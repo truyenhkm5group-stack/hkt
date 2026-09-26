@@ -96,6 +96,12 @@ export type GuardResult = ApprovalDecision & {
   consumed?: boolean;
   /** Khi `consumed`: lượt tiêu thụ được thanh toán theo đường nào. */
   settlement?: ApprovalSettlement;
+  /**
+   * Khi `consumed`: câu `execution_error` mà lời duyệt mang TRƯỚC lượt tiêu thụ này (lần thực thi trước
+   * không hoàn tất — Company OS · Agent N). Lượt tiêu thụ xoá cột đó, nên đây là chỗ duy nhất còn giữ nó;
+   * cũng được ghi vào nhật ký `approval.execute:*`. `undefined` = lời duyệt sạch.
+   */
+  priorExecutionError?: string;
 };
 
 /** Dấu vân tay của MỘT việc: sha256 của JSON chuẩn hoá. Không chứa `summary` (chữ đổi được mà việc không đổi). */
@@ -228,10 +234,12 @@ export async function expireStaleApprovals(db: DbOrTx, requesterId: string, grou
 export async function consumeApprovedRequest(
   db: DbOrTx,
   input: { requesterId: string; group: ApprovalGroup; action: string; fingerprint: string; now: Date },
+  /** Nhận câu `execution_error` của lời duyệt vừa tiêu thụ (nếu có) — tuỳ chọn, không đổi kiểu trả về. */
+  out?: { priorExecutionError?: string },
 ): Promise<string | null> {
   const a = schema.approvalRequests;
   const ungVien = await db
-    .select({ id: a.id })
+    .select({ id: a.id, executionError: a.executionError })
     .from(a)
     .where(
       and(
@@ -251,7 +259,10 @@ export async function consumeApprovedRequest(
       .set({ status: "EXECUTED", executedAt: input.now, executionError: null })
       .where(and(eq(a.id, u.id), eq(a.status, "APPROVED")))
       .returning({ id: a.id });
-    if (lat) return lat.id;
+    if (lat) {
+      if (out && u.executionError) out.priorExecutionError = u.executionError;
+      return lat.id;
+    }
   }
   return null;
 }
@@ -446,16 +457,17 @@ export async function guardSecondApprovalCore(db: DbOrTx, user: ApprovalUser, in
   const tieuThu = { requesterId: user.id, group: input.group, action: input.action, fingerprint, now };
   const phat = { actorId: user.id, group: input.group, action: input.action, entity: input.entity ?? "", entityId: input.entityId ?? "", summary: input.summary, amount: input.amount ?? null, now };
   let daTieuThu: string | null;
+  const truoc: { priorExecutionError?: string } = {};
   if (isOpenTransaction(db)) {
     // Cùng giao dịch với thao tác ghi của nơi gọi: lật + sự kiện sống chết cùng nó.
-    daTieuThu = await consumeApprovedRequest(db, tieuThu);
+    daTieuThu = await consumeApprovedRequest(db, tieuThu, truoc);
     if (daTieuThu) await emitApprovalExecuted(db, { ...phat, requestId: daTieuThu, settlement });
   } else if (settlement === "DEFERRED") {
     // GIỮ CHỖ: lật EXECUTED để lượt đồng thời không lấy được; sự kiện chờ kết quả thật của thao tác.
-    daTieuThu = await consumeApprovedRequest(db, tieuThu);
+    daTieuThu = await consumeApprovedRequest(db, tieuThu, truoc);
   } else {
     daTieuThu = await db.transaction(async (tx) => {
-      const id = await consumeApprovedRequest(tx, tieuThu);
+      const id = await consumeApprovedRequest(tx, tieuThu, truoc);
       if (id) await emitApprovalExecuted(tx, { ...phat, requestId: id, settlement });
       return id;
     });
@@ -473,9 +485,9 @@ export async function guardSecondApprovalCore(db: DbOrTx, user: ApprovalUser, in
         settlement === "IMMEDIATE"
           ? "Thực hiện đúng việc đã được người thứ hai duyệt — lời duyệt đã dùng, lần sau phải xin lại."
           : "Thực hiện đúng việc đã được người thứ hai duyệt — thao tác hỏng thì lời duyệt được trả lại kèm câu lỗi (execution_error).",
-      detail: { group: input.group, summary: input.summary, amount: input.amount ?? null, settlement },
+      detail: { group: input.group, summary: input.summary, amount: input.amount ?? null, settlement, ...(truoc.priorExecutionError ? { priorExecutionError: truoc.priorExecutionError } : {}) },
     });
-    return { mode: "PROCEED", recorded: true, group: input.group, requestId: daTieuThu, consumed: true, settlement };
+    return { mode: "PROCEED", recorded: true, group: input.group, requestId: daTieuThu, consumed: true, settlement, ...(truoc.priorExecutionError ? { priorExecutionError: truoc.priorExecutionError } : {}) };
   }
 
   // ── Cần duyệt nhưng KHÔNG CÓ AI để duyệt ──

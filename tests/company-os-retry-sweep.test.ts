@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { deliverNotifications, notificationDeliveryHealth, type DeliveryConfig, type NotificationSenders } from "@/lib/alerts/notification-delivery";
 import { guardWithinScope, withApprovalExecution } from "@/lib/approvals/execution";
 import { APPROVAL_RESERVATION_TIMEOUT_MINUTES, releaseStuckApprovalReservations, STUCK_RESERVATION_ERROR } from "@/lib/approvals/reservation-sweep";
 import { approvalExecutedDedupeKey, confirmApprovalExecution, decideApprovalCore, guardSecondApprovalCore, type ApprovalUser, type GuardInput } from "@/lib/approvals/service";
 import { APPROVAL_ENFORCE_KEY } from "@/lib/constants/approval";
+import { approvalExecutionNote } from "@/lib/approvals/execution-note";
+import { listApprovalSectionItems } from "@/lib/queries/approvals";
+import { adaptApprovals } from "@/lib/queries/work-adapters";
 import {
   maskDeliveryError,
   NOTIFY_BACKOFF_BASE_MINUTES,
@@ -78,6 +81,9 @@ export function testNotificationRetryPure() {
   assert.ok(che.startsWith("HTTP 500"), "phần không bí mật của câu lỗi còn nguyên để chẩn đoán");
   assert.ok(maskDeliveryError("x".repeat(5000)).length <= 301, "câu lỗi bị cắt ngắn");
   assert.equal(maskDeliveryError(""), "Gửi hỏng mà không có câu lỗi");
+  // Câu nhắc lần thực thi không hoàn tất: có ⇔ execution_error khác rỗng.
+  assert.deepEqual([approvalExecutionNote(null), approvalExecutionNote(undefined), approvalExecutionNote("   ")], [null, null, null]);
+  assert.equal(approvalExecutionNote("Hết kết nối"), "Lần thực thi trước không hoàn tất: Hết kết nối — kiểm tra việc đã được ghi chưa trước khi làm lại");
   console.log("✓ Company OS · N (thuần): nhịp lùi 10·20·40·80 phút nằm trọn trong cửa sổ 6 giờ · câu lỗi che URL / token, cắt ngắn");
 }
 
@@ -250,13 +256,45 @@ export async function testApprovalReservationSweep(db: Db) {
     assert.deepEqual([sau1.status, sau1.executedAt, sau1.executionError], ["APPROVED", null, STUCK_RESERVATION_ERROR]);
     assert.equal(await demNhatKyTraLai(id1), 1, "lượt trả lại để lại đúng một dòng nhật ký (máy làm)");
     assert.deepEqual((await releaseStuckApprovalReservations(db, quaHan())).released.filter((x) => x === id1), [], "lũy đẳng: quét lại không đổi gì");
+
+    // ── (a') câu nhắc HIỆN ở nơi người xin / người duyệt nhìn thấy yêu cầu — TRƯỚC khi ai bấm làm lại ──
+    const choDuyet = await guardSecondApprovalCore(db, xin, viec()); // một yêu cầu ĐANG CHỜ, không có lỗi
+    assert.equal(choDuyet.mode, "NEEDS_APPROVAL");
+    const sach = await duocDuyet(viec()); // đã duyệt, CHƯA thực thi, không lỗi — không phải "bị trả lại"
+    const nhac = approvalExecutionNote(STUCK_RESERVATION_ERROR);
+    const mucXin = await listApprovalSectionItems({ id: R, canDecide: false }, new Date());
+    assert.ok(!mucXin.some((x) => x.id === sach), "lời duyệt sạch chưa dùng không hiện là 'bị trả lại'");
+    const dongTraLai = mucXin.find((x) => x.id === id1);
+    assert.ok(dongTraLai, "lời duyệt bị trả lại phải hiện ở mục duyệt của trang Cần xử lý");
+    assert.deepEqual([dongTraLai.returned, dongTraLai.isRequester, dongTraLai.canDecide, dongTraLai.executionNote], [true, true, false, nhac]);
+    assert.ok(dongTraLai.executionFailedAt instanceof Date, "kèm LÚC lần thực thi bị dọn (từ nhật ký)");
+    const dongCho = mucXin.find((x) => x.id === choDuyet.requestId);
+    assert.ok(dongCho && dongCho.executionNote === null && !dongCho.returned, "yêu cầu không có execution_error ⇒ KHÔNG có câu nhắc");
+    const mucDuyet = await listApprovalSectionItems({ id: A, canDecide: true }, new Date());
+    assert.equal(mucDuyet.find((x) => x.id === id1)?.canDecide, false, "người duyệt thấy câu nhắc nhưng không có gì để duyệt lại");
+    assert.equal(mucDuyet.find((x) => x.id === id1)?.executionNote, nhac);
+    const viecWork = (await adaptApprovals(new Date(), true)).find((w) => w.sourceKey === id1);
+    assert.ok(viecWork && viecWork.evidence.detail.includes(nhac ?? "∅") && viecWork.summary.includes(nhac ?? "∅"), "việc APPROVAL trên /work mang câu nhắc ở tóm tắt và bằng chứng");
+    assert.ok(!(await adaptApprovals(new Date(), true)).find((w) => w.sourceKey === choDuyet.requestId)?.evidence.detail.includes("không hoàn tất"), "việc không có lỗi ⇒ bằng chứng không có câu nhắc");
+    const src = readFileSync(path.join(path.resolve(__dirname, ".."), "app/(dashboard)/alerts/approval-section.tsx"), "utf8");
+    assert.ok(/\{r\.executionNote \? \(/.test(src) && src.includes("r.executionFailedAt"), "mục duyệt trên /alerts vẽ câu nhắc + lúc hỏng");
+
     const lai = await withApprovalExecution(async () => {
       const g = await guardWithinScope(db, xin, v1);
       assert.ok(g.consumed && g.requestId === id1, "làm lại ĐÚNG việc ⇒ dùng lại ĐÚNG lời duyệt đã trả");
+      assert.equal(g.priorExecutionError, STUCK_RESERVATION_ERROR, "lượt tiêu thụ mang câu lỗi của lần trước (cột bị xoá ngay sau đó)");
       return { ok: true as const };
     });
     assert.ok("ok" in lai);
     assert.deepEqual([(await yeuCau(id1)).status, await demSuKien(id1)], ["EXECUTED", 1]);
+    assert.ok(!(await listApprovalSectionItems({ id: R, canDecide: false }, new Date())).some((x) => x.id === id1), "làm lại xong ⇒ câu nhắc biến mất");
+    const [nhatKyThucThi] = await db
+      .select({ detail: schema.auditLogs.detail })
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.entityId, id1), like(schema.auditLogs.action, "approval.execute:%")))
+      .orderBy(desc(schema.auditLogs.createdAt))
+      .limit(1);
+    assert.equal((nhatKyThucThi?.detail as { priorExecutionError?: string } | null)?.priorExecutionError, STUCK_RESERVATION_ERROR, "nhật ký lượt làm lại giữ câu lỗi của lần trước");
 
     // ── (b) CÓ approval.executed ⇒ không bao giờ động vào, dù giữ chỗ cũ đến đâu ──
     const v2 = viec();
@@ -274,6 +312,7 @@ export async function testApprovalReservationSweep(db: Db) {
     await db.update(schema.approvalRequests).set({ status: "EXECUTED", executedAt: new Date() }).where(eq(schema.approvalRequests.id, id3));
     const q3 = await releaseStuckApprovalReservations(db, quaHan());
     assert.ok(!q3.released.includes(id3), "không có nhật ký giữ chỗ DEFERRED ⇒ việc đã chạy thật theo đường cũ, KHÔNG hồi sinh");
+    assert.ok(!(await listApprovalSectionItems({ id: R, canDecide: false }, new Date())).some((x) => x.id === id3 || x.id === id2), "yêu cầu đã thực thi (có hoặc không sự kiện) không hiện là 'bị trả lại'");
 
     // ── (d) hai lượt quét đồng thời ⇒ một hiệu lực ──
     const v4 = viec();

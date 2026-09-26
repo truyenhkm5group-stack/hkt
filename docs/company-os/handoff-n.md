@@ -58,8 +58,8 @@ Lũy đẳng; hai lượt quét chồng ⇒ một hiệu lực, một dòng nh�
 - **Trả lại lời duyệt kẹt có thể cho làm một việc HAI LẦN.** "Kẹt" không phân biệt được (a) chết TRƯỚC khi
   thao tác ghi với (b) thao tác ghi XONG rồi chết trước lượt khẳng định — hoặc (c) lượt khẳng định hỏng vì CSDL
   chập chờn (`execution.ts::thanhToan` nuốt lỗi, để `EXECUTED`). Đề bài yêu cầu trả lại; tôi làm đúng vậy và
-  để câu `execution_error` bảo người xin KIỂM TRA trước khi làm lại. Hôm nay `execution_error` CHƯA hiện ở màn
-  hình nào (grep: chỉ `lib/approvals/service.ts` đọc/ghi) — nên hiện nó ở khối duyệt `/alerts` là việc kế tiếp.
+  để câu `execution_error` bảo người xin KIỂM TRA trước khi làm lại. Commit thứ hai (mục 6) đưa câu này lên
+  màn hình TRƯỚC khi ai bấm làm lại.
 - Tiến trình chết TRƯỚC khi ghi dòng nhật ký cổng (khe vài mili giây sau lượt lật) ⇒ yêu cầu nằm lại
   `EXECUTED` (phía an toàn, không dọn).
 - Gửi tin: tiến trình chết giữa lúc Lark nhận tin và lúc ghi `notified_at` ⇒ lần sau gửi lại (trùng một lần).
@@ -81,6 +81,32 @@ Ghi chú: "không nhận dòng chưa từng thử" được giữ ba lớp (`not
 NULL ⇒ phép so nhịp lùi ra NULL; `notify_attempts` NULL ⇒ khoảng lùi `power(2, NULL)` ra NULL). Đột biến M6
 gỡ cả ba; gỡ một lớp thì bài vẫn xanh — đúng thiết kế, không phải bài yếu. Tương tự điều kiện `status =
 'EXECUTED'` của lượt dọn được `executed_at IS NOT NULL` giữ kèm (dòng đã trả lại có `executed_at` NULL).
+
+## 6. Câu nhắc "lần thực thi trước không hoàn tất" (commit thứ hai, theo yêu cầu Tech Lead)
+
+- `lib/approvals/execution-note.ts::approvalExecutionNote` (hàm thuần, MỘT câu cho mọi màn hình): có ⇔
+  `execution_error` khác rỗng — "Lần thực thi trước không hoàn tất: <lỗi> — kiểm tra việc đã được ghi chưa
+  trước khi làm lại".
+- `/alerts`, mục duyệt: trước đây chỉ liệt kê yêu cầu PENDING — mà lời duyệt bị trả lại là `APPROVED`, tức là
+  KHÔNG hiện ở đâu cả. Nay `listApprovalSectionItems` (lib/queries/approvals.ts) = đang chờ + lời duyệt BỊ TRẢ
+  LẠI (`APPROVED` + `execution_error` + chưa thực thi + còn trong hạn 72 giờ; hết hạn thì không làm lại được
+  nữa nên không liệt kê). Mỗi dòng có câu nhắc màu hổ phách + LÚC hỏng (dòng nhật ký `approval.execute_failed:*`
+  / `approval.reservation_released:*` gần nhất; không có ⇒ "chưa rõ lúc nào", không đoán bằng `decided_at`).
+  Dòng trả lại không có nút duyệt. `listPendingApprovals` giữ tên, chỉ đọc phiên rồi gọi hàm trên.
+- `/work`, `adaptApprovals`: CỘNG THÊM câu nhắc + lúc hỏng vào `summary` và `evidence.detail`. Không đổi trạng
+  thái, không đổi tập việc: lời duyệt bị trả lại vẫn là `APPROVED` ⇒ `DONE` với người duyệt; nó chỉ hiện ở
+  `/work` khi nằm trong cửa sổ việc đã đóng. Biến nó thành việc MỞ của người xin là đổi phép chiếu — chưa làm.
+- Lượt làm lại: `GuardResult.priorExecutionError` (tuỳ chọn, cộng thêm) mang câu lỗi của lời duyệt vừa tiêu
+  thụ — cột `execution_error` bị xoá ngay lúc tiêu thụ, nên đây là chỗ duy nhất còn giữ nó; cũng ghi vào nhật
+  ký `approval.execute:*` (`detail.priorExecutionError`). `consumeApprovedRequest` nhận tham số `out` tuỳ chọn,
+  kiểu trả về giữ nguyên.
+- **KHÔNG làm phần thông báo (toast) lúc làm lại**: 15 server action đi đường DEFERRED trả kiểu kết quả RIÊNG
+  của từng miền, và không action nào chuyển `GuardResult` về trình duyệt khi `PROCEED`. Đưa câu nhắc lên toast
+  là sửa 15 action + client của chúng — không rẻ, và đổi kiểu trả về đang dùng. Bù lại: câu nhắc đứng ở mục
+  duyệt `/alerts` TRƯỚC khi bấm, và lượt làm lại để lại vết trong nhật ký.
+- Đột biến thêm E1–E11 (câu nhắc luôn null / cả khi rỗng · bỏ dòng trả lại · bỏ câu nhắc · không vẽ ở
+  approval-section · /work thiếu ở bằng chứng / tóm tắt · tiêu thụ không mang lỗi cũ · dòng trả lại vẫn duyệt
+  được · liệt kê cả lời duyệt sạch · không đọc lúc hỏng) — tổng 28/28 ĐỎ.
 
 ## 5. Chưa làm
 
