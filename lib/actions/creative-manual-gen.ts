@@ -8,9 +8,9 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, startManualDesignGen, startManualGen, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { captionManualGenImage, drawManualGen, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { manualDesignStartSchema, manualGenInstantSchema, manualGenPromoteSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenPromoteSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 
 /**
  * ═══════════ VÒNG MẪU — GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ═══════════
@@ -209,4 +209,45 @@ export async function publishManualGenImageNowAction(
   });
   revalidatePath(PATH);
   return { ok: true, outcome: r.outcome, detail: r.detail, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), names: r.names, designCode: r.designCode, warnings };
+}
+
+/**
+ * "Lưu" — bài của ảnh đã duyệt vào HÀNG ĐỢI ĐĂNG CAMP (câu chữ + ba tên). Không dựng lô, không gọi Facebook: chỉ là
+ * biên tập nội dung ⇒ quyền `ideas:write`. Đăng từ hàng đợi vẫn qua `publishManualGenImageNowAction` (cần cả
+ * `expenses:write`).
+ */
+export async function saveManualGenDraftAction(raw: unknown): Promise<{ ok: true; queuedAt: string } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Không có quyền soạn bài" };
+  const parsed = manualGenDraftSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const r = await saveManualGenDraft(db, { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName } }, actor, new Date());
+  if (!r.ok) return { error: r.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CREATIVE_MANUAL_GEN_QUEUED",
+    entity: "CREATIVE_MANUAL_GEN_IMAGE",
+    entityId: d.imageId,
+    after: { headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName } },
+  });
+  revalidatePath(PATH);
+  return { ok: true, queuedAt: r.queuedAt.toISOString() };
+}
+
+/** Bỏ một bài khỏi hàng đợi đăng camp (bản nháp câu chữ vẫn giữ trên ảnh). */
+export async function unqueueManualGenDraftAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Không có quyền" };
+  const parsed = recaptionSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Đầu vào không hợp lệ" };
+  const db = await getDb();
+  const r = await unqueueManualGenDraft(db, parsed.data.imageId, new Date());
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_MANUAL_GEN_UNQUEUED", entity: "CREATIVE_MANUAL_GEN_IMAGE", entityId: parsed.data.imageId, after: {} });
+  revalidatePath(PATH);
+  return { ok: true };
 }

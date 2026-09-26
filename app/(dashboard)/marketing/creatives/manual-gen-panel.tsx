@@ -1,5 +1,5 @@
 import { Wand2 } from "lucide-react";
-import { ManualGenAutoRefresh, ManualGenForm, ManualGenImageTile } from "@/app/(dashboard)/marketing/creatives/manual-gen";
+import { ManualGenAutoRefresh, ManualGenForm, ManualGenImageTile, PublishQueue } from "@/app/(dashboard)/marketing/creatives/manual-gen";
 import { VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
@@ -47,6 +47,7 @@ export async function ManualGenPanel({ canEdit, canPublish = false, preselectPro
       <div className="space-y-4">
         {canEdit && chon.note ? <p className="rounded-md border border-dashed px-2.5 py-1.5 text-[12px] text-muted-foreground">{chon.note}</p> : null}
         {canEdit ? <ManualGenForm key={chon.photoId} initialKind={preselectProductId ? "MOCKUP" : "DESIGN"} inspirations={p.inspirations} sources={p.sources} unitVnd={pr.unitVnd} unitUsd={pr.unitUsd} initialPhotoId={chon.photoId} /> : null}
+        <PublishQueue items={p.queue} canEdit={canEdit} canPublish={canPublish} instant={p.instant} pageName={p.pageName} defaults={p.defaults} predictedSeq={p.predictedSeq} targetDay={p.targetDay} />
         <div className="space-y-3">
           <p className="text-[12.5px] font-semibold">
             Kết quả gen tay — {p.isToday ? "hôm nay" : `ngày ${formatDate(p.day)}`}

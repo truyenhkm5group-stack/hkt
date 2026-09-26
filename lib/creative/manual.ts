@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, max, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lte, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CREATIVE_RULE_VERSION, GENE_VOCAB_VERSION, MANUAL_SLOT_BASE, SLOT_MODE_PUBLISH_RANK, type CreativeLoopConfig, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -24,26 +24,53 @@ import { batchWindow } from "@/lib/creative/schedule";
 
 const OPEN_STATUSES: readonly string[] = ["PLANNED", "PENDING_APPROVAL"];
 
+/** Số ngày tối đa nhìn tới khi các lô trước đều đã đóng — quá thế là có gì đó hỏng hẳn, và đi xa hơn cũng vô ích. */
+const LOOKAHEAD_DAYS = 7;
+
 /**
- * Lô gần nhất CÒN NHẬN MẪU: hôm nay nếu chưa qua hạn duyệt của lô hôm nay VÀ lô hôm nay còn mở (chưa có,
- * đang dựng hoặc đang chờ duyệt), không thì ngày mai. Hàm thuần — không đọc đồng hồ ngoài `now`.
+ * Lô gần nhất CÒN NHẬN MẪU: ngày sớm nhất (từ hôm nay) mà lô hằng ngày của ngày ấy CÒN MỞ (chưa có, đang dựng
+ * hoặc đang chờ duyệt) VÀ chưa qua hạn duyệt. Hàm thuần — không đọc đồng hồ ngoài `now`.
  *
- * `todayStatus` là trạng thái lô HÔM NAY (`null` = chưa có lô). Thiếu vế này thì 02:19 sáng, lô hôm nay đã
- * DUYỆT, nút "Đưa vào lô" vẫn trỏ vào lô hôm nay rồi báo "chỉ thêm được mẫu vào lô đang dựng hoặc đang chờ
- * duyệt" — người bấm không có đường nào đi tiếp (chủ shop gặp 25/09/2026). Lô đã duyệt thì bài mới sang
- * lô ngày mai, không mở lại lô đã duyệt: mở lại là huỷ phiếu duyệt của những bài người đã xem xong.
+ * `todayStatus` là trạng thái lô HÔM NAY (`null` = chưa có lô); `later` là trạng thái lô các ngày SAU (khoá
+ * `YYYY-MM-DD`, thiếu = chưa có lô). Hai lần kẹt thật đã sinh ra luật này:
+ *  · 25/09/2026 02:19 — lô hôm nay đã DUYỆT, nút "Đưa vào lô" vẫn trỏ vào nó ⇒ bấm là lỗi, không đường đi tiếp.
+ *  · 26/09/2026 — lô NGÀY MAI (27/09) đã bị TỪ CHỐI, nút vẫn trỏ vào nó ⇒ "Lô 2026-09-27 đã ở trạng thái
+ *    REJECTED". Luật cũ chỉ hỏi trạng thái hôm nay rồi mặc nhiên chọn ngày mai.
+ * Lô đã đóng (duyệt / đăng / từ chối / hết hạn / hỏng) không bao giờ bị mở lại: mở lại lô đã duyệt là huỷ phiếu
+ * duyệt của những bài người đã xem xong, mở lại lô bị từ chối là làm ngược quyết định của người. Bài mới đi
+ * sang ngày kế tiếp còn mở.
  */
-export function manualTargetDay(now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">, todayStatus: string | null = null): string {
+export function manualTargetDay(
+  now: Date,
+  cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">,
+  todayStatus: string | null = null,
+  later: Readonly<Record<string, string>> = {},
+): string {
   const today = vnDay(now);
-  const todayOpen = todayStatus === null || OPEN_STATUSES.includes(todayStatus);
-  return todayOpen && now < batchWindow(today, cfg).approvalDeadline ? today : shiftDay(today, 1);
+  const open = (st: string | null | undefined) => st === null || st === undefined || OPEN_STATUSES.includes(st);
+  if (open(todayStatus) && now < batchWindow(today, cfg).approvalDeadline) return today;
+  for (let k = 1; k <= LOOKAHEAD_DAYS; k += 1) {
+    const d = shiftDay(today, k);
+    if (open(later[d]) && now < batchWindow(d, cfg).approvalDeadline) return d;
+  }
+  return shiftDay(today, LOOKAHEAD_DAYS + 1);
 }
 
-/** `manualTargetDay` với trạng thái lô hôm nay đọc từ CSDL — đường dùng chung của đường ghi và màn hình. */
+/** `manualTargetDay` với trạng thái các lô hằng ngày từ hôm nay đọc từ CSDL — đường dùng chung của đường ghi và màn hình. */
 export async function resolveManualTargetDay(db: Db, now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">): Promise<string> {
   const b = schema.creativeBatches;
-  const [row] = await db.select({ status: b.status }).from(b).where(and(eq(b.batchDay, vnDay(now)), eq(b.kind, "LOOP"))).limit(1);
-  return manualTargetDay(now, cfg, row?.status ?? null);
+  const today = vnDay(now);
+  const rows = await db
+    .select({ day: b.batchDay, status: b.status })
+    .from(b)
+    .where(and(gte(b.batchDay, today), lte(b.batchDay, shiftDay(today, LOOKAHEAD_DAYS)), eq(b.kind, "LOOP")));
+  const later: Record<string, string> = {};
+  let todayStatus: string | null = null;
+  for (const r of rows) {
+    if (r.day === today) todayStatus = r.status;
+    else later[r.day] = r.status;
+  }
+  return manualTargetDay(now, cfg, todayStatus, later);
 }
 
 /**

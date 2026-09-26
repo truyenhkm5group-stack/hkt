@@ -654,7 +654,8 @@ export async function reviewManualGenImage(db: Db, input: { imageId: string; dec
   if (input.decision === "APPROVE" && !r.img.imageId) return { ok: false, error: "Ảnh chưa có điểm ảnh." };
   const rows = await db
     .update(g)
-    .set({ status: target, reviewedByUserId: actor.id, reviewedByName: actor.name, reviewedAt: now, rejectReason: input.decision === "REJECT" ? input.reason : "", updatedAt: now })
+    // Loại ⇒ rời hàng đợi đăng camp (bản nháp câu chữ vẫn giữ — duyệt lại thì soạn tiếp được, nhưng phải bấm Lưu lại).
+    .set({ status: target, reviewedByUserId: actor.id, reviewedByName: actor.name, reviewedAt: now, rejectReason: input.decision === "REJECT" ? input.reason : "", ...(input.decision === "REJECT" ? { queuedAt: null } : {}), updatedAt: now })
     .where(and(eq(g.id, input.imageId), inArray(g.status, from)))
     .returning({ id: g.id });
   if (rows.length === 0) return { ok: false, error: "Ảnh vừa đổi trạng thái — tải lại để xem." };
@@ -662,6 +663,53 @@ export async function reviewManualGenImage(db: Db, input: { imageId: string; dec
   // Ảnh đã có câu chữ (duyệt lại sau khi loại) thì không viết lại — người bấm "AI viết lại" nếu muốn.
   const caption = r.img.headline || r.img.primaryText ? null : await captionManualGenImage(db, input.imageId, now, deps);
   return { ok: true, status: target, caption };
+}
+
+// ───────────────────────────── HÀNG ĐỢI ĐĂNG CAMP ─────────────────────────────
+
+export type DraftInput = { imageId: string; headline: string; primaryText: string; names: { campaign: string; adset: string; ad: string } };
+
+export type DraftResult = { ok: true; queuedAt: Date } | { ok: false; error: string };
+
+/**
+ * "LƯU" (chủ shop 26/09/2026: "duyệt ảnh mẫu → sửa content và lưu vào hàng đợi đăng camp, có thể ấn lưu sau đó ấn
+ * đăng camp luôn"): ghi câu chữ + ba tên vào CHÍNH dòng ảnh đã duyệt và đặt dấu "đang ở hàng đợi" — không dựng lô,
+ * không gọi Facebook, không tốn đồng nào. Bấm lại ⇒ ghi đè bản nháp (mốc lưu = lần bấm cuối). Ba tên rỗng = tên
+ * mặc định theo khuôn lúc đăng. Điều kiện "ảnh còn ĐÃ DUYỆT" nằm TRONG câu UPDATE: ảnh vừa được đăng / loại thì
+ * không ghi gì.
+ */
+export async function saveManualGenDraft(db: Db, input: DraftInput, actor: ManualActor, now: Date): Promise<DraftResult> {
+  const g = schema.creativeManualGenImages;
+  const rows = await db
+    .update(g)
+    .set({
+      headline: input.headline,
+      primaryText: input.primaryText,
+      campaignName: input.names.campaign.trim(),
+      adsetName: input.names.adset.trim(),
+      adName: input.names.ad.trim(),
+      queuedAt: now,
+      queuedByUserId: actor.id,
+      queuedByName: actor.name,
+      updatedAt: now,
+    })
+    .where(and(eq(g.id, input.imageId), eq(g.status, "APPROVED")))
+    .returning({ id: g.id });
+  if (rows.length > 0) return { ok: true, queuedAt: now };
+  const [cur] = await db.select({ status: g.status }).from(g).where(eq(g.id, input.imageId)).limit(1);
+  if (!cur) return { ok: false, error: "Không tìm thấy ảnh." };
+  return { ok: false, error: cur.status === "PROMOTED" ? "Ảnh đã được đăng / đưa vào lô — không còn ở hàng đợi." : "Chỉ lưu được bài của ảnh ĐÃ DUYỆT." };
+}
+
+/** Bỏ một bài khỏi hàng đợi — bản nháp câu chữ vẫn nằm trên ảnh, bấm Lưu lại là quay về hàng đợi. */
+export async function unqueueManualGenDraft(db: Db, imageId: string, now: Date): Promise<{ ok: true } | { ok: false; error: string }> {
+  const g = schema.creativeManualGenImages;
+  const rows = await db
+    .update(g)
+    .set({ queuedAt: null, updatedAt: now })
+    .where(and(eq(g.id, imageId), isNotNull(g.queuedAt)))
+    .returning({ id: g.id });
+  return rows.length ? { ok: true } : { ok: false, error: "Bài không còn ở hàng đợi — tải lại để xem." };
 }
 
 // ───────────────────────────── ĐƯA VÀO LÔ ─────────────────────────────
@@ -785,7 +833,7 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
   if (!ins.ok) return ins;
   const upd = await tx
     .update(schema.creativeManualGenImages)
-    .set({ status: "PROMOTED", variantId: ins.variantId, headline: input.headline, primaryText: input.primaryText, updatedAt: now })
+    .set({ status: "PROMOTED", variantId: ins.variantId, headline: input.headline, primaryText: input.primaryText, campaignName: finalNames.campaign, adsetName: finalNames.adset, adName: finalNames.ad, updatedAt: now })
     .where(and(eq(schema.creativeManualGenImages.id, input.imageId), eq(schema.creativeManualGenImages.status, "APPROVED")))
     .returning({ id: schema.creativeManualGenImages.id });
   if (upd.length === 0) throw new Error("PROMOTE_RACE");

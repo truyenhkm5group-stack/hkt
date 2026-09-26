@@ -616,6 +616,19 @@ kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đ�
   và "Mẫu tự làm" là việc phải làm nên luôn hiện. Thanh lọc có lùi / tiến một ngày, ô chọn ngày, "Hôm nay", và dải các ngày gần
   nhất CÓ kết quả (`listReviewDays`, mới → cũ, hôm nay luôn có mặt).
 
+### Hàng đợi đăng camp + một hộp soạn bài (chủ shop 26/09/2026, lần ba)
+
+*"Gen ảnh mẫu xong muốn duyệt ảnh → sửa content và lưu vào hàng đợi đăng camp set ads, có thể ấn lưu sau đó ấn đăng camp luôn."*
+
+- Ảnh đã duyệt có MỘT hộp soạn bài, ba lối ra dùng chung câu chữ + ba tên: **Lưu vào hàng đợi** (`saveManualGenDraft` — ghi lên
+  chính dòng ảnh, đặt `queued_at` + người lưu bằng khoá tài khoản; không lô, không Facebook, hộp VẪN MỞ để bấm đăng ngay) ·
+  **Đưa vào lô** · **Đăng camp** (ngay / hẹn giờ, §5j). Ba ô tên để trống = tên theo khuôn lúc đăng (số thứ tự đúng ngày đích).
+- Khối **Hàng đợi đăng camp** (`listPublishQueue`): ảnh `APPROVED` có `queued_at`, mới lưu trước, KHÔNG lọc theo ngày đang xem.
+  Mở lại đúng hộp soạn bài; ✕ bỏ khỏi hàng đợi (bản nháp vẫn giữ). Loại ảnh ⇒ rời hàng đợi. Đăng / vào lô ⇒ `PROMOTED`, tự rời;
+  Đăng camp hỏng khi chưa gửi gì ⇒ ảnh về `APPROVED`, vẫn ở hàng đợi. Migration `0148`.
+- Sửa lỗi kẹt: `manualTargetDay` nay bỏ qua MỌI lô hằng ngày đã đóng (duyệt / đăng / từ chối / hết hạn / hỏng) của các ngày tới —
+  26/09 lô ngày mai bị TỪ CHỐI khiến "Đưa vào lô" báo "Lô 2026-09-27 đã ở trạng thái REJECTED". Không mở lại lô đã đóng.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

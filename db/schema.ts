@@ -3773,11 +3773,24 @@ export const creativeManualGenImages = pgTable(
     rejectReason: text("reject_reason").notNull().default(""),
     /** Mẫu (ô của lô) mà ảnh đã được đưa vào. */
     variantId: text("variant_id").references(() => creativeVariants.id, { onDelete: "set null" }),
+    /**
+     * HÀNG ĐỢI ĐĂNG CAMP (migration 0148, chủ shop 26/09/2026): người soạn xong câu chữ + ba tên rồi bấm "Lưu" ⇒
+     * bài nằm ở hàng đợi, bấm "Đăng camp" lúc nào cũng được. Ba tên rỗng = tên mặc định theo khuôn lúc đăng.
+     * `queued_at` có ⇔ bài đang ở hàng đợi (còn `APPROVED`); đăng / đưa vào lô xong ⇒ `PROMOTED`, tự rời hàng đợi.
+     */
+    campaignName: text("campaign_name").notNull().default(""),
+    adsetName: text("adset_name").notNull().default(""),
+    adName: text("ad_name").notNull().default(""),
+    queuedAt: ts("queued_at"),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34); tên là ảnh chụp do máy chủ đọc. */
+    queuedByUserId: text("queued_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    queuedByName: text("queued_by_name").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("creative_manual_gen_images_gen_seq_uq").on(t.genId, t.seq),
+    index("creative_manual_gen_images_queue_idx").on(t.queuedAt),
     index("creative_manual_gen_images_status_idx").on(t.status),
     index("creative_manual_gen_images_image_idx").on(t.imageId),
     check("creative_manual_gen_images_status_check", sql`${t.status} IN ('PLANNED', 'DRAWING', 'GENERATED', 'GEN_FAILED', 'APPROVED', 'REJECTED', 'PROMOTED')`),

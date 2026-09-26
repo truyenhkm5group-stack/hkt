@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ImagePlus, Loader2, Rocket, Send, Sparkles, Wand2, X } from "lucide-react";
+import { Check, ImagePlus, Loader2, Rocket, Save, Send, Sparkles, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { promoteManualGenImageAction, publishManualGenImageNowAction, recaptionManualGenImage, reviewManualGenImageAction, startManualDesignRun, startManualGenRun } from "@/lib/actions/creative-manual-gen";
+import { promoteManualGenImageAction, publishManualGenImageNowAction, recaptionManualGenImage, reviewManualGenImageAction, saveManualGenDraftAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
 import {
   DESIGN_DNA_KEYS,
   DESIGN_DNA_VALUE_LABEL,
@@ -25,9 +25,9 @@ import {
 } from "@/lib/constants/creative-loop";
 import { formatVND, vnShortStamp } from "@/lib/format";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
-import type { DesignInspirationOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
+import type { DesignInspirationOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
-import { VARIANT_COPY_LIMITS, manualGenInstantSchema, manualGenPromoteSchema } from "@/lib/validation/creative";
+import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema, manualGenPromoteSchema } from "@/lib/validation/creative";
 
 /**
  * GEN ẢNH BẰNG TAY (§5i) — phía trình duyệt: form "Gen ảnh" (số ảnh · ảnh tải lên · tiền ước tính), thẻ từng ảnh
@@ -466,6 +466,7 @@ export function ManualGenImageTile({
             AI chưa viết được câu chữ: {img.captionError}
           </p>
         ) : null}
+        {img.queuedAt ? <p className="text-[11px] font-medium text-brand">Trong hàng đợi đăng camp · lưu {vnShortStamp(img.queuedAt)}</p> : null}
         {img.status === "PROMOTED" ? <p className="text-[11px] text-muted-foreground">Đã vào lô / đã đăng camp — xem ở khối lô chờ duyệt hoặc Lịch sử lô.</p> : null}
         {canEdit ? (
           <div className="mt-auto flex flex-wrap gap-1 border-t pt-1.5">
@@ -479,12 +480,7 @@ export function ManualGenImageTile({
                 <X className="size-3.5" /> Loại
               </Button>
             ) : null}
-            {img.status === "APPROVED" ? (
-              <>
-                {canPublish ? <ComposeButton mode="CAMP" img={img} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} /> : null}
-                <ComposeButton mode="LO" img={img} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} />
-              </>
-            ) : null}
+            {img.status === "APPROVED" ? <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} /> : null}
           </div>
         ) : null}
       </div>
@@ -506,47 +502,59 @@ function vnInputToIso(v: string): string | null {
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
+type ComposeProps = { img: ManualGenImageCard; canPublish: boolean; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string; instant: InstantInfo; triggerLabel?: string; triggerClassName?: string };
+
 /**
- * Hộp soạn bài của một ảnh đã duyệt — HAI lối ra dùng chung câu chữ + ba tên:
- *  · `LO`   "Đưa vào lô": vào lô hằng ngày chờ duyệt cả lô (chạy 6:00).
- *  · `CAMP` "Đăng camp": lên Facebook NGAY lúc bấm — chạy ngay, hoặc hẹn giờ (Facebook tự giữ lịch). Người bấm là
- *           lượt duyệt chi, nên hộp in đủ tiền sẽ cam kết, khung chạy và mọi lý do cổng sẽ chặn TRƯỚC khi bấm.
+ * HỘP SOẠN BÀI của một ảnh đã duyệt — MỘT hộp, BA lối ra dùng chung câu chữ + ba tên (chủ shop 26/09/2026: "duyệt ảnh
+ * mẫu → sửa content và lưu vào hàng đợi đăng camp, có thể ấn lưu sau đó ấn đăng camp luôn"):
+ *  · "Lưu vào hàng đợi"  ghi bản nháp lên ảnh + đặt vào HÀNG ĐỢI ĐĂNG CAMP. Hộp VẪN MỞ — bấm Đăng camp ngay sau đó được.
+ *  · "Đưa vào lô"        vào lô hằng ngày chờ duyệt cả lô.
+ *  · "Đăng camp"         lên Facebook NGAY lúc bấm — chạy ngay, hoặc hẹn giờ (Facebook tự giữ lịch). Người bấm là lượt
+ *                        duyệt chi, nên hộp in đủ tiền sẽ cam kết, khung chạy và mọi lý do cổng sẽ chặn TRƯỚC khi bấm.
+ * Ba ô tên để trống = tên theo khuôn lúc đăng / vào lô (số thứ tự lấy đúng ngày đích), nên hộp không điền sẵn một cái
+ * tên mang ngày của lô khác.
  */
-function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay, instant }: { mode: "LO" | "CAMP"; img: ManualGenImageCard; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string; instant: InstantInfo }) {
-  const camp = mode === "CAMP";
+function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targetDay, instant, triggerLabel, triggerClassName }: ComposeProps) {
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
-  const [campName, setCampName] = useState(defaults.campaign);
-  const [adset, setAdset] = useState(defaults.adset);
-  const [ad, setAd] = useState(defaults.ad);
+  const [campName, setCampName] = useState(img.campaignName);
+  const [adset, setAdset] = useState(img.adsetName);
+  const [ad, setAd] = useState(img.adName);
   const [hen, setHen] = useState(false);
   const [henLuc, setHenLuc] = useState("");
+  const [daLuu, setDaLuu] = useState<string | null>(null);
   const [writing, startWrite] = useTransition();
   const [saving, startSave] = useTransition();
 
   const mo = () => {
     setH(img.headline);
     setT(img.primaryText);
-    // Đăng lẻ lấy số thứ tự theo NGÀY lúc bấm — để trống tên chiến dịch / quảng cáo thì máy tự đặt đúng số.
-    setCampName(camp ? "" : defaults.campaign);
-    setAdset(defaults.adset);
-    setAd(camp ? "" : defaults.ad);
+    setCampName(img.campaignName);
+    setAdset(img.adsetName);
+    setAd(img.adName);
     setHen(false);
     setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
+    setDaLuu(null);
     setOpen(true);
   };
-  const scheduleAt = camp && hen ? vnInputToIso(henLuc) : null;
-  const input = useMemo(
-    () => ({ imageId: img.id, headline: h, primaryText: t, campaignName: campName, adsetName: adset, adName: ad, predictedSeq: camp ? null : predictedSeq, ...(camp ? { scheduleAt } : {}) }),
-    [img.id, h, t, campName, adset, ad, predictedSeq, camp, scheduleAt],
-  );
-  const loiTruoc = useMemo(() => {
-    if (camp && hen && !scheduleAt) return "Chọn giờ hẹn.";
-    const r = (camp ? manualGenInstantSchema : manualGenPromoteSchema).safeParse(input);
+  const noiDung = useMemo(() => ({ imageId: img.id, headline: h, primaryText: t, campaignName: campName, adsetName: adset, adName: ad }), [img.id, h, t, campName, adset, ad]);
+  const chuKy = JSON.stringify(noiDung);
+  const scheduleAt = hen ? vnInputToIso(henLuc) : null;
+  const loiLuu = useMemo(() => {
+    const r = manualGenDraftSchema.safeParse(noiDung);
     return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
-  }, [input, camp, hen, scheduleAt]);
-  const chan = camp && instant.blockers.length > 0;
+  }, [noiDung]);
+  const loiLo = useMemo(() => {
+    const r = manualGenPromoteSchema.safeParse({ ...noiDung, predictedSeq });
+    return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
+  }, [noiDung, predictedSeq]);
+  const loiDang = useMemo(() => {
+    if (hen && !scheduleAt) return "Chọn giờ hẹn.";
+    const r = manualGenInstantSchema.safeParse({ ...noiDung, predictedSeq: null, scheduleAt });
+    return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
+  }, [noiDung, hen, scheduleAt]);
+  const chan = instant.blockers.length > 0;
 
   const vietLai = () =>
     startWrite(async () => {
@@ -559,23 +567,35 @@ function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay,
       setT(r.primaryText);
     });
 
-  const gui = () =>
+  const luu = () =>
     startSave(async () => {
-      if (camp) {
-        const r = await publishManualGenImageNowAction(input);
-        if ("error" in r) {
-          toast.error(r.error);
-          return;
-        }
-        const msg = `${r.names.campaign || "Camp"}: ${r.detail}${r.designCode ? ` Mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn.` : ""}`;
-        if (r.outcome === "LIVE" || r.outcome === "SCHEDULED") toast.success(msg);
-        else if (r.outcome === "PENDING") toast.warning(msg);
-        else toast.error(msg);
-        for (const w of r.warnings) toast.warning(w);
-        if (r.outcome !== "FAILED" || !/vẫn ở "Đã duyệt"/.test(r.detail)) setOpen(false);
+      const r = await saveManualGenDraftAction(noiDung);
+      if ("error" in r) {
+        toast.error(r.error);
         return;
       }
-      const r = await promoteManualGenImageAction(input);
+      setDaLuu(chuKy);
+      toast.success(canPublish ? "Đã lưu vào hàng đợi đăng camp — bấm Đăng camp ngay bây giờ hoặc lúc khác ở khối Hàng đợi." : "Đã lưu vào hàng đợi đăng camp.");
+    });
+
+  const dang = () =>
+    startSave(async () => {
+      const r = await publishManualGenImageNowAction({ ...noiDung, predictedSeq: null, scheduleAt });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      const msg = `${r.names.campaign || "Camp"}: ${r.detail}${r.designCode ? ` Mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn.` : ""}`;
+      if (r.outcome === "LIVE" || r.outcome === "SCHEDULED") toast.success(msg);
+      else if (r.outcome === "PENDING") toast.warning(msg);
+      else toast.error(msg);
+      for (const w of r.warnings) toast.warning(w);
+      if (r.outcome !== "FAILED" || !/vẫn ở "Đã duyệt"/.test(r.detail)) setOpen(false);
+    });
+
+  const dua = () =>
+    startSave(async () => {
+      const r = await promoteManualGenImageAction({ ...noiDung, predictedSeq });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -589,35 +609,75 @@ function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay,
       setOpen(false);
     });
 
-  const startPreview = camp ? (hen ? (scheduleAt ? new Date(scheduleAt) : null) : new Date(Date.now() + instant.leadSeconds * 1000)) : null;
+  const startPreview = hen ? (scheduleAt ? new Date(scheduleAt) : null) : new Date(Date.now() + instant.leadSeconds * 1000);
   const endPreview = startPreview ? new Date(startPreview.getTime() + instant.testDays * 86_400_000) : null;
+  const luuMoiNhat = daLuu === chuKy;
 
   return (
     <>
-      {camp ? (
-        <Button size="sm" className="h-7 w-full text-[12px]" onClick={mo} title={chan ? instant.blockers.join(" ") : "Đăng lên Facebook ngay hoặc hẹn giờ chạy"}>
-          <Rocket className="size-3.5" /> Đăng camp
-        </Button>
-      ) : (
-        <Button size="sm" variant="outline" className="h-7 w-full text-[12px]" onClick={mo}>
-          <Send className="size-3.5" /> Soạn bài & đưa vào lô
-        </Button>
-      )}
+      <Button size="sm" className={cn("h-7 w-full text-[12px]", triggerClassName)} onClick={mo}>
+        {canPublish ? <Rocket className="size-3.5" /> : <Send className="size-3.5" />} {triggerLabel ?? (canPublish ? "Soạn bài · Đăng camp" : "Soạn bài")}
+      </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>{camp ? `Đăng camp ${img.design ? "thiết kế mới" : "ảnh"} #${img.seq}` : `Đưa ${img.design ? "thiết kế mới" : "ảnh"} #${img.seq} vào lô chạy ngày ${targetDay}`}</DialogTitle>
+            <DialogTitle>
+              Soạn bài {img.design ? "thiết kế mới" : "ảnh"} #{img.seq}
+              {img.queuedAt ? <span className="ml-2 rounded bg-brand/10 px-1.5 py-0.5 align-middle text-[11px] font-medium text-brand">Đang ở hàng đợi</span> : null}
+            </DialogTitle>
             <DialogDescription>
-              {img.design ? "Máy cấp mã thiết kế TK-… lúc bấm (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
-              Câu chữ do AI viết theo ảnh — sửa tùy ý. Để trống một tên = dùng tên mặc định theo khuôn.{" "}
-              {camp ? "Bấm Đăng là DUYỆT CHI cho đúng bài này: máy tạo chiến dịch → nhóm → quảng cáo trên Facebook ngay lúc bấm." : "Bài vẫn phải qua lượt DUYỆT CẢ LÔ mới được đăng."}
+              {img.design ? "Máy cấp mã thiết kế TK-… lúc đăng / vào lô (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
+              Sửa câu chữ rồi <b>Lưu vào hàng đợi</b> để đăng sau, hoặc <b>Đăng camp</b> ngay. Để trống một tên = tên theo khuôn lúc đăng.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-[1fr_300px]">
             <div className="space-y-2.5">
-              {camp ? (
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor={`pg-h-${img.id}`}>Tiêu đề</Label>
+                  <span className="numeric text-[11px] text-muted-foreground">
+                    {h.trim().length}/{VARIANT_COPY_LIMITS.headlineMaxChars}
+                  </span>
+                </div>
+                <Input id={`pg-h-${img.id}`} value={h} maxLength={VARIANT_COPY_LIMITS.headlineMaxChars} onChange={(e) => setH(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor={`pg-t-${img.id}`}>Nội dung chính</Label>
+                  <span className="numeric text-[11px] text-muted-foreground">
+                    {t.trim().length}/{VARIANT_COPY_LIMITS.primaryTextMaxChars}
+                  </span>
+                </div>
+                <Textarea id={`pg-t-${img.id}`} rows={6} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
+                <Button type="button" size="sm" variant="secondary" onClick={vietLai} disabled={writing}>
+                  {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại theo ảnh
+                </Button>
+              </div>
+              <div className="space-y-1.5 rounded-lg border p-2.5">
+                <p className="text-[12.5px] font-semibold">Tên trên Ads Manager (mỗi bài một chiến dịch → 1 nhóm → 1 quảng cáo)</p>
+                <Label htmlFor={`pg-c-${img.id}`} className="text-[11.5px]">
+                  Chiến dịch
+                </Label>
+                <Input id={`pg-c-${img.id}`} value={campName} onChange={(e) => setCampName(e.target.value)} placeholder={`để trống = theo khuôn, vd ${defaults.campaign}`} />
+                <Label htmlFor={`pg-a-${img.id}`} className="text-[11.5px]">
+                  Nhóm quảng cáo
+                </Label>
+                <Input id={`pg-a-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder={defaults.adset ? `để trống = ${defaults.adset}` : "(chưa đọc được nhóm mẫu — để trống = tên mặc định)"} />
+                <Label htmlFor={`pg-d-${img.id}`} className="text-[11.5px]">
+                  Quảng cáo
+                </Label>
+                <Input id={`pg-d-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} placeholder={`để trống = theo khuôn, vd ${defaults.ad}`} />
+                {defaults.problems.length ? (
+                  <ul className="list-disc pl-4 text-[11px] text-warning">
+                    {defaults.problems.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+              {canPublish ? (
                 <div className="space-y-1.5 rounded-lg border border-brand/40 bg-brand/5 p-2.5">
-                  <p className="text-[12.5px] font-semibold">Thời điểm chạy</p>
+                  <p className="text-[12.5px] font-semibold">Đăng camp — thời điểm chạy</p>
                   <div className="flex flex-wrap gap-3 text-[12.5px]">
                     <label className="flex items-center gap-1.5">
                       <input type="radio" name={`hen-${img.id}`} checked={!hen} onChange={() => setHen(false)} /> Chạy ngay
@@ -640,7 +700,7 @@ function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay,
                       ? `Hẹn giờ vẫn đăng lên Facebook NGAY lúc bấm (camp ở trạng thái lên lịch), tối thiểu sau ${instant.minScheduleLeadMinutes} phút, tối đa ${instant.maxScheduleDays} ngày.`
                       : `"Chạy ngay" = bắt đầu sau khoảng ${Math.round(instant.leadSeconds / 60)} phút (đủ để máy tạo xong chiến dịch).`}
                   </p>
-                  {instant.blockers.length ? (
+                  {chan ? (
                     <ul className="list-disc pl-4 text-[11.5px] text-destructive">
                       {instant.blockers.map((b) => (
                         <li key={b}>{b}</li>
@@ -649,49 +709,6 @@ function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay,
                   ) : null}
                 </div>
               ) : null}
-              <div className="space-y-1">
-                <div className="flex items-baseline justify-between">
-                  <Label htmlFor={`pg-h-${mode}-${img.id}`}>Tiêu đề</Label>
-                  <span className="numeric text-[11px] text-muted-foreground">
-                    {h.trim().length}/{VARIANT_COPY_LIMITS.headlineMaxChars}
-                  </span>
-                </div>
-                <Input id={`pg-h-${mode}-${img.id}`} value={h} maxLength={VARIANT_COPY_LIMITS.headlineMaxChars} onChange={(e) => setH(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-baseline justify-between">
-                  <Label htmlFor={`pg-t-${mode}-${img.id}`}>Nội dung chính</Label>
-                  <span className="numeric text-[11px] text-muted-foreground">
-                    {t.trim().length}/{VARIANT_COPY_LIMITS.primaryTextMaxChars}
-                  </span>
-                </div>
-                <Textarea id={`pg-t-${mode}-${img.id}`} rows={6} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
-                <Button type="button" size="sm" variant="secondary" onClick={vietLai} disabled={writing}>
-                  {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại theo ảnh
-                </Button>
-              </div>
-              <div className="space-y-1.5 rounded-lg border p-2.5">
-                <p className="text-[12.5px] font-semibold">Tên trên Ads Manager (mỗi bài một chiến dịch → 1 nhóm → 1 quảng cáo)</p>
-                <Label htmlFor={`pg-c-${mode}-${img.id}`} className="text-[11.5px]">
-                  Chiến dịch
-                </Label>
-                <Input id={`pg-c-${mode}-${img.id}`} value={campName} onChange={(e) => setCampName(e.target.value)} placeholder={camp ? "(để trống = tên theo khuôn, số thứ tự trong ngày chạy)" : undefined} />
-                <Label htmlFor={`pg-a-${mode}-${img.id}`} className="text-[11.5px]">
-                  Nhóm quảng cáo
-                </Label>
-                <Input id={`pg-a-${mode}-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder="(chưa đọc được nhóm mẫu — để trống = tên mặc định)" />
-                <Label htmlFor={`pg-d-${mode}-${img.id}`} className="text-[11.5px]">
-                  Quảng cáo
-                </Label>
-                <Input id={`pg-d-${mode}-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} placeholder={camp ? "(để trống = tên theo khuôn)" : undefined} />
-                {defaults.problems.length ? (
-                  <ul className="list-disc pl-4 text-[11px] text-warning">
-                    {defaults.problems.map((p) => (
-                      <li key={p}>{p}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
             </div>
             <div className="space-y-1.5">
               <p className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">Xem trước</p>
@@ -699,18 +716,72 @@ function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay,
             </div>
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">
-            <p className="text-[11.5px] text-muted-foreground">{loiTruoc ?? (camp ? (chan ? "Cổng ghi đang chặn — xem lý do ở trên." : `Bấm là cam kết tối đa ${formatVND(instant.budgetVnd)} cho bài này.`) : "Đưa vào lô ⇒ phiếu duyệt đã phát (nếu có) mất hiệu lực.")}</p>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
-                Huỷ
+            <p className="text-[11.5px] text-muted-foreground">
+              {luuMoiNhat ? <span className="text-success">✓ Đã lưu vào hàng đợi.</span> : null} {loiDang ?? (canPublish ? (chan ? "Cổng ghi đang chặn Đăng camp — xem lý do ở trên." : `Đăng camp = cam kết tối đa ${formatVND(instant.budgetVnd)}.`) : "")}
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
+                Đóng
               </Button>
-              <Button type="button" onClick={gui} disabled={saving || !!loiTruoc || chan}>
-                {saving ? <Loader2 className="size-4 animate-spin" /> : camp ? <Rocket className="size-4" /> : <Send className="size-4" />} {camp ? (hen ? "Hẹn giờ đăng" : "Đăng camp ngay") : "Đưa vào lô"}
+              <Button type="button" variant="secondary" onClick={luu} disabled={saving || !!loiLuu || luuMoiNhat} title={loiLuu ?? "Lưu câu chữ + tên vào hàng đợi đăng camp — chưa đăng, chưa tốn đồng nào"}>
+                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} {luuMoiNhat ? "Đã lưu" : "Lưu vào hàng đợi"}
               </Button>
+              <Button type="button" variant="outline" onClick={dua} disabled={saving || !!loiLo} title={loiLo ?? `Vào lô hằng ngày gần nhất còn nhận mẫu (dự kiến ${targetDay}), chờ duyệt cả lô`}>
+                <Send className="size-4" /> Đưa vào lô
+              </Button>
+              {canPublish ? (
+                <Button type="button" onClick={dang} disabled={saving || !!loiDang || chan} title={chan ? instant.blockers.join(" ") : undefined}>
+                  {saving ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />} {hen ? "Hẹn giờ đăng" : "Đăng camp ngay"}
+                </Button>
+              ) : null}
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/**
+ * HÀNG ĐỢI ĐĂNG CAMP — các bài đã soạn và bấm "Lưu", mới lưu trước. Không lọc theo ngày đang xem: đây là việc phải
+ * làm. Mỗi dòng mở lại ĐÚNG hộp soạn bài (sửa tiếp · đăng camp · đưa vào lô); đăng xong bài tự rời hàng đợi.
+ */
+export function PublishQueue({ items, canEdit, canPublish, instant, pageName, defaults, predictedSeq, targetDay }: { items: PublishQueueItem[]; canEdit: boolean; canPublish: boolean; instant: InstantInfo; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string }) {
+  const [pending, start] = useTransition();
+  const bo = (imageId: string) =>
+    start(async () => {
+      const r = await unqueueManualGenDraftAction({ imageId });
+      if ("error" in r) toast.error(r.error);
+      else toast.success("Đã bỏ khỏi hàng đợi — bản nháp câu chữ vẫn giữ trên ảnh.");
+    });
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-1.5 rounded-lg border border-brand/40 bg-brand/5 p-2.5">
+      <p className="text-[12.5px] font-semibold">
+        Hàng đợi đăng camp <span className="numeric font-normal text-muted-foreground">({items.length} bài, mới lưu trước)</span>
+      </p>
+      <div className="divide-y rounded-md border bg-card">
+        {items.map(({ img, runLabel }) => (
+          <div key={img.id} className="flex flex-wrap items-center gap-2.5 p-2">
+            <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={img.headline || `Ảnh #${img.seq}`} className="size-14 shrink-0 rounded" iconClassName="size-4" />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p className="truncate text-[12.5px] font-semibold">{img.headline || <span className="italic text-muted-foreground">(chưa có tiêu đề)</span>}</p>
+              <p className="line-clamp-1 text-[11.5px] text-muted-foreground">{img.primaryText || "(chưa có nội dung chính)"}</p>
+              <p className="truncate text-[10.5px] text-muted-foreground">
+                {runLabel} #{img.seq} · chiến dịch: {img.campaignName || "theo khuôn"} · lưu bởi {img.queuedByName || "—"} {img.queuedAt ? vnShortStamp(img.queuedAt) : ""}
+              </p>
+            </div>
+            {canEdit ? (
+              <div className="flex shrink-0 items-center gap-1">
+                <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} triggerLabel={canPublish ? "Mở · Đăng camp" : "Mở bài"} triggerClassName="w-auto" />
+                <Button size="sm" variant="ghost" className="h-7 text-[12px]" disabled={pending} onClick={() => bo(img.id)} title="Bỏ khỏi hàng đợi">
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
