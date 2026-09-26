@@ -28,6 +28,8 @@ function tepQuet(): string[] {
     "lib/actions/returns-unidentified.ts",
     "lib/actions/owner-decisions.ts",
     "lib/actions/slow-moving.ts",
+    // Nối phiếu nhập với lệnh SX (P2) — tệp phát `stock_receipt.linked_production` và nhật ký của nó.
+    "lib/inventory/receipt-create.ts",
     ...approvals,
   ];
 }
