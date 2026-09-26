@@ -494,7 +494,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         ctx.summary.imported = r.created;
         ctx.summary.updated = r.resolved;
         if (r.lark.error || r.telegram.error) ctx.summary.warning = `gửi cảnh báo hỏng: ${[r.lark.error && `Lark ${r.lark.error}`, r.telegram.error && `Telegram ${r.telegram.error}`].filter(Boolean).join(" · ")}`.slice(0, 500);
-        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}`.slice(0, 900);
+        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}`.slice(0, 900);
         return r;
       }),
   },

@@ -309,6 +309,7 @@ import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.te
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
+import { testApprovalReservationSweep, testNotificationRetryDb, testNotificationRetryPure } from "./company-os-retry-sweep.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
 import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
@@ -2332,6 +2333,10 @@ async function main() {
   await testHardeningApprovalExecution(db);
   await testHardeningReceiptLinkedEvent(db);
   await testHardeningTopicTrackSemantics(db);
+  // Company OS · N: gửi lại tin Lark hỏng + dọn lời duyệt kẹt (mã `cos-n-`; dòng thông báo tự xoá).
+  testNotificationRetryPure();
+  await testNotificationRetryDb(db);
+  await testApprovalReservationSweep(db);
   // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
   testCompanyOsE2ePure();
   await testCompanyOsE2eLifecycle(db);

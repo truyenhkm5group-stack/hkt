@@ -93,6 +93,7 @@ const MOI = [
   "0143_creative_manual_gen_design",
   "0144_company_os_unidentified_identify",
   "0145_creative_instant_publish",
+  "0146_notification_retry",
 ] as const;
 
 /*
@@ -1657,6 +1658,15 @@ export async function testMigrationUpgradePath() {
     await client.query(`update return_unidentified set variant_identified_at = now(), variant_identified_by = 'Kho', variant_identified_by_user_id = 'up-uh' where id = 'up-ru1'`);
     assert.ok(!/(^|;|\s)UPDATE\s+"?return_unidentified/im.test(readFileSync(path.join(goc, "0144_company_os_unidentified_identify.sql"), "utf8").replace(/--.*$/gm, "")), "0144: migration KHÔNG được chứa UPDATE — không backfill");
     assert.equal(await dem("select count(*)::int as n from pg_constraint where conname in ('return_unidentified_variant_identified_check', 'return_unidentified_variant_identified_by_user_id_users_id_fk')"), 2, "0144: đúng một ràng buộc mỗi tên");
+    // 0146 (Company OS · Agent N): ba cột ghi vết gửi lại tin cảnh báo. Dòng ghi KHÔNG nhắc tới chúng — đúng như
+    // mọi dòng đã có trên production — mang NULL cả ba (không DEFAULT, không backfill): NULL = chưa từng thử ⇒
+    // không bao giờ được gửi lại.
+    await client.query(`insert into notifications (id, kind, title, dedupe_key) values ('up-nt1', 'SYSTEM', 'Cảnh báo cũ', 'up-nt1')`);
+    assert.equal(await dem("select count(*)::int as n from notifications where id = 'up-nt1' and notify_attempts is null and notify_last_attempt_at is null and notify_last_error is null"), 1, "0146: dòng cũ giữ NULL ở cả ba cột (không backfill)");
+    const sql0146 = readFileSync(path.join(goc, "0146_notification_retry.sql"), "utf8").replace(/--.*$/gm, "");
+    assert.ok(!/(^|;|\s)UPDATE\s+"?notifications/im.test(sql0146), "0146: migration KHÔNG được chứa UPDATE — không backfill");
+    assert.ok(!/DEFAULT/i.test(sql0146), "0146: không DEFAULT — dòng mới chưa thử cũng là NULL");
+    await client.query(`delete from notifications where id = 'up-nt1'`);
     await client.query(`delete from return_dispositions where id = 'up-rdu1'`);
     await client.query(`delete from return_unidentified where id = 'up-ru1'`);
     await client.query(`delete from users where id = 'up-uh'`);

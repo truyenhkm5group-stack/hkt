@@ -7,11 +7,11 @@ import { and, asc, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm
 import { PRIMARY_ATTEMPT, SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
-import { sendLark } from "@/lib/alerts/lark";
+import { deliverNotifications, fmtAt, type DeliveryResult } from "@/lib/alerts/notification-delivery";
+import { releaseStuckApprovalReservations } from "@/lib/approvals/reservation-sweep";
 import { runStockShortageDigest, type ShortageDigestResult } from "@/lib/alerts/stock-shortage-digest";
 import { runStockWaitLog, type StockWaitLogResult } from "@/lib/alerts/stock-wait-log";
 import { maskUrls, runOwnerDecisionDigest, type OwnerDigestResult } from "@/lib/alerts/owner-decision-digest";
-import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
@@ -20,7 +20,7 @@ import { CS_CASE_SLA_HOURS, csCasesToSurface, csGroupKey, openCsGroups } from "@
 import { ageLabel } from "@/lib/constants/action-queue";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
-import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
+import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL } from "@/lib/constants/alerts";
 import { maskAccountNumber } from "@/lib/constants/bank";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
@@ -35,7 +35,6 @@ import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { COD_STATEMENT_GRACE_HOURS, COD_STATEMENT_LOOKBACK_DAYS, COD_STATEMENT_MATCH_WINDOW_DAYS, statementCoverage, vnDayOf, vtpOrderListDue } from "@/lib/constants/feed-freshness";
 import { readStatementMailHeartbeat, STATEMENT_MAIL_SILENCE_HOURS } from "@/lib/integrations/viettelpost/statement-mail";
 import { getControlTower } from "@/lib/queries/control-tower";
-import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
 
@@ -64,12 +63,6 @@ type Candidate = {
    */
   refresh?: boolean;
 };
-
-/** Định dạng thời điểm ngắn gọn cho tin Lark/Telegram (giờ Việt Nam) */
-function fmtAt(d: Date | string | null | undefined) {
-  if (!d) return "";
-  return new Date(d).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
-}
 
 function orderLabel(o: { systemId: number | null; billFullName: string | null; billPhone: string | null; totalPriceAfterDiscount: number | null }) {
   return `#${o.systemId ?? "?"} · ${o.billFullName || "Khách"}${o.billPhone ? ` · ${o.billPhone}` : ""} · ${formatVND(o.totalPriceAfterDiscount ?? 0)}`;
@@ -1081,7 +1074,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult; /** "Cần anh quyết" gửi nhóm Quản lý — tự bỏ qua khi `owner.digest` tắt (mặc định). */ ownerDigest: OwnerDigestResult };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Gửi tin: lần đầu được · gửi lại được · hỏng còn lượt sau · bỏ cuộc (tới trần) — `lib/alerts/notification-delivery.ts`. */ delivery: Pick<DeliveryResult, "sent" | "retried" | "failed" | "gaveUp">; /** Lời duyệt kẹt được trả lại cho người xin — `lib/approvals/reservation-sweep.ts`. */ approvalSweep: { released: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult; /** "Cần anh quyết" gửi nhóm Quản lý — tự bỏ qua khi `owner.digest` tắt (mặc định). */ ownerDigest: OwnerDigestResult };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -1183,38 +1176,16 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   }
   const [{ open }] = await db.select({ open: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt));
 
-  // Telegram cho thông báo mới
-  const telegram = { sent: 0, error: undefined as string | undefined };
-  if (created.length && cfg.telegramBotToken && cfg.telegramChatId) {
-    const groups = new Map<string, typeof created>();
-    for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
-    for (const [kind, list] of groups) {
-      const lines = list.slice(0, 15).map((c) => `• <b>${escapeHtml(c.title)}</b>\n  ${escapeHtml(c.body)}${c.occurredAt ? ` · ⏱ ${fmtAt(c.occurredAt)}` : ""}\n  ${env.appUrl}${c.href}`);
-      const more = list.length > 15 ? `\n… và ${list.length - 15} mục nữa` : "";
-      const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `⚠️ <b>${escapeHtml(NOTIFICATION_KIND_LABEL[kind] ?? kind)}</b> (${list.length})\n${lines.join("\n")}${more}`);
-      if (result.ok) {
-        telegram.sent += list.length;
-        await db.update(n).set({ notifiedAt: new Date() }).where(inArray(n.id, list.map((c) => c.id)));
-      } else telegram.error = result.error;
-    }
-  }
-  // Lark Suite cho thông báo mới
-  const lark = { sent: 0, error: undefined as string | undefined };
-  if (created.length && (cfg.larkWebhookUrl || cfg.larkBillingWebhookUrl)) {
-    const groups = new Map<string, typeof created>();
-    for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
-    for (const [kind, list] of groups) {
-      const lines = list.slice(0, 15).map((c) => [{ text: `• ${c.title}`, href: `${env.appUrl}${c.href}` }, { text: `${c.body ? `  ${c.body}` : ""}${c.occurredAt ? ` · ⏱ cập nhật ${fmtAt(c.occurredAt)}` : ""}` }]);
-      if (list.length > 15) lines.push([{ text: `… và ${list.length - 15} mục nữa` }]);
-      // cảnh báo ngưỡng thanh toán QC đi vào nhóm riêng (nếu cấu hình)
-      const useBilling = kind === "ADS_BILLING" && cfg.larkBillingWebhookUrl;
-      const result = await sendLark(useBilling ? cfg.larkBillingWebhookUrl : cfg.larkWebhookUrl, useBilling ? cfg.larkBillingSecret : cfg.larkSecret, `${kind === "ADS_BILLING" ? "💳" : "⚠️"} ${NOTIFICATION_KIND_LABEL[kind] ?? kind} (${list.length})`, lines);
-      if (result.ok) {
-        lark.sent += list.length;
-        await db.update(n).set({ notifiedAt: new Date() }).where(inArray(n.id, list.map((c) => c.id)));
-      } else lark.error = result.error;
-    }
-  }
+  /*
+    GỬI TIN — LẦN ĐẦU VÀ GỬI LẠI, MỘT ĐƯỜNG (Company OS · Agent N, `lib/alerts/notification-delivery.ts`).
+    Trước đây chỉ dòng VỪA TẠO được gửi; hỏng là `notified_at` NULL mãi mãi. Nay cùng lượt này thử lại
+    dòng đã hỏng còn trong cửa sổ, có trần + nhịp lùi, nhận dòng bằng so-sánh-rồi-đổi nên hai lượt chạy
+    chồng không gửi trùng. Lỗi gửi không làm hỏng phần còn lại của lượt cảnh báo.
+  */
+  const delivery = await deliverNotifications(db, cfg, { created: created.map((c) => ({ id: c.id, kind: c.kind })) }).catch(
+    (e): DeliveryResult => ({ telegram: { sent: 0 }, lark: { sent: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }, sent: 0, retried: 0, failed: 0, gaveUp: 0 }),
+  );
+  const { telegram, lark } = delivery;
   if (created.length || resolved) publish({ type: "notification", open: Number(open) });
   /*
     BẢNG THIẾU HÀNG GIAO ĐƠN ĐÃ CHỐT — một tin CÓ BẢNG cho cả shop, không phải một tin cho mỗi mẫu.
@@ -1236,7 +1207,16 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     làm hỏng lượt cảnh báo đã chạy xong ở trên; câu lỗi đã che URL.
   */
   const ownerDigest = await runOwnerDecisionDigest().catch((e): OwnerDigestResult => ({ sent: null, items: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }));
-  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage, stockWaitLog, ownerDigest };
+  /*
+    LỜI DUYỆT KẸT GIỮA "GIỮ CHỖ" VÀ "THANH TOÁN" (Company OS · Agent N, `lib/approvals/reservation-sweep.ts`):
+    tiến trình chết giữa hai bước thì yêu cầu nằm EXECUTED không sự kiện. Trả lại cho người xin khi đã quá
+    hạn giữ chỗ. Chạy ở đây vì job này đã chạy 10 phút/lần — không thêm lịch. Lỗi không làm hỏng lượt cảnh báo.
+  */
+  const approvalSweep = await releaseStuckApprovalReservations(db).then(
+    (r) => ({ released: r.released.length, error: undefined as string | undefined }),
+    (e: unknown) => ({ released: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }),
+  );
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, approvalSweep, delivery: { sent: delivery.sent, retried: delivery.retried, failed: delivery.failed, gaveUp: delivery.gaveUp }, stockShortage, stockWaitLog, ownerDigest };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };
