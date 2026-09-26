@@ -12,7 +12,7 @@ import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constant
 import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapshot, type TopicMessageKind, type TopicRequirements } from "@/lib/constants/production-os";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { listTopicFiles } from "@/lib/queries/production-files";
+import { getTopicFileStorage, listTopicFiles } from "@/lib/queries/production-files";
 import { getTopicDetail, listSupplierOptions } from "@/lib/queries/production-os";
 
 export const metadata = { title: "Topic sản xuất" };
@@ -24,7 +24,7 @@ export const metadata = { title: "Topic sản xuất" };
 export default async function TopicPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("planning:view");
   const { id } = await params;
-  const [d, suppliers, files] = await Promise.all([getTopicDetail(id), listSupplierOptions(), listTopicFiles(id)]);
+  const [d, suppliers, files, storage] = await Promise.all([getTopicDetail(id), listSupplierOptions(), listTopicFiles(id), getTopicFileStorage()]);
   if (!d) notFound();
   const canWrite = can(user, "production:write");
   const canApprove = can(user, "production:approve");
@@ -94,7 +94,7 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
           </SectionCard>
 
           <SectionCard title={`Ảnh / video (${formatNumber(files.length)})`} hint="Ảnh mẫu, ảnh chất vải, video test quảng cáo — gửi xưởng xem cùng một chỗ. Ảnh tự thu nhỏ trước khi tải; video dài hơn trần thì dán link vào lượt trao đổi.">
-            <TopicFilesPanel topicId={d.topic.id} files={files} canWrite={canWrite} />
+            <TopicFilesPanel topicId={d.topic.id} files={files} canWrite={canWrite} storage={storage} />
           </SectionCard>
 
           <SectionCard title={`Trao đổi (${formatNumber(d.messages.length)})`} hint="Chỉ thêm, không sửa, không xoá — lịch sử bàn giá là chứng cứ khi xưởng giao khác lời hứa.">

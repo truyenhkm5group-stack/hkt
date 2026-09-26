@@ -19,6 +19,11 @@ export const PROVISIONAL_CODE_PREFIX = "TEST-";
 
 /** `TEST-YYMMDD-NN` (NN ≥ 2 chữ số — ngày thứ 100 vẫn đọc được `TEST-260926-100`). */
 export const PROVISIONAL_CODE_PATTERN = /^TEST-\d{6}-\d{2,}$/;
+/**
+ * CÙNG khuôn ấy viết cho Postgres (`~`) — bộ lọc danh sách mẫu dùng nó. Hai bản phải nói cùng một điều:
+ * `tests/production-topic-files.test.ts` chạy cả hai trên cùng bộ mã rồi so từng mã.
+ */
+export const PROVISIONAL_CODE_PG_REGEX = "^TEST-[0-9]{6}-[0-9]{2,}$";
 
 /** Mã có mang tiền tố dành riêng không (dùng để chặn đăng ký tay và chốt mã chính thức). */
 export function hasProvisionalPrefix(code: string): boolean {

@@ -22,6 +22,12 @@ export const TOPIC_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 export const TOPIC_VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 /** Tối đa tệp đã tải xong trên một topic. */
 export const TOPIC_FILES_MAX_PER_TOPIC = 40;
+/**
+ * TRẦN TỔNG của mọi ảnh / video topic (kể cả lượt đang tải dở) — tệp nằm trong CSDL và đi vào bản sao lưu
+ * hằng ngày, nên phải có một con số chặn trước khi ổ đĩa VPS hay bản sao lưu phình âm thầm. Chạm trần thì
+ * từ chối kèm câu nói rõ đã dùng bao nhiêu và gỡ ở đâu — không cắt im lặng.
+ */
+export const TOPIC_FILES_TOTAL_MAX_BYTES = 3 * 1024 * 1024 * 1024;
 /** Lượt tải dở quá lâu (đóng tab giữa chừng) thì dọn khúc — không hiện ở đâu cả nên không ai khác dọn. */
 export const TOPIC_FILE_STALE_UPLOAD_HOURS = 6;
 
@@ -58,13 +64,17 @@ export function topicFileChunkCount(bytes: number): number {
 }
 
 /** Kiểm một lượt xin tải lên: hợp lệ thì trả loại tệp + số khúc, không thì câu lỗi đọc được. */
-export function checkTopicFileUpload(input: { contentType: string; bytes: number; readyCount: number }): { ok: true; kind: TopicFileKind; chunkCount: number } | { ok: false; error: string } {
+export function checkTopicFileUpload(input: { contentType: string; bytes: number; readyCount: number; usedBytes?: number }): { ok: true; kind: TopicFileKind; chunkCount: number } | { ok: false; error: string } {
   const kind = topicFileKindOf(input.contentType);
   if (!kind) return { ok: false, error: `Không nhận kiểu tệp “${input.contentType || "không rõ"}” — chỉ ảnh (JPEG/PNG/WebP) và video (MP4/MOV/WebM)` };
   if (!Number.isInteger(input.bytes) || input.bytes <= 0) return { ok: false, error: "Tệp rỗng" };
   const max = topicFileMaxBytes(kind);
   if (input.bytes > max) return { ok: false, error: `${TOPIC_FILE_KIND_LABEL[kind]} ${formatMb(input.bytes)} vượt trần ${formatMb(max)}${kind === "VIDEO" ? " — video dài hơn thì dán link Drive / YouTube vào lượt trao đổi" : ""}` };
   if (input.readyCount >= TOPIC_FILES_MAX_PER_TOPIC) return { ok: false, error: `Topic đã có ${TOPIC_FILES_MAX_PER_TOPIC} tệp — gỡ bớt tệp cũ trước khi thêm` };
+  const used = input.usedBytes ?? 0;
+  if (used + input.bytes > TOPIC_FILES_TOTAL_MAX_BYTES) {
+    return { ok: false, error: `Kho ảnh / video topic đã dùng ${formatMb(used)} / ${formatMb(TOPIC_FILES_TOTAL_MAX_BYTES)} — tệp ${formatMb(input.bytes)} vượt trần chung. Gỡ video cũ ở các topic đã đóng, hoặc dán link Drive / YouTube` };
+  }
   return { ok: true, kind, chunkCount: topicFileChunkCount(input.bytes) };
 }
 

@@ -10,6 +10,7 @@ import {
   type ModelState,
   type ModelTimelineDimension,
 } from "@/lib/constants/model-lifecycle";
+import { PROVISIONAL_CODE_PG_REGEX } from "@/lib/constants/provisional-model";
 import { loadRegistryInputs, planModelRegistry, type RegistryAmbiguous } from "@/lib/models/service";
 import { spendMappedFor } from "@/lib/queries/model-ads";
 import { erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -52,6 +53,11 @@ export type ModelListRow = {
   createdAt: Date;
 };
 
+/** Mẫu đang mang mã tạm — bản SQL của `isProvisionalModel`. */
+export function provisionalModelCond(): SQL {
+  return sql`${pm.registeredBy} = 'USER' and ${pm.productId} is null and ${pm.designConceptId} is null and ${pm.code} ~ ${PROVISIONAL_CODE_PG_REGEX}`;
+}
+
 function listWhere(params: ListParams): SQL | undefined {
   const conds: SQL[] = [];
   if (params.q) {
@@ -72,6 +78,8 @@ function listWhere(params: ListParams): SQL | undefined {
     if (noi.includes("product")) parts.push(sql`${pm.productId} is not null`);
     if (noi.includes("design")) parts.push(sql`${pm.designConceptId} is not null`);
     if (noi.includes("none")) parts.push(sql`${pm.productId} is null and ${pm.designConceptId} is null`);
+    // Cùng ba vế với `isProvisionalModel` (lib/constants/provisional-model.ts) — mẫu mới test chưa lên mã.
+    if (noi.includes("provisional")) parts.push(provisionalModelCond());
     if (parts.length) conds.push(or(...parts)!);
   }
   return conds.length ? and(...conds) : undefined;

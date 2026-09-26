@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
 import {
@@ -12,14 +12,18 @@ import {
   TOPIC_FILE_STALE_UPLOAD_HOURS,
   TOPIC_FILE_TYPES,
   TOPIC_FILES_MAX_PER_TOPIC,
+  TOPIC_FILES_TOTAL_MAX_BYTES,
   TOPIC_VIDEO_MAX_BYTES,
 } from "@/lib/constants/production-files";
 import { buildTopicEvidenceSnapshot } from "@/lib/constants/production-os";
-import { hasProvisionalPrefix, isProvisionalModel, nextProvisionalCode, PROVISIONAL_CODE_PATTERN, provisionalDayPrefix, vnDayStamp } from "@/lib/constants/provisional-model";
+import { hasProvisionalPrefix, isProvisionalModel, nextProvisionalCode, PROVISIONAL_CODE_PATTERN, PROVISIONAL_CODE_PG_REGEX, provisionalDayPrefix, vnDayStamp } from "@/lib/constants/provisional-model";
 import { assignModelCodeCore, planModelRegistry, registerModelCore, registerProvisionalModelCore } from "@/lib/models/service";
 import { createTopicCore } from "@/lib/production/topics";
 import { expectedChunkBytes, finishTopicFileCore, putTopicFileChunkCore, removeTopicFileCore, startTopicFileCore } from "@/lib/production/topic-files";
-import { listTopicFiles, readTopicFileRange } from "@/lib/queries/production-files";
+import { listModels } from "@/lib/queries/models";
+import { getTopicFileStorage, listTopicFiles, readTopicFileRange } from "@/lib/queries/production-files";
+import { parseListParams } from "@/lib/search-params";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * ═══════════ TOPIC SẢN XUẤT: MẪU CHƯA CÓ MÃ + ẢNH / VIDEO ĐÍNH KÈM (chủ shop 26/09/2026) ═══════════
@@ -66,6 +70,10 @@ export function testProductionTopicFilesPure() {
   assert.ok(!qua.ok && /link/.test(qua.error), "video quá trần ⇒ chỉ đường dán link");
   assert.equal(checkTopicFileUpload({ contentType: "image/jpeg", bytes: 10, readyCount: TOPIC_FILES_MAX_PER_TOPIC }).ok, false, "đủ trần số tệp ⇒ từ chối");
   assert.equal(checkTopicFileUpload({ contentType: "IMAGE/JPEG", bytes: 10, readyCount: 0 }).ok, true, "kiểu viết hoa vẫn nhận");
+  // Trần CHUNG: vừa khít trần thì nhận, vượt một byte thì từ chối và nói đã dùng bao nhiêu.
+  assert.equal(checkTopicFileUpload({ contentType: "video/mp4", bytes: 10, readyCount: 0, usedBytes: TOPIC_FILES_TOTAL_MAX_BYTES - 10 }).ok, true);
+  const day = checkTopicFileUpload({ contentType: "video/mp4", bytes: 11, readyCount: 0, usedBytes: TOPIC_FILES_TOTAL_MAX_BYTES - 10 });
+  assert.ok(!day.ok && /đã dùng/.test(day.error) && /trần chung/.test(day.error), "chạm trần chung ⇒ từ chối kèm mức đã dùng");
 
   assert.equal(formatMb(7674), "8 KB", "ảnh nhỏ in KB, không in \"0 MB\"");
   assert.equal(formatMb(4.5 * 1024 * 1024), "4,5 MB");
@@ -227,5 +235,23 @@ export async function testProductionTopicFilesDb(db: Db) {
   const lai = await assignModelCodeCore(db, { modelId: r1.modelId, code: Q, actor, source: "test" });
   assert.ok("ok" in lai && lai.noop, "bấm hai lần ⇒ không ghi gì thêm");
   assert.ok("error" in (await assignModelCodeCore(db, { modelId: r1.modelId, code: "PTFQ904", actor, source: "test" })), "đã có mã chính thức ⇒ không đổi tiếp ở đây");
-  console.log("✓ Topic sản xuất: mẫu chưa có mã nhận mã tạm TEST-YYMMDD-NN (tăng trong ngày, giờ VN) · tiền tố dành riêng không đăng ký tay được · chốt mã đổi đúng dòng, topic đi theo, mã đã là dòng khác thì không gộp hộ · ảnh/video tải theo khúc chỉ hiện khi đủ khúc + đúng tổng byte · người khác không chen khúc · Range qua ranh giới khúc đúng byte · lượt tải dở quá hạn được dọn");
+  // ─── G. Khuôn mã tạm: bản Postgres và bản JS nói CÙNG một điều trên cùng bộ mã ───
+  const bo = ["TEST-260926-01", "TEST-260926-100", "TEST-26092-01", "TEST-260926-1", "test-260926-01", "TEST-260926-01X", "XTEST-260926-01", "TK-260926-01", "Q001", ""];
+  for (const code of bo) {
+    const [hang] = rowsOf<{ khop: boolean }>(await db.execute(sql`select ${code} ~ ${PROVISIONAL_CODE_PG_REGEX} as khop`));
+    assert.equal(Boolean(hang?.khop), PROVISIONAL_CODE_PATTERN.test(code), `khuôn mã tạm lệch giữa SQL và JS ở "${code}"`);
+  }
+  // Bộ lọc "Mã tạm" ở danh sách mẫu: r2 còn mã tạm ⇒ có; r1 đã chốt mã ⇒ không.
+  const loc = await listModels(parseListParams({ link: "provisional", pageSize: "200" }, { filterKeys: ["state", "link"], sortable: ["code"], defaultSort: "code", defaultPeriod: "all" }));
+  const ids = new Set(loc.rows.map((r) => r.id));
+  assert.ok(ids.has(r2.modelId), "mẫu còn mã tạm hiện trong bộ lọc");
+  assert.ok(!ids.has(r1.modelId), "mẫu đã chốt mã không còn trong bộ lọc");
+  for (const r of loc.rows) assert.ok(isProvisionalModel(r), `bộ lọc SQL và isProvisionalModel lệch ở ${r.code}`);
+  // Mức đã dùng của kho chung là tổng byte của mọi tệp còn lại (tệp đã gỡ không tính).
+  const kho = await getTopicFileStorage();
+  const [thuc] = await db.select({ b: sql<number>`coalesce(sum(${schema.productionTopicFiles.bytes}), 0)::bigint` }).from(schema.productionTopicFiles);
+  assert.equal(kho.usedBytes, Number(thuc.b));
+  assert.equal(kho.maxBytes, TOPIC_FILES_TOTAL_MAX_BYTES);
+
+  console.log("✓ Topic sản xuất: mẫu chưa có mã nhận mã tạm TEST-YYMMDD-NN (tăng trong ngày, giờ VN) · tiền tố dành riêng không đăng ký tay được · chốt mã đổi đúng dòng, topic đi theo, mã đã là dòng khác thì không gộp hộ · ảnh/video tải theo khúc chỉ hiện khi đủ khúc + đúng tổng byte · người khác không chen khúc · Range qua ranh giới khúc đúng byte · lượt tải dở quá hạn được dọn · trần chung dung lượng · khuôn mã tạm SQL = JS · bộ lọc “Mã tạm” ở danh sách mẫu");
 }

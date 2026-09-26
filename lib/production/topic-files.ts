@@ -46,11 +46,15 @@ export async function startTopicFileCore(
   // Dọn lượt tải dở đã bỏ (đóng tab giữa chừng) — chúng không hiện ở đâu nên không ai khác dọn. Khúc đi theo (cascade).
   await db.delete(f).where(and(eq(f.status, "UPLOADING"), lt(f.createdAt, new Date(now.getTime() - TOPIC_FILE_STALE_UPLOAD_HOURS * 3_600_000))));
 
-  const [dem] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(f)
-    .where(and(eq(f.topicId, t.id), eq(f.status, "READY")));
-  const kiem = checkTopicFileUpload({ contentType: input.contentType, bytes: input.bytes, readyCount: Number(dem?.n ?? 0) });
+  const [[dem], [tong]] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(f)
+      .where(and(eq(f.topicId, t.id), eq(f.status, "READY"))),
+    // Trần CHUNG tính cả lượt đang tải dở: hai người cùng bấm tải không được cùng lọt qua trần.
+    db.select({ bytes: sql<number>`coalesce(sum(${f.bytes}), 0)::bigint` }).from(f),
+  ]);
+  const kiem = checkTopicFileUpload({ contentType: input.contentType, bytes: input.bytes, readyCount: Number(dem?.n ?? 0), usedBytes: Number(tong?.bytes ?? 0) });
   if (!kiem.ok) return { error: kiem.error };
 
   const [row] = await db
