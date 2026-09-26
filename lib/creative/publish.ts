@@ -32,7 +32,9 @@ import {
   type TemplateAd,
 } from "@/lib/integrations/facebook/ads-write";
 import { gateCreativeWrite, gateCreativeWritePrefix, type CreativeGateInput, type CreativePauseKind } from "@/lib/marketing/creative-write-gate";
+import { parseCampaignSetup } from "@/lib/constants/campaign-setup";
 import { approvalDigest, type ApprovalContent } from "@/lib/creative/approval";
+import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { sha256Hex } from "@/lib/creative/images";
 import { describeRule } from "@/lib/creative/judge";
 import { buildObjectStorySpec } from "@/lib/creative/story-spec";
@@ -286,9 +288,16 @@ const FINAL_DENIALS: readonly CreativeWriteDenial[] = ["OVER_BATCH_SIZE", "OVER_
  * Đăng mọi lô `APPROVED` còn trước giờ chạy. Gọi mỗi lượt tick của vòng; chạy lại bao nhiêu lần cũng
  * không đăng một mẫu hai lần (xem tính chất 3 ở đầu tệp).
  */
-export async function publishApprovedBatches(db: Db, now: Date, deps?: CreativeDeps): Promise<PublishBatchReport[]> {
+export async function publishApprovedBatches(db: Db, now: Date, deps?: CreativeDeps, opts: { includeLoop?: boolean } = {}): Promise<PublishBatchReport[]> {
   const d = resolveDeps(deps);
-  const batches = await db.select().from(T.creativeBatches).where(eq(T.creativeBatches.status, "APPROVED")).orderBy(asc(T.creativeBatches.batchDay));
+  // Lô "Đăng camp" (`INSTANT`) đã được người bấm duyệt ⇒ luôn đi tiếp nếu đăng dở. Lô hằng ngày chỉ khi vòng còn bật
+  // (`includeLoop`, mặc định có — đường cũ).
+  const includeLoop = opts.includeLoop ?? true;
+  const batches = await db
+    .select()
+    .from(T.creativeBatches)
+    .where(and(eq(T.creativeBatches.status, "APPROVED"), ...(includeLoop ? [] : [eq(T.creativeBatches.kind, "INSTANT")])))
+    .orderBy(asc(T.creativeBatches.batchDay));
   const out: PublishBatchReport[] = [];
   for (const b of batches) out.push(await publishOneBatch(db, b, now, d));
   return out;
@@ -389,6 +398,9 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
       await db.update(T.creativeBatches).set({ error: msg, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
       return { ...report, result: "ERROR", detail: msg };
     }
+    // Lô "Đăng camp" mang setup người đã chọn (TKQC · fanpage · mục tiêu · vị trí · tuổi · giới tính) — áp lên mẫu MỘT lần.
+    const setup = parseCampaignSetup((b.plan as Record<string, unknown> | null)?.setup);
+    if (setup) template = applyCampaignSetup(template, setup);
     // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào.
     const shape = templateShapeError(template, config.pageId, pending.some(needsOwnCampaign));
     if (shape) {

@@ -134,6 +134,24 @@ async function graphGet(path: string, params: Record<string, string>): Promise<G
   return rec;
 }
 
+import type { GeoSearchHit } from "@/lib/constants/campaign-setup";
+export type { GeoSearchHit };
+
+/**
+ * TÌM TỈNH / THÀNH để nhắm vị trí khi "Đăng camp" (chủ shop 26/09/2026) — lời gọi ĐỌC (không qua chốt ghi, không tốn tiền),
+ * giới hạn trong Việt Nam. Khoá (`key`) Facebook trả về là thứ duy nhất targeting nhận; ERP không tự gõ khoá nào.
+ */
+export async function searchAdGeoLocations(q: string, limit = 12): Promise<GeoSearchHit[]> {
+  const text = q.trim();
+  if (text.length < 2) return [];
+  const rec = await graphGet("search", { type: "adgeolocation", q: text, location_types: JSON.stringify(["region", "city"]), country_code: "VN", limit: String(Math.max(1, Math.min(25, limit))) });
+  const rows = Array.isArray(rec.data) ? (rec.data as unknown[]) : [];
+  return rows
+    .map((r) => asRecord(r))
+    .filter((r): r is Record<string, unknown> => r !== null && (r.type === "region" || r.type === "city") && asText(r.key) !== null)
+    .map((r) => ({ key: asText(r.key) as string, name: asText(r.name) ?? "", type: r.type === "city" ? ("city" as const) : ("region" as const), region: asText(r.region) }));
+}
+
 /**
  * Lời gọi GHI. `retries: 0` — CỐ Ý.
  *

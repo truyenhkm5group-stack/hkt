@@ -3815,7 +3815,7 @@ export const creativeManualGens = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt), check("creative_manual_gens_kind_check", sql`${t.kind} IN ('MOCKUP', 'DESIGN')`)],
+  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt), check("creative_manual_gens_kind_check", sql`${t.kind} IN ('MOCKUP', 'DESIGN', 'UPLOAD')`)],
 );
 
 /** Một ẢNH của lượt gen tay: câu lệnh · gen · ảnh · duyệt / loại · câu chữ + tên · mẫu đã vào lô. */
@@ -3866,6 +3866,11 @@ export const creativeManualGenImages = pgTable(
     /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34); tên là ảnh chụp do máy chủ đọc. */
     queuedByUserId: text("queued_by_user_id").references(() => users.id, { onDelete: "set null" }),
     queuedByName: text("queued_by_name").notNull().default(""),
+    /**
+     * SETUP CAMP đã chọn cho bài ở hàng đợi (migration 0150): TKQC · fanpage · mục tiêu · ngân sách · vị trí · tuổi ·
+     * giới tính (`CampaignSetup`). `NULL` = chưa chọn ⇒ hộp đăng điền mặc định theo lựa chọn dùng nhiều.
+     */
+    campaignSetup: jsonb("campaign_setup").$type<Record<string, unknown>>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

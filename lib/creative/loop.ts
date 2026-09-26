@@ -11,7 +11,7 @@ import { assignOpenBatchNames, refreshNamingTemplate, type TemplateReader } from
 import { readTemplateAd } from "@/lib/integrations/facebook/ads-write";
 import { env } from "@/lib/env";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, MANUAL_GEN, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
+import { DAILY_BATCH_RETIRED, CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, MANUAL_GEN, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 
 /**
@@ -43,6 +43,8 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 
 export type LoopTickDeps = {
   build?: BuildBatchDeps;
+  /** Có dựng lô hằng ngày không. Bỏ trống ⇒ theo `DAILY_BATCH_RETIRED` (đã bỏ). Kiểm thử bật lại để giữ phủ mã dựng lô. */
+  buildDailyBatch?: boolean;
   /** Đọc mẩu mẫu để đặt tên nhóm. `null` ⇒ không đọc. Bỏ trống ⇒ `readTemplateAd` thật NẾU có token Facebook. */
   namingReader?: TemplateReader | null;
   manualGen?: DrawManualGenDeps;
@@ -107,9 +109,9 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
     await say({ kind: "EXPIRED", batchDay: e.batchDay, title: `Vòng mẫu: lô ${e.batchDay} QUÁ HẠN DUYỆT`, lines: ["Lô không được đăng — hôm nay không có mẫu test nào, không tiêu đồng nào."] });
   }
 
-  // 2. Đăng — chỉ khi vòng đang BẬT.
-  if (config.enabled) {
-    out.published = (await step("đăng", () => publishApprovedBatches(db, now, deps.write))) ?? [];
+  // 2. Đăng — bài "Đăng camp" (lô INSTANT, người bấm đã duyệt) đăng dở thì LUÔN đi tiếp; lô hằng ngày chỉ khi vòng BẬT.
+  {
+    out.published = (await step("đăng", () => publishApprovedBatches(db, now, deps.write, { includeLoop: config.enabled }))) ?? [];
     for (const p of out.published) {
       if (p.live === 0 && p.failed === 0 && p.denied === 0) continue;
       await say({
@@ -168,8 +170,8 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
     }
   });
 
-  // 4. Dựng lô ngày mai — chỉ khi vòng đang BẬT (buildBatch tự kiểm lại).
-  if (config.enabled) {
+  // 4. Dựng lô ngày mai — chỉ khi vòng đang BẬT và lô hằng ngày CHƯA bị bỏ (`DAILY_BATCH_RETIRED`, chủ shop 26/09/2026).
+  if (config.enabled && (deps.buildDailyBatch ?? !DAILY_BATCH_RETIRED)) {
     out.build = await step("dựng lô", () => buildBatch(db, now, deps.build));
     const bb = out.build;
     if (bb?.batchId && bb.status === "PENDING_APPROVAL" && bb.batchDay) {

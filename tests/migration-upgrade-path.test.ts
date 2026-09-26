@@ -97,6 +97,7 @@ const MOI = [
   "0147_production_topic_files",
   "0148_creative_publish_queue",
   "0149_outreach_broadcast",
+  "0150_creative_campaign_setup",
 ] as const;
 
 /*

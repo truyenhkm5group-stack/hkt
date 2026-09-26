@@ -8,9 +8,10 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenPromoteSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 
 /**
  * ═══════════ VÒNG MẪU — GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ═══════════
@@ -143,37 +144,6 @@ export async function recaptionManualGenImage(raw: unknown): Promise<{ ok: true;
   return { ok: true, headline: r.headline, primaryText: r.primaryText };
 }
 
-export async function promoteManualGenImageAction(raw: unknown): Promise<{ ok: true; batchDay: string; slot: number; names: { campaign: string; adset: string; ad: string }; designCode: string | null; warnings: string[] } | Fail> {
-  const user = await requireUser();
-  if (!can(user, "ideas:write")) return { error: "Không có quyền đưa bài vào lô" };
-  const parsed = manualGenPromoteSchema.safeParse(raw);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const d = parsed.data;
-  const db = await getDb();
-  const actor = await actorOf(user.id, user.email);
-  const { config } = await readCurrentCreativeConfig(db);
-  const r = await promoteManualGenImage(
-    db,
-    { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, predictedSeq: d.predictedSeq },
-    config,
-    actor,
-    new Date(),
-  );
-  if (!r.ok) return { error: r.error };
-  // Giá khác giá ERP (mockup) / giá đề nghị (thiết kế): cảnh báo, không chặn — cùng luật với mẫu tự làm.
-  const warnings = priceWarnings(`${d.headline}\n${d.primaryText}`, r.priceVnd);
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    action: "CREATIVE_MANUAL_GEN_PROMOTED",
-    entity: "CREATIVE_VARIANT",
-    entityId: r.variantId,
-    after: { imageId: d.imageId, batchId: r.batchId, batchDay: r.batchDay, slot: r.slot, nameSeq: r.nameSeq, names: r.names, designCode: r.designCode, warnings },
-  });
-  revalidatePath(PATH);
-  return { ok: true, batchDay: r.batchDay, slot: r.slot, names: r.names, designCode: r.designCode, warnings };
-}
-
 /**
  * "Đăng camp" — ảnh đã duyệt lên Facebook NGAY (chạy ngay hoặc hẹn giờ), không chờ lô 6:00 hôm sau. Mọi luật ở
  * `publishManualGenImageInstant`; action chạy ĐỒNG BỘ (sáu lời gọi Facebook, vài giây) để người bấm thấy ngay
@@ -192,7 +162,7 @@ export async function publishManualGenImageNowAction(
   const { config } = await readCurrentCreativeConfig(db);
   const r = await publishManualGenImageInstant(
     db,
-    { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, predictedSeq: d.predictedSeq, scheduleAt: d.scheduleAt ? new Date(d.scheduleAt) : null },
+    { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, predictedSeq: d.predictedSeq, scheduleAt: d.scheduleAt ? new Date(d.scheduleAt) : null, setup: d.setup },
     config,
     actor,
     new Date(),
@@ -205,7 +175,7 @@ export async function publishManualGenImageNowAction(
     action: "CREATIVE_INSTANT_PUBLISH",
     entity: "CREATIVE_VARIANT",
     entityId: r.variantId,
-    after: { imageId: d.imageId, batchId: r.batchId, batchDay: r.batchDay, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), scheduled: r.scheduled, outcome: r.outcome, detail: r.detail, names: r.names, designCode: r.designCode, warnings },
+    after: { imageId: d.imageId, batchId: r.batchId, batchDay: r.batchDay, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), scheduled: r.scheduled, outcome: r.outcome, detail: r.detail, names: r.names, designCode: r.designCode, setup: d.setup, warnings },
   });
   revalidatePath(PATH);
   return { ok: true, outcome: r.outcome, detail: r.detail, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), names: r.names, designCode: r.designCode, warnings };
@@ -224,7 +194,7 @@ export async function saveManualGenDraftAction(raw: unknown): Promise<{ ok: true
   const d = parsed.data;
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
-  const r = await saveManualGenDraft(db, { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName } }, actor, new Date());
+  const r = await saveManualGenDraft(db, { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, setup: d.setup }, actor, new Date());
   if (!r.ok) return { error: r.error };
   await audit({
     userId: user.id,
@@ -232,7 +202,7 @@ export async function saveManualGenDraftAction(raw: unknown): Promise<{ ok: true
     action: "CREATIVE_MANUAL_GEN_QUEUED",
     entity: "CREATIVE_MANUAL_GEN_IMAGE",
     entityId: d.imageId,
-    after: { headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName } },
+    after: { headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, setup: d.setup ?? null },
   });
   revalidatePath(PATH);
   return { ok: true, queuedAt: r.queuedAt.toISOString() };
@@ -250,4 +220,19 @@ export async function unqueueManualGenDraftAction(raw: unknown): Promise<{ ok: t
   await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_MANUAL_GEN_UNQUEUED", entity: "CREATIVE_MANUAL_GEN_IMAGE", entityId: parsed.data.imageId, after: {} });
   revalidatePath(PATH);
   return { ok: true };
+}
+
+const geoSchema = z.object({ q: z.string().trim().min(2, "Gõ ít nhất 2 ký tự").max(80) }).strict();
+
+/** Tìm tỉnh / thành để nhắm vị trí khi Đăng camp — lời gọi ĐỌC Facebook (không ghi, không tốn tiền). */
+export async function searchGeoAction(raw: unknown): Promise<{ ok: true; hits: GeoSearchHit[] } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Không có quyền" };
+  const parsed = geoSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Đầu vào không hợp lệ" };
+  try {
+    return { ok: true, hits: await searchAdGeoLocations(parsed.data.q) };
+  } catch (e) {
+    return { error: `Không tìm được vị trí trên Facebook: ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
