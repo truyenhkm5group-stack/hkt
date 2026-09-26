@@ -9,6 +9,10 @@ import { IS_MISSING_COGS } from "@/lib/queries/data-quality";
 import { csCustomerCond } from "@/lib/queries/cs";
 import { reconcileOrderNotCreated } from "@/lib/cs/reconcile-order-created";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { MODEL_STATE_LABELS } from "@/lib/constants/model-lifecycle";
+import { LIFECYCLE_EVIDENCE_TEXT } from "@/lib/constants/evidence-gaps";
+import { listLifecycleEvidenceGaps, listLinkableReceipts } from "@/lib/queries/evidence-gaps";
+import { formatDate } from "@/lib/format";
 
 /**
  * ═══════════ ĐẾM CÁC LỖ HỔNG DỮ LIỆU — MỖI PHÉP ĐẾM MỘT LƯỢT ═══════════
@@ -32,6 +36,8 @@ export type DqIssueRow = DqCheckSpec & {
   lastSeen: Date | null;
   /** Vài dòng ví dụ để người nhận việc bắt đầu được ngay, không phải tự đi tìm. */
   sample: string[];
+  /** Ví dụ MỞ ĐƯỢC: mỗi dòng dẫn thẳng tới đúng chỗ sửa (mẫu, phiếu). Rỗng = mục chỉ có ví dụ chữ. */
+  links: { label: string; href: string }[];
   fixable: boolean;
 };
 
@@ -39,12 +45,13 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
   const db = await getDb();
-  return memo("data-quality:issues:v1", 90_000, async () => {
-    const dung = (key: DqCheck, r: { count: number | null; lastSeen?: Date | null; sample?: string[] }): DqIssueRow => ({
+  return memo("data-quality:issues:v2", 90_000, async () => {
+    const dung = (key: DqCheck, r: { count: number | null; lastSeen?: Date | null; sample?: string[]; links?: { label: string; href: string }[] }): DqIssueRow => ({
       ...DQ_CHECK_SPECS[key],
       count: r.count,
       lastSeen: r.lastSeen ?? null,
       sample: r.sample ?? [],
+      links: r.links ?? [],
       fixable: isFixable(DQ_CHECK_SPECS[key].kind),
     });
 
@@ -215,6 +222,11 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       .orderBy(desc(ri.receivedAt))
       .limit(5);
 
+    /* ───── Lời khai ≠ chứng cứ (Agent P2) ─────
+       Hai phép chiếu tính lúc đọc: luật ở lib/constants/evidence-gaps.ts, dữ kiện ở lib/queries/evidence-gaps.ts. */
+    const [khaiKhongChungCu, phieuChuaNoi] = await Promise.all([listLifecycleEvidenceGaps(), listLinkableReceipts()]);
+    const mocKhai = khaiKhongChungCu.map((g) => g.stateChangedAt).filter((x): x is Date => !!x);
+
     return [
       dung("shipment-no-handoff", { count: num(handoff?.n), lastSeen: handoff?.lastSeen ?? null, sample: handoffMau.map((r) => `${r.code ?? "(chưa có mã)"} · ${r.stage}`) }),
       dung("shipment-no-stage-start", {
@@ -251,6 +263,23 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       dung("return-qty-mismatch", { count: Number(doiSoat?.lechSo ?? 0), lastSeen: doiSoat?.lastSeen ?? null, sample: mauTheoNhom(["QUANTITY_CONFLICT", "DUPLICATE_SOURCE_ROW", "CONFLICT"]) }),
       dung("return-duplicate-receipt", { count: trungPhieu.length, sample: trungPhieu.slice(0, 5).map((r) => `${r.shipmentId} · ${r.n} phiếu`) }),
       dung("return-received-without-expected-item", { count: num(muMo?.n), lastSeen: muMo?.lastSeen ?? null, sample: muMoMau.map((r) => `${r.code ?? "(chưa có mã)"}${r.ref ? ` ← gốc ${r.ref}` : ""}`) }),
+      dung("lifecycle-without-evidence", {
+        count: khaiKhongChungCu.length,
+        lastSeen: mocKhai.length ? new Date(Math.max(...mocKhai.map((d) => new Date(d).getTime()))) : null,
+        sample: khaiKhongChungCu.slice(0, 5).map((g) => `${g.code} · khai “${MODEL_STATE_LABELS[g.state]}” · ${LIFECYCLE_EVIDENCE_TEXT[g.missing].missing}`),
+        links: khaiKhongChungCu.slice(0, 5).map((g) => ({ label: `${g.code} — ${LIFECYCLE_EVIDENCE_TEXT[g.missing].action.toLowerCase()} hoặc sửa trạng thái`, href: g.fixStateHref })),
+      }),
+      dung("receipt-linkable-to-po", {
+        count: phieuChuaNoi.length,
+        lastSeen: phieuChuaNoi.length ? new Date(Math.max(...phieuChuaNoi.map((r) => r.receivedAt.getTime()))) : null,
+        sample: phieuChuaNoi
+          .slice(0, 5)
+          .map((r) => `Phiếu ${formatDate(r.receivedAt)}${r.reference ? ` · ${r.reference}` : ""} → ${r.candidates.length === 1 ? `lệnh ${r.candidates[0].code}` : `${r.candidates.length} lệnh ứng viên (${r.candidates.map((c) => c.code).join(", ")}) — người chọn`}`),
+        links: phieuChuaNoi.slice(0, 5).map((r) => ({
+          label: `Phiếu ${formatDate(r.receivedAt)}${r.reference ? ` · ${r.reference}` : ""} → ${r.candidates.length === 1 ? `nối lệnh ${r.candidates[0].code}` : `chọn 1 trong ${r.candidates.length} lệnh`}`,
+          href: `/inventory/receipts?receipt=${encodeURIComponent(r.receiptId)}${r.candidates.length === 1 ? `&po=${encodeURIComponent(r.candidates[0].id)}` : ""}#chi-tiet`,
+        })),
+      }),
     ];
   });
 }

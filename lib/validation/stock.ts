@@ -52,6 +52,13 @@ export type StockReceiptInput = z.infer<typeof stockReceiptSchema>;
 export const RECEIPT_DELETE_REASON_MIN = 5;
 
 /** Xoá phiếu kho: lý do BẮT BUỘC — xoá cứng thì nhật ký là thứ duy nhất còn lại (Company OS · Agent D). */
+/** Nối một phiếu NHẬP HÀNG đã có vào lệnh sản xuất (Agent P2) — người chọn lệnh, máy chủ kiểm qua `validateProductionLink`. */
+export const linkReceiptSchema = z.object({
+  receiptId: z.string().trim().min(1, "Thiếu mã phiếu"),
+  productionOrderId: z.string().trim().min(1, "Chọn lệnh sản xuất"),
+  note: z.string().trim().max(500, "Ghi chú tối đa 500 ký tự").optional(),
+});
+
 export const deleteReceiptSchema = z.object({
   id: z.string().trim().min(1, "Thiếu mã phiếu"),
   reason: z.string().trim().min(RECEIPT_DELETE_REASON_MIN, `Nêu lý do xoá phiếu (ít nhất ${RECEIPT_DELETE_REASON_MIN} ký tự)`).max(500, "Lý do tối đa 500 ký tự"),

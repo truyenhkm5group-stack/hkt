@@ -27,7 +27,7 @@ import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments, type ReturnItemSummary } from "@/lib/queries/data-quality";
 import { getDataQualityIssues } from "@/lib/queries/data-quality-issues";
-import { DQ_SEVERITY_LABEL, DQ_SEVERITY_TONE, UNKNOWN_KIND_HINT, UNKNOWN_KIND_LABEL } from "@/lib/constants/data-quality-issues";
+import { DQ_SEVERITY_LABEL, DQ_SEVERITY_TONE, UNKNOWN_KIND_HINT, UNKNOWN_KIND_LABEL, UNKNOWN_KINDS } from "@/lib/constants/data-quality-issues";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_LABEL, SEVERITY_TONE, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
@@ -183,6 +183,20 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
         description={`${formatNumber(dqIssues.filter((i) => i.fixable && (i.count ?? 0) > 0).length)} nhóm sửa được / ${formatNumber(dqIssues.length)} nhóm đang theo dõi`}
         hint="Sửa được = dữ liệu ĐÃ CÓ nhưng chưa nối, hoặc đường ống chưa chạy lại. Nhóm 'không có chứng cứ' và 'nhiều ứng viên' KHÔNG phải việc phải làm — giữ nguyên là câu trả lời đúng."
       >
+        {/* Đếm theo LOẠI chỗ trống: số nhóm đang có dòng · tổng dòng. `null` (chưa đếm được) không cộng thành 0. */}
+        <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
+          {UNKNOWN_KINDS.map((k) => {
+            const nhom = dqIssues.filter((i) => i.kind === k);
+            const coDong = nhom.filter((i) => (i.count ?? 0) > 0);
+            const chuaDem = nhom.filter((i) => i.count === null).length;
+            return (
+              <span key={k} className="rounded-md border px-2 py-1" title={UNKNOWN_KIND_HINT[k]}>
+                {UNKNOWN_KIND_LABEL[k]}: <b className="tabular-nums">{formatNumber(coDong.length)}</b>/{formatNumber(nhom.length)} nhóm · <b className="tabular-nums">{formatNumber(coDong.reduce((t, i) => t + (i.count ?? 0), 0))}</b> dòng
+                {chuaDem ? ` · ${formatNumber(chuaDem)} chưa đếm được` : ""}
+              </span>
+            );
+          })}
+        </div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -210,6 +224,17 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                     </div>
                     <div className="max-w-[420px] text-[11px] text-muted-foreground">{i.why}</div>
                     {i.sample.length ? <div className="mt-1 max-w-[420px] truncate text-[11px] text-muted-foreground" title={i.sample.join("\n")}>Ví dụ: {i.sample.slice(0, 2).join(" · ")}</div> : null}
+                    {i.links.length ? (
+                      <ul className="mt-1 max-w-[420px] space-y-0.5 text-[11px]">
+                        {i.links.map((l) => (
+                          <li key={l.href} className="truncate">
+                            <Link href={l.href} className="text-primary underline-offset-2 hover:underline">
+                              {l.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </TableCell>
                   {/* `null` = CHƯA ĐẾM ĐƯỢC, khác hẳn 0 = đã đếm và không có gì. */}
                   <TableCell className="text-right align-top tabular-nums font-medium">{formatNumber(i.count)}</TableCell>

@@ -1,4 +1,4 @@
-import type { DepartmentCode } from "@/lib/constants/departments";
+import { TEAM_DEPARTMENT, type DepartmentCode } from "@/lib/constants/departments";
 
 /**
  * ═══════════ SỔ LỖ HỔNG DỮ LIỆU — MỖI DÒNG PHẢI DẪN TỚI MỘT VIỆC LÀM ĐƯỢC ═══════════
@@ -85,6 +85,8 @@ export const DQ_CHECKS = [
   "return-qty-mismatch",
   "return-duplicate-receipt",
   "return-received-without-expected-item",
+  "lifecycle-without-evidence",
+  "receipt-linkable-to-po",
 ] as const;
 export type DqCheck = (typeof DQ_CHECKS)[number];
 
@@ -289,6 +291,46 @@ export const DQ_CHECK_SPECS: Record<DqCheck, DqCheckSpec> = {
     action: "Ở bàn nhận hàng hoàn, gắn tay kiện với đúng đơn (mã gốc của vận đơn chiều về thường lần ra được). Không gắn được thì đếm theo mã hàng đọc trên tem và lập phiếu tái nhập tay có ghi mã vận đơn.",
     owner: "WAREHOUSE",
     href: "/inventory/returns",
+  },
+  /* ═══════════ LỜI KHAI ≠ CHỨNG CỨ (Company OS · Agent P2 — lib/constants/evidence-gaps.ts) ═══════════
+     Đề bài gọi hai mục này là LIFECYCLE_WITHOUT_EVIDENCE và RECEIPT_LINKABLE_TO_PO; khoá ở đây theo
+     cách viết của sổ. Cả hai là PHÉP CHIẾU tính lúc đọc — không dòng nào được lưu, và ERP KHÔNG sửa hộ. */
+  "lifecycle-without-evidence": {
+    key: "lifecycle-without-evidence",
+    label: "Trạng thái vòng đời khai mà ERP không có chứng từ sản xuất",
+    why:
+      "Mẫu khai “Làm mẫu” / “Đang sản xuất” mà ERP không có mẫu xưởng / lệnh SX nào: trang 360, kế hoạch và bàn sản xuất " +
+      "không có gì để đọc, nên việc thật đang diễn ra ở ngoài ERP — hoặc lời khai đã cũ. Đo 26/09/2026: 0 topic · 0 giá thành · " +
+      "0 mẫu · 0 bản duyệt trong khi 7/7 mẫu đã khai trạng thái.",
+    severity: "MEDIUM",
+    // NGƯỜI quyết bên nào đúng: ghi chứng từ vào ERP, hay sửa lời khai. Máy không đổi trạng thái hộ.
+    kind: "AMBIGUOUS",
+    source:
+      "product_models.lifecycle_state (Bàn sản xuất → Đang sản xuất) đối chiếu production_topics · cost_sheets · samples · " +
+      "design_versions · production_orders DRAFT/SENT của sản phẩm (LIFECYCLE_REQUIRED_EVIDENCE)",
+    action:
+      "Mở topic / lập giá thành / ghi mẫu xưởng / duyệt mẫu / lập lệnh SX trong ERP, hoặc sửa trạng thái khai ở trang mẫu. " +
+      "Mẫu đang bán / xả tồn / ngừng KHÔNG bị hỏi — mẫu bán hợp lệ khi không có topic. ERP không tự đổi trạng thái, không tự tạo chứng từ.",
+    // Luật 69: nhóm việc Sản xuất route qua TEAM_DEPARTMENT (hôm nay về Kho — TEAM_DEPARTMENT_DIVERGENCE). Không gõ thẳng phòng.
+    owner: TEAM_DEPARTMENT.PRODUCTION,
+    href: "/models",
+  },
+  "receipt-linkable-to-po": {
+    key: "receipt-linkable-to-po",
+    label: "Phiếu nhập chưa nối mà có lệnh SX đang mở khớp",
+    why:
+      "Phiếu chưa nối thì lệnh vẫn đếm đủ số là “đang sản xuất” trong khi hàng đã nằm trong tồn — kế hoạch SX trừ hai lần và " +
+      "đề xuất đặt thiếu; ô “Đã nhận” của lệnh in —. Đo 26/09/2026: 8 phiếu nhập, 0 phiếu nối lệnh / lô.",
+    severity: "HIGH",
+    kind: "RESOLVABLE",
+    source:
+      "stock_receipts RECEIPT chưa nối (production_order_id, production_batch_id NULL) × stock_receipt_items → product_variants.product_id " +
+      "× production_orders SENT cùng sản phẩm, gửi xưởng không muộn hơn ngày nhận, cùng xưởng khi cả hai biết (matchReceiptToOrders)",
+    action:
+      "Mở phiếu, chọn lệnh ở ô “Nối với lệnh SX” (điền sẵn khi chỉ một lệnh khớp) rồi bấm Nối. Nhiều lệnh khớp thì người chọn — " +
+      "ERP KHÔNG nối hộ. Phiếu không phải hàng của lệnh nào thì để nguyên.",
+    owner: "WAREHOUSE",
+    href: "/inventory/receipts",
   },
 };
 
