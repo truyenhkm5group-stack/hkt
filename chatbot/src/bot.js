@@ -333,6 +333,58 @@ export class Bot {
     return khop ? { code: ma, color: khop, colors: mauPOS } : null;
   }
 
+  /**
+   * Ban tom tat CHOT DON neu mot MAU ma khach CHUA HE chon (mau co >= 2 mau) -> bot tu chon thay khach.
+   * Su co 2026-09-10 (khach Hong Nguyen, page Hai An Fashion): bot hoi "Do Do hay Xanh Reu?", khach khong
+   * tra loi mau ma gui luon can nang + dia chi + SDT, bot chot "Q003 mau Xanh Reu". missingOrderFields chi
+   * kiem SDT/dia chi/nguoi nhan nen khong chan duoc.
+   * Mau duoc coi la KHACH DA CHON khi: tin cua khach nhac ten mau (ca ten day du, hoac mot tu RIENG cua mau
+   * do ma cac mau khac khong co, vd "xanh" khi chi co Do Do / Xanh Reu), hoac anh khach gui nhan dien ra mau do.
+   * Tra ve { code, color, colors } neu phat hien, null neu khong.
+   */
+  unconfirmedColorInSummary(reply, pageId, messages, visionColor = "") {
+    const t = String(reply || "");
+    if (!isOrderSummaryReply(t, false)) return null;
+    const eff = settings.effective(pageId);
+    const ma = String((t.match(/\bQ\d{3}\b/i) || [])[0] || eff.defaultProduct || "").toUpperCase();
+    if (!ma) return null;
+    const sp = catalog.products.find((p) => String(p.code || "").toUpperCase() === ma);
+    if (!sp) return null;
+    const mauPOS = [...new Set((sp.variations || []).map((v) => v.fields?.["Màu"]).filter(Boolean))];
+    if (mauPOS.length < 2) return null; // chi co 1 mau thi khong co gi de chon
+    const phang = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/\s+/g, "");
+    // Mau bot dua vao tom tat: uu tien ten dai nhat khop (tranh "Do" an vao "Do Do")
+    const mauChot = [...mauPOS].sort((a, b) => b.length - a.length).find((c) => phang(t).includes(phang(c)));
+    if (!mauChot) return null;
+    const tinKhach = (messages || [])
+      .filter((m) => !this.isFromPage(m, pageId))
+      .map((m) => String(this.messageText(m) || ""))
+      .join("\n");
+    const nguon = `${tinKhach}\n${visionColor || ""}`;
+    if (phang(nguon).includes(phang(mauChot))) return null;
+    // Tu RIENG cua mau: giu dau (so khop co dau) de "đỏ" khong trung "do/đó"
+    const tu = (s) => String(s || "").toLowerCase().normalize("NFC").split(/[^\p{L}]+/u).filter((w) => w.length >= 2);
+    const tuMauKhac = new Set(mauPOS.filter((c) => c !== mauChot).flatMap(tu));
+    const tuRieng = tu(mauChot).filter((w) => !tuMauKhac.has(w));
+    const tuKhach = new Set(tu(nguon));
+    if (tuRieng.some((w) => tuKhach.has(w))) return null;
+    return { code: ma, color: mauChot, colors: mauPOS };
+  }
+
+  /** Cau hoi mau mac dinh khi bot van tu chon mau sau khi da bat viet lai */
+  askColorReply(pageId, colors) {
+    const eff = settings.effective(pageId);
+    const xung = eff.customerTitle || "chị";
+    const Xung = xung[0].toUpperCase() + xung.slice(1);
+    return `Dạ em đã ghi nhận thông tin nhận hàng của ${xung} rồi ạ ❤️ ${Xung} lấy màu ${colors.join(" hay ")} để em lên đơn cho mình ạ?`;
+  }
+
   /** Khach hoi ve tinh trang giao hang cua don da dat */
   isOrderStatusQuestion(text) {
     return /gửi hàng|giao hàng|gửi chưa|giao chưa|đi chưa|bao giờ (nhận|tới|đến|có|về)|khi nào (nhận|tới|đến|về)|mấy ngày (nhận|tới|về)|đơn (tới|đến|về|của)|hàng (tới|đến|về)|tới đâu|đến đâu|vận đơn|mã đơn|tra cứu|shipper|bưu tá|ship (chưa|tới|đến)/i.test(String(text || ""));
@@ -1165,6 +1217,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
 
     // Khach vua gui anh -> nhan dien rieng (so voi anh POS) roi bao ket qua cho luot tra loi, de bot khong doan bua
     let maNhanDien = "";
+    let mauNhanDien = "";
     const lastUser = history[history.length - 1];
     if (config.vision.enabled && lastUser?.role === "user" && lastUser.images?.length) {
       try {
@@ -1174,6 +1227,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
           : `KHÔNG KHỚP mẫu nào của shop (độ tin cậy: ${idr.confidence})`;
         systemPrompt += `\n\n## Kết quả nhận diện ảnh khách vừa gửi (hệ thống đã so với ảnh POS)\n- ${verdict}\n- ${idr.matched ? `Hãy tư vấn/báo giá đúng mẫu ${idr.code}${idr.color ? " màu " + idr.color : ""} và gửi ảnh đúng màu đó.` : `Ảnh này KHÔNG phải mẫu shop đang bán: nói rõ shop hết/không có mẫu này, KHÔNG được báo giá hay gửi ảnh như thể là mẫu của shop, rồi gửi tổng hợp mọi mẫu đang có bằng [[IMG:ALL]] theo mục "Khi khách gửi ảnh mẫu shop KHÔNG có".`}`;
         if (idr.matched && idr.code) maNhanDien = idr.code;
+        if (idr.matched && idr.color) mauNhanDien = idr.color;
         log.info(`[${pageId}] ${conversationId}: nhan dien anh -> ${verdict}`);
       } catch (e) {
         log.warn(`[${pageId}] Nhan dien anh loi: ${e.message}`);
@@ -1258,6 +1312,19 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
         reply = `Dạ mình cho em xin ${thieu.join(" và ")} để em lên đơn gửi hàng cho mình nha ❤️`;
         log.warn(`[${pageId}] Viet lai van thieu -> dung cau hoi xin thong tin mac dinh`);
       }
+    }
+    // Chan chot don voi MAU khach chua chon (bot tu chon mau thay khach)
+    const mauChuaChon = this.unconfirmedColorInSummary(reply, pageId, messages, mauNhanDien);
+    if (mauChuaChon) {
+      log.warn(`[${pageId}] ${conversationId}: ban chot don ghi mau "${mauChuaChon.color}" nhung khach CHUA chon mau (${mauChuaChon.code}: ${mauChuaChon.colors.join(", ")}) -> bat hoi mau`);
+      store.bumpStat(pageId, "colorChoiceGuard");
+      const r4 = await generateReply(
+        systemPrompt +
+          `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nCâu trả lời trước là bản tóm tắt chốt đơn ghi màu "${mauChuaChon.color}", nhưng khách CHƯA HỀ chọn màu. Mẫu ${mauChuaChon.code} có các màu: ${mauChuaChon.colors.join(", ")}. TUYỆT ĐỐI không tự chọn màu thay khách và KHÔNG gửi bản tóm tắt chốt đơn. Hãy viết lại: cảm ơn khách đã gửi thông tin, rồi hỏi khách lấy màu nào trong các màu trên. Ngắn gọn, thân thiện.`,
+        history,
+        { model: eff.model, temperature: 0.2 }
+      );
+      reply = r4.text && !this.unconfirmedColorInSummary(r4.text, pageId, messages, mauNhanDien) && !isOrderSummaryReply(r4.text, false) ? r4.text : this.askColorReply(pageId, mauChuaChon.colors);
     }
     if (reply.includes(HANDOFF)) {
       handoff = true;

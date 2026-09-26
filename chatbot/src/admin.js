@@ -363,6 +363,16 @@ Câu trả lời trước là bản tóm tắt chốt đơn nhưng còn TRỐNG:
           );
           text = missingOrderFields(r2.text).length ? `Dạ mình cho em xin ${thieu.join(" và ")} để em lên đơn gửi hàng cho mình nha ❤️` : r2.text;
         }
+        // Chan chot don voi mau khach chua chon, giong het luong chat that
+        const mauChuaChon = bot.unconfirmedColorInSummary(text, p.id, msTest);
+        if (mauChuaChon) {
+          const r4 = await generateReply(
+            sys + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nCâu trả lời trước là bản tóm tắt chốt đơn ghi màu "${mauChuaChon.color}", nhưng khách CHƯA HỀ chọn màu. Mẫu ${mauChuaChon.code} có các màu: ${mauChuaChon.colors.join(", ")}. TUYỆT ĐỐI không tự chọn màu thay khách và KHÔNG gửi bản tóm tắt chốt đơn; hãy hỏi khách lấy màu nào.`,
+            history,
+            { model: eff.model, temperature: 0.2 }
+          );
+          text = r4.text && !bot.unconfirmedColorInSummary(r4.text, p.id, msTest) && !isOrderSummaryReply(r4.text, false) ? r4.text : bot.askColorReply(p.id, mauChuaChon.colors);
+        }
         // Chot chan gia giong luong chat that (ke ca mau khong thuoc dot xa kho)
         const ctxGia = { customerName: body.customerName || "Khách test", type: "INBOX" };
         const ref = bot.priceReferenceFor(p.id, text, sys, saleActive, ctxGia);
