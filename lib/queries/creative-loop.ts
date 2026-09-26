@@ -7,6 +7,7 @@ import {
   variantRuleSet,
   type BatchStatus,
   type ConfigProblem,
+  type CreativeBatchKind,
   type CreativeLoopConfig,
   type CreativeRule,
   type CreativeSourceKind,
@@ -338,6 +339,8 @@ export function sameRule(a: CreativeRule, b: CreativeRule): boolean {
 export type BatchSummary = {
   id: string;
   batchDay: string;
+  /** `LOOP` = lô hằng ngày · `INSTANT` = một bài "Đăng camp" (ngay / hẹn giờ). */
+  kind: CreativeBatchKind;
   status: BatchStatus;
   slotCount: number;
   startAt: string;
@@ -545,6 +548,7 @@ function toBatchSummary(b: BatchRow, counts: Partial<Record<VariantStatus, numbe
   return {
     id: b.id,
     batchDay: b.batchDay,
+    kind: b.kind === "INSTANT" ? "INSTANT" : "LOOP",
     status: b.status as BatchStatus,
     slotCount: b.slotCount,
     startAt: isoReq(b.startAt),
@@ -746,7 +750,7 @@ export async function getPendingBatch(db: Db): Promise<PendingBatch | null> {
   const [b] = await db
     .select()
     .from(schema.creativeBatches)
-    .where(inArray(schema.creativeBatches.status, ["PENDING_APPROVAL", "PLANNED"]))
+    .where(and(inArray(schema.creativeBatches.status, ["PENDING_APPROVAL", "PLANNED"]), eq(schema.creativeBatches.kind, "LOOP")))
     .orderBy(desc(schema.creativeBatches.batchDay))
     .limit(1);
   if (!b) return null;
@@ -798,7 +802,7 @@ export async function getBatchDetail(db: Db, batchId: string, now: Date = new Da
 /** Các lô gần nhất (mới → cũ) kèm số mẫu theo trạng thái. */
 export async function listRecentBatches(db: Db, limit = 14): Promise<BatchSummary[]> {
   const n = Math.max(1, Math.min(200, Math.round(limit)));
-  const rows = await db.select().from(schema.creativeBatches).orderBy(desc(schema.creativeBatches.batchDay)).limit(n);
+  const rows = await db.select().from(schema.creativeBatches).orderBy(desc(schema.creativeBatches.batchDay), desc(schema.creativeBatches.startAt)).limit(n);
   const counts = await variantCountsByBatch(
     db,
     rows.map((r) => r.id),

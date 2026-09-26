@@ -240,7 +240,7 @@ export async function testCreativeManualDesignDb(db: Db) {
       assert.match(s1b.error, /mới lạ/, `không lập thêm được thì nói ra, không vẽ lại thiết kế cũ (nhận: ${s1b.error})`);
     }
 
-    const d1 = await drawManualGen(db, { genId: s1.genId, imageClient, config: cfg });
+    const d1 = await drawManualGen(db, { genId: s1.genId, imageClient });
     assert.equal(d1.drawn, s1.allowed);
     assert.ok(seen.length > 0 && seen.every((k) => k.length >= 1 && k.length <= MANUAL_DESIGN.refPhotos && k.every((kind) => kind === "PRODUCT_PHOTO")), "máy vẽ chỉ nhận ẢNH SẢN PHẨM THẬT của mã cha — không quảng cáo cũ, không spy");
 

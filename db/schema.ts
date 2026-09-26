@@ -3317,6 +3317,12 @@ export const creativeBatches = pgTable(
     id: id(),
     /** Ngày CHẠY, giờ Việt Nam (`YYYY-MM-DD`). */
     batchDay: text("batch_day").notNull(),
+    /**
+     * `CreativeBatchKind` (migration 0145): `LOOP` = lô hằng ngày, MỘT lô mỗi ngày chạy (chỉ mục duy nhất
+     * từng phần bên dưới); `INSTANT` = MỘT bài người bấm "Đăng camp" (ngay / hẹn giờ) — nhiều lô mỗi ngày,
+     * khung giờ do người chọn, người bấm chính là lượt duyệt.
+     */
+    kind: text("kind").notNull().default("LOOP"),
     status: text("status").notNull().default("PLANNED"),
     slotCount: integer("slot_count").notNull().default(0),
     startAt: ts("start_at").notNull(),
@@ -3338,8 +3344,10 @@ export const creativeBatches = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("creative_batches_day_uq").on(t.batchDay),
+    // Một lô HẰNG NGÀY mỗi ngày chạy; lô đăng lẻ (`INSTANT`) không chung khoá này.
+    uniqueIndex("creative_batches_day_uq").on(t.batchDay).where(sql`${t.kind} = 'LOOP'`),
     index("creative_batches_status_idx").on(t.status),
+    check("creative_batches_kind_check", sql`${t.kind} IN ('LOOP', 'INSTANT')`),
     check("creative_batches_status_check", sql`${t.status} IN ('PLANNED', 'PENDING_APPROVAL', 'APPROVED', 'PUBLISHED', 'EXPIRED', 'REJECTED', 'FAILED')`),
     check("creative_batches_day_format_check", sql`${t.batchDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
     // Không có lô nào được ĐĂNG mà không có dấu duyệt — ràng buộc ở CSDL, không chỉ ở mã.
@@ -3697,6 +3705,13 @@ export const creativeManualGens = pgTable(
     kind: text("kind").notNull().default("MOCKUP"),
     /** Lượt `DESIGN`: các mã bán tốt người chọn làm cảm hứng (theo thứ tự người chọn). */
     inspirationProductIds: text("inspiration_product_ids").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * Ảnh đầu vào NGƯỜI TẢI LÊN ngay trong khối gen tay (migration 0145, chủ shop 26/09/2026) — `creative_images.id`,
+     * gửi máy vẽ KÈM ảnh sản phẩm thật (không thay nó: ranh giới 3 vẫn cần một ảnh sản phẩm thật). Chỉ đường ghi
+     * của nút bấm điền cột này, cùng lúc lưu điểm ảnh — không nhận id ảnh có sẵn từ trình duyệt, để không ai
+     * trỏ được một ảnh spy vào máy vẽ.
+     */
+    uploadImageIds: text("upload_image_ids").array().notNull().default(sql`'{}'::text[]`),
     idea: text("idea").notNull().default(""),
     requested: integer("requested").notNull(),
     model: text("model").notNull(),

@@ -479,7 +479,10 @@ export const CREATIVE_HARD_LIMITS = {
   maxExtensionPerClickVnd: 200_000,
   /** Tổng tiền "tiêu thêm" được bấm trong một ngày, toàn shop. Chủ shop chốt 24/09/2026: 1.000.000đ (≤ 5 lượt). */
   maxDailyExtensionVnd: 1_000_000,
-  /** Số ảnh sinh tối đa trong một ngày — kể cả ảnh sinh lại. Chặn một vòng lặp hỏng đốt credit. */
+  /**
+   * Số ảnh sinh tối đa trong một ngày CỦA LÔ HẰNG NGÀY — kể cả ảnh sinh lại. Chặn một vòng lặp hỏng đốt credit.
+   * Ảnh gen tay không tính vào đây (chủ shop 26/09/2026 gỡ trần gen tay — xem `MANUAL_GEN_RUN`).
+   */
   maxImagesPerDay: 30,
   /**
    * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD, và GIỮ NGUYÊN khi chuyển sang
@@ -1434,14 +1437,53 @@ export const CAMPAIGN_NAME_MAX_CHARS = 255;
 // ───────────────────────────── GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ─────────────────────────────
 
 /**
- * `imagesPerRun` — MỖI LẦN BẤM sinh đúng bấy nhiêu ảnh (chủ shop chốt: 10). Tính vào CÙNG trần ảnh / ngày
- * (`maxImagesPerDay`, `imageDailyCapUsd`) với lô hằng ngày — sổ đếm chung là `imageSpendToday`.
+ * `imagesPerRun` — số ảnh CHỌN SẴN của mỗi lần bấm (chủ shop chốt: 10); người đổi được trong khoảng
+ * `MANUAL_GEN_RUN.minImagesPerRun…maxImagesPerRun` (chủ shop 26/09/2026). KHÔNG còn tính vào trần ảnh / ngày
+ * của lô hằng ngày — xem `MANUAL_GEN_RUN`.
  * `drawPerTick` — lượt vòng mẫu vẽ nốt tối đa bấy nhiêu ảnh (lượt `after()` của nút bấm vẽ trước).
  * `staleDrawMinutes` — ảnh "đang vẽ" quá bấy nhiêu phút ⇒ tiến trình đã chết giữa chừng ⇒ KHÔNG vẽ lại
  * (OpenAI có thể đã tính tiền) mà đánh lỗi có lý do.
  * `ideaMaxChars` — ô ý tưởng tự do.
  */
 export const MANUAL_GEN = { imagesPerRun: 10, drawPerTick: 4, staleDrawMinutes: 15, ideaMaxChars: 1000 } as const;
+
+/**
+ * Gen tay KHÔNG CÒN TRẦN ẢNH / NGÀY (chủ shop 26/09/2026: "gỡ giới hạn trong phần gen ảnh, thêm tính tiền trên
+ * mỗi lượt gen và mỗi ảnh"). Thay cho trần là hai thứ người bấm thấy TRƯỚC khi bấm: số ảnh do chính họ chọn
+ * (`minImagesPerRun`…`maxImagesPerRun`) và tiền ước tính của lượt ấy; sau khi vẽ là tiền THẬT từng ảnh và cả lượt.
+ * Trần ngày của LÔ hằng ngày (`maxImagesPerDay` / `maxImageUsdPerDay`) vẫn giữ và chỉ đếm ảnh CỦA LÔ — gen tay
+ * không ăn vào chỗ của lô, nếu không một buổi gen tay nhiều làm lô ngày mai thiếu ảnh.
+ *
+ * `maxImagesPerRun` là TRẦN CỦA MỘT LẦN BẤM, không phải trần ngày: chặn một lần gõ nhầm 200 thành một hoá đơn,
+ * không chặn người bấm tiếp. `maxUploads`: ảnh đầu vào người tải lên ngay trong khối gen tay (đã thu nhỏ ở trình
+ * duyệt — 4 × 1,4 MB base64 vẫn dưới trần 8 MB của server action).
+ */
+export const MANUAL_GEN_RUN = { minImagesPerRun: 1, maxImagesPerRun: 20, maxUploads: 4 } as const;
+
+/** Tiền USD quy ra đồng — hàm THUẦN. `null` (CHƯA BIẾT) giữ nguyên `null`, không thành 0 (mục 42). */
+export function usdToVndRounded(usd: number | null, rate: number): number | null {
+  return usd === null || !Number.isFinite(usd) || !Number.isFinite(rate) || rate <= 0 ? null : Math.round(usd * rate);
+}
+
+/**
+ * ĐĂNG CAMP LẺ — "bấm Đăng camp là camp lên ngay, hoặc hẹn giờ chạy" (chủ shop 26/09/2026).
+ *
+ * Mỗi lần bấm là MỘT lô riêng loại `INSTANT` chỉ chứa đúng một bài (`creative_batches.kind`, migration 0145):
+ * cùng phiếu duyệt / digest, cùng cổng ghi, cùng bốn lớp chặn tiêu quá (ngân sách trọn đời · `end_time` ·
+ * trần cam kết / ngày · công tắc khẩn) với lô hằng ngày — chỉ khác là người bấm CHÍNH LÀ lượt duyệt, và
+ * khung giờ do người chọn thay vì 6:00 hôm sau.
+ *
+ *  · `leadSeconds` — "chạy ngay" = `start_time` sau lúc bấm từng này giây: đủ cho sáu lời gọi Facebook đi
+ *    xong TRƯỚC giờ chạy (cổng chặn mọi lời gọi tạo sau `start_at`), đủ ngắn để người đọc là "ngay".
+ *  · `minScheduleLeadMinutes` / `maxScheduleDays` — hẹn giờ phải sau lúc bấm ít nhất từng ấy phút và không
+ *    quá từng ấy ngày. Hẹn giờ vẫn ĐĂNG LÊN FACEBOOK NGAY lúc bấm với `start_time` = giờ hẹn: Facebook tự giữ
+ *    lịch, nên ERP có chết lúc tới giờ thì camp vẫn chạy đúng giờ và vẫn tự dừng ở `end_time`.
+ */
+export const INSTANT_PUBLISH = { leadSeconds: 120, minScheduleLeadMinutes: 5, maxScheduleDays: 30 } as const;
+
+/** Loại lô: `LOOP` = lô hằng ngày (một lô một ngày chạy) · `INSTANT` = một bài người bấm "Đăng camp". */
+export const CREATIVE_BATCH_KINDS = ["LOOP", "INSTANT"] as const;
+export type CreativeBatchKind = (typeof CREATIVE_BATCH_KINDS)[number];
 
 /**
  * Kiểu một lượt gen tay (migration 0143). `DESIGN` là mặc định của khối gen tay (chủ shop 25/09/2026: "gen
@@ -1479,5 +1521,5 @@ export const MANUAL_GEN_IMAGE_STATUS_LABEL: Record<ManualGenImageStatus, string>
   GEN_FAILED: "Vẽ lỗi",
   APPROVED: "Đã duyệt — soạn bài",
   REJECTED: "Đã loại",
-  PROMOTED: "Đã vào lô",
+  PROMOTED: "Đã vào lô / đã đăng",
 };

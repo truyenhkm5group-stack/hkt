@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
@@ -139,8 +139,9 @@ async function readConfig(db: Db): Promise<CreativeLoopConfig> {
   return normalizeCreativeConfig(raw).config;
 }
 
+/** Lô HẰNG NGÀY của một ngày chạy — lô đăng lẻ (`INSTANT`) cùng ngày không phải lô của vòng. */
 async function batchByDay(db: Db, batchDay: string): Promise<BatchRow | null> {
-  const [b] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, batchDay)).limit(1);
+  const [b] = await db.select().from(schema.creativeBatches).where(and(eq(schema.creativeBatches.batchDay, batchDay), eq(schema.creativeBatches.kind, "LOOP"))).limit(1);
   return b ?? null;
 }
 
@@ -286,7 +287,7 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
         configSnapshot: cfg as unknown as Record<string, unknown>,
         ruleVersion: CREATIVE_RULE_VERSION,
       })
-      .onConflictDoNothing({ target: schema.creativeBatches.batchDay })
+      .onConflictDoNothing({ target: schema.creativeBatches.batchDay, where: sql`${schema.creativeBatches.kind} = 'LOOP'` })
       .returning();
     if (!b) return null;
     const n = await insertComposed(tx, b.id, plan.slots);
@@ -302,12 +303,12 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
 }
 
 /**
- * Số ảnh đã sinh + USD đã chi cho sinh ảnh trong ngày Việt Nam chứa `now` — SỔ ĐẾM DUY NHẤT của trần ảnh /
- * ngày, cho cả lô hằng ngày lẫn GEN TAY (§5i). Hai nguồn, không đếm trùng:
- *  · ảnh của mẫu trong lô (`creative_variants`) — TRỪ ảnh đến từ gen tay (đã đếm ở vế sau, lúc được vẽ);
- *  · ảnh gen tay (`creative_manual_gen_images`), cộng các ảnh ĐANG VẼ (chưa có điểm ảnh, đã giữ chỗ trong
- *    ngày) theo giá ước tính — một lượt vẽ song song không được tiêu phần tiền ảnh đang vẽ sẽ tiêu.
- * (Mẫu tự làm tải tay có `gen_cost_usd` rỗng nên vẫn tính theo giá ước tính — hành vi cũ, giữ nguyên.)
+ * Số ảnh đã sinh + USD đã chi cho sinh ảnh CỦA LÔ HẰNG NGÀY trong ngày Việt Nam chứa `now` — SỔ ĐẾM DUY NHẤT
+ * của trần ảnh / ngày của lô. Ảnh của mẫu trong lô (`creative_variants`) TRỪ ảnh đến từ gen tay: chủ shop
+ * 26/09/2026 gỡ trần gen tay, nên gen tay không còn ăn vào chỗ của lô (trước đó hai bên chung một sổ, và một
+ * buổi gen tay nhiều làm lô ngày mai "chạm trần" — xem `MANUAL_GEN_RUN`). Tiền gen tay đo riêng ở
+ * `manualGenSpendToday`. (Mẫu tự làm tải tay có `gen_cost_usd` rỗng nên vẫn tính theo giá ước tính — hành
+ * vi cũ, giữ nguyên.)
  */
 export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): Promise<{ images: number; usd: number }> {
   const from = dauNgayVN(now);
@@ -324,6 +325,19 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
     .from(v)
     .innerJoin(img, eq(img.id, v.imageId))
     .where(and(gte(img.createdAt, from), lt(img.createdAt, to), sql`not exists (select 1 from ${g} where ${g.imageId} = ${v.imageId})`));
+  // Ảnh chưa định giá được (không có `usage`) tính theo giá ƯỚC TÍNH — với một cái phanh, CHƯA BIẾT
+  // phải nghiêng về phía chặn sớm, không phải phía coi như miễn phí.
+  return { images: Number(r?.images ?? 0), usd: Number(r?.usd ?? 0) + Number(r?.unpriced ?? 0) * unpricedUsd };
+}
+
+/**
+ * Tiền GEN TAY trong ngày Việt Nam chứa `now` — để HIỂN THỊ, không để chặn. `usd` chỉ cộng ảnh có giá thật
+ * (máy vẽ trả `usage`); ảnh đã vẽ mà không có giá đếm riêng ở `unpriced` — CHƯA BIẾT, không phải 0 (mục 42).
+ */
+export async function manualGenSpendToday(db: Db, now: Date): Promise<{ images: number; usd: number; unpriced: number }> {
+  const from = dauNgayVN(now);
+  const to = new Date(from.getTime() + 24 * 3_600_000);
+  const g = schema.creativeManualGenImages;
   const [m] = await db
     .select({
       images: sql<number>`count(*)::int`,
@@ -331,18 +345,8 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
       unpriced: sql<number>`count(*) filter (where nullif(${g.costUsd}, '') is null)::int`,
     })
     .from(g)
-    .leftJoin(img, eq(img.id, g.imageId))
-    .where(
-      or(
-        and(gte(img.createdAt, from), lt(img.createdAt, to)),
-        and(eq(g.status, "DRAWING"), gte(g.claimedAt, from), lt(g.claimedAt, to)),
-      ),
-    );
-  // Ảnh chưa định giá được (không có `usage`) tính theo giá ƯỚC TÍNH — với một cái phanh, CHƯA BIẾT
-  // phải nghiêng về phía chặn sớm, không phải phía coi như miễn phí.
-  const images = Number(r?.images ?? 0) + Number(m?.images ?? 0);
-  const usd = Number(r?.usd ?? 0) + Number(m?.usd ?? 0) + (Number(r?.unpriced ?? 0) + Number(m?.unpriced ?? 0)) * unpricedUsd;
-  return { images, usd };
+    .where(and(isNotNull(g.drawnAt), gte(g.drawnAt, from), lt(g.drawnAt, to)));
+  return { images: Number(m?.images ?? 0), usd: Number(m?.usd ?? 0), unpriced: Number(m?.unpriced ?? 0) };
 }
 
 /**

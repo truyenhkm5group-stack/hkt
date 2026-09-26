@@ -356,7 +356,14 @@ function HistoryTable({ rows, openId }: { rows: BatchSummary[]; openId: string |
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className={cn("border-b border-hairline last:border-b-0", openId === r.id && "bg-muted/40")}>
-                  <td className="whitespace-nowrap px-4 py-2 font-medium">{formatDate(r.batchDay)}</td>
+                  <td className="whitespace-nowrap px-4 py-2 font-medium">
+                    {formatDate(r.batchDay)}
+                    {r.kind === "INSTANT" ? (
+                      <span className="ml-1.5 rounded bg-brand/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-brand" title={`Đăng camp lẻ — chạy từ ${vnShortStamp(r.startAt)}`}>
+                        Đăng lẻ {vnShortStamp(r.startAt)}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2">
                     <BatchStatusChip status={r.status} />
                   </td>
@@ -545,7 +552,7 @@ export async function ApproveTab({
       )}
 
       <div id="gen-tay" className="scroll-mt-4">
-        <ManualGenPanel canEdit={canEdit} preselectProductId={preselectProductId} />
+        <ManualGenPanel canEdit={canEdit} canPublish={canEdit && canApprove} preselectProductId={preselectProductId} />
       </div>
 
       {batchId && !detail ? <EmptyState title="Không tìm thấy lô" description="Lô trong đường dẫn không còn tồn tại." /> : null}

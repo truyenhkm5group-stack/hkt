@@ -92,6 +92,7 @@ const MOI = [
   "0142_company_os_unidentified_dispositions",
   "0143_creative_manual_gen_design",
   "0144_company_os_unidentified_identify",
+  "0145_creative_instant_publish",
 ] as const;
 
 /*

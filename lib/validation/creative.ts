@@ -8,6 +8,7 @@ import {
   CAMPAIGN_NAME_MAX_CHARS,
   MANUAL_DESIGN,
   MANUAL_GEN,
+  MANUAL_GEN_RUN,
   MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
@@ -151,11 +152,27 @@ export const variantSelectionSchema = z
   .strict();
 
 /** Bấm "Gen ảnh": ảnh sản phẩm thật (bắt buộc) + quảng cáo cũ cùng mã (tuỳ chọn) + ý tưởng tự do (tuỳ chọn). */
+/** Số ảnh một lần bấm — người chọn trong khoảng min…max (chủ shop 26/09/2026). */
+const runCount = z
+  .number()
+  .int("Số ảnh phải là số nguyên")
+  .min(MANUAL_GEN_RUN.minImagesPerRun, `Ít nhất ${MANUAL_GEN_RUN.minImagesPerRun} ảnh mỗi lượt`)
+  .max(MANUAL_GEN_RUN.maxImagesPerRun, `Tối đa ${MANUAL_GEN_RUN.maxImagesPerRun} ảnh mỗi lượt`)
+  .default(MANUAL_GEN.imagesPerRun);
+
+/** Ảnh đầu vào người tải lên ngay trong khối gen tay (đã thu nhỏ ở trình duyệt, base64 không tiền tố). */
+const runUploads = z
+  .array(z.string().min(1).max(IDEA_IMAGE_MAX_BASE64, "Ảnh tải lên quá lớn — thu nhỏ trước khi tải").regex(BASE64, "Dữ liệu ảnh tải lên không hợp lệ"))
+  .max(MANUAL_GEN_RUN.maxUploads, `Tải lên tối đa ${MANUAL_GEN_RUN.maxUploads} ảnh đầu vào mỗi lượt`)
+  .default([]);
+
 export const manualGenStartSchema = z
   .object({
     productPhotoSourceId: z.string().trim().min(1, "Chọn ảnh sản phẩm thật làm gốc"),
     ownAdSourceId: z.string().trim().max(200).default(""),
     idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
+    count: runCount,
+    uploads: runUploads,
   })
   .strict();
 
@@ -167,6 +184,8 @@ export const manualDesignStartSchema = z
       .min(1, "Chọn ít nhất một mẫu bán tốt làm cảm hứng")
       .max(MANUAL_DESIGN.maxInspirations, `Chọn tối đa ${MANUAL_DESIGN.maxInspirations} mẫu cảm hứng mỗi lượt`),
     idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
+    count: runCount,
+    uploads: runUploads,
   })
   .strict();
 
@@ -187,6 +206,14 @@ export const manualGenPromoteSchema = z
     predictedSeq: z.number().int().positive().nullable().default(null),
   })
   .strict();
+
+/**
+ * "Đăng camp" một ảnh gen tay đã duyệt — cùng câu chữ + ba tên với "Đưa vào lô", thêm giờ chạy: `null` = chạy
+ * ngay; chuỗi ISO có múi giờ = hẹn giờ (máy chủ kiểm khoảng hợp lệ ở `instantWindow`).
+ */
+export const manualGenInstantSchema = manualGenPromoteSchema.extend({
+  scheduleAt: z.string().datetime({ offset: true, message: "Giờ hẹn không hợp lệ" }).nullable().default(null),
+});
 
 /**
  * Công tắc "Chạy mockup hằng ngày" trên thẻ nguồn (tab Nguồn ảnh). `kind = SOURCE` ⇒ id nguồn `OWN_AD`;
