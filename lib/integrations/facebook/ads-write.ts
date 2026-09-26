@@ -134,6 +134,27 @@ async function graphGet(path: string, params: Record<string, string>): Promise<G
   return rec;
 }
 
+/**
+ * LỖI FACEBOOK ĐÃ BIẾT ⇒ VIỆC PHẢI LÀM. Khoá = `error_subcode` Facebook trả về. Chỉ khai mã đã GẶP THẬT và đã rõ cách sửa.
+ *  · 1885183 — "Bài viết chứa nội dung quảng cáo do ứng dụng đang ở chế độ phát triển tạo" (26/09/2026, lần Đăng camp đầu
+ *    tiên): ứng dụng Facebook cấp token cho ERP còn ở chế độ Development ⇒ Facebook không cho tạo bài quảng cáo. Sửa ở phía
+ *    Meta, không sửa được bằng mã: bật App Mode = Live.
+ */
+export const FB_ERROR_HINTS: Readonly<Record<string, string>> = {
+  "1885183":
+    "Việc cần làm: ứng dụng Facebook cấp token cho ERP đang ở chế độ PHÁT TRIỂN (Development) nên Facebook không cho tạo bài quảng cáo. Vào developers.facebook.com → My Apps → chọn ứng dụng của token → bật App Mode sang LIVE (cần có Privacy Policy URL, danh mục, biểu tượng), rồi bấm Đăng camp lại.",
+};
+
+/** Câu lỗi của một lời gọi Facebook + chỉ dẫn nếu là mã đã biết. Hàm THUẦN (đọc thân phản hồi nằm trong lỗi). */
+export function facebookErrorText(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const body = e instanceof IntegrationError ? e.body : null;
+  const err = body && typeof body === "object" ? (body as { error?: Record<string, unknown> }).error : null;
+  const sub = err && err.error_subcode !== undefined && err.error_subcode !== null ? String(err.error_subcode) : "";
+  const hint = sub ? FB_ERROR_HINTS[sub] : undefined;
+  return hint ? `${msg} ${hint}` : msg;
+}
+
 import type { GeoSearchHit } from "@/lib/constants/campaign-setup";
 export type { GeoSearchHit };
 
@@ -179,7 +200,8 @@ async function graphPost(path: string, fields: Record<string, string>): Promise<
   const rec = (body ?? {}) as GraphRecord;
   if (rec.error) {
     const e = rec.error as GraphRecord;
-    throw new IntegrationError(`Facebook: ${String(e.message ?? "lỗi không xác định")}`, 400, false, body);
+    const nguoi = [e.error_user_title, e.error_user_msg].filter((x): x is string => typeof x === "string" && x !== "").join(" — ");
+    throw new IntegrationError(`Facebook: ${nguoi || String(e.message ?? "lỗi không xác định")}`, 400, false, body);
   }
   return rec;
 }

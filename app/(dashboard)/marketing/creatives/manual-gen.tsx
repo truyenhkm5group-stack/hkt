@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { publishManualGenImageNowAction, recaptionManualGenImage, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
+import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
 import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, describeCampaignSetup, type CampaignSetup, type GeoSearchHit } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
@@ -426,12 +426,12 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             {MANUAL_GEN_IMAGE_STATUS_LABEL[img.status]}
           </div>
         ) : (
-          <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={`Ảnh gen tay #${img.seq}`} className="aspect-[4/5] w-full" />
+          <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={`Ảnh gen tay #${img.seq}`} className="aspect-[4/5] w-full" zoomable />
         )}
-        <span className="absolute left-1.5 top-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-bold">#{img.seq}</span>
-        <span className={cn("absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold", TONE[img.status] ?? "bg-background/90")}>{img.queuedAt ? "Trong hàng đợi" : MANUAL_GEN_IMAGE_STATUS_LABEL[img.status]}</span>
+        <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-bold">#{img.seq}</span>
+        <span className={cn("pointer-events-none absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold", TONE[img.status] ?? "bg-background/90")}>{img.queuedAt ? "Trong hàng đợi" : MANUAL_GEN_IMAGE_STATUS_LABEL[img.status]}</span>
         {daVe && img.costUsd ? (
-          <span className="numeric absolute bottom-1.5 right-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-semibold" title={`${Number(img.costUsd).toFixed(4)} USD — tiền thật máy vẽ báo về`}>
+          <span className="numeric pointer-events-none absolute bottom-1.5 right-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-semibold" title={`${Number(img.costUsd).toFixed(4)} USD — tiền thật máy vẽ báo về`}>
             {formatVND(img.costVnd)}
           </span>
         ) : null}
@@ -461,7 +461,34 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
           </p>
         ) : null}
         {img.queuedAt ? <p className="text-[11px] font-medium text-brand">Trong hàng đợi đăng camp · lưu {vnShortStamp(img.queuedAt)}</p> : null}
-        {img.status === "PROMOTED" ? <p className="text-[11px] text-muted-foreground">Đã đăng camp — xem ở tab ④ Đang chạy.</p> : null}
+        {img.status === "PROMOTED" && !img.publishFailure ? <p className="text-[11px] text-muted-foreground">Đã đăng camp — xem ở tab ④ Đang chạy.</p> : null}
+        {img.publishFailure ? (
+          <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-1.5 text-[11px]">
+            <p className="font-medium text-destructive">Đăng camp KHÔNG thành.</p>
+            <a href={`/marketing/creatives?tab=dang&lo=${encodeURIComponent(img.publishFailure.batchId)}#chi-tiet-lo`} className="underline underline-offset-2">
+              Xem lý do trong sổ ghi Facebook
+            </a>
+            {canEdit && img.publishFailure.canRequeue ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-full text-[12px]"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const r = await requeueFailedManualGenImageAction({ imageId: img.id });
+                    if ("error" in r) toast.error(r.error);
+                    else toast.success("Đã trả ảnh về hàng đợi — sửa xong bấm Đăng camp lại ở ③ Hàng đợi & Đăng.");
+                  })
+                }
+              >
+                {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Rocket className="size-3.5" />} Trả về hàng đợi để đăng lại
+              </Button>
+            ) : (
+              <p className="text-muted-foreground">Trên Facebook đã có chiến dịch / nhóm của bài (đang TẮT) — xoá tay trên Ads Manager.</p>
+            )}
+          </div>
+        ) : null}
         {canEdit ? (
           <div className="mt-auto flex flex-wrap gap-1 border-t pt-1.5">
             {img.status === "GENERATED" || img.status === "REJECTED" ? (
@@ -925,7 +952,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
         const page = s ? (ctx.setup.pages.find((p) => p.id === s.pageId)?.name ?? s.pageId) : null;
         return (
           <div key={img.id} className="flex flex-wrap items-center gap-2.5 p-2">
-            <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={img.headline || `Ảnh #${img.seq}`} className="size-16 shrink-0 rounded" iconClassName="size-4" />
+            <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={img.headline || `Ảnh #${img.seq}`} className="size-16 shrink-0 rounded" iconClassName="size-4" zoomable />
             <div className="min-w-0 flex-1 space-y-0.5">
               <p className="truncate text-[12.5px] font-semibold">{img.headline || <span className="italic text-muted-foreground">(chưa có tiêu đề)</span>}</p>
               <p className="line-clamp-1 text-[11.5px] text-muted-foreground">{img.primaryText || "(chưa có nội dung chính)"}</p>

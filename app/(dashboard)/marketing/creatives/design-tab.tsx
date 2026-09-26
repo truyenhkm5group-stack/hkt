@@ -104,7 +104,7 @@ export async function DesignTab({ canEdit, canCreateTopic = false }: { canEdit: 
                   <tr key={r.id} className="border-b border-hairline align-top last:border-b-0">
                     <td className="px-3 py-2">
                       <div className="flex items-start gap-2">
-                        <VariantImage imageId={r.imageId} available={r.imageAvailable} alt={r.code} className="size-14 shrink-0 rounded-md" iconClassName="size-4" />
+                        <VariantImage imageId={r.imageId} available={r.imageAvailable} alt={r.code} className="size-14 shrink-0 rounded-md" iconClassName="size-4" zoomable />
                         <div className="min-w-0">
                           <p className="font-mono font-semibold">{r.code}</p>
                           <p className="text-[11px] text-muted-foreground">{r.batchDay ? `lô ${formatDate(r.batchDay)}` : formatDate(r.createdAt)}</p>

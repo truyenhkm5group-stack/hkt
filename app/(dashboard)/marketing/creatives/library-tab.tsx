@@ -60,7 +60,7 @@ export async function LibraryTab({ productId, period }: { productId: string | nu
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((v) => (
             <div key={v.id} className="flex flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
-              <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" />
+              <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" zoomable />
               <div className="flex flex-1 flex-col gap-2 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug">{v.headline || <span className="font-normal italic text-muted-foreground">Không tiêu đề</span>}</p>

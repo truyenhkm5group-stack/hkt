@@ -23,6 +23,7 @@ import {
   createTestAdset,
   createTestCampaign,
   extendAdset,
+  facebookErrorText,
   pauseAdset,
   readAdsKillSwitch,
   readTemplateAd,
@@ -217,8 +218,9 @@ export async function logAction(db: Exec, r: LogInput) {
   });
 }
 
+/** Câu lỗi cho sổ ghi — lỗi Facebook đã biết mã thì kèm VIỆC PHẢI LÀM (`facebookErrorText`). */
 function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return facebookErrorText(e);
 }
 
 /** Tổng tiền test ĐÃ CAM KẾT cho một ngày chạy — đếm trên SỔ (lượt tạo nhóm đã áp), không trên cấu hình. */

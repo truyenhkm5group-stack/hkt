@@ -115,7 +115,7 @@ function VariantTile({ v, reserve, canReject, canEditCopy, pageName, selectable 
         </div>
       ) : (
         <div className="relative">
-          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" />
+          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" zoomable />
           {overlay}
         </div>
       )}

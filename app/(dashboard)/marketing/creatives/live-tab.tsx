@@ -121,7 +121,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                     <tr key={v.id} className="border-b border-hairline align-top last:border-b-0">
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
-                          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="size-12 shrink-0 rounded" iconClassName="size-4" />
+                          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="size-12 shrink-0 rounded" iconClassName="size-4" zoomable />
                           <div className="min-w-0 max-w-[230px]">
                             <p className="truncate font-medium" title={v.headline}>
                               #{v.slot} {v.headline || <span className="italic text-muted-foreground">không tiêu đề</span>}

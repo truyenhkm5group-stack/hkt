@@ -8,7 +8,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
@@ -235,4 +235,18 @@ export async function searchGeoAction(raw: unknown): Promise<{ ok: true; hits: G
   } catch (e) {
     return { error: `Không tìm được vị trí trên Facebook: ${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+/** "Trả về hàng đợi" — ảnh đã bấm đăng mà hỏng khi trên Facebook chưa có chiến dịch / nhóm nào (luật ở `requeueFailedManualGenImage`). */
+export async function requeueFailedManualGenImageAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Không có quyền" };
+  const parsed = recaptionSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Đầu vào không hợp lệ" };
+  const db = await getDb();
+  const r = await requeueFailedManualGenImage(db, parsed.data.imageId);
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_MANUAL_GEN_REQUEUED", entity: "CREATIVE_MANUAL_GEN_IMAGE", entityId: parsed.data.imageId, after: {} });
+  revalidatePath(PATH);
+  return { ok: true };
 }
