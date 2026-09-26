@@ -115,8 +115,22 @@ export type ReapplyAdsMappingResult = {
 export async function reapplyAdsMapping(): Promise<ReapplyAdsMappingResult> {
   const db = await getDb();
   const [mapping, index] = await Promise.all([loadAdsMapping(), loadProductCodeIndex()]);
+  /*
+    TÊN MỚI NHẤT, KHÔNG PHẢI `max()`.
+
+    Chủ shop chốt 26/09/2026: chiến dịch chưa có mã trong tên là chi phí test *"cho đến khi có tên
+    thì sync và mapping lại"*. Lượt đồng bộ chỉ ghi lại 3 ngày gần nhất, nên sau khi đổi tên các
+    dòng cũ vẫn mang TÊN CŨ. `max(campaign)` chọn tên đứng sau theo thứ tự chữ cái — đổi
+    "QUAN_TA_18/09_LAVIE_V1" thành "Q004_QUAN_TA_18/09_LAVIE_V1" thì tên CŨ vẫn thắng ('U' > '0'),
+    và chiến dịch đã đặt tên đúng bị ghép theo tên cũ mãi mãi. Lấy tên của ngày chi GẦN NHẤT: đó
+    là tên Facebook đang trả.
+  */
   const rows = await db
-    .select({ campaignId: schema.adSpends.campaignId, campaign: sql<string>`max(${schema.adSpends.campaign})`, accountId: sql<string | null>`max(${schema.adSpends.accountId})` })
+    .select({
+      campaignId: schema.adSpends.campaignId,
+      campaign: sql<string>`(array_agg(${schema.adSpends.campaign} order by ${schema.adSpends.spendDate} desc, ${schema.adSpends.updatedAt} desc))[1]`,
+      accountId: sql<string | null>`(array_agg(${schema.adSpends.accountId} order by ${schema.adSpends.spendDate} desc, ${schema.adSpends.updatedAt} desc))[1]`,
+    })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.platform, "Facebook"), sql`${schema.adSpends.campaignId} is not null`))
     .groupBy(schema.adSpends.campaignId);

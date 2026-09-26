@@ -383,10 +383,11 @@ export async function testAdsDecision(db: Db) {
   */
   assert.equal(spendClassOf("auto", "prod-1", false), "PRODUCT");
   assert.equal(spendClassOf("test", null, false), "TEST");
-  assert.equal(spendClassOf("none", null, false), "UNCLASSIFIED", "không khớp mã VÀ không phải test ⇒ cần người, khác hẳn chi phí test");
+  // Chủ shop chốt 26/09/2026: tên chưa có mã hàng ⇒ chi phí test, tới khi tên có mã (đồng bộ tự ghép lại).
+  assert.equal(spendClassOf("none", null, false), "TEST", "tên chiến dịch chưa có mã hàng ⇒ chi phí test, KHÔNG còn là “việc cần người”");
   assert.equal(spendClassOf("manual", null, false), "TEST", "người khai tay mà không có mã nghĩa là họ đã nói 'đây là chi phí test'");
   assert.equal(spendClassOf("auto", "prod-1", true), "EXCLUDED", "đã loại khỏi phép tính thì thắng mọi nhánh khác");
-  assert.notEqual(spendClassOf("test", null, false), spendClassOf("none", null, false), "hai thứ này KHÔNG được gộp — đó là cả điểm của phép phân loại");
+  assert.equal(spendClassOf("none", "prod-1", false), "PRODUCT", "có mã (ghép được sau khi đổi tên) thì thắng ngay — test chỉ là trạng thái TẠM");
 
   // Chi phí test KHÔNG đi mượn: gán cho một phép thử fanpage điểm hoà vốn của một mã bán là đo sai thứ.
   const testKhongMuon = inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "TEST");

@@ -117,6 +117,43 @@ export async function testAdsMappingDangling() {
     await db.delete(schema.adSpends).where(sql`${schema.adSpends.id} like ${`${P}%`}`);
     await db.delete(schema.products).where(inArray(schema.products.id, [`${P}prod-that`]));
   }
+  await testReapplyUsesLatestName();
+}
+
+/**
+ * ═══════ ĐỔI TÊN CHO CÓ MÃ ⇒ LƯỢT ĐỒNG BỘ KẾ TIẾP GHÉP LẠI CẢ NGÀY CŨ ═══════
+ *
+ * Chủ shop chốt 26/09/2026: chiến dịch chưa có mã trong tên là chi phí test *"cho đến khi có tên
+ * thì sync và mapping lại"*. Đồng bộ chỉ ghi lại 3 ngày gần nhất, nên dòng cũ vẫn mang TÊN CŨ, và
+ * `reapplyAdsMapping` từng chọn tên bằng `max(campaign)` — tên đứng sau theo chữ cái. Tên cũ
+ * "QUAN_TA_…" đứng sau tên mới "A987_QUAN_TA_…", nên chiến dịch đã đặt tên đúng vẫn bị ghép theo
+ * tên cũ mãi mãi. Bài này dựng đúng hình dạng ấy.
+ */
+async function testReapplyUsesLatestName() {
+  const db = await getDb();
+  const mapCu = await getSettingJson<CampaignMap>(ADS_CAMPAIGN_MAP_KEY, {});
+  const aliasCu = await getSettingJson<ProductAliases>(ADS_ALIASES_KEY, {});
+  const ngay = (lui: number) => new Date(Date.now() - lui * 86_400_000);
+  await db.delete(schema.adSpends).where(sql`${schema.adSpends.id} like ${`${P}ren-%`}`);
+  await db.insert(schema.products).values({ id: `${P}prod-a987`, name: "Đầm đổi tên A987", customId: "A987" }).onConflictDoNothing();
+  const dong = (id: string, campaign: string, lui: number) => ({ id, platform: "Facebook", campaign, campaignId: `${P}camp-ren`, accountId: `${P}act-ren`, spend: 100_000, spendDate: ngay(lui), createdBy: "test" });
+  await db.insert(schema.adSpends).values([dong(`${P}ren-cu`, "QUAN_TA_18/09_LAVIE_V1", 10), dong(`${P}ren-moi`, "A987_QUAN_TA_18/09_LAVIE_V1", 1)]);
+  try {
+    await setSettingJson(ADS_CAMPAIGN_MAP_KEY, {});
+    await setSettingJson(ADS_ALIASES_KEY, {});
+    const sau = await chupVaTraVe(async () => {
+      await reapplyAdsMapping();
+      return db.select({ id: schema.adSpends.id, productId: schema.adSpends.productId }).from(schema.adSpends).where(sql`${schema.adSpends.id} like ${`${P}ren-%`}`);
+    });
+    assert.equal(sau.length, 2);
+    for (const r of sau) assert.equal(r.productId, `${P}prod-a987`, `${r.id}: đổi tên cho có mã ⇒ MỌI ngày của chiến dịch về mã A987, kể cả dòng cũ còn mang tên cũ`);
+    console.log("✓ Đổi tên chiến dịch cho có mã ⇒ ghép lại cả ngày cũ (đọc tên MỚI NHẤT, không phải max theo chữ cái)");
+  } finally {
+    await setSettingJson(ADS_CAMPAIGN_MAP_KEY, mapCu);
+    await setSettingJson(ADS_ALIASES_KEY, aliasCu);
+    await db.delete(schema.adSpends).where(sql`${schema.adSpends.id} like ${`${P}ren-%`}`);
+    await db.delete(schema.products).where(inArray(schema.products.id, [`${P}prod-a987`]));
+  }
 }
 
 /**

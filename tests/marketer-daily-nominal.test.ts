@@ -318,6 +318,12 @@ async function kiemChuaGan(db: Awaited<ReturnType<typeof getDb>>, products: { va
     const motMa = await getNominalDaily(ALL, "ORDERED", { productId: p.value, marketerKey: null });
     assert.ok((d.total.adSpend ?? 0) + d.unassigned.spend <= (motMa.total.adSpend ?? 0), `${p.label}: Chi QC của người + chưa gán không được vượt Chi QC cả mã`);
   }
+  // Lưới ngày × MKTer (/ads/daily): tiền ở cột "Chưa quy kết" phải nêu được TÊN chiến dịch.
+  const luoi = await getMarketerDailyNominal(ALL);
+  assert.ok(
+    luoi.warnings.some((w) => w.includes("CHƯA GÁN MKTer") && w.includes("TRINH_TEST_chưa gán người")),
+    "lưới ngày × MKTer phải nêu tên chiến dịch chưa gán MKTer đang nằm ở cột Chưa quy kết",
+  );
 }
 
 export async function testMarketerDailyNominal() {

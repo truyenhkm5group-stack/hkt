@@ -129,18 +129,34 @@ export const ADS_SPEND_CLASS_LABEL: Record<AdsSpendClass, string> = {
 
 export const ADS_SPEND_CLASS_HINT: Record<AdsSpendClass, string> = {
   PRODUCT: "Chiến dịch chạy cho một mã hàng cụ thể — chấm được bằng ROAS và điểm hoà vốn.",
-  TEST: "Chi phí thử fanpage / mẫu quảng cáo mới, KHÔNG thuộc mã hàng nào. Đây không phải chỗ thiếu dữ liệu: nó có câu hỏi riêng — đốt bao nhiêu vào test, và có cái nào ra được thành mã bán. Đòi nó đạt hoà vốn như một chiến dịch bán hàng là đo sai thứ.",
+  TEST: "Chi phí thử fanpage / mẫu quảng cáo mới, KHÔNG thuộc mã hàng nào — gồm chiến dịch tên có chữ TEST, chiến dịch khai tay là test, và chiến dịch mà tên CHƯA có mã hàng (chủ shop chốt 26/09/2026). Đặt mã hàng vào tên chiến dịch thì lượt đồng bộ kế tiếp tự ghép lại cho mọi ngày. Đòi nó đạt hoà vốn như một chiến dịch bán hàng là đo sai thứ.",
   UNCLASSIFIED:
     "Không nhận ra mã hàng trong tên, và cũng không khai là test. ERP KHÔNG đoán — đây là việc cần người: khai mã cho chiến dịch, hoặc đánh dấu nó là chi phí test, ở màn Chi phí quảng cáo.",
   EXCLUDED: "Người đã khai loại chiến dịch này khỏi phép tính.",
 };
 
-/** Phân loại SUY RA từ nguồn ghép của `resolveCampaign` — không phải một danh sách thứ hai. */
+/**
+ * Phân loại SUY RA từ nguồn ghép của `resolveCampaign` — không phải một danh sách thứ hai.
+ *
+ * ─── CHIẾN DỊCH CHƯA ĐẶT MÃ TRONG TÊN LÀ CHI PHÍ TEST (chủ shop chốt 26/09/2026) ───
+ *
+ * *"Mã chiến dịch nào không đặt tên thì cứ cho vào test cho đến khi có tên thì sync và mapping
+ * lại."* Bản trước tách `none` (không nhận ra mã, không khai test) ra `UNCLASSIFIED` — "việc cần
+ * người". Đo production 26/09/2026: 8,0 triệu ₫ tháng 9 rơi vào nhóm ấy, toàn chiến dịch mang tên
+ * fanpage (Phương Dung, LAVIE, Em xinh…) mà không mang mã hàng — tức đúng là tiền thử fanpage /
+ * mẫu mới. Nay chúng là TEST cho tới khi tên có mã; đổi tên xong, lượt đồng bộ kế tiếp tự ghép lại
+ * mã hàng cho MỌI ngày của chiến dịch (`reapplyAdsMapping` đọc tên MỚI NHẤT).
+ *
+ * `UNCLASSIFIED` vẫn còn trong kiểu vì màn hình và `inheritVerdict` đọc nó, nhưng hàm này không
+ * còn trả ra nó.
+ */
 export function spendClassOf(source: "manual" | "alias" | "auto" | "test" | "none", productId: string | null, excluded: boolean): AdsSpendClass {
   if (excluded) return "EXCLUDED";
   if (productId) return "PRODUCT";
-  // `manual` mà không có mã nghĩa là người đã khai tay "đây là chi phí test" (`testCost`).
-  return source === "test" || source === "manual" ? "TEST" : "UNCLASSIFIED";
+  // `manual` mà không có mã = người khai tay "đây là chi phí test"; `test` = tên có chữ TEST;
+  // `none` = tên chưa có mã hàng ⇒ cũng là test, tới khi tên có mã.
+  void source;
+  return "TEST";
 }
 
 export type InheritedVerdict = {
