@@ -398,6 +398,7 @@ export function ManualGenImageTile({
   instant,
   pageName,
   defaults,
+  campDefaults,
   predictedSeq,
   targetDay,
 }: {
@@ -407,6 +408,7 @@ export function ManualGenImageTile({
   instant: InstantInfo;
   pageName: string | null;
   defaults: Defaults;
+  campDefaults: Defaults;
   predictedSeq: number;
   targetDay: string;
 }) {
@@ -480,7 +482,7 @@ export function ManualGenImageTile({
                 <X className="size-3.5" /> Loại
               </Button>
             ) : null}
-            {img.status === "APPROVED" ? <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} /> : null}
+            {img.status === "APPROVED" ? <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} campDefaults={campDefaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} /> : null}
           </div>
         ) : null}
       </div>
@@ -502,7 +504,26 @@ function vnInputToIso(v: string): string | null {
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
-type ComposeProps = { img: ManualGenImageCard; canPublish: boolean; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string; instant: InstantInfo; triggerLabel?: string; triggerClassName?: string };
+type ComposeProps = { img: ManualGenImageCard; canPublish: boolean; pageName: string | null; defaults: Defaults; campDefaults: Defaults; predictedSeq: number; targetDay: string; instant: InstantInfo; triggerLabel?: string; triggerClassName?: string };
+
+/**
+ * Ba tên ĐIỀN SẴN của hộp soạn bài (chủ shop 26/09/2026: "điền sẵn để sẵn sàng đăng ngay, tôi có thể sửa"): tên đã lưu
+ * nếu có; không thì tên theo khuôn của "Đăng camp" (ngày chạy hôm nay) — hoặc của lô, với người không được đăng camp.
+ */
+function prefillNames(img: ManualGenImageCard, canPublish: boolean, defaults: Defaults, campDefaults: Defaults): { campaign: string; adset: string; ad: string } {
+  const d = canPublish ? campDefaults : defaults;
+  return { campaign: img.campaignName || d.campaign, adset: img.adsetName || d.adset, ad: img.adName || d.ad };
+}
+
+/**
+ * Ô tên người KHÔNG sửa (còn đúng chữ điền sẵn theo khuôn) ⇒ gửi rỗng ⇒ đường ghi tự đặt theo khuôn với số thứ tự THẬT
+ * của đúng nơi đến (ngày chạy của camp, hay lô) lúc bấm. Gửi nguyên chữ điền sẵn thì hai bài bấm gần nhau mang cùng số,
+ * và bấm "Đưa vào lô" sẽ mang ngày của camp. Ô người đã sửa ⇒ đúng chữ người gõ. Tên ĐÃ LƯU thì luôn gửi nguyên.
+ */
+function namesToSend(cur: { campaign: string; adset: string; ad: string }, img: ManualGenImageCard, auto: { campaign: string; adset: string; ad: string }) {
+  const one = (k: "campaign" | "adset" | "ad", saved: string) => (saved === "" && cur[k].trim() === auto[k].trim() ? "" : cur[k]);
+  return { campaignName: one("campaign", img.campaignName), adsetName: one("adset", img.adsetName), adName: one("ad", img.adName) };
+}
 
 /**
  * HỘP SOẠN BÀI của một ảnh đã duyệt — MỘT hộp, BA lối ra dùng chung câu chữ + ba tên (chủ shop 26/09/2026: "duyệt ảnh
@@ -514,13 +535,14 @@ type ComposeProps = { img: ManualGenImageCard; canPublish: boolean; pageName: st
  * Ba ô tên để trống = tên theo khuôn lúc đăng / vào lô (số thứ tự lấy đúng ngày đích), nên hộp không điền sẵn một cái
  * tên mang ngày của lô khác.
  */
-function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targetDay, instant, triggerLabel, triggerClassName }: ComposeProps) {
+function ComposeButton({ img, canPublish, pageName, defaults, campDefaults, predictedSeq, targetDay, instant, triggerLabel, triggerClassName }: ComposeProps) {
+  const auto = prefillNames(img, canPublish, defaults, campDefaults);
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
-  const [campName, setCampName] = useState(img.campaignName);
-  const [adset, setAdset] = useState(img.adsetName);
-  const [ad, setAd] = useState(img.adName);
+  const [campName, setCampName] = useState(auto.campaign);
+  const [adset, setAdset] = useState(auto.adset);
+  const [ad, setAd] = useState(auto.ad);
   const [hen, setHen] = useState(false);
   const [henLuc, setHenLuc] = useState("");
   const [daLuu, setDaLuu] = useState<string | null>(null);
@@ -530,15 +552,19 @@ function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targ
   const mo = () => {
     setH(img.headline);
     setT(img.primaryText);
-    setCampName(img.campaignName);
-    setAdset(img.adsetName);
-    setAd(img.adName);
+    setCampName(auto.campaign);
+    setAdset(auto.adset);
+    setAd(auto.ad);
     setHen(false);
     setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
     setOpen(true);
   };
-  const noiDung = useMemo(() => ({ imageId: img.id, headline: h, primaryText: t, campaignName: campName, adsetName: adset, adName: ad }), [img.id, h, t, campName, adset, ad]);
+  const autoKey = `${auto.campaign}|${auto.adset}|${auto.ad}`;
+  const noiDung = useMemo(
+    () => ({ imageId: img.id, headline: h, primaryText: t, ...namesToSend({ campaign: campName, adset, ad }, img, { campaign: autoKey.split("|")[0], adset: autoKey.split("|")[1], ad: autoKey.split("|")[2] }) }),
+    [img, h, t, campName, adset, ad, autoKey],
+  );
   const chuKy = JSON.stringify(noiDung);
   const scheduleAt = hen ? vnInputToIso(henLuc) : null;
   const loiLuu = useMemo(() => {
@@ -585,7 +611,8 @@ function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targ
         toast.error(r.error);
         return;
       }
-      const msg = `${r.names.campaign || "Camp"}: ${r.detail}${r.designCode ? ` Mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn.` : ""}`;
+      // Mã TK chỉ nhắc khi bài THẬT SỰ lên (hoặc đang lên) Facebook — đăng hỏng thì mã ấy không nhận đơn nào.
+      const msg = `${r.names.campaign || "Camp"}: ${r.detail}${r.designCode && r.outcome !== "FAILED" ? ` Mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn.` : ""}`;
       if (r.outcome === "LIVE" || r.outcome === "SCHEDULED") toast.success(msg);
       else if (r.outcome === "PENDING") toast.warning(msg);
       else toast.error(msg);
@@ -627,7 +654,7 @@ function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targ
             </DialogTitle>
             <DialogDescription>
               {img.design ? "Máy cấp mã thiết kế TK-… lúc đăng / vào lô (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
-              Sửa câu chữ rồi <b>Lưu vào hàng đợi</b> để đăng sau, hoặc <b>Đăng camp</b> ngay. Để trống một tên = tên theo khuôn lúc đăng.
+              Sửa câu chữ rồi <b>Lưu vào hàng đợi</b> để đăng sau, hoặc <b>Đăng camp</b> ngay. Ba tên đã điền sẵn theo khuôn — sửa nếu cần.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-[1fr_300px]">
@@ -658,15 +685,16 @@ function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targ
                 <Label htmlFor={`pg-c-${img.id}`} className="text-[11.5px]">
                   Chiến dịch
                 </Label>
-                <Input id={`pg-c-${img.id}`} value={campName} onChange={(e) => setCampName(e.target.value)} placeholder={`để trống = theo khuôn, vd ${defaults.campaign}`} />
+                <Input id={`pg-c-${img.id}`} value={campName} onChange={(e) => setCampName(e.target.value)} placeholder="để trống = theo khuôn" />
                 <Label htmlFor={`pg-a-${img.id}`} className="text-[11.5px]">
                   Nhóm quảng cáo
                 </Label>
-                <Input id={`pg-a-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder={defaults.adset ? `để trống = ${defaults.adset}` : "(chưa đọc được nhóm mẫu — để trống = tên mặc định)"} />
+                <Input id={`pg-a-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder={defaults.adset ? "để trống = theo khuôn" : "(chưa đọc được nhóm mẫu — để trống = tên mặc định)"} />
                 <Label htmlFor={`pg-d-${img.id}`} className="text-[11.5px]">
                   Quảng cáo
                 </Label>
-                <Input id={`pg-d-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} placeholder={`để trống = theo khuôn, vd ${defaults.ad}`} />
+                <Input id={`pg-d-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} placeholder="để trống = theo khuôn" />
+                <p className="text-[11px] text-muted-foreground">Tên điền sẵn theo khuôn{canPublish ? " cho camp chạy hôm nay" : ""} — giữ nguyên thì máy cấp đúng số thứ tự lúc bấm; sửa thì dùng đúng chữ bạn gõ.</p>
                 {defaults.problems.length ? (
                   <ul className="list-disc pl-4 text-[11px] text-warning">
                     {defaults.problems.map((p) => (
@@ -746,7 +774,7 @@ function ComposeButton({ img, canPublish, pageName, defaults, predictedSeq, targ
  * HÀNG ĐỢI ĐĂNG CAMP — các bài đã soạn và bấm "Lưu", mới lưu trước. Không lọc theo ngày đang xem: đây là việc phải
  * làm. Mỗi dòng mở lại ĐÚNG hộp soạn bài (sửa tiếp · đăng camp · đưa vào lô); đăng xong bài tự rời hàng đợi.
  */
-export function PublishQueue({ items, canEdit, canPublish, instant, pageName, defaults, predictedSeq, targetDay }: { items: PublishQueueItem[]; canEdit: boolean; canPublish: boolean; instant: InstantInfo; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string }) {
+export function PublishQueue({ items, canEdit, canPublish, instant, pageName, defaults, campDefaults, predictedSeq, targetDay }: { items: PublishQueueItem[]; canEdit: boolean; canPublish: boolean; instant: InstantInfo; pageName: string | null; defaults: Defaults; campDefaults: Defaults; predictedSeq: number; targetDay: string }) {
   const [pending, start] = useTransition();
   const bo = (imageId: string) =>
     start(async () => {
@@ -768,12 +796,12 @@ export function PublishQueue({ items, canEdit, canPublish, instant, pageName, de
               <p className="truncate text-[12.5px] font-semibold">{img.headline || <span className="italic text-muted-foreground">(chưa có tiêu đề)</span>}</p>
               <p className="line-clamp-1 text-[11.5px] text-muted-foreground">{img.primaryText || "(chưa có nội dung chính)"}</p>
               <p className="truncate text-[10.5px] text-muted-foreground">
-                {runLabel} #{img.seq} · chiến dịch: {img.campaignName || "theo khuôn"} · lưu bởi {img.queuedByName || "—"} {img.queuedAt ? vnShortStamp(img.queuedAt) : ""}
+                {runLabel} #{img.seq} · chiến dịch: {img.campaignName || "theo khuôn lúc đăng"} · lưu bởi {img.queuedByName || "—"} {img.queuedAt ? vnShortStamp(img.queuedAt) : ""}
               </p>
             </div>
             {canEdit ? (
               <div className="flex shrink-0 items-center gap-1">
-                <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} triggerLabel={canPublish ? "Mở · Đăng camp" : "Mở bài"} triggerClassName="w-auto" />
+                <ComposeButton img={img} canPublish={canPublish} pageName={pageName} defaults={defaults} campDefaults={campDefaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} triggerLabel={canPublish ? "Mở · Đăng camp" : "Mở bài"} triggerClassName="w-auto" />
                 <Button size="sm" variant="ghost" className="h-7 text-[12px]" disabled={pending} onClick={() => bo(img.id)} title="Bỏ khỏi hàng đợi">
                   <X className="size-3.5" />
                 </Button>

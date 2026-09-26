@@ -390,22 +390,10 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
       return { ...report, result: "ERROR", detail: msg };
     }
     // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào.
-    // Nhóm mẫu tối ưu tin nhắn về một fanpage KHÁC fanpage đã khai ⇒ bài đứng tên trang này mà tin nhắn
-    // của khách chảy sang trang kia: tiền vẫn tiêu, đơn không ai thấy. Chặn, không đoán trang nào đúng.
-    const promotedPage = typeof template.adset.promotedObject?.page_id === "string" ? template.adset.promotedObject.page_id : null;
-    // Mỗi bài một chiến dịch (§5i): chiến dịch của mẩu mẫu phải đọc được và để ngân sách ở cấp NHÓM — kiểm
-    // MỘT lần trước lời gọi ghi đầu tiên, chỉ khi còn mẫu cần chiến dịch mới (mẫu đăng dở theo cấu trúc cũ thì không).
-    const canCampaign = pending.some(needsOwnCampaign) ? campaignShapeError(template) : null;
-    const thu = template.hasAssetFeed
-      ? { ok: false as const, error: "Mẩu mẫu không được hỗ trợ: quảng cáo động (asset_feed_spec) — máy không đoán hình dạng quảng cáo." }
-      : promotedPage && promotedPage !== config.pageId
-        ? { ok: false as const, error: `Nhóm của mẩu mẫu gửi tin nhắn về fanpage ${promotedPage}, khác fanpage đã khai ${config.pageId} — sửa cấu hình hoặc chọn mẩu mẫu khác.` }
-        : canCampaign
-          ? { ok: false as const, error: canCampaign }
-          : buildObjectStorySpec(template.objectStorySpec, { pageId: config.pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" });
-    if (!thu.ok) {
-      await db.update(T.creativeBatches).set({ error: thu.error, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
-      return { ...report, result: "ERROR", detail: thu.error };
+    const shape = templateShapeError(template, config.pageId, pending.some(needsOwnCampaign));
+    if (shape) {
+      await db.update(T.creativeBatches).set({ error: shape, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
+      return { ...report, result: "ERROR", detail: shape };
     }
 
     const runDenials = new Map<string, CreativeWriteDenial>();
@@ -461,6 +449,25 @@ export function nextStep(v: IdCols): CreativeWriteAction {
   if (!v.fbAdsetId) return "CREATE_ADSET";
   if (!v.fbAdId) return "CREATE_AD";
   return isLegacyStructure(v) ? "CREATE_AD" : "ACTIVATE_CAMPAIGN";
+}
+
+/**
+ * Mẩu mẫu có dùng được để đăng không — hàm THUẦN, MỘT phép kiểm cho cả lượt đăng lô lẫn "Đăng camp" (kiểm TRƯỚC khi
+ * ghi dòng nào). Ba câu hỏi:
+ *  · Nhóm mẫu tối ưu tin nhắn về một fanpage KHÁC fanpage đã khai ⇒ bài đứng tên trang này mà tin nhắn của khách chảy
+ *    sang trang kia: tiền vẫn tiêu, đơn không ai thấy. Chặn, không đoán trang nào đúng.
+ *  · Mỗi bài một chiến dịch (§5i): chiến dịch của mẩu mẫu phải đọc được và để ngân sách ở cấp NHÓM (chỉ khi còn bài cần
+ *    chiến dịch mới — `needCampaign`).
+ *  · Bài mẫu dựng lại được thành bài của mình (`buildObjectStorySpec`, kể cả mẫu là quảng cáo động dạng ảnh đơn).
+ * Được ⇒ `null`; không ⇒ câu lỗi cho người.
+ */
+export function templateShapeError(template: TemplateAd, pageId: string, needCampaign: boolean): string | null {
+  const promotedPage = typeof template.adset.promotedObject?.page_id === "string" ? template.adset.promotedObject.page_id : null;
+  if (promotedPage && promotedPage !== pageId) return `Nhóm của mẩu mẫu gửi tin nhắn về fanpage ${promotedPage}, khác fanpage đã khai ${pageId} — sửa cấu hình hoặc chọn mẩu mẫu khác.`;
+  const camp = needCampaign ? campaignShapeError(template) : null;
+  if (camp) return camp;
+  const thu = buildObjectStorySpec(template.objectStorySpec, { pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" }, template.assetFeedSpec);
+  return thu.ok ? null : thu.error;
 }
 
 /** Chiến dịch của mẩu mẫu KHÔNG dựng được chiến dịch riêng ⇒ câu lỗi; được ⇒ `null`. Hàm thuần. */
@@ -618,7 +625,7 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
   if (!v.fbCreativeId) {
     const g = await gate("CREATE_CREATIVE");
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
-    const spec = buildObjectStorySpec(c.template.objectStorySpec, { pageId: cfg.pageId, imageHash: v.fbImageHash, primaryText: v.primaryText, headline: v.headline });
+    const spec = buildObjectStorySpec(c.template.objectStorySpec, { pageId: cfg.pageId, imageHash: v.fbImageHash, primaryText: v.primaryText, headline: v.headline }, c.template.assetFeedSpec);
     const name = names.creative;
     if (!spec.ok) {
       await c.log({ variantId: v.id, action: "CREATE_CREATIVE", outcome: "FAILED", detail: spec.error });
