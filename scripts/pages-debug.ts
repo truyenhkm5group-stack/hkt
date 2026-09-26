@@ -8,6 +8,7 @@
  */
 import "dotenv/config";
 import { env } from "@/lib/env";
+import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 
 const token = env.pancake.pagesAccessToken;
 const baseUrl = env.pancake.pagesBaseUrl;
@@ -20,6 +21,9 @@ const variants: { name: string; url: string; method?: string; headers?: Record<s
   { name: "public_api/v1/pages POST", url: `https://pages.fm/api/public_api/v1/pages?access_token=${token}`, method: "POST", headers: { accept: "*/*" } },
   { name: "pages.fm/api/v1/pages (header token)", url: `https://pages.fm/api/v1/pages`, headers: { accept: "*/*", authorization: `Bearer ${token}` } },
 ];
+
+/** Token trang sinh ra trong lượt dò — che cùng token người dùng nếu lọt vào câu lỗi. */
+let pageTokenForMask = "";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
@@ -50,18 +54,31 @@ async function getJson(url: string) {
 }
 
 async function probeShape() {
-  const pagesRes = await getJson(`${baseUrl}/pages?access_token=${token}`);
-  const cat = (pagesRes.categorized ?? {}) as Record<string, unknown>;
-  const pages = [...((cat.activated as unknown[]) ?? []), ...((pagesRes.pages as unknown[]) ?? [])] as Record<string, unknown>[];
-  const pageId = String(pages[0]?.id ?? "");
-  if (!pageId) return console.log("Không có page nào để dò hình dạng hội thoại.");
-  const gen = await fetch(`${baseUrl}/pages/${pageId}/generate_page_access_token?access_token=${token}`, { method: "POST", signal: AbortSignal.timeout(20_000) }).then((r) => r.json() as Promise<Record<string, unknown>>);
-  const pageToken = String(gen.page_access_token ?? "");
-  const tk = pageToken ? `page_access_token=${pageToken}` : `access_token=${token}`;
+  // Dùng đúng client đang chạy trên production cho phần liệt kê page / token — lượt dò đầu tự đọc phản hồi
+  // và lấy nhầm trường ID nên không ra page nào.
+  const client = getPancakePagesClient();
+  const pages = await client.listPages();
+  console.log(`\nSố page: ${pages.length}`);
+  if (!pages.length) return console.log("Không có page nào để dò hình dạng hội thoại.");
   const now = Math.floor(Date.now() / 1000);
-  const conv = await getJson(`${baseUrl}/pages/${pageId}/conversations?${tk}&since=${now - 86_400}&until=${now}&page_number=1&page_size=5&order_by=updated_at`);
-  const list = ((conv.conversations as unknown[]) ?? []) as Record<string, unknown>[];
-  console.log(`\n── Hình dạng hội thoại (page thứ nhất, ${list.length} hội thoại 24 giờ) ──`);
+  // Page đầu có thể im 24 giờ — thử lần lượt tới page đầu tiên có hội thoại.
+  let pageId = "";
+  let tk = "";
+  let conv: Record<string, unknown> = {};
+  let list: Record<string, unknown>[] = [];
+  for (const [i, p] of pages.slice(0, 10).entries()) {
+    const pt = await client.pageToken(p.id);
+    pageTokenForMask = pt.value;
+    tk = `${pt.key}=${pt.value}`;
+    pageId = p.id;
+    conv = await getJson(`${baseUrl}/pages/${pageId}/conversations?${tk}&since=${now - 86_400}&until=${now}&page_number=1&page_size=5&order_by=updated_at`);
+    list = ((conv.conversations as unknown[]) ?? []) as Record<string, unknown>[];
+    if (list.length) {
+      console.log(`Page thứ ${i + 1} có hội thoại.`);
+      break;
+    }
+  }
+  console.log(`\n── Hình dạng hội thoại (${list.length} hội thoại 24 giờ) ──`);
   console.log("  Trường cấp ngoài của phản hồi:", Object.keys(conv).sort().join(", "));
   if (!list.length) return;
   console.log(shape(list[0]).join("\n"));
@@ -94,7 +111,9 @@ async function main() {
   try {
     await probeShape();
   } catch (e) {
-    console.log(`Dò hình dạng lỗi: ${(e instanceof Error ? e.message : String(e)).replace(new RegExp(token, "g"), "***")}`);
+    let msg = (e instanceof Error ? e.message : String(e)).replace(new RegExp(token, "g"), "***");
+    if (pageTokenForMask) msg = msg.split(pageTokenForMask).join("***");
+    console.log(`Dò hình dạng lỗi: ${msg}`);
   }
 }
 main().then(() => process.exit(0));
