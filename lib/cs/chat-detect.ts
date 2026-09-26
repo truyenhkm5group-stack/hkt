@@ -480,6 +480,7 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
           match,
           since,
           truncated: chamTran,
+          customerSeenAt: conv.customerSeenAt,
         }),
       );
       // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case

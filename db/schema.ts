@@ -4858,6 +4858,12 @@ export const conversationFunnel = pgTable(
     firstShopReplyAt: ts("first_shop_reply_at"),
     lastCustomerMessageAt: ts("last_customer_message_at"),
     lastShopMessageAt: ts("last_shop_message_at"),
+    /**
+     * Khách đã ĐỌC tới mốc này — `read_watermarks` của Pancake (mốc đọc Messenger), xem
+     * `customerReadWatermark()`. `NULL` = Pancake không cho biết / chưa quét từ 0151 — KHÔNG phải "chưa xem".
+     * Chỉ TIẾN lên (`greatest`): mốc đọc không bao giờ lùi, và một lượt quét thiếu trường không được xoá nó.
+     */
+    customerSeenAt: ts("customer_seen_at"),
     customerMessageCount: integer("customer_message_count").notNull().default(0),
     shopMessageCount: integer("shop_message_count").notNull().default(0),
 

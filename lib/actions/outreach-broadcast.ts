@@ -45,6 +45,7 @@ export async function previewBroadcastAction(raw: unknown): Promise<BroadcastPre
       tags: c.tags,
       lastCustomerAt: c.lastCustomerMessageAt?.toISOString() ?? null,
       lastShopAt: c.lastShopMessageAt?.toISOString() ?? null,
+      seenAt: c.customerSeenAt?.toISOString() ?? null,
     })),
     excluded: p.excluded,
     truncatedPages: p.truncatedPages.map((t) => t.pageName || t.pageId),

@@ -119,6 +119,8 @@ export function buildConversationFunnelRow(input: {
   since: Date;
   /** Page này đã chạm trần số hội thoại mỗi lượt quét ⇒ còn hội thoại chưa đọc. */
   truncated: boolean;
+  /** Mốc khách đã đọc tới (`customerReadWatermark`). Không có ⇒ `null` = chưa biết. */
+  customerSeenAt?: Date | null;
 }): ConversationFunnelRow {
   const timeline = messageTimeline(input.messages);
   const evidence = extractCustomerEvidence(input.messages, input.convPhones);
@@ -142,6 +144,7 @@ export function buildConversationFunnelRow(input: {
     firstShopReplyAt: timeline.firstShopReplyAt,
     lastCustomerMessageAt: timeline.lastCustomerMessageAt,
     lastShopMessageAt: timeline.lastShopMessageAt,
+    customerSeenAt: input.customerSeenAt ?? null,
     customerMessageCount: timeline.customerMessageCount,
     shopMessageCount: timeline.shopMessageCount,
     phoneAt,
@@ -204,6 +207,8 @@ export async function upsertConversationFunnel(db: Db, rows: ConversationFunnelR
         // Mốc MUỘN hơn thắng: đây là hoạt động gần nhất.
         lastCustomerMessageAt: sql`greatest(excluded.last_customer_message_at, ${cf.lastCustomerMessageAt})`,
         lastShopMessageAt: sql`greatest(excluded.last_shop_message_at, ${cf.lastShopMessageAt})`,
+        // Mốc đọc chỉ tiến lên; `greatest` bỏ qua NULL nên lượt quét thiếu trường không xoá mốc đã biết.
+        customerSeenAt: sql`greatest(excluded.customer_seen_at, ${cf.customerSeenAt})`,
         customerMessageCount: sql`greatest(excluded.customer_message_count, ${cf.customerMessageCount})`,
         shopMessageCount: sql`greatest(excluded.shop_message_count, ${cf.shopMessageCount})`,
         phoneAt: sql`least(excluded.phone_at, ${cf.phoneAt})`,

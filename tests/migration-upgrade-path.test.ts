@@ -98,6 +98,7 @@ const MOI = [
   "0148_creative_publish_queue",
   "0149_outreach_broadcast",
   "0150_creative_campaign_setup",
+  "0151_conversation_customer_seen",
 ] as const;
 
 /*
