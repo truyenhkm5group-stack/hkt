@@ -275,6 +275,7 @@ import { testCsSemanticCache } from "./cs-semantic-cache.test";
 import { testFeedAutomation } from "./feed-automation.test";
 import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
 import { testBroadcastFlowDb, testBroadcastVerdictPure } from "./outreach-broadcast.test";
+import { testNurtureWindowPure, testNurtureWindowSendDb } from "./outreach-nurture-window.test";
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testCareUiContrast } from "./care-ui-contrast.test";
@@ -918,9 +919,9 @@ async function main() {
   assert.ok(renderTemplate(tpl, { ten: "", san_pham: "", goi_y: "", shop: "", discountCode: "" }).startsWith("Chào chị,"));
   assert.ok(renderTemplate(DEFAULT_NURTURE_STEPS[0], { ten: "chị Lan", san_pham: "", goi_y: "", shop: "Hải An", discountCode: "", giam: "50k/váy" }).includes("giảm ngay 50k/váy"));
   const legacy = normalizeOutreachConfig({ nurtureDays: 2, nurtureTemplate: "Chào {ten}, shop hỗ trợ tư vấn thêm ạ" });
-  assert.equal(legacy.nurtureWindowHours, 48, "cấu hình cũ nurtureDays → giờ");
+  assert.equal(legacy.nurtureWindowHours, 24, "cấu hình cũ nurtureDays → giờ, rồi kẹp về 24 giờ (cửa sổ của Meta)");
   assert.equal(legacy.nurtureSteps.length, DEFAULT_NURTURE_STEPS.length, "mẫu cũ thành bước 1, các bước sau dùng kịch bản mẫu");
-  assert.equal(normalizeOutreachConfig(null).nurtureWindowHours, 168);
+  assert.equal(normalizeOutreachConfig(null).nurtureWindowHours, 24);
   assert.equal(isDue({ status: "PENDING", nextAt: null }), true);
   assert.equal(isDue({ status: "PENDING", nextAt: new Date(Date.now() + 3_600_000) }), false, "chưa đến hạn bước tiếp theo");
   assert.equal(isDue({ status: "SENT", nextAt: null }), false);
@@ -1827,6 +1828,8 @@ async function main() {
   await testOutreachIdempotentSend(db);
   testBroadcastVerdictPure();
   await testBroadcastFlowDb(db);
+  testNurtureWindowPure();
+  await testNurtureWindowSendDb(db);
   testOutreachEligibility();
   await testOutreachOutcomeFacet(db);
   await testCsCustomerQueue(db);

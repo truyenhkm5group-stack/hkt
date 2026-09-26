@@ -1,18 +1,27 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { renderTemplate, shortName } from "@/lib/constants/outreach";
+import { nurtureNextAt, renderTemplate, shortName } from "@/lib/constants/outreach";
+import { conversationVerdict, timesFromMessages } from "@/lib/constants/outreach-broadcast";
 import { loadOutreachConfig, nurtureVars } from "@/lib/outreach/build";
-import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
+import { getPancakePagesClient, type PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { classifyOutreachError } from "@/lib/constants/outreach-errors";
 
 /**
  * Gửi tin cho các mục đã chọn (chỉ PENDING đã đến hạn, có hội thoại Pancake). Tôn trọng giới hạn ngày và giãn cách 1,5 giây.
- * Băn khoăn nhiều bước: gửi xong bước k → chuẩn bị bước k+1, hẹn sau nurtureStepGapDays ngày; hết bước → SENT.
+ * Băn khoăn nhiều bước: gửi xong bước k → chuẩn bị bước k+1, hẹn sau nurtureStepGapHours giờ — nếu bước đó còn kịp
+ * trong 24 giờ kể từ tin cuối của khách; không kịp thì kịch bản kết thúc (SENT). Hết bước → SENT.
+ *
+ * KIỂM LẠI TRƯỚC KHI GỬI (26/09/2026): có mã khách Pancake thì đọc lại tin nhắn thật. Khách nhắn SAU tin gần nhất
+ * của kịch bản ⇒ `REPLIED` (nhân viên tiếp quản, không bắn tin mẫu đè lên cuộc trò chuyện). Quá 24 giờ từ tin cuối
+ * của khách ⇒ `SKIPPED · POLICY_WINDOW`, không gọi Meta — trước đây dòng ấy đi gửi rồi thành `FAILED (#10)`.
+ * Luật cửa sổ là `conversationVerdict()` — CÙNG hàm với gửi hàng loạt. Đọc lại lỗi ⇒ gửi như cũ, Meta tự quyết.
  */
-export async function sendOutreachTargets(ids: string[], actor: string, options: { dryRun?: boolean } = {}) {
+type SendClient = Pick<PancakePagesClient, "sendMessage" | "sendAttachment" | "listMessages">;
+
+export async function sendOutreachTargets(ids: string[], actor: string, options: { dryRun?: boolean; client?: SendClient } = {}) {
   const db = await getDb();
   const cfg = await loadOutreachConfig();
-  const client = getPancakePagesClient();
+  const client: SendClient = options.client ?? getPancakePagesClient();
   const t = schema.outreachTargets;
   const [sentToday] = await db.select({ count: sql<number>`count(*)` }).from(t).where(gte(t.sentAt, new Date(Date.now() - 86_400_000)));
   let remaining = Math.max(0, cfg.dailyLimit - Number(sentToday?.count ?? 0));
@@ -67,6 +76,31 @@ export async function sendOutreachTargets(ids: string[], actor: string, options:
       skipped += 1;
       continue;
     }
+    // ── Kiểm lại bằng tin nhắn thật (chỉ khi có mã khách — API đọc tin đòi nó) ──
+    let lastCustomerAt: Date | null = row.segment === "NURTURE" ? row.lastActivityAt : null;
+    if (row.pancakeCustomerId && !options.dryRun) {
+      let live: ReturnType<typeof timesFromMessages> | null = null;
+      try {
+        live = timesFromMessages(await client.listMessages(row.pageId, row.conversationId, row.pancakeCustomerId, 20));
+      } catch {
+        live = null; // không đọc được ⇒ gửi như trước, Meta tự từ chối nếu quá hạn
+      }
+      if (live) {
+        const at = new Date();
+        if (row.segment === "NURTURE" && row.sentAt && live.lastCustomerAt && live.lastCustomerAt > row.sentAt) {
+          await db.update(t).set({ status: "REPLIED", lastActivityAt: live.lastCustomerAt, updatedAt: at }).where(eq(t.id, row.id));
+          skipped += 1;
+          continue;
+        }
+        if (conversationVerdict(live, { replyState: "ANY", minSilenceHours: 0 }, at) === "OUTSIDE_WINDOW") {
+          const buoc = row.sentCount > 0 ? ` — kịch bản dừng sau ${row.sentCount} tin` : "";
+          await db.update(t).set({ status: "SKIPPED", error: `Quá 24 giờ từ tin cuối của khách, Meta không cho nhắn${buoc}`, errorKind: "POLICY_WINDOW", nextAt: null, updatedAt: at }).where(eq(t.id, row.id));
+          skipped += 1;
+          continue;
+        }
+        lastCustomerAt = live.lastCustomerAt ?? lastCustomerAt;
+      }
+    }
     const r = options.dryRun ? { ok: true as const } : await client.sendMessage(row.pageId, row.conversationId, row.pancakeCustomerId, row.message);
     const now = new Date();
     let mediaNote = "";
@@ -82,9 +116,11 @@ export async function sendOutreachTargets(ids: string[], actor: string, options:
     if (r.ok) {
       const steps = row.segment === "NURTURE" ? cfg.nurtureSteps : [row.message];
       const nextStep = row.step + 1;
-      if (nextStep < steps.length) {
+      // Bước kế tiếp chỉ được hẹn khi còn kịp trong 24 giờ; không kịp thì kịch bản kết thúc ở đây (nhánh SENT).
+      const nextAt = row.segment === "NURTURE" ? nurtureNextAt(now, cfg.nurtureStepGapHours, lastCustomerAt) : null;
+      if (nextStep < steps.length && nextAt) {
         const nextMessage = renderTemplate(steps[nextStep], nurtureVars(cfg, shortName(row.customerName), row.suggestions));
-        await db.update(t).set({ status: "PENDING", step: nextStep, message: nextMessage, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt: new Date(now.getTime() + cfg.nurtureStepGapDays * 86_400_000), error: mediaNote, errorKind: mediaNote ? "CONTENT_REJECTED" : null, providerMessageId: "id" in r ? (r.id ?? null) : null, acceptedAt: now, attemptCount: row.attemptCount + 1, updatedAt: now }).where(eq(t.id, row.id));
+        await db.update(t).set({ status: "PENDING", step: nextStep, message: nextMessage, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt, error: mediaNote, errorKind: mediaNote ? "CONTENT_REJECTED" : null, providerMessageId: "id" in r ? (r.id ?? null) : null, acceptedAt: now, attemptCount: row.attemptCount + 1, updatedAt: now }).where(eq(t.id, row.id));
       } else {
         /*
           `SENT` CHỈ KHI NHÀ CUNG CẤP XÁC NHẬN. `acceptedAt` là mốc họ nhận, khác `sentAt` là lúc

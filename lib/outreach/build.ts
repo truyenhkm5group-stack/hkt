@@ -1,13 +1,13 @@
 /**
  * Dựng danh sách khách cần nhắn:
- *  - NURTURE: hội thoại Pancake có khách nhắn trong N giờ (24h hoặc 7 ngày) mà chưa có đơn → kịch bản nhiều bước, mỗi ngày một tin.
+ *  - NURTURE: hội thoại Pancake có khách nhắn trong N giờ (≤ 24 — cửa sổ của Meta) mà chưa có đơn → kịch bản nhiều bước cách nhau vài giờ.
  *    Trước khi dựng, rà lại các mục đang chạy: khách đã đặt đơn → CONVERTED; khách trả lời sau tin cuối → REPLIED (nhân viên tiếp quản).
  *  - CROSS_SELL: đơn giao thành công từ N1–N2 ngày trước → tin gợi ý sản phẩm kèm (một bước).
  * Mỗi khách một kịch bản trong cooldownDays; không tạo lại mục đã gửi.
  */
 import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { normalizeOutreachConfig, OUTREACH_KEY, renderTemplate, shortName, type OutreachConfig, type TemplateVars } from "@/lib/constants/outreach";
+import { normalizeOutreachConfig, NURTURE_MAX_WINDOW_HOURS, OUTREACH_KEY, renderTemplate, shortName, type OutreachConfig, type TemplateVars } from "@/lib/constants/outreach";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { productReturnHistory } from "@/lib/queries/profit-nominal";
@@ -197,7 +197,8 @@ export async function buildOutreachTargets(options: { segments?: ("NURTURE" | "C
     result.converted = refreshed.converted;
     result.replied = refreshed.replied;
     const client = getPancakePagesClient();
-    const hours = Math.max(1, options.windowHours ?? cfg.nurtureWindowHours);
+    // Quá 24 giờ thì Meta không cho nhắn — dựng danh sách rộng hơn chỉ đẻ ra dòng sẽ bị từ chối.
+    const hours = Math.min(NURTURE_MAX_WINDOW_HOURS, Math.max(1, options.windowHours ?? cfg.nurtureWindowHours));
     const since = new Date(Date.now() - hours * 3_600_000);
     const pageRows = await db.select({ pageId: schema.orders.pageId }).from(schema.orders).where(sql`${schema.orders.pageId} is not null and ${schema.orders.insertedAt} >= now() - interval '90 days'`).groupBy(schema.orders.pageId);
     const allowed = new Set(pageRows.map((r) => r.pageId).filter(Boolean) as string[]);

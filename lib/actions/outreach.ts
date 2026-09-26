@@ -22,9 +22,9 @@ const configSchema = z.object({
   shopName: z.string().trim().max(100),
   discountCode: z.string().trim().max(50),
   nurtureDiscount: z.string().trim().max(60),
-  nurtureWindowHours: z.number().int().min(1).max(24 * 30),
+  nurtureWindowHours: z.number().int().min(1).max(24),
   nurtureSteps: z.array(z.string().trim().min(10).max(1500)).min(1, "Cần ít nhất một bước").max(15),
-  nurtureStepGapDays: z.number().int().min(1).max(14),
+  nurtureStepGapHours: z.number().int().min(1).max(23),
   crossSellFromDays: z.number().int().min(0).max(60),
   crossSellToDays: z.number().int().min(1).max(120),
   cooldownDays: z.number().int().min(1).max(365),
@@ -56,7 +56,7 @@ export async function saveOutreachConfig(input: unknown): Promise<Result> {
 export async function buildOutreach(segment?: "NURTURE" | "CROSS_SELL", windowHours?: number): Promise<Result<{ nurture: number; crossSell: number; scanned: number; converted: number; replied: number; errors: string[] }>> {
   const { user, error } = await authorize();
   if (error) return { error };
-  const hours = windowHours && Number.isFinite(windowHours) ? Math.min(24 * 30, Math.max(1, Math.round(windowHours))) : undefined;
+  const hours = windowHours && Number.isFinite(windowHours) ? Math.min(24, Math.max(1, Math.round(windowHours))) : undefined;
   const r = await buildOutreachTargets({ segments: segment ? [segment] : undefined, windowHours: hours });
   await audit({ userId: user.id, userEmail: user.email, action: "OUTREACH_BUILD", entity: "OUTREACH", detail: r });
   revalidatePath("/outreach");

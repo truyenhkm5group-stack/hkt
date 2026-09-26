@@ -55,7 +55,7 @@ export function OutreachConfigForm({ config, products, canWrite }: { config: Out
     <div className="rounded-xl border bg-card p-4 text-[13px] shadow-xs">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <span className="font-semibold">Cấu hình:</span>
-        <span>Băn khoăn: khách nhắn trong <b>{windowLabel}</b> chưa có đơn · kịch bản <b>{config.nurtureSteps.length} bước</b>, cách nhau <b>{config.nurtureStepGapDays} ngày</b></span>
+        <span>Băn khoăn: khách nhắn trong <b>{windowLabel}</b> chưa có đơn · kịch bản <b>{config.nurtureSteps.length} bước</b>, cách nhau <b>{config.nurtureStepGapHours} giờ</b> · chỉ gửi các bước còn kịp trong 24 giờ</span>
         <span>Bán chéo: nhận hàng <b>{config.crossSellFromDays}–{config.crossSellToDays} ngày</b> trước · khách cũ giảm <b>{config.crossSellDiscount}</b>, mã xả giảm <b>{config.clearanceDiscount}</b>{config.attachProductImages ? " · kèm ảnh/video" : ""}</span>
         <span>Tối đa <b>{config.dailyLimit} tin/ngày</b></span>
         {canWrite ? (
@@ -77,7 +77,7 @@ export function OutreachConfigForm({ config, products, canWrite }: { config: Out
                 <SelectContent>{NURTURE_WINDOWS.map((w) => <SelectItem key={w.hours} value={String(w.hours)}>{w.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-1"><Label>Cách nhau (ngày/bước)</Label><Input type="number" min={1} value={form.nurtureStepGapDays} onChange={(e) => setForm({ ...form, nurtureStepGapDays: num(e.target.value, 1) })} /></div>
+            <div className="space-y-1"><Label>Cách nhau (giờ/bước)</Label><Input type="number" min={1} max={23} value={form.nurtureStepGapHours} onChange={(e) => setForm({ ...form, nurtureStepGapHours: num(e.target.value, 8) })} /></div>
             <div className="space-y-1"><Label>Bán chéo từ–đến (ngày)</Label><div className="flex gap-1"><Input type="number" min={0} value={form.crossSellFromDays} onChange={(e) => setForm({ ...form, crossSellFromDays: num(e.target.value, 3) })} /><Input type="number" min={1} value={form.crossSellToDays} onChange={(e) => setForm({ ...form, crossSellToDays: num(e.target.value, 14) })} /></div></div>
             <div className="space-y-1"><Label>Không nhắn lại trong (ngày)</Label><Input type="number" min={1} value={form.cooldownDays} onChange={(e) => setForm({ ...form, cooldownDays: num(e.target.value, 14) })} /></div>
             <div className="space-y-1"><Label>Giới hạn tin/ngày</Label><Input type="number" min={1} value={form.dailyLimit} onChange={(e) => setForm({ ...form, dailyLimit: num(e.target.value, 200) })} /></div>
@@ -93,7 +93,7 @@ export function OutreachConfigForm({ config, products, canWrite }: { config: Out
               {form.nurtureSteps.map((step, i) => (
                 <div key={i} className="space-y-1 rounded-lg border p-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold">Bước {i + 1} · ngày {1 + i * form.nurtureStepGapDays}</span>
+                    <span className="text-xs font-semibold">Bước {i + 1} · {i === 0 ? "gửi ngay" : `sau ${i * form.nurtureStepGapHours} giờ`}{i * form.nurtureStepGapHours >= 24 ? " · quá 24 giờ, không bao giờ tới" : ""}</span>
                     <Button type="button" size="sm" variant="ghost" className="ml-auto h-7" onClick={() => doPreview(`n${i}`, "NURTURE", step)} disabled={pending || !step.trim()}><Eye className="size-4" /> Xem trước</Button>
                     <Button type="button" size="icon" variant="ghost" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => removeStep(i)} disabled={form.nurtureSteps.length <= 1}><Trash2 className="size-4" /></Button>
                   </div>

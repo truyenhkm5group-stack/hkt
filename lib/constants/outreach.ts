@@ -5,13 +5,15 @@ export type OutreachConfig = {
   discountCode: string;
   /** Ưu đãi chốt nhanh trong kịch bản băn khoăn, biến {giam} (VD "50k/váy") */
   nurtureDiscount: string;
-  /** Cửa sổ băn khoăn: khách nhắn trong N giờ gần đây (24 = 1 ngày, 168 = 7 ngày) mà chưa có đơn */
+  /** Cửa sổ băn khoăn: khách nhắn trong N giờ gần đây mà chưa có đơn. Tối đa 24 — xem `NURTURE_MAX_WINDOW_HOURS`. */
   nurtureWindowHours: number;
   /** @deprecated dùng nurtureWindowHours; giữ để đọc cấu hình cũ */
   nurtureDays?: number;
-  /** Kịch bản băn khoăn nhiều bước: mỗi bước một tin, cách nhau nurtureStepGapDays ngày */
+  /** Kịch bản băn khoăn nhiều bước: mỗi bước một tin, cách nhau nurtureStepGapHours giờ — chỉ những bước còn kịp trong 24 giờ */
   nurtureSteps: string[];
-  nurtureStepGapDays: number;
+  nurtureStepGapHours: number;
+  /** @deprecated cách nhau theo NGÀY luôn rơi ra ngoài cửa sổ 24 giờ của Meta; giữ để đọc cấu hình cũ */
+  nurtureStepGapDays?: number;
   /** Bán chéo: đơn giao thành công từ N1 đến N2 ngày trước */
   crossSellFromDays: number;
   crossSellToDays: number;
@@ -59,9 +61,9 @@ export const DEFAULT_OUTREACH: OutreachConfig = {
   shopName: "Hải An Fashion",
   discountCode: "",
   nurtureDiscount: "50k/váy",
-  nurtureWindowHours: 168,
+  nurtureWindowHours: 24,
   nurtureSteps: DEFAULT_NURTURE_STEPS,
-  nurtureStepGapDays: 1,
+  nurtureStepGapHours: 8,
   crossSellFromDays: 3,
   crossSellToDays: 14,
   cooldownDays: 14,
@@ -81,10 +83,35 @@ export const DEFAULT_OUTREACH: OutreachConfig = {
     "Chào {ten} ơi, {shop} cảm ơn mình đã tin tưởng đặt {san_pham} ạ 💛 Mình mặc có vừa và ưng ý không ạ?\nShop đang có mẫu {goi_y} giá siêu hời, riêng khách cũ như mình được giảm thêm {giam} ạ. Em gửi ảnh/video thật bên dưới, mình xem ưng thì báo em giữ size ngay nhé, số lượng có hạn ạ 🔥{uu_dai}",
 };
 
+/**
+ * ═══ KỊCH BẢN BĂN KHOĂN PHẢI NẰM TRỌN TRONG 24 GIỜ CỦA META ═══
+ *
+ * Meta chỉ cho trang nhắn trong 24 giờ kể từ tin cuối KHÁCH gửi (đo 13/09/2026: 25/25 tin ngoài cửa sổ bị
+ * `#10`). Bản cũ dựng danh sách từ khách nhắn trong 7 NGÀY và gửi mỗi NGÀY một bước — nên bước 2–7 LUÔN
+ * rơi ra ngoài cửa sổ (khách trả lời thì kịch bản đã tự dừng), và khách nhắn 2–7 ngày trước bị từ chối ngay
+ * từ bước 1. Chủ shop 26/09/2026 đồng ý sửa: danh sách chỉ lấy khách còn trong 24 giờ, các bước cách nhau
+ * theo GIỜ, và bước nào không còn kịp trước hạn thì kịch bản KẾT THÚC thay vì xếp hàng một tin sẽ bị từ chối.
+ * Cùng biên an toàn 10 phút với gửi hàng loạt (`META_WINDOW_MARGIN_MINUTES`).
+ */
+export const NURTURE_MAX_WINDOW_HOURS = 24;
+export const NURTURE_WINDOW_MARGIN_MINUTES = 10;
+
 export const NURTURE_WINDOWS = [
+  { hours: 12, label: "12 giờ" },
   { hours: 24, label: "24 giờ" },
-  { hours: 168, label: "7 ngày" },
 ] as const;
+
+/**
+ * Bước kế tiếp gửi lúc nào — hoặc `null` nếu nó không còn kịp trong cửa sổ 24 giờ tính từ tin cuối của khách
+ * (khi đó kịch bản kết thúc ở bước vừa gửi). Không biết tin cuối của khách ⇒ vẫn hẹn theo khoảng cách, để
+ * lượt gửi sau tự kiểm lại bằng tin nhắn thật.
+ */
+export function nurtureNextAt(now: Date, gapHours: number, lastCustomerAt: Date | null): Date | null {
+  const next = new Date(now.getTime() + gapHours * 3_600_000);
+  if (!lastCustomerAt) return next;
+  const deadline = lastCustomerAt.getTime() + NURTURE_MAX_WINDOW_HOURS * 3_600_000 - NURTURE_WINDOW_MARGIN_MINUTES * 60_000;
+  return next.getTime() < deadline ? next : null;
+}
 
 export const OFFER_LABEL: Record<string, string> = { STANDARD: "Khách cũ giảm", CLEARANCE: "Giá siêu hời · xả" };
 
@@ -145,7 +172,11 @@ export function normalizeOutreachConfig(raw: Partial<OutreachConfig> | null | un
   if (!cfg.crossSellClearanceTemplate) cfg.crossSellClearanceTemplate = DEFAULT_OUTREACH.crossSellClearanceTemplate;
   // mẫu bán chéo cũ (trước khi có ưu đãi khách cũ) → thay bằng mẫu mới có {giam}
   if (cfg.crossSellTemplate && !/\{giam\}/.test(cfg.crossSellTemplate) && /Mẫu này đang được nhiều chị kết hợp cùng/.test(cfg.crossSellTemplate)) cfg.crossSellTemplate = DEFAULT_OUTREACH.crossSellTemplate;
-  cfg.nurtureStepGapDays = Math.max(1, Number(cfg.nurtureStepGapDays) || 1);
+  // Cửa sổ quá 24 giờ không gửi được — cấu hình cũ 7 ngày (168) về 24.
+  cfg.nurtureWindowHours = Math.min(NURTURE_MAX_WINDOW_HOURS, Math.max(1, Number(cfg.nurtureWindowHours) || NURTURE_MAX_WINDOW_HOURS));
+  // Khoảng cách theo NGÀY cũ (tối thiểu 1 ngày) không bao giờ kịp trong 24 giờ, nên KHÔNG quy đổi — dùng mặc định giờ.
+  cfg.nurtureStepGapHours = Math.min(23, Math.max(1, Number(raw?.nurtureStepGapHours) || DEFAULT_OUTREACH.nurtureStepGapHours));
+  delete cfg.nurtureStepGapDays;
   return cfg;
 }
 
