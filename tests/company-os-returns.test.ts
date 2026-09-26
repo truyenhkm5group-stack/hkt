@@ -121,6 +121,9 @@ export function testCompanyOsReturnsPure() {
     "lib/actions/return-dispositions.ts",
     "lib/inventory/receipt-delete.ts",
     "lib/queries/model-stock.ts",
+    // Company OS · W: ops `company-os-summary` chỉ ĐẾM dòng sổ + số món theo kết cục (không đọc giá trị huỷ
+    // ước tính — `tests/company-os-summary.test.ts` quét SQL của nó), không đi vào báo cáo nào.
+    "scripts/company-os-summary.ts",
   ]);
   for (const f of tep) {
     const src = boChuThich(readFileSync(f, "utf8"));
@@ -129,7 +132,7 @@ export function testCompanyOsReturnsPure() {
     if ((/returnDispositions\b|return_dispositions\b/.test(src)) && !DUOC_DOC.has(f) && f !== "db/schema.ts" && !f.startsWith("drizzle/")) docSo.push(f);
   }
   assert.deepEqual(ghiDe, [], "return_dispositions là APPEND-ONLY — không UPDATE / DELETE ở lib/app/scripts/components");
-  assert.deepEqual(docSo, [], "chỉ sáu tệp khai ở DUOC_DOC được đọc return_dispositions — KHÔNG báo cáo lợi nhuận / tồn kho nào đọc giá trị huỷ ước tính ở bản này");
+  assert.deepEqual(docSo, [], "chỉ các tệp khai ở DUOC_DOC được đọc return_dispositions — KHÔNG báo cáo lợi nhuận / tồn kho nào đọc giá trị huỷ ước tính ở bản này");
 
   const dv = boChuThich(nguon("lib/returns/disposition.ts"));
   assert.ok(!/insert\(\s*schema\.stockReceipt/.test(dv), "lõi kết cục KHÔNG tự lập phiếu kho — chỉ đi qua createRestockReceipt của trạm kiểm");

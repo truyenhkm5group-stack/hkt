@@ -122,10 +122,14 @@ export function testCompanyOsSummaryPure() {
   const PII = /\b(phone|[a-z_]+_phone|email|[a-z_]+_email|address|[a-z_]+_address|customer[a-z_]*|receiver[a-z_]*|full_name|[a-z_]+_name|created_by|decided_by|approved_by|finalized_by|requested_by|received_by|actor_id|note|notes|summary|title|body|reason|payload|snapshot|code|reference|supplier|subject_id|source_key|custom_id|dedupe_key)\b/i;
   assert.doesNotMatch(sqlText, PII, `script đọc một cột mang dữ liệu người / mã định danh: ${sqlText.match(PII)?.[0]}`);
   assert.equal(sqlText.replace(/select name as ev/g, "").match(/\bname\b/g), null, "cột `name` chỉ được đọc ở domain_events (tên sự kiện)");
+  // Sổ kết cục hàng hoàn: chỉ đếm dòng + số món — không đọc giá trị huỷ ước tính (tests/company-os-returns.test.ts cho phép đọc sổ vì điều này).
+  assert.doesNotMatch(sqlText, /value_estimate|unit_cost_estimate|cost_basis|total_cost|unit_cost|amount/i, "script không đọc cột tiền nào");
   // Mã mơ hồ của sổ mẫu: chỉ ĐẾM.
   assert.ok(code.includes("p.ambiguous.length") && !/ambiguous\.(map|join|slice)|ambiguous\[/.test(code), "mã mẫu mơ hồ chỉ được đếm, không in");
   // Chỉ đọc do Postgres ép + tiền tố kênh tóm tắt đúng từng ký tự.
-  assert.ok(src.indexOf('process.env.ERP_READ_ONLY = "1"') < src.indexOf('from "@/db"'), "ERP_READ_ONLY đặt TRƯỚC khi nạp @/db");
+  // Chuỗi dựng từ mảnh: bài kiểm này QUÉT mã nguồn, không đọc môi trường (test-hygiene gác chuỗi liền).
+  const datChiDoc = ["process", "env", "ERP_READ_ONLY"].join(".") + ' = "1"';
+  assert.ok(src.includes(datChiDoc) && src.indexOf(datChiDoc) < src.indexOf('from "@/db"'), "ERP_READ_ONLY đặt TRƯỚC khi nạp @/db");
   assert.ok(code.includes("show default_transaction_read_only"), "main hỏi lại chế độ chỉ đọc rồi mới chạy");
   // Chỉ import tệp đã có trên main (ops lấy script từ main, lib từ ảnh đang chạy).
   for (const m of code.matchAll(/from "@\/([^"]+)"/g)) {

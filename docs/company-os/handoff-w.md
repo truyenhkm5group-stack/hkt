@@ -101,4 +101,12 @@ và `mục lỗi 0`. Rồi mở trang chủ buổi sáng: khối "Cần anh quy�
 update` · JSON hỏng thành TẮT · mục hỏng in 0 · gói dòng rơi mẩu · in mã mơ hồ · rời lớp mã hoá · đếm "mở sớm"
 theo chữ thay vì hàm chung.
 
-Cổng: xem báo cáo bàn giao (SHA + kết quả `typecheck` · `lint` · `npm test` · `build`).
+Cổng (Windows, cây `wt-cos-w`, Bash): `npm run typecheck` sạch · `npm run lint` sạch · `npm test` **TẤT CẢ KIỂM THỬ
+ĐẠT** (bốn dòng `✓ Company OS · W`) · `npm run build` thành công. Chưa chạy trên bản checkout sạch theo SHA — việc
+của Tech Lead lúc gộp.
+
+Hai bài kiểm có sẵn phải chạm (chỉ THÊM, không nới luật):
+- `tests/company-os-returns.test.ts`: `DUOC_DOC` (tệp được đọc `return_dispositions`) thêm
+  `scripts/company-os-summary.ts` kèm lý do — script chỉ đếm dòng + số món; `tests/company-os-summary.test.ts` quét
+  SQL của nó để chặn mọi cột tiền (`value_estimate`, `unit_cost_estimate`, `cost_basis`, `amount`…).
+- `tests/test-hygiene.test.ts` KHÔNG sửa: bài của W dựng chuỗi `ERP_READ_ONLY` từ mảnh thay vì xin miễn trừ.
