@@ -110,7 +110,7 @@ export const VIDEO_VARIANT_STATUS_LABEL: Record<VideoVariantStatus, string> = {
 };
 
 /** Loại việc trong hàng đợi. Mở rộng danh sách, không đổi nghĩa một loại đã có. */
-export const VIDEO_JOB_KINDS = ["SCRIPT", "CLIP", "TTS", "RENDER", "QC", "CAPTION", "PUBLISH_REEL"] as const;
+export const VIDEO_JOB_KINDS = ["SCRIPT", "CLIP", "TTS", "RENDER", "QC", "CAPTION", "PUBLISH_REEL", "CREATE_AD", "PAUSE_AD"] as const;
 export type VideoJobKind = (typeof VIDEO_JOB_KINDS)[number];
 
 export const VIDEO_JOB_KIND_LABEL: Record<VideoJobKind, string> = {
@@ -121,6 +121,8 @@ export const VIDEO_JOB_KIND_LABEL: Record<VideoJobKind, string> = {
   QC: "Kiểm chất lượng",
   CAPTION: "Viết content",
   PUBLISH_REEL: "Đăng Reel",
+  CREATE_AD: "Tạo quảng cáo",
+  PAUSE_AD: "Tắt quảng cáo",
 };
 
 /**
@@ -240,10 +242,10 @@ export const VIDEO_SCALE_HARD_LIMITS = {
 export const VIDEO_ASSET_CHUNK_BYTES = 2 * 1024 * 1024;
 
 /** Số lần thử TỰ ĐỘNG tối đa, theo loại việc. Chỉ lỗi `TRANSIENT` / `TIMEOUT` được tự thử lại. */
-export const VIDEO_JOB_MAX_ATTEMPTS: Record<VideoJobKind, number> = { SCRIPT: 2, CLIP: 3, TTS: 3, RENDER: 2, QC: 3, CAPTION: 2, PUBLISH_REEL: 4 };
+export const VIDEO_JOB_MAX_ATTEMPTS: Record<VideoJobKind, number> = { SCRIPT: 2, CLIP: 3, TTS: 3, RENDER: 2, QC: 3, CAPTION: 2, PUBLISH_REEL: 4, CREATE_AD: 3, PAUSE_AD: 6 };
 
 /** Trần thời gian MỘT lượt cầm việc (ms). Quá ⇒ lượt sau coi là chết và nhả (`TIMEOUT`). */
-export const VIDEO_JOB_LEASE_MS: Record<VideoJobKind, number> = { SCRIPT: 4 * 60_000, CLIP: 3 * 60_000, TTS: 2 * 60_000, RENDER: 8 * 60_000, QC: 3 * 60_000, CAPTION: 3 * 60_000, PUBLISH_REEL: 6 * 60_000 };
+export const VIDEO_JOB_LEASE_MS: Record<VideoJobKind, number> = { SCRIPT: 4 * 60_000, CLIP: 3 * 60_000, TTS: 2 * 60_000, RENDER: 8 * 60_000, QC: 3 * 60_000, CAPTION: 3 * 60_000, PUBLISH_REEL: 6 * 60_000, CREATE_AD: 6 * 60_000, PAUSE_AD: 2 * 60_000 };
 
 /** Trần tổng thời gian chờ nhà cung cấp cho một clip — Veo thường 1–6 phút; quá 20 phút coi như hỏng. */
 export const VIDEO_CLIP_DEADLINE_MS = 20 * 60_000;
@@ -282,6 +284,13 @@ export type VideoScaleConfig = {
   burnSubtitles: boolean;
   /** Kích thước bản hoàn chỉnh. Reels khuyên 1080×1920, tối thiểu 540×960. */
   outputHeight: 1280 | 1920;
+  /** Trần ngân sách ngày của TẤT CẢ quảng cáo Video Scale đang chạy (VND). `null` = CHƯA KHAI ⇒ không bật quảng cáo nào. */
+  adsGlobalDailyCapVnd: number | null;
+  /**
+   * Mẩu quảng cáo MẪU (id Facebook) — máy chép đối tượng / mục tiêu tối ưu / đích tin nhắn / nút kêu gọi từ đây, không tự đoán.
+   * Rỗng ⇒ dùng mẩu mẫu của Thư viện Media (`creative.config.templateAdId`).
+   */
+  adTemplateAdId: string;
   /**
    * Câu CHÍNH SÁCH BÁN HÀNG người đã khai (vd "Mua 2 sản phẩm miễn phí vận chuyển"). Là nguồn DUY NHẤT cho mọi khuyến
    * mãi / miễn ship / quà tặng trên kịch bản và câu chữ — không có dòng nào ⇒ không câu khuyến mãi nào được viết.
@@ -305,6 +314,8 @@ export const DEFAULT_VIDEO_SCALE_CONFIG: VideoScaleConfig = {
   burnSubtitles: true,
   outputHeight: 1280,
   policyLines: [],
+  adsGlobalDailyCapVnd: null,
+  adTemplateAdId: "",
 };
 
 export const POLICY_LINES_MAX = 5;
@@ -349,6 +360,11 @@ export function normalizeVideoScaleConfig(raw: unknown): VideoScaleConfig {
     keepNativeAudio: r.keepNativeAudio !== false,
     burnSubtitles: r.burnSubtitles !== false,
     outputHeight: Number(r.outputHeight) === 1920 ? 1920 : 1280,
+    adsGlobalDailyCapVnd: (() => {
+      const g = typeof r.adsGlobalDailyCapVnd === "number" ? r.adsGlobalDailyCapVnd : typeof r.adsGlobalDailyCapVnd === "string" && r.adsGlobalDailyCapVnd.trim() !== "" ? Number(r.adsGlobalDailyCapVnd) : NaN;
+      return Number.isFinite(g) && g > 0 ? Math.min(Math.round(g), VIDEO_ADS_HARD_LIMITS.maxGlobalDailyVnd) : null;
+    })(),
+    adTemplateAdId: typeof r.adTemplateAdId === "string" && /^[0-9]{5,25}$/.test(r.adTemplateAdId.trim()) ? r.adTemplateAdId.trim() : "",
     policyLines: Array.isArray(r.policyLines)
       ? r.policyLines
           .filter((x): x is string => typeof x === "string")
@@ -521,3 +537,159 @@ export function parseVideoAutomation(raw: { ok: true; value: string | null } | {
 
 /** Quyền Facebook mà việc đăng Reel cần (tài liệu Reels Publishing). `read_insights` cho số đo bài (PR 4). */
 export const FB_PAGE_PUBLISH_SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts"] as const;
+
+// ───────────────────────────── QUẢNG CÁO META (PR 3) ─────────────────────────────
+
+/**
+ * Chế độ quảng cáo THEO MÃ:
+ *  · `DRAFT`          — máy chỉ LẬP bản nháp trong ERP (tên, ngân sách, nội dung); không một lời gọi Facebook nào.
+ *  · `PUBLISH_PAUSED` — máy dựng chiến dịch / nhóm / quảng cáo trên Facebook, chiến dịch TẮT; người bấm "Bật".
+ *  · `AUTO_LAUNCH`    — máy dựng rồi TỰ BẬT khi video + bài Reel đạt điều kiện, đúng mapping, còn ngân sách, có luật tắt.
+ *    Bật chế độ này là MỘT lần duyệt có người đứng tên (ghi nhật ký) cho một phong bì tiền đã khai — không phải AUTO của
+ *    nấc quyền quảng cáo (`MAX_ALLOWED_ADS_WRITE_MODE` vẫn là COPILOT; chốt env + công tắc khẩn cấp vẫn áp từng lời ghi).
+ */
+export const VIDEO_ADS_MODES = ["DRAFT", "PUBLISH_PAUSED", "AUTO_LAUNCH"] as const;
+export type VideoAdsMode = (typeof VIDEO_ADS_MODES)[number];
+
+export const VIDEO_ADS_MODE_LABEL: Record<VideoAdsMode, string> = {
+  DRAFT: "Chỉ lập nháp trong ERP",
+  PUBLISH_PAUSED: "Dựng trên Facebook, TẮT — người bấm bật",
+  AUTO_LAUNCH: "Tự dựng + tự bật trong trần ngân sách",
+};
+
+export const VIDEO_AD_STATUSES = ["DRAFT", "QUEUED", "CREATING", "PAUSED", "ACTIVE", "FAILED", "STOPPED"] as const;
+export type VideoAdStatus = (typeof VIDEO_AD_STATUSES)[number];
+
+export const VIDEO_AD_STATUS_LABEL: Record<VideoAdStatus, string> = {
+  DRAFT: "Nháp (chưa lên Facebook)",
+  QUEUED: "Chờ dựng",
+  CREATING: "Đang dựng",
+  PAUSED: "Đã dựng, đang TẮT",
+  ACTIVE: "Đang chạy",
+  FAILED: "Lỗi",
+  STOPPED: "Đã dừng",
+};
+
+/**
+ * TRẦN CỨNG của quảng cáo Video Scale (VND / NGÀY) — cùng mức với scale mẫu thắng của vòng mẫu ảnh (chủ shop 24/09/2026:
+ * 500.000đ / ngày mỗi chiến dịch, tổng 5.000.000đ). Cấu hình theo mã / toàn module chỉ LÀM HẸP. Chưa khai trần mã / trần
+ * toàn module ⇒ không bật được quảng cáo nào (máy không đoán ngân sách).
+ */
+export const VIDEO_ADS_HARD_LIMITS = {
+  minDailyBudgetVnd: 20_000,
+  maxDailyBudgetPerAdVnd: 500_000,
+  maxSkuDailyVnd: 2_000_000,
+  maxGlobalDailyVnd: 5_000_000,
+  /** Một lần tăng ngân sách tối đa +30% (cùng `ADS_WRITE_LIMITS.maxStepPct`). */
+  maxStepPct: 0.3,
+  /** Mỗi quảng cáo tối đa một lần đổi ngân sách mỗi ngày. */
+  maxBudgetChangesPerDay: 1,
+} as const;
+
+export type VideoAdAction = "CREATE" | "ACTIVATE" | "SET_BUDGET" | "PAUSE";
+
+export const VIDEO_AD_DENIALS = [
+  "WRITE_CLOSED",
+  "AUTOMATION_PAUSED",
+  "SKU_PAUSED",
+  "PAGE_PAUSED",
+  "NOT_APPROVED",
+  "TEST_DATA",
+  "QC_FAILED",
+  "REEL_NOT_PUBLISHED",
+  "MAPPING_CHANGED",
+  "NO_AD_ACCOUNT",
+  "NO_TEMPLATE",
+  "NO_KILL_RULES",
+  "NO_BUDGET",
+  "BELOW_MIN_BUDGET",
+  "OVER_AD_CAP",
+  "OVER_SKU_CAP",
+  "OVER_GLOBAL_CAP",
+  "STEP_TOO_BIG",
+  "RATE_LIMIT",
+  "NOT_ON_FACEBOOK",
+] as const;
+export type VideoAdDenial = (typeof VIDEO_AD_DENIALS)[number];
+
+export type VideoAdGateInput = {
+  action: VideoAdAction;
+  /** Lý do đường ghi Facebook đang đóng (`adsWriteDisabledReason()`), `null` = mở. */
+  writeClosed: string | null;
+  automationPaused: boolean;
+  skuPaused: boolean;
+  pagePaused: boolean;
+  variant: { approved: boolean; isTest: boolean; qcFailed: boolean };
+  reelPublished: boolean;
+  mappingOk: boolean;
+  adAccountId: string | null;
+  templateAdId: string | null;
+  killRules: number;
+  /** Đã có id Facebook (chiến dịch) — bật / đổi ngân sách / tắt cần. */
+  onFacebook: boolean;
+  /** Ngân sách ngày của quảng cáo NÀY sau hành động (VND). */
+  budgetVnd: number | null;
+  /** Ngân sách ngày hiện tại trên Facebook (đổi ngân sách). */
+  currentBudgetVnd: number | null;
+  budgetChangesToday: number;
+  caps: { perAdVnd: number | null; skuVnd: number | null; globalVnd: number | null };
+  /** Tổng ngân sách ngày của quảng cáo ĐANG CHẠY (không tính quảng cáo này). */
+  activeSkuVnd: number;
+  activeGlobalVnd: number;
+};
+
+export type VideoAdGate = { allow: true } | { allow: false; denial: VideoAdDenial; reason: string };
+
+const deny = (denial: VideoAdDenial, reason: string): VideoAdGate => ({ allow: false, denial, reason });
+const vnd = (n: number) => `${Math.round(n).toLocaleString("vi-VN")}đ`;
+
+/**
+ * CỔNG GHI QUẢNG CÁO CỦA VIDEO SCALE — hàm THUẦN, thứ tự chốt cố định (kiểm thử khoá cả thứ tự).
+ *
+ * `PAUSE` luôn được (tắt chỉ làm GIẢM tiền — kể cả khi mọi công tắc đang kéo; `graphPost` cũng để `status=PAUSED` đi qua
+ * công tắc khẩn cấp). Mọi hành động khác đi qua: đường ghi mở → không dừng khẩn cấp ở cấp nào → video đã duyệt, không phải
+ * dữ liệu thử, QC không loại → bài Reel đã đăng + fanpage chưa đổi → có tài khoản quảng cáo + mẩu mẫu → (bật / đổi ngân sách)
+ * có luật tắt → ngân sách hợp lệ và trong ba trần: quảng cáo · mã · toàn module.
+ */
+export function gateVideoAd(i: VideoAdGateInput): VideoAdGate {
+  if (i.action === "PAUSE") return i.onFacebook ? { allow: true } : deny("NOT_ON_FACEBOOK", "Quảng cáo chưa lên Facebook — không có gì để tắt.");
+  if (i.writeClosed) return deny("WRITE_CLOSED", `Đường ghi Facebook đang đóng: ${i.writeClosed}`);
+  if (i.automationPaused) return deny("AUTOMATION_PAUSED", "Video Scale đang DỪNG mọi tự động.");
+  if (i.skuPaused) return deny("SKU_PAUSED", "Mã đang dừng khẩn cấp.");
+  if (i.pagePaused) return deny("PAGE_PAUSED", "Fanpage đang dừng khẩn cấp.");
+  if (i.variant.isTest) return deny("TEST_DATA", "Video là DỮ LIỆU THỬ — không bao giờ thành quảng cáo.");
+  if (!i.variant.approved) return deny("NOT_APPROVED", "Video chưa được duyệt.");
+  if (i.variant.qcFailed) return deny("QC_FAILED", "Video bị QC loại.");
+  if (!i.reelPublished) return deny("REEL_NOT_PUBLISHED", "Bài Reel của video chưa đăng xong.");
+  if (!i.mappingOk) return deny("MAPPING_CHANGED", "Fanpage của mã đã đổi so với bài Reel — không chạy quảng cáo trên fanpage cũ.");
+  if (!i.adAccountId) return deny("NO_AD_ACCOUNT", "Mã chưa được gán TÀI KHOẢN QUẢNG CÁO.");
+  if (!i.templateAdId) return deny("NO_TEMPLATE", "Chưa khai MẨU QUẢNG CÁO MẪU (đối tượng, mục tiêu tối ưu, nút kêu gọi) — máy không tự đoán.");
+  if (i.action === "CREATE") return { allow: true };
+  if (i.action === "ACTIVATE" && !i.onFacebook) return deny("NOT_ON_FACEBOOK", "Quảng cáo chưa được dựng trên Facebook.");
+  if (i.killRules <= 0) return deny("NO_KILL_RULES", "Chưa khai luật TẮT quảng cáo (Thư viện Media → Cấu hình & luật) — không bật / tăng tiền khi không có gì tự dừng quảng cáo.");
+  const L = VIDEO_ADS_HARD_LIMITS;
+  if (i.budgetVnd === null || i.caps.perAdVnd === null || i.caps.skuVnd === null || i.caps.globalVnd === null) {
+    return deny("NO_BUDGET", "Chưa khai đủ ngân sách: ngân sách ngày mỗi quảng cáo, trần mã / ngày và trần toàn module / ngày.");
+  }
+  if (i.budgetVnd < L.minDailyBudgetVnd) return deny("BELOW_MIN_BUDGET", `Ngân sách ngày ${vnd(i.budgetVnd)} dưới sàn ${vnd(L.minDailyBudgetVnd)}.`);
+  const perAd = Math.min(i.caps.perAdVnd, L.maxDailyBudgetPerAdVnd);
+  if (i.budgetVnd > perAd) return deny("OVER_AD_CAP", `Ngân sách ngày ${vnd(i.budgetVnd)} vượt trần mỗi quảng cáo ${vnd(perAd)}.`);
+  if (i.action === "SET_BUDGET") {
+    if (i.budgetChangesToday >= L.maxBudgetChangesPerDay) return deny("RATE_LIMIT", "Quảng cáo này đã đổi ngân sách hôm nay.");
+    if (i.currentBudgetVnd === null) return deny("STEP_TOO_BIG", "Chưa đọc được ngân sách hiện tại — không đổi.");
+    if (i.budgetVnd > i.currentBudgetVnd * (1 + L.maxStepPct) + 0.5) return deny("STEP_TOO_BIG", `Tăng quá ${Math.round(L.maxStepPct * 100)}% một lần (${vnd(i.currentBudgetVnd)} → ${vnd(i.budgetVnd)}).`);
+  }
+  const skuCap = Math.min(i.caps.skuVnd, L.maxSkuDailyVnd);
+  if (i.activeSkuVnd + i.budgetVnd > skuCap) return deny("OVER_SKU_CAP", `Mã đang chạy ${vnd(i.activeSkuVnd)}/ngày; thêm ${vnd(i.budgetVnd)} vượt trần mã ${vnd(skuCap)}.`);
+  const globalCap = Math.min(i.caps.globalVnd, L.maxGlobalDailyVnd);
+  if (i.activeGlobalVnd + i.budgetVnd > globalCap) return deny("OVER_GLOBAL_CAP", `Toàn module đang chạy ${vnd(i.activeGlobalVnd)}/ngày; thêm ${vnd(i.budgetVnd)} vượt trần ${vnd(globalCap)}.`);
+  return { allow: true };
+}
+
+/** Tên chiến dịch / nhóm / quảng cáo — MANG MÃ HÀNG để `resolveCampaign` quy tiền ads về đúng mã, KHÔNG chữ TEST. Hàm THUẦN. */
+export function videoAdNames(input: { code: string; day: string; pageLabel: string; seq: number; angle: string }): { campaign: string; adset: string; ad: string } {
+  const clean = (x: string) => x.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D").replace(/[^A-Za-z0-9]+/g, "").slice(0, 24);
+  const d = input.day.replace(/-/g, "").slice(2);
+  const base = `VS_${input.code}_${d}_${clean(input.pageLabel) || "PAGE"}_V${input.seq}`;
+  return { campaign: base, adset: `${base}_${input.angle}`, ad: `${base}_${input.angle}_VIDEO` };
+}

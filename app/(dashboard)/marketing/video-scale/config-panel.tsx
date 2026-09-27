@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { saveVideoScaleConfigAction, toggleVideoMusicAction, uploadVideoMusicAction } from "@/lib/actions/video-scale";
-import { TTS_VOICES, VEO_MODELS, VEO_PRICE_USD_PER_SECOND, VIDEO_SCALE_HARD_LIMITS, type VideoScaleConfig } from "@/lib/constants/video-scale";
+import { TTS_VOICES, VEO_MODELS, VEO_PRICE_USD_PER_SECOND, VIDEO_ADS_HARD_LIMITS, VIDEO_SCALE_HARD_LIMITS, type VideoScaleConfig } from "@/lib/constants/video-scale";
 import type { MusicRow } from "@/lib/queries/video-scale";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -27,6 +27,8 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
   const [c, setC] = useState(config);
   const [cap, setCap] = useState(config.dailyUsdCap === null ? "" : String(config.dailyUsdCap));
   const [policy, setPolicy] = useState(config.policyLines.join("\n"));
+  const [adsCap, setAdsCap] = useState(config.adsGlobalDailyCapVnd === null ? "" : String(config.adsGlobalDailyCapVnd));
+  const [tpl, setTpl] = useState(config.adTemplateAdId);
   const [pending, start] = useTransition();
   const set = <K extends keyof VideoScaleConfig>(k: K, v: VideoScaleConfig[K]) => setC((x) => ({ ...x, [k]: v }));
   const perSec = VEO_PRICE_USD_PER_SECOND[c.model][c.resolution];
@@ -34,7 +36,7 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
 
   const save = () =>
     start(async () => {
-      const r = await saveVideoScaleConfigAction({ ...c, dailyUsdCap: cap.trim(), policyLines: policy.split("\n").map((x) => x.trim()).filter(Boolean) });
+      const r = await saveVideoScaleConfigAction({ ...c, dailyUsdCap: cap.trim(), policyLines: policy.split("\n").map((x) => x.trim()).filter(Boolean), adsGlobalDailyCapVnd: adsCap.trim(), adTemplateAdId: tpl.trim() });
       if ("error" in r) return void toast.error(r.error);
       toast.success("Đã lưu cấu hình Video Scale.");
     });
@@ -131,6 +133,16 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
         <h2 className="text-[14px] font-semibold">Chính sách bán hàng được phép nói</h2>
         <p className="text-[12px] text-muted-foreground">Mỗi dòng một câu (tối đa 5). Đây là nguồn DUY NHẤT cho khuyến mãi / miễn ship / quà tặng trên kịch bản và câu chữ — trống ⇒ máy không viết câu khuyến mãi nào.</p>
         <Textarea rows={3} value={policy} disabled={!canConfig} onChange={(e) => setPolicy(e.target.value)} placeholder="vd: Mua 2 sản phẩm miễn phí vận chuyển" />
+      </section>
+
+      <section className="space-y-3 rounded-lg border p-3">
+        <h2 className="text-[14px] font-semibold">Quảng cáo</h2>
+        <Row label="Trần ngân sách ngày TOÀN MODULE (VND)" hint={`Tổng mọi quảng cáo Video Scale đang chạy. Để trống = không bật quảng cáo nào. Trần cứng ${VIDEO_ADS_HARD_LIMITS.maxGlobalDailyVnd.toLocaleString("vi-VN")}đ.`}>
+          <Input className="h-8 w-36" inputMode="numeric" value={adsCap} disabled={!canConfig} onChange={(e) => setAdsCap(e.target.value)} placeholder="vd 1000000" />
+        </Row>
+        <Row label="Mẩu quảng cáo MẪU (id)" hint="Máy chép đối tượng, mục tiêu tối ưu, đích tin nhắn, nút kêu gọi từ mẩu này. Để trống = dùng mẩu mẫu của Thư viện Media.">
+          <Input className="h-8 w-56" inputMode="numeric" value={tpl} disabled={!canConfig} onChange={(e) => setTpl(e.target.value)} placeholder="vd 120212345678901234" />
+        </Row>
       </section>
 
       {canConfig ? (

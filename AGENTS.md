@@ -586,6 +586,12 @@ deploy dừng, không phải cảnh báo.
     QC loại không bao giờ `APPROVED` (CHECK ở CSDL); máy chỉ tự duyệt QC `PASS`, không bao giờ `FLAG`.
     Bộ sinh giả chỉ ngoài production và mọi thứ nó sinh mang `is_test`. Nhạc chỉ từ thư viện có khai
     quyền. `VIDEO_SCALE_EVERY_MINUTES` chi tiền thật nên fail-closed như `CREATIVE_LOOP_EVERY_MINUTES`.
+    Fanpage đăng Reel CHỈ từ ánh xạ người gán cho mã (không đoán theo tên), mặc định CHỜ NGƯỜI; bước
+    `finish` mang dấu `pending_step` ghi trước nên thử lại không bao giờ ra hai bài. Quảng cáo: một
+    video × một tài khoản = một quảng cáo, chiến dịch riêng dựng TẮT; bật / tăng tiền chỉ qua
+    `gateVideoAd` (có luật tắt, ba trần: quảng cáo · mã · toàn module, +30% / 1 lần / ngày); tắt luôn
+    được. `AUTO_LAUNCH` là lời duyệt thường trực có phong bì tiền đứng tên — KHÔNG nâng
+    `MAX_ALLOWED_ADS_WRITE_MODE`.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

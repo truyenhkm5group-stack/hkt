@@ -935,3 +935,44 @@ export async function readReelStatus(pageId: string, videoId: string): Promise<R
   const token = await pageAccessToken(pageId);
   return parseReelStatus(await graphGet(assertFbId(videoId, "id video"), { fields: "status,permalink_url" }, token));
 }
+
+/* ═══════════════════ VIDEO SCALE — QUẢNG CÁO VIDEO (chủ shop 27/09/2026, `docs/video-scale.md` §PR3) ═══════════════════
+ *
+ * Tham số: developers.facebook.com/docs/marketing-api/reference/ad-account/advideos (đọc 27/09/2026) — `POST act_{id}/advideos`
+ * nhận `file_url` (Facebook tự tải video về) + `name`, trả `{ id }`; video phải `status.video_status = ready` trước khi dựng
+ * bài quảng cáo. `file_url` là LINK KÝ TÊN, hết hạn sau 2 giờ, chỉ mở được video ĐÃ DUYỆT (`/api/video-scale/public/…`).
+ * Chiến dịch / nhóm / quảng cáo / bật dùng LẠI đúng `createTestCampaign` (luôn TẮT, ABO) · `createTestAdset` (ngân sách NGÀY) ·
+ * `createAd` · `activateTestCampaign` — không lời ghi mới nào cho tiền.
+ */
+
+/** Tải video lên thư viện của tài khoản quảng cáo bằng link ký tên. Tải trùng chỉ thêm một video không ai dùng — không tốn tiền. */
+export async function uploadAdVideoFromUrl(accountId: string, input: { fileUrl: string; name: string }): Promise<string> {
+  const u = new URL(input.fileUrl);
+  if (u.protocol !== "https:") throw new IntegrationError("Facebook: link video phải là https.", 400);
+  const rec = await graphPost(actPath(accountId, "advideos"), { file_url: input.fileUrl, name: input.name });
+  return requireId(rec, "tải video quảng cáo");
+}
+
+/** Trạng thái xử lý của một video quảng cáo — CHỈ ĐỌC. */
+export async function readAdVideoStatus(videoId: string): Promise<{ status: string; error: string | null }> {
+  const rec = await graphGet(assertFbId(videoId, "id video"), { fields: "status" });
+  const st = asRecord(rec.status) ?? {};
+  const status = asText(st.video_status) ?? "";
+  const err = asRecord(asRecord(st.processing_phase)?.error)?.message;
+  return { status, error: typeof err === "string" && err ? err : status === "error" ? "Facebook báo video lỗi khi xử lý." : null };
+}
+
+/** Loại tiền của tài khoản quảng cáo — CHỈ ĐỌC. Ngân sách gửi đi quy theo loại tiền này (VND hệ số 1, USD hệ số 100). */
+export async function readAdAccountCurrency(accountId: string): Promise<string> {
+  const rec = await graphGet(actPath(accountId, "").replace(/\/$/, ""), { fields: "currency" });
+  const c = asText(rec.currency);
+  if (!c) throw new IntegrationError("Facebook: không đọc được loại tiền của tài khoản quảng cáo.", 502, false, rec);
+  return c;
+}
+
+/** Ngân sách ngày (VND) + trạng thái của một NHÓM quảng cáo — CHỈ ĐỌC. `null` = không đọc được / không phải ngân sách ngày. */
+export async function readAdsetBudget(adsetId: string, currency: string): Promise<{ dailyBudgetVnd: number | null; status: string; effectiveStatus: string }> {
+  const rec = await graphGet(assertFbId(adsetId, "id nhóm"), { fields: "daily_budget,status,effective_status" });
+  const minor = minorOf(rec.daily_budget);
+  return { dailyBudgetVnd: minor === null ? null : fbMinorToVnd(minor, currency), status: asText(rec.status) ?? "", effectiveStatus: asText(rec.effective_status) ?? "" };
+}

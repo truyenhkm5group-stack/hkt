@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, TTS_VOICES, VEO_MODELS, VIDEO_ANGLES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
+import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, TTS_VOICES, VEO_MODELS, VIDEO_ANGLES, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
 const id = z.string().trim().min(1).max(80);
 
@@ -36,6 +36,9 @@ export const videoConfigSchema = z.object({
   burnSubtitles: z.boolean(),
   outputHeight: z.union([z.literal(1280), z.literal(1920)]),
   policyLines: z.array(z.string().trim().max(POLICY_LINE_MAX_CHARS)).max(POLICY_LINES_MAX),
+  /** Chuỗi rỗng = CHƯA KHAI ⇒ không bật quảng cáo nào. */
+  adsGlobalDailyCapVnd: z.union([z.literal(""), z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(VIDEO_ADS_HARD_LIMITS.maxGlobalDailyVnd)]).default(""),
+  adTemplateAdId: z.string().trim().regex(/^([0-9]{5,25})?$/, "Id mẩu quảng cáo mẫu chỉ gồm chữ số").default(""),
 });
 
 export const videoSkuModeSchema = z.object({ productId: id, reviewMode: z.enum(VIDEO_REVIEW_MODES) });
@@ -59,3 +62,19 @@ export const videoPageConfigSchema = z.object({ pageId: id, publishMode: z.enum(
 
 /** Dừng khẩn cấp: `scope` = mã / fanpage / toàn module. Kéo bắt buộc lý do; nhả cũng bắt buộc lý do. */
 export const videoPauseSchema = z.object({ scope: z.enum(["SKU", "PAGE", "ALL"]), id: z.string().trim().max(80).default(""), paused: z.boolean(), reason: z.string().trim().min(3, "Ghi lý do (ít nhất 3 ký tự)").max(300) });
+
+const vndOrEmpty = (max: number) => z.union([z.literal(""), z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(max)]);
+
+export const videoSkuAdsSchema = z.object({
+  productId: id,
+  adAccountId: z.string().trim().regex(/^([0-9]{5,25})?$/, "Tài khoản quảng cáo không hợp lệ").default(""),
+  adsMode: z.enum(VIDEO_ADS_MODES),
+  dailyBudgetPerAdVnd: vndOrEmpty(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd),
+  skuDailyCapVnd: vndOrEmpty(VIDEO_ADS_HARD_LIMITS.maxSkuDailyVnd),
+  autoScale: z.boolean().default(false),
+});
+
+export const videoAdIdSchema = z.object({ adId: id });
+export const videoAdCreateSchema = z.object({ adId: id, activate: z.boolean() });
+export const videoAdPauseSchema = z.object({ adId: id, reason: z.string().trim().min(3, "Ghi lý do tắt").max(300) });
+export const videoAdBudgetSchema = z.object({ adId: id, budgetVnd: z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd) });
