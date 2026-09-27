@@ -12,6 +12,7 @@ import {
   type ValidationFinding,
   type ValidationGroup,
   type ValidationItem,
+  type ValidationReport,
 } from "@/lib/constants/preship-validation";
 
 /**
@@ -277,9 +278,24 @@ export async function getPreshipValidationQueue(): Promise<PreshipValidationQueu
 
 /** Bản soát của MỘT đơn — cho ngăn chi tiết đơn. Cùng một hàm luật, không có đường tính thứ hai. */
 export async function getOrderValidation(orderId: string): Promise<{ report: ReturnType<typeof validateForShipping>; found: boolean }> {
+  const report = (await validateOrdersForShipping([orderId])).get(orderId);
+  if (!report) return { report: { findings: [], blockers: [], warnings: [], readyToShip: true }, found: false };
+  return { report, found: true };
+}
+
+/**
+ * BẢN SOÁT CỦA NHIỀU ĐƠN MỘT LƯỢT — cho danh sách đơn chờ xuất (`/products/reserved`): đơn còn lỗi
+ * `BLOCKER` thì CHƯA đủ điều kiện vào hàng đợi xuất. Hai câu lệnh cho cả danh sách, không một câu
+ * cho mỗi đơn. Đơn không tồn tại thì không có mặt trong kết quả.
+ */
+export async function validateOrdersForShipping(orderIds: string[]): Promise<Map<string, ValidationReport>> {
+  const out = new Map<string, ValidationReport>();
+  const ids = [...new Set(orderIds)];
+  if (!ids.length) return out;
   const db = await getDb();
-  const rows = rowsOf<OrderRaw>(
-    await db.execute(sql`
+  const idList = sql.join(ids.map((i) => sql`${i}`), sql`, `);
+  const [orders, items] = await Promise.all([
+    db.execute(sql`
       select o.id, o.system_id, o.bill_full_name, o.ship_full_name, o.bill_phone, o.ship_phone,
              o.ship_address, o.ship_province, o.total_price_after_discount as total, o.prepaid,
              o.stage::text as stage, o.inserted_at, o.page_id, o.conversation_id,
@@ -290,15 +306,9 @@ export async function getOrderValidation(orderId: string): Promise<{ report: Ret
            where s0.order_id = o.id and coalesce(s0.direction, 'OUTBOUND') <> 'RETURN' and s0.stage::text <> 'CANCELLED'
            order by s0.created_at desc limit 1
         ) s on true
-       where o.id = ${orderId}
-       limit 1
+       where o.id in (${idList})
     `),
-  );
-  const o = rows[0];
-  if (!o) return { report: { findings: [], blockers: [], warnings: [], readyToShip: true }, found: false };
-
-  const items = rowsOf<ItemRaw>(
-    await db.execute(sql`
+    db.execute(sql`
       select i.order_id, i.variant_id, i.sku, i.product_name, i.variation_detail, i.quantity, i.is_bonus,
              pv.variant_count
         from order_items i
@@ -307,30 +317,36 @@ export async function getOrderValidation(orderId: string): Promise<{ report: Ret
            where i.product_id is not null and v.product_id = i.product_id
           having count(*) > 0
         ) pv on true
-       where i.order_id = ${orderId}
+       where i.order_id in (${idList})
     `),
-  );
-
-  const report = validateForShipping({
-    receiverName: (o.ship_full_name || o.bill_full_name || "").trim(),
-    phone: (o.bill_phone || o.ship_phone || "").trim(),
-    address: o.ship_address ?? "",
-    province: o.ship_province ?? "",
-    total: o.total === null || o.total === undefined ? null : Number(o.total),
-    prepaid: o.prepaid === null || o.prepaid === undefined ? null : Number(o.prepaid),
-    shipmentCod: o.shipment_cod === null || o.shipment_cod === undefined ? null : Number(o.shipment_cod),
-    items: items.map((it) => {
-      const count = it.variant_count === null || it.variant_count === undefined ? null : Number(it.variant_count);
-      return {
-        variantId: it.variant_id,
-        sku: it.sku ?? "",
-        productName: it.product_name ?? "",
-        variationDetail: it.variation_detail ?? "",
-        quantity: Number(it.quantity ?? 0) || 0,
-        hasVariations: count === null ? null : count > 1,
-        isBonus: Boolean(it.is_bonus),
-      };
-    }),
-  });
-  return { report, found: true };
+  ]);
+  const byOrder = new Map<string, ItemRaw[]>();
+  for (const it of rowsOf<ItemRaw>(items)) byOrder.set(it.order_id, [...(byOrder.get(it.order_id) ?? []), it]);
+  for (const o of rowsOf<OrderRaw>(orders)) {
+    out.set(
+      o.id,
+      validateForShipping({
+        receiverName: (o.ship_full_name || o.bill_full_name || "").trim(),
+        phone: (o.bill_phone || o.ship_phone || "").trim(),
+        address: o.ship_address ?? "",
+        province: o.ship_province ?? "",
+        total: o.total === null || o.total === undefined ? null : Number(o.total),
+        prepaid: o.prepaid === null || o.prepaid === undefined ? null : Number(o.prepaid),
+        shipmentCod: o.shipment_cod === null || o.shipment_cod === undefined ? null : Number(o.shipment_cod),
+        items: (byOrder.get(o.id) ?? []).map((it) => {
+          const count = it.variant_count === null || it.variant_count === undefined ? null : Number(it.variant_count);
+          return {
+            variantId: it.variant_id,
+            sku: it.sku ?? "",
+            productName: it.product_name ?? "",
+            variationDetail: it.variation_detail ?? "",
+            quantity: Number(it.quantity ?? 0) || 0,
+            hasVariations: count === null ? null : count > 1,
+            isBonus: Boolean(it.is_bonus),
+          };
+        }),
+      }),
+    );
+  }
+  return out;
 }

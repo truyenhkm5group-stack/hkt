@@ -18,6 +18,7 @@ import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/cons
 import { buildStockSizeMatrix } from "@/lib/inventory/size-matrix";
 import { explainPlan, fmtDateKey, type PlanExplanation } from "@/lib/constants/plan-explain";
 import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
+import { pancakePosProductsUrl } from "@/lib/constants/pancake";
 import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
 import { successTone } from "@/lib/constants/returns";
 import { resolvePeriod } from "@/lib/search-params";
@@ -50,7 +51,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
-  const pancakeUrl = `https://pos.pancake.vn/shop/${env.pancake.shopId}/products`;
+  const pancakeUrl = pancakePosProductsUrl(env.pancake.shopId);
 
   return (
     <div className="space-y-5">
@@ -71,11 +72,13 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               </Button>
             ) : null}
             <SyncButton job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
-            <Button asChild variant="outline" size="sm">
-              <a href={pancakeUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="size-4" /> Mở trên Pancake
-              </a>
-            </Button>
+            {pancakeUrl ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={pancakeUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-4" /> Mở trên Pancake
+                </a>
+              </Button>
+            ) : null}
           </>
         }
       />

@@ -24,7 +24,7 @@ import { getOrderDetail } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 import { getOrderValidation } from "@/lib/queries/preship-validation";
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/constants/preship-validation";
-import { PRE_SHIP_STAGES } from "@/lib/constants/pancake";
+import { pancakePosOrderSearchUrl, pancakePosOrderUrl, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-delivery";
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
@@ -80,7 +80,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const attempts = order.attempts;
   const s = attempts.at(-1) ?? null;
   const paid = order.prepaid + order.transferMoney + order.cash;
-  const pancakeUrl = order.shopId ? `https://pos.pancake.vn/shop/${order.shopId}/orders?id=${order.id}` : `https://pos.pancake.vn/shop/${env.pancake.shopId}/orders`;
+  // Không rõ shop của đơn thì mở danh sách đơn của shop đang kết nối, lọc sẵn theo số đơn.
+  const pancakeUrl = pancakePosOrderUrl(order.id, order.shopId) ?? pancakePosOrderSearchUrl(env.pancake.shopId, order.systemId);
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
   return (
@@ -97,11 +98,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         actions={
           <>
             <SyncOrderButton orderId={order.id} />
-            <Button asChild variant="outline" size="sm">
-              <a href={pancakeUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="size-4" /> Mở trên Pancake
-              </a>
-            </Button>
+            {pancakeUrl ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={pancakeUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-4" /> Mở trên Pancake
+                </a>
+              </Button>
+            ) : null}
           </>
         }
       />

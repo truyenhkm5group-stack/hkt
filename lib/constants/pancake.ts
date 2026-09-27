@@ -139,3 +139,52 @@ export const SOURCE_COLORS: Record<string, string> = {
   Zalo: "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
   Instagram: "bg-pink-50 text-pink-700 dark:bg-pink-950 dark:text-pink-300",
 };
+
+/**
+ * ═══════════ ĐƯỜNG DẪN WEB POS PANCAKE — MỘT CHỖ DUY NHẤT ═══════════
+ *
+ * Mọi liên kết sang pos.pancake.vn dựng ở đây. Bản cũ gõ tay ở từng trang và SAI ở cả bốn nơi:
+ * `/shop/<id>/orders?id=…` trả 404 (web POS không có trang "orders" số nhiều), `/shop/<id>/products`
+ * cũng 404, còn `/shop/orders?search=` thiếu mã shop nên POS đọc chữ "orders" thành mã shop.
+ *
+ * Mẫu đúng đọc từ CHÍNH mã web POS (27/09/2026, bản dựng ea924942): trang đơn là `/shop/<id>/order`,
+ * hàm `getOrderUrl` của POS dựng `…/order?order_id=<id đơn>` (đúng `orders.id` ERP lưu), còn
+ * `?o_c_i=<từ khoá>` là tham số POS đọc từ URL để lọc danh sách đơn. Trang sản phẩm là
+ * `/shop/<id>/product/management`. `tests/pancake-links.test.ts` chặn đường dẫn gõ tay ở nơi khác.
+ */
+export const PANCAKE_POS_WEB = "https://pos.pancake.vn";
+
+function posShop(shopId: string | null | undefined): string | null {
+  const shop = shopId?.trim();
+  return shop ? `${PANCAKE_POS_WEB}/shop/${encodeURIComponent(shop)}` : null;
+}
+
+/**
+ * MỘT ĐƠN TRÊN POS. Không biết shop của đơn ⇒ `null` và nơi gọi KHÔNG vẽ liên kết: mở nhầm shop là
+ * người trực tìm mãi không thấy đơn rồi kết luận đơn không có trên POS.
+ */
+export function pancakePosOrderUrl(orderId: string, shopId: string | null | undefined): string | null {
+  const shop = posShop(shopId);
+  if (!shop || !orderId) return null;
+  return `${shop}/order?order_id=${encodeURIComponent(orderId)}`;
+}
+
+/** DANH SÁCH ĐƠN của shop, lọc sẵn theo một từ khoá (số đơn, SĐT…). Không có từ khoá ⇒ danh sách trần. */
+export function pancakePosOrderSearchUrl(shopId: string | null | undefined, keyword?: string | number | null): string | null {
+  const shop = posShop(shopId);
+  if (!shop) return null;
+  const k = keyword === null || keyword === undefined ? "" : String(keyword).trim();
+  return k ? `${shop}/order?o_c_i=${encodeURIComponent(k)}` : `${shop}/order`;
+}
+
+/** Trang quản lý sản phẩm của shop trên POS. */
+export function pancakePosProductsUrl(shopId: string | null | undefined): string | null {
+  const shop = posShop(shopId);
+  return shop ? `${shop}/product/management` : null;
+}
+
+/** HỘI THOẠI CỦA KHÁCH trên Pancake (inbox). Thiếu trang hoặc mã hội thoại ⇒ `null`. */
+export function pancakeConversationUrl(pageId: string | null | undefined, conversationId: string | null | undefined): string | null {
+  if (!pageId?.trim() || !conversationId?.trim()) return null;
+  return `https://pancake.vn/${pageId.trim()}?c_id=${conversationId.trim()}`;
+}

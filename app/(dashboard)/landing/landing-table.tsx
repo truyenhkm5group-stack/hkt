@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Money, SectionCard } from "@/components/ui-bits";
 import { pushLanding, pushLandingBatch, recheckLanding, setLandingStatus, setLandingVariant } from "@/lib/actions/landing";
 import { PUSH_BLOCK_LABEL } from "@/lib/constants/landing";
+import { pancakePosOrderSearchUrl } from "@/lib/constants/pancake";
 import { LANDING_STATUS_LABEL, LANDING_STATUSES, type LandingStatus } from "@/lib/constants/landing";
 import { OrderOutcomeBadge, OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
 import { formatVND } from "@/lib/format";
@@ -24,7 +25,8 @@ const STATUS_TONE: Record<LandingStatus, string> = {
 
 const fmt = (d: Date | null | undefined) => (d ? new Date(d).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—");
 
-export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]; variants: VariantOption[]; canManage: boolean }) {
+/** `posShopId`: shop POS đang kết nối — đơn nháp landing chỉ có SỐ đơn, nên nút mở danh sách đơn của shop lọc sẵn theo số đó. */
+export function LandingTable({ rows, variants, canManage, posShopId }: { rows: LandingRow[]; variants: VariantOption[]; canManage: boolean; posShopId: string | null }) {
   const [busy, setBusy] = useState<string | null>(null);
   /*
     Ô chọn mẫu mã chỉ DỰNG khi người dùng bấm vào dòng đó. Đo trên production 11/09/2026: trang này
@@ -241,8 +243,8 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                           <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={isBusy} onClick={() => run(r.id, () => recheckLanding(r.id))} title="Tính lại trùng / rủi ro theo dữ liệu mới nhất">
                             <RefreshCw className="size-3.5" /> Kiểm tra lại
                           </Button>
-                          {r.pancakeSystemId && !r.orderId ? (
-                            <a className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline" href={`https://pos.pancake.vn/shop/orders?search=${r.pancakeSystemId}`} target="_blank" rel="noreferrer"><ExternalLink className="size-3" /> Mở POS</a>
+                          {r.pancakeSystemId && !r.orderId && posShopId ? (
+                            <a className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline" href={pancakePosOrderSearchUrl(posShopId, r.pancakeSystemId) ?? undefined} target="_blank" rel="noreferrer"><ExternalLink className="size-3" /> Mở POS</a>
                           ) : null}
                         </div>
                       </TableCell>

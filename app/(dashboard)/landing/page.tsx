@@ -1,6 +1,7 @@
 import { AlertTriangle, CopyX, FileSpreadsheet, PackageCheck, Send, Undo2 } from "lucide-react";
 import { LandingConfigForm } from "@/app/(dashboard)/landing/landing-config";
 import { LandingTable } from "@/app/(dashboard)/landing/landing-table";
+import { env } from "@/lib/env";
 import { ImportButton } from "@/app/(dashboard)/landing/import-button";
 import { AutoRefresh } from "@/app/(dashboard)/landing/auto-refresh";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -92,7 +93,7 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
         </div>
       ) : null}
 
-      <LandingTable rows={rows} variants={variants} canManage={canManage} />
+      <LandingTable rows={rows} variants={variants} canManage={canManage} posShopId={env.pancake.shopId || null} />
     </div>
   );
 }
