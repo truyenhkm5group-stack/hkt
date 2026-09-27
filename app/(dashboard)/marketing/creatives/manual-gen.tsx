@@ -484,9 +484,13 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
               >
                 {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Rocket className="size-3.5" />} Trả về hàng đợi để đăng lại
               </Button>
-            ) : (
-              <p className="text-muted-foreground">Trên Facebook đã có chiến dịch / nhóm của bài (đang TẮT) — xoá tay trên Ads Manager.</p>
-            )}
+            ) : null}
+            {canEdit && img.publishFailure.canRequeue && img.publishFailure.emptyCampaignId ? (
+              <p className="text-muted-foreground">Chiến dịch rỗng {img.publishFailure.emptyCampaignId} (TẮT, chưa có nhóm) còn trên Facebook — không tiêu tiền, xoá tay nếu muốn.</p>
+            ) : null}
+            {!img.publishFailure.canRequeue ? (
+              <p className="text-muted-foreground">Trên Facebook đã có nhóm / mẩu quảng cáo của bài (đang TẮT) — xoá tay trên Ads Manager.</p>
+            ) : null}
           </div>
         ) : null}
         {canEdit ? (

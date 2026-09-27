@@ -91,10 +91,14 @@ export async function testAdsKillSwitchDb(db: Db) {
   const envTruoc = { e: process.env.ADS_WRITE_ENABLED, m: process.env.ADS_WRITE_MODE, t: process.env.FACEBOOK_ACCESS_TOKEN };
   const fetchTruoc = globalThis.fetch;
   const goi: { url: string; body: string }[] = [];
+  /** Phản hồi lỗi xếp hàng cho các lời gọi kế tiếp (HTTP 400 + thân lỗi Facebook); hết hàng ⇒ thành công như cũ. */
+  const loiXepHang: Record<string, unknown>[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const body = typeof init?.body === "string" ? init.body : "";
     goi.push({ url, body });
+    const loi = loiXepHang.shift();
+    if (loi) return new Response(JSON.stringify({ error: loi }), { status: 400, headers: { "content-type": "application/json" } });
     const payload = url.includes("/adimages") ? { images: { a: { hash: "h1" } } } : { id: "1", success: true };
     return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
@@ -149,6 +153,31 @@ export async function testAdsKillSwitchDb(db: Db) {
     await db.update(schema.settings).set({ value: '{"killed":false,"reason":"hết sự cố"}' }).where(eq(schema.settings.key, ADS_WRITE_KILL_KEY));
     assert.equal(await uploadAdImage("act_123", "abc"), "h1");
     assert.equal(goi.length, 1);
+
+    // Khoảng ghi nhận của nhóm mẫu bị từ chối (1885501, 27/09/2026) ⇒ tạo lại ĐÚNG MỘT lần, bỏ attribution_spec; mã khác
+    // hoặc không gửi attribution_spec ⇒ ném nguyên, không thử lại.
+    const nhomMau = { ...template, attributionSpec: [{ event_type: "CLICK_THROUGH", window_days: 7 }, { event_type: "VIEW_THROUGH", window_days: 1 }] };
+    const taoNhom = (t: Parameters<typeof createTestAdset>[1]["template"]) => createTestAdset("act_123", { name: "n", campaignId: "c", lifetimeBudgetMinor: 200000, startTime: new Date(Date.now() + 3_600_000), endTime: new Date(Date.now() + 90_000_000), template: t });
+    const loiKhoang = { message: "Invalid parameter", code: 100, error_subcode: 1885501, error_user_title: "Khoảng thời gian ghi nhận lượt xem không hợp lệ" };
+    goi.length = 0;
+    loiXepHang.push(loiKhoang);
+    assert.equal(await taoNhom(nhomMau), "1", "lần hai (không kèm khoảng ghi nhận) tạo được nhóm");
+    assert.equal(goi.length, 2, "đúng MỘT lần thử lại");
+    assert.ok(new URLSearchParams(goi[0].body).has("attribution_spec"), "lần đầu gửi khoảng ghi nhận của nhóm mẫu");
+    assert.equal(new URLSearchParams(goi[1].body).has("attribution_spec"), false, "lần hai bỏ khoảng ghi nhận");
+    assert.equal(new URLSearchParams(goi[1].body).get("lifetime_budget"), "200000", "mọi trường khác giữ nguyên — trần ngân sách không đổi");
+    goi.length = 0;
+    loiXepHang.push(loiKhoang, loiKhoang);
+    await assert.rejects(taoNhom(nhomMau), /Khoảng thời gian ghi nhận/, "lần thử lại cũng hỏng ⇒ ném, không thử lần ba");
+    assert.equal(goi.length, 2);
+    goi.length = 0;
+    loiXepHang.push({ ...loiKhoang, error_subcode: 1885183 });
+    await assert.rejects(taoNhom(nhomMau));
+    assert.equal(goi.length, 1, "mã khác ⇒ không thử lại");
+    goi.length = 0;
+    loiXepHang.push(loiKhoang);
+    await assert.rejects(taoNhom(template));
+    assert.equal(goi.length, 1, "không gửi khoảng ghi nhận ⇒ không có gì để bỏ, không thử lại");
 
     // Chốt env vẫn đứng trước: công tắc mở không mở được đường ghi đang đóng ở env.
     process.env.ADS_WRITE_ENABLED = "false";

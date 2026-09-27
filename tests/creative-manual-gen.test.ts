@@ -733,16 +733,23 @@ export async function testCreativeManualGenDb(db: Db) {
     // Ảnh KẸT từ trước bản vá (PROMOTED + mẫu hỏng, chưa có chiến dịch) ⇒ nút "Trả về hàng đợi".
     await db.update(schema.creativeManualGenImages).set({ status: "PROMOTED", variantId: v7.id, queuedAt: null }).where(eq(schema.creativeManualGenImages.id, anh7.id));
     const ket = (await listManualGenRuns(db, 50, 25_500, null)).flatMap((r) => r.images).find((x) => x.id === anh7.id);
-    assert.deepEqual(ket?.publishFailure, { batchId: v7.batchId, canRequeue: true }, "thẻ ảnh biết bài hỏng và trả về được");
+    assert.deepEqual(ket?.publishFailure, { batchId: v7.batchId, canRequeue: true, emptyCampaignId: null }, "thẻ ảnh biết bài hỏng và trả về được");
     assert.ok((await requeueFailedManualGenImage(db, anh7.id)).ok);
     assert.ok(await trongHang(anh7.id), "ảnh kẹt về lại hàng đợi");
-    // Đã có chiến dịch trên Facebook ⇒ KHÔNG trả về (tránh đăng trùng).
-    await db.update(schema.creativeManualGenImages).set({ status: "PROMOTED", variantId: v7.id }).where(eq(schema.creativeManualGenImages.id, anh7.id));
-    await db.update(schema.creativeVariants).set({ fbCampaignId: "camp-da-tao" }).where(eq(schema.creativeVariants.id, v7.id));
-    const coCamp = await requeueFailedManualGenImage(db, anh7.id);
-    assert.ok(!coCamp.ok && coCamp.error.includes("Ads Manager"), "đã có chiến dịch ⇒ từ chối, chỉ người xoá tay");
-    await db.update(schema.creativeVariants).set({ fbCampaignId: null }).where(eq(schema.creativeVariants.id, v7.id));
+    // Đã có NHÓM trên Facebook ⇒ KHÔNG trả về (tránh đăng trùng); dấu "đang gửi" cũng vậy.
+    const ketLai = () => db.update(schema.creativeManualGenImages).set({ status: "PROMOTED", variantId: v7.id }).where(eq(schema.creativeManualGenImages.id, anh7.id));
+    await ketLai();
+    await db.update(schema.creativeVariants).set({ fbCampaignId: "camp-da-tao", fbAdsetId: "nhom-da-tao" }).where(eq(schema.creativeVariants.id, v7.id));
+    const coNhom = await requeueFailedManualGenImage(db, anh7.id);
+    assert.ok(!coNhom.ok && coNhom.error.includes("Ads Manager"), "đã có nhóm ⇒ từ chối, chỉ người xoá tay");
+    await db.update(schema.creativeVariants).set({ fbAdsetId: null, fbPendingStep: "CREATE_ADSET" }).where(eq(schema.creativeVariants.id, v7.id));
+    assert.ok(!(await requeueFailedManualGenImage(db, anh7.id)).ok, "dấu 'đang gửi' tạo nhóm ⇒ có thể đã có nhóm ⇒ từ chối");
+    // Chỉ CHIẾN DỊCH RỖNG (hỏng ở bước tạo nhóm, 27/09/2026) ⇒ nút vẫn trả về được, thẻ nói chiến dịch rỗng còn lại.
+    await db.update(schema.creativeVariants).set({ fbPendingStep: "" }).where(eq(schema.creativeVariants.id, v7.id));
+    const ketRong = (await listManualGenRuns(db, 50, 25_500, null)).flatMap((r) => r.images).find((x) => x.id === anh7.id);
+    assert.deepEqual(ketRong?.publishFailure, { batchId: v7.batchId, canRequeue: true, emptyCampaignId: "camp-da-tao" }, "chiến dịch TẮT không nhóm không tiêu được tiền ⇒ trả về được");
     assert.ok((await requeueFailedManualGenImage(db, anh7.id)).ok);
+    assert.ok(await trongHang(anh7.id), "ảnh hỏng ở bước tạo nhóm về lại hàng đợi");
     const c7b = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c7b.ok && c7b.outcome === "LIVE", "sửa xong bấm lại ⇒ đăng được");
     if (c7b.ok) instantIds.push(c7b.batchId);

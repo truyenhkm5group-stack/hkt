@@ -58,7 +58,8 @@ export type ManualGenImageCard = {
    * Ảnh đã bấm đăng mà bài HỎNG / bị gạt: lô để xem sổ ghi + có trả về hàng đợi được không (chưa có chiến dịch / nhóm / mẩu
    * nào trên Facebook). `null` = không hỏng.
    */
-  publishFailure: { batchId: string; canRequeue: boolean } | null;
+  /** `emptyCampaignId` = chiến dịch riêng đã tạo mà chưa có nhóm (TẮT, không tiêu được tiền) — đăng lại sẽ tạo chiến dịch mới. */
+  publishFailure: { batchId: string; canRequeue: boolean; emptyCampaignId: string | null } | null;
 };
 
 type VariantBrief = { status: string | null; batchId: string | null; fbCampaignId: string | null; fbAdsetId: string | null; fbAdId: string | null; fbPendingStep: string | null };
@@ -92,7 +93,7 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
     campaignSetup: parseCampaignSetup(i.campaignSetup),
     publishFailure:
       i.status === "PROMOTED" && vb && vb.batchId && (vb.status === "PUBLISH_FAILED" || vb.status === "REJECTED")
-        ? { batchId: vb.batchId, canRequeue: !vb.fbCampaignId && !vb.fbAdsetId && !vb.fbAdId && !vb.fbPendingStep }
+        ? { batchId: vb.batchId, canRequeue: !vb.fbAdsetId && !vb.fbAdId && !vb.fbPendingStep, emptyCampaignId: vb.fbCampaignId ?? null }
         : null,
   };
 }
