@@ -5,7 +5,9 @@ import type { AdsWriteMode } from "@/lib/constants/ads-write";
 import type { Actor } from "@/lib/constants/actor";
 import {
   CREATIVE_WRITE_DENIAL_REASON,
+  DAILY_BUDGET_MODE,
   PUBLISH_REQUIRED_FIELDS,
+  isDailyBudgetPlan,
   normalizeCreativeConfig,
   variantRuleSet,
   type CreativeLoopConfig,
@@ -136,7 +138,7 @@ type BatchRow = typeof T.creativeBatches.$inferSelect;
 type VariantRow = typeof T.creativeVariants.$inferSelect;
 
 /** Nội dung mà phiếu duyệt khoá, dựng lại từ CSDL. Đường duyệt và đường đăng gọi CHUNG hàm này. */
-export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot">): Promise<ApprovalContent> {
+export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot"> & { plan?: unknown }): Promise<ApprovalContent> {
   const cfg = batchConfig(batch.configSnapshot);
   const rows = await db
     .select({
@@ -157,6 +159,7 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
     startAt: batch.startAt,
     endAt: batch.endAt,
     budgetPerVariantVnd: cfg.budgetPerVariantVnd,
+    ...(isDailyBudgetPlan(batch.plan) ? { budgetMode: DAILY_BUDGET_MODE } : {}),
     killRules: cfg.config.killRules,
     variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline, rules: r.rules ?? null, names: { campaign: r.campaignName, adset: r.adsetName, ad: r.adName } })),
   };
@@ -225,11 +228,19 @@ function errText(e: unknown): string {
 
 /** Tổng tiền test ĐÃ CAM KẾT cho một ngày chạy — đếm trên SỔ (lượt tạo nhóm đã áp), không trên cấu hình. */
 export async function committedTestSpendForDay(db: Exec, actionDay: string): Promise<number> {
+  const fa = T.creativeFbActions;
   const [row] = await db
-    .select({ total: sql<number>`coalesce(sum(${T.creativeFbActions.amountVnd}), 0)::int` })
-    .from(T.creativeFbActions)
-    .where(and(eq(T.creativeFbActions.actionDay, actionDay), eq(T.creativeFbActions.action, "CREATE_ADSET"), eq(T.creativeFbActions.outcome, "APPLIED")));
-  return Number(row?.total ?? 0);
+    .select({ total: sql<number>`coalesce(sum(${fa.amountVnd}), 0)::int` })
+    .from(fa)
+    .where(and(eq(fa.actionDay, actionDay), eq(fa.action, "CREATE_ADSET"), eq(fa.outcome, "APPLIED")));
+  // Camp NGÂN SÁCH NGÀY tạo từ ngày TRƯỚC mà còn chạy (`LIVE`) vẫn tiêu ngân sách ngày của nó HÔM NAY — cộng vào, nếu
+  // không trần ngày chỉ thấy camp mới và camp chạy liên tục thành vô hình với trần (`DAILY_BUDGET_MODE`).
+  const [running] = await db
+    .select({ total: sql<number>`coalesce(sum(${fa.amountVnd}), 0)::int` })
+    .from(fa)
+    .innerJoin(T.creativeVariants, eq(T.creativeVariants.id, fa.variantId))
+    .where(and(lt(fa.actionDay, actionDay), eq(fa.action, "CREATE_ADSET"), eq(fa.outcome, "APPLIED"), sql`${fa.request}->>'budget_kind' = ${DAILY_BUDGET_MODE}`, eq(T.creativeVariants.status, "LIVE")));
+  return Number(row?.total ?? 0) + Number(running?.total ?? 0);
 }
 
 /**
@@ -696,31 +707,25 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
     const g = await gate("CREATE_ADSET", campaignId || null);
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
     const name = names.adset;
-    const request = {
-      account,
-      name,
-      campaign_id: campaignId,
-      lifetime_budget_vnd: c.budgetPerVariantVnd,
-      lifetime_budget_minor: vndToFbMinor(c.budgetPerVariantVnd, cfg.currency),
-      currency: cfg.currency,
-      start_time: b.startAt.toISOString(),
-      end_time: b.endAt.toISOString(),
-      template_ad_id: c.template.adId,
-    };
+    // Ngân sách NGÀY, không giờ kết thúc (lô `INSTANT` từ 27/09/2026 — `DAILY_BUDGET_MODE`) hay TRỌN ĐỜI + giờ kết thúc.
+    // `budget_kind` nằm trong sổ ghi: sổ cam kết của những ngày SAU đọc nó để cộng ngân sách ngày của camp còn chạy.
+    const daily = isDailyBudgetPlan(b.plan);
+    const minor = vndToFbMinor(c.budgetPerVariantVnd, cfg.currency);
+    const request = daily
+      ? { account, name, campaign_id: campaignId, budget_kind: DAILY_BUDGET_MODE, daily_budget_vnd: c.budgetPerVariantVnd, daily_budget_minor: minor, currency: cfg.currency, start_time: b.startAt.toISOString(), end_time: null, template_ad_id: c.template.adId }
+      : { account, name, campaign_id: campaignId, budget_kind: "LIFETIME", lifetime_budget_vnd: c.budgetPerVariantVnd, lifetime_budget_minor: minor, currency: cfg.currency, start_time: b.startAt.toISOString(), end_time: b.endAt.toISOString(), template_ad_id: c.template.adId };
     if (!(await claim("CREATE_ADSET"))) return { kind: "SKIPPED" };
     try {
-      const adsetId = await w.createTestAdset(account, {
-        name,
-        campaignId,
-        lifetimeBudgetMinor: request.lifetime_budget_minor,
-        startTime: b.startAt,
-        endTime: b.endAt,
-        template: c.template.adset,
-      });
+      const adsetId = await w.createTestAdset(
+        account,
+        daily
+          ? { name, campaignId, dailyBudgetMinor: minor, startTime: b.startAt, template: c.template.adset }
+          : { name, campaignId, lifetimeBudgetMinor: minor, startTime: b.startAt, endTime: b.endAt, template: c.template.adset },
+      );
       // Id nhóm và dòng sổ cam kết tiền đi CÙNG một giao dịch: có cái này thì có cái kia.
       await db.transaction(async (tx) => {
         await tx.update(T.creativeVariants).set({ fbAdsetId: adsetId, fbPendingStep: "", fbPendingAt: null, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
-        await c.log({ variantId: v.id, action: "CREATE_ADSET", outcome: "APPLIED", detail: "Đã tạo nhóm test (ngân sách trọn đời + end_time).", targetId: adsetId, amountVnd: c.budgetPerVariantVnd, request }, tx);
+        await c.log({ variantId: v.id, action: "CREATE_ADSET", outcome: "APPLIED", detail: daily ? "Đã tạo nhóm (ngân sách NGÀY, chạy liên tục — luật tắt QC canh tới khi tắt)." : "Đã tạo nhóm test (ngân sách trọn đời + end_time).", targetId: adsetId, amountVnd: c.budgetPerVariantVnd, request }, tx);
       });
       v.fbAdsetId = adsetId;
     } catch (e) {

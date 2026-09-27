@@ -406,7 +406,7 @@ function BatchDetailBlock({ d }: { d: BatchDetail }) {
         <DescriptionList
           columns={3}
           items={[
-            { label: "Khung chạy", value: `${vnShortStamp(b.startAt)} → ${vnShortStamp(b.endAt)}` },
+            { label: "Khung chạy", value: b.dailyBudget ? `${vnShortStamp(b.startAt)} → chạy liên tục (ngân sách ngày)` : `${vnShortStamp(b.startAt)} → ${vnShortStamp(b.endAt)}` },
             { label: "Hạn duyệt", value: vnShortStamp(b.approvalDeadline) },
             { label: "Duyệt", value: b.approvedAt ? `${b.approvedByName || "—"} · ${formatDateTime(b.approvedAt)}` : "Chưa duyệt" },
             { label: "Đăng xong", value: b.publishedAt ? formatDateTime(b.publishedAt) : "—" },

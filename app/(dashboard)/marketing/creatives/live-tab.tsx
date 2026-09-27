@@ -126,7 +126,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                             <p className="truncate font-medium" title={v.headline}>
                               #{v.slot} {v.headline || <span className="italic text-muted-foreground">không tiêu đề</span>}
                             </p>
-                            <p className="truncate text-[11px] text-muted-foreground" title={`${vnShortStamp(v.startAt)} → ${vnShortStamp(v.endAt)}`}>
+                            <p className="truncate text-[11px] text-muted-foreground" title={v.dailyBudget ? `${vnShortStamp(v.startAt)} → chạy liên tục (ngân sách ngày; khung chấm tới ${vnShortStamp(v.endAt)})` : `${vnShortStamp(v.startAt)} → ${vnShortStamp(v.endAt)}`}>
                               Lô {formatDate(v.batchDay)} · {MODE_LABEL[v.mode]} · {VARIANT_STATUS_LABEL[v.status]}
                             </p>
                             <p className="truncate text-[11px] text-muted-foreground">{v.productName ?? v.productId ?? "—"}</p>
@@ -170,7 +170,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                         {canWrite ? (
                           <div className="flex flex-col items-end gap-1">
                             {v.status === "LIVE" ? <PauseNowButton variantId={v.id} slot={v.slot} /> : null}
-                            {v.verdict === "PROMISING" ? <ExtendButton variantId={v.id} slot={v.slot} /> : null}
+                            {v.verdict === "PROMISING" && !v.dailyBudget ? <ExtendButton variantId={v.id} slot={v.slot} /> : null}
                           </div>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">—</span>

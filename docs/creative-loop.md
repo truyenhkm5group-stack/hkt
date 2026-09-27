@@ -113,6 +113,22 @@ Bốn lớp chặn tiêu quá, độc lập nhau: **(a)** cổng thuần từ ch
 ngay trước lời gọi mạng · **(d)** công tắc tắt khẩn cấp `ads.write.kill` đọc lại ngay trước MỖI lời gọi
 ghi, không cần deploy (§9).
 
+**Ngoại lệ có chủ ý — "Đăng camp" chạy NGÂN SÁCH NGÀY, liên tục (chủ shop 27/09/2026).** Lô `INSTANT` đăng từ ngày này
+mang `plan.budgetMode = "DAILY"`: nhóm QC đặt `daily_budget` (≤ 200.000đ/ngày), KHÔNG có `end_time`. Lớp (b) không còn cho
+những camp này — thay bằng: (b′) **luật tắt** là thứ duy nhất tự dừng camp, nên Đăng camp bị CHẶN khi chưa khai luật tắt nào;
+lượt chấm canh camp tới khi nó thật sự tắt (không đánh `ENDED` khi qua khung chấm, mẫu còn `LIVE` luôn được chấm và luôn hiện ở
+"Đang chạy" dù đăng từ bao lâu; không chốt "thua" khi còn LIVE); (b″) **trần 4.000.000đ / ngày** cộng thêm ngân sách ngày của
+mọi camp ngân sách ngày còn LIVE từ những ngày trước (`committedTestSpendForDay`, đọc `request.budget_kind` trong sổ). Facebook
+được phép tiêu vượt ngân sách ngày tới 75% trong một ngày (bù trong tuần). "Tiêu thêm" không áp cho camp ngân sách ngày. Lô cũ
+(không có khoá) giữ nguyên trọn đời + `end_time` như lúc duyệt; digest của phiếu duyệt chỉ mang `budgetMode` khi là `DAILY`,
+nên digest lô cũ không đổi.
+
+**MKTer trong tên chiến dịch (chủ shop 27/09/2026).** Setup camp có ô chọn MKTer (nhân sự trang Lương còn làm, có bí danh). Mã
+= bí danh (ưu tiên một từ, viết hoa, bỏ dấu — `marketerCampaignCode`), ghép ngay sau tên TKQC:
+`TKQC_MãMKTer_ngày_TEST_fanpage_số`. Máy chủ đọc mã theo `marketerId` (không nhận chữ từ trình duyệt) và hỏi CHÍNH
+`resolveMarketer` xem tên cuối cùng có quy về đúng người không — sai (tên tự gõ thiếu mã, hoặc bí danh người khác dài hơn chen
+vào) thì không đăng. Thời gian bắt đầu nằm trong khối setup và lưu cùng bản nháp hàng đợi.
+
 ## 4. Chấm mẫu (`judgeVariant`, hàm thuần)
 
 Thứ tự: `WIN` (vượt `winOrdersAbove` đơn chốt, đã vào thư viện thì không tự rơi ra) → chưa đăng
@@ -601,7 +617,8 @@ kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đ�
   đúng bài ấy; người bấm là lượt duyệt (digest tính từ CSDL, ràng buộc duyệt ở CSDL giữ nguyên); rồi `publishBatchNow` = ĐÚNG
   `publishOneBatch` của lượt tick (công tắc khẩn, năm chốt đầu, cổng từng bước, sổ ghi, dấu "đang gửi"). "Chạy ngay" =
   `start_time` sau lúc bấm `INSTANT_PUBLISH.leadSeconds`; "Hẹn giờ" = đăng NGAY với `start_time` = giờ hẹn (Facebook giữ lịch —
-  ERP chết lúc tới giờ camp vẫn chạy, vẫn tự dừng ở `end_time`). Ngân sách / khung = cấu hình (≤ 200.000đ, ≤ 1 ngày); trần cam
+  ERP chết lúc tới giờ camp vẫn chạy). Từ 27/09/2026 ngân sách là NGÂN SÁCH NGÀY (≤ 200.000đ/ngày), không `end_time` — xem
+  "Ngoại lệ có chủ ý" ở §3; trần cam
   kết / ngày CHUNG với lô hằng ngày (đếm trên sổ). Mọi chốt kiểm TRƯỚC khi ghi — bị chặn thì không để lại lô rỗng. Hỏng khi chưa
   gửi được gì lên Facebook ⇒ ảnh về "Đã duyệt" (bấm lại được), lô `FAILED`; đã gửi một phần ⇒ giữ nguyên, không tự thử lại
   lời gọi tạo (tính chất 4). Tên theo khuôn lấy số thứ tự theo NGÀY chạy trên mọi lô (`nextNameSeqOnDay`). Lịch sử lô gắn nhãn "Đăng lẻ".

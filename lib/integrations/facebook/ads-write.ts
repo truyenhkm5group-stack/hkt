@@ -513,20 +513,34 @@ export async function createAdCreative(
 }
 
 /**
- * Tạo NHÓM quảng cáo test: ngân sách TRỌN ĐỜI + `end_time`.
+ * Ngân sách của nhóm test — HAI hình dạng, không trộn:
+ *  · TRỌN ĐỜI + `end_time` (lô hằng ngày / bài đăng trước 27/09/2026): Facebook tự dừng ở `end_time` và không tiêu quá
+ *    `lifetime_budget`.
+ *  · NGÀY, KHÔNG `end_time` (chủ shop 27/09/2026 — "Đăng camp" chạy liên tục): Facebook tiêu mỗi ngày quanh
+ *    `daily_budget` tới khi luật tắt QC hoặc người tắt (`DAILY_BUDGET_MODE`).
+ */
+export type TestAdsetBudget = { lifetimeBudgetMinor: number; endTime: Date; dailyBudgetMinor?: undefined } | { dailyBudgetMinor: number; lifetimeBudgetMinor?: undefined; endTime?: undefined };
+
+/**
+ * Tạo NHÓM quảng cáo test theo một trong hai hình dạng ngân sách của `TestAdsetBudget`.
  *
- * Đây là lớp chặn tiêu quá thứ hai (`docs/creative-loop.md` §3 lớp b): Facebook tự dừng ở `end_time`
- * và không tiêu quá `lifetime_budget`, nên ERP có chết ngay sau lời gọi này thì lô vẫn không tiêu
- * quá số tiền người đã duyệt. Vì thế hàm TỪ CHỐI mọi lời gọi thiếu một trong hai.
+ * Nhánh trọn đời là lớp chặn tiêu quá thứ hai (`docs/creative-loop.md` §3 lớp b): ERP có chết ngay sau lời gọi này thì
+ * lô vẫn không tiêu quá số tiền người đã duyệt — nên nhánh ấy TỪ CHỐI mọi lời gọi thiếu ngân sách hoặc giờ kết thúc.
+ * Nhánh ngày TỪ CHỐI ngân sách không phải số nguyên dương; giờ kết thúc không có là CHỦ Ý (camp chạy liên tục).
  */
 export async function createTestAdset(
   accountId: string,
-  input: { name: string; campaignId: string; lifetimeBudgetMinor: number; startTime: Date; endTime: Date; template: TemplateAdset },
+  input: { name: string; campaignId: string; startTime: Date; template: TemplateAdset } & TestAdsetBudget,
 ): Promise<string> {
-  if (!Number.isInteger(input.lifetimeBudgetMinor) || input.lifetimeBudgetMinor <= 0) {
-    throw new IntegrationError("Facebook: ngân sách trọn đời phải là số nguyên dương — không tạo nhóm.", 400);
+  const daily = input.dailyBudgetMinor !== undefined;
+  if (daily) {
+    if (!Number.isInteger(input.dailyBudgetMinor) || (input.dailyBudgetMinor ?? 0) <= 0) throw new IntegrationError("Facebook: ngân sách ngày phải là số nguyên dương — không tạo nhóm.", 400);
+  } else {
+    if (!Number.isInteger(input.lifetimeBudgetMinor) || (input.lifetimeBudgetMinor ?? 0) <= 0) {
+      throw new IntegrationError("Facebook: ngân sách trọn đời phải là số nguyên dương — không tạo nhóm.", 400);
+    }
+    if (!input.endTime || !(input.endTime.getTime() > input.startTime.getTime())) throw new IntegrationError("Facebook: nhóm test phải có end_time sau start_time — không tạo nhóm.", 400);
   }
-  if (!(input.endTime.getTime() > input.startTime.getTime())) throw new IntegrationError("Facebook: nhóm test phải có end_time sau start_time — không tạo nhóm.", 400);
   const t = input.template;
   if (!t.targeting || !t.optimizationGoal || !t.billingEvent) {
     throw new IntegrationError("Facebook: mẩu mẫu thiếu đối tượng / mục tiêu tối ưu / sự kiện tính tiền — máy không tự đoán các trường ấy.", 400);
@@ -535,9 +549,8 @@ export async function createTestAdset(
     name: input.name,
     campaign_id: input.campaignId,
     status: "ACTIVE",
-    lifetime_budget: String(input.lifetimeBudgetMinor),
+    ...(daily ? { daily_budget: String(input.dailyBudgetMinor) } : { lifetime_budget: String(input.lifetimeBudgetMinor), end_time: (input.endTime as Date).toISOString() }),
     start_time: input.startTime.toISOString(),
-    end_time: input.endTime.toISOString(),
     targeting: JSON.stringify(t.targeting),
     optimization_goal: t.optimizationGoal,
     billing_event: t.billingEvent,

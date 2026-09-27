@@ -1498,6 +1498,28 @@ export const INSTANT_PUBLISH = { leadSeconds: 120, minScheduleLeadMinutes: 5, ma
  */
 export const DAILY_BATCH_RETIRED = true;
 
+/**
+ * NGÂN SÁCH NGÀY, CHẠY LIÊN TỤC (chủ shop 27/09/2026: "đặt ngân sách mặc định theo ngày chứ không phải ngân sách trọn
+ * đời" · chốt "chạy liên tục, không ngày kết thúc"). Lô `INSTANT` đăng từ nay mang `plan.budgetMode = "DAILY"`: nhóm QC
+ * đặt `daily_budget`, KHÔNG có `end_time` — camp tiêu mỗi ngày tới khi luật tắt QC tắt hoặc người tắt tay.
+ *
+ * Hệ quả, mỗi cái đứng ở đúng một chỗ:
+ *  · `endAt` của lô vẫn là KHUNG CHẤM (luật giữ kết luận sau khung) nhưng KHÔNG gửi lên Facebook, và lượt chấm KHÔNG đánh
+ *    `ENDED` khi qua khung — luật TẮT canh camp tới khi nó thật sự tắt (`evaluate.ts`, `evaluationCandidates`).
+ *  · Trần 4 triệu / ngày: sổ cam kết của một ngày = cam kết ghi cho ngày ấy + ngân sách ngày của mọi camp ngân sách ngày
+ *    ĐANG CHẠY từ các ngày trước (`committedTestSpendForDay`).
+ *  · Trần một camp (`maxBudgetPerVariantVnd`) là trần NGÂN SÁCH NGÀY. Facebook được phép tiêu vượt ngân sách ngày tới 75%
+ *    trong một ngày (bù lại trong tuần) — không phải lỗi của ERP.
+ *  · "Tiêu thêm" (nâng ngân sách trọn đời + dời giờ kết thúc) không áp cho camp này.
+ * Lô cũ (không có khoá) giữ nguyên ngân sách trọn đời + giờ kết thúc như lúc được duyệt.
+ */
+export const DAILY_BUDGET_MODE = "DAILY" as const;
+
+/** Lô chạy ngân sách ngày, không giờ kết thúc? Đọc `plan.budgetMode`. Hàm THUẦN. */
+export function isDailyBudgetPlan(plan: unknown): boolean {
+  return !!plan && typeof plan === "object" && !Array.isArray(plan) && (plan as Record<string, unknown>).budgetMode === DAILY_BUDGET_MODE;
+}
+
 /** Loại lô: `LOOP` = lô hằng ngày (một lô một ngày chạy) · `INSTANT` = một bài người bấm "Đăng camp". */
 export const CREATIVE_BATCH_KINDS = ["LOOP", "INSTANT"] as const;
 export type CreativeBatchKind = (typeof CREATIVE_BATCH_KINDS)[number];

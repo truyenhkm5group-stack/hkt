@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL 
 import { chayKhongJit, schema, type Db } from "@/db";
 import {
   CREATIVE_CONFIG_KEY,
+  isDailyBudgetPlan,
   normalizeCreativeConfig,
   parseVariantRules,
   variantRuleSet,
@@ -341,6 +342,8 @@ export type BatchSummary = {
   slotCount: number;
   startAt: string;
   endAt: string;
+  /** Ngân sách NGÀY, chạy liên tục (`DAILY_BUDGET_MODE`) — `endAt` chỉ là khung chấm, không gửi lên Facebook. */
+  dailyBudget: boolean;
   approvalDeadline: string;
   approvedAt: string | null;
   approvedByName: string;
@@ -419,6 +422,8 @@ export type JudgedVariant = VariantCard & {
   batchDay: string;
   startAt: string;
   endAt: string;
+  /** Ngân sách NGÀY, chạy liên tục (`DAILY_BUDGET_MODE`) — `endAt` chỉ là khung chấm, Facebook không tự dừng. */
+  dailyBudget: boolean;
   metrics: VariantMetricsRow;
   verdict: CreativeVerdict;
   reasons: string[];
@@ -549,6 +554,7 @@ function toBatchSummary(b: BatchRow, counts: Partial<Record<VariantStatus, numbe
     slotCount: b.slotCount,
     startAt: isoReq(b.startAt),
     endAt: isoReq(b.endAt),
+    dailyBudget: isDailyBudgetPlan(b.plan),
     approvalDeadline: isoReq(b.approvalDeadline),
     approvedAt: iso(b.approvedAt),
     approvedByName: b.approvedByName,
@@ -725,6 +731,7 @@ async function judgeCards(db: Db, rows: { card: VariantCard; batch: BatchRow }[]
       batchDay: batch.batchDay,
       startAt: isoReq(batch.startAt),
       endAt: isoReq(batch.endAt),
+      dailyBudget: isDailyBudgetPlan(batch.plan),
       metrics: m,
       verdict: j.verdict,
       reasons: j.reasons,
@@ -829,7 +836,9 @@ export async function listLiveVariants(db: Db, now: Date): Promise<JudgedVariant
     .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, schema.creativeVariants.batchId))
     .leftJoin(schema.products, eq(schema.products.id, schema.creativeVariants.productId))
     .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, schema.creativeVariants.imageId))
-    .where(and(inArray(schema.creativeVariants.status, PUBLISHED_STATUSES), gte(schema.creativeBatches.startAt, from), lte(schema.creativeBatches.startAt, now)))
+    // Mẫu còn `LIVE` luôn hiện dù đăng từ bao lâu: camp ngân sách ngày chạy liên tục (`DAILY_BUDGET_MODE`) — rơi khỏi
+    // cửa sổ 14 ngày là biến mất khỏi "Đang chạy" trong khi vẫn đang tiêu tiền.
+    .where(and(inArray(schema.creativeVariants.status, PUBLISHED_STATUSES), lte(schema.creativeBatches.startAt, now), or(gte(schema.creativeBatches.startAt, from), eq(schema.creativeVariants.status, "LIVE"))))
     .orderBy(desc(schema.creativeBatches.startAt), schema.creativeVariants.slot);
   return judgeCards(
     db,
@@ -1011,7 +1020,7 @@ export const EVALUATE_WINDOW_DAYS = 45;
 
 export type EvaluateCandidate = {
   variant: VariantRow;
-  batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot">;
+  batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot" | "plan">;
 };
 
 /**
@@ -1024,10 +1033,12 @@ export async function evaluationCandidates(db: Db, now: Date): Promise<EvaluateC
   const b = schema.creativeBatches;
   const from = new Date(now.getTime() - EVALUATE_WINDOW_DAYS * 86_400_000);
   const rows = await db
-    .select({ variant: v, batch: { id: b.id, batchDay: b.batchDay, startAt: b.startAt, endAt: b.endAt, configSnapshot: b.configSnapshot } })
+    .select({ variant: v, batch: { id: b.id, batchDay: b.batchDay, startAt: b.startAt, endAt: b.endAt, configSnapshot: b.configSnapshot, plan: b.plan } })
     .from(v)
     .innerJoin(b, eq(b.id, v.batchId))
-    .where(or(and(inArray(v.status, PUBLISHED_STATUSES), sql`coalesce(${v.publishedAt}, ${b.startAt}) >= ${from.toISOString()}::timestamptz`), isNotNull(v.libraryAt)))
+    // Mẫu còn `LIVE` LUÔN được chấm, dù đăng từ bao lâu: camp ngân sách ngày chạy liên tục (`DAILY_BUDGET_MODE`) — rơi
+    // khỏi cửa sổ 45 ngày là luật tắt thôi canh một camp vẫn đang tiêu tiền.
+    .where(or(and(inArray(v.status, PUBLISHED_STATUSES), sql`coalesce(${v.publishedAt}, ${b.startAt}) >= ${from.toISOString()}::timestamptz`), eq(v.status, "LIVE"), isNotNull(v.libraryAt)))
     .orderBy(b.batchDay, v.slot);
   // Khung của TỪNG mẫu là khung hiệu lực (đã tính lượt tiêu thêm) — xem `extendedEndAtOf`.
   const extended = await extendedEndAtOf(

@@ -225,6 +225,8 @@ export const campaignSetupSchema = z
     ageMin: z.number().int().min(CAMPAIGN_SETUP_LIMITS.minAge).max(CAMPAIGN_SETUP_LIMITS.maxAge).nullable(),
     ageMax: z.number().int().min(CAMPAIGN_SETUP_LIMITS.minAge).max(CAMPAIGN_SETUP_LIMITS.maxAge).nullable(),
     gender: z.enum(CAMPAIGN_GENDERS).nullable(),
+    marketerId: z.string().trim().min(1).max(80).nullable().default(null),
+    startAt: z.string().datetime({ offset: true, message: "Giờ bắt đầu không hợp lệ" }).nullable().default(null),
   })
   .strict()
   .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến");

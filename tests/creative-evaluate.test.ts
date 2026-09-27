@@ -102,7 +102,10 @@ export async function testCreativeEvaluate(db: Db) {
     const startB = new Date(now.getTime() - 1 * H);
     const startC = new Date(now.getTime() - 30 * D);
     const startD = new Date(now.getTime() + 26 * H);
-    const batch = (id: string, start: Date, status: string, snapshot: Record<string, unknown>) => ({
+    // Camp NGÂN SÁCH NGÀY, chạy liên tục (chủ shop 27/09/2026): E đã qua khung chấm, F đăng từ 60 ngày trước (ngoài cửa
+    // sổ 45 ngày) — cả hai vẫn LIVE trên Facebook, luật tắt phải canh tiếp.
+    const startF = new Date(now.getTime() - 60 * D);
+    const batch = (id: string, start: Date, status: string, snapshot: Record<string, unknown>, plan: Record<string, unknown> = {}) => ({
       id: `${P}${id}`,
       batchDay: vnDay(start),
       status,
@@ -111,6 +114,9 @@ export async function testCreativeEvaluate(db: Db) {
       endAt: new Date(start.getTime() + D),
       approvalDeadline: new Date(start.getTime() - 30 * 60_000),
       configSnapshot: snapshot,
+      plan,
+      // Camp ngân sách ngày là lô "Đăng camp" (INSTANT) — không vướng khoá một-lô-LOOP-mỗi-ngày.
+      ...(plan.budgetMode ? { kind: "INSTANT" } : {}),
       ruleVersion: 1,
       ...(status === "PUBLISHED" ? { approvedAt: new Date(start.getTime() - H), approvalDigest: "ce-digest" } : {}),
     });
@@ -119,6 +125,8 @@ export async function testCreativeEvaluate(db: Db) {
       batch("batch-b", startB, "PUBLISHED", { killRules: [SNAP_KILL] }),
       batch("batch-c", startC, "PUBLISHED", {}),
       batch("batch-d", startD, "PENDING_APPROVAL", { killRules: [SNAP_KILL], budgetPerVariantVnd: 200_000 }),
+      batch("batch-e", startA, "PUBLISHED", { killRules: [SNAP_KILL] }, { instant: true, budgetMode: "DAILY" }),
+      batch("batch-f", startF, "PUBLISHED", { killRules: [SNAP_KILL] }, { instant: true, budgetMode: "DAILY" }),
     ]);
 
     const variant = (id: string, batchId: string, slot: number, extra: Partial<typeof schema.creativeVariants.$inferInsert>) => ({
@@ -146,6 +154,10 @@ export async function testCreativeEvaluate(db: Db) {
       variant("v-nospend", "batch-b", 3, { status: "LIVE", fbAdId: `${P}ad-nospend`, fbAdsetId: `${P}as-nospend`, genes: { scene: "CAFE" } }),
       // Lô D (chờ duyệt).
       variant("v-pending", "batch-d", 1, { status: "GENERATED", imageId: `${P}img-pending`, headline: "Váy mới" }),
+      // Lô E, F (ngân sách ngày, không giờ kết thúc). Thiếu gen ⇒ không dạy gì, để khối học đứng nguyên.
+      variant("v-daily", "batch-e", 1, { status: "LIVE", fbAdId: `${P}ad-daily`, fbAdsetId: `${P}as-daily`, genes: {} }),
+      variant("v-daily-ok", "batch-e", 2, { status: "LIVE", fbAdId: `${P}ad-daily-ok`, fbAdsetId: `${P}as-daily-ok`, genes: {} }),
+      variant("v-daily-old", "batch-f", 1, { status: "LIVE", fbAdId: `${P}ad-daily-old`, fbAdsetId: `${P}as-daily-old`, genes: {}, publishedAt: startF }),
     ]);
 
     // ─────────── CHI HẠT AD ───────────
@@ -172,6 +184,9 @@ export async function testCreativeEvaluate(db: Db) {
       spend("ad-win", dayA, 180_000, { impressions: 8_000, clicks: 50, messages: 10 }),
       spend("ad-win", shiftDay(dayA, 1), 20_000, { impressions: 1_000, clicks: 5, messages: 1 }),
       spend("ad-lose", dayA, 200_000, { impressions: 9_000, clicks: 40, messages: 2 }),
+      spend("ad-daily", shiftDay(dayA, 2), 120_000, { impressions: 4_000, clicks: 10, messages: 0 }),
+      spend("ad-daily-ok", shiftDay(dayA, 2), 120_000, { impressions: 4_000, clicks: 30, messages: 6 }),
+      spend("ad-daily-old", shiftDay(vnDay(now), -1), 120_000, { impressions: 4_000, clicks: 10, messages: 0 }),
     ]);
 
     // ─────────── ĐƠN THEO ad_id ───────────
@@ -242,13 +257,17 @@ export async function testCreativeEvaluate(db: Db) {
       return { text: "Bản tin thử: bối cảnh quán cà phê đang nhỉnh hơn.", model: "stub" };
     };
     const r1 = await evaluateCreatives(db, now, { writeNarrative: stub });
-    assert.equal(r1.judged, 8, "3 mẫu lô C + 2 lô A + 3 lô B; mẫu chờ duyệt không được chấm");
+    assert.equal(r1.judged, 11, "3 mẫu lô C + 2 lô A + 3 lô B + 3 camp ngân sách ngày (kể cả camp đăng 60 ngày trước — còn LIVE thì luôn được chấm); mẫu chờ duyệt không được chấm");
     assert.deepEqual(
       r1.kills.map((k) => [k.variantId, k.adsetId, k.rule.label]),
-      [[`${P}v-kill`, `${P}as-kill`, SNAP_KILL.label]],
-      "lệnh tắt CHỈ theo luật của lô — luật thêm sau duyệt (clicks < 10) không tắt v-new",
+      [
+        [`${P}v-daily-old`, `${P}as-daily-old`, SNAP_KILL.label],
+        [`${P}v-daily`, `${P}as-daily`, SNAP_KILL.label],
+        [`${P}v-kill`, `${P}as-kill`, SNAP_KILL.label],
+      ],
+      "lệnh tắt CHỈ theo luật của lô — luật thêm sau duyệt (clicks < 10) không tắt v-new; camp ngân sách ngày QUA khung chấm vẫn bị tắt (Facebook không tự dừng nó)",
     );
-    assert.deepEqual(r1.ended, [`${P}v-win`], "LIVE quá endAt ⇒ ENDED");
+    assert.deepEqual(r1.ended, [`${P}v-win`], "LIVE quá endAt ⇒ ENDED — trừ camp ngân sách ngày (v-daily-ok qua khung vẫn LIVE)");
     assert.deepEqual(r1.newWins, [`${P}v-win`]);
     assert.deepEqual(r1.losses, [`${P}v-lose`]);
     assert.deepEqual(r1.purged.sort(), [`${P}v-old-lost`], "chỉ xoá ảnh mẫu thua quá hạn, không phải cha của mẫu đang chạy, không phải ảnh sản phẩm thật");
@@ -276,7 +295,7 @@ export async function testCreativeEvaluate(db: Db) {
 
     const verdicts = async () => db.select().from(schema.creativeVerdicts).where(like(schema.creativeVerdicts.variantId, `${P}%`));
     const vd1 = await verdicts();
-    assert.equal(vd1.length, 8);
+    assert.equal(vd1.length, 11, "một dòng phán quyết mỗi mẫu được chấm, kể cả ba camp ngân sách ngày");
     const byId = new Map(vd1.map((x) => [x.variantId, x]));
     assert.equal(byId.get(`${P}v-kill`)?.verdict, "KILL");
     assert.equal(byId.get(`${P}v-new`)?.verdict, "RUNNING", "luật tắt mới không áp cho lô đã duyệt");
@@ -297,8 +316,9 @@ export async function testCreativeEvaluate(db: Db) {
     // ═══════════ 3. CHẠY LẠI — LŨY ĐẲNG ═══════════
     const r2 = await evaluateCreatives(db, now, { writeNarrative: stub });
     assert.deepEqual([r2.newWins, r2.losses, r2.ended, r2.purged], [[], [], [], []], "lượt thứ hai không chốt / chuyển / xoá lại gì");
-    assert.equal(r2.kills.length, 1, "lệnh tắt vẫn còn cho tới khi gói C tắt thật (lệnh tắt là lũy đẳng)");
-    assert.equal((await verdicts()).length, 8, "không đẻ dòng phán quyết thứ hai trong cùng ngày");
+    assert.equal(r2.kills.length, 3, "lệnh tắt vẫn còn cho tới khi gói C tắt thật (lệnh tắt là lũy đẳng)");
+    assert.equal((await vrow("v-daily-ok")).status, "LIVE", "camp ngân sách ngày không bị đánh ENDED khi qua khung chấm");
+    assert.equal((await verdicts()).length, 11, "không đẻ dòng phán quyết thứ hai trong cùng ngày");
     assert.equal((await db.select().from(L).where(eq(L.learningDay, learningDay))).length, 1, "không đẻ dòng học thứ hai");
     assert.equal(calls, 1, "bảng gen không đổi ⇒ không gọi lại mô hình");
     assert.equal(stableJson({ b: 1, a: [2, { d: 3, c: null }] }), stableJson({ a: [2, { c: null, d: 3 }], b: 1 }));
@@ -345,7 +365,13 @@ export async function testCreativeEvaluate(db: Db) {
 
     const live = await listLiveVariants(db, now);
     const liveIds = live.map((x) => x.id).filter((id) => id.startsWith(P)).sort();
-    assert.deepEqual(liveIds, [`${P}v-kill`, `${P}v-lose`, `${P}v-new`, `${P}v-nospend`, `${P}v-win`].sort(), "14 ngày gần nhất: lô A + B, không lô C, không mẫu chờ duyệt");
+    assert.deepEqual(
+      liveIds,
+      [`${P}v-daily`, `${P}v-daily-ok`, `${P}v-daily-old`, `${P}v-kill`, `${P}v-lose`, `${P}v-new`, `${P}v-nospend`, `${P}v-win`].sort(),
+      "14 ngày gần nhất: lô A + B + E, không lô C, không mẫu chờ duyệt — và camp còn LIVE luôn hiện dù đăng 60 ngày trước (lô F, ngân sách ngày chạy liên tục)",
+    );
+    assert.equal(live.find((x) => x.id === `${P}v-daily`)?.dailyBudget, true, "thẻ Đang chạy biết camp chạy ngân sách ngày (không nút Tiêu thêm)");
+    assert.equal(live.find((x) => x.id === `${P}v-kill`)?.dailyBudget, false);
     const liveNew = live.find((x) => x.id === `${P}v-new`);
     assert.equal(liveNew?.verdict, "RUNNING");
     assert.equal(live.find((x) => x.id === `${P}v-nospend`)?.metrics.spendVnd, null);

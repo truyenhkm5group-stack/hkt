@@ -50,7 +50,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       <PageHeader
         eyebrow="Marketing"
         title="Thư viện Media"
-        description={`① Tạo ảnh → ② Duyệt ảnh → ③ Hàng đợi & Đăng camp → ④ Đang chạy → ⑤ Mẫu thắng. Mỗi camp tối đa ${formatVND(CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd)}, tự dừng sau ${CREATIVE_HARD_LIMITS.maxTestDays} ngày.`}
+        description={`① Tạo ảnh → ② Duyệt ảnh → ③ Hàng đợi & Đăng camp → ④ Đang chạy → ⑤ Mẫu thắng. Mỗi camp ngân sách ngày tối đa ${formatVND(CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd)}, chạy liên tục tới khi luật tắt QC hoặc bạn tắt.`}
         hint={
           <>
             Máy vẽ ảnh quảng cáo từ <b>ảnh sản phẩm thật</b> của shop (hoặc bạn tải mẫu tự làm), bạn duyệt ảnh, sửa câu chữ, chọn setup camp (TKQC, fanpage, mục tiêu, ngân sách, vị trí, tuổi, giới tính) rồi đăng ngay hoặc hẹn giờ. Luật

@@ -8,6 +8,7 @@ import {
   GENE_LABEL,
   GENE_VALUE_LABEL,
   GENE_VOCAB_VERSION,
+  isDailyBudgetPlan,
   parseGenes,
   type CreativeRule,
   type CreativeVerdict,
@@ -42,7 +43,8 @@ import {
  *  3. Chấm: `judgeVariant` — luật TẮT của LÔ, luật GIỮ của cấu hình HIỆN TẠI (lý do ở
  *     `effectiveJudgeConfig`).
  *  4. Hệ quả ghi CSDL — chỉ ba sự kiện một chiều, mỗi cái canh bằng điều kiện `where`:
- *       · LIVE mà đã qua `endAt` ⇒ `ENDED` (Facebook đã tự dừng theo `end_time`, không gọi gì);
+ *       · LIVE mà đã qua `endAt` ⇒ `ENDED` (Facebook đã tự dừng theo `end_time`, không gọi gì) — TRỪ camp ngân sách
+ *         ngày (`DAILY_BUDGET_MODE`): không có `end_time`, Facebook không tự dừng, nên nó vẫn `LIVE` và luật tắt vẫn canh;
  *       · `WIN` lần đầu ⇒ chốt `library_at` + `library_orders` (không bao giờ gỡ);
  *       · `LOSE` lần đầu ⇒ `lost_at`.
  *  5. Trả danh sách `kills` cho bàn tay (gói C) thực thi. Hàm này KHÔNG gọi Facebook.
@@ -149,11 +151,13 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
     // LỆNH TẮT: chỉ mẫu còn LIVE và còn TRONG khung — qua `endAt` thì Facebook đã tự dừng. Luật đã
     // kích hoạt phải thuộc snapshot của lô; kiểm lại tường minh dù `judgeCfg.killRules` vốn chỉ lấy
     // từ snapshot, vì đây là hàng rào tiền và một lần tái cấu trúc sai sẽ không ai nhìn thấy.
-    if (status === "LIVE" && now < batch.endAt && j.verdict === "KILL" && j.firedKillRule && judgeCfg.killRules.some((r) => sameRule(r, j.firedKillRule as CreativeRule))) {
+    // Camp ngân sách ngày không có giờ kết thúc ⇒ "còn trong khung" là "còn LIVE".
+    const openEnded = isDailyBudgetPlan(batch.plan);
+    if (status === "LIVE" && (openEnded || now < batch.endAt) && j.verdict === "KILL" && j.firedKillRule && judgeCfg.killRules.some((r) => sameRule(r, j.firedKillRule as CreativeRule))) {
       kills.push({ variantId: variant.id, batchId: batch.id, adsetId: variant.fbAdsetId, rule: j.firedKillRule });
     }
 
-    if (status === "LIVE" && now >= batch.endAt) {
+    if (status === "LIVE" && !openEnded && now >= batch.endAt) {
       const rows = await db
         .update(v)
         .set({ status: "ENDED", updatedAt: now })
@@ -171,7 +175,9 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
       if (rows.length > 0) newWins.push(variant.id);
     }
 
-    if (j.verdict === "LOSE" && variant.lostAt === null) {
+    // Camp ngân sách ngày CÒN CHẠY chưa phải đã thua — nó vẫn tiêu tiền và luật tắt vẫn canh; chốt `lost_at` lúc này sẽ
+    // đưa ảnh của một camp đang chạy vào hàng xoá điểm ảnh. Phán quyết vẫn vào sổ phán quyết; chốt khi nó thôi LIVE.
+    if (j.verdict === "LOSE" && variant.lostAt === null && !(openEnded && status === "LIVE")) {
       const rows = await db
         .update(v)
         .set({ lostAt: now, updatedAt: now })

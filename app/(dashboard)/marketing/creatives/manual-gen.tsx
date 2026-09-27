@@ -538,15 +538,22 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup): Names3 {
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
   const acc = (id: string) => ctx.setup.accounts.find((a) => a.id === id)?.name ?? "";
   const page = (id: string) => ctx.setup.pages.find((p) => p.id === id)?.name ?? "";
+  const [a0, a1] = [acc(ctx.setup.configAccountId), acc(setup.adAccountId)];
   const swap = (s: string) => {
     let out = s;
-    const [a0, a1] = [acc(ctx.setup.configAccountId), acc(setup.adAccountId)];
     const [p0, p1] = [page(ctx.setup.configPageId), page(setup.pageId)];
     if (a0 && a1 && a0 !== a1) out = out.split(a0).join(a1);
     if (p0 && p1 && p0 !== p1) out = out.split(p0).join(p1);
     return out;
   };
-  return { campaign: swap(d.campaign), adset: d.adset, ad: swap(d.ad) };
+  // Mã MKTer ngay SAU tên TKQC (`TKQC_MãMKTer_ngày_TEST_fanpage_số`) — cùng khuôn máy chủ ghép lúc đăng.
+  const code = setup.marketerId ? (ctx.setup.marketers.find((m) => m.id === setup.marketerId)?.code ?? "") : "";
+  const withCode = (s: string) => {
+    if (!code) return s;
+    const tk = a1 || a0;
+    return tk && s.startsWith(`${tk}_`) ? `${tk}_${code}${s.slice(tk.length)}` : `${code}_${s}`;
+  };
+  return { campaign: withCode(swap(d.campaign)), adset: d.adset, ad: swap(d.ad) };
 }
 
 /**
@@ -570,12 +577,16 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
   const { canPublish, instant } = ctx;
 
   const mo = () => {
+    const s0 = initSetup();
+    // Giờ bắt đầu đã lưu cùng bản nháp: còn ở tương lai (đủ xa để hẹn) thì mở lại đúng giờ ấy; đã qua thì về "Chạy ngay".
+    const luuHen = s0.startAt ? new Date(s0.startAt) : null;
+    const conHen = !!luuHen && luuHen.getTime() > Date.now() + instant.minScheduleLeadMinutes * 60_000;
     setH(img.headline);
     setT(img.primaryText);
-    setSetup(initSetup());
+    setSetup(s0);
     setNames({ campaign: img.campaignName, adset: img.adsetName, ad: img.adName });
-    setHen(false);
-    setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
+    setHen(conHen);
+    setHenLuc(vnLocalInput(conHen && luuHen ? luuHen : new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
     setOpen(true);
   };
@@ -584,18 +595,20 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
   const shown: Names3 = { campaign: names.campaign || auto.campaign, adset: names.adset || auto.adset, ad: names.ad || auto.ad };
   const setName = (k: keyof Names3, v: string) => setNames((cur) => ({ ...cur, [k]: v.trim() === auto[k].trim() ? "" : v }));
   const noiDung = useMemo(() => ({ imageId: img.id, headline: h, primaryText: t, campaignName: names.campaign, adsetName: names.adset, adName: names.ad }), [img.id, h, t, names]);
-  const chuKy = JSON.stringify({ noiDung, setup });
   const scheduleAt = hen ? vnInputToIso(henLuc) : null;
+  // Giờ bắt đầu đi CÙNG setup (lưu vào bản nháp hàng đợi); lúc đăng, giờ hẹn vẫn gửi riêng ở `scheduleAt`.
+  const setupOut = useMemo<CampaignSetup>(() => ({ ...setup, startAt: scheduleAt }), [setup, scheduleAt]);
+  const chuKy = JSON.stringify({ noiDung, setupOut });
   const loiLuu = useMemo(() => {
-    const r = manualGenDraftSchema.safeParse({ ...noiDung, setup: canPublish ? setup : null });
+    const r = manualGenDraftSchema.safeParse({ ...noiDung, setup: canPublish ? setupOut : null });
     return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
-  }, [noiDung, setup, canPublish]);
+  }, [noiDung, setupOut, canPublish]);
   const loiDang = useMemo(() => {
     if (hen && !scheduleAt) return "Chọn giờ hẹn.";
     if (setup.budgetVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) return `Ngân sách tối đa ${formatVND(CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd)} một camp.`;
-    const r = manualGenInstantSchema.safeParse({ ...noiDung, predictedSeq: null, scheduleAt, setup });
+    const r = manualGenInstantSchema.safeParse({ ...noiDung, predictedSeq: null, scheduleAt, setup: setupOut });
     return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
-  }, [noiDung, hen, scheduleAt, setup]);
+  }, [noiDung, hen, scheduleAt, setup, setupOut]);
   const chan = instant.blockers.length > 0;
 
   const vietLai = () =>
@@ -611,7 +624,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
 
   const luu = () =>
     startSave(async () => {
-      const r = await saveManualGenDraftAction({ ...noiDung, setup: canPublish ? setup : null });
+      const r = await saveManualGenDraftAction({ ...noiDung, setup: canPublish ? setupOut : null });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -622,7 +635,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
 
   const dang = () =>
     startSave(async () => {
-      const r = await publishManualGenImageNowAction({ ...noiDung, predictedSeq: null, scheduleAt, setup });
+      const r = await publishManualGenImageNowAction({ ...noiDung, predictedSeq: null, scheduleAt, setup: setupOut });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -637,7 +650,6 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     });
 
   const startPreview = hen ? (scheduleAt ? new Date(scheduleAt) : null) : new Date(Date.now() + instant.leadSeconds * 1000);
-  const endPreview = startPreview ? new Date(startPreview.getTime() + instant.testDays * 86_400_000) : null;
   const luuMoiNhat = daLuu === chuKy;
 
   return (
@@ -698,37 +710,40 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
               </div>
             </div>
             <div className="space-y-2.5">
-              {canPublish ? <SetupFields value={setup} onChange={setSetup} options={ctx.setup} /> : <p className="rounded-lg border border-dashed p-2.5 text-[12px] text-muted-foreground">Setup camp và Đăng camp cần quyền duyệt chi quảng cáo (expenses:write). Bạn vẫn lưu bài vào hàng đợi được.</p>}
               {canPublish ? (
-                <div className="space-y-1.5 rounded-lg border border-brand/40 bg-brand/5 p-2.5">
-                  <p className="text-[12.5px] font-semibold">Thời điểm chạy</p>
-                  <div className="flex flex-wrap gap-3 text-[12.5px]">
-                    <label className="flex items-center gap-1.5">
-                      <input type="radio" name={`hen-${img.id}`} checked={!hen} onChange={() => setHen(false)} /> Chạy ngay
-                    </label>
-                    <label className="flex items-center gap-1.5">
-                      <input type="radio" name={`hen-${img.id}`} checked={hen} onChange={() => setHen(true)} /> Hẹn giờ (giờ VN)
-                    </label>
-                    {hen ? <Input type="datetime-local" value={henLuc} onChange={(e) => setHenLuc(e.target.value)} className="h-8 w-auto text-[12.5px]" /> : null}
+                <SetupFields value={setup} onChange={setSetup} options={ctx.setup}>
+                  <div className="space-y-1.5 rounded-md border border-brand/40 bg-brand/5 p-2">
+                    <p className="text-[11.5px] font-semibold">Thời gian bắt đầu</p>
+                    <div className="flex flex-wrap gap-3 text-[12.5px]">
+                      <label className="flex items-center gap-1.5">
+                        <input type="radio" name={`hen-${img.id}`} checked={!hen} onChange={() => setHen(false)} /> Chạy ngay
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        <input type="radio" name={`hen-${img.id}`} checked={hen} onChange={() => setHen(true)} /> Hẹn giờ (giờ VN)
+                      </label>
+                      {hen ? <Input type="datetime-local" value={henLuc} onChange={(e) => setHenLuc(e.target.value)} className="h-8 w-auto text-[12.5px]" /> : null}
+                    </div>
+                    <p className="text-[11.5px] text-muted-foreground">
+                      Chạy LIÊN TỤC
+                      {startPreview ? (
+                        <>
+                          {" "}
+                          từ <b className="text-foreground">{vnShortStamp(startPreview)}</b>
+                        </>
+                      ) : null}{" "}
+                      · {formatVND(setup.budgetVnd)}/ngày, không có giờ kết thúc — luật tắt QC tắt khi không hiệu quả, hoặc bạn tắt tay. {hen ? `Hẹn giờ vẫn đăng lên Facebook NGAY lúc bấm (camp lên lịch), sau ít nhất ${instant.minScheduleLeadMinutes} phút, tối đa ${instant.maxScheduleDays} ngày.` : `"Chạy ngay" = bắt đầu sau khoảng ${Math.round(instant.leadSeconds / 60)} phút.`}
+                    </p>
                   </div>
-                  <p className="text-[11.5px] text-muted-foreground">
-                    Chạy {instant.testDays} ngày
-                    {startPreview && endPreview ? (
-                      <>
-                        {" "}
-                        · từ <b className="text-foreground">{vnShortStamp(startPreview)}</b> tới {vnShortStamp(endPreview)} — Facebook tự dừng ở giờ kết thúc
-                      </>
-                    ) : null}
-                    . {hen ? `Hẹn giờ vẫn đăng lên Facebook NGAY lúc bấm (camp lên lịch), sau ít nhất ${instant.minScheduleLeadMinutes} phút, tối đa ${instant.maxScheduleDays} ngày.` : `"Chạy ngay" = bắt đầu sau khoảng ${Math.round(instant.leadSeconds / 60)} phút.`}
-                  </p>
-                  {chan ? (
-                    <ul className="list-disc pl-4 text-[11.5px] text-destructive">
-                      {instant.blockers.map((b) => (
-                        <li key={b}>{b}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
+                </SetupFields>
+              ) : (
+                <p className="rounded-lg border border-dashed p-2.5 text-[12px] text-muted-foreground">Setup camp và Đăng camp cần quyền duyệt chi quảng cáo (expenses:write). Bạn vẫn lưu bài vào hàng đợi được.</p>
+              )}
+              {canPublish && chan ? (
+                <ul className="list-disc rounded-lg border border-destructive/40 p-2.5 pl-6 text-[11.5px] text-destructive">
+                  {instant.blockers.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
               ) : null}
             </div>
             <div className="space-y-1.5">
@@ -738,7 +753,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">
             <p className="text-[11.5px] text-muted-foreground">
-              {luuMoiNhat ? <span className="text-success">✓ Đã lưu vào hàng đợi.</span> : null} {canPublish ? (loiDang ?? (chan ? "Cổng ghi đang chặn Đăng camp — xem lý do ở trên." : `Đăng camp = cam kết tối đa ${formatVND(setup.budgetVnd)}.`)) : ""}
+              {luuMoiNhat ? <span className="text-success">✓ Đã lưu vào hàng đợi.</span> : null} {canPublish ? (loiDang ?? (chan ? "Cổng ghi đang chặn Đăng camp — xem lý do ở trên." : `Đăng camp = ${formatVND(setup.budgetVnd)}/ngày, chạy tới khi tắt.`)) : ""}
             </p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
@@ -767,7 +782,7 @@ const sel = "h-8 w-full rounded-md border bg-background px-2 text-[12.5px]";
  * (TKQC chi nhiều nhất · page ra nhiều đơn nhất · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu). "Như mẫu" nói
  * rõ mẫu đang nhắm gì.
  */
-function SetupFields({ value, onChange, options }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions }) {
+function SetupFields({ value, onChange, options, children }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions; children?: React.ReactNode }) {
   const set = (patch: Partial<CampaignSetup>) => onChange({ ...value, ...patch });
   const tpl = options.template;
   // "Chọn tỉnh / thành" là cờ RIÊNG: khi chưa chọn tỉnh nào, `geo = []` vẫn nghĩa là toàn quốc (và ô nói ra như vậy).
@@ -800,6 +815,21 @@ function SetupFields({ value, onChange, options }: { value: CampaignSetup; onCha
   return (
     <div className="space-y-2 rounded-lg border p-2.5">
       <p className="text-[12.5px] font-semibold">Setup camp</p>
+      <label className="block space-y-0.5 text-[11.5px]">
+        MKTer (mã vào tên chiến dịch để quy tiền ads)
+        <select className={sel} value={value.marketerId ?? ""} onChange={(e) => set({ marketerId: e.target.value || null })}>
+          <option value="">— Chưa chọn —</option>
+          {options.marketers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} · {m.code}
+            </option>
+          ))}
+        </select>
+        {value.marketerId && !options.marketers.some((m) => m.id === value.marketerId) ? <span className="block text-destructive">MKTer đã lưu không còn trong danh sách — chọn lại.</span> : null}
+        {!value.marketerId ? <span className="block text-warning">Chưa chọn MKTer — tiền ads của camp này không quy về ai.</span> : null}
+        {options.marketers.length === 0 ? <span className="block text-muted-foreground">Chưa có MKTer nào khai bí danh ở trang Lương — mã MKTer lấy từ bí danh ấy.</span> : null}
+      </label>
+      {children}
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="space-y-0.5 text-[11.5px]">
           Tài khoản quảng cáo
@@ -833,7 +863,7 @@ function SetupFields({ value, onChange, options }: { value: CampaignSetup; onCha
           </select>
         </label>
         <label className="space-y-0.5 text-[11.5px]">
-          Ngân sách trọn đời (tối đa {formatVND(cap)})
+          Ngân sách ngày (tối đa {formatVND(cap)}/ngày)
           <Input type="number" min={CAMPAIGN_SETUP_LIMITS.minBudgetVnd} max={cap} step={10_000} value={value.budgetVnd} onChange={(e) => set({ budgetVnd: Math.round(Number(e.target.value) || 0) })} className="h-8 text-[12.5px]" />
         </label>
       </div>
@@ -954,6 +984,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
         const s = img.campaignSetup;
         const acc = s ? (ctx.setup.accounts.find((a) => a.id === s.adAccountId)?.name ?? s.adAccountId) : null;
         const page = s ? (ctx.setup.pages.find((p) => p.id === s.pageId)?.name ?? s.pageId) : null;
+        const mkt = s?.marketerId ? ctx.setup.marketers.find((m) => m.id === s.marketerId) : null;
         return (
           <div key={img.id} className="flex flex-wrap items-center gap-2.5 p-2">
             <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={img.headline || `Ảnh #${img.seq}`} className="size-16 shrink-0 rounded" iconClassName="size-4" zoomable />
@@ -963,7 +994,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
               <p className="truncate text-[10.5px] text-muted-foreground">
                 {runLabel} #{img.seq} · chiến dịch: {img.campaignName || "theo khuôn lúc đăng"} · lưu bởi {img.queuedByName || "—"} {img.queuedAt ? vnShortStamp(img.queuedAt) : ""}
               </p>
-              <p className="truncate text-[10.5px] text-muted-foreground">{s ? describeCampaignSetup(s, { account: acc ?? undefined, page: page ?? undefined }) : "Setup: mặc định dùng nhiều (chưa chọn)"}</p>
+              <p className="truncate text-[10.5px] text-muted-foreground">{s ? describeCampaignSetup(s, { account: acc ?? undefined, page: page ?? undefined, marketer: mkt ? `${mkt.name} (${mkt.code})` : undefined }) : "Setup: mặc định dùng nhiều (chưa chọn)"}</p>
             </div>
             {canEdit ? (
               <div className="flex shrink-0 items-center gap-1">
