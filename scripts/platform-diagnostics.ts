@@ -3,7 +3,8 @@
  *
  * Mô hình silo không có cột tổ chức, nên "dữ liệu vô chủ" mang hình dạng khác (lib/queries/platform-health.ts):
  * mỗi tổ chức — kết nối được không · migration x/y · bốn bảng `platform_*` trong CSDL tổ chức KHÁC nhà
- * có rỗng không · dòng module mang khoá lạ · module khai bật mà thiếu phụ thuộc; cộng mức sổ: tổ chức
+ * có rỗng không · dòng module mang khoá lạ · module khai bật mà thiếu phụ thuộc · lượt chạy luật tự động đang treo
+ * (lib/workflow/stale.ts, Phase 3.1); cộng mức sổ: tổ chức
  * nhà có ĐÚNG MỘT dòng không. Cùng hàm với trang `/platform` — không có luật thứ hai.
  *
  * ═══ CHỈ ĐỌC — MÁY CHỦ ÉP, KHÔNG PHẢI LỜI HỨA ═══
@@ -42,6 +43,7 @@ async function main(): Promise<number> {
     ["platformTables", "Bảng platform_*", 26],
     ["unknownModuleKeys", "Khoá module lạ", 16],
     ["dependencyErrors", "Lỗi phụ thuộc", 16],
+    ["workflowStale", "Lượt luật treo", 14],
   ];
   console.log(`Chẩn đoán nền tảng (CHỈ ĐỌC) · ${health.checkedAt} · mã nguồn có ${health.migrationsExpected ?? "—"} migration`);
   console.log(cols.map(([, h, w]) => pad(h, w)).join("  "));

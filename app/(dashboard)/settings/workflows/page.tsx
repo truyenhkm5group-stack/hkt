@@ -1,13 +1,15 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { RuleModeBadge, RuleStatusBadge } from "@/components/platform/workflow/badges";
 import { RunNowButton } from "@/components/platform/workflow/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
-import { loadWorkflowList } from "@/lib/platform-ui/workflow-admin";
+import { formatDateTime } from "@/lib/format";
+import { loadStaleWorkflowRuns, loadWorkflowList, type StaleRunView } from "@/lib/platform-ui/workflow-admin";
 import { triggerSummary } from "@/lib/platform-ui/workflow-admin-shared";
+import { WORKFLOW_MAX_ATTEMPTS } from "@/lib/workflow/types";
 
 export const metadata = { title: "Luật tự động" };
 
@@ -19,9 +21,12 @@ const TITLE = "Luật tự động";
  * Luật mới luôn ở NHÁP + CHẠY THỬ (luật 23, 25): không luật nào tự chạy thật khi vừa tạo. Bảng chỉ đọc; sửa,
  * bật, chạy thử, chuyển chạy thật ở trang của từng luật.
  */
-export default async function WorkflowsPage() {
+export default async function WorkflowsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("workflow:manage");
-  const loaded = await loadWorkflowList(user);
+  const sp = await searchParams;
+  const showStale = sp.view === "stale";
+  const [loaded, stale] = await Promise.all([loadWorkflowList(user), loadStaleWorkflowRuns(user)]);
+  const staleRuns = stale.ok ? stale.value : [];
   const newButton = (
     <Button asChild size="sm">
       <Link href="/settings/workflows/new">
@@ -52,6 +57,18 @@ export default async function WorkflowsPage() {
           </div>
         }
       />
+      {staleRuns.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          <TriangleAlert className="size-4 shrink-0" />
+          <span>
+            <b className="numeric">{staleRuns.length}</b> lượt chạy đang treo hoặc cần người xem — máy tự chiếm lại lượt quá hạn giữ ở lượt kế tiếp (tối đa {WORKFLOW_MAX_ATTEMPTS} lần), phần còn lại cần người quyết.
+          </span>
+          <Link href={showStale ? "/settings/workflows" : "/settings/workflows?view=stale"} className="font-medium underline underline-offset-2">
+            {showStale ? "Ẩn danh sách" : "Xem các lượt treo"}
+          </Link>
+        </div>
+      ) : null}
+      {showStale ? <StaleRunsCard runs={staleRuns} /> : null}
       {!loaded.ok ? (
         <EmptyState title="Không mở được danh sách luật" description={loaded.errors.map((e) => e.message).join(" · ")} />
       ) : loaded.value.length === 0 ? (
@@ -97,5 +114,47 @@ export default async function WorkflowsPage() {
         </SectionCard>
       )}
     </div>
+  );
+}
+
+/** Bảng lượt treo (`?view=stale`) — chỉ đọc; tên luật dẫn về trang của luật, nơi có bảng lượt chạy đầy đủ. */
+function StaleRunsCard({ runs }: { runs: StaleRunView[] }) {
+  return (
+    <SectionCard title="Lượt chạy treo" description="Đang chạy thì dừng · đã có lời duyệt mà chưa xử lý · lời duyệt chưa thanh toán · dừng vì treo" padded={false} contentClassName="p-3">
+      {runs.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">Không có lượt chạy nào đang treo.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Cập nhật</th>
+                <th className="px-3 py-2">Luật</th>
+                <th className="px-3 py-2">Loại</th>
+                <th className="px-3 py-2">Bản ghi</th>
+                <th className="px-3 py-2 text-right">Lần chiếm</th>
+                <th className="px-3 py-2">Lý do</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id} className="border-t border-hairline align-top">
+                  <td className="whitespace-nowrap px-3 py-2">{formatDateTime(r.updatedAt)}</td>
+                  <td className="px-3 py-2">
+                    <Link href={`/settings/workflows/${encodeURIComponent(r.ruleId)}`} className="font-medium text-primary underline-offset-2 hover:underline">
+                      {r.ruleName ?? r.ruleId}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2">{r.kindLabel}</td>
+                  <td className="px-3 py-2 font-mono text-[12.5px]">{r.subjectType && r.subjectId ? `${r.subjectType}:${r.subjectId}` : "—"}</td>
+                  <td className="numeric px-3 py-2 text-right">{r.attempt}</td>
+                  <td className="max-w-[360px] px-3 py-2 text-xs text-muted-foreground">{r.error ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SectionCard>
   );
 }

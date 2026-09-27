@@ -63,7 +63,23 @@ export type WorkflowRunRow = {
   error: string | null;
   createdAt: Date;
   finishedAt: Date | null;
+  /** Số lần một tiến trình đã chiếm lượt chạy (0 = chưa ai chiếm). */
+  attempt: number;
+  /** Hạn giữ của tiến trình đang thực thi — `null` khi lượt không ở giữa lúc thực thi. */
+  leaseUntil: Date | null;
+  lastHeartbeatAt: Date | null;
 };
 
 /** Độ sâu nhân quả tối đa — vượt ⇒ lượt chạy FAILED "vòng lặp" (W7). */
 export const WORKFLOW_MAX_CAUSATION_DEPTH = 3;
+
+/**
+ * Hạn giữ của một tiến trình đang thực thi lượt chạy (phút). Mỗi bước xong gia hạn lại. Ba hành động của tập đóng
+ * đều xong trong vài giây, nên 5 phút là thừa cho lượt khoẻ mà vẫn ngắn hơn nhịp 10 phút của job chở bộ máy — một
+ * tiến trình chết được chiếm lại ngay lượt kế tiếp.
+ */
+export const WORKFLOW_LEASE_MINUTES = 5;
+/** Số lần chiếm tối đa. Lượt thứ `MAX + 1` không chạy nữa ⇒ FAILED "treo quá số lần thử". */
+export const WORKFLOW_MAX_ATTEMPTS = 3;
+/** Câu lỗi của lượt dừng VÌ TREO bắt đầu bằng chữ này — `listStaleRuns` nhận ra chúng theo nó. */
+export const WORKFLOW_STUCK_ERROR_PREFIX = "Treo";

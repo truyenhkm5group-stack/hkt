@@ -8,11 +8,12 @@
  * máy chủ (M6); ô chỉ hiện lỗi được đưa tới.
  */
 import * as React from "react";
-import { Paperclip } from "lucide-react";
+import { Download, Paperclip } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { isoToVnLocalInput, parseCurrencyInput, statusTargets, vnLocalInputToIso, formatCustomValue, type ResolvedFormField } from "@/components/metadata/runtime-core";
+import { customFileHref } from "@/lib/metadata/display";
 import { cn } from "@/lib/utils";
 
 export type PickOption = { id: string; label: string };
@@ -30,6 +31,8 @@ export type FieldInputProps = {
   users?: readonly PickOption[];
   relationOptions?: readonly PickOption[];
   uploadAction?: UploadAction;
+  /** Tên tệp theo id (ô `file`) — trang đọc ở máy chủ (`customFileNames`). Thiếu ⇒ ô in "Tệp đính kèm". */
+  fileNames?: Readonly<Record<string, string>>;
   id?: string;
 };
 
@@ -40,7 +43,7 @@ function str(v: unknown): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
-export function FieldInput({ field, value, onChange, error, storedValue, users, relationOptions, uploadAction, id }: FieldInputProps) {
+export function FieldInput({ field, value, onChange, error, storedValue, users, relationOptions, uploadAction, fileNames, id }: FieldInputProps) {
   const inputId = id ?? `f-${field.ref.replace(":", "-")}`;
   const invalid = error ? true : undefined;
   const disabled = field.readOnly;
@@ -151,7 +154,7 @@ export function FieldInput({ field, value, onChange, error, storedValue, users, 
       );
       break;
     case "file":
-      control = <FileControl inputId={inputId} field={field} value={value} onChange={onChange} uploadAction={uploadAction} invalid={invalid} />;
+      control = <FileControl inputId={inputId} field={field} value={value} onChange={onChange} uploadAction={uploadAction} fileNames={fileNames} invalid={invalid} />;
       break;
     case "email":
       control = <Input {...common} type="email" value={str(value)} onChange={(e) => onChange(e.target.value)} />;
@@ -180,20 +183,67 @@ export function FieldInput({ field, value, onChange, error, storedValue, users, 
   );
 }
 
-function FileControl({ inputId, field, value, onChange, uploadAction, invalid }: { inputId: string; field: ResolvedFormField; value: unknown; onChange: (v: unknown) => void; uploadAction?: UploadAction; invalid?: boolean }) {
+/**
+ * Tệp hiện tại: TÊN + liên kết «Tải xuống» tới route tải (`/api/metadata/files/<id>`) — giá trị lưu vẫn là id.
+ * Route mới là nơi kiểm quyền / tổ chức / module; liên kết ở đây không hứa gì hơn một đường dẫn.
+ */
+function CurrentFile({ id, name }: { id: string; name: string | null }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <Paperclip className="size-4 shrink-0" />
+      <span className="truncate" title={name ?? id}>
+        {name ?? "Tệp đính kèm"}
+      </span>
+      <a href={customFileHref(id)} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline" target="_blank" rel="noopener noreferrer">
+        <Download className="size-3.5" /> Tải xuống
+      </a>
+    </span>
+  );
+}
+
+function FileControl({
+  inputId,
+  field,
+  value,
+  onChange,
+  uploadAction,
+  fileNames,
+  invalid,
+}: {
+  inputId: string;
+  field: ResolvedFormField;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  uploadAction?: UploadAction;
+  fileNames?: Readonly<Record<string, string>>;
+  invalid?: boolean;
+}) {
   const [pending, startTransition] = React.useTransition();
   const [message, setMessage] = React.useState<string | null>(null);
+  const [uploadedNames, setUploadedNames] = React.useState<Record<string, string>>({});
   const current = value ? String(value) : null;
+  const currentName = current ? (uploadedNames[current] ?? fileNames?.[current] ?? null) : null;
   if (field.readOnly || !uploadAction) {
     return (
       <div className={cn("flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm", !current && "text-muted-foreground")}>
-        <Paperclip className="size-4 shrink-0" />
-        <span className="truncate font-mono text-xs">{current ?? formatCustomValue({ type: "file", options: [] }, null)}</span>
+        {current ? (
+          <CurrentFile id={current} name={currentName} />
+        ) : (
+          <>
+            <Paperclip className="size-4 shrink-0" />
+            <span className="truncate text-xs">{formatCustomValue({ type: "file", options: [] }, null)}</span>
+          </>
+        )}
       </div>
     );
   }
   return (
     <div className="space-y-1">
+      {current ? (
+        <div className="flex h-8 items-center rounded-md border border-dashed border-input px-3 text-sm">
+          <CurrentFile id={current} name={currentName} />
+        </div>
+      ) : null}
       <Input
         id={inputId}
         type="file"
@@ -209,13 +259,15 @@ function FileControl({ inputId, field, value, onChange, uploadAction, invalid }:
           startTransition(async () => {
             const res = await uploadAction(fd);
             if (res.ok) {
+              const name = res.filename ?? file.name;
+              setUploadedNames((prev) => ({ ...prev, [res.id]: name }));
               onChange(res.id);
-              setMessage(`Đã tải lên ${res.filename ?? file.name}`);
+              setMessage(`Đã tải lên ${name}`);
             } else setMessage(res.error);
           });
         }}
       />
-      <p className="text-xs text-muted-foreground">{pending ? "Đang tải lên…" : (message ?? (current ? `Tệp hiện tại: ${current}` : "Chưa có tệp"))}</p>
+      <p className="text-xs text-muted-foreground">{pending ? "Đang tải lên…" : (message ?? (current ? "Chọn tệp khác để thay tệp hiện tại" : "Chưa có tệp"))}</p>
     </div>
   );
 }

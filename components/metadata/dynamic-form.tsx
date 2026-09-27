@@ -38,10 +38,12 @@ export type DynamicFormProps = {
   /** Lựa chọn cho ô `relation`, theo khoá field. Không có ⇒ ô nhập mã. */
   relationOptions?: Record<string, PickOption[]>;
   uploadAction?: UploadAction;
+  /** Tên tệp theo id cho ô `file` (`customFileNames` ở máy chủ). */
+  fileNames?: Readonly<Record<string, string>>;
   submitLabel?: string;
 };
 
-export function DynamicForm({ schema, system, custom, values, onSubmitAction, systemReadOnlyReason, customEditable, customLockedReason, users, relationOptions, uploadAction, submitLabel = "Lưu" }: DynamicFormProps) {
+export function DynamicForm({ schema, system, custom, values, onSubmitAction, systemReadOnlyReason, customEditable, customLockedReason, users, relationOptions, uploadAction, fileNames, submitLabel = "Lưu" }: DynamicFormProps) {
   const router = useRouter();
   const sections = React.useMemo(() => buildFormLayout(schema, system, custom, { systemReadOnlyReason, customEditable, customLockedReason }), [schema, system, custom, systemReadOnlyReason, customEditable, customLockedReason]);
   const [stored, setStored] = React.useState<DynamicFormPayload>(values);
@@ -112,6 +114,7 @@ export function DynamicForm({ schema, system, custom, values, onSubmitAction, sy
                   users={users}
                   relationOptions={relationOptions?.[f.key]}
                   uploadAction={uploadAction}
+                  fileNames={fileNames}
                 />
               </div>
             ))}

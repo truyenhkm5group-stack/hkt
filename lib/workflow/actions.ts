@@ -13,6 +13,12 @@
  *
  * Lỗi ở một hành động ⇒ bước đó `FAILED`, các bước sau `SKIPPED`, lượt chạy `FAILED`. Hàm KHÔNG ném: một luật
  * hỏng không được làm sập job cảnh báo đang chở nó.
+ *
+ * PHỤC HỒI (Phase 3.1): tiến trình có thể chết GIỮA hai hành động. Nên (a) mỗi bước xong được ghi NGAY vào
+ * `workflow_runs.steps` qua `onStep` (bộ máy ghi, có kiểm hạn giữ), (b) lượt thử lại nhận `previous` và BỎ QUA bước
+ * đã `DONE`, và (c) mọi hành động phải khai trong `ACTION_RETRY_SAFETY` vì sao làm lại nó KHÔNG sinh bản sao —
+ * vì bước có thể đã chạy xong mà chưa kịp ghi `DONE` (chết đúng giữa hai câu lệnh). Hành động khai
+ * `retrySafe: false` thì bộ máy KHÔNG tự thử lại lượt treo chứa nó (FAILED, ghi rõ).
  */
 import { getDb, schema } from "@/db";
 import type { DepartmentCode } from "@/lib/constants/departments";
@@ -31,7 +37,39 @@ export type ActionContext = {
   now: Date;
 };
 
-export type ExecuteResult = { ok: boolean; steps: WorkflowStep[]; error: string | null };
+export type ExecuteResult = { ok: boolean; steps: WorkflowStep[]; error: string | null; /** Mất hạn giữ giữa chừng — tiến trình khác đã chiếm lượt; KHÔNG được chốt kết quả. */ lostLease?: boolean };
+
+/**
+ * Làm lại hành động này có sinh bản sao không — khai TỪNG hành động của tập đóng, kèm căn cứ kiểm được (có bài
+ * kiểm ở `tests/workflow-recovery.test.ts`). Thêm hành động mới mà không khai ⇒ lỗi kiểu (Record đủ khoá).
+ */
+export const ACTION_RETRY_SAFETY: Record<WorkflowAction["kind"], { retrySafe: boolean; why: string }> = {
+  create_task: {
+    retrySafe: true,
+    why: "Khoá UNIQUE work_items(source_type, source_key) với source_key = <id lượt chạy>:<vị trí> + ON CONFLICT DO NOTHING — lượt làm lại gặp đúng dòng cũ, không tạo việc thứ hai.",
+  },
+  notify: {
+    retrySafe: true,
+    why: "notifications.dedupe_key UNIQUE = workflow:<id lượt chạy> + ON CONFLICT DO NOTHING; lưu luật chặn hai hành động notify trong một luật.",
+  },
+  set_custom_value: {
+    retrySafe: true,
+    why: "Ghi lại CÙNG giá trị ⇒ saveCustomValues thấy changed = [] ⇒ không tăng phiên bản, không nhật ký, không phát custom_status.changed lần hai.",
+  },
+};
+
+/** Hành động CHƯA XONG (chưa `DONE` trong `previous`) nào không làm lại an toàn — `null` = làm lại được. Hàm THUẦN. */
+export function retryBlocker(
+  actions: readonly WorkflowAction[],
+  previous: readonly WorkflowStep[],
+  safety: Readonly<Record<string, { retrySafe: boolean }>> = ACTION_RETRY_SAFETY,
+): WorkflowAction["kind"] | null {
+  for (const [i, a] of actions.entries()) {
+    if (previous[i]?.status === "DONE" && previous[i]?.action === a.kind) continue;
+    if (!safety[a.kind]?.retrySafe) return a.kind;
+  }
+  return null;
+}
 
 function short(v: unknown): string {
   const s = typeof v === "string" ? v : JSON.stringify(v);
@@ -102,11 +140,32 @@ async function runOne(ctx: ActionContext, a: WorkflowAction, i: number): Promise
   }
 }
 
-/** Thực thi tuần tự mọi hành động của luật. Không bao giờ ném. */
-export async function executeActions(ctx: ActionContext): Promise<ExecuteResult> {
+export type ExecuteOptions = {
+  /** Các bước đã ghi của lượt chạy (lượt thử lại): bước `DONE` cùng loại hành động ở cùng vị trí thì BỎ QUA. */
+  previous?: readonly WorkflowStep[];
+  /**
+   * Ghi bước vừa xong NGAY (bộ máy ghi `steps` + gia hạn hạn giữ). Trả `false` ⇒ đã mất hạn giữ (tiến trình khác
+   * chiếm lượt) ⇒ dừng, không làm bước sau. Lỗi ném ra từ đây là lỗi HẠ TẦNG và đi thẳng lên nơi gọi.
+   */
+  onStep?: (steps: WorkflowStep[], index: number) => Promise<boolean>;
+};
+
+/**
+ * Thực thi tuần tự mọi hành động của luật. Lỗi của MỘT hành động không bao giờ ném (bước `FAILED`); chỉ lỗi của
+ * `onStep` (ghi sổ lượt chạy) đi lên.
+ */
+export async function executeActions(ctx: ActionContext, opts: ExecuteOptions = {}): Promise<ExecuteResult> {
+  const previous = opts.previous ?? [];
   const steps: WorkflowStep[] = [];
   let error: string | null = null;
+  // Bảng đầy đủ để ghi: bước đã làm + phần CHƯA làm giữ nguyên như đã lập kế hoạch (người xem vẫn thấy việc còn lại).
+  const snapshot = (upTo: number) => [...steps, ...ctx.rule.actions.slice(upTo + 1).map((a, j) => previous[upTo + 1 + j] ?? { action: a.kind, status: "PLANNED" as const, detail: "" })];
   for (const [i, a] of ctx.rule.actions.entries()) {
+    const done = previous[i];
+    if (done?.status === "DONE" && done.action === a.kind) {
+      steps.push(done);
+      continue;
+    }
     if (error) {
       steps.push({ action: a.kind, status: "SKIPPED", detail: "Bỏ qua vì bước trước hỏng" });
       continue;
@@ -119,6 +178,7 @@ export async function executeActions(ctx: ActionContext): Promise<ExecuteResult>
     }
     steps.push(step);
     if (step.status === "FAILED") error = `Bước ${i + 1} (${a.kind}) hỏng: ${step.detail}`;
+    if (opts.onStep && !(await opts.onStep(snapshot(i), i))) return { ok: false, steps: snapshot(i), error: "Mất hạn giữ — tiến trình khác đã chiếm lượt chạy.", lostLease: true };
   }
   return { ok: error === null, steps, error };
 }

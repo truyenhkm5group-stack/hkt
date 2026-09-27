@@ -26,7 +26,7 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import type { Permission } from "@/lib/auth/permissions";
 import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
 import { auditActor, checkObject, existingRecordIds, idColumnOf, loadCustomDefs, recordExists, requireObject } from "@/lib/metadata/common";
-import { customValueText } from "@/lib/metadata/display";
+import { CUSTOM_FILE_ID_PATTERN, customValueText } from "@/lib/metadata/display";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { writableCustomKeys } from "@/lib/metadata/form-schema";
 import { getPublishedForm } from "@/lib/metadata/forms";
@@ -357,19 +357,56 @@ export async function saveCustomFile(objectKey: string, recordId: string, fieldK
   return { ok: true, file: { id: row.id, filename, mime, size: data.length }, values: saved.values, version: saved.version };
 }
 
-/** Đọc một tệp — `null` khi không tồn tại TRONG CSDL TỔ CHỨC NÀY, bản ghi đã mất, field đã lưu trữ hoặc người xem không có quyền. */
-export async function readCustomFile(id: string, viewer: Viewer): Promise<{ filename: string; mime: string; size: number; data: Buffer } | null> {
-  if (typeof id !== "string" || id.length === 0 || id.length > 200) return null;
+export type CustomFileContent = { filename: string; mime: string; size: number; data: Buffer };
+
+/**
+ * Mở một tệp để TẢI XUỐNG — phân biệt đúng HAI lý do từ chối, vì route trả hai mã khác nhau:
+ *  · `MODULE_DISABLED` — tệp có trong CSDL tổ chức này nhưng module của đối tượng đang tắt (403, như mọi cổng module);
+ *  · `NOT_FOUND` — MỌI lý do còn lại gộp làm một: id sai định dạng, không có trong CSDL tổ chức hiện hành (kể cả id
+ *    của tổ chức khác), field đã lưu trữ / không còn kiểu tệp, bản ghi đã xoá, người xem thiếu `viewPermission`.
+ *    Tách chúng ra là cho người ngoài một cái máy dò "id này có tồn tại không".
+ */
+export async function openCustomFile(
+  id: string,
+  viewer: Viewer,
+): Promise<{ ok: true; file: CustomFileContent; objectKey: string; recordId: string; fieldKey: string } | { ok: false; code: "NOT_FOUND" | "MODULE_DISABLED" }> {
+  const notFound = { ok: false as const, code: "NOT_FOUND" as const };
+  if (typeof id !== "string" || !CUSTOM_FILE_ID_PATTERN.test(id)) return notFound;
   const db = await getDb();
   const t = schema.customFiles;
   const [row] = await db.select().from(t).where(eq(t.id, id)).limit(1);
-  if (!row) return null;
+  if (!row) return notFound;
   const checked = await checkObject(row.objectKey, "customFields");
-  if (!checked.ok) return null;
+  if (!checked.ok) return checked.code === "MODULE_DISABLED" ? { ok: false, code: "MODULE_DISABLED" } : notFound;
   const def = (await loadCustomDefs(row.objectKey, false)).find((d) => d.key === row.fieldKey);
-  if (!def || !canViewField(viewer, checked.def, def)) return null;
-  if (!(await recordExists(checked.def, row.recordId))) return null;
-  return { filename: row.filename, mime: row.mime, size: row.size, data: row.data };
+  if (!def || def.type !== "file" || !canViewField(viewer, checked.def, def)) return notFound;
+  if (!(await recordExists(checked.def, row.recordId))) return notFound;
+  return { ok: true, file: { filename: row.filename, mime: row.mime, size: row.size, data: row.data }, objectKey: row.objectKey, recordId: row.recordId, fieldKey: row.fieldKey };
+}
+
+/** Đọc một tệp — `null` khi không tồn tại TRONG CSDL TỔ CHỨC NÀY, bản ghi đã mất, field đã lưu trữ, module tắt hoặc người xem không có quyền. */
+export async function readCustomFile(id: string, viewer: Viewer): Promise<CustomFileContent | null> {
+  const r = await openCustomFile(id, viewer);
+  return r.ok ? r.file : null;
+}
+
+/**
+ * Tên tệp (id ⇒ tên) của MỘT bản ghi, chỉ cho field tệp ĐANG DÙNG mà người xem được xem — để ô `file` hiện tên
+ * thay vì id. Không đọc byte. Id không thuộc bản ghi này thì không có trong kết quả (ô in "Tệp đính kèm").
+ */
+export async function customFileNames(objectKey: string, recordId: string, ids: readonly string[], viewer: Viewer): Promise<Record<string, string>> {
+  const clean = [...new Set(ids.filter((x) => typeof x === "string" && CUSTOM_FILE_ID_PATTERN.test(x)))];
+  if (clean.length === 0) return {};
+  const obj = await requireObject(objectKey, "customFields");
+  const visible = new Set((await loadCustomDefs(objectKey, false)).filter((d) => d.type === "file" && canViewField(viewer, obj, d)).map((d) => d.key));
+  if (visible.size === 0) return {};
+  const db = await getDb();
+  const t = schema.customFiles;
+  const rows = await db
+    .select({ id: t.id, filename: t.filename, fieldKey: t.fieldKey })
+    .from(t)
+    .where(and(eq(t.objectKey, objectKey), eq(t.recordId, recordId), inArray(t.id, clean)));
+  return Object.fromEntries(rows.filter((r) => visible.has(r.fieldKey)).map((r) => [r.id, r.filename]));
 }
 
 // ─────────────────────────── Xuất CSV ───────────────────────────

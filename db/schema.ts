@@ -8533,6 +8533,11 @@ export const workflowRuns = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     finishedAt: ts("finished_at"),
+    // Phase 3.1 (0162): hạn giữ của tiến trình đang thực thi. `attempt` = số lần đã CHIẾM lượt chạy; PENDING mà
+    // quá `lease_until` ⇒ tiến trình đã chết, lượt sau chiếm lại (lib/workflow/engine.ts). Dòng cũ: 0 / NULL.
+    attempt: integer("attempt").notNull().default(0),
+    leaseUntil: ts("lease_until"),
+    lastHeartbeatAt: ts("last_heartbeat_at"),
   },
   (t) => [
     uniqueIndex("workflow_runs_dedupe_uq").on(t.dedupeKey),
