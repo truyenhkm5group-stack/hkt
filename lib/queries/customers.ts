@@ -56,8 +56,12 @@ export function customerSearchCondition(q: string): SQL | undefined {
   return or(ilike(c.name, like), ilike(c.phone, like), sql`array_to_string(${c.phones}, ',') ilike ${like}`, digits.length >= 4 ? ilike(c.phone, `%${digits}%`) : undefined, ilike(c.pancakeId, like));
 }
 
-export function customerListWhere(params: ListParams, agg: Agg, skip: string[] = []) {
-  const conds: (SQL | undefined)[] = [];
+/**
+ * `extra`: điều kiện bổ sung do TẦNG METADATA dựng (bộ lọc mặc định của field custom trong danh sách
+ * đã xuất bản — `customValuesFilterSql`). Vắng mặt ⇒ đúng điều kiện như trước Phase 2.
+ */
+export function customerListWhere(params: ListParams, agg: Agg, skip: string[] = [], extra?: SQL) {
+  const conds: (SQL | undefined)[] = [extra];
   const { period, filters, q } = params;
   const eff = effective(agg);
   if (period.from) conds.push(gte(customerCreatedAt, period.from));
@@ -92,11 +96,11 @@ export type CustomerListRow = {
   lastSource: string | null;
 };
 
-export async function listCustomers(params: ListParams) {
+export async function listCustomers(params: ListParams, extra?: SQL) {
   const db = await getDb();
   const agg = orderAggregate(db);
   const eff = effective(agg);
-  const where = customerListWhere(params, agg);
+  const where = customerListWhere(params, agg, [], extra);
   const sortMap: Record<string, SQL | AnyPgColumn> = { orderCount: eff.orders, purchasedAmount: eff.amount, lastOrderAt: eff.lastOrderAt, name: c.name, insertedAt: customerCreatedAt };
   const sortExpr = sortMap[params.sort] ?? eff.lastOrderAt;
   const orderBy = params.dir === "asc" ? sql`${sortExpr} asc nulls first` : sql`${sortExpr} desc nulls last`;
@@ -159,11 +163,11 @@ export async function listCustomers(params: ListParams) {
 }
 
 /** Số khách theo tỉnh / nhóm (cho bộ lọc) */
-export async function customerFacets(params: ListParams) {
+export async function customerFacets(params: ListParams, extra?: SQL) {
   const db = await getDb();
   const agg = orderAggregate(db);
   const eff = effective(agg);
-  const base = customerListWhere({ ...params, filters: {} }, agg);
+  const base = customerListWhere({ ...params, filters: {} }, agg, [], extra);
   /*
     TẮT JIT — suy từ HÌNH DẠNG, chưa EXPLAIN riêng: cả hai câu nối đúng bảng tổng hợp `agg`
     (`ORDER_OUTCOME_FAST` trên mọi đơn có khách) mà câu danh sách `listCustomers` đã đo JIT bật
@@ -201,11 +205,11 @@ export async function customerFacets(params: ListParams) {
   };
 }
 
-export async function customerSummary(params: ListParams) {
+export async function customerSummary(params: ListParams, extra?: SQL) {
   const db = await getDb();
   const agg = orderAggregate(db);
   const eff = effective(agg);
-  const where = customerListWhere(params, agg);
+  const where = customerListWhere(params, agg, [], extra);
   const newSince = params.period.from ?? new Date(Date.now() - 30 * 86_400_000);
   const newUntil = params.period.to;
   // TẮT JIT — cùng lý do với `customerFacets` ngay trên: nối bảng tổng hợp `agg` mang kết quả đơn.

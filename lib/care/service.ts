@@ -396,31 +396,10 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
   const now = new Date();
   const states: Record<string, CareState> = {};
   const skipped: { shipmentId: string; reason: string }[] = [];
-  /*
-    ═══ MÁY GIAO (`source = "SYSTEM"`) KHÁC NGƯỜI GIAO Ở BA CHỖ ═══
-
-    Máy phân việc (`lib/work/auto-assign-run.ts`) đi qua đúng hàm này để lịch sử ca vẫn ở một chỗ,
-    nhưng nó không được làm ba điều mà một người bấm được phép làm:
-     1. Ghi `first_response_at`. Mốc đó là lần đầu có NGƯỜI chạm vào ca (AGENTS.md mục 63). Máy
-        giao 10 phút một lần thì mọi ca sẽ "phản hồi trong 0 phút" và thẻ điểm nói dối.
-     2. Mở lại một ca đã đóng. Đường mở lại tay (`reopenCase`) cố ý đi vòng qua chốt mốc kích
-        hoạt (mục 59) vì có người quyết; máy thì không ai quyết.
-     3. Lấy ca khỏi tay người đang cầm (mục 25). Kế hoạch dựng lúc ca còn trống, nhưng giữa lúc
-        dựng và lúc ghi có thể có người vừa bấm nhận — người thắng.
-  */
-  const laMay = user.source === "SYSTEM";
   for (const shipmentId of [...new Set(shipmentIds)]) {
     let before = await ensureCareRow(shipmentId, user.email);
     if (!before) {
       skipped.push({ shipmentId, reason: "Không tìm thấy vận đơn" });
-      continue;
-    }
-    if (laMay && !before.active) {
-      skipped.push({ shipmentId, reason: "Ca đã đóng — máy không tự mở lại ca, người bấm “Mở lại” nếu kiện có việc mới" });
-      continue;
-    }
-    if (laMay && before.ownerId) {
-      skipped.push({ shipmentId, reason: "Ca vừa có người nhận — máy không lấy việc khỏi tay người đang cầm" });
       continue;
     }
     /*
@@ -455,7 +434,7 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
         ownerId: owner?.id ?? null,
         ownerEmail: owner?.email ?? "",
         careStatus: next,
-        firstResponseAt: laMay ? before.firstResponseAt : firstResponse(before, now),
+        firstResponseAt: firstResponse(before, now),
         // Mốc giao và NGƯỜI ĐƯỢC GIAO ĐẦU TIÊN — ghi một lần, không viết lại khi chuyển tay (luật 34).
         assignedAt: owner ? (before.assignedAt ?? now) : before.assignedAt,
         initialOwnerId: owner ? (before.initialOwnerId ?? owner.id) : before.initialOwnerId,

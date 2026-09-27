@@ -21,8 +21,8 @@ export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: Pr
       getRowId={(row) => row.id}
       group={{
         key: (row) => row.productId,
-        // THU GỌN mặc định (chủ shop chốt 27/09/2026): mở trang là thấy đủ mọi MÃ trên một màn hình;
-        // bấm mũi tên hoặc "Mở tất cả" mới xổ SKU. Vẫn đủ mọi dòng trong một trang — không cắt đôi một mã.
+        // Mở sẵn: mở trang là thấy mọi mẫu mã; "Thu gọn tất cả" vẫn còn nếu chỉ muốn xem theo mã.
+        defaultExpanded: true,
         parentHref: (p) => `/products/${p.productId}`,
         parent: (rows) => {
           const sum = (f: (r: ProductListRow) => number) => rows.reduce((t, r) => t + f(r), 0);

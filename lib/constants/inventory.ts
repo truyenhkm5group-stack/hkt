@@ -111,8 +111,8 @@ export const INVENTORY_TABLE_TONE: Record<string, string> = {
 };
 
 /**
- * TRANG SẢN PHẨM NẠP HẾT MỌI MÃ VÀ MỌI MẪU MÃ TRONG MỘT TRANG (chủ shop yêu cầu 27/09/2026): nhóm
- * mã thu gọn mặc định, xổ ra là có ngay SKU; danh sách dài cuộn trong khung bảng (tiêu đề dính). Phân trang chỉ còn là lối thoát
+ * TRANG SẢN PHẨM MỞ RA LÀ THẤY HẾT MỌI MÃ VÀ MỌI MẪU MÃ (chủ shop yêu cầu 27/09/2026): danh sách
+ * dài thì cuộn trong khung bảng (tiêu đề dính), không cắt trang. Phân trang chỉ còn là lối thoát
  * khi danh mục vượt số này — và cắt theo mẫu mã thì một mã có thể bị chia đôi qua hai trang, nên
  * số này phải lớn hơn hẳn danh mục thật (đo 27/09/2026: 95 mẫu mã).
  * Dùng chung cho `parseListParams` (máy chủ) và `DataTable` (trình duyệt) — hai nơi phải cùng số.

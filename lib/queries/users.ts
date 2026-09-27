@@ -1,4 +1,4 @@
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 
 /** Danh sách người dùng (không bao gồm mật khẩu băm) */
@@ -18,3 +18,21 @@ export async function listUsers() {
 }
 
 export type UserRow = Awaited<ReturnType<typeof listUsers>>["rows"][number];
+
+/** Tài khoản đang bật cho ô chọn người (field custom kiểu `user`). Nhãn = tên, không có thì email. */
+export async function userPickOptions(): Promise<{ id: string; label: string }[]> {
+  const db = await getDb();
+  const u = schema.users;
+  const rows = await db.select({ id: u.id, name: u.name, email: u.email }).from(u).where(eq(u.active, true)).orderBy(asc(u.name), asc(u.email)).limit(1000);
+  return rows.map((r) => ({ id: r.id, label: r.name || r.email }));
+}
+
+/** Tên theo id (kể cả tài khoản đã tắt) — in giá trị field `user` trên danh sách. Id lạ thì vắng mặt. */
+export async function userLabelsByIds(ids: readonly string[]): Promise<Record<string, string>> {
+  const uniq = [...new Set(ids.filter((x) => typeof x === "string" && x.length > 0))];
+  if (!uniq.length) return {};
+  const db = await getDb();
+  const u = schema.users;
+  const rows = await db.select({ id: u.id, name: u.name, email: u.email }).from(u).where(inArray(u.id, uniq));
+  return Object.fromEntries(rows.map((r) => [r.id, r.name || r.email]));
+}

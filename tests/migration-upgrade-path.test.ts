@@ -101,6 +101,7 @@ const MOI = [
   "0151_conversation_customer_seen",
   "0152_platform_control_plane",
   "0153_production_topic_members",
+  "0154_metadata_foundation",
 ] as const;
 
 /*

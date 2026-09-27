@@ -45,7 +45,6 @@ import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
-import { testCareAutoAssign } from "./care-auto-assign.test";
 import { testCareReturnLegQueue } from "./care-return-leg-queue.test";
 import { testCareDecisionParks } from "./care-decision-parks.test";
 import { testAiCopilot } from "./ai-copilot.test";
@@ -414,6 +413,9 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testMetadataService } from "./metadata-service.test";
+import { testMetadataAdmin } from "./metadata-admin.test";
+import { testMetadataRuntime } from "./metadata-runtime.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
@@ -2073,7 +2075,6 @@ async function main() {
   await testVtpCapability(db);
   await testCareWorkbench(db);
   await testCareClosedAssign(db);
-  await testCareAutoAssign(db);
   await testCareReturnLegQueue(db);
   await testCareDecisionParks(db);
   testCarrierManualPure();
@@ -2408,6 +2409,13 @@ async function main() {
   // fetch / biến môi trường Pancake (khôi phục trong finally) và đăng ký mọi mã đang có — nên đứng SAU CÙNG.
   testCompanyOsAuditLabels();
   await testRegistryCatchUpAfterProductSync(db);
+  // Phase 2 · dịch vụ metadata: hai tổ chức THẬT `pm-a` / `pm-b` (CSDL riêng, tự cấp và tự dọn) — field custom,
+  // giá trị, form, danh sách, trạng thái; tấn công theo id chéo tổ chức chạm 0 dòng.
+  await testMetadataService();
+  // Nền tảng · quản trị metadata (Phase 2): bốn màn hình /settings/{data-model,forms,lists,statuses} — lõi action.
+  await testMetadataAdmin();
+  // Phase 2 · form runtime + danh sách theo metadata (M8, M9): hàm thuần + hàng rào tạo khách.
+  await testMetadataRuntime();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,

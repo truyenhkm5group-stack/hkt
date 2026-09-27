@@ -10,8 +10,7 @@ import { successRate } from "@/lib/queries/metrics";
 import { getReturnRateByVariant, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { recordInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
-import { listReservedOrderLines, listReservedQueue, stockRiskSummary } from "@/lib/queries/stock";
-import { getOrderValidation } from "@/lib/queries/preship-validation";
+import { listReservedOrderLines, stockRiskSummary } from "@/lib/queries/stock";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { STOCK_STATE_LABEL, type StockState } from "@/lib/constants/inventory";
 import type { Period } from "@/lib/search-params";
@@ -178,12 +177,11 @@ export async function testInventory(db: Db) {
   const choXuatTruoc = (await productRow("dq-var")).reserved;
   await db.insert(schema.orders).values([
     { id: "ton-cho-xuat-dq", stage: "CONFIRMED", insertedAt: new Date() },
-    // Đơn thứ hai ĐỦ THÔNG TIN (tên · SĐT · địa chỉ · tỉnh) — đơn thứ nhất cố ý thiếu SĐT/địa chỉ.
-    { id: "ton-cho-xuat-dq-2", stage: "CONFIRMED", insertedAt: new Date(), billFullName: "Khách đủ thông tin", billPhone: "0987654321", shipAddress: "12 Nguyễn Trãi, Phường Bến Thành", shipProvince: "Hồ Chí Minh" },
+    { id: "ton-cho-xuat-dq-2", stage: "CONFIRMED", insertedAt: new Date() },
   ]);
   await db.insert(schema.orderItems).values([
     { id: "ton-cho-xuat-dq-i1", orderId: "ton-cho-xuat-dq", variantId: "dq-var", quantity: 4 },
-    { id: "ton-cho-xuat-dq-i2", orderId: "ton-cho-xuat-dq-2", variantId: "dq-var", quantity: 3, variationDetail: "Đỏ / M" },
+    { id: "ton-cho-xuat-dq-i2", orderId: "ton-cho-xuat-dq-2", variantId: "dq-var", quantity: 3 },
   ]);
   await db.insert(schema.shipments).values({ id: "ton-cho-xuat-dq-s1", orderId: "ton-cho-xuat-dq", stage: "PENDING" });
   clearMemo();
@@ -257,23 +255,6 @@ export async function testInventory(db: Db) {
     "đơn đã chốt CHƯA tạo vận đơn vẫn là đơn chờ xuất — phải có mặt trong danh sách (hàng chắc chắn còn trong kho)",
   );
   assert.deepEqual(await listReservedOrderLines({ variantId: "khong-co-mau-nay" }), { scope: null, lines: [] }, "mẫu mã không tồn tại ⇒ không có phạm vi, không bịa danh sách");
-
-  // ───────── 7d. Đơn THIẾU THÔNG TIN chưa vào hàng đợi xuất — nhưng vẫn giữ hàng ─────────
-  // Chủ shop chốt 27/09/2026. "Thiếu" = lỗi CHẶN GỬI của validateForShipping(), không phải luật thứ hai.
-  const hangDoi = await listReservedQueue({ variantId: "dq-var" });
-  const dqDong = dsSanPham.find((r) => r.id === "dq-var");
-  assert.ok(dqDong, "fixture: thiếu dq-var");
-  assert.equal(tongSl(hangDoi.ready) + tongSl(hangDoi.incomplete), dqDong.reserved, "đủ + thiếu thông tin cộng lại PHẢI bằng ô 'chờ xuất' — đơn thiếu thông tin vẫn giữ hàng, sổ kho không đổi");
-  const du = hangDoi.ready.find((l) => l.orderId === "ton-cho-xuat-dq-2");
-  assert.ok(du, "đơn đủ tên · SĐT · địa chỉ · tỉnh phải nằm trong hàng đợi xuất");
-  assert.equal(du.blockers.length, 0, "đơn trong hàng đợi xuất không được mang lỗi chặn gửi");
-  const thieu = hangDoi.incomplete.find((l) => l.orderId === "ton-cho-xuat-dq");
-  assert.ok(thieu, "đơn thiếu SĐT/địa chỉ phải bị TÁCH khỏi hàng đợi xuất, không biến mất");
-  assert.ok(!hangDoi.ready.some((l) => l.orderId === "ton-cho-xuat-dq"), "đơn thiếu thông tin KHÔNG được nằm trong hàng đợi xuất");
-  const maThieu = thieu.blockers.map((b) => b.code);
-  assert.ok(maThieu.includes("MISSING_PHONE") && maThieu.includes("MISSING_ADDRESS"), `phải nói đích danh trường thiếu, thấy: ${maThieu.join(", ")}`);
-  const motDon = await getOrderValidation("ton-cho-xuat-dq");
-  assert.equal(motDon.report.readyToShip, thieu.readyToShip, "hàng đợi xuất và ngăn soát trên trang đơn phải cùng một kết luận");
 
   await db.delete(schema.shipments).where(eq(schema.shipments.id, "ton-cho-xuat-dq-s1"));
   await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i1"));

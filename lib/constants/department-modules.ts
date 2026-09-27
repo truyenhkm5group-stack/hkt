@@ -402,6 +402,36 @@ export const NAV_MODULES = [
     permission: "modules:manage",
     why: "Tổ chức dùng những mảng nào của ERP. Bật một module là mở cả màn hình, quyền và job của nó cho mọi người — quyết định của quản trị, không của một phòng làm một khâu.",
   },
+  // Metadata của tổ chức (Phase 2): bốn màn hình cùng khoá `metadata:manage`. Đổi ở đây đổi màn hình
+  // của MỌI phòng (field, form, cột, nhãn trạng thái) nên là việc của quản trị, không của phòng nào.
+  {
+    href: "/settings/data-model",
+    label: "Mô hình dữ liệu",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Field tuỳ biến của khách hàng, đơn hàng, sản phẩm… cho CẢ tổ chức. Một field mới hiện ở form và danh sách của mọi phòng — quyết định của quản trị.",
+  },
+  {
+    href: "/settings/forms",
+    label: "Form nhập liệu",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Bố cục form (nhóm, thứ tự, bắt buộc, chỉ đọc) theo Nháp → Xuất bản. Xuất bản đổi màn hình nhập liệu của mọi người mà không cần deploy.",
+  },
+  {
+    href: "/settings/lists",
+    label: "Danh sách",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Cột, sắp xếp và bộ lọc mặc định của danh sách chạy theo metadata. Cùng mô hình Nháp → Xuất bản với form.",
+  },
+  {
+    href: "/settings/statuses",
+    label: "Trạng thái",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Nhãn hiển thị, thứ tự và bộ lọc của trạng thái HỆ THỐNG (vd trạng thái đơn). Giá trị và chuyển trạng thái do Core sở hữu — trang này chỉ đổi phần hiển thị.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",
