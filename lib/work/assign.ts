@@ -1,6 +1,7 @@
 import type { SessionUser } from "@/lib/auth/session";
 import { csQuickAction, updateCsCaseQuick } from "@/lib/actions/cs";
 import { setCareOwner } from "@/lib/actions/care-workbench";
+import { setCareOwner as setCareOwnerService } from "@/lib/care/service";
 import { parseWorkKey } from "@/lib/constants/work";
 import { assigneeAuthorityOf, isWorkSource, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 import * as svc from "@/lib/work/service";
@@ -51,5 +52,48 @@ export async function assignByAuthority(key: string, assigneeId: string | null, 
     }
     default:
       return { error: `${WORK_SOURCE_SPEC[source].label}: nguồn giữ người phụ trách nhưng chưa nối hành động giao việc` };
+  }
+}
+
+/**
+ * ═══════════ CỬA GIAO CỦA MÁY — CHO JOB NỀN, KHÔNG CÓ NGƯỜI BẤM ═══════════
+ *
+ * `assignByAuthority` đi qua Server Action của miền, mà Server Action đọc phiên đăng nhập — job nền
+ * không có phiên. Cửa này dẫn về đúng hàm DỊCH VỤ mà Server Action kia gọi, với người thao tác là
+ * MÁY (`id: null` ở care — AGENTS.md mục 34: khác hẳn "chưa biết ai"). Lịch sử vẫn ghi ở đúng miền.
+ *
+ * Không có quyền để kiểm: người BẬT công tắc phân việc tự động (`work:admin`) đã quyết thay. Nguồn
+ * nào chưa có đường ghi cho máy thì TRẢ LỖI, không đoán — job đếm và in ra, việc nằm lại hàng đợi.
+ */
+export const MACHINE_ASSIGNER = { email: "job:work-auto-assign", name: "Máy phân việc" } as const;
+
+/** Nguồn máy tự giao được. Job lọc TRƯỚC khi dựng kế hoạch, để việc giao không nổi không chiếm chỗ của ai. */
+export function machineAssignable(source: string): boolean {
+  return isWorkSource(source) && (assigneeAuthorityOf(source as WorkSource) === "WORK" || source === "SHIPMENT_CARE");
+}
+
+export async function assignByMachine(key: string, assigneeId: string): Promise<AssignRouteResult> {
+  const parsed = parseWorkKey(key);
+  if (!parsed) return { error: "Khoá việc không hợp lệ" };
+  if (!isWorkSource(parsed.sourceType)) return { error: `Nguồn việc không tồn tại: ${parsed.sourceType}` };
+  const source = parsed.sourceType as WorkSource;
+
+  if (assigneeAuthorityOf(source) === "WORK") {
+    // `id: ""` — cùng quy ước với job sinh việc định kỳ: `assigned_by` thành NULL (máy).
+    const r = await svc.assignWork(key, assigneeId, { id: "", email: MACHINE_ASSIGNER.email, name: MACHINE_ASSIGNER.name, source: "SYSTEM" });
+    return "error" in r ? r : { ok: true };
+  }
+
+  switch (source) {
+    case "SHIPMENT_CARE": {
+      const r = await setCareOwnerService({ id: null, email: MACHINE_ASSIGNER.email, name: MACHINE_ASSIGNER.name, source: "SYSTEM" }, { shipmentIds: [parsed.sourceKey], ownerId: assigneeId });
+      if ("error" in r) return { error: r.error };
+      const skipped = r.data.skipped[0];
+      return skipped ? { error: skipped.reason } : { ok: true };
+    }
+    default:
+      // Case CSKH: đường ghi của miền (`lib/actions/cs.ts`) còn gắn với phiên đăng nhập. Chưa nối thì
+      // nói là chưa nối — không tự viết thẳng vào `cs_cases`.
+      return { error: `${WORK_SOURCE_SPEC[source].label}: chưa có đường giao việc cho máy — giao tay ở trang của miền` };
   }
 }

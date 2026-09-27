@@ -28,7 +28,7 @@ type PlanRow = { key: string; title: string; userId: string; userName: string; w
 type AfterRow = { userId: string; name: string; before: number; added: number; after: number; limit: number };
 type UnplacedSummary = { reason: string; count: number; label: string; fix: string };
 
-export function AutoAssignButton({ department, unassigned }: { department: DepartmentCode; unassigned: number }) {
+export function AutoAssignButton({ department, unassigned, label = "Phân việc tự động" }: { department: DepartmentCode; unassigned: number; label?: string }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [rows, setRows] = useState<PlanRow[]>([]);
@@ -64,7 +64,7 @@ export function AutoAssignButton({ department, unassigned }: { department: Depar
   return (
     <>
       <Button size="sm" variant="outline" disabled={pending || unassigned === 0} onClick={chayThu} title={unassigned === 0 ? "Không còn việc nào chưa ai nhận" : "Chạy thử — chưa ghi gì cả"}>
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />} Phân việc tự động
+        {pending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />} {label}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

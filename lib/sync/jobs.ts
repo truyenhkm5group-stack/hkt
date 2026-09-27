@@ -12,6 +12,7 @@ import {
 import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
+import { runAutoAssign } from "@/lib/work/auto-assign-run";
 import { runMorningBrief } from "@/lib/work/morning-brief";
 import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
@@ -562,6 +563,30 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.imported = r.created;
         ctx.summary.skipped = r.skipped;
         ctx.summary.detail = `sinh ${r.created} việc · ${r.skipped} định nghĩa chưa tới kỳ / đã có việc kỳ này`;
+        return r;
+      }),
+  },
+  "work-auto-assign": {
+    label: "Phân việc tự động",
+    source: "ALL",
+    module: "work",
+    description:
+      "Giao việc CHƯA AI NHẬN của những phòng đã bật công tắc “Phân việc tự động” (Cấu hình → Sức chứa và phân việc) — mặc định tắt ở mọi phòng, nên chưa bật thì lượt chạy chỉ đọc cấu hình rồi thoát. " +
+      "Dùng đúng kế hoạch mà nút “Phân việc tự động” cho xem trước: việc gấp nhất chọn người trước, không nhồi quá trần, bỏ qua người đang khai nghỉ, không lấy việc khỏi tay ai. " +
+      "Máy giao không ghi mốc “phản hồi đầu tiên” của ca care và không mở lại ca đã đóng.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "work-auto-assign", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await runAutoAssign();
+        ctx.summary.imported = r.departments.reduce((n, d) => n + d.applied, 0);
+        ctx.summary.skipped = r.departments.reduce((n, d) => n + d.unplaced + d.failed, 0);
+        const hong = r.departments.filter((d) => d.failed > 0);
+        if (hong.length) ctx.summary.warning = hong.map((d) => `${d.department}: ${d.failed} việc không ghi được — ${d.failures[0]?.reason ?? ""}`).join(" · ").slice(0, 500);
+        ctx.summary.detail = r.enabled.length
+          ? r.departments
+              .map((d) => `${d.department}: giao ${d.applied}/${d.planned} · nằm lại ${d.unplaced}${d.notMachineAssignable ? ` · ${d.notMachineAssignable} việc máy chưa giao được (giao tay)` : ""}`)
+              .join(" · ")
+              .slice(0, 900)
+          : "chưa phòng nào bật phân việc tự động";
         return r;
       }),
   },
