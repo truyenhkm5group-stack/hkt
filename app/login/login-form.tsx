@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DENY_REASON_MESSAGE } from "@/lib/constants/session-revocation";
 
-export function LoginForm({ next, reason }: { next?: string; reason?: string }) {
+export function LoginForm({ next, reason, showOrgField = false }: { next?: string; reason?: string; showOrgField?: boolean }) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
 
   return (
@@ -28,6 +28,12 @@ export function LoginForm({ next, reason }: { next?: string; reason?: string }) 
       <CardContent>
         <form action={action} className="space-y-4">
           <input type="hidden" name="next" value={next ?? "/"} />
+          {showOrgField ? (
+            <div className="space-y-2">
+              <Label htmlFor="org">Mã tổ chức</Label>
+              <Input id="org" name="org" type="text" autoComplete="organization" placeholder="Bỏ trống nếu dùng tổ chức mặc định" autoCapitalize="none" spellCheck={false} />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input id="email" name="email" type="email" autoComplete="username" placeholder="ban@shop.vn" required autoFocus />

@@ -163,3 +163,55 @@ export function sessionCookieSecure(nodeEnv: string | undefined, appUrl: string 
 export function cookieMaxAgeSec(expiresAtSec: number, nowSec: number): number {
   return Math.max(0, expiresAtSec - nowSec);
 }
+
+// ═══════════ TỔ CHỨC TRONG PHIÊN + GIA HẠN GIỮ NGUYÊN DANH TÍNH ═══════════
+
+/**
+ * Claim mang MÃ TỔ CHỨC của phiên (docs/platform/shared-contracts.md mục 3). Do máy chủ ký lúc đăng
+ * nhập; `lib/platform/context.ts` đọc nó (sau khi xác minh chữ ký) để chọn CSDL. Token cũ không có
+ * claim này ⇒ tổ chức nhà — nên lượt deploy nền tảng không đăng xuất ai.
+ */
+export const SESSION_ORG_CLAIM = "org";
+
+/**
+ * Claim KHÔNG được chép khi gia hạn: mốc thời gian của chính tờ giấy (ký lại thì phải là mốc mới)
+ * và `sub` (đặt qua `setSubject`). Mọi claim khác là DANH TÍNH và đi nguyên vẹn sang token mới.
+ */
+const RENEWAL_DROPPED_CLAIMS = new Set(["iat", "exp", "nbf", "sub", "jti"]);
+
+/**
+ * Bộ claim của token GIA HẠN — hàm THUẦN, middleware (Edge) và bài kiểm gọi đúng một bản.
+ *
+ * Chép NGUYÊN mọi claim của token cũ trừ mốc thời gian, rồi đặt lại mốc đăng nhập gốc. Không liệt kê
+ * từng claim cần giữ: danh sách liệt kê là thứ quên được — bản trước chỉ chép `email`, `name`,
+ * `role`, `lgn`, nên claim `org` thêm vào sau sẽ RƠI MẤT ở lần gia hạn đầu tiên và người của tổ chức
+ * B bị coi là người của tổ chức nhà (tenant-readiness-audit ISO-09). Quên một claim danh tính là
+ * một lỗi rò, không phải lỗi giao diện.
+ *
+ * Nơi gọi phải `jwtVerify` trước — hàm này không kiểm chữ ký.
+ */
+export function renewalClaims(payload: Record<string, unknown>, loginAtSec: number): Record<string, unknown> {
+  const claims: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!RENEWAL_DROPPED_CLAIMS.has(key)) claims[key] = value;
+  }
+  // Mốc đăng nhập gốc đi theo token, nếu không thì mỗi lần gia hạn là một lần dời trần sống.
+  claims[SESSION_LOGIN_CLAIM] = loginAtSec;
+  return claims;
+}
+
+// ═══════════ HEADER DO MÁY CHỦ ĐẶT ═══════════
+
+/**
+ * Tiền tố header chỉ MÁY CHỦ được đặt. Middleware XOÁ mọi header mang tiền tố này mà trình duyệt gửi
+ * lên, rồi mới đặt giá trị của chính nó — nên đọc được một header `x-erp-*` ở tầng Node nghĩa là
+ * middleware đã đặt nó.
+ */
+export const ERP_HEADER_PREFIX = "x-erp-";
+
+/**
+ * Đường dẫn của request, do middleware gắn vào (target-architecture P9). `resolveCurrentUser()` đọc
+ * nó để từ chối đường dẫn thuộc module đang tắt — cổng module đi theo ĐƯỜNG DẪN vì quyền không ánh
+ * xạ sạch sang module.
+ */
+export const ERP_PATH_HEADER = "x-erp-path";

@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, num, sleep, str } from "@/lib/integrations/http";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" };
 
@@ -93,6 +94,8 @@ export class FacebookAdsClient {
   }
 
   private async get(pathOrUrl: string, params: Record<string, unknown> = {}) {
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
+    await assertHomeCredentials("facebook");
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();

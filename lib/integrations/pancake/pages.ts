@@ -5,6 +5,7 @@
  */
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, int, str } from "@/lib/integrations/http";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 export type PancakePage = { id: string; name: string; platform: string };
 export type PancakeConversation = {
@@ -61,7 +62,17 @@ export class PancakePagesClient {
     private readonly baseUrl = env.pancake.pagesBaseUrl,
   ) {}
 
+  /**
+   * Credential môi trường là của tổ chức nhà (P12). Gọi ở MỌI đường ra mạng của client — kể cả
+   * `sendMessage`/`sendAttachment` (tự gọi `fetchJson`) và `pageToken` (bắt lỗi rồi lùi về
+   * `access_token` người dùng: không chặn ở đó thì lỗi bị nuốt và khoá của VNX vẫn đi tiếp).
+   */
+  private guard() {
+    return assertHomeCredentials("pancake-pages");
+  }
+
   private async call(path: string, query: Record<string, string | number | undefined>, method = "GET"): Promise<Record<string, unknown>> {
+    await this.guard();
     const url = new URL(`${this.baseUrl}/${path.replace(/^\//, "")}`);
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     const { body, status, text } = await fetchJson(url, { method, headers: { accept: "*/*" }, serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 2 });
@@ -88,6 +99,7 @@ export class PancakePagesClient {
 
   /** page_access_token cho một page (sinh mới nếu chưa có) */
   async pageToken(pageId: string): Promise<{ key: "page_access_token" | "access_token"; value: string }> {
+    await this.guard();
     const cached = this.pageTokens.get(pageId);
     if (cached) return { key: "page_access_token", value: cached };
     try {
@@ -166,6 +178,7 @@ export class PancakePagesClient {
    * dùng khi lần gửi thường bị từ chối "(#10) ngoài khoảng thời gian cho phép".
    */
   async sendMessage(pageId: string, conversationId: string, customerId: string, text: string, options: { tag?: string } = {}): Promise<{ ok: boolean; error?: string; id?: string }> {
+    await this.guard();
     const token = await this.pageToken(pageId);
     const url = new URL(`${this.baseUrl}/pages/${pageId}/conversations/${conversationId}/messages`);
     url.searchParams.set(token.key, token.value);
@@ -194,6 +207,7 @@ export class PancakePagesClient {
 
   /** Gửi ảnh / video kèm theo URL công khai. Thử lần lượt các tên tham số Pancake chấp nhận; trả về lỗi cuối nếu đều thất bại. */
   async sendAttachment(pageId: string, conversationId: string, customerId: string, mediaUrl: string, caption = ""): Promise<{ ok: boolean; error?: string; param?: string }> {
+    await this.guard();
     const token = await this.pageToken(pageId);
     const url = new URL(`${this.baseUrl}/pages/${pageId}/conversations/${conversationId}/messages`);
     url.searchParams.set(token.key, token.value);

@@ -23,6 +23,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SEPAY_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
 import { readBodyCapped } from "@/lib/http/body-limit";
+import { bindOrganization } from "@/lib/platform/background";
+import { withOrganization } from "@/lib/platform/context";
+import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 import { after } from "next/server";
 import { getDb } from "@/db";
 import { staleMemo } from "@/lib/cache";
@@ -48,7 +51,15 @@ function fail(status: number, message: string) {
   return NextResponse.json({ success: false, message }, { status });
 }
 
+/**
+ * Webhook không có phiên: tổ chức phân giải TƯỜNG MINH theo `WEBHOOK_BINDINGS` rồi bọc TOÀN BỘ
+ * phần xử lý — kể cả việc sau phản hồi — trong `withOrganization` (audit ISO-07 · hợp đồng mục 8).
+ */
 export async function POST(request: NextRequest) {
+  return withOrganization(await resolveWebhookOrganization("SEPAY"), () => handlePost(request));
+}
+
+async function handlePost(request: NextRequest) {
   // 1 ─ BYTE GỐC trước mọi thứ khác — nhưng CÓ TRẦN: chữ ký cần body nên phải đọc trước khi xác
   //     thực, và đọc không trần là để kẻ lạ bắt máy chủ cấp phát bao nhiêu cũng được (lib/constants/webhook-limits.ts).
   const read = await readBodyCapped(request, SEPAY_WEBHOOK_MAX_BODY_BYTES);
@@ -136,7 +147,7 @@ export async function POST(request: NextRequest) {
   // 6 ─ Việc nặng và việc không được phép làm hỏng một gói tin đã ghi xong.
   if (outcome.created) {
     const transactionId = outcome.transactionId;
-    after(async () => {
+    after(await bindOrganization(async () => {
       try {
         await applyBankRules(await getDb(), { ids: [transactionId] });
         // Không ai ngồi chờ webhook: đánh dấu đệm cũ để người đang mở trang được kéo lên số mới.
@@ -144,7 +155,7 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error(`[sepay-webhook] gán nhãn hỏng cho ${transactionId}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    });
+    }));
   }
 
   return ok({

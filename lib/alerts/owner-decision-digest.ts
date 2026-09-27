@@ -24,6 +24,7 @@ import type { OwnerDecisionKind } from "@/lib/constants/owner-decisions";
 import { env } from "@/lib/env";
 import { getOwnerDecisionQueue, OWNER_DECISION_WRITE_TIMEOUT_MS } from "@/lib/queries/owner-decisions";
 import { getSettingJson } from "@/lib/settings";
+import { organizationStateKey } from "@/lib/platform/process-state";
 
 /**
  * ═══════════ GỬI "CẦN ANH QUYẾT" VÀO NHÓM LARK QUẢN LÝ ═══════════
@@ -60,7 +61,9 @@ export const OWNER_DIGEST_VIEWER_ID = "system:owner-digest";
 
 /** Sau một lượt đọc đầy đủ hàng đợi mà KHÔNG gửi được (hỏng / rỗng vì nguồn hỏng), đợi chừng này mới đọc lại. */
 const FULL_RETRY_MS = 5 * 60_000;
-const holder = globalThis as unknown as { __erpOwnerDigestFullAt?: number };
+/** Nhịp đọc lại THEO TỔ CHỨC (ISO-18): lượt hỏng của tổ chức này không làm tổ chức kia bị bỏ lượt. */
+const holder = globalThis as unknown as { __erpOwnerDigestFullAtByOrg?: Map<string, number> };
+const fullAtByOrg = (holder.__erpOwnerDigestFullAtByOrg ??= new Map<string, number>());
 
 export type OwnerDigestResult = {
   sent: OwnerDigestReason | null;
@@ -149,7 +152,9 @@ export async function runOwnerDecisionDigest(deps: OwnerDigestDeps = {}): Promis
   const before = await readLedgerRow();
   // Bản sáng đã xét ⇒ chỉ loại GẤP mới kích được tin: đọc hai nguồn nhẹ, không dựng lại tồn / quảng cáo.
   const morningDone = ownerDigestMorningDone(before.ledger, now);
-  if (!morningDone && holder.__erpOwnerDigestFullAt && now.getTime() - holder.__erpOwnerDigestFullAt < (deps.fullRetryMs ?? FULL_RETRY_MS) && now.getTime() >= holder.__erpOwnerDigestFullAt) {
+  const orgKey = await organizationStateKey();
+  const fullAt = fullAtByOrg.get(orgKey);
+  if (!morningDone && fullAt && now.getTime() - fullAt < (deps.fullRetryMs ?? FULL_RETRY_MS) && now.getTime() >= fullAt) {
     return { sent: null, items: 0, skipped: "vừa thử bản sáng — đợi vài phút rồi đọc lại" };
   }
   const viewer = await ownerDigestViewer();
@@ -157,7 +162,7 @@ export async function runOwnerDecisionDigest(deps: OwnerDigestDeps = {}): Promis
   const decision = decideOwnerDecisionDigest(before.ledger, queue, now, { enabled: true, appUrl: env.appUrl });
 
   if (!decision.send || !decision.message) {
-    if (!morningDone && decision.reason === "SOURCES_FAILED") holder.__erpOwnerDigestFullAt = now.getTime();
+    if (!morningDone && decision.reason === "SOURCES_FAILED") fullAtByOrg.set(orgKey, now.getTime());
     if (JSON.stringify(decision.nextState) !== JSON.stringify(before.ledger)) await casLedger(before.text, decision.nextState);
     return { sent: null, items: 0, skipped: OWNER_DIGEST_SKIP_LABEL[decision.reason as keyof typeof OWNER_DIGEST_SKIP_LABEL] ?? String(decision.reason) };
   }
@@ -171,7 +176,7 @@ export async function runOwnerDecisionDigest(deps: OwnerDigestDeps = {}): Promis
   if (!r.ok) {
     // Trả sổ cũ (bỏ claim): lượt sau thử lại. Không ghi "đã gửi" cho một tin chưa tới.
     await casLedger(claimed.text, { ...before.ledger, claim: null });
-    if (!morningDone) holder.__erpOwnerDigestFullAt = now.getTime();
+    if (!morningDone) fullAtByOrg.set(orgKey, now.getTime());
     const error = maskUrls(r.error ?? "không rõ");
     return { sent: null, items: decision.keys.length, skipped: "gửi hỏng", error };
   }
@@ -181,5 +186,5 @@ export async function runOwnerDecisionDigest(deps: OwnerDigestDeps = {}): Promis
 
 /** Chỉ cho kiểm thử: xoá nhịp đọc lại trong bộ nhớ. */
 export function resetOwnerDigestThrottle() {
-  holder.__erpOwnerDigestFullAt = undefined;
+  fullAtByOrg.clear();
 }

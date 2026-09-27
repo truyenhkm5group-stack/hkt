@@ -2,7 +2,8 @@ import { asc, desc } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { SHIPMENT_STAGE_LABEL, COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
 import { formatDateTime } from "@/lib/format";
@@ -18,8 +19,9 @@ function csvCell(value: unknown) {
 
 export async function GET(request: NextRequest) {
   // Xuất CSV đơn hàng mang theo tên, số điện thoại và địa chỉ khách — phải đúng quyền của trang Đơn hàng, không chỉ "đã đăng nhập".
-  const user = await getCurrentUser();
-  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!(can(user, "orders:export") || can(user, "orders:read"))) return new Response("Không có quyền xuất dữ liệu này", { status: 403 });
   const sp: SearchParams = {};
   request.nextUrl.searchParams.forEach((value, key) => {

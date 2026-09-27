@@ -380,6 +380,20 @@ export const NAV_MODULES = [
     permission: "audit:view",
     why: "Ai đã làm gì, lúc nào. Đường truy vết của cả ERP.",
   },
+  {
+    href: "/settings/modules",
+    label: "Module của tổ chức",
+    zone: "SYSTEM",
+    permission: "modules:manage",
+    why: "Tổ chức dùng những mảng nào của ERP. Bật một module là mở cả màn hình, quyền và job của nó cho mọi người — quyết định của quản trị, không của một phòng làm một khâu.",
+  },
+  {
+    href: "/platform",
+    label: "Vận hành nền tảng",
+    zone: "SYSTEM",
+    permission: "platform:operate",
+    why: "Mọi tổ chức trên nền tảng: sức khoẻ CSDL, lỗi cấu hình module. Chỉ người của tổ chức nhà — nó nhìn xuyên qua ranh giới giữa các tổ chức.",
+  },
 ] as const satisfies readonly ModuleSpec[];
 
 /** Mọi đường dẫn có mục menu — TypeScript đòi bảng icon phải phủ đủ, không thiếu một mục. */
@@ -396,7 +410,7 @@ export const ZONE_LABEL: Record<ModuleZone, string> = {
 export const ZONE_HINT: Record<ModuleZone, string> = {
   EVERYONE: "Mọi phòng đều mở — không thuộc phòng nào",
   ...DEPARTMENT_HINT,
-  SYSTEM: "Bộ máy của chính ERP: tích hợp, tài khoản, nhật ký, phòng Tech AI",
+  SYSTEM: "Bộ máy của chính ERP: tích hợp, tài khoản, nhật ký, module, phòng Tech AI",
 };
 
 /** Module của một vùng, giữ nguyên thứ tự khai. */

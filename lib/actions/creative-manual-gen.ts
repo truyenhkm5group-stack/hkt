@@ -12,6 +12,7 @@ import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, rev
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { bindOrganization } from "@/lib/platform/background";
 
 /**
  * ═══════════ VÒNG MẪU — GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ═══════════
@@ -59,7 +60,7 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
     entityId: r.genId,
     after: { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, requested: r.requested, uploads: d.uploads.length },
   });
-  drawAfterResponse(r.genId);
+  await drawAfterResponse(r.genId);
   revalidatePath(PATH);
   return { ok: true, genId: r.genId, requested: r.requested, allowed: r.allowed, note: r.reason };
 }
@@ -70,14 +71,18 @@ function decodeUploads(list: readonly string[]): Uint8Array[] {
 }
 
 /** Vẽ SAU phản hồi — nút bấm không treo. Lỗi ở đây không làm hỏng gì: ảnh còn `PLANNED` thì lượt vòng mẫu vẽ nốt. */
-function drawAfterResponse(genId: string) {
-  after(async () => {
+async function drawAfterResponse(genId: string) {
+  /*
+    Tổ chức CHỤP lúc bấm (request còn sống), việc sau phản hồi tự bọc `withOrganization` — không
+    dựa vào việc Next có mang ngữ cảnh vào `after()` hay không (audit ISO-16).
+  */
+  after(await bindOrganization(async () => {
     try {
       await drawManualGen(await getDb(), { genId });
     } catch (e) {
       console.error("[creative-manual-gen] vẽ sau phản hồi lỗi:", e instanceof Error ? e.message : String(e));
     }
-  });
+  }));
 }
 
 /** "Gen thiết kế mới" — mỗi ảnh một THIẾT KẾ MỚI lai DNA của các mẫu bán tốt người chọn (§5i, kiểu `DESIGN`). */
@@ -101,7 +106,7 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
     entityId: r.genId,
     after: { kind: "DESIGN", inspirationProductIds: d.inspirationProductIds, idea: d.idea, requested: r.requested, allowed: r.allowed, uploads: d.uploads.length, note: r.reason },
   });
-  drawAfterResponse(r.genId);
+  await drawAfterResponse(r.genId);
   revalidatePath(PATH);
   return { ok: true, genId: r.genId, requested: r.requested, allowed: r.allowed, note: r.reason };
 }

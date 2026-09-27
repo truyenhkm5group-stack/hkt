@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { syncOrderById } from "@/lib/integrations/pancake/sync";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
@@ -12,8 +13,9 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   // Kéo lại dữ liệu THẬT từ Pancake / Viettel Post cho một bản ghi — chỉ mở cho người vốn đã được
   // xem chính bản ghi đó.
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "orders:read") && !can(user, "shipments:view")) return NextResponse.json({ ok: false, error: "Không có quyền tải lại dữ liệu" }, { status: 403 });
   const body = (await request.json().catch(() => ({}))) as { orderId?: string; shipmentId?: string };
   const messages: string[] = [];

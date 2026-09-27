@@ -12,8 +12,11 @@ import { loadCsRules } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { normalize } from "@/lib/text";
+import { organizationStateKey } from "@/lib/platform/process-state";
 
-const lock = globalThis as unknown as { __erpPhoneVerifyRunning?: boolean };
+/** Khoá "đang chạy" THEO TỔ CHỨC (ISO-18): lượt của tổ chức này không chặn lượt của tổ chức kia. */
+const lock = globalThis as unknown as { __erpPhoneVerifyRunningByOrg?: Set<string> };
+const runningOrgs = (lock.__erpPhoneVerifyRunningByOrg ??= new Set<string>());
 
 export type ChatMsg = { text: string; fromPage: boolean; insertedAt: Date | null };
 export type PhoneChatState = "CUSTOMER_CONFIRMED" | "SHOP_ASKED" | null;
@@ -76,15 +79,16 @@ export async function cancelPhoneVerifyCases(reason: string): Promise<number> {
 export async function verifyNewPhones(options: { lookbackDays?: number; cancelExisting?: boolean; log?: (m: string) => void } = {}): Promise<PhoneVerifyResult & { cancelled?: number }> {
   const result: PhoneVerifyResult & { cancelled?: number } = { scanned: 0, newPhones: 0, messaged: 0, manual: 0, skipped: 0, byState: {}, errors: [] };
   if (options.cancelExisting) result.cancelled = await cancelPhoneVerifyCases("Huỷ hàng loạt: quy tắc nhận diện SĐT mới được sửa lại (lịch sử tại shop khác lịch sử SĐT toàn Pancake).");
-  if (lock.__erpPhoneVerifyRunning) {
+  const orgKey = await organizationStateKey();
+  if (runningOrgs.has(orgKey)) {
     result.errors.push("Đang có lần chạy khác");
     return result;
   }
-  lock.__erpPhoneVerifyRunning = true;
+  runningOrgs.add(orgKey);
   try {
     return await run(options, result);
   } finally {
-    lock.__erpPhoneVerifyRunning = false;
+    runningOrgs.delete(orgKey);
   }
 }
 

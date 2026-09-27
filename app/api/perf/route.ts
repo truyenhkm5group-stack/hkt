@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { memoSize } from "@/lib/cache";
 import { since, summaries } from "@/lib/perf/registry";
 import { requirePermission } from "@/lib/auth/session";
+import { currentOrganization } from "@/lib/platform/context";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,12 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   await requirePermission("settings:manage");
+  /*
+    SỔ ĐO LÀ CỦA NỀN TẢNG, KHÔNG CỦA KHÁCH (audit ISO-25). Nó gom mọi tổ chức trong tiến trình, và
+    `?reset=1` xoá sổ của cả nền tảng — quản trị của tổ chức khác (có `settings:manage`) không được
+    xem hay xoá. Chỉ tổ chức nhà.
+  */
+  if (!(await currentOrganization()).isHome) return NextResponse.json({ error: "Sổ đo hiệu năng chỉ dành cho người vận hành nền tảng" }, { status: 403 });
   const url = new URL(request.url);
   if (url.searchParams.get("reset") === "1") {
     const { resetPerf } = await import("@/lib/perf/registry");

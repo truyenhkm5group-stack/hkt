@@ -1,15 +1,17 @@
 import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 
 export const dynamic = "force-dynamic";
 
 /** Lịch sử Viettel Post đẩy webhook cho một vận đơn (gọi trực tiếp API VTP, không lưu) */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "shipments:view")) return NextResponse.json({ ok: false, error: "Không có quyền xem vận đơn" }, { status: 403 });
   const { id } = await context.params;
   const db = await getDb();

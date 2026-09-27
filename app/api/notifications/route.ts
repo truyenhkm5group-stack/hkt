@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { listOpenNotifications, unreadCount } from "@/lib/queries/notifications";
 
 export const dynamic = "force-dynamic";
 
 /** Chuông thông báo: 20 thông báo đang mở mới nhất + số chưa đọc của người dùng hiện tại */
 export async function GET() {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "alerts:view")) return NextResponse.json({ error: "Không có quyền xem cảnh báo" }, { status: 403 });
   const [items, unread] = await Promise.all([listOpenNotifications(20), unreadCount(user.id)]);
   return NextResponse.json({

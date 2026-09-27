@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { readCreativeImage } from "@/lib/creative/images";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +16,9 @@ export const dynamic = "force-dynamic";
  * Nội dung của một id không bao giờ đổi (sinh lại = ảnh mới, id mới) nên cho trình duyệt giữ lâu.
  */
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return new NextResponse("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "ideas:view")) return new NextResponse("Không có quyền xem ảnh vòng mẫu", { status: 403 });
   const { id } = await ctx.params;
   const anh = await readCreativeImage(await getDb(), id);

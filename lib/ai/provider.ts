@@ -3,6 +3,7 @@ import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiTier } from "@/li
 import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
+import { assertHomeCredentials, peekIsNonHome } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ LỚP PROVIDER — AI LAYER KHÔNG KHOÁ VÀO MỘT MODEL ═══════════
@@ -182,6 +183,8 @@ export class AnthropicProvider implements AiProvider {
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
+    // Khoá AI trong môi trường là của tổ chức nhà (P12; ai trả tiền token cho tổ chức khác là quyết định còn treo — integration-inventory §2.3).
+    await assertHomeCredentials("ai");
     const started = Date.now();
     const caps = anthropicCapsOf(this.model);
     // Trần 20 tool `strict` của Anthropic — xem `strictToolNames`.
@@ -356,6 +359,8 @@ export const TIMEOUT_BY_TIER: Record<AiTier, number> = {
  */
 export function getAiProvider(tier: AiTier = "copilot", opts?: { hanChoMs?: number }): AiProvider | null {
   if (override !== undefined) return override;
+  // Ngữ cảnh TƯỜNG MINH của tổ chức khác nhà (job của họ) ⇒ "AI chưa cấu hình": khoá môi trường là của tổ chức nhà.
+  if (peekIsNonHome()) return null;
   const hanCho = opts?.hanChoMs ?? TIMEOUT_BY_TIER[tier];
   const khoa = `${tier}:${hanCho}`;
   const hit = cached.get(khoa);

@@ -15,6 +15,7 @@ import {
 import { env } from "@/lib/env";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { organizationStateKey } from "@/lib/platform/process-state";
 
 /**
  * ═══════════ GỬI BẢNG THIẾU HÀNG VÀO LARK ═══════════
@@ -43,7 +44,9 @@ export type ShortageDigestResult = {
  * đợt webhook là trả giá cho một câu trả lời gần như không đổi. Nút bấm tay (`force`) bỏ qua trần.
  */
 const MIN_AUTO_INTERVAL_MS = 5 * 60_000;
-const holder = globalThis as unknown as { __erpShortageDigestAt?: number };
+/** Nhịp THEO TỔ CHỨC (ISO-18): lượt của tổ chức này không làm tổ chức kia nhận "vừa tính trong 5 phút qua". */
+const holder = globalThis as unknown as { __erpShortageDigestAtByOrg?: Map<string, number> };
+const digestAtByOrg = (holder.__erpShortageDigestAtByOrg ??= new Map<string, number>());
 
 function target(cfg: Awaited<ReturnType<typeof loadAlertConfig>>) {
   return cfg.larkInventoryWebhookUrl ? { url: cfg.larkInventoryWebhookUrl, secret: cfg.larkInventorySecret } : { url: cfg.larkWebhookUrl, secret: cfg.larkSecret };
@@ -61,10 +64,12 @@ export async function runStockShortageDigest(opts: { force?: boolean; now?: Date
   const now = opts.now ?? new Date();
   const cfg = await loadAlertConfig();
   if (!cfg.enabled.stockShortage && !opts.force) return { sent: null, via: null, variants: 0, waitingOrders: 0, skipped: "đã tắt trong cấu hình cảnh báo" };
-  if (!opts.force && holder.__erpShortageDigestAt && now.getTime() - holder.__erpShortageDigestAt < MIN_AUTO_INTERVAL_MS) {
+  const orgKey = await organizationStateKey();
+  const lastAt = digestAtByOrg.get(orgKey);
+  if (!opts.force && lastAt && now.getTime() - lastAt < MIN_AUTO_INTERVAL_MS) {
     return { sent: null, via: null, variants: 0, waitingOrders: 0, skipped: "vừa tính trong 5 phút qua" };
   }
-  holder.__erpShortageDigestAt = now.getTime();
+  digestAtByOrg.set(orgKey, now.getTime());
   const to = target(cfg);
 
   const snapshot = await getStockShortage({ fresh: true, urgentAfterHours: cfg.pendingHours, now });

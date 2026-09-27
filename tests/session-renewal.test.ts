@@ -181,7 +181,7 @@ export async function testSessionRenewal() {
 
   /* ═══════════ 10 · NGƯỜI ĐANG LÀM VIỆC KHÔNG BỊ ĐÁ VỀ /login ═══════════ */
 
-  const tokenCu = await signSession(NV, { nowSec: now - 5 * NGAY });
+  const tokenCu = await signSession({ ...NV, orgCode: "vnx" }, { nowSec: now - 5 * NGAY });
   const { res: r10, moi: moi10 } = await goi("/shipments", tokenCu);
   assert.equal(r10.status, 200, "token còn hạn ⇒ ĐI TIẾP, không chuyển hướng");
   assert.equal(r10.headers.get("location"), null, "không được có Location — đó chính là cú đá về /login");
@@ -200,7 +200,7 @@ export async function testSessionRenewal() {
 
   /* ═══════════ 12 · TOKEN CÒN TRẺ: ĐI TIẾP NHƯNG KHÔNG KÝ LẠI ═══════════ */
 
-  const tokenTre = await signSession(NV, { nowSec: now - NGAY });
+  const tokenTre = await signSession({ ...NV, orgCode: "vnx" }, { nowSec: now - NGAY });
   const { res: r12, moi: moi12 } = await goi("/shipments", tokenTre);
   assert.equal(r12.status, 200);
   assert.equal(moi12, null, "chưa qua nửa đời ⇒ KHÔNG ký lại, không tốn một Set-Cookie nào");
@@ -211,7 +211,7 @@ export async function testSessionRenewal() {
      Hai đường này là GET nên chúng vừa đi qua được, vừa TỰ GIA HẠN phiên cho người đang mở tab. */
 
   for (const duong of ["/api/events", "/api/notifications"]) {
-    const { res, moi } = await goi(duong, await signSession(NV, { nowSec: now - 5 * NGAY }));
+    const { res, moi } = await goi(duong, await signSession({ ...NV, orgCode: "vnx" }, { nowSec: now - 5 * NGAY }));
     assert.equal(res.status, 200, `${duong}: token CŨ NHƯNG CÒN HẠN không được trả 401`);
     assert.ok(moi, `${duong}: lượt gọi nền phải gia hạn phiên — đây là thứ giữ cho tab đang mở không chết`);
   }
@@ -220,7 +220,7 @@ export async function testSessionRenewal() {
 
      Bản vá không được biến thành "không bao giờ hết hạn". Nghỉ trọn kỳ nghỉ thì phải đăng nhập lại. */
 
-  const tokenChet = await signSession(NV, { nowSec: now - (SESSION_IDLE_DAYS + 1) * NGAY });
+  const tokenChet = await signSession({ ...NV, orgCode: "vnx" }, { nowSec: now - (SESSION_IDLE_DAYS + 1) * NGAY });
   const { res: r14a, moi: moi14a } = await goi("/api/events", tokenChet);
   assert.equal(r14a.status, 401, "token hết hạn ⇒ API trả 401");
   assert.equal(moi14a, null, "và TUYỆT ĐỐI không gia hạn một token đã chết");
@@ -234,7 +234,7 @@ export async function testSessionRenewal() {
      cookie trên cùng phản hồi thì hai lệnh Set-Cookie đua nhau — và "đăng xuất thỉnh thoảng không
      ăn" là lỗi an ninh, không phải lỗi giao diện. */
 
-  const { res: r15, moi: moi15 } = await goi("/", await signSession(NV, { nowSec: now - 5 * NGAY }), "POST");
+  const { res: r15, moi: moi15 } = await goi("/", await signSession({ ...NV, orgCode: "vnx" }, { nowSec: now - 5 * NGAY }), "POST");
   assert.equal(r15.status, 200, "POST của người đã đăng nhập vẫn đi tiếp bình thường");
   assert.equal(moi15, null, "POST KHÔNG BAO GIỜ gia hạn — không có gì để đua với lệnh xoá cookie của đăng xuất");
 

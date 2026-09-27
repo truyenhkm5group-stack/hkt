@@ -28,6 +28,8 @@ import {
   PackageX,
   PlugZap,
   ReceiptText,
+  Blocks,
+  ServerCog,
   RotateCcw,
   Scissors,
   ScrollText,
@@ -43,6 +45,7 @@ import {
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission } from "@/lib/auth/permissions";
+import { moduleOfPath } from "@/lib/constants/platform-modules";
 import { MODULE_GROUPS, MODULE_TITLES, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
 
 /**
@@ -107,20 +110,56 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/integrations": PlugZap,
   "/settings/users": UserCog,
   "/audit": ScrollText,
+  "/settings/modules": Blocks,
+  "/platform": ServerCog,
 };
 
 export function iconOf(href: string): typeof LayoutDashboard {
   return MODULE_ICON[href as ModuleHref] ?? LayoutDashboard;
 }
 
-/** Người dùng tối thiểu để lọc menu theo quyền — dùng chung cho thanh bên và ô lệnh ⌘K. */
-export type NavUserLike = { role: Role; permissions: string[] };
+/**
+ * Người dùng tối thiểu để lọc menu — dùng chung cho thanh bên và ô lệnh ⌘K.
+ *
+ * `modules` = module ĐANG BẬT của tổ chức (đã phân giải, `SessionUser.modules`). Vắng mặt ⇒ không lọc
+ * theo module (chỉ người dựng tay trong kiểm thử); `resolveCurrentUser()` luôn điền.
+ */
+export type NavUserLike = { role: Role; permissions: string[]; modules?: readonly string[] };
 
-/** Một mục có hiện với người này không. ADMIN thấy hết; `anyOf` thì đủ MỘT quyền là hiện. */
+/**
+ * Mục có thuộc module đang bật không. Áp CẢ CHO ADMIN (target-architecture P8): quản trị vẫn vượt mọi
+ * kiểm QUYỀN, nhưng không vượt cổng MODULE — trang của module tắt mở ra chỉ gặp `/module-disabled`.
+ *
+ * Ẩn menu KHÔNG phải bảo mật: cổng thật ở máy chủ (`resolveCurrentUser` theo đường dẫn). Đây chỉ là
+ * để người dùng không bấm vào một lối cụt.
+ */
+export function moduleAllows(href: string, user: Pick<NavUserLike, "modules">): boolean {
+  if (!user.modules) return true;
+  const mod = moduleOfPath(href);
+  // Mục không thuộc module nào: bài kiểm sổ module đòi mọi href menu có chủ, nên nhánh này chỉ là
+  // lưới an toàn — không chặn thứ sổ không biết.
+  return mod === null || user.modules.includes(mod);
+}
+
+/** Một mục có hiện với người này không. Module tắt ⇒ ẩn (kể cả ADMIN); rồi ADMIN thấy hết; `anyOf` thì đủ MỘT quyền là hiện. */
 export function visible(item: ModuleSpec, user: NavUserLike): boolean {
+  if (!moduleAllows(item.href, user)) return false;
   if (user.role === "ADMIN") return true;
   if (item.anyOf) return item.anyOf.some((p) => hasPermission(user.permissions, p));
   return !item.permission || hasPermission(user.permissions, item.permission);
+}
+
+/**
+ * Chuông có hỏi HÀNG ĐỢI CHUNG (`/api/notifications`) không. Tuyến ấy thuộc lõi nhưng gác bằng
+ * `alerts:view` — khoá của module «Cần xử lý». Tổ chức tắt module đó thì mọi lượt hỏi (30 giây/lần)
+ * đều nhận 403: vừa phí, vừa rác nhật ký. Người không có `alerts:view` cũng vậy (403 từ trước nền tảng).
+ *
+ * Hộp thư CÁ NHÂN (phiếu lương, lời nhắc duyệt) KHÔNG phụ thuộc module này nên vẫn hỏi — tắt cả
+ * chuông là làm mất tin "Gửi riêng bạn" của tổ chức dùng Lương mà không dùng Cần xử lý.
+ */
+export function bellShowsSharedQueue(user: NavUserLike): boolean {
+  if (!moduleAllows("/alerts", user)) return false;
+  return user.role === "ADMIN" || hasPermission(user.permissions, "alerts:view");
 }
 
 /** Mọi trang người này được vào, theo đúng luật lọc của thanh bên (ADMIN thấy hết). */
@@ -156,6 +195,7 @@ export function activeHrefOf(pathname: string): string | undefined {
 export const NAV_TITLES: Record<string, string> = {
   ...MODULE_TITLES,
   "/settings/profile": "Tài khoản của tôi",
+  "/module-disabled": "Module chưa bật",
   "/customers/retention": "Giữ chân khách",
   "/inventory/purchasing": "Mua hàng & xưởng",
   "/import-vtp": "Bổ sung danh sách vận đơn",

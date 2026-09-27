@@ -8,6 +8,7 @@ import { middleware } from "@/middleware";
 import { schema, type Db } from "@/db";
 import { signSession, type SessionIdentity } from "@/lib/auth/session";
 import { RevokeReasonRequired, applySessionRevocation } from "@/lib/auth/session-revoke";
+import { getHomeOrganization } from "@/lib/platform/organizations";
 import { SESSION_COOKIE, claimsFrom } from "@/lib/constants/session";
 import {
   DENY_REASON_MESSAGE,
@@ -46,7 +47,7 @@ function khoa() {
 }
 
 async function tokenVoi(user: SessionIdentity, loginAtSec: number, nowSec: number) {
-  return signSession(user, { loginAtSec, nowSec });
+  return signSession({ ...user, orgCode: (await getHomeOrganization()).code }, { loginAtSec, nowSec });
 }
 
 export async function testSessionRevocation(d: Db) {
@@ -263,9 +264,9 @@ export async function testSessionRevocation(d: Db) {
      bị khoá trong khi tài khoản hoàn toàn bình thường, và họ đi gọi quản trị. */
 
   const thamSo = Object.values(DENY_REASON_PARAM);
-  assert.equal(new Set(thamSo).size, 3, "ba nguyên nhân phải có ba tham số `?reason=` khác nhau");
+  assert.equal(new Set(thamSo).size, thamSo.length, "mỗi nguyên nhân phải có một tham số `?reason=` riêng (ba nguyên nhân phiên + hai nguyên nhân nền tảng: tổ chức ngừng, module tắt)");
   const cau = thamSo.map((r) => DENY_REASON_MESSAGE[r]);
-  assert.equal(new Set(cau).size, 3, "…và ba CÂU khác nhau, không phải ba mã cùng một câu");
+  assert.equal(new Set(cau).size, thamSo.length, "…và mỗi nguyên nhân một CÂU khác nhau, không phải nhiều mã cùng một câu");
   for (const c of cau) assert.ok(c && c.length > 10, "mỗi nguyên nhân phải có câu giải thích thật");
 
   /* VÒNG LẶP CHUYỂN HƯỚNG. `/login` chỉ kiểm chữ ký và hạn, nên một phiên BỊ THU HỒI vẫn trông

@@ -10,6 +10,9 @@ import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { anySecretMatches } from "@/lib/auth/secret-compare";
 import { VTP_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
 import { readBodyCapped } from "@/lib/http/body-limit";
+import { bindOrganization } from "@/lib/platform/background";
+import { withOrganization } from "@/lib/platform/context";
+import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +55,15 @@ function findVtpData(body: Record<string, unknown>): Record<string, unknown> {
   return asRecord(body.DATA ?? body.data ?? body);
 }
 
+/**
+ * Webhook không có phiên: tổ chức phân giải TƯỜNG MINH theo `WEBHOOK_BINDINGS` rồi bọc TOÀN BỘ
+ * phần xử lý — kể cả việc sau phản hồi — trong `withOrganization` (audit ISO-07 · hợp đồng mục 8).
+ */
 export async function POST(request: NextRequest) {
+  return withOrganization(await resolveWebhookOrganization("VIETTELPOST"), () => handlePost(request));
+}
+
+async function handlePost(request: NextRequest) {
   const expected = env.viettelPost.webhookSecret;
   // THIẾU BÍ MẬT LÀ ĐÓNG CỬA, không phải mở toang. Trước đây `expected` rỗng ⇒ mọi POST nặc danh
   // đều được nhận và được phép TẠO vận đơn / đổi trạng thái — tức là ghi thẳng vào kết quả đơn.
@@ -108,7 +119,7 @@ export async function POST(request: NextRequest) {
   );
   const eventId = stored.id;
 
-  after(async () => {
+  after(await bindOrganization(async () => {
     try {
       const result = await applyVtpTracking(record, "VTP_WEBHOOK", { allowCreate: true });
       // PROCESSED phải có nghĩa là ĐÃ ÁP DỤNG. Gói tin lặp hay gói tin đến muộn vẫn được lưu và
@@ -130,7 +141,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       await markWebhook(eventId, "FAILED", error instanceof Error ? error.message : String(error));
     }
-  });
+  }));
 
   // Viettel Post yêu cầu trả HTTP 200 trong < 1 giây
   return NextResponse.json({ status: 200, error: false, message: "OK" });

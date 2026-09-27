@@ -3,6 +3,7 @@ import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema } from "@/db";
 import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
+import { currentOrganization } from "@/lib/platform/context";
 
 /** `ERP`: job nội bộ (dựng lại bảng dẫn xuất…) — cũng phải có bản ghi chạy, nếu không hỏng là không ai biết. */
 export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ERP" | "SEPAY" | "GITHUB";
@@ -29,9 +30,25 @@ export type SyncContext = {
   progress: () => Promise<void>;
 };
 
-const runningJobs = new Map<string, Promise<unknown>>();
+/**
+ * ═══════ KHOÁ "MỘT JOB MỘT LƯỢT" THEO TỔ CHỨC, TRÊN `globalThis` ═══════
+ *
+ * Audit ISO-12. Khoá cũ là `SOURCE:job` ở biến MỨC MODULE: lượt `pancake-orders` của tổ chức B bị
+ * bỏ qua IM LẶNG khi tổ chức nhà đang chạy cùng job, và Next nạp module theo từng bundle nên Map
+ * mức module có thể có nhiều bản — khoá không khoá thật. Nay Map nằm trên `globalThis` và khoá
+ * mang tổ chức (`jobLockKey`). Tổ chức nhà GIỮ khoá cũ `SOURCE:job` — trang Kết nối dữ liệu tra
+ * `runningJobKeys()` theo đúng dạng đó (lib/constants/sync.ts `JOB_RUN_KEYS`).
+ */
+const lockHolder = globalThis as unknown as { __erpSyncJobLocks?: { running: Map<string, Promise<unknown>>; watchdogs: Map<string, ReturnType<typeof setTimeout>> } };
+if (!lockHolder.__erpSyncJobLocks) lockHolder.__erpSyncJobLocks = { running: new Map(), watchdogs: new Map() };
+const runningJobs = lockHolder.__erpSyncJobLocks.running;
 /** Đồng hồ canh cho từng job đang chạy — dọn khi job kết thúc để không giữ tiến trình sống. */
-const jobWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+const jobWatchdogs = lockHolder.__erpSyncJobLocks.watchdogs;
+
+/** Khoá job trong bộ nhớ: nhà ⇒ `SOURCE:job` (như trước nền tảng) · tổ chức khác ⇒ `org:<mã>:SOURCE:job`. */
+export function jobLockKey(org: { code: string; isHome: boolean }, source: string, job: string): string {
+  return org.isHome ? `${source}:${job}` : `org:${org.code}:${source}:${job}`;
+}
 
 /**
  * Bản ghi RUNNING mồ côi: `runningJobs` chỉ nằm trong bộ nhớ tiến trình, nên deploy hay khởi động
@@ -98,7 +115,8 @@ export async function runSyncJob<T>(
   },
   fn: (ctx: SyncContext) => Promise<T>,
 ): Promise<{ run: { id: string; status: string }; summary: SyncSummary; result: T | null; skippedBecauseRunning?: boolean }> {
-  const key = `${options.source}:${options.job}`;
+  // Không xác định được tổ chức ⇒ ném (OrgContextError), không khoá chung với nhà.
+  const key = jobLockKey(await currentOrganization(), options.source, options.job);
   if (runningJobs.has(key)) {
     return {
       run: { id: "", status: "RUNNING" },

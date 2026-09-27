@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ImageMode, ImageQuality, ImageSize } from "@/lib/constants/creative-loop";
 import { assertPixelSafe, decodeImageEditBody, type ImageEditInputImage, type ImageEditKind, type ImageEditResult } from "@/lib/integrations/openai/images";
 import { env } from "@/lib/env";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ OPENAI FILES + BATCH — VẼ ẢNH GIÁ 50% ═══════════
@@ -80,6 +81,8 @@ async function errorText(res: Response): Promise<string> {
 
 /** Một lời gọi. Thử lại MỘT lần với 429 / 5xx; lỗi 4xx khác gọi lại cũng ra đúng lỗi ấy. */
 async function call(url: string, init: { method: string; body?: BodyInit; json?: unknown }, deps: OpenAiDeps, what: string): Promise<Response> {
+  // Khoá OpenAI trong môi trường là của tổ chức nhà (P12) — chặn trước khi đọc khoá.
+  await assertHomeCredentials("openai");
   const apiKey = keyOf(deps);
   const doFetch = deps.fetchImpl ?? fetch;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;

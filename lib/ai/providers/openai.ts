@@ -1,6 +1,7 @@
 import OpenAI, { type ClientOptions } from "openai";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ OPENAI — RESPONSES API ═══════════
@@ -41,6 +42,8 @@ export class OpenAiProvider implements AiProvider {
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
+    // Khoá AI trong môi trường là của tổ chức nhà (P12; ai trả tiền token cho tổ chức khác là quyết định còn treo — integration-inventory §2.3).
+    await assertHomeCredentials("ai");
     const started = Date.now();
     const res = await this.client.responses.create({
       model: this.model,

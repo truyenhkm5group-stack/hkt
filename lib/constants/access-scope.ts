@@ -152,6 +152,9 @@ export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
   */
   "approvals:decide",
   "production:approve",
+  /* Nền tảng: bật/tắt module và vận hành mọi tổ chức — cấp cho TỪNG NGƯỜI, không bó vào vai trò. */
+  "modules:manage",
+  "platform:operate",
 ];
 
 /**
@@ -163,6 +166,8 @@ export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
  * TỪNG NGƯỜI ở trang Người dùng — có tên, có người quyết.
  */
 export const ROLE_BUILDER_FORBIDDEN_REASON: Record<string, string> = {
+  "modules:manage": "Vai trò tuỳ chỉnh không được cấp quyền bật/tắt module — bật một module mở cả mảng quyền và job cho mọi người trong tổ chức",
+  "platform:operate": "Vai trò tuỳ chỉnh không được cấp quyền vận hành nền tảng — đó là quyền nhìn và sửa MỌI tổ chức",
   "users:manage": "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",
   "approvals:decide": "Vai trò tuỳ chỉnh không được cấp quyền duyệt hai bước — đó là cửa để tự duyệt việc của chính mình; quản trị viên cấp riêng cho từng người",
   "production:approve": "Vai trò tuỳ chỉnh không được cấp quyền duyệt mẫu / chốt giá thành — chữ ký bỏ vốn phải cấp cho từng người, có tên",

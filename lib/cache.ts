@@ -7,6 +7,7 @@
  * mã đo khắp nơi. Xem kết quả ở `/api/perf` (chỉ quản trị).
  */
 import { record, reportName } from "@/lib/perf/registry";
+import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { publish } from "@/lib/realtime/bus";
 
 type Entry = { value: unknown; expiresAt: number };
@@ -96,10 +97,37 @@ function ghiNhanChay(key: string, p: Promise<unknown>) {
   void p.then(go, go);
 }
 
+/**
+ * ═══════ KHOÁ ĐỆM MANG TỔ CHỨC — TỰ THÊM Ở ĐÂY, KHÔNG ĐỂ 130 NƠI GỌI TỰ NHỚ ═══════
+ *
+ * Audit ISO-01/02/26 · target-architecture P13. Kho đệm là MỘT cho cả tiến trình, còn khoá do nơi
+ * gọi đặt chỉ gồm tên báo cáo + kỳ (`getDashboardData:<kỳ>`, thậm chí hằng như `"cash-position"`).
+ * Hai tổ chức gọi cùng khoá ⇒ tổ chức B nhận NGUYÊN số của tổ chức nhà trong suốt TTL — kể cả mẫu
+ * quyền vai trò (`auth:roleTemplates`), tức là leo thang quyền chéo tổ chức, không chỉ lộ số.
+ *
+ *  · Tổ chức NHÀ giữ khoá CŨ, từng ký tự: job giữ ấm, sổ đo hiệu năng và bài kiểm so tập khoá
+ *    (`memoKeys()`) chạy y như trước nền tảng.
+ *  · Tổ chức khác: khoá thật là `org:<mã>:<khoá>`. Lượt tính đang chạy (`inflight`) đi theo khoá
+ *    thật, nên B không bao giờ "đi nhờ" lượt tính của A.
+ *  · Không xác định được tổ chức (`OrgContextError`) ⇒ NÉM, không đoán là nhà.
+ *
+ * Sổ đo hiệu năng vẫn gom theo khoá GỐC (`reportName(key)`), để báo cáo của mọi tổ chức không bị
+ * gộp thành một dòng tên `org`.
+ */
+export function memoStoreKey(org: { code: string; isHome: boolean }, key: string): string {
+  return org.isHome ? key : `org:${org.code}:${key}`;
+}
+
 export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const org = await currentOrganization();
+  return memoFor(org, key, ttlMs, fn);
+}
+
+async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const key = memoStoreKey(org, baseKey);
   const now = Date.now();
   const started = performance.now();
-  const name = reportName(key);
+  const name = reportName(baseKey);
   const hit = store.entries.get(key);
   if (hit && hit.expiresAt > now) {
     record(name, performance.now() - started, true);
@@ -114,7 +142,13 @@ export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>):
    */
   if (hit && !luotDangChay(key) && now - hit.expiresAt < NGUONG_QUA_CU) {
     const version = store.version;
-    const refresh = fn()
+    /*
+      Lượt làm mới chạy SAU khi request đã trả lời, nên ngữ cảnh phiên có thể không còn đọc được.
+      Tổ chức khác nhà ⇒ bọc tường minh bằng mã đã phân giải ở trên: lượt tính lại và sự kiện
+      realtime của nó chắc chắn thuộc đúng tổ chức. Nhà ⇒ đường cũ, không đổi gì.
+    */
+    const run = org.isHome ? fn : () => withOrganization(org.code, fn);
+    const refresh = run()
       .then((value) => {
         if (store.version === version) {
           store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
@@ -129,7 +163,7 @@ export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>):
            * Nên khi lượt làm mới xong và giá trị THẬT SỰ đổi, phát một sự kiện để trang tự làm mới
            * lần nữa. Lần đó là trúng đệm, không tính lại, nên không có vòng lặp.
            */
-          if (daDoi(hit.value, value)) publish({ type: "sync", source: "CACHE", job: `memo:${name}`, status: "SUCCESS" });
+          if (daDoi(hit.value, value)) publish({ type: "sync", source: "CACHE", job: `memo:${name}`, status: "SUCCESS" }, org.code);
         }
         return value;
       })
@@ -165,6 +199,9 @@ function daDoi(a: unknown, b: unknown): boolean {
  * XOÁ HẲN — dùng khi NGƯỜI dùng vừa ghi dữ liệu và phải thấy đúng số mới.
  *
  * Người vừa bấm lưu chấp nhận chờ, vì họ biết mình vừa thay đổi cái gì.
+ *
+ * Xoá MỌI tổ chức (hợp đồng mục 9): an toàn, chỉ tốn hiệu năng — một lượt ghi của tổ chức này làm
+ * tổ chức kia tính lại một lần, không bao giờ làm ai thấy số của người khác.
  */
 export function clearMemo() {
   store.entries.clear();

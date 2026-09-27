@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 
@@ -12,8 +13,9 @@ const bodySchema = z.object({ ids: z.array(z.string().min(1).max(100)).min(1).ma
 /** Tra cứu lại trạng thái Viettel Post cho các vận đơn được chọn */
 export async function POST(request: NextRequest) {
   // Chạy một lượt đồng bộ thật sang Viettel Post dưới tên người bấm ⇒ phải đúng quyền vận đơn.
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "shipments:manage")) return NextResponse.json({ ok: false, error: "Không có quyền quản lý vận đơn" }, { status: 403 });
   const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ ok: false, error: "Danh sách vận đơn không hợp lệ" }, { status: 400 });

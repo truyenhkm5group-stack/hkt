@@ -1,6 +1,7 @@
 import { RERUN_RULE } from "@/lib/constants/agent-rerun";
 import { DISPATCHABLE_WORKFLOWS, DISPATCH_REF, laMaViecHopLe } from "@/lib/constants/agent-dispatch";
 import { GithubError, githubConfig, maskToken } from "@/lib/integrations/github/client";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ ĐƯỜNG GHI DUY NHẤT SANG GITHUB ═══════════
@@ -137,6 +138,8 @@ export async function dispatchAgentRun(input: {
       return { ok: false, kind: "FORBIDDEN", detail: `Phản hồi review phải dài ${RERUN_RULE.minFeedbackChars}–${RERUN_RULE.maxFeedbackChars} ký tự (đang ${n}).` };
     }
   }
+  // Khoá GHI của người vận hành nền tảng — tổ chức khác nhà không bao giờ khởi động được workflow của kho nền tảng (audit ISO-14).
+  await assertHomeCredentials("github");
   const cfg = dispatchConfig();
   if (!cfg.configured || !cfg.repo) return { ok: false, kind: "NOT_CONFIGURED", detail: cfg.reason ?? "Chưa cấu hình." };
   const t = dispatchToken();
