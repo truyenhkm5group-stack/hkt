@@ -89,6 +89,7 @@ const SACH: string[] = [
   "marketing/creatives/variant-select.tsx",
   "marketing/fanpages/assign-panel.tsx",
   "marketing/fanpages/reconcile-button.tsx",
+  "models/bulk-declare-panel.tsx",
   "models/[id]/model-controls.tsx",
   "models/[id]/suggestion-transition.tsx",
   "models/registry-actions.tsx",

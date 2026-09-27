@@ -12,7 +12,7 @@ import {
 } from "@/lib/constants/model-lifecycle";
 import { PROVISIONAL_CODE_PG_REGEX } from "@/lib/constants/provisional-model";
 import { loadRegistryInputs, planModelRegistry, type RegistryAmbiguous } from "@/lib/models/service";
-import { spendMappedFor } from "@/lib/queries/model-ads";
+import { spendMappedFor, spendMappedProductIds } from "@/lib/queries/model-ads";
 import { erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -286,11 +286,26 @@ export async function listModelOwnerOptions(): Promise<{ id: string; name: strin
  * ĐƠN LÊN (không kể huỷ / xoá), KHÔNG phải kết quả giao — kết quả giao chỉ có một công thức
  * (`ORDER_OUTCOME`) và giai đoạn quan sát không cần tới nó.
  */
-export async function getModelEvidence(model: Pick<ModelDetail, "product" | "design">): Promise<ModelEvidence> {
-  const designStatus = model.design && ["DRAFT", "TESTING", "WIN", "LOSE", "PRODUCTION"].includes(model.design.status) ? (model.design.status as ModelEvidence["designStatus"]) : null;
-  const base: ModelEvidence = {
-    designStatus,
-    productRemoved: model.product ? model.product.isRemoved : null,
+/** Cửa sổ "30 ngày" của chứng cứ — một hằng cho cả đường một mẫu lẫn đường theo lô. */
+export const MODEL_EVIDENCE_WINDOW_DAYS = 30;
+
+/** Mốc đầu cửa sổ chứng cứ, tính từ `now` (mặc định: bây giờ). Bài kiểm truyền mốc CỐ ĐỊNH (luật 50, 65). */
+function evidenceSince(now: Date | undefined): Date {
+  return new Date((now ?? new Date()).getTime() - MODEL_EVIDENCE_WINDOW_DAYS * 86_400_000);
+}
+
+const DESIGN_EVIDENCE_STATUSES = ["DRAFT", "TESTING", "WIN", "LOSE", "PRODUCTION"] as const;
+
+/** `design_concepts.status` → ô chứng cứ; trạng thái lạ / không có thiết kế ⇒ `null`. */
+function designEvidence(status: string | null | undefined): ModelEvidence["designStatus"] {
+  return status && (DESIGN_EVIDENCE_STATUSES as readonly string[]).includes(status) ? (status as ModelEvidence["designStatus"]) : null;
+}
+
+/** Chứng cứ khi CHƯA đọc nguồn nào: mọi ô đếm là `null` (CHƯA BIẾT), không phải 0. */
+function evidenceBase(productRemoved: boolean | null, designStatus: string | null | undefined): ModelEvidence {
+  return {
+    designStatus: designEvidence(designStatus),
+    productRemoved,
     adSpend30d: null,
     orders30d: null,
     ordersTotal: null,
@@ -299,15 +314,24 @@ export async function getModelEvidence(model: Pick<ModelDetail, "product" | "des
     stockKnown: null,
     stockOnHand: null,
   };
+}
+
+/** Đơn đếm làm chứng cứ: không kể huỷ / xoá. MỘT điều kiện cho cả hai đường. */
+function orderCountedCond(): SQL {
+  return notInArray(schema.orders.stage, ["CANCELLED", "DELETED"]);
+}
+
+export async function getModelEvidence(model: Pick<ModelDetail, "product" | "design">, opts: { now?: Date } = {}): Promise<ModelEvidence> {
+  const base = evidenceBase(model.product ? model.product.isRemoved : null, model.design?.status);
   if (!model.product) return base;
   const productId = model.product.id;
   const db = await getDb();
-  const since = new Date(Date.now() - 30 * 86_400_000);
+  const since = evidenceSince(opts.now);
   const variants = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, productId));
   const variantIds = variants.map((v) => v.id);
   const o = schema.orders;
   const oi = schema.orderItems;
-  const khongHuy = notInArray(o.stage, ["CANCELLED", "DELETED"]);
+  const khongHuy = orderCountedCond();
 
   const [[qc], [don], [lenh], ton, daGhepChi] = await Promise.all([
     db
@@ -370,6 +394,133 @@ async function stockOfVariants(variantIds: string[]): Promise<{ known: boolean; 
     .where(inArray(pv.id, variantIds));
   const knownVariants = Number(r?.knownVariants ?? 0);
   return knownVariants > 0 ? { known: true, onHand: Number(r?.onHand ?? 0) } : { known: false, onHand: null };
+}
+
+type StockCell = { known: boolean; onHand: number | null };
+
+/**
+ * CHỨNG CỨ THEO LÔ (Company OS · Agent Q) — cùng câu trả lời của `getModelEvidence` cho từng mẫu, nhưng
+ * mỗi nguồn đọc ĐÚNG MỘT LẦN cho cả lô rồi cắt theo sản phẩm:
+ *
+ *  · chi QC 30 ngày: `sum(ad_spends.spend)` theo `product_id` (cùng `excluded = false`, cùng cửa sổ);
+ *    đã-từng-ghép theo `spendMappedProductIds` (cùng điều kiện `spendMappedFor`) — chưa ghép ⇒ `null`;
+ *  · đơn lên: `count(distinct orders.id)` theo `product_variants.product_id` (cùng `orderCountedCond`);
+ *  · lệnh SX nháp / đã gửi: theo `production_orders.product_id`;
+ *  · tồn: CÙNG `variantSalesSubquery` / `variantReceiptsSubquery` / `stockKnownExpr` / `erpStockExpr`,
+ *    gộp theo sản phẩm thay vì một sản phẩm một lượt.
+ *
+ * Mẫu không tồn tại ⇒ không có trong kết quả. Không đệm: lô dùng cho một thao tác KHAI, đọc phải mới.
+ * `tests/company-os-bulk-declare.test.ts` so từng ô với `getModelEvidence` trên mọi mẫu của CSDL kiểm thử.
+ */
+export async function getModelsEvidenceBatch(modelIds: readonly string[], opts: { now?: Date } = {}): Promise<Map<string, ModelEvidence>> {
+  const out = new Map<string, ModelEvidence>();
+  const ids = [...new Set(modelIds)];
+  if (!ids.length) return out;
+  const db = await getDb();
+  const models = await db
+    .select({ id: pm.id, productId: p.id, productRemoved: p.isRemoved, designStatus: dc.status })
+    .from(pm)
+    .leftJoin(p, eq(p.id, pm.productId))
+    .leftJoin(dc, eq(dc.id, pm.designConceptId))
+    .where(inArray(pm.id, ids));
+  const productIds = [...new Set(models.map((m) => m.productId).filter((x): x is string => !!x))];
+
+  const since = evidenceSince(opts.now);
+  const pv = schema.productVariants;
+  const o = schema.orders;
+  const oi = schema.orderItems;
+  const po = schema.productionOrders;
+  const ads = schema.adSpends;
+
+  const variantIds = productIds.length ? (await db.select({ id: pv.id }).from(pv).where(inArray(pv.productId, productIds))).map((v) => v.id) : [];
+
+  const chiTheoSp = new Map<string, number>();
+  const donTheoSp = new Map<string, { total: number; recent: number }>();
+  const lenhTheoSp = new Map<string, { draft: number; sent: number }>();
+  let daGhep = new Set<string>();
+  let ton = new Map<string, StockCell>();
+  if (productIds.length) {
+    const [chi, ghep, don, lenh, tonKho] = await Promise.all([
+      db
+        .select({ productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
+        .from(ads)
+        .where(and(inArray(ads.productId, productIds), eq(ads.excluded, false), gte(ads.spendDate, since)))
+        .groupBy(ads.productId),
+      // Chưa từng ghép ⇒ chi CHƯA BIẾT (luật 42, 67) — cùng điều kiện với `spendMappedFor` của đường một mẫu.
+      spendMappedProductIds(db),
+      variantIds.length
+        ? db
+            .select({
+              productId: pv.productId,
+              total: sql<number>`count(distinct ${o.id})`,
+              recent: sql<number>`count(distinct ${o.id}) filter (where ${o.insertedAt} >= ${since})`,
+            })
+            .from(oi)
+            .innerJoin(o, eq(o.id, oi.orderId))
+            .innerJoin(pv, eq(pv.id, oi.variantId))
+            .where(and(inArray(pv.productId, productIds), orderCountedCond()))
+            .groupBy(pv.productId)
+        : Promise.resolve([] as { productId: string; total: number; recent: number }[]),
+      db
+        .select({
+          productId: po.productId,
+          draft: sql<number>`count(*) filter (where ${po.status} = 'DRAFT')`,
+          sent: sql<number>`count(*) filter (where ${po.status} = 'SENT')`,
+        })
+        .from(po)
+        .where(inArray(po.productId, productIds))
+        .groupBy(po.productId),
+      variantIds.length ? stockOfProducts(variantIds) : Promise.resolve(new Map<string, StockCell>()),
+    ]);
+    for (const r of chi) chiTheoSp.set(String(r.productId), Number(r.spend ?? 0));
+    for (const r of don) donTheoSp.set(String(r.productId), { total: Number(r.total ?? 0), recent: Number(r.recent ?? 0) });
+    for (const r of lenh) lenhTheoSp.set(String(r.productId), { draft: Number(r.draft ?? 0), sent: Number(r.sent ?? 0) });
+    daGhep = ghep;
+    ton = tonKho;
+  }
+
+  for (const m of models) {
+    const base = evidenceBase(m.productId ? !!m.productRemoved : null, m.designStatus);
+    if (!m.productId) {
+      out.set(m.id, base);
+      continue;
+    }
+    const d = donTheoSp.get(m.productId);
+    const l = lenhTheoSp.get(m.productId);
+    const t = ton.get(m.productId) ?? { known: false, onHand: null };
+    out.set(m.id, {
+      ...base,
+      adSpend30d: daGhep.has(m.productId) ? (chiTheoSp.get(m.productId) ?? 0) : null,
+      orders30d: d?.recent ?? 0,
+      ordersTotal: d?.total ?? 0,
+      draftProductionOrders: l?.draft ?? 0,
+      sentProductionOrders: l?.sent ?? 0,
+      stockKnown: t.known,
+      stockOnHand: t.onHand,
+    });
+  }
+  return out;
+}
+
+/** Bản theo lô của `stockOfVariants`: cùng biểu thức sổ kho, gộp theo sản phẩm. */
+async function stockOfProducts(variantIds: string[]): Promise<Map<string, StockCell>> {
+  const db = await getDb();
+  const sales = variantSalesSubquery(db, variantIds);
+  const receipts = variantReceiptsSubquery(db, variantIds);
+  const pv = schema.productVariants;
+  const known = stockKnownExpr(receipts);
+  const rows = await db
+    .select({
+      productId: pv.productId,
+      knownVariants: sql<number>`count(*) filter (where ${known})`,
+      onHand: sql<number>`coalesce(sum(${erpStockExpr(sales, receipts)}) filter (where ${known}), 0)`,
+    })
+    .from(pv)
+    .leftJoin(sales, eq(sales.variantId, pv.id))
+    .leftJoin(receipts, eq(receipts.variantId, pv.id))
+    .where(inArray(pv.id, variantIds))
+    .groupBy(pv.productId);
+  return new Map(rows.map((r) => [String(r.productId), Number(r.knownVariants ?? 0) > 0 ? { known: true, onHand: Number(r.onHand ?? 0) } : { known: false, onHand: null }]));
 }
 
 // ─────────────────────────── DÒNG THỜI GIAN MẪU ───────────────────────────

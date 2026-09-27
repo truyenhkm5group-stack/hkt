@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { assignModelCode, setModelOwner, transitionModel } from "@/lib/actions/models";
+import { assignModelCode, declareModelsFromSuggestion, setModelOwner, transitionModel } from "@/lib/actions/models";
+import { BULK_DECLARE_DEFAULT_REASON, DECLARE_ROW_OUTCOME_LABEL } from "@/lib/constants/model-bulk-declare";
 import { checkModelTransition, MODEL_REASON_MIN_LENGTH, MODEL_STATE_LABELS, MODEL_STATES, MODEL_TRANSITIONS, reasonIsEnough, type ModelState } from "@/lib/constants/model-lifecycle";
 import type { WinnerFollowUp } from "@/lib/constants/early-topic";
 
@@ -20,12 +21,17 @@ import type { WinnerFollowUp } from "@/lib/constants/early-topic";
  * `winnerFollowUp` (Agent T): sản xuất của mẫu đã đi trước (topic mở sớm, giá thành, mẫu thử…). Người vừa
  * khai THẮNG thì hiện NGAY một nút chuyển tiếp tới đúng chỗ sản xuất đang đứng, lý do điền sẵn — một cú
  * bấm, vẫn đi qua `transitionModel`. Không bấm thì không có gì đổi.
+ *
+ * `suggested` (Agent Q): mẫu CHƯA KHAI mà máy có gợi ý giai đoạn (ƯỚC TÍNH) ⇒ chọn sẵn gợi ý và điền sẵn lý
+ * do — bản MỘT MẪU của "Khai theo gợi ý": lưu đi qua `declareModelsFromSuggestion` (hàng rào "vẫn chưa
+ * khai", lịch sử ghi gợi ý + người có chọn khác không). Vẫn chỉ ghi khi người bấm "Lưu trạng thái".
  */
-export function TransitionControl({ modelId, state, winnerFollowUp = null }: { modelId: string; state: ModelState | null; winnerFollowUp?: WinnerFollowUp | null }) {
+export function TransitionControl({ modelId, state, winnerFollowUp = null, suggested = null }: { modelId: string; state: ModelState | null; winnerFollowUp?: WinnerFollowUp | null; suggested?: ModelState | null }) {
   const tien = state ? MODEL_TRANSITIONS[state] : [];
   const conLai = MODEL_STATES.filter((s) => s !== state && !tien.includes(s));
-  const [to, setTo] = useState<ModelState | "">(tien[0] ?? "");
-  const [reason, setReason] = useState("");
+  const theoGoiY = state === null && suggested !== null;
+  const [to, setTo] = useState<ModelState | "">(theoGoiY ? suggested : (tien[0] ?? ""));
+  const [reason, setReason] = useState(theoGoiY ? BULK_DECLARE_DEFAULT_REASON : "");
   const [followUp, setFollowUp] = useState<WinnerFollowUp | null>(null);
   const [pending, start] = useTransition();
 
@@ -36,6 +42,21 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null }: { m
   const luu = () =>
     start(async () => {
       if (!to) return;
+      if (theoGoiY) {
+        const k = await declareModelsFromSuggestion({ items: [{ modelId, state: to, expectedState: null }], reason, from: "detail" });
+        if ("error" in k) {
+          toast.error(k.error);
+          return;
+        }
+        const dong = k.results[0];
+        if (!dong || dong.outcome !== "DECLARED") {
+          toast.error(dong ? `${DECLARE_ROW_OUTCOME_LABEL[dong.outcome]}${dong.error ? `: ${dong.error}` : ""}` : "Không khai được");
+          return;
+        }
+        toast.success(`Đã khai: ${MODEL_STATE_LABELS[to]}${to === suggested ? " (theo gợi ý)" : ""}`);
+        setFollowUp(to === "WINNER" ? winnerFollowUp : null);
+        return;
+      }
       const r = await transitionModel({ modelId, to, reason });
       if ("error" in r) {
         toast.error(r.error);
@@ -92,6 +113,7 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null }: { m
                 <SelectItem key={s} value={s}>
                   {MODEL_STATE_LABELS[s]}
                   {state ? " · cần lý do" : ""}
+                  {theoGoiY && s === suggested ? " · máy gợi ý (ước tính)" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
