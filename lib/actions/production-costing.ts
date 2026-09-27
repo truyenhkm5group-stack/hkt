@@ -10,6 +10,7 @@ import { COST_LINE_KINDS, COST_LINE_MAX_VND } from "@/lib/constants/production-o
 import { createCostSheetCore, finalizeCostSheetCore, updateCostSheetDraftCore } from "@/lib/production/costing";
 import { describeFollow } from "@/lib/production/lifecycle";
 import { startCostSheetFromTopicCore } from "@/lib/production/shortcuts";
+import { loadTopicAccess } from "@/lib/production/topic-access";
 
 /**
  * ═══════════ SERVER ACTION: BẢNG GIÁ THÀNH CÓ PHIÊN BẢN ═══════════
@@ -102,6 +103,8 @@ export async function startCostSheetFromTopic(topicId: string): Promise<Result<{
   const id = z.string().trim().min(1).safeParse(topicId);
   if (!id.success) return { error: "Thiếu topic" };
   const db = await getDb();
+  // Topic RIÊNG (0153): chỉ người trong topic đọc được yêu cầu / báo giá của nó — kể cả để điền sẵn giá thành.
+  if (!(await loadTopicAccess(db, id.data, user))?.view) return { error: "Không tìm thấy topic" };
   const r = await startCostSheetFromTopicCore(db, { topicId: id.data, actor: actorOf(user), canWrite: true });
   if ("error" in r) return r;
   if (r.mode === "CREATED") {

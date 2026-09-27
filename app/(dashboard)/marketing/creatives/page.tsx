@@ -16,6 +16,7 @@ import { formatVND } from "@/lib/format";
 import { getPendingBatch } from "@/lib/queries/creative-loop";
 import { loadMediaCounts } from "@/lib/queries/creative-manual-gen";
 import { param, parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { canOpenTopic } from "@/lib/production/topic-access";
 
 export const metadata = { title: "Thư viện Media" };
 
@@ -80,7 +81,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
           <PostedCampsBlock pending={pending?.batch.status === "PENDING_APPROVAL" ? pending : null} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={canEdit} />
         </div>
       ) : tab === "thiet-ke" ? (
-        <DesignTab canEdit={canEdit} canCreateTopic={can(user, "production:write")} />
+        <DesignTab canEdit={canEdit} canCreateTopic={canOpenTopic(user)} />
       ) : tab === "dang-chay" ? (
         <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} />
       ) : tab === "thu-vien" ? (

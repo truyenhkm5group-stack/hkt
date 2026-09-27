@@ -319,6 +319,7 @@ import { testCompanyOsBulkDeclareDb, testCompanyOsBulkDeclarePure, testCompanyOs
 import { testCompanyOsPipelineBoardDb, testCompanyOsPipelineBoardGate, testCompanyOsPipelineBoardPure, testCompanyOsPipelineBoardSource } from "./company-os-pipeline-board.test";
 import { testCompanyOsProductionShortcutsDb, testCompanyOsProductionShortcutsPure, testCompanyOsProductionShortcutsSource } from "./company-os-production-shortcuts.test";
 import { testProductionTopicFilesDb, testProductionTopicFilesPure } from "./production-topic-files.test";
+import { testProductionTopicAccessDb, testProductionTopicAccessPure } from "./production-topic-access.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testApprovalReservationSweep, testNotificationRetryDb, testNotificationRetryPure } from "./company-os-retry-sweep.test";
@@ -1986,6 +1987,8 @@ async function main() {
   // Topic sản xuất cho mẫu CHƯA CÓ MÃ (mã tạm → chốt mã khi thắng) + ảnh / video đính kèm (chủ shop 26/09/2026; mã `ptf-` / `PTFQ`).
   testProductionTopicFilesPure();
   await testProductionTopicFilesDb(db);
+  testProductionTopicAccessPure();
+  await testProductionTopicAccessDb(db);
   // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
   testCompanyOsStockFeedbackPure();
   await testCompanyOsStockFeedbackDb(db);

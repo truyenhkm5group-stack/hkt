@@ -418,10 +418,10 @@ function testSourceContracts() {
   assert.ok(!/from "@\/db"/.test(blocks) && !/from "@\/db"/.test(page), "trang không được truy vấn CSDL trực tiếp — không công thức riêng");
 
   // C và E đã nối: khối gọi đúng hàm của họ, qua loadSource, và đứng sau Suspense (kiểm ở trên).
-  assert.ok(blocks.includes("getModelProductionSummary(ctx.modelId)"), "khối Sản xuất phải đọc getModelProductionSummary của C");
+  assert.ok(blocks.includes("getModelProductionSummary(ctx.modelId, ctx.viewer)"), "khối Sản xuất phải đọc getModelProductionSummary của C, kèm người xem để ẩn tiêu đề topic riêng");
   assert.ok(blocks.includes("getModelReturnDispositions(pid)"), "khối Kết cục hàng hoàn phải đọc getModelReturnDispositions của E");
-  assert.ok(/ctx\.canCreateTopic \?/.test(blocks), "nút Tạo topic sản xuất phải gác bằng production:write");
-  assert.ok(page.includes(`canCreateTopic: can(user, "production:write")`), "canCreateTopic phải lấy từ quyền production:write");
+  assert.ok(/ctx\.canCreateTopic \?/.test(blocks), "nút Tạo topic sản xuất phải gác bằng quyền mở topic");
+  assert.ok(page.includes("canCreateTopic: canOpenTopic(user)"), "canCreateTopic phải lấy từ canOpenTopic (marketing hoặc sản xuất)");
 
   // Một nguồn cho câu hỏi "chi QC này là 0 thật hay chưa ghép": `spendMappedFor` của B.
   const econ = readFileSync("lib/queries/model-economics.ts", "utf8");

@@ -7357,6 +7357,12 @@ export const productionTopics = pgTable(
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /** ẢNH CHỤP tên người mở — do MÁY CHỦ đọc (mục 34). */
     createdBy: text("created_by").notNull().default(""),
+    /**
+     * TOPIC RIÊNG (0153 · chủ shop 27/09/2026): `true` ⇒ chỉ người mở, người được tag
+     * (`production_topic_members`) và ADMIN xem được. Topic mở TRƯỚC 0153 mang `false` và giữ nguyên tầm
+     * nhìn cũ (ai có quyền xem sản xuất cũng xem) — không đoán ngược ai "lẽ ra" được tag (mục 35).
+     */
+    restricted: boolean("restricted").notNull().default(false),
     statusChangedAt: ts("status_changed_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -7371,6 +7377,29 @@ export const productionTopics = pgTable(
 );
 
 /** Lượt trao đổi trong topic — APPEND-ONLY. `author_user_id NULL` = máy. */
+/**
+ * NGƯỜI ĐƯỢC TAG VÀO TOPIC (0153 · chủ shop 27/09/2026). Một dòng = một tài khoản được mời vào trao đổi:
+ * nhận tin ở hộp thư cá nhân và — với topic `restricted` — là một trong những người DUY NHẤT xem được
+ * topic. Người mở topic KHÔNG cần dòng ở đây (`production_topics.created_by_user_id` đã nói điều đó).
+ * Quy kết bằng khoá tài khoản (mục 34); `added_by` chỉ là ảnh chụp tên.
+ */
+export const productionTopicMembers = pgTable(
+  "production_topic_members",
+  {
+    id: id(),
+    topicId: text("topic_id")
+      .notNull()
+      .references(() => productionTopics.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedByUserId: text("added_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    addedBy: text("added_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("production_topic_members_uq").on(t.topicId, t.userId), index("production_topic_members_user_idx").on(t.userId)],
+);
+
 export const productionTopicMessages = pgTable(
   "production_topic_messages",
   {

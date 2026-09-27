@@ -232,7 +232,10 @@ export function testNavigationCoverage() {
     "/tech/incidents": "tab 'Sự cố' của /tech",
     // Company OS · Agent C: form mở topic — vào từ nút 'Mở topic' trên /production, trên bàn sản xuất của
     // một mẫu (/production/models/[id]) và từ trang 360 của mẫu (`?model=<id>`, nút do Agent A2 đặt).
-    "/production/topics/new": "nút 'Mở topic' trên /production và trên bàn sản xuất của mẫu; trang mẫu /models/[id] trỏ tới với ?model=",
+    "/production/topics/new": "đường CŨ, nay chỉ chuyển sang /marketing/topics/new (giữ ?model=) — các lối vào cũ vẫn trỏ tới",
+    // Chủ shop 27/09/2026: marketing mở topic — biểu mẫu vào từ nút 'Mở topic' trên /marketing/topics (menu
+    // Marketing · Topic gửi sản xuất), trên /production, bàn sản xuất của mẫu và trang 360 (`?model=<id>`).
+    "/marketing/topics/new": "nút 'Mở topic' trên /marketing/topics và /production; bàn sản xuất của mẫu và trang mẫu /models/[id] trỏ tới với ?model=",
     // Gửi tin hàng loạt là công cụ CỦA trang Chăm sóc & bán chéo (cùng quyền outreach:*), không phải một
     // module riêng — vào từ nút 'Gửi tin hàng loạt' ở đầu /outreach.
     "/outreach/broadcast": "nút 'Gửi tin hàng loạt' ở đầu trang /outreach",

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Film, ImageIcon, Paperclip, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Film, ImageIcon, Paperclip, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { finishTopicFileUpload, removeTopicFile, startTopicFileUpload, uploadTopicFileChunk } from "@/lib/actions/production-topic-files";
 import { checkTopicFileUpload, formatMb, TOPIC_FILE_ACCEPT, TOPIC_IMAGE_MAX_EDGE, TOPIC_IMAGE_QUALITY, TOPIC_VIDEO_MAX_BYTES, type TopicFileKind } from "@/lib/constants/production-files";
@@ -152,7 +153,7 @@ export function TopicFilePicker({ files, onChange, disabled }: { files: File[]; 
             <li key={p.key} className="relative w-28 overflow-hidden rounded-md border bg-muted/40 text-xs">
               {p.kind === "IMAGE" ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.url} alt="" className="h-20 w-full object-cover" />
+                <img src={p.url} alt="" className="h-20 w-full bg-muted object-contain" />
               ) : (
                 <video src={p.url} muted preload="metadata" className="h-20 w-full bg-black object-cover" />
               )}
@@ -199,11 +200,54 @@ function StorageLine({ used, max }: { used: number; max: number }) {
 
 export type TopicFileView = { id: string; kind: TopicFileKind; fileName: string; bytes: number; uploadedBy: string; createdAt: Date | string };
 
+/**
+ * Xem ảnh CỠ LỚN ngay trong trang (chủ shop 27/09/2026: bấm ảnh không được mở sang tab ngoài). Ảnh hiện
+ * TRỌN (`object-contain`), mũi tên / phím ← → chuyển giữa các ảnh của topic.
+ */
+function ImageLightbox({ images, index, onIndex }: { images: TopicFileView[]; index: number | null; onIndex: (i: number | null) => void }) {
+  const f = index === null ? null : images[index];
+  const n = images.length;
+  const di = (buoc: number) => index !== null && n > 1 && onIndex((index + buoc + n) % n);
+  return (
+    <Dialog open={f !== null} onOpenChange={(o) => (o ? null : onIndex(null))}>
+      <DialogContent
+        className="max-w-[calc(100%-1rem)] gap-2 border-none bg-black/95 p-2 sm:max-w-[min(1200px,calc(100%-2rem))] [&>button]:text-white"
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft") di(-1);
+          if (e.key === "ArrowRight") di(1);
+        }}
+      >
+        <DialogTitle className="truncate pr-8 text-sm font-normal text-white/80">
+          {f ? `${f.fileName || "Ảnh"}${n > 1 ? ` · ${(index ?? 0) + 1}/${n}` : ""}` : ""}
+        </DialogTitle>
+        {f ? (
+          <div className="relative flex items-center justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/api/production/files/${f.id}`} alt={f.fileName} className="max-h-[85vh] w-auto max-w-full object-contain" />
+            {n > 1 ? (
+              <>
+                <button type="button" aria-label="Ảnh trước" onClick={() => di(-1)} className="absolute left-1 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80">
+                  <ChevronLeft className="size-5" />
+                </button>
+                <button type="button" aria-label="Ảnh sau" onClick={() => di(1)} className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80">
+                  <ChevronRight className="size-5" />
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Khung ảnh / video trên trang topic: xem, thêm, gỡ. */
 export function TopicFilesPanel({ topicId, files, canWrite, storage = null }: { topicId: string; files: TopicFileView[]; canWrite: boolean; storage?: { usedBytes: number; maxBytes: number } | null }) {
   const [chon, setChon] = useState<File[]>([]);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [busy, setBusy] = useState(false);
+  const [xem, setXem] = useState<number | null>(null);
+  const anh = files.filter((f) => f.kind !== "VIDEO");
 
   const taiLen = async () => {
     setBusy(true);
@@ -236,10 +280,10 @@ export function TopicFilesPanel({ topicId, files, canWrite, storage = null }: { 
                 {f.kind === "VIDEO" ? (
                   <video src={src} controls preload="metadata" playsInline className="aspect-video w-full bg-black" />
                 ) : (
-                  <a href={src} target="_blank" rel="noreferrer">
+                  <button type="button" onClick={() => setXem(anh.indexOf(f))} className="block w-full cursor-zoom-in" aria-label={`Xem lớn ${f.fileName || "ảnh"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={f.fileName} loading="lazy" className="aspect-square w-full object-cover" />
-                  </a>
+                    <img src={src} alt={f.fileName} loading="lazy" className="aspect-square w-full bg-muted object-contain" />
+                  </button>
                 )}
                 <div className="flex items-start justify-between gap-1 p-1.5">
                   <div className="min-w-0">
@@ -263,6 +307,7 @@ export function TopicFilesPanel({ topicId, files, canWrite, storage = null }: { 
       ) : (
         <p className="text-sm text-muted-foreground">Chưa có ảnh / video nào.</p>
       )}
+      <ImageLightbox images={anh} index={xem} onIndex={setXem} />
       {canWrite ? (
         <div className="space-y-2 border-t pt-3">
           {storage ? <StorageLine used={storage.usedBytes} max={storage.maxBytes} /> : null}

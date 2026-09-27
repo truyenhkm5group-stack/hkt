@@ -32,6 +32,7 @@ import { getModelAdsSummary, getModelCreativeSummary, NO_VERDICT } from "@/lib/q
 import { getModelEconomics, type EconomicsUnit, type EconomicsValue } from "@/lib/queries/model-economics";
 import { getModelInventoryDecisions, getModelOrderOutcome } from "@/lib/queries/model-360";
 import { getModelSignal } from "@/lib/queries/model-signal";
+import type { TopicViewer } from "@/lib/production/topic-access";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
 import { lifecycleEvidenceGap } from "@/lib/constants/evidence-gaps";
 import { evidenceFactsOfSummary } from "@/lib/queries/evidence-gaps";
@@ -65,8 +66,10 @@ export type BlockCtx = {
   periodQuery: string;
   allowed: Record<Model360Block, boolean>;
   canWrite: boolean;
-  /** `production:write` — nút "Tạo topic sản xuất". */
+  /** `canOpenTopic` (marketing hoặc sản xuất) — nút "Tạo topic sản xuất". */
   canCreateTopic: boolean;
+  /** Người đang xem — topic RIÊNG mình không được tag thì chỉ đếm, không hiện tiêu đề / link. */
+  viewer: TopicViewer;
 };
 
 /** Tín hiệu đọc MỘT lần cho mỗi lượt dựng trang (đầu trang + khối tín hiệu + khối đề xuất). */
@@ -636,11 +639,11 @@ export async function EvidenceGapNote({ ctx }: { ctx: BlockCtx }) {
 export async function ProductionBlock({ ctx }: { ctx: BlockCtx }) {
   const title = "Sản xuất";
   if (!ctx.allowed.PRODUCTION) return <DeniedBlock title={title} block="PRODUCTION" />;
-  const l = await loadSource("sản xuất (getModelProductionSummary)", () => getModelProductionSummary(ctx.modelId));
+  const l = await loadSource("sản xuất (getModelProductionSummary)", () => getModelProductionSummary(ctx.modelId, ctx.viewer));
   const pending = MODEL_360_PENDING_SOURCES.filter((p) => p.block === "PRODUCTION");
   const taoTopic = ctx.canCreateTopic ? (
     <Button asChild size="sm" variant="outline" className="h-7">
-      <Link href={`/production/topics/new?model=${encodeURIComponent(ctx.modelId)}`}>
+      <Link href={`/marketing/topics/new?model=${encodeURIComponent(ctx.modelId)}`}>
         <Plus className="size-3.5" /> Tạo topic sản xuất
       </Link>
     </Button>
@@ -689,9 +692,15 @@ export async function ProductionBlock({ ctx }: { ctx: BlockCtx }) {
             <ul className="space-y-1 text-xs">
               {l.data.topics.slice(0, 5).map((t) => (
                 <li key={t.id} className="flex flex-wrap items-center gap-2">
-                  <Link href={`/production/topics/${encodeURIComponent(t.id)}`} className="font-medium underline-offset-2 hover:underline">
-                    {t.title || "(không tiêu đề)"}
-                  </Link>
+                  {t.hidden ? (
+                    <span className="italic text-muted-foreground" title="Topic riêng — chỉ người mở và người được tag xem được">
+                      Topic riêng
+                    </span>
+                  ) : (
+                    <Link href={`/production/topics/${encodeURIComponent(t.id)}`} className="font-medium underline-offset-2 hover:underline">
+                      {t.title || "(không tiêu đề)"}
+                    </Link>
+                  )}
                   <span className="text-muted-foreground">
                     {TOPIC_STATUS_LABEL[t.status] ?? t.status} · {formatDateTime(t.updatedAt)}
                   </span>

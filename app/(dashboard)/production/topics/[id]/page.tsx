@@ -4,16 +4,19 @@ import { TopicStatusBadge } from "@/app/(dashboard)/production/_components/badge
 import { ModelDesk } from "@/app/(dashboard)/production/_components/model-desk";
 import { TopicFilesPanel } from "@/app/(dashboard)/production/_components/topic-files";
 import { TopicMessageForm, TopicStatusControl } from "@/app/(dashboard)/production/topics/[id]/topic-controls";
+import { TopicMembersPanel } from "@/app/(dashboard)/production/topics/[id]/topic-members";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { getDb } from "@/db";
+import { can, requireUser } from "@/lib/auth/session";
 import { describeTopicOpenContext } from "@/lib/constants/early-topic";
 import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapshot, type TopicMessageKind, type TopicRequirements } from "@/lib/constants/production-os";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getTopicFileStorage, listTopicFiles } from "@/lib/queries/production-files";
-import { getTopicDetail, listSupplierOptions } from "@/lib/queries/production-os";
+import { loadTopicAccess } from "@/lib/production/topic-access";
+import { getTopicDetail, listSupplierOptions, listTaggableUsers, listTopicMembers } from "@/lib/queries/production-os";
 import { costV1Prefill, costV1ShortcutState } from "@/lib/constants/production-shortcuts";
 import { loadDesignPoShortcuts } from "@/lib/queries/production-shortcuts";
 
@@ -24,11 +27,25 @@ export const metadata = { title: "Topic sản xuất" };
  * sản xuất của MẪU (giá thành, mẫu, bản duyệt). Mọi nút ghi đi qua server action của miền sản xuất.
  */
 export default async function TopicPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermission("planning:view");
+  const user = await requireUser();
   const { id } = await params;
-  const [d, suppliers, files, storage] = await Promise.all([getTopicDetail(id), listSupplierOptions(), listTopicFiles(id), getTopicFileStorage()]);
+  // Quyền theo TOPIC (chủ shop 27/09/2026): topic riêng chỉ người mở, người được tag và ADMIN. Không xem được
+  // thì trả 404 — không nói cho người ngoài biết topic tồn tại.
+  const acc = await loadTopicAccess(await getDb(), id, user);
+  if (!acc?.view) notFound();
+  const [d, suppliers, files, storage, members, people] = await Promise.all([
+    getTopicDetail(id),
+    listSupplierOptions(),
+    listTopicFiles(id),
+    getTopicFileStorage(),
+    listTopicMembers(id),
+    acc.tag ? listTaggableUsers() : Promise.resolve([]),
+  ]);
   if (!d) notFound();
+  // Bàn sản xuất (giá thành / mẫu) vẫn theo quyền sản xuất; trao đổi + ảnh theo quyền trong topic.
   const canWrite = can(user, "production:write");
+  const canPost = acc.post;
+  const seeDesk = can(user, "planning:view");
   const canApprove = can(user, "production:approve");
   const req: TopicRequirements = { ...EMPTY_REQUIREMENTS, ...(d.topic.requirements as Partial<TopicRequirements>) };
   const ev = d.topic.evidenceSnapshot as Partial<TopicEvidenceSnapshot>;
@@ -111,7 +128,7 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
           </SectionCard>
 
           <SectionCard title={`Ảnh / video (${formatNumber(files.length)})`} hint="Ảnh mẫu, ảnh chất vải, video test quảng cáo — gửi xưởng xem cùng một chỗ. Ảnh tự thu nhỏ trước khi tải; video dài hơn trần thì dán link vào lượt trao đổi.">
-            <TopicFilesPanel topicId={d.topic.id} files={files} canWrite={canWrite} storage={storage} />
+            <TopicFilesPanel topicId={d.topic.id} files={files} canWrite={canPost} storage={storage} />
           </SectionCard>
 
           <SectionCard title={`Trao đổi (${formatNumber(d.messages.length)})`} hint="Chỉ thêm, không sửa, không xoá — lịch sử bàn giá là chứng cứ khi xưởng giao khác lời hứa.">
@@ -137,25 +154,38 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
                 </li>
               ))}
             </ol>
-            {canWrite ? <div className="mt-3"><TopicMessageForm topicId={d.topic.id} /></div> : null}
+            {canPost ? <div className="mt-3"><TopicMessageForm topicId={d.topic.id} /></div> : null}
           </SectionCard>
 
-          <ModelDesk
-            desk={d}
-            modelId={d.topic.modelId}
-            topicId={d.topic.id}
-            productId={d.model?.productId ?? null}
-            suppliers={suppliers}
-            canWrite={canWrite}
-            canApprove={canApprove}
-            canAssumptions={can(user, "reports:assumptions")}
-            poShortcuts={poShortcuts}
-            costV1={costV1}
-          />
+          {seeDesk ? (
+            <ModelDesk
+              desk={d}
+              modelId={d.topic.modelId}
+              topicId={d.topic.id}
+              productId={d.model?.productId ?? null}
+              suppliers={suppliers}
+              canWrite={canWrite}
+              canApprove={canApprove}
+              canAssumptions={can(user, "reports:assumptions")}
+              poShortcuts={poShortcuts}
+              costV1={costV1}
+            />
+          ) : null}
         </div>
 
         <div className="space-y-5">
-          {canWrite ? (
+          <SectionCard title={`Người trong topic (${formatNumber(members.length + 1)})`}>
+            <TopicMembersPanel
+              topicId={d.topic.id}
+              creatorName={d.topic.createdBy}
+              members={members.map((m) => ({ userId: m.userId, name: m.name, email: m.email, active: m.active }))}
+              people={people.filter((p) => p.id !== d.topic.createdByUserId).map((p) => ({ id: p.id, name: p.name, email: p.email }))}
+              canTag={acc.tag}
+              canUntag={acc.untag}
+              restricted={d.topic.restricted}
+            />
+          </SectionCard>
+          {acc.setStatus ? (
             <SectionCard title="Trạng thái topic">
               <TopicStatusControl topicId={d.topic.id} status={d.topic.status} />
             </SectionCard>

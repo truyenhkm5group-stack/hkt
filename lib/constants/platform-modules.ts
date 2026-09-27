@@ -212,8 +212,10 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "production.planning", label: "Kế hoạch đặt xưởng", defaultEnabled: true, why: "`/inventory/planning` — đề xuất và bảng đặt hàng chốt gửi xưởng." },
       { key: "production.workshop", label: "Sổ xưởng", defaultEnabled: true, why: "`/inventory/workshop` — công nợ và giao nhận với xưởng." },
     ],
-    routes: ["/production", "/models", "/inventory/planning", "/inventory/workshop", "/print/production", "/api/production", "/api/export/planning"],
-    permissions: ["models:view", "models:write", "production:write", "production:approve"],
+    // `/marketing/topics` (chủ shop 27/09/2026): biểu mẫu mở topic nằm dưới menu Marketing nhưng LÀ tính năng
+    // topic sản xuất — tiền tố dài hơn `/marketing` nên khớp về đây; tắt module Sản xuất là tắt luôn nó.
+    routes: ["/production", "/marketing/topics", "/models", "/inventory/planning", "/inventory/workshop", "/print/production", "/api/production", "/api/export/planning"],
+    permissions: ["models:view", "models:write", "production:write", "production:topic-open", "production:approve"],
     why: "Chỉ tổ chức TỰ đặt xưởng mới cần. Tách khỏi Mua hàng vì nhà buôn nhập hàng thành phẩm không có topic, mẫu hay giá thành.",
   },
   {
