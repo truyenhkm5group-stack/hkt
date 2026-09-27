@@ -576,8 +576,7 @@ Tệp: `lib/creative/{manual-gen,naming,selection}.ts` · `lib/creative/{publish
 
 **Chờ chủ shop quyết:** (1) ~~trần 30 ảnh / ngày và 2 USD / ngày là CHUNG~~ — chủ shop đã quyết 26/09/2026: gỡ trần gen tay, xem §5j. (2) Chiến dịch riêng
 chép mục tiêu từ chiến dịch test (thường "Tương tác / Tin nhắn") — muốn mục tiêu khác cho bài test thì đổi ở chiến dịch test.
-(3) Nếu tài khoản dùng Graph API ≥ v24 và Facebook đòi `is_adset_budget_sharing_enabled` khi tạo chiến dịch không ngân sách, lượt
-tạo chiến dịch sẽ báo lỗi rõ ràng (không mồ côi gì) — kho đang gọi v21.0.
+(3) ~~Facebook đòi `is_adset_budget_sharing_enabled`~~ — đã xảy ra 27/09/2026 (mã 100/4834011, lượt Đăng camp đầu tiên sau khi đổi token); `testCampaignFields` nay luôn gửi `is_adset_budget_sharing_enabled=false` (không chia sẻ ngân sách giữa nhóm — mỗi bài giữ đúng trần của nhóm nó).
 
 ## 5j. Gen tay không trần · tiền từng ảnh · số ảnh · ảnh tải lên · ý tưởng ưu tiên · ĐĂNG CAMP ngay / hẹn giờ (chủ shop 26/09/2026)
 

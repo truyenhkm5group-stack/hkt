@@ -572,7 +572,10 @@ export function testCampaignFields(name: string, tpl: TemplateCampaign): Record<
   if (tpl.dailyBudgetMinor !== null || tpl.lifetimeBudgetMinor !== null) {
     throw new IntegrationError("Facebook: chiến dịch mẫu đặt ngân sách ở cấp CHIẾN DỊCH (CBO) — mỗi bài một chiến dịch cần ngân sách ở cấp NHÓM (ABO) để trần 200.000đ/bài nằm trên Facebook.", 400);
   }
-  const fields: Record<string, string> = { name, objective: tpl.objective, status: "PAUSED", special_ad_categories: JSON.stringify(tpl.specialAdCategories) };
+  // `is_adset_budget_sharing_enabled` BẮT BUỘC khi chiến dịch không mang ngân sách (ABO) — 27/09/2026 Facebook từ chối lượt tạo
+  // chiến dịch đầu tiên của "Đăng camp" với mã 100/4834011 vì thiếu trường này. `false`: KHÔNG cho Facebook chuyển 20% ngân sách
+  // giữa các nhóm — mỗi bài giữ đúng trần trọn đời của nhóm nó (lớp chặn tiêu quá thứ nhất), đúng ý "ngân sách ở cấp NHÓM".
+  const fields: Record<string, string> = { name, objective: tpl.objective, status: "PAUSED", special_ad_categories: JSON.stringify(tpl.specialAdCategories), is_adset_budget_sharing_enabled: "false" };
   if (tpl.buyingType) fields.buying_type = tpl.buyingType;
   return fields;
 }
