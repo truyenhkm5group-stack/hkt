@@ -139,3 +139,19 @@ export const SOURCE_COLORS: Record<string, string> = {
   Zalo: "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
   Instagram: "bg-pink-50 text-pink-700 dark:bg-pink-950 dark:text-pink-300",
 };
+
+/**
+ * ĐƠN TRÊN POS PANCAKE. Không biết shop của đơn ⇒ `null` và nơi gọi KHÔNG vẽ liên kết: mở nhầm shop
+ * là người trực tìm mãi không thấy đơn rồi kết luận đơn không có trên POS.
+ */
+export function pancakePosOrderUrl(orderId: string, shopId: string | null | undefined): string | null {
+  const shop = shopId?.trim();
+  if (!shop || !orderId) return null;
+  return `https://pos.pancake.vn/shop/${encodeURIComponent(shop)}/orders?id=${encodeURIComponent(orderId)}`;
+}
+
+/** HỘI THOẠI CỦA KHÁCH trên Pancake (inbox). Thiếu trang hoặc mã hội thoại ⇒ `null`. */
+export function pancakeConversationUrl(pageId: string | null | undefined, conversationId: string | null | undefined): string | null {
+  if (!pageId?.trim() || !conversationId?.trim()) return null;
+  return `https://pancake.vn/${pageId.trim()}?c_id=${conversationId.trim()}`;
+}

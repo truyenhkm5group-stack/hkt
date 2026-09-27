@@ -3,6 +3,7 @@ import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
+import { validateOrdersForShipping } from "@/lib/queries/preship-validation";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -173,6 +174,10 @@ export type ReservedOrderLine = {
   orderId: string;
   systemId: number | null;
   orderStage: string;
+  /** Khoá để dựng liên kết POS / chat Pancake — `null` thì trang không vẽ liên kết đó. */
+  shopId: string | null;
+  pageId: string | null;
+  conversationId: string | null;
   insertedAt: Date;
   promisedAt: Date | null;
   customer: string;
@@ -213,6 +218,9 @@ export async function listReservedOrderLines(filter: { variantId: string } | { p
       orderId: o.id,
       systemId: o.systemId,
       orderStage: sql<string>`${o.stage}::text`,
+      shopId: o.shopId,
+      pageId: o.pageId,
+      conversationId: o.conversationId,
       insertedAt: o.insertedAt,
       promisedAt: o.customerPromisedAt,
       customer: o.billFullName,
@@ -238,6 +246,9 @@ export async function listReservedOrderLines(filter: { variantId: string } | { p
     orderId: r.orderId,
     systemId: r.systemId ?? null,
     orderStage: r.orderStage,
+    shopId: r.shopId ?? null,
+    pageId: r.pageId ?? null,
+    conversationId: r.conversationId ?? null,
     insertedAt: new Date(r.insertedAt),
     promisedAt: r.promisedAt ? new Date(r.promisedAt) : null,
     customer: r.customer || "Khách",
@@ -259,6 +270,40 @@ export async function listReservedOrderLines(filter: { variantId: string } | { p
     },
     lines,
   };
+}
+
+/** Một lỗi soát của đơn, rút gọn cho danh sách: mã luật + trường người sửa nhìn thấy trên Pancake. */
+export type ReservedLineFinding = { code: string; field: string };
+
+export type ReservedQueueLine = ReservedOrderLine & {
+  /** `false` = đơn còn lỗi CHẶN GỬI (`validateForShipping`) ⇒ chưa đủ điều kiện vào hàng đợi xuất. */
+  readyToShip: boolean;
+  blockers: ReservedLineFinding[];
+  /** Gửi được nhưng một con số sẽ sai về sau (chưa ghép mẫu mã, lệch tiền) — nêu ra, KHÔNG loại. */
+  warnings: ReservedLineFinding[];
+};
+
+/**
+ * HÀNG ĐỢI XUẤT CỦA MỘT MẪU MÃ / MÃ HÀNG — danh sách chờ xuất TÁCH theo bản soát trước khi gửi.
+ *
+ * Chủ shop chốt 27/09/2026: đơn THIẾU THÔNG TIN (SĐT, địa chỉ, thông tin hàng) chưa đủ điều kiện
+ * vào hàng đợi chờ xuất. "Thiếu" = còn lỗi mức `BLOCKER` của `validateForShipping()` — ĐÚNG bộ luật
+ * của trang Soát đơn trước khi gửi, không phải một định nghĩa thứ hai. Lỗi mức `WARNING` không loại.
+ *
+ * CỐ Ý KHÔNG đổi sổ kho: đơn thiếu thông tin vẫn là đơn ĐÃ CHỐT và vẫn giữ hàng (`reserved` →
+ * Khả dụng bán). Bỏ nó khỏi phần giữ hàng là báo khả dụng DƯ rồi bán trùng đúng những cái đã hứa.
+ * Nên `ready` + `incomplete` cộng lại luôn bằng số "chờ xuất" trên trang Sản phẩm.
+ */
+export async function listReservedQueue(filter: { variantId: string } | { productId: string }): Promise<{ scope: ReservedScope | null; ready: ReservedQueueLine[]; incomplete: ReservedQueueLine[] }> {
+  const { scope, lines } = await listReservedOrderLines(filter);
+  const reports = await validateOrdersForShipping(lines.map((l) => l.orderId));
+  const rut = (fs: { code: string; field: string }[]) => fs.map((f) => ({ code: f.code, field: f.field }));
+  const all: ReservedQueueLine[] = lines.map((l) => {
+    const r = reports.get(l.orderId);
+    // Không soát được (đơn biến mất giữa hai câu lệnh) ⇒ KHÔNG coi là đủ: chưa biết thì chưa xếp vào hàng đợi.
+    return { ...l, readyToShip: r ? r.readyToShip : false, blockers: r ? rut(r.blockers) : [{ code: "NOT_VALIDATED", field: "Chưa soát được đơn" }], warnings: r ? rut(r.warnings) : [] };
+  });
+  return { scope, ready: all.filter((l) => l.readyToShip), incomplete: all.filter((l) => !l.readyToShip) };
 }
 
 /** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. `onlyVariantIds`: như `variantSalesSubquery`. */
