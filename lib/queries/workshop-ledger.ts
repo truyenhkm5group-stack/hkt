@@ -353,7 +353,7 @@ export type WorkshopFormOptions = Awaited<ReturnType<typeof workshopFormOptions>
  * không đi vào lợi nhuận). Dùng bởi `openPoQtyByVariant` để trang Thiếu hàng và Quyết định vốn tồn
  * kho trừ hàng đã đặt. Luật ở `openBatchQtyByVariant` (hàm thuần).
  */
-export async function openBatchQtyByVariantFromLedger() {
+export async function openBatchQtyByVariantFromLedger(excludeProductionOrderId: string | null = null) {
   const db = await getDb();
   const [batches, deliveries, linked] = await Promise.all([
     db
@@ -375,8 +375,10 @@ export async function openBatchQtyByVariantFromLedger() {
     // Phiếu NHẬP HÀNG nối về lô (0133) — chứng từ TỒN, trừ khỏi "đang sản xuất" qua `openQtyAfterReceived`.
     linkedReceiptQty("batch"),
   ]);
+  // Lô nối về lệnh ĐANG ĐƯỢC SỬA là CÙNG lần đặt đó — trừ nó thì lệnh tự trừ chính mình (Agent SC).
+  const conLai = excludeProductionOrderId ? batches.filter((b) => b.productionOrderId !== excludeProductionOrderId) : batches;
   return openBatchQtyByVariant(
-    batches.map((b) => ({ ...b, cells: b.cells ?? {}, dueDate: b.dueDate ? new Date(b.dueDate) : null })),
+    conLai.map((b) => ({ ...b, cells: b.cells ?? {}, dueDate: b.dueDate ? new Date(b.dueDate) : null })),
     deliveries.map((d) => ({ ...d, cells: d.cells ?? {} })),
     linked,
   );

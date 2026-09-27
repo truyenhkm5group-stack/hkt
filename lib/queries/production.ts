@@ -1,29 +1,33 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { cellKey, sizeRank } from "@/lib/constants/production";
+import { netSuggestionByCell, sizeRank } from "@/lib/constants/production";
+import { openPoQtyByVariant } from "@/lib/queries/inventory-decision";
 export { matrixTotals, matrixAsText } from "@/lib/constants/production";
 import { getReplenishmentPlan, type PlanOptions } from "@/lib/queries/planning";
 
 export type ProductionOrderRow = typeof schema.productionOrders.$inferSelect;
 
 /** Ma trận màu × size cho một mã từ kế hoạch đặt hàng: số lượng đề xuất, ảnh theo màu, giá nhập */
-export async function buildMatrixForProduct(productId: string, plan: PlanOptions = {}) {
+export async function buildMatrixForProduct(productId: string, plan: PlanOptions = {}, opts: { excludePoId?: string | null } = {}) {
   const db = await getDb();
-  const [plan_, product, variants] = await Promise.all([
+  const [plan_, product, variants, openPo] = await Promise.all([
     getReplenishmentPlan(plan),
     db.query.products.findFirst({ where: eq(schema.products.id, productId), columns: { id: true, name: true, customId: true, image: true } }),
     db.select({ id: schema.productVariants.id, color: schema.productVariants.color, size: schema.productVariants.size, images: schema.productVariants.images, sku: schema.productVariants.sku }).from(schema.productVariants).where(eq(schema.productVariants.productId, productId)),
+    // Hàng đã đặt xưởng chưa về (lệnh SENT + lô OPEN, trừ phiếu nhập nối) — không kể lệnh ĐANG SỬA (mục 70).
+    openPoQtyByVariant({ excludePoId: opts.excludePoId }),
   ]);
   if (!product) return null;
   const rows = plan_.rows.filter((r) => r.productId === productId);
   const colors = [...new Set([...rows.map((r) => r.color), ...variants.map((v) => v.color)].map((c) => c.trim()).filter(Boolean))];
   const sizes = [...new Set([...rows.map((r) => r.size), ...variants.map((v) => v.size)].map((c) => c.trim()).filter(Boolean))].sort((a, b) => sizeRank(a) - sizeRank(b));
+  const net = netSuggestionByCell(rows, openPo.qtyByVariant);
   const cells: Record<string, number> = {};
-  const detail: Record<string, { stock: number; available: number; sold30: number; suggested: number }> = {};
+  const detail: Record<string, { stock: number; available: number; sold30: number; suggested: number; openPo: number }> = {};
+  for (const [key, n] of Object.entries(net)) cells[key] = n.net;
   for (const r of rows) {
-    const key = cellKey(r.color.trim(), r.size.trim());
-    cells[key] = (cells[key] ?? 0) + Math.max(0, r.suggested);
-    detail[key] = { stock: r.stock, available: r.available, sold30: r.sold30, suggested: r.suggested };
+    const key = `${r.color.trim()}|${r.size.trim()}`;
+    detail[key] = { stock: r.stock, available: r.available, sold30: r.sold30, suggested: net[key].net, openPo: net[key].openPo };
   }
   const images = colors.map((color) => {
     const v = variants.find((x) => x.color.trim() === color && x.images?.length);

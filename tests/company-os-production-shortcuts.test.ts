@@ -5,6 +5,8 @@ import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { can } from "@/lib/auth/session";
 import { clearMemo } from "@/lib/cache";
+import { suggestedNetOfOpenPo } from "@/lib/constants/inventory-decision";
+import { netSuggestionByCell } from "@/lib/constants/production";
 import { computeCostSheet, type SuggestedCellsSnapshot } from "@/lib/constants/production-os";
 import {
   COST_V1_REASON,
@@ -139,6 +141,22 @@ export function testCompanyOsProductionShortcutsPure() {
   assert.equal(costV1ShortcutState({ canWrite: can("WAREHOUSE", "production:write"), topicStatus: "SELECTED", costSheetCount: 0 }).enabled, false);
   assert.equal(costV1ShortcutState({ canWrite: can("LEADER", "production:write"), topicStatus: "SELECTED", costSheetCount: 0 }).enabled, true);
 
+  // ── Mục 70: gợi ý của trình sửa lệnh = Kế hoạch SX − hàng đã đặt xưởng (suggestedNetOfOpenPo) ──
+  const rong = netSuggestionByCell(
+    [
+      { variantId: "a", color: "Đen", size: "M", suggested: 25 },
+      { variantId: "b", color: "Đen", size: "L", suggested: 8 },
+      { variantId: "c", color: "Trắng", size: "M", suggested: 12 },
+      { variantId: "d", color: " Trắng", size: "M ", suggested: 3 },
+    ],
+    new Map([["a", 10], ["b", 30], ["d", 1]]),
+  );
+  assert.deepEqual(rong["Đen|M"], { gross: 25, openPo: 10, net: 15 }, "kế hoạch gợi ý 25, đã đặt xưởng 10 chưa về ⇒ gợi ý 15");
+  assert.deepEqual(rong["Đen|L"], { gross: 8, openPo: 30, net: 0 }, "đã đặt nhiều hơn gợi ý ⇒ 0, không âm");
+  assert.deepEqual(rong["Trắng|M"], { gross: 15, openPo: 1, net: 14 }, "hai mẫu mã về cùng ô: mỗi mẫu mã trừ phần đặt của CHÍNH nó rồi mới cộng");
+  for (const k of Object.keys(rong)) assert.ok(rong[k].net >= 0);
+  assert.equal(rong["Đen|M"].net, suggestedNetOfOpenPo(25, 10), "đúng hàm dùng chung của mục 70");
+
   console.log("✓ Company OS · SC (thuần): còn phải nhập = lệnh − phiếu nối (một phép trừ, không âm, 300 ca) · nút lập lệnh / nhập kho / giá thành V1 tắt kèm lý do · dòng V1 chỉ từ báo giá hoặc giá mong muốn (nhãn đúng)");
 }
 
@@ -198,6 +216,10 @@ export function testCompanyOsProductionShortcutsSource() {
   assert.ok(/designVersionId: tuLoiTat\.designVersionId/.test(moi) && /getNewPoPrefill\(designOptions/.test(moi), "bản duyệt chọn sẵn đi qua getNewPoPrefill(designOptions, …)");
   assert.ok(/requirePermission\("planning:write"\)/.test(moi));
   const luuLenh = boChuThich(doc("lib/actions/production.ts"));
+  assert.ok(/buildMatrixForProduct\(d\.productId, \{[^}]*\}, \{ excludePoId: existing\?\.id \?\? null \}\)/.test(luuLenh), "lúc lưu: gợi ý tính lại KHÔNG trừ chính lệnh đang sửa");
+  assert.ok(/buildMatrixForProduct\(o\.productId, \{\}, \{ excludePoId: o\.id \}\)/.test(boChuThich(doc("app/(dashboard)/inventory/planning/orders/[id]/edit/page.tsx"))), "trang sửa: cùng lệnh loại trừ với lúc lưu");
+  const maTran = boChuThich(doc("lib/queries/production.ts"));
+  assert.ok(/openPoQtyByVariant\(\{ excludePoId: opts\.excludePoId \}\)/.test(maTran) && /netSuggestionByCell\(rows, openPo\.qtyByVariant\)/.test(maTran), "buildMatrixForProduct trừ hàng đã đặt qua đường dùng chung (mục 70)");
   assert.ok(/buildMatrixForProduct\(d\.productId/.test(luuLenh), "máy chủ vẫn TÍNH LẠI gợi ý lúc lưu (không nhận từ trình duyệt)");
 
   // Nhập kho theo lệnh: hộp thoại lưu qua createStockReceipt (validateProductionLink ở máy chủ), chỉ mở khi nút bật.
@@ -236,6 +258,9 @@ async function don(db: Db) {
     await db.delete(schema.stockReceiptItems).where(inArray(schema.stockReceiptItems.receiptId, receiptIds));
     await db.delete(schema.stockReceipts).where(inArray(schema.stockReceipts.id, receiptIds));
   }
+  await db.delete(schema.orderItems).where(like(schema.orderItems.id, `${P}%`));
+  await db.delete(schema.orders).where(like(schema.orders.id, `${P}%`));
+  await db.delete(schema.productionBatches).where(like(schema.productionBatches.id, `${P}%`));
   await db.delete(schema.productionOrders).where(like(schema.productionOrders.id, `${P}%`));
   if (models.length) {
     await db.delete(schema.designVersions).where(inArray(schema.designVersions.modelId, models));
@@ -399,6 +424,25 @@ async function chay(db: Db) {
   assert.ok(nhap1 && nhap1.state.enabled && nhap1.po.supplier === `${P}Xưởng Topic`);
   assert.deepEqual(Object.fromEntries(nhap1!.prefill.rows.map((x) => [x.variantId, x.remaining])), { [`${P}vM`]: 10, [`${P}vL`]: 5 }, "chưa phiếu nào nối ⇒ đủ số lệnh");
 
+  // Mục 70: trình sửa lệnh MỚI trừ hàng đã đặt; sửa CHÍNH lệnh đó thì không tự trừ mình.
+  const moMoi = await buildMatrixForProduct(PROD);
+  const suaLenh = await buildMatrixForProduct(PROD, {}, { excludePoId: PO });
+  assert.ok(moMoi && suaLenh);
+  if (!moMoi || !suaLenh) return;
+  assert.equal(moMoi.detail["Đen|M"].openPo, 10, "lệnh SENT 10 cái Đen/M là hàng đã đặt");
+  assert.equal(moMoi.detail["Đen|L"].openPo, 5);
+  assert.equal(suaLenh.detail["Đen|M"].openPo, 0, "sửa chính lệnh đó ⇒ không trừ chính nó");
+  for (const k of ["Đen|M", "Đen|L"]) {
+    assert.equal(moMoi.cells[k] ?? 0, suggestedNetOfOpenPo(suaLenh.cells[k] ?? 0, moMoi.detail[k].openPo), `${k}: gợi ý lệnh mới = gợi ý gộp − đã đặt (suggestedNetOfOpenPo)`);
+  }
+  // Số điền sẵn == số máy chủ tính lại vào suggested_cells (cùng hàm, cùng lệnh loại trừ) ⇒ không đòi lý do.
+  for (const [truocMat, loaiTru] of [[moMoi, null], [suaLenh, PO]] as const) {
+    const tinhLai = await buildMatrixForProduct(PROD, { coverDays: truocMat.coverDays, countIncoming: truocMat.countIncoming }, { excludePoId: loaiTru });
+    const goi: SuggestedCellsSnapshot = { cells: Object.fromEntries(Object.entries(tinhLai!.cells).filter(([, v]) => v > 0)), basis: { source: "buildMatrixForProduct", coverDays: truocMat.coverDays, countIncoming: truocMat.countIncoming, leadTimeDays: truocMat.leadTimeDays }, computedAt: "cố định" };
+    const ok = await validatePoPlan(db, { productId: PROD, designVersionId: DV, suggestion: goi, finalCells: Object.fromEntries(Object.entries(truocMat.cells).filter(([, v]) => v > 0)), overrideReason: "" });
+    assert.ok("ok" in ok && ok.plan.diff.length === 0, `điền sẵn == tính lại lúc lưu (${loaiTru ? "sửa lệnh" : "lệnh mới"}) ⇒ không đòi lý do`);
+  }
+
   // Phiếu nhập qua ĐÚNG lõi của action (sau cổng validateProductionLink).
   const nhapPhieu = async (lines: [string, number][], productionOrderId: string | null, kind: "RECEIPT" | "RETURN" = "RECEIPT") => {
     const noi = await validateProductionLink(db, { kind, productionOrderId });
@@ -424,6 +468,35 @@ async function chay(db: Db) {
   const dangSx = await openPoQtyByVariant();
   assert.equal(dangSx.qtyByVariant.get(`${P}vM`) ?? 0, 6);
   assert.equal(dangSx.qtyByVariant.get(`${P}vL`) ?? 0, 0);
+  assert.equal((await buildMatrixForProduct(PROD))!.detail["Đen|M"].openPo, 6, "phiếu nhập nối lệnh trừ vào hàng đã đặt (D/V: openQtyAfterReceived)");
+
+  // Kế hoạch có nhu cầu THẬT (đơn lên hôm nay theo đồng hồ thật — cùng nhịp với `now()` của câu kế hoạch, luật 50)
+  // ⇒ gợi ý gộp > 0; lệnh mới được gợi ý gộp − 6 đã đặt; sửa chính lệnh thì được gợi ý gộp.
+  await db.insert(schema.orders).values({ id: `${P}o1`, insertedAt: new Date() });
+  await db.insert(schema.orderItems).values({ id: `${P}oi1`, orderId: `${P}o1`, variantId: `${P}vM`, productId: PROD, sku: "SC-1-M", quantity: 200 });
+  clearMemo();
+  const gop = (await buildMatrixForProduct(PROD, {}, { excludePoId: PO }))!;
+  const rong = (await buildMatrixForProduct(PROD))!;
+  const gopM = gop.cells["Đen|M"] ?? 0;
+  assert.ok(gopM > 6, `kế hoạch phải gợi ý đặt Đen/M (gộp ${gopM}) để phép trừ đo được`);
+  assert.equal(rong.cells["Đen|M"], gopM - 6, `lệnh mới: gợi ý ${gopM} − đã đặt 6 = ${gopM - 6} (suggestedNetOfOpenPo)`);
+  assert.equal(rong.detail["Đen|M"].suggested, gopM - 6, "ô \"đx\" của trình sửa in đúng số đã trừ");
+  const tinhLaiRong = (await buildMatrixForProduct(PROD, { coverDays: rong.coverDays, countIncoming: rong.countIncoming }))!;
+  const khopRong = await validatePoPlan(db, { productId: PROD, designVersionId: DV, suggestion: { cells: Object.fromEntries(Object.entries(tinhLaiRong.cells).filter(([, v]) => v > 0)), basis: { source: "buildMatrixForProduct", coverDays: rong.coverDays, countIncoming: rong.countIncoming, leadTimeDays: rong.leadTimeDays }, computedAt: "cố định" }, finalCells: Object.fromEntries(Object.entries(rong.cells).filter(([, v]) => v > 0)), overrideReason: "" });
+  assert.ok("ok" in khopRong && khopRong.plan.diff.length === 0, "gợi ý đã trừ điền sẵn == gợi ý máy chủ lưu ⇒ không đòi lý do");
+  const theoGop = await validatePoPlan(db, { productId: PROD, designVersionId: DV, suggestion: { cells: Object.fromEntries(Object.entries(tinhLaiRong.cells).filter(([, v]) => v > 0)), basis: { source: "buildMatrixForProduct", coverDays: rong.coverDays, countIncoming: rong.countIncoming, leadTimeDays: rong.leadTimeDays }, computedAt: "cố định" }, finalCells: { ...Object.fromEntries(Object.entries(rong.cells).filter(([, v]) => v > 0)), "Đen|M": gopM }, overrideReason: "" });
+  assert.ok("error" in theoGop, "đặt lại cả phần đã đặt (số gộp) ⇒ lệch gợi ý, phải ghi lý do");
+
+  // Lệnh thứ hai có LÔ xưởng nối vào: hàng đã đặt đếm qua lô; sửa lệnh đó thì cả lô của nó cũng không trừ.
+  const PO2 = `${P}po2`;
+  await db.insert(schema.productionOrders).values({ id: PO2, code: `${P}PO-2`, productId: PROD, productCode: "SC-1", productName: "Đầm SC-1", colors: ["Đen"], sizes: ["L"], cells: { "Đen|L": 8 }, totalQty: 8, status: "SENT", sentAt: new Date(), createdBy: "cos-sc-lead@test.local" });
+  await db.insert(schema.productionBatches).values({ id: `${P}lo1`, productId: PROD, productCode: `${P}SC-1`, batchNo: 1, productionOrderId: PO2, orderedAt: new Date(), orderedQty: 8, cells: { [`${P}vL`]: 8 }, status: "OPEN" });
+  const coLo = await buildMatrixForProduct(PROD);
+  assert.equal(coLo!.detail["Đen|L"].openPo, 8, "lô OPEN nối lệnh: đếm 8 một lần (không cộng cả lệnh lẫn lô)");
+  assert.equal((await buildMatrixForProduct(PROD, {}, { excludePoId: PO2 }))!.detail["Đen|L"].openPo, 0, "sửa lệnh có lô nối ⇒ lô của chính nó cũng không trừ");
+  assert.equal((await buildMatrixForProduct(PROD, {}, { excludePoId: PO }))!.detail["Đen|L"].openPo, 8, "sửa lệnh KHÁC ⇒ lô của lệnh này vẫn trừ");
+  await db.delete(schema.productionBatches).where(eq(schema.productionBatches.id, `${P}lo1`));
+  await db.delete(schema.productionOrders).where(eq(schema.productionOrders.id, PO2));
   assert.ok("ok" in (await nhapPhieu([[`${P}vM`, 6]], PO)));
   assert.deepEqual((await getPoReceiptPrefill(PO, true))?.state, { enabled: false, reason: RECEIPT_SHORTCUT_REASON.NOTHING_LEFT }, "nhập đủ ⇒ mở lại lối tắt không điền gì, nút tắt kèm lý do");
   assert.equal(await getPoReceiptPrefill(`${P}khong-co`, true), null);

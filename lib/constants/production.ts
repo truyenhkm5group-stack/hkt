@@ -1,3 +1,4 @@
+import { suggestedNetOfOpenPo } from "@/lib/constants/inventory-decision";
 /** Bảng chốt đặt hàng sản xuất: thứ tự size, màu hiển thị theo tên màu tiếng Việt, trạng thái */
 export const SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "2XL", "XXL", "3XL", "XXXL", "4XL", "5XL", "FREESIZE", "FREE SIZE", "F"];
 
@@ -54,6 +55,28 @@ export function colorSwatch(name: string): { bg: string; fg: string } {
 }
 
 export const cellKey = (color: string, size: string) => `${color}|${size}`;
+
+/**
+ * GỢI Ý ĐẶT THEO Ô của trình sửa lệnh SX = Kế hoạch SX − hàng đã đặt xưởng chưa về, từng mẫu mã, qua
+ * ĐÚNG `suggestedNetOfOpenPo` mà trang Thiếu hàng / Quyết định vốn tồn dùng (AGENTS.md mục 70: một phép
+ * trừ cho mọi trang). `openByVariant` = `openPoQtyByVariant().qtyByVariant` (lệnh SENT + lô OPEN, đã trừ
+ * phiếu nhập nối). Hàm THUẦN — lúc mở trình sửa lẫn lúc máy chủ tính lại `suggested_cells` đều đi qua nó,
+ * nên số điền sẵn và số đem so lúc lưu là một.
+ */
+export function netSuggestionByCell(
+  rows: readonly { variantId: string; color: string; size: string; suggested: number }[],
+  openByVariant: ReadonlyMap<string, number>,
+): Record<string, { gross: number; openPo: number; net: number }> {
+  const out: Record<string, { gross: number; openPo: number; net: number }> = {};
+  for (const r of rows) {
+    const key = cellKey(r.color.trim(), r.size.trim());
+    const openPo = Math.max(0, openByVariant.get(r.variantId) ?? 0);
+    const net = suggestedNetOfOpenPo(r.suggested, openPo);
+    const cur = out[key] ?? { gross: 0, openPo: 0, net: 0 };
+    out[key] = { gross: cur.gross + Math.max(0, r.suggested), openPo: cur.openPo + openPo, net: cur.net + net };
+  }
+  return out;
+}
 
 export function matrixTotals(colors: string[], sizes: string[], cells: Record<string, number>) {
   const byColor: Record<string, number> = {};

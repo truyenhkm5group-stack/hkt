@@ -35,7 +35,7 @@ export default async function NewProductionOrderPage({ searchParams }: { searchP
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="Kho" title={`Bảng chốt đặt hàng · ${m.product.code ? `${m.product.code} · ` : ""}${m.product.name}`} description={`Số lượng khởi tạo theo đề xuất của ERP cho ${m.coverDays} ngày bán — sửa rồi bấm Chốt.`}
- hint={`Số lượng khởi tạo theo đề xuất của ERP: tồn khả dụng${m.countIncoming ? " cộng hàng đang ở ngoài / chờ hoàn về sắp quay lại kho" : ""}, tốc độ bán, thời gian sản xuất ${m.leadTimeDays} ngày và ${m.coverDays} ngày muốn đủ bán sau khi hàng về. Sửa từng ô rồi bấm Chốt để lưu và in / gửi xưởng.`} />
+ hint={`Số lượng khởi tạo theo đề xuất của ERP: tồn khả dụng${m.countIncoming ? " cộng hàng đang ở ngoài / chờ hoàn về sắp quay lại kho" : ""}, tốc độ bán, thời gian sản xuất ${m.leadTimeDays} ngày và ${m.coverDays} ngày muốn đủ bán sau khi hàng về — đã TRỪ hàng đặt xưởng chưa về (lệnh đã gửi + lô đang mở, trừ phần đã nhập qua phiếu nối). Sửa từng ô rồi bấm Chốt để lưu và in / gửi xưởng.`} />
       {tuLoiTat.designVersionId || tuLoiTat.invalidDesign ? (
         <p className={tuLoiTat.invalidDesign ? "rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-200" : "rounded-md border bg-muted/40 px-3 py-2 text-sm"}>
           {tuLoiTat.invalidDesign

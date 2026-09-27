@@ -37,7 +37,7 @@ ghi CÓ SẴN, người sửa rồi bấm lưu.
 
 ## Luật đã chốt
 
-1. **Số lượng của "Lập lệnh SX" = `buildMatrixForProduct`** — đúng thứ `saveProductionOrder` TÍNH LẠI và
+1. **Số lượng của "Lập lệnh SX" = `buildMatrixForProduct`** (Kế hoạch SX − hàng đã đặt xưởng, mục 70) — đúng thứ `saveProductionOrder` TÍNH LẠI và
    lưu vào `suggested_cells` khi bấm Chốt, nên "lệch gợi ý một ô là phải ghi lý do" đứng nguyên (có bài
    kiểm). Bản duyệt chọn sẵn chỉ khi mã thuộc CHÍNH mẫu của sản phẩm (mã lạ ⇒ không chọn, in câu vàng).
 2. **Xưởng điền sẵn**: xưởng của topic của mẫu được duyệt → không có thì xưởng đã làm mẫu được duyệt →
@@ -63,13 +63,20 @@ ghi CÓ SẴN, người sửa rồi bấm lưu.
 
 1. **Quyền lập lệnh là `planning:write`, không phải `production:write`**: trang `/inventory/planning/orders/new`
    và `saveProductionOrder` đòi `planning:write`; đề bài nói "respect permissions of the underlying action".
-2. **Gợi ý của trình sửa lệnh KHÔNG phải `suggestedNetOfOpenPo`.** Đề bài giả định nút "Điền theo đề xuất
-   ERP" đi qua `suggestedNetOfOpenPo`; soát mã thì nó (và phép tính lại lúc lưu) là `buildMatrixForProduct`
-   = `r.suggested` của Kế hoạch SX, CHƯA trừ lệnh đang mở. Lối tắt dùng ĐÚNG đường của trình sửa — điền
-   số khác thì máy chủ tính lại ra số khác và đòi lý do cho mọi ô. Hệ quả có sẵn từ trước (không do SC):
-   mẫu đang có lệnh SENT mở trình sửa sẽ được gợi ý đặt lại đủ số. Chặn một phần: nút "Lập lệnh SX" tắt
-   khi đã có lệnh đang mở trỏ CÙNG bản duyệt. **Tech Lead:** muốn trình sửa trừ lệnh đang mở thì sửa
-   `buildMatrixForProduct` (một chỗ, cả hiển thị lẫn lúc lưu) và loại chính lệnh đang sửa khỏi phép trừ.
+2. **ĐÃ SỬA (vi phạm mục 70 có từ trước):** trình sửa lệnh từng gợi ý số GỘP (`r.suggested` của Kế hoạch
+   SX), không trừ hàng đã đặt xưởng — lệnh đang mở bị gợi ý đặt lại. Nay `buildMatrixForProduct` trừ qua
+   ĐÚNG `suggestedNetOfOpenPo` với `openPoQtyByVariant()` (lệnh SENT + lô OPEN, đã trừ phiếu nhập nối —
+   cùng phép trừ của Thiếu hàng / Quyết định vốn tồn), từng mẫu mã, hàm thuần `netSuggestionByCell`
+   (`lib/constants/production.ts`). **Lệnh đang sửa không tự trừ mình**: `openPoQtyByVariant({ excludePoId })`
+   bỏ dòng lệnh đó VÀ lô xưởng nối về nó (`openBatchQtyByVariantFromLedger(excludeProductionOrderId)`);
+   trang sửa và `saveProductionOrder` (lúc tính lại `suggested_cells`) truyền cùng lệnh loại trừ, nên số
+   điền sẵn == số máy chủ lưu ⇒ không đòi lý do (có kiểm thử). Ô "đx" của trình sửa in số đã trừ + "đặt N".
+   Lệnh NHÁP không tính là hàng đã đặt (định nghĩa có sẵn của `openPoQtyByVariant`). Chạm hai tệp ngoài
+   phạm vi, chỉ thêm tham số tuỳ chọn: `lib/queries/inventory-decision.ts`, `lib/queries/workshop-ledger.ts`;
+   bài `tests/workshop-ledger.test.ts` nới đúng một chỗ (lời gọi nay mang lệnh loại trừ, vẫn đúng MỘT hàm
+   của sổ). Đột biến 8/8 bị bắt: ô = số gộp · ma trận không truyền lệnh loại trừ · `openPoQtyByVariant` bỏ
+   qua lệnh loại trừ · sổ không loại lô của lệnh đang sửa · action lưu không loại chính lệnh · không kẹp 0 ·
+   trang sửa không loại chính lệnh · bỏ số đã đặt.
 3. **Xưởng lùi về xưởng làm mẫu** khi topic không khai xưởng (từ 27/09 biểu mẫu topic không còn ô xưởng,
    nên hầu hết topic mới sẽ trống) — vẫn là chứng từ đã có, không đoán.
 4. **Nút "Nhập kho theo lệnh" ở danh sách lệnh** không tính số còn lại từng dòng (tránh N truy vấn); trang

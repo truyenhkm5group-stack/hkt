@@ -147,17 +147,19 @@ const norm = (v: string) => v.trim().toLowerCase();
  * đi qua `openQtyAfterReceived` (một phép trừ, dùng chung với lô xưởng). Lệnh không có phiếu nối
  * (toàn bộ dữ liệu hiện nay) ra ĐÚNG số như trước — có kiểm thử khoá.
  */
-export async function openPoQtyByVariant() {
+export async function openPoQtyByVariant(opts: { excludePoId?: string | null } = {}) {
   const db = await getDb();
+  // Trình sửa lệnh (Agent SC): lệnh đang sửa KHÔNG trừ vào gợi ý của chính nó — cả dòng lệnh lẫn lô nối về nó.
+  const excludePoId = opts.excludePoId ?? null;
   const [allRows, batches, receivedByOrder] = await Promise.all([
     db
       .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost, dueDate: po.dueDate })
       .from(po)
       .where(eq(po.status, "SENT")),
-    openBatchQtyByVariantFromLedger(),
+    openBatchQtyByVariantFromLedger(excludePoId),
     linkedReceiptQty("order"),
   ]);
-  const rows = allRows.filter((r) => !batches.linkedProductionOrderIds.has(r.id));
+  const rows = allRows.filter((r) => r.id !== excludePoId && !batches.linkedProductionOrderIds.has(r.id));
 
   const productIds = [...new Set(rows.map((x) => x.productId).filter((x): x is string => Boolean(x)))];
   const variants = productIds.length
