@@ -10,6 +10,7 @@ import type { LifecycleEvidenceGap } from "@/lib/constants/evidence-gaps";
 import { buildDeclarePreview } from "@/lib/constants/model-bulk-declare";
 import { MODEL_360_BLOCK_ACCESS, type Model360Block, type ModelSuggestion } from "@/lib/constants/model-360";
 import { MODEL_STATES, type ModelState } from "@/lib/constants/model-lifecycle";
+import { LINKED_RECEIPT_FROM, staleFactsOf, staleStateSuggestion } from "@/lib/constants/model-stale-state";
 import {
   ALL_DECLARED_VALUES,
   daysInState,
@@ -39,6 +40,7 @@ import { getModelInventoryDecisions } from "@/lib/queries/model-360";
 import { getModelPipelineBoard, pipelineGap, pipelineSuggestions, PIPELINE_PERIOD_KEY, type PipelineAccess, type PipelineModelSources } from "@/lib/queries/model-pipeline";
 import { getModelProductionSummariesBatch, getModelProductionSummary } from "@/lib/queries/model-production";
 import { getModelSignal } from "@/lib/queries/model-signal";
+import { getLinkedReceiptCountsBatch } from "@/lib/queries/model-stale-state";
 import { getModel, getModelEvidence } from "@/lib/queries/models";
 import { getStockFeedbackForProduct } from "@/lib/queries/stock-feedback";
 import { resolvePeriod } from "@/lib/search-params";
@@ -241,7 +243,7 @@ export function testCompanyOsPipelineBoardSource() {
   }
   assert.ok(!/getModelSignal\(|getModelProductionSummary\(|getModelAdsSummary\(|getModelEvidence\(|getStockFeedbackForProduct\(/.test(q), "không dùng đường một-mẫu trong bảng");
   // Cổng quyền từng nguồn — như trang 360.
-  for (const g of [/allowed\.ADS\s*\?\s*loadSource\("quảng cáo/, /allowed\.INVENTORY \? loadSource\("quyết định tồn"/, /allowed\.INVENTORY \? loadSource\("phản hồi tồn/, /allowed\.INVENTORY \? loadSource\("hàng chậm/, /allowed\.PRODUCTION \? loadSource\("sản xuất/, /access\.canWrite && undeclared\.length \? loadSource/]) assert.match(q, g, `thiếu cổng ${g}`);
+  for (const g of [/allowed\.ADS\s*\?\s*loadSource\("quảng cáo/, /allowed\.INVENTORY \? loadSource\("quyết định tồn"/, /allowed\.INVENTORY \? loadSource\("phản hồi tồn/, /allowed\.INVENTORY \? loadSource\("hàng chậm/, /allowed\.PRODUCTION \? loadSource\("sản xuất/, /access\.canWrite && evidenceTargets\.length \? loadSource/]) assert.match(q, g, `thiếu cổng ${g}`);
   // Khoá đệm mang quyền + bộ lọc.
   assert.match(q, /memo\(`modelPipelineBoard:v1:\$\{accessKey\}:\$\{pipelineFiltersKey\(filters\)\}`/, "khoá đệm phải chứa quyền và bộ lọc");
   // Không đường ghi mới.
@@ -361,7 +363,10 @@ async function motMau(modelId: string, access: PipelineAccess): Promise<{ next: 
     const [row] = buildDeclarePreview([{ id: m.id, code: m.code, name: m.name, image: null, state: null }], new Map([[m.id, await getModelEvidence(m)]]));
     declare = row?.suggested ? { state: row.suggested, reasons: row.reasons } : null;
   }
-  return { gap, next: pickNextAction({ modelId, state: m.state, gap, declareSuggestion: declare, suggestions: pipelineSuggestions(s, access, `period=${PIPELINE_PERIOD_KEY}`) }) };
+  // Agent ST: lời khai đi sau thực tế — đường một mẫu của trang 360 (chứng cứ + tóm tắt sản xuất + phiếu nối lệnh).
+  const receipts = access.canWrite && access.allowed.PRODUCTION && m.state === LINKED_RECEIPT_FROM ? ((await getLinkedReceiptCountsBatch([modelId])).get(modelId) ?? null) : null;
+  const stale = access.canWrite && m.state !== null ? staleStateSuggestion(m.state, staleFactsOf(await getModelEvidence(m), s.production, receipts)) : null;
+  return { gap, next: pickNextAction({ modelId, state: m.state, gap, declareSuggestion: declare, stale, suggestions: pipelineSuggestions(s, access, `period=${PIPELINE_PERIOD_KEY}`) }) };
 }
 
 export async function testCompanyOsPipelineBoardDb(db: Db) {
@@ -393,17 +398,21 @@ export async function testCompanyOsPipelineBoardDb(db: Db) {
     assert.equal(ads.column, "ADS_TEST");
     assert.equal(ads.signal, "PROMISING", "thiết kế THẮNG, chưa mã Pancake ⇒ Triển vọng (T)");
     assert.deepEqual(ads.chips.map((c) => c.kind), ["OPEN_TOPIC"]);
-    assert.equal(ads.next, null, "đã có topic ⇒ không bộ máy nào đề xuất gì ⇒ không nút");
-    // Luật T: Triển vọng, chưa topic ⇒ "mở topic sớm", link tạo topic.
+    // Agent ST: thiết kế đã THẮNG mà lời khai còn Test QC ⇒ việc tiếp theo là CẬP NHẬT lời khai (người bấm) — topic mở
+    // sớm vẫn không kéo mẫu đi đâu (luật T), chỉ phán quyết thiết kế mới đề xuất.
+    assert.deepEqual([ads.next?.source, ads.next?.key], ["STALE", "stale:WINNER"], "đã có topic ⇒ không đề xuất mở topic; phán quyết THẮNG ⇒ đề xuất cập nhật");
+    // Luật T: Triển vọng, chưa topic ⇒ "mở topic sớm" — với người KHAI được, việc cập nhật lời khai (ST) đứng trước;
+    // người chỉ xem vẫn thấy đúng đề xuất mở topic sớm (khẳng định ở phần cổng quyền bên dưới).
     const early = the("early");
-    assert.deepEqual([early.column, early.next?.source, early.next?.key, early.next?.href], ["ADS_TEST", "SUGGESTION", "topic-open-early", `/production/topics/new?model=${encodeURIComponent(M("early"))}`]);
+    assert.deepEqual([early.column, early.next?.source, early.next?.key], ["ADS_TEST", "STALE", "stale:WINNER"]);
     // Duyệt mẫu: không nhãn chờ duyệt (cột đã nói), không chỗ hở (có mẫu).
     assert.deepEqual([the("sr").column, the("sr").chips, the("sr").next], ["SAMPLE_REVIEW", [], null]);
     // Giá thành: mẫu bản 2 đã gửi ⇒ nhãn chờ duyệt; có bảng giá thành ⇒ không hở.
     assert.deepEqual(the("cost").chips.map((c) => c.kind), ["SAMPLE_WAITING"]);
     // C + T: khai THẮNG mà sản xuất đi trước ⇒ chuyển tiếp.
     const win = the("win");
-    assert.deepEqual([win.column, win.next?.key, win.next?.href], ["WINNER", "lifecycle-production-ahead", `/production/models/${encodeURIComponent(M("win"))}`]);
+    // Agent ST: cùng sự thật với chuyển tiếp của C + T ("sản xuất đã đi trước") — nút mở ô khai chọn sẵn đích.
+    assert.deepEqual([win.column, win.next?.source, win.next?.key, win.next?.href], ["WINNER", "STALE", "stale:PRODUCTION_DISCUSSION", `/models/${encodeURIComponent(M("win"))}#trang-thai-khai`]);
     // Q: chưa khai + thiết kế đang test ⇒ khai theo gợi ý; mốc = lúc vào sổ.
     const chua = the("null");
     assert.deepEqual([chua.column, chua.next?.source, chua.sinceIsRegistered], ["UNDECLARED", "DECLARE", true]);
@@ -428,7 +437,7 @@ export async function testCompanyOsPipelineBoardDb(db: Db) {
     assert.deepEqual(ma(await getModelPipelineBoard(FULL, { ...EMPTY_PIPELINE_FILTERS, q: "cosbd-ear" })), [M("early")]);
     const canLam = await getModelPipelineBoard(FULL, { ...EMPTY_PIPELINE_FILTERS, onlyActionable: true });
     assert.ok(canLam.cards.length > 0 && canLam.cards.every((c) => c.next), "chỉ mẫu cần làm");
-    assert.ok(!canLam.cards.some((c) => c.modelId === M("ads") || c.modelId === M("los")));
+    assert.ok(!canLam.cards.some((c) => c.modelId === M("los")));
     // Khoá đệm mang bộ lọc: hai bộ lọc liền nhau (không xoá đệm) ra hai tập khác nhau — đã thấy ở trên; lượt đầu vẫn nguyên.
     assert.equal((await getModelPipelineBoard(FULL, EMPTY_PIPELINE_FILTERS)).cards.length, board.cards.length);
 

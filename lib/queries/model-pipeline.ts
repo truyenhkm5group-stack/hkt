@@ -6,6 +6,7 @@ import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { buildDeclarePreview } from "@/lib/constants/model-bulk-declare";
 import { deriveModelSuggestions, loadSource, type Loaded, type Model360Block, type ModelSuggestion } from "@/lib/constants/model-360";
 import { isModelState, type ModelState } from "@/lib/constants/model-lifecycle";
+import { LINKED_RECEIPT_FROM, STALE_CREATIVE_TRACK_STATES, staleFactsOf, staleStateSuggestion } from "@/lib/constants/model-stale-state";
 import type { ModelSignal } from "@/lib/constants/model-signal";
 import {
   matchesPipelineFilters,
@@ -28,6 +29,7 @@ import { pickModelInventoryRows } from "@/lib/queries/model-360";
 import { spendMappedProductIds, summarizeModelAds, type ModelAdsSummary } from "@/lib/queries/model-ads";
 import { getModelProductionSummariesBatch, type ModelProductionSummary } from "@/lib/queries/model-production";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
+import { getLinkedReceiptCountsBatch } from "@/lib/queries/model-stale-state";
 import { getModelsEvidenceBatch } from "@/lib/queries/models";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
 import { getStockFeedbackShop } from "@/lib/queries/stock-feedback";
@@ -47,6 +49,9 @@ import { resolvePeriod } from "@/lib/search-params";
  *  · phản hồi tồn  — `getStockFeedbackShop` (X) ⇒ `deriveStockFeedback` từng mã;
  *  · lớp tồn       — `getSlowMoving` (V) ⇒ lớp tệ nhất của mẫu (nhãn thẻ);
  *  · gợi ý khai    — `getModelsEvidenceBatch` (Q) ⇒ `buildDeclarePreview`, chỉ cho mẫu CHƯA KHAI và người KHAI được;
+ *  · lời khai đi sau thực tế (ST) — CÙNG lô chứng cứ (thiết kế + chi QC, cho mẫu khai còn trước THẮNG) + tóm tắt
+ *                    sản xuất ở trên + `getLinkedReceiptCountsBatch` (mẫu Đang sản xuất) ⇒ `staleStateSuggestion`,
+ *                    chỉ cho người KHAI được;
  *  · phòng ban     — `activeMembershipsByUser` (đường đọc DUY NHẤT của tư cách thành viên, luật 32).
  *
  * Rồi mỗi mẫu đi qua CÙNG phép dựng đề xuất của trang 360 (`deriveModelSuggestions` + `mergeStockFeedbackSuggestions`,
@@ -152,8 +157,12 @@ async function boardUncached(access: PipelineAccess, filters: PipelineFilters): 
   ]);
   const ids = models.map((m) => m.id);
   const undeclared = models.filter((m) => m.state === null);
+  // Chứng cứ creative cho lời khai còn trước THẮNG (ST) đọc CÙNG lượt với gợi ý khai (Q) — một lô, không hai.
+  const creativeTrack = models.filter((m) => isModelState(m.state) && STALE_CREATIVE_TRACK_STATES.includes(m.state));
+  const evidenceTargets = [...undeclared, ...creativeTrack].map((m) => m.id);
+  const inProduction = models.filter((m) => m.state === LINKED_RECEIPT_FROM).map((m) => m.id);
 
-  const [signals, ads, inv, prod, feedback, slow, evidence] = await Promise.all([
+  const [signals, ads, inv, prod, feedback, slow, evidence, receipts] = await Promise.all([
     loadSource("tín hiệu mẫu", () => getModelSignalsBatch(range)),
     allowed.ADS
       ? loadSource("quảng cáo (bảng quyết định chiều mã hàng)", async () => {
@@ -165,7 +174,8 @@ async function boardUncached(access: PipelineAccess, filters: PipelineFilters): 
     allowed.PRODUCTION ? loadSource("sản xuất (getModelProductionSummariesBatch)", () => getModelProductionSummariesBatch(ids)) : Promise.resolve(null),
     allowed.INVENTORY ? loadSource("phản hồi tồn → creative / quảng cáo", () => getStockFeedbackShop({ adsVisible: allowed.ADS })) : Promise.resolve(null),
     allowed.INVENTORY ? loadSource("hàng chậm (lớp tồn)", () => getSlowMoving()) : Promise.resolve(null),
-    access.canWrite && undeclared.length ? loadSource("chứng cứ giai đoạn của mẫu chưa khai", () => getModelsEvidenceBatch(undeclared.map((m) => m.id))) : Promise.resolve(null),
+    access.canWrite && evidenceTargets.length ? loadSource("chứng cứ giai đoạn / thiết kế của mẫu", () => getModelsEvidenceBatch(evidenceTargets)) : Promise.resolve(null),
+    access.canWrite && allowed.PRODUCTION && inProduction.length ? loadSource("phiếu nhập đã nối lệnh / lô sản xuất", () => getLinkedReceiptCountsBatch(inProduction)) : Promise.resolve(null),
   ]);
   const notes: string[] = [];
   if (feedback && feedback.ok) notes.push(...feedback.data.notes);
@@ -219,6 +229,11 @@ async function boardUncached(access: PipelineAccess, filters: PipelineFilters): 
     };
     const gap = pipelineGap(sources);
     const declare = state === null ? (declareOf.get(m.id) ?? null) : null;
+    // ST: chỉ người KHAI được mới thấy đề xuất cập nhật; nguồn không đọc được ⇒ ô CHƯA BIẾT ⇒ không đề xuất từ nó.
+    const stale =
+      access.canWrite && state !== null
+        ? staleStateSuggestion(state, staleFactsOf(evidence && evidence.ok ? (evidence.data.get(m.id) ?? null) : null, production, receipts && receipts.ok ? (receipts.data.get(m.id) ?? null) : null))
+        : null;
     const last = lastOf.get(m.id) ?? null;
     return {
       modelId: m.id,
@@ -245,6 +260,7 @@ async function boardUncached(access: PipelineAccess, filters: PipelineFilters): 
         state,
         gap,
         declareSuggestion: declare && declare.suggested ? { state: declare.suggested, reasons: declare.reasons } : null,
+        stale,
         suggestions: pipelineSuggestions(sources, access, periodQuery),
       }),
     };
@@ -268,7 +284,7 @@ async function boardUncached(access: PipelineAccess, filters: PipelineFilters): 
     ownerOptions,
     deptOptions,
     periodLabel: range.label,
-    failed: failedOf([memberships, signals, ads, inv, prod, feedback, slow, evidence]),
+    failed: failedOf([memberships, signals, ads, inv, prod, feedback, slow, evidence, receipts]),
     notes,
   };
 }

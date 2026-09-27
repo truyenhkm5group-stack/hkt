@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { BULK_DECLARE_MAX, BULK_DECLARE_SOURCE, modelSuggestSource, type DeclareRowResult } from "@/lib/constants/model-bulk-declare";
 import { MODEL_STATES } from "@/lib/constants/model-lifecycle";
+import { modelStaleSource, STALE_UPDATE_SOURCE } from "@/lib/constants/model-stale-state";
 import { declareModelsFromSuggestionCore } from "@/lib/models/bulk-declare";
 import { assignModelCodeCore, registerModelCore, setModelOwnerCore, transitionModelCore } from "@/lib/models/service";
 import { runModelRegistryJob } from "@/lib/models/registry-job";
@@ -192,21 +193,31 @@ export async function runModelRegistrySync(): Promise<{ ok: true; inserted: numb
   return { ok: true, inserted: ket.result.inserted, linked: ket.result.linked, ambiguous: ket.result.ambiguous.length, failed: ket.result.failed.length };
 }
 
-const declareInput = z.object({
-  items: z
-    .array(z.object({ modelId: z.string().min(1), state: z.enum(MODEL_STATES), expectedState: z.null() }))
-    .min(1, "Chưa chọn mẫu nào")
-    .max(BULK_DECLARE_MAX, `Mỗi lượt khai tối đa ${BULK_DECLARE_MAX} mẫu`)
-    .refine((xs) => new Set(xs.map((x) => x.modelId)).size === xs.length, "Một mẫu xuất hiện hai lần trong lượt khai"),
-  reason: z.string().max(1000),
-  /** `list` = bảng gợi ý trên /models · `detail` = trang một mẫu. Chỉ đổi NGUỒN ghi vào lịch sử. */
-  from: z.enum(["list", "detail"]).optional(),
-});
+const declareInput = z
+  .object({
+    items: z
+      .array(z.object({ modelId: z.string().min(1), state: z.enum(MODEL_STATES), expectedState: z.enum(MODEL_STATES).nullable() }))
+      .min(1, "Chưa chọn mẫu nào")
+      .max(BULK_DECLARE_MAX, `Mỗi lượt khai tối đa ${BULK_DECLARE_MAX} mẫu`)
+      .refine((xs) => new Set(xs.map((x) => x.modelId)).size === xs.length, "Một mẫu xuất hiện hai lần trong lượt khai"),
+    reason: z.string().max(1000),
+    /** `list` = bảng trên /models · `detail` = trang một mẫu. Chỉ đổi NGUỒN ghi vào lịch sử. */
+    from: z.enum(["list", "detail"]).optional(),
+    /**
+     * `declare` (mặc định, Q) = khai lần đầu, mọi dòng `expectedState: null` · `stale` (ST) = cập nhật theo thực
+     * tế, mọi dòng mang lời khai người đã thấy (`expectedState` khác null). Không trộn hai luồng trong một lượt.
+     */
+    kind: z.enum(["declare", "stale"]).optional(),
+  })
+  .refine((d) => (d.kind === "stale" ? d.items.every((i) => i.expectedState !== null) : d.items.every((i) => i.expectedState === null)), "Lượt khai trộn mẫu chưa khai với mẫu đã khai — mở lại bảng rồi bấm lại");
 
 /**
  * KHAI THEO GỢI Ý (Company OS · Agent Q): người xác nhận — hoặc chọn khác — giai đoạn máy ước tính cho các
  * mẫu CHƯA KHAI. Chỉ chạy khi có cú bấm; máy không bao giờ tự gọi. Dòng nào đã có người khai trong lúc màn
  * hình còn mở thì BỎ QUA và báo lại, không đè. Mỗi mẫu một giao dịch; một dòng hỏng không kéo dòng khác.
+ *
+ * CẬP NHẬT THEO THỰC TẾ (Agent ST, `kind: "stale"`): CÙNG lõi, cho mẫu ĐÃ KHAI mà chứng từ đã đi trước lời
+ * khai — hàng rào là đúng lời khai người thấy trên màn hình; lời khai đã đổi ⇒ bỏ qua, không đè.
  */
 export async function declareModelsFromSuggestion(input: unknown): Promise<{ ok: true; declared: number; results: DeclareRowResult[] } | { error: string }> {
   const user = await requireUser();
@@ -216,7 +227,9 @@ export async function declareModelsFromSuggestion(input: unknown): Promise<{ ok:
   const d = parsed.data;
 
   const db = await getDb();
-  const source = d.from === "detail" && d.items.length === 1 ? modelSuggestSource(d.items[0].modelId) : BULK_DECLARE_SOURCE;
+  const capNhat = d.kind === "stale";
+  const motMau = d.from === "detail" && d.items.length === 1;
+  const source = capNhat ? (motMau ? modelStaleSource(d.items[0].modelId) : STALE_UPDATE_SOURCE) : motMau ? modelSuggestSource(d.items[0].modelId) : BULK_DECLARE_SOURCE;
   const r = await declareModelsFromSuggestionCore(db, { items: d.items, reason: d.reason, actor: { id: user.id, label: user.name || user.email }, source });
   if ("error" in r) return { error: r.error };
 
@@ -225,9 +238,9 @@ export async function declareModelsFromSuggestion(input: unknown): Promise<{ ok:
     await audit({
       userId: user.id,
       userEmail: user.email,
-      action: "MODEL_BULK_DECLARE",
+      action: capNhat ? "MODEL_STALE_UPDATE" : "MODEL_BULK_DECLARE",
       entity: "PRODUCT_MODEL",
-      before: null,
+      before: capNhat ? { items: d.items.map((i) => ({ modelId: i.modelId, lifecycleState: i.expectedState })) } : null,
       after: {
         source,
         declared: r.declared,

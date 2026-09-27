@@ -11,6 +11,7 @@ import { assignModelCode, declareModelsFromSuggestion, setModelOwner, transition
 import { BULK_DECLARE_DEFAULT_REASON, DECLARE_ROW_OUTCOME_LABEL } from "@/lib/constants/model-bulk-declare";
 import { checkModelTransition, MODEL_REASON_MIN_LENGTH, MODEL_STATE_LABELS, MODEL_STATES, MODEL_TRANSITIONS, reasonIsEnough, type ModelState } from "@/lib/constants/model-lifecycle";
 import type { WinnerFollowUp } from "@/lib/constants/early-topic";
+import { staleUpdateReason, type StaleStateSuggestion } from "@/lib/constants/model-stale-state";
 
 /**
  * ĐỔI TRẠNG THÁI KHAI. Hiện cả khi mẫu CHƯA KHAI (`state = null`) — đó chính là lúc người cần khai.
@@ -25,23 +26,59 @@ import type { WinnerFollowUp } from "@/lib/constants/early-topic";
  * `suggested` (Agent Q): mẫu CHƯA KHAI mà máy có gợi ý giai đoạn (ƯỚC TÍNH) ⇒ chọn sẵn gợi ý và điền sẵn lý
  * do — bản MỘT MẪU của "Khai theo gợi ý": lưu đi qua `declareModelsFromSuggestion` (hàng rào "vẫn chưa
  * khai", lịch sử ghi gợi ý + người có chọn khác không). Vẫn chỉ ghi khi người bấm "Lưu trạng thái".
+ *
+ * `stale` (Agent ST): mẫu ĐÃ KHAI mà chứng từ đã đi trước lời khai (thiết kế đã lên camp / có phán quyết, sản
+ * xuất đã đi tiếp) ⇒ hiện câu chứng cứ, chọn sẵn đích và điền sẵn lý do (sửa được). Lưu đi CÙNG lõi của Q với
+ * hàng rào `expectedState` = lời khai đang hiện — người khác vừa đổi thì bỏ qua, không đè.
  */
-export function TransitionControl({ modelId, state, winnerFollowUp = null, suggested = null }: { modelId: string; state: ModelState | null; winnerFollowUp?: WinnerFollowUp | null; suggested?: ModelState | null }) {
+export function TransitionControl({
+  modelId,
+  state,
+  winnerFollowUp = null,
+  suggested = null,
+  stale = null,
+}: {
+  modelId: string;
+  state: ModelState | null;
+  winnerFollowUp?: WinnerFollowUp | null;
+  suggested?: ModelState | null;
+  stale?: StaleStateSuggestion | null;
+}) {
   const tien = state ? MODEL_TRANSITIONS[state] : [];
   const conLai = MODEL_STATES.filter((s) => s !== state && !tien.includes(s));
   const theoGoiY = state === null && suggested !== null;
-  const [to, setTo] = useState<ModelState | "">(theoGoiY ? suggested : (tien[0] ?? ""));
-  const [reason, setReason] = useState(theoGoiY ? BULK_DECLARE_DEFAULT_REASON : "");
+  const theoThucTe = state !== null && stale !== null;
+  const [to, setTo] = useState<ModelState | "">(theoGoiY ? suggested : theoThucTe && stale ? stale.to : (tien[0] ?? ""));
+  const [reason, setReason] = useState(theoGoiY ? BULK_DECLARE_DEFAULT_REASON : theoThucTe && stale ? staleUpdateReason(stale) : "");
   const [followUp, setFollowUp] = useState<WinnerFollowUp | null>(null);
   const [pending, start] = useTransition();
 
   const kiem = to ? checkModelTransition(state, to) : null;
-  const canLyDo = !!kiem && kiem.ok && kiem.needsReason;
-  const duoc = !!kiem && kiem.ok && (!kiem.needsReason || reasonIsEnough(reason));
+  // Luồng cập nhật theo thực tế luôn ghi lý do (lõi của Q đòi) — ô lý do hiện sẵn, đã điền.
+  const canLyDo = !!kiem && kiem.ok && (kiem.needsReason || theoThucTe);
+  const duoc = !!kiem && kiem.ok && (!canLyDo || reasonIsEnough(reason));
 
   const luu = () =>
     start(async () => {
       if (!to) return;
+      if (theoThucTe && state !== null) {
+        const k = await declareModelsFromSuggestion({ items: [{ modelId, state: to, expectedState: state }], reason, from: "detail", kind: "stale" });
+        if ("error" in k) {
+          toast.error(k.error);
+          return;
+        }
+        const dong = k.results[0];
+        if (!dong || dong.outcome !== "DECLARED") {
+          toast.error(dong ? `${DECLARE_ROW_OUTCOME_LABEL[dong.outcome]}${dong.current ? ` (hiện: ${MODEL_STATE_LABELS[dong.current]})` : ""}${dong.error ? `: ${dong.error}` : ""}` : "Không cập nhật được");
+          return;
+        }
+        toast.success(`Đã cập nhật: ${MODEL_STATE_LABELS[to]}${to === stale?.to ? " (theo thực tế)" : ""}`);
+        // Trang dựng lại với lời khai mới; ô chọn cũ (đích vừa lưu) không còn là một lượt chuyển hợp lệ.
+        setTo("");
+        setReason("");
+        setFollowUp(to === "WINNER" ? winnerFollowUp : null);
+        return;
+      }
       if (theoGoiY) {
         const k = await declareModelsFromSuggestion({ items: [{ modelId, state: to, expectedState: null }], reason, from: "detail" });
         if ("error" in k) {
@@ -82,6 +119,15 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null, sugge
 
   return (
     <div className="space-y-2">
+      {theoThucTe && stale && state ? (
+        <div className="space-y-1 rounded-lg border border-sky-300/60 bg-sky-50 p-2.5 text-xs dark:border-sky-800 dark:bg-sky-950/30" data-testid="stale-state-note">
+          <p className="font-semibold">
+            Thực tế đã đi trước lời khai &ldquo;{MODEL_STATE_LABELS[state]}&rdquo; — đề xuất cập nhật sang &ldquo;{MODEL_STATE_LABELS[stale.to]}&rdquo;
+          </p>
+          <p className="text-muted-foreground">{stale.reasons.join(" · ")}</p>
+          <p className="text-muted-foreground">Đã chọn sẵn bên dưới, lý do điền sẵn (sửa được). Máy không tự ghi — bấm &ldquo;Lưu trạng thái&rdquo; để cập nhật.</p>
+        </div>
+      ) : null}
       {followUp ? (
         <div className="space-y-1.5 rounded-lg border border-primary/40 bg-primary/5 p-2.5 text-xs">
           <p className="font-semibold">Sản xuất của mẫu đã đi trước lúc thắng — chuyển tiếp vòng đời?</p>
@@ -107,6 +153,7 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null, sugge
               {tien.map((s) => (
                 <SelectItem key={s} value={s}>
                   {MODEL_STATE_LABELS[s]} · bước tiếp
+                  {theoThucTe && s === stale?.to ? " · theo thực tế" : ""}
                 </SelectItem>
               ))}
               {conLai.map((s) => (
@@ -114,6 +161,7 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null, sugge
                   {MODEL_STATE_LABELS[s]}
                   {state ? " · cần lý do" : ""}
                   {theoGoiY && s === suggested ? " · máy gợi ý (ước tính)" : ""}
+                  {theoThucTe && s === stale?.to ? " · theo thực tế" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -126,7 +174,7 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null, sugge
       {canLyDo ? (
         <div className="space-y-1">
           <Label className="text-xs">
-            Lý do (bắt buộc, ít nhất {MODEL_REASON_MIN_LENGTH} ký tự) — {state ? "đây là lùi bước hoặc nhảy cóc" : "đây là lần khai đầu tiên của mẫu"}
+            Lý do (bắt buộc, ít nhất {MODEL_REASON_MIN_LENGTH} ký tự) — {theoThucTe ? "cập nhật theo thực tế, ghi vào lịch sử" : state ? "đây là lùi bước hoặc nhảy cóc" : "đây là lần khai đầu tiên của mẫu"}
           </Label>
           <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Vì sao mẫu đang ở trạng thái này…" />
         </div>
