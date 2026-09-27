@@ -12,6 +12,8 @@ import { publish } from "@/lib/realtime/bus";
 import { anySecretMatches } from "@/lib/auth/secret-compare";
 import { VTP_STATEMENT_MAX_BODY_BYTES, VTP_STATEMENT_MAX_UNAUTHENTICATED_READS } from "@/lib/constants/webhook-limits";
 import { concurrencyGate, readBodyCapped } from "@/lib/http/body-limit";
+import { withOrganization } from "@/lib/platform/context";
+import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +74,15 @@ function bodySecrets(body: Record<string, unknown>) {
 /** Số lượt đang đọc body mà CHƯA biết người gửi là ai — xem `VTP_STATEMENT_MAX_UNAUTHENTICATED_READS`. */
 const unauthenticatedReads = concurrencyGate(VTP_STATEMENT_MAX_UNAUTHENTICATED_READS);
 
+/**
+ * Webhook không có phiên: tổ chức phân giải TƯỜNG MINH theo `WEBHOOK_BINDINGS` rồi bọc TOÀN BỘ
+ * phần xử lý — kể cả việc sau phản hồi — trong `withOrganization` (audit ISO-07 · hợp đồng mục 8).
+ */
 export async function POST(request: NextRequest) {
+  return withOrganization(await resolveWebhookOrganization("VTP_STATEMENT"), () => handlePost(request));
+}
+
+async function handlePost(request: NextRequest) {
   const expected = env.viettelPost.webhookSecret;
   if (!expected) return NextResponse.json({ ok: false, error: "Chưa cấu hình tham số bí mật webhook" }, { status: 503 });
 

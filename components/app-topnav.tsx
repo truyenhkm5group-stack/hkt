@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Suspense, useState } from "react";
 import { ChevronDown, Menu } from "lucide-react";
 import type { Role } from "@/db/schema";
-import { activeHrefOf, iconOf, visibleGroups } from "@/components/app-sidebar";
+import { activeHrefOf, bellShowsSharedQueue, iconOf, visibleGroups } from "@/components/app-sidebar";
 import { AiCopilot } from "@/components/ai-copilot";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { GlobalSearch } from "@/components/global-search";
@@ -41,7 +41,8 @@ const PILL_LABEL: Partial<Record<ModuleZone, string>> = {
   MANAGEMENT: "Điều hành",
 };
 
-type TopNavUser = { name: string; email: string; role: Role; permissions: string[] };
+/** `modules` = module đang bật của tổ chức — menu, ô lệnh ⌘K và chuông cùng lọc theo nó. */
+type TopNavUser = { name: string; email: string; role: Role; permissions: string[]; modules?: string[] };
 
 function itemClass(active: boolean) {
   return cn(
@@ -147,7 +148,7 @@ export function AppTopNav({ user }: { user: TopNavUser }) {
           <Suspense fallback={null}>
             <AiCopilot />
           </Suspense>
-          <NotificationBell />
+          <NotificationBell sharedQueue={bellShowsSharedQueue(user)} />
           <RealtimeIndicator />
           <NavUser user={user} />
         </div>

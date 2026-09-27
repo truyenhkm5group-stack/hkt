@@ -31,6 +31,7 @@
  */
 
 import { DISPATCHABLE_WORKFLOWS } from "@/lib/constants/agent-dispatch";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 const API = "https://api.github.com";
 const TIMEOUT_MS = 20_000;
@@ -154,6 +155,8 @@ function rateLimited(res: { status: number; headers: { get(name: string): string
 }
 
 async function get<T>(path: string): Promise<T> {
+  // Token GitHub là của NGƯỜI VẬN HÀNH NỀN TẢNG, chỉ hợp lệ trong ngữ cảnh tổ chức nhà (integration-inventory §2.2).
+  await assertHomeCredentials("github");
   const t = token();
   const r = repo();
   if (!r) throw new GithubError("NOT_CONFIGURED", githubConfig().reason ?? "Chưa cấu hình GitHub.");

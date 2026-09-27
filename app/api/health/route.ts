@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { getDb } from "@/db";
+import { getDb, getPlatformDb } from "@/db";
+import { MODULE_KEYS } from "@/lib/constants/platform-modules";
+import { getEnabledModules } from "@/lib/platform/capabilities";
+import { getHomeOrganization, FALLBACK_HOME_CODE } from "@/lib/platform/organizations";
 import { redactedErrorMessage, runningVersion } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +20,14 @@ export const dynamic = "force-dynamic";
  * TUYẾN NÀY CÔNG KHAI (`middleware.ts::PUBLIC_PREFIXES`) — không đăng nhập vẫn gọi được, vì cả
  * workflow deploy lẫn script cài đặt đều hỏi nó trước khi có phiên nào. Nên câu lỗi phải đi qua
  * `redactedErrorMessage()`: lỗi CSDL có thể mang chuỗi kết nối, và kho mã này PUBLIC.
+ *
+ * ─── KHỐI `platform` (nền tảng đa tổ chức) — CHỈ BOOLEAN VÀ SỐ ĐẾM ───
+ *
+ * Sau một lượt deploy, người vận hành (và agent) phải trả lời được "migration đã áp chưa, tổ chức nhà
+ * có được phân giải đúng không, mọi module của nó còn bật không" mà KHÔNG cần quyền đọc CSDL. Nhưng
+ * tuyến này công khai, nên nó KHÔNG in mã / tên / số lượng tổ chức nào — chỉ nói về tổ chức nhà bằng
+ * cờ đúng/sai. Khối này hỏng thì `ok` của cả phong bì vẫn giữ nguyên nghĩa cũ (tiến trình + CSDL):
+ * không để một phép đo phụ đánh sập bước kiểm của workflow deploy.
  */
 export async function GET() {
   const running = runningVersion();
@@ -24,8 +35,29 @@ export async function GET() {
   try {
     const db = await getDb();
     await db.execute(sql`select 1`);
-    return NextResponse.json({ ok: true, time: new Date().toISOString(), ...version });
+    return NextResponse.json({ ok: true, time: new Date().toISOString(), ...version, platform: await platformHealth() });
   } catch (error) {
     return NextResponse.json({ ok: false, error: redactedErrorMessage(error), ...version }, { status: 500 });
+  }
+}
+
+async function platformHealth() {
+  try {
+    const home = await getHomeOrganization();
+    // `FALLBACK_HOME_CODE` = sổ tổ chức chưa đọc được (bảng chưa có) — mặt phẳng điều khiển CHƯA sẵn sàng.
+    const controlPlane = home.code !== FALLBACK_HOME_CODE;
+    const enabled = await getEnabledModules(home.code);
+    const pdb = await getPlatformDb();
+    const r = await pdb.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => null);
+    const rows = (r as unknown as { rows?: { n: number }[] } | null)?.rows;
+    return {
+      ok: controlPlane && home.status === "ACTIVE" && enabled.size === MODULE_KEYS.length,
+      controlPlane,
+      homeResolved: home.isHome && home.status === "ACTIVE",
+      homeModules: `${enabled.size}/${MODULE_KEYS.length}`,
+      migrations: rows?.[0]?.n ?? null,
+    };
+  } catch (error) {
+    return { ok: false, error: redactedErrorMessage(error) };
   }
 }

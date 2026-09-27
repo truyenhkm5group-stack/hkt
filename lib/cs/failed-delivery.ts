@@ -11,6 +11,7 @@ import { env } from "@/lib/env";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { shortName } from "@/lib/constants/outreach";
 import { normalize } from "@/lib/text";
+import { organizationStateKey } from "@/lib/platform/process-state";
 
 export { classifyFailedReason };
 
@@ -81,19 +82,22 @@ export function renderFailedTemplate(template: string, v: { ten: string; ma_van_
 }
 
 const dayKey = (d: Date | null) => (d ?? new Date()).toISOString().slice(0, 10);
-const lock = globalThis as unknown as { __erpFailedDeliveryRunning?: boolean };
+/** Khoá "đang chạy" THEO TỔ CHỨC (ISO-18): lượt của tổ chức này không chặn lượt của tổ chức kia. */
+const lock = globalThis as unknown as { __erpFailedDeliveryRunningByOrg?: Set<string> };
+const runningOrgs = (lock.__erpFailedDeliveryRunningByOrg ??= new Set<string>());
 
 export async function handleFailedDeliveries(options: { lookbackDays?: number; log?: (m: string) => void } = {}) {
   const result = { scanned: 0, messaged: 0, manual: 0, skipped: 0, byReason: {} as Record<string, number>, errors: [] as string[] };
-  if (lock.__erpFailedDeliveryRunning) {
+  const orgKey = await organizationStateKey();
+  if (runningOrgs.has(orgKey)) {
     result.errors.push("Đang có lần chạy khác");
     return result;
   }
-  lock.__erpFailedDeliveryRunning = true;
+  runningOrgs.add(orgKey);
   try {
     return await run(options, result);
   } finally {
-    lock.__erpFailedDeliveryRunning = false;
+    runningOrgs.delete(orgKey);
   }
 }
 

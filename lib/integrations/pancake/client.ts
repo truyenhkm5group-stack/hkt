@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, int, IntegrationError, sleep, str } from "@/lib/integrations/http";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 export type PancakeListResponse<T = Record<string, unknown>> = {
   data: T[];
@@ -57,6 +58,8 @@ export class PancakeClient {
   }
 
   async get(path: string, params: Record<string, unknown> = {}) {
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
+    await assertHomeCredentials("pancake");
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();
@@ -72,6 +75,8 @@ export class PancakeClient {
 
   /** Gọi POST (tạo / sửa dữ liệu trên Pancake POS) */
   async post(path: string, body: unknown, params: Record<string, unknown> = {}) {
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
+    await assertHomeCredentials("pancake");
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();

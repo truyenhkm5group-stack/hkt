@@ -1,5 +1,6 @@
 import { IMAGE_BATCH_PRICE_FACTOR, IMAGE_MODEL_TOKEN_PRICE_PER_MTOK, PIXEL_SAFE_EDIT_LABEL, PIXEL_SAFE_SOURCE_KINDS, imagePriceKeyOf, type ImageMode, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
 import { env } from "@/lib/env";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ OPENAI gpt-image — SỬA ẢNH SẢN PHẨM THẬT ═══════════
@@ -171,6 +172,8 @@ export async function editImage(input: ImageEditInput, deps: ImageEditDeps = {})
   assertPixelSafe(input.images);
   const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
   if (!prompt) throw new Error("Câu lệnh sinh ảnh trống.");
+  // Khoá OpenAI trong môi trường là của tổ chức nhà (P12) — chặn trước khi đọc khoá.
+  await assertHomeCredentials("openai");
   const apiKey = deps.apiKey ?? env.openaiRest.apiKey;
   if (!apiKey) throw new Error("Chưa có OPENAI_API_KEY trên máy chủ — không sinh ảnh được.");
   const doFetch = deps.fetchImpl ?? fetch;

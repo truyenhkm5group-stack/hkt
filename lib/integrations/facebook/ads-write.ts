@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { IntegrationError, fetchJson } from "@/lib/integrations/http";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import {
   ADS_WRITE_LIMITS,
@@ -122,6 +123,8 @@ function graphUrl(path: string) {
 type GraphRecord = Record<string, unknown>;
 
 async function graphGet(path: string, params: Record<string, string>): Promise<GraphRecord> {
+  // Token Meta trong môi trường là của tổ chức nhà (P12) — chặn trước khi gắn token vào URL.
+  await assertHomeCredentials("facebook");
   const url = graphUrl(path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("access_token", env.facebook.accessToken);
@@ -186,6 +189,8 @@ export async function searchAdGeoLocations(q: string, limit = 12): Promise<GeoSe
  */
 async function graphPost(path: string, fields: Record<string, string>): Promise<GraphRecord> {
   assertAdsWriteAllowed();
+  // Đường GHI tiêu tiền thật: tổ chức khác nhà không bao giờ được chạm tài khoản QC của tổ chức nhà (P12).
+  await assertHomeCredentials("facebook");
   await assertKillSwitchAllows(fields);
   const url = graphUrl(path);
   const form = new URLSearchParams({ ...fields, access_token: env.facebook.accessToken });

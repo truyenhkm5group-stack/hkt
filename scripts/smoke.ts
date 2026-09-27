@@ -219,6 +219,10 @@ const ROUTES = [
   "/integrations",
   "/settings/users",
   "/audit",
+  // Nền tảng đa tổ chức: bảng module đọc qua bộ phân giải năng lực; `/platform` mở CSDL của MỌI
+  // tổ chức để đo sức khoẻ — tuyến nặng nhất khi có nhiều tổ chức, nên phải nằm trong lá chắn.
+  "/settings/modules",
+  "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
 

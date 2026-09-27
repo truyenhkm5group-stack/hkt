@@ -18,6 +18,7 @@
  * Đọc số liệu lần chạy đầu rồi mới siết lại, đúng hơn là đoán trước rồi tin là đúng.
  */
 import { fetchJson, asArray, asRecord, bool, str } from "@/lib/integrations/http";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 import { env } from "@/lib/env";
 import { sepayDirection, sepayInstant, type SepayTransaction } from "@/lib/integrations/bank/sepay";
 
@@ -133,6 +134,8 @@ export function sepayApiDate(at: Date): string {
 }
 
 export async function fetchSepayTransactionPage(params: { from: Date; to: Date; page: number; perPage: number }): Promise<SepayApiPage> {
+  // Token SePay trong môi trường là của tổ chức nhà (P12): giao dịch ngân hàng của họ không bao giờ vào CSDL tổ chức khác.
+  await assertHomeCredentials("sepay");
   const url = new URL(`${env.sepay.apiBaseUrl}/transactions`);
   url.searchParams.set("transaction_date_min", sepayApiDate(params.from));
   url.searchParams.set("transaction_date_max", sepayApiDate(params.to));

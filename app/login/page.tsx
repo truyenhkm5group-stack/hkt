@@ -5,6 +5,7 @@ import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { getSession } from "@/lib/auth/session";
 import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
+import { listOrganizations } from "@/lib/platform/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   */
   if (session && !loginShouldStay(params.reason)) redirect(safeNextPath(params.next));
   const status = integrationStatus();
+  /*
+    Ô "Mã tổ chức" chỉ hiện khi nền tảng THẬT SỰ có hơn một tổ chức đang hoạt động. Với một tổ chức
+    (hôm nay) màn đăng nhập y hệt trước — không ai phải học thêm một ô không dùng tới. Chỉ đếm, không
+    liệt kê: in danh sách tổ chức ra trang công khai là tự dâng sổ khách hàng của nền tảng.
+  */
+  const showOrgField = (await listOrganizations()).filter((o) => o.status === "ACTIVE").length > 1;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
@@ -58,7 +65,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="relative text-xs text-sidebar-foreground/50">© {new Date().getFullYear()} VNXcommerce · Nội bộ</p>
       </div>
       <div className="flex items-center justify-center p-6">
-        <LoginForm next={params.next} reason={params.reason} />
+        <LoginForm next={params.next} reason={params.reason} showOrgField={showOrgField} />
       </div>
     </div>
   );

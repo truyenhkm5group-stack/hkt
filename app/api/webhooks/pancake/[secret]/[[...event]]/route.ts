@@ -8,6 +8,9 @@ import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook, webh
 import { secretEquals } from "@/lib/auth/secret-compare";
 import { PANCAKE_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
 import { readBodyCapped } from "@/lib/http/body-limit";
+import { bindOrganization } from "@/lib/platform/background";
+import { withOrganization } from "@/lib/platform/context";
+import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +19,15 @@ function secretOk(secret: string) {
   return secretEquals(secret, expected);
 }
 
+/**
+ * Webhook không có phiên: tổ chức phân giải TƯỜNG MINH theo `WEBHOOK_BINDINGS` rồi bọc TOÀN BỘ
+ * phần xử lý — kể cả việc sau phản hồi — trong `withOrganization` (audit ISO-07 · hợp đồng mục 8).
+ */
 export async function POST(request: NextRequest, context: { params: Promise<{ secret: string; event?: string[] }> }) {
+  return withOrganization(await resolveWebhookOrganization("PANCAKE"), () => handlePost(request, context));
+}
+
+async function handlePost(request: NextRequest, context: { params: Promise<{ secret: string; event?: string[] }> }) {
   const { secret, event = [] } = await context.params;
   if (!secretOk(secret)) return NextResponse.json({ ok: false, error: "Sai bí mật webhook" }, { status: 401 });
 
@@ -46,7 +57,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
     dedupeKey: webhookDedupeKey("PANCAKE", [kind, externalId, updatedAt]),
     occurredAt: updatedAt ? new Date(updatedAt) : null,
   });
-  after(async () => {
+  after(await bindOrganization(async () => {
     const outcome = await processPancakeWebhook(stored.id);
     /*
       CHỈ KHI CÓ GÌ ĐỔI, VÀ CHỈ ĐÁNH DẤU CŨ.
@@ -59,7 +70,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
       staleMemo();
       scheduleAlertEvaluation();
     }
-  });
+  }));
   return NextResponse.json({ ok: true, received: kind, id: stored.id, duplicate: stored.duplicate });
 }
 

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { getReturnRateByVariant } from "@/lib/queries/return-rate";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { orderValueLabel, parseOrderValue } from "@/lib/constants/order-value";
@@ -14,8 +15,9 @@ function csvCell(value: unknown) {
 /** Xuất CSV tỷ lệ giao thành công theo mã hàng (cùng bộ lọc với trang báo cáo) */
 export async function GET(request: NextRequest) {
   // Cùng quyền với trang Tỷ lệ giao thành công.
-  const user = await getCurrentUser();
-  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!(can(user, "reports:returns"))) return new Response("Không có quyền xuất dữ liệu này", { status: 403 });
   const sp: SearchParams = {};
   request.nextUrl.searchParams.forEach((value, key) => {

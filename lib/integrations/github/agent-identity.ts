@@ -1,4 +1,5 @@
 import { createPrivateKey, createSign, type KeyObject } from "node:crypto";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ DANH TÍNH GITHUB CỦA CODING AGENT — KHÔNG PHẢI CỦA CHỦ SHOP ═══════════
@@ -196,6 +197,8 @@ type CachedToken = { token: string; expiresAt: number; installationId: string };
 let cached: CachedToken | null = null;
 
 async function call(url: string, init: RequestInit & { auth: string }): Promise<Response> {
+  // Token GitHub là của NGƯỜI VẬN HÀNH NỀN TẢNG, chỉ hợp lệ trong ngữ cảnh tổ chức nhà (integration-inventory §2.2).
+  await assertHomeCredentials("github");
   const { auth, ...rest } = init;
   const f = fetchImpl ?? fetch;
   return f(url, {

@@ -1,13 +1,29 @@
 import { ALERT_CONFIG_KEY, DEFAULT_ALERT_CONFIG, type AlertConfig } from "@/lib/constants/alerts";
+import { currentOrganization } from "@/lib/platform/context";
 import { getSettingJson } from "@/lib/settings";
 
-function read(name: string) {
+function readProcessEnv(name: string) {
   const v = process.env[name];
   return typeof v === "string" ? v.trim() : "";
 }
 
-/** Cấu hình cảnh báo: settings → fallback env */
-export async function loadAlertConfig(): Promise<AlertConfig> {
+/**
+ * Cấu hình cảnh báo: settings → fallback env.
+ *
+ * ─── FALLBACK ENV CHỈ CHO TỔ CHỨC NHÀ (audit ISO-05 · target-architecture P12) ───
+ *
+ * `TELEGRAM_*` / `LARK_*` trong môi trường là nhóm chat CỦA VNX. Tổ chức khác chưa khai kênh (bảng
+ * `settings` trống) mà lùi về env thì mọi cảnh báo, bản tin sáng, bảng lương tự động của họ — kèm
+ * mã đơn, tên khách, số tiền — đi thẳng vào nhóm Lark của VNX: rò ra NGOÀI hệ thống, không thu hồi
+ * được. Nên tổ chức khác chỉ có đúng kênh đã khai trong CSDL của họ; trống là "chưa khai kênh".
+ * Không xác định được tổ chức ⇒ ném (`OrgContextError`), không đoán là nhà.
+ *
+ * `deps.readEnv` chỉ để kiểm thử đưa vào một "môi trường" giả mà không chạm biến môi trường của máy.
+ */
+export async function loadAlertConfig(deps: { readEnv?: (name: string) => string } = {}): Promise<AlertConfig> {
+  const org = await currentOrganization();
+  const envRead = deps.readEnv ?? readProcessEnv;
+  const read = (name: string) => (org.isHome ? envRead(name) : "");
   const cfg = await getSettingJson<AlertConfig>(ALERT_CONFIG_KEY, DEFAULT_ALERT_CONFIG);
   return {
     ...DEFAULT_ALERT_CONFIG,

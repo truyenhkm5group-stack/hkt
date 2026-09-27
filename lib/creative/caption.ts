@@ -8,6 +8,7 @@ import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, type Genes } from "@/lib/const
 import { OPENAI_RESPONSES_URL, outputText, usageOf, type ResponsesBody } from "@/lib/creative/vision";
 import { WRITER_LIMITS, clipWords, formatVnd, stripPrices, wrongPrices } from "@/lib/creative/writer";
 import { env } from "@/lib/env";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ CÂU CHỮ VIẾT THEO ẢNH ĐÃ SINH ═══════════
@@ -255,6 +256,8 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
 
   try {
     if (!input.image.bytes.length) return { ok: false, error: "Mẫu không có điểm ảnh để đọc." };
+    // Khoá OpenAI trong môi trường là của tổ chức nhà (P12) — chặn trước khi đọc khoá.
+    await assertHomeCredentials("openai");
     const apiKey = deps.apiKey ?? env.openaiRest.apiKey;
     if (!apiKey) return { ok: false, error: "Chưa có OPENAI_API_KEY trên máy chủ — không đọc được ảnh để viết câu chữ." };
 

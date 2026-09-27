@@ -4223,6 +4223,99 @@ export const settings = pgTable("settings", {
   updatedAt: updatedAt(),
 });
 
+// ═══ NỀN TẢNG — mặt phẳng điều khiển (docs/platform/shared-contracts.md mục 2) ═══
+//
+// Bốn bảng này CHỈ có nghĩa trong CSDL NHÀ (`DATABASE_URL`) và chỉ được đọc/ghi qua
+// `getPlatformDb()`. Vì mọi tổ chức dùng CÙNG một bộ migration, CSDL của tổ chức khác cũng có bốn
+// bảng này nhưng RỖNG và không ai đọc — `/platform/health` kiểm điều đó. Dữ liệu nghiệp vụ không
+// có cột tổ chức nào: mỗi tổ chức một CSDL, CSDL chính là ranh giới (target-architecture P1).
+
+/** Sổ tổ chức. `code` BẤT BIẾN — nó nằm trong JWT, khoá đệm và tên CSDL. */
+export const platformOrganizations = pgTable(
+  "platform_organizations",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    /** `ACTIVE` · `SUSPENDED` · `ARCHIVED` — chỉ `ACTIVE` đăng nhập / chạy job được. */
+    status: text("status").notNull().default("ACTIVE"),
+    /** ĐÚNG MỘT dòng `true`: tổ chức có CSDL là `DATABASE_URL` (tổ chức có từ trước nền tảng). */
+    isHome: boolean("is_home").notNull().default(false),
+    /** Dòng module THIẾU nghĩa là gì: `ENABLED` (tổ chức nhà — như trước nền tảng) · `DISABLED` (tổ chức mới). */
+    moduleDefault: text("module_default").notNull().default("DISABLED"),
+    /** Chỗ cho gói dịch vụ sau này. Phase 1 không có luật nào đọc cột này. */
+    plan: text("plan"),
+    templateKey: text("template_key"),
+    settings: jsonb("settings").notNull().default({}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_organizations_code_key").on(t.code),
+    uniqueIndex("platform_organizations_one_home").on(t.isHome).where(sql`${t.isHome}`),
+    check("platform_organizations_status_check", sql`${t.status} in ('ACTIVE','SUSPENDED','ARCHIVED')`),
+    check("platform_organizations_module_default_check", sql`${t.moduleDefault} in ('ENABLED','DISABLED')`),
+    check("platform_organizations_code_check", sql`${t.code} ~ '^[a-z][a-z0-9-]{1,30}$'`),
+  ],
+);
+
+/** Cấu hình module theo tổ chức. Khoá module khai ở `lib/constants/platform-modules.ts` và BẤT BIẾN. */
+export const platformOrganizationModules = pgTable(
+  "platform_organization_modules",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => platformOrganizations.id),
+    moduleKey: text("module_key").notNull(),
+    enabled: boolean("enabled").notNull(),
+    /** `{ "<module>.<feature>": boolean }` — ghi đè mặc định của feature. */
+    features: jsonb("features").$type<Record<string, boolean>>().notNull().default({}),
+    config: jsonb("config").notNull().default({}),
+    enabledAt: ts("enabled_at"),
+    disabledAt: ts("disabled_at"),
+    /** `"<mã tổ chức>:<id tài khoản>"` hoặc `"system:<nguồn>"`. */
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("platform_organization_modules_pk").on(t.organizationId, t.moduleKey)],
+);
+
+/** Cờ NỀN TẢNG theo tổ chức (khác cấu hình module — target-architecture P11). */
+export const platformFlagOverrides = pgTable(
+  "platform_flag_overrides",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => platformOrganizations.id),
+    flagKey: text("flag_key").notNull(),
+    enabled: boolean("enabled").notNull(),
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("platform_flag_overrides_pk").on(t.organizationId, t.flagKey)],
+);
+
+/** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
+export const platformAuditLog = pgTable(
+  "platform_audit_log",
+  {
+    id: id(),
+    at: ts("at").notNull().defaultNow(),
+    /** Ba cột người làm cùng `NULL` ⇒ MÁY làm (migration, script, kiểm thử) — khác "chưa biết ai". */
+    actorOrgCode: text("actor_org_code"),
+    actorUserId: text("actor_user_id"),
+    actorEmail: text("actor_email"),
+    targetOrgCode: text("target_org_code").notNull(),
+    action: text("action").notNull(),
+    subject: text("subject").notNull(),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    reason: text("reason"),
+    source: text("source").notNull(),
+  },
+  (t) => [index("platform_audit_log_target_at_idx").on(t.targetOrgCode, t.at)],
+);
+
 // ───────────────────────── Relations ─────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({ auditLogs: many(auditLogs) }));

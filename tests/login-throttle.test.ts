@@ -13,6 +13,10 @@ import {
 import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { anySecretMatches, secretEquals } from "@/lib/auth/secret-compare";
 
+// Mã tổ chức của mọi cặp trong tệp này — các khẳng định ở đây nói về MỘT tổ chức; khoá chéo tổ chức
+// (ISO-19) được kiểm ở tests/platform-rbac.test.ts.
+const TC = "vnx";
+
 /**
  * Chặn dò mật khẩu: khoá theo CẶP (email, IP) + trần theo IP; bộ nhớ có trần; đúng thì xoá CẶP.
  * Và hai hàng rào đi cùng màn đăng nhập: IP đọc đúng sau Caddy, đích chuyển hướng chỉ là đường nội bộ.
@@ -20,8 +24,8 @@ import { anySecretMatches, secretEquals } from "@/lib/auth/secret-compare";
 export async function testLoginThrottle() {
   resetLoginThrottle();
   const t0 = 1_000_000;
-  const nan = loginThrottleKeys("chu@shop.vn", "203.0.113.9"); // người thật
-  const ke = loginThrottleKeys("chu@shop.vn", "198.51.100.7"); // kẻ biết email, ở máy khác
+  const nan = loginThrottleKeys("chu@shop.vn", "203.0.113.9", TC); // người thật
+  const ke = loginThrottleKeys("chu@shop.vn", "198.51.100.7", TC); // kẻ biết email, ở máy khác
 
   assert.deepEqual(loginAllowed(nan, t0), { ok: true }, "chưa sai lần nào thì được thử");
   for (let i = 0; i < LOGIN_THROTTLE.maxFailures - 1; i++) recordLoginFailure(ke, t0 + i * 1000);
@@ -32,29 +36,29 @@ export async function testLoginThrottle() {
   assert.ok(!gate.ok && gate.retryAfterSec > 0 && gate.retryAfterSec <= LOGIN_THROTTLE.lockMs / 1000, "báo còn phải đợi bao lâu");
   // ĐÂY là lỗi cũ: khoá theo email trần ⇒ kẻ ở máy khác khoá được chủ shop.
   assert.deepEqual(loginAllowed(nan, t0 + 7000), { ok: true }, "kẻ dò ở IP khác KHÔNG được khoá người thật khỏi tài khoản của họ");
-  assert.equal(loginAllowed(loginThrottleKeys("khac@shop.vn", "198.51.100.7"), t0 + 7000).ok, true, "dưới trần IP thì email khác từ cùng máy vẫn thử được");
+  assert.equal(loginAllowed(loginThrottleKeys("khac@shop.vn", "198.51.100.7", TC), t0 + 7000).ok, true, "dưới trần IP thì email khác từ cùng máy vẫn thử được");
   assert.equal(loginAllowed(ke, t0 + 6000 + LOGIN_THROTTLE.lockMs + 1).ok, true, "hết thời gian khoá thì mở lại");
 
   // Trần theo IP: quét nhiều tài khoản từ một máy (mỗi email một lần sai) vẫn bị chặn.
   resetLoginThrottle();
   const ipQuet = "192.0.2.50";
   for (let i = 0; i < LOGIN_THROTTLE.maxFailuresPerIp; i++) {
-    const k = loginThrottleKeys(`nv${i}@shop.vn`, ipQuet);
+    const k = loginThrottleKeys(`nv${i}@shop.vn`, ipQuet, TC);
     assert.equal(loginAllowed(k, t0 + i).ok, true, `lượt quét ${i} còn dưới trần IP`);
     recordLoginFailure(k, t0 + i);
   }
-  assert.equal(loginAllowed(loginThrottleKeys("moi@shop.vn", ipQuet), t0 + 100).ok, false, "chạm trần IP ⇒ chặn mọi email từ IP đó");
-  assert.equal(loginAllowed(loginThrottleKeys("moi@shop.vn", "192.0.2.51"), t0 + 100).ok, true, "IP khác không vạ lây");
+  assert.equal(loginAllowed(loginThrottleKeys("moi@shop.vn", ipQuet, TC), t0 + 100).ok, false, "chạm trần IP ⇒ chặn mọi email từ IP đó");
+  assert.equal(loginAllowed(loginThrottleKeys("moi@shop.vn", "192.0.2.51", TC), t0 + 100).ok, true, "IP khác không vạ lây");
   assert.ok(LOGIN_THROTTLE.maxFailuresPerIp > LOGIN_THROTTLE.maxFailures, "trần IP phải rộng hơn trần cặp — văn phòng dùng chung một IP");
 
   // Đăng nhập đúng chỉ xoá CẶP, không xoá IP: không "đặt lại" được bộ đếm IP bằng một tài khoản thật.
   resetLoginThrottle();
   const ipChung = "192.0.2.60";
-  for (let i = 0; i < LOGIN_THROTTLE.maxFailuresPerIp - 1; i++) recordLoginFailure(loginThrottleKeys(`dò${i}@shop.vn`, ipChung), t0 + i);
-  clearLoginFailures(loginThrottleKeys("that@shop.vn", ipChung));
-  recordLoginFailure(loginThrottleKeys("dò-cuoi@shop.vn", ipChung), t0 + 200);
-  assert.equal(loginAllowed(loginThrottleKeys("bat-ky@shop.vn", ipChung), t0 + 201).ok, false, "đăng nhập đúng xen giữa KHÔNG được xoá bộ đếm IP");
-  const cap = loginThrottleKeys("a@shop.vn", "192.0.2.61");
+  for (let i = 0; i < LOGIN_THROTTLE.maxFailuresPerIp - 1; i++) recordLoginFailure(loginThrottleKeys(`dò${i}@shop.vn`, ipChung, TC), t0 + i);
+  clearLoginFailures(loginThrottleKeys("that@shop.vn", ipChung, TC));
+  recordLoginFailure(loginThrottleKeys("dò-cuoi@shop.vn", ipChung, TC), t0 + 200);
+  assert.equal(loginAllowed(loginThrottleKeys("bat-ky@shop.vn", ipChung, TC), t0 + 201).ok, false, "đăng nhập đúng xen giữa KHÔNG được xoá bộ đếm IP");
+  const cap = loginThrottleKeys("a@shop.vn", "192.0.2.61", TC);
   recordLoginFailure(cap, t0);
   clearLoginFailures(cap);
   for (let i = 0; i < LOGIN_THROTTLE.maxFailures - 1; i++) recordLoginFailure(cap, t0 + 1 + i);

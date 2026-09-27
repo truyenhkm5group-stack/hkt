@@ -3,6 +3,7 @@ import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viet
 import { asArray, asRecord, fetchJson, int, IntegrationError, num, sleep, str, vtpDate } from "@/lib/integrations/http";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { assertHomeCredentials, peekIsNonHome } from "@/lib/platform/credentials";
 
 const TOKEN_KEY = "viettelpost";
 const THROTTLE_MS = 200;
@@ -78,11 +79,19 @@ export class ViettelPostClient {
 
   constructor(private readonly baseUrl = env.viettelPost.baseUrl) {}
 
+  /**
+   * Ngữ cảnh TƯỜNG MINH của tổ chức khác nhà (job của họ) ⇒ `false`: credential môi trường là của
+   * tổ chức nhà (P12), job tự bỏ qua sớm. Request mang phiên tổ chức khác không có ngữ cảnh tường
+   * minh — lối gọi mạng (`rawCall`, `getToken`) vẫn chặn bằng `assertHomeCredentials`.
+   */
   get configured() {
+    if (peekIsNonHome()) return false;
     return Boolean(env.viettelPost.apiKey || (env.viettelPost.username && env.viettelPost.password));
   }
 
   private async rawCall(path: string, options: { method?: string; body?: unknown; token?: string | null; query?: Record<string, unknown> } = {}): Promise<VtpEnvelope> {
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
+    await assertHomeCredentials("viettelpost");
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();
@@ -154,6 +163,12 @@ export class ViettelPostClient {
   }
 
   async getToken(forceRefresh = false): Promise<string> {
+    /*
+      CHẶN TRƯỚC KHI ĐỤNG TOKEN. Token trong bộ nhớ của client dùng chung là của tổ chức nhà, và
+      nhánh dưới GHI token vừa đổi vào `integration_tokens` của CSDL HIỆN HÀNH — thiếu dòng này thì
+      credential của VNX nằm trong CSDL (và bản sao lưu) của tổ chức khác (audit ISO-04).
+    */
+    await assertHomeCredentials("viettelpost");
     if (!forceRefresh && this.token && (!this.tokenExpiresAt || this.tokenExpiresAt.getTime() - Date.now() > 3600_000)) return this.token;
     const db = await getDb().catch(() => null);
     if (!forceRefresh && db) {

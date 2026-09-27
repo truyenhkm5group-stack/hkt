@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { parseByteRange, TOPIC_FILE_CHUNK_BYTES } from "@/lib/constants/production-files";
 import { getTopicFileMeta, readTopicFileRange } from "@/lib/queries/production-files";
 
@@ -21,8 +22,9 @@ export const dynamic = "force-dynamic";
 const OPEN_RANGE_MAX = 2 * TOPIC_FILE_CHUNK_BYTES;
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return new NextResponse("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "planning:view")) return new NextResponse("Không có quyền xem sản xuất", { status: 403 });
   const { id } = await ctx.params;
   const meta = await getTopicFileMeta(id);

@@ -7,6 +7,7 @@ import { xetTranNgay } from "@/lib/constants/ai-budget";
 import { GENE_KEYS, GENE_VOCAB, parsePartialGenes, type Genes } from "@/lib/constants/creative-loop";
 import { readCreativeImage } from "@/lib/creative/images";
 import { env } from "@/lib/env";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /**
  * ═══════════ ĐỌC ẢNH NGUỒN THÀNH GEN + MÔ TẢ CHỮ ═══════════
@@ -135,6 +136,8 @@ export async function describeSource(db: Db, sourceId: string, deps: DescribeSou
     const img = await readCreativeImage(db, src.imageId);
     if (!img) return { ok: false, error: "Ảnh của nguồn đã bị xoá điểm ảnh." };
 
+    // Khoá OpenAI trong môi trường là của tổ chức nhà (P12) — chặn trước khi đọc khoá.
+    await assertHomeCredentials("openai");
     const apiKey = deps.apiKey ?? env.openaiRest.apiKey;
     if (!apiKey) return { ok: false, error: "Chưa có OPENAI_API_KEY trên máy chủ — không đọc được ảnh." };
 

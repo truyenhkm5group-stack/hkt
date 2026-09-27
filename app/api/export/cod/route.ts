@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { SETTLEMENT_LABEL, type SettlementStatus } from "@/lib/constants/cod";
 import { listCodSettlement } from "@/lib/queries/cod-settlement";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -17,8 +18,9 @@ function csvCell(value: unknown) {
  */
 export async function GET(request: NextRequest) {
   // Bảng đối soát COD là số tiền thật — cùng quyền với trang Đối soát COD.
-  const user = await getCurrentUser();
-  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!(can(user, "cod:view"))) return new Response("Không có quyền xuất dữ liệu này", { status: 403 });
   const raw = Object.fromEntries(request.nextUrl.searchParams.entries()) as SearchParams;
   const params = parseListParams(raw, { defaultSort: "deliveredAt", sortable: [], defaultPeriod: "all" });

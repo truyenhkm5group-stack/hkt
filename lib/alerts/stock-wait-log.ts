@@ -2,6 +2,7 @@ import { and, isNull, notInArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { StockShortageSnapshot } from "@/lib/constants/stock-shortage";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { organizationStateKey } from "@/lib/platform/process-state";
 
 /**
  * ═══════════ GHI SỔ ĐƠN CHỜ HÀNG ═══════════
@@ -20,7 +21,9 @@ import { getStockShortage } from "@/lib/queries/stock-shortage";
 
 const MIN_INTERVAL_MS = 5 * 60_000;
 const CHUNK = 500;
-const holder = globalThis as unknown as { __erpStockWaitLogAt?: number };
+/** Nhịp THEO TỔ CHỨC (ISO-18): sổ chờ hàng của tổ chức này không bị bỏ lượt vì tổ chức kia vừa ghi. */
+const holder = globalThis as unknown as { __erpStockWaitLogAtByOrg?: Map<string, number> };
+const waitLogAtByOrg = (holder.__erpStockWaitLogAtByOrg ??= new Map<string, number>());
 
 export type StockWaitLogResult = { waiting: number; opened: number; closed: number; skipped?: string; error?: string };
 
@@ -72,10 +75,12 @@ export async function writeStockWaitLog(snapshot: StockShortageSnapshot, now: Da
 /** Lượt tự động của job `alerts`. Trần nhịp 5 phút: job còn chạy sau mỗi đợt webhook. */
 export async function runStockWaitLog(opts: { now?: Date } = {}): Promise<StockWaitLogResult> {
   const now = opts.now ?? new Date();
-  if (holder.__erpStockWaitLogAt && now.getTime() - holder.__erpStockWaitLogAt < MIN_INTERVAL_MS) {
+  const orgKey = await organizationStateKey();
+  const lastAt = waitLogAtByOrg.get(orgKey);
+  if (lastAt && now.getTime() - lastAt < MIN_INTERVAL_MS) {
     return { waiting: 0, opened: 0, closed: 0, skipped: "vừa ghi trong 5 phút qua" };
   }
-  holder.__erpStockWaitLogAt = now.getTime();
+  waitLogAtByOrg.set(orgKey, now.getTime());
   // Dùng đệm 60 giây của bảng thiếu hàng (chung với trang và hàng đợi fulfillment) — độ phân giải
   // của sổ là một lượt job, lệch thêm tối đa một phút không đổi được con số theo ngày.
   const snapshot = await getStockShortage();

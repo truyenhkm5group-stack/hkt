@@ -8,6 +8,7 @@ import { readCreativeImage, sha256Hex, sniffImageType } from "@/lib/creative/ima
 import { downloadImage, type DownloadDeps } from "@/lib/creative/import";
 import { OPENAI_RESPONSES_URL, outputText, usageOf, type ResponsesBody } from "@/lib/creative/vision";
 import { env } from "@/lib/env";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 import { pendingProductDna, type ProductDnaTarget } from "@/lib/queries/creative-design";
 
 /**
@@ -120,6 +121,8 @@ export async function readProductDna(db: Db, target: ProductDnaTarget, deps: Pro
   const now = deps.now ?? new Date();
   const model = deps.model ?? MODEL_BY_TIER.openai.routine;
   // Khoá + phanh tiền TRƯỚC mọi thứ chạm mạng (kể cả tải ảnh Pancake).
+  // Khoá OpenAI trong môi trường là của tổ chức nhà (P12) — chặn trước khi đọc khoá.
+  await assertHomeCredentials("openai");
   const apiKey = deps.apiKey ?? env.openaiRest.apiKey;
   if (!apiKey) return { ok: false, error: "Chưa có OPENAI_API_KEY trên máy chủ — chưa đọc được DNA.", skipped: true };
   try {

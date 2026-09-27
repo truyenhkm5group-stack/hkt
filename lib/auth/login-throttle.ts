@@ -46,9 +46,17 @@ type Entry = { failures: number[]; lockedUntil: number };
 
 const store = new Map<string, Entry>();
 
-/** Hai khoá của một lượt đăng nhập. Nơi gọi KHÔNG tự dựng khoá — một chỗ khai, một chỗ đếm. */
-export function loginThrottleKeys(email: string, ip: string): string[] {
-  return [`pair:${email}|${ip}`, `ip:${ip}`];
+/**
+ * Hai khoá của một lượt đăng nhập. Nơi gọi KHÔNG tự dựng khoá — một chỗ khai, một chỗ đếm.
+ *
+ * CẶP mang thêm MÃ TỔ CHỨC (tenant-readiness-audit ISO-19): cùng một email là HAI tài khoản ở hai tổ
+ * chức, nên dò mật khẩu ở tổ chức A không được khoá người thật ở tổ chức B — một văn phòng dùng chung
+ * NAT dùng hai tổ chức là đủ để khoá chéo. Khoá `ip:` giữ TOÀN CỤC: nó chống quét từ một máy, và máy
+ * ấy dò tổ chức nào cũng là cùng một máy. Mã tổ chức là thứ đã gõ trên form (bỏ trống ⇒ mã nhà), kể
+ * cả mã không tồn tại — dò mã tổ chức cũng bị đếm.
+ */
+export function loginThrottleKeys(email: string, ip: string, orgCode: string): string[] {
+  return [`pair:${orgCode}:${email}|${ip}`, `ip:${ip}`];
 }
 
 function limitOf(key: string): number {

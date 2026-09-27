@@ -17,8 +17,13 @@ type Item = { id: string; kind: string; severity: string; title: string; body: s
 /** Tin trong HỘP THƯ CÁ NHÂN (phiếu lương, lời nhắc duyệt lương) — của riêng người đang đăng nhập. */
 type Personal = { id: string; kind: string; title: string; body: string; href: string; createdAt: string; read: boolean };
 
-/** Chuông thông báo: đơn chờ xử lý, giao thất bại chờ phát lại, vận đơn treo… Tự làm mới mỗi 30 giây và khi quay lại tab. */
-export function NotificationBell() {
+/**
+ * Chuông thông báo: đơn chờ xử lý, giao thất bại chờ phát lại, vận đơn treo… Tự làm mới mỗi 30 giây và khi quay lại tab.
+ *
+ * `sharedQueue = false` (tổ chức tắt module «Cần xử lý», hoặc người không có `alerts:view`) ⇒ KHÔNG hỏi
+ * `/api/notifications` — mỗi lượt sẽ chỉ nhận 403 — và không trỏ tới `/alerts`. Hộp thư cá nhân vẫn chạy.
+ */
+export function NotificationBell({ sharedQueue = true }: { sharedQueue?: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [unread, setUnread] = useState(0);
   const [personal, setPersonal] = useState<Personal[]>([]);
@@ -31,15 +36,20 @@ export function NotificationBell() {
       HAI NGUỒN, HAI CỔNG: hàng đợi chung của shop đòi quyền xem cảnh báo (nhân viên Kho/CSKH có thể
       không có), còn hộp thư cá nhân chỉ đòi đã đăng nhập. Một nguồn hỏng không được làm mất nguồn kia.
     */
-    try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
-      if (res.ok) {
-        const data = (await res.json()) as { unread: number; items: Item[] };
-        setItems(data.items);
-        setUnread(data.unread);
+    if (sharedQueue) {
+      try {
+        const res = await fetch("/api/notifications", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { unread: number; items: Item[] };
+          setItems(data.items);
+          setUnread(data.unread);
+        }
+      } catch {
+        // bỏ qua
       }
-    } catch {
-      // bỏ qua
+    } else {
+      setItems([]);
+      setUnread(0);
     }
     try {
       const data = await listMyInbox();
@@ -48,7 +58,7 @@ export function NotificationBell() {
     } catch {
       // bỏ qua
     }
-  }, []);
+  }, [sharedQueue]);
 
   useEffect(() => {
     void load();
@@ -67,7 +77,7 @@ export function NotificationBell() {
     startTransition(async () => {
       // Hộp thư cá nhân trước: người không có quyền cảnh báo vẫn phải đánh dấu được tin của mình.
       if (personalUnread) await markMyInboxRead("all");
-      if (unread) await markNotificationsRead([]).catch(() => undefined);
+      if (unread && sharedQueue) await markNotificationsRead([]).catch(() => undefined);
       await load();
     });
   const openPersonal = (item: Personal) =>
@@ -94,7 +104,7 @@ export function NotificationBell() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[min(380px,calc(100vw-1rem))] p-0">
         <DropdownMenuLabel className="flex items-center justify-between px-3 py-2">
-          <span>Cần xử lý {items.length ? `(${items.length})` : ""}</span>
+          <span>{sharedQueue ? `Cần xử lý ${items.length ? `(${items.length})` : ""}` : "Thông báo"}</span>
           {badge ? (
             <button type="button" onClick={markAll} className="flex items-center gap-1 text-xs font-normal text-muted-foreground hover:text-foreground">
               <CheckCheck className="size-3.5" /> Đã đọc hết
@@ -119,7 +129,7 @@ export function NotificationBell() {
             </>
           ) : null}
           {items.length === 0 ? (
-            personal.length ? null : <p className="px-3 py-6 text-center text-sm text-muted-foreground">Không có việc cần xử lý 🎉</p>
+            personal.length ? null : <p className="px-3 py-6 text-center text-sm text-muted-foreground">{sharedQueue ? "Không có việc cần xử lý 🎉" : "Chưa có tin nào gửi riêng bạn"}</p>
           ) : (
             items.map((item) => (
               <DropdownMenuItem key={item.id} onSelect={() => open(item)} className={cn("flex cursor-pointer flex-col items-start gap-0.5 rounded-none border-b px-3 py-2 last:border-b-0", !item.read && "bg-primary/5")}>
@@ -133,10 +143,14 @@ export function NotificationBell() {
             ))
           )}
         </div>
-        <DropdownMenuSeparator className="my-0" />
-        <DropdownMenuItem asChild className="justify-center rounded-none py-2 text-sm">
-          <Link href="/alerts">Xem tất cả & cấu hình cảnh báo</Link>
-        </DropdownMenuItem>
+        {sharedQueue ? (
+          <>
+            <DropdownMenuSeparator className="my-0" />
+            <DropdownMenuItem asChild className="justify-center rounded-none py-2 text-sm">
+              <Link href="/alerts">Xem tất cả & cấu hình cảnh báo</Link>
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

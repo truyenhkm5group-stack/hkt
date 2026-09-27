@@ -1,11 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import {
+  ERP_HEADER_PREFIX,
+  ERP_PATH_HEADER,
   SESSION_COOKIE,
-  SESSION_LOGIN_CLAIM,
   claimsFrom,
   cookieMaxAgeSec,
   decideRenewal,
+  renewalClaims,
   sessionCookieSecure,
 } from "@/lib/constants/session";
 
@@ -63,9 +65,28 @@ const COOKIE = SESSION_COOKIE;
  * và mọi API vẫn từ chối nó ngay lập tức. Trần tuyệt đối trong `lib/constants/session.ts` là thứ
  * chặn cookie ấy sống mãi.
  */
+/**
+ * ═══════════ HEADER `x-erp-*`: CHỈ MÁY CHỦ ĐẶT ═══════════
+ *
+ * `resolveCurrentUser()` đọc `x-erp-path` để từ chối đường dẫn thuộc module đang tắt
+ * (docs/platform/target-architecture.md P9). Một header mà trình duyệt tự gửi được thì không phải
+ * chứng cứ của máy chủ: gửi `x-erp-path: /` kèm lượt gọi `/production` là đi vòng qua cổng module.
+ * Nên XOÁ mọi `x-erp-*` client gửi lên TRƯỚC, rồi mới đặt giá trị của chính middleware — ở MỌI
+ * request đi qua đây, kể cả đường công khai (một tuyến công khai hôm nay có thể gọi hàm đọc header
+ * này ngày mai).
+ */
+function serverHeaders(request: NextRequest, pathname: string): Headers {
+  const headers = new Headers(request.headers);
+  const clientSent = [...headers.keys()].filter((name) => name.toLowerCase().startsWith(ERP_HEADER_PREFIX));
+  for (const name of clientSent) headers.delete(name);
+  headers.set(ERP_PATH_HEADER, pathname);
+  return headers;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next();
+  const next = () => NextResponse.next({ request: { headers: serverHeaders(request, pathname) } });
+  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 
   const token = request.cookies.get(COOKIE)?.value;
   /*
@@ -88,20 +109,20 @@ export async function middleware(request: NextRequest) {
   }
 
   if (payload) {
-    const res = NextResponse.next();
+    const res = next();
     if (request.method === "GET" || request.method === "HEAD") {
       const nowSec = Math.floor(Date.now() / 1000);
       const quyet = decideRenewal(claimsFrom(payload), nowSec);
       if (quyet.renew) {
-        const moi = await new SignJWT({
-          // Giữ NGUYÊN danh tính của token cũ. Không đọc lại từ đâu cả: ba trường này chỉ để hiển
-          // thị, còn vai trò và quyền THẬT được `getCurrentUser()` nạp lại từ CSDL ở mỗi lần dựng.
-          email: payload.email,
-          name: payload.name,
-          role: payload.role,
-          // Mốc đăng nhập gốc đi theo token, nếu không thì mỗi lần gia hạn là một lần dời trần sống.
-          [SESSION_LOGIN_CLAIM]: quyet.loginAtSec,
-        })
+        /*
+          Giữ NGUYÊN danh tính của token cũ — MỌI claim, kể cả `org` (mã tổ chức). Không đọc lại từ
+          đâu cả: email/tên/vai trò chỉ để hiển thị, còn vai trò và quyền THẬT được
+          `getCurrentUser()` nạp lại từ CSDL ở mỗi lần dựng. Quên `org` ở đây là đá người của tổ
+          chức khác về tổ chức nhà ở lần gia hạn đầu tiên (ISO-09) — nên phép dựng claim là một hàm
+          thuần có bài kiểm (`renewalClaims`), không phải một khối liệt kê tay.
+          Mốc đăng nhập gốc đi theo token, nếu không thì mỗi lần gia hạn là một lần dời trần sống.
+        */
+        const moi = await new SignJWT(renewalClaims(payload, quyet.loginAtSec))
           .setProtectedHeader({ alg: "HS256" })
           .setSubject(String(payload.sub ?? ""))
           .setIssuedAt(nowSec)

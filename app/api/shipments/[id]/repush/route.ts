@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +12,9 @@ export const dynamic = "force-dynamic";
 export async function POST(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   // Đây là hành động GHI ra ngoài: gọi sang Viettel Post rồi ghi nhật ký dưới tên người bấm.
   // "Đã đăng nhập" là chưa đủ — phải đúng quyền quản lý vận đơn.
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "shipments:manage")) return NextResponse.json({ ok: false, error: "Không có quyền quản lý vận đơn" }, { status: 403 });
   const { id } = await context.params;
   const db = await getDb();

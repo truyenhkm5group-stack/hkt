@@ -2,11 +2,20 @@ import { sql as sqlRaw } from "drizzle-orm";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
+import { currentOrganization } from "@/lib/platform/context";
 import * as schema from "./schema";
 
 export type Db = NodePgDatabase<typeof schema>;
 
-type Holder = { db?: Db; kind?: "pg" | "pglite"; pool?: Pool; pglite?: unknown };
+type Holder = {
+  db?: Db;
+  kind?: "pg" | "pglite";
+  pool?: Pool;
+  pglite?: unknown;
+  /** CSDL của các tổ chức KHÔNG phải nhà — mỗi mã tổ chức một handle (docs/platform/shared-contracts.md mục 4). */
+  orgs?: Map<string, OrgHandle>;
+};
+type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown };
 const holder = globalThis as unknown as { __erpDb?: Holder };
 if (!holder.__erpDb) holder.__erpDb = {};
 
@@ -35,10 +44,9 @@ export function pgliteDataDir() {
   return path === "memory" || path === "" ? undefined : path;
 }
 
-async function createPglite(): Promise<Db> {
+async function createPglite(dir: string | undefined = pgliteDataDir(), keep: (client: unknown) => void = (c) => (holder.__erpDb!.pglite = c)): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
   const { drizzle } = await import("drizzle-orm/pglite");
-  const dir = pgliteDataDir();
   if (dir) {
     const fs = await import("node:fs");
     const path = await import("node:path");
@@ -80,11 +88,11 @@ async function createPglite(): Promise<Db> {
   // đương. (Chỉ dùng cho máy cá nhân / kiểm thử; production luôn là PostgreSQL thật.)
   if (readOnlyMode()) await client.exec("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
   instrumentQueries(client as unknown as QueryClient);
-  holder.__erpDb!.pglite = client;
+  keep(client);
   return drizzle(client, { schema }) as unknown as Db;
 }
 
-function createPg(): Db {
+function createPg(url: string = databaseUrl(), maxOverride?: number, keep: (pool: Pool) => void = (p) => (holder.__erpDb!.pool = p)): Db {
   /**
    * BỂ KẾT NỐI PHẢI VỪA VỚI SỐ NHÂN CPU, KHÔNG PHẢI VỪA VỚI SỐ TRUY VẤN.
    *
@@ -98,7 +106,7 @@ function createPg(): Db {
    *
    * Cho phép chỉnh bằng `PGPOOL_MAX` để không phải deploy lại khi đổi cấu hình máy.
    */
-  const max = Math.max(2, Number(process.env.PGPOOL_MAX) || 5);
+  const max = maxOverride ?? Math.max(2, Number(process.env.PGPOOL_MAX) || 5);
   /*
     ═══ BỂ CẠN PHẢI BÁO LỖI, KHÔNG ĐƯỢC CHỜ VÔ HẠN ═══
 
@@ -125,13 +133,13 @@ function createPg(): Db {
     dụng không bao giờ chạy ở chế độ này.
   */
   const pool = new Pool({
-    connectionString: databaseUrl(),
+    connectionString: url,
     max,
     connectionTimeoutMillis: 15_000,
     ...(readOnlyMode() ? { options: "-c default_transaction_read_only=on" } : {}),
   });
   instrumentQueries(pool as unknown as QueryClient);
-  holder.__erpDb!.pool = pool;
+  keep(pool);
   return drizzlePg(pool, { schema });
 }
 
@@ -178,8 +186,95 @@ function isProcessAlive(pid: number) {
 
 let pending: Promise<Db> | null = null;
 
-/** Lấy kết nối DB (lazy). Dùng `await getDb()` trong server code. */
+/**
+ * ═══════════ CỬA DUY NHẤT VÀO CSDL — VÀ NÓ CHỌN ĐÚNG CSDL CỦA TỔ CHỨC ═══════════
+ *
+ * Chữ ký KHÔNG đổi: 388 tệp đang gọi `await getDb()` và không tệp nào phải sửa. Tổ chức lấy từ
+ * `currentOrganization()` (lib/platform/context.ts) — ngữ cảnh tường minh của job/webhook/script,
+ * hoặc claim `org` trong JWT phiên đã xác minh. Không có cả hai ⇒ tổ chức nhà, tức ĐÚNG handle
+ * singleton trước nền tảng: cùng bể, cùng kết nối, cùng hành vi.
+ *
+ * Vì mỗi tổ chức một CSDL, một câu truy vấn viết sai (quên lọc) vẫn không đọc được dòng của tổ
+ * chức khác — không có dòng nào của họ trong CSDL này. Đó là lý do cô lập nằm Ở ĐÂY chứ không nằm
+ * trong 1.879 đoạn SQL (docs/platform/target-architecture.md mục 2).
+ */
 export async function getDb(): Promise<Db> {
+  const org = await currentOrganization();
+  return org.isHome ? getHomeDb() : getOrgDb(org.code);
+}
+
+/**
+ * CSDL NHÀ — nơi có mặt phẳng điều khiển (`platform_*`). Luôn là `DATABASE_URL`, bất kể ngữ cảnh.
+ * Chỉ `lib/platform/*` được gọi hàm này; mã nghiệp vụ gọi `getDb()`.
+ */
+export async function getPlatformDb(): Promise<Db> {
+  return getHomeDb();
+}
+
+/** CSDL của một tổ chức chỉ định TƯỜNG MINH — chỉ dùng trong `lib/platform/*` (cấp tổ chức, health). */
+export async function getDbFor(org: { code: string; isHome: boolean }): Promise<Db> {
+  return org.isHome ? getHomeDb() : getOrgDb(org.code);
+}
+
+/**
+ * Chuỗi kết nối của một tổ chức. KHÔNG lưu trong CSDL (chuỗi kết nối mang mật khẩu):
+ *  · tổ chức nhà ⇒ `DATABASE_URL`;
+ *  · ghi đè bằng `ORG_DATABASE_URL__<MÃ_IN_HOA>` (CSDL ở máy khác);
+ *  · còn lại DẪN XUẤT: Postgres cùng máy chủ, tên CSDL `<tên>_org_<mã>`; PGlite thư mục `<thư mục>-org-<mã>`.
+ */
+export function organizationDatabaseUrl(org: { code: string; isHome: boolean }): string {
+  if (org.isHome) return databaseUrl();
+  const override = (process.env[`ORG_DATABASE_URL__${org.code.toUpperCase().replace(/-/g, "_")}`] || "").trim();
+  if (override) return override;
+  if (isPglite()) {
+    const dir = pgliteDataDir();
+    return dir ? `pglite://${dir}-org-${org.code}` : "pglite:memory";
+  }
+  const url = new URL(databaseUrl());
+  url.pathname = `/${organizationDatabaseName(org.code)}`;
+  return url.toString();
+}
+
+/** Tên CSDL Postgres dẫn xuất cho tổ chức không phải nhà (dùng khi cấp tổ chức). */
+export function organizationDatabaseName(code: string): string {
+  const base = decodeURIComponent(new URL(databaseUrl()).pathname.replace(/^\//, "")) || "postgres";
+  return `${base}_org_${code.replace(/-/g, "_")}`;
+}
+
+async function getOrgDb(code: string): Promise<Db> {
+  const orgs = (holder.__erpDb!.orgs ??= new Map());
+  let h = orgs.get(code);
+  if (h?.db) return h.db;
+  if (!h) {
+    h = {};
+    orgs.set(code, h);
+  }
+  const handle = h;
+  if (!handle.pending) {
+    handle.pending = (async () => {
+      const url = organizationDatabaseUrl({ code, isHome: false });
+      let db: Db;
+      if (url.startsWith("pglite:")) {
+        const path = url.replace(/^pglite:\/\//, "").replace(/^pglite:/, "");
+        db = await createPglite(path === "memory" || path === "" ? undefined : path, (c) => (handle.pglite = c));
+      } else {
+        db = createPg(url, Math.max(1, Number(process.env.PGPOOL_MAX_ORG) || 2), (p) => (handle.pool = p));
+      }
+      // CSDL tổ chức tự áp bộ migration khi mở lần đầu trong tiến trình (idempotent, có khoá).
+      const { migrateOrganizationDb } = await import("./migrate");
+      await migrateOrganizationDb(db, { pool: handle.pool });
+      handle.db = db;
+      return db;
+    })().catch((error) => {
+      handle.pending = undefined;
+      throw error;
+    });
+  }
+  return handle.pending;
+}
+
+/** Handle singleton của CSDL nhà — ĐÚNG hàm `getDb()` trước nền tảng. */
+async function getHomeDb(): Promise<Db> {
   if (holder.__erpDb!.db) return holder.__erpDb!.db;
   if (!pending) {
     pending = (async () => {

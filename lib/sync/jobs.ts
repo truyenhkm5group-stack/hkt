@@ -37,6 +37,7 @@ import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integra
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
+import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
@@ -50,7 +51,17 @@ import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 
-export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
+export type JobOptions = {
+  trigger: SyncTrigger;
+  actor: string;
+  params?: Record<string, string | undefined>;
+  /**
+   * Mã tổ chức mà job chạy cho. CHỈ tuyến máy-gọi-máy đã xác thực `CRON_SECRET` được đặt (hợp đồng
+   * mục 3); không đặt ⇒ tổ chức của ngữ cảnh hiện hành (script/cron không phiên ⇒ nhà; người bấm ⇒
+   * tổ chức trong phiên của họ) — không bao giờ "nhà" khi người bấm thuộc tổ chức khác.
+   */
+  org?: string;
+};
 
 export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
   /*
@@ -606,9 +617,81 @@ function num(value: string | undefined) {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * ═══════ JOB CẦN CREDENTIAL MÔI TRƯỜNG — TỔ CHỨC KHÁC NHÀ BỎ QUA, NÓI RÕ VÌ SAO ═══════
+ *
+ * Credential trong biến môi trường là của tổ chức nhà (P12). Chạy các job dưới đây cho tổ chức khác
+ * thì hoặc kéo dữ liệu của VNX vào CSDL của họ, hoặc hỏng mỗi 3 phút rồi mở sự cố rác. Nên bỏ qua
+ * TRƯỚC khi chạy: không ghi `sync_runs`, không ném (một job không được làm sập job khác), trả về
+ * trạng thái `SKIPPED` kèm lý do. Lối gọi mạng vẫn chặn lần hai bằng `assertHomeCredentials`.
+ *
+ * Giá trị = connector mà job cần. Bài kiểm `tests/platform-process-isolation.test.ts` đòi mọi job có
+ * `source` là một nhà cung cấp ngoài (PANCAKE · VIETTELPOST · FACEBOOK · SEPAY · GITHUB) có mặt ở
+ * đây, trừ các job khai trong `HOME_CREDENTIAL_EXEMPT` (chạy được chỉ trên dữ liệu có sẵn).
+ */
+export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
+  "pancake-orders": "pancake",
+  "pancake-backfill": "pancake",
+  "pancake-reconcile": "pancake",
+  "pancake-products": "pancake",
+  "pancake-warehouses": "pancake",
+  "pancake-customers": "pancake",
+  "pancake-inventory": "pancake",
+  "pancake-returns": "pancake",
+  "pancake-all": "pancake",
+  "landing-push": "pancake",
+  "cs-chat": "pancake-pages",
+  "failed-delivery": "pancake-pages",
+  "phone-verify": "pancake-pages",
+  "outreach-build": "pancake-pages",
+  "fanpage-attribution": "pancake-pages",
+  "vtp-tracking": "viettelpost",
+  "vtp-import": "viettelpost",
+  "facebook-ads": "facebook",
+  "facebook-ad-index": "facebook",
+  "facebook-adset-index": "facebook",
+  "ads-billing": "facebook",
+  "sepay-reconcile": "sepay",
+  "github-deployments": "github",
+  "github-pr-sync": "github",
+  "agent-run-reconcile": "github",
+  "agent-reaper": "github",
+  "task-advance-watch": "github",
+  "tech-incident-watch": "github",
+  "ai-incident-watch": "ai",
+  "creative-loop": "openai",
+  "marketing-digest": "lark",
+  "morning-brief": "lark",
+  "work-escalation": "lark",
+  "payroll-autopilot": "lark",
+  all: "pancake",
+};
+
+/** Job có `source` nhà cung cấp ngoài nhưng chạy được chỉ trên dữ liệu có sẵn — không cần credential. */
+export const HOME_CREDENTIAL_EXEMPT: Readonly<Record<string, string>> = {
+  "canonical-backfill": "Dựng lại vận đơn chuẩn từ dữ liệu đã có trong CSDL — không gọi API Viettel Post.",
+};
+
+export type JobSkipped = { skipped: "CONNECTOR_NOT_CONFIGURED"; job: string; org: string; connector: string; detail: string };
+
 export async function runJob(job: string, options: JobOptions) {
   const definition = JOB_DEFINITIONS[job];
   if (!definition) throw new Error(`Không có job "${job}"`);
-  // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
-  return trongJobNen(() => definition.run(options));
+  /*
+    MỌI JOB CHẠY TRONG NGỮ CẢNH TỔ CHỨC TƯỜNG MINH (hợp đồng mục 8 · audit ISO-11).
+
+    Có ngữ cảnh tường minh thì mọi thứ phía sau — `getDb()`, khoá đệm, sự kiện realtime, hẹn giờ,
+    việc bỏ rơi của `?wait=0` — đều đi đúng tổ chức, kể cả khi request đã trả lời xong.
+  */
+  const orgCode = options.org ?? (await currentOrganization()).code;
+  return withOrganization(orgCode, async () => {
+    const org = await currentOrganization();
+    const connector = HOME_CREDENTIAL_JOBS[job];
+    if (!org.isHome && connector) {
+      const skipped: JobSkipped = { skipped: "CONNECTOR_NOT_CONFIGURED", job, org: org.code, connector, detail: `Bỏ qua: job cần kết nối "${connector}" — credential trong biến môi trường chỉ thuộc tổ chức nhà.` };
+      return skipped;
+    }
+    // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
+    return trongJobNen(() => definition.run(options));
+  });
 }

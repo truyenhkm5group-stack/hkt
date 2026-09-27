@@ -11,6 +11,7 @@ import type { Actor } from "@/lib/constants/actor";
 import { broadcastFiltersSchema, broadcastStartSchema, type BroadcastPreviewResult } from "@/lib/constants/outreach-broadcast";
 import { createBroadcast, resumeBroadcast, runBroadcast, stopBroadcast } from "@/lib/outreach/broadcast";
 import { previewBroadcast } from "@/lib/queries/outreach-broadcast";
+import { bindOrganization } from "@/lib/platform/background";
 
 /**
  * Gửi tin hàng loạt theo bộ lọc. Luật ở `lib/constants/outreach-broadcast.ts`, đường ghi ở
@@ -54,14 +55,18 @@ export async function previewBroadcastAction(raw: unknown): Promise<BroadcastPre
 }
 
 /** Vòng gửi SAU phản hồi. Lỗi ở đây không mất gì: dòng còn `PENDING`, bấm "Tiếp tục" là chạy nốt. */
-function runAfterResponse(broadcastId: string) {
-  after(async () => {
+async function runAfterResponse(broadcastId: string) {
+  /*
+    Tổ chức CHỤP lúc bấm (request còn sống), việc sau phản hồi tự bọc `withOrganization` — không
+    dựa vào việc Next có mang ngữ cảnh vào `after()` hay không (audit ISO-16).
+  */
+  after(await bindOrganization(async () => {
     try {
       await runBroadcast(broadcastId);
     } catch (e) {
       console.error("[outreach-broadcast] vòng gửi lỗi:", e instanceof Error ? e.message : String(e));
     }
-  });
+  }));
 }
 
 export async function startBroadcastAction(raw: unknown): Promise<{ ok: true; broadcastId: string; total: number } | Fail> {
@@ -80,7 +85,7 @@ export async function startBroadcastAction(raw: unknown): Promise<{ ok: true; br
     entityId: r.broadcastId,
     after: { total: r.total, filters: parsed.data.filters, messages: parsed.data.messages.length, media: parsed.data.mediaUrls.length, gapSeconds: parsed.data.gapSeconds },
   });
-  runAfterResponse(r.broadcastId);
+  await runAfterResponse(r.broadcastId);
   revalidatePath(PATH);
   return { ok: true, broadcastId: r.broadcastId, total: r.total };
 }
@@ -107,7 +112,7 @@ export async function resumeBroadcastAction(raw: unknown): Promise<{ ok: true } 
   const r = await resumeBroadcast(parsed.data.id);
   if (!r.ok) return { error: r.error };
   await audit({ userId: user.id, userEmail: user.email, action: "OUTREACH_BROADCAST_RESUME", entity: "OUTREACH_BROADCAST", entityId: parsed.data.id });
-  runAfterResponse(parsed.data.id);
+  await runAfterResponse(parsed.data.id);
   revalidatePath(PATH);
   return { ok: true };
 }

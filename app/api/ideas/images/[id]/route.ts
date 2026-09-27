@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { getIdeaImage } from "@/lib/queries/ideas";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +15,9 @@ export const dynamic = "force-dynamic";
  * cho trình duyệt giữ lâu — danh sách ý tưởng có nhiều ảnh, tải lại mỗi lần vào trang là phí.
  */
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return new NextResponse("Chưa đăng nhập", { status: 401 });
+  const guard = await apiGuard(null, { format: "text" });
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "ideas:view")) return new NextResponse("Không có quyền xem ý tưởng", { status: 403 });
   const { id } = await ctx.params;
   const anh = await getIdeaImage(id);

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { audit } from "@/lib/audit";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { chatbotFetch } from "@/lib/integrations/chatbot/client";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +20,9 @@ export const maxDuration = 300;
  * lượt nạp tệp mang khoá Gemini / token page, lượt chat mang tin nhắn khách.
  */
 async function forward(request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+  const guard = await apiGuard();
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
   if (!can(user, "cs:config")) return NextResponse.json({ error: "Cần quyền CSKH: quy tắc & mẫu tin" }, { status: 403 });
 
   const { path } = await ctx.params;

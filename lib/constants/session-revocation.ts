@@ -84,19 +84,39 @@ export function sessionRevoked(loginAtSec: number | null | undefined, invalidBef
 }
 
 /**
- * VÌ SAO một lượt gọi bị từ chối. Ba nguyên nhân, ba câu khác nhau.
+ * VÌ SAO một lượt gọi bị từ chối. Mỗi nguyên nhân một câu khác nhau.
  *
  * Trước bản này cả ba đều ra `/login?reason=inactive` — tức là **nói với nhân viên rằng tài khoản
  * họ bị khoá trong khi tài khoản hoàn toàn bình thường**, và họ đi gọi quản trị.
  */
-export type SessionDenyReason = "NOT_FOUND" | "DISABLED" | "REVOKED";
+export type SessionDenyReason =
+  | "NOT_FOUND"
+  | "DISABLED"
+  | "REVOKED"
+  /**
+   * Phiên thuộc một tổ chức không còn hoạt động (đình chỉ / lưu trữ) hoặc không còn tồn tại
+   * (docs/platform/shared-contracts.md mục 3). KHÔNG rơi về tổ chức nhà — rơi về nhà là cho người
+   * của tổ chức B đọc CSDL của A.
+   */
+  | "ORG_INACTIVE"
+  /**
+   * Đường dẫn đang mở thuộc một module tổ chức CHƯA BẬT (target-architecture P8, P9). Người dùng và
+   * phiên đều hợp lệ — chỉ trang này không dùng được, nên nó KHÔNG đưa về `/login` mà về
+   * `/module-disabled?m=<khoá>`. Tham số dưới đây chỉ để câu hiển thị có mặt nếu nó lọt tới `/login`.
+   */
+  | "MODULE_DISABLED";
 
 /** Tham số `?reason=` trên `/login` cho từng nguyên nhân. */
 export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
   NOT_FOUND: "invalid",
   DISABLED: "inactive",
   REVOKED: "revoked",
+  ORG_INACTIVE: "org-inactive",
+  MODULE_DISABLED: "module-disabled",
 };
+
+/** Trang giải thích "module chưa bật" — `requireUser()` chuyển tới đây kèm `?m=<khoá module>`. */
+export const MODULE_DISABLED_PATH = "/module-disabled";
 
 /** Lý do KHÔNG phải một lượt từ chối: người dùng vừa tự đổi mật khẩu và được đưa về đây. */
 export const REASON_PASSWORD_CHANGED = "password-changed";
@@ -105,6 +125,8 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
   invalid: "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.",
   inactive: "Tài khoản đã bị khoá. Liên hệ quản trị viên.",
   revoked: "Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.",
+  "org-inactive": "Tổ chức của phiên đăng nhập này đang tạm ngừng hoặc không còn tồn tại. Liên hệ quản trị viên của tổ chức.",
+  "module-disabled": "Chức năng này chưa được bật cho tổ chức của bạn. Liên hệ quản trị viên của tổ chức.",
   // KHÔNG dùng chung câu "đã bị thu hồi": người vừa tự bấm đổi mật khẩu mà đọc câu ấy sẽ tưởng
   // mình bị quản trị đá ra. Cùng một cơ chế, hai tình huống, hai câu.
   [REASON_PASSWORD_CHANGED]: "Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.",
@@ -119,7 +141,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
  * trang trong, trang đó gọi `requireUser()` → bị từ chối → đẩy ngược ra `/login` → **vòng lặp vô
  * tận**. Mọi nguyên nhân từ chối phải nằm trong danh sách này.
  */
-export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", REASON_PASSWORD_CHANGED];
+export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", REASON_PASSWORD_CHANGED];
 
 export function loginShouldStay(reason: string | undefined): boolean {
   return !!reason && LOGIN_REASONS_STAY.includes(reason);

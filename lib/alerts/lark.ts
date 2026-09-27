@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 type LarkResult = { ok: boolean; error?: string };
 
@@ -6,6 +7,12 @@ type LarkResult = { ok: boolean; error?: string };
 async function postToLark(webhookUrl: string, secret: string, body: Record<string, unknown>): Promise<LarkResult> {
   if (!webhookUrl) return { ok: false, error: "Chưa cấu hình Lark webhook" };
   try {
+    /*
+      Kênh gửi tin là connector `requiresHomeCredentials` ở Phase 1 (shared-contracts mục 5): tổ
+      chức khác nhà KHÔNG gửi, kể cả khi địa chỉ đến từ đâu đi nữa. Lỗi đi theo đúng hợp đồng của
+      hàm này — `{ ok: false }`, không ném — để một lượt cảnh báo không sập vì kênh chưa mở.
+    */
+    await assertHomeCredentials("lark");
     const payload: Record<string, unknown> = { ...body };
     if (secret) {
       const timestamp = Math.floor(Date.now() / 1000).toString();

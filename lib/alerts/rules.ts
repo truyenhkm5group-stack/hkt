@@ -37,6 +37,7 @@ import { readStatementMailHeartbeat, STATEMENT_MAIL_SILENCE_HOURS } from "@/lib/
 import { getControlTower } from "@/lib/queries/control-tower";
 import { formatVND } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
+import { peekOrganization, withOrganization } from "@/lib/platform/context";
 
 /**
  * MỐC TIN CUỐI CÙNG TỪ ĐVVC cho một vận đơn.
@@ -1219,13 +1220,40 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, approvalSweep, delivery: { sent: delivery.sent, retried: delivery.retried, failed: delivery.failed, gaveUp: delivery.gaveUp }, stockShortage, stockWaitLog, ownerDigest };
 }
 
-const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };
+const holder = globalThis as unknown as { __erpAlertsTimers?: Map<string, ReturnType<typeof setTimeout>> };
+const alertTimers = (holder.__erpAlertsTimers ??= new Map<string, ReturnType<typeof setTimeout>>());
 
-/** Gọi sau webhook: gộp nhiều lần gọi trong 20 giây thành một lần chạy */
+/** Khoá hẹn giờ khi KHÔNG có ngữ cảnh tường minh — đường cũ trước nền tảng (mặc định nhà, P4). */
+const NO_EXPLICIT_CONTEXT = "";
+
+/**
+ * Gọi sau webhook: gộp nhiều lần gọi trong 20 giây thành một lần chạy.
+ *
+ * HẸN GIỜ THEO TỔ CHỨC (audit ISO-15). Một hẹn giờ cho cả tiến trình nghĩa là webhook của tổ chức
+ * B trong 20 giây sau webhook của A bị NUỐT, và lượt quét chạy với ngữ cảnh của A. Nay mỗi tổ chức
+ * một hẹn giờ, và callback tự bọc `withOrganization(mã đã chụp)` — không dựa vào việc `setTimeout`
+ * mang theo ngữ cảnh của lượt gọi đầu tiên.
+ *
+ * Đồng bộ nên chỉ nhìn ngữ cảnh TƯỜNG MINH: mọi webhook đã bọc `withOrganization` (máy quét đòi).
+ */
 export function scheduleAlertEvaluation() {
-  if (holder.__erpAlertsTimer) return;
-  holder.__erpAlertsTimer = setTimeout(() => {
-    holder.__erpAlertsTimer = undefined;
-    evaluateAlerts().catch(() => undefined);
+  const code = peekOrganization()?.code ?? NO_EXPLICIT_CONTEXT;
+  if (alertTimers.has(code)) return;
+  const timer = setTimeout(() => {
+    alertTimers.delete(code);
+    const run = code === NO_EXPLICIT_CONTEXT ? evaluateAlerts() : withOrganization(code, evaluateAlerts);
+    run.catch(() => undefined);
   }, 20_000);
+  alertTimers.set(code, timer);
+}
+
+/** Chỉ cho kiểm thử: tổ chức nào đang có hẹn giờ gộp cảnh báo. */
+export function pendingAlertEvaluations(): string[] {
+  return [...alertTimers.keys()];
+}
+
+/** Chỉ cho kiểm thử: huỷ mọi hẹn giờ gộp cảnh báo (để bài kiểm không để lại lượt quét chạy sau khi xong). */
+export function cancelAlertEvaluationsForTests() {
+  for (const t of alertTimers.values()) clearTimeout(t);
+  alertTimers.clear();
 }

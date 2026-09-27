@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { jwtVerify, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
@@ -11,8 +11,12 @@ import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
-import { SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
-import { DENY_REASON_PARAM, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
+import { ERP_PATH_HEADER, SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, SESSION_ORG_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
+import { DENY_REASON_PARAM, MODULE_DISABLED_PATH, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
+import { moduleOfPath, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
+import { getEnabledModules } from "@/lib/platform/capabilities";
+import { currentOrganization, OrgContextError, readSessionTokenRaw } from "@/lib/platform/context";
+import { findOrganization } from "@/lib/platform/organizations";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -35,6 +39,17 @@ export type SessionUser = {
   departmentCodes: string[];
   /** Chức danh. CHỈ ĐỂ HIỂN THỊ — không tham gia vào bất kỳ phép kiểm tra quyền nào. */
   positionId: string | null;
+  /**
+   * Tổ chức của phiên (docs/platform/shared-contracts.md mục 7). Mọi `SessionUser` do
+   * `resolveCurrentUser()` dựng LUÔN có trường này; vắng mặt chỉ ở người dùng dựng tay trong kiểm thử.
+   */
+  organization?: { code: string; name: string; isHome: boolean };
+  /**
+   * Module ĐANG BẬT của tổ chức (đã phân giải: dòng thiếu, core, đóng dưới phụ thuộc). Menu, cổng
+   * đường dẫn và `can()` đọc trường này. `undefined` = không cổng module — chỉ người dựng tay trong
+   * kiểm thử; `resolveCurrentUser()` luôn điền.
+   */
+  modules?: string[];
 };
 
 function secretKey() {
@@ -49,6 +64,13 @@ const NGAY_GIAY = 86_400;
 export type SessionIdentity = Pick<SessionUser, "id" | "email" | "name" | "role">;
 
 /**
+ * Danh tính + TỔ CHỨC — thứ duy nhất được ký vào một phiên mới. `orgCode` BẮT BUỘC
+ * (docs/platform/shared-contracts.md mục 3): một token không nói nó thuộc tổ chức nào chỉ còn được
+ * chấp nhận cho phiên CŨ (phát ra khi hệ thống chỉ có tổ chức nhà), không bao giờ cho phiên mới.
+ */
+export type SessionSubject = SessionIdentity & { orgCode: string };
+
+/**
  * Ký một token phiên.
  *
  * `loginAtSec` là mốc ĐĂNG NHẬP GỐC và nó ĐI THEO token qua mọi lần gia hạn — đó là thứ duy nhất
@@ -57,10 +79,11 @@ export type SessionIdentity = Pick<SessionUser, "id" | "email" | "name" | "role"
  * `iat` thì ngược lại: nó luôn là LÚC NÀY. Hai mốc tách nhau vì chúng trả lời hai câu khác nhau —
  * "phiên này bắt đầu khi nào" và "tờ giấy này được ký lại lần gần nhất khi nào".
  */
-export async function signSession(user: SessionIdentity, opts: { loginAtSec?: number; nowSec?: number } = {}) {
+export async function signSession(user: SessionSubject, opts: { loginAtSec?: number; nowSec?: number } = {}) {
   const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
   const loginAtSec = opts.loginAtSec ?? nowSec;
-  return new SignJWT({ email: user.email, name: user.name, role: user.role, [SESSION_LOGIN_CLAIM]: loginAtSec })
+  if (!user.orgCode) throw new Error("signSession: thiếu mã tổ chức — phiên mới phải nói nó thuộc tổ chức nào.");
+  return new SignJWT({ email: user.email, name: user.name, role: user.role, [SESSION_ORG_CLAIM]: user.orgCode, [SESSION_LOGIN_CLAIM]: loginAtSec })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt(nowSec)
@@ -94,7 +117,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
   return (await readSessionToken(token))?.user ?? null;
 }
 
-export async function createSession(user: SessionIdentity) {
+export async function createSession(user: SessionSubject) {
   const nowSec = Math.floor(Date.now() / 1000);
   const token = await signSession(user, { nowSec });
   const store = await cookies();
@@ -114,11 +137,47 @@ export async function destroySession() {
   store.delete(COOKIE_PHIEN);
 }
 
+/**
+ * Token đọc qua `readSessionTokenRaw()` của ngữ cảnh tổ chức — MỘT đường đọc cho cả "người này là
+ * ai" lẫn "người này thuộc tổ chức nào", để hai câu trả lời không bao giờ đến từ hai token khác nhau.
+ */
 async function getSessionRaw(): Promise<PhienDaDoc | null> {
-  const store = await cookies();
-  const token = store.get(COOKIE_PHIEN)?.value;
-  if (!token) return null;
+  const token = await readSessionTokenRaw();
+  if (!token) {
+    /*
+      GIỮ HỢP ĐỒNG CŨ: NGOÀI mọi request thì NÉM, không trả `null`. `readSessionTokenRaw()` nuốt lỗi
+      "gọi ngoài request" (ngữ cảnh tổ chức cần thế), nhưng `decideScope()` (lib/auth/scope-guard.ts)
+      phân biệt "không có phiên TRONG request" (ĐÓNG) với "job nền / script" (MỞ) đúng bằng lỗi này.
+      Trả `null` ở đây là biến mọi job nền thành "người lạ" và mọi truy vấn có phạm vi ra rỗng.
+      Trong một request thật, `cookies()` không ném — nhánh này chỉ là "chưa đăng nhập".
+    */
+    await cookies();
+    return null;
+  }
   return readSessionToken(token);
+}
+
+/**
+ * MÓC KIỂM THỬ cho `x-erp-path`: bộ kiểm thử chạy ngoài Next nên không có header request. Đặt một
+ * hàm trả đường dẫn để giả lập "request tới trang này". `null` để gỡ. Mã sản phẩm không gọi hàm này.
+ */
+let requestPathOverride: (() => string | null | undefined) | null = null;
+export function setRequestPathSourceForTests(source: (() => string | null | undefined) | null) {
+  requestPathOverride = source;
+}
+
+/**
+ * Đường dẫn của request hiện hành, do middleware đặt (`x-erp-path`, client không giả được — xem
+ * `middleware.ts`). `null` = không có request (script, job) ⇒ không có cổng module theo đường dẫn;
+ * cổng theo khoá quyền trong `can()` vẫn chạy.
+ */
+async function requestPath(): Promise<string | null> {
+  if (requestPathOverride) return requestPathOverride() ?? null;
+  try {
+    return (await headers()).get(ERP_PATH_HEADER);
+  } catch {
+    return null;
+  }
 }
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -132,6 +191,10 @@ export async function getSession(): Promise<SessionUser | null> {
  * chuông thông báo (30 giây/lần) — mà chúng chỉ đổi khi quản trị sửa quyền, và lúc đó `audit()`
  * xoá hẳn đệm nên số mới hiện ngay. Trước đây mỗi lần điều hướng tốn 6 câu truy vấn chỉ để biết
  * người đang đăng nhập là ai (layout + trang, mỗi bên 3 câu).
+ *
+ * THEO TỔ CHỨC (tenant-readiness-audit ISO-02): `memo()` tự gắn tiền tố `org:<mã>:` cho mọi tổ chức
+ * không phải nhà, nên mẫu quyền của tổ chức A không bao giờ áp cho người của B. Không thêm hậu tố
+ * tổ chức ở đây — hai nơi cùng khoá theo tổ chức là hai chỗ phải giữ khớp nhau.
  */
 export async function loadRoleTemplates(): Promise<RolePermissionMap> {
   return memo("auth:roleTemplates", 60_000, () => getSettingJson<RolePermissionMap>(ROLE_PERMISSIONS_KEY, {}));
@@ -147,8 +210,11 @@ export async function loadPermissionSnapshots(): Promise<Record<string, string[]
   return memo("auth:permissionSnapshots", 60_000, () => getSettingJson<Record<string, string[]>>(USER_PERMISSION_SNAPSHOT_KEY, {}));
 }
 
-/** Kết quả đầy đủ: hoặc là người dùng, hoặc là LÝ DO bị từ chối. Ba lý do, ba câu khác nhau. */
-export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason };
+/**
+ * Kết quả đầy đủ: hoặc là người dùng, hoặc là LÝ DO bị từ chối — mỗi lý do một câu khác nhau.
+ * `module` chỉ có mặt khi `denied = "MODULE_DISABLED"`: khoá của module đang tắt mà đường dẫn thuộc về.
+ */
+export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason; module?: ModuleKey };
 
 /**
  * Người dùng hiện tại với quyền đã tính, HOẶC lý do bị từ chối. Không chuyển hướng.
@@ -161,8 +227,32 @@ export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason }
 export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
   const session = await getSessionRaw();
   if (!session) return { denied: "NOT_FOUND" };
+  let ket: ResolvedUser;
+  try {
+    ket = await resolveSessionUser(session);
+  } catch (error) {
+    /*
+      Claim `org` trỏ tới tổ chức đình chỉ / lưu trữ / không còn ⇒ `getDb()` NÉM (lib/platform/context.ts).
+      Đó là một lý do từ chối có tên, không phải trang lỗi 500 — và tuyệt đối không rơi về tổ chức nhà.
+    */
+    if (error instanceof OrgContextError) return { denied: "ORG_INACTIVE" };
+    throw error;
+  }
+  if ("denied" in ket) return ket;
+  /*
+    CỔNG MODULE THEO ĐƯỜNG DẪN (target-architecture P8, P9). Đứng SAU mọi kiểm danh tính: người bị
+    khoá / bị thu hồi phải nghe đúng câu của họ, không phải "module chưa bật". Đọc cùng tập module mà
+    `can()` và menu dùng (`user.modules`) — một ảnh chụp cho cả lượt dựng.
+  */
+  const path = await requestPath();
+  const pathModule = path ? moduleOfPath(path) : null;
+  if (pathModule && !(ket.user.modules ?? []).includes(pathModule)) return { denied: "MODULE_DISABLED", module: pathModule };
+  return ket;
+});
+
+async function resolveSessionUser(session: PhienDaDoc): Promise<ResolvedUser> {
   const db = await getDb();
-  const [user, templates, snapshots] = await Promise.all([
+  const [user, templates, snapshots, platform] = await Promise.all([
     db.query.users.findFirst({
       where: eq(schema.users.id, session.user.id),
       // `sessionInvalidBefore` đi CÙNG lượt tra này — không thêm một câu truy vấn nào. Và tuyệt đối
@@ -172,6 +262,7 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     }),
     loadRoleTemplates(),
     loadPermissionSnapshots(),
+    platformOfSession(),
   ]);
   if (!user) return { denied: "NOT_FOUND" };
   if (!user.active) return { denied: "DISABLED" };
@@ -203,6 +294,7 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
         scope,
         departmentCodes: [],
         positionId: user.positionId ?? null,
+        ...platform,
       },
     };
   }
@@ -227,9 +319,17 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
       scope: access.scope,
       departmentCodes: access.departmentCodes,
       positionId: user.positionId ?? null,
+      ...platform,
     },
   };
-});
+}
+
+/** Tổ chức + module bật của phiên hiện hành — cùng ngữ cảnh mà `getDb()` vừa dùng để tra người dùng. */
+async function platformOfSession(): Promise<Required<Pick<SessionUser, "organization" | "modules">>> {
+  const ctx = await currentOrganization();
+  const [org, modules] = await Promise.all([findOrganization(ctx.code), getEnabledModules(ctx.code)]);
+  return { organization: { code: ctx.code, name: org?.name ?? ctx.code, isHome: ctx.isHome }, modules: [...modules] };
+}
 
 /**
  * Người dùng hiện tại, hoặc `null`. Lớp mỏng trên `resolveCurrentUser()` — nó nuốt LÝ DO từ chối
@@ -251,6 +351,9 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
       quản trị. Không có cookie thì về `/login` trần như cũ, vì lúc đó chẳng có gì để giải thích.
     */
     if (ket.denied === "NOT_FOUND" && !(await getSession())) redirect("/login");
+    // Module chưa bật KHÔNG phải lỗi phiên: người dùng vẫn đăng nhập hợp lệ, chỉ trang này không dùng
+    // được. Đưa họ về `/login` là bắt đăng nhập lại để rồi bị chặn đúng chỗ cũ.
+    if (ket.denied === "MODULE_DISABLED" && ket.module) redirect(`${MODULE_DISABLED_PATH}?m=${encodeURIComponent(ket.module)}`);
     redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
   }
   const user = ket.user;
@@ -276,8 +379,34 @@ export const ROLE_LABEL: Record<Role, string> = {
   VIEWER: "Chỉ xem",
 };
 
-/** Kiểm tra quyền: truyền người dùng (quyền đã tuỳ chỉnh) hoặc vai trò (quyền mẫu mặc định) */
+/** Khoá quyền chỉ người của TỔ CHỨC NHÀ có hiệu lực (docs/platform/shared-contracts.md mục 11). */
+export const PLATFORM_OPERATE_PERMISSION = "platform:operate";
+
+/**
+ * Khoá quyền này có thuộc một module ĐANG TẮT của tổ chức người dùng không — trả khoá module đó, hoặc
+ * `null`. `modules` vắng mặt (người dùng dựng tay trong kiểm thử, không qua `resolveCurrentUser()`)
+ * ⇒ không có cổng module.
+ */
+export function permissionModuleDisabled(subject: SessionUser, permission: string): ModuleKey | null {
+  if (!subject.modules) return null;
+  const owner = moduleOfPermission(permission);
+  return owner && !subject.modules.includes(owner) ? owner : null;
+}
+
+/**
+ * Kiểm tra quyền: truyền người dùng (quyền đã tuỳ chỉnh) hoặc vai trò (quyền mẫu mặc định).
+ *
+ * Với NGƯỜI DÙNG, thứ tự là cổng module → cổng nền tảng → luật cũ:
+ *  · Khoá thuộc module đang tắt ⇒ `false`, KỂ CẢ ADMIN (target-architecture P8). ADMIN vượt mọi kiểm
+ *    QUYỀN, không vượt được cấu hình của TỔ CHỨC — nếu không, tắt module chỉ là ẩn menu.
+ *  · `platform:operate` ⇒ chỉ người của tổ chức NHÀ. ADMIN của tổ chức khác KHÔNG BAO GIỜ có, và
+ *    người không mang thông tin tổ chức cũng không (mọi nhánh lỗi rơi về phía HẸP HƠN, luật 31).
+ *
+ * Với VAI TRÒ (chuỗi): không có ngữ cảnh tổ chức ⇒ luật cũ — chỉ dùng cho màn hình mẫu quyền.
+ */
 export function can(subject: SessionUser | Role, permission: Permission) {
   if (typeof subject === "string") return subject === "ADMIN" || hasPermission(resolvePermissions(subject, null), permission);
+  if (permissionModuleDisabled(subject, permission)) return false;
+  if (permission === PLATFORM_OPERATE_PERMISSION && subject.organization?.isHome !== true) return false;
   return subject.role === "ADMIN" || hasPermission(subject.permissions, permission);
 }

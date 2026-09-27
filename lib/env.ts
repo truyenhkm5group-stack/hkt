@@ -73,7 +73,15 @@ export const env = {
     get accessToken() {
       return read("FACEBOOK_ACCESS_TOKEN");
     },
-    /** ID Business Manager chứa các tài khoản quảng cáo */
+    /**
+     * ID Business Manager chứa các tài khoản quảng cáo.
+     *
+     * Giá trị mặc định là BM CỦA VNX (audit ISO-23) — GIỮ NGUYÊN vì bỏ đi là đổi hành vi của tổ chức
+     * nhà. An toàn đa tổ chức không dựa vào getter này: mọi lời gọi Graph đi qua
+     * `assertHomeCredentials("facebook")` (lib/platform/credentials.ts), nên tổ chức khác không bao
+     * giờ tới được chỗ dùng nó. Khi credential theo tổ chức ra đời (Phase 1.x), mặc định này phải
+     * bỏ: thiếu BM id là "chưa cấu hình", không phải "dùng BM của VNX".
+     */
     get businessId() {
       return read("FACEBOOK_BUSINESS_ID", "336423739082347");
     },
@@ -189,6 +197,40 @@ export const env = {
     },
   },
 };
+
+/**
+ * CREDENTIAL CỦA TỔ CHỨC NHÀ trong biến môi trường (hợp đồng mục 9 · integration-inventory §2.4).
+ *
+ * Chỉ để đọc và để máy quét biết nhóm nào là "khoá của khách" — không có mã nào rẽ nhánh theo danh
+ * sách này. Chặn thật nằm ở lối gọi mạng: `assertHomeCredentials()` (lib/platform/credentials.ts)
+ * và `loadAlertConfig()` (lib/alerts/config.ts — fallback Lark/Telegram chỉ cho tổ chức nhà).
+ */
+export const CUSTOMER_CREDENTIAL_ENV = [
+  "PANCAKE_API_KEY",
+  "PANCAKE_SHOP_ID",
+  "PANCAKE_WEBHOOK_SECRET",
+  "PANCAKE_ACCESS_TOKEN",
+  "FACEBOOK_ACCESS_TOKEN",
+  "FACEBOOK_BUSINESS_ID",
+  "SEPAY_WEBHOOK_SECRET",
+  "SEPAY_WEBHOOK_API_KEY",
+  "SEPAY_API_TOKEN",
+  "VIETTELPOST_API_KEY",
+  "VIETTELPOST_USERNAME",
+  "VIETTELPOST_PASSWORD",
+  "VIETTELPOST_WEBHOOK_SECRET",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
+  "LARK_WEBHOOK_URL",
+  "LARK_WEBHOOK_SECRET",
+  "LARK_BILLING_WEBHOOK_URL",
+  "LARK_BILLING_WEBHOOK_SECRET",
+  "LARK_INVENTORY_WEBHOOK_URL",
+  "LARK_INVENTORY_WEBHOOK_SECRET",
+  "LARK_MANAGER_WEBHOOK_URL",
+  "LARK_MANAGER_WEBHOOK_SECRET",
+  "CHATBOT_ADMIN_TOKEN",
+] as const;
 
 export function integrationStatus() {
   return {

@@ -10,6 +10,8 @@
  * Bot tự quyết mọi thứ về hội thoại (chốt chặn giá, size, mã mẫu…); ERP không tính lại gì.
  */
 
+import { assertHomeCredentials } from "@/lib/platform/credentials";
+
 const DEFAULT_URL = "http://chatbot:3456";
 
 export function chatbotConfig() {
@@ -21,6 +23,8 @@ export function chatbotConfig() {
 
 /** Gọi API quản trị của bot. Ném lỗi đọc được khi không kết nối được — không bao giờ kèm khoá. */
 export async function chatbotFetch(path: string, init: RequestInit & { timeoutMs?: number } = {}) {
+  // MỘT bot cho cả máy chủ = bot của tổ chức nhà (audit ISO-06): tổ chức khác không quản trị được nó.
+  await assertHomeCredentials("chatbot");
   const { baseUrl, token } = chatbotConfig();
   const { timeoutMs, ...rest } = init;
   const headers = new Headers(rest.headers);

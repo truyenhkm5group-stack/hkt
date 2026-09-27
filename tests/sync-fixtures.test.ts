@@ -7,6 +7,7 @@ import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testCodStatementAudit } from "./cod-statement-audit.test";
 import { testIdeas } from "./ideas.test";
 import { testPermissions } from "./permissions.test";
+import { testPlatformModules } from "./platform-modules.test";
 import { testOrderSource } from "./order-source.test";
 import { testDuplicateEvidencePure, testFanpageAttribution } from "./fanpage-attribution.test";
 import { testFanpageAccessPure, testFanpageHistoryDb, testPageEvidencePure } from "./fanpage-history.test";
@@ -402,6 +403,12 @@ import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/land
 import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 import { testOpsLogLeak } from "./ops-log-leak.test";
+import { testPlatformRbac } from "./platform-rbac.test";
+import { testPlatformContext } from "./platform-context.test";
+import { testPlatformIsolation } from "./platform-isolation.test";
+import { testPlatformUi } from "./platform-ui.test";
+import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
+import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
 
 async function main() {
   await ensureMigrated();
@@ -2003,6 +2010,7 @@ async function main() {
   await testLandingAttributionDb();
   await testIdeas();
   await testPermissions();
+  await testPlatformModules();
   await testVtpImportTruth(db);
   await testVtpImportRecovery(db);
   await testCostAllocation(db);
@@ -2339,6 +2347,8 @@ async function main() {
   testTechPermissions();
   testTechHealthParsing();
   testRepoIntegrity();
+  // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
+  testPlatformIsolationStatic();
   testChatbotNoSecretsInRepo();
   testChatbotDeployShape();
   await testChatbotImportGuards();
@@ -2370,6 +2380,19 @@ async function main() {
   // fetch / biến môi trường Pancake (khôi phục trong finally) và đăng ký mọi mã đang có — nên đứng SAU CÙNG.
   testCompanyOsAuditLabels();
   await testRegistryCatchUpAfterProductSync(db);
+  // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
+  await testPlatformUi();
+  // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
+  // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
+  await testPlatformProcessIsolation();
+  // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
+  // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
+  await testPlatformRbac();
+  // Nền tảng đa tổ chức: cấp một tổ chức THẬT thứ hai (CSDL PGlite riêng, mã `pt-`) — đứng cuối để mọi
+  // bài phía trên chạy đúng như trước nền tảng, không thấy tổ chức nào khác ngoài nhà.
+  await testPlatformContext();
+  // Kịch bản chấp nhận §55 + tấn công truy cập trực tiếp theo id (mã `pq-`).
+  await testPlatformIsolation();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
