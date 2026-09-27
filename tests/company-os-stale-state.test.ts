@@ -299,14 +299,17 @@ async function donDep(db: Db) {
     await db.delete(schema.productModelStateHistory).where(inArray(schema.productModelStateHistory.modelId, ids));
     await db.delete(schema.domainEvents).where(inArray(schema.domainEvents.modelId, ids));
   }
+  const phieu = (await db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(like(schema.stockReceipts.reference, `${P}%`))).map((r) => r.id);
+  if (phieu.length) await db.delete(schema.stockReceiptItems).where(inArray(schema.stockReceiptItems.receiptId, phieu));
   await db.delete(schema.stockReceipts).where(like(schema.stockReceipts.reference, `${P}%`));
-  await db.delete(schema.productionBatches).where(like(schema.productionBatches.id, `${P}%`));
+  await db.execute(sql`delete from production_batches where id like ${`${P}%`}`);
   await db.delete(schema.productionOrders).where(like(schema.productionOrders.id, `${P}%`));
   await db.delete(schema.costSheets).where(like(schema.costSheets.id, `${P}%`));
   await db.delete(schema.samples).where(like(schema.samples.id, `${P}%`));
   await db.delete(schema.productionTopics).where(like(schema.productionTopics.id, `${P}%`));
   await db.delete(schema.productModels).where(like(schema.productModels.id, `${P}%`));
   await db.delete(schema.designConcepts).where(like(schema.designConcepts.id, `${P}%`));
+  await db.delete(schema.productVariants).where(like(schema.productVariants.id, `${P}%`));
   await db.delete(schema.products).where(like(schema.products.id, `${P}%`));
   await db.delete(schema.users).where(like(schema.users.id, `${P}%`));
 }
@@ -356,17 +359,23 @@ async function gieo(db: Db) {
   ]);
   const lenh = (x: string, productId: string, status: string) => ({ id: `${P}po-${x}`, code: `COSST-PO-${x.toUpperCase()}`, productId, productCode: productId.toUpperCase(), productName: productId, status, totalQty: 50, unitCost: 0, supplier: "Xưởng ST", sentAt: status === "DRAFT" ? null : at("2002-03-01") });
   await db.insert(schema.productionOrders).values([lenh("appr", `${P}p-appr`, "SENT"), lenh("inp", `${P}p-inp`, "RECEIVED"), lenh("inp2", `${P}p-inp2`, "SENT")]);
-  await db.insert(schema.productionBatches).values([
-    { id: `${P}pb-inp2`, productId: `${P}p-inp2`, productCode: "COSST-P-INP2", batchNo: 1, orderedAt: at("2002-01-01"), orderedQty: 20 },
-    { id: `${P}pb-inp3`, productId: `${P}p-inp3`, productCode: "COSST-P-INP3", batchNo: 1, orderedAt: at("2002-01-01"), orderedQty: 20 },
-  ]);
-  await db.insert(schema.stockReceipts).values([
-    { kind: "RECEIPT", receivedAt: at("2002-03-20"), reference: `${P}r-inp`, productionOrderId: `${P}po-inp`, createdBy: "test" },
-    { kind: "RECEIPT", receivedAt: at("2002-01-20"), reference: `${P}r-inp2`, productionBatchId: `${P}pb-inp2`, createdBy: "test" },
-    { kind: "RECEIPT", receivedAt: at("2002-01-20"), reference: `${P}r-inp3`, productionBatchId: `${P}pb-inp3`, createdBy: "test" },
-    // Phiếu TÁI NHẬP HOÀN không phải "hàng về từ xưởng" — không đếm.
-    { kind: "RETURN", receivedAt: at("2002-01-21"), reference: `${P}r-sell`, productionBatchId: `${P}pb-inp3`, createdBy: "test" },
-  ]);
+  // Lô xưởng thuộc sổ công nợ (chỉ bốn tệp của nó được chạm bảng qua schema) — gieo bằng SQL thô trong bài kiểm.
+  for (const x of ["inp2", "inp3", "sell"]) {
+    await db.execute(sql`insert into production_batches (id, product_id, product_code, batch_no, ordered_at, ordered_qty) values (${`${P}pb-${x}`}, ${`${P}p-${x}`}, ${`COSST-P-${x.toUpperCase()}`}, 1, ${at("2002-01-01")}, 20)`);
+  }
+  await db.insert(schema.productVariants).values(["inp2", "inp3", "sell"].map((x) => ({ id: `${P}v-${x}`, productId: `${P}p-${x}`, sku: `COSST-${x.toUpperCase()}-M`, color: "Đen", size: "M" })));
+  const phieu = await db
+    .insert(schema.stockReceipts)
+    .values([
+      { kind: "RECEIPT", receivedAt: at("2002-03-20"), reference: `${P}r-inp`, productionOrderId: `${P}po-inp`, createdBy: "test" },
+      { kind: "RECEIPT", receivedAt: at("2002-01-20"), reference: `${P}r-inp2`, productionBatchId: `${P}pb-inp2`, createdBy: "test" },
+      { kind: "RECEIPT", receivedAt: at("2002-01-20"), reference: `${P}r-inp3`, productionBatchId: `${P}pb-inp3`, createdBy: "test" },
+      // Phiếu TÁI NHẬP HOÀN không phải "hàng về từ xưởng" — không đếm.
+      { kind: "RETURN", receivedAt: at("2002-01-21"), reference: `${P}r-sell`, productionBatchId: `${P}pb-sell`, createdBy: "test" },
+    ])
+    .returning({ id: schema.stockReceipts.id, reference: schema.stockReceipts.reference });
+  const idOf = (x: string) => phieu.find((p) => p.reference === `${P}r-${x}`)!.id;
+  await db.insert(schema.stockReceiptItems).values(["inp2", "inp3", "sell"].map((x) => ({ receiptId: idOf(x), variantId: `${P}v-${x}`, quantity: 5, unitCost: 100_000 })));
 }
 
 const LIST: ListParams = { page: 1, pageSize: 25, sort: "code", dir: "asc", q: "COSST-", filters: {}, period: { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null } };

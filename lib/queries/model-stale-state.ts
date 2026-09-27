@@ -1,4 +1,4 @@
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { buildStalePreview, BULK_DECLARE_MAX, type DeclarePreviewRow } from "@/lib/constants/model-bulk-declare";
 import type { ModelEvidence } from "@/lib/constants/model-lifecycle";
@@ -21,9 +21,11 @@ import type { ListParams } from "@/lib/search-params";
  */
 
 /**
- * Số phiếu NHẬP HÀNG (`kind = 'RECEIPT'`) đã nối vào một lệnh sản xuất HOẶC một lô xưởng của sản phẩm của
- * mẫu — MỘT câu cho cả lô. Mẫu có sản phẩm mà không phiếu nào ⇒ 0 (đã đếm); mẫu chưa có sản phẩm ⇒ vắng mặt
- * (CHƯA BIẾT — không có sản phẩm thì không có lệnh nào để nối).
+ * Số phiếu NHẬP HÀNG (`kind = 'RECEIPT'`) đã nối vào một lệnh sản xuất HOẶC một lô xưởng, của sản phẩm của
+ * mẫu — MỘT câu cho cả lô. Phiếu nối lệnh: sản phẩm của LỆNH. Phiếu nối lô: sản phẩm của CÁC DÒNG phiếu (mẫu mã
+ * nhập vào) — không đọc bảng lô xưởng, vì sổ đặt xưởng là sổ công nợ / giá thành chỉ bốn tệp của nó được chạm
+ * (tests/workshop-ledger.test.ts). Mẫu có sản phẩm mà không phiếu nào ⇒ 0 (đã đếm); mẫu chưa có sản phẩm ⇒ vắng
+ * mặt (CHƯA BIẾT — không có sản phẩm thì không có lệnh nào để nối).
  */
 export async function getLinkedReceiptCountsBatch(modelIds: readonly string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
@@ -36,14 +38,17 @@ export async function getLinkedReceiptCountsBatch(modelIds: readonly string[]): 
   if (!productIds.length) return out;
   const r = schema.stockReceipts;
   const po = schema.productionOrders;
-  const pb = schema.productionBatches;
-  const sp = sql<string>`coalesce(${po.productId}, ${pb.productId})`;
+  const ri = schema.stockReceiptItems;
+  const pv = schema.productVariants;
+  const sp = sql<string>`coalesce(${po.productId}, ${pv.productId})`;
   const rows = await db
     .select({ productId: sp, n: sql<number>`count(distinct ${r.id})::int` })
     .from(r)
     .leftJoin(po, eq(po.id, r.productionOrderId))
-    .leftJoin(pb, eq(pb.id, r.productionBatchId))
-    .where(and(eq(r.kind, "RECEIPT"), or(inArray(po.productId, productIds), inArray(pb.productId, productIds))))
+    // Dòng phiếu chỉ cần cho phiếu nối LÔ (không nối lệnh) — phiếu nối lệnh đã có sản phẩm của lệnh.
+    .leftJoin(ri, and(isNull(r.productionOrderId), isNotNull(r.productionBatchId), eq(ri.receiptId, r.id)))
+    .leftJoin(pv, eq(pv.id, ri.variantId))
+    .where(and(eq(r.kind, "RECEIPT"), or(inArray(po.productId, productIds), inArray(pv.productId, productIds))))
     .groupBy(sp);
   const theoSp = new Map(rows.map((x) => [String(x.productId), Number(x.n)]));
   for (const m of models) if (m.productId) out.set(m.id, theoSp.get(m.productId) ?? 0);
