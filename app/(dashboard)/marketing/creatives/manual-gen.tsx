@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
-import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
@@ -545,7 +545,7 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode
 function namePartsOf(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode | null): CampaignNameParts {
   return {
     account: ctx.setup.accounts.find((a) => a.id === setup.adAccountId)?.name ?? null,
-    marketerCode: setup.marketerId ? (ctx.setup.marketers.find((m) => m.id === setup.marketerId)?.code ?? null) : null,
+    marketerCode: pickMarketerOption(ctx.setup.marketers, setup.marketerId, setup.marketerCode)?.code ?? null,
     kindLabel: campaignKindLabel(setup.campaignKind, win),
     page: ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? null,
   };
@@ -556,7 +556,7 @@ function nameKnownOf(ctx: ComposeCtx, win: ProductWinCode | null): CampaignNameK
   return {
     accounts: ctx.setup.accounts.map((a) => a.name),
     pages: ctx.setup.pages.map((p) => p.name),
-    marketerCodes: ctx.setup.marketers.map((m) => m.code),
+    marketerCodes: [...new Set(ctx.setup.marketers.map((m) => m.code))],
     kinds: win ? ["TEST", win.code] : ["TEST"],
   };
 }
@@ -832,20 +832,28 @@ function SetupFields({ value, onChange, options, winCode, children }: { value: C
   }, [q, geoMode]);
   const picked = value.geo ?? [];
   const cap = CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd;
+  const chon = pickMarketerOption(options.marketers, value.marketerId, value.marketerCode);
   return (
     <div className="space-y-2 rounded-lg border p-2.5">
       <p className="text-[12.5px] font-semibold">Setup camp</p>
       <label className="block space-y-0.5 text-[11.5px]">
         MKTer (mã vào tên chiến dịch để quy tiền ads)
-        <select className={sel} value={value.marketerId ?? ""} onChange={(e) => set({ marketerId: e.target.value || null })}>
+        <select
+          className={sel}
+          value={chon ? `${chon.id}|${chon.code}` : ""}
+          onChange={(e) => {
+            const [id, ...code] = e.target.value.split("|");
+            set(id ? { marketerId: id, marketerCode: code.join("|") || null } : { marketerId: null, marketerCode: null });
+          }}
+        >
           <option value="">— Chưa chọn —</option>
           {options.marketers.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={`${m.id}|${m.code}`} value={`${m.id}|${m.code}`}>
               {m.name} · {m.code}
             </option>
           ))}
         </select>
-        {value.marketerId && !options.marketers.some((m) => m.id === value.marketerId) ? <span className="block text-destructive">MKTer đã lưu không còn trong danh sách — chọn lại.</span> : null}
+        {value.marketerId && !chon ? <span className="block text-destructive">MKTer / mã đã lưu không còn trong danh sách — chọn lại.</span> : null}
         {!value.marketerId ? <span className="block text-warning">Chưa chọn MKTer — tiền ads của camp này không quy về ai.</span> : null}
         {options.marketers.length === 0 ? <span className="block text-muted-foreground">Chưa có MKTer nào khai bí danh ở trang Lương — mã MKTer lấy từ bí danh ấy.</span> : null}
       </label>
@@ -1014,7 +1022,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
         const s = img.campaignSetup;
         const acc = s ? (ctx.setup.accounts.find((a) => a.id === s.adAccountId)?.name ?? s.adAccountId) : null;
         const page = s ? (ctx.setup.pages.find((p) => p.id === s.pageId)?.name ?? s.pageId) : null;
-        const mkt = s?.marketerId ? ctx.setup.marketers.find((m) => m.id === s.marketerId) : null;
+        const mkt = s ? pickMarketerOption(ctx.setup.marketers, s.marketerId, s.marketerCode) : null;
         const kind = s?.campaignKind === "WIN" && img.winCode ? ` · mã ${img.winCode.code}` : "";
         return (
           <div key={img.id} className="flex flex-wrap items-center gap-2.5 p-2">

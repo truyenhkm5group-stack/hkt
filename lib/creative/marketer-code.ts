@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { marketerCampaignCode, type MarketerOption } from "@/lib/constants/campaign-setup";
+import { marketerCampaignCodes, type MarketerOption } from "@/lib/constants/campaign-setup";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { resolveMarketer } from "@/lib/integrations/facebook/mapping";
 
@@ -25,13 +25,16 @@ export async function readPayrollEmployees(db: Db): Promise<Employee[]> {
   }
 }
 
-/** MKTer chọn được: nhân sự CÒN LÀM có ít nhất một bí danh dùng được làm mã. Người chưa khai bí danh không hiện (không đoán mã). */
+/**
+ * Lựa chọn (MKTer, mã): MỘT dòng cho mỗi mã dùng được của mỗi nhân sự CÒN LÀM — người chọn mã nào vào tên. Người chưa khai bí
+ * danh không hiện (không đoán mã). Xếp theo tên người, trong một người giữ thứ tự bí danh đã khai.
+ */
 export function marketerOptions(employees: readonly Employee[]): MarketerOption[] {
   return employees
     .filter((e) => e.active !== false)
-    .map((e) => ({ id: e.id, name: (e.shortName || e.name || e.id).trim(), code: marketerCampaignCode(e.aliases) }))
-    .filter((m): m is MarketerOption => m.code !== null)
-    .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    .map((e) => ({ id: e.id, name: (e.shortName || e.name || e.id).trim(), codes: marketerCampaignCodes(e.aliases) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "vi"))
+    .flatMap((e) => e.codes.map((code) => ({ id: e.id, name: e.name, code })));
 }
 
 /**
