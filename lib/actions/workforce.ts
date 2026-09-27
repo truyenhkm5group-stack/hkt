@@ -9,10 +9,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import { DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 import { WIP_MAX, WIP_MIN, type StaffingConfig } from "@/lib/constants/workforce";
 import { staffingSchema } from "@/lib/validation/workforce";
-import { summarizeUnplaced, type DistributionPlan } from "@/lib/work/distribution";
-import { buildDepartmentPlan } from "@/lib/work/auto-assign-run";
+import { planDistribution, summarizeUnplaced, type DistributionPlan } from "@/lib/work/distribution";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
-import { buildCapacity, getStaffing, saveStaffing } from "@/lib/queries/workforce";
+import { buildCapacity, getStaffing, holderKeyOf, saveStaffing } from "@/lib/queries/workforce";
 import { saveScoreWeights } from "@/lib/queries/work-config";
 import { listOrgPeople } from "@/lib/queries/work";
 import { assignByAuthority } from "@/lib/work/assign";
@@ -192,9 +191,14 @@ export async function autoAssign(input: unknown): Promise<Result<AutoAssignResul
   const department = parsed.data.department as DepartmentCode;
   const apply = parsed.data.apply === true;
 
-  // Cùng một hàm dựng kế hoạch với job nền (`lib/work/auto-assign-run.ts`): xem trước ở đây là
-  // đúng thứ job sẽ làm.
-  const { plan } = await buildDepartmentPlan({ department, now: new Date(), limit: parsed.data.limit });
+  const now = new Date();
+  const [{ items }, people, cfg] = await Promise.all([collectWorkItems({ now }), listOrgPeople(), getStaffing()]);
+  const open = items.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
+  const capacity = buildCapacity(people, open, cfg, now, department);
+  // CHỈ việc chưa ai cầm. Máy không bao giờ lấy việc khỏi tay người đang giữ — đó là `reassignWork`.
+  const canGiao = open.filter((i) => i.department === department && holderKeyOf(i) === null);
+
+  const plan = planDistribution(department, canGiao, capacity, cfg, now, { limit: parsed.data.limit });
 
   let applied = 0;
   let failed = 0;

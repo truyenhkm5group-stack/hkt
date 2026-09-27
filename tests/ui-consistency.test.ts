@@ -242,6 +242,9 @@ export function testNavigationCoverage() {
     // Chi tiết của MỘT ô số, không phải một module: bấm "chờ xuất N" dưới cột Đã xuất trên /products
     // (theo mẫu mã hoặc theo cả mã hàng). Mở trần không tham số thì trang tự nói phải vào từ đâu.
     "/products/reserved": "số 'chờ xuất N' dưới cột Đã xuất của bảng /products",
+    // Phase 2 · metadata: form TẠO khách — vào từ nút 'Tạo khách hàng' ở đầu /customers, chỉ hiện khi tổ chức
+    // KHÔNG bật connector_pancake và người xem có customers:write (cùng cổng với trang và server action).
+    "/customers/new": "nút 'Tạo khách hàng' ở đầu trang /customers (chỉ khi không bật Pancake + có customers:write)",
   };
 
   const pages = walkPages("app/(dashboard)");

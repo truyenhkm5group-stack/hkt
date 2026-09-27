@@ -77,8 +77,8 @@ export type ModuleDef = {
   why: string; // vì sao module này tồn tại / ranh giới của nó
 };
 
-/** Hai khoá quyền của nền tảng (hợp đồng mục 11). Khai ở đây để sổ module tự kiểm được chủ của chúng. */
-export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate"] as const;
+/** Khoá quyền của nền tảng (hợp đồng mục 11; `metadata:manage` — phase-2-contracts M11). Khai ở đây để sổ module tự kiểm được chủ của chúng. */
+export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "metadata:manage"] as const;
 
 /**
  * Đường dẫn KHÔNG thuộc module nào — `moduleOfPath` trả `null`, không cổng module nào chặn.
@@ -129,7 +129,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     dependsOn: [],
     features: [{ key: "customers.retention", label: "Khách quay lại", defaultEnabled: true, why: "Màn hình giữ chân khách (`/customers/retention`) — phân tích, không phải thao tác." }],
     routes: ["/customers"],
-    permissions: ["customers:view"],
+    permissions: ["customers:view", "customers:write"],
     why: "Danh bạ khách là nền của đơn hàng và CSKH; đứng riêng để tổ chức chỉ quản lý khách (chưa bán) vẫn dùng được.",
   },
   {

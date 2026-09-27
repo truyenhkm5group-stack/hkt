@@ -12,7 +12,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { cn } from "@/lib/utils";
-import { requirePermission } from "@/lib/auth/session";
+import { requirePermission, type SessionUser } from "@/lib/auth/session";
+import { CustomerProfileForm } from "@/app/(dashboard)/customers/[id]/customer-profile-form";
+import { objectDef } from "@/lib/constants/object-registry";
+import { MetadataError } from "@/lib/metadata/errors";
+import { listFields } from "@/lib/metadata/fields";
+import { getPublishedForm } from "@/lib/metadata/forms";
+import { canEditField, getCustomValues } from "@/lib/metadata/values";
+import { userPickOptions } from "@/lib/queries/users";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -29,11 +36,39 @@ function addressText(a: AddressRecord) {
   return a.full_address || [a.address, a.commune_name, a.district_name, a.province_name].filter(Boolean).join(", ");
 }
 
+/**
+ * Dữ liệu khối "Hồ sơ bổ sung" (form `profile` đã xuất bản — M7/M8). `null` ⇒ KHÔNG hiện khối: tổ chức
+ * chưa có field custom nào VÀ chưa xuất bản form (tổ chức nhà không thấy một khối trống), hoặc lớp
+ * metadata từ chối đọc (module / năng lực) — trang khách vẫn đứng nguyên.
+ */
+async function loadProfileBlock(user: SessionUser, customer: Record<string, unknown> & { id: string }) {
+  try {
+    const [form, fields] = await Promise.all([getPublishedForm("customer", "profile"), listFields("customer")]);
+    if (!fields.custom.length && form.isDefault) return null;
+    const obj = objectDef("customer")!;
+    const [stored, users] = await Promise.all([getCustomValues("customer", [customer.id], user), fields.custom.some((f) => f.type === "user") ? userPickOptions() : Promise.resolve(undefined)]);
+    const system = Object.fromEntries(fields.system.map((f) => [f.key, customer[f.column] ?? null]));
+    return {
+      schema: form.schema,
+      system: fields.system,
+      custom: fields.custom,
+      values: { system, custom: stored.get(customer.id) ?? {} },
+      customEditable: fields.custom.filter((f) => canEditField(user, obj, f)).map((f) => f.key),
+      users,
+      version: form.version,
+    };
+  } catch (error) {
+    if (error instanceof MetadataError) return null;
+    throw error;
+  }
+}
+
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("customers:view");
+  const user = await requirePermission("customers:view");
   const { id } = await params;
   const customer = await getCustomerDetail(id);
   if (!customer) notFound();
+  const profile = await loadProfileBlock(user, customer);
   const { stats } = customer;
   const addresses = parseAddresses(customer.addresses);
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
@@ -202,6 +237,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               ]}
             />
           </SectionCard>
+
+          {profile ? (
+            <SectionCard title="Hồ sơ bổ sung" description={profile.version ? `Form phiên bản ${profile.version}` : "Form mặc định"} hint="Trường do tổ chức tự khai. Thông tin hệ thống của khách chỉ đọc ở đây: khách đồng bộ từ Pancake, sửa ở ERP sẽ bị lượt đồng bộ kế tiếp ghi đè.">
+              <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} />
+            </SectionCard>
+          ) : null}
 
           <SectionCard title={`Địa chỉ (${formatNumber(addresses.length)})`} description="Sổ địa chỉ giao hàng từ Pancake" padded={false}>
             {addresses.length ? (

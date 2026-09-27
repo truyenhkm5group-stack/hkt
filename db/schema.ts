@@ -7784,3 +7784,142 @@ export const recommendationDecisions = pgTable(
 );
 
 export type RecommendationDecisionDbRow = typeof recommendationDecisions.$inferSelect;
+
+// ═══ PHASE 2 — METADATA & TUỲ BIẾN THEO TỔ CHỨC (docs/platform/phase-2-contracts.md mục 2) ═══
+//
+// Bảy bảng này nằm trong CSDL CỦA TỔ CHỨC (M1): định nghĩa field / form / danh sách / trạng thái và
+// giá trị custom là dữ liệu của tổ chức, nên silo cô lập chúng miễn phí. Không bảng nghiệp vụ nào bị
+// đổi: giá trị custom nằm ở MỘT dòng mở rộng mỗi bản ghi (`custom_values`) — đồng bộ Pancake upsert
+// cả dòng `customers` / `products` mà không bao giờ chạm bảng này (M3).
+
+/** Định nghĩa field custom. `field_key` BẤT BIẾN; không xoá — `ARCHIVED` (M4). */
+export const metaCustomFields = pgTable(
+  "meta_custom_fields",
+  {
+    id: id(),
+    objectKey: text("object_key").notNull(),
+    fieldKey: text("field_key").notNull(),
+    label: text("label").notNull(),
+    fieldType: text("field_type").notNull(),
+    required: boolean("required").notNull().default(false),
+    defaultValue: jsonb("default_value"),
+    options: jsonb("options").notNull().default([]),
+    validation: jsonb("validation").notNull().default({}),
+    transitions: jsonb("transitions").notNull().default({}),
+    relationObject: text("relation_object"),
+    helpText: text("help_text"),
+    viewPermission: text("view_permission"),
+    editPermission: text("edit_permission"),
+    listable: boolean("listable").notNull().default(true),
+    filterable: boolean("filterable").notNull().default(false),
+    position: integer("position").notNull().default(0),
+    status: text("status").notNull().default("ACTIVE"),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("meta_custom_fields_object_key_uq").on(t.objectKey, t.fieldKey),
+    check("meta_custom_fields_status_check", sql`${t.status} in ('ACTIVE','ARCHIVED')`),
+    check("meta_custom_fields_key_check", sql`${t.fieldKey} ~ '^[a-z][a-z0-9_]{1,40}$'`),
+  ],
+);
+
+/** Giá trị custom: MỘT dòng mỗi bản ghi, mọi field trong `values` (M3). */
+export const customValues = pgTable(
+  "custom_values",
+  {
+    objectKey: text("object_key").notNull(),
+    recordId: text("record_id").notNull(),
+    values: jsonb("values").$type<Record<string, unknown>>().notNull().default({}),
+    version: integer("version").notNull().default(1),
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("custom_values_pk").on(t.objectKey, t.recordId)],
+);
+
+/** Tệp của field kiểu `file` — cùng lối các tệp đính kèm khác (bytea, không base64). Trần 5 MB ở dịch vụ. */
+export const customFiles = pgTable(
+  "custom_files",
+  {
+    id: id(),
+    objectKey: text("object_key").notNull(),
+    recordId: text("record_id").notNull(),
+    fieldKey: text("field_key").notNull(),
+    filename: text("filename").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("custom_files_record_idx").on(t.objectKey, t.recordId)],
+);
+
+/** Form metadata: Nháp / Đã xuất bản (M7). Người dùng chỉ thấy `published`. */
+export const metaForms = pgTable(
+  "meta_forms",
+  {
+    objectKey: text("object_key").notNull(),
+    formKey: text("form_key").notNull(),
+    draft: jsonb("draft"),
+    published: jsonb("published"),
+    publishedVersion: integer("published_version").notNull().default(0),
+    publishedAt: ts("published_at"),
+    publishedBy: text("published_by"),
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("meta_forms_pk").on(t.objectKey, t.formKey)],
+);
+
+/** Danh sách metadata — cùng mô hình Nháp / Đã xuất bản (M9). */
+export const metaListViews = pgTable(
+  "meta_list_views",
+  {
+    objectKey: text("object_key").notNull(),
+    viewKey: text("view_key").notNull(),
+    draft: jsonb("draft"),
+    published: jsonb("published"),
+    publishedVersion: integer("published_version").notNull().default(0),
+    publishedAt: ts("published_at"),
+    publishedBy: text("published_by"),
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("meta_list_views_pk").on(t.objectKey, t.viewKey)],
+);
+
+/** Trạng thái HỆ THỐNG: tổ chức chỉ đổi nhãn / thứ tự / ẩn khỏi bộ lọc (M10). */
+export const metaStatusOverrides = pgTable(
+  "meta_status_overrides",
+  {
+    objectKey: text("object_key").notNull(),
+    fieldKey: text("field_key").notNull(),
+    value: text("value").notNull(),
+    label: text("label"),
+    position: integer("position"),
+    active: boolean("active").notNull().default(true),
+    updatedBy: text("updated_by"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("meta_status_overrides_pk").on(t.objectKey, t.fieldKey, t.value)],
+);
+
+/** Ảnh chụp BẤT BIẾN của mỗi lượt xuất bản (M12). Chỉ thêm. */
+export const metaConfigVersions = pgTable(
+  "meta_config_versions",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    objectKey: text("object_key").notNull(),
+    configKey: text("config_key").notNull(),
+    version: integer("version").notNull(),
+    snapshot: jsonb("snapshot").notNull(),
+    actorId: text("actor_id"),
+    actorEmail: text("actor_email"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("meta_config_versions_key_idx").on(t.kind, t.objectKey, t.configKey, t.version)],
+);

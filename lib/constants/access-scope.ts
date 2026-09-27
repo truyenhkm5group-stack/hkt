@@ -155,6 +155,7 @@ export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
   /* Nền tảng: bật/tắt module và vận hành mọi tổ chức — cấp cho TỪNG NGƯỜI, không bó vào vai trò. */
   "modules:manage",
   "platform:operate",
+  "metadata:manage",
 ];
 
 /**
@@ -166,6 +167,7 @@ export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
  * TỪNG NGƯỜI ở trang Người dùng — có tên, có người quyết.
  */
 export const ROLE_BUILDER_FORBIDDEN_REASON: Record<string, string> = {
+  "metadata:manage": "Vai trò tuỳ chỉnh không được cấp quyền cấu hình dữ liệu — đổi field / form là đổi thứ cả tổ chức nhập và nhìn thấy",
   "modules:manage": "Vai trò tuỳ chỉnh không được cấp quyền bật/tắt module — bật một module mở cả mảng quyền và job cho mọi người trong tổ chức",
   "platform:operate": "Vai trò tuỳ chỉnh không được cấp quyền vận hành nền tảng — đó là quyền nhìn và sửa MỌI tổ chức",
   "users:manage": "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",

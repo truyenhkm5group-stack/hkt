@@ -225,6 +225,11 @@ const ROUTES = [
   // Nền tảng đa tổ chức: bảng module đọc qua bộ phân giải năng lực; `/platform` mở CSDL của MỌI
   // tổ chức để đo sức khoẻ — tuyến nặng nhất khi có nhiều tổ chức, nên phải nằm trong lá chắn.
   "/settings/modules",
+  // Metadata (Phase 2): bốn màn hình quản trị đọc sổ đối tượng + dịch vụ `lib/metadata/*` của tổ chức.
+  "/settings/data-model",
+  "/settings/forms",
+  "/settings/lists",
+  "/settings/statuses",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.

@@ -39,6 +39,13 @@ export const PERMISSION_GROUPS = [
       { key: "landing:config", label: "Đơn landing page: cấu hình sheet", hint: "Link Google Sheet, cột, phí ship, kho mặc định" },
       { key: "returns:view", label: "Đổi / trả hàng" },
       { key: "customers:view", label: "Khách hàng" },
+      /*
+        Phase 2 (metadata): ghi THÔNG TIN BỔ SUNG của khách (field custom, form "Hồ sơ bổ sung") và tạo khách qua
+        form ở tổ chức KHÔNG dùng Pancake. Tách khỏi `customers:view` vì xem ≠ sửa; mặc định chỉ Quản trị (loại
+        khỏi mẫu Quản lý), vai trò tuỳ chỉnh vẫn cấp được. Không chạm con số nghiệp vụ nào — field custom không đi
+        vào ORDER_OUTCOME / tồn kho / COD.
+      */
+      { key: "customers:write", label: "Khách hàng: tạo & sửa thông tin bổ sung", hint: "Sửa field bổ sung / hồ sơ bổ sung của khách; tạo khách bằng form khi tổ chức không đồng bộ từ Pancake." },
     ],
   },
   {
@@ -185,6 +192,13 @@ export const PERMISSION_GROUPS = [
         quyền không ai quyết định cấp) và vai trò tuỳ chỉnh không cấp được (`ROLE_BUILDER_FORBIDDEN`).
       */
       { key: "modules:manage", label: "Bật / tắt module của tổ chức", hint: "Chọn module và tính năng tổ chức dùng. Bật một module mở cả màn hình, quyền và job của nó cho mọi người trong tổ chức." },
+      /*
+        Phase 2 — METADATA (docs/platform/phase-2-contracts.md M11): thêm field, sửa form / danh sách /
+        nhãn trạng thái của tổ chức. Đổi cấu hình là đổi thứ mọi người trong tổ chức nhìn thấy và nhập
+        vào ⇒ quyền cấu hình cấp cao, cùng nhóm `modules:manage`: loại khỏi mẫu MANAGER, vai trò tuỳ chỉnh
+        không cấp được.
+      */
+      { key: "metadata:manage", label: "Cấu hình dữ liệu (field, form, danh sách, trạng thái)", hint: "Thêm field custom cho khách hàng / đơn hàng…, sắp xếp form và danh sách, đổi nhãn trạng thái. Có hiệu lực ngay khi xuất bản, không cần deploy." },
       { key: "platform:operate", label: "Vận hành nền tảng (mọi tổ chức)", hint: "Chỉ người của tổ chức nhà: xem sức khoẻ nền tảng, danh sách tổ chức, đổi module của tổ chức khác." },
       // ═══ Company OS · Agent G ═══ — xem `withDerivedApprovalDecide()` cuối tệp.
       {
@@ -281,7 +295,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "customers:write"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

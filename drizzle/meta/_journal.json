@@ -1072,6 +1072,13 @@
       "when": 1790506027148,
       "tag": "0153_production_topic_members",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1790506068385,
+      "tag": "0154_metadata_foundation",
+      "breakpoints": true
     }
   ]
 }

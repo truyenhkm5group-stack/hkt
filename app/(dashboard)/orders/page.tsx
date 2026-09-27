@@ -12,16 +12,27 @@ import { FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_ORDER } from "@/lib/consta
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
+import { applyStatusFacet, statusLabelOverrides } from "@/components/metadata/runtime-core";
+import { objectDef } from "@/lib/constants/object-registry";
+import { getListMetadata, getSystemStatusOptions, listCustomValuesFor } from "@/lib/queries/metadata-lists";
 
 export const metadata = { title: "Đơn hàng" };
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("ORDERS", "orders:read");
+  const { user, decision } = await requireResource("ORDERS", "orders:read");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Đơn hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
-  const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params)]);
+  /*
+    Danh sách theo metadata (M9, M10) — CHỈ HIỂN THỊ: thứ tự/ẩn cột có sẵn, cột custom, nhãn / thứ tự /
+    ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
+    đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
+  */
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage")]);
+  const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
+  const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
+  const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
   return (
@@ -70,7 +81,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         searchPlaceholder="Mã đơn, SĐT, tên khách, mã vận đơn, SKU…"
         period={{ defaultKey: "30d" }}
         facets={[
-          { key: "stage", label: "Trạng thái", options: facets.stages },
+          { key: "stage", label: "Trạng thái", options: stageFacet },
           { key: "source", label: "Kênh bán", options: facets.sources },
           { key: "carrier", label: "ĐVVC", options: facets.carriers },
           /*
@@ -87,7 +98,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ]}
         resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
-      <OrdersTable rows={rows} pageCount={pageCount} total={total} />
+      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
     </div>
   );
 }
