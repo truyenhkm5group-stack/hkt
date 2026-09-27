@@ -282,6 +282,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          # Khoá Veo của Video Scale — cũng chỉ dùng cho apply-ai-env.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Chỉ dùng cho apply-sepay-env. Cùng nguyên tắc: GitHub che secret trong log, và tuyệt
           # đối KHÔNG truyền qua ô "arg" — ô đó được in nguyên văn vào log của mọi lần chạy.
           SEPAY_WEBHOOK_SECRET: ${{ secrets.SEPAY_WEBHOOK_SECRET }}
@@ -325,7 +327,7 @@ jobs:
           # `tests/ops-concurrency.test.ts::testEnvsChuyenDuXuong` khoá bất biến: MỌI khoá khai ở
           # `env:` của bước này phải có mặt ở `envs:`. Bất biến đó bắt cả LỚP lỗi, không riêng ba
           # biến đã hỏng một lần.
-          envs: ACTION,DAYS,ARG,OPS_RESULT_CERT_B64,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_DISPATCH_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,OPS_RESULT_CERT_B64,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,GEMINI_API_KEY,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_DISPATCH_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -1183,6 +1185,7 @@ jobs:
                 [ -n "${OPENAI_API_KEY:-}" ] && { upsert_env OPENAI_API_KEY "$OPENAI_API_KEY"; CHANGED=1; echo "OPENAI_API_KEY: đã ghi (${#OPENAI_API_KEY} ký tự)"; }
                 [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; CHANGED=1; echo "ANTHROPIC_API_KEY: đã ghi (${#ANTHROPIC_API_KEY} ký tự)"; }
                 [ -n "${AI_PROVIDER:-}" ] && { upsert_env AI_PROVIDER "$AI_PROVIDER"; CHANGED=1; echo "AI_PROVIDER=$AI_PROVIDER"; }
+                [ -n "${GEMINI_API_KEY:-}" ] && { upsert_env GEMINI_API_KEY "$GEMINI_API_KEY"; CHANGED=1; echo "GEMINI_API_KEY: đã ghi (${#GEMINI_API_KEY} ký tự)"; }
                 if [ "$CHANGED" = "0" ]; then echo "Không có Secret OPENAI_API_KEY / ANTHROPIC_API_KEY nào trong repo — chưa ghi gì. Thêm Secret ở Settings → Secrets and variables → Actions rồi chạy lại."; exit 1; fi
                 $C up -d app scheduler
                 sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo

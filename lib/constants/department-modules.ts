@@ -146,6 +146,13 @@ export const NAV_MODULES = [
     why: "Thư viện Media (trước 26/09/2026 tên \"Vòng mẫu QC\"): ảnh nguồn → máy dựng lô → duyệt → test → chấm → học. Người chạy quảng cáo nạp ảnh, khai luật tắt/giữ và duyệt lô.",
   },
   {
+    href: "/marketing/video-scale",
+    label: "Video Scale",
+    zone: "MARKETING",
+    permission: "ideas:view",
+    why: "Video Reels 9:16 cho MÃ WIN: ảnh sản phẩm thật → kịch bản theo góc bán → clip Veo → hậu kỳ → QC → duyệt. Cùng người chạy quảng cáo với Thư viện Media, tách màn hình vì luồng video có hàng đợi và trần tiền riêng.",
+  },
+  {
     href: "/marketing/topics",
     label: "Topic gửi sản xuất",
     zone: "MARKETING",

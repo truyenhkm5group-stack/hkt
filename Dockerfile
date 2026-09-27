@@ -1,6 +1,12 @@
 FROM node:22-alpine
 WORKDIR /app
 RUN apk add --no-cache libc6-compat openssl
+# Video Scale (docs/video-scale.md): ffmpeg/ffprobe cho hậu kỳ + QC, phông DejaVu có đủ dấu tiếng Việt cho chữ trên hình.
+# Kiểm ngay trong lúc dựng: image thiếu ffmpeg phải ĐỎ ở đây (AGENTS.md mục 65), không đợi tới lượt hậu kỳ đầu tiên.
+RUN apk add --no-cache ffmpeg font-dejavu \
+  && ffmpeg -hide_banner -version | head -n 1 \
+  && ffprobe -hide_banner -version | head -n 1 \
+  && test -f /usr/share/fonts/dejavu/DejaVuSans-Bold.ttf
 
 # Cài dependencies (bao gồm devDependencies để build & chạy drizzle-kit/tsx)
 COPY package.json package-lock.json ./

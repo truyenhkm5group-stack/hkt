@@ -1,0 +1,289 @@
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
+import { vnDay } from "@/lib/constants/marketing-decision-ledger";
+import { MODEL_STATE_LABELS, isModelState } from "@/lib/constants/model-lifecycle";
+import type { VideoQcVerdict, VideoReviewMode, VideoScript } from "@/lib/constants/video-scale";
+
+/**
+ * ═══════════ ĐỌC CHO MÀN HÌNH VIDEO SCALE ═══════════
+ *
+ * Chỉ đọc. "Mã win" = mẫu người đã KHAI từ "Thắng test" trở đi (`CAMPAIGN_WIN_STATES`, cùng danh sách của "Đăng camp") —
+ * máy không tự coi một mã là thắng.
+ */
+
+const tRun = schema.videoScaleRuns;
+const tVar = schema.videoScaleVariants;
+const tJob = schema.videoScaleJobs;
+
+export type WinProductRow = {
+  productId: string;
+  name: string;
+  code: string;
+  image: string | null;
+  stateLabel: string;
+  photoCount: number;
+  reviewMode: VideoReviewMode | null;
+  runs: number;
+  inProduction: number;
+  awaitingReview: number;
+  approved: number;
+};
+
+export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
+  const tProd = schema.products;
+  const tModel = schema.productModels;
+  const tSrc = schema.creativeSources;
+  const rows = await db
+    .select({ productId: tProd.id, name: tProd.name, customId: tProd.customId, modelCode: tModel.code, image: tProd.image, state: tModel.lifecycleState })
+    .from(tModel)
+    .innerJoin(tProd, eq(tProd.id, tModel.productId))
+    .where(inArray(tModel.lifecycleState, [...CAMPAIGN_WIN_STATES]))
+    .orderBy(asc(tModel.code));
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.productId);
+  const [photos, skus, variantStats, runStats] = await Promise.all([
+    db
+      .select({ productId: tSrc.productId, n: sql<string>`count(*)` })
+      .from(tSrc)
+      .where(and(inArray(tSrc.productId, ids), eq(tSrc.kind, "PRODUCT_PHOTO"), eq(tSrc.active, true), isNotNull(tSrc.imageId)))
+      .groupBy(tSrc.productId),
+    db.select({ productId: schema.videoScaleSkus.productId, reviewMode: schema.videoScaleSkus.reviewMode }).from(schema.videoScaleSkus).where(inArray(schema.videoScaleSkus.productId, ids)),
+    db
+      .select({
+        productId: tVar.productId,
+        prod: sql<string>`count(*) filter (where ${tVar.status} in ('SCRIPTED','GENERATING','RENDERING','QC'))`,
+        review: sql<string>`count(*) filter (where ${tVar.status} = 'REVIEW')`,
+        approved: sql<string>`count(*) filter (where ${tVar.status} = 'APPROVED')`,
+      })
+      .from(tVar)
+      .where(inArray(tVar.productId, ids))
+      .groupBy(tVar.productId),
+    db.select({ productId: tRun.productId, n: sql<string>`count(*)` }).from(tRun).where(inArray(tRun.productId, ids)).groupBy(tRun.productId),
+  ]);
+  const photoBy = new Map(photos.map((p) => [p.productId, Number(p.n)]));
+  const skuBy = new Map(skus.map((s) => [s.productId, s.reviewMode as VideoReviewMode]));
+  const vBy = new Map(variantStats.map((v) => [v.productId, v]));
+  const rBy = new Map(runStats.map((r) => [r.productId, Number(r.n)]));
+  return rows.map((r) => {
+    const v = vBy.get(r.productId);
+    return {
+      productId: r.productId,
+      name: r.name,
+      code: r.modelCode || r.customId || "",
+      image: r.image,
+      stateLabel: r.state && isModelState(r.state) ? MODEL_STATE_LABELS[r.state] : "",
+      photoCount: photoBy.get(r.productId) ?? 0,
+      reviewMode: skuBy.get(r.productId) ?? null,
+      runs: rBy.get(r.productId) ?? 0,
+      inProduction: Number(v?.prod ?? 0),
+      awaitingReview: Number(v?.review ?? 0),
+      approved: Number(v?.approved ?? 0),
+    };
+  });
+}
+
+export type SourcePhoto = { id: string; imageId: string; title: string };
+
+export async function listProductPhotos(db: Db, productId: string): Promise<SourcePhoto[]> {
+  const tSrc = schema.creativeSources;
+  const rows = await db
+    .select({ id: tSrc.id, imageId: tSrc.imageId, title: tSrc.title })
+    .from(tSrc)
+    .where(and(eq(tSrc.productId, productId), eq(tSrc.kind, "PRODUCT_PHOTO"), eq(tSrc.active, true), isNotNull(tSrc.imageId)))
+    .orderBy(desc(tSrc.createdAt))
+    .limit(24);
+  return rows.map((r) => ({ id: r.id, imageId: r.imageId as string, title: r.title }));
+}
+
+export type RunRow = {
+  id: string;
+  productId: string;
+  productName: string;
+  status: string;
+  variantsRequested: number;
+  variants: number;
+  isTest: boolean;
+  createdBy: string;
+  createdAt: Date;
+  error: string;
+  /** Tiền ước tính theo bảng giá (clip đã xong + kịch bản + QC). `null` = CHƯA BIẾT. */
+  costUsd: number | null;
+  /** Tiền giữ chỗ trong trần (gồm lượt hỏng). */
+  reservedUsd: number;
+};
+
+export async function listRuns(db: Db, limit = 30): Promise<RunRow[]> {
+  const tProd = schema.products;
+  const rows = await db
+    .select({
+      id: tRun.id,
+      productId: tRun.productId,
+      productName: tProd.name,
+      status: tRun.status,
+      variantsRequested: tRun.variantsRequested,
+      isTest: tRun.isTest,
+      createdBy: tRun.createdBy,
+      createdAt: tRun.createdAt,
+      error: tRun.error,
+      // Câu con tương quan: viết TÊN BẢNG tường minh — `${tRun.id}` trong câu con có thể in thành "id" trần và so nhầm với
+      // cột id của chính bảng con (sai im lặng, đã cắn một lần trong kho).
+      variants: sql<string>`(select count(*) from "video_scale_variants" vv where vv."run_id" = "video_scale_runs"."id")`,
+      cost: sql<string | null>`(select sum(jj."cost_usd") from "video_scale_jobs" jj where jj."run_id" = "video_scale_runs"."id")`,
+      reserved: sql<string>`(select coalesce(sum(jj."reserved_usd"), 0) from "video_scale_jobs" jj where jj."run_id" = "video_scale_runs"."id")`,
+    })
+    .from(tRun)
+    .innerJoin(tProd, eq(tProd.id, tRun.productId))
+    .orderBy(desc(tRun.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({ ...r, variants: Number(r.variants), costUsd: r.cost === null ? null : Number(r.cost), reservedUsd: Number(r.reserved) }));
+}
+
+export type VariantCard = {
+  id: string;
+  runId: string;
+  productId: string;
+  productName: string;
+  seq: number;
+  angle: string;
+  status: string;
+  script: VideoScript;
+  sourceImageId: string | null;
+  finalAssetId: string | null;
+  thumbnailAssetId: string | null;
+  durationMs: number | null;
+  qcVerdict: VideoQcVerdict | null;
+  qc: Record<string, unknown>;
+  reviewedBy: string;
+  reviewNote: string;
+  autoApproved: boolean;
+  isTest: boolean;
+  error: string;
+  createdAt: Date;
+};
+
+export async function listVariants(db: Db, filter: { statuses?: string[]; runId?: string; limit?: number }): Promise<VariantCard[]> {
+  const tProd = schema.products;
+  const tSrc = schema.creativeSources;
+  const rows = await db
+    .select({
+      id: tVar.id,
+      runId: tVar.runId,
+      productId: tVar.productId,
+      productName: tProd.name,
+      seq: tVar.seq,
+      angle: tVar.angle,
+      status: tVar.status,
+      script: tVar.script,
+      sourceImageId: tSrc.imageId,
+      finalAssetId: tVar.finalAssetId,
+      thumbnailAssetId: tVar.thumbnailAssetId,
+      durationMs: tVar.durationMs,
+      qcVerdict: tVar.qcVerdict,
+      qc: tVar.qc,
+      reviewedBy: tVar.reviewedBy,
+      reviewNote: tVar.reviewNote,
+      autoApproved: tVar.autoApproved,
+      isTest: tVar.isTest,
+      error: tVar.error,
+      createdAt: tVar.createdAt,
+    })
+    .from(tVar)
+    .innerJoin(tProd, eq(tProd.id, tVar.productId))
+    .leftJoin(tSrc, eq(tSrc.id, tVar.sourceId))
+    .where(and(filter.statuses?.length ? inArray(tVar.status, filter.statuses) : undefined, filter.runId ? eq(tVar.runId, filter.runId) : undefined))
+    .orderBy(desc(tVar.createdAt), asc(tVar.seq))
+    .limit(filter.limit ?? 60);
+  return rows.map((r) => ({ ...r, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null }));
+}
+
+export type JobRowView = {
+  id: string;
+  kind: string;
+  status: string;
+  runId: string | null;
+  variantId: string | null;
+  sceneIndex: number | null;
+  productName: string | null;
+  attempts: number;
+  maxAttempts: number;
+  error: string;
+  errorKind: string;
+  costUsd: number | null;
+  reservedUsd: number | null;
+  nextRunAt: Date;
+  lockedUntil: Date | null;
+  updatedAt: Date;
+  isTest: boolean;
+};
+
+export async function listJobs(db: Db, opts: { active: boolean; limit?: number }): Promise<JobRowView[]> {
+  const tProd = schema.products;
+  const rows = await db
+    .select({
+      id: tJob.id,
+      kind: tJob.kind,
+      status: tJob.status,
+      runId: tJob.runId,
+      variantId: tJob.variantId,
+      sceneIndex: tJob.sceneIndex,
+      productName: tProd.name,
+      attempts: tJob.attempts,
+      maxAttempts: tJob.maxAttempts,
+      error: tJob.error,
+      errorKind: tJob.errorKind,
+      costUsd: tJob.costUsd,
+      reservedUsd: tJob.reservedUsd,
+      nextRunAt: tJob.nextRunAt,
+      lockedUntil: tJob.lockedUntil,
+      updatedAt: tJob.updatedAt,
+      isTest: tJob.isTest,
+    })
+    .from(tJob)
+    .leftJoin(tRun, eq(tRun.id, tJob.runId))
+    .leftJoin(tProd, eq(tProd.id, tRun.productId))
+    .where(opts.active ? inArray(tJob.status, ["QUEUED", "RUNNING", "WAITING", "BLOCKED"]) : inArray(tJob.status, ["FAILED", "SUCCEEDED", "CANCELLED"]))
+    .orderBy(opts.active ? asc(tJob.nextRunAt) : desc(tJob.updatedAt))
+    .limit(opts.limit ?? 80);
+  return rows;
+}
+
+export type SpendToday = { day: string; reservedUsd: number; estimatedUsd: number; clips: number };
+
+/** Tiền sinh video hôm nay (giờ VN): giữ chỗ trong trần (gồm lượt hỏng) và ước tính của clip đã xong. */
+export async function videoSpendOnDay(db: Db, now = new Date()): Promise<SpendToday> {
+  const day = vnDay(now);
+  const [r] = await db
+    .select({
+      reserved: sql<string>`coalesce(sum(${tJob.reservedUsd}), 0)`,
+      est: sql<string>`coalesce(sum(${tJob.costUsd}), 0)`,
+      clips: sql<string>`count(*) filter (where ${tJob.reservedUsd} is not null)`,
+    })
+    .from(tJob)
+    .where(and(eq(tJob.kind, "CLIP"), eq(tJob.costDay, day)));
+  return { day, reservedUsd: Number(r?.reserved ?? 0), estimatedUsd: Number(r?.est ?? 0), clips: Number(r?.clips ?? 0) };
+}
+
+export type MusicRow = { id: string; title: string; licenseNote: string; assetId: string; active: boolean; uploadedBy: string; createdAt: Date };
+
+export async function listMusic(db: Db): Promise<MusicRow[]> {
+  const tModel = schema.videoScaleMusic;
+  return db.select({ id: tModel.id, title: tModel.title, licenseNote: tModel.licenseNote, assetId: tModel.assetId, active: tModel.active, uploadedBy: tModel.uploadedBy, createdAt: tModel.createdAt }).from(tModel).orderBy(desc(tModel.createdAt));
+}
+
+export type VideoScaleCounts = { review: number; activeJobs: number; blockedJobs: number; failedJobs24h: number };
+
+export async function loadVideoScaleCounts(db: Db, now = new Date()): Promise<VideoScaleCounts> {
+  const since = new Date(now.getTime() - 86_400_000);
+  const [v, j] = await Promise.all([
+    db.select({ n: sql<string>`count(*)` }).from(tVar).where(eq(tVar.status, "REVIEW")),
+    db
+      .select({
+        active: sql<string>`count(*) filter (where ${tJob.status} in ('QUEUED','RUNNING','WAITING'))`,
+        blocked: sql<string>`count(*) filter (where ${tJob.status} = 'BLOCKED')`,
+        failed: sql<string>`count(*) filter (where ${tJob.status} = 'FAILED' and ${tJob.updatedAt} >= ${since})`,
+      })
+      .from(tJob),
+  ]);
+  return { review: Number(v[0]?.n ?? 0), activeJobs: Number(j[0]?.active ?? 0), blockedJobs: Number(j[0]?.blocked ?? 0), failedJobs24h: Number(j[0]?.failed ?? 0) };
+}

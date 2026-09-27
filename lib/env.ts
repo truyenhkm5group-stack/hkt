@@ -155,6 +155,34 @@ export const env = {
     },
   },
   /**
+   * Gemini API — CHỈ cho máy sinh video Veo của Video Scale (`lib/video-scale/providers/veo.ts`). Khoá đi vào tiêu đề
+   * `x-goog-api-key`, không log, không ghi sổ, không vào câu lỗi. KHÁC khoá của bot chat (bot đọc `/data/bot.env`
+   * riêng trong container của nó — ERP không đọc được và không được đọc khoá ấy).
+   */
+  gemini: {
+    get apiKey() {
+      return read("GEMINI_API_KEY");
+    },
+  },
+  /** Video Scale — công cụ hậu kỳ và bộ sinh giả (chỉ ngoài production). */
+  videoScale: {
+    /** Đường dẫn `ffmpeg` / `ffprobe` — mặc định tìm trên PATH (image Docker cài bằng `apk add ffmpeg`). */
+    get ffmpegPath() {
+      return read("FFMPEG_PATH", "ffmpeg");
+    },
+    get ffprobePath() {
+      return read("FFPROBE_PATH", "ffprobe");
+    },
+    /** Phông có đủ dấu tiếng Việt cho chữ trên hình. Image Docker: `font-dejavu`. */
+    get fontFile() {
+      return read("VIDEO_FONT_FILE", "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf");
+    },
+    /** `1` ⇒ cho phép bộ sinh GIẢ — chỉ có hiệu lực khi `NODE_ENV !== 'production'` (`fakeProviderAllowed`). */
+    get fakeProviderFlag() {
+      return read("VIDEO_PROVIDER_FAKE");
+    },
+  },
+  /**
    * SePay — cổng Open Banking đẩy biến động số dư realtime về ERP.
    *
    * HMAC là đường chính (`SEPAY_WEBHOOK_SECRET`). API key chỉ là đường lùi cho lúc dựng thử: nó

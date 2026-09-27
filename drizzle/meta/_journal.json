@@ -1079,6 +1079,13 @@
       "when": 1790506068385,
       "tag": "0154_metadata_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1790566027148,
+      "tag": "0155_video_scale",
+      "breakpoints": true
     }
   ]
 }

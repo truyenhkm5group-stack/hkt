@@ -60,6 +60,8 @@ if [ -f .env ]; then
   [ -n "${OPENAI_API_KEY:-}" ] && upsert_env OPENAI_API_KEY "${OPENAI_API_KEY}"
   [ -n "${ANTHROPIC_API_KEY:-}" ] && upsert_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY}"
   [ -n "${AI_PROVIDER:-}" ] && upsert_env AI_PROVIDER "${AI_PROVIDER}"
+  # Máy sinh video Veo (Video Scale): cùng luật khoá API — Secret trống không xoá khoá đang dùng.
+  [ -n "${GEMINI_API_KEY:-}" ] && upsert_env GEMINI_API_KEY "${GEMINI_API_KEY}"
   # Webhook SePay: cũng CHỈ ghi khi Secret có giá trị. Secret chưa đặt mà ghi đè rỗng là làm
   # chết đường realtime đang chạy — mọi gói tin sau đó bị từ chối 401 mà không ai hiểu vì sao.
   [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && upsert_env SEPAY_WEBHOOK_SECRET "${SEPAY_WEBHOOK_SECRET}"
@@ -181,10 +183,11 @@ fi
 #   ADS_WRITE_ENABLED            chốt ngoài cùng của đường ghi quảng cáo Meta    → false
 #   ADS_WRITE_MODE               nấc quyền ghi quảng cáo                         → OFF
 #   CREATIVE_LOOP_EVERY_MINUTES  vòng mẫu quảng cáo — sinh ảnh, CHI TIỀN THẬT    → 0 (không vào lịch)
+#   VIDEO_SCALE_EVERY_MINUTES    Video Scale — sinh video Veo, CHI TIỀN THẬT     → 0 (không vào lịch)
 #
 # Chạy SAU cả hai nhánh (có sẵn .env / tạo mới) để lần cài đầu cũng nhận Variable, không chỉ lần sau.
 # Giá trị không phải bí mật (một chuỗi "true", một tên nấc, một con số phút) nên được in ra log.
-CONG_TAC_AN_TOAN="ADS_WRITE_ENABLED=false ADS_WRITE_MODE=OFF CREATIVE_LOOP_EVERY_MINUTES=0"
+CONG_TAC_AN_TOAN="ADS_WRITE_ENABLED=false ADS_WRITE_MODE=OFF CREATIVE_LOOP_EVERY_MINUTES=0 VIDEO_SCALE_EVERY_MINUTES=0"
 for cap in $CONG_TAC_AN_TOAN; do
   ten="${cap%%=*}"
   gia_tri_tat="${cap#*=}"

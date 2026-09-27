@@ -50,6 +50,7 @@ import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
+import { runVideoScaleTick } from "@/lib/video-scale/pipeline";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 
@@ -135,6 +136,30 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
           r.manualGen && (r.manualGen.drawn || r.manualGen.failed) ? `gen tay: vẽ ${r.manualGen.drawn} · lỗi ${r.manualGen.failed}` : "",
         ].filter(Boolean).join(" · ");
         if (r.warnings.length) ctx.summary.warning = r.warnings.slice(0, 5).join(" | ");
+        return r;
+      }),
+  },
+  /*
+    VIDEO SCALE CHO MÃ WIN — một lượt hàng đợi: viết kịch bản, gửi / hỏi clip Veo, hậu kỳ ffmpeg, QC. Đặc tả:
+    `docs/video-scale.md`.
+
+    CHI TIỀN THẬT (Veo tính theo giây video) — nên KHÔNG có trong lịch mặc định: chủ shop bật bằng
+    `VIDEO_SCALE_EVERY_MINUTES`. Không bật thì hàng đợi vẫn chạy sau mỗi cú bấm (`after()`, tối đa 15 phút); lượt vòng này
+    là lưới an toàn khi tiến trình chết giữa chừng. Trần tiền ngày đọc ở cấu hình hiện tại trước MỖI clip.
+  */
+  "video-scale": {
+    label: "Video Scale — hàng đợi video",
+    source: "ALL",
+    module: "connector_meta",
+    description:
+      "Một lượt hàng đợi Video Scale: viết kịch bản cho lượt mới, gửi clip sang Veo trong trần tiền ngày và giới hạn đồng thời, hỏi / tải clip đã xong, hậu kỳ bằng ffmpeg, kiểm chất lượng. Lũy đẳng — việc cầm có hạn, khoá chống trùng theo (biến thể, cảnh).",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "video-scale", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runVideoScaleTick(await getDb(), { budgetMs: 4 * 60_000 });
+        ctx.summary.updated = r.handled;
+        ctx.summary.failed = r.errors.length;
+        ctx.summary.detail = [Object.entries(r.byKind).map(([k, n]) => `${k} ${n}`).join(" · "), r.purged ? `xoá nội dung ${r.purged} tệp quá hạn giữ` : ""].filter(Boolean).join(" · ");
+        if (r.errors.length) ctx.summary.warning = r.errors.slice(0, 5).join(" | ");
         return r;
       }),
   },
@@ -727,6 +752,7 @@ export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
   "pancake-all": "pancake",
   "landing-push": "pancake",
   "cs-chat": "pancake-pages",
+  "video-scale": "gemini",
   "failed-delivery": "pancake-pages",
   "phone-verify": "pancake-pages",
   "outreach-build": "pancake-pages",

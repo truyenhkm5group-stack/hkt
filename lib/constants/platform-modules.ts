@@ -287,11 +287,11 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     dependsOn: ["orders"],
     features: [
       { key: "marketing.meta_ads", label: "Hiệu quả quảng cáo", defaultEnabled: true, why: "`/ads` — chi tiêu theo chiến dịch / mã / marketer (luật 67)." },
-      { key: "marketing.creative_library", label: "Ý tưởng & thư viện creative", defaultEnabled: true, why: "`/ideas`, `/marketing/creatives`." },
+      { key: "marketing.creative_library", label: "Ý tưởng & thư viện creative", defaultEnabled: true, why: "`/ideas`, `/marketing/creatives`, `/marketing/video-scale`." },
       { key: "marketing.profitability", label: "Lợi nhuận theo fanpage / marketer", defaultEnabled: true, why: "`/marketing/fanpages` — quy kết đơn theo ảnh chụp phân công fanpage." },
       { key: "marketing.outreach", label: "Chăm sóc & bán chéo", defaultEnabled: true, why: "`/outreach` — gửi tin hàng loạt, kịch bản chăm sóc." },
     ],
-    routes: ["/ads", "/ideas", "/marketing", "/outreach", "/api/ideas", "/api/creative"],
+    routes: ["/ads", "/ideas", "/marketing", "/outreach", "/api/ideas", "/api/creative", "/api/video-scale"],
     permissions: ["ideas:view", "ideas:write", "ideas:review", "outreach:view", "outreach:send", "outreach:config"],
     why: "Tiền quảng cáo đổi ra đơn — không có đơn thì không đo được hiệu quả. `expenses:*` và `reports:nominal` gác cả trang Marketing lẫn Tài chính nên không thuộc riêng ai.",
   },
