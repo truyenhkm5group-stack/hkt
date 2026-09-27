@@ -70,7 +70,8 @@ export async function sleep(ms: number) {
 export type FetchJsonOptions = {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  /** Chuỗi (JSON / form), hoặc byte thô (tải video lên Facebook `rupload`). */
+  body?: string | Uint8Array;
   timeoutMs?: number;
   retries?: number;
   serviceName: string;
@@ -93,7 +94,8 @@ export async function fetchJson(url: string | URL, options: FetchJsonOptions): P
       response = await fetch(url, {
         method,
         headers: { accept: "application/json", ...(body ? { "content-type": "application/json" } : {}), ...headers },
-        body,
+        // Uint8Array là BodyInit hợp lệ lúc chạy; kiểu DOM của TS chỉ nhận ArrayBuffer (không nhận ArrayBufferLike).
+        body: body as BodyInit | undefined,
         signal: AbortSignal.timeout(timeoutMs),
         cache: "no-store",
       });

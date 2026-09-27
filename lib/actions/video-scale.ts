@@ -11,7 +11,12 @@ import { bindOrganization } from "@/lib/platform/background";
 import { listProductPhotos, type SourcePhoto } from "@/lib/queries/video-scale";
 import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, retryVideoJob } from "@/lib/video-scale/pipeline";
 import { storeAsset } from "@/lib/video-scale/storage";
-import { videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema } from "@/lib/validation/video-scale";
+import { videoCaptionSchema, videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoPageConfigSchema, videoPauseSchema, videoPublishSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema, videoSkuPublishingSchema } from "@/lib/validation/video-scale";
+import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
+import { finalCaptionProblems } from "@/lib/video-scale/caption";
+import { loadProductFacts } from "@/lib/video-scale/facts";
+import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/video-scale/publish";
+import { enqueueJob } from "@/lib/video-scale/queue";
 
 /**
  * ═══════════ VIDEO SCALE — SERVER ACTIONS ═══════════
@@ -216,5 +221,155 @@ export async function kickVideoQueueAction(): Promise<{ ok: true } | Fail> {
   const user = await requireUser();
   if (!can(user, "ideas:write")) return { error: "Bạn không có quyền chạy hàng đợi video" };
   await drainAfterResponse();
+  return { ok: true };
+}
+
+// ───────────────────────────── PR 2 — CONTENT + ĐĂNG REEL ─────────────────────────────
+//
+// Quyền: sửa / chốt content · đăng / hẹn · huỷ bài — `ideas:write` (biên tập, không tiêu tiền quảng cáo). Gán fanpage cho mã và
+// bật TỰ ĐĂNG cho fanpage — `expenses:write` hoặc `settings:manage` (quyết định để máy đăng thay người). Dừng khẩn cấp: KÉO
+// — `ideas:write` hoặc `expenses:write` (ai thấy sai cũng dừng được); NHẢ — `expenses:write` hoặc `settings:manage`.
+
+async function captionFacts(variantId: string) {
+  const db = await getDb();
+  const [v] = await db.select({ productId: schema.videoScaleVariants.productId }).from(schema.videoScaleVariants).where(eq(schema.videoScaleVariants.id, variantId)).limit(1);
+  if (!v) return null;
+  const cfg = await readVideoScaleConfig(db);
+  return loadProductFacts(db, v.productId, null, cfg.policyLines);
+}
+
+export async function saveVideoCaptionAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền sửa content" };
+  const parsed = videoCaptionSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const facts = await captionFacts(parsed.data.variantId);
+  if (!facts) return { error: "Không tìm thấy video" };
+  const problems = finalCaptionProblems(parsed.data.caption, facts);
+  if (problems.length) return { error: `Content chưa lưu được: ${problems.slice(0, 3).join("; ")}` };
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const V = schema.videoScaleVariants;
+  const [before] = await db.select({ caption: V.caption, captionState: V.captionState }).from(V).where(eq(V.id, parsed.data.variantId)).limit(1);
+  await db.update(V).set({ caption: parsed.data.caption.trim(), captionState: "READY", captionByUserId: actor.id, captionBy: actor.label, captionAt: new Date() }).where(eq(V.id, parsed.data.variantId));
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_CAPTION_SAVE", entity: "VIDEO_SCALE_VARIANT", entityId: parsed.data.variantId, before, after: { caption: parsed.data.caption.trim() } });
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function regenerateVideoCaptionAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền viết content" };
+  const parsed = videoIdSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu video" };
+  const db = await getDb();
+  const V = schema.videoScaleVariants;
+  const [v] = await db.select({ id: V.id, runId: V.runId, status: V.status, isTest: V.isTest }).from(V).where(eq(V.id, parsed.data.id)).limit(1);
+  if (!v || v.status !== "APPROVED") return { error: "Chỉ viết content cho video ĐÃ DUYỆT." };
+  await enqueueJob(db, { kind: "CAPTION", key: `caption:${v.id}:${Date.now()}`, runId: v.runId, variantId: v.id, isTest: v.isTest, createdByUserId: user.id });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_CAPTION_REGENERATE", entity: "VIDEO_SCALE_VARIANT", entityId: v.id });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function publishVideoReelAction(raw: unknown): Promise<{ ok: true; postId: string } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền đăng Reel" };
+  const parsed = videoPublishSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  let publishAt: Date | null = null;
+  if (parsed.data.publishAt) {
+    publishAt = new Date(parsed.data.publishAt);
+    if (!Number.isFinite(publishAt.getTime())) return { error: "Giờ hẹn không hợp lệ." };
+  }
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const r = await requestReelPost(db, { variantId: parsed.data.variantId, caption: parsed.data.caption, publishAt }, actor);
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: publishAt ? "VIDEO_SCALE_REEL_SCHEDULE" : "VIDEO_SCALE_REEL_PUBLISH", entity: "VIDEO_SCALE_POST", entityId: r.postId, after: { variantId: parsed.data.variantId, publishAt: publishAt?.toISOString() ?? null, caption: parsed.data.caption } });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true, postId: r.postId };
+}
+
+export async function cancelVideoPostAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền huỷ bài" };
+  const parsed = videoIdSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu bài" };
+  const r = await cancelReelPost(await getDb(), parsed.data.id);
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_REEL_CANCEL", entity: "VIDEO_SCALE_POST", entityId: parsed.data.id });
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function setVideoSkuPublishingAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write") && !can(user, "settings:manage")) return { error: "Gán fanpage cho mã là quyết định của quản lý (chi phí: sửa hoặc cấu hình hệ thống)." };
+  const parsed = videoSkuPublishingSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  if (d.pageId) {
+    // Chỉ nhận fanpage ERP ĐÃ BIẾT (đồng bộ từ Pancake) — không nhận một mã gõ tay.
+    const [f] = await db.select({ id: schema.fanpages.externalPageId }).from(schema.fanpages).where(eq(schema.fanpages.externalPageId, d.pageId)).limit(1);
+    if (!f) return { error: "Fanpage này không có trong danh sách fanpage của ERP." };
+  }
+  const actor = await actorOf(user.id, user.email);
+  const T = schema.videoScaleSkus;
+  const [before] = await db.select({ pageId: T.pageId, publishMode: T.publishMode }).from(T).where(eq(T.productId, d.productId)).limit(1);
+  const set = { pageId: d.pageId || null, publishMode: d.publishMode || null, updatedByUserId: actor.id, updatedBy: actor.label };
+  await db.insert(T).values({ productId: d.productId, ...set }).onConflictDoUpdate({ target: T.productId, set: { ...set, updatedAt: new Date() } });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_SKU_PUBLISHING", entity: "VIDEO_SCALE_SKU", entityId: d.productId, before: before ?? null, after: set });
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function setVideoPageConfigAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write") && !can(user, "settings:manage")) return { error: "Bật tự đăng cho fanpage là quyết định của quản lý (chi phí: sửa hoặc cấu hình hệ thống)." };
+  const parsed = videoPageConfigSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const T = schema.videoScalePages;
+  const [before] = await db.select({ publishMode: T.publishMode, maxPostsPerDay: T.maxPostsPerDay }).from(T).where(eq(T.pageId, d.pageId)).limit(1);
+  const set = { publishMode: d.publishMode, maxPostsPerDay: d.maxPostsPerDay, updatedByUserId: actor.id, updatedBy: actor.label };
+  await db.insert(T).values({ pageId: d.pageId, ...set }).onConflictDoUpdate({ target: T.pageId, set: { ...set, updatedAt: new Date() } });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_PAGE_CONFIG", entity: "VIDEO_SCALE_PAGE", entityId: d.pageId, before: before ?? null, after: set });
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/** DỪNG KHẨN CẤP cấp mã / fanpage / toàn module. Có hiệu lực ở lượt việc KẾ TIẾP (cổng đọc lại trước mỗi lượt). */
+export async function setVideoPauseAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  const parsed = videoPauseSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  if (d.paused && !can(user, "ideas:write") && !can(user, "expenses:write")) return { error: "Bạn không có quyền dừng Video Scale" };
+  if (!d.paused && !can(user, "expenses:write") && !can(user, "settings:manage")) return { error: "Mở lại tự động là quyết định của quản lý (chi phí: sửa hoặc cấu hình hệ thống)." };
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const now = new Date();
+  let before: unknown = null;
+  if (d.scope === "ALL") {
+    before = await readVideoAutomation(db);
+    const value = JSON.stringify({ paused: d.paused, reason: d.reason, by: actor.label, at: now.toISOString() });
+    await db.insert(schema.settings).values({ key: VIDEO_AUTOMATION_KEY, value }).onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } });
+  } else if (d.scope === "SKU") {
+    const T = schema.videoScaleSkus;
+    const set = { automationPausedAt: d.paused ? now : null, automationPausedReason: d.paused ? d.reason : "", updatedByUserId: actor.id, updatedBy: actor.label };
+    await db.insert(T).values({ productId: d.id, ...set }).onConflictDoUpdate({ target: T.productId, set: { ...set, updatedAt: now } });
+  } else {
+    const T = schema.videoScalePages;
+    const set = { pausedAt: d.paused ? now : null, pausedReason: d.paused ? d.reason : "", updatedByUserId: actor.id, updatedBy: actor.label };
+    await db.insert(T).values({ pageId: d.id, ...set }).onConflictDoUpdate({ target: T.pageId, set: { ...set, updatedAt: now } });
+  }
+  await audit({ userId: user.id, userEmail: user.email, action: d.paused ? "VIDEO_SCALE_PAUSE" : "VIDEO_SCALE_RESUME", entity: `VIDEO_SCALE_${d.scope}`, entityId: d.id || VIDEO_AUTOMATION_KEY, before, after: { paused: d.paused }, reason: d.reason });
+  revalidatePath(PATH);
   return { ok: true };
 }

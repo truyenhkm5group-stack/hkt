@@ -254,6 +254,7 @@ import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTic
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
 import { testVideoScaleDb, testVideoScalePure } from "./video-scale.test";
+import { testVideoScaleReelDb, testVideoScaleReelPure } from "./video-scale-reel.test";
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
@@ -1809,6 +1810,8 @@ async function main() {
   // Video Scale cho mã win (docs/video-scale.md): hàng đợi, trần tiền, AMBIGUOUS, hậu kỳ + QC thật khi máy có ffmpeg.
   testVideoScalePure();
   await testVideoScaleDb(db);
+  testVideoScaleReelPure();
+  await testVideoScaleReelDb(db);
   testCreativeManualDesignPure();
   await testCreativeManualDesignDb(db);
   testCreativeImportPure();

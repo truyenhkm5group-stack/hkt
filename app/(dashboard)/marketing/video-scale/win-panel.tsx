@@ -3,6 +3,7 @@ import { formatDateTime } from "@/lib/format";
 import type { MusicRow, RunRow, WinProductRow } from "@/lib/queries/video-scale";
 import { CreateRunDialog } from "./create-run-dialog";
 import { CancelRunButton, SkuModeSelect } from "./small-actions";
+import { PauseButton, SkuPublishingSelect } from "./publishing-controls";
 
 const RUN_STATUS_LABEL: Record<string, string> = {
   SCRIPTING: "Đang viết kịch bản",
@@ -14,7 +15,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 };
 
 /** Tab "Mã win": mỗi mã một thẻ — ảnh, trạng thái khai, số ảnh gốc, số video theo bước, nút tạo chiến dịch media. */
-export function WinPanel({ products, runs, music, canSpend, canEdit, canMode }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; canSpend: boolean; canEdit: boolean; canMode: boolean }) {
+export function WinPanel({ products, runs, music, pages, canSpend, canEdit, canMode, canEngage, canRelease }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canEngage: boolean; canRelease: boolean }) {
   return (
     <div className="space-y-5">
       {products.length === 0 ? (
@@ -43,6 +44,11 @@ export function WinPanel({ products, runs, music, canSpend, canEdit, canMode }: 
                   {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music.map((m) => ({ id: m.id, title: m.title }))} /> : null}
                   <SkuModeSelect productId={p.productId} value={p.reviewMode ?? "MANUAL"} disabled={!canMode} />
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SkuPublishingSelect productId={p.productId} pageId={p.pageId} publishMode={p.publishMode} pages={pages} disabled={!canMode} />
+                  <PauseButton scope="SKU" id={p.productId} paused={Boolean(p.pausedAt)} reason={p.pausedReason} canEngage={canEngage} canRelease={canRelease} label="mã" />
+                </div>
+                {p.pausedAt ? <p className="text-[12px] text-destructive">Mã đang dừng khẩn cấp{p.pausedReason ? `: ${p.pausedReason}` : ""}.</p> : null}
               </div>
             </div>
           ))}

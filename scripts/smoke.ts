@@ -187,10 +187,11 @@ const ROUTES = [
   "/marketing/creatives?tab=hoc",
   "/marketing/creatives?tab=nguon",
   "/marketing/creatives?tab=cau-hinh",
-  // Video Scale: bốn tab, bốn đường đọc (mã win + lượt · hàng đợi việc · biến thể chờ duyệt · cấu hình + nhạc).
+  // Video Scale: năm tab, năm đường đọc (mã win + lượt · hàng đợi việc · biến thể chờ duyệt · bài Reel + fanpage · cấu hình + nhạc).
   "/marketing/video-scale?tab=ma-win",
   "/marketing/video-scale?tab=hang-doi",
   "/marketing/video-scale?tab=duyet",
+  "/marketing/video-scale?tab=dang-reel",
   "/marketing/video-scale?tab=cau-hinh",
   // QUY KẾT FANPAGE → MARKETER. Ba tab đọc ba đường khác nhau trên cùng ảnh chụp `order_attributions`,
   // nên mở mỗi tab một lần mới phủ hết: bảng theo người · danh sách từng đơn · màn hình khai báo.

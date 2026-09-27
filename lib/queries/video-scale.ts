@@ -24,6 +24,12 @@ export type WinProductRow = {
   stateLabel: string;
   photoCount: number;
   reviewMode: VideoReviewMode | null;
+  /** Fanpage ĐƯỢC DUYỆT cho mã. `null` = chưa gán ⇒ không đăng được. */
+  pageId: string | null;
+  /** `null` = theo fanpage · `MANUAL_REVIEW` = mã luôn chờ người. */
+  publishMode: string | null;
+  pausedAt: Date | null;
+  pausedReason: string;
   runs: number;
   inProduction: number;
   awaitingReview: number;
@@ -48,7 +54,17 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
       .from(tSrc)
       .where(and(inArray(tSrc.productId, ids), eq(tSrc.kind, "PRODUCT_PHOTO"), eq(tSrc.active, true), isNotNull(tSrc.imageId)))
       .groupBy(tSrc.productId),
-    db.select({ productId: schema.videoScaleSkus.productId, reviewMode: schema.videoScaleSkus.reviewMode }).from(schema.videoScaleSkus).where(inArray(schema.videoScaleSkus.productId, ids)),
+    db
+      .select({
+        productId: schema.videoScaleSkus.productId,
+        reviewMode: schema.videoScaleSkus.reviewMode,
+        pageId: schema.videoScaleSkus.pageId,
+        publishMode: schema.videoScaleSkus.publishMode,
+        pausedAt: schema.videoScaleSkus.automationPausedAt,
+        pausedReason: schema.videoScaleSkus.automationPausedReason,
+      })
+      .from(schema.videoScaleSkus)
+      .where(inArray(schema.videoScaleSkus.productId, ids)),
     db
       .select({
         productId: tVar.productId,
@@ -62,7 +78,7 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
     db.select({ productId: tRun.productId, n: sql<string>`count(*)` }).from(tRun).where(inArray(tRun.productId, ids)).groupBy(tRun.productId),
   ]);
   const photoBy = new Map(photos.map((p) => [p.productId, Number(p.n)]));
-  const skuBy = new Map(skus.map((s) => [s.productId, s.reviewMode as VideoReviewMode]));
+  const skuBy = new Map(skus.map((s) => [s.productId, s]));
   const vBy = new Map(variantStats.map((v) => [v.productId, v]));
   const rBy = new Map(runStats.map((r) => [r.productId, Number(r.n)]));
   return rows.map((r) => {
@@ -74,7 +90,11 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
       image: r.image,
       stateLabel: r.state && isModelState(r.state) ? MODEL_STATE_LABELS[r.state] : "",
       photoCount: photoBy.get(r.productId) ?? 0,
-      reviewMode: skuBy.get(r.productId) ?? null,
+      reviewMode: (skuBy.get(r.productId)?.reviewMode as VideoReviewMode | undefined) ?? null,
+      pageId: skuBy.get(r.productId)?.pageId ?? null,
+      publishMode: skuBy.get(r.productId)?.publishMode ?? null,
+      pausedAt: skuBy.get(r.productId)?.pausedAt ?? null,
+      pausedReason: skuBy.get(r.productId)?.pausedReason ?? "",
       runs: rBy.get(r.productId) ?? 0,
       inProduction: Number(v?.prod ?? 0),
       awaitingReview: Number(v?.review ?? 0),
@@ -160,6 +180,12 @@ export type VariantCard = {
   isTest: boolean;
   error: string;
   createdAt: Date;
+  captionOptions: Record<string, unknown>[];
+  caption: string;
+  captionState: string;
+  captionBy: string;
+  /** Bài Reel gần nhất của biến thể (nếu có). */
+  post: { id: string; status: string; permalink: string; error: string; publishAt: Date | null; publishedAt: Date | null; auto: boolean } | null;
 };
 
 export async function listVariants(db: Db, filter: { statuses?: string[]; runId?: string; limit?: number }): Promise<VariantCard[]> {
@@ -187,6 +213,10 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
       isTest: tVar.isTest,
       error: tVar.error,
       createdAt: tVar.createdAt,
+      captionOptions: tVar.captionOptions,
+      caption: tVar.caption,
+      captionState: tVar.captionState,
+      captionBy: tVar.captionBy,
     })
     .from(tVar)
     .innerJoin(tProd, eq(tProd.id, tVar.productId))
@@ -194,7 +224,20 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
     .where(and(filter.statuses?.length ? inArray(tVar.status, filter.statuses) : undefined, filter.runId ? eq(tVar.runId, filter.runId) : undefined))
     .orderBy(desc(tVar.createdAt), asc(tVar.seq))
     .limit(filter.limit ?? 60);
-  return rows.map((r) => ({ ...r, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null }));
+  const tPost = schema.videoScalePosts;
+  const posts = rows.length
+    ? await db
+        .select({ variantId: tPost.variantId, id: tPost.id, status: tPost.status, permalink: tPost.permalink, error: tPost.error, publishAt: tPost.publishAt, publishedAt: tPost.publishedAt, auto: tPost.auto, updatedAt: tPost.updatedAt })
+        .from(tPost)
+        .where(inArray(tPost.variantId, rows.map((r) => r.id)))
+        .orderBy(desc(tPost.updatedAt))
+    : [];
+  const postBy = new Map<string, (typeof posts)[number]>();
+  for (const p of posts) if (!postBy.has(p.variantId)) postBy.set(p.variantId, p);
+  return rows.map((r) => {
+    const p = postBy.get(r.id);
+    return { ...r, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
+  });
 }
 
 export type JobRowView = {
@@ -286,4 +329,70 @@ export async function loadVideoScaleCounts(db: Db, now = new Date()): Promise<Vi
       .from(tJob),
   ]);
   return { review: Number(v[0]?.n ?? 0), activeJobs: Number(j[0]?.active ?? 0), blockedJobs: Number(j[0]?.blocked ?? 0), failedJobs24h: Number(j[0]?.failed ?? 0) };
+}
+
+// ───────────────────────────── PR 2 — ĐĂNG REEL ─────────────────────────────
+
+export type PostRow = {
+  id: string;
+  variantId: string;
+  productName: string;
+  seq: number;
+  pageId: string;
+  pageName: string;
+  status: string;
+  caption: string;
+  publishAt: Date | null;
+  publishedAt: Date | null;
+  permalink: string;
+  fbVideoId: string;
+  error: string;
+  auto: boolean;
+  authorizedBy: string;
+  createdAt: Date;
+};
+
+export async function listPosts(db: Db, limit = 60): Promise<PostRow[]> {
+  const tPost = schema.videoScalePosts;
+  const tProd = schema.products;
+  const tPage = schema.fanpages;
+  const rows = await db
+    .select({
+      id: tPost.id,
+      variantId: tPost.variantId,
+      productName: tProd.name,
+      seq: tVar.seq,
+      pageId: tPost.pageId,
+      pageName: sql<string>`coalesce(nullif(${tPage.alias}, ''), nullif(${tPage.name}, ''), ${tPost.pageId})`,
+      status: tPost.status,
+      caption: tPost.caption,
+      publishAt: tPost.publishAt,
+      publishedAt: tPost.publishedAt,
+      permalink: tPost.permalink,
+      fbVideoId: tPost.fbVideoId,
+      error: tPost.error,
+      auto: tPost.auto,
+      authorizedBy: tPost.authorizedBy,
+      createdAt: tPost.createdAt,
+    })
+    .from(tPost)
+    .innerJoin(tVar, eq(tVar.id, tPost.variantId))
+    .innerJoin(tProd, eq(tProd.id, tPost.productId))
+    .leftJoin(tPage, eq(tPage.externalPageId, tPost.pageId))
+    .orderBy(desc(tPost.createdAt))
+    .limit(limit);
+  return rows;
+}
+
+export type PageConfigRow = { pageId: string; name: string; orders30d: number; publishMode: string; maxPostsPerDay: number; pausedAt: Date | null; pausedReason: string; configured: boolean };
+
+/** Fanpage ERP đã biết (xếp theo đơn 30 ngày) + cấu hình đăng. Fanpage chưa có dòng = chờ người duyệt (mặc định an toàn). */
+export async function listPageConfigs(db: Db, pages: { id: string; name: string; orders30d: number }[]): Promise<PageConfigRow[]> {
+  const tPageCfg = schema.videoScalePages;
+  const cfg = await db.select().from(tPageCfg);
+  const by = new Map(cfg.map((c) => [c.pageId, c]));
+  return pages.map((p) => {
+    const c = by.get(p.id);
+    return { pageId: p.id, name: p.name, orders30d: p.orders30d, publishMode: c?.publishMode ?? "MANUAL_REVIEW", maxPostsPerDay: c?.maxPostsPerDay ?? 3, pausedAt: c?.pausedAt ?? null, pausedReason: c?.pausedReason ?? "", configured: Boolean(c) };
+  });
 }

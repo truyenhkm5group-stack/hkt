@@ -3,6 +3,7 @@ import type { Db } from "@/db";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { SCRIPT_LIMITS, VIDEO_ANGLE_BRIEF, VIDEO_ANGLE_LABEL, isVideoAngle, scriptTokens, type VideoAngle, type VideoScript } from "@/lib/constants/video-scale";
 import { stripPrices, wrongPrices } from "@/lib/creative/writer";
+import { claimProblems, type ClaimFacts } from "@/lib/video-scale/claims";
 import { formatVND } from "@/lib/format";
 import type { ProductFacts } from "@/lib/video-scale/facts";
 import { callOpenAiJson, extractJson, type JsonCallDeps } from "@/lib/video-scale/openai-json";
@@ -26,10 +27,6 @@ import { nearDuplicate } from "@/lib/video-scale/plan";
  */
 
 export const SCRIPT_ROUTE = "video-scale.script";
-
-export const MATERIAL_WORDS = ["lụa", "satin", "cotton", "linen", "lanh", "đũi", "voan", "chiffon", "len", "dạ", "tweed", "denim", "jean", "kaki", "nhung", "ren", "thun", "tơ", "polyester", "cashmere", "organza", "tafta", "gấm", "xô"] as const;
-export const PROMO_WORDS = ["giảm giá", "giảm", "sale", "khuyến mãi", "khuyến mại", "ưu đãi", "freeship", "free ship", "miễn phí", "tặng", "quà", "flash sale", "voucher", "mã giảm"] as const;
-export const COLOR_WORDS = ["đen", "trắng", "kem", "be", "nâu", "hồng", "đỏ", "xanh", "vàng", "cam", "tím", "xám", "ghi", "bạc", "rêu", "đô", "mận", "pastel"] as const;
 
 /** Đuôi tiếng Anh gắn TẤT ĐỊNH vào mọi câu lệnh cảnh. */
 export const VEO_KEEP_PRODUCT =
@@ -81,16 +78,6 @@ export function parseScripts(text: string): VideoScript[] | null {
 
 // ───────────────────────────── KIỂM ─────────────────────────────
 
-function norm(s: string): string {
-  return s.normalize("NFC").toLowerCase();
-}
-
-/** Từ đứng riêng (ranh giới là ký tự không phải chữ/số Unicode). */
-function hasWord(text: string, word: string): boolean {
-  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${esc}([^\\p{L}\\p{N}]|$)`, "u").test(norm(text));
-}
-
 export function vietnameseFields(s: VideoScript): { field: string; text: string }[] {
   return [
     { field: "móc câu", text: s.hook },
@@ -103,7 +90,7 @@ export function vietnameseFields(s: VideoScript): { field: string; text: string 
 }
 
 /** Lỗi của MỘT kịch bản so với sự thật về mã. Rỗng là đạt. Hàm THUẦN. */
-export function scriptProblems(s: VideoScript, expect: { angle: VideoAngle; scenes: number }, facts: Pick<ProductFacts, "name" | "priceVnd" | "sizes" | "colors" | "policyLines">): string[] {
+export function scriptProblems(s: VideoScript, expect: { angle: VideoAngle; scenes: number }, facts: ClaimFacts): string[] {
   const out: string[] = [];
   if (s.angle !== expect.angle) out.push(`góc phải là ${expect.angle}, không phải ${s.angle}`);
   if (s.scenes.length !== expect.scenes) out.push(`phải có đúng ${expect.scenes} cảnh (đang có ${s.scenes.length})`);
@@ -116,20 +103,7 @@ export function scriptProblems(s: VideoScript, expect: { angle: VideoAngle; scen
     if (c.overlay.length > SCRIPT_LIMITS.overlayMaxChars) out.push(`chữ trên hình cảnh ${i + 1} dài ${c.overlay.length} ký tự, tối đa ${SCRIPT_LIMITS.overlayMaxChars}`);
     if (c.voiceover.length > SCRIPT_LIMITS.voiceoverMaxCharsPerScene) out.push(`lời đọc cảnh ${i + 1} dài ${c.voiceover.length} ký tự, tối đa ${SCRIPT_LIMITS.voiceoverMaxCharsPerScene}`);
   });
-  const name = norm(facts.name);
-  const policy = norm(facts.policyLines.join(" \n "));
-  const sizes = new Set(facts.sizes.map((x) => norm(x).replace(/\s+/g, "")));
-  const colors = norm(facts.colors.join(" | "));
-  for (const { field, text } of vietnameseFields(s)) {
-    const bad = wrongPrices(text, facts.priceVnd);
-    if (bad.length) out.push(`${field} có con số giá "${bad.map((b) => b.raw).join('", "')}" ${facts.priceVnd === null ? "trong khi giá chưa rõ — bỏ mọi con số giá" : `khác giá ERP ${formatVND(facts.priceVnd)}`}`);
-    for (const m of norm(text).matchAll(/(?:^|[^\p{L}\p{N}])size\s+([\p{L}\p{N}]{1,4})(?=[^\p{L}\p{N}]|$)/gu)) {
-      if (!sizes.has(m[1])) out.push(`${field} nhắc "size ${m[1].toUpperCase()}" — size đang bán: ${facts.sizes.join(", ") || "chưa có dữ liệu"}`);
-    }
-    for (const w of MATERIAL_WORDS) if (hasWord(text, w) && !hasWord(name, w)) out.push(`${field} nêu chất liệu "${w}" — ERP không có dữ liệu chất liệu, không được khẳng định`);
-    for (const w of PROMO_WORDS) if (hasWord(text, w) && !policy.includes(w)) out.push(`${field} có "${w}" — chưa có chính sách bán hàng nào khai điều này`);
-    for (const w of COLOR_WORDS) if (hasWord(text, w) && !colors.includes(w)) out.push(`${field} nhắc màu "${w}" — màu đang bán: ${facts.colors.join(", ") || "chưa có dữ liệu"}`);
-  }
+  for (const { field, text } of vietnameseFields(s)) out.push(...claimProblems(field, text, facts));
   return out;
 }
 
