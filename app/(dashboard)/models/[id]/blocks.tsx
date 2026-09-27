@@ -231,6 +231,7 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
   const list: ModelSuggestion[] = stock && stock.ok ? mergeStockFeedbackSuggestions(base, stock.data.recommendations) : base;
   return (
     <SectionCard
+      id="de-xuat"
       title="Đề xuất"
       hint="Chỉ dựng từ quyết định ĐÃ CÓ: bảng quyết định quảng cáo (Tăng ngân sách / Cắt), bộ máy quyết định tồn (đặt thêm — số đã trừ hàng đặt xưởng; chôn vốn / nên xả), tín hiệu mẫu THẮNG khi vòng đời chưa tới bước trao đổi sản xuất; tín hiệu TRIỂN VỌNG ⇒ mở topic sản xuất SỚM, chạy song song với test quảng cáo, vòng đời không đổi (quy tắc chủ shop 25/09/2026); mẫu đã khai THẮNG mà sản xuất đi trước ⇒ chuyển vòng đời tới đúng chỗ sản xuất đang đứng. Vòng phản hồi tồn → creative / quảng cáo: tồn chậm ⇒ làm creative mới / đẩy qua khách cũ; quảng cáo đề nghị tăng mà sắp hết hàng ⇒ đừng tăng. Không có quyết định thì không có đề xuất. Mọi đề xuất là để NGƯỜI bấm — không có gì tự áp."
       actions={

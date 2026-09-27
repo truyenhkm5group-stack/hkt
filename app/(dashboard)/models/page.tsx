@@ -1,16 +1,21 @@
 import Link from "next/link";
-import { AlertTriangle, GitBranch, HelpCircle, Layers, Wand2 } from "lucide-react";
+import { AlertTriangle, GitBranch, HelpCircle, KanbanSquare, Layers, List, Wand2 } from "lucide-react";
 import { BulkDeclarePanel } from "@/app/(dashboard)/models/bulk-declare-panel";
 import { ModelsTable } from "@/app/(dashboard)/models/models-table";
+import { PipelineBoard } from "@/app/(dashboard)/models/pipeline-board";
 import { RegisterModelDialog, RegistrySyncButton } from "@/app/(dashboard)/models/registry-actions";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
+import { DataWarnings } from "@/components/data-warnings";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { loadSource } from "@/lib/constants/model-360";
 import { BULK_DECLARE_MAX, buildDeclarePreview } from "@/lib/constants/model-bulk-declare";
 import { MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
+import { PIPELINE_VIEW, PIPELINE_VIEW_HREF, type PipelineFilters } from "@/lib/constants/model-pipeline";
+import { modelBlockAccess } from "@/lib/models/block-access";
+import { getModelPipelineBoard } from "@/lib/queries/model-pipeline";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { getModelsEvidenceBatch, listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
@@ -26,10 +31,120 @@ export const metadata = { title: "Vòng đời mẫu" };
  * Mẫu mới vào sổ bằng nút đồng bộ (từ sản phẩm Pancake + thiết kế TK) hoặc bằng tay (ý tưởng chưa lên
  * Pancake). Trạng thái của mẫu đồng bộ về luôn TRỐNG — "Chưa khai" — cho tới khi có người khai.
  */
+/** Bật / tắt một tham số URL, giữ nguyên các tham số còn lại. */
+function toggleHref(raw: SearchParams, key: string, value: string, on: boolean): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === key || v === undefined) continue;
+    for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
+  }
+  if (!on) q.set(key, value);
+  const s = q.toString();
+  return s ? `/models?${s}` : "/models";
+}
+
+/** Hai cách xem cùng một sổ: danh sách (bảng) và bảng quy trình (Kanban theo bước của chủ shop). */
+function ViewSwitch({ board }: { board: boolean }) {
+  const item = (on: boolean) => cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5", on ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted");
+  return (
+    <nav className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Cách xem sổ mẫu">
+      <span className="text-muted-foreground">Xem:</span>
+      <Link href="/models" className={item(!board)}>
+        <List className="size-3.5" /> Danh sách
+      </Link>
+      <Link href={PIPELINE_VIEW_HREF} className={item(board)}>
+        <KanbanSquare className="size-3.5" /> Bảng quy trình
+      </Link>
+    </nav>
+  );
+}
+
+/**
+ * ═══ BẢNG QUY TRÌNH MẪU (`/models?view=bang` — Company OS · Agent BD) ═══
+ *
+ * Mỗi mẫu đứng ĐÚNG MỘT cột theo trạng thái KHAI; thẻ mang số ngày ở bước, tín hiệu, tối đa hai nhãn máy suy
+ * ra, và MỘT nút "việc tiếp theo" nhặt từ bộ máy đã có (không có thì không có nút). Chỉ đọc — mọi nút mở màn
+ * hình chủ của việc đó; không có đường ghi mới.
+ */
+async function PipelineView({ user, raw, canWrite }: { user: SessionUser; raw: SearchParams; canWrite: boolean }) {
+  const params = parseListParams(raw, { defaultSort: "code", defaultDir: "asc", filterKeys: ["owner", "dept"], sortable: MODEL_SORTABLE, defaultPeriod: "all" });
+  const filters: PipelineFilters = { owner: params.filters.owner ?? [], dept: params.filters.dept ?? [], q: params.q ?? "", onlyActionable: raw.canlam === "1" };
+  const allowed = await modelBlockAccess(user);
+  const board = await getModelPipelineBoard({ allowed, canWrite, canCreateTopic: can(user, "production:write") }, filters);
+  const now = new Date();
+  const actionable = board.cards.filter((c) => c.next).length;
+  const locDangAp = filters.owner.length > 0 || filters.dept.length > 0 || filters.q.trim() !== "" || filters.onlyActionable;
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        eyebrow="Sản xuất"
+        title="Bảng quy trình mẫu"
+        description={`${formatNumber(board.cards.length)}${locDangAp ? ` / ${formatNumber(board.totalModels)}` : ""} mẫu · ${formatNumber(actionable)} có việc tiếp theo · tín hiệu & đề xuất ${board.periodLabel.toLowerCase()}`}
+        hint={
+          <>
+            <p>
+              Mỗi mẫu đứng <b>đúng một cột</b> theo trạng thái NGƯỜI khai — máy không dời mẫu sang cột khác. Điều máy thấy (tín hiệu Triển vọng khi còn test, topic
+              sản xuất mở sớm, tồn hoàn gần hết / hàng chết, mẫu chờ duyệt, lời khai thiếu chứng từ) chỉ hiện thành nhãn trên thẻ.
+            </p>
+            <p className="mt-1.5">
+              Nút <b>việc tiếp theo</b> nhặt từ bộ máy đã có, theo thứ tự: lời khai trái chứng từ → gợi ý khai của máy (mẫu chưa khai) → đề xuất của trang mẫu (quảng
+              cáo, tồn kho, mở topic / chuyển vòng đời, phản hồi tồn). Không bộ máy nào nói gì thì thẻ không có nút. Đề xuất theo quyền của bạn — thiếu quyền xem
+              quảng cáo / tồn / sản xuất thì phần đó không được đọc.
+            </p>
+          </>
+        }
+        actions={
+          board.failed.length || board.notes.length ? (
+            <span className="flex items-center gap-2">
+              {board.failed.length ? <DataWarnings tone="danger" items={board.failed.map((f) => `Không đọc được nguồn ${f.source}: ${f.error}`)} /> : null}
+              {board.notes.length ? <DataWarnings items={board.notes} /> : null}
+            </span>
+          ) : null
+        }
+      />
+      <ViewSwitch board />
+      {board.totalModels === 0 ? (
+        <EmptyState
+          icon={GitBranch}
+          title="Sổ mẫu chưa có mẫu nào"
+          description="Chưa có mẫu nào để xếp lên bảng — đồng bộ sổ mẫu hoặc đăng ký mẫu ở chế độ Danh sách."
+          action={
+            <Link href="/models" className="text-sm font-semibold text-primary hover:underline">
+              Mở danh sách mẫu
+            </Link>
+          }
+        />
+      ) : (
+        <>
+          <DataTableToolbar
+            searchPlaceholder="Mã mẫu, tên…"
+            period={false}
+            facets={[
+              { key: "owner", label: "Người phụ trách", options: board.ownerOptions },
+              { key: "dept", label: "Phòng ban", options: board.deptOptions },
+            ]}
+            extraResetKeys={["canlam"]}
+            resultLabel={locDangAp && board.cards.length === 0 ? "Không mẫu nào khớp bộ lọc — thử bỏ bớt điều kiện." : undefined}
+          >
+            <Link
+              href={toggleHref(raw, "canlam", "1", filters.onlyActionable)}
+              className={cn("rounded-full border px-2.5 py-0.5 text-xs", filters.onlyActionable ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}
+            >
+              {filters.onlyActionable ? "✓ " : ""}Chỉ mẫu cần làm
+            </Link>
+          </DataTableToolbar>
+          <PipelineBoard cards={board.cards} now={now} declareHref={canWrite ? "/models?state=NONE&khai=goi-y" : null} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default async function ModelsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("models:view");
   const canWrite = can(user, "models:write");
   const raw = await searchParams;
+  if (raw.view === PIPELINE_VIEW) return <PipelineView user={user} raw={raw} canWrite={canWrite} />;
   const params = parseListParams(raw, { defaultSort: "code", defaultDir: "asc", filterKeys: ["state", "link"], sortable: MODEL_SORTABLE, defaultPeriod: "all" });
   // Cột "Tín hiệu" (Agent S): TẮT mặc định — lượt nguội của tín hiệu theo lô đọc bảng quyết định quảng cáo và
   // hiệu quả mẫu mã cả shop (vài giây trên production), không bắt mọi lượt mở danh sách trả giá đó.
@@ -61,17 +176,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
           ),
         }
       : undefined;
-  /** Bật / tắt một tham số URL, giữ nguyên các tham số còn lại. */
-  const hrefToggle = (key: string, value: string, on: boolean) => {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(raw)) {
-      if (k === key || v === undefined) continue;
-      for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
-    }
-    if (!on) q.set(key, value);
-    const s = q.toString();
-    return s ? `/models?${s}` : "/models";
-  };
+  const hrefToggle = (key: string, value: string, on: boolean) => toggleHref(raw, key, value, on);
   const hrefTinHieu = hrefToggle("tinhieu", "1", coTinHieu);
 
   const chuaDongBo = summary.total === 0;
@@ -102,6 +207,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
         }
       />
 
+      <ViewSwitch board={false} />
       {chuaDongBo ? (
         <EmptyState
           icon={GitBranch}
