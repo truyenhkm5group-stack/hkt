@@ -7,26 +7,20 @@ import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { TopicFilePicker, uploadTopicFiles, UploadProgressBar, type UploadProgress } from "@/app/(dashboard)/production/_components/topic-files";
 import { createProductionTopic } from "@/lib/actions/production-topics";
-import { MODEL_STATE_LABELS } from "@/lib/constants/model-lifecycle";
-import { PROVISIONAL_CODE_PREFIX, PROVISIONAL_DEFAULT_STATE, PROVISIONAL_NAME_MIN, PROVISIONAL_START_STATES, type ProvisionalStartState } from "@/lib/constants/provisional-model";
+import { PROVISIONAL_CODE_PREFIX, PROVISIONAL_DEFAULT_STATE, PROVISIONAL_NAME_MIN } from "@/lib/constants/provisional-model";
 
 /** Giá trị ô chọn mẫu cho "mẫu mới chưa có mã" — không trùng được một id (uuid). */
 const NEW_MODEL = "__new__";
 
-const list = (s: string) =>
-  s
-    .split(/[,;\n]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-
 const soHoacNull = (s: string) => (s.trim() ? Math.round(Number(s.replace(/[^\d]/g, ""))) : null);
 
 /**
- * Mở topic hỏi giá xưởng. Ô nào bỏ trống là CHƯA ĐẶT (in "—"), không phải 0. Số đơn / chi quảng cáo lúc
- * mở topic do MÁY CHỦ chụp lại — form không gửi con số nào như vậy.
+ * Mở topic hỏi giá xưởng. Chủ shop 27/09/2026: biểu mẫu chỉ giữ ba ô — chất liệu, giá bán, giá sản xuất
+ * mong muốn (+ ảnh/video). Tiêu đề tự đặt theo mẫu; màu/size/phụ liệu/xưởng… bàn tiếp trong luồng trao đổi.
+ * Ô nào bỏ trống là CHƯA ĐẶT (in "—"), không phải 0. Số đơn / chi quảng cáo lúc mở topic do MÁY CHỦ chụp
+ * lại — form không gửi con số nào như vậy.
  */
 export type TopicModelOption = {
   id: string;
@@ -41,56 +35,52 @@ export type TopicModelOption = {
 export function TopicForm({
   models,
   fixedModelId,
+  fixedModelLabel = null,
   fixedNotice = null,
-  suppliers,
   canRegisterModel = false,
 }: {
   models: TopicModelOption[];
   fixedModelId: string | null;
+  /** Mã · tên của mẫu cố định (lối vào từ trang mẫu) — để đặt tiêu đề topic. */
+  fixedModelLabel?: string | null;
   fixedNotice?: string | null;
-  suppliers: { id: string; name: string }[];
   /** Người có `models:write` mới đăng ký được mẫu mới (mã tạm) ngay từ đây. */
   canRegisterModel?: boolean;
 }) {
   const [modelId, setModelId] = useState(fixedModelId ?? "");
   const [newName, setNewName] = useState("");
-  const [newState, setNewState] = useState<ProvisionalStartState>(PROVISIONAL_DEFAULT_STATE);
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [title, setTitle] = useState("");
-  const [supplierId, setSupplierId] = useState("");
   const [material, setMaterial] = useState("");
-  const [colors, setColors] = useState("");
-  const [sizes, setSizes] = useState("");
-  const [trims, setTrims] = useState("");
-  const [designNotes, setDesignNotes] = useState("");
+  const [salePrice, setSalePrice] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
-  const [expectedQty, setExpectedQty] = useState("");
-  const [deadline, setDeadline] = useState("");
-  const [firstMessage, setFirstMessage] = useState("");
   const [pending, start] = useNavTransition();
   const router = useRouter();
   const isNew = !fixedModelId && modelId === NEW_MODEL;
-  const notice = fixedModelId ? fixedNotice : isNew ? null : (models.find((m) => m.id === modelId)?.notice ?? null);
-  const duMau = isNew ? newName.trim().length >= PROVISIONAL_NAME_MIN : !!modelId;
+  const picked = fixedModelId ? null : models.find((m) => m.id === modelId);
+  const notice = fixedModelId ? fixedNotice : isNew ? null : (picked?.notice ?? null);
+  const tenMoi = newName.trim();
+  // Nút tắt thì PHẢI nói vì sao — trước đây "T1" (2 ký tự) làm nút tắt im lặng và người dùng tưởng hỏng.
+  const chuaDu = isNew
+    ? tenMoi.length < PROVISIONAL_NAME_MIN
+      ? `Tên gọi tạm cần ít nhất ${PROVISIONAL_NAME_MIN} ký tự${tenMoi ? ` (đang ${tenMoi.length})` : ""}`
+      : null
+    : modelId
+      ? null
+      : "Chọn mẫu trước";
+  const nhanMau = fixedModelId ? fixedModelLabel : isNew ? tenMoi : picked ? `${picked.code}${picked.name ? ` · ${picked.name}` : ""}` : "";
+  const title = `Hỏi giá ${nhanMau || "mẫu"}`.slice(0, 200);
 
   const luu = () =>
     start(async () => {
       const r = await createProductionTopic({
         modelId: isNew ? "" : modelId,
-        newModel: isNew ? { name: newName, state: newState } : null,
+        newModel: isNew ? { name: newName, state: PROVISIONAL_DEFAULT_STATE } : null,
         title,
-        supplierId: supplierId || null,
-        firstMessage: firstMessage.trim() || null,
         requirements: {
           material,
-          colors: list(colors),
-          sizes: list(sizes).map((s) => s.toUpperCase()),
-          trims,
-          designNotes,
+          salePrice: soHoacNull(salePrice),
           targetPrice: soHoacNull(targetPrice),
-          expectedQty: soHoacNull(expectedQty),
-          deadline: deadline || null,
         },
       });
       if ("error" in r) {
@@ -109,9 +99,9 @@ export function TopicForm({
     });
 
   return (
-    <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-2">
+    <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
       {fixedModelId ? null : (
-        <div className="space-y-1 sm:col-span-2">
+        <div className="space-y-1 sm:col-span-3">
           <Label>Mẫu</Label>
           <select value={modelId} onChange={(e) => setModelId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
             <option value="">— Chọn mẫu trong sổ —</option>
@@ -127,88 +117,38 @@ export function TopicForm({
         </div>
       )}
       {!fixedModelId && !canRegisterModel ? (
-        <p className="text-xs text-muted-foreground sm:col-span-2">Mẫu mới chưa có mã: cần quyền “Vòng đời mẫu: khai &amp; đồng bộ” để đăng ký ngay tại đây.</p>
+        <p className="text-xs text-muted-foreground sm:col-span-3">Mẫu mới chưa có mã: cần quyền “Vòng đời mẫu: khai &amp; đồng bộ” để đăng ký ngay tại đây.</p>
       ) : null}
       {isNew ? (
-        <>
-          <div className="space-y-1">
-            <Label>Tên gọi tạm của mẫu</Label>
-            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Đầm babydoll hoa nhí cổ vuông" />
-          </div>
-          <div className="space-y-1">
-            <Label>Mẫu đang ở</Label>
-            <select value={newState} onChange={(e) => setNewState(e.target.value as ProvisionalStartState)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
-              {PROVISIONAL_START_STATES.map((s) => (
-                <option key={s} value={s}>
-                  {MODEL_STATE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-2">
-            Máy cấp mã tạm dạng <span className="font-mono">{PROVISIONAL_CODE_PREFIX}ngàythángnăm-số</span> để topic, giá thành, mẫu thử gắn được vào mẫu. Mẫu thắng thì vào trang mẫu bấm “Chốt mã chính thức” (ví dụ Q012) — mọi thứ đã gắn đi theo, không phải làm lại.
+        <div className="space-y-1 sm:col-span-3">
+          <Label>Tên gọi tạm của mẫu</Label>
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Đầm babydoll hoa nhí cổ vuông" />
+          <p className="text-xs text-muted-foreground">
+            Máy cấp mã tạm <span className="font-mono">{PROVISIONAL_CODE_PREFIX}ngàythángnăm-số</span>; mẫu thắng thì chốt mã chính thức ở trang mẫu, topic đi theo.
           </p>
-        </>
+        </div>
       ) : null}
-      {notice ? <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-2">{notice}</p> : null}
-      <div className="space-y-1 sm:col-span-2">
-        <Label>Tiêu đề</Label>
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Hỏi giá may 500 áo Q001 vải đũi" />
-      </div>
-      <div className="space-y-1">
-        <Label>Xưởng hỏi giá</Label>
-        <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
-          <option value="">— Chưa chọn —</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {notice ? <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-3">{notice}</p> : null}
       <div className="space-y-1">
         <Label>Chất liệu</Label>
-        <Input value={material} onChange={(e) => setMaterial(e.target.value)} />
+        <Input value={material} onChange={(e) => setMaterial(e.target.value)} placeholder="Thun rayon" />
       </div>
       <div className="space-y-1">
-        <Label>Màu (ngăn bằng dấu phẩy)</Label>
-        <Input value={colors} onChange={(e) => setColors(e.target.value)} placeholder="Đen, Trắng kem" />
+        <Label>Giá bán (đ/sp)</Label>
+        <Input inputMode="numeric" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="bỏ trống = chưa đặt" />
       </div>
       <div className="space-y-1">
-        <Label>Size (ngăn bằng dấu phẩy)</Label>
-        <Input value={sizes} onChange={(e) => setSizes(e.target.value)} placeholder="S, M, L, XL" />
-      </div>
-      <div className="space-y-1">
-        <Label>Phụ liệu</Label>
-        <Input value={trims} onChange={(e) => setTrims(e.target.value)} placeholder="Cúc, khoá, mác…" />
-      </div>
-      <div className="space-y-1">
-        <Label>Giá mục tiêu (đ/sp)</Label>
+        <Label>Giá SX mong muốn (đ/sp)</Label>
         <Input inputMode="numeric" value={targetPrice} onChange={(e) => setTargetPrice(e.target.value)} placeholder="bỏ trống = chưa đặt" />
       </div>
-      <div className="space-y-1">
-        <Label>Số lượng dự kiến</Label>
-        <Input inputMode="numeric" value={expectedQty} onChange={(e) => setExpectedQty(e.target.value)} placeholder="bỏ trống = chưa đặt" />
-      </div>
-      <div className="space-y-1">
-        <Label>Hạn cần hàng</Label>
-        <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
-      </div>
-      <div className="space-y-1 sm:col-span-2">
-        <Label>Ghi chú thiết kế</Label>
-        <Textarea rows={3} value={designNotes} onChange={(e) => setDesignNotes(e.target.value)} />
-      </div>
-      <div className="space-y-1 sm:col-span-2">
-        <Label>Lời mở đầu gửi xưởng (tuỳ chọn — thành lượt trao đổi đầu tiên)</Label>
-        <Textarea rows={2} value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} />
-      </div>
-      <div className="space-y-1 sm:col-span-2">
+      <div className="space-y-1 sm:col-span-3">
         <Label>Ảnh / video mẫu (tuỳ chọn)</Label>
         <TopicFilePicker files={files} onChange={setFiles} disabled={pending} />
         <UploadProgressBar p={progress} />
       </div>
-      <div className="flex justify-end sm:col-span-2">
-        <Button onClick={luu} disabled={pending || !duMau || title.trim().length < 3}>
+      <div className="flex items-center justify-end gap-3 sm:col-span-3">
+        {chuaDu ? <span className="text-xs text-amber-700 dark:text-amber-400">{chuaDu}</span> : null}
+        <Button onClick={luu} disabled={pending || chuaDu !== null}>
           Mở topic
         </Button>
       </div>

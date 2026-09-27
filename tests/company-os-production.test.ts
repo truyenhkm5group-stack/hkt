@@ -284,7 +284,7 @@ export async function testCompanyOsProductionDb(db: Db) {
   const [m2] = await db.insert(schema.productModels).values({ id: `${P}m2`, code: "COSC2", name: "Áo COSC2", productId: `${P}p2`, lifecycleState: null, registeredBy: "USER" }).returning();
   const [sup] = await db.insert(schema.suppliers).values({ name: `${P}Xưởng A` }).returning({ id: schema.suppliers.id });
   const evidence = { kind: "SNAPSHOT" as const, capturedAt: NOW.toISOString(), basis: "kiểm thử", productId: `${P}p1`, orders30d: 12, ordersTotal: 40, adSpend30d: null };
-  const req = { material: "Đũi", colors: ["Đen", "Trắng"], sizes: ["M", "L"], trims: "Cúc gỗ", designNotes: "Cổ V", targetPrice: 120_000, expectedQty: 300, deadline: null };
+  const req = { material: "Đũi", colors: ["Đen", "Trắng"], sizes: ["M", "L"], trims: "Cúc gỗ", designNotes: "Cổ V", salePrice: null, targetPrice: 120_000, expectedQty: 300, deadline: null };
 
   // ═══ 1. TOPIC ═══
   assert.ok("error" in (await createTopicCore(db, { modelId: m1.id, title: "Hỏi giá", requirements: req, supplierId: null, evidence, actor: { id: null, label: "máy" } })), "mở topic phải là một người");

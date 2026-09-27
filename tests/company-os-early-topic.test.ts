@@ -274,7 +274,7 @@ export async function testCompanyOsEarlyTopicDb(db: Db) {
   const [tk] = await db.insert(schema.productModels).values({ id: `${P}m-tk`, code: "TKCOST01", name: "Váy TK", designConceptId: `${P}d1`, lifecycleState: null, registeredBy: "SYNC" }).returning();
   const [qc] = await db.insert(schema.productModels).values({ id: `${P}m-qc`, code: "TKCOST02", name: "Áo đang test", designConceptId: `${P}d2`, lifecycleState: "ADS_TESTING", registeredBy: "USER" }).returning();
   const evidence = (productId: string | null): TopicEvidenceSnapshot => buildTopicEvidenceSnapshot({ orders30d: null, ordersTotal: null, adSpend30d: null }, productId, new Date(0));
-  const req = { material: "", colors: [], sizes: [], trims: "", designNotes: "", targetPrice: null, expectedQty: null, deadline: null };
+  const req = { material: "", colors: [], sizes: [], trims: "", designNotes: "", salePrice: null, targetPrice: null, expectedQty: null, deadline: null };
 
   // ─── A. Buồng lái: mẫu TRIỂN VỌNG chưa có topic ⇒ có dòng (đọc bằng lô THẬT, không giả nguồn) ───
   clearMemo();

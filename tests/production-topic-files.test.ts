@@ -111,6 +111,12 @@ export function testProductionTopicFilesPure() {
     models: [{ id: "m-da-chot", code: "Q777", name: "Đầm hoa", productId: null, designConceptId: null }],
   });
   assert.deepEqual(ke.toInsert, [], "không đăng ký mẫu mới cho mã đã chốt");
+
+  // Biểu mẫu mở topic (chủ shop 27/09/2026): chỉ chất liệu · giá bán · giá SX mong muốn; nút tắt thì nói lý do.
+  const form = readFileSync("app/(dashboard)/production/topics/new/topic-form.tsx", "utf8");
+  assert.ok(form.includes("salePrice: soHoacNull(salePrice)") && form.includes("targetPrice: soHoacNull(targetPrice)"), "biểu mẫu gửi giá bán + giá SX mong muốn");
+  assert.ok(!/setColors|setSizes|setTrims|setDeadline|setExpectedQty|setSupplierId|setFirstMessage/.test(form), "biểu mẫu không còn ô dư");
+  assert.ok(form.includes("disabled={pending || chuaDu !== null}") && form.includes("{chuaDu ? <span"), "nút Mở topic tắt thì hiện lý do, không tắt im lặng");
   assert.deepEqual(
     ke.toLink.map((l) => [l.modelId, l.productId]),
     [["m-da-chot", "prod-q"]],
@@ -151,10 +157,13 @@ export async function testProductionTopicFilesDb(db: Db) {
   assert.ok("error" in tay && /dành cho mã tạm/.test(tay.error), "đăng ký tay mã TEST-… bị chặn");
 
   // ─── B. Mở topic cho mẫu mã tạm: vòng đời đứng yên (Đang test QC không có cạnh sang Bàn sản xuất) ───
-  const req = { material: "Thun rayon", colors: [], sizes: [], trims: "", designNotes: "", targetPrice: null, expectedQty: null, deadline: null };
+  const req = { material: "Thun rayon", colors: [], sizes: [], trims: "", designNotes: "", salePrice: 399_000, targetPrice: 160_000, expectedQty: null, deadline: null };
   const t = await createTopicCore(db, { modelId: r1.modelId, title: "Hỏi giá sx mẫu này", requirements: req, supplierId: null, evidence: buildTopicEvidenceSnapshot({ orders30d: null, ordersTotal: null, adSpend30d: null }, null, now), actor });
   assert.ok("ok" in t);
   if (!("ok" in t)) return;
+  const [luuYeuCau] = await db.select({ q: schema.productionTopics.requirements }).from(schema.productionTopics).where(eq(schema.productionTopics.id, t.topicId));
+  assert.equal((luuYeuCau.q as { salePrice?: unknown }).salePrice, 399_000, "giá bán lưu cùng yêu cầu topic");
+  assert.equal((luuYeuCau.q as { targetPrice?: unknown }).targetPrice, 160_000, "giá SX mong muốn lưu cùng yêu cầu topic");
   assert.equal(t.lifecycle.moved, false, "topic mở sớm không kéo vòng đời");
 
   // ─── C. Tải tệp theo khúc: 2 khúc + 5 byte ⇒ 3 khúc; thiếu khúc không READY ───

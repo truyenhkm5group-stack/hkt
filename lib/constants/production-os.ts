@@ -122,7 +122,9 @@ export type TopicRequirements = {
   sizes: string[];
   trims: string;
   designNotes: string;
-  /** Giá mục tiêu mỗi sản phẩm (VND). `null` = chưa đặt. */
+  /** Giá bán dự kiến mỗi sản phẩm (VND) — để xưởng và người duyệt thấy biên. `null` = chưa đặt. */
+  salePrice: number | null;
+  /** Giá sản xuất mong muốn mỗi sản phẩm (VND). `null` = chưa đặt. */
   targetPrice: number | null;
   /** Số lượng dự kiến đặt. `null` = chưa đặt. */
   expectedQty: number | null;
@@ -130,7 +132,7 @@ export type TopicRequirements = {
   deadline: string | null;
 };
 
-export const EMPTY_REQUIREMENTS: TopicRequirements = { material: "", colors: [], sizes: [], trims: "", designNotes: "", targetPrice: null, expectedQty: null, deadline: null };
+export const EMPTY_REQUIREMENTS: TopicRequirements = { material: "", colors: [], sizes: [], trims: "", designNotes: "", salePrice: null, targetPrice: null, expectedQty: null, deadline: null };
 
 /**
  * ẢNH CHỤP chứng cứ lúc mở topic — số đơn / chi quảng cáo mà người mở topic đang nhìn thấy. Nó KHÔNG
