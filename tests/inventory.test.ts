@@ -6,10 +6,11 @@ import { clearMemo } from "@/lib/cache";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { getProductDetail, listProducts, productSummary } from "@/lib/queries/products";
-import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
+import { successRate } from "@/lib/queries/metrics";
+import { getReturnRateByVariant, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { recordInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
-import { stockRiskSummary } from "@/lib/queries/stock";
+import { listReservedOrderLines, stockRiskSummary } from "@/lib/queries/stock";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { STOCK_STATE_LABEL, type StockState } from "@/lib/constants/inventory";
 import type { Period } from "@/lib/search-params";
@@ -233,6 +234,28 @@ export async function testInventory(db: Db) {
       assert.ok(chiTiet.totals.committedUnknown >= 4, "chờ xuất trên mẫu mã chưa có phiếu nhập phải hiện ra ở tổng, không biến mất");
     }
   }
+  // ───────── 7c. Bấm "chờ xuất N" ra danh sách đơn: tổng số cái PHẢI bằng đúng con số vừa bấm ─────────
+  // Hai định nghĩa "chờ xuất" là hai con số khác nhau cho cùng một câu hỏi — danh sách đọc
+  // RESERVED_IN_WAREHOUSE + PRIMARY_ATTEMPT y như cột `reserved`, và bài này khoá điều đó.
+  const tongSl = (lines: { quantity: number }[]) => lines.reduce((t, l) => t + l.quantity, 0);
+  for (const variantId of ["rr-var", "dq-var"]) {
+    const dong = dsSanPham.find((r) => r.id === variantId);
+    assert.ok(dong, `fixture: thiếu ${variantId}`);
+    const theoMau = await listReservedOrderLines({ variantId });
+    assert.ok(theoMau.scope, `danh sách chờ xuất phải nhận ra mẫu mã ${variantId}`);
+    assert.equal(theoMau.scope.productId, dong.productId, `danh sách chờ xuất gắn nhầm mã hàng: ${variantId}`);
+    assert.equal(tongSl(theoMau.lines), dong.reserved, `tổng danh sách chờ xuất phải bằng ô "chờ xuất" của ${variantId}`);
+    const theoMa = await listReservedOrderLines({ productId: dong.productId });
+    const oChoXuatCuaMa = dsSanPham.filter((r) => r.productId === dong.productId).reduce((t, r) => t + r.reserved, 0);
+    assert.equal(tongSl(theoMa.lines), oChoXuatCuaMa, `tổng chờ xuất của cả mã ${dong.productId} phải bằng dòng mã trên bảng`);
+  }
+  const dqChoXuat = await listReservedOrderLines({ variantId: "dq-var" });
+  assert.ok(
+    dqChoXuat.lines.some((l) => l.orderId === "ton-cho-xuat-dq-2" && l.shipmentCode === null),
+    "đơn đã chốt CHƯA tạo vận đơn vẫn là đơn chờ xuất — phải có mặt trong danh sách (hàng chắc chắn còn trong kho)",
+  );
+  assert.deepEqual(await listReservedOrderLines({ variantId: "khong-co-mau-nay" }), { scope: null, lines: [] }, "mẫu mã không tồn tại ⇒ không có phạm vi, không bịa danh sách");
+
   await db.delete(schema.shipments).where(eq(schema.shipments.id, "ton-cho-xuat-dq-s1"));
   await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i1"));
   await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i2"));
@@ -350,6 +373,69 @@ export async function testInventory(db: Db) {
   // Cảnh báo vận hành cũng phải cùng bộ máy: cùng số mẫu mã OUT + CRITICAL.
   const planNow = await getReplenishmentPlan();
   assert.equal(risk.atRisk, planNow.summary.out + planNow.summary.critical, "Tổng quan, Kế hoạch SX và cảnh báo phải cùng một bộ máy days-of-cover");
+
+  // ───────── 10. ĐƠN GTC / TỶ LỆ GTC trên trang Sản phẩm = báo cáo Tỷ lệ hoàn, MỘT công thức ─────────
+  // Cùng ORDER_OUTCOME, cùng tập dòng đơn (bỏ hàng tặng, bỏ đơn NEW), cùng grain ĐƠN. Dòng MÃ HÀNG
+  // so với dòng gộp theo mã của báo cáo (gộp theo đơn ở máy chủ) — cộng các dòng mẫu mã là đếm hai
+  // lần đơn mua hai mẫu cùng mã, và phép so này bắt được đúng lỗi đó.
+  // Tình huống quyết định: MỘT đơn giao thành công mua HAI mẫu của CÙNG một mã (gói 2 chiếc khác màu).
+  // Mỗi dòng mẫu mã đếm đơn đó 1 lần; dòng MÃ cũng phải là 1 — cộng hai dòng lại ra 2.
+  await db.insert(schema.products).values({ id: "gtc-prod", name: "Mã kiểm thử GTC" });
+  await db.insert(schema.productVariants).values([
+    { id: "gtc-v1", productId: "gtc-prod", sku: "GTC-DO", color: "Đỏ", size: "M", retailPrice: 499000 },
+    { id: "gtc-v2", productId: "gtc-prod", sku: "GTC-DEN", color: "Đen", size: "M", retailPrice: 499000 },
+  ]);
+  await db.insert(schema.orders).values({ id: "gtc-o1", stage: "DELIVERED", insertedAt: new Date(), cod: 998000 });
+  await db.insert(schema.orderItems).values([
+    { id: "gtc-o1-i1", orderId: "gtc-o1", variantId: "gtc-v1", productId: "gtc-prod", sku: "GTC-DO", quantity: 1, unitPrice: 499000, lineTotal: 499000 },
+    { id: "gtc-o1-i2", orderId: "gtc-o1", variantId: "gtc-v2", productId: "gtc-prod", sku: "GTC-DEN", quantity: 1, unitPrice: 499000, lineTotal: 499000 },
+  ]);
+  await db.insert(schema.shipments).values({ id: "gtc-s1", orderId: "gtc-o1", carrier: "Viettel Post", vtpOrderNumber: "PKEGTC0000001", stage: "DELIVERED", codAmount: 998000, pickedUpAt: new Date() });
+  await db.insert(schema.shipmentEvents).values({ shipmentId: "gtc-s1", source: "VTP_WEBHOOK", status: "501", statusName: "Phát thành công", occurredAt: new Date(), normalizedStage: "DELIVERED", legType: "OUTBOUND" });
+  clearMemo();
+  const tatCa: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+  const [{ rows: dsGtc }, tyLe] = await Promise.all([
+    listProducts(allParams(), 200),
+    getReturnRateByVariant({ period: tatCa, q: "", minShipped: 0, sort: "shipped", dir: "desc", page: 1, pageSize: 500 }),
+  ]);
+  let coKetThuc = 0;
+  for (const dong of dsGtc) {
+    const bc = tyLe.all.find((x) => x.variantId === dong.id);
+    const giao = bc?.delivered ?? 0;
+    const hoan = bc?.returned ?? 0;
+    assert.equal(dong.deliveredOrders, giao, `đơn GTC lệch với báo cáo Tỷ lệ hoàn: ${dong.id}`);
+    assert.equal(dong.returnedOrders, hoan, `đơn hoàn lệch với báo cáo Tỷ lệ hoàn: ${dong.id}`);
+    assert.equal(dong.successRate, successRate(giao, hoan), `tỷ lệ GTC phải do successRate() tính: ${dong.id}`);
+    if (giao + hoan) coKetThuc++;
+    else assert.equal(dong.successRate, null, `chưa đơn nào kết thúc ⇒ tỷ lệ GTC là null, không phải 0%: ${dong.id}`);
+    const ma = tyLe.productRows.find((x) => x.productKey === dong.productId);
+    assert.equal(dong.productDeliveredOrders, ma?.delivered ?? 0, `đơn GTC của MÃ lệch với dòng gộp theo mã: ${dong.productId}`);
+    assert.equal(dong.productReturnedOrders, ma?.returned ?? 0, `đơn hoàn của MÃ lệch với dòng gộp theo mã: ${dong.productId}`);
+  }
+  assert.ok(coKetThuc > 0, "fixture phải có mẫu mã có đơn đã kết thúc — nếu không phép so ở trên là rỗng");
+  // Sắp theo tỷ lệ GTC chạy được ở máy chủ, và mẫu CHƯA CÓ tỷ lệ luôn ở cuối, cả hai chiều.
+  for (const dir of ["asc", "desc"] as const) {
+    const { rows: sx } = await listProducts({ ...allParams(), sort: "successRate", dir }, 200);
+    const tyLes = sx.map((r) => r.successRate);
+    const dauNull = tyLes.indexOf(null);
+    if (dauNull >= 0) assert.ok(tyLes.slice(dauNull).every((x) => x === null), `sắp ${dir}: mẫu chưa có tỷ lệ GTC phải nằm cuối`);
+    const coSo = tyLes.filter((x): x is number => x !== null);
+    for (let k = 1; k < coSo.length; k++) assert.ok(dir === "asc" ? coSo[k - 1] <= coSo[k] : coSo[k - 1] >= coSo[k], `sắp ${dir} theo tỷ lệ GTC sai thứ tự`);
+  }
+  for (const id of ["gtc-v1", "gtc-v2"]) {
+    const dong = dsGtc.find((r) => r.id === id);
+    assert.ok(dong, `fixture: thiếu ${id}`);
+    assert.equal(dong.deliveredOrders, 1, `${id}: đơn mua mẫu này là 1 đơn GTC`);
+    assert.equal(dong.productDeliveredOrders, 1, "dòng MÃ: một đơn mua hai mẫu cùng mã là MỘT đơn GTC, không phải hai");
+    assert.equal(dong.productSuccessRate, 100, "dòng MÃ: 1 đơn kết thúc, giao thành công ⇒ 100%");
+  }
+  await db.delete(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, "gtc-s1"));
+  await db.delete(schema.shipments).where(eq(schema.shipments.id, "gtc-s1"));
+  await db.delete(schema.orderItems).where(eq(schema.orderItems.orderId, "gtc-o1"));
+  await db.delete(schema.orders).where(eq(schema.orders.id, "gtc-o1"));
+  await db.delete(schema.productVariants).where(eq(schema.productVariants.productId, "gtc-prod"));
+  await db.delete(schema.products).where(eq(schema.products.id, "gtc-prod"));
+  clearMemo();
 
   console.log(
     `✓ Sổ kho: tồn = phiếu kho − đã xuất (ĐVVC) · hàng hoàn chỉ về tồn qua phiếu tái nhập · xuất tay trừ tồn · ${summary.unknownStock} mẫu mã chưa có phiếu nhập không bị coi là hết hàng`,

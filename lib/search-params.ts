@@ -102,10 +102,11 @@ export function previousPeriod(period: Period): { from: Date | null; to: Date | 
 
 export function parseListParams(
   params: SearchParams,
-  options: { defaultSort?: string; defaultDir?: "asc" | "desc"; filterKeys?: string[]; defaultPageSize?: number; defaultPeriod?: PeriodKey; sortable?: string[] } = {},
+  /** `maxPageSize`: trần số dòng mỗi trang (mặc định 200) — chỉ trang cố ý in HẾT danh sách mới nâng. */
+  options: { defaultSort?: string; defaultDir?: "asc" | "desc"; filterKeys?: string[]; defaultPageSize?: number; maxPageSize?: number; defaultPeriod?: PeriodKey; sortable?: string[] } = {},
 ): ListParams {
   const page = Math.max(1, Number(param(params, "page", "1")) || 1);
-  const pageSize = Math.min(200, Math.max(10, Number(param(params, "pageSize", String(options.defaultPageSize ?? 25))) || 25));
+  const pageSize = Math.min(options.maxPageSize ?? 200, Math.max(10, Number(param(params, "pageSize", String(options.defaultPageSize ?? 25))) || 25));
   let sort = param(params, "sort", options.defaultSort ?? "");
   if (options.sortable && sort && !options.sortable.includes(sort)) sort = options.defaultSort ?? "";
   const dir = param(params, "dir", options.defaultDir ?? "desc") === "asc" ? "asc" : "desc";

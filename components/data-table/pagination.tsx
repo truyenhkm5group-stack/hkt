@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatNumber } from "@/lib/format";
 
-export function DataTablePagination({ page, pageSize, pageCount, total, onPageChange, onPageSizeChange }: { page: number; pageSize: number; pageCount: number; total: number; onPageChange: (page: number) => void; onPageSizeChange: (size: number) => void }) {
+export function DataTablePagination({ page, pageSize, pageCount, total, onPageChange, onPageSizeChange, extraSizes = [] }: { page: number; pageSize: number; pageCount: number; total: number; onPageChange: (page: number) => void; onPageSizeChange: (size: number) => void; extraSizes?: number[] }) {
+  // Cỡ mặc định của trang (vd. 500 ở Sản phẩm) và cỡ đang dùng phải chọn được, nếu không ô chọn hiện trống.
+  const sizes = [...new Set([10, 25, 50, 100, 200, ...extraSizes, pageSize])].sort((a, b) => a - b);
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
   return (
@@ -21,7 +23,7 @@ export function DataTablePagination({ page, pageSize, pageCount, total, onPageCh
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {[10, 25, 50, 100, 200].map((n) => (
+              {sizes.map((n) => (
                 <SelectItem key={n} value={String(n)} className="text-xs">
                   {n}
                 </SelectItem>

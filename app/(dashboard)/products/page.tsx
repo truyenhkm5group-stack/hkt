@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
+import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listProducts, listWarehouses, productFacets, productSummary, PRODUCT_SORTABLE } from "@/lib/queries/products";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -20,7 +21,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Sản phẩm" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all" });
+  const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all", defaultPageSize: PRODUCT_LIST_PAGE_SIZE, maxPageSize: PRODUCT_LIST_PAGE_SIZE });
   const [{ rows, total, pageCount }, facets, summary, warehouses] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses()]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 

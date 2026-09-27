@@ -6,10 +6,11 @@ import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { toDate } from "@/lib/format";
 import { getProductStockPlan, isPlanRowActive } from "@/lib/queries/planning";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
-import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { successRate } from "@/lib/queries/metrics";
+import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, productOutcomeOrders, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
-export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue", "received", "delivered", "returned", "inTransit"];
+export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue", "received", "delivered", "returned", "inTransit", "deliveredOrders", "successRate"];
 
 const pv = schema.productVariants;
 const p = schema.products;
@@ -146,6 +147,16 @@ export type ProductListRow = {
   delivered: number;
   /** Hoàn theo kết quả đơn (đối chiếu, không dùng tính tồn) */
   returned: number;
+  /** SỐ ĐƠN giao thành công theo `ORDER_OUTCOME` (grain đơn, bỏ hàng tặng và đơn chưa chốt) */
+  deliveredOrders: number;
+  /** SỐ ĐƠN hoàn / không thành công theo `ORDER_OUTCOME` */
+  returnedOrders: number;
+  /** TỶ LỆ GIAO THÀNH CÔNG (%) của mẫu mã — `successRate()`; `null` = chưa đơn nào kết thúc, KHÔNG phải 0% */
+  successRate: number | null;
+  /** Ba số trên ở grain MÃ HÀNG, gộp theo ĐƠN ở máy chủ — cho dòng cha; KHÔNG cộng các dòng mẫu mã. */
+  productDeliveredOrders: number;
+  productReturnedOrders: number;
+  productSuccessRate: number | null;
   /** TỒN THỰC TẾ = tổng phiếu kho − đã xuất */
   erpStock: number;
   /** TỒN KHẢ DỤNG = tồn thực tế − đã chốt đơn chưa xuất */
@@ -189,6 +200,10 @@ export async function listProducts(params: ListParams, limit?: number) {
   const reserved = sql<number>`coalesce(${sales.reserved}, 0)`;
   const delivered = sql<number>`coalesce(${sales.delivered}, 0)`;
   const returned = sql<number>`coalesce(${sales.returned}, 0)`;
+  const deliveredOrders = sql<number>`coalesce(${sales.deliveredOrders}, 0)`;
+  const returnedOrders = sql<number>`coalesce(${sales.returnedOrders}, 0)`;
+  // Cùng phép chia với `successRate()` — chỉ để SẮP XẾP; con số in ra vẫn do hàm dùng chung tính.
+  const successRateSort = sql<number | null>`${deliveredOrders}::numeric / nullif(${deliveredOrders} + ${returnedOrders}, 0)`;
   const available = availableStockExpr(sales, receipts);
   const stockKnown = stockKnownExpr(receipts);
   const sortMap: Record<string, SQL | AnyPgColumn> = {
@@ -203,9 +218,12 @@ export async function listProducts(params: ListParams, limit?: number) {
     delivered,
     returned,
     inTransit,
+    deliveredOrders,
+    successRate: successRateSort,
   };
   const sortExpr = sortMap[params.sort] ?? erpStock;
-  const orderBy = params.dir === "asc" ? asc(sortExpr) : desc(sortExpr);
+  // `nulls last` cả hai chiều: mẫu CHƯA CÓ tỷ lệ (chưa đơn nào kết thúc) không được đứng đầu khi sắp giảm dần.
+  const orderBy = sql`${sortExpr} ${sql.raw(params.dir === "asc" ? "asc" : "desc")} nulls last`;
   const pageSize = limit ?? params.pageSize;
 
   /*
@@ -248,6 +266,8 @@ export async function listProducts(params: ListParams, limit?: number) {
         reserved,
         delivered,
         returned,
+        deliveredOrders,
+        returnedOrders,
         erpStock,
         available,
         stockKnown,
@@ -269,8 +289,9 @@ export async function listProducts(params: ListParams, limit?: number) {
   ]);
 
   const ids = rows.map((r) => r.id);
-  const stocks = ids.length
-    ? await db
+  const [stocks, byProduct] = await Promise.all([
+    ids.length
+    ? db
         .select({
           variantId: schema.variantStocks.variantId,
           warehouseId: schema.variantStocks.warehouseId,
@@ -283,7 +304,9 @@ export async function listProducts(params: ListParams, limit?: number) {
         .from(schema.variantStocks)
         .innerJoin(schema.warehouses, eq(schema.variantStocks.warehouseId, schema.warehouses.id))
         .where(inArray(schema.variantStocks.variantId, ids))
-    : [];
+    : [],
+    productOutcomeOrders([...new Set(rows.map((r) => r.productId))]),
+  ]);
   const stockMap = new Map<string, VariantStockCell[]>();
   for (const s of stocks) {
     const list = stockMap.get(s.variantId) ?? [];
@@ -311,6 +334,7 @@ export async function listProducts(params: ListParams, limit?: number) {
     reserved: Number(r.reserved ?? 0),
     delivered: Number(r.delivered ?? 0),
     returned: Number(r.returned ?? 0),
+    ...gtcFields(r, byProduct.get(r.productId)),
     erpStock: Number(r.erpStock ?? 0),
     available: Number(r.available ?? 0),
     stockKnown: Boolean(r.stockKnown),
@@ -319,6 +343,22 @@ export async function listProducts(params: ListParams, limit?: number) {
   }));
 
   return { rows: mapped, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
+}
+
+/** Số đơn + tỷ lệ GTC của một dòng mẫu mã, kèm số của cả mã hàng (gộp theo đơn) cho dòng cha. */
+function gtcFields(r: { deliveredOrders: unknown; returnedOrders: unknown }, product: { deliveredOrders: number; returnedOrders: number } | undefined) {
+  const deliveredOrders = Number(r.deliveredOrders ?? 0);
+  const returnedOrders = Number(r.returnedOrders ?? 0);
+  const productDeliveredOrders = product?.deliveredOrders ?? 0;
+  const productReturnedOrders = product?.returnedOrders ?? 0;
+  return {
+    deliveredOrders,
+    returnedOrders,
+    successRate: successRate(deliveredOrders, returnedOrders),
+    productDeliveredOrders,
+    productReturnedOrders,
+    productSuccessRate: successRate(productDeliveredOrders, productReturnedOrders),
+  };
 }
 
 /** Số mẫu mã theo tồn kho / danh mục / kho / trạng thái (cho bộ lọc) */
