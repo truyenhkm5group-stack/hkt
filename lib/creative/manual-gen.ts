@@ -494,7 +494,9 @@ export function manualEditPrompt(i: { request: ImageEditRequest; productName: st
     "TOP PRIORITY — EDIT REQUEST FROM THE SHOP OWNER. Produce a NEW version of the FIRST attached image (a Facebook feed advertising photo the shop already made) applying ONLY these change(s):",
     ...asks.map((a, k) => `${k + 1}. ${a}`),
     `Keep everything the request does not mention exactly as in the first attached image: the garment design (${i.isDesign ? "it is one of the shop's NEW designs" : `product "${i.productName ?? "—"}"`}), its colour${color ? " (except the requested colour change)" : ""}, the model, the scene, the lighting and the overall style${r.layout ? " (except the requested presentation)" : ""}.`,
-    !i.isDesign ? `The second attached image is the REAL product photo — the garment must stay that product's design (cut, details, fabric)${color ? "; only its colour changes as requested" : ""}.` : "",
+    !i.isDesign
+      ? `The second attached image is the REAL product photo — the garment must stay that product's design (cut, details, fabric)${color ? "; only its colour changes as requested" : ""}.`
+      : "The second attached image is a REAL best-selling product of the shop — use it ONLY as a reference for photographic quality and the shop's look. Do NOT copy the garment in it: the garment must stay the NEW design shown in the first image (with the requested changes).",
     "Do not add any logo, brand name, text or watermark. Photorealistic commercial fashion photo for a Vietnamese fashion shop.",
   ]
     .filter(Boolean)
@@ -528,6 +530,8 @@ export async function startManualEdit(db: Db, input: StartManualEditInput, cfg: 
   if (src.img.design && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế (DNA) — không sửa được." };
   const product = spec ? null : src.run.productId ? await loadProductBrief(db, src.run.productId) : null;
   if (!spec && !product) return { ok: false, error: "Ảnh không còn gắn mã hàng — không sửa được." };
+  // Máy vẽ bắt buộc có MỘT ảnh sản phẩm thật đi kèm — kiểm TRƯỚC khi ghi lượt, để không tạo ảnh chắc chắn vẽ hỏng.
+  if (spec ? spec.photoSourceIds.length === 0 : !src.run.productPhotoSourceId) return { ok: false, error: "Ảnh này không có ảnh sản phẩm thật đi kèm (vd Mẫu tự làm) — máy vẽ bắt buộc có một ảnh thật nên không sửa được." };
 
   const want = Math.max(IMAGE_EDIT.minImages, Math.min(IMAGE_EDIT.maxImages, Math.round(input.count ?? IMAGE_EDIT.defaultImages) || IMAGE_EDIT.defaultImages));
   const idea = describeImageEdit(request);
@@ -624,7 +628,12 @@ async function pixelsFor(db: Db, run: GenRow, img: ImageRow): Promise<ImageEditI
     const px = src?.imageId ? await readCreativeImage(db, src.imageId) : null;
     if (!px) throw new Error("Ảnh gốc cần sửa đã mất (bị xoá hoặc dọn điểm ảnh) — không vẽ.");
     const out: ImageEditInputImage[] = [{ kind: "OWN_VARIANT", bytes: new Uint8Array(px.bytes), contentType: px.contentType }];
-    if (run.productPhotoSourceId) out.push(...(await gatherPixels(db, { productPhotoSourceId: run.productPhotoSourceId, parentVariantId: null, ownAdSourceId: null })));
+    // Máy vẽ luôn đòi MỘT ảnh sản phẩm thật (ranh giới 3, `assertPixelSafe`): mockup ⇒ ảnh thật của mã; thiết kế mới ⇒ ảnh thật
+    // của mã cha trội (câu lệnh dặn chỉ lấy phong cách, không chép chiếc áo ấy). 28/09/2026 lần sửa đầu tiên của chủ shop là một
+    // thiết kế mới và vấp đúng chỗ này vì chỉ gửi ảnh gốc.
+    const realPhoto = run.productPhotoSourceId ?? parseManualDesignSpec(img.design)?.photoSourceIds[0] ?? null;
+    if (!realPhoto) throw new Error("Không có ảnh sản phẩm thật đi kèm (máy vẽ bắt buộc) — không vẽ.");
+    out.push(...(await gatherPixels(db, { productPhotoSourceId: realPhoto, parentVariantId: null, ownAdSourceId: null })));
     return out;
   }
   if (run.kind !== "DESIGN") {

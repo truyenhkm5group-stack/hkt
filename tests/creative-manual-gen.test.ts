@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import type { VariantCaptioner } from "@/lib/creative/caption";
@@ -18,14 +18,14 @@ import { campaignKindLabel, describeCampaignSetup, marketerCampaignCodes, parseC
 import { pickWinCode, winNameProblem } from "@/lib/creative/win-code";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { marketerNameProblem, marketerOptions } from "@/lib/creative/marketer-code";
-import { listRecentBatches } from "@/lib/queries/creative-loop";
+import { listLiveVariants, listRecentBatches } from "@/lib/queries/creative-loop";
 import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
 import { facebookErrorText, testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
 import { IntegrationError, loiNghiepVu } from "@/lib/integrations/http";
 import { describeFbTokenApp } from "@/lib/queries/fb-token-scopes";
-import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/openai/images";
+import { assertPixelSafe, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
 
 /**
  * ═══════════ VÒNG MẪU — GEN TAY · TÊN CHIẾN DỊCH · TÍCH CHỌN BÀI · MỖI BÀI MỘT CHIẾN DỊCH (§5i) ═══════════
@@ -176,7 +176,7 @@ export function testCreativeManualGenPure() {
   assert.ok(pm.includes("REAL product photo"), "ảnh mockup mã thật: nhắc ảnh sản phẩm thật để kiểu dáng không trôi");
   assert.ok(!pm.includes("Owner's edit request"), "không sửa chi tiết ⇒ không có dòng ấy");
   const pd = manualEditPrompt({ request: { color: "", layout: null, detail: "đổi tay bồng thành tay lỡ" }, productName: null, isDesign: true });
-  assert.ok(pd.includes("NEW designs") && !pd.includes("REAL product photo") && pd.includes("tay lỡ"), "thiết kế mới: không có ảnh sản phẩm thật, yêu cầu tự do đi nguyên văn");
+  assert.ok(pd.includes("NEW designs") && !pd.includes("REAL product photo") && pd.includes("Do NOT copy the garment in it") && pd.includes("tay lỡ"), "thiết kế mới: ảnh thật của mã cha chỉ là tham chiếu phong cách, yêu cầu tự do đi nguyên văn");
   assert.ok(!pd.includes("colour to:"), "không đổi màu ⇒ không có dòng đổi màu");
 
   // GHÉP LẠI TÊN KHI SETUP ĐỔI (chủ shop 27/09/2026: chọn MKTer ⇒ tên đổi NGAY, kể cả tên đã lưu).
@@ -388,6 +388,8 @@ export async function testCreativeManualGenDb(db: Db) {
   const firstSent: Uint8Array[] = [];
   let costEach = 0.01;
   const imageClient: ImageEditClient = async (input) => {
+    // Cùng chốt điểm ảnh của máy vẽ thật — thiếu nó, ca "sửa thiết kế mới" 28/09/2026 xanh ở đây mà đỏ trên production.
+    assertPixelSafe(input.images);
     imageCalls += 1;
     seen.push(input.images.map((i) => i.kind));
     firstSent.push(input.images[0]?.bytes ?? new Uint8Array());
@@ -679,6 +681,8 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(bc1.startAt.getTime(), henLuc.getTime());
     assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd", "uploadAdImage", "createAdCreative", "createTestCampaign", "createTestAdset", "createAd", "activateTestCampaign"], "đọc mẫu TRƯỚC khi ghi dòng nào, rồi đi ĐÚNG sáu bước của đường đăng lô");
     assert.equal(adsetTimes[0].start.getTime(), henLuc.getTime(), "Facebook giữ lịch: start_time = giờ hẹn");
+    const dangChay = await listLiveVariants(db, t1);
+    assert.ok(dangChay.some((x) => x.id === (c1.ok ? c1.variantId : "") && x.verdict === "PENDING"), "camp hẹn giờ đã lên Facebook hiện ở tab Đang chạy (chờ tới giờ) — 28/09/2026 tab bỏ sót 7 camp hẹn 07:00");
     assert.equal(adsetTimes[0].end, null, "ngân sách NGÀY, chạy liên tục (chủ shop 27/09/2026) — KHÔNG gửi end_time");
     assert.ok(adsetsSent[0]?.daily, "nhóm đặt daily_budget, không phải lifetime_budget");
     assert.equal((bc1.plan as Record<string, unknown>).budgetMode, "DAILY", "lô INSTANT mang ngân sách ngày — lượt tick đi tiếp và phiếu duyệt đọc đúng điều này");
@@ -935,6 +939,30 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.ok((await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, runSua.id))).every((x) => x.status === "GENERATED"), "ảnh sửa chờ duyệt như ảnh gen tay");
     const theSua = (await listManualGenRuns(db, 50, 25_500, null)).find((r) => r.id === runSua.id);
     assert.deepEqual([theSua?.kind, theSua?.editSource?.seq, theSua?.editSource?.imageId], ["EDIT", anh8.seq, anh8.imageId], "thẻ lượt nói sửa từ ảnh nào");
+
+    // (g1b) SỬA MỘT THIẾT KẾ MỚI — đúng ca production 28/09/2026: máy vẽ đòi một ảnh sản phẩm thật, lượt sửa chỉ gửi ảnh gốc
+    //       nên vẽ hỏng. Nay gửi kèm ảnh thật của mã cha trội; bản mô tả thiết kế đi theo ⇒ đăng vẫn cấp mã TK.
+    const dna = Object.fromEntries(DESIGN_DNA_KEYS.map((k) => [k, (DESIGN_DNA_VOCAB[k] as readonly string[])[0]]));
+    const s9 = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+    await drawManualGen(db, { genId: s9.ok ? s9.genId : "", imageClient });
+    const [anh9] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s9.ok ? s9.genId : ""));
+    await db.update(schema.creativeManualGenImages).set({ design: { dna, photoSourceIds: [`${P}photo`], parentProductIds: [`${P}prod`], parentLabels: ["Q003"], priceVnd: 499_000, why: "thử", ownerIdea: "" } }).where(eq(schema.creativeManualGenImages.id, anh9.id));
+    const e2 = await startManualEdit(db, { sourceImageId: anh9.id, request: { color: "Đỏ đô", layout: "LIFESTYLE", detail: "đổi thành tay lỡ" }, count: 1 }, cfgKhongTran, actor);
+    assert.ok(e2.ok, e2.ok ? "" : e2.error);
+    const [runTk] = await db.select().from(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, e2.ok ? e2.genId : ""));
+    assert.deepEqual([runTk.productId, runTk.productPhotoSourceId], [null, null], "thiết kế mới: lượt sửa không gắn mã hàng cha");
+    seen.length = 0;
+    await drawManualGen(db, { genId: runTk.id, imageClient });
+    assert.deepEqual(seen, [["OWN_VARIANT", "PRODUCT_PHOTO"]], "ảnh gốc + ảnh thật của mã cha trội (chốt điểm ảnh của máy vẽ đi qua)");
+    const [anhTk] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, runTk.id));
+    assert.equal(anhTk.status, "GENERATED", anhTk.error);
+    assert.ok(anhTk.prompt.includes("Do NOT copy the garment in it"), "câu lệnh dặn chỉ lấy phong cách từ ảnh mã cha");
+    assert.ok(String((anhTk.design as Record<string, unknown>).ownerIdea).includes("Sửa ảnh: đổi màu Đỏ đô"), "bản mô tả thiết kế đi theo, ghi yêu cầu sửa");
+    // Ảnh không có ảnh sản phẩm thật đi kèm (Mẫu tự làm) ⇒ từ chối TRƯỚC khi ghi lượt, không để vẽ hỏng.
+    const upSua = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh9.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "", primaryText: "x", note: "", imageBytes: fakeJpeg(9_201) }, actor, new Date());
+    assert.ok(upSua.ok);
+    const khongAnhThat = await startManualEdit(db, { sourceImageId: upSua.ok ? upSua.imageId : "", request: { color: "Đen", layout: null, detail: "" } }, cfgKhongTran, actor);
+    assert.ok(!khongAnhThat.ok && khongAnhThat.error.includes("không có ảnh sản phẩm thật"), "Mẫu tự làm không có ảnh thật ⇒ từ chối trước khi tốn tiền");
 
     // (g2) MẪU TỰ LÀM ⇒ vào THẲNG hàng đợi (lô hằng ngày đã bỏ).
     const up = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "Tự làm", primaryText: "Ảnh tôi tự vẽ", note: "vẽ trên ChatGPT", imageBytes: fakeJpeg(9_101) }, actor, new Date());

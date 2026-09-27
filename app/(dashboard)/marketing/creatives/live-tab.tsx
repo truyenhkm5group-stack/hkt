@@ -57,7 +57,9 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
   const now = new Date();
   const [rows, kill] = await Promise.all([listLiveVariants(db, now), readAdsKillSwitch()]);
 
-  const chay = rows.filter((r) => r.status === "LIVE");
+  // Camp hẹn giờ đã lên Facebook (LIVE) mà chưa tới giờ chạy — đếm riêng, không gộp vào "đang chạy".
+  const choGio = rows.filter((r) => r.status === "LIVE" && new Date(r.startAt) > now);
+  const chay = rows.filter((r) => r.status === "LIVE" && new Date(r.startAt) <= now);
   const chi = rows.reduce<number | null>((s, r) => (r.metrics.spendVnd === null ? s : (s ?? 0) + r.metrics.spendVnd), null);
   const hua = rows.filter((r) => r.verdict === "PROMISING").length;
   const tat = rows.filter((r) => r.verdict === "KILL").length;
@@ -70,7 +72,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
       <StatStrip
         columns={5}
         items={[
-          { label: "Đang chạy", value: formatNumber(chay.length), note: `trên ${formatNumber(rows.length)} mẫu đã đăng · ${LIVE_WINDOW_DAYS} ngày` },
+          { label: "Đang chạy", value: formatNumber(chay.length), note: `${choGio.length ? `+ ${formatNumber(choGio.length)} chờ tới giờ · ` : ""}trên ${formatNumber(rows.length)} mẫu đã đăng · ${LIVE_WINDOW_DAYS} ngày` },
           { label: "Đã chi", value: formatVND(chi), note: "chi cấp mẩu QC", hint: "Cộng dòng chi hạt AD của các mẫu trong bảng. Mẫu chưa có dòng chi nào không được cộng như 0 — nếu không mẫu nào có số chi thì in “—”." },
           { label: "Hứa hẹn", value: formatNumber(hua), note: "qua mọi luật giữ — có thể cho tiêu thêm" },
           { label: "Tắt sớm theo luật", value: formatNumber(tat) },
@@ -129,6 +131,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                             <p className="truncate text-[11px] text-muted-foreground" title={v.dailyBudget ? `${vnShortStamp(v.startAt)} → chạy liên tục (ngân sách ngày; khung chấm tới ${vnShortStamp(v.endAt)})` : `${vnShortStamp(v.startAt)} → ${vnShortStamp(v.endAt)}`}>
                               Lô {formatDate(v.batchDay)} · {MODE_LABEL[v.mode]} · {VARIANT_STATUS_LABEL[v.status]}
                             </p>
+                            {v.status === "LIVE" && new Date(v.startAt) > now ? <p className="text-[11px] font-medium text-brand">Chờ tới giờ · chạy lúc {vnShortStamp(v.startAt)}</p> : null}
                             <p className="truncate text-[11px] text-muted-foreground">{v.productName ?? v.productId ?? "—"}</p>
                           </div>
                         </div>
