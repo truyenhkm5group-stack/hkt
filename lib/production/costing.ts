@@ -40,10 +40,15 @@ function okLines(c: Exclude<ReturnType<typeof computeCostSheet>, { error: string
   return c.lines;
 }
 
+/**
+ * `onlyFirst` (lối tắt "Lập giá thành V1" — Agent SC): chỉ tạo khi mẫu CHƯA có bảng nào. Khoá dòng mẫu
+ * (`FOR UPDATE`) trước khi đếm, nên hai cú bấm đồng thời xếp hàng: người sau thấy V1 đã có và nhận lại
+ * chính nó (`existing`) thay vì đẻ V2. Không đặt cờ ⇒ hành vi cũ, không khoá thêm gì.
+ */
 export async function createCostSheetCore(
   db: Db,
-  input: { modelId: string; topicId: string | null; lines: CostLineInput[]; notes: string; actor: Actor },
-): Promise<{ ok: true; costSheetId: string; version: number; totalUnitCost: number; eventId: string | null; lifecycle: LifecycleFollow } | { error: string }> {
+  input: { modelId: string; topicId: string | null; lines: CostLineInput[]; notes: string; actor: Actor; onlyFirst?: boolean },
+): Promise<{ ok: true; costSheetId: string; version: number; totalUnitCost: number; eventId: string | null; lifecycle: LifecycleFollow } | { error: string; existing?: { costSheetId: string; version: number } }> {
   const loi = humanError(input.actor);
   if (loi) return { error: loi };
   const c = computeCostSheet(input.lines);
@@ -56,6 +61,11 @@ export async function createCostSheetCore(
   }
 
   const out = await db.transaction(async (tx) => {
+    if (input.onlyFirst) {
+      await tx.select({ id: schema.productModels.id }).from(schema.productModels).where(eq(schema.productModels.id, m.id)).for("update");
+      const [co] = await tx.select({ id: cs.id, version: cs.version }).from(cs).where(eq(cs.modelId, m.id)).orderBy(asc(cs.version)).limit(1);
+      if (co) return { existing: { costSheetId: co.id, version: co.version } };
+    }
     // Số phiên bản tiếp theo của mẫu. UNIQUE (model_id, version) chặn hai người cùng tạo V2.
     const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${cs.version}), 0)::int` }).from(cs).where(eq(cs.modelId, m.id));
     const version = Number(n) + 1;
@@ -80,6 +90,7 @@ export async function createCostSheetCore(
     return { costSheetId: row.id, version, totalUnitCost: c.total, eventId, lifecycle };
   });
 
+  if ("existing" in out) return { error: "Mẫu đã có bảng giá thành", existing: out.existing };
   return { ok: true, ...out };
 }
 

@@ -317,6 +317,7 @@ import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testCompanyOsEvidenceGapsDb, testCompanyOsEvidenceGapsPure } from "./company-os-evidence-gaps.test";
 import { testCompanyOsBulkDeclareDb, testCompanyOsBulkDeclarePure, testCompanyOsBulkDeclareSource } from "./company-os-bulk-declare.test";
 import { testCompanyOsPipelineBoardDb, testCompanyOsPipelineBoardGate, testCompanyOsPipelineBoardPure, testCompanyOsPipelineBoardSource } from "./company-os-pipeline-board.test";
+import { testCompanyOsProductionShortcutsDb, testCompanyOsProductionShortcutsPure, testCompanyOsProductionShortcutsSource } from "./company-os-production-shortcuts.test";
 import { testProductionTopicFilesDb, testProductionTopicFilesPure } from "./production-topic-files.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
@@ -2009,6 +2010,10 @@ async function main() {
   testCompanyOsPipelineBoardSource();
   testCompanyOsPipelineBoardGate();
   await testCompanyOsPipelineBoardDb(db);
+  // Company OS · Agent SC: lối tắt sản xuất — bản duyệt → lập lệnh SX · lệnh đã gửi → nhập kho theo lệnh · topic đã chốt → giá thành V1 (mã `cos-sc-`, tự dọn).
+  testCompanyOsProductionShortcutsPure();
+  testCompanyOsProductionShortcutsSource();
+  await testCompanyOsProductionShortcutsDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

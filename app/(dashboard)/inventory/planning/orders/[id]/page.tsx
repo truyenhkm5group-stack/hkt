@@ -10,6 +10,9 @@ import { getProductionOrder, matrixAsText } from "@/lib/queries/production";
 import { designWarning, diffCells } from "@/lib/constants/production-os";
 import { getDesignVersionBrief, requireApprovedDesignFlag } from "@/lib/queries/production-os";
 import { cn } from "@/lib/utils";
+import { PackagePlus } from "lucide-react";
+import { ShortcutAction } from "@/components/shortcut-action";
+import { getPoReceiptPrefill } from "@/lib/queries/production-shortcuts";
 
 export default async function ProductionOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("planning:view");
@@ -19,6 +22,8 @@ export default async function ProductionOrderPage({ params }: { params: Promise<
   const text = matrixAsText(o);
   const [design, requireApprovedDesign] = await Promise.all([getDesignVersionBrief(o.designVersionId), requireApprovedDesignFlag()]);
   const lech = o.suggestedCells ? diffCells(o.suggestedCells.cells, o.cells) : [];
+  // Lối tắt "Nhập kho theo lệnh SX" (Agent SC): quyền của hộp thoại Nhập hàng (inventory:write), số còn phải nhập = ô lệnh − đã nhập qua phiếu nối lệnh.
+  const nhap = await getPoReceiptPrefill(o.id, can(user, "inventory:write"));
   return (
     <div className="space-y-5">
       <PageHeader
@@ -33,6 +38,17 @@ export default async function ProductionOrderPage({ params }: { params: Promise<
         actions={<div className="flex items-center gap-2"><span className={cn("rounded px-2 py-0.5 text-xs font-semibold", PRODUCTION_STATUS_TONE[o.status])}>{PRODUCTION_STATUS_LABEL[o.status]}</span><Link href="/inventory/planning/orders" className="text-sm text-primary hover:underline">Danh sách</Link></div>}
       />
       <OrderActions id={o.id} status={o.status} text={text} canWrite={can(user, "planning:write")} />
+      {nhap ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-3 text-sm">
+          <ShortcutAction state={nhap.state} label="Nhập kho theo lệnh SX" icon={<PackagePlus className="size-4" />} />
+          {o.status === "SENT" ? (
+            <span className="text-xs text-muted-foreground">
+              Lệnh {formatNumber(o.totalQty)} sp · còn phải nhập {formatNumber(nhap.prefill.remainingTotal)} sp theo phiếu đã nối lệnh
+              {nhap.prefill.unmapped.length ? ` · ${nhap.prefill.unmapped.length} ô không khớp mẫu mã nào (nhập tay)` : ""}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {/* Company OS · Agent C — bản duyệt mà xưởng may theo + gợi ý máy vs số người chốt. */}
       <div className="grid gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-xl border bg-card p-3">

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
+import { receiptShortcutHref } from "@/lib/constants/production-shortcuts";
 import { PRODUCTION_STATUS_LABEL, PRODUCTION_STATUS_TONE } from "@/lib/constants/production";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { listProductionOrders } from "@/lib/queries/production";
@@ -11,7 +12,9 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Bảng đặt hàng sản xuất" };
 
 export default async function ProductionOrdersPage() {
-  await requirePermission("planning:view");
+  const user = await requirePermission("planning:view");
+  // Lối tắt "Nhập kho theo lệnh" (Agent SC) chỉ hiện với lệnh ĐÃ GỬI và người có quyền nhập kho.
+  const canNhap = can(user, "inventory:write");
   const rows = await listProductionOrders();
   return (
     <div className="space-y-5">
@@ -37,7 +40,7 @@ export default async function ProductionOrdersPage() {
                 <TableCell className="text-right font-semibold tabular-nums">{formatNumber(r.totalQty)}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.unitCost ? formatVND(r.totalQty * r.unitCost, { compact: true }) : "—"}</TableCell>
                 <TableCell className="text-sm">{r.supplier || "—"}{r.dueDate ? ` · ${formatDate(r.dueDate)}` : ""}</TableCell>
-                <TableCell><span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", PRODUCTION_STATUS_TONE[r.status])}>{PRODUCTION_STATUS_LABEL[r.status] ?? r.status}</span></TableCell>
+                <TableCell><span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", PRODUCTION_STATUS_TONE[r.status])}>{PRODUCTION_STATUS_LABEL[r.status] ?? r.status}</span>{canNhap && r.status === "SENT" && r.productId ? <div><Link href={receiptShortcutHref(r.id)} className="text-xs font-medium text-primary hover:underline">Nhập kho theo lệnh</Link></div> : null}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}<div>{r.createdBy}</div></TableCell>
               </TableRow>
             ))}

@@ -4,7 +4,9 @@ import { activeSupplierNames } from "@/lib/queries/suppliers";
 import { getDb } from "@/db";
 import { productIdsHavingMarketerPrice } from "@/lib/inventory/receipt-pricing";
 import { DeleteReceiptButton } from "@/app/(dashboard)/inventory/receipts/delete-receipt-button";
-import { ReceiptDialog } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
+import { ReceiptDialog, type ReceiptPrefillView } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
+import { RECEIPT_PREFILL_PARAM } from "@/lib/constants/production-shortcuts";
+import { getPoReceiptPrefill } from "@/lib/queries/production-shortcuts";
 import { LinkProductionControl } from "@/app/(dashboard)/inventory/receipts/link-production-control";
 import { prefilledOrderId } from "@/lib/constants/evidence-gaps";
 import { listLinkableReceipts } from "@/lib/queries/evidence-gaps";
@@ -41,6 +43,29 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
     canWrite ? listOpenProductionLinks() : Promise.resolve([]),
     canWrite ? getDb().then(productIdsHavingMarketerPrice) : Promise.resolve([] as string[]),
   ]);
+  /*
+    LỐI TẮT "Nhập kho theo lệnh SX" (Agent SC): `?nhap-lenh=<lệnh>` mở hộp thoại Nhập hàng CÓ SẴN, điền
+    xưởng · lệnh · số còn phải nhập. Lệnh không nhập được (chưa gửi / đã đủ / không quyền) ⇒ không mở hộp
+    thoại, in lý do. Lệnh luôn có mặt trong ô chọn (danh sách ứng viên chỉ lấy 300 lệnh mới nhất).
+  */
+  const poParam = param(raw, RECEIPT_PREFILL_PARAM);
+  const theoLenh = poParam ? await getPoReceiptPrefill(poParam, canWrite) : null;
+  const prefill: ReceiptPrefillView | null =
+    theoLenh && theoLenh.state.enabled
+      ? {
+          poId: theoLenh.po.id,
+          poCode: theoLenh.po.code,
+          productLabel: theoLenh.po.productLabel,
+          supplier: theoLenh.po.supplier,
+          reference: theoLenh.po.code,
+          qty: Object.fromEntries(theoLenh.prefill.rows.filter((r) => r.remaining > 0).map((r) => [r.variantId, r.remaining])),
+          unmapped: theoLenh.prefill.unmapped,
+        }
+      : null;
+  const linkOptions =
+    prefill && !productionLinks.some((l) => l.kind === "ORDER" && l.id === prefill.poId)
+      ? [{ kind: "ORDER" as const, id: prefill.poId, label: `Lệnh ${prefill.poCode} · ${prefill.productLabel} · ${theoLenh?.po.totalQty ?? "—"} cái`, supplier: prefill.supplier }, ...productionLinks]
+      : productionLinks;
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
   const selected = selectedId ? receipts.find((r) => r.id === selectedId) : null;
@@ -58,11 +83,17 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
             <>
               <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
               <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={productionLinks} pricedProductIds={pricedProductIds} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={linkOptions} pricedProductIds={pricedProductIds} prefill={prefill} />
             </>
           ) : null
         }
       />
+
+      {poParam && !prefill ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+          Nhập kho theo lệnh: {theoLenh ? `lệnh ${theoLenh.po.code} — ${theoLenh.state.enabled ? "" : theoLenh.state.reason}` : "không tìm thấy lệnh sản xuất trên đường dẫn"}.
+        </p>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng đã nhập" value={`+${formatNumber(summary.received)}`} note={`${formatNumber(summary.receipts)} phiếu nhập hàng`} icon={ArrowDownToLine} tone="green" />

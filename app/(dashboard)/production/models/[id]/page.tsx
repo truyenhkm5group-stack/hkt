@@ -8,6 +8,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { getModelBrief, getModelProductionDesk, listSupplierOptions } from "@/lib/queries/production-os";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
+import { loadDesignPoShortcuts } from "@/lib/queries/production-shortcuts";
 
 export const metadata = { title: "Bàn sản xuất của mẫu" };
 
@@ -21,6 +22,8 @@ export default async function ModelProductionPage({ params }: { params: Promise<
   const [model, desk, summary, suppliers] = await Promise.all([getModelBrief(id), getModelProductionDesk(id), getModelProductionSummary(id), listSupplierOptions()]);
   if (!model || !summary) notFound();
   const canWrite = can(user, "production:write");
+  // Lối tắt "Lập lệnh SX" theo bản duyệt (Agent SC) — quyền của trình sửa lệnh (planning:write).
+  const poShortcuts = await loadDesignPoShortcuts({ productId: model.productId, designIds: desk.designVersions.map((x) => x.id), canWrite: can(user, "planning:write") });
   return (
     <div className="space-y-5">
       <PageHeader
@@ -57,7 +60,7 @@ export default async function ModelProductionPage({ params }: { params: Promise<
           <p className="text-sm text-muted-foreground">Chưa có topic nào cho mẫu này.</p>
         )}
       </SectionCard>
-      <ModelDesk desk={desk} modelId={model.id} topicId={null} productId={model.productId} suppliers={suppliers} canWrite={canWrite} canApprove={can(user, "production:approve")} canAssumptions={can(user, "reports:assumptions")} />
+      <ModelDesk desk={desk} modelId={model.id} topicId={null} productId={model.productId} suppliers={suppliers} canWrite={canWrite} canApprove={can(user, "production:approve")} canAssumptions={can(user, "reports:assumptions")} poShortcuts={poShortcuts} />
     </div>
   );
 }

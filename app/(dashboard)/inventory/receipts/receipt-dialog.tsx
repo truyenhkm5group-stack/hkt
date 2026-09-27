@@ -18,6 +18,27 @@ import { cn } from "@/lib/utils";
 
 type RowInput = { qty: string; counted: string };
 
+/**
+ * Điền sẵn "Nhập kho theo lệnh SX" (Company OS · Agent SC): xưởng, lệnh, và số còn phải nhập từng mẫu mã
+ * (ô lệnh − đã nhập qua phiếu nối lệnh, do máy chủ tính). Chỉ là số KHỞI TẠO — kho sửa theo số đếm thật
+ * rồi bấm lưu qua đúng `createStockReceipt` (máy chủ kiểm lại lệnh bằng `validateProductionLink`).
+ */
+export type ReceiptPrefillView = {
+  poId: string;
+  poCode: string;
+  productLabel: string;
+  supplier: string;
+  reference: string;
+  qty: Record<string, number>;
+  unmapped: { cell: string; qty: number }[];
+};
+
+function inputsOf(prefill: ReceiptPrefillView | null | undefined): Record<string, RowInput> {
+  const out: Record<string, RowInput> = {};
+  for (const [id, n] of Object.entries(prefill?.qty ?? {})) if (n > 0) out[id] = { qty: String(n), counted: "" };
+  return out;
+}
+
 function toInt(value: string) {
   const n = Number(String(value).replace(/[^\d-]/g, ""));
   return Number.isFinite(n) ? Math.trunc(n) : 0;
@@ -31,6 +52,7 @@ export function ReceiptDialog({
   supplierOptions = [],
   productionLinks = [],
   pricedProductIds,
+  prefill = null,
 }: {
   variants: VariantPickerRow[];
   defaultKind?: StockReceiptKind;
@@ -44,25 +66,30 @@ export function ReceiptDialog({
    * ngày nhập. Danh sách này chỉ để báo TRƯỚC mã nào sẽ lưu với giá "chưa biết".
    */
   pricedProductIds?: string[];
+  /** Mở từ "Nhập kho theo lệnh SX": hộp thoại tự mở và điền sẵn. */
+  prefill?: ReceiptPrefillView | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(prefill));
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());
-  const [reference, setReference] = useState("");
-  const [supplier, setSupplier] = useState("");
+  const [reference, setReference] = useState(prefill?.reference ?? "");
+  const [supplier, setSupplier] = useState(prefill?.supplier ?? "");
   const [note, setNote] = useState("");
-  const [productionOrderId, setProductionOrderId] = useState("");
+  const [productionOrderId, setProductionOrderId] = useState(prefill?.poId ?? "");
   const [productionBatchId, setProductionBatchId] = useState("");
   const [search, setSearch] = useState("");
   const [onlySelling, setOnlySelling] = useState(true);
-  const [inputs, setInputs] = useState<Record<string, RowInput>>({});
+  const [onlyPrefill, setOnlyPrefill] = useState(Boolean(prefill));
+  const [inputs, setInputs] = useState<Record<string, RowInput>>(() => inputsOf(prefill));
+  const prefillIds = useMemo(() => new Set(Object.keys(prefill?.qty ?? {})), [prefill]);
   const [pending, startTransition] = useTransition();
   const coGiaBao = useMemo(() => (pricedProductIds ? new Set(pricedProductIds) : null), [pricedProductIds]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return variants.filter((v) => (!onlySelling || v.selling) && (!term || `${v.productName} ${v.sku} ${v.color} ${v.size}`.toLowerCase().includes(term)));
-  }, [variants, search, onlySelling]);
+    // "Chỉ mẫu mã của lệnh" thay cho "chỉ mẫu mã đang bán": mẫu mã của lệnh vẫn phải hiện dù đang ẩn trên Pancake.
+    return variants.filter((v) => (prefill && onlyPrefill ? prefillIds.has(v.id) : !onlySelling || v.selling) && (!term || `${v.productName} ${v.sku} ${v.color} ${v.size}`.toLowerCase().includes(term)));
+  }, [variants, search, onlySelling, onlyPrefill, prefill, prefillIds]);
 
   const setField = (id: string, field: keyof RowInput, value: string) => setInputs((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { qty: "", counted: "" }), [field]: value } }));
 
@@ -107,6 +134,15 @@ export function ReceiptDialog({
     setSearch("");
     setReceivedAt(todayVN());
   };
+  // Mở lại hộp thoại theo lệnh ⇒ điền lại từ số MỚI NHẤT máy chủ vừa tính (phiếu vừa lưu đã được trừ).
+  const applyPrefill = () => {
+    if (!prefill) return;
+    setInputs(inputsOf(prefill));
+    setReference(prefill.reference);
+    setSupplier(prefill.supplier);
+    setProductionOrderId(prefill.poId);
+    setOnlyPrefill(true);
+  };
 
   const submit = () => {
     if (!items.length) {
@@ -138,7 +174,10 @@ export function ReceiptDialog({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) setKind(defaultKind);
+        if (next) {
+          setKind(defaultKind);
+          applyPrefill();
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -153,6 +192,12 @@ export function ReceiptDialog({
           <DialogDescription>
 {STOCK_RECEIPT_KIND_HINT[kind]}
           </DialogDescription>
+          {prefill && kind === "RECEIPT" ? (
+            <p className="mt-1 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200">
+              Theo lệnh <b>{prefill.poCode}</b> · {prefill.productLabel}: số điền sẵn = số của lệnh − đã nhập qua phiếu nối lệnh. Sửa theo số ĐẾM THẬT rồi lưu.
+              {prefill.unmapped.length ? ` ${prefill.unmapped.length} ô của lệnh không khớp mẫu mã nào (${prefill.unmapped.map((u) => `${u.cell.replace("|", " · ")}: ${u.qty}`).join(", ")}) — nhập tay.` : ""}
+            </p>
+          ) : null}
         </DialogHeader>
 
         <div className="grid gap-3 border-b px-5 py-3 sm:grid-cols-4">
@@ -221,8 +266,13 @@ export function ReceiptDialog({
             <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Lọc theo tên, SKU, màu, size…" className="pl-8" />
           </div>
+          {prefill ? (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input type="checkbox" checked={onlyPrefill} onChange={(e) => setOnlyPrefill(e.target.checked)} /> Chỉ mẫu mã của lệnh
+            </label>
+          ) : null}
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input type="checkbox" checked={onlySelling} onChange={(e) => setOnlySelling(e.target.checked)} /> Chỉ mẫu mã đang bán
+            <input type="checkbox" checked={onlySelling} disabled={Boolean(prefill && onlyPrefill)} onChange={(e) => setOnlySelling(e.target.checked)} /> Chỉ mẫu mã đang bán
           </label>
           <span className="text-xs text-muted-foreground">{visible.length} mẫu mã</span>
         </div>
