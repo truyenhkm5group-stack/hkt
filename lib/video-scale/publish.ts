@@ -276,7 +276,10 @@ export async function handlePublishReel(ctx: HandlerCtx, job: VideoJobRow): Prom
     if (st.publishStatus.toLowerCase() === "published" || st.publishing.toLowerCase() === "complete") {
       const publishedAt = st.publishTime ? new Date(st.publishTime) : now;
       await setPost({ status: "PUBLISHED", publishedAt: Number.isFinite(publishedAt.getTime()) ? publishedAt : now, permalink: st.permalink || `https://www.facebook.com/reel/${videoId}`, error: "" });
-      return void (await succeedJob(db, job, now, { result: { videoId, permalink: st.permalink } }));
+      await succeedJob(db, job, now, { result: { videoId, permalink: st.permalink } });
+      // Reel đã lên ⇒ lập quảng cáo theo chế độ của mã. Lỗi ở đây KHÔNG làm hỏng bài đã đăng.
+      await ctx.deps.onReelPublished(db, post.variantId, ctx.cfgNow).catch(() => undefined);
+      return;
     }
     if (job.deadlineAt && now > job.deadlineAt) {
       const msg = `Facebook chưa đăng xong sau ${REEL_LIMITS.processingDeadlineMs / 60_000} phút (xử lý: ${st.processing || "?"}, đăng: ${st.publishing || "?"}). Kiểm tra trên fanpage.`;

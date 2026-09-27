@@ -7953,6 +7953,20 @@ export const videoScaleSkus = pgTable(
     /** Dừng khẩn cấp CẤP MÃ: có mốc ⇒ không đăng / không tạo quảng cáo mới cho mã này. */
     automationPausedAt: ts("automation_paused_at"),
     automationPausedReason: text("automation_paused_reason").notNull().default(""),
+    /** Tài khoản quảng cáo của mã (số, không `act_`). `NULL` = chưa gán ⇒ không dựng quảng cáo. */
+    adAccountId: text("ad_account_id"),
+    /** `DRAFT` · `PUBLISH_PAUSED` · `AUTO_LAUNCH` (`VIDEO_ADS_MODES`). Mặc định chỉ lập nháp. */
+    adsMode: text("ads_mode").notNull().default("DRAFT"),
+    /** Ngân sách NGÀY mỗi quảng cáo (VND). `NULL` = chưa khai ⇒ không bật được. */
+    dailyBudgetPerAdVnd: integer("daily_budget_per_ad_vnd"),
+    /** Trần tổng ngân sách ngày các quảng cáo ĐANG CHẠY của mã (VND). `NULL` = chưa khai. */
+    skuDailyCapVnd: integer("sku_daily_cap_vnd"),
+    /** Cho máy TĂNG ngân sách quảng cáo tốt trong trần (PR 4). Mặc định tắt: tăng tiền phải có người bấm. */
+    autoScale: boolean("auto_scale").notNull().default(false),
+    /** Người bật chế độ quảng cáo hiện tại (mục 34) — `AUTO_LAUNCH` là một lần duyệt có người đứng tên. */
+    adsModeByUserId: text("ads_mode_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    adsModeBy: text("ads_mode_by").notNull().default(""),
+    adsModeAt: ts("ads_mode_at"),
     updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /** ẢNH CHỤP tên — do MÁY CHỦ đọc (mục 34). */
     updatedBy: text("updated_by").notNull().default(""),
@@ -7962,6 +7976,13 @@ export const videoScaleSkus = pgTable(
   (t) => [
     check("video_scale_skus_review_mode_check", sql`${t.reviewMode} IN ('MANUAL', 'AUTO_ON_PASS')`),
     check("video_scale_skus_publish_mode_check", sql`${t.publishMode} IS NULL OR ${t.publishMode} = 'MANUAL_REVIEW'`),
+    check("video_scale_skus_ads_mode_check", sql`${t.adsMode} IN ('DRAFT', 'PUBLISH_PAUSED', 'AUTO_LAUNCH')`),
+    // Tự bật quảng cáo chỉ khi đã khai ĐỦ tiền và có người đứng tên — không có phong bì tiền thì không có "tự".
+    check(
+      "video_scale_skus_auto_launch_check",
+      sql`${t.adsMode} <> 'AUTO_LAUNCH' OR (${t.adAccountId} IS NOT NULL AND ${t.dailyBudgetPerAdVnd} > 0 AND ${t.skuDailyCapVnd} > 0 AND ${t.adsModeByUserId} IS NOT NULL)`,
+    ),
+    check("video_scale_skus_budget_check", sql`(${t.dailyBudgetPerAdVnd} IS NULL OR ${t.dailyBudgetPerAdVnd} BETWEEN 20000 AND 500000) AND (${t.skuDailyCapVnd} IS NULL OR ${t.skuDailyCapVnd} BETWEEN 20000 AND 2000000)`),
   ],
 );
 
@@ -8187,6 +8208,8 @@ export const videoScaleJobs = pgTable(
     outputAssetId: text("output_asset_id").references(() => videoScaleAssets.id, { onDelete: "set null" }),
     /** Bài Reel mà việc `PUBLISH_REEL` phục vụ. */
     postId: text("post_id"),
+    /** Quảng cáo mà việc `CREATE_AD` / `PAUSE_AD` phục vụ. */
+    adId: text("ad_id"),
     isTest: boolean("is_test").notNull().default(false),
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
@@ -8197,7 +8220,7 @@ export const videoScaleJobs = pgTable(
     index("video_scale_jobs_due_idx").on(t.status, t.nextRunAt),
     index("video_scale_jobs_variant_idx").on(t.variantId),
     index("video_scale_jobs_cost_day_idx").on(t.costDay),
-    check("video_scale_jobs_kind_check", sql`${t.kind} IN ('SCRIPT', 'CLIP', 'TTS', 'RENDER', 'QC', 'CAPTION', 'PUBLISH_REEL')`),
+    check("video_scale_jobs_kind_check", sql`${t.kind} IN ('SCRIPT', 'CLIP', 'TTS', 'RENDER', 'QC', 'CAPTION', 'PUBLISH_REEL', 'CREATE_AD', 'PAUSE_AD')`),
     check("video_scale_jobs_status_check", sql`${t.status} IN ('QUEUED', 'RUNNING', 'WAITING', 'SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED')`),
     check("video_scale_jobs_error_kind_check", sql`${t.errorKind} IN ('', 'TRANSIENT', 'PERMANENT', 'AMBIGUOUS', 'TIMEOUT', 'BLOCKED')`),
     check("video_scale_jobs_cost_basis_check", sql`${t.costBasis} IN ('', 'ESTIMATED')`),
@@ -8269,5 +8292,90 @@ export const videoScalePosts = pgTable(
     check("video_scale_posts_published_check", sql`${t.status} <> 'PUBLISHED' OR (${t.fbVideoId} <> '' AND ${t.publishedAt} IS NOT NULL)`),
     check("video_scale_posts_caption_check", sql`length(btrim(${t.caption})) > 0`),
     check("video_scale_posts_auto_check", sql`${t.auto} = false OR ${t.authorizedByUserId} IS NULL`),
+  ],
+);
+
+/**
+ * QUẢNG CÁO của một video — một dòng cho một (biến thể, tài khoản quảng cáo). Mỗi quảng cáo một chiến dịch riêng (ABO: ngân
+ * sách ở NHÓM), dựng TẮT; chỉ bật ở bước cuối. `pending_step` ghi NGAY TRƯỚC lời gọi tạo, xoá cùng lúc lưu id.
+ */
+export const videoScaleAds = pgTable(
+  "video_scale_ads",
+  {
+    id: id(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => videoScaleVariants.id, { onDelete: "restrict" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    postId: text("post_id").references(() => videoScalePosts.id, { onDelete: "set null" }),
+    pageId: text("page_id").notNull(),
+    adAccountId: text("ad_account_id").notNull(),
+    /** Chế độ lúc lập (`VIDEO_ADS_MODES`) — `AUTO_LAUNCH` ⇒ máy bật khi dựng xong và cổng cho phép. */
+    mode: text("mode").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    dailyBudgetVnd: integer("daily_budget_vnd").notNull(),
+    campaignName: text("campaign_name").notNull(),
+    adsetName: text("adset_name").notNull(),
+    adName: text("ad_name").notNull(),
+    message: text("message").notNull(),
+    templateAdId: text("template_ad_id").notNull(),
+    fbVideoId: text("fb_video_id").notNull().default(""),
+    fbImageHash: text("fb_image_hash").notNull().default(""),
+    fbCreativeId: text("fb_creative_id").notNull().default(""),
+    fbCampaignId: text("fb_campaign_id").notNull().default(""),
+    fbAdsetId: text("fb_adset_id").notNull().default(""),
+    fbAdId: text("fb_ad_id").notNull().default(""),
+    pendingStep: text("pending_step").notNull().default(""),
+    pendingAt: ts("pending_at"),
+    error: text("error").notNull().default(""),
+    /** Ai cho phép dựng (mục 34). `NULL` = máy theo chế độ của mã. */
+    authorizedByUserId: text("authorized_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    authorizedBy: text("authorized_by").notNull().default(""),
+    activatedAt: ts("activated_at"),
+    activatedBy: text("activated_by").notNull().default(""),
+    stoppedAt: ts("stopped_at"),
+    stopReason: text("stop_reason").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("video_scale_ads_variant_account_uq").on(t.variantId, t.adAccountId),
+    uniqueIndex("video_scale_ads_fb_ad_uq").on(t.fbAdId).where(sql`${t.fbAdId} <> ''`),
+    index("video_scale_ads_product_idx").on(t.productId, t.status),
+    check("video_scale_ads_mode_check", sql`${t.mode} IN ('DRAFT', 'PUBLISH_PAUSED', 'AUTO_LAUNCH')`),
+    check("video_scale_ads_status_check", sql`${t.status} IN ('DRAFT', 'QUEUED', 'CREATING', 'PAUSED', 'ACTIVE', 'FAILED', 'STOPPED')`),
+    check("video_scale_ads_budget_check", sql`${t.dailyBudgetVnd} BETWEEN 20000 AND 500000`),
+    // "Đang chạy" / "đang tắt" mà không có quảng cáo trên Facebook là một khẳng định không có chứng từ.
+    check("video_scale_ads_live_check", sql`${t.status} NOT IN ('PAUSED', 'ACTIVE') OR (${t.fbAdId} <> '' AND ${t.fbCampaignId} <> '')`),
+  ],
+);
+
+/**
+ * SỔ GHI QUẢNG CÁO của Video Scale — mọi lượt xin tạo / bật / tắt / đổi ngân sách, KỂ CẢ lượt bị chặn (cùng lý do
+ * `creative_fb_actions`): "máy đã ĐỊNH làm gì" là thông tin quý nhất khi đánh giá một cỗ máy tiêu tiền.
+ */
+export const videoScaleAdActions = pgTable(
+  "video_scale_ad_actions",
+  {
+    id: id(),
+    adId: text("ad_id").references(() => videoScaleAds.id, { onDelete: "set null" }),
+    action: text("action").notNull(),
+    outcome: text("outcome").notNull(),
+    denial: text("denial").notNull().default(""),
+    detail: text("detail").notNull().default(""),
+    budgetBeforeVnd: integer("budget_before_vnd"),
+    budgetAfterVnd: integer("budget_after_vnd"),
+    /** Người (mục 34). `NULL` = máy (tự bật / tự tắt / tự tăng theo cấu hình người đã duyệt). */
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actor: text("actor").notNull().default(""),
+    request: jsonb("request").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("video_scale_ad_actions_ad_idx").on(t.adId, t.createdAt),
+    check("video_scale_ad_actions_action_check", sql`${t.action} IN ('CREATE', 'ACTIVATE', 'PAUSE', 'SET_BUDGET')`),
+    check("video_scale_ad_actions_outcome_check", sql`${t.outcome} IN ('APPLIED', 'DENIED', 'FAILED')`),
   ],
 );

@@ -190,3 +190,44 @@ và System User được GIAO fanpage với quyền Tạo nội dung (chỉ lộ
 | Token System User có `pages_manage_posts` + `pages_read_engagement` + `pages_show_list`, và được giao fanpage thử (quyền Tạo nội dung) | cấp quyền là việc của chủ Business Manager |
 | Gán **fanpage thử** cho mã thử ở tab Mã win | chọn fanpage nào đăng là quyết định của người |
 | (Tuỳ) bật TỰ ĐĂNG cho fanpage | để máy đăng thay người là quyết định kinh doanh |
+
+## 12. PR 3 — Quảng cáo Meta + hạn mức
+
+```
+Reel ĐÃ ĐĂNG của video đã duyệt
+  → planVideoAd       một dòng `video_scale_ads` / (video, tài khoản) — ràng buộc duy nhất; tên VS_<mã>_<yymmdd>_<fanpage>_V<n>
+  → CREATE_AD (việc)  tải video bằng LINK KÝ TÊN (≤ 2 giờ) → đợi `ready` → ảnh bìa → bài quảng cáo video (chép nút kêu gọi
+                      của MẨU MẪU) → CHIẾN DỊCH riêng (TẮT, ABO) → NHÓM (ngân sách NGÀY) → QUẢNG CÁO
+  → bật               chỉ khi cổng `gateVideoAd` cho qua (người bấm, hoặc AUTO_LAUNCH)
+```
+
+**Ba chế độ theo mã** (`video_scale_skus.ads_mode`): `DRAFT` (mặc định — chỉ lập dòng, người bấm dựng) · `PUBLISH_PAUSED`
+(Reel đăng xong ⇒ máy dựng đủ ba cấp, để TẮT) · `AUTO_LAUNCH` (dựng xong ⇒ máy bật nếu cổng cho qua). `AUTO_LAUNCH` là
+QUYẾT ĐỊNH ĐỨNG TÊN: CHECK ở CSDL đòi đủ tài khoản quảng cáo + ngân sách ngày khởi điểm + trần mã / ngày + người bật. Đây là
+một lời duyệt thường trực có phong bì tiền rõ, không phải nâng `MAX_ALLOWED_ADS_WRITE_MODE` (vẫn `COPILOT`).
+
+**Cổng `gateVideoAd`** — hàm thuần, thứ tự chốt, kiểm thử khoá cả thứ tự: đường ghi Facebook mở → không dừng khẩn cấp ở cấp
+nào (module · mã · fanpage) → video đã duyệt, không phải dữ liệu thử, QC không loại → Reel đã đăng + fanpage của mã chưa đổi →
+có tài khoản quảng cáo + mẩu mẫu → (bật / đổi ngân sách) có LUẬT TẮT ở Thư viện Media → ngân sách hợp lệ và trong BA TRẦN:
+mỗi quảng cáo (trần cứng 500.000đ) · mã / ngày (trần cứng 2.000.000đ) · toàn module / ngày (trần cứng 5.000.000đ, bắt buộc
+khai). Đổi ngân sách: đọc ngân sách hiện tại TỪ FACEBOOK, tối đa +30% / lần, một lần / quảng cáo / ngày. **Tắt luôn được** —
+kể cả khi đường ghi đóng hay đang dừng khẩn cấp (tắt chỉ làm giảm tiền).
+
+**Không tạo trùng**: `pending_step` ghi TRƯỚC lời gọi tạo chiến dịch / nhóm / quảng cáo; gặp lại dấu mà không có id ⇒ KHÔNG gửi
+lại, hỏng kèm TÊN để người tìm trên Ads Manager. Tải video / ảnh / dựng bài gửi lại được (không tiêu tiền).
+
+**Không đụng camp ngoài module**: mọi lời ghi nhắm id do CHÍNH module tạo ra (`video_scale_ads.fb_*`). Mẩu mẫu chỉ được ĐỌC.
+
+**Sổ** `video_scale_ad_actions`: mọi lượt tạo / bật / tắt / đổi ngân sách — cả lượt BỊ CHẶN (kèm mã chặn) và lượt HỎNG.
+
+**Dừng khẩn cấp theo phạm vi**: dừng mã / fanpage / toàn module ⇒ xếp việc `PAUSE_AD` cho mọi quảng cáo đang chạy trong phạm vi.
+
+### HUMAN GATE thêm của PR 3
+
+| Việc | Vì sao máy không tự làm |
+|---|---|
+| `ADS_WRITE_ENABLED=true` + `ADS_WRITE_MODE=COPILOT` (GitHub Variables) rồi deploy | mở đường ghi tiền là quyết định của chủ shop |
+| Khai **mẩu quảng cáo mẫu** (Cấu hình) và **luật TẮT** (Thư viện Media → Cấu hình & luật) | máy không đoán đối tượng / mục tiêu / điều kiện dừng |
+| Khai **trần toàn module / ngày** (Cấu hình) | trần tiền là quyết định kinh doanh |
+| Mỗi mã: tài khoản quảng cáo · chế độ · ngân sách ngày khởi điểm · trần mã / ngày | như trên |
+

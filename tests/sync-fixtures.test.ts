@@ -257,6 +257,7 @@ import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
 import { testVideoScaleDb, testVideoScalePure } from "./video-scale.test";
 import { testVideoScaleReelDb, testVideoScaleReelPure } from "./video-scale-reel.test";
+import { testVideoScaleAdsDb, testVideoScaleAdsPure } from "./video-scale-ads.test";
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
@@ -1814,6 +1815,8 @@ async function main() {
   await testVideoScaleDb(db);
   testVideoScaleReelPure();
   await testVideoScaleReelDb(db);
+  testVideoScaleAdsPure();
+  await testVideoScaleAdsDb(db);
   testCreativeManualDesignPure();
   await testCreativeManualDesignDb(db);
   testCreativeImportPure();

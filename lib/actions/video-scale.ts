@@ -16,6 +16,9 @@ import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
 import { finalCaptionProblems } from "@/lib/video-scale/caption";
 import { loadProductFacts } from "@/lib/video-scale/facts";
 import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/video-scale/publish";
+import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
+import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
+import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
 
 /**
@@ -144,7 +147,12 @@ export async function saveVideoScaleConfigAction(raw: unknown): Promise<{ ok: tr
   const db = await getDb();
   const before = await readVideoScaleConfig(db);
   // Giữ nhà cung cấp đang khai (bộ sinh giả không chọn được từ màn hình production).
-  const next = normalizeVideoScaleConfig({ ...parsed.data, provider: before.provider, dailyUsdCap: parsed.data.dailyUsdCap === "" ? null : parsed.data.dailyUsdCap });
+  const next = normalizeVideoScaleConfig({
+    ...parsed.data,
+    provider: before.provider,
+    dailyUsdCap: parsed.data.dailyUsdCap === "" ? null : parsed.data.dailyUsdCap,
+    adsGlobalDailyCapVnd: parsed.data.adsGlobalDailyCapVnd === "" ? null : parsed.data.adsGlobalDailyCapVnd,
+  });
   const text = JSON.stringify(next);
   await db.insert(schema.settings).values({ key: VIDEO_SCALE_CONFIG_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
   await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_CONFIG_SAVE", entity: "SETTINGS", entityId: VIDEO_SCALE_CONFIG_KEY, before, after: next });
@@ -369,7 +377,101 @@ export async function setVideoPauseAction(raw: unknown): Promise<{ ok: true } | 
     const set = { pausedAt: d.paused ? now : null, pausedReason: d.paused ? d.reason : "", updatedByUserId: actor.id, updatedBy: actor.label };
     await db.insert(T).values({ pageId: d.id, ...set }).onConflictDoUpdate({ target: T.pageId, set: { ...set, updatedAt: now } });
   }
-  await audit({ userId: user.id, userEmail: user.email, action: d.paused ? "VIDEO_SCALE_PAUSE" : "VIDEO_SCALE_RESUME", entity: `VIDEO_SCALE_${d.scope}`, entityId: d.id || VIDEO_AUTOMATION_KEY, before, after: { paused: d.paused }, reason: d.reason });
+  // Dừng = tiền phải NGỪNG CHẢY: xếp việc TẮT mọi quảng cáo đang chạy trong phạm vi (tắt đi qua được công tắc khẩn cấp).
+  const paused = d.paused ? await queuePauseAds(db, d.scope === "SKU" ? { productId: d.id } : d.scope === "PAGE" ? { pageId: d.id } : {}, `Dừng khẩn cấp (${d.scope}): ${d.reason}`) : 0;
+  await audit({ userId: user.id, userEmail: user.email, action: d.paused ? "VIDEO_SCALE_PAUSE" : "VIDEO_SCALE_RESUME", entity: `VIDEO_SCALE_${d.scope}`, entityId: d.id || VIDEO_AUTOMATION_KEY, before, after: { paused: d.paused, adsQueuedToPause: paused }, reason: d.reason });
+  if (paused) await drainAfterResponse();
   revalidatePath(PATH);
   return { ok: true };
+}
+
+// ───────────────────────────── PR 3 — QUẢNG CÁO META ─────────────────────────────
+//
+// Quyền: mọi việc làm TĂNG hoặc CAM KẾT tiền (gán tài khoản, chế độ, ngân sách, dựng, bật, đổi ngân sách) — `expenses:write`.
+// TẮT một quảng cáo — `ideas:write` hoặc `expenses:write` (tắt chỉ làm giảm tiền, ai thấy sai cũng tắt được).
+
+export async function setVideoSkuAdsAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Cấu hình quảng cáo của mã là quyết định chi tiền — cần quyền chi phí: sửa." };
+  const parsed = videoSkuAdsSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  if (d.adAccountId) {
+    // Chỉ tài khoản ERP ĐÃ BIẾT (có chi tiêu đồng bộ) — không nhận một số gõ tay.
+    const known = await listAdAccountOptions(db, new Date(), "");
+    if (!known.some((a) => a.id === d.adAccountId)) return { error: "Tài khoản quảng cáo này chưa có trong dữ liệu chi tiêu ERP đã đồng bộ." };
+  }
+  const budget = d.dailyBudgetPerAdVnd === "" ? null : d.dailyBudgetPerAdVnd;
+  const cap = d.skuDailyCapVnd === "" ? null : d.skuDailyCapVnd;
+  if (d.adsMode === "AUTO_LAUNCH" && (!d.adAccountId || !budget || !cap)) return { error: "Tự bật quảng cáo cần ĐỦ tài khoản, ngân sách ngày mỗi quảng cáo và trần mã / ngày — máy không đoán ngân sách." };
+  if (budget && cap && budget > cap) return { error: "Ngân sách mỗi quảng cáo không được lớn hơn trần của mã." };
+  const actor = await actorOf(user.id, user.email);
+  const T = schema.videoScaleSkus;
+  const [before] = await db.select({ adAccountId: T.adAccountId, adsMode: T.adsMode, dailyBudgetPerAdVnd: T.dailyBudgetPerAdVnd, skuDailyCapVnd: T.skuDailyCapVnd, autoScale: T.autoScale }).from(T).where(eq(T.productId, d.productId)).limit(1);
+  const set = {
+    adAccountId: d.adAccountId || null,
+    adsMode: d.adsMode,
+    dailyBudgetPerAdVnd: budget,
+    skuDailyCapVnd: cap,
+    autoScale: d.autoScale,
+    adsModeByUserId: actor.id,
+    adsModeBy: actor.label,
+    adsModeAt: new Date(),
+    updatedByUserId: actor.id,
+    updatedBy: actor.label,
+  };
+  await db.insert(T).values({ productId: d.productId, ...set }).onConflictDoUpdate({ target: T.productId, set: { ...set, updatedAt: new Date() } });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_SKU_ADS", entity: "VIDEO_SCALE_SKU", entityId: d.productId, before: before ?? null, after: set, reason: d.adsMode === "AUTO_LAUNCH" ? "Người bật TỰ BẬT QUẢNG CÁO trong phong bì tiền đã khai." : undefined });
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function queueCreateVideoAdAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Dựng quảng cáo cần quyền chi phí: sửa." };
+  const parsed = videoAdCreateSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const r = await queueCreateAd(db, parsed.data.adId, parsed.data.activate, await actorOf(user.id, user.email));
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: parsed.data.activate ? "VIDEO_SCALE_AD_CREATE_ACTIVATE" : "VIDEO_SCALE_AD_CREATE_PAUSED", entity: "VIDEO_SCALE_AD", entityId: parsed.data.adId });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+export async function activateVideoAdAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Bật quảng cáo cần quyền chi phí: sửa." };
+  const parsed = videoAdIdSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu quảng cáo" };
+  const db = await getDb();
+  const r = await activateVideoAd(db, parsed.data.adId, await actorOf(user.id, user.email), await readVideoScaleConfig(db));
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_AD_ACTIVATE", entity: "VIDEO_SCALE_AD", entityId: parsed.data.adId, after: r });
+  revalidatePath(PATH);
+  return r.ok ? { ok: true } : { error: r.error };
+}
+
+export async function pauseVideoAdAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write") && !can(user, "expenses:write")) return { error: "Bạn không có quyền tắt quảng cáo" };
+  const parsed = videoAdPauseSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const r = await pauseVideoAd(await getDb(), parsed.data.adId, await actorOf(user.id, user.email), parsed.data.reason);
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_AD_PAUSE", entity: "VIDEO_SCALE_AD", entityId: parsed.data.adId, after: r, reason: parsed.data.reason });
+  revalidatePath(PATH);
+  return r.ok ? { ok: true } : { error: r.error };
+}
+
+export async function setVideoAdBudgetAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Đổi ngân sách cần quyền chi phí: sửa." };
+  const parsed = videoAdBudgetSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const r = await setVideoAdBudget(db, parsed.data.adId, parsed.data.budgetVnd, await actorOf(user.id, user.email), await readVideoScaleConfig(db));
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_AD_BUDGET", entity: "VIDEO_SCALE_AD", entityId: parsed.data.adId, after: { budgetVnd: parsed.data.budgetVnd, result: r } });
+  revalidatePath(PATH);
+  return r.ok ? { ok: true } : { error: r.error };
 }

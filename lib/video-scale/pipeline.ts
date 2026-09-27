@@ -19,6 +19,7 @@ import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
 import { enqueueCaptionJob, enqueueVariantProduction, handleClip, handleQc, handleRender, handleScript, handleTts, scriptOf, type HandlerCtx } from "@/lib/video-scale/handlers";
 import { writeCaptions } from "@/lib/video-scale/caption";
 import { FACEBOOK_REEL_API, handleCaption, handlePublishReel, type ReelApi } from "@/lib/video-scale/publish";
+import { DEFAULT_ADS_DEPS, handleCreateAd, handlePauseAd, planVideoAd, type AdsDeps } from "@/lib/video-scale/ads";
 import type { AngleStat } from "@/lib/video-scale/plan";
 import { videoProviderFor } from "@/lib/video-scale/providers";
 import type { VideoProvider } from "@/lib/video-scale/providers/types";
@@ -58,6 +59,9 @@ export type VideoScaleDeps = {
   lessons?: (db: Db, productId: string) => Promise<string[]>;
   captionWriter?: typeof writeCaptions;
   reel?: ReelApi;
+  adsDeps?: AdsDeps;
+  /** Reel vừa đăng xong ⇒ lập quảng cáo theo chế độ của mã (PR 3). Tiêm được để kiểm thử PR 2 không phụ thuộc quảng cáo. */
+  onReelPublished?: (db: Db, variantId: string, cfg: VideoScaleConfig) => Promise<void>;
 };
 
 export function resolveDeps(d: VideoScaleDeps = {}): Required<VideoScaleDeps> {
@@ -73,6 +77,8 @@ export function resolveDeps(d: VideoScaleDeps = {}): Required<VideoScaleDeps> {
     lessons: d.lessons ?? (async () => []),
     captionWriter: d.captionWriter ?? writeCaptions,
     reel: d.reel ?? FACEBOOK_REEL_API,
+    adsDeps: d.adsDeps ?? DEFAULT_ADS_DEPS,
+    onReelPublished: d.onReelPublished ?? (async (db, variantId, cfg) => void (await planVideoAd(db, variantId, cfg, null))),
   };
 }
 
@@ -170,6 +176,8 @@ const HANDLERS: Record<VideoJobKind, (ctx: HandlerCtx, job: VideoJobRow) => Prom
   QC: handleQc,
   CAPTION: handleCaption,
   PUBLISH_REEL: handlePublishReel,
+  CREATE_AD: handleCreateAd,
+  PAUSE_AD: handlePauseAd,
 };
 
 export type TickResult = { handled: number; byKind: Record<string, number>; errors: string[]; purged: number };

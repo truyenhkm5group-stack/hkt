@@ -30,6 +30,12 @@ export type WinProductRow = {
   publishMode: string | null;
   pausedAt: Date | null;
   pausedReason: string;
+  adAccountId: string | null;
+  adsMode: string;
+  dailyBudgetPerAdVnd: number | null;
+  skuDailyCapVnd: number | null;
+  autoScale: boolean;
+  adsModeBy: string;
   runs: number;
   inProduction: number;
   awaitingReview: number;
@@ -62,6 +68,12 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
         publishMode: schema.videoScaleSkus.publishMode,
         pausedAt: schema.videoScaleSkus.automationPausedAt,
         pausedReason: schema.videoScaleSkus.automationPausedReason,
+        adAccountId: schema.videoScaleSkus.adAccountId,
+        adsMode: schema.videoScaleSkus.adsMode,
+        dailyBudgetPerAdVnd: schema.videoScaleSkus.dailyBudgetPerAdVnd,
+        skuDailyCapVnd: schema.videoScaleSkus.skuDailyCapVnd,
+        autoScale: schema.videoScaleSkus.autoScale,
+        adsModeBy: schema.videoScaleSkus.adsModeBy,
       })
       .from(schema.videoScaleSkus)
       .where(inArray(schema.videoScaleSkus.productId, ids)),
@@ -95,6 +107,12 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
       publishMode: skuBy.get(r.productId)?.publishMode ?? null,
       pausedAt: skuBy.get(r.productId)?.pausedAt ?? null,
       pausedReason: skuBy.get(r.productId)?.pausedReason ?? "",
+      adAccountId: skuBy.get(r.productId)?.adAccountId ?? null,
+      adsMode: skuBy.get(r.productId)?.adsMode ?? "DRAFT",
+      dailyBudgetPerAdVnd: skuBy.get(r.productId)?.dailyBudgetPerAdVnd ?? null,
+      skuDailyCapVnd: skuBy.get(r.productId)?.skuDailyCapVnd ?? null,
+      autoScale: skuBy.get(r.productId)?.autoScale ?? false,
+      adsModeBy: skuBy.get(r.productId)?.adsModeBy ?? "",
       runs: rBy.get(r.productId) ?? 0,
       inProduction: Number(v?.prod ?? 0),
       awaitingReview: Number(v?.review ?? 0),
@@ -395,4 +413,76 @@ export async function listPageConfigs(db: Db, pages: { id: string; name: string;
     const c = by.get(p.id);
     return { pageId: p.id, name: p.name, orders30d: p.orders30d, publishMode: c?.publishMode ?? "MANUAL_REVIEW", maxPostsPerDay: c?.maxPostsPerDay ?? 3, pausedAt: c?.pausedAt ?? null, pausedReason: c?.pausedReason ?? "", configured: Boolean(c) };
   });
+}
+
+// ───────────────────────────── PR 3 — QUẢNG CÁO ─────────────────────────────
+
+export type AdRowView = {
+  id: string;
+  productName: string;
+  seq: number;
+  angle: string;
+  pageId: string;
+  adAccountId: string;
+  mode: string;
+  status: string;
+  dailyBudgetVnd: number;
+  campaignName: string;
+  fbCampaignId: string;
+  fbAdId: string;
+  error: string;
+  authorizedBy: string;
+  activatedBy: string;
+  activatedAt: Date | null;
+  stopReason: string;
+  createdAt: Date;
+};
+
+export async function listAds(db: Db, limit = 80): Promise<AdRowView[]> {
+  const tAd = schema.videoScaleAds;
+  const tProd = schema.products;
+  return db
+    .select({
+      id: tAd.id,
+      productName: tProd.name,
+      seq: tVar.seq,
+      angle: tVar.angle,
+      pageId: tAd.pageId,
+      adAccountId: tAd.adAccountId,
+      mode: tAd.mode,
+      status: tAd.status,
+      dailyBudgetVnd: tAd.dailyBudgetVnd,
+      campaignName: tAd.campaignName,
+      fbCampaignId: tAd.fbCampaignId,
+      fbAdId: tAd.fbAdId,
+      error: tAd.error,
+      authorizedBy: tAd.authorizedBy,
+      activatedBy: tAd.activatedBy,
+      activatedAt: tAd.activatedAt,
+      stopReason: tAd.stopReason,
+      createdAt: tAd.createdAt,
+    })
+    .from(tAd)
+    .innerJoin(tVar, eq(tVar.id, tAd.variantId))
+    .innerJoin(tProd, eq(tProd.id, tAd.productId))
+    .orderBy(desc(tAd.createdAt))
+    .limit(limit);
+}
+
+export type AdActionView = { id: string; adId: string | null; action: string; outcome: string; denial: string; detail: string; before: number | null; after: number | null; actor: string; createdAt: Date };
+
+export async function listAdActions(db: Db, limit = 40): Promise<AdActionView[]> {
+  const tAct = schema.videoScaleAdActions;
+  return db
+    .select({ id: tAct.id, adId: tAct.adId, action: tAct.action, outcome: tAct.outcome, denial: tAct.denial, detail: tAct.detail, before: tAct.budgetBeforeVnd, after: tAct.budgetAfterVnd, actor: tAct.actor, createdAt: tAct.createdAt })
+    .from(tAct)
+    .orderBy(desc(tAct.createdAt))
+    .limit(limit);
+}
+
+/** Tổng ngân sách ngày quảng cáo Video Scale ĐANG CHẠY (VND). */
+export async function activeAdsDailyVnd(db: Db): Promise<number> {
+  const tAd = schema.videoScaleAds;
+  const [r] = await db.select({ n: sql<string>`coalesce(sum(${tAd.dailyBudgetVnd}), 0)` }).from(tAd).where(eq(tAd.status, "ACTIVE"));
+  return Number(r?.n ?? 0);
 }

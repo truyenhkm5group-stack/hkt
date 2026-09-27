@@ -192,6 +192,7 @@ const ROUTES = [
   "/marketing/video-scale?tab=hang-doi",
   "/marketing/video-scale?tab=duyet",
   "/marketing/video-scale?tab=dang-reel",
+  "/marketing/video-scale?tab=quang-cao",
   "/marketing/video-scale?tab=cau-hinh",
   // QUY KẾT FANPAGE → MARKETER. Ba tab đọc ba đường khác nhau trên cùng ảnh chụp `order_attributions`,
   // nên mở mỗi tab một lần mới phủ hết: bảng theo người · danh sách từng đơn · màn hình khai báo.

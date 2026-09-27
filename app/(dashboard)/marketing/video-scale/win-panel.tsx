@@ -4,6 +4,7 @@ import type { MusicRow, RunRow, WinProductRow } from "@/lib/queries/video-scale"
 import { CreateRunDialog } from "./create-run-dialog";
 import { CancelRunButton, SkuModeSelect } from "./small-actions";
 import { PauseButton, SkuPublishingSelect } from "./publishing-controls";
+import { SkuAdsForm } from "./ads-controls";
 
 const RUN_STATUS_LABEL: Record<string, string> = {
   SCRIPTING: "Đang viết kịch bản",
@@ -15,7 +16,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 };
 
 /** Tab "Mã win": mỗi mã một thẻ — ảnh, trạng thái khai, số ảnh gốc, số video theo bước, nút tạo chiến dịch media. */
-export function WinPanel({ products, runs, music, pages, canSpend, canEdit, canMode, canEngage, canRelease }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canEngage: boolean; canRelease: boolean }) {
+export function WinPanel({ products, runs, music, pages, accounts, canSpend, canEdit, canMode, canMoney, canEngage, canRelease }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; accounts: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canMoney: boolean; canEngage: boolean; canRelease: boolean }) {
   return (
     <div className="space-y-5">
       {products.length === 0 ? (
@@ -49,6 +50,7 @@ export function WinPanel({ products, runs, music, pages, canSpend, canEdit, canM
                   <PauseButton scope="SKU" id={p.productId} paused={Boolean(p.pausedAt)} reason={p.pausedReason} canEngage={canEngage} canRelease={canRelease} label="mã" />
                 </div>
                 {p.pausedAt ? <p className="text-[12px] text-destructive">Mã đang dừng khẩn cấp{p.pausedReason ? `: ${p.pausedReason}` : ""}.</p> : null}
+                <SkuAdsForm productId={p.productId} accounts={accounts} value={{ adAccountId: p.adAccountId, adsMode: p.adsMode, dailyBudgetPerAdVnd: p.dailyBudgetPerAdVnd, skuDailyCapVnd: p.skuDailyCapVnd, autoScale: p.autoScale, adsModeBy: p.adsModeBy }} disabled={!canMoney} />
               </div>
             </div>
           ))}

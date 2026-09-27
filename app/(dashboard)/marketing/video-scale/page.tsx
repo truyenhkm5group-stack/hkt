@@ -5,7 +5,10 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { VIDEO_PRICE_SOURCE, fakeProviderAllowed } from "@/lib/constants/video-scale";
 import { env } from "@/lib/env";
 import { listJobs, listMusic, listPageConfigs, listPosts, listRuns, listVariants, listWinProducts, loadVideoScaleCounts, videoSpendOnDay } from "@/lib/queries/video-scale";
-import { listFanpageOptions } from "@/lib/queries/creative-manual-gen";
+import { listAdAccountOptions, listFanpageOptions } from "@/lib/queries/creative-manual-gen";
+import { activeAdsDailyVnd, listAdActions, listAds } from "@/lib/queries/video-scale";
+import { killRuleCount, templateAdIdFor } from "@/lib/video-scale/ads";
+import { AdsPanel } from "./ads-panel";
 import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { FB_PAGE_PUBLISH_SCOPES } from "@/lib/constants/video-scale";
@@ -27,6 +30,7 @@ const TABS = [
   { value: "hang-doi", label: "Hàng đợi render" },
   { value: "duyet", label: "Duyệt video" },
   { value: "dang-reel", label: "Đăng Reel" },
+  { value: "quang-cao", label: "Quảng cáo" },
   { value: "cau-hinh", label: "Cấu hình" },
 ] as const;
 
@@ -50,6 +54,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
   const canMode = canConfig || can(user, "expenses:write");
   const canEngage = canEdit || can(user, "expenses:write");
   const canRelease = can(user, "expenses:write") || canConfig;
+  const canMoney = can(user, "expenses:write");
   const badge: Record<string, number> = { duyet: counts.review, "hang-doi": counts.activeJobs + counts.blockedJobs };
 
   return (
@@ -121,11 +126,13 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       </nav>
 
       {tab === "ma-win" ? (
-        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canEngage={canEngage} canRelease={canRelease} />
+        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} />
       ) : tab === "hang-doi" ? (
         <QueuePanel active={await listJobs(db, { active: true })} recent={await listJobs(db, { active: false, limit: 40 })} variants={await listVariants(db, { statuses: ["SCRIPTED", "GENERATING", "RENDERING", "QC", "FAILED", "QC_FAILED"], limit: 40 })} canEdit={canEdit} canSpend={canSpend} />
       ) : tab === "duyet" ? (
         <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} />
+      ) : tab === "quang-cao" ? (
+        <AdsPanel ads={await listAds(db)} actions={await listAdActions(db)} activeVnd={await activeAdsDailyVnd(db)} globalCapVnd={cfg.adsGlobalDailyCapVnd} killRules={await killRuleCount(db)} templateAdId={await templateAdIdFor(db, cfg)} writeBlocked={adsWriteDisabledReason()} canSpend={canMoney} canPause={canEngage} />
       ) : tab === "dang-reel" ? (
         <PublishPanel readiness={await publishReadiness()} automation={automation} pages={await listPageConfigs(db, fanpages)} posts={await listPosts(db)} canEngage={canEngage} canRelease={canRelease} canConfigure={canMode} canEdit={canEdit} />
       ) : (
