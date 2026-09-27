@@ -7923,3 +7923,248 @@ export const metaConfigVersions = pgTable(
   },
   (t) => [index("meta_config_versions_key_idx").on(t.kind, t.objectKey, t.configKey, t.version)],
 );
+
+// ═══════════════════════════ VIDEO SCALE CHO MÃ WIN (docs/video-scale.md) ═══════════════════════════
+//
+// Hợp đồng: `lib/constants/video-scale.ts`. Tệp video nằm trong CSDL (khúc `bytea`) — cùng lối với tệp topic sản xuất,
+// vì máy chủ không có ổ lưu tệp riêng được sao lưu.
+
+/** Cấu hình THEO MÃ của Video Scale — một dòng mỗi mã người đã đưa vào module. Không có dòng = chưa bật cho mã ấy. */
+export const videoScaleSkus = pgTable(
+  "video_scale_skus",
+  {
+    productId: text("product_id")
+      .primaryKey()
+      .references(() => products.id, { onDelete: "restrict" }),
+    /** `MANUAL` · `AUTO_ON_PASS` (`VIDEO_REVIEW_MODES`). */
+    reviewMode: text("review_mode").notNull().default("MANUAL"),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP tên — do MÁY CHỦ đọc (mục 34). */
+    updatedBy: text("updated_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("video_scale_skus_review_mode_check", sql`${t.reviewMode} IN ('MANUAL', 'AUTO_ON_PASS')`)],
+);
+
+/** Một lượt "Tạo chiến dịch media" cho một mã win. */
+export const videoScaleRuns = pgTable(
+  "video_scale_runs",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    /** Id `creative_sources` (loại `PRODUCT_PHOTO`, CÙNG mã) người đã chọn làm ảnh gốc — người chọn = người duyệt ảnh. */
+    sourceIds: jsonb("source_ids").$type<string[]>().notNull(),
+    status: text("status").notNull().default("SCRIPTING"),
+    promptVersion: integer("prompt_version").notNull(),
+    angleVocabVersion: integer("angle_vocab_version").notNull(),
+    variantsRequested: integer("variants_requested").notNull(),
+    /** Góc người chỉ định (rỗng = máy chọn theo sổ học). */
+    anglesRequested: jsonb("angles_requested").$type<string[]>().notNull().default([]),
+    /** Ảnh chụp cấu hình lúc bấm (nhà cung cấp, model, độ phân giải, số cảnh, giọng đọc…) — lượt chạy sau không đổi theo cấu hình mới. */
+    configSnapshot: jsonb("config_snapshot").$type<Record<string, unknown>>().notNull(),
+    musicId: text("music_id"),
+    /** Ghi chú / ý tưởng của người bấm — đi vào bản giao việc cho người viết kịch bản. */
+    brief: text("brief").notNull().default(""),
+    scriptModel: text("script_model").notNull().default(""),
+    /** `NULL` = CHƯA BIẾT (mục 42). */
+    scriptCostUsd: doublePrecision("script_cost_usd"),
+    /** Dữ liệu THỬ (bộ sinh giả) — không đăng, không quảng cáo, màn hình gắn nhãn. */
+    isTest: boolean("is_test").notNull().default(false),
+    error: text("error").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("video_scale_runs_product_idx").on(t.productId, t.createdAt),
+    check("video_scale_runs_status_check", sql`${t.status} IN ('SCRIPTING', 'PRODUCING', 'REVIEW', 'DONE', 'FAILED', 'CANCELLED')`),
+    check("video_scale_runs_sources_check", sql`jsonb_typeof(${t.sourceIds}) = 'array' AND jsonb_array_length(${t.sourceIds}) > 0`),
+    check("video_scale_runs_variants_check", sql`${t.variantsRequested} BETWEEN 1 AND 6`),
+  ],
+);
+
+/** Tệp của module (clip nguồn, giọng đọc, nhạc, bản hoàn chỉnh, ảnh bìa). */
+export const videoScaleAssets = pgTable(
+  "video_scale_assets",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    runId: text("run_id").references(() => videoScaleRuns.id, { onDelete: "set null" }),
+    variantId: text("variant_id"),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    durationMs: integer("duration_ms"),
+    width: integer("width"),
+    height: integer("height"),
+    chunkCount: integer("chunk_count").notNull(),
+    status: text("status").notNull().default("UPLOADING"),
+    isTest: boolean("is_test").notNull().default(false),
+    createdAt: createdAt(),
+    completedAt: ts("completed_at"),
+    purgedAt: ts("purged_at"),
+  },
+  (t) => [
+    index("video_scale_assets_variant_idx").on(t.variantId),
+    check("video_scale_assets_kind_check", sql`${t.kind} IN ('SOURCE_CLIP', 'VOICE', 'MUSIC', 'FINAL', 'THUMBNAIL')`),
+    check("video_scale_assets_status_check", sql`${t.status} IN ('UPLOADING', 'READY', 'PURGED')`),
+    check("video_scale_assets_size_check", sql`${t.bytes} > 0 AND ${t.chunkCount} > 0`),
+    check("video_scale_assets_ready_check", sql`${t.status} <> 'READY' OR ${t.completedAt} IS NOT NULL`),
+  ],
+);
+
+export const videoScaleAssetChunks = pgTable(
+  "video_scale_asset_chunks",
+  {
+    id: id(),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => videoScaleAssets.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    data: bytea("data").notNull(),
+  },
+  (t) => [uniqueIndex("video_scale_asset_chunks_seq_uq").on(t.assetId, t.seq), check("video_scale_asset_chunks_seq_check", sql`${t.seq} >= 0`)],
+);
+
+/** Một biến thể video của một lượt — một kịch bản, một bản hoàn chỉnh. */
+export const videoScaleVariants = pgTable(
+  "video_scale_variants",
+  {
+    id: id(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => videoScaleRuns.id, { onDelete: "restrict" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    seq: integer("seq").notNull(),
+    angle: text("angle").notNull(),
+    angleVocabVersion: integer("angle_vocab_version").notNull(),
+    /** `VideoScript` — móc câu, cảnh (câu lệnh Veo + chữ trên hình + lời đọc), CTA. */
+    script: jsonb("script").$type<Record<string, unknown>>().notNull(),
+    /** Tập từ chống lặp (`scriptTokens`), nối bằng dấu cách — so Jaccard với các biến thể trước của cùng mã. */
+    fingerprint: text("fingerprint").notNull().default(""),
+    /** Ảnh gốc của biến thể (một trong `run.source_ids`). */
+    sourceId: text("source_id").notNull(),
+    status: text("status").notNull().default("SCRIPTED"),
+    qcVerdict: text("qc_verdict"),
+    /** Chi tiết QC: `technical` (ffprobe) + `visual` (mô hình, từng điểm) + `model` + `costUsd`. */
+    qc: jsonb("qc").$type<Record<string, unknown>>().notNull().default({}),
+    qcAt: ts("qc_at"),
+    finalAssetId: text("final_asset_id").references(() => videoScaleAssets.id, { onDelete: "set null" }),
+    thumbnailAssetId: text("thumbnail_asset_id").references(() => videoScaleAssets.id, { onDelete: "set null" }),
+    durationMs: integer("duration_ms"),
+    /** Người duyệt / loại (mục 34). `auto_approved = true` và người `NULL` = MÁY duyệt theo `AUTO_ON_PASS`. */
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedBy: text("reviewed_by").notNull().default(""),
+    reviewedAt: ts("reviewed_at"),
+    reviewNote: text("review_note").notNull().default(""),
+    autoApproved: boolean("auto_approved").notNull().default(false),
+    isTest: boolean("is_test").notNull().default(false),
+    error: text("error").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("video_scale_variants_run_seq_uq").on(t.runId, t.seq),
+    index("video_scale_variants_product_idx").on(t.productId, t.createdAt),
+    index("video_scale_variants_status_idx").on(t.status),
+    check(
+      "video_scale_variants_status_check",
+      sql`${t.status} IN ('SCRIPTED', 'GENERATING', 'RENDERING', 'QC', 'REVIEW', 'APPROVED', 'REJECTED', 'QC_FAILED', 'FAILED', 'CANCELLED')`,
+    ),
+    check("video_scale_variants_qc_check", sql`${t.qcVerdict} IS NULL OR ${t.qcVerdict} IN ('PASS', 'FLAG', 'FAIL')`),
+    // Ranh giới 4: video QC loại không bao giờ ở trạng thái ĐÃ DUYỆT; duyệt phải có bản hoàn chỉnh và mốc duyệt.
+    check(
+      "video_scale_variants_approve_check",
+      sql`${t.status} <> 'APPROVED' OR (${t.qcVerdict} IN ('PASS', 'FLAG') AND ${t.finalAssetId} IS NOT NULL AND ${t.reviewedAt} IS NOT NULL)`,
+    ),
+    // Máy chỉ tự duyệt video QC ĐẠT; video "nghi ngờ" phải có người.
+    check("video_scale_variants_auto_check", sql`${t.autoApproved} = false OR (${t.qcVerdict} = 'PASS' AND ${t.reviewedByUserId} IS NULL)`),
+  ],
+);
+
+/**
+ * HÀNG ĐỢI VIỆC của Video Scale. Mỗi việc có khoá chống trùng (`idempotency_key`, duy nhất) — dựng lại việc cho cùng cảnh
+ * cùng lượt không đẻ dòng thứ hai. Cầm việc bằng `UPDATE … WHERE status IN (…) AND (locked_until IS NULL OR locked_until < now())`.
+ */
+export const videoScaleJobs = pgTable(
+  "video_scale_jobs",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    runId: text("run_id").references(() => videoScaleRuns.id, { onDelete: "set null" }),
+    variantId: text("variant_id").references(() => videoScaleVariants.id, { onDelete: "set null" }),
+    sceneIndex: integer("scene_index"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("QUEUED"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull(),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    lockedUntil: ts("locked_until"),
+    lockToken: text("lock_token").notNull().default(""),
+    provider: text("provider").notNull().default(""),
+    model: text("model").notNull().default(""),
+    /** Mã thao tác ở nhà cung cấp (Veo: `models/…/operations/…`). Có mã ⇒ lượt sau chỉ HỎI, không tạo lại. */
+    providerRef: text("provider_ref").notNull().default(""),
+    /** Ghi NGAY TRƯỚC lời gọi tạo tốn tiền, xoá cùng lúc lưu `provider_ref` (ranh giới 3). */
+    providerPendingAt: ts("provider_pending_at"),
+    startedAt: ts("started_at"),
+    finishedAt: ts("finished_at"),
+    /** Hạn chót của cả việc (vd clip chờ Veo tối đa `VIDEO_CLIP_DEADLINE_MS`). */
+    deadlineAt: ts("deadline_at"),
+    /** Tiền của lượt (USD). `NULL` = CHƯA BIẾT / chưa phát sinh — không phải 0. */
+    costUsd: doublePrecision("cost_usd"),
+    /** `ESTIMATED` (theo bảng giá công bố) — nhà cung cấp không trả số tiền. `''` khi chưa có tiền. */
+    costBasis: text("cost_basis").notNull().default(""),
+    /** Tiền GIỮ CHỖ trong trần ngày khi việc đang bay — tránh vượt trần vì nhiều việc cùng lúc. */
+    reservedUsd: doublePrecision("reserved_usd"),
+    /** Ngày (giờ VN, `YYYY-MM-DD`) mà tiền / giữ chỗ tính vào trần. */
+    costDay: text("cost_day").notNull().default(""),
+    request: jsonb("request").$type<Record<string, unknown>>().notNull().default({}),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
+    error: text("error").notNull().default(""),
+    errorKind: text("error_kind").notNull().default(""),
+    outputAssetId: text("output_asset_id").references(() => videoScaleAssets.id, { onDelete: "set null" }),
+    isTest: boolean("is_test").notNull().default(false),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("video_scale_jobs_idem_uq").on(t.idempotencyKey),
+    index("video_scale_jobs_due_idx").on(t.status, t.nextRunAt),
+    index("video_scale_jobs_variant_idx").on(t.variantId),
+    index("video_scale_jobs_cost_day_idx").on(t.costDay),
+    check("video_scale_jobs_kind_check", sql`${t.kind} IN ('SCRIPT', 'CLIP', 'TTS', 'RENDER', 'QC')`),
+    check("video_scale_jobs_status_check", sql`${t.status} IN ('QUEUED', 'RUNNING', 'WAITING', 'SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED')`),
+    check("video_scale_jobs_error_kind_check", sql`${t.errorKind} IN ('', 'TRANSIENT', 'PERMANENT', 'AMBIGUOUS', 'TIMEOUT', 'BLOCKED')`),
+    check("video_scale_jobs_cost_basis_check", sql`${t.costBasis} IN ('', 'ESTIMATED')`),
+    check("video_scale_jobs_attempts_check", sql`${t.attempts} >= 0 AND ${t.maxAttempts} >= 1`),
+  ],
+);
+
+/**
+ * THƯ VIỆN NHẠC CÓ QUYỀN SỬ DỤNG. Không có dòng nào ⇒ video không có nhạc nền (không bao giờ tự lấy nhạc ở đâu khác).
+ * `license_note` bắt buộc: người tải khai nguồn + quyền (mua gói, nhạc tự làm, thư viện miễn phí bản quyền…).
+ */
+export const videoScaleMusic = pgTable(
+  "video_scale_music",
+  {
+    id: id(),
+    title: text("title").notNull(),
+    licenseNote: text("license_note").notNull(),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => videoScaleAssets.id, { onDelete: "restrict" }),
+    active: boolean("active").notNull().default(true),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [check("video_scale_music_license_check", sql`length(btrim(${t.licenseNote})) >= 10`), check("video_scale_music_title_check", sql`length(btrim(${t.title})) > 0`)],
+);

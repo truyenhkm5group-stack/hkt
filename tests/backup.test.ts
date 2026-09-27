@@ -464,7 +464,7 @@ export function testCongTacGhiFailClosed() {
   // Mọi Variable mở đường GHI / CHI TIỀN mà deploy truyền xuống phải nằm trong danh sách fail-closed.
   const deploy = readFileSync(".github/workflows/deploy-vps.yml", "utf8");
   const danhSach = /^CONG_TAC_AN_TOAN="([^"]+)"/m.exec(install)?.[1].split(/\s+/).map((c) => c.split("=")[0]) ?? [];
-  const bienGhi = [...deploy.matchAll(/^\s+([A-Z0-9_]+): \$\{\{ vars\.\1 \}\}$/gm)].map((m) => m[1]).filter((k) => /WRITE|SPEND|LOOP|APPLY|BUDGET/.test(k));
+  const bienGhi = [...deploy.matchAll(/^\s+([A-Z0-9_]+): \$\{\{ vars\.\1 \}\}$/gm)].map((m) => m[1]).filter((k) => /WRITE|SPEND|LOOP|APPLY|BUDGET|VIDEO_SCALE/.test(k));
   assert.ok(bienGhi.length >= 3, `phải đọc được các Variable ghi/chi tiền từ deploy-vps.yml (thấy ${bienGhi.join(", ")})`);
   for (const k of bienGhi) assert.ok(danhSach.includes(k), `${k} mở đường ghi / chi tiền nhưng KHÔNG nằm trong CONG_TAC_AN_TOAN — xoá Variable sẽ không tắt được nó`);
 

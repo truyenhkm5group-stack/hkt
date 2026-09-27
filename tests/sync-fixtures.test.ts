@@ -253,6 +253,7 @@ import { testCompanyOsAdOrderUnify } from "./company-os-ad-order-unify.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
+import { testVideoScaleDb, testVideoScalePure } from "./video-scale.test";
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
@@ -1805,6 +1806,9 @@ async function main() {
   await testCreativeManualDb(db);
   testCreativeManualGenPure();
   await testCreativeManualGenDb(db);
+  // Video Scale cho mã win (docs/video-scale.md): hàng đợi, trần tiền, AMBIGUOUS, hậu kỳ + QC thật khi máy có ffmpeg.
+  testVideoScalePure();
+  await testVideoScaleDb(db);
   testCreativeManualDesignPure();
   await testCreativeManualDesignDb(db);
   testCreativeImportPure();

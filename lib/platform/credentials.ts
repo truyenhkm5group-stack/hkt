@@ -36,6 +36,7 @@ export const HOME_CREDENTIAL_PROVIDERS = [
   "sepay",
   "ai",
   "openai",
+  "gemini",
   "github",
   "chatbot",
   "lark",

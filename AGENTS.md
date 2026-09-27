@@ -575,6 +575,18 @@ deploy dừng, không phải cảnh báo.
     lương gửi hộp thư CÁ NHÂN (`user_messages`), cổng trang nhân viên là QUYỀN SỞ HỮU phiếu; im lặng
     quá hạn là "không phản hồi", KHÔNG phải "đã xác nhận"; tiêu đề tin và tin nhóm Lark không in số tiền.
 
+72. **VIDEO SCALE: ẢNH THẬT VÀO, SỰ THẬT RA, KHÔNG GỬI LẠI LỜI GỌI TỐN TIỀN** (`docs/video-scale.md`,
+    `lib/constants/video-scale.ts`, chủ shop 27/09/2026). Chỉ ảnh `PRODUCT_PHOTO` của ĐÚNG mã đi sang
+    máy sinh video — kiểm ba lần, lần cuối trong adapter lúc chạy. Góc bán do hàm thuần chọn; kịch bản
+    và câu chữ chỉ nói giá ERP, size / màu đang bán, khuyến mãi CÓ trong câu chính sách người đã khai —
+    KHÔNG chất liệu (ảnh không cho biết thành phần vải). Veo không nhận khoá chống trùng: dấu
+    `provider_pending_at` ghi trước lời gọi tạo; mất phản hồi ⇒ `AMBIGUOUS`, chỉ người có
+    `expenses:write` được thử lại. Trần chi sinh video / ngày BẮT BUỘC khai (chưa khai ⇒ không sinh),
+    đếm trên tiền GIỮ CHỖ theo giá công bố (nhãn ƯỚC TÍNH), đọc cấu hình hiện tại trước MỖI clip. Video
+    QC loại không bao giờ `APPROVED` (CHECK ở CSDL); máy chỉ tự duyệt QC `PASS`, không bao giờ `FLAG`.
+    Bộ sinh giả chỉ ngoài production và mọi thứ nó sinh mang `is_test`. Nhạc chỉ từ thư viện có khai
+    quyền. `VIDEO_SCALE_EVERY_MINUTES` chi tiền thật nên fail-closed như `CREATIVE_LOOP_EVERY_MINUTES`.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

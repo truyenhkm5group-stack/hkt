@@ -117,6 +117,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/alerts/stock-wait-log.ts::__erpStockWaitLogAtByOrg": { loai: "THEO_TO_CHUC", lyDo: "Nhịp ghi sổ chờ hàng theo mã tổ chức (ISO-18)." },
   "lib/cs/failed-delivery.ts::__erpFailedDeliveryRunningByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'đang chạy' theo mã tổ chức (ISO-18)." },
   "lib/cs/phone-verify.ts::__erpPhoneVerifyRunningByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'đang chạy' theo mã tổ chức (ISO-18)." },
+  "lib/video-scale/pipeline.ts::__erpVideoScaleDrainByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'vòng after() đang chạy hàng đợi video' theo mã tổ chức — chỉ chặn chạy trùng trong một tổ chức; việc vẫn cầm bằng CSDL." },
   "lib/perf/probe.ts::__erpProbe": { loai: "NEN_TANG", lyDo: "AsyncLocalStorage của phép đo — phạm vi một lượt gọi, không vượt request." },
   "lib/perf/registry.ts::__erpPerf": { loai: "NEN_TANG", lyDo: "Sổ đo hiệu năng (tên báo cáo, thời gian) — chỉ tổ chức nhà đọc được qua /api/perf (ISO-25)." },
   "lib/platform/context.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "Chính ngữ cảnh tổ chức (AsyncLocalStorage)." },

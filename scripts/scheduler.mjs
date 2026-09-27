@@ -31,6 +31,8 @@ const minutes = (name, fallback) => {
 const marketingLedgerEvery = Number(process.env.MARKETING_LEDGER_EVERY_MINUTES) || 0;
 // Vòng mẫu quảng cáo CHI TIỀN THẬT (ảnh OpenAI, quảng cáo test) — chỉ có trong lịch khi chủ shop đặt biến này.
 const creativeLoopEvery = Number(process.env.CREATIVE_LOOP_EVERY_MINUTES) || 0;
+// Video Scale CHI TIỀN THẬT (Veo) — chỉ có trong lịch khi chủ shop đặt biến này (gợi ý 5).
+const videoScaleEvery = Number(process.env.VIDEO_SCALE_EVERY_MINUTES) || 0;
 const sepayEvery = Number(process.env.SYNC_SEPAY_EVERY_MINUTES) || 0;
 const sepayApply = process.env.SYNC_SEPAY_APPLY === "1" ? "&apply=1" : "";
 
@@ -206,6 +208,7 @@ const JOBS = [
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
   ...(marketingLedgerEvery > 0 ? [{ job: "marketing-decision-ledger", every: marketingLedgerEvery, offset: 14 }] : []),
   ...(creativeLoopEvery > 0 ? [{ job: "creative-loop", every: creativeLoopEvery, offset: 3 }] : []),
+  ...(videoScaleEvery > 0 ? [{ job: "video-scale", every: videoScaleEvery, offset: 1.5 }] : []),
 ];
 
 const DAILY = [
