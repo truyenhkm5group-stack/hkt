@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { TopicStatusBadge } from "@/app/(dashboard)/production/_components/badges";
 import { ModelDesk } from "@/app/(dashboard)/production/_components/model-desk";
 import { TopicFilesPanel } from "@/app/(dashboard)/production/_components/topic-files";
-import { TopicMessageForm, TopicStatusControl } from "@/app/(dashboard)/production/topics/[id]/topic-controls";
+import { TopicMessageForm, TopicStatusControl, TopicSupplierSelect } from "@/app/(dashboard)/production/topics/[id]/topic-controls";
 import { TopicMembersPanel } from "@/app/(dashboard)/production/topics/[id]/topic-members";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
@@ -115,7 +115,10 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
                 { label: "Chất liệu", value: req.material || "—" },
                 { label: "Giá bán", value: req.salePrice === null ? "—" : `${formatVND(req.salePrice)}/sp` },
                 { label: "Giá SX mong muốn", value: req.targetPrice === null ? "—" : `${formatVND(req.targetPrice)}/sp` },
-                ...(d.topic.supplierName ? [{ label: "Xưởng", value: d.topic.supplierName }] : []),
+                {
+                  label: "Xưởng",
+                  value: acc.setStatus ? <TopicSupplierSelect topicId={d.topic.id} supplierId={d.topic.supplierId} suppliers={suppliers} /> : (d.topic.supplierName ?? "—"),
+                },
                 ...(req.trims ? [{ label: "Phụ liệu", value: req.trims }] : []),
                 ...(req.colors.length ? [{ label: "Màu", value: req.colors.join(", ") }] : []),
                 ...(req.sizes.length ? [{ label: "Size", value: req.sizes.join(", ") }] : []),

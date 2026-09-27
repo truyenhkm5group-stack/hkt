@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { PeoplePicker, type PickablePerson } from "@/app/(dashboard)/production/_components/people-picker";
 import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
-import { tagTopicMembers, untagTopicMember } from "@/lib/actions/production-topics";
+import { restrictProductionTopic, tagTopicMembers, untagTopicMember } from "@/lib/actions/production-topics";
 
 export type TopicMemberView = { userId: string; name: string; email: string; active: boolean };
 
@@ -56,11 +56,25 @@ export function TopicMembersPanel({
     });
   };
 
+  const chuyenRieng = () => {
+    if (!window.confirm("Chuyển thành topic riêng? Từ lúc này chỉ người mở, những người đang được tag và chủ shop xem được topic — không đổi lại được.")) return;
+    start(async () => {
+      const r = await restrictProductionTopic({ topicId });
+      if ("error" in r) toast.error(r.error);
+      else toast.success(r.changed ? "Topic đã là topic riêng" : "Topic đã là topic riêng từ trước");
+    });
+  };
+
   return (
     <div className="space-y-3 text-sm">
       <p className="text-xs text-muted-foreground">
         {restricted ? "Topic riêng — chỉ những người dưới đây và chủ shop xem được." : "Topic mở trước khi có tag — ai có quyền xem sản xuất cũng xem được."}
       </p>
+      {!restricted && canUntag ? (
+        <Button size="sm" variant="outline" onClick={chuyenRieng} disabled={pending}>
+          Chuyển thành topic riêng
+        </Button>
+      ) : null}
       <ul className="space-y-1">
         <li className="flex items-center justify-between gap-2">
           <span>
