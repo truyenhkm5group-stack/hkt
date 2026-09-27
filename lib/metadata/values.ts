@@ -13,10 +13,15 @@
  *  6. ghi theo PHIÊN BẢN (khoá lạc quan): người khác vừa ghi ⇒ `CONFLICT`, không đè im lặng.
  * Sau khi ghi: `audit()` entity `CUSTOM_VALUES`, trước/sau CHỈ của các khoá đổi. Không đổi gì ⇒ không ghi,
  * không tăng phiên bản, không thêm nhật ký.
+ *
+ * Phase 3 · W2: field kiểu `status` ĐỔI giá trị ⇒ sự kiện miền `custom_status.changed` trong CÙNG giao dịch với
+ * lượt ghi (không bao giờ có giá trị mới mà thiếu sự kiện, hay ngược lại) — nguồn trigger của workflow.
  */
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
+import { emitDomainEvent } from "@/lib/events/emit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import type { Permission } from "@/lib/auth/permissions";
 import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
@@ -33,6 +38,20 @@ import { validateCustomValues } from "@/lib/metadata/validate";
 export const CUSTOM_FILE_MAX_BYTES = 5 * 1024 * 1024;
 
 type Viewer = SessionUser;
+
+/**
+ * Người ghi là MÁY — hành động `set_custom_value` của luật tự động (Phase 3). `id: null` theo luật 34: máy làm,
+ * không phải "chưa biết ai". Máy KHÔNG đi qua cửa quyền của người (quyền đã được kiểm lúc NGƯỜI khai luật —
+ * `workflow:manage`, chỉ quản trị), nhưng VẪN qua mọi hàng rào dữ liệu: đối tượng / module, bản ghi tồn tại trong
+ * CSDL tổ chức, kiểm hợp lệ + chuyển trạng thái, tham chiếu có thật, khoá lạc quan. Field bắt buộc chỉ áp cho
+ * khoá máy gửi lên — máy không điền form, và một field bắt buộc bỏ trống từ trước không phải lỗi của lượt ghi này.
+ */
+export type MachineWriter = { kind: "MACHINE"; id: null; email: string };
+export type ValueWriter = Viewer | MachineWriter;
+
+function isMachine(w: ValueWriter): w is MachineWriter {
+  return (w as MachineWriter).kind === "MACHINE";
+}
 
 function perms(def: ObjectDef) {
   return OBJECT_RECORD_PERMISSIONS[def.key];
@@ -118,11 +137,20 @@ async function checkReferences(obj: ObjectDef, recordId: string, defs: CustomFie
  * rỗng / `null` ⇒ xoá khoá. `opts.formKey`: lượt ghi đi qua một form ⇒ chỉ nhận field HIỆN và KHÔNG chỉ
  * đọc trong bản ĐÃ XUẤT BẢN của form đó ("field ẩn không nhận ghi").
  */
-export async function saveCustomValues(objectKey: string, recordId: string, input: CustomValues, viewer: Viewer, opts: { formKey?: string } = {}): Promise<SaveValuesResult> {
+export async function saveCustomValues(
+  objectKey: string,
+  recordId: string,
+  input: CustomValues,
+  viewer: ValueWriter,
+  /** `causationId`: id lượt chạy workflow đã gây ra lượt ghi này — đi vào `causation_id` của sự kiện (chặn vòng lặp W7). */
+  opts: { formKey?: string; causationId?: string | null } = {},
+): Promise<SaveValuesResult> {
   const checked = await checkObject(objectKey, "customFields");
   if (!checked.ok) return checked;
   const obj = checked.def;
-  if (!can(viewer, perms(obj).edit as Permission)) return fail("FORBIDDEN", `Bạn không có quyền sửa dữ liệu bổ sung của ${obj.label}.`);
+  const machine = isMachine(viewer);
+  const canEdit = (d: CustomFieldDef) => isMachine(viewer) || canEditField(viewer, obj, d);
+  if (!isMachine(viewer) && !can(viewer, perms(obj).edit as Permission)) return fail("FORBIDDEN", `Bạn không có quyền sửa dữ liệu bổ sung của ${obj.label}.`);
   if (!(await recordExists(obj, recordId))) return fail("NOT_FOUND", `Bản ghi không tồn tại (${obj.label} "${String(recordId).slice(0, 80)}").`, "record");
 
   const defs = await loadCustomDefs(objectKey, true);
@@ -130,7 +158,7 @@ export async function saveCustomValues(objectKey: string, recordId: string, inpu
   const denied: FieldError[] = [];
   for (const key of inputKeys) {
     const def = defs.find((d) => d.key === key && d.status === "ACTIVE");
-    if (def && !canEditField(viewer, obj, def)) denied.push({ field: key, message: `Bạn không có quyền sửa "${def.label}".` });
+    if (def && !canEdit(def)) denied.push({ field: key, message: `Bạn không có quyền sửa "${def.label}".` });
   }
   if (denied.length > 0) return fail("FORBIDDEN", denied);
   if (opts.formKey) {
@@ -150,7 +178,9 @@ export async function saveCustomValues(objectKey: string, recordId: string, inpu
   const previous = prevRow?.values ?? null;
 
   // Field người này không sửa được thì không bắt họ điền: bắt buộc chỉ áp cho field họ sửa được.
-  const effective = defs.map((d) => (d.required && d.status === "ACTIVE" && !canEditField(viewer, obj, d) ? { ...d, required: false } : d));
+  const effective = defs.map((d) =>
+    d.required && d.status === "ACTIVE" && (machine ? !inputKeys.includes(d.key) : !canEdit(d)) ? { ...d, required: false } : d,
+  );
   const { values: merged, errors } = validateCustomValues(effective, input, previous);
   if (errors.length > 0) return fail("INVALID", errors);
   const refErrors = await checkReferences(obj, recordId, defs, input, merged);
@@ -158,26 +188,50 @@ export async function saveCustomValues(objectKey: string, recordId: string, inpu
 
   const before = previous ?? {};
   const changed = [...new Set([...Object.keys(before), ...Object.keys(merged)])].filter((k) => !sameValue(before[k], merged[k])).sort();
-  const visible = new Set(defs.filter((d) => d.status === "ACTIVE" && canViewField(viewer, obj, d)).map((d) => d.key));
+  const visible = new Set(defs.filter((d) => d.status === "ACTIVE" && (isMachine(viewer) || canViewField(viewer, obj, d))).map((d) => d.key));
   if (changed.length === 0) return { ok: true, values: visibleOnly(merged, visible), version: prevRow?.version ?? 0, changed: [] };
 
-  let version: number;
-  if (prevRow) {
-    const updated = await db
-      .update(t)
-      .set({ values: merged, version: prevRow.version + 1, updatedBy: viewer.id, updatedAt: new Date() })
-      .where(and(eq(t.objectKey, objectKey), eq(t.recordId, recordId), eq(t.version, prevRow.version)))
-      .returning({ version: t.version });
-    if (updated.length === 0) return fail("CONFLICT", "Dữ liệu vừa được người khác sửa — tải lại rồi lưu lại.");
-    version = updated[0].version;
-  } else {
-    const inserted = await db.insert(t).values({ objectKey, recordId, values: merged, version: 1, updatedBy: viewer.id }).onConflictDoNothing().returning({ version: t.version });
-    if (inserted.length === 0) return fail("CONFLICT", "Dữ liệu vừa được người khác sửa — tải lại rồi lưu lại.");
-    version = inserted[0].version;
-  }
+  // Field TRẠNG THÁI đổi giá trị ⇒ một sự kiện mỗi field, cùng giao dịch với lượt ghi (W2).
+  const statusChanged = defs.filter((d) => d.type === "status" && changed.includes(d.key));
+  const causationId = opts.causationId ?? null;
+  const now = new Date();
+  const version = await db.transaction(async (tx) => {
+    let v: number | null;
+    if (prevRow) {
+      const updated = await tx
+        .update(t)
+        .set({ values: merged, version: prevRow.version + 1, updatedBy: viewer.id, updatedAt: now })
+        .where(and(eq(t.objectKey, objectKey), eq(t.recordId, recordId), eq(t.version, prevRow.version)))
+        .returning({ version: t.version });
+      v = updated[0]?.version ?? null;
+    } else {
+      const inserted = await tx.insert(t).values({ objectKey, recordId, values: merged, version: 1, updatedBy: viewer.id }).onConflictDoNothing().returning({ version: t.version });
+      v = inserted[0]?.version ?? null;
+    }
+    if (v === null) return null;
+    for (const d of statusChanged) {
+      await emitDomainEvent(tx, {
+        name: "custom_status.changed",
+        subjectType: METADATA_RECORD_SUBJECT,
+        subjectId: `${objectKey}:${recordId}`,
+        modelId: null,
+        payload: { objectKey, recordId, fieldKey: d.key, from: before[d.key] ?? null, to: merged[d.key] ?? null },
+        actorKind: machine ? "SYSTEM" : "USER",
+        actorId: viewer.id,
+        source: machine ? viewer.email : `metadata:${objectKey}`,
+        causationId,
+        dedupeKey: `custom_status:${objectKey}:${recordId}:${d.key}:${v}`,
+        occurredAt: now,
+      });
+    }
+    return v;
+  });
+  if (version === null) return fail("CONFLICT", "Dữ liệu vừa được người khác sửa — tải lại rồi lưu lại.");
   const pick = (src: CustomValues) => Object.fromEntries(changed.map((k) => [k, src[k] ?? null]));
   await audit({
     ...auditActor({ id: viewer.id, email: viewer.email }),
+    ...(machine ? { actorKind: "SYSTEM" as const } : {}),
+    ...(causationId ? { correlationId: causationId } : {}),
     action: "CUSTOM_VALUES_SAVE",
     entity: "CUSTOM_VALUES",
     entityId: `${objectKey}:${recordId}`,

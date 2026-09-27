@@ -117,6 +117,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `return.variant_identified` | E (Agent U) | LIVE (`lib/returns/unidentified.ts`) — kho XÁC ĐỊNH / đổi mẫu mã cho hàng hoàn không nhãn sau khi nhận; `subject_id` = `unidentified:<id>`, `model_id` qua sổ mẫu của sản phẩm (NULL khi chưa vào sổ); không tự cộng tồn |
 | `approval.executed` | G | LIVE từ Agent K (`lib/approvals/service.ts`) — phát CÙNG giao dịch với lượt ghi trạng thái yêu cầu: lật `EXECUTED` khi cổng đứng trong giao dịch nghiệp vụ, hoặc lượt khẳng định sau khi action xong (`withApprovalExecution`); khoá chống trùng `approval.executed:<id yêu cầu>`; `model_id` NULL |
 | `recommendation.decided` | H | LIVE |
+| `custom_status.changed` | PLATFORM (Phase 3 · W2) | LIVE (`lib/metadata/values.ts::saveCustomValues`) — field custom kiểu `status` đổi giá trị; phát CÙNG giao dịch với lượt ghi `custom_values`; subject `custom_record`, `subject_id` = `<objectKey>:<recordId>` (sổ khai một subject cho mỗi tên, còn field custom gắn được vào mọi đối tượng); payload `{ objectKey, recordId, fieldKey, from, to }`; khoá chống trùng `custom_status:<object>:<record>:<field>:<phiên bản mới>`; `causation_id` = id lượt chạy workflow khi lượt ghi do luật làm (chặn vòng lặp W7) |
 
 ## 3. Việc (`work_items`) — nguồn mới
 

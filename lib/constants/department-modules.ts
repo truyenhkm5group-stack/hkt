@@ -439,6 +439,15 @@ export const NAV_MODULES = [
     permission: "metadata:manage",
     why: "Nhãn hiển thị, thứ tự và bộ lọc của trạng thái HỆ THỐNG (vd trạng thái đơn). Giá trị và chuyển trạng thái do Core sở hữu — trang này chỉ đổi phần hiển thị.",
   },
+  // Luật tự động (Phase 3): khoá riêng `workflow:manage` — một luật chạy thật cho máy làm thay người trên CẢ
+  // tổ chức (tạo việc cho mọi phòng, gửi báo, ghi giá trị), nên là việc của quản trị, không của phòng nào.
+  {
+    href: "/settings/workflows",
+    label: "Luật tự động",
+    zone: "SYSTEM",
+    permission: "workflow:manage",
+    why: "Khi nào · điều kiện · làm gì (tạo việc, báo, ghi giá trị) · có cần người duyệt. Luật mới luôn ở NHÁP + CHẠY THỬ; chuyển CHẠY THẬT là quyết định của quản trị vì máy sẽ làm thay người trên cả tổ chức.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

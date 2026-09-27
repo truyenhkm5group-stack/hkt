@@ -34,7 +34,8 @@ export const DOMAIN_ACTOR_KIND_LABEL: Record<DomainActorKind, string> = {
 /** Cùng biểu thức với CHECK `domain_events_name_check` của migration 0132. */
 export const DOMAIN_EVENT_NAME_PATTERN = /^[a-z_]+(\.[a-z_]+)+$/;
 
-export type DomainEventOwner = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H";
+/** "A"–"H": agent của Company OS. "PLATFORM": lớp nền tảng (Phase 2 metadata / Phase 3 workflow). */
+export type DomainEventOwner = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "PLATFORM";
 
 export type DomainEventSpec = {
   name: string;
@@ -49,6 +50,15 @@ export type DomainEventSpec = {
 
 /** Subject của mọi sự kiện `model.*`. */
 export const MODEL_SUBJECT = "product_model";
+
+/**
+ * Subject của sự kiện trên BẢN GHI mang field custom (Phase 3 · `custom_status.changed`). Sổ khai MỘT
+ * `subjectType` cho mỗi tên, còn một field trạng thái custom gắn được vào mọi đối tượng trong sổ đối tượng
+ * (khách, đơn, vận đơn…) — nên subject là "bản ghi metadata" và `subject_id` = `<objectKey>:<recordId>`
+ * (cùng khuôn `unidentified:<id>` của Agent U). Không mượn subject của miền (`product_model`…): dòng thời gian
+ * của miền đó sẽ hiện một sự kiện không thuộc về nó.
+ */
+export const METADATA_RECORD_SUBJECT = "custom_record";
 
 /** Tệp lõi dịch vụ của sổ mẫu — nơi DUY NHẤT phát `model.*`. */
 const MODEL_EMITTER = "lib/models/service.ts";
@@ -153,6 +163,20 @@ export const DOMAIN_EVENTS = [
   { name: "approval.executed", subjectType: "approval_request", owner: "G", status: "LIVE", emitter: "lib/approvals/service.ts", why: "Yêu cầu duyệt đã được tiêu thụ đúng một lần VÀ thao tác được duyệt đã chạy xong." },
   // Agent H (0139): LIVE. Một sự kiện cho MỖI dòng `recommendation_decisions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ. `subject_id` = khoá nguồn của đề xuất.
   { name: "recommendation.decided", subjectType: "recommendation", owner: "H", status: "LIVE", emitter: "lib/owner-decisions/service.ts", why: "Chủ shop chấp nhận / bỏ qua / hẹn nhắc lại một đề xuất trên cockpit — để đo độ đúng sau này." },
+  /*
+    Phase 3 · W2 (0155): LIVE. Phát trong CÙNG giao dịch với lượt ghi `custom_values` khi một field custom kiểu
+    `status` ĐỔI giá trị (lib/metadata/values.ts::saveCustomValues). Khoá chống trùng
+    `custom_status:<object>:<record>:<field>:<phiên bản mới>`; `causation_id` = id lượt chạy workflow khi lượt ghi
+    do luật tự động làm (chặn vòng lặp W7). Payload `{ objectKey, recordId, fieldKey, from, to }`.
+  */
+  {
+    name: "custom_status.changed",
+    subjectType: METADATA_RECORD_SUBJECT,
+    owner: "PLATFORM",
+    status: "LIVE",
+    emitter: "lib/metadata/values.ts",
+    why: "Trạng thái nghiệp vụ do tổ chức tự khai (field custom kiểu status) đổi giá trị — nguồn trigger của workflow cho đối tượng không phát sự kiện miền.",
+  },
 ] as const satisfies readonly DomainEventSpec[];
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[number]["name"];
@@ -184,6 +208,7 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "recommendation.decided": "Phản ứng với đề xuất trên buồng lái",
   "approval.executed": "Việc đã duyệt được thực hiện",
   "stock_receipt.linked_production": "Phiếu nhập nối lệnh / lô sản xuất",
+  "custom_status.changed": "Đổi trạng thái nghiệp vụ (field tự khai)",
 };
 
 export function domainEventLabel(name: string): string {

@@ -38,6 +38,14 @@ export const APPROVAL_GROUPS = [
   "PURCHASING_LARGE",
   "BUSINESS_RULE_CHANGE",
   "ADS_BUDGET_MUTATION",
+  /*
+    Phase 3 · W5: cửa duyệt của LUẬT TỰ ĐỘNG (`workflow_rules.gate`). Người xin là MÁY (`requested_by` NULL,
+    `requested_by_email` = "workflow:<khoá luật>"), nên luật "người xin không tự duyệt" luôn thoả và ai có
+    `approvals:decide` cũng quyết được. KHÔNG nằm trong `APPROVAL_GROUPS_WIRED`: cửa này không đi qua công tắc
+    cưỡng chế — người khai luật đã chọn "cần duyệt", và tắt cưỡng chế không được lặng lẽ biến luật đó thành tự chạy.
+    Không ngưỡng tiền (`amount` NULL ⇒ coi như vượt, luôn phải duyệt). Hạn hiệu lực lời duyệt: `APPROVAL_VALID_HOURS`.
+  */
+  "WORKFLOW",
 ] as const;
 export type ApprovalGroup = (typeof APPROVAL_GROUPS)[number];
 
@@ -51,6 +59,7 @@ export const APPROVAL_GROUP_LABEL: Record<ApprovalGroup, string> = {
   PURCHASING_LARGE: "Đặt hàng vượt ngưỡng",
   BUSINESS_RULE_CHANGE: "Đổi luật nghiệp vụ / ngưỡng",
   ADS_BUDGET_MUTATION: "Thay đổi ngân sách quảng cáo",
+  WORKFLOW: "Luật tự động xin chạy",
 };
 
 /**
@@ -67,6 +76,7 @@ export const APPROVAL_GROUP_REASON: Record<ApprovalGroup, string> = {
   PURCHASING_LARGE: "Vượt ngưỡng thì một quyết định sai khoá vốn của shop trong nhiều tháng.",
   BUSINESS_RULE_CHANGE: "Đổi ngưỡng nghiệp vụ là đổi cách ĐỌC mọi số liệu lịch sử cùng lúc.",
   ADS_BUDGET_MUTATION: "Ngân sách quảng cáo đốt tiền theo giờ; một con số gõ nhầm không có phanh.",
+  WORKFLOW: "Người khai luật đã chọn để một người gật trước khi máy làm thay — máy không biết bối cảnh mà người duyệt biết.",
 };
 
 /**

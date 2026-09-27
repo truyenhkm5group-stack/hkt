@@ -78,7 +78,7 @@ export type ModuleDef = {
 };
 
 /** Khoá quyền của nền tảng (hợp đồng mục 11; `metadata:manage` — phase-2-contracts M11). Khai ở đây để sổ module tự kiểm được chủ của chúng. */
-export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "metadata:manage"] as const;
+export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "metadata:manage", "workflow:manage"] as const;
 
 /**
  * Đường dẫn KHÔNG thuộc module nào — `moduleOfPath` trả `null`, không cổng module nào chặn.

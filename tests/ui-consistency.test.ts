@@ -142,6 +142,7 @@ export function testUiConsistency() {
     "app/(dashboard)/reports/scenario/page.tsx",
     "app/(dashboard)/reports/target/page.tsx",
     "app/(dashboard)/shipments/stock-wait/page.tsx",
+    "app/(dashboard)/settings/workflows/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
@@ -245,6 +246,9 @@ export function testNavigationCoverage() {
     // Phase 2 · metadata: form TẠO khách — vào từ nút 'Tạo khách hàng' ở đầu /customers, chỉ hiện khi tổ chức
     // KHÔNG bật connector_pancake và người xem có customers:write (cùng cổng với trang và server action).
     "/customers/new": "nút 'Tạo khách hàng' ở đầu trang /customers (chỉ khi không bật Pancake + có customers:write)",
+    // Phase 3 · luật tự động: form TẠO luật — vào từ nút 'Luật mới' ở đầu /settings/workflows. Trang của MỘT luật
+    // (`/settings/workflows/[id]`) là route động nên tự đứng ngoài bài này: vào từ tên luật trong bảng danh sách.
+    "/settings/workflows/new": "nút 'Luật mới' ở đầu /settings/workflows; trang một luật /settings/workflows/[id] vào từ tên luật trong bảng",
   };
 
   const pages = walkPages("app/(dashboard)");

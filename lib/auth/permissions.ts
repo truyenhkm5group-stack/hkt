@@ -199,6 +199,8 @@ export const PERMISSION_GROUPS = [
         không cấp được.
       */
       { key: "metadata:manage", label: "Cấu hình dữ liệu (field, form, danh sách, trạng thái)", hint: "Thêm field custom cho khách hàng / đơn hàng…, sắp xếp form và danh sách, đổi nhãn trạng thái. Có hiệu lực ngay khi xuất bản, không cần deploy." },
+      /* Phase 3 — WORKFLOW (docs/platform/phase-3-contracts.md mục 5): khai luật tự động. Bật một luật LIVE là cho máy tạo việc / gửi báo / ghi giá trị thay người ⇒ quyền cấu hình cấp cao, cùng nhóm metadata:manage. */
+      { key: "workflow:manage", label: "Luật tự động (workflow)", hint: "Khai luật: khi nào (sự kiện / trạng thái nghiệp vụ) · điều kiện · làm gì (tạo việc, báo, ghi giá trị) · có cần người duyệt. Luật mới luôn ở NHÁP + CHẠY THỬ." },
       { key: "platform:operate", label: "Vận hành nền tảng (mọi tổ chức)", hint: "Chỉ người của tổ chức nhà: xem sức khoẻ nền tảng, danh sách tổ chức, đổi module của tổ chức khác." },
       // ═══ Company OS · Agent G ═══ — xem `withDerivedApprovalDecide()` cuối tệp.
       {
@@ -295,7 +297,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "customers:write"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

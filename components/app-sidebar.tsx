@@ -49,6 +49,7 @@ import {
   UserCog,
   Users,
   Wallet,
+  Workflow,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -125,6 +126,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/forms": FormInput,
   "/settings/lists": Columns3,
   "/settings/statuses": Tags,
+  "/settings/workflows": Workflow,
   "/platform": ServerCog,
 };
 

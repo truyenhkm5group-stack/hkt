@@ -388,6 +388,107 @@ export async function recordApprovalExecutionError(db: Db, requestId: string, er
   return true;
 }
 
+/* ═══════ Phase 3 · W5 · LỜI DUYỆT CỦA LUẬT TỰ ĐỘNG (người xin là MÁY) ═══════
+ *
+ * Yêu cầu nhóm `WORKFLOW` có `requested_by` NULL: không người xin nào "bấm lại" để tiêu thụ lời duyệt như
+ * cổng `guardSecondApprovalCore`. Bên tiêu thụ là LƯỢT CHẠY KẾ TIẾP của job (`lib/workflow/engine.ts`): nó
+ * chiếm lượt chạy bằng `UPDATE … WHERE status = 'WAITING_APPROVAL'` (đúng một lượt thắng), thực thi, rồi thanh
+ * toán lời duyệt ở đây — cùng một chỗ duy nhất được lật trạng thái yêu cầu và phát `approval.executed`.
+ */
+
+/**
+ * Thực thi xong ⇒ `EXECUTED` + `approval.executed` (actor SYSTEM, `actor_id` NULL) trong CÙNG giao dịch.
+ * Thực thi hỏng ⇒ lời duyệt GIỮ `APPROVED` và mang `execution_error` — không bao giờ ghi "đã thực hiện" cho
+ * một việc không chạy. Trả `true` khi lượt này là lượt đã lật / ghi lỗi.
+ */
+export async function settleMachineApproval(
+  db: Db,
+  requestId: string,
+  outcome: { ok: true } | { error: string },
+  machine: { email: string },
+  now: Date = new Date(),
+): Promise<boolean> {
+  const a = schema.approvalRequests;
+  if ("error" in outcome) {
+    const loi = cauLoi(outcome.error);
+    const [r] = await db.update(a).set({ executionError: loi }).where(and(eq(a.id, requestId), eq(a.status, "APPROVED"))).returning({ id: a.id, group: a.group, action: a.action });
+    if (!r) return false;
+    await audit({
+      userId: null,
+      userEmail: machine.email,
+      actorKind: "SYSTEM",
+      action: `approval.execute_failed:${r.action}`,
+      entity: "APPROVAL_REQUEST",
+      entityId: requestId,
+      correlationId: requestId,
+      reason: "Luật tự động đã được duyệt nhưng hành động KHÔNG chạy được — lời duyệt không bị tính là đã thực hiện.",
+      detail: { group: r.group, executionError: loi },
+    });
+    return true;
+  }
+  const lat = await db.transaction(async (tx) => {
+    const [r] = await tx
+      .update(a)
+      .set({ status: "EXECUTED", executedAt: now, executionError: null })
+      .where(and(eq(a.id, requestId), eq(a.status, "APPROVED")))
+      .returning({ group: a.group, action: a.action, entity: a.entity, entityId: a.entityId, summary: a.summary, amount: a.amount });
+    if (!r) return null;
+    await emitDomainEvent(tx, {
+      name: "approval.executed",
+      subjectType: "approval_request",
+      subjectId: requestId,
+      modelId: null,
+      payload: { group: r.group, action: r.action, entity: r.entity, entityId: r.entityId, summary: r.summary, amount: r.amount, settlement: "WORKFLOW" },
+      actorKind: "SYSTEM",
+      actorId: null,
+      source: `approval:${r.action}`,
+      correlationId: requestId,
+      dedupeKey: approvalExecutedDedupeKey(requestId),
+      occurredAt: now,
+    });
+    return r;
+  });
+  if (!lat) return false;
+  await audit({
+    userId: null,
+    userEmail: machine.email,
+    actorKind: "SYSTEM",
+    action: `approval.execute:${lat.action}`,
+    entity: "APPROVAL_REQUEST",
+    entityId: requestId,
+    correlationId: requestId,
+    reason: "Luật tự động thực hiện đúng việc đã được người duyệt — lời duyệt đã dùng.",
+    detail: { group: lat.group, summary: lat.summary, settlement: "WORKFLOW" },
+  });
+  return true;
+}
+
+/**
+ * Lời duyệt của MÁY đã quá `APPROVAL_VALID_HOURS` mà chưa dùng ⇒ `EXPIRED` ("chạm thì ghi", cùng luật với
+ * `expireStaleApprovals` — hàm kia khoá theo người xin, còn ở đây người xin là NULL). Trả `true` khi đã lật.
+ */
+export async function expireMachineApproval(db: Db, requestId: string, machine: { email: string }, now: Date = new Date()): Promise<boolean> {
+  const a = schema.approvalRequests;
+  const [r] = await db
+    .update(a)
+    .set({ status: "EXPIRED" })
+    .where(and(eq(a.id, requestId), eq(a.status, "APPROVED"), isNull(a.executedAt), sql`${a.decidedAt} <= ${approvalValidSince(now)}`))
+    .returning({ id: a.id, group: a.group });
+  if (!r) return false;
+  await audit({
+    userId: null,
+    userEmail: machine.email,
+    actorKind: "SYSTEM",
+    action: "approval.expire",
+    entity: "APPROVAL_REQUEST",
+    entityId: requestId,
+    correlationId: requestId,
+    reason: `Lời duyệt quá ${APPROVAL_VALID_HOURS} giờ mà luật chưa chạy — hết hiệu lực.`,
+    detail: { group: r.group },
+  });
+  return true;
+}
+
 /**
  * Hỏi cổng: việc này làm luôn được, hay phải chờ người thứ hai?
  *

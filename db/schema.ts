@@ -5218,7 +5218,7 @@ export const workItems = pgTable(
     check("work_items_money_basis_check", sql`${t.moneyConfidence} = 'UNKNOWN' OR length(btrim(${t.moneyBasis})) > 0`),
     // Chặn mà không nói vì sao là xoá bằng chứng lặng lẽ — cùng luật với `notifications.ignored_reason`.
     check("work_items_blocked_reason_check", sql`${t.status} IS DISTINCT FROM 'BLOCKED' OR length(btrim(${t.blockedReason})) > 0`),
-    check("work_items_creation_source_check", sql`${t.creationSource} IN ('AUTO', 'MANUAL', 'RECURRING')`),
+    check("work_items_creation_source_check", sql`${t.creationSource} IN ('AUTO', 'MANUAL', 'RECURRING', 'WORKFLOW')`),
   ],
 );
 
@@ -5259,7 +5259,7 @@ export const workItemEvents = pgTable(
   (t) => [
     index("work_item_events_key_idx").on(t.workKey, t.createdAt),
     index("work_item_events_actor_idx").on(t.actorEmail, t.createdAt),
-    check("work_item_events_source_check", sql`${t.source} IN ('UI', 'API', 'SYSTEM', 'RECURRENCE')`),
+    check("work_item_events_source_check", sql`${t.source} IN ('UI', 'API', 'SYSTEM', 'RECURRENCE', 'WORKFLOW')`),
   ],
 );
 
@@ -8479,3 +8479,72 @@ export const videoScaleLessons = pgTable(
     check("video_scale_lessons_source_check", sql`${t.source} IN ('AD', 'REVIEW')`),
   ],
 );
+
+// ═══ PHASE 3 — WORKFLOW FOUNDATION (docs/platform/phase-3-contracts.md mục 1) ═══
+//
+// Luật là metadata của tổ chức (CSDL tổ chức). Luật MỚI luôn DRAFT + DRY_RUN (W1 — luật 23, 25): không
+// luật nào tự chạy thật khi vừa tạo. `workflow_runs.dedupe_key` UNIQUE ⇒ chạy lại không nhân đôi (W6).
+
+export const workflowRules = pgTable(
+  "workflow_rules",
+  {
+    id: id(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    status: text("status").notNull().default("DRAFT"),
+    mode: text("mode").notNull().default("DRY_RUN"),
+    trigger: jsonb("trigger").notNull(),
+    conditions: jsonb("conditions"),
+    actions: jsonb("actions").notNull().default([]),
+    gate: jsonb("gate"),
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    activatedBy: text("activated_by"),
+    activatedAt: ts("activated_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("workflow_rules_key_uq").on(t.key),
+    check("workflow_rules_status_check", sql`${t.status} in ('DRAFT','ACTIVE','PAUSED','ARCHIVED')`),
+    check("workflow_rules_mode_check", sql`${t.mode} in ('DRY_RUN','LIVE')`),
+  ],
+);
+
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: id(),
+    ruleId: text("rule_id").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    mode: text("mode").notNull(),
+    triggerKind: text("trigger_kind").notNull(),
+    triggerRef: text("trigger_ref").notNull(),
+    subjectType: text("subject_type"),
+    subjectId: text("subject_id"),
+    dedupeKey: text("dedupe_key").notNull(),
+    status: text("status").notNull(),
+    steps: jsonb("steps").notNull().default([]),
+    causationDepth: integer("causation_depth").notNull().default(0),
+    approvalRequestId: text("approval_request_id"),
+    error: text("error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    finishedAt: ts("finished_at"),
+  },
+  (t) => [
+    uniqueIndex("workflow_runs_dedupe_uq").on(t.dedupeKey),
+    index("workflow_runs_rule_idx").on(t.ruleId, t.createdAt),
+    index("workflow_runs_status_idx").on(t.status),
+    check("workflow_runs_status_check", sql`${t.status} in ('DRY_RUN','PENDING','WAITING_APPROVAL','DONE','SKIPPED','FAILED','REJECTED')`),
+  ],
+);
+
+/** Con trỏ tiêu thụ (vd `domain_events`) — chỉ tiến. */
+export const workflowCursors = pgTable("workflow_cursors", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: updatedAt(),
+});
