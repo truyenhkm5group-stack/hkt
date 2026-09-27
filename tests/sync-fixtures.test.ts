@@ -408,6 +408,7 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
+import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
 
 async function main() {
@@ -2349,6 +2350,8 @@ async function main() {
   testRepoIntegrity();
   // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
   testPlatformIsolationStatic();
+  // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.
+  testPlatformNoDb();
   testChatbotNoSecretsInRepo();
   testChatbotDeployShape();
   await testChatbotImportGuards();
