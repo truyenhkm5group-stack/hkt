@@ -45,6 +45,7 @@ import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
+import { testCareAutoAssign } from "./care-auto-assign.test";
 import { testCareReturnLegQueue } from "./care-return-leg-queue.test";
 import { testCareDecisionParks } from "./care-decision-parks.test";
 import { testAiCopilot } from "./ai-copilot.test";
@@ -2072,6 +2073,7 @@ async function main() {
   await testVtpCapability(db);
   await testCareWorkbench(db);
   await testCareClosedAssign(db);
+  await testCareAutoAssign(db);
   await testCareReturnLegQueue(db);
   await testCareDecisionParks(db);
   testCarrierManualPure();
