@@ -9,6 +9,7 @@ import type { Actor } from "@/lib/constants/actor";
 import { COST_LINE_KINDS, COST_LINE_MAX_VND } from "@/lib/constants/production-os";
 import { createCostSheetCore, finalizeCostSheetCore, updateCostSheetDraftCore } from "@/lib/production/costing";
 import { describeFollow } from "@/lib/production/lifecycle";
+import { startCostSheetFromTopicCore } from "@/lib/production/shortcuts";
 
 /**
  * ═══════════ SERVER ACTION: BẢNG GIÁ THÀNH CÓ PHIÊN BẢN ═══════════
@@ -87,4 +88,34 @@ export async function finalizeCostSheet(costSheetId: string): Promise<Result<{ v
   await audit({ userId: user.id, userEmail: user.email, action: "COST_SHEET_FINALIZE", entity: "COST_SHEET", entityId: costSheetId, after: { status: "FINAL", version: r.version, totalUnitCost: r.totalUnitCost } });
   revalidateProduction();
   return { ok: true, version: r.version, totalUnitCost: r.totalUnitCost };
+}
+
+/**
+ * Lối tắt "Lập giá thành V1" trên trang topic ĐÃ CHỐT (Company OS · Agent SC). Dòng khởi tạo do MÁY CHỦ
+ * dựng từ topic (lib/production/shortcuts.ts) rồi đi qua ĐÚNG `createCostSheetCore` — cùng quyền
+ * `production:write`, cùng nhật ký `COST_SHEET_CREATE` với nút "Phiên bản giá thành mới". Bấm hai lần ⇒ lần
+ * sau nhận lại V1 đã có (`EXISTING`), không đẻ V2. Topic chưa có giá nào ⇒ không ghi gì (`EMPTY_EDITOR`).
+ */
+export async function startCostSheetFromTopic(topicId: string): Promise<Result<{ mode: "CREATED" | "EXISTING" | "EMPTY_EDITOR"; version: number | null; totalUnitCost: number | null; note: string; lifecycle: string | null }>> {
+  const user = await requireUser();
+  if (!can(user, "production:write")) return { error: "Không có quyền lập bảng giá thành" };
+  const id = z.string().trim().min(1).safeParse(topicId);
+  if (!id.success) return { error: "Thiếu topic" };
+  const db = await getDb();
+  const r = await startCostSheetFromTopicCore(db, { topicId: id.data, actor: actorOf(user), canWrite: true });
+  if ("error" in r) return r;
+  if (r.mode === "CREATED") {
+    await audit({ userId: user.id, userEmail: user.email, action: "COST_SHEET_CREATE", entity: "COST_SHEET", entityId: r.costSheetId, after: { version: r.version, totalUnitCost: r.totalUnitCost, source: r.prefill.source, topicId: id.data }, detail: { lifecycle: r.lifecycle, shortcut: "COST_V1_FROM_TOPIC" } });
+  }
+  // Mọi nhánh thành công đều làm mới trang (kể cả EXISTING: người khác vừa tạo ⇒ trang đang cũ thật).
+  revalidateProduction();
+  if (r.mode === "CREATED") revalidatePath(`/models/${r.modelId}`);
+  return {
+    ok: true,
+    mode: r.mode,
+    version: r.mode === "EMPTY_EDITOR" ? null : r.version,
+    totalUnitCost: r.mode === "CREATED" ? r.totalUnitCost : null,
+    note: r.mode === "EXISTING" ? "" : r.prefill.note,
+    lifecycle: r.mode === "CREATED" ? describeFollow(r.lifecycle) : null,
+  };
 }

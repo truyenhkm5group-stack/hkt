@@ -1,8 +1,11 @@
-import { CostSheets, type CostSheetView } from "@/app/(dashboard)/production/_components/cost-sheets";
+import { CostSheets, type CostSheetView, type CostV1View } from "@/app/(dashboard)/production/_components/cost-sheets";
 import { SamplesPanel, type SampleView } from "@/app/(dashboard)/production/_components/samples-panel";
+import { ShortcutAction } from "@/components/shortcut-action";
 import { SectionCard } from "@/components/ui-bits";
+import type { ShortcutState } from "@/lib/constants/production-shortcuts";
 import { type CostSheetStatus, type SampleStatus } from "@/lib/constants/production-os";
 import { formatDateTime, formatVND } from "@/lib/format";
+import { ClipboardList } from "lucide-react";
 import type { getModelProductionDesk } from "@/lib/queries/production-os";
 
 type Desk = Awaited<ReturnType<typeof getModelProductionDesk>>;
@@ -27,6 +30,8 @@ export function ModelDesk({
   canWrite,
   canApprove,
   canAssumptions,
+  poShortcuts = {},
+  costV1 = null,
 }: {
   desk: Desk;
   modelId: string;
@@ -36,6 +41,10 @@ export function ModelDesk({
   canWrite: boolean;
   canApprove: boolean;
   canAssumptions: boolean;
+  /** Lối tắt "Lập lệnh SX" theo từng bản duyệt (Agent SC) — `loadDesignPoShortcuts`. Thiếu ⇒ không vẽ nút. */
+  poShortcuts?: Record<string, ShortcutState>;
+  /** Lối tắt "Lập giá thành V1" — chỉ trang TOPIC truyền (lối tắt dựng dòng từ topic). */
+  costV1?: CostV1View | null;
 }) {
   const sheets: CostSheetView[] = desk.costSheets.map((s) => ({
     id: s.id,
@@ -75,7 +84,7 @@ export function ModelDesk({
         title="Giá thành tạm tính (phiên bản)"
         hint="Mỗi lần xưởng báo lại giá là một phiên bản. Bản đã chốt không sửa được — phiên bản cũ luôn còn để so. Chốt cần quyền duyệt. Giá thành ở đây KHÔNG tự vào báo cáo lợi nhuận: muốn dùng làm giá vốn dự tính thì bấm “Dùng làm giá ước tính” trên bản đã chốt."
       >
-        <CostSheets modelId={modelId} topicId={topicId} productId={productId} sheets={sheets} canWrite={canWrite} canApprove={canApprove} canAssumptions={canAssumptions} />
+        <CostSheets modelId={modelId} topicId={topicId} productId={productId} sheets={sheets} canWrite={canWrite} canApprove={canApprove} canAssumptions={canAssumptions} v1={costV1} />
       </SectionCard>
 
       <SectionCard id="mau" title="Mẫu xưởng làm" hint="Mỗi phiên bản mẫu nhận đúng một phán quyết. Yêu cầu sửa thì ghi mẫu phiên bản tiếp theo; duyệt thì sinh bản thiết kế bất biến cho lệnh sản xuất trỏ vào.">
@@ -100,6 +109,12 @@ export function ModelDesk({
                     {spec.costSheet ? `V${spec.costSheet.version} · ${formatVND(spec.costSheet.totalUnitCost ?? null)}/sp` : (spec.costSheetNote ?? "—")}
                     {spec.topic?.selectedOption ? ` · Phương án: ${spec.topic.selectedOption}` : ""}
                   </div>
+                  {poShortcuts[d.id] ? (
+                    <div className="mt-1.5">
+                      {/* Lối tắt (Agent SC): mở trình sửa lệnh CÓ SẴN, chọn sẵn bản duyệt này + xưởng, ô số lượng = gợi ý Kế hoạch SX. Người sửa rồi bấm Chốt. */}
+                      <ShortcutAction state={poShortcuts[d.id]} label="Lập lệnh SX" icon={<ClipboardList className="size-4" />} size="xs" />
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
