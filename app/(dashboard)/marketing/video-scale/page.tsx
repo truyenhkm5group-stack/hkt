@@ -4,7 +4,13 @@ import { getDb } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
 import { VIDEO_PRICE_SOURCE, fakeProviderAllowed } from "@/lib/constants/video-scale";
 import { env } from "@/lib/env";
-import { listJobs, listMusic, listRuns, listVariants, listWinProducts, loadVideoScaleCounts, videoSpendOnDay } from "@/lib/queries/video-scale";
+import { listJobs, listMusic, listPageConfigs, listPosts, listRuns, listVariants, listWinProducts, loadVideoScaleCounts, videoSpendOnDay } from "@/lib/queries/video-scale";
+import { listFanpageOptions } from "@/lib/queries/creative-manual-gen";
+import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
+import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
+import { FB_PAGE_PUBLISH_SCOPES } from "@/lib/constants/video-scale";
+import { readVideoAutomation } from "@/lib/video-scale/publish";
+import { PublishPanel, type PublishReadiness } from "./publish-panel";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
@@ -20,6 +26,7 @@ const TABS = [
   { value: "ma-win", label: "Mã win" },
   { value: "hang-doi", label: "Hàng đợi render" },
   { value: "duyet", label: "Duyệt video" },
+  { value: "dang-reel", label: "Đăng Reel" },
   { value: "cau-hinh", label: "Cấu hình" },
 ] as const;
 
@@ -31,7 +38,8 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
   const user = await requirePermission("ideas:view");
   const raw = await searchParams;
   const db = await getDb();
-  const [counts, cfg, ff, spend] = await Promise.all([loadVideoScaleCounts(db), readVideoScaleConfig(db), ffmpegVersion(), videoSpendOnDay(db)]);
+  const [counts, cfg, ff, spend, automation, fanpages] = await Promise.all([loadVideoScaleCounts(db), readVideoScaleConfig(db), ffmpegVersion(), videoSpendOnDay(db), readVideoAutomation(db), listFanpageOptions(db, new Date(), "")]);
+  const pageName = new Map(fanpages.map((p) => [p.id, p.name]));
   const defaultTab = counts.review > 0 ? "duyet" : counts.activeJobs > 0 ? "hang-doi" : "ma-win";
   const tabRaw = param(raw, "tab");
   const tab = TABS.some((t) => t.value === tabRaw) ? tabRaw : defaultTab;
@@ -40,6 +48,8 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
   const canSpend = canEdit && can(user, "expenses:write");
   const canConfig = can(user, "settings:manage");
   const canMode = canConfig || can(user, "expenses:write");
+  const canEngage = canEdit || can(user, "expenses:write");
+  const canRelease = can(user, "expenses:write") || canConfig;
   const badge: Record<string, number> = { duyet: counts.review, "hang-doi": counts.activeJobs + counts.blockedJobs };
 
   return (
@@ -90,6 +100,12 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
         </div>
       </div>
 
+      {automation.paused ? (
+        <p className="rounded-lg border border-destructive/60 bg-destructive/5 p-2 text-[13px] font-medium">
+          Video Scale đang DỪNG mọi tự động (không đăng Reel, không tạo / bật quảng cáo){automation.reason ? ` — ${automation.reason}` : ""}. Mở lại ở tab Đăng Reel.
+        </p>
+      ) : null}
+
       <nav className="flex flex-wrap gap-1.5 border-b pb-2" aria-label="Các bước Video Scale">
         {TABS.map((t) => (
           <Link
@@ -105,14 +121,26 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       </nav>
 
       {tab === "ma-win" ? (
-        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} canSpend={canSpend} canEdit={canEdit} canMode={canMode} />
+        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canEngage={canEngage} canRelease={canRelease} />
       ) : tab === "hang-doi" ? (
         <QueuePanel active={await listJobs(db, { active: true })} recent={await listJobs(db, { active: false, limit: 40 })} variants={await listVariants(db, { statuses: ["SCRIPTED", "GENERATING", "RENDERING", "QC", "FAILED", "QC_FAILED"], limit: 40 })} canEdit={canEdit} canSpend={canSpend} />
       ) : tab === "duyet" ? (
-        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} canEdit={canEdit} canSpend={canSpend} />
+        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} />
+      ) : tab === "dang-reel" ? (
+        <PublishPanel readiness={await publishReadiness()} automation={automation} pages={await listPageConfigs(db, fanpages)} posts={await listPosts(db)} canEngage={canEngage} canRelease={canRelease} canConfigure={canMode} canEdit={canEdit} />
       ) : (
         <ConfigPanel config={cfg} ffmpeg={ff} music={await listMusic(db)} canConfig={canConfig} canEdit={canEdit} />
       )}
     </div>
   );
+}
+
+/** Đường ghi Facebook có mở không + token có quyền đăng Reel không (hỏi Facebook, chỉ đọc; không hỏi được ⇒ CHƯA BIẾT). */
+async function publishReadiness(): Promise<PublishReadiness> {
+  const scopes = await getFbTokenScopes();
+  const missing = FB_PAGE_PUBLISH_SCOPES.filter((s) => !scopes.granted.includes(s));
+  return {
+    writeBlocked: adsWriteDisabledReason(),
+    scopes: { state: scopes.state === "UNKNOWN" ? "UNKNOWN" : missing.length ? "MISSING" : "READY", missing, reason: scopes.reason },
+  };
 }

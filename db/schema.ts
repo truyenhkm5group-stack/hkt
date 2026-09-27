@@ -7943,13 +7943,50 @@ export const videoScaleSkus = pgTable(
       .references(() => products.id, { onDelete: "restrict" }),
     /** `MANUAL` · `AUTO_ON_PASS` (`VIDEO_REVIEW_MODES`). */
     reviewMode: text("review_mode").notNull().default("MANUAL"),
+    /**
+     * FANPAGE ĐƯỢC DUYỆT cho mã (Facebook Page ID, khoá của `fanpages.external_page_id`). Người có quyền chọn trong danh
+     * sách fanpage ERP đã biết — máy KHÔNG đoán fanpage theo tên gần giống. `NULL` = chưa gán ⇒ không đăng được.
+     */
+    pageId: text("page_id"),
+    /** `NULL` = theo cấu hình fanpage · `MANUAL_REVIEW` = mã này luôn chờ người bấm đăng (kể cả khi fanpage bật tự động). */
+    publishMode: text("publish_mode"),
+    /** Dừng khẩn cấp CẤP MÃ: có mốc ⇒ không đăng / không tạo quảng cáo mới cho mã này. */
+    automationPausedAt: ts("automation_paused_at"),
+    automationPausedReason: text("automation_paused_reason").notNull().default(""),
     updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /** ẢNH CHỤP tên — do MÁY CHỦ đọc (mục 34). */
     updatedBy: text("updated_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("video_scale_skus_review_mode_check", sql`${t.reviewMode} IN ('MANUAL', 'AUTO_ON_PASS')`)],
+  (t) => [
+    check("video_scale_skus_review_mode_check", sql`${t.reviewMode} IN ('MANUAL', 'AUTO_ON_PASS')`),
+    check("video_scale_skus_publish_mode_check", sql`${t.publishMode} IS NULL OR ${t.publishMode} = 'MANUAL_REVIEW'`),
+  ],
+);
+
+/**
+ * Cấu hình ĐĂNG theo fanpage. Không có dòng = fanpage CHƯA CẤU HÌNH ⇒ mặc định an toàn: chờ người duyệt từng bài.
+ * `AUTO_PUBLISH` ⇒ video đã duyệt + câu chữ qua kiểm được máy đăng không cần người bấm từng bài (trong trần bài / ngày).
+ */
+export const videoScalePages = pgTable(
+  "video_scale_pages",
+  {
+    pageId: text("page_id").primaryKey(),
+    publishMode: text("publish_mode").notNull().default("MANUAL_REVIEW"),
+    maxPostsPerDay: integer("max_posts_per_day").notNull().default(3),
+    /** Dừng khẩn cấp CẤP FANPAGE. */
+    pausedAt: ts("paused_at"),
+    pausedReason: text("paused_reason").notNull().default(""),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    updatedBy: text("updated_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("video_scale_pages_mode_check", sql`${t.publishMode} IN ('MANUAL_REVIEW', 'AUTO_PUBLISH')`),
+    check("video_scale_pages_max_check", sql`${t.maxPostsPerDay} BETWEEN 1 AND 10`),
+  ],
 );
 
 /** Một lượt "Tạo chiến dịch media" cho một mã win. */
@@ -8071,10 +8108,23 @@ export const videoScaleVariants = pgTable(
     autoApproved: boolean("auto_approved").notNull().default(false),
     isTest: boolean("is_test").notNull().default(false),
     error: text("error").notNull().default(""),
+    /** Các phương án content máy viết (`CaptionOption[]`: móc câu · thân · CTA · hashtag). */
+    captionOptions: jsonb("caption_options").$type<Record<string, unknown>[]>().notNull().default([]),
+    /** Content SẼ ĐĂNG (người sửa được). */
+    caption: text("caption").notNull().default(""),
+    /** `''` chưa có · `DRAFTED` máy viết, chưa ai chốt · `READY` đã chốt (người, hoặc máy khi đăng tự động). */
+    captionState: text("caption_state").notNull().default(""),
+    captionModel: text("caption_model").notNull().default(""),
+    captionCostUsd: doublePrecision("caption_cost_usd"),
+    /** Người chốt content (mục 34). `NULL` + `READY` = máy chốt khi đăng tự động. */
+    captionByUserId: text("caption_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    captionBy: text("caption_by").notNull().default(""),
+    captionAt: ts("caption_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check("video_scale_variants_caption_state_check", sql`${t.captionState} IN ('', 'DRAFTED', 'READY')`),
     uniqueIndex("video_scale_variants_run_seq_uq").on(t.runId, t.seq),
     index("video_scale_variants_product_idx").on(t.productId, t.createdAt),
     index("video_scale_variants_status_idx").on(t.status),
@@ -8135,6 +8185,8 @@ export const videoScaleJobs = pgTable(
     error: text("error").notNull().default(""),
     errorKind: text("error_kind").notNull().default(""),
     outputAssetId: text("output_asset_id").references(() => videoScaleAssets.id, { onDelete: "set null" }),
+    /** Bài Reel mà việc `PUBLISH_REEL` phục vụ. */
+    postId: text("post_id"),
     isTest: boolean("is_test").notNull().default(false),
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
@@ -8145,7 +8197,7 @@ export const videoScaleJobs = pgTable(
     index("video_scale_jobs_due_idx").on(t.status, t.nextRunAt),
     index("video_scale_jobs_variant_idx").on(t.variantId),
     index("video_scale_jobs_cost_day_idx").on(t.costDay),
-    check("video_scale_jobs_kind_check", sql`${t.kind} IN ('SCRIPT', 'CLIP', 'TTS', 'RENDER', 'QC')`),
+    check("video_scale_jobs_kind_check", sql`${t.kind} IN ('SCRIPT', 'CLIP', 'TTS', 'RENDER', 'QC', 'CAPTION', 'PUBLISH_REEL')`),
     check("video_scale_jobs_status_check", sql`${t.status} IN ('QUEUED', 'RUNNING', 'WAITING', 'SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED')`),
     check("video_scale_jobs_error_kind_check", sql`${t.errorKind} IN ('', 'TRANSIENT', 'PERMANENT', 'AMBIGUOUS', 'TIMEOUT', 'BLOCKED')`),
     check("video_scale_jobs_cost_basis_check", sql`${t.costBasis} IN ('', 'ESTIMATED')`),
@@ -8172,4 +8224,50 @@ export const videoScaleMusic = pgTable(
     createdAt: createdAt(),
   },
   (t) => [check("video_scale_music_license_check", sql`length(btrim(${t.licenseNote})) >= 10`), check("video_scale_music_title_check", sql`length(btrim(${t.title})) > 0`)],
+);
+
+/**
+ * BÀI REEL trên fanpage — một dòng cho một (biến thể, fanpage). Thử lại dùng lại ĐÚNG dòng này, nên một biến thể không bao
+ * giờ thành hai bài trên cùng fanpage. `pending_step` ghi NGAY TRƯỚC lời gọi ghi Facebook (cùng lối `fb_pending_step`).
+ */
+export const videoScalePosts = pgTable(
+  "video_scale_posts",
+  {
+    id: id(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => videoScaleVariants.id, { onDelete: "restrict" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    pageId: text("page_id").notNull(),
+    /** `QUEUED` · `UPLOADING` · `PROCESSING` · `SCHEDULED` · `PUBLISHED` · `FAILED` · `CANCELLED`. */
+    status: text("status").notNull().default("QUEUED"),
+    /** Content ĐÚNG như đã gửi Facebook (ảnh chụp lúc duyệt đăng). */
+    caption: text("caption").notNull(),
+    /** Hẹn giờ đăng. `NULL` = đăng ngay. */
+    publishAt: ts("publish_at"),
+    fbVideoId: text("fb_video_id").notNull().default(""),
+    fbPostId: text("fb_post_id").notNull().default(""),
+    permalink: text("permalink").notNull().default(""),
+    publishedAt: ts("published_at"),
+    uploadedAt: ts("uploaded_at"),
+    pendingStep: text("pending_step").notNull().default(""),
+    pendingAt: ts("pending_at"),
+    error: text("error").notNull().default(""),
+    /** Ai cho phép đăng (mục 34). `auto = true` và người `NULL` = MÁY đăng theo `AUTO_PUBLISH` của fanpage. */
+    authorizedByUserId: text("authorized_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    authorizedBy: text("authorized_by").notNull().default(""),
+    auto: boolean("auto").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("video_scale_posts_variant_page_uq").on(t.variantId, t.pageId),
+    index("video_scale_posts_page_idx").on(t.pageId, t.createdAt),
+    check("video_scale_posts_status_check", sql`${t.status} IN ('QUEUED', 'UPLOADING', 'PROCESSING', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED')`),
+    check("video_scale_posts_published_check", sql`${t.status} <> 'PUBLISHED' OR (${t.fbVideoId} <> '' AND ${t.publishedAt} IS NOT NULL)`),
+    check("video_scale_posts_caption_check", sql`length(btrim(${t.caption})) > 0`),
+    check("video_scale_posts_auto_check", sql`${t.auto} = false OR ${t.authorizedByUserId} IS NULL`),
+  ],
 );

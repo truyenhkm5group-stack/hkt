@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, TTS_VOICES, VEO_MODELS, VIDEO_ANGLES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
+import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, TTS_VOICES, VEO_MODELS, VIDEO_ANGLES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
 const id = z.string().trim().min(1).max(80);
 
@@ -47,3 +47,15 @@ export const videoMusicUploadSchema = z.object({
   contentType: z.enum(["audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/x-m4a"]),
   base64: z.string().min(10).max(10_000_000),
 });
+
+export const videoCaptionSchema = z.object({ variantId: id, caption: z.string().max(CAPTION_LIMITS.totalMaxChars) });
+
+/** `publishAt` rỗng = đăng ngay; có giá trị = ISO (trình duyệt đổi giờ địa phương sang ISO trước khi gửi). */
+export const videoPublishSchema = z.object({ variantId: id, caption: z.string().max(CAPTION_LIMITS.totalMaxChars), publishAt: z.string().max(40).default("") });
+
+export const videoSkuPublishingSchema = z.object({ productId: id, pageId: z.string().trim().max(40).default(""), publishMode: z.enum(["", "MANUAL_REVIEW"]).default("") });
+
+export const videoPageConfigSchema = z.object({ pageId: id, publishMode: z.enum(VIDEO_PUBLISH_MODES), maxPostsPerDay: z.coerce.number().int().min(1).max(10) });
+
+/** Dừng khẩn cấp: `scope` = mã / fanpage / toàn module. Kéo bắt buộc lý do; nhả cũng bắt buộc lý do. */
+export const videoPauseSchema = z.object({ scope: z.enum(["SKU", "PAGE", "ALL"]), id: z.string().trim().max(80).default(""), paused: z.boolean(), reason: z.string().trim().min(3, "Ghi lý do (ít nhất 3 ký tự)").max(300) });

@@ -211,6 +211,11 @@ export async function enqueueVariantProduction(db: Db, v: { variantId: string; r
   }
 }
 
+/** Xếp việc viết content cho một video vừa được duyệt (người hoặc máy). Lũy đẳng theo biến thể. */
+export function enqueueCaptionJob(db: Db, v: { id: string; runId: string }, actorId: string | null) {
+  return enqueueJob(db, { kind: "CAPTION", key: `caption:${v.id}`, runId: v.runId, variantId: v.id, isTest: false, createdByUserId: actorId });
+}
+
 // ───────────────────────────── CLIP ─────────────────────────────
 
 export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<void> {
@@ -521,6 +526,7 @@ export async function handleQc(ctx: HandlerCtx, job: VideoJobRow): Promise<void>
         ...(auto ? { autoApproved: true, reviewedAt: now, reviewedBy: "Máy — tự duyệt khi QC đạt", reviewedByUserId: null } : {}),
       })
       .where(and(eq(V.id, variant.id), eq(V.status, "QC")));
+    if (auto) await enqueueCaptionJob(db, { id: variant.id, runId: run.id }, null);
     await succeedJob(db, job, now, { result: { verdict, auto }, costUsd: visual.ran ? visual.costUsd : null, costBasis: visual.ran && visual.costUsd !== null ? "ESTIMATED" : "" });
   } catch (e) {
     const pe = e instanceof ProviderError ? e : new ProviderError(e instanceof Error ? e.message : String(e), "TRANSIENT");

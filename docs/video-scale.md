@@ -9,7 +9,7 @@
 > | PR | Phạm vi | Trạng thái |
 > |---|---|---|
 > | 1 | Dữ liệu + kịch bản + video (Veo) + hậu kỳ + QC + duyệt | **dựng xong trong PR này** |
-> | 2 | Content (caption / hook / CTA) + đăng Facebook Reel | kế tiếp |
+> | 2 | Content (caption / hook / CTA) + đăng Facebook Reel | **dựng xong** (§11) |
 > | 3 | Meta ads (campaign / ad set / ad) + hạn mức + dừng khẩn cấp | kế tiếp |
 > | 4 | Đo lường (Meta + đơn + lợi nhuận) + vòng tối ưu | kế tiếp |
 
@@ -148,3 +148,45 @@ Không thêm khoá quyền mới — nên không có việc gì phải làm vớ
   thử ảnh gốc khác (cận sản phẩm, ít mặt người).
 - QC hình ảnh là một mô hình đọc ảnh — nó giảm việc cho người duyệt, không thay người duyệt; vì thế mặc định mọi mã là
   "người duyệt từng video".
+
+## 11. PR 2 — Content + đăng Facebook Reel
+
+```
+Video ĐÃ DUYỆT (người, hoặc máy khi mã bật tự duyệt)
+  → CAPTION   LLM viết 3 phương án (móc câu · thân · CTA · hashtag) từ kịch bản của video + sự thật về mã
+              → CÙNG bộ kiểm khẳng định với kịch bản (`lib/video-scale/claims.ts`): giá, size, màu, chất liệu, khuyến mãi
+  → NGƯỜI     chọn / sửa content (máy chủ kiểm lại) → Đăng ngay hoặc Hẹn giờ (≥ 10 phút, ≤ 29 ngày — luật Facebook)
+     hoặc MÁY fanpage bật TỰ ĐĂNG ⇒ phương án đầu, trong trần bài / ngày của fanpage
+  → PUBLISH_REEL  mở phiên (video_reels start) → tải byte (rupload) → ĐĂNG (finish) → hỏi trạng thái tới khi đăng xong
+```
+
+**Fanpage ĐƯỢC DUYỆT theo mã** (`video_scale_skus.page_id`): người có `expenses:write` / `settings:manage` chọn trong danh
+sách fanpage ERP đã biết (`fanpages`, đồng bộ từ Pancake) — máy không đoán theo tên. Mã chưa gán ⇒ không đăng được.
+
+**Chế độ đăng**: theo FANPAGE (`video_scale_pages`). Fanpage chưa có dòng = **chờ người bấm từng bài** (mặc định an toàn).
+`AUTO_PUBLISH` ⇒ máy đăng video đã duyệt + content qua kiểm, tối đa N bài / ngày (1–10); bài vượt trần nằm CHỜ tới 0 giờ,
+không mất. Mã có thể ép "luôn chờ người" kể cả khi fanpage tự đăng.
+
+**Dừng khẩn cấp ba cấp** — mã · fanpage · toàn module (`settings["videoScale.automation"]`, FAIL-CLOSED: đọc lỗi / JSON hỏng /
+`paused` không đúng kiểu ⇒ coi như DỪNG). Có hiệu lực ở lượt việc kế tiếp: cổng đăng đọc lại TRƯỚC MỖI lượt. Kéo: `ideas:write`
+hoặc `expenses:write`; nhả: `expenses:write` hoặc `settings:manage`; cả hai bắt buộc lý do, ghi nhật ký. Công tắc khẩn cấp
+quảng cáo (`ads.write.kill`) và `ADS_WRITE_ENABLED` vẫn áp — mọi lời ghi Facebook đi qua `graphPost`.
+
+**Không đăng trùng**: một dòng `video_scale_posts` / (biến thể, fanpage) — ràng buộc duy nhất; thử lại dùng lại dòng. Bước
+mở phiên và tải byte gửi lại an toàn (không tạo bài). Chỉ bước `finish` ĐĂNG: `pending_step = FINISH` ghi trước; lượt sau
+thấy dấu ⇒ HỎI trạng thái video trước, Facebook đã nhận ⇒ không gửi lại. Mất phản hồi mà hết lượt thử ⇒ bài HỎNG nhưng
+GIỮ dấu ⇒ không ai đăng lại mù (phải kiểm fanpage rồi huỷ). Facebook TRẢ LỜI từ chối ⇒ chắc chưa đăng ⇒ xoá dấu.
+
+**Đổi fanpage giữa chừng** ⇒ bài đang chờ hỏng có lý do "fanpage đã đổi", không lên fanpage cũ.
+
+**Token**: ERP lấy token FANPAGE bằng token System User mỗi lần dùng (`GET /{page_id}?fields=access_token`) — không lưu,
+không log. Cần `pages_show_list` · `pages_read_engagement` · `pages_manage_posts` (tab Đăng Reel hỏi Facebook và in thiếu gì)
+và System User được GIAO fanpage với quyền Tạo nội dung (chỉ lộ ra ở lượt đăng đầu tiên).
+
+### HUMAN GATE thêm của PR 2
+
+| Việc | Vì sao máy không tự làm |
+|---|---|
+| Token System User có `pages_manage_posts` + `pages_read_engagement` + `pages_show_list`, và được giao fanpage thử (quyền Tạo nội dung) | cấp quyền là việc của chủ Business Manager |
+| Gán **fanpage thử** cho mã thử ở tab Mã win | chọn fanpage nào đăng là quyết định của người |
+| (Tuỳ) bật TỰ ĐĂNG cho fanpage | để máy đăng thay người là quyết định kinh doanh |

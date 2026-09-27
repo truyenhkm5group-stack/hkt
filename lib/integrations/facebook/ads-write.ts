@@ -122,12 +122,13 @@ function graphUrl(path: string) {
 
 type GraphRecord = Record<string, unknown>;
 
-async function graphGet(path: string, params: Record<string, string>): Promise<GraphRecord> {
+async function graphGet(path: string, params: Record<string, string>, token?: string): Promise<GraphRecord> {
   // Token Meta trong môi trường là của tổ chức nhà (P12) — chặn trước khi gắn token vào URL.
   await assertHomeCredentials("facebook");
   const url = graphUrl(path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  url.searchParams.set("access_token", env.facebook.accessToken);
+  // `token` = token FANPAGE (đăng Reel, đọc trạng thái Reel) — lấy từ chính token System User mỗi lần dùng, không lưu.
+  url.searchParams.set("access_token", token ?? env.facebook.accessToken);
   const { body } = await fetchJson(url, { serviceName: "Facebook", timeoutMs: 30_000, retries: 2 });
   const rec = (body ?? {}) as GraphRecord;
   if (rec.error) {
@@ -195,20 +196,24 @@ export async function searchAdGeoLocations(q: string, limit = 12): Promise<GeoSe
  *
  * Hỏng thì báo người và để người bấm lại — người bấm lại là một quyết định, còn máy thử lại thì không.
  */
-async function graphPost(path: string, fields: Record<string, string>): Promise<GraphRecord> {
+async function graphPost(path: string, fields: Record<string, string>, via: WriteVia = {}): Promise<GraphRecord> {
   assertAdsWriteAllowed();
   // Đường GHI tiêu tiền thật: tổ chức khác nhà không bao giờ được chạm tài khoản QC của tổ chức nhà (P12).
   await assertHomeCredentials("facebook");
   await assertKillSwitchAllows(fields);
-  const url = graphUrl(path);
-  const form = new URLSearchParams({ ...fields, access_token: env.facebook.accessToken });
-  const { body } = await fetchJson(url, {
+  const token = via.token ?? env.facebook.accessToken;
+  // Hai hình dạng, MỘT lời gọi mạng (bài kiểm đếm số lời gọi fetchJson trong tệp này — phải đúng HAI): form tới Graph API, hoặc byte video thô tới
+  // máy tải lên của Facebook (`rupload`, chỉ nhận đúng máy ấy). Cả hai đã qua ĐỦ ba chốt ở trên.
+  const upload = via.upload ? { url: assertRuploadUrl(via.upload.url), bytes: via.upload.bytes } : null;
+  const { body } = await fetchJson(upload ? upload.url : graphUrl(path), {
     serviceName: "Facebook",
     method: "POST",
-    timeoutMs: 30_000,
+    timeoutMs: upload ? 300_000 : 30_000,
     retries: 0,
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: form.toString(),
+    headers: upload
+      ? { authorization: `OAuth ${token}`, offset: "0", file_size: String(upload.bytes.byteLength), "content-type": "application/octet-stream" }
+      : { "content-type": "application/x-www-form-urlencoded" },
+    body: upload ? upload.bytes : new URLSearchParams({ ...fields, access_token: token }).toString(),
   });
   const rec = (body ?? {}) as GraphRecord;
   if (rec.error) {
@@ -217,6 +222,20 @@ async function graphPost(path: string, fields: Record<string, string>): Promise<
     throw new IntegrationError(`Facebook: ${nguoi || String(e.message ?? "lỗi không xác định")}`, 400, false, body);
   }
   return rec;
+}
+
+/**
+ * Đường gửi của một lời ghi. Mặc định: Graph API, token System User, form. `token` = token FANPAGE (đăng Reel). `upload` =
+ * tải byte video thô lên `rupload.facebook.com` (bước 2 của Reels Publishing) — vẫn qua đủ chốt env + tổ chức nhà + công tắc
+ * khẩn cấp như mọi lời ghi khác.
+ */
+type WriteVia = { token?: string; upload?: { url: string; bytes: Uint8Array } };
+
+/** Chỉ tải video lên ĐÚNG máy tải lên của Facebook — một URL lạ không được nhận token fanpage. */
+function assertRuploadUrl(raw: string): URL {
+  const u = new URL(raw);
+  if (u.protocol !== "https:" || u.hostname !== "rupload.facebook.com") throw new IntegrationError(`Facebook: máy tải video lạ "${u.hostname}" — không gửi token tới đó.`, 400);
+  return u;
 }
 
 export type CampaignState = {
@@ -817,4 +836,102 @@ export async function setScaleDailyBudget(objectId: string, dailyBudgetMinor: nu
 /** Bật / tắt một đối tượng của bản sao (chiến dịch · nhóm · mẩu). Chỉ đúng một trường `status`. */
 export async function setScaleStatus(objectId: string, status: "ACTIVE" | "PAUSED"): Promise<void> {
   await graphPost(assertFbId(objectId, "id đối tượng"), { status });
+}
+
+/* ═══════════════════ VIDEO SCALE — ĐĂNG FACEBOOK REEL (chủ shop 27/09/2026, `docs/video-scale.md` §PR2) ═══════════════════
+ *
+ * Tham số: developers.facebook.com/docs/video-api/guides/reels-publishing (đọc 27/09/2026) —
+ *  1. `POST /{page_id}/video_reels` `upload_phase=start` (token FANPAGE) → `video_id`.
+ *  2. `POST https://rupload.facebook.com/video-upload/{ver}/{video_id}`, tiêu đề `Authorization: OAuth <token>`,
+ *     `offset: 0`, `file_size`, thân = byte video → `{ success: true }`.
+ *  3. `POST /{page_id}/video_reels` `upload_phase=finish` `video_id` `video_state=PUBLISHED|SCHEDULED` `description`
+ *     (+ `scheduled_publish_time` UNIX, ≥ 10 phút, ≤ 29 ngày) → `{ success: true }`.
+ *  4. `GET /{video_id}?fields=status` — `uploading_phase` · `processing_phase` · `publishing_phase` · `video_status`.
+ * Quyền: `pages_show_list` · `pages_read_engagement` · `pages_manage_posts`; token FANPAGE của người/System User có quyền
+ * TẠO NỘI DUNG trên page. ERP lấy token fanpage bằng token System User MỖI LẦN DÙNG (`GET /{page_id}?fields=access_token`)
+ * — không lưu, không log, không trả ra ngoài tệp này.
+ *
+ * Mọi lời ghi đi qua `graphPost` ⇒ chốt `ADS_WRITE_ENABLED`, tổ chức nhà, công tắc khẩn cấp (kéo ⇒ không đăng), `retries: 0`.
+ * Chống đăng trùng nằm ở nơi gọi (`lib/video-scale/publish.ts`): dấu "đang gửi" + hỏi trạng thái trước khi gửi lại bước 3.
+ */
+
+async function pageAccessToken(pageId: string): Promise<string> {
+  const rec = await graphGet(assertFbId(pageId, "id fanpage"), { fields: "access_token" });
+  const t = asText(rec.access_token);
+  if (!t) {
+    throw new IntegrationError(
+      "Facebook: không lấy được token của fanpage — System User chưa được giao fanpage này với quyền Tạo nội dung, hoặc token thiếu pages_show_list / pages_manage_posts.",
+      403,
+    );
+  }
+  return t;
+}
+
+/** Bước 1 — mở phiên tải lên. Không đăng gì: phiên bỏ dở không thành bài. */
+export async function startReelUpload(pageId: string): Promise<{ videoId: string }> {
+  const token = await pageAccessToken(pageId);
+  const rec = await graphPost(`${assertFbId(pageId, "id fanpage")}/video_reels`, { upload_phase: "start" }, { token });
+  const videoId = asText(rec.video_id);
+  if (!videoId) throw new IntegrationError("Facebook: mở phiên tải Reel nhưng không nhận được video_id.", 502, false, rec);
+  return { videoId };
+}
+
+/** Bước 2 — tải byte video. Gửi lại cùng `video_id` từ byte 0 là an toàn (cùng một đối tượng video). */
+export async function uploadReelVideo(pageId: string, videoId: string, bytes: Uint8Array): Promise<void> {
+  if (!bytes.byteLength) throw new IntegrationError("Facebook: video rỗng — không tải lên.", 400);
+  const token = await pageAccessToken(pageId);
+  const url = `https://rupload.facebook.com/video-upload/${env.facebook.apiVersion}/${assertFbId(videoId, "id video")}`;
+  const rec = await graphPost("", { upload_phase: "transfer" }, { token, upload: { url, bytes } });
+  if (rec.success !== true) throw new IntegrationError("Facebook: tải video Reel lên không báo thành công.", 502, false, rec);
+}
+
+/** Các trường của bước 3 — hàm THUẦN để bài kiểm khoá: đăng ngay hay hẹn giờ, không trường nào khác. */
+export function finishReelFields(input: { videoId: string; description: string; publishAt: Date | null }): Record<string, string> {
+  const f: Record<string, string> = { upload_phase: "finish", video_id: input.videoId, video_state: input.publishAt ? "SCHEDULED" : "PUBLISHED", description: input.description };
+  if (input.publishAt) f.scheduled_publish_time = String(Math.floor(input.publishAt.getTime() / 1000));
+  return f;
+}
+
+/** Bước 3 — ĐĂNG (hoặc hẹn giờ). Nơi gọi PHẢI hỏi `readReelStatus` trước khi gửi lại bước này. */
+export async function finishReel(pageId: string, input: { videoId: string; description: string; publishAt: Date | null }): Promise<void> {
+  const token = await pageAccessToken(pageId);
+  const rec = await graphPost(`${assertFbId(pageId, "id fanpage")}/video_reels`, finishReelFields(input), { token });
+  if (rec.success !== true) throw new IntegrationError("Facebook: bước đăng Reel không báo thành công.", 502, false, rec);
+}
+
+export type ReelStatus = {
+  videoStatus: string;
+  uploading: string;
+  processing: string;
+  publishing: string;
+  publishStatus: string;
+  publishTime: string | null;
+  error: string | null;
+  permalink: string;
+};
+
+/** Đọc `status` của một video Reel — hàm THUẦN. */
+export function parseReelStatus(rec: Record<string, unknown>): ReelStatus {
+  const st = asRecord(rec.status) ?? {};
+  const up = asRecord(st.uploading_phase) ?? {};
+  const pr = asRecord(st.processing_phase) ?? {};
+  const pu = asRecord(st.publishing_phase) ?? {};
+  const errs = [asRecord(pr.error)?.message, asRecord(up.error)?.message, asRecord(pu.error)?.message].filter((x): x is string => typeof x === "string" && x !== "");
+  const permalinkRaw = asText(rec.permalink_url) ?? "";
+  return {
+    videoStatus: asText(st.video_status) ?? "",
+    uploading: asText(up.status) ?? "",
+    processing: asText(pr.status) ?? "",
+    publishing: asText(pu.status) ?? "",
+    publishStatus: asText(pu.publish_status) ?? "",
+    publishTime: asText(pu.publish_time),
+    error: errs.length ? errs.join("; ") : asText(st.video_status) === "error" ? "Facebook báo video lỗi khi xử lý." : null,
+    permalink: permalinkRaw.startsWith("/") ? `https://www.facebook.com${permalinkRaw}` : permalinkRaw,
+  };
+}
+
+/** Bước 4 — hỏi trạng thái (CHỈ ĐỌC, bằng token fanpage). */
+export async function readReelStatus(pageId: string, videoId: string): Promise<ReelStatus> {
+  const token = await pageAccessToken(pageId);
+  return parseReelStatus(await graphGet(assertFbId(videoId, "id video"), { fields: "status,permalink_url" }, token));
 }

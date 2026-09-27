@@ -16,7 +16,9 @@ import { env } from "@/lib/env";
 import { organizationStateKey } from "@/lib/platform/process-state";
 import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
 import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
-import { enqueueVariantProduction, handleClip, handleQc, handleRender, handleScript, handleTts, scriptOf, type HandlerCtx } from "@/lib/video-scale/handlers";
+import { enqueueCaptionJob, enqueueVariantProduction, handleClip, handleQc, handleRender, handleScript, handleTts, scriptOf, type HandlerCtx } from "@/lib/video-scale/handlers";
+import { writeCaptions } from "@/lib/video-scale/caption";
+import { FACEBOOK_REEL_API, handleCaption, handlePublishReel, type ReelApi } from "@/lib/video-scale/publish";
 import type { AngleStat } from "@/lib/video-scale/plan";
 import { videoProviderFor } from "@/lib/video-scale/providers";
 import type { VideoProvider } from "@/lib/video-scale/providers/types";
@@ -54,6 +56,8 @@ export type VideoScaleDeps = {
   /** Sổ học theo góc — PR đo lường điền; mặc định rỗng (mọi góc ngang nhau). */
   angleStats?: (db: Db, productId: string) => Promise<AngleStat[]>;
   lessons?: (db: Db, productId: string) => Promise<string[]>;
+  captionWriter?: typeof writeCaptions;
+  reel?: ReelApi;
 };
 
 export function resolveDeps(d: VideoScaleDeps = {}): Required<VideoScaleDeps> {
@@ -67,6 +71,8 @@ export function resolveDeps(d: VideoScaleDeps = {}): Required<VideoScaleDeps> {
     negativePrompt: d.negativePrompt ?? VEO_NEGATIVE_PROMPT,
     angleStats: d.angleStats ?? (async () => []),
     lessons: d.lessons ?? (async () => []),
+    captionWriter: d.captionWriter ?? writeCaptions,
+    reel: d.reel ?? FACEBOOK_REEL_API,
   };
 }
 
@@ -162,6 +168,8 @@ const HANDLERS: Record<VideoJobKind, (ctx: HandlerCtx, job: VideoJobRow) => Prom
   TTS: handleTts,
   RENDER: handleRender,
   QC: handleQc,
+  CAPTION: handleCaption,
+  PUBLISH_REEL: handlePublishReel,
 };
 
 export type TickResult = { handled: number; byKind: Record<string, number>; errors: string[]; purged: number };
@@ -285,8 +293,10 @@ export async function approveVideoVariant(db: Db, variantId: string, actor: Acto
     .update(V)
     .set({ status: "APPROVED", reviewedByUserId: actor.id, reviewedBy: actor.label, reviewedAt: now, reviewNote: note.trim().slice(0, 500), autoApproved: false })
     .where(and(eq(V.id, variantId), eq(V.status, "REVIEW"), inArray(V.qcVerdict, ["PASS", "FLAG"]), isNotNull(V.finalAssetId)))
-    .returning({ runId: V.runId });
+    .returning({ runId: V.runId, isTest: V.isTest });
   if (!rows[0]) return { ok: false, error: "Chỉ duyệt được video đang CHỜ DUYỆT và không bị QC loại." };
+  // Video thật vừa được duyệt ⇒ máy viết content ngay (dữ liệu thử không bao giờ đăng nên không tốn lượt viết).
+  if (!rows[0].isTest) await enqueueCaptionJob(db, { id: variantId, runId: rows[0].runId }, actor.id);
   await refreshRunStatus(db, rows[0].runId);
   return { ok: true };
 }

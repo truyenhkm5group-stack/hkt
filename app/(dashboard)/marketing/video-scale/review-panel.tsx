@@ -4,6 +4,10 @@ import type { VariantCard } from "@/lib/queries/video-scale";
 import { cn } from "@/lib/utils";
 import { ReviewActions } from "./review-actions";
 import { RemakeVariantButton } from "./small-actions";
+import { ContentEditor } from "./content-editor";
+import { captionOptionsOf } from "@/lib/video-scale/publish";
+import { VIDEO_POST_STATUS_LABEL, type VideoPostStatus } from "@/lib/constants/video-scale";
+import { formatDateTime } from "@/lib/format";
 
 const VERDICT_LABEL = { PASS: "QC đạt", FLAG: "QC nghi ngờ — xem kỹ", FAIL: "QC loại" } as const;
 
@@ -35,7 +39,7 @@ function QcBlock({ v }: { v: VariantCard }) {
   );
 }
 
-function VariantBlock({ v, canEdit, canSpend }: { v: VariantCard; canEdit: boolean; canSpend: boolean }) {
+function VariantBlock({ v, canEdit, canSpend, pageLabel }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null }) {
   return (
     <article className="space-y-3 rounded-lg border p-3">
       <header className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -101,22 +105,37 @@ function VariantBlock({ v, canEdit, canSpend }: { v: VariantCard; canEdit: boole
         </p>
       ) : null}
       {canEdit && v.status === "REVIEW" ? <ReviewActions variantId={v.id} /> : null}
+      {v.post ? (
+        <p className="text-[12.5px]">
+          Reel: <b>{VIDEO_POST_STATUS_LABEL[v.post.status as VideoPostStatus] ?? v.post.status}</b>
+          {v.post.publishedAt ? ` · ${formatDateTime(v.post.publishedAt)}` : v.post.publishAt ? ` · hẹn ${formatDateTime(v.post.publishAt)}` : ""}
+          {v.post.permalink ? (
+            <a className="ml-1 text-primary underline" href={v.post.permalink} target="_blank" rel="noreferrer">
+              mở
+            </a>
+          ) : null}
+          {v.post.error ? <span className="block text-destructive">{v.post.error}</span> : null}
+        </p>
+      ) : null}
+      {v.status === "APPROVED" && !v.isTest && (!v.post || ["FAILED", "CANCELLED"].includes(v.post.status)) ? (
+        <ContentEditor variantId={v.id} options={captionOptionsOf(v.captionOptions)} caption={v.caption} captionState={v.captionState} captionBy={v.captionBy} canPost={canEdit && Boolean(pageLabel)} pageLabel={pageLabel} />
+      ) : null}
       {canSpend && (v.status === "QC_FAILED" || v.status === "REJECTED") ? <RemakeVariantButton variantId={v.id} /> : null}
     </article>
   );
 }
 
 /** Tab "Duyệt video": chờ duyệt ở trên, đã quyết gần đây ở dưới. */
-export function ReviewPanel({ review, decided, canEdit, canSpend }: { review: VariantCard[]; decided: VariantCard[]; canEdit: boolean; canSpend: boolean }) {
+export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend }: { review: VariantCard[]; decided: VariantCard[]; pageOf: Record<string, string | null>; canEdit: boolean; canSpend: boolean }) {
   return (
     <div className="space-y-6">
       <section className="space-y-3">
         <h2 className="text-[14px] font-semibold">Chờ duyệt ({review.length})</h2>
-        {review.length === 0 ? <p className="text-[13px] text-muted-foreground">Không có video chờ duyệt.</p> : <div className="grid gap-3 lg:grid-cols-2">{review.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} />)}</div>}
+        {review.length === 0 ? <p className="text-[13px] text-muted-foreground">Không có video chờ duyệt.</p> : <div className="grid gap-3 lg:grid-cols-2">{review.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} />)}</div>}
       </section>
       <section className="space-y-3">
         <h2 className="text-[14px] font-semibold">Đã quyết gần đây</h2>
-        {decided.length === 0 ? <p className="text-[13px] text-muted-foreground">Chưa có.</p> : <div className="grid gap-3 lg:grid-cols-2">{decided.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} />)}</div>}
+        {decided.length === 0 ? <p className="text-[13px] text-muted-foreground">Chưa có.</p> : <div className="grid gap-3 lg:grid-cols-2">{decided.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} />)}</div>}
       </section>
     </div>
   );

@@ -109,8 +109,8 @@ export const VIDEO_VARIANT_STATUS_LABEL: Record<VideoVariantStatus, string> = {
   CANCELLED: "Đã huỷ",
 };
 
-/** Loại việc trong hàng đợi. PR sau thêm `PUBLISH_REEL` · `CREATE_AD` · `METRICS` — mở rộng danh sách, không đổi nghĩa. */
-export const VIDEO_JOB_KINDS = ["SCRIPT", "CLIP", "TTS", "RENDER", "QC"] as const;
+/** Loại việc trong hàng đợi. Mở rộng danh sách, không đổi nghĩa một loại đã có. */
+export const VIDEO_JOB_KINDS = ["SCRIPT", "CLIP", "TTS", "RENDER", "QC", "CAPTION", "PUBLISH_REEL"] as const;
 export type VideoJobKind = (typeof VIDEO_JOB_KINDS)[number];
 
 export const VIDEO_JOB_KIND_LABEL: Record<VideoJobKind, string> = {
@@ -119,6 +119,8 @@ export const VIDEO_JOB_KIND_LABEL: Record<VideoJobKind, string> = {
   TTS: "Giọng đọc",
   RENDER: "Hậu kỳ",
   QC: "Kiểm chất lượng",
+  CAPTION: "Viết content",
+  PUBLISH_REEL: "Đăng Reel",
 };
 
 /**
@@ -238,10 +240,10 @@ export const VIDEO_SCALE_HARD_LIMITS = {
 export const VIDEO_ASSET_CHUNK_BYTES = 2 * 1024 * 1024;
 
 /** Số lần thử TỰ ĐỘNG tối đa, theo loại việc. Chỉ lỗi `TRANSIENT` / `TIMEOUT` được tự thử lại. */
-export const VIDEO_JOB_MAX_ATTEMPTS: Record<VideoJobKind, number> = { SCRIPT: 2, CLIP: 3, TTS: 3, RENDER: 2, QC: 3 };
+export const VIDEO_JOB_MAX_ATTEMPTS: Record<VideoJobKind, number> = { SCRIPT: 2, CLIP: 3, TTS: 3, RENDER: 2, QC: 3, CAPTION: 2, PUBLISH_REEL: 4 };
 
 /** Trần thời gian MỘT lượt cầm việc (ms). Quá ⇒ lượt sau coi là chết và nhả (`TIMEOUT`). */
-export const VIDEO_JOB_LEASE_MS: Record<VideoJobKind, number> = { SCRIPT: 4 * 60_000, CLIP: 3 * 60_000, TTS: 2 * 60_000, RENDER: 8 * 60_000, QC: 3 * 60_000 };
+export const VIDEO_JOB_LEASE_MS: Record<VideoJobKind, number> = { SCRIPT: 4 * 60_000, CLIP: 3 * 60_000, TTS: 2 * 60_000, RENDER: 8 * 60_000, QC: 3 * 60_000, CAPTION: 3 * 60_000, PUBLISH_REEL: 6 * 60_000 };
 
 /** Trần tổng thời gian chờ nhà cung cấp cho một clip — Veo thường 1–6 phút; quá 20 phút coi như hỏng. */
 export const VIDEO_CLIP_DEADLINE_MS = 20 * 60_000;
@@ -424,3 +426,98 @@ export function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number 
 export function fakeProviderAllowed(nodeEnv: string | undefined, flag: string | undefined): boolean {
   return nodeEnv !== "production" && flag === "1";
 }
+
+// ───────────────────────────── CONTENT + ĐĂNG REEL (PR 2) ─────────────────────────────
+
+/** Chế độ đăng của một FANPAGE. Fanpage chưa có dòng cấu hình = `MANUAL_REVIEW` (mặc định an toàn). */
+export const VIDEO_PUBLISH_MODES = ["MANUAL_REVIEW", "AUTO_PUBLISH"] as const;
+export type VideoPublishMode = (typeof VIDEO_PUBLISH_MODES)[number];
+
+export const VIDEO_PUBLISH_MODE_LABEL: Record<VideoPublishMode, string> = {
+  MANUAL_REVIEW: "Chờ người bấm đăng từng bài",
+  AUTO_PUBLISH: "Tự đăng video đã duyệt (trong trần bài / ngày)",
+};
+
+/**
+ * Chế độ đăng THỰC của một mã trên fanpage đã gán. Tự đăng chỉ khi fanpage bật `AUTO_PUBLISH` VÀ mã không ép
+ * `MANUAL_REVIEW`. Thiếu dòng cấu hình fanpage ⇒ chờ người. Hàm THUẦN.
+ */
+export function effectivePublishMode(page: { publishMode: string } | null, sku: { publishMode: string | null } | null): VideoPublishMode {
+  if (!page || page.publishMode !== "AUTO_PUBLISH") return "MANUAL_REVIEW";
+  if (sku?.publishMode === "MANUAL_REVIEW") return "MANUAL_REVIEW";
+  return "AUTO_PUBLISH";
+}
+
+export const VIDEO_POST_STATUSES = ["QUEUED", "UPLOADING", "PROCESSING", "SCHEDULED", "PUBLISHED", "FAILED", "CANCELLED"] as const;
+export type VideoPostStatus = (typeof VIDEO_POST_STATUSES)[number];
+
+export const VIDEO_POST_STATUS_LABEL: Record<VideoPostStatus, string> = {
+  QUEUED: "Chờ đăng",
+  UPLOADING: "Đang tải lên",
+  PROCESSING: "Facebook đang xử lý",
+  SCHEDULED: "Đã hẹn giờ",
+  PUBLISHED: "Đã đăng",
+  FAILED: "Lỗi",
+  CANCELLED: "Đã huỷ",
+};
+
+/** Khung Reels của Facebook (developers.facebook.com/docs/video-api/guides/reels-publishing, đọc 27/09/2026). */
+export const REEL_LIMITS = {
+  minSeconds: 3,
+  maxSeconds: 90,
+  /** Hẹn giờ: ≥ 10 phút tới, ≤ 29 ngày. */
+  scheduleMinLeadMs: 10 * 60_000,
+  scheduleMaxLeadMs: 29 * 86_400_000,
+  /** Nhịp hỏi trạng thái Reel sau khi gửi. */
+  pollMs: 30_000,
+  /** Quá thời gian này mà Facebook chưa xử lý xong ⇒ báo lỗi để người xem. */
+  processingDeadlineMs: 45 * 60_000,
+} as const;
+
+/** Lỗi hẹn giờ, hoặc `null` nếu được. `null` giờ hẹn = đăng ngay. Hàm THUẦN. */
+export function scheduleProblem(publishAt: Date | null, now: Date): string | null {
+  if (!publishAt) return null;
+  const lead = publishAt.getTime() - now.getTime();
+  if (lead < REEL_LIMITS.scheduleMinLeadMs) return "Giờ hẹn phải cách hiện tại ít nhất 10 phút (luật Facebook).";
+  if (lead > REEL_LIMITS.scheduleMaxLeadMs) return "Facebook chỉ cho hẹn trong vòng 29 ngày.";
+  return null;
+}
+
+export const CAPTION_LIMITS = { hookMaxChars: 90, bodyMaxChars: 700, ctaMaxChars: 80, hashtagMin: 2, hashtagMax: 6, hashtagMaxChars: 30, totalMaxChars: 1500, options: 3 } as const;
+
+export type CaptionOption = { hook: string; body: string; cta: string; hashtags: string[] };
+
+/** Ghép một phương án thành content đăng. Hàm THUẦN. */
+export function composeCaption(o: CaptionOption): string {
+  const tags = o.hashtags.map((h) => `#${h.replace(/^#+/, "").replace(/\s+/g, "")}`).filter((h) => h.length > 1);
+  return [o.hook.trim(), o.body.trim(), o.cta.trim(), tags.join(" ")].filter(Boolean).join("\n\n");
+}
+
+// ───────────────────────────── DỪNG KHẨN CẤP TOÀN MODULE ─────────────────────────────
+
+/**
+ * Công tắc DỪNG MỌI TỰ ĐỘNG của Video Scale (đăng Reel, tạo / bật quảng cáo, tăng ngân sách) — `settings` khoá này.
+ * Tách khỏi `ads.write.kill` (công tắc của MỌI đường ghi quảng cáo): dừng Video Scale không được dừng vòng mẫu ảnh đang
+ * chạy của marketer. Cả hai cùng áp: công tắc quảng cáo kéo thì Video Scale cũng không ghi được Facebook.
+ *
+ * FAIL-CLOSED: không đọc được / JSON hỏng / `paused` không phải đúng `true`·`false` ⇒ coi như ĐANG DỪNG. Không có dòng
+ * nào = chưa ai kéo = chạy.
+ */
+export const VIDEO_AUTOMATION_KEY = "videoScale.automation";
+
+export type VideoAutomationState = { paused: boolean; reason: string; by: string; at: string; unreadable: boolean };
+
+export function parseVideoAutomation(raw: { ok: true; value: string | null } | { ok: false; error: string }): VideoAutomationState {
+  if (!raw.ok) return { paused: true, reason: `Không đọc được công tắc: ${raw.error}`, by: "", at: "", unreadable: true };
+  if (raw.value === null) return { paused: false, reason: "", by: "", at: "", unreadable: false };
+  try {
+    const o = JSON.parse(raw.value) as Record<string, unknown>;
+    if (o.paused !== true && o.paused !== false) return { paused: true, reason: "Công tắc hỏng (paused không phải true/false) — coi như ĐANG DỪNG.", by: "", at: "", unreadable: true };
+    return { paused: o.paused, reason: typeof o.reason === "string" ? o.reason : "", by: typeof o.by === "string" ? o.by : "", at: typeof o.at === "string" ? o.at : "", unreadable: false };
+  } catch {
+    return { paused: true, reason: "Công tắc hỏng (JSON) — coi như ĐANG DỪNG.", by: "", at: "", unreadable: true };
+  }
+}
+
+/** Quyền Facebook mà việc đăng Reel cần (tài liệu Reels Publishing). `read_insights` cho số đo bài (PR 4). */
+export const FB_PAGE_PUBLISH_SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts"] as const;

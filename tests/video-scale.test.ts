@@ -234,6 +234,8 @@ async function cleanup(db: Db) {
   if (ids.length) {
     // Thứ tự theo khoá ngoại, KHÔNG gỡ `final_asset_id` bằng UPDATE — CHECK duyệt (đúng) chặn biến thể ĐÃ DUYỆT mất bản hoàn chỉnh.
     await db.delete(schema.videoScaleJobs).where(inArray(schema.videoScaleJobs.runId, ids));
+    const vIds = (await db.select({ id: schema.videoScaleVariants.id }).from(schema.videoScaleVariants).where(inArray(schema.videoScaleVariants.runId, ids))).map((v) => v.id);
+    if (vIds.length) await db.delete(schema.videoScalePosts).where(inArray(schema.videoScalePosts.variantId, vIds));
     await db.delete(schema.videoScaleVariants).where(inArray(schema.videoScaleVariants.runId, ids));
     await db.delete(schema.videoScaleAssets).where(inArray(schema.videoScaleAssets.runId, ids));
     await db.delete(schema.videoScaleRuns).where(inArray(schema.videoScaleRuns.id, ids));

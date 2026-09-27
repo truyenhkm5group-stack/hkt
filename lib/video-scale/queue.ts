@@ -30,6 +30,7 @@ export type EnqueueInput = {
   deadlineAt?: Date | null;
   createdByUserId?: string | null;
   nextRunAt?: Date;
+  postId?: string | null;
 };
 
 /** Tạo việc nếu CHƯA có việc cùng khoá. Trả id của việc (mới hoặc đã có). */
@@ -46,6 +47,7 @@ export async function enqueueJob(db: Db, input: EnqueueInput): Promise<string> {
       request: input.request ?? {},
       deadlineAt: input.deadlineAt ?? null,
       createdByUserId: input.createdByUserId ?? null,
+      postId: input.postId ?? null,
       maxAttempts: VIDEO_JOB_MAX_ATTEMPTS[input.kind],
       nextRunAt: input.nextRunAt ?? new Date(),
     })
