@@ -174,16 +174,43 @@ export const VIDEO_QC_CHECK_LABEL: Record<VideoQcCheck, string> = {
 // ───────────────────────────── NHÀ CUNG CẤP VIDEO ─────────────────────────────
 
 /**
- * Nhà cung cấp có API chính thức. `VEO` = Veo trên Gemini API (ai.google.dev). OpenAI Sora KHÔNG có mặt: API video của
+ * Nhà cung cấp có API chính thức. `VEO` = Veo trên Gemini API (ai.google.dev). `OMNI` = Gemini Omni Flash trên CÙNG Gemini
+ * API, cùng khoá `GEMINI_API_KEY` (Interactions API — ai.google.dev/gemini-api/docs/omni, đọc 28/09/2026). OpenAI Sora KHÔNG có mặt: API video của
  * OpenAI đã đóng ngày 24/09/2026 (developers.openai.com/api/docs/guides/video-generation, đọc 27/09/2026), và kể cả trước
  * đó nó từ chối ảnh đầu vào có mặt người — ảnh người mẫu mặc váy là đúng loại ảnh shop có. `SEEDANCE` để dành chỗ:
  * thêm adapter là thêm một tệp trong `lib/video-scale/providers/` và một dòng ở `videoProviderFor`, không sửa luồng.
  */
-export const VIDEO_PROVIDERS = ["VEO", "FAKE"] as const;
+export const VIDEO_PROVIDERS = ["VEO", "OMNI", "FAKE"] as const;
+/** Nhà cung cấp người chọn được trên màn hình — bộ sinh GIẢ không bao giờ nằm ở đây. */
+export const SELECTABLE_VIDEO_PROVIDERS = ["VEO", "OMNI"] as const;
+export const VIDEO_PROVIDER_LABEL: Record<VideoProviderId, string> = {
+  VEO: "Veo 3.1 (Gemini API)",
+  OMNI: "Gemini Omni Flash (Gemini API)",
+  FAKE: "Bộ sinh GIẢ (chỉ ngoài production)",
+};
 export type VideoProviderId = (typeof VIDEO_PROVIDERS)[number];
 
 export const VEO_MODELS = ["veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview", "veo-3.1-generate-preview"] as const;
 export type VeoModel = (typeof VEO_MODELS)[number];
+
+export const OMNI_MODELS = ["gemini-omni-1.1-flash"] as const;
+export type OmniModel = (typeof OMNI_MODELS)[number];
+
+export type VideoModel = VeoModel | OmniModel;
+export const VIDEO_MODELS: readonly VideoModel[] = [...VEO_MODELS, ...OMNI_MODELS];
+
+/** Model thuộc nhà cung cấp nào — model lạ ⇒ `null`. Hàm THUẦN. */
+export function providerOfModel(model: string): "VEO" | "OMNI" | null {
+  if ((VEO_MODELS as readonly string[]).includes(model)) return "VEO";
+  if ((OMNI_MODELS as readonly string[]).includes(model)) return "OMNI";
+  return null;
+}
+
+/**
+ * Omni KHÔNG có tham số độ dài đã công bố (tài liệu ghi 3–10 giây, không có ví dụ trường `duration`) — độ dài mong muốn đi
+ * vào câu lệnh, và TIỀN GIỮ CHỖ tính theo độ dài TỐI ĐA để trần ngày không bao giờ bị vượt vì một clip dài hơn dự kiến.
+ */
+export const OMNI_MAX_CLIP_SECONDS = 10;
 
 export const VIDEO_RESOLUTIONS = ["720p", "1080p"] as const;
 export type VideoResolution = (typeof VIDEO_RESOLUTIONS)[number];
@@ -197,7 +224,10 @@ export type ClipSeconds = (typeof VEO_CLIP_SECONDS)[number];
  * TÍNH theo bảng giá, không phải hoá đơn: Gemini API không trả số tiền trong phản hồi. Model không có trong bảng ⇒ giá
  * CHƯA BIẾT ⇒ không sinh được (không áp được trần tiền thì không chi).
  */
-export const VEO_PRICE_USD_PER_SECOND: Readonly<Record<VeoModel, Readonly<Record<VideoResolution, number>>>> = {
+export const VEO_PRICE_USD_PER_SECOND: Readonly<Record<VideoModel, Readonly<Partial<Record<VideoResolution, number>>>>> = {
+  // Omni tính theo TOKEN ra: 5.792 token / giây video 720p × 17,50 USD / 1 triệu token ≈ 0,1014 USD / giây. Bảng chính thức
+  // KHÔNG ghi số token của 1080p ⇒ 1080p để trống ⇒ giá CHƯA BIẾT ⇒ không sinh (không áp được trần thì không chi).
+  "gemini-omni-1.1-flash": { "720p": 0.1014 },
   "veo-3.1-generate-preview": { "720p": 0.4, "1080p": 0.4 },
   "veo-3.1-fast-generate-preview": { "720p": 0.1, "1080p": 0.12 },
   "veo-3.1-lite-generate-preview": { "720p": 0.05, "1080p": 0.08 },
@@ -205,9 +235,25 @@ export const VEO_PRICE_USD_PER_SECOND: Readonly<Record<VeoModel, Readonly<Record
 
 export const VIDEO_PRICE_SOURCE = "Bảng giá công bố Gemini API (ai.google.dev/gemini-api/docs/pricing, đọc 27/09/2026) — ước tính, không phải hoá đơn.";
 
+/**
+ * Số giây GIỮ CHỖ trước lời gọi tạo: Veo tính đúng độ dài xin; Omni có thể trả tới 10 giây ⇒ giữ chỗ 10. Hàm THUẦN.
+ */
+export function reserveSecondsFor(provider: VideoProviderId, clipSeconds: number): number {
+  return provider === "OMNI" ? OMNI_MAX_CLIP_SECONDS : clipSeconds;
+}
+
+/**
+ * Số giây GHI TIỀN sau khi có clip: Veo = độ dài xin; Omni = độ dài ĐO ĐƯỢC của clip (tính tiền theo giây video ra), không đo
+ * được ⇒ độ dài tối đa (ước tính phía cao, không bao giờ phía thấp). Hàm THUẦN.
+ */
+export function billedSecondsFor(provider: VideoProviderId, clipSeconds: number, probedSec: number | null): number {
+  if (provider !== "OMNI") return clipSeconds;
+  return probedSec !== null && Number.isFinite(probedSec) && probedSec > 0 ? Math.min(probedSec, OMNI_MAX_CLIP_SECONDS) : OMNI_MAX_CLIP_SECONDS;
+}
+
 /** Giá một clip theo bảng. `null` = CHƯA BIẾT. Hàm THUẦN. */
 export function clipCostUsd(model: string, resolution: VideoResolution, seconds: number): number | null {
-  const row = (VEO_PRICE_USD_PER_SECOND as Record<string, Record<VideoResolution, number> | undefined>)[model];
+  const row = (VEO_PRICE_USD_PER_SECOND as Record<string, Partial<Record<VideoResolution, number>> | undefined>)[model];
   const per = row?.[resolution];
   if (per === undefined || !Number.isFinite(seconds) || seconds <= 0) return null;
   return Math.round(per * seconds * 1_000_000) / 1_000_000;
@@ -267,7 +313,7 @@ export type VideoScaleConfig = {
   /** Công tắc mềm: tắt ⇒ lượt chạy không bắt đầu việc tốn tiền mới (việc đang chờ Veo vẫn được hỏi kết quả để không mất clip đã trả tiền). */
   enabled: boolean;
   provider: VideoProviderId;
-  model: VeoModel;
+  model: VideoModel;
   resolution: VideoResolution;
   clipSeconds: ClipSeconds;
   scenesPerVariant: number;
@@ -351,15 +397,21 @@ export function normalizeVideoScaleConfig(raw: unknown): VideoScaleConfig {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const d = DEFAULT_VIDEO_SCALE_CONFIG;
   const L = VIDEO_SCALE_HARD_LIMITS;
-  const model = (VEO_MODELS as readonly string[]).includes(String(r.model)) ? (r.model as VeoModel) : d.model;
-  const resolution = (VIDEO_RESOLUTIONS as readonly string[]).includes(String(r.resolution)) ? (r.resolution as VideoResolution) : d.resolution;
+  const provider: VideoProviderId = r.provider === "FAKE" ? "FAKE" : r.provider === "OMNI" ? "OMNI" : "VEO";
+  // Model phải THUỘC nhà cung cấp; lệch ⇒ model mặc định của nhà cung cấp đó (không gửi model Veo sang Omni và ngược lại).
+  const want = providerOfModel(String(r.model));
+  const model: VideoModel =
+    provider === "OMNI" ? (want === "OMNI" ? (r.model as OmniModel) : OMNI_MODELS[0]) : want === "VEO" ? (r.model as VeoModel) : (d.model as VeoModel);
+  // Omni: bảng giá chính thức chỉ có 720p ⇒ ép 720p (1080p sẽ là giá CHƯA BIẾT và bị chặn ở từng clip).
+  const resolution: VideoResolution =
+    provider === "OMNI" ? "720p" : (VIDEO_RESOLUTIONS as readonly string[]).includes(String(r.resolution)) ? (r.resolution as VideoResolution) : d.resolution;
   let clipSeconds = (VEO_CLIP_SECONDS as readonly number[]).includes(Number(r.clipSeconds)) ? (Number(r.clipSeconds) as ClipSeconds) : d.clipSeconds;
   // Veo: 1080p bắt buộc 8 giây — cấu hình trái luật thì theo luật của nhà cung cấp, không gửi một yêu cầu chắc chắn bị từ chối.
-  if (resolution === "1080p") clipSeconds = 8;
+  if (provider !== "OMNI" && resolution === "1080p") clipSeconds = 8;
   const cap = typeof r.dailyUsdCap === "number" ? r.dailyUsdCap : typeof r.dailyUsdCap === "string" && r.dailyUsdCap.trim() !== "" ? Number(r.dailyUsdCap) : NaN;
   return {
     enabled: r.enabled === true,
-    provider: r.provider === "FAKE" ? "FAKE" : "VEO",
+    provider,
     model,
     resolution,
     clipSeconds,

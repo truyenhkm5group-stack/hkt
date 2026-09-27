@@ -15,7 +15,7 @@ import { FB_PAGE_PUBLISH_SCOPES } from "@/lib/constants/video-scale";
 import { readVideoAutomation } from "@/lib/video-scale/publish";
 import { PublishPanel, type PublishReadiness } from "./publish-panel";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
-import { getVideoScaleReport } from "@/lib/queries/video-scale";
+import { getVideoScaleReport, modelComparison } from "@/lib/queries/video-scale";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
 import { lastOptimizeAt } from "@/lib/video-scale/optimize";
@@ -175,7 +175,7 @@ async function reportTab(raw: SearchParams, canOptimize: boolean) {
   const key = REPORT_PERIODS.some((p) => p.key === param(raw, "period")) ? param(raw, "period") : "30d";
   const period = resolvePeriod({ period: key }, "30d");
   const includeTest = param(raw, "test") === "1";
-  const [skus, nominal, beat] = await Promise.all([getVideoScaleReport(db, { includeTest }), getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false), lastOptimizeAt(db)]);
+  const [skus, nominal, beat, models] = await Promise.all([getVideoScaleReport(db, { includeTest }), getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false), lastOptimizeAt(db), modelComparison(db)]);
   const ids = new Set(skus.map((s) => s.productId));
   const profit: Record<string, SkuProfit> = {};
   for (const r of nominal.rows) {
@@ -190,6 +190,7 @@ async function reportTab(raw: SearchParams, canOptimize: boolean) {
       includeTest={includeTest}
       lastOptimizeAt={beat}
       canOptimize={canOptimize}
+      models={models}
     />
   );
 }

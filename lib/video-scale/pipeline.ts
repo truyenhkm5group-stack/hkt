@@ -6,6 +6,7 @@ import {
   VIDEO_PROMPT_VERSION,
   VIDEO_SCALE_CONFIG_KEY,
   VIDEO_SCALE_HARD_LIMITS,
+  clipCostUsd,
   fakeProviderAllowed,
   normalizeVideoScaleConfig,
   type VideoJobKind,
@@ -103,9 +104,10 @@ export async function readVideoScaleConfig(db: Db): Promise<VideoScaleConfig> {
 export async function videoScaleBlockers(cfg: VideoScaleConfig, ff: string | null): Promise<string[]> {
   const out: string[] = [];
   if (!cfg.enabled) out.push("Video Scale đang TẮT (tab Cấu hình → Bật).");
-  if (cfg.provider === "VEO" && !env.gemini.apiKey) out.push("Máy chủ ERP chưa có GEMINI_API_KEY (GitHub Secret GEMINI_API_KEY → chạy lại deploy).");
+  if (cfg.provider !== "FAKE" && !env.gemini.apiKey) out.push("Máy chủ ERP chưa có GEMINI_API_KEY (GitHub Secret GEMINI_API_KEY → chạy lại deploy) — Veo và Omni dùng chung khoá này.");
   if (cfg.provider === "FAKE" && !fakeProviderAllowed(process.env.NODE_ENV, env.videoScale.fakeProviderFlag)) out.push("Bộ sinh GIẢ chỉ dùng ngoài production (VIDEO_PROVIDER_FAKE=1).");
-  if (cfg.provider === "VEO" && cfg.dailyUsdCap === null) out.push("Chưa khai trần chi sinh video / ngày (USD).");
+  if (cfg.provider !== "FAKE" && cfg.dailyUsdCap === null) out.push("Chưa khai trần chi sinh video / ngày (USD).");
+  if (cfg.provider !== "FAKE" && clipCostUsd(cfg.model, cfg.resolution, 1) === null) out.push(`Model ${cfg.model} ở ${cfg.resolution} chưa có trong bảng giá — không áp được trần tiền nên không sinh.`);
   if (!env.openaiRest.apiKey) out.push("Máy chủ ERP chưa có OPENAI_API_KEY (viết kịch bản + QC hình ảnh).");
   if (!ff) out.push("Máy chủ ERP chưa có ffmpeg (hậu kỳ).");
   return out;

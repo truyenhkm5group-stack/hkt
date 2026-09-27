@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, TTS_VOICES, VEO_MODELS, VIDEO_ANGLES, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
+import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, SELECTABLE_VIDEO_PROVIDERS, TTS_VOICES, VIDEO_ANGLES, VIDEO_MODELS, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
 const id = z.string().trim().min(1).max(80);
 
@@ -22,7 +22,9 @@ export const videoIdSchema = z.object({ id });
 
 export const videoConfigSchema = z.object({
   enabled: z.boolean(),
-  model: z.enum(VEO_MODELS),
+  /** Không có FAKE: bộ sinh giả không chọn được từ màn hình. */
+  provider: z.enum(SELECTABLE_VIDEO_PROVIDERS).optional(),
+  model: z.string().refine((m) => (VIDEO_MODELS as readonly string[]).includes(m), "Model không có trong danh sách"),
   resolution: z.enum(["720p", "1080p"]),
   clipSeconds: z.coerce.number().int().refine((n) => [4, 6, 8].includes(n), "4, 6 hoặc 8 giây"),
   scenesPerVariant: z.coerce.number().int().min(1).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant),

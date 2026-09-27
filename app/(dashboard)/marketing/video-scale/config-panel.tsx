@@ -7,7 +7,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { saveVideoScaleConfigAction, toggleVideoMusicAction, uploadVideoMusicAction } from "@/lib/actions/video-scale";
-import { TTS_VOICES, VEO_MODELS, VEO_PRICE_USD_PER_SECOND, VIDEO_ADS_HARD_LIMITS, VIDEO_SCALE_HARD_LIMITS, type VideoScaleConfig } from "@/lib/constants/video-scale";
+import {
+  OMNI_MODELS,
+  SELECTABLE_VIDEO_PROVIDERS,
+  TTS_VOICES,
+  VEO_MODELS,
+  VEO_PRICE_USD_PER_SECOND,
+  VIDEO_ADS_HARD_LIMITS,
+  VIDEO_PROVIDER_LABEL,
+  VIDEO_SCALE_HARD_LIMITS,
+  clipCostUsd,
+  reserveSecondsFor,
+  type VideoScaleConfig,
+} from "@/lib/constants/video-scale";
 import type { MusicRow } from "@/lib/queries/video-scale";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -32,8 +44,15 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
   const [minOrders, setMinOrders] = useState(config.autoScaleMinOrders === null ? "" : String(config.autoScaleMinOrders));
   const [pending, start] = useTransition();
   const set = <K extends keyof VideoScaleConfig>(k: K, v: VideoScaleConfig[K]) => setC((x) => ({ ...x, [k]: v }));
-  const perSec = VEO_PRICE_USD_PER_SECOND[c.model][c.resolution];
-  const perVariant = perSec * c.clipSeconds * c.scenesPerVariant;
+  const isOmni = c.provider === "OMNI";
+  const models: readonly string[] = isOmni ? OMNI_MODELS : VEO_MODELS;
+  const priceOf = (m: string) => (VEO_PRICE_USD_PER_SECOND as Record<string, Partial<Record<string, number>>>)[m]?.[c.resolution];
+  const perSec = priceOf(c.model) ?? null;
+  const reserveSec = reserveSecondsFor(c.provider, c.clipSeconds);
+  const perClip = clipCostUsd(c.model, c.resolution, reserveSec);
+  const perVariant = perClip === null ? null : perClip * c.scenesPerVariant;
+  const pickProvider = (p: (typeof SELECTABLE_VIDEO_PROVIDERS)[number]) =>
+    setC((x) => ({ ...x, provider: p, model: p === "OMNI" ? OMNI_MODELS[0] : VEO_MODELS[0], resolution: p === "OMNI" ? "720p" : x.resolution }));
 
   const save = () =>
     start(async () => {
@@ -49,22 +68,32 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
         <Row label="Bật Video Scale" hint="Tắt ⇒ không bắt đầu clip mới (clip đang chờ vẫn được lấy về).">
           <input type="checkbox" checked={c.enabled} disabled={!canConfig} onChange={(e) => set("enabled", e.target.checked)} />
         </Row>
-        <Row label="Nhà cung cấp">
-          <span>{c.provider === "VEO" ? "Veo (Gemini API — khoá GEMINI_API_KEY)" : "Bộ sinh GIẢ (chỉ ngoài production)"}</span>
+        <Row label="Nhà cung cấp" hint="Veo và Omni dùng chung khoá GEMINI_API_KEY.">
+          {c.provider === "FAKE" ? (
+            <span>{VIDEO_PROVIDER_LABEL.FAKE}</span>
+          ) : (
+            <select className="h-8 rounded border px-2" value={c.provider} disabled={!canConfig} onChange={(e) => pickProvider(e.target.value as (typeof SELECTABLE_VIDEO_PROVIDERS)[number])}>
+              {SELECTABLE_VIDEO_PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {VIDEO_PROVIDER_LABEL[p]}
+                </option>
+              ))}
+            </select>
+          )}
         </Row>
-        <Row label="Model Veo">
+        <Row label="Model">
           <select className="h-8 rounded border px-2" value={c.model} disabled={!canConfig} onChange={(e) => set("model", e.target.value as VideoScaleConfig["model"])}>
-            {VEO_MODELS.map((m) => (
+            {models.map((m) => (
               <option key={m} value={m}>
-                {m} — {VEO_PRICE_USD_PER_SECOND[m][c.resolution]} USD/giây
+                {m} — {priceOf(m) === undefined ? "chưa có giá" : `${priceOf(m)} USD/giây`}
               </option>
             ))}
           </select>
         </Row>
-        <Row label="Độ phân giải clip">
-          <select className="h-8 rounded border px-2" value={c.resolution} disabled={!canConfig} onChange={(e) => set("resolution", e.target.value as VideoScaleConfig["resolution"])}>
+        <Row label="Độ phân giải clip" hint={isOmni ? "Omni: bảng giá chính thức chỉ có 720p — 1080p chưa biết giá nên không mở." : undefined}>
+          <select className="h-8 rounded border px-2" value={c.resolution} disabled={!canConfig || isOmni} onChange={(e) => set("resolution", e.target.value as VideoScaleConfig["resolution"])}>
             <option value="720p">720p</option>
-            <option value="1080p">1080p (bắt buộc 8 giây)</option>
+            {isOmni ? null : <option value="1080p">1080p (bắt buộc 8 giây)</option>}
           </select>
         </Row>
         <Row label="Giây mỗi cảnh · số cảnh">
@@ -86,7 +115,9 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
           </span>
         </Row>
         <p className="text-[12px] text-muted-foreground">
-          Ước tính theo bảng giá: {perVariant.toFixed(2)} USD / biến thể ({c.scenesPerVariant} × {c.clipSeconds} giây × {perSec} USD/giây).
+          {perVariant === null || perSec === null
+            ? "Model / độ phân giải này chưa có trong bảng giá — không sinh được (không áp được trần tiền)."
+            : `Giữ chỗ trong trần theo bảng giá: ${perVariant.toFixed(2)} USD / biến thể (${c.scenesPerVariant} cảnh × ${reserveSec} giây × ${perSec} USD/giây)${isOmni ? " — Omni tự quyết độ dài 3–10 giây nên giữ chỗ theo 10 giây, ghi tiền theo độ dài thật của clip" : ""}.`}
         </p>
         <Row label="Trần chi sinh video / ngày (USD)" hint={`Bắt buộc — để trống = KHÔNG sinh. Trần cứng ${VIDEO_SCALE_HARD_LIMITS.maxVideoUsdPerDay} USD.`}>
           <Input className="h-8 w-32" inputMode="decimal" value={cap} disabled={!canConfig} onChange={(e) => setCap(e.target.value)} placeholder="vd 10" />

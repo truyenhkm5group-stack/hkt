@@ -9,7 +9,9 @@ import {
   VIDEO_CLIP_DEADLINE_MS,
   VIDEO_POLL_INTERVAL_MS,
   VIDEO_SCALE_HARD_LIMITS,
+  billedSecondsFor,
   clipCostUsd,
+  reserveSecondsFor,
   normalizeVideoScaleConfig,
   outputSize,
   scriptTokens,
@@ -244,7 +246,7 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
     }
     if (polled.state === "RUNNING") {
       if (job.deadlineAt && now > job.deadlineAt) {
-        return void (await failOrRetryJob(db, job, now, `Veo chưa xong sau ${VIDEO_CLIP_DEADLINE_MS / 60_000} phút — bỏ lượt này (tiền giữ chỗ vẫn tính vào trần).`, "PERMANENT"));
+        return void (await failOrRetryJob(db, job, now, `Nhà cung cấp video chưa xong sau ${VIDEO_CLIP_DEADLINE_MS / 60_000} phút — bỏ lượt này (tiền giữ chỗ vẫn tính vào trần).`, "PERMANENT"));
       }
       return void (await waitJob(db, job, new Date(now.getTime() + VIDEO_POLL_INTERVAL_MS)));
     }
@@ -281,7 +283,8 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
       width: probe?.width ?? null,
       height: probe?.height ?? null,
     });
-    const cost = provider.id === "FAKE" ? 0 : clipCostUsd(snap.model, snap.resolution, snap.clipSeconds);
+    // Omni tính tiền theo giây video RA ⇒ ghi theo độ dài đo được; Veo theo độ dài xin.
+    const cost = provider.id === "FAKE" ? 0 : clipCostUsd(snap.model, snap.resolution, billedSecondsFor(provider.id, snap.clipSeconds, probe?.durationSec ?? null));
     await succeedJob(db, job, now, { outputAssetId: asset.id, costUsd: cost, costBasis: cost === null ? "" : "ESTIMATED", result: { bytes: asset.bytes, durationSec: probe?.durationSec ?? null } });
     return;
   }
@@ -292,7 +295,8 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
     return void (await failOrRetryJob(db, job, now, "Lượt trước đã gửi yêu cầu tạo clip nhưng không lưu được mã thao tác — có thể clip đã được tạo và tính tiền. Máy không tự gửi lại; bấm \"Thử lại\" nếu chấp nhận rủi ro trả tiền hai lần.", "AMBIGUOUS"));
   }
   if (!cfgNow.enabled) return void (await blockJob(db, job, "Video Scale đang TẮT ở Cấu hình — không bắt đầu clip mới.", new Date(now.getTime() + 15 * 60_000)));
-  const est = provider.id === "FAKE" ? 0 : clipCostUsd(snap.model, snap.resolution, snap.clipSeconds);
+  // Giữ chỗ theo độ dài TỐI ĐA nhà cung cấp có thể trả (Omni: 10 giây) — trần ngày không bao giờ bị vượt vì một clip dài hơn dự kiến.
+  const est = provider.id === "FAKE" ? 0 : clipCostUsd(snap.model, snap.resolution, reserveSecondsFor(provider.id, snap.clipSeconds));
   if (est === null) return void (await failOrRetryJob(db, job, now, `Model ${snap.model} chưa có trong bảng giá — không áp được trần tiền nên không sinh.`, "PERMANENT"));
   const day = vnDay(now);
   if (provider.id !== "FAKE") {
