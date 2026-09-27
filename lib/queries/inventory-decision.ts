@@ -61,6 +61,8 @@ export type InventoryDecisionRow = InventoryDecisionResult & {
   openPoQty: number;
   velocity: number;
   velocityTrimmed: boolean;
+  /** Bảng Hàng chậm xếp `RETURNED_OUT` — gửi đi mà không giao được món nào (vòng phản hồi tồn đọc cờ này). */
+  returnedOut: boolean;
   /** Nhịp hao kho ròng sau độ trễ hoàn — của Kế hoạch SX, để gộp nhiều mẫu mã bằng CÙNG `coverDaysOf`. */
   netVelocity: number;
   /** Độ trễ hoàn (ngày) Kế hoạch SX đã dùng; `null` = chưa đo được. */
@@ -237,6 +239,8 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
   const a = plan.assumptions;
   const shopReturnRate = plan.used.shopReturnRate;
   const lastSale = new Map(slow.rows.map((r) => [r.variantId, r.daysSinceLastSale]));
+  // Lớp "hoàn gần hết" đọc THẲNG từ bảng Hàng chậm — một phép xếp lớp, không xếp lại ở đây.
+  const returnedOut = new Set(slow.rows.filter((r) => r.risk === "RETURNED_OUT").map((r) => r.variantId));
   // Toàn shop đã có đơn kết thúc chưa — chưa có thì tỷ lệ hoàn là CHƯA BIẾT, không phải 0%.
   const shopFinished = plan.rows.reduce((t, r) => t + r.delivered + r.returned, 0);
   const now = Date.now();
@@ -302,6 +306,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       daysSinceLastSale,
       ageDays,
       slowRules: slow.rules,
+      returnedOut: returnedOut.has(r.variantId),
     });
 
     byDecision[decision.decision] += 1;
@@ -339,6 +344,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       openPoQty: openPo.qtyByVariant.get(r.variantId) ?? 0,
       velocity: Math.round(r.velocity * 100) / 100,
       velocityTrimmed: r.velocityTrimmed,
+      returnedOut: returnedOut.has(r.variantId),
       // Cùng độ tròn với `velocity` bên trên — gộp hai số khác độ tròn thì nhịp ròng có thể vượt nhịp gửi đi.
       netVelocity: Math.round(paceOfPlanRow(r).netVelocity * 100) / 100,
       returnLagDays: paceOfPlanRow(r).returnLagDays,

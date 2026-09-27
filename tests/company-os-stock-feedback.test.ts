@@ -9,6 +9,7 @@ import { OWNER_DIGEST_URGENT_KINDS } from "@/lib/constants/owner-digest";
 import { allowedKinds, OWNER_DECISION_KIND_SPEC, sourcesFor } from "@/lib/constants/owner-decisions";
 import {
   creativeGenHref,
+  returnsHref,
   deriveStockFeedback,
   manualGenPreselect,
   mergeStockFeedbackSuggestions,
@@ -54,6 +55,7 @@ function v(p: Partial<StockFeedbackVariant> & { variantId: string }): StockFeedb
     // Không khai nhịp ròng ⇒ bằng nhịp gửi đi, độ trễ hoàn chưa đo: `coverDaysOf` = khả dụng ÷ tốc độ.
     netVelocity: p.velocity ?? 0,
     returnLagDays: null,
+    returnedOut: false,
     leadTimeDays: 20,
     unitCost: 100_000,
     suggestedQty: 0,
@@ -102,6 +104,20 @@ export function testCompanyOsStockFeedbackPure() {
   // Agent V (27/09/2026): "Đủ bán" đi qua CÙNG `coverDaysOf` của Kế hoạch SX — sau độ trễ hoàn, kho hao theo nhịp ròng.
   const coTre = deriveStockFeedback(inp({ variants: [{ ...OVER, netVelocity: 0.5, returnLagDays: 10 }, DEAD] })).recommendations[0];
   assert.equal(datum(coTre, "Đủ bán")?.value, "190 ngày", "10 ngày hao đủ tốc độ gửi đi + 90 cái ÷ nhịp ròng 0,5");
+  // Agent V (27/09/2026): mẫu HOÀN GẦN HẾT được đối xử như hàng chết — việc chính là xem lý do hoàn, không
+  // phải làm creative mới; tốc độ gửi đi của nó không vào "Đủ bán"; lý do nói rõ phải xem lại chất lượng.
+  const HOAN = v({ variantId: "ve", decision: "CLEARANCE_CANDIDATE", available: 20, velocity: 3, sold30: 90, daysOfCover: 6.7, capitalFreeable: 2_000_000, returnedOut: true });
+  const hoan = deriveStockFeedback(inp({ variants: [OVER, HOAN] }));
+  assert.deepEqual(kinds(hoan), ["PUSH_STOCK"]);
+  const fh = hoan.recommendations[0];
+  assert.equal(fh.action.href, returnsHref("Q005"), "hoàn gần hết ⇒ việc chính là xem lý do hoàn của mã");
+  assert.equal(fh.action.href, "/reports/returns?period=90d&product=Q005");
+  assert.notEqual(fh.action.href, creativeGenHref("prod-1"), "KHÔNG làm creative mới là việc chính");
+  assert.ok(fh.what.includes("khách hoàn gần hết") && fh.what.includes("chất lượng"), fh.what);
+  assert.ok(fh.why.includes("khách hoàn gần hết") && fh.why.includes("chất lượng / mô tả"), fh.why);
+  assert.equal(datum(fh, "Đủ bán")?.value, "110 ngày", "(90 + 20) ÷ 1 — nhịp 3/ngày của mẫu hoàn gần hết KHÔNG vào đủ bán");
+  assert.ok(fh.basis.includes("RETURNED_OUT:ve"), "khoá đề xuất đổi khi lời khuyên đổi");
+  assert.equal(returnsHref(""), "/reports/returns?period=90d");
   assert.equal(datum(f, "Bán 30 ngày")?.value, "30");
   const gt = datum(f, "Giá trị tồn (ước tính, giá nhập gần nhất)");
   assert.equal(gt?.value, formatVND(10_000_000));

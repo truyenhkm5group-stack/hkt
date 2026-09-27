@@ -60,6 +60,12 @@ export type StockFeedbackVariant = {
   available: number;
   /** Món/ngày — tốc độ GỬI ĐI của Kế hoạch SX (đã chống nhiễu). */
   velocity: number;
+  /**
+   * Bảng Hàng chậm xếp `RETURNED_OUT`: gửi đi mà không giao thành công món nào, đã có món hoàn. Đối xử như
+   * hàng chết — tốc độ gửi đi của nó KHÔNG vào "đủ bán", và việc chính là xem lại lý do hoàn, không phải
+   * làm creative mới.
+   */
+  returnedOut: boolean;
   /** Nhịp hao kho ròng sau độ trễ hoàn — của Kế hoạch SX. */
   netVelocity: number;
   /** Độ trễ hoàn (ngày); `null` = chưa đo được. */
@@ -164,6 +170,11 @@ function variantBasis(vs: readonly StockFeedbackVariant[]): string {
     .join(",");
 }
 
+/** Báo cáo hoàn lọc theo MÃ HÀNG (bộ lọc `product` nhận mã hàng) — 90 ngày, cùng kỳ GTC theo mã. */
+export function returnsHref(productCode: string): string {
+  return productCode ? `/reports/returns?period=90d&product=${encodeURIComponent(productCode)}` : "/reports/returns?period=90d";
+}
+
 function adsHref(): string {
   return `/ads?dim=product&period=${STOCK_FEEDBACK_ADS_PERIOD}`;
 }
@@ -206,10 +217,12 @@ function pushStock(input: StockFeedbackInput, known: readonly StockFeedbackVaria
   const sold30 = push.reduce((a, v) => a + v.sold30, 0);
   // CÙNG `coverDaysOf` của Kế hoạch SX (hàng hoàn trừ sau độ trễ hoàn), trên nhịp GỘP của các mẫu mã đang
   // đẩy — không chia thẳng khả dụng cho tốc độ gửi đi. Không gửi đi / không vơi ⇒ `null`, không in số.
-  const coverRaw = coverDaysOf(available, pooledPace(push));
+  // Mẫu hoàn gần hết góp tồn nhưng KHÔNG góp nhịp: hàng đi rồi về, như hàng chết.
+  const coverRaw = coverDaysOf(available, pooledPace(push.map((v) => (v.returnedOut ? { ...v, velocity: 0, netVelocity: 0 } : v))));
   const cover = coverRaw === null ? null : Math.floor(coverRaw);
   const stockValue = sumOrNull(push.map((v) => (v.unitCost === null ? null : Math.max(0, v.available) * v.unitCost)));
-  const labels = push.map((v) => `${v.label || "—"} — ${DECISION_LABEL[v.decision]}`).join(" · ");
+  const labels = push.map((v) => `${v.label || "—"} — ${v.returnedOut ? "hoàn gần hết" : DECISION_LABEL[v.decision]}`).join(" · ");
+  const hoanGanHet = push.filter((v) => v.returnedOut);
 
   let adsLine: string;
   if (!input.adsVisible) adsLine = "";
@@ -220,16 +233,32 @@ function pushStock(input: StockFeedbackInput, known: readonly StockFeedbackVaria
 
   const creativeLink: StockFeedbackLink = { label: "Làm creative mới cho mẫu tồn", href: creativeGenHref(input.productId) };
   const outreachLink: StockFeedbackLink = { label: "Đẩy qua chăm sóc khách cũ / combo", href: "/outreach" };
-  const alternatives: StockFeedbackLink[] = [adsCut ? creativeLink : outreachLink];
+  /*
+    HOÀN GẦN HẾT (27/09/2026, chủ shop duyệt): có mẫu gửi đi mà không giao được món nào ⇒ việc CHÍNH là đọc
+    lý do hoàn của mã; creative mới / khách cũ chỉ còn là lối khác. Đẩy thêm một mẫu khách trả gần hết là
+    đổ thêm tiền cước và tiền quảng cáo vào hàng sẽ quay về.
+  */
+  const returnsLink: StockFeedbackLink = { label: "Xem lý do hoàn của mã", href: returnsHref(input.productCode) };
+  const primary = hoanGanHet.length ? returnsLink : adsCut ? outreachLink : creativeLink;
+  const alternatives: StockFeedbackLink[] = hoanGanHet.length ? [adsCut ? outreachLink : creativeLink] : [adsCut ? creativeLink : outreachLink];
   if (input.adsVisible) alternatives.push({ label: "Xem lại quảng cáo đang chạy", href: adsHref() });
   alternatives.push({ label: "Xem quyết định vốn tồn", href: "/inventory/decisions" });
+  const name = input.productCode || input.productName;
+  const what = hoanGanHet.length
+    ? `${name} · khách hoàn gần hết — xem lại chất lượng / mô tả trước khi đẩy thêm`
+    : adsCut
+      ? `${name} · tồn chậm, quảng cáo đang lỗ — đẩy bằng ưu đãi / khách cũ`
+      : `${name} · tồn chậm — làm creative mới / đẩy qua khách cũ`;
+  const returnedLine = hoanGanHet.length
+    ? ` ${formatNumber(hoanGanHet.length)} mẫu mã gửi đi mà KHÔNG giao thành công món nào — khách hoàn gần hết: xem lại chất lượng / mô tả / size trước khi đẩy thêm; creative mới hay ưu đãi chỉ đẩy thêm hàng sẽ quay về.`
+    : "";
 
   return {
     kind: "PUSH_STOCK",
     productId: input.productId,
     modelId: input.modelId,
-    what: adsCut ? `${input.productCode || input.productName} · tồn chậm, quảng cáo đang lỗ — đẩy bằng ưu đãi / khách cũ` : `${input.productCode || input.productName} · tồn chậm — làm creative mới / đẩy qua khách cũ`,
-    why: `Bộ máy quyết định tồn: ${labels}.${adsLine}`,
+    what,
+    why: `Bộ máy quyết định tồn: ${labels}.${returnedLine}${adsLine}`,
     data: [
       { label: "Khả dụng", value: formatNumber(available) },
       { label: "Đủ bán", value: cover === null ? null : `${formatNumber(cover)} ngày` },
@@ -238,9 +267,9 @@ function pushStock(input: StockFeedbackInput, known: readonly StockFeedbackVaria
       ...creativeData(input),
       ...spendDatum(input),
     ],
-    action: adsCut ? outreachLink : creativeLink,
+    action: primary,
     alternatives,
-    basis: `PUSH_STOCK|${variantBasis(push)}`,
+    basis: `PUSH_STOCK|${variantBasis(push)}${hoanGanHet.length ? `|RETURNED_OUT:${hoanGanHet.map((v) => v.variantId).sort().join(",")}` : ""}`,
     impact: {
       amountVnd: sumOrNull(push.map((v) => v.capitalFreeable)),
       basis: "Vốn theo giá nhập giải phóng được nếu đẩy hết phần vượt mức (decideInventory). Chưa biết giá nhập ⇒ —.",

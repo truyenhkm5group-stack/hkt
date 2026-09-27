@@ -3,7 +3,8 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { coverDaysOf, paceOfPlanRow, qtyForCoverDays, roundCoverDays } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
-import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { SLOW_MOVING_KEY, classifyStockRisk, resolveSlowMovingRules, type ResolvedSlowMovingRules, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
 
 /**
@@ -48,6 +49,9 @@ export type SlowMovingRow = {
   /** Lần cuối bán được (giao thành công); `null` = chưa bán được lần nào. */
   lastSoldAt: Date | null;
   daysSinceLastSale: number | null;
+  /** Món gửi đi (đơn không huỷ) / món đã hoàn của đơn lên trong cửa sổ hàng chết — căn cứ lớp `RETURNED_OUT`. */
+  shippedInDeadWindow: number;
+  returnedInDeadWindow: number;
   unitCost: number;
   /** Tiền vốn đang nằm trong lô hàng này. */
   stockValue: number;
@@ -69,21 +73,41 @@ export type SlowMovingReport = {
 };
 
 /**
- * Lần cuối THẬT SỰ giao được hàng của từng mẫu mã — thứ duy nhất bảng này đọc thêm ngoài dòng kế hoạch.
+ * Sự kiện của CỬA SỔ HÀNG CHẾT theo mẫu mã — thứ duy nhất bảng này đọc thêm ngoài dòng kế hoạch:
+ *   · lần cuối THẬT SỰ giao được hàng (toàn lịch sử, ORDER_OUTCOME = DELIVERED — căn cứ luật hàng chết);
+ *   · số món gửi đi (đơn KHÔNG HUỶ, cùng căn cứ "gộp" với tốc độ gửi đi) và số món đã HOÀN, của đơn lên
+ *     trong `deadDays` ngày — để nhận ra mẫu "gửi đi mà không giao được" (`RETURNED_OUT`).
+ * KHÔNG phải một định nghĩa tốc độ: không chia cho số ngày, không vào số ngày phủ.
  *
- * Dùng ĐÚNG bí danh bảng mà `ORDER_OUTCOME` mong đợi (`orders`/`shipments`): đặt bí danh khác sẽ khiến
- * nó lặng lẽ trỏ sang bảng ở câu ngoài và trả về kết quả sai mà không báo lỗi.
+ * Kết quả đơn tính MỘT lần cho mỗi dòng trong bảng dẫn xuất (`OUTCOME_FENCE` chặn Postgres nội tuyến lại
+ * ba lần). Dùng ĐÚNG bí danh bảng mà `ORDER_OUTCOME` mong đợi (`orders`/`shipments`): đặt bí danh khác sẽ
+ * khiến nó lặng lẽ trỏ sang bảng ở câu ngoài và trả về kết quả sai mà không báo lỗi.
  */
-function lastSoldSubquery(db: Awaited<ReturnType<typeof getDb>>) {
-  return db
-    .select({ variantId: oi.variantId, lastSoldAt: sql<Date | null>`max(${o.insertedAt})`.as("sm_last_sold") })
+function deadWindowFactsSubquery(db: Awaited<ReturnType<typeof getDb>>, deadDays: number) {
+  const base = db
+    .select({
+      variantId: oi.variantId,
+      insertedAt: sql<Date>`${o.insertedAt}`.as("sm_inserted_at"),
+      qty: sql<number>`${oi.quantity}`.as("sm_qty"),
+      outcome: outcomeColumn(),
+    })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    // Lần cuối THẬT SỰ giao được hàng — đơn hoàn nghĩa là chưa bán được.
-    .where(sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`)
-    .groupBy(oi.variantId)
-    .as("sm_last");
+    .offset(OUTCOME_FENCE)
+    .as("sm_base");
+  const trongCuaSo = sql`${base.insertedAt} >= now() - (${deadDays} || ' days')::interval`;
+  return db
+    .select({
+      variantId: base.variantId,
+      // Lần cuối THẬT SỰ giao được hàng — đơn hoàn nghĩa là chưa bán được.
+      lastSoldAt: sql<Date | null>`max(${base.insertedAt}) filter (where ${base.outcome} = 'DELIVERED')`.as("sm_last_sold"),
+      shipped: sql<number>`coalesce(sum(${base.qty}) filter (where ${trongCuaSo} and ${base.outcome} <> 'CANCELLED'), 0)`.as("sm_shipped_dead"),
+      returned: sql<number>`coalesce(sum(${base.qty}) filter (where ${trongCuaSo} and ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`.as("sm_returned_dead"),
+    })
+    .from(base)
+    .groupBy(base.variantId)
+    .as("sm_dead");
 }
 
 /**
@@ -113,15 +137,16 @@ async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingRep
   const [plan, lastRows] = await Promise.all([
     getReplenishmentPlan(),
     chayKhongJit(db, (tx) => {
-      const last = lastSoldSubquery(tx);
-      return tx.select({ variantId: last.variantId, lastSoldAt: last.lastSoldAt }).from(last);
+      const f = deadWindowFactsSubquery(tx, rules.deadDays);
+      return tx.select({ variantId: f.variantId, lastSoldAt: f.lastSoldAt, shipped: f.shipped, returned: f.returned }).from(f);
     }),
   ]);
-  const lastSold = new Map(lastRows.map((r) => [r.variantId, r.lastSoldAt]));
+  const facts = new Map(lastRows.map((r) => [r.variantId, r]));
 
   const out: SlowMovingRow[] = [];
   const byRisk: Record<StockRisk, { count: number; value: number }> = {
     DEAD: { count: 0, value: 0 },
+    RETURNED_OUT: { count: 0, value: 0 },
     EXCESS: { count: 0, value: 0 },
     SLOW: { count: 0, value: 0 },
     HEALTHY: { count: 0, value: 0 },
@@ -140,18 +165,21 @@ async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingRep
     const daysOfCover = roundCoverDays(coverDaysOf(available, pace));
     const unitCost = r.unitCost;
     const stockValue = available * unitCost;
-    const lastRaw = lastSold.get(r.variantId);
-    const lastSoldAt = lastRaw ? new Date(lastRaw) : null;
+    const f = facts.get(r.variantId);
+    const lastSoldAt = f?.lastSoldAt ? new Date(f.lastSoldAt) : null;
+    const shippedInDeadWindow = Number(f?.shipped ?? 0);
+    const returnedInDeadWindow = Number(f?.returned ?? 0);
     const daysSinceLastSale = lastSoldAt ? Math.floor((Date.now() - lastSoldAt.getTime()) / 86_400_000) : null;
 
-    const { risk, reason } = classifyStockRisk({ velocity: pace.velocity, daysOfCover, daysSinceLastSale }, rules);
+    const { risk, reason } = classifyStockRisk({ velocity: pace.velocity, daysOfCover, daysSinceLastSale, shippedInDeadWindow, returnedInDeadWindow }, rules);
 
     /**
      * PHẦN VỐN VƯỢT MỨC = tiền nằm trong số hàng nhiều hơn mức đủ bán trong kỳ lành mạnh — đo bằng
      * ĐÚNG nhịp hao kho đã xếp loại (nghịch đảo của `coverDaysOf`).
-     * Hàng chết thì TOÀN BỘ là vượt mức — không có nhịp bán nào để giữ lại phần nào cả.
+     * Hàng chết thì TOÀN BỘ là vượt mức — không có nhịp bán nào để giữ lại phần nào cả. Hoàn gần hết
+     * cũng vậy: tốc độ gửi đi dương nhưng không món nào ở lại tay khách, nên không có "mức đủ bán" nào.
      */
-    const healthyQty = Math.ceil(qtyForCoverDays(rules.healthyCoverDays, pace) - 1e-9);
+    const healthyQty = risk === "RETURNED_OUT" ? 0 : Math.ceil(qtyForCoverDays(rules.healthyCoverDays, pace) - 1e-9);
     const excessQty = Math.max(0, available - healthyQty);
     const excessValue = risk === "HEALTHY" ? 0 : excessQty * unitCost;
 
@@ -172,6 +200,8 @@ async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingRep
       daysOfCover,
       lastSoldAt,
       daysSinceLastSale,
+      shippedInDeadWindow,
+      returnedInDeadWindow,
       unitCost,
       stockValue,
       excessValue,

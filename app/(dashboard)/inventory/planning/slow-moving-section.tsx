@@ -2,7 +2,8 @@ import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money } from "@/components/ui-bits";
-import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE } from "@/lib/constants/slow-moving";
+import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, STOCK_RISK_WHY } from "@/lib/constants/slow-moving";
+import { InfoHint } from "@/components/info-hint";
 import { SlowMovingRulesEditor } from "@/app/(dashboard)/inventory/planning/slow-moving-rules-editor";
 import { formatNumber } from "@/lib/format";
 import { getSlowMoving, loadSlowMovingRules } from "@/lib/queries/slow-moving";
@@ -49,8 +50,8 @@ export async function SlowMovingSection({ canWrite = false }: { canWrite?: boole
       {risky.length ? (
     <SectionCard
       title={`Vốn đang nằm chết — ${formatNumber(risky.length)} mẫu mã`}
-      description={`${Math.round(report.totalExcessValue).toLocaleString("vi-VN")}đ vượt mức cần thiết trên tổng ${Math.round(report.totalStockValue).toLocaleString("vi-VN")}đ vốn tồn · ${report.byRisk.DEAD.count} mẫu chết · ${report.byRisk.EXCESS.count} mẫu thừa`}
-      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${R.deadDays} ngày. Vốn nằm chết = tồn đủ bán quá ${R.excessCoverDays} ngày — "đủ bán" là ĐÚNG số ngày còn đủ hàng của Kế hoạch SX (tốc độ gửi đi, hàng hoàn trừ sau độ trễ hoàn), không phải một phép tính riêng. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
+      description={`${Math.round(report.totalExcessValue).toLocaleString("vi-VN")}đ vượt mức cần thiết trên tổng ${Math.round(report.totalStockValue).toLocaleString("vi-VN")}đ vốn tồn · ${report.byRisk.DEAD.count} mẫu chết${report.byRisk.RETURNED_OUT.count ? ` · ${report.byRisk.RETURNED_OUT.count} mẫu hoàn gần hết` : ""} · ${report.byRisk.EXCESS.count} mẫu thừa`}
+      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${R.deadDays} ngày. Hoàn gần hết = CÓ gửi đi trong ${R.deadDays} ngày ấy, đã có món hoàn, mà không giao thành công món nào — không bao giờ được xếp "Bình thường" chỉ vì tốc độ gửi đi dương. Vốn nằm chết = tồn đủ bán quá ${R.excessCoverDays} ngày — "đủ bán" là ĐÚNG số ngày còn đủ hàng của Kế hoạch SX (tốc độ gửi đi, hàng hoàn trừ sau độ trễ hoàn), không phải một phép tính riêng. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
       padded={false}
     >
       <div className="overflow-x-auto">
@@ -80,8 +81,14 @@ export async function SlowMovingSection({ canWrite = false }: { canWrite?: boole
                 <TableCell className="text-right"><Money value={r.stockValue} /></TableCell>
                 <TableCell className="text-right font-semibold"><Money value={r.excessValue} /></TableCell>
                 <TableCell>
-                  <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", STOCK_RISK_TONE[r.risk])} title={r.reason}>
-                    {STOCK_RISK_LABEL[r.risk]}
+                  <span className="inline-flex items-center gap-1">
+                    <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", STOCK_RISK_TONE[r.risk])} title={r.reason}>
+                      {STOCK_RISK_LABEL[r.risk]}
+                    </span>
+                    <InfoHint label={`Vì sao: ${STOCK_RISK_LABEL[r.risk]}`}>
+                      <p className="font-medium">{r.reason}</p>
+                      <p className="mt-1 text-muted-foreground">{STOCK_RISK_WHY[r.risk]}</p>
+                    </InfoHint>
                   </span>
                 </TableCell>
                 <TableCell className="max-w-[280px] text-xs text-muted-foreground">{STOCK_RISK_ACTION[r.risk]}</TableCell>
