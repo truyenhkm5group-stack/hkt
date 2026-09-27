@@ -394,7 +394,7 @@ async function chay(db: Db, keepModels: Set<string>) {
   const evidence = buildTopicEvidenceSnapshot(await getModelEvidence(chiTietMau), PRODUCT, tick());
   assert.equal(evidence.ordersTotal, 2, "ảnh chụp chứng cứ lúc mở topic thấy đúng 2 đơn lên của mẫu");
   assert.equal(evidence.adSpend30d, 200_000, "ảnh chụp thấy chi QC 30 ngày của mẫu");
-  const req = { material: "Đũi", colors: ["Đen"], sizes: ["M", "L"], trims: "Cúc gỗ", designNotes: "Cổ V", targetPrice: 130_000, expectedQty: 30, deadline: null };
+  const req = { material: "Đũi", colors: ["Đen"], sizes: ["M", "L"], trims: "Cúc gỗ", designNotes: "Cổ V", salePrice: null, targetPrice: 130_000, expectedQty: 30, deadline: null };
   const topic = await createTopicCore(db, { modelId: M, title: "Hỏi giá may COSQA-01", requirements: req, supplierId: sup.id, evidence, firstMessage: "Xưởng báo giá giúp shop mẫu đầm đen", actor: LEAD });
   assert.ok("ok" in topic, "mở topic được");
   if (!("ok" in topic)) return;

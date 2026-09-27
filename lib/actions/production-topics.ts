@@ -34,6 +34,7 @@ const requirementsSchema = z.object({
   sizes: z.array(z.string().trim().min(1).max(20)).max(30).default([]),
   trims: z.string().trim().max(500).default(""),
   designNotes: z.string().trim().max(3000).default(""),
+  salePrice: money.nullable().default(null),
   targetPrice: money.nullable().default(null),
   expectedQty: z.number().int().min(0).max(1_000_000).nullable().default(null),
   deadline: z

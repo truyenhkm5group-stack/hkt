@@ -79,16 +79,18 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
             <DescriptionList
               columns={3}
               items={[
-                { label: "Xưởng", value: d.topic.supplierName ?? "—" },
+                // Ba ô biểu mẫu hỏi (chủ shop 27/09/2026) luôn hiện; ô cũ chỉ hiện khi topic cũ có khai.
                 { label: "Chất liệu", value: req.material || "—" },
-                { label: "Phụ liệu", value: req.trims || "—" },
-                { label: "Màu", value: req.colors.length ? req.colors.join(", ") : "—" },
-                { label: "Size", value: req.sizes.length ? req.sizes.join(", ") : "—" },
-                { label: "Giá mục tiêu", value: req.targetPrice === null ? "—" : `${formatVND(req.targetPrice)}/sp` },
-                { label: "Số lượng dự kiến", value: req.expectedQty === null ? "—" : formatNumber(req.expectedQty) },
-                { label: "Hạn cần hàng", value: req.deadline ? formatDate(req.deadline) : "—" },
-                { label: "Phương án đã chốt", value: d.topic.selectedOption || "—" },
-                { label: "Ghi chú thiết kế", value: req.designNotes || "—", span: true },
+                { label: "Giá bán", value: req.salePrice === null ? "—" : `${formatVND(req.salePrice)}/sp` },
+                { label: "Giá SX mong muốn", value: req.targetPrice === null ? "—" : `${formatVND(req.targetPrice)}/sp` },
+                ...(d.topic.supplierName ? [{ label: "Xưởng", value: d.topic.supplierName }] : []),
+                ...(req.trims ? [{ label: "Phụ liệu", value: req.trims }] : []),
+                ...(req.colors.length ? [{ label: "Màu", value: req.colors.join(", ") }] : []),
+                ...(req.sizes.length ? [{ label: "Size", value: req.sizes.join(", ") }] : []),
+                ...(req.expectedQty !== null ? [{ label: "Số lượng dự kiến", value: formatNumber(req.expectedQty) }] : []),
+                ...(req.deadline ? [{ label: "Hạn cần hàng", value: formatDate(req.deadline) }] : []),
+                ...(d.topic.selectedOption ? [{ label: "Phương án đã chốt", value: d.topic.selectedOption }] : []),
+                ...(req.designNotes ? [{ label: "Ghi chú thiết kế", value: req.designNotes, span: true }] : []),
               ]}
             />
           </SectionCard>

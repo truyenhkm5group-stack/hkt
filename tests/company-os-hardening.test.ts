@@ -108,7 +108,7 @@ export async function testHardeningLifecycleInTx(db: Db) {
   await db.execute(sql.raw(`create or replace function cos_k_no_topic() returns trigger language plpgsql as $$ begin if new.model_id = '${P}m2' then raise exception 'cos-k: topic hỏng lúc chốt'; end if; return new; end $$`));
   await db.execute(sql.raw(`create constraint trigger cos_k_no_topic_commit after insert on production_topics deferrable initially deferred for each row execute function cos_k_no_topic()`));
   const evidence = { kind: "SNAPSHOT" as const, capturedAt: new Date().toISOString(), basis: "kiểm thử K", productId: null, orders30d: null, ordersTotal: null, adSpend30d: null };
-  const req = { material: "", colors: [], sizes: [], trims: "", designNotes: "", targetPrice: null, expectedQty: null, deadline: null };
+  const req = { material: "", colors: [], sizes: [], trims: "", designNotes: "", salePrice: null, targetPrice: null, expectedQty: null, deadline: null };
   try {
     await assert.rejects(
       () => createTopicCore(db, { modelId: m2.id, title: "Hỏi giá COSK2", requirements: req, supplierId: null, evidence, actor: nguoi }),

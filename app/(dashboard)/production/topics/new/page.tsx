@@ -7,7 +7,7 @@ import { topicOpenNotice } from "@/lib/constants/early-topic";
 import { isModelState, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, type ModelState } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { modelSignalsForPicker } from "@/lib/queries/early-topic";
-import { getModelBrief, listModelOptions, listSupplierOptions } from "@/lib/queries/production-os";
+import { getModelBrief, listModelOptions } from "@/lib/queries/production-os";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Mở topic sản xuất" };
@@ -30,10 +30,9 @@ export default async function NewTopicPage({ searchParams }: { searchParams: Pro
   const raw = await searchParams;
   const modelParam = typeof raw.model === "string" ? raw.model : "";
   // Nhãn tín hiệu chỉ là NHÃN (không số) — cùng mức trang 360 cho người có "Vòng đời mẫu: xem".
-  const [model, models, suppliers, signals] = await Promise.all([
+  const [model, models, signals] = await Promise.all([
     modelParam ? getModelBrief(modelParam) : null,
     modelParam ? [] : listModelOptions(),
-    listSupplierOptions(),
     can(user, "models:view") ? modelSignalsForPicker() : Promise.resolve(null),
   ]);
   if (modelParam && !model) notFound();
@@ -68,7 +67,13 @@ export default async function NewTopicPage({ searchParams }: { searchParams: Pro
           Sổ mẫu đang trống — đồng bộ sổ ở <Link href="/models" className="underline">Vòng đời mẫu</Link> trước khi mở topic.
         </p>
       ) : (
-        <TopicForm models={options} fixedModelId={model?.id ?? null} fixedNotice={fixedNotice} suppliers={suppliers} canRegisterModel={canRegisterModel} />
+        <TopicForm
+          models={options}
+          fixedModelId={model?.id ?? null}
+          fixedModelLabel={model ? `${model.code}${model.name ? ` · ${model.name}` : ""}` : null}
+          fixedNotice={fixedNotice}
+          canRegisterModel={canRegisterModel}
+        />
       )}
     </div>
   );
