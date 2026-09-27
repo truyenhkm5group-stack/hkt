@@ -3,6 +3,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { AREA_LABEL, AREA_TONE, CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { formatVND } from "@/lib/format";
 import { getBusinessBrief } from "@/lib/queries/business-brief";
+import { hrefVisible, type ModuleViewer } from "@/lib/platform-ui/module-visibility";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -16,8 +17,11 @@ import { cn } from "@/lib/utils";
  * Mỗi rủi ro bắt buộc mang theo: chỉ số nào · bằng chứng nào · khoảng thời gian nào · mức tin cậy.
  * Thiếu một trong bốn thì đó là câu bói, không phải khuyến nghị.
  */
-export async function BusinessBriefSection({ period }: { period: Period }) {
-  const brief = await getBusinessBrief(period);
+export async function BusinessBriefSection({ period, viewer }: { period: Period; viewer: ModuleViewer }) {
+  const all = await getBusinessBrief(period);
+  // Rủi ro dẫn tới trang của module đang tắt không hiện: bản tin đệm theo tổ chức, còn danh sách
+  // module thì đọc lúc dựng — lọc ở đây để khoá đệm không phải mang tập module.
+  const brief = { ...all, risks: all.risks.filter((r) => hrefVisible(viewer, r.href)) };
   if (!brief.summary.length && !brief.risks.length) return null;
 
   return (

@@ -79,6 +79,14 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         }
       />
 
+      {health.registryProblems.length ? (
+        <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm">
+          {health.registryProblems.map((p) => (
+            <p key={p}>{p}</p>
+          ))}
+        </div>
+      ) : null}
+
       <SectionCard title="Tổ chức & sức khoẻ" description={health.journalNote ?? "Kết nối · migration · bảng platform_* · cấu hình module"} padded={false}>
         {health.organizations.length === 0 ? (
           <EmptyState title="Chưa có tổ chức nào trong sổ" description="Sổ tổ chức rỗng — migration nền tảng chưa áp? Tổ chức nhà luôn phải có một dòng." className="m-4" />

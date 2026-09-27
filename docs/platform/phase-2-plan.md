@@ -27,8 +27,7 @@ deploy — trên đúng nền Phase 1 (silo + sổ module + năng lực).
    của gói ngành; tổ chức nhà giữ bản hiện tại, contract test giữ nguyên.
 2. **Credential theo tổ chức** cho connector (P12): màn hình khai + lưu mã hoá trong CSDL tổ chức; bảng
    liên kết "tài khoản bên ngoài → tổ chức" để webhook phân giải tường minh (thay `HOME_ONLY`).
-3. **Lọc tầng tổng hợp theo module bật**: `/`, `/cockpit`, `/data-quality`, `/work` hiện đọc cả nguồn
-   của module đang tắt (ra số 0 / ô trống). Mỗi khối khai module nguồn; khối của module tắt không hiện.
+3. **Lọc `/work` theo module bật**: `/`, `/cockpit`, `/data-quality` đã lọc ở Phase 1.x (`lib/platform-ui/module-visibility.ts`); còn hàng đợi `/work` đọc cả nguồn việc của module đang tắt.
 
 ## 4. Không làm ở Phase 2
 

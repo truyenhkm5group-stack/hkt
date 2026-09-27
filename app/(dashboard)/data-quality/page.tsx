@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
+import { DATA_QUALITY_BLOCKS, dataQualityHrefVisible, visibleBlocks } from "@/lib/platform-ui/module-visibility";
 import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
 import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
@@ -51,10 +52,18 @@ function Rate({ value }: { value: number | null }) {
 
 
 export default async function DataQualityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("dashboard:view");
+  const user = await requirePermission("dashboard:view");
+  /*
+    Ô / khối của module đang tắt không hiện, và truy vấn của nó không chạy (phase-2-plan mục 3.3).
+    `?issue=` trỏ tới ô đang ẩn bị bỏ qua như một khoá lạ — sửa URL không mở được danh sách của
+    module tắt. Tổ chức bật mọi module thấy đủ như trước.
+  */
+  const show = visibleBlocks(user, DATA_QUALITY_BLOCKS);
+  const canOpen = (href: string) => dataQualityHrefVisible(user, href);
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultPeriod: "90d", defaultPageSize: PAGE_SIZE, sortable: ["updatedAt", "codAmount", "codCollected", "stage", "vtpOrderNumber"], defaultSort: "updatedAt", defaultDir: "desc" });
-  const issue = (DQ_ISSUES as readonly string[]).includes(param(raw, "issue")) ? (param(raw, "issue") as DqIssue) : null;
+  const issueParam = param(raw, "issue");
+  const issue = (DQ_ISSUES as readonly string[]).includes(issueParam) && show[issueParam as DqIssue] ? (issueParam as DqIssue) : null;
   const page = Math.max(1, Number(param(raw, "page", "1")) || 1);
 
   // Luật của trung tâm điều khiển mở danh sách riêng, không dùng chung với 7 nhóm legacy.
@@ -65,7 +74,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
   // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
   const phutHienTai = Math.floor(Date.now() / 60_000) * 60_000;
-  const [summary, tower, towerDrill, drill, backlog, adsCoverage, dqIssues] = await Promise.all([
+  const [summary, tower, towerDrill, drill, backlog, adsCoverage, allDqIssues] = await Promise.all([
     dataQualitySummary(params.period),
     getControlTower(),
     towerRule ? controlTowerDrill(towerRule, page, PAGE_SIZE) : Promise.resolve(null),
@@ -82,9 +91,11 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     // Độ phủ quy kết quảng cáo 30 ngày — chỉ số theo dõi dữ liệu MỚI có tốt lên hay không.
     // Mốc TRÒN TỚI PHÚT: khoá đệm của hàm chứa mốc tới mili giây, nên `new Date()` trần đổi khoá mỗi
     // lượt tải và đệm 120 giây KHÔNG BAO GIỜ trúng. Cửa sổ lùi tối đa 60 giây — nhỏ hơn độ cũ của đệm.
-    adsAttributionCoverage(new Date(phutHienTai - 30 * 86_400_000), new Date(phutHienTai)),
+    show.adsCoverage ? adsAttributionCoverage(new Date(phutHienTai - 30 * 86_400_000), new Date(phutHienTai)) : Promise.resolve(null),
     getDataQualityIssues(),
   ]);
+  // Lỗ hổng mà trang xử lý thuộc module đang tắt không hiện; ví dụ mở được cũng lọc theo cùng luật.
+  const dqIssues = allDqIssues.filter((i) => canOpen(i.href)).map((i) => ({ ...i, links: i.links.filter((l) => canOpen(l.href)) }));
   const warehouseBacklog = backlog
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
     : undefined;
@@ -112,6 +123,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
         phiên bản "tạm" — cùng người đọc thấy hai tỷ lệ giao khác nhau ở hai trang. Bảng đối chiếu
         legacy ↔ có chứng từ bên dưới vẫn giữ đủ các con số đó, đúng chỗ của nó.
       */}
+      {show.summary ? (
       <div className="grid gap-3 sm:grid-cols-2">
         <MetricCard
           label="Đơn chưa đủ dữ liệu xác minh"
@@ -128,6 +140,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           note="COD khai báo của đơn chưa chứng minh được"
         />
       </div>
+      ) : null}
 
       {/*
         ───────── ĐỘ PHỦ QUY KẾT QUẢNG CÁO ─────────
@@ -136,6 +149,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
         một câu: dữ liệu mới có đang tốt lên không. Nó chỉ tăng khi từng mẩu quảng cáo có mã theo dõi
         riêng — nên "đơn có mã theo dõi" đứng ngay cạnh.
       */}
+      {adsCoverage ? (
       <SectionCard
         title="Độ phủ quy kết quảng cáo — 30 ngày"
         description={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.attributable)} đơn CÓ DẤU VẾT FACEBOOK quy kết được (${adsCoverage.coveragePct === null ? "chưa đo được" : `${adsCoverage.coveragePct}%`}) · ${formatNumber(adsCoverage.ambiguous)} nhập nhằng · ${formatNumber(adsCoverage.lostFacebook)} mất dấu · ${formatNumber(adsCoverage.notFromAds)} không đến từ quảng cáo (ngoài mẫu số)`}
@@ -166,6 +180,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           />
         </div>
       </SectionCard>
+      ) : null}
 
       {/*
         ───────── SỔ LỖ HỔNG DỮ LIỆU ─────────
@@ -294,7 +309,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                         {towerRule === i.rule ? "Đóng" : "Xem danh sách"}
                       </Link>
                     </Button>
-                    {i.href ? <Link className="text-[11px] text-primary underline underline-offset-2" href={i.href}>Mở trang xử lý →</Link> : null}
+                    {i.href && canOpen(i.href) ? <Link className="text-[11px] text-primary underline underline-offset-2" href={i.href}>Mở trang xử lý →</Link> : null}
                   </div>
                 </div>
               </div>
@@ -351,7 +366,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
             ["return-not-received", summary.returnRiskShipments, Boxes, `${formatNumber(summary.returnRiskUnits)} sản phẩm chưa xác nhận về kho`],
             ["missing-cogs", summary.missingCogs, Coins, `Doanh thu ${formatVND(summary.missingCogsRevenue)} đang tính lãi mà không trừ vốn`],
             ["unverified", summary.unverified, CircleHelp, "Không có số tiền nào để kết luận"],
-          ] as const).map(([key, value, Icon, note]) => (
+          ] as const).filter(([key]) => show[key]).map(([key, value, Icon, note]) => (
             <Link key={key} href={drillHref(key)} className={cn("rounded-xl border p-4 transition hover:border-primary hover:bg-accent/40", issue === key && "border-primary bg-accent/40")}>
               <div className="flex items-start justify-between gap-3">
                 <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
@@ -385,6 +400,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
               </TableRow>
             </TableHeader>
             <TableBody>
+              {/* Mỗi dòng mở một trang / một ô — dòng của module đang tắt không hiện. */}
+              {canOpen(drillHref("unverified")) ? (
               <TableRow>
                 <TableCell>Doanh thu đơn giao thành công</TableCell>
                 <TableCell className="numeric text-right">{formatVND(summary.legacyRevenue)}</TableCell>
@@ -392,6 +409,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell className="numeric text-right text-destructive">{formatVND(summary.verifiedRevenue - summary.legacyRevenue, { sign: true })}</TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href={drillHref("unverified")}>Đơn chưa xác minh</Link></TableCell>
               </TableRow>
+              ) : null}
+              {canOpen("/cod") ? (
               <TableRow>
                 <TableCell>Tiền theo legacy (ước tính)</TableCell>
                 <TableCell className="text-right"><Unknown>Chưa có chỉ số này</Unknown></TableCell>
@@ -402,6 +421,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                   <span className="block text-[11px] text-muted-foreground">Truy về từng đợt tiền về tài khoản và phần còn treo</span>
                 </TableCell>
               </TableRow>
+              ) : null}
+              {canOpen(drillHref("unverified")) ? (
               <TableRow>
                 <TableCell>Giá trị đang chờ xác minh</TableCell>
                 <TableCell className="text-right">—</TableCell>
@@ -409,6 +430,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell className="numeric text-right">{formatNumber(summary.unverified)} đơn</TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href={drillHref("unverified")}>Xem đơn</Link></TableCell>
               </TableRow>
+              ) : null}
+              {canOpen("/reports/returns") ? (
               <TableRow>
                 <TableCell>Tỷ lệ giao thành công</TableCell>
                 <TableCell className="numeric text-right"><Rate value={summary.legacySuccessRate} /></TableCell>
@@ -418,6 +441,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 </TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href="/reports/returns">Báo cáo GTC</Link></TableCell>
               </TableRow>
+              ) : null}
+              {canOpen(drillHref("pancake-declared")) ? (
               <TableRow>
                 <TableCell>Số đơn bị phân loại khác nhau</TableCell>
                 <TableCell className="numeric text-right">{formatNumber(summary.legacyDelivered)} đơn giao TC</TableCell>
@@ -425,6 +450,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell className="numeric text-right font-semibold text-destructive">{formatNumber(summary.mismatch)} đơn</TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href={drillHref("pancake-declared")}>Đơn khai báo suông</Link></TableCell>
               </TableRow>
+              ) : null}
+              {canOpen(drillHref("return-not-received")) ? (
               <TableRow>
                 <TableCell>Tồn kho có nguy cơ sai</TableCell>
                 <TableCell className="text-right"><Unknown>Trước đây cộng hết vào tồn</Unknown></TableCell>
@@ -432,6 +459,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell className="numeric text-right">{formatNumber(summary.returnRiskShipments)} vận đơn</TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href={drillHref("return-not-received")}>Xác nhận về kho</Link></TableCell>
               </TableRow>
+              ) : null}
+              {canOpen("/ads") ? (
               <TableRow>
                 <TableCell>Doanh thu marketing có nguy cơ sai</TableCell>
                 <TableCell className="numeric text-right">{formatVND(summary.marketingRiskRevenue)}</TableCell>
@@ -439,6 +468,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell className="numeric text-right">{formatNumber(summary.mismatch)} đơn</TableCell>
                 <TableCell><Link className="text-primary underline underline-offset-2" href="/ads">Hiệu quả quảng cáo</Link></TableCell>
               </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>

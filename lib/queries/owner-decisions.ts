@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
 import { decideScope } from "@/lib/auth/scope-guard";
+import { hrefVisible } from "@/lib/platform-ui/module-visibility";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { BEFORE_PRODUCTION_DISCUSSION } from "@/lib/constants/model-360";
@@ -541,12 +542,20 @@ async function guarded(label: string, run: () => Promise<SourceResult>, timeoutM
   }
 }
 
-/** Loại người xem được thấy. Phạm vi chỉ hỏi khi quyền đã đủ (luật 28: quyền trước, phạm vi sau). */
+/**
+ * Loại người xem được thấy. Phạm vi chỉ hỏi khi quyền đã đủ (luật 28: quyền trước, phạm vi sau).
+ *
+ * MODULE TRƯỚC CẢ QUYỀN: loại có màn hình chủ thuộc module đang tắt không thấy — kể cả khi quyền đủ.
+ * `planning:view` và `expenses:view` là khoá DÙNG CHUNG (không module nào sở hữu), nên `can()` một
+ * mình để lọt «Chiến dịch nên CẮT» (/ads) sang tổ chức không bật Marketing. Lọc ở đây thì nguồn của
+ * loại ấy KHÔNG được đọc (`sourcesFor`), và lượt ghi (`findOwnerDecisionItem`) trả `FORBIDDEN`.
+ */
 export async function viewerKinds(viewer: SessionUser, scopeOk?: (resource: "ADS") => Promise<boolean>): Promise<OwnerDecisionKind[]> {
   const hasPerm = (p: Parameters<typeof can>[1]) => can(viewer, p);
-  const needScope = allowedKinds(hasPerm, () => true).some((k) => OWNER_DECISION_KIND_SPEC[k].scopeResource === "ADS");
+  const inModule = (k: OwnerDecisionKind) => hrefVisible(viewer, OWNER_DECISION_KIND_SPEC[k].home);
+  const needScope = allowedKinds(hasPerm, () => true).some((k) => inModule(k) && OWNER_DECISION_KIND_SPEC[k].scopeResource === "ADS");
   const adsOk = needScope ? await (scopeOk ?? (async (r: "ADS") => (await decideScope(r, viewer, "expenses:view")).allow !== "NONE"))("ADS") : false;
-  return allowedKinds(hasPerm, () => adsOk);
+  return allowedKinds(hasPerm, () => adsOk).filter(inModule);
 }
 
 export async function getOwnerDecisionQueue(opts: QueueOptions): Promise<OwnerDecisionQueue> {
@@ -571,7 +580,8 @@ export async function getOwnerDecisionQueue(opts: QueueOptions): Promise<OwnerDe
   );
   // Một nguồn có thể sinh loại người xem KHÔNG được thấy (vd sau này tách quyền) — lọc lại theo loại.
   const seen = new Set<string>();
-  const items = results.flat().filter((it) => kinds.includes(it.kind) && (seen.has(it.sourceKey) ? false : (seen.add(it.sourceKey), true)));
+  // Nút hành động dẫn tới trang của module đang tắt (vd lệnh sản xuất khi tắt Sản xuất) ⇒ dòng không hiện.
+  const items = results.flat().filter((it) => kinds.includes(it.kind) && hrefVisible(opts.viewer, it.action.href) && (seen.has(it.sourceKey) ? false : (seen.add(it.sourceKey), true)));
 
   let latest = new Map<string, RecommendationDecisionRow>();
   try {
