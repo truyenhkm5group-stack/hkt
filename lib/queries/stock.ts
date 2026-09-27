@@ -176,6 +176,8 @@ export type ReservedOrderLine = {
   orderStage: string;
   /** Khoá để dựng liên kết POS / chat Pancake — `null` thì trang không vẽ liên kết đó. */
   shopId: string | null;
+  /** `orders.raw.order_link` — đường dẫn POS chính thức Pancake gửi kèm đơn (mang MÃ NỘI BỘ của POS). */
+  posOrderLink: string | null;
   pageId: string | null;
   conversationId: string | null;
   insertedAt: Date;
@@ -219,6 +221,7 @@ export async function listReservedOrderLines(filter: { variantId: string } | { p
       systemId: o.systemId,
       orderStage: sql<string>`${o.stage}::text`,
       shopId: o.shopId,
+      posOrderLink: sql<string | null>`${o.raw}->>'order_link'`,
       pageId: o.pageId,
       conversationId: o.conversationId,
       insertedAt: o.insertedAt,
@@ -247,6 +250,7 @@ export async function listReservedOrderLines(filter: { variantId: string } | { p
     systemId: r.systemId ?? null,
     orderStage: r.orderStage,
     shopId: r.shopId ?? null,
+    posOrderLink: r.posOrderLink ?? null,
     pageId: r.pageId ?? null,
     conversationId: r.conversationId ?? null,
     insertedAt: new Date(r.insertedAt),

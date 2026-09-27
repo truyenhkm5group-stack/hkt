@@ -179,7 +179,7 @@ export async function testInventory(db: Db) {
   await db.insert(schema.orders).values([
     { id: "ton-cho-xuat-dq", stage: "CONFIRMED", insertedAt: new Date() },
     // Đơn thứ hai ĐỦ THÔNG TIN (tên · SĐT · địa chỉ · tỉnh) — đơn thứ nhất cố ý thiếu SĐT/địa chỉ.
-    { id: "ton-cho-xuat-dq-2", stage: "CONFIRMED", insertedAt: new Date(), billFullName: "Khách đủ thông tin", billPhone: "0987654321", shipAddress: "12 Nguyễn Trãi, Phường Bến Thành", shipProvince: "Hồ Chí Minh" },
+    { id: "ton-cho-xuat-dq-2", stage: "CONFIRMED", insertedAt: new Date(), billFullName: "Khách đủ thông tin", billPhone: "0987654321", shipAddress: "12 Nguyễn Trãi, Phường Bến Thành", shipProvince: "Hồ Chí Minh", raw: { id: 4063, system_id: 4063, order_link: "https://pos.pages.fm/shop/408063069/order?order_id=10920003274" } },
   ]);
   await db.insert(schema.orderItems).values([
     { id: "ton-cho-xuat-dq-i1", orderId: "ton-cho-xuat-dq", variantId: "dq-var", quantity: 4 },
@@ -266,6 +266,7 @@ export async function testInventory(db: Db) {
   assert.equal(tongSl(hangDoi.ready) + tongSl(hangDoi.incomplete), dqDong.reserved, "đủ + thiếu thông tin cộng lại PHẢI bằng ô 'chờ xuất' — đơn thiếu thông tin vẫn giữ hàng, sổ kho không đổi");
   const du = hangDoi.ready.find((l) => l.orderId === "ton-cho-xuat-dq-2");
   assert.ok(du, "đơn đủ tên · SĐT · địa chỉ · tỉnh phải nằm trong hàng đợi xuất");
+  assert.equal(du.posOrderLink, "https://pos.pages.fm/shop/408063069/order?order_id=10920003274", "danh sách chờ xuất phải mang order_link Pancake gửi — POS mở đơn bằng mã nội bộ trong đó, không bằng orders.id");
   assert.equal(du.blockers.length, 0, "đơn trong hàng đợi xuất không được mang lỗi chặn gửi");
   const thieu = hangDoi.incomplete.find((l) => l.orderId === "ton-cho-xuat-dq");
   assert.ok(thieu, "đơn thiếu SĐT/địa chỉ phải bị TÁCH khỏi hàng đợi xuất, không biến mất");
