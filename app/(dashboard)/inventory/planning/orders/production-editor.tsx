@@ -21,7 +21,8 @@ export type EditorInit = {
   colors: string[];
   sizes: string[];
   cells: Record<string, number>;
-  detail?: Record<string, { stock: number; available: number; sold30: number; suggested: number }>;
+  /** `suggested` = gợi ý ĐÃ trừ hàng đặt xưởng chưa về (`openPo`, không kể lệnh đang sửa) — mục 70. */
+  detail?: Record<string, { stock: number; available: number; sold30: number; suggested: number; openPo?: number }>;
   images: { color: string; url: string }[];
   unitCost: number;
   supplier: string;
@@ -153,7 +154,7 @@ export function ProductionEditor({ init, supplierOptions = [] }: { init: EditorI
                       return (
                         <td key={c} className="border p-1">
                           <Input type="number" min={0} className="h-8 w-20 text-center tabular-nums" value={cells[cellKey(c, s)] ?? ""} placeholder="0" onChange={(e) => setCell(c, s, e.target.value)} />
-                          {d ? <div className="mt-0.5 text-[10px] text-muted-foreground" title="Tồn khả dụng · bán 30 ngày · ERP đề xuất">kd {d.available} · b30 {d.sold30} · đx {d.suggested}</div> : null}
+                          {d ? <div className="mt-0.5 text-[10px] text-muted-foreground" title="Tồn khả dụng · bán 30 ngày · đã đặt xưởng chưa về (lệnh khác) · ERP đề xuất sau khi trừ hàng đã đặt">kd {d.available} · b30 {d.sold30}{d.openPo ? ` · đặt ${d.openPo}` : ""} · đx {d.suggested}</div> : null}
                         </td>
                       );
                     })}

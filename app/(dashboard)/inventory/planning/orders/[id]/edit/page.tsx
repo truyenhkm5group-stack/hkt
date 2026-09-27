@@ -11,7 +11,7 @@ export default async function EditProductionOrderPage({ params }: { params: Prom
   const { id } = await params;
   const o = await getProductionOrder(id);
   if (!o) notFound();
-  const [m, designOptions, requireApprovedDesign] = await Promise.all([o.productId ? buildMatrixForProduct(o.productId) : null, designOptionsForPo(o.productId), requireApprovedDesignFlag()]);
+  const [m, designOptions, requireApprovedDesign] = await Promise.all([o.productId ? buildMatrixForProduct(o.productId, {}, { excludePoId: o.id }) : null, designOptionsForPo(o.productId), requireApprovedDesignFlag()]);
   // `unitCost ?? 0`: ô nhập của trình sửa coi 0 là "để trống" — giá NULL (CHƯA BIẾT, vd nháp MOQ §5h) hiện ô trống.
   return (
     <div className="space-y-5">

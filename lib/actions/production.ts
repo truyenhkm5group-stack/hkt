@@ -70,7 +70,8 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     */
     let suggestion: SuggestedCellsSnapshot | null = existing?.suggestedCells ?? null;
     if (d.fromSuggestion) {
-      const m = await buildMatrixForProduct(d.productId, { coverDays: d.suggestionBasis?.coverDays, countIncoming: d.suggestionBasis?.countIncoming ?? true });
+      // Lệnh đang sửa không trừ vào gợi ý của chính nó — cùng lời gọi với trang sửa (AGENTS.md mục 70).
+      const m = await buildMatrixForProduct(d.productId, { coverDays: d.suggestionBasis?.coverDays, countIncoming: d.suggestionBasis?.countIncoming ?? true }, { excludePoId: existing?.id ?? null });
       if (m) {
         suggestion = {
           cells: Object.fromEntries(Object.entries(m.cells).filter(([, v]) => v > 0)),
