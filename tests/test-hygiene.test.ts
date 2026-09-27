@@ -116,6 +116,10 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/platform-no-db.test.ts":
+    "GỠ DATABASE_URL khỏi môi trường của TIẾN TRÌNH CON để dựng đúng máy GitHub Actions (cầu nối mở PR không có CSDL). Đó là ĐẦU VÀO của phép kiểm; kết luận không phụ thuộc máy đang chạy có CSDL hay không.",
+  "tests/platform-no-db-probe.ts":
+    "Tiến trình con của platform-no-db.test.ts: chỉ KHẲNG ĐỊNH DATABASE_URL vắng mặt (điều kiện dựng tình huống), không rẽ nhánh theo máy.",
   "tests/sync-fixtures.test.ts":
     "Bộ chạy chính: ĐẶT biến môi trường để dựng tình huống cho hàm đang kiểm (ví dụ xoá ERP_GITHUB_REPO để kiểm nhánh CHƯA CẤU HÌNH), rồi trả lại nguyên trạng. Đó là ĐẦU VÀO của phép kiểm, không phải điều kiện của kết luận.",
   "tests/tech-phase2a.test.ts":

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { jwtVerify } from "jose";
 import { env } from "@/lib/env";
 import { SESSION_COOKIE } from "@/lib/constants/session";
-import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
+import { FALLBACK_HOME_CODE, findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 
 /**
  * ═══════════ NGỮ CẢNH TỔ CHỨC — "ĐANG CHẠY CHO AI" ═══════════
@@ -62,9 +62,25 @@ export function peekOrganization(): OrgContext | null {
   return als.getStore() ?? null;
 }
 
+/**
+ * Ngữ cảnh tổ chức nhà khi KHÔNG có phiên mang claim tổ chức và không có ngữ cảnh tường minh.
+ *
+ * ─── KHÔNG ĐƯỢC PHỤ THUỘC CSDL ───
+ *
+ * Ở nhánh này câu trả lời "là nhà" đã chắc chắn trước khi đọc sổ; sổ chỉ cho biết MÃ của nhà. Script
+ * chạy trên GitHub Actions không có `DATABASE_URL` (cầu nối mở PR `scripts/agent-open-pr.ts` đi qua
+ * `assertHomeCredentials()` của client GitHub) — bản đầu để lỗi "Chưa cấu hình DATABASE_URL" của lượt
+ * đọc sổ ném lên, và cầu nối mở PR hỏng cho MỌI phiên ngay sau khi Phase 1 lên `main` (27/09/2026).
+ * Đọc sổ hỏng ⇒ dùng mã dựng sẵn của nhà. Không mở rộng quyền nào: nhánh có claim tổ chức (hoặc ngữ
+ * cảnh tường minh) KHÔNG đi qua đây, nên tổ chức khác không bao giờ rơi về nhà vì lỗi sổ.
+ */
 async function homeContext(source: OrgContextSource): Promise<OrgContext> {
-  const home = await getHomeOrganization();
-  return { code: home.code, isHome: true, source };
+  try {
+    const home = await getHomeOrganization();
+    return { code: home.code, isHome: true, source };
+  } catch {
+    return { code: FALLBACK_HOME_CODE, isHome: true, source };
+  }
 }
 
 export async function currentOrganization(): Promise<OrgContext> {
