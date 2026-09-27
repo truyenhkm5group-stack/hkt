@@ -102,7 +102,7 @@ export function testProductionTopicFilesPure() {
   const route = readFileSync("app/api/production/files/[id]/route.ts", "utf8");
   assert.match(route, /x-content-type-options": "nosniff"/, "phục vụ tệp phải có nosniff");
   assert.match(route, /content-security-policy": "sandbox/, "phục vụ tệp phải sandbox");
-  assert.match(route, /can\(user, "planning:view"\)/, "xem tệp cần quyền xem sản xuất");
+  assert.match(route, /loadTopicAccess\(/, "xem tệp cần quyền xem CHÍNH topic chứa tệp (topic riêng chỉ người trong topic)");
 
   // Đồng bộ sổ sau khi chốt mã nối sản phẩm Pancake mang mã mới vào ĐÚNG dòng đã có (không đẻ dòng thứ hai).
   const ke = planModelRegistry({
@@ -113,7 +113,7 @@ export function testProductionTopicFilesPure() {
   assert.deepEqual(ke.toInsert, [], "không đăng ký mẫu mới cho mã đã chốt");
 
   // Biểu mẫu mở topic (chủ shop 27/09/2026): chỉ chất liệu · giá bán · giá SX mong muốn; nút tắt thì nói lý do.
-  const form = readFileSync("app/(dashboard)/production/topics/new/topic-form.tsx", "utf8");
+  const form = readFileSync("app/(dashboard)/marketing/topics/new/topic-form.tsx", "utf8");
   assert.ok(form.includes("salePrice: soHoacNull(salePrice)") && form.includes("targetPrice: soHoacNull(targetPrice)"), "biểu mẫu gửi giá bán + giá SX mong muốn");
   assert.ok(!/setColors|setSizes|setTrims|setDeadline|setExpectedQty|setSupplierId|setFirstMessage/.test(form), "biểu mẫu không còn ô dư");
   assert.ok(form.includes("disabled={pending || chuaDu !== null}") && form.includes("{chuaDu ? <span"), "nút Mở topic tắt thì hiện lý do, không tắt im lặng");

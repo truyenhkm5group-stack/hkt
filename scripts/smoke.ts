@@ -192,6 +192,9 @@ const ROUTES = [
   "/marketing/fanpages",
   "/marketing/fanpages?tab=orders",
   "/marketing/fanpages?tab=assign",
+  // Topic gửi sản xuất (chủ shop 27/09/2026): danh sách "của tôi" + biểu mẫu mở topic của marketing.
+  "/marketing/topics",
+  "/marketing/topics/new",
   "/products/performance",
   "/reports/funnel",
   "/shipments/stock-wait",

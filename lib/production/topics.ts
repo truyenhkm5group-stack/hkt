@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import {
@@ -38,6 +38,10 @@ export type CreateTopicInput = {
   evidence: TopicEvidenceSnapshot;
   /** Lời mở đầu (tuỳ chọn) — thành lượt trao đổi đầu tiên. */
   firstMessage?: string | null;
+  /** Topic RIÊNG — chỉ người mở + người được tag + ADMIN xem (0153). Mặc định `false` = tầm nhìn cũ. */
+  restricted?: boolean;
+  /** Người được tag ngay lúc mở (khoá tài khoản; người mở tự bị loại vì đã là người trong topic). */
+  memberIds?: readonly string[];
   actor: Actor;
 };
 
@@ -61,9 +65,11 @@ export async function createTopicCore(db: Db, input: CreateTopicInput): Promise<
         evidenceSnapshot: input.evidence,
         createdByUserId: input.actor.id,
         createdBy: input.actor.label,
+        restricted: input.restricted ?? false,
         statusChangedAt: new Date(),
       })
       .returning({ id: tp.id });
+    await insertMembers(tx, row.id, input.memberIds ?? [], input.actor);
     const eventId = await emitDomainEvent(tx, {
       name: "production_topic.created",
       subjectType: "production_topic",
@@ -82,6 +88,48 @@ export async function createTopicCore(db: Db, input: CreateTopicInput): Promise<
   });
 
   return { ok: true, ...out };
+}
+
+/**
+ * Tag người vào topic. Trả đúng những người MỚI được thêm (đã có thì bỏ qua, người mở topic không cần tag,
+ * tài khoản tắt / không tồn tại bị loại) — để lượt gửi tin chỉ báo người thật sự mới.
+ */
+async function insertMembers(tx: DbLike, topicId: string, userIds: readonly string[], actor: Actor): Promise<string[]> {
+  const ids = [...new Set(userIds.map((x) => x.trim()).filter(Boolean))].filter((x) => x !== actor.id);
+  if (!ids.length) return [];
+  const [t] = await tx.select({ createdBy: tp.createdByUserId }).from(tp).where(eq(tp.id, topicId)).limit(1);
+  const live = await tx
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(and(inArray(schema.users.id, ids), eq(schema.users.active, true)));
+  const hopLe = live.map((u) => u.id).filter((x) => x !== t?.createdBy);
+  if (!hopLe.length) return [];
+  const rows = await tx
+    .insert(schema.productionTopicMembers)
+    .values(hopLe.map((userId) => ({ topicId, userId, addedByUserId: actor.id, addedBy: actor.label })))
+    .onConflictDoNothing({ target: [schema.productionTopicMembers.topicId, schema.productionTopicMembers.userId] })
+    .returning({ userId: schema.productionTopicMembers.userId });
+  return rows.map((r) => r.userId);
+}
+
+export async function addTopicMembersCore(db: Db, input: { topicId: string; userIds: readonly string[]; actor: Actor }): Promise<{ ok: true; added: string[] } | { error: string }> {
+  const loi = humanError(input.actor);
+  if (loi) return { error: loi };
+  const [t] = await db.select({ id: tp.id }).from(tp).where(eq(tp.id, input.topicId)).limit(1);
+  if (!t) return { error: "Không tìm thấy topic" };
+  const added = await db.transaction((tx) => insertMembers(tx, t.id, input.userIds, input.actor));
+  return { ok: true, added };
+}
+
+export async function removeTopicMemberCore(db: Db, input: { topicId: string; userId: string; actor: Actor }): Promise<{ ok: true; removed: boolean } | { error: string }> {
+  const loi = humanError(input.actor);
+  if (loi) return { error: loi };
+  const mb = schema.productionTopicMembers;
+  const rows = await db
+    .delete(mb)
+    .where(and(eq(mb.topicId, input.topicId), eq(mb.userId, input.userId)))
+    .returning({ id: mb.id });
+  return { ok: true, removed: rows.length > 0 };
 }
 
 type MessageRow = { topicId: string; modelId: string; kind: TopicMessageKind; body: string; attachments: string[]; quotedUnitPrice: number | null; actor: Actor; causationId?: string | null };

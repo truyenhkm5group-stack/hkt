@@ -244,15 +244,16 @@ export function testCompanyOsEarlyTopicPure() {
   // ─── 8. Quét mã nguồn: đường thật dùng đúng hàm ───
   const action = readFileSync("lib/actions/production-topics.ts", "utf8");
   assert.ok(action.includes("buildTopicOpenContext(") && action.includes("getModelSignal("), "server action chụp tín hiệu + vòng đời lúc mở topic");
-  assert.ok(/can\(user, "production:write"\)/.test(action), "mở topic vẫn cần production:write");
+  assert.ok(action.includes("if (!canOpenTopic(user))"), "mở topic cần quyền mở topic (marketing: production:topic-open · sản xuất: production:write)");
   const loader = readFileSync("lib/queries/owner-decisions.ts", "utf8");
   assert.ok(loader.includes("modelEarlyTopicToItems(modelEarlyTopicCandidates("), "nguồn tín hiệu mẫu sinh cả loại mở sớm");
   const tab = readFileSync("app/(dashboard)/marketing/creatives/design-tab.tsx", "utf8");
   assert.ok(tab.includes("canCreateTopic && EARLY_TOPIC_DESIGN_STATUSES.includes(r.status)"), "link topic ở tab Thiết kế chỉ với production:write và thiết kế đang test / thắng");
   assert.ok(tab.includes("Đồng bộ sổ mẫu trước") && !/syncModelRegistry|registerModel/.test(tab), "thiết kế chưa vào sổ ⇒ nhắc đồng bộ, KHÔNG tự đăng ký");
-  assert.ok(readFileSync("app/(dashboard)/marketing/creatives/page.tsx", "utf8").includes('canCreateTopic={can(user, "production:write")}'));
-  const newPage = readFileSync("app/(dashboard)/production/topics/new/page.tsx", "utf8");
-  assert.ok(newPage.includes('requirePermission("production:write")'), "biểu mẫu mở topic cần production:write");
+  // Chủ shop 27/09/2026: marketing mở topic (khoá hẹp `production:topic-open` hoặc `production:write`).
+  assert.ok(readFileSync("app/(dashboard)/marketing/creatives/page.tsx", "utf8").includes("canCreateTopic={canOpenTopic(user)}"));
+  const newPage = readFileSync("app/(dashboard)/marketing/topics/new/page.tsx", "utf8");
+  assert.ok(newPage.includes("if (!canOpenTopic(user)) redirect("), "biểu mẫu mở topic cần quyền mở topic");
   assert.ok(!/state\s*!==?\s*"(LOSER|DISCONTINUED)"|filter\(\(m\) => .*state/.test(newPage), "ô chọn mẫu KHÔNG lọc theo trạng thái (C không lọc)");
   const controls = readFileSync("app/(dashboard)/models/[id]/model-controls.tsx", "utf8");
   assert.ok(controls.includes('setFollowUp(to === "WINNER" ? winnerFollowUp : null)') && controls.includes("transitionModel({ modelId, to: followUp.to, reason: followUp.reason })"), "chuyển tiếp sau khai THẮNG: một cú bấm, đi qua transitionModel");

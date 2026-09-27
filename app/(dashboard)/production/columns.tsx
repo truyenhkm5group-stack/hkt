@@ -27,7 +27,17 @@ export const topicColumns: ColumnDef<TopicListRow, unknown>[] = [
     },
   },
   { id: "status", header: "Trạng thái", cell: ({ row }) => <TopicStatusBadge status={row.original.status} /> },
-  { id: "supplier", header: "Xưởng", enableSorting: false, cell: ({ row }) => <span className="text-sm">{row.original.supplierName ?? "—"}</span> },
+  {
+    id: "members",
+    header: "Người được tag",
+    enableSorting: false,
+    meta: { align: "right" },
+    cell: ({ row }) => (
+      <span className="tabular-nums" title={row.original.restricted ? "Topic riêng — chỉ người mở, người được tag và chủ shop xem được" : "Topic cũ — ai có quyền xem sản xuất cũng xem được"}>
+        {row.original.restricted ? `🔒 ${formatNumber(row.original.members)}` : formatNumber(row.original.members)}
+      </span>
+    ),
+  },
   {
     id: "lastQuote",
     header: "Báo giá gần nhất",

@@ -7,6 +7,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { getModelBrief, getModelProductionDesk, listSupplierOptions } from "@/lib/queries/production-os";
+import { canOpenTopic } from "@/lib/production/topic-access";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
 import { loadDesignPoShortcuts } from "@/lib/queries/production-shortcuts";
 
@@ -19,7 +20,7 @@ export const metadata = { title: "Bàn sản xuất của mẫu" };
 export default async function ModelProductionPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("planning:view");
   const { id } = await params;
-  const [model, desk, summary, suppliers] = await Promise.all([getModelBrief(id), getModelProductionDesk(id), getModelProductionSummary(id), listSupplierOptions()]);
+  const [model, desk, summary, suppliers] = await Promise.all([getModelBrief(id), getModelProductionDesk(id), getModelProductionSummary(id, user), listSupplierOptions()]);
   if (!model || !summary) notFound();
   const canWrite = can(user, "production:write");
   // Lối tắt "Lập lệnh SX" theo bản duyệt (Agent SC) — quyền của trình sửa lệnh (planning:write).
@@ -32,8 +33,8 @@ export default async function ModelProductionPage({ params }: { params: Promise<
         description="Giá thành · mẫu · bản thiết kế đã duyệt của mẫu này"
         actions={
           <div className="flex items-center gap-3">
-            {canWrite ? (
-              <Link href={`/production/topics/new?model=${model.id}`} className="text-sm text-primary hover:underline">
+            {canOpenTopic(user) ? (
+              <Link href={`/marketing/topics/new?model=${model.id}`} className="text-sm text-primary hover:underline">
                 Mở topic
               </Link>
             ) : null}
@@ -48,9 +49,15 @@ export default async function ModelProductionPage({ params }: { params: Promise<
           <ul className="divide-y text-sm">
             {summary.topics.map((t) => (
               <li key={t.id} className="flex flex-wrap items-center gap-2 py-2">
-                <Link href={`/production/topics/${t.id}`} className="font-medium underline-offset-2 hover:underline">
-                  {t.title}
-                </Link>
+                {t.hidden ? (
+                  <span className="italic text-muted-foreground" title="Topic riêng — chỉ người mở và người được tag xem được">
+                    Topic riêng
+                  </span>
+                ) : (
+                  <Link href={`/production/topics/${t.id}`} className="font-medium underline-offset-2 hover:underline">
+                    {t.title}
+                  </Link>
+                )}
                 <TopicStatusBadge status={t.status} />
                 <span className="text-xs text-muted-foreground">cập nhật {formatDateTime(t.updatedAt)}</span>
               </li>

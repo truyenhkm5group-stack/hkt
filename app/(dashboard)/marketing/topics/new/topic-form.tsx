@@ -7,6 +7,7 @@ import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PeoplePicker, type PickablePerson } from "@/app/(dashboard)/production/_components/people-picker";
 import { TopicFilePicker, uploadTopicFiles, UploadProgressBar, type UploadProgress } from "@/app/(dashboard)/production/_components/topic-files";
 import { createProductionTopic } from "@/lib/actions/production-topics";
 import { PROVISIONAL_CODE_PREFIX, PROVISIONAL_DEFAULT_STATE, PROVISIONAL_NAME_MIN } from "@/lib/constants/provisional-model";
@@ -37,15 +38,15 @@ export function TopicForm({
   fixedModelId,
   fixedModelLabel = null,
   fixedNotice = null,
-  canRegisterModel = false,
+  people,
 }: {
   models: TopicModelOption[];
   fixedModelId: string | null;
   /** Mã · tên của mẫu cố định (lối vào từ trang mẫu) — để đặt tiêu đề topic. */
   fixedModelLabel?: string | null;
   fixedNotice?: string | null;
-  /** Người có `models:write` mới đăng ký được mẫu mới (mã tạm) ngay từ đây. */
-  canRegisterModel?: boolean;
+  /** Tài khoản đang bật (trừ chính mình) — tag người cùng trao đổi. */
+  people: PickablePerson[];
 }) {
   const [modelId, setModelId] = useState(fixedModelId ?? "");
   const [newName, setNewName] = useState("");
@@ -54,6 +55,7 @@ export function TopicForm({
   const [material, setMaterial] = useState("");
   const [salePrice, setSalePrice] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [pending, start] = useNavTransition();
   const router = useRouter();
   const isNew = !fixedModelId && modelId === NEW_MODEL;
@@ -82,6 +84,7 @@ export function TopicForm({
           salePrice: soHoacNull(salePrice),
           targetPrice: soHoacNull(targetPrice),
         },
+        memberIds,
       });
       if ("error" in r) {
         toast.error(r.error);
@@ -105,7 +108,7 @@ export function TopicForm({
           <Label>Mẫu</Label>
           <select value={modelId} onChange={(e) => setModelId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
             <option value="">— Chọn mẫu trong sổ —</option>
-            {canRegisterModel ? <option value={NEW_MODEL}>＋ Mẫu mới chưa có mã (đang test — thắng mới lên mã)</option> : null}
+            <option value={NEW_MODEL}>＋ Mẫu mới chưa có mã (đang test — thắng mới lên mã)</option>
             {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.code}
@@ -116,9 +119,6 @@ export function TopicForm({
           </select>
         </div>
       )}
-      {!fixedModelId && !canRegisterModel ? (
-        <p className="text-xs text-muted-foreground sm:col-span-3">Mẫu mới chưa có mã: cần quyền “Vòng đời mẫu: khai &amp; đồng bộ” để đăng ký ngay tại đây.</p>
-      ) : null}
       {isNew ? (
         <div className="space-y-1 sm:col-span-3">
           <Label>Tên gọi tạm của mẫu</Label>
@@ -140,6 +140,11 @@ export function TopicForm({
       <div className="space-y-1">
         <Label>Giá SX mong muốn (đ/sp)</Label>
         <Input inputMode="numeric" value={targetPrice} onChange={(e) => setTargetPrice(e.target.value)} placeholder="bỏ trống = chưa đặt" />
+      </div>
+      <div className="space-y-1 sm:col-span-3">
+        <Label>Tag người cùng trao đổi</Label>
+        <p className="text-xs text-muted-foreground">Người được tag nhận thông báo ở quả chuông. Topic là topic riêng: chỉ bạn, người được tag và chủ shop xem được.</p>
+        <PeoplePicker people={people} value={memberIds} onChange={setMemberIds} disabled={pending} />
       </div>
       <div className="space-y-1 sm:col-span-3">
         <Label>Ảnh / video mẫu (tuỳ chọn)</Label>

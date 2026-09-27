@@ -74,6 +74,13 @@ export const PERMISSION_GROUPS = [
          · `production:approve` — CHỮ KÝ (target-architecture Q7a): duyệt / loại mẫu, chốt giá thành.
            Chỉ MANAGER (qua phép trừ) và ADMIN; vai trò tuỳ chỉnh KHÔNG cấp được (ROLE_BUILDER_FORBIDDEN).
       */
+      /*
+        Chủ shop 27/09/2026: MARKETING là người MỞ topic để trao đổi với sản xuất (mẫu thắng test → hỏi xưởng).
+        Khoá HẸP riêng thay vì cấp `production:write` cho marketing: nó chỉ mở topic (kể cả mẫu mới mang mã tạm
+        TEST-…) và tag người — KHÔNG lập giá thành, không ghi mẫu thử, không đổi vòng đời mẫu. Trong topic mình
+        mở hoặc được tag, người đó trao đổi và đính kèm được (lib/production/topic-access.ts).
+      */
+      { key: "production:topic-open", label: "Sản xuất: mở topic & tag người (MKT)", hint: "Mở topic hỏi sản xuất từ Marketing, đăng ký mẫu mới mã tạm, tag người vào trao đổi. Không gồm giá thành / mẫu thử." },
       { key: "production:write", label: "Sản xuất: topic, giá thành, mẫu", hint: "Mở topic hỏi giá xưởng, ghi trao đổi / báo giá, lập & sửa bảng giá thành nháp, ghi mẫu, gửi mẫu chờ duyệt, yêu cầu xưởng sửa mẫu" },
       { key: "production:approve", label: "Sản xuất: duyệt mẫu & chốt giá thành", hint: "Chữ ký bỏ vốn: duyệt / loại mẫu (sinh bản thiết kế bất biến), chốt bảng giá thành. Vai trò tuỳ chỉnh không cấp được quyền này." },
     ],
@@ -277,7 +284,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
@@ -290,7 +297,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   */
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
-  MARKETING: [...VIEW_ALL, "ideas:write", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
+  MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };
 

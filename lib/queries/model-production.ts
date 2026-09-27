@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { topicVisibleSql, type TopicViewer } from "@/lib/production/topic-access";
 import { TOPIC_OPEN_STATUSES, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
 
 /**
@@ -22,7 +23,11 @@ import { TOPIC_OPEN_STATUSES, type SampleStatus, type TopicStatus } from "@/lib/
 export type ModelProductionSummary = {
   modelId: string;
   productId: string | null;
-  topics: { id: string; title: string; status: TopicStatus; updatedAt: Date }[];
+  /**
+   * `hidden = true` ⇒ topic RIÊNG mà người đang xem không được tag: vẫn ĐẾM (mẫu có topic là sự thật về mẫu),
+   * nhưng tiêu đề bị xoá và không được dẫn link. Không truyền `viewer` ⇒ không ẩn gì (đường máy / bảng đếm).
+   */
+  topics: { id: string; title: string; status: TopicStatus; updatedAt: Date; hidden: boolean }[];
   openTopics: number;
   finalCosting: { id: string; version: number; totalUnitCost: number; finalizedAt: Date | null; finalizedBy: string } | null;
   /** Số phiên bản giá thành còn NHÁP (chưa chốt). */
@@ -36,8 +41,8 @@ export type ModelProductionSummary = {
 export const RECEIVED_BASIS =
   "Đã nhận = tổng dòng phiếu NHẬP HÀNG đã nối vào lệnh (stock_receipts.production_order_id). Lệnh chưa có phiếu nào nối ⇒ “—” (chưa biết), vì phiếu nhập trước khi có cột này không được nối ngược.";
 
-export async function getModelProductionSummary(modelId: string): Promise<ModelProductionSummary | null> {
-  return (await getModelProductionSummariesBatch([modelId])).get(modelId) ?? null;
+export async function getModelProductionSummary(modelId: string, viewer?: TopicViewer): Promise<ModelProductionSummary | null> {
+  return (await getModelProductionSummariesBatch([modelId], viewer)).get(modelId) ?? null;
 }
 
 /**
@@ -45,7 +50,8 @@ export async function getModelProductionSummary(modelId: string): Promise<ModelP
  * rồi cắt theo mẫu. `getModelProductionSummary` gọi chính hàm này với một mẫu — không có công thức thứ hai.
  * Mẫu không tồn tại ⇒ không có trong bản đồ (bản một mẫu trả `null`).
  */
-export async function getModelProductionSummariesBatch(modelIds: readonly string[]): Promise<Map<string, ModelProductionSummary>> {
+export async function getModelProductionSummariesBatch(modelIds: readonly string[], viewer?: TopicViewer): Promise<Map<string, ModelProductionSummary>> {
+  const nhin = viewer ? topicVisibleSql(viewer) : undefined;
   const out = new Map<string, ModelProductionSummary>();
   const ids = [...new Set(modelIds)];
   if (!ids.length) return out;
@@ -63,7 +69,11 @@ export async function getModelProductionSummariesBatch(modelIds: readonly string
   const productIds = [...new Set(models.map((m) => m.productId).filter((x): x is string => !!x))];
 
   const [topics, finals, drafts, samples, designs, orders] = await Promise.all([
-    db.select({ modelId: tp.modelId, id: tp.id, title: tp.title, status: tp.status, updatedAt: tp.updatedAt }).from(tp).where(inArray(tp.modelId, found)).orderBy(desc(tp.updatedAt)),
+    db
+      .select({ modelId: tp.modelId, id: tp.id, title: tp.title, status: tp.status, updatedAt: tp.updatedAt, visible: nhin ? sql<boolean>`(${nhin})` : sql<boolean>`true` })
+      .from(tp)
+      .where(inArray(tp.modelId, found))
+      .orderBy(desc(tp.updatedAt)),
     // Bản CHỐT mới nhất của từng mẫu (phiên bản lớn nhất) — `distinct on` = `limit 1` theo từng mẫu.
     db
       .selectDistinctOn([cs.modelId], { modelId: cs.modelId, id: cs.id, version: cs.version, totalUnitCost: cs.totalUnitCost, finalizedAt: cs.finalizedAt, finalizedBy: cs.finalizedBy })
@@ -115,7 +125,7 @@ export async function getModelProductionSummariesBatch(modelIds: readonly string
   for (const o of orders) if (o.productId) ordersOf.set(o.productId, [...(ordersOf.get(o.productId) ?? []), o]);
 
   for (const m of models) {
-    const t = (topicsOf.get(m.id) ?? []).map(({ id, title, status, updatedAt }) => ({ id, title, status: status as TopicStatus, updatedAt }));
+    const t = (topicsOf.get(m.id) ?? []).map(({ id, title, status, updatedAt, visible }) => ({ id, title: visible === false ? "" : title, status: status as TopicStatus, updatedAt, hidden: visible === false }));
     const f = finalOf.get(m.id);
     const s = sampleOf.get(m.id);
     const d = designOf.get(m.id);

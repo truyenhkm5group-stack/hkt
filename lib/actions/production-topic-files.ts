@@ -4,15 +4,16 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { audit } from "@/lib/audit";
-import { can, requireUser, type SessionUser } from "@/lib/auth/session";
+import { requireUser, type SessionUser } from "@/lib/auth/session";
 import type { Actor } from "@/lib/constants/actor";
 import { TOPIC_FILE_CHUNK_BYTES } from "@/lib/constants/production-files";
+import { loadTopicAccess, topicIdOfFile } from "@/lib/production/topic-access";
 import { finishTopicFileCore, putTopicFileChunkCore, removeTopicFileCore, startTopicFileCore } from "@/lib/production/topic-files";
 
 /**
  * ═══════════ SERVER ACTION: ẢNH / VIDEO ĐÍNH KÈM TOPIC SẢN XUẤT ═══════════
  *
- * `requireUser` → `can("production:write")` → zod → lõi (`lib/production/topic-files.ts`) → `audit()` →
+ * `requireUser` → quyền GHI theo topic (`loadTopicAccess().post` — người mở, người được tag, sản xuất) → zod → lõi (`lib/production/topic-files.ts`) → `audit()` →
  * `revalidatePath`. Gửi khúc KHÔNG audit / không làm mới trang (mười mấy lượt cho một video) — chỉ lượt
  * HOÀN TẤT và lượt GỠ mới là sự việc người đọc cần thấy.
  */
@@ -22,10 +23,18 @@ function actorOf(user: { id: string; name: string | null; email: string }): Acto
   return { id: user.id, label: user.name || user.email };
 }
 
-async function nguoiGhi(): Promise<{ ok: true; user: SessionUser } | { ok: false; error: string }> {
+/** Người đang đăng nhập có ghi được vào topic này không. Hỏi theo TOPIC (topic riêng chỉ người trong topic). */
+async function nguoiGhi(topicId: string | null): Promise<{ ok: true; user: SessionUser } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!can(user, "production:write")) return { ok: false, error: "Không có quyền đính kèm tệp vào topic sản xuất" };
+  if (!topicId) return { ok: false, error: "Không tìm thấy tệp / topic" };
+  const acc = await loadTopicAccess(await getDb(), topicId, user);
+  if (!acc) return { ok: false, error: "Không tìm thấy topic" };
+  if (!acc.post) return { ok: false, error: "Không có quyền đính kèm tệp vào topic này" };
   return { ok: true, user };
+}
+
+async function nguoiGhiTheoTep(fileId: string) {
+  return nguoiGhi(fileId ? await topicIdOfFile(await getDb(), fileId) : null);
 }
 
 const startSchema = z.object({
@@ -36,10 +45,10 @@ const startSchema = z.object({
 });
 
 export async function startTopicFileUpload(input: unknown): Promise<Result<{ fileId: string; chunkCount: number; chunkBytes: number }>> {
-  const g = await nguoiGhi();
-  if (!g.ok) return { error: g.error };
   const parsed = startSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const g = await nguoiGhi(parsed.data.topicId);
+  if (!g.ok) return { error: g.error };
   const db = await getDb();
   const r = await startTopicFileCore(db, { ...parsed.data, actor: actorOf(g.user) });
   if ("error" in r) return r;
@@ -48,9 +57,9 @@ export async function startTopicFileUpload(input: unknown): Promise<Result<{ fil
 
 /** `FormData`: `fileId`, `seq`, `chunk` (Blob ≤ 2 MB). */
 export async function uploadTopicFileChunk(form: FormData): Promise<Result> {
-  const g = await nguoiGhi();
-  if (!g.ok) return { error: g.error };
   const fileId = String(form.get("fileId") ?? "");
+  const g = await nguoiGhiTheoTep(fileId);
+  if (!g.ok) return { error: g.error };
   const seq = Number(form.get("seq"));
   const chunk = form.get("chunk");
   if (!fileId || !(chunk instanceof Blob)) return { error: "Thiếu khúc tệp" };
@@ -60,7 +69,7 @@ export async function uploadTopicFileChunk(form: FormData): Promise<Result> {
 }
 
 export async function finishTopicFileUpload(fileId: string): Promise<Result> {
-  const g = await nguoiGhi();
+  const g = await nguoiGhiTheoTep(fileId);
   if (!g.ok) return { error: g.error };
   const db = await getDb();
   const r = await finishTopicFileCore(db, { fileId, actor: actorOf(g.user) });
@@ -71,7 +80,7 @@ export async function finishTopicFileUpload(fileId: string): Promise<Result> {
 }
 
 export async function removeTopicFile(fileId: string): Promise<Result> {
-  const g = await nguoiGhi();
+  const g = await nguoiGhiTheoTep(fileId);
   if (!g.ok) return { error: g.error };
   const db = await getDb();
   const r = await removeTopicFileCore(db, { fileId, actor: actorOf(g.user) });

@@ -506,7 +506,7 @@ export async function testCompanyOsProductionDb(db: Db) {
   }
 
   // Hàm đọc của màn hình chạy được trên dữ liệu thật (câu con tương quan không được mơ hồ cột).
-  const ds = await listTopics({ page: 1, pageSize: 25, sort: "updatedAt", dir: "desc", q: "COSC", filters: {}, period: { from: null, to: null, key: "all", label: "", fromKey: null, toKey: null } } satisfies ListParams);
+  const ds = await listTopics({ page: 1, pageSize: 25, sort: "updatedAt", dir: "desc", q: "COSC", filters: {}, period: { from: null, to: null, key: "all", label: "", fromKey: null, toKey: null } } satisfies ListParams, { id: `${P}nguoi-xem`, role: "LEADER", permissions: ["planning:view"] });
   const dong1 = ds.rows.find((r) => r.id === t.topicId);
   assert.equal(dong1?.messages, 6, "danh sách đếm đúng số lượt trao đổi của TỪNG topic");
   assert.equal(dong1?.lastQuote, 118_000, "báo giá gần nhất đọc từ lượt QUOTE");

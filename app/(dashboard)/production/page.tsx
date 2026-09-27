@@ -4,7 +4,8 @@ import { TopicsTable } from "@/app/(dashboard)/production/topics-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { can, requirePermission } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
+import { canOpenTopic } from "@/lib/production/topic-access";
 import { formatNumber } from "@/lib/format";
 import { listTopics, TOPIC_SORTABLE, topicStatusFacets } from "@/lib/queries/production-os";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -19,9 +20,10 @@ export const metadata = { title: "Topic sản xuất" };
  */
 export default async function ProductionTopicsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("planning:view");
+  // Topic RIÊNG chỉ hiện với người mở, người được tag và ADMIN (lib/production/topic-access.ts).
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "updatedAt", defaultDir: "desc", filterKeys: ["status", "open"], sortable: TOPIC_SORTABLE, defaultPeriod: "all" });
-  const [{ rows, total, pageCount }, facets] = await Promise.all([listTopics(params), topicStatusFacets()]);
+  const [{ rows, total, pageCount }, facets] = await Promise.all([listTopics(params, user), topicStatusFacets(user)]);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -35,9 +37,10 @@ export default async function ProductionTopicsPage({ searchParams }: { searchPar
           </>
         }
         actions={
-          can(user, "production:write") ? (
+          // Chủ shop 27/09/2026: marketing là người mở topic — nút dẫn sang biểu mẫu bên Marketing.
+          canOpenTopic(user) ? (
             <Button asChild size="sm">
-              <Link href="/production/topics/new">
+              <Link href="/marketing/topics/new">
                 <Plus className="size-4" /> Mở topic
               </Link>
             </Button>

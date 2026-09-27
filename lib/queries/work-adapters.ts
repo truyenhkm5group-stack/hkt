@@ -943,7 +943,9 @@ export async function adaptProductionTopics(now: Date): Promise<WorkItem[]> {
     .select({ id: t.id, title: t.title, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, modelCode: schema.productModels.code, modelId: t.modelId })
     .from(t)
     .innerJoin(schema.productModels, eq(schema.productModels.id, t.modelId))
-    .where(inArray(t.status, [...TOPIC_OPEN_STATUSES]))
+    // Topic RIÊNG (0153) không lên hàng đợi phòng: hàng đợi không biết ai đang xem, còn topic riêng chỉ người
+    // được tag mới được thấy — kể cả tiêu đề. Người trong topic nhận tin ở hộp thư cá nhân thay thế.
+    .where(and(inArray(t.status, [...TOPIC_OPEN_STATUSES]), eq(t.restricted, false)))
     .limit(500);
   const ms = now.getTime();
   return rows.map((r) => {

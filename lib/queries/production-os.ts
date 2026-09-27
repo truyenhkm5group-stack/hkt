@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { REQUIRE_APPROVED_DESIGN_KEY, TOPIC_OPEN_STATUSES, TOPIC_STATUSES, TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
 import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { designOptionsForProduct } from "@/lib/production/orders";
+import { topicVisibleSql, type TopicViewer } from "@/lib/production/topic-access";
 import { getSettingJson } from "@/lib/settings";
 import type { ListParams } from "@/lib/search-params";
 
@@ -43,11 +44,18 @@ export type TopicListRow = {
   updatedAt: Date;
   messages: number;
   lastQuote: number | null;
+  restricted: boolean;
+  members: number;
 };
 
-export async function listTopics(params: ListParams): Promise<{ rows: TopicListRow[]; total: number; pageCount: number }> {
+/** `viewer` BẮT BUỘC: topic riêng chỉ hiện với người mở, người được tag và ADMIN (`topicVisibleSql`). */
+export async function listTopics(params: ListParams, viewer: TopicViewer, opts: { mine?: boolean } = {}): Promise<{ rows: TopicListRow[]; total: number; pageCount: number }> {
   const db = await getDb();
   const conds: SQL[] = [];
+  const nhin = topicVisibleSql(viewer);
+  if (nhin) conds.push(nhin);
+  // "Của tôi" (trang Marketing): topic mình mở hoặc được tag — kể cả với ADMIN.
+  if (opts.mine) conds.push(or(eq(tp.createdByUserId, viewer.id), sql`exists (select 1 from ${schema.productionTopicMembers} m where m.topic_id = "production_topics"."id" and m.user_id = ${viewer.id})`)!);
   const st = (params.filters.status ?? []).filter((s): s is TopicStatus => (TOPIC_STATUSES as readonly string[]).includes(s));
   if (st.length) conds.push(inArray(tp.status, st));
   if (params.filters.open?.includes("1")) conds.push(inArray(tp.status, [...TOPIC_OPEN_STATUSES]));
@@ -73,6 +81,8 @@ export async function listTopics(params: ListParams): Promise<{ rows: TopicListR
         updatedAt: tp.updatedAt,
         messages: sql<number>`(select count(*)::int from ${schema.productionTopicMessages} m where m.topic_id = "production_topics"."id")`,
         lastQuote: sql<number | null>`(select m.quoted_unit_price from ${schema.productionTopicMessages} m where m.topic_id = "production_topics"."id" and m.kind = 'QUOTE' order by m.created_at desc limit 1)`,
+        restricted: tp.restricted,
+        members: sql<number>`(select count(*)::int from ${schema.productionTopicMembers} m where m.topic_id = "production_topics"."id")`,
       })
       .from(tp)
       .innerJoin(pm, eq(pm.id, tp.modelId))
@@ -84,15 +94,15 @@ export async function listTopics(params: ListParams): Promise<{ rows: TopicListR
     db.select({ total: count() }).from(tp).innerJoin(pm, eq(pm.id, tp.modelId)).where(where),
   ]);
   return {
-    rows: rows.map((r) => ({ ...r, status: r.status as TopicStatus, messages: Number(r.messages), lastQuote: r.lastQuote === null ? null : Number(r.lastQuote) })),
+    rows: rows.map((r) => ({ ...r, status: r.status as TopicStatus, messages: Number(r.messages), members: Number(r.members), lastQuote: r.lastQuote === null ? null : Number(r.lastQuote) })),
     total: Number(total),
     pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)),
   };
 }
 
-export async function topicStatusFacets(): Promise<{ value: string; label: string; count: number }[]> {
+export async function topicStatusFacets(viewer: TopicViewer): Promise<{ value: string; label: string; count: number }[]> {
   const db = await getDb();
-  const rows = await db.select({ status: tp.status, n: count() }).from(tp).groupBy(tp.status);
+  const rows = await db.select({ status: tp.status, n: count() }).from(tp).where(topicVisibleSql(viewer)).groupBy(tp.status);
   const by = new Map(rows.map((r) => [r.status, Number(r.n)]));
   return TOPIC_STATUSES.map((s) => ({ value: s, label: TOPIC_STATUS_LABEL[s], count: by.get(s) ?? 0 }));
 }
@@ -176,6 +186,30 @@ export async function getTopicDetail(topicId: string) {
     getModelProductionDesk(t.topic.modelId),
   ]);
   return { topic: { ...t.topic, status: t.topic.status as TopicStatus, supplierName: t.supplierName }, model, messages, ...desk };
+}
+
+export type TopicMemberRow = { userId: string; name: string; email: string; active: boolean; addedBy: string; createdAt: Date };
+
+/** Người được tag trong topic (người mở KHÔNG nằm ở đây — xem `production_topics.created_by_user_id`). */
+export async function listTopicMembers(topicId: string): Promise<TopicMemberRow[]> {
+  const db = await getDb();
+  const mb = schema.productionTopicMembers;
+  return db
+    .select({ userId: mb.userId, name: schema.users.name, email: schema.users.email, active: schema.users.active, addedBy: mb.addedBy, createdAt: mb.createdAt })
+    .from(mb)
+    .innerJoin(schema.users, eq(schema.users.id, mb.userId))
+    .where(eq(mb.topicId, topicId))
+    .orderBy(asc(mb.createdAt));
+}
+
+export type TaggableUser = { id: string; name: string; email: string; role: string };
+
+/** Tài khoản đang bật — ô chọn người để tag (chọn nhiều). */
+export async function listTaggableUsers(): Promise<TaggableUser[]> {
+  const db = await getDb();
+  const u = schema.users;
+  const rows = await db.select({ id: u.id, name: u.name, email: u.email, role: u.role }).from(u).where(eq(u.active, true)).orderBy(asc(u.name), asc(u.email)).limit(500);
+  return rows.map((r) => ({ ...r, name: r.name ?? "", role: String(r.role) }));
 }
 
 /** Bản duyệt chọn được cho lệnh của một sản phẩm — trình sửa lệnh SX dùng. */

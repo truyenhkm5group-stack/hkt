@@ -32,6 +32,7 @@ import { loadSource, mergeTimelines } from "@/lib/constants/model-360";
 import { modelBlockAccess } from "@/lib/models/block-access";
 import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
+import { canOpenTopic } from "@/lib/production/topic-access";
 import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getModelLinkedIdeas, ideaTimelineEntries } from "@/lib/queries/model-360";
@@ -105,7 +106,8 @@ export default async function ModelDetailPage({ params, searchParams }: { params
     periodQuery: periodQueryOf(range),
     allowed,
     canWrite,
-    canCreateTopic: can(user, "production:write"),
+    canCreateTopic: canOpenTopic(user),
+    viewer: user,
   };
 
   return (

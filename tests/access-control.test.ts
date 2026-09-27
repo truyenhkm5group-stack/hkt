@@ -72,11 +72,17 @@ export function testAccessControl() {
       quyền rồi mới quyết, nên nó là một lượt hỏi quyền đầy đủ chứ không phải một lối vòng. Đòi
       ĐỦ HAI THỨ — tính phạm vi VÀ có câu chặn dựa trên phạm vi ấy — vì một tuyến tính ra phạm vi
       rồi không dùng nó thì vẫn đang mở toang.
+
+      Dạng thứ tư là QUYỀN THEO ĐỐI TƯỢNG (`lib/production/topic-access.ts`, chủ shop 27/09/2026): topic
+      riêng chỉ người mở + người được tag + ADMIN xem được, nên câu hỏi không còn là "có khoá quyền không"
+      mà là "có được xem CHÍNH topic này không" — máy tính ấy hỏi khoá quyền qua `can()` bên trong. Cũng
+      đòi ĐỦ HAI THỨ: tính quyền của topic VÀ câu chặn dựa trên `.view` của nó.
     */
     const coQuyen =
       /can\(\s*user\s*,\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
       /requirePermission\(\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
-      (/resolvePayrollScope\(\s*user\s*\)/.test(src) && /can(?:Open|SeeAll)Payroll\(/.test(src));
+      (/resolvePayrollScope\(\s*user\s*\)/.test(src) && /can(?:Open|SeeAll)Payroll\(/.test(src)) ||
+      (/loadTopicAccess\(.*, user\)/.test(src) && /if \(!acc\?\.view\)/.test(src));
     assert.ok(
       coQuyen,
       `${file}: chỉ kiểm tra phiên đăng nhập là chưa đủ — phải hỏi đúng quyền của module. Menu ẩn không khoá được đường dẫn.`,

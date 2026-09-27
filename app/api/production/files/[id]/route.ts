@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiGuard } from "@/lib/auth/api-guard";
-import { can } from "@/lib/auth/session";
 import { parseByteRange, TOPIC_FILE_CHUNK_BYTES } from "@/lib/constants/production-files";
+import { getDb } from "@/db";
+import { loadTopicAccess } from "@/lib/production/topic-access";
 import { getTopicFileMeta, readTopicFileRange } from "@/lib/queries/production-files";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +10,9 @@ export const dynamic = "force-dynamic";
 /**
  * Phục vụ ảnh / video đính kèm topic sản xuất (`production_topic_files`).
  *
- * Tệp nằm trong CSDL nên phải đi qua đây; vẫn đòi phiên đăng nhập + quyền xem sản xuất (`planning:view`,
- * cùng quyền của trang topic) — ảnh mẫu chưa ra mắt là tài liệu nội bộ.
+ * Tệp nằm trong CSDL nên phải đi qua đây; đòi phiên đăng nhập + quyền XEM CHÍNH TOPIC chứa tệp
+ * (`loadTopicAccess` — cùng luật với trang topic: topic riêng chỉ người mở, người được tag và ADMIN) — ảnh
+ * mẫu chưa ra mắt là tài liệu nội bộ.
  *
  * Hỗ trợ `Range`: Safari KHÔNG phát video nếu máy chủ không trả 206, và tua video chỉ xin đúng đoạn cần.
  * Khoảng mở (`bytes=0-`, cái trình duyệt gửi đầu tiên) được cắt còn tối đa 2 khúc — trả ít hơn khoảng xin
@@ -25,10 +27,11 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   const guard = await apiGuard(null, { format: "text" });
   if (guard instanceof Response) return guard;
   const { user } = guard;
-  if (!can(user, "planning:view")) return new NextResponse("Không có quyền xem sản xuất", { status: 403 });
   const { id } = await ctx.params;
   const meta = await getTopicFileMeta(id);
   if (!meta) return new NextResponse("Không tìm thấy tệp", { status: 404 });
+  const acc = await loadTopicAccess(await getDb(), meta.topicId, user);
+  if (!acc?.view) return new NextResponse("Không có quyền xem topic này", { status: 403 });
 
   const headers: Record<string, string> = {
     "content-type": meta.contentType,

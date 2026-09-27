@@ -146,6 +146,13 @@ export const NAV_MODULES = [
     why: "Thư viện Media (trước 26/09/2026 tên \"Vòng mẫu QC\"): ảnh nguồn → máy dựng lô → duyệt → test → chấm → học. Người chạy quảng cáo nạp ảnh, khai luật tắt/giữ và duyệt lô.",
   },
   {
+    href: "/marketing/topics",
+    label: "Topic gửi sản xuất",
+    zone: "MARKETING",
+    permission: "production:topic-open",
+    why: "Chủ shop 27/09/2026: marketer là người MỞ topic — mẫu thắng test cần hỏi giá, chất liệu, giá sản xuất mong muốn — và tag người sản xuất vào trao đổi. Phòng Sản xuất vẫn giữ màn hình \"Topic sản xuất\" để làm việc với xưởng.",
+  },
+  {
     href: "/marketing/fanpages",
     label: "Fanpage & quy kết MKT",
     zone: "MARKETING",
