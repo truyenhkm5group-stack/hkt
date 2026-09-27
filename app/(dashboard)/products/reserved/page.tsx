@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { requireResource } from "@/lib/auth/scope-guard";
-import { ORDER_STAGE_LABEL, pancakeConversationUrl, pancakePosOrderUrl } from "@/lib/constants/pancake";
+import { ORDER_STAGE_LABEL, pancakeConversationUrl, pancakePosOrderSearchUrl, pancakePosOrderUrlFromLink } from "@/lib/constants/pancake";
 import { VALIDATION_RULES, type ValidationCode } from "@/lib/constants/preship-validation";
 import { getViettelPostTrackingUrl, SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, maskPhone } from "@/lib/format";
@@ -258,7 +258,8 @@ function FindingList({ findings, className, prefix }: { findings: ReservedLineFi
 function LinksCell({ line }: { line: ReservedQueueLine }) {
   const links = [
     { label: "Chat", href: pancakeConversationUrl(line.pageId, line.conversationId), title: "Mở hội thoại của khách trên Pancake" },
-    { label: "POS", href: pancakePosOrderUrl(line.orderId, line.shopId), title: "Mở đơn trên POS Pancake" },
+    // Đường dẫn Pancake tự gửi (mã nội bộ POS); thiếu thì mở danh sách đơn của shop lọc theo số đơn.
+    { label: "POS", href: pancakePosOrderUrlFromLink(line.posOrderLink) ?? pancakePosOrderSearchUrl(line.shopId, line.systemId), title: "Mở đơn trên POS Pancake" },
     { label: "VTP", href: getViettelPostTrackingUrl(line.shipmentCode), title: "Tra cứu vận đơn trên viettelpost.vn" },
   ];
   return (

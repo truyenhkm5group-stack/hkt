@@ -148,7 +148,8 @@ export const SOURCE_COLORS: Record<string, string> = {
  * cũng 404, còn `/shop/orders?search=` thiếu mã shop nên POS đọc chữ "orders" thành mã shop.
  *
  * Mẫu đúng đọc từ CHÍNH mã web POS (27/09/2026, bản dựng ea924942): trang đơn là `/shop/<id>/order`,
- * hàm `getOrderUrl` của POS dựng `…/order?order_id=<id đơn>` (đúng `orders.id` ERP lưu), còn
+ * hàm `getOrderUrl` của POS dựng `…/order?order_id=<MÃ NỘI BỘ POS>` — KHÔNG phải `orders.id` (xem
+ * `pancakePosOrderUrlFromLink`: mã ấy chỉ có trong `order_link` Pancake gửi kèm đơn), còn
  * `?o_c_i=<từ khoá>` là tham số POS đọc từ URL để lọc danh sách đơn. Trang sản phẩm là
  * `/shop/<id>/product/management`. `tests/pancake-links.test.ts` chặn đường dẫn gõ tay ở nơi khác.
  */
@@ -160,13 +161,37 @@ function posShop(shopId: string | null | undefined): string | null {
 }
 
 /**
- * MỘT ĐƠN TRÊN POS. Không biết shop của đơn ⇒ `null` và nơi gọi KHÔNG vẽ liên kết: mở nhầm shop là
- * người trực tìm mãi không thấy đơn rồi kết luận đơn không có trên POS.
+ * MỘT ĐƠN TRÊN POS — dựng từ `order_link` PANCAKE TỰ GỬI trong mỗi đơn (`orders.raw.order_link`),
+ * KHÔNG từ `orders.id`.
+ *
+ * Web POS mở một đơn bằng MÃ NỘI BỘ, khác mã của API. Đo production 28/09/2026: đơn API `id = 4063`
+ * (`system_id` cũng 4063) có `order_link = …/shop/408063069/order?order_id=10920003274`; mở bằng
+ * `order_id=4063` thì POS ra danh sách trống. Mã nội bộ không nằm ở cột nào khác, nhưng 3.866/3.866
+ * đơn đều có `order_link`. Nên hàm này KHÔNG nhận `orders.id` — không có đường nào để dùng nhầm lại.
+ *
+ * Chỉ nhận đường dẫn đúng hình dạng `/shop/<số>/order?order_id=<số>` trên pos.pages.fm hoặc
+ * pos.pancake.vn, rồi dựng lại trên `PANCAKE_POS_WEB` (pos.pages.fm vốn chỉ chuyển hướng sang đó).
+ * Sai hình dạng ⇒ `null`: nơi gọi rơi về `pancakePosOrderSearchUrl` (tìm theo số đơn).
  */
-export function pancakePosOrderUrl(orderId: string, shopId: string | null | undefined): string | null {
-  const shop = posShop(shopId);
-  if (!shop || !orderId) return null;
-  return `${shop}/order?order_id=${encodeURIComponent(orderId)}`;
+export function pancakePosOrderUrlFromLink(orderLink: unknown): string | null {
+  if (typeof orderLink !== "string" || !orderLink.trim()) return null;
+  let u: URL;
+  try {
+    u = new URL(orderLink.trim());
+  } catch {
+    return null;
+  }
+  if (!["pos.pages.fm", "pos.pancake.vn"].includes(u.hostname)) return null;
+  const shop = /^\/shop\/(\d+)\/order\/?$/.exec(u.pathname)?.[1];
+  const posOrderId = u.searchParams.get("order_id");
+  if (!shop || !posOrderId || !/^\d+$/.test(posOrderId)) return null;
+  return `${posShop(shop)}/order?order_id=${posOrderId}`;
+}
+
+/** Cùng hàm trên, đọc thẳng từ bản ghi thô Pancake của đơn (`orders.raw`). */
+export function pancakePosOrderUrlFromRaw(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  return pancakePosOrderUrlFromLink((raw as { order_link?: unknown }).order_link);
 }
 
 /** DANH SÁCH ĐƠN của shop, lọc sẵn theo một từ khoá (số đơn, SĐT…). Không có từ khoá ⇒ danh sách trần. */
