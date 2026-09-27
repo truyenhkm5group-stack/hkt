@@ -76,6 +76,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   RECOMMENDATION_DECIDED: "Phản ứng với đề xuất (Cần anh quyết)",
   // Company OS · sổ mẫu & vòng đời (lib/actions/models.ts).
   MODEL_STATE_CHANGE: "Khai / chuyển trạng thái vòng đời mẫu",
+  MODEL_BULK_DECLARE: "Khai trạng thái mẫu theo gợi ý của ERP (người xác nhận)",
   MODEL_OWNER_CHANGE: "Đổi người phụ trách mẫu",
   MODEL_REGISTER: "Đăng ký mẫu mới vào sổ",
   MODEL_REGISTRY_SYNC: "Đồng bộ sổ mẫu (bấm tay)",

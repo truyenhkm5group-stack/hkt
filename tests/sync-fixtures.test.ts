@@ -312,6 +312,7 @@ import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./compan
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testCompanyOsEvidenceGapsDb, testCompanyOsEvidenceGapsPure } from "./company-os-evidence-gaps.test";
+import { testCompanyOsBulkDeclareDb, testCompanyOsBulkDeclarePure, testCompanyOsBulkDeclareSource } from "./company-os-bulk-declare.test";
 import { testProductionTopicFilesDb, testProductionTopicFilesPure } from "./production-topic-files.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
@@ -1982,6 +1983,10 @@ async function main() {
   // Company OS · Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất khai mà ERP không có chứng từ · phiếu nhập chưa nối có lệnh SX khớp (mã `cos-p2-`, tự dọn; ngày cố định 2001).
   testCompanyOsEvidenceGapsPure();
   await testCompanyOsEvidenceGapsDb(db);
+  // Company OS · Agent Q: "Khai theo gợi ý" — chứng cứ theo lô = từng mẫu, người xác nhận gợi ý, hàng rào màn hình cũ (mã `cos-q-` / `COSQ`, tự dọn).
+  testCompanyOsBulkDeclarePure();
+  testCompanyOsBulkDeclareSource();
+  await testCompanyOsBulkDeclareDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

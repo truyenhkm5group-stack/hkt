@@ -6,7 +6,9 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { BULK_DECLARE_MAX, BULK_DECLARE_SOURCE, modelSuggestSource, type DeclareRowResult } from "@/lib/constants/model-bulk-declare";
 import { MODEL_STATES } from "@/lib/constants/model-lifecycle";
+import { declareModelsFromSuggestionCore } from "@/lib/models/bulk-declare";
 import { assignModelCodeCore, registerModelCore, setModelOwnerCore, transitionModelCore } from "@/lib/models/service";
 import { runModelRegistryJob } from "@/lib/models/registry-job";
 
@@ -188,4 +190,57 @@ export async function runModelRegistrySync(): Promise<{ ok: true; inserted: numb
   });
   modelPaths();
   return { ok: true, inserted: ket.result.inserted, linked: ket.result.linked, ambiguous: ket.result.ambiguous.length, failed: ket.result.failed.length };
+}
+
+const declareInput = z.object({
+  items: z
+    .array(z.object({ modelId: z.string().min(1), state: z.enum(MODEL_STATES), expectedState: z.null() }))
+    .min(1, "Chưa chọn mẫu nào")
+    .max(BULK_DECLARE_MAX, `Mỗi lượt khai tối đa ${BULK_DECLARE_MAX} mẫu`)
+    .refine((xs) => new Set(xs.map((x) => x.modelId)).size === xs.length, "Một mẫu xuất hiện hai lần trong lượt khai"),
+  reason: z.string().max(1000),
+  /** `list` = bảng gợi ý trên /models · `detail` = trang một mẫu. Chỉ đổi NGUỒN ghi vào lịch sử. */
+  from: z.enum(["list", "detail"]).optional(),
+});
+
+/**
+ * KHAI THEO GỢI Ý (Company OS · Agent Q): người xác nhận — hoặc chọn khác — giai đoạn máy ước tính cho các
+ * mẫu CHƯA KHAI. Chỉ chạy khi có cú bấm; máy không bao giờ tự gọi. Dòng nào đã có người khai trong lúc màn
+ * hình còn mở thì BỎ QUA và báo lại, không đè. Mỗi mẫu một giao dịch; một dòng hỏng không kéo dòng khác.
+ */
+export async function declareModelsFromSuggestion(input: unknown): Promise<{ ok: true; declared: number; results: DeclareRowResult[] } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "models:write")) return { error: "Không đủ quyền khai trạng thái vòng đời mẫu" };
+  const parsed = declareInput.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+
+  const db = await getDb();
+  const source = d.from === "detail" && d.items.length === 1 ? modelSuggestSource(d.items[0].modelId) : BULK_DECLARE_SOURCE;
+  const r = await declareModelsFromSuggestionCore(db, { items: d.items, reason: d.reason, actor: { id: user.id, label: user.name || user.email }, source });
+  if ("error" in r) return { error: r.error };
+
+  // Một dòng nhật ký tóm tắt cho cả lượt; từng mẫu đã có dòng lịch sử vòng đời riêng (lõi ghi).
+  if (r.declared) {
+    await audit({
+      userId: user.id,
+      userEmail: user.email,
+      action: "MODEL_BULK_DECLARE",
+      entity: "PRODUCT_MODEL",
+      before: null,
+      after: {
+        source,
+        declared: r.declared,
+        accepted: r.results.filter((x) => x.outcome === "DECLARED" && x.accepted).length,
+        overridden: r.results.filter((x) => x.outcome === "DECLARED" && x.accepted === false).length,
+        skipped: r.results.filter((x) => x.outcome !== "DECLARED" && x.outcome !== "FAILED").length,
+        failed: r.results.filter((x) => x.outcome === "FAILED").length,
+        items: r.results.map((x) => ({ modelId: x.modelId, outcome: x.outcome, state: x.state, suggested: x.suggested, historyId: x.historyId ?? null })),
+      },
+      reason: d.reason.trim() || undefined,
+    });
+  }
+  // Làm mới cả khi không khai được dòng nào: màn hình đang cũ (người khác vừa khai) — lượt gọi mang luôn giao diện mới.
+  revalidatePath("/models", "layout");
+  return r;
 }

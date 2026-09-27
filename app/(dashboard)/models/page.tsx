@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { AlertTriangle, GitBranch, HelpCircle, Layers } from "lucide-react";
+import { AlertTriangle, GitBranch, HelpCircle, Layers, Wand2 } from "lucide-react";
+import { BulkDeclarePanel } from "@/app/(dashboard)/models/bulk-declare-panel";
 import { ModelsTable } from "@/app/(dashboard)/models/models-table";
 import { RegisterModelDialog, RegistrySyncButton } from "@/app/(dashboard)/models/registry-actions";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -8,10 +9,11 @@ import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { loadSource } from "@/lib/constants/model-360";
+import { BULK_DECLARE_MAX, buildDeclarePreview } from "@/lib/constants/model-bulk-declare";
 import { MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
-import { listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
+import { getModelsEvidenceBatch, listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -32,12 +34,23 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
   // Cột "Tín hiệu" (Agent S): TẮT mặc định — lượt nguội của tín hiệu theo lô đọc bảng quyết định quảng cáo và
   // hiệu quả mẫu mã cả shop (vài giây trên production), không bắt mọi lượt mở danh sách trả giá đó.
   const coTinHieu = raw.tinhieu === "1";
-  const [{ rows, total, pageCount }, facets, summary, preview, tinHieu] = await Promise.all([
+  // "Khai theo gợi ý" (Agent Q): chỉ đọc chứng cứ theo lô khi người MỞ bảng (`?khai=goi-y`) và có quyền khai.
+  // Tập mẫu = mẫu CHƯA KHAI khớp ô tìm / bộ lọc "Nối với" đang áp (không cắt theo trang), tối đa BULK_DECLARE_MAX.
+  const moKhai = canWrite && raw.khai === "goi-y";
+  const khaiGoiY = moKhai
+    ? loadSource("chứng cứ giai đoạn của mẫu chưa khai", async () => {
+        const chuaKhai = await listModels({ ...params, filters: { ...params.filters, state: [MODEL_STATE_NONE] }, page: 1, pageSize: BULK_DECLARE_MAX, sort: "code", dir: "asc" });
+        const evidence = await getModelsEvidenceBatch(chuaKhai.rows.map((r) => r.id));
+        return { rows: buildDeclarePreview(chuaKhai.rows, evidence), total: chuaKhai.total };
+      })
+    : Promise.resolve(null);
+  const [{ rows, total, pageCount }, facets, summary, preview, tinHieu, goiY] = await Promise.all([
     listModels(params),
     modelStateFacets(),
     modelRegistrySummary(),
     previewModelRegistry(),
     coTinHieu ? loadSource("tín hiệu mẫu", () => getModelSignalsBatch()) : Promise.resolve(null),
+    khaiGoiY,
   ]);
   const signals =
     tinHieu && tinHieu.ok
@@ -48,16 +61,18 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
           ),
         }
       : undefined;
-  const hrefTinHieu = (() => {
+  /** Bật / tắt một tham số URL, giữ nguyên các tham số còn lại. */
+  const hrefToggle = (key: string, value: string, on: boolean) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(raw)) {
-      if (k === "tinhieu" || v === undefined) continue;
+      if (k === key || v === undefined) continue;
       for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
     }
-    if (!coTinHieu) q.set("tinhieu", "1");
+    if (!on) q.set(key, value);
     const s = q.toString();
     return s ? `/models?${s}` : "/models";
-  })();
+  };
+  const hrefTinHieu = hrefToggle("tinhieu", "1", coTinHieu);
 
   const chuaDongBo = summary.total === 0;
   const trangThaiLoc = params.filters.state ?? [];
@@ -115,7 +130,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
               {
                 label: "Chưa khai trạng thái",
                 value: formatNumber(summary.undeclared),
-                hint: "Mẫu đồng bộ về chưa có ai khai trạng thái vòng đời. Máy không tự điền — mở từng mẫu để khai.",
+                hint: "Mẫu đồng bộ về chưa có ai khai trạng thái vòng đời. Máy không tự điền — mở từng mẫu, hoặc bấm “Khai theo gợi ý” để xác nhận gợi ý của máy cho cả lô.",
                 icon: HelpCircle,
                 tone: summary.undeclared ? "amber" : "muted",
                 href: `/models?state=${MODEL_STATE_NONE}`,
@@ -148,7 +163,29 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
               {coTinHieu ? "✓ " : ""}Tín hiệu mẫu
             </Link>
             {tinHieu && !tinHieu.ok ? <span className="text-rose-700 dark:text-rose-300">Không đọc được nguồn {tinHieu.source}: {tinHieu.error}</span> : null}
+            {canWrite && (summary.undeclared > 0 || moKhai) ? (
+              <Link
+                href={hrefToggle("khai", "goi-y", moKhai)}
+                className={cn("ml-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5", moKhai ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}
+              >
+                <Wand2 className="size-3.5" />
+                {moKhai ? "✓ " : ""}Khai theo gợi ý
+              </Link>
+            ) : null}
           </div>
+          {goiY ? (
+            <SectionCard
+              title={
+                <span className="flex items-center gap-1.5">
+                  <Wand2 className="size-4" /> Khai theo gợi ý —{" "}
+                  {goiY.ok ? `${formatNumber(goiY.data.rows.length)}${goiY.data.total > goiY.data.rows.length ? ` / ${formatNumber(goiY.data.total)}` : ""} mẫu chưa khai` : "không đọc được"}
+                </span>
+              }
+              hint={`Máy đọc chứng cứ của từng mẫu chưa khai và GỢI Ý giai đoạn (ước tính). Không có gì được ghi cho tới khi bạn bấm “Khai”. Mỗi lời khai mang tên bạn, lý do, và ghi lại gợi ý của máy + bạn có chọn khác không. Mẫu đã có người khai trong lúc bảng còn mở sẽ bị bỏ qua, không đè. Mỗi lượt tối đa ${BULK_DECLARE_MAX} mẫu, theo ô tìm / bộ lọc “Nối với” đang áp.`}
+            >
+              {goiY.ok ? <BulkDeclarePanel rows={goiY.data.rows} /> : <p className="text-sm text-rose-700 dark:text-rose-300">Không đọc được nguồn {goiY.source}: {goiY.error}</p>}
+            </SectionCard>
+          ) : null}
           <DataTableToolbar
             searchPlaceholder="Mã mẫu, tên…"
             period={false}

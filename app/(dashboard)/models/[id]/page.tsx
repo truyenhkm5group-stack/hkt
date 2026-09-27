@@ -199,7 +199,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
               <EvidenceGapNote ctx={ctx} />
             </Suspense>
             {canWrite && provisional ? <AssignCodeControl modelId={model.id} code={model.code} /> : null}
-            {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
+            {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} suggested={model.state === null ? observed.stage : null} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm">
               <span>Người phụ trách:</span>
               {canWrite ? <OwnerControl modelId={model.id} ownerUserId={model.ownerUserId} options={ownerOptions} /> : <span className={model.ownerName ? "" : "text-muted-foreground"}>{model.ownerName ?? "—"}</span>}
