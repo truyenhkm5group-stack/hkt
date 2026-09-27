@@ -5,8 +5,9 @@ import type { FieldError, MetadataActor } from "@/lib/metadata/types";
 import { withOrganization } from "@/lib/platform/context";
 import { adminObjects, buildCatalog } from "@/lib/platform-ui/metadata-admin-shared";
 import { statusFieldsOf, workflowEventOptions, type EventOption, type WorkflowObjectOption } from "@/lib/platform-ui/workflow-admin-shared";
-import { listRuns, previewRule, runWorkflows } from "@/lib/workflow/engine";
+import { listRuns, listStaleRuns, previewRule, runWorkflows } from "@/lib/workflow/engine";
 import { getRule, listRules, saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
+import { STALE_RUN_KIND_LABEL, type StaleRun } from "@/lib/workflow/stale";
 import type { WorkflowMode, WorkflowRule, WorkflowRunRow } from "@/lib/workflow/types";
 
 /**
@@ -81,6 +82,20 @@ export async function workflowObjects(user: SessionUser): Promise<WorkflowObject
     }
   }
   return out;
+}
+
+export type StaleRunView = StaleRun & { ruleName: string | null; kindLabel: string };
+
+/**
+ * Lượt chạy TREO của tổ chức người xem (lib/workflow/stale.ts) — cho dòng cảnh báo và bảng lọc `?view=stale` của
+ * /settings/workflows. Chỉ đọc; phục hồi là việc của bộ máy ở lượt kế tiếp, không có nút "đánh dấu xong".
+ */
+export async function loadStaleWorkflowRuns(user: SessionUser): Promise<Loaded<StaleRunView[]>> {
+  const denial = workflowAdminDenial(user);
+  if (denial) return denied(denial);
+  const [stale, rules] = await Promise.all([listStaleRuns(), listRules()]);
+  const names = new Map(rules.map((r) => [r.id, r.name]));
+  return { ok: true, value: stale.map((x) => ({ ...x, ruleName: names.get(x.ruleId) ?? null, kindLabel: STALE_RUN_KIND_LABEL[x.kind] })) };
 }
 
 export type WorkflowEditorView = {
@@ -165,7 +180,7 @@ export async function adminPreviewWorkflowRule(user: SessionUser, id: unknown, s
   return { ok: true, matched: r.matched, wouldDo: r.wouldDo.map((w) => ({ action: w.action, detail: w.detail })), reason: r.reason ?? null };
 }
 
-export type WorkflowRunNowResult = { ok: true; events: number; runs: number; executed: number; waiting: number; failed: number } | { ok: false; errors: FieldError[] };
+export type WorkflowRunNowResult = { ok: true; events: number; runs: number; executed: number; waiting: number; failed: number; recovered: number } | { ok: false; errors: FieldError[] };
 
 /**
  * «Chạy lượt kiểm tra ngay» — một lượt `runWorkflows()` cho ĐÚNG tổ chức của người bấm.
@@ -179,5 +194,5 @@ export async function adminRunWorkflowsNow(user: SessionUser): Promise<WorkflowR
   const denial = workflowAdminDenial(user);
   if (denial || !user.organization) return denied(denial ?? "Phiên chưa gắn tổ chức — đăng nhập lại.");
   const r = await withOrganization(user.organization.code, () => runWorkflows());
-  return { ok: true, events: r.events, runs: r.runs, executed: r.executed, waiting: r.waiting, failed: r.failed };
+  return { ok: true, events: r.events, runs: r.runs, executed: r.executed, waiting: r.waiting, failed: r.failed, recovered: r.recovered };
 }

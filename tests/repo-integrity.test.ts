@@ -203,6 +203,21 @@ export function testMigrationAppendOnly() {
   const maxWhenBefore = Math.max(...previousList.flatMap((p) => p.entries.map((e) => e.when)));
   const added = current.entries.filter((e) => !before.has(e.tag));
 
+  // Lịch sử KHÔNG phân kỳ (Phase 3.1): mục đã có ở cha — và có thể đã áp — không bị xoá / đổi tên / đổi số / đổi
+  // mốc / đổi chỗ; mục mới chỉ NỐI VÀO CUỐI. Bộ kiểm có kiểm đột biến (`tuKiemHistoryProblems`).
+  tuKiemHistoryProblems();
+  /*
+    "CÓ THỂ ĐÃ ÁP" = có trong sổ của `origin/main` khi đọc được nó. Migration chỉ có ở nhánh (chưa vào main) thì
+    chưa máy chủ nào áp, và `npm run migration:renumber` được phép đánh lại số nó — kể cả trong một commit riêng hay
+    trong commit hợp nhất main về nhánh (đo lịch sử kho 28/09/2026: 6 commit làm đúng việc này, trong đó 3 commit
+    hợp nhất). Không đọc được `origin/main` (CI: checkout sâu 2, không có nhánh từ xa) ⇒ MỌI mục của cha đều được
+    bảo vệ — nghiêm hơn, và đúng cho CI vì ở đó HEAD luôn là bản sắp vào main (commit gộp của PR hoặc commit của main).
+  */
+  const mainJournal = read("origin/main");
+  const onMain = mainJournal ? new Set(mainJournal.entries.map((e) => e.tag)) : null;
+  const history = historyProblems(previousList, current, onMain);
+  assert.deepEqual(history, [], `LỊCH SỬ SỔ MIGRATION BỊ VIẾT LẠI — mục đã có ở commit cha có thể đã chạy trên production:\n${history.map((h) => `  - ${h}`).join("\n")}`);
+
   for (const e of added) {
     assert.ok(
       e.when > maxWhenBefore,
@@ -213,9 +228,81 @@ export function testMigrationAppendOnly() {
   }
 
   console.log(
-    `✓ Sổ migration chỉ nối vào cuối: ${added.length} mục mới ở commit này` +
+    `✓ Sổ migration chỉ nối vào cuối (so ${previousList.length} commit cha; mục cũ bất biến: tên · idx · mốc · thứ tự — ${onMain ? "bảo vệ mục có trên origin/main" : "không đọc được origin/main ⇒ bảo vệ MỌI mục của cha"}; bộ kiểm lịch sử tự kiểm đột biến 6 kiểu × 2 chế độ): ${added.length} mục mới ở commit này` +
       (added.length ? ` (${added.map((e) => e.tag).join(", ")}) đều muộn hơn mốc lớn nhất trước đó` : ""),
   );
+}
+
+type JournalLike = { entries: { idx: number; tag: string; when: number }[] };
+
+/**
+ * Lịch sử sổ migration có bị VIẾT LẠI so với các commit cha không — hàm THUẦN, mỗi điều sai một câu.
+ *
+ * Mục ĐÃ CÓ ở cha mà CÓ THỂ ĐÃ ÁP trên production (`drizzle.__drizzle_migrations` giữ băm + mốc) là BẤT BIẾN: không
+ * bị xoá, không đổi tên, không đổi `idx`, không đổi `when`, không đổi chỗ so với các mục được bảo vệ khác. Mục không
+ * được bảo vệ (mới, hoặc của riêng nhánh) chỉ được đứng SAU mọi mục được bảo vệ.
+ *
+ * `onProduction`: tập tên có thể đã áp (sổ của `origin/main`). `null` ⇒ mọi mục của mọi cha đều được bảo vệ.
+ */
+export function historyProblems(parents: readonly JournalLike[], current: JournalLike, onProduction: ReadonlySet<string> | null = null): string[] {
+  const out: string[] = [];
+  const now = new Map(current.entries.map((e, i) => [e.tag, { ...e, pos: i }]));
+  const protectedTags = new Set<string>();
+  parents.forEach((p, k) => {
+    let lastPos = -1;
+    let lastTag = "";
+    for (const e of p.entries) {
+      if (onProduction && !onProduction.has(e.tag)) continue;
+      protectedTags.add(e.tag);
+      const c = now.get(e.tag);
+      if (!c) {
+        out.push(`${e.tag} có ở commit cha #${k + 1} nhưng đã BIẾN MẤT khỏi sổ (xoá hoặc đổi tên) — drizzle sẽ coi tên mới là migration mới và áp LẠI.`);
+        continue;
+      }
+      if (c.idx !== e.idx) out.push(`${e.tag}: idx đổi ${e.idx} → ${c.idx} — mục đã áp là bất biến.`);
+      if (c.when !== e.when) out.push(`${e.tag}: mốc when đổi ${e.when} → ${c.when} — mục đã áp là bất biến.`);
+      if (c.pos < lastPos) out.push(`${e.tag} bị dời lên trước ${lastTag} — thứ tự áp của mục cũ là bất biến.`);
+      else {
+        lastPos = c.pos;
+        lastTag = e.tag;
+      }
+    }
+  });
+  const lastOld = Math.max(-1, ...current.entries.map((e, i) => (protectedTags.has(e.tag) ? i : -1)));
+  current.entries.forEach((e, i) => {
+    if (!protectedTags.has(e.tag) && i < lastOld) out.push(`${e.tag} là mục MỚI nhưng CHÈN vào giữa sổ (vị trí ${i}, mục cũ cuối cùng ở ${lastOld}) — chỉ được nối vào cuối.`);
+  });
+  return out;
+}
+
+/** Kiểm ĐỘT BIẾN của `historyProblems`: mỗi kiểu viết lại lịch sử phải bị bắt; nối cuối và đánh số lại của nhánh thì không. */
+function tuKiemHistoryProblems() {
+  const e = (idx: number, tag: string, when: number) => ({ idx, tag, when });
+  const cha: JournalLike = { entries: [e(0, "0000_a", 10), e(1, "0001_b", 20), e(2, "0002_c", 30)] };
+  const sach = (j: JournalLike, ps: JournalLike[] = [cha], prod: ReadonlySet<string> | null = null) => historyProblems(ps, j, prod);
+  assert.deepEqual(sach({ entries: [...cha.entries, e(3, "0003_moi", 40)] }), [], "nối vào cuối ⇒ sạch");
+  const dotBien: [string, JournalLike, RegExp][] = [
+    ["xoá mục cũ", { entries: [cha.entries[0], cha.entries[2]] }, /0001_b .*BIẾN MẤT/],
+    ["đổi tên mục cũ", { entries: [cha.entries[0], e(1, "0001_b_moi", 20), cha.entries[2]] }, /0001_b .*BIẾN MẤT/],
+    ["đổi số mục cũ", { entries: [cha.entries[0], e(5, "0001_b", 20), cha.entries[2]] }, /0001_b: idx đổi 1 → 5/],
+    ["đổi mốc mục cũ", { entries: [cha.entries[0], e(1, "0001_b", 25), cha.entries[2]] }, /0001_b: mốc when đổi 20 → 25/],
+    ["đảo chỗ mục cũ", { entries: [cha.entries[0], cha.entries[2], cha.entries[1]] }, /dời lên trước/],
+    ["chèn mục mới vào giữa", { entries: [cha.entries[0], e(9, "0009_chen", 15), cha.entries[1], cha.entries[2]] }, /0009_chen là mục MỚI nhưng CHÈN/],
+  ];
+  for (const [ten, j, re] of dotBien) {
+    const ps = sach(j);
+    assert.ok(ps.some((p) => re.test(p)), `đột biến "${ten}" phải bị bắt — nhận ${JSON.stringify(ps)}`);
+    // Mục bị đụng có trên main ⇒ vẫn bị bắt khi đọc được sổ của main.
+    assert.ok(sach(j, [cha], new Set(cha.entries.map((x) => x.tag))).some((p) => re.test(p)), `đột biến "${ten}" (mục có trên main) phải bị bắt`);
+  }
+  // Nhánh đánh lại số migration RIÊNG (chưa lên main) — commit riêng hoặc commit hợp nhất main về ⇒ hợp lệ.
+  const nhanh: JournalLike = { entries: [...cha.entries, e(3, "0003_cua_nhanh", 40)] };
+  const main: JournalLike = { entries: [...cha.entries, e(3, "0003_cua_main", 50)] };
+  const mainTags = new Set(main.entries.map((x) => x.tag));
+  assert.deepEqual(sach({ entries: [...main.entries, e(4, "0004_cua_nhanh", 60)] }, [nhanh, main], mainTags), [], "hợp nhất: đánh lại số migration riêng của nhánh ⇒ sạch");
+  assert.deepEqual(sach({ entries: [...cha.entries, e(4, "0004_cua_nhanh", 60)] }, [nhanh], new Set(cha.entries.map((x) => x.tag))), [], "commit riêng đánh lại số migration của nhánh ⇒ sạch");
+  assert.ok(sach({ entries: [...cha.entries, e(3, "0003_cua_nhanh", 40), e(4, "0004_cua_main", 50)] }, [nhanh, main], mainTags).some((p) => /0003_cua_main .*BIẾN MẤT/.test(p)), "hợp nhất: đổi số migration của main ⇒ đỏ");
+  assert.ok(sach({ entries: [...cha.entries, e(4, "0004_cua_nhanh", 60)] }, [nhanh], null).some((p) => /0003_cua_nhanh .*BIẾN MẤT/.test(p)), "không đọc được main ⇒ bảo vệ mọi mục của cha");
 }
 
 /**
@@ -241,7 +328,8 @@ export function testMigrationNumberUnique() {
   }
 
   const dups = [...byIdx.entries()].filter(([, tags]) => tags.length > 1);
-  const KNOWN_COLLISION = 1; // idx 32 từ 09/09/2026 — đã công nhận trong lịch sử
+  // Từng cho phép MỘT (idx 32, 09/09/2026). Đo sổ thật 28/09/2026: 0 số hiệu trùng — nên từ Phase 3.1 trùng là ĐỎ.
+  const KNOWN_COLLISION = 0;
   assert.ok(
     dups.length <= KNOWN_COLLISION,
     `Migration index collision: có ${dups.length} số hiệu bị dùng lần > 1 ` +

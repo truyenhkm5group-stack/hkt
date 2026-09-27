@@ -109,6 +109,7 @@ const MOI = [
   "0159_video_scale_optimize",
   "0160_workflow_foundation",
   "0161_page_visit_daily",
+  "0162_workflow_run_lease",
 ] as const;
 
 /*
@@ -1695,6 +1696,17 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from creative_manual_gen_images where id = 'up-mgi1' and design is null"), 1, "0143: bản mô tả thiết kế mặc định NULL — không backfill");
     await client.query(`delete from creative_manual_gen_images where id = 'up-mgi1'`);
     await client.query(`delete from creative_manual_gens where id in ('up-mg1', 'up-mg2')`);
+
+    /*
+      0162 (Phase 3.1 · hạn giữ lượt chạy): CHỈ THÊM ba cột. Dòng ghi bằng câu lệnh KHÔNG nhắc tới chúng — đúng như
+      mọi dòng workflow_runs đã có trên máy chủ — mang attempt 0 và hai mốc NULL (không backfill, mục 8.8); tệp không
+      chứa UPDATE nào.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'workflow_runs' and column_name in ('attempt','lease_until','last_heartbeat_at')"), 3, "0162: ba cột hạn giữ phải có");
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0162_workflow_run_lease.sql"), "utf8").replace(/--.*$/gm, "")), "0162: migration KHÔNG được chứa UPDATE — không backfill lượt chạy cũ");
+    await client.query(`insert into workflow_runs (id, rule_id, rule_version, mode, trigger_kind, trigger_ref, dedupe_key, status) values ('up-wr1', 'r1', 1, 'LIVE', 'event', 'e1', 'r1:e1', 'PENDING')`);
+    assert.equal(await dem("select count(*)::int as n from workflow_runs where id = 'up-wr1' and attempt = 0 and lease_until is null and last_heartbeat_at is null"), 1, "0162: dòng cũ mang attempt 0, hai mốc NULL");
+    await client.query(`delete from workflow_runs where id = 'up-wr1'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

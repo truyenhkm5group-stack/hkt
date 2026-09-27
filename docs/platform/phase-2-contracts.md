@@ -27,6 +27,10 @@ record_id, values jsonb, …)`, khoá chính `(object_key, record_id)`.
 | **Một dòng jsonb mỗi bản ghi (chọn)** | Một lượt nối cho cả danh sách; cập nhật nguyên tử; lọc bằng `values->>'k'` + chỉ mục GIN; đồng bộ từ đối tác KHÔNG BAO GIỜ chạm bảng này |
 
 Tệp (`file`): bytea trong `custom_files` (cùng lối các tệp đính kèm hiện có), trần 5 MB; giá trị lưu id.
+Tải xuống (Phase 3.1): `GET /api/metadata/files/<id>` (module lõi; tự kiểm module của đối tượng ⇒ 403 `MODULE_DISABLED`)
+qua `openCustomFile` — mọi lý do khác (id sai dạng / của tổ chức khác / field lưu trữ / bản ghi đã xoá / thiếu quyền xem)
+là 404 CÙNG MỘT CÂU. Chỉ ảnh raster + pdf mở ngay; kiểu khác (kể cả html, svg) ⇒ `application/octet-stream` + `attachment`;
+luôn `nosniff`, `private, no-store`; mỗi lượt tải một dòng `audit()` `CUSTOM_FILE_DOWNLOAD` (không nội dung).
 
 **M4 — Khoá field BẤT BIẾN**, dạng `^[a-z][a-z0-9_]{1,40}$`, duy nhất theo (tổ chức, đối tượng), không
 trùng khoá field hệ thống. Nhãn đổi thoải mái; khoá không. Không xoá — `ARCHIVED` (giá trị giữ nguyên,

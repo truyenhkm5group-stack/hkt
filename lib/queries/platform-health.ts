@@ -7,6 +7,7 @@ import { getModuleRows } from "@/lib/platform/capabilities";
 import { FALLBACK_HOME_CODE, listOrganizations } from "@/lib/platform/organizations";
 import type { Organization } from "@/lib/platform/types";
 import { buildModuleView } from "@/lib/queries/platform-modules";
+import { countStaleRunsOn, STALE_RUN_KIND_LABEL, STALE_RUN_KINDS } from "@/lib/workflow/stale";
 
 /**
  * ═══════════ SỨC KHOẺ NỀN TẢNG — "MÁY QUÉT DỮ LIỆU VÔ CHỦ" CỦA MÔ HÌNH SILO ═══════════
@@ -54,6 +55,12 @@ export type OrgHealth = {
   /** Số dòng mỗi bảng `platform_*` trong CSDL tổ chức. `null` với tổ chức nhà (bảng thật) hoặc khi chưa đo. */
   platformTables: { table: string; rows: number | null }[] | null;
   platformTablesNote: string | null;
+  /**
+   * Lượt chạy luật tự động đang TREO (lib/workflow/stale.ts — cùng câu hỏi với /settings/workflows). `null` = chưa
+   * đo (xem `workflowStaleNote`), vd CSDL chưa áp 0162. Tuỳ chọn: bảng dựng tay trước Phase 3.1 không có ô này.
+   */
+  workflowStaleRuns?: number | null;
+  workflowStaleNote?: string | null;
   /** Những điều sai, mỗi điều một câu. Rỗng ⇔ không phát hiện gì (KHÔNG có nghĩa là mọi thứ đã đo — xem các `note`). */
   problems: string[];
 };
@@ -191,6 +198,19 @@ async function checkOrganization(org: Organization, expected: number | null, mod
     const dirty = tables.filter((t) => t.rows !== null && t.rows > 0);
     for (const t of dirty) health.problems.push(`${t.table} trong CSDL tổ chức có ${t.rows} dòng — phải rỗng (chỉ bản ở CSDL nhà là thật).`);
   }
+
+  try {
+    const stale = await countStaleRunsOn(db);
+    health.workflowStaleRuns = stale.total;
+    health.workflowStaleNote = null;
+    if (stale.total > 0) {
+      const parts = STALE_RUN_KINDS.filter((k) => stale.byKind[k] > 0).map((k) => `${STALE_RUN_KIND_LABEL[k]}: ${stale.byKind[k]}`);
+      health.problems.push(`${stale.total} lượt chạy luật tự động đang treo (${parts.join(" · ")}) — xem /settings/workflows?view=stale.`);
+    }
+  } catch (error) {
+    health.workflowStaleRuns = null;
+    health.workflowStaleNote = `Chưa đo lượt chạy treo: ${errorText(error)}`;
+  }
   return health;
 }
 
@@ -244,6 +264,8 @@ export type DiagnosticsRow = {
   platformTables: string;
   unknownModuleKeys: string;
   dependencyErrors: string;
+  /** Lượt chạy luật tự động đang treo — `—` khi chưa đo. */
+  workflowStale: string;
 };
 
 export type DiagnosticsSummary = {
@@ -268,6 +290,7 @@ export function summarizeHealth(health: PlatformHealth): DiagnosticsSummary {
     if (o.connected === null) unmeasured.push(`[${o.code}] kết nối: ${o.connectNote ?? "chưa đo"}`);
     if (o.connected && o.migrationsApplied === null) unmeasured.push(`[${o.code}] migration: ${o.migrationsNote ?? "chưa đo"}`);
     if (o.connected && !o.isHome && o.platformTables?.some((t) => t.rows === null)) unmeasured.push(`[${o.code}] bảng platform_*: ${o.platformTablesNote ?? "chưa đo"}`);
+    if (o.connected && o.workflowStaleRuns === null) unmeasured.push(`[${o.code}] lượt chạy treo: ${o.workflowStaleNote ?? "chưa đo"}`);
     const dirty = (o.platformTables ?? []).filter((t) => t.rows !== null && t.rows > 0);
     return {
       code: o.code,
@@ -278,6 +301,7 @@ export function summarizeHealth(health: PlatformHealth): DiagnosticsSummary {
       platformTables: o.isHome ? "n/a (nhà)" : o.platformTables === null ? "—" : dirty.length ? `CÓ DÒNG: ${dirty.map((t) => `${t.table}=${t.rows}`).join(", ")}` : o.platformTables.some((t) => t.rows === null) ? "—" : "rỗng",
       unknownModuleKeys: o.unknownModuleKeys.length ? o.unknownModuleKeys.join(", ") : "không",
       dependencyErrors: o.dependencyErrors.length ? o.dependencyErrors.map((e) => e.key).join(", ") : "không",
+      workflowStale: o.workflowStaleRuns === undefined || o.workflowStaleRuns === null ? "—" : String(o.workflowStaleRuns),
     };
   });
   return { rows, problems, unmeasured, exitCode: problems.length ? 1 : unmeasured.length ? 2 : 0 };

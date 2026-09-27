@@ -1225,7 +1225,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   */
   const workflows = await runWorkflows().then(
     (r): RunWorkflowsResult & { error?: string } => r,
-    (e: unknown): RunWorkflowsResult & { error?: string } => ({ events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }),
+    (e: unknown): RunWorkflowsResult & { error?: string } => ({ events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }),
   );
   return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, approvalSweep, delivery: { sent: delivery.sent, retried: delivery.retried, failed: delivery.failed, gaveUp: delivery.gaveUp }, stockShortage, stockWaitLog, ownerDigest, workflows };
 }

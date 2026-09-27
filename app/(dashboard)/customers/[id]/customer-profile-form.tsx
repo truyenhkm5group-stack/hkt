@@ -11,7 +11,27 @@ import type { CustomFieldDef, CustomValues, FormSchema, SystemFieldDef } from "@
  * field hệ thống của khách chỉ đọc ở Phase 2 (khách đồng bộ từ Pancake: sửa ở ERP thì lượt đồng bộ kế
  * tiếp ghi đè lại, người sửa tưởng đã lưu mà dữ liệu tự quay về).
  */
-export function CustomerProfileForm({ recordId, schema, system, custom, values, users, customEditable, syncedFromPancake }: { recordId: string; schema: FormSchema; system: SystemFieldDef[]; custom: CustomFieldDef[]; values: DynamicFormPayload; users?: PickOption[]; customEditable: string[]; syncedFromPancake: boolean }) {
+export function CustomerProfileForm({
+  recordId,
+  schema,
+  system,
+  custom,
+  values,
+  users,
+  fileNames,
+  customEditable,
+  syncedFromPancake,
+}: {
+  recordId: string;
+  schema: FormSchema;
+  system: SystemFieldDef[];
+  custom: CustomFieldDef[];
+  values: DynamicFormPayload;
+  users?: PickOption[];
+  fileNames?: Record<string, string>;
+  customEditable: string[];
+  syncedFromPancake: boolean;
+}) {
   return (
     <DynamicForm
       schema={schema}
@@ -20,6 +40,7 @@ export function CustomerProfileForm({ recordId, schema, system, custom, values, 
       values={values}
       customEditable={customEditable}
       users={users}
+      fileNames={fileNames}
       /*
         Lý do CHỈ ĐỌC phải đúng với tổ chức đang xem: tổ chức không bật Pancake tự tạo khách trên ERP, nói với
         họ "đồng bộ từ Pancake" là nói sai (bắt được ở bài chạy thử trình duyệt 27/09/2026).

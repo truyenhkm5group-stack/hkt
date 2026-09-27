@@ -427,6 +427,8 @@ import { testMetadataService } from "./metadata-service.test";
 import { testMetadataAdmin } from "./metadata-admin.test";
 import { testMetadataRuntime } from "./metadata-runtime.test";
 import { testWorkflowEngine } from "./workflow-engine.test";
+import { testWorkflowRecovery } from "./workflow-recovery.test";
+import { testMetadataFiles } from "./metadata-files.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
@@ -2449,6 +2451,12 @@ async function main() {
   // Phase 3 · bộ máy workflow: hai tổ chức THẬT `pw-a` / `pw-b` (tự cấp, tự dọn) — lưu luật, chạy thử, cửa duyệt,
   // đúng một việc sau khi duyệt, vòng lặp bị chặn, lượt đầu không xử lý lịch sử, cô lập tổ chức.
   await testWorkflowEngine();
+  // Phase 3.1 · phục hồi lượt chạy treo: tổ chức THẬT `pr-a` (tự cấp, tự dọn) — chết sau khi chiếm / giữa hai hành
+  // động ⇒ chiếm lại đúng một lần, bước đã xong không làm lại, quá số lần thử ⇒ FAILED, listStaleRuns + chẩn đoán.
+  await testWorkflowRecovery();
+  // Phase 3.1 · tải tệp field `file`: hai tổ chức THẬT `pf-a` / `pf-b` — HANDLER route trong phiên thật, 404 cùng
+  // một câu cho id chéo tổ chức / id rác / field lưu trữ / bản ghi đã xoá, .html ⇒ attachment, module tắt ⇒ 403.
+  await testMetadataFiles();
   // Phase 3 · giao diện luật tự động: lõi màn hình /settings/workflows (quyền, bản nháp form) + vòng đời thật trên tổ chức `wa-wf` (tự cấp, tự dọn).
   await testWorkflowAdmin();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.

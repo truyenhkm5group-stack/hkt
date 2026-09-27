@@ -85,12 +85,18 @@ export function testAccessControl() {
       riêng chỉ người mở + người được tag + ADMIN xem được, nên câu hỏi không còn là "có khoá quyền không"
       mà là "có được xem CHÍNH topic này không" — máy tính ấy hỏi khoá quyền qua `can()` bên trong. Cũng
       đòi ĐỦ HAI THỨ: tính quyền của topic VÀ câu chặn dựa trên `.view` của nó.
+
+      Dạng thứ năm là TỆP CỦA FIELD TUỲ BIẾN (`lib/metadata/values.ts::openCustomFile`, Phase 3.1): tệp thuộc một
+      bản ghi của BẤT KỲ đối tượng nào trong sổ, nên khoá quyền chỉ biết được SAU khi đọc dòng tệp — nó hỏi
+      `can()` bằng khoá xem của đối tượng (`OBJECT_RECORD_PERMISSIONS`) và `viewPermission` của field. Cũng đòi ĐỦ
+      HAI THỨ: gọi máy tính ấy với người của phiên VÀ câu chặn dựa trên `.ok` của nó.
     */
     const coQuyen =
       /can\(\s*user\s*,\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
       /requirePermission\(\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
       (/resolvePayrollScope\(\s*user\s*\)/.test(src) && /can(?:Open|SeeAll)Payroll\(/.test(src)) ||
-      (/loadTopicAccess\(.*, user\)/.test(src) && /if \(!acc\?\.view\)/.test(src));
+      (/loadTopicAccess\(.*, user\)/.test(src) && /if \(!acc\?\.view\)/.test(src)) ||
+      (/openCustomFile\(\s*id\s*,\s*user\s*\)/.test(src) && /if \(!r\.ok\)/.test(src));
     assert.ok(
       coQuyen,
       `${file}: chỉ kiểm tra phiên đăng nhập là chưa đủ — phải hỏi đúng quyền của module. Menu ẩn không khoá được đường dẫn.`,

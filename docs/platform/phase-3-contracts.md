@@ -79,3 +79,18 @@ listRuns(opts): Promise<WorkflowRunRow[]>;
 - Khoá `workflow:manage` (ADMIN; loại khỏi MANAGER; vai trò tuỳ chỉnh không cấp) — module `core`.
 - `/settings/workflows`: danh sách luật · form luật (trigger / điều kiện / hành động / cửa duyệt — ô chọn, không
   vẽ sơ đồ) · chạy thử trên một bản ghi · bật ACTIVE · chuyển LIVE (xác nhận) · bảng lượt chạy gần đây.
+
+## 6. Phase 3.1 — hardening (bổ sung, không đổi chữ ký cũ)
+
+- **Lượt chạy có hạn giữ** (migration `0162_workflow_run_lease`, CHỈ THÊM cột): `workflow_runs.attempt int default 0`,
+  `lease_until timestamptz`, `last_heartbeat_at timestamptz`. Chiếm lượt = `claimRun` (một câu `UPDATE … WHERE
+  attempt < 3 AND (status='WAITING_APPROVAL' OR PENDING-quá-hạn) RETURNING`); lượt không cửa duyệt sinh ra đã chiếm
+  sẵn. Mỗi bước xong ghi `steps` + gia hạn, chỉ khi `attempt` còn là của mình. Lượt thử lại bỏ qua bước `DONE`.
+- **Lũy đẳng khai từng hành động** (`ACTION_RETRY_SAFETY` trong `lib/workflow/actions.ts`): `create_task` theo khoá
+  `WORKFLOW_TASK:<run>:<i>`, `notify` theo `notifications.dedupe_key = workflow:<run>`, `set_custom_value` cùng giá trị
+  ⇒ không đổi gì, không phát sự kiện. Hành động chưa chứng minh được ⇒ lượt treo chứa nó KHÔNG tự thử lại (FAILED).
+- **Trần**: quá 3 lần chiếm ⇒ FAILED "Treo quá số lần thử", lời duyệt thanh toán BẰNG LỖI (không tính là đã làm).
+- **Chẩn đoán**: `listStaleRuns()` (`lib/workflow/stale.ts`) — bốn loại `LEASE_EXPIRED` · `DECISION_NOT_APPLIED` ·
+  `UNSETTLED_APPROVAL` · `STUCK_FAILED`; cùng câu hỏi ở dòng cảnh báo `/settings/workflows` (`?view=stale`) và cột
+  "Lượt luật treo" của `npm run platform:diagnostics`.
+- `runWorkflows()` trả thêm `recovered` (số lượt treo đã chiếm lại trong lượt này).

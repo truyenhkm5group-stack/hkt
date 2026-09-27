@@ -18,7 +18,7 @@ import { objectDef } from "@/lib/constants/object-registry";
 import { MetadataError } from "@/lib/metadata/errors";
 import { listFields } from "@/lib/metadata/fields";
 import { getPublishedForm } from "@/lib/metadata/forms";
-import { canEditField, getCustomValues } from "@/lib/metadata/values";
+import { canEditField, customFileNames, getCustomValues } from "@/lib/metadata/values";
 import { userPickOptions } from "@/lib/queries/users";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
@@ -48,13 +48,17 @@ async function loadProfileBlock(user: SessionUser, customer: Record<string, unkn
     const obj = objectDef("customer")!;
     const [stored, users] = await Promise.all([getCustomValues("customer", [customer.id], user), fields.custom.some((f) => f.type === "user") ? userPickOptions() : Promise.resolve(undefined)]);
     const system = Object.fromEntries(fields.system.map((f) => [f.key, customer[f.column] ?? null]));
+    const custom = stored.get(customer.id) ?? {};
+    const fileIds = fields.custom.filter((f) => f.type === "file" && typeof custom[f.key] === "string").map((f) => String(custom[f.key]));
+    const fileNames = fileIds.length ? await customFileNames("customer", customer.id, fileIds, user) : {};
     return {
       schema: form.schema,
       system: fields.system,
       custom: fields.custom,
-      values: { system, custom: stored.get(customer.id) ?? {} },
+      values: { system, custom },
       customEditable: fields.custom.filter((f) => canEditField(user, obj, f)).map((f) => f.key),
       users,
+      fileNames,
       version: form.version,
     };
   } catch (error) {
@@ -240,7 +244,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
           {profile ? (
             <SectionCard title="Hồ sơ bổ sung" description={profile.version ? `Form phiên bản ${profile.version}` : "Form mặc định"} hint="Trường do tổ chức tự khai. Thông tin hệ thống của khách chỉ đọc ở đây: khách đồng bộ từ Pancake, sửa ở ERP sẽ bị lượt đồng bộ kế tiếp ghi đè.">
-              <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} />
+              <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} fileNames={profile.fileNames} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} />
             </SectionCard>
           ) : null}
 
