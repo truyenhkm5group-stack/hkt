@@ -103,16 +103,17 @@ function joinParts(parts: (string | null)[]): string {
 
 /**
  * Ba tên mặc định của MỘT bài. Tên chiến dịch: `TKQC_MãMKTer_ngày_TEST_fanpage_số` (chủ shop 27/09/2026 — mã MKTer ngay
- * sau TKQC để quy tiền ads; không chọn MKTer thì bỏ phần ấy như mọi phần không biết). Hàm THUẦN.
+ * sau TKQC để quy tiền ads; không chọn MKTer thì bỏ phần ấy như mọi phần không biết). Camp mã win: `TEST` thay bằng mã hàng
+ * (`kindLabel`, xem `campaignKindLabel`). Hàm THUẦN.
  */
-export function defaultNames(ctx: NamingContext, batchDay: string, seq: number, media: CreativeMediaKind = "IMAGE", marketerCode: string | null = null): DefaultNames {
+export function defaultNames(ctx: NamingContext, batchDay: string, seq: number, media: CreativeMediaKind = "IMAGE", marketerCode: string | null = null, kindLabel = "TEST"): DefaultNames {
   const problems: string[] = [];
   if (!ctx.accountName) problems.push("Chưa có tên tài khoản quảng cáo (chưa đồng bộ chi tiêu của tài khoản này) — tên chiến dịch để trống phần ấy.");
   if (!ctx.pageName) problems.push("Chưa có tên fanpage trong sổ fanpage — tên chiến dịch / quảng cáo để trống phần ấy.");
   if (!ctx.adset) problems.push("Chưa đọc được cài đặt nhóm QC mẫu — tên nhóm để trống (lượt vòng mẫu kế tiếp đọc lại).");
   else problems.push(...ctx.adset.problems);
   return {
-    campaign: joinParts([ctx.accountName, marketerCode, ddMm(batchDay), "TEST", ctx.pageName, String(seq)]),
+    campaign: joinParts([ctx.accountName, marketerCode, ddMm(batchDay), kindLabel, ctx.pageName, String(seq)]),
     adset: ctx.adset?.name ?? "",
     ad: joinParts([ctx.pageName, MEDIA_NAME_LABEL[media], String(seq), "TXT"]),
     problems,

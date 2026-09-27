@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import { moTaLoiCsdl } from "@/lib/db/error-message";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import { env } from "@/lib/env";
 import { getFacebookAdsClient, type FbAdInsight, type FbCampaignInsight } from "@/lib/integrations/facebook/client";
 import { decideGrain, type AdSpendGrain } from "@/lib/constants/ads-grain";
@@ -89,8 +89,9 @@ const fetchCampaignInsights = (client: ReturnType<typeof getFacebookAdsClient>, 
 const fetchAdInsights = (client: ReturnType<typeof getFacebookAdsClient>, accountId: string, since: string, until: string, log: (m: string) => void) =>
   fetchChunked<FbAdInsight>((s, e) => client.adInsights(accountId, s, e), accountId, since, until, log, "mẩu");
 
-export async function loadProductCodeIndex(): Promise<ProductCodeEntry[]> {
-  const db = await getDb();
+/** Chỉ mục mã hàng mà phép ghép tên chiến dịch → mã (`matchCampaignToProduct`) dùng. `dbIn` để nơi gọi có sẵn kết nối (và kiểm thử) dùng đúng nó. */
+export async function loadProductCodeIndex(dbIn?: Db): Promise<ProductCodeEntry[]> {
+  const db = dbIn ?? (await getDb());
   const rows = await db
     .select({ id: schema.products.id, name: schema.products.name, customId: schema.products.customId, skus: sql<string[]>`coalesce(array_agg(distinct ${schema.productVariants.sku}) filter (where ${schema.productVariants.sku} <> ''), '{}')` })
     .from(schema.products)

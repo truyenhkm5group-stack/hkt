@@ -15,7 +15,7 @@ import {
   type CreativeLoopConfig,
 } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
-import { CAMPAIGN_GENDERS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS } from "@/lib/constants/campaign-setup";
 
 /**
  * ═══════════ VÒNG MẪU — LƯỢC ĐỒ ĐẦU VÀO CỦA HAI MÀN HÌNH (nguồn ảnh · cấu hình) ═══════════
@@ -227,6 +227,7 @@ export const campaignSetupSchema = z
     gender: z.enum(CAMPAIGN_GENDERS).nullable(),
     marketerId: z.string().trim().min(1).max(80).nullable().default(null),
     startAt: z.string().datetime({ offset: true, message: "Giờ bắt đầu không hợp lệ" }).nullable().default(null),
+    campaignKind: z.enum(CAMPAIGN_KINDS).default("TEST"),
   })
   .strict()
   .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến");

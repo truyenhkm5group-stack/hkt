@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup, type MarketerOption } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup, type MarketerOption, type ProductWinCode } from "@/lib/constants/campaign-setup";
+import { productWinCodes } from "@/lib/creative/win-code";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
 import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
@@ -61,6 +62,8 @@ export type ManualGenImageCard = {
    */
   /** `emptyCampaignId` = chiến dịch riêng đã tạo mà chưa có nhóm (TẮT, không tiêu được tiền) — đăng lại sẽ tạo chiến dịch mới. */
   publishFailure: { batchId: string; canRequeue: boolean; emptyCampaignId: string | null } | null;
+  /** Mã win của mã hàng ảnh thuộc về (camp mã win ghi mã này thay cho TEST). `null` = ảnh thiết kế mới / mã hàng không có mã đọc được. */
+  winCode: ProductWinCode | null;
 };
 
 type VariantBrief = { status: string | null; batchId: string | null; fbCampaignId: string | null; fbAdsetId: string | null; fbAdId: string | null; fbPendingStep: string | null };
@@ -68,7 +71,7 @@ type VariantBrief = { status: string | null; batchId: string | null; fbCampaignI
 type ImageRow = typeof schema.creativeManualGenImages.$inferSelect;
 
 /** Một dòng ảnh ⇒ thẻ màn hình. Dùng chung cho "Kết quả gen tay" và "Hàng đợi đăng camp" — một cách dựng, không hai. */
-function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number, vb: VariantBrief | null = null): ManualGenImageCard {
+function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number, vb: VariantBrief | null = null, winCode: ProductWinCode | null = null): ManualGenImageCard {
   const d = parseManualDesignSpec(i.design);
   return {
     id: i.id,
@@ -96,6 +99,8 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
       i.status === "PROMOTED" && vb && vb.batchId && (vb.status === "PUBLISH_FAILED" || vb.status === "REJECTED")
         ? { batchId: vb.batchId, canRequeue: !vb.fbAdsetId && !vb.fbAdId && !vb.fbPendingStep, emptyCampaignId: vb.fbCampaignId ?? null }
         : null,
+    // Ảnh thiết kế mới không mang mã hàng cha (đơn / chấm đi theo mã TK) ⇒ không có camp mã win.
+    winCode: d ? null : winCode,
   };
 }
 
@@ -230,10 +235,14 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
   ]);
   const titleOf = new Map(srcs.map((x) => [x.id, x.title]));
   const labelOf = new Map(insp.map((x) => [x.id, x.customId || x.name]));
+  // Mã win chỉ cần cho ảnh ĐÃ DUYỆT (thứ mở được hộp Đăng camp) — không dựng chỉ mục mã hàng khi không có ảnh nào như thế.
+  const needWin = runs.filter((r) => r.run.kind !== "DESIGN" && r.run.productId && imgs.some((x) => x.i.genId === r.run.id && x.i.status === "APPROVED")).map((r) => r.run.productId as string);
+  const wins = await productWinCodes(db, needWin);
   return runs.map(({ run, productName }) => {
+    const win = run.productId ? (wins.get(run.productId) ?? null) : null;
     const images: ManualGenImageCard[] = imgs
       .filter((x) => x.i.genId === run.id)
-      .map(({ i, purgedAt, imageRow, vb }) => toImageCard(i, imageRow, purgedAt, rate, vb));
+      .map(({ i, purgedAt, imageRow, vb }) => toImageCard(i, imageRow, purgedAt, rate, vb, win));
     const counts: Partial<Record<ManualGenImageStatus, number>> = {};
     for (const im of images) counts[im.status] = (counts[im.status] ?? 0) + 1;
     const priced = images.filter((im) => im.costUsd !== "" && Number.isFinite(Number(im.costUsd)));
@@ -382,7 +391,7 @@ export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccou
     marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null },
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null, campaignKind: "TEST" },
     template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
   };
 }
@@ -401,7 +410,7 @@ export async function listPublishQueue(db: Db, rate: number = env.facebook.usdTo
   const im = schema.creativeManualGenImages;
   const g = schema.creativeManualGens;
   const rows = await db
-    .select({ i: im, purgedAt: schema.creativeImages.purgedAt, imageRow: schema.creativeImages.id, run: { kind: g.kind, createdAt: g.createdAt }, productName: schema.products.name })
+    .select({ i: im, purgedAt: schema.creativeImages.purgedAt, imageRow: schema.creativeImages.id, run: { kind: g.kind, createdAt: g.createdAt, productId: g.productId }, productName: schema.products.name })
     .from(im)
     .innerJoin(g, eq(g.id, im.genId))
     .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, im.imageId))
@@ -409,8 +418,12 @@ export async function listPublishQueue(db: Db, rate: number = env.facebook.usdTo
     .where(and(eq(im.status, "APPROVED"), isNotNull(im.queuedAt)))
     .orderBy(desc(im.queuedAt))
     .limit(QUEUE_MAX);
+  const wins = await productWinCodes(
+    db,
+    rows.filter((r) => r.run.kind !== "DESIGN" && r.run.productId).map((r) => r.run.productId as string),
+  );
   return rows.map((r) => ({
-    img: toImageCard(r.i, r.imageRow, r.purgedAt, rate),
+    img: toImageCard(r.i, r.imageRow, r.purgedAt, rate, null, r.run.productId ? (wins.get(r.run.productId) ?? null) : null),
     runLabel: r.run.kind === "DESIGN" ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
     runCreatedAt: r.run.createdAt.toISOString(),
   }));
