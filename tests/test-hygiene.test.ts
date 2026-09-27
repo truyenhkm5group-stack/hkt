@@ -125,6 +125,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
+  "tests/platform-credentials-no-db.test.ts":
+    "Bỏ DATABASE_URL để dựng ĐÚNG tình huống của cầu nối mở PR trên GitHub Actions (không CSDL), rồi trả lại nguyên trạng trong finally — đầu vào của hàm đang kiểm, không phải điều kiện của kết luận.",
   "tests/backup.test.ts":
     "Chỉ đọc process.platform, và chỉ theo đúng mẫu mục 65: thiếu flock TRÊN LINUX là ĐỎ, nền khác in CHƯA ĐO ĐƯỢC (không dấu ✓); bit quyền 700/755 chỉ đo chạy thật trên Linux vì NTFS dưới Git Bash không giữ bit POSIX — dòng chmod vẫn được kiểm ở mức mã nguồn trên mọi nền. Không đọc biến môi trường nào.",
   "tests/automation-ladder.test.ts":

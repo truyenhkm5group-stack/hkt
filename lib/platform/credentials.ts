@@ -1,4 +1,5 @@
-import { currentOrganization, peekOrganization } from "@/lib/platform/context";
+import { hasDatabaseConfigured } from "@/db";
+import { currentOrganization, peekOrganization, type OrgContext } from "@/lib/platform/context";
 
 /**
  * ═══════════ CREDENTIAL TRONG BIẾN MÔI TRƯỜNG LÀ CỦA TỔ CHỨC NHÀ ═══════════
@@ -62,8 +63,25 @@ export function isConnectorUnavailable(error: unknown): error is ConnectorUnavai
  * phương thức gửi request — trước khi đọc khoá, trước điều tiết nhịp, trước `fetch`.
  */
 export async function assertHomeCredentials(provider: HomeCredentialProvider): Promise<void> {
+  if (!homeCheckNeeded(peekOrganization(), hasDatabaseConfigured())) return;
   const org = await currentOrganization();
   if (!org.isHome) throw new ConnectorUnavailableError(provider, org.code);
+}
+
+/**
+ * Có cần hỏi "ngữ cảnh này có phải tổ chức nhà không" hay không — hàm thuần.
+ *
+ * Tiến trình KHÔNG có CSDL (vd workflow GitHub Actions `agent-open-pr.yml` mở PR bằng danh tính
+ * agent) không phục vụ được tổ chức nào: không phiên, không `withOrganization`, không đọc được sổ tổ
+ * chức — nên không có tổ chức KHÁC nào để chặn. Hỏi `currentOrganization()` ở đó chỉ để đọc tổ chức
+ * nhà từ CSDL và ném "Chưa cấu hình DATABASE_URL" — đo 27/09/2026: MỌI lượt mở PR của kho đỏ từ khi
+ * #314 thêm lớp chặn này, vì cầu nối gọi `assertHomeCredentials("github")`.
+ *
+ * Ngữ cảnh TƯỜNG MINH luôn được xét (kể cả khi không có CSDL) — `withOrganization` của tổ chức khác
+ * vẫn bị chặn. Mọi request thật của ứng dụng đều có CSDL nên vẫn đi đủ đường kiểm.
+ */
+export function homeCheckNeeded(explicit: OrgContext | null, hasDatabase: boolean): boolean {
+  return explicit !== null || hasDatabase;
 }
 
 /**

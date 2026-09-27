@@ -24,6 +24,15 @@ export function databaseUrl() {
 }
 
 /**
+ * Tiến trình này CÓ cấu hình CSDL không — chỉ trả lời có/không, KHÔNG lộ URL, không chọn CSDL nào.
+ * Dùng ở `lib/platform/credentials.ts`: tiến trình không có CSDL (cầu nối mở PR trên GitHub Actions)
+ * không phục vụ được tổ chức nào. Đọc URL vẫn chỉ ở tệp này (bài cô lập S2).
+ */
+export function hasDatabaseConfigured(): boolean {
+  return databaseUrl() !== "";
+}
+
+/**
  * Phiên làm việc này có bị ép CHỈ ĐỌC ở tầng CSDL không.
  *
  * Đọc từ môi trường chứ không nhận tham số: nó phải đúng cho MỌI kết nối của tiến trình, kể cả
