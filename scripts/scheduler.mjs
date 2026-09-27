@@ -73,6 +73,16 @@ const JOBS = [
   */
   { job: "work-escalation", every: minutes("WORK_ESCALATION_EVERY_MINUTES", 30), offset: 11 },
   /*
+    PHÂN VIỆC TỰ ĐỘNG — 10 phút/lần (chủ shop yêu cầu 27/09/2026: case care chưa ai nhận tự về
+    người trực, đỡ công giao tay).
+
+    Lượt chạy chỉ GHI ở phòng đã bật công tắc "Phân việc tự động" — mặc định tắt ở mọi phòng, nên
+    lượt deploy mang dòng này không giao việc nào cho tới khi người có quyền bật. 10 phút là để một
+    ca mới mở không nằm trống quá một chu kỳ `vtp-tracking`; chạy dày hơn cũng không giao thêm gì
+    vì mỗi lượt chỉ xét việc chưa ai cầm và không vượt trần.
+  */
+  { job: "work-auto-assign", every: minutes("WORK_AUTO_ASSIGN_EVERY_MINUTES", 10), offset: 14 },
+  /*
     BẢN TIN MARKETING HẰNG NGÀY — 30 phút/lần, và đó KHÔNG phải "gửi 48 tin mỗi ngày".
 
     Sổ chống gửi lại (`settings["marketing.digest.sent"]`) khoá đúng MỘT bản tin cho mỗi phạm vi

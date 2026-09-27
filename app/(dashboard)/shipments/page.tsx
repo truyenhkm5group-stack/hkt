@@ -6,6 +6,9 @@ import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
 import { ReconcilePanel } from "@/app/(dashboard)/shipments/reconcile-panel";
 import { CaseOutcomeReport } from "@/app/(dashboard)/shipments/case-outcome-report";
+import { AutoAssignButton } from "@/app/(dashboard)/work/today/panels";
+import { autoAssignOn } from "@/lib/constants/workforce";
+import { getStaffing } from "@/lib/queries/workforce";
 import { PERIOD_BASES, PERIOD_BASIS_LABEL, type PeriodBasis } from "@/lib/constants/care-effect";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
@@ -68,6 +71,13 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
     ? [null, [], [], RESOLUTION_NOTES_DEFAULT]
     : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets(), getResolutionNotePresets()]);
   const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
+  /*
+    CHIA CASE CHƯA AI NHẬN — đi qua máy phân việc của phòng Giao vận (`SHIPMENT_CARE` thuộc
+    LOGISTICS), không có luật giao riêng cho trang này. Người được nhận là thành viên phòng Giao vận
+    còn chỗ và không khai nghỉ; muốn mọi ca về một người thì phòng chỉ xếp người đó.
+  */
+  const canAssign = !ngoaiCare && can(user, "work:assign");
+  const tuChia = canAssign ? autoAssignOn("LOGISTICS", await getStaffing()) : false;
 
   const tab = (key: CareView | "report" | "reconcile", label: string, count?: number) => (
     <NavLink
@@ -98,6 +108,14 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         description={wb ? `${formatNumber(wb.counts.care)} kiện cần care · COD treo ${formatVND(wb.moneyAtRisk, { compact: true })} · ${formatNumber(wb.overdue)} vỡ SLA · ${formatNumber(wb.unassigned)} chưa ai nhận` : undefined}
         actions={
           <>
+            {canAssign && wb ? <AutoAssignButton department="LOGISTICS" unassigned={wb.unassigned} label="Chia case chưa ai nhận" /> : null}
+            {canAssign ? (
+              <span title="Bật/tắt ở Cấu hình → Sức chứa và phân việc, dòng Giao vận">
+                <NavLink href="/work/settings" className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline">
+                  Tự chia: {tuChia ? "bật" : "tắt"}
+                </NavLink>
+              </span>
+            ) : null}
             <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
             {view === "all" ? <SyncButton job="vtp-import" label="Nhập từ tài khoản VTP" params={{ days: "30" }} /> : null}
             {/*

@@ -45,6 +45,7 @@ import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
+import { testCareAutoAssign } from "./care-auto-assign.test";
 import { testCareReturnLegQueue } from "./care-return-leg-queue.test";
 import { testCareDecisionParks } from "./care-decision-parks.test";
 import { testAiCopilot } from "./ai-copilot.test";
@@ -82,6 +83,7 @@ import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo, testTranChoTachKhoiBac, testPhepDoJit, testChuoiSach, testMetricResolverTatJit } from "./agent-chi-phi.test";
 import { testTrangChamTatJit } from "./trang-cham-jit.test";
+import { testPancakeLinks } from "./pancake-links.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
@@ -2079,6 +2081,7 @@ async function main() {
   await testVtpCapability(db);
   await testCareWorkbench(db);
   await testCareClosedAssign(db);
+  await testCareAutoAssign(db);
   await testCareReturnLegQueue(db);
   await testCareDecisionParks(db);
   testCarrierManualPure();
@@ -2356,6 +2359,7 @@ async function main() {
   testChuoiSach();
   testMetricResolverTatJit();
   testTrangChamTatJit();
+  testPancakeLinks();
   testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();
