@@ -16,7 +16,7 @@ import {
   TOPIC_VIDEO_MAX_BYTES,
 } from "@/lib/constants/production-files";
 import { buildTopicEvidenceSnapshot } from "@/lib/constants/production-os";
-import { hasProvisionalPrefix, isProvisionalModel, nextProvisionalCode, PROVISIONAL_CODE_PATTERN, PROVISIONAL_CODE_PG_REGEX, provisionalDayPrefix, vnDayStamp } from "@/lib/constants/provisional-model";
+import { hasProvisionalPrefix, isProvisionalModel, nextProvisionalCode, PROVISIONAL_CODE_PATTERN, PROVISIONAL_CODE_PG_REGEX, PROVISIONAL_NAME_MIN, provisionalDayPrefix, vnDayStamp } from "@/lib/constants/provisional-model";
 import { assignModelCodeCore, planModelRegistry, registerModelCore, registerProvisionalModelCore } from "@/lib/models/service";
 import { createTopicCore } from "@/lib/production/topics";
 import { expectedChunkBytes, finishTopicFileCore, putTopicFileChunkCore, removeTopicFileCore, startTopicFileCore } from "@/lib/production/topic-files";
@@ -136,7 +136,9 @@ export async function testProductionTopicFilesDb(db: Db) {
   const prefix = provisionalDayPrefix(now);
 
   // ─── A. Đăng ký mẫu chưa có mã: mã tạm, tên bắt buộc, chặng do người chọn ───
-  assert.ok("error" in (await registerProvisionalModelCore(db, { name: "ab", state: "ADS_TESTING", actor, source: "test" })), "tên quá ngắn ⇒ từ chối");
+  assert.ok("error" in (await registerProvisionalModelCore(db, { name: "a", state: "ADS_TESTING", actor, source: "test" })), "tên quá ngắn ⇒ từ chối");
+  // Chủ shop 27/09/2026 đặt tên tạm "T1" — hai ký tự là đủ để người khác nhận ra trong nhóm.
+  assert.equal(PROVISIONAL_NAME_MIN, 2);
   assert.ok("error" in (await registerProvisionalModelCore(db, { name: "Đầm hoa", state: "ADS_TESTING", actor: { id: null, label: "máy" }, source: "test" })), "mục 34: phải có khoá tài khoản");
   const r1 = await registerProvisionalModelCore(db, { name: "Đầm babydoll hoa nhí", state: "ADS_TESTING", actor, source: "test", now });
   const r2 = await registerProvisionalModelCore(db, { name: "Áo croptop kẻ", state: "IDEA", actor, source: "test", now });

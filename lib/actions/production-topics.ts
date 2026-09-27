@@ -11,7 +11,7 @@ import { buildTopicEvidenceSnapshot, TOPIC_MESSAGE_KINDS, TOPIC_STATUSES } from 
 import { describeFollow } from "@/lib/production/lifecycle";
 import { canOpenTopic, loadTopicAccess } from "@/lib/production/topic-access";
 import { notifyTopicMessage, notifyTopicTagged } from "@/lib/production/topic-notify";
-import { addTopicMembersCore, addTopicMessageCore, createTopicCore, removeTopicMemberCore, setTopicStatusCore } from "@/lib/production/topics";
+import { addTopicMembersCore, addTopicMessageCore, createTopicCore, removeTopicMemberCore, restrictTopicCore, setTopicStatusCore, setTopicSupplierCore } from "@/lib/production/topics";
 import { getModel, getModelEvidence } from "@/lib/queries/models";
 import { buildTopicOpenContext } from "@/lib/constants/early-topic";
 import { getModelSignal } from "@/lib/queries/model-signal";
@@ -232,4 +232,38 @@ export async function untagTopicMember(input: unknown): Promise<Result> {
   if (r.removed) await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_TOPIC_UNTAG", entity: "PRODUCTION_TOPIC", entityId: parsed.data.topicId, before: { userId: parsed.data.userId } });
   revalidateProduction(parsed.data.topicId);
   return { ok: true };
+}
+
+const supplierSchema = z.object({ topicId: z.string().min(1), supplierId: z.string().trim().min(1).nullable() });
+
+/** Gắn / đổi / bỏ xưởng của topic — người mở topic, người có quyền sản xuất, ADMIN (cùng quyền đổi trạng thái). */
+export async function setTopicSupplier(input: unknown): Promise<Result<{ noop: boolean }>> {
+  const user = await requireUser();
+  const parsed = supplierSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const acc = await loadTopicAccess(db, parsed.data.topicId, user);
+  if (!acc) return { error: "Không tìm thấy topic" };
+  if (!acc.setStatus) return { error: "Không có quyền đổi xưởng của topic" };
+  const r = await setTopicSupplierCore(db, { ...parsed.data, actor: actorOf(user) });
+  if ("error" in r) return r;
+  if (!r.noop) await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_TOPIC_SUPPLIER", entity: "PRODUCTION_TOPIC", entityId: parsed.data.topicId, before: { supplierId: r.from }, after: { supplierId: r.to } });
+  revalidateProduction(parsed.data.topicId);
+  return { ok: true, noop: r.noop };
+}
+
+/** Chuyển topic cũ thành topic riêng — chỉ người mở topic / ADMIN, một chiều. */
+export async function restrictProductionTopic(input: unknown): Promise<Result<{ changed: boolean }>> {
+  const user = await requireUser();
+  const parsed = z.object({ topicId: z.string().min(1) }).safeParse(input);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const acc = await loadTopicAccess(db, parsed.data.topicId, user);
+  if (!acc) return { error: "Không tìm thấy topic" };
+  if (!acc.untag) return { error: "Chỉ người mở topic (hoặc ADMIN) chuyển được topic thành topic riêng" };
+  const r = await restrictTopicCore(db, { topicId: parsed.data.topicId, actor: actorOf(user) });
+  if ("error" in r) return r;
+  if (r.changed) await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_TOPIC_RESTRICT", entity: "PRODUCTION_TOPIC", entityId: parsed.data.topicId, before: { restricted: false }, after: { restricted: true } });
+  revalidateProduction(parsed.data.topicId);
+  return { ok: true, changed: r.changed };
 }

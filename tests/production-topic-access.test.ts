@@ -8,7 +8,7 @@ import { buildTopicEvidenceSnapshot, EMPTY_REQUIREMENTS } from "@/lib/constants/
 import { registerProvisionalModelCore } from "@/lib/models/service";
 import { canOpenTopic, loadTopicAccess, topicAccess, topicAudience, type TopicViewer } from "@/lib/production/topic-access";
 import { notifyTopicMessage, notifyTopicTagged, TOPIC_INBOX_KIND } from "@/lib/production/topic-notify";
-import { addTopicMembersCore, createTopicCore, removeTopicMemberCore } from "@/lib/production/topics";
+import { addTopicMembersCore, createTopicCore, removeTopicMemberCore, restrictTopicCore, setTopicSupplierCore } from "@/lib/production/topics";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
 import { listTopics } from "@/lib/queries/production-os";
 import { adaptProductionTopics } from "@/lib/queries/work-adapters";
@@ -72,6 +72,10 @@ export function testProductionTopicAccessPure() {
   const tf = readFileSync("app/(dashboard)/production/_components/topic-files.tsx", "utf8");
   assert.ok(!tf.includes('target="_blank"'), "bấm ảnh không mở link ngoài");
   assert.ok(tf.includes("<ImageLightbox") && !/<img[^>]*object-cover/.test(tf), "ảnh không bị cắt (object-contain) và có popup xem lớn");
+  const detailSrc = readFileSync("app/(dashboard)/production/topics/[id]/page.tsx", "utf8");
+  assert.ok(detailSrc.includes("<TopicSupplierSelect"), "trang topic có ô chọn xưởng");
+  const membersSrc = readFileSync("app/(dashboard)/production/topics/[id]/topic-members.tsx", "utf8");
+  assert.ok(membersSrc.includes("!restricted && canUntag") && membersSrc.includes("restrictProductionTopic("), "topic cũ có nút chuyển thành topic riêng — chỉ người mở / ADMIN");
   const form = readFileSync("app/(dashboard)/marketing/topics/new/topic-form.tsx", "utf8");
   assert.ok(form.includes("<PeoplePicker") && form.includes("memberIds,"), "biểu mẫu tag được nhiều người");
 
@@ -141,6 +145,26 @@ export async function testProductionTopicAccessDb(db: Db) {
   assert.ok(!viec.some((w) => w.sourceKey === t.topicId), "topic riêng không lên hàng đợi");
   assert.ok(viec.some((w) => w.sourceKey === cu.topicId));
 
+  // ─── Xưởng chọn SAU khi mở; xưởng lạ bị từ chối; không đổi ⇒ không ghi ───
+  const [xuong] = await db.insert(schema.suppliers).values({ id: `${P}xuong`, name: "Xưởng may PTA" }).returning({ id: schema.suppliers.id });
+  assert.ok("error" in (await setTopicSupplierCore(db, { topicId: t.topicId, supplierId: `${P}khong-co`, actor: mkt })), "xưởng không có trong sổ ⇒ từ chối");
+  const gan = await setTopicSupplierCore(db, { topicId: t.topicId, supplierId: xuong.id, actor: mkt });
+  assert.ok("ok" in gan && !gan.noop && gan.from === null && gan.to === xuong.id);
+  const lai = await setTopicSupplierCore(db, { topicId: t.topicId, supplierId: xuong.id, actor: mkt });
+  assert.ok("ok" in lai && lai.noop, "chọn lại đúng xưởng cũ ⇒ không ghi");
+  const boXuong = await setTopicSupplierCore(db, { topicId: t.topicId, supplierId: null, actor: mkt });
+  assert.ok("ok" in boXuong && !boXuong.noop && boXuong.to === null, "bỏ gắn xưởng được");
+
+  // ─── Topic cũ → topic riêng: một chiều, người ngoài mất quyền xem ngay ───
+  assert.equal((await loadTopicAccess(db, cu.topicId, vNgoai))?.view, true);
+  const r1 = await restrictTopicCore(db, { topicId: cu.topicId, actor: mkt });
+  assert.ok("ok" in r1 && r1.changed);
+  assert.equal((await loadTopicAccess(db, cu.topicId, vNgoai))?.view, false, "đã chuyển riêng ⇒ người không được tag thôi xem");
+  assert.equal((await loadTopicAccess(db, cu.topicId, vMkt))?.view, true, "người mở vẫn xem");
+  const r2 = await restrictTopicCore(db, { topicId: cu.topicId, actor: mkt });
+  assert.ok("ok" in r2 && !r2.changed, "bấm lần hai không ghi gì");
+  await db.update(schema.productionTopics).set({ restricted: false }).where(eq(schema.productionTopics.id, cu.topicId));
+
   // ─── Tag thêm (nhiều người một lượt), bỏ tag ───
   const them = await addTopicMembersCore(db, { topicId: t.topicId, userIds: [NGOAI, SX], actor: mkt });
   assert.ok("ok" in them && them.added.length === 1 && them.added[0] === NGOAI, "người đã ở trong topic không bị tag lại");
@@ -168,5 +192,5 @@ export async function testProductionTopicAccessDb(db: Db) {
     ].sort(),
   );
 
-  console.log("✓ Topic sản xuất (CSDL): tag lúc mở loại trùng / tự tag / tài khoản khoá · danh sách lọc đúng theo người xem · trang mẫu đếm nhưng ẩn tiêu đề · hàng đợi bỏ topic riêng · tag thêm / bỏ tag đổi quyền xem ngay · tin hộp thư không nhân đôi");
+  console.log("✓ Topic sản xuất (CSDL): tag lúc mở loại trùng / tự tag / tài khoản khoá · danh sách lọc đúng theo người xem · trang mẫu đếm nhưng ẩn tiêu đề · hàng đợi bỏ topic riêng · tag thêm / bỏ tag đổi quyền xem ngay · tin hộp thư không nhân đôi · xưởng chọn sau khi mở · topic cũ chuyển riêng một chiều");
 }

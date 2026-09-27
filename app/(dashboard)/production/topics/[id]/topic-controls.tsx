@@ -6,7 +6,7 @@ import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { addProductionTopicMessage, setProductionTopicStatus } from "@/lib/actions/production-topics";
+import { addProductionTopicMessage, setProductionTopicStatus, setTopicSupplier } from "@/lib/actions/production-topics";
 import { TOPIC_MESSAGE_KIND_LABEL, TOPIC_MESSAGE_KINDS, TOPIC_STATUS_LABEL, TOPIC_TRANSITIONS, type TopicMessageKind, type TopicStatus } from "@/lib/constants/production-os";
 
 /** Thêm một lượt trao đổi (append-only — không sửa, không xoá). */
@@ -96,5 +96,29 @@ export function TopicStatusControl({ topicId, status }: { topicId: string; statu
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Xưởng của topic — chọn SAU khi mở (chủ shop 27/09/2026: biểu mẫu mở topic không còn ô xưởng). Đổi ngay khi
+ * chọn; "— Chưa chọn —" là bỏ gắn.
+ */
+export function TopicSupplierSelect({ topicId, supplierId, suppliers }: { topicId: string; supplierId: string | null; suppliers: { id: string; name: string }[] }) {
+  const [pending, start] = useNavTransition();
+  const doi = (v: string) =>
+    start(async () => {
+      const r = await setTopicSupplier({ topicId, supplierId: v || null });
+      if ("error" in r) toast.error(r.error);
+      else if (!r.noop) toast.success(v ? "Đã gắn xưởng cho topic" : "Đã bỏ gắn xưởng");
+    });
+  return (
+    <select value={supplierId ?? ""} onChange={(e) => doi(e.target.value)} disabled={pending} className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-sm font-normal">
+      <option value="">— Chưa chọn —</option>
+      {suppliers.map((x) => (
+        <option key={x.id} value={x.id}>
+          {x.name}
+        </option>
+      ))}
+    </select>
   );
 }

@@ -66,6 +66,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   PRODUCTION_TOPIC_FILE_REMOVE: "Gỡ ảnh / video khỏi topic sản xuất",
   PRODUCTION_TOPIC_TAG: "Tag người vào topic sản xuất",
   PRODUCTION_TOPIC_UNTAG: "Bỏ tag người khỏi topic sản xuất",
+  PRODUCTION_TOPIC_SUPPLIER: "Gắn / đổi xưởng của topic sản xuất",
+  PRODUCTION_TOPIC_RESTRICT: "Chuyển topic sản xuất thành topic riêng",
   MODEL_REGISTER_PROVISIONAL: "Đăng ký mẫu mới chưa có mã (mã tạm)",
   MODEL_CODE_ASSIGN: "Chốt mã chính thức cho mẫu mang mã tạm",
   COST_SHEET_CREATE: "Lập phiên bản giá thành",

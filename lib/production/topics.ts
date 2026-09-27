@@ -132,6 +132,40 @@ export async function removeTopicMemberCore(db: Db, input: { topicId: string; us
   return { ok: true, removed: rows.length > 0 };
 }
 
+/**
+ * Gắn / đổi / bỏ xưởng của topic (chủ shop 27/09/2026: biểu mẫu mở topic không còn ô xưởng — người trong
+ * topic chọn sau khi đã biết hỏi xưởng nào). Xưởng phải còn trong sổ; `null` = bỏ gắn. Không đổi ⇒ không ghi.
+ */
+export async function setTopicSupplierCore(db: Db, input: { topicId: string; supplierId: string | null; actor: Actor }): Promise<{ ok: true; from: string | null; to: string | null; noop: boolean } | { error: string }> {
+  const loi = humanError(input.actor);
+  if (loi) return { error: loi };
+  const [t] = await db.select({ id: tp.id, supplierId: tp.supplierId }).from(tp).where(eq(tp.id, input.topicId)).limit(1);
+  if (!t) return { error: "Không tìm thấy topic" };
+  if (input.supplierId) {
+    const [s] = await db.select({ id: schema.suppliers.id }).from(schema.suppliers).where(eq(schema.suppliers.id, input.supplierId)).limit(1);
+    if (!s) return { error: "Không tìm thấy xưởng trong sổ" };
+  }
+  if (t.supplierId === input.supplierId) return { ok: true, from: t.supplierId, to: input.supplierId, noop: true };
+  await db.update(tp).set({ supplierId: input.supplierId, updatedAt: new Date() }).where(eq(tp.id, t.id));
+  return { ok: true, from: t.supplierId, to: input.supplierId, noop: false };
+}
+
+/**
+ * Chuyển một topic CŨ (mở trước 0153, ai có quyền xem sản xuất cũng xem) thành topic RIÊNG. Một chiều: người
+ * bấm là người mở topic hoặc ADMIN, sau khi đã tag đủ người — máy KHÔNG tự chuyển hàng loạt vì như thế là
+ * đoán ai lẽ ra được tag (mục 35).
+ */
+export async function restrictTopicCore(db: Db, input: { topicId: string; actor: Actor }): Promise<{ ok: true; changed: boolean } | { error: string }> {
+  const loi = humanError(input.actor);
+  if (loi) return { error: loi };
+  const rows = await db
+    .update(tp)
+    .set({ restricted: true })
+    .where(and(eq(tp.id, input.topicId), eq(tp.restricted, false)))
+    .returning({ id: tp.id });
+  return { ok: true, changed: rows.length > 0 };
+}
+
 type MessageRow = { topicId: string; modelId: string; kind: TopicMessageKind; body: string; attachments: string[]; quotedUnitPrice: number | null; actor: Actor; causationId?: string | null };
 
 async function insertMessage(tx: DbLike, m: MessageRow): Promise<{ messageId: string; eventId: string | null }> {

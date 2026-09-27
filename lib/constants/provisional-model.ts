@@ -77,5 +77,8 @@ export const PROVISIONAL_START_STATES = ["ADS_TESTING", "CREATIVE", "IDEA"] as c
 export type ProvisionalStartState = (typeof PROVISIONAL_START_STATES)[number];
 export const PROVISIONAL_DEFAULT_STATE: ProvisionalStartState = "ADS_TESTING";
 
-/** Tên gọi tạm tối thiểu — không có mã thì TÊN là thứ duy nhất để người khác nhận ra mẫu. */
-export const PROVISIONAL_NAME_MIN = 3;
+/**
+ * Tên gọi tạm tối thiểu — không có mã thì TÊN là thứ duy nhất để người khác nhận ra mẫu. Chủ shop 27/09/2026
+ * đặt tên kiểu "T1": hai ký tự là đủ trong nhóm; một ký tự thì không ai phân biệt được.
+ */
+export const PROVISIONAL_NAME_MIN = 2;
