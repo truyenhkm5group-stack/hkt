@@ -28,7 +28,18 @@
 
   CHỈ import tệp `lib/` và tên ĐÃ CÓ trên ảnh đang chạy (không một hàm nào của bản gộp):
   `computeVelocity`, `getReplenishmentPlan`, `loadPlanningAssumptions`, `resolveSlowMovingRules`,
-  `SLOW_MOVING_KEY`, `ORDER_OUTCOME_FAST`, `PRIMARY_ATTEMPT`, `chayKhongJit` — bài kiểm chặn tên mới.
+  `SLOW_MOVING_KEY`, `ORDER_OUTCOME_FAST`, `PRIMARY_ATTEMPT`, `chayKhongJit`, `RETURNED_OUTCOMES_SQL`
+  (có từ 23/09/2026) — bài kiểm chặn tên mới.
+
+  ─── LỚP "HOÀN GẦN HẾT / GỬI ĐI KHÔNG GIAO ĐƯỢC" (`RETURNED_OUT`, chủ shop duyệt 27/09/2026) ───
+
+  Lượt đo đầu (run 36306328239, 28 mẫu mã) cho 1 mẫu đi DEAD → HEALTHY: gửi đi đều nhưng hoàn gần hết,
+  tốc độ gửi đi dương nên số ngày phủ ngắn ⇒ "Bình thường". Bản vá thêm lớp `RETURNED_OUT` vào
+  `classifyStockRisk` — nhưng hàm ấy CHƯA có trên ảnh đang chạy, nên vế MỚI của script tự xếp lớp này
+  bằng `xepLop` (bản sao thuần của `classifyStockRisk`; bài kiểm so hai hàm trên cả lưới) từ: dòng Kế hoạch
+  SX của ảnh + câu SQL CHỈ ĐỌC `deadWindowFacts` dưới đây (món gửi đi / món hoàn của đơn lên trong
+  `deadDays` ngày — cùng căn cứ luật hàng chết cũ: ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT). Vế CŨ xếp bằng
+  `xepLopCu` — nguyên văn f84be840, không có lớp mới.
 
   arg: không có.
 */
@@ -41,6 +52,7 @@ import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { computeVelocity } from "@/lib/constants/planning";
 import { SLOW_MOVING_KEY, resolveSlowMovingRules, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
 import { getReplenishmentPlan, loadPlanningAssumptions } from "@/lib/queries/planning";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -50,8 +62,8 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 export const COMPARE_MAX_LINES = 60;
 export const COMPARE_MAX_CHARS = 300;
 
-export const RISKS: readonly StockRisk[] = ["DEAD", "EXCESS", "SLOW", "HEALTHY"];
-const NHAN: Record<StockRisk, string> = { DEAD: "Hàng chết", EXCESS: "Vốn nằm chết", SLOW: "Bán chậm", HEALTHY: "Bình thường" };
+export const RISKS: readonly StockRisk[] = ["DEAD", "RETURNED_OUT", "EXCESS", "SLOW", "HEALTHY"];
+const NHAN: Record<StockRisk, string> = { DEAD: "Hàng chết", RETURNED_OUT: "Hoàn gần hết", EXCESS: "Vốn nằm chết", SLOW: "Bán chậm", HEALTHY: "Bình thường" };
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -67,6 +79,9 @@ export type VariantCompare = {
   newCover: number | null;
   oldRisk: StockRisk;
   newRisk: StockRisk;
+  /** Món gửi đi / món hoàn của đơn lên trong cửa sổ hàng chết — căn cứ lớp `RETURNED_OUT` (chỉ vế MỚI). */
+  shippedInDeadWindow: number;
+  returnedInDeadWindow: number;
 };
 
 export type VelocityCompare = {
@@ -120,16 +135,50 @@ function lastSold(db: Db) {
     .groupBy(oi.variantId);
 }
 
+/**
+ * Món gửi đi (đơn KHÔNG HUỶ — căn cứ "gộp" của tốc độ gửi đi) và món đã HOÀN của đơn lên trong
+ * `deadDays` ngày. CHỈ ĐỌC. Mirror của `deadWindowFactsSubquery` (lib/queries/slow-moving.ts, chưa
+ * deploy) viết bằng các tên đã có trên ảnh; bài kiểm so số của hai câu trên PGlite.
+ */
+function deadWindowFacts(db: Db, deadDays: number) {
+  return db
+    .select({
+      variantId: oi.variantId,
+      shipped: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`.as("vc_shipped_dead"),
+      returned: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`.as("vc_returned_dead"),
+    })
+    .from(oi)
+    .innerJoin(o, eq(o.id, oi.orderId))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(sql`${o.insertedAt} >= now() - (${deadDays} || ' days')::interval`)
+    .groupBy(oi.variantId);
+}
+
 const tron1 = (x: number | null) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 10) / 10);
 
-/**
- * Phép xếp lớp — chép từ vòng lặp `slowMovingUncached` tại f84be840, cộng đúng MỘT nhánh mà định nghĩa
- * mới sinh ra (có gửi đi mà hàng hoàn về bằng hàng đi ⇒ tồn không vơi ⇒ Vốn nằm chết). Vế cũ không
- * bao giờ chạm nhánh ấy (tốc độ ròng > 0 luôn cho số ngày hữu hạn). Bài kiểm so hàm này với
- * `classifyStockRisk` của mã nguồn mới trên cả lưới đầu vào.
- */
-export function xepLop(velocity: number, cover: number | null, daysSinceLastSale: number | null, R: SlowMovingRules): StockRisk {
+/** Phép xếp lớp CŨ — nguyên văn vòng lặp `slowMovingUncached` tại f84be840. Chỉ vế CŨ dùng. */
+export function xepLopCu(velocity: number, cover: number | null, daysSinceLastSale: number | null, R: SlowMovingRules): StockRisk {
   if (velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= R.deadDays)) return "DEAD";
+  if (cover !== null && cover > R.excessCoverDays) return "EXCESS";
+  if (cover !== null && cover > R.slowCoverDays) return "SLOW";
+  return "HEALTHY";
+}
+
+/**
+ * Phép xếp lớp MỚI — bản sao thuần của `classifyStockRisk` (lib/constants/slow-moving.ts), vì hàm ấy
+ * chưa có trên ảnh đang chạy. Bài kiểm so hai hàm trên cả lưới đầu vào, kể cả hai sự kiện cửa sổ.
+ */
+export function xepLop(
+  velocity: number,
+  cover: number | null,
+  daysSinceLastSale: number | null,
+  R: SlowMovingRules,
+  shippedInDeadWindow: number,
+  returnedInDeadWindow: number,
+): StockRisk {
+  const noDelivery = daysSinceLastSale === null || daysSinceLastSale >= R.deadDays;
+  if (noDelivery && shippedInDeadWindow > 0 && returnedInDeadWindow > 0) return "RETURNED_OUT";
+  if (velocity <= 0 && noDelivery) return "DEAD";
   if (velocity > 0 && cover === null) return "EXCESS";
   if (cover !== null && cover > R.excessCoverDays) return "EXCESS";
   if (cover !== null && cover > R.slowCoverDays) return "SLOW";
@@ -153,9 +202,14 @@ export async function collectVelocityCompare(db: Db): Promise<VelocityCompare> {
   const [resolved, a, plan] = await Promise.all([loadRules(db), loadPlanningAssumptions(), getReplenishmentPlan()]);
   const R = resolved.rules;
   const windowDays = Math.max(1, a.velocityWindowDays);
-  const [win, last] = await Promise.all([chayKhongJit(db, (tx) => oldWindowSales(tx, windowDays)), chayKhongJit(db, (tx) => lastSold(tx))]);
+  const [win, last, dead] = await Promise.all([
+    chayKhongJit(db, (tx) => oldWindowSales(tx, windowDays)),
+    chayKhongJit(db, (tx) => lastSold(tx)),
+    chayKhongJit(db, (tx) => deadWindowFacts(tx, R.deadDays)),
+  ]);
   const winBy = new Map(win.map((r) => [r.variantId, r]));
   const lastBy = new Map(last.map((r) => [r.variantId, r.lastSoldAt]));
+  const deadBy = new Map(dead.map((r) => [r.variantId, r]));
 
   const variants: VariantCompare[] = [];
   for (const r of plan.rows) {
@@ -168,14 +222,19 @@ export async function collectVelocityCompare(db: Db): Promise<VelocityCompare> {
     const v = computeVelocity(Number(w?.sold ?? 0), windowDays, Number(w?.peak ?? 0));
     const oldCover = v.velocity > 0 ? tron1(r.available / v.velocity) : null;
     const newCover = tron1(r.daysOfCover);
+    const d = deadBy.get(r.variantId);
+    const shippedInDeadWindow = Number(d?.shipped ?? 0);
+    const returnedInDeadWindow = Number(d?.returned ?? 0);
     variants.push({
       variantId: r.variantId,
       oldVelocity: v.velocity,
       newVelocity: r.velocity,
       oldCover,
       newCover,
-      oldRisk: xepLop(v.velocity, oldCover, daysSinceLastSale, R),
-      newRisk: xepLop(r.velocity, newCover, daysSinceLastSale, R),
+      oldRisk: xepLopCu(v.velocity, oldCover, daysSinceLastSale, R),
+      newRisk: xepLop(r.velocity, newCover, daysSinceLastSale, R, shippedInDeadWindow, returnedInDeadWindow),
+      shippedInDeadWindow,
+      returnedInDeadWindow,
     });
   }
   return {
@@ -218,6 +277,11 @@ export function velocityCompareLines(c: VelocityCompare): string[] {
   for (const v of doi) cap.set(`${v.oldRisk}→${v.newRisk}`, (cap.get(`${v.oldRisk}→${v.newRisk}`) ?? 0) + 1);
   const capParts = [...cap.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([k, m]) => `${k} ${dem(m)}`);
   out.push(`ĐỔI LỚP: ${dem(doi.length)}/${dem(n)} mẫu mã${capParts.length ? ` — ${capParts.join(" · ")}` : ""}`);
+  const hoan = c.variants.filter((v) => v.newRisk === "RETURNED_OUT");
+  const tuLop = RISKS.map((k) => [k, hoan.filter((v) => v.oldRisk === k).length] as const).filter(([, m]) => m > 0).map(([k, m]) => `${k} ${dem(m)}`);
+  out.push(
+    `HOÀN GẦN HẾT (mới — gửi đi trong ${dem(R.deadDays)} ngày, có món hoàn, 0 món giao thành công): ${dem(hoan.length)} mẫu mã${tuLop.length ? ` — lớp CŨ của chúng: ${tuLop.join(" · ")}` : ""} · CŨ Hàng chết → MỚI Bình thường: ${dem(c.variants.filter((v) => v.oldRisk === "DEAD" && v.newRisk === "HEALTHY").length)}`,
+  );
   const cungTocDo = doi.filter((v) => Math.abs(v.oldVelocity - v.newVelocity) < EPS).length;
   out.push(`  trong đó đổi lớp mà tốc độ gửi đi = tốc độ ròng cũ: ${dem(cungTocDo)} (chỉ do trừ hàng hoàn sau độ trễ hoàn)`);
 

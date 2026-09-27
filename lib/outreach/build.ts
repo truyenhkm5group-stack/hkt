@@ -12,6 +12,7 @@ import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { productReturnHistory } from "@/lib/queries/profit-nominal";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { getSlowMoving } from "@/lib/queries/slow-moving";
 import { coverDaysOf, paceOfPlanRow, pooledPace, type StockPace } from "@/lib/constants/planning";
 import { getSettingJson } from "@/lib/settings";
 
@@ -42,13 +43,16 @@ export function nurtureVars(cfg: OutreachConfig, ten: string, goiY: string): Tem
  */
 export async function clearanceProducts(cfg: OutreachConfig): Promise<Set<string>> {
   const out = new Set<string>(cfg.clearanceProductIds);
-  const [history, plan] = await Promise.all([productReturnHistory(90), getReplenishmentPlan()]);
+  const [history, plan, slow] = await Promise.all([productReturnHistory(90), getReplenishmentPlan(), getSlowMoving()]);
+  // Mẫu "hoàn gần hết" (Hàng chậm `RETURNED_OUT`) góp tồn nhưng KHÔNG góp nhịp — hàng đi rồi về, như hàng chết.
+  const returnedOut = new Set(slow.rows.filter((r) => r.risk === "RETURNED_OUT").map((r) => r.variantId));
   const byProduct = new Map<string, { available: number; paces: StockPace[] }>();
   for (const r of plan.rows) {
     if (!r.stockKnown) continue;
     const e = byProduct.get(r.productId) ?? { available: 0, paces: [] };
     e.available += Math.max(0, r.available);
-    e.paces.push(paceOfPlanRow(r));
+    const p = paceOfPlanRow(r);
+    e.paces.push(returnedOut.has(r.variantId) ? { ...p, velocity: 0, netVelocity: 0 } : p);
     byProduct.set(r.productId, e);
   }
   for (const [productId, h] of history) {

@@ -5,13 +5,16 @@ import { inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { computePlan, coverDaysOf, paceOfPlanRow, pooledPace, qtyForCoverDays, roundCoverDays, type StockPace } from "@/lib/constants/planning";
-import { SLOW_MOVING_RULES, classifyStockRisk, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
+import { SLOW_MOVING_RULES, STOCK_RISKS, STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, STOCK_RISK_WHY, classifyStockRisk, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
+import { decideInventory, type DecisionInput } from "@/lib/constants/inventory-decision";
+import { normalizeOutreachConfig } from "@/lib/constants/outreach";
+import { clearanceProducts } from "@/lib/outreach/build";
 import { getInventoryDecisionReport } from "@/lib/queries/inventory-decision";
 import { getReplenishmentPlan, getVariantPaceMap } from "@/lib/queries/planning";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
 import type { Period } from "@/lib/search-params";
-import { COMPARE_MAX_CHARS, COMPARE_MAX_LINES, collectVelocityCompare, velocityCompareLines, xepLop } from "@/scripts/velocity-compare";
+import { COMPARE_MAX_CHARS, COMPARE_MAX_LINES, RISKS, collectVelocityCompare, velocityCompareLines, xepLop, xepLopCu } from "@/scripts/velocity-compare";
 
 /**
  * ═══════════ COMPANY OS · AGENT V · MỘT TỐC ĐỘ BÁN ═══════════
@@ -27,7 +30,11 @@ import { COMPARE_MAX_CHARS, COMPARE_MAX_LINES, collectVelocityCompare, velocityC
  *    lịch sử đã khai); script ops không import một tên nào của bản gộp (ảnh đang chạy chưa có).
  *  · CSDL (PGlite): cùng một bộ dữ liệu, số ngày phủ của Hàng chậm == Kế hoạch SX == Quyết định vốn tồn
  *    == Hiệu quả mẫu mã cho TỪNG mẫu mã; mẫu mã dựng riêng nhiều hàng hoàn dịch lớp đúng hướng đã khai
- *    (Vốn nằm chết → Bình thường; Hàng chết → Bình thường), mẫu mã không có hoàn giữ nguyên lớp.
+ *    (Vốn nằm chết → Bình thường), mẫu mã không có hoàn giữ nguyên lớp.
+ *  · Lớp "Hoàn gần hết" (27/09/2026, chủ shop duyệt sau lượt đo production run 36306328239): gửi đi trong cửa
+ *    sổ hàng chết mà KHÔNG giao được món nào ⇒ `RETURNED_OUT`, không bao giờ Bình thường; không gửi đi ⇒ vẫn
+ *    Hàng chết; đang đi chưa kết luận ⇒ không gắn nhãn. Quyết định vốn tồn / vòng phản hồi tồn / tệp xả hàng
+ *    đối xử như hàng chết.
  */
 
 const P = "cos-v-";
@@ -67,22 +74,58 @@ export function testVelocityUnifyPure() {
   // ── 2. Xếp lớp: trùng phép cũ trên miền của phép cũ; script ops trùng mã nguồn trên TOÀN lưới. ──
   const boNguong: SlowMovingRules[] = [{ ...SLOW_MOVING_RULES }, { deadDays: 90, excessCoverDays: 200, slowCoverDays: 75, healthyCoverDays: 30 }];
   let o = 0;
+  let hoan = 0;
   for (const R of boNguong)
     for (const velocity of [0, 0.3, 2])
       for (const cover of [null, 0, 10, 45, 59.9, 60, 60.1, 75, 120, 120.1, 200, 200.1, 300])
-        for (const dsls of [null, 0, 59, 60, 89, 90, 400]) {
-          const moi = classifyStockRisk({ velocity, daysOfCover: cover, daysSinceLastSale: dsls }, R).risk;
-          assert.equal(xepLop(velocity, cover, dsls, R), moi, `script ops xếp lớp khác mã nguồn: v=${velocity} phủ=${cover} ngày=${dsls}`);
-          if (velocity > 0 && cover === null) assert.equal(moi, "EXCESS", "gửi đi mà tồn không vơi ⇒ Vốn nằm chết, không phải Bình thường");
-          else {
-            assert.equal(moi, lopCu(velocity, cover, dsls, R), `ngưỡng/xếp lớp đổi so với bản cũ: v=${velocity} phủ=${cover} ngày=${dsls}`);
-            o += 1;
+        for (const dsls of [null, 0, 59, 60, 89, 90, 400])
+          for (const [shipped, returned] of [[0, 0], [5, 0], [5, 1], [5, 5]]) {
+            const khong = dsls === null || dsls >= R.deadDays;
+            const moi = classifyStockRisk({ velocity, daysOfCover: cover, daysSinceLastSale: dsls, shippedInDeadWindow: shipped, returnedInDeadWindow: returned }, R).risk;
+            const tag = `v=${velocity} phủ=${cover} ngày=${dsls} gửi=${shipped} hoàn=${returned}`;
+            assert.equal(xepLop(velocity, cover, dsls, R, shipped, returned), moi, `script ops xếp lớp khác mã nguồn: ${tag}`);
+            assert.equal(xepLopCu(velocity, cover, dsls, R), lopCu(velocity, cover, dsls, R), `vế CŨ của script lệch bản f84be840: ${tag}`);
+            if (khong && shipped > 0 && returned > 0) {
+              // Gửi đi mà không giao được món nào, đã có hoàn ⇒ KHÔNG BAO GIỜ Bình thường, không bao giờ biến mất.
+              assert.equal(moi, "RETURNED_OUT", `gửi đi mà không giao được phải là Hoàn gần hết: ${tag}`);
+              hoan += 1;
+            } else if (velocity > 0 && cover === null) assert.equal(moi, "EXCESS", "gửi đi mà tồn không vơi ⇒ Vốn nằm chết, không phải Bình thường");
+            else {
+              // Ngoài ca mới, ngưỡng và phép xếp y như cũ — kể cả "không gửi đi" (hoặc chưa có hoàn) vẫn là Hàng chết.
+              assert.equal(moi, lopCu(velocity, cover, dsls, R), `ngưỡng/xếp lớp đổi so với bản cũ: ${tag}`);
+              o += 1;
+            }
           }
-        }
-  assert.ok(o > 400, "lưới xếp lớp đủ dày");
+  assert.ok(o > 1400 && hoan > 600, `lưới xếp lớp đủ dày (${o} ca giữ nguyên, ${hoan} ca hoàn gần hết)`);
+  // Không gửi đi ⇒ vẫn là Hàng chết như hôm nay; gửi đi mà chưa có món nào kết luận hoàn ⇒ CHƯA BIẾT, không gắn nhãn hoàn.
+  const R0 = SLOW_MOVING_RULES;
+  const f0 = { shippedInDeadWindow: 0, returnedInDeadWindow: 0 };
+  assert.equal(classifyStockRisk({ velocity: 0, daysOfCover: null, daysSinceLastSale: null, ...f0 }, R0).risk, "DEAD");
+  assert.notEqual(classifyStockRisk({ velocity: 1, daysOfCover: 3, daysSinceLastSale: null, shippedInDeadWindow: 9, returnedInDeadWindow: 0 }, R0).risk, "RETURNED_OUT");
+  // Có một lần giao thành công trong cửa sổ ⇒ không phải lớp mới (luật hàng chết cũ quyết định "giao được").
+  assert.notEqual(classifyStockRisk({ velocity: 1, daysOfCover: 3, daysSinceLastSale: 5, shippedInDeadWindow: 9, returnedInDeadWindow: 8 }, R0).risk, "RETURNED_OUT");
+  const lyDo = classifyStockRisk({ velocity: 1, daysOfCover: 2, daysSinceLastSale: null, shippedInDeadWindow: 14, returnedInDeadWindow: 12 }, R0).reason;
+  assert.ok(lyDo.includes("Gửi đi 14 món trong 60 ngày, hoàn 12, chưa giao thành công món nào (2 món chưa kết luận)"), lyDo);
+  // Lớp mới có đủ nhãn / màu / việc nên làm / câu ⓘ, và script đếm đủ các lớp theo cùng thứ tự.
+  for (const k of STOCK_RISKS) assert.ok(STOCK_RISK_LABEL[k] && STOCK_RISK_TONE[k] && STOCK_RISK_ACTION[k] && STOCK_RISK_WHY[k], `lớp ${k} thiếu nhãn/màu/việc/ⓘ`);
+  assert.deepEqual([...RISKS], [...STOCK_RISKS], "script ops đếm đủ và đúng thứ tự các lớp");
+  assert.ok(STOCK_RISK_ACTION.RETURNED_OUT.includes("chất lượng"));
+  const sec = docMa("app/(dashboard)/inventory/planning/slow-moving-section.tsx");
+  assert.ok(sec.includes("STOCK_RISK_WHY[r.risk]") && sec.includes("<InfoHint"), "bảng Hàng chậm in ⓘ vì sao cạnh nhãn");
+
+  // Quyết định vốn tồn: hoàn gần hết (còn hàng) ⇒ Nên xả, KHÔNG đề xuất đặt thêm dù tốc độ gửi đi dương.
+  const dauVao: DecisionInput = { stockKnown: true, stock: 20, available: 20, incomingFromReturns: 0, openPoQty: 0, velocity: 3, velocityTrimmed: false, soldInWindow: 42, sold30: 90, daysOfCover: 6, leadTimeDays: 10, leadTimeSource: "override", safetyDays: 3, suggested: 25, unitCost: 100_000, retailPrice: 300_000, returnRate: 0.95, returnRateSource: "variant", daysSinceLastSale: null, ageDays: 100 };
+  assert.equal(decideInventory(dauVao).decision, "STOCKOUT_RISK", "đối chứng: không cờ ⇒ theo tốc độ gửi đi");
+  const xa = decideInventory({ ...dauVao, returnedOut: true });
+  assert.equal(xa.decision, "CLEARANCE_CANDIDATE");
+  assert.equal(xa.suggestedQty, 0, "hoàn gần hết ⇒ không đặt thêm");
+  assert.equal(xa.excessQty, 20);
+  assert.equal(xa.capitalFreeable, 2_000_000);
+  assert.ok(xa.reason.includes("hoàn gần hết") && xa.reason.includes("chất lượng"), xa.reason);
+  assert.equal(decideInventory({ ...dauVao, available: 0, returnedOut: true }).decision, "STOCKOUT_RISK", "hết hàng thì cờ không đổi gì (không có vốn để giải phóng)");
   // Câu lý do in ĐÚNG số đã xếp, và không bao giờ in vô cực.
-  assert.match(classifyStockRisk({ velocity: 1, daysOfCover: 130.5, daysSinceLastSale: 1 }, SLOW_MOVING_RULES).reason, /130,5|130\.5/);
-  assert.doesNotMatch(classifyStockRisk({ velocity: 1, daysOfCover: null, daysSinceLastSale: 1 }, SLOW_MOVING_RULES).reason, /Infinity|∞|NaN/);
+  assert.match(classifyStockRisk({ velocity: 1, daysOfCover: 130.5, daysSinceLastSale: 1, ...f0 }, SLOW_MOVING_RULES).reason, /130,5|130\.5/);
+  assert.doesNotMatch(classifyStockRisk({ velocity: 1, daysOfCover: null, daysSinceLastSale: 1, ...f0 }, SLOW_MOVING_RULES).reason, /Infinity|∞|NaN/);
 
   // ── 3. `computePlan` và `coverDaysOf` là MỘT phép tính — so từng bit trên cả lưới. ──
   let n = 0;
@@ -136,7 +179,7 @@ export function testVelocityUnifyPure() {
   // ── 6. Script ops: chỉ đọc, chỉ tên đã có trên ảnh đang chạy, khai đúng khuôn company-os-summary. ──
   const src = docMa("scripts/velocity-compare.ts");
   const code = boChuThich(src);
-  const MOI = ["coverDaysOf", "qtyForCoverDays", "paceOfPlanRow", "pooledPace", "roundCoverDays", "StockPace", "classifyStockRisk", "getVariantPaceMap", "VariantPace"];
+  const MOI = ["coverDaysOf", "qtyForCoverDays", "paceOfPlanRow", "pooledPace", "roundCoverDays", "StockPace", "classifyStockRisk", "getVariantPaceMap", "VariantPace", "STOCK_RISKS", "STOCK_RISK_WHY", "DeadWindowFacts", "returnsHref"];
   for (const m of code.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*"@\/([^"]+)"/g)) {
     const ten = m[1].split(",").map((x) => x.replace(/\btype\b/, "").trim()).filter(Boolean);
     for (const t of ten) assert.ok(!MOI.includes(t), `script ops import "${t}" — tên của bản gộp, ảnh đang chạy chưa có ⇒ MODULE/export không tồn tại`);
@@ -203,17 +246,24 @@ export async function testVelocityUnifyDb(db: Db) {
     Kiện hoàn mang mốc lấy hàng + mốc hoàn (cách nhau 50 phút) để Kế hoạch SX ĐO ĐƯỢC độ trễ hoàn (≥ 30
     kiện): không có nó thì độ trễ là `null` và mọi màn hình trùng nhau cả khi một nơi bỏ qua độ trễ.
   */
-  await db.insert(schema.products).values({ id: `${P}p1`, name: TEN, customId: "COSV1" });
-  await db.insert(schema.productVariants).values([1, 2, 3, 4, 5].map((k) => ({ id: `${P}v${k}`, productId: `${P}p1`, sku: `COSV1-${k}`, color: "Đen", size: String(k), retailPrice: 500_000 })));
-  await db.insert(schema.stockReceipts).values({ id: `${P}rc1`, kind: "RECEIPT", receivedAt: new Date(now - 100 * 24 * H), reference: `${P}rc1`, totalQuantity: 249, totalCost: 24_900_000, createdBy: "test" });
+  // v2 đứng RIÊNG một mã hàng (COSV2) để tệp khách xả hàng — gộp theo mã hàng — nhìn thấy riêng nó.
+  // v6 ĐANG ĐI: 3 đơn chưa kết luận, chưa giao lần nào — CHƯA BIẾT, không phải "hoàn gần hết".
+  const maCua = (variant: string) => (variant === `${P}v2` ? `${P}p2` : `${P}p1`);
+  await db.insert(schema.products).values([
+    { id: `${P}p1`, name: TEN, customId: "COSV1" },
+    { id: `${P}p2`, name: `${TEN} 2`, customId: "COSV2" },
+  ]);
+  await db.insert(schema.productVariants).values([1, 2, 3, 4, 5, 6].map((k) => ({ id: `${P}v${k}`, productId: maCua(`${P}v${k}`), sku: `COSV1-${k}`, color: "Đen", size: String(k), retailPrice: 500_000 })));
+  await db.insert(schema.stockReceipts).values({ id: `${P}rc1`, kind: "RECEIPT", receivedAt: new Date(now - 100 * 24 * H), reference: `${P}rc1`, totalQuantity: 254, totalCost: 25_400_000, createdBy: "test" });
   await db.insert(schema.stockReceiptItems).values([
     { id: `${P}ri1`, receiptId: `${P}rc1`, variantId: `${P}v1`, quantity: 94, unitCost: 100_000 },
     { id: `${P}ri2`, receiptId: `${P}rc1`, variantId: `${P}v2`, quantity: 16, unitCost: 100_000 },
     { id: `${P}ri3`, receiptId: `${P}rc1`, variantId: `${P}v3`, quantity: 15, unitCost: 100_000 },
     { id: `${P}ri4`, receiptId: `${P}rc1`, variantId: `${P}v4`, quantity: 50, unitCost: 100_000 },
     { id: `${P}ri5`, receiptId: `${P}rc1`, variantId: `${P}v5`, quantity: 74, unitCost: 100_000 },
+    { id: `${P}ri6`, receiptId: `${P}rc1`, variantId: `${P}v6`, quantity: 5, unitCost: 100_000 },
   ]);
-  type Don = { id: string; variant: string; at: Date; giao: boolean };
+  type Don = { id: string; variant: string; at: Date; giao: boolean | null };
   const don: Don[] = [];
   for (let d = 0; d < 14; d += 1) {
     for (let j = 0; j < 6; j += 1) don.push({ id: `${P}o1-${d}-${j}`, variant: `${P}v1`, at: new Date(now - d * 24 * H - 2 * H - j * 60_000), giao: d === 0 && j === 0 });
@@ -221,19 +271,51 @@ export async function testVelocityUnifyDb(db: Db) {
     don.push({ id: `${P}o3-${d}`, variant: `${P}v3`, at: new Date(now - d * 24 * H - 4 * H), giao: true });
     don.push({ id: `${P}o5-${d}`, variant: `${P}v5`, at: new Date(now - d * 24 * H - 5 * H), giao: d % 2 === 0 });
   }
+  for (let d = 0; d < 3; d += 1) don.push({ id: `${P}o6-${d}`, variant: `${P}v6`, at: new Date(now - d * 24 * H - 6 * H), giao: null });
   await db.insert(schema.orders).values(don.map((x) => ({ id: x.id, stage: "SHIPPED" as const, cod: 500_000, totalPriceAfterDiscount: 500_000, prepaid: 0, insertedAt: x.at })));
-  await db.insert(schema.orderItems).values(don.map((x) => ({ id: `${x.id}-i`, orderId: x.id, variantId: x.variant, productId: `${P}p1`, productName: TEN, quantity: 1, unitPrice: 500_000, lineTotal: 500_000 })));
+  await db.insert(schema.orderItems).values(don.map((x) => ({ id: `${x.id}-i`, orderId: x.id, variantId: x.variant, productId: maCua(x.variant), productName: TEN, quantity: 1, unitPrice: 500_000, lineTotal: 500_000 })));
   await db.insert(schema.shipments).values(
     don.map((x, i) => ({
       orderId: x.id,
       vtpOrderNumber: `COSV${String(i).padStart(4, "0")}`,
-      stage: (x.giao ? "DELIVERED" : "RETURNED") as never,
+      stage: (x.giao === null ? "IN_TRANSIT" : x.giao ? "DELIVERED" : "RETURNED") as never,
       codAmount: 500_000,
       codCollected: x.giao ? 450_000 : 0,
       pickedUpAt: new Date(x.at.getTime() + 10 * 60_000),
       deliveredAt: x.giao ? new Date(x.at.getTime() + H) : null,
-      returnedAt: x.giao ? null : new Date(x.at.getTime() + H),
+      returnedAt: x.giao === false ? new Date(x.at.getTime() + H) : null,
     })),
+  );
+  /*
+    Ba đơn biên của v2 cho hai sự kiện cửa sổ (không đổi tốc độ gửi đi 14 ngày của nó, nhận thêm 2 món phiếu
+    nhập cho hai đơn đã rời kho):
+      · HUỶ 3 ngày trước — không phải "gửi đi" (cùng căn cứ gộp: bỏ đơn huỷ);
+      · hoàn 80 ngày trước — NGOÀI cửa sổ 60 ngày, không đếm;
+      · "giao thành công" chỉ thu 70.000 ₫, 20 ngày trước — luật tiền kết luận HOÀN (`RETURNED_BY_RULE`), phải đếm.
+  */
+  await db.update(schema.stockReceiptItems).set({ quantity: 18 }).where(like(schema.stockReceiptItems.id, `${P}ri2`));
+  const bien = [
+    { id: `${P}o2-huy`, at: new Date(now - 3 * 24 * H), stage: "CANCELLED" as const, ship: null },
+    { id: `${P}o2-cu`, at: new Date(now - 80 * 24 * H), stage: "SHIPPED" as const, ship: { stage: "RETURNED", codCollected: 0 } },
+    { id: `${P}o2-luat`, at: new Date(now - 20 * 24 * H), stage: "SHIPPED" as const, ship: { stage: "DELIVERED", codCollected: 70_000 } },
+  ];
+  await db.insert(schema.orders).values(bien.map((x) => ({ id: x.id, stage: x.stage, cod: 500_000, totalPriceAfterDiscount: 500_000, prepaid: 0, insertedAt: x.at })));
+  await db.insert(schema.orderItems).values(bien.map((x) => ({ id: `${x.id}-i`, orderId: x.id, variantId: `${P}v2`, productId: `${P}p2`, productName: TEN, quantity: 1, unitPrice: 500_000, lineTotal: 500_000 })));
+  await db.insert(schema.shipments).values(
+    bien.flatMap((x, i) =>
+      x.ship
+        ? [{
+            orderId: x.id,
+            vtpOrderNumber: `COSVB${i}`,
+            stage: x.ship.stage as never,
+            codAmount: 500_000,
+            codCollected: x.ship.codCollected,
+            pickedUpAt: new Date(x.at.getTime() + 10 * 60_000),
+            deliveredAt: x.ship.stage === "DELIVERED" ? new Date(x.at.getTime() + H) : null,
+            returnedAt: x.ship.stage === "RETURNED" ? new Date(x.at.getTime() + H) : null,
+          }]
+        : [],
+    ),
   );
 
   try {
@@ -260,7 +342,7 @@ export async function testVelocityUnifyDb(db: Db) {
       assert.ok(pr, `${r.variantId}: dòng Hàng chậm phải có dòng Kế hoạch SX`);
       assert.equal(r.daysOfCover, roundCoverDays(pr.daysOfCover), `${r.sku}: số ngày phủ Hàng chậm ≠ Kế hoạch SX`);
       assert.equal(r.velocity, Math.round(pr.velocity * 100) / 100, `${r.sku}: tốc độ Hàng chậm ≠ Kế hoạch SX`);
-      assert.equal(r.risk, classifyStockRisk({ velocity: pr.velocity, daysOfCover: r.daysOfCover, daysSinceLastSale: r.daysSinceLastSale }, slow.rules).risk);
+      assert.equal(r.risk, classifyStockRisk({ velocity: pr.velocity, daysOfCover: r.daysOfCover, daysSinceLastSale: r.daysSinceLastSale, shippedInDeadWindow: r.shippedInDeadWindow, returnedInDeadWindow: r.returnedInDeadWindow }, slow.rules).risk);
     }
     for (const pr of plan.rows) if (pr.stockKnown && pr.available > 0) assert.ok(slowBy.has(pr.variantId), `${pr.sku}: biết tồn và còn hàng mà vắng khỏi Hàng chậm`);
 
@@ -291,8 +373,25 @@ export async function testVelocityUnifyDb(db: Db) {
     const lop = (k: string) => slowBy.get(`${P}${k}`);
     assert.equal(lop("v1")?.daysOfCover, 1.7);
     assert.equal(lop("v1")?.risk, "HEALTHY", "nhiều hoàn: tốc độ gửi đi 6/ngày ⇒ 1,7 ngày ⇒ Bình thường");
-    assert.equal(lop("v2")?.daysOfCover, 2);
-    assert.equal(lop("v2")?.risk, "HEALTHY");
+    assert.equal(lop("v2")?.daysOfCover, 2, "số ngày phủ vẫn là của Kế hoạch SX — chỉ LỚP đổi");
+    assert.equal(lop("v2")?.shippedInDeadWindow, 15, "14 hoàn + 1 hoàn theo luật tiền; đơn huỷ và đơn ngoài cửa sổ không đếm");
+    assert.equal(lop("v2")?.returnedInDeadWindow, 15, "RETURNED_BY_RULE là hoàn; đơn hoàn 80 ngày trước nằm ngoài cửa sổ");
+    assert.equal(lop("v2")?.risk, "RETURNED_OUT", "gửi đi 15 món, hoàn 15, chưa giao món nào ⇒ Hoàn gần hết — KHÔNG BAO GIỜ Bình thường");
+    assert.equal(lop("v2")?.excessValue, lop("v2")?.stockValue, "hoàn gần hết ⇒ toàn bộ là vốn nằm chết, như hàng chết");
+    assert.equal(slow.byRisk.RETURNED_OUT.count, slow.rows.filter((r) => r.risk === "RETURNED_OUT").length);
+    assert.equal(lop("v6")?.shippedInDeadWindow, 3);
+    assert.equal(lop("v6")?.returnedInDeadWindow, 0);
+    assert.ok(lop("v6") && lop("v6")?.risk !== "RETURNED_OUT" && lop("v6")?.risk !== "DEAD", `v6 đang đi, chưa kết luận ⇒ không phải hoàn gần hết, không phải hàng chết (đang ${lop("v6")?.risk})`);
+    // Quyết định vốn tồn đọc ĐÚNG lớp của Hàng chậm: v2 ⇒ Nên xả, không đề xuất đặt; cờ đi tới vòng phản hồi tồn.
+    const decV2 = dec.rows.find((r) => r.variantId === `${P}v2`);
+    assert.ok(decV2, "v2 phải có dòng Quyết định vốn tồn");
+    assert.equal(decV2.decision, "CLEARANCE_CANDIDATE");
+    assert.equal(decV2.returnedOut, true);
+    assert.equal(decV2.suggestedQty, 0);
+    for (const r of dec.rows) assert.equal(r.returnedOut, slowBy.get(r.variantId)?.risk === "RETURNED_OUT", `${r.sku}: cờ hoàn gần hết phải là lớp của Hàng chậm`);
+    // Tệp khách xả hàng: v2 góp tồn nhưng không góp nhịp ⇒ tồn "không vơi" ⇒ mã COSV2 vào tệp xả (tỷ lệ hoàn 100%).
+    const tepXa = await clearanceProducts(normalizeOutreachConfig({ clearanceProductIds: [], clearanceReturnRatePct: 50, clearanceStockDays: 30 }));
+    assert.ok(tepXa.has(`${P}p2`), "mã chỉ có mẫu hoàn gần hết phải vào tệp xả hàng như hàng chết");
     assert.equal(lop("v3")?.daysOfCover, 1);
     assert.equal(lop("v3")?.risk, "HEALTHY");
     assert.equal(lop("v4")?.daysOfCover, null, "không gửi đi ⇒ số ngày phủ CHƯA BIẾT, không 0, không vô cực");
@@ -316,6 +415,8 @@ export async function testVelocityUnifyDb(db: Db) {
       assert.ok(v, `${r.sku}: vắng trong script`);
       assert.equal(v.newCover, r.daysOfCover, `${r.sku}: vế MỚI của script ≠ Hàng chậm`);
       assert.equal(v.newRisk, r.risk, `${r.sku}: lớp MỚI của script ≠ Hàng chậm`);
+      assert.equal(v.shippedInDeadWindow, r.shippedInDeadWindow, `${r.sku}: món gửi đi trong cửa sổ — câu SQL của script ≠ lib`);
+      assert.equal(v.returnedInDeadWindow, r.returnedInDeadWindow, `${r.sku}: món hoàn trong cửa sổ — câu SQL của script ≠ lib`);
     }
     const cu = (k: string) => cBy.get(`${P}${k}`);
     assert.ok(Math.abs((cu("v1")?.oldVelocity ?? -1) - 1 / 14) < 1e-9, "cũ: tốc độ RÒNG của v1 = 1 giao / 14 ngày");
@@ -331,15 +432,17 @@ export async function testVelocityUnifyDb(db: Db) {
     assert.deepEqual(doiLop, ["v1", "v2"], "chỉ mẫu mã có hàng hoàn (tốc độ đổi) mới đổi lớp");
     for (const k of ["v3", "v4"]) assert.ok(Math.abs((cu(k)?.oldVelocity ?? -1) - (cu(k)?.newVelocity ?? -2)) < 1e-9, `${k}: không hoàn ⇒ tốc độ cũ = mới`);
     assert.equal(`${cu("v1")?.oldRisk}→${cu("v1")?.newRisk}`, "EXCESS→HEALTHY", "hướng đã khai: nhiều hoàn ⇒ số ngày phủ NGẮN lại ⇒ về phía Bình thường");
-    assert.equal(`${cu("v2")?.oldRisk}→${cu("v2")?.newRisk}`, "DEAD→HEALTHY");
+    assert.equal(`${cu("v2")?.oldRisk}→${cu("v2")?.newRisk}`, "DEAD→RETURNED_OUT", "gửi đi mà không giao được: không bao giờ DEAD→HEALTHY");
+    assert.ok(!c.variants.some((v) => v.oldRisk === "DEAD" && v.newRisk === "HEALTHY" && v.shippedInDeadWindow > 0 && v.returnedInDeadWindow > 0), "DEAD→HEALTHY không xảy ra được với mẫu có gửi đi và có hoàn");
 
     const lines = velocityCompareLines(c);
     const all = lines.join("\n");
     assert.ok(lines.length <= COMPARE_MAX_LINES && lines.every((l) => l.length <= COMPARE_MAX_CHARS), "vừa kênh tóm tắt");
     for (const bi of [P, "COSV", TEN]) assert.ok(!all.includes(bi), `dòng tóm tắt lộ "${bi}":\n${all}`);
     assert.match(all, /ĐỔI LỚP: [\d.]+\/[\d.]+ mẫu mã — .*EXCESS→HEALTHY/);
-    assert.match(all, /DEAD→HEALTHY/);
-    console.log(`✓ Company OS · V: một tốc độ bán trên PGlite — ${slow.rows.length} mẫu mã: Hàng chậm = Kế hoạch SX = Quyết định vốn tồn (${soDec} chung) = Hiệu quả mẫu mã; nhiều hoàn EXCESS→HEALTHY, chưa giao DEAD→HEALTHY, đối chứng giữ lớp`);
+    assert.match(all, /DEAD→RETURNED_OUT/);
+    assert.match(all, /HOÀN GẦN HẾT \(mới — gửi đi trong 60 ngày, có món hoàn, 0 món giao thành công\): [1-9][\d.]* mẫu mã — lớp CŨ của chúng: .*DEAD [1-9]/);
+    console.log(`✓ Company OS · V: một tốc độ bán trên PGlite — ${slow.rows.length} mẫu mã: Hàng chậm = Kế hoạch SX = Quyết định vốn tồn (${soDec} chung) = Hiệu quả mẫu mã; nhiều hoàn EXCESS→HEALTHY, gửi đi không giao được DEAD→RETURNED_OUT (Nên xả, vào tệp xả), đang đi không gắn nhãn, đối chứng giữ lớp`);
   } finally {
     await donDep(db);
   }

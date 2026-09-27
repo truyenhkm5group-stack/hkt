@@ -136,6 +136,12 @@ export type DecisionInput = {
    * ngưỡng khác nhau khi chủ shop chỉnh số.
    */
   slowRules?: SlowMovingRules;
+  /**
+   * Bảng Hàng chậm xếp mẫu này `RETURNED_OUT` (`classifyStockRisk` — gửi đi trong cửa sổ hàng chết mà không
+   * giao thành công món nào, đã có món hoàn). Truy vấn truyền ĐÚNG lớp của bảng Hàng chậm, không tự xếp
+   * lại. Bỏ trống = không (đối chứng lịch sử không có căn cứ này).
+   */
+  returnedOut?: boolean;
 };
 
 export type InventoryDecisionResult = {
@@ -188,6 +194,7 @@ export function suggestedNetOfOpenPo(suggested: number, openPoQty: number): numb
  * Thứ tự xét (mỗi bước chặn một kiểu sai):
  *  1. Chưa biết tồn ⇒ DATA_INSUFFICIENT — đề xuất trên dữ liệu bịa còn tệ hơn không đề xuất.
  *  2. Tồn âm mà không bán ⇒ DATA_INSUFFICIENT (sổ kho lệch, phải kiểm kê chứ không phải đặt hàng).
+ *  2b. Còn hàng mà gửi đi không giao được món nào (Hàng chậm `RETURNED_OUT`) ⇒ CLEARANCE_CANDIDATE.
  *  3. Hết / sắp hết trước khi lô mới về ⇒ STOCKOUT_RISK (trừ hàng đã đặt xưởng trước khi kêu đặt thêm).
  *  4. Còn thiếu sau khi trừ mọi nguồn cung ⇒ REORDER.
  *  5. Không bán được: mẫu mới thì CHỜ, đủ lâu thì CLEARANCE_CANDIDATE.
@@ -237,11 +244,29 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
     };
   }
 
+  const capitalOf = (qty: number) => (i.unitCost === null ? null : Math.round(qty * i.unitCost));
+
+  // ── 2b. Gửi đi mà KHÔNG giao được món nào (hoàn gần hết): tốc độ gửi đi dương nhưng không phải bán được.
+  // Đối xử như hàng chết — không đề xuất đặt thêm, toàn bộ tồn là vốn nằm chết; lý do nói rõ phải xem lại
+  // chất lượng / mô tả trước khi đẩy thêm. Chỉ khi còn hàng: hết hàng thì không có vốn nào để giải phóng.
+  if (i.returnedOut && i.available > 0) {
+    notes.push("khách hoàn gần hết — tốc độ gửi đi không phải nhu cầu thật");
+    return {
+      ...base,
+      decision: "CLEARANCE_CANDIDATE",
+      reason: `Gửi đi nhưng không giao thành công món nào trong ${R.deadDays} ngày — khách hoàn gần hết. Xem lại chất lượng / mô tả trước khi đẩy thêm; KHÔNG đặt thêm. Còn ${i.available} cái trong kho.`,
+      suggestedQty: 0,
+      capitalRequired: 0,
+      excessQty: i.available,
+      capitalFreeable: capitalOf(i.available),
+      confidence: confidenceFrom(notes, false),
+    };
+  }
+
   // Số nên đặt SAU khi trừ hàng đã đặt xưởng: computePlan đã trừ hàng sắp quay về kho
   // (`incomingFromReturns`) nhưng không biết đơn sản xuất đang mở,
   // nên nếu không trừ thì mẫu đã đặt 500 cái vẫn bị kêu đặt thêm 500 cái nữa.
   const suggestedNet = suggestedNetOfOpenPo(i.suggested, i.openPoQty);
-  const capitalOf = (qty: number) => (i.unitCost === null ? null : Math.round(qty * i.unitCost));
 
   if (i.velocity > 0) {
     const outNow = i.available <= 0;

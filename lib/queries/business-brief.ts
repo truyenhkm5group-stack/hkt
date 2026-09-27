@@ -157,7 +157,7 @@ async function buildBusinessBrief(period: Period): Promise<BusinessBrief> {
 
   // ── Rủi ro tồn kho ──
   if (slow) {
-    for (const r of slow.rows.filter((x) => x.risk === "DEAD" || x.risk === "EXCESS").slice(0, 5)) {
+    for (const r of slow.rows.filter((x) => x.risk === "DEAD" || x.risk === "RETURNED_OUT" || x.risk === "EXCESS").slice(0, 5)) {
       risks.push({
         area: "INVENTORY",
         title: `${r.productName}${r.color || r.size ? ` (${[r.color, r.size].filter(Boolean).join("/")})` : ""}`,

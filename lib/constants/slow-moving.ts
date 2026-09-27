@@ -101,10 +101,20 @@ export function sparseSlowMovingOverride(rules: SlowMovingRules): Partial<SlowMo
   return out;
 }
 
-export type StockRisk = "DEAD" | "EXCESS" | "SLOW" | "HEALTHY";
+/**
+ * Lớp của một mẫu mã còn hàng. `RETURNED_OUT` (27/09/2026, chủ shop duyệt): CÓ gửi đi trong cửa sổ hàng
+ * chết mà KHÔNG giao thành công món nào, và có món đã hoàn — tốc độ gửi đi của Kế hoạch SX thì dương nên
+ * phép xếp theo số ngày phủ sẽ gọi nó "Bình thường", đúng thứ không được xảy ra. Đo production (ops
+ * `velocity-compare`, run 36306328239): 1/28 mẫu mã đi DEAD → HEALTHY theo đúng đường đó.
+ */
+export type StockRisk = "DEAD" | "RETURNED_OUT" | "EXCESS" | "SLOW" | "HEALTHY";
+
+/** Thứ tự in cố định (bảng, số đếm, ops). */
+export const STOCK_RISKS: readonly StockRisk[] = ["DEAD", "RETURNED_OUT", "EXCESS", "SLOW", "HEALTHY"];
 
 export const STOCK_RISK_LABEL: Record<StockRisk, string> = {
   DEAD: "Hàng chết",
+  RETURNED_OUT: "Hoàn gần hết / gửi đi không giao được",
   EXCESS: "Vốn nằm chết",
   SLOW: "Bán chậm",
   HEALTHY: "Bình thường",
@@ -112,6 +122,7 @@ export const STOCK_RISK_LABEL: Record<StockRisk, string> = {
 
 export const STOCK_RISK_TONE: Record<StockRisk, string> = {
   DEAD: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  RETURNED_OUT: "bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950/60 dark:text-fuchsia-300",
   EXCESS: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   SLOW: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   HEALTHY: "bg-muted text-muted-foreground",
@@ -119,9 +130,32 @@ export const STOCK_RISK_TONE: Record<StockRisk, string> = {
 
 export const STOCK_RISK_ACTION: Record<StockRisk, string> = {
   DEAD: "Xả giá vốn hoặc gộp thành combo — giữ tiếp chỉ tốn thêm chỗ và vốn.",
+  RETURNED_OUT: "Khách hoàn gần hết — xem lại chất lượng / mô tả / size trước khi đẩy thêm; KHÔNG đặt thêm, không tăng quảng cáo.",
   EXCESS: "Ngừng đặt thêm, đẩy bán bằng ưu đãi cho tới khi tồn về mức bán được trong một–hai tháng.",
   SLOW: "Chưa cần xả, nhưng KHÔNG đặt thêm cho tới khi nhịp bán tăng lại.",
   HEALTHY: "Không cần làm gì.",
+};
+
+/** Câu ⓘ "vì sao" của từng lớp — in cạnh nhãn trên bảng Hàng chậm. */
+export const STOCK_RISK_WHY: Record<StockRisk, string> = {
+  DEAD: "Không gửi đi món nào trong cửa sổ tốc độ và không giao thành công món nào trong cửa sổ hàng chết.",
+  RETURNED_OUT:
+    "Có gửi đi trong cửa sổ hàng chết nhưng KHÔNG giao thành công món nào (theo ORDER_OUTCOME, cùng căn cứ luật hàng chết) và đã có món hoàn. Tốc độ gửi đi dương không phải là bán được — hàng đi rồi về.",
+  EXCESS: "Tồn đủ bán quá ngưỡng vốn nằm chết theo số ngày còn đủ hàng của Kế hoạch SX, hoặc hàng hoàn về bằng hàng đi nên tồn không vơi.",
+  SLOW: "Tồn đủ bán quá ngưỡng bán chậm theo số ngày còn đủ hàng của Kế hoạch SX.",
+  HEALTHY: "Số ngày còn đủ hàng trong vùng lành mạnh.",
+};
+
+/**
+ * Sự kiện của CỬA SỔ HÀNG CHẾT (`deadDays` của `inventory.slowMoving`, không thêm ngưỡng nào) mà phép xếp
+ * lớp cần ngoài nhịp hao kho — đọc cùng một câu với "lần cuối giao được" (`lib/queries/slow-moving.ts`).
+ * KHÔNG phải một định nghĩa tốc độ: chỉ trả lời "có gửi đi không" và "có món nào đã hoàn không".
+ */
+export type DeadWindowFacts = {
+  /** Số món của đơn KHÔNG HUỶ lên trong cửa sổ — cùng căn cứ "gộp" với tốc độ gửi đi của Kế hoạch SX. */
+  shippedInDeadWindow: number;
+  /** Số món của đơn lên trong cửa sổ đã kết luận HOÀN (`RETURNED` / `RETURNED_BY_RULE`). */
+  returnedInDeadWindow: number;
 };
 
 /**
@@ -135,10 +169,24 @@ export const STOCK_RISK_ACTION: Record<StockRisk, string> = {
  * khi ngưỡng là quá 60 ngày.
  */
 export function classifyStockRisk(
-  i: { velocity: number; daysOfCover: number | null; daysSinceLastSale: number | null },
+  i: { velocity: number; daysOfCover: number | null; daysSinceLastSale: number | null } & DeadWindowFacts,
   rules: SlowMovingRules,
 ): { risk: StockRisk; reason: string } {
   const { velocity, daysOfCover, daysSinceLastSale } = i;
+  /*
+    HOÀN GẦN HẾT — xét TRƯỚC mọi nhánh khác. "Không giao được món nào trong cửa sổ hàng chết" đọc ĐÚNG
+    căn cứ của luật hàng chết cũ (`daysSinceLastSale`, ORDER_OUTCOME = DELIVERED). Cần CẢ gửi đi > 0 (nếu
+    không thì là hàng chết như cũ) LẪN hoàn > 0: hàng còn đang đi là CHƯA BIẾT (luật 3), không phải thất
+    bại — một mẫu mới toàn đơn đang giao không được gắn nhãn "hoàn gần hết".
+  */
+  const noDelivery = daysSinceLastSale === null || daysSinceLastSale >= rules.deadDays;
+  if (noDelivery && i.shippedInDeadWindow > 0 && i.returnedInDeadWindow > 0) {
+    const dangDi = Math.max(0, i.shippedInDeadWindow - i.returnedInDeadWindow);
+    return {
+      risk: "RETURNED_OUT",
+      reason: `Gửi đi ${i.shippedInDeadWindow} món trong ${rules.deadDays} ngày, hoàn ${i.returnedInDeadWindow}, chưa giao thành công món nào${dangDi > 0 ? ` (${dangDi} món chưa kết luận)` : ""} — khách hoàn gần hết`,
+    };
+  }
   if (velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= rules.deadDays)) {
     return { risk: "DEAD", reason: daysSinceLastSale === null ? "Chưa bán được cái nào" : `Không bán được cái nào trong ${daysSinceLastSale} ngày` };
   }

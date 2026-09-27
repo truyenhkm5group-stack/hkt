@@ -30,8 +30,8 @@ Mẫu mã không hoàn, không tặng: tốc độ cũ = mới; lớp chỉ đ�
 (script in riêng dòng "đổi lớp mà tốc độ gửi đi = tốc độ ròng cũ").
 
 Bộ dữ liệu dựng riêng (PGlite): nhiều hoàn **Vốn nằm chết → Bình thường** (140 → 1,7 ngày); mọi đơn đều hoàn, chưa
-giao lần nào **Hàng chết → Bình thường** (hàng rời kho mỗi ngày không phải hàng chết — đó là việc của báo cáo hoàn);
-hai mẫu đối chứng (không hoàn / không bán) giữ lớp.
+giao lần nào **Hàng chết → Hoàn gần hết** (xem mục 5 — bản đầu để nó rơi vào Bình thường, SAI); đang đi chưa kết
+luận không gắn nhãn; hai mẫu đối chứng (không hoàn / không bán) giữ lớp.
 
 ## 3. Đo TRƯỚC khi deploy — lệnh cho Tech Lead
 
@@ -62,3 +62,27 @@ Sau deploy chạy lại một lần: vế MỚI phải ra đúng các con số c
 
 - Chưa đo production (phiên này không có quyền) — số trước/sau nằm ở lượt `velocity-compare` đầu tiên.
 - Đối chứng lịch sử vẫn là ước tính riêng (mục 1). Muốn gộp nốt thì cần dựng GTC / độ trễ hoàn TẠI mốc cắt — việc riêng.
+
+## 5. Bản vá "Hoàn gần hết" (nhánh `claude/cos-hoan-gan-het`, 27/09/2026)
+
+Đo production (ops `velocity-compare`, run 36306328239, 28 mẫu mã, TRƯỚC deploy #312): 7 mẫu đổi lớp —
+SLOW→EXCESS 4 (do trừ hàng hoàn tương lai — chấp nhận), HEALTHY→EXCESS 1, HEALTHY→SLOW 1, **DEAD→HEALTHY 1 — sai**:
+mẫu gửi đi mà khách hoàn gần hết không bao giờ được đọc "Bình thường". Chủ shop duyệt bản vá.
+
+| Việc | Tệp |
+|---|---|
+| Lớp `RETURNED_OUT` "Hoàn gần hết / gửi đi không giao được" trong phép xếp lớp DUY NHẤT; nhãn · màu · việc nên làm · câu ⓘ | `lib/constants/slow-moving.ts` |
+| Hai sự kiện cửa sổ (món gửi đi / món hoàn trong `deadDays`) đọc chung câu "lần cuối giao được"; tồn của lớp này toàn bộ là vượt mức | `lib/queries/slow-moving.ts` |
+| Bảng Hàng chậm: nhãn + ⓘ "vì sao" (lý do có số + định nghĩa lớp) | `app/(dashboard)/inventory/planning/slow-moving-section.tsx` |
+| Quyết định vốn tồn: cờ `returnedOut` từ lớp của Hàng chậm ⇒ **Nên xả**, 0 đề xuất đặt | `lib/constants/inventory-decision.ts`, `lib/queries/inventory-decision.ts` |
+| Vòng phản hồi tồn: PUSH_STOCK có mẫu hoàn gần hết ⇒ việc chính "Xem lý do hoàn của mã" (`/reports/returns?period=90d&product=<mã>`), lý do "khách hoàn gần hết — xem lại chất lượng / mô tả trước khi đẩy thêm"; creative / khách cũ thành lối khác; khoá đề xuất mang `RETURNED_OUT:<mẫu>` | `lib/constants/stock-feedback.ts`, `lib/queries/stock-feedback.ts` |
+| Tệp khách xả hàng: nhịp của mẫu hoàn gần hết không vào "đủ bán" (như hàng chết) | `lib/outreach/build.ts` |
+| Bản tin kinh doanh: rủi ro tồn gồm cả lớp mới | `lib/queries/business-brief.ts` |
+| Ops `velocity-compare`: vế MỚI tự xếp lớp mới (bản sao thuần `xepLop` + câu SQL chỉ đọc `deadWindowFacts`, vì `classifyStockRisk` mới chưa có trên ảnh); vế CŨ `xepLopCu` nguyên văn f84be840; dòng mới `HOÀN GẦN HẾT (mới …): n mẫu mã — lớp CŨ của chúng: …` | `scripts/velocity-compare.ts` |
+
+Lệch so với lời giao (có lý do): lời giao nói "không giao thành công + có gửi đi". Bản vá đòi THÊM **có ít nhất một
+món đã kết luận hoàn** — đơn còn đang đi là CHƯA BIẾT; không có vế này, một mẫu mới toàn đơn đang giao sẽ bị gắn
+"hoàn gần hết". Kiểm thử có đúng ca đó (v6).
+
+**Đo lại (không cần deploy):** chạy lại `action = velocity-compare`, `arg` để trống. Kỳ vọng: cặp `DEAD→HEALTHY`
+thành `DEAD→RETURNED_OUT` (hoặc biến mất), dòng `HOÀN GẦN HẾT (mới …)` ≥ 1 và `CŨ Hàng chết → MỚI Bình thường: 0`.

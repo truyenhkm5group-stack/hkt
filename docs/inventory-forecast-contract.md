@@ -102,6 +102,31 @@ bảng Hàng chậm xếp lớp trên số đã làm tròn — đúng con số n
 
 **Không bao giờ hiện `Infinity`.**
 
+### Gửi đi mà không giao được — lớp "Hoàn gần hết" (27/09/2026)
+
+Tốc độ gửi đi dương **không phải** là bán được. Lượt đo production đầu tiên sau khi gộp (ops `velocity-compare`,
+run 36306328239, 28 mẫu mã) có 1 mẫu đi **Hàng chết → Bình thường**: gửi đi đều, khách hoàn gần hết, số ngày phủ
+ngắn nên phép xếp theo ngưỡng gọi nó "Bình thường". Chủ shop duyệt bản vá — một lớp tường minh trong CHÍNH phép
+xếp lớp duy nhất (`classifyStockRisk`), xét trước mọi nhánh khác:
+
+```
+không giao thành công món nào trong cửa sổ hàng chết  (ORDER_OUTCOME = DELIVERED — cùng căn cứ luật hàng chết cũ)
+và gửi đi > 0 trong cửa sổ                              (đơn không huỷ — cùng căn cứ "gộp" với tốc độ gửi đi)
+và hoàn > 0 trong cửa sổ                                (RETURNED / RETURNED_BY_RULE)
+    ⇒ RETURNED_OUT "Hoàn gần hết / gửi đi không giao được"
+không gửi đi món nào                                    ⇒ Hàng chết như cũ
+```
+
+- **Cửa sổ** là `deadDays` của `inventory.slowMoving` — KHÔNG thêm ngưỡng nào.
+- **Cần có món hoàn**: đơn còn đang đi là CHƯA BIẾT, không phải thất bại — một mẫu mới toàn đơn đang giao không
+  được gắn nhãn "hoàn gần hết" (luật 3 / 42).
+- Hai sự kiện cửa sổ đọc chung một câu với "lần cuối giao được" (`deadWindowFactsSubquery`); **không** phải định
+  nghĩa tốc độ thứ hai — không chia cho số ngày, không vào số ngày phủ (số ngày phủ vẫn là của Kế hoạch SX).
+- Đối xử **như hàng chết** ở mọi nơi dùng: toàn bộ tồn là vốn vượt mức; Quyết định vốn tồn ⇒ **Nên xả**, không đề
+  xuất đặt thêm; vòng phản hồi tồn ⇒ việc chính là **xem lý do hoàn của mã** (không phải làm creative mới), câu lý
+  do nói "xem lại chất lượng / mô tả trước khi đẩy thêm"; nhịp gửi đi của mẫu này không vào "đủ bán" của tệp khách
+  xả hàng và của vòng phản hồi.
+
 ---
 
 ## 3. Ngày dự kiến hết hàng và mức rủi ro
