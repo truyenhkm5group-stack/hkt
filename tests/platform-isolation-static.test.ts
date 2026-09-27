@@ -365,6 +365,78 @@ export function testKhongIdNgoaiLamMacDinh() {
   khongMienTruMoCoi("S16", MAC_DINH_ID_DA_KHAI, new Set(thay));
 }
 
+/* ═════════════ S17 · CSDL CHỈ ĐỊNH TƯỜNG MINH CHỈ Ở MÃ NỀN TẢNG ═════════════ */
+
+/**
+ * `getPlatformDb` (luôn CSDL nhà), `getDbFor` / `getDbForInspection` (CSDL của một tổ chức chỉ định)
+ * VÒNG QUA ngữ cảnh tổ chức — mã nghiệp vụ gọi chúng là đọc/ghi CSDL của ai đó khác với người đang
+ * đăng nhập. Chỉ những chỗ sau được gọi; khoá kết thúc bằng `/` là cả thư mục.
+ */
+const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
+  "lib/platform/": "Mã nền tảng: sổ tổ chức, cấu hình module, nhật ký nền tảng, cấp tổ chức — mặt phẳng điều khiển nằm ở CSDL nhà theo định nghĩa.",
+  "db/": "Chỗ định nghĩa ba hàm, và lượt migrate CSDL nhà lúc khởi động (`ensureMigrated`).",
+  "lib/queries/platform-health.ts": "Máy quét sức khoẻ nền tảng: mở CSDL TỪNG tổ chức để đếm migration và bảng platform_* — việc của nó là nhìn sang mọi tổ chức.",
+  "app/api/health/route.ts": "Tuyến sức khoẻ công khai của lượt deploy: đọc mặt phẳng điều khiển (cờ + số đếm, không mã tổ chức nào) — không có phiên để đi qua ngữ cảnh.",
+};
+
+export function testCsdlChiDinhChiONenTang() {
+  const pham: string[] = [];
+  const daDung = new Set<string>();
+  let dem = 0;
+  for (const tep of tepMa(["lib/", "app/", "db/", "scripts/", "components/", "chatbot/", "middleware.ts", "instrumentation"])) {
+    if (!/\b(?:getPlatformDb|getDbFor|getDbForInspection)\b/.test(ma(tep))) continue;
+    dem += 1;
+    const khoa = Object.keys(CSDL_CHI_DINH_DUOC_PHEP).find((k) => (k.endsWith("/") ? tep.startsWith(k) : tep === k));
+    if (khoa) {
+      daDung.add(khoa);
+      continue;
+    }
+    pham.push(tep);
+  }
+  assert.deepEqual(pham, [], "getPlatformDb / getDbFor / getDbForInspection ngoài mã nền tảng là chọn CSDL bỏ qua tổ chức của phiên — mã nghiệp vụ gọi getDb() (S17). Khai vào CSDL_CHI_DINH_DUOC_PHEP kèm lý do nếu thật sự là việc của nền tảng");
+  assert.ok(dem >= 5, `phải thấy các lời gọi đã biết (sổ tổ chức, năng lực, cấp tổ chức, sức khoẻ) — mới thấy ${dem}: bộ dò có thể đã mù`);
+  khongMienTruMoCoi("S17", CSDL_CHI_DINH_DUOC_PHEP, daDung);
+}
+
+/* ═════════════ S18 · ROUTE API DÙNG PHIÊN PHẢI QUA apiGuard ═════════════ */
+
+/**
+ * Route dựng trên `getCurrentUser()` chỉ nói được "Chưa đăng nhập": module tắt ⇒ 401 thay vì 403
+ * `MODULE_DISABLED`, tổ chức đình chỉ ⇒ 401 thay vì 403 `ORG_INACTIVE` (risk-register R-18). Route
+ * mới dùng phiên phải đi qua `apiGuard`; ngoại lệ khai ở đây kèm lý do.
+ */
+const ROUTE_PHIEN_MIEN_TRU: Record<string, string> = {
+  "app/api/perf/route.ts": "Dùng requirePermission (chuyển hướng) + chỉ tổ chức nhà (sổ đo của NỀN TẢNG); cổng đường dẫn trong resolveCurrentUser vẫn chặn — đổi sang apiGuard là đổi phản hồi của công cụ vận hành.",
+  "app/api/export/payroll/route.ts":
+    "Bài quét cửa vào của LƯƠNG (payroll-production-readiness mục 9) đòi requireUser()/getCurrentUser() đứng đầu mọi cửa lương; chuyển sang apiGuard là sửa kỳ vọng của bài kiểm miền lương — việc riêng (R-18 còn một nửa). Cổng đường dẫn trong getCurrentUser vẫn chặn khi Lương tắt, chỉ sai mã (401 thay vì 403).",
+  "app/api/sync/[job]/route.ts": "Hai cửa xác thực: CRON_SECRET (không phiên) HOẶC phiên có sync:run. Đường dẫn không thuộc module nào (MODULE_FREE); sync:run thuộc module Kết nối dữ liệu nên can() đã chặn khi module tắt.",
+};
+
+const DUNG_PHIEN = /\b(?:getCurrentUser|requireUser|requirePermission|resolveCurrentUser|getSession)\s*\(/;
+
+export function testRouteApiQuaApiGuard() {
+  const routes = tepTrongKho().filter((t) => t.startsWith("app/api/") && /\/route\.tsx?$/.test(t));
+  assert.ok(routes.length >= 20, `phải thấy các route API đã biết — mới thấy ${routes.length}`);
+  const pham: string[] = [];
+  const daDung = new Set<string>();
+  let quaCong = 0;
+  for (const tep of routes) {
+    const m = ma(tep);
+    const quaApiGuard = /\bapiGuard\s*\(/.test(m);
+    if (quaApiGuard) quaCong += 1;
+    if (!DUNG_PHIEN.test(m) && !quaApiGuard) continue; // tuyến máy-gọi-máy (webhook, bí mật) — không có phiên
+    if (ROUTE_PHIEN_MIEN_TRU[tep]) {
+      daDung.add(tep);
+      continue;
+    }
+    if (!quaApiGuard) pham.push(`${tep}: dùng phiên mà không qua apiGuard`);
+    else if (DUNG_PHIEN.test(m)) pham.push(`${tep}: đã qua apiGuard mà vẫn tự đọc phiên lần hai`);
+  }
+  assert.deepEqual(pham, [], "route API dùng phiên phải qua apiGuard — trả đúng 401 / 403 MODULE_DISABLED / ORG_INACTIVE (S18 · R-18). Ngoại lệ khai ở ROUTE_PHIEN_MIEN_TRU kèm lý do");
+  assert.ok(quaCong >= 15, `phải thấy các route đã qua apiGuard — mới thấy ${quaCong}: bộ dò có thể đã mù`);
+  khongMienTruMoCoi("S18", ROUTE_PHIEN_MIEN_TRU, daDung);
+}
+
 export function testPlatformIsolationStatic() {
   testKhongKetNoiCsdlThuHai();
   testHolderGlobalDaKhai();
@@ -377,7 +449,9 @@ export function testPlatformIsolationStatic() {
   testKhongGiaTienToDem();
   testMigrationKhongCanQuyenCum();
   testKhongIdNgoaiLamMacDinh();
-  console.log("✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID");
+  testCsdlChiDinhChiONenTang();
+  testRouteApiQuaApiGuard();
+  console.log("✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID, CSDL chỉ định chỉ ở mã nền tảng, route API qua apiGuard");
 }
 
 // Chạy được độc lập, và cũng export để bộ kiểm thử chung dùng lại.

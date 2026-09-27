@@ -14,6 +14,8 @@ type Holder = {
   pglite?: unknown;
   /** CSDL của các tổ chức KHÔNG phải nhà — mỗi mã tổ chức một handle (docs/platform/shared-contracts.md mục 4). */
   orgs?: Map<string, OrgHandle>;
+  /** Handle CHỈ ĐỌC, không migrate, của CSDL tổ chức mở để CHẨN ĐOÁN (`getDbForInspection`). */
+  inspect?: Map<string, Promise<Db>>;
 };
 type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown };
 const holder = globalThis as unknown as { __erpDb?: Holder };
@@ -44,7 +46,7 @@ export function pgliteDataDir() {
   return path === "memory" || path === "" ? undefined : path;
 }
 
-async function createPglite(dir: string | undefined = pgliteDataDir(), keep: (client: unknown) => void = (c) => (holder.__erpDb!.pglite = c)): Promise<Db> {
+async function createPglite(dir: string | undefined = pgliteDataDir(), keep: (client: unknown) => void = (c) => (holder.__erpDb!.pglite = c), opts: { readOnly?: boolean } = {}): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
   const { drizzle } = await import("drizzle-orm/pglite");
   if (dir) {
@@ -86,13 +88,13 @@ async function createPglite(dir: string | undefined = pgliteDataDir(), keep: (cl
   const client = new PGlite(dir);
   // PGlite không nhận tham số kết nối, nhưng nó chỉ có MỘT phiên — đặt ở mức phiên là đủ và tương
   // đương. (Chỉ dùng cho máy cá nhân / kiểm thử; production luôn là PostgreSQL thật.)
-  if (readOnlyMode()) await client.exec("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
+  if (readOnlyMode() || opts.readOnly) await client.exec("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
   instrumentQueries(client as unknown as QueryClient);
   keep(client);
   return drizzle(client, { schema }) as unknown as Db;
 }
 
-function createPg(url: string = databaseUrl(), maxOverride?: number, keep: (pool: Pool) => void = (p) => (holder.__erpDb!.pool = p)): Db {
+function createPg(url: string = databaseUrl(), maxOverride?: number, keep: (pool: Pool) => void = (p) => (holder.__erpDb!.pool = p), opts: { readOnly?: boolean } = {}): Db {
   /**
    * BỂ KẾT NỐI PHẢI VỪA VỚI SỐ NHÂN CPU, KHÔNG PHẢI VỪA VỚI SỐ TRUY VẤN.
    *
@@ -136,7 +138,7 @@ function createPg(url: string = databaseUrl(), maxOverride?: number, keep: (pool
     connectionString: url,
     max,
     connectionTimeoutMillis: 15_000,
-    ...(readOnlyMode() ? { options: "-c default_transaction_read_only=on" } : {}),
+    ...(readOnlyMode() || opts.readOnly ? { options: "-c default_transaction_read_only=on" } : {}),
   });
   instrumentQueries(pool as unknown as QueryClient);
   keep(pool);
@@ -214,6 +216,45 @@ export async function getPlatformDb(): Promise<Db> {
 /** CSDL của một tổ chức chỉ định TƯỜNG MINH — chỉ dùng trong `lib/platform/*` (cấp tổ chức, health). */
 export async function getDbFor(org: { code: string; isHome: boolean }): Promise<Db> {
   return org.isHome ? getHomeDb() : getOrgDb(org.code);
+}
+
+/**
+ * ═══════ CSDL CỦA MỘT TỔ CHỨC — ĐỂ CHẨN ĐOÁN, CHỈ ĐỌC ═══════
+ *
+ * `getDbFor()` mở CSDL tổ chức lần đầu là MIGRATE + XOÁ bản sao `platform_*` (`migrateOrganizationDb`).
+ * Đúng cho ứng dụng, sai cho một lượt chẩn đoán: công cụ đo không được sửa thứ nó đo — dọn bảng
+ * `platform_*` trước khi đếm thì "bảng phải rỗng" luôn đúng, và lượt đo xoá mất chính bằng chứng.
+ *
+ * Hàm này:
+ *  · tiến trình ĐÃ mở CSDL ấy (ứng dụng, kiểm thử) ⇒ dùng lại đúng handle — không mở kết nối thứ hai;
+ *  · chưa mở ⇒ mở handle riêng mà MÁY CHỦ ép chỉ đọc (`default_transaction_read_only`), KHÔNG migrate,
+ *    KHÔNG dọn, bể một kết nối;
+ *  · PGlite mà thư mục chưa có ⇒ NÉM, không tạo (tạo thư mục là tạo một CSDL rỗng rồi báo "mở được").
+ */
+export async function getDbForInspection(org: { code: string; isHome: boolean }): Promise<Db> {
+  if (org.isHome) return getHomeDb();
+  const live = holder.__erpDb!.orgs?.get(org.code)?.db;
+  if (live) return live;
+  const cache = (holder.__erpDb!.inspect ??= new Map());
+  let pendingDb = cache.get(org.code);
+  if (!pendingDb) {
+    pendingDb = (async () => {
+      const url = organizationDatabaseUrl(org);
+      if (url.startsWith("pglite:")) {
+        const dir = url.replace(/^pglite:\/\//, "").replace(/^pglite:/, "");
+        if (dir === "memory" || dir === "") throw new Error(`CSDL của tổ chức "${org.code}" là PGlite trong bộ nhớ — không có gì để đọc ngoài tiến trình đã tạo nó.`);
+        const fs = await import("node:fs");
+        if (!fs.existsSync(dir)) throw new Error(`Thư mục CSDL của tổ chức "${org.code}" không tồn tại — tổ chức có trong sổ mà chưa được cấp CSDL.`);
+        return createPglite(dir, () => undefined, { readOnly: true });
+      }
+      return createPg(url, 1, () => undefined, { readOnly: true });
+    })().catch((error) => {
+      cache.delete(org.code);
+      throw error;
+    });
+    cache.set(org.code, pendingDb);
+  }
+  return pendingDb;
 }
 
 /**

@@ -407,6 +407,7 @@ import { testOpsLogLeak } from "./ops-log-leak.test";
 import { testPlatformRbac } from "./platform-rbac.test";
 import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
+import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformNoDb } from "./platform-no-db.test";
@@ -2402,6 +2403,8 @@ async function main() {
   await testPlatformContext();
   // Kịch bản chấp nhận §55 + tấn công truy cập trực tiếp theo id (mã `pq-`).
   await testPlatformIsolation();
+  // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
+  await testPlatformHardening();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

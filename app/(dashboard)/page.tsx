@@ -24,6 +24,7 @@ import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { requirePermission } from "@/lib/auth/session";
+import { DASHBOARD_BLOCKS, hrefVisible, visibleBlocks } from "@/lib/platform-ui/module-visibility";
 
 export const metadata = { title: "Tổng quan" };
 
@@ -33,7 +34,14 @@ function change(current: number, previous: number | null | undefined) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("dashboard:view");
+  const user = await requirePermission("dashboard:view");
+  /*
+    KHỐI CỦA MODULE ĐANG TẮT KHÔNG HIỆN (phase-2-plan mục 3.3): tổ chức bán buôn không thấy khối Vận
+    chuyển, Hàng hoàn, Quảng cáo hay nút đồng bộ Pancake — một ô 0 ₫ của module không dùng là một
+    con số giả. Tổ chức bật mọi module (nhà) thấy ĐỦ như trước: mọi khối trong `DASHBOARD_BLOCKS` đều
+    hiện (bài kiểm `platform-hardening`).
+  */
+  const show = visibleBlocks(user, DASHBOARD_BLOCKS);
   const params = await searchParams;
   const period = resolvePeriod(params, "30d");
   const data = await getDashboardData(period);
@@ -56,12 +64,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         actions={
           <>
             <PeriodFilter defaultKey="30d" />
-            <SyncButton job="pancake-orders" label="Đồng bộ ngay" variant="default" />
+            {show.pancakeSync ? <SyncButton job="pancake-orders" label="Đồng bộ ngay" variant="default" /> : null}
           </>
         }
       />
 
-      {!status.pancake ? (
+      {!show.pancakeSync ? null : !status.pancake ? (
         <div className="flex items-center gap-2 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-sm">
           <AlertTriangle className="size-4 shrink-0 text-amber-600" />
           <p className="font-semibold">Chưa kết nối Pancake POS</p>
@@ -96,6 +104,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         Ba ô đứng MỘT HÀNG từ 768px (máy tính bảng): xếp chồng thì chuỗi ①→②→③ bị cắt qua ba màn cuộn.
       */}
       <section className="grid gap-4 md:grid-cols-3">
+        {show.bookedRevenue ? (
         <MetricCard
           size="lg"
           href={`/orders?period=${period.key}`}
@@ -107,9 +116,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={ShoppingBag}
           tone="blue"
         />
+        ) : null}
+        {show.deliveredRevenue ? (
         <MetricCard
           size="lg"
           href={`/reports/returns?period=${period.key}`}
+          linkable={hrefVisible(user, "/reports/returns")}
           label="② Doanh thu GIAO THÀNH CÔNG"
           emphasis
           value={formatVND(data.money.delivered, { compact: true })}
@@ -119,6 +131,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={PackageCheck}
           tone="green"
         />
+        ) : null}
+        {show.cashReceived ? (
         <MetricCard
           size="lg"
           href={`/reports?tab=truth&period=${period.key}`}
@@ -128,6 +142,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={Banknote}
           tone="green"
         />
+        ) : null}
       </section>
 
       {/*
@@ -135,9 +150,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         "xu hướng thế nào", bốn thẻ trả lời "cần quyết gì hôm nay" — đứng cạnh nhau để đọc một lượt.
       */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {show.revenueChart ? (
         <SectionCard title="Doanh thu theo ngày" hint="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>} className="sm:col-span-2 xl:row-span-2">
           <RevenueChart data={data.daily} className="h-[300px]" />
         </SectionCard>
+        ) : null}
+        {show.estimatedProfit ? (
         <MetricCard
           href={`/reports?tab=truth&period=${period.key}`}
           label="Lợi nhuận ước tính"
@@ -147,6 +165,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={TrendingUp}
           tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
         />
+        ) : null}
+        {show.contribution ? (
         <MetricCard
           href={`/reports?tab=truth&period=${period.key}`}
           label="Lợi nhuận góp"
@@ -156,6 +176,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={CircleDollarSign}
           tone={data.money.contribution >= 0 ? "primary" : "rose"}
         />
+        ) : null}
+        {show.carrierHolding ? (
         <MetricCard
           href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`}
           label="Viettel Post còn giữ"
@@ -165,6 +187,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={Truck}
           tone="amber"
         />
+        ) : null}
+        {show.attention ? (
         <MetricCard
           href="/alerts"
           label="Việc cần xử lý"
@@ -173,13 +197,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           icon={BellRing}
           tone="amber"
         />
+        ) : null}
       </section>
 
       {/* HAI TỶ LỆ QUẢNG CÁO — mẫu số khác nhau có chủ đích, không thay thế cho nhau:
           một bên là số khách chốt, một bên là số hàng thật sự tới tay khách. */}
       <StatStrip
-        columns={3}
+        columns={show.adsRatios ? 3 : 2}
         items={[
+          ...(show.adsRatios
+            ? [
           {
             label: "QC / Doanh số POS",
             value: data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`,
@@ -196,6 +223,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             tone: data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? ("rose" as const) : ("default" as const),
             href: `/ads?period=${period.key}`,
           },
+              ]
+            : []),
+          ...(show.dataIssues
+            ? [
           {
             label: "Dữ liệu sai nghiêm trọng",
             value: formatNumber(data.dataIssues.critical),
@@ -207,6 +238,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             tone: data.dataIssues.critical ? ("rose" as const) : ("muted" as const),
             href: "/data-quality",
           },
+              ]
+            : []),
         ]}
       />
 
@@ -218,28 +251,35 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         chúng. Trước đây cả trang phải đợi khối chậm nhất.
       */}
       {/* Độ tươi đứng TRƯỚC mọi con số: biết số cũ hay mới là điều kiện để đọc số. */}
+      {show.freshness ? (
       <Suspense fallback={<Skeleton className="h-9 rounded-2xl" />}>
         <DataFreshnessStrip />
       </Suspense>
+      ) : null}
 
+      {show.brief ? (
       <Suspense fallback={<Skeleton className="h-32 rounded-2xl" />}>
-        <BusinessBriefSection period={period} />
+        <BusinessBriefSection period={period} viewer={user} />
       </Suspense>
+      ) : null}
 
       {/*
         CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
         shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
         có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
       */}
+      {show.ownerDecisions ? (
       <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
         <OwnerDecisionsSection />
       </Suspense>
+      ) : null}
 
       {/*
         BỐN KHỐI DƯỚI: lưới 12 cột để mỗi khối rộng đúng bằng nội dung của nó — danh sách việc và
         thanh "hàng đang ở đâu" cần chỗ cho nhãn dài, kênh bán chỉ cần một cột hẹp.
       */}
       <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
+        {show.todayActions ? (
         <SectionCard
           className="xl:col-span-7"
           title="Việc cần làm hôm nay"
@@ -253,16 +293,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           padded={false}
         >
           <Suspense fallback={<div className="space-y-2 p-5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>}>
-            <TopActions />
+            <TopActions viewer={user} />
           </Suspense>
           {/* Số đếm theo nhóm giữ lại ở dạng gọn: nó trả lời "tình hình chung thế nào", còn danh
               sách trên trả lời "bắt đầu từ đâu". Hai câu hỏi khác nhau. */}
           <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">
-            {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
-            {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
-            {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
+            {/* Mỗi vế chỉ hiện khi module nguồn của nó bật — cùng câu chữ, cùng thứ tự như trước. */}
+            {[
+              show.orderFlow ? `${formatNumber(data.attention.newOrders)} đơn mới` : null,
+              show.fulfillment ? `${formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn` : null,
+              show.fulfillment ? `${formatNumber(data.attention.staleShipments)} treo lâu` : null,
+              show.carrierHolding ? `${formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về` : null,
+              hrefVisible(user, "/inventory/planning") ? `${data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             {/* Tồn âm là SAI LỆCH cần kiểm, không phải kho nợ hàng — đứng riêng, không trừ vào tổng tồn. */}
-            {data.attention.negativeStockRows ? (
+            {data.attention.negativeStockRows && hrefVisible(user, "/inventory/planning") ? (
               <>
                 {" · "}
                 <Link href="/inventory/planning" className="font-semibold text-rose-600 hover:underline">
@@ -272,6 +319,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             ) : null}
           </div>
         </SectionCard>
+        ) : null}
 
         {/*
           BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
@@ -287,6 +335,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           KHÔNG thay thế cho nhau; chênh lệch giữa chúng chính là việc tồn đọng của khâu bàn giao
           (đơn bấm "đã gửi" mà chưa ai lấy, đơn đã tới tay khách mà chưa ai bấm sang "đã nhận").
         */}
+        {show.fulfillment ? (
         <SectionCard
           className="xl:col-span-5"
           title="Hàng đang ở đâu"
@@ -345,6 +394,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             </div>
           ) : null}
         </SectionCard>
+        ) : null}
+        {show.orderFlow ? (
         <SectionCard
           className="xl:col-span-5"
           title="Luồng đơn hàng"
@@ -371,6 +422,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             })}
           </div>
         </SectionCard>
+        ) : null}
+        {show.channels ? (
         <SectionCard className="xl:col-span-3" title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
           {data.channels.length ? (
             <div className="space-y-4">
@@ -396,6 +449,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
           )}
         </SectionCard>
+        ) : null}
+        {show.topProducts ? (
         <SectionCard className="lg:col-span-2 xl:col-span-4" title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
@@ -428,6 +483,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu bán hàng trong kỳ.</p>
           )}
         </SectionCard>
+        ) : null}
       </section>
 
     </div>

@@ -6,7 +6,7 @@ import { COPILOT_SYSTEM_PROMPT, contextPreamble } from "@/lib/ai/prompt";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
-import { getTool, toolsFor, toProviderTools, type AiToolContext, type AiToolDefinition } from "@/lib/ai/tools/registry";
+import { getTool, TOOL_MODULE_DISABLED, toolModuleEnabled, toolsFor, toProviderTools, type AiToolContext, type AiToolDefinition } from "@/lib/ai/tools/registry";
 import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
@@ -137,6 +137,12 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
       for (const u of uses) {
         const t0 = Date.now();
         const tool = getTool(u.name);
+        // Tool của module đang tắt: từ chối có TÊN (`MODULE_DISABLED`), để model nói đúng lý do thay vì "không tồn tại".
+        if (tool && !toolModuleEnabled(input.user, tool)) {
+          toolCalls.push({ name: tool.name, label: tool.label, kind: tool.kind, input: u.input, executed: false, ok: false, summary: TOOL_MODULE_DISABLED, latencyMs: 0 });
+          results.push({ type: "tool_result", toolUseId: u.id, content: JSON.stringify({ error: `Chức năng «${tool.label}» thuộc module chưa bật cho tổ chức này`, code: TOOL_MODULE_DISABLED, module: tool.module }), isError: true });
+          continue;
+        }
         // Model chỉ được thấy tool trong `tools`; gọi tên khác (hoặc tool bị chặn) là lỗi, không chạy.
         if (!tool || !tools.some((x) => x.name === tool.name)) {
           toolCalls.push({ name: u.name, label: u.name, kind: "read", input: u.input, executed: false, ok: false, summary: "Tool không tồn tại hoặc không được phép", latencyMs: 0 });
@@ -249,6 +255,8 @@ export async function confirmCopilotActions(input: { user: SessionUser; interact
     }
     const tool = getTool(p.name);
     if (!tool || tool.kind !== "write" || tool.policy === "forbidden") return { error: `Hành động ${p.name} không còn được phép` };
+    // Module tắt SAU lượt đề nghị (hoặc token của tổ chức khác) ⇒ không chạy, nói đúng mã.
+    if (!toolModuleEnabled(input.user, tool)) return { error: `${TOOL_MODULE_DISABLED}: hành động ${p.name} thuộc module «${tool.module}» chưa bật cho tổ chức này` };
     if (!can(input.user, tool.permission)) return { error: `Thiếu quyền ${tool.permission}` };
     if (!verifyActionToken(token, input.user.id, tool.name, p.input)) return { error: "Token xác nhận không khớp — hành động đã bị sửa" };
     const parsed = tool.input.safeParse(p.input);

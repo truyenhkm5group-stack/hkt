@@ -38,6 +38,7 @@ export function MetricCard({
   tone = "primary",
   size = "md",
   href,
+  linkable = true,
   emphasis = false,
   className,
 }: {
@@ -59,6 +60,11 @@ export function MetricCard({
   size?: "md" | "lg";
   /** Mở đúng tập dữ liệu đã sinh ra con số này. */
   href?: string;
+  /**
+   * `false` ⇒ thẻ vẫn hiện nhưng KHÔNG thành liên kết — trang đích thuộc module đang tắt của tổ chức
+   * (lib/platform-ui/module-visibility.ts). `href` vẫn khai để hợp đồng drill-down đọc được lối kiểm chứng.
+   */
+  linkable?: boolean;
   /**
    * Ô NHẤN của giao diện Bento: nền mực, chữ sáng. Mỗi màn hình dùng NHIỀU NHẤT MỘT ô như vậy — cho
    * con số mà người đọc phải nhìn thấy đầu tiên. Hai ô nhấn là không ô nào nhấn.
@@ -103,7 +109,7 @@ export function MetricCard({
     className,
   );
 
-  if (!href) return <div className={shell}>{body}</div>;
+  if (!href || !linkable) return <div className={shell}>{body}</div>;
   return (
     <Link
       href={href}

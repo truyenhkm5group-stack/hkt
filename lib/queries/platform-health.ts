@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
-import { getDbFor, type Db } from "@/db";
+import { getDbFor, getDbForInspection, type Db } from "@/db";
 import { PLATFORM_MODULES, moduleDependencyErrors, type ModuleDependencyError } from "@/lib/constants/platform-modules";
 import { getModuleRows } from "@/lib/platform/capabilities";
-import { listOrganizations } from "@/lib/platform/organizations";
+import { FALLBACK_HOME_CODE, listOrganizations } from "@/lib/platform/organizations";
 import type { Organization } from "@/lib/platform/types";
 import { buildModuleView } from "@/lib/queries/platform-modules";
 
@@ -58,7 +58,38 @@ export type OrgHealth = {
   problems: string[];
 };
 
-export type PlatformHealth = { checkedAt: string; migrationsExpected: number | null; journalNote: string | null; organizations: OrgHealth[] };
+export type PlatformHealth = {
+  checkedAt: string;
+  migrationsExpected: number | null;
+  journalNote: string | null;
+  /** Sai ở mức SỔ TỔ CHỨC (không thuộc riêng tổ chức nào) — vd không đúng một dòng tổ chức nhà. */
+  registryProblems: string[];
+  organizations: OrgHealth[];
+};
+
+/**
+ * Hai cách mở CSDL tổ chức để đo:
+ *  · `APP` (mặc định, trang `/platform`) — `getDbFor`: mở lần đầu là tự migrate + dọn bản sao `platform_*`,
+ *    đúng như ứng dụng sẽ làm khi người của tổ chức ấy đăng nhập.
+ *  · `READ_ONLY` (CLI `npm run platform:diagnostics`) — `getDbForInspection`: không migrate, không dọn,
+ *    máy chủ ép chỉ đọc. Số migration và số dòng `platform_*` là của CSDL ĐÚNG NHƯ ĐANG CÓ.
+ */
+export type HealthMode = "APP" | "READ_ONLY";
+
+/**
+ * Sổ tổ chức phải có ĐÚNG MỘT dòng tổ chức nhà. Chỉ mục duy nhất một phần của 0152 cấm hai dòng; KHÔNG
+ * dòng nào thì `listOrganizations()` tự dựng bản sẵn (mã `home`) để app không sập — trang vẫn chạy,
+ * nhưng đó là tình trạng phải có người biết (bảng chưa có, hoặc dòng nhà bị xoá tay).
+ */
+export function homeRowProblems(orgs: readonly Pick<Organization, "id" | "code" | "isHome">[]): string[] {
+  const homes = orgs.filter((o) => o.isHome);
+  if (homes.length > 1) return [`Sổ tổ chức có ${homes.length} dòng tổ chức nhà (${homes.map((o) => o.code).join(", ")}) — phải đúng một.`];
+  if (homes.length === 0) return ["Sổ tổ chức không có dòng tổ chức nhà nào — phải đúng một."];
+  if (homes[0].code === FALLBACK_HOME_CODE && homes[0].id === "org-home") {
+    return ["Sổ tổ chức không có dòng tổ chức nhà (bảng platform_organizations chưa có hoặc dòng nhà đã mất) — ứng dụng đang chạy bằng bản dựng sẵn."];
+  }
+  return [];
+}
 
 function errorText(error: unknown): string {
   const e = error as { message?: string; cause?: { message?: string } } | null;
@@ -106,7 +137,7 @@ async function countPlatformTables(db: Db): Promise<{ table: string; rows: numbe
   return out;
 }
 
-async function checkOrganization(org: Organization, expected: number | null): Promise<OrgHealth> {
+async function checkOrganization(org: Organization, expected: number | null, mode: HealthMode): Promise<OrgHealth> {
   const { rows } = await getModuleRows(org.code);
   const view = buildModuleView(org, rows);
   const health: OrgHealth = {
@@ -134,7 +165,7 @@ async function checkOrganization(org: Organization, expected: number | null): Pr
 
   let db: Db;
   try {
-    db = await getDbFor(org);
+    db = mode === "READ_ONLY" ? await getDbForInspection(org) : await getDbFor(org);
     await db.execute(sql`select 1`);
     health.connected = true;
   } catch (error) {
@@ -164,7 +195,8 @@ async function checkOrganization(org: Organization, expected: number | null): Pr
 }
 
 /** Sức khoẻ mọi tổ chức. Một tổ chức hỏng không làm hỏng bảng — lỗi của nó nằm trong dòng của nó. */
-export async function getPlatformHealth(): Promise<PlatformHealth> {
+export async function getPlatformHealth(opts: { mode?: HealthMode } = {}): Promise<PlatformHealth> {
+  const mode = opts.mode ?? "APP";
   const journal = readJournalCount();
   const orgs = await listOrganizations();
   const sorted = [...orgs].sort((a, b) => Number(b.isHome) - Number(a.isHome) || a.code.localeCompare(b.code));
@@ -173,7 +205,7 @@ export async function getPlatformHealth(): Promise<PlatformHealth> {
   // cùng lúc là tự dựng một cơn bão kết nối vào máy chủ Postgres đang phục vụ tổ chức nhà.
   for (const org of sorted) {
     try {
-      organizations.push(await checkOrganization(org, journal.count));
+      organizations.push(await checkOrganization(org, journal.count, mode));
     } catch (error) {
       const why = `Không đọc được cấu hình của tổ chức: ${errorText(error)}`;
       organizations.push({
@@ -198,5 +230,55 @@ export async function getPlatformHealth(): Promise<PlatformHealth> {
       });
     }
   }
-  return { checkedAt: new Date().toISOString(), migrationsExpected: journal.count, journalNote: journal.note, organizations };
+  return { checkedAt: new Date().toISOString(), migrationsExpected: journal.count, journalNote: journal.note, registryProblems: homeRowProblems(orgs), organizations };
+}
+
+// ═══════════ TÓM TẮT CHO CLI — THUẦN ═══════════
+
+export type DiagnosticsRow = {
+  code: string;
+  home: boolean;
+  status: string;
+  connection: string;
+  migrations: string;
+  platformTables: string;
+  unknownModuleKeys: string;
+  dependencyErrors: string;
+};
+
+export type DiagnosticsSummary = {
+  rows: DiagnosticsRow[];
+  problems: string[];
+  /** Thứ CHƯA ĐO ĐƯỢC — không phải lỗi, cũng không phải "ổn" (AGENTS.md mục 42, 65). */
+  unmeasured: string[];
+  /** 0 = đo đủ và sạch · 1 = có vấn đề · 2 = không vấn đề nào nhưng còn chỗ chưa đo được. */
+  exitCode: 0 | 1 | 2;
+};
+
+/**
+ * Bảng của `npm run platform:diagnostics`. Ô chưa đo in `—` kèm lý do ở phần "chưa đo", KHÔNG in `0`
+ * hay `✓`: một lượt chẩn đoán không mở được CSDL không được trông giống một lượt sạch.
+ */
+export function summarizeHealth(health: PlatformHealth): DiagnosticsSummary {
+  const problems: string[] = [...health.registryProblems];
+  const unmeasured: string[] = [];
+  if (health.journalNote) unmeasured.push(`sổ migration của mã nguồn: ${health.journalNote}`);
+  const rows = health.organizations.map((o): DiagnosticsRow => {
+    for (const p of o.problems) problems.push(`[${o.code}] ${p}`);
+    if (o.connected === null) unmeasured.push(`[${o.code}] kết nối: ${o.connectNote ?? "chưa đo"}`);
+    if (o.connected && o.migrationsApplied === null) unmeasured.push(`[${o.code}] migration: ${o.migrationsNote ?? "chưa đo"}`);
+    if (o.connected && !o.isHome && o.platformTables?.some((t) => t.rows === null)) unmeasured.push(`[${o.code}] bảng platform_*: ${o.platformTablesNote ?? "chưa đo"}`);
+    const dirty = (o.platformTables ?? []).filter((t) => t.rows !== null && t.rows > 0);
+    return {
+      code: o.code,
+      home: o.isHome,
+      status: o.status,
+      connection: o.connected === null ? "—" : o.connected ? "mở được" : "KHÔNG mở được",
+      migrations: `${o.migrationsApplied ?? "—"}/${o.migrationsExpected ?? "—"}`,
+      platformTables: o.isHome ? "n/a (nhà)" : o.platformTables === null ? "—" : dirty.length ? `CÓ DÒNG: ${dirty.map((t) => `${t.table}=${t.rows}`).join(", ")}` : o.platformTables.some((t) => t.rows === null) ? "—" : "rỗng",
+      unknownModuleKeys: o.unknownModuleKeys.length ? o.unknownModuleKeys.join(", ") : "không",
+      dependencyErrors: o.dependencyErrors.length ? o.dependencyErrors.map((e) => e.key).join(", ") : "không",
+    };
+  });
+  return { rows, problems, unmeasured, exitCode: problems.length ? 1 : unmeasured.length ? 2 : 0 };
 }

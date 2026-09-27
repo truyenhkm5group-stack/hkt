@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, can } from "@/lib/auth/session";
+import { apiGuard } from "@/lib/auth/api-guard";
+import { can } from "@/lib/auth/session";
 import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
@@ -12,8 +13,15 @@ function cell(v: unknown) {
 }
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user || !can(user, "planning:view")) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
+  /*
+    Cổng chung của API (risk-register R-18): chưa đăng nhập ⇒ 401; module Sản xuất tắt ⇒ 403
+    MODULE_DISABLED. Thiếu `planning:view` giữ NGUYÊN phản hồi cũ (401 + câu cũ) — đổi mã ấy là đổi
+    hành vi với tổ chức nhà, việc riêng.
+  */
+  const guard = await apiGuard(null);
+  if (guard instanceof Response) return guard;
+  const { user } = guard;
+  if (!can(user, "planning:view")) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
   // Xuất đúng bảng người dùng đang xem: cùng số ngày muốn đủ bán và cùng lựa chọn trừ hàng sắp về.
   const sp = new URL(req.url).searchParams;
   const soNgay = Number(sp.get("ngay"));

@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
 import { formatVND } from "@/lib/format";
 import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
+import { hrefVisible, type ModuleViewer } from "@/lib/platform-ui/module-visibility";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,10 +16,11 @@ import { cn } from "@/lib/utils";
  * ERP — kèm vì sao nó gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa. Chủ shop mở
  * trang là biết ngay việc đầu tiên phải làm.
  */
-export async function TopActions({ limit = 6 }: { limit?: number }) {
+export async function TopActions({ limit = 6, viewer }: { limit?: number; viewer: ModuleViewer }) {
   const queue = await getDashboardActionQueue();
-  // Việc đã có người ĐANG LÀM không cần chen lên đầu bảng điều khiển của chủ shop.
-  const top = queue.cases.filter((c) => c.status === "OPEN" || c.status === "ACKNOWLEDGED").slice(0, limit);
+  // Việc đã có người ĐANG LÀM không cần chen lên đầu bảng điều khiển của chủ shop. Việc mở ra trang
+  // của module đang tắt không hiện — bấm vào chỉ gặp `/module-disabled`.
+  const top = queue.cases.filter((c) => (c.status === "OPEN" || c.status === "ACKNOWLEDGED") && hrefVisible(viewer, c.href || "/alerts")).slice(0, limit);
 
   if (!top.length) {
     return <p className="px-5 py-8 text-center text-sm text-muted-foreground">Không còn việc nào đang chờ. Hàng đợi sạch.</p>;

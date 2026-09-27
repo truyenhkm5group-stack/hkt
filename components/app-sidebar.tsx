@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission } from "@/lib/auth/permissions";
-import { moduleOfPath } from "@/lib/constants/platform-modules";
+import { hrefVisible } from "@/lib/platform-ui/module-visibility";
 import { MODULE_GROUPS, MODULE_TITLES, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
 
 /**
@@ -134,11 +134,9 @@ export type NavUserLike = { role: Role; permissions: string[]; modules?: readonl
  * để người dùng không bấm vào một lối cụt.
  */
 export function moduleAllows(href: string, user: Pick<NavUserLike, "modules">): boolean {
-  if (!user.modules) return true;
-  const mod = moduleOfPath(href);
-  // Mục không thuộc module nào: bài kiểm sổ module đòi mọi href menu có chủ, nên nhánh này chỉ là
-  // lưới an toàn — không chặn thứ sổ không biết.
-  return mod === null || user.modules.includes(mod);
+  // Cùng MỘT hàm với trang tổng hợp và công cụ AI (lib/platform-ui/module-visibility.ts). Mục không
+  // thuộc module nào: bài kiểm sổ module đòi mọi href menu có chủ, nên nhánh ấy chỉ là lưới an toàn.
+  return hrefVisible(user, href);
 }
 
 /** Một mục có hiện với người này không. Module tắt ⇒ ẩn (kể cả ADMIN); rồi ADMIN thấy hết; `anyOf` thì đủ MỘT quyền là hiện. */
