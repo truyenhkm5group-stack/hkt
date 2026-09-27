@@ -150,7 +150,8 @@ export async function saveVideoScaleConfigAction(raw: unknown): Promise<{ ok: tr
   // Giữ nhà cung cấp đang khai (bộ sinh giả không chọn được từ màn hình production).
   const next = normalizeVideoScaleConfig({
     ...parsed.data,
-    provider: before.provider,
+    // Người chọn được VEO / OMNI; bộ sinh GIẢ đang khai (máy thử) thì giữ nguyên — màn hình không bật / tắt được nó.
+    provider: before.provider === "FAKE" ? "FAKE" : (parsed.data.provider ?? before.provider),
     dailyUsdCap: parsed.data.dailyUsdCap === "" ? null : parsed.data.dailyUsdCap,
     adsGlobalDailyCapVnd: parsed.data.adsGlobalDailyCapVnd === "" ? null : parsed.data.adsGlobalDailyCapVnd,
     autoScaleMinOrders: parsed.data.autoScaleMinOrders === "" ? null : parsed.data.autoScaleMinOrders,

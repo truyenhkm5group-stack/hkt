@@ -675,3 +675,67 @@ export async function getVideoScaleReport(db: Db, opts: { includeTest: boolean; 
     };
   });
 }
+
+// ───────────────────────────── SO SÁNH MODEL SINH VIDEO ─────────────────────────────
+
+export type ModelComparisonRow = {
+  model: string;
+  /** Biến thể đã đi hết sinh + hậu kỳ + QC (không tính dữ liệu thử). */
+  videos: number;
+  qcPass: number;
+  qcFlag: number;
+  qcFail: number;
+  approved: number;
+  rejected: number;
+  /** Tiền AI ƯỚC TÍNH (clip + giọng đọc + QC + content) của các biến thể trên. `null` = chưa việc nào ghi tiền. */
+  aiUsd: number | null;
+  /** Tiền AI / video ĐƯỢC DUYỆT — con số để chọn model. `null` khi chưa video nào được duyệt (không chia cho 0). */
+  usdPerApproved: number | null;
+};
+
+/**
+ * Mỗi model một dòng, đọc model từ ẢNH CHỤP cấu hình của lượt (`video_scale_runs.config_snapshot`) — không phải cấu hình
+ * hiện tại, vì đổi model hôm nay không được đổi lịch sử hôm qua. Chỉ biến thể đã QC xong mới được đếm.
+ */
+export async function modelComparison(db: Db): Promise<ModelComparisonRow[]> {
+  const cost = db
+    .select({ variantId: tJob.variantId, usd: sql<number | null>`sum(${tJob.costUsd})`.as("vs_cmp_usd") })
+    .from(tJob)
+    .where(sql`${tJob.variantId} is not null`)
+    .groupBy(tJob.variantId)
+    .as("vs_cmp_cost");
+  const rows = await db
+    .select({
+      model: sql<string>`coalesce(${tRun.configSnapshot}->>'model', '')`,
+      videos: sql<string>`count(*)`,
+      qcPass: sql<string>`count(*) filter (where ${tVar.qcVerdict} = 'PASS')`,
+      qcFlag: sql<string>`count(*) filter (where ${tVar.qcVerdict} = 'FLAG')`,
+      qcFail: sql<string>`count(*) filter (where ${tVar.qcVerdict} = 'FAIL')`,
+      approved: sql<string>`count(*) filter (where ${tVar.status} = 'APPROVED')`,
+      rejected: sql<string>`count(*) filter (where ${tVar.status} = 'REJECTED')`,
+      aiUsd: sql<string | null>`sum(${cost.usd})`,
+    })
+    .from(tVar)
+    .innerJoin(tRun, eq(tRun.id, tVar.runId))
+    .leftJoin(cost, eq(cost.variantId, tVar.id))
+    .where(and(eq(tVar.isTest, false), isNotNull(tVar.qcVerdict)))
+    .groupBy(sql`coalesce(${tRun.configSnapshot}->>'model', '')`);
+  return rows
+    .map((r) => {
+      const approved = Number(r.approved);
+      const aiUsd = r.aiUsd === null ? null : Number(r.aiUsd);
+      return {
+        model: r.model || "(không rõ)",
+        videos: Number(r.videos),
+        qcPass: Number(r.qcPass),
+        qcFlag: Number(r.qcFlag),
+        qcFail: Number(r.qcFail),
+        approved,
+        rejected: Number(r.rejected),
+        aiUsd,
+        usdPerApproved: aiUsd !== null && approved > 0 ? aiUsd / approved : null,
+      };
+    })
+    .sort((a, b) => b.videos - a.videos);
+}
+

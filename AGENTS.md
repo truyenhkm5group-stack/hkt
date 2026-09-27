@@ -596,6 +596,9 @@ deploy dừng, không phải cảnh báo.
     + `ORDER_OUTCOME`), số Meta chỉ để đọc; thua ⇒ tắt, tốt ⇒ chỉ ĐỀ NGHỊ trừ khi người khai ngưỡng
     đơn + bật tự tăng và số chi mới tới hôm qua. Nhịp tim vòng tối ưu im lặng > 3 giờ ⇒ cổng chặn
     BẬT / TĂNG (`NO_OPTIMIZER`); nút chạy tay không ghi nhịp tim.
+    Nhà cung cấp video (`VEO` · `OMNI`) chọn ở cấu hình; model phải THUỘC nhà cung cấp, model / độ
+    phân giải không có trong bảng giá ⇒ KHÔNG sinh. Omni tự quyết độ dài nên giữ chỗ tiền theo độ dài
+    TỐI ĐA (10 giây) và ghi tiền theo độ dài đo được. Thiếu tệp phông tiếng Việt ⇒ hậu kỳ BỊ CHẶN.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

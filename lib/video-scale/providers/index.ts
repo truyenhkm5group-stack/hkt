@@ -1,5 +1,6 @@
 import type { VideoProviderId } from "@/lib/constants/video-scale";
 import { FakeVideoProvider } from "@/lib/video-scale/providers/fake";
+import { OmniProvider } from "@/lib/video-scale/providers/omni";
 import type { VideoProvider } from "@/lib/video-scale/providers/types";
 import { VeoProvider } from "@/lib/video-scale/providers/veo";
 
@@ -8,6 +9,8 @@ export function videoProviderFor(id: VideoProviderId): VideoProvider {
   switch (id) {
     case "VEO":
       return new VeoProvider();
+    case "OMNI":
+      return new OmniProvider();
     case "FAKE":
       return new FakeVideoProvider();
   }

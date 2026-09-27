@@ -13,7 +13,7 @@ import {
   type VideoVariantStatus,
 } from "@/lib/constants/video-scale";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import type { ReportSku } from "@/lib/queries/video-scale";
+import type { ModelComparisonRow, ReportSku } from "@/lib/queries/video-scale";
 import { cn } from "@/lib/utils";
 import { OptimizeNowButton } from "./optimize-now";
 
@@ -36,6 +36,7 @@ export function ReportPanel({
   includeTest,
   lastOptimizeAt,
   canOptimize,
+  models,
 }: {
   skus: ReportSku[];
   profit: Record<string, SkuProfit>;
@@ -44,6 +45,7 @@ export function ReportPanel({
   includeTest: boolean;
   lastOptimizeAt: Date | null;
   canOptimize: boolean;
+  models: ModelComparisonRow[];
 }) {
   return (
     <div className="space-y-4 text-[13px]">
@@ -64,6 +66,48 @@ export function ReportPanel({
         </span>
         {canOptimize ? <OptimizeNowButton /> : null}
       </div>
+
+      <section className="space-y-1 rounded-lg border p-3">
+        <h2 className="text-[14px] font-semibold">So sánh model sinh video</h2>
+        <p className="text-[12px] text-muted-foreground">
+          Chọn model theo <b>tiền AI trên mỗi video ĐƯỢC DUYỆT</b> — một model rẻ mà hay sai màu / sai dáng thì đắt hơn khi tính trên video dùng được. Chỉ đếm
+          video thật đã QC xong; model đọc từ cấu hình lúc tạo lượt. Tiền là ƯỚC TÍNH theo bảng giá.
+        </p>
+        {models.length === 0 ? (
+          <p className="text-muted-foreground">Chưa có video thật nào qua QC — chưa so được.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-[12px]">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2">Model</th>
+                  <th className="pr-2">Video</th>
+                  <th className="pr-2">QC đạt · nghi ngờ · loại</th>
+                  <th className="pr-2">Duyệt · loại</th>
+                  <th className="pr-2">Tiền AI</th>
+                  <th>Tiền AI / video duyệt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((m) => (
+                  <tr key={m.model} className="border-t">
+                    <td className="py-1 pr-2 font-medium">{m.model}</td>
+                    <td className="pr-2 tabular-nums">{m.videos}</td>
+                    <td className="pr-2 tabular-nums">
+                      {m.qcPass} · {m.qcFlag} · {m.qcFail}
+                    </td>
+                    <td className="pr-2 tabular-nums">
+                      {m.approved} · {m.rejected}
+                    </td>
+                    <td className="pr-2 tabular-nums">{usd(m.aiUsd)}</td>
+                    <td className="tabular-nums font-semibold">{m.usdPerApproved === null ? "— (chưa video nào được duyệt)" : usd(m.usdPerApproved)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {skus.length === 0 ? <p className="text-muted-foreground">Chưa có video nào.</p> : null}
 

@@ -287,3 +287,28 @@ chốt / giao / hoàn, doanh thu — thứ phán quyết đọc) · lợi nhuậ
 6. **Có sự cố**: Dừng khẩn cấp ở mã / fanpage / toàn module (tab Đăng Reel) ⇒ mọi quảng cáo đang chạy trong phạm vi bị tắt ở
    lượt kế tiếp; công tắc `ads.write.kill` của Thư viện Media vẫn chặn mọi lời ghi Facebook.
 
+## 15. Nhà cung cấp thứ hai — Gemini Omni Flash (28/09/2026)
+
+Tab Cấu hình → **Nhà cung cấp**: `Veo 3.1` hoặc `Gemini Omni Flash`. Cả hai đi qua CÙNG khoá `GEMINI_API_KEY` (Gemini API bậc
+trả phí — không model video nào có bậc miễn phí). Mỗi lượt chụp lại model lúc tạo, nên đổi model không đổi lịch sử.
+
+| Model | Giá công bố / giây (ai.google.dev/gemini-api/docs/pricing, đọc 28/09/2026) | Ghi chú |
+|---|---|---|
+| `veo-3.1-lite-generate-preview` | 720p 0,05 · 1080p 0,08 USD | rẻ nhất |
+| `veo-3.1-fast-generate-preview` | 720p 0,10 · 1080p 0,12 USD | mặc định |
+| `veo-3.1-generate-preview` | 720p / 1080p 0,40 USD | chất lượng cao nhất của Veo |
+| `gemini-omni-1.1-flash` | 720p ≈ 0,1014 USD (5.792 token/giây × 17,50 USD / 1 triệu token) | 1080p chưa có số chính thức ⇒ ép 720p |
+
+Khác biệt kỹ thuật (`lib/video-scale/providers/omni.ts`):
+
+- **Interactions API** (`POST /v1beta/interactions`, `background: true`, `store: true`) thay cho `predictLongRunning`; hỏi
+  `GET /v1beta/interactions/{id}`; tải qua Files API (tệp còn `PROCESSING` ⇒ lỗi TẠM THỜI, hàng đợi hỏi lại — không mất clip).
+- Ảnh gốc là ẢNH ĐẦU theo lời dặn trong câu lệnh (Veo có trường khung đầu riêng, Omni không) — QC hình ảnh vẫn là hàng rào thật.
+- Omni tự quyết độ dài 3–10 giây, không có trường độ dài đã công bố ⇒ **giữ chỗ tiền theo 10 giây**, ghi tiền theo độ dài
+  ĐO ĐƯỢC của clip (không đo được ⇒ 10 giây, ước tính phía cao).
+- Không có trường câu lệnh phủ định ⇒ điều cấm đi vào câu chữ.
+
+**Chọn model bằng số đo, không bằng cảm giác**: tab Báo cáo → "So sánh model sinh video" in, theo từng model, số video đã QC,
+đạt / nghi ngờ / loại, duyệt / loại và **tiền AI trên mỗi video ĐƯỢC DUYỆT** — model rẻ mà hay sai màu / sai dáng thì đắt
+hơn khi tính trên video dùng được.
+
