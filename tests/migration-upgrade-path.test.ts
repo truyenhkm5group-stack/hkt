@@ -110,6 +110,7 @@ const MOI = [
   "0160_workflow_foundation",
   "0161_page_visit_daily",
   "0162_workflow_run_lease",
+  "0163_meta_pages",
 ] as const;
 
 /*

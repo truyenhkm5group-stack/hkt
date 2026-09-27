@@ -143,6 +143,7 @@ export function testUiConsistency() {
     "app/(dashboard)/reports/target/page.tsx",
     "app/(dashboard)/shipments/stock-wait/page.tsx",
     "app/(dashboard)/settings/workflows/page.tsx",
+    "app/(dashboard)/settings/pages/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
@@ -249,6 +250,9 @@ export function testNavigationCoverage() {
     // Phase 3 · luật tự động: form TẠO luật — vào từ nút 'Luật mới' ở đầu /settings/workflows. Trang của MỘT luật
     // (`/settings/workflows/[id]`) là route động nên tự đứng ngoài bài này: vào từ tên luật trong bảng danh sách.
     "/settings/workflows/new": "nút 'Luật mới' ở đầu /settings/workflows; trang một luật /settings/workflows/[id] vào từ tên luật trong bảng",
+    // Phase 4 · trang tuỳ biến: form TẠO trang — vào từ nút 'Trang mới' ở đầu /settings/pages. Trình soạn MỘT trang
+    // (`/settings/pages/[id]`) là route động: vào từ tên trang trong bảng danh sách, hoặc tự mở sau «Tạo từ mẫu».
+    "/settings/pages/new": "nút 'Trang mới' ở đầu /settings/pages; trình soạn một trang /settings/pages/[id] vào từ tên trang trong bảng",
   };
 
   const pages = walkPages("app/(dashboard)");

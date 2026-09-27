@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Suspense, useState } from "react";
 import { ChevronDown, Menu } from "lucide-react";
 import type { Role } from "@/db/schema";
-import { activeHrefOf, bellShowsSharedQueue, iconOf, visibleGroups } from "@/components/app-sidebar";
+import { activeHrefOf, bellShowsSharedQueue, iconOf, visibleGroups, type NavZone } from "@/components/app-sidebar";
 import { AiCopilot } from "@/components/ai-copilot";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { GlobalSearch } from "@/components/global-search";
@@ -15,7 +15,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { RealtimeIndicator } from "@/components/realtime-provider";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import type { ModuleZone } from "@/lib/constants/department-modules";
+import type { DynamicNavItem } from "@/lib/pages/nav";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,13 +36,16 @@ import { cn } from "@/lib/utils";
  */
 
 /** Nhãn ngắn cho viên thuốc; nhãn đầy đủ vẫn hiện ở đầu menu thả xuống. */
-const PILL_LABEL: Partial<Record<ModuleZone, string>> = {
+const PILL_LABEL: Partial<Record<NavZone, string>> = {
   SALES: "Kinh doanh",
   MANAGEMENT: "Điều hành",
 };
 
-/** `modules` = module đang bật của tổ chức — menu, ô lệnh ⌘K và chuông cùng lọc theo nó. */
-type TopNavUser = { name: string; email: string; role: Role; permissions: string[]; modules?: string[] };
+/**
+ * `modules` = module đang bật của tổ chức — menu, ô lệnh ⌘K và chuông cùng lọc theo nó. `dynamicPages` = trang
+ * tuỳ biến đã xuất bản (Phase 4 · G12), bố cục nạp ở máy chủ và đã lọc theo người xem.
+ */
+type TopNavUser = { name: string; email: string; role: Role; permissions: string[]; modules?: string[]; dynamicPages?: readonly DynamicNavItem[] };
 
 function itemClass(active: boolean) {
   return cn(
@@ -66,7 +69,7 @@ function ItemInner({ href, label, active }: { href: string; label: string; activ
 
 export function AppTopNav({ user }: { user: TopNavUser }) {
   const pathname = usePathname();
-  const activeHref = activeHrefOf(pathname);
+  const activeHref = activeHrefOf(pathname, user.dynamicPages?.map((d) => d.href));
   const groups = visibleGroups(user);
   const [sheetOpen, setSheetOpen] = useState(false);
 

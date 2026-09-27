@@ -8574,3 +8574,35 @@ export const pageVisitDaily = pgTable(
     check("page_visit_daily_key_check", sql`length(${t.pageKey}) between 1 and 120`),
   ],
 );
+
+// ═══ PHASE 4 — DYNAMIC PAGE RUNTIME (docs/platform/phase-4-contracts.md mục 2) ═══
+//
+// Trang là metadata của tổ chức (CSDL tổ chức). Người dùng CHỈ thấy `published`; `draft` là của trình soạn.
+// Không mã riêng cho trang nào: một schema (section → khối), một renderer (`app/(dashboard)/p/[slug]`).
+
+export const metaPages = pgTable(
+  "meta_pages",
+  {
+    id: id(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    moduleKey: text("module_key").notNull(),
+    requiredPermission: text("required_permission"),
+    nav: jsonb("nav").notNull().default({ enabled: false, label: "", zone: null, order: 0 }),
+    status: text("status").notNull().default("ACTIVE"),
+    draft: jsonb("draft"),
+    published: jsonb("published"),
+    publishedVersion: integer("published_version").notNull().default(0),
+    publishedAt: ts("published_at"),
+    publishedBy: text("published_by"),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("meta_pages_slug_uq").on(t.slug),
+    check("meta_pages_status_check", sql`${t.status} in ('ACTIVE','ARCHIVED')`),
+    check("meta_pages_slug_check", sql`${t.slug} ~ '^[a-z][a-z0-9-]{1,60}$'`),
+  ],
+);

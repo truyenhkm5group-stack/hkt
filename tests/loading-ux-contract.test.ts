@@ -165,6 +165,8 @@ export function testLoadingUxContract() {
     ["app/(dashboard)/inventory/planning/orders/[id]/order-actions.tsx", "transition bọc server action đổi trạng thái lệnh sản xuất"],
     ["components/global-search.tsx", "transition bọc lần TẢI kết quả tìm kiếm, không bọc điều hướng"],
     ["components/platform/workflow/rule-editor.tsx", "transition bọc thao tác LƯU luật tự động; router.push chỉ chạy SAU khi lưu xong để mở trang của luật vừa tạo"],
+    ["components/platform/pages/page-meta-form.tsx", "transition bọc thao tác TẠO / LƯU thông tin trang tuỳ biến; router.push chỉ chạy SAU khi tạo xong để mở trình soạn của trang vừa tạo"],
+    ["components/platform/pages/template-picker.tsx", "transition bọc thao tác TẠO trang từ mẫu; router.push chỉ chạy SAU khi tạo xong để mở trình soạn của trang vừa tạo"],
   ]);
   const clientFiles = [...walk("app/(dashboard)", ".tsx"), ...walk("components", ".tsx")];
   const viPham: string[] = [];

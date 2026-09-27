@@ -422,7 +422,10 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testPageData } from "./page-data.test";
+import { testPageRuntime } from "./page-runtime.test";
 import { testWorkflowAdmin } from "./workflow-admin.test";
+import { testPageAdmin } from "./page-admin.test";
 import { testMetadataService } from "./metadata-service.test";
 import { testMetadataAdmin } from "./metadata-admin.test";
 import { testMetadataRuntime } from "./metadata-runtime.test";
@@ -2459,6 +2462,14 @@ async function main() {
   await testMetadataFiles();
   // Phase 3 · giao diện luật tự động: lõi màn hình /settings/workflows (quyền, bản nháp form) + vòng đời thật trên tổ chức `wa-wf` (tự cấp, tự dọn).
   await testWorkflowAdmin();
+  // Phase 4 · sổ nguồn + sổ action + trình phân giải khối trang động: hai tổ chức THẬT `pd-a` / `pd-b` (tự cấp, tự dọn) —
+  // số đơn khớp orderKpis, module tắt / thiếu quyền / lọc sai ⇒ 0 lượt gọi nguồn, action đọc bản ĐÃ XUẤT BẢN.
+  await testPageData();
+  // Phase 4 · trang động: sổ loại khối + kiểm schema (sổ giả tiêm vào), dựng trang cô lập lỗi, menu động, vòng đời
+  // trang trên hai tổ chức THẬT `pr4-a` / `pr4-b` (tự cấp, tự dọn) — nháp / xuất bản / phiên bản / lưu trữ / mẫu.
+  await testPageRuntime();
+  // Phase 4 · trình soạn trang tuỳ biến: lõi màn hình /settings/pages (quyền, module chủ, lỗi theo path).
+  await testPageAdmin();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,

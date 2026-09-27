@@ -19,6 +19,7 @@ import {
   Clapperboard,
   Landmark,
   LayoutDashboard,
+  LayoutTemplate,
   Flag,
   FormInput,
   Lightbulb,
@@ -54,7 +55,8 @@ import {
 import type { Role } from "@/db/schema";
 import { hasPermission } from "@/lib/auth/permissions";
 import { hrefVisible } from "@/lib/platform-ui/module-visibility";
-import { MODULE_GROUPS, MODULE_TITLES, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
+import { MODULE_GROUPS, MODULE_TITLES, ZONE_HINT, ZONE_LABEL, ZONE_ORDER, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
+import { DYNAMIC_PAGE_PREFIX, DYNAMIC_PAGES_HINT, DYNAMIC_PAGES_LABEL, DYNAMIC_PAGES_ZONE, type DynamicNavItem } from "@/lib/pages/nav";
 
 /**
  * MENU XẾP THEO PHÒNG BAN — VÀ DANH SÁCH MODULE KHÔNG CÒN SỐNG Ở ĐÂY.
@@ -127,10 +129,12 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/lists": Columns3,
   "/settings/statuses": Tags,
   "/settings/workflows": Workflow,
+  "/settings/pages": LayoutTemplate,
   "/platform": ServerCog,
 };
 
 export function iconOf(href: string): typeof LayoutDashboard {
+  if (href.startsWith(`${DYNAMIC_PAGE_PREFIX}/`)) return LayoutTemplate;
   return MODULE_ICON[href as ModuleHref] ?? LayoutDashboard;
 }
 
@@ -140,7 +144,32 @@ export function iconOf(href: string): typeof LayoutDashboard {
  * `modules` = module ĐANG BẬT của tổ chức (đã phân giải, `SessionUser.modules`). Vắng mặt ⇒ không lọc
  * theo module (chỉ người dựng tay trong kiểm thử); `resolveCurrentUser()` luôn điền.
  */
-export type NavUserLike = { role: Role; permissions: string[]; modules?: readonly string[] };
+export type NavUserLike = {
+  role: Role;
+  permissions: string[];
+  modules?: readonly string[];
+  /**
+   * Mục menu ĐỘNG (Phase 4 · G12): trang tuỳ biến đã xuất bản, bố cục nạp ở máy chủ và ĐÃ lọc theo người xem
+   * (`lib/pages/nav.ts`). Vắng mặt ⇒ menu cũ nguyên vẹn. Vẫn qua `moduleAllows` ở đây như mọi mục khác.
+   */
+  dynamicPages?: readonly DynamicNavItem[];
+};
+
+/** Vùng menu: phòng ban / nhóm chéo của sổ khai, cộng nhóm "Trang tuỳ biến" cho trang động không khai vùng. */
+export type NavZone = ModuleZone | typeof DYNAMIC_PAGES_ZONE;
+export type NavGroupItem = { href: string; label: string };
+export type NavGroup = { zone: NavZone; label: string; hint: string; items: NavGroupItem[] };
+
+/** Mục động của người này theo vùng (đã qua cổng module như mục tĩnh). */
+function dynamicByZone(user: NavUserLike): Map<NavZone, NavGroupItem[]> {
+  const out = new Map<NavZone, NavGroupItem[]>();
+  for (const d of user.dynamicPages ?? []) {
+    if (!moduleAllows(d.href, user)) continue;
+    const zone: NavZone = d.zone && (ZONE_ORDER as readonly string[]).includes(d.zone) ? d.zone : DYNAMIC_PAGES_ZONE;
+    out.set(zone, [...(out.get(zone) ?? []), { href: d.href, label: d.label }]);
+  }
+  return out;
+}
 
 /**
  * Mục có thuộc module đang bật không. Áp CẢ CHO ADMIN (target-architecture P8): quản trị vẫn vượt mọi
@@ -176,27 +205,33 @@ export function bellShowsSharedQueue(user: NavUserLike): boolean {
   return user.role === "ADMIN" || hasPermission(user.permissions, "alerts:view");
 }
 
-/** Mọi trang người này được vào, theo đúng luật lọc của thanh bên (ADMIN thấy hết). */
+/** Mọi trang người này được vào, theo đúng luật lọc của thanh bên (ADMIN thấy hết) — gồm cả trang tuỳ biến. */
 export function allowedNavItems(user: NavUserLike): { href: string; label: string; group: string; icon: typeof LayoutDashboard }[] {
-  return MODULE_GROUPS.flatMap((g) =>
-    g.items.filter((item) => visible(item, user)).map((item) => ({ href: item.href, label: item.label, group: g.label, icon: iconOf(item.href) })),
-  );
+  return visibleGroups(user).flatMap((g) => g.items.map((item) => ({ href: item.href, label: item.label, group: g.label, icon: iconOf(item.href) })));
 }
 
-/** Các nhóm menu người này thấy — nhóm không còn mục nào sau khi lọc quyền thì bỏ hẳn. */
-export function visibleGroups(user: NavUserLike): { zone: ModuleZone; label: string; hint: string; items: ModuleSpec[] }[] {
-  return MODULE_GROUPS.map((g) => ({ ...g, items: g.items.filter((item) => visible(item, user)) })).filter((g) => g.items.length > 0);
+/**
+ * Các nhóm menu người này thấy — nhóm không còn mục nào sau khi lọc quyền thì bỏ hẳn. Mục động (G12) nối vào
+ * CUỐI nhóm vùng nó khai (kể cả vùng chưa có mục tĩnh nào); không khai vùng ⇒ nhóm "Trang tuỳ biến" ở cuối.
+ */
+export function visibleGroups(user: NavUserLike): NavGroup[] {
+  const dyn = dynamicByZone(user);
+  const groups: NavGroup[] = ZONE_ORDER.map((zone) => {
+    const base = MODULE_GROUPS.find((g) => g.zone === zone);
+    const items: NavGroupItem[] = [...(base?.items.filter((item) => visible(item, user)) ?? []), ...(dyn.get(zone) ?? [])];
+    return { zone, label: base?.label ?? ZONE_LABEL[zone], hint: base?.hint ?? ZONE_HINT[zone], items };
+  });
+  groups.push({ zone: DYNAMIC_PAGES_ZONE, label: DYNAMIC_PAGES_LABEL, hint: DYNAMIC_PAGES_HINT, items: dyn.get(DYNAMIC_PAGES_ZONE) ?? [] });
+  return groups.filter((g) => g.items.length > 0);
 }
 
 /**
  * Mục có đường dẫn dài nhất khớp với trang hiện tại mới được tô sáng (/reports/returns không tô
  * cả /reports). Tính MỘT lần cho cả menu, thay vì lặp lại phép này bên trong từng mục.
  */
-export function activeHrefOf(pathname: string): string | undefined {
+export function activeHrefOf(pathname: string, extraHrefs: readonly string[] = []): string | undefined {
   const matches = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
-  return MODULE_GROUPS.flatMap((g) => g.items)
-    .filter((i) => matches(i.href))
-    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+  return [...MODULE_GROUPS.flatMap((g) => g.items.map((i) => i.href)), ...extraHrefs].filter(matches).sort((a, b) => b.length - a.length)[0];
 }
 
 /*
@@ -221,4 +256,10 @@ export const NAV_TITLES: Record<string, string> = {
   "/reports/scenario": "Mô phỏng kịch bản",
   "/reports/target": "Kế hoạch mục tiêu lợi nhuận",
   "/shipments/stock-wait": "Chờ hàng & giao thành công",
+  /*
+    Trang tuỳ biến (Phase 4): MỘT khoá đếm cho mọi `/p/<slug>`. Bộ đếm lượt mở cố ý không nhận đường dẫn thô
+    (lib/constants/page-usage.ts điều 2) — mỗi slug một khoá là để bảng phình theo cấu hình của từng tổ chức.
+    Không có trang `/p` trần: `DetailCrumb` bỏ qua tiền tố này (trang động tự in tên của nó).
+  */
+  [DYNAMIC_PAGE_PREFIX]: "Trang tuỳ biến",
 };

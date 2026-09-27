@@ -1,6 +1,5 @@
-import { DIMENSION_LABEL, DIMENSION_TONE, WEIGHT_LABEL, sourceWeight } from "@/lib/constants/timeline";
+import { DIMENSION_LABEL, DIMENSION_TONE, WEIGHT_LABEL, sourceWeight, type TimelineDimension } from "@/lib/constants/timeline";
 import { formatDateTime, formatVND } from "@/lib/format";
-import type { TimelineEntry } from "@/lib/queries/entity-timeline";
 import { cn } from "@/lib/utils";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -23,29 +22,38 @@ const SOURCE_LABEL: Record<string, string> = {
  * quả đơn, Pancake nói thì không quyết định gì. Trộn chung mà không ghi nguồn sẽ khiến người đọc
  * kết luận sai — đúng loại sai lầm mà toàn bộ lớp Data Truth sinh ra để chống.
  */
-export function EntityTimeline({ entries, limit = 40 }: { entries: TimelineEntry[]; limit?: number }) {
-  if (!entries.length) return <p className="text-sm text-muted-foreground">Chưa có mốc nào được ghi nhận cho đơn này.</p>;
+/**
+ * Một mốc. `TimelineEntry` của `lib/queries/entity-timeline.ts` khớp nguyên hình này; khối dòng thời gian của
+ * trang động (Phase 4) truyền mốc KHÔNG có chiều / số tiền — thiếu thì không in nhãn chiều, KHÔNG đoán chiều
+ * từ nguồn (một nhãn "Người dùng" gắn nhầm còn tệ hơn không có nhãn).
+ */
+export type EntityTimelineEntry = { id: string; at: Date | string; dimension?: TimelineDimension; source?: string; title: string; detail?: string; amount?: number | null };
+
+export function EntityTimeline({ entries, limit = 40, emptyText = "Chưa có mốc nào được ghi nhận cho đơn này." }: { entries: EntityTimelineEntry[]; limit?: number; emptyText?: string }) {
+  if (!entries.length) return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   const shown = entries.slice(0, limit);
 
   return (
     <ol className="relative space-y-0 border-l pl-4">
       {shown.map((e, i) => {
-        const weight = sourceWeight(e.source);
+        const weight = e.source ? sourceWeight(e.source) : null;
         return (
           <li key={e.id} className="relative pb-4 last:pb-0">
             <span className={cn("absolute -left-[21px] top-1.5 size-2.5 rounded-full border-2 border-background", i === 0 ? "bg-primary" : "bg-muted-foreground/50")} />
             <div className="flex flex-wrap items-baseline gap-x-2">
-              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", DIMENSION_TONE[e.dimension])}>{DIMENSION_LABEL[e.dimension]}</span>
+              {e.dimension ? <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", DIMENSION_TONE[e.dimension])}>{DIMENSION_LABEL[e.dimension]}</span> : null}
               <span className={cn("text-sm font-semibold", i === 0 && "text-primary")}>{e.title}</span>
-              {e.amount !== null ? <span className="text-sm tabular-nums">{formatVND(e.amount)}</span> : null}
+              {typeof e.amount === "number" ? <span className="text-sm tabular-nums">{formatVND(e.amount)}</span> : null}
               <span className="text-xs text-muted-foreground">{formatDateTime(e.at)}</span>
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {e.detail}
-              <span className="ml-1.5 rounded bg-muted px-1 text-[10px]" title={`Nguồn này ${WEIGHT_LABEL[weight]}`}>
-                {SOURCE_LABEL[e.source] ?? e.source}
-                {weight === "DECIDES" ? " · quyết định kết quả đơn" : weight === "CONTEXT" ? " · chỉ là bối cảnh" : ""}
-              </span>
+              {e.source && weight ? (
+                <span className="ml-1.5 rounded bg-muted px-1 text-[10px]" title={`Nguồn này ${WEIGHT_LABEL[weight]}`}>
+                  {SOURCE_LABEL[e.source] ?? e.source}
+                  {weight === "DECIDES" ? " · quyết định kết quả đơn" : weight === "CONTEXT" ? " · chỉ là bối cảnh" : ""}
+                </span>
+              ) : null}
             </p>
           </li>
         );
