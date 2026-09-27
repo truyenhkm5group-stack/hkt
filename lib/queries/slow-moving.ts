@@ -1,11 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { computeVelocity } from "@/lib/constants/planning";
-import { loadPlanningAssumptions } from "@/lib/queries/planning";
+import { coverDaysOf, paceOfPlanRow, qtyForCoverDays, roundCoverDays } from "@/lib/constants/planning";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { LAST_RECEIPT_COST, availableStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
-import { SLOW_MOVING_KEY, resolveSlowMovingRules, type ResolvedSlowMovingRules, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
+import { SLOW_MOVING_KEY, classifyStockRisk, resolveSlowMovingRules, type ResolvedSlowMovingRules, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
 
 /**
  * ───────────── HÀNG BÁN CHẬM & VỐN NẰM CHẾT ─────────────
@@ -13,15 +12,19 @@ import { SLOW_MOVING_KEY, resolveSlowMovingRules, type ResolvedSlowMovingRules, 
  * Đối trọng của trang Kế hoạch sản xuất. Kế hoạch chỉ nhìn cái SẮP HẾT; nếu không có bảng này thì
  * shop chỉ thấy chỗ cần đổ thêm tiền vào, không bao giờ thấy chỗ tiền đang nằm chết.
  *
- * Đặc tả tồn kho: docs/inventory-forecast-contract.md. Tồn dùng đúng công thức của sổ kho, tốc độ
- * bán dùng đúng hàm chống nhiễu của kế hoạch — không có công thức riêng ở đây.
+ * Đặc tả tồn kho: docs/inventory-forecast-contract.md. KHÔNG có công thức tồn hay tốc độ riêng ở
+ * đây: mỗi dòng đọc thẳng DÒNG KẾ HOẠCH SX (`getReplenishmentPlan`) — tồn khả dụng, tốc độ gửi đi,
+ * nhịp hao kho sau độ trễ hoàn, số ngày còn đủ hàng. Trước 27/09/2026 bảng này tự tính một tốc độ
+ * RÒNG (bỏ đơn hoàn, bỏ hàng tặng) nên cùng một mẫu mã có hai "số ngày còn đủ hàng" trên cùng một
+ * trang; chủ shop giao Tech Lead chốt và định nghĩa của Kế hoạch SX thắng (xem hợp đồng §1–2).
+ *
+ * TẬP DÒNG không đổi: mẫu mã BIẾT tồn và còn hàng (khả dụng > 0). Mẫu như vậy luôn nằm trong bản kế
+ * hoạch (`isPlanRowActive`: khả dụng > 0 ⇒ tồn ≠ 0), nên đọc `plan.rows` là đọc đủ.
  *
  * GIÁ TRỊ VỐN tính theo GIÁ NHẬP, không theo giá bán: đây là số tiền đã bỏ ra và chưa thu lại,
  * không phải doanh thu có thể thu.
  */
 
-const pv = schema.productVariants;
-const p = schema.products;
 const oi = schema.orderItems;
 const o = schema.orders;
 const s = schema.shipments;
@@ -34,9 +37,13 @@ export type SlowMovingRow = {
   color: string;
   size: string;
   available: number;
-  /** Món/ngày, đã bỏ ngày đột biến. */
+  /** Tốc độ GỬI ĐI của Kế hoạch SX (món/ngày, đã bỏ ngày đột biến) — CÙNG số với cột "Gửi đi/ngày" ở bảng trên. */
   velocity: number;
-  /** `null` khi không bán được cái nào — CHƯA BIẾT, không phải vô cực. */
+  /**
+   * Số ngày còn đủ hàng của Kế hoạch SX (`coverDaysOf`, một chữ số thập phân) — CÙNG số với bảng Kế
+   * hoạch và Quyết định vốn tồn. `null` khi không gửi đi cái nào, hoặc hàng hoàn về bằng hàng đi —
+   * không phải vô cực, không phải 0.
+   */
   daysOfCover: number | null;
   /** Lần cuối bán được (giao thành công); `null` = chưa bán được lần nào. */
   lastSoldAt: Date | null;
@@ -62,39 +69,11 @@ export type SlowMovingReport = {
 };
 
 /**
- * Bán ròng trong cửa sổ, ngày bán mạnh nhất và lần cuối giao được hàng — mỗi thứ một truy vấn con
- * dùng ĐÚNG bí danh bảng mà `ORDER_OUTCOME` mong đợi.
+ * Lần cuối THẬT SỰ giao được hàng của từng mẫu mã — thứ duy nhất bảng này đọc thêm ngoài dòng kế hoạch.
  *
- * CỐ Ý không viết dưới dạng truy vấn con tương quan có bí danh riêng (o2/o3/o4): `ORDER_OUTCOME`
- * dựng trên bí danh `orders`/`shipments`, nên đặt bí danh khác sẽ khiến nó lặng lẽ trỏ sang bảng ở
- * câu ngoài và trả về kết quả sai mà không báo lỗi.
+ * Dùng ĐÚNG bí danh bảng mà `ORDER_OUTCOME` mong đợi (`orders`/`shipments`): đặt bí danh khác sẽ khiến
+ * nó lặng lẽ trỏ sang bảng ở câu ngoài và trả về kết quả sai mà không báo lỗi.
  */
-function windowSalesSubquery(db: Awaited<ReturnType<typeof getDb>>, windowDays: number) {
-  const daily = db
-    .select({
-      variantId: oi.variantId,
-      day: sql<string>`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`.as("sale_day"),
-      qty: sql<number>`coalesce(sum(${oi.quantity}), 0)`.as("day_qty"),
-    })
-    .from(oi)
-    .innerJoin(o, eq(o.id, oi.orderId))
-    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
-    .where(sql`${o.insertedAt} >= now() - (${windowDays} || ' days')::interval and ${oi.isBonus} = false and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
-    .groupBy(oi.variantId, sql`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`)
-    .as("sm_daily");
-
-  return db
-    .select({
-      variantId: daily.variantId,
-      sold: sql<number>`coalesce(sum(${daily.qty}), 0)`.as("sm_sold"),
-      peak: sql<number>`coalesce(max(${daily.qty}), 0)`.as("sm_peak"),
-    })
-    .from(daily)
-    .groupBy(daily.variantId)
-    .as("sm_window");
-}
-
 function lastSoldSubquery(db: Awaited<ReturnType<typeof getDb>>) {
   return db
     .select({ variantId: oi.variantId, lastSoldAt: sql<Date | null>`max(${o.insertedAt})`.as("sm_last_sold") })
@@ -127,40 +106,18 @@ export async function loadSlowMovingRules(): Promise<ResolvedSlowMovingRules> {
 
 async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingReport> {
   const db = await getDb();
-  const a = await loadPlanningAssumptions();
-  const windowDays = Math.max(1, a.velocityWindowDays);
-  const sales = variantSalesSubquery(db);
-  const receipts = variantReceiptsSubquery(db);
-  const win = windowSalesSubquery(db, windowDays);
-  const last = lastSoldSubquery(db);
-
   /*
-    JIT TẮT — đo được: câu lệnh sổ bán theo mẫu mã tốn 17.571ms trên production, và cùng họ với
-    truy vấn đã tách bạch được JIT (8.578ms bật ↔ 26ms tắt, cùng khối đệm). `getBusinessBrief` gọi
-    hàm này, và nó là 17.611ms nguội.
+    JIT TẮT cho câu lần bán cuối — cùng họ truy vấn sổ bán theo mẫu mã đã đo (8.578ms bật ↔ 26ms tắt).
+    Dòng kế hoạch đọc qua bộ đệm của chính trang Kế hoạch SX: một lượt tính cho cả hai bảng.
   */
-  const rows = await chayKhongJit(db, (tx) => tx
-    .select({
-      variantId: pv.id,
-      productId: pv.productId,
-      productName: p.name,
-      sku: pv.sku,
-      color: pv.color,
-      size: pv.size,
-      stockKnown: stockKnownExpr(receipts),
-      available: availableStockExpr(sales, receipts),
-      unitCost: sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`,
-      soldInWindow: sql<number>`coalesce(${win.sold}, 0)`,
-      peakDayQty: sql<number>`coalesce(${win.peak}, 0)`,
-      lastSoldAt: sql<Date | null>`${last.lastSoldAt}`,
-    })
-    .from(pv)
-    .innerJoin(p, eq(p.id, pv.productId))
-    .leftJoin(sales, eq(sales.variantId, pv.id))
-    .leftJoin(receipts, eq(receipts.variantId, pv.id))
-    .leftJoin(win, eq(win.variantId, pv.id))
-    .leftJoin(last, eq(last.variantId, pv.id))
-    .where(and(eq(pv.isRemoved, false), eq(p.isRemoved, false))));
+  const [plan, lastRows] = await Promise.all([
+    getReplenishmentPlan(),
+    chayKhongJit(db, (tx) => {
+      const last = lastSoldSubquery(tx);
+      return tx.select({ variantId: last.variantId, lastSoldAt: last.lastSoldAt }).from(last);
+    }),
+  ]);
+  const lastSold = new Map(lastRows.map((r) => [r.variantId, r.lastSoldAt]));
 
   const out: SlowMovingRow[] = [];
   const byRisk: Record<StockRisk, { count: number; value: number }> = {
@@ -172,39 +129,29 @@ async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingRep
   let totalStockValue = 0;
   let totalExcessValue = 0;
 
-  for (const r of rows) {
+  for (const r of plan.rows) {
     // Chưa có phiếu nhập ⇒ tồn là CHƯA BIẾT ⇒ không kết luận gì về vốn nằm chết.
     if (!r.stockKnown) continue;
-    const available = Number(r.available ?? 0);
+    const available = r.available;
     if (available <= 0) continue;
 
-    const v = computeVelocity(Number(r.soldInWindow ?? 0), windowDays, Number(r.peakDayQty ?? 0));
-    const daysOfCover = v.velocity > 0 ? Math.round((available / v.velocity) * 10) / 10 : null;
-    const unitCost = Number(r.unitCost ?? 0);
+    // MỘT nhịp hao kho, MỘT số ngày phủ — của Kế hoạch SX, làm tròn một chỗ.
+    const pace = paceOfPlanRow(r);
+    const daysOfCover = roundCoverDays(coverDaysOf(available, pace));
+    const unitCost = r.unitCost;
     const stockValue = available * unitCost;
-    const lastSoldAt = r.lastSoldAt ? new Date(r.lastSoldAt) : null;
+    const lastRaw = lastSold.get(r.variantId);
+    const lastSoldAt = lastRaw ? new Date(lastRaw) : null;
     const daysSinceLastSale = lastSoldAt ? Math.floor((Date.now() - lastSoldAt.getTime()) / 86_400_000) : null;
 
-    let risk: StockRisk = "HEALTHY";
-    let reason = "";
-    if (v.velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= rules.deadDays)) {
-      risk = "DEAD";
-      reason = daysSinceLastSale === null ? "Chưa bán được cái nào" : `Không bán được cái nào trong ${daysSinceLastSale} ngày`;
-    } else if (daysOfCover !== null && daysOfCover > rules.excessCoverDays) {
-      risk = "EXCESS";
-      reason = `Tồn đủ bán ${daysOfCover} ngày — vượt xa mức cần thiết`;
-    } else if (daysOfCover !== null && daysOfCover > rules.slowCoverDays) {
-      risk = "SLOW";
-      reason = `Tồn đủ bán ${daysOfCover} ngày — bán chậm hơn mức lành mạnh`;
-    } else {
-      reason = daysOfCover === null ? "Chưa đủ căn cứ" : `Tồn đủ bán ${daysOfCover} ngày`;
-    }
+    const { risk, reason } = classifyStockRisk({ velocity: pace.velocity, daysOfCover, daysSinceLastSale }, rules);
 
     /**
-     * PHẦN VỐN VƯỢT MỨC = tiền nằm trong số hàng nhiều hơn mức đủ bán trong kỳ lành mạnh.
+     * PHẦN VỐN VƯỢT MỨC = tiền nằm trong số hàng nhiều hơn mức đủ bán trong kỳ lành mạnh — đo bằng
+     * ĐÚNG nhịp hao kho đã xếp loại (nghịch đảo của `coverDaysOf`).
      * Hàng chết thì TOÀN BỘ là vượt mức — không có nhịp bán nào để giữ lại phần nào cả.
      */
-    const healthyQty = v.velocity > 0 ? Math.ceil(v.velocity * rules.healthyCoverDays) : 0;
+    const healthyQty = Math.ceil(qtyForCoverDays(rules.healthyCoverDays, pace) - 1e-9);
     const excessQty = Math.max(0, available - healthyQty);
     const excessValue = risk === "HEALTHY" ? 0 : excessQty * unitCost;
 
@@ -221,7 +168,7 @@ async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingRep
       color: r.color ?? "",
       size: r.size ?? "",
       available,
-      velocity: Math.round(v.velocity * 100) / 100,
+      velocity: Math.round(pace.velocity * 100) / 100,
       daysOfCover,
       lastSoldAt,
       daysSinceLastSale,

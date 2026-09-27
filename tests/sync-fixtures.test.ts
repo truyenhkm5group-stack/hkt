@@ -311,6 +311,7 @@ import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./comp
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
+import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testCompanyOsEvidenceGapsDb, testCompanyOsEvidenceGapsPure } from "./company-os-evidence-gaps.test";
 import { testCompanyOsBulkDeclareDb, testCompanyOsBulkDeclarePure, testCompanyOsBulkDeclareSource } from "./company-os-bulk-declare.test";
 import { testProductionTopicFilesDb, testProductionTopicFilesPure } from "./production-topic-files.test";
@@ -1980,6 +1981,9 @@ async function main() {
   await testCompanyOsWarmDb();
   testCompanyOsSummaryPure();
   await testCompanyOsSummaryDb(db);
+  // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
+  testVelocityUnifyPure();
+  await testVelocityUnifyDb(db);
   // Company OS · Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất khai mà ERP không có chứng từ · phiếu nhập chưa nối có lệnh SX khớp (mã `cos-p2-`, tự dọn; ngày cố định 2001).
   testCompanyOsEvidenceGapsPure();
   await testCompanyOsEvidenceGapsDb(db);

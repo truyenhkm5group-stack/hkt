@@ -50,7 +50,7 @@ export async function SlowMovingSection({ canWrite = false }: { canWrite?: boole
     <SectionCard
       title={`Vốn đang nằm chết — ${formatNumber(risky.length)} mẫu mã`}
       description={`${Math.round(report.totalExcessValue).toLocaleString("vi-VN")}đ vượt mức cần thiết trên tổng ${Math.round(report.totalStockValue).toLocaleString("vi-VN")}đ vốn tồn · ${report.byRisk.DEAD.count} mẫu chết · ${report.byRisk.EXCESS.count} mẫu thừa`}
-      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${R.deadDays} ngày. Vốn nằm chết = tồn đủ bán quá ${R.excessCoverDays} ngày. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
+      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${R.deadDays} ngày. Vốn nằm chết = tồn đủ bán quá ${R.excessCoverDays} ngày — "đủ bán" là ĐÚNG số ngày còn đủ hàng của Kế hoạch SX (tốc độ gửi đi, hàng hoàn trừ sau độ trễ hoàn), không phải một phép tính riêng. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
       padded={false}
     >
       <div className="overflow-x-auto">
@@ -59,8 +59,8 @@ export async function SlowMovingSection({ canWrite = false }: { canWrite?: boole
             <TableRow>
               <TableHead>Mẫu mã</TableHead>
               <TableHead className="text-right">Còn</TableHead>
-              <TableHead className="text-right">Bán/ngày</TableHead>
-              <TableHead className="text-right">Đủ bán</TableHead>
+              <TableHead className="text-right" title="Tốc độ gửi đi của Kế hoạch SX — cùng cột ở bảng trên">Gửi đi/ngày</TableHead>
+              <TableHead className="text-right" title="Số ngày còn đủ hàng của Kế hoạch SX (hàng hoàn trừ sau độ trễ hoàn) — cùng số ở bảng trên">Đủ bán</TableHead>
               <TableHead className="text-right">Vốn tồn</TableHead>
               <TableHead className="text-right">Vượt mức</TableHead>
               <TableHead>Tình trạng</TableHead>

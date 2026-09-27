@@ -15,12 +15,38 @@ Sai ở bước đầu thì cả ba bước sau đều sai, nên tốc độ bá
 
 ## 1. Tốc độ bán
 
+> **MỘT định nghĩa cho mọi màn hình — quyết định 27/09/2026** (chủ shop giao Tech Lead: "Bạn làm thế
+> nào tốt nhất thì làm"). Trước ngày đó shop có hai: Kế hoạch SX dùng tốc độ **gửi đi** (gộp), còn
+> bảng Hàng chậm tự tính tốc độ **ròng** (bỏ đơn hoàn, bỏ hàng tặng) — cùng một mẫu mã hiện hai "số
+> ngày còn đủ hàng" trên cùng một trang. Định nghĩa **của Kế hoạch SX thắng**, vì:
+>
+> 1. nó là định nghĩa đang **quyết định tiền** (số nên đặt sản xuất); đổi nó là đổi đơn đặt xưởng,
+>    đổi bảng Hàng chậm chỉ đổi nhãn;
+> 2. nó mô tả đúng cách kho **thật sự vơi**: hàng rời kho theo mọi đơn không huỷ (kể cả đơn sẽ hoàn,
+>    kể cả hàng tặng), phần hoàn chỉ quay lại **sau** độ trễ hoàn đo được — tốc độ ròng giả vờ hàng
+>    hoàn chưa từng rời kho, nên với mã hoàn nhiều nó báo "tồn đủ bán 140 ngày" cho lô hàng thật ra
+>    đang đi hết trong 2 ngày;
+> 3. phần hoàn được trừ **tường minh**, có tên, có số đo (tỷ lệ hoàn theo GTC của mã, tỷ lệ nhập lại
+>    được, độ trễ hoàn) — in ra được trong lời diễn giải, thay vì bị giấu trong phép lọc đơn.
+>
+> Đo trước/sau trên production bằng ops `velocity-compare` (`docs/company-os/handoff-v.md`).
+
 ```
-tốc độ thô = số món bán ròng trong cửa sổ ÷ số ngày cửa sổ
+tốc độ gửi đi = số món của đơn KHÔNG HUỶ trong cửa sổ (gồm đơn đang giao, đơn đã hoàn, hàng tặng)
+                ÷ số ngày cửa sổ   (sau khi bỏ ngày đột biến — mục dưới)
+nhịp hao kho ròng = tốc độ gửi đi × (1 − tỷ lệ hoàn của mã × tỷ lệ nhập lại được)   — chỉ SAU độ trễ hoàn
 ```
 
-"Bán ròng" = không tính đơn huỷ, không tính đơn hoàn, không tính hàng tặng. Hàng hoàn **không phải
-nhu cầu** — tính nó vào sẽ đặt thừa đúng bằng phần hoàn.
+Nơi DUY NHẤT dựng ba số này là `computePlan` (`lib/constants/planning.ts`); mọi nơi khác đọc chúng
+từ dòng Kế hoạch SX (`paceOfPlanRow`, `getVariantPaceMap`, hoặc thẳng `getReplenishmentPlan().rows`).
+Người đọc hiện tại: Kế hoạch SX, trang chi tiết sản phẩm, Quyết định vốn tồn, **Hàng chậm / vốn nằm
+chết**, **Hiệu quả mẫu mã** (và nhãn mẫu mã dựng trên nó), **tệp khách xả hàng** (outreach), **vòng
+phản hồi tồn** (gộp nhóm mẫu đang đẩy), cảnh báo đặt hàng. `tests/velocity-unify.test.ts` chặn mọi
+phép chia cho tốc độ bên ngoài `lib/constants/planning.ts`.
+
+Ngoại lệ đã khai: **đối chứng lịch sử** (`backtestInventoryDecisions`) dựng tồn tại một mốc cắt quá
+khứ và không có GTC / độ trễ hoàn của thời điểm đó — nó là ƯỚC TÍNH có nhãn, không phải số của màn
+hình vận hành.
 
 ### Chống một ngày đột biến
 
@@ -52,15 +78,24 @@ sao con số đề xuất khác cảm giác của người bán.
 ## 2. Số ngày còn đủ hàng
 
 ```
-số ngày còn đủ hàng = tồn khả dụng ÷ tốc độ bán
 tồn khả dụng = tồn thực tế − hàng đã chốt đơn còn trong kho
+nếu chưa đo được độ trễ hoàn, hoặc khả dụng ≤ tốc độ gửi đi × độ trễ hoàn:
+    số ngày còn đủ hàng = khả dụng ÷ tốc độ gửi đi
+ngược lại:
+    số ngày còn đủ hàng = độ trễ hoàn + (khả dụng − tốc độ gửi đi × độ trễ hoàn) ÷ nhịp hao kho ròng
 ```
+
+Một hàm: `coverDaysOf` (nghịch đảo `qtyForCoverDays` cho "mức tồn lành mạnh" của bảng Hàng chậm;
+`pooledPace` gộp nhiều mẫu mã — độ trễ hoàn là số toàn shop nên cộng được). Làm tròn để in: một chỗ,
+`roundCoverDays` (một chữ số thập phân). Ngưỡng Hàng chậm (`inventory.slowMoving`) **không đổi**;
+bảng Hàng chậm xếp lớp trên số đã làm tròn — đúng con số nó in.
 
 **Bốn trường hợp biên, và không trường hợp nào được ra một con số bịa:**
 
 | Tình huống | Kết quả | Vì sao |
 |---|---|---|
 | Không bán được cái nào | `null` → hiện "—" | Chia cho 0 là vô cực, không phải "đủ hàng mãi mãi" |
+| Có gửi đi nhưng hàng hoàn về bằng hàng đi (nhịp ròng ≤ 0) | `null` → hiện "—"; bảng Hàng chậm xếp **Vốn nằm chết** | Tồn không vơi — không có số ngày nào, nhưng kết luận thì có |
 | Tồn âm | 0 ngày, trạng thái **Hết hàng** | Tồn âm là dấu hiệu sai lệch, không phải kho có nợ |
 | Chưa có phiếu nhập nào | `null`, trạng thái **Chưa có phiếu nhập** | "Nhập = 0" là THIẾU DỮ LIỆU, không phải "nhập 0 cái" |
 | Chưa đủ lịch sử bán | Vẫn tính, nhưng cửa sổ ngắn thì không cắt đột biến | Ít dữ liệu vẫn hơn không có |
@@ -108,8 +143,9 @@ từ hàng đang đi    = số lượng × tỷ lệ hoàn × tỷ lệ nhập l
 ```
 
 Hai tỷ lệ lấy từ **dữ liệu thật của shop** (phiếu tái nhập đã đếm ÷ hàng hoàn đã xử lý), không phải
-số gõ tay. Tỷ lệ hoàn dùng số của chính mẫu mã khi có ≥ 20 đơn đã kết thúc, không đủ thì dùng số
-toàn shop.
+số gõ tay. Tỷ lệ hoàn = 1 − tỷ lệ giao thành công của MÃ HÀNG theo thang bậc chung
+(`lib/constants/delivery-rate.ts`, AGENTS.md mục 68) — từ 23/09/2026, thay cho "số của mẫu mã khi đủ
+20 đơn, không thì số toàn shop".
 
 ### Làm tròn và mức đặt tối thiểu
 
@@ -130,7 +166,9 @@ là do ràng buộc của xưởng chứ không phải do nhu cầu.
 ## Cấm
 
 1. **Không đề xuất khi chưa biết tồn.** Đề xuất dựa trên dữ liệu bịa còn tệ hơn không đề xuất.
-2. **Không tính hàng hoàn vào nhu cầu.**
+2. **Không tính hàng hoàn vào nhu cầu** — hàng hoàn nằm trong tốc độ GỬI ĐI (nó thật sự rời kho) và
+   được trừ tường minh qua nhịp hao kho ròng sau độ trễ hoàn; không màn hình nào được tự tính một tốc
+   độ "ròng" thứ hai.
 3. **Không dùng tồn Pancake** thay tồn ERP — tồn ERP đi từ phiếu kho và sự kiện Viettel Post.
 4. **Không coi "ĐVVC báo đã hoàn" là hàng đã về kho.** Chỉ phiếu tái nhập với số đếm thực tế mới
    cộng tồn.

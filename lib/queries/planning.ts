@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanInput, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
+import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, paceOfPlanRow, type PlanInput, type PlanningAssumptions, type PlanOutput, type PlanStatus, type StockPace } from "@/lib/constants/planning";
 import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { productDeliveryRates, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
@@ -410,3 +410,29 @@ export async function getProductStockPlan(productId: string) {
 }
 
 export type ProductStockPlan = Awaited<ReturnType<typeof getProductStockPlan>>;
+
+/** Nhịp hao kho + số ngày phủ của một mẫu mã — ĐÚNG số của dòng Kế hoạch SX. */
+export type VariantPace = StockPace & {
+  /** Tồn khả dụng Kế hoạch SX đã dùng để tính `daysOfCover`. */
+  available: number;
+  stockKnown: boolean;
+  /** `coverDaysOf(khả dụng)` của Kế hoạch SX, CHƯA làm tròn. `null` = chưa biết tồn / không gửi đi / không vơi. */
+  daysOfCover: number | null;
+};
+
+/**
+ * ═══════ MỘT ĐƯỜNG ĐỌC TỐC ĐỘ BÁN / SỐ NGÀY PHỦ CHO MỌI MÀN HÌNH NGOÀI KẾ HOẠCH SX ═══════
+ *
+ * Chủ shop giao Tech Lead chốt 27/09/2026: một mẫu mã chỉ có MỘT tốc độ bán và MỘT số ngày còn đủ
+ * hàng — của Kế hoạch SX. Hàng chậm, Hiệu quả mẫu mã, tệp khách xả hàng đọc từ đây (hoặc thẳng từ
+ * `getReplenishmentPlan().rows`), KHÔNG tự chia số bán cho số ngày.
+ *
+ * Mẫu mã VẮNG trong map là mẫu không có việc gì trên Kế hoạch SX (không gửi đi, không tồn, không đơn
+ * chờ) ⇒ người đọc hiểu là tốc độ 0 và số ngày phủ CHƯA BIẾT (`null`), không bao giờ 0 hay vô cực.
+ */
+export async function getVariantPaceMap(): Promise<Map<string, VariantPace>> {
+  const plan = await getReplenishmentPlan();
+  const out = new Map<string, VariantPace>();
+  for (const r of plan.rows) out.set(r.variantId, { ...paceOfPlanRow(r), available: r.available, stockKnown: r.stockKnown, daysOfCover: r.daysOfCover });
+  return out;
+}

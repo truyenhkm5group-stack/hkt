@@ -8,7 +8,7 @@ import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can, requirePermission } from "@/lib/auth/session";
-import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE } from "@/lib/constants/planning";
+import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, coverDaysOf, paceOfPlanRow, pooledPace } from "@/lib/constants/planning";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
@@ -184,9 +184,12 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                   const sum = (f: (r: (typeof g.rows)[number]) => number) => g.rows.reduce((t, r) => t + f(r), 0);
                   // Tồn / khả dụng chỉ cộng mẫu mã ĐÃ CÓ phiếu nhập — cộng số của mẫu mã chưa biết tồn là cộng số bịa.
                   const stock = sum((r) => (r.stockKnown ? r.stock : 0));
-                  const velocity = sum((r) => r.velocity);
                   const available = sum((r) => (r.stockKnown ? r.available : 0));
-                  const cover = velocity > 0 ? Math.max(0, available) / velocity : null;
+                  // CÙNG `coverDaysOf` với từng dòng (hàng hoàn trừ sau độ trễ hoàn) — không chia thẳng, nếu
+                  // không dòng tổng nói một nhịp hao kho khác với chính các dòng nó cộng lại.
+                  const pace = pooledPace(g.rows.map(paceOfPlanRow));
+                  const velocity = pace.velocity;
+                  const cover = coverDaysOf(Math.max(0, available), pace);
                   const outCount = g.rows.filter((r) => r.status === "OUT").length;
                   const critCount = g.rows.filter((r) => r.status === "CRITICAL").length;
                   const lowCount = g.rows.filter((r) => r.status === "LOW").length;

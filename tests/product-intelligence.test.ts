@@ -5,6 +5,8 @@ import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { getProductIntelligence, getProductMatrix } from "@/lib/queries/product-intelligence";
 import { getDashboardData } from "@/lib/queries/dashboard";
+import { roundCoverDays } from "@/lib/constants/planning";
+import { getVariantPaceMap } from "@/lib/queries/planning";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
@@ -20,6 +22,7 @@ export async function testProductIntelligence(db: Db) {
   clearMemo();
   const rows = await getProductIntelligence({ period: ALL, limit: 50 });
   assert.ok(rows.length > 0, "fixture phải có mẫu mã bán được để kiểm tra");
+  const paces = await getVariantPaceMap();
 
   // ───────── 1. Số liệu phải khớp ORDER_OUTCOME, không tính lại theo cách khác ─────────
   const withVariant = rows.find((r) => r.variantId);
@@ -102,10 +105,12 @@ export async function testProductIntelligence(db: Db) {
     assert.ok(row.confirmedQty <= row.orderedQty, `${row.sku}: không thể xác nhận nhiều hơn số lên đơn`);
     assert.ok(row.deliveredRevenue <= row.bookedRevenue, `${row.sku}: doanh thu giao thành công không thể vượt doanh thu lên đơn`);
 
-    // TỐC ĐỘ BÁN tính theo số GIAO THÀNH CÔNG, không theo số lên đơn: hàng hoàn không phải nhu cầu,
-    // tính nó vào sẽ đẩy kế hoạch sản xuất đặt thừa đúng bằng phần hoàn.
-    assert.ok(row.velocity >= 0, `${row.sku}: tốc độ bán không được âm`);
-    if (row.deliveredQty === 0) assert.equal(row.velocity, 0, `${row.sku}: chưa giao được cái nào thì tốc độ bán bằng 0`);
+    // TỐC ĐỘ BÁN / SỐ NGÀY PHỦ là của KẾ HOẠCH SX (quyết định 27/09/2026 — một định nghĩa cho mọi màn
+    // hình): không tự chia số giao được cho số ngày của kỳ đang xem.
+    const pace = row.variantId ? paces.get(row.variantId) : undefined;
+    assert.equal(row.velocity, row.variantId ? Math.round((pace?.velocity ?? 0) * 100) / 100 : null, `${row.sku}: tốc độ phải là tốc độ gửi đi của Kế hoạch SX`);
+    if (row.velocity !== null) assert.ok(row.velocity >= 0, `${row.sku}: tốc độ bán không được âm`);
+    if (row.available !== null && row.variantId) assert.equal(row.daysOfCover, roundCoverDays(pace?.daysOfCover ?? null), `${row.sku}: số ngày phủ phải là số của Kế hoạch SX`);
 
     // Chưa có phiếu nhập thì tồn và hàng giữ chỗ đều là CHƯA BIẾT, không phải 0.
     if (row.available === null) assert.equal(row.reserved, null, `${row.sku}: chưa biết tồn thì cũng chưa biết hàng giữ chỗ`);
@@ -113,7 +118,7 @@ export async function testProductIntelligence(db: Db) {
 
     // Không biết tồn hoặc không bán được cái nào ⇒ KHÔNG có số ngày còn hàng (không phải 0, không
     // phải vô cực).
-    if (row.available === null || row.velocity === 0) assert.equal(row.daysOfCover, null, `${row.sku}: không đủ căn cứ thì không được bịa số ngày còn hàng`);
+    if (row.available === null || !row.velocity) assert.equal(row.daysOfCover, null, `${row.sku}: không đủ căn cứ thì không được bịa số ngày còn hàng`);
   }
 
   console.log(

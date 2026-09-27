@@ -242,14 +242,10 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
     được — nên thứ thật sự mất khỏi kho là `1 − tyLeHoan × tyLeNhapLai`. Nhưng hàng hoàn chỉ về SAU
     `returnLagDays` ngày: trước mốc đó kho hao theo tốc độ gửi đi đầy đủ.
   */
-  const lag = i.returnLagDays !== null && i.returnLagDays !== undefined && Number.isFinite(i.returnLagDays) && i.returnLagDays >= 0 ? i.returnLagDays : null;
+  const lag = validLag(i.returnLagDays);
   const netVelocity = v.velocity * (1 - tyLeHoan * tyLeNhapLai);
-  /** Số ngày `x` cái hàng đủ bán: hao đủ tốc độ tới độ trễ hoàn, sau đó hao theo tốc độ ròng. */
-  const coverOf = (x: number): number | null => {
-    if (v.velocity <= 0) return null;
-    if (lag === null || x <= v.velocity * lag) return x / v.velocity;
-    return netVelocity > 0 ? lag + (x - v.velocity * lag) / netVelocity : null;
-  };
+  const pace: StockPace = { velocity: v.velocity, netVelocity, returnLagDays: lag };
+  const coverOf = (x: number): number | null => coverDaysOf(x, pace);
   if (i.stockKnown === false) {
     return { available, velocity: v.velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed,
       daysOfCover: null, stockOutDate: null, reorderByDate: null, leadTimeDemand: 0,
@@ -293,6 +289,85 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
   return { available, velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed, daysOfCover, stockOutDate, reorderByDate,
     leadTimeDemand, safetyStock, target, shortage, suggested, suggestedBeforeMoq, moqApplied, status,
     incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming, netVelocity, futureReturnCredit };
+}
+
+/**
+ * ═══════ NHỊP HAO KHO CỦA MỘT MẪU MÃ — MỘT ĐỊNH NGHĨA CHO MỌI MÀN HÌNH ═══════
+ *
+ * Chủ shop giao Tech Lead chốt ngày 27/09/2026 ("Bạn làm thế nào tốt nhất thì làm"): trước ngày đó
+ * shop có HAI định nghĩa tốc độ bán — Kế hoạch SX dùng tốc độ GỬI ĐI (gộp, trừ hàng hoàn tường minh
+ * sau độ trễ hoàn), còn bảng Hàng chậm dùng tốc độ RÒNG (bỏ đơn hoàn, bỏ hàng tặng) — nên cùng một
+ * mẫu mã hiện hai "số ngày còn đủ hàng" trên cùng một trang. Định nghĩa thắng là của KẾ HOẠCH SX, vì
+ * nó là định nghĩa đang quyết định tiền (số nên đặt) và là định nghĩa duy nhất mô tả đúng cách kho
+ * thật sự vơi: hàng rời kho theo tốc độ gửi đi, phần hoàn chỉ quay lại SAU độ trễ hoàn. Xem
+ * `docs/inventory-forecast-contract.md` §1–2.
+ *
+ * `computePlan` là nơi DUY NHẤT dựng bộ ba này; mọi nơi khác đọc nó từ dòng kế hoạch
+ * (`paceOfPlanRow`), không tự dựng lại tốc độ.
+ */
+export type StockPace = {
+  /** Tốc độ GỬI ĐI (cái/ngày), đã bỏ ngày đột biến. */
+  velocity: number;
+  /** Tốc độ HAO KHO RÒNG sau độ trễ hoàn = gửi đi × (1 − tỷ lệ hoàn × tỷ lệ nhập lại được). */
+  netVelocity: number;
+  /** Độ trễ hoàn (ngày) — `null` = chưa đo được ⇒ không trông vào hàng hoàn. */
+  returnLagDays: number | null;
+};
+
+function validLag(x: number | null | undefined): number | null {
+  return x !== null && x !== undefined && Number.isFinite(x) && x >= 0 ? x : null;
+}
+
+/**
+ * SỐ NGÀY `qty` cái hàng đủ bán: hao đủ tốc độ gửi đi tới độ trễ hoàn, sau đó hao theo tốc độ ròng.
+ *
+ * `null` = CHƯA BIẾT / không vơi (luật 42): không gửi đi cái nào, hoặc sau độ trễ hoàn hàng về bằng
+ * hàng đi. KHÔNG BAO GIỜ trả `Infinity`.
+ */
+export function coverDaysOf(qty: number, p: StockPace): number | null {
+  if (!(p.velocity > 0)) return null;
+  const lag = validLag(p.returnLagDays);
+  if (lag === null || qty <= p.velocity * lag) return qty / p.velocity;
+  return p.netVelocity > 0 ? lag + (qty - p.velocity * lag) / p.netVelocity : null;
+}
+
+/**
+ * NGHỊCH ĐẢO của `coverDaysOf`: cần bao nhiêu cái để đủ bán `days` ngày theo CÙNG nhịp hao kho.
+ * Dùng cho "mức tồn lành mạnh" của bảng Hàng chậm — phần vượt mức phải đo bằng đúng thước đã xếp loại.
+ */
+export function qtyForCoverDays(days: number, p: StockPace): number {
+  const d = Math.max(0, days);
+  if (!(p.velocity > 0)) return 0;
+  const lag = validLag(p.returnLagDays);
+  if (lag === null || d <= lag) return p.velocity * d;
+  return p.velocity * lag + Math.max(0, p.netVelocity) * (d - lag);
+}
+
+/** Nhịp hao kho của MỘT dòng kế hoạch — đọc lại đúng thứ `computePlan` đã dùng, không dựng lại. */
+export function paceOfPlanRow(r: Pick<PlanOutput, "velocity" | "netVelocity"> & { input: Pick<PlanInput, "returnLagDays"> }): StockPace {
+  return { velocity: r.velocity, netVelocity: r.netVelocity, returnLagDays: validLag(r.input.returnLagDays) };
+}
+
+/**
+ * GỘP nhịp hao kho của nhiều mẫu mã (tổng một mã hàng, một nhóm mẫu đang đẩy) để hỏi "cả nhóm đủ bán bao
+ * lâu" bằng CÙNG `coverDaysOf`. Cộng được vì độ trễ hoàn là số toàn shop; tốc độ âm (không có) bị kẹp 0.
+ * Không mẫu nào ⇒ tốc độ 0 ⇒ số ngày phủ `null`.
+ */
+export function pooledPace(paces: readonly StockPace[]): StockPace {
+  let velocity = 0;
+  let netVelocity = 0;
+  let returnLagDays: number | null = null;
+  for (const p of paces) {
+    velocity += Math.max(0, p.velocity);
+    netVelocity += Math.max(0, p.netVelocity);
+    if (returnLagDays === null) returnLagDays = validLag(p.returnLagDays);
+  }
+  return { velocity, netVelocity, returnLagDays };
+}
+
+/** Làm tròn số ngày phủ để IN — MỘT phép làm tròn cho mọi bảng (một chữ số thập phân). `null` giữ nguyên. */
+export function roundCoverDays(d: number | null): number | null {
+  return d === null || !Number.isFinite(d) ? null : Math.round(d * 10) / 10;
 }
 
 function clamp01(v: number) {

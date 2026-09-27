@@ -123,3 +123,31 @@ export const STOCK_RISK_ACTION: Record<StockRisk, string> = {
   SLOW: "Chưa cần xả, nhưng KHÔNG đặt thêm cho tới khi nhịp bán tăng lại.",
   HEALTHY: "Không cần làm gì.",
 };
+
+/**
+ * XẾP LOẠI MỘT MẪU MÃ còn hàng — hàm THUẦN, một chỗ cho trang Hàng chậm và cho mọi phép đo trước/sau.
+ *
+ * `velocity` và `daysOfCover` PHẢI là của Kế hoạch SX (`paceOfPlanRow` + `coverDaysOf`, đã làm tròn
+ * bằng `roundCoverDays`) — quyết định chủ shop giao Tech Lead chốt 27/09/2026: một mẫu mã chỉ có MỘT
+ * số ngày còn đủ hàng trên mọi màn hình. Ngưỡng giữ nguyên (`inventory.slowMoving`).
+ *
+ * Xếp trên số ĐÃ LÀM TRÒN — đúng con số in trong câu lý do, để "đủ bán 60 ngày" không bị gọi là bán chậm
+ * khi ngưỡng là quá 60 ngày.
+ */
+export function classifyStockRisk(
+  i: { velocity: number; daysOfCover: number | null; daysSinceLastSale: number | null },
+  rules: SlowMovingRules,
+): { risk: StockRisk; reason: string } {
+  const { velocity, daysOfCover, daysSinceLastSale } = i;
+  if (velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= rules.deadDays)) {
+    return { risk: "DEAD", reason: daysSinceLastSale === null ? "Chưa bán được cái nào" : `Không bán được cái nào trong ${daysSinceLastSale} ngày` };
+  }
+  // Có gửi đi nhưng sau độ trễ hoàn hàng về bằng hàng đi: tồn KHÔNG vơi — số ngày phủ không tồn tại
+  // (in "—", không in vô cực) nhưng kết luận thì có: tiền nằm yên trong kho.
+  if (velocity > 0 && daysOfCover === null) {
+    return { risk: "EXCESS", reason: "Gửi đi bao nhiêu hoàn về bấy nhiêu — theo nhịp hiện tại tồn không vơi" };
+  }
+  if (daysOfCover !== null && daysOfCover > rules.excessCoverDays) return { risk: "EXCESS", reason: `Tồn đủ bán ${daysOfCover} ngày — vượt xa mức cần thiết` };
+  if (daysOfCover !== null && daysOfCover > rules.slowCoverDays) return { risk: "SLOW", reason: `Tồn đủ bán ${daysOfCover} ngày — bán chậm hơn mức lành mạnh` };
+  return { risk: "HEALTHY", reason: daysOfCover === null ? "Chưa đủ căn cứ" : `Tồn đủ bán ${daysOfCover} ngày` };
+}

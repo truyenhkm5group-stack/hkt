@@ -51,6 +51,9 @@ function v(p: Partial<StockFeedbackVariant> & { variantId: string }): StockFeedb
     velocity: 0,
     sold30: 0,
     daysOfCover: null,
+    // Không khai nhịp ròng ⇒ bằng nhịp gửi đi, độ trễ hoàn chưa đo: `coverDaysOf` = khả dụng ÷ tốc độ.
+    netVelocity: p.velocity ?? 0,
+    returnLagDays: null,
     leadTimeDays: 20,
     unitCost: 100_000,
     suggestedQty: 0,
@@ -96,6 +99,9 @@ export function testCompanyOsStockFeedbackPure() {
   assert.ok(f.alternatives.some((l) => l.href.startsWith("/ads?dim=product")), "lối khác: xem lại quảng cáo đang chạy (chiều mã hàng)");
   assert.equal(datum(f, "Khả dụng")?.value, "100");
   assert.equal(datum(f, "Đủ bán")?.value, "100 ngày", "khả dụng ÷ tốc độ của các mẫu mã đang đẩy (100 ÷ 1)");
+  // Agent V (27/09/2026): "Đủ bán" đi qua CÙNG `coverDaysOf` của Kế hoạch SX — sau độ trễ hoàn, kho hao theo nhịp ròng.
+  const coTre = deriveStockFeedback(inp({ variants: [{ ...OVER, netVelocity: 0.5, returnLagDays: 10 }, DEAD] })).recommendations[0];
+  assert.equal(datum(coTre, "Đủ bán")?.value, "190 ngày", "10 ngày hao đủ tốc độ gửi đi + 90 cái ÷ nhịp ròng 0,5");
   assert.equal(datum(f, "Bán 30 ngày")?.value, "30");
   const gt = datum(f, "Giá trị tồn (ước tính, giá nhập gần nhất)");
   assert.equal(gt?.value, formatVND(10_000_000));
