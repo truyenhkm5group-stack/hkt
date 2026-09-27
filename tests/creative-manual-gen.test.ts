@@ -21,6 +21,7 @@ import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
 import { facebookErrorText, testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
 import { IntegrationError, loiNghiepVu } from "@/lib/integrations/http";
+import { describeFbTokenApp } from "@/lib/queries/fb-token-scopes";
 import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/openai/images";
 
 /**
@@ -166,6 +167,11 @@ export function testCreativeManualGenPure() {
   const goiY = facebookErrorText(new IntegrationError("Facebook: HTTP 400 x", 400, false, loiFb));
   assert.ok(goiY.includes("LIVE") && goiY.includes("developers.facebook.com"), "mã 1885183 ⇒ chỉ đúng việc phải làm (bật App Mode Live)");
   assert.equal(facebookErrorText(new IntegrationError("Facebook: khác", 400, false, { error: { error_subcode: 99 } })), "Facebook: khác", "mã lạ ⇒ không bịa chỉ dẫn");
+  // Token của ứng dụng nào (27/09/2026: ứng dụng "ERP" đã Live mà vẫn bị báo chế độ phát triển ⇒ token thuộc ứng dụng khác).
+  const tApp = describeFbTokenApp({ state: "KNOWN", appId: "145634995501895", appName: "Graph API Explorer", type: "USER", isValid: true, expiresAt: null });
+  assert.ok(tApp.includes("Graph API Explorer") && tApp.includes("145634995501895") && tApp.includes("developers.facebook.com/apps/145634995501895/settings/basic/") && tApp.includes("tài khoản cá nhân"), "nói đúng ứng dụng + đường tới trang cài đặt của nó");
+  assert.ok(describeFbTokenApp({ state: "KNOWN", appId: "1", appName: "A", type: "SYSTEM_USER", isValid: false, expiresAt: 1 }).includes("HẾT HIỆU LỰC"));
+  assert.ok(describeFbTokenApp({ state: "UNKNOWN", error: "không có mạng" }).startsWith("Chưa hỏi được"), "không hỏi được ⇒ nói ra, không đoán ứng dụng");
 
   // ── Bộ lọc ngày của tab "Duyệt mẫu" (thuần): vắng / hỏng / ngày không có trên lịch ⇒ HÔM NAY ──
   assert.equal(parseReviewDay(null, "2031-05-05"), "2031-05-05");
@@ -708,11 +714,12 @@ export async function testCreativeManualGenDb(db: Db) {
     await reviewManualGenImage(db, { imageId: anh7.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
     creativeFails = true;
     fbCalls.length = 0;
-    const c7 = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c7 = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, tokenApp: async () => 'Token ERP đang dùng thuộc ứng dụng "App thử" (ID 999).' });
     creativeFails = false;
     assert.ok(c7.ok && c7.outcome === "FAILED", c7.ok ? c7.detail : c7.error);
     if (c7.ok) instantIds.push(c7.batchId);
     assert.ok(c7.ok && c7.detail.includes("chế độ phát triển") && c7.detail.includes("LIVE"), `câu báo mang lý do thật + việc phải làm (nhận: ${c7.ok ? c7.detail : ""})`);
+    assert.ok(c7.ok && c7.detail.includes('thuộc ứng dụng "App thử" (ID 999)'), "câu báo nói luôn token thuộc ứng dụng nào");
     assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd", "uploadAdImage", "createAdCreative"], "dừng ở bước tạo bài — không chiến dịch, không nhóm");
     const [anh7b] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, anh7.id));
     assert.equal(anh7b.status, "APPROVED", "ảnh tự về 'Đã duyệt'");

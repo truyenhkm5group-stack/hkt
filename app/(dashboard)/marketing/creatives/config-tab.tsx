@@ -10,7 +10,7 @@ import { ADS_KILL_SOURCE_LABEL } from "@/lib/constants/ads-kill-switch";
 import { adsWriteDisabledReason, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { creativeSourceCounts, listCreativeProductOptions, readCreativeConfig } from "@/lib/queries/creative-sources";
 import { FB_WRITE_SCOPE } from "@/lib/constants/fb-token-scopes";
-import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
+import { describeFbTokenApp, getFbTokenIdentity, getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,7 +24,7 @@ const ICON: Record<Level, typeof CheckCircle2> = { OK: CheckCircle2, BLOCK: XCir
 const TONE: Record<Level, string> = { OK: "text-success", BLOCK: "text-destructive", WARN: "text-warning", UNKNOWN: "text-muted-foreground" };
 
 export async function ConfigTab({ canManage, canKill }: { canManage: boolean; canKill: boolean }) {
-  const [state, counts, products, kill, scopes] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions(), readAdsKillSwitch(), getFbTokenScopes()]);
+  const [state, counts, products, kill, scopes, tokenApp] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions(), readAdsKillSwitch(), getFbTokenScopes(), getFbTokenIdentity()]);
   const { config, problems } = state;
   const writeReason = adsWriteDisabledReason();
   const thieu = problems.filter((p) => p.field !== "rules");
@@ -73,6 +73,13 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
           {scopes.declined.length ? ` Bị từ chối: ${scopes.declined.join(", ")}.` : ""}
         </>
       ),
+    },
+    {
+      // Token của ỨNG DỤNG NÀO (debug_token). Graph API không cho đọc chế độ Live / Development ⇒ không tô xanh / đỏ — chỉ nói
+      // đúng ứng dụng và đường tới trang cài đặt của nó (27/09/2026: token thuộc ứng dụng khác ứng dụng chủ shop đã bật Live).
+      level: tokenApp.state === "KNOWN" && !tokenApp.isValid ? "BLOCK" : "UNKNOWN",
+      label: "Token thuộc ứng dụng (ứng dụng này phải ở chế độ Live)",
+      detail: describeFbTokenApp(tokenApp),
     },
     {
       // Phân quyền TÀI SẢN trong Business Manager không nằm trong phạm vi token — Graph API `/me/permissions` không trả lời câu này.

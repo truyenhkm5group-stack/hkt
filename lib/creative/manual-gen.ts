@@ -40,6 +40,7 @@ import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib
 import { gateCreativeWritePrefix } from "@/lib/marketing/creative-write-gate";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-plan";
+import { describeFbTokenApp, getFbTokenIdentity } from "@/lib/queries/fb-token-scopes";
 
 /**
  * ═══════════ GEN ẢNH BẰNG TAY → DUYỆT ẢNH → SOẠN BÀI → VÀO LÔ (chủ shop 25/09/2026, §5i) ═══════════
@@ -937,7 +938,11 @@ export function instantWindow(now: Date, scheduleAt: Date | null, cfg: Pick<Crea
   return { ok: true, startAt, endAt: new Date(startAt.getTime() + days * 86_400_000), batchDay: vnDay(startAt), scheduled: scheduleAt !== null };
 }
 
-export type InstantPublishDeps = CreativeDeps & { killSwitch?: () => Promise<AdsKillSwitchState> };
+export type InstantPublishDeps = CreativeDeps & {
+  killSwitch?: () => Promise<AdsKillSwitchState>;
+  /** Câu "token thuộc ứng dụng …" khi Facebook báo ứng dụng ở chế độ phát triển (1885183). Kiểm thử tiêm bản giả. */
+  tokenApp?: () => Promise<string>;
+};
 
 /**
  * Mọi lý do cổng ghi SẼ chặn nếu đăng một bài lẻ vào ngày chạy `batchDay` lúc này — CHỈ ĐỌC, không gọi Facebook.
@@ -1078,7 +1083,13 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   }
   // Câu lỗi THẬT của Facebook (sổ ghi của lô) đứng trước câu tóm tắt "không mẫu nào đăng được" — người bấm cần biết phải
   // sửa gì, không phải biết là có lỗi.
-  const why = publishError || (await lastFailureOf(db, made.batchId)) || report?.detail || "Không rõ lý do — xem sổ ghi Facebook của lô.";
+  let why = publishError || (await lastFailureOf(db, made.batchId)) || report?.detail || "Không rõ lý do — xem sổ ghi Facebook của lô.";
+  // Ứng dụng ở chế độ phát triển: nói luôn token thuộc ứng dụng NÀO — người dùng nhìn một ứng dụng đã Live mà vẫn bị báo lỗi
+  // này thì gần như chắc token là của ứng dụng khác (27/09/2026).
+  if (/1885183/.test(why)) {
+    const app = await (deps.tokenApp ?? (async () => describeFbTokenApp(await getFbTokenIdentity())))().catch(() => "");
+    if (app) why = `${why} ${app}`;
+  }
   if (v && v.status !== "LIVE" && v.status !== "PAUSED" && v.status !== "ENDED") {
     const back = await requeueIfNothingSpendable(db, input.imageId, v.id, made.batchId, why);
     if (back) return { ...base, outcome: "FAILED", detail: `Chưa đăng được — chưa có chiến dịch / nhóm nào trên Facebook, không đồng nào chảy; ảnh đã về hàng đợi, sửa xong bấm Đăng camp lại ("Đã duyệt"). Lý do: ${why}` };

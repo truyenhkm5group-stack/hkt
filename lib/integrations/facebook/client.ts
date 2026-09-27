@@ -155,6 +155,18 @@ export class FacebookAdsClient {
       .filter((x) => x.permission);
   }
 
+  /**
+   * TOKEN NÀY CỦA ỨNG DỤNG NÀO — `GET /debug_token`, CHỈ ĐỌC (chủ shop 27/09/2026: Đăng camp báo "ứng dụng ở chế độ phát
+   * triển" trong khi ứng dụng "ERP" đã Live ⇒ token thuộc một ứng dụng khác). Trả id + tên ứng dụng, loại token
+   * (SYSTEM_USER / USER / PAGE), còn hiệu lực không. Không trả chế độ Live / Development — Graph API không cho đọc điều đó.
+   */
+  async tokenIdentity(): Promise<{ appId: string; appName: string; type: string; isValid: boolean; expiresAt: number | null }> {
+    const r = await this.get("debug_token", { input_token: this.accessToken });
+    const d = asRecord(r.data);
+    const exp = num(d.expires_at);
+    return { appId: str(d.app_id), appName: str(d.application), type: str(d.type), isValid: d.is_valid === true, expiresAt: exp > 0 ? exp : null };
+  }
+
   /** Tất cả tài khoản quảng cáo của BM: sở hữu (owned) + được cấp quyền (client) */
   async listAdAccounts(): Promise<FbAdAccount[]> {
     const fields = "id,account_id,name,currency,account_status";
