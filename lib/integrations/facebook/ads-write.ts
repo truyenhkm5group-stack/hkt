@@ -142,7 +142,7 @@ async function graphGet(path: string, params: Record<string, string>): Promise<G
  */
 export const FB_ERROR_HINTS: Readonly<Record<string, string>> = {
   "1885183":
-    "Việc cần làm: ứng dụng Facebook cấp token cho ERP đang ở chế độ PHÁT TRIỂN (Development) nên Facebook không cho tạo bài quảng cáo. Vào developers.facebook.com → My Apps → chọn ứng dụng của token → bật App Mode sang LIVE (cần có Privacy Policy URL, danh mục, biểu tượng), rồi bấm Đăng camp lại.",
+    "Việc cần làm: ứng dụng Facebook cấp token cho ERP đang ở chế độ PHÁT TRIỂN (Development) nên Facebook không cho tạo bài quảng cáo. Bật LIVE cho ĐÚNG ứng dụng của token (xem tab Cấu hình & luật → dòng \"Token thuộc ứng dụng\"): developers.facebook.com → ứng dụng ấy → Cài đặt ứng dụng → Thông tin cơ bản điền đủ (URL chính sách quyền riêng tư, xoá dữ liệu, hạng mục, biểu tượng) → mục \"Đăng\" → Đăng ứng dụng; hoặc tạo lại token từ một ứng dụng đã Live. Rồi bấm Đăng camp lại.",
 };
 
 /** Câu lỗi của một lời gọi Facebook + chỉ dẫn nếu là mã đã biết. Hàm THUẦN (đọc thân phản hồi nằm trong lỗi). */
