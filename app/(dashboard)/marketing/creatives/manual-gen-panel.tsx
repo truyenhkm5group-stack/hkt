@@ -26,7 +26,7 @@ import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 
 /** Bộ đồ nghề chung của hộp soạn bài — dựng một lần từ dữ liệu khu gen tay. */
 function composeCtxOf(p: ManualGenPanel, canPublish: boolean): ComposeCtx {
-  return { canPublish, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup };
+  return { canPublish, pricing: { unitVnd: p.pricing.unitVnd, unitUsd: p.pricing.unitUsd }, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup };
 }
 
 function SpendPill({ p }: { p: ManualGenPanel }) {
@@ -157,6 +157,14 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
           <p>
             <b>{MANUAL_GEN_KIND_LABEL.DESIGN}</b> từ {run.inspirationLabels.join(", ") || "—"} · {run.createdByName || "—"} · {vnShortStamp(run.createdAt)}
           </p>
+        ) : run.kind === "EDIT" ? (
+          <p className="flex flex-wrap items-center gap-1.5">
+            {run.editSource?.imageId ? <VariantImage imageId={run.editSource.imageId} available alt={`Ảnh gốc #${run.editSource.seq}`} className="size-8 rounded" iconClassName="size-3" zoomable /> : null}
+            <span>
+              <b>Sửa ảnh</b>
+              {run.editSource ? ` #${run.editSource.seq}` : " (ảnh gốc đã xoá)"} · {run.productName ?? (run.editSource?.isDesign || !run.productId ? "Thiết kế mới" : "Mã đã xoá")} · {run.createdByName || "—"} · {vnShortStamp(run.createdAt)}
+            </span>
+          </p>
         ) : run.kind === "UPLOAD" ? (
           <p>
             <b>Mẫu tự làm</b> · {run.productName ?? "Mã đã xoá"} · {run.createdByName || "—"} · {vnShortStamp(run.createdAt)}
@@ -178,7 +186,7 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
       </div>
       {run.idea ? (
         <p className="line-clamp-2 text-[11.5px] text-muted-foreground" title={run.idea}>
-          Ý tưởng: {run.idea}
+          {run.kind === "EDIT" ? "Yêu cầu sửa" : "Ý tưởng"}: {run.idea}
         </p>
       ) : null}
       {run.uploadImageIds.length ? (

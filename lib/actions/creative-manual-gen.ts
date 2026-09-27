@@ -8,10 +8,10 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { manualDesignStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 import { bindOrganization } from "@/lib/platform/background";
 
 /**
@@ -63,6 +63,34 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
   await drawAfterResponse(r.genId);
   revalidatePath(PATH);
   return { ok: true, genId: r.genId, requested: r.requested, allowed: r.allowed, note: r.reason };
+}
+
+/**
+ * "Sửa ảnh" — từ một ảnh đã tạo, vẽ 1–4 ảnh mới theo yêu cầu sửa (đổi màu · kiểu trình bày · chi tiết). Cùng quyền và cùng
+ * đường vẽ-sau-phản-hồi với "Gen ảnh"; ảnh mới vào một lượt `EDIT` chờ duyệt như mọi ảnh gen tay.
+ */
+export async function startManualEditRun(raw: unknown): Promise<{ ok: true; genId: string; requested: number } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền gen ảnh" };
+  const parsed = manualEditStartSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const { config } = await readCurrentCreativeConfig(db);
+  const r = await startManualEdit(db, { sourceImageId: d.sourceImageId, request: { color: d.color, layout: d.layout, detail: d.detail }, count: d.count }, config, actor);
+  if (!r.ok) return { error: r.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CREATIVE_MANUAL_GEN_START",
+    entity: "CREATIVE_MANUAL_GEN",
+    entityId: r.genId,
+    after: { kind: "EDIT", sourceImageId: d.sourceImageId, color: d.color, layout: d.layout, detail: d.detail, requested: r.requested },
+  });
+  await drawAfterResponse(r.genId);
+  revalidatePath(PATH);
+  return { ok: true, genId: r.genId, requested: r.requested };
 }
 
 /** Ảnh tải lên (base64 đã qua lược đồ) ⇒ byte. Đường ghi tự kiểm loại ảnh / kích thước khi lưu. */

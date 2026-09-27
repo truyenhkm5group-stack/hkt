@@ -8,17 +8,22 @@ import {
   DESIGN_DNA_VERSION,
   DESIGN_NOVELTY,
   GENE_VOCAB,
+  IMAGE_EDIT,
+  IMAGE_EDIT_LAYOUT_PROMPT,
   INSTANT_PUBLISH,
   MANUAL_DESIGN,
   MANUAL_GEN,
   MANUAL_GEN_RUN,
+  describeImageEdit,
   designCode,
+  hasImageEdit,
   normalizeCreativeConfig,
   parseDna,
   parseGenes,
   type CreativeLoopConfig,
   type DesignDna,
   type Genes,
+  type ImageEditRequest,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/constants/creative-loop";
@@ -470,6 +475,99 @@ export async function startManualDesignGen(db: Db, input: StartManualDesignInput
   return { ok: true, genId, requested: want, allowed: plan.specs.length, reason: note || null };
 }
 
+// ───────────────────────────── BẤM "SỬA ẢNH" ─────────────────────────────
+
+/**
+ * Câu lệnh SỬA một ảnh đã tạo — hàm THUẦN. Ảnh cần sửa là ảnh ĐẦU TIÊN gửi kèm; chỉ đổi đúng thứ người xin, mọi thứ
+ * khác giữ như ảnh ấy. Ảnh mockup của mã hàng THẬT còn gửi kèm ảnh sản phẩm thật (ảnh thứ hai) để kiểu dáng không trôi.
+ */
+export function manualEditPrompt(i: { request: ImageEditRequest; productName: string | null; isDesign: boolean }): string {
+  const r = i.request;
+  const color = r.color.trim();
+  const detail = r.detail.trim();
+  const asks = [
+    color ? `Change the garment's colour to: ${color}. Keep the exact same cut, silhouette, neckline, sleeves, length, fabric texture and every design detail — only the colour changes.` : "",
+    r.layout ? IMAGE_EDIT_LAYOUT_PROMPT[r.layout] : "",
+    detail ? `Owner's edit request (may be written in Vietnamese) — apply it faithfully: ${detail}` : "",
+  ].filter(Boolean);
+  return [
+    "TOP PRIORITY — EDIT REQUEST FROM THE SHOP OWNER. Produce a NEW version of the FIRST attached image (a Facebook feed advertising photo the shop already made) applying ONLY these change(s):",
+    ...asks.map((a, k) => `${k + 1}. ${a}`),
+    `Keep everything the request does not mention exactly as in the first attached image: the garment design (${i.isDesign ? "it is one of the shop's NEW designs" : `product "${i.productName ?? "—"}"`}), its colour${color ? " (except the requested colour change)" : ""}, the model, the scene, the lighting and the overall style${r.layout ? " (except the requested presentation)" : ""}.`,
+    !i.isDesign ? `The second attached image is the REAL product photo — the garment must stay that product's design (cut, details, fabric)${color ? "; only its colour changes as requested" : ""}.` : "",
+    "Do not add any logo, brand name, text or watermark. Photorealistic commercial fashion photo for a Vietnamese fashion shop.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export type StartManualEditInput = { sourceImageId: string; request: ImageEditRequest; count?: number };
+
+/** Ảnh gen tay dùng được làm gốc để sửa: đã có điểm ảnh (không phải đang chờ vẽ / vẽ hỏng). */
+const EDITABLE_STATUSES = ["GENERATED", "APPROVED", "REJECTED", "PROMOTED"];
+
+/**
+ * Ghi MỘT lượt `EDIT` + số ảnh người chọn (1–4) từ một ảnh gen tay đã có. Không gọi OpenAI. Ảnh mới THỪA HƯỞNG bộ gen
+ * và (nếu là thiết kế mới) bản mô tả thiết kế của ảnh gốc — `ownerIdea` ghi yêu cầu sửa, vì nhãn DNA có thể lệch đúng ở
+ * thuộc tính người đã đổi (màu). Trả `{ ok: false }` cho lỗi nghiệp vụ — không ném.
+ */
+export async function startManualEdit(db: Db, input: StartManualEditInput, cfg: CreativeLoopConfig, actor: ManualActor): Promise<StartManualGenResult> {
+  const request: ImageEditRequest = {
+    color: input.request.color.trim().slice(0, IMAGE_EDIT.colorMaxChars),
+    layout: input.request.layout,
+    detail: input.request.detail.trim().slice(0, IMAGE_EDIT.detailMaxChars),
+  };
+  if (!hasImageEdit(request)) return { ok: false, error: "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết cần sửa." };
+  const src = await loadImage(db, input.sourceImageId);
+  if (!src) return { ok: false, error: "Không tìm thấy ảnh cần sửa." };
+  if (!EDITABLE_STATUSES.includes(src.img.status) || !src.img.imageId) return { ok: false, error: "Ảnh này chưa có điểm ảnh (đang chờ vẽ hoặc vẽ hỏng) — không sửa được." };
+  if (!(await readCreativeImage(db, src.img.imageId))) return { ok: false, error: "Điểm ảnh của ảnh này đã bị dọn — không sửa được." };
+  const genes = parseGenes(src.img.genes);
+  if (!genes) return { ok: false, error: "Bộ gen của ảnh hỏng — ảnh sửa sẽ không học được." };
+  const spec = src.img.design ? parseManualDesignSpec(src.img.design) : null;
+  if (src.img.design && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế (DNA) — không sửa được." };
+  const product = spec ? null : src.run.productId ? await loadProductBrief(db, src.run.productId) : null;
+  if (!spec && !product) return { ok: false, error: "Ảnh không còn gắn mã hàng — không sửa được." };
+
+  const want = Math.max(IMAGE_EDIT.minImages, Math.min(IMAGE_EDIT.maxImages, Math.round(input.count ?? IMAGE_EDIT.defaultImages) || IMAGE_EDIT.defaultImages));
+  const idea = describeImageEdit(request);
+  const prompt = manualEditPrompt({ request, productName: product?.name ?? null, isDesign: spec !== null });
+  const genId = await db.transaction(async (tx) => {
+    const [g] = await tx
+      .insert(schema.creativeManualGens)
+      .values({
+        kind: "EDIT",
+        productId: spec ? null : src.run.productId,
+        // Ảnh sản phẩm THẬT của lượt gốc đi kèm để kiểu dáng không trôi (ranh giới 3); thiết kế mới thì chính ảnh gốc là thiết kế.
+        productPhotoSourceId: spec ? null : src.run.productPhotoSourceId,
+        ownAdSourceId: null,
+        inspirationProductIds: src.run.inspirationProductIds,
+        sourceGenImageId: src.img.id,
+        idea,
+        requested: want,
+        model: cfg.imageModel,
+        size: cfg.imageSize,
+        quality: cfg.imageQuality,
+        note: "",
+        createdByUserId: actor.id,
+        createdByName: actor.name,
+      })
+      .returning({ id: schema.creativeManualGens.id });
+    await tx.insert(schema.creativeManualGenImages).values(
+      Array.from({ length: want }, (_, k) => ({
+        genId: g.id,
+        seq: k + 1,
+        genes: genes as Record<string, string>,
+        prompt,
+        design: spec ? ({ ...spec, ownerIdea: [spec.ownerIdea, `Sửa ảnh: ${idea}`].filter(Boolean).join(" · ") } as unknown as Record<string, unknown>) : null,
+        status: "PLANNED",
+      })),
+    );
+    return g.id;
+  });
+  return { ok: true, genId, requested: want, allowed: want, reason: null };
+}
+
 // ───────────────────────────── VẼ ─────────────────────────────
 
 export type DrawManualGenDeps = {
@@ -520,6 +618,15 @@ async function uploadPixels(db: Db, run: GenRow): Promise<ImageEditInputImage[]>
  * phẩm thật luôn đứng đầu (ranh giới 3).
  */
 async function pixelsFor(db: Db, run: GenRow, img: ImageRow): Promise<ImageEditInputImage[]> {
+  if (run.kind === "EDIT") {
+    // Ảnh CẦN SỬA đứng đầu (câu lệnh nói "ảnh đầu tiên") — ảnh gen tay của shop, nhãn `OWN_VARIANT`; rồi ảnh sản phẩm thật.
+    const [src] = run.sourceGenImageId ? await db.select({ imageId: schema.creativeManualGenImages.imageId }).from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, run.sourceGenImageId)).limit(1) : [];
+    const px = src?.imageId ? await readCreativeImage(db, src.imageId) : null;
+    if (!px) throw new Error("Ảnh gốc cần sửa đã mất (bị xoá hoặc dọn điểm ảnh) — không vẽ.");
+    const out: ImageEditInputImage[] = [{ kind: "OWN_VARIANT", bytes: new Uint8Array(px.bytes), contentType: px.contentType }];
+    if (run.productPhotoSourceId) out.push(...(await gatherPixels(db, { productPhotoSourceId: run.productPhotoSourceId, parentVariantId: null, ownAdSourceId: null })));
+    return out;
+  }
   if (run.kind !== "DESIGN") {
     const base = await gatherPixels(db, { productPhotoSourceId: run.productPhotoSourceId, parentVariantId: null, ownAdSourceId: run.ownAdSourceId });
     return [...base, ...(await uploadPixels(db, run))];
@@ -611,7 +718,7 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
   if (r.img.status !== "APPROVED") return { ok: false, error: "Chỉ viết câu chữ cho ảnh đã duyệt, chưa đưa vào lô." };
   // Thiết kế mới: "sản phẩm" là thiết kế chưa có mã — giá = GIÁ ĐỀ NGHỊ (null ⇒ câu chữ không ghi con số giá),
   // giọng văn học từ cha trội (cùng cách ô thiết kế của lô viết câu chữ).
-  const spec = r.run.kind === "DESIGN" ? parseManualDesignSpec(r.img.design) : null;
+  const spec = r.img.design ? parseManualDesignSpec(r.img.design) : null;
   const product = spec ? { name: "Mẫu mới", code: "", priceVnd: spec.priceVnd } : r.run.productId ? await loadProductBrief(db, r.run.productId) : null;
   const pixels = r.img.imageId ? await readCreativeImage(db, r.img.imageId) : null;
   const genes = parseGenes(r.img.genes);
@@ -619,7 +726,7 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
     await db.update(schema.creativeManualGenImages).set({ captionError: error.slice(0, 1000), updatedAt: now }).where(eq(schema.creativeManualGenImages.id, id));
     return { ok: false, error };
   };
-  if (r.run.kind === "DESIGN" && !spec) return fail("Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ.");
+  if (r.img.design && !spec) return fail("Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ.");
   if (!product) return fail("Không tìm thấy mã hàng — không biết giá để viết câu chữ.");
   if (!pixels) return fail("Ảnh đã mất điểm ảnh.");
   const caption = deps.caption ?? captionFromImage;
@@ -821,8 +928,9 @@ async function readyImage(db: Db, imageId: string): Promise<ReadyImage | { ok: f
   if (!r.img.imageId) return { ok: false, error: "Ảnh chưa có điểm ảnh." };
   const genes = parseGenes(r.img.genes);
   if (!genes) return { ok: false, error: "Bộ gen của ảnh hỏng — máy không học được từ bài này." };
-  const spec = r.run.kind === "DESIGN" ? parseManualDesignSpec(r.img.design) : null;
-  if (r.run.kind === "DESIGN" && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế (DNA) — không lập được mã TK cho bài này." };
+  // Thiết kế nhận ra bằng bản mô tả thiết kế của ẢNH (ảnh sửa từ một thiết kế nằm ở lượt `EDIT`, vẫn là thiết kế).
+  const spec = r.img.design ? parseManualDesignSpec(r.img.design) : null;
+  if (r.img.design && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế (DNA) — không lập được mã TK cho bài này." };
   if (!spec && !r.run.productId) return { ok: false, error: "Lượt gen không còn gắn mã hàng." };
   const priceVnd = spec ? spec.priceVnd : ((await loadProductBrief(db, r.run.productId as string))?.priceVnd ?? null);
   return { r, genes, spec, imageId: r.img.imageId, priceVnd };

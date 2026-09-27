@@ -632,6 +632,20 @@ kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đ�
   gửi được gì lên Facebook ⇒ ảnh về "Đã duyệt" (bấm lại được), lô `FAILED`; đã gửi một phần ⇒ giữ nguyên, không tự thử lại
   lời gọi tạo (tính chất 4). Tên theo khuôn lấy số thứ tự theo NGÀY chạy trên mọi lô (`nextNameSeqOnDay`). Lịch sử lô gắn nhãn "Đăng lẻ".
 
+### Sửa ảnh (chủ shop 27/09/2026)
+
+- "Mấy ảnh đã tạo duyệt được về kiểu dáng nhưng muốn đổi sang màu khác, đổi kiểu trình bày mockup khác, hoặc tuỳ chỉnh chi tiết."
+  Nút **Sửa ảnh** trên mọi ảnh gen tay đã có điểm ảnh (chờ duyệt · đã duyệt · đã loại · đã đăng) ⇒ `startManualEdit` ghi một lượt
+  `creative_manual_gens.kind = 'EDIT'` (migration `0156`, cột `source_gen_image_id` trỏ ảnh gốc) với 1–4 ảnh (`IMAGE_EDIT`).
+- Yêu cầu: **màu** (chữ tự do / chọn nhanh) · **kiểu trình bày** (danh sách đóng `IMAGE_EDIT_LAYOUTS`, câu lệnh tiếng Anh cố
+  định) · **sửa chi tiết** (tự do). Không yêu cầu nào ⇒ không vẽ. Câu lệnh `manualEditPrompt`: chỉ đổi đúng thứ đã xin, giữ
+  mọi thứ khác của ảnh gốc.
+- Điểm ảnh: ảnh gốc gửi máy vẽ ĐẦU TIÊN (nhãn `OWN_VARIANT` — ảnh của shop), ảnh mockup của mã thật kèm ảnh sản phẩm thật (qua
+  `gatherPixels`) để kiểu dáng không trôi. Ảnh gốc mất ⇒ ảnh ấy `GEN_FAILED` có lý do.
+- Ảnh mới thừa hưởng bộ gen và (thiết kế mới) bản mô tả thiết kế của ảnh gốc, `ownerIdea` ghi thêm "Sửa ảnh: …" — nhãn DNA có
+  thể lệch đúng ở thuộc tính người đã đổi (màu). Thiết kế nay nhận ra bằng bản mô tả thiết kế của ẢNH (không bằng kiểu lượt),
+  nên ảnh sửa từ một thiết kế đăng vẫn cấp mã TK.
+
 ### Tên màn hình + lọc theo ngày ở tab Duyệt mẫu (chủ shop 26/09/2026, lần hai)
 
 - Màn hình đổi tên **"Thư viện Media"** (menu + tiêu đề; trước là "Vòng mẫu QC" / "Vòng mẫu quảng cáo"); tab "Duyệt lô" đổi tên

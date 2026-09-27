@@ -106,8 +106,10 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
 
 export type ManualGenRunCard = {
   id: string;
-  /** `UPLOAD` = "Mẫu tự làm" người tải lên (vào thẳng hàng đợi). */
-  kind: ManualGenKind | "UPLOAD";
+  /** `UPLOAD` = "Mẫu tự làm" người tải lên (vào thẳng hàng đợi) · `EDIT` = sửa từ một ảnh đã tạo. */
+  kind: ManualGenKind | "UPLOAD" | "EDIT";
+  /** Lượt `EDIT`: ảnh gốc được sửa (số thứ tự trong lượt của nó + điểm ảnh). `null` ở kiểu khác / ảnh gốc đã xoá. */
+  editSource: { seq: number; imageId: string | null; isDesign: boolean } | null;
   /** Lượt `DESIGN`: tên các mã cảm hứng người đã chọn. */
   inspirationLabels: string[];
   createdAt: string;
@@ -235,6 +237,10 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
   ]);
   const titleOf = new Map(srcs.map((x) => [x.id, x.title]));
   const labelOf = new Map(insp.map((x) => [x.id, x.customId || x.name]));
+  // Lượt SỬA ẢNH: ảnh gốc (số thứ tự + điểm ảnh) để thẻ lượt nói "sửa từ ảnh nào".
+  const editIds = [...new Set(runs.map((r) => r.run.sourceGenImageId).filter((x): x is string => !!x))];
+  const editRows = editIds.length ? await db.select({ id: schema.creativeManualGenImages.id, seq: schema.creativeManualGenImages.seq, imageId: schema.creativeManualGenImages.imageId, design: schema.creativeManualGenImages.design }).from(schema.creativeManualGenImages).where(inArray(schema.creativeManualGenImages.id, editIds)) : [];
+  const srcOf = new Map(editRows.map((x) => [x.id, { seq: x.seq, imageId: x.imageId, isDesign: x.design !== null }]));
   // Mã win chỉ cần cho ảnh ĐÃ DUYỆT (thứ mở được hộp Đăng camp) — không dựng chỉ mục mã hàng khi không có ảnh nào như thế.
   const needWin = runs.filter((r) => r.run.kind !== "DESIGN" && r.run.productId && imgs.some((x) => x.i.genId === r.run.id && x.i.status === "APPROVED")).map((r) => r.run.productId as string);
   const wins = await productWinCodes(db, needWin);
@@ -249,7 +255,8 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
     const usd = priced.reduce((t, im) => t + Number(im.costUsd), 0);
     return {
       id: run.id,
-      kind: run.kind === "DESIGN" ? "DESIGN" : run.kind === "UPLOAD" ? "UPLOAD" : "MOCKUP",
+      kind: run.kind === "DESIGN" ? "DESIGN" : run.kind === "UPLOAD" ? "UPLOAD" : run.kind === "EDIT" ? "EDIT" : "MOCKUP",
+      editSource: run.sourceGenImageId ? (srcOf.get(run.sourceGenImageId) ?? null) : null,
       inspirationLabels: run.inspirationProductIds.map((x) => labelOf.get(x) ?? "Mã đã xoá"),
       createdAt: run.createdAt.toISOString(),
       createdByName: run.createdByName,
@@ -424,7 +431,7 @@ export async function listPublishQueue(db: Db, rate: number = env.facebook.usdTo
   );
   return rows.map((r) => ({
     img: toImageCard(r.i, r.imageRow, r.purgedAt, rate, null, r.run.productId ? (wins.get(r.run.productId) ?? null) : null),
-    runLabel: r.run.kind === "DESIGN" ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
+    runLabel: r.run.kind === "DESIGN" || (r.run.kind === "EDIT" && !r.run.productId) ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
     runCreatedAt: r.run.createdAt.toISOString(),
   }));
 }
