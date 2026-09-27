@@ -8,6 +8,8 @@ import { OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from 
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { availableStockExpr, variantLastCostSubquery, variantReceiptsSubquery, variantSalesSubquery, stockKnownExpr } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
+import { roundCoverDays } from "@/lib/constants/planning";
+import { getVariantPaceMap } from "@/lib/queries/planning";
 
 /**
  * ───────────── HIỆU QUẢ THEO MẪU MÃ ─────────────
@@ -18,7 +20,7 @@ import type { Period } from "@/lib/search-params";
  *
  *  · BÁN     — số lượng lên đơn, số lượng thật sự tới tay khách, doanh thu giao thành công;
  *  · CHẤT    — tỷ lệ giao thành công, tỷ lệ hoàn, phần doanh thu mất vì hoàn;
- *  · CÒN     — khả dụng bán và số ngày còn đủ hàng (days of cover).
+ *  · CÒN     — khả dụng bán và số ngày còn đủ hàng (days of cover) — ĐÚNG số của Kế hoạch SX.
  *
  * Kết quả đơn luôn đi qua `ORDER_OUTCOME` — không có công thức riêng ở đây.
  * `contribution` (lợi nhuận góp thô) chỉ tính khi TRA ĐƯỢC GIÁ VỐN; không tra được thì trả `null`
@@ -63,11 +65,11 @@ export type ProductIntelRow = {
   /** Đã chốt đơn, hàng còn nằm trong kho chờ xuất — đã bị trừ khỏi khả dụng bán. */
   reserved: number | null;
   /**
-   * TỐC ĐỘ BÁN: số món GIAO THÀNH CÔNG mỗi ngày trong kỳ. Cố ý không dùng số lên đơn — hàng hoàn
-   * không phải nhu cầu, và tính nó vào tốc độ bán sẽ đẩy kế hoạch sản xuất đặt thừa.
+   * TỐC ĐỘ GỬI ĐI của Kế hoạch SX (món/ngày) — KHÔNG theo kỳ đang xem: một mẫu mã chỉ có MỘT tốc độ
+   * trên mọi màn hình (quyết định 27/09/2026). `null` = không đọc được Kế hoạch SX / dòng không có mẫu mã.
    */
-  velocity: number;
-  /** Số ngày còn đủ hàng theo tốc độ bán trong kỳ; `null` khi không bán được cái nào hoặc chưa biết tồn. */
+  velocity: number | null;
+  /** Số ngày còn đủ hàng của Kế hoạch SX; `null` khi chưa biết tồn, không gửi đi cái nào hoặc tồn không vơi. */
   daysOfCover: number | null;
 };
 
@@ -114,7 +116,12 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
   // Giá nhập gần nhất tính MỘT LẦN cho mỗi mẫu mã (xem variantLastCostSubquery): trước đây đây là
   // truy vấn con chạy cho từng dòng đơn và chiếm 99,3% chi phí của cả truy vấn này.
   const lastCost = variantLastCostSubquery(db);
-  const windowDays = query.period.from && query.period.to ? Math.max(1, Math.round((query.period.to.getTime() - query.period.from.getTime()) / 86_400_000)) : 30;
+  /*
+    TỐC ĐỘ BÁN / SỐ NGÀY PHỦ: của Kế hoạch SX, không tự chia số giao được cho số ngày của kỳ (quyết định
+    27/09/2026 — một mẫu mã chỉ có một số ngày phủ). Kế hoạch hỏng thì hai ô này CHƯA BIẾT (`null`),
+    không kéo sập cả bảng và không in 0.
+  */
+  const pacePromise = getVariantPaceMap().catch(() => null);
 
   /**
    * BẢNG DẪN XUẤT: kết quả đơn và giá vốn tính ĐÚNG MỘT LẦN cho mỗi dòng đơn hàng.
@@ -191,6 +198,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     .orderBy(desc(sql`coalesce(sum(${base.lineTotal}) filter (where ${DELIVERED}), 0)`))
     .limit(limit));
 
+  const paces = await pacePromise;
   return rows.map((r) => {
     const delivered = Number(r.deliveredOrders ?? 0);
     const returned = Number(r.returnedOrders ?? 0);
@@ -198,8 +206,8 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     const missing = Number(r.missingCostLines ?? 0);
     const deliveredQty = Number(r.deliveredQty ?? 0);
     const available = r.available === null || r.available === undefined ? null : Number(r.available);
-    // Tốc độ bán tính theo SỐ THẬT SỰ GIAO ĐƯỢC, không theo số lên đơn — hàng hoàn không phải nhu cầu.
-    const velocity = deliveredQty / windowDays;
+    // Mẫu mã vắng trong bản kế hoạch = không gửi đi ⇒ tốc độ 0, số ngày phủ CHƯA BIẾT.
+    const pace = paces === null ? null : r.variantId ? (paces.get(r.variantId) ?? { velocity: 0, daysOfCover: null }) : null;
     return {
       variantId: r.variantId,
       sku: r.sku ?? "",
@@ -221,8 +229,8 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       contributionBlockedBy: missing > 0 ? `${missing} dòng đã giao không tra được giá nhập — nhập phiếu kho có đơn giá cho mẫu mã này` : null,
       available,
       reserved: r.reserved === null || r.reserved === undefined ? null : Number(r.reserved),
-      velocity: Math.round(velocity * 100) / 100,
-      daysOfCover: available === null || velocity <= 0 ? null : Math.round((available / velocity) * 10) / 10,
+      velocity: pace === null ? null : Math.round(pace.velocity * 100) / 100,
+      daysOfCover: available === null || pace === null ? null : roundCoverDays(pace.daysOfCover),
     };
   });
 }

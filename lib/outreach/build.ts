@@ -12,6 +12,7 @@ import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { productReturnHistory } from "@/lib/queries/profit-nominal";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { coverDaysOf, paceOfPlanRow, pooledPace, type StockPace } from "@/lib/constants/planning";
 import { getSettingJson } from "@/lib/settings";
 
 export async function loadOutreachConfig(): Promise<OutreachConfig> {
@@ -27,23 +28,35 @@ export function nurtureVars(cfg: OutreachConfig, ten: string, goiY: string): Tem
   return { ten, san_pham: "", goi_y: goiY, shop: cfg.shopName, discountCode: cfg.discountCode, giam: cfg.nurtureDiscount };
 }
 
-/** Mã cần xả: tỷ lệ hoàn ≥ N% VÀ tồn đủ bán ≥ M ngày (theo tốc độ bán 30 ngày), hoặc chọn tay trong cấu hình */
+/**
+ * Mã cần xả: tỷ lệ hoàn ≥ N% VÀ tồn đủ bán ≥ M ngày, hoặc chọn tay trong cấu hình.
+ *
+ * "Tồn đủ bán" là số ngày phủ của KẾ HOẠCH SX, gộp theo mã hàng (quyết định 27/09/2026 — một định
+ * nghĩa tốc độ bán cho mọi nơi): cộng khả dụng và cộng nhịp hao kho của các mẫu mã biết tồn, rồi đưa
+ * qua CÙNG `coverDaysOf`. Cộng được vì độ trễ hoàn là số toàn shop, và tỷ lệ hoàn trong nhịp ròng là
+ * của MÃ HÀNG — mọi mẫu mã của một mã hàng dùng chung hai số đó.
+ *
+ * Trước 27/09/2026 chỗ này tự chia TỒN (không trừ đơn đã chốt) cho bán RÒNG 30 ngày — định nghĩa thứ
+ * ba, và in vô cực cho mã không bán. `null` ở đây nghĩa là không gửi đi cái nào hoặc tồn không vơi:
+ * với câu hỏi "tồn có nằm lâu không" thì đó là CÓ, nên mã vẫn vào tệp xả.
+ */
 export async function clearanceProducts(cfg: OutreachConfig): Promise<Set<string>> {
   const out = new Set<string>(cfg.clearanceProductIds);
   const [history, plan] = await Promise.all([productReturnHistory(90), getReplenishmentPlan()]);
-  const stockByProduct = new Map<string, { stock: number; sold30: number }>();
+  const byProduct = new Map<string, { available: number; paces: StockPace[] }>();
   for (const r of plan.rows) {
-    const e = stockByProduct.get(r.productId) ?? { stock: 0, sold30: 0 };
-    e.stock += Math.max(0, r.stock);
-    e.sold30 += Math.max(0, r.sold30);
-    stockByProduct.set(r.productId, e);
+    if (!r.stockKnown) continue;
+    const e = byProduct.get(r.productId) ?? { available: 0, paces: [] };
+    e.available += Math.max(0, r.available);
+    e.paces.push(paceOfPlanRow(r));
+    byProduct.set(r.productId, e);
   }
   for (const [productId, h] of history) {
     if (h.rate === null || h.finished < 10) continue;
-    const st = stockByProduct.get(productId);
-    if (!st || st.stock <= 0) continue;
-    const daysOfCover = st.sold30 > 0 ? st.stock / (st.sold30 / 30) : Number.POSITIVE_INFINITY;
-    if (h.rate * 100 >= cfg.clearanceReturnRatePct && daysOfCover >= cfg.clearanceStockDays) out.add(productId);
+    const st = byProduct.get(productId);
+    if (!st || st.available <= 0) continue;
+    const daysOfCover = coverDaysOf(st.available, pooledPace(st.paces));
+    if (h.rate * 100 >= cfg.clearanceReturnRatePct && (daysOfCover === null || daysOfCover >= cfg.clearanceStockDays)) out.add(productId);
   }
   return out;
 }

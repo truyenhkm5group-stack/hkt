@@ -1,5 +1,6 @@
 import { ADS_ACTION_LABEL, type AdsAction } from "@/lib/constants/ads-decision";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
+import { coverDaysOf, pooledPace } from "@/lib/constants/planning";
 import type { ModelSuggestion } from "@/lib/constants/model-360";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 
@@ -57,10 +58,14 @@ export type StockFeedbackVariant = {
    */
   stockKnown: boolean;
   available: number;
-  /** Món/ngày — tốc độ bán của kế hoạch (đã chống nhiễu). */
+  /** Món/ngày — tốc độ GỬI ĐI của Kế hoạch SX (đã chống nhiễu). */
   velocity: number;
+  /** Nhịp hao kho ròng sau độ trễ hoàn — của Kế hoạch SX. */
+  netVelocity: number;
+  /** Độ trễ hoàn (ngày); `null` = chưa đo được. */
+  returnLagDays: number | null;
   sold30: number;
-  /** Khả dụng ÷ tốc độ; `null` = không bán được cái nào. */
+  /** Số ngày còn đủ hàng của Kế hoạch SX (`coverDaysOf`); `null` = không gửi đi / không vơi / chưa biết. */
   daysOfCover: number | null;
   /** Thời gian sản xuất của kế hoạch; `null` = không biết. */
   leadTimeDays: number | null;
@@ -198,10 +203,11 @@ function pushStock(input: StockFeedbackInput, known: readonly StockFeedbackVaria
   const ads = input.adsVisible ? input.ads : null;
   const adsCut = ads !== null && ads.status === "OK" && ads.action === "CUT";
   const available = push.reduce((a, v) => a + v.available, 0);
-  const velocity = push.reduce((a, v) => a + Math.max(0, v.velocity), 0);
   const sold30 = push.reduce((a, v) => a + v.sold30, 0);
-  // Cùng phép chia "khả dụng ÷ tốc độ" của kế hoạch, trên tổng các mẫu mã đang đẩy. Không bán ⇒ không tính.
-  const cover = velocity > 0 ? Math.floor(available / velocity) : null;
+  // CÙNG `coverDaysOf` của Kế hoạch SX (hàng hoàn trừ sau độ trễ hoàn), trên nhịp GỘP của các mẫu mã đang
+  // đẩy — không chia thẳng khả dụng cho tốc độ gửi đi. Không gửi đi / không vơi ⇒ `null`, không in số.
+  const coverRaw = coverDaysOf(available, pooledPace(push));
+  const cover = coverRaw === null ? null : Math.floor(coverRaw);
   const stockValue = sumOrNull(push.map((v) => (v.unitCost === null ? null : Math.max(0, v.available) * v.unitCost)));
   const labels = push.map((v) => `${v.label || "—"} — ${DECISION_LABEL[v.decision]}`).join(" · ");
 

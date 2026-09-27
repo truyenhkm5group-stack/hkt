@@ -8,7 +8,7 @@ import {
   type InventoryDecisionKind,
   type InventoryDecisionResult,
 } from "@/lib/constants/inventory-decision";
-import { computePlan } from "@/lib/constants/planning";
+import { computePlan, paceOfPlanRow, roundCoverDays } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { linkedReceiptQty, openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
 import { openQtyAfterReceived } from "@/lib/constants/workshop-ledger";
@@ -61,6 +61,10 @@ export type InventoryDecisionRow = InventoryDecisionResult & {
   openPoQty: number;
   velocity: number;
   velocityTrimmed: boolean;
+  /** Nhịp hao kho ròng sau độ trễ hoàn — của Kế hoạch SX, để gộp nhiều mẫu mã bằng CÙNG `coverDaysOf`. */
+  netVelocity: number;
+  /** Độ trễ hoàn (ngày) Kế hoạch SX đã dùng; `null` = chưa đo được. */
+  returnLagDays: number | null;
   daysOfCover: number | null;
   stockOutDate: string | null;
   reorderByDate: string | null;
@@ -335,7 +339,10 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       openPoQty: openPo.qtyByVariant.get(r.variantId) ?? 0,
       velocity: Math.round(r.velocity * 100) / 100,
       velocityTrimmed: r.velocityTrimmed,
-      daysOfCover: r.daysOfCover === null ? null : Math.round(r.daysOfCover * 10) / 10,
+      // Cùng độ tròn với `velocity` bên trên — gộp hai số khác độ tròn thì nhịp ròng có thể vượt nhịp gửi đi.
+      netVelocity: Math.round(paceOfPlanRow(r).netVelocity * 100) / 100,
+      returnLagDays: paceOfPlanRow(r).returnLagDays,
+      daysOfCover: roundCoverDays(r.daysOfCover),
       stockOutDate: r.stockOutDate,
       reorderByDate: r.reorderByDate,
       leadTimeDays: r.leadTimeDays,

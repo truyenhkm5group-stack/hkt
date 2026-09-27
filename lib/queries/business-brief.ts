@@ -162,7 +162,7 @@ async function buildBusinessBrief(period: Period): Promise<BusinessBrief> {
         area: "INVENTORY",
         title: `${r.productName}${r.color || r.size ? ` (${[r.color, r.size].filter(Boolean).join("/")})` : ""}`,
         metric: "Vốn tồn theo giá nhập và số ngày còn đủ bán",
-        evidence: `Còn ${r.available} món · bán ${r.velocity}/ngày · vốn ${vnd(r.stockValue)}`,
+        evidence: `Còn ${r.available} món · gửi đi ${r.velocity}/ngày · vốn ${vnd(r.stockValue)}`,
         timeRange: "Tồn hiện tại",
         amount: r.excessValue,
         reason: r.reason,

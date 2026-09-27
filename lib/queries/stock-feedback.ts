@@ -63,6 +63,8 @@ export function toFeedbackVariant(r: InventoryDecisionRow): StockFeedbackVariant
     stockKnown: r.decision !== "DATA_INSUFFICIENT",
     available: r.available,
     velocity: r.velocity,
+    netVelocity: r.netVelocity,
+    returnLagDays: r.returnLagDays,
     sold30: r.sold30,
     daysOfCover: r.daysOfCover,
     leadTimeDays: r.leadTimeDays,

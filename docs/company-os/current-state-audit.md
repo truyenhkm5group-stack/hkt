@@ -91,7 +91,7 @@ nào. Mọi module hiện nối nhau bằng **so khớp chuỗi mã** (`products
 | Kết quả kiểm hoàn | một phần | trạm kiểm | `return_inspection_items` | EXTEND | không có SỬA LẠI / HUỶ BỎ HÀNG | thêm kết quả |
 | Tái nhập qua phiếu RETURN | có | — | `stock_receipts` kind RETURN | KEEP | — | — |
 | Hoàn không nhãn | có | `/inventory/returns` | `return_unidentified` | KEEP | — | — |
-| Tốc độ bán / ngày phủ / ngày hết | có | `/inventory/planning` | — | CONSOLIDATE | **hai định nghĩa tốc độ** (gộp vs ròng) | chọn một |
+| Tốc độ bán / ngày phủ / ngày hết | có | `/inventory/planning` | — | CONSOLIDATE | **hai định nghĩa tốc độ** (gộp vs ròng) | chọn một — **ĐÃ GỘP 27/09/2026 (Agent V)**: định nghĩa Kế hoạch SX thắng, xem `docs/inventory-forecast-contract.md` §1 |
 | Chậm / chết / tồn dư | có | planning | — | CONSOLIDATE | ngưỡng cứng trong mã; không HOT; không sell-through | đưa ngưỡng vào settings |
 | Máy quyết định vốn tồn + backtest | có (beta) | `/inventory/decisions` | — | KEEP | — | — |
 | Gợi ý đặt lại → lệnh SX | có | planning → orders/new | — | KEEP | — | — |
@@ -144,7 +144,7 @@ nào. Mọi module hiện nối nhau bằng **so khớp chuỗi mã** (`products
 3. **Bốn bộ chấm quảng cáo** (`decideAction`, `ads-performance.rate`, `classifyProduct`, ngưỡng intraday) + **ba bộ chấm mẫu** (product-verdict, creative verdict, `designParentScore`).
 4. **Hai sổ lệnh sản xuất** (`production_orders` ↔ `production_batches`, liên kết tuỳ chọn, hai kiểu khoá ô) và **ba sự thật "đã nhận"** (PO RECEIVED · lô DONE · phiếu nhập) không có FK.
 5. **Sáu trường đơn giá** không đối chiếu nhau.
-6. **Hai định nghĩa tốc độ bán** và **bốn bộ luật "chết / xả"**.
+6. **Hai định nghĩa tốc độ bán** (đã gộp về một 27/09/2026 — `handoff-v.md`) và **bốn bộ luật "chết / xả"**.
 7. **Hai hàng đợi việc** (`/alerts` và `/work`), **năm cơ chế duyệt**, **bốn đường thông báo**, **hai sổ chi phí AI**.
 8. **Ba đường lợi nhuận marketer** cùng mang chữ "lợi nhuận".
 
