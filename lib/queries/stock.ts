@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
@@ -27,6 +27,22 @@ const coo = schema.canonicalOrderOutcome;
  * luật "chậm chứ không sai", chỉ khác là phần chậm nay chỉ trả cho những dòng thật sự cũ.
  */
 const OUTCOME_JOINED = sql`coalesce(${coo.outcome}, ${ORDER_OUTCOME_FAST})`;
+
+/** Điều kiện nối bảng dẫn xuất kết quả đơn — dòng CŨ hơn đơn / vận đơn không khớp, rơi về biểu thức chuẩn. */
+const COO_FRESH = and(
+  eq(coo.orderId, o.id),
+  sql`coalesce(${coo.shipmentId}, '') = coalesce(${s.id}, '')`,
+  eq(coo.logicVersion, CANONICAL_OUTCOME_VERSION),
+  sql`${coo.computedAt} >= ${o.updatedAt}`,
+  sql`(${s.id} is null or ${coo.computedAt} >= ${s.updatedAt})`,
+);
+
+/**
+ * DÒNG ĐƠN ĐƯỢC TÍNH VÀO TỶ LỆ GIAO THÀNH CÔNG — ĐÚNG tập mà báo cáo Tỷ lệ hoàn dùng (`baseWhere`
+ * trong return-rate.ts): bỏ dòng HÀNG TẶNG (đơn 0đ của món tặng không phải một lần bán) và bỏ đơn
+ * `NEW` (chưa chốt). Khác vế tồn kho ở trên — hàng tặng vẫn trừ tồn vì nó vẫn rời kho.
+ */
+const GTC_ORDER_LINE = sql`(${oi.isBonus} = false and ${REPORTABLE_ORDER})`;
 
 /**
  * SỔ KHO — mọi con số tồn của ERP đều ra từ một phương trình duy nhất:
@@ -103,24 +119,146 @@ export function variantSalesSubquery(db: Db, onlyVariantIds?: string[]) {
       delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} = 'DELIVERED'), 0)`.as("sold_delivered"),
       /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
       returned: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`.as("sold_returned"),
+      /**
+       * SỐ ĐƠN giao thành công / hoàn — grain ĐƠN, không phải số cái: đơn mua 2 cái cùng mẫu vẫn là
+       * MỘT đơn. Hai vế của `successRate()`; đơn chưa kết thúc không nằm ở vế nào.
+       */
+      deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${GTC_ORDER_LINE} and ${OUTCOME_JOINED} = 'DELIVERED')`.as("gtc_delivered_orders"),
+      returnedOrders: sql<number>`count(distinct ${o.id}) filter (where ${GTC_ORDER_LINE} and ${OUTCOME_JOINED} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`.as("gtc_returned_orders"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     // Kết quả đơn lấy bằng PHÉP NỐI, không bằng truy vấn con cho từng dòng — xem OUTCOME_JOINED.
-    .leftJoin(
-      coo,
-      and(
-        eq(coo.orderId, o.id),
-        sql`coalesce(${coo.shipmentId}, '') = coalesce(${s.id}, '')`,
-        eq(coo.logicVersion, CANONICAL_OUTCOME_VERSION),
-        sql`${coo.computedAt} >= ${o.updatedAt}`,
-        sql`(${s.id} is null or ${coo.computedAt} >= ${s.updatedAt})`,
-      ),
-    )
+    .leftJoin(coo, COO_FRESH)
     .where(onlyVariantIds ? inArray(oi.variantId, onlyVariantIds) : undefined)
     .groupBy(oi.variantId)
     .as("vsales");
+}
+
+/**
+ * SỐ ĐƠN GIAO THÀNH CÔNG / HOÀN THEO MÃ HÀNG — gộp THEO ĐƠN ở máy chủ, không cộng các dòng mẫu mã.
+ *
+ * Một đơn mua hai mẫu của cùng một mã (gói 2 chiếc khác màu/size) có mặt ở CẢ HAI dòng mẫu mã; cộng
+ * hai dòng lại là đếm đơn đó hai lần và tỷ lệ của mã bị cân lệch về phía đơn nhiều món. Khoá mã hàng
+ * là ĐÚNG biểu thức của báo cáo Tỷ lệ hoàn (`productKey` trong `getReturnRateByVariant`).
+ * Chỉ gộp các mã được hỏi — trang Sản phẩm hỏi đúng các mã đang hiện.
+ */
+export async function productOutcomeOrders(productIds: string[]): Promise<Map<string, { deliveredOrders: number; returnedOrders: number }>> {
+  const map = new Map<string, { deliveredOrders: number; returnedOrders: number }>();
+  if (!productIds.length) return map;
+  const db = await getDb();
+  const productKey = sql<string>`coalesce(${pv.productId}, ${oi.productId}, '')`;
+  const rows = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        productId: productKey,
+        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${OUTCOME_JOINED} = 'DELIVERED')`,
+        returnedOrders: sql<number>`count(distinct ${o.id}) filter (where ${OUTCOME_JOINED} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
+      })
+      .from(oi)
+      .innerJoin(o, eq(o.id, oi.orderId))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      .leftJoin(coo, COO_FRESH)
+      .leftJoin(pv, eq(pv.id, oi.variantId))
+      .where(and(GTC_ORDER_LINE, inArray(productKey, productIds)))
+      .groupBy(productKey),
+  );
+  for (const r of rows) map.set(r.productId, { deliveredOrders: Number(r.deliveredOrders ?? 0), returnedOrders: Number(r.returnedOrders ?? 0) });
+  return map;
+}
+
+/** Một dòng đơn ĐÃ CHỐT mà hàng CHƯA rời kho — chi tiết của ô "chờ xuất" trên trang Sản phẩm. */
+export type ReservedOrderLine = {
+  orderId: string;
+  systemId: number | null;
+  orderStage: string;
+  insertedAt: Date;
+  promisedAt: Date | null;
+  customer: string;
+  phone: string;
+  /** `null` = Pancake không ghi giá trị đơn — CHƯA BIẾT, không in thành 0 ₫. */
+  orderValue: number | null;
+  variantId: string;
+  sku: string;
+  variantLabel: string;
+  quantity: number;
+  isBonus: boolean;
+  shipmentCode: string | null;
+  shipmentStage: string | null;
+};
+
+/** Mã hàng (và mẫu mã, nếu mở theo mẫu) mà danh sách chờ xuất đang nói tới. */
+export type ReservedScope = { productId: string; productName: string; variant: { sku: string; label: string } | null };
+
+/**
+ * DANH SÁCH ĐƠN CHỜ XUẤT — ĐÚNG vị ngữ `RESERVED_IN_WAREHOUSE` và ĐÚNG phép nối vận đơn
+ * (`PRIMARY_ATTEMPT`) của cột `reserved` trong `variantSalesSubquery`, nên tổng `quantity` của danh
+ * sách BẰNG số "chờ xuất" in trên bảng (bài kiểm khoá điều đó). Hàng tặng vẫn có mặt vì nó cũng
+ * đang giữ hàng trong kho. Đơn chờ LÂU NHẤT lên đầu.
+ */
+export async function listReservedOrderLines(filter: { variantId: string } | { productId: string }): Promise<{ scope: ReservedScope | null; lines: ReservedOrderLine[] }> {
+  const db = await getDb();
+  const byVariant = "variantId" in filter;
+  const scope = byVariant ? eq(oi.variantId, filter.variantId) : eq(pv.productId, filter.productId);
+  const [head] = await db
+    .select({ productId: p.id, productName: p.name, sku: pv.sku, color: pv.color, size: pv.size })
+    .from(pv)
+    .innerJoin(p, eq(p.id, pv.productId))
+    .where(byVariant ? eq(pv.id, filter.variantId) : eq(pv.productId, filter.productId))
+    .limit(1);
+  if (!head) return { scope: null, lines: [] };
+  const rows = await db
+    .select({
+      orderId: o.id,
+      systemId: o.systemId,
+      orderStage: sql<string>`${o.stage}::text`,
+      insertedAt: o.insertedAt,
+      promisedAt: o.customerPromisedAt,
+      customer: o.billFullName,
+      phone: o.billPhone,
+      orderValue: o.totalPriceAfterDiscount,
+      variantId: oi.variantId,
+      sku: sql<string>`coalesce(nullif(${pv.sku}, ''), ${oi.sku})`,
+      color: pv.color,
+      size: pv.size,
+      variationDetail: oi.variationDetail,
+      quantity: oi.quantity,
+      isBonus: oi.isBonus,
+      shipmentCode: s.vtpOrderNumber,
+      shipmentStage: sql<string | null>`${s.stage}::text`,
+    })
+    .from(oi)
+    .innerJoin(o, eq(o.id, oi.orderId))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .innerJoin(pv, eq(pv.id, oi.variantId))
+    .where(and(RESERVED_IN_WAREHOUSE, scope))
+    .orderBy(asc(o.insertedAt), asc(o.id));
+  const lines = rows.map((r) => ({
+    orderId: r.orderId,
+    systemId: r.systemId ?? null,
+    orderStage: r.orderStage,
+    insertedAt: new Date(r.insertedAt),
+    promisedAt: r.promisedAt ? new Date(r.promisedAt) : null,
+    customer: r.customer || "Khách",
+    phone: r.phone ?? "",
+    orderValue: r.orderValue === null || r.orderValue === undefined ? null : Number(r.orderValue),
+    variantId: r.variantId as string,
+    sku: r.sku ?? "",
+    variantLabel: [r.color, r.size].filter(Boolean).join(" / ") || r.variationDetail || "",
+    quantity: Number(r.quantity ?? 0),
+    isBonus: Boolean(r.isBonus),
+    shipmentCode: r.shipmentCode ?? null,
+    shipmentStage: r.shipmentStage ?? null,
+  }));
+  return {
+    scope: {
+      productId: head.productId,
+      productName: head.productName,
+      variant: byVariant ? { sku: head.sku ?? "", label: [head.color, head.size].filter(Boolean).join(" / ") } : null,
+    },
+    lines,
+  };
 }
 
 /** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. `onlyVariantIds`: như `variantSalesSubquery`. */

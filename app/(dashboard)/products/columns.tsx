@@ -1,10 +1,11 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import Link from "next/link";
 import { Shirt } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { Money } from "@/components/ui-bits";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import type { ProductListRow } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,11 @@ export function stockTone(remain: number) {
   if (remain <= 0) return "text-destructive";
   if (remain <= 5) return "text-amber-600 dark:text-amber-400";
   return "";
+}
+
+/** Danh sách đơn chờ xuất: dòng mã hàng (gộp) mở theo mã, dòng mẫu mã mở theo mẫu. */
+function reservedHref(r: ProductListRow) {
+  return r.id.startsWith("group:") ? `/products/reserved?product=${encodeURIComponent(r.productId)}` : `/products/reserved?variant=${encodeURIComponent(r.id)}`;
 }
 
 /** Tạo cột cho bảng mẫu mã; mỗi kho là một cột riêng (danh sách kho lấy từ server) */
@@ -127,7 +133,15 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
       cell: ({ row }) => (
         <div className="text-right">
           <span className={cn("numeric font-medium", row.original.shipped === 0 && "text-muted-foreground")}>{formatNumber(row.original.shipped)}</span>
-          {row.original.reserved ? <div className="text-[10.5px] text-muted-foreground">chờ xuất {formatNumber(row.original.reserved)}</div> : null}
+          {row.original.reserved ? (
+            <Link
+              href={reservedHref(row.original)}
+              className="block text-[10.5px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-primary"
+              title="Xem các đơn đã chốt đang chờ xuất"
+            >
+              chờ xuất {formatNumber(row.original.reserved)}
+            </Link>
+          ) : null}
         </div>
       ),
     },
@@ -180,6 +194,37 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
       header: "Bán ròng 30 ngày",
       meta: { align: "right" },
       cell: ({ row }) => <span className={cn("numeric font-semibold", row.original.sold30 === 0 && "text-muted-foreground")}>{formatNumber(row.original.sold30)}</span>,
+    },
+    {
+      id: "deliveredOrders",
+      accessorKey: "deliveredOrders",
+      // SỐ ĐƠN (không phải số cái) giao thành công theo ORDER_OUTCOME — chứng từ ĐVVC trước, rồi tới
+      // luật tiền COD thực thu. Dòng mã hàng: máy chủ gộp theo đơn, không cộng các dòng mẫu mã.
+      header: "Đơn GTC",
+      meta: { align: "right" },
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric font-medium", row.original.deliveredOrders === 0 && "text-muted-foreground")}>{formatNumber(row.original.deliveredOrders)}</span>
+          {row.original.returnedOrders ? <div className="text-[10.5px] text-muted-foreground">hoàn {formatNumber(row.original.returnedOrders)}</div> : null}
+        </div>
+      ),
+    },
+    {
+      id: "successRate",
+      accessorKey: "successRate",
+      // GTC ÷ (GTC + hoàn) trên đơn ĐÃ kết thúc. Chưa đơn nào kết thúc ⇒ "—", không phải 0%.
+      // KHÔNG tô màu: chưa có đích do chủ shop đặt thì không kết luận tốt/xấu (AGENTS.md mục 38).
+      header: "Tỷ lệ GTC",
+      meta: { align: "right" },
+      cell: ({ row }) => {
+        const finished = row.original.deliveredOrders + row.original.returnedOrders;
+        return (
+          <div className="text-right">
+            <span className={cn("numeric font-semibold", row.original.successRate === null && "text-muted-foreground")}>{formatPercent(row.original.successRate)}</span>
+            {finished ? <div className="text-[10.5px] text-muted-foreground">trên {formatNumber(finished)} đơn</div> : null}
+          </div>
+        );
+      },
     },
     {
       id: "stockValue",

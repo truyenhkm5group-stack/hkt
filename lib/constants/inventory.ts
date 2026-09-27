@@ -109,3 +109,12 @@ export const INVENTORY_TABLE_TONE: Record<string, string> = {
   order_returns: "bg-orange-50 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300",
   stocktakings: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
 };
+
+/**
+ * TRANG SẢN PHẨM MỞ RA LÀ THẤY HẾT MỌI MÃ VÀ MỌI MẪU MÃ (chủ shop yêu cầu 27/09/2026): danh sách
+ * dài thì cuộn trong khung bảng (tiêu đề dính), không cắt trang. Phân trang chỉ còn là lối thoát
+ * khi danh mục vượt số này — và cắt theo mẫu mã thì một mã có thể bị chia đôi qua hai trang, nên
+ * số này phải lớn hơn hẳn danh mục thật (đo 27/09/2026: 95 mẫu mã).
+ * Dùng chung cho `parseListParams` (máy chủ) và `DataTable` (trình duyệt) — hai nơi phải cùng số.
+ */
+export const PRODUCT_LIST_PAGE_SIZE = 500;

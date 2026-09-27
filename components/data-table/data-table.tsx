@@ -57,6 +57,11 @@ export type DataTableProps<T> = {
    * (không có accessorKey) vì TanStack không cho sắp xếp cột loại này, dù máy chủ vẫn sắp xếp được.
    */
   sortable?: string[];
+  /**
+   * Số dòng mỗi trang khi URL không ghi `pageSize` — PHẢI trùng `defaultPageSize` mà trang truyền cho
+   * `parseListParams`, nếu không máy chủ trả N dòng còn thanh phân trang tính theo 25.
+   */
+  defaultPageSize?: number;
 };
 
 export const tableParsers = {
@@ -84,20 +89,20 @@ function compareValues(a: unknown, b: unknown): number {
 }
 
 /** Parser theo mặc định sắp xếp của TỪNG trang để mũi tên trên tiêu đề khớp với thứ tự máy chủ đang trả về */
-function sortParsers(defaultSort: string, defaultDir: "asc" | "desc") {
+function sortParsers(defaultSort: string, defaultDir: "asc" | "desc", defaultPageSize: number) {
   return {
     page: parseAsInteger.withDefault(1),
-    pageSize: parseAsInteger.withDefault(25),
+    pageSize: parseAsInteger.withDefault(defaultPageSize),
     sort: parseAsString.withDefault(defaultSort).withOptions({ clearOnDefault: false }),
     dir: parseAsString.withDefault(defaultDir).withOptions({ clearOnDefault: false }),
   };
 }
 
-export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group, defaultSort = "", defaultDir = "desc", sortable }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group, defaultSort = "", defaultDir = "desc", sortable, defaultPageSize = 25 }: DataTableProps<T>) {
   const router = useRouter();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
-  const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
+  const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir, defaultPageSize), [defaultSort, defaultDir, defaultPageSize]);
   // Sắp xếp / phân trang đều đi vòng lên máy chủ. Không bắt trạng thái chờ thì bảng đứng im vài
   // trăm mili-giây sau khi bấm và người dùng tưởng không ăn.
   const [dangTai, startTransition] = useNavTransition();
@@ -334,7 +339,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
             </TableBody>
           </Table>
         {footer}
-        <DataTablePagination page={params.page} pageSize={params.pageSize} pageCount={pageCount} total={total} onPageChange={(page) => void setParams({ page })} onPageSizeChange={(pageSize) => void setParams({ pageSize, page: 1 })} />
+        <DataTablePagination page={params.page} pageSize={params.pageSize} pageCount={pageCount} total={total} onPageChange={(page) => void setParams({ page })} onPageSizeChange={(pageSize) => void setParams({ pageSize, page: 1 })} extraSizes={[defaultPageSize]} />
       </div>
     </div>
   );

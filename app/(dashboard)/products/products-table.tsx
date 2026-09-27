@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { buildProductColumns } from "@/app/(dashboard)/products/columns";
 import { DataTable } from "@/components/data-table/data-table";
+import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
 import type { ProductListRow } from "@/lib/queries/products";
 
 export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: ProductListRow[]; pageCount: number; total: number; warehouses: { id: string; name: string }[] }) {
@@ -15,10 +16,13 @@ export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: Pr
       total={total}
       defaultSort="erpStock"
       defaultDir="asc"
+      defaultPageSize={PRODUCT_LIST_PAGE_SIZE}
       rowHref={(row) => `/products/${row.productId}`}
       getRowId={(row) => row.id}
       group={{
         key: (row) => row.productId,
+        // Mở sẵn: mở trang là thấy mọi mẫu mã; "Thu gọn tất cả" vẫn còn nếu chỉ muốn xem theo mã.
+        defaultExpanded: true,
         parentHref: (p) => `/products/${p.productId}`,
         parent: (rows) => {
           const sum = (f: (r: ProductListRow) => number) => rows.reduce((t, r) => t + f(r), 0);
@@ -57,6 +61,10 @@ export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: Pr
             reserved: sum((r) => r.reserved),
             delivered: sum((r) => r.delivered),
             returned: sum((r) => r.returned),
+            // SỐ ĐƠN của mã do máy chủ gộp THEO ĐƠN — cộng các dòng mẫu mã là đếm hai lần đơn mua 2 mẫu.
+            deliveredOrders: rows[0].productDeliveredOrders,
+            returnedOrders: rows[0].productReturnedOrders,
+            successRate: rows[0].productSuccessRate,
             erpStock,
             available: sum((r) => r.available),
             unitCost: erpStock ? Math.round(stockValue / erpStock) : 0,
