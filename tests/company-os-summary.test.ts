@@ -49,6 +49,7 @@ function rong(): CompanyOsSummary {
     unidentified: hong,
     approvals: hong,
     receipts: hong,
+    pageUsage: hong,
   };
 }
 
@@ -62,7 +63,7 @@ export function testCompanyOsSummaryPure() {
   // Mục không đọc được ⇒ "—" + lý do; không có số 0 nào đứng thay.
   const hong = companyOsSummaryLines(rong());
   const moiMucHong = hong.slice(1);
-  assert.equal(moiMucHong.length, 14, "mỗi mục hỏng in đúng MỘT dòng");
+  assert.equal(moiMucHong.length, 15, "mỗi mục hỏng in đúng MỘT dòng");
   for (const l of moiMucHong) {
     assert.match(l, /: — \(không đọc được: relation "x" does not exist\)$/, l);
     assert.doesNotMatch(l, /\b0\b/, `mục hỏng không được in 0: ${l}`);
@@ -95,10 +96,22 @@ export function testCompanyOsSummaryPure() {
     unidentified: { ok: true, data: [{ status: "PENDING_IDENTIFICATION", withVariant: 1, withoutVariant: 4 }] },
     approvals: { ok: true, data: [{ status: "EXECUTED", n7: 2, n: 9, err7: 0, err: 1 }] },
     receipts: { ok: true, data: { receipts: 10, withOrder: 2, withBatch: 1, linked: 3, receipts30: 4, linked30: 1 } },
+    pageUsage: {
+      ok: true,
+      data: {
+        firstMeasuredDay: "2026-09-20",
+        measuredDays: 7,
+        windowDays: 14,
+        otherVisits: 2,
+        lines: Array.from({ length: 110 }, (_, i) => ({ key: `/trang-${i}/con`, visits: i < 40 ? 0 : i, activeDays: i < 40 ? 0 : 3, lastDay: null })),
+      },
+    },
   };
   const lines = companyOsSummaryLines(day);
   assert.ok(lines.length <= SUMMARY_MAX_LINES && lines.every((l) => l.length <= SUMMARY_MAX_CHARS), `≤ ${SUMMARY_MAX_LINES} dòng × ${SUMMARY_MAX_CHARS} ký tự`);
   const all = lines.join("\n");
+  assert.match(all, /LƯỢT MỞ TRANG \(14 ngày[^\n]*mục 0 lượt 40\/110/, "khối cuối cùng vẫn lọt trần 60 dòng, không bị cắt");
+  assert.match(all, /nhiều nhất — \/trang-109\/con 109\/3n/, "nhiều nhất đứng đầu dòng của nó");
   assert.ok(all.includes("PHIẾU NHẬP"), "mục CUỐI vẫn lọt trần 60 dòng khi sự kiện / phản ứng dài");
   assert.match(all, /vòng đời — chưa khai 1\.200 · IDEA 0/, "chưa khai đứng đầu, trạng thái không có mẫu = 0 thật");
   assert.match(all, /JOB model-registry: lượt cuối — · chưa chạy lần nào · 0 lượt\/7 ngày/);

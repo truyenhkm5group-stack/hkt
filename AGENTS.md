@@ -609,6 +609,9 @@ deploy dừng, không phải cảnh báo.
   Migration tự áp dụng khi app khởi động.
   Nhiều nhánh cùng sinh migration thì **trùng số hiệu** — nhánh về sau phải đánh số lại migration CỦA
   MÌNH (chưa áp ở đâu) cho nối tiếp vào cuối sổ, không đụng tới của nhánh đã vào `main`.
+  **Đừng làm tay**: `npm run migration:renumber` (so với `origin/main`, mặc định CHẠY THỬ; `-- --apply`
+  để ghi) giữ nguyên sổ của main, nối mục của mình vào cuối, nâng mốc `when`, thay tên đầy đủ trong
+  bài kiểm / tài liệu. Chạy được cả khi `_journal.json` đang xung đột — sổ dựng lại từ base + tệp trên đĩa.
   `tests/migration-journal.test.ts` và `tests/migration-upgrade-path.test.ts` chặn ở mức mã nguồn.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
 - Không xoá dữ liệu Pancake đã đồng bộ (kể cả đơn `DELETED`); dùng cờ/trạng thái.

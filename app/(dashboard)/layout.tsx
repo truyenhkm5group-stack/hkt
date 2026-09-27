@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { AppTopNav } from "@/components/app-topnav";
 import { DetailCrumb } from "@/components/detail-crumb";
 import { NavProgressProvider, NavProgressReset, StaleWhileRefreshing } from "@/components/nav-progress";
+import { PageVisitBeacon } from "@/components/page-visit-beacon";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { requireUser } from "@/lib/auth/session";
@@ -44,6 +45,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <Suspense fallback={null}>
           <NavProgressReset />
         </Suspense>
+        {/* Đếm lượt mở trang theo mục menu (không ghi ai mở) — số liệu để rút gọn menu, xem Hệ thống → Module. */}
+        <PageVisitBeacon />
       </NavProgressProvider>
     </TooltipProvider>
   );

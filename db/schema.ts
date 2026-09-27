@@ -8548,3 +8548,24 @@ export const workflowCursors = pgTable("workflow_cursors", {
   value: text("value").notNull(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * LƯỢT MỞ TRANG THEO NGÀY (`lib/constants/page-usage.ts`). Một dòng = (ngày VN, mục trang đã khai) —
+ * KHÔNG có cột người: câu hỏi là "màn hình có được dùng không", không phải "ai mở". `page_key` là
+ * mục menu / trang con đã khai (hoặc `(khác)`), không bao giờ là đường dẫn thô mang mã đơn / mã mẫu.
+ */
+export const pageVisitDaily = pgTable(
+  "page_visit_daily",
+  {
+    day: text("day").notNull(),
+    pageKey: text("page_key").notNull(),
+    visits: integer("visits").notNull().default(0),
+    lastAt: ts("last_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("page_visit_daily_pk").on(t.day, t.pageKey),
+    check("page_visit_daily_day_check", sql`${t.day} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+    check("page_visit_daily_visits_check", sql`${t.visits} >= 0`),
+    check("page_visit_daily_key_check", sql`length(${t.pageKey}) between 1 and 120`),
+  ],
+);

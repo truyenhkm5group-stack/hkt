@@ -55,6 +55,13 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
     `x-cron-secret`, cũng không có đường phiên. Nó trả về đúng sáu trường và CHỈ việc được phép
     giao (dùng lại `canDispatchTask`), nên nó không rộng hơn cổng giao việc.
   */
+  /*
+    Bộ đếm lượt mở trang (`lib/constants/page-usage.ts`): ai đã mở được một trang thì lượt mở ấy là
+    thật, nên chỉ cần PHIÊN (apiGuard() không tham số vẫn chặn chưa đăng nhập · tổ chức ngừng). Tuyến
+    không đọc / không trả dữ liệu nghiệp vụ nào, không lưu đường dẫn thô và không ghi ai mở — đòi một
+    khoá quyền ở đây chỉ làm mất lượt đếm của đúng những người ít quyền nhất.
+  */
+  "app/api/usage/visit/route.ts": "chỉ cần phiên: cộng +1 vào bộ đếm theo MỤC trang đã khai, không đọc/trả dữ liệu, không ghi ai mở",
   "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
 };
 
