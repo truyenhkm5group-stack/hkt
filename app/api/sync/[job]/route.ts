@@ -3,7 +3,7 @@ import { secretEquals } from "@/lib/auth/secret-compare";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { JOB_DEFINITIONS, runJob } from "@/lib/sync/jobs";
-import { isJobRunning, jobLockKey } from "@/lib/sync/runner";
+import { isJobRunning, syncRouteShieldKey } from "@/lib/sync/runner";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
@@ -76,11 +76,12 @@ async function handle(request: NextRequest, context: { params: Promise<{ job: st
   const businessParams = [...request.nextUrl.searchParams.keys()].filter((k) => k !== "wait" && k !== "org");
   const source = JOB_DEFINITIONS[job].source;
   /*
-    Khoá hỏi THEO TỔ CHỨC (ISO-12). Lưu ý đã biết, CHƯA sửa vì sửa là đổi hành vi: lá chắn hỏi theo
-    SLUG (`PANCAKE:pancake-orders`) còn runner khoá theo tên job NỘI BỘ (`PANCAKE:orders_incremental`,
-    xem `JOB_RUN_KEYS`), nên lá chắn gần như không bao giờ khớp — `runSyncJob` tự chặn bên trong.
+    Khoá hỏi THEO TỔ CHỨC (ISO-12). Lưu ý đã biết, CHƯA sửa vì sửa là đổi hành vi (R-17 — xem
+    `syncRouteShieldKey`): lá chắn hỏi theo SLUG còn runner khoá theo tên job NỘI BỘ, nên lá chắn
+    không bao giờ khớp — `runSyncJob` tự chặn bên trong.
   */
-  if (source !== "ALL" && businessParams.length === 0 && isJobRunning(jobLockKey(org, source, job))) {
+  const shieldKey = syncRouteShieldKey(org, source, job);
+  if (shieldKey !== null && businessParams.length === 0 && isJobRunning(shieldKey)) {
     return NextResponse.json({ ok: false, running: true, message: "Job đang chạy" }, { status: 202 });
   }
 

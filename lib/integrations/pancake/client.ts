@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, int, IntegrationError, sleep, str } from "@/lib/integrations/http";
-import { assertHomeCredentials } from "@/lib/platform/credentials";
+import { assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
 
 export type PancakeListResponse<T = Record<string, unknown>> = {
   data: T[];
@@ -268,8 +268,17 @@ export class PancakeClient {
   }
 }
 
-let cached: PancakeClient | null = null;
+/**
+ * Một client cho MỖI tổ chức (R-04): nhà giữ đúng một instance như trước; tổ chức khác không có
+ * credential Pancake nào ⇒ `ConnectorUnavailableError` ngay tại getter, không dựng client từ khoá
+ * môi trường của nhà.
+ */
+const clients = perOrganizationClients<PancakeClient>({
+  home: () => new PancakeClient(),
+  other: (organization) => {
+    throw new ConnectorUnavailableError("pancake", organization);
+  },
+});
 export function getPancakeClient() {
-  if (!cached) cached = new PancakeClient();
-  return cached;
+  return clients.get();
 }

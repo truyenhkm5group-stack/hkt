@@ -38,6 +38,8 @@ import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { canUseModule } from "@/lib/platform/capabilities";
+import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
@@ -63,7 +65,32 @@ export type JobOptions = {
   org?: string;
 };
 
-export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+/**
+ * ═══════ MỖI JOB THUỘC MỘT MODULE (hợp đồng mục 8 · target-architecture P13) ═══════
+ *
+ * `module` — module phải BẬT thì job mới chạy. Job cần credential môi trường khai module CONNECTOR
+ * tương ứng (Pancake · Viettel Post · Meta · SePay · Lark/Telegram; GitHub và khoá AI thuộc `tech`);
+ * job thuần CSDL khai module nghiệp vụ mà nó phục vụ. Module tắt ⇒ `runJob` trả `SKIPPED` kèm lý do,
+ * không chạy, không ghi `sync_runs`, không ném.
+ *
+ * `alsoRequires` — module nghiệp vụ mà connector KHÔNG tự kéo theo qua phụ thuộc (vd bản tin
+ * marketing đi qua kênh Lark nhưng là việc của Marketing: tắt Marketing thì không gửi nữa).
+ *
+ * `fanOut` — bộ lập lịch được gọi thêm job này cho TỪNG tổ chức khác nhà (`?org=<mã>`). CHỈ job
+ * thuần CSDL, không cần credential môi trường (bài kiểm `tests/platform-jobs.test.ts` khoá điều
+ * đó); `scripts/scheduler-fanout.mjs` giữ bản sao danh sách vì bộ lập lịch không đọc được TypeScript.
+ */
+export type JobDefinition = {
+  label: string;
+  source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL";
+  module: ModuleKey;
+  alsoRequires?: readonly ModuleKey[];
+  fanOut?: true;
+  description: string;
+  run: (o: JobOptions) => Promise<unknown>;
+};
+
+export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
   /*
     GHI SỔ QUYẾT ĐỊNH QUẢNG CÁO — CHỈ ĐỌC NGHIỆP VỤ, CHỈ GHI VÀO SỔ CỦA CHÍNH NÓ.
 
@@ -88,6 +115,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "creative-loop": {
     label: "Vòng mẫu quảng cáo",
     source: "ALL",
+    module: "connector_meta",
     description:
       "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 20 mẫu × 200.000đ — chủ shop 24/09), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt), đặt tên chiến dịch / nhóm / quảng cáo theo khuôn và vẽ nốt ảnh gen tay. Lũy đẳng — chạy lại không đẻ lô thứ hai.",
     run: (o) =>
@@ -113,6 +141,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "marketing-decision-ledger": {
     label: "Ghi sổ quyết định quảng cáo",
     source: "ALL",
+    module: "marketing",
     description:
       "CHỈ ĐỌC nghiệp vụ: chạy bộ quyết định SCALE/HOLD/WATCH/CUT trên kỳ chuẩn (14 ngày, kết thúc hôm qua) rồi chép kết luận kèm bằng chứng vào sổ `ads_decision_ledger`. Không đổi con số tiền nào, không gửi tin nào. Khoá tự nhiên theo NGÀY nên chạy lại trong ngày chỉ cập nhật, không đẻ dòng mới.",
     run: (o) =>
@@ -127,6 +156,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "marketing-digest": {
     label: "Bản tin hiệu quả marketing hằng ngày",
     source: "ALL",
+    module: "connector_messaging",
+    alsoRequires: ["marketing"],
     description:
       "CHỈ ĐỌC + GỬI TIN: dựng bản tin hiệu quả marketing của NGÀY HÔM QUA (mốc cohort — ngày lên đơn), chạy máy phân tích bất thường, rồi gửi Lark cho từng MKTer và bản tổng cho quản lý. Không ghi vào bảng nghiệp vụ nào, không đổi một con số nào. Sổ chống gửi lại nằm ở settings `marketing.digest.sent` nên chạy lại nhiều lần trong ngày KHÔNG gửi trùng.",
     /*
@@ -153,6 +184,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "morning-brief": {
     label: "Bản tin sáng cho nhóm Quản lý",
     source: "ALL",
+    module: "connector_messaging",
     description:
       "CHỈ ĐỌC + GỬI TIN, KHÔNG DÙNG AI: chép màn hình /work/today (ba việc đáng làm nhất xếp liên phòng, việc quá hạn, việc chưa ai nhận, tiền đang treo, phòng chưa có người) vào nhóm Lark Quản lý mỗi sáng từ 7 giờ. " +
       "Mọi con số đọc từ CÙNG hàm với màn hình. Chưa khai webhook nhóm Quản lý thì không gửi — không lùi về nhóm vận đơn. Sổ chống gửi lại ở settings 'work.morning-brief.sent' nên chạy nhiều lần trong ngày chỉ gửi một tin.",
@@ -173,6 +205,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "github-deployments": {
     label: "Đọc lượt deploy từ GitHub Actions",
     source: "GITHUB",
+    module: "tech",
     description:
       "CHỈ ĐỌC: nạp N lượt chạy gần nhất của workflow deploy vào sổ quan sát `tech_deployments`, rồi đối chiếu commit của lượt thành công mới nhất với bản production ĐANG CHẠY. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền. Idempotent theo khoá (lượt chạy, lần chạy lại).",
     run: (o) => runGithubDeploymentSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
@@ -180,6 +213,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "agent-reaper": {
     label: "Đóng lượt chạy agent mồ côi",
     source: "ALL",
+    module: "tech",
     description:
       "Đóng những lượt chạy agent đang ở RUNNING mà NHỊP TIM đã đứng im quá ngưỡng (mặc định 45 phút, đổi bằng ?minutes=). " +
       "KHÔNG đụng tới lượt chạy còn sống — tiến trình còn chạy thì còn đập nhịp. Không xoá dòng nào: lượt mồ côi được ghi FAILED kèm mốc nhịp tim cuối và ngưỡng đã dùng. " +
@@ -205,6 +239,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "github-pr-sync": {
     label: "Chép trạng thái Pull Request về việc Tech",
     source: "GITHUB",
+    module: "tech",
     description:
       "CHỈ ĐỌC: đọc N pull request cập nhật gần nhất rồi chép bốn chiều (PR mở/đóng/gộp · cổng CI · duyệt · gộp được chưa) vào những việc Tech đã có khoá nối. " +
       "Nối bằng KHOÁ, không đoán: số PR đã biết, hoặc `tech_tasks.branch` BẰNG ĐÚNG nhánh nguồn của PR. Không dò mã việc trong tiêu đề. " +
@@ -215,6 +250,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "tech-incident-watch": {
     label: "Mở sự cố cho job đồng bộ hỏng liên tiếp",
     source: "ALL",
+    module: "tech",
     description:
       "Quét `sync_runs` trong 24 giờ gần nhất, tìm job có N lượt hỏng LIÊN TIẾP (mặc định 3) rồi mở một sự cố Tech cho nó. " +
       "MỘT lượt hỏng không phải sự cố — chuỗi liên tiếp mới là thứ phân biệt 'mạng chập' với 'hỏng thật'. " +
@@ -225,6 +261,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "agent-run-reconcile": {
     label: "Đối chiếu sổ lượt chạy agent với GitHub",
     source: "GITHUB",
+    module: "tech",
     description:
       "CHỈ ĐỌC: so N lượt chạy `agent-run.yml` gần nhất trên GitHub với `tech_agent_runs`. Cửa chép sổ mang `continue-on-error`, nên một lượt chạy THÀNH CÔNG vẫn có thể không bao giờ về tới production — và hôm nay không gì đỏ lên. " +
       "Năm câu trả lời tách bạch: có sổ · chưa xong · hỏng trước khi agent chạy (KHÔNG phải mất) · mất dòng TRƯỚC khi cửa hoạt động (di sản đã vá) · mất dòng SAU khi cửa hoạt động (lỗi còn đang xảy ra, phải bằng 0). " +
@@ -235,6 +272,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "task-advance-watch": {
     label: "Đẩy trạng thái việc Tech theo bằng chứng GitHub",
     source: "ALL",
+    module: "tech",
     description:
       "Đọc phép chiếu PR đã chép về `tech_tasks` rồi đẩy việc đi tiếp ĐÚNG HAI bước: BUILDING → REVIEW khi có PR đang mở, và REVIEW → QA khi PR đã gộp (ruleset đòi 1 duyệt + cổng gates xanh trước khi gộp). " +
       "KHÔNG bao giờ tự đặt READY_TO_DEPLOY, DEPLOYING, OBSERVING, DONE, FAILED hay BLOCKED — những bước ấy là QUYẾT ĐỊNH hoặc lời QUY KẾT, không phải quan sát. " +
@@ -245,6 +283,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "ai-incident-watch": {
     label: "Mở sự cố khi khoá AI hỏng kiểu KHÔNG TỰ KHỎI",
     source: "ALL",
+    module: "tech",
     description:
       "Quét `ai_interactions` 24 giờ gần nhất, tìm N lượt gọi hỏng LIÊN TIẾP (mặc định 2) thuộc lớp CẦN NGƯỜI — hết credit, hoặc khoá bị từ chối. " +
       "Quá hạn mức KHÔNG tính: nó tự khỏi sau vài phút, mở sự cố cho nó là đổ nhiễu vào sổ. " +
@@ -255,6 +294,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "sepay-reconcile": {
     label: "Đối chiếu giao dịch ngân hàng qua API SePay",
     source: "SEPAY",
+    module: "connector_bank",
     description:
       "Quét lại N ngày qua API SePay và vá những gói tin webhook không bao giờ tới. Webhook chỉ được SePay thử lại 7 lần trong 5 giờ; sự cố dài hơn thế làm mất hẳn giao dịch, và sổ thiếu tiền mà nhìn vào không thấy gì bất thường. MẶC ĐỊNH CHẠY THỬ — truyền apply=1 mới ghi.",
     run: (o) =>
@@ -268,24 +308,28 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "pancake-orders": {
     label: "Đơn hàng mới cập nhật",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Lấy các đơn thay đổi gần đây theo updated_at (chạy mỗi vài phút).",
     run: (o) => syncOrdersIncremental({ trigger: o.trigger, actor: o.actor, overlapMinutes: num(o.params?.overlap) }),
   },
   "pancake-backfill": {
     label: "Đồng bộ lịch sử đơn hàng",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Tải toàn bộ đơn trong N ngày (mặc định theo PANCAKE_BACKFILL_DAYS). Có thể chạy lại để tiếp tục.",
     run: (o) => syncOrdersBackfill({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days), restart: o.params?.restart === "1" }),
   },
   "pancake-reconcile": {
     label: "Đối chiếu lại đơn gần đây",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Ép ghi đè các đơn cập nhật trong 3 ngày gần nhất (chạy hằng đêm).",
     run: (o) => syncOrdersReconcile({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   "pancake-products": {
     label: "Sản phẩm & tồn kho",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Sản phẩm, mẫu mã, giá vốn và tồn kho theo từng kho. Xong thì sổ mẫu tự bắt kịp mã mới (job `model-registry`, dòng chạy riêng) — chỉ đăng ký danh tính, trạng thái vòng đời để trống.",
     // Company OS · P1: sổ mẫu bắt kịp NGAY sau khi mã mới vào ERP — không phải lịch mới, là bước cuối của job này.
     run: (o) => syncProducts({ trigger: o.trigger, actor: o.actor, followUp: modelRegistryFollowUp(o.trigger) }),
@@ -293,36 +337,42 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "pancake-warehouses": {
     label: "Danh sách kho",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Danh sách kho hàng của shop.",
     run: (o) => syncWarehouses({ trigger: o.trigger, actor: o.actor }),
   },
   "pancake-customers": {
     label: "Khách hàng",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Khách hàng thay đổi gần đây (full=1 để tải toàn bộ).",
     run: (o) => syncCustomers({ trigger: o.trigger, actor: o.actor, full: o.params?.full === "1" }),
   },
   "pancake-inventory": {
     label: "Nhật ký xuất nhập kho",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Lịch sử xuất/nhập/chuyển kho.",
     run: (o) => syncInventoryHistories({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   "pancake-returns": {
     label: "Đơn đổi/trả",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Phiếu đổi/trả hàng.",
     run: (o) => syncOrderReturns({ trigger: o.trigger, actor: o.actor }),
   },
   "pancake-all": {
     label: "Đồng bộ toàn bộ Pancake",
     source: "PANCAKE",
+    module: "connector_pancake",
     description: "Kho → sản phẩm → đơn hàng → khách hàng → đổi trả → nhật ký kho.",
     run: (o) => syncPancakeAll({ trigger: o.trigger, actor: o.actor, backfill: o.params?.backfill === "1", days: num(o.params?.days), productsFollowUp: modelRegistryFollowUp(o.trigger) }),
   },
   "vtp-tracking": {
     label: "Trạng thái vận đơn Viettel Post",
     source: "VIETTELPOST",
+    module: "connector_viettelpost",
     description: "Tra cứu các vận đơn Viettel Post chưa kết thúc và cập nhật hành trình.",
     run: async (o) => {
       const r = await syncViettelPostShipments({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), includeFinal: o.params?.all === "1" });
@@ -338,12 +388,14 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "vtp-import": {
     label: "Nhập vận đơn từ Viettel Post",
     source: "VIETTELPOST",
+    module: "connector_viettelpost",
     description: "Kéo danh sách vận đơn trong N ngày từ tài khoản Viettel Post (kể cả đơn không lên từ Pancake).",
     run: (o) => importViettelPostOrders({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   "facebook-ads": {
     label: "Chi tiêu quảng cáo Facebook",
     source: "FACEBOOK",
+    module: "connector_meta",
     description: "Kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (days=N để kéo lùi N ngày, mặc định 3).",
     run: async (o) => {
       const r = await syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) });
@@ -362,24 +414,29 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "landing-sheet": {
     label: "Đơn landing page từ Google Sheet",
     source: "ALL",
+    module: "sales_channels",
     description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới; recheck=1 tính lại trùng / rủi ro cho mọi dòng.",
     run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? recheckAllLanding(num(o.params?.days) ?? 60) : importLandingSheet({ onlyNew: o.params?.new === "1" })),
   },
   "landing-push": {
     label: "Gửi POS các đơn landing đã đủ thông tin",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["sales_channels"],
     description: "Tạo đơn nháp Pancake cho mọi đơn landing chưa lên POS mà đã đủ mẫu mã, SĐT và địa chỉ có tỉnh/thành. Đơn còn vướng bị bỏ qua (xem bộ lọc “Chưa đủ thông tin”). Chạy lại không tạo đơn trùng.",
     run: (o) => pushAllReadyLanding(o.actor || "job:landing-push", num(o.params?.limit) ?? 200),
   },
   "facebook-ad-index": {
     label: "Tra ad_id đơn Pancake → chiến dịch Facebook",
     source: "FACEBOOK",
+    module: "connector_meta",
     description: "Đơn Pancake có ad_id (quảng cáo tạo ra đơn) → tra Facebook lấy chiến dịch / tài khoản → ghi nhận đơn, doanh thu cho đúng marketer kể cả khi chạy chung fanpage. days=N số ngày đơn quét lùi (mặc định 120).",
     run: (o) => syncFacebookAdIndex({ days: num(o.params?.days) }),
   },
   "facebook-adset-index": {
     label: "Tra nhóm quảng cáo của tracking landing → chiến dịch",
     source: "FACEBOOK",
+    module: "connector_meta",
     description:
       "Form landing ghi `utm_source` bằng adset_id. `fb_ads` chỉ tra ad_id có trong đơn Pancake (đơn landing không có), còn `ad_spends` chỉ giữ số liệu ở mức chiến dịch — nên adset_id không khớp được ở đâu cả. Job này tra THẲNG từng mã đang cần về `fb_adsets` (kể cả nhóm đã tắt), để chuỗi adset → chiến dịch → TKQC → marketer khép kín. Không đụng chi tiêu hay thanh toán.",
     run: (o) => syncFacebookAdsetIndex({ dryRun: o.params?.dryRun === "1" }),
@@ -388,6 +445,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "model-registry": {
     label: "Đồng bộ sổ mẫu",
     source: "ALL",
+    module: "production",
     description:
       "Đăng ký vào sổ mẫu (`product_models`) mọi mã chủ shop đang có: sản phẩm Pancake có `custom_id` và thiết kế TK. Thiết kế và sản phẩm cùng mã ⇒ một mẫu. Hai sản phẩm cùng mã ⇒ KHÔNG đăng ký, hiện ở danh sách mã mơ hồ để người quyết. Trạng thái vòng đời của mẫu mới để TRỐNG (chưa khai) — không backfill. Chạy lại không đẻ dòng mới. Tự chạy sau mỗi lượt “Sản phẩm & tồn kho”.",
     run: (o) => runModelRegistryJob({ trigger: o.trigger, actor: o.actor }),
@@ -395,6 +453,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "outcome-materialize": {
     label: "Dựng lại kết quả đơn đã tính sẵn",
     source: "ALL",
+    module: "orders",
+    fanOut: true,
     description:
       "Tính lại kết quả đơn cho những đơn có ĐẦU VÀO ĐÃ ĐỔI (đơn, vận đơn, sự kiện ĐVVC, dòng bảng kê) hoặc mang phiên bản luật cũ. Đây là LỚP TĂNG TỐC — không đụng dữ liệu nghiệp vụ, và báo cáo vẫn tự tính khi thiếu dòng nên chậm chứ không sai.",
     /*
@@ -413,6 +473,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "dashboard-warm": {
     label: "Giữ ấm bảng điều khiển",
     source: "ALL",
+    module: "core",
+    fanOut: true,
     description:
       "Tính sẵn số liệu Tổng quan, Tóm tắt & rủi ro và các bộ máy cả shop của khối \"Cần anh quyết\" (tín hiệu mẫu, quyết định quảng cáo, vốn tồn, lệnh sản xuất) cho kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     // Company OS · G: bọc để có dòng `sync_runs` — CHỈ QUAN SÁT (không làm cũ đệm vừa ấm, không phát `sync`).
@@ -429,6 +491,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "work-snapshot": {
     label: "Chụp ảnh hiệu suất kỳ đã đóng",
     source: "ALL",
+    module: "work",
+    fanOut: true,
     description:
       "Chụp thẻ điểm của TUẦN VỪA ĐÓNG (và, khi chạy đầu tháng, cả THÁNG vừa đóng) thành dòng bất biến trong `performance_snapshots`. " +
       "GHI MỘT LẦN: chạy lại bao nhiêu lần cũng không ghi đè số đã chụp, nên số lịch sử không đổi vì truy vấn hôm nay đổi. " +
@@ -451,6 +515,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "work-escalation": {
     label: "Leo thang việc quá hạn",
     source: "ALL",
+    module: "connector_messaging",
     description:
       "Quét hàng đợi công việc, đếm việc sắp vỡ hạn / đã vỡ hạn, và gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ mà vẫn chưa ai nhận. " +
       "CHỈ ĐỌC dữ liệu nghiệp vụ: không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc), không tạo cảnh báo nào. " +
@@ -470,6 +535,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "payroll-autopilot": {
     label: "Lương tự động",
     source: "ALL",
+    module: "connector_messaging",
+    alsoRequires: ["payroll"],
     description:
       "Mỗi giờ: khớp tiền ra trong sổ ngân hàng với lệnh chuyển lương, khép kỳ đã trả đủ theo sao kê. Khi công tắc lương tự động BẬT: từ 09:00 ngày 01 quyết toán kỳ trước nữa, tính & gửi phiếu kỳ trước vào hộp thư từng người, báo chủ shop khi đủ trả lời, nhắc duyệt từ ngày 13 và nhắc chuyển từ ngày 15. " +
       "KHÔNG BAO GIỜ duyệt, khoá, hay khai “đã trả” khi chưa có dòng sao kê. Chạy lại vô hại: mọi tin nhắn và dòng lệnh đều có khoá chống trùng ở CSDL. Đặc tả: docs/payroll-autopilot.md.",
@@ -485,6 +552,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "work-recurrence": {
     label: "Sinh việc định kỳ",
     source: "ALL",
+    module: "work",
+    fanOut: true,
     description:
       "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL.",
     run: (o) =>
@@ -499,6 +568,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   alerts: {
     label: "Cảnh báo vận hành",
     source: "ALL",
+    module: "alerts",
     description: "Quét đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn → tạo thông báo và gửi Telegram (chạy mỗi 10 phút và sau mỗi webhook).",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "alerts", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
@@ -513,6 +583,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "cs-chat": {
     label: "Case CSKH từ hội thoại Pancake",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["customer_care"],
     description: "Đọc hội thoại & thẻ chat Pancake (PANCAKE_ACCESS_TOKEN) trong N giờ gần nhất (hours=48) → tạo case: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng…",
     run: async (o) => {
       /*
@@ -545,6 +617,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "ads-billing": {
     label: "Dư nợ & ngưỡng thanh toán tài khoản QC",
     source: "FACEBOOK",
+    module: "connector_meta",
     description: "Đọc dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo trong Business Manager; học ngưỡng thanh toán; cảnh báo Lark khi sắp tới ngưỡng hoặc tài khoản bị vô hiệu hoá (30 phút/lần).",
     run: async () => {
       const r = await syncAdAccountBilling();
@@ -555,18 +628,24 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "failed-delivery": {
     label: "Nhắn khách đơn giao không thành",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["customer_care"],
     description: "Vận đơn Viettel Post giao không thành (chờ xử lý / hẹn phát lại) → nhắn khách qua Pancake hỏi lý do, gửi SĐT bưu tá khi hẹn phát lại; mở case CSKH đã nhắn / chưa xử lý được (đơn landing page, sheet) → Lark. Chạy cùng job cảnh báo mỗi 10 phút.",
     run: (o) => handleFailedDeliveries({ lookbackDays: num(o.params?.days) }),
   },
   "phone-verify": {
     label: "Xác nhận SĐT mới trước khi gửi hàng",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["customer_care"],
     description: "Đơn chưa gửi ĐVVC có SĐT chưa từng mua (Pancake tô xanh) → nhắn khách qua Pancake xác nhận SĐT đúng chưa và xin số phụ; đọc chat trước (khách đã gửi số / shop đã hỏi thì không nhắn); mở case CSKH → Lark. Chạy cùng job cảnh báo mỗi 10 phút; days=N số ngày quét lùi.",
     run: (o) => verifyNewPhones({ lookbackDays: num(o.params?.days), cancelExisting: o.params?.cancel === "1" }),
   },
   "data-check": {
     label: "Đối soát dữ liệu vận đơn & COD",
     source: "ALL",
+    module: "logistics",
+    fanOut: true,
     description:
       "QUÉT CHỈ ĐỌC toàn bộ luật đối soát (ảnh chụp lệch lịch sử, tiền về mà chưa có chứng từ giao, vận đơn mồ côi, mã trùng, treo lâu, mã ĐVVC lạ, mốc đi ngược, gói tin chưa xử lý…). fix=1 chỉ sửa HAI luật xác định: dựng lại ảnh chụp vận đơn từ lịch sử, và sửa nhãn 'không thu hộ' sai theo chính số tiền thu hộ. Lệch giữa tiền và giao hàng KHÔNG bao giờ tự sửa. days=N ngưỡng treo; since=N chỉ quét N ngày gần đây.",
     run: (o) => checkShipmentConsistency({ fix: o.params?.fix === "1", staleDays: num(o.params?.days), sinceDays: num(o.params?.since), actor: o.actor }),
@@ -574,6 +653,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "canonical-backfill": {
     label: "Dựng lại trạng thái vận đơn từ lịch sử",
     source: "VIETTELPOST",
+    module: "logistics",
     description:
       "MẶC ĐỊNH CHẠY THỬ: đếm xem dựng lại từ lịch sử sự kiện sẽ đổi bao nhiêu vận đơn, bao nhiêu đơn lật từ giao thành công sang hoàn và ngược lại — không ghi gì. apply=1 mới ghi thật, và bị chặn nếu chạy thử có bất thường (trừ khi force=1). batch=N chạy theo lô, resume=1 chạy tiếp chỗ dở. Không đụng dữ liệu gốc, tiền hay mốc kho nhận hàng hoàn.",
     run: async (o) => {
@@ -589,12 +669,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["marketing"],
     description: "Khách nhắn Pancake chưa đặt đơn (băn khoăn, cửa sổ 24h/7 ngày theo cấu hình; hours=N để ghi đè) và khách đã nhận hàng 3–14 ngày (bán chéo) → danh sách chờ gửi ở trang Chăm sóc & bán chéo; đồng thời rà kịch bản đang chạy (đã mua / khách trả lời). Chỉ lập danh sách, không tự gửi.",
     run: (o) => buildOutreachTargets({ windowHours: num(o.params?.hours) }),
   },
   "fanpage-attribution": {
     label: "Quy kết fanpage → marketer",
     source: "PANCAKE",
+    module: "connector_pancake",
+    alsoRequires: ["marketing"],
     description:
       "Phát hiện fanpage mới từ page_id của đơn, rồi dựng lại ảnh chụp quy kết (đơn → fanpage → marketer phụ trách TẠI MỐC ĐƠN LÊN) và đánh dấu đơn bị nhập lại. Chỉ ghi bảng order_attributions; không đụng đơn, vận đơn, tiền hay tồn kho. Chạy lại bao nhiêu lần cũng ra một kết quả — dryRun=1 để xem trước số đơn sẽ đổi.",
     run: (o) => runFanpageAttributionJob({ dryRun: o.params?.dryRun === "1", actor: o.actor }),
@@ -602,6 +686,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   all: {
     label: "Đồng bộ tất cả",
     source: "ALL",
+    module: "connector_pancake",
+    alsoRequires: ["connector_viettelpost", "connector_meta"],
     description: "Pancake (toàn bộ) rồi Viettel Post.",
     run: async (o) => {
       const pancake = await syncPancakeAll({ trigger: o.trigger, actor: o.actor, productsFollowUp: modelRegistryFollowUp(o.trigger) }).catch((e) => ({ error: String(e) }));
@@ -672,7 +758,14 @@ export const HOME_CREDENTIAL_EXEMPT: Readonly<Record<string, string>> = {
   "canonical-backfill": "Dựng lại vận đơn chuẩn từ dữ liệu đã có trong CSDL — không gọi API Viettel Post.",
 };
 
-export type JobSkipped = { skipped: "CONNECTOR_NOT_CONFIGURED"; job: string; org: string; connector: string; detail: string };
+export type JobSkipped =
+  | { skipped: "CONNECTOR_NOT_CONFIGURED"; job: string; org: string; connector: string; detail: string }
+  | { skipped: "MODULE_DISABLED"; job: string; org: string; module: ModuleKey; detail: string };
+
+/** Mọi module mà job cần bật: module chính trước, rồi các module nghiệp vụ đi kèm. */
+export function jobModules(definition: Pick<JobDefinition, "module" | "alsoRequires">): ModuleKey[] {
+  return [definition.module, ...(definition.alsoRequires ?? [])];
+}
 
 export async function runJob(job: string, options: JobOptions) {
   const definition = JOB_DEFINITIONS[job];
@@ -690,6 +783,17 @@ export async function runJob(job: string, options: JobOptions) {
     if (!org.isHome && connector) {
       const skipped: JobSkipped = { skipped: "CONNECTOR_NOT_CONFIGURED", job, org: org.code, connector, detail: `Bỏ qua: job cần kết nối "${connector}" — credential trong biến môi trường chỉ thuộc tổ chức nhà.` };
       return skipped;
+    }
+    /*
+      MODULE TẮT ⇒ KHÔNG CHẠY (P13). Hỏi TRƯỚC khi chạy để không ghi `sync_runs` rác và không làm
+      cũ đệm của ai. Lỗi đọc cấu hình module thì NÉM (lượt này hỏng, có dấu vết) — không đoán là
+      "bật". Tổ chức nhà khai `module_default = ENABLED` nên mọi job của nó chạy như trước.
+    */
+    for (const moduleKey of jobModules(definition)) {
+      if (!(await canUseModule(moduleKey, org.code))) {
+        const skipped: JobSkipped = { skipped: "MODULE_DISABLED", job, org: org.code, module: moduleKey, detail: `Bỏ qua: module "${moduleKey}" đang tắt cho tổ chức "${org.code}".` };
+        return skipped;
+      }
     }
     // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
     return trongJobNen(() => definition.run(options));

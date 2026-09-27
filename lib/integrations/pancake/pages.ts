@@ -5,7 +5,7 @@
  */
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, int, str } from "@/lib/integrations/http";
-import { assertHomeCredentials } from "@/lib/platform/credentials";
+import { assertHomeCredentials, perOrganizationClients } from "@/lib/platform/credentials";
 
 export type PancakePage = { id: string; name: string; platform: string };
 export type PancakeConversation = {
@@ -238,8 +238,15 @@ export class PancakePagesClient {
   }
 }
 
-let cached: PancakePagesClient | null = null;
+/**
+ * Một client cho MỖI tổ chức (R-04). Ngăn của tổ chức khác dựng với token RỖNG — không bao giờ đọc
+ * `PANCAKE_ACCESS_TOKEN` của nhà — nên bảng token trang (`pageTokens`) của nhà không bao giờ nằm
+ * trong instance mà tổ chức khác cầm. Mọi lối gọi mạng vẫn chặn bằng `assertHomeCredentials`.
+ */
+const clients = perOrganizationClients<PancakePagesClient>({
+  home: () => new PancakePagesClient(),
+  other: () => new PancakePagesClient("", env.pancake.pagesBaseUrl),
+});
 export function getPancakePagesClient() {
-  if (!cached) cached = new PancakePagesClient();
-  return cached;
+  return clients.get();
 }

@@ -120,6 +120,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/perf/probe.ts::__erpProbe": { loai: "NEN_TANG", lyDo: "AsyncLocalStorage của phép đo — phạm vi một lượt gọi, không vượt request." },
   "lib/perf/registry.ts::__erpPerf": { loai: "NEN_TANG", lyDo: "Sổ đo hiệu năng (tên báo cáo, thời gian) — chỉ tổ chức nhà đọc được qua /api/perf (ISO-25)." },
   "lib/platform/context.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "Chính ngữ cảnh tổ chức (AsyncLocalStorage)." },
+  "lib/platform/peek.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "CHỈ ĐỌC đúng holder ngữ cảnh của context.ts (không dựng holder mới) — cho getter đồng bộ ở tầng thấp như lib/env.ts." },
   "lib/platform/organizations.ts::__erpOrgs": { loai: "NEN_TANG", lyDo: "Sổ tổ chức của mặt phẳng điều khiển (CSDL nhà), đệm 10 giây." },
   "lib/platform/capabilities.ts::__erpCapabilities": { loai: "THEO_TO_CHUC", lyDo: "Đệm 5 giây của dòng cấu hình module, KHOÁ theo mã tổ chức (`Map<mã, dòng>`); ghi cấu hình xoá đúng khoá của tổ chức đó." },
 };
@@ -146,19 +147,33 @@ export function testHolderGlobalDaKhai() {
 
 /* ═════════════ S5 · CLIENT TÍCH HỢP SINGLETON — CHỈ NHỮNG CÁI ĐÃ KHAI ═════════════ */
 
+/**
+ * Token giữ trong bộ nhớ — chỉ hai chỗ, đều đã khai. Client (Pancake POS, Pancake Pages, Viettel
+ * Post, Facebook) KHÔNG còn là biến `cached` cho cả tiến trình: getter đi qua `perOrganizationClients`
+ * (R-04, xem khối kiểm ngay dưới).
+ */
 const SINGLETON_DA_KHAI: Record<string, string> = {
-  "lib/integrations/pancake/client.ts": "Client dựng từ credential môi trường = của tổ chức nhà; get/post chặn bằng assertHomeCredentials. Phase 1.x: Map theo tổ chức.",
-  "lib/integrations/pancake/pages.ts": "Như Pancake POS; call/pageToken/sendMessage/sendAttachment chặn bằng assertHomeCredentials trước khi đụng pageTokens.",
-  "lib/integrations/viettelpost/client.ts": "Token trong instance là của tổ chức nhà; rawCall + getToken chặn TRƯỚC khi đọc/ghi integration_tokens (ISO-04).",
-  "lib/integrations/facebook/client.ts": "Client dựng từ token môi trường của tổ chức nhà; get() chặn bằng assertHomeCredentials.",
-  "lib/integrations/github/agent-identity.ts": "Token cài đặt GitHub App của NGƯỜI VẬN HÀNH nền tảng; call() chặn bằng assertHomeCredentials.",
+  "lib/integrations/viettelpost/client.ts": "Token đăng nhập nằm TRONG instance; instance chia ngăn theo tổ chức (perOrganizationClients) và rawCall + getToken chặn TRƯỚC khi đọc/ghi integration_tokens (ISO-04 · R-04).",
+  "lib/integrations/github/agent-identity.ts": "Token cài đặt GitHub App của NGƯỜI VẬN HÀNH nền tảng; installationToken() chặn bằng assertHomeCredentials TRƯỚC khi trả cả token đang đệm (R-04).",
 };
+
+/** Getter client dùng credential môi trường — mỗi cái phải chia ngăn theo tổ chức. */
+const GETTER_CLIENT_THEO_TO_CHUC = [
+  "lib/integrations/pancake/client.ts",
+  "lib/integrations/pancake/pages.ts",
+  "lib/integrations/viettelpost/client.ts",
+  "lib/integrations/facebook/client.ts",
+] as const;
 
 export function testSingletonTichHopDaKhai() {
   const pham: string[] = [];
   const daDung = new Set<string>();
+  const getterMoi: string[] = [];
   for (const tep of tepMa(["lib/integrations/"])) {
     const m = ma(tep);
+    // R-04: một biến `cached` giữ CLIENT cho cả tiến trình là cách tổ chức gọi trước thắng — cấm hẳn.
+    if (/^let\s+cached\s*:\s*[A-Z]\w*Client\b/m.test(m)) pham.push(`${tep} (let cached: …Client — dùng perOrganizationClients)`);
+    if (/export\s+function\s+get\w*Client\s*\(/.test(m) && !(GETTER_CLIENT_THEO_TO_CHUC as readonly string[]).includes(tep)) getterMoi.push(tep);
     if (!/^let\s+cached\b|^let\s+\w*[Tt]oken\b|private\s+token\s*:/m.test(m)) continue;
     if (SINGLETON_DA_KHAI[tep]) {
       daDung.add(tep);
@@ -169,6 +184,10 @@ export function testSingletonTichHopDaKhai() {
   }
   assert.deepEqual(pham, [], "client tích hợp singleton / token mức module mới: credential đóng băng lúc dựng lần đầu, tổ chức gọi trước thắng (S5 · ISO-04)");
   khongMienTruMoCoi("S5", SINGLETON_DA_KHAI, daDung);
+  assert.deepEqual(getterMoi, [], "getter client tích hợp mới phải khai vào GETTER_CLIENT_THEO_TO_CHUC và chia ngăn theo tổ chức (R-04)");
+  for (const tep of GETTER_CLIENT_THEO_TO_CHUC) {
+    assert.ok(/perOrganizationClients\s*(<[^>]*>)?\s*\(/.test(ma(tep)), `${tep}: getter client phải giữ Map theo tổ chức qua perOrganizationClients (R-04)`);
+  }
 }
 
 /* ═════════════ S9 · MỌI `after(` MANG TỔ CHỨC ═════════════ */

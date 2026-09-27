@@ -254,10 +254,26 @@ runJob(job, opts) // bọc withOrganization(opts.org ?? tổ chức của NGỮ 
                   // không bao giờ chạy job cho nhà. Job cần credential env ở tổ chức khác ⇒ SKIPPED, không ghi sync_runs.
 // Khoá "job đang chạy": `<org>:<nguồn>:<job>`; tổ chức nhà GIỮ dạng cũ `<nguồn>:<job>` (trang /integrations đọc nó).
 ```
-- `JOB_DEFINITIONS` mỗi job khai `module: ModuleKey` (module phải bật để chạy).
-- Webhook: resolve tổ chức TƯỜNG MINH qua `resolveWebhookOrganization(provider)`. Phase 1: mọi
-  connector chỉ gắn với tổ chức nhà (`requiresHomeCredentials`) ⇒ trả mã tổ chức nhà, KHAI trong
-  bảng `WEBHOOK_BINDINGS` (không ngầm định). Phase 1.x: bảng liên kết tài khoản tích hợp → tổ chức.
+- `JOB_DEFINITIONS` mỗi job khai `module: ModuleKey` (+ `alsoRequires?: ModuleKey[]` cho module
+  nghiệp vụ mà connector không tự kéo theo). Job cần credential môi trường khai module CONNECTOR
+  (Pancake · Viettel Post · Meta · SePay · Lark/Telegram; GitHub và khoá AI thuộc `tech`). `runJob`
+  kiểm theo thứ tự: credential (tổ chức khác ⇒ `SKIPPED CONNECTOR_NOT_CONFIGURED`) rồi MỌI module
+  của job (`canUseModule`, tắt ⇒ `SKIPPED MODULE_DISABLED` kèm tên module). Bỏ qua thì không ghi
+  `sync_runs`, không ném. Lỗi đọc cấu hình module ⇒ NÉM (không đoán là bật).
+- `fanOut: true` — chỉ job THUẦN CSDL (không trong `HOME_CREDENTIAL_JOBS`, không module cần
+  credential): `dashboard-warm`, `outcome-materialize`, `work-recurrence`, `work-snapshot`,
+  `data-check`. Bản sao cho bộ lập lịch ở `scripts/scheduler-fanout.mjs` (bài kiểm đòi bằng nhau).
+- Bộ lập lịch: lịch của nhà GIỮ NGUYÊN (cùng URL, nhịp, lệch pha). `SCHEDULER_FANOUT=1` (mặc định TẮT
+  — VPS 2 nhân, và đổi lịch phải hỏi chủ) thì sau lượt của nhà gọi thêm `/api/sync/<job>?org=<mã>`
+  cho từng mã lấy từ `GET /api/sync/organizations` (CHỈ `CRON_SECRET`, trả `{ organizations: string[] }`
+  = mã tổ chức ACTIVE không phải nhà; đệm 5 phút; lỗi ⇒ không fan-out lượt đó).
+- Client tích hợp: `perOrganizationClients({ home, other })` (`lib/platform/credentials.ts`) — ngăn nhà
+  là MỘT instance (ngữ cảnh tường minh của nhà hoặc không ngữ cảnh), ngăn tổ chức khác khoá bằng mã
+  và KHÔNG BAO GIỜ dựng từ credential môi trường.
+- Webhook: resolve tổ chức TƯỜNG MINH qua `resolveWebhookOrganization(provider)`. Phase 1.x vẫn: mọi
+  connector chỉ gắn với tổ chức nhà (`requiresHomeCredentials`) ⇒ mọi dòng `WEBHOOK_BINDINGS` là
+  `HOME_ONLY` (bài kiểm khoá). Nhà cung cấp không có trong bảng, hay chế độ lạ ⇒ NÉM, không rơi về nhà.
+  Sau này: bảng liên kết tài khoản tích hợp → tổ chức.
 
 ## 9. Trạng thái mức tiến trình
 

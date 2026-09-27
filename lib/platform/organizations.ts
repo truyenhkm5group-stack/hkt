@@ -87,6 +87,19 @@ export async function getHomeOrganization(): Promise<Organization> {
   return list.find((o) => o.isHome) ?? fallbackHome();
 }
 
+/**
+ * Mã các tổ chức mà bộ lập lịch được gọi thêm job `fanOut` cho: ĐANG HOẠT ĐỘNG và KHÔNG phải nhà
+ * (lịch của nhà đi đường cũ, không `?org=`). Chỉ MÃ — không tên, không gói, không trạng thái: tuyến
+ * trả nó ra (`GET /api/sync/organizations`) chỉ cần đủ để dựng URL. Sắp xếp để hai lượt đọc cùng sổ
+ * cho cùng một thứ tự gọi.
+ */
+export function fanOutOrganizationCodes(list: readonly Organization[]): string[] {
+  return list
+    .filter((o) => o.status === "ACTIVE" && !o.isHome)
+    .map((o) => o.code)
+    .sort();
+}
+
 /** Gọi sau MỌI lượt ghi `platform_organizations` trong tiến trình này. */
 export function invalidateOrganizations() {
   store.cache = null;

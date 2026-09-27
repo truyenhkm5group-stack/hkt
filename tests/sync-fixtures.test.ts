@@ -409,6 +409,7 @@ import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
+import { testPlatformJobs } from "./platform-jobs.test";
 
 async function main() {
   await ensureMigrated();
@@ -2385,6 +2386,9 @@ async function main() {
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
   await testPlatformProcessIsolation();
+  // Nền tảng 1.x: module của từng job, client chia ngăn theo tổ chức, fan-out lịch, webhook, R-17 (mã `ph-`,
+  // tự cấp và tự dọn; tắt thử một module của nhà rồi khôi phục trong finally).
+  await testPlatformJobs();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();
