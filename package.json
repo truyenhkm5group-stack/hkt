@@ -25,6 +25,7 @@
     "set:setting": "tsx --tsconfig tsconfig.json scripts/set-setting.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
     "db:generate": "drizzle-kit generate",
+    "migration:renumber": "tsx --tsconfig tsconfig.json scripts/migration-renumber.ts",
     "gate": "tsx --tsconfig tsconfig.json scripts/final-gate.ts",
     "bench": "tsx --tsconfig tsconfig.json scripts/bench-reports.ts",
     "bench:http": "tsx --tsconfig tsconfig.json scripts/bench-http.ts",

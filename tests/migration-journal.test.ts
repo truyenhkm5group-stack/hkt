@@ -71,7 +71,7 @@ export function testMigrationJournal() {
   for (let i = 1; i < journal.entries.length; i += 1) {
     assert.ok(
       journal.entries[i].when > journal.entries[i - 1].when,
-      `mốc migration phải TĂNG NGHIÊM NGẶT — ${journal.entries[i].tag} (${journal.entries[i].when}) không muộn hơn ${journal.entries[i - 1].tag} (${journal.entries[i - 1].when}). Mục có mốc cũ hơn sẽ bị bỏ qua vĩnh viễn trên cơ sở dữ liệu đã chạy.`,
+      `mốc migration phải TĂNG NGHIÊM NGẶT — ${journal.entries[i].tag} (${journal.entries[i].when}) không muộn hơn ${journal.entries[i - 1].tag} (${journal.entries[i - 1].when}). Mục có mốc cũ hơn sẽ bị bỏ qua vĩnh viễn trên cơ sở dữ liệu đã chạy. Sửa bằng: "npm run migration:renumber" (chạy thử) rồi "-- --apply".`,
     );
   }
 

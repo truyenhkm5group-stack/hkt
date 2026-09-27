@@ -108,6 +108,7 @@ const MOI = [
   "0158_video_scale_ads",
   "0159_video_scale_optimize",
   "0160_workflow_foundation",
+  "0161_page_visit_daily",
 ] as const;
 
 /*

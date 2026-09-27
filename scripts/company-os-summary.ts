@@ -29,6 +29,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { getDb, type Db } from "@/db";
+import { NAV_TITLES } from "@/components/app-sidebar";
 import { DOMAIN_EVENTS } from "@/lib/constants/domain-events";
 import { describeTopicOpenContext } from "@/lib/constants/early-topic";
 import { MODEL_STATES } from "@/lib/constants/model-lifecycle";
@@ -38,6 +39,8 @@ import { COST_SHEET_STATUSES, SAMPLE_STATUSES, TOPIC_STATUSES } from "@/lib/cons
 import { RETURN_DISPOSITIONS } from "@/lib/constants/return-disposition";
 import { UNIDENTIFIED_STATUSES } from "@/lib/constants/return-unidentified";
 import { formatNumber } from "@/lib/format";
+import { OTHER_USAGE_KEY, usageKeysFrom, type PageUsageSummary } from "@/lib/constants/page-usage";
+import { getPageUsage } from "@/lib/usage/page-visits";
 import { previewModelRegistry } from "@/lib/queries/models";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -71,6 +74,8 @@ export type CompanyOsSummary = {
   unidentified: Doc<{ status: string; withVariant: number; withoutVariant: number }[]>;
   approvals: Doc<{ status: string; n7: number; n: number; err7: number; err: number }[]>;
   receipts: Doc<{ receipts: number; withOrder: number; withBatch: number; linked: number; receipts30: number; linked30: number }>;
+  /** Lượt mở trang theo mục (không ghi ai) — cùng hàm đọc với Hệ thống → Module. */
+  pageUsage: Doc<PageUsageSummary>;
 };
 
 // ═══════════════════════════ IN (thuần) ═══════════════════════════
@@ -205,6 +210,19 @@ export function companyOsSummaryLines(s: CompanyOsSummary): string[] {
   muc("PHIẾU NHẬP", s.receipts, (x) => [
     `PHIẾU NHẬP (RECEIPT): tổng ${dem(x.receipts)} · gắn lệnh SX ${dem(x.withOrder)} · gắn lô xưởng ${dem(x.withBatch)} · gắn ít nhất một ${dem(x.linked)} · 30 ngày: ${dem(x.linked30)}/${dem(x.receipts30)} có gắn`,
   ]);
+  muc("LƯỢT MỞ TRANG", s.pageUsage, (x) => {
+    const head = `LƯỢT MỞ TRANG (${x.windowDays} ngày, theo mục, không ghi ai mở)`;
+    if (x.measuredDays === 0) return [`${head}: chưa có số đo (CHƯA BIẾT, không phải 0)`];
+    const zero = x.lines.filter((l) => l.visits === 0);
+    const used = x.lines.filter((l) => (l.visits ?? 0) > 0);
+    const fmt = (l: PageUsageSummary["lines"][number]) => `${l.key} ${dem(l.visits)}/${dem(l.activeDays)}n`;
+    return [
+      `${head}: đã đo ${dem(x.measuredDays)}/${dem(x.windowDays)} ngày từ ${x.firstMeasuredDay ?? "—"} · tổng ${dem(used.reduce((t, l) => t + (l.visits ?? 0), 0))} · ngoài danh sách ${dem(x.otherVisits)} · mục 0 lượt ${dem(zero.length)}/${dem(x.lines.length)} · (lượt/ngày có lượt)`,
+      ...packParts("  0 lượt — ", zero.map((l) => l.key)),
+      ...packParts("  ít nhất — ", used.slice(0, 12).map(fmt)),
+      ...packParts("  nhiều nhất — ", used.slice(-8).reverse().map(fmt)),
+    ];
+  });
   return out.slice(0, SUMMARY_MAX_LINES).map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 
@@ -386,7 +404,9 @@ export async function collectCompanyOsSummary(db: Db): Promise<CompanyOsSummary>
     return { receipts: so(r?.n), withOrder: so(r?.po), withBatch: so(r?.batch), linked: so(r?.linked), receipts30: so(r?.n30), linked30: so(r?.linked30) };
   });
 
-  return { at, models, registry, runs, events, topics, costSheets, samples, design, recommendations, ownerDigest, dispositions, unidentified, approvals, receipts };
+  const pageUsage = await docMuc(() => getPageUsage([...usageKeysFrom(Object.keys(NAV_TITLES)), OTHER_USAGE_KEY], { db, windowDays: 14 }));
+
+  return { at, models, registry, runs, events, topics, costSheets, samples, design, recommendations, ownerDigest, dispositions, unidentified, approvals, receipts, pageUsage };
 }
 
 async function main() {

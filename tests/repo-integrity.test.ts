@@ -208,7 +208,7 @@ export function testMigrationAppendOnly() {
       e.when > maxWhenBefore,
       `migration MỚI "${e.tag}" có mốc ${e.when} KHÔNG muộn hơn mốc lớn nhất đã có (${maxWhenBefore}). ` +
         "Những mục cũ có thể đã chạy trên production; drizzle chỉ áp mốc muộn hơn mốc cuối đã áp, " +
-        "nên mục này sẽ BỊ BỎ QUA VĨNH VIỄN trên máy chủ. Sinh lại migration hoặc nâng mốc lên sau mốc lớn nhất.",
+        "nên mục này sẽ BỊ BỎ QUA VĨNH VIỄN trên máy chủ. Sửa bằng: `npm run migration:renumber` (chạy thử) rồi `-- --apply`.",
     );
   }
 
@@ -246,7 +246,7 @@ export function testMigrationNumberUnique() {
     dups.length <= KNOWN_COLLISION,
     `Migration index collision: có ${dups.length} số hiệu bị dùng lần > 1 ` +
       dups.map(([idx, tags]) => `${idx}=${tags.join("+")}`) +
-      ". Khi sinh migration mới, dùng số LỚNHƠN tất cả số đang có.",
+      ". Khi sinh migration mới, dùng số LỚN HƠN tất cả số đang có. Sửa bằng: `npm run migration:renumber` (chạy thử) rồi `-- --apply`.",
   );
 
   // Kiểm tra số hiệu tăng dần (ít nhất là không giảm) — nếu giảm thì khó đọc.
