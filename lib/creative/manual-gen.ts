@@ -4,6 +4,7 @@ import {
   CREATIVE_HARD_LIMITS,
   CREATIVE_RULE_VERSION,
   CREATIVE_WRITE_DENIAL_REASON,
+  DAILY_BUDGET_MODE,
   DESIGN_DNA_VERSION,
   DESIGN_NOVELTY,
   GENE_VOCAB,
@@ -31,6 +32,7 @@ import { describeDnaVi, designPromptEn, planDesigns, type DesignParent, type Des
 import { gatherPixels } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { insertManualVariant, type ManualActor } from "@/lib/creative/manual";
+import { marketerNameProblem, marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-code";
 import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay } from "@/lib/creative/naming";
 import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
@@ -771,6 +773,8 @@ export type PromoteInput = {
   names: { campaign: string; adset: string; ad: string };
   /** Số thứ tự màn hình đã dùng để dựng tên mặc định lúc hiển thị (`null` = không biết). */
   predictedSeq: number | null;
+  /** Mã MKTer ghép vào tên chiến dịch theo khuôn — máy chủ dẫn xuất từ `setup.marketerId`, không nhận từ trình duyệt. */
+  marketerCode?: string | null;
 };
 
 type PromoteOk = {
@@ -867,8 +871,9 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
       names: async (batch) => {
         const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
         const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
-        const d = defaultNames(ctx, batch.batchDay, seq);
-        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? defaultNames(ctx, batch.batchDay, input.predictedSeq) : null;
+        const mk = input.marketerCode ?? null;
+        const d = defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk);
+        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk) : null;
         finalSeq = seq;
         finalNames = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
         return { nameSeq: seq, campaignName: finalNames.campaign, adsetName: finalNames.adset, adName: finalNames.ad };
@@ -958,6 +963,9 @@ export async function instantPublishBlockers(db: Db, cfg: CreativeLoopConfig, ba
   if (!pre.ok) out.push(pre.reason);
   if (bc.budgetPerVariantVnd <= 0) out.push("Chưa khai ngân sách một mẫu ở Cấu hình & luật.");
   if (bc.budgetPerVariantVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) out.push(CREATIVE_WRITE_DENIAL_REASON.OVER_VARIANT_BUDGET);
+  // Camp "Đăng camp" chạy ngân sách NGÀY, không giờ kết thúc (`DAILY_BUDGET_MODE`): luật tắt là thứ DUY NHẤT tự dừng nó.
+  // Không có luật nào ⇒ camp tiêu mỗi ngày mãi mãi cho tới khi có người nhớ ra — không đăng.
+  if (bc.config.killRules.length === 0) out.push("Chưa khai luật TẮT nào ở Cấu hình & luật — camp chạy ngân sách ngày liên tục, không có luật tắt thì không bao giờ tự dừng. Khai ít nhất một luật tắt rồi đăng.");
   const committed = await committedTestSpendForDay(db, batchDay);
   if (committed + bc.budgetPerVariantVnd > CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd) {
     out.push(`${CREATIVE_WRITE_DENIAL_REASON.OVER_DAILY_CAP} (Sổ đã ghi ${committed.toLocaleString("vi-VN")}đ cho ngày ${batchDay}.)`);
@@ -974,8 +982,8 @@ export type InstantPublishInput = PromoteInput & { scheduleAt: Date | null; setu
 
 /**
  * Setup camp người chọn ⇒ cấu hình hiệu lực của MỘT bài lẻ: TKQC · fanpage · ngân sách thay cho cấu hình chung (lô
- * `INSTANT` chụp đúng cấu hình này, nên digest, trần cam kết, tên theo khuôn đều theo nó). Ngân sách kẹp trong trần cứng
- * (chủ shop 26/09/2026: GIỮ trần cũ). Sai hình dạng ⇒ câu lỗi. Hàm THUẦN.
+ * `INSTANT` chụp đúng cấu hình này, nên digest, trần cam kết, tên theo khuôn đều theo nó). Ngân sách (NGÂN SÁCH NGÀY từ
+ * 27/09/2026) kẹp trong trần cứng (chủ shop 26/09/2026: GIỮ trần cũ). Sai hình dạng ⇒ câu lỗi. Hàm THUẦN.
  */
 export function instantConfig(cfg: CreativeLoopConfig, setup: CampaignSetup | null | undefined): { ok: true; cfg: CreativeLoopConfig } | { ok: false; error: string } {
   if (!setup) return { ok: true, cfg };
@@ -983,7 +991,7 @@ export function instantConfig(cfg: CreativeLoopConfig, setup: CampaignSetup | nu
   if (!/^[0-9]+$/.test(acc)) return { ok: false, error: "Tài khoản quảng cáo đã chọn không hợp lệ." };
   if (!/^[0-9]+$/.test(setup.pageId)) return { ok: false, error: "Fanpage đã chọn không hợp lệ." };
   if (setup.budgetVnd < CAMPAIGN_SETUP_LIMITS.minBudgetVnd || setup.budgetVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) {
-    return { ok: false, error: `Ngân sách phải trong ${CAMPAIGN_SETUP_LIMITS.minBudgetVnd.toLocaleString("vi-VN")}đ – ${CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd.toLocaleString("vi-VN")}đ (trần một camp).` };
+    return { ok: false, error: `Ngân sách ngày phải trong ${CAMPAIGN_SETUP_LIMITS.minBudgetVnd.toLocaleString("vi-VN")}đ – ${CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd.toLocaleString("vi-VN")}đ (trần một camp).` };
   }
   const tuoi = [setup.ageMin, setup.ageMax].filter((x): x is number => x !== null);
   if (tuoi.some((a) => a < CAMPAIGN_SETUP_LIMITS.minAge || a > CAMPAIGN_SETUP_LIMITS.maxAge)) return { ok: false, error: `Tuổi phải trong ${CAMPAIGN_SETUP_LIMITS.minAge}–${CAMPAIGN_SETUP_LIMITS.maxAge}.` };
@@ -1021,6 +1029,15 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   if (!w.ok) return w;
   const blockers = await instantPublishBlockers(db, cfg, w.batchDay, deps);
   if (blockers.length) return { ok: false, error: `Chưa đăng được: ${blockers.join(" ")}` };
+  // MKTer: tên + mã đọc lại ở trang Lương theo `marketerId` — chọn người đã nghỉ / chưa khai bí danh thì dừng, không đăng
+  // một camp mà tiền ads không quy về ai.
+  const employees = setup?.marketerId ? await readPayrollEmployees(db) : [];
+  const marketer = setup?.marketerId ? (marketerOptions(employees).find((m) => m.id === setup.marketerId) ?? null) : null;
+  if (setup?.marketerId && !marketer) return { ok: false, error: "MKTer đã chọn không còn trong danh sách nhân sự (trang Lương) hoặc chưa khai bí danh — chọn lại MKTer." };
+  if (marketer && input.names.campaign.trim()) {
+    const problem = marketerNameProblem(input.names.campaign.trim(), marketer, employees);
+    if (problem) return { ok: false, error: problem };
+  }
   // Quảng cáo mẫu kiểm TRƯỚC khi ghi dòng nào (một lượt ĐỌC Facebook): mẫu không dùng được thì không dựng lô, không
   // cấp mã TK, ảnh vẫn "Đã duyệt". 26/09/2026 lần bấm đầu tiên của chủ shop cấp mã TK-260926-103 rồi mới vấp ở đây.
   const writer = deps.writer ?? REAL_CREATIVE_WRITER;
@@ -1047,14 +1064,18 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           startAt: w.startAt,
           endAt: w.endAt,
           approvalDeadline: w.startAt,
-          // Setup camp nằm trong lô: lượt đăng (và lượt tick đi tiếp nếu đăng dở) áp ĐÚNG setup người đã bấm.
-          plan: { instant: true, scheduled: w.scheduled, manualGenImageId: input.imageId, ...(setup ? { setup } : {}) },
+          // Setup camp nằm trong lô: lượt đăng (và lượt tick đi tiếp nếu đăng dở) áp ĐÚNG setup người đã bấm. Ngân sách
+          // NGÀY, chạy liên tục (chủ shop 27/09/2026 — `DAILY_BUDGET_MODE`); digest của phiếu duyệt khoá cả điều này.
+          plan: { instant: true, scheduled: w.scheduled, manualGenImageId: input.imageId, budgetMode: DAILY_BUDGET_MODE, ...(setup ? { setup } : {}) },
           configSnapshot: cfg as unknown as Record<string, unknown>,
           ruleVersion: CREATIVE_RULE_VERSION,
         })
         .returning();
-      const ins = await insertImageVariant(tx, x, input, cfg, actor, now, batch);
+      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null }, cfg, actor, now, batch);
       if (!ins.ok) throw new InstantAbort(ins.error);
+      // Tên cuối cùng phải quy về ĐÚNG MKTer đã chọn theo chính luật quy tiền ads — sai thì huỷ cả giao dịch, chưa gì lên Facebook.
+      const nameProblem = marketer ? marketerNameProblem(ins.names.campaign, marketer, employees) : null;
+      if (nameProblem) throw new InstantAbort(nameProblem);
       const digest = approvalDigest(await batchApprovalContent(tx as unknown as Db, batch));
       await tx.update(B).set({ status: "APPROVED", approvalDigest: digest, approvedAt: now, approvedByUserId: actor.id, approvedByName: actor.name, updatedAt: now }).where(eq(B.id, batch.id));
       return ins;

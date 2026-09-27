@@ -46,6 +46,8 @@ export type ApprovalContent = {
   startAt: Date;
   endAt: Date;
   budgetPerVariantVnd: number;
+  /** `"DAILY"` = ngân sách là ngân sách NGÀY, không giờ kết thúc. Vắng = trọn đời (lô cũ — digest của chúng KHÔNG đổi). */
+  budgetMode?: "DAILY";
   killRules: CreativeRule[];
   variants: ApprovalVariant[];
 };
@@ -60,6 +62,7 @@ export function approvalDigest(c: ApprovalContent): string {
     startAt: c.startAt.toISOString(),
     endAt: c.endAt.toISOString(),
     budgetPerVariantVnd: c.budgetPerVariantVnd,
+    ...(c.budgetMode ? { budgetMode: c.budgetMode } : {}),
     killRules: c.killRules,
     variants: [...c.variants]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))

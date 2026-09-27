@@ -113,7 +113,7 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
         ? luatHong.map((p) => p.message).join(" ")
         : config.killRules.length
           ? `${formatNumber(config.killRules.length)} luật.`
-          : "Chưa khai — máy sẽ KHÔNG tự tắt mẫu nào; mỗi mẫu tiêu hết ngân sách test rồi tự dừng.",
+          : "Chưa khai — máy sẽ KHÔNG tự tắt mẫu nào, và Đăng camp bị chặn: camp ngân sách ngày chạy liên tục, không có luật tắt thì không bao giờ tự dừng.",
     },
     {
       level: config.keepRules.length ? "OK" : "WARN",

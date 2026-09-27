@@ -7,7 +7,7 @@ import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { actionToken, verifyActionToken } from "@/lib/ai/policy";
-import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, type CreativeVerdict, type VariantStatus } from "@/lib/constants/creative-loop";
+import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, isDailyBudgetPlan, type CreativeVerdict, type VariantStatus } from "@/lib/constants/creative-loop";
 import { approvalDigest } from "@/lib/creative/approval";
 import { extensionMatchesTicket, planExtension, type ExtensionInput } from "@/lib/creative/extend";
 import { judgeVariant } from "@/lib/creative/judge";
@@ -97,6 +97,8 @@ async function loadContext(db: Db, variantId: string, now: Date): Promise<Ctx | 
     .limit(1);
   if (!row) return { error: "Không tìm thấy mẫu." };
   const { v, b } = row;
+  // "Tiêu thêm" = nâng ngân sách TRỌN ĐỜI + dời giờ kết thúc. Camp ngân sách ngày không có cả hai (`DAILY_BUDGET_MODE`).
+  if (isDailyBudgetPlan(b.plan)) return { error: "Camp này chạy ngân sách NGÀY, liên tục — không có giờ kết thúc để gia hạn. Muốn chi nhiều hơn thì sửa ngân sách ngày trên Ads Manager." };
 
   const { config: current } = await readCurrentCreativeConfig(db);
   const metrics = (await variantMetrics(db, [{ id: v.id, fbAdId: v.fbAdId, startAt: b.startAt }])).get(v.id);

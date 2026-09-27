@@ -3,7 +3,11 @@
  *
  * Chủ shop 26/09/2026: "code thêm tính năng chọn TKQC, chọn fanpage, chọn mục tiêu chiến dịch, ngân sách quảng cáo, vị trí
  * địa lý… như những setup trên FB. Để mặc định theo những lựa chọn được sử dụng nhiều". Chốt cùng ngày: TKQC + fanpage lấy
- * từ dữ liệu ĐÃ ĐỒNG BỘ; ngân sách GIỮ trần cũ (`CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd`, 1 ngày).
+ * từ dữ liệu ĐÃ ĐỒNG BỘ; ngân sách GIỮ trần cũ (`CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd`).
+ *
+ * Chủ shop 27/09/2026: ngân sách là NGÂN SÁCH NGÀY, camp CHẠY LIÊN TỤC (không giờ kết thúc — luật tắt QC canh tới khi
+ * tắt); chọn MKTer ⇒ mã MKTer (bí danh khai ở trang Lương) vào tên chiến dịch ngay sau tên TKQC để quy tiền ads; chọn
+ * được thời gian bắt đầu ngay trong khối setup (và lưu cùng bản nháp hàng đợi).
  *
  * Tệp này là HÌNH DẠNG + nhãn (không import gì phía máy chủ — hộp soạn bài phía trình duyệt đọc được). Phép áp setup
  * lên quảng cáo mẫu là hàm thuần ở `lib/creative/campaign-setup.ts`.
@@ -50,7 +54,32 @@ export type CampaignSetup = {
   ageMin: number | null;
   ageMax: number | null;
   gender: CampaignGender | null;
+  /** MKTer của camp (`Employee.id` ở trang Lương). `null` = chưa chọn — tên chiến dịch không mang mã MKTer. */
+  marketerId: string | null;
+  /** Giờ bắt đầu đã chọn (ISO có múi giờ). `null` = chạy ngay lúc bấm. Chỉ để LƯU cùng bản nháp — lúc đăng, giờ hẹn gửi riêng. */
+  startAt: string | null;
 };
+
+/** Một MKTer chọn được trong khối setup: `code` = mã vào tên chiến dịch (dẫn xuất từ bí danh, máy chủ tính). */
+export type MarketerOption = { id: string; name: string; code: string };
+
+/**
+ * MÃ MKTER TRONG TÊN CHIẾN DỊCH — dẫn xuất từ bí danh khai ở trang Lương (`Employee.aliases`), KHÔNG phải danh sách thứ
+ * hai: luật quy tiền ads (`resolveMarketer`) nhận MKTer bằng đúng các bí danh ấy, nên mã lấy từ đó thì camp tự quy về đúng
+ * người. Ưu tiên bí danh MỘT từ (vd "TRINH"), viết hoa, bỏ dấu. Không có bí danh ⇒ `null` (không đoán). Hàm THUẦN.
+ */
+export function marketerCampaignCode(aliases: readonly string[] | null | undefined): string | null {
+  const norm = (a: string) =>
+    a
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[đĐ]/g, "D")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .toUpperCase();
+  const all = (aliases ?? []).map(norm).filter((a) => a.length >= 2);
+  return all.find((a) => !a.includes(" ")) ?? all[0] ?? null;
+}
 
 /** Giới hạn ô nhập — tuổi theo quy định của Facebook (13–65, 65 = "65+"); ngân sách tối thiểu để một ngày có phân phối. */
 export const CAMPAIGN_SETUP_LIMITS = { minBudgetVnd: 20_000, minAge: 18, maxAge: 65, maxGeo: 25 } as const;
@@ -75,13 +104,16 @@ export function parseCampaignSetup(raw: unknown): CampaignSetup | null {
         .filter((g) => g.key !== "")
     : null;
   const gender = (CAMPAIGN_GENDERS as readonly string[]).includes(r.gender as string) ? (r.gender as CampaignGender) : null;
-  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender };
+  const marketerId = typeof r.marketerId === "string" && r.marketerId.trim() ? r.marketerId.trim() : null;
+  const startAt = typeof r.startAt === "string" && Number.isFinite(new Date(r.startAt).getTime()) ? r.startAt : null;
+  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, startAt };
 }
 
 /** Câu ngắn mô tả một setup — cho sổ ghi / hàng đợi. Hàm THUẦN. */
-export function describeCampaignSetup(s: CampaignSetup, names: { account?: string; page?: string } = {}): string {
+export function describeCampaignSetup(s: CampaignSetup, names: { account?: string; page?: string; marketer?: string } = {}): string {
   const geo = s.geo === null ? "vị trí như mẫu" : s.geo.length === 0 ? "toàn quốc" : s.geo.map((g) => g.name).join(", ");
   const tuoi = s.ageMin === null && s.ageMax === null ? "tuổi như mẫu" : `${s.ageMin ?? "?"}–${s.ageMax === 65 ? "65+" : (s.ageMax ?? "?")}`;
   const gioi = s.gender === null ? "giới tính như mẫu" : CAMPAIGN_GENDER_LABEL[s.gender];
-  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, CAMPAIGN_OBJECTIVE_LABEL[s.objective], `${s.budgetVnd.toLocaleString("vi-VN")}đ`, geo, tuoi, gioi].join(" · ");
+  const mkt = s.marketerId ? `MKTer ${names.marketer || s.marketerId}` : "chưa chọn MKTer";
+  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, CAMPAIGN_OBJECTIVE_LABEL[s.objective], `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
 }

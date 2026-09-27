@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup, type MarketerOption } from "@/lib/constants/campaign-setup";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
 import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
@@ -8,6 +8,7 @@ import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
 import { instantPublishBlockers, parseManualDesignSpec } from "@/lib/creative/manual-gen";
 import { agePart, defaultNames, genderPart, geoPart, loadNamingContext, nextNameSeq, nextNameSeqOnDay, readNamingTemplate, type DefaultNames } from "@/lib/creative/naming";
+import { marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-code";
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
@@ -320,6 +321,8 @@ export type FanpageOption = { id: string; name: string; orders30d: number };
 export type CampaignSetupOptions = {
   accounts: AdAccountOption[];
   pages: FanpageOption[];
+  /** MKTer chọn được (trang Lương, còn làm, có bí danh) + mã vào tên chiến dịch. Mặc định KHÔNG chọn ai — máy không đoán người. */
+  marketers: MarketerOption[];
   /** Mặc định = lựa chọn DÙNG NHIỀU: TKQC chi nhiều nhất 30 ngày · page ra nhiều đơn nhất 30 ngày · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu. */
   defaults: CampaignSetup;
   /** TKQC / fanpage của CẤU HÌNH — tên theo khuôn điền sẵn dựng với hai cái này (hộp soạn bài thay khi người chọn cái khác). */
@@ -371,14 +374,15 @@ export async function listFanpageOptions(db: Db, now: Date, configPageId: string
 
 /** Lựa chọn + mặc định cho khối "Setup camp" của hộp Đăng camp. */
 export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccountId: string; pageId: string; budgetPerVariantVnd: number }): Promise<CampaignSetupOptions> {
-  const [accounts, pages, tpl] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId), readNamingTemplate(db)]);
+  const [accounts, pages, tpl, employees] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId), readNamingTemplate(db), readPayrollEmployees(db)]);
   const t = tpl?.targeting ?? null;
   return {
     accounts,
     pages,
+    marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null },
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null },
     template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
   };
 }

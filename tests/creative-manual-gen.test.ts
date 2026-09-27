@@ -11,10 +11,12 @@ import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
 import { addUploadedDraft, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
-import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
+import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
-import { parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { describeCampaignSetup, marketerCampaignCode, parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
+import { marketerNameProblem, marketerOptions } from "@/lib/creative/marketer-code";
 import { listRecentBatches } from "@/lib/queries/creative-loop";
 import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
@@ -47,6 +49,14 @@ import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/op
  */
 
 const P = "cmg-";
+
+/** Nhân sự trang Lương cho ca MKTer của "Đăng camp" (27/09/2026). */
+const NV_MK: Employee[] = [
+  { id: "mk-trinh", name: "Tuyết Trinh", shortName: "Tuyết Trinh", department: "Marketing", aliases: ["TRINH"], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" },
+  { id: "mk-quan", name: "Quân Tạ", shortName: "Quân TA", department: "Marketing", aliases: ["QUAN TA"], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" },
+  { id: "mk-nghi", name: "Đã nghỉ", shortName: "", department: "Marketing", aliases: ["NGHI"], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: false, note: "" },
+  { id: "mk-chua", name: "Chưa bí danh", shortName: "", department: "Marketing", aliases: [], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" },
+];
 
 function fakeJpeg(tag: number): Uint8Array {
   return new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, tag & 0xff, (tag >> 8) & 0xff, (tag >> 16) & 0xff, 9, 9, 1, 2, 3]);
@@ -130,7 +140,28 @@ export function testCreativeManualGenPure() {
     objectStorySpec: { page_id: "pg-mau", instagram_user_id: "ig-mau", link_data: { link: "x" } },
     hasAssetFeed: false,
   };
-  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null };
+  // MÃ MKTER (chủ shop 27/09/2026): dẫn xuất từ bí danh ở trang Lương — ưu tiên bí danh một từ, viết hoa, bỏ dấu.
+  assert.equal(marketerCampaignCode(["Tuyết Trinh", "trinh"]), "TRINH", "ưu tiên bí danh MỘT từ");
+  assert.equal(marketerCampaignCode(["quân tạ"]), "QUAN TA", "chỉ có bí danh nhiều từ ⇒ dùng nó (luật quy tiền ads so khớp trọn cụm)");
+  assert.equal(marketerCampaignCode(["Đạt"]), "DAT", "đ ⇒ D");
+  assert.equal(marketerCampaignCode([]), null, "không bí danh ⇒ KHÔNG đoán mã");
+  assert.equal(marketerCampaignCode(["x"]), null, "bí danh một ký tự không dùng làm mã");
+  const opts = marketerOptions(NV_MK);
+  assert.deepEqual(opts.map((o) => [o.id, o.code]), [["mk-quan", "QUAN TA"], ["mk-trinh", "TRINH"]], "chỉ người còn làm và có bí danh; người nghỉ / chưa khai không hiện");
+  const trinh = opts.find((o) => o.id === "mk-trinh");
+  assert.ok(trinh);
+  assert.equal(marketerNameProblem("VNX2 - 1_TRINH_27/09_TEST_Hải An Fashion_14", trinh, NV_MK), null, "tên mang mã ⇒ luật quy tiền ads nhận đúng người");
+  assert.match(marketerNameProblem("VNX2 - 1_27/09_TEST_Hải An Fashion_14", trinh, NV_MK) ?? "", /không mang mã MKTer TRINH/);
+  assert.match(marketerNameProblem("TRINH_QUAN TA_27/09", trinh, NV_MK) ?? "", /bị nhận là của MKTer Quân TA/, "bí danh người khác dài hơn chen vào thắng ⇒ nói ra");
+  const ctxMk: NamingContext = { accountName: "VNX2 - 1", pageName: "Hải An Fashion", adset: { name: "MESS", problems: [] } };
+  assert.equal(defaultNames(ctxMk, "2026-09-27", 14, "IMAGE", "TRINH").campaign, "VNX2 - 1_TRINH_27/09_TEST_Hải An Fashion_14", "Tên TKQC_Mã MKTer_Ngày_TEST_Fanpage_số");
+  assert.equal(defaultNames(ctxMk, "2026-09-27", 14).campaign, "VNX2 - 1_27/09_TEST_Hải An Fashion_14", "không chọn MKTer ⇒ khuôn cũ");
+  assert.equal(defaultNames({ ...ctxMk, accountName: null }, "2026-09-27", 3, "IMAGE", "TRINH").campaign, "TRINH_27/09_TEST_Hải An Fashion_3", "thiếu tên TKQC ⇒ bỏ phần ấy, mã MKTer vẫn đứng đầu");
+
+  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null };
+  assert.match(describeCampaignSetup({ ...goc, marketerId: "mk-trinh" }, { marketer: "Tuyết Trinh (TRINH)" }), /MKTer Tuyết Trinh \(TRINH\) · .*100\.000đ\/ngày/, "câu mô tả setup nói MKTer và ngân sách NGÀY");
+  assert.deepEqual(parseCampaignSetup({ ...goc, marketerId: " mk-trinh ", startAt: "2026-09-28T08:00:00+07:00" }), { ...goc, marketerId: "mk-trinh", startAt: "2026-09-28T08:00:00+07:00" }, "MKTer + giờ bắt đầu lưu cùng bản nháp");
+  assert.deepEqual(parseCampaignSetup({ ...goc, startAt: "không phải ngày" }), goc, "giờ hỏng ⇒ chạy ngay, không vỡ bản nháp");
   const nguyen = applyCampaignSetup(mau, goc);
   assert.deepEqual(nguyen.adset, mau.adset, "setup toàn 'như mẫu' + cùng TKQC / page ⇒ nhóm giữ NGUYÊN");
   assert.equal(nguyen.objectStorySpec?.instagram_user_id, "ig-mau", "cùng page ⇒ giữ Instagram");
@@ -265,6 +296,11 @@ const TEMPLATE_AD = "9990001";
 
 function cfgOf(over: Partial<CreativeLoopConfig> = {}): CreativeLoopConfig {
   return { ...DEFAULT_CREATIVE_CONFIG, enabled: false, pageId: `${P}page`, adAccountId: "8880001", testCampaignId: "7770001", templateAdId: TEMPLATE_AD, imageModel: "gpt-image-2", imageQuality: "low", imageSize: "1024x1024", ...over };
+}
+
+/** Cấu hình cho "Đăng camp": có MỘT luật tắt — camp ngân sách ngày chạy liên tục, không luật tắt thì cổng chặn đăng. */
+function cfgPub(over: Partial<CreativeLoopConfig> = {}): CreativeLoopConfig {
+  return cfgOf({ killRules: [{ metric: "ctr", op: "lt", value: 0.1, minSpendVnd: 5_000, label: "" }], ...over });
 }
 
 async function cleanup(db: Db, days: string[], extraBatchIds: string[] = []) {
@@ -489,7 +525,7 @@ export async function testCreativeManualGenDb(db: Db) {
 
     // ── (f) ĐĂNG CAMP — máy ghi Facebook GIẢ ──
     const fbCalls: string[] = [];
-    const adsetTimes: { start: Date; end: Date; name: string }[] = [];
+    const adsetTimes: { start: Date; end: Date | null; name: string }[] = [];
     let n = 0;
     const tplPub: TemplateAd = { ...tplAd, adset: { ...tplAd.adset, promotedObject: { page_id: `${P}page` } }, objectStorySpec: { page_id: `${P}page`, link_data: { link: "https://m.me/x", call_to_action: { type: "MESSAGE_PAGE" } } } };
     let templateFails = false;
@@ -501,7 +537,7 @@ export async function testCreativeManualGenDb(db: Db) {
     let tplNow: TemplateAd = tplPub;
     const specsSent: Record<string, unknown>[] = [];
     const campaignsSent: { account: string; objective: string | null }[] = [];
-    const adsetsSent: { account: string; template: TemplateAd["adset"]; budget: number }[] = [];
+    const adsetsSent: { account: string; template: TemplateAd["adset"]; budget: number; daily: boolean }[] = [];
     const fbGia: CreativeWriter = {
       readTemplateAd: async () => {
         fbCalls.push("readTemplateAd");
@@ -525,9 +561,9 @@ export async function testCreativeManualGenDb(db: Db) {
         return `camp-${++n}`;
       },
       createTestAdset: async (acc, i) => {
-        adsetsSent.push({ account: acc, template: i.template, budget: i.lifetimeBudgetMinor });
+        adsetsSent.push({ account: acc, template: i.template, budget: i.dailyBudgetMinor ?? i.lifetimeBudgetMinor ?? 0, daily: i.dailyBudgetMinor !== undefined });
         fbCalls.push("createTestAdset");
-        adsetTimes.push({ start: i.startTime, end: i.endTime, name: i.name });
+        adsetTimes.push({ start: i.startTime, end: i.endTime ?? null, name: i.name });
         return `adset-${++n}`;
       },
       createAd: async () => (fbCalls.push("createAd"), `ad-${++n}`),
@@ -575,16 +611,16 @@ export async function testCreativeManualGenDb(db: Db) {
 
     // (f1) Đường ghi tắt ⇒ không dựng lô, không gọi Facebook, ảnh vẫn "Đã duyệt".
     const t1 = new Date();
-    const tat = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: { hardEnabled: false, mode: "COPILOT" }, killSwitch: khongKeo });
+    const tat = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgPub(), actor, t1, { writer: fbGia, env: { hardEnabled: false, mode: "COPILOT" }, killSwitch: khongKeo });
     assert.ok(!tat.ok && tat.error.includes("Chưa đăng được"), "cổng tắt ⇒ từ chối có lý do");
     assert.equal(fbCalls.length, 0, "cổng tắt ⇒ 0 lời gọi Facebook");
     assert.equal((await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.kind, "INSTANT"))).length, 0, "không để lại lô rỗng");
-    const keo = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: ON, killSwitch: async () => ({ killed: true, source: "ENGAGED" as const, reason: "đang soát", by: null, at: null }) });
+    const keo = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgPub(), actor, t1, { writer: fbGia, env: ON, killSwitch: async () => ({ killed: true, source: "ENGAGED" as const, reason: "đang soát", by: null, at: null }) });
     assert.ok(!keo.ok && fbCalls.length === 0, "công tắc khẩn đang kéo ⇒ không đăng");
 
     // (f2) Hẹn giờ ⇒ lô INSTANT riêng, người bấm là lượt duyệt, nhóm mang start_time = giờ hẹn.
     const henLuc = new Date(t1.getTime() + 3 * 3_600_000);
-    const c1 = await publishManualGenImageInstant(db, camInput(cam[0].id, henLuc), cfgOf(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c1 = await publishManualGenImageInstant(db, camInput(cam[0].id, henLuc), cfgPub(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c1.ok, c1.ok ? "" : c1.error);
     assert.equal(c1.ok && c1.outcome, "SCHEDULED", c1.ok ? c1.detail : "");
     const [bc1] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, c1.ok ? c1.batchId : ""));
@@ -596,7 +632,10 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(bc1.startAt.getTime(), henLuc.getTime());
     assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd", "uploadAdImage", "createAdCreative", "createTestCampaign", "createTestAdset", "createAd", "activateTestCampaign"], "đọc mẫu TRƯỚC khi ghi dòng nào, rồi đi ĐÚNG sáu bước của đường đăng lô");
     assert.equal(adsetTimes[0].start.getTime(), henLuc.getTime(), "Facebook giữ lịch: start_time = giờ hẹn");
-    assert.equal(adsetTimes[0].end.getTime(), henLuc.getTime() + 86_400_000, "end_time — Facebook tự dừng");
+    assert.equal(adsetTimes[0].end, null, "ngân sách NGÀY, chạy liên tục (chủ shop 27/09/2026) — KHÔNG gửi end_time");
+    assert.ok(adsetsSent[0]?.daily, "nhóm đặt daily_budget, không phải lifetime_budget");
+    assert.equal((bc1.plan as Record<string, unknown>).budgetMode, "DAILY", "lô INSTANT mang ngân sách ngày — lượt tick đi tiếp và phiếu duyệt đọc đúng điều này");
+    assert.equal(bc1.endAt.getTime(), henLuc.getTime() + 86_400_000, "endAt của lô vẫn là KHUNG CHẤM (không gửi lên Facebook)");
     const [vc1] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, c1.ok ? c1.variantId : ""));
     assert.equal(vc1.status, "LIVE");
     assert.equal(vc1.committedBudgetVnd, cfgOf().budgetPerVariantVnd);
@@ -604,7 +643,7 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(ic1.status, "PROMOTED");
     assert.ok(!(await trongHang(cam[0].id)), "đăng camp xong ⇒ bài tự rời hàng đợi");
     assert.equal(ic1.campaignName, c1.ok ? c1.names.campaign : "", "ảnh ghi lại đúng tên chiến dịch đã đăng");
-    const lai2 = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const lai2 = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgPub(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!lai2.ok, "một ảnh không đăng hai lần");
 
     // Lịch sử lô lọc theo NGÀY CHẠY: bài hẹn giờ hiện ở ngày chạy của nó, không hiện ở hôm trước.
@@ -614,7 +653,7 @@ export async function testCreativeManualGenDb(db: Db) {
     // (f3) Chạy ngay ⇒ lô INSTANT THỨ HAI cùng ngày (chỉ mục duy nhất chỉ khoá lô hằng ngày), bắt đầu sau leadSeconds.
     fbCalls.length = 0;
     const t2 = new Date();
-    const c2 = await publishManualGenImageInstant(db, camInput(cam[1].id, null), cfgOf(), actor, t2, { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c2 = await publishManualGenImageInstant(db, camInput(cam[1].id, null), cfgPub(), actor, t2, { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c2.ok && c2.outcome === "LIVE", c2.ok ? c2.detail : c2.error);
     if (c2.ok) instantIds.push(c2.batchId);
     assert.equal(adsetTimes[1].start.getTime(), t2.getTime() + INSTANT_PUBLISH.leadSeconds * 1000, "chạy ngay = sau lúc bấm leadSeconds giây");
@@ -626,7 +665,7 @@ export async function testCreativeManualGenDb(db: Db) {
     const loTruoc = (await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.kind, "INSTANT"))).length;
     const tkTruoc = (await db.select().from(schema.designConcepts)).length;
     templateFails = true;
-    const c3 = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c3 = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!c3.ok && c3.error.includes("quảng cáo mẫu") && c3.error.includes("Đã duyệt"), c3.ok ? c3.detail : c3.error);
     assert.deepEqual(fbCalls, ["readTemplateAd"], "chỉ lượt ĐỌC — không một lời gọi ghi nào");
     assert.equal((await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.kind, "INSTANT"))).length, loTruoc, "không dựng lô");
@@ -636,14 +675,14 @@ export async function testCreativeManualGenDb(db: Db) {
     templateFails = false;
     // Mẫu có hình dạng không dựng lại được (băng chuyền) ⇒ cũng dừng trước khi ghi.
     tplNow = { ...tplPub, objectStorySpec: { page_id: `${P}page`, link_data: { link: "x", child_attachments: [{ link: "a" }, { link: "b" }] } } };
-    const c3c = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c3c = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!c3c.ok && c3c.error.includes("băng chuyền"), "mẫu băng chuyền ⇒ từ chối trước khi ghi, nói rõ lý do");
     tplNow = tplPub;
 
     // (f4b) Đọc trước được nhưng lượt đăng đọc lại HỎNG khi chưa gửi gì ⇒ ảnh về "Đã duyệt", lô FAILED, bấm lại được.
     fbCalls.length = 0;
     failReadNo = readNo + 2;
-    const c3d = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c3d = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c3d.ok && c3d.outcome === "FAILED" && c3d.detail.includes("Đã duyệt"), c3d.ok ? c3d.detail : c3d.error);
     if (c3d.ok) instantIds.push(c3d.batchId);
     assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd"], "chỉ lượt ĐỌC — không một lời gọi ghi nào");
@@ -653,7 +692,7 @@ export async function testCreativeManualGenDb(db: Db) {
     const [bc3] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, c3d.ok ? c3d.batchId : ""));
     assert.equal(bc3.status, "FAILED");
     failReadNo = 0;
-    const c3b = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c3b = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c3b.ok && c3b.outcome === "LIVE", "bấm lại sau khi sửa ⇒ đăng được");
     if (c3b.ok) instantIds.push(c3b.batchId);
 
@@ -666,7 +705,7 @@ export async function testCreativeManualGenDb(db: Db) {
       assetFeedSpec: { images: [{ hash: "cu" }], bodies: [{ text: "câu cũ" }], titles: [{ text: "tiêu đề cũ" }], call_to_action_types: ["MESSAGE_PAGE"], ad_formats: ["SINGLE_IMAGE"], additional_data: { page_welcome_message: "chào bạn" } },
     };
     specsSent.length = 0;
-    const c5 = await publishManualGenImageInstant(db, camInput(cam[3].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c5 = await publishManualGenImageInstant(db, camInput(cam[3].id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c5.ok && c5.outcome === "LIVE", c5.ok ? c5.detail : c5.error);
     if (c5.ok) instantIds.push(c5.batchId);
     const ld = (specsSent[0]?.link_data ?? {}) as Record<string, unknown>;
@@ -685,14 +724,14 @@ export async function testCreativeManualGenDb(db: Db) {
     await drawManualGen(db, { genId: s6.ok ? s6.genId : "", imageClient });
     const [anh6] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s6.ok ? s6.genId : ""));
     await reviewManualGenImage(db, { imageId: anh6.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
-    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE" };
+    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, startAt: null };
     // Lưu setup cùng bản nháp ⇒ hàng đợi đọc lại đúng setup.
     assert.ok((await saveManualGenDraft(db, { imageId: anh6.id, headline: "H6", primaryText: "Nội dung 6", names: { campaign: "", adset: "", ad: "" }, setup: setup6 }, actor, new Date())).ok);
     assert.deepEqual((await trongHang(anh6.id))?.img.campaignSetup, setup6, "setup camp lưu cùng bài ở hàng đợi");
     campaignsSent.length = 0;
     adsetsSent.length = 0;
     specsSent.length = 0;
-    const c6 = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: setup6 }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c6 = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: setup6 }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c6.ok && c6.outcome === "LIVE", c6.ok ? c6.detail : c6.error);
     if (c6.ok) instantIds.push(c6.batchId);
     assert.deepEqual(campaignsSent, [{ account: "8880009", objective: "OUTCOME_ENGAGEMENT" }], "chiến dịch tạo trong TKQC đã chọn, mục tiêu Tin nhắn");
@@ -707,8 +746,45 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal((b6.configSnapshot as Record<string, unknown>).budgetPerVariantVnd, 150_000, "ngân sách theo setup");
     const [v6] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, c6.ok ? c6.variantId : ""));
     assert.equal(v6.committedBudgetVnd, 150_000);
-    const vuot = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: { ...setup6, budgetVnd: 900_000 } }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const vuot = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: { ...setup6, budgetVnd: 900_000 } }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!vuot.ok, "ngân sách vượt trần ⇒ từ chối trước mọi lời gọi");
+
+    // (f6b) SỔ TRẦN NGÀY cộng ngân sách ngày của camp ngân sách ngày CÒN CHẠY từ những ngày trước — nếu không, camp chạy
+    //       liên tục thành vô hình với trần 4 triệu / ngày.
+    const ngaySau = shiftDay(b6.batchDay, 1);
+    const coC6 = await committedTestSpendForDay(db, ngaySau);
+    await db.update(schema.creativeVariants).set({ status: "PAUSED" }).where(eq(schema.creativeVariants.id, v6.id));
+    assert.equal(coC6 - (await committedTestSpendForDay(db, ngaySau)), 150_000, "camp ngân sách ngày LIVE ⇒ ngân sách ngày của nó nằm trong sổ của NGÀY SAU; tắt rồi thì thôi");
+    await db.update(schema.creativeVariants).set({ status: "LIVE" }).where(eq(schema.creativeVariants.id, v6.id));
+
+    // (f6c) MKTER: mã vào tên chiến dịch ngay sau TKQC; tên không quy về đúng người ⇒ không đăng; người lạ ⇒ không đăng.
+    const [nsCu] = await db.select().from(schema.settings).where(eq(schema.settings.key, PAYROLL_EMPLOYEES_KEY));
+    await db.insert(schema.settings).values({ key: PAYROLL_EMPLOYEES_KEY, value: JSON.stringify({ list: NV_MK }) }).onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify({ list: NV_MK }) } });
+    try {
+      const sMk = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+      await drawManualGen(db, { genId: sMk.ok ? sMk.genId : "", imageClient });
+      const [anhMk] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, sMk.ok ? sMk.genId : ""));
+      await reviewManualGenImage(db, { imageId: anhMk.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
+      const setupMk: CampaignSetup = { ...setup6, marketerId: "mk-trinh" };
+      const trinhDb = marketerOptions(NV_MK).find((o) => o.id === "mk-trinh");
+      assert.ok(trinhDb);
+      fbCalls.length = 0;
+      const la = await publishManualGenImageInstant(db, { ...camInput(anhMk.id, null), setup: { ...setup6, marketerId: "mk-nghi" } }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(!la.ok && la.error.includes("MKTer đã chọn không còn"), "MKTer đã nghỉ ⇒ không đăng");
+      const tuGo = await publishManualGenImageInstant(db, { ...camInput(anhMk.id, null), names: { campaign: "Camp tôi gõ", adset: "", ad: "" }, setup: setupMk }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(!tuGo.ok && tuGo.error.includes("không mang mã MKTer TRINH"), "tên tự gõ thiếu mã MKTer ⇒ không đăng — tiền ads sẽ không quy về ai");
+      assert.equal(fbCalls.length, 0, "cả hai lần từ chối đều TRƯỚC mọi lời gọi Facebook");
+      const khongLuat = await publishManualGenImageInstant(db, { ...camInput(anhMk.id, null), setup: setupMk }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(!khongLuat.ok && khongLuat.error.includes("Chưa khai luật TẮT"), "không luật tắt ⇒ camp chạy liên tục không bao giờ tự dừng ⇒ không đăng");
+      const cMk = await publishManualGenImageInstant(db, { ...camInput(anhMk.id, null), setup: setupMk }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(cMk.ok && cMk.outcome === "LIVE", cMk.ok ? cMk.detail : cMk.error);
+      if (cMk.ok) instantIds.push(cMk.batchId);
+      assert.match(cMk.ok ? cMk.names.campaign : "", /^(.+_)?TRINH_\d{2}\/\d{2}_TEST_/, "mã MKTer ngay sau tên TKQC, trước ngày tháng");
+      assert.equal(cMk.ok && marketerNameProblem(cMk.names.campaign, trinhDb, NV_MK), null, "tên đã đăng quy về đúng Tuyết Trinh theo chính luật quy tiền ads");
+    } finally {
+      if (nsCu) await db.update(schema.settings).set({ value: nsCu.value }).where(eq(schema.settings.key, PAYROLL_EMPLOYEES_KEY));
+      else await db.delete(schema.settings).where(eq(schema.settings.key, PAYROLL_EMPLOYEES_KEY));
+    }
 
     // (f7) ĐÚNG SỰ CỐ PRODUCTION 26/09/2026: ảnh tải lên được, TẠO BÀI bị Facebook từ chối (1885183) ⇒ chưa có chiến dịch / nhóm
     //      nào ⇒ ảnh TỰ về hàng đợi, câu báo mang lý do THẬT + việc phải làm; bấm lại sau khi sửa ⇒ đăng được.
@@ -718,7 +794,7 @@ export async function testCreativeManualGenDb(db: Db) {
     await reviewManualGenImage(db, { imageId: anh7.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
     creativeFails = true;
     fbCalls.length = 0;
-    const c7 = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, tokenApp: async () => 'Token ERP đang dùng thuộc ứng dụng "App thử" (ID 999).' });
+    const c7 = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, tokenApp: async () => 'Token ERP đang dùng thuộc ứng dụng "App thử" (ID 999).' });
     creativeFails = false;
     assert.ok(c7.ok && c7.outcome === "FAILED", c7.ok ? c7.detail : c7.error);
     if (c7.ok) instantIds.push(c7.batchId);
@@ -750,7 +826,7 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.deepEqual(ketRong?.publishFailure, { batchId: v7.batchId, canRequeue: true, emptyCampaignId: "camp-da-tao" }, "chiến dịch TẮT không nhóm không tiêu được tiền ⇒ trả về được");
     assert.ok((await requeueFailedManualGenImage(db, anh7.id)).ok);
     assert.ok(await trongHang(anh7.id), "ảnh hỏng ở bước tạo nhóm về lại hàng đợi");
-    const c7b = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    const c7b = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c7b.ok && c7b.outcome === "LIVE", "sửa xong bấm lại ⇒ đăng được");
     if (c7b.ok) instantIds.push(c7b.batchId);
 
