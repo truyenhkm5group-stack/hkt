@@ -291,6 +291,15 @@ export type VideoScaleConfig = {
    * Rỗng ⇒ dùng mẩu mẫu của Thư viện Media (`creative.config.templateAdId`).
    */
   adTemplateAdId: string;
+  /** Khung chấm một quảng cáo (ngày, từ lúc bật): hết khung mới kết luận theo luật GIỮ; luật TẮT xét mọi lúc. */
+  optimizeWindowDays: number;
+  /** Bước tăng ngân sách khi quảng cáo tốt (0,05–0,3; cổng vẫn chặn trên 30%). */
+  scaleStepPct: number;
+  /**
+   * Số đơn chốt TỐI THIỂU quy về quảng cáo trước khi máy được TỰ tăng ngân sách (mã phải bật `auto_scale`). `null` =
+   * CHƯA KHAI ⇒ máy chỉ ĐỀ NGHỊ tăng, không tự tăng — ít dữ liệu thì không ra quyết định tiêu thêm tiền.
+   */
+  autoScaleMinOrders: number | null;
   /**
    * Câu CHÍNH SÁCH BÁN HÀNG người đã khai (vd "Mua 2 sản phẩm miễn phí vận chuyển"). Là nguồn DUY NHẤT cho mọi khuyến
    * mãi / miễn ship / quà tặng trên kịch bản và câu chữ — không có dòng nào ⇒ không câu khuyến mãi nào được viết.
@@ -316,6 +325,9 @@ export const DEFAULT_VIDEO_SCALE_CONFIG: VideoScaleConfig = {
   policyLines: [],
   adsGlobalDailyCapVnd: null,
   adTemplateAdId: "",
+  optimizeWindowDays: 3,
+  scaleStepPct: 0.2,
+  autoScaleMinOrders: null,
 };
 
 export const POLICY_LINES_MAX = 5;
@@ -365,6 +377,12 @@ export function normalizeVideoScaleConfig(raw: unknown): VideoScaleConfig {
       return Number.isFinite(g) && g > 0 ? Math.min(Math.round(g), VIDEO_ADS_HARD_LIMITS.maxGlobalDailyVnd) : null;
     })(),
     adTemplateAdId: typeof r.adTemplateAdId === "string" && /^[0-9]{5,25}$/.test(r.adTemplateAdId.trim()) ? r.adTemplateAdId.trim() : "",
+    optimizeWindowDays: clampInt(r.optimizeWindowDays, 1, 14, d.optimizeWindowDays),
+    scaleStepPct: typeof r.scaleStepPct === "number" && r.scaleStepPct >= 0.05 && r.scaleStepPct <= VIDEO_ADS_HARD_LIMITS.maxStepPct ? r.scaleStepPct : d.scaleStepPct,
+    autoScaleMinOrders: (() => {
+      const n = typeof r.autoScaleMinOrders === "number" ? r.autoScaleMinOrders : typeof r.autoScaleMinOrders === "string" && r.autoScaleMinOrders.trim() !== "" ? Number(r.autoScaleMinOrders) : NaN;
+      return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : null;
+    })(),
     policyLines: Array.isArray(r.policyLines)
       ? r.policyLines
           .filter((x): x is string => typeof x === "string")
@@ -600,7 +618,7 @@ export const VIDEO_AD_DENIALS = [
   "MAPPING_CHANGED",
   "NO_AD_ACCOUNT",
   "NO_TEMPLATE",
-  "NO_KILL_RULES",
+  "NO_KILL_RULES", "NO_OPTIMIZER",
   "NO_BUDGET",
   "BELOW_MIN_BUDGET",
   "OVER_AD_CAP",
@@ -625,6 +643,8 @@ export type VideoAdGateInput = {
   adAccountId: string | null;
   templateAdId: string | null;
   killRules: number;
+  /** Vòng tối ưu (thứ chạy luật tắt) đã im lặng quá `OPTIMIZER_MAX_SILENCE_MS`, hoặc chưa chạy lần nào. */
+  optimizerSilent: boolean;
   /** Đã có id Facebook (chiến dịch) — bật / đổi ngân sách / tắt cần. */
   onFacebook: boolean;
   /** Ngân sách ngày của quảng cáo NÀY sau hành động (VND). */
@@ -667,6 +687,9 @@ export function gateVideoAd(i: VideoAdGateInput): VideoAdGate {
   if (i.action === "CREATE") return { allow: true };
   if (i.action === "ACTIVATE" && !i.onFacebook) return deny("NOT_ON_FACEBOOK", "Quảng cáo chưa được dựng trên Facebook.");
   if (i.killRules <= 0) return deny("NO_KILL_RULES", "Chưa khai luật TẮT quảng cáo (Thư viện Media → Cấu hình & luật) — không bật / tăng tiền khi không có gì tự dừng quảng cáo.");
+  if (i.optimizerSilent) {
+    return deny("NO_OPTIMIZER", "Vòng tối ưu (thứ chạy luật tắt quảng cáo) không chạy trong 3 giờ qua — bật VIDEO_SCALE_EVERY_MINUTES rồi đợi một lượt, không bật / tăng tiền khi không có gì tự dừng quảng cáo thua.");
+  }
   const L = VIDEO_ADS_HARD_LIMITS;
   if (i.budgetVnd === null || i.caps.perAdVnd === null || i.caps.skuVnd === null || i.caps.globalVnd === null) {
     return deny("NO_BUDGET", "Chưa khai đủ ngân sách: ngân sách ngày mỗi quảng cáo, trần mã / ngày và trần toàn module / ngày.");
@@ -692,4 +715,46 @@ export function videoAdNames(input: { code: string; day: string; pageLabel: stri
   const d = input.day.replace(/-/g, "").slice(2);
   const base = `VS_${input.code}_${d}_${clean(input.pageLabel) || "PAGE"}_V${input.seq}`;
   return { campaign: base, adset: `${base}_${input.angle}`, ad: `${base}_${input.angle}_VIDEO` };
+}
+
+// ───────────────────────────── ĐO LƯỜNG + VÒNG TỐI ƯU (PR 4) ─────────────────────────────
+
+/** Nhịp lượt tối ưu (kéo số đo Meta, chấm, tắt / đề nghị tăng, rút bài học) — chạy trong job `video-scale`. */
+export const OPTIMIZE_EVERY_MS = 55 * 60_000;
+export const OPTIMIZER_STATE_KEY = "videoScale.optimizer";
+/**
+ * Vòng tối ưu im lặng quá mức này ⇒ cổng KHÔNG cho bật / tăng tiền quảng cáo. Luật tắt chỉ bảo vệ tiền khi có thứ chạy nó:
+ * bộ lập lịch chưa bật (`VIDEO_SCALE_EVERY_MINUTES`) hoặc job chết thì quảng cáo thua cứ tiêu mãi.
+ */
+export const OPTIMIZER_MAX_SILENCE_MS = 3 * 3_600_000;
+
+export const VIDEO_AD_ACTIONS_TAKEN = ["NONE", "PAUSE", "SCALE", "RECOMMEND_SCALE"] as const;
+export type VideoAdActionTaken = (typeof VIDEO_AD_ACTIONS_TAKEN)[number];
+
+export const VIDEO_AD_ACTION_TAKEN_LABEL: Record<VideoAdActionTaken, string> = {
+  NONE: "Giữ nguyên",
+  PAUSE: "Máy tắt",
+  SCALE: "Máy tăng ngân sách",
+  RECOMMEND_SCALE: "Đề nghị tăng ngân sách (chờ người)",
+};
+
+/**
+ * Từ phán quyết ra hành động — hàm THUẦN. Tắt chỉ khi phán quyết là THUA / KÍCH HOẠT LUẬT TẮT (tắt chỉ làm GIẢM tiền).
+ * Tăng chỉ khi TỐT (hứa hẹn / thắng) VÀ mã bật tự tăng VÀ đã khai ngưỡng đơn VÀ số đơn chốt đạt ngưỡng; thiếu một điều
+ * ⇒ chỉ ĐỀ NGHỊ. Phán quyết chưa kết luận (chưa có số chi, đang trong khung, đợi đơn) ⇒ không làm gì.
+ */
+export function actionForVerdict(input: { verdict: string; adActive: boolean; autoScale: boolean; minOrders: number | null; bookedOrders: number }): VideoAdActionTaken {
+  if (!input.adActive) return "NONE";
+  if (input.verdict === "KILL" || input.verdict === "LOSE") return "PAUSE";
+  if (input.verdict === "PROMISING" || input.verdict === "WIN") {
+    if (input.autoScale && input.minOrders !== null && input.bookedOrders >= input.minOrders) return "SCALE";
+    return "RECOMMEND_SCALE";
+  }
+  return "NONE";
+}
+
+/** Ngân sách sau một bước tăng — làm tròn nghìn đồng, không vượt trần mỗi quảng cáo. Hàm THUẦN. */
+export function nextScaledBudget(currentVnd: number, stepPct: number): number {
+  const raw = currentVnd * (1 + Math.min(stepPct, VIDEO_ADS_HARD_LIMITS.maxStepPct));
+  return Math.min(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd, Math.floor(raw / 1000) * 1000);
 }

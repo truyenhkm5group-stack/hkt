@@ -2,7 +2,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
-import { VIDEO_ADS_HARD_LIMITS, gateVideoAd, videoAdNames, type VideoAdAction, type VideoAdGate, type VideoAdsMode, type VideoScaleConfig } from "@/lib/constants/video-scale";
+import { OPTIMIZER_MAX_SILENCE_MS, OPTIMIZER_STATE_KEY, VIDEO_ADS_HARD_LIMITS, gateVideoAd, videoAdNames, type VideoAdAction, type VideoAdGate, type VideoAdsMode, type VideoScaleConfig } from "@/lib/constants/video-scale";
 import { env } from "@/lib/env";
 import { IntegrationError } from "@/lib/integrations/http";
 import {
@@ -125,6 +125,17 @@ export async function templateAdIdFor(db: Db, cfg: VideoScaleConfig): Promise<st
   return config.templateAdId || null;
 }
 
+/** Mốc lượt tối ưu gần nhất (`settings` khoá `videoScale.optimizer`). Không đọc được ⇒ `null` (coi như IM LẶNG). */
+export async function optimizerHeartbeat(db: Db): Promise<Date | null> {
+  try {
+    const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, OPTIMIZER_STATE_KEY)).limit(1);
+    const t = Number((JSON.parse(row?.value ?? "{}") as { lastRunAt?: unknown }).lastRunAt);
+    return Number.isFinite(t) && t > 0 ? new Date(t) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function killRuleCount(db: Db): Promise<number> {
   const { config } = await readCurrentCreativeConfig(db);
   return config.killRules.length;
@@ -156,12 +167,13 @@ export async function adGateFor(db: Db, ad: AdRow, action: VideoAdAction, budget
   const [post] = ad.postId ? await db.select().from(Ps).where(eq(Ps.id, ad.postId)).limit(1) : [];
   const [sku] = await db.select().from(SK).where(eq(SK.productId, ad.productId)).limit(1);
   const [page] = await db.select().from(PG).where(eq(PG.pageId, ad.pageId)).limit(1);
-  const [auto, kill, active, changes, template] = await Promise.all([
+  const [auto, kill, active, changes, template, beat] = await Promise.all([
     readVideoAutomation(db),
     killRuleCount(db),
     activeBudgets(db, ad.productId, ad.id),
     budgetChangesToday(db, ad.id, extra.now),
     templateAdIdFor(db, cfg),
+    optimizerHeartbeat(db),
   ]);
   return gateVideoAd({
     action,
@@ -175,6 +187,7 @@ export async function adGateFor(db: Db, ad: AdRow, action: VideoAdAction, budget
     adAccountId: sku?.adAccountId ?? null,
     templateAdId: ad.templateAdId || template,
     killRules: kill,
+    optimizerSilent: beat === null || extra.now.getTime() - beat.getTime() > OPTIMIZER_MAX_SILENCE_MS,
     onFacebook: Boolean(ad.fbCampaignId),
     budgetVnd,
     currentBudgetVnd: extra.currentBudgetVnd ?? null,

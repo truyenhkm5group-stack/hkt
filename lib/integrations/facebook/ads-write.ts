@@ -976,3 +976,116 @@ export async function readAdsetBudget(adsetId: string, currency: string): Promis
   const minor = minorOf(rec.daily_budget);
   return { dailyBudgetVnd: minor === null ? null : fbMinorToVnd(minor, currency), status: asText(rec.status) ?? "", effectiveStatus: asText(rec.effective_status) ?? "" };
 }
+
+/* ═══════════════════ VIDEO SCALE — SỐ ĐO (chủ shop 27/09/2026, `docs/video-scale.md` §PR4) — CHỈ ĐỌC ═══════════════════
+ *
+ * Tham số: developers.facebook.com/docs/marketing-api/insights/parameters (đọc 27/09/2026) — `GET {ad_id}/insights` với
+ * `time_increment=1` trả một dòng / ngày; các trường video là MẢNG `[{ action_type, value }]`. Reel: `GET {video_id}/video_insights`
+ * bằng token fanpage (`blue_reels_play_count` · `post_impressions_unique` · `post_video_likes_by_reaction_type` ·
+ * `post_video_social_actions`). Trường Meta không trả ⇒ `null` (CHƯA BIẾT), không bao giờ 0. Tiền KHÔNG đọc ở đây — tiền quảng
+ * cáo có một nguồn là `ad_spends` (đồng bộ insights hằng giờ).
+ */
+
+export type AdVideoDay = { day: string; videoPlays: number | null; thruplays: number | null; p25: number | null; p50: number | null; p75: number | null; p100: number | null };
+
+function actionSum(v: unknown): number | null {
+  if (!Array.isArray(v)) return null;
+  let total = 0;
+  let seen = false;
+  for (const x of v) {
+    const n = Number(asRecord(x)?.value);
+    if (Number.isFinite(n)) {
+      total += n;
+      seen = true;
+    }
+  }
+  return seen ? Math.round(total) : null;
+}
+
+/** Hàm THUẦN: phản hồi insights → một dòng / ngày. Dòng không có `date_start` bị bỏ. */
+export function parseAdVideoInsights(body: unknown): AdVideoDay[] {
+  const data = asRecord(body)?.data;
+  if (!Array.isArray(data)) return [];
+  const out: AdVideoDay[] = [];
+  for (const raw of data) {
+    const r = asRecord(raw);
+    const day = asText(r?.date_start);
+    if (!r || !day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    out.push({
+      day,
+      videoPlays: actionSum(r.video_play_actions),
+      thruplays: actionSum(r.video_thruplay_watched_actions),
+      p25: actionSum(r.video_p25_watched_actions),
+      p50: actionSum(r.video_p50_watched_actions),
+      p75: actionSum(r.video_p75_watched_actions),
+      p100: actionSum(r.video_p100_watched_actions),
+    });
+  }
+  return out;
+}
+
+export async function readAdVideoInsights(adId: string, since: string, until: string): Promise<AdVideoDay[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new IntegrationError("Facebook: khoảng ngày không hợp lệ.", 400);
+  const rec = await graphGet(`${assertFbId(adId, "id quảng cáo")}/insights`, {
+    fields: "video_play_actions,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions",
+    time_increment: "1",
+    time_range: JSON.stringify({ since, until }),
+    limit: "60",
+  });
+  return parseAdVideoInsights(rec);
+}
+
+export type ReelInsights = { plays: number | null; reach: number | null; reactions: number | null; comments: number | null; shares: number | null };
+
+/** Hàm THUẦN: phản hồi `video_insights` → năm con số; chỉ số vắng ⇒ `null`. */
+export function parseReelInsights(body: unknown): ReelInsights {
+  const out: ReelInsights = { plays: null, reach: null, reactions: null, comments: null, shares: null };
+  const data = asRecord(body)?.data;
+  if (!Array.isArray(data)) return out;
+  const num = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+  const sumObj = (v: unknown) => {
+    const o = asRecord(v);
+    if (!o) return num(v);
+    let t = 0;
+    let seen = false;
+    for (const x of Object.values(o)) {
+      const n = Number(x);
+      if (Number.isFinite(n)) {
+        t += n;
+        seen = true;
+      }
+    }
+    return seen ? Math.round(t) : null;
+  };
+  for (const raw of data) {
+    const r = asRecord(raw);
+    const name = asText(r?.name);
+    const values = Array.isArray(r?.values) ? (r?.values as unknown[]) : [];
+    const value = asRecord(values[values.length - 1])?.value;
+    if (value === undefined) continue;
+    if (name === "blue_reels_play_count") out.plays = num(value);
+    else if (name === "post_impressions_unique") out.reach = num(value);
+    else if (name === "post_video_likes_by_reaction_type") out.reactions = sumObj(value);
+    else if (name === "post_video_social_actions") {
+      const o = asRecord(value);
+      if (o) {
+        out.comments = o.COMMENT !== undefined ? num(o.COMMENT) : o.comment !== undefined ? num(o.comment) : null;
+        out.shares = o.SHARE !== undefined ? num(o.SHARE) : o.share !== undefined ? num(o.share) : null;
+      }
+    }
+  }
+  return out;
+}
+
+export async function readReelInsights(pageId: string, videoId: string): Promise<ReelInsights> {
+  const token = await pageAccessToken(pageId);
+  const rec = await graphGet(
+    `${assertFbId(videoId, "id video")}/video_insights`,
+    { metric: "blue_reels_play_count,post_impressions_unique,post_video_likes_by_reaction_type,post_video_social_actions" },
+    token,
+  );
+  return parseReelInsights(rec);
+}

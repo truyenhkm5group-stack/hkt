@@ -39,6 +39,10 @@ export const videoConfigSchema = z.object({
   /** Chuỗi rỗng = CHƯA KHAI ⇒ không bật quảng cáo nào. */
   adsGlobalDailyCapVnd: z.union([z.literal(""), z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(VIDEO_ADS_HARD_LIMITS.maxGlobalDailyVnd)]).default(""),
   adTemplateAdId: z.string().trim().regex(/^([0-9]{5,25})?$/, "Id mẩu quảng cáo mẫu chỉ gồm chữ số").default(""),
+  optimizeWindowDays: z.coerce.number().int().min(1).max(14).default(3),
+  scaleStepPct: z.coerce.number().min(0.05).max(VIDEO_ADS_HARD_LIMITS.maxStepPct).default(0.2),
+  /** Chuỗi rỗng = CHƯA KHAI ⇒ máy chỉ ĐỀ NGHỊ tăng, không tự tăng. */
+  autoScaleMinOrders: z.union([z.literal(""), z.coerce.number().int().min(1).max(1000)]).default(""),
 });
 
 export const videoSkuModeSchema = z.object({ productId: id, reviewMode: z.enum(VIDEO_REVIEW_MODES) });
@@ -72,6 +76,7 @@ export const videoSkuAdsSchema = z.object({
   dailyBudgetPerAdVnd: vndOrEmpty(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd),
   skuDailyCapVnd: vndOrEmpty(VIDEO_ADS_HARD_LIMITS.maxSkuDailyVnd),
   autoScale: z.boolean().default(false),
+  autoNextRound: z.boolean().default(false),
 });
 
 export const videoAdIdSchema = z.object({ adId: id });

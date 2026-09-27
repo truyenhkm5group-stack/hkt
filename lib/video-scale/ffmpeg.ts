@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
 import { env } from "@/lib/env";
 
 /**
@@ -54,6 +55,20 @@ export function ffmpegVersion(): Promise<string | null> {
     .then((r) => (r.code === 0 ? (r.stdout.toString("utf8").split("\n")[0] ?? "ffmpeg").trim() : null))
     .catch(() => null);
   return availability;
+}
+
+/**
+ * Tệp phông cho chữ trên hình, hoặc `null` khi tệp không có. Thiếu phông thì ffmpeg KHÔNG báo lỗi — nó lặng lẽ dùng một phông
+ * khác, và phông ấy thường thiếu dấu tiếng Việt ("thử" thành "th□"): video vẫn "thành công" với chữ vỡ. Nên thiếu phông là CHẶN.
+ */
+export async function resolveFontFile(file: string = env.videoScale.fontFile): Promise<string | null> {
+  if (!file) return null;
+  try {
+    await access(file);
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 // ───────────────────────────── ĐỌC THÔNG SỐ ─────────────────────────────

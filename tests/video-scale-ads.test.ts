@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CREATIVE_CONFIG_KEY } from "@/lib/constants/creative-loop";
-import { VIDEO_AUTOMATION_KEY, VIDEO_SCALE_CONFIG_KEY, gateVideoAd, normalizeVideoScaleConfig, videoAdNames, type VideoAdGateInput } from "@/lib/constants/video-scale";
+import { OPTIMIZER_STATE_KEY, VIDEO_AUTOMATION_KEY, VIDEO_SCALE_CONFIG_KEY, gateVideoAd, normalizeVideoScaleConfig, videoAdNames, type VideoAdGateInput } from "@/lib/constants/video-scale";
 import type { TemplateAd } from "@/lib/integrations/facebook/ads-write";
 import { adsetForPage, buildVideoStorySpec, signedAssetUrl, verifyAssetSignature } from "@/lib/video-scale/ad-spec";
 import { activateVideoAd, planVideoAd, queuePauseAds, setVideoAdBudget, type AdsApi, type AdsDeps } from "@/lib/video-scale/ads";
@@ -37,6 +37,7 @@ function base(over: Partial<VideoAdGateInput> = {}): VideoAdGateInput {
     adAccountId: ACC,
     templateAdId: "120000000000001",
     killRules: 2,
+    optimizerSilent: false,
     onFacebook: true,
     budgetVnd: 100_000,
     currentBudgetVnd: 100_000,
@@ -64,6 +65,7 @@ export function testVideoScaleAdsPure() {
     ["chưa khai mẩu mẫu", { templateAdId: null }, "NO_TEMPLATE"],
     ["chưa dựng", { onFacebook: false }, "NOT_ON_FACEBOOK"],
     ["không luật tắt", { killRules: 0 }, "NO_KILL_RULES"],
+    ["vòng tối ưu im lặng", { optimizerSilent: true }, "NO_OPTIMIZER"],
     ["chưa khai trần mã", { caps: { perAdVnd: 200_000, skuVnd: null, globalVnd: 1_000_000 } }, "NO_BUDGET"],
     ["chưa khai trần toàn module", { caps: { perAdVnd: 200_000, skuVnd: 300_000, globalVnd: null } }, "NO_BUDGET"],
     ["dưới sàn", { budgetVnd: 10_000 }, "BELOW_MIN_BUDGET"],
@@ -133,7 +135,7 @@ export function testVideoScaleAdsPure() {
   const far = String(Math.floor(now.getTime() / 1000) + 10 * 3600);
   assert.ok(!verifyAssetSignature("khoa-bi-mat", "tep-1", far, sig, now), "hạn xa quá 2 giờ ⇒ từ chối");
 
-  console.log("✓ Video Scale quảng cáo (thuần): cổng 20 ca + thứ tự chốt · tắt luôn được · +30%/1 lần ngày · tên mang mã không TEST · bài video chép nút mẩu mẫu · link ký tên");
+  console.log("✓ Video Scale quảng cáo (thuần): cổng 21 ca + thứ tự chốt · tắt luôn được · +30%/1 lần ngày · tên mang mã không TEST · bài video chép nút mẩu mẫu · link ký tên");
 }
 
 // ───────────────────────────── CSDL ─────────────────────────────
@@ -223,7 +225,7 @@ async function publishedVariant(db: Db, runId: string, seq: number, userId: stri
 }
 
 export async function testVideoScaleAdsDb(db: Db) {
-  const keys = [VIDEO_SCALE_CONFIG_KEY, CREATIVE_CONFIG_KEY, VIDEO_AUTOMATION_KEY];
+  const keys = [VIDEO_SCALE_CONFIG_KEY, CREATIVE_CONFIG_KEY, VIDEO_AUTOMATION_KEY, OPTIMIZER_STATE_KEY];
   const prev = await db.select().from(schema.settings).where(inArray(schema.settings.key, keys));
   await cleanup(db);
   const setSetting = (key: string, value: unknown) => db.insert(schema.settings).values({ key, value: JSON.stringify(value) }).onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify(value) } });
@@ -231,6 +233,8 @@ export async function testVideoScaleAdsDb(db: Db) {
     await db.delete(schema.settings).where(eq(schema.settings.key, VIDEO_AUTOMATION_KEY));
     await setSetting(VIDEO_SCALE_CONFIG_KEY, { enabled: true, dailyUsdCap: 5, adsGlobalDailyCapVnd: 150_000, adTemplateAdId: "120000000000001" });
     await setSetting(CREATIVE_CONFIG_KEY, { killRules: [{ metric: "ctr", op: "lt", value: 0.005, minSpendVnd: 100_000, label: "CTR thấp" }] });
+    // Nhịp tim vòng tối ưu: 4 giờ trước ⇒ IM LẶNG (cổng chặn bật); ca đầu dưới đây kiểm điều đó rồi mới đặt mốc mới.
+    await setSetting(OPTIMIZER_STATE_KEY, { lastRunAt: Date.now() - 4 * 3_600_000 });
     await db.insert(schema.users).values({ id: `${P}u`, email: `${P}u@t.local`, name: "Người chi tiền", passwordHash: "x", role: "ADMIN" });
     const actor = { id: `${P}u`, label: "Người chi tiền" };
     await db.insert(schema.products).values({ id: `${P}prod`, name: "Đầm thử quảng cáo", customId: "Q777" });
@@ -260,6 +264,12 @@ export async function testVideoScaleAdsDb(db: Db) {
     assert.equal(calls.activates.length, 0, "PUBLISH_PAUSED không bao giờ tự bật");
     assert.ok(a1.campaignName.includes("Q777") || a1.campaignName.includes("VSATEST1"), "tên chiến dịch mang mã");
     assert.ok((await planVideoAd(db, v1, cfg, null)).adId === null, "một video một quảng cáo / tài khoản");
+
+    // Vòng tối ưu im lặng ⇒ người cũng KHÔNG bật được (không có gì chạy luật tắt).
+    const silent = await activateVideoAd(db, a1.id, actor, cfg, adsDeps);
+    assert.ok(!silent.ok && silent.error.includes("Vòng tối ưu"), silent.ok ? "" : silent.error);
+    assert.equal(calls.activates.length, 0);
+    await setSetting(OPTIMIZER_STATE_KEY, { lastRunAt: Date.now() });
 
     // Người bật ⇒ chạy; sổ ghi APPLIED.
     const act = await activateVideoAd(db, a1.id, actor, cfg, adsDeps);
@@ -325,7 +335,7 @@ export async function testVideoScaleAdsDb(db: Db) {
     await db.update(schema.videoScaleVariants).set({ isTest: true }).where(eq(schema.videoScaleVariants.id, v2));
     assert.equal((await planVideoAd(db, v2, cfgBig, null)).adId, null);
 
-    console.log("✓ Video Scale quảng cáo (CSDL): dựng TẮT rồi mới bật · tự bật chịu trần mã / toàn module · không luật tắt không bật · +30% / 1 lần ngày · dấu đang gửi không tạo chiến dịch lần hai · dừng khẩn cấp tắt được cả khi đường ghi đóng · sổ ghi cả lượt bị chặn");
+    console.log("✓ Video Scale quảng cáo (CSDL): dựng TẮT rồi mới bật · vòng tối ưu im lặng thì không bật · tự bật chịu trần mã / toàn module · không luật tắt không bật · +30% / 1 lần ngày · dấu đang gửi không tạo chiến dịch lần hai · dừng khẩn cấp tắt được cả khi đường ghi đóng · sổ ghi cả lượt bị chặn");
   } finally {
     await cleanup(db);
     await db.delete(schema.settings).where(inArray(schema.settings.key, keys));

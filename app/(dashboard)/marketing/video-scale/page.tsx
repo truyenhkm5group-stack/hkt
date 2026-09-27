@@ -14,7 +14,12 @@ import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { FB_PAGE_PUBLISH_SCOPES } from "@/lib/constants/video-scale";
 import { readVideoAutomation } from "@/lib/video-scale/publish";
 import { PublishPanel, type PublishReadiness } from "./publish-panel";
-import { param, type SearchParams } from "@/lib/search-params";
+import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { getVideoScaleReport } from "@/lib/queries/video-scale";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
+import { lastOptimizeAt } from "@/lib/video-scale/optimize";
+import { ReportPanel, type SkuProfit } from "./report-panel";
 import { cn } from "@/lib/utils";
 import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
 import { readVideoScaleConfig, videoScaleBlockers } from "@/lib/video-scale/pipeline";
@@ -31,6 +36,7 @@ const TABS = [
   { value: "duyet", label: "Duyệt video" },
   { value: "dang-reel", label: "Đăng Reel" },
   { value: "quang-cao", label: "Quảng cáo" },
+  { value: "bao-cao", label: "Báo cáo" },
   { value: "cau-hinh", label: "Cấu hình" },
 ] as const;
 
@@ -133,6 +139,8 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
         <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} />
       ) : tab === "quang-cao" ? (
         <AdsPanel ads={await listAds(db)} actions={await listAdActions(db)} activeVnd={await activeAdsDailyVnd(db)} globalCapVnd={cfg.adsGlobalDailyCapVnd} killRules={await killRuleCount(db)} templateAdId={await templateAdIdFor(db, cfg)} writeBlocked={adsWriteDisabledReason()} canSpend={canMoney} canPause={canEngage} />
+      ) : tab === "bao-cao" ? (
+        await reportTab(raw, canMoney || canConfig)
       ) : tab === "dang-reel" ? (
         <PublishPanel readiness={await publishReadiness()} automation={automation} pages={await listPageConfigs(db, fanpages)} posts={await listPosts(db)} canEngage={canEngage} canRelease={canRelease} canConfigure={canMode} canEdit={canEdit} />
       ) : (
@@ -150,4 +158,38 @@ async function publishReadiness(): Promise<PublishReadiness> {
     writeBlocked: adsWriteDisabledReason(),
     scopes: { state: scopes.state === "UNKNOWN" ? "UNKNOWN" : missing.length ? "MISSING" : "READY", missing, reason: scopes.reason },
   };
+}
+
+const REPORT_PERIODS = [
+  { key: "7d", label: "7 ngày" },
+  { key: "30d", label: "30 ngày" },
+  { key: "90d", label: "90 ngày" },
+] as const;
+
+/**
+ * Tab Báo cáo. Lợi nhuận của MÃ đọc từ ĐÚNG công thức của Báo cáo lợi nhuận danh nghĩa (không tính lại ở đây); tắt đọc tồn
+ * kho vì tab này không in tồn.
+ */
+async function reportTab(raw: SearchParams, canOptimize: boolean) {
+  const db = await getDb();
+  const key = REPORT_PERIODS.some((p) => p.key === param(raw, "period")) ? param(raw, "period") : "30d";
+  const period = resolvePeriod({ period: key }, "30d");
+  const includeTest = param(raw, "test") === "1";
+  const [skus, nominal, beat] = await Promise.all([getVideoScaleReport(db, { includeTest }), getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false), lastOptimizeAt(db)]);
+  const ids = new Set(skus.map((s) => s.productId));
+  const profit: Record<string, SkuProfit> = {};
+  for (const r of nominal.rows) {
+    if (ids.has(r.productId)) profit[r.productId] = { expectedProfit: r.expectedProfit, margin: r.margin, adSpend: r.adSpend, orders: r.orders, delivered: r.delivered };
+  }
+  return (
+    <ReportPanel
+      skus={skus}
+      profit={profit}
+      periodLabel={period.label.toLowerCase()}
+      periods={REPORT_PERIODS.map((p) => ({ key: p.key, label: p.label, active: p.key === key }))}
+      includeTest={includeTest}
+      lastOptimizeAt={beat}
+      canOptimize={canOptimize}
+    />
+  );
 }

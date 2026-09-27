@@ -50,7 +50,7 @@ export function WinPanel({ products, runs, music, pages, accounts, canSpend, can
                   <PauseButton scope="SKU" id={p.productId} paused={Boolean(p.pausedAt)} reason={p.pausedReason} canEngage={canEngage} canRelease={canRelease} label="mã" />
                 </div>
                 {p.pausedAt ? <p className="text-[12px] text-destructive">Mã đang dừng khẩn cấp{p.pausedReason ? `: ${p.pausedReason}` : ""}.</p> : null}
-                <SkuAdsForm productId={p.productId} accounts={accounts} value={{ adAccountId: p.adAccountId, adsMode: p.adsMode, dailyBudgetPerAdVnd: p.dailyBudgetPerAdVnd, skuDailyCapVnd: p.skuDailyCapVnd, autoScale: p.autoScale, adsModeBy: p.adsModeBy }} disabled={!canMoney} />
+                <SkuAdsForm productId={p.productId} accounts={accounts} value={{ adAccountId: p.adAccountId, adsMode: p.adsMode, dailyBudgetPerAdVnd: p.dailyBudgetPerAdVnd, skuDailyCapVnd: p.skuDailyCapVnd, autoScale: p.autoScale, autoNextRound: p.autoNextRound, adsModeBy: p.adsModeBy }} disabled={!canMoney} />
               </div>
             </div>
           ))}

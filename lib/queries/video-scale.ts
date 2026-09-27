@@ -4,6 +4,7 @@ import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { MODEL_STATE_LABELS, isModelState } from "@/lib/constants/model-lifecycle";
 import type { VideoQcVerdict, VideoReviewMode, VideoScript } from "@/lib/constants/video-scale";
+import { unknownMetrics, variantMetrics, type VariantMetricsRow } from "@/lib/queries/creative-loop";
 
 /**
  * ═══════════ ĐỌC CHO MÀN HÌNH VIDEO SCALE ═══════════
@@ -35,6 +36,7 @@ export type WinProductRow = {
   dailyBudgetPerAdVnd: number | null;
   skuDailyCapVnd: number | null;
   autoScale: boolean;
+  autoNextRound: boolean;
   adsModeBy: string;
   runs: number;
   inProduction: number;
@@ -73,6 +75,7 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
         dailyBudgetPerAdVnd: schema.videoScaleSkus.dailyBudgetPerAdVnd,
         skuDailyCapVnd: schema.videoScaleSkus.skuDailyCapVnd,
         autoScale: schema.videoScaleSkus.autoScale,
+        autoNextRound: schema.videoScaleSkus.autoNextRound,
         adsModeBy: schema.videoScaleSkus.adsModeBy,
       })
       .from(schema.videoScaleSkus)
@@ -112,6 +115,7 @@ export async function listWinProducts(db: Db): Promise<WinProductRow[]> {
       dailyBudgetPerAdVnd: skuBy.get(r.productId)?.dailyBudgetPerAdVnd ?? null,
       skuDailyCapVnd: skuBy.get(r.productId)?.skuDailyCapVnd ?? null,
       autoScale: skuBy.get(r.productId)?.autoScale ?? false,
+      autoNextRound: skuBy.get(r.productId)?.autoNextRound ?? false,
       adsModeBy: skuBy.get(r.productId)?.adsModeBy ?? "",
       runs: rBy.get(r.productId) ?? 0,
       inProduction: Number(v?.prod ?? 0),
@@ -485,4 +489,189 @@ export async function activeAdsDailyVnd(db: Db): Promise<number> {
   const tAd = schema.videoScaleAds;
   const [r] = await db.select({ n: sql<string>`coalesce(sum(${tAd.dailyBudgetVnd}), 0)` }).from(tAd).where(eq(tAd.status, "ACTIVE"));
   return Number(r?.n ?? 0);
+}
+
+// ───────────────────────────── BÁO CÁO: MÃ → VIDEO → REEL → QUẢNG CÁO (PR 4) ─────────────────────────────
+
+export type ReportAd = {
+  id: string;
+  adName: string;
+  status: string;
+  dailyBudgetVnd: number;
+  activatedAt: Date | null;
+  fbAdId: string;
+  /** Số ERP — `variantMetrics` (tiền: `ad_spends`; đơn: `ORDER_AD_ID` + `ORDER_OUTCOME`). `null` = CHƯA BIẾT. */
+  erp: VariantMetricsRow;
+  /** Số của META (không phải tiền, không vào phán quyết). `null` = Meta chưa trả. */
+  meta: { videoPlays: number | null; thruplays: number | null; p100: number | null };
+  verdict: { day: string; verdict: string; action: string; actionResult: string; reasons: string[] } | null;
+};
+
+export type ReportPost = {
+  id: string;
+  pageId: string;
+  status: string;
+  permalink: string;
+  publishedAt: Date | null;
+  snapshot: { plays: number | null; reach: number | null; reactions: number | null; comments: number | null; shares: number | null; error: string; capturedAt: Date } | null;
+};
+
+export type ReportVariant = {
+  id: string;
+  runId: string;
+  seq: number;
+  angle: string;
+  hook: string;
+  status: string;
+  qcVerdict: string | null;
+  isTest: boolean;
+  sourceId: string;
+  /** Tiền AI ƯỚC TÍNH theo bảng giá (clip + giọng đọc + QC + content) của riêng biến thể. `null` = chưa việc nào ghi tiền. */
+  aiUsd: number | null;
+  createdAt: Date;
+  posts: ReportPost[];
+  ads: ReportAd[];
+  lesson: string | null;
+};
+
+export type ReportSku = {
+  productId: string;
+  name: string;
+  code: string;
+  runs: number;
+  /** Tiền AI của cả mã: biến thể + việc cấp lượt (viết kịch bản). */
+  aiUsd: number | null;
+  variants: ReportVariant[];
+};
+
+/** Cây báo cáo. Số quảng cáo tính TỪ LÚC BẬT tới nay (không theo kỳ) — mỗi quảng cáo có một đời riêng. */
+export async function getVideoScaleReport(db: Db, opts: { includeTest: boolean; limitVariants?: number }): Promise<ReportSku[]> {
+  const tAd = schema.videoScaleAds;
+  const tPost = schema.videoScalePosts;
+  const tProd = schema.products;
+  const tModel = schema.productModels;
+  const tVerdict = schema.videoScaleVerdicts;
+  const tMetric = schema.videoScaleAdMetrics;
+  const tReel = schema.videoScaleReelMetrics;
+  const tLesson = schema.videoScaleLessons;
+
+  const variants = await db
+    .select({ id: tVar.id, runId: tVar.runId, productId: tVar.productId, seq: tVar.seq, angle: tVar.angle, script: tVar.script, status: tVar.status, qcVerdict: tVar.qcVerdict, isTest: tVar.isTest, sourceId: tVar.sourceId, createdAt: tVar.createdAt })
+    .from(tVar)
+    .where(opts.includeTest ? undefined : eq(tVar.isTest, false))
+    .orderBy(desc(tVar.createdAt))
+    .limit(opts.limitVariants ?? 200);
+  if (!variants.length) return [];
+  const vIds = variants.map((v) => v.id);
+  const pIds = [...new Set(variants.map((v) => v.productId))];
+  const rIds = [...new Set(variants.map((v) => v.runId))];
+
+  const [prods, codes, varCost, runCost, runCount, posts, ads, lessons] = await Promise.all([
+    db.select({ id: tProd.id, name: tProd.name, customId: tProd.customId }).from(tProd).where(inArray(tProd.id, pIds)),
+    db.select({ productId: tModel.productId, code: tModel.code }).from(tModel).where(inArray(tModel.productId, pIds)),
+    db.select({ variantId: tJob.variantId, usd: sql<string | null>`sum(${tJob.costUsd})` }).from(tJob).where(inArray(tJob.variantId, vIds)).groupBy(tJob.variantId),
+    db
+      .select({ runId: tJob.runId, usd: sql<string | null>`sum(${tJob.costUsd})` })
+      .from(tJob)
+      .where(and(inArray(tJob.runId, rIds), sql`${tJob.variantId} is null`))
+      .groupBy(tJob.runId),
+    db.select({ productId: tRun.productId, n: sql<string>`count(*)` }).from(tRun).where(inArray(tRun.productId, pIds)).groupBy(tRun.productId),
+    db.select().from(tPost).where(inArray(tPost.variantId, vIds)),
+    db.select().from(tAd).where(inArray(tAd.variantId, vIds)),
+    db.select({ variantId: tLesson.variantId, source: tLesson.source, summary: tLesson.summary }).from(tLesson).where(inArray(tLesson.variantId, vIds)),
+  ]);
+
+  const postIds = posts.map((p) => p.id);
+  const adIds = ads.map((a) => a.id);
+  const [snaps, metaRows, verdicts, erp] = await Promise.all([
+    postIds.length
+      ? db
+          .selectDistinctOn([tReel.postId], { postId: tReel.postId, plays: tReel.plays, reach: tReel.reach, reactions: tReel.reactions, comments: tReel.comments, shares: tReel.shares, error: tReel.error, capturedAt: tReel.capturedAt })
+          .from(tReel)
+          .where(inArray(tReel.postId, postIds))
+          .orderBy(tReel.postId, desc(tReel.capturedAt))
+      : Promise.resolve([]),
+    adIds.length
+      ? db
+          .select({ adId: tMetric.adId, plays: sql<string | null>`sum(${tMetric.videoPlays})`, thru: sql<string | null>`sum(${tMetric.thruplays})`, p100: sql<string | null>`sum(${tMetric.p100})` })
+          .from(tMetric)
+          .where(inArray(tMetric.adId, adIds))
+          .groupBy(tMetric.adId)
+      : Promise.resolve([]),
+    adIds.length
+      ? db
+          .selectDistinctOn([tVerdict.adId], { adId: tVerdict.adId, day: tVerdict.day, verdict: tVerdict.verdict, action: tVerdict.action, actionResult: tVerdict.actionResult, reasons: tVerdict.reasons })
+          .from(tVerdict)
+          .where(inArray(tVerdict.adId, adIds))
+          .orderBy(tVerdict.adId, desc(tVerdict.day))
+      : Promise.resolve([]),
+    variantMetrics(
+      db,
+      ads.filter((a) => a.fbAdId && a.activatedAt).map((a) => ({ id: a.id, fbAdId: a.fbAdId, startAt: a.activatedAt })),
+    ),
+  ]);
+
+  const num = (x: string | null | undefined) => (x === null || x === undefined ? null : Number(x));
+  const snapOf = new Map(snaps.map((s) => [s.postId, s]));
+  const metaOf = new Map(metaRows.map((m) => [m.adId, m]));
+  const verdictOf = new Map(verdicts.map((v) => [v.adId, v]));
+  const varCostOf = new Map(varCost.map((c) => [c.variantId, num(c.usd)]));
+  const runCostOf = new Map(runCost.map((c) => [c.runId, num(c.usd)]));
+
+  const vRows = variants.map((v) => {
+    const script = v.script as { hook?: unknown };
+    const lessonRows = lessons.filter((l) => l.variantId === v.id);
+    const row: ReportVariant = {
+      id: v.id,
+      runId: v.runId,
+      seq: v.seq,
+      angle: v.angle,
+      hook: typeof script.hook === "string" ? script.hook : "",
+      status: v.status,
+      qcVerdict: v.qcVerdict,
+      isTest: v.isTest,
+      sourceId: v.sourceId,
+      aiUsd: varCostOf.get(v.id) ?? null,
+      createdAt: v.createdAt,
+      posts: posts
+        .filter((p) => p.variantId === v.id)
+        .map((p) => ({ id: p.id, pageId: p.pageId, status: p.status, permalink: p.permalink, publishedAt: p.publishedAt, snapshot: snapOf.get(p.id) ?? null })),
+      ads: ads
+        .filter((a) => a.variantId === v.id)
+        .map((a) => {
+          const m = metaOf.get(a.id);
+          const vd = verdictOf.get(a.id);
+          return {
+            id: a.id,
+            adName: a.adName,
+            status: a.status,
+            dailyBudgetVnd: a.dailyBudgetVnd,
+            activatedAt: a.activatedAt,
+            fbAdId: a.fbAdId,
+            erp: erp.get(a.id) ?? unknownMetrics(),
+            meta: { videoPlays: num(m?.plays), thruplays: num(m?.thru), p100: num(m?.p100) },
+            verdict: vd ? { day: vd.day, verdict: vd.verdict, action: vd.action, actionResult: vd.actionResult, reasons: vd.reasons } : null,
+          };
+        }),
+      lesson: (lessonRows.find((l) => l.source === "AD") ?? lessonRows[0])?.summary ?? null,
+    };
+    return { productId: v.productId, row };
+  });
+
+  const nameOf = new Map(prods.map((p) => [p.id, p]));
+  const codeOf = new Map(codes.map((c) => [c.productId, c.code]));
+  const runsOf = new Map(runCount.map((r) => [r.productId, Number(r.n)]));
+  return pIds.map((pid) => {
+    const vs = vRows.filter((v) => v.productId === pid).map((v) => v.row);
+    const runCosts = [...new Set(vs.map((v) => v.runId))].map((r) => runCostOf.get(r) ?? null);
+    const parts = [...vs.map((v) => v.aiUsd), ...runCosts].filter((x): x is number => x !== null);
+    return {
+      productId: pid,
+      name: nameOf.get(pid)?.name ?? pid,
+      code: codeOf.get(pid) ?? nameOf.get(pid)?.customId ?? "",
+      runs: runsOf.get(pid) ?? 0,
+      aiUsd: parts.length ? parts.reduce((a, b) => a + b, 0) : null,
+      variants: vs,
+    };
+  });
 }

@@ -231,3 +231,59 @@ lại, hỏng kèm TÊN để người tìm trên Ads Manager. Tải video / ả
 | Khai **trần toàn module / ngày** (Cấu hình) | trần tiền là quyết định kinh doanh |
 | Mỗi mã: tài khoản quảng cáo · chế độ · ngân sách ngày khởi điểm · trần mã / ngày | như trên |
 
+## 13. PR 4 — Đo lường + vòng tối ưu
+
+Chạy trong job `video-scale`, tối đa một lượt / 55 phút (`settings["videoScale.optimizer"].lastRunAt`):
+
+1. **Số đo META** (`video_scale_ad_metrics`): lượt phát, ThruPlay, xem 25/50/75/100% theo quảng cáo × ngày; ảnh chụp bài Reel
+   (`video_scale_reel_metrics`: lượt phát, người xem, cảm xúc, bình luận, chia sẻ — tối đa một lần / 6 giờ / bài, lỗi đọc ghi
+   vào dòng chụp). Chỉ số Meta không trả ⇒ `NULL`, không 0. Số Meta KHÔNG vào phán quyết nào.
+2. **Chấm** mỗi quảng cáo đã từng bật bằng CHÍNH bộ máy của vòng mẫu ảnh: `variantMetrics` (tiền từ `ad_spends` cấp mẩu — một
+   nguồn; đơn qua `ORDER_AD_ID` + `ORDER_OUTCOME` — một công thức) và `judgeVariant` với luật TẮT / GIỮ của Thư viện Media.
+   Khung chấm = `optimizeWindowDays` từ lúc bật. Một dòng `video_scale_verdicts` / (quảng cáo, ngày).
+3. **Hành động** (`actionForVerdict`, hàm thuần):
+   - `KILL` / `LOSE` ⇒ máy TẮT (chỉ giảm tiền).
+   - `PROMISING` / `WIN` ⇒ máy TĂNG `scaleStepPct` (≤ 30%) CHỈ khi: mã bật tự tăng · đã khai **số đơn chốt tối thiểu**
+     (`autoScaleMinOrders`, mặc định CHƯA KHAI ⇒ không bao giờ tự tăng) · đủ đơn · số chi mới tới HÔM QUA (đồng bộ trễ ⇒ chi
+     CHƯA BIẾT) · Video Scale bật · không dừng tự động — VÀ lượt tăng vẫn qua `gateVideoAd` (ba trần, một lần / ngày). Thiếu
+     một điều ⇒ chỉ ĐỀ NGHỊ, người bấm ở tab Quảng cáo.
+   - Chưa kết luận (đang trong khung, chưa có số chi, đợi đơn, chưa khai luật giữ) ⇒ không làm gì.
+   - Chạy lại trong ngày không làm lại hành động đã `APPLIED`.
+4. **Bài học** (`video_scale_lessons`): mỗi biến thể một câu ĐÃ ĐẾM từ phán quyết cuối (góc, móc câu, chi, đơn, chi/đơn,
+   ThruPlay), và lý do người loại video. Người viết kịch bản đọc tối đa 8 câu (của mã trước, rồi video thắng của cả shop).
+   Bộ chọn góc (Thompson) đếm bài học `AD`: mã có ≥ 3 bài học ⇒ của mã, ít hơn ⇒ của cả shop.
+5. **Vòng tự động** (mã bật `auto_next_round`, mặc định tắt): mỗi ngày tối đa MỘT vòng mới dùng lại ảnh gốc / số biến thể /
+   ý tưởng / nhạc của vòng trước; không tạo khi mã còn vòng đang chạy, hôm nay đã có vòng, hoặc mã chưa có bài học quảng cáo
+   nào. Trần USD / ngày vẫn chặn ở từng clip.
+
+**Nhịp tim là điều kiện để tiêu tiền**: cổng `gateVideoAd` chặn BẬT / TĂNG (`NO_OPTIMIZER`) khi vòng tối ưu im lặng quá 3 giờ
+hoặc chưa chạy lần nào. Luật tắt chỉ bảo vệ tiền khi có thứ chạy nó — không bật `VIDEO_SCALE_EVERY_MINUTES` thì không quảng
+cáo nào được bật. Nút "Chạy vòng tối ưu ngay" KHÔNG ghi nhịp tim (một cú bấm tay không chứng minh bộ lập lịch còn sống).
+
+**Tab Báo cáo**: MÃ → VIDEO → REEL → QUẢNG CÁO, ba nhóm số KHÔNG trộn — META (lượt xem, chỉ để hiểu video) · ERP (chi, đơn
+chốt / giao / hoàn, doanh thu — thứ phán quyết đọc) · lợi nhuận danh nghĩa của CẢ MÃ theo kỳ (đọc thẳng
+`getNominalProfitReport`, mọi nguồn đơn). Lợi nhuận riêng từng quảng cáo KHÔNG tính: ERP không có công thức ấy. Tiền AI là
+ƯỚC TÍNH theo bảng giá (`video_scale_jobs.cost_usd`). Dữ liệu thử ẩn mặc định, hiện có nhãn.
+
+### HUMAN GATE thêm của PR 4
+
+| Việc | Vì sao máy không tự làm |
+|---|---|
+| GitHub Variable **`VIDEO_SCALE_EVERY_MINUTES`** (gợi ý 5) rồi deploy — BẮT BUỘC trước khi bật quảng cáo | đổi lịch là việc của chủ shop; không lịch thì không có gì chạy luật tắt |
+| Luật GIỮ ở Thư viện Media (thiếu ⇒ quảng cáo không bao giờ được kết luận TỐT) | ngưỡng là quyết định kinh doanh |
+| (Tuỳ) khai **số đơn chốt tối thiểu** + bật **tự tăng** theo mã | để máy tiêu thêm tiền là quyết định kinh doanh |
+| (Tuỳ) bật **vòng tự động** theo mã | mỗi vòng tốn tiền sinh video |
+
+## 14. Vận hành hằng ngày (đủ bốn PR)
+
+1. **Sáng — Báo cáo**: đọc tab Báo cáo: quảng cáo nào máy đã tắt / đã tăng / đang ĐỀ NGHỊ tăng (lý do in cạnh). Đề nghị ⇒
+   quyết ở tab Quảng cáo → Ngân sách (tối đa +30%, một lần / ngày).
+2. **Mã win**: mã mới thắng test ⇒ gán fanpage + tài khoản quảng cáo + chế độ + ngân sách → Tạo chiến dịch media (3–4 biến
+   thể). Mã bật vòng tự động thì máy tự tạo vòng mới mỗi ngày khi đã có bài học.
+3. **Duyệt video** (khi có badge): xem cạnh ảnh gốc, đọc QC; loại kèm lý do CỤ THỂ — lý do thành bài học của vòng sau.
+4. **Content + Reel**: chọn / sửa content, Đăng ngay hoặc Hẹn giờ (fanpage tự đăng thì máy làm).
+5. **Quảng cáo**: `PUBLISH_PAUSED` ⇒ bấm Bật trên quảng cáo đã dựng; `AUTO_LAUNCH` ⇒ máy bật trong phong bì. Bị chặn luôn
+   có câu lý do (thiếu luật tắt, vượt trần, vòng tối ưu im lặng…).
+6. **Có sự cố**: Dừng khẩn cấp ở mã / fanpage / toàn module (tab Đăng Reel) ⇒ mọi quảng cáo đang chạy trong phạm vi bị tắt ở
+   lượt kế tiếp; công tắc `ads.write.kill` của Thư viện Media vẫn chặn mọi lời ghi Facebook.
+

@@ -7963,6 +7963,8 @@ export const videoScaleSkus = pgTable(
     skuDailyCapVnd: integer("sku_daily_cap_vnd"),
     /** Cho máy TĂNG ngân sách quảng cáo tốt trong trần (PR 4). Mặc định tắt: tăng tiền phải có người bấm. */
     autoScale: boolean("auto_scale").notNull().default(false),
+    /** Mỗi ngày máy TỰ tạo một vòng biến thể mới cho mã (dùng bài học đã rút) — mặc định tắt: sinh video là tiêu tiền. */
+    autoNextRound: boolean("auto_next_round").notNull().default(false),
     /** Người bật chế độ quảng cáo hiện tại (mục 34) — `AUTO_LAUNCH` là một lần duyệt có người đứng tên. */
     adsModeByUserId: text("ads_mode_by_user_id").references(() => users.id, { onDelete: "set null" }),
     adsModeBy: text("ads_mode_by").notNull().default(""),
@@ -8377,5 +8379,103 @@ export const videoScaleAdActions = pgTable(
     index("video_scale_ad_actions_ad_idx").on(t.adId, t.createdAt),
     check("video_scale_ad_actions_action_check", sql`${t.action} IN ('CREATE', 'ACTIVATE', 'PAUSE', 'SET_BUDGET')`),
     check("video_scale_ad_actions_outcome_check", sql`${t.outcome} IN ('APPLIED', 'DENIED', 'FAILED')`),
+  ],
+);
+
+/**
+ * PHÁN QUYẾT hằng ngày của một quảng cáo video (`judgeVariant` của vòng mẫu ảnh — cùng luật tắt / luật giữ) + hành động máy
+ * đã làm. Một dòng / (quảng cáo, ngày VN) — lượt tối ưu chạy lại trong ngày chỉ cập nhật.
+ */
+export const videoScaleVerdicts = pgTable(
+  "video_scale_verdicts",
+  {
+    id: id(),
+    adId: text("ad_id")
+      .notNull()
+      .references(() => videoScaleAds.id, { onDelete: "cascade" }),
+    day: text("day").notNull(),
+    verdict: text("verdict").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    /** Số đo lúc chấm: chi (sổ `ad_spends`), hiển thị, nhấp, tin nhắn, đơn chốt / giao / hoàn, doanh thu. */
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+    action: text("action").notNull().default("NONE"),
+    actionResult: text("action_result").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("video_scale_verdicts_ad_day_uq").on(t.adId, t.day), check("video_scale_verdicts_action_check", sql`${t.action} IN ('NONE', 'PAUSE', 'SCALE', 'RECOMMEND_SCALE')`)],
+);
+
+/**
+ * SỐ ĐO VIDEO CỦA META theo quảng cáo × ngày — lượt xem 3 giây, ThruPlay, 25/50/75/100%. Đây là số của META, KHÔNG phải
+ * tiền: tiền quảng cáo có MỘT nguồn (`ad_spends`, mục 15). `NULL` = Meta không trả chỉ số đó (chưa biết), không phải 0.
+ */
+export const videoScaleAdMetrics = pgTable(
+  "video_scale_ad_metrics",
+  {
+    id: id(),
+    adId: text("ad_id")
+      .notNull()
+      .references(() => videoScaleAds.id, { onDelete: "cascade" }),
+    day: text("day").notNull(),
+    videoPlays: integer("video_plays"),
+    thruplays: integer("thruplays"),
+    p25: integer("p25"),
+    p50: integer("p50"),
+    p75: integer("p75"),
+    p100: integer("p100"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("video_scale_ad_metrics_ad_day_uq").on(t.adId, t.day)],
+);
+
+/** Ảnh chụp số đo BÀI REEL (không trả tiền) — lượt phát, người xem, cảm xúc, bình luận, chia sẻ. Lỗi đọc ghi vào `error`. */
+export const videoScaleReelMetrics = pgTable(
+  "video_scale_reel_metrics",
+  {
+    id: id(),
+    postId: text("post_id")
+      .notNull()
+      .references(() => videoScalePosts.id, { onDelete: "cascade" }),
+    plays: integer("plays"),
+    reach: integer("reach"),
+    reactions: integer("reactions"),
+    comments: integer("comments"),
+    shares: integer("shares"),
+    error: text("error").notNull().default(""),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("video_scale_reel_metrics_post_idx").on(t.postId, t.capturedAt)],
+);
+
+/**
+ * BÀI HỌC của một biến thể — thứ người viết kịch bản đọc ở vòng sau, và thứ sổ học theo góc đếm. Một dòng / (biến thể,
+ * nguồn): `AD` = kết luận từ số đo quảng cáo · `REVIEW` = người loại video kèm lý do. Chữ là câu ĐÃ ĐẾM, không phải ý kiến
+ * của mô hình.
+ */
+export const videoScaleLessons = pgTable(
+  "video_scale_lessons",
+  {
+    id: id(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => videoScaleVariants.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    angle: text("angle").notNull(),
+    angleVocabVersion: integer("angle_vocab_version").notNull(),
+    hook: text("hook").notNull().default(""),
+    verdict: text("verdict").notNull(),
+    success: boolean("success"),
+    summary: text("summary").notNull(),
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("video_scale_lessons_variant_source_uq").on(t.variantId, t.source),
+    index("video_scale_lessons_product_idx").on(t.productId, t.createdAt),
+    check("video_scale_lessons_source_check", sql`${t.source} IN ('AD', 'REVIEW')`),
   ],
 );

@@ -20,6 +20,7 @@ import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAd
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
 import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
+import { DEFAULT_OPTIMIZE_DEPS, runOptimize } from "@/lib/video-scale/optimize";
 
 /**
  * ═══════════ VIDEO SCALE — SERVER ACTIONS ═══════════
@@ -152,6 +153,7 @@ export async function saveVideoScaleConfigAction(raw: unknown): Promise<{ ok: tr
     provider: before.provider,
     dailyUsdCap: parsed.data.dailyUsdCap === "" ? null : parsed.data.dailyUsdCap,
     adsGlobalDailyCapVnd: parsed.data.adsGlobalDailyCapVnd === "" ? null : parsed.data.adsGlobalDailyCapVnd,
+    autoScaleMinOrders: parsed.data.autoScaleMinOrders === "" ? null : parsed.data.autoScaleMinOrders,
   });
   const text = JSON.stringify(next);
   await db.insert(schema.settings).values({ key: VIDEO_SCALE_CONFIG_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
@@ -408,13 +410,14 @@ export async function setVideoSkuAdsAction(raw: unknown): Promise<{ ok: true } |
   if (budget && cap && budget > cap) return { error: "Ngân sách mỗi quảng cáo không được lớn hơn trần của mã." };
   const actor = await actorOf(user.id, user.email);
   const T = schema.videoScaleSkus;
-  const [before] = await db.select({ adAccountId: T.adAccountId, adsMode: T.adsMode, dailyBudgetPerAdVnd: T.dailyBudgetPerAdVnd, skuDailyCapVnd: T.skuDailyCapVnd, autoScale: T.autoScale }).from(T).where(eq(T.productId, d.productId)).limit(1);
+  const [before] = await db.select({ adAccountId: T.adAccountId, adsMode: T.adsMode, dailyBudgetPerAdVnd: T.dailyBudgetPerAdVnd, skuDailyCapVnd: T.skuDailyCapVnd, autoScale: T.autoScale, autoNextRound: T.autoNextRound }).from(T).where(eq(T.productId, d.productId)).limit(1);
   const set = {
     adAccountId: d.adAccountId || null,
     adsMode: d.adsMode,
     dailyBudgetPerAdVnd: budget,
     skuDailyCapVnd: cap,
     autoScale: d.autoScale,
+    autoNextRound: d.autoNextRound,
     adsModeByUserId: actor.id,
     adsModeBy: actor.label,
     adsModeAt: new Date(),
@@ -474,4 +477,19 @@ export async function setVideoAdBudgetAction(raw: unknown): Promise<{ ok: true }
   await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_AD_BUDGET", entity: "VIDEO_SCALE_AD", entityId: parsed.data.adId, after: { budgetVnd: parsed.data.budgetVnd, result: r } });
   revalidatePath(PATH);
   return r.ok ? { ok: true } : { error: r.error };
+}
+
+/**
+ * Chạy MỘT lượt vòng tối ưu ngay (số đo Meta, chấm, tắt quảng cáo thua, đề nghị / tự tăng trong trần, bài học). KHÔNG ghi
+ * nhịp tim: nhịp tim chứng minh BỘ LẬP LỊCH còn sống, một cú bấm tay thì không.
+ */
+export async function runVideoOptimizeNowAction(): Promise<{ ok: true; detail: string } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write") && !can(user, "settings:manage")) return { error: "Chạy vòng tối ưu (có thể tắt / tăng quảng cáo) cần quyền chi phí: sửa." };
+  const db = await getDb();
+  const o = await runOptimize(db, await readVideoScaleConfig(db), { ...DEFAULT_OPTIMIZE_DEPS, createRun: createVideoRun });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_OPTIMIZE_NOW", entity: "SETTINGS", entityId: "videoScale.optimizer", after: { ...o, errors: o.errors.slice(0, 5) } });
+  revalidatePath(PATH);
+  const detail = `Chấm ${o.judged} · tắt ${o.paused} · tăng ${o.scaled} · đề nghị ${o.recommended} · bài học ${o.lessons} · vòng mới ${o.runsCreated}${o.errors.length ? ` · ${o.errors.length} lỗi: ${o.errors[0]}` : ""}`;
+  return { ok: true, detail };
 }

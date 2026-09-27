@@ -1107,6 +1107,13 @@
       "when": 1790566148148,
       "tag": "0158_video_scale_ads",
       "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1790566208148,
+      "tag": "0159_video_scale_optimize",
+      "breakpoints": true
     }
   ]
 }
