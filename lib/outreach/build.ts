@@ -41,6 +41,23 @@ export function nurtureVars(cfg: OutreachConfig, ten: string, goiY: string): Tem
  * ba, và in vô cực cho mã không bán. `null` ở đây nghĩa là không gửi đi cái nào hoặc tồn không vơi:
  * với câu hỏi "tồn có nằm lâu không" thì đó là CÓ, nên mã vẫn vào tệp xả.
  */
+/**
+ * Mã có vào tệp XẢ HÀNG không — hàm thuần, MỘT phép so.
+ *
+ * `returnRatePct` là PHẦN TRĂM (0–100) đúng như `productReturnHistory` trả (`returned / finished × 100`),
+ * cùng đơn vị với `clearanceReturnRatePct`. Từ 05/09/2026 tới 27/09/2026 dòng so từng nhân thêm × 100
+ * lần nữa, nên mã hoàn ~0,5% đã đủ "hoàn cao" và được chào ưu đãi khách cũ / giá siêu hời thay cho
+ * ngưỡng chủ shop đặt (mặc định 35%). `daysOfCover === null` = tồn không vơi (không có nhịp ròng) ⇒
+ * vẫn tính là tồn nhiều.
+ */
+export function qualifiesForClearance(
+  returnRatePct: number,
+  daysOfCover: number | null,
+  cfg: Pick<OutreachConfig, "clearanceReturnRatePct" | "clearanceStockDays">,
+): boolean {
+  return returnRatePct >= cfg.clearanceReturnRatePct && (daysOfCover === null || daysOfCover >= cfg.clearanceStockDays);
+}
+
 export async function clearanceProducts(cfg: OutreachConfig): Promise<Set<string>> {
   const out = new Set<string>(cfg.clearanceProductIds);
   const [history, plan, slow] = await Promise.all([productReturnHistory(90), getReplenishmentPlan(), getSlowMoving()]);
@@ -60,7 +77,7 @@ export async function clearanceProducts(cfg: OutreachConfig): Promise<Set<string
     const st = byProduct.get(productId);
     if (!st || st.available <= 0) continue;
     const daysOfCover = coverDaysOf(st.available, pooledPace(st.paces));
-    if (h.rate * 100 >= cfg.clearanceReturnRatePct && (daysOfCover === null || daysOfCover >= cfg.clearanceStockDays)) out.add(productId);
+    if (qualifiesForClearance(h.rate, daysOfCover, cfg)) out.add(productId);
   }
   return out;
 }
