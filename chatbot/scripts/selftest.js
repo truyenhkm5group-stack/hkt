@@ -801,5 +801,53 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 24: ban chot don khong duoc tu chon mau khi khach chua chon (mau co >= 2 mau)");
 }
 
+// ---- 25: su co 2026-09-26 (khach Hoai Thu, Linh Tay CS1 chay Q005)
+{
+  const prevProducts = catalog.products;
+  const prevSettings = settings.get("PAGE1");
+  catalog.setProducts([{
+    id: "p5", code: "Q005", name: "Đầm Q005", note: "", attributes: { "Màu": ["Đen", "Đỏ Đô"], Size: ["L", "XL"] }, price: { min: 499000, max: 499000 },
+    images: ["https://content.pancake.vn/q005.png"], variations: [
+      { id: "v5a", sku: "Q005DENXL", fields: { "Màu": "Đen", Size: "XL" }, price: 499000, stock: 1, available: true, images: ["https://content.pancake.vn/q005-den.png"] },
+    ],
+  }]);
+  settings.update("PAGE1", { defaultProduct: "Q005", extraPrompt: "", sendProductImages: true, sizeChart: '[{"h":[0,999],"w":[[30,49,"M"],[50,55,"L"],[56,63,"XL"],[64,79,"2XL"]]}]' });
+  const shop = (t, att) => ({ from: { id: "PAGE1" }, message: t, attachments: att || [] });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+
+  // (a) So do nam NGOAI 8 tin cuoi cua khach van phai doc duoc
+  const hoiThoai = [
+    khach("60kg cao 1m60"), shop("Dạ chị mặc size XL ạ"),
+    ...["Ok", "Màu gì", "Có đen k", "Đứng vậy", "Có lẽ", "Trở đi trở lại cứ xin chiều cao cân nặng", "Các em nhiều nv à", "K đoc tn a", "2 lần gửi rồi và cho sai rồi giờ lại hỏi tiếp"].flatMap((t) => [khach(t), shop("Dạ")]),
+  ];
+  const r = bot.sizeLookupFor("PAGE1", hoiThoai);
+  assert.equal(r.status, "ok", "so do cu hon 8 tin van phai doc duoc");
+  assert.equal(r.size, "XL");
+  // (b) Da co so do ma bot van xin lai -> thay bang cau bao size
+  const xinLai = bot.stopAskingMeasurementsAgain("Dạ chị có thể cho em xin chiều cao và cân nặng của mình để em tư vấn size chuẩn nhất cho chị nha", "PAGE1", hoiThoai);
+  assert.match(xinLai, /size XL/);
+  assert.doesNotMatch(xinLai, /xin chiều cao/);
+  assert.equal(bot.stopAskingMeasurementsAgain("Dạ chị cho em xin chiều cao cân nặng ạ", "PAGE1", [khach("giá sao shop")]), "Dạ chị cho em xin chiều cao cân nặng ạ", "chua co so do thi van duoc hoi");
+
+  // (c) Khach buc minh -> nhan ra (xin loi 1 lan, chuyen nhan vien, im)
+  for (const t of ["Trở đi trở lại cứ xin chiều cao cân nặng", "K đoc tn a", "2 lần gửi rồi và cho sai rồi giờ lại hỏi tiếp", "Đồ điên", "Thôi đọc lại từ đầu đến cuối\nC k mua nữa mô"]) {
+    assert.equal(bot.isAnnoyed(t), true, "phai nhan ra khach buc: " + t);
+  }
+  for (const t of ["Ok mua nữa nha shop", "chị lấy 2 cái", "có đen không em", "60kg cao 1m60", "đọc giúp chị địa chỉ"]) {
+    assert.equal(bot.isAnnoyed(t), false, "khong duoc bat nham: " + t);
+  }
+
+  // (d) Page chay Q005: khach xin anh -> gan [[IMG:Q005]] theo mau chu luc, ke ca da gui anh truoc do
+  const daGuiAnh = [shop("", [{ type: "photo", url: "https://content.pancake.vn/q005.png" }]), khach("cho c xem ảnh thật đi")];
+  assert.match(bot.ensureQuoteImage("Dạ đây ạ, chị xem giúp em nhé", "PAGE1", daGuiAnh), /\[\[IMG:Q005\]\]/, "khach xin anh -> gui anh Q005 du da gui truoc do");
+  assert.match(bot.ensureQuoteImage("Dạ em gửi chị ảnh mẫu ạ", "PAGE1", [khach("mẫu này giá sao")]), /\[\[IMG:Q005\]\]/, "khong co ma trong cau -> dung mau chu luc");
+  assert.equal(bot.ensureQuoteImage("Dạ chị cao bao nhiêu ạ", "PAGE1", daGuiAnh.slice(0, 1).concat(khach("ok"))), "Dạ chị cao bao nhiêu ạ", "khach khong xin anh -> khong gui lai");
+  assert.match(bot.ensureQuoteImage("Dạ ảnh đây ạ [[IMG:Q005]]", "PAGE1", daGuiAnh), /^Dạ ảnh đây ạ \[\[IMG:Q005\]\]$/, "da co ma anh thi giu nguyen");
+
+  settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "", extraPrompt: prevSettings.extraPrompt || "", sizeChart: prevSettings.sizeChart || "", sendProductImages: prevSettings.sendProductImages ?? null });
+  catalog.setProducts(prevProducts);
+  console.log("OK 25: so do cu van doc duoc, khong xin lai so do, nhan ra khach buc, khach xin anh -> gui anh mau chu luc");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
