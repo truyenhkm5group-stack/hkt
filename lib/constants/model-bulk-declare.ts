@@ -18,6 +18,7 @@
  */
 import type { ModelEvidence, ModelState, ObservedModelStage } from "@/lib/constants/model-lifecycle";
 import { evidenceUnknowns, observeModelStage } from "@/lib/constants/model-lifecycle";
+import { staleStateSuggestion, type StaleStateFacts } from "@/lib/constants/model-stale-state";
 
 /** Trần kỹ thuật một lượt khai (một giao dịch mỗi mẫu) — không phải ngưỡng nghiệp vụ. */
 export const BULK_DECLARE_MAX = 200;
@@ -41,6 +42,11 @@ export type DeclarePreviewRow = {
   code: string;
   name: string;
   image: string | null;
+  /**
+   * Lời khai hiện tại lúc dựng bảng — cũng là HÀNG RÀO `expectedState` gửi lên máy chủ. `null` = mẫu chưa khai
+   * (bảng "Khai theo gợi ý"); khác `null` = bảng "Cập nhật theo thực tế" (Agent ST).
+   */
+  current: ModelState | null;
   /** `null` = máy không gợi ý ⇒ KHÔNG chọn được. */
   suggested: ModelState | null;
   reasons: string[];
@@ -70,6 +76,7 @@ export function buildDeclarePreview(
       code: m.code,
       name: m.name || m.productName || "",
       image: m.image,
+      current: null,
       suggested: obs.stage,
       reasons: obs.reasons,
       unknowns: e ? evidenceUnknowns(e) : ["Không đọc được chứng cứ của mẫu này."],
@@ -80,13 +87,34 @@ export function buildDeclarePreview(
   return out;
 }
 
+/**
+ * Bảng xem trước "Cập nhật theo thực tế" (Agent ST): mẫu ĐÃ KHAI mà chứng cứ đã đi trước lời khai. CHỈ giữ
+ * dòng máy có đề xuất (`staleStateSuggestion`) — mẫu lời khai còn đúng không có việc gì ở bảng này. Mẫu thiếu
+ * dữ kiện trong bản đồ (không đọc được) ⇒ không đề xuất ⇒ không vào bảng.
+ */
+export function buildStalePreview(
+  models: readonly { id: string; code: string; name: string; productName?: string | null; image: string | null; state: ModelState | null }[],
+  facts: ReadonlyMap<string, StaleStateFacts>,
+): DeclarePreviewRow[] {
+  const out: DeclarePreviewRow[] = [];
+  for (const m of models) {
+    if (m.state === null) continue;
+    const f = facts.get(m.id);
+    const s = f ? staleStateSuggestion(m.state, f) : null;
+    if (!s) continue;
+    out.push({ modelId: m.id, code: m.code, name: m.name || m.productName || "", image: m.image, current: m.state, suggested: s.to, reasons: s.reasons, unknowns: [], selectable: true, defaultChecked: true });
+  }
+  return out;
+}
+
 /** Kết cục của MỘT dòng trong lượt khai — không dòng nào biến mất khỏi báo cáo. */
-export const DECLARE_ROW_OUTCOMES = ["DECLARED", "SKIPPED_ALREADY_DECLARED", "SKIPPED_NO_SUGGESTION", "NOT_FOUND", "FAILED"] as const;
+export const DECLARE_ROW_OUTCOMES = ["DECLARED", "SKIPPED_ALREADY_DECLARED", "SKIPPED_STATE_CHANGED", "SKIPPED_NO_SUGGESTION", "NOT_FOUND", "FAILED"] as const;
 export type DeclareRowOutcome = (typeof DECLARE_ROW_OUTCOMES)[number];
 
 export const DECLARE_ROW_OUTCOME_LABEL: Record<DeclareRowOutcome, string> = {
   DECLARED: "Đã khai",
   SKIPPED_ALREADY_DECLARED: "Bỏ qua — mẫu đã có người khai trong lúc màn hình còn mở",
+  SKIPPED_STATE_CHANGED: "Bỏ qua — trạng thái khai của mẫu đã đổi trong lúc màn hình còn mở",
   SKIPPED_NO_SUGGESTION: "Bỏ qua — máy không còn gợi ý cho mẫu này",
   NOT_FOUND: "Không tìm thấy mẫu",
   FAILED: "Lỗi",

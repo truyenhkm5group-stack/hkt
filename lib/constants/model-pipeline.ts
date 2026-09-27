@@ -2,6 +2,7 @@ import type { LifecycleEvidenceGap } from "@/lib/constants/evidence-gaps";
 import { BEFORE_PRODUCTION_DISCUSSION_STATES } from "@/lib/constants/early-topic";
 import { MODEL_STATE_LABELS, MODEL_STATES, type ModelState } from "@/lib/constants/model-lifecycle";
 import type { ModelSuggestion } from "@/lib/constants/model-360";
+import type { StaleStateSuggestion } from "@/lib/constants/model-stale-state";
 import type { ModelSignal } from "@/lib/constants/model-signal";
 import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISKS, type StockRisk } from "@/lib/constants/slow-moving";
 
@@ -22,7 +23,8 @@ import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISKS, type StockRisk } from
  *    — không bao giờ đẩy mẫu sang cột khác, không bao giờ sinh thẻ thứ hai. Máy dời mẫu sang cột khác là
  *    máy tự khai trạng thái (target-architecture Q3).
  *  · "VIỆC TIẾP THEO" chỉ NHẶT từ bộ máy đã có: chỗ hở lời khai ≠ chứng từ (P2 · `lifecycleEvidenceGap`),
- *    gợi ý khai của máy (Q · `buildDeclarePreview`), và danh sách đề xuất của trang 360 (A2 ·
+ *    lời khai đi SAU chứng cứ (ST · `staleStateSuggestion`), gợi ý khai của máy (Q · `buildDeclarePreview`), và
+ *    danh sách đề xuất của trang 360 (A2 ·
  *    `deriveModelSuggestions` — gồm luật mở topic sớm của T và chuyển tiếp của C — ghép vòng phản hồi tồn
  *    của X · `mergeStockFeedbackSuggestions`). Không bộ máy nào nói gì ⇒ thẻ KHÔNG có nút, không bịa việc.
  *
@@ -151,16 +153,18 @@ export function pipelineChips(i: PipelineChipInput): PipelineChip[] {
 
 // ─────────────────────────── VIỆC TIẾP THEO ───────────────────────────
 
-export type NextActionSource = "EVIDENCE_GAP" | "DECLARE" | "SUGGESTION";
+export type NextActionSource = "EVIDENCE_GAP" | "STALE" | "DECLARE" | "SUGGESTION";
 
 /**
  * Thứ tự nhặt MỘT việc tiếp theo cho thẻ:
  *  1. Lời khai trái chứng từ (P2) — ERP đang nói hai điều trái nhau về chính bước của mẫu, sửa trước.
- *  2. Mẫu chưa khai mà máy có gợi ý (Q) — chưa biết mẫu ở bước nào thì mọi việc khác là đoán.
- *  3. Đề xuất của trang 360 (A2 + T + X): ưu tiên đề xuất ĐẨY BƯỚC quy trình (`STEP_ADVANCING_SUGGESTION_KEYS`),
+ *  2. Lời khai đi SAU chứng từ (ST) — thẻ đang đứng sai cột: thiết kế đã lên camp / đã có phán quyết, sản xuất
+ *     đã đi tiếp mà lời khai chưa theo. Một cú bấm mở ô khai CHỌN SẴN đích + lý do điền sẵn (người bấm lưu).
+ *  3. Mẫu chưa khai mà máy có gợi ý (Q) — chưa biết mẫu ở bước nào thì mọi việc khác là đoán.
+ *  4. Đề xuất của trang 360 (A2 + T + X): ưu tiên đề xuất ĐẨY BƯỚC quy trình (`STEP_ADVANCING_SUGGESTION_KEYS`),
  *     không có thì đề xuất đầu tiên theo đúng thứ tự bộ máy trả.
  */
-export const NEXT_ACTION_ORDER: readonly NextActionSource[] = ["EVIDENCE_GAP", "DECLARE", "SUGGESTION"];
+export const NEXT_ACTION_ORDER: readonly NextActionSource[] = ["EVIDENCE_GAP", "STALE", "DECLARE", "SUGGESTION"];
 
 /**
  * Khoá đề xuất của `deriveModelSuggestions` (mục 3 — mở topic / chuyển vòng đời) — đề xuất đưa mẫu sang
@@ -185,6 +189,8 @@ export type NextActionInput = {
   gap: LifecycleEvidenceGap | null;
   /** Gợi ý khai của máy (Q) — chỉ truyền khi người xem KHAI được; `null` = không gợi ý / không quyền. */
   declareSuggestion: { state: ModelState; reasons: readonly string[] } | null;
+  /** Lời khai đi sau chứng cứ (ST) — chỉ truyền khi người xem KHAI được; `null` / vắng = không đề xuất. */
+  stale?: StaleStateSuggestion | null;
   suggestions: readonly ModelSuggestion[];
 };
 
@@ -214,6 +220,15 @@ export function pickNextAction(i: NextActionInput): PipelineNextAction | null {
   for (const src of NEXT_ACTION_ORDER) {
     if (src === "EVIDENCE_GAP" && i.gap) {
       return { source: "EVIDENCE_GAP", key: i.gap.missing, label: i.gap.actionLabel, href: i.gap.actionHref, why: i.gap.text };
+    }
+    if (src === "STALE" && i.state !== null && i.stale) {
+      return {
+        source: "STALE",
+        key: `stale:${i.stale.to}`,
+        label: `Cập nhật → ${PIPELINE_COLUMN_BY_KEY[pipelineColumnOf(i.stale.to)].label} (${i.stale.short})`,
+        href: modelHref(i.modelId, DECLARE_ANCHOR),
+        why: `Thực tế đã đi trước lời khai “${MODEL_STATE_LABELS[i.state]}”: ${i.stale.reasons.join(" · ")}. Đề xuất cập nhật sang “${MODEL_STATE_LABELS[i.stale.to]}” — người bấm lưu, máy không tự ghi.`,
+      };
     }
     if (src === "DECLARE" && i.state === null && i.declareSuggestion) {
       return {

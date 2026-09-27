@@ -31,11 +31,13 @@ import { DOMAIN_ACTOR_KIND_LABEL } from "@/lib/constants/domain-events";
 import { loadSource, mergeTimelines } from "@/lib/constants/model-360";
 import { modelBlockAccess } from "@/lib/models/block-access";
 import { winnerFollowUp } from "@/lib/constants/early-topic";
+import { LINKED_RECEIPT_FROM, STALE_CREATIVE_TRACK_STATES, staleCandidateState, staleFactsOf, staleStateSuggestion } from "@/lib/constants/model-stale-state";
 import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
 import { canOpenTopic } from "@/lib/production/topic-access";
 import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getModelLinkedIdeas, ideaTimelineEntries } from "@/lib/queries/model-360";
+import { getLinkedReceiptCountsBatch } from "@/lib/queries/model-stale-state";
 import { getModel, getModelEvidence, getModelStateHistory, getModelTimeline, listModelOwnerOptions } from "@/lib/queries/models";
 import { resolvePeriod, type Period, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -93,6 +95,15 @@ export default async function ModelDetailPage({ params, searchParams }: { params
   // mẫu chưa ở THẮNG. Đọc hỏng ⇒ không đề xuất (ô đổi trạng thái vẫn dùng được như cũ).
   const production = canWrite && allowed.PRODUCTION && model.state !== "WINNER" ? await productionOnce(model.id) : null;
   const followUp = production && production.ok ? winnerFollowUp(production.data) : null;
+  // Lời khai đi SAU thực tế (Agent ST): CÙNG luật + cùng cổng quyền với nút trên Bảng quy trình — chứng cứ
+  // creative (lô chứng cứ đã đọc ở trên) cho lời khai trước THẮNG; tóm tắt sản xuất (đọc một lần, `productionOnce`)
+  // + phiếu nhập đã nối lệnh cho lời khai từ THẮNG trở đi. Không đọc được ⇒ ô CHƯA BIẾT ⇒ không đề xuất từ nó.
+  const staleProduction = canWrite && allowed.PRODUCTION && staleCandidateState(model.state) && !STALE_CREATIVE_TRACK_STATES.includes(model.state) ? await productionOnce(model.id) : null;
+  const staleReceipts = canWrite && allowed.PRODUCTION && model.state === LINKED_RECEIPT_FROM ? await loadSource("phiếu nhập đã nối lệnh", () => getLinkedReceiptCountsBatch([model.id])) : null;
+  const stale =
+    canWrite && model.state !== null
+      ? staleStateSuggestion(model.state, staleFactsOf(evidence, staleProduction && staleProduction.ok ? staleProduction.data : null, staleReceipts && staleReceipts.ok ? (staleReceipts.data.get(model.id) ?? null) : null))
+      : null;
 
   const provisional = isProvisionalModel({ code: model.code, registeredBy: model.registeredBy, productId: model.product?.id ?? null, designConceptId: model.design?.id ?? null });
 
@@ -187,7 +198,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
               <EvidenceGapNote ctx={ctx} />
             </Suspense>
             {canWrite && provisional ? <AssignCodeControl modelId={model.id} code={model.code} /> : null}
-            {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} suggested={model.state === null ? observed.stage : null} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
+            {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} suggested={model.state === null ? observed.stage : null} stale={stale} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm">
               <span>Người phụ trách:</span>
               {canWrite ? <OwnerControl modelId={model.id} ownerUserId={model.ownerUserId} options={ownerOptions} /> : <span className={model.ownerName ? "" : "text-muted-foreground"}>{model.ownerName ?? "—"}</span>}

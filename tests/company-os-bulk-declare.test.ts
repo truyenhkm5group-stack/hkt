@@ -202,7 +202,8 @@ export function testCompanyOsBulkDeclareSource() {
   assert.match(than, /can\(user, "models:write"\)/, "cần quyền khai");
   assert.match(than, /actor: \{ id: user\.id, label: user\.name \|\| user\.email \}/, "tên người do MÁY CHỦ đọc từ phiên (mục 34)");
   assert.match(than, /revalidatePath\("\/models", "layout"\)/, "làm mới /models và trang từng mẫu — client không router.refresh()");
-  assert.match(than, /action: "MODEL_BULK_DECLARE"/);
+  // Agent ST: cùng action cho luồng "cập nhật theo thực tế" — nhật ký tách tên hành động.
+  assert.match(than, /action: capNhat \? "MODEL_STALE_UPDATE" : "MODEL_BULK_DECLARE"/);
 
   const page = doc("app/(dashboard)/models/page.tsx");
   assert.match(page, /const moKhai = canWrite && raw\.khai === "goi-y";/, "chứng cứ theo lô chỉ đọc khi người MỞ bảng gợi ý và có quyền khai");
@@ -214,7 +215,7 @@ export function testCompanyOsBulkDeclareSource() {
   assert.match(ctl, /declareModelsFromSuggestion\(\{ items: \[\{ modelId, state: to, expectedState: null \}\], reason, from: "detail" \}\)/, "trang một mẫu đi CÙNG luồng khai theo gợi ý");
   assert.match(ctl, /const theoGoiY = state === null && suggested !== null;/, "chỉ mẫu CHƯA KHAI mà máy có gợi ý mới đi luồng gợi ý");
   assert.match(ctl, /useState<ModelState \| "">\(theoGoiY \? suggested : /, "trang một mẫu chọn sẵn gợi ý");
-  assert.match(ctl, /useState\(theoGoiY \? BULK_DECLARE_DEFAULT_REASON : ""\)/, "trang một mẫu điền sẵn cùng lý do");
+  assert.match(ctl, /useState\(theoGoiY \? BULK_DECLARE_DEFAULT_REASON : theoThucTe && stale \? staleUpdateReason\(stale\) : ""\)/, "trang một mẫu điền sẵn cùng lý do (ST: lý do cập nhật cho mẫu đã khai)");
   assert.match(doc("app/(dashboard)/models/[id]/page.tsx"), /suggested=\{model\.state === null \? observed\.stage : null\}/, "trang 360 truyền gợi ý của máy xuống ô khai");
   console.log("✓ Company OS · Q (mã nguồn): chỉ server action gọi lõi · không job / đồng bộ chạm luồng này · hàng rào chưa-khai trước lượt chuyển · bảng không refresh thừa");
 }

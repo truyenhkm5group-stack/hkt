@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, GitBranch, HelpCircle, KanbanSquare, Layers, List, Wand2 } from "lucide-react";
+import { AlertTriangle, GitBranch, HelpCircle, KanbanSquare, Layers, List, RefreshCcw, Wand2 } from "lucide-react";
 import { BulkDeclarePanel } from "@/app/(dashboard)/models/bulk-declare-panel";
 import { ModelsTable } from "@/app/(dashboard)/models/models-table";
 import { PipelineBoard } from "@/app/(dashboard)/models/pipeline-board";
@@ -18,6 +18,7 @@ import { modelBlockAccess } from "@/lib/models/block-access";
 import { getModelPipelineBoard } from "@/lib/queries/model-pipeline";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
+import { listStaleStatePreview } from "@/lib/queries/model-stale-state";
 import { getModelsEvidenceBatch, listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -159,13 +160,19 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
         return { rows: buildDeclarePreview(chuaKhai.rows, evidence), total: chuaKhai.total };
       })
     : Promise.resolve(null);
-  const [{ rows, total, pageCount }, facets, summary, preview, tinHieu, goiY] = await Promise.all([
+  // "Cập nhật theo thực tế" (Agent ST): mẫu ĐÃ KHAI mà chứng từ đã đi trước lời khai. Số trên chip cần chính bảng
+  // xem trước, nên người KHAI được luôn đọc nó (ba lô: chứng cứ · tóm tắt sản xuất · phiếu nối lệnh — không truy vấn
+  // theo mẫu); người không khai được không đọc gì. Cùng ô tìm / bộ lọc "Nối với" với bảng "Khai theo gợi ý".
+  const moCapNhat = canWrite && raw.capnhat === "thuc-te";
+  const capNhat = canWrite ? loadSource("chứng cứ đi trước lời khai", () => listStaleStatePreview(params)) : Promise.resolve(null);
+  const [{ rows, total, pageCount }, facets, summary, preview, tinHieu, goiY, thucTe] = await Promise.all([
     listModels(params),
     modelStateFacets(),
     modelRegistrySummary(),
     previewModelRegistry(),
     coTinHieu ? loadSource("tín hiệu mẫu", () => getModelSignalsBatch()) : Promise.resolve(null),
     khaiGoiY,
+    capNhat,
   ]);
   const signals =
     tinHieu && tinHieu.ok
@@ -278,7 +285,30 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
                 {moKhai ? "✓ " : ""}Khai theo gợi ý
               </Link>
             ) : null}
+            {thucTe && (moCapNhat || !thucTe.ok || thucTe.data.rows.length > 0) ? (
+              <Link
+                href={hrefToggle("capnhat", "thuc-te", moCapNhat)}
+                className={cn("ml-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5", moCapNhat ? "border-primary bg-primary/10 font-semibold" : "border-sky-300 hover:bg-muted dark:border-sky-800")}
+                title="Mẫu đã khai mà chứng từ trong ERP đã đi trước lời khai (thiết kế đã lên camp / có phán quyết, sản xuất đã đi tiếp) — máy đề xuất, người xác nhận."
+              >
+                <RefreshCcw className="size-3.5" />
+                {moCapNhat ? "✓ " : ""}Cập nhật theo thực tế ({thucTe.ok ? formatNumber(thucTe.data.rows.length) : "?"})
+              </Link>
+            ) : null}
           </div>
+          {moCapNhat && thucTe ? (
+            <SectionCard
+              title={
+                <span className="flex items-center gap-1.5">
+                  <RefreshCcw className="size-4" /> Cập nhật theo thực tế —{" "}
+                  {thucTe.ok ? `${formatNumber(thucTe.data.rows.length)} mẫu có chứng từ đi trước lời khai (đã xét ${formatNumber(thucTe.data.scanned)}${thucTe.data.total > thucTe.data.scanned ? ` / ${formatNumber(thucTe.data.total)}` : ""} mẫu đã khai)` : "không đọc được"}
+                </span>
+              }
+              hint={`Lời khai là ảnh chụp của người: thiết kế đã lên camp / có phán quyết THẮNG · Loại, hay sản xuất đã đi tiếp (topic, giá thành, mẫu thử, lệnh gửi xưởng, hàng về kho) mà lời khai chưa theo. Máy chỉ đề xuất đi TỚI và không tự ghi — mỗi dòng bạn bấm mang tên bạn, lý do, đề xuất của máy và bạn có chọn khác không. Mẫu có người vừa đổi lời khai trong lúc bảng còn mở sẽ bị bỏ qua, không đè. Mỗi lượt tối đa ${BULK_DECLARE_MAX} mẫu, theo ô tìm / bộ lọc “Nối với” đang áp.`}
+            >
+              {thucTe.ok ? <BulkDeclarePanel rows={thucTe.data.rows} mode="stale" /> : <p className="text-sm text-rose-700 dark:text-rose-300">Không đọc được nguồn {thucTe.source}: {thucTe.error}</p>}
+            </SectionCard>
+          ) : null}
           {goiY ? (
             <SectionCard
               title={
