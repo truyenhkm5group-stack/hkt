@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
+import { PIPELINE_VIEW_HREF } from "@/lib/constants/model-pipeline";
 import { datumText, OWNER_DECISION_KINDS, OWNER_DECISION_KIND_SPEC, RECOMMENDATION_DECISION_LABEL, type OwnerDecisionKind } from "@/lib/constants/owner-decisions";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { getOwnerDecisionQueue, listRecentDecisions } from "@/lib/queries/owner-decisions";
@@ -41,6 +42,13 @@ export default async function CockpitPage({ searchParams }: { searchParams: Prom
         eyebrow="Ban điều hành"
         title="Cần anh quyết"
         description={`${formatNumber(q.total)} quyết định đang chờ · ${formatNumber(q.hidden.length)} đang ẩn`}
+        actions={
+          can(user, "models:view") ? (
+            <Link href={PIPELINE_VIEW_HREF} className="text-sm font-semibold text-primary hover:underline">
+              Xem bảng quy trình mẫu
+            </Link>
+          ) : null
+        }
         hint={
           <>
             <p>Mỗi dòng là một quyết định của người điều hành, đọc từ màn hình đang chạy — CÁI GÌ · VÌ SAO · SỐ LIỆU · TÁC ĐỘNG · nút mở màn hình chủ. Không có công thức hay ngưỡng mới nào ở đây; số trên dòng là số của màn hình chủ.</p>

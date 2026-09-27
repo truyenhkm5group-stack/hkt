@@ -25,11 +25,11 @@ import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { decideScope } from "@/lib/auth/scope-guard";
-import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
 import { DOMAIN_ACTOR_KIND_LABEL } from "@/lib/constants/domain-events";
-import { loadSource, MODEL_360_BLOCK_ACCESS, mergeTimelines, type Model360Block } from "@/lib/constants/model-360";
+import { loadSource, mergeTimelines } from "@/lib/constants/model-360";
+import { modelBlockAccess } from "@/lib/models/block-access";
 import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
 import { isProvisionalModel } from "@/lib/constants/provisional-model";
@@ -50,19 +50,6 @@ function soHoacGach(n: number | null, fmt: (x: number) => string = formatNumber)
 function periodQueryOf(p: Period): string {
   if (p.key === "custom" && p.fromKey && p.toKey) return `period=custom&from=${p.fromKey}&to=${p.toKey}`;
   return `period=${p.key}`;
-}
-
-/**
- * Người xem có được đọc nguồn của một khối không: ĐÚNG quyền của màn hình chủ nguồn ấy, và phạm vi dữ
- * liệu không phải "từ chối" (cùng cổng mà màn hình chủ áp — `requireResource`). Trang 360 không được là
- * cửa sau đọc lợi nhuận / chi quảng cáo cho người chỉ có "Vòng đời mẫu: xem".
- */
-async function blockAllowed(user: SessionUser, block: Model360Block): Promise<boolean> {
-  const a = MODEL_360_BLOCK_ACCESS[block];
-  if (!can(user, a.permission)) return false;
-  if (!a.resource) return true;
-  const d = await decideScope(a.resource, user, a.permission);
-  return d.allow !== "NONE";
 }
 
 function BlockSkeleton({ h = "h-48" }: { h?: string }) {
@@ -86,16 +73,15 @@ export default async function ModelDetailPage({ params, searchParams }: { params
   if (!model) notFound();
   const range = resolvePeriod(raw, "30d");
 
-  const blocks = Object.keys(MODEL_360_BLOCK_ACCESS) as Model360Block[];
-  const [evidence, history, timeline, owners, ideas, allowList] = await Promise.all([
+  const [evidence, history, timeline, owners, ideas, allowed] = await Promise.all([
     getModelEvidence(model),
     getModelStateHistory(model.id),
     getModelTimeline(model.id),
     canWrite ? listModelOwnerOptions() : Promise.resolve([]),
     loadSource("ý tưởng đã nối", () => getModelLinkedIdeas(model.id)),
-    Promise.all(blocks.map((b) => blockAllowed(user, b))),
+    // Cổng từng khối — một bản dùng chung với Bảng quy trình mẫu (lib/models/block-access.ts).
+    modelBlockAccess(user),
   ]);
-  const allowed = Object.fromEntries(blocks.map((b, i) => [b, allowList[i]])) as Record<Model360Block, boolean>;
   const observed = observeModelStage(evidence);
   const image = model.product?.image ?? null;
   const ownerOptions = model.ownerUserId && !owners.some((o) => o.id === model.ownerUserId) ? [{ id: model.ownerUserId, name: model.ownerName ?? "Tài khoản đã khoá" }, ...owners] : owners;

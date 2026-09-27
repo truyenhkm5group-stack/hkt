@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
-import { requireUser } from "@/lib/auth/session";
+import { can, requireUser } from "@/lib/auth/session";
+import { PIPELINE_VIEW_HREF } from "@/lib/constants/model-pipeline";
 import { formatNumber } from "@/lib/format";
 import { getOwnerDecisionQueue } from "@/lib/queries/owner-decisions";
 import { KindGroupBlock, SourceWarnings } from "@/app/(dashboard)/cockpit/decision-list";
@@ -39,9 +40,17 @@ export async function OwnerDecisionsSection() {
         </>
       }
       actions={
-        <Link href="/cockpit" className="text-xs font-semibold text-primary hover:underline">
-          Mở buồng lái
-        </Link>
+        <span className="flex items-center gap-3">
+          {/* Bảng quy trình mẫu (Agent BD): mọi mẫu ở bước nào + việc tiếp theo — gác đúng quyền của trang (models:view, module Sản xuất). */}
+          {can(user, "models:view") ? (
+            <Link href={PIPELINE_VIEW_HREF} className="text-xs font-semibold text-primary hover:underline">
+              Xem bảng quy trình
+            </Link>
+          ) : null}
+          <Link href="/cockpit" className="text-xs font-semibold text-primary hover:underline">
+            Mở buồng lái
+          </Link>
+        </span>
       }
       padded={false}
     >

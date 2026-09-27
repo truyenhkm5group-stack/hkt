@@ -14,6 +14,8 @@ import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapsho
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getTopicFileStorage, listTopicFiles } from "@/lib/queries/production-files";
 import { getTopicDetail, listSupplierOptions } from "@/lib/queries/production-os";
+import { costV1Prefill, costV1ShortcutState } from "@/lib/constants/production-shortcuts";
+import { loadDesignPoShortcuts } from "@/lib/queries/production-shortcuts";
 
 export const metadata = { title: "Topic sản xuất" };
 
@@ -34,6 +36,19 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
   // không mang bối cảnh ⇒ không nhãn, không đoán.
   const openCtx = describeTopicOpenContext(ev);
   const hasCtx = openCtx !== null;
+  /*
+    LỐI TẮT (Agent SC). Giá thành V1: dòng khởi tạo từ CHÍNH topic này (báo giá / giá SX mong muốn) — cùng
+    hàm thuần máy chủ dùng lúc bấm. Lập lệnh SX: theo từng bản duyệt, quyền của trình sửa lệnh (planning:write).
+  */
+  const v1Prefill = costV1Prefill({ quotes: d.messages.filter((m) => m.kind === "QUOTE").map((m) => ({ price: m.quotedUnitPrice })), targetPrice: req.targetPrice });
+  const costV1 = {
+    topicId: d.topic.id,
+    state: costV1ShortcutState({ canWrite, topicStatus: d.topic.status, costSheetCount: d.costSheets.length }),
+    source: v1Prefill.source,
+    note: v1Prefill.note,
+    previewUnitCost: v1Prefill.lines[0]?.unitCost ?? null,
+  };
+  const poShortcuts = await loadDesignPoShortcuts({ productId: d.model?.productId ?? null, designIds: d.designVersions.map((x) => x.id), canWrite: can(user, "planning:write") });
 
   return (
     <div className="space-y-5">
@@ -134,6 +149,8 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
             canWrite={canWrite}
             canApprove={canApprove}
             canAssumptions={can(user, "reports:assumptions")}
+            poShortcuts={poShortcuts}
+            costV1={costV1}
           />
         </div>
 

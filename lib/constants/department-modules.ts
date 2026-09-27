@@ -250,6 +250,14 @@ export const NAV_MODULES = [
     permission: "models:view",
     why: "Mẫu nào đang ở khâu nào — thắng test, bàn giá, làm mẫu, sản xuất, bán, xả — và ai phụ trách. Các khai báo trên trang này quyết định mẫu nào được đưa vào sản xuất / đặt lại / ngừng, tức quyết định của phòng Sản xuất; marketing đọc nó để biết mẫu thắng của mình đã đi tới đâu.",
   },
+  // Company OS · Agent BD — bảng quy trình: cùng sổ mẫu, xếp theo 13 bước của chủ shop, mỗi thẻ một việc tiếp theo.
+  {
+    href: "/models?view=bang",
+    label: "Bảng quy trình mẫu",
+    zone: "PRODUCTION",
+    permission: "models:view",
+    why: "Một màn hình cho mọi mẫu đang ở bước nào của quy trình 13 bước (creative → test → thắng → bàn SX → giá thành & mẫu → duyệt → kế hoạch → sản xuất → bán → đẩy tồn) và VIỆC TIẾP THEO của từng mẫu. Là một cách xem của sổ mẫu nên cùng phòng Sản xuất, cùng quyền `models:view`.",
+  },
   // Company OS · Agent C — sản xuất nửa đầu (bước 4–6 của chủ shop).
   {
     href: "/production",

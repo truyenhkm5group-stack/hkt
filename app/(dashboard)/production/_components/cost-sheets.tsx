@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Copy, Lock, Pencil, Plus, Tag, Trash2 } from "lucide-react";
+import { Calculator, Copy, Lock, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { CostSheetStatusBadge } from "@/app/(dashboard)/production/_components/badges";
 import { useNavTransition } from "@/components/nav-progress";
@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { setEstimatedCost } from "@/lib/actions/estimated-cost";
-import { createCostSheet, finalizeCostSheet, updateCostSheetDraft } from "@/lib/actions/production-costing";
+import { createCostSheet, finalizeCostSheet, startCostSheetFromTopic, updateCostSheetDraft } from "@/lib/actions/production-costing";
 import { COST_LINE_KIND_LABEL, COST_LINE_KINDS, computeCostSheet, PERCENT_UNIT, type CostLineKind, type CostSheetStatus } from "@/lib/constants/production-os";
+import type { CostV1Prefill, ShortcutState } from "@/lib/constants/production-shortcuts";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 
 export type CostSheetView = {
@@ -26,6 +27,12 @@ export type CostSheetView = {
   topicId: string | null;
   lines: { kind: string; description: string; qty: number; unit: string; unitCost: number; amount: number }[];
 };
+
+/**
+ * Lối tắt "Lập giá thành V1" từ topic (Agent SC). `state` + `prefill` do MÁY CHỦ tính lúc dựng trang chỉ để
+ * hiển thị; lúc bấm, máy chủ đọc lại topic và dựng lại dòng (không nhận dòng từ trình duyệt).
+ */
+export type CostV1View = { topicId: string; state: ShortcutState; source: CostV1Prefill["source"]; note: string; previewUnitCost: number | null };
 
 type Row = { kind: CostLineKind; description: string; qty: string; unit: string; unitCost: string };
 
@@ -51,6 +58,7 @@ export function CostSheets({
   canWrite,
   canApprove,
   canAssumptions,
+  v1 = null,
 }: {
   modelId: string;
   topicId: string | null;
@@ -59,7 +67,9 @@ export function CostSheets({
   canWrite: boolean;
   canApprove: boolean;
   canAssumptions: boolean;
+  v1?: CostV1View | null;
 }) {
+  const [v1Hint, setV1Hint] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string | null } | null>(null);
   const [rows, setRows] = useState<Row[]>([EMPTY_ROW]);
   const [notes, setNotes] = useState("");
@@ -76,6 +86,22 @@ export function CostSheets({
     setRows(toRows(s.lines));
     setNotes(s.notes);
     setEditing({ id: s.id });
+  };
+  // Lối tắt V1: có giá trong topic ⇒ máy chủ tạo bảng NHÁP một dòng; không có giá ⇒ mở bảng trống ở đây.
+  const lapV1 = () => {
+    if (!v1) return;
+    start(async () => {
+      const r = await startCostSheetFromTopic(v1.topicId);
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      if (r.mode === "EMPTY_EDITOR") {
+        moMoi();
+        setV1Hint(r.note);
+      } else if (r.mode === "EXISTING") toast.info(`Mẫu đã có bảng giá thành V${r.version} — không tạo thêm`);
+      else toast.success(`Đã tạo V${r.version} (nháp) · ${formatVND(r.totalUnitCost)}/sp — sửa dòng khi xưởng gửi chi tiết${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
+    });
   };
   const setRow = (i: number, patch: Partial<Row>) => setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
@@ -97,6 +123,7 @@ export function CostSheets({
         toast.success(`Đã tạo V${r.version} · ${formatVND(r.totalUnitCost)}/sp${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
       }
       setEditing(null);
+      setV1Hint(null);
     });
 
   const chot = (s: CostSheetView) => {
@@ -215,6 +242,18 @@ export function CostSheets({
         <p className="text-sm text-muted-foreground">Chưa có bảng giá thành nào cho mẫu này.</p>
       )}
 
+      {v1 && !sheets.length && !editing ? (
+        <div className="space-y-1 rounded-lg border border-dashed p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={lapV1} disabled={pending || !v1.state.enabled} title={v1.state.enabled ? undefined : v1.state.reason}>
+              <Calculator className="size-4" /> Lập giá thành V1{v1.previewUnitCost !== null ? ` · ${formatVND(v1.previewUnitCost)}/sp` : ""}
+            </Button>
+            {!v1.state.enabled ? <span className="text-xs text-muted-foreground">{v1.state.reason}</span> : null}
+          </div>
+          {v1.state.enabled ? <p className="text-xs text-muted-foreground">{v1.note}</p> : null}
+        </div>
+      ) : null}
+
       {canWrite && !editing ? (
         <Button size="sm" variant="outline" onClick={() => moMoi()}>
           <Plus className="size-4" /> Phiên bản giá thành mới
@@ -224,6 +263,7 @@ export function CostSheets({
       {editing ? (
         <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
           <div className="text-sm font-semibold">{editing.id ? "Sửa bảng nháp" : "Phiên bản mới"}</div>
+          {v1Hint && !editing.id ? <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">{v1Hint}</p> : null}
           <p className="text-xs text-muted-foreground">
             Dòng thường: thành tiền = SL × đơn giá. Hao hụt theo tỷ lệ: chọn loại <b>Hao hụt</b>, đơn vị <code>%</code>, SL là số phần trăm — tính trên tổng các dòng KHÔNG phải %.
           </p>
@@ -288,7 +328,7 @@ export function CostSheets({
           </div>
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ghi chú: báo giá của xưởng nào, ngày nào, điều kiện…" />
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setEditing(null)} disabled={pending}>
+            <Button size="sm" variant="ghost" onClick={() => { setEditing(null); setV1Hint(null); }} disabled={pending}>
               Huỷ
             </Button>
             <Button size="sm" onClick={luu} disabled={pending || "error" in tinh}>
