@@ -148,12 +148,20 @@ export const FB_ERROR_HINTS: Readonly<Record<string, string>> = {
     "Việc cần làm: ứng dụng Facebook cấp token cho ERP đang ở chế độ PHÁT TRIỂN (Development) nên Facebook không cho tạo bài quảng cáo. Bật LIVE cho ĐÚNG ứng dụng của token (xem tab Cấu hình & luật → dòng \"Token thuộc ứng dụng\"): developers.facebook.com → ứng dụng ấy → Cài đặt ứng dụng → Thông tin cơ bản điền đủ (URL chính sách quyền riêng tư, xoá dữ liệu, hạng mục, biểu tượng) → mục \"Đăng\" → Đăng ứng dụng; hoặc tạo lại token từ một ứng dụng đã Live. Rồi bấm Đăng camp lại.",
 };
 
+/** Facebook từ chối `attribution_spec` của nhóm (khoảng ghi nhận không hợp lệ với mục tiêu tối ưu) — `createTestAdset` tự bỏ trường ấy. */
+export const ATTRIBUTION_REJECTED_SUBCODE = "1885501";
+
+/** `error_subcode` Facebook trả về trong lỗi của một lời gọi; `""` khi không có. Hàm THUẦN. */
+export function fbErrorSubcode(e: unknown): string {
+  const body = e instanceof IntegrationError ? e.body : null;
+  const err = body && typeof body === "object" ? (body as { error?: Record<string, unknown> }).error : null;
+  return err && err.error_subcode !== undefined && err.error_subcode !== null ? String(err.error_subcode) : "";
+}
+
 /** Câu lỗi của một lời gọi Facebook + chỉ dẫn nếu là mã đã biết. Hàm THUẦN (đọc thân phản hồi nằm trong lỗi). */
 export function facebookErrorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
-  const body = e instanceof IntegrationError ? e.body : null;
-  const err = body && typeof body === "object" ? (body as { error?: Record<string, unknown> }).error : null;
-  const sub = err && err.error_subcode !== undefined && err.error_subcode !== null ? String(err.error_subcode) : "";
+  const sub = fbErrorSubcode(e);
   const hint = sub ? FB_ERROR_HINTS[sub] : undefined;
   return hint ? `${msg} ${hint}` : msg;
 }
@@ -539,7 +547,16 @@ export async function createTestAdset(
   if (t.promotedObject) fields.promoted_object = JSON.stringify(t.promotedObject);
   if (t.destinationType) fields.destination_type = t.destinationType;
   if (t.attributionSpec) fields.attribution_spec = JSON.stringify(t.attributionSpec);
-  return requireId(await graphPost(actPath(accountId, "adsets"), fields), "tạo nhóm quảng cáo");
+  try {
+    return requireId(await graphPost(actPath(accountId, "adsets"), fields), "tạo nhóm quảng cáo");
+  } catch (e) {
+    // KHOẢNG GHI NHẬN của nhóm mẫu không còn hợp lệ với mục tiêu tối ưu (27/09/2026, mã 100/1885501: Facebook chỉ còn cho
+    // "1 ngày click, 0 ngày xem" trong khi nhóm mẫu mang khoảng cũ). Lời gọi hỏng không tạo gì ⇒ tạo lại ĐÚNG MỘT lần, bỏ
+    // trường ấy cho Facebook dùng khoảng mặc định hợp lệ của mục tiêu. Mọi lỗi khác ném nguyên như cũ.
+    if (!fields.attribution_spec || fbErrorSubcode(e) !== ATTRIBUTION_REJECTED_SUBCODE) throw e;
+    delete fields.attribution_spec;
+    return requireId(await graphPost(actPath(accountId, "adsets"), fields), "tạo nhóm quảng cáo");
+  }
 }
 
 /** Tạo MẨU quảng cáo trong nhóm test, gắn bài quảng cáo đã tạo. */
