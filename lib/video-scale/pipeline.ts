@@ -15,11 +15,12 @@ import {
 import { env } from "@/lib/env";
 import { organizationStateKey } from "@/lib/platform/process-state";
 import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
-import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
+import { ffmpegVersion, resolveFontFile } from "@/lib/video-scale/ffmpeg";
 import { enqueueCaptionJob, enqueueVariantProduction, handleClip, handleQc, handleRender, handleScript, handleTts, scriptOf, type HandlerCtx } from "@/lib/video-scale/handlers";
 import { writeCaptions } from "@/lib/video-scale/caption";
 import { FACEBOOK_REEL_API, handleCaption, handlePublishReel, type ReelApi } from "@/lib/video-scale/publish";
 import { DEFAULT_ADS_DEPS, handleCreateAd, handlePauseAd, planVideoAd, type AdsDeps } from "@/lib/video-scale/ads";
+import { angleStatsFor, lessonsFor } from "@/lib/video-scale/optimize";
 import type { AngleStat } from "@/lib/video-scale/plan";
 import { videoProviderFor } from "@/lib/video-scale/providers";
 import type { VideoProvider } from "@/lib/video-scale/providers/types";
@@ -52,9 +53,11 @@ export type VideoScaleDeps = {
   tts?: typeof synthesizeSpeech;
   visual?: typeof visualQc;
   ffmpegVersion?: () => Promise<string | null>;
+  /** Tệp phông có dấu tiếng Việt; `null` ⇒ hậu kỳ BỊ CHẶN (không ra video chữ vỡ dấu). */
+  fontFile?: () => Promise<string | null>;
   veoPrompt?: (scenePrompt: string) => string;
   negativePrompt?: string;
-  /** Sổ học theo góc — PR đo lường điền; mặc định rỗng (mọi góc ngang nhau). */
+  /** Sổ học theo góc + bài học (`optimize.ts`, từ phán quyết quảng cáo và lý do người loại video). */
   angleStats?: (db: Db, productId: string) => Promise<AngleStat[]>;
   lessons?: (db: Db, productId: string) => Promise<string[]>;
   captionWriter?: typeof writeCaptions;
@@ -71,10 +74,11 @@ export function resolveDeps(d: VideoScaleDeps = {}): Required<VideoScaleDeps> {
     tts: d.tts ?? synthesizeSpeech,
     visual: d.visual ?? visualQc,
     ffmpegVersion: d.ffmpegVersion ?? ffmpegVersion,
+    fontFile: d.fontFile ?? (() => resolveFontFile()),
     veoPrompt: d.veoPrompt ?? veoPrompt,
     negativePrompt: d.negativePrompt ?? VEO_NEGATIVE_PROMPT,
-    angleStats: d.angleStats ?? (async () => []),
-    lessons: d.lessons ?? (async () => []),
+    angleStats: d.angleStats ?? angleStatsFor,
+    lessons: d.lessons ?? lessonsFor,
     captionWriter: d.captionWriter ?? writeCaptions,
     reel: d.reel ?? FACEBOOK_REEL_API,
     adsDeps: d.adsDeps ?? DEFAULT_ADS_DEPS,

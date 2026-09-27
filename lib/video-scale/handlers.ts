@@ -373,6 +373,10 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
   if (!run || !variant) return void (await settleJob(db, job, { status: "CANCELLED", finishedAt: now }));
   const version = await ctx.deps.ffmpegVersion();
   if (!version) return void (await blockJob(db, job, "Máy chủ ERP không có ffmpeg — hậu kỳ không chạy được. Image Docker phải cài `apk add ffmpeg font-dejavu`.", new Date(now.getTime() + 30 * 60_000)));
+  const fontFile = await ctx.deps.fontFile();
+  if (!fontFile) {
+    return void (await blockJob(db, job, `Máy chủ ERP thiếu tệp phông tiếng Việt (VIDEO_FONT_FILE = ${env.videoScale.fontFile}) — chữ trên hình sẽ vỡ dấu, nên không hậu kỳ. Image Docker phải cài \`font-dejavu\`.`, new Date(now.getTime() + 30 * 60_000)));
+  }
   const [others] = await db
     .select({ n: sql<string>`count(*)` })
     .from(J)
@@ -432,7 +436,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         burnSubtitles: snap.burnSubtitles,
         width: size.width,
         height: size.height,
-        fontFile: env.videoScale.fontFile,
+        fontFile,
         output: "final.mp4",
       });
       for (const t of plan.textFiles) await writeFile(path.join(dir, t.name), t.content, "utf8");

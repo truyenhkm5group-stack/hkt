@@ -67,16 +67,18 @@ export function AdRowActions({ adId, status, budgetVnd, canSpend, canPause }: { 
 }
 
 /** Cấu hình quảng cáo của MỘT mã: tài khoản, chế độ, ngân sách ngày mỗi quảng cáo, trần mã / ngày, tự tăng ngân sách. */
-export function SkuAdsForm({ productId, accounts, value, disabled }: { productId: string; accounts: { id: string; name: string }[]; value: { adAccountId: string | null; adsMode: string; dailyBudgetPerAdVnd: number | null; skuDailyCapVnd: number | null; autoScale: boolean; adsModeBy: string }; disabled: boolean }) {
+export function SkuAdsForm({ productId, accounts, value, disabled }: { productId: string; accounts: { id: string; name: string }[]; value: { adAccountId: string | null; adsMode: string; dailyBudgetPerAdVnd: number | null; skuDailyCapVnd: number | null; autoScale: boolean; autoNextRound: boolean; adsModeBy: string }; disabled: boolean }) {
   const [pending, run] = useAct();
   const [acc, setAcc] = useState(value.adAccountId ?? "");
   const [mode, setMode] = useState(value.adsMode as VideoAdsMode);
   const [budget, setBudget] = useState(value.dailyBudgetPerAdVnd ? String(value.dailyBudgetPerAdVnd) : "");
   const [cap, setCap] = useState(value.skuDailyCapVnd ? String(value.skuDailyCapVnd) : "");
   const [autoScale, setAutoScale] = useState(value.autoScale);
+  const [autoNextRound, setAutoNextRound] = useState(value.autoNextRound);
   const save = () => {
+    if (autoNextRound && !value.autoNextRound && !confirm("Bật VÒNG TỰ ĐỘNG: mỗi ngày máy tạo một vòng video mới cho mã này (tốn tiền sinh video, vẫn trong trần USD / ngày) khi mã đã có bài học quảng cáo. Tiếp tục?")) return;
     if (mode === "AUTO_LAUNCH" && value.adsMode !== "AUTO_LAUNCH" && !confirm("Bật TỰ BẬT QUẢNG CÁO: máy sẽ dựng và bật quảng cáo cho video đã đăng của mã này, trong ngân sách + trần đã khai, không cần người bấm từng lần. Bạn đứng tên quyết định này. Tiếp tục?")) return;
-    run(() => setVideoSkuAdsAction({ productId, adAccountId: acc, adsMode: mode, dailyBudgetPerAdVnd: budget, skuDailyCapVnd: cap, autoScale }), "Đã lưu cấu hình quảng cáo của mã.");
+    run(() => setVideoSkuAdsAction({ productId, adAccountId: acc, adsMode: mode, dailyBudgetPerAdVnd: budget, skuDailyCapVnd: cap, autoScale, autoNextRound }), "Đã lưu cấu hình quảng cáo của mã.");
   };
   return (
     <details className="w-full rounded border p-2 text-[12px]">
@@ -110,7 +112,11 @@ export function SkuAdsForm({ productId, accounts, value, disabled }: { productId
         </label>
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={autoScale} disabled={disabled || pending} onChange={(e) => setAutoScale(e.target.checked)} />
-          Cho máy tăng ngân sách quảng cáo tốt (tối đa +30%/ngày, trong trần)
+          Cho máy tăng ngân sách quảng cáo tốt (tối đa +30%/ngày, trong trần; cần khai &ldquo;số đơn tối thiểu&rdquo; ở Cấu hình)
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={autoNextRound} disabled={disabled || pending} onChange={(e) => setAutoNextRound(e.target.checked)} />
+          Vòng tự động: mỗi ngày một vòng video mới dùng bài học (tốn tiền sinh video)
         </label>
         {!disabled ? (
           <Button size="sm" className="w-fit" disabled={pending} onClick={save}>

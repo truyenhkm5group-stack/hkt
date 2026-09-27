@@ -29,6 +29,7 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
   const [policy, setPolicy] = useState(config.policyLines.join("\n"));
   const [adsCap, setAdsCap] = useState(config.adsGlobalDailyCapVnd === null ? "" : String(config.adsGlobalDailyCapVnd));
   const [tpl, setTpl] = useState(config.adTemplateAdId);
+  const [minOrders, setMinOrders] = useState(config.autoScaleMinOrders === null ? "" : String(config.autoScaleMinOrders));
   const [pending, start] = useTransition();
   const set = <K extends keyof VideoScaleConfig>(k: K, v: VideoScaleConfig[K]) => setC((x) => ({ ...x, [k]: v }));
   const perSec = VEO_PRICE_USD_PER_SECOND[c.model][c.resolution];
@@ -36,7 +37,7 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
 
   const save = () =>
     start(async () => {
-      const r = await saveVideoScaleConfigAction({ ...c, dailyUsdCap: cap.trim(), policyLines: policy.split("\n").map((x) => x.trim()).filter(Boolean), adsGlobalDailyCapVnd: adsCap.trim(), adTemplateAdId: tpl.trim() });
+      const r = await saveVideoScaleConfigAction({ ...c, dailyUsdCap: cap.trim(), policyLines: policy.split("\n").map((x) => x.trim()).filter(Boolean), adsGlobalDailyCapVnd: adsCap.trim(), adTemplateAdId: tpl.trim(), autoScaleMinOrders: minOrders.trim() });
       if ("error" in r) return void toast.error(r.error);
       toast.success("Đã lưu cấu hình Video Scale.");
     });
@@ -142,6 +143,29 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
         </Row>
         <Row label="Mẩu quảng cáo MẪU (id)" hint="Máy chép đối tượng, mục tiêu tối ưu, đích tin nhắn, nút kêu gọi từ mẩu này. Để trống = dùng mẩu mẫu của Thư viện Media.">
           <Input className="h-8 w-56" inputMode="numeric" value={tpl} disabled={!canConfig} onChange={(e) => setTpl(e.target.value)} placeholder="vd 120212345678901234" />
+        </Row>
+      </section>
+
+      <section className="space-y-3 rounded-lg border p-3">
+        <h2 className="text-[14px] font-semibold">Vòng tối ưu</h2>
+        <p className="text-[12px] text-muted-foreground">
+          Chấm bằng luật TẮT / GIỮ của Thư viện Media (một bộ luật cho cả ảnh lẫn video). Quảng cáo thua ⇒ máy tắt. Quảng cáo tốt ⇒ máy chỉ ĐỀ NGHỊ tăng, trừ khi mã
+          bật &ldquo;tự tăng&rdquo; VÀ đã khai số đơn tối thiểu dưới đây.
+        </p>
+        <Row label="Khung chấm (ngày từ lúc bật)" hint="Hết khung mới kết luận theo luật GIỮ; luật TẮT xét mọi lúc.">
+          <Input className="h-8 w-20" type="number" min={1} max={14} value={c.optimizeWindowDays} disabled={!canConfig} onChange={(e) => set("optimizeWindowDays", Number(e.target.value))} />
+        </Row>
+        <Row label="Bước tăng ngân sách" hint={`5–${Math.round(VIDEO_ADS_HARD_LIMITS.maxStepPct * 100)}% mỗi lần, tối đa một lần / quảng cáo / ngày.`}>
+          <select className="h-8 rounded border px-2" value={c.scaleStepPct} disabled={!canConfig} onChange={(e) => set("scaleStepPct", Number(e.target.value))}>
+            {[0.1, 0.15, 0.2, 0.25, 0.3].map((x) => (
+              <option key={x} value={x}>
+                +{Math.round(x * 100)}%
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label="Số đơn chốt tối thiểu để máy TỰ tăng" hint="Để trống = máy không bao giờ tự tăng, chỉ đề nghị.">
+          <Input className="h-8 w-24" inputMode="numeric" value={minOrders} disabled={!canConfig} onChange={(e) => setMinOrders(e.target.value)} placeholder="vd 3" />
         </Row>
       </section>
 

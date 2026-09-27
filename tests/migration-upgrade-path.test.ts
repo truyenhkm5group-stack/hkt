@@ -106,6 +106,7 @@ const MOI = [
   "0156_creative_image_edit",
   "0157_video_scale_reels",
   "0158_video_scale_ads",
+  "0159_video_scale_optimize",
 ] as const;
 
 /*

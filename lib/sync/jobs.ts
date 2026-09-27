@@ -51,7 +51,8 @@ import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
-import { runVideoScaleTick } from "@/lib/video-scale/pipeline";
+import { createVideoRun, readVideoScaleConfig, runVideoScaleTick } from "@/lib/video-scale/pipeline";
+import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 
@@ -147,6 +148,10 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     CHI TIỀN THẬT (Veo tính theo giây video) — nên KHÔNG có trong lịch mặc định: chủ shop bật bằng
     `VIDEO_SCALE_EVERY_MINUTES`. Không bật thì hàng đợi vẫn chạy sau mỗi cú bấm (`after()`, tối đa 15 phút); lượt vòng này
     là lưới an toàn khi tiến trình chết giữa chừng. Trần tiền ngày đọc ở cấu hình hiện tại trước MỖI clip.
+
+    Cùng job chạy VÒNG TỐI ƯU (~55 phút / lần): số đo Meta, chấm quảng cáo, tắt quảng cáo thua, đề nghị / tự tăng trong
+    trần, bài học. Nhịp tim của nó là điều kiện để cổng cho BẬT / TĂNG tiền quảng cáo — không lịch thì không có quảng cáo
+    nào chạy mà không ai canh.
   */
   "video-scale": {
     label: "Video Scale — hàng đợi video",
@@ -156,12 +161,21 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Một lượt hàng đợi Video Scale: viết kịch bản cho lượt mới, gửi clip sang Veo trong trần tiền ngày và giới hạn đồng thời, hỏi / tải clip đã xong, hậu kỳ bằng ffmpeg, kiểm chất lượng. Lũy đẳng — việc cầm có hạn, khoá chống trùng theo (biến thể, cảnh).",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "video-scale", trigger: o.trigger, actor: o.actor }, async (ctx) => {
-        const r = await runVideoScaleTick(await getDb(), { budgetMs: 4 * 60_000 });
+        const db = await getDb();
+        const r = await runVideoScaleTick(db, { budgetMs: 4 * 60_000 });
+        const o = await maybeOptimize(db, await readVideoScaleConfig(db), { ...DEFAULT_OPTIMIZE_DEPS, createRun: createVideoRun });
+        const errors = [...r.errors, ...(o?.errors ?? [])];
         ctx.summary.updated = r.handled;
-        ctx.summary.failed = r.errors.length;
-        ctx.summary.detail = [Object.entries(r.byKind).map(([k, n]) => `${k} ${n}`).join(" · "), r.purged ? `xoá nội dung ${r.purged} tệp quá hạn giữ` : ""].filter(Boolean).join(" · ");
-        if (r.errors.length) ctx.summary.warning = r.errors.slice(0, 5).join(" | ");
-        return r;
+        ctx.summary.failed = errors.length;
+        ctx.summary.detail = [
+          Object.entries(r.byKind).map(([k, n]) => `${k} ${n}`).join(" · "),
+          r.purged ? `xoá nội dung ${r.purged} tệp quá hạn giữ` : "",
+          o ? `tối ưu: chấm ${o.judged} · tắt ${o.paused} · tăng ${o.scaled} · đề nghị ${o.recommended} · bài học ${o.lessons} · vòng mới ${o.runsCreated}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (errors.length) ctx.summary.warning = errors.slice(0, 5).join(" | ");
+        return { tick: r, optimize: o };
       }),
   },
   "marketing-decision-ledger": {

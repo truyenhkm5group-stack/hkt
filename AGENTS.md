@@ -592,6 +592,10 @@ deploy dừng, không phải cảnh báo.
     `gateVideoAd` (có luật tắt, ba trần: quảng cáo · mã · toàn module, +30% / 1 lần / ngày); tắt luôn
     được. `AUTO_LAUNCH` là lời duyệt thường trực có phong bì tiền đứng tên — KHÔNG nâng
     `MAX_ALLOWED_ADS_WRITE_MODE`.
+    Vòng tối ưu chấm bằng CHÍNH `variantMetrics` + `judgeVariant` (tiền `ad_spends`, đơn `ORDER_AD_ID`
+    + `ORDER_OUTCOME`), số Meta chỉ để đọc; thua ⇒ tắt, tốt ⇒ chỉ ĐỀ NGHỊ trừ khi người khai ngưỡng
+    đơn + bật tự tăng và số chi mới tới hôm qua. Nhịp tim vòng tối ưu im lặng > 3 giờ ⇒ cổng chặn
+    BẬT / TĂNG (`NO_OPTIMIZER`); nút chạy tay không ghi nhịp tim.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

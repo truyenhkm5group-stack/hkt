@@ -17,9 +17,10 @@ import {
   type VideoScript,
 } from "@/lib/constants/video-scale";
 import { storeCreativeImage } from "@/lib/creative/images";
-import { buildRenderArgs, fakeClipArgs, ffmpegVersion, filterPath, parseProbe, qcFrameTimes, runTool, wrapText } from "@/lib/video-scale/ffmpeg";
+import { buildRenderArgs, fakeClipArgs, ffmpegVersion, filterPath, parseProbe, qcFrameTimes, resolveFontFile, runTool, wrapText } from "@/lib/video-scale/ffmpeg";
 import { planAngles, nearDuplicate } from "@/lib/video-scale/plan";
-import { approveVideoVariant, createVideoRun, rejectVideoVariant, retryVideoJob, runVideoScaleTick, type VideoScaleDeps } from "@/lib/video-scale/pipeline";
+import { approveVideoVariant, createVideoRun, rejectVideoVariant, resolveDeps, retryVideoJob, runVideoScaleTick, type VideoScaleDeps } from "@/lib/video-scale/pipeline";
+import { handleRender } from "@/lib/video-scale/handlers";
 import { assertVideoPixelSafe, httpErrorKind, ProviderError, type ClipRequest, type PollResult, type VideoProvider } from "@/lib/video-scale/providers/types";
 import { parseVeoOperation, veoRequestBody } from "@/lib/video-scale/providers/veo";
 import { combineQc, technicalQc, visualVerdict, type VisualCheck } from "@/lib/video-scale/qc";
@@ -307,6 +308,12 @@ export async function testVideoScaleDb(db: Db) {
       },
       visual: async () => ({ ran: true, checks: visualChecks, summary: "khớp ảnh gốc", model: "fake-qc", costUsd: 0.002 }),
       ffmpegVersion: async () => ff,
+      // Phông có dấu tiếng Việt của CHÍNH máy chạy kiểm thử (image Docker · Ubuntu · Windows); không có ⇒ giữ đường mặc định.
+      fontFile: async () =>
+        (await resolveFontFile()) ??
+        (await resolveFontFile("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")) ??
+        (await resolveFontFile("C:/Windows/Fonts/arialbd.ttf")) ??
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     };
     const J = schema.videoScaleJobs;
     const V = schema.videoScaleVariants;
@@ -394,7 +401,18 @@ export async function testVideoScaleDb(db: Db) {
     assert.equal(st.starts, s2, "gặp dấu đang gửi mà không có mã thao tác ⇒ không gọi tạo");
     assert.equal(amb.errorKind, "AMBIGUOUS");
 
-    console.log(`✓ Video Scale (CSDL): chỉ mã win + ảnh thật · trần tiền ngày · khoá chống trùng · AMBIGUOUS không tự gửi lại · ${ff ? "hậu kỳ + QC thật · duyệt/loại · CHECK chặn duyệt video QC loại" : "hậu kỳ CHƯA ĐO ĐƯỢC"}`);
+    // Thiếu phông tiếng Việt ⇒ hậu kỳ BỊ CHẶN kèm lý do (ffmpeg không báo lỗi — nó lặng lẽ dùng phông thiếu dấu).
+    assert.equal(await resolveFontFile(path.join(tmp, "khong-co-phong.ttf")), null);
+    const [anyVariant] = await db.select({ id: V.id }).from(V).where(eq(V.runId, runId)).limit(1);
+    const fontJob = await enqueueJob(db, { kind: "RENDER", key: `font-check:${anyVariant.id}`, runId, variantId: anyVariant.id, isTest: false });
+    const [fj] = await db.select().from(J).where(eq(J.idempotencyKey, `font-check:${anyVariant.id}`));
+    assert.ok(fontJob !== undefined && fj);
+    await handleRender({ db, now: new Date(), cfgNow: normalizeVideoScaleConfig(cfg), deps: resolveDeps({ ...deps, ffmpegVersion: async () => "ffmpeg thử", fontFile: async () => null }) }, fj);
+    const [fj2] = await db.select().from(J).where(eq(J.id, fj.id));
+    assert.equal(fj2.status, "BLOCKED", "thiếu phông ⇒ chặn, không ra video chữ vỡ dấu");
+    assert.ok(fj2.error.includes("phông tiếng Việt"), fj2.error);
+
+    console.log(`✓ Video Scale (CSDL): chỉ mã win + ảnh thật · trần tiền ngày · khoá chống trùng · AMBIGUOUS không tự gửi lại · thiếu phông ⇒ chặn hậu kỳ · ${ff ? "hậu kỳ + QC thật · duyệt/loại · CHECK chặn duyệt video QC loại" : "hậu kỳ CHƯA ĐO ĐƯỢC"}`);
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     await cleanup(db);
