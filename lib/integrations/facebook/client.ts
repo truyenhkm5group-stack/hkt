@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, num, sleep, str } from "@/lib/integrations/http";
-import { assertHomeCredentials } from "@/lib/platform/credentials";
+import { assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
 
 export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" };
 
@@ -446,8 +446,17 @@ export class FacebookAdsClient {
   }
 }
 
-let cached: FacebookAdsClient | null = null;
+/**
+ * Một client cho MỖI tổ chức (R-04): nhà giữ đúng một instance như trước; tổ chức khác không có
+ * System User token nào ⇒ `ConnectorUnavailableError` ngay tại getter, không dựng client từ token
+ * môi trường của nhà.
+ */
+const clients = perOrganizationClients<FacebookAdsClient>({
+  home: () => new FacebookAdsClient(),
+  other: (organization) => {
+    throw new ConnectorUnavailableError("facebook", organization);
+  },
+});
 export function getFacebookAdsClient() {
-  if (!cached) cached = new FacebookAdsClient();
-  return cached;
+  return clients.get();
 }

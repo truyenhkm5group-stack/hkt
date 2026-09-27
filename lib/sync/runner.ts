@@ -51,6 +51,24 @@ export function jobLockKey(org: { code: string; isHome: boolean }, source: strin
 }
 
 /**
+ * Khoá mà lá chắn "job đang chạy" của `/api/sync/<job>` hỏi — `null` ⇒ không có lá chắn (job nguồn
+ * `ALL`). Tách khỏi route để bài kiểm đo được đúng hàm route dùng (route của Next chỉ được export
+ * handler).
+ *
+ * ─── HIỆN TRẠNG CÓ CHỦ Ý (risk-register R-17, CHƯA SỬA) ───
+ *
+ * Lá chắn hỏi theo SLUG (`VIETTELPOST:vtp-tracking`) còn runner khoá theo tên job NỘI BỘ
+ * (`VIETTELPOST:tracking_poll`, xem `JOB_RUN_KEYS`), nên lá chắn KHÔNG BAO GIỜ khớp — chống chạy
+ * chồng thật nằm ở `runSyncJob`. Sửa cho khớp là ĐỔI HÀNH VI của tổ chức nhà: lượt `vtp-tracking`
+ * mười phút một lần sẽ trả 202 khi lượt tra cứu trước còn chạy, và bỏ luôn đối chiếu độ phủ care +
+ * ghép lại bảng kê — hai bước hôm nay vẫn chạy ở lượt ấy dù phần tra cứu tự bỏ qua. Bài kiểm
+ * `tests/platform-jobs.test.ts` ghim hiện trạng này; muốn sửa thì sửa CẢ bài kiểm lẫn quyết định.
+ */
+export function syncRouteShieldKey(org: { code: string; isHome: boolean }, source: string, job: string): string | null {
+  return source === "ALL" ? null : jobLockKey(org, source, job);
+}
+
+/**
  * Bản ghi RUNNING mồ côi: `runningJobs` chỉ nằm trong bộ nhớ tiến trình, nên deploy hay khởi động
  * lại container giữa chừng để lại dòng RUNNING vĩnh viễn — vừa hiện sai là "đang chạy", vừa che
  * mất lần chạy hỏng. Đóng chúng lại mỗi khi bắt đầu một lần chạy mới.

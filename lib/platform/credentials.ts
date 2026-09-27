@@ -22,8 +22,9 @@ import { currentOrganization, peekOrganization } from "@/lib/platform/context";
  *
  * `currentOrganization()` ném `OrgContextError` (claim lạ, tổ chức bị đình chỉ) ⇒ ném tiếp, KHÔNG
  * coi là nhà. Tổ chức không phải nhà ⇒ `ConnectorUnavailableError` TRƯỚC khi một byte rời máy.
- * Phase 1.x mới có credential riêng từng tổ chức (bảng `settings` / `integration_tokens` của CSDL
- * tổ chức đó) — tới lúc ấy hàm này đổi thành "credential của tổ chức này", không phải "cấm".
+ * Credential riêng từng tổ chức (bảng `settings` / `integration_tokens` của CSDL tổ chức đó) là
+ * bước sau — tới lúc ấy hàm này đổi thành "credential của tổ chức này", không phải "cấm". Đệm client
+ * đã chia ngăn theo tổ chức (`perOrganizationClients` bên dưới) để bước ấy không phải sửa nơi gọi.
  */
 
 /** Danh sách nhà cung cấp dùng credential môi trường — chỉ để câu lỗi và máy quét đọc được. */
@@ -75,4 +76,69 @@ export async function assertHomeCredentials(provider: HomeCredentialProvider): P
 export function peekIsNonHome(): boolean {
   const explicit = peekOrganization();
   return explicit !== null && !explicit.isHome;
+}
+
+/**
+ * ═══════════ ĐỆM CLIENT TÍCH HỢP THEO TỔ CHỨC (risk-register R-04) ═══════════
+ *
+ * Trước Phase 1.x mỗi client (Pancake POS, Pancake Pages, Viettel Post, Facebook) là MỘT biến
+ * `cached` cho cả tiến trình: dựng lần đầu bằng credential môi trường của tổ chức nhà rồi phát cho
+ * MỌI người gọi — kể cả job của tổ chức khác. Lời chặn ở lối gọi mạng giữ cho nó an toàn, nhưng
+ * trạng thái bên trong instance (token Viettel Post đã đăng nhập, token trang Pancake Pages) vẫn là
+ * của nhà và nằm trong tay người gọi sai.
+ *
+ * Nay mỗi getter giữ một `Map<ngăn, client>`:
+ *
+ *  · NGĂN NHÀ (`HOME_CLIENT_SLOT`) — ngữ cảnh tường minh của nhà HOẶC không có ngữ cảnh tường minh
+ *    (request thường, script cũ). Đúng MỘT instance như trước nền tảng: tổ chức nhà không đăng nhập
+ *    Viettel Post thêm một lần nào, không mất token trang nào.
+ *  · NGĂN CỦA TỔ CHỨC KHÁC — khoá bằng MÃ tổ chức của ngữ cảnh tường minh. Hàm dựng của ngăn này
+ *    KHÔNG BAO GIỜ đọc credential môi trường: hoặc ném `ConnectorUnavailableError` (client bắt buộc
+ *    có khoá lúc dựng), hoặc dựng một instance RỖNG credential. Bước sau thay hàm dựng bằng
+ *    "credential của tổ chức này" mà không đổi một nơi gọi nào.
+ *
+ * Getter là ĐỒNG BỘ (hàng chục nơi gọi), nên chỉ nhìn được ngữ cảnh TƯỜNG MINH. Request mang phiên
+ * tổ chức khác rơi vào ngăn nhà — đó là phần dư đã biết, và lối gọi mạng vẫn chặn nó bằng
+ * `assertHomeCredentials()`. Hai lớp: ngăn đúng khi biết, lời chặn đúng mọi lúc.
+ */
+
+/** Không phải mã tổ chức hợp lệ (`^[a-z]…`) nên không bao giờ trùng ngăn của tổ chức nào. */
+export const HOME_CLIENT_SLOT = "@home";
+
+export type ClientSlot = { key: string; isHome: boolean; organization: string | null };
+
+export function currentClientSlot(): ClientSlot {
+  const explicit = peekOrganization();
+  if (explicit && !explicit.isHome) return { key: explicit.code, isHome: false, organization: explicit.code };
+  return { key: HOME_CLIENT_SLOT, isHome: true, organization: explicit?.code ?? null };
+}
+
+export type PerOrganizationClients<T> = {
+  /** Client của ngăn hiện hành — dựng lần đầu, dùng lại về sau. Hàm dựng ném ⇒ không lưu gì. */
+  get(): T;
+  /** CHỈ KIỂM THỬ: đặt client của NGĂN NHÀ; `null` ⇒ vứt MỌI ngăn (lượt sau dựng lại client thật). */
+  setHomeForTests(client: T | null): void;
+  /** Các ngăn đang giữ client — để bài kiểm chứng minh tổ chức khác không dùng chung ngăn nhà. */
+  slotKeys(): string[];
+};
+
+export function perOrganizationClients<T>(build: { home: () => T; other: (organization: string) => T }): PerOrganizationClients<T> {
+  const slots = new Map<string, T>();
+  return {
+    get() {
+      const slot = currentClientSlot();
+      const hit = slots.get(slot.key);
+      if (hit !== undefined) return hit;
+      const client = slot.isHome ? build.home() : build.other(slot.key);
+      slots.set(slot.key, client);
+      return client;
+    },
+    setHomeForTests(client) {
+      if (client === null) slots.clear();
+      else slots.set(HOME_CLIENT_SLOT, client);
+    },
+    slotKeys() {
+      return [...slots.keys()];
+    },
+  };
 }

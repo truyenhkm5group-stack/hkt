@@ -26,10 +26,15 @@ export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>>
 
 /** Mã tổ chức mà gói tin của `provider` thuộc về. Nhà cung cấp chưa khai ⇒ NÉM, không đoán. */
 export async function resolveWebhookOrganization(provider: WebhookProvider): Promise<string> {
-  const binding = WEBHOOK_BINDINGS[provider];
+  // `Object.hasOwn`: chuỗi lạ trùng tên thuộc tính của Object (`toString`, `constructor`…) không được
+  // lọt qua như một dòng khai.
+  const binding = Object.hasOwn(WEBHOOK_BINDINGS, provider) ? WEBHOOK_BINDINGS[provider] : undefined;
   if (!binding) throw new Error(`Webhook "${provider}" chưa khai cách phân giải tổ chức trong WEBHOOK_BINDINGS.`);
   switch (binding.mode) {
     case "HOME_ONLY":
       return (await getHomeOrganization()).code;
+    default:
+      // Chế độ lạ (dữ liệu hỏng, bản sau thêm chế độ mà quên nhánh) ⇒ NÉM, không rơi về nhà.
+      throw new Error(`Webhook "${provider}" khai chế độ phân giải "${String((binding as { mode?: unknown }).mode)}" chưa được hỗ trợ.`);
   }
 }

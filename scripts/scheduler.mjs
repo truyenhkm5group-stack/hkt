@@ -2,6 +2,8 @@
  * Bộ lập lịch đồng bộ (chạy như một tiến trình riêng, ví dụ service "scheduler" trong docker-compose).
  * Gọi các API /api/sync/<job> của ERP theo chu kỳ. Không cần build TypeScript.
  */
+import { fanOutEnabled, fanOutUrls, FANOUT_JOBS } from "./scheduler-fanout.mjs";
+
 const BASE = (process.env.ERP_INTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
 const SECRET = process.env.CRON_SECRET || "";
 
@@ -224,14 +226,50 @@ const DAILY = [
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);
 
-async function trigger(job, query = "") {
-  const url = `${BASE}/api/sync/${job}?wait=0${query ? `&${query}` : ""}`;
+// Lịch cho tổ chức khác nhà — MẶC ĐỊNH TẮT, lý do ở scripts/scheduler-fanout.mjs.
+const FANOUT = fanOutEnabled(process.env.SCHEDULER_FANOUT);
+
+/*
+  Danh sách tổ chức đệm 5 phút: hỏi mỗi lượt job là thêm một request cho mỗi tick của mọi job. Hỏi
+  hỏng ⇒ KHÔNG fan-out lượt này (danh sách rỗng) — không đoán, không dùng lại danh sách quá cũ.
+*/
+const ORGS_TTL_MS = 5 * 60_000;
+let orgsCache = { at: 0, list: [] };
+
+async function fanOutOrganizations() {
+  if (Date.now() - orgsCache.at < ORGS_TTL_MS) return orgsCache.list;
+  try {
+    const res = await fetch(`${BASE}/api/sync/organizations`, { headers: { "x-cron-secret": SECRET } });
+    const body = await res.json().catch(() => ({}));
+    const list = res.ok && Array.isArray(body.organizations) ? body.organizations : [];
+    if (!res.ok) log("fan-out: không đọc được danh sách tổ chức", res.status);
+    orgsCache = { at: Date.now(), list };
+    return list;
+  } catch (error) {
+    log("fan-out: lỗi đọc danh sách tổ chức:", error.message);
+    orgsCache = { at: Date.now(), list: [] };
+    return [];
+  }
+}
+
+async function call(label, url) {
   try {
     const res = await fetch(url, { method: "POST", headers: { "x-cron-secret": SECRET } });
     const body = await res.json().catch(() => ({}));
-    log(job, res.status, body.message || (body.started ? "started" : JSON.stringify(body).slice(0, 120)));
+    log(label, res.status, body.message || (body.started ? "started" : JSON.stringify(body).slice(0, 120)));
   } catch (error) {
-    log(job, "lỗi:", error.message);
+    log(label, "lỗi:", error.message);
+  }
+}
+
+async function trigger(job, query = "") {
+  // Lượt của tổ chức NHÀ: cùng URL, cùng thời điểm như trước khi có fan-out.
+  await call(job, `${BASE}/api/sync/${job}?wait=0${query ? `&${query}` : ""}`);
+  if (!FANOUT || !FANOUT_JOBS.includes(job)) return;
+  // Tuần tự từng tổ chức: `wait=0` nên mỗi lượt gọi trả ngay, nhưng không bắn cả loạt cùng một lúc.
+  const organizations = await fanOutOrganizations();
+  for (const url of fanOutUrls({ base: BASE, job, query, organizations, enabled: FANOUT })) {
+    await call(`${job}@${new URL(url).searchParams.get("org")}`, url);
   }
 }
 
@@ -266,6 +304,7 @@ async function main() {
     }, item.offset * 60_000);
   }
   log("Lịch chạy:", JOBS.map((j) => `${j.job}/${j.every}p`).join(", "));
+  log(FANOUT ? `Fan-out tổ chức khác nhà: BẬT cho ${FANOUT_JOBS.join(", ")}` : "Fan-out tổ chức khác nhà: TẮT (SCHEDULER_FANOUT khác \"1\")");
 
   const firedToday = new Set();
   setInterval(() => {

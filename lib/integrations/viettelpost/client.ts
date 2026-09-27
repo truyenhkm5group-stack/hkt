@@ -3,7 +3,7 @@ import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viet
 import { asArray, asRecord, fetchJson, int, IntegrationError, num, sleep, str, vtpDate } from "@/lib/integrations/http";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { assertHomeCredentials, peekIsNonHome } from "@/lib/platform/credentials";
+import { assertHomeCredentials, peekIsNonHome, perOrganizationClients } from "@/lib/platform/credentials";
 
 const TOKEN_KEY = "viettelpost";
 const THROTTLE_MS = 200;
@@ -349,16 +349,25 @@ export function moneyOrZero(value: unknown) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
 }
 
-let cached: ViettelPostClient | null = null;
+/**
+ * Một client cho MỖI tổ chức (R-04). Instance giữ TOKEN ĐÃ ĐĂNG NHẬP; trước đây job của tổ chức khác
+ * cầm đúng instance mang token của nhà. Ngăn của tổ chức khác là một instance riêng chưa từng đăng
+ * nhập — `configured` trả `false` và `getToken` chặn bằng `assertHomeCredentials` trước khi đọc
+ * `integration_tokens`. Nhà vẫn đúng MỘT instance: không đăng nhập thêm lần nào.
+ */
+const clients = perOrganizationClients<ViettelPostClient>({
+  home: () => new ViettelPostClient(),
+  other: () => new ViettelPostClient(),
+});
 export function getViettelPostClient() {
-  if (!cached) cached = new ViettelPostClient();
-  return cached;
+  return clients.get();
 }
 
 /**
- * CHỈ CHO KIỂM THỬ: thay client bằng bản giả để chạy job đối chiếu mà không đụng mạng. Truyền
- * `null` để trả lại client thật. Job chỉ dùng `getOrderDetail`, nên bản giả chỉ cần có hàm đó.
+ * CHỈ CHO KIỂM THỬ: thay client CỦA TỔ CHỨC NHÀ bằng bản giả để chạy job đối chiếu mà không đụng
+ * mạng. Truyền `null` để trả lại client thật. Job chỉ dùng `getOrderDetail`, nên bản giả chỉ cần có hàm đó.
  */
 export function setViettelPostClientForTests(client: Partial<Pick<ViettelPostClient, "getOrderDetail" | "updateOrder" | "editOrder" | "configured">> | null) {
-  cached = client as ViettelPostClient | null;
+  // Đặt vào NGĂN NHÀ (bộ kiểm thử chạy như tổ chức nhà); `null` vứt mọi ngăn.
+  clients.setHomeForTests(client as ViettelPostClient | null);
 }

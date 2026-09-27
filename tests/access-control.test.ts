@@ -38,6 +38,8 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   "app/api/webhooks/vtp-statement/route.ts": "webhook bảng kê Viettel Post",
   "app/api/webhooks/sepay/route.ts": "webhook SePay, xác thực bằng HMAC-SHA256 trên byte gốc + chống phát lại 5 phút — không có phiên đăng nhập",
   "app/api/sync/[job]/route.ts": "gọi bằng x-cron-secret (bộ lập lịch) hoặc phiên có quyền sync:run",
+  // Cố ý KHÔNG có đường phiên: danh sách khách của nền tảng không màn hình nghiệp vụ nào cần (tests/platform-jobs.test.ts khoá).
+  "app/api/sync/organizations/route.ts": "CHỈ x-cron-secret (bộ lập lịch fan-out); trả đúng mã các tổ chức khác nhà đang hoạt động, không có đường phiên đăng nhập",
   /*
     Cửa máy-gọi-máy: máy GitHub Actions chép sổ lượt chạy agent về (phương án B — runner KHÔNG nối
     CSDL production). Nó CHỈ nhận `x-cron-secret` và CỐ Ý KHÔNG có đường phiên đăng nhập: thêm một

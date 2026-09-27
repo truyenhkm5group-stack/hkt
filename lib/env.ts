@@ -1,3 +1,5 @@
+import { peekExplicitNonHomeCode } from "@/lib/platform/peek";
+
 function read(name: string, fallback = "") {
   const value = process.env[name];
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -232,7 +234,16 @@ export const CUSTOMER_CREDENTIAL_ENV = [
   "CHATBOT_ADMIN_TOKEN",
 ] as const;
 
+/**
+ * Kết nối nào đã có credential. Ngữ cảnh TƯỜNG MINH của tổ chức khác nhà (job, việc nền của họ) ⇒
+ * mọi ô `false`: credential môi trường là của tổ chức nhà (P12), màn hình và job của tổ chức khác
+ * không được tưởng là có kết nối. Request mang phiên tổ chức khác không có ngữ cảnh tường minh —
+ * lối gọi mạng vẫn chặn bằng `assertHomeCredentials`.
+ */
 export function integrationStatus() {
+  if (peekExplicitNonHomeCode() !== null) {
+    return { pancake: false, pancakePages: false, viettelPost: false, facebook: false, pancakeWebhook: false, viettelPostWebhook: false, sepayWebhook: false, sepayWebhookSigned: false, sepayApi: false };
+  }
   return {
     pancake: Boolean(env.pancake.apiKey && env.pancake.shopId),
     pancakePages: Boolean(env.pancake.pagesAccessToken),

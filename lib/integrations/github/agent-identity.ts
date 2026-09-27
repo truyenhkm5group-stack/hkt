@@ -214,6 +214,13 @@ async function call(url: string, init: RequestInit & { auth: string }): Promise<
  * cho `git push`) được khai rõ là KHÔNG ĐƯỢC IN.
  */
 async function installationToken(cfg: AgentGithubConfig, now: Date = new Date()): Promise<string> {
+  /*
+    CHẶN TRƯỚC KHI TRẢ TOKEN ĐANG ĐỆM (R-04). `call()` đã chặn — nhưng nhánh trúng đệm dưới đây
+    không gọi `call()`, nên trước đây một ngữ cảnh tổ chức khác nhà nhận nguyên token còn hạn của
+    người vận hành nền tảng (vd `agentRemoteUrl()` cho `git push`) mà không một byte nào đi qua lời
+    chặn.
+  */
+  await assertHomeCredentials("github");
   if (cached && cached.installationId === cfg.installationId && cached.expiresAt - now.getTime() > TOKEN_SAFETY_MS) return cached.token;
   const res = await call(`${API}/app/installations/${encodeURIComponent(cfg.installationId)}/access_tokens`, {
     method: "POST",
