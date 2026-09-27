@@ -569,6 +569,11 @@ export const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDi
     thời gian mẫu nào — khai tường minh để một loại chủ thể mới không lặng lẽ rơi về chiều mặc định.
   */
   approval_request: "LIFECYCLE",
+  /*
+    Phase 3: trạng thái nghiệp vụ tự khai (field custom kiểu status) đổi giá trị. `model_id = NULL` nên không
+    hiện trên dòng thời gian mẫu nào — khai tường minh cùng lý do với `approval_request`.
+  */
+  custom_record: "LIFECYCLE",
 };
 
 export function domainEventDimension(name: string): ModelTimelineDimension {

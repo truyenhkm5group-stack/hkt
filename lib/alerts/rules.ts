@@ -9,6 +9,7 @@ import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { deliverNotifications, fmtAt, type DeliveryResult } from "@/lib/alerts/notification-delivery";
 import { releaseStuckApprovalReservations } from "@/lib/approvals/reservation-sweep";
+import { runWorkflows, type RunWorkflowsResult } from "@/lib/workflow/engine";
 import { runStockShortageDigest, type ShortageDigestResult } from "@/lib/alerts/stock-shortage-digest";
 import { runStockWaitLog, type StockWaitLogResult } from "@/lib/alerts/stock-wait-log";
 import { maskUrls, runOwnerDecisionDigest, type OwnerDigestResult } from "@/lib/alerts/owner-decision-digest";
@@ -1075,7 +1076,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Gửi tin: lần đầu được · gửi lại được · hỏng còn lượt sau · bỏ cuộc (tới trần) — `lib/alerts/notification-delivery.ts`. */ delivery: Pick<DeliveryResult, "sent" | "retried" | "failed" | "gaveUp">; /** Lời duyệt kẹt được trả lại cho người xin — `lib/approvals/reservation-sweep.ts`. */ approvalSweep: { released: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult; /** "Cần anh quyết" gửi nhóm Quản lý — tự bỏ qua khi `owner.digest` tắt (mặc định). */ ownerDigest: OwnerDigestResult };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Gửi tin: lần đầu được · gửi lại được · hỏng còn lượt sau · bỏ cuộc (tới trần) — `lib/alerts/notification-delivery.ts`. */ delivery: Pick<DeliveryResult, "sent" | "retried" | "failed" | "gaveUp">; /** Lời duyệt kẹt được trả lại cho người xin — `lib/approvals/reservation-sweep.ts`. */ approvalSweep: { released: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult; /** "Cần anh quyết" gửi nhóm Quản lý — tự bỏ qua khi `owner.digest` tắt (mặc định). */ ownerDigest: OwnerDigestResult; /** Luật tự động (Phase 3) chạy ké lượt này — `lib/workflow/engine.ts`. */ workflows: RunWorkflowsResult & { error?: string } };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -1217,7 +1218,16 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     (r) => ({ released: r.released.length, error: undefined as string | undefined }),
     (e: unknown) => ({ released: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }),
   );
-  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, approvalSweep, delivery: { sent: delivery.sent, retried: delivery.retried, failed: delivery.failed, gaveUp: delivery.gaveUp }, stockShortage, stockWaitLog, ownerDigest };
+  /*
+    LUẬT TỰ ĐỘNG (Phase 3 · W8, `lib/workflow/engine.ts`): đọc sự kiện miền mới theo con trỏ, ghi lượt chạy, thực thi
+    lượt đã được duyệt. Chạy SAU lượt dọn lời duyệt kẹt ở trên, cùng lý do: job này đã chạy 10 phút/lần — không thêm
+    lịch. Lỗi ở đây không làm hỏng lượt cảnh báo đã chạy xong; câu lỗi đã che URL.
+  */
+  const workflows = await runWorkflows().then(
+    (r): RunWorkflowsResult & { error?: string } => r,
+    (e: unknown): RunWorkflowsResult & { error?: string } => ({ events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }),
+  );
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, approvalSweep, delivery: { sent: delivery.sent, retried: delivery.retried, failed: delivery.failed, gaveUp: delivery.gaveUp }, stockShortage, stockWaitLog, ownerDigest, workflows };
 }
 
 const holder = globalThis as unknown as { __erpAlertsTimers?: Map<string, ReturnType<typeof setTimeout>> };

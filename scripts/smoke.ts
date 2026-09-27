@@ -238,6 +238,8 @@ const ROUTES = [
   "/settings/forms",
   "/settings/lists",
   "/settings/statuses",
+  // Luật tự động (Phase 3): danh sách luật đọc dịch vụ `lib/workflow/*` của tổ chức.
+  "/settings/workflows",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.

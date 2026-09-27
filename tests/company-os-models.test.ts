@@ -148,6 +148,8 @@ export function testCompanyOsModelsPure() {
     "return.variant_identified",
     // 26/09/2026: mẫu mới test mở topic sản xuất bằng mã tạm, thắng thì chốt mã chính thức — dòng thêm ở shared-contracts.md mục 2.
     "model.code_assigned",
+    // Phase 3 · W2: field custom kiểu status đổi giá trị — nguồn trigger workflow; dòng ở shared-contracts.md mục 2.
+    "custom_status.changed",
   ];
   assert.deepEqual([...ten].sort(), [...hopDong].sort(), "sổ khai phải đúng bằng bảng tên đã cấp ở shared-contracts.md mục 2");
   const migName = /"domain_events_name_check" CHECK \("name" ~ '([^']+)'\)/.exec(mig);

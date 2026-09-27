@@ -51,6 +51,8 @@ export const WORK_SOURCES = [
   "SAMPLE_REVIEW",
   "MANUAL_TASK",
   "RECURRING_TASK",
+  // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
+  "WORKFLOW_TASK",
 ] as const;
 export type WorkSource = (typeof WORK_SOURCES)[number];
 
@@ -434,6 +436,32 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: null,
     outcomeAttributable: true,
     actions: ["WORK_STATUS", "WORK_ASSIGN", "WORK_DUE"],
+  },
+  /*
+    ═══ Phase 3 · W9 · VIỆC DO LUẬT TỰ ĐỘNG TẠO ═══
+
+    Authority `WORK`: không miền nào sở hữu việc này — `work_items` là nguồn duy nhất, cùng hình dạng việc tay.
+    `source_key` = `<id lượt chạy>:<vị trí hành động>` ⇒ chạy lại lượt đó không đẻ việc thứ hai.
+
+    PHÒNG `null`: phòng do NGƯỜI KHAI LUẬT chọn trong hành động (`departmentCode`) — cùng lý do với việc tay,
+    không có phòng mặc định nào đúng cho mọi luật. HẠN `null`: hạn là `dueInHours` của hành động; không có hằng
+    số hạn nào đang chạy để lấy lại (AGENTS.md mục 22 cấm gõ một con số mới).
+
+    KHÔNG trùng độ mịn với cảnh báo nào: việc sinh từ một lượt chạy luật, không đi qua bảng `notifications`
+    (hành động `notify` là MỘT tin cho lượt chạy, kind `SYSTEM`, không phải việc) — nên
+    `ALERT_KINDS_OWNED_ELSEWHERE` không cần thêm gì.
+  */
+  WORKFLOW_TASK: {
+    key: "WORKFLOW_TASK",
+    label: "Việc do luật tự động tạo",
+    why: "Một luật tự động của tổ chức thấy điều kiện đã khai xảy ra và giao việc cho người — máy phát hiện, người làm.",
+    statusAuthority: "WORK",
+    assigneeAuthority: "WORK",
+    department: null,
+    businessEntity: "NONE",
+    slaHours: null,
+    outcomeAttributable: true,
+    actions: ["WORK_STATUS", "WORK_ASSIGN", "WORK_DUE", "WORK_PRIORITY"],
   },
 };
 

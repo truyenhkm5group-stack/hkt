@@ -419,9 +419,11 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testWorkflowAdmin } from "./workflow-admin.test";
 import { testMetadataService } from "./metadata-service.test";
 import { testMetadataAdmin } from "./metadata-admin.test";
 import { testMetadataRuntime } from "./metadata-runtime.test";
+import { testWorkflowEngine } from "./workflow-engine.test";
 import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
@@ -2433,6 +2435,11 @@ async function main() {
   await testMetadataAdmin();
   // Phase 2 · form runtime + danh sách theo metadata (M8, M9): hàm thuần + hàng rào tạo khách.
   await testMetadataRuntime();
+  // Phase 3 · bộ máy workflow: hai tổ chức THẬT `pw-a` / `pw-b` (tự cấp, tự dọn) — lưu luật, chạy thử, cửa duyệt,
+  // đúng một việc sau khi duyệt, vòng lặp bị chặn, lượt đầu không xử lý lịch sử, cô lập tổ chức.
+  await testWorkflowEngine();
+  // Phase 3 · giao diện luật tự động: lõi màn hình /settings/workflows (quyền, bản nháp form) + vòng đời thật trên tổ chức `wa-wf` (tự cấp, tự dọn).
+  await testWorkflowAdmin();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,

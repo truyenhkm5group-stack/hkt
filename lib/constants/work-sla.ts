@@ -310,6 +310,14 @@ const SOURCE_RULES: SlaRule[] = [
     department: null,
     alsoShownOn: "Cấu hình · việc định kỳ",
   },
+  {
+    key: "WORKFLOW_TASK",
+    label: "Việc do luật tự động tạo (khi hành động không đặt hạn riêng)",
+    hours: WORK_SOURCE_SPEC.WORKFLOW_TASK.slaHours,
+    why: "Hạn là 'sau bao nhiêu giờ' người khai luật đặt trong hành động tạo việc. Con số ở đây chỉ là dự phòng khi ô đó trống — mặc định không đặt.",
+    department: null,
+    alsoShownOn: "Cấu hình · luật tự động",
+  },
 ];
 
 /**

@@ -179,13 +179,14 @@ export function sumMoney(items: { money: WorkMoney }[]): { atRisk: number; recov
 
 // ───────────────────────── Nguồn tạo việc ─────────────────────────
 
-export const CREATION_SOURCES = ["AUTO", "MANUAL", "RECURRING"] as const;
+export const CREATION_SOURCES = ["AUTO", "MANUAL", "RECURRING", "WORKFLOW"] as const;
 export type CreationSource = (typeof CREATION_SOURCES)[number];
 
 export const CREATION_SOURCE_LABEL: Record<CreationSource, string> = {
   AUTO: "Hệ thống phát hiện",
   MANUAL: "Giao tay",
   RECURRING: "Việc định kỳ",
+  WORKFLOW: "Luật tự động",
 };
 
 // ───────────────────────── Hình dạng một việc ─────────────────────────

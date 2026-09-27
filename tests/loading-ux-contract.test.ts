@@ -155,7 +155,7 @@ export function testLoadingUxContract() {
   // Component nào ghi lên URL với `shallow: false` (đi vòng lên máy chủ) mà lại dùng
   // React.useTransition trần thì người dùng bấm xong sẽ không thấy dấu hiệu gì.
   //
-  // NGOẠI LỆ CÓ CHỦ Ý: ba tệp dưới đây dùng transition cho một thao tác GHI hoặc một lần TẢI DỮ
+  // NGOẠI LỆ CÓ CHỦ Ý: các tệp dưới đây dùng transition cho một thao tác GHI hoặc một lần TẢI DỮ
   // LIỆU, không phải cho điều hướng — `router.push` chỉ chạy SAU khi việc đó xong. Đẩy chúng lên
   // thanh tiến trình chung sẽ khiến thanh này chạy mỗi lần lưu biểu mẫu, làm loãng đúng tín hiệu
   // mà nó sinh ra để mang: "đang mở trang khác". Thêm tệp vào danh sách này phải là quyết định
@@ -164,6 +164,7 @@ export function testLoadingUxContract() {
     ["app/(dashboard)/inventory/planning/orders/production-editor.tsx", "transition bọc thao tác LƯU bảng sản xuất"],
     ["app/(dashboard)/inventory/planning/orders/[id]/order-actions.tsx", "transition bọc server action đổi trạng thái lệnh sản xuất"],
     ["components/global-search.tsx", "transition bọc lần TẢI kết quả tìm kiếm, không bọc điều hướng"],
+    ["components/platform/workflow/rule-editor.tsx", "transition bọc thao tác LƯU luật tự động; router.push chỉ chạy SAU khi lưu xong để mở trang của luật vừa tạo"],
   ]);
   const clientFiles = [...walk("app/(dashboard)", ".tsx"), ...walk("components", ".tsx")];
   const viPham: string[] = [];

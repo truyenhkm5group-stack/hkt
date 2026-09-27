@@ -20,7 +20,7 @@ import { assigneeAuthorityOf, authorityOf, isWorkSource, WORK_SOURCE_SPEC, type 
  * ERP có hai đường ghi cho cùng một sự thật, và đường thứ hai sẽ không có `audit()` của miền kia.
  */
 
-export type WorkActor = { id: string; email: string; name: string; source?: "UI" | "API" | "SYSTEM" | "RECURRENCE" };
+export type WorkActor = { id: string; email: string; name: string; source?: "UI" | "API" | "SYSTEM" | "RECURRENCE" | "WORKFLOW" };
 
 export type WorkResult<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -496,6 +496,66 @@ export async function generateRecurringTasks(at: Date = new Date(), actor: WorkA
     }
   }
   return { created, skipped };
+}
+
+/* ═══════════════════ VIỆC DO LUẬT TỰ ĐỘNG TẠO (Phase 3 · W9) ═══════════════════ */
+
+export type WorkflowTaskInput = {
+  /** `<id lượt chạy>:<vị trí hành động>` — khoá tự nhiên, cùng vai trò `<recurrenceId>:<kỳ>` của việc định kỳ. */
+  sourceKey: string;
+  title: string;
+  summary: string;
+  department: DepartmentCode | null;
+  priority: WorkPriority;
+  dueAt: Date | null;
+  /** Bản ghi đã kích hoạt luật (`<objectKey>:<recordId>` hoặc subject của sự kiện) — để người làm mở đúng chỗ. */
+  businessEntityId: string;
+};
+
+/**
+ * Tạo MỘT việc nguồn `WORKFLOW_TASK`, lũy đẳng: `onConflictDoNothing` trên `(source_type, source_key)` — chạy lại
+ * cùng lượt chạy không đẻ việc thứ hai (trả `created: false` kèm id việc đã có). Người tạo là MÁY (`created_by`
+ * NULL, nhật ký nguồn `WORKFLOW`); tên luật đi vào ảnh chụp tên của dòng nhật ký.
+ */
+export async function createWorkflowTask(input: WorkflowTaskInput, actor: WorkActor): Promise<WorkResult<{ id: string; key: string; created: boolean }>> {
+  const db = await getDb();
+  const title = input.title.trim();
+  if (title.length < 2) return { error: "Tiêu đề việc quá ngắn" };
+  let departmentId: string | null = null;
+  if (input.department) {
+    departmentId = await departmentIdOf(db, input.department);
+    if (!departmentId) return { error: `Không tìm thấy phòng ban ${DEPARTMENT_LABEL[input.department] ?? input.department}` };
+  }
+  const key = `WORKFLOW_TASK:${input.sourceKey}`;
+  const inserted = await db
+    .insert(schema.workItems)
+    .values({
+      id: crypto.randomUUID(),
+      sourceType: "WORKFLOW_TASK",
+      sourceKey: input.sourceKey,
+      authority: "WORK",
+      status: "NEW",
+      title,
+      summary: input.summary,
+      departmentId,
+      priority: input.priority,
+      dueAt: input.dueAt,
+      businessEntity: "NONE",
+      businessEntityId: input.businessEntityId,
+      creationSource: "WORKFLOW",
+      createdBy: null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: schema.workItems.id });
+  if (inserted.length) {
+    await logWorkEvent(db, { workKey: key, workItemId: inserted[0].id, actor: { ...actor, id: "", source: "WORKFLOW" }, action: "CREATE", note: title, nextStatus: "NEW" });
+    return { ok: true, id: inserted[0].id, key, created: true };
+  }
+  const existing = await db.query.workItems.findFirst({
+    where: and(eq(schema.workItems.sourceType, "WORKFLOW_TASK"), eq(schema.workItems.sourceKey, input.sourceKey)),
+    columns: { id: true },
+  });
+  return existing ? { ok: true, id: existing.id, key, created: false } : { error: "Không tạo được việc" };
 }
 
 export type RecurrenceInput = {

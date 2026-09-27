@@ -1113,10 +1113,10 @@ export async function adaptOwnedWork(now: Date, includeClosed: boolean, closedSi
           ? MONEY_UNKNOWN
           : { atRisk: r.moneyAtRisk, recoverable: r.moneyRecoverable, confidence: r.moneyConfidence as WorkMoney["confidence"], basis: r.moneyBasis },
       tags: r.tags ?? [],
-      evidence: { source: r.creationSource === "RECURRING" ? "Việc định kỳ" : "Người giao", detail: r.summary.slice(0, 200) },
+      evidence: { source: r.creationSource === "RECURRING" ? "Việc định kỳ" : r.creationSource === "WORKFLOW" ? "Luật tự động" : "Người giao", detail: r.summary.slice(0, 200) },
       blockedReason: r.blockedReason,
       creationSource: r.creationSource as WorkItem["creationSource"],
-      actions: actionsOf(r.sourceType === "RECURRING_TASK" ? "RECURRING_TASK" : "MANUAL_TASK"),
+      actions: actionsOf(r.sourceType === "RECURRING_TASK" ? "RECURRING_TASK" : r.sourceType === "WORKFLOW_TASK" ? "WORKFLOW_TASK" : "MANUAL_TASK"),
       recommendedAction: r.summary.slice(0, 200),
     };
   });
@@ -1230,7 +1230,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
     want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
-    want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
+    want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 
   let items = groups.flat().map((i) => applyWorkConfig(i, cfg));

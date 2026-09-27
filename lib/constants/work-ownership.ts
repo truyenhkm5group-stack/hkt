@@ -64,6 +64,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
+  WORKFLOW_TASK: "Việc do luật tự động tạo đi theo phòng người khai luật chọn trong hành động — không có phòng mặc định nào đúng cho mọi luật.",
 };
 
 /**
@@ -165,7 +166,7 @@ export const ALERT_TYPES_WITHOUT_OWNER: CaseType[] = CASE_TYPES.filter(
 
 /**
  * Nguồn nào KHÔNG có luật sở hữu mức nguồn — và điều đó có cố ý không.
- * `ALERT` · `MANUAL_TASK` · `RECURRING_TASK` cố ý không có: phòng ban của chúng suy theo từng dòng.
+ * `ALERT` · `MANUAL_TASK` · `RECURRING_TASK` · `WORKFLOW_TASK` cố ý không có: phòng ban của chúng suy theo từng dòng.
  */
 export const SOURCES_WITHOUT_OWNER: WorkSource[] = WORK_SOURCES.filter(
   (s) => WORK_SOURCE_SPEC[s].department !== null && !DEFAULT_OWNERSHIP_MAP[s] && !DEFAULT_OWNERSHIP_RULES.some((r) => r.key.startsWith(`${s}:`)),
