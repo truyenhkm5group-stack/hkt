@@ -1,5 +1,6 @@
 /**
- * Kho NHÁP / ĐÃ XUẤT BẢN dùng chung cho form (`meta_forms`) và danh sách (`meta_list_views`) — CHỈ MÁY CHỦ.
+ * Kho NHÁP / ĐÃ XUẤT BẢN dùng chung cho form (`meta_forms`), danh sách (`meta_list_views`) và trang tuỳ biến
+ * (`meta_pages`, Phase 4) — CHỈ MÁY CHỦ.
  *
  * Xuất bản = chép bản nháp (đã chuẩn hoá) sang `published`, `published_version + 1`, và MỘT dòng ảnh chụp
  * bất biến trong `meta_config_versions` — cả hai trong CÙNG một giao dịch, khoá lạc quan theo phiên bản cũ
@@ -10,7 +11,16 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 
-export type ConfigKind = "FORM" | "LIST_VIEW";
+/**
+ * `PAGE` (Phase 4 · G1): trang tuỳ biến ở `meta_pages`. Khoá của nó là `(PAGE_CONFIG_OBJECT, <id trang>)` — id chứ
+ * không phải slug, vì slug còn đổi được cho tới lần xuất bản đầu. KHÁC hai loại kia ở một điểm: dòng
+ * `meta_pages` phải có sẵn (tạo trang mang slug / tên / module chủ) — `upsertDraft("PAGE")` chỉ CẬP NHẬT, không
+ * bao giờ đẻ ra một trang không tên.
+ */
+export type ConfigKind = "FORM" | "LIST_VIEW" | "PAGE";
+
+/** `object_key` của ảnh chụp trang trong `meta_config_versions` — trang không thuộc một đối tượng nào. */
+export const PAGE_CONFIG_OBJECT = "page";
 
 export type ConfigRow = {
   draft: unknown;
@@ -25,6 +35,11 @@ export async function loadConfigRow(kind: ConfigKind, objectKey: string, key: st
   if (kind === "FORM") {
     const t = schema.metaForms;
     const [r] = await db.select().from(t).where(and(eq(t.objectKey, objectKey), eq(t.formKey, key))).limit(1);
+    return r ? { draft: r.draft, published: r.published, publishedVersion: r.publishedVersion, publishedAt: r.publishedAt, publishedBy: r.publishedBy } : null;
+  }
+  if (kind === "PAGE") {
+    const t = schema.metaPages;
+    const [r] = await db.select().from(t).where(eq(t.id, key)).limit(1);
     return r ? { draft: r.draft, published: r.published, publishedVersion: r.publishedVersion, publishedAt: r.publishedAt, publishedBy: r.publishedBy } : null;
   }
   const t = schema.metaListViews;
@@ -59,6 +74,11 @@ export async function upsertDraft(kind: ConfigKind, objectKey: string, key: stri
       .onConflictDoUpdate({ target: [t.objectKey, t.formKey], set: { draft, updatedBy: actorId, updatedAt: now } });
     return;
   }
+  if (kind === "PAGE") {
+    const t = schema.metaPages;
+    await db.update(t).set({ draft, updatedBy: actorId, updatedAt: now }).where(eq(t.id, key));
+    return;
+  }
   const t = schema.metaListViews;
   await db
     .insert(t)
@@ -87,6 +107,14 @@ export async function publishConfig(
         .update(t)
         .set({ published, publishedVersion: version, publishedAt: now, publishedBy: actor.id, updatedBy: actor.id, updatedAt: now })
         .where(and(eq(t.objectKey, objectKey), eq(t.formKey, key), eq(t.publishedVersion, expectedVersion)))
+        .returning({ v: t.publishedVersion });
+      n = r.length;
+    } else if (kind === "PAGE") {
+      const t = schema.metaPages;
+      const r = await tx
+        .update(t)
+        .set({ published, publishedVersion: version, publishedAt: now, publishedBy: actor.id, updatedBy: actor.id, updatedAt: now })
+        .where(and(eq(t.id, key), eq(t.status, "ACTIVE"), eq(t.publishedVersion, expectedVersion)))
         .returning({ v: t.publishedVersion });
       n = r.length;
     } else {

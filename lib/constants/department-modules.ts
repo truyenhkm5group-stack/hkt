@@ -448,6 +448,15 @@ export const NAV_MODULES = [
     permission: "workflow:manage",
     why: "Khi nào · điều kiện · làm gì (tạo việc, báo, ghi giá trị) · có cần người duyệt. Luật mới luôn ở NHÁP + CHẠY THỬ; chuyển CHẠY THẬT là quyết định của quản trị vì máy sẽ làm thay người trên cả tổ chức.",
   },
+  // Trang tuỳ biến (Phase 4): cùng khoá `metadata:manage` với bốn màn hình metadata — một trang xuất bản lên menu
+  // của CẢ tổ chức và ghép số liệu của nhiều phòng, nên là việc của quản trị, không của phòng nào.
+  {
+    href: "/settings/pages",
+    label: "Trang tuỳ biến",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Ghép trang từ khối có sẵn (chỉ số, bảng, biểu đồ, Kanban, nhật ký, form, nút) theo Nháp → Xuất bản, không cần deploy. Trang lên menu của mọi người nên là quyết định của quản trị; mỗi khối vẫn tự kiểm quyền của người xem.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

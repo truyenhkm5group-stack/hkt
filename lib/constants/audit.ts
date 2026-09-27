@@ -112,6 +112,13 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "approval.execute_failed": "Việc đã duyệt thực hiện hỏng — trả lại lời duyệt",
   "approval.blocked": "Chặn: cần duyệt mà chưa có người đủ tư cách duyệt",
   "approval.reservation_released": "Nhả lời duyệt giữ chỗ quá hạn",
+  // Trang tuỳ biến (Phase 4 · lib/pages/registry.ts, lib/pages/actions.ts).
+  META_PAGE_CREATE: "Tạo trang tuỳ biến",
+  META_PAGE_UPDATE: "Sửa thông tin trang tuỳ biến (tên, menu, quyền xem)",
+  META_PAGE_DRAFT_SAVE: "Lưu nháp trang tuỳ biến",
+  META_PAGE_PUBLISH: "Xuất bản trang tuỳ biến",
+  META_PAGE_ARCHIVE: "Lưu trữ trang tuỳ biến",
+  PAGE_ACTION_RUN: "Bấm nút trên trang tuỳ biến",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -140,6 +147,7 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   APPROVAL: "Duyệt hai bước",
   APPROVAL_REQUEST: "Yêu cầu duyệt hai bước",
   return_unidentified: "Kiện hoàn không mã",
+  META_PAGE: "Trang tuỳ biến",
 };
 
 /**

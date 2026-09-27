@@ -99,7 +99,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     core: true,
     dependsOn: [],
     features: [],
-    routes: ["/", "/cockpit", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata"],
+    routes: ["/", "/cockpit", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata"],
     permissions: ["dashboard:view", "audit:view", "users:manage", "settings:manage", "approvals:decide", ...PLATFORM_PERMISSION_KEYS],
     why: "Thứ mọi tổ chức cần để đăng nhập, phân quyền và quản trị chính mình. Không tắt được: tắt nó là khoá người quản trị khỏi chính màn hình bật lại nó. `/cockpit` ở đây: nó là tầng TỔNG HỢP của chủ (gác `dashboard:view`) đọc nhiều miền, không phải một màn hình Tài chính. `/integrations` KHÔNG ở đây — trang ấy in credential của tổ chức nhà (xem module «Kết nối dữ liệu»). `/api/metadata` (tải tệp của field tuỳ biến) ở đây vì một tệp thuộc ĐỐI TƯỢNG của bất kỳ module nào — route tự kiểm module của đối tượng sở hữu tệp và trả 403 MODULE_DISABLED khi nó tắt.",
   },

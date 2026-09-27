@@ -41,7 +41,8 @@ export type OrderKpis = {
   successRate: number | null;
 };
 
-async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
+/** KPI đơn của Tổng quan — dùng lại NGUYÊN hàm này ở mọi nơi cần cùng con số (khối KPI trang động, Phase 4). */
+export async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
   const db = await getDb();
   // Chỉ đơn ĐÃ XÁC NHẬN trên Pancake (bỏ đơn Mới chưa chốt, huỷ, xoá) — khớp báo cáo lợi nhuận
   const where = metricScope({ key: "custom", from, to, label: "", fromKey: null, toKey: null }, "confirmed");

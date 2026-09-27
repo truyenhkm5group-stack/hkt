@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { NAV_TITLES } from "@/components/app-sidebar";
+import { DYNAMIC_PAGE_PREFIX } from "@/lib/pages/nav";
 
 /**
  * ĐƯỜNG QUAY LẠI CHO TRANG CHI TIẾT.
@@ -16,6 +17,9 @@ export function DetailCrumb() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length < 2) return null;
+  // Trang tuỳ biến `/p/<slug>` (Phase 4) không phải trang chi tiết: không có trang `/p` trần để quay về, và trang
+  // động tự in tên của nó. "/p" có trong NAV_TITLES chỉ để làm khoá đếm lượt mở.
+  if (`/${segments[0]}` === DYNAMIC_PAGE_PREFIX) return null;
   const twoLevel = `/${segments.slice(0, 2).join("/")}`;
   // Trang có mục menu riêng (vd /reports/returns) KHÔNG phải trang chi tiết.
   if (NAV_TITLES[twoLevel] && segments.length === 2) return null;
