@@ -836,9 +836,10 @@ export async function listLiveVariants(db: Db, now: Date): Promise<JudgedVariant
     .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, schema.creativeVariants.batchId))
     .leftJoin(schema.products, eq(schema.products.id, schema.creativeVariants.productId))
     .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, schema.creativeVariants.imageId))
-    // Mẫu còn `LIVE` luôn hiện dù đăng từ bao lâu: camp ngân sách ngày chạy liên tục (`DAILY_BUDGET_MODE`) — rơi khỏi
-    // cửa sổ 14 ngày là biến mất khỏi "Đang chạy" trong khi vẫn đang tiêu tiền.
-    .where(and(inArray(schema.creativeVariants.status, PUBLISHED_STATUSES), lte(schema.creativeBatches.startAt, now), or(gte(schema.creativeBatches.startAt, from), eq(schema.creativeVariants.status, "LIVE"))))
+    // Mẫu còn `LIVE` luôn hiện: dù đăng từ bao lâu (camp ngân sách ngày chạy liên tục — rơi khỏi cửa sổ 14 ngày là biến mất
+    // khỏi "Đang chạy" trong khi vẫn tiêu tiền), VÀ dù chưa tới giờ chạy (camp hẹn giờ đã lên Facebook — 28/09/2026 chủ shop
+    // đăng 7 camp hẹn 07:00 mà tab chỉ hiện 2 camp cũ).
+    .where(and(inArray(schema.creativeVariants.status, PUBLISHED_STATUSES), or(and(gte(schema.creativeBatches.startAt, from), lte(schema.creativeBatches.startAt, now)), eq(schema.creativeVariants.status, "LIVE"))))
     .orderBy(desc(schema.creativeBatches.startAt), schema.creativeVariants.slot);
   return judgeCards(
     db,
