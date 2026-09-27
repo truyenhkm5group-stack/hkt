@@ -226,6 +226,7 @@ export const campaignSetupSchema = z
     ageMax: z.number().int().min(CAMPAIGN_SETUP_LIMITS.minAge).max(CAMPAIGN_SETUP_LIMITS.maxAge).nullable(),
     gender: z.enum(CAMPAIGN_GENDERS).nullable(),
     marketerId: z.string().trim().min(1).max(80).nullable().default(null),
+    marketerCode: z.string().trim().min(1).max(40).nullable().default(null),
     startAt: z.string().datetime({ offset: true, message: "Giờ bắt đầu không hợp lệ" }).nullable().default(null),
     campaignKind: z.enum(CAMPAIGN_KINDS).default("TEST"),
   })

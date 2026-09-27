@@ -391,7 +391,7 @@ export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccou
     marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null, campaignKind: "TEST" },
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
     template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
   };
 }

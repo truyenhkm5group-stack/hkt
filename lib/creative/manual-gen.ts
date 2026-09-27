@@ -23,7 +23,7 @@ import {
   type ImageSize,
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
-import { CAMPAIGN_SETUP_LIMITS, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
@@ -1037,8 +1037,8 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   // MKTer: tên + mã đọc lại ở trang Lương theo `marketerId` — chọn người đã nghỉ / chưa khai bí danh thì dừng, không đăng
   // một camp mà tiền ads không quy về ai.
   const employees = setup?.marketerId ? await readPayrollEmployees(db) : [];
-  const marketer = setup?.marketerId ? (marketerOptions(employees).find((m) => m.id === setup.marketerId) ?? null) : null;
-  if (setup?.marketerId && !marketer) return { ok: false, error: "MKTer đã chọn không còn trong danh sách nhân sự (trang Lương) hoặc chưa khai bí danh — chọn lại MKTer." };
+  const marketer = setup?.marketerId ? pickMarketerOption(marketerOptions(employees), setup.marketerId, setup.marketerCode) : null;
+  if (setup?.marketerId && !marketer) return { ok: false, error: setup.marketerCode ? `Mã MKTer ${setup.marketerCode} không còn là bí danh của MKTer đã chọn (trang Lương) — chọn lại.` : "MKTer đã chọn không còn trong danh sách nhân sự (trang Lương) hoặc chưa khai bí danh — chọn lại MKTer." };
   if (marketer && input.names.campaign.trim()) {
     const problem = marketerNameProblem(input.names.campaign.trim(), marketer, employees);
     if (problem) return { ok: false, error: problem };

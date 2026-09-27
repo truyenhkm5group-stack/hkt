@@ -72,7 +72,22 @@ export function rewriteCampaignName(name: string, to: CampaignNameParts, known: 
   if (to.account) segs = segs.map((x) => (has(known.accounts, x) ? to.account as string : x));
   if (to.page) segs = segs.map((x) => (has(known.pages, x) ? to.page as string : x));
   segs = segs.map((x) => (has(known.kinds, x) ? to.kindLabel : x));
-  segs = segs.filter((x) => !has(known.marketerCodes, x));
+  // Mã MKTer có thể nhiều đoạn (`QUAN_TA`) ⇒ gỡ theo CHUỖI đoạn liên tiếp, mã dài trước.
+  const codeParts = known.marketerCodes
+    .map((c) => c.split("_").map((x) => x.trim()).filter((x) => x !== ""))
+    .filter((p) => p.length > 0)
+    .sort((a, b) => b.length - a.length);
+  const kept: string[] = [];
+  for (let i = 0; i < segs.length; ) {
+    const hit = codeParts.find((p) => p.every((x, k) => (segs[i + k] ?? "").trim() === x));
+    if (hit) {
+      i += hit.length;
+      continue;
+    }
+    kept.push(segs[i]);
+    i += 1;
+  }
+  segs = kept;
   if (to.marketerCode) {
     const acc = to.account ? segs.findIndex((x) => x.trim() === (to.account as string).trim()) : -1;
     const date = segs.findIndex((x) => /^\d{2}\/\d{2}$/.test(x.trim()));
@@ -107,31 +122,52 @@ export type CampaignSetup = {
   gender: CampaignGender | null;
   /** MKTer của camp (`Employee.id` ở trang Lương). `null` = chưa chọn — tên chiến dịch không mang mã MKTer. */
   marketerId: string | null;
+  /** Mã MKTer đã chọn trong các mã của người ấy (`marketerCampaignCodes`). `null` = mã đầu tiên (setup lưu trước khi có ô này). */
+  marketerCode: string | null;
   /** Giờ bắt đầu đã chọn (ISO có múi giờ). `null` = chạy ngay lúc bấm. Chỉ để LƯU cùng bản nháp — lúc đăng, giờ hẹn gửi riêng. */
   startAt: string | null;
   /** `TEST` = tên mang chữ TEST · `WIN` = tên mang mã hàng của ảnh (tiền ads quy về mã). */
   campaignKind: CampaignKind;
 };
 
-/** Một MKTer chọn được trong khối setup: `code` = mã vào tên chiến dịch (dẫn xuất từ bí danh, máy chủ tính). */
+/** Một lựa chọn (MKTer, mã) trong khối setup — MỘT dòng mỗi mã của mỗi người: `code` = mã vào tên chiến dịch (dẫn xuất từ bí danh, máy chủ tính). */
 export type MarketerOption = { id: string; name: string; code: string };
 
 /**
- * MÃ MKTER TRONG TÊN CHIẾN DỊCH — dẫn xuất từ bí danh khai ở trang Lương (`Employee.aliases`), KHÔNG phải danh sách thứ
- * hai: luật quy tiền ads (`resolveMarketer`) nhận MKTer bằng đúng các bí danh ấy, nên mã lấy từ đó thì camp tự quy về đúng
- * người. Ưu tiên bí danh MỘT từ (vd "TRINH"), viết hoa, bỏ dấu. Không có bí danh ⇒ `null` (không đoán). Hàm THUẦN.
+ * CÁC MÃ MKTER DÙNG ĐƯỢC TRONG TÊN CHIẾN DỊCH — dẫn xuất từ bí danh khai ở trang Lương (`Employee.aliases`), KHÔNG phải danh
+ * sách thứ hai: luật quy tiền ads (`resolveMarketer`) nhận MKTer bằng đúng các bí danh ấy, nên mã lấy từ đó thì camp tự quy về
+ * đúng người. Mỗi bí danh là MỘT mã (chủ shop 27/09/2026: "Quân TA có mã MKTer là QUAN_TA nữa" — người chọn mã nào dùng):
+ * viết hoa, bỏ dấu, khoảng trắng / ký tự lạ thành `_` (`QUAN TA` ⇒ `QUAN_TA`; luật quy tiền ads coi `_` như khoảng trắng nên
+ * vẫn nhận đúng). Bí danh mang chữ TEST bị bỏ: chữ TEST trong tên biến camp thành chi phí test. Giữ thứ tự khai. Không có bí
+ * danh ⇒ `[]` (không đoán). Hàm THUẦN.
  */
-export function marketerCampaignCode(aliases: readonly string[] | null | undefined): string | null {
+export function marketerCampaignCodes(aliases: readonly string[] | null | undefined): string[] {
   const norm = (a: string) =>
     a
       .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/[đĐ]/g, "D")
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim()
+      .replace(/[^\p{L}\p{N}]+/gu, "_")
+      .replace(/^_+|_+$/g, "")
       .toUpperCase();
-  const all = (aliases ?? []).map(norm).filter((a) => a.length >= 2);
-  return all.find((a) => !a.includes(" ")) ?? all[0] ?? null;
+  const out: string[] = [];
+  for (const a of aliases ?? []) {
+    const code = norm(a);
+    if (code.length < 2 || code.split("_").includes("TEST") || out.includes(code)) continue;
+    out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Lựa chọn MKTer của một setup: đúng (người, mã) đã chọn; setup cũ chưa lưu mã ⇒ mã ĐẦU TIÊN của người ấy. `code` được khai
+ * mà không còn là mã của người ấy ⇒ `null` (không lặng lẽ đổi sang mã khác). Hàm THUẦN.
+ */
+export function pickMarketerOption(options: readonly MarketerOption[], marketerId: string | null, marketerCode: string | null): MarketerOption | null {
+  if (!marketerId) return null;
+  const mine = options.filter((o) => o.id === marketerId);
+  if (marketerCode) return mine.find((o) => o.code === marketerCode) ?? null;
+  return mine[0] ?? null;
 }
 
 /** Giới hạn ô nhập — tuổi theo quy định của Facebook (13–65, 65 = "65+"); ngân sách tối thiểu để một ngày có phân phối. */
@@ -158,9 +194,10 @@ export function parseCampaignSetup(raw: unknown): CampaignSetup | null {
     : null;
   const gender = (CAMPAIGN_GENDERS as readonly string[]).includes(r.gender as string) ? (r.gender as CampaignGender) : null;
   const marketerId = typeof r.marketerId === "string" && r.marketerId.trim() ? r.marketerId.trim() : null;
+  const marketerCode = marketerId && typeof r.marketerCode === "string" && r.marketerCode.trim() ? r.marketerCode.trim() : null;
   const startAt = typeof r.startAt === "string" && Number.isFinite(new Date(r.startAt).getTime()) ? r.startAt : null;
   const campaignKind: CampaignKind = r.campaignKind === "WIN" ? "WIN" : "TEST";
-  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, startAt, campaignKind };
+  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, marketerCode, startAt, campaignKind };
 }
 
 /** Câu ngắn mô tả một setup — cho sổ ghi / hàng đợi. Hàm THUẦN. */
