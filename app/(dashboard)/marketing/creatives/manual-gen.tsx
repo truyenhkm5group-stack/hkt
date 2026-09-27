@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ImagePlus, Loader2, Rocket, Save, Send, Sparkles, Wand2, X } from "lucide-react";
+import { Brush, Check, ImagePlus, Loader2, Rocket, Save, Send, Sparkles, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,11 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
+import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualEditRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
 import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
+  IMAGE_EDIT,
+  IMAGE_EDIT_COLOR_CHIPS,
+  IMAGE_EDIT_LAYOUTS,
+  IMAGE_EDIT_LAYOUT_LABEL,
   DESIGN_DNA_VALUE_LABEL,
   MANUAL_DESIGN,
   MANUAL_GEN,
@@ -22,6 +26,7 @@ import {
   MANUAL_GEN_KINDS,
   MANUAL_GEN_KIND_LABEL,
   MANUAL_GEN_RUN,
+  type ImageEditLayout,
   type ManualGenImageStatus,
   type ManualGenKind,
 } from "@/lib/constants/creative-loop";
@@ -396,6 +401,8 @@ type Defaults = { campaign: string; adset: string; ad: string; problems: string[
 /** Bộ đồ nghề chung của hộp soạn bài (máy chủ dựng một lần ở `manual-gen-panel.tsx`). */
 export type ComposeCtx = {
   canPublish: boolean;
+  /** Giá ước tính MỘT ảnh theo cấu hình đang chạy — cho dòng "ước tính" của hộp Sửa ảnh. */
+  pricing: { unitVnd: number | null; unitUsd: number };
   instant: InstantInfo;
   pageName: string | null;
   defaults: Defaults;
@@ -506,10 +513,114 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
               </Button>
             ) : null}
             {img.status === "APPROVED" ? <ComposeButton img={img} ctx={ctx} /> : null}
+            {img.imageAvailable && (img.status === "GENERATED" || img.status === "APPROVED" || img.status === "REJECTED" || img.status === "PROMOTED") ? <EditImageButton img={img} ctx={ctx} /> : null}
           </div>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * HỘP SỬA ẢNH (chủ shop 27/09/2026): từ một ảnh đã tạo — đổi màu, đổi kiểu trình bày mockup, sửa chi tiết — máy vẽ 1–4
+ * ảnh MỚI giữ nguyên kiểu dáng. Ảnh mới vào một lượt "Sửa ảnh" chờ duyệt như mọi ảnh gen tay; ảnh gốc không đổi.
+ */
+function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCtx }) {
+  const [open, setOpen] = useState(false);
+  const [color, setColor] = useState("");
+  const [layout, setLayout] = useState<ImageEditLayout | null>(null);
+  const [detail, setDetail] = useState("");
+  const [count, setCount] = useState<number>(IMAGE_EDIT.defaultImages);
+  const [pending, start] = useTransition();
+  const coGi = color.trim() !== "" || layout !== null || detail.trim() !== "";
+  const mo = () => {
+    setColor("");
+    setLayout(null);
+    setDetail("");
+    setCount(IMAGE_EDIT.defaultImages);
+    setOpen(true);
+  };
+  const tao = () =>
+    start(async () => {
+      const r = await startManualEditRun({ sourceImageId: img.id, color, layout, detail, count });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Đang vẽ ${r.requested} ảnh sửa — ảnh mới hiện ở lượt "Sửa ảnh" trên cùng của ngày hôm nay, chờ duyệt như ảnh gen tay.`);
+      setOpen(false);
+    });
+  return (
+    <>
+      <Button size="sm" variant="ghost" className="h-7 flex-1 text-[12px]" onClick={mo} title="Tạo ảnh mới từ ảnh này: đổi màu · đổi kiểu trình bày · sửa chi tiết">
+        <Brush className="size-3.5" /> Sửa ảnh
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Sửa ảnh #{img.seq}</DialogTitle>
+            <DialogDescription>Máy vẽ ảnh MỚI từ đúng ảnh này, giữ nguyên kiểu dáng — chỉ đổi những gì bạn chọn dưới đây. Ảnh gốc giữ nguyên; ảnh mới chờ duyệt như ảnh gen tay.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
+            <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={`Ảnh gốc #${img.seq}`} className="aspect-[4/5] w-full rounded-md" zoomable />
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor={`sua-mau-${img.id}`}>Đổi màu</Label>
+                <Input id={`sua-mau-${img.id}`} value={color} maxLength={IMAGE_EDIT.colorMaxChars} onChange={(e) => setColor(e.target.value)} placeholder="Để trống = giữ màu. Gõ màu, vd: xanh navy, đỏ đô…" />
+                <div className="flex flex-wrap gap-1">
+                  {IMAGE_EDIT_COLOR_CHIPS.map((c) => (
+                    <button key={c} type="button" className={cn("rounded border px-1.5 py-0.5 text-[11px] hover:bg-muted", color === c && "border-brand bg-brand/10 text-brand")} onClick={() => setColor(color === c ? "" : c)}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="block space-y-1 text-[13px]">
+                <span className="font-medium">Kiểu trình bày mockup</span>
+                <select className="h-9 w-full rounded-md border bg-background px-2 text-[13px]" value={layout ?? ""} onChange={(e) => setLayout(e.target.value ? (e.target.value as ImageEditLayout) : null)}>
+                  <option value="">Giữ như ảnh gốc</option>
+                  {IMAGE_EDIT_LAYOUTS.map((l) => (
+                    <option key={l} value={l}>
+                      {IMAGE_EDIT_LAYOUT_LABEL[l]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor={`sua-ct-${img.id}`}>Sửa chi tiết</Label>
+                  <span className="numeric text-[11px] text-muted-foreground">
+                    {detail.trim().length}/{IMAGE_EDIT.detailMaxChars}
+                  </span>
+                </div>
+                <Textarea id={`sua-ct-${img.id}`} rows={3} value={detail} maxLength={IMAGE_EDIT.detailMaxChars} onChange={(e) => setDetail(e.target.value)} placeholder="Vd: đổi tay bồng thành tay lỡ, thêm thắt lưng mảnh, người mẫu cười, nền sáng hơn…" />
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="font-medium">Số ảnh</span>
+                {Array.from({ length: IMAGE_EDIT.maxImages - IMAGE_EDIT.minImages + 1 }, (_, k) => IMAGE_EDIT.minImages + k).map((n) => (
+                  <button key={n} type="button" className={cn("numeric h-7 w-8 rounded border text-[12px]", count === n ? "border-brand bg-brand/10 font-semibold text-brand" : "hover:bg-muted")} onClick={() => setCount(n)}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <EstimateLine count={count} unitVnd={ctx.pricing.unitVnd} unitUsd={ctx.pricing.unitUsd} uploads={0} />
+              {!img.design && color.trim() ? <p className="text-[11px] text-warning">Đây là ảnh của mã hàng ĐANG CÓ — chỉ đổi sang màu shop thật sự có, nếu không quảng cáo sẽ bán một màu không giao được.</p> : null}
+            </div>
+          </div>
+          <DialogFooter className="items-center gap-2 sm:justify-between">
+            <p className="text-[11.5px] text-muted-foreground">{coGi ? "" : "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết."}</p>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+                Đóng
+              </Button>
+              <Button type="button" onClick={tao} disabled={pending || !coGi}>
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <Brush className="size-4" />} Tạo {count} ảnh sửa
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

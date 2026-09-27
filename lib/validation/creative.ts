@@ -1,19 +1,5 @@
 import { z } from "zod";
-import {
-  GENE_LABEL,
-  GENE_VOCAB,
-  IMAGE_MODES,
-  IMAGE_QUALITIES,
-  IMAGE_SIZES,
-  CAMPAIGN_NAME_MAX_CHARS,
-  MANUAL_DESIGN,
-  MANUAL_GEN,
-  MANUAL_GEN_RUN,
-  MANUAL_UPLOAD_SOURCE_KINDS,
-  normalizeCreativeConfig,
-  type ConfigProblem,
-  type CreativeLoopConfig,
-} from "@/lib/constants/creative-loop";
+import { GENE_LABEL, GENE_VOCAB, IMAGE_MODES, IMAGE_QUALITIES, IMAGE_SIZES, CAMPAIGN_NAME_MAX_CHARS, MANUAL_DESIGN, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_UPLOAD_SOURCE_KINDS, normalizeCreativeConfig, type ConfigProblem, type CreativeLoopConfig, IMAGE_EDIT, IMAGE_EDIT_LAYOUTS } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
 import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS } from "@/lib/constants/campaign-setup";
 
@@ -176,6 +162,18 @@ export const manualGenStartSchema = z
     uploads: runUploads,
   })
   .strict();
+
+/** Bấm "Sửa ảnh": ảnh gen tay đã có + yêu cầu sửa (màu · kiểu trình bày · chi tiết — ít nhất một) + số ảnh 1–4. */
+export const manualEditStartSchema = z
+  .object({
+    sourceImageId: z.string().trim().min(1, "Thiếu ảnh cần sửa"),
+    color: z.string().trim().max(IMAGE_EDIT.colorMaxChars, `Màu tối đa ${IMAGE_EDIT.colorMaxChars} ký tự`).default(""),
+    layout: z.enum(IMAGE_EDIT_LAYOUTS).nullable().default(null),
+    detail: z.string().trim().max(IMAGE_EDIT.detailMaxChars, `Yêu cầu sửa tối đa ${IMAGE_EDIT.detailMaxChars} ký tự`).default(""),
+    count: z.number().int().min(IMAGE_EDIT.minImages).max(IMAGE_EDIT.maxImages).default(IMAGE_EDIT.defaultImages),
+  })
+  .strict()
+  .refine((d) => d.color !== "" || d.layout !== null || d.detail !== "", "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết cần sửa.");
 
 /** Bấm "Gen thiết kế mới": các mã bán tốt làm cảm hứng (máy chủ kiểm lại điều kiện) + ý tưởng tự do (tuỳ chọn). */
 export const manualDesignStartSchema = z

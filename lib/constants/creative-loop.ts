@@ -1550,6 +1550,59 @@ export type ManualGenKind = (typeof MANUAL_GEN_KINDS)[number];
 export const MANUAL_GEN_KIND_LABEL: Record<ManualGenKind, string> = { DESIGN: "Thiết kế mới", MOCKUP: "Ảnh mới cho mẫu đang có" };
 
 /**
+ * ═══════════ SỬA ẢNH (chủ shop 27/09/2026) ═══════════
+ *
+ * "Mấy ảnh đã tạo duyệt được về kiểu dáng nhưng muốn đổi sang màu khác, đổi kiểu trình bày mockup khác cho mẫu đó, hoặc
+ * tuỳ chỉnh sửa chi tiết gì đó trên ảnh để tạo ra ảnh mới ưng ý hơn." Một lượt `EDIT` gửi máy vẽ CHÍNH ảnh ấy (đứng đầu)
+ * + yêu cầu sửa; ảnh mới đi đúng đường duyệt của gen tay. Ba loại yêu cầu, gộp được trong một lượt:
+ *   · `color`  — màu mới của sản phẩm (chữ người gõ / chọn nhanh);
+ *   · `layout` — kiểu trình bày mockup (danh sách đóng dưới đây, câu lệnh tiếng Anh cố định cho từng kiểu);
+ *   · `detail` — sửa chi tiết tự do.
+ * Không yêu cầu nào ⇒ không vẽ (vẽ lại y nguyên là tốn tiền vô ích).
+ */
+export const IMAGE_EDIT = { minImages: 1, maxImages: 4, defaultImages: 2, colorMaxChars: 60, detailMaxChars: 1000 } as const;
+
+export const IMAGE_EDIT_LAYOUTS = ["HERO", "COLLAGE_4", "COLOR_VARIANTS", "FLATLAY", "MANNEQUIN", "DETAIL_CLOSEUPS", "LIFESTYLE"] as const;
+export type ImageEditLayout = (typeof IMAGE_EDIT_LAYOUTS)[number];
+
+export const IMAGE_EDIT_LAYOUT_LABEL: Record<ImageEditLayout, string> = {
+  HERO: "Một ảnh lớn toàn thân",
+  COLLAGE_4: "Ghép 4 khung (1 lớn + 3 góc chi tiết)",
+  COLOR_VARIANTS: "Ghép nhiều màu của cùng mẫu",
+  FLATLAY: "Trải phẳng (flat-lay)",
+  MANNEQUIN: "Trên ma-nơ-canh",
+  DETAIL_CLOSEUPS: "Cận cảnh chi tiết (cổ, tay, eo, vải)",
+  LIFESTYLE: "Người mẫu ngoài trời / đời thường",
+};
+
+/** Câu lệnh cố định của từng kiểu trình bày — tiếng Anh cho máy vẽ; người chỉ thấy nhãn tiếng Việt. */
+export const IMAGE_EDIT_LAYOUT_PROMPT: Record<ImageEditLayout, string> = {
+  HERO: "Present it as ONE single large full-body photo of the model wearing the garment — no collage, no split panels.",
+  COLLAGE_4: "Present it as a 4-panel collage: one large main full-body shot plus three smaller close-up panels of key details (neckline, sleeve, waist, fabric).",
+  COLOR_VARIANTS: "Present it as a collage showing the SAME garment design in 3–4 different colours side by side (same cut and details, only the colour changes).",
+  FLATLAY: "Present it as a clean flat-lay product photo: the garment laid flat, neatly arranged, top-down view, with a few tasteful accessories.",
+  MANNEQUIN: "Present it on a dress form / mannequin in a bright boutique setting, no human model.",
+  DETAIL_CLOSEUPS: "Present it as close-up detail shots of the garment (neckline, sleeves, waist, fabric texture) arranged in a tidy grid.",
+  LIFESTYLE: "Present it as a natural lifestyle photo: the model wearing the garment outdoors in an everyday setting (street, café, park), candid pose.",
+};
+
+/** Màu chọn nhanh ở hộp sửa ảnh — chỉ là giá trị điền vào ô màu, người vẫn gõ màu khác được. */
+export const IMAGE_EDIT_COLOR_CHIPS = ["Đen", "Trắng kem", "Be", "Nâu", "Đỏ đô", "Hồng pastel", "Xanh navy", "Xanh rêu", "Xanh pastel", "Tím", "Vàng mù tạt", "Xám"] as const;
+
+/** Yêu cầu sửa một ảnh. Chuỗi rỗng / `null` = không đổi phần ấy. */
+export type ImageEditRequest = { color: string; layout: ImageEditLayout | null; detail: string };
+
+/** Có yêu cầu nào không. Hàm THUẦN. */
+export function hasImageEdit(r: ImageEditRequest): boolean {
+  return r.color.trim() !== "" || r.layout !== null || r.detail.trim() !== "";
+}
+
+/** Câu tiếng Việt mô tả yêu cầu sửa — lưu vào `idea` của lượt để người đọc lại biết đã xin gì. Hàm THUẦN. */
+export function describeImageEdit(r: ImageEditRequest): string {
+  return [r.color.trim() ? `đổi màu ${r.color.trim()}` : "", r.layout ? `trình bày: ${IMAGE_EDIT_LAYOUT_LABEL[r.layout]}` : "", r.detail.trim() ? `sửa: ${r.detail.trim()}` : ""].filter(Boolean).join(" · ");
+}
+
+/**
  * Gen tay kiểu THIẾT KẾ MỚI:
  *  · `maxInspirations` — số mã cảm hứng tối đa một lượt (nhiều hơn thì mỗi thiết kế vẫn chỉ lai hai mã, phần
  *    còn lại chỉ làm loãng phép chọn có trọng số).

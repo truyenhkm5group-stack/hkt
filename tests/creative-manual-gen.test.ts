@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import type { VariantCaptioner } from "@/lib/creative/caption";
 import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
-import { storeCreativeImage } from "@/lib/creative/images";
+import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { addUploadedDraft, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
@@ -167,6 +167,17 @@ export function testCreativeManualGenPure() {
   assert.equal(defaultNames(ctxMk, "2026-09-27", 14, "IMAGE", "TRINH").campaign, "VNX2 - 1_TRINH_27/09_TEST_Hải An Fashion_14", "Tên TKQC_Mã MKTer_Ngày_TEST_Fanpage_số");
   assert.equal(defaultNames(ctxMk, "2026-09-27", 14).campaign, "VNX2 - 1_27/09_TEST_Hải An Fashion_14", "không chọn MKTer ⇒ khuôn cũ");
   assert.equal(defaultNames({ ...ctxMk, accountName: null }, "2026-09-27", 3, "IMAGE", "TRINH").campaign, "TRINH_27/09_TEST_Hải An Fashion_3", "thiếu tên TKQC ⇒ bỏ phần ấy, mã MKTer vẫn đứng đầu");
+
+  // SỬA ẢNH (chủ shop 27/09/2026): câu lệnh chỉ xin đúng thứ người chọn, giữ mọi thứ khác của ảnh gốc.
+  assert.equal(hasImageEdit({ color: "  ", layout: null, detail: "" }), false, "không yêu cầu nào ⇒ không vẽ (tốn tiền vô ích)");
+  assert.equal(describeImageEdit({ color: "Xanh navy", layout: "COLLAGE_4", detail: "thêm thắt lưng" }), "đổi màu Xanh navy · trình bày: Ghép 4 khung (1 lớn + 3 góc chi tiết) · sửa: thêm thắt lưng");
+  const pm = manualEditPrompt({ request: { color: "Xanh navy", layout: "COLLAGE_4", detail: "" }, productName: "Đầm linen", isDesign: false });
+  assert.ok(pm.includes("FIRST attached image") && pm.includes("colour to: Xanh navy") && pm.includes(IMAGE_EDIT_LAYOUT_PROMPT.COLLAGE_4), "ảnh gốc đứng đầu + màu + kiểu trình bày");
+  assert.ok(pm.includes("REAL product photo"), "ảnh mockup mã thật: nhắc ảnh sản phẩm thật để kiểu dáng không trôi");
+  assert.ok(!pm.includes("Owner's edit request"), "không sửa chi tiết ⇒ không có dòng ấy");
+  const pd = manualEditPrompt({ request: { color: "", layout: null, detail: "đổi tay bồng thành tay lỡ" }, productName: null, isDesign: true });
+  assert.ok(pd.includes("NEW designs") && !pd.includes("REAL product photo") && pd.includes("tay lỡ"), "thiết kế mới: không có ảnh sản phẩm thật, yêu cầu tự do đi nguyên văn");
+  assert.ok(!pd.includes("colour to:"), "không đổi màu ⇒ không có dòng đổi màu");
 
   // GHÉP LẠI TÊN KHI SETUP ĐỔI (chủ shop 27/09/2026: chọn MKTer ⇒ tên đổi NGAY, kể cả tên đã lưu).
   const known = { accounts: ["VNX2 - 1", "QUÂN TA 4"], pages: ["Hải An Fashion", "Phương Anh Fashion"], marketerCodes: ["TRINH", "QA4", "QUAN_TA"], kinds: ["TEST", "Q005"] };
@@ -373,10 +384,13 @@ export async function testCreativeManualGenDb(db: Db) {
 
   let imageCalls = 0;
   const seen: ImageEditInputImage["kind"][][] = [];
+  /** Điểm ảnh ĐẦU TIÊN gửi máy vẽ ở mỗi lượt gọi — ca "Sửa ảnh" khẳng định đó là đúng ảnh cần sửa. */
+  const firstSent: Uint8Array[] = [];
   let costEach = 0.01;
   const imageClient: ImageEditClient = async (input) => {
     imageCalls += 1;
     seen.push(input.images.map((i) => i.kind));
+    firstSent.push(input.images[0]?.bytes ?? new Uint8Array());
     return { bytes: fakeJpeg(50_000 + imageCalls), contentType: "image/jpeg", usage: null, costUsd: costEach };
   };
   const caption: VariantCaptioner = async () => ({ ok: true, headline: "Đầm linen đi biển", primaryText: "Mặc mát cả ngày — nhắn shop tư vấn size.", options: [], seen: "đầm trắng bãi biển", model: "fake-caption", costUsd: null, attempts: 1, priceStripped: false });
@@ -890,6 +904,37 @@ export async function testCreativeManualGenDb(db: Db) {
     const c7b = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c7b.ok && c7b.outcome === "LIVE", "sửa xong bấm lại ⇒ đăng được");
     if (c7b.ok) instantIds.push(c7b.batchId);
+
+    // (g1) SỬA ẢNH (chủ shop 27/09/2026): từ một ảnh đã tạo ⇒ lượt EDIT, ảnh gốc gửi máy vẽ ĐẦU TIÊN, ảnh sản phẩm thật kèm sau.
+    const s8 = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+    await drawManualGen(db, { genId: s8.ok ? s8.genId : "", imageClient });
+    const [anh8] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s8.ok ? s8.genId : ""));
+    assert.equal(anh8.status, "GENERATED");
+    const rongSua = await startManualEdit(db, { sourceImageId: anh8.id, request: { color: " ", layout: null, detail: "" } }, cfgKhongTran, actor);
+    assert.ok(!rongSua.ok && rongSua.error.includes("ít nhất một thay đổi"), "không yêu cầu nào ⇒ không ghi lượt");
+    const chuaVe = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+    const [anhChuaVe] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, chuaVe.ok ? chuaVe.genId : ""));
+    assert.ok(!(await startManualEdit(db, { sourceImageId: anhChuaVe.id, request: { color: "Đen", layout: null, detail: "" } }, cfgKhongTran, actor)).ok, "ảnh chưa vẽ ⇒ không sửa được");
+    await db.update(schema.creativeManualGenImages).set({ status: "REJECTED" }).where(eq(schema.creativeManualGenImages.id, anhChuaVe.id));
+    const e1 = await startManualEdit(db, { sourceImageId: anh8.id, request: { color: "Xanh navy", layout: "COLLAGE_4", detail: "" }, count: 9 }, cfgKhongTran, actor);
+    assert.ok(e1.ok, e1.ok ? "" : e1.error);
+    assert.equal(e1.ok && e1.requested, 4, "số ảnh kẹp trong 1–4");
+    const [runSua] = await db.select().from(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, e1.ok ? e1.genId : ""));
+    assert.deepEqual([runSua.kind, runSua.sourceGenImageId, runSua.productId, runSua.productPhotoSourceId], ["EDIT", anh8.id, `${P}prod`, `${P}photo`], "lượt EDIT nhớ ảnh gốc + mã hàng + ảnh sản phẩm thật");
+    assert.ok(runSua.idea.includes("đổi màu Xanh navy"), "yêu cầu sửa lưu bằng tiếng Việt để người đọc lại");
+    const anhSua = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, runSua.id));
+    assert.equal(anhSua.length, 4);
+    assert.ok(anhSua.every((x) => JSON.stringify(x.genes) === JSON.stringify(anh8.genes) && x.prompt.includes("Xanh navy") && x.design === null), "thừa hưởng bộ gen của ảnh gốc; mockup không có bản mô tả thiết kế");
+    seen.length = 0;
+    firstSent.length = 0;
+    await drawManualGen(db, { genId: runSua.id, imageClient });
+    const goc8 = await readCreativeImage(db, anh8.imageId as string);
+    assert.equal(seen.length, 4);
+    assert.ok(seen.every((k) => k[0] === "OWN_VARIANT" && k[1] === "PRODUCT_PHOTO" && k.length === 2), `ảnh gốc ĐẦU TIÊN, ảnh sản phẩm thật sau (nhận: ${JSON.stringify(seen[0])})`);
+    assert.ok(goc8 && firstSent.every((b) => Buffer.from(b).equals(Buffer.from(goc8.bytes))), "điểm ảnh đầu tiên là ĐÚNG ảnh cần sửa");
+    assert.ok((await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, runSua.id))).every((x) => x.status === "GENERATED"), "ảnh sửa chờ duyệt như ảnh gen tay");
+    const theSua = (await listManualGenRuns(db, 50, 25_500, null)).find((r) => r.id === runSua.id);
+    assert.deepEqual([theSua?.kind, theSua?.editSource?.seq, theSua?.editSource?.imageId], ["EDIT", anh8.seq, anh8.imageId], "thẻ lượt nói sửa từ ảnh nào");
 
     // (g2) MẪU TỰ LÀM ⇒ vào THẲNG hàng đợi (lô hằng ngày đã bỏ).
     const up = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "Tự làm", primaryText: "Ảnh tôi tự vẽ", note: "vẽ trên ChatGPT", imageBytes: fakeJpeg(9_101) }, actor, new Date());

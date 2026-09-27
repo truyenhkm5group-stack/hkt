@@ -3803,6 +3803,11 @@ export const creativeManualGens = pgTable(
      * trỏ được một ảnh spy vào máy vẽ.
      */
     uploadImageIds: text("upload_image_ids").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * Lượt `EDIT` (migration 0156, chủ shop 27/09/2026): ẢNH GEN TAY được sửa — máy vẽ nhận đúng ảnh ấy + yêu cầu sửa
+     * (`idea`). `NULL` ở mọi kiểu khác, và khi ảnh gốc bị xoá (lượt sửa vẫn còn).
+     */
+    sourceGenImageId: text("source_gen_image_id").references((): AnyPgColumn => creativeManualGenImages.id, { onDelete: "set null" }),
     idea: text("idea").notNull().default(""),
     requested: integer("requested").notNull(),
     model: text("model").notNull(),
@@ -3815,7 +3820,7 @@ export const creativeManualGens = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt), check("creative_manual_gens_kind_check", sql`${t.kind} IN ('MOCKUP', 'DESIGN', 'UPLOAD')`)],
+  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt), check("creative_manual_gens_kind_check", sql`${t.kind} IN ('MOCKUP', 'DESIGN', 'UPLOAD', 'EDIT')`)],
 );
 
 /** Một ẢNH của lượt gen tay: câu lệnh · gen · ảnh · duyệt / loại · câu chữ + tên · mẫu đã vào lô. */
