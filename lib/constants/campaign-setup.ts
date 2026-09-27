@@ -23,6 +23,8 @@
  * Mục tiêu đòi pixel / dataset / sự kiện mua (Doanh số) KHÔNG mở: ERP không có dữ liệu để chọn đúng tập dữ liệu ấy.
  */
 
+import type { ModelState } from "@/lib/constants/model-lifecycle";
+
 export const CAMPAIGN_OBJECTIVES = ["TEMPLATE", "MESSAGES", "REACH"] as const;
 export type CampaignObjective = (typeof CAMPAIGN_OBJECTIVES)[number];
 export const CAMPAIGN_OBJECTIVE_LABEL: Record<CampaignObjective, string> = {
@@ -30,6 +32,55 @@ export const CAMPAIGN_OBJECTIVE_LABEL: Record<CampaignObjective, string> = {
   MESSAGES: "Tin nhắn (Messenger)",
   REACH: "Tiếp cận / nhận biết",
 };
+
+/**
+ * LOẠI CAMP — phần giữa tên chiến dịch (chủ shop 27/09/2026: "camp chạy mã win thì ghi tên mã"):
+ *   · `TEST` — `..._TEST_...`: luật quy tiền ads tính là CHI PHÍ TEST, không thuộc mã nào.
+ *   · `WIN`  — `..._<MÃ>_...` (vd Q005): tiền ads quy về đúng mã hàng của ảnh. Chỉ có khi ảnh thuộc một mã hàng có mã đọc
+ *              được trong tên (`ProductWinCode`); mặc định chọn khi mẫu đã được KHAI "Thắng test" trở đi.
+ */
+export const CAMPAIGN_KINDS = ["TEST", "WIN"] as const;
+export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
+
+/** Trạng thái vòng đời (người khai) coi là "đã thắng test" — mặc định loại camp `WIN`. Chưa khai / đang test / thua ⇒ `TEST`. */
+export const CAMPAIGN_WIN_STATES = ["WINNER", "PRODUCTION_DISCUSSION", "COSTING", "SAMPLING", "SAMPLE_REVIEW", "APPROVED", "PRODUCTION_PLANNING", "IN_PRODUCTION", "SELLING", "CLEARANCE"] as const satisfies readonly ModelState[];
+
+/** Mã win của MỘT mã hàng — máy chủ dựng (`productWinCodes`), hộp soạn bài đọc. */
+export type ProductWinCode = { productId: string; code: string; declaredWin: boolean; stateLabel: string };
+
+/** Phần giữa tên chiến dịch theo loại camp. Hàm THUẦN. */
+export function campaignKindLabel(kind: CampaignKind, win: Pick<ProductWinCode, "code"> | null): string {
+  return kind === "WIN" && win ? win.code : "TEST";
+}
+
+/** Các phần của tên chiến dịch mà setup quyết định. `null` / rỗng = phần ấy không có trong tên. */
+export type CampaignNameParts = { account: string | null; marketerCode: string | null; kindLabel: string; page: string | null };
+
+/** Những giá trị mà một phần tên CÓ THỂ đang mang (mọi TKQC / fanpage / mã MKTer / loại camp chọn được) — để nhận ra phần cũ trong tên. */
+export type CampaignNameKnown = { accounts: readonly string[]; pages: readonly string[]; marketerCodes: readonly string[]; kinds: readonly string[] };
+
+/**
+ * GHÉP LẠI TÊN CHIẾN DỊCH KHI SETUP ĐỔI — ngay lúc chọn, kể cả khi tên đã được lưu / sửa tay (chủ shop 27/09/2026: "khi chọn
+ * MKTer thì tên camp sync realtime, chèn mã MKTer vào tên camp luôn"). Tên cắt theo `_`; phần nào trùng MỘT giá trị đã biết
+ * của TKQC / fanpage / loại camp thì thay bằng giá trị mới; mã MKTer cũ bị gỡ và mã mới chèn ngay SAU tên TKQC (không có TKQC
+ * trong tên thì trước ngày `dd/mm`, không có nữa thì đứng đầu). Phần người tự gõ khác đi (không trùng giá trị nào) giữ nguyên.
+ * Hàm THUẦN.
+ */
+export function rewriteCampaignName(name: string, to: CampaignNameParts, known: CampaignNameKnown): string {
+  const has = (list: readonly string[], seg: string) => list.some((x) => x.trim() !== "" && x.trim() === seg.trim());
+  let segs = name.split("_");
+  if (to.account) segs = segs.map((x) => (has(known.accounts, x) ? to.account as string : x));
+  if (to.page) segs = segs.map((x) => (has(known.pages, x) ? to.page as string : x));
+  segs = segs.map((x) => (has(known.kinds, x) ? to.kindLabel : x));
+  segs = segs.filter((x) => !has(known.marketerCodes, x));
+  if (to.marketerCode) {
+    const acc = to.account ? segs.findIndex((x) => x.trim() === (to.account as string).trim()) : -1;
+    const date = segs.findIndex((x) => /^\d{2}\/\d{2}$/.test(x.trim()));
+    const at = acc >= 0 ? acc + 1 : date >= 0 ? date : 0;
+    segs.splice(at, 0, to.marketerCode);
+  }
+  return segs.filter((x) => x !== "").join("_");
+}
 
 export const CAMPAIGN_GENDERS = ["ALL", "FEMALE", "MALE"] as const;
 export type CampaignGender = (typeof CAMPAIGN_GENDERS)[number];
@@ -58,6 +109,8 @@ export type CampaignSetup = {
   marketerId: string | null;
   /** Giờ bắt đầu đã chọn (ISO có múi giờ). `null` = chạy ngay lúc bấm. Chỉ để LƯU cùng bản nháp — lúc đăng, giờ hẹn gửi riêng. */
   startAt: string | null;
+  /** `TEST` = tên mang chữ TEST · `WIN` = tên mang mã hàng của ảnh (tiền ads quy về mã). */
+  campaignKind: CampaignKind;
 };
 
 /** Một MKTer chọn được trong khối setup: `code` = mã vào tên chiến dịch (dẫn xuất từ bí danh, máy chủ tính). */
@@ -106,7 +159,8 @@ export function parseCampaignSetup(raw: unknown): CampaignSetup | null {
   const gender = (CAMPAIGN_GENDERS as readonly string[]).includes(r.gender as string) ? (r.gender as CampaignGender) : null;
   const marketerId = typeof r.marketerId === "string" && r.marketerId.trim() ? r.marketerId.trim() : null;
   const startAt = typeof r.startAt === "string" && Number.isFinite(new Date(r.startAt).getTime()) ? r.startAt : null;
-  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, startAt };
+  const campaignKind: CampaignKind = r.campaignKind === "WIN" ? "WIN" : "TEST";
+  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, startAt, campaignKind };
 }
 
 /** Câu ngắn mô tả một setup — cho sổ ghi / hàng đợi. Hàm THUẦN. */
@@ -115,5 +169,5 @@ export function describeCampaignSetup(s: CampaignSetup, names: { account?: strin
   const tuoi = s.ageMin === null && s.ageMax === null ? "tuổi như mẫu" : `${s.ageMin ?? "?"}–${s.ageMax === 65 ? "65+" : (s.ageMax ?? "?")}`;
   const gioi = s.gender === null ? "giới tính như mẫu" : CAMPAIGN_GENDER_LABEL[s.gender];
   const mkt = s.marketerId ? `MKTer ${names.marketer || s.marketerId}` : "chưa chọn MKTer";
-  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, CAMPAIGN_OBJECTIVE_LABEL[s.objective], `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
+  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, s.campaignKind === "WIN" ? "camp mã win" : "camp TEST", CAMPAIGN_OBJECTIVE_LABEL[s.objective], `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
 }

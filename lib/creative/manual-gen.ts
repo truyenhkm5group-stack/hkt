@@ -33,6 +33,8 @@ import { gatherPixels } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { insertManualVariant, type ManualActor } from "@/lib/creative/manual";
 import { marketerNameProblem, marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-code";
+import { productWinCodes, winNameProblem } from "@/lib/creative/win-code";
+import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
 import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay } from "@/lib/creative/naming";
 import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
@@ -775,6 +777,8 @@ export type PromoteInput = {
   predictedSeq: number | null;
   /** Mã MKTer ghép vào tên chiến dịch theo khuôn — máy chủ dẫn xuất từ `setup.marketerId`, không nhận từ trình duyệt. */
   marketerCode?: string | null;
+  /** Phần giữa tên theo loại camp: "TEST" hoặc mã win (máy chủ tính từ mã hàng của ảnh). Vắng ⇒ "TEST". */
+  kindLabel?: string;
 };
 
 type PromoteOk = {
@@ -872,8 +876,9 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
         const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
         const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
         const mk = input.marketerCode ?? null;
-        const d = defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk);
-        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk) : null;
+        const kind = input.kindLabel ?? "TEST";
+        const d = defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind);
+        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind) : null;
         finalSeq = seq;
         finalNames = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
         return { nameSeq: seq, campaignName: finalNames.campaign, adsetName: finalNames.adset, adName: finalNames.ad };
@@ -1038,6 +1043,16 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
     const problem = marketerNameProblem(input.names.campaign.trim(), marketer, employees);
     if (problem) return { ok: false, error: problem };
   }
+  // CAMP MÃ WIN: tên mang mã hàng của ảnh thay cho TEST ⇒ tiền ads quy về mã. Mã do máy chủ chọn (phép ghép tên → mã phải
+  // nhận đúng sản phẩm); ảnh thiết kế mới / không có mã đọc được thì không có camp mã win.
+  const winProductId = x.spec ? null : x.r.run.productId;
+  const codeIndex = setup?.campaignKind === "WIN" ? await loadProductCodeIndex(db) : [];
+  const win = setup?.campaignKind === "WIN" && winProductId ? ((await productWinCodes(db, [winProductId], codeIndex)).get(winProductId) ?? null) : null;
+  if (setup?.campaignKind === "WIN" && !win) return { ok: false, error: x.spec ? "Ảnh thiết kế mới chưa có mã hàng — chỉ đăng được camp TEST." : "Mã hàng của ảnh không có mã đọc được trong tên chiến dịch (mã mẫu / mã Pancake / mã trong tên sản phẩm) — chỉ đăng được camp TEST." };
+  if (win && input.names.campaign.trim()) {
+    const problem = winNameProblem(input.names.campaign.trim(), win, codeIndex);
+    if (problem) return { ok: false, error: problem };
+  }
   // Quảng cáo mẫu kiểm TRƯỚC khi ghi dòng nào (một lượt ĐỌC Facebook): mẫu không dùng được thì không dựng lô, không
   // cấp mã TK, ảnh vẫn "Đã duyệt". 26/09/2026 lần bấm đầu tiên của chủ shop cấp mã TK-260926-103 rồi mới vấp ở đây.
   const writer = deps.writer ?? REAL_CREATIVE_WRITER;
@@ -1071,8 +1086,10 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           ruleVersion: CREATIVE_RULE_VERSION,
         })
         .returning();
-      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null }, cfg, actor, now, batch);
+      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST" }, cfg, actor, now, batch);
       if (!ins.ok) throw new InstantAbort(ins.error);
+      const winProblem = win ? winNameProblem(ins.names.campaign, win, codeIndex) : null;
+      if (winProblem) throw new InstantAbort(winProblem);
       // Tên cuối cùng phải quy về ĐÚNG MKTer đã chọn theo chính luật quy tiền ads — sai thì huỷ cả giao dịch, chưa gì lên Facebook.
       const nameProblem = marketer ? marketerNameProblem(ins.names.campaign, marketer, employees) : null;
       if (nameProblem) throw new InstantAbort(nameProblem);

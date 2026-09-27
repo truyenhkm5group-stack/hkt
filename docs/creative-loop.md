@@ -127,7 +127,16 @@ nên digest lô cũ không đổi.
 = bí danh (ưu tiên một từ, viết hoa, bỏ dấu — `marketerCampaignCode`), ghép ngay sau tên TKQC:
 `TKQC_MãMKTer_ngày_TEST_fanpage_số`. Máy chủ đọc mã theo `marketerId` (không nhận chữ từ trình duyệt) và hỏi CHÍNH
 `resolveMarketer` xem tên cuối cùng có quy về đúng người không — sai (tên tự gõ thiếu mã, hoặc bí danh người khác dài hơn chen
-vào) thì không đăng. Thời gian bắt đầu nằm trong khối setup và lưu cùng bản nháp hàng đợi.
+vào) thì không đăng. Thời gian bắt đầu nằm trong khối setup và lưu cùng bản nháp hàng đợi. Đổi setup ⇒ ô tên đổi NGAY, kể cả
+tên đã lưu / sửa tay (`rewriteCampaignName`: phần trùng một TKQC / fanpage / mã MKTer / loại camp đã biết thì thay, phần người
+tự gõ khác đi giữ nguyên).
+
+**Camp mã win (chủ shop 27/09/2026: "camp chạy mã win thì ghi tên mã").** Ô "Loại camp": `TEST` hoặc `Mã win` — tên mang mã hàng
+của ảnh thay cho `TEST` (`TKQC_MãMKTer_ngày_Q005_fanpage_số`). Không chỉ là nhãn: `resolveCampaign` coi chiến dịch có chữ TEST là
+chi phí test, còn tên mang mã thì tiền ads quy về mã. Mã = mã mẫu (`product_models.code`) → mã Pancake → mã trong tên sản
+phẩm, lấy cái đầu tiên mà CHÍNH `matchCampaignToProduct` nhận ra đúng sản phẩm (`productWinCodes`). Mặc định `Mã win` khi mẫu đã
+được KHAI "Thắng test" trở đi (`CAMPAIGN_WIN_STATES`); chưa khai ⇒ `TEST`, người đổi được. Ảnh thiết kế mới (mã TK) không có mã
+win. Tên cuối cùng còn chữ TEST hoặc không ghép ra đúng mã ⇒ không đăng.
 
 ## 4. Chấm mẫu (`judgeVariant`, hàm thuần)
 

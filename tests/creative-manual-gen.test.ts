@@ -14,7 +14,8 @@ import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, gender
 import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
-import { describeCampaignSetup, marketerCampaignCode, parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { campaignKindLabel, describeCampaignSetup, marketerCampaignCode, parseCampaignSetup, rewriteCampaignName, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { pickWinCode, winNameProblem } from "@/lib/creative/win-code";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { marketerNameProblem, marketerOptions } from "@/lib/creative/marketer-code";
 import { listRecentBatches } from "@/lib/queries/creative-loop";
@@ -158,7 +159,28 @@ export function testCreativeManualGenPure() {
   assert.equal(defaultNames(ctxMk, "2026-09-27", 14).campaign, "VNX2 - 1_27/09_TEST_Hải An Fashion_14", "không chọn MKTer ⇒ khuôn cũ");
   assert.equal(defaultNames({ ...ctxMk, accountName: null }, "2026-09-27", 3, "IMAGE", "TRINH").campaign, "TRINH_27/09_TEST_Hải An Fashion_3", "thiếu tên TKQC ⇒ bỏ phần ấy, mã MKTer vẫn đứng đầu");
 
-  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null };
+  // GHÉP LẠI TÊN KHI SETUP ĐỔI (chủ shop 27/09/2026: chọn MKTer ⇒ tên đổi NGAY, kể cả tên đã lưu).
+  const known = { accounts: ["VNX2 - 1", "QUÂN TA 4"], pages: ["Hải An Fashion", "Phương Anh Fashion"], marketerCodes: ["TRINH", "QA4"], kinds: ["TEST", "Q005"] };
+  const cu = "VNX2 - 1_27/09_TEST_Hải An Fashion_14";
+  assert.equal(rewriteCampaignName(cu, { account: "VNX2 - 1", marketerCode: "QA4", kindLabel: "TEST", page: "Hải An Fashion" }, known), "VNX2 - 1_QA4_27/09_TEST_Hải An Fashion_14", "chọn MKTer ⇒ chèn mã ngay sau TKQC");
+  assert.equal(rewriteCampaignName("VNX2 - 1_QA4_27/09_TEST_Hải An Fashion_14", { account: "VNX2 - 1", marketerCode: "TRINH", kindLabel: "TEST", page: "Hải An Fashion" }, known), "VNX2 - 1_TRINH_27/09_TEST_Hải An Fashion_14", "đổi MKTer ⇒ THAY mã, không chèn thêm");
+  assert.equal(rewriteCampaignName("VNX2 - 1_QA4_27/09_TEST_Hải An Fashion_14", { account: "VNX2 - 1", marketerCode: null, kindLabel: "TEST", page: "Hải An Fashion" }, known), cu, "bỏ chọn MKTer ⇒ gỡ mã");
+  assert.equal(rewriteCampaignName(cu, { account: "QUÂN TA 4", marketerCode: "QA4", kindLabel: "Q005", page: "Phương Anh Fashion" }, known), "QUÂN TA 4_QA4_27/09_Q005_Phương Anh Fashion_14", "đổi TKQC · fanpage · TEST → mã win cùng lúc");
+  assert.equal(rewriteCampaignName("Camp mùa thu_27/09", { account: "VNX2 - 1", marketerCode: "TRINH", kindLabel: "TEST", page: null }, known), "Camp mùa thu_TRINH_27/09", "tên tự gõ không có TKQC ⇒ mã đứng trước ngày, phần người gõ giữ nguyên");
+  assert.equal(rewriteCampaignName("Camp mùa thu", { account: null, marketerCode: "TRINH", kindLabel: "TEST", page: null }, known), "TRINH_Camp mùa thu", "không TKQC, không ngày ⇒ mã đứng đầu");
+  assert.equal(campaignKindLabel("WIN", { code: "Q005" }), "Q005");
+  assert.equal(campaignKindLabel("WIN", null), "TEST", "không có mã win ⇒ TEST, không bịa mã");
+  // MÃ WIN: chọn mã bằng cách hỏi CHÍNH phép ghép tên → mã (quy tiền ads), không đoán.
+  const idx = [{ productId: "p-q0051", code: "Q0051" }, { productId: "p-q005", code: "Q005" }];
+  assert.equal(pickWinCode(["Q005"], "p-q005", idx), "Q005");
+  assert.equal(pickWinCode(["X99", "Q005"], "p-q005", idx), "Q005", "mã đầu không nhận ra sản phẩm ⇒ thử mã kế");
+  assert.equal(pickWinCode(["Q0051"], "p-q005", idx), null, "mã ghép ra sản phẩm KHÁC ⇒ không dùng");
+  const w5 = { productId: "p-q005", code: "Q005", declaredWin: true, stateLabel: "Đang bán" };
+  assert.equal(winNameProblem("VNX2 - 1_QA4_27/09_Q005_Hải An Fashion_3", w5, idx), null);
+  assert.match(winNameProblem("VNX2 - 1_27/09_TEST_Q005_3", w5, idx) ?? "", /còn chữ TEST/, "chữ TEST thắng mọi mã trong luật quy tiền ads ⇒ chặn");
+  assert.match(winNameProblem("VNX2 - 1_27/09_Hải An_3", w5, idx) ?? "", /không mang mã Q005/);
+
+  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, startAt: null, campaignKind: "TEST" };
   assert.match(describeCampaignSetup({ ...goc, marketerId: "mk-trinh" }, { marketer: "Tuyết Trinh (TRINH)" }), /MKTer Tuyết Trinh \(TRINH\) · .*100\.000đ\/ngày/, "câu mô tả setup nói MKTer và ngân sách NGÀY");
   assert.deepEqual(parseCampaignSetup({ ...goc, marketerId: " mk-trinh ", startAt: "2026-09-28T08:00:00+07:00" }), { ...goc, marketerId: "mk-trinh", startAt: "2026-09-28T08:00:00+07:00" }, "MKTer + giờ bắt đầu lưu cùng bản nháp");
   assert.deepEqual(parseCampaignSetup({ ...goc, startAt: "không phải ngày" }), goc, "giờ hỏng ⇒ chạy ngay, không vỡ bản nháp");
@@ -724,7 +746,7 @@ export async function testCreativeManualGenDb(db: Db) {
     await drawManualGen(db, { genId: s6.ok ? s6.genId : "", imageClient });
     const [anh6] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s6.ok ? s6.genId : ""));
     await reviewManualGenImage(db, { imageId: anh6.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
-    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, startAt: null };
+    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, startAt: null, campaignKind: "TEST" };
     // Lưu setup cùng bản nháp ⇒ hàng đợi đọc lại đúng setup.
     assert.ok((await saveManualGenDraft(db, { imageId: anh6.id, headline: "H6", primaryText: "Nội dung 6", names: { campaign: "", adset: "", ad: "" }, setup: setup6 }, actor, new Date())).ok);
     assert.deepEqual((await trongHang(anh6.id))?.img.campaignSetup, setup6, "setup camp lưu cùng bài ở hàng đợi");
@@ -784,6 +806,32 @@ export async function testCreativeManualGenDb(db: Db) {
     } finally {
       if (nsCu) await db.update(schema.settings).set({ value: nsCu.value }).where(eq(schema.settings.key, PAYROLL_EMPLOYEES_KEY));
       else await db.delete(schema.settings).where(eq(schema.settings.key, PAYROLL_EMPLOYEES_KEY));
+    }
+
+    // (f6d) CAMP MÃ WIN (chủ shop 27/09/2026): tên mang mã hàng thay cho TEST ⇒ tiền ads quy về mã. Mặc định theo vòng đời
+    //       NGƯỜI đã khai; mã do máy chủ chọn theo phép ghép tên → mã.
+    await db.update(schema.products).set({ customId: "QZ901" }).where(eq(schema.products.id, `${P}prod`));
+    await db.insert(schema.productModels).values({ code: "QZ901", productId: `${P}prod`, lifecycleState: "SELLING", registeredBy: "USER" });
+    try {
+      const sW = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+      await drawManualGen(db, { genId: sW.ok ? sW.genId : "", imageClient });
+      const [anhW] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, sW.ok ? sW.genId : ""));
+      await reviewManualGenImage(db, { imageId: anhW.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
+      assert.ok((await saveManualGenDraft(db, { imageId: anhW.id, headline: "HW", primaryText: "Nội dung W", names: { campaign: "", adset: "", ad: "" } }, actor, new Date())).ok);
+      assert.deepEqual((await trongHang(anhW.id))?.img.winCode, { productId: `${P}prod`, code: "QZ901", declaredWin: true, stateLabel: "Đang bán" }, "thẻ ảnh biết mã win + vòng đời đã khai (mặc định Mã win)");
+      const setupW: CampaignSetup = { ...setup6, campaignKind: "WIN" };
+      fbCalls.length = 0;
+      const conTest = await publishManualGenImageInstant(db, { ...camInput(anhW.id, null), names: { campaign: "Camp_TEST_QZ901", adset: "", ad: "" }, setup: setupW }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(!conTest.ok && conTest.error.includes("còn chữ TEST"), "camp mã win mà tên còn TEST ⇒ không đăng (tiền sẽ thành chi phí test)");
+      assert.equal(fbCalls.length, 0);
+      const cW = await publishManualGenImageInstant(db, { ...camInput(anhW.id, null), setup: setupW }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(cW.ok && cW.outcome === "LIVE", cW.ok ? cW.detail : cW.error);
+      if (cW.ok) instantIds.push(cW.batchId);
+      assert.match(cW.ok ? cW.names.campaign : "", /_QZ901_/, "mã win thay cho TEST trong tên");
+      assert.doesNotMatch(cW.ok ? cW.names.campaign : "", /TEST/, "không còn chữ TEST");
+    } finally {
+      await db.delete(schema.productModels).where(eq(schema.productModels.code, "QZ901"));
+      await db.update(schema.products).set({ customId: null }).where(eq(schema.products.id, `${P}prod`));
     }
 
     // (f7) ĐÚNG SỰ CỐ PRODUCTION 26/09/2026: ảnh tải lên được, TẠO BÀI bị Facebook từ chối (1885183) ⇒ chưa có chiến dịch / nhóm

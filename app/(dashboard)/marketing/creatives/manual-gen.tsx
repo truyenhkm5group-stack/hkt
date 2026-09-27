@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
-import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, describeCampaignSetup, type CampaignSetup, type GeoSearchHit } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
@@ -534,26 +534,31 @@ type Names3 = { campaign: string; adset: string; ad: string };
  * fanpage của CẤU HÌNH — người chọn TKQC / fanpage khác thì thay đúng hai phần tên ấy để ô nói đúng tên sẽ đăng. Máy chủ
  * vẫn tự đặt lại khi ô còn nguyên (gửi rỗng), nên đây chỉ là bản xem trước.
  */
-function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup): Names3 {
+function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode | null): Names3 {
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
-  const acc = (id: string) => ctx.setup.accounts.find((a) => a.id === id)?.name ?? "";
-  const page = (id: string) => ctx.setup.pages.find((p) => p.id === id)?.name ?? "";
-  const [a0, a1] = [acc(ctx.setup.configAccountId), acc(setup.adAccountId)];
-  const swap = (s: string) => {
-    let out = s;
-    const [p0, p1] = [page(ctx.setup.configPageId), page(setup.pageId)];
-    if (a0 && a1 && a0 !== a1) out = out.split(a0).join(a1);
-    if (p0 && p1 && p0 !== p1) out = out.split(p0).join(p1);
-    return out;
+  const to = namePartsOf(ctx, setup, win);
+  const known = nameKnownOf(ctx, win);
+  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: d.adset, ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
+}
+
+/** Phần tên mà setup quyết định: tên TKQC · mã MKTer · TEST / mã win · tên fanpage — cùng khuôn máy chủ ghép lúc đăng. */
+function namePartsOf(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode | null): CampaignNameParts {
+  return {
+    account: ctx.setup.accounts.find((a) => a.id === setup.adAccountId)?.name ?? null,
+    marketerCode: setup.marketerId ? (ctx.setup.marketers.find((m) => m.id === setup.marketerId)?.code ?? null) : null,
+    kindLabel: campaignKindLabel(setup.campaignKind, win),
+    page: ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? null,
   };
-  // Mã MKTer ngay SAU tên TKQC (`TKQC_MãMKTer_ngày_TEST_fanpage_số`) — cùng khuôn máy chủ ghép lúc đăng.
-  const code = setup.marketerId ? (ctx.setup.marketers.find((m) => m.id === setup.marketerId)?.code ?? "") : "";
-  const withCode = (s: string) => {
-    if (!code) return s;
-    const tk = a1 || a0;
-    return tk && s.startsWith(`${tk}_`) ? `${tk}_${code}${s.slice(tk.length)}` : `${code}_${s}`;
+}
+
+/** Mọi giá trị một phần tên có thể đang mang — để nhận ra phần CŨ trong tên (kể cả tên đã lưu / sửa tay). */
+function nameKnownOf(ctx: ComposeCtx, win: ProductWinCode | null): CampaignNameKnown {
+  return {
+    accounts: ctx.setup.accounts.map((a) => a.name),
+    pages: ctx.setup.pages.map((p) => p.name),
+    marketerCodes: ctx.setup.marketers.map((m) => m.code),
+    kinds: win ? ["TEST", win.code] : ["TEST"],
   };
-  return { campaign: withCode(swap(d.campaign)), adset: d.adset, ad: swap(d.ad) };
 }
 
 /**
@@ -563,7 +568,8 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup): Names3 {
  * (Lô hằng ngày đã bỏ nên không còn "Đưa vào lô".) Ô tên còn nguyên chữ theo khuôn ⇒ gửi rỗng ⇒ máy chủ đặt đúng số thật.
  */
 function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: ManualGenImageCard; ctx: ComposeCtx; triggerLabel?: string; triggerClassName?: string }) {
-  const initSetup = () => img.campaignSetup ?? ctx.setup.defaults;
+  // Chưa lưu setup ⇒ mặc định dùng nhiều; loại camp mặc định "Mã win" khi mã đã được KHAI Thắng test trở đi.
+  const initSetup = (): CampaignSetup => img.campaignSetup ?? { ...ctx.setup.defaults, campaignKind: img.winCode?.declaredWin ? "WIN" : "TEST" };
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
@@ -584,14 +590,28 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     setH(img.headline);
     setT(img.primaryText);
     setSetup(s0);
-    setNames({ campaign: img.campaignName, adset: img.adsetName, ad: img.adName });
+    // Tên đã lưu đi cùng setup đã lưu: ghép lại một lượt để tên nói đúng MKTer / TKQC / fanpage / loại camp đang chọn.
+    const to0 = namePartsOf(ctx, s0, img.winCode);
+    const known0 = nameKnownOf(ctx, img.winCode);
+    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName, ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
     setHen(conHen);
     setHenLuc(vnLocalInput(conHen && luuHen ? luuHen : new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
     setOpen(true);
   };
   // Ô tên RỖNG trong state = "theo khuôn" (hiện bản xem trước); người gõ ⇒ đúng chữ người gõ.
-  const auto = autoNamesFor(ctx, setup);
+  const auto = autoNamesFor(ctx, setup, img.winCode);
+  // Đổi setup ⇒ tên đổi NGAY, kể cả tên đã lưu / sửa tay: chèn / thay mã MKTer, thay TKQC · fanpage · TEST ↔ mã win.
+  const doiSetup = (next: CampaignSetup) => {
+    setSetup(next);
+    const to = namePartsOf(ctx, next, img.winCode);
+    const known = nameKnownOf(ctx, img.winCode);
+    setNames((cur) => ({
+      campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
+      adset: cur.adset,
+      ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
+    }));
+  };
   const shown: Names3 = { campaign: names.campaign || auto.campaign, adset: names.adset || auto.adset, ad: names.ad || auto.ad };
   const setName = (k: keyof Names3, v: string) => setNames((cur) => ({ ...cur, [k]: v.trim() === auto[k].trim() ? "" : v }));
   const noiDung = useMemo(() => ({ imageId: img.id, headline: h, primaryText: t, campaignName: names.campaign, adsetName: names.adset, adName: names.ad }), [img.id, h, t, names]);
@@ -711,7 +731,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
             </div>
             <div className="space-y-2.5">
               {canPublish ? (
-                <SetupFields value={setup} onChange={setSetup} options={ctx.setup}>
+                <SetupFields value={setup} onChange={doiSetup} options={ctx.setup} winCode={img.winCode}>
                   <div className="space-y-1.5 rounded-md border border-brand/40 bg-brand/5 p-2">
                     <p className="text-[11.5px] font-semibold">Thời gian bắt đầu</p>
                     <div className="flex flex-wrap gap-3 text-[12.5px]">
@@ -782,7 +802,7 @@ const sel = "h-8 w-full rounded-md border bg-background px-2 text-[12.5px]";
  * (TKQC chi nhiều nhất · page ra nhiều đơn nhất · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu). "Như mẫu" nói
  * rõ mẫu đang nhắm gì.
  */
-function SetupFields({ value, onChange, options, children }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions; children?: React.ReactNode }) {
+function SetupFields({ value, onChange, options, winCode, children }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions; winCode: ProductWinCode | null; children?: React.ReactNode }) {
   const set = (patch: Partial<CampaignSetup>) => onChange({ ...value, ...patch });
   const tpl = options.template;
   // "Chọn tỉnh / thành" là cờ RIÊNG: khi chưa chọn tỉnh nào, `geo = []` vẫn nghĩa là toàn quốc (và ô nói ra như vậy).
@@ -828,6 +848,16 @@ function SetupFields({ value, onChange, options, children }: { value: CampaignSe
         {value.marketerId && !options.marketers.some((m) => m.id === value.marketerId) ? <span className="block text-destructive">MKTer đã lưu không còn trong danh sách — chọn lại.</span> : null}
         {!value.marketerId ? <span className="block text-warning">Chưa chọn MKTer — tiền ads của camp này không quy về ai.</span> : null}
         {options.marketers.length === 0 ? <span className="block text-muted-foreground">Chưa có MKTer nào khai bí danh ở trang Lương — mã MKTer lấy từ bí danh ấy.</span> : null}
+      </label>
+      <label className="block space-y-0.5 text-[11.5px]">
+        Loại camp (phần giữa tên chiến dịch)
+        <select className={sel} value={value.campaignKind} onChange={(e) => set({ campaignKind: e.target.value === "WIN" ? "WIN" : "TEST" })}>
+          <option value="TEST">TEST — tiền ads tính là chi phí test</option>
+          <option value="WIN" disabled={!winCode}>
+            {winCode ? `Mã win ${winCode.code} — tiền ads quy về mã (vòng đời: ${winCode.stateLabel})` : "Mã win — ảnh này không thuộc mã hàng có mã đọc được"}
+          </option>
+        </select>
+        {value.campaignKind === "WIN" && !winCode ? <span className="block text-destructive">Ảnh này không có mã win — chọn TEST.</span> : null}
       </label>
       {children}
       <div className="grid gap-2 sm:grid-cols-2">
@@ -985,6 +1015,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
         const acc = s ? (ctx.setup.accounts.find((a) => a.id === s.adAccountId)?.name ?? s.adAccountId) : null;
         const page = s ? (ctx.setup.pages.find((p) => p.id === s.pageId)?.name ?? s.pageId) : null;
         const mkt = s?.marketerId ? ctx.setup.marketers.find((m) => m.id === s.marketerId) : null;
+        const kind = s?.campaignKind === "WIN" && img.winCode ? ` · mã ${img.winCode.code}` : "";
         return (
           <div key={img.id} className="flex flex-wrap items-center gap-2.5 p-2">
             <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={img.headline || `Ảnh #${img.seq}`} className="size-16 shrink-0 rounded" iconClassName="size-4" zoomable />
@@ -994,7 +1025,7 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
               <p className="truncate text-[10.5px] text-muted-foreground">
                 {runLabel} #{img.seq} · chiến dịch: {img.campaignName || "theo khuôn lúc đăng"} · lưu bởi {img.queuedByName || "—"} {img.queuedAt ? vnShortStamp(img.queuedAt) : ""}
               </p>
-              <p className="truncate text-[10.5px] text-muted-foreground">{s ? describeCampaignSetup(s, { account: acc ?? undefined, page: page ?? undefined, marketer: mkt ? `${mkt.name} (${mkt.code})` : undefined }) : "Setup: mặc định dùng nhiều (chưa chọn)"}</p>
+              <p className="truncate text-[10.5px] text-muted-foreground">{s ? `${describeCampaignSetup(s, { account: acc ?? undefined, page: page ?? undefined, marketer: mkt ? `${mkt.name} (${mkt.code})` : undefined })}${kind}` : "Setup: mặc định dùng nhiều (chưa chọn)"}</p>
             </div>
             {canEdit ? (
               <div className="flex shrink-0 items-center gap-1">
