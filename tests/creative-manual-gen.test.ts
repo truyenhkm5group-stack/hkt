@@ -240,7 +240,11 @@ export function testCreativeManualGenPure() {
 
   // ── Mỗi bài một chiến dịch: trường tạo chiến dịch + bước kế tiếp ──
   const camp = { objective: "OUTCOME_ENGAGEMENT", buyingType: "AUCTION", specialAdCategories: [], dailyBudgetMinor: null, lifetimeBudgetMinor: null };
-  assert.deepEqual(testCampaignFields("C1", camp), { name: "C1", objective: "OUTCOME_ENGAGEMENT", status: "PAUSED", special_ad_categories: "[]", buying_type: "AUCTION" }, "chiến dịch riêng LUÔN tạo TẮT, KHÔNG mang ngân sách");
+  assert.deepEqual(
+    testCampaignFields("C1", camp),
+    { name: "C1", objective: "OUTCOME_ENGAGEMENT", status: "PAUSED", special_ad_categories: "[]", is_adset_budget_sharing_enabled: "false", buying_type: "AUCTION" },
+    "chiến dịch riêng LUÔN tạo TẮT, KHÔNG mang ngân sách, và khai rõ KHÔNG chia sẻ ngân sách giữa nhóm (Facebook bắt buộc từ 27/09/2026 — mã 4834011)",
+  );
   assert.throws(() => testCampaignFields("C1", { ...camp, dailyBudgetMinor: 100 }), /CBO/, "chiến dịch mẫu CBO ⇒ không tạo");
   assert.throws(() => testCampaignFields("C1", { ...camp, objective: null }), /mục tiêu/);
   assert.throws(() => testCampaignFields("C1", { ...camp, specialAdCategories: null }), /special_ad_categories/);
