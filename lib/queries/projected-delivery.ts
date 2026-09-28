@@ -125,8 +125,10 @@ async function taiKho(): Promise<Corpus> {
     const db = await getDb();
     const loadedAt = new Date();
     const since = new Date(loadedAt.getTime() - CORPUS_LOOKBACK_DAYS * NGAY_MS);
+    // TẮT JIT: đo production 29/09/2026 — 457 ms, trong đó biên dịch 198 ms (189 hàm) cho một câu
+    // mang ORDER_OUTCOME. Nhỏ hơn các câu báo cáo, nhưng lượt tải nguội của mọi trang đọc kho này trả nó.
     const kien = rowsOf<{ id: string; outcome: string; handoff_at: unknown; final_at: unknown }>(
-      await db.execute(kienDaKetThuc([sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${since}`])),
+      await chayKhongJit(db, (tx) => tx.execute(kienDaKetThuc([sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${since}`]))),
     );
     const shipments: LabelledShipment[] = [];
     for (const r of kien) {

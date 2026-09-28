@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import type { ExpenseCategory } from "@/db/schema";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
@@ -231,19 +231,26 @@ export async function adOrdersFromErp(from: Date | null, to: Date | null) {
   const db = await getDb();
   const o = schema.orders;
   const hasAd = sql`${o.adId} is not null and ${o.adId} <> ''`;
-  const [row] = await db
-    .select({
-      orders: sql<number>`count(*)`,
-      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`,
-      adOrders: sql<number>`count(*) filter (where ${hasAd})`,
-      adRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${hasAd}), 0)`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
-    })
-    .from(o)
-    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
-    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(and(inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(o.insertedAt, from, to)));
+  /*
+    TẮT JIT: câu mang `ORDER_OUTCOME` trên cả kỳ đơn. Đo production 29/09/2026 (EXPLAIN ANALYZE, kỳ
+    tháng này): 3.896 ms, trong đó biên dịch JIT 3.797 ms (273 hàm). `adSummary` của /ads gọi hàm
+    này HAI lần song song (kỳ này + kỳ trước). Giao dịch riêng của chính câu này.
+  */
+  const [row] = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        orders: sql<number>`count(*)`,
+        revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`,
+        adOrders: sql<number>`count(*) filter (where ${hasAd})`,
+        adRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${hasAd}), 0)`,
+        delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+        deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+      })
+      .from(o)
+      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
+      .where(and(inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(o.insertedAt, from, to))),
+  );
   return {
     orders: Number(row?.orders ?? 0),
     revenue: Number(row?.revenue ?? 0),
