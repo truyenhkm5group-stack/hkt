@@ -40,7 +40,7 @@ function QcBlock({ v }: { v: VariantCard }) {
   );
 }
 
-function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null; music: { id: string; title: string }[] }) {
+function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null; music: { id: string; title: string; assetId: string }[] }) {
   return (
     <article className="space-y-3 rounded-lg border p-3">
       <header className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -107,7 +107,7 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCa
       ) : null}
       {canEdit && v.status === "REVIEW" ? <ReviewActions variantId={v.id} /> : null}
       {canEdit && !v.isTest && !v.hasAd && (!v.post || ["FAILED", "CANCELLED"].includes(v.post.status)) && ["REVIEW", "APPROVED", "REJECTED", "QC_FAILED"].includes(v.status) ? (
-        <VideoEditor variantId={v.id} script={v.script} render={v.render} music={music} approved={v.status === "APPROVED"} />
+        <VideoEditor variantId={v.id} productId={v.productId} script={v.script} render={v.render} music={music} approved={v.status === "APPROVED"} sceneClips={v.sceneClips} posterUrl={v.sourceImageId ? `/api/creative/images/${v.sourceImageId}` : v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : null} />
       ) : null}
       {v.post ? (
         <p className="text-[12.5px]">
@@ -130,7 +130,7 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCa
 }
 
 /** Tab "Duyệt video": chờ duyệt ở trên, đã quyết gần đây ở dưới. */
-export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend, music }: { review: VariantCard[]; decided: VariantCard[]; pageOf: Record<string, string | null>; canEdit: boolean; canSpend: boolean; music: { id: string; title: string }[] }) {
+export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend, music }: { review: VariantCard[]; decided: VariantCard[]; pageOf: Record<string, string | null>; canEdit: boolean; canSpend: boolean; music: { id: string; title: string; assetId: string }[] }) {
   return (
     <div className="space-y-6">
       <section className="space-y-3">

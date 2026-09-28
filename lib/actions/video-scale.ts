@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { VIDEO_SCALE_CONFIG_KEY, normalizeVideoScaleConfig } from "@/lib/constants/video-scale";
 import { bindOrganization } from "@/lib/platform/background";
 import { listProductPhotos, type SourcePhoto } from "@/lib/queries/video-scale";
-import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, cloneVideoVariant, rerenderVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
+import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, cloneVideoVariant, rerenderVideoVariant, retryVideoJob, storeVideoVoice, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
 import { storeAsset } from "@/lib/video-scale/storage";
 import { videoCaptionSchema, videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoPageConfigSchema, videoPauseSchema, videoPublishSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema, videoSkuPublishingSchema } from "@/lib/validation/video-scale";
 import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
@@ -19,7 +19,7 @@ import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/vide
 import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
 import { readTokenPages } from "@/lib/queries/facebook-pages";
-import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
+import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema, videoVoiceUploadSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { LYRIA_CLIP_PRICE_USD, MUSIC_MOODS, generateMusicLibrary, type MusicMood } from "@/lib/video-scale/music-gen";
 import { DEFAULT_OPTIMIZE_DEPS, runOptimize } from "@/lib/video-scale/optimize";
@@ -160,6 +160,19 @@ export async function cloneVideoAction(raw: unknown): Promise<{ ok: true; tts: n
   await drainAfterResponse();
   revalidatePath(PATH);
   return { ok: true, tts: r.tts };
+}
+
+/** Tải giọng tự thu cho một video — chỉ lưu tệp; áp vào video khi người bấm "Dựng lại". */
+export async function uploadVideoVoiceAction(raw: unknown): Promise<{ ok: true; assetId: string } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền sửa video" };
+  const parsed = videoVoiceUploadSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const bytes = new Uint8Array(Buffer.from(parsed.data.base64, "base64"));
+  const r = await storeVideoVoice(await getDb(), parsed.data.variantId, { bytes, contentType: parsed.data.contentType });
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_VOICE_UPLOAD", entity: "VIDEO_SCALE_VARIANT", entityId: parsed.data.variantId, after: { assetId: r.assetId, bytes: bytes.byteLength, contentType: parsed.data.contentType } });
+  return { ok: true, assetId: r.assetId };
 }
 
 /** Đổi một cảnh hỏng / bị chặn sang ẢNH ĐỘNG (miễn phí — không gọi AI). */

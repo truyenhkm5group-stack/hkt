@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { MODEST_STYLE_NOTE, VIDEO_QC_CHECKS, VIDEO_SCALE_CONFIG_KEY, effectiveRender, normalizeRenderOptions, normalizeVideoScaleConfig, renderJobKey, softenScenePrompt } from "@/lib/constants/video-scale";
+import { DEFAULT_SUB_STYLE, DEFAULT_TEXT_STYLE, MODEST_STYLE_NOTE, VIDEO_QC_CHECKS, VIDEO_SCALE_CONFIG_KEY, effectiveRender, normalizeRenderOptions, normalizeVideoScaleConfig, renderJobKey, softenScenePrompt } from "@/lib/constants/video-scale";
 import { veoPrompt } from "@/lib/video-scale/script";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { buildRenderArgs, ffmpegVersion, lineChars, resolveFontFile, runTool, wrapText } from "@/lib/video-scale/ffmpeg";
@@ -25,7 +25,11 @@ export function testVideoScaleEditPure() {
   assert.deepEqual(normalizeRenderOptions({ musicId: null, voice: "nope", musicVolume: 9, showText: false, junk: 1 }), { musicId: null, showText: false }, "giá trị lạ bị bỏ; null = không nhạc");
   const snap = normalizeVideoScaleConfig({ voiceover: false, voice: "marin", burnSubtitles: true });
   const base = effectiveRender(snap, "m1", {});
-  assert.deepEqual(base, { musicId: "m1", musicVolume: 0.18, voiceover: false, voice: "marin", burnSubtitles: true, keepNativeAudio: true, showText: true }, "không sửa ⇒ theo lượt");
+  assert.deepEqual(
+    base,
+    { musicId: "m1", musicVolume: 0.18, voiceover: false, voice: "marin", burnSubtitles: true, keepNativeAudio: true, showText: true, text: DEFAULT_TEXT_STYLE, sub: DEFAULT_SUB_STYLE, transition: "NONE", filter: "NONE", sceneOrder: null, voiceAssetId: null },
+    "không sửa ⇒ theo lượt",
+  );
   const ed = effectiveRender(snap, "m1", { musicId: null, voiceover: true, voice: "cedar", burnSubtitles: false });
   assert.equal(ed.musicId, null, "video bỏ nhạc dù lượt có nhạc");
   assert.equal(ed.voiceover, true);

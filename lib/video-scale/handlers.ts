@@ -10,6 +10,13 @@ import {
   VIDEO_POLL_INTERVAL_MS,
   VIDEO_SCALE_HARD_LIMITS,
   PHOTO_SCENE_PROVIDER,
+  TEXT_BOXES,
+  TEXT_COLORS,
+  TEXT_SIZES,
+  TRANSITION_SECONDS,
+  VIDEO_COLOR_FILTERS,
+  VIDEO_FONTS,
+  VIDEO_TRANSITIONS,
   billedSecondsFor,
   effectiveRender,
   normalizeRenderOptions,
@@ -20,13 +27,14 @@ import {
   normalizeVideoScaleConfig,
   outputSize,
   scriptTokens,
+  type TextStyle,
   type VideoScaleConfig,
   type VideoScript,
 } from "@/lib/constants/video-scale";
 import { readCreativeImage } from "@/lib/creative/images";
 import { env } from "@/lib/env";
 import { loadProductFacts } from "@/lib/video-scale/facts";
-import { buildRenderArgs, frameArgs, photoMotionArgs, probeFile, qcFrameTimes, runTool, type MediaProbe } from "@/lib/video-scale/ffmpeg";
+import { buildRenderArgs, frameArgs, photoMotionArgs, probeFile, qcFrameTimes, resolveFontFile, runTool, type MediaProbe, type RenderTextStyle } from "@/lib/video-scale/ffmpeg";
 import { planAngles } from "@/lib/video-scale/plan";
 import { ProviderError, type VideoProvider } from "@/lib/video-scale/providers/types";
 import { combineQc, technicalQc, type VisualQc } from "@/lib/video-scale/qc";
@@ -366,10 +374,13 @@ async function handlePhotoScene(ctx: HandlerCtx, job: VideoJobRow, run: NonNulla
   if (!version) return void (await blockJob(db, job, "Máy chủ ERP không có ffmpeg — không dựng được cảnh ảnh động.", new Date(now.getTime() + 30 * 60_000)));
   const scene = job.sceneIndex ?? 0;
   const sources = run.sourceIds.length ? run.sourceIds : [variant.sourceId];
-  const img = await loadSourceImage(db, sources[scene % sources.length] ?? variant.sourceId, variant.productId);
+  // "Đổi cảnh" ở trang sửa video: người chọn ẢNH cho cảnh này — `loadSourceImage` vẫn kiểm đúng loại + đúng mã như mọi ảnh gốc.
+  const picked = (job.request as { sourceId?: unknown } | null)?.sourceId;
+  const sourceId = typeof picked === "string" && picked ? picked : (sources[scene % sources.length] ?? variant.sourceId);
+  const img = await loadSourceImage(db, sourceId, variant.productId);
   if (typeof img === "string") return void (await failOrRetryJob(db, job, now, img, "PERMANENT"));
   const snap = snapshotOf(run);
-  if (!(await beginAttempt(db, job, { provider: PHOTO_SCENE_PROVIDER, model: "photo-motion", request: { mode: "PHOTO", seconds: snap.clipSeconds } }))) return;
+  if (!(await beginAttempt(db, job, { provider: PHOTO_SCENE_PROVIDER, model: "photo-motion", request: { mode: "PHOTO", seconds: snap.clipSeconds, ...(sourceId !== variant.sourceId ? { sourceId } : {}) } }))) return;
   if (variant.status === "SCRIPTED") await db.update(V).set({ status: "GENERATING" }).where(and(eq(V.id, variant.id), eq(V.status, "SCRIPTED")));
   try {
     const out = await withTemp(async (dir) => {
@@ -468,13 +479,18 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
   const clips = [...clipByScene.values()].sort((a, b) => (a.sceneIndex ?? 0) - (b.sceneIndex ?? 0));
   const eff = effectiveRender(snap, run.musicId, normalizeRenderOptions(variant.renderOptions));
   if (clips.length !== script.scenes.length) return void (await failOrRetryJob(db, job, now, `Thiếu clip: có ${clips.length}/${script.scenes.length} cảnh.`, "PERMANENT"));
+  // Thứ tự cảnh do người sắp (bỏ một cảnh = không có trong danh sách). Chỉ số lạ ⇒ thứ tự gốc, không đoán.
+  const order = eff.sceneOrder && eff.sceneOrder.every((i) => i < clips.length) ? eff.sceneOrder : clips.map((_, i) => i);
+  const textStyle = await renderTextStyle(eff.text, fontFile);
+  const subStyle = await renderTextStyle(eff.sub, fontFile);
+  const xfade = VIDEO_TRANSITIONS[eff.transition].xfade;
   if (!(await beginAttempt(db, job))) return;
   renderSlots.busy += 1;
   try {
     const size = outputSize(snap.outputHeight);
     const result = await withTemp(async (dir) => {
       const clipFiles: { file: string; durationSec: number; hasAudio: boolean }[] = [];
-      for (const c of clips) {
+      for (const c of order.map((i) => clips[i])) {
         const a = await readAsset(db, c.assetId as string);
         if (!a) throw new ProviderError(`Clip cảnh ${(c.sceneIndex ?? 0) + 1} không còn trong kho (đã xoá sau hạn giữ?).`, "PERMANENT");
         const f = path.join(dir, `c${c.sceneIndex}.mp4`);
@@ -483,8 +499,19 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         clipFiles.push({ file: f, durationSec: p.durationSec ?? snap.clipSeconds, hasAudio: p.hasAudio });
       }
       const voices = new Map<number, { file: string; durationSec: number }>();
+      // Giọng tự thu cho cả video THAY giọng đọc AI từng cảnh — trộn cả hai là hai người nói cùng lúc.
+      let voiceTrack: { file: string; durationSec: number } | null = null;
+      if (eff.voiceAssetId) {
+        const a = await readAsset(db, eff.voiceAssetId);
+        if (!a || a.meta.kind !== "VOICE") throw new ProviderError("Tệp giọng tự thu không còn trong kho — tải lại ở \"Sửa video\".", "PERMANENT");
+        const f = path.join(dir, "voice-track.bin");
+        await writeFile(f, a.bytes);
+        const p = await probeFile(f);
+        if (!p.durationSec) throw new ProviderError("Tệp giọng tự thu không đọc được (không phải tệp âm thanh?).", "PERMANENT");
+        voiceTrack = { file: f, durationSec: p.durationSec };
+      }
       // Giọng đọc TẮT ⇒ không trộn tệp nào; bật ⇒ tệp MỚI NHẤT mỗi cảnh (lần sửa sau ghi đè lần trước — `inputs` xếp theo giờ).
-      for (const t of eff.voiceover ? inputs.filter((x) => x.kind === "TTS" && x.assetId) : []) {
+      for (const t of eff.voiceover && !voiceTrack ? inputs.filter((x) => x.kind === "TTS" && x.assetId) : []) {
         const a = await readAsset(db, t.assetId as string);
         if (!a) continue;
         const f = path.join(dir, `v${t.sceneIndex}.mp3`);
@@ -503,7 +530,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       }
       const plan = buildRenderArgs({
         clips: clipFiles,
-        scenes: script.scenes.map((s, i) => ({ overlay: s.overlay, subtitle: s.voiceover, voice: voices.get(i) ?? null })),
+        scenes: order.map((i) => ({ overlay: script.scenes[i].overlay, subtitle: script.scenes[i].voiceover, voice: voices.get(i) ?? null })),
         hook: script.hook,
         cta: script.cta,
         music,
@@ -513,6 +540,11 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         width: size.width,
         height: size.height,
         fontFile,
+        textStyle,
+        subStyle,
+        transition: xfade ? { xfade, seconds: TRANSITION_SECONDS } : null,
+        colorFilter: VIDEO_COLOR_FILTERS[eff.filter].ff,
+        voiceTrack,
         output: "final.mp4",
       });
       for (const t of plan.textFiles) await writeFile(path.join(dir, t.name), t.content, "utf8");
@@ -523,7 +555,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       const bytes = await readFile(out);
       const t2 = await runTool(env.videoScale.ffmpegPath, frameArgs(out, Math.min(1.2, (probe.durationSec ?? 2) / 2), path.join(dir, "thumb.jpg")), { timeoutMs: 60_000 });
       const thumb = t2.code === 0 ? await readFile(path.join(dir, "thumb.jpg")) : null;
-      return { bytes, probe, thumb };
+      return { bytes, probe, thumb, plannedSec: plan.totalSec };
     });
     const finalAsset = await storeAsset(db, {
       kind: "FINAL",
@@ -542,13 +574,23 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       .set({ status: "QC", finalAssetId: finalAsset.id, thumbnailAssetId: thumbAsset?.id ?? null, durationMs: result.probe.durationSec ? Math.round(result.probe.durationSec * 1000) : null, error: "" })
       .where(eq(V.id, variant.id));
     await enqueueJob(db, { kind: "QC", key: `qc:${variant.id}:${finalAsset.id}`, runId: run.id, variantId: variant.id, isTest: run.isTest });
-    await succeedJob(db, job, now, { outputAssetId: finalAsset.id, result: { ffmpeg: version, bytes: finalAsset.bytes, durationSec: result.probe.durationSec } });
+    await succeedJob(db, job, now, { outputAssetId: finalAsset.id, result: { ffmpeg: version, bytes: finalAsset.bytes, durationSec: result.probe.durationSec, plannedSec: result.plannedSec } });
   } catch (e) {
     const pe = e instanceof ProviderError ? e : new ProviderError(e instanceof Error ? e.message : String(e), "TRANSIENT");
     await failOrRetryJob(db, job, now, pe.message, pe.kind === "AMBIGUOUS" ? "TRANSIENT" : pe.kind);
   } finally {
     renderSlots.busy -= 1;
   }
+}
+
+/**
+ * Kiểu chữ đã chọn → tham số bộ dựng. Font nằm CẠNH font mặc định (cùng gói `font-dejavu`); thiếu tệp thì dùng font mặc định
+ * đã được kiểm là có — không bao giờ để ffmpeg tự chọn một font thiếu dấu tiếng Việt.
+ */
+async function renderTextStyle(style: TextStyle, defaultFont: string): Promise<RenderTextStyle> {
+  const want = path.join(path.dirname(defaultFont), VIDEO_FONTS[style.font].file);
+  const fontFile = want === defaultFont ? defaultFont : ((await resolveFontFile(want)) ?? defaultFont);
+  return { fontFile, sizeK: TEXT_SIZES[style.size].k, colorHex: TEXT_COLORS[style.color].hex, boxColor: TEXT_BOXES[style.box].color, y: style.y };
 }
 
 // ───────────────────────────── QC ─────────────────────────────
@@ -584,7 +626,14 @@ export async function handleQc(ctx: HandlerCtx, job: VideoJobRow): Promise<void>
       .from(J)
       .where(and(eq(J.variantId, variant.id), eq(J.kind, "CLIP"), eq(J.status, "SUCCEEDED")));
     const measured = Number(clipSec[0]?.d ?? 0);
-    const expectSec = measured > 0 && Number(clipSec[0]?.n ?? 0) === script.scenes.length ? measured : script.scenes.length * snap.clipSeconds;
+    // Độ dài bộ dựng ĐÃ TÍNH lúc dựng (chuyển cảnh chồng hai cảnh lên nhau, bỏ cảnh làm video ngắn đi) thắng phép cộng clip.
+    const [rj] = await db
+      .select({ planned: sql<string | null>`(${J.result}->>'plannedSec')` })
+      .from(J)
+      .where(and(eq(J.variantId, variant.id), eq(J.kind, "RENDER"), eq(J.outputAssetId, variant.finalAssetId)))
+      .limit(1);
+    const planned = Number(rj?.planned ?? NaN);
+    const expectSec = Number.isFinite(planned) && planned > 0 ? planned : measured > 0 && Number(clipSec[0]?.n ?? 0) === script.scenes.length ? measured : script.scenes.length * snap.clipSeconds;
     const tech = technicalQc(probe, { width: size.width, height: size.height, durationSec: expectSec, bytes: final.meta.bytes });
     let visual: VisualQc;
     if (run.isTest) visual = { ran: false, reason: "Dữ liệu THỬ (bộ sinh giả) — không chạy QC hình ảnh." };

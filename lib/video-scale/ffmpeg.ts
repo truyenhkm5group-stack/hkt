@@ -177,13 +177,27 @@ export type RenderInput = {
   burnSubtitles: boolean;
   /** Chữ trên hình (móc câu · chữ cảnh · CTA). Vắng = có. */
   showText?: boolean;
+  /** Kiểu chữ trên hình / phụ đề đã quy đổi (tệp font thật, hệ số cỡ, mã màu, nền, vị trí). Vắng = mặc định cũ. */
+  textStyle?: RenderTextStyle;
+  subStyle?: RenderTextStyle;
+  /** Tên hiệu ứng `xfade` (vd "fade") + độ dài; `null` = cắt thẳng. */
+  transition?: { xfade: string; seconds: number } | null;
+  /** Chuỗi bộ lọc màu đã chọn từ bảng hằng (KHÔNG BAO GIỜ là chữ của người). Rỗng = không lọc. */
+  colorFilter?: string;
+  /** Tệp giọng đọc tự thu cho CẢ video — có thì thay giọng đọc từng cảnh. */
+  voiceTrack?: { file: string; durationSec: number } | null;
+  /** `ultrafast` cho bản xem trước (nhanh, nặng hơn); mặc định `veryfast`. */
+  preset?: "veryfast" | "ultrafast";
   width: number;
   height: number;
   fontFile: string;
   output: string;
 };
 
-export type RenderPlan = { args: string[]; textFiles: { name: string; content: string }[]; totalSec: number };
+export type RenderPlan = { args: string[]; textFiles: { name: string; content: string }[]; totalSec: number; sceneStarts: number[] };
+
+/** Kiểu chữ đã quy đổi sẵn cho bộ dựng — hàm thuần không đọc bảng hằng nào của cấu hình. */
+export type RenderTextStyle = { fontFile: string; sizeK: number; colorHex: string; boxColor: string | null; y: number };
 
 /** Giây CTA chiếm ở cuối video. */
 export const CTA_SECONDS = 2.5;
@@ -226,6 +240,12 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
       nextInput += 1;
     }
   });
+  let trackInput: number | null = null;
+  if (input.voiceTrack) {
+    args.push("-i", input.voiceTrack.file);
+    trackInput = nextInput;
+    nextInput += 1;
+  }
   let musicInput: number | null = null;
   if (input.music) {
     args.push("-stream_loop", "-1", "-i", input.music.file);
@@ -233,58 +253,78 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
     nextInput += 1;
   }
 
+  // Chuyển cảnh: mỗi chỗ nối ăn mất `D` giây (hai cảnh chồng lên nhau) ⇒ mốc bắt đầu cảnh i = Σ độ dài trước − i·D.
+  const D = input.transition && n > 1 ? Math.max(0.1, Math.min(input.transition.seconds, ...input.clips.map((c) => c.durationSec / 3))) : 0;
   const starts: number[] = [];
   let t = 0;
-  for (const c of input.clips) {
-    starts.push(t);
+  input.clips.forEach((c, i) => {
+    starts.push(r3(t - i * D));
     t += c.durationSec;
-  }
-  const total = r3(t);
+  });
+  const total = r3(t - (n - 1) * D);
   const f: string[] = [];
   input.clips.forEach((c, i) => {
     const d = r3(c.durationSec);
-    f.push(`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,setsar=1,format=yuv420p,trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`);
+    f.push(`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,setsar=1,format=yuv420p,trim=duration=${d},setpts=PTS-STARTPTS,settb=AVTB[v${i}]`);
     f.push(
       c.hasAudio
         ? `[${i}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=duration=${d},asetpts=PTS-STARTPTS[a${i}]`
         : `anullsrc=r=48000:cl=stereo,atrim=duration=${d},asetpts=PTS-STARTPTS[a${i}]`,
     );
   });
-  f.push(`${input.clips.map((_, i) => `[v${i}][a${i}]`).join("")}concat=n=${n}:v=1:a=1[vc][ac]`);
+  if (D > 0 && input.transition) {
+    // xfade: offset = lúc cảnh sau bắt đầu hiện, tính trên trục của chuỗi đã nối; âm thanh đan chéo cùng độ dài.
+    let vPrev = "v0";
+    let aPrev = "a0";
+    for (let i = 1; i < n; i += 1) {
+      const vOut = i === n - 1 ? "vc" : `xv${i}`;
+      const aOut = i === n - 1 ? "ac" : `xa${i}`;
+      f.push(`[${vPrev}][v${i}]xfade=transition=${input.transition.xfade}:duration=${r3(D)}:offset=${r3(starts[i])}[${vOut}]`);
+      f.push(`[${aPrev}][a${i}]acrossfade=d=${r3(D)}:c1=tri:c2=tri[${aOut}]`);
+      vPrev = vOut;
+      aPrev = aOut;
+    }
+  } else {
+    f.push(`${input.clips.map((_, i) => `[v${i}][a${i}]`).join("")}concat=n=${n}:v=1:a=1[vc][ac]`);
+  }
+  const graded = input.colorFilter ? "vg" : "vc";
+  if (input.colorFilter) f.push(`[vc]${input.colorFilter}[vg]`);
 
   // Chữ trên hình — mỗi đoạn một tệp, đi bằng tên tương đối trong `cwd`.
   const textFiles: { name: string; content: string }[] = [];
-  const font = filterPath(input.fontFile);
   const draws: string[] = [];
-  const draw = (name: string, raw: string, opts: { size: number; y: string; from: number; to: number; box?: boolean; lines: number }) => {
-    const size = Math.round(opts.size * k);
+  const baseText: RenderTextStyle = input.textStyle ?? { fontFile: input.fontFile, sizeK: 1, colorHex: "FFFFFF", boxColor: "black@0.55", y: 0.6 };
+  const baseSub: RenderTextStyle = input.subStyle ?? { fontFile: input.fontFile, sizeK: 1, colorHex: "FFFFFF", boxColor: null, y: 0.82 };
+  const draw = (name: string, raw: string, opts: { size: number; style: RenderTextStyle; y: string; from: number; to: number; lines: number }) => {
+    const size = Math.round(opts.size * k * opts.style.sizeK);
     const content = wrapText(raw, lineChars(W, size), opts.lines);
     if (!content.trim()) return;
     textFiles.push({ name, content });
-    const box = opts.box ? `:box=1:boxcolor=black@0.55:boxborderw=${Math.round(18 * k)}` : "";
+    // Viền chữ tương phản với MÀU CHỮ (chữ tối ⇒ viền sáng) — không nền vẫn đọc được trên mọi cảnh.
+    const dark = parseInt(opts.style.colorHex.slice(0, 2), 16) + parseInt(opts.style.colorHex.slice(2, 4), 16) + parseInt(opts.style.colorHex.slice(4, 6), 16) < 200;
+    const box = opts.style.boxColor ? `:box=1:boxcolor=${opts.style.boxColor}:boxborderw=${Math.round(18 * k)}` : "";
     draws.push(
-      `drawtext=fontfile=${font}:textfile=${name}:expansion=none:fontsize=${size}:fontcolor=white:borderw=${Math.max(2, Math.round(3 * k))}:bordercolor=black@0.85:line_spacing=${Math.round(10 * k)}:x=(w-text_w)/2:y=${opts.y}${box}:enable='between(t,${r3(opts.from)},${r3(opts.to)})'`,
+      `drawtext=fontfile=${filterPath(opts.style.fontFile)}:textfile=${name}:expansion=none:fontsize=${size}:fontcolor=0x${opts.style.colorHex}:borderw=${Math.max(2, Math.round(3 * k))}:bordercolor=${dark ? "white@0.85" : "black@0.85"}:line_spacing=${Math.round(10 * k)}:x=(w-text_w)/2:y=${opts.y}${box}:enable='between(t,${r3(opts.from)},${r3(opts.to)})'`,
     );
   };
   const hookEnd = Math.min(HOOK_SECONDS, total);
   const ctaStart = Math.max(0, total - CTA_SECONDS);
-  // Chữ lớn nằm ở nửa DƯỚI khung (≈ 62%): ảnh thời trang dọc có mặt người mẫu ở phần trên — chữ đè lên mặt là video hỏng.
+  const ends = starts.map((st, i) => Math.min(r3(st + input.clips[i].durationSec), total));
+  // Mặc định chữ lớn ở ≈ 60% chiều cao: ảnh thời trang dọc có mặt người mẫu ở phần trên — chữ đè lên mặt là video hỏng.
   const text = input.showText !== false;
-  if (text) draw("hook.txt", input.hook, { size: 52, y: "h*0.60", from: 0, to: hookEnd, box: true, lines: 3 });
+  const ty = `h*${r3(baseText.y)}`;
+  if (text) draw("hook.txt", input.hook, { size: 52, style: baseText, y: ty, from: 0, to: hookEnd, lines: 3 });
   input.scenes.forEach((s, i) => {
     const from = i === 0 ? hookEnd : starts[i];
-    const to = Math.min(i === n - 1 ? ctaStart : starts[i] + input.clips[i].durationSec, total);
-    if (text && to - from > 0.4) draw(`overlay${i}.txt`, s.overlay, { size: 46, y: "h*0.60", from, to, box: true, lines: 3 });
-    if (input.burnSubtitles) {
-      const subTo = Math.min(starts[i] + input.clips[i].durationSec, total);
-      draw(`sub${i}.txt`, s.subtitle, { size: 36, y: "h*0.82", from: starts[i], to: subTo, lines: 2 });
-    }
+    const to = Math.min(i === n - 1 ? ctaStart : ends[i], total);
+    if (text && to - from > 0.4) draw(`overlay${i}.txt`, s.overlay, { size: 46, style: baseText, y: ty, from, to, lines: 3 });
+    if (input.burnSubtitles) draw(`sub${i}.txt`, s.subtitle, { size: 36, style: baseSub, y: `h*${r3(baseSub.y)}`, from: starts[i], to: ends[i], lines: 2 });
   });
-  if (text) draw("cta.txt", input.cta, { size: 58, y: "(h-text_h)/2", from: ctaStart, to: total, box: true, lines: 2 });
-  f.push(draws.length ? `[vc]${draws.join(",")}[vout]` : `[vc]null[vout]`);
+  if (text) draw("cta.txt", input.cta, { size: 58, style: baseText, y: "(h-text_h)/2", from: ctaStart, to: total, lines: 2 });
+  f.push(draws.length ? `[${graded}]${draws.join(",")}[vout]` : `[${graded}]null[vout]`);
 
   // Âm thanh.
-  const hasExtra = voiceInputs.length > 0 || musicInput !== null;
+  const hasExtra = voiceInputs.length > 0 || musicInput !== null || trackInput !== null;
   const nativeVol = input.keepNativeAudio ? (hasExtra ? 0.25 : 1) : 0;
   f.push(`[ac]volume=${nativeVol}[an]`);
   const mix = ["[an]"];
@@ -294,6 +334,11 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
     const delay = Math.round(starts[v.sceneIndex] * 1000);
     f.push(`[${v.input}:a]aresample=48000,aformat=channel_layouts=stereo,atempo=${r3(tempo)},atrim=duration=${r3(sceneDur)},adelay=${delay}|${delay}[vo${v.sceneIndex}]`);
     mix.push(`[vo${v.sceneIndex}]`);
+  }
+  if (trackInput !== null) {
+    // Giọng tự thu đặt ở giây 0, dài quá video thì cắt; ngắn hơn thì phần sau im (không kéo giãn giọng người).
+    f.push(`[${trackInput}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=duration=${total},asetpts=PTS-STARTPTS[vt]`);
+    mix.push("[vt]");
   }
   if (musicInput !== null && input.music) {
     f.push(`[${musicInput}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=duration=${total},volume=${r3(input.music.volume)}[mu]`);
@@ -311,7 +356,7 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    input.preset ?? "veryfast",
     "-crf",
     "23",
     "-pix_fmt",
@@ -332,7 +377,7 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
     String(total),
     input.output,
   );
-  return { args, textFiles, totalSec: total };
+  return { args, textFiles, totalSec: total, sceneStarts: starts };
 }
 
 /** Tham số cắt MỘT khung hình JPEG ở giây `at` (ảnh bìa / khung cho QC). Hàm THUẦN. */
