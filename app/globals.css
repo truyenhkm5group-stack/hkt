@@ -191,6 +191,24 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /*
+    Ô chọn / lịch / thanh cuộn GỐC của trình duyệt đi theo chế độ sáng / tối của trang. Thiếu dòng này thì ở chế độ tối
+    danh sách thả xuống của <select> vẫn vẽ NỀN SÁNG trong khi chữ lấy màu sáng của giao diện tối ⇒ chữ xám nhạt trên nền
+    trắng, gần như không đọc được (chủ shop báo 28/09/2026, tab Duyệt video → Sửa video → chọn nhạc).
+  */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  select {
+    @apply bg-background text-foreground;
+  }
+  select option,
+  select optgroup {
+    @apply bg-popover text-popover-foreground;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "tnum";
