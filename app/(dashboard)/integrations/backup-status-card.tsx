@@ -24,12 +24,20 @@ export async function BackupStatusCard() {
   const s = b.lastSuccess;
   const r = b.lastRun;
   const d = b.lastDrill;
+  // Tổ chức khác nhà: thẻ nói về CSDL CỦA CHÍNH NÓ (erp_org_…), không bao giờ về bản của nhà.
+  const toChuc = b.target.scope === "ORGANIZATION" ? b.target.database : null;
+  const o = b.organizations;
+  const hongToChuc = o ? o.organizations.filter((x) => x.result !== "OK") : [];
   return (
     <SectionCard
       id="sao-luu"
       title="Sao lưu dữ liệu"
-      description={s?.schedule ? `Lịch: ${s.schedule}` : "Cron trên máy chủ — scripts/erp-backup.sh"}
-      hint={`ĐẠT chỉ khi đủ năm vế: bản CSDL thành công trong ${BACKUP_MAX_AGE_HOURS} giờ · lượt gần nhất không hỏng · có bản NGOÀI MÁY · dữ liệu bot chat được sao lưu · diễn tập khôi phục đạt trong ${BACKUP_DRILL_MAX_AGE_DAYS} ngày. Chi tiết: docs/backup-restore.md · ops backup-status · ops restore-drill.`}
+      description={`${toChuc ? `CSDL của tổ chức này (${toChuc}) · ` : ""}${s?.schedule ? `Lịch: ${s.schedule}` : "Cron trên máy chủ — scripts/erp-backup.sh"}`}
+      hint={
+        toChuc
+          ? `ĐẠT chỉ khi đủ bốn vế cho CSDL ${toChuc}: bản thành công trong ${BACKUP_MAX_AGE_HOURS} giờ · lượt gần nhất không hỏng · có bản NGOÀI MÁY · diễn tập khôi phục đạt trong ${BACKUP_DRILL_MAX_AGE_DAYS} ngày. Bản sao của tổ chức khác không phủ CSDL này. Chi tiết: docs/platform/backup-recovery.md.`
+          : `ĐẠT chỉ khi đủ năm vế: bản CSDL thành công trong ${BACKUP_MAX_AGE_HOURS} giờ · lượt gần nhất không hỏng · có bản NGOÀI MÁY · dữ liệu bot chat được sao lưu · diễn tập khôi phục đạt trong ${BACKUP_DRILL_MAX_AGE_DAYS} ngày. Chi tiết: docs/backup-restore.md · ops backup-status · ops restore-drill.`
+      }
     >
       <div className="mb-3 flex flex-wrap items-start gap-2">
         <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", HEALTH_TONE[b.state])}>{HEALTH_LABEL[b.state]}</span>
@@ -57,7 +65,10 @@ export async function BackupStatusCard() {
             value: r ? `${formatDateTime(r.finishedAt)} · ${NHAN_KET_QUA[r.result]} · ${r.trigger === "cron" ? "tự động" : "bấm tay"}` : "Chưa có",
           },
           { label: "Bản ngoài máy", value: s ? `${NHAN_NGOAI_MAY[s.offsite.state]}${s.offsite.remote ? ` (${s.offsite.remote})` : ""}` : "—" },
-          { label: "Bot chat", value: s ? (s.chatbot.state === "OK" ? formatBackupSize(s.chatbot.bytes) : s.chatbot.state) : "—" },
+          {
+            label: "Bot chat",
+            value: toChuc ? "Không áp dụng (bot chat thuộc tổ chức nhà)" : s ? (s.chatbot.state === "OK" ? formatBackupSize(s.chatbot.bytes) : s.chatbot.state) : "—",
+          },
           {
             label: "Giữ lại",
             value: s && s.retention.daily !== null ? `${s.retention.daily} bản ngày + ${s.retention.weekly ?? "—"} bản tuần + ${s.retention.manual ?? "—"} bản tay` : "—",
@@ -66,6 +77,17 @@ export async function BackupStatusCard() {
             label: "Diễn tập khôi phục",
             value: d ? `${formatTimeAgo(d.finishedAt)} · ${d.result === "OK" ? `đạt (${d.tables.length} bảng)` : d.result === "FAILED" ? "THẤT BẠI" : "không chạy"}` : "Chưa từng",
           },
+          // Chỉ màn hình của NHÀ (chủ nền tảng) thấy dòng này; nó không tham gia mức của thẻ.
+          ...(o
+            ? [
+                {
+                  label: "CSDL tổ chức khác (lượt gần nhất)",
+                  value: `${formatDateTime(o.finishedAt)} · ${o.organizations.length} CSDL · ${
+                    hongToChuc.length ? `HỎNG: ${hongToChuc.map((x) => x.database).join(", ")}` : "không CSDL nào hỏng"
+                  }${o.listError ? " · KHÔNG liệt kê được CSDL tổ chức" : ""}${o.missingDatabases.length ? ` · không sao lưu được: ${o.missingDatabases.join(", ")}` : ""}`,
+                },
+              ]
+            : []),
         ]}
       />
     </SectionCard>

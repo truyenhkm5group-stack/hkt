@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   BACKUP_DRILL_MAX_AGE_DAYS,
   BACKUP_MAX_AGE_HOURS,
   BACKUP_STATUS_DIR_DEFAULT,
+  ORG_BACKUP_DATABASE_PATTERN,
   UNPARSABLE,
   evaluateBackupHealth,
   formatBackupSize,
   parseBackupRun,
+  parseOrgBackupSummary,
+  type BackupTarget,
 } from "@/lib/constants/backup";
+import { backupTargetFor, readBackupStatusFiles } from "@/lib/queries/backup-status";
 
 /**
  * ═══════════ SAO LƯU TỰ ĐỘNG — BÀI KIỂM CHẠY SHELL THẬT, KHÔNG MÔ PHỎNG BẰNG LỜI ═══════════
@@ -863,7 +868,403 @@ export function testNgoaiMayGoogleDrive() {
   );
 }
 
-export function testSaoLuu() {
+/* ═════════════ 10 · CSDL TỔ CHỨC KHÁC NHÀ (erp_org_*) — Phase 11 ═════════════ */
+
+/**
+ * Băm SHA-256 của `scripts/erp-backup.sh` SAU KHI gỡ mọi khối `# >>> TỔ CHỨC KHÁC NHÀ` … `# <<< TỔ
+ * CHỨC KHÁC NHÀ` — tức đúng bản trước Phase 11 (origin/main 64cd4732). Đây là lời khẳng định "phần của
+ * nhà KHÔNG đổi một byte" ở dạng máy kiểm được.
+ *
+ * Đỏ ở đây nghĩa là ai đó đã sửa đường sao lưu của CSDL NHÀ (VNX). Nếu việc đó là CỐ Ý: cập nhật băm
+ * CÙNG commit và nói trong commit vì sao đường của nhà đổi. Nếu không cố ý: phần tổ chức đã rò ra ngoài
+ * khối có dấu — đưa nó về trong khối.
+ */
+const BAM_PHAN_NHA = "57d9b50d8667042817dac3c830bc9253fafd4186bcb7a4ec15725ca0b27892b1";
+const DAU_MO = "# >>> TỔ CHỨC KHÁC NHÀ";
+const DAU_DONG = "# <<< TỔ CHỨC KHÁC NHÀ";
+
+/** Tách script thành [phần của nhà, các khối tổ chức]. Kết thúc dòng quy về LF (AGENTS.md mục 65). */
+function tachPhanToChuc(): { nha: string; toChuc: string } {
+  const nha: string[] = [];
+  const toChuc: string[] = [];
+  let trong = false;
+  for (const dong of src().replace(/\r\n/g, "\n").split("\n")) {
+    const t = dong.trimStart();
+    if (t.startsWith(DAU_MO)) {
+      assert.ok(!trong, "khối tổ chức lồng nhau — thiếu dấu đóng");
+      trong = true;
+      continue;
+    }
+    if (t.startsWith(DAU_DONG)) {
+      assert.ok(trong, "dấu đóng khối tổ chức không có dấu mở");
+      trong = false;
+      continue;
+    }
+    (trong ? toChuc : nha).push(dong);
+  }
+  assert.ok(!trong, "khối tổ chức cuối cùng không có dấu đóng");
+  return { nha: nha.join("\n"), toChuc: toChuc.join("\n") };
+}
+
+export function testToChucPhanNhaKhongDoi() {
+  const { nha, toChuc } = tachPhanToChuc();
+  const bam = createHash("sha256").update(nha).digest("hex");
+  assert.equal(bam, BAM_PHAN_NHA, "gỡ các khối TỔ CHỨC KHÁC NHÀ ra phải được NGUYÊN VĂN bản sao lưu của nhà trước Phase 11 — xem chú thích BAM_PHAN_NHA");
+  assert.ok(!/to_chuc|erp_org|TO_CHUC/i.test(nha), "phần của nhà không được nhắc tới tổ chức khác — mọi thứ về tổ chức nằm trong khối có dấu");
+
+  // Lệnh then chốt của nhà còn nguyên (đọc được cả khi ai đó cố ý cập nhật băm).
+  for (const dong of [
+    'DB_FILE="erp-$moc.dump"',
+    'docker exec "$DB_CONTAINER" pg_dump -U erp -d erp -Fc > "$tam"',
+    "grep -q ' TABLE DATA public orders ' <<< \"$danh_sach\"",
+    "grep -q ' TABLE DATA public shipments ' <<< \"$danh_sach\"",
+    "for tt in erp chatbot; do",
+    'for f in "$BACKUP_DIR/$d"/erp-*.dump; do',
+    'ghi_json "$STATUS_DIR/last-success.json" "$noi_dung"',
+    'day_ngoai_may "$(basename "$thu_muc")" "${tep_da_tao[@]}"',
+  ]) {
+    assert.ok(nha.includes(dong), `phần của nhà phải còn nguyên dòng: ${dong}`);
+  }
+
+  // Khối tổ chức: không `exit` (trừ ĐÚNG MỘT dòng mã thoát cuối cmd_run, sau khi mọi tổ chức đã chạy),
+  // không `that_bai`, không dựa vào `set -e`.
+  const khoiDu = boChuThichShell(toChuc);
+  const DONG_THOAT = /^\s*\[ -z "\$TO_CHUC_HONG" \] \|\| \{ loi "[^"]*"; exit 1; \}\s*$/gm;
+  assert.equal((khoiDu.match(DONG_THOAT) ?? []).length, 1, "đúng MỘT dòng mã thoát cho tổ chức hỏng, ở cuối cmd_run");
+  const khoi = khoiDu.replace(DONG_THOAT, "");
+  assert.ok(!/(^|[;&|{(]\s*|\s)exit\b/m.test(khoi), "khối tổ chức không được `exit` — một tổ chức hỏng thì ghi lỗi rồi sang tổ chức kế tiếp, không dừng script");
+  assert.ok(!/\bthat_bai\b/.test(khoi), "khối tổ chức không được gọi that_bai — nó ghi đè trạng thái của NHÀ thành thất bại rồi thoát");
+  assert.ok(!/\bset -e\b/.test(khoi), "khối tổ chức không được bật lại set -e");
+  assert.ok(!/(^|[^A-Z_])(OFFSITE_\w+|KET_QUA|LY_DO|DB_\w+|BOT_\w+|TU_DO_MB|CAN_MB)=/m.test(khoi), "khối tổ chức không được ghi biến trạng thái của NHÀ (chỉ ORG_* và TO_CHUC_HONG)");
+  assert.ok(!/TABLE DATA public (orders|shipments)/.test(khoi), "kiểm toàn vẹn của tổ chức KHÔNG đòi orders/shipments — tổ chức dịch vụ không có đơn");
+
+  // Chỗ gọi: SAU khi trạng thái của nhà đã ghi, trong ngữ cảnh `|| true`.
+  const code = src().replace(/\r\n/g, "\n");
+  const iRun = code.indexOf("cmd_run() {");
+  const than = code.slice(iRun, code.indexOf("\n}\n", iRun));
+  const iGoi = than.indexOf('sao_luu_cac_to_chuc "$moc" "$(basename "$thu_muc")" || true');
+  assert.ok(iGoi > 0, "cmd_run phải gọi sao_luu_cac_to_chuc trong ngữ cảnh `|| true`");
+  assert.ok(iGoi > than.indexOf('ghi_json "$STATUS_DIR/last-success.json"') && iGoi > than.indexOf("daily-done"), "tổ chức chạy SAU khi trạng thái của nhà (last-run, last-success, daily-done) đã ghi");
+  assert.ok(than.indexOf('[ "$KET_QUA" = "OK" ] || { loi "$LY_DO"; exit 1; }') < than.indexOf('[ -z "$TO_CHUC_HONG" ]'), "mã thoát của nhà xét TRƯỚC — lý do in ra khi nhà hỏng vẫn là lý do của nhà");
+
+  // Lọc tên chặt, cùng một mẫu ở script và ở ERP.
+  const mau = /^MAU_CSDL_TO_CHUC='([^']+)'$/m.exec(code)?.[1];
+  assert.equal(mau, "^erp_org_[a-z0-9_]+$", "tên CSDL tổ chức phải lọc bằng ^erp_org_[a-z0-9_]+$");
+  assert.equal(ORG_BACKUP_DATABASE_PATTERN.source, mau, "ERP và script phải dùng CÙNG một mẫu tên CSDL");
+  assert.match(khoi, /datname like 'erp\\_org\\_%'/, "liệt kê bằng pg_database với LIKE đã thoát dấu _");
+  // Xoay vòng riêng theo tiền tố từng CSDL, đọc đúng hằng số của nhà.
+  const xoay = [...khoi.matchAll(/^\s*xoay_vong "\$goc\/(daily|weekly|manual)" "\$csdl" "(\$GIU_BAN_\w+)"/gm)].map((m) => `${m[1]}=${m[2]}`);
+  assert.deepEqual(xoay, ["daily=$GIU_BAN_NGAY", "weekly=$GIU_BAN_TUAN", "manual=$GIU_BAN_TAY"], "tổ chức xoay vòng ba thư mục của CHÍNH nó, theo tiền tố tên CSDL, bằng hằng số GIU_BAN_*");
+  assert.match(code, /grep -E "\^\$\{tien_to\}-\[0-9\]\{8\}-\[0-9\]\{4\}\\\."/, "mẫu xoay vòng dùng chung phải neo `<tiền tố>-<8 số>` — erp_org_ab không ăn vào erp_org_abc");
+
+  console.log(`✓ Tổ chức khác nhà (mã nguồn): gỡ khối có dấu ⇒ đúng băm bản trước Phase 11 · lệnh then chốt của nhà còn nguyên · khối tổ chức không exit / that_bai / set -e, không ghi biến của nhà, không đòi orders · gọi SAU trạng thái của nhà trong ngữ cảnh || true · mẫu tên ${mau} chung với ERP · xoay vòng riêng theo tiền tố`);
+}
+
+/** ANSI-C quoting của bash — chuyển nguyên vẹn xuống dòng, nháy, gạch ngược. */
+const bq = (s: string) => `$'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n")}'`;
+
+export function testToChucHamThuan() {
+  const hopLe = ["erp_org_ab", "erp_org_a_b_c", "erp_org_x9"];
+  const khongHopLe = ["", "erp", "erp_org_", "erp_org_AB", "erp_org_a-b", "erp_org_a;rm -rf /", "erp_org_a b", "erp_org_a/../x", "xerp_org_a", "erp_org_a\nerp", "erp-org-a"];
+  const r = chayBash(
+    [
+      "#!/usr/bin/env bash",
+      'T="$(mktemp -d)"',
+      'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks"',
+      `source "${bashPath(SCRIPT)}"`,
+      "set +e",
+      'echo "@@TEN"',
+      ...[...hopLe, ...khongHopLe].map((n, i) => `ten_csdl_to_chuc_hop_le ${bq(n)}; echo "${i}:$?"`),
+      'echo "@@TEP"; ten_tep_to_chuc erp_org_ab 20260928-0217; echo',
+      'echo "@@DU"; bang_loi_thieu $\'1; 0 0 TABLE DATA public users erp\\n2; 0 0 TABLE DATA public settings erp\\n3; 0 0 TABLE DATA drizzle __drizzle_migrations erp\\n\'; echo "|"',
+      'echo "@@THIEU"; bang_loi_thieu $\'1; 0 0 TABLE DATA public users_cu erp\\n2; 0 0 TABLE DATA drizzle __drizzle_migrations erp\\n3; 0 0 TABLE DATA public orders erp\\n\'; echo',
+      // Xoay vòng trong một thư mục chung: tiền tố của tổ chức này không được ăn vào tệp của tổ chức khác / của nhà.
+      'D="$T/chung"; mkdir -p "$D"',
+      'for i in 01 02 03 04 05; do touch "$D/erp_org_ab-202609$i-0217.dump" "$D/erp_org_abc-202609$i-0217.dump" "$D/erp-202609$i-0217.dump"; done',
+      'xoay_vong "$D" erp_org_ab 2 > /dev/null; echo "@@XOAY"; ls -1 "$D" | sort',
+      // Liệt kê: docker giả trả cả tên hợp lệ lẫn tên lạ; tên lạ bị bỏ và nói ra ở stderr.
+      "docker() { printf 'erp_org_alpha\\nerp_org_Bad;x\\nerp_org_beta\\r\\n'; }",
+      'ds="$(liet_ke_csdl_to_chuc 2>"$T/err")"; echo "@@LIET"; echo "$ds"; echo "@@LIETLOI"; cat "$T/err"',
+      "docker() { echo 'psql: loi gia' >&2; return 2; }",
+      'liet_ke_csdl_to_chuc > /dev/null 2>&1; rc=$?; echo "@@LIETHONG"; echo $rc',
+      'echo "@@HET"; rm -rf "$T"',
+      "",
+    ].join("\n"),
+  );
+  const ten = phan(r.ra, "TEN").split("\n");
+  hopLe.forEach((n, i) => assert.equal(ten[i], `${i}:0`, `"${n}" phải là tên CSDL tổ chức hợp lệ`));
+  khongHopLe.forEach((n, k) => assert.notEqual(ten[hopLe.length + k], `${hopLe.length + k}:0`, `${JSON.stringify(n)} KHÔNG được coi là tên CSDL tổ chức — nó sẽ đi vào đường dẫn và lệnh pg_dump`));
+
+  const tep = phan(r.ra, "TEP");
+  assert.equal(tep, "erp_org_ab-20260928-0217.dump");
+  assert.ok(!tep.startsWith("erp-") && !/^erp-[0-9]{8}-[0-9]{4}\./.test(tep), "tên tệp tổ chức không được khớp glob `erp-*.dump` (ban_moi_nhat) hay mẫu xoay vòng của nhà");
+  assert.equal(phan(r.ra, "DU"), "|", "mục lục đủ users + settings + __drizzle_migrations ⇒ không thiếu gì — KHÔNG đòi orders");
+  assert.equal(phan(r.ra, "THIEU"), "public.users public.settings", "users_cu không phải users; có orders cũng không bù được bảng lõi thiếu");
+
+  const xoay = phan(r.ra, "XOAY").split("\n");
+  assert.deepEqual(xoay.filter((f) => f.startsWith("erp_org_ab-")), ["erp_org_ab-20260904-0217.dump", "erp_org_ab-20260905-0217.dump"], "xoay vòng giữ đúng 2 bản MỚI NHẤT của erp_org_ab");
+  assert.equal(xoay.filter((f) => f.startsWith("erp_org_abc-")).length, 5, "tệp của erp_org_abc KHÔNG bị xoay theo tiền tố erp_org_ab");
+  assert.equal(xoay.filter((f) => f.startsWith("erp-")).length, 5, "tệp của nhà KHÔNG bị xoay theo tiền tố tổ chức");
+
+  assert.deepEqual(phan(r.ra, "LIET").split("\n"), ["erp_org_alpha", "erp_org_beta"], "liệt kê chỉ trả tên hợp lệ (bỏ CR)");
+  assert.match(phan(r.ra, "LIETLOI"), /bỏ qua CSDL tên lạ .*erp_org_Bad/, "tên lạ bị bỏ và NÓI RA");
+  assert.equal(phan(r.ra, "LIETHONG"), "1", "không hỏi được Postgres ⇒ trả 1 (CHƯA BIẾT), không phải danh sách rỗng");
+
+  console.log(`✓ Tổ chức khác nhà (hàm thuần, chạy bash thật): ${hopLe.length} tên hợp lệ · ${khongHopLe.length} tên lạ bị từ chối (có ; / .. dấu cách, xuống dòng, chữ hoa, gạch ngang) · tên tệp không khớp glob của nhà · bảng lõi users/settings/__drizzle_migrations, không đòi orders · xoay vòng không ăn sang erp_org_abc hay erp- · psql lỗi ⇒ trả 1`);
+}
+
+/**
+ * Khung chạy `cmd_run` THẬT với Postgres / Docker / rclone giả, có CSDL tổ chức. `docker` giả đọc
+ * tên CSDL từ tham số `-d` và ghi nó vào bản dump giả, để `pg_restore --list` giả trả mục lục đúng
+ * LOẠI (nhà: có orders/shipments; tổ chức: bảng lõi, KHÔNG có orders).
+ */
+function khungToChuc(truoc = ""): string {
+  return [
+    "#!/usr/bin/env bash",
+    "set -uo pipefail",
+    'T="$(mktemp -d)"',
+    'mkdir -p "$T/bin" "$T/erp" "$T/bot" "$T/remote"',
+    'echo "khoa-bot-gia" > "$T/bot/bot.env"',
+    "cat > \"$T/bin/docker\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "$*" >> "$DOCKER_LOG"',
+    'case "$1" in',
+    "  inspect)",
+    '    case "$*" in',
+    "      *State.Running*) echo true ;;",
+    "      *Destination*) echo erp_chatbot_data ;;",
+    "      *Config.Image*) echo postgres:16-alpine ;;",
+    "    esac ;;",
+    "  exec)",
+    '    case "$*" in',
+    '      *pg_database*) [ "${STUB_LIST_ORG:-}" = loi ] && { echo "psql: loi gia" >&2; exit 2; }; printf "%s" "${STUB_ORGS:-}" ;;',
+    '      *platform_organizations*) printf "%s" "${STUB_SO:-}" ;;',
+    "      *pg_dump*)",
+    '        db=""; prev=""; for a in "$@"; do [ "$prev" = "-d" ] && db="$a"; prev="$a"; done',
+    '        case " ${STUB_DUMP_HONG:-} " in *" $db "*) echo "pg_dump: loi gia $db" >&2; exit 1 ;; esac',
+    '        printf "PGDMP-%s-%0300d" "$db" 7 ;;',
+    '      *"pg_restore --list"*)',
+    '        noi="$(cat)"; db="${noi#PGDMP-}"; db="${db%%-*}"',
+    '        if [ "$db" = erp ]; then printf "1; 0 0 TABLE DATA public users erp\\n2; 0 0 TABLE DATA public shipments erp\\n3; 0 0 TABLE DATA public orders erp\\n"',
+    "        else",
+    '          printf "1; 0 0 TABLE DATA public users erp\\n2; 0 0 TABLE DATA drizzle __drizzle_migrations erp\\n"',
+    '          case " ${STUB_THIEU_SETTINGS:-} " in *" $db "*) ;; *) printf "3; 0 0 TABLE DATA public settings erp\\n" ;; esac',
+    "        fi ;;",
+    "    esac ;;",
+    '  run) cd "$BOT_DATA" && tar czf - . ;;',
+    "esac",
+    "EOF",
+    "cat > \"$T/bin/df\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "Filesystem 1048576-blocks Used Available Capacity Mounted"',
+    'echo "/dev/gia 40000 1 999999 1% /"',
+    "EOF",
+    "cat > \"$T/bin/rclone\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "rclone $*" >> "$DOCKER_LOG"',
+    'dich() { printf "%s" "$REMOTE_DIR/${1#gia:}"; }',
+    'case "$1" in',
+    '  copyto) shift; while [ "${1#--}" != "$1" ]; do shift; [ "$1" = 3 ] && shift; done; mkdir -p "$(dirname "$(dich "$2")")"; cp "$1" "$(dich "$2")" ;;',
+    '  lsf) f="$(dich "${!#}")"; [ -f "$f" ] || exit 1; stat -c %s "$f" ;;',
+    "  delete) : ;;",
+    "esac",
+    "EOF",
+    'chmod +x "$T/bin/docker" "$T/bin/df" "$T/bin/rclone"',
+    'export PATH="$T/bin:$PATH" DOCKER_LOG="$T/docker.log" BOT_DATA="$T/bot" REMOTE_DIR="$T/remote"',
+    'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks" BACKUP_OFFSITE_REMOTE=gia:',
+    ': > "$DOCKER_LOG"',
+    `source "${bashPath(SCRIPT)}"`,
+    "set +e",
+    "khoa_chong_chong() { return 0; }   # khoá: đo riêng bằng flock THẬT",
+    "giu_khoa() { return 0; }",
+    truoc,
+    '( set -e; TRIGGER=cron; cmd_run ) > "$T/out" 2>&1; rc=$?', // set -e: ĐÚNG cờ của script khi chạy thật
+    'echo "@@EXIT"; echo "$rc"',
+    'echo "@@OUT"; cat "$T/out"',
+    'echo "@@RUN"; cat "$T/backups/status/last-run.json" 2>/dev/null',
+    'echo "@@SUCCESS"; cat "$T/backups/status/last-success.json" 2>/dev/null',
+    'echo "@@DAILY"; ls -1A "$T/backups/daily" 2>/dev/null',
+    'echo "@@ORGFILES"; (cd "$T/backups" && find orgs -type f 2>/dev/null | sort)',
+    'echo "@@STATUSFILES"; (cd "$T/backups/status" && find . -type f 2>/dev/null | sort)',
+    'echo "@@SUMMARY"; cat "$T/backups/status/orgs-last-run.json" 2>/dev/null',
+    'echo "@@ALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-run.json" 2>/dev/null',
+    'echo "@@BETA"; cat "$T/backups/status/orgs/erp_org_beta/last-run.json" 2>/dev/null',
+    'echo "@@REMOTE"; (cd "$T/remote" && find . -type f | sort)',
+    'echo "@@DOCKER"; cat "$DOCKER_LOG"',
+    'echo "@@HET"',
+    'rm -rf "$T"',
+    "",
+  ].join("\n");
+}
+
+/** Bỏ phần phụ thuộc đồng hồ / máy (mốc, thời điểm, tên máy) để so hai lượt chạy. */
+const chuanHoa = (s: string) => s.replace(/\d{8}-\d{4}/g, "MOC");
+function trangThaiNha(raw: string): Record<string, unknown> {
+  const j = JSON.parse(raw) as Record<string, unknown>;
+  delete j.startedAt;
+  delete j.finishedAt;
+  delete j.host;
+  return JSON.parse(chuanHoa(JSON.stringify(j))) as Record<string, unknown>;
+}
+
+export function testToChucChayThat() {
+  const ngay = hangSo("GIU_BAN_NGAY");
+
+  // ───────── KHÔNG CÓ CSDL erp_org_* (production hôm nay) ⇒ không làm gì thêm ─────────
+  const goc = chayBash(khungToChuc());
+  assert.equal(phan(goc.ra, "EXIT"), "0", `không có tổ chức nào: lượt sao lưu của nhà phải đạt như cũ:\n${goc.ra}`);
+  assert.equal(phan(goc.ra, "ORGFILES"), "", "không có tổ chức ⇒ không tạo thư mục / tệp nào cho tổ chức");
+  assert.deepEqual(phan(goc.ra, "STATUSFILES").split("\n"), ["./daily-done", "./last-run.json", "./last-success.json"], "không có tổ chức ⇒ thư mục trạng thái đúng ba tệp của nhà");
+  assert.match(phan(goc.ra, "OUT"), /không có CSDL erp_org_\* nào — không làm gì thêm/);
+  assert.ok(!/pg_dump -U erp -d erp_org/.test(phan(goc.ra, "DOCKER")), "không có tổ chức ⇒ không một lệnh dump nào khác");
+
+  // ───────── HAI TỔ CHỨC: alpha tốt, beta pg_dump lỗi, một tên lạ, một tổ chức trong sổ không có CSDL ─────────
+  const tao = `for i in $(seq -w 1 ${ngay + 3}); do touch "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily/erp_org_alpha-202609$i-0217.dump"; done`;
+  const hai = chayBash(
+    khungToChuc(
+      [
+        'mkdir -p "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily"',
+        tao,
+        'touch "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily/erp_org_alpha_x-20260901-0217.dump" "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily/ghi-chu.txt"',
+      ].join("\n"),
+    ),
+    { STUB_ORGS: "erp_org_alpha\nerp_org_Bad;rm -rf /\nerp_org_beta\n", STUB_DUMP_HONG: "erp_org_beta", STUB_SO: "alpha\nbeta\ngamma-x\n" },
+  );
+  const out = phan(hai.ra, "OUT");
+  assert.equal(phan(hai.ra, "EXIT"), "1", `có tổ chức hỏng ⇒ lượt thoát 1 để ops đỏ:\n${hai.ra}`);
+
+  // Bản của NHÀ: y hệt lượt không có tổ chức.
+  assert.deepEqual(trangThaiNha(phan(hai.ra, "RUN")), trangThaiNha(phan(goc.ra, "RUN")), "last-run.json của NHÀ phải giống hệt lượt không có tổ chức (trừ mốc giờ)");
+  assert.deepEqual(trangThaiNha(phan(hai.ra, "SUCCESS")), trangThaiNha(phan(goc.ra, "SUCCESS")), "last-success.json của NHÀ phải giống hệt");
+  assert.equal(parseBackupRun(JSON.parse(phan(hai.ra, "RUN")))?.result, "OK", "tổ chức hỏng KHÔNG làm bản của nhà thành thất bại");
+  assert.equal(chuanHoa(phan(hai.ra, "DAILY")), chuanHoa(phan(goc.ra, "DAILY")), "daily/ của nhà giống hệt");
+  const xa = (ra: string) => phan(ra, "REMOTE").split("\n");
+  assert.deepEqual(xa(hai.ra).filter((f) => f.startsWith("./daily/")).map(chuanHoa), xa(goc.ra).filter((f) => f.startsWith("./daily/")).map(chuanHoa), "bản ngoài máy của nhà giống hệt");
+  assert.ok(out.indexOf("KẾT QUẢ: OK") >= 0 && out.indexOf("KẾT QUẢ: OK") < out.indexOf("pg_dump -Fc erp_org_alpha"), "tổ chức chạy SAU khi nhà đã chốt kết quả");
+
+  // alpha: có bản, trạng thái của CHÍNH nó, ngoài máy dưới orgs/erp_org_alpha/.
+  const files = phan(hai.ra, "ORGFILES").split("\n");
+  const alphaDaily = files.filter((f) => /^orgs\/erp_org_alpha\/daily\/erp_org_alpha-\d{8}-\d{4}\.dump$/.test(f));
+  assert.equal(alphaDaily.length, ngay, `alpha: xoay vòng giữ đúng ${ngay} bản của CHÍNH nó (bản mới + ${ngay - 1} bản cũ nhất còn lại)`);
+  assert.ok(!alphaDaily.some((f) => /202609(0[1-3])-/.test(f)), "bản cũ nhất của alpha bị xoay đi");
+  assert.ok(files.includes("orgs/erp_org_alpha/daily/erp_org_alpha_x-20260901-0217.dump") && files.includes("orgs/erp_org_alpha/daily/ghi-chu.txt"), "tệp không mang đúng tiền tố alpha KHÔNG bị đụng");
+  const alpha = parseBackupRun(JSON.parse(phan(hai.ra, "ALPHA")));
+  assert.ok(alpha, "trạng thái tổ chức phải đọc được bằng CHÍNH bộ đọc của ERP");
+  assert.equal(alpha.scope, "ORGANIZATION");
+  assert.equal(alpha.database, "erp_org_alpha");
+  assert.equal(alpha.result, "OK", "alpha không có bảng orders mà vẫn ĐẠT — kiểm toàn vẹn theo loại");
+  assert.equal(alpha.offsite.state, "OK");
+  assert.equal(alpha.chatbot.state, "NOT_APPLICABLE");
+  assert.ok(xa(hai.ra).some((f) => /^\.\/orgs\/erp_org_alpha\/daily\/erp_org_alpha-\d{8}-\d{4}\.dump$/.test(f)), "bản ngoài máy của alpha nằm dưới orgs/erp_org_alpha/daily/");
+  assert.match(phan(hai.ra, "DOCKER"), /^rclone delete gia:orgs\/erp_org_alpha\/daily --min-age /m, "dọn ngoài máy của tổ chức ở ĐÚNG thư mục của nó — không đụng daily/ của nhà");
+
+  // beta: hỏng, nói rõ, không để lại tệp.
+  const beta = parseBackupRun(JSON.parse(phan(hai.ra, "BETA")));
+  assert.equal(beta?.result, "FAILED");
+  assert.match(beta?.reason ?? "", /pg_dump erp_org_beta lỗi: pg_dump: loi gia erp_org_beta/, "lý do mang dòng lỗi thật của pg_dump");
+  assert.ok(!files.some((f) => f.startsWith("orgs/erp_org_beta/") && f.endsWith(".dump")) && !files.some((f) => f.includes(".dang-ghi")), "beta hỏng ⇒ không bản nào, không tệp đang-ghi");
+  assert.ok(!phan(hai.ra, "STATUSFILES").includes("orgs/erp_org_beta/last-success.json"), "lượt hỏng KHÔNG được ghi thành bản thành công của beta");
+
+  // Tên lạ: không bao giờ tới pg_dump.
+  assert.ok(!/erp_org_Bad/.test(phan(hai.ra, "DOCKER").split("\n").filter((l) => l.includes("pg_dump")).join("\n")), "tên CSDL lạ KHÔNG được đi vào lệnh pg_dump");
+  assert.match(out, /bỏ qua CSDL tên lạ/);
+
+  // Tổng hợp: nói rõ tổ chức nào hỏng, tổ chức nào không sao lưu được.
+  const tong = parseOrgBackupSummary(JSON.parse(phan(hai.ra, "SUMMARY")));
+  assert.ok(tong, "tệp tổng hợp phải đọc được bằng bộ đọc của ERP");
+  assert.deepEqual(tong.organizations.map((o) => `${o.database}=${o.result}`), ["erp_org_alpha=OK", "erp_org_beta=FAILED"]);
+  assert.deepEqual(tong.missingDatabases, ["erp_org_gamma_x"], "tổ chức trong sổ mà không có CSDL trên erp-db phải được NÊU, không im lặng");
+  assert.match(out, /::warning::\[sao-lưu\] tổ chức gamma-x có trong sổ nhưng KHÔNG có CSDL erp_org_gamma_x/);
+  assert.match(out, /CSDL nhà đã sao lưu ĐẠT; CSDL tổ chức khác hỏng: erp_org_beta/, "dòng cuối nói rõ nhà ĐẠT và tổ chức NÀO hỏng");
+
+  // ───────── Mục lục thiếu bảng lõi ⇒ tổ chức đó hỏng, bản bị xoá; nhà vẫn đạt ─────────
+  const thieu = chayBash(khungToChuc(), { STUB_ORGS: "erp_org_alpha\n", STUB_THIEU_SETTINGS: "erp_org_alpha" });
+  assert.equal(phan(thieu.ra, "EXIT"), "1");
+  assert.equal(parseBackupRun(JSON.parse(phan(thieu.ra, "RUN")))?.result, "OK", "nhà vẫn ĐẠT");
+  assert.match(parseBackupRun(JSON.parse(phan(thieu.ra, "ALPHA")))?.reason ?? "", /thiếu dữ liệu bảng lõi: public\.settings/);
+  assert.ok(!phan(thieu.ra, "ORGFILES").split("\n").some((f) => f.endsWith(".dump")), "bản thiếu bảng lõi bị XOÁ");
+
+  // ───────── Không liệt kê được CSDL tổ chức ⇒ CHƯA BIẾT: thoát 1, nhà vẫn đạt, tổng hợp mang lỗi ─────────
+  const khongLiet = chayBash(khungToChuc(), { STUB_LIST_ORG: "loi" });
+  assert.equal(phan(khongLiet.ra, "EXIT"), "1", "không liệt kê được ⇒ không được im lặng coi như không có tổ chức");
+  assert.equal(parseBackupRun(JSON.parse(phan(khongLiet.ra, "RUN")))?.result, "OK");
+  assert.match(parseOrgBackupSummary(JSON.parse(phan(khongLiet.ra, "SUMMARY")))?.listError ?? "", /CHƯA BIẾT/);
+
+  console.log(`✓ Tổ chức khác nhà (cmd_run chạy thật): 0 CSDL erp_org_* ⇒ không tệp, không lệnh thêm · 2 tổ chức + 1 hỏng ⇒ trạng thái / tệp / bản ngoài máy của NHÀ giống hệt lượt không có tổ chức, nhà vẫn OK · alpha không có orders vẫn đạt, xoay vòng giữ ${ngay} bản của chính nó, ngoài máy dưới orgs/<csdl>/ · beta hỏng ⇒ FAILED có lý do, không tệp dở · tên lạ không tới pg_dump · tổ chức trong sổ thiếu CSDL được nêu · thiếu bảng lõi ⇒ xoá bản · không liệt kê được ⇒ thoát 1`);
+}
+
+export async function testChamSaoLuuToChuc() {
+  const BAY_GIO = new Date("2026-09-24T03:00:00Z");
+  const truoc = (gio: number) => new Date(BAY_GIO.getTime() - gio * 3_600_000).toISOString();
+  const nha = { schema: 1, kind: "backup", result: "OK", trigger: "cron", finishedAt: truoc(2), db: { file: "erp-x.dump", bytes: 1, tableData: 3 }, chatbot: { state: "OK" }, offsite: { state: "OK", remote: "gcrypt:" }, retention: { daily: 7 } };
+  const cuaToChuc = (database: string, over: Record<string, unknown> = {}) => ({ ...nha, kind: "org-backup", database, chatbot: undefined, db: { file: `${database}-x.dump`, bytes: 1, tableData: 90 }, ...over });
+  const dienTapNha = { schema: 1, kind: "restore-drill", result: "OK", finishedAt: truoc(5), tables: [] };
+  const A: BackupTarget = { scope: "ORGANIZATION", database: "erp_org_alpha" };
+
+  // Nhà khoẻ trọn năm vế — kiểm lại để phép so dưới đây có nghĩa.
+  const duNha = { dirReadable: true, lastRun: nha, lastSuccess: nha, lastDrill: dienTapNha };
+  assert.equal(evaluateBackupHealth(duNha, BAY_GIO).state, "HEALTHY");
+  // Đúng lỗi Phase 11 bắt được: tổ chức khác đọc lời khai của nhà ⇒ KHÔNG BAO GIỜ khoẻ.
+  const muonNha = evaluateBackupHealth(duNha, BAY_GIO, A);
+  assert.equal(muonNha.state, "DOWN", "lời khai của NHÀ không phải căn cứ cho tổ chức khác — tổ chức B không được thấy 'sao lưu tốt' của VNX");
+  assert.equal(muonNha.lastSuccess, null);
+  assert.ok(muonNha.issues.some((i) => /CSDL KHÁC/.test(i.text)), "tệp đặt nhầm chỗ phải được NÓI RA");
+  // Chưa có gì ⇒ "chưa có bản sao" của CHÍNH CSDL đó.
+  const chua = evaluateBackupHealth({ dirReadable: true }, BAY_GIO, A);
+  assert.equal(chua.state, "DOWN");
+  assert.match(chua.reason, /Chưa có bản sao lưu nào cho CSDL của tổ chức này \(erp_org_alpha\)/);
+  // Lời khai của tổ chức KHÁC ⇒ không dùng.
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastRun: cuaToChuc("erp_org_beta"), lastSuccess: cuaToChuc("erp_org_beta") }, BAY_GIO, A).lastSuccess, null, "bản của erp_org_beta không phải bản của erp_org_alpha");
+  // Lời khai của tổ chức không đọc được thành bản của NHÀ.
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastRun: cuaToChuc("erp_org_alpha"), lastSuccess: cuaToChuc("erp_org_alpha"), lastDrill: dienTapNha }, BAY_GIO).lastSuccess, null, "lời khai của tổ chức không làm căn cứ cho NHÀ");
+  // Tổ chức có bản đủ: không vế bot chat; chưa diễn tập ⇒ vàng, nói thẳng.
+  const co = evaluateBackupHealth({ dirReadable: true, lastRun: cuaToChuc("erp_org_alpha"), lastSuccess: cuaToChuc("erp_org_alpha") }, BAY_GIO, A);
+  assert.equal(co.state, "DEGRADED");
+  assert.equal(co.issues.length, 1, `chỉ còn vế diễn tập: ${co.issues.map((i) => i.text).join(" | ")}`);
+  assert.match(co.reason, /Chưa diễn tập khôi phục CSDL của tổ chức này/);
+  assert.ok(!co.issues.some((i) => /bot chat/.test(i.text)), "tổ chức khác không có bot chat — không đòi vế đó");
+  // Diễn tập của NHÀ không phủ tổ chức; diễn tập ghi đúng CSDL thì có.
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastRun: cuaToChuc("erp_org_alpha"), lastSuccess: cuaToChuc("erp_org_alpha"), lastDrill: dienTapNha }, BAY_GIO, A).lastDrill, null, "diễn tập của nhà không chứng minh gì về CSDL tổ chức");
+  assert.equal(
+    evaluateBackupHealth({ dirReadable: true, lastRun: cuaToChuc("erp_org_alpha"), lastSuccess: cuaToChuc("erp_org_alpha"), lastDrill: { ...dienTapNha, database: "erp_org_alpha" } }, BAY_GIO, A).state,
+    "HEALTHY",
+  );
+  // CSDL ở máy khác ⇒ đỏ, nói rõ vì sao.
+  assert.equal(evaluateBackupHealth({ dirReadable: true }, BAY_GIO, { ...A, externalDatabase: true }).issues[0].state, "DOWN");
+  // Lời khai tổ chức thiếu tên CSDL ⇒ không thuộc về ai.
+  assert.equal(parseBackupRun({ ...cuaToChuc("x"), database: undefined }), null);
+
+  // Nhà: tổng hợp tổ chức đọc được, KHÔNG làm đổi mức của nhà.
+  const tong = { schema: 1, kind: "org-backup-summary", finishedAt: truoc(1), listError: null, organizations: [{ database: "erp_org_beta", result: "FAILED", reason: "x" }], missingDatabases: [] };
+  const nhaCoTong = evaluateBackupHealth({ ...duNha, orgSummary: tong }, BAY_GIO);
+  assert.equal(nhaCoTong.state, "HEALTHY", "CSDL của khách khác hỏng không làm sao lưu của VNX 'xấu đi' — nó là dòng riêng");
+  assert.deepEqual(nhaCoTong.organizations?.organizations.map((o) => o.result), ["FAILED"]);
+  assert.equal(evaluateBackupHealth({ ...duNha, orgSummary: tong }, BAY_GIO, A).organizations, null, "tổ chức khác không bao giờ thấy tổng hợp của các tổ chức");
+
+  // ───────── Đọc đĩa thật: thư mục có lời khai của NHÀ, tổ chức chưa có gì ─────────
+  const dir = mkdtempSync(path.join(tmpdir(), "trang-thai-sao-luu-"));
+  try {
+    writeFileSync(path.join(dir, "last-run.json"), JSON.stringify(nha));
+    writeFileSync(path.join(dir, "last-success.json"), JSON.stringify(nha));
+    writeFileSync(path.join(dir, "last-drill.json"), JSON.stringify(dienTapNha));
+    const tepA = await readBackupStatusFiles(dir, A);
+    assert.equal(tepA.lastRun, undefined, "tổ chức đọc thư mục của CHÍNH nó — không đọc last-run.json của nhà");
+    assert.equal(evaluateBackupHealth(tepA, BAY_GIO, A).state, "DOWN");
+    mkdirSync(path.join(dir, "orgs", "erp_org_alpha"), { recursive: true });
+    writeFileSync(path.join(dir, "orgs", "erp_org_alpha", "last-success.json"), JSON.stringify(cuaToChuc("erp_org_alpha")));
+    assert.equal(parseBackupRun((await readBackupStatusFiles(dir, A)).lastSuccess)?.database, "erp_org_alpha");
+    // Tên CSDL lạ không bao giờ thành đường dẫn.
+    const la = await readBackupStatusFiles(dir, { scope: "ORGANIZATION", database: "../status" });
+    assert.deepEqual(la, { dirReadable: true }, "tên CSDL không khớp mẫu ⇒ không đọc tệp nào");
+    assert.equal(backupTargetFor({ code: "home", isHome: true }).scope, "HOME");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log("✓ Chấm sao lưu theo tổ chức: lời khai của nhà / của tổ chức khác không bao giờ là căn cứ cho một tổ chức (DOWN 'chưa có bản sao', nói ra tệp đặt nhầm) · tổ chức không có vế bot chat · diễn tập của nhà không phủ tổ chức · CSDL ở máy khác ⇒ đỏ · tổng hợp tổ chức chỉ nhà thấy và không đổi mức của nhà · đọc đĩa thật: tổ chức chỉ đọc orgs/<csdl>/, tên lạ không thành đường dẫn");
+}
+
+export async function testSaoLuu() {
   testLichSaoLuuDuocCai();
   testXoayVongMotChoKhai();
   testKiemODiaVaToanVen();
@@ -873,5 +1274,9 @@ export function testSaoLuu() {
   testMountTrangThaiChiDoc();
   testChamSaoLuu();
   testNgoaiMayGoogleDrive();
+  testToChucPhanNhaKhongDoi();
+  testToChucHamThuan();
+  testToChucChayThat();
+  await testChamSaoLuuToChuc();
 }
 

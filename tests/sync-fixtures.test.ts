@@ -2444,7 +2444,7 @@ async function main() {
   testDeployScript();
   testApplyGithubEnvBlock();
   testOpsConcurrency();
-  testSaoLuu();
+  await testSaoLuu();
   testMigrationAppendOnly();
   await testMigrationUpgradePath();
   testMigrationNumberUnique();
