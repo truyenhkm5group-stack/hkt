@@ -423,6 +423,7 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testConnectors } from "./connectors.test";
 import { testPageData } from "./page-data.test";
 import { testPageRuntime } from "./page-runtime.test";
 import { testWorkflowAdmin } from "./workflow-admin.test";
@@ -2474,6 +2475,9 @@ async function main() {
   // Phase 4 · trình soạn trang tuỳ biến: lõi màn hình /settings/pages (quyền, module chủ, lỗi theo path).
   await testPageAdmin();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
+  // Phase 9 · sổ connector ↔ mã, mã hoá bí mật kết nối (AAD theo tổ chức), kiểm tra chỉ tới Lark / Telegram, hai tổ
+  // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
+  await testConnectors();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

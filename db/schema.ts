@@ -8606,3 +8606,38 @@ export const metaPages = pgTable(
     check("meta_pages_slug_check", sql`${t.slug} ~ '^[a-z][a-z0-9-]{1,60}$'`),
   ],
 );
+
+// ═══ PHASE 9 — KẾT NỐI THEO TỔ CHỨC (docs/platform/phase-9-contracts.md §2) ═══
+//
+// Bảng trong CSDL CỦA TỔ CHỨC — không có cột tổ chức nào để lọc sai, vì mỗi tổ chức một CSDL (X6). `org_code` chỉ là
+// dây bẫy: dòng chép sang CSDL khác sẽ lệch mã với ngữ cảnh và bị từ chối. Bí mật nằm ở `secrets_enc` (AES-256-GCM,
+// khoá HKDF từ PLATFORM_SECRETS_KEY, AAD gắn mã tổ chức + khoá connector — lib/connectors/secrets.ts); `secret_hints`
+// chỉ giữ `••••` + 4 ký tự cuối để hiện mà không phải giải mã. Credential của tổ chức nhà KHÔNG chuyển vào đây (X7).
+export const orgConnections = pgTable(
+  "org_connections",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    connectorKey: text("connector_key").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    settings: jsonb("settings").notNull().default({}),
+    secretsEnc: bytea("secrets_enc"),
+    secretsKeyId: text("secrets_key_id"),
+    secretHints: jsonb("secret_hints").notNull().default({}),
+    lastTestAt: ts("last_test_at"),
+    lastTestOk: boolean("last_test_ok"),
+    lastTestMessage: text("last_test_message"),
+    activatedAt: ts("activated_at"),
+    activatedBy: text("activated_by"),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("org_connections_connector_uq").on(t.connectorKey),
+    check("org_connections_status_check", sql`${t.status} in ('DRAFT','ACTIVE','DISABLED')`),
+    check("org_connections_active_tested_check", sql`${t.status} <> 'ACTIVE' or ${t.lastTestOk} = true`),
+    check("org_connections_key_check", sql`${t.connectorKey} ~ '^[a-z][a-z0-9-]{1,60}$'`),
+  ],
+);

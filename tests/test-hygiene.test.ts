@@ -162,6 +162,9 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ads-kill-switch.test.ts":
     "ĐẶT ADS_WRITE_ENABLED / ADS_WRITE_MODE / FACEBOOK_ACCESS_TOKEN (token BỊA) để chốt env mở ra, rồi mới đo được thứ bài này hỏi — công tắc settings có chặn lời gọi ghi ra mạng không (fetch là bản giả đếm lượt gọi). Trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
+  "tests/connectors.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) — và XOÁ nó — để đo cả hai nhánh có khoá / thiếu khoá của đường lưu bí mật; ĐẶT vài credential BỊA của nhà (PANCAKE_*, VIETTELPOST_*, FACEBOOK_ACCESS_TOKEN, CHATBOT_ADMIN_TOKEN, GEMINI_API_KEY) để kiểm màn hình chỉ đọc không lộ giá trị. Mọi khoá trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+
   /* ───── ĐỌC biến, nhưng đọc ĐÚNG NGUỒN mà mã sản xuất đọc ───── */
   "tests/session-renewal.test.ts":
     "Ký token kiểm thử bằng AUTH_SECRET đọc qua ĐÚNG fallback của lib/env.ts (dev-secret-… khi chưa đặt). Đó là dựng kỳ vọng TỪ CÙNG MỘT NGUỒN với mã đang đo — gõ lại một khoá khác mới là đo sai.",
