@@ -11,6 +11,7 @@ import { getDb, schema } from "@/db";
 import type { AnyObjectDef, ObjectCapabilities } from "@/lib/constants/object-registry";
 import { isModuleKey } from "@/lib/constants/platform-modules";
 import { resolveObject } from "@/lib/metadata/object-resolver";
+import { scopedMetadataRead } from "@/lib/metadata/read-scope";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { FIELD_TYPES, type CustomFieldDef, type FieldOption, type FieldType, type FieldValidation, type MetadataActor } from "@/lib/metadata/types";
@@ -117,12 +118,17 @@ export function toFieldDef(row: FieldRow): CustomFieldDef {
 export async function loadCustomDefs(objectKey: string, includeArchived: boolean): Promise<CustomFieldDef[]> {
   const db = await getDb();
   const t = schema.metaCustomFields;
-  const rows = await db
-    .select()
-    .from(t)
-    .where(includeArchived ? eq(t.objectKey, objectKey) : and(eq(t.objectKey, objectKey), eq(t.status, "ACTIVE")))
-    .orderBy(asc(t.position), asc(t.fieldKey));
-  return rows.map(toFieldDef);
+  // Trong một lượt dựng trang (`withMetadataReadScope`) đọc MỘT lần; ngoài phạm vi ⇒ đọc thẳng như cũ (M13). Trả BẢN
+  // SAO của mảng: nơi gọi lọc / xếp tại chỗ không được làm đổi câu trả lời của nơi gọi khác trong cùng lượt.
+  const defs = await scopedMetadataRead(db, `fields:${objectKey}:${includeArchived ? "all" : "active"}`, async () => {
+    const rows = await db
+      .select()
+      .from(t)
+      .where(includeArchived ? eq(t.objectKey, objectKey) : and(eq(t.objectKey, objectKey), eq(t.status, "ACTIVE")))
+      .orderBy(asc(t.position), asc(t.fieldKey));
+    return rows.map(toFieldDef);
+  });
+  return [...defs];
 }
 
 /** Cột id của bảng thật của đối tượng (drizzle), dẫn xuất từ sổ. */

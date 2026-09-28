@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { InstallHistoryTable } from "@/components/blueprints/install-history-table";
+import { BlueprintFileInstall } from "@/components/blueprints/file-install";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -75,6 +76,18 @@ export default async function TemplatesPage() {
               ))}
             </div>
           )}
+          <SectionCard
+            title="Cài từ tệp JSON"
+            description="Khôi phục cấu hình: tải lên tệp đã xuất ở «Xuất cấu hình» (của tổ chức này hoặc tổ chức khác) → máy kiểm và xem trước → bạn xác nhận"
+          >
+            <div className="space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                Tệp đi đúng đường của một mẫu: kiểm định dạng, lập kế hoạch từng thao tác (chưa ghi gì), rồi mới cài khi bạn xác nhận. Tệp chỉ mang cấu hình — không bản ghi, không người dùng, không bí mật kết
+                nối; luật luôn cài ở NHÁP + CHẠY THỬ. <Link href="/settings/export" className="font-medium text-primary underline-offset-2 hover:underline">Xuất cấu hình của tổ chức này</Link>
+              </p>
+              <BlueprintFileInstall />
+            </div>
+          </SectionCard>
           <SectionCard title="Lịch sử cài" description="Mỗi lượt cài / cập nhật của tổ chức — kể cả lượt dừng giữa chừng" padded={false} contentClassName="p-3">
             {loaded.value.history.length === 0 ? (
               <p className="p-4 text-sm text-muted-foreground">Chưa có lượt cài nào — tổ chức chưa cài mẫu nào.</p>

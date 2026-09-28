@@ -209,6 +209,16 @@ export function clearMemo() {
 }
 
 /**
+ * QUÊN MỘT KHOÁ của tổ chức NGỮ CẢNH — dùng khi chính nơi gọi biết số đệm vừa hết đúng (vd lượt kiểm hạn mức vừa cho
+ * qua một lượt tạo: số đếm cũ thấp hơn thật đúng một đơn vị, và đệm 60 giây sẽ cho lọt quá trần). Chỉ xoá ĐÚNG khoá
+ * đó của ĐÚNG tổ chức — không đụng khoá nào khác.
+ */
+export async function forgetMemo(key: string): Promise<void> {
+  const org = await currentOrganization();
+  store.entries.delete(memoStoreKey(org, key));
+}
+
+/**
  * ĐÁNH DẤU CŨ — dùng khi JOB NỀN vừa ghi dữ liệu.
  *
  * Không ai đang ngồi chờ job nền, nhưng có người đang mở trang. Đánh dấu cũ thì người đó nhận NGAY

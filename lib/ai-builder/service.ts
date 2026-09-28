@@ -19,6 +19,7 @@ import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth/session";
 import { blueprintAdminDenial, sanitizeResolutions } from "@/lib/blueprints/admin";
 import { installBlueprint, planForOrg } from "@/lib/blueprints/install";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import type { ApplyResult, Blueprint, BlueprintIssue, BlueprintPlan, BlueprintValidation } from "@/lib/blueprints/types";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -149,6 +150,10 @@ export async function createDraft(user: SessionUser, input: { mode?: unknown; pr
   if (prompt.length < 10) return fail("Mô tả quá ngắn — viết ít nhất một câu về doanh nghiệp hoặc thay đổi cần làm.");
   if (prompt.length > AI_BUILDER_LIMITS.maxPromptChars) return fail(`Mô tả dài quá ${AI_BUILDER_LIMITS.maxPromptChars} ký tự.`);
   if ((await usedToday()) >= AI_BUILDER_LIMITS.maxDraftsPerDay) return fail(`Tổ chức đã dùng hết ${AI_BUILDER_LIMITS.maxDraftsPerDay} lượt soạn hôm nay — thử lại ngày mai.`);
+  // Hạn mức GÓI (Phase 10 · §5) — riêng với trần kỹ thuật ở trên, và kiểm TRƯỚC khi gọi AI: vượt gói thì không tốn một
+  // token nào. Tổ chức nhà = nội bộ, không đếm gì.
+  const ent = await checkEntitlement("aiDraftsPerDay", 1);
+  if (!ent.ok) return fail(ent.error);
   const ai = await getBuilderAi();
   if (!ai.ok) return fail(ai.reason);
 

@@ -13,16 +13,17 @@ import { listProducts, listWarehouses, productFacets, productSummary, PRODUCT_SO
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
+import { getBrandCopy } from "@/lib/branding/service";
 
 export const metadata = { title: "Sản phẩm & tồn kho" };
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("INVENTORY", "products:view");
+  const { user, decision } = await requireResource("INVENTORY", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Sản phẩm" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all", defaultPageSize: PRODUCT_LIST_PAGE_SIZE, maxPageSize: PRODUCT_LIST_PAGE_SIZE });
-  const [{ rows, total, pageCount }, facets, summary, warehouses] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses()]);
+  const [{ rows, total, pageCount }, facets, summary, warehouses, copy] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user)]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
   return (
@@ -35,8 +36,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <>
             <b>SỔ KHO.</b> <b>Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay −{" "}
             <b>Đã xuất</b>; <b>Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chờ xuất.
-            &ldquo;Đã xuất&rdquo; đếm theo xác nhận <b>lấy hàng của Viettel Post</b>, không theo
-            trạng thái Pancake và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập{" "}
+            &ldquo;Đã xuất&rdquo; đếm theo xác nhận <b>lấy hàng của {copy.name("SHIPPING")}</b>, không theo
+            trạng thái {copy.name("ORDER_SOURCE")} và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập{" "}
             <b>phiếu tái nhập</b> với số đếm thực tế — ĐVVC báo &ldquo;đã hoàn&rdquo; mới chỉ là
             hàng đang trên đường về. Mẫu mã chưa có phiếu nhập thì ERP báo &ldquo;Chưa có phiếu
             nhập&rdquo; thay vì hiện số bịa.
@@ -107,14 +108,14 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             label: "Đã xuất kho",
             value: formatNumber(summary.shipped),
             note: `nhập mới ${formatNumber(summary.receiptIn)} · tái nhập ${formatNumber(summary.returnIn)}${summary.shrinkage ? ` · hụt ${formatNumber(summary.shrinkage)}` : ""}`,
-            hint: "Đếm theo xác nhận LẤY HÀNG của Viettel Post — không theo trạng thái Pancake, không theo tiền COD.",
+            hint: `Đếm theo xác nhận LẤY HÀNG của ${copy.name("SHIPPING")} — không theo trạng thái ${copy.name("ORDER_SOURCE")}, không theo tiền COD.`,
             icon: ShoppingBag,
           },
           {
             label: "Hoàn chờ kho nhận",
             value: formatNumber(summary.awaitingReturn),
             note: "chưa cộng vào tồn",
-            hint: "Viettel Post báo đã hoàn nhưng kho chưa lập phiếu tái nhập với số đếm thực tế. Hàng này CHƯA nằm trong tồn khả dụng, và cố ý như vậy.",
+            hint: `${copy.name("SHIPPING")} báo đã hoàn nhưng kho chưa lập phiếu tái nhập với số đếm thực tế. Hàng này CHƯA nằm trong tồn khả dụng, và cố ý như vậy.`,
             icon: PackagePlus,
             tone: summary.awaitingReturn ? ("amber" as const) : ("muted" as const),
             href: "/inventory/returns",

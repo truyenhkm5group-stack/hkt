@@ -34,6 +34,9 @@ async function nguoiGhi(topicId: string | null): Promise<{ ok: true; user: Sessi
 }
 
 async function nguoiGhiTheoTep(fileId: string) {
+  // Hỏi phiên TRƯỚC lượt đọc đầu tiên: tra topic theo id tệp là đọc CSDL bằng đối số trình duyệt gửi thẳng — không
+  // được chạy cho một người chưa biết là ai (Phase 11 · H1, S19). `requireUser` khử trùng lặp trong một lượt gọi.
+  await requireUser();
   return nguoiGhi(fileId ? await topicIdOfFile(await getDb(), fileId) : null);
 }
 

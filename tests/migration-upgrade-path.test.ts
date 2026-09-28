@@ -118,6 +118,7 @@ const MOI = [
   "0168_ai_blueprint_drafts",
   "0169_platform_onboarding",
   "0170_video_scale_render_options",
+  "0171_custom_records_live_sort",
 ] as const;
 
 /*

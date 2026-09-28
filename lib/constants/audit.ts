@@ -125,6 +125,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   BLUEPRINT_INSTALL_DONE: "Cài xong mẫu / gói cấu hình",
   BLUEPRINT_INSTALL_FAILED: "Cài mẫu / gói cấu hình dừng giữa chừng",
   BLUEPRINT_STEP: "Một bước cài mẫu / gói cấu hình",
+  // Xuất cấu hình tổ chức (Phase 11 · H3 · app/api/metadata/blueprint-export) — chỉ đọc, không đổi số liệu.
+  BLUEPRINT_EXPORT: "Tải cấu hình tổ chức (blueprint JSON)",
   // Đối tượng tuỳ biến (Phase 6 · lib/objects/*).
   META_OBJECT_CREATE: "Tạo đối tượng tuỳ biến",
   META_OBJECT_UPDATE: "Sửa đối tượng tuỳ biến",

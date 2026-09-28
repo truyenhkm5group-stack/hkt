@@ -3,6 +3,7 @@ import { ConnectorGroupTable } from "@/components/connectors/connector-group-tab
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, loadConnectionsView } from "@/lib/connectors/service";
+import { getBrandCopy } from "@/lib/branding/service";
 
 export const metadata = { title: "Kết nối theo tổ chức" };
 
@@ -19,7 +20,7 @@ const TITLE = "Kết nối theo tổ chức";
  */
 export default async function ConnectionsPage() {
   const user = await requirePermission(CONNECTIONS_PERMISSION);
-  const view = await loadConnectionsView(user);
+  const [view, copy] = await Promise.all([loadConnectionsView(user), getBrandCopy(user)]);
   if ("error" in view) {
     return (
       <div className="space-y-5">
@@ -40,7 +41,7 @@ export default async function ConnectionsPage() {
         description={`${view.organization.name} · ${total} connector trong sổ · ${active}/${configurable.length} kết nối của tổ chức đang bật`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
-            <p>Tích hợp đang chạy của tổ chức nhà (Pancake, Viettel Post, Meta, SePay…) giữ nguyên đường cũ và credential ở máy chủ — màn hình này chỉ NÓI RA chúng, không đổi được và không hiện bí mật nào.</p>
+            <p>{copy.text("connections.homeIntegrations")}</p>
             <p>Kết nối «theo tổ chức» do chính tổ chức khai: bí mật mã hoá trong CSDL của tổ chức, chỉ hiện •••• + 4 ký tự cuối. Lưu ⇒ về Nháp; Kiểm tra gửi một yêu cầu thật; Bật chỉ được sau khi Kiểm tra đạt.</p>
             <p>Mọi lượt lưu / kiểm tra / bật / tắt ghi vào Nhật ký hệ thống (không kèm bí mật).</p>
           </div>

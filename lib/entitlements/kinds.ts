@@ -2,9 +2,9 @@
  * ═══════════ SỔ HẠN MỨC GÓI (Phase 10 · §5) — THUẦN, CLIENT-SAFE ═══════════
  *
  * Mỗi loại hạn mức khai: nhãn, đơn vị, ĐẾM TỪ ĐÂU (bảng thật trong CSDL tổ chức — không có bộ đếm riêng dễ lệch), và
- * khi CHƯA đếm được thì vì sao. Loại chưa đo được (`counter: null`) KHÔNG chặn gì và hiện "—" (chưa biết ≠ 0, luật 42):
- * đối tượng / bản ghi tuỳ biến (Phase 6) và bản nháp AI (Phase 8) chưa có ở bản này — phiên tích hợp nối điểm tạo
- * của chúng vào `checkEntitlement(<loại>)` và khai bộ đếm ở `lib/entitlements/check.ts`.
+ * khi CHƯA đếm được thì vì sao. Loại chưa đo được (`source: null`) KHÔNG chặn gì và hiện "—" (chưa biết ≠ 0, luật 42).
+ * Cả bảy loại đã có bộ đếm (Phase 11 · H4 nối đối tượng, bản ghi tuỳ biến, bản nháp AI) — bộ đếm ở
+ * `lib/entitlements/check.ts`, điểm tạo gọi `checkEntitlement(<loại>)`.
  */
 
 export const ENTITLEMENT_KINDS = ["users", "pages", "objects", "records", "workflows", "aiDraftsPerDay", "storageMb"] as const;
@@ -22,10 +22,10 @@ export type EntitlementSpec = {
 export const ENTITLEMENT_SPEC: Record<EntitlementKind, EntitlementSpec> = {
   users: { label: "Người dùng", unit: "tài khoản", source: "users · đang hoạt động", missingWhat: null },
   pages: { label: "Trang tuỳ biến", unit: "trang", source: "meta_pages · chưa lưu trữ", missingWhat: null },
-  objects: { label: "Đối tượng tuỳ biến", unit: "đối tượng", source: null, missingWhat: "Đối tượng tuỳ biến (Phase 6) chưa có ở bản này — điểm tạo sẽ gọi checkEntitlement(\"objects\") khi có." },
-  records: { label: "Bản ghi tuỳ biến", unit: "bản ghi", source: null, missingWhat: "Bản ghi của đối tượng tuỳ biến (Phase 6) chưa có ở bản này." },
+  objects: { label: "Đối tượng tuỳ biến", unit: "đối tượng", source: "meta_objects · chưa lưu trữ", missingWhat: null },
+  records: { label: "Bản ghi tuỳ biến", unit: "bản ghi", source: "custom_records · chưa xoá", missingWhat: null },
   workflows: { label: "Luật tự động", unit: "luật", source: "workflow_rules · chưa lưu trữ", missingWhat: null },
-  aiDraftsPerDay: { label: "Bản nháp AI mỗi ngày", unit: "bản nháp", source: null, missingWhat: "Bản nháp AI (Phase 8) chưa có ở bản này — sổ bản nháp sẽ là nguồn đếm." },
+  aiDraftsPerDay: { label: "Bản nháp AI mỗi ngày", unit: "bản nháp", source: "ai_blueprint_drafts · tạo từ 00:00 hôm nay (giờ VN)", missingWhat: null },
   storageMb: { label: "Dung lượng tệp", unit: "MB", source: "custom_files · tổng kích thước (gồm logo)", missingWhat: null },
 };
 

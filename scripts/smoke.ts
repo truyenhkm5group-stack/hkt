@@ -246,6 +246,8 @@ const ROUTES = [
   "/settings/connections",
   // Mẫu cấu hình (Phase 7): danh sách mẫu + lịch sử cài đọc sổ `blueprint_installs` của tổ chức.
   "/settings/templates",
+  // Xuất cấu hình (Phase 11 · H3): dựng blueprint từ cấu hình của tổ chức — CHỈ ĐỌC.
+  "/settings/export",
   // Đối tượng tuỳ biến (Phase 6): danh sách đối tượng + số bản ghi / field của tổ chức.
   "/settings/objects",
   // AI dựng cấu hình (Phase 8): lịch sử bản nháp đọc `ai_blueprint_drafts`; KHÔNG gọi AI khi mở trang.

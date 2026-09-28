@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { installTemplate, previewTemplate } from "@/lib/blueprints/admin";
+import { installBlueprintFile, previewBlueprintFile } from "@/lib/blueprints/import-file";
 import type { ApplyResult, BlueprintIssue, BlueprintPlan } from "@/lib/blueprints/types";
 
 /**
@@ -28,6 +29,26 @@ export async function installTemplateAction(key: string, input: { planHash: stri
   if (result.installId) {
     revalidatePath("/settings/templates");
     revalidatePath(`/settings/templates/${encodeURIComponent(key)}`);
+    revalidatePath("/", "layout");
+  }
+  return result;
+}
+
+/**
+ * CÀI TỪ TỆP JSON (Phase 11 · H3) — đường khôi phục cấu hình. Tệp đi qua CÙNG bộ kiểm / bộ lập kế hoạch / bộ cài như
+ * mẫu ngành (`lib/blueprints/import-file.ts`); nội dung tệp là dữ liệu của client nên máy chủ kiểm lại ở MỖI lượt.
+ */
+export async function previewBlueprintFileAction(text: string, resolutions: Record<string, string>): Promise<{ ok: true; plan: BlueprintPlan } | { ok: false; errors: BlueprintIssue[] }> {
+  const user = await requirePermission("metadata:manage");
+  const r = await previewBlueprintFile(user, text, resolutions);
+  return r.ok ? { ok: true, plan: r.value.plan } : r;
+}
+
+export async function installBlueprintFileAction(text: string, input: { planHash: string; resolutions: Record<string, string> }): Promise<ApplyResult> {
+  const user = await requirePermission("metadata:manage");
+  const result = await installBlueprintFile(user, text, input);
+  if (result.installId) {
+    revalidatePath("/settings/templates");
     revalidatePath("/", "layout");
   }
   return result;

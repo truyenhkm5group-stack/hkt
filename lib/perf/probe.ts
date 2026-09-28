@@ -48,7 +48,7 @@ export function shapeOf(sql: string) {
     .slice(0, 240);
 }
 
-function summarize(label: string, queries: QuerySample[], ms: number): ProbeStats {
+function summarize(label: string, queries: QuerySample[], ms: number, top: number): ProbeStats {
   const byShape = new Map<string, { sql: string; count: number; ms: number; rows: number }>();
   for (const q of queries) {
     const shape = shapeOf(q.sql);
@@ -64,14 +64,14 @@ function summarize(label: string, queries: QuerySample[], ms: number): ProbeStat
     queries: queries.length,
     dbMs: Math.round(queries.reduce((t, q) => t + q.ms, 0) * 100) / 100,
     rows: queries.reduce((t, q) => t + q.rows, 0),
-    slowest: [...byShape.values()].sort((a, b) => b.ms - a.ms).slice(0, 5).map((e) => ({ ...e, ms: Math.round(e.ms * 100) / 100 })),
+    slowest: [...byShape.values()].sort((a, b) => b.ms - a.ms).slice(0, top).map((e) => ({ ...e, ms: Math.round(e.ms * 100) / 100 })),
   };
 }
 
-/** Chạy `fn` trong một phạm vi đo và trả về kết quả kèm số liệu */
-export async function probe<T>(label: string, fn: () => Promise<T>): Promise<{ value: T; stats: ProbeStats }> {
+/** Chạy `fn` trong một phạm vi đo và trả về kết quả kèm số liệu. `top`: số hình dạng câu giữ lại (mặc định 5 câu chậm nhất). */
+export async function probe<T>(label: string, fn: () => Promise<T>, opts: { top?: number } = {}): Promise<{ value: T; stats: ProbeStats }> {
   const scope: Scope = { label, queries: [] };
   const started = performance.now();
   const value = await storage.run(scope, fn);
-  return { value, stats: summarize(label, scope.queries, Math.round((performance.now() - started) * 100) / 100) };
+  return { value, stats: summarize(label, scope.queries, Math.round((performance.now() - started) * 100) / 100, opts.top ?? 5) };
 }

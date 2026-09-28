@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SectionCard } from "@/components/ui-bits";
-import { installTemplateAction, previewTemplateAction } from "@/lib/actions/blueprints";
+import { installBlueprintFileAction, installTemplateAction, previewBlueprintFileAction, previewTemplateAction } from "@/lib/actions/blueprints";
 import {
   BLUEPRINT_ITEM_KIND_LABEL,
   OVERRIDABLE_ACTIONS,
@@ -61,8 +61,11 @@ function DiffList({ step }: { step: PlanStep }) {
  *
  * Đổi một lựa chọn ghi đè ⇒ máy chủ lập LẠI kế hoạch (không tự tính ở trình duyệt). Nút Cài gửi `planHash` của kế
  * hoạch đang hiện: máy chủ lập lại lần nữa và từ chối nếu tổ chức đã đổi giữa chừng.
+ *
+ * `fileJson` (Phase 11 · H3): gói đến từ TỆP tải lên chứ không từ sổ mẫu — cùng bảng, cùng xác nhận; máy chủ đọc và
+ * kiểm lại nội dung tệp ở mỗi lượt xem trước / cài.
  */
-export function InstallPanel({ templateKey, initialPlan }: { templateKey: string; initialPlan: BlueprintPlan }) {
+export function InstallPanel({ templateKey, initialPlan, fileJson }: { templateKey: string; initialPlan: BlueprintPlan; fileJson?: string }) {
   const [plan, setPlan] = useState(initialPlan);
   const [resolutions, setResolutions] = useState<Record<string, "overwrite" | "skip">>({});
   const [errors, setErrors] = useState<BlueprintIssue[]>([]);
@@ -76,7 +79,7 @@ export function InstallPanel({ templateKey, initialPlan }: { templateKey: string
   const replan = (next: Record<string, "overwrite" | "skip">) =>
     startTransition(async () => {
       try {
-        const r = await previewTemplateAction(templateKey, next);
+        const r = fileJson !== undefined ? await previewBlueprintFileAction(fileJson, next) : await previewTemplateAction(templateKey, next);
         if (r.ok) {
           setPlan(r.plan);
           setErrors([]);
@@ -98,13 +101,13 @@ export function InstallPanel({ templateKey, initialPlan }: { templateKey: string
   const install = () =>
     startTransition(async () => {
       try {
-        const r = await installTemplateAction(templateKey, { planHash: plan.planHash, resolutions });
+        const r = fileJson !== undefined ? await installBlueprintFileAction(fileJson, { planHash: plan.planHash, resolutions }) : await installTemplateAction(templateKey, { planHash: plan.planHash, resolutions });
         setResult(r);
         setConfirming(false);
         if (r.ok) {
           toast.success(`Đã cài «${plan.blueprint.name}» phiên bản ${r.version}`);
           setResolutions({});
-          const fresh = await previewTemplateAction(templateKey, {});
+          const fresh = fileJson !== undefined ? await previewBlueprintFileAction(fileJson, {}) : await previewTemplateAction(templateKey, {});
           if (fresh.ok) setPlan(fresh.plan);
         } else setErrors(r.errors);
       } catch {

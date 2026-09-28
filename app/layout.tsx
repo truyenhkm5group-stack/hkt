@@ -15,7 +15,13 @@ const sans = Plus_Jakarta_Sans({ subsets: ["latin", "vietnamese"], variable: "--
 export const metadata: Metadata = {
   title: { default: "VNXcommerce ERP", template: "%s · VNXcommerce ERP" },
   description: "Hệ thống quản trị nội bộ VNXcommerce cho shop thời trang bán hàng online — đồng bộ Pancake POS & Viettel Post.",
-  icons: { icon: "/icon.svg" },
+  /*
+    `favicon.ico` nằm ở `public/` (không ở `app/`) và được khai TƯỜNG MINH ở đây: tệp `app/favicon.ico` bị Next chèn vào
+    ĐẦU mọi trang, kể cả khi bố cục con khai `icons` riêng — tổ chức không-nhà khi đó vẫn mang biểu tượng của nhà.
+    Khai ở đây thì bố cục dashboard của tổ chức khác THAY được cả bộ (lib/branding/copy.ts::orgTabMetadata); tổ chức nhà
+    nhận đúng hai thẻ như trước (ico 16×16 rồi svg).
+  */
+  icons: { icon: [{ url: "/favicon.ico", type: "image/x-icon", sizes: "16x16" }, { url: "/icon.svg" }] },
 };
 
 export const viewport: Viewport = {

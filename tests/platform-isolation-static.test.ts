@@ -118,6 +118,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/cs/failed-delivery.ts::__erpFailedDeliveryRunningByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'đang chạy' theo mã tổ chức (ISO-18)." },
   "lib/cs/phone-verify.ts::__erpPhoneVerifyRunningByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'đang chạy' theo mã tổ chức (ISO-18)." },
   "lib/video-scale/pipeline.ts::__erpVideoScaleDrainByOrg": { loai: "THEO_TO_CHUC", lyDo: "Khoá 'vòng after() đang chạy hàng đợi video' theo mã tổ chức — chỉ chặn chạy trùng trong một tổ chức; việc vẫn cầm bằng CSDL." },
+  "lib/metadata/read-scope.ts::__erpMetadataReadScope": { loai: "THEO_TO_CHUC", lyDo: "AsyncLocalStorage của MỘT lượt dựng trang; ô đệm bên trong khoá theo handle CSDL của tổ chức (`getDb()`), mất khi lượt xong." },
   "lib/perf/probe.ts::__erpProbe": { loai: "NEN_TANG", lyDo: "AsyncLocalStorage của phép đo — phạm vi một lượt gọi, không vượt request." },
   "lib/perf/registry.ts::__erpPerf": { loai: "NEN_TANG", lyDo: "Sổ đo hiệu năng (tên báo cáo, thời gian) — chỉ tổ chức nhà đọc được qua /api/perf (ISO-25)." },
   "lib/platform/context.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "Chính ngữ cảnh tổ chức (AsyncLocalStorage)." },
@@ -381,8 +382,10 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/platform/": "Mã nền tảng: sổ tổ chức, cấu hình module, nhật ký nền tảng, cấp tổ chức — mặt phẳng điều khiển nằm ở CSDL nhà theo định nghĩa.",
   "db/": "Chỗ định nghĩa ba hàm, và lượt migrate CSDL nhà lúc khởi động (`ensureMigrated`).",
   "lib/queries/platform-health.ts": "Máy quét sức khoẻ nền tảng: mở CSDL TỪNG tổ chức để đếm migration và bảng platform_* — việc của nó là nhìn sang mọi tổ chức.",
+  "lib/queries/platform-org-diagnostics.ts": "Chẩn đoán MỘT tổ chức cho người vận hành nền tảng (/platform/org/<mã>, Phase 11 · H4): mở CSDL của tổ chức được chọn để ĐẾM (chỉ SELECT), kiểm platformOperatorDenial trước mọi truy vấn.",
   "app/api/health/route.ts": "Tuyến sức khoẻ công khai của lượt deploy: đọc mặt phẳng điều khiển (cờ + số đếm, không mã tổ chức nào) — không có phiên để đi qua ngữ cảnh.",
   "lib/onboarding/": "Tự phục vụ (Phase 10): mã mời, lượt đăng ký, trạng thái dựng tổ chức — mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức mới chỉ chạm qua provisionOrganization + withOrganization.",
+  "scripts/platform-load-probe.ts": "Script ĐO TẢI chạy tay (Phase 11 · H2), không nằm trong đường chạy của ứng dụng: cấp rồi GỠ năm tổ chức thử `lprobe-*` của chính nó ở mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
 };
 
@@ -421,17 +424,49 @@ const ROUTE_PHIEN_MIEN_TRU: Record<string, string> = {
 
 const DUNG_PHIEN = /\b(?:getCurrentUser|requireUser|requirePermission|resolveCurrentUser|getSession)\s*\(/;
 
+/**
+ * S18b · ROUTE KHÔNG DÙNG PHIÊN PHẢI KHAI VÌ SAO NÓ CÔNG KHAI — và tự mang cổng của nó (Phase 11 · H1).
+ *
+ * Route không đọc phiên thì `getDb()` rơi về TỔ CHỨC NHÀ (không claim ⇒ HOME_DEFAULT). Một route mới quên `apiGuard`
+ * không lộ ra như lỗi 401 — nó lặng lẽ trả dữ liệu của nhà cho bất kỳ ai gõ đúng URL. Nên mọi route như vậy phải có
+ * mặt ở đây kèm lý do, VÀ mã của nó phải khớp đúng cổng đã khai (bí mật cron · chữ ký URL · webhook phân giải tổ
+ * chức). Khoá kết thúc bằng `/` là cả thư mục.
+ */
+const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
+  "app/api/webhooks/": {
+    lyDo: "Webhook máy-gọi-máy: xác thực bằng bí mật trong URL / chữ ký của nhà cung cấp và phân giải tổ chức qua resolveWebhookOrganization (S11) — không có phiên người dùng để đi qua.",
+    cong: /\bresolveWebhookOrganization\(/,
+  },
+  "app/api/health/route.ts": { lyDo: "Tuyến sức khoẻ công khai của lượt deploy: chỉ trả cờ + số đếm của mặt phẳng điều khiển, không một dòng nghiệp vụ nào.", cong: null },
+  "app/api/sync/organizations/route.ts": { lyDo: "Bộ lập lịch hỏi danh sách mã tổ chức để phân tán job — chỉ nhận CRON_SECRET, không phiên.", cong: /\bsecretEquals\(/ },
+  "app/api/tech/agent-run/route.ts": { lyDo: "Máy chạy agent nộp kết quả — khoá riêng AGENT_INGEST_SECRET hoặc CRON_SECRET, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
+  "app/api/tech/agent-task/route.ts": { lyDo: "Máy chạy agent đọc việc được giao — cùng khoá với cửa ghi, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
+  "app/api/video-scale/public/[id]/route.ts": { lyDo: "URL tệp video Meta tải về để đăng Reel — không có phiên; mỗi URL mang chữ ký HMAC có hạn, sai / hết hạn ⇒ 404.", cong: /\bverifyAssetSignature\(/ },
+};
+
 export function testRouteApiQuaApiGuard() {
   const routes = tepTrongKho().filter((t) => t.startsWith("app/api/") && /\/route\.tsx?$/.test(t));
   assert.ok(routes.length >= 20, `phải thấy các route API đã biết — mới thấy ${routes.length}`);
   const pham: string[] = [];
   const daDung = new Set<string>();
+  const phamCongKhai: string[] = [];
+  const daDungCongKhai = new Set<string>();
   let quaCong = 0;
   for (const tep of routes) {
     const m = ma(tep);
     const quaApiGuard = /\bapiGuard\s*\(/.test(m);
     if (quaApiGuard) quaCong += 1;
-    if (!DUNG_PHIEN.test(m) && !quaApiGuard) continue; // tuyến máy-gọi-máy (webhook, bí mật) — không có phiên
+    if (!DUNG_PHIEN.test(m) && !quaApiGuard) {
+      // Tuyến không phiên (webhook, bí mật, chữ ký URL) — phải khai, và phải mang đúng cổng đã khai.
+      const khoa = Object.keys(ROUTE_CONG_KHAI).find((k) => (k.endsWith("/") ? tep.startsWith(k) : tep === k));
+      if (!khoa) phamCongKhai.push(`${tep}: không phiên, không apiGuard, chưa khai lý do công khai`);
+      else {
+        daDungCongKhai.add(khoa);
+        const cong = ROUTE_CONG_KHAI[khoa].cong;
+        if (cong && !cong.test(m)) phamCongKhai.push(`${tep}: khai công khai nhờ ${cong} mà mã không còn cổng đó`);
+      }
+      continue;
+    }
     if (ROUTE_PHIEN_MIEN_TRU[tep]) {
       daDung.add(tep);
       continue;
@@ -442,6 +477,166 @@ export function testRouteApiQuaApiGuard() {
   assert.deepEqual(pham, [], "route API dùng phiên phải qua apiGuard — trả đúng 401 / 403 MODULE_DISABLED / ORG_INACTIVE (S18 · R-18). Ngoại lệ khai ở ROUTE_PHIEN_MIEN_TRU kèm lý do");
   assert.ok(quaCong >= 15, `phải thấy các route đã qua apiGuard — mới thấy ${quaCong}: bộ dò có thể đã mù`);
   khongMienTruMoCoi("S18", ROUTE_PHIEN_MIEN_TRU, daDung);
+  assert.deepEqual(phamCongKhai, [], "route không đọc phiên thì getDb() rơi về tổ chức NHÀ — phải qua apiGuard, hoặc khai vào ROUTE_CONG_KHAI kèm lý do và cổng riêng của nó (S18b · Phase 11 H1)");
+  khongMienTruMoCoi(
+    "S18b",
+    Object.fromEntries(Object.entries(ROUTE_CONG_KHAI).map(([k, v]) => [k, v.lyDo])),
+    daDungCongKhai,
+  );
+}
+
+/* ═════════════ S19 · MỌI SERVER ACTION QUA CỔNG PHIÊN TRƯỚC LƯỢT ĐỌC / GHI ĐẦU TIÊN ═════════════ */
+
+/**
+ * Một export của tệp `"use server"` là một điểm gọi từ xa: trình duyệt gửi thẳng đối số tới nó, không đi qua trang nào.
+ * Luật (Phase 11 · H1): lệnh `await` ĐẦU TIÊN trong thân mỗi export phải là `requireUser(` / `requirePermission(` —
+ * hoặc một hàm cổng cục bộ mà lệnh `await` đầu tiên của NÓ là cổng (dò bắc cầu trong cùng tệp). Mã đồng bộ đứng trước
+ * (zod, cắt chuỗi) không chạm CSDL nên được phép; mọi lượt đọc / ghi đều là `await`, nên "cổng là `await` đầu tiên"
+ * nghĩa là "không một câu truy vấn nào chạy trước khi biết người gọi là ai".
+ *
+ * Ngoại lệ là cửa CHƯA CÓ PHIÊN theo định nghĩa — khai tên từng hàm kèm lý do; miễn trừ mồ côi là đỏ.
+ */
+const ACTION_CONG_KHAI: Record<string, string> = {
+  "lib/actions/auth.ts::loginAction": "Đăng nhập: chạy khi CHƯA có phiên. Tra tài khoản trong ĐÚNG tổ chức ô «Mã tổ chức» chỉ (verifyLogin bọc withOrganization), có chặn dò mật khẩu theo cặp email + IP.",
+  "lib/actions/auth.ts::logoutAction": "Đăng xuất: đọc phiên (getSession) chỉ để ghi nhật ký LOGOUT rồi xoá cookie — không đọc dữ liệu nghiệp vụ nào.",
+  "lib/actions/onboarding.ts::checkInviteAction": "Bước 1 của /start (khách CHƯA có tài khoản): lõi kiểm cờ PLATFORM_SIGNUP_MODE + trần theo IP trước khi tra mã mời ở mặt phẳng điều khiển.",
+  "lib/actions/onboarding.ts::checkOrgAction": "Bước 2 của /start: kiểm trùng mã tổ chức SẮP tạo — chế độ invite đòi mã mời hợp lệ, không cho dùng làm máy dò danh sách khách.",
+  "lib/actions/onboarding.ts::checkAdminAction": "Bước 3 của /start: chỉ kiểm lược đồ (tên, email, độ dài mật khẩu) — hàm thuần, không đọc CSDL nào.",
+  "lib/actions/onboarding.ts::previewSignupAction": "Xem trước của /start: lập kế hoạch cài trên một tổ chức TRẮNG tưởng tượng (freshOrgState) — không đọc dữ liệu của tổ chức nào có thật.",
+  "lib/actions/onboarding.ts::createOrganizationAction": "Tạo tổ chức từ /start: cổng là cờ + mã mời + trần IP trong lõi; mã đã có chủ ⇒ «đã có người dùng», chỉ đúng chủ (cùng mã mời / người vận hành) mới chạy lại.",
+  "lib/actions/refresh.ts::refreshReportData": "Chỉ xoá đệm của tiến trình (clearMemo) khi có phiên — không đọc / ghi dòng nào; không phiên ⇒ trả lỗi, không làm gì.",
+};
+
+const CONG_PHIEN = ["requireUser", "requirePermission"] as const;
+
+type KhaiBao = { chuKy: string; than: string; xuat: boolean; laHam: boolean };
+
+/** Khai báo cấp cao nhất của một tệp đã bỏ chú thích: hàm / hằng, chữ ký và thân (tới dòng `}` ở cột đầu). */
+function khaiBaoCapCao(m: string): Map<string, KhaiBao> {
+  const out = new Map<string, KhaiBao>();
+  for (const k of m.matchAll(/^(export\s+)?(?:async\s+)?function\s+(\w+)|^(export\s+)?const\s+(\w+)\s*=/gm)) {
+    const ten = k[2] ?? k[4];
+    const sau = m.slice(k.index ?? 0);
+    const het = sau.search(/\n\}/);
+    const van = het < 0 ? sau : sau.slice(0, het + 2);
+    const moThan = van.search(/\{\s*\n/);
+    out.set(ten, {
+      chuKy: moThan < 0 ? van : van.slice(0, moThan),
+      than: moThan < 0 ? "" : van.slice(moThan),
+      xuat: Boolean(k[1] ?? k[3]),
+      laHam: Boolean(k[2]) || /^[^\n]*=\s*(?:cache\()?async\b/.test(sau),
+    });
+  }
+  return out;
+}
+
+/** Tên hàm của lệnh `await` đầu tiên trong thân (`await foo(` / `await (foo(`), hoặc `null`. */
+function awaitDauTien(than: string): string | null {
+  const k = than.match(/\bawait\s+(?:\(\s*)?([\w.$]+)\s*\(/);
+  return k ? k[1] : null;
+}
+
+function tepServerAction(): string[] {
+  return tepMa(["lib/", "app/"]).filter((t) => /^\s*["']use server["']/.test(readFileSync(path.join(goc, t), "utf8")));
+}
+
+export function testServerActionQuaCongPhien(): number {
+  const pham: string[] = [];
+  const daDung = new Set<string>();
+  let dem = 0;
+  for (const tep of tepServerAction()) {
+    const kb = khaiBaoCapCao(ma(tep));
+    // Hàm cổng cục bộ: `await` đầu tiên của nó là một cổng (bắc cầu).
+    const cong = new Set<string>(CONG_PHIEN);
+    for (let doi = true; doi; ) {
+      doi = false;
+      for (const [ten, k] of kb) {
+        if (cong.has(ten) || !k.laHam) continue;
+        const dau = awaitDauTien(k.than);
+        if (dau && cong.has(dau)) {
+          cong.add(ten);
+          doi = true;
+        }
+      }
+    }
+    for (const [ten, k] of kb) {
+      if (!k.xuat || !k.laHam) continue;
+      dem += 1;
+      const khoa = `${tep}::${ten}`;
+      if (ACTION_CONG_KHAI[khoa]) {
+        daDung.add(khoa);
+        continue;
+      }
+      const dau = awaitDauTien(k.than);
+      if (!dau || !cong.has(dau)) pham.push(`${khoa} — await đầu tiên: ${dau ?? "(không có)"}`);
+    }
+  }
+  assert.ok(dem >= 300, `phải thấy hàng trăm server action đã biết — mới thấy ${dem}: bộ dò có thể đã mù`);
+  assert.deepEqual(pham, [], "server action phải hỏi phiên (requireUser / requirePermission, hoặc hàm cổng cục bộ) TRƯỚC lượt đọc / ghi đầu tiên — đối số của nó do trình duyệt gửi thẳng (S19 · Phase 11 H1). Cửa chưa có phiên theo định nghĩa khai ở ACTION_CONG_KHAI kèm lý do");
+  khongMienTruMoCoi("S19", ACTION_CONG_KHAI, daDung);
+  return dem;
+}
+
+/* ═════════════ S20 · SERVER ACTION KHÔNG CHỌN TỔ CHỨC THEO ĐỐI SỐ CỦA CLIENT ═════════════ */
+
+/**
+ * Tổ chức của một lượt gọi đến từ PHIÊN do máy chủ ký (lib/platform/context.ts). Server action nhận mã tổ chức từ
+ * trình duyệt rồi đem đi chọn CSDL là cửa đọc / ghi tổ chức khác bằng cách sửa một đối số. Luật:
+ *  · trong lib/actions/*: KHÔNG `withOrganization(` / `getDbFor(` / `getDbForInspection(` / `getPlatformDb(`;
+ *  · export nào nhận mã tổ chức (tham số `orgCode` / `organization…` / `org`, hoặc đọc ô `org` của FormData) phải khai
+ *    ở đây: hoặc là cửa của NGƯỜI VẬN HÀNH (thân phải qua `platform:operate` — chỉ tổ chức nhà có), hoặc là cửa công
+ *    khai của đăng nhập / tự đăng ký (đã khai ở S19) — nơi mã tổ chức là ĐÍCH người dùng tự chọn, không phải một
+ *    CSDL được mở hộ họ.
+ */
+const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
+  "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
+  "lib/actions/onboarding.ts::retrySetupAction": { loai: "VAN_HANH", lyDo: "Người vận hành chạy lại việc dựng một tổ chức SETUP_FAILED — requireOperator (platform:operate + tổ chức nhà)." },
+  "lib/actions/onboarding.ts::checkOrgAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức ĐỀ XUẤT cho tổ chức sắp tạo — chỉ kiểm trùng ở sổ tổ chức, không mở CSDL nào." },
+  "lib/actions/onboarding.ts::previewSignupAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức đi cùng mã mời để tra mã mời đã gắn đúng tổ chức — xem trước chạy trên tổ chức TRẮNG tưởng tượng." },
+  "lib/actions/auth.ts::loginAction": { loai: "CONG_KHAI", lyDo: "Ô «Mã tổ chức» của màn đăng nhập: người dùng chọn tổ chức để đăng nhập VÀO — mật khẩu kiểm trong CSDL của chính tổ chức đó." },
+};
+
+const NHAN_MA_TO_CHUC = /\b(?:orgCode|organizationCode|organization|org)\b\s*[?:]/;
+const DOC_O_ORG = /\.get\(\s*["'](?:org|orgCode|organization)["']\s*\)/;
+const CHON_CSDL = /\b(?:withOrganization|getDbFor|getDbForInspection|getPlatformDb)\s*\(/;
+
+/** Danh sách tham số của chữ ký hàm (bỏ kiểu trả về — `Promise<{ orgCode: string }>` không phải đầu vào). */
+function thamSoCua(chuKy: string): string {
+  const mo = chuKy.indexOf("(");
+  return mo < 0 ? "" : doiSoCuaLoiGoi(chuKy, mo + 1).join(", ");
+}
+
+export function testServerActionKhongChonToChuc() {
+  const phamCsdl: string[] = [];
+  const thay = new Set<string>();
+  const phamKhai: string[] = [];
+  for (const tep of tepServerAction()) {
+    const m = ma(tep);
+    if (CHON_CSDL.test(m)) phamCsdl.push(tep);
+    for (const [ten, k] of khaiBaoCapCao(m)) {
+      if (!k.xuat || !k.laHam) continue;
+      if (!NHAN_MA_TO_CHUC.test(thamSoCua(k.chuKy)) && !DOC_O_ORG.test(k.than)) continue;
+      const khoa = `${tep}::${ten}`;
+      thay.add(khoa);
+      const khai = ACTION_NHAN_MA_TO_CHUC[khoa];
+      if (!khai) {
+        phamKhai.push(`${khoa}: nhận mã tổ chức từ client mà chưa khai`);
+        continue;
+      }
+      if (khai.loai === "VAN_HANH" && !/requirePermission\(\s*["']platform:operate["']\s*\)|\brequireOperator\(/.test(k.than)) phamKhai.push(`${khoa}: khai là cửa vận hành mà thân không qua platform:operate`);
+      if (khai.loai === "CONG_KHAI" && !ACTION_CONG_KHAI[khoa]) phamKhai.push(`${khoa}: khai là cửa công khai mà không có trong ACTION_CONG_KHAI (S19)`);
+    }
+  }
+  assert.deepEqual(phamCsdl, [], "server action tự chọn CSDL (withOrganization / getDbFor / getPlatformDb) là vòng qua tổ chức của PHIÊN — việc đó thuộc lõi nền tảng, không thuộc tệp nhận đối số từ trình duyệt (S20)");
+  assert.deepEqual(phamKhai, [], "server action nhận mã tổ chức từ client phải khai ở ACTION_NHAN_MA_TO_CHUC: cửa vận hành (platform:operate) hoặc cửa công khai của đăng nhập / tự đăng ký (S20 · Phase 11 H1)");
+  const moCoi = Object.keys(ACTION_NHAN_MA_TO_CHUC).filter((k) => !thay.has(k));
+  assert.deepEqual(moCoi, [], "S20: khai báo không còn khớp export nào — xoá khỏi danh sách");
+  // Tự kiểm bộ dò: không tin được nó thì luật trên mù.
+  assert.ok(NHAN_MA_TO_CHUC.test("(input: { orgCode: string; x: 1 })") && NHAN_MA_TO_CHUC.test("(org: { name: string })") && !NHAN_MA_TO_CHUC.test("(input: { moduleKey: string })"));
+  assert.equal(NHAN_MA_TO_CHUC.test(thamSoCua("export async function f(draft: unknown): Promise<{ ok: true; orgCode: string }> ")), false, "kiểu trả về không phải tham số");
+  assert.equal(NHAN_MA_TO_CHUC.test(thamSoCua("export async function f(input: { invite: string | null; orgCode: string }): Promise<X> ")), true);
+  assert.equal(awaitDauTien("{\n  const x = z.parse(a);\n  const u = await requireUser();\n  await getDb();\n}"), "requireUser");
+  assert.equal(awaitDauTien("{\n  return nguoiGhi(id ? await topicIdOf(await getDb(), id) : null);\n}"), "topicIdOf");
 }
 
 export function testPlatformIsolationStatic() {
@@ -458,7 +653,11 @@ export function testPlatformIsolationStatic() {
   testKhongIdNgoaiLamMacDinh();
   testCsdlChiDinhChiONenTang();
   testRouteApiQuaApiGuard();
-  console.log("✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID, CSDL chỉ định chỉ ở mã nền tảng, route API qua apiGuard");
+  const soAction = testServerActionQuaCongPhien();
+  testServerActionKhongChonToChuc();
+  console.log(
+    `✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID, CSDL chỉ định chỉ ở mã nền tảng, route API qua apiGuard hoặc khai công khai kèm cổng riêng, ${soAction} server action hỏi phiên trước lượt đọc/ghi đầu tiên, không action nào chọn CSDL theo mã tổ chức của client`,
+  );
 }
 
 // Chạy được độc lập, và cũng export để bộ kiểm thử chung dùng lại.

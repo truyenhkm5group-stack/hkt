@@ -427,6 +427,10 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testTenantAttack } from "./tenant-attack.test";
+import { testPageQueryBudget } from "./page-query-budget.test";
+import { testOrgExport } from "./org-export.test";
+import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
 import { testConnectors } from "./connectors.test";
 import { testBlueprints } from "./blueprints.test";
 import { testCustomObjects } from "./custom-objects.test";
@@ -2507,6 +2511,19 @@ async function main() {
   // Phase 6 × 4/5 · đối tượng tuỳ biến làm nguồn trang động: hai tổ chức THẬT `pco-a` / `pco-b` (tự cấp, tự dọn) — bảng,
   // KPI tổng hợp, kanban, dòng thời gian trên x_contract đúng số + đúng phạm vi, x_other không lọt, B không thấy khoá của A.
   await testPageCustomObjects();
+  // Phase 11 · H1 tấn công cô lập: hai tổ chức THẬT `ta-a` / `ta-b` (B dựng qua /start, tự dọn) — phiên thật của A gọi thẳng
+  // server action / route / page component / dịch vụ bằng id, khoá, slug, tệp, mã mời của B; CSDL B + dòng mặt phẳng điều khiển
+  // của B không đổi một dòng, 0 kết quả mang dữ liệu của B, 0 request mạng.
+  await testTenantAttack();
+  // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
+  // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
+  await testPageQueryBudget();
+  // Phase 11 · H3 · xuất / khôi phục cấu hình: hai tổ chức THẬT `ox-a` / `ox-b` (tự cấp, tự dọn) — A cài mẫu + tuỳ biến ⇒
+  // xuất ⇒ B trống cài TỪ TỆP ⇒ xuất lại bằng A (băm ổn định); gói không mang email / bí mật / bản ghi / id.
+  await testOrgExport();
+  // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
+  // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
+  await testPlatformDiagnosticsOrg();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

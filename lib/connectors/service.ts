@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { homeReadiness } from "@/lib/connectors/home-status";
@@ -112,6 +112,33 @@ function guard(user: SessionUser, connectorKey: string): { spec: ConnectorSpec }
 }
 
 // ───────────────────────────── ĐỌC ─────────────────────────────
+
+/** Trạng thái một kết nối — KHÔNG bí mật, KHÔNG cấu hình, KHÔNG câu kết quả kiểm tra (câu đó do bên ngoài trả về). */
+export type ConnectionStatusRow = {
+  connectorKey: string;
+  /** Dây bẫy: khác mã tổ chức của CSDL đang đọc ⇒ nơi gọi không được dùng dòng này. */
+  orgCode: string;
+  status: ConnectionStatus;
+  lastTestAt: Date | null;
+  lastTestOk: boolean | null;
+  activatedAt: Date | null;
+  updatedAt: Date;
+};
+
+/**
+ * Đường đọc TRẠNG THÁI kết nối cho nơi khác (chẩn đoán nền tảng `/platform/org/<mã>`, chữ trang lõi theo connector đã
+ * khai). Liệt kê CỘT — không bao giờ `select()` cả dòng (dòng mang `secrets_enc` / `secret_hints` / `settings`).
+ * `db` bỏ trống ⇒ CSDL của tổ chức ngữ cảnh; chẩn đoán nền tảng truyền CSDL của tổ chức nó đang xem.
+ */
+export async function connectionStatusRows(db?: Db): Promise<ConnectionStatusRow[]> {
+  const c = schema.orgConnections;
+  const rows = await (db ?? (await getDb()))
+    .select({ connectorKey: c.connectorKey, orgCode: c.orgCode, status: c.status, lastTestAt: c.lastTestAt, lastTestOk: c.lastTestOk, activatedAt: c.activatedAt, updatedAt: c.updatedAt })
+    .from(c)
+    .orderBy(c.connectorKey);
+  return rows.map((r) => ({ ...r, status: r.status as ConnectionStatus }));
+}
+
 
 export async function loadConnectionsView(user: SessionUser, deps: { keyState?: SecretsKeyState } = {}): Promise<ConnectionsView | { error: string }> {
   if (!can(user, CONNECTIONS_PERMISSION)) return { error: "Không có quyền xem kết nối." };

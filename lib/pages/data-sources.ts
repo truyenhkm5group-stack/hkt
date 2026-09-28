@@ -52,6 +52,7 @@ import { filterShapeOk, LIST_MAX_FILTERS } from "@/lib/metadata/list-schema";
 import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
 import { canWriteObject, CUSTOM_RECORDS_SCOPE } from "@/lib/metadata/record-access";
 import { RELATION_TYPES, type CustomFieldDef, type CustomValues, type FieldRef, type ListFilter, type SystemFieldDef } from "@/lib/metadata/types";
+import { withMetadataReadScope } from "@/lib/metadata/read-scope";
 import { canEditField, canViewField, customValuesFilterSql, getCustomValues } from "@/lib/metadata/values";
 import { recordTimeline, relationLabelsFor, relationOptionsFor } from "@/lib/objects/records";
 import { actionAvailability } from "@/lib/pages/actions";
@@ -100,7 +101,8 @@ import {
   type TimelineSourceSpec,
   type ValueFormat,
 } from "@/lib/pages/types";
-import { record as recordPerf } from "@/lib/perf/registry";
+import { currentOrganization } from "@/lib/platform/context";
+import { record as recordPerf, recordFailure } from "@/lib/perf/registry";
 import { orderKpis } from "@/lib/queries/dashboard";
 import { pageAggregateBuckets, pageAggregateGroups, pageAggregateTotal, type AggregateFieldRef, type AggregatePeriod } from "@/lib/queries/page-aggregate";
 import { getOrderTimeline } from "@/lib/queries/entity-timeline";
@@ -1151,6 +1153,11 @@ async function guarded<T>(block: PageBlock | null | undefined, run: () => Promis
     if (error instanceof BlockStop) return { ok: false, issue: { blockId, code: error.code, message: error.message } };
     // Lỗi bất ngờ: một câu chung cho người xem; chi tiết chỉ ở log máy chủ.
     console.error(`[page-block] ${blockId} (${String(block?.type)}) lỗi:`, error instanceof Error ? error.message : String(error));
+    // Sổ lỗi theo tổ chức cho /platform/org/<mã> — chỉ tên loại khối + mã tổ chức, không câu lỗi.
+    await currentOrganization().then(
+      (org) => recordFailure(`pageblock:${String(block?.type)}`, org.code),
+      () => undefined,
+    );
     return { ok: false, issue: { blockId, code: "DATA_ERROR", message: "Không đọc được dữ liệu của khối này." } };
   } finally {
     recordPerf(`pageblock:${String(block?.type)}`, performance.now() - started, false);
@@ -1189,7 +1196,7 @@ async function resolveData(block: PageBlock, user: SessionUser, ctx: PageRenderC
  * `resolvePage` dựng; khối `filter` gọi lẻ trả thanh lọc nhưng không áp lên khối nào.
  */
 export async function resolveBlock<T extends BlockType>(block: PageBlock<T>, user: SessionUser, ctx: PageRenderContext): Promise<BlockResult<T>> {
-  const r = await guarded(block, () => resolveData(block as PageBlock, user, ctx, null));
+  const r = await withMetadataReadScope(() => guarded(block, () => resolveData(block as PageBlock, user, ctx, null)));
   return r.ok ? { ok: true, data: r.data as BlockDataByType[T] } : r;
 }
 
@@ -1202,6 +1209,12 @@ export type ResolvedPage = { sections: { key: string; title?: string; variant?: 
  * song với bộ lọc đó. Ghi thời gian dựng vào `page:<slug>`.
  */
 export async function resolvePage(schemaIn: PageSchema, user: SessionUser, ctx: PageRenderContext, slug = "unknown"): Promise<ResolvedPage> {
+  // Một lượt dựng = một phạm vi đọc metadata: 20 khối cùng đối tượng không hỏi lại `meta_objects` / `meta_custom_fields`
+  // mỗi khối vài lần (lib/metadata/read-scope.ts). Phạm vi mất khi lượt dựng xong — không đệm giữa các lượt (M13).
+  return withMetadataReadScope(() => resolvePageInScope(schemaIn, user, ctx, slug));
+}
+
+async function resolvePageInScope(schemaIn: PageSchema, user: SessionUser, ctx: PageRenderContext, slug: string): Promise<ResolvedPage> {
   const started = performance.now();
   const sections = Array.isArray(schemaIn?.sections) ? schemaIn.sections : [];
   const flat = flattenBlocks(schemaIn);

@@ -364,7 +364,7 @@ async function testEntitlementsAndIsolation(s: SessionSubject) {
     assert.ok(obj.ok && obj.used === null, "loại chưa có bộ đếm ⇒ không chặn, chưa biết ≠ 0");
     const usage = await getPlanUsage();
     assert.equal(usage.rows.find((r) => r.kind === "users")?.used, 2);
-    assert.equal(usage.rows.find((r) => r.kind === "objects")?.used, null);
+    assert.equal(typeof usage.rows.find((r) => r.kind === "objects")?.used, "number", "đối tượng đã có bộ đếm (Phase 11 · H4) ⇒ số thật, không còn «chưa biết»");
 
     // Thương hiệu + logo của A.
     const saved = await saveBrandingCore(adminA, { displayName: "Minh An Sỉ", accent: "teal" });

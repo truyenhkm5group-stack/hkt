@@ -164,8 +164,11 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                         </ul>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      <Link href={`/platform?org=${encodeURIComponent(o.code)}`} className="whitespace-nowrap text-xs font-medium text-primary hover:underline">
+                    <td className="space-y-1 px-3 py-2 text-right">
+                      <Link href={`/platform/org/${encodeURIComponent(o.code)}`} className="block whitespace-nowrap text-xs font-medium text-primary hover:underline">
+                        Chẩn đoán
+                      </Link>
+                      <Link href={`/platform?org=${encodeURIComponent(o.code)}`} className="block whitespace-nowrap text-xs font-medium text-primary hover:underline">
                         Sửa module
                       </Link>
                     </td>

@@ -239,7 +239,7 @@ async function buildPreview(step: PlanStep, planKey: string): Promise<Built | { 
   if ("error" in built) return built;
   const plan = planBlueprint(built.bp, { orgState: freshOrgState(), can: () => true });
   const resolved = await resolvePlan({ isHome: false, plan: planKey });
-  const over = resolved ? overPlanLimits(resolved.limits, { users: 1, pages: built.bp.pages?.length ?? 0, workflows: built.bp.workflows?.length ?? 0 }, resolved.name) : ["Không đọc được gói dịch vụ."];
+  const over = resolved ? overPlanLimits(resolved.limits, { users: 1, pages: built.bp.pages?.length ?? 0, workflows: built.bp.workflows?.length ?? 0, objects: built.bp.objects?.length ?? 0 }, resolved.name) : ["Không đọc được gói dịch vụ."];
   const preview: SignupPreview = {
     blueprint: { key: built.bp.key, name: built.bp.name, version: built.bp.version, fromTemplate: built.fromTemplate },
     modules: [...CORE_MODULES, ...built.modules].map((k) => ({ key: k, label: moduleDef(k)?.label ?? k, autoAdded: built.autoAdded.includes(k) })),

@@ -27,12 +27,14 @@ import type { SessionUser } from "@/lib/auth/session";
 import { domainEventLabel, METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
 import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import { emitDomainEvent } from "@/lib/events/emit";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import { idColumnOf, loadCustomDefs, objectModuleOff, recordScopeSql } from "@/lib/metadata/common";
 import { CUSTOM_RECORD_FORM_CREATE, CUSTOM_RECORD_FORM_EDIT, CUSTOM_RECORD_LIST, customObjectHref, TITLE_MAX_LENGTH } from "@/lib/metadata/custom-object-def";
 import { MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { parseRef, writableCustomKeys, writableSystemKeys } from "@/lib/metadata/form-schema";
 import { getPublishedForm } from "@/lib/metadata/forms";
 import { getPublishedListView } from "@/lib/metadata/lists";
+import { withMetadataReadScope } from "@/lib/metadata/read-scope";
 import { resolveObject } from "@/lib/metadata/object-resolver";
 import { canViewObject, canWriteObject, objectScope, recordTitles, visibleRecordIds } from "@/lib/metadata/record-access";
 import { RELATION_TYPES, type CustomFieldDef, type CustomValues, type FieldRef, type ListFilter, type ListViewSchema } from "@/lib/metadata/types";
@@ -194,7 +196,12 @@ export type RecordListResult = {
  * `extra.fieldEq`: lọc bằng trên field tuỳ biến lọc được mà người xem XEM ĐƯỢC (field khác bị bỏ — lọc theo một field
  * không được xem là để lộ giá trị của nó qua việc bản ghi có mặt hay không).
  */
-export async function listRecords(objectKey: string, params: ListParams, viewer: Viewer, extra: { fieldEq?: Record<string, string>; mine?: boolean } = {}): Promise<ObjectsResult<RecordListResult>> {
+export function listRecords(objectKey: string, params: ListParams, viewer: Viewer, extra: { fieldEq?: Record<string, string>; mine?: boolean } = {}): Promise<ObjectsResult<RecordListResult>> {
+  // Một lượt danh sách = một phạm vi đọc metadata (cổng, danh sách đã xuất bản, field, đích quan hệ hỏi chung một lần).
+  return withMetadataReadScope(() => listRecordsInScope(objectKey, params, viewer, extra));
+}
+
+async function listRecordsInScope(objectKey: string, params: ListParams, viewer: Viewer, extra: { fieldEq?: Record<string, string>; mine?: boolean }): Promise<ObjectsResult<RecordListResult>> {
   const gate = await recordGate(objectKey, viewer, "view");
   if (!gate.ok) return gate;
   const { def, decision } = gate;
@@ -411,6 +418,10 @@ export async function createRecord(objectKey: string, input: RecordInput, viewer
   const effective = defs.map((d) => (d.required && d.status === "ACTIVE" && !canEditField(viewer, def, d) ? { ...d, required: false } : d));
   for (const e of validateCustomValues(effective, customIn, null).errors) if (!errors.some((x) => x.path === e.field)) errors.push({ path: e.field, message: e.message });
   if (errors.length) return objectsFail("INVALID", errors);
+  // Hạn mức gói (Phase 10 · §5) — SAU cổng quyền và kiểm đầu vào (người không được tạo nhận đúng câu của cổng), TRƯỚC
+  // lượt chèn. Tổ chức nhà = nội bộ, không đếm gì.
+  const ent = await checkEntitlement("records", 1);
+  if (!ent.ok) return objectsFail("INVALID", ent.error);
 
   const db = await getDb();
   const t = schema.customRecords;
@@ -552,7 +563,12 @@ const REVERSE_SHOW = 50;
  * Chỉ nhóm của đối tượng người xem mở được + field người xem được xem; chỉ bản ghi nguồn người xem xem được (phạm vi).
  * Nơi gọi đã kiểm người xem xem được bản ghi ĐÍCH. Tìm theo `custom_values` của CSDL tổ chức hiện hành.
  */
-export async function reverseRelations(targetObjectKey: string, targetId: string, viewer: Viewer): Promise<ReverseRelationGroup[]> {
+export function reverseRelations(targetObjectKey: string, targetId: string, viewer: Viewer): Promise<ReverseRelationGroup[]> {
+  // Nhiều field của CÙNG đối tượng nguồn trỏ về đây ⇒ đối tượng + field của nó đọc một lần (lib/metadata/read-scope.ts).
+  return withMetadataReadScope(() => reverseRelationsInScope(targetObjectKey, targetId, viewer));
+}
+
+async function reverseRelationsInScope(targetObjectKey: string, targetId: string, viewer: Viewer): Promise<ReverseRelationGroup[]> {
   const db = await getDb();
   const mf = schema.metaCustomFields;
   const fieldRows = await db

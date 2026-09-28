@@ -15,6 +15,7 @@ import { describeListFilter, listViewDefaultSort } from "@/components/metadata/r
 import { CUSTOMER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns";
 import { getListMetadata, listCustomValuesFor, listMetadataFilterSql } from "@/lib/queries/metadata-lists";
 import { customerCreateGate } from "@/lib/records/customer-create";
+import { getBrandCopy } from "@/lib/branding/service";
 
 /** Tham số URL tắt bộ lọc mặc định của danh sách đã xuất bản (người xem phải bỏ được lọc mình không chọn). */
 const META_FILTER_OFF = "mf";
@@ -27,7 +28,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   if (decision.allow === "NONE") return <ScopeDenied title="Khách hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   // Danh sách đã xuất bản (M9): thứ tự/ẩn cột, cột custom, sắp xếp + bộ lọc mặc định. `null` ⇒ y như trước.
-  const [meta, createGate] = await Promise.all([getListMetadata("customer", "default", user), customerCreateGate(user)]);
+  const [meta, createGate, copy] = await Promise.all([getListMetadata("customer", "default", user), customerCreateGate(user), getBrandCopy(user)]);
   const metaSort = listViewDefaultSort(meta?.schema, CUSTOMER_LIST_REF_COLUMNS, CUSTOMER_SORTABLE);
   const params = parseListParams(raw, { defaultSort: metaSort?.sort ?? "lastOrderAt", defaultDir: metaSort?.dir, filterKeys: ["province", "tier"], sortable: CUSTOMER_SORTABLE, defaultPeriod: "all" });
   const filtersOff = raw[META_FILTER_OFF] === "off";
@@ -44,7 +45,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <PageHeader
         eyebrow="Vận hành"
         title="Khách hàng"
-        description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số liệu Pancake kết hợp đơn hàng trong ERP`}
+        description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số liệu ${copy.name("ORDER_SOURCE")} kết hợp đơn hàng trong ERP`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {createGate.allowed ? (
@@ -67,7 +68,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       */}
       <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
-        <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên Pancake ${summary.newLabel}`} icon={UserPlus} tone="green" />
+        <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên ${copy.name("ORDER_SOURCE")} ${summary.newLabel}`} icon={UserPlus} tone="green" />
         <MetricCard label="Tỷ lệ hoàn" value={`${returnRate.toFixed(1)}%`} note={`${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone={returnRate >= 10 ? "rose" : "amber"} />
       </section>
 

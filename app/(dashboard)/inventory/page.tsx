@@ -9,23 +9,24 @@ import { inventoryFacets, inventorySummary, INVENTORY_SORTABLE, listInventory } 
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
+import { getBrandCopy } from "@/lib/branding/service";
 
 export const metadata = { title: "Nhật ký kho" };
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("INVENTORY", "products:view");
+  const { user, decision } = await requireResource("INVENTORY", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tồn kho" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["warehouse", "table", "direction"], sortable: INVENTORY_SORTABLE, defaultPeriod: "30d" });
-  const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listInventory(params), inventoryFacets(params), inventorySummary(params)]);
+  const [{ rows, total, pageCount }, facets, summary, copy] = await Promise.all([listInventory(params), inventoryFacets(params), inventorySummary(params), getBrandCopy(user)]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Kho"
         title="Nhật ký kho"
-        description={`Lịch sử xuất / nhập / chuyển kho ghi nhận từ Pancake POS · ${params.period.label.toLowerCase()} · ${formatNumber(summary.variants)} mẫu mã có biến động`}
+        description={`Lịch sử xuất / nhập / chuyển kho ghi nhận từ ${copy.name("POS")} · ${params.period.label.toLowerCase()} · ${formatNumber(summary.variants)} mẫu mã có biến động`}
         actions={<SyncButton job="pancake-inventory" label="Đồng bộ nhật ký kho" />}
       />
 
