@@ -2,8 +2,9 @@
  * PHASE 7 · BLUEPRINT + MẪU NGÀNH — `lib/blueprints/*`, `/settings/templates`.
  *
  * Ba lớp:
- *  1. THUẦN — mỗi mẫu qua `validateBlueprint` (trang qua `validatePageSchema` với module của gói), mẫu khác nhau thật
- *     về module, không mang thứ chỉ-VNX; đối tượng tuỳ biến / field quan hệ bị TỪ CHỐI rõ ràng; vai trò có
+ *  1. THUẦN — mỗi mẫu qua `validateBlueprint` (trang qua `validatePageSchema` với module của gói), năm mẫu khác nhau
+ *     thật về module, không mang thứ chỉ-VNX; đối tượng tuỳ biến tự kéo `apps`, field quan hệ phải trỏ đích có thật
+ *     (sổ hoặc gói), `unique` chỉ cho `relation`; vai trò có
  *     `users:manage` ⇒ lỗi gắn đúng mục ⇒ kế hoạch BỊ CHẶN; băm ổn định theo thứ tự khoá.
  *  2. MÃ NGUỒN — không tệp nào trong `lib/blueprints/*` ghi thẳng bảng, trừ sổ cài (`ledger.ts`) và sổ chỉ ghi hai
  *     bảng của chính nó.
@@ -42,7 +43,10 @@ import { orderModules, planBlueprint, type OrgState } from "@/lib/blueprints/pla
 import { BLUEPRINT_TEMPLATES, templateBlueprint } from "@/lib/blueprints/templates";
 import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import { AI_PROFILE_SETTING_KEY, BLUEPRINT_ITEM_KINDS, type Blueprint, type BlueprintPlan, type PlanAction } from "@/lib/blueprints/types";
-import { NOT_SUPPORTED_YET, validateBlueprint } from "@/lib/blueprints/validate";
+import { blueprintModuleSet, validateBlueprint } from "@/lib/blueprints/validate";
+import { SERVICE_BUSINESS_BLUEPRINT } from "@/lib/blueprints/templates/service-business";
+import { resolveObject } from "@/lib/metadata/object-resolver";
+import { toggleOwnModule } from "@/lib/platform-ui/module-toggle";
 
 function sessionUser(over: Partial<SessionUser>): SessionUser {
   return { id: "bp-user", email: "bp@local", name: "BP", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: "nha", name: "Nhà", isHome: true }, modules: [...MODULE_KEYS], ...over };
@@ -59,9 +63,15 @@ function actionOf(plan: BlueprintPlan, kind: string, key: string): PlanAction | 
 // ═══════════ 1 · THUẦN ═══════════
 
 function testTemplatesPure() {
-  assert.ok(BLUEPRINT_TEMPLATES.length >= 3, "ít nhất ba mẫu ở phiên bản (a)");
+  assert.equal(BLUEPRINT_TEMPLATES.length, 5, "năm mẫu tham chiếu (§4)");
   const keys = BLUEPRINT_TEMPLATES.map((t) => t.key);
-  assert.deepEqual([...keys].sort(), ["fashion-commerce", "general-ecommerce", "wholesale"]);
+  assert.deepEqual([...keys].sort(), ["fashion-commerce", "general-ecommerce", "manufacturing", "service-business", "wholesale"]);
+  // Hai mẫu (b) dùng đối tượng tuỳ biến; mẫu dịch vụ có quan hệ tới khách từ HAI đối tượng.
+  const svc = templateBlueprint("service-business")!;
+  assert.deepEqual(svc.objects?.map((o) => o.key), ["x_contract", "x_project"]);
+  for (const o of ["x_contract", "x_project"]) assert.ok(svc.fields?.some((f) => f.objectKey === o && f.type === "relation" && f.relation?.objectKey === "customer"), `${o} có quan hệ tới khách`);
+  assert.ok(templateBlueprint("manufacturing")!.objects?.some((o) => o.key === "x_work_center"));
+  assert.ok(svc.workflows?.some((w) => w.gate?.kind === "approval" && w.trigger.objectKey === "x_contract"), "luật hợp đồng > ngưỡng ⇒ duyệt ⇒ việc");
   for (const bp of BLUEPRINT_TEMPLATES) {
     const v = validateBlueprint(bp);
     assert.ok(v.ok, `${bp.key}: ${JSON.stringify(v.errors)}`);
@@ -105,12 +115,24 @@ function testTemplatesPure() {
 function testRejections() {
   const base = clone(WHOLESALE_BLUEPRINT);
   // Đối tượng tuỳ biến: CHƯA hỗ trợ — từ chối rõ ràng.
-  const withObjects: Blueprint = { ...clone(base), objects: [{ key: "x_contract", label: "Hợp đồng", labelPlural: "Hợp đồng", icon: "file", moduleKey: "customers", titleLabel: "Tên" }] };
-  const vo = validateBlueprint(withObjects);
-  assert.ok(!vo.ok && vo.errors.some((e) => e.path === "objects" && e.message.includes(NOT_SUPPORTED_YET)), JSON.stringify(vo.errors));
-  const withRelation: Blueprint = { ...clone(base), fields: [...(base.fields ?? []), { objectKey: "customer", key: "nguoi_gioi_thieu", label: "Người giới thiệu", type: "relation", relation: { objectKey: "customer" } }] };
-  const vr = validateBlueprint(withRelation);
-  assert.ok(!vr.ok && vr.errors.some((e) => e.message.includes(NOT_SUPPORTED_YET)), "field quan hệ bị từ chối rõ ràng");
+  // Đối tượng tuỳ biến: `apps` TỰ vào tập module (gói không khai vẫn hợp lệ); biểu tượng ngoài tập đóng bị từ chối.
+  const withObjects: Blueprint = { ...clone(base), objects: [{ key: "x_contract", label: "Hợp đồng", labelPlural: "Hợp đồng", icon: "file-text", moduleKey: "customers", titleLabel: "Số" }] };
+  assert.ok(!withObjects.modules.includes("apps"));
+  assert.ok(validateBlueprint(withObjects).ok, JSON.stringify(validateBlueprint(withObjects).errors));
+  assert.ok(blueprintModuleSet(withObjects).has("apps"), "gói có đối tượng ⇒ apps là điều kiện cần");
+  assert.ok(!validateBlueprint({ ...clone(withObjects), objects: [{ ...withObjects.objects![0], icon: "khong-co" }] }).ok, "biểu tượng ngoài tập đóng");
+  // Field quan hệ: đích phải có thật (sổ hoặc gói); `unique` chỉ cho `relation`; field trên x_ không khai ⇒ lỗi.
+  const rel = (f: NonNullable<Blueprint["fields"]>[number]) => validateBlueprint({ ...clone(withObjects), fields: [...(base.fields ?? []), f] });
+  assert.ok(rel({ objectKey: "x_contract", key: "khach", label: "Khách", type: "relation", relation: { objectKey: "customer", unique: true } }).ok);
+  assert.ok(rel({ objectKey: "customer", key: "hd", label: "HĐ", type: "relation_many", relation: { objectKey: "x_contract" } }).ok);
+  assert.ok(rel({ objectKey: "customer", key: "hd", label: "HĐ", type: "relation_many", relation: { objectKey: "x_contract", unique: true } }).errors.some((e) => e.path.endsWith("relation.unique")), "unique chỉ cho relation");
+  assert.ok(rel({ objectKey: "customer", key: "hd", label: "HĐ", type: "relation", relation: { objectKey: "x_khong_khai" } }).errors.some((e) => e.path.endsWith("relation.objectKey")), "đích x_ không khai trong gói");
+  assert.ok(rel({ objectKey: "customer", key: "hd", label: "HĐ", type: "relation" }).errors.some((e) => e.path.endsWith(".relation")), "relation thiếu đích");
+  assert.ok(rel({ objectKey: "x_khong_khai", key: "ghi_chu", label: "Ghi chú", type: "text" }).errors.some((e) => e.path.endsWith("objectKey")), "field trên đối tượng không khai");
+  // Luật event + objectKey chỉ cho sự kiện của bản ghi metadata.
+  const evBad = clone(SERVICE_BUSINESS_BLUEPRINT);
+  evBad.workflows![0] = { ...evBad.workflows![0], trigger: { kind: "event", event: "model.registered", objectKey: "x_contract" } };
+  assert.ok(validateBlueprint(evBad).errors.some((e) => e.path.startsWith("workflows.0.trigger")), "sự kiện miền khác không lọc theo đối tượng");
 
   // Vai trò có users:manage ⇒ lỗi gắn đúng mục (luật 31); nền ADMIN ⇒ sai hình.
   const escalate = clone(base);
@@ -226,7 +248,7 @@ async function testOrgA() {
     let admin = await adminOf(ORG_A);
     assert.deepEqual([...(await getEnabledModules(ORG_A))].sort(), ["core", "work"], "tổ chức mới chỉ có lõi — mẫu không tự cài (luật 23)");
     const catalog = await loadTemplateCatalog(admin);
-    assert.ok(catalog.ok && catalog.value.templates.length === 3 && catalog.value.history.length === 0);
+    assert.ok(catalog.ok && catalog.value.templates.length === 5 && catalog.value.history.length === 0);
     assert.ok(catalog.value.templates.every((t) => t.installedVersion === null && !t.updateAvailable));
 
     // ── Xem trước = kế hoạch, không ghi ──
@@ -401,6 +423,80 @@ async function testOrgB() {
   });
 }
 
+const ORG_C = "bp-c";
+
+async function testOrgC() {
+  await withOrganization(ORG_C, async () => {
+    let admin = await adminOf(ORG_C);
+    assert.ok(!(await getEnabledModules(ORG_C)).has("apps"), "tổ chức mới chưa bật Ứng dụng tuỳ biến");
+
+    // ── service-business: apps tự bật (CREATE ở bước module, trước bước đối tượng) ──
+    const plan = await planForOrg(SERVICE_BUSINESS_BLUEPRINT, admin);
+    assert.ok(plan.ok, JSON.stringify(plan.steps.filter((s) => s.action === "BLOCKED")));
+    assert.equal(actionOf(plan, "module", "apps"), "CREATE");
+    const iApps = plan.steps.findIndex((s) => s.kind === "module" && s.key === "apps");
+    const iObj = plan.steps.findIndex((s) => s.kind === "object");
+    const iField = plan.steps.findIndex((s) => s.kind === "field" && s.key === "x_contract.khach_hang");
+    assert.ok(iApps < iObj && iObj < iField, "thứ tự: module → đối tượng → field");
+    const done = await installBlueprint(SERVICE_BUSINESS_BLUEPRINT, admin, { expectedPlanHash: plan.planHash });
+    assert.ok(done.ok, JSON.stringify(done));
+    admin = await adminOf(ORG_C);
+    assert.ok((await getEnabledModules(ORG_C)).has("apps"));
+
+    const contract = await resolveObject("x_contract");
+    assert.ok(contract?.custom && contract.custom.status === "ACTIVE" && contract.label === "Hợp đồng" && contract.custom.menuModule === "customers", "đối tượng Hợp đồng đã tạo qua createObject");
+    assert.equal(contract.custom.viewPermission, "records:view");
+    assert.ok((await resolveObject("x_project"))?.custom, "đối tượng Dự án");
+    const cf = (await listFields("x_contract")).custom;
+    assert.equal(cf.find((f) => f.key === "khach_hang")?.relationObject, "customer", "quan hệ hợp đồng → khách");
+    assert.equal(cf.find((f) => f.key === "du_an")?.type, "relation_many");
+    assert.equal(cf.find((f) => f.key === "du_an")?.relationObject, "x_project", "quan hệ nhiều-nhiều tới đối tượng tuỳ biến khác");
+    const pf = (await listFields("x_project")).custom;
+    assert.equal(pf.find((f) => f.key === "hop_dong_chinh")?.validation.unique, true, "một-một");
+    assert.equal(pf.find((f) => f.key === "khach_hang")?.relationObject, "customer");
+    assert.equal((await getPublishedForm("x_contract", "create")).version, 1, "form tạo hợp đồng xuất bản");
+    assert.equal((await getPublishedListView("x_project", "default")).version, 1);
+    assert.ok(await getPageBySlug("khach-hang-dich-vu"), "trang của mẫu đã xuất bản");
+    const rule = (await listRules()).find((r) => r.key === "hop_dong_lon_can_duyet");
+    assert.ok(rule && rule.status === "DRAFT" && rule.mode === "DRY_RUN" && rule.gate?.kind === "approval");
+    assert.deepEqual(rule.trigger, { kind: "event", event: "custom_record.created", objectKey: "x_contract" });
+
+    // ── Cài lại ⇒ toàn UNCHANGED ──
+    const again = await planForOrg(SERVICE_BUSINESS_BLUEPRINT, admin);
+    assert.equal(again.counts.UNCHANGED, again.steps.length, JSON.stringify(again.steps.filter((s) => s.action !== "UNCHANGED").map((s) => [s.kind, s.key, s.action, s.reason])));
+    // Một gói KHÁC khoá mang đúng nội dung ấy: đối tượng / field có sẵn giống hệt ⇒ nhận làm của gói (UNCHANGED), không
+    // CONFLICT — phép chiếu đích (mặc định quyền, nhóm menu…) phải khớp đúng thứ `createObject` đã ghi.
+    const copy = await planForOrg({ ...clone(SERVICE_BUSINESS_BLUEPRINT), key: "dich-vu-ban-sao" }, admin);
+    for (const [kind, key] of [["object", "x_contract"], ["object", "x_project"], ["field", "x_contract.khach_hang"], ["field", "x_project.hop_dong_chinh"], ["form", "x_contract.create"], ["page", "khach-hang-dich-vu"]] as const) {
+      assert.equal(actionOf(copy, kind, key), "UNCHANGED", `${kind} ${key}: ${JSON.stringify(copy.steps.find((s) => s.kind === kind && s.key === key)?.diff)}`);
+    }
+
+    // ── Mẫu sản xuất cùng tổ chức: quan hệ từ đối tượng HỆ THỐNG (sản phẩm, lệnh sản xuất) tới x_work_center ──
+    const mf = templateBlueprint("manufacturing")!;
+    const mfPlan = await planForOrg(mf, admin);
+    assert.ok(mfPlan.ok, JSON.stringify(mfPlan.steps.filter((s) => s.action === "BLOCKED")));
+    assert.equal(actionOf(mfPlan, "module", "apps"), "UNCHANGED");
+    assert.ok((await installBlueprint(mf, admin, { expectedPlanHash: mfPlan.planHash })).ok);
+    admin = await adminOf(ORG_C);
+    assert.equal((await listFields("production_order")).custom.find((f) => f.key === "chuyen_san_xuat")?.relationObject, "x_work_center");
+    assert.ok(await getPageBySlug("ke-hoach-san-xuat"));
+    assert.ok((await listRules()).some((r) => r.key === "chuyen_bao_tri" && r.status === "DRAFT"));
+
+    // ── Tổ chức TẮT apps sau khi cài ⇒ không tự bật lại: module SKIP_DELETED, đối tượng + field của nó BỊ CHẶN ──
+    const off = await toggleOwnModule(admin, { moduleKey: "apps", enabled: false, reason: "thử tắt" });
+    assert.ok("ok" in off, JSON.stringify(off));
+    admin = await adminOf(ORG_C);
+    const blocked = await planForOrg(SERVICE_BUSINESS_BLUEPRINT, admin);
+    assert.equal(actionOf(blocked, "module", "apps"), "SKIP_DELETED");
+    assert.equal(actionOf(blocked, "object", "x_contract"), "BLOCKED");
+    assert.equal(actionOf(blocked, "field", "x_contract.gia_tri"), "BLOCKED");
+    assert.equal(blocked.ok, false);
+    const refused = await installBlueprint(SERVICE_BUSINESS_BLUEPRINT, admin);
+    assert.ok(!refused.ok && refused.installId === null, "không ghi gì khi còn bước bị chặn");
+    assert.ok(!(await getEnabledModules(ORG_C)).has("apps"), "máy không tự bật lại module tổ chức đã tắt");
+  });
+}
+
 export async function testBlueprints() {
   testTemplatesPure();
   testRejections();
@@ -408,14 +504,17 @@ export async function testBlueprints() {
   testMenu();
   await provision(ORG_A);
   await provision(ORG_B);
+  await provision(ORG_C);
   try {
     await testOrgA();
     await testOrgB();
+    await testOrgC();
   } finally {
     await cleanupOrg(ORG_A);
     await cleanupOrg(ORG_B);
+    await cleanupOrg(ORG_C);
   }
   console.log(
-    "✓ Phase 7 · blueprint + mẫu ngành: 3 mẫu qua validateBlueprint (trang qua validatePageSchema theo module của gói), khác nhau về module, không mang thứ chỉ-VNX; objects / field quan hệ bị từ chối rõ ràng; users:manage ⇒ BLOCKED; lib/blueprints không ghi thẳng bảng (trừ sổ cài); bp-a: cài wholesale ⇒ module đúng + field/form/danh sách/trang xuất bản/luật NHÁP/vai trò/AI, cài lại ⇒ toàn UNCHANGED, sửa trang + lưu trữ field ⇒ 1.1.0: SKIP_CUSTOMIZED/SKIP_DELETED, mục chưa sửa UPDATE vào nháp, ghi đè theo lựa chọn; bp-b: không thấy sổ của A, thiếu quyền ⇒ BLOCKED, hỏng giữa chừng ⇒ FAILED rồi chạy lại đi tiếp, CONFLICT không đè mẫu kia",
+    "✓ Phase 7 · blueprint + mẫu ngành: 5 mẫu qua validateBlueprint (trang qua validatePageSchema theo module của gói), khác nhau về module, không mang thứ chỉ-VNX; đối tượng tuỳ biến kéo apps, quan hệ phải trỏ đích có thật, unique chỉ cho relation; users:manage ⇒ BLOCKED; lib/blueprints không ghi thẳng bảng (trừ sổ cài); bp-a: cài wholesale ⇒ module đúng + field/form/danh sách/trang xuất bản/luật NHÁP/vai trò/AI, cài lại ⇒ toàn UNCHANGED, sửa trang + lưu trữ field ⇒ 1.1.0: SKIP_CUSTOMIZED/SKIP_DELETED, mục chưa sửa UPDATE vào nháp, ghi đè theo lựa chọn; bp-b: không thấy sổ của A, thiếu quyền ⇒ BLOCKED, hỏng giữa chừng ⇒ FAILED rồi chạy lại đi tiếp, CONFLICT không đè mẫu kia; bp-c: service-business ⇒ apps tự bật, x_contract/x_project qua createObject, quan hệ tới khách + một-một + nhiều-nhiều, luật custom_record.created NHÁP có cửa duyệt, cài lại toàn UNCHANGED, manufacturing quan hệ sản phẩm/lệnh → x_work_center; tắt apps ⇒ đối tượng BLOCKED, không tự bật lại",
   );
 }

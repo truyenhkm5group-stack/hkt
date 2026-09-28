@@ -146,6 +146,7 @@ export function testUiConsistency() {
     "app/(dashboard)/settings/pages/page.tsx",
     "app/(dashboard)/settings/connections/page.tsx",
     "app/(dashboard)/settings/templates/page.tsx",
+    "app/(dashboard)/settings/ai-builder/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
@@ -255,6 +256,10 @@ export function testNavigationCoverage() {
     // Phase 4 · trang tuỳ biến: form TẠO trang — vào từ nút 'Trang mới' ở đầu /settings/pages. Trình soạn MỘT trang
     // (`/settings/pages/[id]`) là route động: vào từ tên trang trong bảng danh sách, hoặc tự mở sau «Tạo từ mẫu».
     "/settings/pages/new": "nút 'Trang mới' ở đầu /settings/pages; trình soạn một trang /settings/pages/[id] vào từ tên trang trong bảng",
+    // Phase 10 · tự phục vụ: hai màn chỉ có nghĩa với tổ chức KHÔNG phải nhà (nhà giữ giao diện, gói nội bộ không giới
+    // hạn) — vào từ thẻ «Bắt đầu» ở trang chủ của tổ chức đó, không thêm mục vào menu của tổ chức nhà.
+    "/settings/branding": "bước 'Đặt tên hiển thị, màu và logo' trên thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
+    "/settings/plan": "liên kết 'Gói & hạn mức' ở đầu thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
   };
 
   const pages = walkPages("app/(dashboard)");

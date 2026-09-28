@@ -13,6 +13,7 @@ import { listDataSources } from "@/lib/pages/data-sources";
 import { archivePage, createPage, createPageFromTemplate, getPageBySlug, getPageDraft, listPages, pageAdminDenial, publishPage, savePageDraft, updatePageMeta, type PageFailure } from "@/lib/pages/registry";
 import { templateSpec, templates } from "@/lib/pages/templates";
 import type { PageDefinition, PageSchema } from "@/lib/pages/types";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import { buildCatalog } from "@/lib/platform-ui/metadata-admin-shared";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { blankSchema, suggestSlug, type PageEditorCatalog, type PageMetaInput, type PageMetaOptions, type PageObjectOption, type PagePathError, type PageWriteResult } from "@/lib/platform-ui/page-admin-shared";
@@ -275,6 +276,8 @@ export async function adminCreatePage(user: SessionUser, input: unknown): Promis
   if (denial) return denied(denial);
   const meta = metaInput(user, input);
   if (!meta.ok) return meta;
+  const ent = await checkEntitlement("pages", 1);
+  if (!ent.ok) return denied(ent.error);
   return toResult(await createPage(meta.value, pageActorOf(user)));
 }
 
@@ -288,6 +291,8 @@ export async function adminCreatePageFromTemplate(user: SessionUser, templateKey
   // Mẫu mang slug đề xuất; bấm lần hai (hoặc slug đã có trang dùng) thì lấy slug trống kế tiếp — không bắt người bấm
   // đi đổi tay một thứ họ chưa từng gõ. Dịch vụ vẫn là lời cuối (chỉ mục duy nhất ⇒ SLUG_TAKEN).
   const taken = new Set((await listPages({ includeArchived: true })).map((p) => p.slug));
+  const ent = await checkEntitlement("pages", 1);
+  if (!ent.ok) return denied(ent.error);
   return toResult(await createPageFromTemplate(spec.key, pageActorOf(user), { slug: suggestSlug(spec.slug, taken) }));
 }
 

@@ -19,15 +19,19 @@
  *
  * Mỗi lỗi mang `path` của mục (vd `roles.0.permissions`) để kế hoạch đánh dấu ĐÚNG mục đó là BỊ CHẶN.
  *
- * PHIÊN BẢN NÀY CHƯA HỖ TRỢ đối tượng tuỳ biến (`objects`) và field quan hệ — chúng thuộc Phase 6 (đang làm song
- * song). Từ chối RÕ RÀNG thay vì bỏ qua: một gói khai 3 đối tượng mà cài ra 0 đối tượng là cài thiếu im lặng.
+ * ĐỐI TƯỢNG TUỲ BIẾN (Phase 6): mục `objects` được kiểm như mọi mục khác (khoá `x_…`, biểu tượng trong tập đóng, nhóm
+ * menu là module của gói, khoá quyền có thật). Field / form / danh sách / luật trỏ tới `x_…` phải trỏ đối tượng KHAI
+ * TRONG GÓI — phép kiểm dùng CHÍNH hàm dựng `customObjectDef` của Phase 6 nên đối tượng của gói có đúng field hệ
+ * thống, form, danh sách như lúc đã tạo. Field quan hệ (`relation` / `relation_many`) trỏ đối tượng hệ thống có trong
+ * sổ hoặc đối tượng của gói; `unique` chỉ cho `relation`. Module `apps` tự vào tập module khi gói có đối tượng.
  */
 import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
 import { ROLE_BUILDER_FORBIDDEN, ROLE_BUILDER_FORBIDDEN_REASON } from "@/lib/constants/access-scope";
 import { ZONE_ORDER } from "@/lib/constants/department-modules";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
-import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
-import { objectDef } from "@/lib/constants/object-registry";
+import { DOMAIN_EVENT_BY_NAME, METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
+import { CUSTOM_OBJECTS_MODULE, customObjectDef } from "@/lib/metadata/custom-object-def";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { moduleDef, moduleOfPermission, PLATFORM_MODULES, type ModuleKey } from "@/lib/constants/platform-modules";
 import { formRefProblems } from "@/lib/metadata/form-schema";
 import { listRefProblems } from "@/lib/metadata/list-schema";
@@ -40,7 +44,6 @@ import { EVENT_SUBJECT_REFS, PAYLOAD_REF_PREFIX } from "@/lib/workflow/subject";
 import { blueprintZ, SAFE_SETTING_VALUE_Z } from "@/lib/blueprints/schema";
 import { SAFE_SETTING_SPEC, type Blueprint, type BlueprintField, type BlueprintIssue, type BlueprintValidation } from "@/lib/blueprints/types";
 
-export const NOT_SUPPORTED_YET = "chưa hỗ trợ ở phiên bản này (đối tượng tuỳ biến và field quan hệ thuộc Phase 6)";
 
 const PERMISSION_SET: ReadonlySet<string> = new Set(ALL_PERMISSIONS);
 const ZONE_SET: ReadonlySet<string> = new Set(ZONE_ORDER);
@@ -49,10 +52,41 @@ const NUMBER_TYPES = new Set(["number", "currency"]);
 const STRING_TYPES = new Set(["text", "textarea", "email", "phone", "url"]);
 
 /** Tập module sau khi cài: module của gói + module lõi (luôn bật, gói không cần khai). */
-export function blueprintModuleSet(bp: Pick<Blueprint, "modules">): Set<ModuleKey> {
+export function blueprintModuleSet(bp: Pick<Blueprint, "modules" | "objects">): Set<ModuleKey> {
   const set = new Set<ModuleKey>(bp.modules);
   for (const m of PLATFORM_MODULES) if (m.core) set.add(m.key);
+  // Mọi đối tượng tuỳ biến thuộc module `apps` — gói có đối tượng thì `apps` là điều kiện cần, không bắt người soạn nhớ.
+  if ((bp.objects ?? []).length > 0) set.add(CUSTOM_OBJECTS_MODULE);
   return set;
+}
+
+/** Module cần bật của gói, theo thứ tự khai + `apps` tự thêm khi có đối tượng tuỳ biến. */
+export function blueprintModules(bp: Pick<Blueprint, "modules" | "objects">): ModuleKey[] {
+  return (bp.objects ?? []).length > 0 && !bp.modules.includes(CUSTOM_OBJECTS_MODULE) ? [...bp.modules, CUSTOM_OBJECTS_MODULE] : [...bp.modules];
+}
+
+/**
+ * Đối tượng mà gói nói tới: sổ tĩnh, hoặc đối tượng tuỳ biến KHAI TRONG GÓI (dựng bằng `customObjectDef` — cùng hàm
+ * `resolveObject` dùng sau khi tạo). Khoá `x_…` không khai trong gói ⇒ `null`: gói phải tự đủ.
+ */
+export function objectOf(bp: Pick<Blueprint, "objects">, key: string): AnyObjectDef | null {
+  const sys = objectDef(key);
+  if (sys) return sys;
+  const o = (bp.objects ?? []).find((x) => x.key === key);
+  if (!o) return null;
+  return customObjectDef({
+    key: o.key,
+    label: o.label,
+    labelPlural: o.labelPlural,
+    icon: o.icon,
+    moduleKey: o.moduleKey,
+    titleLabel: o.titleLabel,
+    description: o.description ?? null,
+    viewPermission: o.viewPermission ?? "records:view",
+    writePermission: o.writePermission ?? "records:write",
+    status: "ACTIVE",
+    origin: null,
+  });
 }
 
 /** Field của gói ⇒ `CustomFieldDef` ACTIVE — để dùng lại NGUYÊN hàm kiểm / chuẩn hoá thuần của Phase 2. */
@@ -62,6 +96,11 @@ export function fieldDefsOf(bp: Pick<Blueprint, "fields">, objectKey: string): C
 
 export function normalizeOptions(raw: BlueprintField["options"]): FieldOption[] {
   return (raw ?? []).map((o, i) => ({ value: o.value, label: o.label, ...(o.color ? { color: o.color } : {}), active: o.active !== false, position: o.position ?? i }));
+}
+
+/** `unique` của gói nằm ở `relation.unique`; dịch vụ field lưu nó trong `validation.unique` (Phase 6). */
+export function fieldValidationOf(f: BlueprintField): NonNullable<BlueprintField["validation"]> & { unique?: boolean } {
+  return { ...(f.validation ?? {}), ...(f.relation?.unique !== undefined ? { unique: f.relation.unique } : {}) };
 }
 
 export function blueprintFieldDef(f: BlueprintField, position: number): CustomFieldDef {
@@ -74,9 +113,9 @@ export function blueprintFieldDef(f: BlueprintField, position: number): CustomFi
     required: f.required === true,
     defaultValue: null,
     options: normalizeOptions(f.options),
-    validation: f.validation ?? {},
+    validation: fieldValidationOf(f),
     transitions: f.transitions ?? {},
-    relationObject: null,
+    relationObject: f.relation?.objectKey ?? null,
     helpText: f.helpText?.trim() || null,
     viewPermission: null,
     editPermission: null,
@@ -129,8 +168,20 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
   const warnings: BlueprintIssue[] = [];
   const modules = blueprintModuleSet(bp);
 
-  // ── Đối tượng tuỳ biến: chưa hỗ trợ ──
-  if ((bp.objects ?? []).length > 0) errors.push({ path: "objects", message: `Mục «objects» ${NOT_SUPPORTED_YET}.` });
+  // ── Đối tượng tuỳ biến (Phase 6) ──
+  const objectKeys = new Set<string>();
+  (bp.objects ?? []).forEach((o, i) => {
+    const p = `objects.${i}`;
+    if (objectKeys.has(o.key)) errors.push({ path: `${p}.key`, message: `Đối tượng «${o.key}» khai hai lần.` });
+    objectKeys.add(o.key);
+    const menu = moduleDef(o.moduleKey);
+    if (menu?.category === "CONNECTOR") errors.push({ path: `${p}.moduleKey`, message: `«${menu.label}» là kết nối dữ liệu — không làm nhóm menu cho đối tượng.` });
+    else if (!modules.has(o.moduleKey)) errors.push({ path: `${p}.moduleKey`, message: `Nhóm menu «${o.moduleKey}» không phải module của gói.` });
+    for (const k of ["viewPermission", "writePermission"] as const) {
+      const perm = o[k];
+      if (perm !== undefined && !PERMISSION_SET.has(perm)) errors.push({ path: `${p}.${k}`, message: `Khoá quyền «${perm}» không có trong danh mục quyền.` });
+    }
+  });
 
   // ── Module: không trùng, đóng dưới phụ thuộc ──
   const seenModules = new Set<string>();
@@ -169,19 +220,20 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
     if (fieldKeys.has(id)) errors.push({ path: `${p}.key`, message: `Field «${id}» khai hai lần.` });
     fieldKeys.add(id);
     fieldByRef.set(id, f);
-    if (f.objectKey.startsWith("x_")) {
-      errors.push({ path: `${p}.objectKey`, message: `Field trên đối tượng tuỳ biến «${f.objectKey}» ${NOT_SUPPORTED_YET}.` });
-      return;
-    }
-    if (f.type === "relation" || f.relation) {
-      errors.push({ path: `${p}.type`, message: `Field quan hệ ${NOT_SUPPORTED_YET}.` });
-      return;
-    }
-    const def = objectDef(f.objectKey);
+    const def = objectOf(bp, f.objectKey);
     if (!def) {
-      errors.push({ path: `${p}.objectKey`, message: `Đối tượng «${f.objectKey}» không có trong sổ đối tượng.` });
+      errors.push({ path: `${p}.objectKey`, message: f.objectKey.startsWith("x_") ? `Đối tượng tuỳ biến «${f.objectKey}» không khai trong gói.` : `Đối tượng «${f.objectKey}» không có trong sổ đối tượng.` });
       return;
     }
+    if (f.type === "relation" || f.type === "relation_many") {
+      if (!f.relation) errors.push({ path: `${p}.relation`, message: "Field liên kết phải khai đối tượng đích (relation.objectKey)." });
+      else {
+        const target = objectOf(bp, f.relation.objectKey);
+        if (!target) errors.push({ path: `${p}.relation.objectKey`, message: `Đích «${f.relation.objectKey}» không phải đối tượng trong sổ hoặc đối tượng khai trong gói.` });
+        else if (!modules.has(target.module)) errors.push({ path: `${p}.relation.objectKey`, message: `${target.label} thuộc module «${target.module}» — gói không khai module này.` });
+        if (f.relation.unique !== undefined && f.type !== "relation") errors.push({ path: `${p}.relation.unique`, message: "«Một-một» (unique) chỉ áp cho field liên kết MỘT bản ghi." });
+      }
+    } else if (f.relation) errors.push({ path: `${p}.relation`, message: "Chỉ field liên kết mới có đối tượng đích." });
     if (!def.customizable || !def.capabilities.customFields) errors.push({ path: `${p}.objectKey`, message: `${def.label} không nhận field tuỳ biến.` });
     if (!modules.has(def.module)) errors.push({ path: `${p}.objectKey`, message: `${def.label} thuộc module «${def.module}» — gói không khai module này.` });
     if (def.fields.some((s) => s.key === f.key)) errors.push({ path: `${p}.key`, message: `Khoá «${f.key}» trùng field hệ thống của ${def.label}.` });
@@ -217,7 +269,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
   // ── Trạng thái HỆ THỐNG: chỉ nhãn / thứ tự / ẩn — không thêm giá trị (M10) ──
   (bp.statuses ?? []).forEach((s, i) => {
     const p = `statuses.${i}`;
-    const def = objectDef(s.objectKey);
+    const def = objectOf(bp, s.objectKey);
     if (!def || !def.capabilities.statuses || !def.statusFields.includes(s.field)) {
       errors.push({ path: `${p}.field`, message: `«${s.objectKey}.${s.field}» không phải trạng thái hệ thống cấu hình được.` });
       return;
@@ -240,7 +292,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
     const id = `${f.objectKey}.${f.formKey}`;
     if (formKeys.has(id)) errors.push({ path: p, message: `Form «${id}» khai hai lần.` });
     formKeys.add(id);
-    const def = objectDef(f.objectKey);
+    const def = objectOf(bp, f.objectKey);
     if (!def || !def.capabilities.forms || !def.forms.some((x) => x.key === f.formKey)) {
       errors.push({ path: `${p}.formKey`, message: `«${f.objectKey}» không có form «${f.formKey}».` });
       return;
@@ -254,7 +306,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
     const id = `${l.objectKey}.${l.listKey}`;
     if (listKeys.has(id)) errors.push({ path: p, message: `Danh sách «${id}» khai hai lần.` });
     listKeys.add(id);
-    const def = objectDef(l.objectKey);
+    const def = objectOf(bp, l.objectKey);
     if (!def || !def.capabilities.lists || !def.lists.some((x) => x.key === l.listKey)) {
       errors.push({ path: `${p}.listKey`, message: `«${l.objectKey}» không có danh sách «${l.listKey}».` });
       return;
@@ -300,7 +352,12 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
       const spec = DOMAIN_EVENT_BY_NAME[w.trigger.event];
       if (w.trigger.event.startsWith("workflow.")) errors.push({ path: `${p}.trigger.event`, message: "Luật không được nghe sự kiện do chính workflow phát (chặn vòng lặp)." });
       else if (!spec) errors.push({ path: `${p}.trigger.event`, message: `Sự kiện «${w.trigger.event}» không có trong sổ sự kiện.` });
-      else if (objectDef(spec.subjectType)) objectKey = spec.subjectType;
+      else if (w.trigger.objectKey) {
+        // Chỉ sự kiện trên BẢN GHI metadata (`custom_record.*`, `custom_status.changed`) mang `objectKey` — cùng luật `validateRuleInput`.
+        if (spec.subjectType !== METADATA_RECORD_SUBJECT) errors.push({ path: `${p}.trigger.objectKey`, message: `Sự kiện «${w.trigger.event}» không gắn với bản ghi của một đối tượng — bỏ objectKey.` });
+        else if (!objectOf(bp, w.trigger.objectKey)?.capabilities.customFields) errors.push({ path: `${p}.trigger.objectKey`, message: `Đối tượng «${w.trigger.objectKey}» không có trong sổ hoặc trong gói.` });
+        else objectKey = w.trigger.objectKey;
+      } else if (objectDef(spec.subjectType)) objectKey = spec.subjectType;
     } else {
       objectKey = w.trigger.objectKey;
       const f = fieldByRef.get(`${w.trigger.objectKey}.${w.trigger.fieldKey}`);
@@ -313,7 +370,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
     }
     if (w.conditions !== undefined && w.conditions !== null) {
       if (conditionDepth(w.conditions) > WORKFLOW_CONDITION_MAX_DEPTH) errors.push({ path: `${p}.conditions`, message: `Cây điều kiện sâu tối đa ${WORKFLOW_CONDITION_MAX_DEPTH} tầng.` });
-      const def = objectKey ? objectDef(objectKey) : null;
+      const def = objectKey ? objectOf(bp, objectKey) : null;
       checkConditionRefs(w.conditions, `${p}.conditions`, errors, (ref) => {
         if ((EVENT_SUBJECT_REFS as readonly string[]).includes(ref) || ref.startsWith(PAYLOAD_REF_PREFIX)) return null;
         if (ref.startsWith("system:")) return def?.fields.some((f) => `system:${f.key}` === ref) ? null : `Điều kiện trỏ «${ref}» — không có field hệ thống đó trên đối tượng của luật.`;
@@ -336,7 +393,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
       }
     });
     if (objectKey) {
-      const def = objectDef(objectKey);
+      const def = objectOf(bp, objectKey);
       if (def && !modules.has(def.module)) errors.push({ path: `${p}.trigger`, message: `${def.label} thuộc module «${def.module}» — gói không khai module này.` });
     }
   });

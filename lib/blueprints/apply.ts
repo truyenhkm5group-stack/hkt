@@ -7,6 +7,7 @@
  *
  *   module   → `toggleOwnModule`      (đường ghi duy nhất của module: kiểm phụ thuộc, hai nhật ký, xoá đệm năng lực)
  *   vai trò  → `saveAccessRoleCore`   (lược đồ chặn luật 31 ở cửa vào)
+ *   đối tượng → `createObject` / `updateObject` (Phase 6 — module `apps` đã bật ở bước module)
  *   field    → `createCustomField` / `updateCustomField`
  *   trạng thái → `saveStatusOverrides`
  *   form     → `saveFormDraft` (+ `publishForm` chỉ lần cài đầu khi gói khai `publish`)
@@ -25,6 +26,7 @@ import { audit } from "@/lib/audit";
 import { saveAccessRoleCore } from "@/lib/auth/access-roles";
 import type { SessionUser } from "@/lib/auth/session";
 import { createCustomField, updateCustomField } from "@/lib/metadata/fields";
+import { createObject, updateObject } from "@/lib/objects/objects";
 import { publishForm, saveFormDraft } from "@/lib/metadata/forms";
 import { publishListView, saveListViewDraft } from "@/lib/metadata/lists";
 import { saveStatusOverrides } from "@/lib/metadata/statuses";
@@ -41,6 +43,7 @@ import { finishInstall, recordItem, startInstall } from "@/lib/blueprints/ledger
 import { blueprintItems, type BlueprintItem } from "@/lib/blueprints/plan";
 import { projectAi } from "@/lib/blueprints/project";
 import { newReadContext, readEntity, type ReadContext } from "@/lib/blueprints/state";
+import { fieldValidationOf } from "@/lib/blueprints/validate";
 import {
   AI_PROFILE_SETTING_KEY,
   stepKey,
@@ -49,6 +52,7 @@ import {
   type BlueprintField,
   type BlueprintForm,
   type BlueprintListView,
+  type BlueprintObject,
   type BlueprintPage,
   type BlueprintPlan,
   type BlueprintRole,
@@ -102,8 +106,9 @@ async function runStep(step: PlanStep, it: BlueprintItem, bp: Blueprint, user: S
         type: f.type,
         label: f.label,
         required: f.required === true,
-        validation: f.validation ?? {},
+        validation: fieldValidationOf(f),
         transitions: f.transitions ?? {},
+        relationObject: f.relation?.objectKey ?? null,
         helpText: f.helpText?.trim() || null,
         listable: f.listable !== false,
         filterable: f.filterable === true,
@@ -190,8 +195,21 @@ async function runStep(step: PlanStep, it: BlueprintItem, bp: Blueprint, user: S
       await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: AI_PROFILE_SETTING_KEY, before, after: value, reason });
       return { ok: true };
     }
-    case "object":
-      return { error: "Đối tượng tuỳ biến chưa hỗ trợ ở phiên bản này." };
+    case "object": {
+      const o = it.item as BlueprintObject;
+      const input = {
+        label: o.label,
+        labelPlural: o.labelPlural,
+        icon: o.icon,
+        moduleKey: o.moduleKey,
+        titleLabel: o.titleLabel,
+        description: o.description?.trim() || null,
+        ...(o.viewPermission ? { viewPermission: o.viewPermission } : {}),
+        ...(o.writePermission ? { writePermission: o.writePermission } : {}),
+      };
+      const r = step.action === "CREATE" ? await createObject(user, { key: o.key, ...input }) : await updateObject(user, o.key, input);
+      return r.ok ? { ok: true } : { error: messages(r.errors) };
+    }
   }
 }
 

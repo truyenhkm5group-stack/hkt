@@ -5,7 +5,8 @@
  * dùng được mà không kéo theo CSDL hay mã chỉ-máy-chủ.
  */
 
-export type OrganizationStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+/** `SETUP_FAILED` (Phase 10): lượt dựng tự phục vụ hỏng giữa chừng — không đăng nhập, không job; người vận hành xử lý ở /platform. */
+export type OrganizationStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED" | "SETUP_FAILED";
 
 /** Dòng module THIẾU nghĩa là gì với tổ chức này (target-architecture P7): khai ở cấp tổ chức, không đoán. */
 export type ModuleDefault = "ENABLED" | "DISABLED";

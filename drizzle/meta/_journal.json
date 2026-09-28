@@ -1170,6 +1170,20 @@
       "when": 1790566665167,
       "tag": "0167_meta_pages_draft_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1790566725167,
+      "tag": "0168_ai_blueprint_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1790566785167,
+      "tag": "0169_platform_onboarding",
+      "breakpoints": true
     }
   ]
 }

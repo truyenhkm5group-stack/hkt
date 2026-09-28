@@ -64,6 +64,7 @@ export default async function TemplatesPage() {
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground">
+                      {t.counts.objects ? `${t.counts.objects} đối tượng tuỳ biến · ` : ""}
                       {t.counts.fields} field · {t.counts.forms} form · {t.counts.lists} danh sách · {t.counts.pages} trang · {t.counts.workflows} luật · {t.counts.roles} vai trò
                     </p>
                     <Link href={`/settings/templates/${encodeURIComponent(t.key)}`} className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline">

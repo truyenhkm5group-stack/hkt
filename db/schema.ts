@@ -4242,13 +4242,13 @@ export const platformOrganizations = pgTable(
     id: id(),
     code: text("code").notNull(),
     name: text("name").notNull(),
-    /** `ACTIVE` · `SUSPENDED` · `ARCHIVED` — chỉ `ACTIVE` đăng nhập / chạy job được. */
+    /** `ACTIVE` · `SUSPENDED` · `ARCHIVED` · `SETUP_FAILED` (dựng dở, 0169) — chỉ `ACTIVE` đăng nhập / chạy job được. */
     status: text("status").notNull().default("ACTIVE"),
     /** ĐÚNG MỘT dòng `true`: tổ chức có CSDL là `DATABASE_URL` (tổ chức có từ trước nền tảng). */
     isHome: boolean("is_home").notNull().default(false),
     /** Dòng module THIẾU nghĩa là gì: `ENABLED` (tổ chức nhà — như trước nền tảng) · `DISABLED` (tổ chức mới). */
     moduleDefault: text("module_default").notNull().default("DISABLED"),
-    /** Chỗ cho gói dịch vụ sau này. Phase 1 không có luật nào đọc cột này. */
+    /** Khoá gói (`platform_plans.key`, 0169). Tổ chức nhà LUÔN là `internal` trong mã; tổ chức khác thiếu ⇒ `trial` (lib/entitlements). */
     plan: text("plan"),
     templateKey: text("template_key"),
     settings: jsonb("settings").notNull().default({}),
@@ -4258,9 +4258,71 @@ export const platformOrganizations = pgTable(
   (t) => [
     uniqueIndex("platform_organizations_code_key").on(t.code),
     uniqueIndex("platform_organizations_one_home").on(t.isHome).where(sql`${t.isHome}`),
-    check("platform_organizations_status_check", sql`${t.status} in ('ACTIVE','SUSPENDED','ARCHIVED')`),
+    check("platform_organizations_status_check", sql`${t.status} in ('ACTIVE','SUSPENDED','ARCHIVED','SETUP_FAILED')`),
     check("platform_organizations_module_default_check", sql`${t.moduleDefault} in ('ENABLED','DISABLED')`),
     check("platform_organizations_code_check", sql`${t.code} ~ '^[a-z][a-z0-9-]{1,30}$'`),
+  ],
+);
+
+/**
+ * Gói dịch vụ + hạn mức (Phase 10 · §5, 0169). `limits` = `{ users, pages, objects, records, workflows, aiDraftsPerDay,
+ * storageMb }`, mỗi ô là số hoặc `null` (= không giới hạn). Ba gói gieo bằng migration — dữ liệu cấu hình của nền tảng.
+ */
+export const platformPlans = pgTable(
+  "platform_plans",
+  {
+    key: text("key").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    limits: jsonb("limits").$type<Record<string, number | null>>().notNull().default({}),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("platform_plans_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,30}$'`)],
+);
+
+/** Mã mời tự đăng ký (Phase 10 · §1). Chỉ lưu BĂM sha256 — mã thô hiện đúng một lần lúc tạo. Dùng một lần, có hạn. */
+export const platformSignupInvites = pgTable(
+  "platform_signup_invites",
+  {
+    id: id(),
+    codeHash: text("code_hash").notNull(),
+    note: text("note"),
+    planKey: text("plan_key"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    createdByOrg: text("created_by_org"),
+    createdByUserId: text("created_by_user_id"),
+    createdByEmail: text("created_by_email"),
+    usedAt: ts("used_at"),
+    organizationCode: text("organization_code"),
+    revokedAt: ts("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("platform_signup_invites_hash_key").on(t.codeHash),
+    check("platform_signup_invites_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check("platform_signup_invites_used_check", sql`(${t.usedAt} IS NULL) = (${t.organizationCode} IS NULL)`),
+  ],
+);
+
+/** Mỗi lượt thử đăng ký / nhập mã mời — nguồn ĐẾM của trần theo IP (băm) và theo ngày. Không giữ IP thô. */
+export const platformSignupAttempts = pgTable(
+  "platform_signup_attempts",
+  {
+    id: id(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    mode: text("mode").notNull(),
+    ipHash: text("ip_hash").notNull(),
+    organizationCode: text("organization_code"),
+    outcome: text("outcome").notNull(),
+    reason: text("reason"),
+  },
+  (t) => [
+    index("platform_signup_attempts_ip_at_idx").on(t.ipHash, t.at),
+    index("platform_signup_attempts_at_idx").on(t.at),
+    check("platform_signup_attempts_mode_check", sql`${t.mode} in ('invite','open','operator')`),
+    check("platform_signup_attempts_outcome_check", sql`${t.outcome} in ('CREATED','FAILED','REJECTED','INVITE_REJECTED')`),
   ],
 );
 
@@ -8750,5 +8812,50 @@ export const customRecords = pgTable(
     index("custom_records_object_idx").on(t.objectKey, t.deletedAt, t.updatedAt),
     index("custom_records_owner_idx").on(t.ownerId),
     check("custom_records_title_check", sql`length(btrim(${t.title})) > 0`),
+  ],
+);
+
+// ═══ PHASE 8 — AI ERP BUILDER (docs/platform/phase-8-contracts.md mục 3) ═══
+//
+// Bản nháp AI soạn trong CSDL tổ chức. AI không có đường ghi nào của riêng nó: áp dụng = bộ cài Phase 7
+// (`installBlueprint` với `expectedPlanHash`). Chỉ `lib/ai-builder/service.ts` ghi bảng này.
+
+export const aiBlueprintDrafts = pgTable(
+  "ai_blueprint_drafts",
+  {
+    id: id(),
+    mode: text("mode").notNull(),
+    prompt: text("prompt").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    blueprint: jsonb("blueprint"),
+    contextKeys: jsonb("context_keys").notNull().default([]),
+    valid: boolean("valid").notNull().default(false),
+    validation: jsonb("validation").notNull().default({}),
+    error: text("error"),
+    excludedKeys: jsonb("excluded_keys").notNull().default([]),
+    planHash: text("plan_hash"),
+    installId: text("install_id"),
+    aiSource: text("ai_source"),
+    provider: text("provider"),
+    model: text("model"),
+    aiCalls: integer("ai_calls").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costUsd: doublePrecision("cost_usd"),
+    createdBy: text("created_by"),
+    createdByEmail: text("created_by_email"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: ts("applied_at"),
+    appliedBy: text("applied_by"),
+    discardedAt: ts("discarded_at"),
+    discardedBy: text("discarded_by"),
+  },
+  (t) => [
+    index("ai_blueprint_drafts_created_idx").on(t.createdAt),
+    check("ai_blueprint_drafts_mode_check", sql`${t.mode} in ('new','edit')`),
+    check("ai_blueprint_drafts_status_check", sql`${t.status} in ('DRAFT','APPLIED','DISCARDED')`),
+    check("ai_blueprint_drafts_applied_check", sql`${t.status} <> 'APPLIED' or ${t.installId} is not null`),
+    check("ai_blueprint_drafts_source_check", sql`${t.aiSource} is null or ${t.aiSource} in ('ORG_CONNECTION','HOME')`),
   ],
 );

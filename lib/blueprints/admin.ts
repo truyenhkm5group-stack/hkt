@@ -8,11 +8,11 @@
  * kế hoạch đánh dấu BỊ CHẶN, nên người thiếu quyền thấy trước bước nào không làm được thay vì hỏng giữa chừng.
  */
 import { can, type SessionUser } from "@/lib/auth/session";
-import { objectDef } from "@/lib/constants/object-registry";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { installHistory, installedVersion } from "@/lib/blueprints/ledger";
 import { installBlueprint, planForOrg } from "@/lib/blueprints/install";
 import { BLUEPRINT_TEMPLATES, templateBlueprint } from "@/lib/blueprints/templates";
+import { blueprintModules, objectOf } from "@/lib/blueprints/validate";
 import { compareVersions, type ApplyResult, type Blueprint, type BlueprintIssue, type BlueprintPlan, type InstallHistoryRow, type StepResolution } from "@/lib/blueprints/types";
 
 export type BlueprintDenied = { ok: false; errors: BlueprintIssue[] };
@@ -37,6 +37,7 @@ export type TemplateSummary = {
   modules: { key: string; label: string }[];
   counts: { roles: number; fields: number; forms: number; lists: number; pages: number; workflows: number; objects: number };
   fieldObjects: string[];
+  objects: { key: string; label: string }[];
   pages: { slug: string; name: string }[];
   workflows: { key: string; name: string }[];
   integrations: { connectorKey: string; label: string; reason: string }[];
@@ -51,7 +52,7 @@ export function summarize(bp: Blueprint, installed: string | null): TemplateSumm
     name: bp.name,
     description: bp.description,
     industry: bp.industry,
-    modules: bp.modules.map((m) => ({ key: m, label: moduleDef(m)?.label ?? m })),
+    modules: blueprintModules(bp).map((m) => ({ key: m, label: moduleDef(m)?.label ?? m })),
     counts: {
       roles: bp.roles?.length ?? 0,
       fields: bp.fields?.length ?? 0,
@@ -61,7 +62,8 @@ export function summarize(bp: Blueprint, installed: string | null): TemplateSumm
       workflows: bp.workflows?.length ?? 0,
       objects: bp.objects?.length ?? 0,
     },
-    fieldObjects: [...new Set((bp.fields ?? []).map((f) => objectDef(f.objectKey)?.label ?? f.objectKey))],
+    fieldObjects: [...new Set((bp.fields ?? []).map((f) => objectOf(bp, f.objectKey)?.label ?? f.objectKey))],
+    objects: (bp.objects ?? []).map((o) => ({ key: o.key, label: o.label })),
     pages: (bp.pages ?? []).map((p) => ({ slug: p.slug, name: p.name })),
     workflows: (bp.workflows ?? []).map((w) => ({ key: w.key, name: w.name })),
     integrations: (bp.integrations ?? []).map((i) => ({ connectorKey: i.connectorKey, label: moduleDef(i.connectorKey)?.label ?? i.connectorKey, reason: i.reason })),

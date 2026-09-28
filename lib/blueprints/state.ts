@@ -13,9 +13,10 @@ import { listAccessRoles, type AccessRoleRow } from "@/lib/queries/access";
 import { objectDef } from "@/lib/constants/object-registry";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { loadCustomDefs } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
 import { loadConfigRow } from "@/lib/metadata/config-store";
 import { getStatusOverrides } from "@/lib/metadata/statuses";
-import type { CustomFieldDef, FormSchema, ListViewSchema } from "@/lib/metadata/types";
+import { isCustomObjectKey, type CustomFieldDef, type FormSchema, type ListViewSchema } from "@/lib/metadata/types";
 import { getPageDraft, listPages } from "@/lib/pages/registry";
 import type { PageDefinition } from "@/lib/pages/types";
 import { getEnabledModules } from "@/lib/platform/capabilities";
@@ -24,7 +25,8 @@ import { listRules } from "@/lib/workflow/rules";
 import type { WorkflowRule } from "@/lib/workflow/types";
 import { installedItems, installedVersion } from "@/lib/blueprints/ledger";
 import type { EntityState, OrgState } from "@/lib/blueprints/plan";
-import { projectFieldDef, projectForm, projectList, projectPage, projectRoleRow, projectRule, projectStatusRows } from "@/lib/blueprints/project";
+import { projectFieldDef, projectForm, projectList, projectObjectDef, projectPage, projectRoleRow, projectRule, projectStatusRows } from "@/lib/blueprints/project";
+import { blueprintModules } from "@/lib/blueprints/validate";
 import { AI_PROFILE_SETTING_KEY, stepKey, type Blueprint, type BlueprintItemKind } from "@/lib/blueprints/types";
 
 /** Đệm đọc cho MỘT lượt lập kế hoạch / cài — không sống qua lượt (M13: không đệm metadata trong tiến trình). */
@@ -42,8 +44,9 @@ export async function newReadContext(): Promise<ReadContext> {
 
 async function defsOf(ctx: ReadContext, objectKey: string): Promise<CustomFieldDef[]> {
   if (!ctx.customDefs.has(objectKey)) {
+    // Đối tượng tuỳ biến (`x_…`) luôn nhận field tuỳ biến; `loadCustomDefs` không kiểm module (đọc cả khi `apps` tắt).
     const def = objectDef(objectKey);
-    ctx.customDefs.set(objectKey, def?.capabilities.customFields ? await loadCustomDefs(objectKey, true) : []);
+    ctx.customDefs.set(objectKey, isCustomObjectKey(objectKey) || def?.capabilities.customFields ? await loadCustomDefs(objectKey, true) : []);
   }
   return ctx.customDefs.get(objectKey)!;
 }
@@ -84,7 +87,8 @@ export async function readEntity(kind: BlueprintItemKind, key: string, ctx: Read
       const raw = row ? (row.draft ?? row.published) : null;
       if (!row || raw === null || raw === undefined) return ABSENT;
       const custom = await defsOf(ctx, objectKey);
-      const projection = kind === "form" ? projectForm(objectKey, raw as FormSchema, custom) : projectList(objectKey, raw as ListViewSchema, custom);
+      const def = await resolveObject(objectKey);
+      const projection = kind === "form" ? projectForm(def, raw as FormSchema, custom) : projectList(def, raw as ListViewSchema, custom);
       return { exists: true, deleted: false, projection, publishedVersion: row.publishedVersion };
     }
     case "page": {
@@ -107,16 +111,20 @@ export async function readEntity(kind: BlueprintItemKind, key: string, ctx: Read
       const v = await getSettingJson<unknown>(AI_PROFILE_SETTING_KEY, null);
       return v === null || v === undefined ? ABSENT : { exists: true, deleted: false, projection: v };
     }
-    case "object":
-      return ABSENT;
+    case "object": {
+      const def = await resolveObject(key);
+      const projection = def ? projectObjectDef(def) : null;
+      return def && projection ? { exists: true, deleted: def.custom?.status === "ARCHIVED", projection } : ABSENT;
+    }
   }
 }
 
 /** Mọi (loại, khoá) mà gói nhắc tới — cùng khoá với `blueprintItems`. */
 function itemKeys(bp: Blueprint): { kind: BlueprintItemKind; key: string }[] {
   return [
-    ...bp.modules.map((m) => ({ kind: "module" as const, key: m })),
+    ...blueprintModules(bp).map((m) => ({ kind: "module" as const, key: m })),
     ...(bp.roles ?? []).map((r) => ({ kind: "role" as const, key: r.key })),
+    ...(bp.objects ?? []).map((o) => ({ kind: "object" as const, key: o.key })),
     ...(bp.fields ?? []).map((f) => ({ kind: "field" as const, key: `${f.objectKey}.${f.key}` })),
     ...(bp.statuses ?? []).map((s) => ({ kind: "status" as const, key: `${s.objectKey}.${s.field}` })),
     ...(bp.forms ?? []).map((f) => ({ kind: "form" as const, key: `${f.objectKey}.${f.formKey}` })),

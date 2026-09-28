@@ -62,6 +62,9 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
     khoá quyền ở đây chỉ làm mất lượt đếm của đúng những người ít quyền nhất.
   */
   "app/api/usage/visit/route.ts": "chỉ cần phiên: cộng +1 vào bộ đếm theo MỤC trang đã khai, không đọc/trả dữ liệu, không ghi ai mở",
+  // Phase 10 · thương hiệu: logo hiện trên thanh đầu cho MỌI người của tổ chức, nên khoá quyền nào ở đây cũng làm vỡ
+  // thanh đầu của người ít quyền nhất. Không nhận id / mã tổ chức: chỉ trả logo của CHÍNH tổ chức trong phiên.
+  "app/api/branding/logo/route.ts": "chỉ cần phiên: logo của CHÍNH tổ chức trong phiên (thanh đầu của mọi người), không nhận id hay mã tổ chức",
   "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
 };
 

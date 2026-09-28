@@ -8,6 +8,7 @@ import { testCodStatementAudit } from "./cod-statement-audit.test";
 import { testIdeas } from "./ideas.test";
 import { testPermissions } from "./permissions.test";
 import { testPlatformModules } from "./platform-modules.test";
+import { testOnboarding } from "./onboarding.test";
 import { testOrderSource } from "./order-source.test";
 import { testDuplicateEvidencePure, testFanpageAttribution } from "./fanpage-attribution.test";
 import { testFanpageAccessPure, testFanpageHistoryDb, testPageEvidencePure } from "./fanpage-history.test";
@@ -428,6 +429,7 @@ import { testPlatformUi } from "./platform-ui.test";
 import { testConnectors } from "./connectors.test";
 import { testBlueprints } from "./blueprints.test";
 import { testCustomObjects } from "./custom-objects.test";
+import { testAiBuilder } from "./ai-builder.test";
 import { testPageData } from "./page-data.test";
 import { testPageRuntime } from "./page-runtime.test";
 import { testWorkflowAdmin } from "./workflow-admin.test";
@@ -2492,6 +2494,12 @@ async function main() {
   // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
   await testConnectors();
   await testCustomObjects();
+  // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
+  // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.
+  await testAiBuilder();
+  // Phase 10 · tự phục vụ: ba tổ chức THẬT `ob-a` / `ob-b` / `ob-c` (tự cấp, tự dọn) — cờ off / mã mời / tạo từ mẫu
+  // bán sỉ bỏ Mua hàng / đăng nhập đúng tổ chức / chạy lại không nhân đôi / SETUP_FAILED / hạn mức gói / cô lập logo.
+  await testOnboarding();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

@@ -113,8 +113,52 @@ export async function testTelegramBot(input: { secrets: Record<string, string>; 
   }
 }
 
+/*
+  ═══════════ KHOÁ AI CỦA TỔ CHỨC (Phase 8) — HỎI "KHOÁ CÒN SỐNG KHÔNG" BẰNG LỜI GỌI RẺ NHẤT ═══════════
+
+  `GET /v1/models` ở cả hai nhà cung cấp: chỉ đọc, KHÔNG sinh token nào (không tốn tiền của tổ chức), trả 401 khi khoá
+  sai. Địa chỉ là HẰNG SỐ trong mã — người dùng chỉ nhập khoá, không nhập URL, nên không có đường nào đưa request đi
+  chỗ khác. Không theo chuyển hướng, trần 10 giây, khoá bị che trong mọi câu lỗi.
+*/
+export const ANTHROPIC_KEY_PATTERN = /^sk-ant-[A-Za-z0-9_-]{20,200}$/;
+export const OPENAI_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,200}$/;
+export const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models?limit=1";
+export const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
+
+async function probeModels(fetchImpl: FetchLike, url: string, headers: Record<string, string>, vendor: string, hide: string[]): Promise<TesterResult> {
+  try {
+    const res = await fetchImpl(url, { method: "GET", headers, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status >= 300 && res.status < 400) return { ok: false, message: `${vendor} trả chuyển hướng HTTP ${res.status} — không theo.` };
+    const body = (await readCapped(res)) as { error?: { message?: string; type?: string } | string } | null;
+    if (res.status === 401 || res.status === 403) return { ok: false, message: `${vendor} từ chối khoá (HTTP ${res.status}) — khoá sai, đã thu hồi, hoặc không có quyền.` };
+    if (!res.ok) {
+      const detail = typeof body?.error === "string" ? body.error : (body?.error?.message ?? `HTTP ${res.status}`);
+      return { ok: false, message: scrubSecrets(`${vendor} trả lỗi: ${detail}`, hide) };
+    }
+    return { ok: true, message: `${vendor} nhận khoá (đã liệt kê model — lời gọi chỉ đọc, không tốn token).` };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(`Không gọi được ${vendor}: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
+/** Anthropic: `GET https://api.anthropic.com/v1/models` với `x-api-key` của tổ chức. */
+export async function testAnthropicKey(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const key = (input.secrets.apiKey ?? "").trim();
+  if (!ANTHROPIC_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá không đúng dạng khoá Anthropic (sk-ant-…) — không gửi." };
+  return probeModels(deps.fetch ?? fetch, ANTHROPIC_MODELS_URL, { "x-api-key": key, "anthropic-version": "2023-06-01" }, "Anthropic", [key]);
+}
+
+/** OpenAI: `GET https://api.openai.com/v1/models` với `Authorization: Bearer` của tổ chức. */
+export async function testOpenAiKey(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const key = (input.secrets.apiKey ?? "").trim();
+  if (!OPENAI_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá không đúng dạng khoá OpenAI (sk-…) — không gửi." };
+  return probeModels(deps.fetch ?? fetch, OPENAI_MODELS_URL, { authorization: `Bearer ${key}` }, "OpenAI", [key]);
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
   "telegram-bot": (input, deps) => testTelegramBot(input, deps),
+  "anthropic-byok": (input, deps) => testAnthropicKey(input, deps),
+  "openai-byok": (input, deps) => testOpenAiKey(input, deps),
 };

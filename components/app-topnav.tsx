@@ -67,7 +67,13 @@ function ItemInner({ href, label, active }: { href: string; label: string; activ
   );
 }
 
-export function AppTopNav({ user }: { user: TopNavUser }) {
+/**
+ * Thương hiệu của tổ chức KHÔNG phải nhà (Phase 10 · §4): tên + logo thay cho nhận diện của tổ chức nhà. `null` ⇒ tổ
+ * chức nhà, giữ nguyên nhận diện hiện tại.
+ */
+export type TopNavBrand = { name: string; logoUrl: string | null } | null;
+
+export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: TopNavBrand }) {
   const pathname = usePathname();
   const activeHref = activeHrefOf(pathname, user.dynamicPages?.map((d) => d.href));
   const groups = visibleGroups(user);
@@ -107,12 +113,25 @@ export function AppTopNav({ user }: { user: TopNavUser }) {
           </SheetContent>
         </Sheet>
 
-        <Link href="/" aria-label="VNXcommerce — về trang tổng quan" className="mr-2 flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-opacity hover:opacity-90">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-brand text-white">
-            <BrandGlyph className="h-[12px]" />
-          </span>
-          <BrandWordmark className="hidden text-[16px] text-foreground sm:inline xl:hidden 2xl:inline" />
-        </Link>
+        {brand ? (
+          <Link href="/" aria-label={`${brand.name} — về trang chủ`} className="mr-2 flex min-w-0 shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-opacity hover:opacity-90" data-org-brand>
+            {brand.logoUrl ? (
+              // Logo tải qua route có kiểm tổ chức (`/api/branding/logo`) — không qua bộ tối ưu ảnh của Next.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={brand.logoUrl} alt="" className="size-9 shrink-0 rounded-xl object-contain" />
+            ) : (
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">{brand.name.trim().charAt(0).toUpperCase() || "•"}</span>
+            )}
+            <span className="hidden max-w-[180px] truncate text-[15px] font-bold text-foreground sm:inline xl:hidden 2xl:inline">{brand.name}</span>
+          </Link>
+        ) : (
+          <Link href="/" aria-label="VNXcommerce — về trang tổng quan" className="mr-2 flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-opacity hover:opacity-90">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-brand text-white">
+              <BrandGlyph className="h-[12px]" />
+            </span>
+            <BrandWordmark className="hidden text-[16px] text-foreground sm:inline xl:hidden 2xl:inline" />
+          </Link>
+        )}
 
         <nav aria-label="Điều hướng chính" className="hidden min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] xl:flex [&::-webkit-scrollbar]:hidden">
           {groups.map((group) => {

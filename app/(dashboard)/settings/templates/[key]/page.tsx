@@ -53,6 +53,11 @@ export default async function TemplatePreviewPage({ params }: { params: Promise<
           <p>
             <b>Module:</b> {template.modules.map((m) => m.label).join(" · ")}
           </p>
+          {template.objects.length ? (
+            <p>
+              <b>Đối tượng tuỳ biến (tạo mới, module «Ứng dụng tuỳ biến»):</b> {template.objects.map((o) => `${o.label} (${o.key})`).join(", ")}
+            </p>
+          ) : null}
           <p>
             <b>Field tuỳ biến trên:</b> {template.fieldObjects.join(", ") || "—"} · <b>Trang:</b> {template.pages.map((p) => p.name).join(", ") || "—"} · <b>Luật (NHÁP):</b>{" "}
             {template.workflows.map((w) => w.name).join(", ") || "—"}

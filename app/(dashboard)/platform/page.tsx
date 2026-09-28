@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
+import { InvitePanel, RetrySetupButton, RevokeInviteButton } from "@/components/onboarding/platform-signup";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
+import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
+import { listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
+import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
+import { listOrganizations } from "@/lib/platform/organizations";
+import { listOnboardingStates, signupMode } from "@/lib/onboarding/service";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
 import { getOrganizationModuleView } from "@/lib/queries/platform-modules";
@@ -13,7 +19,8 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Vận hành nền tảng" };
 
-const STATUS_LABEL: Record<OrgHealth["status"], string> = { ACTIVE: "Đang chạy", SUSPENDED: "Đình chỉ", ARCHIVED: "Lưu trữ" };
+const STATUS_LABEL: Record<OrgHealth["status"], string> = { ACTIVE: "Đang chạy", SUSPENDED: "Đình chỉ", ARCHIVED: "Lưu trữ", SETUP_FAILED: "Dựng hỏng" };
+const SIGNUP_MODE_LABEL = { off: "TẮT — /start chỉ in «chưa mở đăng ký»", invite: "Cần mã mời", open: "Mở (có trần theo IP / ngày)" } as const;
 
 function Measured({ ok, children, note }: { ok: boolean | null; children: React.ReactNode; note?: string | null }) {
   return (
@@ -62,6 +69,9 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const selected = selectedCode ? health.organizations.find((o) => o.code === selectedCode) : undefined;
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
+  const [onboarding, invites, plans, registry] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations()]);
+  const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
+  const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
 
   return (
     <div className="space-y-5">
@@ -116,8 +126,23 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                       </div>
                       <div className="font-mono text-[11px] text-muted-foreground">{o.code}</div>
                     </td>
-                    <td className="px-3 py-2">{STATUS_LABEL[o.status] ?? o.status}</td>
-                    <td className="px-3 py-2 text-xs">{o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : <span className="text-muted-foreground">—</span>}</td>
+                    <td className="px-3 py-2">
+                      <span className={cn(o.status === "SETUP_FAILED" && "font-semibold text-destructive")}>{STATUS_LABEL[o.status] ?? o.status}</span>
+                      {onboarding[o.code] && onboarding[o.code].state !== "DONE" ? (
+                        <div className="max-w-[260px] space-y-1 text-[11px] text-muted-foreground">
+                          <p>
+                            Dựng {onboarding[o.code].state === "RUNNING" ? "đang chạy" : "hỏng"}
+                            {onboarding[o.code].failedStep ? ` ở bước ${onboarding[o.code].failedStep}` : ""} · {onboarding[o.code].runs} lượt
+                          </p>
+                          {onboarding[o.code].error ? <p className="text-destructive">{onboarding[o.code].error}</p> : null}
+                          {o.status === "SETUP_FAILED" ? <RetrySetupButton orgCode={o.code} /> : null}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : <span className="text-muted-foreground">—</span>}
+                      <div className="text-[11px] text-muted-foreground">Gói {planName(planOfCode(o.code, o.isHome))}</div>
+                    </td>
                     <td className="numeric px-3 py-2 text-right" title={`Dòng module thiếu = ${o.moduleDefault === "ENABLED" ? "BẬT" : "TẮT"}`}>
                       {o.enabledModules ?? "—"}/{o.totalModules}
                     </td>
@@ -150,6 +175,53 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
             </table>
           </div>
         )}
+      </SectionCard>
+
+      <SectionCard
+        title="Tự phục vụ — mã mời & tạo tổ chức"
+        description={`Đăng ký công khai: ${SIGNUP_MODE_LABEL[signupMode()]} (biến môi trường PLATFORM_SIGNUP_MODE, đọc ở máy chủ)`}
+        hint="Người vận hành luôn tạo được tổ chức cho khách qua /start — cùng luồng với khách, không cần cờ, và phiên của bạn không đổi. Mã mời dùng một lần, có hạn; CSDL chỉ giữ băm của mã. Dựng hỏng giữa chừng ⇒ tổ chức ở «Dựng hỏng» (bảng trên) kèm nút Chạy lại — không có CSDL nào bị xoá tự động."
+        actions={
+          <Button asChild size="sm">
+            <Link href="/start">Tạo tổ chức cho khách</Link>
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          <InvitePanel plans={plans.filter((p) => p.key !== "internal").map((p) => ({ key: p.key, name: p.name }))} />
+          {invites.length === 0 ? (
+            <EmptyState title="Chưa có mã mời nào" description="Tạo mã ở trên rồi gửi liên kết cho khách." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Ghi chú</th>
+                    <th className="px-3 py-2">Gói</th>
+                    <th className="px-3 py-2">Trạng thái</th>
+                    <th className="px-3 py-2">Hạn</th>
+                    <th className="px-3 py-2">Tổ chức sinh ra</th>
+                    <th className="px-3 py-2">Người tạo</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invites.map((i) => (
+                    <tr key={i.id} className="border-t border-hairline">
+                      <td className="px-3 py-2">{i.note ?? <span className="text-muted-foreground">—</span>}</td>
+                      <td className="px-3 py-2 text-xs">{planName(i.planKey ?? "trial")}</td>
+                      <td className="px-3 py-2 text-xs">{INVITE_STATUS_LABEL[i.status]}</td>
+                      <td className="px-3 py-2 text-xs">{formatDateTime(i.expiresAt)}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{i.organizationCode ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs">{i.createdByEmail ?? "máy"}</td>
+                      <td className="px-3 py-2 text-right">{i.status === "ACTIVE" ? <RevokeInviteButton id={i.id} /> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </SectionCard>
 
       {selectedCode && !selected ? <EmptyState title={`Không có tổ chức mã "${selectedCode}"`} description="Chọn lại từ bảng phía trên." /> : null}

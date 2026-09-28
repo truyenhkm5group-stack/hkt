@@ -257,6 +257,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/landing/sheet.ts": "CSV công khai của Google Sheet, URL đọc từ `settings` của CHÍNH tổ chức đang chạy — không có credential môi trường.",
   "lib/actions/workshop-ledger.ts": "Link Google Sheet công khai do người dùng dán vào form — không có credential môi trường.",
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",
+  "lib/ai-builder/providers.ts":
+    "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials).",
   "lib/connectors/testers.ts":
     "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường nào; đích chỉ là máy chủ Lark / api.telegram.org, không theo chuyển hướng.",
 };
@@ -380,6 +382,8 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "db/": "Chỗ định nghĩa ba hàm, và lượt migrate CSDL nhà lúc khởi động (`ensureMigrated`).",
   "lib/queries/platform-health.ts": "Máy quét sức khoẻ nền tảng: mở CSDL TỪNG tổ chức để đếm migration và bảng platform_* — việc của nó là nhìn sang mọi tổ chức.",
   "app/api/health/route.ts": "Tuyến sức khoẻ công khai của lượt deploy: đọc mặt phẳng điều khiển (cờ + số đếm, không mã tổ chức nào) — không có phiên để đi qua ngữ cảnh.",
+  "lib/onboarding/": "Tự phục vụ (Phase 10): mã mời, lượt đăng ký, trạng thái dựng tổ chức — mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức mới chỉ chạm qua provisionOrganization + withOrganization.",
+  "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
 };
 
 export function testCsdlChiDinhChiONenTang() {

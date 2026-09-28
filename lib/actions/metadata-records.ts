@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
 import { saveCustomFile } from "@/lib/metadata/values";
@@ -40,6 +41,8 @@ export async function uploadCustomerFileAction(formData: FormData): Promise<{ ok
   const field = formData.get("field");
   const file = formData.get("file");
   if (typeof recordId !== "string" || typeof field !== "string" || !(file instanceof File)) return { ok: false, error: "Thiếu tệp hoặc thiếu bản ghi." };
+  const ent = await checkEntitlement("storageMb", file.size / (1024 * 1024));
+  if (!ent.ok) return { ok: false, error: ent.error };
   const r = await saveCustomFile("customer", recordId, field, { filename: file.name, mime: file.type, data: Buffer.from(await file.arrayBuffer()) }, user);
   if (!r.ok) return { ok: false, error: r.errors.map((e) => e.message).join(" · ") || "Không tải lên được." };
   revalidatePath(`/customers/${recordId}`);

@@ -86,9 +86,11 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/api/webhooks`, `/api/sync`: tuyến máy-gọi-máy, chạy trong `withOrganization` và tự kiểm
  *    module của connector / job (hợp đồng mục 5, 8).
  *  · `/login`: chưa có phiên thì chưa có tổ chức để hỏi module.
+ *  · `/start`: tạo tổ chức tự phục vụ (Phase 10) — tổ chức CHƯA tồn tại; cổng của nó là cờ `PLATFORM_SIGNUP_MODE`
+ *    kiểm ở máy chủ (`lib/onboarding/service.ts`), không phải module.
  *  · `/_next`: tài nguyên tĩnh của Next.
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/_next"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/_next"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {
@@ -100,7 +102,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     core: true,
     dependsOn: [],
     features: [],
-    routes: ["/", "/cockpit", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata"],
+    routes: ["/", "/cockpit", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata", "/api/branding"],
     permissions: ["dashboard:view", "audit:view", "users:manage", "settings:manage", "approvals:decide", ...PLATFORM_PERMISSION_KEYS],
     why: "Thứ mọi tổ chức cần để đăng nhập, phân quyền và quản trị chính mình. Không tắt được: tắt nó là khoá người quản trị khỏi chính màn hình bật lại nó. `/cockpit` ở đây: nó là tầng TỔNG HỢP của chủ (gác `dashboard:view`) đọc nhiều miền, không phải một màn hình Tài chính. `/integrations` KHÔNG ở đây — trang ấy in credential của tổ chức nhà (xem module «Kết nối dữ liệu»). `/api/metadata` (tải tệp của field tuỳ biến) ở đây vì một tệp thuộc ĐỐI TƯỢNG của bất kỳ module nào — route tự kiểm module của đối tượng sở hữu tệp và trả 403 MODULE_DISABLED khi nó tắt.",
   },

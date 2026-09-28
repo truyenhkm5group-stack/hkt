@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
 import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import { setSettingJson } from "@/lib/settings";
 import { changePasswordSchema, createUserSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
 
@@ -36,6 +37,9 @@ export async function createUser(input: unknown): Promise<ActionResult> {
   const db = await getDb();
   const existing = await db.query.users.findFirst({ where: eq(schema.users.email, data.email), columns: { id: true } });
   if (existing) return { error: "Email này đã được sử dụng" };
+  // Hạn mức gói (Phase 10 · §5): tổ chức nhà không giới hạn và không đếm gì.
+  const ent = await checkEntitlement("users", 1);
+  if (!ent.ok) return { error: ent.error };
   const [row] = await db
     .insert(schema.users)
     .values({ email: data.email, name: data.name, role: data.role, passwordHash: await hashPassword(data.password), active: true })
