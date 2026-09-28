@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { VIDEO_QC_CHECKS, VIDEO_SCALE_CONFIG_KEY, effectiveRender, normalizeRenderOptions, normalizeVideoScaleConfig, renderJobKey } from "@/lib/constants/video-scale";
+import { MODEST_STYLE_NOTE, VIDEO_QC_CHECKS, VIDEO_SCALE_CONFIG_KEY, effectiveRender, normalizeRenderOptions, normalizeVideoScaleConfig, renderJobKey, softenScenePrompt } from "@/lib/constants/video-scale";
+import { veoPrompt } from "@/lib/video-scale/script";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { buildRenderArgs, ffmpegVersion, lineChars, resolveFontFile, runTool, wrapText } from "@/lib/video-scale/ffmpeg";
-import { rerenderVideoVariant, runVideoScaleTick, type VideoScaleDeps } from "@/lib/video-scale/pipeline";
+import { cloneVideoVariant, rerenderVideoVariant, runVideoScaleTick, type VideoScaleDeps } from "@/lib/video-scale/pipeline";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { storeAsset } from "@/lib/video-scale/storage";
 
@@ -57,6 +58,12 @@ export function testVideoScaleEditPure() {
   assert.ok(!on.args[on.args.indexOf("-filter_complex") + 1].includes("h*0.12"), "móc câu không còn ở mép trên (đè lên mặt người mẫu)");
   const off = plan(false);
   assert.deepEqual(off.textFiles.map((t) => t.name), ["sub0.txt"], "tắt chữ ⇒ chỉ còn phụ đề");
+
+  // Câu lệnh cảnh nói về CHIẾC VÁY, không nói về cơ thể — đo 28/09/2026: Omni chặn cảnh "tạo điểm nhấn vòng eo".
+  const soft = softenScenePrompt("Model turns to show her slim waist, curves and bare legs in a tight sexy dress");
+  assert.ok(!/\b(waist|curves|bare|legs|tight|sexy)\b/i.test(soft.replace(/waistline/gi, "")), soft);
+  assert.ok(soft.includes("fitted waistline") && soft.includes("elegant"), soft);
+  assert.ok(veoPrompt("slow turn").includes(MODEST_STYLE_NOTE), "câu lệnh gửi máy sinh video luôn kèm lời dặn trang nhã");
 
   console.log("✓ Video Scale sửa video (thuần): tuỳ chọn dựng · video ⊕ lượt · khoá theo lần sửa · chữ không tràn khung · tắt chữ");
 }
@@ -177,12 +184,32 @@ export async function testVideoScaleEditDb(db: Db) {
     await tick();
     assert.equal(ttsCalls.length, 1);
 
+    // Nhân bản: video MỚI từ đúng các clip đã trả tiền — không gọi máy sinh clip, tiền clip 0, video gốc giữ nguyên.
+    const finalBeforeClone = (await db.select().from(V).where(eq(V.id, v.id)))[0].finalAssetId;
+    const c1 = await cloneVideoVariant(db, v.id, { ...edit, hook: "Bản nhân: đi làm cũng đẹp", scenes: [{ overlay: "Thanh lịch", voiceover: "" }, { overlay: "", voiceover: "" }], options: { voiceover: false, musicId: null } }, actor);
+    assert.ok(c1.ok, c1.ok ? "" : c1.error);
+    if (c1.ok) {
+      assert.equal(c1.tts, 0);
+      await tick();
+      const [cv] = await db.select().from(V).where(eq(V.id, c1.variantId));
+      assert.equal(cv.status, "REVIEW", `bản nhân dựng xong: ${cv.error}`);
+      assert.equal(cv.seq, 2);
+      assert.notEqual(cv.finalAssetId, finalBeforeClone);
+      const cloneClips = await db.select().from(J).where(eq(J.variantId, c1.variantId));
+      assert.ok(cloneClips.filter((x) => x.kind === "CLIP").every((x) => x.costUsd === 0), "clip dùng chung, tiền không cộng hai lần");
+      assert.equal((await db.select().from(V).where(eq(V.id, v.id)))[0].finalAssetId, finalBeforeClone, "video gốc giữ nguyên");
+      assert.equal(providerCalls, 0, "nhân bản không gọi máy sinh clip");
+    }
+    const bad2 = await cloneVideoVariant(db, v.id, { ...edit, hook: "Đầm lụa" }, actor);
+    assert.ok(!bad2.ok, "chữ nói chất liệu ⇒ từ chối, không để lại video rác");
+    assert.equal((await db.select().from(V).where(eq(V.runId, run.id))).length, 2);
+
     // Đã lên Reel ⇒ không sửa đè.
     await db.insert(schema.videoScalePosts).values({ variantId: v.id, productId: `${P}p`, pageId: "9200000000999", status: "PUBLISHED", caption: "x", fbVideoId: "1", publishedAt: new Date() });
     const r3 = await rerenderVideoVariant(db, v.id, edit, actor);
     assert.ok(!r3.ok && r3.error.includes("Reel"), r3.ok ? "" : r3.error);
 
-    console.log("✓ Video Scale sửa video (CSDL + ffmpeg thật): dựng lại ra bản mới, quay lại chờ duyệt · giọng đọc chỉ cho cảnh có lời, không tạo lại khi lời không đổi · không gọi máy sinh clip · chữ nói chất liệu ⇒ từ chối · đã lên Reel ⇒ từ chối");
+    console.log("✓ Video Scale sửa video (CSDL + ffmpeg thật): dựng lại ra bản mới, quay lại chờ duyệt · giọng đọc chỉ cho cảnh có lời, không tạo lại khi lời không đổi · không gọi máy sinh clip · nhân bản dùng lại clip, tiền clip 0, gốc giữ nguyên · chữ nói chất liệu ⇒ từ chối · đã lên Reel ⇒ từ chối");
   } finally {
     await cleanup(db);
     await rm(tmp, { recursive: true, force: true }).catch(() => undefined);

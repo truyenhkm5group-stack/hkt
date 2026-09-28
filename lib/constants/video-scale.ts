@@ -952,7 +952,68 @@ export const MUSIC_MOODS = {
   ROMANTIC: { label: "Lãng mạn", prompt: "Romantic cinematic piano with soft strings, 80 BPM, tender and elegant, wedding-season feeling" },
   RNB_SMOOTH: { label: "Cuốn hút, R&B", prompt: "Smooth modern R&B groove, 90 BPM, silky bass, snaps, sensual confident mood" },
   SALE_HYPE: { label: "Sale sôi nổi", prompt: "High-energy EDM pop, 128 BPM, big build and drop, exciting countdown feeling for a flash sale" },
+  TET_FESTIVE: { label: "Tết rộn ràng", prompt: "Festive Lunar New Year pop, 112 BPM, bright bamboo flute and plucked zither motifs over modern drums, joyful spring celebration" },
+  OFFICE_ELEGANT: { label: "Công sở thanh lịch", prompt: "Elegant modern corporate pop, 105 BPM, clean piano, light strings and soft beat, confident polished workday mood" },
+  KOREAN_SOFT: { label: "Nhẹ nhàng kiểu Hàn", prompt: "Soft Korean drama style ballad-pop instrumental, 88 BPM, gentle piano and airy pads, sweet and dreamy" },
+  CITY_POP: { label: "Retro city pop", prompt: "Retro 80s city pop groove, 108 BPM, funky bass, bright electric piano and chorus guitar, nostalgic stylish night drive" },
+  AUTUMN_GENTLE: { label: "Mùa thu dịu dàng", prompt: "Warm autumn acoustic folk-pop, 92 BPM, fingerpicked guitar, soft brushes, cozy and wistful" },
+  PARTY_NIGHT: { label: "Dạ tiệc lộng lẫy", prompt: "Glamorous evening party nu-disco, 118 BPM, shimmering strings, groovy bass, elegant celebration" },
+  BOHO_TRAVEL: { label: "Du lịch boho", prompt: "Breezy boho travel pop, 100 BPM, ukulele, hand percussion and whistled melody, sunny beach getaway" },
+  MINIMAL_MODERN: { label: "Tối giản hiện đại", prompt: "Minimal modern electronic, 115 BPM, clean pulses, subtle bass, sleek contemporary fashion editorial" },
 } as const;
 export type MusicMood = keyof typeof MUSIC_MOODS;
 export const MUSIC_MOOD_KEYS = Object.keys(MUSIC_MOODS) as MusicMood[];
+
+/**
+ * NGUỒN NHẠC MIỄN PHÍ dùng thương mại — không kho nào có API cho máy tải tự động (Pixabay chỉ có API ảnh / video; tải tự động
+ * ngoài API là trái điều khoản), nên người tải về rồi tải lên; chọn nguồn thì ghi chú quyền được điền sẵn. Đọc điều khoản
+ * 28/09/2026. Nhạc thư viện miễn phí đôi khi bị hệ thống nhận diện nhạc báo NHẦM — giữ ghi chú để khiếu nại.
+ */
+export const FREE_MUSIC_SOURCES = [
+  {
+    key: "PIXABAY",
+    label: "Pixabay Music",
+    url: "https://pixabay.com/music/",
+    license: "Pixabay Music (pixabay.com/music) — Pixabay Content License: dùng thương mại, không cần ghi nguồn",
+  },
+  {
+    key: "MIXKIT",
+    label: "Mixkit",
+    url: "https://mixkit.co/free-stock-music/",
+    license: "Mixkit (mixkit.co) — Mixkit Free License: dùng trong video thương mại, không cần ghi nguồn",
+  },
+  {
+    key: "FB_SOUND",
+    label: "Facebook Sound Collection",
+    url: "https://www.facebook.com/sound/collection/",
+    license: "Facebook Sound Collection — chỉ dùng cho video đăng trên Facebook / Instagram",
+  },
+] as const;
+
+// ───────────────────────────── CÂU LỆNH CẢNH ÍT BỊ CHẶN ─────────────────────────────
+
+/**
+ * Từ hay làm bộ lọc nội dung của máy sinh video CHẶN cảnh thời trang (đo 28/09/2026: Omni chặn cảnh "tạo điểm nhấn vòng eo")
+ * ⇒ đổi sang cách nói về CHIẾC VÁY thay vì cơ thể. Lượt bị chặn vẫn giữ chỗ tiền trong trần và mất một lượt — nên làm mềm TRƯỚC
+ * khi gửi. Hàm THUẦN, chỉ đụng câu lệnh gửi máy sinh video (chữ trên hình giữ nguyên).
+ */
+const SOFTEN: [RegExp, string][] = [
+  [/\b(sexy|seductive|sensual|sultry|hot)\b/gi, "elegant"],
+  [/\b(curvy|curves|curvaceous)\b/gi, "flattering silhouette"],
+  [/\b(cleavage|bust|chest|breasts?)\b/gi, "neckline"],
+  [/\b(hips?|buttocks?|butt)\b/gi, "skirt drape"],
+  [/\b(thighs?|bare legs|legs)\b/gi, "hemline"],
+  [/\bwaist(line)?\b/gi, "the dress's fitted waistline"],
+  [/\b(body|figure)\b/gi, "outfit"],
+  [/\b(skin|bare|naked|nude|revealing|see-through|lingerie|underwear|bra)\b/gi, "fabric"],
+  [/\b(tight|skin-tight|slim-fitting)\b/gi, "tailored"],
+];
+
+export function softenScenePrompt(prompt: string): string {
+  let out = prompt;
+  for (const [re, to] of SOFTEN) out = out.replace(re, to);
+  return out;
+}
+
+export const MODEST_STYLE_NOTE = "Tasteful, modest, family-friendly fashion catalog style; focus on the garment's fabric, color and movement.";
 

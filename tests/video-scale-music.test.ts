@@ -12,7 +12,7 @@ import { MUSIC_GEN_MAX_PER_DAY, MUSIC_MOOD_KEYS, generateMusicLibrary, lyriaAudi
  */
 
 export function testVideoScaleMusicPure() {
-  assert.equal(MUSIC_MOOD_KEYS.length, 8);
+  assert.equal(MUSIC_MOOD_KEYS.length, 16);
   for (const m of MUSIC_MOOD_KEYS) {
     const p = lyriaPrompt(m);
     assert.ok(p.includes("Instrumental only, no vocals") && p.includes("do not imitate any existing song or artist"), p);

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Db } from "@/db";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
-import { SCRIPT_LIMITS, VIDEO_ANGLE_BRIEF, VIDEO_ANGLE_LABEL, isVideoAngle, scriptTokens, type VideoAngle, type VideoScript } from "@/lib/constants/video-scale";
+import { SCRIPT_LIMITS, VIDEO_ANGLE_BRIEF, VIDEO_ANGLE_LABEL, isVideoAngle, scriptTokens, type VideoAngle, type VideoScript, MODEST_STYLE_NOTE, softenScenePrompt } from "@/lib/constants/video-scale";
 import { stripPrices, wrongPrices } from "@/lib/creative/writer";
 import { claimProblems, type ClaimFacts } from "@/lib/video-scale/claims";
 import { formatVND } from "@/lib/format";
@@ -35,7 +35,8 @@ export const VEO_KEEP_PRODUCT =
 export const VEO_NEGATIVE_PROMPT = "text, captions, subtitles, logo, watermark, brand name, distorted body, extra limbs, extra fingers, deformed hands, changed garment color, different dress, blurry, low quality";
 
 export function veoPrompt(scenePrompt: string): string {
-  return `${scenePrompt.trim().replace(/\s+/g, " ").slice(0, SCRIPT_LIMITS.scenePromptMaxChars)} ${VEO_KEEP_PRODUCT}`;
+  // Làm mềm từ nói về CƠ THỂ trước khi gửi — lượt bị bộ lọc nội dung chặn là một lượt phí công (đo 28/09/2026 trên Omni).
+  return `${softenScenePrompt(scenePrompt.trim().replace(/\s+/g, " ").slice(0, SCRIPT_LIMITS.scenePromptMaxChars))} ${MODEST_STYLE_NOTE} ${VEO_KEEP_PRODUCT}`;
 }
 
 // ───────────────────────────── ĐỌC CÂU TRẢ LỜI ─────────────────────────────
