@@ -15,10 +15,11 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
-import { isObjectKey, type ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import { auditActor, checkObject, isUniqueViolation, loadCustomDefs, requireObject, toFieldDef } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
-import { FIELD_KEY_PATTERN, FIELD_TYPES, FIELD_TYPE_LABEL, type CustomFieldDef, type FieldError, type FieldOption, type FieldType, type MetadataActor, type SystemFieldDef } from "@/lib/metadata/types";
+import { FIELD_KEY_PATTERN, FIELD_TYPES, FIELD_TYPE_LABEL, RELATION_TYPES, type CustomFieldDef, type FieldError, type FieldOption, type FieldType, type MetadataActor, type SystemFieldDef } from "@/lib/metadata/types";
 import { coerceFieldValue, compilePattern, TEXTAREA_MAX_LENGTH } from "@/lib/metadata/validate";
 
 export type FieldResult = { ok: true; field: CustomFieldDef } | MetaFailure;
@@ -26,7 +27,7 @@ export type FieldResult = { ok: true; field: CustomFieldDef } | MetaFailure;
 const OPTION_TYPES: readonly FieldType[] = ["select", "multi_select", "status"];
 const STRING_TYPES: readonly FieldType[] = ["text", "textarea", "email", "phone", "url"];
 const NUMBER_TYPES: readonly FieldType[] = ["number", "currency"];
-const REFERENCE_TYPES: readonly FieldType[] = ["user", "relation", "file"];
+const REFERENCE_TYPES: readonly FieldType[] = ["user", "relation", "relation_many", "file"];
 
 const optionZ = z.object({
   value: z.string().trim().min(1, "giá trị tuỳ chọn không được rỗng").max(100),
@@ -44,6 +45,7 @@ const validationZ = z
     maxLength: z.number().int().min(1).max(TEXTAREA_MAX_LENGTH).optional(),
     pattern: z.string().max(200, "mẫu kiểm tối đa 200 ký tự").optional(),
     patternMessage: z.string().max(200).optional(),
+    unique: z.boolean().optional(),
   })
   .strict();
 
@@ -82,8 +84,18 @@ function normalizeOptions(raw: z.output<typeof optionZ>[] | undefined): FieldOpt
   return (raw ?? []).map((o, i) => ({ value: o.value, label: o.label, ...(o.color ? { color: o.color } : {}), active: o.active !== false, position: o.position ?? i }));
 }
 
+/**
+ * Đích của field quan hệ còn dùng được không (Phase 6): đối tượng của sổ tĩnh, hoặc đối tượng tuỳ biến ACTIVE của
+ * TỔ CHỨC HIỆN HÀNH — khoá của tổ chức khác không có trong CSDL này, nên không thể trỏ sang tổ chức khác.
+ */
+async function relationTargetValid(relationObject: string | null): Promise<boolean> {
+  if (!relationObject) return false;
+  const target = await resolveObject(relationObject);
+  return Boolean(target && target.custom?.status !== "ARCHIVED");
+}
+
 /** Kiểm một định nghĩa đầy đủ (sau khi gộp bản vá). `takenKeys`: khoá đã có của đối tượng (trừ chính nó). */
-function checkDefinition(obj: ObjectDef, def: CustomFieldDef, takenKeys: Set<string>): FieldError[] {
+function checkDefinition(obj: AnyObjectDef, def: CustomFieldDef, takenKeys: Set<string>, targetValid: boolean): FieldError[] {
   const errors: FieldError[] = [];
   if (!FIELD_KEY_PATTERN.test(def.key)) errors.push({ field: "key", message: "Khoá chỉ gồm chữ thường không dấu, số, gạch dưới; bắt đầu bằng chữ; 2–41 ký tự." });
   else if (obj.fields.some((f: SystemFieldDef) => f.key === def.key)) errors.push({ field: "key", message: `Khoá "${def.key}" trùng field hệ thống của ${obj.label}.` });
@@ -114,9 +126,10 @@ function checkDefinition(obj: ObjectDef, def: CustomFieldDef, takenKeys: Set<str
     }
   } else if (transitionKeys.length > 0) errors.push({ field: "transitions", message: "Chỉ field trạng thái nghiệp vụ mới có chuyển trạng thái." });
 
-  if (def.type === "relation") {
-    if (!def.relationObject || !isObjectKey(def.relationObject)) errors.push({ field: "relationObject", message: "Field liên kết phải trỏ một đối tượng có trong sổ." });
+  if (RELATION_TYPES.includes(def.type)) {
+    if (!def.relationObject || !targetValid) errors.push({ field: "relationObject", message: "Field liên kết phải trỏ một đối tượng có trong sổ (hoặc đối tượng tuỳ biến đang dùng)." });
   } else if (def.relationObject) errors.push({ field: "relationObject", message: "Chỉ field liên kết mới có đối tượng liên kết." });
+  if (def.validation.unique !== undefined && def.type !== "relation") errors.push({ field: "validation", message: "«Một-một» (unique) chỉ áp cho field liên kết một bản ghi." });
 
   for (const k of ["viewPermission", "editPermission"] as const) {
     const p = def[k];
@@ -213,7 +226,7 @@ export async function createCustomField(objectKey: string, input: unknown, actor
     position: p.position ?? existing.reduce((m, d) => Math.max(m, d.position + 1), 0),
     status: "ACTIVE",
   };
-  const errors = checkDefinition(obj.def, candidate, new Set(existing.map((d) => d.key)));
+  const errors = checkDefinition(obj.def, candidate, new Set(existing.map((d) => d.key)), await relationTargetValid(candidate.relationObject));
   if (errors.length === 0) {
     const dv = checkDefault(candidate);
     if ("error" in dv) errors.push(dv.error);
@@ -284,7 +297,7 @@ export async function updateCustomField(objectKey: string, key: string, patch: u
     const removed = current.options.filter((o) => !kept.has(o.value)).map((o) => o.value);
     if (removed.length > 0) errors.push({ field: "options", message: `Không xoá được tuỳ chọn đã khai (${removed.join(", ")}) — tắt nó (ngừng dùng) thay vì xoá.` });
   }
-  errors.push(...checkDefinition(obj.def, next, new Set(all.filter((d) => d.id !== current.id).map((d) => d.key))));
+  errors.push(...checkDefinition(obj.def, next, new Set(all.filter((d) => d.id !== current.id).map((d) => d.key)), await relationTargetValid(next.relationObject)));
   if (errors.length === 0) {
     const dv = checkDefault(next);
     if ("error" in dv) errors.push(dv.error);

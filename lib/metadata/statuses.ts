@@ -13,7 +13,7 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import type { ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import { auditActor, checkObject, loadCustomDefs, requireObject } from "@/lib/metadata/common";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { zodFieldErrors } from "@/lib/metadata/fields";
@@ -34,7 +34,7 @@ const rowsZ = z
   )
   .max(200);
 
-function statusField(def: ObjectDef, fieldKey: string): SystemFieldDef | null {
+function statusField(def: AnyObjectDef, fieldKey: string): SystemFieldDef | null {
   if (!def.statusFields.includes(fieldKey)) return null;
   const f = def.fields.find((x) => x.key === fieldKey);
   return f && (f.options?.length ?? 0) > 0 ? f : null;

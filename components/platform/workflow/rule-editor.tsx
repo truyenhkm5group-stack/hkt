@@ -23,6 +23,7 @@ import {
   opsForField,
   orphanErrors,
   PRIORITY_OPTIONS,
+  eventTakesObject,
   subjectObjectKey,
   suggestRuleKey,
   TRIGGER_KIND_LABEL,
@@ -183,16 +184,32 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
           </div>
           <FieldErrors errors={blockErrors(errors, "trigger", ["trigger.event", "trigger.objectKey", "trigger.fieldKey", "trigger.to", "trigger.from"])} />
           {draft.triggerKind === "event" ? (
-            <Row label="Sự kiện" errors={errorsFor(errors, "trigger.event")} className="max-w-xl">
-              <select className={cn(SELECT_CLASS, "h-9")} value={draft.event} onChange={(e) => set("event", e.target.value)}>
-                <option value="">— chọn sự kiện —</option>
-                {events.map((ev) => (
-                  <option key={ev.name} value={ev.name}>
-                    {ev.label === ev.name ? ev.name : `${ev.label} · ${ev.name}`}
-                  </option>
-                ))}
-              </select>
-            </Row>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Row label="Sự kiện" errors={errorsFor(errors, "trigger.event")} className="max-w-xl">
+                <select className={cn(SELECT_CLASS, "h-9")} value={draft.event} onChange={(e) => set("event", e.target.value)}>
+                  <option value="">— chọn sự kiện —</option>
+                  {events.map((ev) => (
+                    <option key={ev.name} value={ev.name}>
+                      {ev.label === ev.name ? ev.name : `${ev.label} · ${ev.name}`}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              {eventTakesObject(draft.event, events) ? (
+                /* Phase 6: sự kiện trên bản ghi (tạo / sửa / xoá bản ghi tuỳ biến) — chọn ĐỐI TƯỢNG để luật chỉ nghe
+                   bản ghi của nó và điều kiện đọc được field của nó. */
+                <Row label="Của đối tượng" errors={errorsFor(errors, "trigger.objectKey")}>
+                  <select className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => set("objectKey", e.target.value)}>
+                    <option value="">— mọi đối tượng —</option>
+                    {objects.map((o) => (
+                      <option key={o.key} value={o.key}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+              ) : null}
+            </div>
           ) : statusObjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">Chưa có đối tượng nào có field «Trạng thái nghiệp vụ» — khai ở Mô hình dữ liệu trước.</p>
           ) : (

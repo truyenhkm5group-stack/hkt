@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { objectDef } from "@/lib/constants/object-registry";
+import { customObjectHref } from "@/lib/metadata/custom-object-def";
+import { isCustomObjectKey } from "@/lib/metadata/types";
 import {
   adminArchiveField,
   adminCreateField,
@@ -30,7 +32,7 @@ import type { AdminWriteResult } from "@/lib/platform-ui/metadata-admin-shared";
  * của chính người bấm (bộ đệm tuyến phía client) thấy bản mới ngay.
  */
 
-const ADMIN_PATHS = ["/settings/data-model", "/settings/forms", "/settings/lists", "/settings/statuses"] as const;
+const ADMIN_PATHS = ["/settings/data-model", "/settings/forms", "/settings/lists", "/settings/statuses", "/settings/objects"] as const;
 
 /**
  * `runtime`: lượt ghi đổi thứ NGƯỜI DÙNG thấy (field, bản xuất bản, nhãn trạng thái) ⇒ dựng lại cả trang chạy
@@ -44,6 +46,11 @@ function refresh(result: AdminWriteResult, objectKey: string, runtime: boolean):
     for (const list of objectDef(objectKey)?.lists ?? []) {
       revalidatePath(list.route);
       revalidatePath(`${list.route}/[id]`, "page");
+    }
+    // Đối tượng tuỳ biến (Phase 6): trang tự sinh `/o/<khoá>` — khoá đã qua mẫu `x_…`, không nhận đường dẫn từ client.
+    if (isCustomObjectKey(objectKey)) {
+      revalidatePath(customObjectHref(objectKey));
+      revalidatePath(`${customObjectHref(objectKey)}/[id]`, "page");
     }
   }
   return result;

@@ -95,6 +95,12 @@ export type ScopeResource = {
   sensitive: boolean;
   /** Vì sao không thu hẹp theo người được — chỉ khai khi `rowOwner` và `rowAssignee` đều `null`. */
   noRowOwnerReason?: string;
+  /**
+   * Phạm vi TEAM / DEPARTMENT thu hẹp theo PHÒNG CỦA CHỦ DÒNG (`rowOwner` phải là `USER_ID`): dòng hiện khi chủ của nó là
+   * thành viên CÒN HIỆU LỰC của (một trong các) phòng người xem thuộc / phụ trách. Dành cho bảng không có cột phòng
+   * nhưng có chủ là tài khoản (bản ghi tuỳ biến — Phase 6). Vắng ⇒ luật cũ (cột phòng hoặc phòng sở hữu).
+   */
+  ownerMembership?: boolean;
 };
 
 export const SCOPE_RESOURCES: readonly ScopeResource[] = [
@@ -287,6 +293,27 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     sensitive: true,
     noRowOwnerReason:
       "Bảng lương không phải một bảng CSDL mà là báo cáo dựng từ nhân sự khai trong `settings`. Luật \"chỉ dòng của mình\" đã có sẵn ở quyền `payroll:view-own`, khớp theo email / tên nhân sự — phạm vi không dựng lại luật đó.",
+  },
+  {
+    /*
+      Phase 6 — bản ghi của đối tượng TUỲ BIẾN (docs/platform/phase-6-contracts.md mục 4). Có chủ theo dòng bằng
+      KHOÁ TÀI KHOẢN (`custom_records.owner_id`, luật 34): SELF / ASSIGNED ⇒ chỉ bản ghi mình là chủ; TEAM / DEPARTMENT
+      ⇒ bản ghi có chủ là thành viên còn hiệu lực của phòng mình (`ownerMembership`); ALL ⇒ tất cả. Bản ghi chưa có
+      chủ KHÔNG hiện với phạm vi hẹp — không đoán người (luật 35).
+    */
+    key: "CUSTOM_RECORDS",
+    enforcement: "SQL_ROWS",
+    label: "Bản ghi ứng dụng tuỳ biến",
+    readPermissions: ["records:view"],
+    writePermission: "records:write",
+    routes: ["/o/[object]", "/o/[object]/new", "/o/[object]/[id]"],
+    table: "custom_records",
+    rowOwner: { by: "USER_ID", column: "owner_id" },
+    rowAssignee: null,
+    rowDepartmentColumn: null,
+    ownedBy: "MANAGEMENT",
+    sensitive: false,
+    ownerMembership: true,
   },
 ] as const;
 

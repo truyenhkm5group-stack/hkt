@@ -4,10 +4,9 @@ import { CustomFieldManager } from "@/components/platform/metadata/custom-field-
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { OBJECT_REGISTRY } from "@/lib/constants/object-registry";
-import { FIELD_TYPE_LABEL } from "@/lib/metadata/types";
+import { FIELD_TYPE_LABEL, isCustomObjectKey } from "@/lib/metadata/types";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
-import { loadDataModel } from "@/lib/platform-ui/metadata-admin";
-import { adminObjects } from "@/lib/platform-ui/metadata-admin-shared";
+import { adminObjectsAll, loadDataModel } from "@/lib/platform-ui/metadata-admin";
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Mô hình dữ liệu" };
@@ -24,7 +23,7 @@ const TITLE = "Mô hình dữ liệu";
 export default async function DataModelPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("metadata:manage");
   const raw = await searchParams;
-  const objects = adminObjects(user, "customFields");
+  const objects = await adminObjectsAll(user, "customFields");
   if (!user.organization || objects.length === 0) {
     return (
       <div className="space-y-5">
@@ -39,7 +38,11 @@ export default async function DataModelPage({ searchParams }: { searchParams: Pr
   }
   const current = objects.find((o) => o.key === param(raw, "object")) ?? objects[0];
   const loaded = await loadDataModel(user, current.key);
-  const relationTargets = OBJECT_REGISTRY.filter((o) => moduleOn(user, o.module)).map((o) => ({ key: o.key, label: o.label }));
+  // Đích quan hệ: đối tượng của sổ tĩnh có module bật + đối tượng tuỳ biến ACTIVE (Phase 6 · mục 3).
+  const relationTargets = [
+    ...OBJECT_REGISTRY.filter((o) => moduleOn(user, o.module)).map((o) => ({ key: o.key, label: o.label })),
+    ...objects.filter((o) => isCustomObjectKey(o.key)).map((o) => ({ key: o.key, label: `${o.label} (tuỳ biến)` })),
+  ];
 
   return (
     <div className="space-y-5">

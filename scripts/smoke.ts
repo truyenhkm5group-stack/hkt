@@ -246,6 +246,8 @@ const ROUTES = [
   "/settings/connections",
   // Mẫu cấu hình (Phase 7): danh sách mẫu + lịch sử cài đọc sổ `blueprint_installs` của tổ chức.
   "/settings/templates",
+  // Đối tượng tuỳ biến (Phase 6): danh sách đối tượng + số bản ghi / field của tổ chức.
+  "/settings/objects",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.

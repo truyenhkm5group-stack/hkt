@@ -13,7 +13,7 @@
  * xuất bản (cùng lý do với form); bản nháp nối nó vào cuối ở trạng thái ẩn.
  */
 import { z } from "zod";
-import { objectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { activeCustom, fieldRefZ, parseRef } from "@/lib/metadata/form-schema";
 import type { CustomFieldDef, FieldError, FieldRef, ListColumnConfig, ListFilter, ListFilterOp, ListViewSchema, SystemFieldDef } from "@/lib/metadata/types";
 
@@ -60,13 +60,16 @@ export function filterShapeOk(f: ListFilter): boolean {
   return isScalar(f.value);
 }
 
-export function defaultListView(objectKey: string, _viewKey: string, customDefs: readonly CustomFieldDef[]): ListViewSchema {
-  const def = objectDef(objectKey);
+/** `object`: khoá của sổ tĩnh, HOẶC định nghĩa đã phân giải (đối tượng tuỳ biến — Phase 6). */
+export function defaultListView(object: string | AnyObjectDef, _viewKey: string, customDefs: readonly CustomFieldDef[]): ListViewSchema {
+  const def = typeof object === "string" ? objectDef(object) : object;
   const columns: ListColumnConfig[] = [
     ...(def?.fields ?? []).filter((f) => f.listable).map((f) => ({ ref: `system:${f.key}` as FieldRef, visible: true })),
     ...activeCustom(customDefs)
       .filter((c) => c.listable)
-      .map((c) => ({ ref: `custom:${c.key}` as FieldRef, visible: false })),
+      // Đối tượng hệ thống: cột custom có mặt nhưng ẨN ("cột của mã nguồn y như cũ", M9). Đối tượng tuỳ biến (Phase 6)
+      // không có "mã nguồn cũ" nào — field của nó LÀ nội dung, nên hiện ngay.
+      .map((c) => ({ ref: `custom:${c.key}` as FieldRef, visible: def?.system === false })),
   ];
   return { version: 1, columns, defaultSort: null, defaultFilters: [] };
 }

@@ -3,8 +3,8 @@ import { AdminPicker } from "@/components/platform/metadata/admin-picker";
 import { ListViewDesigner } from "@/components/platform/metadata/list-view-designer";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
-import { loadListEditor } from "@/lib/platform-ui/metadata-admin";
-import { adminObjects } from "@/lib/platform-ui/metadata-admin-shared";
+import { adminObjectsAll, loadListEditor } from "@/lib/platform-ui/metadata-admin";
+
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Danh sách" };
@@ -18,7 +18,7 @@ const TITLE = "Danh sách";
 export default async function ListsAdminPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("metadata:manage");
   const raw = await searchParams;
-  const objects = adminObjects(user, "lists");
+  const objects = await adminObjectsAll(user, "lists");
   if (!user.organization || objects.length === 0) {
     return (
       <div className="space-y-5">

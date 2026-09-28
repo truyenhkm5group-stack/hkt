@@ -5,8 +5,8 @@ import { StatusOverridesEditor } from "@/components/platform/metadata/status-ove
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { objectDef } from "@/lib/constants/object-registry";
-import { loadStatusEditor } from "@/lib/platform-ui/metadata-admin";
-import { adminObjects } from "@/lib/platform-ui/metadata-admin-shared";
+import { adminObjectsAll, loadStatusEditor } from "@/lib/platform-ui/metadata-admin";
+
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Trạng thái" };
@@ -21,7 +21,7 @@ const TITLE = "Trạng thái";
 export default async function StatusesAdminPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("metadata:manage");
   const raw = await searchParams;
-  const objects = adminObjects(user, "statuses");
+  const objects = await adminObjectsAll(user, "statuses");
   const businessHref = "/settings/data-model";
   if (!user.organization || objects.length === 0) {
     return (

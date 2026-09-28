@@ -3,7 +3,8 @@ import { MetadataError } from "@/lib/metadata/errors";
 import { listFields } from "@/lib/metadata/fields";
 import type { FieldError, MetadataActor } from "@/lib/metadata/types";
 import { withOrganization } from "@/lib/platform/context";
-import { adminObjects, buildCatalog } from "@/lib/platform-ui/metadata-admin-shared";
+import { buildCatalog } from "@/lib/platform-ui/metadata-admin-shared";
+import { adminObjectsAll } from "@/lib/platform-ui/metadata-admin";
 import { statusFieldsOf, workflowEventOptions, type EventOption, type WorkflowObjectOption } from "@/lib/platform-ui/workflow-admin-shared";
 import { listRuns, listStaleRuns, previewRule, runWorkflows } from "@/lib/workflow/engine";
 import { getRule, listRules, saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
@@ -71,7 +72,8 @@ export async function loadWorkflowList(user: SessionUser): Promise<Loaded<Workfl
  */
 export async function workflowObjects(user: SessionUser): Promise<WorkflowObjectOption[]> {
   const out: WorkflowObjectOption[] = [];
-  for (const o of adminObjects(user, "customFields")) {
+  // Phase 6: kèm đối tượng tuỳ biến ACTIVE (cùng bộ phân giải với màn hình Mô hình dữ liệu).
+  for (const o of await adminObjectsAll(user, "customFields")) {
     try {
       const fields = await listFields(o.key);
       const catalog = buildCatalog(fields.system, fields.custom);

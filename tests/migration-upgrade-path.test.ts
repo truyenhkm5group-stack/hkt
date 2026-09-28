@@ -113,6 +113,7 @@ const MOI = [
   "0163_meta_pages",
   "0164_org_connections",
   "0165_blueprint_installs",
+  "0166_custom_objects",
 ] as const;
 
 /*

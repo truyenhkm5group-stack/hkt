@@ -3,8 +3,8 @@ import { AdminPicker } from "@/components/platform/metadata/admin-picker";
 import { FormDesigner } from "@/components/platform/metadata/form-designer";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
-import { loadFormEditor } from "@/lib/platform-ui/metadata-admin";
-import { adminObjects } from "@/lib/platform-ui/metadata-admin-shared";
+import { adminObjectsAll, loadFormEditor } from "@/lib/platform-ui/metadata-admin";
+
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Form nhập liệu" };
@@ -18,7 +18,7 @@ const TITLE = "Form nhập liệu";
 export default async function FormsAdminPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("metadata:manage");
   const raw = await searchParams;
-  const objects = adminObjects(user, "forms");
+  const objects = await adminObjectsAll(user, "forms");
   if (!user.organization || objects.length === 0) {
     return (
       <div className="space-y-5">

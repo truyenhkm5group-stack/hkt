@@ -22,9 +22,10 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
-import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
-import { isObjectKey, objectDef } from "@/lib/constants/object-registry";
+import { DOMAIN_EVENT_BY_NAME, METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
+import { isObjectKey } from "@/lib/constants/object-registry";
 import { checkObject, isUniqueViolation, loadCustomDefs } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
 import { zodFieldErrors } from "@/lib/metadata/fields";
 import { FIELD_KEY_PATTERN, type CustomFieldDef, type FieldError, type MetadataActor } from "@/lib/metadata/types";
 import { validateCustomValues } from "@/lib/metadata/validate";
@@ -73,6 +74,7 @@ export function toRule(r: RuleRow): WorkflowRule {
 /** Đối tượng mà luật nói về — nơi điều kiện `custom:` và hành động `set_custom_value` trỏ tới. `null` = không có bản ghi. */
 export function triggerObjectKey(trigger: WorkflowTrigger): string | null {
   if (trigger.kind === "custom_status") return trigger.objectKey;
+  if (trigger.objectKey) return trigger.objectKey;
   const spec = DOMAIN_EVENT_BY_NAME[trigger.event];
   return spec && isObjectKey(spec.subjectType) ? spec.subjectType : null;
 }
@@ -82,7 +84,7 @@ export function triggerObjectKey(trigger: WorkflowTrigger): string | null {
 const statusValueZ = z.string().trim().min(1).max(100);
 
 const triggerZ = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("event"), event: z.string().trim().min(3, "chọn một sự kiện").max(80) }).strict(),
+  z.object({ kind: z.literal("event"), event: z.string().trim().min(3, "chọn một sự kiện").max(80), objectKey: z.string().trim().min(1).max(60).optional() }).strict(),
   z
     .object({
       kind: z.literal("custom_status"),
@@ -207,6 +209,14 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
   if (trigger.kind === "event") {
     if (trigger.event.startsWith("workflow.")) errors.push({ field: "trigger.event", message: "Luật không được nghe sự kiện do chính workflow phát (chặn vòng lặp)." });
     else if (!DOMAIN_EVENT_BY_NAME[trigger.event]) errors.push({ field: "trigger.event", message: `Sự kiện "${trigger.event}" không có trong sổ sự kiện.` });
+    else if (trigger.objectKey) {
+      // Chỉ sự kiện trên BẢN GHI metadata mang `objectKey` trong payload — sự kiện của miền khác không lọc theo đối tượng được.
+      if (DOMAIN_EVENT_BY_NAME[trigger.event].subjectType !== METADATA_RECORD_SUBJECT) errors.push({ field: "trigger.objectKey", message: `Sự kiện "${trigger.event}" không gắn với bản ghi của một đối tượng — bỏ chọn đối tượng.` });
+      else {
+        const checked = await checkObject(trigger.objectKey, "customFields");
+        if (!checked.ok) errors.push({ field: "trigger.objectKey", message: checked.errors[0]?.message ?? "Đối tượng không hỗ trợ field custom." });
+      }
+    }
   } else {
     const checked = await checkObject(trigger.objectKey, "customFields");
     if (!checked.ok) errors.push({ field: "trigger.objectKey", message: checked.errors[0]?.message ?? "Đối tượng không hỗ trợ field custom." });
@@ -222,7 +232,8 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
       }
     }
   }
-  if (trigger.kind === "event" && objectKey && objectDef(objectKey)?.customizable) customDefs = await loadCustomDefs(objectKey, false).catch(() => []);
+  const objectResolved = objectKey ? await resolveObject(objectKey) : null;
+  if (trigger.kind === "event" && objectKey && objectResolved?.customizable) customDefs = await loadCustomDefs(objectKey, false).catch(() => []);
 
   // ── Điều kiện ──
   let conditions: WorkflowCondition | null = null;
@@ -231,7 +242,7 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
     const before = errors.length;
     checkConditionShape(v.conditions, "conditions", errors, refs);
     if (conditionDepth(v.conditions) > WORKFLOW_CONDITION_MAX_DEPTH) errors.push({ field: "conditions", message: `Cây điều kiện sâu tối đa ${WORKFLOW_CONDITION_MAX_DEPTH} tầng.` });
-    const def = objectKey ? objectDef(objectKey) : null;
+    const def = objectResolved;
     const systemKeys = new Set((def?.fields ?? []).map((f) => `system:${f.key}`));
     const customKeys = new Set(customDefs.map((d) => `custom:${d.key}`));
     for (const { ref, path } of refs) {
@@ -270,10 +281,10 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
       }
       const d = customDefs.find((x) => x.key === a.field);
       if (!d) {
-        errors.push({ field: `${path}.field`, message: `Field custom "${a.field}" không tồn tại (hoặc đã lưu trữ) trên ${objectDef(objectKey)?.label ?? objectKey}.` });
+        errors.push({ field: `${path}.field`, message: `Field custom "${a.field}" không tồn tại (hoặc đã lưu trữ) trên ${objectResolved?.label ?? objectKey}.` });
         continue;
       }
-      if (d.type === "file" || d.type === "user" || d.type === "relation") {
+      if (d.type === "file" || d.type === "user" || d.type === "relation" || d.type === "relation_many") {
         errors.push({ field: `${path}.field`, message: `Luật tự động không ghi được field kiểu "${d.type}" — giá trị tham chiếu phải do người chọn.` });
         continue;
       }

@@ -11,8 +11,11 @@
  * Ẩn menu KHÔNG phải bảo mật: trang tự kiểm lại ở máy chủ.
  */
 import { hasPermission } from "@/lib/auth/permissions";
-import type { ModuleZone } from "@/lib/constants/department-modules";
-import { moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
+import { NAV_MODULES, type ModuleZone } from "@/lib/constants/department-modules";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
+import { moduleOfPath, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
+import { customObjectHref } from "@/lib/metadata/custom-object-def";
+import { objectAccess } from "@/lib/metadata/permissions";
 import type { PageDefinition } from "@/lib/pages/types";
 
 /** Nhóm menu của trang không khai vùng (`nav.zone = null`). Không phải một phòng ban. */
@@ -47,4 +50,36 @@ export function dynamicNavFor(pages: readonly PageDefinition[], viewer: DynamicN
     .filter((p) => p.status === "ACTIVE" && p.publishedVersion > 0 && p.nav.enabled && pageOpenableBy(p, viewer))
     .sort((a, b) => a.nav.order - b.nav.order || a.name.localeCompare(b.name, "vi"))
     .map((p) => ({ href: dynamicPageHref(p.slug), label: p.nav.label || p.name, zone: (p.nav.zone as ModuleZone | null) ?? null, order: p.nav.order }));
+}
+
+// ═══════════ NGUỒN MỤC THỨ HAI: ĐỐI TƯỢNG TUỲ BIẾN (Phase 6 · mục 5) ═══════════
+
+/** Thứ tự của mục đối tượng tuỳ biến trong nhóm — đứng SAU trang tuỳ biến cùng nhóm (trang có `nav.order` riêng). */
+export const CUSTOM_OBJECT_NAV_ORDER = 10_000;
+
+/** Vùng menu của một module: vùng của mục menu tĩnh ĐẦU TIÊN thuộc module đó; không có ⇒ nhóm "Trang tuỳ biến". */
+export function zoneOfModule(module: string): ModuleZone | null {
+  return NAV_MODULES.find((m) => moduleOfPath(m.href) === module)?.zone ?? null;
+}
+
+/**
+ * Đối tượng tuỳ biến ACTIVE ⇒ mục menu của người xem (hàm THUẦN). Cùng luật lọc với trang `/o/<khoá>`:
+ *  1. module `apps` VÀ nhóm menu của đối tượng phải bật cho tổ chức (kể cả ADMIN — P8);
+ *  2. đủ khoá xem (`records:view` + khoá siết của đối tượng) — ADMIN vượt quyền, KHÔNG vượt module sở hữu khoá.
+ * Ẩn menu KHÔNG phải bảo mật: trang tự kiểm lại ở máy chủ (`recordGate`).
+ */
+export function customObjectNavFor(objects: readonly AnyObjectDef[], viewer: DynamicNavViewer): DynamicNavItem[] {
+  return objects
+    .filter((o) => !o.system && o.custom?.status === "ACTIVE")
+    .filter((o) => {
+      const modules = [o.module as string, o.custom!.menuModule];
+      if (viewer.modules && modules.some((m) => !viewer.modules!.includes(m))) return false;
+      return objectAccess(o).view.every((p) => {
+        const owner: ModuleKey | null = moduleOfPermission(p);
+        if (owner && viewer.modules && !viewer.modules.includes(owner)) return false;
+        return viewer.role === "ADMIN" || hasPermission(viewer.permissions, p);
+      });
+    })
+    .sort((a, b) => a.labelPlural.localeCompare(b.labelPlural, "vi"))
+    .map((o) => ({ href: customObjectHref(o.key), label: o.labelPlural, zone: zoneOfModule(o.custom!.menuModule), order: CUSTOM_OBJECT_NAV_ORDER }));
 }

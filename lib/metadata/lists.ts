@@ -5,7 +5,7 @@
  * mã nguồn, cột custom có mặt nhưng ẩn — trang chạy y như trước khi có metadata.
  */
 import { audit } from "@/lib/audit";
-import type { ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import { auditActor, checkObject, loadCustomDefs, requireObject } from "@/lib/metadata/common";
 import { loadConfigRow, publishConfig, publisherOf, upsertDraft } from "@/lib/metadata/config-store";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
@@ -17,7 +17,7 @@ import type { ListViewSchema, MetadataActor } from "@/lib/metadata/types";
 // Hàm thuần nằm ở `list-schema.ts` (client-safe, trình soạn dùng lại); xuất lại ở đây cho nơi gọi phía máy chủ.
 export { defaultListView, normalizeListView } from "@/lib/metadata/list-schema";
 
-function requireViewKey(def: ObjectDef, viewKey: string): void {
+function requireViewKey(def: AnyObjectDef, viewKey: string): void {
   if (!def.lists.some((l) => l.key === viewKey)) throw new MetadataError("NOT_FOUND", `${def.label} không có danh sách "${viewKey}".`);
 }
 
@@ -29,7 +29,7 @@ export async function getPublishedListView(objectKey: string, viewKey: string): 
   const custom = def.capabilities.customFields ? await loadCustomDefs(objectKey, true) : [];
   const row = await loadConfigRow("LIST_VIEW", objectKey, viewKey);
   if (!row || row.published === null || row.published === undefined) {
-    return { schema: normalizeListView(defaultListView(objectKey, viewKey, custom), def.fields, custom), version: 0, isDefault: true, publishedAt: null, publishedBy: null };
+    return { schema: normalizeListView(defaultListView(def, viewKey, custom), def.fields, custom), version: 0, isDefault: true, publishedAt: null, publishedBy: null };
   }
   return {
     schema: normalizeListView(row.published as ListViewSchema, def.fields, custom),
@@ -45,7 +45,7 @@ export async function getListViewDraft(objectKey: string, viewKey: string): Prom
   requireViewKey(def, viewKey);
   const custom = def.capabilities.customFields ? await loadCustomDefs(objectKey, true) : [];
   const row = await loadConfigRow("LIST_VIEW", objectKey, viewKey);
-  const base = (row?.draft ?? row?.published ?? defaultListView(objectKey, viewKey, custom)) as ListViewSchema;
+  const base = (row?.draft ?? row?.published ?? defaultListView(def, viewKey, custom)) as ListViewSchema;
   return normalizeListView(base, def.fields, custom, { appendMissing: true });
 }
 

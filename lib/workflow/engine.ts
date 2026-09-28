@@ -50,15 +50,15 @@ import { getDb, schema, type Db } from "@/db";
 import { expireMachineApproval, approvalFingerprint, approvalStillValid, settleMachineApproval } from "@/lib/approvals/service";
 import { audit } from "@/lib/audit";
 import type { DbOrTx } from "@/lib/db-transaction";
-import { isObjectKey, objectDef } from "@/lib/constants/object-registry";
 import { recordExists } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { executeActions, planSteps, retryBlocker } from "@/lib/workflow/actions";
 import { advanceEventCursor, ensureEventCursor, RECORDED_AT_TEXT, type CursorPos } from "@/lib/workflow/cursor";
 import { evaluateCondition } from "@/lib/workflow/evaluate";
 import { CUSTOM_STATUS_EVENT, getRule, machineEmailOf, toRule, triggerObjectKey } from "@/lib/workflow/rules";
 import { leaseExpiredSql, staleRunsOn, type StaleRun } from "@/lib/workflow/stale";
-import { eventSubjectFields, recordSubjectFields, subjectLabel, subjectRefOf, type EventLike, type SubjectRef } from "@/lib/workflow/subject";
+import { eventSubjectFields, isSubjectObjectKey, recordSubjectFields, subjectLabel, subjectRefOf, type EventLike, type SubjectRef } from "@/lib/workflow/subject";
 import {
   WORKFLOW_LEASE_MINUTES,
   WORKFLOW_MAX_ATTEMPTS,
@@ -100,7 +100,8 @@ export function setWorkflowStepHookForTests(hook: ((runId: string, index: number
 
 /** Trigger có khớp sự kiện không — hàm THUẦN. */
 export function triggerMatches(trigger: WorkflowTrigger, ev: Pick<EventLike, "name" | "payload">): boolean {
-  if (trigger.kind === "event") return trigger.event === ev.name;
+  // `objectKey` (Phase 6): chỉ sự kiện của ĐÚNG đối tượng đó (payload `objectKey` của sự kiện trên bản ghi metadata).
+  if (trigger.kind === "event") return trigger.event === ev.name && (!trigger.objectKey || ev.payload?.objectKey === trigger.objectKey);
   if (ev.name !== CUSTOM_STATUS_EVENT) return false;
   const p = ev.payload ?? {};
   if (p.objectKey !== trigger.objectKey || p.fieldKey !== trigger.fieldKey) return false;
@@ -111,7 +112,7 @@ export function triggerMatches(trigger: WorkflowTrigger, ev: Pick<EventLike, "na
 
 /** Bản ghi của một lượt chạy đã lưu — `subject_type` là khoá đối tượng khi lượt chạy gắn với bản ghi. */
 function runSubjectRef(subjectType: string | null, subjectId: string | null): SubjectRef | null {
-  return subjectType && subjectId && isObjectKey(subjectType) ? { objectKey: subjectType, recordId: subjectId } : null;
+  return subjectType && subjectId && isSubjectObjectKey(subjectType) ? { objectKey: subjectType, recordId: subjectId } : null;
 }
 
 async function readEventsAfter(db: Db, cursor: CursorPos, limit: number): Promise<EventRow[]> {
@@ -135,7 +136,7 @@ type Subject = { ref: SubjectRef | null; fields: Record<string, unknown>; label:
 async function subjectOfEvent(ev: EventRow): Promise<Subject> {
   const ref = subjectRefOf(ev);
   const rec = ref ? await recordSubjectFields(ref) : null;
-  return { ref: rec ? ref : null, fields: { ...eventSubjectFields(ev), ...(rec ?? {}) }, label: subjectLabel(rec ? ref : null, rec, `${ev.subjectType} ${ev.subjectId}`) };
+  return { ref: rec ? ref : null, fields: { ...eventSubjectFields(ev), ...(rec ?? {}) }, label: await subjectLabel(rec ? ref : null, rec, `${ev.subjectType} ${ev.subjectId}`) };
 }
 
 /** Độ sâu nhân quả của một sự kiện: 0 nếu không do workflow gây ra, còn lại = độ sâu lượt chạy gây ra + 1. */
@@ -360,7 +361,7 @@ async function sweepWaiting(db: Db, c: Counters, now: Date) {
     if (!claimed) continue;
     const ref = runSubjectRef(run.subjectType, run.subjectId);
     const rec = ref ? await recordSubjectFields(ref) : null;
-    const res = await executeRun(db, claimed, rule!, rec ? ref : null, subjectLabel(rec ? ref : null, rec, `${run.subjectType ?? ""} ${run.subjectId ?? ""}`.trim()), c, now);
+    const res = await executeRun(db, claimed, rule!, rec ? ref : null, await subjectLabel(rec ? ref : null, rec, `${run.subjectType ?? ""} ${run.subjectId ?? ""}`.trim()), c, now);
     if (res.lost) continue;
     await settleMachineApproval(db, req.id, res.ok ? { ok: true } : { error: res.error ?? "Thực thi hỏng" }, { email: machine }, now);
   }
@@ -436,7 +437,7 @@ async function recoverStaleRuns(db: Db, c: Counters, now: Date) {
     c.recovered += 1;
     const ref = runSubjectRef(run.subjectType, run.subjectId);
     const rec = ref ? await recordSubjectFields(ref) : null;
-    const res = await executeRun(db, claimed, rule!, rec ? ref : null, subjectLabel(rec ? ref : null, rec, `${run.subjectType ?? ""} ${run.subjectId ?? ""}`.trim()), c, now);
+    const res = await executeRun(db, claimed, rule!, rec ? ref : null, await subjectLabel(rec ? ref : null, rec, `${run.subjectType ?? ""} ${run.subjectId ?? ""}`.trim()), c, now);
     if (res.lost) continue;
     await settle(res.ok ? { ok: true } : { error: res.error ?? "Thực thi hỏng" });
   }
@@ -502,10 +503,10 @@ export type PreviewResult = { matched: boolean; wouldDo: WorkflowStepPreview[]; 
 export async function previewRule(ruleId: string, subject: { objectKey: string; recordId: string }): Promise<PreviewResult> {
   const rule = await getRule(ruleId);
   if (!rule) return { matched: false, wouldDo: [], reason: "Luật không tồn tại." };
-  const def = objectDef(subject?.objectKey ?? "");
+  const def = await resolveObject(subject?.objectKey ?? "");
   if (!def) return { matched: false, wouldDo: [], reason: `Đối tượng "${String(subject?.objectKey)}" không có trong sổ đối tượng.` };
   const want = triggerObjectKey(rule.trigger);
-  if (want && want !== def.key) return { matched: false, wouldDo: [], reason: `Luật này nói về ${objectDef(want)?.label ?? want}, không phải ${def.label}.` };
+  if (want && want !== def.key) return { matched: false, wouldDo: [], reason: `Luật này nói về ${(await resolveObject(want))?.label ?? want}, không phải ${def.label}.` };
   if (!(await recordExists(def, subject.recordId))) return { matched: false, wouldDo: [], reason: `${def.label} "${String(subject.recordId).slice(0, 80)}" không tồn tại.` };
   const ref: SubjectRef = { objectKey: def.key, recordId: subject.recordId };
   const rec = (await recordSubjectFields(ref)) ?? {};
@@ -513,7 +514,7 @@ export async function previewRule(ruleId: string, subject: { objectKey: string; 
     rule.trigger.kind === "custom_status" ? { objectKey: def.key, recordId: subject.recordId, fieldKey: rule.trigger.fieldKey, from: null, to: rec[`custom:${rule.trigger.fieldKey}`] ?? null } : {};
   const fields = { ...eventSubjectFields({ name: rule.trigger.kind === "event" ? rule.trigger.event : CUSTOM_STATUS_EVENT, subjectType: def.key, subjectId: subject.recordId, actorKind: "USER", payload }), ...rec };
   const matched = evaluateCondition(rule.conditions, fields);
-  const label = subjectLabel(ref, rec, `${def.label} ${subject.recordId}`);
+  const label = await subjectLabel(ref, rec, `${def.label} ${subject.recordId}`);
   const triggerNote =
     rule.trigger.kind === "custom_status" && !rule.trigger.to.includes(String(payload.to ?? ""))
       ? `Trạng thái hiện tại của bản ghi không nằm trong trạng thái đích của luật — luật chỉ chạy khi "${rule.trigger.fieldKey}" chuyển sang ${rule.trigger.to.join(" / ")}.`

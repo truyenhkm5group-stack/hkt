@@ -124,6 +124,15 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   BLUEPRINT_INSTALL_DONE: "Cài xong mẫu / gói cấu hình",
   BLUEPRINT_INSTALL_FAILED: "Cài mẫu / gói cấu hình dừng giữa chừng",
   BLUEPRINT_STEP: "Một bước cài mẫu / gói cấu hình",
+  // Đối tượng tuỳ biến (Phase 6 · lib/objects/*).
+  META_OBJECT_CREATE: "Tạo đối tượng tuỳ biến",
+  META_OBJECT_UPDATE: "Sửa đối tượng tuỳ biến",
+  META_OBJECT_ARCHIVE: "Lưu trữ đối tượng tuỳ biến",
+  META_OBJECT_RESTORE: "Khôi phục đối tượng tuỳ biến",
+  CUSTOM_RECORD_CREATE: "Tạo bản ghi",
+  CUSTOM_RECORD_UPDATE: "Sửa bản ghi",
+  CUSTOM_RECORD_DELETE: "Xoá bản ghi",
+  CUSTOM_VALUES_SAVE: "Lưu dữ liệu bổ sung",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -154,6 +163,8 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   return_unidentified: "Kiện hoàn không mã",
   META_PAGE: "Trang tuỳ biến",
   BLUEPRINT: "Mẫu / gói cấu hình",
+  META_OBJECT: "Đối tượng tuỳ biến",
+  CUSTOM_RECORD: "Bản ghi tuỳ biến",
 };
 
 /**

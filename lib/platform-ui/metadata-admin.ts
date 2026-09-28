@@ -1,14 +1,16 @@
 import { can, type SessionUser } from "@/lib/auth/session";
-import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { formatDateTime } from "@/lib/format";
 import { MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { archiveCustomField, createCustomField, listFields, updateCustomField, type CustomFieldInput as ServiceFieldInput, type CustomFieldPatch as ServiceFieldPatch } from "@/lib/metadata/fields";
 import { getFormDraft, getPublishedForm, publishForm, saveFormDraft } from "@/lib/metadata/forms";
 import { getListViewDraft, getPublishedListView, publishListView, saveListViewDraft } from "@/lib/metadata/lists";
+import { listCustomObjectDefs, resolveObject } from "@/lib/metadata/object-resolver";
 import { getStatusOverrides, saveStatusOverrides } from "@/lib/metadata/statuses";
-import type { CustomFieldDef, FieldError, FormSchema, ListViewSchema, MetadataActor, SystemFieldDef } from "@/lib/metadata/types";
+import { isCustomObjectKey, type CustomFieldDef, type FieldError, type FormSchema, type ListViewSchema, type MetadataActor, type SystemFieldDef } from "@/lib/metadata/types";
 import {
   adminObjects,
+  adminObjectsOf,
   buildCatalog,
   moveItem,
   type AdminCapability,
@@ -65,7 +67,7 @@ export function metadataAdminDenial(user: SessionUser): string | null {
   return null;
 }
 
-export type ResolvedObject = { object: AdminObjectOption; def: ObjectDef };
+export type ResolvedObject = { object: AdminObjectOption; def: AnyObjectDef };
 
 /** Đối tượng có cấu hình được ở màn hình này với người này không — cùng một luật với ô chọn đối tượng. */
 export function resolveAdminObject(user: SessionUser, objectKey: unknown, capability: AdminCapability): { ok: true; value: ResolvedObject } | AdminDenied {
@@ -79,6 +81,33 @@ export function resolveAdminObject(user: SessionUser, objectKey: unknown, capabi
     if (!def.customizable || !def.capabilities[capability]) return denied(`«${def.label}» không cấu hình được ở màn hình này.`);
     return denied(`Module của «${def.label}» đang tắt với tổ chức — bật module trước khi cấu hình.`);
   }
+  return { ok: true, value: { object, def } };
+}
+
+/**
+ * Đối tượng chọn được ở một màn hình quản trị: sổ tĩnh + đối tượng tuỳ biến ACTIVE của tổ chức người xem (Phase 6 —
+ * qua bộ phân giải, không nhánh riêng). Lỗi đọc đối tượng tuỳ biến (CSDL chưa áp migration) ⇒ chỉ sổ tĩnh.
+ */
+export async function adminObjectsAll(user: SessionUser, capability: AdminCapability): Promise<AdminObjectOption[]> {
+  let custom: AnyObjectDef[] = [];
+  try {
+    custom = await listCustomObjectDefs();
+  } catch (error) {
+    console.error("[metadata] không đọc được đối tượng tuỳ biến:", error instanceof Error ? error.message : error);
+  }
+  return [...adminObjects(user, capability), ...adminObjectsOf(custom, user, capability)];
+}
+
+/** `resolveAdminObject` cho CẢ khoá `x_…` (đọc CSDL của tổ chức hiện hành qua bộ phân giải). */
+export async function resolveAdminTarget(user: SessionUser, objectKey: unknown, capability: AdminCapability): Promise<{ ok: true; value: ResolvedObject } | AdminDenied> {
+  if (!isCustomObjectKey(objectKey)) return resolveAdminObject(user, objectKey, capability);
+  const denial = metadataAdminDenial(user);
+  if (denial) return denied(denial);
+  const def = await resolveObject(objectKey);
+  if (!def) return denied(`Không có đối tượng «${objectKey}» trong tổ chức này.`);
+  if (def.custom?.status === "ARCHIVED") return denied(`«${def.label}» đã lưu trữ — khôi phục ở Đối tượng tuỳ biến trước khi cấu hình.`);
+  const object = adminObjectsOf([def], user, capability)[0];
+  if (!object) return denied(`Module của «${def.label}» (Ứng dụng tuỳ biến / nhóm menu) đang tắt với tổ chức — bật module trước khi cấu hình.`);
   return { ok: true, value: { object, def } };
 }
 
@@ -105,14 +134,14 @@ export const FIELD_INPUT_MATCHES_SERVICE: [ExtraKeys<CustomFieldInput, ServiceFi
 export type DataModelView = { object: AdminObjectOption; system: SystemFieldDef[]; custom: CustomFieldDef[] };
 export type FormEditorView = {
   object: AdminObjectOption;
-  form: ObjectDef["forms"][number];
+  form: AnyObjectDef["forms"][number];
   catalog: CatalogField[];
   draft: FormSchema;
   published: PublishInfo & { schema: FormSchema };
 };
 export type ListEditorView = {
   object: AdminObjectOption;
-  list: ObjectDef["lists"][number];
+  list: AnyObjectDef["lists"][number];
   catalog: CatalogField[];
   draft: ListViewSchema;
   published: PublishInfo & { schema: ListViewSchema };
@@ -126,7 +155,7 @@ function publishInfo(p: { version: number; isDefault: boolean; publishedAt: Date
 }
 
 export async function loadDataModel(user: SessionUser, objectKey: unknown): Promise<Loaded<DataModelView>> {
-  const r = resolveAdminObject(user, objectKey, "customFields");
+  const r = await resolveAdminTarget(user, objectKey, "customFields");
   if (!r.ok) return r;
   const fields = await reading(() => listFields(r.value.def.key, { includeArchived: true }));
   if (!fields.ok) return fields;
@@ -134,7 +163,7 @@ export async function loadDataModel(user: SessionUser, objectKey: unknown): Prom
 }
 
 export async function loadFormEditor(user: SessionUser, objectKey: unknown, formKey: unknown): Promise<Loaded<FormEditorView>> {
-  const r = resolveAdminObject(user, objectKey, "forms");
+  const r = await resolveAdminTarget(user, objectKey, "forms");
   if (!r.ok) return r;
   const form = r.value.object.forms.find((f) => f.key === formKey) ?? null;
   if (!form) return denied(`«${r.value.def.label}» không có form «${String(formKey)}».`);
@@ -149,7 +178,7 @@ export async function loadFormEditor(user: SessionUser, objectKey: unknown, form
 }
 
 export async function loadListEditor(user: SessionUser, objectKey: unknown, viewKey: unknown): Promise<Loaded<ListEditorView>> {
-  const r = resolveAdminObject(user, objectKey, "lists");
+  const r = await resolveAdminTarget(user, objectKey, "lists");
   if (!r.ok) return r;
   const list = r.value.object.lists.find((l) => l.key === viewKey) ?? null;
   if (!list) return denied(`«${r.value.def.label}» không có danh sách «${String(viewKey)}».`);
@@ -164,7 +193,7 @@ export async function loadListEditor(user: SessionUser, objectKey: unknown, view
 }
 
 export async function loadStatusEditor(user: SessionUser, objectKey: unknown, fieldKey: unknown): Promise<Loaded<StatusEditorView>> {
-  const r = resolveAdminObject(user, objectKey, "statuses");
+  const r = await resolveAdminTarget(user, objectKey, "statuses");
   if (!r.ok) return r;
   const key = typeof fieldKey === "string" && r.value.object.statusFields.includes(fieldKey) ? fieldKey : null;
   const field = key ? r.value.def.fields.find((f) => f.key === key) : null;
@@ -186,20 +215,20 @@ export async function loadStatusEditor(user: SessionUser, objectKey: unknown, fi
 // ═══════════ GHI ═══════════
 
 export async function adminCreateField(user: SessionUser, objectKey: unknown, input: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "customFields");
+  const r = await resolveAdminTarget(user, objectKey, "customFields");
   if (!r.ok) return r;
   return toResult(await createCustomField(r.value.def.key, input, actorOf(user)));
 }
 
 export async function adminUpdateField(user: SessionUser, objectKey: unknown, fieldKey: unknown, patch: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "customFields");
+  const r = await resolveAdminTarget(user, objectKey, "customFields");
   if (!r.ok) return r;
   if (typeof fieldKey !== "string" || !fieldKey) return denied("Thiếu khoá field.");
   return toResult(await updateCustomField(r.value.def.key, fieldKey, patch, actorOf(user)));
 }
 
 export async function adminArchiveField(user: SessionUser, objectKey: unknown, fieldKey: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "customFields");
+  const r = await resolveAdminTarget(user, objectKey, "customFields");
   if (!r.ok) return r;
   if (typeof fieldKey !== "string" || !fieldKey) return denied("Thiếu khoá field.");
   return toResult(await archiveCustomField(r.value.def.key, fieldKey, actorOf(user)));
@@ -210,7 +239,7 @@ export async function adminArchiveField(user: SessionUser, objectKey: unknown, f
  * (field tạo cùng lúc) — nên đánh lại 0..n−1 theo thứ tự MỚI và chỉ ghi field có vị trí đổi thật.
  */
 export async function adminMoveField(user: SessionUser, objectKey: unknown, fieldKey: unknown, delta: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "customFields");
+  const r = await resolveAdminTarget(user, objectKey, "customFields");
   if (!r.ok) return r;
   if (delta !== 1 && delta !== -1) return denied("Hướng di chuyển không hợp lệ.");
   const fields = await reading(() => listFields(r.value.def.key));
@@ -228,7 +257,7 @@ export async function adminMoveField(user: SessionUser, objectKey: unknown, fiel
 }
 
 export async function adminSaveFormDraft(user: SessionUser, objectKey: unknown, formKey: unknown, schema: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "forms");
+  const r = await resolveAdminTarget(user, objectKey, "forms");
   if (!r.ok) return r;
   const form = r.value.object.forms.find((f) => f.key === formKey);
   if (!form) return denied(`Không có form «${String(formKey)}».`);
@@ -236,7 +265,7 @@ export async function adminSaveFormDraft(user: SessionUser, objectKey: unknown, 
 }
 
 export async function adminPublishForm(user: SessionUser, objectKey: unknown, formKey: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "forms");
+  const r = await resolveAdminTarget(user, objectKey, "forms");
   if (!r.ok) return r;
   const form = r.value.object.forms.find((f) => f.key === formKey);
   if (!form) return denied(`Không có form «${String(formKey)}».`);
@@ -244,7 +273,7 @@ export async function adminPublishForm(user: SessionUser, objectKey: unknown, fo
 }
 
 export async function adminSaveListDraft(user: SessionUser, objectKey: unknown, viewKey: unknown, schema: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "lists");
+  const r = await resolveAdminTarget(user, objectKey, "lists");
   if (!r.ok) return r;
   const list = r.value.object.lists.find((l) => l.key === viewKey);
   if (!list) return denied(`Không có danh sách «${String(viewKey)}».`);
@@ -252,7 +281,7 @@ export async function adminSaveListDraft(user: SessionUser, objectKey: unknown, 
 }
 
 export async function adminPublishList(user: SessionUser, objectKey: unknown, viewKey: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "lists");
+  const r = await resolveAdminTarget(user, objectKey, "lists");
   if (!r.ok) return r;
   const list = r.value.object.lists.find((l) => l.key === viewKey);
   if (!list) return denied(`Không có danh sách «${String(viewKey)}».`);
@@ -260,7 +289,7 @@ export async function adminPublishList(user: SessionUser, objectKey: unknown, vi
 }
 
 export async function adminSaveStatusOverrides(user: SessionUser, objectKey: unknown, fieldKey: unknown, rows: unknown): Promise<AdminWriteResult> {
-  const r = resolveAdminObject(user, objectKey, "statuses");
+  const r = await resolveAdminTarget(user, objectKey, "statuses");
   if (!r.ok) return r;
   if (typeof fieldKey !== "string" || !r.value.object.statusFields.includes(fieldKey)) return denied(`Không có trạng thái hệ thống «${String(fieldKey)}».`);
   return toResult(await saveStatusOverrides(r.value.def.key, fieldKey, rows, actorOf(user)));

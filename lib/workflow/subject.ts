@@ -12,8 +12,10 @@ import { and, eq } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
-import { isObjectKey, objectDef } from "@/lib/constants/object-registry";
-import { idColumnOf, loadCustomDefs } from "@/lib/metadata/common";
+import { isObjectKey } from "@/lib/constants/object-registry";
+import { idColumnOf, loadCustomDefs, recordScopeSql } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
+import { isCustomObjectKey } from "@/lib/metadata/types";
 
 export type SubjectRef = { objectKey: string; recordId: string };
 
@@ -29,12 +31,17 @@ export type EventLike = {
 export const EVENT_SUBJECT_REFS = ["system:event.name", "system:event.subject_type", "system:event.subject_id", "system:event.actor_kind"] as const;
 export const PAYLOAD_REF_PREFIX = "system:payload.";
 
+/** Khoá có thể là một đối tượng (sổ tĩnh HOẶC tuỳ biến `x_…` — Phase 6). Tồn tại thật hay không là việc của `resolveObject`. */
+export function isSubjectObjectKey(key: unknown): key is string {
+  return typeof key === "string" && (isObjectKey(key) || isCustomObjectKey(key));
+}
+
 /** Bản ghi mà sự kiện nói về — `null` khi subject của sự kiện không phải một đối tượng trong sổ. */
 export function subjectRefOf(ev: Pick<EventLike, "subjectType" | "subjectId" | "payload">): SubjectRef | null {
   if (ev.subjectType === METADATA_RECORD_SUBJECT) {
     const o = ev.payload?.objectKey;
     const r = ev.payload?.recordId;
-    return typeof o === "string" && typeof r === "string" && isObjectKey(o) ? { objectKey: o, recordId: r } : null;
+    return isSubjectObjectKey(o) && typeof r === "string" ? { objectKey: o, recordId: r } : null;
   }
   return isObjectKey(ev.subjectType) ? { objectKey: ev.subjectType, recordId: ev.subjectId } : null;
 }
@@ -61,11 +68,12 @@ export function eventSubjectFields(ev: EventLike): Record<string, unknown> {
 
 /** Phần subject đến từ BẢN GHI: field hệ thống (cột thật) + field custom ACTIVE. `null` khi bản ghi không tồn tại. */
 export async function recordSubjectFields(ref: SubjectRef): Promise<Record<string, unknown> | null> {
-  const def = objectDef(ref.objectKey);
+  // Qua bộ phân giải (Phase 6): bản ghi tuỳ biến đọc `custom_records` — đúng đối tượng, CHƯA XOÁ (bản ghi đã xoá ⇒ `null`).
+  const def = await resolveObject(ref.objectKey);
   if (!def || typeof ref.recordId !== "string" || ref.recordId.length === 0 || ref.recordId.length > 200) return null;
   const db = await getDb();
   const table = (schema as unknown as Record<string, unknown>)[def.table] as PgTable;
-  const rows = (await db.select().from(table).where(eq(idColumnOf(def), ref.recordId)).limit(1)) as Record<string, unknown>[];
+  const rows = (await db.select().from(table).where(and(eq(idColumnOf(def), ref.recordId), recordScopeSql(def))).limit(1)) as Record<string, unknown>[];
   const row = rows[0];
   if (!row) return null;
   const out: Record<string, unknown> = {};
@@ -85,9 +93,9 @@ export async function recordSubjectFields(ref: SubjectRef): Promise<Record<strin
 }
 
 /** Nhãn ngắn của bản ghi để ghi vào việc / thông báo: `<đối tượng> "<tên>"` hoặc `<đối tượng> <id>`. */
-export function subjectLabel(ref: SubjectRef | null, fields: Record<string, unknown> | null, fallback: string): string {
+export async function subjectLabel(ref: SubjectRef | null, fields: Record<string, unknown> | null, fallback: string): Promise<string> {
   if (!ref) return fallback;
-  const def = objectDef(ref.objectKey);
+  const def = await resolveObject(ref.objectKey);
   const title = def ? fields?.[`system:${def.titleField}`] : null;
   return `${def?.label ?? ref.objectKey} ${typeof title === "string" && title.trim() ? `"${title.trim()}"` : ref.recordId}`;
 }

@@ -21,6 +21,7 @@ import {
   NO_DEFAULT_TYPES,
   NUMERIC_TYPES,
   OPTION_TYPES,
+  RELATION_FIELD_TYPES,
   suggestFieldKey,
   TEXTUAL_TYPES,
   type AdminWriteResult,
@@ -224,7 +225,7 @@ function FieldEditor({ objectKey, objectLabel, mode, takenKeys, systemKeys, rela
     "helpText",
     ...(hasOptions ? ["options"] : []),
     ...(input.type === "status" && input.options.length > 0 ? ["transitions"] : []),
-    ...(input.type === "relation" ? ["relationObject"] : []),
+    ...(RELATION_FIELD_TYPES.includes(input.type) ? ["relationObject", "validation"] : []),
     ...(NUMERIC_TYPES.includes(input.type) ? ["validation.min", "validation.max"] : []),
     ...(TEXTUAL_TYPES.includes(input.type) ? ["validation.minLength", "validation.maxLength", "validation.pattern", "validation.patternMessage"] : []),
   ];
@@ -309,7 +310,7 @@ function FieldEditor({ objectKey, objectLabel, mode, takenKeys, systemKeys, rela
         <Row label="Giá trị mặc định" errors={errorsFor(errors, "defaultValue")}>
           <DefaultValueInput type={input.type} options={input.options} value={input.defaultValue} onChange={(v) => set("defaultValue", v)} />
         </Row>
-        {input.type === "relation" ? (
+        {RELATION_FIELD_TYPES.includes(input.type) ? (
           <Row label="Liên kết tới đối tượng" errors={errorsFor(errors, "relationObject")}>
             <select className={cn(SELECT_CLASS, "h-9")} value={input.relationObject ?? ""} onChange={(e) => set("relationObject", e.target.value || null)}>
               <option value="">— chọn —</option>
@@ -319,6 +320,13 @@ function FieldEditor({ objectKey, objectLabel, mode, takenKeys, systemKeys, rela
                 </option>
               ))}
             </select>
+          </Row>
+        ) : null}
+        {input.type === "relation" ? (
+          <Row label="Một-một" errors={errorsFor(errors, "validation")}>
+            <label className="inline-flex h-9 items-center gap-2 text-sm">
+              <Tick checked={input.validation.unique === true} onChange={(v) => set("validation", { ...input.validation, unique: v || undefined })} label="Mỗi bản ghi đích chỉ được một bản ghi trỏ tới" /> Mỗi bản ghi đích chỉ một
+            </label>
           </Row>
         ) : null}
       </div>

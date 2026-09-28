@@ -24,7 +24,7 @@
  *    hình thấy và chọn bật.
  */
 import { z } from "zod";
-import { objectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import type { CustomFieldDef, FieldError, FieldRef, FormFieldConfig, FormSchema, FormSection, SystemFieldDef } from "@/lib/metadata/types";
 
 export const FORM_MAX_SECTIONS = 20;
@@ -80,9 +80,12 @@ function hasValue(v: unknown): boolean {
   return v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "");
 }
 
-/** Form MẶC ĐỊNH: field hệ thống `editable` (nhóm "Thông tin chính") + mọi field custom ACTIVE ("Thông tin bổ sung"). */
-export function defaultFormSchema(objectKey: string, formKey: string, customDefs: readonly CustomFieldDef[]): FormSchema {
-  const def = objectDef(objectKey);
+/**
+ * Form MẶC ĐỊNH: field hệ thống `editable` (nhóm "Thông tin chính") + mọi field custom ACTIVE ("Thông tin bổ sung").
+ * `object`: khoá của sổ tĩnh, HOẶC định nghĩa đã phân giải (đối tượng tuỳ biến — Phase 6, không có trong sổ tĩnh).
+ */
+export function defaultFormSchema(object: string | AnyObjectDef, formKey: string, customDefs: readonly CustomFieldDef[]): FormSchema {
+  const def = typeof object === "string" ? objectDef(object) : object;
   const purpose = def?.forms.find((f) => f.key === formKey)?.purpose ?? "edit";
   const sections: FormSection[] = [];
   const system = (def?.fields ?? []).filter((f) => f.editable);
@@ -191,6 +194,18 @@ export function writableCustomKeys(schema: FormSchema): Set<string> {
     for (const cfg of sec.fields) {
       const p = parseRef(cfg.ref);
       if (p?.kind === "custom" && cfg.visible && !cfg.readOnly) out.add(p.key);
+    }
+  }
+  return out;
+}
+
+/** Khoá field HỆ THỐNG mà form cho GHI (hiện, không chỉ đọc) ⇒ `required` theo form (chặt hơn định nghĩa). */
+export function writableSystemKeys(schema: FormSchema): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  for (const sec of schema.sections) {
+    for (const cfg of sec.fields) {
+      const p = parseRef(cfg.ref);
+      if (p?.kind === "system" && cfg.visible && !cfg.readOnly) out.set(p.key, cfg.required);
     }
   }
   return out;

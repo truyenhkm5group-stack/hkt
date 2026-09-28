@@ -5,8 +5,13 @@
  */
 import type { FieldRef, ListFilterOp } from "@/lib/metadata/types";
 
+/**
+ * `event.objectKey` (Phase 6): chỉ cho sự kiện trên BẢN GHI metadata (`custom_record.*`, `custom_status.changed` —
+ * subject `custom_record`) — luật chỉ nghe sự kiện của ĐÚNG đối tượng đó, và điều kiện / `set_custom_value` trỏ được
+ * vào field của nó (vd "Hợp đồng tạo mới ⇒ giá trị > 20 triệu").
+ */
 export type WorkflowTrigger =
-  | { kind: "event"; event: string }
+  | { kind: "event"; event: string; objectKey?: string }
   | { kind: "custom_status"; objectKey: string; fieldKey: string; to: string[]; from?: string[] };
 
 export type WorkflowCondition = { all: WorkflowCondition[] } | { any: WorkflowCondition[] } | { field: FieldRef; op: ListFilterOp; value?: unknown };

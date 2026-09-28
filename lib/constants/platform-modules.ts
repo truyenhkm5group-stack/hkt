@@ -56,6 +56,7 @@ export const MODULE_KEYS = [
   "connector_bank",
   "connector_messaging",
   "integrations",
+  "apps",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -443,6 +444,19 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["integrations:view", "integrations:manage", "sync:run"],
     requiresHomeCredentials: true,
     why: "`/integrations` in nguyên secret webhook Viettel Post và URL webhook Pancake kèm secret; `/api/integrations/test` trả tên shop / BM / tài khoản Viettel Post — tất cả là credential của tổ chức nhà từ biến môi trường. Nên nó KHÔNG thuộc lõi và chỉ tổ chức nhà bật được.",
+  },
+  {
+    key: "apps",
+    label: "Ứng dụng tuỳ biến",
+    description: "Đối tượng nghiệp vụ tổ chức tự tạo (Hợp đồng bảo trì, Công trình, Xe…): danh sách, form, chi tiết tự sinh, quan hệ, luật tự động.",
+    category: "OPERATIONS",
+    version: 1,
+    core: false,
+    dependsOn: [],
+    features: [],
+    routes: ["/o"],
+    permissions: ["records:view", "records:write"],
+    why: "Phase 6 (docs/platform/phase-6-contracts.md): tổ chức thêm nghiệp vụ Core không có sẵn mà không cần viết mã — bản ghi ở `custom_records`, giá trị ở `custom_values` (X5), không bảng vật lý cho mỗi đối tượng. Tắt module ⇒ mọi đối tượng tuỳ biến ẩn khỏi menu VÀ bị từ chối ở máy chủ; định nghĩa và dữ liệu giữ nguyên. Không phụ thuộc module nào: tổ chức chỉ quản lý Công trình vẫn dùng được. Cấu hình đối tượng ở `/settings/objects` (lõi, `metadata:manage`).",
   },
 ];
 

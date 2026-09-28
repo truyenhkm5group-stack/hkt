@@ -384,7 +384,11 @@ export function visibleCustomKeys(schema: ListViewSchema | null | undefined): st
 
 // ───────────────────────── In giá trị ─────────────────────────
 
-export type FormatContext = { userNames?: Readonly<Record<string, string>> };
+/**
+ * `relationLabels` (Phase 6): tên đích theo field ⇒ id. Có map của field mà id vắng ⇒ "—" (người xem không xem được
+ * đích, hoặc đích đã xoá — hợp đồng mục 3). Không có map của field ⇒ in nguyên mã như Phase 2.
+ */
+export type FormatContext = { userNames?: Readonly<Record<string, string>>; relationLabels?: Readonly<Record<string, Readonly<Record<string, string>>>>; fieldKey?: string };
 
 function optionLabel(options: readonly FieldOption[], value: unknown): string {
   const s = String(value);
@@ -412,6 +416,14 @@ export function formatCustomValue(def: Pick<CustomFieldDef, "type" | "options">,
       return Array.isArray(value) ? value.map((v) => optionLabel(def.options, v)).join(", ") : optionLabel(def.options, value);
     case "user":
       return ctx.userNames?.[String(value)] ?? String(value);
+    case "relation":
+    case "relation_many": {
+      const labels = ctx.fieldKey ? ctx.relationLabels?.[ctx.fieldKey] : undefined;
+      const ids = (Array.isArray(value) ? value : [value]).map(String);
+      if (!labels) return ids.join(", ");
+      const shown = ids.map((id) => labels[id] ?? MISSING_TEXT);
+      return shown.join(", ");
+    }
     default:
       return String(value);
   }
