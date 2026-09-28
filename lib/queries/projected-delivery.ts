@@ -1,7 +1,7 @@
 import { and, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
-import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { CARRIER_SUBSTATE_LABEL, carrierSubstate, eventStatusCode, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import {
   AGE_BUCKET_LABEL,
   ageBucketOf,
@@ -47,8 +47,26 @@ import { rowsOf } from "@/lib/sql-rows";
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 const NGAY_MS = 86_400_000;
 
-/** Trạng thái con của một SỰ KIỆN hành trình (không có `stage` để rơi về — sự kiện nói gì thì là nấy). */
-const CON_SU_KIEN = carrierSubstateSql(sql`nullif(regexp_replace(e.status, '[^0-9]', '', 'g'), '')::int`, sql`e.status_name`, sql`null::text`);
+/**
+ * TRẠNG THÁI CON CỦA MỘT SỰ KIỆN hành trình (không có `stage` để rơi về — sự kiện nói gì thì là nấy),
+ * tính bằng bản TypeScript của luật, NHỚ THEO CẶP (mã, chữ).
+ *
+ * Trước đây câu nạp sự kiện tính nó trong Postgres bằng `carrierSubstateSql` cho TỪNG dòng. Đo
+ * production 28/09/2026: ~0,115 ms mỗi dòng sự kiện — 1,0–1,6 s mỗi cụm 1.000 kiện, 2–3 cụm trong gần
+ * mọi hàm báo cáo đọc kho này (/ads, /ads/daily, báo cáo hoàn, lợi nhuận danh nghĩa, phễu). Trong khi
+ * toàn bộ 21.671 dòng sự kiện ĐVVC chỉ mang 29 cặp (mã, chữ) khác nhau. Đối chiếu trên chính 29 cặp
+ * ấy: bản TypeScript và bản SQL cho CÙNG kết quả ở 29/29 cặp, 21.671/21.671 dòng (và
+ * `tests/care-states.test.ts` giữ hai bản không trôi xa nhau).
+ */
+function conSuKien(cache: Map<string, CarrierSubstate>, status: string | null, statusName: string | null): CarrierSubstate {
+  const key = `${status ?? "\u0000"}\u0001${statusName ?? "\u0000"}`;
+  let con = cache.get(key);
+  if (con === undefined) {
+    con = carrierSubstate({ code: eventStatusCode(status), text: statusName, stage: null }).substate;
+    cache.set(key, con);
+  }
+  return con;
+}
 
 /**
  * KIỆN ĐÃ KẾT THÚC theo `ORDER_OUTCOME`, kèm mốc ĐVVC nhận và mốc kết cục cuối.
@@ -117,12 +135,13 @@ async function taiKho(): Promise<Corpus> {
       shipments.push({ id: r.id, outcome: r.outcome, handoffAt, finalAt: toDate(r.final_at), productCode: null });
     }
     const events = new Map<string, CarrierEventLite[]>();
+    const conCache = new Map<string, CarrierSubstate>();
     const ids = shipments.map((s) => s.id);
     for (let i = 0; i < ids.length; i += EVENT_ID_CHUNK) {
       const chunk = ids.slice(i, i + EVENT_ID_CHUNK);
-      const rows = rowsOf<{ shipment_id: string; occurred_at: unknown; con: string }>(
+      const rows = rowsOf<{ shipment_id: string; occurred_at: unknown; status: string | null; status_name: string | null }>(
         await db.execute(sql`
-          select e.shipment_id, e.occurred_at, ${CON_SU_KIEN} as con
+          select e.shipment_id, e.occurred_at, e.status, e.status_name
             from shipment_events e
            where e.source in (${sql.raw(EVENT_SOURCES)})
              and e.shipment_id in (${sql.join(chunk.map((id) => sql`${id}`), sql`, `)})
@@ -133,7 +152,7 @@ async function taiKho(): Promise<Corpus> {
         const at = toDate(r.occurred_at);
         if (!at) continue;
         const list = events.get(r.shipment_id) ?? [];
-        list.push({ at, con: r.con });
+        list.push({ at, con: conSuKien(conCache, r.status, r.status_name) });
         events.set(r.shipment_id, list);
       }
     }

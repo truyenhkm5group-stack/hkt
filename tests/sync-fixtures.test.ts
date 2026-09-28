@@ -1790,7 +1790,7 @@ async function main() {
   await testCancelAnalysisDb(db);
   await testPreshipRisk(db);
   // Hình dạng câu báo cáo: biểu thức regex đắt tính MỘT lần (trạng thái con ĐVVC · đuôi SĐT của backtest) — đo production 28/09/2026.
-  testReportQueryShape();
+  await testReportQueryShape(db);
   await testAdsRoas(db);
   await testMarketingDaily();
   await testMarketerDailyNominal();
