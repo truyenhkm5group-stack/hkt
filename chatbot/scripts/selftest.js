@@ -894,5 +894,37 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 26: chi phi AI / don: gia theo tien to dai nhat, token cache/suy nghi dung nha cung cap, model chua gia = chua biet (khong phai 0d)");
 }
 
+// ---- 27: chi phi AI / SDT cung khung gio (chu shop 28/09/2026: "lay tong tien tieu cho api chia cho chuan voi sdt")
+// Su co: 829d tien (do tu 16:40 hom do) chia cho 577 don cua 30 ngay => "1d/don". Tu so va mau so phai cung khung.
+{
+  const { phonesInText } = await import("../src/orders.js");
+  const { meteredUsage, perSdt } = await import("../src/aicost.js");
+  assert.deepEqual(phonesInText("sdt c 0912.345.678 nha, so cu +84 987 654 321"), ["0912345678", "0987654321"]);
+  assert.deepEqual(phonesInText("60kg 1m60, don 279.000d, ma 4452"), [], "can nang / gia / ma don khong phai SDT");
+  // Ngay bat dau do: tru phan token ghi TRUOC moc; ngay truoc moc bo han
+  const byDay = { "2026-09-27": { m: { calls: 50, input: 1, cached: 0, output: 1 } }, "2026-09-28": { m: { calls: 30, input: 300, cached: 0, output: 30 } } };
+  const mu = meteredUsage(byDay, { day: "2026-09-28" }, { m: { calls: 20, input: 200, cached: 0, output: 20 } });
+  assert.deepEqual(Object.keys(mu), ["2026-09-28"]);
+  assert.deepEqual(mu["2026-09-28"].m, { calls: 10, input: 100, cached: 0, output: 10 });
+  assert.equal(perSdt(829, 0), null, "chua co SDT nao -> khong chia");
+  assert.equal(perSdt(null, 5), null, "tien chua biet -> khong chia");
+  assert.equal(perSdt(1000, 4), 250);
+  // SDT: moi so dem MOT lan; tin go truoc moc do khong dem
+  const since = store.getMeter().since;
+  assert.ok(since, "store co moc do");
+  assert.equal(store.addPhone("PAGE_SDT", "0911111111", since - 60000), false, "SDT go truoc moc khong dem");
+  assert.equal(store.addPhone("PAGE_SDT", "0911111112", Date.now()), true);
+  assert.equal(store.addPhone("PAGE_SDT", "0911111112", Date.now()), false, "cung so khong dem lan hai");
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  assert.equal(store.countPhones([today], "PAGE_SDT"), 1);
+  assert.ok(!JSON.stringify(store.state.phones).includes("0911111112"), "chi luu bam, khong luu so that");
+  // Hoa don that nhap tay: chan khoang nguoc / so am
+  assert.throws(() => settings.setAiBills([{ from: "2026-09-30", to: "2026-09-01", amountVnd: 1 }]), /Khoang ngay/);
+  assert.throws(() => settings.setAiBills([{ from: "2026-09-01", to: "2026-09-30", amountVnd: -5 }]), /So tien/);
+  assert.equal(settings.setAiBills([{ from: "2026-09-01", to: "2026-09-30", amountVnd: 350000.4, note: "thang 9" }])[0].amountVnd, 350000);
+  settings.global.aiBills = [];
+  console.log("OK 27: chi phi AI / SDT: tu so va mau so cung khung gio tu moc do, SDT dem mot lan (chi luu bam), hoa don that nhap tay");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

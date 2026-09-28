@@ -16,7 +16,7 @@ import { broadcast } from "./broadcast.js";
 import { salesAgent, followupConfig, STAGES } from "./salesagent.js";
 import { orderAudit, STATUS_NAMES } from "./audit.js";
 import { handleErpRoutes } from "./erp-import.js";
-import { summarizeAiCost } from "./aicost.js";
+import { summarizeAiCost, meteredUsage, perSdt } from "./aicost.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_HTML = path.join(ROOT, "admin", "index.html");
@@ -65,10 +65,17 @@ function pageSummary(bot, pageId) {
   const days = Object.keys(st).filter((k) => k !== "lastActivity").sort().slice(-7);
   const sum = (key) => days.reduce((n, d) => n + (st[d]?.[key] || 0), 0);
   const { prices, usdVnd } = settings.aiPricing();
-  const ai7 = summarizeAiCost(store.getAiUsage(pageId), days, { prices, usdVnd, orders: sum("orders") });
+  // Chi phi AI cua page: chi tu moc do (cung khung voi SDT), chia cho SDT moi cua page trong cung ngay.
+  const meter = store.getMeter();
+  const mUsage = meteredUsage(store.getAiUsage(pageId), meter, meter?.baseline?.[pageId]);
+  const mDays = lastDays(7).filter((d) => !meter?.day || d >= meter.day);
+  const ai7 = summarizeAiCost(mUsage, mDays, { prices, usdVnd, orders: mDays.reduce((n, d) => n + (st[d]?.orders || 0), 0) });
+  const sdt7 = store.countPhones(mDays, pageId);
+  const sdtToday = store.countPhones([today], pageId);
+  const aiToday = summarizeAiCost(mUsage, [today], { prices, usdVnd, orders: st[today]?.orders || 0 });
   return {
     id: pageId,
-    ai: { last7: ai7, today: summarizeAiCost(store.getAiUsage(pageId), [today], { prices, usdVnd, orders: st[today]?.orders || 0 }) },
+    ai: { last7: { ...ai7, sdt: sdt7, perSdtVnd: perSdt(ai7.costVnd, sdt7) }, today: { ...aiToday, sdt: sdtToday, perSdtVnd: perSdt(aiToday.costVnd, sdtToday) } },
     name: bot.pageNames.get(pageId) || "",
     pancakeName: bot.pancakeNames?.get(pageId) || "",
     settings: settings.get(pageId),
@@ -97,43 +104,74 @@ Hãy phân tích và trả lời bằng tiếng Việt, ngắn gọn, dạng dan
 Không bịa thông tin shop; chỗ nào cần chủ shop điền thì ghi [cần điền].`;
 
 /**
- * TONG CHI PHI AI ca shop theo ky (hom nay / 7 / 30 ngay lich, gio VN): gom token moi page + phan "_khac"
- * (tro ly, doi chieu don...), don = tong don POS cua moi page cung ky; kem bang theo tung page.
+ * TONG CHI PHI AI ca shop theo ky (hom nay / 7 / 30 ngay lich, gio VN), CHIA CHO SO SDT khach de lai trong CUNG khung
+ * gio: ca tu so va mau so chi tinh tu MOC DO (store.getMeter()). Truoc moc chi co tien ma khong co SDT; chia tien it
+ * ngay cho don nhieu ngay tung ra "1d/don" — mot con so trong co ve dung nhung sai.
+ *
+ * Ben canh uoc tinh theo token, chu shop nhap TIEN THUC TRA (hoa don Google) cho mot khoang ngay; ERP chia cho so SDT
+ * cua dung khoang do. Khoang bat dau truoc moc do => SDT khong du => khong chia (null), noi ro ly do.
  */
 function lastDays(n) {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   return [...Array(n)].map((_, i) => new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10));
 }
+function daysBetween(from, to) {
+  const out = [];
+  for (let t = Date.parse(from); t <= Date.parse(to) && out.length < 400; t += 86400000) out.push(new Date(t).toISOString().slice(0, 10));
+  return out;
+}
+function meteredAll() {
+  const meter = store.getMeter();
+  const out = {};
+  for (const [id, byDay] of Object.entries(store.getAllAiUsage())) out[id] = meteredUsage(byDay, meter, meter?.baseline?.[id]);
+  return out;
+}
+function mergeUsage(usage, days) {
+  const gop = {};
+  for (const byDay of Object.values(usage)) {
+    for (const d of days) {
+      for (const [model, t] of Object.entries(byDay[d] || {})) {
+        const x = ((gop[d] ||= {})[model] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+        x.calls += t.calls || 0; x.input += t.input || 0; x.cached += t.cached || 0; x.output += t.output || 0;
+      }
+    }
+  }
+  return gop;
+}
+function withSdt(a, sdt) {
+  return { ...a, sdt, perSdtVnd: perSdt(a.costVnd, sdt) };
+}
 function shopAiCost(bot) {
   const pricing = settings.aiPricing();
-  const usage = store.getAllAiUsage();
+  const meter = store.getMeter();
+  const usage = meteredAll();
   const orderOf = (id, days) => {
     const st = store.getStats(id);
     return days.reduce((n, d) => n + (st[d]?.orders || 0), 0);
   };
+  const inMeter = (days) => days.filter((d) => !meter?.day || d >= meter.day);
   const periods = {};
   for (const [key, n] of [["today", 1], ["d7", 7], ["d30", 30]]) {
-    const days = lastDays(n);
-    const gop = {};
-    for (const byDay of Object.values(usage)) {
-      for (const d of days) {
-        for (const [model, t] of Object.entries(byDay[d] || {})) {
-          const x = ((gop[d] ||= {})[model] ||= { calls: 0, input: 0, cached: 0, output: 0 });
-          x.calls += t.calls || 0; x.input += t.input || 0; x.cached += t.cached || 0; x.output += t.output || 0;
-        }
-      }
-    }
+    const days = inMeter(lastDays(n));
     let orders = 0;
     for (const id of bot.clients.keys()) orders += orderOf(id, days);
-    periods[key] = summarizeAiCost(gop, days, { ...pricing, orders });
+    periods[key] = { ...withSdt(summarizeAiCost(mergeUsage(usage, days), days, { ...pricing, orders }), store.countPhones(days)), fullWindow: days.length === n };
   }
-  const d30 = lastDays(30);
+  const d30 = inMeter(lastDays(30));
   const ids = new Set([...bot.clients.keys(), ...Object.keys(usage)]);
   const byPage = [...ids].map((id) => {
     const a = summarizeAiCost(usage[id] || {}, d30, { ...pricing, orders: id === "_khac" ? 0 : orderOf(id, d30) });
-    return { id, name: id === "_khac" ? "Ngoài hội thoại (trợ lý AI, đối chiếu đơn…)" : bot.pageNames.get(id) || id, calls: a.calls, costVnd: a.costVnd, partial: a.partial, orders: a.orders, perOrderVnd: a.perOrderVnd };
-  }).filter((r) => r.calls > 0).sort((a, b) => (b.costVnd ?? -1) - (a.costVnd ?? -1));
-  return { ...periods.d7, periods, byPage };
+    const sdt = id === "_khac" ? 0 : store.countPhones(d30, id);
+    return { id, name: id === "_khac" ? "Ngoài hội thoại (trợ lý AI, đối chiếu đơn…)" : bot.pageNames.get(id) || id, calls: a.calls, costVnd: a.costVnd, partial: a.partial, orders: a.orders, perOrderVnd: a.perOrderVnd, sdt, perSdtVnd: perSdt(a.costVnd, sdt) };
+  }).filter((r) => r.calls > 0 || r.sdt > 0).sort((a, b) => (b.costVnd ?? -1) - (a.costVnd ?? -1));
+  const bills = settings.aiBills().map((b) => {
+    const days = daysBetween(b.from, b.to);
+    const du = !meter?.day || b.from >= meter.day;
+    const sdt = store.countPhones(days);
+    const est = summarizeAiCost(mergeUsage(usage, days), days, { ...pricing, orders: 0 });
+    return { ...b, sdt: du ? sdt : null, perSdtVnd: du ? perSdt(b.amountVnd, sdt) : null, estimateVnd: du ? est.costVnd : null, reason: du ? (sdt ? (meter?.day && b.from === meter.day ? "ngày đầu chỉ đếm SĐT từ lúc bắt đầu đo — số / SĐT có thể cao hơn thực tế" : "") : "chưa có SĐT nào trong khoảng này") : `SĐT chỉ đếm từ ${meter.day} — khoảng bắt đầu trước đó thì không chia được` };
+  });
+  return { ...periods.d7, periods, byPage, bills, meterSince: meter?.since || null };
 }
 
 export function createAdminHandler(bot) {
@@ -207,6 +245,13 @@ export function createAdminHandler(bot) {
         if ("aiPrices" in body || "usdVnd" in body) {
           try {
             settings.setAiPricing({ aiPrices: body.aiPrices, usdVnd: body.usdVnd });
+          } catch (e) {
+            return json(res, 400, { error: e.message }), true;
+          }
+        }
+        if ("aiBills" in body) {
+          try {
+            settings.setAiBills(body.aiBills);
           } catch (e) {
             return json(res, 400, { error: e.message }), true;
           }

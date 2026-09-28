@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
@@ -10,7 +11,8 @@ import { log } from "./logger.js";
  * - lastHandled: { conversationId: messageId cuoi cung bot da tra loi }
  * - convUpdatedAt: { conversationId: updated_at } dung cho che do poll
  */
-const MAX_IDS = 20000; // tang de nho lau hon tin cua bot (phan biet voi tin tu dong cua Facebook)
+const MAX_IDS = 20000;
+const vnDay = (ms) => new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10); // tang de nho lau hon tin cua bot (phan biet voi tin tu dong cua Facebook)
 
 class Store {
   constructor() {
@@ -18,6 +20,7 @@ class Store {
     this.file = path.join(config.dataDir, "state.json");
     this.state = { processed: [], botMessages: [], lastHandled: {}, convUpdatedAt: {}, stats: {}, recent: {} };
     this._load();
+    this._startMeter();
     this._processed = new Set(this.state.processed);
     this._bot = new Set(this.state.botMessages);
     this._timer = null;
@@ -101,6 +104,47 @@ class Store {
     const days = Object.keys(p).sort();
     while (days.length > 35) delete p[days.shift()];
     this._save();
+  }
+  /**
+   * MOC DO CHI PHI / SDT: tu luc nay moi dem SDT, nen phep chia chi dung ngay tu moc (truoc do chi co tien, khong co
+   * SDT — chia 30 ngay tien cho 30 ngay don la chia hai tap khac nhau). Token cua NGAY BAT DAU ghi truoc moc duoc chup
+   * lai (baseline) de tru ra, nen ngay dau cung khop dung khung gio.
+   */
+  _startMeter() {
+    if (this.state.meter?.since) return;
+    const since = Date.now();
+    const day = vnDay(since);
+    const baseline = {};
+    for (const [page, byDay] of Object.entries(this.state.aiUsage || {})) {
+      if (byDay[day]) baseline[page] = JSON.parse(JSON.stringify(byDay[day]));
+    }
+    this.state.meter = { since, day, baseline };
+    this._save();
+  }
+  getMeter() {
+    return this.state.meter;
+  }
+  /**
+   * SDT khach de lai trong hoi thoai bot phu trach: moi so dem MOT lan, o ngay khach go no (gio VN). Chi luu BAM cua
+   * so (khong luu so that). Tin go truoc moc do khong dem — do la SDT cua ky truoc, khong phai ket qua cua tien nay.
+   */
+  addPhone(pageId, phone, atMs) {
+    if (!phone || !Number.isFinite(atMs) || atMs < (this.state.meter?.since || 0)) return false;
+    const key = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+    const all = (this.state.phones ||= {});
+    if (all[key]) return false;
+    all[key] = { p: String(pageId), d: vnDay(atMs) };
+    const cutoff = vnDay(Date.now() - 35 * 86400000);
+    for (const [k, v] of Object.entries(all)) if (v.d < cutoff) delete all[k];
+    this._save();
+    return true;
+  }
+  /** So SDT moi theo page trong cac ngay cho truoc. */
+  countPhones(days, pageId) {
+    const set = new Set(days);
+    let n = 0;
+    for (const v of Object.values(this.state.phones || {})) if (set.has(v.d) && (pageId === undefined || v.p === String(pageId))) n++;
+    return n;
   }
   getAiUsage(pageId) {
     return (this.state.aiUsage || {})[String(pageId)] || {};

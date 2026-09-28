@@ -8,7 +8,7 @@ import { log } from "./logger.js";
 import { catalog } from "./catalog.js";
 import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
-import { orderSync, describeOrder } from "./orders.js";
+import { orderSync, describeOrder, phonesInText } from "./orders.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
@@ -1409,6 +1409,11 @@ ${eff.afterOrderText.trim()}`;
 
     store.bumpStat(pageId, "replies");
     if (handoff) store.bumpStat(pageId, "handoffs");
+    // SDT khach da go trong hoi thoai bot dang phu trach — mau so cua "chi phi AI / 1 SDT"
+    for (const m of messages) {
+      if (this.isFromPage(m, pageId)) continue;
+      for (const ph of phonesInText(this.messageText(m))) store.addPhone(pageId, ph, parseTs(m.inserted_at));
+    }
     store.recordReply(pageId, { conversationId, customerName: name, question: this.messageText(last).slice(0, 200), reply: reply.slice(0, 500), handoff, dryRun: eff.dryRun });
     if (eff.dryRun) {
       log.info(`[${pageId}] DRY_RUN: khong gui tin cho khach`);
