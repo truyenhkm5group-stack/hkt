@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleCheck, ExternalLink, PackageCheck } from "lucide-react";
+import { CircleCheck, ExternalLink, PackageCheck, PackageX } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ScopeDenied } from "@/components/scope-denied";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -14,6 +14,11 @@ import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, mas
 import { listReservedQueue, type ReservedLineFinding, type ReservedQueueLine } from "@/lib/queries/stock";
 import { PhoneReputationProvider, PhoneRiskSummary, PhoneWarningCell, ReturnRateCell } from "@/app/(dashboard)/products/reserved/reputation";
 import { loadAlertConfig } from "@/lib/alerts/config";
+import { RiskToolbar, SortHead, SortedRows } from "@/app/(dashboard)/products/reserved/risk-view";
+import { PosPushBar, PosPushCheckbox, PosPushProvider, PosPushSelectAll, type PosCandidate } from "@/app/(dashboard)/products/reserved/pos-push";
+import { ORDER_PACK_LABEL, orderPackState, packStateDetail, type OrderPackState, type OrderStockVerdict } from "@/lib/constants/stock-shortage";
+import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Đơn chờ xuất" };
 
@@ -24,7 +29,12 @@ export const metadata = { title: "Đơn chờ xuất" };
  * Danh sách đọc ĐÚNG vị ngữ `RESERVED_IN_WAREHOUSE` của sổ kho, rồi TÁCH theo bản soát trước khi
  * gửi (`listReservedQueue`): đơn còn lỗi chặn gửi (thiếu SĐT, địa chỉ, thông tin hàng) chưa đủ điều
  * kiện vào hàng đợi xuất và đứng ở mục riêng, nói rõ thiếu gì. Hai mục cộng lại = con số vừa bấm.
- * Chỉ đọc.
+ *
+ * Đơn đủ thông tin lại tách theo HÀNG TRONG KHO (chủ shop yêu cầu 28/09/2026): kết luận cấp đơn của
+ * bảng phân bổ `allocateStock` (tồn thực tế sổ kho, đơn lên trước được hàng trước) — CÙNG bảng mà
+ * trang Thiếu hàng và hàng đợi fulfillment đọc, không có phép tính thứ hai. Chỉ đơn "có hàng" mới là
+ * đơn kho in, đóng và gửi Viettel Post được; chúng chọn được để mở một lượt trên POS (`pos-push.tsx`).
+ * Chỉ đọc — ERP không đẩy đơn sang ĐVVC.
  */
 export default async function ReservedOrdersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { decision } = await requireResource("INVENTORY", "products:view");
@@ -41,10 +51,12 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
     );
   }
 
-  const [{ scope, ready, incomplete }, alertCfg] = await Promise.all([
+  const [{ scope, ready, incomplete }, alertCfg, shortage] = await Promise.all([
     listReservedQueue(variantId ? { variantId } : { productId: productId as string }),
     // Ngưỡng rủi ro uy tín SĐT — nguồn duy nhất là cấu hình cảnh báo. Không đọc được ⇒ không gắn cảnh báo.
     loadAlertConfig().catch(() => null),
+    // Không đọc được sổ kho ⇒ KHÔNG kết luận có / không có hàng (mọi đơn về một mục như cũ), không đoán.
+    getStockShortage().catch(() => null),
   ]);
   const thresholds = alertCfg ? { phoneRiskReturnRatePct: alertCfg.phoneRiskReturnRatePct, phoneRiskWarningCount: alertCfg.phoneRiskWarningCount, phoneRiskMinOrders: alertCfg.phoneRiskMinOrders } : null;
   if (!scope) {
@@ -60,6 +72,12 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
   const orders = (lines: ReservedQueueLine[]) => new Set(lines.map((l) => l.orderId)).size;
   const byProduct = !scope.variant;
   const title = scope.variant ? `${scope.productName} · ${scope.variant.label || scope.variant.sku}` : scope.productName;
+  const stock = shortage?.orders ?? null;
+  const packOf = (l: ReservedQueueLine): OrderPackState => orderPackState(stock?.get(l.orderId));
+  const packable = stock ? ready.filter((l) => packOf(l) === "PACKABLE") : ready;
+  const noStock = stock ? ready.filter((l) => packOf(l) === "NO_STOCK") : [];
+  const unsure = stock ? ready.filter((l) => packOf(l) === "STOCK_UNKNOWN" || packOf(l) === "NOT_ALLOCATED") : [];
+  const posCandidates: PosCandidate[] = [...new Map(packable.map((l) => [l.orderId, { orderId: l.orderId, systemId: l.systemId ?? null, shopId: l.shopId, hasShipment: Boolean(l.shipmentCode) }])).values()];
 
   return (
     <PhoneReputationProvider orderIds={[...new Set([...ready, ...incomplete].map((l) => l.orderId))]} thresholds={thresholds}>
@@ -67,7 +85,11 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
       <PageHeader
         eyebrow="Kho · Đơn chờ xuất"
         title={title}
-        description={`${formatNumber(orders(ready))} đơn · ${formatNumber(units(ready))} sản phẩm đủ điều kiện xuất${incomplete.length ? ` · ${formatNumber(orders(incomplete))} đơn thiếu thông tin chưa vào hàng đợi` : ""}`}
+        description={
+          stock
+            ? `${formatNumber(orders(packable))} đơn có hàng, đóng gói & gửi VTP được · ${formatNumber(orders(noStock))} đơn không có hàng để đóng${unsure.length ? ` · ${formatNumber(orders(unsure))} đơn chưa biết tồn` : ""}${incomplete.length ? ` · ${formatNumber(orders(incomplete))} đơn thiếu thông tin` : ""}`
+            : `${formatNumber(orders(ready))} đơn · ${formatNumber(units(ready))} sản phẩm đủ điều kiện xuất${incomplete.length ? ` · ${formatNumber(orders(incomplete))} đơn thiếu thông tin chưa vào hàng đợi` : ""}`
+        }
         hint={
           <>
             Đơn <b>đã chốt</b> mà hàng <b>chưa rời kho</b> (chưa có xác nhận lấy hàng của Viettel Post), gồm cả đơn chưa
@@ -75,6 +97,9 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
             địa chỉ, thiếu tỉnh, không có hàng, thiếu màu/size, số lượng sai — <b>chưa đủ điều kiện vào hàng đợi xuất</b>{" "}
             và đứng ở mục riêng bên dưới. Đơn đó VẪN giữ hàng trong kho (đã chốt với khách), nên hai mục cộng lại đúng
             bằng số &ldquo;chờ xuất&rdquo; trên trang Sản phẩm và Khả dụng bán không đổi. Đơn chờ lâu nhất đứng đầu.
+            <br />
+            <br />
+            <b>Có hàng / không có hàng</b>: tồn thực tế của sổ kho (phiếu kho − đã xuất qua ĐVVC) được phân cho các đơn đã chốt theo thứ tự <b>ai lên đơn trước được hàng trước</b> (đơn khách hẹn giao xa xếp cuối) — cùng bảng với trang Thiếu hàng. Kho đóng CẢ ĐƠN, nên đơn nhiều món mà thiếu một món là &ldquo;không có hàng để đóng&rdquo;. Tồn Pancake không dùng để tính. Bảng phân bổ cập nhật mỗi phút.
           </>
         }
         actions={
@@ -88,69 +113,45 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
 
       <PhoneRiskSummary labels={Object.fromEntries([...ready, ...incomplete].map((l) => [l.orderId, `#${l.systemId ?? l.orderId}`]))} />
 
-      <SectionCard
-        title={`Đủ điều kiện xuất · ${formatNumber(orders(ready))} đơn`}
-        description="Đủ SĐT, địa chỉ và thông tin hàng — kho đóng gói và giao ĐVVC được ngay."
-        padded={false}
-      >
-        {ready.length === 0 ? (
-          <EmptyState className="m-4" title="Không có đơn nào đủ điều kiện xuất" description={incomplete.length ? "Mọi đơn đang giữ hàng đều còn thiếu thông tin — xem mục bên dưới." : "Các đơn đã được Viettel Post lấy hàng, hoặc đã huỷ."} icon={PackageCheck} />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Đơn</TableHead>
-                <TableHead>Tạo đơn</TableHead>
-                <TableHead>Khách</TableHead>
-                <TableHead className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP.">Tỷ lệ hoàn · Pancake</TableHead>
-                <TableHead className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</TableHead>
-                {byProduct ? <TableHead>Mẫu mã</TableHead> : null}
-                <TableHead className="text-right">SL</TableHead>
-                <TableHead>Trạng thái đơn</TableHead>
-                <TableHead>Vận đơn</TableHead>
-                <TableHead>Hẹn khách</TableHead>
-                <TableHead className="text-right">Giá trị đơn</TableHead>
-                <TableHead>Mở</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ready.map((l, i) => (
-                <TableRow key={`${l.orderId}-${l.variantId}-${i}`}>
-                  <TableCell>
-                    <OrderLink line={l} />
-                    <div className="mt-0.5 flex items-center gap-1 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-400">
-                      <CircleCheck className="size-3" aria-hidden /> Đủ thông tin
-                    </div>
-                    {l.warnings.length ? <FindingList findings={l.warnings} className="text-amber-700 dark:text-amber-400" prefix="Lưu ý: " /> : null}
-                  </TableCell>
-                  <CreatedCell line={l} />
-                  <CustomerCell line={l} />
-                  <ReturnRateCell orderId={l.orderId} />
-                  <PhoneWarningCell orderId={l.orderId} />
-                  {byProduct ? <VariantCell line={l} /> : null}
-                  <QtyCell line={l} />
-                  <TableCell className="text-xs">{ORDER_STAGE_LABEL[l.orderStage as OrderStage] ?? l.orderStage}</TableCell>
-                  <TableCell>
-                    {l.shipmentCode ? (
-                      <>
-                        <div className="font-mono text-xs">{l.shipmentCode}</div>
-                        <div className="text-[10.5px] text-muted-foreground">{l.shipmentStage ? (SHIPMENT_STAGE_LABEL[l.shipmentStage as ShipmentStage] ?? l.shipmentStage) : "—"}</div>
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Chưa tạo vận đơn</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs">{l.promisedAt ? formatDate(l.promisedAt) : <span className="text-muted-foreground">—</span>}</TableCell>
-                  <TableCell className="text-right">
-                    <span className="numeric">{formatVND(l.orderValue)}</span>
-                  </TableCell>
-                  <LinksCell line={l} />
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </SectionCard>
+      {ready.length + incomplete.length ? <RiskToolbar orderIds={[...ready, ...incomplete].map((l) => l.orderId)} /> : null}
+
+      <PosPushProvider candidates={posCandidates}>
+        <SectionCard
+          title={stock ? `Có hàng — đóng gói & gửi VTP được · ${formatNumber(orders(packable))} đơn` : `Đủ điều kiện xuất · ${formatNumber(orders(ready))} đơn`}
+          description={stock ? "Đủ SĐT, địa chỉ, thông tin hàng VÀ kho có đủ hàng cho cả đơn — chọn đơn, mở trên POS để đẩy sang Viettel Post, rồi kho in đơn và đóng hàng." : "Đủ SĐT, địa chỉ và thông tin hàng. Chưa đọc được sổ kho nên chưa tách được đơn có hàng / không có hàng."}
+          actions={stock && posCandidates.length ? <PosPushBar /> : undefined}
+          padded={false}
+        >
+          {packable.length === 0 ? (
+            <EmptyState className="m-4" title="Không có đơn nào đóng được ngay" description={ready.length ? "Các đơn đủ thông tin đều đang chờ hàng hoặc chưa biết tồn — xem các mục bên dưới." : incomplete.length ? "Mọi đơn đang giữ hàng đều còn thiếu thông tin — xem mục bên dưới." : "Các đơn đã được Viettel Post lấy hàng, hoặc đã huỷ."} icon={PackageCheck} />
+          ) : (
+            <ReadyTable lines={packable} byProduct={byProduct} stock={stock} selectable={Boolean(stock)} />
+          )}
+        </SectionCard>
+      </PosPushProvider>
+
+      {noStock.length ? (
+        <SectionCard
+          title={`Không có hàng để đóng · ${formatNumber(orders(noStock))} đơn`}
+          description="Đủ thông tin nhưng tồn kho đã phân hết cho đơn lên trước — CHƯA đẩy VTP, chưa in đơn / đóng hàng. CSKH báo khách chờ hoặc đổi màu/size."
+          actions={
+            <Button asChild variant="outline" size="sm">
+              <Link href="/inventory/shortage">
+                <PackageX className="size-4" /> Thiếu hàng giao đơn
+              </Link>
+            </Button>
+          }
+          padded={false}
+        >
+          <ReadyTable lines={noStock} byProduct={byProduct} stock={stock} />
+        </SectionCard>
+      ) : null}
+
+      {unsure.length ? (
+        <SectionCard title={`Chưa biết tồn · ${formatNumber(orders(unsure))} đơn`} description="Mẫu chưa có phiếu nhập kho (hoặc đơn vừa lên) — ERP không biết còn hay hết; kho đếm tay trước khi đẩy VTP." padded={false}>
+          <ReadyTable lines={unsure} byProduct={byProduct} stock={stock} />
+        </SectionCard>
+      ) : null}
 
       {incomplete.length ? (
         <SectionCard
@@ -167,47 +168,159 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
             <TableHeader>
               <TableRow>
                 <TableHead>Đơn</TableHead>
-                <TableHead>Tạo đơn</TableHead>
+                <SortHead column="tao">Tạo đơn</SortHead>
                 <TableHead>Khách</TableHead>
-                <TableHead className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP.">Tỷ lệ hoàn · Pancake</TableHead>
-                <TableHead className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</TableHead>
+                <SortHead column="hoan" className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP. Bấm để xếp rủi ro thấp → cao.">Tỷ lệ hoàn · Pancake</SortHead>
+                <SortHead column="bao" className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</SortHead>
                 {byProduct ? <TableHead>Mẫu mã</TableHead> : null}
-                <TableHead className="text-right">SL</TableHead>
+                <SortHead column="sl" className="text-right">SL</SortHead>
                 <TableHead>Còn thiếu</TableHead>
+                {stock ? <TableHead>Hàng trong kho</TableHead> : null}
                 <TableHead>Mở</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {incomplete.map((l, i) => (
-                <TableRow key={`${l.orderId}-${l.variantId}-${i}`}>
-                  <TableCell>
-                    <OrderLink line={l} />
-                  </TableCell>
-                  <CreatedCell line={l} />
-                  <CustomerCell line={l} />
-                  <ReturnRateCell orderId={l.orderId} />
-                  <PhoneWarningCell orderId={l.orderId} />
-                  {byProduct ? <VariantCell line={l} /> : null}
-                  <QtyCell line={l} />
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {l.blockers.map((f, k) => (
-                        <span key={k} className="rounded bg-rose-100 px-1.5 py-0.5 text-[10.5px] font-medium text-rose-800 dark:bg-rose-950/60 dark:text-rose-300" title={ruleOf(f.code)?.fix}>
-                          {ruleOf(f.code)?.field ?? f.field}
-                          {f.code === "PHONE_MALFORMED" ? " sai dạng" : f.code === "ADDRESS_TOO_SHORT" ? " quá ngắn" : ""}
-                        </span>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <LinksCell line={l} />
-                </TableRow>
-              ))}
+              <SortedRows
+                colSpan={8 + (byProduct ? 1 : 0) + (stock ? 1 : 0)}
+                rows={incomplete.map((l, i) => ({
+                  key: `${l.orderId}-${l.variantId}-${i}`,
+                  orderId: l.orderId,
+                  insertedAt: new Date(l.insertedAt).getTime(),
+                  qty: l.quantity,
+                  value: l.orderValue,
+                  node: (
+                    <TableRow key={`${l.orderId}-${l.variantId}-${i}`}>
+                      <TableCell>
+                        <OrderLink line={l} />
+                      </TableCell>
+                      <CreatedCell line={l} />
+                      <CustomerCell line={l} />
+                      <ReturnRateCell orderId={l.orderId} />
+                      <PhoneWarningCell orderId={l.orderId} />
+                      {byProduct ? <VariantCell line={l} /> : null}
+                      <QtyCell line={l} />
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {l.blockers.map((f, k) => (
+                            <span key={k} className="rounded bg-rose-100 px-1.5 py-0.5 text-[10.5px] font-medium text-rose-800 dark:bg-rose-950/60 dark:text-rose-300" title={ruleOf(f.code)?.fix}>
+                              {ruleOf(f.code)?.field ?? f.field}
+                              {f.code === "PHONE_MALFORMED" ? " sai dạng" : f.code === "ADDRESS_TOO_SHORT" ? " quá ngắn" : ""}
+                            </span>
+                          ))}
+                        </div>
+                      </TableCell>
+                      {stock ? <StockCell line={l} verdict={stock.get(l.orderId)} /> : null}
+                      <LinksCell line={l} />
+                    </TableRow>
+                  ),
+                }))}
+              />
             </TableBody>
           </Table>
         </SectionCard>
       ) : null}
     </div>
     </PhoneReputationProvider>
+  );
+}
+
+const PACK_TONE: Record<OrderPackState, string> = {
+  PACKABLE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  NO_STOCK: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  STOCK_UNKNOWN: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  NOT_ALLOCATED: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+};
+
+/** Có hàng để đóng CẢ ĐƠN hay không — kết luận của bảng phân bổ, không tính lại ở đây. */
+function StockCell({ line, verdict }: { line: ReservedQueueLine; verdict: OrderStockVerdict | undefined }) {
+  const state = orderPackState(verdict);
+  return (
+    <TableCell className="max-w-[220px]">
+      <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", PACK_TONE[state])}>{ORDER_PACK_LABEL[state]}</span>
+      {state !== "PACKABLE" ? <div className="mt-0.5 text-[10.5px] text-muted-foreground">{packStateDetail(verdict, line.variantId)}</div> : null}
+    </TableCell>
+  );
+}
+
+/** Bảng đơn đủ thông tin — dùng cho cả ba mục có hàng / không có hàng / chưa biết tồn. */
+function ReadyTable({ lines, byProduct, stock, selectable = false }: { lines: ReservedQueueLine[]; byProduct: boolean; stock: Map<string, OrderStockVerdict> | null; selectable?: boolean }) {
+  // Mục chọn được là mục "Có hàng" — tiêu đề mục đã nói điều đó, cột riêng chỉ làm bảng tràn ngang.
+  const showStock = Boolean(stock) && !selectable;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {selectable ? (
+            <TableHead className="w-8">
+              <PosPushSelectAll />
+            </TableHead>
+          ) : null}
+          <TableHead>Đơn</TableHead>
+          <SortHead column="tao">Tạo đơn</SortHead>
+          <TableHead>Khách</TableHead>
+          <SortHead column="hoan" className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP. Bấm để xếp rủi ro thấp → cao.">Tỷ lệ hoàn · Pancake</SortHead>
+          <SortHead column="bao" className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</SortHead>
+          {byProduct ? <TableHead>Mẫu mã</TableHead> : null}
+          <SortHead column="sl" className="text-right">SL</SortHead>
+          {showStock ? <TableHead>Hàng trong kho</TableHead> : null}
+          <TableHead>Vận đơn · trạng thái</TableHead>
+          <TableHead>Hẹn khách</TableHead>
+          <SortHead column="giaTri" className="text-right">Giá trị đơn</SortHead>
+          <TableHead>Mở</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        <SortedRows
+          colSpan={10 + (selectable ? 1 : 0) + (byProduct ? 1 : 0) + (showStock ? 1 : 0)}
+          rows={lines.map((l, i) => ({
+            key: `${l.orderId}-${l.variantId}-${i}`,
+            orderId: l.orderId,
+            insertedAt: new Date(l.insertedAt).getTime(),
+            qty: l.quantity,
+            value: l.orderValue,
+            node: (
+              <TableRow key={`${l.orderId}-${l.variantId}-${i}`}>
+                {selectable ? (
+                  <TableCell>
+                    <PosPushCheckbox orderId={l.orderId} systemId={l.systemId ?? null} />
+                  </TableCell>
+                ) : null}
+                <TableCell>
+                  <OrderLink line={l} />
+                  <div className="mt-0.5 flex items-center gap-1 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-400">
+                    <CircleCheck className="size-3" aria-hidden /> Đủ thông tin
+                  </div>
+                  {l.warnings.length ? <FindingList findings={l.warnings} className="text-amber-700 dark:text-amber-400" prefix="Lưu ý: " /> : null}
+                </TableCell>
+                <CreatedCell line={l} />
+                <CustomerCell line={l} />
+                <ReturnRateCell orderId={l.orderId} />
+                <PhoneWarningCell orderId={l.orderId} />
+                {byProduct ? <VariantCell line={l} /> : null}
+                <QtyCell line={l} />
+                {showStock && stock ? <StockCell line={l} verdict={stock.get(l.orderId)} /> : null}
+                <TableCell>
+                  {l.shipmentCode ? (
+                    <>
+                      <div className="font-mono text-xs">{l.shipmentCode}</div>
+                      <div className="text-[10.5px] text-muted-foreground">{l.shipmentStage ? (SHIPMENT_STAGE_LABEL[l.shipmentStage as ShipmentStage] ?? l.shipmentStage) : "—"}</div>
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Chưa tạo vận đơn</span>
+                  )}
+                  <div className="text-[10.5px] text-muted-foreground">Đơn: {ORDER_STAGE_LABEL[l.orderStage as OrderStage] ?? l.orderStage}</div>
+                </TableCell>
+                <TableCell className="text-xs">{l.promisedAt ? formatDate(l.promisedAt) : <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell className="text-right">
+                  <span className="numeric">{formatVND(l.orderValue)}</span>
+                </TableCell>
+                <LinksCell line={l} />
+              </TableRow>
+            ),
+          }))}
+        />
+      </TableBody>
+    </Table>
   );
 }
 

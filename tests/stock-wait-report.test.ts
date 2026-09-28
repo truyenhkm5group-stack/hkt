@@ -278,6 +278,7 @@ function fakeSnapshot(now: Date, waiting: string[]): StockShortageSnapshot {
     totals: { variants: 0, shortUnits: 0, waitingOrders: waiting.length, waitingValue: 0, urgentOrders: 0, readyOrders: 0, unknownOrders: 0, unknownVariants: 0, ledgerNegativeVariants: 0, mutedVariants: 0, coveredVariants: 0, stillShortUnits: 0 },
     urgentAfterHours: 24,
     measuredAt: now,
+    pending: { variants: [], orphanUnits: 0, orphanVariants: 0 },
   };
 }
 

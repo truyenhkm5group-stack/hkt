@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { PANCAKE_POS_WEB, pancakeConversationUrl, pancakePosOrderSearchUrl, pancakePosOrderUrlFromLink, pancakePosOrderUrlFromRaw, pancakePosProductsUrl } from "@/lib/constants/pancake";
+import { PANCAKE_POS_WEB, POS_MULTI_ORDER_CHUNK, pancakeConversationUrl, pancakePosOrderBatches, pancakePosOrderSearchUrl, pancakePosOrderUrlFromLink, pancakePosOrderUrlFromRaw, pancakePosProductsUrl } from "@/lib/constants/pancake";
 
 /**
  * ═══════════ LIÊN KẾT SANG WEB POS PANCAKE ═══════════
@@ -37,6 +37,28 @@ export function testPancakeLinks() {
   assert.equal(pancakePosOrderSearchUrl("9", 6304), `${PANCAKE_POS_WEB}/shop/9/order?o_c_i=6304`);
   assert.equal(pancakePosOrderSearchUrl("9", null), `${PANCAKE_POS_WEB}/shop/9/order`, "không có từ khoá ⇒ danh sách trần, không phải ?o_c_i= rỗng");
   assert.equal(pancakePosOrderSearchUrl(null, 6304), null, "thiếu shop ⇒ không dựng — '/shop/orders' làm POS đọc chữ 'orders' thành mã shop");
+
+  // Nhiều đơn một lượt: số đơn nối bằng dấu cách (cách chính POS tìm nhiều đơn), chia theo shop và theo lượt.
+  const nhieu = pancakePosOrderBatches(
+    [
+      { shopId: "9", systemId: 1 },
+      { shopId: "9", systemId: 2 },
+      { shopId: "9", systemId: 2 },
+      { shopId: "9", systemId: 3 },
+      { shopId: "7", systemId: 4 },
+      { shopId: null, systemId: 5 },
+      { shopId: "9", systemId: null },
+    ],
+    2,
+  );
+  assert.deepEqual(
+    nhieu.batches.map((b) => b.url),
+    [`${PANCAKE_POS_WEB}/shop/9/order?o_c_i=1%202`, `${PANCAKE_POS_WEB}/shop/9/order?o_c_i=3`, `${PANCAKE_POS_WEB}/shop/7/order?o_c_i=4`],
+    "một link chỉ một shop, không lặp đơn, mỗi lượt tối đa `chunk` đơn",
+  );
+  assert.equal(nhieu.skipped, 2, "đơn thiếu shop / số đơn phải được ĐẾM ra, không rơi im lặng");
+  assert.equal(pancakePosOrderBatches([{ shopId: "9", systemId: 1 }]).batches[0]?.systemIds.length, 1);
+  assert.ok(POS_MULTI_ORDER_CHUNK > 1);
 
   // ───────── 3. Sản phẩm: /product/management, không phải /products ─────────
   assert.equal(pancakePosProductsUrl("9"), `${PANCAKE_POS_WEB}/shop/9/product/management`);

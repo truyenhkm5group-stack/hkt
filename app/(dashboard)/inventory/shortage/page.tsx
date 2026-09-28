@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, Boxes, Factory, HelpCircle, PackageX, Timer, Truck } from "lucide-react";
+import { AlarmClock, Boxes, Factory, HelpCircle, PackageX, Ruler, Timer, Truck } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { SHORTAGE_ACTION_LABEL, SHORTAGE_DECISIONS, SHORTAGE_DECISION_LABEL, SHORTAGE_LINKS, waitLabel, waitingOrderDetail, type ShortageAction, type ShortageDecisionKind } from "@/lib/constants/stock-shortage";
 import { ShortageDecisionButtons } from "@/app/(dashboard)/inventory/shortage/decision-buttons";
+import { PendingMatrixSection } from "@/app/(dashboard)/inventory/shortage/pending-matrix-section";
+import { buildPendingMatrices } from "@/lib/constants/pending-matrix";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { cn } from "@/lib/utils";
@@ -31,8 +33,9 @@ const ACTION_TONE: Record<ShortageAction, string> = {
 /**
  * ═══════════ THIẾU HÀNG GIAO ĐƠN ĐÃ CHỐT ═══════════
  *
- * Trang đích của tin Lark "thiếu hàng". Hai bảng, hai phòng:
+ * Trang đích của tin Lark "thiếu hàng". Ba bảng:
  *   · THEO MẪU MÃ — phòng Sản xuất (đặt / giục xưởng) và Kho (kiểm đếm khi sổ lệch).
+ *   · CHỜ XUẤT THEO MÃ × MÀU × SIZE — người đặt vải: tổng theo màu nhân định mức ra lượng vải cần đặt.
  *   · THEO ĐƠN — CSKH báo khách, đề nghị đổi màu cùng size, hoặc huỷ.
  * Chỉ đọc: không nút nào ở đây ghi dữ liệu. Tạo lệnh sản xuất đi qua trang Kế hoạch SX như cũ.
  */
@@ -49,6 +52,7 @@ export default async function StockShortagePage({ searchParams }: { searchParams
   const byVariant = new Map(s.variants.map((v) => [v.variantId, v]));
   const waiting = [...s.orders.values()].filter((o) => o.state === "WAITING_STOCK").sort((a, b) => a.insertedAt.getTime() - b.insertedAt.getTime());
   const oldest = s.variants.reduce((m, r) => Math.max(m, r.oldestWaitHours), 0);
+  const pendingMatrices = buildPendingMatrices(s.pending.variants);
 
   return (
     <div className="space-y-5">
@@ -68,6 +72,11 @@ export default async function StockShortagePage({ searchParams }: { searchParams
         }
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="#cho-xuat">
+                <Ruler className="size-4" /> Chờ xuất theo màu · size
+              </Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <Link href={SHORTAGE_LINKS.planning}>
                 <Factory className="size-4" /> Kế hoạch đặt hàng SX
@@ -234,6 +243,8 @@ export default async function StockShortagePage({ searchParams }: { searchParams
           </p>
         ) : null}
       </SectionCard>
+
+      <PendingMatrixSection matrices={pendingMatrices} orphanUnits={s.pending.orphanUnits} orphanVariants={s.pending.orphanVariants} />
 
       {waiting.length ? (
         <SectionCard

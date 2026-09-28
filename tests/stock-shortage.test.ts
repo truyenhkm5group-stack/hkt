@@ -4,6 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { suggestedNetOfOpenPo } from "@/lib/constants/inventory-decision";
+import { EMPTY_FABRIC_NORM, buildPendingMatrices, fabricPlan, measureOf, measureText, pendingMatrixAsText } from "@/lib/constants/pending-matrix";
 import {
   EMPTY_DIGEST_LEDGER,
   SHORTAGE_DECISIONS_KEY,
@@ -12,6 +13,8 @@ import {
   applyShortageDecisions,
   decisionLink,
   isShortageMuted,
+  orderPackState,
+  packStateDetail,
   pruneShortageDecisions,
   type ShortageDecision,
   buildShortageLarkCard,
@@ -119,6 +122,65 @@ export function testStockShortagePure() {
   assert.ok(detail.includes("Q005 Đen/M ×2"), detail);
   assert.ok(detail.includes("xưởng đang làm 1 cái"), detail);
   assert.ok(detail.includes("Q005 Trắng/M (4)"), "phải gợi ý mẫu cùng size còn hàng để khách đổi");
+
+  // ───────── 1b. Chờ xuất theo mã × màu × size — để tính vải cần đặt ─────────
+  const byVar = new Map(snap.pending.variants.map((p) => [p.variantId, p]));
+  assert.deepEqual(
+    [...byVar.values()].map((p) => [p.variantId, p.pending, p.shortQty, p.toOrder]),
+    [
+      ["chua-nhap", 3, null, null],
+      ["den-m", 5, 3, 2],
+      ["trang-m", 1, 0, 0],
+    ],
+    "chờ xuất có MỌI mẫu có đơn giữ (cả mẫu đủ hàng); tồn chưa biết thì thiếu / cần đặt là null, KHÔNG phải 0",
+  );
+  assert.equal(
+    snap.pending.variants.reduce((t, p) => t + p.pending, 0) + snap.pending.orphanUnits,
+    lines.reduce((t, l) => t + l.qty, 0),
+    "tổng chờ xuất phải bằng đúng tổng số cái các dòng đơn đang giữ — không rơi cái nào",
+  );
+  const [mx] = buildPendingMatrices(snap.pending.variants);
+  assert.deepEqual(mx.colors, ["Đen", "Xanh", "Trắng"], "màu nhiều hàng chờ xuất nhất đứng đầu");
+  assert.deepEqual(mx.sizes, ["M"]);
+  assert.deepEqual(mx.total, { pending: 9, short: 3, toOrder: 2, unknown: 3 });
+  assert.equal(measureText(measureOf(mx.total, "short")), "3 +?", "có mẫu chưa biết tồn thì tổng thiếu phải mang dấu chưa biết");
+  assert.equal(measureText(measureOf(mx.byColor["Xanh"], "toOrder")), "?", "màu toàn mẫu chưa biết tồn in '?', không in 0");
+  assert.equal(measureText(measureOf(mx.byColor["Xanh"], "pending")), "3", "chờ xuất thì luôn biết");
+
+  const vai = fabricPlan(mx, "toOrder", { ...EMPTY_FABRIC_NORM, common: 1.2, wastePct: 5 });
+  assert.equal(vai.lines.find((l) => l.color === "Đen")?.fabric, 2.6, "2 cái × 1,2 m × 1,05 = 2,52 ⇒ làm tròn LÊN 2,6 — mua thiếu vài phân là thiếu một chiếc");
+  assert.equal(vai.total, 2.6);
+  assert.equal(vai.unknown, 3, "3 cái chưa biết tồn KHÔNG vào phép tính vải và phải được đếm ra");
+  assert.equal(fabricPlan(mx, "pending", { ...EMPTY_FABRIC_NORM, common: 1.2, wastePct: 5 }).lines[0]?.fabric, 6.3, "5 × 1,2 × 1,05 = 6,3 đúng — sai số dấu phẩy động không được đẩy lên 6,4");
+  const thieuDinhMuc = fabricPlan(mx, "toOrder", EMPTY_FABRIC_NORM);
+  assert.equal(thieuDinhMuc.total, null, "chưa khai định mức ⇒ tổng vải CHƯA BIẾT, không phải 0");
+  assert.deepEqual(thieuDinhMuc.missingSizes, ["M"]);
+
+  const nhieuSize = buildPendingMatrices([
+    { variantId: "s", productId: "p2", productCode: "A1", productName: "Áo", color: "Đỏ", size: "L", stockKnown: true, openPoQty: 0, pending: 1, shortQty: 1, toOrder: 1 },
+    { variantId: "t", productId: "p2", productCode: "A1", productName: "Áo", color: "Đỏ", size: "S", stockKnown: true, openPoQty: 0, pending: 2, shortQty: 2, toOrder: 2 },
+    { variantId: "u", productId: "p2", productCode: "A1", productName: "Áo", color: "", size: "", stockKnown: true, openPoQty: 0, pending: 1, shortQty: 0, toOrder: 0 },
+  ]);
+  assert.deepEqual(nhieuSize[0]?.sizes, ["S", "L", "—"], "size xếp theo thứ tự may mặc, ô trống thành '—'");
+  const theoSize = fabricPlan(nhieuSize[0], "toOrder", { ...EMPTY_FABRIC_NORM, common: 1, bySize: { L: 1.5 } });
+  assert.equal(theoSize.lines.find((l) => l.color === "Đỏ")?.fabric, 3.5, "định mức size L ghi đè định mức chung: 2×1 + 1×1,5");
+  const text = pendingMatrixAsText(mx, "short", { ...EMPTY_FABRIC_NORM, common: 1 });
+  assert.ok(text.includes(["Màu", "M", "Tổng", "Vải (m)"].join("\t")), text);
+  assert.ok(text.includes(["Xanh", "?", "?", "0"].join("\t")), "bản sao chép phải giữ dấu chưa biết như màn hình");
+
+  const moCoi = allocateStock([v("a", { onHand: 1 })], [line("y1", "a", 1, 5, now), line("y2", "da-xoa", 4, 5, now)], { now, urgentAfterHours: 24 });
+  assert.deepEqual([moCoi.pending.orphanUnits, moCoi.pending.orphanVariants], [4, 1], "dòng đơn trỏ tới mẫu đã xoá khỏi danh mục phải được ĐẾM ra, không biến mất");
+
+  // ───────── 1c. Đơn chờ xuất: đóng được hay không — kết luận CẤP ĐƠN ─────────
+  assert.equal(orderPackState(snap.orders.get("o1")), "PACKABLE");
+  assert.equal(orderPackState(snap.orders.get("o3")), "NO_STOCK");
+  assert.equal(orderPackState(snap.orders.get("o4")), "STOCK_UNKNOWN", "chưa có phiếu nhập: không nói có, không nói không");
+  assert.equal(orderPackState(undefined), "NOT_ALLOCATED", "đơn chưa có trong bảng phân bổ: không đoán");
+  assert.ok(packStateDetail(snap.orders.get("o3"), "den-m").includes("thiếu 2/2 cái mẫu này"), packStateDetail(snap.orders.get("o3"), "den-m"));
+  const haiMon = allocateStock([v("a", { onHand: 1 }), v("b", { color: "Trắng", onHand: 0 })], [line("m1", "a", 1, 5, now), line("m1", "b", 1, 5, now)], { now, urgentAfterHours: 24 });
+  assert.equal(orderPackState(haiMon.orders.get("m1")), "NO_STOCK", "kho đóng CẢ ĐƠN: có món này mà thiếu món kia thì KHÔNG đóng được");
+  const chiTiet = packStateDetail(haiMon.orders.get("m1"), "a");
+  assert.ok(chiTiet.includes("mẫu này đã có hàng") && chiTiet.includes("thiếu Q005 Trắng/M ×1"), `phải nói rõ món nào thiếu: ${chiTiet}`);
 
   // ───────── 2. Hai dòng cùng mẫu trong một đơn là MỘT lượt nhận ─────────
   const gop = allocateStock([v("a", { onHand: 1 })], [line("x1", "a", 1, 5, now), line("x1", "a", 1, 5, now)], { now, urgentAfterHours: 24 });
@@ -310,6 +372,11 @@ export async function testStockShortageDb(db: Db) {
     const planDen = plan.rows.find((r) => r.variantId === `${P}den-m`);
     assert.equal(den.onHand, planDen?.stock, "tồn đọc bằng phép gộp ĐÃ LỌC theo mẫu phải bằng đúng tồn của phép gộp toàn shop — lọc chỉ được bớt việc, không được đổi số");
     assert.equal(den.reserved, planDen?.committed, "số cái đơn giữ phải BẰNG cột 'đã chốt' của sổ kho — hai vị ngữ là hai con số");
+    for (const pv of s.pending.variants.filter((x) => x.variantId.startsWith(P))) {
+      const pr = plan.rows.find((r) => r.variantId === pv.variantId);
+      if (pr) assert.equal(pv.pending, pr.committed, `chờ xuất của ${pv.variantId} phải BẰNG cột 'đã chốt' của sổ kho`);
+    }
+    assert.ok(s.pending.variants.some((x) => x.variantId === `${P}xanh-m` && x.shortQty === null), "mẫu chưa có phiếu nhập vẫn có mặt trong bảng chờ xuất, với thiếu = CHƯA BIẾT");
     assert.equal(den.proposeQty, suggestedNetOfOpenPo(planDen?.suggested ?? 0, 1));
 
     // Hàng đợi fulfillment: kho KHÔNG được giao việc đóng gói đơn không có hàng.

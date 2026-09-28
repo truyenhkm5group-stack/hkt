@@ -202,6 +202,51 @@ export function pancakePosOrderSearchUrl(shopId: string | null | undefined, keyw
   return k ? `${shop}/order?o_c_i=${encodeURIComponent(k)}` : `${shop}/order`;
 }
 
+/**
+ * Số đơn tối đa trên MỘT link lọc nhiều đơn. URL quá dài bị trình duyệt / máy chủ cắt, và danh sách
+ * đơn của POS phân trang — chia lượt thì mỗi lượt vừa một trang để chọn tất cả rồi đẩy một lần.
+ */
+export const POS_MULTI_ORDER_CHUNK = 50;
+
+/**
+ * NHIỀU ĐƠN MỘT LƯỢT TRÊN POS — để chọn tất cả rồi dùng tính năng đẩy nhiều đơn sang ĐVVC của POS.
+ *
+ * `o_c_i` được POS đưa thẳng vào ô tìm kiếm của danh sách đơn (`fetchListOfOrders({ search })`), và
+ * chính POS tìm nhiều đơn một lượt bằng cách NỐI CÁC MÃ BẰNG DẤU CÁCH (`search = ids.join(" ")` trong
+ * công cụ đối soát đơn — đọc từ mã web POS 28/09/2026). Nên từ khoá ở đây là các SỐ ĐƠN nối bằng dấu
+ * cách, cùng loại số mà `pancakePosOrderSearchUrl` dùng cho một đơn.
+ *
+ * Chia theo SHOP (một link chỉ mở được một shop) rồi theo `POS_MULTI_ORDER_CHUNK`. Đơn thiếu shop hoặc
+ * thiếu số đơn thì KHÔNG dựng được — trả riêng trong `skipped` để màn hình nói ra, không lặng lẽ rơi.
+ */
+export function pancakePosOrderBatches(
+  orders: readonly { shopId: string | null | undefined; systemId: number | string | null | undefined }[],
+  chunk: number = POS_MULTI_ORDER_CHUNK,
+): { batches: { shopId: string; systemIds: string[]; url: string }[]; skipped: number } {
+  const byShop = new Map<string, string[]>();
+  let skipped = 0;
+  for (const o of orders) {
+    const shop = o.shopId?.trim();
+    const id = o.systemId === null || o.systemId === undefined ? "" : String(o.systemId).trim();
+    if (!shop || !id) {
+      skipped += 1;
+      continue;
+    }
+    const list = byShop.get(shop) ?? [];
+    if (!list.includes(id)) list.push(id);
+    byShop.set(shop, list);
+  }
+  const size = Math.max(1, Math.floor(chunk));
+  const batches: { shopId: string; systemIds: string[]; url: string }[] = [];
+  for (const [shopId, ids] of byShop) {
+    for (let i = 0; i < ids.length; i += size) {
+      const systemIds = ids.slice(i, i + size);
+      batches.push({ shopId, systemIds, url: pancakePosOrderSearchUrl(shopId, systemIds.join(" ")) as string });
+    }
+  }
+  return { batches, skipped };
+}
+
 /** Trang quản lý sản phẩm của shop trên POS. */
 export function pancakePosProductsUrl(shopId: string | null | undefined): string | null {
   const shop = posShop(shopId);
