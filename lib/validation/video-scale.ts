@@ -107,3 +107,5 @@ export const videoEditSchema = z.object({
     showText: z.boolean().optional(),
   }),
 });
+/** Phong cách nhạc AI — khoá trong `MUSIC_MOODS` (lib/video-scale/music-gen.ts), tối đa 8 một lần. */
+export const videoMusicGenSchema = z.object({ moods: z.array(z.string().regex(/^[A-Z_]{3,30}$/)).min(1).max(8) });

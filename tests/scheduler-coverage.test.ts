@@ -34,6 +34,7 @@ const KHONG_CAN_LICH: Record<string, string> = {
   all: "gộp mọi nguồn, cùng lý do với pancake-all",
   "vtp-import": "nhập tệp Viettel Post do người tải về, không có gì để tự động",
   "landing-push": "TẠO ĐƠN trên Pancake — việc ghi ra hệ thống ngoài phải có người bấm (AGENTS.md mục 7)",
+  "video-scale-music-seed": "TIÊU TIỀN (Lyria 0,04 USD / bản) để tạo sẵn thư viện nhạc một lần — chạy tay qua ops run-job hoặc nút ở tab Cấu hình; chạy theo lịch là tiêu tiền lặp lại vô ích",
   "canonical-backfill": "dựng lại trạng thái vận đơn hàng loạt, mặc định chạy thử; ghi thật phải có người quyết",
   // Chạy LỒNG trong job khác — có người chạy, chỉ là không trực tiếp trong bộ lập lịch.
   "model-registry": "chạy lồng cuối `pancake-products` (lib/sync/jobs.ts → modelRegistryFollowUp), mỗi 30 phút; nút trên /models vẫn chạy tay. Lịch RIÊNG là đổi lịch scheduler — việc chủ shop duyệt (AGENTS.md mục 7)",

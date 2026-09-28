@@ -53,6 +53,7 @@ import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { createVideoRun, readVideoScaleConfig, runVideoScaleTick } from "@/lib/video-scale/pipeline";
 import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize";
+import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 
@@ -176,6 +177,27 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
           .join(" · ");
         if (errors.length) ctx.summary.warning = errors.slice(0, 5).join(" | ");
         return { tick: r, optimize: o };
+      }),
+  },
+  /*
+    TẠO SẴN BỘ NHẠC NỀN GỐC (Google Lyria) cho thư viện nhạc Video Scale — chủ shop 28/09/2026 xin "nhạc thịnh hành không vi phạm
+    bản quyền". Bài trend là nhạc có bản quyền nên KHÔNG nạp; job tạo nhạc GỐC không lời theo 8 phong cách đang phổ biến, mỗi bản
+    0,04 USD, trần 20 bản / ngày. Chỉ tạo phong cách CHƯA có ⇒ chạy lại không nhân đôi, không tốn thêm. Không có trong lịch: chạy
+    tay (ops run-job) hoặc nút ở tab Cấu hình.
+  */
+  "video-scale-music-seed": {
+    label: "Video Scale — tạo sẵn bộ nhạc nền AI",
+    source: "ALL",
+    module: "connector_meta",
+    description: "Tạo nhạc nền GỐC không lời bằng Google Lyria cho 8 phong cách đang phổ biến (mỗi bản 0,04 USD, trần 20 bản / ngày), lưu vào thư viện nhạc có ghi chú nguồn + quyền. Chỉ tạo phong cách chưa có.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "video-scale-music-seed", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await generateMusicLibrary(await getDb(), { moods: MUSIC_MOOD_KEYS, onlyMissing: true }, null);
+        ctx.summary.imported = r.created.length;
+        ctx.summary.skipped = r.skipped.length;
+        ctx.summary.detail = `tạo ${r.created.length} bản · ≈ ${r.costUsd.toFixed(2)} USD${r.skipped.length ? ` · bỏ qua: ${r.skipped.map((s) => `${s.mood} (${s.reason})`).join("; ")}` : ""}`.slice(0, 900);
+        if (r.skipped.some((s) => !s.reason.includes("đã có"))) ctx.summary.warning = r.skipped.filter((s) => !s.reason.includes("đã có")).map((s) => s.reason).slice(0, 3).join(" | ");
+        return r;
       }),
   },
   "marketing-decision-ledger": {
@@ -792,6 +814,7 @@ export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
   "landing-push": "pancake",
   "cs-chat": "pancake-pages",
   "video-scale": "gemini",
+  "video-scale-music-seed": "gemini",
   "failed-delivery": "pancake-pages",
   "phone-verify": "pancake-pages",
   "outreach-build": "pancake-pages",

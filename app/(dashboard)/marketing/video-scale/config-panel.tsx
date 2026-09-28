@@ -1,12 +1,12 @@
 "use client";
 
-import { Loader2, Save, Upload } from "lucide-react";
+import { Loader2, Music, Save, Upload } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { saveVideoScaleConfigAction, toggleVideoMusicAction, uploadVideoMusicAction } from "@/lib/actions/video-scale";
+import { generateVideoMusicAction, saveVideoScaleConfigAction, toggleVideoMusicAction, uploadVideoMusicAction } from "@/lib/actions/video-scale";
 import {
   OMNI_MODELS,
   SELECTABLE_VIDEO_PROVIDERS,
@@ -15,7 +15,11 @@ import {
   VEO_PRICE_USD_PER_SECOND,
   VIDEO_ADS_HARD_LIMITS,
   VIDEO_PROVIDER_LABEL,
+  LYRIA_CLIP_PRICE_USD,
+  MUSIC_MOODS,
+  MUSIC_MOOD_KEYS,
   VIDEO_SCALE_HARD_LIMITS,
+  type MusicMood,
   reserveSecondsFor,
   variantReserveUsd,
   type VideoScaleConfig,
@@ -35,7 +39,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 }
 
 /** Tab "Cấu hình": thông số sinh video, TRẦN TIỀN, giọng đọc, câu chính sách bán hàng, thư viện nhạc có quyền. */
-export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { config: VideoScaleConfig; ffmpeg: string | null; music: MusicRow[]; canConfig: boolean; canEdit: boolean }) {
+export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit, canSpendAi = false }: { config: VideoScaleConfig; ffmpeg: string | null; music: MusicRow[]; canConfig: boolean; canEdit: boolean; canSpendAi?: boolean }) {
   const [c, setC] = useState(config);
   const [cap, setCap] = useState(config.dailyUsdCap === null ? "" : String(config.dailyUsdCap));
   const [policy, setPolicy] = useState(config.policyLines.join("\n"));
@@ -227,12 +231,20 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
         <p className="text-[12px] text-muted-foreground">Chỉ người có quyền &ldquo;Cấu hình hệ thống khác&rdquo; sửa được cấu hình (trần tiền).</p>
       )}
 
-      <MusicLibrary music={music} canEdit={canEdit} />
+      <MusicLibrary music={music} canEdit={canEdit} canGenerate={canConfig || canSpendAi} />
     </div>
   );
 }
 
-function MusicLibrary({ music, canEdit }: { music: MusicRow[]; canEdit: boolean }) {
+function MusicLibrary({ music, canEdit, canGenerate }: { music: MusicRow[]; canEdit: boolean; canGenerate: boolean }) {
+  const [moods, setMoods] = useState<MusicMood[]>([]);
+  const generate = (list: MusicMood[]) =>
+    start(async () => {
+      const r = await generateVideoMusicAction({ moods: list });
+      if ("error" in r) return void toast.error(r.error);
+      toast.success(r.background ? `Đang tạo ${list.length} bản nhạc (mỗi bản ~30–60 giây) — tải lại trang sau vài phút.` : `Đã tạo ${r.created} bản nhạc.${r.skipped.length ? ` Bỏ qua: ${r.skipped.join("; ")}` : ""}`);
+      setMoods([]);
+    });
   const [title, setTitle] = useState("");
   const [license, setLicense] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -278,6 +290,31 @@ function MusicLibrary({ music, canEdit }: { music: MusicRow[]; canEdit: boolean 
       ) : (
         <p className="text-[12.5px] text-muted-foreground">Chưa có bản nào — video dùng âm gốc của clip.</p>
       )}
+      {canGenerate ? (
+        <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+          <p className="text-[12.5px] font-medium">Tạo nhạc nền GỐC bằng AI (Google Lyria) — {LYRIA_CLIP_PRICE_USD} USD / bản 30 giây</p>
+          <p className="text-[12px] text-muted-foreground">
+            Nhạc &ldquo;thịnh hành&rdquo; trên TikTok / Reels là bài hát có bản quyền — ghép vào video bán hàng / quảng cáo là vi phạm và Facebook sẽ tắt tiếng hoặc từ
+            chối quảng cáo. Ở đây máy tạo nhạc MỚI theo phong cách đang phổ biến: không lời, không bắt chước bài / ca sĩ nào, được dùng thương mại.
+          </p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {MUSIC_MOOD_KEYS.map((m) => (
+              <label key={m} className="flex items-center gap-1.5 text-[12.5px]">
+                <input type="checkbox" checked={moods.includes(m)} onChange={(e) => setMoods((xs) => (e.target.checked ? [...xs, m] : xs.filter((x) => x !== m)))} />
+                {MUSIC_MOODS[m].label}
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={pending || !moods.length} onClick={() => generate(moods)}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : <Music className="size-4" />} Tạo {moods.length || ""} bản ({(moods.length * LYRIA_CLIP_PRICE_USD).toFixed(2)} USD)
+            </Button>
+            <Button size="sm" variant="outline" disabled={pending} onClick={() => confirm(`Tạo bộ ${MUSIC_MOOD_KEYS.length} phong cách (≈ ${(MUSIC_MOOD_KEYS.length * LYRIA_CLIP_PRICE_USD).toFixed(2)} USD)?`) && generate(MUSIC_MOOD_KEYS)}>
+              Tạo cả bộ {MUSIC_MOOD_KEYS.length} phong cách
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {canEdit ? (
         <div className="grid gap-2 sm:grid-cols-2">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Tên bản nhạc" aria-label="Tên bản nhạc" />
