@@ -89,8 +89,13 @@ const JOBS = [
     chỉ tới ERP ở lượt đối chiếu 02:15 — ca đã duyệt hoàn nằm lại hàng đợi care trung vị 5 giờ. Lượt
     này hỏi lại Pancake ≤ 80 đơn đang ở "đề nghị hoàn" (≈ 130 lượt gọi/giờ lúc đông, 0 khi không có
     ca nào) rồi đối chiếu. Chỉ đóng CA care; không đổi trạng thái vận đơn, tiền hay tồn kho.
+
+    LỆCH PHA NGẮN CÓ CHỦ Ý: lượt đầu chạy `offset` phút SAU khi bộ lập lịch khởi động, và mỗi lần deploy
+    là một lần khởi động lại. Bản đầu lệch 27 phút; ngày 28/09/2026 các lượt deploy cách nhau 20–25 phút
+    (xong lúc 09:23 · 09:43 · 10:09 UTC) nên job CHƯA CHẠY LẦN NÀO — `sync_runs` rỗng sau 50 phút.
+    4,5 phút: chạy ngay sau mỗi lần khởi động, không trùng lệch pha nào đang dùng.
   */
-  { job: "care-return-check", every: minutes("CARE_RETURN_CHECK_EVERY_MINUTES", 30), offset: 27 },
+  { job: "care-return-check", every: minutes("CARE_RETURN_CHECK_EVERY_MINUTES", 30), offset: 4.5 },
   /*
     UY TÍN SĐT THEO PANCAKE — 10 phút/lần, chạy TRƯỚC `alerts` (offset 3) để lượt cảnh báo đọc đệm vừa
     làm ấm. Mỗi lượt hỏi tối đa 30 SĐT CHƯA có trong đệm (đệm sống 6 giờ), nên sau lượt đầu phần lớn
