@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import {
   DECISION_RANK,
@@ -459,20 +459,30 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
   const beforeStart = new Date(cutoff.getTime() - windowDays * MS_PER_DAY);
   const horizonEnd = new Date(cutoff.getTime() + horizonDays * MS_PER_DAY);
 
-  // Nhu cầu ròng quanh mốc cắt + lần bán cuối trước mốc — một lượt quét.
-  const demand = await db
-    .select({
-      variantId: oi.variantId,
-      soldBefore: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${o.insertedAt} >= ${beforeStart} and ${o.insertedAt} < ${cutoff}), 0)`.as("bt_sold_before"),
-      soldAfter: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${o.insertedAt} >= ${cutoff} and ${o.insertedAt} < ${horizonEnd}), 0)`.as("bt_sold_after"),
-      lastSoldBefore: sql<string | null>`max(${o.insertedAt}) filter (where ${o.insertedAt} < ${cutoff} and ${ORDER_OUTCOME_FAST} = 'DELIVERED')`.as("bt_last_before"),
-    })
-    .from(oi)
-    .innerJoin(o, eq(o.id, oi.orderId))
-    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
-    .where(sql`${o.insertedAt} < ${horizonEnd} and ${oi.isBonus} = false and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
-    .groupBy(oi.variantId);
+  /*
+    Nhu cầu ròng quanh mốc cắt + lần bán cuối trước mốc — một lượt quét.
+
+    TẮT JIT CHO ĐÚNG CÂU NÀY (`chayKhongJit`). Nó mang `ORDER_OUTCOME_FAST` hai lần, và Postgres biên
+    dịch cả khối biểu thức ấy trước khi chạy: đo production 28/09/2026 (EXPLAIN ANALYZE, máy rảnh
+    23:50 giờ VN) — 5.983 ms, trong đó JIT 5.869 ms (352 hàm), tức phần chạy thật ~110 ms. Đây là lý
+    do /inventory/decisions đứng ở 5,9–6,4 s qua mọi lượt smoke. Hai câu còn lại của phép thử ngược
+    (vào kho, rời kho: 25 ms) không có biểu thức kết quả đơn nặng nên để nguyên.
+  */
+  const demand = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        variantId: oi.variantId,
+        soldBefore: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${o.insertedAt} >= ${beforeStart} and ${o.insertedAt} < ${cutoff}), 0)`.as("bt_sold_before"),
+        soldAfter: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${o.insertedAt} >= ${cutoff} and ${o.insertedAt} < ${horizonEnd}), 0)`.as("bt_sold_after"),
+        lastSoldBefore: sql<string | null>`max(${o.insertedAt}) filter (where ${o.insertedAt} < ${cutoff} and ${ORDER_OUTCOME_FAST} = 'DELIVERED')`.as("bt_last_before"),
+      })
+      .from(oi)
+      .innerJoin(o, eq(o.id, oi.orderId))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
+      .where(sql`${o.insertedAt} < ${horizonEnd} and ${oi.isBonus} = false and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
+      .groupBy(oi.variantId),
+  );
 
   // Vế "vào kho" tại hai mốc + phiếu nhập đầu tiên (tồn có BIẾT tại mốc cắt không).
   const received = await db
