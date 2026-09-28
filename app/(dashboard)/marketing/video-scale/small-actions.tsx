@@ -1,10 +1,10 @@
 "use client";
 
-import { Loader2, Play, RotateCcw, X } from "lucide-react";
+import { Image as ImageIcon, Loader2, Play, RotateCcw, X } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cancelVideoRunAction, kickVideoQueueAction, remakeVideoVariantAction, retryVideoJobAction, setVideoSkuReviewModeAction } from "@/lib/actions/video-scale";
+import { cancelVideoRunAction, kickVideoQueueAction, remakeVideoVariantAction, retryVideoJobAction, setVideoSkuReviewModeAction, switchSceneToPhotoAction } from "@/lib/actions/video-scale";
 import { VIDEO_REVIEW_MODES, VIDEO_REVIEW_MODE_LABEL, type VideoReviewMode } from "@/lib/constants/video-scale";
 
 function useAct() {
@@ -33,6 +33,15 @@ export function RetryJobButton({ jobId, ambiguous }: { jobId: string; ambiguous:
   return (
     <Button size="sm" variant="outline" disabled={pending} onClick={() => confirm(ask) && run(() => retryVideoJobAction({ id: jobId }), "Đã xếp lại việc.")}>
       {pending ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />} Thử lại
+    </Button>
+  );
+}
+
+export function SceneToPhotoButton({ jobId }: { jobId: string }) {
+  const [pending, run] = useAct();
+  return (
+    <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => switchSceneToPhotoAction({ id: jobId }), "Đã đổi cảnh sang ảnh động — dựng trong ít giây.")}>
+      {pending ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />} Dùng ảnh động (miễn phí)
     </Button>
   );
 }

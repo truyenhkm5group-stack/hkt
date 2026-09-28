@@ -370,6 +370,21 @@ export async function retryVideoJob(db: Db, jobId: string, now = new Date()): Pr
   return { ok: true };
 }
 
+/**
+ * Đổi MỘT cảnh sang ẢNH ĐỘNG (miễn phí) — lối ra khi AI bị bộ lọc nội dung chặn hoặc hỏng hẳn. Chỉ việc sinh clip đã HỎNG /
+ * BỊ CHẶN: clip đang tạo dở trên nhà cung cấp có thể đã tính tiền, không cắt ngang nó.
+ */
+export async function switchSceneToPhoto(db: Db, jobId: string, now = new Date()): Promise<Result> {
+  const [job] = await db.select({ kind: J.kind, status: J.status, variantId: J.variantId, runId: J.runId }).from(J).where(eq(J.id, jobId)).limit(1);
+  if (!job || job.kind !== "CLIP") return { ok: false, error: "Chỉ đổi được việc SINH CLIP." };
+  if (!["FAILED", "BLOCKED"].includes(job.status)) return { ok: false, error: "Chỉ đổi được cảnh đã HỎNG hoặc BỊ CHẶN (clip đang tạo có thể đã tính tiền)." };
+  await db.update(J).set({ request: { mode: "PHOTO" } }).where(and(eq(J.id, jobId), inArray(J.status, ["FAILED", "BLOCKED"])));
+  if (!(await resetJob(db, jobId, now))) return { ok: false, error: "Việc đang được chạy — thử lại sau ít giây." };
+  if (job.variantId) await db.update(V).set({ status: "GENERATING", error: "" }).where(and(eq(V.id, job.variantId), eq(V.status, "FAILED")));
+  if (job.runId) await refreshRunStatus(db, job.runId);
+  return { ok: true };
+}
+
 export async function cancelVideoRun(db: Db, runId: string, now = new Date()): Promise<Result> {
   const [run] = await db.select({ status: R.status }).from(R).where(eq(R.id, runId)).limit(1);
   if (!run) return { ok: false, error: "Không tìm thấy lượt." };

@@ -364,3 +364,51 @@ export function fakeClipArgs(image: string, seconds: number, W: number, H: numbe
     output,
   ];
 }
+
+/**
+ * CẢNH ẢNH ĐỘNG từ ảnh sản phẩm thật — MIỄN PHÍ, không AI, không bao giờ sai màu / sai dáng. Ảnh (thường vuông hoặc 3:4) nằm
+ * GIỮA khung 9:16 trên nền là CHÍNH ảnh ấy phóng to làm mờ; chuyển động chậm đổi kiểu theo cảnh để video không lặp:
+ * 0 = phóng dần vào · 1 = lùi dần ra · 2 = lướt ngang. Âm thanh câm 48 kHz (hậu kỳ trộn giọng đọc / nhạc). Hàm THUẦN.
+ */
+export function photoMotionArgs(image: string, seconds: number, W: number, H: number, output: string, style: number): string[] {
+  const frames = Math.max(1, Math.round(seconds * 24));
+  const z = style % 3 === 0 ? `min(1+0.10*on/${frames},1.10)` : style % 3 === 1 ? `max(1.10-0.10*on/${frames},1.0)` : "1.08";
+  const x = style % 3 === 2 ? `(iw-iw/zoom)*on/${frames}` : "iw/2-(iw/zoom/2)";
+  const graph = [
+    `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=24:2,setsar=1[bg]`,
+    `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg]`,
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2,zoompan=z='${z}':x='${x}':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=24,format=yuv420p[v]`,
+  ].join(";");
+  return [
+    "-hide_banner",
+    "-y",
+    "-loop",
+    "1",
+    "-framerate",
+    "24",
+    "-i",
+    image,
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=r=48000:cl=stereo",
+    "-filter_complex",
+    graph,
+    "-map",
+    "[v]",
+    "-map",
+    "1:a",
+    "-t",
+    String(seconds),
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-shortest",
+    output,
+  ];
+}

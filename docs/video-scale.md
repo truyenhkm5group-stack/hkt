@@ -312,3 +312,27 @@ Khác biệt kỹ thuật (`lib/video-scale/providers/omni.ts`):
 đạt / nghi ngờ / loại, duyệt / loại và **tiền AI trên mỗi video ĐƯỢC DUYỆT** — model rẻ mà hay sai màu / sai dáng thì đắt
 hơn khi tính trên video dùng được.
 
+## 16. Tiến trình + cảnh ảnh động miễn phí (28/09/2026)
+
+**Tab Hàng đợi render = màn hình tiến trình.** Mỗi lượt một thẻ (mã, model, số cảnh AI, người tạo, đã chi / đang giữ chỗ); mỗi
+video một hàng bước: từng cảnh (AI hay ảnh động) → giọng đọc → hậu kỳ → kiểm chất lượng → "Xem video & duyệt". Clip từng cảnh
+xem được ngay khi xong; video hoàn chỉnh hiện ngay trên thẻ. Trang tự làm mới mỗi 15 giây khi còn việc chạy (chỉ khi tab đang
+được nhìn). Bảng kỹ thuật cũ nằm trong mục "Chi tiết kỹ thuật". Tạo lượt xong ⇒ tự chuyển sang tab này.
+
+**Bị bộ lọc nội dung chặn lúc HỎI trạng thái** (đo production 28/09/2026: Omni trả HTTP 400 "Request blocked due to prohibited
+content guidelines" cho lượt hỏi) ⇒ việc HỎNG NGAY với câu tiếng Việt và hai lối ra: **Dùng ảnh động (miễn phí)** cho cảnh ấy,
+hoặc Thử lại. Trước bản vá, mọi lỗi lúc hỏi bị coi là tạm thời ⇒ việc treo "Chờ nhà cung cấp" tới hết hạn 20 phút.
+
+**Cảnh ẢNH ĐỘNG** (`photoMotionArgs`): ffmpeg dựng từ chính ảnh sản phẩm — ảnh nằm giữa khung 9:16 trên nền chính nó phóng to làm
+mờ, chuyển động chậm đổi kiểu theo cảnh (phóng vào · lùi ra · lướt ngang), nhiều ảnh gốc ⇒ mỗi cảnh một ảnh. Tiền = 0 (số THẬT,
+không gọi dịch vụ trả tiền nào), không bao giờ sai màu / sai dáng. Cấu hình → **Cảnh dùng AI mỗi video**: mọi cảnh · N cảnh đầu ·
+0 (toàn ảnh động, miễn phí). Tiền giữ chỗ chỉ tính cảnh AI.
+
+| Cách làm video 16 giây (2 cảnh × 8 giây) | Tiền sinh video (giá công bố) |
+|---|---|
+| 2 cảnh Omni Flash / Veo 3.1 Fast | ≈ 1,62 USD |
+| 2 cảnh Veo 3.1 Lite | ≈ 0,80 USD |
+| 1 cảnh Omni + 1 cảnh ảnh động | ≈ 0,81 USD |
+| 1 cảnh Veo Lite + 1 cảnh ảnh động | ≈ 0,40 USD |
+| Toàn ảnh động | 0 USD |
+

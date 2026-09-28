@@ -165,7 +165,13 @@ export class OmniProvider implements VideoProvider {
     const m = INTERACTION_REF.exec(ref);
     if (!m) return { state: "FAILED", error: `Mã thao tác Omni lạ: "${ref.slice(0, 80)}".`, kind: "PERMANENT" };
     const res = await this.get(`${GEMINI_API_BASE}/interactions/${m[1]}`, "hỏi được trạng thái clip");
-    if (!res.ok) throw await apiError(res, "trả trạng thái clip");
+    if (!res.ok) {
+      const err = await apiError(res, "trả trạng thái clip");
+      // Đo 28/09/2026 trên production: bộ lọc nội dung trả lời LƯỢT HỎI bằng HTTP 400 "Request blocked due to prohibited
+      // content guidelines" — clip ấy không bao giờ xong, nên đó là KẾT QUẢ hỏng, không phải lỗi mạng để hỏi lại.
+      if (err.kind === "PERMANENT") return { state: "FAILED", error: err.message, kind: "PERMANENT" };
+      throw err;
+    }
     return parseOmniInteraction(await res.json().catch(() => null), m[1]);
   }
 

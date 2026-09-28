@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { VIDEO_SCALE_CONFIG_KEY, normalizeVideoScaleConfig } from "@/lib/constants/video-scale";
 import { bindOrganization } from "@/lib/platform/background";
 import { listProductPhotos, type SourcePhoto } from "@/lib/queries/video-scale";
-import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, retryVideoJob } from "@/lib/video-scale/pipeline";
+import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
 import { storeAsset } from "@/lib/video-scale/storage";
 import { videoCaptionSchema, videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoPageConfigSchema, videoPauseSchema, videoPublishSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema, videoSkuPublishingSchema } from "@/lib/validation/video-scale";
 import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
@@ -123,6 +123,20 @@ export async function retryVideoJobAction(raw: unknown): Promise<{ ok: true } | 
     before: { kind: job.kind, errorKind: job.errorKind, error: job.error },
     reason: job.errorKind === "AMBIGUOUS" ? "Người bấm chấp nhận rủi ro nhà cung cấp tính tiền hai lần." : undefined,
   });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/** Đổi một cảnh hỏng / bị chặn sang ẢNH ĐỘNG (miễn phí — không gọi AI). */
+export async function switchSceneToPhotoAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền thao tác hàng đợi video" };
+  const parsed = videoIdSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu việc" };
+  const r = await switchSceneToPhoto(await getDb(), parsed.data.id);
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_SCENE_TO_PHOTO", entity: "VIDEO_SCALE_JOB", entityId: parsed.data.id });
   await drainAfterResponse();
   revalidatePath(PATH);
   return { ok: true };

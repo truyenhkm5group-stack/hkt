@@ -599,6 +599,8 @@ deploy dừng, không phải cảnh báo.
     Nhà cung cấp video (`VEO` · `OMNI`) chọn ở cấu hình; model phải THUỘC nhà cung cấp, model / độ
     phân giải không có trong bảng giá ⇒ KHÔNG sinh. Omni tự quyết độ dài nên giữ chỗ tiền theo độ dài
     TỐI ĐA (10 giây) và ghi tiền theo độ dài đo được. Thiếu tệp phông tiếng Việt ⇒ hậu kỳ BỊ CHẶN.
+    Lỗi VĨNH VIỄN lúc HỎI trạng thái (bộ lọc nội dung) là kết quả hỏng, không phải lỗi mạng: hỏng ngay,
+    không hỏi lại tới hết hạn. Cảnh ẢNH ĐỘNG dựng từ ảnh sản phẩm thật, tiền 0 là số THẬT.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

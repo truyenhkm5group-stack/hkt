@@ -16,8 +16,8 @@ import {
   VIDEO_ADS_HARD_LIMITS,
   VIDEO_PROVIDER_LABEL,
   VIDEO_SCALE_HARD_LIMITS,
-  clipCostUsd,
   reserveSecondsFor,
+  variantReserveUsd,
   type VideoScaleConfig,
 } from "@/lib/constants/video-scale";
 import type { MusicRow } from "@/lib/queries/video-scale";
@@ -49,8 +49,8 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
   const priceOf = (m: string) => (VEO_PRICE_USD_PER_SECOND as Record<string, Partial<Record<string, number>>>)[m]?.[c.resolution];
   const perSec = priceOf(c.model) ?? null;
   const reserveSec = reserveSecondsFor(c.provider, c.clipSeconds);
-  const perClip = clipCostUsd(c.model, c.resolution, reserveSec);
-  const perVariant = perClip === null ? null : perClip * c.scenesPerVariant;
+  const perVariant = variantReserveUsd(c);
+  const aiCount = c.aiScenes === null ? c.scenesPerVariant : Math.min(c.aiScenes, c.scenesPerVariant);
   const pickProvider = (p: (typeof SELECTABLE_VIDEO_PROVIDERS)[number]) =>
     setC((x) => ({ ...x, provider: p, model: p === "OMNI" ? OMNI_MODELS[0] : VEO_MODELS[0], resolution: p === "OMNI" ? "720p" : x.resolution }));
 
@@ -114,10 +114,29 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit }: { con
             </select>
           </span>
         </Row>
+        <Row label="Cảnh dùng AI mỗi video" hint="Cảnh còn lại là ẢNH ĐỘNG dựng từ chính ảnh sản phẩm (ffmpeg) — miễn phí và luôn đúng sản phẩm.">
+          <select
+            className="h-8 rounded border px-2"
+            value={c.aiScenes === null ? "all" : String(c.aiScenes)}
+            disabled={!canConfig}
+            onChange={(e) => set("aiScenes", e.target.value === "all" ? null : Number(e.target.value))}
+          >
+            <option value="all">Mọi cảnh dùng AI</option>
+            {Array.from({ length: c.scenesPerVariant }, (_, i) => i).map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "0 — toàn ảnh động (MIỄN PHÍ)" : `${n} cảnh AI đầu, còn lại ảnh động`}
+              </option>
+            ))}
+          </select>
+        </Row>
         <p className="text-[12px] text-muted-foreground">
           {perVariant === null || perSec === null
-            ? "Model / độ phân giải này chưa có trong bảng giá — không sinh được (không áp được trần tiền)."
-            : `Giữ chỗ trong trần theo bảng giá: ${perVariant.toFixed(2)} USD / biến thể (${c.scenesPerVariant} cảnh × ${reserveSec} giây × ${perSec} USD/giây)${isOmni ? " — Omni tự quyết độ dài 3–10 giây nên giữ chỗ theo 10 giây, ghi tiền theo độ dài thật của clip" : ""}.`}
+            ? aiCount === 0
+              ? "Toàn ảnh động: 0 USD tiền sinh video."
+              : "Model / độ phân giải này chưa có trong bảng giá — không sinh được (không áp được trần tiền)."
+            : perVariant === 0
+              ? "Toàn ảnh động: 0 USD tiền sinh video."
+              : `Giữ chỗ trong trần theo bảng giá: ${perVariant.toFixed(2)} USD / video (${aiCount} cảnh AI × ${reserveSec} giây × ${perSec} USD/giây)${isOmni ? " — Omni tự quyết độ dài 3–10 giây nên giữ chỗ theo 10 giây, ghi tiền theo độ dài thật của clip" : ""}.`}
         </p>
         <Row label="Trần chi sinh video / ngày (USD)" hint={`Bắt buộc — để trống = KHÔNG sinh. Trần cứng ${VIDEO_SCALE_HARD_LIMITS.maxVideoUsdPerDay} USD.`}>
           <Input className="h-8 w-32" inputMode="decimal" value={cap} disabled={!canConfig} onChange={(e) => setCap(e.target.value)} placeholder="vd 10" />
