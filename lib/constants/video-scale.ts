@@ -317,6 +317,11 @@ export type VideoScaleConfig = {
   resolution: VideoResolution;
   clipSeconds: ClipSeconds;
   scenesPerVariant: number;
+  /**
+   * Số cảnh ĐẦU mỗi video do AI sinh; các cảnh sau là ẢNH ĐỘNG (dựng bằng ffmpeg từ chính ảnh sản phẩm — miễn phí, đúng
+   * sản phẩm tuyệt đối). `null` = mọi cảnh dùng AI; `0` = video miễn phí hoàn toàn.
+   */
+  aiScenes: number | null;
   /** Trần chi sinh video mỗi ngày (USD). `null` = CHƯA KHAI ⇒ không sinh. */
   dailyUsdCap: number | null;
   dailyClipCap: number;
@@ -360,6 +365,7 @@ export const DEFAULT_VIDEO_SCALE_CONFIG: VideoScaleConfig = {
   resolution: "720p",
   clipSeconds: 8,
   scenesPerVariant: 2,
+  aiScenes: null,
   dailyUsdCap: null,
   dailyClipCap: 40,
   providerConcurrency: 2,
@@ -416,6 +422,7 @@ export function normalizeVideoScaleConfig(raw: unknown): VideoScaleConfig {
     resolution,
     clipSeconds,
     scenesPerVariant: clampInt(r.scenesPerVariant, 1, L.maxScenesPerVariant, d.scenesPerVariant),
+    aiScenes: r.aiScenes === null || r.aiScenes === undefined || r.aiScenes === "" ? null : clampInt(r.aiScenes, 0, L.maxScenesPerVariant, 0),
     dailyUsdCap: Number.isFinite(cap) && cap > 0 ? Math.min(cap, L.maxVideoUsdPerDay) : null,
     dailyClipCap: clampInt(r.dailyClipCap, 1, L.maxClipsPerDay, d.dailyClipCap),
     providerConcurrency: clampInt(r.providerConcurrency, 1, L.maxProviderConcurrency, d.providerConcurrency),
@@ -809,4 +816,69 @@ export function actionForVerdict(input: { verdict: string; adActive: boolean; au
 export function nextScaledBudget(currentVnd: number, stepPct: number): number {
   const raw = currentVnd * (1 + Math.min(stepPct, VIDEO_ADS_HARD_LIMITS.maxStepPct));
   return Math.min(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd, Math.floor(raw / 1000) * 1000);
+}
+
+// ───────────────────────────── CẢNH ẢNH ĐỘNG (MIỄN PHÍ) ─────────────────────────────
+
+/** Nhãn nhà cung cấp của cảnh ảnh động trong hàng đợi (`video_scale_jobs.provider`). */
+export const PHOTO_SCENE_PROVIDER = "PHOTO";
+
+/**
+ * Cảnh này dựng bằng ẢNH ĐỘNG (không gọi AI)? Hàm THUẦN. Người đã chuyển riêng cảnh sang ảnh động (`mode = PHOTO` trên việc) ⇒
+ * luôn ảnh động; không thì theo `aiScenes` của ảnh chụp cấu hình lượt; bộ sinh giả không bao giờ ở nhánh này.
+ */
+export function isPhotoScene(input: { provider: VideoProviderId; aiScenes: number | null; sceneIndex: number; requestMode: unknown }): boolean {
+  if (input.requestMode === "PHOTO") return true;
+  if (input.provider === "FAKE" || input.aiScenes === null) return false;
+  return input.sceneIndex >= input.aiScenes;
+}
+
+/** Tiền GIỮ CHỖ ước tính cho một video (chỉ cảnh AI tốn tiền). `null` = model chưa có giá. Hàm THUẦN. */
+export function variantReserveUsd(cfg: Pick<VideoScaleConfig, "provider" | "model" | "resolution" | "clipSeconds" | "scenesPerVariant" | "aiScenes">): number | null {
+  const ai = cfg.aiScenes === null ? cfg.scenesPerVariant : Math.min(cfg.aiScenes, cfg.scenesPerVariant);
+  if (ai === 0) return 0;
+  const per = clipCostUsd(cfg.model, cfg.resolution, reserveSecondsFor(cfg.provider, cfg.clipSeconds));
+  return per === null ? null : Math.round(per * ai * 10_000) / 10_000;
+}
+
+/**
+ * Câu lỗi của nhà cung cấp là BỘ LỌC NỘI DUNG chặn? Hàm THUẦN — để màn hình nói tiếng người và đưa đúng lối ra (đổi cảnh sang
+ * ảnh động), thay vì một câu tiếng Anh và nút "thử lại" sẽ bị chặn y như cũ.
+ */
+export function isContentBlock(error: string): boolean {
+  return /prohibited|safety|blocked due to|content guideline|responsible ai|rai|bộ lọc an toàn|chính sách nội dung/i.test(error);
+}
+
+// ───────────────────────────── TIẾN TRÌNH CHO NGƯỜI XEM ─────────────────────────────
+
+export type StepTone = "todo" | "run" | "done" | "fail" | "block";
+export type StepState = { tone: StepTone; label: string; since: Date | null };
+
+/**
+ * Một việc trong hàng đợi → một câu người đọc được + màu. Hàm THUẦN. "Đang tạo trên Google" chỉ khi đã có mã thao tác (clip
+ * đang sinh thật, có thể đã tính tiền); "Chờ lượt" khi chưa gửi. Việc HỎNG / BỊ CHẶN mang nguyên câu lỗi để người biết làm gì.
+ */
+export function jobStepState(j: { status: string; providerRef: string; lockedUntil: Date | null; nextRunAt: Date; updatedAt: Date; error: string; provider: string }, now: Date): StepState {
+  const photo = j.provider === PHOTO_SCENE_PROVIDER;
+  switch (j.status) {
+    case "SUCCEEDED":
+      return { tone: "done", label: photo ? "Xong (ảnh động)" : "Xong", since: j.updatedAt };
+    case "FAILED":
+      return { tone: "fail", label: isContentBlock(j.error) ? "Bị Google chặn (chính sách nội dung)" : "Hỏng", since: j.updatedAt };
+    case "BLOCKED":
+      return { tone: "block", label: "Đang bị chặn", since: j.updatedAt };
+    case "CANCELLED":
+      return { tone: "fail", label: "Đã huỷ", since: j.updatedAt };
+    case "WAITING":
+      return j.providerRef ? { tone: "run", label: "Đang tạo trên Google", since: j.updatedAt } : { tone: "todo", label: "Chờ lượt", since: j.nextRunAt };
+    default:
+      if (j.status === "RUNNING" || (j.lockedUntil !== null && j.lockedUntil > now)) return { tone: "run", label: "Đang chạy", since: j.updatedAt };
+      return { tone: "todo", label: "Chờ lượt", since: j.nextRunAt };
+  }
+}
+
+/** Câu lỗi nhà cung cấp → câu người đọc được; bộ lọc nội dung chỉ thẳng lối ra. Giữ nguyên câu gốc ở cuối để tra. */
+export function humanProviderError(msg: string): string {
+  if (!isContentBlock(msg) || msg.startsWith("Google CHẶN")) return msg.slice(0, 1000);
+  return `Google CHẶN cảnh này theo chính sách nội dung (thường do câu lệnh nhắc tới cơ thể / người mẫu). Thử lại y nguyên sẽ bị chặn tiếp — bấm "Dùng ảnh động (miễn phí)" cho cảnh này, hoặc "Làm lại" cả video. Câu gốc: ${msg}`.slice(0, 1000);
 }

@@ -25,6 +25,9 @@ import { ffmpegVersion } from "@/lib/video-scale/ffmpeg";
 import { readVideoScaleConfig, videoScaleBlockers } from "@/lib/video-scale/pipeline";
 import { ConfigPanel } from "./config-panel";
 import { QueuePanel } from "./queue-panel";
+import { ProgressPanel } from "./progress-panel";
+import { AutoRefresh } from "./auto-refresh";
+import { listRunProgress } from "@/lib/queries/video-scale";
 import { ReviewPanel } from "./review-panel";
 import { WinPanel } from "./win-panel";
 
@@ -134,7 +137,21 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       {tab === "ma-win" ? (
         <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} />
       ) : tab === "hang-doi" ? (
-        <QueuePanel active={await listJobs(db, { active: true })} recent={await listJobs(db, { active: false, limit: 40 })} variants={await listVariants(db, { statuses: ["SCRIPTED", "GENERATING", "RENDERING", "QC", "FAILED", "QC_FAILED"], limit: 40 })} canEdit={canEdit} canSpend={canSpend} />
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[13px]">
+              Kết quả: mỗi clip xem được ngay khi xong; video hoàn chỉnh hiện ở đây và ở tab <b>Duyệt video</b>.
+            </p>
+            <AutoRefresh active={counts.activeJobs > 0} />
+          </div>
+          <ProgressPanel runs={await listRunProgress(db)} now={new Date()} canEdit={canEdit} canSpend={canSpend} />
+          <details className="rounded-lg border p-3">
+            <summary className="cursor-pointer text-[13px] font-medium">Chi tiết kỹ thuật từng việc trong hàng đợi</summary>
+            <div className="mt-3">
+              <QueuePanel active={await listJobs(db, { active: true })} recent={await listJobs(db, { active: false, limit: 40 })} variants={await listVariants(db, { statuses: ["SCRIPTED", "GENERATING", "RENDERING", "QC", "FAILED", "QC_FAILED"], limit: 40 })} canEdit={canEdit} canSpend={canSpend} />
+            </div>
+          </details>
+        </div>
       ) : tab === "duyet" ? (
         <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} />
       ) : tab === "quang-cao" ? (

@@ -739,3 +739,148 @@ export async function modelComparison(db: Db): Promise<ModelComparisonRow[]> {
     .sort((a, b) => b.videos - a.videos);
 }
 
+// ───────────────────────────── TIẾN TRÌNH TỪNG LƯỢT ─────────────────────────────
+
+export type ProgressJob = {
+  id: string;
+  kind: string;
+  sceneIndex: number | null;
+  status: string;
+  error: string;
+  errorKind: string;
+  attempts: number;
+  maxAttempts: number;
+  provider: string;
+  providerRef: string;
+  outputAssetId: string | null;
+  costUsd: number | null;
+  reservedUsd: number | null;
+  nextRunAt: Date;
+  lockedUntil: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ProgressVariant = {
+  id: string;
+  seq: number;
+  angle: string;
+  hook: string;
+  status: string;
+  error: string;
+  qcVerdict: string | null;
+  finalAssetId: string | null;
+  scenes: number;
+  jobs: ProgressJob[];
+};
+
+export type ProgressRun = {
+  id: string;
+  productName: string;
+  status: string;
+  error: string;
+  isTest: boolean;
+  createdBy: string;
+  createdAt: Date;
+  provider: string;
+  model: string;
+  aiScenes: number | null;
+  scenesPerVariant: number;
+  costUsd: number | null;
+  reservedUsd: number;
+  scriptJob: ProgressJob | null;
+  variants: ProgressVariant[];
+};
+
+/** Các lượt gần nhất, mỗi lượt kèm biến thể và TỪNG việc — màn hình tiến trình vẽ từ đây, không tự suy trạng thái. */
+export async function listRunProgress(db: Db, limit = 6): Promise<ProgressRun[]> {
+  const tProd = schema.products;
+  const runs = await db
+    .select({ id: tRun.id, productName: tProd.name, status: tRun.status, error: tRun.error, isTest: tRun.isTest, createdBy: tRun.createdBy, createdAt: tRun.createdAt, snap: tRun.configSnapshot })
+    .from(tRun)
+    .innerJoin(tProd, eq(tProd.id, tRun.productId))
+    .orderBy(desc(tRun.createdAt))
+    .limit(limit);
+  if (!runs.length) return [];
+  const ids = runs.map((r) => r.id);
+  const [variants, jobs] = await Promise.all([
+    db
+      .select({ id: tVar.id, runId: tVar.runId, seq: tVar.seq, angle: tVar.angle, script: tVar.script, status: tVar.status, error: tVar.error, qcVerdict: tVar.qcVerdict, finalAssetId: tVar.finalAssetId })
+      .from(tVar)
+      .where(inArray(tVar.runId, ids))
+      .orderBy(asc(tVar.seq)),
+    db
+      .select({
+        id: tJob.id,
+        runId: tJob.runId,
+        variantId: tJob.variantId,
+        kind: tJob.kind,
+        sceneIndex: tJob.sceneIndex,
+        status: tJob.status,
+        error: tJob.error,
+        errorKind: tJob.errorKind,
+        attempts: tJob.attempts,
+        maxAttempts: tJob.maxAttempts,
+        provider: tJob.provider,
+        providerRef: tJob.providerRef,
+        outputAssetId: tJob.outputAssetId,
+        costUsd: tJob.costUsd,
+        reservedUsd: tJob.reservedUsd,
+        nextRunAt: tJob.nextRunAt,
+        lockedUntil: tJob.lockedUntil,
+        createdAt: tJob.createdAt,
+        updatedAt: tJob.updatedAt,
+      })
+      .from(tJob)
+      .where(inArray(tJob.runId, ids))
+      .orderBy(asc(tJob.createdAt)),
+  ]);
+  const strip = (j: (typeof jobs)[number]): ProgressJob => {
+    const { runId, variantId, ...rest } = j;
+    void runId;
+    void variantId;
+    return rest;
+  };
+  return runs.map((r) => {
+    const snap = (r.snap ?? {}) as Record<string, unknown>;
+    const runJobs = jobs.filter((j) => j.runId === r.id);
+    const vs = variants.filter((v) => v.runId === r.id);
+    const cost = runJobs.map((j) => j.costUsd).filter((x): x is number => x !== null);
+    return {
+      id: r.id,
+      productName: r.productName,
+      status: r.status,
+      error: r.error,
+      isTest: r.isTest,
+      createdBy: r.createdBy,
+      createdAt: r.createdAt,
+      provider: typeof snap.provider === "string" ? snap.provider : "VEO",
+      model: typeof snap.model === "string" ? snap.model : "",
+      aiScenes: typeof snap.aiScenes === "number" ? snap.aiScenes : null,
+      scenesPerVariant: typeof snap.scenesPerVariant === "number" ? snap.scenesPerVariant : 0,
+      costUsd: cost.length ? cost.reduce((a, b) => a + b, 0) : null,
+      // Tiền giữ chỗ của việc CHƯA chốt tiền (đang tạo / hỏng giữa chừng).
+      reservedUsd: runJobs.filter((j) => j.costUsd === null).reduce((a, j) => a + (j.reservedUsd ?? 0), 0),
+      scriptJob: (() => {
+        const sj = runJobs.filter((j) => j.kind === "SCRIPT").pop();
+        return sj ? strip(sj) : null;
+      })(),
+      variants: vs.map((v) => {
+        const script = (v.script ?? {}) as { hook?: unknown; scenes?: unknown };
+        return {
+          id: v.id,
+          seq: v.seq,
+          angle: v.angle,
+          hook: typeof script.hook === "string" ? script.hook : "",
+          status: v.status,
+          error: v.error,
+          qcVerdict: v.qcVerdict,
+          finalAssetId: v.finalAssetId,
+          scenes: Array.isArray(script.scenes) ? script.scenes.length : 0,
+          jobs: runJobs.filter((j) => j.variantId === v.id).map(strip),
+        };
+      }),
+    };
+  });
+}
+

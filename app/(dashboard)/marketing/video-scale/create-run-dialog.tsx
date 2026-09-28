@@ -1,7 +1,9 @@
 "use client";
 
 import { Clapperboard, Loader2 } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useNavTransition } from "@/components/nav-progress";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -23,8 +25,8 @@ export function CreateRunDialog({ productId, label, music }: { productId: string
   const [angles, setAngles] = useState<VideoAngle[]>([]);
   const [brief, setBrief] = useState("");
   const [musicId, setMusicId] = useState("");
-  const [loading, startLoad] = useTransition();
-  const [pending, start] = useTransition();
+  const [loading, startLoad] = useNavTransition();
+  const [pending, start] = useNavTransition();
 
   const onOpen = (v: boolean) => {
     setOpen(v);
@@ -39,12 +41,14 @@ export function CreateRunDialog({ productId, label, music }: { productId: string
 
   const toggle = <T,>(list: T[], x: T) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
 
+  const router = useRouter();
   const submit = () =>
     start(async () => {
       const r = await createVideoRunAction({ productId, sourceIds: picked, variants, angles, brief, musicId });
       if ("error" in r) return void toast.error(r.error);
-      toast.success("Đã xếp lượt — máy đang viết kịch bản; theo dõi ở tab Hàng đợi render.");
+      toast.success("Đã xếp lượt — máy đang viết kịch bản. Chuyển sang màn hình tiến trình.");
       setOpen(false);
+      router.push("?tab=hang-doi");
     });
 
   return (

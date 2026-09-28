@@ -28,6 +28,8 @@ export const videoConfigSchema = z.object({
   resolution: z.enum(["720p", "1080p"]),
   clipSeconds: z.coerce.number().int().refine((n) => [4, 6, 8].includes(n), "4, 6 hoặc 8 giây"),
   scenesPerVariant: z.coerce.number().int().min(1).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant),
+  /** `null` = mọi cảnh AI; 0 = toàn ảnh động (miễn phí). */
+  aiScenes: z.union([z.null(), z.coerce.number().int().min(0).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant)]).default(null),
   /** Chuỗi rỗng = CHƯA KHAI (không sinh). */
   dailyUsdCap: z.union([z.literal(""), z.coerce.number().positive().max(VIDEO_SCALE_HARD_LIMITS.maxVideoUsdPerDay)]),
   dailyClipCap: z.coerce.number().int().min(1).max(VIDEO_SCALE_HARD_LIMITS.maxClipsPerDay),

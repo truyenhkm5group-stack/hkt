@@ -9,8 +9,11 @@ import {
   VIDEO_CLIP_DEADLINE_MS,
   VIDEO_POLL_INTERVAL_MS,
   VIDEO_SCALE_HARD_LIMITS,
+  PHOTO_SCENE_PROVIDER,
   billedSecondsFor,
   clipCostUsd,
+  humanProviderError,
+  isPhotoScene,
   reserveSecondsFor,
   normalizeVideoScaleConfig,
   outputSize,
@@ -21,7 +24,7 @@ import {
 import { readCreativeImage } from "@/lib/creative/images";
 import { env } from "@/lib/env";
 import { loadProductFacts } from "@/lib/video-scale/facts";
-import { buildRenderArgs, frameArgs, probeFile, qcFrameTimes, runTool, type MediaProbe } from "@/lib/video-scale/ffmpeg";
+import { buildRenderArgs, frameArgs, photoMotionArgs, probeFile, qcFrameTimes, runTool, type MediaProbe } from "@/lib/video-scale/ffmpeg";
 import { planAngles } from "@/lib/video-scale/plan";
 import { ProviderError, type VideoProvider } from "@/lib/video-scale/providers/types";
 import { combineQc, technicalQc, type VisualQc } from "@/lib/video-scale/qc";
@@ -227,6 +230,11 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
   const run = await loadRun(db, job.runId);
   if (!run || !variant) return void (await settleJob(db, job, { status: "CANCELLED", finishedAt: now }));
   const snap = snapshotOf(run);
+  // Cảnh ẢNH ĐỘNG: dựng ngay bằng ffmpeg từ ảnh sản phẩm — không nhà cung cấp, không tiền, không mơ hồ "đã tạo chưa".
+  const requestMode = (job.request as { mode?: unknown } | null)?.mode;
+  if (!job.providerRef && isPhotoScene({ provider: snap.provider, aiScenes: snap.aiScenes, sceneIndex: job.sceneIndex ?? 0, requestMode })) {
+    return void (await handlePhotoScene(ctx, job, run, variant));
+  }
   let provider: VideoProvider;
   try {
     provider = ctx.deps.provider(snap.provider);
@@ -241,6 +249,9 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
       polled = await provider.poll(job.providerRef);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      // Nhà cung cấp TỪ CHỐI hẳn lượt hỏi (vd bộ lọc nội dung trả HTTP 400) ⇒ clip này không bao giờ xong: hỏng NGAY kèm câu
+      // tiếng người. Trước đây mọi lỗi lúc hỏi đều bị coi là tạm thời ⇒ việc treo "Chờ nhà cung cấp" tới hết hạn 20 phút.
+      if (e instanceof ProviderError && e.kind === "PERMANENT") return void (await failOrRetryJob(db, job, now, humanProviderError(msg), "PERMANENT", { providerRef: "" }));
       if (job.deadlineAt && now > job.deadlineAt) return void (await failOrRetryJob(db, job, now, `Quá hạn chờ clip: ${msg}`, "PERMANENT"));
       return void (await waitJob(db, job, new Date(now.getTime() + VIDEO_POLL_INTERVAL_MS * 2), { error: msg.slice(0, 500) }));
     }
@@ -252,7 +263,7 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
     }
     if (polled.state === "FAILED") {
       // Lượt tạo mới (nếu thử lại) là một thao tác KHÁC: xoá mã cũ; tiền giữ chỗ của lượt hỏng vẫn nằm trong trần.
-      return void (await failOrRetryJob(db, job, now, polled.error, polled.kind, { providerRef: "" }));
+      return void (await failOrRetryJob(db, job, now, humanProviderError(polled.error), polled.kind, { providerRef: "" }));
     }
     let bytes: Uint8Array;
     try {
@@ -340,6 +351,56 @@ export async function handleClip(ctx: HandlerCtx, job: VideoJobRow): Promise<voi
     const release = { providerPendingAt: null, reservedUsd: job.reservedUsd && job.reservedUsd - est > 1e-9 ? job.reservedUsd - est : null };
     if (pe.kind === "BLOCKED") return void (await blockJob(db, job, pe.message, new Date(now.getTime() + 30 * 60_000), release));
     await failOrRetryJob(db, job, now, pe.message, pe.kind, release);
+  }
+}
+
+/**
+ * Dựng MỘT cảnh ẢNH ĐỘNG từ ảnh sản phẩm thật (ffmpeg) — miễn phí. Nhiều ảnh gốc ⇒ mỗi cảnh một ảnh khác (cảnh i dùng ảnh
+ * i mod n), để video không lặp một khung. Kiểu chuyển động đổi theo cảnh. Chạy xong trong cùng lượt: không có mã thao tác.
+ */
+async function handlePhotoScene(ctx: HandlerCtx, job: VideoJobRow, run: NonNullable<Awaited<ReturnType<typeof loadRun>>>, variant: NonNullable<Awaited<ReturnType<typeof loadVariant>>>): Promise<void> {
+  const { db, now } = ctx;
+  const version = await ctx.deps.ffmpegVersion();
+  if (!version) return void (await blockJob(db, job, "Máy chủ ERP không có ffmpeg — không dựng được cảnh ảnh động.", new Date(now.getTime() + 30 * 60_000)));
+  const scene = job.sceneIndex ?? 0;
+  const sources = run.sourceIds.length ? run.sourceIds : [variant.sourceId];
+  const img = await loadSourceImage(db, sources[scene % sources.length] ?? variant.sourceId, variant.productId);
+  if (typeof img === "string") return void (await failOrRetryJob(db, job, now, img, "PERMANENT"));
+  const snap = snapshotOf(run);
+  if (!(await beginAttempt(db, job, { provider: PHOTO_SCENE_PROVIDER, model: "photo-motion", request: { mode: "PHOTO", seconds: snap.clipSeconds } }))) return;
+  if (variant.status === "SCRIPTED") await db.update(V).set({ status: "GENERATING" }).where(and(eq(V.id, variant.id), eq(V.status, "SCRIPTED")));
+  try {
+    const out = await withTemp(async (dir) => {
+      const ext = img.contentType.includes("png") ? "png" : img.contentType.includes("webp") ? "webp" : "jpg";
+      const src = path.join(dir, `src.${ext}`);
+      const f = path.join(dir, "scene.mp4");
+      await writeFile(src, img.bytes);
+      const r = await runTool(env.videoScale.ffmpegPath, photoMotionArgs(src, snap.clipSeconds, 720, 1280, f, scene), { timeoutMs: 180_000 });
+      if (r.code !== 0) throw new Error(`ffmpeg dựng cảnh ảnh động hỏng: ${r.stderr.slice(-300)}`);
+      const bytes = new Uint8Array(await readFile(f));
+      let probe: MediaProbe | null = null;
+      try {
+        probe = await probeFile(f);
+      } catch {
+        probe = null;
+      }
+      return { bytes, probe };
+    });
+    const asset = await storeAsset(db, {
+      kind: "SOURCE_CLIP",
+      bytes: out.bytes,
+      contentType: "video/mp4",
+      runId: run.id,
+      variantId: variant.id,
+      isTest: run.isTest,
+      durationMs: out.probe?.durationSec ? Math.round(out.probe.durationSec * 1000) : null,
+      width: out.probe?.width ?? null,
+      height: out.probe?.height ?? null,
+    });
+    // 0 là số THẬT (không gọi dịch vụ trả tiền nào), không phải "chưa biết".
+    await succeedJob(db, job, now, { outputAssetId: asset.id, costUsd: 0, costBasis: "", result: { bytes: asset.bytes, durationSec: out.probe?.durationSec ?? null, mode: "PHOTO" } });
+  } catch (e) {
+    await failOrRetryJob(db, job, now, e instanceof Error ? e.message : String(e), "TRANSIENT");
   }
 }
 
