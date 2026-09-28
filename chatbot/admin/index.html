@@ -242,6 +242,15 @@ function aiNote(a) {
   if (a.perOrderVnd == null && a.calls) t += " · chưa có đơn nên chưa chia được theo đơn";
   return t;
 }
+function aiTotalCard() {
+  const sh = STATE.aiShop;
+  if (!sh?.periods) return "";
+  const cell = (a, label) => `<div title="${esc(aiNote(a))}"><b>${fmtVnd(a)}</b><span class="muted">${label}${a?.perOrderVnd != null ? ` · ${(a.partial ? "≥ " : "") + a.perOrderVnd.toLocaleString("vi-VN")}đ/đơn (${a.orders} đơn)` : ""}</span></div>`;
+  const rows = (sh.byPage || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.calls.toLocaleString("vi-VN")}</td><td>${r.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : (r.partial ? "≥ " : "") + r.costVnd.toLocaleString("vi-VN") + "đ"}</td><td>${r.orders || "—"}</td><td>${r.perOrderVnd == null ? "—" : (r.partial ? "≥ " : "") + r.perOrderVnd.toLocaleString("vi-VN") + "đ"}</td></tr>`).join("");
+  return `<div class="card"><h3>Tổng chi phí AI cả shop (ước tính)</h3><div class="stat">
+    ${cell(sh.periods.today, "hôm nay")}${cell(sh.periods.d7, "7 ngày")}${cell(sh.periods.d30, "30 ngày")}</div>
+    ${rows ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Chia theo page · 30 ngày</summary><table style="margin-top:8px"><tr><th>Page</th><th>Lượt gọi AI</th><th>Tiền</th><th>Đơn POS</th><th>AI / đơn</th></tr>${rows}</table></details>` : ""}</div>`;
+}
 function aiCostCard(p) {
   const a = p.ai?.last7, shop = STATE.aiShop, pr = STATE.aiPricing || { prices: {}, usdVnd: 0 };
   const rows = (a?.perModel || []).map((m) => `<tr><td>${esc(m.model)}</td><td>${m.calls.toLocaleString("vi-VN")}</td><td>${(m.input + m.cached).toLocaleString("vi-VN")}${m.cached ? ` <span class="muted small">(${Math.round((m.cached / Math.max(1, m.input + m.cached)) * 100)}% cache)</span>` : ""}</td><td>${m.output.toLocaleString("vi-VN")}</td><td>${m.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : m.costVnd.toLocaleString("vi-VN") + "đ"}</td></tr>`).join("");
@@ -274,6 +283,7 @@ function bindAiPrices() {
 function renderSettings(p) {
   const s = p.settings, g = STATE.global, st = p.stats;
   $("#content").innerHTML = `
+  ${aiTotalCard()}
   <div class="card"><h3>Hoạt động (7 ngày)</h3><div class="stat">
     <div><b>${st.last7.replies}</b><span class="muted">bot đã trả lời</span></div>
     <div><b>${st.last7.handoffs}</b><span class="muted">chuyển nhân viên</span></div>

@@ -96,25 +96,44 @@ Hãy phân tích và trả lời bằng tiếng Việt, ngắn gọn, dạng dan
 3. Đề xuất cụ thể 3–6 dòng nên THÊM vào "Hướng dẫn riêng cho page" (viết sẵn để copy vào), ví dụ câu trả lời mẫu, chính sách còn thiếu, cách xưng hô.
 Không bịa thông tin shop; chỗ nào cần chủ shop điền thì ghi [cần điền].`;
 
-/** Ca shop, 7 ngay: gom token moi page + phan "_khac" (tro ly, doi chieu don...) ; don = tong don cua moi page. */
-function shopAiCost(bot) {
+/**
+ * TONG CHI PHI AI ca shop theo ky (hom nay / 7 / 30 ngay lich, gio VN): gom token moi page + phan "_khac"
+ * (tro ly, doi chieu don...), don = tong don POS cua moi page cung ky; kem bang theo tung page.
+ */
+function lastDays(n) {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-  const days = [...Array(7)].map((_, i) => new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10));
-  const gop = {};
-  for (const byDay of Object.values(store.getAllAiUsage())) {
-    for (const d of days) {
-      for (const [model, t] of Object.entries(byDay[d] || {})) {
-        const x = ((gop[d] ||= {})[model] ||= { calls: 0, input: 0, cached: 0, output: 0 });
-        x.calls += t.calls || 0; x.input += t.input || 0; x.cached += t.cached || 0; x.output += t.output || 0;
+  return [...Array(n)].map((_, i) => new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10));
+}
+function shopAiCost(bot) {
+  const pricing = settings.aiPricing();
+  const usage = store.getAllAiUsage();
+  const orderOf = (id, days) => {
+    const st = store.getStats(id);
+    return days.reduce((n, d) => n + (st[d]?.orders || 0), 0);
+  };
+  const periods = {};
+  for (const [key, n] of [["today", 1], ["d7", 7], ["d30", 30]]) {
+    const days = lastDays(n);
+    const gop = {};
+    for (const byDay of Object.values(usage)) {
+      for (const d of days) {
+        for (const [model, t] of Object.entries(byDay[d] || {})) {
+          const x = ((gop[d] ||= {})[model] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+          x.calls += t.calls || 0; x.input += t.input || 0; x.cached += t.cached || 0; x.output += t.output || 0;
+        }
       }
     }
+    let orders = 0;
+    for (const id of bot.clients.keys()) orders += orderOf(id, days);
+    periods[key] = summarizeAiCost(gop, days, { ...pricing, orders });
   }
-  let orders = 0;
-  for (const id of bot.clients.keys()) {
-    const st = store.getStats(id);
-    for (const d of days) orders += st[d]?.orders || 0;
-  }
-  return summarizeAiCost(gop, days, { ...settings.aiPricing(), orders });
+  const d30 = lastDays(30);
+  const ids = new Set([...bot.clients.keys(), ...Object.keys(usage)]);
+  const byPage = [...ids].map((id) => {
+    const a = summarizeAiCost(usage[id] || {}, d30, { ...pricing, orders: id === "_khac" ? 0 : orderOf(id, d30) });
+    return { id, name: id === "_khac" ? "Ngoài hội thoại (trợ lý AI, đối chiếu đơn…)" : bot.pageNames.get(id) || id, calls: a.calls, costVnd: a.costVnd, partial: a.partial, orders: a.orders, perOrderVnd: a.perOrderVnd };
+  }).filter((r) => r.calls > 0).sort((a, b) => (b.costVnd ?? -1) - (a.costVnd ?? -1));
+  return { ...periods.d7, periods, byPage };
 }
 
 export function createAdminHandler(bot) {
