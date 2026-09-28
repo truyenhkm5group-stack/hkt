@@ -6,7 +6,7 @@ import { schema, type Db } from "@/db";
 import { collectCandidates } from "@/lib/alerts/rules";
 import { DEFAULT_ALERT_CONFIG } from "@/lib/constants/alerts";
 import { clearPhoneReputationCache, primePhoneReputationForTest } from "@/lib/queries/phone-reputation";
-import { normalizePhoneForPancake, parseBadReportInfo, phoneRiskReasons, type PhoneReputation } from "@/lib/constants/phone-reputation";
+import { compareRisk, normalizePhoneForPancake, parseBadReportInfo, phoneRiskLevel, phoneRiskReasons, type PhoneReputation } from "@/lib/constants/phone-reputation";
 
 /**
  * "Tỷ lệ hoàn" / "Cảnh báo SĐT" theo Pancake trên danh sách chờ xuất — phần THUẦN.
@@ -75,6 +75,23 @@ export function testPhoneReputation() {
   assert.deepEqual(phoneRiskReasons(rep(100, 0, 4), t), [], "4 đơn vẫn dưới ngưỡng tối thiểu 5");
   assert.deepEqual(phoneRiskReasons(rep(60, 0, 5), t), ["RETURN_RATE"], "đủ 5 đơn thì xét như thường");
   assert.deepEqual(phoneRiskReasons(rep(100, 11, 1), t), ["WARNINGS"], "ngưỡng tối thiểu CHỈ áp cho tỷ lệ hoàn — số lần bị báo vẫn tự đủ");
+  // ───────── Lọc "ít rủi ro" và xếp rủi ro thấp → cao (chủ shop yêu cầu 28/09/2026) ─────────
+  assert.equal(phoneRiskLevel(rep(10, 0), t), "LOW");
+  assert.equal(phoneRiskLevel(rep(41, 0), t), "HIGH");
+  assert.equal(phoneRiskLevel(rep(null, 0), t), "NO_HISTORY", "khách chưa có đơn nào trên Pancake KHÔNG phải ít rủi ro");
+  assert.equal(phoneRiskLevel(rep(0, 0, 1), t), "NO_HISTORY", "1/1 giao thành công chưa đủ mẫu — không được gọi là ít rủi ro");
+  assert.equal(phoneRiskLevel(rep(100, 0, 1), t), "NO_HISTORY", "1/1 hoàn không bật cảnh báo (mẫu nhỏ) thì cũng KHÔNG được rơi vào 'ít rủi ro'");
+  assert.equal(phoneRiskLevel(rep(0, 0, 5), t), "LOW", "đủ 5 đơn, không vượt ngưỡng ⇒ ít rủi ro");
+  assert.equal(phoneRiskLevel(rep(null, 11), t), "HIGH", "chưa có đơn nhưng bị báo quá ngưỡng vẫn là rủi ro cao");
+  assert.equal(phoneRiskLevel(null, t), "UNKNOWN", "chưa hỏi được Pancake ⇒ chưa biết, không phải ít rủi ro");
+  assert.equal(phoneRiskLevel(rep(10, 0), null), "UNKNOWN", "không đọc được ngưỡng ⇒ không khẳng định ai ít rủi ro");
+  const ds: [string, PhoneReputation | null][] = [["x", null], ["cao", rep(60, 2)], ["moi", rep(null, 0)], ["thap", rep(5, 0)], ["thapBao", rep(5, 3)]];
+  const xep = (dir: 1 | -1, by: "RATE" | "WARNINGS" = "RATE") => [...ds].sort((a, b) => compareRisk(a[1], b[1], dir, by)).map((x) => x[0]);
+  assert.deepEqual(xep(1), ["thap", "thapBao", "cao", "moi", "x"], "thấp → cao: tỷ lệ hoàn rồi số lần bị báo; chưa có lịch sử, chưa biết đứng cuối");
+  assert.deepEqual(xep(-1), ["cao", "thapBao", "thap", "moi", "x"], "đảo chiều KHÔNG đưa 'chưa biết' lên đầu danh sách rủi ro cao");
+  const mauNho = rep(100, 0, 1);
+  assert.ok(compareRisk(mauNho, rep(60, 0), -1, "RATE", 5) > 0, "1/1 hoàn (100%) KHÔNG đứng trên 60% của 100 đơn khi xếp rủi ro cao → thấp — mẫu nhỏ xuống cuối");
+  assert.deepEqual(xep(1, "WARNINGS"), ["moi", "thap", "cao", "thapBao", "x"], "xếp theo cảnh báo: khách chưa có lịch sử vẫn có số lần báo (0) nên xếp được");
   // Nút Lưu ở trang Cảnh báo không được làm RƠI các ô này: z.object() cắt khoá không khai báo.
   const luoc = readFileSync(path.join(path.resolve(__dirname, ".."), "lib", "actions", "alerts.ts"), "utf8");
   for (const k of ["phoneRiskReturnRatePct", "phoneRiskWarningCount", "phoneRiskMinOrders"]) {

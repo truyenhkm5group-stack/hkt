@@ -189,6 +189,29 @@ export type StockShortageSnapshot = {
    * trả hàng ghi tổng). Nói ra để người đọc biết vì sao đã đặt mà Lark vẫn nhắc — không đoán chia hộ.
    */
   unsplitOrdered?: { batches: number; units: number };
+  /**
+   * HÀNG CHỜ XUẤT của MỌI mẫu đang có đơn giữ — kể cả mẫu đủ hàng và mẫu chưa biết tồn — để dựng
+   * bảng mã × màu × size tính vải (`lib/constants/pending-matrix.ts`). `variants` ở trên chỉ có mẫu
+   * THIẾU nên không dùng thay được: bảng chờ xuất phải cộng ra đúng cột "đã chốt" của sổ kho.
+   */
+  pending: PendingSnapshot;
+};
+
+/** Một mẫu mã đang có đơn đã chốt giữ hàng (chưa rời kho). */
+export type PendingVariant = Pick<ShortageVariantInput, "variantId" | "productId" | "productCode" | "productName" | "color" | "size" | "stockKnown" | "openPoQty"> & {
+  /** Chờ xuất = tổng số cái các đơn đã chốt đang giữ, hàng chưa rời kho (vị ngữ `RESERVED_IN_WAREHOUSE`). */
+  pending: number;
+  /** Thiếu = phần chờ xuất mà tồn thực tế không phân được. `null` = tồn CHƯA BIẾT (chưa có phiếu nhập). */
+  shortQty: number | null;
+  /** Cần đặt thêm = thiếu − hàng đã đặt xưởng chưa về (`stillShortAfterOrder`). `null` khi tồn chưa biết. */
+  toOrder: number | null;
+};
+
+export type PendingSnapshot = {
+  variants: PendingVariant[];
+  /** Dòng đơn trỏ tới mẫu KHÔNG còn trong danh mục — không biết mã / màu / size nên không xếp được vào bảng. */
+  orphanUnits: number;
+  orphanVariants: number;
 };
 
 /* ═══════════════════ PHÂN BỔ ═══════════════════ */
@@ -285,9 +308,12 @@ export function allocateStock(variants: ShortageVariantInput[], lines: ReservedL
   type Acc = { reserved: number; short: number; orders: Set<string>; value: Map<string, number>; oldest: Date | null };
   const acc = new Map<string, Acc>();
   const unknownVariants = new Set<string>();
+  // Chờ xuất theo mẫu — đếm TRƯỚC mọi nhánh, để mẫu chưa biết tồn vẫn có mặt trong bảng chờ xuất.
+  const pendingQty = new Map<string, number>();
 
   for (const l of queue) {
     const v = byId.get(l.variantId);
+    pendingQty.set(l.variantId, (pendingQty.get(l.variantId) ?? 0) + l.qty);
     const verdict = orders.get(l.orderId) ?? { orderId: l.orderId, systemId: l.systemId, state: "READY" as OrderStockState, shortLines: [], unknownLines: [], insertedAt: l.insertedAt, customer: l.customer, value: l.value };
     orders.set(l.orderId, verdict);
     const label = v ? variantLabel(v) : "(mẫu không còn trong danh mục)";
@@ -341,11 +367,37 @@ export function allocateStock(variants: ShortageVariantInput[], lines: ReservedL
   }
   rows.sort((x, y) => y.oldestWaitHours - x.oldestWaitHours || y.shortQty - x.shortQty || (x.variantId < y.variantId ? -1 : 1));
 
+  const pending: PendingSnapshot = { variants: [], orphanUnits: 0, orphanVariants: 0 };
+  for (const [variantId, qty] of pendingQty) {
+    const v = byId.get(variantId);
+    if (!v) {
+      pending.orphanUnits += qty;
+      pending.orphanVariants += 1;
+      continue;
+    }
+    const short = v.stockKnown ? (acc.get(variantId)?.short ?? 0) : null;
+    pending.variants.push({
+      variantId,
+      productId: v.productId,
+      productCode: v.productCode,
+      productName: v.productName,
+      color: v.color,
+      size: v.size,
+      stockKnown: v.stockKnown,
+      openPoQty: v.openPoQty,
+      pending: qty,
+      shortQty: short,
+      toOrder: short === null ? null : stillShortAfterOrder(short, v.openPoQty),
+    });
+  }
+  pending.variants.sort((x, y) => (x.variantId < y.variantId ? -1 : x.variantId > y.variantId ? 1 : 0));
+
   const all = [...orders.values()];
   const waiting = all.filter((o) => o.state === "WAITING_STOCK");
   return {
     variants: rows,
     orders,
+    pending,
     totals: {
       variants: rows.length,
       shortUnits: rows.reduce((t, r) => t + r.shortQty, 0),
@@ -378,6 +430,53 @@ export function waitingOrderDetail(order: OrderStockVerdict, variants: Map<strin
     return `Thiếu ${l.label} ×${l.short}${po}${alt}`;
   });
   return `${parts.join(". ")}.`;
+}
+
+/* ═══════════════════ ĐƠN CHỜ XUẤT: ĐÓNG ĐƯỢC HAY CHƯA ═══════════════════ */
+
+/**
+ * Chủ shop yêu cầu (28/09/2026): *"đơn nào chờ xuất mà đã có sẵn hàng tồn trong kho để đóng (đủ điều
+ * kiện gửi sang VTP cho kho in đơn, đóng hàng), đơn nào chờ xuất mà hàng tồn kho không có sẵn"*.
+ *
+ * Câu trả lời là kết luận CẤP ĐƠN của `allocateStock` — không tính lại lần hai. Kho đóng gói CẢ ĐƠN,
+ * nên một đơn hai món mà món kia thiếu thì KHÔNG đóng được, dù món đang xem đã có hàng.
+ *
+ *   PACKABLE      — mọi dòng của đơn đều được phân đủ tồn thực tế ⇒ in đơn, đóng hàng, gửi VTP.
+ *   NO_STOCK      — ít nhất một dòng không được phân hàng ⇒ chưa có gì để đóng đủ đơn.
+ *   STOCK_UNKNOWN — không dòng nào thiếu, nhưng có mẫu chưa có phiếu nhập ⇒ không biết; kho đếm tay.
+ *   NOT_ALLOCATED — đơn chưa có trong bảng phân bổ (bảng đệm 60 giây, đơn vừa lên) ⇒ không đoán.
+ */
+export type OrderPackState = "PACKABLE" | "NO_STOCK" | "STOCK_UNKNOWN" | "NOT_ALLOCATED";
+
+export const ORDER_PACK_STATES: readonly OrderPackState[] = ["PACKABLE", "NO_STOCK", "STOCK_UNKNOWN", "NOT_ALLOCATED"];
+
+export const ORDER_PACK_LABEL: Record<OrderPackState, string> = {
+  PACKABLE: "Có hàng · đóng được",
+  NO_STOCK: "Không có hàng để đóng",
+  STOCK_UNKNOWN: "Chưa biết tồn",
+  NOT_ALLOCATED: "Đang cập nhật",
+};
+
+export function orderPackState(verdict: OrderStockVerdict | undefined): OrderPackState {
+  if (!verdict) return "NOT_ALLOCATED";
+  return verdict.state === "READY" ? "PACKABLE" : verdict.state === "WAITING_STOCK" ? "NO_STOCK" : "STOCK_UNKNOWN";
+}
+
+/**
+ * Một câu cho dòng (đơn × mẫu) đang xem: thiếu mẫu nào bao nhiêu cái. Dòng này có hàng mà đơn vẫn
+ * thiếu món khác thì nói rõ — nếu không, kho thấy "có hàng" ở mẫu mình tìm và đi đóng một đơn thiếu.
+ */
+export function packStateDetail(verdict: OrderStockVerdict | undefined, variantId: string): string {
+  const state = orderPackState(verdict);
+  if (!verdict || state === "NOT_ALLOCATED") return "Đơn vừa lên — bảng phân bổ cập nhật mỗi phút.";
+  const mine = verdict.shortLines.find((l) => l.variantId === variantId);
+  const others = verdict.shortLines.filter((l) => l.variantId !== variantId);
+  if (state === "NO_STOCK") {
+    const parts = [...(mine ? [`thiếu ${mine.short}/${mine.qty} cái mẫu này`] : ["mẫu này đã có hàng"]), ...others.map((l) => `thiếu ${l.label} ×${l.short}`)];
+    return parts.join(" · ");
+  }
+  if (state === "STOCK_UNKNOWN") return `Chưa có phiếu nhập: ${verdict.unknownLines.map((l) => l.label).join(", ")} — kho đếm tay trước khi đóng.`;
+  return "Kho đã có đủ hàng cho cả đơn.";
 }
 
 export const WAITING_STOCK_NEXT_ACTION =

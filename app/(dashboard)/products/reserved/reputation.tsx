@@ -54,6 +54,13 @@ export function PhoneReputationProvider({ orderIds, thresholds, children }: { or
   );
 }
 
+/** Toàn bộ số đã hỏi được + ngưỡng — cho bộ lọc / sắp xếp theo rủi ro (`risk-view.tsx`). */
+export function useReputationBook(): State & { thresholds: PhoneRiskThresholds | null } {
+  const st = React.useContext(Ctx);
+  const thresholds = React.useContext(NguongCtx);
+  return { ...st, thresholds };
+}
+
 function useRisk(orderId: string): PhoneRiskReason[] {
   const t = React.useContext(NguongCtx);
   const st = React.useContext(Ctx);

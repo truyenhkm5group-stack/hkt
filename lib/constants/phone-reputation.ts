@@ -109,3 +109,56 @@ export function phoneRiskText(rep: PhoneReputation, reasons: PhoneRiskReason[]):
     .map((l) => (l === "RETURN_RATE" ? `Pancake: hoàn ${rep.returnRatePct}% (${rep.orderFail}/${rep.orderSuccess + rep.orderFail} đơn)` : `SĐT bị báo ${rep.warningCount} lần trên Pancake`))
     .join(" · ");
 }
+
+/* ═══════════════════ LỌC & SẮP XẾP ĐƠN CHỜ XUẤT THEO RỦI RO ═══════════════════ */
+
+/**
+ * Chủ shop yêu cầu (28/09/2026): *"lọc các đơn ít rủi ro và sắp xếp các đơn rủi ro từ thấp đến cao"*.
+ *
+ * BỐN mức, không phải hai. "Ít rủi ro" là một KHẲNG ĐỊNH — nên chỉ khi Pancake đã trả số, khách có ĐỦ
+ * `phoneRiskMinOrders` đơn kết thúc (cùng ngưỡng mẫu nhỏ mà `phoneRiskReasons` dùng để bật cảnh báo),
+ * và không vượt ngưỡng nào. Khách chưa đủ lịch sử (1/1 đơn hoàn không bật cảnh báo, nên cũng không được
+ * gọi là ít rủi ro) và đơn chưa hỏi được Pancake KHÔNG được xếp vào "ít rủi ro": chưa biết không phải
+ * an toàn (AGENTS.md mục 42).
+ * Không đọc được ngưỡng thì không có ai "rủi ro cao" cũng không có ai "ít rủi ro".
+ */
+export type PhoneRiskLevel = "LOW" | "NO_HISTORY" | "HIGH" | "UNKNOWN";
+
+export const PHONE_RISK_LEVELS: readonly PhoneRiskLevel[] = ["LOW", "NO_HISTORY", "HIGH", "UNKNOWN"];
+
+export const PHONE_RISK_LEVEL_LABEL: Record<PhoneRiskLevel, string> = {
+  LOW: "Ít rủi ro",
+  NO_HISTORY: "Chưa đủ lịch sử",
+  HIGH: "Rủi ro cao",
+  UNKNOWN: "Chưa biết",
+};
+
+/** Tỷ lệ hoàn có đủ mẫu để nói điều gì không — CÙNG vế mà `phoneRiskReasons` dùng. */
+function enoughHistory(rep: PhoneReputation, minOrders: number): boolean {
+  return rep.returnRatePct !== null && rep.orderSuccess + rep.orderFail >= Math.max(1, minOrders);
+}
+
+export function phoneRiskLevel(rep: PhoneReputation | null | undefined, t: PhoneRiskThresholds | null): PhoneRiskLevel {
+  if (!rep) return "UNKNOWN";
+  if (t && phoneRiskReasons(rep, t).length) return "HIGH";
+  if (!t) return "UNKNOWN";
+  return enoughHistory(rep, t.phoneRiskMinOrders) ? "LOW" : "NO_HISTORY";
+}
+
+/**
+ * So hai đơn theo rủi ro, `dir = 1` là THẤP → CAO. Khoá: tỷ lệ hoàn (số đang in), rồi số lần bị báo.
+ * Hai nhóm không có tỷ lệ ĐÁNG TIN luôn đứng CUỐI, bất kể chiều: chưa đủ `minOrders` đơn trước (1/1 hoàn
+ * là "100%" nhưng không nói gì — xếp nó lên đầu "rủi ro cao nhất" là tin một mẫu nhỏ), chưa hỏi được
+ * sau cùng — đảo chiều mà đưa "chưa biết" lên đầu danh sách "rủi ro cao nhất" là nói điều không đo.
+ * Trả 0 khi hoà: nơi gọi tự phân định (đơn chờ lâu nhất trước).
+ */
+export function compareRisk(a: PhoneReputation | null | undefined, b: PhoneReputation | null | undefined, dir: 1 | -1, by: "RATE" | "WARNINGS" = "RATE", minOrders = 1): number {
+  const tier = (r: PhoneReputation | null | undefined) => (!r ? 2 : by === "RATE" && !enoughHistory(r, minOrders) ? 1 : 0);
+  const ta = tier(a);
+  const tb = tier(b);
+  if (ta !== tb) return ta - tb;
+  if (ta === 2 || !a || !b) return 0;
+  const rate = (a.returnRatePct ?? 0) - (b.returnRatePct ?? 0);
+  const warn = a.warningCount - b.warningCount;
+  return dir * (by === "RATE" ? rate || warn : warn || rate);
+}
