@@ -1,3 +1,4 @@
+import { APPROVALS_HREF } from "@/lib/constants/approval";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER } from "@/lib/constants/departments";
 import { DOMAIN_EVENTS, domainEventLabel, METADATA_RECORD_SUBJECT, type DomainEventSpec } from "@/lib/constants/domain-events";
 import { objectDef } from "@/lib/constants/object-registry";
@@ -104,8 +105,12 @@ export const TRIGGER_KIND_LABEL: Record<WorkflowTrigger["kind"], string> = {
   custom_status: "Trạng thái nghiệp vụ đổi",
 };
 
-/** Lượt chạy chờ duyệt: yêu cầu nằm ở hàng đợi duyệt đã có — trang Cần xử lý (`/alerts`) và bàn làm việc `/work`. */
-export const APPROVAL_QUEUE_HREF = "/alerts";
+/**
+ * Lượt chạy chờ duyệt: yêu cầu nằm ở trang Duyệt của LÕI (`/approvals`, khoá `approvals:decide`) và bàn làm việc
+ * `/work`. KHÔNG trỏ `/alerts`: module «Cần xử lý» cần «Đơn hàng», nên tổ chức không bán hàng (mẫu service-business)
+ * bấm vào chỉ gặp `/module-disabled` và lượt chạy treo «chờ duyệt» mãi (bài chấp nhận Phase 12, E2E #3).
+ */
+export const APPROVAL_QUEUE_HREF = APPROVALS_HREF;
 
 export const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = WORK_PRIORITIES.map((p) => ({ value: p, label: WORK_PRIORITY_LABEL[p] }));
 export const DEPARTMENT_OPTIONS: { value: string; label: string }[] = DEPARTMENT_ORDER.map((d) => ({ value: d, label: DEPARTMENT_LABEL[d] }));

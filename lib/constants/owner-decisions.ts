@@ -1,4 +1,5 @@
 import type { Permission } from "@/lib/auth/permissions";
+import { APPROVALS_HREF } from "@/lib/constants/approval";
 import { formatVND } from "@/lib/format";
 
 /**
@@ -83,10 +84,12 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
   APPROVAL: {
     label: "Yêu cầu chờ duyệt",
     source: "APPROVALS",
-    home: "/alerts",
-    requires: ["alerts:view", "approvals:decide"],
+    // Trang Duyệt của LÕI: mở được ở mọi tổ chức, cổng là `approvals:decide` (cũng của lõi). Trước đây trỏ `/alerts` +
+    // đòi `alerts:view` — tổ chức không bật «Cần xử lý» (cần «Đơn hàng») thì loại này biến khỏi buồng lái.
+    home: APPROVALS_HREF,
+    requires: ["approvals:decide"],
     scopeResource: null,
-    hint: "Duyệt hai bước đang chờ (listApprovalRequests — cùng truy vấn với trang Cần xử lý và /work). Yêu cầu do chính anh xin không hiện ở đây: người xin không tự duyệt được.",
+    hint: "Duyệt hai bước đang chờ (listApprovalRequests — cùng truy vấn với trang Duyệt, trang Cần xử lý và /work). Yêu cầu do chính anh xin không hiện ở đây: người xin không tự duyệt được.",
   },
   SAMPLE_REVIEW: {
     label: "Mẫu xưởng chờ duyệt",

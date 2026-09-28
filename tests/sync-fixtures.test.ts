@@ -430,6 +430,7 @@ import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
+import { testApprovalsCore } from "./approvals-core.test";
 import { testOrgExport } from "./org-export.test";
 import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
 import { testConnectors } from "./connectors.test";
@@ -2527,6 +2528,9 @@ async function main() {
   // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
   // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
   await testPlatformDiagnosticsOrg();
+  // Phase 12 · năm lỗi của bài chấp nhận: trang Duyệt LÕI + lối duyệt, /platform chỉ ở nhà, not-found theo thương hiệu,
+  // số tiền của yêu cầu duyệt, bộ quét menu × module tắt — hai tổ chức THẬT `ap-svc` (cài mẫu dịch vụ) / `ap-si` (tự cấp, tự dọn).
+  await testApprovalsCore();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

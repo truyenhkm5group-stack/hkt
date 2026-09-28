@@ -1,4 +1,5 @@
 import type { Permission } from "@/lib/auth/permissions";
+import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { DEPARTMENT_HINT, DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode } from "@/lib/constants/departments";
 
 /**
@@ -45,6 +46,13 @@ export type ModuleSpec = {
   permission?: Permission;
   /** Đủ MỘT trong các quyền này là thấy — dùng cho trang gộp nhiều sổ (ví dụ Tổng quan tài chính). */
   anyOf?: readonly Permission[];
+  /**
+   * Module NGUỒN SỐ LIỆU ngoài module sở hữu đường dẫn (module sở hữu tra bằng `moduleOfPath`, không khai ở đây). Mục chỉ
+   * hiện khi mọi module này bật — cùng khái niệm với khối của trang tổng hợp (`AggregateBlock`). Vd `/cod` thuộc Tài
+   * chính nhưng đối soát tiền THU HỘ của đơn vị vận chuyển: tổ chức không bật «Vận chuyển» (mẫu dịch vụ) thì mục ấy chỉ
+   * là một trang rỗng mang tên nghiệp vụ họ không có.
+   */
+  requires?: readonly ModuleKey[];
   /** Một dòng: vì sao phòng này sở hữu màn hình này. */
   why: string;
 };
@@ -77,6 +85,13 @@ export const NAV_MODULES = [
     zone: "EVERYONE",
     permission: "work:view",
     why: "Bàn làm việc cá nhân + hàng đợi phòng + mục tiêu. Mỗi người mở nó thấy đúng phần của mình, nên nó là màn hình dùng chung chứ không phải của một phòng.",
+  },
+  {
+    href: "/approvals",
+    label: "Duyệt",
+    zone: "EVERYONE",
+    permission: "approvals:decide",
+    why: "Việc đang chờ người thứ hai quyết — của người và của luật tự động có cửa duyệt. Thuộc LÕI chứ không thuộc «Cần xử lý» (module ấy cần «Đơn hàng»): tổ chức không bán hàng vẫn phải duyệt được, nếu không lượt chạy của luật treo mãi. Chỉ người có quyền duyệt thấy mục này.",
   },
 
   // ───────────────── KINH DOANH & CSKH ─────────────────
@@ -247,6 +262,7 @@ export const NAV_MODULES = [
     label: "Thiếu hàng giao đơn",
     zone: "PRODUCTION",
     permission: "planning:view",
+    requires: ["orders"],
     why: "Đơn đã chốt đang chờ vì kho không đủ hàng: việc gỡ nó là đặt / giục xưởng. Kho đọc để kiểm đếm, CSKH đọc để báo khách — nhưng nguồn cung là quyết định của phòng Sản xuất.",
   },
   {
@@ -285,6 +301,7 @@ export const NAV_MODULES = [
     label: "Hiệu quả mẫu mã",
     zone: "PRODUCTION",
     permission: "reports:returns",
+    requires: ["orders"],
     why: "Mẫu nào bán được, mẫu nào hoàn nhiều là ĐẦU VÀO của lệnh đặt hàng tiếp theo. Kho đọc để biết xếp hàng ở đâu, nhưng người QUYẾT theo nó là phòng Sản xuất.",
   },
 
@@ -302,6 +319,7 @@ export const NAV_MODULES = [
     label: "Đối soát COD",
     zone: "FINANCE",
     permission: "cod:view",
+    requires: ["logistics"],
     why: "Tiền đã giao mà chưa về: chứng từ nằm ở kế toán, dù việc đòi phải làm với ĐVVC.",
   },
   {
@@ -509,6 +527,36 @@ export const NAV_MODULES = [
     why: "Mọi tổ chức trên nền tảng: sức khoẻ CSDL, lỗi cấu hình module. Chỉ người của tổ chức nhà — nó nhìn xuyên qua ranh giới giữa các tổ chức.",
   },
 ] as const satisfies readonly ModuleSpec[];
+
+/**
+ * ═══ NHÓM MANG TÊN MỘT MODULE ═══
+ *
+ * Nhóm menu là PHÒNG BAN, không phải module — nhưng ba phòng chỉ tồn tại trong menu VÌ một module: «Sản xuất» vì
+ * module Sản xuất, «Giao vận» vì Vận chuyển, «Marketing» vì Marketing. Mục của nhóm lại có thể thuộc module KHÁC vẫn
+ * đang bật: tổ chức bán sỉ (Sản xuất TẮT, Mua hàng BẬT) từng thấy nhóm «Sản xuất» chứa «Thiếu hàng giao đơn», «Quyết
+ * định vốn tồn kho», «Hiệu quả mẫu mã» (bài chấp nhận Phase 12, lỗi #5) — trang mở được, nhưng cái nhãn nói với họ rằng
+ * họ có một phòng Sản xuất.
+ *
+ * Luật: module của nhóm TẮT ⇒ nhóm KHÔNG hiện; mục còn hiện được (module của chính nó bật) CHUYỂN sang `fallback` —
+ * không mất lối vào trang, chỉ mất cái nhãn sai. `fallback` cũng có thể mang module (Marketing → Sản xuất): dời tiếp
+ * tới khi gặp nhóm không gắn module hoặc module đang bật (`resolveNavZone`).
+ */
+export const ZONE_MODULE: Partial<Record<ModuleZone, { module: ModuleKey; fallback: ModuleZone; why: string }>> = {
+  PRODUCTION: { module: "production", fallback: "WAREHOUSE", why: "Mua hàng, thiếu hàng, hiệu quả mã hàng vẫn là việc của người giữ kho khi tổ chức không tự sản xuất." },
+  LOGISTICS: { module: "logistics", fallback: "WAREHOUSE", why: "Không có vận chuyển thì phiếu đổi / trả và tỷ lệ hoàn là việc của kho nhận hàng về." },
+  MARKETING: { module: "marketing", fallback: "PRODUCTION", why: "Mục duy nhất còn sống được khi Marketing tắt là «Topic gửi sản xuất» (module Sản xuất) — về đúng phòng của nó." },
+};
+
+/** Nhóm thực sự chứa một mục của vùng `zone` với tập module đang bật (`isOn`) — dời theo `ZONE_MODULE` tới khi dừng. */
+export function resolveNavZone(zone: ModuleZone, isOn: (m: ModuleKey) => boolean): ModuleZone {
+  let z = zone;
+  for (let i = 0; i < 8; i++) {
+    const bound = ZONE_MODULE[z];
+    if (!bound || isOn(bound.module)) return z;
+    z = bound.fallback;
+  }
+  return z;
+}
 
 /** Mọi đường dẫn có mục menu — TypeScript đòi bảng icon phải phủ đủ, không thiếu một mục. */
 export type ModuleHref = (typeof NAV_MODULES)[number]["href"];

@@ -61,6 +61,12 @@ export const CORE_TEXT = {
     home: "Bán hàng · nguồn Pancake",
     other: (n: NameOf, ctx: CopyContext) => (ctx.declared.ORDER_SOURCE ? `Bán hàng · nguồn ${n("ORDER_SOURCE")}` : "Bán hàng"),
   },
+  // Trang "không tìm thấy" của khung dashboard (`app/(dashboard)/not-found.tsx`): "đồng bộ về ERP" là câu của nhà (dữ liệu
+  // kéo từ Pancake) — tổ chức không có kết nối nào đọc nó như thể có một bước đồng bộ đang hỏng.
+  "notFound.body": {
+    home: "Bản ghi không tồn tại hoặc chưa được đồng bộ về ERP.",
+    other: () => "Bản ghi không tồn tại, đã bị xoá hoặc bạn không có quyền xem.",
+  },
   "connections.homeIntegrations": {
     home: "Tích hợp đang chạy của tổ chức nhà (Pancake, Viettel Post, Meta, SePay…) giữ nguyên đường cũ và credential ở máy chủ — màn hình này chỉ NÓI RA chúng, không đổi được và không hiện bí mật nào.",
     other: () => "Dòng «Chỉ tổ chức nhà» là tích hợp dùng chung của nền tảng, chưa mở cho tổ chức này — màn hình chỉ nói ra chúng, không đổi được và không hiện bí mật nào.",

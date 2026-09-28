@@ -25,7 +25,7 @@ import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
 import { resolvePeriod } from "@/lib/search-params";
-import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
+import { APPROVAL_GROUP_LABEL, APPROVALS_HREF, type ApprovalGroup } from "@/lib/constants/approval";
 import { approvalFailureTimes, listApprovalRequests } from "@/lib/queries/approvals";
 import { approvalExecutionNote } from "@/lib/approvals/execution-note";
 import { formatDateTime, formatVND } from "@/lib/format";
@@ -913,14 +913,15 @@ export async function adaptApprovals(now: Date, includeClosed = false, closedSin
       snoozedUntil: null,
       businessEntity: "NONE",
       businessEntityId: r.entityId || r.id,
-      sourceUrl: "/alerts",
+      // Trang Duyệt của LÕI — mở được ở mọi tổ chức (trang Cần xử lý cần module «Cần xử lý» ⇒ «Đơn hàng»).
+      sourceUrl: APPROVALS_HREF,
       money: MONEY_UNKNOWN,
       tags: [r.group],
       evidence: { source: "Phê duyệt hai bước", detail: `${nhom} · ${r.amount === null ? "chưa rõ số tiền" : formatVND(r.amount)} · ${r.action}${nhacDu ? ` · ${nhacDu}` : ""}` },
       blockedReason: "",
       creationSource: "AUTO" as WorkItem["creationSource"],
       actions: actionsOf("APPROVAL"),
-      recommendedAction: "Mở trang Cần xử lý, đọc vì sao việc cần người thứ hai, rồi Duyệt hoặc Từ chối (từ chối phải nêu lý do)",
+      recommendedAction: "Mở trang Duyệt, đọc vì sao việc cần người thứ hai, rồi Duyệt hoặc Từ chối (từ chối phải nêu lý do)",
     };
   });
 }

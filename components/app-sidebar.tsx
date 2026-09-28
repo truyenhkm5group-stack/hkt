@@ -46,6 +46,7 @@ import {
   Send,
   ShieldCheck,
   Shirt,
+  Stamp,
   Tags,
   ShoppingBag,
   TrendingUp,
@@ -57,9 +58,9 @@ import {
   Workflow,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
-import { hasPermission } from "@/lib/auth/permissions";
-import { hrefVisible } from "@/lib/platform-ui/module-visibility";
-import { MODULE_GROUPS, MODULE_TITLES, ZONE_HINT, ZONE_LABEL, ZONE_ORDER, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
+import { hasPermission, homeOrgPermissionDenied } from "@/lib/auth/permissions";
+import { hrefVisible, moduleOn, modulesOn } from "@/lib/platform-ui/module-visibility";
+import { MODULE_GROUPS, MODULE_TITLES, resolveNavZone, ZONE_HINT, ZONE_LABEL, ZONE_ORDER, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
 import { DYNAMIC_PAGE_PREFIX, DYNAMIC_PAGES_HINT, DYNAMIC_PAGES_LABEL, DYNAMIC_PAGES_ZONE, type DynamicNavItem } from "@/lib/pages/nav";
 
 /**
@@ -84,6 +85,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/": LayoutDashboard,
   "/alerts": BellRing,
   "/work": ListTodo,
+  "/approvals": Stamp,
   "/cs": Headset,
   "/orders": ShoppingBag,
   "/landing": FileSpreadsheet,
@@ -160,6 +162,11 @@ export type NavUserLike = {
   permissions: string[];
   modules?: readonly string[];
   /**
+   * Tổ chức của phiên — chỉ cần `isHome`: khoá chỉ-nhà (`platform:operate`) KHÔNG hiện mục ở tổ chức khác, kể cả
+   * với ADMIN (cùng luật `homeOrgPermissionDenied` với `can()`). Vắng mặt ⇒ coi như KHÔNG phải nhà (hỏng về phía hẹp).
+   */
+  organization?: { isHome: boolean } | null;
+  /**
    * Mục menu ĐỘNG (Phase 4 · G12): trang tuỳ biến đã xuất bản, bố cục nạp ở máy chủ và ĐÃ lọc theo người xem
    * (`lib/pages/nav.ts`). Vắng mặt ⇒ menu cũ nguyên vẹn. Vẫn qua `moduleAllows` ở đây như mọi mục khác.
    */
@@ -171,12 +178,17 @@ export type NavZone = ModuleZone | typeof DYNAMIC_PAGES_ZONE;
 export type NavGroupItem = { href: string; label: string };
 export type NavGroup = { zone: NavZone; label: string; hint: string; items: NavGroupItem[] };
 
-/** Mục động của người này theo vùng (đã qua cổng module như mục tĩnh). */
+/** Nhóm thật của một vùng khai với người này: vùng mang tên một module TẮT dời sang nhóm dự phòng (`ZONE_MODULE`). */
+function zoneFor(zone: ModuleZone, user: Pick<NavUserLike, "modules">): ModuleZone {
+  return resolveNavZone(zone, (m) => moduleOn(user, m));
+}
+
+/** Mục động của người này theo vùng (đã qua cổng module như mục tĩnh; vùng mang tên module tắt cũng dời như mục tĩnh). */
 function dynamicByZone(user: NavUserLike): Map<NavZone, NavGroupItem[]> {
   const out = new Map<NavZone, NavGroupItem[]>();
   for (const d of user.dynamicPages ?? []) {
     if (!moduleAllows(d.href, user)) continue;
-    const zone: NavZone = d.zone && (ZONE_ORDER as readonly string[]).includes(d.zone) ? d.zone : DYNAMIC_PAGES_ZONE;
+    const zone: NavZone = d.zone && (ZONE_ORDER as readonly string[]).includes(d.zone) ? zoneFor(d.zone as ModuleZone, user) : DYNAMIC_PAGES_ZONE;
     out.set(zone, [...(out.get(zone) ?? []), { href: d.href, label: d.label }]);
   }
   return out;
@@ -195,12 +207,20 @@ export function moduleAllows(href: string, user: Pick<NavUserLike, "modules">): 
   return hrefVisible(user, href);
 }
 
-/** Một mục có hiện với người này không. Module tắt ⇒ ẩn (kể cả ADMIN); rồi ADMIN thấy hết; `anyOf` thì đủ MỘT quyền là hiện. */
+/**
+ * Một mục có hiện với người này không. Module tắt ⇒ ẩn (kể cả ADMIN); khoá chỉ-nhà ở tổ chức khác ⇒ bỏ (kể cả ADMIN —
+ * cùng cổng với `can()` và với trang, vd `/platform` gác bằng `platformOperatorDenial`); rồi ADMIN thấy hết; `anyOf`
+ * thì đủ MỘT quyền còn hiệu lực là hiện.
+ */
 export function visible(item: ModuleSpec, user: NavUserLike): boolean {
   if (!moduleAllows(item.href, user)) return false;
+  // Module NGUỒN SỐ LIỆU ngoài module sở hữu đường dẫn (vd `/cod` cần «Vận chuyển») — tắt ⇒ ẩn, kể cả ADMIN.
+  if (item.requires && !modulesOn(user, item.requires)) return false;
+  const keys = item.anyOf ?? (item.permission ? [item.permission] : []);
+  const usable = keys.filter((p) => !homeOrgPermissionDenied(user, p));
+  if (keys.length > 0 && usable.length === 0) return false;
   if (user.role === "ADMIN") return true;
-  if (item.anyOf) return item.anyOf.some((p) => hasPermission(user.permissions, p));
-  return !item.permission || hasPermission(user.permissions, item.permission);
+  return keys.length === 0 || usable.some((p) => hasPermission(user.permissions, p));
 }
 
 /**
@@ -227,9 +247,20 @@ export function allowedNavItems(user: NavUserLike): { href: string; label: strin
  */
 export function visibleGroups(user: NavUserLike): NavGroup[] {
   const dyn = dynamicByZone(user);
+  // Nhóm mang tên một module TẮT (`ZONE_MODULE`) không hiện; mục còn hiện được của nó DỜI sang nhóm dự phòng, đứng SAU
+  // mục vốn có của nhóm ấy — không mất lối vào trang, chỉ mất cái nhãn sai.
+  const native = new Map<ModuleZone, NavGroupItem[]>();
+  const moved = new Map<ModuleZone, NavGroupItem[]>();
+  for (const zone of ZONE_ORDER) {
+    const items = (MODULE_GROUPS.find((g) => g.zone === zone)?.items ?? []).filter((item) => visible(item, user)).map((i) => ({ href: i.href, label: i.label }));
+    if (items.length === 0) continue;
+    const target = zoneFor(zone, user);
+    const into = target === zone ? native : moved;
+    into.set(target, [...(into.get(target) ?? []), ...items]);
+  }
   const groups: NavGroup[] = ZONE_ORDER.map((zone) => {
     const base = MODULE_GROUPS.find((g) => g.zone === zone);
-    const items: NavGroupItem[] = [...(base?.items.filter((item) => visible(item, user)) ?? []), ...(dyn.get(zone) ?? [])];
+    const items: NavGroupItem[] = [...(native.get(zone) ?? []), ...(moved.get(zone) ?? []), ...(dyn.get(zone) ?? [])];
     return { zone, label: base?.label ?? ZONE_LABEL[zone], hint: base?.hint ?? ZONE_HINT[zone], items };
   });
   groups.push({ zone: DYNAMIC_PAGES_ZONE, label: DYNAMIC_PAGES_LABEL, hint: DYNAMIC_PAGES_HINT, items: dyn.get(DYNAMIC_PAGES_ZONE) ?? [] });

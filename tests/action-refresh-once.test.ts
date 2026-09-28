@@ -212,7 +212,7 @@ function phu(src: string, trang: string): boolean {
 /** Module action → trang mà component (đã bỏ refresh) đứng trên. */
 const PHU: [string, string[]][] = [
   ["alerts.ts", ["/alerts", "/ads", "/orders", "/shipments"]],
-  ["approvals.ts", ["/alerts"]],
+  ["approvals.ts", ["/alerts", "/approvals"]],
   ["marketing-alerts.ts", ["/alerts"]],
   ["bank.ts", ["/bank", "/finance-ops"]],
   ["workshop-ledger.ts", ["/bank", "/inventory/workshop", "/inventory/workshop/[id]"]],

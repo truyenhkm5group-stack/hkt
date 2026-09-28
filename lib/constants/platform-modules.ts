@@ -102,9 +102,9 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     core: true,
     dependsOn: [],
     features: [],
-    routes: ["/", "/cockpit", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata", "/api/branding"],
+    routes: ["/", "/cockpit", "/approvals", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata", "/api/branding"],
     permissions: ["dashboard:view", "audit:view", "users:manage", "settings:manage", "approvals:decide", ...PLATFORM_PERMISSION_KEYS],
-    why: "Thứ mọi tổ chức cần để đăng nhập, phân quyền và quản trị chính mình. Không tắt được: tắt nó là khoá người quản trị khỏi chính màn hình bật lại nó. `/cockpit` ở đây: nó là tầng TỔNG HỢP của chủ (gác `dashboard:view`) đọc nhiều miền, không phải một màn hình Tài chính. `/integrations` KHÔNG ở đây — trang ấy in credential của tổ chức nhà (xem module «Kết nối dữ liệu»). `/api/metadata` (tải tệp của field tuỳ biến) ở đây vì một tệp thuộc ĐỐI TƯỢNG của bất kỳ module nào — route tự kiểm module của đối tượng sở hữu tệp và trả 403 MODULE_DISABLED khi nó tắt.",
+    why: "Thứ mọi tổ chức cần để đăng nhập, phân quyền và quản trị chính mình. Không tắt được: tắt nó là khoá người quản trị khỏi chính màn hình bật lại nó. `/cockpit` ở đây: nó là tầng TỔNG HỢP của chủ (gác `dashboard:view`) đọc nhiều miền, không phải một màn hình Tài chính. `/integrations` KHÔNG ở đây — trang ấy in credential của tổ chức nhà (xem module «Kết nối dữ liệu»). `/approvals` ở đây: hàng đợi DUYỆT HAI BƯỚC (khoá `approvals:decide` của lõi) — luật tự động có cửa duyệt chạy ở mọi tổ chức, nên màn duyệt không được phụ thuộc «Cần xử lý» (module ấy cần «Đơn hàng»; tổ chức dịch vụ không có thì lượt chạy treo «chờ duyệt» mãi). `/api/metadata` (tải tệp của field tuỳ biến) ở đây vì một tệp thuộc ĐỐI TƯỢNG của bất kỳ module nào — route tự kiểm module của đối tượng sở hữu tệp và trả 403 MODULE_DISABLED khi nó tắt.",
   },
   {
     key: "work",

@@ -58,7 +58,7 @@ import { advanceEventCursor, ensureEventCursor, RECORDED_AT_TEXT, type CursorPos
 import { evaluateCondition } from "@/lib/workflow/evaluate";
 import { CUSTOM_STATUS_EVENT, getRule, machineEmailOf, toRule, triggerObjectKey } from "@/lib/workflow/rules";
 import { leaseExpiredSql, staleRunsOn, type StaleRun } from "@/lib/workflow/stale";
-import { eventSubjectFields, isSubjectObjectKey, recordSubjectFields, subjectLabel, subjectRefOf, type EventLike, type SubjectRef } from "@/lib/workflow/subject";
+import { approvalAmountOf, currencyFieldRefs, eventSubjectFields, isSubjectObjectKey, recordSubjectFields, subjectLabel, subjectRefOf, type EventLike, type SubjectRef } from "@/lib/workflow/subject";
 import {
   WORKFLOW_LEASE_MINUTES,
   WORKFLOW_MAX_ATTEMPTS,
@@ -208,6 +208,9 @@ async function processRule(db: Db, rule: WorkflowRule, ev: EventRow, subject: Su
   }
   const machine = machineEmailOf(rule.key);
   if (rule.gate) {
+    // Số tiền của yêu cầu duyệt: field tiền mà điều kiện vừa xét (hoặc field tiền đầu tiên) — cùng ảnh chụp subject.
+    // Không có ⇒ `null` = "chưa rõ số tiền" (luật 42), không bao giờ 0 giả.
+    const amount = subject.ref ? approvalAmountOf(rule.conditions, subject.fields, await currencyFieldRefs(subject.ref.objectKey)) : null;
     const created = await db.transaction(async (tx) => {
       const runId = await insertRun({ status: "WAITING_APPROVAL", steps: planSteps(rule, rule.gate, subject.label) }, tx);
       if (!runId) return null;
@@ -217,7 +220,7 @@ async function processRule(db: Db, rule: WorkflowRule, ev: EventRow, subject: Su
         .insert(schema.approvalRequests)
         .values({
           ...input,
-          amount: null,
+          amount,
           summary: `Luật "${rule.name}" xin chạy: ${rule.gate!.reason} · ${subject.label}`.slice(0, 500),
           payload,
           requestedBy: null,

@@ -403,6 +403,21 @@ export function hasPermission(perms: readonly string[] | Set<string> | null | un
   return perms instanceof Set ? perms.has(permission) : perms.includes(permission);
 }
 
+/* ═══════════ KHOÁ CHỈ CÓ HIỆU LỰC Ở TỔ CHỨC NHÀ ═══════════
+ *
+ * `platform:operate` nhìn xuyên ranh giới giữa các tổ chức, nên ADMIN của tổ chức khác KHÔNG BAO GIỜ có nó — kể cả khi
+ * ADMIN "có mọi quyền". Luật ấy trước đây chỉ sống trong `can()` (máy chủ); menu lọc theo `role === "ADMIN"` nên quản
+ * trị tổ chức khác thấy mục «Vận hành nền tảng», bấm vào bị đẩy về `/` không một lời (bài chấp nhận Phase 12, lỗi #2).
+ * Nay MỘT hàm thuần, client-safe: `can()` (lib/auth/session.ts) và menu (`components/app-sidebar.tsx::visible`) cùng gọi.
+ * Phiên không mang tổ chức ⇒ từ chối — hỏng về phía HẸP (luật 31).
+ */
+export const PLATFORM_OPERATE_PERMISSION = "platform:operate";
+export const HOME_ORG_ONLY_PERMISSIONS: readonly string[] = [PLATFORM_OPERATE_PERMISSION];
+
+export function homeOrgPermissionDenied(subject: { organization?: { isHome: boolean } | null }, permission: string): boolean {
+  return HOME_ORG_ONLY_PERMISSIONS.includes(permission) && subject.organization?.isHome !== true;
+}
+
 /* ═══════════ Company OS · Agent G · QUYỀN DUYỆT HAI BƯỚC GIỮ NGUYÊN TẬP NGƯỜI CŨ ═══════════
  *
  * Trước khoá `approvals:decide`, `lib/actions/approvals.ts` tự viết điều kiện:

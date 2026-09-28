@@ -158,7 +158,7 @@ export function testCompanyOsCockpitPure() {
   assert.deepEqual(ap.map((i) => i.sourceKey), ["approval:a1", "approval:a4"], "yêu cầu do CHÍNH người xem xin và yêu cầu đã quyết KHÔNG hiện");
   assert.equal(ap[0].what, "Duyệt · Sửa khoản chi a1");
   assert.match(ap[0].why, /ke@t\.local xin/);
-  assert.equal(ap[0].action.href, "/alerts");
+  assert.equal(ap[0].action.href, "/approvals");
   assert.equal(ap[0].impact.amountVnd, 2_500_000);
   assert.equal(ap[1].impact.amountVnd, null, "số tiền chưa biết ⇒ tác động null");
   assert.equal(impactText(ap[1].impact.amountVnd), "—", "tác động chưa biết in —, không in 0 ₫");
