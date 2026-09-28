@@ -80,13 +80,44 @@ export type ResolvedAssumptions = ProfitAssumptions & {
 };
 
 /**
+ * CƯỚC BÌNH QUÂN 90 NGÀY TỪ DỮ LIỆU — phần ĐẮT của `resolveAssumptions`, tách ra để nhớ đệm.
+ *
+ * Đo production 29/09/2026 (EXPLAIN ANALYZE): **5.339 ms, trong đó biên dịch JIT 5.203 ms** (393
+ * hàm) — câu mang `ORDER_OUTCOME` trên cả 90 ngày đơn, phép tính thật chỉ ~140 ms. Và nó KHÔNG có
+ * đệm, trong khi `/ads` gọi nó từ ba khối song song (bảng quyết định · trong ngày · hiệu quả
+ * marketer), cộng Lương, Báo cáo LN danh nghĩa, tỷ lệ GTC theo mã: mỗi khối trả lại đủ 5 giây.
+ *
+ * Nên: tắt JIT (`chayKhongJit`, giao dịch RIÊNG của chính câu này — hàm gọi nó có thể đang ở trong
+ * `Promise.all`, không ôm vào giao dịch của ai) và nhớ 120 giây. Chỉ nhớ phần DỮ LIỆU: giả định chủ
+ * shop gõ trong `settings` vẫn đọc mới mỗi lần, nên sửa giả định có hiệu lực ngay. Bình quân 90 ngày
+ * đổi chậm tới mức 2 phút không làm lệch một đồng nào đáng kể.
+ */
+function shipFeeFromData() {
+  return memo("profit-assumptions:ship-fee-90d", 120_000, async () => {
+    const db = await getDb();
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    const [row] = await chayKhongJit(db, (tx) =>
+      tx
+        .select({
+          delivered: sql<number>`avg(nullif(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}), 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+          returnFee: sql<number>`avg(nullif(${o.returnFee}, 0)) filter (where ${IS_RETURNED})`,
+          returnFeeSample: sql<number>`count(*) filter (where ${IS_RETURNED} and ${o.returnFee} > 0)`,
+        })
+        .from(o)
+        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+        .where(gte(o.insertedAt, since)),
+    );
+    return row;
+  });
+}
+
+/**
  * Đọc giả định + tự tính cước từ dữ liệu 90 ngày cho ô để trống:
  *  - cước gửi/đơn: bình quân cước ĐVVC của đơn đã giao (Pancake partner_fee / shipments.shipping_fee), không có thì 17.000đ;
  *  - cước đơn hoàn: cước gửi + phí hoàn về bình quân của các đơn hoàn CÓ ghi phí hoàn; Pancake/Viettel Post webhook không đẩy phí hoàn nên
  *    thường bằng 0 → giả định phí hoàn về = cước gửi (đơn hoàn tốn gấp đôi). Nhập tay ở "Sửa giả định" nếu hợp đồng VTP khác.
  */
 export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
-  const db = await getDb();
   const saved = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);
   let shipFeeDeliveredUsed = Math.max(0, Number(saved.shipFeeDelivered) || 0);
   let shipFeeReturnedUsed = Math.max(0, Number(saved.shipFeeReturned) || 0);
@@ -94,16 +125,7 @@ export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
   let returnFeeFromData = 0;
   let returnFeeSample = 0;
   if (!shipFeeDeliveredUsed || !shipFeeReturnedUsed) {
-    const since = new Date(Date.now() - 90 * 86_400_000);
-    const [row] = await db
-      .select({
-        delivered: sql<number>`avg(nullif(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}), 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        returnFee: sql<number>`avg(nullif(${o.returnFee}, 0)) filter (where ${IS_RETURNED})`,
-        returnFeeSample: sql<number>`count(*) filter (where ${IS_RETURNED} and ${o.returnFee} > 0)`,
-      })
-      .from(o)
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(gte(o.insertedAt, since));
+    const row = await shipFeeFromData();
     const d = Math.round(Number(row?.delivered ?? 0));
     returnFeeFromData = Math.round(Number(row?.returnFee ?? 0));
     returnFeeSample = Number(row?.returnFeeSample ?? 0);

@@ -149,6 +149,45 @@ async function main() {
   await doKhoi("/ads · độ phủ quy kết", () => getAdsAttributionAudit(THANG));
   await doKhoi("/ads · hiệu quả theo marketer (khối cuối trang)", () => getAdsPerformance(THANG));
 
+  await doKhoi("/ads · tổng quan chi tiêu (adSummary)", async () => {
+    const { adSummary } = await import("@/lib/queries/expenses");
+    return adSummary(THANG);
+  });
+
+  /*
+    ═══════════ /reports/returns: TỪNG LỜI GỌI, ĐÚNG THAM SỐ MẶC ĐỊNH CỦA TRANG ═══════════
+
+    Smoke 28/09/2026: 6,6 s. Mọi câu mang ORDER_OUTCOME của trang này đã chạy không JIT (đo bằng bộ
+    bắt câu ở tầng driver), nên phải đo từng lời gọi mới biết thời gian nằm ở đâu. Kỳ 90 ngày, mốc
+    SHIPPED, không lọc giá trị — đúng như `parseListParams(..., defaultPeriod: "90d")` của trang.
+    Hai lượt `Promise.all` của trang chạy tuần tự nhau, nên in cả tổng từng lượt.
+  */
+  {
+    const rr = await import("@/lib/queries/return-rate");
+    const { getReturnReasonReport } = await import("@/lib/queries/return-reason-report");
+    const { getReturnIntelligence } = await import("@/lib/queries/return-intelligence");
+    const { logisticsPerformance } = await import("@/lib/queries/logistics");
+    const { NO_ORDER_VALUE_FILTER } = await import("@/lib/constants/order-value");
+    const D90 = resolvePeriod({}, "90d");
+    const v = NO_ORDER_VALUE_FILTER;
+    const doDai = (D90.to?.getTime() ?? 0) - (D90.from?.getTime() ?? 0);
+    const truoc = D90.from ? { from: new Date(D90.from.getTime() - doDai - 1), to: new Date(D90.from.getTime() - 1) } : null;
+    await doKhoi("/reports/returns · theo mẫu mã", () => rr.getReturnRateByVariant({ period: D90, basis: "SHIPPED", value: v, q: "", minShipped: 1, sort: "successRate", dir: "asc", page: 1, pageSize: 50 }));
+    await doKhoi("/reports/returns · tổng hợp", () => rr.getReturnRateSummary(D90, "", "SHIPPED", v));
+    await doKhoi("/reports/returns · theo nguồn đơn", () => rr.getReturnRateBySource(D90, "", v));
+    let lyDo: Awaited<ReturnType<typeof getReturnReasonReport>> | null = null;
+    await doKhoi("/reports/returns · lý do hoàn", async () => {
+      lyDo = await getReturnReasonReport({ period: D90, basis: "SHIPPED", codes: undefined, marketerIds: undefined, value: v });
+      return lyDo;
+    });
+    await doKhoi("/reports/returns · ĐVVC", () => logisticsPerformance(D90, v));
+    if (lyDo) {
+      const baoCao = lyDo;
+      await doKhoi("/reports/returns · tầng quyết định (intelligence)", () => getReturnIntelligence({ period: D90, previous: truoc, basis: "SHIPPED", codes: undefined, marketerIds: undefined, trendGrain: "DAY", reasonReport: baoCao, value: v }));
+    }
+    await doKhoi("/reports/returns · theo bậc giá trị đơn", () => rr.getReturnRateByTier(D90, "", "SHIPPED"));
+  }
+
   results.sort((a, b) => b.ms - a.ms);
   const total = results.reduce((t, r) => t + r.ms, 0);
   kichThuoc.sort((a, b) => b.kb - a.kb);
