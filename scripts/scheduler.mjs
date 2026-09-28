@@ -2,6 +2,7 @@
  * Bộ lập lịch đồng bộ (chạy như một tiến trình riêng, ví dụ service "scheduler" trong docker-compose).
  * Gọi các API /api/sync/<job> của ERP theo chu kỳ. Không cần build TypeScript.
  */
+import { nextRunAt } from "./scheduler-clock.mjs";
 import { fanOutEnabled, fanOutUrls, FANOUT_JOBS } from "./scheduler-fanout.mjs";
 
 const BASE = (process.env.ERP_INTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -330,13 +331,20 @@ async function main() {
   const ready = await waitForApp();
   if (!ready) log("ERP chưa phản hồi, vẫn tiếp tục thử theo lịch.");
 
+  /*
+    THEO ĐỒNG HỒ (scripts/scheduler-clock.mjs): mỗi job chạy ở các mốc cố định — không phụ thuộc lúc
+    bộ lập lịch khởi động, nên deploy dày không còn nuốt mất job offset lớn. Lượt kế tiếp tính từ MỐC
+    vừa nhắm (không từ lúc timer thật sự nổ): timer nổ sớm vài mili-giây cũng không chạy hai lần.
+  */
   for (const item of JOBS) {
-    setTimeout(() => {
-      trigger(item.job, item.query);
-      setInterval(() => trigger(item.job, item.query), item.every * 60_000);
-    }, item.offset * 60_000);
+    const hen = (moc) =>
+      setTimeout(() => {
+        trigger(item.job, item.query);
+        hen(nextRunAt(Math.max(Date.now(), moc), item.every, item.offset));
+      }, Math.max(0, moc - Date.now()));
+    hen(nextRunAt(Date.now(), item.every, item.offset));
   }
-  log("Lịch chạy:", JOBS.map((j) => `${j.job}/${j.every}p`).join(", "));
+  log("Lịch chạy (theo đồng hồ):", JOBS.map((j) => `${j.job}/${j.every}p`).join(", "));
   log(FANOUT ? `Fan-out tổ chức khác nhà: BẬT cho ${FANOUT_JOBS.join(", ")}` : "Fan-out tổ chức khác nhà: TẮT (SCHEDULER_FANOUT khác \"1\")");
 
   const firedToday = new Set();
