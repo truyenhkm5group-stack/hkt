@@ -2,11 +2,18 @@
  * Dò xem API Pancake có trả lịch sử mua hàng theo SĐT trên toàn hệ thống (số GTC / hoàn như Pancake hiển thị cạnh SĐT) không.
  * In mã HTTP + các khoá / đoạn đầu phản hồi, KHÔNG in api_key / token.
  *   npx tsx scripts/phone-probe.ts 0788281828
+ *   npx tsx scripts/phone-probe.ts order:4063     ← lấy SĐT từ chính đơn đó trên Pancake (SĐT không đi qua ô "arg")
+ *
+ * 28/09/2026: web POS hiện cột "Tỷ lệ hoàn" (reports_by_phone → order_fail / (order_success + order_fail))
+ * và "Cảnh báo SĐT" (total_warning · warning_phone_numbers) — đọc từ mã web POS. Đường POS gọi cho
+ * một SĐT là `orders/bad_report_info?phone_number=`. Phần "POS thật" bên dưới hỏi đúng các đường đó.
  */
 import "dotenv/config";
 import { env } from "@/lib/env";
 
-const phone = (process.argv[2] ?? "").replace(/\D/g, "");
+const arg = (process.argv[2] ?? "").trim();
+const orderArg = arg.startsWith("order:") ? arg.slice(6).trim() : "";
+let phone = orderArg ? "" : arg.replace(/\D/g, "");
 const key = env.pancake.apiKey;
 const shop = env.pancake.shopId;
 const base = env.pancake.baseUrl.replace(/\/$/, "");
@@ -34,10 +41,53 @@ async function probe(name: string, url: string) {
   }
 }
 
+/** Các khoá liên quan tới lịch sử SĐT có mặt trong một bản ghi đơn — để biết đường nào trả chúng. */
+const REPORT_KEYS = ["reports_by_phone", "total_warning", "warning_phone_numbers", "bad_report_info"];
+function reportKeys(o: unknown): string {
+  if (!o || typeof o !== "object") return "(không phải object)";
+  const r = o as Record<string, unknown>;
+  return REPORT_KEYS.map((k) => `${k}=${k in r ? JSON.stringify(r[k]).slice(0, 300) : "∅"}`).join(" · ");
+}
+
+async function getJson(url: string): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  const text = await res.text();
+  try {
+    return { status: res.status, body: JSON.parse(text) };
+  } catch {
+    return { status: res.status, body: mask(text).slice(0, 200) };
+  }
+}
+
+async function posThat(q: string) {
+  console.log("── POS thật: các đường web POS dùng cho Tỷ lệ hoàn / Cảnh báo SĐT ──");
+  const bad = await getJson(`${base}/shops/${shop}/orders/bad_report_info?${q}&phone_number=${phone}`);
+  console.log(`- orders/bad_report_info: HTTP ${bad.status} · ${mask(JSON.stringify(bad.body)).slice(0, 1500)}`);
+  if (orderArg) {
+    const one = await getJson(`${base}/shops/${shop}/orders/${encodeURIComponent(orderArg)}?${q}`);
+    const d = (one.body as { data?: unknown })?.data;
+    console.log(`- orders/<id>: HTTP ${one.status} · ${reportKeys(d)}`);
+  }
+  const list = await getJson(`${base}/shops/${shop}/orders?${q}&page_size=1&search=${phone}`);
+  console.log(`- orders?search: HTTP ${list.status} · ${reportKeys((list.body as { data?: unknown[] })?.data?.[0])}`);
+  for (const f of ["reports_by_phone,total_warning,warning_phone_numbers", "reports_by_phone"]) {
+    const lf = await getJson(`${base}/shops/${shop}/orders?${q}&page_size=1&search=${phone}&fields=${encodeURIComponent(f)}`);
+    console.log(`- orders?search&fields=${f}: HTTP ${lf.status} · ${reportKeys((lf.body as { data?: unknown[] })?.data?.[0])}`);
+  }
+}
+
 async function main() {
-  if (!phone) throw new Error("Nhập SĐT: npx tsx scripts/phone-probe.ts 09xxxxxxxx");
   if (!key) throw new Error("Chưa có PANCAKE_API_KEY");
   const q = `api_key=${key}`;
+  if (orderArg) {
+    const o = await getJson(`${base}/shops/${shop}/orders/${encodeURIComponent(orderArg)}?${q}`);
+    const d = ((o.body as { data?: Record<string, unknown> })?.data ?? {}) as Record<string, unknown>;
+    phone = String(d.bill_phone_number ?? (d.shipping_address as Record<string, unknown> | undefined)?.phone_number ?? "").replace(/\D/g, "");
+    console.log(`đơn ${orderArg}: HTTP ${o.status} · ${phone ? `SĐT ${phone.length} chữ số (không in)` : "KHÔNG đọc được SĐT"}`);
+  }
+  if (!phone) throw new Error("Nhập SĐT hoặc order:<mã đơn>: npx tsx scripts/phone-probe.ts 09xxxxxxxx");
+  await posThat(q);
+  console.log("── Các đường đoán tên (lượt dò cũ) ──");
   const c = [
     ["customers?search", `${base}/shops/${shop}/customers?${q}&page_size=2&search=${phone}`],
     ["customers?phone_number", `${base}/shops/${shop}/customers?${q}&page_size=2&phone_number=${phone}`],
