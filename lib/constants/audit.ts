@@ -51,6 +51,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "return.received.undo": "Huỷ xác nhận nhận hàng hoàn",
   "return.received.bulk": "Xác nhận nhận hàng hoàn hàng loạt",
   "care.record": "CSKH ghi nhận việc đã làm",
+  "care.pancake-refresh": "Hỏi lại Pancake cho ca chờ quyết định hoàn",
   "care.status": "Đổi trạng thái care nội bộ",
   "care.owner": "Giao kiện cho người care",
   "care.followUp": "Hẹn theo dõi lại kiện",

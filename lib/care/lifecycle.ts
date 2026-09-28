@@ -4,7 +4,7 @@ import { careEntryFor, CARE_ENTRY_SUBSTATES, CARE_TERMINAL_STAGES, LEFT_WAREHOUS
 import { settleCarrierRequests } from "@/lib/care/carrier-requests";
 import { SUBSTATE_IMPLIES_PICKED_UP, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareOutcome } from "@/lib/constants/care-outcome";
-import { returnApproved } from "@/lib/constants/care-return-approval";
+import { PANCAKE_RELAY_APPROVED_STATUSES, relayApprovedAfterProposal, returnApproved } from "@/lib/constants/care-return-approval";
 import { CARE_TERMINAL_STATUSES, type CareStatus } from "@/lib/constants/care";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { rowsOf } from "@/lib/sql-rows";
@@ -585,6 +585,12 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
       vtpStatusDate: schema.shipments.vtpStatusDate,
       daRoiKho: sql<boolean>`(${schema.shipments.pickedUpAt} is not null or exists (select 1 from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.normalized_stage in ${LEFT_WAREHOUSE_EVENT_STAGES}))`,
       roiKhoTuLuc: sql<Date | null>`least(${schema.shipments.pickedUpAt}, (select min(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.normalized_stage in ${LEFT_WAREHOUSE_EVENT_STAGES}))`,
+      // Lời "đã duyệt hoàn / đã chuyển hoàn" do PANCAKE chuyển tiếp (webhook VTP không bao giờ gửi 515).
+      // Chỉ đọc để đóng ca — xem `PANCAKE_RELAY_APPROVED_STATUSES`.
+      pancakeDuyetLuc: sql<Date | null>`(select max(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.source = 'PANCAKE' and e.status in (${sql.join(
+        PANCAKE_RELAY_APPROVED_STATUSES.map((s) => sql`${s}`),
+        sql`, `,
+      )}))`,
     })
     .from(schema.shipmentCare)
     .innerJoin(schema.shipments, eq(schema.shipments.id, schema.shipmentCare.shipmentId))
@@ -627,6 +633,28 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
     */
     if (stage === "RETURNING" && returnApproved({ code: r.vtpStatus, text: r.vtpStatusName })) {
       const res = await chotKetQua(db, r.care, { outcome: "RESCUE_FAILED", logistics: "FAILED" }, { substate, occurredAt: at, statusName: r.vtpStatusName, source: "RECONCILE" });
+      if (res.resolved) out.settled += 1;
+      continue;
+    }
+    /*
+      ═══ CÙNG LỜI DUYỆT HOÀN ẤY, NHƯNG ĐẾN QUA PANCAKE ═══
+
+      Webhook VTP không bao giờ gửi 515 (đo 28/09/2026: 0 dòng trên toàn sổ), nên ảnh chụp kiện đứng ở
+      505 "đề nghị hoàn" cho tới khi hàng lên đường về (502) — trung vị 7,7 giờ, p90 63 giờ sau khi
+      VTP đã duyệt. Pancake chuyển tiếp nguyên văn "Bưu cục phát duyệt hoàn": dòng ấy MỚI HƠN lần đề
+      nghị hoàn mà ảnh chụp đang mang ⇒ ĐVVC đã duyệt, đội không còn cửa can thiệp. Chỉ đóng CA; trạng
+      thái vận đơn, kết quả đơn, tiền và tồn kho vẫn chờ chứng từ VTP như cũ.
+    */
+    // Tới đây ảnh chụp ở RETURNING mà CHƯA nói "đã duyệt" (vế trên đã bắt) — tức là ĐỀ NGHỊ hoàn: mã 505,
+    // HOẶC dòng tệp "Chờ xử lý" không mang mã (thắng webhook vì tới sau vài giây — đúng như PKE1529361891).
+    const pancakeDuyetLuc = r.pancakeDuyetLuc ? new Date(r.pancakeDuyetLuc) : null;
+    if (stage === "RETURNING" && pancakeDuyetLuc && relayApprovedAfterProposal({ relayApprovedAt: pancakeDuyetLuc, proposalAt: r.vtpStatusDate })) {
+      const res = await chotKetQua(
+        db,
+        r.care,
+        { outcome: "RESCUE_FAILED", logistics: "FAILED" },
+        { substate, occurredAt: pancakeDuyetLuc, statusName: "Bưu cục phát duyệt hoàn (Pancake chuyển tiếp)", source: "RECONCILE" },
+      );
       if (res.resolved) out.settled += 1;
       continue;
     }

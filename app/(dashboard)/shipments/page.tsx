@@ -7,6 +7,7 @@ import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
 import { ReconcilePanel } from "@/app/(dashboard)/shipments/reconcile-panel";
 import { CaseOutcomeReport } from "@/app/(dashboard)/shipments/case-outcome-report";
 import { AutoAssignButton } from "@/app/(dashboard)/work/today/panels";
+import { PancakeRefreshButton } from "@/app/(dashboard)/shipments/pancake-refresh-button";
 import { autoAssignOn } from "@/lib/constants/workforce";
 import { getStaffing } from "@/lib/queries/workforce";
 import { PERIOD_BASES, PERIOD_BASIS_LABEL, type PeriodBasis } from "@/lib/constants/care-effect";
@@ -109,6 +110,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         actions={
           <>
             {canAssign && wb ? <AutoAssignButton department="LOGISTICS" unassigned={wb.unassigned} label="Chia case chưa ai nhận" /> : null}
+            {!ngoaiCare && can(user, "shipments:manage") ? <PancakeRefreshButton /> : null}
             {canAssign ? (
               <span title="Bật/tắt ở Cấu hình → Sức chứa và phân việc, dòng Giao vận">
                 <NavLink href="/work/settings" className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline">
