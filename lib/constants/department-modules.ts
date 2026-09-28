@@ -466,6 +466,15 @@ export const NAV_MODULES = [
     permission: "settings:manage",
     why: "Sổ connector: tích hợp của tổ chức nhà hiện CHỈ ĐỌC (không bí mật nào), kết nối do chính tổ chức khai thì mã hoá, kiểm tra thật rồi mới bật. Bí mật kết nối là việc của quản trị, không của phòng nào.",
   },
+  // Mẫu cấu hình (Phase 7): cùng khoá `metadata:manage` — cài một mẫu dựng field, form, danh sách, trang và luật cho CẢ
+  // tổ chức; bước bật module / vai trò / luật còn đòi thêm quyền riêng của chúng (kế hoạch đánh dấu BỊ CHẶN nếu thiếu).
+  {
+    href: "/settings/templates",
+    label: "Mẫu cấu hình",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Cài một mẫu ngành (thời trang, TMĐT chung, bán sỉ…) theo Xem trước → Xác nhận: máy chỉ gọi các màn hình cấu hình sẵn có, luật sinh ở NHÁP. Nâng mẫu lên phiên bản mới không đè thứ tổ chức đã sửa.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

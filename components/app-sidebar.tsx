@@ -36,6 +36,7 @@ import {
   PlugZap,
   ReceiptText,
   Blocks,
+  LibraryBig,
   ServerCog,
   RotateCcw,
   Scissors,
@@ -132,6 +133,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/workflows": Workflow,
   "/settings/pages": LayoutTemplate,
   "/settings/connections": Plug,
+  "/settings/templates": LibraryBig,
   "/platform": ServerCog,
 };
 
