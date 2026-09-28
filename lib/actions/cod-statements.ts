@@ -114,6 +114,12 @@ export async function importVtpDataFiles(input: unknown): Promise<Result<{ files
     revalidate();
     return { ok: true, ...result };
   } catch (e) {
+    /*
+      Lỗi GIỮA CHỪNG vẫn làm mới: tệp gốc, danh sách vận đơn đã ghi xong trước khi một bảng kê hỏng.
+      Hộp "Bổ sung bảng kê" trên /cod đã thôi gọi router.refresh() lúc đóng — nhánh này là nơi duy
+      nhất trang biết phần đã vào sổ.
+    */
+    revalidate();
     return { error: readableError(e, "Không nhập được tệp") };
   }
 }

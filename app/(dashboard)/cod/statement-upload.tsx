@@ -2,7 +2,6 @@
 
 import { FileUp } from "lucide-react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { VtpImportForm } from "@/app/(dashboard)/import-vtp/import-form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,19 +16,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  */
 export function StatementUploadDialog({ label = "Bổ sung bảng kê thiếu" }: { label?: string }) {
   const [open, setOpen] = useState(false);
-  const router = useRouter();
+  /*
+    Đóng hộp KHÔNG router.refresh(): `importVtpDataFiles` đã `revalidatePath("/cod")` ngay trong lượt
+    nhập (cả nhánh lỗi giữa chừng), nên trang đã mang số mới từ lúc bấm Nhập. Gọi thêm lúc đóng là
+    một lượt dựng nguội thứ hai — và là lượt thừa hẳn khi người dùng chỉ mở ra rồi đóng.
+  */
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <FileUp className="size-4" /> {label}
       </Button>
-      <Dialog
-        open={open}
-        onOpenChange={(v) => {
-          setOpen(v);
-          if (!v) router.refresh();
-        }}
-      >
+      <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Bổ sung bảng kê Viettel Post</DialogTitle>

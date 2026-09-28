@@ -28,9 +28,16 @@ function useAction() {
   const run = (fn: () => Promise<Result>) =>
     start(async () => {
       const r = await fn();
-      if ("error" in r) toast.error(r.error);
-      else toast.success(r.message ?? "Xong");
-      router.refresh();
+      /*
+        Thành công: mọi action ở `lib/actions/payroll-autopilot.ts` đã `refresh()` (phủ /payroll/autopilot)
+        nên KHÔNG router.refresh() — gọi thêm là dựng trang hai lần. Lỗi thì VẪN làm mới, có lý do: nhánh
+        lỗi của action không revalidate mà nhiều khi chính là lúc trang đang cũ ("Dòng này không còn chờ
+        chuyển", "Kỳ đang ở trạng thái…" — người khác vừa làm), hoặc đã ghi dở (gửi phiếu hỏng giữa chừng).
+      */
+      if ("error" in r) {
+        toast.error(r.error);
+        router.refresh();
+      } else toast.success(r.message ?? "Xong");
     });
   return { pending, run };
 }
