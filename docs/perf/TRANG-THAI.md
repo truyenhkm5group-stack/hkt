@@ -1,4 +1,4 @@
-# Trạng thái hiệu năng — tổng hợp theo trang (24/09/2026, `main` @ `1d5b4ec6`)
+# Trạng thái hiệu năng — tổng hợp theo trang (24/09/2026, `main` @ `1d5b4ec6`; bổ sung 28/09/2026, mục 3 và 3a)
 
 **Tệp này là BẢN TỔNG HỢP, không phải chứng từ số đo.** Nó không chứa phép đo mới nào. Mỗi con số
 dưới đây được chép từ một tệp hoặc một commit ghi ngay cạnh nó — muốn trích một con số thì trích
@@ -62,19 +62,51 @@ Cột "gần nhất" là số trang (smoke / verify) nếu có, không thì số
 
 ---
 
-## 3. Nhánh CHƯA GỘP: `claude/trang-cham-jit` (`d5146ec2`, 24/09/2026)
+## 3. Nhánh `claude/trang-cham-jit` (`d5146ec2`) — ĐÃ GỘP vào `main` (#216, 24/09/2026)
 
-Vá theo HÌNH DẠNG (cùng họ câu với chỗ đã đo, chưa EXPLAIN riêng từng câu): 27 hàm chạy trong
-`chayKhongJit` ở `cod-settlement` · `data-quality` · `data-quality-issues` · `customers` ·
-`products` · `cashflow` · `profit-cash-bridge` · `profit-cash` · `conversion-funnel` ·
-`return-intelligence` · `crm` · `landing`; `dataQualitySummary` đổi hình dạng sang bảng dẫn xuất
-có rào; `memo` 120 s cho `/reports/funnel`; khoá đệm `adsAttributionCoverage` tròn tới phút. Tức là
-các trang **/cod, /data-quality, /customers, /products, /reports/cashflow, /reports/funnel** (và
-phần còn lại của /reports/returns, /landing, /customers/retention).
+Kiểm lại 28/09: `git merge-base --is-ancestor d5146ec2 origin/main` đúng; `chayKhongJit` có mặt ở
+`cod-settlement`, `customers`, `landing`…; bốn hàm của /reports/funnel có `memo` 120 s. Vá theo HÌNH
+DẠNG (27 hàm, cùng họ câu với chỗ đã đo) — **số đo SAU vá cho từng trang vẫn CHƯA CÓ trong kho**;
+số smoke gần nhất ở mục 3a.
 
-**Chưa có số đo SAU vá** — commit ghi rõ máy vá không chạm production. Lệnh đo và bảng chờ điền nằm
-ở `docs/perf/vong-va-2026-09-24.md` **trên nhánh ấy** (chưa có trên `main`). Khi gộp và đo xong,
-sửa các dòng tương ứng ở bảng mục 2.
+---
+
+## 3a. Đợt đo 28/09/2026 — và một chẩn đoán SAI đã gỡ
+
+**Smoke 10/10 lượt deploy (27–28/09) cùng 11 trang CHẬM** — ổn định, không phải nhiễu: /reports/funnel
+~8 s; /reports, /reports/returns, /reports/scenario, /inventory/decisions, /ads ~6 s; /orders,
+/inventory/returns, /inventory/planning, /landing, /work/okr 2–4 s (log job `release` của
+`deploy-vps.yml`, dòng `⚠ … [SLOW]`).
+
+| Chỗ | Đo được (production, EXPLAIN ANALYZE qua `db-query`) | Nguyên nhân THẬT | Vá |
+|---|---|---|---|
+| Backtest điểm rủi ro (`getPreshipRiskBacktest`, /reports/funnel) | 6.606 ms (gốc) → 4.867 ms (#347) → **139 ms** (#352) | bốn truy vấn con TƯƠNG QUAN quét lại cả bảng cho TỪNG đơn kiểm tra (3,6 ms × 315 lượt × 4) — regex SĐT chỉ là phần nhỏ | #352: nối băm có gom nhóm (`ls_*`); đối chiếu bản gốc 263 đơn × 11 cột, 0 lệch. Smoke /reports/funnel 7,8 s → 2,1 s |
+| Kho dữ liệu học GTC dự phóng (`taiKho`, đọc bởi /ads, /ads/daily, báo cáo hoàn, lợi nhuận danh nghĩa) | ~0,115 ms/dòng sự kiện ⇒ ~2,5 s cho 21.425 dòng → **81 ms** | tính trạng thái con ĐVVC trong Postgres cho TỪNG dòng, trong khi cả sổ chỉ có 29 cặp (mã, chữ) | #352: bản TypeScript `carrierSubstate`, nhớ theo cặp; 29/29 cặp, 21.671/21.671 dòng = SQL |
+
+**Chẩn đoán SAI (#347):** "regex mã bị chép vào 29 vế `when` là thủ phạm". Hai biểu thức chạy trong
+CÙNG một `EXPLAIN ANALYZE` trên cùng 21.402 dòng: 0,116 ↔ 0,117 ms/dòng — không khác gì. Bản sửa ấy
+đã được gỡ ở #352. Bài học (và là lý do mục này tồn tại): **đọc kế hoạch + suy luận KHÔNG phải số đo**;
+trước khi gộp một bản vá hiệu năng, đo cũ ↔ mới CÓ ĐỐI CHỨNG.
+
+**Cách đo có đối chứng đã chạy được (không cần PR script):**
+- Sinh câu SQL THẬT từ mã: gọi hàm với `db.execute` thay bằng hàm bắt đối tượng `SQL` rồi trả
+  `{ rows: [] }`; `PgDialect.sqlToQuery` rồi chèn tham số. `db-query` cấm dấu gạch ngược ⇒ `'\D'`
+  thành `'[^0-9]'`.
+- Hai biến thể của cùng một biểu thức: đặt cả hai vào MỘT `explain (analyze) select <cũ>, <mới> …` —
+  hai SubPlan, cùng dòng, cùng tải máy.
+- Đúng/sai trên toàn bộ dữ liệu thật: `select count(*) filter (where <cũ> is distinct from <mới>) …`.
+- Đối chiếu từng dòng cục bộ: PGlite + `seed-demo` + gieo ca khó; `clearMemo()` giữa hai lượt (không
+  thì lượt hai đọc đệm và ra 0 dòng trong 1 ms).
+
+**Giờ làm việc làm mọi con số xấu đi:** smoke 20:14 UTC (03:14 giờ VN) có 13 trang chậm; các lượt
+01:30–03:06 UTC (08:30–10:06 giờ VN) có 16–21. `ops perf` 03:26 UTC: `erp-db` 84 % CPU, tải 2,2 trên
+máy 2 nhân, 5/5 kết nối đang chạy; toàn bộ job nền 3 giờ qua chỉ ~1.200 s (≈ 11 % một nhân). Nên:
+**so sánh trước/sau phải cùng khung giờ**, và cột "ứng dụng" của `perf-probe` phình ra khi máy bận
+(tiến trình đo tranh CPU với người dùng thật) — đừng đọc nó như chi phí JavaScript.
+
+**Chưa đo được câu nào ăn CPU trong giờ làm việc:** máy chủ không có `pg_stat_statements`
+(`select extname from pg_extension` chỉ ra `plpgsql`). Bật nó cần sửa `docker-compose.prod.yml`
+(`shared_preload_libraries`) — dựng lại container `db` — nên là quyết định của chủ shop, CHƯA làm.
 
 ---
 
@@ -83,6 +115,8 @@ sửa các dòng tương ứng ở bảng mục 2.
 | Việc | Căn cứ |
 |---|---|
 | Đo lại mọi trang sau các bản vá 23–24/09 trên máy KHÔNG bão hoà | Số 23/09 là cận trên (mục 1.3) |
+| Bật `pg_stat_statements` để biết câu nào ăn CPU trong giờ làm việc (cần chủ shop duyệt: dựng lại container `db`) | Mục 3a |
+| Đo lại /ads, /ads/daily, /reports/returns sau #352 trong khung giờ ĐÊM (so cùng khung giờ) | Mục 3a |
 | Truy vấn con tương quan tra `canonical_order_outcome` từng dòng (~3,2 s nguội) → đổi sang phép NỐI, giữ nhánh dự phòng | P0.5 Phụ lục 3 — "biết chính xác, chưa sửa" |
 | `stockByProduct` quét toàn bộ lịch sử dòng hàng (5,1 s) | `8d6665a0` |
 | Bốn phép đo phía trình duyệt (số truy vấn / lượt, fetch khi đổi lọc, refetch thừa, ranh giới server/client) | `docs/TECH-6-SUMMARY.md` là cách đo và chỗ điền — không có số |
