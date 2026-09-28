@@ -372,6 +372,7 @@ import {
   testClassifierStepsAndCodes,
   testObservationDedupeKeyIsShared,
   testObservationResolution,
+  testReasonTextLatestParity,
   testQuickPickHasNoFreeText,
   testReasonSourceRegistry,
 } from "./return-reason-observation.test";
@@ -1969,6 +1970,7 @@ async function main() {
   testQuickPickHasNoFreeText();
   testObservationDedupeKeyIsShared();
   await testObservationResolution(db);
+  await testReasonTextLatestParity(db);
   testUseServerExports();
   testClientBoundaryExports();
   testVtpTrackingLink();

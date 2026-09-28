@@ -17,7 +17,7 @@ import {
 import { REASON_NEEDS_HUMAN, RETURN_REASON_LABEL } from "@/lib/constants/return-reason";
 import { classifyRaw } from "@/lib/returns/reason-classify";
 import { dangGhiQuanSat, reasonDedupeKey } from "@/lib/returns/reason-observe";
-import { reasonsForShipments } from "@/lib/queries/return-reason";
+import { reasonFromStatusText, reasonsForShipments } from "@/lib/queries/return-reason";
 
 /**
  * ═══════════ LỚP QUAN SÁT LÝ DO HOÀN ═══════════
@@ -280,4 +280,76 @@ export async function testObservationResolution(db: Db) {
   await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.shipmentId, KIEN));
   await db.delete(schema.shipments).where(inArray(schema.shipments.id, KIEN));
   console.log("✓ Giải quan sát trên CSDL: người thắng ĐVVC · RAW_ONLY tách khỏi NO_EVIDENCE · ghi trùng không nhân đôi");
+}
+
+/*
+  ───── 6 · Bậc 3 đọc MỘT dòng mỗi kiện — và ra ĐÚNG như bản duyệt mọi sự kiện ─────
+
+  Bản cũ kéo mọi sự kiện có chữ rồi để dòng MUỘN NHẤT dịch ra lý do thắng (116 nghìn dòng mỗi lượt
+  trên production 29/09/2026). Bản mới phân loại các câu chữ KHÁC NHAU rồi chỉ đọc dòng muộn nhất
+  mỗi kiện. Bài này chạy CHÍNH luật cũ làm bản tham chiếu trên cùng dữ liệu và so từng kiện — đổi
+  cách đọc không được đổi một kết luận nào.
+*/
+export async function testReasonTextLatestParity(db: Db) {
+  const KIEN = ["rrp-1", "rrp-2", "rrp-3", "rrp-4", "rrp-5", "rrp-6"];
+  const NGOAI = "rrp-ngoai";
+  const tat = [...KIEN, NGOAI];
+  await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.shipmentId, tat));
+  await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, tat));
+  await db.delete(schema.shipments).where(inArray(schema.shipments.id, tat));
+  await db.insert(schema.shipments).values(tat.map((id, i) => ({ id, vtpOrderNumber: `RRP${i + 1}`, carrier: "VTP", stage: "RETURNED" as const })));
+  const t = (phut: number) => new Date(Date.UTC(2026, 8, 2, 0, phut, 0));
+  const ev = (shipmentId: string, status: string, statusName: string, phut: number) => ({ shipmentId, source: "VTP_WEBHOOK", status, statusName, occurredAt: t(phut) });
+  await db.insert(schema.shipmentEvents).values([
+    // rrp-1: có lý do rồi tới câu KHÔNG phải lý do ⇒ lý do cũ đứng nguyên.
+    ev("rrp-1", "A1", "Tồn - Khách hàng nghỉ, không có nhà", 1),
+    ev("rrp-1", "A2", "Đang giao hàng", 2),
+    // rrp-2: hai câu có lý do ⇒ câu MUỘN hơn thắng.
+    ev("rrp-2", "B1", "Tồn - Khách hàng nghỉ, không có nhà", 1),
+    ev("rrp-2", "B2", "Tồn - Khách hàng đến bưu cục nhận", 3),
+    // rrp-3: câu bước hoàn ("chuyển hoàn bưu cục gốc") KHÔNG phải lý do, không được đè.
+    ev("rrp-3", "C1", "Tồn - Khách hàng đến bưu cục nhận", 1),
+    ev("rrp-3", "C2", "Chuyển hoàn bưu cục gốc", 2),
+    // rrp-4: toàn câu không dịch được ⇒ không có lý do.
+    ev("rrp-4", "D1", "Đang giao hàng", 1),
+    ev("rrp-4", "D2", "Giao hàng thành công", 2),
+    // rrp-5: chữ rỗng xen giữa ⇒ bị bỏ qua, lý do vẫn đọc được.
+    ev("rrp-5", "E1", "", 1),
+    ev("rrp-5", "E2", "Không liên lạc được với khách", 2),
+    ev("rrp-5", "E3", "", 3),
+    // rrp-6: không có sự kiện nào.
+    // Kiện NGOÀI tập hỏi mang lý do muộn hơn ⇒ không được rò sang kết quả.
+    ev(NGOAI, "F1", "Tồn - Khách hàng đến bưu cục nhận", 9),
+  ]);
+
+  // Bản tham chiếu: ĐÚNG luật cũ — mọi sự kiện có chữ, tăng dần theo thời gian, dòng có lý do sau cùng thắng.
+  const moiSuKien = await db
+    .select({ shipmentId: schema.shipmentEvents.shipmentId, statusName: schema.shipmentEvents.statusName, occurredAt: schema.shipmentEvents.occurredAt })
+    .from(schema.shipmentEvents)
+    .where(inArray(schema.shipmentEvents.shipmentId, KIEN));
+  moiSuKien.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  const thamChieu = new Map<string, { reason: string; raw: string }>();
+  for (const e of moiSuKien) {
+    if (!e.statusName) continue;
+    const r = reasonFromStatusText(e.statusName);
+    if (r) thamChieu.set(e.shipmentId, { reason: r, raw: e.statusName.trim() });
+  }
+
+  const ra = await reasonsForShipments(KIEN);
+  assert.equal(ra.size, KIEN.length, "mọi kiện được hỏi đều phải có mặt — kể cả kiện không có chứng từ");
+  assert.equal(ra.has(NGOAI), false, "kiện ngoài tập hỏi không được lọt vào kết quả");
+  for (const id of KIEN) {
+    const moi = ra.get(id);
+    const cu = thamChieu.get(id);
+    assert.equal(moi?.reason, cu?.reason ?? "UNKNOWN", `${id}: lý do lệch bản duyệt mọi sự kiện`);
+    if (cu) assert.equal(moi?.rawReason, cu.raw, `${id}: chữ gốc lệch bản duyệt mọi sự kiện`);
+  }
+  // Khoá cả giá trị, không chỉ sự khớp: bản tham chiếu sai theo cùng một cách thì bài vẫn phải đỏ.
+  assert.equal(ra.get("rrp-1")?.reason, "CUSTOMER_UNREACHABLE");
+  assert.equal(ra.get("rrp-2")?.reason, "CUSTOMER_RESCHEDULE_FAILED", "câu có lý do MUỘN hơn phải thắng");
+  assert.equal(ra.get("rrp-3")?.reason, "CUSTOMER_RESCHEDULE_FAILED", "câu bước hoàn không được đè lý do");
+  assert.equal(ra.get("rrp-4")?.reason, "UNKNOWN");
+  assert.equal(ra.get("rrp-5")?.reason, "CUSTOMER_UNREACHABLE");
+  assert.equal(ra.get("rrp-6")?.reason, "UNKNOWN");
+  console.log("✓ Lý do hoàn bậc chữ: đọc một dòng mỗi kiện mà ra đúng bản duyệt mọi sự kiện · muộn hơn thắng · bước hoàn không đè · chữ rỗng bỏ qua · kiện ngoài tập không rò");
 }
