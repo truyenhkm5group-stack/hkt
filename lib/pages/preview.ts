@@ -15,6 +15,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { MetadataError } from "@/lib/metadata/errors";
 import { getEnabledModules } from "@/lib/platform/capabilities";
 import { normalizePageSchema, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
+import { effectivePageCatalog } from "@/lib/pages/custom-sources";
 import { resolveBlock } from "@/lib/pages/data-sources";
 import { getPageDraft, pageAdminDenial, type PageIssue } from "@/lib/pages/registry";
 import type { PageBlock, PageRenderContext, ResolvedBlock } from "@/lib/pages/types";
@@ -39,9 +40,11 @@ export async function previewBlock(pageId: string, block: unknown, user: Session
   }
   const modules = await getEnabledModules();
   const one = { version: 1, sections: [{ key: "preview", blocks: [block] }] };
-  const v = validatePageSchema(one, { modules, catalog: opts.catalog, moduleIssues: "warning", partial: true });
+  // Sổ hiệu lực (sổ tĩnh + đối tượng tuỳ biến của tổ chức) — cùng sổ lượt lưu nháp / xuất bản dùng.
+  const catalog = opts.catalog ?? (await effectivePageCatalog());
+  const v = validatePageSchema(one, { modules, catalog, moduleIssues: "warning", partial: true });
   if (!v.ok) return { ok: false, code: "INVALID", errors: relative(v.errors) };
-  const normalized = normalizePageSchema(one, { modules, catalog: opts.catalog, partial: true })!.sections[0].blocks[0] as PageBlock;
+  const normalized = normalizePageSchema(one, { modules, catalog, partial: true })!.sections[0].blocks[0] as PageBlock;
   const ctx: PageRenderContext = { searchParams: opts.searchParams ?? {}, period: "30d" };
   const r = await resolveBlock(normalized, user, ctx);
   return { ok: true, resolved: r.ok ? { ok: true, block: normalized, data: r.data } : { ok: false, block: normalized, issue: r.issue }, warnings: relative(v.warnings) };

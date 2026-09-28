@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/auth/session";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { MetadataError } from "@/lib/metadata/errors";
 import { validatePageSchema } from "@/lib/pages/components";
+import { effectivePageCatalog } from "@/lib/pages/custom-sources";
 import { resolvePage } from "@/lib/pages/data-sources";
 import { getPageDraft } from "@/lib/pages/registry";
 import { startPageRender } from "@/lib/pages/render";
@@ -39,7 +40,7 @@ export default async function PagePreview({ params, searchParams }: { params: Pr
   }
   const { page, draft } = loaded;
   const modules = new Set((user.modules ?? []) as ModuleKey[]);
-  const check = validatePageSchema(draft, { modules, moduleIssues: "error" });
+  const check = validatePageSchema(draft, { modules, catalog: await effectivePageCatalog(), moduleIssues: "error" });
   const moduleOff = user.modules !== undefined && !modules.has(page.moduleKey);
   const sections = startPageRender(draft, user, pageRenderContext(sp), `preview:${page.slug}`, resolvePage);
 

@@ -76,7 +76,6 @@ export function BuilderCanvas(props: Props) {
   const { schema, device, drag, hint, onHint, onDrop, selection, onSelect } = props;
   const phone = device === "phone";
   const root = React.useRef<HTMLDivElement>(null);
-  const innerPick = React.useRef<string | null>(null);
   const [rects, setRects] = React.useState<Record<string, Rect>>({});
   const [resize, setResize] = React.useState<{ id: string; span: BlockSpan } | null>(null);
   const resizing = React.useRef<{ id: string; x: number; span: number; width: number } | null>(null);
@@ -185,19 +184,8 @@ export function BuilderCanvas(props: Props) {
     onDrop();
   };
 
-  // ─── Chọn: khung cột bắt cú bấm ở pha BẮT trước khung con, nên ghi khung trong cùng ở đây rồi thay vào ───
-  const onClickCapture = (e: React.MouseEvent) => {
-    const frame = (e.target as HTMLElement).closest?.("[data-block-id]") as HTMLElement | null;
-    innerPick.current = frame?.dataset.blockId ?? null;
-  };
-  const selectBlock = React.useCallback(
-    (id: string) => {
-      const pick = innerPick.current ?? id;
-      innerPick.current = null;
-      onSelect({ kind: "block", id: pick });
-    },
-    [onSelect],
-  );
+  // ─── Chọn: khung khối tự chọn đúng khung TRONG CÙNG chứa điểm bấm (`EditableBlockFrame`) — khối con trong cột chọn được ───
+  const selectBlock = React.useCallback((id: string) => onSelect({ kind: "block", id }), [onSelect]);
 
   // ─── Tay nắm đổi độ rộng ───
   const startResize = (e: React.PointerEvent<HTMLButtonElement>, b: PageBlock) => {
@@ -243,7 +231,7 @@ export function BuilderCanvas(props: Props) {
   const selectedInColumn = selectedId ? locate(schema, selectedId)?.child !== null : false;
 
   return (
-    <div ref={root} data-builder-root className="relative" onDragStart={onDragStart} onDragOver={onDragOver} onDrop={drop} onDragEnd={props.onDragEnd} onClickCapture={onClickCapture}>
+    <div ref={root} data-builder-root className="relative" onDragStart={onDragStart} onDragOver={onDragOver} onDrop={drop} onDragEnd={props.onDragEnd}>
       <style>{EDIT_CSS}</style>
       <div className={cn("mx-auto space-y-4", phone ? "w-[390px] max-w-full rounded-[28px] border-8 border-foreground/10 bg-background p-3" : "w-full")} data-builder-device={device}>
         {schema.sections.map((s, si) => {

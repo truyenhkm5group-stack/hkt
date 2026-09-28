@@ -201,9 +201,13 @@ export type ValueFormat = "vnd" | "number" | "percent";
 
 export type MetricSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; format: ValueFormat; periods: PeriodKey[]; why: string };
 export type SeriesSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; kinds: ChartKind[]; format: ValueFormat; periods: PeriodKey[]; why: string };
-/** Nguồn danh sách = một đối tượng của sổ đối tượng; trường lấy từ field hệ thống `listable` + field custom. */
-export type ListSourceSpec = { objectKey: string; label: string; module: ModuleKey; permission: string; why: string };
-export type TimelineSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; recordObject: string | null; why: string };
+/**
+ * Nguồn danh sách = một đối tượng của sổ đối tượng; trường lấy từ field hệ thống `listable` + field custom.
+ * `permissions` (Phase 6 — đối tượng tuỳ biến): MỌI khoá người xem phải có (`records:view` + khoá siết của đối tượng);
+ * vắng ⇒ chỉ `permission`. `permission` luôn là khoá đầu tiên của danh sách đó.
+ */
+export type ListSourceSpec = { objectKey: string; label: string; module: ModuleKey; permission: string; permissions?: string[]; why: string };
+export type TimelineSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; permissions?: string[]; recordObject: string | null; why: string };
 export type PageActionSpec = { key: string; label: string; module: ModuleKey | null; permission: string | null; objectKey?: string; sideEffect: "NONE" | "WRITE"; requiresApproval: boolean; why: string };
 
 // ═══ DỮ LIỆU ĐÃ PHÂN GIẢI của từng loại khối — máy chủ trả, renderer vẽ ═══

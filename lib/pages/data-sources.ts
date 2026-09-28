@@ -22,6 +22,16 @@
  *  · Khối `filter`: đọc `pf_<id>_<i>` từ URL, parse THEO KIỂU field (giá trị hỏng bị bỏ, không thành lỗi), bỏ ô
  *    trên field không `filterable` / không được xem; áp lên khối đích CÙNG đối tượng qua `ctx.blockFilters`.
  *  · Khối `column`: khối con phân giải SONG SONG, mỗi con một kết quả riêng — con hỏng không kéo con khác.
+ *
+ * ─── PHASE 6 · ĐỐI TƯỢNG TUỲ BIẾN (`x_…`, hợp đồng phase-6 §7) ───
+ *  · Bảng / kanban / KPI + biểu đồ tổng hợp / ô lọc / form / dòng thời gian nhận khoá `x_…`. Cổng KHÔNG đọc sổ (sổ chỉ là
+ *    lời khai): `listObject` → `recordGate` của dịch vụ bản ghi (tồn tại trong tổ chức hiện hành, chưa lưu trữ, module
+ *    `apps` + nhóm menu, đủ khoá `objectAccess(def).view`, phạm vi `CUSTOM_RECORDS`).
+ *  · Mọi `where` trên `custom_records` mang `recordScopeSql(def)` (đúng khoá đối tượng + chưa xoá) — trong `buildWhere`,
+ *    MỘT chỗ cho bảng, kanban và tổng hợp; bản ghi lẻ (form, dòng thời gian) hỏi `visibleRecordIds`.
+ *  · Liên kết dòng / thẻ = `/o/<khoá>/<id>`; field quan hệ in TÊN đích chỉ khi người xem xem được đích, không thì "—".
+ *  · Dòng thời gian: khoá `custom_record_<x_khoá>` (cùng tiền tố với sổ tĩnh, không bao giờ trùng) đọc `recordTimeline`
+ *    của trang /o/… — không có nguồn dòng thời gian thứ hai cho bản ghi tuỳ biến.
  */
 import { and, eq, getTableName, type SQL } from "drizzle-orm";
 import type { Permission } from "@/lib/auth/permissions";
@@ -30,22 +40,25 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import { memo, periodKey } from "@/lib/cache";
 import { statusTargets } from "@/components/metadata/runtime-core";
 import { SCOPE_RESOURCE_BY_KEY } from "@/lib/constants/data-scope-policy";
-import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { getDb, schema } from "@/db";
-import { recordExists } from "@/lib/metadata/common";
+import { recordExists, recordScopeSql } from "@/lib/metadata/common";
 import { customValueText } from "@/lib/metadata/display";
 import { listFields } from "@/lib/metadata/fields";
 import { parseRef } from "@/lib/metadata/form-schema";
 import { getPublishedForm } from "@/lib/metadata/forms";
 import { filterShapeOk, LIST_MAX_FILTERS } from "@/lib/metadata/list-schema";
 import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
-import type { CustomFieldDef, CustomValues, FieldRef, ListFilter, SystemFieldDef } from "@/lib/metadata/types";
+import { canWriteObject, CUSTOM_RECORDS_SCOPE } from "@/lib/metadata/record-access";
+import { RELATION_TYPES, type CustomFieldDef, type CustomValues, type FieldRef, type ListFilter, type SystemFieldDef } from "@/lib/metadata/types";
 import { canEditField, canViewField, customValuesFilterSql, getCustomValues } from "@/lib/metadata/values";
+import { recordTimeline, relationLabelsFor, relationOptionsFor } from "@/lib/objects/records";
 import { actionAvailability } from "@/lib/pages/actions";
-import { CUSTOM_RECORD_TIMELINE_PREFIX, LIST_SOURCES, listSource, METRIC_SOURCES, metricSource, PAGE_ACTIONS, pageAction, SERIES_SOURCES, seriesSource, TIMELINE_SOURCES, timelineSource } from "@/lib/pages/catalog";
-import { gateSource, OBJECT_SCOPE_RESOURCE, pageDetailHref } from "@/lib/pages/runtime-common";
-import { AGGREGATE_NUMERIC_TYPES, DATE_TYPES, filterOpFits, filterTargetObject, GROUPABLE_TYPES, ROW_ACTION_KEYS } from "@/lib/pages/components";
+import { CUSTOM_RECORD_TIMELINE_PREFIX, listSource, METRIC_SOURCES, metricSource, pageAction, SERIES_SOURCES, seriesSource, TIMELINE_SOURCES, timelineSource } from "@/lib/pages/catalog";
+import { customObjectGate, customRecordVisible, isCustomKey, recordHref } from "@/lib/pages/page-objects";
+import { gateSource, OBJECT_SCOPE_RESOURCE } from "@/lib/pages/runtime-common";
+import { AGGREGATE_NUMERIC_TYPES, DATE_TYPES, defaultPageCatalog, filterOpFits, filterTargetObject, GROUPABLE_TYPES, ROW_ACTION_KEYS, type PageCatalog } from "@/lib/pages/components";
 import {
   AGGREGATE_FNS,
   AGGREGATE_MAX_GROUPS,
@@ -271,9 +284,9 @@ async function resolveChart(block: PageBlock<"chart">, user: SessionUser, ctx: P
 
 // ─────────────────────────── Bảng + Kanban: trường và bộ lọc ───────────────────────────
 
-type ObjectFields = { def: ObjectDef; system: SystemFieldDef[]; custom: CustomFieldDef[]; viewable: CustomFieldDef[] };
+type ObjectFields = { def: AnyObjectDef; system: SystemFieldDef[]; custom: CustomFieldDef[]; viewable: CustomFieldDef[] };
 
-async function objectFields(def: ObjectDef, user: SessionUser): Promise<ObjectFields> {
+async function objectFields(def: AnyObjectDef, user: SessionUser): Promise<ObjectFields> {
   const f = await listFields(def.key);
   const custom = f.custom.filter((c) => c.status === "ACTIVE");
   return { def, system: f.system, custom, viewable: custom.filter((c) => canViewField(user, def, c)) };
@@ -309,6 +322,10 @@ function buildWhere(of: ObjectFields, filters: unknown, decision: ScopeDecision,
   if (list.length > LIST_MAX_FILTERS) stop("INVALID_CONFIG", `Tối đa ${LIST_MAX_FILTERS} bộ lọc.`);
   const { columns } = pageObjectTable(of.def);
   const parts: SQL[] = [];
+  // Đối tượng tuỳ biến: mọi đối tượng chung MỘT bảng `custom_records` ⇒ khớp ĐÚNG khoá đối tượng + chưa xoá mềm. Điều
+  // kiện này đi vào MỌI câu của bảng / kanban / tổng hợp (cùng một `where`) — không có đường nào đọc bảng mà thiếu nó.
+  const own = recordScopeSql(of.def);
+  if (own) parts.push(own);
   const customFilters: ListFilter[] = [];
   for (const f of list) {
     const r = resolveRef(of, f?.ref) ?? stop("INVALID_CONFIG", `Bộ lọc trỏ field không tồn tại: "${String(f?.ref)}".`);
@@ -359,16 +376,24 @@ function systemCell(v: unknown): unknown {
   return v;
 }
 
-function customCell(f: CustomFieldDef, v: unknown, users: Record<string, string>): unknown {
+type RelationLabels = Record<string, Record<string, string>>;
+
+function customCell(f: CustomFieldDef, v: unknown, users: Record<string, string>, relations: RelationLabels = {}): unknown {
   if (v === undefined || v === null) return null;
   if (f.type === "number" || f.type === "currency") return typeof v === "number" ? v : null;
   if (f.type === "date" || f.type === "datetime") return typeof v === "string" ? v : null;
   if (f.type === "user" && typeof v === "string") return users[v] ?? v;
+  if (RELATION_TYPES.includes(f.type)) {
+    // Tên đích CHỈ khi người xem xem được đích (hợp đồng Phase 6 §3) — không thì "—", không bao giờ in id thô.
+    const labels = relations[f.key] ?? {};
+    const names = (Array.isArray(v) ? v : [v]).map((x) => labels[String(x)]).filter((x): x is string => typeof x === "string");
+    return names.length ? names.join(", ") : "—";
+  }
   const text = customValueText(f, v);
   return text === "" ? null : text;
 }
 
-async function statusLabels(def: ObjectDef): Promise<Map<string, Map<string, string>>> {
+async function statusLabels(def: AnyObjectDef): Promise<Map<string, Map<string, string>>> {
   const out = new Map<string, Map<string, string>>();
   for (const key of def.statusFields) {
     const opts = (await getSystemStatusOptions(def.key, key)) ?? def.fields.find((f) => f.key === key)?.options ?? [];
@@ -377,16 +402,50 @@ async function statusLabels(def: ObjectDef): Promise<Map<string, Map<string, str
   return out;
 }
 
-async function customFor(objectKey: string, fields: CustomFieldDef[], ids: string[], user: SessionUser): Promise<{ values: Map<string, CustomValues>; users: Record<string, string> }> {
-  if (!fields.length || !ids.length) return { values: new Map(), users: {} };
+async function customFor(objectKey: string, fields: CustomFieldDef[], ids: string[], user: SessionUser): Promise<{ values: Map<string, CustomValues>; users: Record<string, string>; relations: RelationLabels }> {
+  if (!fields.length || !ids.length) return { values: new Map(), users: {}, relations: {} };
   const values = await getCustomValues(objectKey, ids, user);
   const userKeys = fields.filter((f) => f.type === "user").map((f) => f.key);
   const userIds = userKeys.length ? [...values.values()].flatMap((v) => userKeys.map((k) => v[k]).filter((x): x is string => typeof x === "string")) : [];
-  return { values, users: userIds.length ? await userLabelsByIds(userIds) : {} };
+  const relationFields = fields.filter((f) => RELATION_TYPES.includes(f.type));
+  const [users, relations] = await Promise.all([
+    userIds.length ? userLabelsByIds(userIds) : Promise.resolve({} as Record<string, string>),
+    relationFields.length ? relationLabelsFor(user, relationFields, [...values.values()]) : Promise.resolve({} as RelationLabels),
+  ]);
+  return { values, users, relations };
 }
 
 function sourceForObject(objectKey: string): ListSourceSpec {
   return listSource(objectKey) ?? stop("INVALID_CONFIG", `"${objectKey}" không có trong sổ nguồn danh sách.`);
+}
+
+/** Tên người cho field HỆ THỐNG kiểu người dùng (vd người phụ trách bản ghi tuỳ biến) — theo khoá tài khoản (luật 34). */
+async function systemUserLabels(fields: readonly SystemFieldDef[], rows: readonly { values: Record<string, unknown> }[]): Promise<Record<string, string>> {
+  const keys = fields.filter((f) => f.type === "user").map((f) => f.key);
+  const userIds = keys.length ? rows.flatMap((r) => keys.map((k) => r.values[k]).filter((x): x is string => typeof x === "string" && x.length > 0)) : [];
+  return userIds.length ? userLabelsByIds(userIds) : {};
+}
+
+type ListObject = { def: AnyObjectDef; decision: ScopeDecision; resource: string | null };
+
+/**
+ * Đối tượng mà một khối danh sách (bảng · kanban · tổng hợp · ô lọc · form) đọc, SAU ba cổng module → quyền → phạm vi.
+ *  · khoá hệ thống: sổ tĩnh `LIST_SOURCES` + cổng của trang cũ (như Phase 4);
+ *  · khoá `x_…` (Phase 6): `recordGate` của dịch vụ bản ghi — không tồn tại trong tổ chức hiện hành / đã lưu trữ ⇒
+ *    `NOT_FOUND`, module `apps` hoặc nhóm menu tắt ⇒ `MODULE_DISABLED`, thiếu một khoá của `objectAccess(def).view` ⇒
+ *    `FORBIDDEN`; phạm vi `CUSTOM_RECORDS` (chủ dòng `owner_id`) đi vào `where` như mọi đối tượng khác.
+ */
+async function listObject(objectKey: string, user: SessionUser): Promise<ListObject> {
+  if (isCustomKey(objectKey)) {
+    const g = await customObjectGate(user, objectKey);
+    if (!g.ok) return stop(g.code, g.message);
+    return { def: g.def, decision: g.decision, resource: CUSTOM_RECORDS_SCOPE };
+  }
+  const src = sourceForObject(objectKey);
+  const def = objectDef(src.objectKey) ?? stop("INVALID_CONFIG", "Đối tượng không có trong sổ.");
+  const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
+  const decision = await gateOrStop(user, { module: src.module, permission: src.permission, label: src.label }, resource);
+  return { def, decision, resource };
 }
 
 // ─────────────────────────── Bảng ───────────────────────────
@@ -396,10 +455,7 @@ const TABLE_MAX_PAGE_SIZE = 100;
 
 async function resolveTable(block: PageBlock<"table">, user: SessionUser, ctx: PageRenderContext): Promise<BlockDataByType["table"]> {
   const cfg = block.config as TableConfig;
-  const src = sourceForObject(String(cfg?.source ?? ""));
-  const def = objectDef(src.objectKey) ?? stop("INVALID_CONFIG", "Đối tượng không có trong sổ.");
-  const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
-  const decision = await gateOrStop(user, { module: src.module, permission: src.permission, label: src.label }, resource);
+  const { def, decision, resource } = await listObject(String(cfg?.source ?? ""), user);
   const of = await objectFields(def, user);
 
   // Cột: chỉ field `listable`; field custom người xem không được xem thì KHÔNG có cột (không lỗi — như danh sách Phase 2).
@@ -429,7 +485,7 @@ async function resolveTable(block: PageBlock<"table">, user: SessionUser, ctx: P
   probe();
   const { rows, total } = await pageObjectRows(def, { fields: sysCols, where, sort, limit: pageSize, offset: (page - 1) * pageSize });
   const ids = rows.map((r) => r.id);
-  const [{ values, users }, labels, rowActions] = await Promise.all([customFor(def.key, cusCols, ids, user), statusLabels(def), rowActionsFor(cfg, def, user)]);
+  const [{ values, users, relations }, labels, rowActions, owners] = await Promise.all([customFor(def.key, cusCols, ids, user), statusLabels(def), rowActionsFor(cfg, def, user), systemUserLabels(sysCols, rows)]);
   const columns: TableColumn[] = [...sysCols.map((f) => ({ id: `system:${f.key}`, label: f.label, format: systemFormat(f) })), ...cusCols.map((f) => ({ id: `custom:${f.key}`, label: f.label, format: customFormat(f) }))];
   return {
     columns,
@@ -437,12 +493,12 @@ async function resolveTable(block: PageBlock<"table">, user: SessionUser, ctx: P
       const cells: Record<string, unknown> = {};
       for (const f of sysCols) {
         const raw = systemCell(r.values[f.key]);
-        const label = typeof raw === "string" ? labels.get(f.key)?.get(raw) : undefined;
+        const label = typeof raw === "string" ? (f.type === "user" ? owners[raw] : labels.get(f.key)?.get(raw)) : undefined;
         cells[`system:${f.key}`] = label ?? raw;
       }
       const cv = values.get(r.id) ?? {};
-      for (const f of cusCols) cells[`custom:${f.key}`] = customCell(f, cv[f.key], users);
-      const href = cfg.rowLink ? pageDetailHref(def.key, r.id) : undefined;
+      for (const f of cusCols) cells[`custom:${f.key}`] = customCell(f, cv[f.key], users, relations);
+      const href = cfg.rowLink ? recordHref(def, r.id) : undefined;
       return { id: r.id, ...(href ? { href } : {}), cells };
     }),
     total,
@@ -457,7 +513,7 @@ async function resolveTable(block: PageBlock<"table">, user: SessionUser, ctx: P
  * Hành động theo dòng như NGƯỜI XEM thấy (bật / tắt + lý do). Chỉ để vẽ — `executePageAction` đọc lại bản ĐÃ XUẤT
  * BẢN và kiểm bản ghi trong phạm vi người bấm. Đối tượng luôn là đối tượng của bảng (ghim ở máy chủ).
  */
-async function rowActionsFor(cfg: TableConfig, def: ObjectDef, user: SessionUser): Promise<TableRowActionData[]> {
+async function rowActionsFor(cfg: TableConfig, def: AnyObjectDef, user: SessionUser): Promise<TableRowActionData[]> {
   const list = Array.isArray(cfg.rowActions) ? cfg.rowActions.slice(0, TABLE_MAX_ROW_ACTIONS) : [];
   return Promise.all(
     list.map(async (a, index): Promise<TableRowActionData> => {
@@ -479,10 +535,7 @@ const KANBAN_MAX_CARD_FIELDS = 6;
 
 async function resolveKanban(block: PageBlock<"kanban">, user: SessionUser, ctx: PageRenderContext): Promise<BlockDataByType["kanban"]> {
   const cfg = block.config as KanbanConfig;
-  const src = sourceForObject(String(cfg?.objectKey ?? ""));
-  const def = objectDef(src.objectKey) ?? stop("INVALID_CONFIG", "Đối tượng không có trong sổ.");
-  const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
-  const decision = await gateOrStop(user, { module: src.module, permission: src.permission, label: src.label }, resource);
+  const { def, decision, resource } = await listObject(String(cfg?.objectKey ?? ""), user);
   const of = await objectFields(def, user);
 
   // CHỈ field custom kiểu `status` — trạng thái HỆ THỐNG (đơn, vận đơn…) không bao giờ thành cột kéo thả.
@@ -510,7 +563,7 @@ async function resolveKanban(block: PageBlock<"kanban">, user: SessionUser, ctx:
   const { rows } = await pageObjectRows(def, { fields: sysFields, where, sort: pageDefaultSort(def), limit: limit + 1, offset: 0 });
   const truncated = rows.length > limit;
   const cards = rows.slice(0, limit);
-  const { values, users } = await customFor(def.key, cusFields, cards.map((c) => c.id), user);
+  const [{ values, users, relations }, owners] = await Promise.all([customFor(def.key, cusFields, cards.map((c) => c.id), user), systemUserLabels(sysFields, cards)]);
   const allowMove = cfg.allowMove === true && canEditField(user, def, status);
   const options = [...status.options].sort((a, b) => a.position - b.position);
 
@@ -518,13 +571,14 @@ async function resolveKanban(block: PageBlock<"kanban">, user: SessionUser, ctx:
   for (const r of cards) {
     const cv = values.get(r.id) ?? {};
     const current = typeof cv[status.key] === "string" ? (cv[status.key] as string) : "";
+    const href = recordHref(def, r.id);
     const card: KanbanCard = {
       id: r.id,
       title: String(title ? (systemCell(r.values[title.key]) ?? r.id) : r.id),
-      ...(pageDetailHref(def.key, r.id) ? { href: pageDetailHref(def.key, r.id) } : {}),
+      ...(href ? { href } : {}),
       fields: shown.map((s) => ({
         label: s.field.label,
-        value: String((s.kind === "system" ? systemCell(r.values[s.field.key]) : customCell(s.field, cv[s.field.key], users)) ?? "—"),
+        value: String((s.kind === "system" ? (s.field.type === "user" && typeof r.values[s.field.key] === "string" ? (owners[r.values[s.field.key] as string] ?? null) : null) ?? systemCell(r.values[s.field.key]) : customCell(s.field, cv[s.field.key], users, relations)) ?? "—"),
       })),
       // Đích kéo theo ĐÚNG luật chuyển của field (hàm thuần dùng chung với form) — máy chủ vẫn kiểm lại khi ghi.
       moveTargets: allowMove ? statusTargets(options, status.transitions, current || null).map((o) => o.value).filter((v) => v !== current) : [],
@@ -555,7 +609,13 @@ function recordParamValue(cfg: { recordParam?: string }, ctx: PageRenderContext)
   return id as string;
 }
 
-async function requireRecordInScope(objectKey: string, id: string, decision: ScopeDecision, resource: string | null) {
+async function requireRecordInScope(objectKey: string, id: string, decision: ScopeDecision, resource: string | null, user: SessionUser, customDef?: AnyObjectDef) {
+  if (customDef) {
+    // Đúng đối tượng + chưa xoá + trong phạm vi người xem (một câu, `visibleRecordIds`) — id của đối tượng khác, của
+    // bản ghi người khác (SELF) hay của tổ chức khác đều cùng MỘT câu "không tồn tại".
+    if (!(await customRecordVisible(user, customDef, id))) stop("NOT_FOUND", "Bản ghi không tồn tại.");
+    return;
+  }
   if (objectKey === "model") {
     const db = await getDb();
     const found = await db.select({ id: schema.productModels.id }).from(schema.productModels).where(eq(schema.productModels.id, id)).limit(1);
@@ -573,13 +633,27 @@ async function requireRecordInScope(objectKey: string, id: string, decision: Sco
 
 async function resolveTimeline(block: PageBlock<"timeline">, user: SessionUser, ctx: PageRenderContext): Promise<BlockDataByType["timeline"]> {
   const cfg = block.config as TimelineConfig;
-  const spec: TimelineSourceSpec = timelineSource(String(cfg?.source ?? "")) ?? stop("INVALID_CONFIG", `Dòng thời gian "${String(cfg?.source)}" không có trong sổ nguồn.`);
+  const key = String(cfg?.source ?? "");
+  const customKey = key.startsWith(CUSTOM_RECORD_TIMELINE_PREFIX) ? key.slice(CUSTOM_RECORD_TIMELINE_PREFIX.length) : "";
+  if (!timelineSource(key) && isCustomKey(customKey)) {
+    // Đối tượng tuỳ biến: cùng dòng thời gian của trang /o/… (`recordTimeline` — nhật ký + sự kiện miền, mốc chạm field
+    // người xem không được xem thì không hiện), sau cổng bản ghi + bản ghi trong phạm vi người xem.
+    const g = await customObjectGate(user, customKey);
+    if (!g.ok) return stop(g.code, g.message);
+    const id = recordParamValue(cfg, ctx);
+    await requireRecordInScope(g.def.key, id, g.decision, CUSTOM_RECORDS_SCOPE, user, g.def);
+    const take = Math.max(1, Math.min(TIMELINE_MAX, Math.floor(Number(cfg.limit ?? 50)) || 50));
+    probe();
+    const list = await recordTimeline(g.def.key, id, user, g.def);
+    return { entries: list.slice(0, take).map((e) => ({ id: e.id, at: e.at, title: e.title, ...(e.detail ? { detail: e.detail } : {}), ...(e.source ? { source: e.source } : {}) })) };
+  }
+  const spec: TimelineSourceSpec = timelineSource(key) ?? stop("INVALID_CONFIG", `Dòng thời gian "${String(cfg?.source)}" không có trong sổ nguồn.`);
   const recordObject = spec.recordObject ?? stop("INVALID_CONFIG", "Nguồn dòng thời gian thiếu đối tượng bản ghi.");
   const id = recordParamValue(cfg, ctx);
   const resource = OBJECT_SCOPE_RESOURCE[recordObject] ?? null;
   const decision = await gateOrStop(user, spec, resource);
   const limit = Math.max(1, Math.min(TIMELINE_MAX, Math.floor(Number(cfg.limit ?? 50)) || 50));
-  await requireRecordInScope(recordObject, id, decision, resource);
+  await requireRecordInScope(recordObject, id, decision, resource, user);
   probe();
 
   if (spec.key === "order") {
@@ -626,23 +700,33 @@ export const TIMELINE_WIRING_GAPS = TIMELINE_SOURCES.filter((s) => !["order", "s
 
 async function resolveForm(block: PageBlock<"form">, user: SessionUser, ctx: PageRenderContext): Promise<BlockDataByType["form"]> {
   const cfg = block.config as FormConfig;
-  const def = objectDef(String(cfg?.objectKey ?? "")) ?? stop("INVALID_CONFIG", `Đối tượng "${String(cfg?.objectKey)}" không có trong sổ.`);
+  const objectKey = String(cfg?.objectKey ?? "");
+  const customGate = isCustomKey(objectKey) ? await customObjectGate(user, objectKey) : null;
+  if (customGate && !customGate.ok) return stop(customGate.code, customGate.message);
+  const def: AnyObjectDef = customGate?.ok ? customGate.def : (objectDef(objectKey) ?? stop("INVALID_CONFIG", `Đối tượng "${String(cfg?.objectKey)}" không có trong sổ.`));
+  const isCustom = !def.system;
   if (!def.capabilities.forms) stop("INVALID_CONFIG", `${def.label} chưa có form metadata.`);
   const form = def.forms.find((f) => f.key === cfg.formKey) ?? stop("INVALID_CONFIG", `${def.label} không có form "${String(cfg.formKey)}".`);
   const mode = cfg.mode;
   if (mode !== "create" && mode !== "edit" && mode !== "view") stop("INVALID_CONFIG", "Chế độ form không hợp lệ.");
   if ((mode === "create") !== (form.purpose === "create")) stop("INVALID_CONFIG", `Form "${form.label}" dùng cho ${form.purpose === "create" ? "tạo mới" : "sửa / xem"}, không dùng được ở chế độ "${mode}".`);
-  const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
-  const decision = await gateOrStop(user, { module: def.module, permission: OBJECT_RECORD_PERMISSIONS[def.key].view, label: def.labelPlural }, resource);
+  const resource = isCustom ? CUSTOM_RECORDS_SCOPE : (OBJECT_SCOPE_RESOURCE[def.key] ?? null);
+  const decision = customGate?.ok ? customGate.decision : await gateOrStop(user, { module: def.module, permission: OBJECT_RECORD_PERMISSIONS[def.key as keyof typeof OBJECT_RECORD_PERMISSIONS].view, label: def.labelPlural }, resource);
 
   if (mode === "create") {
-    if (def.key !== "customer" || !def.capabilities.create) stop("INVALID_CONFIG", `${def.label} không tạo được qua form.`);
-    const { customerCreateGate } = await import("@/lib/records/customer-create");
-    const gate = await customerCreateGate(user);
-    if (!gate.allowed) stop(gate.code === "NOT_SUPPORTED" ? "INVALID_CONFIG" : gate.code, gate.reason);
+    if (isCustom) {
+      // Tạo bản ghi tuỳ biến: CÙNG cổng ghi của /o/<khoá>/new (`recordGate` chế độ ghi); lượt lưu đi qua `createRecord`.
+      const w = await customObjectGate(user, def.key, "write");
+      if (!w.ok) stop(w.code, w.message);
+    } else {
+      if (def.key !== "customer" || !def.capabilities.create) stop("INVALID_CONFIG", `${def.label} không tạo được qua form.`);
+      const { customerCreateGate } = await import("@/lib/records/customer-create");
+      const gate = await customerCreateGate(user);
+      if (!gate.allowed) stop(gate.code === "NOT_SUPPORTED" ? "INVALID_CONFIG" : gate.code, gate.reason);
+    }
   }
   const recordId = mode === "create" ? null : recordParamValue(cfg, ctx);
-  if (recordId) await requireRecordInScope(def.key, recordId, decision, resource);
+  if (recordId) await requireRecordInScope(def.key, recordId, decision, resource, user, isCustom ? def : undefined);
 
   probe();
   const [published, fields] = await Promise.all([getPublishedForm(def.key, form.key), listFields(def.key)]);
@@ -651,12 +735,21 @@ async function resolveForm(block: PageBlock<"form">, user: SessionUser, ctx: Pag
   let customValues: CustomValues = {};
   if (recordId) {
     const { id: idCol } = pageObjectTable(def);
-    const { rows } = await pageObjectRows(def, { fields: fields.system, where: eq(idCol, recordId), sort: null, limit: 1, offset: 0 });
+    const { rows } = await pageObjectRows(def, { fields: fields.system, where: and(eq(idCol, recordId), recordScopeSql(def)), sort: null, limit: 1, offset: 0 });
     systemValues = Object.fromEntries(fields.system.map((f) => [f.key, systemCell(rows[0]?.values[f.key])]));
     customValues = (await getCustomValues(def.key, [recordId], user)).get(recordId) ?? {};
   }
-  const editable = mode === "view" ? [] : custom.filter((f) => (mode === "create" ? f.type !== "file" : true) && canEditField(user, def, f)).map((f) => f.key);
-  const users = custom.some((f) => f.type === "user") ? await userPickOptions() : undefined;
+  // Bản ghi tuỳ biến: sửa được khi người xem GHI được đúng dòng đó (quyền ghi + phạm vi ghi); tên / người phụ trách sửa
+  // được như ở /o/…/<id> (máy chủ `updateRecord` kiểm lại theo form đã xuất bản). Đối tượng hệ thống giữ Phase 4.
+  let canWriteRow = mode !== "view";
+  if (isCustom && canWriteRow) canWriteRow = mode === "create" ? canWriteObject(user, def) : Boolean(recordId && (await customRecordVisible(user, def, recordId, "write")));
+  const editable = !canWriteRow ? [] : custom.filter((f) => (mode === "create" ? f.type !== "file" : true) && canEditField(user, def, f)).map((f) => f.key);
+  const viewableCustom = custom.filter((f) => canViewField(user, def, f));
+  const [users, relationOptions] = await Promise.all([
+    custom.some((f) => f.type === "user") || isCustom ? userPickOptions() : Promise.resolve(undefined),
+    isCustom && viewableCustom.some((f) => RELATION_TYPES.includes(f.type)) ? relationOptionsFor(user, viewableCustom) : Promise.resolve(undefined),
+  ]);
+  const systemReadOnlyReason = isCustom ? (canWriteRow ? null : "Bạn chỉ xem được bản ghi này") : mode === "create" ? null : "Thông tin hệ thống chỉ đọc ở form này — chỉ field bổ sung sửa được";
   return {
     objectKey: def.key,
     formKey: form.key,
@@ -666,12 +759,13 @@ async function resolveForm(block: PageBlock<"form">, user: SessionUser, ctx: Pag
       schema: published.schema,
       system: fields.system,
       // Field người xem không được xem KHÔNG lên trình duyệt — kể cả định nghĩa của nó.
-      custom: custom.filter((f) => canViewField(user, def, f)),
+      custom: viewableCustom,
       values: { system: systemValues, custom: customValues },
       customEditable: editable,
       ...(mode === "create" ? { customLockedReason: Object.fromEntries(custom.filter((f) => f.type === "file").map((f) => [f.key, "Tải tệp ở trang chi tiết sau khi tạo"])) } : {}),
-      systemReadOnlyReason: mode === "create" ? null : "Thông tin hệ thống chỉ đọc ở form này — chỉ field bổ sung sửa được",
+      systemReadOnlyReason,
       ...(users ? { users } : {}),
+      ...(relationOptions ? { relationOptions } : {}),
       submitLabel: mode === "create" ? `Tạo ${def.label.toLowerCase()}` : "Lưu",
     },
   };
@@ -705,7 +799,7 @@ function resolveText(block: PageBlock<"text">): BlockDataByType["text"] {
 const AGGREGATE_MAX_BUCKETS = 366;
 
 type AggregatePlan = {
-  def: ObjectDef;
+  def: AnyObjectDef;
   of: ObjectFields;
   decision: ScopeDecision;
   where: SQL | undefined;
@@ -739,11 +833,8 @@ function aggregateRef(of: ObjectFields, ref: unknown, role: "aggregate" | "count
 /** Bốn cổng + field + `where` của một phép tổng hợp — TRƯỚC mọi truy vấn dữ liệu. */
 async function planAggregate(spec: AggregateSpec, user: SessionUser, extra: readonly ListFilter[]): Promise<AggregatePlan> {
   if (!spec || typeof spec !== "object") stop("INVALID_CONFIG", "Khối tổng hợp thiếu cấu hình.");
-  const src = sourceForObject(String(spec.objectKey ?? ""));
-  const def = objectDef(src.objectKey) ?? stop("INVALID_CONFIG", "Đối tượng không có trong sổ.");
   if (!(AGGREGATE_FNS as readonly string[]).includes(spec.fn)) stop("INVALID_CONFIG", `Phép tổng hợp "${String(spec.fn)}" không có trong sổ.`);
-  const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
-  const decision = await gateOrStop(user, { module: src.module, permission: src.permission, label: src.label }, resource);
+  const { def, decision, resource } = await listObject(String(spec.objectKey ?? ""), user);
   const of = await objectFields(def, user);
   let field: AggregateFieldRef | null = null;
   if (spec.field) field = aggregateRef(of, spec.field, spec.fn === "count" ? "count" : "aggregate");
@@ -788,7 +879,7 @@ async function resolveAggregateKpi(blockId: string, cfg: AggregateKpiConfig, use
 const AGGREGATE_LABEL: Record<AggregateSpec["fn"], string> = { count: "Số", sum: "Tổng", avg: "Trung bình", min: "Nhỏ nhất", max: "Lớn nhất" };
 
 /** Nhãn của một khoá nhóm: nhãn trạng thái đã cấu hình (Phase 2) · nhãn tuỳ chọn · Có/Không · tên người. */
-async function groupLabeler(def: ObjectDef, group: AggregateFieldRef, keys: string[]): Promise<(k: string) => string> {
+async function groupLabeler(def: AnyObjectDef, group: AggregateFieldRef, keys: string[]): Promise<(k: string) => string> {
   if (group.field.type === "boolean") return (k) => (k === "true" ? "Có" : k === "false" ? "Không" : k);
   if (group.field.type === "user") {
     const names = await userLabelsByIds(keys);
@@ -970,12 +1061,14 @@ async function resolveFilter(block: PageBlock<"filter">, user: SessionUser, ctx:
       objects.set(
         objectKey,
         (async () => {
-          const src = listSource(objectKey);
-          const def = src ? objectDef(src.objectKey) : null;
-          if (!src || !def) return "nguồn không có trong sổ danh sách";
-          const g = await gateSource(user, { module: src.module, permission: src.permission, label: src.label }, OBJECT_SCOPE_RESOURCE[def.key] ?? null);
-          if (!g.ok) return g.message;
-          return objectFields(def, user);
+          if (!isCustomKey(objectKey) && !listSource(objectKey)) return "nguồn không có trong sổ danh sách";
+          try {
+            // Cùng ba cổng với khối đích (hệ thống: sổ tĩnh; `x_…`: cổng bản ghi tuỳ biến).
+            return await objectFields((await listObject(objectKey, user)).def, user);
+          } catch (error) {
+            if (error instanceof BlockStop) return error.message;
+            throw error;
+          }
         })(),
       );
     }
@@ -1155,14 +1248,21 @@ export async function resolvePage(schemaIn: PageSchema, user: SessionUser, ctx: 
 
 // ─────────────────────────── Cho trình soạn ───────────────────────────
 
-/** Nguồn + action NGƯỜI NÀY dùng được (module + quyền) — chỉ để trình soạn gợi ý; trình phân giải vẫn kiểm lại. */
-export function listDataSources(user: SessionUser): { metrics: MetricSourceSpec[]; series: SeriesSourceSpec[]; lists: ListSourceSpec[]; timelines: TimelineSourceSpec[]; actions: PageActionSpec[] } {
-  const ok = (m: string | null, p: string | null) => (!m || !user.modules || user.modules.includes(m)) && (!p || can(user, p as Permission));
+/**
+ * Nguồn + action NGƯỜI NÀY dùng được (module + quyền) — chỉ để trình soạn gợi ý; trình phân giải vẫn kiểm lại.
+ * `catalog`: sổ hiệu lực (`effectivePageCatalog()` — sổ tĩnh + đối tượng tuỳ biến ACTIVE của tổ chức); vắng ⇒ sổ tĩnh.
+ * Mục mang `permissions` (đối tượng tuỳ biến) đòi ĐỦ mọi khoá, như `objectAccess(def).view`.
+ */
+export function listDataSources(
+  user: SessionUser,
+  catalog: PageCatalog = defaultPageCatalog(),
+): { metrics: MetricSourceSpec[]; series: SeriesSourceSpec[]; lists: ListSourceSpec[]; timelines: TimelineSourceSpec[]; actions: PageActionSpec[] } {
+  const ok = (m: string | null, p: string | null, all?: readonly string[]) => (!m || !user.modules || user.modules.includes(m)) && (all ?? (p ? [p] : [])).every((k) => can(user, k as Permission));
   return {
-    metrics: METRIC_SOURCES.filter((s) => ok(s.module, s.permission)),
-    series: SERIES_SOURCES.filter((s) => ok(s.module, s.permission)),
-    lists: LIST_SOURCES.filter((s) => ok(s.module, s.permission)),
-    timelines: TIMELINE_SOURCES.filter((s) => ok(s.module, s.permission)),
-    actions: PAGE_ACTIONS.filter((a) => ok(a.module, a.permission)),
+    metrics: catalog.metrics.filter((s) => ok(s.module, s.permission)),
+    series: catalog.series.filter((s) => ok(s.module, s.permission)),
+    lists: catalog.lists.filter((s) => ok(s.module, s.permission, s.permissions)),
+    timelines: catalog.timelines.filter((s) => ok(s.module, s.permission, s.permissions)),
+    actions: catalog.actions.filter((a) => ok(a.module, a.permission)),
   };
 }

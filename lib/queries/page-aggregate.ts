@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import type { ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef as ObjectDef } from "@/lib/constants/object-registry";
 import { FIELD_KEY_PATTERN, type CustomFieldDef, type SystemFieldDef } from "@/lib/metadata/types";
 import type { AggregateFn, TimeBucket } from "@/lib/pages/types";
 import { pageObjectTable } from "@/lib/queries/page-data";

@@ -31,7 +31,7 @@
  * kiểm tiếp phần đó (`customRefProblems`) sau khi hàm thuần này đạt.
  */
 import { z } from "zod";
-import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { MODULE_KEYS, type ModuleKey } from "@/lib/constants/platform-modules";
 import { FIELD_REF_PATTERN } from "@/lib/metadata/form-schema";
 import type { FieldType, ListFilterOp, SystemFieldDef } from "@/lib/metadata/types";
@@ -76,7 +76,17 @@ export type PageCatalog = {
   lists: readonly ListSourceSpec[];
   timelines: readonly TimelineSourceSpec[];
   actions: readonly PageActionSpec[];
+  /**
+   * Đối tượng TUỲ BIẾN của tổ chức (Phase 6) mà sổ `lists` / `timelines` đã nối thêm — hàm thuần này không đọc CSDL
+   * nên nhận định nghĩa của chúng qua sổ. Vắng ⇒ chỉ đối tượng hệ thống (sổ tĩnh).
+   */
+  objects?: readonly AnyObjectDef[];
 };
+
+/** Đối tượng theo khoá: sổ tĩnh trước, rồi đối tượng tuỳ biến mà sổ mang theo. */
+export function catalogObject(key: string, catalog: PageCatalog): AnyObjectDef | null {
+  return objectDef(key) ?? catalog.objects?.find((o) => o.key === key) ?? null;
+}
 
 /** Sổ thật (`lib/pages/catalog.ts`). Đọc ở MỖI lượt gọi — không chụp lại ở đây, để sổ là nguồn duy nhất. */
 export function defaultPageCatalog(): PageCatalog {
@@ -234,9 +244,11 @@ const dep = (kind: BlockDependency["kind"], key: string, path: string, spec: { m
   permission: spec?.permission ?? null,
 });
 
-function objectDep(key: string, path: string): BlockDependency {
-  const def = objectDef(key);
-  return { kind: "object", key, path, found: def !== null, module: def?.module ?? null, permission: null };
+function objectDep(key: string, path: string, cat: PageCatalog): BlockDependency {
+  const def = catalogObject(key, cat);
+  // Đối tượng tuỳ biến: module do sổ danh sách khai (apps, hoặc nhóm menu đang tắt mà đối tượng cần).
+  const owner = def && !def.system ? (cat.lists.find((l) => l.objectKey === key)?.module ?? def.module) : (def?.module ?? null);
+  return { kind: "object", key, path, found: def !== null, module: owner, permission: null };
 }
 
 const listDep = (key: string, path: string, cat: PageCatalog) => dep("list", key, path, cat.lists.find((l) => l.objectKey === key));
@@ -279,7 +291,7 @@ export const COMPONENT_REGISTRY: { [T in BlockType]: ComponentSpec<T> } = {
     defaultSpan: 12,
     config: kanbanZ,
     example: { objectKey: "", statusField: "custom:status", cardFields: [], allowMove: false },
-    dependencies: (c, cat) => [listDep(c.objectKey, "config.objectKey", cat), objectDep(c.objectKey, "config.objectKey")],
+    dependencies: (c, cat) => [listDep(c.objectKey, "config.objectKey", cat), objectDep(c.objectKey, "config.objectKey", cat)],
   },
   timeline: {
     type: "timeline",
@@ -297,7 +309,7 @@ export const COMPONENT_REGISTRY: { [T in BlockType]: ComponentSpec<T> } = {
     defaultSpan: 6,
     config: formZ,
     example: { objectKey: "", formKey: "", mode: "view", recordParam: "id" },
-    dependencies: (c) => [objectDep(c.objectKey, "config.objectKey")],
+    dependencies: (c, cat) => [objectDep(c.objectKey, "config.objectKey", cat)],
   },
   button: {
     type: "button",
@@ -528,7 +540,7 @@ function checkFilterTargets(blocks: ParsedBlock[], errors: Issue[]) {
   }
 }
 
-function systemField(def: ObjectDef, ref: string): SystemFieldDef | null | undefined {
+function systemField(def: AnyObjectDef, ref: string): SystemFieldDef | null | undefined {
   if (!ref.startsWith("system:")) return undefined;
   return def.fields.find((x) => x.key === ref.slice("system:".length)) ?? null;
 }
@@ -536,7 +548,7 @@ function systemField(def: ObjectDef, ref: string): SystemFieldDef | null | undef
 /** Luật riêng từng loại mà zod không nói được: kỳ / loại biểu đồ nguồn hỗ trợ, field hệ thống có thật, kanban chỉ trên field custom. */
 function checkBlockSpecifics(type: BlockType, config: unknown, catalog: PageCatalog, base: string, errors: Issue[]) {
   const systemRefProblems = (objectKey: string, refs: { ref: string; path: string; needFilterable?: boolean }[]) => {
-    const def = objectDef(objectKey);
+    const def = catalogObject(objectKey, catalog);
     if (!def) return;
     for (const r of refs) {
       const f = systemField(def, r.ref);
@@ -547,7 +559,7 @@ function checkBlockSpecifics(type: BlockType, config: unknown, catalog: PageCata
   };
   /** Field hệ thống trong vai trò: số tổng hợp được · nhóm được · ngày. Field custom kiểm ở registry. */
   const roleProblem = (objectKey: string, ref: string, path: string, role: "aggregate" | "group" | "date") => {
-    const def = objectDef(objectKey);
+    const def = catalogObject(objectKey, catalog);
     if (!def) return;
     const f = systemField(def, ref);
     if (f === undefined) return;
@@ -622,7 +634,7 @@ function checkBlockSpecifics(type: BlockType, config: unknown, catalog: PageCata
     if (spec && spec.recordObject && !c.recordParam) errors.push({ path: `${base}.recordParam`, message: `Dòng thời gian «${spec.label}» cần tham số URL mang id bản ghi (vd «id»).` });
   } else if (type === "form") {
     const c = config as BlockConfigByType["form"];
-    const def = objectDef(c.objectKey);
+    const def = catalogObject(c.objectKey, catalog);
     if (def) {
       if (!def.capabilities.forms) errors.push({ path: `${base}.objectKey`, message: `${def.label} không có form metadata.` });
       else if (!def.forms.some((f) => f.key === c.formKey)) errors.push({ path: `${base}.formKey`, message: `${def.label} không có form «${c.formKey}».` });
@@ -636,7 +648,7 @@ function checkBlockSpecifics(type: BlockType, config: unknown, catalog: PageCata
       const k = `${f.objectKey}|${f.ref}|${f.op}`;
       if (seen.has(k)) errors.push({ path: at, message: "Ô lọc bị trùng." });
       seen.add(k);
-      const def = objectDef(f.objectKey);
+      const def = catalogObject(f.objectKey, catalog);
       if (!def) return;
       const sf = systemField(def, f.ref);
       if (sf === undefined) return;

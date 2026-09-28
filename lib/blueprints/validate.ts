@@ -37,7 +37,8 @@ import { formRefProblems } from "@/lib/metadata/form-schema";
 import { listRefProblems } from "@/lib/metadata/list-schema";
 import type { CustomFieldDef, FieldOption } from "@/lib/metadata/types";
 import { compilePattern } from "@/lib/metadata/validate";
-import { customRefsOf, validatePageSchema } from "@/lib/pages/components";
+import { customObjectListSource, customObjectTimelineSource } from "@/lib/pages/catalog";
+import { customRefsOf, defaultPageCatalog, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
 import type { PageSchema } from "@/lib/pages/types";
 import { conditionDepth, WORKFLOW_CONDITION_MAX_DEPTH, WORKFLOW_CONDITION_OPS } from "@/lib/workflow/evaluate";
 import { EVENT_SUBJECT_REFS, PAYLOAD_REF_PREFIX } from "@/lib/workflow/subject";
@@ -87,6 +88,24 @@ export function objectOf(bp: Pick<Blueprint, "objects">, key: string): AnyObject
     status: "ACTIVE",
     origin: null,
   });
+}
+
+/**
+ * Sổ nguồn trang cho phép kiểm của GÓI: sổ tĩnh + đối tượng tuỳ biến KHAI TRONG GÓI (cùng hàm dựng nguồn
+ * `customObjectListSource` / `customObjectTimelineSource` mà `effectivePageCatalog` dùng cho tổ chức). Thiếu vế này thì
+ * trang của gói trỏ `x_…` bị báo "không có trong sổ" ở bước kiểm, trong khi bước cài (lưu/xuất bản trang) lại dùng sổ
+ * hiệu lực của tổ chức — hai bước nói hai điều khác nhau.
+ */
+export function pageCatalogOf(bp: Pick<Blueprint, "objects">): PageCatalog {
+  const base = defaultPageCatalog();
+  const own = (bp.objects ?? []).map((o) => objectOf(bp, o.key)).filter((d): d is AnyObjectDef => d !== null && !d.system);
+  if (own.length === 0) return base;
+  return {
+    ...base,
+    lists: [...base.lists, ...own.map((d) => customObjectListSource(d, CUSTOM_OBJECTS_MODULE))],
+    timelines: [...base.timelines, ...own.map((d) => customObjectTimelineSource(d, CUSTOM_OBJECTS_MODULE))],
+    objects: [...(base.objects ?? []), ...own],
+  };
 }
 
 /** Field của gói ⇒ `CustomFieldDef` ACTIVE — để dùng lại NGUYÊN hàm kiểm / chuẩn hoá thuần của Phase 2. */
@@ -328,7 +347,7 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
       if (owner && !modules.has(owner)) errors.push({ path: `${p}.requiredPermission`, message: `Quyền «${pg.requiredPermission}» thuộc module «${owner}» không có trong gói — không ai mở được trang.` });
     }
     if (pg.nav.zone !== null && !ZONE_SET.has(pg.nav.zone)) errors.push({ path: `${p}.nav.zone`, message: `Nhóm menu «${pg.nav.zone}» không có trong bản đồ phòng ban.` });
-    const v = validatePageSchema(pg.schema, { modules, moduleIssues: "error" });
+    const v = validatePageSchema(pg.schema, { modules, moduleIssues: "error", catalog: pageCatalogOf(bp) });
     for (const e of v.errors) errors.push({ path: `${p}.schema${e.path ? `.${e.path}` : ""}`, message: e.message });
     if (!v.ok) return;
     const schema = pg.schema as PageSchema;
