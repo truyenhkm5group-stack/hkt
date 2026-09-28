@@ -144,7 +144,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "products.performance", label: "Hiệu quả theo mã hàng", defaultEnabled: true, why: "`/products/performance` — tỷ lệ giao thành công theo mã, đọc `ORDER_OUTCOME`." },
       { key: "products.notes", label: "Ghi chú sản phẩm", defaultEnabled: true, why: "Ô chữ tự do cho người đọc; không chạm con số nào (luật 46)." },
     ],
-    routes: ["/products", "/api/export/products"],
+    routes: ["/products", "/api/export/products", "/api/phone-reputation"],
     permissions: ["products:view"],
     why: "Danh mục hàng là nền của đơn, kho và sản xuất. `products:view` là cổng vào của cả trang Kho — Kho phụ thuộc Sản phẩm nên khoá thuộc về đây.",
   },

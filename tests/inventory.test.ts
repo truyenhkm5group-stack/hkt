@@ -12,6 +12,7 @@ import { recordInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { listReservedOrderLines, listReservedQueue, stockRiskSummary } from "@/lib/queries/stock";
 import { getOrderValidation } from "@/lib/queries/preship-validation";
+import { clearPhoneReputationCache, getPhoneReputationForOrders } from "@/lib/queries/phone-reputation";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { STOCK_STATE_LABEL, type StockState } from "@/lib/constants/inventory";
 import type { Period } from "@/lib/search-params";
@@ -273,6 +274,13 @@ export async function testInventory(db: Db) {
   assert.ok(!hangDoi.ready.some((l) => l.orderId === "ton-cho-xuat-dq"), "đơn thiếu thông tin KHÔNG được nằm trong hàng đợi xuất");
   const maThieu = thieu.blockers.map((b) => b.code);
   assert.ok(maThieu.includes("MISSING_PHONE") && maThieu.includes("MISSING_ADDRESS"), `phải nói đích danh trường thiếu, thấy: ${maThieu.join(", ")}`);
+  // Uy tín SĐT theo Pancake: chỉ đơn ĐANG CHỜ XUẤT mới được hỏi; không hỏi được Pancake ⇒ null, không phải 0.
+  clearPhoneReputationCache();
+  const uyTin = await getPhoneReputationForOrders(["ton-cho-xuat-dq-2", "rr-9001", "khong-ton-tai"]);
+  assert.ok("ton-cho-xuat-dq-2" in uyTin, "đơn đang chờ xuất phải có mặt trong kết quả");
+  assert.equal(uyTin["ton-cho-xuat-dq-2"], null, "bộ kiểm thử không có kết nối Pancake ⇒ CHƯA BIẾT (null), không bịa 0%");
+  assert.ok(!("rr-9001" in uyTin), "đơn KHÔNG đang chờ xuất không được hỏi — route không phải công cụ tra SĐT tuỳ ý");
+  assert.ok(!("khong-ton-tai" in uyTin));
   const motDon = await getOrderValidation("ton-cho-xuat-dq");
   assert.equal(motDon.report.readyToShip, thieu.readyToShip, "hàng đợi xuất và ngăn soát trên trang đơn phải cùng một kết luận");
 

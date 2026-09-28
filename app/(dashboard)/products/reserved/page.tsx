@@ -12,6 +12,7 @@ import { VALIDATION_RULES, type ValidationCode } from "@/lib/constants/preship-v
 import { getViettelPostTrackingUrl, SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, maskPhone } from "@/lib/format";
 import { listReservedQueue, type ReservedLineFinding, type ReservedQueueLine } from "@/lib/queries/stock";
+import { PhoneReputationProvider, PhoneWarningCell, ReturnRateCell } from "@/app/(dashboard)/products/reserved/reputation";
 
 export const metadata = { title: "Đơn chờ xuất" };
 
@@ -55,6 +56,7 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
   const title = scope.variant ? `${scope.productName} · ${scope.variant.label || scope.variant.sku}` : scope.productName;
 
   return (
+    <PhoneReputationProvider orderIds={[...new Set([...ready, ...incomplete].map((l) => l.orderId))]}>
     <div className="space-y-5">
       <PageHeader
         eyebrow="Kho · Đơn chờ xuất"
@@ -92,6 +94,8 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
                 <TableHead>Đơn</TableHead>
                 <TableHead>Tạo đơn</TableHead>
                 <TableHead>Khách</TableHead>
+                <TableHead className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP.">Tỷ lệ hoàn · Pancake</TableHead>
+                <TableHead className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</TableHead>
                 {byProduct ? <TableHead>Mẫu mã</TableHead> : null}
                 <TableHead className="text-right">SL</TableHead>
                 <TableHead>Trạng thái đơn</TableHead>
@@ -113,6 +117,8 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
                   </TableCell>
                   <CreatedCell line={l} />
                   <CustomerCell line={l} />
+                  <ReturnRateCell orderId={l.orderId} />
+                  <PhoneWarningCell orderId={l.orderId} />
                   {byProduct ? <VariantCell line={l} /> : null}
                   <QtyCell line={l} />
                   <TableCell className="text-xs">{ORDER_STAGE_LABEL[l.orderStage as OrderStage] ?? l.orderStage}</TableCell>
@@ -155,6 +161,8 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
                 <TableHead>Đơn</TableHead>
                 <TableHead>Tạo đơn</TableHead>
                 <TableHead>Khách</TableHead>
+                <TableHead className="text-right" title="Theo Pancake, trên mọi shop dùng Pancake: đơn thất bại ÷ (thành công + thất bại) của SĐT khách — cùng công thức cột 'Tỷ lệ hoàn' trên POS. Không phải kết quả đơn của ERP.">Tỷ lệ hoàn · Pancake</TableHead>
+                <TableHead className="text-right" title="Số lần SĐT bị shop khác báo trên Pancake — cùng cột 'Cảnh báo SĐT' trên POS. Rê chuột vào số để xem lý do.">Cảnh báo SĐT</TableHead>
                 {byProduct ? <TableHead>Mẫu mã</TableHead> : null}
                 <TableHead className="text-right">SL</TableHead>
                 <TableHead>Còn thiếu</TableHead>
@@ -169,6 +177,8 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
                   </TableCell>
                   <CreatedCell line={l} />
                   <CustomerCell line={l} />
+                  <ReturnRateCell orderId={l.orderId} />
+                  <PhoneWarningCell orderId={l.orderId} />
                   {byProduct ? <VariantCell line={l} /> : null}
                   <QtyCell line={l} />
                   <TableCell>
@@ -189,6 +199,7 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
         </SectionCard>
       ) : null}
     </div>
+    </PhoneReputationProvider>
   );
 }
 

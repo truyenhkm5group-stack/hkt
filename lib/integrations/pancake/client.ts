@@ -153,6 +153,15 @@ export class PancakeClient {
     return this.toList(record);
   }
 
+  /**
+   * Lịch sử SĐT trên TOÀN MẠNG Pancake (đơn thành công / thất bại, các lần bị shop khác báo) — đường
+   * web POS dùng cho cột "Tỷ lệ hoàn" / "Cảnh báo SĐT". Đọc: `lib/constants/phone-reputation.ts`.
+   */
+  async badReportInfo(phone: string) {
+    const record = await this.get(`shops/${this.shopId}/orders/bad_report_info`, { phone_number: phone });
+    return record.data;
+  }
+
   async getOrder(orderId: string) {
     const record = await this.get(`shops/${this.shopId}/orders/${encodeURIComponent(orderId)}`);
     return asRecord(record.data);
