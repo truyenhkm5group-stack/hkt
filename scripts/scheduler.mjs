@@ -83,6 +83,15 @@ const JOBS = [
   */
   { job: "work-auto-assign", every: minutes("WORK_AUTO_ASSIGN_EVERY_MINUTES", 10), offset: 14 },
   /*
+    KIỂM TRA DUYỆT HOÀN — 30 phút/lần (chủ shop duyệt 28/09/2026: "làm theo phương án tốt nhất").
+
+    Webhook Viettel Post không bao giờ gửi 515 "Bưu cục phát duyệt hoàn"; Pancake chuyển tiếp nhưng
+    chỉ tới ERP ở lượt đối chiếu 02:15 — ca đã duyệt hoàn nằm lại hàng đợi care trung vị 5 giờ. Lượt
+    này hỏi lại Pancake ≤ 80 đơn đang ở "đề nghị hoàn" (≈ 130 lượt gọi/giờ lúc đông, 0 khi không có
+    ca nào) rồi đối chiếu. Chỉ đóng CA care; không đổi trạng thái vận đơn, tiền hay tồn kho.
+  */
+  { job: "care-return-check", every: minutes("CARE_RETURN_CHECK_EVERY_MINUTES", 30), offset: 27 },
+  /*
     BẢN TIN MARKETING HẰNG NGÀY — 30 phút/lần, và đó KHÔNG phải "gửi 48 tin mỗi ngày".
 
     Sổ chống gửi lại (`settings["marketing.digest.sent"]`) khoá đúng MỘT bản tin cho mỗi phạm vi

@@ -1104,6 +1104,18 @@ function trangThaiNha(raw: string): Record<string, unknown> {
   delete j.startedAt;
   delete j.finishedAt;
   delete j.host;
+  /*
+    KÍCH THƯỚC TỆP NÉN KHÔNG PHẢI THỨ ĐỂ SO (luật 65). tar ghi mốc giờ của từng tệp vào bản nén, nên
+    hai lượt đóng gói CÙNG nội dung lệch nhau vài byte — đo 28/09/2026 trên Windows: chạy riêng bài
+    này 3 lần thì 2 xanh 1 đỏ (`chatbot-MOC.tar.gz` 165 ↔ 166 byte). Điều bài này khẳng định là "lượt
+    của nhà y hệt như trước", tức cùng thành phần, cùng tên tệp, cùng trạng thái, và tệp KHÔNG RỖNG.
+  */
+  for (const v of Object.values(j)) {
+    if (v && typeof v === "object" && typeof (v as { bytes?: unknown }).bytes === "number") {
+      const o = v as { bytes: unknown };
+      o.bytes = (o.bytes as number) > 0;
+    }
+  }
   return JSON.parse(chuanHoa(JSON.stringify(j))) as Record<string, unknown>;
 }
 

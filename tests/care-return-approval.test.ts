@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -326,4 +327,19 @@ export async function testCareReturnApproval(db: Db) {
   console.log(
     "✓ Chờ xử lý + Trả hàng = chờ xử lý HOÀN (không phải chờ lấy hàng) · mã 102 vẫn PENDING · 505 đề nghị ≠ 515 đã duyệt và chữ không tách nổi nên mã quyết định · ca chốt ở 515, 504 tới sau không đếm lại · dòng tệp đến sau không kéo vận đơn đang hoàn về điểm xuất phát · ĐƯỜNG SỰ KIỆN và BỘ ĐỐI CHIẾU nói cùng một điều",
   );
+}
+
+/**
+ * Job `care-return-check` (chủ shop duyệt 28/09/2026) và nút "Kiểm tra duyệt hoàn" phải đi CÙNG MỘT
+ * hàm — hai đường đọc hai luật thì sớm muộn chúng nói hai điều khác nhau về cùng một ca.
+ */
+export function testCareReturnCheckWiring() {
+  const doc = (p: string) => readFileSync(p, "utf8");
+  const jobs = doc("lib/sync/jobs.ts");
+  const job = jobs.slice(jobs.indexOf('"care-return-check": {'), jobs.indexOf('"care-return-check": {') + 1500);
+  assert.match(job, /refreshPendingReturns\(await getDb\(\)\)/, "job gọi đúng hàm dùng chung");
+  assert.match(doc("lib/actions/care-pancake-refresh.ts"), /refreshPendingReturns\(await getDb\(\)\)/, "nút gọi đúng hàm dùng chung");
+  assert.ok(!/syncOrderById/.test(doc("lib/actions/care-pancake-refresh.ts")), "nút không tự dựng vòng hỏi Pancake thứ hai");
+  assert.match(doc("scripts/scheduler.mjs"), /\{ job: "care-return-check", every: minutes\("CARE_RETURN_CHECK_EVERY_MINUTES", 30\)/, "job có lịch 30 phút, đổi được bằng biến môi trường");
+  console.log("✓ Kiểm tra duyệt hoàn: nút và job 30 phút đi cùng một hàm");
 }
