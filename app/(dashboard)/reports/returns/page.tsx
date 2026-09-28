@@ -119,20 +119,29 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
 
   const reasonFilter = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
 
-  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer] = await Promise.all([
+  /*
+    MỘT LƯỢT SONG SONG, KHÔNG PHẢI HAI LƯỢT NỐI ĐUÔI.
+
+    Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca. Nhưng
+    nó chỉ cần ĐÚNG báo cáo đó, nên bắt đầu ngay khi báo cáo lý do xong (`reasonP.then`), không đứng
+    chờ bảng theo mẫu mã. Đo production 29/09/2026 (mỗi lời gọi nguội): theo mẫu mã 2,7 s · tầng quyết
+    định 3,1 s · lý do hoàn 1,0 s — hai lượt nối đuôi là ~5,8 s, trong khi đường găng thật chỉ là
+    lý do hoàn → tầng quyết định. Dự phóng GTC dùng chung giữa các lời gọi qua `memo` (lượt đang tính
+    được dùng chung, không tính lại).
+
+    Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
+  */
+  const reasonP = getReturnReasonReport(reasonFilter);
+  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia] = await Promise.all([
     getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
     getReturnRateSummary(params.period, params.q, basis, giaTriDon),
     variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
     getReturnRateBySource(params.period, params.q, giaTriDon),
-    getReturnReasonReport(reasonFilter),
+    reasonP,
     listProductCodes(),
     listAttributedMarketers(),
-  ]);
-
-  // Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca.
-  const [logistics, intel, theoBacGia] = await Promise.all([
     logisticsPerformance(params.period, giaTriDon),
-    getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport, value: giaTriDon }),
+    reasonP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
     getReturnRateByTier(params.period, params.q, basis),
   ]);
 

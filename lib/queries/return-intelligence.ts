@@ -215,7 +215,9 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
   const loc = { period: input.period, basis: input.basis, codes: input.codes, variantKeys: input.variantKeys, marketerIds: input.marketerIds, value };
   const trendGrain: TrendGrain = input.trendGrain ?? "DAY";
 
-  const [hienTai, kyTruoc, duBao, targets, ten, cham, xuHuong] = await Promise.all([
+  // `problemByProduct` chỉ phụ thuộc `loc` ⇒ chạy CÙNG lượt, không đứng sau cả khối (đo production
+  // 29/09/2026: khối này 3,1 s nguội, mà mọi phần của nó độc lập với nhau).
+  const [hienTai, kyTruoc, duBao, targets, ten, cham, xuHuong, lopTheoMa] = await Promise.all([
     input.reasonReport ? Promise.resolve(input.reasonReport) : getReturnReasonReport(loc),
     input.previous ? getReturnReasonReport({ ...loc, period: { ...input.period, from: input.previous.from, to: input.previous.to } }) : Promise.resolve(null),
     getProjectedDeliveryMetrics(input.period, input.basis, "PRODUCT", value),
@@ -223,6 +225,7 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
     marketerNames(),
     careRows(input.period, input.basis, value),
     trendPoints(input.period, input.basis, trendGrain, value),
+    problemByProduct(loc),
   ]);
 
   /*
@@ -280,7 +283,6 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
   });
 
   /* ─── LỚP VẤN ĐỀ CHIẾM NHIỀU CA NHẤT của từng mã: đếm trên lý do, không trên con số ─── */
-  const lopTheoMa = await problemByProduct(loc);
   for (const p of products) {
     const m = lopTheoMa.get(p.code);
     if (!m) continue;
