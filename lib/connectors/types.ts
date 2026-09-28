@@ -55,8 +55,8 @@ export type ConnectorView = {
 
 export type ConnectionsView = {
   organization: { code: string; name: string; isHome: boolean };
-  /** Máy chủ có khoá lưu bí mật không — chỉ có/không + câu giải thích, KHÔNG có gì của khoá. */
-  secretsReady: { ok: boolean; reason: string | null };
+  /** Máy chủ có khoá lưu bí mật không — có/không + câu giải thích + 8 ký tự đầu của MÃ khoá (HMAC, không suy ngược), KHÔNG có gì của khoá. */
+  secretsReady: { ok: boolean; reason: string | null; keyIdShort: string | null };
   groups: { kind: ConnectorKind; label: string; rows: ConnectorView[] }[];
 };
 

@@ -4362,6 +4362,27 @@ export const platformFlagOverrides = pgTable(
   (t) => [uniqueIndex("platform_flag_overrides_pk").on(t.organizationId, t.flagKey)],
 );
 
+/**
+ * Cài đặt của NỀN TẢNG (không thuộc tổ chức nào) — 0172. Khoá dạng `platform.<miền>.<tên>`, giá trị jsonb.
+ *
+ * Mục đầu tiên: `platform.signup.mode` (`off` · `invite` · `open`) — người vận hành bật `/start` ở `/platform` mà KHÔNG
+ * cần deploy. Hiệu lực = min(trần môi trường `PLATFORM_SIGNUP_MODE`, cài đặt này) — `lib/onboarding/signup-mode.ts`.
+ * THIẾU dòng ⇒ `off`. Ràng buộc CHECK giữ giá trị trong tập đóng, để một lượt ghi tay sai chính tả không mở cửa.
+ * Mọi lượt đổi ghi `platform_audit_log` (`SIGNUP_MODE_SET`).
+ */
+export const platformSettings = pgTable(
+  "platform_settings",
+  {
+    key: text("key").primaryKey(),
+    value: jsonb("value").notNull(),
+    updatedAt: updatedAt(),
+    /** `"<mã tổ chức>:<id tài khoản>"` — cùng khuôn `platform_organization_modules.updated_by`. */
+    updatedBy: text("updated_by"),
+    updatedByEmail: text("updated_by_email"),
+  },
+  () => [check("platform_settings_signup_mode_check", sql`"key" <> 'platform.signup.mode' OR ("value" #>> '{}') IN ('off','invite','open')`)],
+);
+
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
 export const platformAuditLog = pgTable(
   "platform_audit_log",

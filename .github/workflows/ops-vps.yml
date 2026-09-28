@@ -82,6 +82,7 @@ on:
           - backup              # sao lưu NGAY bằng scripts/erp-backup.sh: CSDL (-Fc) + dữ liệu bot chat, kiểm toàn vẹn, xoay vòng, đẩy ngoài máy nếu đã khai (vào /root/backups/manual)
           - backup-status       # trạng thái sao lưu: lịch cron, lượt gần nhất, bản trên máy, ngoài máy, ổ đĩa — KHÔNG in dữ liệu
           - restore-drill       # DIỄN TẬP khôi phục bản mới nhất vào container Postgres TẠM (không mạng, trần RAM), đếm dòng bảng then chốt so với CSDL sống, rồi xoá container
+          - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — CHẠY TAY, không nằm trong cron
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
@@ -478,7 +479,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org"
 
             LOP=GHI
             case "$ARG" in
@@ -1172,6 +1173,19 @@ jobs:
                 SB=/root/erp/scripts/erp-backup.sh
                 [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
                 ERP_DIR=/root/erp bash "$SB" restore-drill ;;
+              restore-drill-org)
+                # Diễn tập khôi phục MỘT CSDL tổ chức — cùng khuôn với restore-drill của nhà: bản mới nhất của
+                # /root/backups/orgs/<csdl>/ nạp vào CSDL TẠM `tam_khoiphuc_<mã>` BÊN TRONG container Postgres tạm
+                # (không mạng, trần RAM), đếm bảng lõi so với CSDL sống (chỉ `count(*)`), xoá container. KHÔNG
+                # một lệnh ghi nào vào erp-db. Ô arg = mã tổ chức (chữ thường, số, gạch ngang); rỗng = luân phiên.
+                case "$ARG" in
+                  *[!a-z0-9_-]*)
+                    echo "::error::Tham số phải là MÃ tổ chức (chữ thường, số, - hoặc _), ví dụ: bp-a — hoặc để trống để luân phiên."
+                    exit 1 ;;
+                esac
+                SB=/root/erp/scripts/erp-backup.sh
+                [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
+                ERP_DIR=/root/erp bash "$SB" restore-drill-org "$ARG" ;;
               rotate-webhook-secrets)
                 NEW_PK="pk_$(openssl rand -hex 16)"; NEW_VTP="vtp_$(openssl rand -hex 16)"
                 sed -i -E "s|^PANCAKE_WEBHOOK_SECRET=.*|PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"|; s|^VIETTELPOST_WEBHOOK_SECRET=.*|VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"|" .env

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
-import { InvitePanel, RetrySetupButton, RevokeInviteButton } from "@/components/onboarding/platform-signup";
+import { InvitePanel, RetrySetupButton, RevokeInviteButton, SignupModeControl } from "@/components/onboarding/platform-signup";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
 import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -11,7 +11,10 @@ import { listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
 import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
 import { listOrganizations } from "@/lib/platform/organizations";
-import { listOnboardingStates, signupMode } from "@/lib/onboarding/service";
+import { secretsKeyPublicStatus, SECRETS_KEY_ENV } from "@/lib/connectors/secrets";
+import { listOnboardingStates } from "@/lib/onboarding/service";
+import { SIGNUP_MODE_LABEL } from "@/lib/onboarding/shared";
+import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
 import { getOrganizationModuleView } from "@/lib/queries/platform-modules";
@@ -20,7 +23,6 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Vận hành nền tảng" };
 
 const STATUS_LABEL: Record<OrgHealth["status"], string> = { ACTIVE: "Đang chạy", SUSPENDED: "Đình chỉ", ARCHIVED: "Lưu trữ", SETUP_FAILED: "Dựng hỏng" };
-const SIGNUP_MODE_LABEL = { off: "TẮT — /start chỉ in «chưa mở đăng ký»", invite: "Cần mã mời", open: "Mở (có trần theo IP / ngày)" } as const;
 
 function Measured({ ok, children, note }: { ok: boolean | null; children: React.ReactNode; note?: string | null }) {
   return (
@@ -69,7 +71,8 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const selected = selectedCode ? health.organizations.find((o) => o.code === selectedCode) : undefined;
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
-  const [onboarding, invites, plans, registry] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations()]);
+  const [onboarding, invites, plans, registry, signup] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState()]);
+  const secretsKey = secretsKeyPublicStatus();
   const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
   const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
 
@@ -181,8 +184,45 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
       </SectionCard>
 
       <SectionCard
+        id="launch-gates"
+        title="Cổng mở bán"
+        description="Hai công tắc của nền tảng — docs/platform/launch-gates.md"
+        hint="A: khoá mã hoá bí mật kết nối theo tổ chức — chỉ có ở biến môi trường máy chủ, màn hình không bao giờ in khoá, chỉ mã khoá rút gọn. B: chế độ đăng ký /start = min(trần môi trường PLATFORM_SIGNUP_MODE, cài đặt ở đây); đổi cài đặt KHÔNG cần deploy, mọi lượt đổi vào nhật ký nền tảng."
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-1.5 text-sm" data-launch-gate="secrets-key">
+            <p className="font-semibold">A · Khoá bí mật kết nối ({SECRETS_KEY_ENV})</p>
+            {secretsKey.ready ? (
+              <p>
+                <span className="font-medium text-emerald-700 dark:text-emerald-300">Sẵn sàng</span> · mã khoá <span className="font-mono">{secretsKey.keyIdShort}</span>
+                <span className="block text-xs text-muted-foreground">Tổ chức lưu được bí mật Lark / Telegram / khoá AI ở /settings/connections. Đổi khoá ⇒ mọi bí mật đã lưu phải nhập lại.</span>
+              </p>
+            ) : (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                Chưa có {SECRETS_KEY_ENV} — người vận hành thêm secret GitHub <span className="font-mono">{SECRETS_KEY_ENV}</span> rồi deploy. Hiện tổ chức KHÔNG lưu được bí mật kết nối; tổ chức nhà không ảnh hưởng.
+                <span className="block text-xs">{secretsKey.reason}</span>
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5 text-sm" data-launch-gate="signup-mode">
+            <p className="font-semibold">B · Đăng ký tổ chức mới (/start)</p>
+            <SignupModeControl
+              ceiling={signup.ceiling.mode}
+              ceilingSource={signup.ceiling.source}
+              setting={signup.setting.mode}
+              stored={signup.setting.stored}
+              effective={signup.effective}
+              updatedAt={signup.setting.updatedAt ? formatDateTime(new Date(signup.setting.updatedAt)) : null}
+              updatedByEmail={signup.setting.updatedByEmail}
+              cacheSeconds={signup.cacheSeconds}
+            />
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
         title="Tự phục vụ — mã mời & tạo tổ chức"
-        description={`Đăng ký công khai: ${SIGNUP_MODE_LABEL[signupMode()]} (biến môi trường PLATFORM_SIGNUP_MODE, đọc ở máy chủ)`}
+        description={`Đăng ký công khai đang có hiệu lực: ${SIGNUP_MODE_LABEL[signup.effective]} — đổi ở khung «Cổng mở bán» phía trên`}
         hint="Người vận hành luôn tạo được tổ chức cho khách qua /start — cùng luồng với khách, không cần cờ, và phiên của bạn không đổi. Mã mời dùng một lần, có hạn; CSDL chỉ giữ băm của mã. Dựng hỏng giữa chừng ⇒ tổ chức ở «Dựng hỏng» (bảng trên) kèm nút Chạy lại — không có CSDL nào bị xoá tự động."
         actions={
           <Button asChild size="sm">

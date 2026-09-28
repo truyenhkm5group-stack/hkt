@@ -38,6 +38,7 @@ import { actorOf } from "@/lib/platform-ui/metadata-admin";
 import { setSettingJson } from "@/lib/settings";
 import { saveRule } from "@/lib/workflow/rules";
 import { stableHash, stableStringify } from "@/lib/blueprints/hash";
+import { blueprintLeaks } from "@/lib/blueprints/restore-drill";
 import { installBlueprint } from "@/lib/blueprints/install";
 import { blueprintContentHash, comparableBlueprint, exportDenial, exportFileName, exportForUser, exportKeyOf, exportOrgBlueprint, exportVersionOf, type OrgExport } from "@/lib/blueprints/export";
 import { BLUEPRINT_FILE_MAX_BYTES, installBlueprintFile, parseBlueprintFile, previewBlueprintFile } from "@/lib/blueprints/import-file";
@@ -53,7 +54,6 @@ const SECRET_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/abcd1234-ox
 const RECORD_TITLE = "HD-BAN-GHI-RIENG-7788";
 const RECORD_VALUE = "GIA-TRI-BAN-GHI-XYZ-4321";
 const HAND_EDIT = "Sửa tay trên tổ chức A — đoạn này phải đi theo gói";
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function sessionUser(over: Partial<SessionUser>): SessionUser {
   return { id: "ox-user", email: "ox@local", name: "OX", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: "nha", name: "Nhà", isHome: true }, modules: [...MODULE_KEYS], ...over };
@@ -111,19 +111,10 @@ async function download(token: string): Promise<{ status: number; headers: Heade
 }
 
 /**
- * Quét chuỗi của gói: không email, không bí mật, không giá trị bản ghi, không mật khẩu, không id nội bộ. Trả danh sách
- * chỗ rò (rỗng = sạch) — bài kiểm đột biến dựa vào đúng hàm này.
+ * Quét chuỗi của gói: không email, không bí mật, không giá trị bản ghi, không mật khẩu, không id nội bộ. Định nghĩa
+ * "rò" dùng chung với kịch bản diễn tập khôi phục (`lib/blueprints/restore-drill.ts`) — một luật, hai nơi đọc.
  */
-export function leaksOf(bp: unknown, forbidden: readonly string[]): string[] {
-  const text = JSON.stringify(bp);
-  const out: string[] = [];
-  for (const s of forbidden) if (text.includes(s)) out.push(`chứa «${s}»`);
-  const emails = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g);
-  if (emails) out.push(`có email: ${[...new Set(emails)].join(", ")}`);
-  const uuid = UUID.exec(text);
-  if (uuid) out.push(`có id nội bộ ${uuid[0]}`);
-  return out;
-}
+export const leaksOf = blueprintLeaks;
 
 function testPure() {
   assert.equal(exportKeyOf("bp-a"), "org-bp-a");

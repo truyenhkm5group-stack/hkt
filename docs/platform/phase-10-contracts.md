@@ -5,7 +5,9 @@
 
 ## 1. Cửa vào (X7)
 
-- Cờ `PLATFORM_SIGNUP_MODE` ∈ `off | invite | open` (mặc định `off`; production giữ `off` cho tới khi chủ nền tảng đổi).
+- Chế độ ∈ `off | invite | open`, hiệu lực = min(trần `PLATFORM_SIGNUP_MODE`, cài đặt `platform_settings['platform.signup.mode']`)
+  — `launch-gates.md` mục B. Trần: không đặt ⇒ `invite`, `off` ⇒ tắt cứng, lạ ⇒ `off`. Cài đặt: người vận hành đổi ở
+  `/platform` KHÔNG cần deploy, mặc định `off` ⇒ production vẫn TẮT cho tới khi được bật.
 - `invite`: người vận hành nền tảng (`platform:operate`, màn `/platform`) tạo mã mời dùng MỘT lần, có hạn
   (`platform_signup_invites` ở control plane: băm mã, hạn, người tạo, dùng lúc, tổ chức sinh ra). Mã thô chỉ hiện một lần.
 - `open`: không cần mã, nhưng có trần theo IP / giờ và theo ngày toàn nền tảng.

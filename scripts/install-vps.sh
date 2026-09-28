@@ -169,6 +169,22 @@ ENV
   say "Đã ghi .env (chmod 600)"
 fi
 
+# ═══ KHOÁ BÍ MẬT KẾT NỐI THEO TỔ CHỨC — PLATFORM_SECRETS_KEY (docs/platform/launch-gates.md mục A) ═══
+#
+# Đi từ GitHub Secret → deploy-vps.yml (env + envs + export của bước SSH) → bootstrap.sh (exec sang tệp này, môi trường
+# giữ nguyên) → .env → container (compose `env_file: .env`). Chạy SAU cả hai nhánh .env để lần cài đầu cũng nhận khoá.
+#
+# Luật "RỖNG ⇒ GIỮ NGUYÊN" của khoá API, và ở đây nó còn quan trọng hơn: khoá này MÃ HOÁ dữ liệu thật của khách —
+# Secret bị xoá nhầm mà ghi đè rỗng là mọi bí mật đã lưu thành rác. Không bao giờ in giá trị (kể cả khi từ chối).
+# `upsert_env` chở giá trị qua `sed` với dấu `|`: ký tự ngoài base64 (`&`, `|`, `\`, nháy) sẽ ghi SAI khoá một cách im
+# lặng ⇒ từ chối ghi và nói rõ, giữ giá trị cũ. `openssl rand -base64 48` luôn nằm trong tập cho phép.
+if [ -n "${PLATFORM_SECRETS_KEY:-}" ]; then
+  case "$PLATFORM_SECRETS_KEY" in
+    *[!A-Za-z0-9+/=_.-]*) warn "PLATFORM_SECRETS_KEY có ký tự ngoài base64 — KHÔNG ghi (giữ giá trị cũ). Tạo lại bằng: openssl rand -base64 48" ;;
+    *) upsert_env PLATFORM_SECRETS_KEY "${PLATFORM_SECRETS_KEY}"; say "PLATFORM_SECRETS_KEY: đã ghi vào .env (không in giá trị)" ;;
+  esac
+fi
+
 # ═══ CÔNG TẮC AN TOÀN — FAIL-CLOSED: VARIABLE BỊ XOÁ / RỖNG ⇒ TẮT ═══
 #
 # LỖI ĐÃ SỬA (24/09/2026): ba công tắc dưới đây từng đi chung luật "rỗng thì giữ nguyên giá trị cũ"

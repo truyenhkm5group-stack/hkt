@@ -12,6 +12,7 @@ import {
   UNPARSABLE,
   evaluateBackupHealth,
   formatBackupSize,
+  parseBackupDrill,
   parseBackupRun,
   parseOrgBackupSummary,
   type BackupTarget,
@@ -1276,6 +1277,237 @@ export async function testChamSaoLuuToChuc() {
   console.log("✓ Chấm sao lưu theo tổ chức: lời khai của nhà / của tổ chức khác không bao giờ là căn cứ cho một tổ chức (DOWN 'chưa có bản sao', nói ra tệp đặt nhầm) · tổ chức không có vế bot chat · diễn tập của nhà không phủ tổ chức · CSDL ở máy khác ⇒ đỏ · tổng hợp tổ chức chỉ nhà thấy và không đổi mức của nhà · đọc đĩa thật: tổ chức chỉ đọc orgs/<csdl>/, tên lạ không thành đường dẫn");
 }
 
+/* ═════════════ 11 · DIỄN TẬP KHÔI PHỤC MỘT CSDL TỔ CHỨC (restore-drill-org) — CHẠY TAY ═════════════ */
+
+/** Thân một hàm shell (từ `ten() {` tới `}` đầu dòng), đã bỏ chú thích. */
+function thanHam(ten: string): string {
+  const code = src().replace(/\r\n/g, "\n");
+  const i = code.indexOf(`\n${ten}() {`);
+  assert.ok(i >= 0, `scripts/erp-backup.sh phải có hàm ${ten}`);
+  return boChuThichShell(code.slice(i, code.indexOf("\n}\n", i)));
+}
+
+export function testDienTapToChucMaNguon() {
+  const { toChuc } = tachPhanToChuc();
+  const khoi = boChuThichShell(toChuc);
+  const dt = thanHam("cmd_restore_drill_to_chuc");
+  // Đích khôi phục KHÔNG BAO GIỜ là erp-db.
+  assert.ok(!/\b(dropdb|createdb)\b|alter database/i.test(khoi), "khối tổ chức không được tạo / xoá / đổi tên CSDL nào — CSDL tạm sống và chết cùng container tạm");
+  for (const dong of khoi.split("\n").filter((d) => /"\$DB_CONTAINER"/.test(d) && /docker exec/.test(d))) {
+    assert.ok(/ psql -U erp -d /.test(dong) && /select (count\(\*\)|\(pg_database_size)/.test(dong) || /pg_dump -U erp -d "\$csdl" -Fc/.test(dong) || /pg_restore --list/.test(dong) || /datname|platform_organizations/.test(dong), `lệnh vào erp-db trong khối tổ chức chỉ được ĐỌC: ${dong.trim()}`);
+  }
+  assert.ok(!/"\$DB_CONTAINER"[^\n]*pg_restore -U|pg_restore -U[^\n]*"\$DB_CONTAINER"/.test(dt), "diễn tập tổ chức KHÔNG BAO GIỜ pg_restore vào erp-db");
+  assert.match(dt, /docker exec "\$DRILL_TEN_TO_CHUC" pg_restore -U erp -d "\$tam"/, "pg_restore vào CSDL tạm trong container tạm");
+  assert.match(dt, /-e POSTGRES_DB="\$tam"/, "CSDL tạm dựng bằng POSTGRES_DB của container tạm");
+  assert.match(dt, /--network none/, "container diễn tập KHÔNG có mạng");
+  assert.ok(!/ -p |--publish/.test(dt), "container diễn tập KHÔNG mở cổng");
+  assert.match(dt, /--memory "\$BO_NHO_DIEN_TAP" --memory-swap "\$BO_NHO_DIEN_TAP"/, "trần bộ nhớ như diễn tập nhà");
+  assert.match(dt, /trap don_dien_tap_to_chuc EXIT/, "container tạm phải bị xoá cả khi diễn tập hỏng giữa chừng");
+  assert.match(thanHam("don_dien_tap_to_chuc"), /docker rm -f -v "\$DRILL_TEN_TO_CHUC"/);
+  assert.ok(dt.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") > 0 && dt.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB") < dt.indexOf("docker run"), "kiểm RAM TRƯỚC khi dựng container");
+  assert.ok(dt.indexOf('ten_csdl_tam "$csdl"') < dt.indexOf("docker run"), "tên CSDL tạm qua hàng rào TRƯỚC khi dựng gì");
+  // Tên tạm: tiền tố KHÔNG giao với mẫu tên CSDL tổ chức — lượt sao lưu đêm không bao giờ coi nó là một tổ chức.
+  const tienTo = /^TIEN_TO_CSDL_TAM="([^"]+)"$/m.exec(src())?.[1];
+  assert.equal(tienTo, "tam_khoiphuc_");
+  assert.ok(!ORG_BACKUP_DATABASE_PATTERN.test(`${tienTo}x`) && !`${tienTo}`.startsWith("erp_org_"), "tiền tố CSDL tạm không được khớp mẫu erp_org_*");
+  // CHẠY TAY: không đường tự động nào gọi nó.
+  for (const ham of ["cmd_run", "cmd_cron", "cmd_install_cron", "sao_luu_cac_to_chuc"]) assert.ok(!/restore_drill_to_chuc|restore-drill-org/.test(thanHam(ham)), `${ham} không được gọi diễn tập tổ chức — bật tự động là quyết định của chủ nền tảng`);
+  // Bảng đếm có thật trong lược đồ, và gồm đủ bảng lõi mà lượt sao lưu đã kiểm.
+  const bang = hangSoChuoi("BANG_DIEN_TAP_TO_CHUC");
+  const schema = readFileSync("db/schema.ts", "utf8");
+  for (const b of bang) if (b.startsWith("public.")) assert.ok(schema.includes(`"${b.slice(7)}"`), `bảng diễn tập ${b} không có trong db/schema.ts`);
+  for (const b of hangSoChuoi("BANG_LOI_TO_CHUC")) assert.ok(bang.includes(b), `diễn tập tổ chức phải đếm bảng lõi ${b}`);
+  for (const b of ["public.meta_pages", "public.meta_custom_fields", "public.workflow_rules", "public.custom_records"]) assert.ok(bang.includes(b), `diễn tập tổ chức phải đếm bảng cấu hình / dữ liệu ${b}`);
+
+  // Ops: thao tác riêng, làn DOC_NANG, soát ô arg rồi mới gọi CHUNG erp-backup.sh.
+  const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
+  const opts = ops.slice(ops.indexOf("        options:\n"), ops.indexOf("      days:"));
+  assert.match(opts, /^ {10}- restore-drill-org /m, "ops phải có thao tác restore-drill-org");
+  const lop = (ten: string) => (new RegExp(`^ +${ten}="([^"]*)"`, "m").exec(ops)?.[1] ?? "").split(/\s+/);
+  assert.ok(lop("DOC_NANG").includes("restore-drill-org"), "restore-drill-org: làn DOC_NANG — dựng một Postgres thứ hai trên máy 2 GB");
+  const i = ops.indexOf("\n              restore-drill-org)\n");
+  assert.ok(i > 0, "không tìm thấy nhánh restore-drill-org");
+  const nhanh = ops.slice(i, ops.indexOf('"$ARG" ;;', i) + '"$ARG" ;;'.length);
+  assert.match(nhanh, /case "\$ARG" in\s*\n\s*\*\[!a-z0-9_-\]\*\)/, "ô arg phải qua danh sách ký tự CHO PHÉP trước khi tới script");
+  assert.match(nhanh, /bash "\$SB" restore-drill-org "\$ARG" ;;$/, "ops gọi CHUNG scripts/erp-backup.sh");
+  console.log(`✓ Diễn tập tổ chức (mã nguồn): đích là CSDL tạm ${tienTo}<mã> trong container tạm (không mạng, không cổng, trần RAM, trap dọn), 0 lệnh createdb/dropdb/alter database, erp-db chỉ bị ĐỌC · kiểm RAM + tên tạm TRƯỚC khi dựng · không đường tự động nào gọi (cron/run) · ${bang.length} bảng đều có trong lược đồ · ops restore-drill-org làn DOC_NANG, soát arg`);
+}
+
+/** Khung chạy diễn tập tổ chức THẬT với docker / free / df giả. */
+function khungDienTap(lenh: string, truoc = ""): string {
+  return [
+    "#!/usr/bin/env bash",
+    "set -uo pipefail",
+    'T="$(mktemp -d)"',
+    'mkdir -p "$T/bin"',
+    "cat > \"$T/bin/docker\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "$*" >> "$DOCKER_LOG"',
+    'case "$1" in',
+    "  inspect) case \"$*\" in *Config.Image*) echo postgres:16-alpine ;; esac ;;",
+    "  ps) : ;;",
+    '  run) [ "${STUB_RUN:-ok}" = ok ] || exit 1; echo id-gia ;;',
+    '  logs) echo "PostgreSQL init process complete; ready for start up." ;;',
+    "  rm) : ;;",
+    "  exec)",
+    '    ct="$2"',
+    '    case "$*" in',
+    "      *pg_isready*) exit 0 ;;",
+    "      *pg_database_size*) echo 42 ;;",
+    '      *"pg_restore -U"*) [ "${STUB_RESTORE:-ok}" = ok ] || { echo "pg_restore: error: loi gia" >&2; exit 1; } ;;',
+    '      *"select count(*) from"*)',
+    '        b="${!#}"; b="${b##*from }"',
+    '        if [ "$ct" = erp-db ]; then echo 5; else case " ${STUB_RONG:-} " in *" $b "*) echo 0 ;; *) echo 4 ;; esac; fi ;;',
+    "    esac ;;",
+    "esac",
+    "EOF",
+    "cat > \"$T/bin/free\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "              total        used        free      shared  buff/cache   available"',
+    'echo "Mem:           1900         800         300          10         800        ${STUB_RAM:-1200}"',
+    "EOF",
+    "cat > \"$T/bin/df\" <<'EOF'",
+    "#!/usr/bin/env bash",
+    'echo "Filesystem 1048576-blocks Used Available Capacity Mounted"',
+    'echo "/dev/gia 40000 1 999999 1% /"',
+    "EOF",
+    'chmod +x "$T/bin/docker" "$T/bin/free" "$T/bin/df"',
+    'export PATH="$T/bin:$PATH" DOCKER_LOG="$T/docker.log"',
+    'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks"',
+    ': > "$DOCKER_LOG"',
+    `source "${bashPath(SCRIPT)}"`,
+    "set +e",
+    "giu_khoa() { return 0; }   # khoá: đo riêng bằng flock THẬT (testKhoaSaoLuuChayThat)",
+    'for c in alpha beta; do mkdir -p "$ERP_BACKUP_DIR/orgs/erp_org_$c/daily" "$ERP_BACKUP_DIR/orgs/erp_org_$c/manual"; done',
+    'for m in 20260925-0217 20260926-0217; do echo "PGDMP" > "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily/erp_org_alpha-$m.dump"; done',
+    'echo "PGDMP" > "$ERP_BACKUP_DIR/orgs/erp_org_alpha/manual/erp_org_alpha-20260927-1015.dump"',
+    'echo "rac" > "$ERP_BACKUP_DIR/orgs/erp_org_alpha/manual/erp_org_alpha-20991231-2359.dump.dang-ghi"',
+    truoc,
+    `( set -e; ${lenh} ) > "$T/out" 2>&1; rc=$?`, // set -e: ĐÚNG cờ của script khi chạy thật
+    'echo "@@EXIT"; echo "$rc"',
+    'echo "@@OUT"; cat "$T/out"',
+    'echo "@@ALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-drill.json" 2>/dev/null',
+    'echo "@@BETA"; cat "$T/backups/status/orgs/erp_org_beta/last-drill.json" 2>/dev/null',
+    'echo "@@NHA"; ls "$T/backups/status/last-drill.json" 2>/dev/null',
+    'echo "@@DOCKER"; cat "$DOCKER_LOG"',
+    'echo "@@HET"',
+    'rm -rf "$T"',
+    "",
+  ].join("\n");
+}
+
+export function testDienTapToChucChayThat() {
+  const bang = hangSoChuoi("BANG_DIEN_TAP_TO_CHUC");
+  const lenhDocker = (ra: string) => phan(ra, "DOCKER").split("\n").filter(Boolean);
+  const chiDocErpDb = (ra: string) => {
+    for (const l of lenhDocker(ra).filter((d) => /^exec (-i )?erp-db /.test(d))) {
+      assert.match(l, /^exec erp-db psql -U erp -d \S+ -Atc select (count\(\*\) from |\(pg_database_size)/, `lệnh vào erp-db phải chỉ ĐỌC: ${l}`);
+    }
+  };
+
+  // ───────── ĐẠT — qua ĐÚNG đường main, bản MỚI NHẤT theo tên, CSDL tạm trong container tạm, dọn khi xong ─────────
+  const dat = chayBash(khungDienTap("main restore-drill-org alpha"));
+  assert.equal(phan(dat.ra, "EXIT"), "0", `diễn tập đạt phải thoát 0:\n${dat.ra}`);
+  const ld = lenhDocker(dat.ra);
+  const run = ld.find((l) => l.startsWith("run "));
+  assert.ok(run, "phải dựng container tạm");
+  assert.match(run, /--label erp\.restore-drill-org=1 --network none --memory 512m --memory-swap 512m/);
+  assert.match(run, /-e POSTGRES_DB=tam_khoiphuc_alpha /, "CSDL tạm tên tam_khoiphuc_<mã> — KHÔNG bắt đầu bằng erp_org_");
+  assert.match(run, /erp_org_alpha-20260927-1015\.dump:\/drill\/ban\.dump:ro/, "chọn bản MỚI NHẤT theo mốc trong tên (manual/ mới hơn daily/), bỏ tệp .dang-ghi");
+  const ten = /--name (erp-restore-drill-org-\d+)/.exec(run)?.[1];
+  assert.ok(ten);
+  assert.ok(ld.some((l) => l.startsWith(`exec ${ten} pg_restore -U erp -d tam_khoiphuc_alpha --no-owner --no-privileges`)), "pg_restore vào CSDL tạm trong container tạm");
+  chiDocErpDb(dat.ra);
+  assert.equal(ld.at(-1), `rm -f -v ${ten}`, "lệnh docker cuối cùng là xoá container tạm (trap EXIT)");
+  const drill = parseBackupDrill(JSON.parse(phan(dat.ra, "ALPHA")));
+  assert.ok(drill, "trạng thái diễn tập phải đọc được bằng CHÍNH bộ đọc của ERP");
+  assert.equal(drill.database, "erp_org_alpha");
+  assert.equal(drill.result, "OK");
+  assert.equal(drill.dumpFile, "erp_org_alpha-20260927-1015.dump");
+  assert.deepEqual(drill.tables.map((t) => `${t.name}=${t.restored}/${t.live}`), bang.map((b) => `${b}=4/5`));
+  assert.equal(phan(dat.ra, "NHA"), "", "diễn tập tổ chức KHÔNG ghi last-drill.json của nhà");
+  // ERP: tổ chức có bản + diễn tập của CHÍNH nó ⇒ hết vàng "chưa diễn tập".
+  const bayGio = new Date(drill.finishedAt.getTime() + 3_600_000);
+  const banToChuc = { schema: 1, kind: "org-backup", database: "erp_org_alpha", result: "OK", trigger: "cron", finishedAt: new Date(bayGio.getTime() - 2 * 3_600_000).toISOString(), db: { file: "erp_org_alpha-x.dump", bytes: 1, tableData: 90 }, offsite: { state: "OK", remote: "gcrypt:" }, retention: { daily: 7 } };
+  const A: BackupTarget = { scope: "ORGANIZATION", database: "erp_org_alpha" };
+  const suc = evaluateBackupHealth({ dirReadable: true, lastRun: banToChuc, lastSuccess: banToChuc, lastDrill: JSON.parse(phan(dat.ra, "ALPHA")) }, bayGio, A);
+  assert.equal(suc.state, "HEALTHY", `thẻ của tổ chức phải nhận diễn tập của chính nó: ${suc.issues.map((x) => x.text).join(" | ")}`);
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastDrill: JSON.parse(phan(dat.ra, "ALPHA")) }, bayGio).lastDrill, null, "diễn tập của tổ chức không làm căn cứ cho NHÀ");
+
+  // ───────── pg_restore lỗi ⇒ FAILED, container VẪN bị xoá ─────────
+  const hong = chayBash(khungDienTap("main restore-drill-org alpha"), { STUB_RESTORE: "loi" });
+  assert.equal(phan(hong.ra, "EXIT"), "1");
+  assert.equal(parseBackupDrill(JSON.parse(phan(hong.ra, "ALPHA")))?.result, "FAILED");
+  assert.match(lenhDocker(hong.ra).at(-1) ?? "", /^rm -f -v erp-restore-drill-org-\d+$/, "diễn tập hỏng giữa chừng vẫn xoá container tạm");
+  chiDocErpDb(hong.ra);
+
+  // ───────── Bản khôi phục RỖNG ở bảng mà CSDL sống có dòng ⇒ FAILED, nói tên bảng ─────────
+  const rong = chayBash(khungDienTap("main restore-drill-org alpha"), { STUB_RONG: "public.meta_pages" });
+  assert.equal(phan(rong.ra, "EXIT"), "1");
+  assert.match(parseBackupDrill(JSON.parse(phan(rong.ra, "ALPHA")))?.reason ?? "", /public\.meta_pages\(rỗng\)/);
+
+  // ───────── Không có bản ⇒ SKIPPED, không dựng gì ─────────
+  const khongBan = chayBash(khungDienTap("main restore-drill-org beta"));
+  assert.equal(phan(khongBan.ra, "EXIT"), "1");
+  assert.equal(parseBackupDrill(JSON.parse(phan(khongBan.ra, "BETA")))?.result, "SKIPPED");
+  assert.ok(!lenhDocker(khongBan.ra).some((l) => l.startsWith("run ")), "không có bản ⇒ không dựng container");
+
+  // ───────── RAM thiếu ⇒ SKIPPED, không dựng gì ─────────
+  const ram = chayBash(khungDienTap("main restore-drill-org alpha"), { STUB_RAM: "300" });
+  assert.equal(phan(ram.ra, "EXIT"), "1");
+  assert.match(parseBackupDrill(JSON.parse(phan(ram.ra, "ALPHA")))?.reason ?? "", /RAM dùng được 300 MB/);
+  assert.ok(!lenhDocker(ram.ra).some((l) => l.startsWith("run ")));
+
+  // ───────── Tham số lạ ⇒ thoát 2, KHÔNG một lệnh docker nào ─────────
+  for (const xau of ["a;rm -rf /", "../x", "ALPHA", "erp_org_a b", "-x"]) {
+    const r = chayBash(khungDienTap(`main restore-drill-org ${bq(xau)}`));
+    assert.equal(phan(r.ra, "EXIT"), "2", `tham số ${JSON.stringify(xau)} phải bị từ chối`);
+    assert.deepEqual(lenhDocker(r.ra), [], `tham số ${JSON.stringify(xau)}: không lệnh docker nào được chạy`);
+  }
+
+  // ───────── Hàm thuần: mọi tên hợp lệ ⇒ tên tạm KHÔNG khớp erp_org_* ─────────
+  const tenHam = chayBash(
+    [
+      "#!/usr/bin/env bash",
+      'T="$(mktemp -d)"',
+      'export ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/locks"',
+      `source "${bashPath(SCRIPT)}"`,
+      "set +e",
+      'echo "@@TEN"',
+      ...["bp-a", "erp_org_bp_a", "a1", "org-x-y", "erp_org_x9"].map((v) => `c="$(csdl_tu_ma_to_chuc ${bq(v)})"; t="$(ten_csdl_tam "$c")"; echo "$c|$t"`),
+      'echo "@@SAI"',
+      ...["", "Bp", "1a", "a", "erp_org_", "bp_a;x"].map((v) => `csdl_tu_ma_to_chuc ${bq(v)} >/dev/null; echo "$?"`),
+      'ten_csdl_tam erp_org_ >/dev/null; echo "$?"',
+      'rm -rf "$T"',
+      "",
+    ].join("\n"),
+  );
+  const cap = phan(tenHam.ra, "TEN").split("\n");
+  assert.deepEqual(cap, ["erp_org_bp_a|tam_khoiphuc_bp_a", "erp_org_bp_a|tam_khoiphuc_bp_a", "erp_org_a1|tam_khoiphuc_a1", "erp_org_org_x_y|tam_khoiphuc_org_x_y", "erp_org_x9|tam_khoiphuc_x9"]);
+  for (const d of cap) assert.ok(!ORG_BACKUP_DATABASE_PATTERN.test(d.split("|")[1]), "tên tạm không bao giờ khớp mẫu CSDL tổ chức");
+  assert.ok(phan(tenHam.ra, "SAI").split("\n").every((x) => x === "1"), `mã sai ⇒ trả 1: ${phan(tenHam.ra, "SAI")}`);
+
+  // ───────── LUÂN PHIÊN: không mã ⇒ tổ chức CHƯA diễn tập đứng trước tổ chức vừa diễn tập ─────────
+  const luan = chayBash(
+    khungDienTap(
+      "main restore-drill-org",
+      [
+        'echo "PGDMP" > "$ERP_BACKUP_DIR/orgs/erp_org_beta/daily/erp_org_beta-20260926-0217.dump"',
+        'mkdir -p "$ERP_BACKUP_DIR/status/orgs/erp_org_alpha"',
+        'printf \'{"schema":1,"kind":"restore-drill","database":"erp_org_alpha","result":"OK","finishedAt":"2026-09-27T20:00:00Z"}\\n\' > "$ERP_BACKUP_DIR/status/orgs/erp_org_alpha/last-drill.json"',
+      ].join("\n"),
+    ),
+  );
+  assert.equal(phan(luan.ra, "EXIT"), "0", luan.ra);
+  assert.match(phan(luan.ra, "OUT"), /luân phiên chọn erp_org_beta/);
+  assert.equal(parseBackupDrill(JSON.parse(phan(luan.ra, "BETA")))?.result, "OK");
+  const trongKhong = chayBash(khungDienTap("main restore-drill-org", 'rm -rf "$ERP_BACKUP_DIR/orgs"'));
+  assert.equal(phan(trongKhong.ra, "EXIT"), "0", "không tổ chức nào có bản ⇒ không có gì để diễn tập — không phải lỗi");
+  assert.deepEqual(lenhDocker(trongKhong.ra), []);
+
+  console.log(`✓ Diễn tập tổ chức (chạy bash thật qua main): ĐẠT ⇒ bản mới nhất theo tên, CSDL tạm tam_khoiphuc_alpha trong container tạm, ${bang.length} bảng đếm, erp-db chỉ bị đọc, lệnh cuối là xoá container, trạng thái đọc được bằng bộ đọc của ERP và làm thẻ tổ chức HEALTHY (không phải của nhà) · pg_restore lỗi ⇒ FAILED + vẫn dọn · bảng rỗng ⇒ FAILED nêu tên · không bản / thiếu RAM ⇒ SKIPPED, không dựng gì · 5 tham số lạ ⇒ thoát 2, 0 lệnh docker · luân phiên chọn tổ chức chưa diễn tập`);
+}
+
 export async function testSaoLuu() {
   testLichSaoLuuDuocCai();
   testXoayVongMotChoKhai();
@@ -1290,5 +1522,7 @@ export async function testSaoLuu() {
   testToChucHamThuan();
   testToChucChayThat();
   await testChamSaoLuuToChuc();
+  testDienTapToChucMaNguon();
+  testDienTapToChucChayThat();
 }
 

@@ -119,6 +119,7 @@ const MOI = [
   "0169_platform_onboarding",
   "0170_video_scale_render_options",
   "0171_custom_records_live_sort",
+  "0172_platform_settings",
 ] as const;
 
 /*
@@ -300,6 +301,12 @@ export async function testMigrationUpgradePath() {
 
     const sau = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
+
+    // 0172 (cài đặt nền tảng): bảng mới, KHÔNG gieo dòng nào — thiếu dòng `platform.signup.mode` ⇒ `/start` TẮT,
+    // đúng như production trước migration. CHECK chặn giá trị ngoài tập đóng ngay ở CSDL.
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'platform_settings'"), 1, "bước 2: 0172 phải tạo bảng platform_settings");
+    assert.equal(await dem("select count(*)::int as n from platform_settings"), 0, "bước 2: 0172 không được gieo dòng nào — mở /start là việc của người vận hành");
+    await assert.rejects(client.query(`insert into platform_settings (key, value) values ('platform.signup.mode', '"mo-het"'::jsonb)`), "bước 2: 0172 — giá trị ngoài off/invite/open phải bị CSDL từ chối");
 
     // 0132 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
     // job `model-registry` do người bấm, trạng thái vòng đời không backfill (mục 8.8, 35).

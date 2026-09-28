@@ -3,10 +3,12 @@
 import { useState, useTransition } from "react";
 import { Copy, Loader2, RotateCcw, Ticket } from "lucide-react";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createInviteAction, retrySetupAction, revokeInviteAction } from "@/lib/actions/onboarding";
+import { createInviteAction, retrySetupAction, revokeInviteAction, setSignupModeAction } from "@/lib/actions/onboarding";
+import { exceedsSignupCeiling, narrowerSignupMode, SIGNUP_MODE_CONSEQUENCE, SIGNUP_MODE_LABEL, SIGNUP_MODES, type SignupCeilingSource, type SignupMode } from "@/lib/onboarding/shared";
 
 /**
  * Ba nút của khu "Tự phục vụ" ở `/platform` (Phase 10 · §1): tạo mã mời (mã THÔ hiện ĐÚNG MỘT LẦN — đóng khung này là
@@ -132,5 +134,112 @@ export function RetrySetupButton({ orgCode }: { orgCode: string }) {
       {pending ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
       Chạy lại
     </Button>
+  );
+}
+
+const CEILING_NOTE: Record<SignupCeilingSource, string> = {
+  ENV_UNSET: "biến môi trường PLATFORM_SIGNUP_MODE không đặt ⇒ trần mặc định",
+  ENV: "khai ở biến môi trường PLATFORM_SIGNUP_MODE",
+  ENV_INVALID: "PLATFORM_SIGNUP_MODE mang giá trị lạ ⇒ tắt cứng",
+};
+
+/**
+ * Công tắc B của «Cổng mở bán» (`/platform`): chế độ đăng ký `/start` = min(trần môi trường, cài đặt). Chế độ vượt trần
+ * không chọn được (máy chủ cũng từ chối). Đổi phải ghi lý do và qua hộp xác nhận in NGUYÊN VĂN hệ quả của chế độ mới.
+ */
+export function SignupModeControl(props: {
+  ceiling: SignupMode;
+  ceilingSource: SignupCeilingSource;
+  setting: SignupMode;
+  stored: boolean;
+  effective: SignupMode;
+  updatedAt: string | null;
+  updatedByEmail: string | null;
+  cacheSeconds: number;
+}) {
+  const [mode, setMode] = useState<SignupMode>(props.setting);
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const nextEffective = narrowerSignupMode(props.ceiling, mode);
+
+  const apply = () =>
+    start(async () => {
+      setError(null);
+      const r = await setSignupModeAction({ mode, reason });
+      if ("error" in r) {
+        setError(r.error);
+        setConfirming(false);
+        return;
+      }
+      setConfirming(false);
+      setReason("");
+      toast.success(r.changed ? `Đã đổi — /start đang ở chế độ «${SIGNUP_MODE_LABEL[r.effective as SignupMode] ?? r.effective}»` : "Không đổi gì — cài đặt đã là như vậy");
+    });
+
+  return (
+    <div className="space-y-2">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+        <dt className="text-muted-foreground">Đang có hiệu lực</dt>
+        <dd className={props.effective === "off" ? "font-semibold" : "font-semibold text-emerald-700 dark:text-emerald-300"} data-signup-effective={props.effective}>
+          {SIGNUP_MODE_LABEL[props.effective]}
+        </dd>
+        <dt className="text-muted-foreground">Trần máy chủ</dt>
+        <dd>
+          {SIGNUP_MODE_LABEL[props.ceiling]} <span className="text-muted-foreground">({CEILING_NOTE[props.ceilingSource]})</span>
+        </dd>
+        <dt className="text-muted-foreground">Cài đặt</dt>
+        <dd>
+          {SIGNUP_MODE_LABEL[props.setting]}
+          <span className="text-muted-foreground">{props.stored ? ` · ${props.updatedAt ?? "—"} · ${props.updatedByEmail ?? "máy"}` : " (chưa từng đặt ⇒ TẮT)"}</span>
+        </dd>
+      </dl>
+      <div className="grid gap-2 sm:grid-cols-[150px_1fr_auto] sm:items-end">
+        <div className="space-y-1">
+          <Label htmlFor="signup-mode">Chế độ mới</Label>
+          <select id="signup-mode" value={mode} onChange={(e) => setMode(e.target.value as SignupMode)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+            {SIGNUP_MODES.map((m) => (
+              <option key={m} value={m} disabled={exceedsSignupCeiling(m, props.ceiling)}>
+                {SIGNUP_MODE_LABEL[m]}
+                {exceedsSignupCeiling(m, props.ceiling) ? " — vượt trần" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="signup-reason">Lý do (vào nhật ký nền tảng)</Label>
+          <Input id="signup-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mở cho khách thử đợt 1" maxLength={500} />
+        </div>
+        <Button type="button" variant="outline" disabled={pending || reason.trim().length < 5} onClick={() => setConfirming(true)}>
+          Đổi…
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      <p className="text-[11px] text-muted-foreground">Có hiệu lực ngay ở máy chủ này (tiến trình khác trễ tối đa {props.cacheSeconds} giây) — không cần deploy. Tắt khẩn cấp: đặt «TẮT» ở đây, hoặc PLATFORM_SIGNUP_MODE=off rồi khởi động lại.</p>
+
+      <AlertDialog open={confirming} onOpenChange={(o) => !pending && setConfirming(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Đổi đăng ký /start sang «{SIGNUP_MODE_LABEL[mode]}»?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {SIGNUP_MODE_CONSEQUENCE[nextEffective]} Hiệu lực sau khi đổi: «{SIGNUP_MODE_LABEL[nextEffective]}» (trần máy chủ: «{SIGNUP_MODE_LABEL[props.ceiling]}»). Lượt đổi ghi vào nhật ký nền tảng kèm lý do.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Huỷ</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending}
+              onClick={(e) => {
+                e.preventDefault();
+                apply();
+              }}
+            >
+              {pending ? "Đang đổi…" : "Xác nhận đổi"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

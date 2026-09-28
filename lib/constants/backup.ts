@@ -308,7 +308,7 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
     issues.push({
       state: "DEGRADED",
       text: toChuc
-        ? "Chưa diễn tập khôi phục CSDL của tổ chức này — diễn tập tự động (ops restore-drill) mới phủ CSDL nhà; khôi phục thử theo docs/platform/backup-recovery.md mục 5."
+        ? "Chưa diễn tập khôi phục CSDL của tổ chức này — ops restore-drill chỉ phủ CSDL nhà; chạy ops restore-drill-org với mã tổ chức (docs/backup-restore.md mục 8)."
         : "Chưa từng diễn tập khôi phục — chưa chứng minh được bản sao lưu dùng được (ops restore-drill).",
     });
   } else if (lastDrill.result === "FAILED") {

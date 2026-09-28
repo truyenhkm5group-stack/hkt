@@ -29,6 +29,7 @@ export function openCopilot(detail: CopilotOpenDetail = {}) {
 }
 
 type Turn = { role: "user" | "assistant"; text: string; result?: CopilotResult; confirmed?: Record<string, { ok: boolean; summary: string }> };
+type UiStatus = { enabled: boolean; scope: "HOME" | "ORGANIZATION"; model: string; modelSauHon: string; reason: string | null };
 
 function contextFromPath(pathname: string, search: string): CopilotContext {
   const m = pathname.match(/^\/(shipments|orders|customers)\/([^/]+)$/);
@@ -67,7 +68,15 @@ export function AiCopilot() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<{ enabled: boolean; model: string; modelSauHon: string; reason: string | null } | null>(null);
+  const [status, setStatus] = useState<UiStatus | null>(null);
+  // MỘT lượt hỏi trạng thái cho cả phiên mở trang: ô soạn và lối gửi tự động (sự kiện `erp:copilot`) cùng đợi nó.
+  const statusReq = useRef<Promise<UiStatus> | null>(null);
+  const ensureStatus = useCallback(() => {
+    statusReq.current ??= copilotStatus()
+      .then((s): UiStatus => ({ enabled: s.enabled, scope: s.scope, model: s.model, modelSauHon: s.modelSauHon, reason: s.reason }))
+      .catch((): UiStatus => ({ enabled: false, scope: "HOME", model: "", modelSauHon: "", reason: "Không đọc được trạng thái" }));
+    return statusReq.current;
+  }, []);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [override, setOverride] = useState<Partial<CopilotContext> | null>(null);
@@ -81,15 +90,20 @@ export function AiCopilot() {
     (message: string, ctx: CopilotContext, sauHon = false) => {
       const text = message.trim();
       if (!text) return;
-      setInput("");
-      setTurns((t) => [...t, { role: "user", text }]);
       start(async () => {
+        // Copilot TẮT (tổ chức khác nhà, hoặc máy chủ chưa có khoá) ⇒ KHÔNG gửi câu hỏi nào — kể cả lượt gửi tự động
+        // tới trước khi trạng thái kịp tải. Câu đã gõ ở lại ô soạn.
+        const s = await ensureStatus();
+        setStatus(s);
+        if (!s.enabled) return;
+        setInput("");
+        setTurns((t) => [...t, { role: "user", text }]);
         const history = turns.slice(-8).map((t) => ({ role: t.role, text: t.text }));
         const r = await askCopilot({ message: text, context: ctx, history, sauHon }).catch((e: unknown) => ({ interactionId: null, status: "ERROR" as const, answer: "", toolCalls: [], pendingActions: [], warnings: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: null, latencyMs: 0, rounds: 0, model: "", error: e instanceof Error ? e.message : String(e) }));
         setTurns((t) => [...t, { role: "assistant", text: r.answer || (r.error ? `Lỗi: ${r.error}` : ""), result: r }]);
       });
     },
-    [turns],
+    [turns, ensureStatus],
   );
 
   useEffect(() => {
@@ -117,8 +131,8 @@ export function AiCopilot() {
   }, [send]);
 
   useEffect(() => {
-    if (open && !status) void copilotStatus().then((s) => setStatus({ enabled: s.enabled, model: s.model, modelSauHon: s.modelSauHon, reason: s.reason })).catch(() => setStatus({ enabled: false, model: "", modelSauHon: "", reason: "Không đọc được trạng thái" }));
-  }, [open, status]);
+    if (open && !status) void ensureStatus().then(setStatus);
+  }, [open, status, ensureStatus]);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [turns, pending]);
@@ -165,7 +179,15 @@ export function AiCopilot() {
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {status && !status.enabled ? (
               <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                <b>AI chưa được cấu hình.</b> {status.reason ?? "Chưa có khoá API trên máy chủ."} Chủ shop thêm <code>OPENAI_API_KEY</code> (hoặc <code>ANTHROPIC_API_KEY</code>) vào <code>.env</code> trên VPS rồi khởi động lại.
+                {status.scope === "ORGANIZATION" ? (
+                  <>
+                    <b>Chưa có AI cho tổ chức này.</b> {status.reason}
+                  </>
+                ) : (
+                  <>
+                    <b>AI chưa được cấu hình.</b> {status.reason ?? "Chưa có khoá API trên máy chủ."} Chủ shop thêm <code>OPENAI_API_KEY</code> (hoặc <code>ANTHROPIC_API_KEY</code>) vào <code>.env</code> trên VPS rồi khởi động lại.
+                  </>
+                )}
               </div>
             ) : null}
             {turns.length === 0 ? (
@@ -245,7 +267,7 @@ export function AiCopilot() {
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={status?.enabled === false ? "AI chưa được cấu hình" : "Hỏi về đơn, kiện, khách, tiền, kho… (Enter để gửi)"}
+              placeholder={status?.enabled === false ? (status.scope === "ORGANIZATION" ? "Chưa có AI cho tổ chức này" : "AI chưa được cấu hình") : "Hỏi về đơn, kiện, khách, tiền, kho… (Enter để gửi)"}
               disabled={pending || status?.enabled === false}
               rows={2}
               className="min-h-[56px] text-[13px]"

@@ -1,7 +1,7 @@
 # Sao lưu & khôi phục ERP — runbook
 
-Một tệp làm mọi việc: `scripts/erp-backup.sh`. Cron, ops `backup` / `backup-status` / `restore-drill`
-và `install-vps.sh` đều gọi nó — không nơi nào tự viết một `pg_dump`.
+Một tệp làm mọi việc: `scripts/erp-backup.sh`. Cron, ops `backup` / `backup-status` / `restore-drill` /
+`restore-drill-org` và `install-vps.sh` đều gọi nó — không nơi nào tự viết một `pg_dump`.
 
 ## 1. Tóm tắt
 
@@ -41,7 +41,8 @@ bảo vệ, hay chưa từng khôi phục thử, là một lời hứa chứ ch�
 |---|---|---|
 | `backup-status` | in lịch cron, ba tệp trạng thái, danh sách bản trên máy, ổ đĩa, tình trạng ngoài máy (thư mục Drive, có token / có mã hoá hay không, danh sách bản trên Drive theo tên đã giải mã) — **không in dữ liệu, không in khoá** | đọc nhẹ |
 | `backup` | sao lưu NGAY vào `manual/` (cùng luật với cron) | đọc nặng |
-| `restore-drill` | diễn tập khôi phục (mục 4) | đọc nặng |
+| `restore-drill` | diễn tập khôi phục CSDL nhà (mục 4) | đọc nặng |
+| `restore-drill-org` | diễn tập khôi phục MỘT CSDL tổ chức `erp_org_*` — ô *arg* = mã tổ chức, để trống = luân phiên (mục 8) | đọc nặng |
 
 ## 3. Khôi phục toàn phần — từng bước
 
@@ -273,9 +274,9 @@ khoá điều đó (xem `BAM_PHAN_NHA`).
 **Ai thấy gì trên ERP.** Thẻ *Kết nối dữ liệu → Sao lưu dữ liệu* của một tổ chức khác chỉ đọc
 `status/orgs/<CSDL của chính nó>/` — không có ⇒ **"Chưa có bản sao lưu nào cho CSDL của tổ chức này"**
 (đỏ), KHÔNG BAO GIỜ mượn "sao lưu tốt" của nhà. Tệp của CSDL khác nằm nhầm chỗ bị bỏ và nói ra. Tổ chức
-không có vế bot chat. Diễn tập tự động (`restore-drill`) mới phủ CSDL nhà, nên thẻ của tổ chức luôn ghi
-**vàng "Chưa diễn tập khôi phục CSDL của tổ chức này"** cho tới khi có diễn tập riêng — nói thật, không
-mượn lượt diễn tập của nhà. Thẻ của NHÀ có thêm dòng *CSDL tổ chức khác (lượt gần nhất)* đọc từ
+không có vế bot chat. `restore-drill` chỉ phủ CSDL nhà, nên thẻ của tổ chức ghi **vàng "Chưa diễn tập
+khôi phục CSDL của tổ chức này"** cho tới khi chạy `restore-drill-org` cho CHÍNH tổ chức đó (mục 8) — nói
+thật, không mượn lượt diễn tập của nhà. Thẻ của NHÀ có thêm dòng *CSDL tổ chức khác (lượt gần nhất)* đọc từ
 `orgs-last-run.json`; dòng ấy KHÔNG đổi mức của nhà.
 
 `status` (ops `backup-status`) in thêm khối *CSDL tổ chức khác nhà*: tệp tổng hợp, trạng thái và danh
@@ -302,5 +303,72 @@ docker exec -i erp-db psql -U erp -d erp -c "alter database tam_khoiphuc_<mã> r
 # 4. Mở lại tổ chức (ACTIVE). Lần mở đầu tự áp migration còn thiếu.
 ```
 
-Diễn tập thủ công cho một tổ chức = bước 2 rồi `dropdb tam_khoiphuc_<mã>`; làm lúc thấp điểm (máy
-2 nhân / ~1,9 GB).
+Diễn tập cho một tổ chức: dùng ops `restore-drill-org` (mục 8) — nó nạp vào CSDL tạm trong một container
+TẠM nên không cần `createdb` / `dropdb` nào trên `erp-db`. Các lệnh `createdb tam_khoiphuc_<mã>` ở trên chỉ
+dành cho KHÔI PHỤC THẬT, khi bản tạm sẽ được đổi tên thành CSDL của tổ chức.
+
+## 8. Diễn tập khôi phục MỘT tổ chức — hai tầng
+
+Hai tầng trả lời hai câu hỏi khác nhau, và không tầng nào thay tầng kia:
+
+| Tầng | Câu hỏi | Chạy ở đâu | Lệnh |
+|---|---|---|---|
+| **CSDL** (pg_dump) | Bản dump đêm của `erp_org_<mã>` có nạp lại được MỌI THỨ không (bản ghi, tệp, người dùng, cấu hình) | VPS, người vận hành bấm | ops `restore-drill-org` |
+| **Cấu hình** (blueprint) | Mất hẳn CSDL, chỉ còn tệp xuất cấu hình, dựng lại được KHUNG của tổ chức không | máy lập trình / CI (PGlite) | `npx tsx --tsconfig tsconfig.json scripts/restore-drill-org-config.ts` |
+
+### 8.1 Tầng CSDL — ops `restore-drill-org` (CHẠY TAY)
+
+*Actions* → **Vận hành ERP trên VPS** → `restore-drill-org`, ô *arg* = mã tổ chức (vd `bp-a`; nhận cả tên
+`erp_org_bp_a`). Để trống ⇒ **luân phiên**: chọn CSDL có bản sao mà lượt diễn tập gần nhất cũ nhất (chưa từng
+⇒ đứng đầu). Trên máy chủ, tương đương: `bash /root/erp/scripts/erp-backup.sh restore-drill-org bp-a`.
+
+1. Chọn bản `erp_org_<mã>-YYYYmmdd-HHMM.dump` có MỐC TRONG TÊN mới nhất trong
+   `/root/backups/orgs/<csdl>/{daily,weekly,manual}/` (không tin mtime; tệp `.dang-ghi` bị bỏ).
+2. Kiểm tài nguyên TRƯỚC khi dựng gì — cùng ngưỡng với diễn tập nhà: RAM dùng được ≥ 700 MB, ổ đĩa ≥ cỡ CSDL
+   tổ chức + 3.000 MB. Thiếu ⇒ `SKIPPED` kèm lý do (không phải lỗi của bản sao lưu).
+3. Dựng container Postgres **tạm** (cùng ảnh với `erp-db`, `--network none`, `--memory 512m`, `--cpus 1`, bản
+   dump gắn chỉ-đọc, nhãn `erp.restore-drill-org=1`) với `POSTGRES_DB=tam_khoiphuc_<mã>` — CSDL tạm sống **bên
+   trong** container đó. Tên tạm KHÔNG bao giờ bắt đầu bằng `erp_org_` (hai hàng rào: mẫu `^tam_khoiphuc_[a-z0-9_]+$`
+   và "không khớp `^erp_org_[a-z0-9_]+$`").
+4. `pg_restore --no-owner --no-privileges` vào CSDL tạm; lỗi ⇒ `FAILED` (thẻ của tổ chức chuyển đỏ).
+5. Đếm dòng 12 bảng lõi ở bản khôi phục **và** CSDL sống (`users`, `settings`, `access_roles`, `meta_objects`,
+   `meta_custom_fields`, `meta_forms`, `meta_list_views`, `meta_pages`, `workflow_rules`, `blueprint_installs`,
+   `custom_records`, `drizzle.__drizzle_migrations`). `erp-db` chỉ bị đọc `count(*)` và `pg_database_size`.
+6. `trap EXIT` xoá container kèm volume — kể cả khi hỏng giữa chừng. Xoá container = xoá CSDL tạm; KHÔNG có lệnh
+   `createdb` / `dropdb` / `alter database` / `pg_restore` nào nhắm vào `erp-db` (`tests/backup.test.ts` khoá ở
+   mức mã nguồn và chạy thật với `docker` giả).
+7. Ghi `/root/backups/status/orgs/<csdl>/last-drill.json` (kind `restore-drill`, mang tên CSDL). Thẻ Sao lưu của
+   ĐÚNG tổ chức đó đọc tệp này; thẻ của nhà và của tổ chức khác không.
+
+**Tiêu chí ĐẠT:** thoát 0, dòng cuối `DIỄN TẬP TỔ CHỨC ĐẠT: … khôi phục sạch vào CSDL tạm tam_khoiphuc_<mã>`,
+`last-drill.json` có `"result":"OK"`, và không bảng nào `THIẾU` hay `(rỗng)` trong khi CSDL sống có dòng. `CHÊNH`
+dương nhỏ là bình thường (dữ liệu sinh sau lúc dump). `SKIPPED` (thiếu RAM / ổ / chưa có bản) KHÔNG phải đạt.
+
+**Không nằm trong cron.** Dựng một Postgres thứ hai trên VPS 2 nhân / ~1,9 GB là đổi hành vi vận hành; bật tự
+động (vd luân phiên một tổ chức mỗi Chủ nhật) là quyết định của chủ nền tảng — `docs/platform/launch-gates.md`
+mục C. Nên chạy lúc thấp điểm và không chồng với `restore-drill` của nhà (hai lệnh cùng làn khoá đọc nặng nên
+ops tự xếp hàng).
+
+### 8.2 Tầng cấu hình — `scripts/restore-drill-org-config.ts` (máy cục bộ / CI)
+
+```bash
+npx tsx --tsconfig tsconfig.json scripts/restore-drill-org-config.ts            # mã thử mặc định dt-cauhinh
+npx tsx --tsconfig tsconfig.json scripts/restore-drill-org-config.ts --ma=dt-x --giu   # giữ thư mục để soi
+```
+
+PGlite RIÊNG của lượt (`data/pglite-restore-drill-<pid>`), KHÔNG đọc `.env` — một `.env` trỏ production không
+biến lượt diễn tập thành một tổ chức mới trên production. Ba tiến trình, vì "mất CSDL" phải là mất thật:
+
+1. **Nguồn:** cấp tổ chức thử → cài mẫu `service-business` → tuỳ biến tay (field trên đối tượng tuỳ biến và hệ
+   thống, trang tay, form sửa tay, luật tay, vai trò, bật thêm module, đổi nhãn trạng thái đơn) + một bản ghi dữ
+   liệu + một khoá cài đặt mang bí mật → đo phạm vi → xuất blueprint ra tệp.
+2. **Mất:** xoá thư mục CSDL của tổ chức.
+3. **Khôi phục:** xoá cả dòng sổ tổ chức → cấp lại CÙNG mã ở dạng trống → cài từ tệp (xem trước → `planHash` →
+   cài, đúng bộ cài của màn Mẫu) → xuất lại → so băm → xem trước lại cùng tệp.
+
+**Tiêu chí ĐẠT** (`judgeConfigRestoreDrill`, `lib/blueprints/restore-drill.ts`): băm nội dung sau khôi phục =
+nguồn **và** tổ chức trống có băm KHÁC nguồn (phép so không mù) · số mục theo loại bằng nhau · kế hoạch 0 xung đột,
+0 bị chặn · cài lại cùng tệp 0 mục phải ghi · gói không mang bí mật / email / id / bản ghi · sau khôi phục 0 bản ghi
+(blueprint KHÔNG mang dữ liệu — đúng thiết kế) · phạm vi: bảng cấu hình có dòng trong CSDL tổ chức, 0 dòng thêm ở
+CSDL nhà, 0 dòng mặt phẳng điều khiển trong CSDL tổ chức. In `KẾT QUẢ: ĐẠT`, thoát 0. `npm test` chạy lượt này
+(`tests/restore-drill-config.test.ts`).

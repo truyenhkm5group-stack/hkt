@@ -51,7 +51,11 @@ export default async function ConnectionsPage() {
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
           ⚠ Chưa lưu được bí mật kết nối: {view.secretsReady.reason}
         </div>
-      ) : null}
+      ) : (
+        <p className="text-xs text-muted-foreground" data-secrets-key-status="ready">
+          Khoá mã hoá bí mật kết nối của máy chủ: sẵn sàng · mã khoá <span className="font-mono">{view.secretsReady.keyIdShort}</span> (không phải khoá — chỉ để biết khoá có đổi hay không).
+        </p>
+      )}
       {view.groups.length === 0 ? (
         <EmptyState title="Chưa có connector nào trong sổ" description="Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật." />
       ) : (

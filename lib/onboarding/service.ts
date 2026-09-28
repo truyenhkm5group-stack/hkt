@@ -39,13 +39,13 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { buildSignupBlueprint, freshOrgState, type SignupBlueprint } from "@/lib/onboarding/blueprint";
 import { claimInvite, lookupInvite, type InviteRow } from "@/lib/onboarding/invites";
 import { checkSignupRate, hashIp, recordAttempt, type AttemptMode } from "@/lib/onboarding/rate";
+import { effectiveSignupMode } from "@/lib/onboarding/signup-mode";
 import {
   adminStepZ,
   CORE_MODULES,
   firstIssue,
   inviteCodeZ,
   orgStepZ,
-  parseSignupMode,
   planStepZ,
   signupDraftZ,
   type PlanStep,
@@ -56,9 +56,12 @@ import {
 
 // ═══ CỜ + CỬA VÀO ═══
 
-/** Chế độ đăng ký, đọc ở MÁY CHỦ mỗi lần (không đóng băng lúc khởi động — đổi biến môi trường rồi khởi động lại). */
-export function signupMode(): SignupMode {
-  return parseSignupMode(process.env.PLATFORM_SIGNUP_MODE);
+/**
+ * Chế độ đăng ký ĐANG CÓ HIỆU LỰC, đọc ở MÁY CHỦ mỗi lần = min(trần `PLATFORM_SIGNUP_MODE`, cài đặt control plane) —
+ * `lib/onboarding/signup-mode.ts`. Người vận hành đổi cài đặt ở `/platform`: có hiệu lực không cần deploy.
+ */
+export async function signupMode(): Promise<SignupMode> {
+  return effectiveSignupMode();
 }
 
 export const SIGNUP_CLOSED = "Chưa mở đăng ký tổ chức mới.";
@@ -69,10 +72,10 @@ export type SignupActor = { kind: "public"; ip: string } | { kind: "operator"; i
 
 type Gate = { ok: true; mode: AttemptMode; ipHash: string } | { ok: false; error: string };
 
-function gate(who: SignupActor): Gate {
+async function gate(who: SignupActor): Promise<Gate> {
   const ipHash = hashIp(who.ip);
   if (who.kind === "operator") return { ok: true, mode: "operator", ipHash };
-  const mode = signupMode();
+  const mode = await signupMode();
   if (mode === "off") return { ok: false, error: SIGNUP_CLOSED };
   return { ok: true, mode, ipHash };
 }
@@ -175,7 +178,7 @@ async function reservedCode(code: string): Promise<boolean> {
 
 /** Bước 1 — mã mời (chỉ khi `invite`). Tra, không tiêu mã. Mã sai tính vào trần của IP. */
 export async function checkInviteStep(raw: unknown, who: SignupActor): Promise<SignupStepResult> {
-  const g = gate(who);
+  const g = await gate(who);
   if (!g.ok) return { error: g.error };
   if (g.mode !== "invite") return { ok: true };
   const rate = await checkSignupRate(g.mode, g.ipHash, { creating: false });
@@ -194,7 +197,7 @@ export async function checkInviteStep(raw: unknown, who: SignupActor): Promise<S
  * dùng ô "kiểm trùng" làm máy dò danh sách khách hàng. Ở `open`, mỗi lượt trùng tính vào trần của IP.
  */
 export async function checkOrgStep(input: unknown, invite: unknown, who: SignupActor): Promise<SignupStepResult> {
-  const g = gate(who);
+  const g = await gate(who);
   if (!g.ok) return { error: g.error };
   const parsed = orgStepZ.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -257,7 +260,7 @@ async function buildPreview(step: PlanStep, planKey: string): Promise<Built | { 
 
 /** Bước Xem trước. `draft` KHÔNG cần mật khẩu. */
 export async function previewSignup(input: { invite?: unknown; orgCode?: unknown; plan: unknown; planKey?: unknown }, who: SignupActor): Promise<{ ok: true; preview: SignupPreview } | { error: string }> {
-  const g = gate(who);
+  const g = await gate(who);
   if (!g.ok) return { error: g.error };
   let invite: InviteRow | null = null;
   if (g.mode === "invite") {
@@ -401,7 +404,7 @@ async function reactivateForRetry(code: string) {
  * hành tạo hộ, hoặc bài kiểm muốn tự đăng nhập).
  */
 export async function createOrganizationFromSignup(rawDraft: unknown, who: SignupActor, opts: { issue?: (subject: SessionSubject) => Promise<void> } = {}): Promise<CreateResult> {
-  const g = gate(who);
+  const g = await gate(who);
   if (!g.ok) return { error: g.error };
   const parsed = signupDraftZ.safeParse(rawDraft);
   if (!parsed.success) return { error: firstIssue(parsed.error) };

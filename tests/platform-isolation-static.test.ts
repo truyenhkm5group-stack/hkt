@@ -124,6 +124,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/platform/context.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "Chính ngữ cảnh tổ chức (AsyncLocalStorage)." },
   "lib/platform/peek.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "CHỈ ĐỌC đúng holder ngữ cảnh của context.ts (không dựng holder mới) — cho getter đồng bộ ở tầng thấp như lib/env.ts." },
   "lib/platform/organizations.ts::__erpOrgs": { loai: "NEN_TANG", lyDo: "Sổ tổ chức của mặt phẳng điều khiển (CSDL nhà), đệm 10 giây." },
+  "lib/onboarding/signup-mode.ts::__erpSignupSetting": { loai: "NEN_TANG", lyDo: "Đệm ≤ 10 giây của MỘT cài đặt nền tảng (chế độ đăng ký /start, CSDL nhà) — không thuộc tổ chức nào, không chứa dữ liệu nghiệp vụ; lượt ghi xoá đệm ngay." },
   "lib/platform/capabilities.ts::__erpCapabilities": { loai: "THEO_TO_CHUC", lyDo: "Đệm 5 giây của dòng cấu hình module, KHOÁ theo mã tổ chức (`Map<mã, dòng>`); ghi cấu hình xoá đúng khoá của tổ chức đó." },
 };
 
@@ -386,6 +387,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "app/api/health/route.ts": "Tuyến sức khoẻ công khai của lượt deploy: đọc mặt phẳng điều khiển (cờ + số đếm, không mã tổ chức nào) — không có phiên để đi qua ngữ cảnh.",
   "lib/onboarding/": "Tự phục vụ (Phase 10): mã mời, lượt đăng ký, trạng thái dựng tổ chức — mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức mới chỉ chạm qua provisionOrganization + withOrganization.",
   "scripts/platform-load-probe.ts": "Script ĐO TẢI chạy tay (Phase 11 · H2), không nằm trong đường chạy của ứng dụng: cấp rồi GỠ năm tổ chức thử `lprobe-*` của chính nó ở mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
+  "scripts/restore-drill-org-config.ts": "Script DIỄN TẬP KHÔI PHỤC tầng cấu hình chạy tay / trong bài kiểm (sẵn sàng thương mại C), không nằm trong đường chạy của ứng dụng: trên PGlite RIÊNG của chính nó (không đọc .env), cấp một tổ chức thử, xoá rồi cấp lại dòng sổ ở mặt phẳng điều khiển; dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
 };
 

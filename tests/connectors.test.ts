@@ -31,7 +31,7 @@ import {
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
 import { SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyState } from "@/lib/connectors/secrets";
-import { loadConnectionsView, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot } from "@/lib/connectors/testers";
 import type { ConnectionsView } from "@/lib/connectors/types";
 import { MODULE_KEYS } from "@/lib/constants/platform-modules";
@@ -50,6 +50,7 @@ const MASTER_2 = "mot-khoa-khac-hoan-toan-cung-du-dai-0123456789zz";
 const LARK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/aaaa1111-bbbb-2222-cccc-3333dddd4444";
 const LARK_SIGN = "ky-lark-bi-mat-cua-to-chuc-a-9f8e7d";
 const TG_TOKEN = "1234567890:AAH-bi-mat-telegram-cua-to-chuc-a_xyz0";
+const AI_KEY = "sk-ant-api03-khoa-bia-vong-tron-pc-a-0123456789wxyz";
 
 function chuan(p: string): string {
   return p.split(path.sep).join("/").split("\\").join("/");
@@ -338,7 +339,7 @@ export async function testConnectionsTwoOrgs() {
   }
   const larkOk = fakeFetch(() => ({ body: { code: 0 } }));
   const larkNo = fakeFetch(() => ({ body: { code: 19001, msg: "param invalid" } }));
-  const SECRETS = [LARK_URL, LARK_SIGN, TG_TOKEN, "aaaa1111-bbbb-2222-cccc-3333dddd4444"];
+  const SECRETS = [LARK_URL, LARK_SIGN, TG_TOKEN, AI_KEY, MASTER, "aaaa1111-bbbb-2222-cccc-3333dddd4444"];
   try {
     const adminA = await adminOf(A);
     const adminB = await adminOf(B);
@@ -349,6 +350,8 @@ export async function testConnectionsTwoOrgs() {
       const v0 = (await loadConnectionsView(adminA)) as ConnectionsView;
       assert.equal(v0.secretsReady.ok, false);
       assert.match(v0.secretsReady.reason ?? "", /PLATFORM_SECRETS_KEY/);
+      assert.match(v0.secretsReady.reason ?? "", /secret GitHub PLATFORM_SECRETS_KEY.*deploy/, "câu nói rõ người vận hành làm gì: thêm secret GitHub rồi deploy");
+      assert.equal(v0.secretsReady.keyIdShort, null, "chưa có khoá ⇒ không có mã khoá");
       const noKey = await saveConnection(adminA, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL } });
       assert.ok("error" in noKey && /PLATFORM_SECRETS_KEY/.test(noKey.error), "thiếu PLATFORM_SECRETS_KEY ⇒ từ chối lưu");
       assert.equal((await (await getDb()).select().from(schema.orgConnections)).length, 0, "từ chối lưu ⇒ không dòng nào");
@@ -411,6 +414,24 @@ export async function testConnectionsTwoOrgs() {
       assert.ok("ok" in tg);
       const tgFetch = fakeFetch((url) => (url.endsWith("/getMe") ? { body: { ok: true, result: { username: "a_bot" } } } : { body: { ok: true } }));
       assert.ok("ok" in (await testOrgConnection(adminA, "telegram-bot", { tester: { fetch: tgFetch.fetch } })));
+      assert.ok(tgFetch.calls[0]?.url.includes(`/bot${TG_TOKEN}/`), "kiểm tra Telegram nhận ĐÚNG token đã giải mã");
+
+      // Vòng tròn qua ĐƯỜNG ỨNG DỤNG (không gọi openSecrets trong bài): lưu → kiểm tra → bật → openActiveConnection (đường
+      // AI Builder đọc lúc chạy) ra ĐÚNG bản rõ; màn hình / action chỉ trả •••• + 4 ký tự cuối, và mã khoá rút gọn.
+      const aiSaved = await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY } });
+      assert.ok("ok" in aiSaved, JSON.stringify(aiSaved));
+      const aiFetch = fakeFetch(() => ({ body: { data: [] } }));
+      const aiTest = await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: aiFetch.fetch } });
+      assert.ok("ok" in aiTest, JSON.stringify(aiTest));
+      const aiOn = await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE");
+      assert.ok("ok" in aiOn && aiOn.status === "ACTIVE");
+      const opened = await openActiveConnection("anthropic-byok");
+      assert.ok(opened.ok && opened.secrets.apiKey === AI_KEY, "lưu → đọc lại qua service ra ĐÚNG bản rõ");
+      const vAi = (await loadConnectionsView(adminA)) as ConnectionsView;
+      assert.equal(vAi.groups.flatMap((g) => g.rows).find((r) => r.key === "anthropic-byok")?.connection?.secretHints.apiKey, `••••${AI_KEY.slice(-4)}`, "màn hình: •••• + 4 ký tự");
+      const kid = secretsKeyState((n) => (n === "PLATFORM_SECRETS_KEY" ? MASTER : undefined));
+      assert.ok(vAi.secretsReady.ok && kid.ok && vAi.secretsReady.keyIdShort === `${kid.keyId.slice(0, 8)}…`, "có khoá ⇒ màn hình chỉ in 8 ký tự đầu của MÃ khoá");
+      assertNoSecret("màn hình + action của khoá AI", [vAi, aiSaved, aiTest, aiOn], SECRETS);
 
       // Không đường trả về nào mang bí mật: màn hình, kết quả action, nhật ký.
       const vA = await loadConnectionsView(adminA);

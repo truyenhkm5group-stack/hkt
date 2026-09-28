@@ -86,6 +86,6 @@ Mỗi điểm: hình dạng, bài kiểm bắt buộc, cách thêm một mục m
 ## 5. Việc của người (HUMAN GATE)
 
 - `PLATFORM_SECRETS_KEY` trên production: chuỗi ngẫu nhiên ≥ 32 ký tự (vd `openssl rand -base64 48`), đặt ở `.env`
-  máy chủ / GitHub Secret. Thiếu nó KHÔNG làm hỏng gì của VNX — chỉ tắt việc lưu bí mật kết nối theo tổ chức (màn hình
+  máy chủ / GitHub Secret (đường ống secret → deploy → `.env` đã nối — `launch-gates.md` mục A). Thiếu nó KHÔNG làm hỏng gì của VNX — chỉ tắt việc lưu bí mật kết nối theo tổ chức (màn hình
   nói rõ). Đổi / mất khoá ⇒ mọi bí mật đã lưu phải nhập lại (không có đường khôi phục — có chủ ý). Là quyết định của
   chủ nền tảng: thêm một secret mới vào môi trường production (AGENTS.md mục 7).
