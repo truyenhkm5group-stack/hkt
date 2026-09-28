@@ -117,6 +117,7 @@ const MOI = [
   "0167_meta_pages_draft_revision",
   "0168_ai_blueprint_drafts",
   "0169_platform_onboarding",
+  "0170_video_scale_render_options",
 ] as const;
 
 /*

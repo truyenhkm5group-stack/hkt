@@ -8205,6 +8205,10 @@ export const videoScaleVariants = pgTable(
     captionByUserId: text("caption_by_user_id").references(() => users.id, { onDelete: "set null" }),
     captionBy: text("caption_by").notNull().default(""),
     captionAt: ts("caption_at"),
+    /** Tuỳ chọn dựng RIÊNG của video (`VideoRenderOptions`) — ghi đè cấu hình lượt khi người sửa video. */
+    renderOptions: jsonb("render_options").$type<Record<string, unknown>>().notNull().default({}),
+    /** Số lần NGƯỜI dựng lại video (0 = bản đầu). Đi vào khoá việc dựng để mỗi lần sửa là một việc mới. */
+    renderRev: integer("render_rev").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

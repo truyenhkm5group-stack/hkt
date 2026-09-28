@@ -601,6 +601,8 @@ deploy dừng, không phải cảnh báo.
     TỐI ĐA (10 giây) và ghi tiền theo độ dài đo được. Thiếu tệp phông tiếng Việt ⇒ hậu kỳ BỊ CHẶN.
     Lỗi VĨNH VIỄN lúc HỎI trạng thái (bộ lọc nội dung) là kết quả hỏng, không phải lỗi mạng: hỏng ngay,
     không hỏi lại tới hết hạn. Cảnh ẢNH ĐỘNG dựng từ ảnh sản phẩm thật, tiền 0 là số THẬT.
+    Sửa video = dựng lại từ clip ĐÃ CÓ, chữ mới qua cùng bộ kiểm khẳng định, video quay lại chờ duyệt;
+    video đã lên Reel / thành quảng cáo không sửa đè.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { VIDEO_SCALE_CONFIG_KEY, normalizeVideoScaleConfig } from "@/lib/constants/video-scale";
 import { bindOrganization } from "@/lib/platform/background";
 import { listProductPhotos, type SourcePhoto } from "@/lib/queries/video-scale";
-import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
+import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, rerenderVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
 import { storeAsset } from "@/lib/video-scale/storage";
 import { videoCaptionSchema, videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoPageConfigSchema, videoPauseSchema, videoPublishSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema, videoSkuPublishingSchema } from "@/lib/validation/video-scale";
 import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
@@ -18,7 +18,7 @@ import { loadProductFacts } from "@/lib/video-scale/facts";
 import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/video-scale/publish";
 import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
-import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
+import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { DEFAULT_OPTIMIZE_DEPS, runOptimize } from "@/lib/video-scale/optimize";
 
@@ -126,6 +126,23 @@ export async function retryVideoJobAction(raw: unknown): Promise<{ ok: true } | 
   await drainAfterResponse();
   revalidatePath(PATH);
   return { ok: true };
+}
+
+/** Sửa video: dựng lại từ clip đã có với chữ / lời đọc / nhạc / phụ đề mới. Không tạo clip AI nào. */
+export async function rerenderVideoAction(raw: unknown): Promise<{ ok: true; tts: number } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền sửa video" };
+  const parsed = videoEditSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const [before] = await db.select({ script: schema.videoScaleVariants.script, renderOptions: schema.videoScaleVariants.renderOptions, status: schema.videoScaleVariants.status }).from(schema.videoScaleVariants).where(eq(schema.videoScaleVariants.id, parsed.data.variantId)).limit(1);
+  const { variantId, ...edit } = parsed.data;
+  const r = await rerenderVideoVariant(db, variantId, edit, await actorOf(user.id, user.email));
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_VIDEO_EDIT", entity: "VIDEO_SCALE_VARIANT", entityId: variantId, before: before ?? null, after: edit, reason: before?.status === "APPROVED" ? "Sửa video đã duyệt — video quay lại chờ duyệt." : undefined });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true, tts: r.tts };
 }
 
 /** Đổi một cảnh hỏng / bị chặn sang ẢNH ĐỘNG (miễn phí — không gọi AI). */

@@ -11,6 +11,8 @@ import {
   VIDEO_SCALE_HARD_LIMITS,
   PHOTO_SCENE_PROVIDER,
   billedSecondsFor,
+  effectiveRender,
+  normalizeRenderOptions,
   clipCostUsd,
   humanProviderError,
   isPhotoScene,
@@ -413,10 +415,14 @@ export async function handleTts(ctx: HandlerCtx, job: VideoJobRow): Promise<void
   const run = await loadRun(db, job.runId);
   if (!run || !variant) return void (await settleJob(db, job, { status: "CANCELLED", finishedAt: now }));
   const scene = scriptOf(variant.script).scenes[job.sceneIndex ?? 0];
-  if (!scene?.voiceover.trim()) return void (await succeedJob(db, job, now, { result: { note: "cảnh không có lời đọc" } }));
+  // Lần dựng lại mang lời + giọng NGƯỜI sửa trong `request` (ảnh chụp lúc xếp việc); bản đầu đọc từ kịch bản + cấu hình lượt.
+  const req = (job.request ?? {}) as { text?: unknown; voice?: unknown };
+  const text = typeof req.text === "string" ? req.text : (scene?.voiceover ?? "");
+  const voice = typeof req.voice === "string" ? req.voice : snapshotOf(run).voice;
+  if (!text.trim()) return void (await succeedJob(db, job, now, { result: { note: "cảnh không có lời đọc" } }));
   if (!(await beginAttempt(db, job))) return;
   try {
-    const bytes = await ctx.deps.tts(db, { text: scene.voiceover, voice: snapshotOf(run).voice, entityId: variant.id });
+    const bytes = await ctx.deps.tts(db, { text, voice, entityId: variant.id });
     const asset = await storeAsset(db, { kind: "VOICE", bytes, contentType: "audio/mpeg", runId: run.id, variantId: variant.id, isTest: run.isTest });
     await succeedJob(db, job, now, { outputAssetId: asset.id });
   } catch (e) {
@@ -455,8 +461,12 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
     .select({ kind: J.kind, sceneIndex: J.sceneIndex, assetId: J.outputAssetId })
     .from(J)
     .where(and(eq(J.variantId, variant.id), inArray(J.kind, ["CLIP", "TTS"]), eq(J.status, "SUCCEEDED")))
-    .orderBy(asc(J.sceneIndex));
-  const clips = inputs.filter((x) => x.kind === "CLIP" && x.assetId);
+    .orderBy(asc(J.sceneIndex), asc(J.createdAt));
+  // Mỗi cảnh MỘT clip — clip mới nhất (cảnh đổi sang ảnh động / tạo lại thắng bản cũ).
+  const clipByScene = new Map<number, (typeof inputs)[number]>();
+  for (const x of inputs) if (x.kind === "CLIP" && x.assetId) clipByScene.set(x.sceneIndex ?? 0, x);
+  const clips = [...clipByScene.values()].sort((a, b) => (a.sceneIndex ?? 0) - (b.sceneIndex ?? 0));
+  const eff = effectiveRender(snap, run.musicId, normalizeRenderOptions(variant.renderOptions));
   if (clips.length !== script.scenes.length) return void (await failOrRetryJob(db, job, now, `Thiếu clip: có ${clips.length}/${script.scenes.length} cảnh.`, "PERMANENT"));
   if (!(await beginAttempt(db, job))) return;
   renderSlots.busy += 1;
@@ -473,7 +483,8 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         clipFiles.push({ file: f, durationSec: p.durationSec ?? snap.clipSeconds, hasAudio: p.hasAudio });
       }
       const voices = new Map<number, { file: string; durationSec: number }>();
-      for (const t of inputs.filter((x) => x.kind === "TTS" && x.assetId)) {
+      // Giọng đọc TẮT ⇒ không trộn tệp nào; bật ⇒ tệp MỚI NHẤT mỗi cảnh (lần sửa sau ghi đè lần trước — `inputs` xếp theo giờ).
+      for (const t of eff.voiceover ? inputs.filter((x) => x.kind === "TTS" && x.assetId) : []) {
         const a = await readAsset(db, t.assetId as string);
         if (!a) continue;
         const f = path.join(dir, `v${t.sceneIndex}.mp3`);
@@ -482,14 +493,13 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         if (p.durationSec) voices.set(t.sceneIndex ?? 0, { file: f, durationSec: p.durationSec });
       }
       let music: { file: string; volume: number } | null = null;
-      if (run.musicId) {
-        const [m] = await db.select({ assetId: schema.videoScaleMusic.assetId }).from(schema.videoScaleMusic).where(and(eq(schema.videoScaleMusic.id, run.musicId), eq(schema.videoScaleMusic.active, true))).limit(1);
+      if (eff.musicId) {
+        const [m] = await db.select({ assetId: schema.videoScaleMusic.assetId }).from(schema.videoScaleMusic).where(and(eq(schema.videoScaleMusic.id, eff.musicId), eq(schema.videoScaleMusic.active, true))).limit(1);
         const a = m ? await readAsset(db, m.assetId) : null;
-        if (a) {
-          const f = path.join(dir, "music.bin");
-          await writeFile(f, a.bytes);
-          music = { file: f, volume: 0.18 };
-        }
+        if (!a) throw new ProviderError("Bản nhạc đã chọn không còn trong thư viện nhạc có quyền — chọn bản khác ở \"Sửa video\".", "PERMANENT");
+        const f = path.join(dir, "music.bin");
+        await writeFile(f, a.bytes);
+        music = { file: f, volume: eff.musicVolume };
       }
       const plan = buildRenderArgs({
         clips: clipFiles,
@@ -497,8 +507,9 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         hook: script.hook,
         cta: script.cta,
         music,
-        keepNativeAudio: snap.keepNativeAudio,
-        burnSubtitles: snap.burnSubtitles,
+        keepNativeAudio: eff.keepNativeAudio,
+        burnSubtitles: eff.burnSubtitles,
+        showText: eff.showText,
         width: size.width,
         height: size.height,
         fontFile,

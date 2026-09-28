@@ -175,6 +175,8 @@ export type RenderInput = {
   music: { file: string; volume: number } | null;
   keepNativeAudio: boolean;
   burnSubtitles: boolean;
+  /** Chữ trên hình (móc câu · chữ cảnh · CTA). Vắng = có. */
+  showText?: boolean;
   width: number;
   height: number;
   fontFile: string;
@@ -189,6 +191,15 @@ export const CTA_SECONDS = 2.5;
 export const HOOK_SECONDS = 2.8;
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * Số ký tự tối đa mỗi dòng cho cỡ chữ `sizePx` trên khung rộng `W` — hàm THUẦN. DejaVu Sans Bold rộng ~0,62 cỡ chữ mỗi ký tự
+ * (chữ có dấu tiếng Việt cũng vậy); chừa 14% bề ngang cho viền nền và lề. Đo 28/09/2026 trên video thật: bản cũ cố định 24 ký tự
+ * ở cỡ 50 ⇒ đúng 720 px, cộng viền nền là TRÀN hai mép ("lột chiếc đầm tạo điểm / hấn vòng eo…").
+ */
+export function lineChars(W: number, sizePx: number): number {
+  return Math.max(8, Math.floor((W * 0.86) / (sizePx * 0.62)));
+}
 
 /**
  * Dựng tham số ffmpeg cho một bản hoàn chỉnh 9:16. Hàm THUẦN — mọi tệp đầu vào là đường dẫn đã có; tệp chữ trả về trong
@@ -245,10 +256,11 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
   const textFiles: { name: string; content: string }[] = [];
   const font = filterPath(input.fontFile);
   const draws: string[] = [];
-  const draw = (name: string, content: string, opts: { size: number; y: string; from: number; to: number; box?: boolean }) => {
+  const draw = (name: string, raw: string, opts: { size: number; y: string; from: number; to: number; box?: boolean; lines: number }) => {
+    const size = Math.round(opts.size * k);
+    const content = wrapText(raw, lineChars(W, size), opts.lines);
     if (!content.trim()) return;
     textFiles.push({ name, content });
-    const size = Math.round(opts.size * k);
     const box = opts.box ? `:box=1:boxcolor=black@0.55:boxborderw=${Math.round(18 * k)}` : "";
     draws.push(
       `drawtext=fontfile=${font}:textfile=${name}:expansion=none:fontsize=${size}:fontcolor=white:borderw=${Math.max(2, Math.round(3 * k))}:bordercolor=black@0.85:line_spacing=${Math.round(10 * k)}:x=(w-text_w)/2:y=${opts.y}${box}:enable='between(t,${r3(opts.from)},${r3(opts.to)})'`,
@@ -256,17 +268,19 @@ export function buildRenderArgs(input: RenderInput): RenderPlan {
   };
   const hookEnd = Math.min(HOOK_SECONDS, total);
   const ctaStart = Math.max(0, total - CTA_SECONDS);
-  draw("hook.txt", wrapText(input.hook, 22, 2), { size: 58, y: "h*0.12", from: 0, to: hookEnd, box: true });
+  // Chữ lớn nằm ở nửa DƯỚI khung (≈ 62%): ảnh thời trang dọc có mặt người mẫu ở phần trên — chữ đè lên mặt là video hỏng.
+  const text = input.showText !== false;
+  if (text) draw("hook.txt", input.hook, { size: 52, y: "h*0.60", from: 0, to: hookEnd, box: true, lines: 3 });
   input.scenes.forEach((s, i) => {
     const from = i === 0 ? hookEnd : starts[i];
     const to = Math.min(i === n - 1 ? ctaStart : starts[i] + input.clips[i].durationSec, total);
-    if (to - from > 0.4) draw(`overlay${i}.txt`, wrapText(s.overlay, 24, 2), { size: 50, y: "h*0.62", from, to, box: true });
+    if (text && to - from > 0.4) draw(`overlay${i}.txt`, s.overlay, { size: 46, y: "h*0.60", from, to, box: true, lines: 3 });
     if (input.burnSubtitles) {
       const subTo = Math.min(starts[i] + input.clips[i].durationSec, total);
-      draw(`sub${i}.txt`, wrapText(s.subtitle, 30, 3), { size: 38, y: "h*0.80", from: starts[i], to: subTo });
+      draw(`sub${i}.txt`, s.subtitle, { size: 36, y: "h*0.82", from: starts[i], to: subTo, lines: 2 });
     }
   });
-  draw("cta.txt", wrapText(input.cta, 20, 2), { size: 64, y: "(h-text_h)/2", from: ctaStart, to: total, box: true });
+  if (text) draw("cta.txt", input.cta, { size: 58, y: "(h-text_h)/2", from: ctaStart, to: total, box: true, lines: 2 });
   f.push(draws.length ? `[vc]${draws.join(",")}[vout]` : `[vc]null[vout]`);
 
   // Âm thanh.

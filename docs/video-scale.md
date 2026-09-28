@@ -336,3 +336,19 @@ không gọi dịch vụ trả tiền nào), không bao giờ sai màu / sai dá
 | 1 cảnh Veo Lite + 1 cảnh ảnh động | ≈ 0,40 USD |
 | Toàn ảnh động | 0 USD |
 
+## 17. Sửa video (28/09/2026)
+
+Thẻ video ở tab **Duyệt video** → **Sửa video**: sửa móc câu / chữ từng cảnh / CTA (hoặc tắt chữ trên hình), bật / tắt giọng đọc +
+chọn giọng + sửa lời đọc từng cảnh, bật / tắt phụ đề (chữ của lời đọc), chọn nhạc CÓ QUYỀN + âm lượng, giữ / tắt âm gốc →
+**Dựng lại video**. Dựng lại từ các clip ĐÃ CÓ — không tạo clip AI nào; chỉ cảnh ĐỔI lời mới tạo giọng đọc mới (≈ 0,015 USD /
+phút); kiểm chất lượng chạy lại (≈ 0,01 USD). Chữ mới qua CÙNG bộ kiểm của kịch bản (giá ERP, size / màu đang bán, không chất
+liệu, không khuyến mãi ngoài câu chính sách). Video quay lại "Chờ duyệt" (bản đã duyệt cũng vậy). Video đã lên / đang lên Reel
+hoặc đã thành quảng cáo thì KHÔNG sửa đè — bản đã đăng phải khớp bản ERP giữ.
+
+Lưu: `video_scale_variants.render_options` (ghi đè cấu hình lượt; `musicId = null` = không nhạc) + `render_rev` (khoá việc dựng
+`render:<id>:r<n>`; lần 0 giữ khoá cũ). Migration 0170.
+
+**Chữ trên hình không còn tràn khung**: số ký tự mỗi dòng tính theo bề ngang khung và cỡ chữ (`lineChars`), tối đa 3 dòng; móc
+câu + chữ cảnh ở ≈ 60% chiều cao (bản cũ đặt móc câu ở 12% — đè lên mặt người mẫu), phụ đề ở 82%. Đo trên video thật 28/09:
+bản cũ cố định 24 ký tự ở cỡ 50 ⇒ đúng 720 px, cộng viền nền là cắt hai mép.
+
