@@ -32,6 +32,7 @@ import {
   PackageOpen,
   PackagePlus,
   PackageX,
+  Plug,
   PlugZap,
   ReceiptText,
   Blocks,
@@ -130,6 +131,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/statuses": Tags,
   "/settings/workflows": Workflow,
   "/settings/pages": LayoutTemplate,
+  "/settings/connections": Plug,
   "/platform": ServerCog,
 };
 

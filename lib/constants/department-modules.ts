@@ -457,6 +457,15 @@ export const NAV_MODULES = [
     permission: "metadata:manage",
     why: "Ghép trang từ khối có sẵn (chỉ số, bảng, biểu đồ, Kanban, nhật ký, form, nút) theo Nháp → Xuất bản, không cần deploy. Trang lên menu của mọi người nên là quyết định của quản trị; mỗi khối vẫn tự kiểm quyền của người xem.",
   },
+  // Kết nối theo tổ chức (Phase 9): khoá `settings:manage` của lõi — `integrations:*` thuộc module «Kết nối dữ
+  // liệu» chỉ tổ chức nhà bật được, nên tổ chức khác sẽ không bao giờ tới được màn hình khai kết nối của chính mình.
+  {
+    href: "/settings/connections",
+    label: "Kết nối theo tổ chức",
+    zone: "SYSTEM",
+    permission: "settings:manage",
+    why: "Sổ connector: tích hợp của tổ chức nhà hiện CHỈ ĐỌC (không bí mật nào), kết nối do chính tổ chức khai thì mã hoá, kiểm tra thật rồi mới bật. Bí mật kết nối là việc của quản trị, không của phòng nào.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

@@ -242,6 +242,8 @@ const ROUTES = [
   "/settings/workflows",
   // Trang tuỳ biến (Phase 4): danh sách trang đọc dịch vụ `lib/pages/*` của tổ chức.
   "/settings/pages",
+  // Kết nối theo tổ chức (Phase 9): sổ connector + trạng thái cấu hình CHỈ ĐỌC của tổ chức nhà (không bí mật nào).
+  "/settings/connections",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
