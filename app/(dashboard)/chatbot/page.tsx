@@ -41,7 +41,7 @@ export default async function ChatbotPage() {
 
       {status.state === "RUNNING" ? (
         <>
-          <div className="overflow-hidden rounded-lg border bg-[#0b0f14]">
+          <div className="overflow-hidden rounded-xl border bg-card">
             <iframe src="/api/chatbot/admin" title="Quản lý bot chat" className="block h-[calc(100vh-190px)] min-h-[640px] w-full" />
           </div>
           <details className="rounded-lg border p-4">

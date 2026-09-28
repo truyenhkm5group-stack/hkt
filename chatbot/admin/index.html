@@ -6,22 +6,25 @@
 <title>Pancake Bot Manager</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%234a90d9%27/%3E%3Ctext x=%2716%27 y=%2721%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3EP%3C/text%3E%3C/svg%3E">
 <style>
-  :root{--bg:#0f1318;--panel:#161c24;--panel2:#1d2530;--line:#2a3441;--text:#e6edf3;--muted:#8a9bb0;--acc:#4a90d9;--ok:#3fb950;--warn:#d29922;--err:#f85149;--radius:10px}
+  /* Bang mau + phong DONG BO voi ERP (app/globals.css): sang/toi theo ERP, cam am lam mau nhan. */
+  :root{--bg:oklch(0.955 0.011 80);--panel:oklch(1 0 0);--panel2:oklch(0.955 0.01 80);--field:oklch(1 0 0);--line:oklch(0.905 0.012 80);--text:oklch(0.215 0.014 70);--muted:oklch(0.5 0.02 70);--acc:oklch(0.57 0.2 33);--acc-fg:oklch(0.99 0.01 60);--accent:oklch(0.955 0.022 50);--ok:oklch(0.55 0.15 150);--warn:oklch(0.62 0.15 70);--err:oklch(0.55 0.225 16);--radius:12px;--font:"Plus Jakarta Sans",ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  :root[data-theme=dark]{--bg:oklch(0.17 0.008 70);--panel:oklch(0.215 0.009 70);--panel2:oklch(0.265 0.01 70);--field:oklch(0.17 0.008 70);--line:oklch(1 0 0 / 10%);--text:oklch(0.95 0.008 80);--muted:oklch(0.72 0.015 75);--acc:oklch(0.7 0.19 34);--acc-fg:oklch(0.16 0.03 34);--accent:oklch(0.3 0.045 40);--ok:oklch(0.72 0.17 150);--warn:oklch(0.78 0.15 80);--err:oklch(0.7 0.2 18)}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;height:100vh;display:flex;overflow:hidden}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--font);height:100vh;display:flex;overflow:hidden}
   a{color:var(--acc)}
-  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;border-radius:8px}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;border-radius:10px;transition:border-color .15s}
   button:hover{border-color:var(--acc)}
-  button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-fg);font-weight:600}
   button.danger{border-color:var(--err);color:var(--err)}
   button:disabled{opacity:.5;cursor:default}
-  input,select,textarea{font:inherit;background:#0b0f14;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
+  input,select,textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;width:100%}
+  input:focus,select:focus,textarea:focus{outline:2px solid color-mix(in oklch,var(--acc) 45%,transparent);outline-offset:0;border-color:var(--acc)}
   textarea{min-height:120px;resize:vertical;line-height:1.45}
   label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
   .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
-  .card h3{margin:0 0 10px;font-size:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:0 1px 2px oklch(0 0 0 / 4%)}
+  .card h3{margin:0 0 10px;font-size:14px;font-weight:700}
   .muted{color:var(--muted)}
   .small{font-size:12px}
   .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--muted)}
@@ -32,7 +35,7 @@
   #side .head .small{font-weight:400}
   #pages{flex:1;overflow:auto;padding:8px}
   .pg{padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;gap:10px;align-items:center}
-  .pg:hover{background:var(--panel2)} .pg.active{background:var(--panel2);outline:1px solid var(--acc)}
+  .pg:hover{background:var(--panel2)} .pg.active{background:var(--accent);outline:1px solid var(--acc)}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
   .dot.on{background:var(--ok)} .dot.dry{background:var(--warn)}
   .pg .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -44,19 +47,20 @@
   #top h2{margin:0;font-size:16px;flex:1}
   #tabs{display:flex;gap:4px;padding:8px 20px 0;border-bottom:1px solid var(--line);background:var(--panel)}
   #tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--muted);padding:8px 12px}
-  #tabs button.active{color:#fff;border-bottom-color:var(--acc)}
+  #tabs button.active{color:var(--text);font-weight:600;border-bottom-color:var(--acc)}
   #content{flex:1;overflow:auto;padding:16px 20px}
   .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
   .switch input{width:auto}
-  .stat{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-  .stat div{background:var(--panel2);border-radius:8px;padding:10px}
-  .stat b{font-size:20px;display:block}
-  pre{white-space:pre-wrap;word-break:break-word;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:420px;overflow:auto;font-size:12px}
+  .stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat div{background:var(--panel2);border-radius:10px;padding:10px 12px}
+  .stat b{font-size:20px;display:block;font-variant-numeric:tabular-nums}
+  .stat .muted{font-size:12px}
+  pre{white-space:pre-wrap;word-break:break-word;background:var(--field);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:420px;overflow:auto;font-size:12px}
   /* chat */
   .chat{display:flex;flex-direction:column;height:calc(100vh - 210px)}
-  .msgs{flex:1;overflow:auto;padding:10px;background:#0b0f14;border:1px solid var(--line);border-radius:8px}
+  .msgs{flex:1;overflow:auto;padding:10px;background:var(--field);border:1px solid var(--line);border-radius:8px}
   .m{max-width:70%;padding:8px 12px;border-radius:12px;margin:6px 0;white-space:pre-wrap;word-break:break-word}
-  .m.u{background:#243447;margin-left:auto} .m.b{background:var(--panel2)} .m .meta{font-size:11px;color:var(--muted);margin-top:4px}
+  .m.u{background:var(--accent);margin-left:auto} .m.b{background:var(--panel2)} .m .meta{font-size:11px;color:var(--muted);margin-top:4px}
   .m img{max-width:200px;border-radius:8px;display:block;margin-top:6px}
   .convs{display:grid;grid-template-columns:320px 1fr;gap:12px;height:calc(100vh - 210px)}
   .convlist{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
@@ -70,11 +74,39 @@
   .diff{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .hint{font-size:12px;color:var(--muted);margin-top:4px}
   #nav_assistant{border:1px solid var(--acc);margin-bottom:6px}
-  .act{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;margin:4px 4px 0 0;border:1px solid var(--line);background:#0b0f14;color:var(--muted)}
+  .act{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;margin:4px 4px 0 0;border:1px solid var(--line);background:var(--field);color:var(--muted)}
   .act.ok{border-color:var(--ok);color:var(--ok)} .act.err{border-color:var(--err);color:var(--err)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
   .chips button{font-size:12px;padding:4px 10px}
 </style>
+<script>
+/* Theo che do sang/toi va phong chu cua ERP khi mo trong khung cua ERP (cung nguon nen doc duoc trang cha). */
+(function () {
+  function sync() {
+    var dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+    try {
+      if (window.parent !== window) dark = window.parent.document.documentElement.classList.contains("dark");
+    } catch (e) {}
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }
+  sync();
+  try {
+    var pd = window.parent !== window ? window.parent.document : null;
+    if (pd) {
+      new MutationObserver(sync).observe(pd.documentElement, { attributes: true, attributeFilter: ["class"] });
+      // Chep @font-face cua ERP (next/font tu phuc vu Plus Jakarta Sans) de khung dung dung phong cua ERP
+      var css = "";
+      for (var i = 0; i < pd.styleSheets.length; i++) {
+        var rules; try { rules = pd.styleSheets[i].cssRules; } catch (e) { continue; }
+        for (var j = 0; j < rules.length; j++) if (rules[j].type === 5) css += rules[j].cssText + "\n";
+      }
+      var fam = getComputedStyle(pd.body).fontFamily;
+      if (css) { var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st); }
+      if (fam) document.documentElement.style.setProperty("--font", fam);
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <div id="side">
@@ -196,6 +228,49 @@ function render() {
 }
 
 /* ---------- Cài đặt ---------- */
+// ---- Chi phi AI (xem src/aicost.js): CHUA BIET in "—", khong in 0d; co model chua co gia thi in "≥"
+function fmtVnd(a) {
+  if (!a) return "—";
+  if (a.costVnd == null) return "—";
+  return (a.partial ? "≥ " : "") + a.costVnd.toLocaleString("vi-VN") + "đ";
+}
+function aiNote(a) {
+  if (!a) return "";
+  if (!a.calls) return "Chưa có lượt gọi AI nào trong kỳ";
+  let t = `${a.calls.toLocaleString("vi-VN")} lượt gọi AI`;
+  if (a.unpricedCalls) t += ` · ${a.unpricedCalls} lượt chưa tính được tiền (model chưa có giá: ${a.unpricedModels.join(", ")})`;
+  if (a.perOrderVnd == null && a.calls) t += " · chưa có đơn nên chưa chia được theo đơn";
+  return t;
+}
+function aiCostCard(p) {
+  const a = p.ai?.last7, shop = STATE.aiShop, pr = STATE.aiPricing || { prices: {}, usdVnd: 0 };
+  const rows = (a?.perModel || []).map((m) => `<tr><td>${esc(m.model)}</td><td>${m.calls.toLocaleString("vi-VN")}</td><td>${(m.input + m.cached).toLocaleString("vi-VN")}${m.cached ? ` <span class="muted small">(${Math.round((m.cached / Math.max(1, m.input + m.cached)) * 100)}% cache)</span>` : ""}</td><td>${m.output.toLocaleString("vi-VN")}</td><td>${m.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : m.costVnd.toLocaleString("vi-VN") + "đ"}</td></tr>`).join("");
+  const priceRows = Object.entries(pr.prices).map(([k, v]) => `<tr><td><input data-pm="${esc(k)}" value="${esc(k)}"></td><td><input data-pi="${esc(k)}" type="number" step="0.001" value="${v.input}"></td><td><input data-pc="${esc(k)}" type="number" step="0.001" value="${v.cached}"></td><td><input data-po="${esc(k)}" type="number" step="0.001" value="${v.output}"></td></tr>`).join("");
+  return `<div class="card"><h3>Chi phí AI 7 ngày (ước tính)</h3>
+    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tính từ số token thật của mọi lượt gọi AI (trả lời, nhận diện ảnh, trích xuất đơn) × bảng giá bên dưới. "AI / 1 đơn" = chi phí AI của page ÷ số đơn bot ghi vào POS — tiền của hội thoại không ra đơn vẫn tính vào. Cả shop 7 ngày: <b>${fmtVnd(shop)}</b>${shop?.perOrderVnd != null ? ` · <b>${(shop.partial ? "≥ " : "") + shop.perOrderVnd.toLocaleString("vi-VN")}đ</b>/đơn (${shop.orders} đơn)` : ""}.</div>
+    ${rows ? `<table><tr><th>Model</th><th>Lượt gọi</th><th>Token vào</th><th>Token ra</th><th>Tiền</th></tr>${rows}</table>` : '<div class="muted small">Chưa có lượt gọi AI nào được ghi (bộ đếm bắt đầu từ bản cập nhật này).</div>'}
+    <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Bảng giá AI (USD / 1 triệu token) · tỷ giá ${pr.usdVnd.toLocaleString("vi-VN")}đ/USD</summary>
+      <table id="ai_prices" style="margin-top:8px"><tr><th>Model (khớp theo tiền tố)</th><th>Vào</th><th>Vào từ cache</th><th>Ra (gồm suy nghĩ)</th></tr>${priceRows}
+      <tr><td><input data-pm="__new" placeholder="thêm model, vd gemini-3.5-flash"></td><td><input data-pi="__new" type="number" step="0.001"></td><td><input data-pc="__new" type="number" step="0.001"></td><td><input data-po="__new" type="number" step="0.001"></td></tr></table>
+      <div class="row" style="margin-top:8px"><div style="width:180px"><label>Tỷ giá (đ / 1 USD)</label><input id="ai_usdvnd" type="number" value="${pr.usdVnd}"></div><button class="primary" id="ai_save" style="align-self:flex-end">Lưu bảng giá</button></div>
+      <div class="hint">Giá niêm yết tham khảo của nhà cung cấp, không phải hoá đơn. Model không có giá thì lượt gọi đó hiện "chưa có giá", không bị tính 0đ.</div>
+    </details></div>`;
+}
+function bindAiPrices() {
+  const btn = $("#ai_save");
+  if (!btn) return;
+  btn.onclick = async () => {
+    const out = {};
+    document.querySelectorAll("#ai_prices input[data-pm]").forEach((el) => {
+      const k = el.dataset.pm, name = el.value.trim().toLowerCase();
+      const v = (a) => document.querySelector(`#ai_prices input[data-${a}="${CSS.escape(k)}"]`)?.value;
+      if (!name) return;
+      if (k === "__new" && !v("pi")) return;
+      out[name] = { input: Number(v("pi")), cached: Number(v("pc") || 0), output: Number(v("po") || 0) };
+    });
+    try { await api("/api/global", { method: "POST", body: { aiPrices: out, usdVnd: Number($("#ai_usdvnd").value) } }); toast("Đã lưu bảng giá AI"); await refreshState(); } catch (e) { toast("Lỗi: " + e.message, 6000); }
+  };
+}
 function renderSettings(p) {
   const s = p.settings, g = STATE.global, st = p.stats;
   $("#content").innerHTML = `
@@ -204,7 +279,10 @@ function renderSettings(p) {
     <div><b>${st.last7.handoffs}</b><span class="muted">chuyển nhân viên</span></div>
     <div><b>${st.last7.skippedStaff}</b><span class="muted">nhường nhân viên</span></div>
     <div><b>${st.last7.orders || 0}</b><span class="muted">đơn ghi vào POS</span></div>
+    <div title="${esc(aiNote(p.ai?.last7))}"><b>${fmtVnd(p.ai?.last7)}</b><span class="muted">chi phí AI (ước tính)</span></div>
+    <div title="${esc(aiNote(p.ai?.last7))}"><b>${p.ai?.last7?.perOrderVnd == null ? "—" : (p.ai.last7.partial ? "≥ " : "") + p.ai.last7.perOrderVnd.toLocaleString("vi-VN") + "đ"}</b><span class="muted">AI / 1 đơn POS</span></div>
     <div><b class="small" style="font-size:13px;margin-top:4px">${fmtTime(st.lastActivity)}</b><span class="muted">hoạt động cuối</span></div></div></div>
+  ${aiCostCard(p)}
   <div class="card"><h3>Tên page</h3>
     <div class="row"><div style="flex:1"><label>Tên hiển thị (trống = dùng tên thật từ Pancake${p.pancakeName ? ": <b>" + esc(p.pancakeName) + "</b>" : ""})</label><input id="f_displayName" value="${esc(s.displayName || "")}" placeholder="${esc(p.pancakeName || p.name || "")}"></div></div>
     <div class="hint">Tên này hiện trong app và được bot dùng khi giới thiệu shop ({{SHOP_NAME}} trong prompt).</div>
@@ -254,6 +332,7 @@ function renderSettings(p) {
       extraPrompt: $("#f_extraPrompt").value, model: $("#f_model").value, temperature: $("#f_temperature").value === "" ? null : Number($("#f_temperature").value), humanTakeoverMinutes: $("#f_humanTakeoverMinutes").value === "" ? null : Number($("#f_humanTakeoverMinutes").value), minCustomerMessages: $("#f_minCustomerMessages").value === "" ? null : Number($("#f_minCustomerMessages").value) };
     try { await api(`/api/pages/${p.id}/settings`, { method: "PUT", body }); toast("Đã lưu cài đặt cho " + (p.name || p.id)); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
   };
+  bindAiPrices();
   $("#viewPrompt").onclick = async () => { const d = await api(`/api/pages/${p.id}/prompt`); const pre = $("#fullPrompt"); pre.textContent = d.text; pre.style.display = "block"; };
 }
 
@@ -402,7 +481,7 @@ function renderCare(p) {
   const showProgress = (s) => {
     if (!s.running && !s.total) return ($("#care_progress").textContent = "Chưa gửi.");
     const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
-    $("#care_progress").innerHTML = `<div>${s.running ? "⏳ Đang gửi" : "✅ Xong"}${s.dryRun ? " (chỉ log)" : ""}: ${s.done}/${s.total} · gửi ${s.sent} · bỏ qua ${s.skipped} · lỗi ${s.failed} · ${s.perMinute} tin/phút</div><div style="height:8px;background:#0b0f14;border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>${s.errors?.length ? `<div class="small muted">${s.errors.map(esc).join("<br>")}</div>` : ""}`;
+    $("#care_progress").innerHTML = `<div>${s.running ? "⏳ Đang gửi" : "✅ Xong"}${s.dryRun ? " (chỉ log)" : ""}: ${s.done}/${s.total} · gửi ${s.sent} · bỏ qua ${s.skipped} · lỗi ${s.failed} · ${s.perMinute} tin/phút</div><div style="height:8px;background:var(--panel2);border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>${s.errors?.length ? `<div class="small muted">${s.errors.map(esc).join("<br>")}</div>` : ""}`;
     if (!s.running && poll) { clearInterval(poll); poll = null; }
   };
   const startPoll = () => { if (poll) clearInterval(poll); poll = setInterval(() => api(`/api/pages/${p.id}/broadcast/status`).then(showProgress).catch(() => {}), 2000); };
@@ -534,7 +613,7 @@ function renderFollow(p) {
     if (!s.running && !s.total) return ($("#fu_progress").textContent = "Chưa chạy.");
     const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
     $("#fu_progress").innerHTML = `<div>${s.running ? "⏳ Đang bám" : "✅ Xong"}${s.dryRun ? " (chỉ log)" : ""}: ${s.done}/${s.total} · gửi ${s.sent} · bỏ qua ${s.skipped} · lỗi ${s.failed}</div>
-      <div style="height:8px;background:#0b0f14;border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>
+      <div style="height:8px;background:var(--panel2);border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>
       ${s.log?.length ? `<div class="small" style="white-space:pre-wrap">${s.log.map(esc).join("\n")}</div>` : ""}
       ${s.errors?.length ? `<div class="small muted">${s.errors.map(esc).join("<br>")}</div>` : ""}`;
     if (!s.running && poll) { clearInterval(poll); poll = null; }

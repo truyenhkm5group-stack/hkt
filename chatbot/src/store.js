@@ -87,6 +87,27 @@ class Store {
     while (days.length > 30) delete p[days.shift()];
     this._save();
   }
+  /** Token AI theo page / ngay (gio VN) / model — giu 35 ngay. Xem aicost.js. */
+  addAiUsage(pageId, model, t) {
+    const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    const all = (this.state.aiUsage ||= {});
+    const p = (all[String(pageId)] ||= {});
+    const d = (p[day] ||= {});
+    const x = (d[String(model)] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+    x.calls += 1;
+    x.input += t.input || 0;
+    x.cached += t.cached || 0;
+    x.output += t.output || 0;
+    const days = Object.keys(p).sort();
+    while (days.length > 35) delete p[days.shift()];
+    this._save();
+  }
+  getAiUsage(pageId) {
+    return (this.state.aiUsage || {})[String(pageId)] || {};
+  }
+  getAllAiUsage() {
+    return this.state.aiUsage || {};
+  }
   getStats(pageId) {
     return (this.state.stats || {})[String(pageId)] || {};
   }

@@ -16,6 +16,7 @@ import { broadcast } from "./broadcast.js";
 import { salesAgent, followupConfig, STAGES } from "./salesagent.js";
 import { orderAudit, STATUS_NAMES } from "./audit.js";
 import { handleErpRoutes } from "./erp-import.js";
+import { summarizeAiCost } from "./aicost.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_HTML = path.join(ROOT, "admin", "index.html");
@@ -63,8 +64,11 @@ function pageSummary(bot, pageId) {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const days = Object.keys(st).filter((k) => k !== "lastActivity").sort().slice(-7);
   const sum = (key) => days.reduce((n, d) => n + (st[d]?.[key] || 0), 0);
+  const { prices, usdVnd } = settings.aiPricing();
+  const ai7 = summarizeAiCost(store.getAiUsage(pageId), days, { prices, usdVnd, orders: sum("orders") });
   return {
     id: pageId,
+    ai: { last7: ai7, today: summarizeAiCost(store.getAiUsage(pageId), [today], { prices, usdVnd, orders: st[today]?.orders || 0 }) },
     name: bot.pageNames.get(pageId) || "",
     pancakeName: bot.pancakeNames?.get(pageId) || "",
     settings: settings.get(pageId),
@@ -91,6 +95,27 @@ Hãy phân tích và trả lời bằng tiếng Việt, ngắn gọn, dạng dan
 2. Lỗi/điểm yếu trong cách bot đang trả lời (nếu thấy).
 3. Đề xuất cụ thể 3–6 dòng nên THÊM vào "Hướng dẫn riêng cho page" (viết sẵn để copy vào), ví dụ câu trả lời mẫu, chính sách còn thiếu, cách xưng hô.
 Không bịa thông tin shop; chỗ nào cần chủ shop điền thì ghi [cần điền].`;
+
+/** Ca shop, 7 ngay: gom token moi page + phan "_khac" (tro ly, doi chieu don...) ; don = tong don cua moi page. */
+function shopAiCost(bot) {
+  const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const days = [...Array(7)].map((_, i) => new Date(Date.parse(today) - i * 86400000).toISOString().slice(0, 10));
+  const gop = {};
+  for (const byDay of Object.values(store.getAllAiUsage())) {
+    for (const d of days) {
+      for (const [model, t] of Object.entries(byDay[d] || {})) {
+        const x = ((gop[d] ||= {})[model] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+        x.calls += t.calls || 0; x.input += t.input || 0; x.cached += t.cached || 0; x.output += t.output || 0;
+      }
+    }
+  }
+  let orders = 0;
+  for (const id of bot.clients.keys()) {
+    const st = store.getStats(id);
+    for (const d of days) orders += st[d]?.orders || 0;
+  }
+  return summarizeAiCost(gop, days, { ...settings.aiPricing(), orders });
+}
 
 export function createAdminHandler(bot) {
   const assistant = createAssistant(bot);
@@ -151,6 +176,8 @@ export function createAdminHandler(bot) {
             vision: config.vision.enabled,
           },
           catalog: { enabled: catalog.enabled, products: catalog.products.length, updatedAt: catalog.updatedAt || null },
+          aiPricing: settings.aiPricing(),
+          aiShop: shopAiCost(bot),
           pages: [...bot.clients.keys()].map((id) => pageSummary(bot, id)),
         }), true;
       }
@@ -158,7 +185,14 @@ export function createAdminHandler(bot) {
       if (m("POST", "/api/global")) {
         const body = await readJson(req);
         if ("dryRun" in body) settings.setGlobalDryRun(body.dryRun === null ? null : !!body.dryRun);
-        return json(res, 200, { ok: true, dryRun: settings.globalDryRun() }), true;
+        if ("aiPrices" in body || "usdVnd" in body) {
+          try {
+            settings.setAiPricing({ aiPrices: body.aiPrices, usdVnd: body.usdVnd });
+          } catch (e) {
+            return json(res, 400, { error: e.message }), true;
+          }
+        }
+        return json(res, 200, { ok: true, dryRun: settings.globalDryRun(), aiPricing: settings.aiPricing() }), true;
       }
 
       if (m("POST", "/api/refresh")) {

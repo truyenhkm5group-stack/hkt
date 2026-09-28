@@ -1,6 +1,7 @@
 import { config, loadSystemPrompt } from "./config.js";
 import { PancakeClient } from "./pancake.js";
 import { generateReply } from "./ai.js";
+import { aiScope } from "./aicost.js";
 import { store } from "./store.js";
 import { ConversationQueue } from "./queue.js";
 import { log } from "./logger.js";
@@ -1050,7 +1051,12 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
   }
 
   /** Xu ly 1 hoi thoai: lay lich su -> Gemini -> gui tra loi (+ anh san pham) */
-  async processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
+  /** Moi lan goi AI trong luot xu ly nay duoc tinh tien cho dung page (aicost.js). */
+  processConversation(payload) {
+    return aiScope.run({ pageId: String(payload.pageId) }, () => this._processConversation(payload));
+  }
+
+  async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
     const client = this.getClient(pageId);
     if (!client) return;
     if (this.isPaused(tags, pageId)) return;

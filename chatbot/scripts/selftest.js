@@ -849,5 +849,50 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 25: so do cu van doc duoc, khong xin lai so do, nhan ra khach buc, khach xin anh -> gui anh mau chu luc");
 }
 
+// ---- 26: chi phi AI moi don (chu shop 28/09/2026: "them so tien phai tra cho api / 1 don hang")
+{
+  const { priceFor, usageTokens, summarizeAiCost, aiScope, DEFAULT_AI_PRICES } = await import("../src/aicost.js");
+  // Gia theo TIEN TO DAI NHAT: "flash-lite-preview" khong duoc an gia cua "flash"
+  assert.deepEqual(priceFor("gemini-2.5-flash-lite-preview-06-17", DEFAULT_AI_PRICES), DEFAULT_AI_PRICES["gemini-2.5-flash-lite"]);
+  assert.deepEqual(priceFor("gemini-2.5-flash", DEFAULT_AI_PRICES), DEFAULT_AI_PRICES["gemini-2.5-flash"]);
+  assert.equal(priceFor("gemini-3.5-flash", DEFAULT_AI_PRICES), null, "model chua co gia -> null, khong doan");
+  // Token: Gemini tru phan cache khoi token vao, cong token suy nghi vao token ra; OpenAI khong cong reasoning lan hai
+  assert.deepEqual(usageTokens("gemini", { promptTokenCount: 10000, cachedContentTokenCount: 9000, candidatesTokenCount: 150, thoughtsTokenCount: 50 }), { input: 1000, cached: 9000, output: 200 });
+  assert.deepEqual(usageTokens("openai", { promptTokenCount: 8000, prompt_tokens_details: { cached_tokens: 6000 }, candidatesTokenCount: 300, thoughtsTokenCount: 100 }), { input: 2000, cached: 6000, output: 300 });
+  // Tong hop: 100 luot flash-lite, 10 don -> tien/don; co model chua gia -> "it nhat" (partial), khong in 0
+  const byDay = { "2026-09-28": { "gemini-2.5-flash-lite": { calls: 100, input: 100000, cached: 900000, output: 20000 } } };
+  const a = summarizeAiCost(byDay, ["2026-09-28"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 10 });
+  // (100000*0.1 + 900000*0.025 + 20000*0.4) / 1e6 = 0.0405 USD = 1053 d
+  assert.equal(a.costVnd, 1053);
+  assert.equal(a.perOrderVnd, 105);
+  assert.equal(a.partial, false);
+  const b = summarizeAiCost({ d: { ...byDay["2026-09-28"], "gemini-3.5-flash": { calls: 5, input: 1, cached: 0, output: 1 } } }, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 10 });
+  assert.equal(b.partial, true);
+  assert.equal(b.unpricedCalls, 5);
+  const c = summarizeAiCost({ d: { "gemini-3.5-flash": { calls: 5, input: 1, cached: 0, output: 1 } } }, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 3 });
+  assert.equal(c.costVnd, null, "toan luot chua co gia -> CHUA BIET, khong phai 0d");
+  assert.equal(c.perOrderVnd, null);
+  assert.equal(summarizeAiCost({}, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 0 }).costVnd, 0, "khong goi AI lan nao -> 0d that");
+  assert.equal(a.perOrderVnd !== null && summarizeAiCost(byDay, ["2026-09-28"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 0 }).perOrderVnd, null, "chua co don -> khong chia");
+  // Moi lan goi AI trong luot xu ly cua mot page duoc ghi cho dung page do
+  const before = JSON.stringify(store.getAiUsage("PAGE_COST"));
+  store.addAiUsage("PAGE_COST", "gemini-2.5-flash-lite", { input: 10, cached: 90, output: 5 });
+  const u = store.getAiUsage("PAGE_COST");
+  const day = Object.keys(u).sort().pop();
+  assert.equal(u[day]["gemini-2.5-flash-lite"].calls >= 1, true);
+  assert.notEqual(JSON.stringify(u), before);
+  const { currentAiPage } = await import("../src/aicost.js");
+  assert.equal(currentAiPage(), "_khac");
+  assert.equal(aiScope.run({ pageId: "PAGE9" }, () => currentAiPage()), "PAGE9");
+  // Bang gia sua trong app: chan so am / ty gia vo ly
+  assert.throws(() => settings.setAiPricing({ aiPrices: { x: { input: -1, cached: 0, output: 0 } } }), /khong hop le/);
+  assert.throws(() => settings.setAiPricing({ usdVnd: 5 }), /khong hop le/);
+  const pr = settings.setAiPricing({ aiPrices: { "gemini-3.5-flash": { input: 0.5, cached: 0.05, output: 3 } }, usdVnd: 25500 });
+  assert.equal(pr.usdVnd, 25500);
+  assert.ok(pr.prices["gemini-3.5-flash"] && pr.prices["gemini-2.5-flash-lite"], "gia moi cong them, khong xoa gia mac dinh");
+  settings.global.aiPrices = {}; settings.global.usdVnd = undefined;
+  console.log("OK 26: chi phi AI / don: gia theo tien to dai nhat, token cache/suy nghi dung nha cung cap, model chua gia = chua biet (khong phai 0d)");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
