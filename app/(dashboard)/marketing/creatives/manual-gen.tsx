@@ -34,6 +34,7 @@ import { formatVND, vnShortStamp } from "@/lib/format";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { CampaignSetupOptions, DesignInspirationOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
+import { IdeaPresets } from "./idea-presets";
 import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
 /**
@@ -203,7 +204,7 @@ function DesignGenForm({ inspirations, unitVnd, unitUsd }: { inspirations: Desig
       .map((o) => o.productId),
   );
   const [idea, setIdea] = useState("");
-  const [count, setCount] = useState<number>(MANUAL_GEN.imagesPerRun);
+  const [count, setCount] = useState<number>(MANUAL_GEN.pickerDefault);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [pending, start] = useTransition();
   const toggle = (id: string) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= MANUAL_DESIGN.maxInspirations ? cur : [...cur, id]));
@@ -278,6 +279,7 @@ function DesignGenForm({ inspirations, unitVnd, unitUsd }: { inspirations: Desig
             {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
           </span>
         </div>
+        <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design disabled={pending} />
         <Textarea id="md-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: chất thun rayon, đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" />
         <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT: đè bối cảnh / không khí / cách phối và cả thuộc tính thiết kế bạn nói ra (chất liệu, màu, độ dài…); phần không nhắc tới đi theo DNA máy lập.</p>
         <div className="mt-auto space-y-1.5">
@@ -310,7 +312,7 @@ function MockupGenForm({
   const [photoId, setPhotoId] = useState(initialPhotoId && photos.some((s) => s.id === initialPhotoId) ? initialPhotoId : (photos[0]?.id ?? ""));
   const [ownAdId, setOwnAdId] = useState("");
   const [idea, setIdea] = useState("");
-  const [count, setCount] = useState<number>(MANUAL_GEN.imagesPerRun);
+  const [count, setCount] = useState<number>(MANUAL_GEN.pickerDefault);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [pending, start] = useTransition();
   const productOf = sources.find((s) => s.id === photoId)?.productId ?? "";
@@ -373,6 +375,7 @@ function MockupGenForm({
             {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
           </span>
         </div>
+        <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design={false} disabled={pending} />
         <Textarea id="mg-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: mặc đi biển Đà Nẵng buổi chiều, ánh nắng vàng, dáng đi tự nhiên…" />
         <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, dáng, người mẫu, ánh sáng, cách phối) — chỉ trừ chính sản phẩm: máy luôn giữ đúng món hàng trong ảnh thật.</p>
         <div className="mt-auto space-y-1.5">

@@ -1454,7 +1454,8 @@ export const CAMPAIGN_NAME_MAX_CHARS = 255;
  * (OpenAI có thể đã tính tiền) mà đánh lỗi có lý do.
  * `ideaMaxChars` — ô ý tưởng tự do.
  */
-export const MANUAL_GEN = { imagesPerRun: 10, drawPerTick: 4, staleDrawMinutes: 15, ideaMaxChars: 1000 } as const;
+/** `pickerDefault` — số ảnh CHỌN SẴN trên màn hình (chủ shop 28/09/2026: "mặc định số ảnh tạo cho về 1"); `imagesPerRun` còn là mặc định phía máy chủ khi không gửi số. */
+export const MANUAL_GEN = { imagesPerRun: 10, pickerDefault: 1, drawPerTick: 4, staleDrawMinutes: 15, ideaMaxChars: 1000 } as const;
 
 /**
  * Gen tay KHÔNG CÒN TRẦN ẢNH / NGÀY (chủ shop 26/09/2026: "gỡ giới hạn trong phần gen ảnh, thêm tính tiền trên
@@ -1560,7 +1561,7 @@ export const MANUAL_GEN_KIND_LABEL: Record<ManualGenKind, string> = { DESIGN: "T
  *   · `detail` — sửa chi tiết tự do.
  * Không yêu cầu nào ⇒ không vẽ (vẽ lại y nguyên là tốn tiền vô ích).
  */
-export const IMAGE_EDIT = { minImages: 1, maxImages: 4, defaultImages: 2, colorMaxChars: 60, detailMaxChars: 1000 } as const;
+export const IMAGE_EDIT = { minImages: 1, maxImages: 4, defaultImages: 1, colorMaxChars: 60, detailMaxChars: 1000 } as const;
 
 export const IMAGE_EDIT_LAYOUTS = ["HERO", "COLLAGE_4", "COLOR_VARIANTS", "FLATLAY", "MANNEQUIN", "DETAIL_CLOSEUPS", "LIFESTYLE"] as const;
 export type ImageEditLayout = (typeof IMAGE_EDIT_LAYOUTS)[number];
