@@ -211,6 +211,17 @@ export const SUBSTATE_TEXT_RULES: { match: string[]; substate: CarrierSubstate }
 ];
 
 /**
+ * MÃ SỐ CỦA MỘT SỰ KIỆN HÀNH TRÌNH từ chuỗi `shipment_events.status` — CÙNG NGHĨA với biểu thức SQL
+ * `nullif(regexp_replace(status, '[^0-9]', '', 'g'), '')::int`: bỏ mọi ký tự không phải chữ số,
+ * chuỗi rỗng (hoặc `NULL`) là KHÔNG CÓ MÃ chứ không phải mã 0.
+ */
+export function eventStatusCode(status: string | null | undefined): number | null {
+  if (status === null || status === undefined) return null;
+  const digits = status.replace(/[^0-9]/g, "");
+  return digits === "" ? null : Number(digits);
+}
+
+/**
  * TRẠNG THÁI CON CỦA MỘT KIỆN — mã trước, chữ sau, không rõ thì nói là không rõ.
  *
  * `stage` chỉ dùng làm lưới an toàn CUỐI CÙNG khi không có cả mã lẫn chữ: một kiện đã `DELIVERED`
