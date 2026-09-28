@@ -425,6 +425,7 @@ import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testConnectors } from "./connectors.test";
+import { testBlueprints } from "./blueprints.test";
 import { testPageData } from "./page-data.test";
 import { testPageRuntime } from "./page-runtime.test";
 import { testWorkflowAdmin } from "./workflow-admin.test";
@@ -2477,6 +2478,9 @@ async function main() {
   await testPageRuntime();
   // Phase 4 · trình soạn trang tuỳ biến: lõi màn hình /settings/pages (quyền, module chủ, lỗi theo path).
   await testPageAdmin();
+  // Phase 7 · blueprint + mẫu ngành: hai tổ chức THẬT `bp-a` / `bp-b` (tự cấp, tự dọn) — kiểm / lập kế hoạch / cài /
+  // nâng phiên bản ba chiều (UNCHANGED · UPDATE · SKIP_CUSTOMIZED · SKIP_DELETED · CONFLICT · BLOCKED), cô lập tổ chức.
+  await testBlueprints();
   // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
   // Phase 9 · sổ connector ↔ mã, mã hoá bí mật kết nối (AAD theo tổ chức), kiểm tra chỉ tới Lark / Telegram, hai tổ
   // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.

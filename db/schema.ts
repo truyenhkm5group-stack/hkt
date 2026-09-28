@@ -8641,3 +8641,52 @@ export const orgConnections = pgTable(
     check("org_connections_key_check", sql`${t.connectorKey} ~ '^[a-z][a-z0-9-]{1,60}$'`),
   ],
 );
+
+// ═══ PHASE 7 — BLUEPRINT + MẪU NGÀNH (docs/platform/phase-7-contracts.md mục 3) ═══
+//
+// Sổ cài đặt của gói metadata trong CSDL tổ chức. `blueprint_items` giữ hai băm của phép so ba chiều X4: băm của mục
+// trong GÓI (`template_hash`) và băm của thực thể ngay sau khi cài (`applied_hash`). Chỉ `lib/blueprints/ledger.ts` ghi
+// hai bảng này; bộ cài không ghi thẳng bảng metadata nào (đi qua dịch vụ sẵn có).
+
+export const blueprintInstalls = pgTable(
+  "blueprint_installs",
+  {
+    id: id(),
+    blueprintKey: text("blueprint_key").notNull(),
+    version: text("version").notNull(),
+    status: text("status").notNull().default("RUNNING"),
+    installedAt: timestamp("installed_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: ts("finished_at"),
+    installedBy: text("installed_by"),
+    installedByEmail: text("installed_by_email"),
+    plan: jsonb("plan").notNull().default({}),
+    result: jsonb("result"),
+    error: text("error"),
+  },
+  (t) => [
+    index("blueprint_installs_key_idx").on(t.blueprintKey, t.installedAt),
+    check("blueprint_installs_status_check", sql`${t.status} in ('RUNNING','DONE','FAILED')`),
+    check("blueprint_installs_key_check", sql`${t.blueprintKey} ~ '^[a-z][a-z0-9-]{1,40}$'`),
+    check("blueprint_installs_version_check", sql`${t.version} ~ '^[0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5}$'`),
+  ],
+);
+
+export const blueprintItems = pgTable(
+  "blueprint_items",
+  {
+    installId: text("install_id")
+      .notNull()
+      .references(() => blueprintInstalls.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    key: text("key").notNull(),
+    templateHash: text("template_hash").notNull(),
+    appliedHash: text("applied_hash"),
+    action: text("action").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("blueprint_items_pk").on(t.installId, t.kind, t.key),
+    check("blueprint_items_kind_check", sql`${t.kind} in ('module','role','object','field','status','form','list','page','workflow','setting','ai')`),
+    check("blueprint_items_action_check", sql`${t.action} in ('CREATE','UPDATE','UNCHANGED','SKIP_CUSTOMIZED','SKIP_DELETED','CONFLICT')`),
+  ],
+);

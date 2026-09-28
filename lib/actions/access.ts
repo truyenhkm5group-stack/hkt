@@ -12,11 +12,12 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { departmentCodesOfMany, effectiveAccess, toCustomRole } from "@/lib/auth/access";
+import { saveAccessRoleCore } from "@/lib/auth/access-roles";
 import { can, loadPermissionSnapshots, loadRoleTemplates, requireUser } from "@/lib/auth/session";
 import { normalizeScope } from "@/lib/constants/access-scope";
 import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { effectivePreview } from "@/lib/queries/access";
-import { savePositionSchema, saveAccessRoleSchema, setUserAccessSchema } from "@/lib/validation/access";
+import { savePositionSchema, setUserAccessSchema } from "@/lib/validation/access";
 
 export type AccessResult = { ok: true; id?: string } | { error: string };
 
@@ -36,54 +37,16 @@ function refreshOrgViews() {
   revalidatePath("/", "layout");
 }
 
-/** Tạo / sửa một vai trò tuỳ chỉnh. Vai trò hệ thống không đi qua đây — chúng không phải dòng dữ liệu. */
+/**
+ * Tạo / sửa một vai trò tuỳ chỉnh. Vai trò hệ thống không đi qua đây — chúng không phải dòng dữ liệu.
+ * Đường ghi nằm ở lõi `saveAccessRoleCore` (dùng chung với bộ cài blueprint); action chỉ đọc phiên và làm mới màn hình.
+ */
 export async function saveAccessRole(input: unknown): Promise<AccessResult> {
   const user = await requireUser();
-  if (!can(user, "users:manage")) return { error: "Không có quyền" };
-  const parsed = saveAccessRoleSchema.safeParse(input);
-  if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const data = parsed.data;
-  const db = await getDb();
-
-  const trung = await db.query.accessRoles.findFirst({
-    where: data.id ? and(eq(schema.accessRoles.code, data.code), ne(schema.accessRoles.id, data.id)) : eq(schema.accessRoles.code, data.code),
-    columns: { id: true },
-  });
-  if (trung) return { error: `Mã "${data.code}" đã được dùng cho một vai trò khác` };
-
-  const values = {
-    code: data.code,
-    name: data.name,
-    description: data.description,
-    baseRole: data.baseRole as (typeof schema.accessRoles.$inferInsert)["baseRole"],
-    permissions: [...new Set(data.permissions)].sort(),
-    defaultScope: data.defaultScope,
-    active: data.active,
-  };
-
-  if (!data.id) {
-    const [row] = await db.insert(schema.accessRoles).values(values).returning({ id: schema.accessRoles.id });
-    await audit({ userId: user.id, userEmail: user.email, action: "ACCESS_ROLE_CREATE", entity: "ACCESS_ROLE", entityId: row.id, detail: { after: values } });
-    refreshOrgViews();
-    return { ok: true, id: row.id };
-  }
-
-  const cu = await db.query.accessRoles.findFirst({ where: eq(schema.accessRoles.id, data.id) });
-  if (!cu) return { error: "Không tìm thấy vai trò" };
-  await db.update(schema.accessRoles).set(values).where(eq(schema.accessRoles.id, data.id));
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    action: "ACCESS_ROLE_UPDATE",
-    entity: "ACCESS_ROLE",
-    entityId: data.id,
-    detail: {
-      before: { code: cu.code, name: cu.name, baseRole: cu.baseRole, permissions: cu.permissions, defaultScope: cu.defaultScope, active: cu.active },
-      after: values,
-    },
-  });
+  const result = await saveAccessRoleCore(user, input);
+  if ("error" in result) return result;
   refreshOrgViews();
-  return { ok: true, id: data.id };
+  return { ok: true, id: result.id };
 }
 
 /**

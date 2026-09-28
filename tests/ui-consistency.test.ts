@@ -145,6 +145,7 @@ export function testUiConsistency() {
     "app/(dashboard)/settings/workflows/page.tsx",
     "app/(dashboard)/settings/pages/page.tsx",
     "app/(dashboard)/settings/connections/page.tsx",
+    "app/(dashboard)/settings/templates/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];

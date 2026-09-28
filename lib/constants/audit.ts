@@ -119,6 +119,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   META_PAGE_PUBLISH: "Xuất bản trang tuỳ biến",
   META_PAGE_ARCHIVE: "Lưu trữ trang tuỳ biến",
   PAGE_ACTION_RUN: "Bấm nút trên trang tuỳ biến",
+  // Blueprint + mẫu ngành (Phase 7 · lib/blueprints/apply.ts) — mỗi thực thể vẫn có dòng nhật ký của dịch vụ ghi nó.
+  BLUEPRINT_INSTALL_START: "Bắt đầu cài mẫu / gói cấu hình",
+  BLUEPRINT_INSTALL_DONE: "Cài xong mẫu / gói cấu hình",
+  BLUEPRINT_INSTALL_FAILED: "Cài mẫu / gói cấu hình dừng giữa chừng",
+  BLUEPRINT_STEP: "Một bước cài mẫu / gói cấu hình",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -148,6 +153,7 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   APPROVAL_REQUEST: "Yêu cầu duyệt hai bước",
   return_unidentified: "Kiện hoàn không mã",
   META_PAGE: "Trang tuỳ biến",
+  BLUEPRINT: "Mẫu / gói cấu hình",
 };
 
 /**

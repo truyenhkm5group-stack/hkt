@@ -112,6 +112,7 @@ const MOI = [
   "0162_workflow_run_lease",
   "0163_meta_pages",
   "0164_org_connections",
+  "0165_blueprint_installs",
 ] as const;
 
 /*

@@ -244,6 +244,8 @@ const ROUTES = [
   "/settings/pages",
   // Kết nối theo tổ chức (Phase 9): sổ connector + trạng thái cấu hình CHỈ ĐỌC của tổ chức nhà (không bí mật nào).
   "/settings/connections",
+  // Mẫu cấu hình (Phase 7): danh sách mẫu + lịch sử cài đọc sổ `blueprint_installs` của tổ chức.
+  "/settings/templates",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
