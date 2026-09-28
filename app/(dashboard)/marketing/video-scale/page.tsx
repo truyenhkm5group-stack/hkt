@@ -161,7 +161,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       ) : tab === "dang-reel" ? (
         <PublishPanel readiness={await publishReadiness()} automation={automation} pages={await listPageConfigs(db, fanpages)} posts={await listPosts(db)} canEngage={canEngage} canRelease={canRelease} canConfigure={canMode} canEdit={canEdit} />
       ) : (
-        <ConfigPanel config={cfg} ffmpeg={ff} music={await listMusic(db)} canConfig={canConfig} canEdit={canEdit} />
+        <ConfigPanel config={cfg} ffmpeg={ff} music={await listMusic(db)} canConfig={canConfig} canEdit={canEdit} canSpendAi={canMoney} />
       )}
     </div>
   );

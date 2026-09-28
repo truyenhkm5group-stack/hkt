@@ -18,8 +18,9 @@ import { loadProductFacts } from "@/lib/video-scale/facts";
 import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/video-scale/publish";
 import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
-import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
+import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
+import { LYRIA_CLIP_PRICE_USD, MUSIC_MOODS, generateMusicLibrary, type MusicMood } from "@/lib/video-scale/music-gen";
 import { DEFAULT_OPTIMIZE_DEPS, runOptimize } from "@/lib/video-scale/optimize";
 
 /**
@@ -232,6 +233,37 @@ export async function uploadVideoMusicAction(raw: unknown): Promise<{ ok: true }
   await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_MUSIC_UPLOAD", entity: "VIDEO_SCALE_MUSIC", entityId: m.id, after: { title: d.title, licenseNote: d.licenseNote, bytes: bytes.byteLength } });
   revalidatePath(PATH);
   return { ok: true };
+}
+
+/**
+ * Tạo nhạc nền GỐC bằng Lyria (0,04 USD / bản). ≤ 2 phong cách ⇒ chờ xong rồi trả; nhiều hơn ⇒ chạy sau khi trả lời (mỗi bản
+ * ~ vài chục giây), trang tự hiện bản mới khi tải lại. Tiêu tiền nên cần quyền chi phí hoặc cấu hình hệ thống.
+ */
+export async function generateVideoMusicAction(raw: unknown): Promise<{ ok: true; created: number; background: boolean; skipped: string[] } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write") && !can(user, "settings:manage")) return { error: "Tạo nhạc AI tốn tiền — cần quyền chi phí: sửa hoặc cấu hình hệ thống." };
+  const parsed = videoMusicGenSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Chọn ít nhất một phong cách nhạc." };
+  const moods = [...new Set(parsed.data.moods)].filter((m): m is MusicMood => m in MUSIC_MOODS);
+  if (!moods.length) return { error: "Phong cách nhạc không hợp lệ." };
+  const actor = await actorOf(user.id, user.email);
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_MUSIC_GENERATE", entity: "VIDEO_SCALE_MUSIC", entityId: moods.join(","), after: { moods, estUsd: moods.length * LYRIA_CLIP_PRICE_USD } });
+  if (moods.length > 2) {
+    after(
+      await bindOrganization(async () => {
+        try {
+          await generateMusicLibrary(await getDb(), { moods, onlyMissing: false }, actor);
+        } catch {
+          // bản nào hỏng thì không có trong thư viện — người bấm lại
+        }
+      }),
+    );
+    return { ok: true, created: 0, background: true, skipped: [] };
+  }
+  const r = await generateMusicLibrary(await getDb(), { moods, onlyMissing: false }, actor);
+  revalidatePath(PATH);
+  if (!r.created.length) return { error: r.skipped.map((s) => s.reason).join("; ") || "Không tạo được bản nào." };
+  return { ok: true, created: r.created.length, background: false, skipped: r.skipped.map((s) => `${s.mood}: ${s.reason}`) };
 }
 
 export async function toggleVideoMusicAction(raw: unknown): Promise<{ ok: true } | Fail> {

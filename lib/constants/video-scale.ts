@@ -937,4 +937,22 @@ export function renderJobKey(variantId: string, rev: number): string {
 
 /** Video ở trạng thái này thì sửa được (đã có bản hoàn chỉnh, không đang sản xuất). */
 export const EDITABLE_VARIANT_STATUSES = ["REVIEW", "APPROVED", "REJECTED", "QC_FAILED"] as const;
+// ───────────────────────────── NHẠC NỀN GỐC (LYRIA) ─────────────────────────────
+
+/** Giá công bố một đoạn 30 giây `lyria-3-clip-preview` (ai.google.dev/gemini-api/docs/pricing, đọc 28/09/2026). */
+export const LYRIA_CLIP_PRICE_USD = 0.04;
+
+/** Phong cách nhạc nền đang phổ biến trên Reels thời trang — Lyria tạo nhạc GỐC theo MÔ TẢ phong cách, không theo bài nào. */
+export const MUSIC_MOODS = {
+  TIKTOK_UPBEAT: { label: "Sôi động kiểu TikTok", prompt: "Catchy upbeat modern pop dance groove, 120 BPM, punchy drums, bright synth hook, feel-good energy like a viral short-video trend" },
+  CHIC_FASHION: { label: "Sang trọng, thời thượng", prompt: "Chic fashion runway deep house, 118 BPM, elegant groove, warm bass, minimal stylish synths, luxury boutique mood" },
+  SOFT_FEMININE: { label: "Nhẹ nhàng, nữ tính", prompt: "Soft feminine acoustic pop, gentle guitar and light percussion, warm and graceful, 95 BPM" },
+  SUMMER_TROPICAL: { label: "Vui tươi, mùa hè", prompt: "Sunny tropical house, 110 BPM, marimba and plucked synths, carefree summer vacation vibe" },
+  LOFI_CHILL: { label: "Chill lo-fi", prompt: "Chill lo-fi hip hop beat, 85 BPM, dusty drums, mellow electric piano, relaxed cozy afternoon" },
+  ROMANTIC: { label: "Lãng mạn", prompt: "Romantic cinematic piano with soft strings, 80 BPM, tender and elegant, wedding-season feeling" },
+  RNB_SMOOTH: { label: "Cuốn hút, R&B", prompt: "Smooth modern R&B groove, 90 BPM, silky bass, snaps, sensual confident mood" },
+  SALE_HYPE: { label: "Sale sôi nổi", prompt: "High-energy EDM pop, 128 BPM, big build and drop, exciting countdown feeling for a flash sale" },
+} as const;
+export type MusicMood = keyof typeof MUSIC_MOODS;
+export const MUSIC_MOOD_KEYS = Object.keys(MUSIC_MOODS) as MusicMood[];
 

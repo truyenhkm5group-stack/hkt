@@ -352,3 +352,17 @@ Lưu: `video_scale_variants.render_options` (ghi đè cấu hình lượt; `musi
 câu + chữ cảnh ở ≈ 60% chiều cao (bản cũ đặt móc câu ở 12% — đè lên mặt người mẫu), phụ đề ở 82%. Đo trên video thật 28/09:
 bản cũ cố định 24 ký tự ở cỡ 50 ⇒ đúng 720 px, cộng viền nền là cắt hai mép.
 
+## 18. Nhạc nền gốc bằng AI (28/09/2026)
+
+Chủ shop xin "nhạc thịnh hành không vi phạm bản quyền". Bài trend trên TikTok / Reels là bài hát thương mại CÓ bản quyền —
+ghép vào video bán hàng / quảng cáo là vi phạm, Facebook (Rights Manager) tắt tiếng video hoặc từ chối quảng cáo. Nên ERP KHÔNG
+nạp bài trend. Thay vào đó: **Google Lyria** (`lyria-3-clip-preview`, cùng khoá `GEMINI_API_KEY`) tạo nhạc GỐC 30 giây, không lời,
+theo 8 PHONG CÁCH đang phổ biến trên Reels thời trang (sôi động kiểu TikTok · sang trọng · nữ tính · mùa hè · lo-fi · lãng mạn ·
+R&B · sale). Lời nhắc luôn dặn không bắt chước bài / ca sĩ nào (Lyria cũng chặn tên ca sĩ / lời có bản quyền). Google cho phép
+dùng thương mại; có dấu SynthID. **0,04 USD / bản**, trần 20 bản / ngày.
+
+- Tab Cấu hình → Thư viện nhạc → chọn phong cách → **Tạo** (hoặc **Tạo cả bộ 8 phong cách** ≈ 0,32 USD). Cần quyền chi phí: sửa
+  hoặc cấu hình hệ thống.
+- Job `video-scale-music-seed` (không trong lịch, chạy bằng ops `run-job`): tạo các phong cách CHƯA có — chạy lại không nhân đôi.
+- Mỗi bản lưu với ghi chú nguồn + quyền (model, ngày, "nhạc gốc không lời, không bắt chước…"), dùng ngay trong "Sửa video".
+
