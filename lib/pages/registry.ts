@@ -34,8 +34,9 @@ import { loadConfigRow, PAGE_CONFIG_OBJECT, publishConfig } from "@/lib/metadata
 import { MetadataError } from "@/lib/metadata/errors";
 import type { MetadataActor } from "@/lib/metadata/types";
 import { getEnabledModules } from "@/lib/platform/capabilities";
-import { AGGREGATE_NUMERIC_TYPES, blockCountOf, customRefsOf, DATE_TYPES, defaultPageCatalog, EMPTY_PAGE_SCHEMA, GROUPABLE_TYPES, normalizePageSchema, PAGE_SLUG_PATTERN, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
-import { buildTemplateSchema, templateSpec } from "@/lib/pages/templates";
+import { AGGREGATE_NUMERIC_TYPES, blockCountOf, catalogObject, customRefsOf, DATE_TYPES, EMPTY_PAGE_SCHEMA, GROUPABLE_TYPES, normalizePageSchema, PAGE_SLUG_PATTERN, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
+import { effectivePageCatalog } from "@/lib/pages/custom-sources";
+import { buildTemplateSchema, templateSpec, type TemplateCustomField } from "@/lib/pages/templates";
 import type { PageDefinition, PageNav, PageSchema, PageStatus } from "@/lib/pages/types";
 
 // ═══ Kết quả ═══
@@ -191,13 +192,13 @@ export async function listNavPages(): Promise<PageDefinition[]> {
  * tổng hợp phải là SỐ (field số tuỳ biến tổng hợp được mặc định — Phase 5); nhóm theo field chọn / trạng thái /
  * có-không / người dùng; mốc kỳ là field ngày.
  */
-async function customRefProblems(s: PageSchema): Promise<PageIssue[]> {
+async function customRefProblems(s: PageSchema, catalog: PageCatalog): Promise<PageIssue[]> {
   const refs = customRefsOf(s);
   if (refs.length === 0) return [];
   const byObject = new Map<string, Awaited<ReturnType<typeof loadCustomDefs>>>();
   const out: PageIssue[] = [];
   for (const r of refs) {
-    const def = objectDef(r.objectKey);
+    const def = catalogObject(r.objectKey, catalog);
     if (!def) continue; // validatePageSchema đã báo
     if (!def.capabilities.customFields) {
       out.push({ path: r.path, message: `${def.label} không có field custom.` });
@@ -255,10 +256,11 @@ export async function createPage(
   let draft: PageSchema = EMPTY_PAGE_SCHEMA;
   let warnings: PageIssue[] = [];
   if (raw.draft !== undefined) {
-    const v = validatePageSchema(raw.draft, { modules, catalog: opts.catalog, moduleIssues: "warning" });
+    const catalog = opts.catalog ?? (await effectivePageCatalog());
+    const v = validatePageSchema(raw.draft, { modules, catalog, moduleIssues: "warning" });
     if (!v.ok) return pageFail("INVALID", v.errors);
-    draft = normalizePageSchema(raw.draft, { modules, catalog: opts.catalog })!;
-    const custom = await customRefProblems(draft);
+    draft = normalizePageSchema(raw.draft, { modules, catalog })!;
+    const custom = await customRefProblems(draft, catalog);
     if (custom.length > 0) return pageFail("INVALID", custom);
     warnings = v.warnings;
   }
@@ -332,10 +334,11 @@ export async function savePageDraft(
   if (base !== undefined && (!Number.isInteger(base) || base < 0)) return pageFail("INVALID", "baseRevision phải là số nguyên không âm.", "baseRevision");
   if (base !== undefined && base !== r.draftRevision) return revisionConflict(r.draftRevision);
   const modules = await getEnabledModules();
-  const v = validatePageSchema(schemaInput, { modules, catalog: opts.catalog, moduleIssues: "warning" });
+  const catalog = opts.catalog ?? (await effectivePageCatalog());
+  const v = validatePageSchema(schemaInput, { modules, catalog, moduleIssues: "warning" });
   if (!v.ok) return pageFail("INVALID", v.errors);
-  const draft = normalizePageSchema(schemaInput, { modules, catalog: opts.catalog })!;
-  const custom = await customRefProblems(draft);
+  const draft = normalizePageSchema(schemaInput, { modules, catalog })!;
+  const custom = await customRefProblems(draft, catalog);
   if (custom.length > 0) return pageFail("INVALID", custom);
   const page = toDefinition(r);
   // So theo NỘI DUNG (khoá xếp thứ tự): jsonb của Postgres tự sắp lại khoá, so chuỗi thô thì không bao giờ bằng.
@@ -382,11 +385,12 @@ export async function publishPage(id: string, actor: MetadataActor, opts: PageWr
   const pageProblems = pageModuleProblems(page, modules);
   if (pageProblems.length > 0) return pageFail("MODULE_DISABLED", pageProblems);
   // Xuất bản: module tắt là LỖI CHẶN (G7), không phải cảnh báo.
-  const v = validatePageSchema(row.draft, { modules, catalog: opts.catalog, moduleIssues: "error" });
+  const catalog = opts.catalog ?? (await effectivePageCatalog());
+  const v = validatePageSchema(row.draft, { modules, catalog, moduleIssues: "error" });
   if (!v.ok) return pageFail("INVALID", v.errors);
-  const schemaOut = normalizePageSchema(row.draft, { modules, catalog: opts.catalog })!;
+  const schemaOut = normalizePageSchema(row.draft, { modules, catalog })!;
   if (blockCountOf(schemaOut) === 0) return pageFail("INVALID", "Trang chưa có khối nào — không có gì để người dùng mở.", "sections");
-  const custom = await customRefProblems(schemaOut);
+  const custom = await customRefProblems(schemaOut, catalog);
   if (custom.length > 0) return pageFail("INVALID", custom);
 
   // Ảnh chụp mang cả phần mô tả trang LÚC xuất bản: slug / module / quyền / menu có thể đổi sau.
@@ -439,8 +443,11 @@ export async function createPageFromTemplate(
   if (!spec) return pageFail("NOT_FOUND", `Không có mẫu «${String(templateKey)}».`, "template");
   const modules = await getEnabledModules();
   if (!modules.has(spec.moduleKey)) return pageFail("MODULE_DISABLED", `Mẫu «${spec.name}» cần module «${spec.moduleKey}» — module đang tắt với tổ chức.`, "template");
-  const catalog = opts.catalog ?? defaultPageCatalog();
-  const customFields = objectDef("customer")?.capabilities.customFields ? await loadCustomDefs("customer", false) : [];
+  const catalog = opts.catalog ?? (await effectivePageCatalog());
+  // Field custom mẫu cần: của khách hàng + của mọi đối tượng tuỳ biến trong sổ (mẫu "Bàn làm việc khách hàng" gợi ý
+  // bảng của đối tượng tuỳ biến — ưu tiên đối tượng có field liên kết tới khách).
+  const objectKeys = [...(objectDef("customer")?.capabilities.customFields ? ["customer"] : []), ...(catalog.objects ?? []).filter((o) => !o.system).map((o) => o.key)];
+  const customFields: TemplateCustomField[] = (await Promise.all(objectKeys.map((k) => loadCustomDefs(k, false)))).flat().map((f) => ({ objectKey: f.objectKey, key: f.key, label: f.label, type: f.type, listable: f.listable, relationObject: f.relationObject }));
   const built = buildTemplateSchema(spec.key, { catalog, modules, customFields });
   const created = await createPage(
     { slug: input.slug ?? spec.slug, name: input.name ?? spec.name, moduleKey: spec.moduleKey, requiredPermission: null, nav: { enabled: false, label: input.name ?? spec.name, zone: null, order: 0 }, draft: built.schema },

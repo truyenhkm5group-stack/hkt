@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Boxes, CircleDollarSign, ExternalLink, MapPin, PackageCheck, Phone, RotateCcw, ShoppingBag, Truck, User } from "lucide-react";
 import { CopyButton, JsonViewer } from "@/components/misc";
+import { ReverseRelationsCard } from "@/components/objects/reverse-relations-card";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
@@ -247,6 +248,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} fileNames={profile.fileNames} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} />
             </SectionCard>
           ) : null}
+
+          <ReverseRelationsCard objectKey="customer" recordId={customer.id} user={user} />
 
           <SectionCard title={`Địa chỉ (${formatNumber(addresses.length)})`} description="Sổ địa chỉ giao hàng từ Pancake" padded={false}>
             {addresses.length ? (

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReverseRelationsCard } from "@/components/objects/reverse-relations-card";
 import { cn } from "@/lib/utils";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
@@ -404,6 +405,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Truck className="size-3.5" /> Giá trị đơn {formatVND(order.totalPriceAfterDiscount)} · {formatNumber(order.itemsCount)} dòng hàng
           </div>
+          <ReverseRelationsCard objectKey="order" recordId={order.id} user={user} />
           <JsonViewer value={order.raw} />
         </div>
       </div>

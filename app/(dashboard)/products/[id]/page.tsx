@@ -4,6 +4,7 @@ import { AlertTriangle, Boxes, ExternalLink, Shirt, ShoppingBag, Warehouse } fro
 import { ProductSalesChart } from "@/components/charts/product-sales-chart";
 import { MetricCard } from "@/components/metric-card";
 import { JsonViewer } from "@/components/misc";
+import { ReverseRelationsCard } from "@/components/objects/reverse-relations-card";
 import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
@@ -328,6 +329,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             )}
           </SectionCard>
 
+          <ReverseRelationsCard objectKey="product" recordId={product.id} user={user} />
           <JsonViewer value={product.raw ?? { id: product.id, name: product.name, customId: product.customId, categories: product.categories, variants: product.variants.map((v) => v.raw ?? { id: v.id, sku: v.sku }) }} />
         </div>
       </div>

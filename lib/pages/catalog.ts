@@ -17,8 +17,9 @@
  * sổ `METRIC_BINDINGS` đọc qua `resolveMetric`; tồn khả dụng đọc `availableStockExpr` + `stockKnownExpr` của
  * sổ kho (luật 10). CHƯA BIẾT ⇒ `null` ⇒ "—" (luật 42), không bao giờ 0.
  */
-import { OBJECT_REGISTRY } from "@/lib/constants/object-registry";
-import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
+import { OBJECT_REGISTRY, type AnyObjectDef } from "@/lib/constants/object-registry";
+import type { ModuleKey } from "@/lib/constants/platform-modules";
+import { OBJECT_RECORD_PERMISSIONS, objectAccess } from "@/lib/metadata/permissions";
 import type { ListSourceSpec, MetricSourceSpec, PageActionSpec, SeriesSourceSpec, TimelineSourceSpec } from "@/lib/pages/types";
 import type { PeriodKey } from "@/lib/search-params";
 
@@ -291,6 +292,46 @@ export const PAGE_ACTIONS: readonly PageActionSpec[] = [
     why: "Map qua luật workflow CÓ CỬA DUYỆT: nút khai `ruleKey`; máy chủ chỉ nhận luật ĐANG BẬT, chạy thật, trigger `custom_status` trên khách và có `gate: approval`, rồi chuyển field trạng thái sang giá trị kích hoạt qua `saveCustomValues` (luật chuyển của field vẫn áp) và gọi `runWorkflows()` — yêu cầu duyệt do CHÍNH bộ máy Phase 3 tạo. Từ chối nếu một luật đang bật khác KHÔNG có cửa duyệt cũng khớp lượt đổi ấy (nút sẽ thành đường chạy hành động không qua duyệt).",
   },
 ];
+
+// ─── Đối tượng tuỳ biến (Phase 6 · hợp đồng §7) — mục ĐỘNG, dựng từ `ObjectDef` của tổ chức ───
+//
+// Sổ tĩnh ở trên KHÔNG đổi. Đối tượng tuỳ biến ACTIVE của tổ chức hiện hành được NỐI THÊM vào sổ hiệu lực
+// (`effectivePageCatalog` — lib/pages/custom-sources.ts, chỉ máy chủ) bằng hai hàm thuần dưới đây. Khoá `x_…` không bao
+// giờ trùng khoá hệ thống (ràng buộc CSDL), nên nối thêm không che mất mục nào của sổ tĩnh.
+
+/**
+ * Nguồn danh sách của MỘT đối tượng tuỳ biến. `module`: `apps`, hoặc module ĐANG TẮT mà đối tượng cần (nhóm menu) — để
+ * phép kiểm module của `validatePageSchema` nói đúng module phải bật (cảnh báo khi lưu nháp, chặn khi xuất bản).
+ */
+export function customObjectListSource(def: AnyObjectDef, module: ModuleKey): ListSourceSpec {
+  const permissions = objectAccess(def).view;
+  return {
+    objectKey: def.key,
+    label: def.labelPlural,
+    module,
+    permission: permissions[0],
+    permissions,
+    why: `Đối tượng tuỳ biến của tổ chức (${def.key}) — bản ghi ở custom_records (lọc đúng khoá đối tượng + chưa xoá), giá trị ở custom_values; phạm vi CUSTOM_RECORDS theo người phụ trách. Cổng = cổng của /o/${def.key}.`,
+  };
+}
+
+/**
+ * Dòng thời gian của MỘT đối tượng tuỳ biến: khoá `custom_record_<x_khoá>` — cùng tiền tố với nguồn "lịch sử dữ liệu bổ
+ * sung" của đối tượng hệ thống (cấu hình khối dòng thời gian không mang khoá đối tượng, nên một khoá cho mỗi đối tượng),
+ * không bao giờ trùng vì khoá đối tượng tuỳ biến luôn bắt đầu bằng `x_`.
+ */
+export function customObjectTimelineSource(def: AnyObjectDef, module: ModuleKey): TimelineSourceSpec {
+  const permissions = objectAccess(def).view;
+  return {
+    key: `${CUSTOM_RECORD_TIMELINE_PREFIX}${def.key}`,
+    label: `Dòng thời gian · ${def.label}`,
+    module,
+    permission: permissions[0],
+    permissions,
+    recordObject: def.key,
+    why: "Cùng dòng thời gian của trang chi tiết /o/… (`recordTimeline`): nhật ký ghi + sự kiện miền của bản ghi; mốc chạm field người xem không được xem không hiện.",
+  };
+}
 
 export function metricSource(key: string): MetricSourceSpec | null {
   return METRIC_SOURCES.find((s) => s.key === key) ?? null;

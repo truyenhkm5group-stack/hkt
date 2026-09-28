@@ -133,6 +133,22 @@ function testRejections() {
   const evBad = clone(SERVICE_BUSINESS_BLUEPRINT);
   evBad.workflows![0] = { ...evBad.workflows![0], trigger: { kind: "event", event: "model.registered", objectKey: "x_contract" } };
   assert.ok(validateBlueprint(evBad).errors.some((e) => e.path.startsWith("workflows.0.trigger")), "sự kiện miền khác không lọc theo đối tượng");
+  // Trang của gói trỏ đối tượng tuỳ biến KHAI TRONG GÓI ⇒ qua (sổ nguồn của gói); trỏ `x_…` không khai ⇒ chặn.
+  const pageOwn = clone(SERVICE_BUSINESS_BLUEPRINT);
+  pageOwn.pages = [
+    {
+      slug: "hop-dong-cua-goi",
+      name: "Hợp đồng",
+      moduleKey: "apps",
+      nav: { enabled: false, label: "", zone: null, order: 0 },
+      schema: { version: 1, sections: [{ key: "main", blocks: [{ id: "bang_hd", type: "table", span: 12, config: { source: "x_contract", pageSize: 20 } }] }] },
+    },
+  ] as typeof pageOwn.pages;
+  const vOwn = validateBlueprint(pageOwn);
+  assert.ok(vOwn.ok, `trang trỏ x_contract của gói phải hợp lệ: ${JSON.stringify(vOwn.errors)}`);
+  const pageForeign = clone(pageOwn) as unknown as { pages: { schema: { sections: { blocks: { config: { source: string } }[] }[] } }[] };
+  pageForeign.pages[0].schema.sections[0].blocks[0].config.source = "x_khong_khai";
+  assert.ok(!validateBlueprint(pageForeign).ok, "trang trỏ đối tượng không khai trong gói bị chặn");
 
   // Vai trò có users:manage ⇒ lỗi gắn đúng mục (luật 31); nền ADMIN ⇒ sai hình.
   const escalate = clone(base);

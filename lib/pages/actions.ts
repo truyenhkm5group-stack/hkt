@@ -29,15 +29,17 @@ import type { Permission } from "@/lib/auth/permissions";
 import { rowInScope, type ScopeDecision } from "@/lib/auth/scope-guard";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { SCOPE_RESOURCE_BY_KEY } from "@/lib/constants/data-scope-policy";
-import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { isModuleKey } from "@/lib/constants/platform-modules";
-import { loadCustomDefs, recordExists } from "@/lib/metadata/common";
+import { loadCustomDefs, objectModuleOff, recordExists } from "@/lib/metadata/common";
 import { MetadataError, type MetaFailure } from "@/lib/metadata/errors";
-import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
+import { resolveObject } from "@/lib/metadata/object-resolver";
+import { OBJECT_RECORD_PERMISSIONS, objectAccess } from "@/lib/metadata/permissions";
 import { FIELD_KEY_PATTERN, type CustomFieldDef, type FieldError } from "@/lib/metadata/types";
 import { canEditField, getCustomValues, saveCustomValues } from "@/lib/metadata/values";
 import { listSource, pageAction } from "@/lib/pages/catalog";
 import { ROW_ACTION_KEYS } from "@/lib/pages/components";
+import { customRecordVisible, isCustomKey, recordHref } from "@/lib/pages/page-objects";
 import { gateSource, moduleOn, OBJECT_SCOPE_RESOURCE, pageDetailHref } from "@/lib/pages/runtime-common";
 import { pageObjectTable } from "@/lib/queries/page-data";
 import { flattenBlocks, type ButtonConfig, type KanbanConfig, type PageActionSpec, type PageBlock, type PageDefinition, type PageSchema, type TableConfig } from "@/lib/pages/types";
@@ -82,7 +84,27 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-async function scopeAllowsRecord(user: SessionUser, def: ObjectDef, permission: string, recordId: string): Promise<boolean> {
+/**
+ * Đối tượng theo khoá: sổ tĩnh; khoá `x_…` (Phase 6) ⇒ đối tượng tuỳ biến CÒN HOẠT ĐỘNG của tổ chức hiện hành (đã lưu
+ * trữ / của tổ chức khác ⇒ `null`, cùng một câu "không có").
+ */
+async function objectOf(key: string): Promise<AnyObjectDef | null> {
+  const sys = objectDef(key);
+  if (sys) return sys;
+  if (!isCustomKey(key)) return null;
+  const def = await resolveObject(key);
+  return def && !def.system && def.custom?.status === "ACTIVE" ? def : null;
+}
+
+/** Module của đối tượng bật cho người + tổ chức — đối tượng tuỳ biến cần CẢ `apps` lẫn nhóm menu của nó. */
+async function objectOn(user: SessionUser, def: AnyObjectDef): Promise<boolean> {
+  if (!(await moduleOn(user, def.module))) return false;
+  return def.system || (await objectModuleOff(def)) === null;
+}
+
+async function scopeAllowsRecord(user: SessionUser, def: AnyObjectDef, permission: string, recordId: string): Promise<boolean> {
+  // Bản ghi tuỳ biến: MỘT câu hỏi — module + đủ khoá xem + đúng đối tượng + chưa xoá + trong phạm vi CUSTOM_RECORDS.
+  if (!def.system) return customRecordVisible(user, def, recordId);
   const resource = OBJECT_SCOPE_RESOURCE[def.key] ?? null;
   const gate = await gateSource(user, { module: def.module, permission, label: def.labelPlural }, resource);
   if (!gate.ok) return false;
@@ -90,7 +112,7 @@ async function scopeAllowsRecord(user: SessionUser, def: ObjectDef, permission: 
 }
 
 /** Dòng cụ thể có trong phạm vi không — bảng của sổ phạm vi phải là ĐÚNG bảng của đối tượng, không thì từ chối. */
-async function rowAllowed(decision: ScopeDecision, resource: string | null, def: ObjectDef, recordId: string): Promise<boolean> {
+async function rowAllowed(decision: ScopeDecision, resource: string | null, def: AnyObjectDef, recordId: string): Promise<boolean> {
   if (decision.allow === "ALL") return true;
   if (decision.allow === "NONE" || !resource) return false;
   const res = SCOPE_RESOURCE_BY_KEY[resource];
@@ -110,12 +132,13 @@ async function activeCustomField(objectKey: string, field: string): Promise<Cust
 type Input = Record<string, unknown>;
 
 async function openRecord(input: Input, user: SessionUser): Promise<PageActionResult> {
-  const def = objectDef(String(input.objectKey));
-  const href = def ? pageDetailHref(def.key, String(input.recordId)) : undefined;
+  const def = await objectOf(String(input.objectKey));
+  const href = def ? recordHref(def, String(input.recordId)) : undefined;
   if (!def || !href) return { ok: false, error: "Đối tượng này không có trang chi tiết." };
-  const perm = OBJECT_RECORD_PERMISSIONS[def.key].view;
-  if (!(await moduleOn(user, def.module))) return { ok: false, error: `Module "${def.module}" chưa được bật cho tổ chức này.`, code: "MODULE_DISABLED" };
-  if (!can(user, perm as Permission)) return { ok: false, error: `Bạn không có quyền xem ${def.labelPlural}.`, code: "FORBIDDEN" };
+  const perms = objectAccess(def).view;
+  const perm = perms[0];
+  if (!(await objectOn(user, def))) return { ok: false, error: `Module "${def.module}" chưa được bật cho tổ chức này.`, code: "MODULE_DISABLED" };
+  if (!perms.every((p) => can(user, p as Permission))) return { ok: false, error: `Bạn không có quyền xem ${def.labelPlural}.`, code: "FORBIDDEN" };
   const id = String(input.recordId);
   if (!(await recordExists(def, id)) || !(await scopeAllowsRecord(user, def, perm, id))) return { ok: false, error: "Bản ghi không tồn tại.", code: "NOT_FOUND" };
   return { ok: true, redirectTo: href };
@@ -128,15 +151,15 @@ async function createRecord(input: Input, user: SessionUser): Promise<PageAction
 }
 
 async function updateSafeField(input: Input, user: SessionUser): Promise<PageActionResult> {
-  const def = objectDef(String(input.objectKey));
+  const def = await objectOf(String(input.objectKey));
   if (!def || !def.capabilities.customFields || !def.customizable) return { ok: false, error: "Đối tượng không có field bổ sung.", code: "NOT_SUPPORTED" };
-  if (!(await moduleOn(user, def.module))) return { ok: false, error: `Module "${def.module}" chưa được bật cho tổ chức này.`, code: "MODULE_DISABLED" };
+  if (!(await objectOn(user, def))) return { ok: false, error: `Module "${def.module}" chưa được bật cho tổ chức này.`, code: "MODULE_DISABLED" };
   const field = String(input.field);
   // CHỈ field custom: khoá trùng field hệ thống không bao giờ là field custom (sổ cấm trùng), nên tra định nghĩa là đủ.
   const fdef = await activeCustomField(def.key, field);
   if (!fdef) return { ok: false, error: `"${field}" không phải field bổ sung đang dùng — chỉ field bổ sung sửa được từ trang.`, code: "NOT_FOUND" };
   const id = String(input.recordId);
-  if (!(await scopeAllowsRecord(user, def, OBJECT_RECORD_PERMISSIONS[def.key].view, id))) return { ok: false, error: "Bản ghi không tồn tại.", code: "NOT_FOUND" };
+  if (!(await scopeAllowsRecord(user, def, objectAccess(def).view[0], id))) return { ok: false, error: "Bản ghi không tồn tại.", code: "NOT_FOUND" };
   const r = await saveCustomValues(def.key, id, { [field]: input.value }, user);
   if (!r.ok) return metaError(r);
   return { ok: true, message: r.changed.length ? `Đã lưu ${fdef.label}.` : "Không có gì thay đổi." };
@@ -206,8 +229,8 @@ export async function actionAvailability(spec: PageActionSpec, pinned: Input, us
     if (!gate.allowed) return { enabled: false, reason: gate.reason };
   }
   if (spec.key === "update_safe_field") {
-    const def = objectDef(String(pinned.objectKey));
-    if (!def || !(await moduleOn(user, def.module))) return { enabled: false, reason: "Đối tượng của nút chưa bật." };
+    const def = await objectOf(String(pinned.objectKey));
+    if (!def || !(await objectOn(user, def))) return { enabled: false, reason: "Đối tượng của nút chưa bật." };
     try {
       const fdef = await activeCustomField(def.key, String(pinned.field));
       if (!fdef || !canEditField(user, def, fdef)) return { enabled: false, reason: "Bạn không sửa được field này." };
@@ -241,8 +264,9 @@ async function rowActionOfBlock(block: PageBlock, index: unknown, recordId: unkn
   const ra = list[index];
   const spec = pageAction(String(ra?.action ?? ""));
   if (!spec || !ROW_ACTION_KEYS.includes(spec.key)) return { ok: false, error: `Action "${String(ra?.action)}" không dùng được trên từng dòng.`, code: "INVALID" };
-  const def = objectDef(String(cfg.source ?? ""));
-  const src = def ? listSource(def.key) : null;
+  const def = await objectOf(String(cfg.source ?? ""));
+  // Đối tượng tuỳ biến không nằm trong sổ tĩnh: cổng của nó là `objectAccess(def).view` (kiểm trong `scopeAllowsRecord`).
+  const src = def ? (def.system ? listSource(def.key) : { permission: objectAccess(def).view[0] }) : null;
   if (!def || !src) return { ok: false, error: "Bảng trỏ đối tượng không có trong sổ.", code: "INVALID" };
   if (spec.objectKey && spec.objectKey !== def.key) return { ok: false, error: `Action "${spec.label}" không dùng cho ${def.labelPlural}.`, code: "INVALID" };
   const id = recordIdZ.safeParse(recordId);

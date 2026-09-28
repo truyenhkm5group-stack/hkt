@@ -73,6 +73,21 @@ Sau khi Phase 5 và 6 cùng vào `main`: `LIST_SOURCES` động = sổ tĩnh + �
 `records:view`/quyền siết); bảng, kanban, form, KPI/biểu đồ tổng hợp, dòng thời gian dùng được với `x_…`. Việc nối này
 là một bước tích hợp riêng (không agent nào của đợt 1 sửa `lib/pages/*` cho Phase 6).
 
+**Đã nối (bước tích hợp P5×P6):**
+
+- Sổ hiệu lực `effectivePageCatalog()` (`lib/pages/custom-sources.ts`) = sổ tĩnh GIỮ NGUYÊN + mỗi đối tượng ACTIVE một
+  nguồn danh sách `{ objectKey, label, module, permission, permissions: objectAccess(def).view }` + một nguồn dòng thời
+  gian + định nghĩa đối tượng (`PageCatalog.objects`, để `validatePageSchema` thuần kiểm field hệ thống / form của nó).
+  `module` = `apps`, hoặc module nhóm menu đang TẮT mà đối tượng cần (lưu nháp: cảnh báo; xuất bản: chặn). Dùng ở trình
+  soạn (`listDataSources(user, catalog)`), lưu nháp / xuất bản / xem trước / mẫu trang (mặc định của registry).
+- Trình phân giải KHÔNG tin sổ cho `x_…`: mọi khối đi qua `recordGate` (không tồn tại / lưu trữ ⇒ `NOT_FOUND`, module ⇒
+  `MODULE_DISABLED`, thiếu khoá ⇒ `FORBIDDEN`), `where` luôn mang `recordScopeSql(def)` + phạm vi `CUSTOM_RECORDS`.
+- Dòng thời gian: khoá `custom_record_<x_khoá>` — CÙNG tiền tố với nguồn "lịch sử dữ liệu bổ sung" của đối tượng hệ thống
+  (cấu hình khối dòng thời gian không mang khoá đối tượng nên phải một khoá cho mỗi đối tượng; tiền tố `x_` không bao giờ
+  trùng khoá hệ thống ⇒ sổ tĩnh không đổi), đọc `recordTimeline` của trang `/o/…` — không nguồn thứ hai.
+- Liên kết ngược trên trang hệ thống (`/customers/[id]`, `/products/[id]`, `/orders/[id]`):
+  `components/objects/reverse-relations-card.tsx` — không có gì xem được ⇒ không vẽ gì.
+
 ## 8. Chấp nhận
 
 Tạo đối tượng "Hợp đồng bảo trì" → field (khách = quan hệ tới khách hàng, giá trị = tiền, trạng thái) → form → danh

@@ -1,7 +1,7 @@
 import { count, desc, eq, getTableColumns, is, sql, type SQL } from "drizzle-orm";
 import { PgTable, type PgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema } from "@/db";
-import type { ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef as ObjectDef } from "@/lib/constants/object-registry";
 import { addDays, vnDateKey } from "@/lib/format";
 import { filterShapeOk } from "@/lib/metadata/list-schema";
 import type { ListFilter, SystemFieldDef } from "@/lib/metadata/types";

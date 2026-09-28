@@ -34,11 +34,11 @@ export type PageTemplateSpec = {
 export const PAGE_TEMPLATES: readonly PageTemplateSpec[] = [
   { key: "sales-overview", name: "Tổng quan bán hàng", description: "Bộ lọc kỳ + trạng thái đơn, cột hai KPI (đơn hôm nay, doanh thu lên đơn) cạnh biểu đồ đơn theo ngày, bảng đơn mới.", moduleKey: "orders", slug: "tong-quan-ban-hang" },
   { key: "inventory-overview", name: "Tổng quan kho", description: "Tồn khả dụng, hàng hoàn trong kỳ và bảng sản phẩm.", moduleKey: "inventory", slug: "tong-quan-kho" },
-  { key: "customer-workspace", name: "Bàn làm việc khách hàng", description: "Bảng khách kèm cột custom; kanban theo field trạng thái custom nếu tổ chức đã tạo.", moduleKey: "customers", slug: "ban-lam-viec-khach" },
+  { key: "customer-workspace", name: "Bàn làm việc khách hàng", description: "Bảng khách kèm cột custom; kanban theo field trạng thái custom nếu tổ chức đã tạo; bảng đối tượng tuỳ biến (ưu tiên đối tượng liên kết tới khách) nếu tổ chức có.", moduleKey: "customers", slug: "ban-lam-viec-khach" },
 ];
 
 /** Field custom tối thiểu mẫu cần biết (máy chủ đọc từ `meta_custom_fields`). */
-export type TemplateCustomField = { objectKey: string; key: string; label: string; type: string; listable: boolean };
+export type TemplateCustomField = { objectKey: string; key: string; label: string; type: string; listable: boolean; relationObject?: string | null };
 
 export type TemplateContext = {
   catalog: PageCatalog;
@@ -154,7 +154,30 @@ function customerWorkspace(ctx: TemplateContext): TemplateBuild {
       });
     }
   }
+  const apps = customObjectTable(ctx);
+  if ("skip" in apps) {
+    if (apps.skip) skipped.push({ blockId: "app_records_table", reason: apps.skip });
+  } else sections.push(apps);
   return { schema: { version: 1, sections }, skipped };
+}
+
+/**
+ * (Phase 6) Tổ chức có đối tượng tuỳ biến ⇒ gợi ý MỘT bảng của nó: ưu tiên đối tượng có field liên kết tới khách hàng
+ * (vd Hợp đồng bảo trì → khách), không có thì đối tượng tuỳ biến đầu tiên trong sổ. Chỉ đối tượng CÓ trong sổ hiệu lực và
+ * module đang bật; không có đối tượng nào ⇒ không gợi ý gì (và không ghi lý do — tổ chức chưa từng tạo thì chẳng có gì bị bỏ).
+ */
+function customObjectTable(ctx: TemplateContext): PageSection | { skip: string | null } {
+  const lists = ctx.catalog.lists.filter((l) => l.objectKey.startsWith("x_"));
+  if (lists.length === 0) return { skip: null };
+  const linked = lists.find((l) => ctx.customFields.some((f) => f.objectKey === l.objectKey && f.relationObject === "customer"));
+  const list = linked ?? lists[0];
+  if (!ctx.modules.has(list.module)) return { skip: `module «${list.module}» của «${list.label}» đang tắt` };
+  const customCols = ctx.customFields
+    .filter((f) => f.objectKey === list.objectKey && f.listable)
+    .slice(0, 4)
+    .map((f) => `custom:${f.key}` as const);
+  const columns = ["system:title", ...customCols, "system:owner"] as PageBlock<"table">["config"]["columns"];
+  return { key: "apps", title: list.label, blocks: [{ id: "app_records_table", type: "table", span: 12, title: list.label, config: { source: list.objectKey, columns, pageSize: 20, rowLink: true } } as PageBlock] };
 }
 
 /** Dựng schema NHÁP của một mẫu từ sổ + module + field custom của tổ chức. Không ghi gì. */

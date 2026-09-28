@@ -3,12 +3,13 @@ import { getDb, schema as dbSchema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { PERMISSION_LABEL } from "@/lib/auth/permissions";
 import { ZONE_LABEL, ZONE_ORDER } from "@/lib/constants/department-modules";
-import { OBJECT_REGISTRY } from "@/lib/constants/object-registry";
+import { OBJECT_REGISTRY, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { PLATFORM_MODULES, PLATFORM_PERMISSION_KEYS, isModuleKey, moduleOfPermission } from "@/lib/constants/platform-modules";
 import { formatDateTime } from "@/lib/format";
 import { MetadataError } from "@/lib/metadata/errors";
 import { listFields } from "@/lib/metadata/fields";
 import type { MetadataActor } from "@/lib/metadata/types";
+import { effectivePageCatalog } from "@/lib/pages/custom-sources";
 import { listDataSources } from "@/lib/pages/data-sources";
 import { archivePage, createPage, createPageFromTemplate, getPageBySlug, getPageDraft, listPages, pageAdminDenial, publishPage, savePageDraft, updatePageMeta, type PageFailure } from "@/lib/pages/registry";
 import { templateSpec, templates } from "@/lib/pages/templates";
@@ -128,12 +129,15 @@ function pageTemplates(user: SessionUser): PageTemplateOption[] {
  * (module vừa tắt) bị bỏ, không làm hỏng cả trang. Lọc ở đây là UX — máy chủ kiểm lại khi lưu và khi xuất bản (G7).
  */
 export async function pageEditorCatalog(user: SessionUser): Promise<PageEditorCatalog> {
-  const sources = listDataSources(user);
-  const objectKeys = OBJECT_REGISTRY.filter((o) => moduleOn(user, o.module)).map((o) => o.key);
+  // Sổ HIỆU LỰC: sổ tĩnh + đối tượng tuỳ biến ACTIVE của tổ chức (Phase 6) — cùng sổ lượt lưu / xuất bản kiểm. Đối tượng
+  // tuỳ biến chỉ vào trình soạn khi người soạn XEM được nó (module + đủ khoá `objectAccess(def).view`).
+  const effective = await effectivePageCatalog();
+  const sources = listDataSources(user, effective);
+  const visibleCustom = new Set(sources.lists.filter((l) => l.objectKey.startsWith("x_")).map((l) => l.objectKey));
+  const defs: AnyObjectDef[] = [...OBJECT_REGISTRY.filter((o) => moduleOn(user, o.module)), ...(effective.objects ?? []).filter((o) => !o.system && visibleCustom.has(o.key))];
   const objects = await Promise.all(
-    objectKeys.map(async (key): Promise<PageObjectOption | null> => {
-      const def = OBJECT_REGISTRY.find((o) => o.key === key);
-      if (!def) return null;
+    defs.map(async (def): Promise<PageObjectOption | null> => {
+      const key = def.key;
       try {
         const fields = await listFields(key);
         return { key, label: def.label, catalog: buildCatalog(fields.system, fields.custom), forms: def.capabilities.forms ? def.forms.map((f) => ({ ...f })) : [] };

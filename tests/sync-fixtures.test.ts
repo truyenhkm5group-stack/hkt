@@ -430,6 +430,7 @@ import { testConnectors } from "./connectors.test";
 import { testBlueprints } from "./blueprints.test";
 import { testCustomObjects } from "./custom-objects.test";
 import { testAiBuilder } from "./ai-builder.test";
+import { testPageCustomObjects } from "./page-custom-objects.test";
 import { testPageData } from "./page-data.test";
 import { testPageRuntime } from "./page-runtime.test";
 import { testWorkflowAdmin } from "./workflow-admin.test";
@@ -2500,6 +2501,9 @@ async function main() {
   // Phase 10 · tự phục vụ: ba tổ chức THẬT `ob-a` / `ob-b` / `ob-c` (tự cấp, tự dọn) — cờ off / mã mời / tạo từ mẫu
   // bán sỉ bỏ Mua hàng / đăng nhập đúng tổ chức / chạy lại không nhân đôi / SETUP_FAILED / hạn mức gói / cô lập logo.
   await testOnboarding();
+  // Phase 6 × 4/5 · đối tượng tuỳ biến làm nguồn trang động: hai tổ chức THẬT `pco-a` / `pco-b` (tự cấp, tự dọn) — bảng,
+  // KPI tổng hợp, kanban, dòng thời gian trên x_contract đúng số + đúng phạm vi, x_other không lọt, B không thấy khoá của A.
+  await testPageCustomObjects();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
