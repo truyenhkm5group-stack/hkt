@@ -253,6 +253,42 @@ async function checkAi() {
 }
 
 /**
+ * Gemini API cho Video Scale — CHỈ ĐỌC, KHÔNG TỐN TIỀN: hỏi Google khoá có THẤY từng model video không
+ * (`GET /v1beta/models/{model}`), không tạo video nào. Thấy model KHÔNG chứng minh đã bật thanh toán —
+ * Veo / Omni không có bậc miễn phí, chuyện đó chỉ lộ ra ở lượt tạo đầu tiên. Khoá in ở dạng ĐÃ CHE (độ dài,
+ * 4 ký tự đầu, có khoảng trắng / dấu nháy thừa không) — đủ để biết dán đúng thứ chưa, không đủ để dùng lại.
+ * Danh sách model viết tại chỗ: script lấy từ `main`, `lib/` từ ảnh đang chạy.
+ */
+async function checkGeminiVideo() {
+  section("Gemini API — model sinh video (Video Scale)");
+  const key = env.gemini.apiKey;
+  if (!key) {
+    bad("Chưa có GEMINI_API_KEY trên máy chủ ERP");
+    huongDan("Thêm GitHub Secret GEMINI_API_KEY rồi chạy ops apply-ai-env.");
+    return;
+  }
+  const dirty = /\s|["']/.test(key);
+  (dirty ? bad : ok)(`Khoá: ${key.length} ký tự, bắt đầu "${key.slice(0, 4)}…"${dirty ? " — CÓ khoảng trắng / dấu nháy thừa, dán lại Secret" : ""}`);
+  for (const model of ["gemini-omni-1.1-flash", "veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview", "veo-3.1-generate-preview"]) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, { headers: { "x-goog-api-key": key }, signal: AbortSignal.timeout(20_000) });
+      let msg = "";
+      try {
+        const body = (await res.json()) as { error?: { message?: unknown }; displayName?: unknown };
+        msg = typeof body.error?.message === "string" ? body.error.message.slice(0, 200) : typeof body.displayName === "string" ? body.displayName : "";
+      } catch {
+        msg = "";
+      }
+      if (res.ok) ok(`${model}: khoá thấy model${msg ? ` (${msg})` : ""}`);
+      else bad(`${model}: HTTP ${res.status}${msg ? ` — ${msg}` : ""}`);
+    } catch (error) {
+      bad(`${model}: không gọi được Google — ${error instanceof Error ? error.message.slice(0, 200) : String(error)}`);
+    }
+  }
+  huongDan("Thấy model ≠ đã bật thanh toán: lượt tạo đầu tiên (1 lượt × 1 biến thể) mới trả lời câu đó.");
+}
+
+/**
  * GitHub Actions — nguồn của sổ quan sát deploy (Phòng Tech AI).
  *
  * CHỈ ĐỌC và KHÔNG GHI MỘT DÒNG NÀO: hàm này hỏi GitHub hai câu rồi in ra, nó không nạp lượt chạy
@@ -337,6 +373,7 @@ async function main() {
   console.log("Kiểm tra kết nối API — VNXcommerce ERP");
   if (process.argv.includes("--ai")) {
     await checkAi();
+    await checkGeminiVideo();
     process.exit(0);
   }
   if (process.argv.includes("--github")) {
@@ -352,6 +389,7 @@ async function main() {
   await checkFacebook();
   await checkPancakePages();
   await checkAi();
+  await checkGeminiVideo();
   await checkGithub();
   await checkAgentIdentity();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
