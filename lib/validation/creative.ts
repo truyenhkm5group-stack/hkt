@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { GENE_LABEL, GENE_VOCAB, IMAGE_MODES, IMAGE_QUALITIES, IMAGE_SIZES, CAMPAIGN_NAME_MAX_CHARS, MANUAL_DESIGN, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_UPLOAD_SOURCE_KINDS, normalizeCreativeConfig, type ConfigProblem, type CreativeLoopConfig, IMAGE_EDIT, IMAGE_EDIT_LAYOUTS } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
-import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS } from "@/lib/constants/campaign-setup";
 
 /**
  * ═══════════ VÒNG MẪU — LƯỢC ĐỒ ĐẦU VÀO CỦA HAI MÀN HÌNH (nguồn ảnh · cấu hình) ═══════════
@@ -215,6 +215,7 @@ export const campaignSetupSchema = z
     adAccountId: z.string().trim().min(1, "Chọn tài khoản quảng cáo").max(40),
     pageId: z.string().trim().min(1, "Chọn fanpage").max(40),
     objective: z.enum(CAMPAIGN_OBJECTIVES),
+    performanceGoal: z.enum(PERFORMANCE_GOALS).nullable().default(null),
     budgetVnd: z.number().int("Ngân sách là số nguyên").min(CAMPAIGN_SETUP_LIMITS.minBudgetVnd, `Ngân sách tối thiểu ${CAMPAIGN_SETUP_LIMITS.minBudgetVnd.toLocaleString("vi-VN")}đ`),
     geo: z
       .array(z.object({ key: z.string().trim().min(1).max(40), name: z.string().trim().max(120), type: z.enum(["region", "city"]) }).strict())
@@ -229,7 +230,8 @@ export const campaignSetupSchema = z
     campaignKind: z.enum(CAMPAIGN_KINDS).default("TEST"),
   })
   .strict()
-  .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến");
+  .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến")
+  .refine((s) => s.objective !== "REACH" || s.performanceGoal === null, "Mục tiêu Tiếp cận không đi với mục tiêu hiệu quả tin nhắn — chọn lại một trong hai");
 
 /**
  * "Lưu" bài của một ảnh gen tay đã duyệt vào HÀNG ĐỢI ĐĂNG CAMP — cùng trần câu chữ / tên với "Đưa vào lô", nhưng

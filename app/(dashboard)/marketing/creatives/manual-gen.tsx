@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualEditRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
-import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
@@ -26,6 +26,7 @@ import {
   MANUAL_GEN_KINDS,
   MANUAL_GEN_KIND_LABEL,
   MANUAL_GEN_RUN,
+  adsetNameForGoal,
   type ImageEditLayout,
   type ManualGenImageStatus,
   type ManualGenKind,
@@ -649,7 +650,7 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
   const to = namePartsOf(ctx, setup, win);
   const known = nameKnownOf(ctx, win);
-  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: d.adset, ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
+  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameForGoal(d.adset, setupOptimizationGoal(setup)), ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
 }
 
 /** Phần tên mà setup quyết định: tên TKQC · mã MKTer · TEST / mã win · tên fanpage — cùng khuôn máy chủ ghép lúc đăng. */
@@ -704,7 +705,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     // Tên đã lưu đi cùng setup đã lưu: ghép lại một lượt để tên nói đúng MKTer / TKQC / fanpage / loại camp đang chọn.
     const to0 = namePartsOf(ctx, s0, img.winCode);
     const known0 = nameKnownOf(ctx, img.winCode);
-    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName, ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
+    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName ? adsetNameForGoal(img.adsetName, setupOptimizationGoal(s0)) : "", ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
     setHen(conHen);
     setHenLuc(vnLocalInput(conHen && luuHen ? luuHen : new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
@@ -719,7 +720,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     const known = nameKnownOf(ctx, img.winCode);
     setNames((cur) => ({
       campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
-      adset: cur.adset,
+      adset: cur.adset ? adsetNameForGoal(cur.adset, setupOptimizationGoal(next)) : "",
       ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
     }));
   };
@@ -995,14 +996,23 @@ function SetupFields({ value, onChange, options, winCode, children }: { value: C
           <select className={sel} value={value.pageId} onChange={(e) => set({ pageId: e.target.value })}>
             {options.pages.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} · {p.orders30d} đơn/30 ngày
+                {p.name} · {p.orders30d ? `${p.orders30d} đơn/30 ngày` : p.viaToken ? "chưa ra đơn Pancake" : "0 đơn/30 ngày"}
               </option>
             ))}
           </select>
+          {options.tokenPagesError ? <span className="block text-warning">Không đọc được danh sách page của token ERP ({options.tokenPagesError}) — chỉ còn page từng ra đơn trên Pancake.</span> : null}
         </label>
         <label className="space-y-0.5 text-[11.5px]">
           Mục tiêu chiến dịch
-          <select className={sel} value={value.objective} onChange={(e) => set({ objective: e.target.value as CampaignSetup["objective"] })}>
+          <select
+            className={sel}
+            value={value.objective}
+            onChange={(e) => {
+              const objective = e.target.value as CampaignSetup["objective"];
+              // Tiếp cận không có mục tiêu tin nhắn ⇒ bỏ mục tiêu hiệu quả đang chọn.
+              set(objective === "REACH" ? { objective, performanceGoal: null } : { objective });
+            }}
+          >
             {CAMPAIGN_OBJECTIVES.map((o) => (
               <option key={o} value={o}>
                 {CAMPAIGN_OBJECTIVE_LABEL[o]}
@@ -1010,6 +1020,27 @@ function SetupFields({ value, onChange, options, winCode, children }: { value: C
               </option>
             ))}
           </select>
+        </label>
+        <label className="space-y-0.5 text-[11.5px]">
+          Mục tiêu hiệu quả
+          <select
+            className={sel}
+            value={value.performanceGoal ?? ""}
+            disabled={value.objective === "REACH"}
+            onChange={(e) => set({ performanceGoal: (PERFORMANCE_GOALS as readonly string[]).includes(e.target.value) ? (e.target.value as CampaignSetup["performanceGoal"]) : null })}
+          >
+            <option value="">
+              {value.objective === "TEMPLATE" ? `Như mẫu${tpl?.optimizationGoal ? ` (${PERFORMANCE_GOAL_LABEL[tpl.optimizationGoal as PerformanceGoal] ?? tpl.optimizationGoal})` : ""}` : value.objective === "MESSAGES" ? "Theo mục tiêu (trò chuyện)" : "Theo mục tiêu (tiếp cận)"}
+            </option>
+            {PERFORMANCE_GOALS.map((g) => (
+              <option key={g} value={g}>
+                {PERFORMANCE_GOAL_LABEL[g]}
+              </option>
+            ))}
+          </select>
+          {value.performanceGoal === "MESSAGING_PURCHASE_CONVERSION" || value.performanceGoal === "VALUE" ? (
+            <span className="block text-muted-foreground">Facebook chỉ nhận khi page đã gửi đủ sự kiện mua qua tin nhắn (≥ 5 / 30 ngày) — không đủ thì bước tạo nhóm báo lỗi, camp chưa chạy.</span>
+          ) : null}
         </label>
         <label className="space-y-0.5 text-[11.5px]">
           Ngân sách ngày (tối đa {formatVND(cap)}/ngày)

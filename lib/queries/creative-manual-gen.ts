@@ -13,6 +13,8 @@ import { marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-c
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
+import type { TokenPage } from "@/lib/integrations/facebook/ads-write";
+import { readTokenPages } from "@/lib/queries/facebook-pages";
 import { vnStartOfDay } from "@/lib/format";
 import { fanpageDisplayName, readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 
@@ -331,12 +333,17 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
 
 /** Một TKQC chọn được khi "Đăng camp" — tài khoản ĐÃ ĐỒNG BỘ chi tiêu vào ERP (`ad_spends`). `spend30dVnd` để xếp hạng. */
 export type AdAccountOption = { id: string; name: string; spend30dVnd: number };
-/** Một fanpage chọn được — sổ fanpage (`fanpages`, khoá = id page Facebook). `orders30d` để xếp hạng. */
-export type FanpageOption = { id: string; name: string; orders30d: number };
+/**
+ * Một fanpage chọn được — sổ fanpage (`fanpages`, khoá = id page Facebook) gộp với page token ERP được giao. `orders30d` để
+ * xếp hạng; `viaToken` = token của ERP thấy page này (đăng camp / đăng Reel dùng được quyền của nó).
+ */
+export type FanpageOption = { id: string; name: string; orders30d: number; viaToken: boolean };
 
 export type CampaignSetupOptions = {
   accounts: AdAccountOption[];
   pages: FanpageOption[];
+  /** Không đọc được danh sách page của token (câu lỗi Facebook) — ô chọn chỉ còn page của sổ fanpage. `null` = đọc được / không có token. */
+  tokenPagesError: string | null;
   /** MKTer chọn được (trang Lương, còn làm, có bí danh) + mã vào tên chiến dịch. Mặc định KHÔNG chọn ai — máy không đoán người. */
   marketers: MarketerOption[];
   /** Mặc định = lựa chọn DÙNG NHIỀU: TKQC chi nhiều nhất 30 ngày · page ra nhiều đơn nhất 30 ngày · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu. */
@@ -367,8 +374,28 @@ export async function listAdAccountOptions(db: Db, now: Date, configAccountId: s
   return out.sort((x, y) => y.spend30dVnd - x.spend30dVnd);
 }
 
-/** Fanpage trong sổ (đang bật), RA NHIỀU ĐƠN NHẤT 30 ngày trước. Fanpage của cấu hình luôn có mặt. */
-export async function listFanpageOptions(db: Db, now: Date, configPageId: string): Promise<FanpageOption[]> {
+/**
+ * GỘP HAI NGUỒN FANPAGE — hàm THUẦN. Sổ `fanpages` chỉ có page TỪNG RA ĐƠN trên Pancake (job quy kết dựng từ
+ * `orders.page_id`), nên page mới share cho System User mà chưa ra đơn không bao giờ vào sổ (chủ shop 28/09/2026: "tôi chọn
+ * được ít fanpage vậy?"). Page của token được THÊM vào (0 đơn/30 ngày, tên theo Facebook); page chủ shop đã TẮT trong sổ
+ * (`inactiveIds`) vẫn tắt — token thấy nó không có nghĩa là người muốn dùng lại. Page trùng thì giữ dòng của sổ (tên người
+ * đặt thắng tên API), chỉ đánh dấu `viaToken`.
+ */
+export function mergeFanpageOptions(fromLedger: readonly FanpageOption[], tokenPages: readonly TokenPage[], inactiveIds: ReadonlySet<string> = new Set()): FanpageOption[] {
+  const seen = new Map(tokenPages.map((p) => [p.id, p]));
+  const out: FanpageOption[] = fromLedger.map((p) => ({ ...p, viaToken: seen.has(p.id) }));
+  for (const p of tokenPages) {
+    if (inactiveIds.has(p.id) || out.some((x) => x.id === p.id)) continue;
+    out.push({ id: p.id, name: p.name || p.id, orders30d: 0, viaToken: true });
+  }
+  return out.sort((x, y) => y.orders30d - x.orders30d || x.name.localeCompare(y.name));
+}
+
+/**
+ * Fanpage chọn được: sổ fanpage (đang bật, RA NHIỀU ĐƠN NHẤT 30 ngày trước) GỘP với page mà token ERP được giao
+ * (`mergeFanpageOptions`). Fanpage của cấu hình luôn có mặt.
+ */
+export async function listFanpageOptions(db: Db, now: Date, configPageId: string, tokenPages: readonly TokenPage[] = []): Promise<FanpageOption[]> {
   const f = schema.fanpages;
   const o = schema.orders;
   const since = new Date(now.getTime() - 30 * 86_400_000);
@@ -379,26 +406,28 @@ export async function listFanpageOptions(db: Db, now: Date, configPageId: string
     .groupBy(o.pageId)
     .as("c");
   const rows = await db
-    .select({ id: f.externalPageId, name: f.name, alias: f.alias, n: sql<number>`coalesce(${counts.n}, 0)::int` })
+    .select({ id: f.externalPageId, name: f.name, alias: f.alias, active: f.active, n: sql<number>`coalesce(${counts.n}, 0)::int` })
     .from(f)
-    .leftJoin(counts, eq(counts.pageId, f.externalPageId))
-    .where(eq(f.active, true));
-  const out = rows.map((r) => ({ id: r.id, name: r.alias || r.name || r.id, orders30d: Number(r.n ?? 0) }));
-  if (configPageId && !out.some((x) => x.id === configPageId)) out.push({ id: configPageId, name: `Page ${configPageId} (cấu hình)`, orders30d: 0 });
-  return out.sort((x, y) => y.orders30d - x.orders30d || x.name.localeCompare(y.name));
+    .leftJoin(counts, eq(counts.pageId, f.externalPageId));
+  const ledger = rows.filter((r) => r.active).map((r) => ({ id: r.id, name: r.alias || r.name || r.id, orders30d: Number(r.n ?? 0), viaToken: false }));
+  const out = mergeFanpageOptions(ledger, tokenPages, new Set(rows.filter((r) => !r.active).map((r) => r.id)));
+  if (configPageId && !out.some((x) => x.id === configPageId)) out.push({ id: configPageId, name: `Page ${configPageId} (cấu hình)`, orders30d: 0, viaToken: false });
+  return out;
 }
 
 /** Lựa chọn + mặc định cho khối "Setup camp" của hộp Đăng camp. */
 export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccountId: string; pageId: string; budgetPerVariantVnd: number }): Promise<CampaignSetupOptions> {
-  const [accounts, pages, tpl, employees] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId), readNamingTemplate(db), readPayrollEmployees(db)]);
+  const token = await readTokenPages();
+  const [accounts, pages, tpl, employees] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId, token.pages), readNamingTemplate(db), readPayrollEmployees(db)]);
   const t = tpl?.targeting ?? null;
   return {
     accounts,
     pages,
+    tokenPagesError: token.error,
     marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], performanceGoal: null, budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
     template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
   };
 }

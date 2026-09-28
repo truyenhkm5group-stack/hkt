@@ -24,6 +24,7 @@ import { vnStartOfDay } from "@/lib/format";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { AD_MESSAGES } from "@/lib/queries/ads-roas";
+import { tokenPageName } from "@/lib/queries/facebook-pages";
 import { ORDER_AD_ID, orderAdCandidates } from "@/lib/queries/ads-attribution-link";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
@@ -283,14 +284,15 @@ export async function readCurrentCreativeConfig(db: Db): Promise<{ config: Creat
 
 /**
  * Tên fanpage đứng tên bài quảng cáo — để khối "Sẵn sàng đăng" hiện đúng tên như Facebook sẽ hiện.
- * Tên người đặt (`alias`) trước tên API (`name`). Chưa khai fanpage, hoặc sổ fanpage chưa biết page ấy
- * ⇒ `null`; màn hình nói ra điều đó, không bịa một cái tên.
+ * Tên người đặt (`alias`) trước tên API (`name`); page chưa vào sổ ⇒ tên Facebook nếu token ERP được giao page ấy.
+ * Chưa khai fanpage, hoặc không nguồn nào biết page ấy ⇒ `null`; màn hình nói ra điều đó, không bịa một cái tên.
  */
 export async function fanpageDisplayName(db: Db, pageId: string): Promise<string | null> {
   if (!pageId.trim()) return null;
   try {
     const [row] = await db.select({ name: schema.fanpages.name, alias: schema.fanpages.alias }).from(schema.fanpages).where(eq(schema.fanpages.externalPageId, pageId.trim())).limit(1);
-    return row ? row.alias.trim() || row.name.trim() || null : null;
+    // Page chưa vào sổ (chưa ra đơn Pancake) mà token ERP được giao ⇒ tên Facebook của nó — cùng nguồn với ô chọn fanpage.
+    return row ? row.alias.trim() || row.name.trim() || null : await tokenPageName(pageId);
   } catch {
     return null;
   }

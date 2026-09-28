@@ -34,6 +34,39 @@ export const CAMPAIGN_OBJECTIVE_LABEL: Record<CampaignObjective, string> = {
 };
 
 /**
+ * MỤC TIÊU HIỆU QUẢ (performance goal) CỦA NHÓM QC — chủ shop 28/09/2026: chọn được như ô "Mục tiêu hiệu quả" trên Ads
+ * Manager (nhóm "Mục tiêu lượt tương tác" của camp tin nhắn). `null` = theo mục tiêu chiến dịch ở trên (như trước giờ).
+ *
+ * Chỉ đổi `optimization_goal` của nhóm (+ điểm đến MESSENGER, đối tượng quảng bá = fanpage đã chọn, tính tiền IMPRESSIONS);
+ * mục tiêu CHIẾN DỊCH giữ nguyên như ô "Mục tiêu chiến dịch" — cả bốn lựa chọn nằm CHUNG trong một mục tiêu chiến dịch trên
+ * Ads Manager của shop, nên đổi thêm mục tiêu chiến dịch là đoán thêm một lớp. Mã API theo tài liệu Marketing API:
+ *   · `CONVERSATIONS` — tổ hợp Click-to-Messenger chuẩn (tài liệu nêu rõ).
+ *   · `LEAD_GENERATION` — "Messenger Ads for Leads" (tài liệu nêu rõ điểm đến MESSENGER + page_id).
+ *   · `MESSAGING_PURCHASE_CONVERSION` — tối ưu lượt mua qua tin nhắn; Meta chỉ mở khi page đã gửi ≥ 5 sự kiện mua / 30 ngày.
+ *   · `VALUE` — tối ưu tổng giá trị mua; cần cùng điều kiện sự kiện mua.
+ * Ghép không hợp lệ với mục tiêu chiến dịch / tài khoản ⇒ Facebook TỪ CHỐI ở bước tạo nhóm (chiến dịch tạo ở trạng thái
+ * PAUSED, không tiêu tiền) và câu lỗi của Facebook hiện nguyên cho người bấm — máy không tự đổi sang mục tiêu khác.
+ */
+export const PERFORMANCE_GOALS = ["CONVERSATIONS", "LEAD_GENERATION", "MESSAGING_PURCHASE_CONVERSION", "VALUE"] as const;
+export type PerformanceGoal = (typeof PERFORMANCE_GOALS)[number];
+export const PERFORMANCE_GOAL_LABEL: Record<PerformanceGoal, string> = {
+  CONVERSATIONS: "Tối đa hóa số cuộc trò chuyện",
+  LEAD_GENERATION: "Tối đa hóa số khách hàng tiềm năng qua tin nhắn",
+  MESSAGING_PURCHASE_CONVERSION: "Tối đa hóa số lượt mua qua tin nhắn",
+  VALUE: "Tối đa hóa giá trị của lượt mua qua tin nhắn",
+};
+
+/**
+ * Mục tiêu tối ưu mà NHÓM THẬT sẽ mang theo setup (để đặt tên nhóm cho đúng): mục tiêu hiệu quả đã chọn; không chọn thì
+ * theo mục tiêu chiến dịch (`MESSAGES` ⇒ CONVERSATIONS, `REACH` ⇒ REACH); như mẫu ⇒ `null`. Hàm THUẦN — cùng thứ tự đè với
+ * `applyCampaignSetup`.
+ */
+export function setupOptimizationGoal(s: Pick<CampaignSetup, "objective" | "performanceGoal">): string | null {
+  if (s.objective === "REACH") return "REACH";
+  return s.performanceGoal ?? (s.objective === "MESSAGES" ? "CONVERSATIONS" : null);
+}
+
+/**
  * LOẠI CAMP — phần giữa tên chiến dịch (chủ shop 27/09/2026: "camp chạy mã win thì ghi tên mã"):
  *   · `TEST` — `..._TEST_...`: luật quy tiền ads tính là CHI PHÍ TEST, không thuộc mã nào.
  *   · `WIN`  — `..._<MÃ>_...` (vd Q005): tiền ads quy về đúng mã hàng của ảnh. Chỉ có khi ảnh thuộc một mã hàng có mã đọc
@@ -115,6 +148,8 @@ export type CampaignSetup = {
   adAccountId: string;
   pageId: string;
   objective: CampaignObjective;
+  /** Mục tiêu hiệu quả của nhóm (`PERFORMANCE_GOALS`). `null` = theo mục tiêu chiến dịch / như mẫu. Không dùng với `REACH`. */
+  performanceGoal: PerformanceGoal | null;
   budgetVnd: number;
   geo: GeoPick[] | null;
   ageMin: number | null;
@@ -197,7 +232,9 @@ export function parseCampaignSetup(raw: unknown): CampaignSetup | null {
   const marketerCode = marketerId && typeof r.marketerCode === "string" && r.marketerCode.trim() ? r.marketerCode.trim() : null;
   const startAt = typeof r.startAt === "string" && Number.isFinite(new Date(r.startAt).getTime()) ? r.startAt : null;
   const campaignKind: CampaignKind = r.campaignKind === "WIN" ? "WIN" : "TEST";
-  return { adAccountId, pageId, objective, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, marketerCode, startAt, campaignKind };
+  // Setup lưu trước khi có ô này ⇒ không có trường ⇒ `null` (như mẫu). REACH không có mục tiêu tin nhắn.
+  const performanceGoal = objective !== "REACH" && (PERFORMANCE_GOALS as readonly string[]).includes(r.performanceGoal as string) ? (r.performanceGoal as PerformanceGoal) : null;
+  return { adAccountId, pageId, objective, performanceGoal, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, marketerCode, startAt, campaignKind };
 }
 
 /** Câu ngắn mô tả một setup — cho sổ ghi / hàng đợi. Hàm THUẦN. */
@@ -206,5 +243,5 @@ export function describeCampaignSetup(s: CampaignSetup, names: { account?: strin
   const tuoi = s.ageMin === null && s.ageMax === null ? "tuổi như mẫu" : `${s.ageMin ?? "?"}–${s.ageMax === 65 ? "65+" : (s.ageMax ?? "?")}`;
   const gioi = s.gender === null ? "giới tính như mẫu" : CAMPAIGN_GENDER_LABEL[s.gender];
   const mkt = s.marketerId ? `MKTer ${names.marketer || s.marketerId}` : "chưa chọn MKTer";
-  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, s.campaignKind === "WIN" ? "camp mã win" : "camp TEST", CAMPAIGN_OBJECTIVE_LABEL[s.objective], `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
+  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, s.campaignKind === "WIN" ? "camp mã win" : "camp TEST", CAMPAIGN_OBJECTIVE_LABEL[s.objective], ...(s.performanceGoal ? [PERFORMANCE_GOAL_LABEL[s.performanceGoal]] : []), `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
 }

@@ -8,6 +8,9 @@ import type { TemplateAd } from "@/lib/integrations/facebook/ads-write";
  * Không đọc CSDL, không gọi mạng; ra là một `TemplateAd` mới, không sửa đối tượng vào. Xem `lib/constants/campaign-setup.ts`.
  *
  *  · Mục tiêu `MESSAGES` / `REACH` thay mục tiêu chiến dịch + BỘ tham số nhóm tương ứng (tổ hợp chuẩn, không trộn).
+ *  · Mục tiêu HIỆU QUẢ (`performanceGoal`) đè `optimization_goal` của nhóm SAU cùng (điểm đến MESSENGER, page đã chọn);
+ *    mục tiêu chiến dịch không đổi. Đổi sang mục tiêu khác mẫu ⇒ giá thầu về tự động (`bid_amount` của mẫu tính cho đơn vị
+ *    kết quả cũ).
  *  · Đối tượng quảng bá (`promoted_object.page_id`) luôn đổi sang fanpage đã chọn — tin nhắn của khách phải về đúng page
  *    đứng tên bài.
  *  · TKQC khác tài khoản của quảng cáo mẫu ⇒ BỎ tệp đối tượng tuỳ chỉnh (`custom_audiences`…) khỏi targeting: chúng thuộc
@@ -74,6 +77,22 @@ export function applyCampaignSetup(t: TemplateAd, s: CampaignSetup): TemplateAd 
     if (out.campaign) out.campaign = { ...out.campaign, objective: s.objective === "MESSAGES" ? "OUTCOME_ENGAGEMENT" : "OUTCOME_AWARENESS" };
   } else if (out.adset.promotedObject && typeof out.adset.promotedObject.page_id === "string") {
     out.adset.promotedObject = { ...out.adset.promotedObject, page_id: s.pageId };
+  }
+
+  if (s.performanceGoal && s.objective !== "REACH") {
+    const doiMucTieu = out.adset.optimizationGoal !== s.performanceGoal;
+    out.adset.optimizationGoal = s.performanceGoal;
+    out.adset.billingEvent = "IMPRESSIONS";
+    out.adset.destinationType = "MESSENGER";
+    // Mua / giá trị mua giữ các trường sự kiện của mẫu (nếu có); trò chuyện / khách tiềm năng chỉ cần page.
+    const muaHang = s.performanceGoal === "MESSAGING_PURCHASE_CONVERSION" || s.performanceGoal === "VALUE";
+    out.adset.promotedObject = muaHang ? { ...(out.adset.promotedObject ?? {}), page_id: s.pageId } : { page_id: s.pageId };
+    // Giá thầu của mẫu đặt cho MỤC TIÊU CŨ (giá một cuộc trò chuyện ≠ giá một lượt mua) ⇒ đổi mục tiêu thì về giá tự động,
+    // không mang con số sang một đơn vị kết quả khác.
+    if (doiMucTieu) {
+      out.adset.bidStrategy = "LOWEST_COST_WITHOUT_CAP";
+      out.adset.bidAmount = null;
+    }
   }
   return out;
 }

@@ -1430,6 +1430,25 @@ export const BID_STRATEGY_LABEL: Readonly<Record<string, string>> = {
   COST_CAP: "costcap",
 };
 
+/**
+ * TÊN NHÓM THEO MỤC TIÊU TỐI ƯU ĐANG CHỌN — hàm THUẦN, dùng chung cho bản xem trước (hộp soạn bài) và tên máy chủ tự đặt.
+ * Tên nhóm theo khuôn mở đầu bằng nhãn mục tiêu tối ưu của NHÓM MẪU (`MESS_…`); người chọn mục tiêu khác thì nhóm thật tối ưu
+ * cho mục tiêu ấy ⇒ đổi đoạn đầu (`MESSMUA_…`), và vì `applyCampaignSetup` đưa giá thầu về tự động khi đổi mục tiêu, đoạn
+ * cuối giá thầu thành `autobid`. `goal = null` hoặc đoạn đầu đã đúng nhãn ⇒ giữ nguyên. Đoạn đầu KHÔNG phải nhãn mục tiêu
+ * (người tự gõ tên khác) ⇒ giữ nguyên cả tên — không sửa chữ người gõ.
+ */
+export function adsetNameForGoal(name: string, goal: string | null): string {
+  if (!goal) return name;
+  const segs = name.split("_");
+  const next = OPTIMIZATION_GOAL_LABEL[goal] ?? goal;
+  const known = new Set([...Object.values(OPTIMIZATION_GOAL_LABEL), "?"]);
+  if (segs.length === 0 || !known.has(segs[0]) || segs[0] === next) return name;
+  segs[0] = next;
+  const last = segs.length - 1;
+  if (last > 0 && Object.values(BID_STRATEGY_LABEL).includes(segs[last])) segs[last] = BID_STRATEGY_LABEL.LOWEST_COST_WITHOUT_CAP;
+  return segs.join("_");
+}
+
 /** `targeting.genders`: 1 = nam, 2 = nữ; vắng / rỗng / cả hai = mọi giới tính. */
 export const GENDER_LABEL: Readonly<Record<string, string>> = { "1": "Nam", "2": "Nữ", ALL: "All" };
 

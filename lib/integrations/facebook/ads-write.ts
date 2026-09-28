@@ -185,6 +185,38 @@ export async function searchAdGeoLocations(q: string, limit = 12): Promise<GeoSe
     .map((r) => ({ key: asText(r.key) as string, name: asText(r.name) ?? "", type: r.type === "city" ? ("city" as const) : ("region" as const), region: asText(r.region) }));
 }
 
+/** Một fanpage mà TOKEN của ERP (System User) được giao — `tasks` là quyền trên page (`ADVERTISE`, `CREATE_CONTENT`…). */
+export type TokenPage = { id: string; name: string; tasks: string[] };
+
+/** Trần số trang kết quả khi lật `me/accounts` (100 page mỗi trang) — đủ 1.000 page, chặn vòng lặp vô tận nếu `after` lặp. */
+const TOKEN_PAGES_MAX_ROUNDS = 10;
+
+/**
+ * FANPAGE MÀ TOKEN ERP THẤY ĐƯỢC — `GET /me/accounts` của System User (chủ shop 28/09/2026: "share rất nhiều fanpage cho
+ * người dùng hệ thống đã khai token cho ERP" mà ô chọn fanpage chỉ ra vài page). Lời gọi ĐỌC, lật hết các trang kết quả.
+ * Không lấy `access_token` của page: token page chỉ lấy lúc dùng (`pageAccessToken`), không đi qua danh sách này.
+ */
+export async function listTokenPages(): Promise<TokenPage[]> {
+  const out: TokenPage[] = [];
+  let after = "";
+  for (let i = 0; i < TOKEN_PAGES_MAX_ROUNDS; i++) {
+    const rec = await graphGet("me/accounts", { fields: "id,name,tasks", limit: "100", ...(after ? { after } : {}) });
+    const rows = Array.isArray(rec.data) ? (rec.data as unknown[]) : [];
+    for (const r of rows) {
+      const x = asRecord(r);
+      const id = x ? asText(x.id) : null;
+      if (!x || !id || out.some((p) => p.id === id)) continue;
+      const tasks = Array.isArray(x.tasks) ? x.tasks.filter((t): t is string => typeof t === "string") : [];
+      out.push({ id, name: asText(x.name) ?? "", tasks });
+    }
+    const paging = asRecord(rec.paging);
+    const next = asText(asRecord(paging?.cursors)?.after);
+    if (!next || next === after || !paging?.next) break;
+    after = next;
+  }
+  return out;
+}
+
 /**
  * Lời gọi GHI. `retries: 0` — CỐ Ý.
  *

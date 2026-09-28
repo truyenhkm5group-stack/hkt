@@ -18,6 +18,7 @@ import { loadProductFacts } from "@/lib/video-scale/facts";
 import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/video-scale/publish";
 import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
+import { readTokenPages } from "@/lib/queries/facebook-pages";
 import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { LYRIA_CLIP_PRICE_USD, MUSIC_MOODS, generateMusicLibrary, type MusicMood } from "@/lib/video-scale/music-gen";
@@ -402,9 +403,9 @@ export async function setVideoSkuPublishingAction(raw: unknown): Promise<{ ok: t
   const d = parsed.data;
   const db = await getDb();
   if (d.pageId) {
-    // Chỉ nhận fanpage ERP ĐÃ BIẾT (đồng bộ từ Pancake) — không nhận một mã gõ tay.
+    // Chỉ nhận fanpage ERP ĐÃ BIẾT — sổ fanpage (đồng bộ từ Pancake) HOẶC page token ERP được giao — không nhận một mã gõ tay.
     const [f] = await db.select({ id: schema.fanpages.externalPageId }).from(schema.fanpages).where(eq(schema.fanpages.externalPageId, d.pageId)).limit(1);
-    if (!f) return { error: "Fanpage này không có trong danh sách fanpage của ERP." };
+    if (!f && !(await readTokenPages()).pages.some((p) => p.id === d.pageId)) return { error: "Fanpage này không có trong sổ fanpage của ERP, cũng không nằm trong các page token ERP được giao." };
   }
   const actor = await actorOf(user.id, user.email);
   const T = schema.videoScaleSkus;
