@@ -23,10 +23,22 @@ import { integrationStatus } from "@/lib/env";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { getCurrentUser, requirePermission } from "@/lib/auth/session";
+import { getOrgBrand } from "@/lib/branding/service";
+import type { Metadata } from "next";
 import { DASHBOARD_BLOCKS, hrefVisible, visibleBlocks } from "@/lib/platform-ui/module-visibility";
+import { GettingStartedHome } from "@/components/onboarding/getting-started";
 
-export const metadata = { title: "Tổng quan" };
+/**
+ * Tổ chức nhà: "Tổng quan" như trước. Tổ chức khác: tiêu đề TUYỆT ĐỐI mang tên của họ — trang này cùng phân đoạn với
+ * bố cục nên `title.template` của bố cục không áp lên nó, và mẫu gốc sẽ gắn tên của tổ chức nhà vào (Phase 10 · §4).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const user = await getCurrentUser();
+  if (!user?.organization || user.organization.isHome) return { title: "Tổng quan" };
+  const name = (await getOrgBrand(user))?.name ?? user.organization.name;
+  return { title: { absolute: `Bắt đầu · ${name}` } };
+}
 
 function change(current: number, previous: number | null | undefined) {
   if (previous === null || previous === undefined || previous === 0) return null;
@@ -35,6 +47,12 @@ function change(current: number, previous: number | null | undefined) {
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("dashboard:view");
+  /*
+    TỔ CHỨC KHÔNG PHẢI NHÀ (Phase 10 · §3): thẻ "Bắt đầu" đo từ dữ liệu thật, THAY cho các thẻ bên dưới — chúng đọc luật
+    COD / Pancake / Viettel Post của tổ chức nhà và với tổ chức mới chỉ là một bảng số 0 giả. Tổ chức nhà KHÔNG đi
+    nhánh này: trang chủ của nhà giữ nguyên từng khối.
+  */
+  if (user.organization && !user.organization.isHome) return <GettingStartedHome user={user} />;
   /*
     KHỐI CỦA MODULE ĐANG TẮT KHÔNG HIỆN (phase-2-plan mục 3.3): tổ chức bán buôn không thấy khối Vận
     chuyển, Hàng hoàn, Quảng cáo hay nút đồng bộ Pancake — một ô 0 ₫ của module không dùng là một

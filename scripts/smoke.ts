@@ -248,6 +248,8 @@ const ROUTES = [
   "/settings/templates",
   // Đối tượng tuỳ biến (Phase 6): danh sách đối tượng + số bản ghi / field của tổ chức.
   "/settings/objects",
+  // AI dựng cấu hình (Phase 8): lịch sử bản nháp đọc `ai_blueprint_drafts`; KHÔNG gọi AI khi mở trang.
+  "/settings/ai-builder",
   "/platform",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.

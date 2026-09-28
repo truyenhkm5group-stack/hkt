@@ -70,4 +70,8 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_organization_modules`);
   await db.execute(sql`delete from platform_flag_overrides`);
   await db.execute(sql`delete from platform_organizations`);
+  // 0169 · gói (gieo bằng migration), mã mời, lượt đăng ký — cũng là mặt phẳng điều khiển, cũng chỉ thật ở CSDL nhà.
+  await db.execute(sql`delete from platform_signup_attempts`);
+  await db.execute(sql`delete from platform_signup_invites`);
+  await db.execute(sql`delete from platform_plans`);
 }

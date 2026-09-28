@@ -486,6 +486,53 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: [],
     why: `Trợ lý AI dùng chung không phải một module ở Phase 1 (khai ở lõi). Khoá của NỀN TẢNG hay của khách là quyết định còn treo (integration-inventory §2.3). ${HOME_WHY}`,
   },
+  /*
+    KHOÁ AI CỦA CHÍNH TỔ CHỨC (Phase 8 · §1 — "ai dùng người ấy trả"). Không có khoá AI dùng chung của nền tảng: AI
+    Builder của một tổ chức đọc ĐÚNG MỘT kết nối đang bật của chính nó (`openActiveConnection`), còn khoá `.env` của
+    tổ chức nhà (`ai-chat`) không bao giờ đi qua đây. Kiểm tra = liệt kê model (chỉ đọc, không tốn token).
+  */
+  {
+    key: "anthropic-byok",
+    label: "Anthropic — khoá AI của tổ chức",
+    vendor: "Anthropic",
+    kind: "AI",
+    capabilities: ["chat"],
+    auth: "API_KEY",
+    settings: [
+      { key: "apiKey", label: "Anthropic API key", type: "text", secret: true, required: true, hint: "console.anthropic.com → API keys. Khoá của tổ chức — tổ chức trả tiền token.", pattern: "^sk-ant-[A-Za-z0-9_-]{20,200}$", maxLength: 220 },
+      { key: "model", label: "Model (để trống = mặc định)", type: "text", secret: false, required: false, hint: "Ví dụ claude-opus-5. Để trống thì dùng model mặc định của bậc trợ lý.", pattern: "^[a-z][a-z0-9.-]{2,60}$", maxLength: 60 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testAnthropicKey",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/ai-builder/providers.ts"],
+    consumers: ["lib/ai-builder/provider.ts::getBuilderAi"],
+    why: "Khoá AI do CHÍNH tổ chức mang đến cho AI Builder (Phase 8). Kiểm tra = GET /v1/models (chỉ đọc, không tốn token), chỉ tới api.anthropic.com, không theo chuyển hướng. Khoá .env của tổ chức nhà không bao giờ dùng thay.",
+  },
+  {
+    key: "openai-byok",
+    label: "OpenAI — khoá AI của tổ chức",
+    vendor: "OpenAI",
+    kind: "AI",
+    capabilities: ["chat"],
+    auth: "API_KEY",
+    settings: [
+      { key: "apiKey", label: "OpenAI API key", type: "text", secret: true, required: true, hint: "platform.openai.com → API keys. Khoá của tổ chức — tổ chức trả tiền token.", pattern: "^sk-[A-Za-z0-9_-]{20,200}$", maxLength: 220 },
+      { key: "model", label: "Model (để trống = mặc định)", type: "text", secret: false, required: false, hint: "Để trống thì dùng model mặc định của bậc trợ lý.", pattern: "^[a-z][a-z0-9.-]{2,60}$", maxLength: 60 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testOpenAiKey",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/ai-builder/providers.ts"],
+    consumers: ["lib/ai-builder/provider.ts::getBuilderAi"],
+    why: "Khoá AI do CHÍNH tổ chức mang đến cho AI Builder (Phase 8). Kiểm tra = GET /v1/models (chỉ đọc, không tốn token), chỉ tới api.openai.com, không theo chuyển hướng. Khoá .env của tổ chức nhà không bao giờ dùng thay.",
+  },
   {
     key: "openai-rest",
     label: "OpenAI REST (ảnh, đọc ảnh, giọng đọc)",

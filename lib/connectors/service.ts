@@ -159,6 +159,35 @@ export async function loadConnectionsView(user: SessionUser, deps: { keyState?: 
   };
 }
 
+// ───────────────────────── ĐỌC LÚC CHẠY (consumer đã khai) ─────────────────────────
+
+export type ActiveConnection = { ok: true; secrets: Record<string, string>; settings: Record<string, string> } | { ok: false; reason: string };
+
+/**
+ * Bí mật của MỘT kết nối ĐANG BẬT của tổ chức NGỮ CẢNH, cho luồng chạy đã khai trong `consumers` của sổ (Phase 8: AI
+ * Builder đọc khoá AI của chính tổ chức). Không nhận mã tổ chức — `getDb()` và AAD đều lấy từ ngữ cảnh, nên không có
+ * tham số nào đưa khoá của tổ chức A sang B. Connector chưa khai consumer ⇒ từ chối (không có "đọc bí mật tuỳ ý").
+ * Không kiểm quyền người: đây là đường MÁY dùng khoá thay tổ chức; nơi gọi đã gác quyền màn hình của nó. Bí mật trả
+ * về chỉ được đưa thẳng vào client của nhà cung cấp — không log, không trả về trình duyệt.
+ */
+export async function openActiveConnection(connectorKey: string, deps: { keyState?: SecretsKeyState } = {}): Promise<ActiveConnection> {
+  const spec = findConnector(connectorKey);
+  if (!spec || !isOrgConfigurable(spec)) return { ok: false, reason: `«${connectorKey}» không phải kết nối theo tổ chức.` };
+  if (spec.consumers.length === 0) return { ok: false, reason: `«${spec.label}» chưa khai luồng nào được đọc lúc chạy.` };
+  const ctx = await currentOrganization();
+  const row = await findRow(spec.key);
+  if (!row) return { ok: false, reason: `Chưa có kết nối «${spec.label}».` };
+  if (row.orgCode !== ctx.code) return { ok: false, reason: `Dòng kết nối «${spec.key}» mang mã tổ chức khác ngữ cảnh — không dùng.` };
+  if (row.status !== "ACTIVE" || row.lastTestOk !== true) return { ok: false, reason: `Kết nối «${spec.label}» chưa bật (cần Kiểm tra đạt rồi Bật).` };
+  if (!row.secretsEnc) return { ok: false, reason: `Kết nối «${spec.label}» chưa có bí mật.` };
+  try {
+    const secrets = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: spec.key, keyId: row.secretsKeyId }, deps.keyState ?? secretsKeyState());
+    return { ok: true, secrets, settings: asStringMap(row.settings) };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "Không giải mã được bí mật." };
+  }
+}
+
 // ───────────────────────────── GHI ─────────────────────────────
 
 export type SaveConnectionInput = { connectorKey: string; settings?: Record<string, unknown>; secrets?: Record<string, unknown> };

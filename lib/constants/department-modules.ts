@@ -484,6 +484,15 @@ export const NAV_MODULES = [
     permission: "metadata:manage",
     why: "Tạo nghiệp vụ mới không có sẵn (Hợp đồng bảo trì, Công trình, Xe…) không cần viết mã: danh sách, form, chi tiết tự sinh; field / form / danh sách soạn ở các màn metadata. Đối tượng lên menu của cả tổ chức nên là quyết định của quản trị.",
   },
+  // AI dựng cấu hình (Phase 8): cùng khoá `metadata:manage` với Mẫu cấu hình — AI chỉ SOẠN một gói, áp dụng đi qua ĐÚNG
+  // bộ cài của Mẫu cấu hình, nên quyền của từng bước (module / vai trò / luật) vẫn do kế hoạch chặn.
+  {
+    href: "/settings/ai-builder",
+    label: "AI dựng cấu hình",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Mô tả doanh nghiệp hoặc một thay đổi, AI soạn gói cấu hình; người bỏ chọn từng mục, xem trước rồi xác nhận — AI không có đường ghi riêng. Khoá AI là của chính tổ chức (Kết nối theo tổ chức).",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

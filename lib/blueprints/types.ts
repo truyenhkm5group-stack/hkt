@@ -52,8 +52,12 @@ export type AiBusinessProfile = { businessProfile: string; glossary: { term: str
 
 export type BlueprintRole = { key: string; label: string; description?: string; base: Exclude<Role, "ADMIN">; permissions: string[]; defaultScope?: "SELF" | "ASSIGNED" | "TEAM" | "DEPARTMENT" | "ALL" };
 
-/** Đối tượng tuỳ biến (Phase 6). Phiên bản này TỪ CHỐI mục `objects` — xem `validateBlueprint`. */
-export type BlueprintObject = { key: `x_${string}`; label: string; labelPlural: string; icon: string; moduleKey: ModuleKey; titleLabel: string; viewPermission?: string; writePermission?: string };
+/**
+ * Đối tượng tuỳ biến (Phase 6) — tạo qua `createObject` (lib/objects/objects.ts). `moduleKey` là NHÓM MENU; module của
+ * MỌI đối tượng tuỳ biến là `apps` và bộ lập kế hoạch tự thêm nó vào tập module của gói. Quyền mặc định
+ * `records:view` / `records:write`; khai khoá khác để SIẾT.
+ */
+export type BlueprintObject = { key: `x_${string}`; label: string; labelPlural: string; icon: string; moduleKey: ModuleKey; titleLabel: string; description?: string; viewPermission?: string; writePermission?: string };
 
 export type BlueprintFieldOption = { value: string; label: string; color?: string; active?: boolean; position?: number };
 
@@ -66,8 +70,11 @@ export type BlueprintField = {
   validation?: FieldValidation;
   /** Chỉ kiểu `status`: `{ "<từ>": ["<tới>", …] }`. */
   transitions?: Record<string, string[]>;
-  /** Field quan hệ (Phase 6) — phiên bản này từ chối. */
-  relation?: { objectKey: string };
+  /**
+   * Field quan hệ (Phase 6, kiểu `relation` / `relation_many`): đích là đối tượng hệ thống có trong sổ HOẶC đối tượng
+   * tuỳ biến khai trong CHÍNH gói. `unique` (một-một) chỉ áp cho `relation`.
+   */
+  relation?: { objectKey: string; unique?: boolean };
   required?: boolean;
   listable?: boolean;
   filterable?: boolean;

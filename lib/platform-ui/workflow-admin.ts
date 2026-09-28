@@ -5,6 +5,7 @@ import type { FieldError, MetadataActor } from "@/lib/metadata/types";
 import { withOrganization } from "@/lib/platform/context";
 import { buildCatalog } from "@/lib/platform-ui/metadata-admin-shared";
 import { adminObjectsAll } from "@/lib/platform-ui/metadata-admin";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import { statusFieldsOf, workflowEventOptions, type EventOption, type WorkflowObjectOption } from "@/lib/platform-ui/workflow-admin-shared";
 import { listRuns, listStaleRuns, previewRule, runWorkflows } from "@/lib/workflow/engine";
 import { getRule, listRules, saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
@@ -134,6 +135,10 @@ export async function adminSaveWorkflowRule(user: SessionUser, id: string | null
   if (id !== null && (typeof id !== "string" || !id)) return denied("Thiếu mã luật.");
   if (typeof input !== "object" || input === null || Array.isArray(input)) return denied("Đầu vào luật không hợp lệ.");
   const payload = id === null ? input : { ...input, id };
+  if (id === null) {
+    const ent = await checkEntitlement("workflows", 1);
+    if (!ent.ok) return denied(ent.error);
+  }
   return toResult(await saveRule(payload, workflowActorOf(user)));
 }
 

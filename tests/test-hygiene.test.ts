@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/onboarding.test.ts":
+    "ĐẶT PLATFORM_SIGNUP_MODE (off / invite / open) để dựng từng cửa vào của /start — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy đang chạy khai cờ gì.",
   "tests/platform-no-db.test.ts":
     "GỠ DATABASE_URL khỏi môi trường của TIẾN TRÌNH CON để dựng đúng máy GitHub Actions (cầu nối mở PR không có CSDL). Đó là ĐẦU VÀO của phép kiểm; kết luận không phụ thuộc máy đang chạy có CSDL hay không.",
   "tests/platform-no-db-probe.ts":
@@ -164,6 +166,9 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
 
   "tests/connectors.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) — và XOÁ nó — để đo cả hai nhánh có khoá / thiếu khoá của đường lưu bí mật; ĐẶT vài credential BỊA của nhà (PANCAKE_*, VIETTELPOST_*, FACEBOOK_ACCESS_TOKEN, CHATBOT_ADMIN_TOKEN, GEMINI_API_KEY) để kiểm màn hình chỉ đọc không lộ giá trị. Mọi khoá trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+
+  "tests/ai-builder.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) để lưu khoá AI BỊA của tổ chức thử; ĐẶT ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL BỊA của «nhà» để chứng minh client BYOK KHÔNG đọc chúng (fetch là bản giả, không gọi mạng). Mọi biến trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
   /* ───── ĐỌC biến, nhưng đọc ĐÚNG NGUỒN mà mã sản xuất đọc ───── */
   "tests/session-renewal.test.ts":

@@ -37,6 +37,11 @@ MESSAGING 6 · AI 3 · STORAGE 1 · PLATFORM 1). `PER_ORG`: `google-sheet-landin
 trước), `bank-statement-file` (không khoá), và hai kết nối MỚI lưu ở `org_connections`: `lark-webhook`,
 `telegram-bot`. `lib/integrations/http.ts` là helper (`INTEGRATION_HELPERS`), không phải connector.
 
+Phase 8 thêm hai kết nối AI `PER_ORG` (sổ thành **20 — 14 `HOME_ONLY`, 6 `PER_ORG`**, AI 5): `anthropic-byok`,
+`openai-byok` — khoá AI của CHÍNH tổ chức cho AI Builder. Kiểm tra = `GET /v1/models` (chỉ đọc, không tốn token), chỉ
+tới địa chỉ hằng của nhà cung cấp. Consumer đầu tiên đọc bí mật lúc chạy qua `openActiveConnection()` (service vẫn là
+nơi DUY NHẤT giải mã; connector chưa khai `consumers` bị từ chối).
+
 ## 2. Kết nối theo tổ chức
 
 - Bảng `org_connections` trong CSDL CỦA TỔ CHỨC (migration `0164`, CHỈ THÊM, idempotent): `org_code` (dây bẫy — dòng

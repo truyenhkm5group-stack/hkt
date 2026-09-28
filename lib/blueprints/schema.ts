@@ -18,6 +18,7 @@ import { ROLE_ORDER } from "@/lib/constants/roles";
 import { ACCESS_SCOPES } from "@/lib/constants/access-scope";
 import { CARE_NOTE_PRESETS_MAX } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
+import { CUSTOM_OBJECT_ICONS } from "@/lib/objects/constants";
 import {
   BLUEPRINT_FORMAT,
   BLUEPRINT_FORMAT_VERSION,
@@ -45,11 +46,12 @@ const roleZ = z.strictObject({
 
 const objectZ = z.strictObject({
   key: z.string().regex(/^x_[a-z][a-z0-9_]{1,40}$/, "Khoá đối tượng tuỳ biến phải bắt đầu bằng x_"),
-  label: text(100),
-  labelPlural: text(100),
-  icon: text(40),
+  label: text(60),
+  labelPlural: text(60),
+  icon: z.enum(CUSTOM_OBJECT_ICONS, { error: "Biểu tượng không có trong bộ biểu tượng của đối tượng tuỳ biến" }),
   moduleKey: moduleKeyZ,
-  titleLabel: text(100),
+  titleLabel: text(40),
+  description: z.string().trim().max(500).optional(),
   viewPermission: permissionKeyZ.optional(),
   writePermission: permissionKeyZ.optional(),
 });
@@ -79,7 +81,7 @@ const fieldZ = z.strictObject({
     })
     .optional(),
   transitions: z.record(z.string(), z.array(z.string()).max(200)).optional(),
-  relation: z.strictObject({ objectKey: objectKeyZ }).optional(),
+  relation: z.strictObject({ objectKey: objectKeyZ, unique: z.boolean().optional() }).optional(),
   required: z.boolean().optional(),
   listable: z.boolean().optional(),
   filterable: z.boolean().optional(),
@@ -111,7 +113,7 @@ const pageZ = z.strictObject({
 });
 
 const triggerZ = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("event"), event: z.string().trim().min(3).max(80) }),
+  z.strictObject({ kind: z.literal("event"), event: z.string().trim().min(3).max(80), objectKey: objectKeyZ.optional() }),
   z.strictObject({ kind: z.literal("custom_status"), objectKey: objectKeyZ, fieldKey: fieldKeyZ, to: z.array(text(100)).min(1).max(50), from: z.array(text(100)).max(50).optional() }),
 ]);
 

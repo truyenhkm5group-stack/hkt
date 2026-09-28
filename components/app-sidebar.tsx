@@ -37,6 +37,7 @@ import {
   ReceiptText,
   Blocks,
   LibraryBig,
+  WandSparkles,
   ServerCog,
   RotateCcw,
   Scissors,
@@ -135,6 +136,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/connections": Plug,
   "/settings/templates": LibraryBig,
   "/settings/objects": Boxes,
+  "/settings/ai-builder": WandSparkles,
   "/platform": ServerCog,
 };
 

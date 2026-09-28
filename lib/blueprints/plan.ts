@@ -22,7 +22,6 @@
  * bật. Kế hoạch có bước BLOCKED thì KHÔNG cài được — cài một nửa gói là để trang trỏ vào field không tồn tại.
  */
 import { moduleDef, PLATFORM_MODULES, type ModuleKey } from "@/lib/constants/platform-modules";
-import { objectDef } from "@/lib/constants/object-registry";
 import type { CustomFieldDef } from "@/lib/metadata/types";
 import { stableHash } from "@/lib/blueprints/hash";
 import {
@@ -30,6 +29,7 @@ import {
   itemLabel,
   projectAi,
   projectBlueprintField,
+  projectBlueprintObject,
   projectBlueprintPage,
   projectBlueprintRole,
   projectBlueprintWorkflow,
@@ -39,7 +39,7 @@ import {
   statusRowsOf,
 } from "@/lib/blueprints/project";
 import { blueprintZ } from "@/lib/blueprints/schema";
-import { blueprintFieldDef, blueprintModuleSet, validateBlueprint } from "@/lib/blueprints/validate";
+import { blueprintFieldDef, blueprintModules, blueprintModuleSet, objectOf, validateBlueprint } from "@/lib/blueprints/validate";
 import {
   BLUEPRINT_ITEM_KINDS,
   PLAN_ACTIONS,
@@ -121,24 +121,30 @@ function mergedDefs(bp: Blueprint, orgDefs: Record<string, CustomFieldDef[]>, ob
 export function blueprintItems(bp: Blueprint, orgDefs: Record<string, CustomFieldDef[]> = {}): BlueprintItem[] {
   const modules = blueprintModuleSet(bp);
   const items: BlueprintItem[] = [];
+  // Module của đối tượng: sổ tĩnh ⇒ module khai trong sổ; đối tượng tuỳ biến của gói ⇒ `apps`.
   const objMod = (o: string): ModuleKey[] => {
-    const m = objectDef(o)?.module;
+    const m = objectOf(bp, o)?.module;
     return m ? [m] : [];
   };
   const moduleIndex = new Map(bp.modules.map((m, i) => [m, i]));
-  for (const m of orderModules(bp.modules)) items.push({ kind: "module", key: m, path: `modules.${moduleIndex.get(m)}`, item: m, target: { enabled: true }, modules: [], publish: false });
+  // `apps` tự thêm khi gói có đối tượng tuỳ biến (không có `path`: người soạn không khai nó).
+  for (const m of orderModules(blueprintModules(bp))) items.push({ kind: "module", key: m, path: moduleIndex.has(m) ? `modules.${moduleIndex.get(m)}` : null, item: m, target: { enabled: true }, modules: [], publish: false });
   (bp.roles ?? []).forEach((r, i) => items.push({ kind: "role", key: r.key, path: `roles.${i}`, item: r, target: projectBlueprintRole(r), modules: [], publish: false }));
+  (bp.objects ?? []).forEach((o, i) => {
+    const menu = new Set<ModuleKey>([...objMod(o.key), o.moduleKey]);
+    items.push({ kind: "object", key: o.key, path: `objects.${i}`, item: o, target: projectBlueprintObject(o), modules: [...menu], publish: false });
+  });
   (bp.fields ?? []).forEach((f, i) => items.push({ kind: "field", key: `${f.objectKey}.${f.key}`, path: `fields.${i}`, item: f, target: projectBlueprintField(f), modules: objMod(f.objectKey), publish: false }));
   (bp.statuses ?? []).forEach((s, i) => items.push({ kind: "status", key: `${s.objectKey}.${s.field}`, path: `statuses.${i}`, item: s, target: projectStatusRows(statusRowsOf(s)), modules: objMod(s.objectKey), publish: false }));
   (bp.forms ?? []).forEach((f, i) =>
-    items.push({ kind: "form", key: `${f.objectKey}.${f.formKey}`, path: `forms.${i}`, item: f, target: projectForm(f.objectKey, f.schema, mergedDefs(bp, orgDefs, f.objectKey)), modules: objMod(f.objectKey), publish: f.publish === true }),
+    items.push({ kind: "form", key: `${f.objectKey}.${f.formKey}`, path: `forms.${i}`, item: f, target: projectForm(objectOf(bp, f.objectKey), f.schema, mergedDefs(bp, orgDefs, f.objectKey)), modules: objMod(f.objectKey), publish: f.publish === true }),
   );
   (bp.listViews ?? []).forEach((l, i) =>
-    items.push({ kind: "list", key: `${l.objectKey}.${l.listKey}`, path: `listViews.${i}`, item: l, target: projectList(l.objectKey, l.schema, mergedDefs(bp, orgDefs, l.objectKey)), modules: objMod(l.objectKey), publish: l.publish === true }),
+    items.push({ kind: "list", key: `${l.objectKey}.${l.listKey}`, path: `listViews.${i}`, item: l, target: projectList(objectOf(bp, l.objectKey), l.schema, mergedDefs(bp, orgDefs, l.objectKey)), modules: objMod(l.objectKey), publish: l.publish === true }),
   );
   (bp.pages ?? []).forEach((p, i) => items.push({ kind: "page", key: p.slug, path: `pages.${i}`, item: p, target: projectBlueprintPage(p, modules), modules: [p.moduleKey], publish: p.publish === true }));
   (bp.workflows ?? []).forEach((w, i) => {
-    const o = w.trigger.kind === "custom_status" ? w.trigger.objectKey : null;
+    const o = w.trigger.objectKey ?? null;
     items.push({ kind: "workflow", key: w.key, path: `workflows.${i}`, item: w, target: projectBlueprintWorkflow(w), modules: o ? objMod(o) : [], publish: false });
   });
   (bp.settings ?? []).forEach((s, i) => items.push({ kind: "setting", key: s.key, path: `settings.${i}`, item: s, target: s.value, modules: [SAFE_SETTING_SPEC[s.key].module], publish: false }));

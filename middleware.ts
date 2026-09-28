@@ -36,8 +36,11 @@ import {
  *
  * Cùng luật với `/api/sync` (bí mật cron qua header) và `/api/webhooks` (bí mật trong đường dẫn /
  * chữ ký HMAC).
+ *
+ * `/start` (Phase 10 · tạo tổ chức tự phục vụ): trang KHÔNG cần phiên; cổng của nó là cờ `PLATFORM_SIGNUP_MODE` đọc ở
+ * máy chủ — `off` (mặc định) thì trang chỉ in "chưa mở đăng ký" và mọi server action của nó từ chối.
  */
-const PUBLIC_PREFIXES = ["/login", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/start", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
 const COOKIE = SESSION_COOKIE;
 
 /**

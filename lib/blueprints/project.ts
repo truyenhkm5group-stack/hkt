@@ -11,7 +11,7 @@
  *  · chuẩn hoá bằng CHÍNH hàm chuẩn hoá của dịch vụ (`normalizeFormSchema`, `normalizeListView`,
  *    `normalizePageSchema`) — bản gói sau khi cài đúng bằng bản gói chiếu ra ở đây, không có luật thứ hai.
  */
-import { objectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import { moduleDef, type ModuleKey } from "@/lib/constants/platform-modules";
 import { normalizeFormSchema } from "@/lib/metadata/form-schema";
 import { normalizeListView } from "@/lib/metadata/list-schema";
@@ -19,8 +19,8 @@ import type { CustomFieldDef, FieldOption, FormSchema, ListViewSchema } from "@/
 import { normalizePageSchema } from "@/lib/pages/components";
 import type { PageNav, PageSchema } from "@/lib/pages/types";
 import type { WorkflowRule } from "@/lib/workflow/types";
-import { normalizeOptions } from "@/lib/blueprints/validate";
-import { SAFE_SETTING_SPEC, type Blueprint, type BlueprintField, type BlueprintItemKind, type BlueprintPage, type BlueprintRole, type BlueprintStatusOverride, type BlueprintWorkflow, type DiffEntry, type SafeSettingKey } from "@/lib/blueprints/types";
+import { fieldValidationOf, normalizeOptions, objectOf } from "@/lib/blueprints/validate";
+import { SAFE_SETTING_SPEC, type Blueprint, type BlueprintField, type BlueprintObject, type BlueprintItemKind, type BlueprintPage, type BlueprintRole, type BlueprintStatusOverride, type BlueprintWorkflow, type DiffEntry, type SafeSettingKey } from "@/lib/blueprints/types";
 
 // ═══ Hình chiếu của từng loại ═══
 
@@ -32,11 +32,12 @@ export type FieldProjection = {
   validation: Record<string, unknown>;
   transitions: Record<string, string[]>;
   helpText: string | null;
+  relationObject: string | null;
   listable: boolean;
   filterable: boolean;
 };
 
-export function projectFieldDef(d: Pick<CustomFieldDef, "type" | "label" | "required" | "options" | "validation" | "transitions" | "helpText" | "listable" | "filterable">): FieldProjection {
+export function projectFieldDef(d: Pick<CustomFieldDef, "type" | "label" | "required" | "options" | "validation" | "transitions" | "helpText" | "relationObject" | "listable" | "filterable">): FieldProjection {
   return {
     type: d.type,
     label: d.label,
@@ -45,6 +46,7 @@ export function projectFieldDef(d: Pick<CustomFieldDef, "type" | "label" | "requ
     validation: { ...d.validation },
     transitions: d.transitions,
     helpText: d.helpText,
+    relationObject: d.relationObject ?? null,
     listable: d.listable,
     filterable: d.filterable,
   };
@@ -56,12 +58,43 @@ export function projectBlueprintField(f: BlueprintField): FieldProjection {
     label: f.label,
     required: f.required === true,
     options: normalizeOptions(f.options),
-    validation: f.validation ?? {},
+    validation: fieldValidationOf(f),
     transitions: f.transitions ?? {},
     helpText: f.helpText?.trim() || null,
+    relationObject: f.relation?.objectKey ?? null,
     listable: f.listable !== false,
     filterable: f.filterable === true,
   });
+}
+
+/** Đối tượng tuỳ biến: đúng những cột `createObject` / `updateObject` nhận (mặc định như dịch vụ điền). */
+export type ObjectProjection = { label: string; labelPlural: string; icon: string; moduleKey: string; titleLabel: string; description: string | null; viewPermission: string; writePermission: string };
+
+export function projectBlueprintObject(o: BlueprintObject): ObjectProjection {
+  return {
+    label: o.label.trim(),
+    labelPlural: o.labelPlural.trim(),
+    icon: o.icon,
+    moduleKey: o.moduleKey,
+    titleLabel: o.titleLabel.trim() || "Tên",
+    description: o.description?.trim() || null,
+    viewPermission: o.viewPermission ?? "records:view",
+    writePermission: o.writePermission ?? "records:write",
+  };
+}
+
+export function projectObjectDef(d: AnyObjectDef): ObjectProjection | null {
+  if (!d.custom) return null;
+  return {
+    label: d.label,
+    labelPlural: d.labelPlural,
+    icon: d.custom.icon,
+    moduleKey: d.custom.menuModule,
+    titleLabel: d.custom.titleLabel,
+    description: d.custom.description ?? null,
+    viewPermission: d.custom.viewPermission,
+    writePermission: d.custom.writePermission,
+  };
 }
 
 export type RoleProjection = { name: string; description: string; baseRole: string; permissions: string[]; defaultScope: string; active: boolean };
@@ -85,15 +118,13 @@ export function statusRowsOf(s: BlueprintStatusOverride): StatusRowProjection[] 
 }
 
 /** Form: chuẩn hoá bằng hàm của dịch vụ, rồi chỉ giữ ô ĐANG HIỆN (xem đầu tệp). */
-export function projectForm(objectKey: string, schema: FormSchema | null | undefined, custom: readonly CustomFieldDef[]): FormSchema | null {
-  const def = objectDef(objectKey);
+export function projectForm(def: AnyObjectDef | null, schema: FormSchema | null | undefined, custom: readonly CustomFieldDef[]): FormSchema | null {
   if (!def || !schema) return null;
   const n = normalizeFormSchema(schema, def.fields, custom);
   return { version: 1, sections: n.sections.map((s) => ({ key: s.key, label: s.label, fields: s.fields.filter((f) => f.visible) })) };
 }
 
-export function projectList(objectKey: string, schema: ListViewSchema | null | undefined, custom: readonly CustomFieldDef[]): ListViewSchema | null {
-  const def = objectDef(objectKey);
+export function projectList(def: AnyObjectDef | null, schema: ListViewSchema | null | undefined, custom: readonly CustomFieldDef[]): ListViewSchema | null {
   if (!def || !schema) return null;
   const n = normalizeListView(schema, def.fields, custom);
   return { version: 1, columns: n.columns.filter((c) => c.visible), defaultSort: n.defaultSort, defaultFilters: n.defaultFilters };
@@ -177,10 +208,12 @@ export function itemLabel(kind: BlueprintItemKind, key: string, bp: Blueprint): 
       return "Hồ sơ doanh nghiệp cho trợ lý AI";
     case "role":
       return bp.roles?.find((r) => r.key === key)?.label ?? key;
+    case "object":
+      return bp.objects?.find((o) => o.key === key)?.label ?? key;
     case "field": {
       const [o, k] = key.split(".");
       const f = bp.fields?.find((x) => x.objectKey === o && x.key === k);
-      return f ? `${objectDef(o)?.label ?? o} · ${f.label}` : key;
+      return f ? `${objectOf(bp, o)?.label ?? o} · ${f.label}` : key;
     }
     case "page":
       return bp.pages?.find((p) => p.slug === key)?.name ?? key;
@@ -190,7 +223,7 @@ export function itemLabel(kind: BlueprintItemKind, key: string, bp: Blueprint): 
     case "list":
     case "status": {
       const [o, k] = key.split(".");
-      return `${objectDef(o)?.label ?? o} · ${k}`;
+      return `${objectOf(bp, o)?.label ?? o} · ${k}`;
     }
     default:
       return key;

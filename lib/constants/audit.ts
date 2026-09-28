@@ -133,6 +133,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   CUSTOM_RECORD_UPDATE: "Sửa bản ghi",
   CUSTOM_RECORD_DELETE: "Xoá bản ghi",
   CUSTOM_VALUES_SAVE: "Lưu dữ liệu bổ sung",
+  // AI ERP Builder (Phase 8 · lib/ai-builder/service.ts) — AI chỉ SOẠN; áp dụng đi qua bộ cài ở trên.
+  AI_BLUEPRINT_DRAFT_CREATE: "AI soạn bản nháp gói cấu hình",
+  AI_BLUEPRINT_DRAFT_APPLY: "Áp dụng bản nháp gói cấu hình do AI soạn",
+  AI_BLUEPRINT_DRAFT_APPLY_FAILED: "Áp dụng bản nháp AI không thành",
+  AI_BLUEPRINT_DRAFT_DISCARD: "Bỏ bản nháp gói cấu hình do AI soạn",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
