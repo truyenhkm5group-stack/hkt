@@ -20,7 +20,7 @@
  *
  * Không có bậc thứ năm. Đặc biệt KHÔNG suy từ tiền: xem chú thích đầu tệp hằng số.
  */
-import { inArray, sql } from "drizzle-orm";
+import { and, desc, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { classifyRaw } from "@/lib/returns/reason-classify";
 import {
@@ -88,6 +88,45 @@ export function reasonFromStatusText(statusName: string): ReturnReason | null {
 }
 
 /**
+ * ═══════════ BẬC 3 ĐỌC ĐÚNG MỘT DÒNG MỖI KIỆN, KHÔNG PHẢI MỌI SỰ KIỆN ═══════════
+ *
+ * Bản cũ kéo MỌI sự kiện có chữ của cả tập kiện rồi chạy `reasonFromStatusText` trên TỪNG dòng, chỉ
+ * để giữ lại dòng muộn nhất dịch ra lý do. Đo production 29/09/2026 (`ops perf-probe`, kỳ 90 ngày):
+ * báo cáo lý do hoàn kéo 116.416 dòng, tầng quyết định 123.854 dòng (nó gọi hàm này cho cả kỳ
+ * trước); hai câu đọc sự kiện của hàm này trong tầng quyết định mất 772 ms và 540 ms tính từ lúc gọi
+ * tới lúc Node đọc xong, trong khi EXPLAIN của chính chúng chỉ 70–94 ms — phần còn lại là truyền và
+ * phân tích hàng chục nghìn dòng trên một luồng Node đang bận.
+ *
+ * Câu chữ lặp lại, dù không ít như tưởng: đo production 29/09/2026, 61.668 sự kiện có chữ của 3.064
+ * kiện (120 ngày) chỉ có 9.834 câu KHÁC NHAU (chữ ĐVVC mang cả tên bưu tá, số điện thoại…). Nên làm
+ * hai bước — Node đọc ~1/5 số dòng, và mỗi câu chữ chỉ qua bộ dịch một lần:
+ *   1. Lấy các câu chữ KHÁC NHAU của tập kiện, phân loại bằng ĐÚNG `reasonFromStatusText`
+ *      — cùng một hàm, không dịch lại luật sang SQL.
+ *   2. Chỉ kéo sự kiện MUỘN NHẤT mỗi kiện trong số những câu chữ có lý do (`distinct on`).
+ *
+ * Kết quả bằng hệt bản cũ: bản cũ duyệt theo `occurred_at` tăng dần và dòng có lý do sau cùng thắng
+ * — tức đúng dòng muộn nhất trong số dòng có lý do. Hai dòng CÙNG mốc thì bản cũ lấy theo thứ tự
+ * ngẫu nhiên của CSDL; ở đây phá hoà bằng `id` giảm dần để chạy hai lần ra cùng một kết quả.
+ */
+async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: string[]): Promise<{ shipmentId: string; statusName: string; reason: ReturnReason }[]> {
+  const e = schema.shipmentEvents;
+  const coChu = sql`${e.shipmentId} in ${ids} and coalesce(${e.statusName}, '') <> ''`;
+  const cauChu = await db.selectDistinct({ statusName: e.statusName }).from(e).where(coChu);
+  const lyDoCua = new Map<string, ReturnReason>();
+  for (const { statusName } of cauChu) {
+    const r = reasonFromStatusText(statusName ?? "");
+    if (r) lyDoCua.set(statusName, r);
+  }
+  if (!lyDoCua.size) return [];
+  const dong = await db
+    .selectDistinctOn([e.shipmentId], { shipmentId: e.shipmentId, statusName: e.statusName })
+    .from(e)
+    .where(and(coChu, inArray(e.statusName, [...lyDoCua.keys()])))
+    .orderBy(e.shipmentId, desc(e.occurredAt), desc(e.id));
+  return dong.map((d) => ({ shipmentId: d.shipmentId, statusName: d.statusName, reason: lyDoCua.get(d.statusName) as ReturnReason }));
+}
+
+/**
  * Lý do hoàn của một tập vận đơn. MỘT truy vấn cho cả tập, không phải một truy vấn mỗi kiện.
  *
  * Vận đơn không nằm trong kết quả trả về = chưa xét (gọi sai tập), khác với vận đơn trả về
@@ -102,20 +141,15 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
   const [thuCong, vanDon, suKien] = await Promise.all([
     db.select().from(schema.shipmentReturnReasons).where(inArray(schema.shipmentReturnReasons.shipmentId, ids)),
     db.select({ id: schema.shipments.id, code: schema.shipments.vtpReasonCode }).from(schema.shipments).where(inArray(schema.shipments.id, ids)),
-    db
-      .select({ shipmentId: schema.shipmentEvents.shipmentId, statusName: schema.shipmentEvents.statusName, occurredAt: schema.shipmentEvents.occurredAt })
-      .from(schema.shipmentEvents)
-      .where(sql`${schema.shipmentEvents.shipmentId} in ${ids} and coalesce(${schema.shipmentEvents.statusName}, '') <> ''`)
-      .orderBy(sql`${schema.shipmentEvents.occurredAt} asc`),
+    suKienCoLyDoMuonNhat(db, ids),
   ]);
 
   for (const id of ids) out.set(id, KHONG_BIET);
 
-  // Bậc 3 — chữ trong trạng thái. Duyệt theo thời gian tăng dần, giữ lý do MUỘN NHẤT:
-  // kiện hẹn lại rồi vẫn không giao được thì lý do cuối mới là lý do nó hoàn.
+  // Bậc 3 — chữ trong trạng thái: sự kiện MUỘN NHẤT mang chữ dịch ra lý do (kiện hẹn lại rồi vẫn
+  // không giao được thì lý do cuối mới là lý do nó hoàn). Mỗi kiện tối đa MỘT dòng — xem hàm dưới.
   for (const e of suKien) {
-    const r = reasonFromStatusText(e.statusName ?? "");
-    if (!r) continue;
+    const r = e.reason;
     out.set(e.shipmentId, {
       reason: r,
       confidence: "CARRIER_TEXT",

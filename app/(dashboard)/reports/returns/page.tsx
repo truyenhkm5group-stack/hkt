@@ -122,12 +122,15 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   /*
     MỘT LƯỢT SONG SONG, KHÔNG PHẢI HAI LƯỢT NỐI ĐUÔI.
 
-    Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca. Nhưng
-    nó chỉ cần ĐÚNG báo cáo đó, nên bắt đầu ngay khi báo cáo lý do xong (`reasonP.then`), không đứng
-    chờ bảng theo mẫu mã. Đo production 29/09/2026 (mỗi lời gọi nguội): theo mẫu mã 2,7 s · tầng quyết
-    định 3,1 s · lý do hoàn 1,0 s — hai lượt nối đuôi là ~5,8 s, trong khi đường găng thật chỉ là
-    lý do hoàn → tầng quyết định. Dự phóng GTC dùng chung giữa các lời gọi qua `memo` (lượt đang tính
-    được dùng chung, không tính lại).
+    Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca. Nó
+    chỉ cần ĐÚNG báo cáo đó, nên bắt đầu ngay khi báo cáo lý do xong (`reasonP.then`), không đứng chờ
+    bảng theo mẫu mã.
+
+    ĐỪNG TRÔNG ĐỢI NÓ NHANH HƠN NHIỀU: đo sau deploy (#382) trang vẫn 7,4 s so với 6,9 s trước đó.
+    `ops perf-probe` cho thấy vì sao — phần lớn thời gian là NODE (một luồng) tính dự phóng GTC và duyệt
+    hàng trăm nghìn dòng sự kiện, không phải CSDL chờ; chạy song song thêm không làm một luồng nhanh
+    hơn. Chỗ sửa thật là giảm việc: `reasonsForShipments` thôi kéo mọi sự kiện (xem hàm ấy); ~2 s
+    ứng dụng còn lại của bảng theo mẫu mã / tổng hợp là dự phóng GTC — một việc riêng, chưa sửa.
 
     Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
   */
