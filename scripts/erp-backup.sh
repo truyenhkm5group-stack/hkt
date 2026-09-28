@@ -14,6 +14,11 @@
 #                                              mỗi ngày (giờ VN) đúng một bản vào daily/
 #   erp-backup.sh status                       in trạng thái — KHÔNG in một dòng dữ liệu nào
 #   erp-backup.sh restore-drill                khôi phục bản mới nhất vào container TẠM rồi đếm dòng
+# >>> TỔ CHỨC KHÁC NHÀ
+#   erp-backup.sh restore-drill-org [mã]       CHẠY TAY (ops `restore-drill-org`): khôi phục bản mới nhất của MỘT CSDL
+#                                              erp_org_* vào CSDL TẠM `tam_khoiphuc_<mã>` trong container TẠM, đếm bảng
+#                                              lõi, xoá container. Không mã ⇒ luân phiên (tổ chức diễn tập lâu nhất).
+# <<< TỔ CHỨC KHÁC NHÀ
 #   erp-backup.sh install-cron                 cài /etc/cron.d/erp-backup (install-vps.sh gọi mỗi lần deploy)
 #   erp-backup.sh configure-offsite            dựng cấu hình Google Drive + crypt từ Secrets/Variables mà
 #                                              deploy truyền xuống (install-vps.sh gọi mỗi lần deploy)
@@ -681,7 +686,7 @@ trang_thai_to_chuc() {
     csdl="$(basename "$d")"
     ten_csdl_to_chuc_hop_le "$csdl" || continue
     echo "$csdl:"
-    for tep in last-run.json last-success.json; do
+    for tep in last-run.json last-success.json last-drill.json; do
       if [ -f "$STATUS_TO_CHUC/$csdl/$tep" ]; then echo "  $tep: $(cat "$STATUS_TO_CHUC/$csdl/$tep")"; else echo "  $tep: (chưa có)"; fi
     done
     for sub in daily weekly manual; do
@@ -689,6 +694,194 @@ trang_thai_to_chuc() {
       ls -lh "$d$sub" 2>/dev/null | sed '1d' | sed 's/^/    /' || true
     done
   done
+  return 0
+}
+
+# ═══════════════ LỆNH: restore-drill-org — DIỄN TẬP KHÔI PHỤC MỘT CSDL TỔ CHỨC (CHẠY TAY) ═══════════════
+#
+# Cùng khuôn với `cmd_restore_drill` của nhà (container Postgres TẠM cùng ảnh, không mạng, không cổng, trần RAM; CSDL
+# sống chỉ bị đọc `count(*)`), cho MỘT CSDL `erp_org_*`. Lý do có lệnh riêng thay vì nới lệnh của nhà: diễn tập của nhà
+# không đổi một byte (xem BAM_PHAN_NHA), và thẻ của tổ chức chỉ tin diễn tập mang ĐÚNG tên CSDL của nó.
+#
+# LUẬT:
+#  · CHẠY TAY (ops `restore-drill-org`). KHÔNG nằm trong cron: dựng một Postgres thứ hai lúc 02–05 giờ trên máy 2 nhân /
+#    ~1,9 GB là đổi hành vi vận hành — bật tự động là quyết định của chủ nền tảng (docs/platform/launch-gates.md mục C).
+#  · Đích khôi phục là CSDL TẠM `tam_khoiphuc_<mã>` BÊN TRONG container tạm — KHÔNG BAO GIỜ trên erp-db. Khối này không
+#    có một lệnh `createdb` / `dropdb` / `pg_restore` / `alter database` nào nhắm vào $DB_CONTAINER.
+#  · Tên tạm KHÔNG bắt đầu bằng `erp_org_`: lượt sao lưu đêm liệt kê `erp_org_%` và sẽ dump một CSDL tạm như một tổ chức
+#    thật nếu nó lọt vào erp-db. Hai hàng rào độc lập: mẫu MAU_CSDL_TAM, và tên không được khớp MAU_CSDL_TO_CHUC.
+#  · Dọn bằng trap EXIT — container (kèm volume) bị xoá cả khi diễn tập hỏng giữa chừng. Xoá container = xoá CSDL tạm.
+#  · Không `exit`: mọi bước tự kiểm rồi `return` (luật khối). Trạng thái ghi vào status/orgs/<csdl>/last-drill.json
+#    (kind `restore-drill`, mang tên CSDL) — ERP đọc đúng tệp này cho thẻ Sao lưu của tổ chức đó.
+BANG_DIEN_TAP_TO_CHUC="public.users public.settings public.access_roles public.meta_objects public.meta_custom_fields public.meta_forms public.meta_list_views public.meta_pages public.workflow_rules public.blueprint_installs public.custom_records drizzle.__drizzle_migrations"
+TIEN_TO_CSDL_TAM="tam_khoiphuc_"
+MAU_CSDL_TAM='^tam_khoiphuc_[a-z0-9_]+$'
+NHAN_DIEN_TAP_TO_CHUC="erp.restore-drill-org=1"
+DRILL_TEN_TO_CHUC=""
+
+# Mã tổ chức (a-z0-9-) hoặc tên CSDL erp_org_* ⇒ tên CSDL. Trả 1 khi không hợp lệ — không bao giờ đoán.
+csdl_tu_ma_to_chuc() { # $1
+  local v="${1:-}"
+  if ten_csdl_to_chuc_hop_le "$v"; then printf '%s' "$v"; return 0; fi
+  [[ "$v" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || return 1
+  v="erp_org_${v//-/_}"
+  ten_csdl_to_chuc_hop_le "$v" || return 1
+  printf '%s' "$v"
+}
+
+# erp_org_bp_a ⇒ tam_khoiphuc_bp_a. Trả 1 khi kết quả không qua hai hàng rào tên.
+ten_csdl_tam() { # $1=csdl
+  local t
+  ten_csdl_to_chuc_hop_le "${1:-}" || return 1
+  t="${TIEN_TO_CSDL_TAM}${1#erp_org_}"
+  [[ "$t" =~ $MAU_CSDL_TAM ]] || return 1
+  if ten_csdl_to_chuc_hop_le "$t" || [[ "$t" == erp_org_* ]]; then return 1; fi
+  printf '%s' "$t"
+}
+
+# Bản dump mới nhất của MỘT CSDL tổ chức, theo MỐC TRONG TÊN (không tin mtime), cả ba thư mục.
+ban_moi_nhat_to_chuc() { # $1=csdl
+  local d f ten tot="" ten_tot=""
+  for d in daily weekly manual; do
+    for f in "$THU_MUC_TO_CHUC/$1/$d/$1"-*.dump; do
+      [ -f "$f" ] || continue
+      ten="$(basename "$f")"
+      [[ "$ten" =~ ^${1}-[0-9]{8}-[0-9]{4}\.dump$ ]] || continue
+      if [ -z "$ten_tot" ] || [[ "$ten" > "$ten_tot" ]]; then tot="$f"; ten_tot="$ten"; fi
+    done
+  done
+  printf '%s' "$tot"
+}
+
+# LUÂN PHIÊN: CSDL có bản sao mà lượt diễn tập gần nhất CŨ NHẤT (chưa từng ⇒ đứng đầu). Rỗng ⇒ không có gì để diễn tập.
+chon_to_chuc_luan_phien() {
+  local d csdl moc tot="" moc_tot="" co=""
+  for d in "$THU_MUC_TO_CHUC"/*/; do
+    csdl="$(basename "$d")"
+    ten_csdl_to_chuc_hop_le "$csdl" || continue
+    [ -n "$(ban_moi_nhat_to_chuc "$csdl")" ] || continue
+    moc="$(sed -n 's/.*"finishedAt":"\([^"]*\)".*/\1/p' "$STATUS_TO_CHUC/$csdl/last-drill.json" 2>/dev/null | head -n 1 || true)"
+    if [ -z "$co" ] || [[ "$moc" < "$moc_tot" ]]; then tot="$csdl"; moc_tot="$moc"; co=1; fi
+  done
+  printf '%s' "$tot"
+}
+
+don_dien_tap_to_chuc() {
+  if [ -n "$DRILL_TEN_TO_CHUC" ]; then docker rm -f -v "$DRILL_TEN_TO_CHUC" >/dev/null 2>&1 || true; fi
+}
+
+ghi_dien_tap_to_chuc() { # $1=csdl $2=kết quả $3=lý do $4=bản $5=CSDL tạm $6=mảng bảng JSON $7=bắt đầu
+  mkdir -p "$STATUS_TO_CHUC/$1" 2>/dev/null && chmod 755 "$STATUS_TO_CHUC" "$STATUS_TO_CHUC/$1" 2>/dev/null
+  ghi_json "$STATUS_TO_CHUC/$1/last-drill.json" "$(printf '{"schema":1,"kind":"restore-drill","scope":"ORGANIZATION","database":%s,"result":%s,"startedAt":%s,"finishedAt":%s,"reason":%s,"dumpFile":%s,"tempDatabase":%s,"tables":%s}' \
+    "$(js "$1")" "$(js "$2")" "$(js "$7")" "$(js "$(bay_gio_utc)")" "$(js "$3")" "$(js "$4")" "$(js "$5")" "${6:-[]}")" \
+    || loi "không ghi được trạng thái diễn tập của $1"
+}
+
+cmd_restore_drill_to_chuc() { # $1 = mã tổ chức | tên CSDL erp_org_* | rỗng (luân phiên)
+  local csdl tam ban ten_ban avail db_mb tu_do can anh i b phuc song hoi loi_bang="" bang_json="" so_loi bat_dau tep_loi
+  bat_dau="$(bay_gio_utc)"
+  if [ "$#" -gt 1 ]; then loi "restore-drill-org nhận TỐI ĐA một tham số (mã tổ chức)."; return 2; fi
+  chuan_bi_thu_muc || { loi "Không chuẩn bị được thư mục sao lưu."; return 1; }
+  if [ -n "${1:-}" ]; then
+    csdl="$(csdl_tu_ma_to_chuc "$1")" || { loi "Mã tổ chức $(printf '%q' "$1") không hợp lệ (chữ thường, số, gạch ngang; hoặc tên CSDL erp_org_*)."; return 2; }
+  else
+    csdl="$(chon_to_chuc_luan_phien)"
+    if [ -z "$csdl" ]; then bao "diễn tập tổ chức: không CSDL erp_org_* nào có bản sao lưu trên máy — không có gì để diễn tập."; return 0; fi
+    bao "diễn tập tổ chức: luân phiên chọn $csdl (lượt diễn tập gần nhất cũ nhất / chưa từng)"
+  fi
+  tam="$(ten_csdl_tam "$csdl")" || { loi "Tên CSDL tạm cho $csdl không qua hàng rào tên — KHÔNG diễn tập."; return 2; }
+
+  giu_khoa 8 "$KHOA_DOC_DB" -x "$TRAN_CHO_KHOA_GIAY" || { loi "Hết giờ chờ khoá đọc nặng — diễn tập KHÔNG chạy."; return 75; }
+  giu_khoa 9 "$KHOA_VONG_DOI" -s "$TRAN_CHO_KHOA_GIAY" || { loi "Hết giờ chờ khoá vòng đời — diễn tập KHÔNG chạy."; return 75; }
+
+  ban="$(ban_moi_nhat_to_chuc "$csdl")"
+  if [ -z "$ban" ]; then
+    ghi_dien_tap_to_chuc "$csdl" "SKIPPED" "Chưa có bản sao lưu nào của $csdl trên máy — chạy ops backup trước." "" "$tam" "[]" "$bat_dau"
+    loi "Chưa có bản sao lưu nào của $csdl ($THU_MUC_TO_CHUC/$csdl/…) để diễn tập."; return 1
+  fi
+  ten_ban="$(basename "$ban")"
+
+  # Tài nguyên TRƯỚC khi dựng gì — đúng ngưỡng của diễn tập nhà.
+  avail="$(free -m 2>/dev/null | awk '/^Mem:/ {print $7}' || true)"
+  if [ -z "$avail" ] || ! [ "$avail" -ge "$RAM_TOI_THIEU_DIEN_TAP_MB" ] 2>/dev/null; then
+    ghi_dien_tap_to_chuc "$csdl" "SKIPPED" "RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_MB} MB — không dựng container tạm lúc máy đang chật." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_MB} MB — diễn tập KHÔNG chạy (không phải lỗi của bản sao lưu)."; return 1
+  fi
+  # Tên CSDL đã qua MAU_CSDL_TO_CHUC ([a-z0-9_]) — nội suy vào câu đọc là an toàn.
+  db_mb="$(docker exec "$DB_CONTAINER" psql -U erp -d erp -Atc "select (pg_database_size('$csdl') / 1048576)::bigint" 2>/dev/null || true)"
+  tu_do="$(o_trong_mb /var/lib/docker)"; [ -n "$tu_do" ] || tu_do="$(o_trong_mb /)"
+  can=$(( ${db_mb:-0} + DU_TRU_O_DIA_MB ))
+  if ! [[ "${db_mb:-}" =~ ^[0-9]+$ ]] || [ -z "$tu_do" ] || [ "$tu_do" -lt "$can" ]; then
+    ghi_dien_tap_to_chuc "$csdl" "SKIPPED" "Ổ đĩa còn ${tu_do:-?} MB, cần ≥ ${can} MB (CSDL ${db_mb:-?} MB + dự trữ ${DU_TRU_O_DIA_MB} MB)." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "Không đủ ổ đĩa (hoặc không đọc được cỡ $csdl) cho diễn tập: còn ${tu_do:-?} MB, cần ≥ ${can} MB — KHÔNG chạy."; return 1
+  fi
+  bao "diễn tập tổ chức: $csdl · bản $ten_ban → CSDL tạm $tam · RAM dùng được ${avail} MB · ổ còn ${tu_do} MB (cần ${can} MB)"
+
+  # Container sót lại từ lượt trước bị cắt ngang — dọn trước (chỉ container mang nhãn diễn tập tổ chức).
+  docker ps -aq --filter "label=$NHAN_DIEN_TAP_TO_CHUC" 2>/dev/null | xargs -r docker rm -f -v >/dev/null 2>&1 || true
+  anh="$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER" 2>/dev/null || true)"
+  if [ -z "$anh" ]; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Không đọc được ảnh của container $DB_CONTAINER." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "Không đọc được ảnh của $DB_CONTAINER."; return 1
+  fi
+  DRILL_TEN_TO_CHUC="erp-restore-drill-org-$(date +%s)"
+  trap don_dien_tap_to_chuc EXIT
+  # --network none: không cổng, không mạng — `trust` vô hại vì không ai tới được nó. POSTGRES_DB dựng sẵn CSDL tạm.
+  if ! docker run -d --name "$DRILL_TEN_TO_CHUC" --label "$NHAN_DIEN_TAP_TO_CHUC" --network none \
+    --memory "$BO_NHO_DIEN_TAP" --memory-swap "$BO_NHO_DIEN_TAP" --cpus 1 --pids-limit 256 \
+    -e POSTGRES_USER=erp -e POSTGRES_DB="$tam" -e POSTGRES_HOST_AUTH_METHOD=trust \
+    -v "$ban:/drill/ban.dump:ro" "$anh" \
+    postgres -c shared_buffers=32MB -c maintenance_work_mem=64MB -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c autovacuum=off >/dev/null; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Không dựng được container Postgres tạm." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "docker run container tạm lỗi — diễn tập thất bại."; return 1
+  fi
+
+  # Chờ "init process complete" rồi mới hỏi — pg_isready xanh trong lúc initdb là xanh giả (như diễn tập nhà).
+  for i in $(seq 1 90); do
+    if grep -q "PostgreSQL init process complete" <<< "$(docker logs "$DRILL_TEN_TO_CHUC" 2>&1)" \
+      && docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  if ! docker exec "$DRILL_TEN_TO_CHUC" pg_isready -U erp -d "$tam" >/dev/null 2>&1; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Container Postgres tạm không lên sau 180 giây." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "Container tạm không lên — diễn tập thất bại."; return 1
+  fi
+
+  bao "diễn tập tổ chức: pg_restore vào $tam trong container tạm $DRILL_TEN_TO_CHUC…"
+  tep_loi="$STATUS_DIR/.drill-to-chuc.err"
+  if ! timeout "$TRAN_LENH_GIAY" docker exec "$DRILL_TEN_TO_CHUC" pg_restore -U erp -d "$tam" --no-owner --no-privileges /drill/ban.dump 2>"$tep_loi"; then
+    so_loi="$(grep -c 'error' "$tep_loi" 2>/dev/null || true)"
+    echo "── 20 dòng đầu của lỗi pg_restore ──"; head -n 20 "$tep_loi" 2>/dev/null || true
+    rm -f "$tep_loi"
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "pg_restore báo lỗi (${so_loi:-?} dòng lỗi) — bản $ten_ban KHÔNG khôi phục sạch." "$ten_ban" "$tam" "[]" "$bat_dau"
+    loi "pg_restore lỗi — bản sao lưu của $csdl CHƯA chứng minh được là dùng được."; return 1
+  fi
+  rm -f "$tep_loi"
+
+  echo
+  printf '%-32s %14s %14s %10s\n' "BẢNG ($csdl)" "BẢN SAO LƯU" "CSDL SỐNG" "CHÊNH"
+  for b in $BANG_DIEN_TAP_TO_CHUC; do
+    phuc="$(docker exec "$DRILL_TEN_TO_CHUC" psql -U erp -d "$tam" -Atc "select count(*) from $b" 2>/dev/null || true)"
+    song="$(docker exec "$DB_CONTAINER" psql -U erp -d "$csdl" -Atc "select count(*) from $b" 2>/dev/null || true)"
+    [[ "$phuc" =~ ^[0-9]+$ ]] || phuc=""
+    [[ "$song" =~ ^[0-9]+$ ]] || song=""
+    hoi=""
+    if [ -n "$phuc" ] && [ -n "$song" ]; then hoi=$(( song - phuc )); fi
+    printf '%-32s %14s %14s %10s\n' "$b" "${phuc:-THIẾU}" "${song:-—}" "${hoi:-—}"
+    # Hỏng thật: bảng có ở CSDL sống mà bản khôi phục KHÔNG có, hoặc sống có dòng mà bản khôi phục rỗng.
+    if [ -n "$song" ] && [ -z "$phuc" ]; then loi_bang="$loi_bang $b(thiếu bảng)"; fi
+    if [ -n "$song" ] && [ -n "$phuc" ] && [ "$song" -gt 0 ] && [ "$phuc" -eq 0 ]; then loi_bang="$loi_bang $b(rỗng)"; fi
+    bang_json="${bang_json:+$bang_json,}{\"name\":$(js "$b"),\"restored\":$(jn "$phuc"),\"live\":$(jn "$song")}"
+  done
+  echo "CHÊNH = CSDL sống − bản sao lưu: dương nhỏ là BÌNH THƯỜNG (dữ liệu mới sinh sau lúc dump)."
+  echo
+
+  if [ -n "$loi_bang" ]; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "Khôi phục xong nhưng hỏng ở:$loi_bang" "$ten_ban" "$tam" "[$bang_json]" "$bat_dau"
+    loi "Diễn tập $csdl THẤT BẠI — hỏng ở:$loi_bang"; return 1
+  fi
+  ghi_dien_tap_to_chuc "$csdl" "OK" "" "$ten_ban" "$tam" "[$bang_json]" "$bat_dau"
+  bao "DIỄN TẬP TỔ CHỨC ĐẠT: $ten_ban khôi phục sạch vào CSDL tạm $tam (container tạm, sẽ bị xoá), $(echo "$BANG_DIEN_TAP_TO_CHUC" | wc -w) bảng lõi đối chiếu với $csdl."
   return 0
 }
 
@@ -1135,6 +1328,14 @@ RCLONE_CONFIG_${REMOTE_CRYPT^^}_FILENAME_ENCRYPTION=standard"
 main() {
   local lenh="${1:-}"
   shift || true
+  # >>> TỔ CHỨC KHÁC NHÀ — lệnh nhận MÃ tổ chức làm tham số nên đi trước vòng đọc --trigger của nhà.
+  # Gọi trong ngữ cảnh `||` (tắt set -e cho cả cây hàm, đúng luật khối): mọi bước tự kiểm và trả mã.
+  if [ "$lenh" = "restore-drill-org" ]; then
+    local ma_dien_tap=0
+    cmd_restore_drill_to_chuc "$@" || ma_dien_tap=$?
+    return "$ma_dien_tap"
+  fi
+  # <<< TỔ CHỨC KHÁC NHÀ
   local a
   for a in "$@"; do
     case "$a" in

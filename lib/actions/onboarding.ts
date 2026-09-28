@@ -8,6 +8,7 @@ import { createSession, getCurrentUser, requirePermission, type SessionUser } fr
 import { createInvite, revokeInvite } from "@/lib/onboarding/invites";
 import { checkAdminStep, checkInviteStep, checkOrgStep, createOrganizationFromSignup, previewSignup, retryOrganizationSetup, type SignupActor } from "@/lib/onboarding/service";
 import type { SignupPreview, SignupStepResult } from "@/lib/onboarding/shared";
+import { setSignupSetting } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 /**
@@ -93,6 +94,20 @@ export async function revokeInviteAction(id: string): Promise<{ ok: true } | { e
   const out = await revokeInvite(String(id ?? ""), { orgCode: r.user.organization!.code, userId: r.user.id, email: r.user.email });
   revalidatePath("/platform");
   return out;
+}
+
+/**
+ * Đổi chế độ đăng ký `/start` (cài đặt control plane) — KHÔNG cần deploy. Lõi (`setSignupSetting`) kiểm lại người vận
+ * hành, lý do, trần môi trường, và ghi `platform_audit_log`. `/start` đọc lại cờ ở lượt dựng kế tiếp.
+ */
+export async function setSignupModeAction(input: { mode: string; reason: string }): Promise<{ ok: true; changed: boolean; effective: string } | { error: string }> {
+  const r = await requireOperator();
+  if ("error" in r) return r;
+  const out = await setSignupSetting(r.user, input);
+  if ("error" in out) return out;
+  revalidatePath("/platform");
+  revalidatePath("/start");
+  return { ok: true, changed: out.changed, effective: out.state.effective };
 }
 
 export async function retrySetupAction(orgCode: string): Promise<{ ok: true } | { error: string }> {

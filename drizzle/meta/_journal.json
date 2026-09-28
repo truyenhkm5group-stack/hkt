@@ -1198,6 +1198,13 @@
       "when": 1790566905167,
       "tag": "0171_custom_records_live_sort",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1790566965167,
+      "tag": "0172_platform_settings",
+      "breakpoints": true
     }
   ]
 }

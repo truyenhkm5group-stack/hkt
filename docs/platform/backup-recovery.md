@@ -24,7 +24,8 @@ liệu thì không.
 - **Ngoài máy:** Google Drive qua remote `gcrypt:` (rclone crypt — Drive chỉ thấy byte mã hoá), cấu hình từ
   Secrets ở `/root/.config/erp-backup/offsite.env`.
 - **Kiểm:** kích thước > 0, `pg_restore --list` đọc lại được, mục lục phải có dữ liệu `orders` + `shipments`; ops
-  `restore-drill` nạp bản mới nhất vào container tạm rồi đếm 14 bảng then chốt.
+  `restore-drill` nạp bản mới nhất vào container tạm rồi đếm 14 bảng then chốt. CSDL tổ chức: ops `restore-drill-org`
+  (CHẠY TAY, §7).
 - **PHẠM VI:** CSDL nhà `docker exec erp-db pg_dump -U erp -d erp -Fc` (`cmd_run`, bước 2) + volume bot chat, rồi
   (từ Phase 11 · P11-BACKUP, bước 9) **mọi CSDL `erp_org_*` trên `erp-db`** — xem §2.1 và `docs/backup-restore.md`
   mục 7. Mặt phẳng điều khiển (`platform_organizations`, `platform_organization_modules`, gói, mã mời) nằm trong CSDL
@@ -60,7 +61,7 @@ gỡ các khối đó ra và băm phần còn lại (`BAM_PHAN_NHA` = đúng b�
 | 2 · dump + xoay vòng riêng | ✓ thư mục RIÊNG `/root/backups/orgs/<csdl>/{daily,weekly,manual}/`, tệp `<csdl>-<mốc>.dump`, xoay vòng theo tiền tố của CHÍNH CSDL, cùng `GIU_BAN_*`; ngoài máy `gcrypt:orgs/<csdl>/…` |
 | 3 · kiểm toàn vẹn theo loại | ✓ tổ chức: dữ liệu `public.users` + `public.settings` + `drizzle.__drizzle_migrations` trong mục lục; không đòi orders |
 | 4 · trạng thái theo tổ chức | ✓ khác đề xuất ở chỗ: KHÔNG thêm mảng vào `last-run.json` của nhà (đổi tệp của nhà); mỗi CSDL một thư mục `status/orgs/<csdl>/` + tệp tổng hợp `status/orgs-last-run.json`. Tổ chức chỉ đọc thư mục của chính nó; chưa có ⇒ "Chưa có bản sao lưu nào cho CSDL của tổ chức này" (đỏ) |
-| 5 · diễn tập luân phiên | ✗ CHƯA LÀM — `restore-drill` vẫn chỉ phủ CSDL nhà; thẻ của tổ chức vì thế luôn vàng "Chưa diễn tập khôi phục CSDL của tổ chức này". Diễn tập tay: `docs/backup-restore.md` mục 7 |
+| 5 · diễn tập luân phiên | ✓ CHẠY TAY (Commercial readiness C) — ops `restore-drill-org` (`erp-backup.sh restore-drill-org [mã]`; không mã ⇒ luân phiên theo lượt diễn tập cũ nhất). Ghi `status/orgs/<csdl>/last-drill.json` nên thẻ của ĐÚNG tổ chức đó hết vàng. **Chưa nằm trong cron** — bật tự động là quyết định của chủ nền tảng (`launch-gates.md` mục C). §7 |
 | 6 · bài kiểm | ✓ (xem trên) |
 | 7 · CSDL ở máy khác | ✓ nêu ra ở hai phía: script (`missingDatabases`) và thẻ của tổ chức (`ORG_DATABASE_URL__…` ⇒ đỏ "không được sao lưu tự động"). Lịch sao lưu riêng cho chúng vẫn là việc của chủ nền tảng |
 
@@ -167,7 +168,64 @@ tổ chức thật (và kiểm toàn vẹn nó). Dùng `tam_khoiphuc_<mã>` cho 
 6. **Mở lại tổ chức** (`ACTIVE`). Lần mở đầu tiên tự migrate phần còn thiếu (§4) và xoá bản sao `platform_*`. Kiểm
    `/settings/export` của tổ chức: `contentHash` phải khớp bản xuất gần nhất trước sự cố nếu có lưu.
 7. **Bí mật kết nối** trong bản dump được mã hoá AES-256-GCM với AAD theo tổ chức bằng `PLATFORM_SECRETS_KEY`: khôi phục
-   sang máy khác cần CÙNG khoá, nếu không kết nối hiện "không giải mã được" và phải khai lại.
+   sang máy khác cần CÙNG khoá, nếu không kết nối hiện "không giải mã được" và phải khai lại. Khoá này nằm ở
+   `/root/erp/.env` — tệp **không** thuộc phạm vi `erp-backup.sh` và không đi qua GitHub Secrets (đo 28/09/2026:
+   không workflow / script nào nhắc tới nó) ⇒ mất VPS là mất khoá, trừ khi đã cất bản sao ở ngoài (`launch-gates.md` C).
 8. **Chỉ còn blueprint, không có dump:** tạo tổ chức mới cùng mã (hoặc mã mới) → cài tệp blueprint (§3) → nhập lại
    người dùng và dữ liệu. Đây là khôi phục CẤU HÌNH, không phải khôi phục dữ liệu, và phải được nói đúng như thế với
    khách.
+
+## 6. Phạm vi đã xác minh (Commercial readiness C · 28/09/2026)
+
+Câu hỏi: cấu hình / metadata của một tổ chức có nằm TRONG CSDL `erp_org_<mã>` — tức có đi theo bản dump đêm — hay
+nằm lẫn ở CSDL nhà? Trả lời bằng ba nguồn độc lập, không đoán:
+
+**(a) Đọc mã.** `getDb()` (`db/index.ts`) phân giải theo ngữ cảnh tổ chức → `getOrgDb(code)` → CSDL
+`erp_org_<mã>`. Chỉ `getPlatformDb()` trỏ CSDL nhà, và chỉ các tệp sau gọi nó: `lib/platform/{provision,organizations,
+capabilities,module-config,audit}.ts`, `lib/onboarding/{service,invites,rate}.ts`, `lib/entitlements/check.ts` (đọc
+`platform_plans`; số đếm hạn mức của tổ chức vẫn đi `getDb()`), `app/api/health/route.ts` — tất cả chỉ chạm bảng
+`platform_*` (+ `users` khi cấp tổ chức, ghi qua `getDbFor(org)` vào CSDL CỦA tổ chức). CSDL tổ chức chạy CÙNG bộ
+migration (`migrateOrganizationDb`) nên có đủ lược đồ, rồi XOÁ sạch 8 bảng `platform_*` mỗi lần mở. Lệnh dump
+`pg_dump -U erp -d "$csdl" -Fc` không lọc bảng / lược đồ ⇒ mọi thứ trong CSDL tổ chức, kể cả `drizzle`, vào bản dump.
+
+**(b) Đo chạy thật** (`scripts/restore-drill-org-config.ts`, PGlite, tổ chức thử sau khi cài mẫu + tuỳ biến): bảng
+cấu hình có dòng TRONG CSDL tổ chức — `meta_objects 2 · meta_custom_fields 13 · meta_forms 2 · meta_list_views 2 ·
+meta_pages 2 · meta_status_overrides 1 · meta_config_versions 7 · custom_records 1 · custom_values 1 · workflow_rules 2
+· blueprint_installs 1 · blueprint_items 26 · access_roles 1 · settings 3 · users 1`; **0** dòng thêm ở cùng các bảng
+đó trong CSDL nhà; **0** dòng `platform_*` trong CSDL tổ chức; **+7** dòng sổ tổ chức + module ở CSDL nhà; 185 / 185
+bảng `public` ở hai CSDL (một lược đồ).
+
+**(c) Khoá bằng bài kiểm** (`tests/restore-drill-config.test.ts`): `CONTROL_PLANE_TABLES` = ĐÚNG các bảng `platform_*`
+của `db/schema.ts` = ĐÚNG các bảng `migrateOrganizationDb` xoá; mọi bảng trong `ORG_CONFIG_TABLES` có trong lược đồ;
+kịch bản chạy thật trong `npm test` và phán quyết đỏ nếu một bảng cấu hình ghi sang CSDL nhà.
+
+| Nhóm | Bảng | Nằm ở | Đi theo bản dump nào |
+|---|---|---|---|
+| Metadata | `meta_objects` · `meta_custom_fields` · `meta_forms` · `meta_list_views` · `meta_pages` · `meta_status_overrides` · `meta_config_versions` | `erp_org_<mã>` | dump tổ chức |
+| Bản ghi tuỳ biến | `custom_records` · `custom_values` · `custom_files` (bytea — tệp đính kèm) | `erp_org_<mã>` | dump tổ chức |
+| Tự động hoá | `workflow_rules` · `workflow_runs` · `workflow_cursors` | `erp_org_<mã>` | dump tổ chức |
+| Blueprint / AI | `blueprint_installs` · `blueprint_items` · `ai_blueprint_drafts` | `erp_org_<mã>` | dump tổ chức |
+| Kết nối | `org_connections` (bí mật mã hoá bằng `PLATFORM_SECRETS_KEY`, khoá KHÔNG ở trong dump — §5 bước 7) | `erp_org_<mã>` | dump tổ chức |
+| Người & quyền | `users` · `access_roles` · `departments` · `department_members` · `positions` | `erp_org_<mã>` | dump tổ chức |
+| Cài đặt | `settings` | `erp_org_<mã>` | dump tổ chức |
+| Nghiệp vụ + nhật ký | mọi bảng còn lại của `db/schema.ts` (đơn, khách, sản phẩm, `audit_logs`, `notifications`, …) — cùng lược đồ, dùng hay không tuỳ module | `erp_org_<mã>` | dump tổ chức |
+| Sổ migration | `drizzle.__drizzle_migrations` | từng CSDL | dump của chính CSDL đó |
+| **Mặt phẳng điều khiển** | `platform_organizations` · `platform_organization_modules` · `platform_flag_overrides` · `platform_audit_log` · `platform_plans` · `platform_signup_invites` · `platform_signup_attempts` · `platform_settings` | `erp` (nhà); RỖNG trong mọi `erp_org_*` | dump **nhà** (`pg_dump -d erp`) |
+
+Hệ quả vận hành: module đang bật, trạng thái (ACTIVE / SUSPENDED), gói, tiến trình dựng (`platform_organizations.settings.onboarding`)
+của một tổ chức sống ở CSDL NHÀ. Khôi phục
+riêng CSDL tổ chức từ bản dump ngày T trong khi sổ ở nhà là hiện tại ⇒ module theo sổ hiện tại, không theo ngày T.
+Khôi phục CẢ nhà từ bản cũ ⇒ sổ lùi về ngày đó (tổ chức cấp sau ngày ấy biến khỏi sổ dù CSDL của nó còn). Không
+tệp nào ngoài CSDL (`.env`, `PLATFORM_SECRETS_KEY`) nằm trong phạm vi `erp-backup.sh`.
+
+## 7. Diễn tập khôi phục MỘT tổ chức — hai tầng
+
+Chi tiết lệnh + tiêu chí đạt: `docs/backup-restore.md` mục 8.
+
+| Tầng | Chứng minh | Chạy | Kết quả đo |
+|---|---|---|---|
+| **Cấu hình** (blueprint) | xuất → MẤT CSDL + sổ → cấp lại CÙNG mã trống → cài từ tệp → xuất lại ⇒ cùng băm | `scripts/restore-drill-org-config.ts` (PGlite, 3 tiến trình); `npm test` chạy nó | 28/09/2026, máy Windows: **ĐẠT** — tệp 16.251 byte; băm nội dung nguồn `f308c4b1f0623ae188a062904a78a11e` = sau khôi phục; tổ chức trống `4a3cdd1d196a87e281542687f4b11593` (khác — phép so không mù); 0 xung đột, 0 bị chặn; cài lại 0 mục phải ghi; 1 → 0 bản ghi; 0 rò; ~20 giây |
+| **CSDL** (pg_dump) | bản dump đêm của `erp_org_<mã>` nạp sạch vào Postgres thật, bảng lõi có dòng | ops `restore-drill-org` trên VPS, người vận hành bấm | CHƯA CHẠY trên VPS (production chưa có CSDL `erp_org_*`). Đã kiểm bằng `bash` thật với `docker` giả: đích là CSDL tạm `tam_khoiphuc_<mã>` trong container tạm, `erp-db` chỉ bị đọc, dọn cả khi hỏng |
+
+Tầng cấu hình KHÔNG thay tầng CSDL: blueprint không mang bản ghi, tệp, người dùng hay bí mật (§3). Tầng CSDL là lời
+hứa cho tới lượt `restore-drill-org` đầu tiên chạy trên VPS sau khi có tổ chức thật — đó là mục của `launch-gates.md` C.

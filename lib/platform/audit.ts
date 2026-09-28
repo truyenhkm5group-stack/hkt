@@ -10,7 +10,7 @@ import { getPlatformDb, schema } from "@/db";
  * Hàm này NÉM khi ghi hỏng, và bên gọi phải ghi nhật ký TRƯỚC khi coi lượt đổi cấu hình là xong:
  * một cấu hình đổi mà không có vết thì không ai trả lời được "vì sao hôm qua tổ chức X mất module Y".
  */
-export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_SET" | "FLAG_SET" | "ORG_CREATE" | "ORG_STATUS" | "ORG_SETUP" | "INVITE_CREATE" | "INVITE_REVOKE";
+export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_SET" | "FLAG_SET" | "ORG_CREATE" | "ORG_STATUS" | "ORG_SETUP" | "INVITE_CREATE" | "INVITE_REVOKE" | "SIGNUP_MODE_SET";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

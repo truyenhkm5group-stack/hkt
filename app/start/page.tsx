@@ -16,12 +16,13 @@ export const metadata: Metadata = { title: { absolute: "Tạo tổ chức mới"
 /**
  * `/start` — TẠO TỔ CHỨC TỰ PHỤC VỤ (Phase 10 · §1–§2). Ngoài nhóm dashboard, không cần phiên.
  *
- * Cờ `PLATFORM_SIGNUP_MODE` đọc ở MÁY CHỦ: `off` (mặc định, production) ⇒ trang tĩnh "chưa mở đăng ký", HTTP 200, không
- * in gì về nền tảng hay tổ chức nào. Người vận hành nền tảng (phiên tổ chức nhà + `platform:operate`) luôn dùng được
- * trang này để tạo hộ khách — cùng luồng, không cần cờ. Trang không in gì của tổ chức nhà (tên, thương hiệu, số liệu).
+ * Chế độ đọc ở MÁY CHỦ mỗi lượt dựng = min(trần `PLATFORM_SIGNUP_MODE`, cài đặt ở `/platform`) — docs/platform/
+ * launch-gates.md mục B. `off` (mặc định, production) ⇒ trang tĩnh "chưa mở đăng ký", HTTP 200, không in gì về nền tảng
+ * hay tổ chức nào. Người vận hành nền tảng (phiên tổ chức nhà + `platform:operate`) luôn dùng được trang này để tạo hộ
+ * khách — cùng luồng, không cần cờ. Trang không in gì của tổ chức nhà (tên, thương hiệu, số liệu).
  */
 export default async function StartPage({ searchParams }: { searchParams: Promise<{ invite?: string }> }) {
-  const mode = signupMode();
+  const mode = await signupMode();
   const user = await getCurrentUser();
   const operator = Boolean(user && !platformOperatorDenial(user));
   const flow: "invite" | "open" | "operator" | null = operator ? "operator" : mode === "off" ? null : mode;

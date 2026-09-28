@@ -26,11 +26,24 @@
  * AAD của bí mật kết nối · bỏ hai chốt "chỉ tổ chức nhà vận hành nền tảng" · đăng nhập tra tài khoản ngoài tổ chức
  * được chọn · bỏ kiểm chữ ký JWT phiên · khoá đệm năng lực không theo tổ chức.
  *
+ * Bảo mật cuối (docs/platform/security-final.md) thêm các mặt ra đời SAU Phase 11 hoặc chưa phủ: trang Duyệt lõi
+ * `/approvals`, AI Copilot (tổ chức khác nhà TẮT ở cổng: trạng thái «chưa có AI cho tổ chức này», không gọi model, không
+ * ghi `ai_interactions`; công cụ gọi thẳng chỉ đọc CSDL của A, module tắt ⇒ MODULE_DISABLED; nhà không đổi), bản mã AI
+ * của B chép NGUYÊN VĂN, THAO TÚNG METADATA (trang / form / danh sách / field / luật / gói tự gửi / nháp AI mang khoá của
+ * B, field `x_…` không có, nguồn ngoài sổ, `users:manage`, vòng lặp, module tắt — từ chối và ảnh chụp CSDL A trước =
+ * sau), xuất gói cấu hình, thẻ trạng thái sao lưu. Đột biến (28/09/2026), mỗi cái ĐỎ: "không tìm thấy lời duyệt" = thành
+ * công · bỏ cổng tổ chức của Copilot · `copilotStatus` báo «bật» cho tổ chức khác · công cụ Copilot bỏ qua module tắt · AI
+ * Builder của tổ chức khác rơi về khoá nhà · bỏ chốt mã tổ chức của dòng kết nối + AAD lấy từ cột · trang bỏ kiểm field
+ * custom · luật bỏ chặn vòng lặp trực tiếp · gói cho vai trò khoá cấm · sao lưu đọc lời khai của nhà · tìm kiếm của
+ * Copilot đọc CSDL nhà.
+ *
  * Chạy qua `npm test` (cần `./setup-env` + `ensureMigrated()` của bộ chạy chung).
  */
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { SignJWT } from "jose";
 import * as ReactNs from "react";
@@ -38,16 +51,21 @@ import { workAsyncStorage } from "next/dist/server/app-render/work-async-storage
 import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-async-storage.external";
 import { RequestCookies, ResponseCookies } from "next/dist/server/web/spec-extension/cookies";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
+import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
+import ApprovalsPage from "@/app/(dashboard)/approvals/page";
+import { BackupStatusCard } from "@/app/(dashboard)/integrations/backup-status-card";
 import ObjectRecordsPage from "@/app/(dashboard)/o/[object]/page";
 import ObjectRecordPage from "@/app/(dashboard)/o/[object]/[id]/page";
 import DynamicPage from "@/app/(dashboard)/p/[slug]/page";
 import { GET as logoGET } from "@/app/api/branding/logo/route";
+import { GET as blueprintExportGET } from "@/app/api/metadata/blueprint-export/route";
 import { GET as metadataFileGET } from "@/app/api/metadata/files/[id]/route";
 import { POST as syncPOST } from "@/app/api/sync/[job]/route";
+import { askCopilot, confirmCopilotActions, copilotStatus } from "@/lib/actions/ai";
 import { applyAiDraftAction, createAiDraftAction, discardAiDraftAction, previewAiDraftAction } from "@/lib/actions/ai-builder";
 import { decideApproval, listPendingApprovals } from "@/lib/actions/approvals";
 import { loginAction } from "@/lib/actions/auth";
-import { installTemplateAction, previewTemplateAction } from "@/lib/actions/blueprints";
+import { installBlueprintFileAction, installTemplateAction, previewBlueprintFileAction, previewTemplateAction } from "@/lib/actions/blueprints";
 import { removeLogoAction } from "@/lib/actions/branding";
 import { saveConnectionAction, setConnectionStatusAction, testConnectionAction } from "@/lib/actions/connections";
 import { saveCustomValuesAction } from "@/lib/actions/metadata";
@@ -64,23 +82,26 @@ import {
 } from "@/lib/actions/metadata-admin";
 import { uploadCustomerFileAction } from "@/lib/actions/metadata-records";
 import { createRecordAction, deleteRecordAction, setObjectArchivedAction, updateObjectAction, updateRecordAction, uploadRecordFileAction } from "@/lib/actions/objects";
-import { checkOrgAction, createInviteAction, createOrganizationAction, previewSignupAction, retrySetupAction, revokeInviteAction } from "@/lib/actions/onboarding";
+import { checkOrgAction, createInviteAction, createOrganizationAction, previewSignupAction, retrySetupAction, revokeInviteAction, setSignupModeAction } from "@/lib/actions/onboarding";
 import { runPageAction } from "@/lib/actions/page-actions";
-import { addPageToMenuAction, archivePageAction, loadBuilderDraftAction, publishBuilderPageAction, publishPageAction, savePageDraftAction, saveBuilderDraftAction, updatePageMetaAction } from "@/lib/actions/page-admin";
+import { addPageToMenuAction, archivePageAction, createPageAction, loadBuilderDraftAction, publishBuilderPageAction, publishPageAction, savePageDraftAction, saveBuilderDraftAction, updatePageMetaAction } from "@/lib/actions/page-admin";
 import { previewPageBlock } from "@/lib/actions/page-preview";
 import { toggleModuleForOrgAction } from "@/lib/actions/platform-modules";
 import { previewWorkflowRuleAction, runWorkflowsNowAction, saveWorkflowRuleAction, setWorkflowRuleModeAction, setWorkflowRuleStatusAction } from "@/lib/actions/workflow-admin";
 import { readOrgBuilderState } from "@/lib/ai-builder/metadata";
 import { BLUEPRINT_TOOL_NAME } from "@/lib/ai-builder/prompt";
 import { getBuilderAi, setBuilderAiForTests } from "@/lib/ai-builder/provider";
-import { createDraft, loadDraft, previewDraft } from "@/lib/ai-builder/service";
-import { FakeProvider, type AiRequest, type AiResponse } from "@/lib/ai/provider";
+import { createDraft, loadAiBuilderView, loadDraft, previewDraft } from "@/lib/ai-builder/service";
+import { COPILOT_ORG_UNAVAILABLE, copilotOrgDenial, runCopilot } from "@/lib/ai/copilot";
+import { FakeProvider, setAiProviderForTests, type AiRequest, type AiResponse } from "@/lib/ai/provider";
+import { getTool, TOOL_MODULE_DISABLED } from "@/lib/ai/tools/registry";
 import { verifyLogin } from "@/lib/auth/login";
 import { requireUser, setRequestPathSourceForTests, signSession, type SessionUser } from "@/lib/auth/session";
 import { loadTemplateCatalog, previewTemplate } from "@/lib/blueprints/admin";
 import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import { getBranding, readLogo, saveBrandingCore, uploadLogoCore } from "@/lib/branding/service";
 import { clearMemo } from "@/lib/cache";
+import { ORG_BACKUP_STATUS_SUBDIR, ORG_BACKUP_SUMMARY_FILE } from "@/lib/constants/backup";
 import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
 import { createCustomField } from "@/lib/metadata/fields";
@@ -92,6 +113,7 @@ import { claimInvite, createInvite } from "@/lib/onboarding/invites";
 import { hashIp } from "@/lib/onboarding/rate";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
 import { CORE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
+import { invalidateSignupSetting, SIGNUP_MODE_SETTING_KEY } from "@/lib/onboarding/signup-mode";
 import { resolveBlock, resolvePage } from "@/lib/pages/data-sources";
 import { createPage, getPageBySlug, publishPage, savePageDraft } from "@/lib/pages/registry";
 import type { BlockType, KpiData, PageBlock, PageRenderContext, PageSchema, ResolvedBlock } from "@/lib/pages/types";
@@ -100,8 +122,11 @@ import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { loadPageBuilder, adminLoadBuilderDraft } from "@/lib/platform-ui/page-builder";
+import { loadFormEditor, loadListEditor } from "@/lib/platform-ui/metadata-admin";
 import { loadPageEditor } from "@/lib/platform-ui/page-admin";
 import { loadWorkflowEditor } from "@/lib/platform-ui/workflow-admin";
+import { listApprovalRequests } from "@/lib/queries/approvals";
+import { getBackupHealth } from "@/lib/queries/backup-status";
 import { parseListParams } from "@/lib/search-params";
 import { runWorkflows } from "@/lib/workflow/engine";
 import { saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
@@ -110,6 +135,10 @@ const A = "ta-a";
 const B = "ta-b";
 /** Mọi chữ của B mang dấu này — thấy nó ở bất kỳ kết quả nào A nhận được là rò. */
 const MARK = "TABIMAT7Q";
+/** Dấu của dữ liệu TỔ CHỨC NHÀ gieo riêng cho bài này (khách, lời khai sao lưu) — A cũng không được thấy nó. */
+const HOME_MARK = "TANHAMAT4K";
+/** Khoá / tên / đường dẫn của B (và của mẫu B đã cài) — tóm tắt cấu hình gửi AI của A không được chứa chuỗi nào. */
+const B_KEYS = ["x_b_hd", "b_stage", "b_hang", "b_hop_dong", "trang-b", "b_vip", "cong-no-ai-b", "nhac_no_ai_b", "han_muc_cong_no", "tinh_trang_cong_no", "cong-no-khach-hang", "nhac_cong_no_qua_han", "ke_toan_cong_no", "admin@ta-b.local"];
 const NOTE = "ta-h1";
 const IP_B = "10.91.0.2";
 const IP_A = "10.91.0.1";
@@ -153,6 +182,32 @@ async function withEnv<T>(key: string, value: string | undefined, fn: () => Prom
     if (before === undefined) delete process.env[key];
     else process.env[key] = before;
   }
+}
+
+async function signupSettingRow(): Promise<string | null> {
+  const pdb = await getPlatformDb();
+  const row = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY) });
+  return row ? String(row.value) : null;
+}
+
+async function putSignupSetting(mode: string | null) {
+  const pdb = await getPlatformDb();
+  await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY));
+  if (mode !== null) await pdb.insert(schema.platformSettings).values({ key: SIGNUP_MODE_SETTING_KEY, value: mode });
+  invalidateSignupSetting();
+}
+
+/** Mở ĐÚNG một cửa vào của /start: trần môi trường VÀ cài đặt control plane cùng bằng `mode` (hiệu lực = min của hai). */
+async function withSignupMode<T>(mode: "invite" | "open", fn: () => Promise<T>): Promise<T> {
+  const before = await signupSettingRow();
+  return withEnv("PLATFORM_SIGNUP_MODE", mode, async () => {
+    try {
+      await putSignupSetting(mode);
+      return await fn();
+    } finally {
+      await putSignupSetting(before);
+    }
+  });
 }
 
 async function adminOf(org: string, email: string): Promise<SessionUser> {
@@ -226,6 +281,28 @@ function aiBodyB(): Record<string, unknown> {
   (bp.workflows as { key: string }[])[0].key = "nhac_no_ai_b";
   return bp;
 }
+
+/** Model giả của Copilot: lượt 1 gọi đúng các công cụ cho trước, lượt 2 trả lời — mọi kết quả công cụ nằm trong `calls[1]`. */
+function copilotModel(uses: { name: string; input: Record<string, unknown> }[]): FakeProvider {
+  return new FakeProvider([
+    () => ({ content: uses.map((u, i) => ({ type: "tool_use" as const, id: `cp-${i}`, name: u.name, input: u.input })), stopReason: "tool_use" as const }),
+    () => ({ content: [{ type: "text" as const, text: "xong" }], stopReason: "end_turn" as const }),
+  ]);
+}
+
+/**
+ * Gói cấu hình A tự gửi lên (tệp khôi phục / đầu ra AI): mẫu bán sỉ đổi khoá — HỢP LỆ — rồi cài đúng MỘT chỗ độc.
+ * Gói gốc hợp lệ là đối chứng: lời từ chối của từng biến thể phải là vì CHỖ ĐỘC, không vì gói hỏng sẵn.
+ */
+type RawBlueprint = { [k: string]: unknown; roles: unknown[]; workflows: unknown[]; pages: unknown[]; forms: unknown[]; fields: unknown[] };
+function poisonedBlueprint(poison: (bp: RawBlueprint) => void): string {
+  const bp = JSON.parse(JSON.stringify(WHOLESALE_BLUEPRINT)) as RawBlueprint;
+  bp.key = "ta-goi-a";
+  bp.name = "Gói tự gửi của A";
+  poison(bp);
+  return JSON.stringify(bp);
+}
+const pageOf = (slug: string, blocks: unknown[], moduleKey = "customers") => ({ slug, name: `Trang ${slug}`, moduleKey, nav: { enabled: false, label: "", zone: null, order: 100 }, schema: { version: 1, sections: [{ key: "s", blocks }] } });
 
 // ─────────────────────────── ảnh chụp CSDL của B ───────────────────────────
 
@@ -441,6 +518,7 @@ export async function testTenantAttack() {
   g.React ??= ReactNs;
   const netCalls: string[] = [];
   const savedKey = process.env.PLATFORM_SECRETS_KEY;
+  let backupDir: string | null = null;
   process.env.PLATFORM_SECRETS_KEY = MASTER;
   await cleanup();
   for (const code of [A, B]) rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
@@ -458,7 +536,7 @@ export async function testTenantAttack() {
       plan: { businessType: "wholesale", templateKey: "wholesale", modules: planModules },
       planKey: null,
     };
-    const madeB = await withEnv("PLATFORM_SIGNUP_MODE", "invite", () => createOrganizationFromSignup(draftB, { kind: "public", ip: IP_B }, { issue: async () => undefined }));
+    const madeB = await withSignupMode("invite", () => createOrganizationFromSignup(draftB, { kind: "public", ip: IP_B }, { issue: async () => undefined }));
     assert.ok("ok" in madeB && madeB.created, `B dựng qua /start: ${JSON.stringify(madeB)}`);
 
     // ══════════ A: cấp thẳng, KHÔNG có Kho / Tài chính (để đòn đệm năng lực thấy được) ══════════
@@ -551,6 +629,23 @@ export async function testTenantAttack() {
       idB.aiPlanHash = dp.value.plan.planHash;
       setBuilderAiForTests(undefined);
 
+      // Copilot của tổ chức khác nhà TẮT ở cổng: kể cả khi có model (giả), không gọi model, không ghi `ai_interactions`.
+      const bModel = new FakeProvider([() => ({ content: [{ type: "text", text: `Trả lời ${MARK}` }], stopReason: "end_turn" })]);
+      setAiProviderForTests(bModel);
+      try {
+        const asked = await runCopilot({ user: qtB, message: `Khách ${MARK} còn nợ bao nhiêu?`, context: { route: "/customers", entityType: "customer", entityId: "ta-b-cus1" } });
+        assert.equal(asked.status, "DISABLED", `B (tổ chức khác nhà): Copilot tắt — ${JSON.stringify(asked)}`);
+        assert.equal(asked.error, COPILOT_ORG_UNAVAILABLE);
+        assert.equal(asked.interactionId, null);
+        assert.equal(bModel.calls.length, 0, "không gọi model");
+        assert.equal((await db.select().from(schema.aiInteractions)).length, 0, "B: không một dòng ai_interactions nào");
+      } finally {
+        setAiProviderForTests(undefined);
+      }
+      // Một dòng lượt hỏi CŨ của B (ghi trước bản vá này) — A sẽ thử xác nhận hành động của lượt ấy bằng id.
+      const [cu] = await db.insert(schema.aiInteractions).values({ userId: qtB.id, userEmail: qtB.email, provider: "fake", model: "fake-model", prompt: `Khách ${MARK}`, answer: `Trả lời ${MARK}`, status: "OK" }).returning({ id: schema.aiInteractions.id });
+      idB.copilot = cu.id;
+
       // Kết nối có bí mật, đã kiểm tra (fetch giả) và BẬT.
       const larkOk = async () => new Response(JSON.stringify({ code: 0 }), { status: 200, headers: { "content-type": "application/json" } });
       assert.ok("ok" in (await saveConnection(qtB, { connectorKey: "lark-webhook", settings: {}, secrets: { webhookUrl: LARK_B, signSecret: SIGN_B } })));
@@ -581,7 +676,7 @@ export async function testTenantAttack() {
     const inviteIds = [inviteB.id, spareInvite.id, freeInvite.id];
 
     // ══════════ A: dữ liệu CỦA MÌNH cho các đòn cùng khoá ══════════
-    await withOrganization(A, async () => {
+    const editorsA = await withOrganization(A, async () => {
       const db = await getDb();
       await db.insert(schema.customers).values({ id: "ta-a-cus1", name: "Khách A1" });
       assert.ok((await createObject(qtA, { key: "x_chung", label: "Chung A", labelPlural: "Chung A", icon: "file-text" })).ok);
@@ -594,7 +689,15 @@ export async function testTenantAttack() {
       assert.ok((await savePageDraft(p.page.id, CHUNG, actorA)).ok);
       assert.ok((await publishPage(p.page.id, actorA)).ok);
       idB.pageA = p.page.id;
+      // Bản nháp form / danh sách THẬT của A — đòn thao túng metadata chỉ cài đúng một tham chiếu độc vào đó.
+      const f = await loadFormEditor(qtA, "customer", "profile");
+      const l = await loadListEditor(qtA, "customer", "default");
+      assert.ok(f.ok && l.ok, "A mở được trình soạn form / danh sách khách của mình");
+      return { form: f.value.draft, list: l.value.draft };
     });
+    // Dữ liệu của TỔ CHỨC NHÀ mang dấu riêng — Copilot của A không được đọc tới nó (dọn ở finally).
+    await (await getDb()).insert(schema.customers).values({ id: "ta-home-cus1", name: `Khách nhà ${HOME_MARK}` }).onConflictDoNothing();
+    assert.ok(serialize(await (await getDb()).select().from(schema.customers).where(eq(schema.customers.id, "ta-home-cus1"))).includes(HOME_MARK), "tiền đề: khách mang dấu nằm ở CSDL NHÀ");
 
     TOKEN_A = await signSession({ id: qtA.id, email: qtA.email, name: "QT A", role: "ADMIN", orgCode: A });
     const now = Math.floor(Date.now() / 1000);
@@ -652,6 +755,11 @@ export async function testTenantAttack() {
     await attack("Tệp tuỳ biến", "GET /api/metadata/files/<tệp bản ghi của B>", () => metadataFileGET(new Request(`http://erp.local/api/metadata/files/${idB.recordFile}`), { params: Promise.resolve({ id: idB.recordFile }) }), { path: `/api/metadata/files/${idB.recordFile}` });
     await attack("Tệp tuỳ biến", "GET /api/metadata/files/<id tệp logo của B>", () => metadataFileGET(new Request(`http://erp.local/api/metadata/files/${idB.logoFile}`), { params: Promise.resolve({ id: idB.logoFile }) }), { path: `/api/metadata/files/${idB.logoFile}` });
     await attack("Tệp tuỳ biến", "openCustomFile(id tệp của B)", () => openCustomFile(idB.customerFile, qtA));
+    const xuat = await attack("Tệp tuỳ biến", "GET /api/metadata/blueprint-export — gói của A, không khoá nào của B", () => blueprintExportGET(), { path: "/api/metadata/blueprint-export", ownOnly: () => undefined });
+    assert.ok(xuat.ok && xuat.value instanceof Response && xuat.value.status === 200, "A tải được gói cấu hình của CHÍNH mình");
+    const goiA = await (xuat.value as Response).clone().text();
+    const roGoi = B_KEYS.filter((k) => goiA.includes(k));
+    assert.ok(goiA.includes("x_chung") && roGoi.length === 0, `gói xuất của A: có đối tượng của A, không khoá nào của B — lọt: ${roGoi.join(", ")}`);
 
     // ══════════ ĐÒN 2 · ĐỐI TƯỢNG TUỲ BIẾN + BẢN GHI + QUAN HỆ (Phase 6) ══════════
     const O = "Đối tượng & bản ghi";
@@ -726,6 +834,16 @@ export async function testTenantAttack() {
       ownOnly: (v) => assert.equal((v as { runs?: number }).runs ?? 0, 0, "A không có luật nào ⇒ 0 lượt chạy (lượt chờ của B không bị chạm)"),
     });
 
+    // ══════════ ĐÒN 4b · TRANG DUYỆT LÕI /approvals (PR #366) ══════════
+    const D = "Duyệt lõi /approvals";
+    const khongCoLoiDuyetB = (v: unknown) => assert.ok(!serialize(v).includes(idB.approval), "khối Duyệt của A không mang lời duyệt của B");
+    await attack(D, "mở /approvals (page component)", () => ApprovalsPage(), { path: "/approvals", ownOnly: khongCoLoiDuyetB });
+    await attack(D, "dựng khối Duyệt đứng riêng của /approvals", () => ApprovalSection({ standalone: true }), { path: "/approvals", ownOnly: khongCoLoiDuyetB });
+    await attack(D, "danh sách chờ duyệt đọc từ /approvals", () => listPendingApprovals(), { path: "/approvals", ownOnly: khongCoLoiDuyetB });
+    await attack(D, "sổ yêu cầu duyệt kể cả đã quyết (lõi)", () => listApprovalRequests({ includeDecided: true, limit: 500 }), { path: "/approvals", ownOnly: khongCoLoiDuyetB });
+    await attack(D, "duyệt lời duyệt của B bằng id từ /approvals", () => decideApproval(idB.approval, true, "chiếm"), { path: "/approvals" });
+    await attack(D, "từ chối lời duyệt của B bằng id từ /approvals", () => decideApproval(idB.approval, false, "phá"), { path: "/approvals" });
+
     // ══════════ ĐÒN 5 · BLUEPRINT (Phase 7) ══════════
     const T = "Blueprint";
     await attack(T, "xem trước mẫu bán sỉ — kế hoạch của A, không phải trạng thái đã cài của B", () => previewTemplateAction("wholesale", {}), {
@@ -765,7 +883,102 @@ export async function testTenantAttack() {
     }
     assert.ok(spy.calls.length >= 1, "provider giả phải được gọi (lượt soạn chạy thật)");
     const sent = serialize(spy.calls);
-    assert.ok(sent.includes("Chung A") && !sent.includes("x_b_hd") && !sent.includes(MARK), "tóm tắt cấu hình gửi AI: có khoá của A, không một khoá / chữ nào của B");
+    assert.ok(sent.includes("Chung A") && !sent.includes(MARK), "tóm tắt cấu hình gửi AI: có khoá của A, không chữ nào của B");
+    // TOÀN BỘ prompt (system + user + công cụ) quét theo từng khoá / tên / đường dẫn của B và của mẫu B đã cài.
+    const roB = B_KEYS.filter((k) => sent.includes(k));
+    assert.deepEqual(roB, [], `prompt gửi AI của A mang khoá của B: ${roB.join(", ")}`);
+    assert.ok(!sent.includes(HOME_MARK), "prompt gửi AI của A không mang dữ liệu của nhà");
+    await attack(I, "màn AI Builder của A không liệt kê nháp của B", () => loadAiBuilderView(qtA), {
+      path: "/settings/ai-builder",
+      ownOnly: (v) => assert.ok(!serialize(v).includes(idB.aiDraft), "danh sách nháp AI của A không có nháp của B"),
+    });
+
+    // ══════════ ĐÒN 6b · AI COPILOT (lib/ai/copilot.ts + lib/ai/tools/*) ══════════
+    // Copilot gọi model bằng khoá môi trường = khoá của NHÀ, nên tổ chức khác nhà TẮT ngay ở cổng (`copilotOrgDenial`):
+    // trạng thái nói «chưa có AI cho tổ chức này», câu hỏi không tới model — kể cả khi môi trường có khoá hay có model
+    // (giả) được tiêm — và không ghi một dòng `ai_interactions` nào vào CSDL của A. Lớp thứ hai (phòng khi cổng hỏng):
+    // công cụ đọc gọi thẳng trong phiên A chỉ đọc CSDL của A, và công cụ của module A không bật bị từ chối.
+    const K = "AI Copilot";
+    const hoi = (message: string) => askCopilot({ message, context: { route: "/customers", entityType: "customer", entityId: "ta-b-cus1" } });
+    const soDongAiA = () => withOrganization(A, async () => (await (await getDb()).select().from(schema.aiInteractions)).length);
+    const dongAiTruoc = await soDongAiA();
+    const tatVoiToChuc = (v: unknown) => {
+      const r = v as { status?: string; error?: string; interactionId?: string | null; enabled?: boolean; scope?: string };
+      if ("enabled" in r) assert.ok(r.enabled === false && r.scope === "ORGANIZATION", `trạng thái Copilot của A phải TẮT theo tổ chức: ${serialize(v).slice(0, 300)}`);
+      else assert.ok(r.status === "DISABLED" && r.error === COPILOT_ORG_UNAVAILABLE && r.interactionId === null, `câu hỏi của A phải dừng ở cổng tổ chức: ${serialize(v).slice(0, 300)}`);
+    };
+    setAiProviderForTests(undefined);
+    await withEnv("AI_PROVIDER", "anthropic", () =>
+      withEnv("OPENAI_API_KEY", undefined, () =>
+        withEnv("ANTHROPIC_API_KEY", "sk-ant-khoa-cua-nha-trong-moi-truong-0000", async () => {
+          await attack(K, "trạng thái Copilot của A khi máy chủ có khoá AI của NHÀ", () => copilotStatus(), { path: "/customers", ownOnly: tatVoiToChuc });
+          const r = await attack(K, "hỏi Copilot bằng khoá AI của NHÀ (model thật)", () => hoi("Khách này là ai?"), { path: "/customers" });
+          assert.ok(r.ok, "askCopilot trả lời (không ném)");
+          tatVoiToChuc(r.value);
+          await attack(K, "AI Builder của A khi môi trường có khoá AI của NHÀ (getBuilderAi)", () => getBuilderAi({ fetch: globalThis.fetch }).then((x) => (x.ok ? { ok: true, source: x.ai.source } : { ok: false, error: x.reason })));
+        }),
+      ),
+    );
+    const modelTiem = copilotModel([{ name: "search_customer", input: { query: "hách A" } }]);
+    setAiProviderForTests(modelTiem);
+    try {
+      const r = await attack(K, "hỏi Copilot khi có model được tiêm sẵn", () => hoi("Tra giúp khách này."), { path: "/customers" });
+      assert.ok(r.ok, "askCopilot trả lời (không ném)");
+      tatVoiToChuc(r.value);
+      assert.equal(modelTiem.calls.length, 0, "cổng tổ chức đứng TRƯỚC model — không một lượt gọi model nào");
+    } finally {
+      setAiProviderForTests(undefined);
+    }
+    await attack(K, "xác nhận hành động của lượt hỏi Copilot của B (id)", () => confirmCopilotActions({ interactionId: idB.copilot, tokens: ["token-gia-0123456789"] }), { path: "/customers" });
+    assert.equal(await soDongAiA(), dongAiTruoc, "Copilot tắt ở tổ chức khác nhà ⇒ không một dòng ai_interactions nào được ghi vào CSDL của A");
+
+    // Lớp thứ hai — công cụ gọi thẳng trong phiên A. Tìm theo MỘT ĐOẠN của dấu (`ilike %…%`): lượt gọi không tự vang
+    // lại dấu đầy đủ, nên dấu đầy đủ xuất hiện ở kết quả chỉ có thể là tên khách của B / của nhà.
+    const congCu = (mat: string, name: string, input: Record<string, unknown>, check?: (text: string) => void) =>
+      attack(
+        K,
+        `công cụ ${name} gọi thẳng — ${mat}`,
+        async () => {
+          const u = await requireUser();
+          const tool = getTool(name);
+          assert.ok(tool, `công cụ ${name} có trong sổ`);
+          return tool.run({ user: u, actor: { id: u.id, email: u.email, name: u.name, source: "AI" }, route: "/customers", entityType: "customer", entityId: "", now: new Date() }, input);
+        },
+        {
+          path: "/customers",
+          ownOnly: (v) => {
+            const text = serialize(v);
+            assert.ok(!text.includes(HOME_MARK) && !text.includes("ta-home-cus1"), `${name}: kết quả mang dữ liệu của nhà: ${text.slice(0, 300)}`);
+            check?.(text);
+          },
+        },
+      );
+    await congCu("đối chứng: đoạn tên khách CỦA A", "search_customer", { query: "hách A" }, (t) => assert.ok(t.includes("ta-a-cus1"), `đối chứng: công cụ thật sự chạy trên CSDL của A — ${t.slice(0, 300)}`));
+    await congCu("đoạn tên khách của B", "search_customer", { query: MARK.slice(0, 7) }, (t) => assert.ok(!t.includes("ta-b-cus1")));
+    await congCu("đoạn tên khách của nhà", "search_customer", { query: HOME_MARK.slice(0, 8) });
+    await congCu("id khách của B", "get_customer_history", { customerId: "ta-b-cus1" });
+    await congCu("id khách của nhà", "get_customer_history", { customerId: "ta-home-cus1" });
+    await congCu("bản tin chủ shop", "get_owner_brief", { period: "30d" });
+    for (const [mat, name, input] of [
+      ["module Giao vận của A tắt", "get_care_case", { shipmentId: "ta-b-ship" }],
+      ["module Tài chính của A tắt", "get_profit_summary", { period: "30d" }],
+    ] as const) {
+      const s = await congCu(mat, name, input);
+      assert.ok(!s.ok && (s.error as { code?: string }).code === TOOL_MODULE_DISABLED, `${name}: module tắt phải bị từ chối MODULE_DISABLED trước khi chạy — ${serialize(s.ok ? s.value : (s.error as Error).message).slice(0, 200)}`);
+    }
+    // Tổ chức NHÀ không đổi: cổng mở, câu hỏi tới model (giả) và trả lời bình thường (sổ ai_interactions của nhà: tests/ai-copilot.test.ts).
+    assert.equal(await copilotOrgDenial(), null, "tổ chức nhà: Copilot không bị cổng tổ chức chặn");
+    const nhaModel = new FakeProvider([() => ({ content: [{ type: "text", text: "nhà trả lời" }], stopReason: "end_turn" })]);
+    setAiProviderForTests(nhaModel);
+    try {
+      const cauNha = `Câu hỏi của nhà ${HOME_MARK}`;
+      const rNha = await runCopilot({ user: { ...qtA, modules: undefined, organization: undefined }, message: cauNha, context: { route: "/", entityType: "", entityId: "" } });
+      assert.equal(rNha.status, "OK", `tổ chức nhà: Copilot chạy như trước — ${JSON.stringify(rNha).slice(0, 300)}`);
+      assert.equal(nhaModel.calls.length, 1, "tổ chức nhà: câu hỏi tới model");
+      await (await getDb()).delete(schema.aiInteractions).where(eq(schema.aiInteractions.prompt, cauNha));
+    } finally {
+      setAiProviderForTests(undefined);
+    }
 
     // ══════════ ĐÒN 7 · KẾT NỐI + BÍ MẬT (Phase 9) ══════════
     const C = "Kết nối & bí mật";
@@ -794,6 +1007,16 @@ export async function testTenantAttack() {
     } finally {
       await withOrganization(A, async () => (await getDb()).delete(schema.orgConnections).where(eq(schema.orgConnections.id, "ta-danh-cap")));
     }
+    // Chép NGUYÊN VĂN (mã tổ chức vẫn là B): nếu máy chủ lấy AAD từ CỘT của dòng thay vì từ ngữ cảnh thì bản này giải được.
+    await withOrganization(A, async () => (await getDb()).insert(schema.orgConnections).values({ ...stolen, id: "ta-danh-cap-nguyen-van" }));
+    try {
+      const read = await attack(C, "đọc khoá AI từ bản mã của B chép NGUYÊN VĂN sang A (dòng mang mã tổ chức B)", () => openActiveConnection("anthropic-byok"));
+      assert.ok(read.ok && /mã tổ chức khác ngữ cảnh/.test(serialize(read.value)), `dòng mang mã tổ chức khác bị từ chối trước khi giải mã: ${serialize(read.ok ? read.value : read.error)}`);
+      await attack(C, "AI Builder của A dùng bản mã chép nguyên văn (getBuilderAi)", () => getBuilderAi({ fetch: globalThis.fetch }).then((r) => (r.ok ? { ok: true, source: r.ai.source } : { ok: false, error: r.reason })));
+      await attack(C, "soạn nháp AI bằng bản mã chép nguyên văn", () => createAiDraftAction({ mode: "new", prompt: "Dựng ERP bán buôn có CRM và kho." }), { path: "/settings/ai-builder" });
+    } finally {
+      await withOrganization(A, async () => (await getDb()).delete(schema.orgConnections).where(eq(schema.orgConnections.id, "ta-danh-cap-nguyen-van")));
+    }
 
     // ══════════ ĐÒN 8 · THƯƠNG HIỆU / LOGO / TỰ PHỤC VỤ / ĐĂNG NHẬP / VẬN HÀNH NỀN TẢNG (Phase 10 + 1) ══════════
     const S = "Thương hiệu & tự phục vụ";
@@ -807,7 +1030,12 @@ export async function testTenantAttack() {
     await attack(S, "chạy lại việc dựng tổ chức B", () => retrySetupAction(B), { path: "/platform" });
     await attack(S, "tắt module Ứng dụng của B", () => toggleModuleForOrgAction({ orgCode: B, moduleKey: "apps", enabled: false, reason: "kẻ lạ tắt hộ" }), { path: "/platform" });
     await attack(S, "bật module Sản xuất cho B", () => toggleModuleForOrgAction({ orgCode: B, moduleKey: "production", enabled: true, reason: "kẻ lạ bật hộ" }), { path: "/platform" });
-    await withEnv("PLATFORM_SIGNUP_MODE", "invite", async () => {
+    // Cổng mở bán B: đổi chế độ đăng ký /start là việc của người vận hành nền tảng — tổ chức khác không mở được cửa.
+    const signupBefore = await signupSettingRow();
+    await attack(S, "mở đăng ký /start cho cả nền tảng", () => setSignupModeAction({ mode: "open", reason: "kẻ lạ mở cửa" }), { path: "/platform" });
+    await attack(S, "mở đăng ký /start bằng mã mời", () => setSignupModeAction({ mode: "invite", reason: "kẻ lạ mở cửa" }), { path: "/platform" });
+    assert.equal(await signupSettingRow(), signupBefore, "lượt đổi chế độ đăng ký của tổ chức khác không để lại dòng cài đặt nào");
+    await withSignupMode("invite", async () => {
       await attack(S, "/start: kiểm mã tổ chức ta-b bằng mã mời còn trống", () => checkOrgAction({ name: "Chiếm B", code: B }, freeInvite.code), { path: "/start" });
       const redo = (invite: string, email: string, password: string): SignupDraft => ({ ...draftB, invite, admin: { name: "Kẻ lạ", email, password } });
       await attack(S, "/start: tạo tổ chức mã ta-b bằng mã mời còn trống", () => createOrganizationAction(redo(freeInvite.code, "ke-la@ta-a.local", "KeLa@2026x")), { path: "/start" });
@@ -818,7 +1046,7 @@ export async function testTenantAttack() {
         ownOnly: (v) => assert.ok(!serialize(v).includes("x_b_hd"), "xem trước dựng trên tổ chức TRẮNG, không đọc gì của B"),
       });
     });
-    await withEnv("PLATFORM_SIGNUP_MODE", "open", async () => {
+    await withSignupMode("open", async () => {
       await attack(S, "/start (mở): tạo tổ chức mã ta-b", () => createOrganizationAction({ ...draftB, invite: null, admin: { name: "Kẻ lạ", email: "ke-la@ta-a.local", password: "KeLa@2026x" } }), { path: "/start" });
     });
     const login = await attack(S, "đăng nhập VÀO B bằng tài khoản của A", () => loginAction(undefined, form({ email: A_EMAIL, password: A_PW, org: B, next: "/da-vao-b" })), { path: "/login" });
@@ -828,15 +1056,161 @@ export async function testTenantAttack() {
     assert.equal(issued, false, "không một phiên nào mang org = B được ký cho tài khoản của A");
     await attack(S, "POST /api/sync/<job>?org=ta-b bằng phiên A", () => syncPOST(new NextLikeRequest(`http://erp.local/api/sync/alerts?org=${B}`) as never, { params: Promise.resolve({ job: "alerts" }) }), { path: "/api/sync/alerts" });
 
+    // ══════════ ĐÒN 10 · THAO TÚNG METADATA — A gửi thẳng cấu hình mang khoá / id / field của B, hoặc thứ ngoài sổ ══════════
+    // Mọi lượt ghi vào tài nguyên CỦA CHÍNH A (trang `chung`, form / danh sách khách, luật mới, gói tự gửi) nhưng cài
+    // một tham chiếu độc. Máy chủ phải từ chối VÀ không ghi gì — ảnh chụp CSDL của A (mọi bảng) trước = sau.
+    const X = "Thao túng metadata";
+    // Đối chứng TRƯỚC ảnh chụp: bản nháp form thật của A lưu được, gói gốc (mẫu bán sỉ đổi khoá) đọc được — lời từ chối
+    // phía dưới là vì CHỖ ĐỘC, không vì đầu vào hỏng sẵn.
+    const formSach = await asRequest(TOKEN_A, "/settings/forms", () => saveFormDraftAdminAction("customer", "profile", editorsA.form));
+    assert.ok(formSach.ok && (formSach.value as { ok: boolean }).ok, `đối chứng: bản nháp form của A tự nó lưu được — ${serialize(formSach.ok ? formSach.value : formSach.error).slice(0, 300)}`);
+    const goiSach = poisonedBlueprint(() => undefined);
+    const doiChung = await asRequest(TOKEN_A, "/settings/templates", () => previewBlueprintFileAction(goiSach, {}));
+    assert.ok(doiChung.ok && (doiChung.value as { ok: boolean }).ok, `đối chứng: gói gốc (mẫu bán sỉ đổi khoá) đọc được — ${serialize(doiChung.ok ? doiChung.value : doiChung.error).slice(0, 300)}`);
+    const hashSach = (doiChung.value as { plan: { planHash: string } }).plan.planHash;
+    const aBefore = await withOrganization(A, snapshotOrgDb);
+    const trangA = (blocks: unknown[]) => ({ version: 1, sections: [{ key: "so", blocks }] });
+    const tuChoi = async (mat: string, fn: () => Promise<unknown>, why: RegExp, reqPath: string) => {
+      const s = await attack(X, mat, fn, { path: reqPath });
+      const text = await payloadOf(s);
+      assert.match(text, why, `${mat}: bị từ chối nhưng không vì chỗ độc — ${text.slice(0, 300)}`);
+    };
+    // Trang
+    await tuChoi("trang A: bảng đọc đối tượng của B (x_b_hd)", () => savePageDraftAction(idB.pageA, trangA([block("x1", "table", { source: "x_b_hd" })])), /x_b_hd/, "/settings/pages");
+    await tuChoi("trang A: bảng trên khách với field của B (custom:b_hang)", () => savePageDraftAction(idB.pageA, trangA([block("x1", "table", { source: "customer", columns: ["system:name", "custom:b_hang"] })])), /b_hang/, "/settings/pages");
+    await tuChoi("trang A: KPI tổng field chỉ B có (x_chung.gia_tri)", () => savePageDraftAction(idB.pageA, trangA([block("x1", "kpi", { aggregate: { objectKey: "x_chung", fn: "sum", field: "custom:gia_tri" } })])), /gia_tri/, "/settings/pages");
+    await tuChoi("trang A: bảng đọc đối tượng x_… không tồn tại", () => savePageDraftAction(idB.pageA, trangA([block("x1", "table", { source: "x_khong_ton_tai" })])), /x_khong_ton_tai/, "/settings/pages");
+    await tuChoi("trang A: KPI đọc nguồn ngoài sổ", () => savePageDraftAction(idB.pageA, trangA([block("x1", "kpi", { metric: "sql_ngoai_so" } as never)])), /sql_ngoai_so/, "/settings/pages");
+    await tuChoi("trang A: dòng thời gian bản ghi của đối tượng B", () => savePageDraftAction(idB.pageA, trangA([block("x1", "timeline", { source: "custom_record_x_b_hd", recordParam: "id" })])), /custom_record_x_b_hd|x_b_hd/, "/settings/pages");
+    const revA = await withOrganization(A, () => adminLoadBuilderDraft(qtA, idB.pageA));
+    assert.ok(revA.ok, "A đọc được số hiệu nháp trang của mình");
+    await tuChoi("trình kéo-thả A: lưu nháp (đúng số hiệu) mang nguồn của B", () => saveBuilderDraftAction(idB.pageA, trangA([block("x1", "table", { source: "x_b_hd" })]), revA.draftRevision), /x_b_hd/, "/settings/pages");
+    await tuChoi("trang A: gắn vào module A không bật (finance)", () => updatePageMetaAction(idB.pageA, { slug: "chung", name: "Chung A", moduleKey: "finance", requiredPermission: null, nav: { enabled: true } }), /Tài chính|finance|đang tắt/i, "/settings/pages");
+    await tuChoi("tạo trang trong module A không bật (finance)", () => createPageAction({ slug: "trang-tai-chinh", name: "Tài chính", moduleKey: "finance", nav: { enabled: false } }), /Tài chính|finance|đang tắt/i, "/settings/pages");
+    // Form / danh sách / field
+    const formDoc = (ref: string) => {
+      const f = JSON.parse(JSON.stringify(editorsA.form)) as { sections: { fields: unknown[] }[] };
+      f.sections[0].fields.push({ ref, visible: true, readOnly: false, required: false });
+      return f;
+    };
+    const listDoc = (ref: string) => {
+      const l = JSON.parse(JSON.stringify(editorsA.list)) as { columns: unknown[] };
+      l.columns.push({ ref, visible: true });
+      return l;
+    };
+    await tuChoi("form khách của A: ô field của B (custom:b_hang)", () => saveFormDraftAdminAction("customer", "profile", formDoc("custom:b_hang")), /b_hang/, "/settings/forms");
+    await tuChoi("form khách của A: ô field x_… không tồn tại", () => saveFormDraftAdminAction("customer", "profile", formDoc("custom:x_khong_co")), /x_khong_co/, "/settings/forms");
+    await tuChoi("danh sách khách của A: cột field của B (custom:b_stage)", () => saveListDraftAdminAction("customer", "default", listDoc("custom:b_stage")), /b_stage/, "/settings/lists");
+    await tuChoi("field quan hệ của A trỏ đối tượng của B", () => createFieldAction("x_chung", { key: "tro_b", label: "Trỏ B", type: "relation", relationObject: "x_b_hd" }), /relationObject/, "/settings/data-model");
+    // Luật
+    const luat = (over: Record<string, unknown>) => ({ key: "luat_doc", name: "Luật độc", trigger: { kind: "custom_status", objectKey: "x_chung", fieldKey: "trang_thai", to: ["xong"] }, conditions: null, actions: [{ kind: "notify", message: "x" }], gate: null, ...over });
+    await tuChoi("luật A nghe field trạng thái của B (customer.b_stage)", () => saveWorkflowRuleAction(null, luat({ trigger: { kind: "custom_status", objectKey: "customer", fieldKey: "b_stage", to: ["vip"] } })), /b_stage/, "/settings/workflows");
+    await tuChoi("luật A nghe đối tượng của B (x_b_hd)", () => saveWorkflowRuleAction(null, luat({ trigger: { kind: "event", event: "custom_record.created", objectKey: "x_b_hd" } })), /x_b_hd|đối tượng/i, "/settings/workflows");
+    await tuChoi("luật A điều kiện trên field của B", () => saveWorkflowRuleAction(null, luat({ conditions: { field: "custom:gia_tri", op: "eq", value: 1 } })), /gia_tri/, "/settings/workflows");
+    await tuChoi("luật ghi lại CHÍNH field kích hoạt (vòng lặp)", () => saveWorkflowRuleAction(null, luat({ actions: [{ kind: "set_custom_value", field: "trang_thai", value: "moi" }] })), /vòng lặp/, "/settings/workflows");
+    await tuChoi("luật nghe mọi lượt đổi trạng thái rồi ghi field (vòng lặp)", () => saveWorkflowRuleAction(null, luat({ trigger: { kind: "event", event: "custom_status.changed", objectKey: "x_chung" }, actions: [{ kind: "set_custom_value", field: "trang_thai", value: "moi" }] })), /vòng lặp/, "/settings/workflows");
+    await tuChoi("luật nghe sự kiện do chính workflow phát", () => saveWorkflowRuleAction(null, luat({ trigger: { kind: "event", event: "workflow.run_finished" } })), /vòng lặp|workflow/, "/settings/workflows");
+    // Gói cấu hình tự gửi (tệp khôi phục) — sáu biến thể độc của gói sạch ở trên
+    const goiDoc: [string, string, RegExp][] = [
+      ["vai trò cấp users:manage", poisonedBlueprint((bp) => (bp.roles[0] as { permissions: string[] }).permissions.push("users:manage")), /users:manage|quản lý người dùng|tài khoản/i],
+      ["luật ghi lại chính field kích hoạt (vòng lặp)", poisonedBlueprint((bp) => ((bp.workflows[0] as { actions: unknown[] }).actions = [{ kind: "set_custom_value", field: "tinh_trang_cong_no", value: "tam_khoa" }])), /vòng lặp/],
+      ["trang trỏ module gói không bật (marketing)", poisonedBlueprint((bp) => ((bp.pages[0] as { moduleKey: string }).moduleKey = "marketing")), /marketing|Marketing|module/i],
+      ["form trên đối tượng của B không khai trong gói", poisonedBlueprint((bp) => bp.forms.push({ objectKey: "x_b_hd", formKey: "create", schema: { version: 1, sections: [] } })), /x_b_hd/],
+      ["field trên đối tượng của B không khai trong gói", poisonedBlueprint((bp) => bp.fields.push({ objectKey: "x_b_hd", key: "gia_tri", label: "Giá trị", type: "currency" })), /x_b_hd/],
+      ["trang đọc nguồn ngoài sổ", poisonedBlueprint((bp) => bp.pages.push(pageOf("trang-doc", [{ id: "k1", type: "kpi", span: 4, config: { metric: "sql_ngoai_so" } }]))), /sql_ngoai_so/],
+    ];
+    for (const [ten, goi, why] of goiDoc) {
+      await tuChoi(`gói tự gửi — xem trước: ${ten}`, () => previewBlueprintFileAction(goi, {}), why, "/settings/templates");
+      await tuChoi(`gói tự gửi — cài (planHash của gói sạch): ${ten}`, () => installBlueprintFileAction(goi, { planHash: hashSach, resolutions: {} }), why, "/settings/templates");
+    }
+    assert.deepEqual(diff(aBefore, await withOrganization(A, snapshotOrgDb)), [], "mọi lượt thao túng metadata bị từ chối KHÔNG ghi một dòng nào vào CSDL của A");
+
+    // Module tắt: nháp được phép mang cảnh báo (module có thể bật sau), nhưng XUẤT BẢN và DỰNG phải chặn.
+    const chungTruoc = await withOrganization(A, () => getPageBySlug("chung"));
+    await asRequest(TOKEN_A, "/settings/pages", () => savePageDraftAction(idB.pageA, trangA([block("tc", "kpi", { metric: "delivered_revenue" })])));
+    await tuChoi("xuất bản trang A có khối của module A không bật (finance)", () => publishPageAction(idB.pageA), /finance|Tài chính|TẮT|tắt/i, "/settings/pages");
+    await attack(X, "dựng khối của module A không bật (finance) ngay trên máy chủ", () => resolveBlock(block("tc", "kpi", { metric: "delivered_revenue" }), qtA, ctxOf()));
+    const chungSau = await withOrganization(A, () => getPageBySlug("chung"));
+    assert.deepEqual(chungSau?.schema, chungTruoc?.schema, "bản đã xuất bản của trang `chung` không đổi");
+    await asRequest(TOKEN_A, "/settings/pages", () => savePageDraftAction(idB.pageA, CHUNG));
+
+    // AI trả về gói có vai trò users:manage ⇒ nháp được GHI (để người đọc lỗi) nhưng xem trước / áp dụng bị chặn.
+    const aiDoc = JSON.parse(poisonedBlueprint((bp) => (bp.roles[0] as { permissions: string[] }).permissions.push("users:manage"))) as Record<string, unknown>;
+    setBuilderAiForTests({ provider: new FakeProvider([toolCall(aiDoc)]), source: "ORG_CONNECTION", connectorKey: "anthropic-byok" });
+    let draftDoc = "";
+    try {
+      const made = await attack(X, "AI trả gói có vai trò users:manage — nháp ghi ở A, đánh dấu KHÔNG hợp lệ", () => createAiDraftAction({ mode: "new", prompt: "Dựng ERP bán buôn có vai trò quản trị người dùng." }), {
+        path: "/settings/ai-builder",
+        ownOnly: (v) => {
+          const d = (v as { value: { id: string; valid: boolean } }).value;
+          assert.equal(d.valid, false, "nháp có users:manage không được đánh dấu hợp lệ");
+          draftDoc = d.id;
+        },
+      });
+      assert.ok(made.ok && draftDoc, "nháp độc được ghi để người đọc lỗi");
+    } finally {
+      setBuilderAiForTests(undefined);
+    }
+    const planDoc = await asRequest(TOKEN_A, "/settings/ai-builder", () => previewAiDraftAction(draftDoc, { excludedKeys: [], resolutions: {} }));
+    const planOfDoc = planDoc.ok ? (planDoc.value as { value?: { plan?: { planHash: string; ok: boolean } } }).value?.plan : undefined;
+    assert.ok(planOfDoc && planOfDoc.ok === false, `xem trước nháp độc: kế hoạch phải BỊ CHẶN — ${serialize(planDoc.ok ? planDoc.value : planDoc.error).slice(0, 300)}`);
+    const hashDoc = planOfDoc.planHash;
+    await tuChoi("áp dụng nháp AI có vai trò users:manage", () => applyAiDraftAction(draftDoc, { planHash: hashDoc, excludedKeys: [], resolutions: {} }), /users:manage|người dùng|tài khoản|bị chặn/i, "/settings/ai-builder");
+    const rolesA = await withOrganization(A, async () => (await (await getDb()).select().from(schema.accessRoles)).map((r) => ({ code: r.code, permissions: r.permissions })));
+    assert.ok(!serialize(rolesA).includes("users:manage"), `không vai trò nào của A mang users:manage: ${serialize(rolesA)}`);
+
+    // ══════════ ĐÒN 11 · SAO LƯU (PR #365) — thẻ trạng thái sao lưu ══════════
+    // Thư mục trạng thái có lời khai của NHÀ (+ tổng hợp tổ chức, nhắc tên CSDL B) và thư mục riêng của B: A chỉ được
+    // thấy "chưa có bản sao" của CHÍNH CSDL mình — không lời khai nào của nhà, không dòng nào của B.
+    const L = "Sao lưu";
+    backupDir = mkdtempSync(path.join(tmpdir(), "ta-sao-luu-"));
+    const luc = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const nha = { schema: 1, kind: "backup", result: "OK", trigger: "cron", finishedAt: luc, db: { file: `erp-${HOME_MARK}.dump`, bytes: 1, tableData: 3 }, chatbot: { state: "OK" }, offsite: { state: "OK", remote: `gcrypt:${HOME_MARK}` }, retention: { daily: 7 } };
+    const cuaB = { ...nha, kind: "org-backup", database: "erp_org_ta_b", chatbot: undefined, db: { file: `erp_org_ta_b-${MARK}.dump`, bytes: 1, tableData: 9 }, offsite: { state: "OK", remote: `gcrypt:${MARK}` } };
+    for (const f of ["last-run.json", "last-success.json"]) writeFileSync(path.join(backupDir, f), JSON.stringify(nha));
+    writeFileSync(path.join(backupDir, "last-drill.json"), JSON.stringify({ schema: 1, kind: "restore-drill", result: "OK", finishedAt: luc, tables: [] }));
+    writeFileSync(path.join(backupDir, ORG_BACKUP_SUMMARY_FILE), JSON.stringify({ schema: 1, kind: "org-backup-summary", finishedAt: luc, listError: null, organizations: [{ database: "erp_org_ta_b", result: "FAILED", reason: `hỏng ${MARK}` }], missingDatabases: [] }));
+    mkdirSync(path.join(backupDir, ORG_BACKUP_STATUS_SUBDIR, "erp_org_ta_b"), { recursive: true });
+    for (const f of ["last-run.json", "last-success.json"]) writeFileSync(path.join(backupDir, ORG_BACKUP_STATUS_SUBDIR, "erp_org_ta_b", f), JSON.stringify(cuaB));
+    const dir = backupDir;
+    await withEnv("ERP_BACKUP_STATUS_DIR", dir, async () => {
+      clearMemo();
+      const cuaNha = serialize(await getBackupHealth());
+      assert.ok(cuaNha.includes(HOME_MARK) && cuaNha.includes("erp_org_ta_b"), `đối chứng: NHÀ đọc được lời khai của mình và tổng hợp tổ chức — ${cuaNha.slice(0, 300)}`);
+      const khongCuaAi = (v: unknown) => {
+        const s = serialize(v);
+        assert.ok(!s.includes(HOME_MARK) && !s.includes("erp_org_ta_b"), `thẻ sao lưu của A mang lời khai của nhà / của B: ${s.slice(0, 300)}`);
+      };
+      await attack(L, "getBackupHealth() của A — không lời khai của nhà, không tổng hợp tổ chức", () => getBackupHealth(), {
+        path: "/integrations",
+        ownOnly: (v) => {
+          khongCuaAi(v);
+          const h = v as { state: string; lastSuccess: unknown; organizations: unknown; target: { scope: string } };
+          assert.equal(h.target.scope, "ORGANIZATION");
+          assert.equal(h.lastSuccess, null, "A chưa có bản sao nào của CHÍNH nó");
+          assert.equal(h.organizations, null, "tổng hợp các tổ chức chỉ nhà thấy");
+          assert.notEqual(h.state, "HEALTHY");
+        },
+      });
+      await attack(L, "thẻ «Sao lưu dữ liệu» (BackupStatusCard) của A", () => BackupStatusCard(), { path: "/integrations", ownOnly: khongCuaAi });
+    });
+    clearMemo();
+
     // ══════════ ĐÒN 9 · PHIÊN GIẢ (claim org = ta-b, sub = quản trị B, ký bằng khoá sai) ══════════
     const F = "Phiên giả";
     await attack(F, "tạo bản ghi trong x_b_hd", () => createRecordAction("x_b_hd", { system: { title: "giả" }, custom: {} }), { token: FORGED, path: "/o/x_b_hd" });
     await attack(F, "duyệt lời duyệt của B", () => decideApproval(idB.approval, true, "giả"), { token: FORGED, path: "/alerts" });
+    await attack(F, "mở /approvals rồi duyệt lời duyệt của B", async () => {
+      await ApprovalsPage();
+      return decideApproval(idB.approval, true, "giả");
+    }, { token: FORGED, path: "/approvals" });
+    await attack(F, "xác nhận hành động Copilot của B", () => confirmCopilotActions({ interactionId: idB.copilot, tokens: ["token-gia-0123456789"] }), { token: FORGED, path: "/customers" });
     await attack(F, "xuất bản trang của B", () => publishPageAction(idB.page), { token: FORGED, path: "/settings/pages" });
     await attack(F, "áp dụng nháp AI của B", () => applyAiDraftAction(idB.aiDraft, { planHash: idB.aiPlanHash, excludedKeys: [], resolutions: {} }), { token: FORGED, path: "/settings/ai-builder" });
     await attack(F, "bật kết nối của B", () => setConnectionStatusAction({ connectorKey: "lark-webhook", status: "DISABLED" }), { token: FORGED, path: "/settings/connections" });
     await attack(F, "tải tệp của B qua route", () => metadataFileGET(new Request(`http://erp.local/api/metadata/files/${idB.customerFile}`), { params: Promise.resolve({ id: idB.customerFile }) }), { token: FORGED, path: `/api/metadata/files/${idB.customerFile}` });
     await attack(F, "tải logo của B qua route", () => logoGET(), { token: FORGED, path: "/api/branding/logo" });
+    await attack(F, "tải gói cấu hình của B qua route xuất", () => blueprintExportGET(), { token: FORGED, path: "/api/metadata/blueprint-export" });
     await attack(F, "mở /p/trang-b", () => DynamicPage({ params: Promise.resolve({ slug: "trang-b" }), searchParams: Promise.resolve({}) }), { token: FORGED, path: "/p/trang-b" });
 
     // ══════════ SAU: B không đổi một dòng, không request mạng nào ══════════
@@ -868,6 +1242,9 @@ export async function testTenantAttack() {
     setBuilderAiForTests(undefined);
     if (savedKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;
     else process.env.PLATFORM_SECRETS_KEY = savedKey;
+    setAiProviderForTests(undefined);
+    await (await getDb()).delete(schema.customers).where(eq(schema.customers.id, "ta-home-cus1"));
+    if (backupDir) rmSync(backupDir, { recursive: true, force: true });
     await cleanup();
     clearMemo();
   }

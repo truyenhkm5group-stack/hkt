@@ -436,8 +436,10 @@ import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testOrgExport } from "./org-export.test";
+import { testRestoreDrillConfig } from "./restore-drill-config.test";
 import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
 import { testConnectors } from "./connectors.test";
+import { testLaunchGatesPipeline } from "./launch-gates.test";
 import { testBlueprints } from "./blueprints.test";
 import { testCustomObjects } from "./custom-objects.test";
 import { testAiBuilder } from "./ai-builder.test";
@@ -2518,6 +2520,8 @@ async function main() {
   // Phase 9 · sổ connector ↔ mã, mã hoá bí mật kết nối (AAD theo tổ chức), kiểm tra chỉ tới Lark / Telegram, hai tổ
   // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
   await testConnectors();
+  // Cổng mở bán A: PLATFORM_SECRETS_KEY đi đủ ba chặng secret → workflow → bootstrap/install → .env, rỗng không đè, không in.
+  testLaunchGatesPipeline();
   await testCustomObjects();
   // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
   // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.
@@ -2538,6 +2542,9 @@ async function main() {
   // Phase 11 · H3 · xuất / khôi phục cấu hình: hai tổ chức THẬT `ox-a` / `ox-b` (tự cấp, tự dọn) — A cài mẫu + tuỳ biến ⇒
   // xuất ⇒ B trống cài TỪ TỆP ⇒ xuất lại bằng A (băm ổn định); gói không mang email / bí mật / bản ghi / id.
   await testOrgExport();
+  // Commercial readiness C · diễn tập khôi phục cấu hình: phán quyết (đột biến từng vế) + phạm vi khai báo khớp lược đồ /
+  // migrateOrganizationDb + CHẠY THẬT scripts/restore-drill-org-config.ts (cùng mã, CSDL + sổ bị xoá giữa hai tiến trình).
+  testRestoreDrillConfig();
   // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
   // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
   await testPlatformDiagnosticsOrg();

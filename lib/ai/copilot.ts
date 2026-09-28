@@ -13,6 +13,7 @@ import { can } from "@/lib/auth/session";
 import { aiDisabledReason } from "@/lib/ai/router";
 import { bacChoLuotHoi, xetTranNgay } from "@/lib/constants/ai-budget";
 import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
+import { currentOrganization } from "@/lib/platform/context";
 
 /**
  * ═══════════ VÒNG LẶP COPILOT — ERP TRUTH → TYPED TOOLS → AI ═══════════
@@ -58,11 +59,35 @@ function actorOf(user: SessionUser) {
   return { id: user.id, email: user.email, name: user.name, source: "AI" as const };
 }
 
+/**
+ * ═══════════ COPILOT CHỈ CÓ Ở TỔ CHỨC NHÀ (bảo mật cuối — docs/platform/security-final.md) ═══════════
+ *
+ * Copilot gọi model bằng khoá AI trong biến môi trường — khoá của tổ chức NHÀ. Với tổ chức khác, lối gọi mạng đã
+ * chặn (`assertHomeCredentials`), nhưng trước bản này màn hình vẫn báo «bật» và mỗi câu hỏi ghi một dòng
+ * `ai_interactions` ERROR vào CSDL của tổ chức đó: người dùng hỏi, chờ, nhận lỗi, và sổ AI của họ đầy rác.
+ *
+ * Nay tổ chức khác nhà ⇒ Copilot TẮT ngay từ cổng: trạng thái nói rõ «chưa có AI cho tổ chức này», không gọi model,
+ * không ghi dòng nào. KHÔNG mở bằng khoá BYOK của tổ chức ở đây: ai trả tiền token cho tổ chức khác là quyết định còn
+ * treo (integration-inventory §2.3). `null` = được dùng. Tổ chức nhà không đổi gì.
+ */
+export const COPILOT_ORG_UNAVAILABLE = "AI_NOT_AVAILABLE_FOR_ORG" as const;
+
+export async function copilotOrgDenial(): Promise<string | null> {
+  const org = await currentOrganization();
+  if (org.isHome) return null;
+  return "AI Copilot chưa được mở cho tổ chức này — Copilot hiện chỉ chạy bằng khoá AI của máy chủ, chưa dùng khoá AI riêng của tổ chức.";
+}
+
 export type RunCopilotInput = CopilotRequest & { user: SessionUser; provider?: AiProvider | null; now?: Date };
 
 export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult> {
   const started = Date.now();
   const now = input.now ?? new Date();
+  // Cổng tổ chức TRƯỚC mọi thứ: không chọn provider, không đọc sổ chi phí, không ghi `ai_interactions`.
+  const denial = await copilotOrgDenial();
+  if (denial) {
+    return { interactionId: null, status: "DISABLED", answer: denial, toolCalls: [], pendingActions: [], warnings: [], usage: EMPTY_USAGE, costUsd: null, latencyMs: 0, rounds: 0, model: "", error: COPILOT_ORG_UNAVAILABLE };
+  }
   /*
     BẬC MẶC ĐỊNH LÀ BẬC RẺ — xem `lib/constants/ai-budget.ts`.
 
@@ -232,6 +257,8 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
  * tool còn được phép — rồi mới gọi tool. Kết quả ghi thêm vào `actions_executed` (chỉ thêm).
  */
 export async function confirmCopilotActions(input: { user: SessionUser; interactionId: string; tokens: string[]; now?: Date }): Promise<CopilotConfirmResult> {
+  const denial = await copilotOrgDenial();
+  if (denial) return { error: denial };
   const db = await getDb();
   const [row] = await db.select().from(schema.aiInteractions).where(eq(schema.aiInteractions.id, input.interactionId));
   if (!row) return { error: "Không tìm thấy lượt hỏi" };

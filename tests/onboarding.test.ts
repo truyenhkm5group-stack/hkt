@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
-import { eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, eq, inArray, like, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { GET as logoGET } from "@/app/api/branding/logo/route";
 import { setRequestPathSourceForTests, signSession, type SessionSubject, type SessionUser } from "@/lib/auth/session";
@@ -44,10 +44,12 @@ import {
   readOnboarding,
   retryOrganizationSetup,
   setOnboardingFaultForTests,
+  signupMode,
   SIGNUP_CLOSED,
   type SignupActor,
 } from "@/lib/onboarding/service";
-import { closeUnderDependencies, CORE_MODULES, parseSignupMode, toggleModule, type SignupDraft } from "@/lib/onboarding/shared";
+import { closeUnderDependencies, CORE_MODULES, narrowerSignupMode, parseSignupMode, signupCeiling, SIGNUP_MODES, toggleModule, type SignupDraft, type SignupMode } from "@/lib/onboarding/shared";
+import { invalidateSignupSetting, readSignupSetting, setSignupSetting, SIGNUP_MODE_CACHE_MS, SIGNUP_MODE_SETTING_KEY, signupModeState } from "@/lib/onboarding/signup-mode";
 import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 
 const ORGS = ["ob-a", "ob-b", "ob-c"] as const;
@@ -83,15 +85,39 @@ async function cleanup() {
   invalidateCapabilities();
 }
 
-async function withEnvMode<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+/**
+ * Ghi THẲNG cài đặt control plane (`null` = xoá dòng ⇒ mặc định `off`) rồi xoá đệm — đầu vào của tình huống, không phải
+ * đường ghi được kiểm (đường ghi thật `setSignupSetting` có bài riêng ở `testSignupModeGate`).
+ */
+async function putSignupSetting(mode: string | null) {
+  const pdb = await getPlatformDb();
+  await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY));
+  if (mode !== null) await pdb.insert(schema.platformSettings).values({ key: SIGNUP_MODE_SETTING_KEY, value: mode, updatedByEmail: "ob-test@local" });
+  invalidateSignupSetting();
+}
+
+async function signupSettingNow(): Promise<string | null> {
+  const pdb = await getPlatformDb();
+  const row = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY) });
+  return row ? String(row.value) : null;
+}
+
+/**
+ * Dựng MỘT cửa vào của /start: trần môi trường `PLATFORM_SIGNUP_MODE` = `env` VÀ cài đặt control plane = `setting`
+ * (mặc định: cùng giá trị với trần — "mở đúng chế độ này"). Trả lại nguyên trạng cả hai trong finally.
+ */
+async function withEnvMode<T>(env: string | undefined, fn: () => Promise<T>, setting: string | null = env ?? null): Promise<T> {
   const before = process.env.PLATFORM_SIGNUP_MODE;
-  if (mode === undefined) delete process.env.PLATFORM_SIGNUP_MODE;
-  else process.env.PLATFORM_SIGNUP_MODE = mode;
+  const settingBefore = await signupSettingNow();
+  if (env === undefined) delete process.env.PLATFORM_SIGNUP_MODE;
+  else process.env.PLATFORM_SIGNUP_MODE = env;
   try {
+    await putSignupSetting(setting);
     return await fn();
   } finally {
     if (before === undefined) delete process.env.PLATFORM_SIGNUP_MODE;
     else process.env.PLATFORM_SIGNUP_MODE = before;
+    await putSignupSetting(settingBefore);
   }
 }
 
@@ -171,7 +197,9 @@ function testSource() {
 // ═══════════ 3 · TỔ CHỨC THẬT ═══════════
 
 async function testOffMode() {
+  // Production HÔM NAY: không khai trần (⇒ trần invite) và chưa ai đặt cài đặt (⇒ off) ⇒ TẮT.
   await withEnvMode(undefined, async () => {
+    assert.equal(await signupMode(), "off", "không trần + không cài đặt ⇒ /start TẮT");
     assert.deepEqual(await checkInviteStep("x", PUBLIC), { error: SIGNUP_CLOSED });
     assert.deepEqual(await checkOrgStep({ name: "A", code: "ob-a" }, null, PUBLIC), { error: SIGNUP_CLOSED });
     assert.deepEqual(await previewSignup({ plan: draft().plan }, PUBLIC), { error: SIGNUP_CLOSED });
@@ -232,7 +260,7 @@ async function testInviteFlow(): Promise<SessionSubject> {
       const page = await getPageBySlug("cong-no-khach-hang");
       assert.ok(page && page.page.publishedVersion > 0, "trang của mẫu có và đã xuất bản");
       const db = await getDb();
-      for (const t of ["platform_plans", "platform_signup_invites", "platform_signup_attempts"]) {
+      for (const t of ["platform_plans", "platform_signup_invites", "platform_signup_attempts", "platform_settings"]) {
         const res = (await db.execute(sql.raw(`select count(*)::int as n from ${t}`))) as unknown as { rows: { n: number }[] };
         assert.equal(res.rows[0].n, 0, `${t} trong CSDL tổ chức phải rỗng`);
       }
@@ -433,15 +461,141 @@ async function testOpenRate() {
   });
 }
 
+// ═══════════ 4 · CỔNG MỞ BÁN B — min(trần môi trường, cài đặt control plane) ═══════════
+
+function testSignupTruthTable() {
+  // Trần: không đặt ⇒ invite · off / invite / open ⇒ đúng nó · lạ ⇒ off. Cài đặt: off / invite / open. 6 × 3 = 18 ô.
+  const ceilings: [string | undefined, SignupMode][] = [
+    [undefined, "invite"],
+    ["", "invite"],
+    ["off", "off"],
+    [" Invite ", "invite"],
+    ["open", "open"],
+    ["mo-het", "off"],
+  ];
+  const expected: Record<SignupMode, Record<SignupMode, SignupMode>> = {
+    off: { off: "off", invite: "off", open: "off" },
+    invite: { off: "off", invite: "invite", open: "invite" },
+    open: { off: "off", invite: "invite", open: "open" },
+  };
+  for (const [raw, ceilingMode] of ceilings) {
+    const c = signupCeiling(raw);
+    assert.equal(c.mode, ceilingMode, `trần «${raw}» ⇒ ${ceilingMode}`);
+    for (const setting of SIGNUP_MODES) assert.equal(narrowerSignupMode(c.mode, setting), expected[ceilingMode][setting], `trần «${raw}» × cài đặt ${setting}`);
+  }
+  assert.equal(signupCeiling(undefined).source, "ENV_UNSET");
+  assert.equal(signupCeiling("mo-het").source, "ENV_INVALID", "giá trị lạ ⇒ tắt cứng, và nói ra là lạ");
+  assert.ok(SIGNUP_MODE_CACHE_MS <= 30_000, `đệm cờ ${SIGNUP_MODE_CACHE_MS} ms > 30 giây — bật / tắt phải có hiệu lực gần như ngay`);
+  const start = readFileSync("app/start/page.tsx", "utf8");
+  assert.ok(start.includes("await signupMode()") && start.includes('export const dynamic = "force-dynamic"'), "/start đọc cờ ở MỖI lượt dựng (không đóng băng lúc build / khởi động)");
+}
+
+async function testSignupModeGate() {
+  const home = await getHomeOrganization();
+  const operator: SessionUser = { id: "ob-op", email: "op@nha.local", name: "Vận hành", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } };
+  const homeViewer: SessionUser = { ...operator, id: "ob-viewer", email: "xem@nha.local", role: "VIEWER", permissions: ["dashboard:view"] };
+  const otherOrgAdmin: SessionUser = { ...operator, id: "ob-khac", email: "qt@khac.local", permissions: ["platform:operate"], organization: { code: "ob-a", name: "Khác", isHome: false } };
+  const pdb = await getPlatformDb();
+  const signupAudits = async () =>
+    pdb
+      .select()
+      .from(schema.platformAuditLog)
+      .where(and(eq(schema.platformAuditLog.action, "SIGNUP_MODE_SET"), eq(schema.platformAuditLog.subject, SIGNUP_MODE_SETTING_KEY)))
+      .orderBy(schema.platformAuditLog.at);
+
+  await withEnvMode(
+    undefined,
+    async () => {
+      // Mặc định: TẮT, và lõi của /start nói "chưa mở".
+      assert.equal((await signupModeState()).setting.stored, false, "chưa ai đặt ⇒ không có dòng");
+      assert.deepEqual(await checkInviteStep("SAI00-SAI00-SAI00", PUBLIC), { error: SIGNUP_CLOSED });
+
+      // Không phải người vận hành / tổ chức khác ⇒ không đổi được, không dòng nào, không nhật ký.
+      const n0 = (await signupAudits()).length;
+      for (const [who, label] of [
+        [homeViewer, "người nhà không có platform:operate"],
+        [otherOrgAdmin, "quản trị tổ chức khác (kể cả mang khoá platform:operate)"],
+      ] as const) {
+        const r = await setSignupSetting(who, { mode: "invite", reason: "thử mở hộ" });
+        assert.ok("error" in r, `${label} ⇒ từ chối`);
+      }
+      assert.equal(await signupSettingNow(), null, "lượt bị từ chối không ghi cài đặt");
+      assert.equal((await signupAudits()).length, n0, "lượt bị từ chối không ghi nhật ký");
+
+      // Đầu vào: thiếu lý do / chế độ lạ / vượt trần ⇒ từ chối.
+      assert.ok("error" in (await setSignupSetting(operator, { mode: "invite", reason: "ngắn" })), "lý do < 5 ký tự ⇒ từ chối");
+      assert.ok("error" in (await setSignupSetting(operator, { mode: "mo-het", reason: "chế độ lạ" })), "chế độ lạ ⇒ từ chối");
+      const over = await setSignupSetting(operator, { mode: "open", reason: "mở hẳn cho mọi người" });
+      assert.ok("error" in over && /PLATFORM_SIGNUP_MODE=open/.test(over.error), "không khai trần ⇒ trần invite ⇒ đặt open bị từ chối, nói cách mở");
+      assert.equal(await signupSettingNow(), null);
+
+      // Người vận hành bật invite ⇒ có hiệu lực NGAY (không khởi động lại), nhật ký có dòng.
+      const on = await setSignupSetting(operator, { mode: "invite", reason: "mở cho khách thử đợt 1" });
+      assert.ok("ok" in on && on.changed && on.state.effective === "invite", JSON.stringify(on));
+      assert.equal(await signupMode(), "invite", "/start phản ánh ngay sau khi đổi — không deploy, không khởi động lại");
+      assert.match(((await checkInviteStep("SAI00-SAI00-SAI00", PUBLIC)) as { error: string }).error, /không đúng/, "cửa đã mở: mã sai bị từ chối vì SAI, không còn vì «chưa mở»");
+      const all = await signupAudits();
+      assert.equal(all.length, n0 + 1, "đúng MỘT dòng nhật ký cho lượt đổi");
+      const log = all[all.length - 1];
+      assert.ok(log.actorEmail === operator.email && log.actorOrgCode === home.code && log.targetOrgCode === home.code && log.source === "UI", `nhật ký nền tảng mang người + tổ chức: ${JSON.stringify(log)}`);
+      assert.deepEqual(log.before, { setting: null, effective: "off" });
+      assert.equal((log.after as { setting: string; effective: string }).setting, "invite");
+      assert.equal((log.after as { setting: string; effective: string }).effective, "invite");
+      assert.equal(log.reason, "mở cho khách thử đợt 1");
+      const same = await setSignupSetting(operator, { mode: "invite", reason: "bấm lại lần hai" });
+      assert.ok("ok" in same && !same.changed, "đặt lại đúng giá trị ⇒ không đổi");
+      assert.equal((await signupAudits()).length, n0 + 1, "không đổi ⇒ không thêm nhật ký");
+
+      // Tắt bằng cài đặt ⇒ đóng NGAY.
+      const off = await setSignupSetting(operator, { mode: "off", reason: "tắt khẩn cấp từ /platform" });
+      assert.ok("ok" in off && off.changed && off.state.effective === "off");
+      assert.deepEqual(await checkInviteStep("SAI00-SAI00-SAI00", PUBLIC), { error: SIGNUP_CLOSED }, "tắt ở /platform ⇒ /start đóng ngay");
+
+      // Tiến trình KHÁC ghi (không qua xoá đệm của tiến trình này): trễ tối đa bằng đệm, rồi thấy.
+      await pdb.update(schema.platformSettings).set({ value: "invite" }).where(eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY));
+      assert.equal((await readSignupSetting()).mode, "off", "trong hạn đệm vẫn là giá trị đã đệm (tiền đề của phép đo tiếp theo)");
+      assert.equal((await readSignupSetting({ now: Date.now() + SIGNUP_MODE_CACHE_MS + 1 })).mode, "invite", "qua hạn đệm (≤ 30 s) ⇒ đọc lại từ CSDL, không cần khởi động lại");
+
+      // CSDL tự chặn giá trị ngoài tập đóng.
+      await assert.rejects(pdb.update(schema.platformSettings).set({ value: "mo-het" }).where(eq(schema.platformSettings.key, SIGNUP_MODE_SETTING_KEY)), "CHECK platform_settings_signup_mode_check");
+    },
+    null,
+  );
+
+  // Trần `off` (công tắc khẩn cấp) THẮNG mọi cài đặt, kể cả open.
+  await withEnvMode(
+    "off",
+    async () => {
+      assert.equal(await signupMode(), "off", "env off + cài đặt open ⇒ TẮT");
+      assert.deepEqual(await checkInviteStep("SAI00-SAI00-SAI00", PUBLIC), { error: SIGNUP_CLOSED });
+      assert.deepEqual(await checkOrgStep({ name: "A", code: "ob-a" }, null, PUBLIC), { error: SIGNUP_CLOSED });
+      const r = await setSignupSetting(operator, { mode: "invite", reason: "cố mở khi đang tắt cứng" });
+      assert.ok("error" in r && /TẮT CỨNG/.test(r.error), "đang tắt cứng ⇒ cài đặt không mở được, và nói vì sao");
+    },
+    "open",
+  );
+  // Giá trị lạ ở trần ⇒ cũng tắt cứng.
+  await withEnvMode("mo-het", async () => assert.equal(await signupMode(), "off", "trần lạ ⇒ TẮT"), "open");
+  // Trần open + cài đặt open ⇒ mở; người vận hành vẫn thu hẹp được về invite.
+  await withEnvMode("open", async () => {
+    assert.equal(await signupMode(), "open");
+    const r = await setSignupSetting(operator, { mode: "invite", reason: "thu hẹp về mã mời" });
+    assert.ok("ok" in r && r.state.effective === "invite");
+    assert.equal(await signupMode(), "invite");
+  });
+}
+
 export async function testOnboarding() {
   testPure();
   testSource();
+  testSignupTruthTable();
   await cleanup();
   for (const code of ORGS) rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
   const home = await getHomeOrganization();
   const homeModulesBefore = [...(await getEnabledModules(home.code))].sort();
   try {
     await testOffMode();
+    await testSignupModeGate();
     const subject = await testInviteFlow();
     await testSetupFailed();
     await testEntitlementsAndIsolation(subject);

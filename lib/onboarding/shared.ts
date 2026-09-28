@@ -16,11 +16,60 @@ import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
 export const SIGNUP_MODES = ["off", "invite", "open"] as const;
 export type SignupMode = (typeof SIGNUP_MODES)[number];
 
-/** Chuỗi biến môi trường ⇒ chế độ. Lạ / trống ⇒ `off`: hỏng về phía ĐÓNG. */
+/** Chuỗi (cài đặt / biến môi trường) ⇒ chế độ. Lạ / trống ⇒ `off`: hỏng về phía ĐÓNG. */
 export function parseSignupMode(raw: string | null | undefined): SignupMode {
   const v = String(raw ?? "").trim().toLowerCase();
   return (SIGNUP_MODES as readonly string[]).includes(v) ? (v as SignupMode) : "off";
 }
+
+/*
+  ═══ HIỆU LỰC = min(TRẦN MÔI TRƯỜNG, CÀI ĐẶT CONTROL PLANE) — docs/platform/launch-gates.md mục B ═══
+
+  Hai chìa, hai người, hai tốc độ:
+    · TRẦN — biến môi trường `PLATFORM_SIGNUP_MODE`, đổi bằng deploy / khởi động lại. Là công tắc KHẨN CẤP: `off` tắt
+      cứng bất kể cài đặt. KHÔNG đặt ⇒ trần `invite` — mở hẳn (`open`) là quyết định của chủ nền tảng, phải khai trần
+      `open` tường minh. Giá trị lạ ⇒ trần `off` (hỏng về phía đóng, không đoán ý người gõ).
+    · CÀI ĐẶT — `platform_settings['platform.signup.mode']`, người vận hành đổi ở `/platform`, có hiệu lực không cần
+      deploy. THIẾU dòng ⇒ `off`: production sau bản này vẫn TẮT y như trước.
+  Hàm ở đây THUẦN (không đọc CSDL, không đọc môi trường) để bảng chân lý kiểm được đủ 18 ô.
+*/
+
+const SIGNUP_RANK: Record<SignupMode, number> = { off: 0, invite: 1, open: 2 };
+
+/** Trần khi biến môi trường KHÔNG đặt. */
+export const DEFAULT_SIGNUP_CEILING: SignupMode = "invite";
+/** Cài đặt khi chưa có dòng nào ở control plane. */
+export const DEFAULT_SIGNUP_SETTING: SignupMode = "off";
+
+export type SignupCeilingSource = "ENV" | "ENV_UNSET" | "ENV_INVALID";
+export type SignupCeiling = { mode: SignupMode; source: SignupCeilingSource };
+
+/** Trần từ biến môi trường: trống / không đặt ⇒ `invite`; hợp lệ ⇒ đúng giá trị đó; lạ ⇒ `off`. */
+export function signupCeiling(raw: string | null | undefined): SignupCeiling {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (!v) return { mode: DEFAULT_SIGNUP_CEILING, source: "ENV_UNSET" };
+  if ((SIGNUP_MODES as readonly string[]).includes(v)) return { mode: v as SignupMode, source: "ENV" };
+  return { mode: "off", source: "ENV_INVALID" };
+}
+
+/** Chế độ hẹp hơn trong hai. */
+export function narrowerSignupMode(a: SignupMode, b: SignupMode): SignupMode {
+  return SIGNUP_RANK[a] <= SIGNUP_RANK[b] ? a : b;
+}
+
+/** `true` khi `mode` rộng hơn `ceiling` — cài đặt như vậy bị TỪ CHỐI lúc lưu (không để nó "tự mở" khi trần nâng sau này). */
+export function exceedsSignupCeiling(mode: SignupMode, ceiling: SignupMode): boolean {
+  return SIGNUP_RANK[mode] > SIGNUP_RANK[ceiling];
+}
+
+export const SIGNUP_MODE_LABEL: Record<SignupMode, string> = { off: "TẮT", invite: "Cần mã mời", open: "Mở (có trần theo IP / ngày)" };
+
+/** Hệ quả của từng chế độ — hộp xác nhận ở `/platform` in NGUYÊN VĂN câu này. */
+export const SIGNUP_MODE_CONSEQUENCE: Record<SignupMode, string> = {
+  off: "/start chỉ in «Chưa mở đăng ký». Mã mời đã phát không dùng được cho tới khi mở lại. Người vận hành vẫn tạo hộ khách được.",
+  invite: "Khách cầm mã mời CÒN HẠN (phát ở /platform, dùng một lần) tự tạo được tổ chức — mỗi tổ chức một CSDL mới trên máy chủ này. Không có mã ⇒ không tạo được.",
+  open: "BẤT KỲ AI trên Internet tự tạo được tổ chức, không cần mã — chỉ bị chặn bởi trần theo IP / giờ và theo ngày toàn nền tảng.",
+};
 
 // ═══ LOẠI HÌNH → MẪU GỢI Ý ═══
 

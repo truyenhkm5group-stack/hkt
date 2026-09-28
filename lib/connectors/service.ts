@@ -15,7 +15,7 @@ import {
   type ConnectionStatus,
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
-import { openSecrets, sealSecrets, secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
+import { openSecrets, sealSecrets, secretsKeyPublicStatus, secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
 import { ORG_CONNECTION_TESTERS, type TesterDeps } from "@/lib/connectors/testers";
 import type { ConnectionActionResult, ConnectionSnapshot, ConnectionsView, ConnectorView } from "@/lib/connectors/types";
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
@@ -181,7 +181,10 @@ export async function loadConnectionsView(user: SessionUser, deps: { keyState?: 
 
   return {
     organization: org,
-    secretsReady: keyState.ok ? { ok: true, reason: null } : { ok: false, reason: keyState.reason },
+    secretsReady: (() => {
+      const pub = secretsKeyPublicStatus(keyState);
+      return pub.ready ? { ok: true, reason: null, keyIdShort: pub.keyIdShort } : { ok: false, reason: pub.reason, keyIdShort: null };
+    })(),
     groups: CONNECTOR_KINDS.map((kind) => ({ kind, label: CONNECTOR_KIND_LABEL[kind], rows: CONNECTORS.filter((c) => c.kind === kind).map(view) })).filter((g) => g.rows.length > 0),
   };
 }

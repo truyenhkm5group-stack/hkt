@@ -64,11 +64,18 @@ export class SecretsDecryptError extends Error {
  */
 export function secretsKeyState(readEnv: (name: string) => string | undefined = (n) => process.env[n]): SecretsKeyState {
   const raw = (readEnv(SECRETS_KEY_ENV) ?? "").trim();
-  if (!raw) return { ok: false, reason: `Máy chủ chưa có ${SECRETS_KEY_ENV} — tính năng lưu bí mật kết nối đang TẮT. Người vận hành đặt biến này (≥ ${MIN_MASTER_CHARS} ký tự ngẫu nhiên) rồi khởi động lại.` };
-  if (raw.length < MIN_MASTER_CHARS) return { ok: false, reason: `${SECRETS_KEY_ENV} quá ngắn (${raw.length} ký tự, cần ≥ ${MIN_MASTER_CHARS}) — tính năng lưu bí mật kết nối đang TẮT.` };
+  if (!raw) return { ok: false, reason: `Máy chủ chưa có ${SECRETS_KEY_ENV} — tính năng lưu bí mật kết nối đang TẮT. Người vận hành nền tảng thêm secret GitHub ${SECRETS_KEY_ENV} (openssl rand -base64 48) rồi chạy deploy (docs/platform/launch-gates.md mục A).` };
+  if (raw.length < MIN_MASTER_CHARS) return { ok: false, reason: `${SECRETS_KEY_ENV} quá ngắn (${raw.length} ký tự, cần ≥ ${MIN_MASTER_CHARS}) — tính năng lưu bí mật kết nối đang TẮT. Người vận hành nền tảng thay secret GitHub ${SECRETS_KEY_ENV} bằng openssl rand -base64 48 rồi chạy deploy.` };
   const key = Buffer.from(hkdfSync("sha256", Buffer.from(raw, "utf8"), Buffer.from(HKDF_SALT, "utf8"), Buffer.from(HKDF_INFO, "utf8"), 32));
   const keyId = createHmac("sha256", key).update("kid").digest("hex").slice(0, 16);
   return { ok: true, key, keyId };
+}
+
+/** Trạng thái khoá ĐỂ IN RA màn hình: không khoá, không chuỗi gốc — chỉ 8 ký tự đầu của mã khoá (HMAC, không suy ngược). */
+export type SecretsKeyPublicStatus = { ready: true; keyIdShort: string } | { ready: false; reason: string };
+
+export function secretsKeyPublicStatus(state: SecretsKeyState = secretsKeyState()): SecretsKeyPublicStatus {
+  return state.ok ? { ready: true, keyIdShort: `${state.keyId.slice(0, 8)}…` } : { ready: false, reason: state.reason };
 }
 
 export function connectionAad(orgCode: string, connectorKey: string): Buffer {

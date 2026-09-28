@@ -4,7 +4,7 @@ import { bacChoLuotHoi } from "@/lib/constants/ai-budget";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { CopilotConfirmResult, CopilotResult, CopilotToolInfo } from "@/lib/ai/contracts";
-import { confirmCopilotActions as confirmCore, runCopilot } from "@/lib/ai/copilot";
+import { confirmCopilotActions as confirmCore, copilotOrgDenial, runCopilot } from "@/lib/ai/copilot";
 import { describeTools } from "@/lib/ai/tools/registry";
 import { requireUser } from "@/lib/auth/session";
 import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
@@ -63,12 +63,27 @@ export async function confirmCopilotActions(input: z.input<typeof confirmSchema>
  * nó để quyết định. Nhãn nay dựng từ CÙNG hàm mà lượt hỏi dùng (`bacChoLuotHoi`), nên hai nơi
  * không thể trôi xa nhau.
  */
-export async function copilotStatus(): Promise<{ enabled: boolean; provider: string; model: string; modelSauHon: string; reason: string | null; tools: CopilotToolInfo[] }> {
+export type CopilotStatus = {
+  enabled: boolean;
+  /** `ORGANIZATION` = tắt vì đây là tổ chức khác nhà (không phải vì máy chủ thiếu khoá) — giao diện nói hai câu khác nhau. */
+  scope: "HOME" | "ORGANIZATION";
+  provider: string;
+  model: string;
+  modelSauHon: string;
+  reason: string | null;
+  tools: CopilotToolInfo[];
+};
+
+export async function copilotStatus(): Promise<CopilotStatus> {
   const user = await requireUser();
+  // Tổ chức khác nhà: TẮT kèm lý do, cùng một cổng với `runCopilot` — nhãn không được nói «bật» khi câu hỏi sẽ bị chặn.
+  const denial = await copilotOrgDenial();
+  if (denial) return { enabled: false, scope: "ORGANIZATION", provider: "", model: "", modelSauHon: "", reason: denial, tools: describeTools(user) };
   const name = resolveProviderName();
   const bac = bacChoLuotHoi({});
   return {
     enabled: Boolean(name),
+    scope: "HOME",
     provider: name ?? "",
     model: name ? modelFor(name, bac) : "",
     /** Model khi người hỏi bấm "hỏi kỹ" — để UI nói được cái nút ấy đổi sang gì. */

@@ -43,7 +43,10 @@ tổ chức · màn duyệt lõi.
    `/settings/connections` trên máy thử), hoặc (b) cho phép thử trên tổ chức nhà bằng khoá `.env` hiện có (tốn tiền của
    VNX; chỉ tạo BẢN NHÁP, áp dụng thử ở tổ chức thử bằng "cài từ tệp").
 2. `PLATFORM_SECRETS_KEY` trên production — để tổ chức khác lưu bí mật kết nối (thiếu ⇒ tính năng tắt, VNX không ảnh hưởng).
-3. Có mở `PLATFORM_SIGNUP_MODE` (invite/open) trên production không — hiện `off` (X7).
+   Đường ống secret GitHub → deploy → `.env` đã nối: chủ nền tảng chỉ còn tạo secret (`openssl rand -base64 48`) rồi
+   dispatch deploy — `launch-gates.md` mục A.
+3. Có mở `/start` (invite/open) trên production không — hiện TẮT. Không còn cần deploy: người vận hành bật «Cần mã mời» ở
+   `/platform` → Cổng mở bán (cài đặt control plane, 0172); mở hẳn `open` cần trần `PLATFORM_SIGNUP_MODE=open` — mục B.
 4. Sao lưu tổ chức: dung lượng Drive (~11 bản / tổ chức), tải VPS 02–05 giờ, có diễn tập khôi phục cho CSDL tổ chức không.
 
 ## Quy trình phát hành
@@ -62,5 +65,5 @@ Commit/PR KHÔNG mang tên model AI, KHÔNG dòng Co-Authored-By (AGENTS.md 6.6)
 - AI Builder chưa chạy với model thật (schema công cụ ~11 KB chưa thử với nhà cung cấp).
 - Kéo xa khi phải cuộn trong trình kéo-thả chưa đo trên màn hình thường.
 - Cài blueprint vượt hạn mức đối tượng hỏng giữa chừng (kế hoạch chưa báo trước).
-- Sao lưu tổ chức chưa có diễn tập khôi phục tự động; đêm nhà hỏng thì tổ chức không được sao lưu.
+- Sao lưu tổ chức chưa có diễn tập khôi phục TỰ ĐỘNG (có ops `restore-drill-org` chạy tay — bật tự động là cổng C2 ở `launch-gates.md`); đêm nhà hỏng thì tổ chức không được sao lưu.
 - `/login`, `/start` và một số trang lõi ngoài danh sách H4 còn chữ gốc VNX.
