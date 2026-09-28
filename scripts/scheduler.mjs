@@ -92,6 +92,12 @@ const JOBS = [
   */
   { job: "care-return-check", every: minutes("CARE_RETURN_CHECK_EVERY_MINUTES", 30), offset: 27 },
   /*
+    UY TÍN SĐT THEO PANCAKE — 10 phút/lần, chạy TRƯỚC `alerts` (offset 3) để lượt cảnh báo đọc đệm vừa
+    làm ấm. Mỗi lượt hỏi tối đa 30 SĐT CHƯA có trong đệm (đệm sống 6 giờ), nên sau lượt đầu phần lớn
+    lượt chỉ đọc rồi thoát. Tắt cảnh báo "Đơn rủi ro" thì không gọi Pancake.
+  */
+  { job: "phone-reputation", every: minutes("PHONE_REPUTATION_EVERY_MINUTES", 10), offset: 1 },
+  /*
     BẢN TIN MARKETING HẰNG NGÀY — 30 phút/lần, và đó KHÔNG phải "gửi 48 tin mỗi ngày".
 
     Sổ chống gửi lại (`settings["marketing.digest.sent"]`) khoá đúng MỘT bản tin cho mỗi phạm vi

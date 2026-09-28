@@ -85,7 +85,7 @@ import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo, testTranChoTachKhoiBac, testPhepDoJit, testChuoiSach, testMetricResolverTatJit } from "./agent-chi-phi.test";
 import { testTrangChamTatJit } from "./trang-cham-jit.test";
 import { testPancakeLinks } from "./pancake-links.test";
-import { testPhoneReputation } from "./phone-reputation.test";
+import { testPhoneReputation, testPhoneRiskAlert } from "./phone-reputation.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
@@ -2414,6 +2414,7 @@ async function main() {
   testTrangChamTatJit();
   testPancakeLinks();
   testPhoneReputation();
+  await testPhoneRiskAlert(db);
   testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();

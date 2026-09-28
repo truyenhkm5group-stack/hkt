@@ -35,10 +35,26 @@ export function clearPhoneReputationCache() {
   cache.clear();
 }
 
+async function currentOrgKey() {
+  const org = await currentOrganization();
+  return org.isHome ? "home" : org.code;
+}
+
+/** CHỈ ĐỌC đệm: `undefined` = chưa hỏi (hoặc đã quá hạn), `null` = đã hỏi mà không biết. Không gọi mạng. */
+function cachedOf(orgKey: string, phone: string): PhoneReputation | null | undefined {
+  const hit = cache.get(`${orgKey}:${phone}`);
+  return hit && hit.expiresAt > Date.now() ? hit.value : undefined;
+}
+
+/** Chỉ để kiểm thử: đặt sẵn một kết quả như thể Pancake vừa trả — bài kiểm không gọi mạng thật. */
+export async function primePhoneReputationForTest(phone: string, value: PhoneReputation | null) {
+  cache.set(`${await currentOrgKey()}:${phone}`, { value, expiresAt: Date.now() + REPUTATION_TTL_MS });
+}
+
 async function reputationOf(orgKey: string, phone: string): Promise<PhoneReputation | null> {
   const key = `${orgKey}:${phone}`;
-  const hit = cache.get(key);
-  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  const hit = cachedOf(orgKey, phone);
+  if (hit !== undefined) return hit;
   try {
     const value = parseBadReportInfo(await getPancakeClient().badReportInfo(phone));
     cache.set(key, { value, expiresAt: Date.now() + (value ? REPUTATION_TTL_MS : REPUTATION_ERROR_TTL_MS) });
@@ -64,12 +80,46 @@ export async function getPhoneReputationForOrders(orderIds: string[]): Promise<R
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(and(inArray(o.id, ids), RESERVED_IN_WAREHOUSE));
-  const org = await currentOrganization();
-  const orgKey = org.isHome ? "home" : org.code;
+  const orgKey = await currentOrgKey();
   const out: Record<string, PhoneReputation | null> = {};
   for (const r of rows) {
     const phone = normalizePhoneForPancake(r.billPhone || r.shipPhone);
     out[r.id] = phone ? await reputationOf(orgKey, phone) : null;
   }
   return out;
+}
+
+/**
+ * ĐỌC ĐỆM cho nhiều SĐT, không gọi mạng — dùng trong luật cảnh báo (`lib/alerts/rules.ts`), để một
+ * lượt quét cảnh báo không bao giờ phụ thuộc vào Pancake đang chậm hay đang lỗi. SĐT chưa có trong
+ * đệm thì vắng mặt khỏi kết quả (chưa hỏi ≠ đã hỏi mà không biết).
+ */
+export async function cachedPhoneReputations(phones: string[]): Promise<Map<string, PhoneReputation | null>> {
+  const orgKey = await currentOrgKey();
+  const out = new Map<string, PhoneReputation | null>();
+  for (const p of phones) {
+    const phone = normalizePhoneForPancake(p);
+    if (!phone) continue;
+    const v = cachedOf(orgKey, phone);
+    if (v !== undefined) out.set(phone, v);
+  }
+  return out;
+}
+
+/**
+ * LÀM ẤM ĐỆM — việc của job `phone-reputation`: hỏi Pancake cho các SĐT CHƯA có trong đệm, tối đa
+ * `max` SĐT một lượt theo đúng thứ tự truyền vào (nơi gọi xếp đơn mới nhất trước). Phần còn lại để
+ * lượt sau: client Pancake giãn 250 ms/lượt cho MỌI việc, một lượt không được chiếm nó quá lâu.
+ */
+export async function warmPhoneReputations(phones: string[], max: number): Promise<{ fetched: number; known: number; unknown: number; pending: number }> {
+  const orgKey = await currentOrgKey();
+  const need = [...new Set(phones.map((p) => normalizePhoneForPancake(p)).filter((p): p is string => Boolean(p)))].filter((p) => cachedOf(orgKey, p) === undefined);
+  let known = 0;
+  let unknown = 0;
+  const lan = need.slice(0, Math.max(0, max));
+  for (const phone of lan) {
+    if ((await reputationOf(orgKey, phone)) === null) unknown++;
+    else known++;
+  }
+  return { fetched: lan.length, known, unknown, pending: need.length - lan.length };
 }

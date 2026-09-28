@@ -84,7 +84,7 @@ export function normalizePhoneForPancake(phone: string | null | undefined): stri
 }
 
 /** Ngưỡng rủi ro — nguồn DUY NHẤT là cấu hình cảnh báo (`AlertConfig.phoneRisk*`, sửa trên trang Cảnh báo). */
-export type PhoneRiskThresholds = { phoneRiskReturnRatePct: number; phoneRiskWarningCount: number };
+export type PhoneRiskThresholds = { phoneRiskReturnRatePct: number; phoneRiskWarningCount: number; phoneRiskMinOrders: number };
 
 export type PhoneRiskReason = "RETURN_RATE" | "WARNINGS";
 
@@ -92,11 +92,20 @@ export type PhoneRiskReason = "RETURN_RATE" | "WARNINGS";
  * Đơn chờ xuất có RỦI RO CAO không, và vì sao. VƯỢT ngưỡng mới tính (`>`, đúng lời chủ shop
  * "> 40%", "> 10"), và so trên ĐÚNG con số màn hình đang in (`returnRatePct` đã làm tròn như POS) —
  * để không có ô in "40%" mà bị gắn cảnh báo "> 40%". Chưa biết (`null`) ⇒ không kết luận gì.
+ * Tỷ lệ hoàn chỉ xét khi SĐT đã có ít nhất `phoneRiskMinOrders` đơn kết thúc (mẫu nhỏ là nhiễu).
  */
 export function phoneRiskReasons(rep: PhoneReputation | null | undefined, t: PhoneRiskThresholds): PhoneRiskReason[] {
   if (!rep) return [];
   const out: PhoneRiskReason[] = [];
-  if (rep.returnRatePct !== null && rep.returnRatePct > t.phoneRiskReturnRatePct) out.push("RETURN_RATE");
+  const finished = rep.orderSuccess + rep.orderFail;
+  if (rep.returnRatePct !== null && finished >= Math.max(1, t.phoneRiskMinOrders) && rep.returnRatePct > t.phoneRiskReturnRatePct) out.push("RETURN_RATE");
   if (rep.warningCount > t.phoneRiskWarningCount) out.push("WARNINGS");
   return out;
+}
+
+/** Câu lý do dùng chung cho khung cảnh báo trên trang và tin cảnh báo — một cách nói, không hai. */
+export function phoneRiskText(rep: PhoneReputation, reasons: PhoneRiskReason[]): string {
+  return reasons
+    .map((l) => (l === "RETURN_RATE" ? `Pancake: hoàn ${rep.returnRatePct}% (${rep.orderFail}/${rep.orderSuccess + rep.orderFail} đơn)` : `SĐT bị báo ${rep.warningCount} lần trên Pancake`))
+    .join(" · ");
 }

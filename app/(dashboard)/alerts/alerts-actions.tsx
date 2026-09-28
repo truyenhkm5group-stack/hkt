@@ -410,6 +410,10 @@ export function AlertConfigForm({
           <Input type="number" min={0} max={1000} value={form.phoneRiskWarningCount} onChange={(e) => setForm({ ...form, phoneRiskWarningCount: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 10 })} />
         </div>
         <div className="space-y-1">
+          <Label title="Tỷ lệ hoàn Pancake chỉ được xét khi SĐT đã có ít nhất chừng này đơn kết thúc — 1/1 thất bại là 100% nhưng chưa nói lên điều gì">Tỷ lệ hoàn chỉ xét khi SĐT có từ (đơn)</Label>
+          <Input type="number" min={1} max={1000} value={form.phoneRiskMinOrders} onChange={(e) => setForm({ ...form, phoneRiskMinOrders: Number(e.target.value) || 5 })} />
+        </div>
+        <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
           <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — để trống là giữ nguyên" : "123456:ABC… (tạo bot qua @BotFather)"} />
         </div>

@@ -63,6 +63,21 @@ export async function riskyOrderCandidates(cfg: RiskConfig, lookback: Date) {
   return out;
 }
 
+/**
+ * Tập đơn xét UY TÍN SĐT THEO PANCAKE — ĐÚNG tập của cảnh báo "Đơn rủi ro" ở trên (đơn chưa gửi ĐVVC
+ * trong kỳ cảnh báo), đơn MỚI NHẤT trước. Job `phone-reputation` làm ấm đệm cho tập này, luật cảnh
+ * báo đọc đệm cho CHÍNH tập này — hai nơi không thể xét hai tập đơn khác nhau.
+ */
+export async function phoneRiskOrderRows(lookback: Date) {
+  const db = await getDb();
+  const o = schema.orders;
+  return db
+    .select({ id: o.id, systemId: o.systemId, name: o.billFullName, phone: o.billPhone, shipPhone: o.shipPhone, total: o.totalPriceAfterDiscount, insertedAt: o.insertedAt })
+    .from(o)
+    .where(and(inArray(o.stage, ["NEW", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), gte(o.insertedAt, lookback)))
+    .orderBy(sql`${o.insertedAt} desc`);
+}
+
 /** Số đơn khác trong ERP (mọi trạng thái trừ huỷ) cùng SĐT — 0 = SĐT mới, chưa từng lên đơn */
 export async function erpOrderCountByPhone(phones: string[], excludeOrderId?: string): Promise<number> {
   const db = await getDb();

@@ -36,6 +36,7 @@ const configSchema = z.object({
   riskReturnRatePct: z.number().int().min(1).max(100).default(40),
   phoneRiskReturnRatePct: z.number().int().min(0).max(99).default(40),
   phoneRiskWarningCount: z.number().int().min(0).max(1000).default(10),
+  phoneRiskMinOrders: z.number().int().min(1).max(1000).default(5),
   returnInspectionDays: z.number().int().min(1).max(60).default(3),
   /**
    * PHẢI KHAI ĐỦ MỌI CỜ Ở ĐÂY.
