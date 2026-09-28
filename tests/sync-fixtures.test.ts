@@ -134,6 +134,7 @@ import { testConversionFunnel } from "./conversion-funnel.test";
 import { testOrderHourAuditDb, testOrderHourAuditPure } from "./order-hour-audit.test";
 import { testCancelAnalysisDb, testCancelAnalysisPure } from "./cancel-analysis.test";
 import { testPreshipRisk } from "./preship-risk.test";
+import { testReportQueryShape } from "./report-query-shape.test";
 import { testAdsAttribution } from "./ads-attribution.test";
 import { testAdsAnomaly } from "./ads-anomaly.test";
 import { testAdsAttributionLink } from "./ads-attribution-link.test";
@@ -1787,6 +1788,8 @@ async function main() {
   testCancelAnalysisPure();
   await testCancelAnalysisDb(db);
   await testPreshipRisk(db);
+  // Hình dạng câu báo cáo: biểu thức regex đắt tính MỘT lần (trạng thái con ĐVVC · đuôi SĐT của backtest) — đo production 28/09/2026.
+  testReportQueryShape();
   await testAdsRoas(db);
   await testMarketingDaily();
   await testMarketerDailyNominal();

@@ -134,6 +134,28 @@ export async function getPreshipRiskBacktest(period: Period): Promise<RiskBackte
         so_don_hoc as (
           select count(*)::int as n from da_ket_thuc where inserted_at < (select moc from moc_hoc)
         ),
+        /*
+          ĐUÔI SĐT TÍNH MỘT LẦN CHO MỖI ĐƠN, KHÔNG PHẢI MỘT LẦN CHO MỖI CẶP ĐƠN.
+
+          Bốn cột lịch sử khách bên dưới từng tính đuôi SĐT của đơn cũ bằng regex thẳng
+          trong truy vấn con tương quan — tức với MỖI đơn kiểm tra, Postgres quét mọi đơn cũ hơn và
+          chạy regex trên SĐT của từng đơn ấy, bốn lượt. Đo production 28/09/2026 (ops perf-probe,
+          EXPLAIN ANALYZE JIT tắt): 4 SubPlan × 313 lượt × ~5,3 ms, 136.361 khối heap mỗi SubPlan —
+          6,9 s trên 7,0 s của cả câu, và là phần lớn thời gian của trang /reports/funnel.
+
+          Hai bảng dưới giữ ĐÚNG hình dạng cũ: duoi_don là mọi đơn (cho số đơn khác / số khách khác),
+          duoi_ket_qua là phép nối canonical_order_outcome ⋈ orders như cũ — một đơn có nhiều dòng
+          kết quả (mỗi vận đơn một dòng) thì vẫn được đếm đúng bấy nhiêu lần, không hơn không kém.
+        */
+        duoi_don as materialized (
+          select d.id, d.inserted_at, d.stage, d.customer_id,
+                 right(regexp_replace(d.bill_phone, '\\D', '', 'g'), 9) as duoi
+            from orders d
+        ),
+        duoi_ket_qua as materialized (
+          select oh.id, oh.inserted_at, oh.duoi, co2.outcome
+            from canonical_order_outcome co2 join duoi_don oh on oh.id = co2.order_id
+        ),
         ${asOfRateCte("ty_le_mau_ma", "coalesce(nullif(oi2.product_name, ''), oi2.sku)")},
         ${asOfRateCte("ty_le_tinh", "nullif(o2.ship_province, '')")},
         ${asOfRateCte("ty_le_kenh", "coalesce(nullif(o2.source, ''), 'Khác')")}
@@ -151,27 +173,27 @@ export async function getPreshipRiskBacktest(period: Period): Promise<RiskBackte
                  lúc chuẩn bị gửi đơn này, ta CHƯA THỂ biết kết quả những đơn lên sau nó. Bỏ điều kiện
                  đó là cho điểm rủi ro xem trước tương lai.
                */
-               (select count(*) filter (where co2.outcome = 'DELIVERED')::int
-                  from canonical_order_outcome co2 join orders oh on oh.id = co2.order_id
-                 where oh.id <> o.id
-                   and oh.inserted_at < o.inserted_at
-                   and right(regexp_replace(oh.bill_phone, '\\D', '', 'g'), 9) = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
+               (select count(*) filter (where k.outcome = 'DELIVERED')::int
+                  from duoi_ket_qua k
+                 where k.id <> o.id
+                   and k.inserted_at < o.inserted_at
+                   and k.duoi = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
                    and length(right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)) = 9) as cust_delivered,
-               (select count(*) filter (where co2.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int
-                  from canonical_order_outcome co2 join orders oh on oh.id = co2.order_id
-                 where oh.id <> o.id
-                   and oh.inserted_at < o.inserted_at
-                   and right(regexp_replace(oh.bill_phone, '\\D', '', 'g'), 9) = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
+               (select count(*) filter (where k.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int
+                  from duoi_ket_qua k
+                 where k.id <> o.id
+                   and k.inserted_at < o.inserted_at
+                   and k.duoi = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
                    and length(right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)) = 9) as cust_returned,
                (select c.is_block from customers c where c.id = o.customer_id) as is_blocked,
-               (select count(*)::int from orders oo
+               (select count(*)::int from duoi_don oo
                  where oo.id <> o.id and oo.stage not in ('CANCELLED','DELETED')
                    and oo.inserted_at < o.inserted_at
-                   and right(regexp_replace(oo.bill_phone, '\\D', '', 'g'), 9) = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
+                   and oo.duoi = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
                    and length(right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)) = 9) as other_orders,
-               (select count(distinct oo.customer_id)::int from orders oo
+               (select count(distinct oo.customer_id)::int from duoi_don oo
                  where oo.customer_id is not null
-                   and right(regexp_replace(oo.bill_phone, '\\D', '', 'g'), 9) = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
+                   and oo.duoi = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
                    and length(right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)) = 9) as distinct_customers,
                (o.ship_province <> '' and (o.ship_commune <> '' or o.ship_district <> '')) as address_complete,
                length(coalesce(nullif(o.ship_full_address, ''), o.ship_address, '')) as address_length,
