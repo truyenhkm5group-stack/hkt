@@ -70,6 +70,7 @@ export async function guardSecondApproval(input: GuardInput): Promise<GuardResul
   const db = await getDb();
   const kq = await guardWithinScope(db, { id: user.id, email: user.email }, input);
   if (kq.mode === "NEEDS_APPROVAL" || kq.consumed) {
+    revalidatePath("/approvals");
     revalidatePath("/alerts");
     revalidatePath("/work");
   }
@@ -81,6 +82,8 @@ export async function decideApproval(id: string, dong_y: boolean, note?: string)
   const db = await getDb();
   const kq = await decideApprovalCore(db, { id: user.id, email: user.email, canDecide: coTheDuyet(user) }, id, dong_y, note);
   if ("ok" in kq) {
+    // Trang Duyệt (lõi) và mục duyệt của Cần xử lý là CÙNG một danh sách — làm mới cả hai.
+    revalidatePath("/approvals");
     revalidatePath("/alerts");
     revalidatePath("/work");
   }

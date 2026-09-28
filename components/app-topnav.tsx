@@ -45,7 +45,7 @@ const PILL_LABEL: Partial<Record<NavZone, string>> = {
  * `modules` = module đang bật của tổ chức — menu, ô lệnh ⌘K và chuông cùng lọc theo nó. `dynamicPages` = trang
  * tuỳ biến đã xuất bản (Phase 4 · G12), bố cục nạp ở máy chủ và đã lọc theo người xem.
  */
-type TopNavUser = { name: string; email: string; role: Role; permissions: string[]; modules?: string[]; dynamicPages?: readonly DynamicNavItem[] };
+type TopNavUser = { name: string; email: string; role: Role; permissions: string[]; modules?: string[]; organization?: { isHome: boolean } | null; dynamicPages?: readonly DynamicNavItem[] };
 
 function itemClass(active: boolean) {
   return cn(

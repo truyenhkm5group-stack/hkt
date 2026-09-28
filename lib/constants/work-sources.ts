@@ -368,7 +368,8 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     businessEntity: "NONE",
     slaHours: null,
     outcomeAttributable: true,
-    // CHỈ NÚT MỞ: duyệt / từ chối có lý do bắt buộc nằm ở trang Cần xử lý, nơi người duyệt đọc được
+    // CHỈ NÚT MỞ: duyệt / từ chối có lý do bắt buộc nằm ở trang Duyệt của lõi (`/approvals` — nguồn của dòng việc;
+    // trang Cần xử lý hiện cùng danh sách cho tổ chức bật module ấy), nơi người duyệt đọc được
     // vì sao việc đó cần người thứ hai. Nút bấm-một-phát ở đây sẽ bỏ qua đúng đoạn đọc ấy.
     actions: ["OPEN_SOURCE"],
   },

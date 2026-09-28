@@ -16,6 +16,7 @@ import { isObjectKey } from "@/lib/constants/object-registry";
 import { idColumnOf, loadCustomDefs, recordScopeSql } from "@/lib/metadata/common";
 import { resolveObject } from "@/lib/metadata/object-resolver";
 import { isCustomObjectKey } from "@/lib/metadata/types";
+import type { WorkflowCondition } from "@/lib/workflow/types";
 
 export type SubjectRef = { objectKey: string; recordId: string };
 
@@ -98,4 +99,51 @@ export async function subjectLabel(ref: SubjectRef | null, fields: Record<string
   const def = await resolveObject(ref.objectKey);
   const title = def ? fields?.[`system:${def.titleField}`] : null;
   return `${def?.label ?? ref.objectKey} ${typeof title === "string" && title.trim() ? `"${title.trim()}"` : ref.recordId}`;
+}
+
+/* ═══════════ SỐ TIỀN CỦA YÊU CẦU DUYỆT (bài chấp nhận Phase 12, lỗi #4) ═══════════
+ *
+ * Lượt chạy có cửa duyệt từng ghi `approval_requests.amount = null` cho MỌI luật, nên người duyệt hợp đồng 25.000.000 ₫
+ * đọc «chưa rõ số tiền» — dù chính điều kiện của luật đang so field tiền đó với 20 triệu. Nay số tiền đọc từ SUBJECT
+ * (cùng ảnh chụp mà điều kiện vừa xét — không truy vấn lại, không đọc giá trị khác lúc duyệt):
+ *  1. field kiểu `currency` mà ĐIỀU KIỆN của luật tham chiếu, theo thứ tự xuất hiện;
+ *  2. không có ⇒ field `currency` ĐẦU TIÊN của đối tượng (field hệ thống trước, rồi field custom theo vị trí khai).
+ * Field nào có giá trị số nguyên hợp lệ trước thì dùng. Không field tiền nào có giá trị ⇒ `null` — "chưa rõ số tiền"
+ * (luật 42: CHƯA BIẾT không in thành 0). Giá trị 0 THẬT vẫn là 0.
+ */
+
+/** Mọi field mà điều kiện tham chiếu, theo thứ tự xuất hiện (không lặp) — hàm THUẦN. */
+export function conditionFieldRefs(cond: WorkflowCondition | null | undefined): string[] {
+  const out: string[] = [];
+  const walk = (c: WorkflowCondition | null | undefined) => {
+    if (!c) return;
+    if ("all" in c) c.all.forEach(walk);
+    else if ("any" in c) c.any.forEach(walk);
+    else if (!out.includes(c.field)) out.push(c.field);
+  };
+  walk(cond);
+  return out;
+}
+
+/** Số tiền của yêu cầu duyệt — hàm THUẦN. `currencyRefs` = field kiểu tiền của đối tượng theo thứ tự khai. */
+export function approvalAmountOf(conditions: WorkflowCondition | null | undefined, fields: Record<string, unknown>, currencyRefs: readonly string[]): number | null {
+  const referenced = conditionFieldRefs(conditions).filter((r) => currencyRefs.includes(r));
+  for (const ref of [...referenced, ...currencyRefs]) {
+    const v = fields[ref];
+    // Cột tiền hệ thống kiểu `numeric` về dạng chuỗi ("150000" / "150000.00") — nhận khi là số nguyên đồng.
+    const n = typeof v === "string" && /^-?[0-9]+(?:[.]0+)?$/.test(v.trim()) ? Number(v.trim()) : v;
+    if (typeof n === "number" && Number.isSafeInteger(n)) return n;
+  }
+  return null;
+}
+
+/** Field kiểu `currency` của đối tượng (`system:<k>` rồi `custom:<k>` ACTIVE), theo thứ tự khai. Đối tượng lạ ⇒ rỗng. */
+export async function currencyFieldRefs(objectKey: string): Promise<string[]> {
+  const def = await resolveObject(objectKey);
+  if (!def) return [];
+  const out = def.fields.filter((f) => f.type === "currency").map((f) => `system:${f.key}`);
+  if (def.customizable && def.capabilities.customFields) {
+    for (const d of await loadCustomDefs(objectKey, false)) if (d.type === "currency") out.push(`custom:${d.key}`);
+  }
+  return out;
 }

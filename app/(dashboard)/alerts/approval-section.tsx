@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { listPendingApprovals } from "@/lib/actions/approvals";
@@ -8,21 +9,41 @@ import { ApprovalDecisionButtons } from "@/app/(dashboard)/alerts/approval-actio
 /**
  * ───────────── VIỆC ĐANG CHỜ NGƯỜI THỨ HAI GẬT ─────────────
  *
- * Đặt ở đầu trang Cần xử lý, trên cả hàng đợi thường: đây là việc CÓ NGƯỜI ĐANG CHỜ, khác hẳn cảnh
- * báo do máy quét ra. Để lẫn xuống dưới thì người xin ngồi đợi mà không ai biết.
+ * MỘT component cho HAI chỗ đứng, cùng đường đọc (`listPendingApprovals`) và cùng nút (`decideApproval` — cùng kiểm
+ * quyền `approvals:decide`, cùng nhật ký). Không có đường duyệt thứ hai:
  *
- * Không có yêu cầu nào thì mục này BIẾN MẤT hẳn, không hiện khung rỗng — trang này vốn đã dài.
+ *  · Trang Cần xử lý (`/alerts`, module «Cần xử lý») — đầu trang, trên cả hàng đợi thường: đây là việc CÓ NGƯỜI ĐANG
+ *    CHỜ, khác hẳn cảnh báo do máy quét ra. Không có yêu cầu nào thì mục BIẾN MẤT hẳn — trang ấy vốn đã dài.
+ *  · Trang Duyệt (`/approvals`, LÕI — `standalone`) — lối vào của mọi tổ chức, kể cả tổ chức không bật «Cần xử lý»
+ *    (module ấy cần «Đơn hàng»; thiếu nó thì lời duyệt của luật tự động treo mãi). Ở đây danh sách rỗng vẫn phải NÓI
+ *    RA là rỗng: một trang trắng không phân biệt được "không có gì chờ" với "trang hỏng".
  */
-export async function ApprovalSection() {
+export async function ApprovalSection({ standalone = false }: { standalone?: boolean } = {}) {
   const list = await listPendingApprovals();
-  if (!list.length) return null;
+  if (!list.length) {
+    if (!standalone) return null;
+    return (
+      <SectionCard title="Không có việc nào chờ duyệt" description="Yêu cầu duyệt mới (của người hoặc của luật tự động) sẽ hiện ở đây.">
+        <p className="py-6 text-center text-sm text-muted-foreground">Không có yêu cầu nào đang chờ bạn quyết.</p>
+      </SectionCard>
+    );
+  }
   const cho = list.filter((r) => !r.returned).length;
   const traLai = list.length - cho;
+  // Trên trang Cần xử lý: lối sang trang Duyệt riêng — chỉ khi người xem THẬT SỰ quyết được ít nhất một yêu cầu.
+  const loiSangTrangDuyet = !standalone && list.some((r) => r.canDecide);
 
   return (
     <SectionCard
       title={`${cho} việc chờ duyệt${traLai ? ` · ${traLai} lời duyệt bị trả lại` : ""}`}
       description="Những việc một người không được tự làm một mình. Người xin không duyệt được việc của chính mình."
+      actions={
+        loiSangTrangDuyet ? (
+          <Link href="/approvals" className="text-xs font-semibold text-primary hover:underline">
+            Mở trang Duyệt
+          </Link>
+        ) : undefined
+      }
       padded={false}
     >
       <ul className="divide-y">

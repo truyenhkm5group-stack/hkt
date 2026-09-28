@@ -143,6 +143,8 @@ const ROUTES = [
   "/payroll/settings",
   "/expenses",
   "/alerts",
+  // Trang Duyệt của LÕI (Phase 12): lối duyệt của mọi tổ chức, kể cả tổ chức không bật «Cần xử lý».
+  "/approvals",
   // Bản đồ phòng ban & AI: in hai sổ khai + một phép đếm người theo phòng. Nhẹ, nhưng nó đọc CSDL
   // (`department_members`) nên vẫn phải mở thử — một trang chỉ-đọc-hằng-số cũng hỏng được vì một
   // truy vấn duy nhất của nó.

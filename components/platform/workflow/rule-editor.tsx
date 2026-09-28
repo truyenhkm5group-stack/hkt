@@ -363,7 +363,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
       </SectionCard>
 
       {/* ───────────── CỬA DUYỆT ───────────── */}
-      <SectionCard title="Cửa duyệt" hint="Bật thì mỗi lượt khớp luật sinh MỘT yêu cầu duyệt ở hàng đợi duyệt (trang Cần xử lý và /work); máy chỉ làm sau khi một người duyệt, từ chối thì lượt chạy dừng.">
+      <SectionCard title="Cửa duyệt" hint="Bật thì mỗi lượt khớp luật sinh MỘT yêu cầu duyệt ở hàng đợi duyệt (trang Duyệt /approvals và /work); máy chỉ làm sau khi một người duyệt, từ chối thì lượt chạy dừng.">
         <div className="space-y-2 text-sm">
           <label className="inline-flex items-center gap-2">
             <Tick checked={draft.gateOn} onChange={(v) => set("gateOn", v)} label="Cần người duyệt trước khi làm" /> Cần người duyệt trước khi làm

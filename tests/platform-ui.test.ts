@@ -60,7 +60,11 @@ function testMenuPure() {
   assert.ok(allowedNavItems({ role: "ADMIN", permissions: [] }).some((i) => i.href === "/production"));
   const coreOnly: NavUserLike = { role: "ADMIN", permissions: [], modules: ["core", "work"] };
   const hrefs = visibleGroups(coreOnly).flatMap((g) => g.items.map((i) => i.href));
-  assert.ok(hrefs.includes("/settings/modules") && hrefs.includes("/platform") && hrefs.includes("/"), "tổ chức chỉ có lõi vẫn thấy màn hình quản trị module");
+  assert.ok(hrefs.includes("/settings/modules") && hrefs.includes("/"), "tổ chức chỉ có lõi vẫn thấy màn hình quản trị module");
+  // «Vận hành nền tảng» là khoá chỉ-nhà (`homeOrgPermissionDenied`, cùng luật với can()): phiên không mang tổ chức nhà ⇒
+  // KHÔNG hiện, kể cả ADMIN (bài chấp nhận Phase 12, lỗi #2); ADMIN của tổ chức nhà vẫn thấy.
+  assert.ok(!hrefs.includes("/platform"), "ADMIN không mang tổ chức nhà không thấy /platform");
+  assert.ok(visibleGroups({ ...coreOnly, organization: { isHome: true } }).some((g) => g.items.some((i) => i.href === "/platform")), "ADMIN tổ chức nhà vẫn thấy /platform");
   assert.ok(!hrefs.includes("/orders") && !hrefs.includes("/alerts"), "tổ chức chỉ có lõi không thấy trang nghiệp vụ nào");
   for (const h of hrefs) assert.ok(["core", "work"].includes(moduleOfPath(h) ?? ""), `${h} hiện với tổ chức chỉ-lõi mà không thuộc lõi`);
   assert.equal(moduleOfPath("/settings/modules"), "core");

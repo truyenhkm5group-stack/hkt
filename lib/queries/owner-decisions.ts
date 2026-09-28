@@ -4,7 +4,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
 import { decideScope } from "@/lib/auth/scope-guard";
 import { hrefVisible } from "@/lib/platform-ui/module-visibility";
-import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
+import { APPROVAL_GROUP_LABEL, APPROVALS_HREF, type ApprovalGroup } from "@/lib/constants/approval";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { BEFORE_PRODUCTION_DISCUSSION } from "@/lib/constants/model-360";
 import { suggestsTopicOpening } from "@/lib/constants/early-topic";
@@ -98,7 +98,7 @@ export function approvalsToItems(rows: readonly ApprovalRequestRow[], viewerId: 
           amountVnd: r.amount ?? null,
           basis: "Số tiền trên yêu cầu — QUY MÔ việc xin duyệt, không phải tiền đang treo (cùng cách nguồn việc APPROVAL đọc).",
         },
-        action: { label: "Mở để duyệt", href: "/alerts" },
+        action: { label: "Mở để duyệt", href: APPROVALS_HREF },
         modelId: null,
       };
     });

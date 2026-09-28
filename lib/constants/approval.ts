@@ -27,6 +27,13 @@
  * `APPROVAL_ENFORCE_KEY`. Khoá cũ `approval.enforce` KHÔNG còn tự có hiệu lực (xem `parseEnforceConfig`).
  */
 
+/**
+ * MÀN DUYỆT CỦA LÕI — mọi lối "mở để duyệt" (sổ lượt chạy của luật, nguồn việc APPROVAL trên `/work`, buồng lái)
+ * trỏ về đây. Trang thuộc module `core`, cổng là khoá `approvals:decide` (cũng của lõi) nên MỌI tổ chức mở được —
+ * khác mục duyệt trên trang Cần xử lý (`/alerts`), vốn thuộc module «Cần xử lý» (cần «Đơn hàng»).
+ */
+export const APPROVALS_HREF = "/approvals";
+
 /** Nhóm việc rủi ro. Bật / tắt cưỡng chế theo NHÓM, không theo từng nút. */
 export const APPROVAL_GROUPS = [
   "INVENTORY_ADJUSTMENT",

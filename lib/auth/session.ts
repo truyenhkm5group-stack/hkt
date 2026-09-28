@@ -5,7 +5,7 @@ import { jwtVerify, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
-import { hasPermission, resolvePermissions, USER_PERMISSION_SNAPSHOT_KEY, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
+import { hasPermission, homeOrgPermissionDenied, PLATFORM_OPERATE_PERMISSION, resolvePermissions, USER_PERMISSION_SNAPSHOT_KEY, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
 import { departmentCodesOfMany, effectiveAccess, loadCustomRole } from "@/lib/auth/access";
 import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
@@ -379,8 +379,8 @@ export const ROLE_LABEL: Record<Role, string> = {
   VIEWER: "Chỉ xem",
 };
 
-/** Khoá quyền chỉ người của TỔ CHỨC NHÀ có hiệu lực (docs/platform/shared-contracts.md mục 11). */
-export const PLATFORM_OPERATE_PERMISSION = "platform:operate";
+/** Khoá quyền chỉ người của TỔ CHỨC NHÀ có hiệu lực (docs/platform/shared-contracts.md mục 11) — khai ở `lib/auth/permissions.ts` (thuần) để menu dùng cùng luật. */
+export { PLATFORM_OPERATE_PERMISSION };
 
 /**
  * Khoá quyền này có thuộc một module ĐANG TẮT của tổ chức người dùng không — trả khoá module đó, hoặc
@@ -407,6 +407,6 @@ export function permissionModuleDisabled(subject: SessionUser, permission: strin
 export function can(subject: SessionUser | Role, permission: Permission) {
   if (typeof subject === "string") return subject === "ADMIN" || hasPermission(resolvePermissions(subject, null), permission);
   if (permissionModuleDisabled(subject, permission)) return false;
-  if (permission === PLATFORM_OPERATE_PERMISSION && subject.organization?.isHome !== true) return false;
+  if (homeOrgPermissionDenied(subject, permission)) return false;
   return subject.role === "ADMIN" || hasPermission(subject.permissions, permission);
 }
