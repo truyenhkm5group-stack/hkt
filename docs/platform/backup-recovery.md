@@ -25,11 +25,14 @@ liệu thì không.
   Secrets ở `/root/.config/erp-backup/offsite.env`.
 - **Kiểm:** kích thước > 0, `pg_restore --list` đọc lại được, mục lục phải có dữ liệu `orders` + `shipments`; ops
   `restore-drill` nạp bản mới nhất vào container tạm rồi đếm 14 bảng then chốt.
-- **PHẠM VI — đúng MỘT CSDL:** `docker exec erp-db pg_dump -U erp -d erp -Fc` (`erp-backup.sh`, lệnh `cmd_run`, bước 2),
-  cộng volume dữ liệu bot chat. Mặt phẳng điều khiển (`platform_organizations`, `platform_organization_modules`, gói,
-  mã mời) nằm trong CSDL nhà (`getPlatformDb()` = CSDL nhà) nên ĐƯỢC phủ.
+- **PHẠM VI:** CSDL nhà `docker exec erp-db pg_dump -U erp -d erp -Fc` (`cmd_run`, bước 2) + volume bot chat, rồi
+  (từ Phase 11 · P11-BACKUP, bước 9) **mọi CSDL `erp_org_*` trên `erp-db`** — xem §2.1 và `docs/backup-restore.md`
+  mục 7. Mặt phẳng điều khiển (`platform_organizations`, `platform_organization_modules`, gói, mã mời) nằm trong CSDL
+  nhà (`getPlatformDb()` = CSDL nhà) nên ĐƯỢC phủ.
 
-### 2.1 KHOẢNG HỞ: CSDL của tổ chức khác nhà KHÔNG được sao lưu
+### 2.1 KHOẢNG HỞ (ĐÃ VÁ ở P11-BACKUP, trừ các điểm nêu ở §2.2): CSDL của tổ chức khác nhà KHÔNG được sao lưu
+
+> Phần dưới mô tả hiện trạng TRƯỚC bản vá, giữ lại để đọc lý do. Trạng thái sau bản vá: §2.2.
 
 Tổ chức không-nhà nằm ở CSDL `erp_org_<mã với - thành _>` trên cùng máy Postgres (`organizationDatabaseName`,
 `db/index.ts`), hoặc ở máy khác nếu khai `ORG_DATABASE_URL__<MÃ>`. Script sao lưu cứng `-d erp`, và kiểm toàn vẹn cứng
@@ -44,9 +47,31 @@ bảng `orders` / `shipments` — một tổ chức dịch vụ không có đơn
 Hôm nay khoảng hở này CHƯA gây mất gì vì production chưa có tổ chức thứ hai (cấp tổ chức trên production là HUMAN GATE
 — `migration-strategy.md` §6). Nó thành lỗ thật đúng vào ngày tổ chức đầu tiên được cấp.
 
-### 2.2 Đề xuất (việc của chủ nền tảng — không đổi trong commit này)
+### 2.2 Bản vá P11-BACKUP — đã làm gì, còn gì
 
-Không cần secret mới, không đổi lịch cron — chỉ mở rộng thân lệnh `run` trong `erp-backup.sh`:
+Không secret mới, không đổi lịch cron, không đổi một byte đường sao lưu của nhà. Toàn bộ phần tổ chức nằm giữa các
+cặp dấu `# >>> TỔ CHỨC KHÁC NHÀ` / `# <<< TỔ CHỨC KHÁC NHÀ` trong `scripts/erp-backup.sh`; `tests/backup.test.ts`
+gỡ các khối đó ra và băm phần còn lại (`BAM_PHAN_NHA` = đúng bản trước Phase 11), rồi chạy `cmd_run` thật với
+`docker`/`psql`/`rclone` giả, so trạng thái + tệp + bản ngoài máy của nhà giữa lượt không có và có tổ chức.
+
+| Đề xuất (bản H3, giữ nguyên bên dưới) | Đã làm |
+|---|---|
+| 1 · liệt kê từ Postgres, đối chiếu sổ | ✓ `pg_database` + mẫu `^erp_org_[a-z0-9_]+$` (tên lạ bị bỏ, nói ra); tổ chức `ACTIVE`/`SUSPENDED` trong sổ mà không có CSDL ⇒ `::warning::` + `missingDatabases` (không làm lượt thất bại). CSDL có mà sổ không có vẫn được SAO LƯU (sao lưu thừa rẻ hơn mất) |
+| 2 · dump + xoay vòng riêng | ✓ thư mục RIÊNG `/root/backups/orgs/<csdl>/{daily,weekly,manual}/`, tệp `<csdl>-<mốc>.dump`, xoay vòng theo tiền tố của CHÍNH CSDL, cùng `GIU_BAN_*`; ngoài máy `gcrypt:orgs/<csdl>/…` |
+| 3 · kiểm toàn vẹn theo loại | ✓ tổ chức: dữ liệu `public.users` + `public.settings` + `drizzle.__drizzle_migrations` trong mục lục; không đòi orders |
+| 4 · trạng thái theo tổ chức | ✓ khác đề xuất ở chỗ: KHÔNG thêm mảng vào `last-run.json` của nhà (đổi tệp của nhà); mỗi CSDL một thư mục `status/orgs/<csdl>/` + tệp tổng hợp `status/orgs-last-run.json`. Tổ chức chỉ đọc thư mục của chính nó; chưa có ⇒ "Chưa có bản sao lưu nào cho CSDL của tổ chức này" (đỏ) |
+| 5 · diễn tập luân phiên | ✗ CHƯA LÀM — `restore-drill` vẫn chỉ phủ CSDL nhà; thẻ của tổ chức vì thế luôn vàng "Chưa diễn tập khôi phục CSDL của tổ chức này". Diễn tập tay: `docs/backup-restore.md` mục 7 |
+| 6 · bài kiểm | ✓ (xem trên) |
+| 7 · CSDL ở máy khác | ✓ nêu ra ở hai phía: script (`missingDatabases`) và thẻ của tổ chức (`ORG_DATABASE_URL__…` ⇒ đỏ "không được sao lưu tự động"). Lịch sao lưu riêng cho chúng vẫn là việc của chủ nền tảng |
+
+Hai giới hạn còn lại, cố ý:
+
+- Tổ chức chạy SAU nhà trong cùng lượt. Nhà thất bại (ổ đầy, `pg_dump erp` lỗi, hết giờ chờ khoá) thì lượt dừng như
+  trước và tổ chức **không được sao lưu đêm đó** — đổi điều này là đổi đường của nhà.
+- `daily-done` của cron vẫn ghi theo kết quả của NHÀ: tổ chức hỏng lúc 02 giờ KHÔNG được thử lại lúc 03–05 giờ; lượt
+  sau là đêm kế tiếp (hoặc ops `backup` bấm tay). Ops `backup` đỏ (thoát 1) khi có tổ chức hỏng.
+
+**Đề xuất gốc của H3 (trước bản vá):**
 
 1. **Liệt kê CSDL tổ chức từ chính Postgres**, không từ cấu hình:
    `psql -U erp -d erp -Atc "select datname from pg_database where datname like 'erp\_org\_%' order by 1"`.
@@ -119,21 +144,25 @@ cùng CSDL, so `contentHash`.
 
 ## 5. Quy trình khôi phục MỘT tổ chức từ bản sao
 
-Chỉ áp dụng khi đã có bản dump của CSDL tổ chức (xem khoảng hở §2.1 — hôm nay chưa có). Ghi đè dữ liệu production ⇒ cần
-chủ nền tảng đồng ý (AGENTS.md §7).
+Bản dump của CSDL tổ chức nằm ở `/root/backups/orgs/<csdl>/{daily,weekly,manual}/<csdl>-YYYYmmdd-HHMM.dump` và trên
+Drive ở `gcrypt:orgs/<csdl>/…` (từ P11-BACKUP, §2.2). Lệnh copy-dán đầy đủ: `docs/backup-restore.md` mục 7. Ghi đè dữ
+liệu production ⇒ cần chủ nền tảng đồng ý (AGENTS.md §7).
+
+**Tên CSDL tạm KHÔNG được bắt đầu bằng `erp_org_`**: lượt sao lưu đêm liệt kê mọi `erp_org_%` và sẽ dump nó như một
+tổ chức thật (và kiểm toàn vẹn nó). Dùng `tam_khoiphuc_<mã>` cho bản tạm và `hong_<mã>_<mốc>` cho bản cũ đổi tên.
 
 1. **Xác định tổ chức và CSDL:** mã tổ chức `<ma>` ⇒ CSDL `erp_org_<ma với - thành _>` (hoặc URL ở
    `ORG_DATABASE_URL__<MÃ>`). Ghi lại mốc bản sao định dùng.
 2. **Tạm ngừng tổ chức** ở `/platform` (trạng thái `SUSPENDED`) để không phiên / job / webhook nào ghi vào trong lúc nạp;
    các tổ chức khác và nhà chạy bình thường — đó là lợi ích của SILO.
-3. **Sao lưu hiện trạng** (dù hỏng) để có đường lui: `pg_dump -d erp_org_<ma> -Fc`.
+3. **Sao lưu hiện trạng** (dù hỏng) để có đường lui: ops `backup` (nó dump cả CSDL tổ chức vào `orgs/<csdl>/manual/`).
 4. **Nạp vào CSDL TẠM trước**, đối chiếu số dòng (`users`, `custom_records`, `meta_pages`, `drizzle.__drizzle_migrations`):
    ```bash
-   docker exec -i erp-db createdb -U erp -O erp erp_org_<ma>_khoiphuc
-   docker exec -i erp-db pg_restore -U erp -d erp_org_<ma>_khoiphuc --no-owner --no-privileges < erp_org_<ma>-<mốc>.dump
+   docker exec -i erp-db createdb -U erp -O erp tam_khoiphuc_<ma>
+   docker exec -i erp-db pg_restore -U erp -d tam_khoiphuc_<ma> --no-owner --no-privileges < /root/backups/orgs/erp_org_<ma>/daily/erp_org_<ma>-<mốc>.dump
    ```
    `pg_restore` báo lỗi ⇒ DỪNG.
-5. **Đổi chỗ:** ngắt kết nối vào CSDL cũ, đổi tên cũ ⇒ `..._hong_<mốc>`, tạm ⇒ tên thật (`ALTER DATABASE … RENAME TO …`).
+5. **Đổi chỗ:** ngắt kết nối vào CSDL cũ, đổi tên cũ ⇒ `hong_<ma>_<mốc>`, tạm ⇒ tên thật (`ALTER DATABASE … RENAME TO …`).
    Không `dropdb` bản cũ cho tới khi xác nhận xong.
 6. **Mở lại tổ chức** (`ACTIVE`). Lần mở đầu tiên tự migrate phần còn thiếu (§4) và xoá bản sao `platform_*`. Kiểm
    `/settings/export` của tổ chức: `contentHash` phải khớp bản xuất gần nhất trước sự cố nếu có lưu.

@@ -405,6 +405,294 @@ sao_luu_bot() { # $1=thư mục đích $2=mốc
   rm -f "$STATUS_DIR/.bot.err"
 }
 
+# >>> TỔ CHỨC KHÁC NHÀ ─────────────────────────────────────────────────────────────────────────
+# ═══════════════ CSDL CỦA TỔ CHỨC KHÁC NHÀ (erp_org_*) — Phase 11 ═══════════════
+#
+# Nền tảng đa tổ chức SILO: tổ chức nhà ở CSDL `erp`, mỗi tổ chức khác một CSDL `erp_org_<mã, - thành _>`
+# trên CÙNG container erp-db (`organizationDatabaseName`, db/index.ts). Trước khối này script chỉ dump
+# `-d erp`: CSDL của tổ chức khác KHÔNG có bản sao nào, mất ổ là mất hẳn (docs/platform/backup-recovery.md).
+#
+# LUẬT CỦA KHỐI:
+#  · Mọi thứ về tổ chức khác nằm giữa các cặp dấu `>>> TỔ CHỨC KHÁC NHÀ` / `<<< TỔ CHỨC KHÁC NHÀ`.
+#    Phần của nhà KHÔNG đổi một byte — gỡ các khối có dấu ra là được nguyên văn bản trước Phase 11
+#    (`tests/backup.test.ts` chạy lượt có / không có tổ chức và so tệp + trạng thái của nhà).
+#  · Chạy SAU khi bản của nhà đã kiểm toàn vẹn, xoay vòng, đẩy ngoài máy và GHI TRẠNG THÁI xong: lỗi
+#    của một tổ chức không chạm được bản của nhà.
+#  · Được gọi trong ngữ cảnh `|| true` ⇒ bash TẮT `set -e` cho cả cây hàm bên dưới. Nên KHÔNG bước
+#    nào dựa vào `set -e`: mọi bước có thể hỏng đều kiểm TƯỜNG MINH rồi `return 1`, và không một dòng
+#    nào `exit` — một tổ chức hỏng thì ghi lỗi của nó rồi sang tổ chức kế tiếp.
+#  · Danh sách lấy từ CHÍNH Postgres (`pg_database`), không từ cấu hình. Tên phải khớp
+#    MAU_CSDL_TO_CHUC — tên lạ bị BỎ và nói ra, không bao giờ vào một đường dẫn hay một lệnh.
+#  · Kiểm toàn vẹn THEO LOẠI: tổ chức dịch vụ không có đơn, nên không đòi orders/shipments — đòi các
+#    bảng lõi mọi CSDL tổ chức đều có (BANG_LOI_TO_CHUC).
+#  · Tệp, thư mục, trạng thái, đường Drive đều TÁCH theo tổ chức:
+#      $BACKUP_DIR/orgs/<csdl>/{daily,weekly,manual}/<csdl>-YYYYmmdd-HHMM.dump
+#      $STATUS_DIR/orgs/<csdl>/{last-run,last-success}.json  ·  $STATUS_DIR/orgs-last-run.json (tổng hợp)
+#      <remote>orgs/<csdl>/{daily,weekly,manual}/
+#    Tên tệp bắt đầu bằng `erp_org_` (gạch DƯỚI): glob `erp-*.dump` của `ban_moi_nhat` và mẫu xoay
+#    vòng `^erp-[0-9]{8}` của nhà không bao giờ khớp, kể cả khi ai đó chép nhầm thư mục. Xoay vòng
+#    đếm RIÊNG theo tiền tố từng CSDL — gộp chung thì bản của năm tổ chức đẩy bản của nhà ra khỏi 7 bản giữ.
+#  · Không có CSDL `erp_org_*` nào (production 28/09/2026) ⇒ không ghi tệp nào, không đổi mã thoát.
+MAU_CSDL_TO_CHUC='^erp_org_[a-z0-9_]+$'
+BANG_LOI_TO_CHUC="public.users public.settings drizzle.__drizzle_migrations"
+THU_MUC_TO_CHUC="$BACKUP_DIR/orgs"
+STATUS_TO_CHUC="$STATUS_DIR/orgs"
+TO_CHUC_HONG=""
+
+ten_csdl_to_chuc_hop_le() { [[ "${1:-}" =~ $MAU_CSDL_TO_CHUC ]]; }
+ten_tep_to_chuc() { printf '%s-%s.dump' "$1" "$2"; } # $1=csdl $2=mốc
+
+# In các bảng lõi THIẾU dữ liệu trong mục lục `pg_restore --list` (rỗng = đủ). Here-string, không
+# đường ống — cùng lý do SIGPIPE/pipefail với phép kiểm của nhà.
+bang_loi_thieu() { # $1=mục lục
+  local b thieu=""
+  for b in $BANG_LOI_TO_CHUC; do
+    grep -qF " TABLE DATA ${b%%.*} ${b#*.} " <<< "$1" || thieu="${thieu:+$thieu }$b"
+  done
+  printf '%s' "$thieu"
+}
+
+# Mỗi dòng một tên HỢP LỆ. Trả 1 khi không hỏi được Postgres — CHƯA BIẾT, không phải "không có tổ chức".
+# Lời cảnh báo đi ra stderr: stdout của hàm LÀ danh sách.
+liet_ke_csdl_to_chuc() {
+  local ds ten
+  ds="$(docker exec "$DB_CONTAINER" psql -U erp -d erp -Atc "select datname from pg_database where datname like 'erp\_org\_%' and not datistemplate order by 1" 2>/dev/null)" || return 1
+  while IFS= read -r ten; do
+    ten="${ten%$'\r'}"
+    [ -n "$ten" ] || continue
+    if ten_csdl_to_chuc_hop_le "$ten"; then
+      printf '%s\n' "$ten"
+    else
+      loi "bỏ qua CSDL tên lạ $(printf '%q' "$ten") — không khớp $MAU_CSDL_TO_CHUC, KHÔNG sao lưu." >&2
+    fi
+  done <<< "$ds"
+}
+
+# Ước lượng như `uoc_tinh_mb` của nhà nhưng trên bản của CHÍNH tổ chức này (2 × bản gần nhất).
+uoc_tinh_mb_to_chuc() { # $1=csdl
+  local d f tot="" mb=$TOI_THIEU_UOC_TINH_MB
+  for d in daily weekly manual; do
+    for f in "$THU_MUC_TO_CHUC/$1/$d/$1"-*.dump; do
+      [ -f "$f" ] || continue
+      if [ -z "$tot" ] || [[ "$(basename "$f")" > "$(basename "$tot")" ]]; then tot="$f"; fi
+    done
+  done
+  [ -z "$tot" ] || mb=$(( $(mb_cua "$(kich_thuoc "$tot")") * HE_SO_UOC_TINH ))
+  [ "$mb" -ge "$TOI_THIEU_UOC_TINH_MB" ] 2>/dev/null || mb=$TOI_THIEU_UOC_TINH_MB
+  echo "$mb"
+}
+
+# Như `day_ngoai_may` nhưng đích là `orgs/<csdl>/…` và trạng thái ghi vào ORG_OFFSITE_* — KHÔNG đụng
+# OFFSITE_* của nhà (trạng thái của nhà đã ghi xong trước khi khối này chạy).
+day_ngoai_may_to_chuc() { # $1=csdl $2=thư mục con $3...=tệp cục bộ
+  local csdl="$1" sub="$2" f dich kt_xa kt_goc remote="${BACKUP_OFFSITE_REMOTE:-}" tep_loi="$STATUS_DIR/.rclone-to-chuc.err"
+  shift 2
+  if [ -z "$remote" ]; then
+    ORG_OFFSITE_STATE="NOT_CONFIGURED"
+    ORG_OFFSITE_REASON="CHƯA CÓ BẢN SAO NGOÀI MÁY — chưa khai BACKUP_OFFSITE_REMOTE; bản của $csdl đang nằm trên chính VPS."
+    return 0
+  fi
+  ORG_OFFSITE_REMOTE="${remote%%:*}:"
+  if ! command -v rclone >/dev/null 2>&1; then
+    ORG_OFFSITE_STATE="FAILED"
+    ORG_OFFSITE_REASON="Đã khai BACKUP_OFFSITE_REMOTE nhưng máy chưa cài rclone (deploy kế tiếp tự cài)."
+    return 0
+  fi
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    dich="$(noi_duong "$remote" "orgs/$csdl/$sub/$(basename "$f")")"
+    if ! timeout "$TRAN_LENH_GIAY" rclone copyto --retries 3 "$f" "$dich" 2>"$tep_loi"; then
+      ORG_OFFSITE_STATE="FAILED"
+      ORG_OFFSITE_REASON="rclone copyto lỗi cho $(basename "$f"): $(tail -n 1 "$tep_loi" 2>/dev/null || true)"
+      rm -f "$tep_loi"
+      return 0
+    fi
+    kt_xa="$(timeout 300 rclone lsf --format s "$dich" 2>/dev/null | head -n 1 || true)"
+    kt_goc="$(kich_thuoc "$f")"
+    if [ "$kt_xa" != "$kt_goc" ]; then
+      ORG_OFFSITE_STATE="FAILED"
+      ORG_OFFSITE_REASON="Đầu kia báo $(basename "$f") nặng '${kt_xa:-không thấy}' byte, bản gốc $kt_goc byte."
+      rm -f "$tep_loi"
+      return 0
+    fi
+    bao "ngoài máy: đã đẩy $(basename "$f") ($kt_goc byte) → $ORG_OFFSITE_REMOTE…/orgs/$csdl/$sub/"
+  done
+  rm -f "$tep_loi"
+  ORG_OFFSITE_STATE="OK"
+  ORG_OFFSITE_REASON=""
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/daily")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/weekly")" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/manual")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+}
+
+# MỘT tổ chức: ổ đĩa → dump → kiểm toàn vẹn → (bản tuần) → xoay vòng → ngoài máy. Đặt ORG_*; trả 1
+# khi KHÔNG có bản dùng được (ORG_LY_DO nói vì sao). Bản hỏng / dở bị xoá như luật của nhà.
+sao_luu_mot_to_chuc() { # $1=csdl $2=mốc $3=thư mục con (daily|manual)
+  local csdl="$1" moc="$2" sub="$3" goc thu_muc tam danh_sach thieu dong_loi tep_loi="$STATUS_DIR/.dump-to-chuc.err" tep_tuan=""
+  ORG_FILE=""; ORG_BYTES=""; ORG_TABLES=""; ORG_LY_DO=""; ORG_TU_DO_MB=""; ORG_CAN_MB=""
+  ORG_OFFSITE_STATE="NOT_RUN"; ORG_OFFSITE_REMOTE=""; ORG_OFFSITE_REASON=""
+  ten_csdl_to_chuc_hop_le "$csdl" || { ORG_LY_DO="Tên CSDL không hợp lệ — không sao lưu."; return 1; }
+  goc="$THU_MUC_TO_CHUC/$csdl"
+  thu_muc="$goc/$sub"
+  if ! mkdir -p "$goc/daily" "$goc/weekly" "$goc/manual"; then
+    ORG_LY_DO="Không tạo được thư mục $goc."; return 1
+  fi
+  chmod 700 "$THU_MUC_TO_CHUC" "$goc" "$goc/daily" "$goc/weekly" "$goc/manual" 2>/dev/null || true
+
+  ORG_TU_DO_MB="$(o_trong_mb "$BACKUP_DIR")"
+  ORG_CAN_MB=$(( $(uoc_tinh_mb_to_chuc "$csdl") + DU_TRU_O_DIA_MB ))
+  if [ -z "$ORG_TU_DO_MB" ]; then
+    ORG_LY_DO="Không đọc được dung lượng trống của $BACKUP_DIR (df lỗi) — KHÔNG dump khi không biết còn chỗ hay không."; return 1
+  fi
+  if [ "$ORG_TU_DO_MB" -lt "$ORG_CAN_MB" ]; then
+    ORG_LY_DO="Ổ đĩa còn ${ORG_TU_DO_MB} MB, cần ≥ ${ORG_CAN_MB} MB (ước bản mới $((ORG_CAN_MB - DU_TRU_O_DIA_MB)) MB + dự trữ ${DU_TRU_O_DIA_MB} MB) — KHÔNG dump $csdl."; return 1
+  fi
+
+  ORG_FILE="$(ten_tep_to_chuc "$csdl" "$moc")"
+  tam="$thu_muc/.$ORG_FILE.dang-ghi"
+  bao "pg_dump -Fc $csdl → $thu_muc/$ORG_FILE"
+  if ! timeout "$TRAN_LENH_GIAY" docker exec "$DB_CONTAINER" pg_dump -U erp -d "$csdl" -Fc > "$tam" 2>"$tep_loi"; then
+    dong_loi="$(tail -n 1 "$tep_loi" 2>/dev/null || true)"
+    rm -f "$tam" "$tep_loi"; ORG_FILE=""
+    ORG_LY_DO="pg_dump $csdl lỗi: ${dong_loi:-không có thông báo}"; return 1
+  fi
+  rm -f "$tep_loi"
+
+  ORG_BYTES="$(kich_thuoc "$tam")"
+  if ! [ "${ORG_BYTES:-0}" -gt 0 ] 2>/dev/null; then
+    rm -f "$tam"; ORG_FILE=""
+    ORG_LY_DO="Bản dump $csdl rỗng (0 byte) — đã xoá, KHÔNG tính là một bản sao lưu."; return 1
+  fi
+  if ! danh_sach="$(docker exec -i "$DB_CONTAINER" pg_restore --list < "$tam" 2>/dev/null)"; then
+    rm -f "$tam"; ORG_FILE=""
+    ORG_LY_DO="pg_restore --list không đọc được bản dump $csdl vừa tạo — bản hỏng đã xoá."; return 1
+  fi
+  ORG_TABLES="$(grep -c ' TABLE DATA ' <<< "$danh_sach" || true)"
+  thieu="$(bang_loi_thieu "$danh_sach")"
+  if [ -n "$thieu" ]; then
+    rm -f "$tam"; ORG_FILE=""
+    ORG_LY_DO="Mục lục bản dump $csdl thiếu dữ liệu bảng lõi: $thieu ($ORG_TABLES bảng có dữ liệu) — không phải một bản sao lưu dùng được."; return 1
+  fi
+  chmod 600 "$tam" 2>/dev/null || true
+  if ! mv -f "$tam" "$thu_muc/$ORG_FILE"; then
+    rm -f "$tam"; ORG_FILE=""
+    ORG_LY_DO="Không đổi tên được bản dump $csdl vào $thu_muc."; return 1
+  fi
+  bao "CSDL tổ chức: $ORG_FILE — $ORG_BYTES byte, $ORG_TABLES bảng có dữ liệu, pg_restore đọc lại được"
+
+  if [ "$TRIGGER" = "cron" ] && [ "$(gio_vn +%u)" = "$THU_BAN_TUAN" ]; then
+    tep_tuan="$goc/weekly/$ORG_FILE"
+    ln -f "$thu_muc/$ORG_FILE" "$tep_tuan" 2>/dev/null || cp -p "$thu_muc/$ORG_FILE" "$tep_tuan" 2>/dev/null || tep_tuan=""
+  fi
+
+  xoay_vong "$goc/daily" "$csdl" "$GIU_BAN_NGAY" || true
+  xoay_vong "$goc/weekly" "$csdl" "$GIU_BAN_TUAN" || true
+  xoay_vong "$goc/manual" "$csdl" "$GIU_BAN_TAY" || true
+
+  day_ngoai_may_to_chuc "$csdl" "$sub" "$thu_muc/$ORG_FILE"
+  if [ -n "$tep_tuan" ] && [ "$ORG_OFFSITE_STATE" = "OK" ]; then
+    day_ngoai_may_to_chuc "$csdl" weekly "$tep_tuan"
+  fi
+  return 0
+}
+
+noi_dung_trang_thai_to_chuc() { # $1=csdl $2=kết quả $3=lý do $4=bắt đầu
+  printf '{"schema":1,"kind":"org-backup","database":%s,"result":%s,"trigger":%s,"startedAt":%s,"finishedAt":%s,"reason":%s,' \
+    "$(js "$1")" "$(js "$2")" "$(js "$TRIGGER")" "$(js "$4")" "$(js "$(bay_gio_utc)")" "$(js "$3")"
+  printf '"freeMbBefore":%s,"needMb":%s,' "$(jn "$ORG_TU_DO_MB")" "$(jn "$ORG_CAN_MB")"
+  printf '"db":{"file":%s,"bytes":%s,"tableData":%s},' "$(js "$ORG_FILE")" "$(jn "$ORG_BYTES")" "$(jn "$ORG_TABLES")"
+  printf '"offsite":{"state":%s,"remote":%s,"reason":%s},' "$(js "$ORG_OFFSITE_STATE")" "$(js "$ORG_OFFSITE_REMOTE")" "$(js "$ORG_OFFSITE_REASON")"
+  printf '"retention":{"daily":%s,"weekly":%s,"manual":%s},"schedule":%s,"host":%s}' \
+    "$GIU_BAN_NGAY" "$GIU_BAN_TUAN" "$GIU_BAN_TAY" "$(js "$LICH_MO_TA")" "$(js "$(hostname 2>/dev/null || true)")"
+}
+
+# Mọi tổ chức. Đặt TO_CHUC_HONG (rỗng = không tổ chức nào hỏng); trả 1 khi có. Gọi SAU khi trạng thái
+# của nhà đã ghi, trong ngữ cảnh `|| true` — xem luật đầu khối.
+sao_luu_cac_to_chuc() { # $1=mốc $2=thư mục con (daily|manual)
+  local moc="$1" sub="$2" ds="" csdl ket ly_do bat_dau dang_ky ma ten json_ds="" thieu_json="" loi_liet_ke="" noi_dung n=0
+  TO_CHUC_HONG=""
+  if ! ds="$(liet_ke_csdl_to_chuc)"; then
+    ds=""
+    loi_liet_ke="Không liệt kê được CSDL erp_org_* (psql lỗi) — CHƯA BIẾT có tổ chức nào chưa được sao lưu."
+    loi "$loi_liet_ke"
+    TO_CHUC_HONG=" (không liệt kê được CSDL tổ chức)"
+  fi
+  # Đối chiếu sổ tổ chức: tổ chức đang ACTIVE/SUSPENDED mà KHÔNG có CSDL trên erp-db (CSDL ở máy khác
+  # qua ORG_DATABASE_URL__<MÃ>, hoặc cấp dở) thì script này KHÔNG sao lưu được nó — nói ra, không im lặng.
+  # Sổ không đọc được (CSDL nhà cũ chưa có bảng) thì bỏ qua phép đối chiếu, không coi là lỗi sao lưu.
+  if [ -z "$loi_liet_ke" ] && dang_ky="$(docker exec "$DB_CONTAINER" psql -U erp -d erp -Atc "select code from platform_organizations where not is_home and status in ('ACTIVE','SUSPENDED') order by 1" 2>/dev/null)"; then
+    while IFS= read -r ma; do
+      ma="${ma%$'\r'}"
+      [ -n "$ma" ] || continue
+      ten="erp_org_${ma//-/_}"
+      if ten_csdl_to_chuc_hop_le "$ten" && grep -qxF "$ten" <<< "$ds"; then continue; fi
+      printf '::warning::[sao-lưu] tổ chức %s có trong sổ nhưng KHÔNG có CSDL %s trên %s — script này KHÔNG sao lưu được nó (CSDL ở máy khác cần lịch sao lưu riêng).\n' "$(printf '%q' "$ma")" "$(printf '%q' "$ten")" "$DB_CONTAINER"
+      thieu_json="${thieu_json:+$thieu_json,}$(js "$ten")"
+    done <<< "$dang_ky"
+  fi
+  if [ -z "$ds" ] && [ -z "$loi_liet_ke" ] && [ -z "$thieu_json" ]; then
+    bao "tổ chức khác: không có CSDL erp_org_* nào — không làm gì thêm"
+    return 0
+  fi
+
+  mkdir -p "$STATUS_TO_CHUC" 2>/dev/null && chmod 755 "$STATUS_TO_CHUC" 2>/dev/null || true
+  while IFS= read -r csdl; do
+    [ -n "$csdl" ] || continue
+    n=$((n + 1))
+    bat_dau="$(bay_gio_utc)"
+    if sao_luu_mot_to_chuc "$csdl" "$moc" "$sub"; then
+      if [ "$ORG_OFFSITE_STATE" = "FAILED" ]; then
+        ket="PARTIAL"; ly_do="CSDL $csdl đã sao lưu và kiểm toàn vẹn; phần hỏng: bản ngoài máy."
+        TO_CHUC_HONG="$TO_CHUC_HONG $csdl(ngoài máy)"
+      else
+        ket="OK"; ly_do=""
+      fi
+    else
+      ket="FAILED"; ly_do="$ORG_LY_DO"
+      TO_CHUC_HONG="$TO_CHUC_HONG $csdl"
+      loi "$ly_do"
+    fi
+    noi_dung="$(noi_dung_trang_thai_to_chuc "$csdl" "$ket" "$ly_do" "$bat_dau")"
+    if mkdir -p "$STATUS_TO_CHUC/$csdl" 2>/dev/null; then
+      chmod 755 "$STATUS_TO_CHUC/$csdl" 2>/dev/null || true
+      ghi_json "$STATUS_TO_CHUC/$csdl/last-run.json" "$noi_dung" || loi "không ghi được trạng thái của $csdl"
+      [ "$ket" = "FAILED" ] || ghi_json "$STATUS_TO_CHUC/$csdl/last-success.json" "$noi_dung" || loi "không ghi được trạng thái của $csdl"
+    else
+      loi "không tạo được thư mục trạng thái của $csdl"
+    fi
+    json_ds="${json_ds:+$json_ds,}{\"database\":$(js "$csdl"),\"result\":$(js "$ket"),\"file\":$(js "$ORG_FILE"),\"bytes\":$(jn "$ORG_BYTES"),\"offsite\":$(js "$ORG_OFFSITE_STATE"),\"reason\":$(js "$ly_do")}"
+    bao "tổ chức $csdl: $ket${ly_do:+ — $ly_do}"
+  done <<< "$ds"
+
+  ghi_json "$STATUS_DIR/orgs-last-run.json" "$(printf '{"schema":1,"kind":"org-backup-summary","trigger":%s,"finishedAt":%s,"listError":%s,"organizations":[%s],"missingDatabases":[%s]}' \
+    "$(js "$TRIGGER")" "$(js "$(bay_gio_utc)")" "$(js "$loi_liet_ke")" "$json_ds" "$thieu_json")" || loi "không ghi được $STATUS_DIR/orgs-last-run.json"
+  bao "TỔ CHỨC KHÁC: $n CSDL · hỏng:${TO_CHUC_HONG:- không}"
+  [ -z "$TO_CHUC_HONG" ]
+}
+
+# `status`: phần tổ chức khác — trạng thái và bản trên máy, KHÔNG in một dòng dữ liệu nào.
+trang_thai_to_chuc() {
+  local d csdl tep sub
+  echo
+  echo "── CSDL tổ chức khác nhà (erp_org_*) ──"
+  if [ -f "$STATUS_DIR/orgs-last-run.json" ]; then echo "orgs-last-run.json:"; cat "$STATUS_DIR/orgs-last-run.json"; else echo "orgs-last-run.json: (chưa có — chưa lượt sao lưu nào gặp CSDL erp_org_*)"; fi
+  [ -d "$THU_MUC_TO_CHUC" ] || return 0
+  for d in "$THU_MUC_TO_CHUC"/*/; do
+    csdl="$(basename "$d")"
+    ten_csdl_to_chuc_hop_le "$csdl" || continue
+    echo "$csdl:"
+    for tep in last-run.json last-success.json; do
+      if [ -f "$STATUS_TO_CHUC/$csdl/$tep" ]; then echo "  $tep: $(cat "$STATUS_TO_CHUC/$csdl/$tep")"; else echo "  $tep: (chưa có)"; fi
+    done
+    for sub in daily weekly manual; do
+      echo "  $sub/:"
+      ls -lh "$d$sub" 2>/dev/null | sed '1d' | sed 's/^/    /' || true
+    done
+  done
+  return 0
+}
+
+# <<< TỔ CHỨC KHÁC NHÀ ─────────────────────────────────────────────────────────────────────────
 # ═══════════════ LỆNH: run ═══════════════
 
 cmd_run() {
@@ -508,7 +796,13 @@ cmd_run() {
 
   bao "KẾT QUẢ: $KET_QUA · CSDL $DB_FILE ($DB_BYTES byte) · bot $BOT_STATE · ngoài máy $OFFSITE_STATE"
   [ "$OFFSITE_STATE" != "NOT_CONFIGURED" ] || bao "⚠ CHƯA CÓ BẢN SAO NGOÀI MÁY — xem docs/backup-restore.md mục HUMAN GATE."
+  # >>> TỔ CHỨC KHÁC NHÀ — 9 · CSDL erp_org_*: SAU khi trạng thái của nhà đã ghi; `|| true` = lỗi của tổ chức không dừng script
+  sao_luu_cac_to_chuc "$moc" "$(basename "$thu_muc")" || true
+  # <<< TỔ CHỨC KHÁC NHÀ
   [ "$KET_QUA" = "OK" ] || { loi "$LY_DO"; exit 1; }
+  # >>> TỔ CHỨC KHÁC NHÀ — nhà ĐẠT mà có tổ chức hỏng ⇒ thoát 1 để ops đỏ; trạng thái của nhà vẫn là ĐẠT
+  [ -z "$TO_CHUC_HONG" ] || { loi "CSDL nhà đã sao lưu ĐẠT; CSDL tổ chức khác hỏng:$TO_CHUC_HONG — xem $STATUS_DIR/orgs-last-run.json."; exit 1; }
+  # <<< TỔ CHỨC KHÁC NHÀ
 }
 
 # ═══════════════ LỆNH: cron ═══════════════
@@ -580,6 +874,9 @@ cmd_status() {
       rm -f "$tep_loi"
     fi
   fi
+  # >>> TỔ CHỨC KHÁC NHÀ
+  trang_thai_to_chuc
+  # <<< TỔ CHỨC KHÁC NHÀ
 }
 
 # ═══════════════ LỆNH: restore-drill ═══════════════

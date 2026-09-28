@@ -19,6 +19,7 @@ và `install-vps.sh` đều gọi nó — không nơi nào tự viết một `pg
 | Cấu hình ngoài máy | `/root/.config/erp-backup/offsite.env` (thư mục 700, tệp 600) — `erp-backup.sh configure-offsite` dựng lại ở mỗi lần deploy | **không** nằm trong `/root/erp/.env`: compose nạp `.env` vào container app/scheduler, còn token Drive và mật khẩu giải mã không có việc gì ở đó |
 | Trạng thái | `/root/backups/status/last-run.json` · `last-success.json` · `last-drill.json` | ERP mount thư mục này CHỈ-ĐỌC (`/erp-backup-status`) và hiện ở **Kết nối dữ liệu → Sao lưu dữ liệu** và **Phòng Tech** |
 | Log | `/var/log/erp-backup.log` (logrotate hằng tuần) | |
+| CSDL tổ chức khác nhà | mọi CSDL `erp_org_*` trên `erp-db`, chạy **sau** khi bản của nhà đã ghi trạng thái xong, cùng lượt, cùng khoá — **mục 7** | không có CSDL nào (production 28/09/2026) ⇒ không làm gì thêm, không ghi tệp nào |
 
 ### ERP chấm thế nào (`lib/constants/backup.ts::evaluateBackupHealth`)
 
@@ -246,3 +247,60 @@ rỗng hoặc báo lỗi giải mã — KHÔNG phải "Drive trống". Có tệp
 Đã đo trên rclone v1.75 (crypt bọc một thư mục cục bộ thay cho Drive, 25/09/2026): đẩy bằng đúng
 `day_ngoai_may` → đọc lại kích thước qua crypt khớp → quy trình B (`config create … --no-obscure`)
 giải ra tệp **khớp từng byte** với bản gốc.
+
+## 7. CSDL của tổ chức khác nhà (`erp_org_*`) — Phase 11
+
+Nền tảng đa tổ chức SILO: tổ chức nhà ở CSDL `erp`, mỗi tổ chức khác một CSDL `erp_org_<mã, - thành _>`
+trên **cùng** container `erp-db`. Từ Phase 11, lượt `run` / `cron` sao lưu cả chúng. Phần của nhà
+**không đổi một byte**: mọi dòng về tổ chức nằm giữa các cặp dấu `# >>> TỔ CHỨC KHÁC NHÀ` /
+`# <<< TỔ CHỨC KHÁC NHÀ` trong `scripts/erp-backup.sh`, và `tests/backup.test.ts` băm phần còn lại để
+khoá điều đó (xem `BAM_PHAN_NHA`).
+
+| Việc | Luật |
+|---|---|
+| Danh sách | hỏi CHÍNH Postgres: `select datname from pg_database where datname like 'erp\_org\_%'`; tên phải khớp `^erp_org_[a-z0-9_]+$`, tên lạ bị bỏ và nói ra (không bao giờ vào đường dẫn hay lệnh) |
+| Thứ tự | SAU khi bản của nhà đã kiểm, xoay vòng, đẩy ngoài máy và **ghi trạng thái** — lỗi của một tổ chức không chạm được bản của nhà. Nhà thất bại (ổ đầy, `pg_dump erp` lỗi…) thì lượt dừng như trước và **tổ chức không chạy đêm đó** |
+| Dump | `docker exec erp-db pg_dump -U erp -d erp_org_<mã> -Fc` → `/root/backups/orgs/<csdl>/{daily,manual}/<csdl>-YYYYmmdd-HHMM.dump`; Chủ nhật (cron) liên kết cứng sang `weekly/` |
+| Ổ đĩa | kiểm riêng từng tổ chức: ước lượng 2 × bản gần nhất của CHÍNH nó + cùng 3.000 MB dự trữ |
+| Toàn vẹn | kích thước > 0, `pg_restore --list` đọc được, mục lục có dữ liệu `public.users`, `public.settings`, `drizzle.__drizzle_migrations` — **không** đòi `orders`/`shipments` (tổ chức dịch vụ không có đơn) |
+| Xoay vòng | cùng `GIU_BAN_NGAY/TUAN/TAY`, đếm RIÊNG theo tiền tố tên CSDL trong thư mục riêng — bản của năm tổ chức không đẩy bản của nhà ra khỏi 7 bản giữ |
+| Ngoài máy | `gcrypt:orgs/<csdl>/{daily,weekly,manual}/`, đọc lại kích thước, dọn theo tuổi đúng thư mục của tổ chức |
+| Lỗi | một tổ chức hỏng ⇒ ghi lỗi của nó, sang tổ chức kế tiếp; trạng thái của NHÀ vẫn ghi `OK`; lượt thoát 1 (ops `backup` đỏ) với dòng cuối `CSDL nhà đã sao lưu ĐẠT; CSDL tổ chức khác hỏng: …` |
+| Không liệt kê được | `psql` lỗi ⇒ CHƯA BIẾT có ai bị bỏ sót: ghi `listError`, thoát 1 — không im lặng coi như không có tổ chức |
+| Trong sổ mà không có CSDL | tổ chức `ACTIVE`/`SUSPENDED` không có CSDL trên `erp-db` (vd khai `ORG_DATABASE_URL__<MÃ>` — CSDL ở máy khác) ⇒ `::warning::` + `missingDatabases`; script **không** sao lưu được nó, cần lịch riêng |
+| Trạng thái | `/root/backups/status/orgs/<csdl>/last-run.json` · `last-success.json` (kind `org-backup`, mang tên CSDL) · `/root/backups/status/orgs-last-run.json` (tổng hợp) |
+
+**Ai thấy gì trên ERP.** Thẻ *Kết nối dữ liệu → Sao lưu dữ liệu* của một tổ chức khác chỉ đọc
+`status/orgs/<CSDL của chính nó>/` — không có ⇒ **"Chưa có bản sao lưu nào cho CSDL của tổ chức này"**
+(đỏ), KHÔNG BAO GIỜ mượn "sao lưu tốt" của nhà. Tệp của CSDL khác nằm nhầm chỗ bị bỏ và nói ra. Tổ chức
+không có vế bot chat. Diễn tập tự động (`restore-drill`) mới phủ CSDL nhà, nên thẻ của tổ chức luôn ghi
+**vàng "Chưa diễn tập khôi phục CSDL của tổ chức này"** cho tới khi có diễn tập riêng — nói thật, không
+mượn lượt diễn tập của nhà. Thẻ của NHÀ có thêm dòng *CSDL tổ chức khác (lượt gần nhất)* đọc từ
+`orgs-last-run.json`; dòng ấy KHÔNG đổi mức của nhà.
+
+`status` (ops `backup-status`) in thêm khối *CSDL tổ chức khác nhà*: tệp tổng hợp, trạng thái và danh
+sách bản trên máy của từng CSDL.
+
+**Khôi phục MỘT tổ chức** (không đụng nhà và các tổ chức khác — lợi ích của SILO). Ghi đè dữ liệu của
+khách ⇒ cần chủ nền tảng đồng ý (AGENTS.md mục 7). Chi tiết lý do từng bước:
+`docs/platform/backup-recovery.md` mục 5. `<csdl>` = `erp_org_<mã, - thành _>`; trong tên CSDL tạm, `<mã>` cũng viết
+`-` thành `_` (lệnh `alter database` bên dưới không trích dẫn tên).
+
+```bash
+# 0. Tạm ngừng tổ chức ở /platform (SUSPENDED) — không phiên / job nào ghi vào trong lúc nạp.
+# 1. Chọn bản: bash /root/erp/scripts/erp-backup.sh status  (khối "CSDL tổ chức khác nhà")
+#    Từ Drive: bash -c 'source scripts/erp-backup.sh; nap_cau_hinh; rclone copy gcrypt:orgs/<csdl>/daily/<csdl>-YYYYmmdd-HHMM.dump /root/restore/'
+# 2. Nạp vào CSDL TẠM — tên KHÔNG bắt đầu bằng erp_org_ để lượt sao lưu đêm không coi nó là một tổ chức:
+docker exec -i erp-db createdb -U erp -O erp tam_khoiphuc_<mã>
+docker exec -i erp-db pg_restore -U erp -d tam_khoiphuc_<mã> --no-owner --no-privileges < /root/backups/orgs/<csdl>/daily/<csdl>-YYYYmmdd-HHMM.dump
+#    pg_restore báo lỗi ⇒ DỪNG. Đối chiếu số dòng:
+docker exec -i erp-db psql -U erp -d tam_khoiphuc_<mã> -Atc "select (select count(*) from users), (select count(*) from settings), (select count(*) from drizzle.__drizzle_migrations)"
+# 3. Đổi chỗ (giữ bản cũ, không dropdb cho tới khi xác nhận xong):
+docker exec -i erp-db psql -U erp -d erp -c "select pg_terminate_backend(pid) from pg_stat_activity where datname in ('<csdl>','tam_khoiphuc_<mã>') and pid<>pg_backend_pid();"
+docker exec -i erp-db psql -U erp -d erp -c "alter database <csdl> rename to hong_<mã>_YYYYmmdd"
+docker exec -i erp-db psql -U erp -d erp -c "alter database tam_khoiphuc_<mã> rename to <csdl>"
+# 4. Mở lại tổ chức (ACTIVE). Lần mở đầu tự áp migration còn thiếu.
+```
+
+Diễn tập thủ công cho một tổ chức = bước 2 rồi `dropdb tam_khoiphuc_<mã>`; làm lúc thấp điểm (máy
+2 nhân / ~1,9 GB).
