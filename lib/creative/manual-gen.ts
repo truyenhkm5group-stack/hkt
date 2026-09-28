@@ -14,6 +14,7 @@ import {
   MANUAL_DESIGN,
   MANUAL_GEN,
   MANUAL_GEN_RUN,
+  adsetNameForGoal,
   describeImageEdit,
   designCode,
   hasImageEdit,
@@ -28,7 +29,7 @@ import {
   type ImageSize,
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
-import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
@@ -40,7 +41,7 @@ import { insertManualVariant, type ManualActor } from "@/lib/creative/manual";
 import { marketerNameProblem, marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-code";
 import { productWinCodes, winNameProblem } from "@/lib/creative/win-code";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
-import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay } from "@/lib/creative/naming";
+import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay, type DefaultNames } from "@/lib/creative/naming";
 import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
 import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
@@ -895,6 +896,8 @@ export type PromoteInput = {
   marketerCode?: string | null;
   /** Phần giữa tên theo loại camp: "TEST" hoặc mã win (máy chủ tính từ mã hàng của ảnh). Vắng ⇒ "TEST". */
   kindLabel?: string;
+  /** Mục tiêu tối ưu nhóm thật sẽ mang (`setupOptimizationGoal`) — đổi đoạn đầu tên nhóm theo khuôn. Vắng / `null` = như mẫu. */
+  adsetGoal?: string | null;
 };
 
 type PromoteOk = {
@@ -994,8 +997,10 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
         const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
         const mk = input.marketerCode ?? null;
         const kind = input.kindLabel ?? "TEST";
-        const d = defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind);
-        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind) : null;
+        const goal = input.adsetGoal ?? null;
+        const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameForGoal(n.adset, goal) });
+        const d = withGoal(defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind));
+        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind)) : null;
         finalSeq = seq;
         finalNames = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
         return { nameSeq: seq, campaignName: finalNames.campaign, adsetName: finalNames.adset, adName: finalNames.ad };
@@ -1203,7 +1208,7 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           ruleVersion: CREATIVE_RULE_VERSION,
         })
         .returning();
-      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST" }, cfg, actor, now, batch);
+      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setup ? setupOptimizationGoal(setup) : null }, cfg, actor, now, batch);
       if (!ins.ok) throw new InstantAbort(ins.error);
       const winProblem = win ? winNameProblem(ins.names.campaign, win, codeIndex) : null;
       if (winProblem) throw new InstantAbort(winProblem);

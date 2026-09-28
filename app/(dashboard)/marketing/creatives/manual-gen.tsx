@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualEditRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
-import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
@@ -26,13 +26,15 @@ import {
   MANUAL_GEN_KINDS,
   MANUAL_GEN_KIND_LABEL,
   MANUAL_GEN_RUN,
+  adsetNameForGoal,
   type ImageEditLayout,
   type ManualGenImageStatus,
   type ManualGenKind,
 } from "@/lib/constants/creative-loop";
+import { rankFanpagesForCamp, type CampPageTarget, type FanpageEvidence, type RankedFanpages } from "@/lib/constants/fanpage-rank";
 import { formatVND, vnShortStamp } from "@/lib/format";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
-import type { CampaignSetupOptions, DesignInspirationOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
+import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
 import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
@@ -408,7 +410,14 @@ export type ComposeCtx = {
   defaults: Defaults;
   campDefaults: Defaults;
   setup: CampaignSetupOptions;
+  /** Bằng chứng xếp fanpage theo camp của từng ảnh (đơn của mã · mẫu tương tự đã chạy). */
+  fanpageEvidence: FanpageEvidence;
 };
+
+/** Camp của một ảnh để xếp fanpage: camp mã win khi đang chọn WIN và ảnh có mã win; còn lại là camp TEST. */
+function campTargetOf(img: ManualGenImageCard, kind: CampaignSetup["campaignKind"]): CampPageTarget {
+  return { kind: kind === "WIN" && img.winCode ? "WIN" : "TEST", productId: img.productId, dna: img.design?.dna ?? null };
+}
 
 export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageCard; canEdit: boolean; ctx: ComposeCtx }) {
   const [pending, start] = useTransition();
@@ -649,7 +658,7 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
   const to = namePartsOf(ctx, setup, win);
   const known = nameKnownOf(ctx, win);
-  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: d.adset, ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
+  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameForGoal(d.adset, setupOptimizationGoal(setup)), ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
 }
 
 /** Phần tên mà setup quyết định: tên TKQC · mã MKTer · TEST / mã win · tên fanpage — cùng khuôn máy chủ ghép lúc đăng. */
@@ -679,8 +688,14 @@ function nameKnownOf(ctx: ComposeCtx, win: ProductWinCode | null): CampaignNameK
  * (Lô hằng ngày đã bỏ nên không còn "Đưa vào lô".) Ô tên còn nguyên chữ theo khuôn ⇒ gửi rỗng ⇒ máy chủ đặt đúng số thật.
  */
 function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: ManualGenImageCard; ctx: ComposeCtx; triggerLabel?: string; triggerClassName?: string }) {
-  // Chưa lưu setup ⇒ mặc định dùng nhiều; loại camp mặc định "Mã win" khi mã đã được KHAI Thắng test trở đi.
-  const initSetup = (): CampaignSetup => img.campaignSetup ?? { ...ctx.setup.defaults, campaignKind: img.winCode?.declaredWin ? "WIN" : "TEST" };
+  // Chưa lưu setup ⇒ mặc định dùng nhiều; loại camp mặc định "Mã win" khi mã đã được KHAI Thắng test trở đi; fanpage mặc định
+  // = page đứng đầu theo camp của ảnh (đã ra đơn mã này / chưa ra đơn mà đã chạy mẫu tương tự), không có thì page dùng nhiều.
+  const initSetup = (): CampaignSetup => {
+    if (img.campaignSetup) return img.campaignSetup;
+    const campaignKind = img.winCode?.declaredWin ? "WIN" : "TEST";
+    const r = rankFanpagesForCamp(ctx.setup.pages, ctx.fanpageEvidence, campTargetOf(img, campaignKind));
+    return { ...ctx.setup.defaults, campaignKind, pageId: r.prioritized > 0 ? r.pages[0].id : ctx.setup.defaults.pageId };
+  };
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
@@ -704,7 +719,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     // Tên đã lưu đi cùng setup đã lưu: ghép lại một lượt để tên nói đúng MKTer / TKQC / fanpage / loại camp đang chọn.
     const to0 = namePartsOf(ctx, s0, img.winCode);
     const known0 = nameKnownOf(ctx, img.winCode);
-    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName, ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
+    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName ? adsetNameForGoal(img.adsetName, setupOptimizationGoal(s0)) : "", ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
     setHen(conHen);
     setHenLuc(vnLocalInput(conHen && luuHen ? luuHen : new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
@@ -719,7 +734,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     const known = nameKnownOf(ctx, img.winCode);
     setNames((cur) => ({
       campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
-      adset: cur.adset,
+      adset: cur.adset ? adsetNameForGoal(cur.adset, setupOptimizationGoal(next)) : "",
       ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
     }));
   };
@@ -842,7 +857,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
             </div>
             <div className="space-y-2.5">
               {canPublish ? (
-                <SetupFields value={setup} onChange={doiSetup} options={ctx.setup} winCode={img.winCode}>
+                <SetupFields value={setup} onChange={doiSetup} options={ctx.setup} winCode={img.winCode} ranked={rankFanpagesForCamp(ctx.setup.pages, ctx.fanpageEvidence, campTargetOf(img, setup.campaignKind))}>
                   <div className="space-y-1.5 rounded-md border border-brand/40 bg-brand/5 p-2">
                     <p className="text-[11.5px] font-semibold">Thời gian bắt đầu</p>
                     <div className="flex flex-wrap gap-3 text-[12.5px]">
@@ -913,7 +928,12 @@ const sel = "h-8 w-full rounded-md border bg-background px-2 text-[12.5px]";
  * (TKQC chi nhiều nhất · page ra nhiều đơn nhất · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu). "Như mẫu" nói
  * rõ mẫu đang nhắm gì.
  */
-function SetupFields({ value, onChange, options, winCode, children }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions; winCode: ProductWinCode | null; children?: React.ReactNode }) {
+/** Nhãn mặc định của một fanpage trong ô chọn (thứ tự dùng nhiều). */
+function pageLabel(p: FanpageOption): string {
+  return `${p.name} · ${p.orders30d ? `${p.orders30d} đơn/30 ngày` : p.viaToken ? "chưa ra đơn Pancake" : "0 đơn/30 ngày"}`;
+}
+
+function SetupFields({ value, onChange, options, winCode, ranked, children }: { value: CampaignSetup; onChange: (s: CampaignSetup) => void; options: CampaignSetupOptions; winCode: ProductWinCode | null; ranked: RankedFanpages<FanpageOption>; children?: React.ReactNode }) {
   const set = (patch: Partial<CampaignSetup>) => onChange({ ...value, ...patch });
   const tpl = options.template;
   // "Chọn tỉnh / thành" là cờ RIÊNG: khi chưa chọn tỉnh nào, `geo = []` vẫn nghĩa là toàn quốc (và ô nói ra như vậy).
@@ -993,16 +1013,46 @@ function SetupFields({ value, onChange, options, winCode, children }: { value: C
         <label className="space-y-0.5 text-[11.5px]">
           Fanpage
           <select className={sel} value={value.pageId} onChange={(e) => set({ pageId: e.target.value })}>
-            {options.pages.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · {p.orders30d} đơn/30 ngày
-              </option>
-            ))}
+            {ranked.prioritized > 0 ? (
+              <>
+                <optgroup label={value.campaignKind === "WIN" && winCode ? `Đã ra đơn mã ${winCode.code}` : "Chưa ra đơn · đã chạy mẫu tương tự"}>
+                  {ranked.pages.slice(0, ranked.prioritized).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.hint}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Fanpage khác">
+                  {ranked.pages.slice(ranked.prioritized).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {pageLabel(p)}
+                    </option>
+                  ))}
+                </optgroup>
+              </>
+            ) : (
+              ranked.pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {pageLabel(p)}
+                </option>
+              ))
+            )}
           </select>
+          {ranked.pages.find((p) => p.id === value.pageId)?.hint ? <span className="block text-muted-foreground">{ranked.pages.find((p) => p.id === value.pageId)?.hint}</span> : null}
+          {ranked.note ? <span className="block text-muted-foreground">{ranked.note}</span> : null}
+          {options.tokenPagesError ? <span className="block text-warning">Không đọc được danh sách page của token ERP ({options.tokenPagesError}) — chỉ còn page từng ra đơn trên Pancake.</span> : null}
         </label>
         <label className="space-y-0.5 text-[11.5px]">
           Mục tiêu chiến dịch
-          <select className={sel} value={value.objective} onChange={(e) => set({ objective: e.target.value as CampaignSetup["objective"] })}>
+          <select
+            className={sel}
+            value={value.objective}
+            onChange={(e) => {
+              const objective = e.target.value as CampaignSetup["objective"];
+              // Tiếp cận không có mục tiêu tin nhắn ⇒ bỏ mục tiêu hiệu quả đang chọn.
+              set(objective === "REACH" ? { objective, performanceGoal: null } : { objective });
+            }}
+          >
             {CAMPAIGN_OBJECTIVES.map((o) => (
               <option key={o} value={o}>
                 {CAMPAIGN_OBJECTIVE_LABEL[o]}
@@ -1010,6 +1060,27 @@ function SetupFields({ value, onChange, options, winCode, children }: { value: C
               </option>
             ))}
           </select>
+        </label>
+        <label className="space-y-0.5 text-[11.5px]">
+          Mục tiêu hiệu quả
+          <select
+            className={sel}
+            value={value.performanceGoal ?? ""}
+            disabled={value.objective === "REACH"}
+            onChange={(e) => set({ performanceGoal: (PERFORMANCE_GOALS as readonly string[]).includes(e.target.value) ? (e.target.value as CampaignSetup["performanceGoal"]) : null })}
+          >
+            <option value="">
+              {value.objective === "TEMPLATE" ? `Như mẫu${tpl?.optimizationGoal ? ` (${PERFORMANCE_GOAL_LABEL[tpl.optimizationGoal as PerformanceGoal] ?? tpl.optimizationGoal})` : ""}` : value.objective === "MESSAGES" ? "Theo mục tiêu (trò chuyện)" : "Theo mục tiêu (tiếp cận)"}
+            </option>
+            {PERFORMANCE_GOALS.map((g) => (
+              <option key={g} value={g}>
+                {PERFORMANCE_GOAL_LABEL[g]}
+              </option>
+            ))}
+          </select>
+          {value.performanceGoal === "MESSAGING_PURCHASE_CONVERSION" || value.performanceGoal === "VALUE" ? (
+            <span className="block text-muted-foreground">Facebook chỉ nhận khi page đã gửi đủ sự kiện mua qua tin nhắn (≥ 5 / 30 ngày) — không đủ thì bước tạo nhóm báo lỗi, camp chưa chạy.</span>
+          ) : null}
         </label>
         <label className="space-y-0.5 text-[11.5px]">
           Ngân sách ngày (tối đa {formatVND(cap)}/ngày)

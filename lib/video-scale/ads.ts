@@ -27,6 +27,7 @@ import {
   type TemplateCampaign,
 } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
+import { tokenPageName } from "@/lib/queries/facebook-pages";
 import { adsetForPage, buildVideoStorySpec, signedAssetUrl } from "@/lib/video-scale/ad-spec";
 import type { HandlerCtx } from "@/lib/video-scale/handlers";
 import { readVideoAutomation } from "@/lib/video-scale/publish";
@@ -217,7 +218,7 @@ export async function planVideoAd(db: Db, variantId: string, cfg: VideoScaleConf
   if (!template) return { adId: null, note: "chưa khai mẩu quảng cáo mẫu" };
   const [prod] = await db.select({ code: schema.products.customId, modelCode: schema.productModels.code }).from(schema.products).leftJoin(schema.productModels, eq(schema.productModels.productId, schema.products.id)).where(eq(schema.products.id, v.productId)).limit(1);
   const [fp] = await db.select({ name: schema.fanpages.name, alias: schema.fanpages.alias }).from(schema.fanpages).where(eq(schema.fanpages.externalPageId, post.pageId)).limit(1);
-  const names = videoAdNames({ code: prod?.modelCode || prod?.code || "MA", day: vnDay(new Date()), pageLabel: fp?.alias || fp?.name || post.pageId, seq: v.seq, angle: v.angle });
+  const names = videoAdNames({ code: prod?.modelCode || prod?.code || "MA", day: vnDay(new Date()), pageLabel: fp?.alias || fp?.name || (await tokenPageName(post.pageId)) || post.pageId, seq: v.seq, angle: v.angle });
   const mode = sku.adsMode as VideoAdsMode;
   const [row] = await db
     .insert(Ads)

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, adsetNameForGoal, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import type { VariantCaptioner } from "@/lib/creative/caption";
@@ -14,12 +14,12 @@ import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, gender
 import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
-import { campaignKindLabel, describeCampaignSetup, marketerCampaignCodes, parseCampaignSetup, pickMarketerOption, rewriteCampaignName, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { campaignKindLabel, describeCampaignSetup, marketerCampaignCodes, parseCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { pickWinCode, winNameProblem } from "@/lib/creative/win-code";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { marketerNameProblem, marketerOptions } from "@/lib/creative/marketer-code";
 import { listLiveVariants, listRecentBatches } from "@/lib/queries/creative-loop";
-import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
+import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel, mergeFanpageOptions } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
 import { facebookErrorText, testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
@@ -202,7 +202,7 @@ export function testCreativeManualGenPure() {
   assert.match(winNameProblem("VNX2 - 1_27/09_TEST_Q005_3", w5, idx) ?? "", /còn chữ TEST/, "chữ TEST thắng mọi mã trong luật quy tiền ads ⇒ chặn");
   assert.match(winNameProblem("VNX2 - 1_27/09_Hải An_3", w5, idx) ?? "", /không mang mã Q005/);
 
-  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
+  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", performanceGoal: null, budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
   assert.match(describeCampaignSetup({ ...goc, marketerId: "mk-trinh" }, { marketer: "Tuyết Trinh (TRINH)" }), /MKTer Tuyết Trinh \(TRINH\) · .*100\.000đ\/ngày/, "câu mô tả setup nói MKTer và ngân sách NGÀY");
   assert.deepEqual(parseCampaignSetup({ ...goc, marketerId: " mk-trinh ", startAt: "2026-09-28T08:00:00+07:00" }), { ...goc, marketerId: "mk-trinh", startAt: "2026-09-28T08:00:00+07:00" }, "MKTer + giờ bắt đầu lưu cùng bản nháp");
   assert.deepEqual(parseCampaignSetup({ ...goc, startAt: "không phải ngày" }), goc, "giờ hỏng ⇒ chạy ngay, không vỡ bản nháp");
@@ -224,6 +224,38 @@ export function testCreativeManualGenPure() {
   assert.deepEqual((toanQuoc.adset.targeting as Record<string, unknown>).geo_locations, { location_types: ["home", "recent"], countries: ["VN"] }, "geo [] = toàn quốc");
   assert.deepEqual([toanQuoc.campaign?.objective, toanQuoc.adset.optimizationGoal, toanQuoc.adset.destinationType], ["OUTCOME_AWARENESS", "REACH", null]);
   assert.deepEqual(applyCampaignSetup(mau, { ...goc, pageId: "pg-2" }).adset.promotedObject, { page_id: "pg-2", pixel_id: "px" }, "như mẫu + đổi page ⇒ chỉ đổi page của đối tượng quảng bá");
+  // MỤC TIÊU HIỆU QUẢ (chủ shop 28/09/2026): chỉ đè `optimization_goal` của nhóm, mục tiêu CHIẾN DỊCH giữ nguyên.
+  const muaTn = applyCampaignSetup(mau, { ...goc, pageId: "pg-2", performanceGoal: "MESSAGING_PURCHASE_CONVERSION" });
+  assert.equal(muaTn.campaign?.objective, mau.campaign?.objective, "mục tiêu hiệu quả KHÔNG đổi mục tiêu chiến dịch của mẫu");
+  assert.deepEqual([muaTn.adset.optimizationGoal, muaTn.adset.billingEvent, muaTn.adset.destinationType], ["MESSAGING_PURCHASE_CONVERSION", "IMPRESSIONS", "MESSENGER"]);
+  assert.deepEqual(muaTn.adset.promotedObject, { page_id: "pg-2", pixel_id: "px" }, "tối ưu mua giữ trường sự kiện của mẫu, page = page đã chọn");
+  assert.deepEqual([muaTn.adset.bidStrategy, muaTn.adset.bidAmount], ["LOWEST_COST_WITHOUT_CAP", null], "đổi mục tiêu ⇒ giá thầu mẫu (tính cho kết quả cũ) về tự động");
+  const troChuyen = applyCampaignSetup(mau, { ...goc, objective: "MESSAGES", performanceGoal: "LEAD_GENERATION" });
+  assert.deepEqual([troChuyen.campaign?.objective, troChuyen.adset.optimizationGoal, troChuyen.adset.promotedObject], ["OUTCOME_ENGAGEMENT", "LEAD_GENERATION", { page_id: "pg-mau" }], "khách tiềm năng qua tin nhắn: chỉ page, không mang pixel");
+  const cungMucTieu = applyCampaignSetup({ ...mau, adset: { ...mau.adset, optimizationGoal: "VALUE" } }, { ...goc, performanceGoal: "VALUE" });
+  assert.deepEqual([cungMucTieu.adset.bidStrategy, cungMucTieu.adset.bidAmount], ["COST_CAP", "5000"], "trùng mục tiêu của mẫu ⇒ giữ giá thầu của mẫu");
+  assert.equal(applyCampaignSetup(mau, { ...goc, objective: "REACH", performanceGoal: "CONVERSATIONS" }).adset.optimizationGoal, "REACH", "Tiếp cận không nhận mục tiêu tin nhắn");
+  assert.equal(parseCampaignSetup({ ...goc, performanceGoal: "VALUE" })?.performanceGoal, "VALUE");
+  const { performanceGoal: _bo, ...setupCu } = goc;
+  void _bo;
+  assert.equal(parseCampaignSetup(setupCu)?.performanceGoal, null, "setup lưu trước khi có ô này ⇒ như mẫu");
+  assert.equal(parseCampaignSetup({ ...goc, performanceGoal: "LINK_CLICKS" })?.performanceGoal, null, "mã lạ ⇒ như mẫu, không gửi mã chưa khai");
+  assert.match(describeCampaignSetup({ ...goc, performanceGoal: "CONVERSATIONS" }), /Tối đa hóa số cuộc trò chuyện/);
+  // Tên nhóm theo mục tiêu nhóm THẬT sẽ mang.
+  assert.equal(setupOptimizationGoal(goc), null);
+  assert.equal(setupOptimizationGoal({ objective: "MESSAGES", performanceGoal: null }), "CONVERSATIONS");
+  assert.equal(setupOptimizationGoal({ objective: "MESSAGES", performanceGoal: "VALUE" }), "VALUE");
+  assert.equal(adsetNameForGoal("MESS_VN_18-65+_Nữ_costcap", "MESSAGING_PURCHASE_CONVERSION"), "MESSMUA_VN_18-65+_Nữ_autobid", "đổi mục tiêu ⇒ đổi đoạn đầu + giá thầu tự động");
+  assert.equal(adsetNameForGoal("MESS_VN_18-65+_Nữ_costcap", "CONVERSATIONS"), "MESS_VN_18-65+_Nữ_costcap", "cùng mục tiêu mẫu ⇒ giữ nguyên");
+  assert.equal(adsetNameForGoal("Nhóm tôi đặt_VN", "VALUE"), "Nhóm tôi đặt_VN", "tên người tự gõ ⇒ không sửa");
+  assert.equal(adsetNameForGoal("MESS_VN", null), "MESS_VN");
+  // FANPAGE: sổ (page từng ra đơn Pancake) GỘP page token ERP được giao (chủ shop 28/09/2026: "chọn được ít fanpage").
+  const gop = mergeFanpageOptions(
+    [{ id: "p1", name: "Linh Tây Luxury", orders30d: 40, viaToken: false }, { id: "p2", name: "Hải An", orders30d: 3, viaToken: false }],
+    [{ id: "p2", name: "Hải An Fashion (tên FB)", tasks: ["ADVERTISE"] }, { id: "p9", name: "Cindy Pink", tasks: ["ADVERTISE", "CREATE_CONTENT"] }, { id: "p7", name: "Page đã tắt", tasks: [] }],
+    new Set(["p7"]),
+  );
+  assert.deepEqual(gop.map((p) => [p.id, p.name, p.orders30d, p.viaToken]), [["p1", "Linh Tây Luxury", 40, false], ["p2", "Hải An", 3, true], ["p9", "Cindy Pink", 0, true]], "page chưa ra đơn vẫn chọn được · tên sổ thắng tên API · page chủ shop đã tắt vẫn tắt");
   // Cấu hình hiệu lực của bài lẻ + đọc lại setup.
   const ic = instantConfig(cfgOf(), { ...goc, adAccountId: "act_333", pageId: "444", budgetVnd: 150_000 });
   assert.ok(ic.ok && ic.cfg.adAccountId === "333" && ic.cfg.pageId === "444" && ic.cfg.budgetPerVariantVnd === 150_000, "setup ⇒ TKQC / page / ngân sách của lô");
@@ -775,7 +807,7 @@ export async function testCreativeManualGenDb(db: Db) {
     await drawManualGen(db, { genId: s6.ok ? s6.genId : "", imageClient });
     const [anh6] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s6.ok ? s6.genId : ""));
     await reviewManualGenImage(db, { imageId: anh6.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
-    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
+    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", performanceGoal: null, budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
     // Lưu setup cùng bản nháp ⇒ hàng đợi đọc lại đúng setup.
     assert.ok((await saveManualGenDraft(db, { imageId: anh6.id, headline: "H6", primaryText: "Nội dung 6", names: { campaign: "", adset: "", ad: "" }, setup: setup6 }, actor, new Date())).ok);
     assert.deepEqual((await trongHang(anh6.id))?.img.campaignSetup, setup6, "setup camp lưu cùng bài ở hàng đợi");

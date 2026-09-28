@@ -13,6 +13,10 @@ import { marketerOptions, readPayrollEmployees } from "@/lib/creative/marketer-c
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
+import type { TokenPage } from "@/lib/integrations/facebook/ads-write";
+import { readTokenPages } from "@/lib/queries/facebook-pages";
+import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
+import type { FanpageEvidence } from "@/lib/constants/fanpage-rank";
 import { vnStartOfDay } from "@/lib/format";
 import { fanpageDisplayName, readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 
@@ -64,6 +68,8 @@ export type ManualGenImageCard = {
   publishFailure: { batchId: string; canRequeue: boolean; emptyCampaignId: string | null } | null;
   /** Mã win của mã hàng ảnh thuộc về (camp mã win ghi mã này thay cho TEST). `null` = ảnh thiết kế mới / mã hàng không có mã đọc được. */
   winCode: ProductWinCode | null;
+  /** Mã hàng ảnh thể hiện — để xếp fanpage theo đơn / mẫu tương tự của mã. `null` = ảnh thiết kế mới / lượt không gắn mã. */
+  productId: string | null;
 };
 
 type VariantBrief = { status: string | null; batchId: string | null; fbCampaignId: string | null; fbAdsetId: string | null; fbAdId: string | null; fbPendingStep: string | null };
@@ -71,7 +77,7 @@ type VariantBrief = { status: string | null; batchId: string | null; fbCampaignI
 type ImageRow = typeof schema.creativeManualGenImages.$inferSelect;
 
 /** Một dòng ảnh ⇒ thẻ màn hình. Dùng chung cho "Kết quả gen tay" và "Hàng đợi đăng camp" — một cách dựng, không hai. */
-function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number, vb: VariantBrief | null = null, winCode: ProductWinCode | null = null): ManualGenImageCard {
+function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number, vb: VariantBrief | null = null, winCode: ProductWinCode | null = null, productId: string | null = null): ManualGenImageCard {
   const d = parseManualDesignSpec(i.design);
   return {
     id: i.id,
@@ -101,6 +107,7 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
         : null,
     // Ảnh thiết kế mới không mang mã hàng cha (đơn / chấm đi theo mã TK) ⇒ không có camp mã win.
     winCode: d ? null : winCode,
+    productId: d ? null : productId,
   };
 }
 
@@ -159,6 +166,8 @@ export type ManualGenPanel = {
   queue: PublishQueueItem[];
   /** Lựa chọn + mặc định cho khối Setup camp của hộp Đăng camp. */
   setup: CampaignSetupOptions;
+  /** Bằng chứng xếp fanpage theo camp của từng ảnh (`rankFanpagesForCamp`). */
+  fanpageEvidence: FanpageEvidence;
   sources: PixelSourceOption[];
   /** Mẫu cảm hứng, điểm cao trước. */
   inspirations: DesignInspirationOption[];
@@ -248,7 +257,7 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
     const win = run.productId ? (wins.get(run.productId) ?? null) : null;
     const images: ManualGenImageCard[] = imgs
       .filter((x) => x.i.genId === run.id)
-      .map(({ i, purgedAt, imageRow, vb }) => toImageCard(i, imageRow, purgedAt, rate, vb, win));
+      .map(({ i, purgedAt, imageRow, vb }) => toImageCard(i, imageRow, purgedAt, rate, vb, win, run.kind === "DESIGN" ? null : run.productId));
     const counts: Partial<Record<ManualGenImageStatus, number>> = {};
     for (const im of images) counts[im.status] = (counts[im.status] ?? 0) + 1;
     const priced = images.filter((im) => im.costUsd !== "" && Number.isFinite(Number(im.costUsd)));
@@ -331,12 +340,17 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
 
 /** Một TKQC chọn được khi "Đăng camp" — tài khoản ĐÃ ĐỒNG BỘ chi tiêu vào ERP (`ad_spends`). `spend30dVnd` để xếp hạng. */
 export type AdAccountOption = { id: string; name: string; spend30dVnd: number };
-/** Một fanpage chọn được — sổ fanpage (`fanpages`, khoá = id page Facebook). `orders30d` để xếp hạng. */
-export type FanpageOption = { id: string; name: string; orders30d: number };
+/**
+ * Một fanpage chọn được — sổ fanpage (`fanpages`, khoá = id page Facebook) gộp với page token ERP được giao. `orders30d` để
+ * xếp hạng; `viaToken` = token của ERP thấy page này (đăng camp / đăng Reel dùng được quyền của nó).
+ */
+export type FanpageOption = { id: string; name: string; orders30d: number; viaToken: boolean };
 
 export type CampaignSetupOptions = {
   accounts: AdAccountOption[];
   pages: FanpageOption[];
+  /** Không đọc được danh sách page của token (câu lỗi Facebook) — ô chọn chỉ còn page của sổ fanpage. `null` = đọc được / không có token. */
+  tokenPagesError: string | null;
   /** MKTer chọn được (trang Lương, còn làm, có bí danh) + mã vào tên chiến dịch. Mặc định KHÔNG chọn ai — máy không đoán người. */
   marketers: MarketerOption[];
   /** Mặc định = lựa chọn DÙNG NHIỀU: TKQC chi nhiều nhất 30 ngày · page ra nhiều đơn nhất 30 ngày · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu. */
@@ -367,8 +381,28 @@ export async function listAdAccountOptions(db: Db, now: Date, configAccountId: s
   return out.sort((x, y) => y.spend30dVnd - x.spend30dVnd);
 }
 
-/** Fanpage trong sổ (đang bật), RA NHIỀU ĐƠN NHẤT 30 ngày trước. Fanpage của cấu hình luôn có mặt. */
-export async function listFanpageOptions(db: Db, now: Date, configPageId: string): Promise<FanpageOption[]> {
+/**
+ * GỘP HAI NGUỒN FANPAGE — hàm THUẦN. Sổ `fanpages` chỉ có page TỪNG RA ĐƠN trên Pancake (job quy kết dựng từ
+ * `orders.page_id`), nên page mới share cho System User mà chưa ra đơn không bao giờ vào sổ (chủ shop 28/09/2026: "tôi chọn
+ * được ít fanpage vậy?"). Page của token được THÊM vào (0 đơn/30 ngày, tên theo Facebook); page chủ shop đã TẮT trong sổ
+ * (`inactiveIds`) vẫn tắt — token thấy nó không có nghĩa là người muốn dùng lại. Page trùng thì giữ dòng của sổ (tên người
+ * đặt thắng tên API), chỉ đánh dấu `viaToken`.
+ */
+export function mergeFanpageOptions(fromLedger: readonly FanpageOption[], tokenPages: readonly TokenPage[], inactiveIds: ReadonlySet<string> = new Set()): FanpageOption[] {
+  const seen = new Map(tokenPages.map((p) => [p.id, p]));
+  const out: FanpageOption[] = fromLedger.map((p) => ({ ...p, viaToken: seen.has(p.id) }));
+  for (const p of tokenPages) {
+    if (inactiveIds.has(p.id) || out.some((x) => x.id === p.id)) continue;
+    out.push({ id: p.id, name: p.name || p.id, orders30d: 0, viaToken: true });
+  }
+  return out.sort((x, y) => y.orders30d - x.orders30d || x.name.localeCompare(y.name));
+}
+
+/**
+ * Fanpage chọn được: sổ fanpage (đang bật, RA NHIỀU ĐƠN NHẤT 30 ngày trước) GỘP với page mà token ERP được giao
+ * (`mergeFanpageOptions`). Fanpage của cấu hình luôn có mặt.
+ */
+export async function listFanpageOptions(db: Db, now: Date, configPageId: string, tokenPages: readonly TokenPage[] = []): Promise<FanpageOption[]> {
   const f = schema.fanpages;
   const o = schema.orders;
   const since = new Date(now.getTime() - 30 * 86_400_000);
@@ -379,26 +413,103 @@ export async function listFanpageOptions(db: Db, now: Date, configPageId: string
     .groupBy(o.pageId)
     .as("c");
   const rows = await db
-    .select({ id: f.externalPageId, name: f.name, alias: f.alias, n: sql<number>`coalesce(${counts.n}, 0)::int` })
+    .select({ id: f.externalPageId, name: f.name, alias: f.alias, active: f.active, n: sql<number>`coalesce(${counts.n}, 0)::int` })
     .from(f)
-    .leftJoin(counts, eq(counts.pageId, f.externalPageId))
-    .where(eq(f.active, true));
-  const out = rows.map((r) => ({ id: r.id, name: r.alias || r.name || r.id, orders30d: Number(r.n ?? 0) }));
-  if (configPageId && !out.some((x) => x.id === configPageId)) out.push({ id: configPageId, name: `Page ${configPageId} (cấu hình)`, orders30d: 0 });
-  return out.sort((x, y) => y.orders30d - x.orders30d || x.name.localeCompare(y.name));
+    .leftJoin(counts, eq(counts.pageId, f.externalPageId));
+  const ledger = rows.filter((r) => r.active).map((r) => ({ id: r.id, name: r.alias || r.name || r.id, orders30d: Number(r.n ?? 0), viaToken: false }));
+  const out = mergeFanpageOptions(ledger, tokenPages, new Set(rows.filter((r) => !r.active).map((r) => r.id)));
+  if (configPageId && !out.some((x) => x.id === configPageId)) out.push({ id: configPageId, name: `Page ${configPageId} (cấu hình)`, orders30d: 0, viaToken: false });
+  return out;
+}
+
+/**
+ * Phần bằng chứng fanpage KHÔNG phụ thuộc mã đang xem: page đã có đơn xác nhận + page chưa có đơn đã chạy ads mã nào.
+ * Đệm 120 giây (một lượt mở hộp soạn bài không đổi được sổ đơn / sổ ads).
+ *
+ * Page của một chiến dịch = page trong `story_id` của các mẩu thuộc chiến dịch ấy (`fb_ads`), lấy DISTINCT (chiến dịch,
+ * page) TRƯỚC khi nối vào `ad_spends` — nối thẳng từng mẩu sẽ nhân tiền chiến dịch lên theo số mẩu.
+ */
+async function fanpageAdHistory(db: Db): Promise<{ orderedPages: string[]; ranByPage: FanpageEvidence["ranByPage"] }> {
+  return memo("creative-manual-fanpage-history", 120_000, async () => {
+    const o = schema.orders;
+    const s = schema.adSpends;
+    const fa = schema.fbAds;
+    const cp = db
+      .selectDistinct({ campaignId: fa.campaignId, pageId: sql<string>`split_part(${fa.storyId}, '_', 1)`.as("page_id") })
+      .from(fa)
+      .where(and(isNotNull(fa.campaignId), sql`${fa.storyId} like '%\\_%'`))
+      .as("cp");
+    const [ordered, ran] = await Promise.all([
+      db.selectDistinct({ pageId: o.pageId }).from(o).where(and(CONFIRMED_ORDER, isNotNull(o.pageId))),
+      db
+        .select({ pageId: cp.pageId, productId: s.productId, spend: sql<number>`sum(${s.spend})::bigint` })
+        .from(s)
+        .innerJoin(cp, eq(cp.campaignId, s.campaignId))
+        .where(and(isNotNull(s.productId), eq(s.excluded, false), sql`${s.spend} > 0`))
+        .groupBy(cp.pageId, s.productId),
+    ]);
+    const orderedPages = ordered.map((r) => r.pageId).filter((x): x is string => !!x);
+    const has = new Set(orderedPages);
+    const ranByPage: FanpageEvidence["ranByPage"] = {};
+    for (const r of ran) {
+      if (!r.pageId || !r.productId || has.has(r.pageId)) continue;
+      (ranByPage[r.pageId] ??= []).push({ productId: r.productId, spendVnd: Number(r.spend) });
+    }
+    return { orderedPages, ranByPage };
+  });
+}
+
+/**
+ * BẰNG CHỨNG XẾP FANPAGE cho các mã đang hiện (`rankFanpagesForCamp` — chủ shop 28/09/2026): đơn xác nhận theo (mã, page),
+ * page chưa ra đơn đã chạy mã nào, và DNA của các mã liên quan. Không có mã nào ⇒ vẫn trả phần lịch sử ads (ảnh thiết kế
+ * mới so bằng DNA của chính nó).
+ */
+export async function loadFanpageEvidence(db: Db, productIds: readonly string[]): Promise<FanpageEvidence> {
+  const ids = [...new Set(productIds.filter((x) => !!x))];
+  const o = schema.orders;
+  const oi = schema.orderItems;
+  const [hist, byProduct] = await Promise.all([
+    fanpageAdHistory(db),
+    ids.length
+      ? db
+          .select({ productId: oi.productId, pageId: o.pageId, n: sql<number>`count(distinct ${o.id})::int` })
+          .from(oi)
+          .innerJoin(o, eq(o.id, oi.orderId))
+          .where(and(inArray(oi.productId, ids), CONFIRMED_ORDER, isNotNull(o.pageId), eq(oi.isBonus, false)))
+          .groupBy(oi.productId, o.pageId)
+      : Promise.resolve([] as { productId: string | null; pageId: string | null; n: number }[]),
+  ]);
+  const ordersByProduct: FanpageEvidence["ordersByProduct"] = {};
+  for (const r of byProduct) if (r.productId && r.pageId) (ordersByProduct[r.productId] ??= {})[r.pageId] = Number(r.n);
+  const related = [...new Set([...ids, ...Object.values(hist.ranByPage).flatMap((xs) => xs.map((x) => x.productId))])];
+  const [dnaRows, labelRows] = related.length
+    ? await Promise.all([
+        db.select({ productId: schema.productDna.productId, dna: schema.productDna.dna }).from(schema.productDna).where(inArray(schema.productDna.productId, related)),
+        db.select({ id: schema.products.id, name: schema.products.name, customId: schema.products.customId }).from(schema.products).where(inArray(schema.products.id, related)),
+      ])
+    : [[], []];
+  return {
+    orderedPages: hist.orderedPages,
+    ordersByProduct,
+    ranByPage: hist.ranByPage,
+    dna: Object.fromEntries(dnaRows.map((r) => [r.productId, { ...(r.dna ?? {}) }])),
+    productLabel: Object.fromEntries(labelRows.map((r) => [r.id, r.customId || r.name])),
+  };
 }
 
 /** Lựa chọn + mặc định cho khối "Setup camp" của hộp Đăng camp. */
 export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccountId: string; pageId: string; budgetPerVariantVnd: number }): Promise<CampaignSetupOptions> {
-  const [accounts, pages, tpl, employees] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId), readNamingTemplate(db), readPayrollEmployees(db)]);
+  const token = await readTokenPages();
+  const [accounts, pages, tpl, employees] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId, token.pages), readNamingTemplate(db), readPayrollEmployees(db)]);
   const t = tpl?.targeting ?? null;
   return {
     accounts,
     pages,
+    tokenPagesError: token.error,
     marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], performanceGoal: null, budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
     template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
   };
 }
@@ -430,7 +541,7 @@ export async function listPublishQueue(db: Db, rate: number = env.facebook.usdTo
     rows.filter((r) => r.run.kind !== "DESIGN" && r.run.productId).map((r) => r.run.productId as string),
   );
   return rows.map((r) => ({
-    img: toImageCard(r.i, r.imageRow, r.purgedAt, rate, null, r.run.productId ? (wins.get(r.run.productId) ?? null) : null),
+    img: toImageCard(r.i, r.imageRow, r.purgedAt, rate, null, r.run.productId ? (wins.get(r.run.productId) ?? null) : null, r.run.kind === "DESIGN" ? null : r.run.productId),
     runLabel: r.run.kind === "DESIGN" || (r.run.kind === "EDIT" && !r.run.productId) ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
     runCreatedAt: r.run.createdAt.toISOString(),
   }));
@@ -511,12 +622,15 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     loadCampaignSetupOptions(db, now, config),
   ]);
   const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
+  const shownImages = [...runs.flatMap((r) => r.images), ...queue.map((q) => q.img)];
+  const fanpageEvidence = await loadFanpageEvidence(db, shownImages.filter((im) => im.status === "APPROVED" && im.productId).map((im) => im.productId as string));
   // Bài lẻ đứng tên theo cấu hình HIỆN TẠI (lô `INSTANT` chụp cấu hình lúc bấm), không theo ảnh chụp của lô hằng ngày.
   const [campCtx, campSeq] = await Promise.all([namingCfg === config ? Promise.resolve(ctx) : loadNamingContext(db, config), nextNameSeqOnDay(db, vnDay(now))]);
   return {
     runs,
     queue,
     setup,
+    fanpageEvidence,
     sources,
     inspirations,
     pricing: {

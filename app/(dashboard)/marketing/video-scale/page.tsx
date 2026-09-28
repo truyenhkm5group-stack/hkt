@@ -6,6 +6,7 @@ import { VIDEO_PRICE_SOURCE, VIDEO_PROVIDER_LABEL, fakeProviderAllowed, variantR
 import { env } from "@/lib/env";
 import { listJobs, listMusic, listPageConfigs, listPosts, listRuns, listVariants, listWinProducts, loadVideoScaleCounts, videoSpendOnDay } from "@/lib/queries/video-scale";
 import { listAdAccountOptions, listFanpageOptions } from "@/lib/queries/creative-manual-gen";
+import { readTokenPages } from "@/lib/queries/facebook-pages";
 import { activeAdsDailyVnd, listAdActions, listAds } from "@/lib/queries/video-scale";
 import { killRuleCount, templateAdIdFor } from "@/lib/video-scale/ads";
 import { AdsPanel } from "./ads-panel";
@@ -51,7 +52,9 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
   const user = await requirePermission("ideas:view");
   const raw = await searchParams;
   const db = await getDb();
-  const [counts, cfg, ff, spend, automation, fanpages] = await Promise.all([loadVideoScaleCounts(db), readVideoScaleConfig(db), ffmpegVersion(), videoSpendOnDay(db), readVideoAutomation(db), listFanpageOptions(db, new Date(), "")]);
+  // Fanpage = sổ fanpage (page từng ra đơn Pancake) GỘP page token ERP được giao — page mới share chưa ra đơn vẫn chọn được.
+  const tokenPages = await readTokenPages();
+  const [counts, cfg, ff, spend, automation, fanpages] = await Promise.all([loadVideoScaleCounts(db), readVideoScaleConfig(db), ffmpegVersion(), videoSpendOnDay(db), readVideoAutomation(db), listFanpageOptions(db, new Date(), "", tokenPages.pages)]);
   const pageName = new Map(fanpages.map((p) => [p.id, p.name]));
   const defaultTab = counts.review > 0 ? "duyet" : counts.activeJobs > 0 ? "hang-doi" : "ma-win";
   const tabRaw = param(raw, "tab");
@@ -79,6 +82,12 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
           </>
         }
       />
+
+      {tokenPages.error ? (
+        <p className="rounded-lg border border-amber-500/60 bg-amber-500/5 p-2.5 text-[12.5px]">
+          Không đọc được danh sách fanpage của token ERP ({tokenPages.error}) — ô chọn fanpage chỉ còn page từng ra đơn trên Pancake.
+        </p>
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-3">
         <div className="rounded-lg border p-3 text-[13px]">

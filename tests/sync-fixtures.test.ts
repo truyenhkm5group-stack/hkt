@@ -259,6 +259,7 @@ import { testCompanyOsAdOrderUnify } from "./company-os-ad-order-unify.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
+import { testFanpageRankDb, testFanpageRankPure } from "./fanpage-rank.test";
 import { testVideoScaleDb, testVideoScalePure } from "./video-scale.test";
 import { testVideoScaleReelDb, testVideoScaleReelPure } from "./video-scale-reel.test";
 import { testVideoScaleAdsDb, testVideoScaleAdsPure } from "./video-scale-ads.test";
@@ -1841,6 +1842,9 @@ async function main() {
   await testCreativeManualDb(db);
   testCreativeManualGenPure();
   await testCreativeManualGenDb(db);
+  // Xếp fanpage theo camp (chủ shop 28/09/2026): mã win ⇒ page đã ra đơn mã ấy; TEST ⇒ page chưa ra đơn đã chạy mẫu tương tự.
+  testFanpageRankPure();
+  await testFanpageRankDb(db);
   // Video Scale cho mã win (docs/video-scale.md): hàng đợi, trần tiền, AMBIGUOUS, hậu kỳ + QC thật khi máy có ffmpeg.
   testVideoScalePure();
   await testVideoScaleDb(db);
