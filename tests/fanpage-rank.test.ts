@@ -36,6 +36,8 @@ export function testFanpageRankPure() {
     orderedPages: ["a", "b"],
     ordersByProduct: { q005: { b: 7, a: 2 } },
     ranByPage: {
+      // Page ĐÃ ra đơn cũng chạy mẫu rất gần và chi nhiều nhất — vẫn KHÔNG được ưu tiên cho camp test.
+      a: [{ productId: "dam-gan", spendVnd: 50_000_000 }],
       c: [{ productId: "dam-gan", spendVnd: 100_000 }],
       d: [
         { productId: "dam-xa", spendVnd: 900_000 },
