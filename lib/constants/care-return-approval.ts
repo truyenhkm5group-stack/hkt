@@ -61,3 +61,43 @@ export function returnApproved(input: { code?: number | null; text?: string | nu
   if (!text) return false;
   return RETURN_APPROVED_TEXTS.some((k) => text.includes(k));
 }
+
+/**
+ * ═══════════ DÒNG HÀNH TRÌNH DO PANCAKE CHUYỂN TIẾP — NGUỒN DUY NHẤT CÓ MÃ 515 ═══════════
+ *
+ * Đo production 28/09/2026: webhook Viettel Post gửi cho ERP **chưa từng** mang mã 515 (0 dòng trên
+ * toàn sổ), trong khi Pancake chuyển tiếp nguyên văn "Bưu cục phát duyệt hoàn" cho 703 kiện. Kiện
+ * đã duyệt hoàn vì thế nằm lại hàng đợi care tới khi webhook báo 502 (trung vị 7,7 giờ, p90 63 giờ
+ * sau khi duyệt) — nhân viên mở ra và không làm được gì (chủ shop báo: PKE1529361891).
+ *
+ * Dòng Pancake KHÔNG được quyền dựng trạng thái vận đơn (`CARRIER_EVENT_SOURCES`, lib/constants/truth.ts):
+ * mốc của nó là giờ Pancake ghi nhận, và trộn vào từng kéo 122 kiện đã giao về "đang đi phát". Ở
+ * đây nó chỉ được dùng cho ĐÚNG MỘT việc: đóng ca care khi ĐVVC đã duyệt hoàn — không đổi trạng
+ * thái vận đơn, kết quả đơn, tiền hay tồn kho.
+ *
+ * So KHỚP NGUYÊN VĂN (đã chuẩn hoá khoảng trắng), không so chuỗi con: tên của 505 "Tồn - Thông báo
+ * chuyển hoàn bưu cục gốc" CHỨA "chuyển hoàn bưu cục gốc" — tên của 502. So chuỗi con là đóng nhầm
+ * ca đúng lúc shop còn xin phát tiếp được.
+ */
+export const PANCAKE_RELAY_APPROVED_STATUSES: readonly string[] = ["Bưu cục phát duyệt hoàn", "Chuyển hoàn bưu cục gốc"];
+
+const chuanHoa = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+const RELAY_SET = new Set(PANCAKE_RELAY_APPROVED_STATUSES.map(chuanHoa));
+
+/** Một dòng Pancake chuyển tiếp có phải lời VTP "đã duyệt hoàn / đã chuyển hoàn" không. Khớp nguyên văn. */
+export function isRelayedReturnApproval(status: string | null | undefined): boolean {
+  return RELAY_SET.has(chuanHoa(String(status ?? "")));
+}
+
+/**
+ * Ca care có được đóng vì Pancake đã chuyển tiếp lời duyệt hoàn không. Hàm THUẦN.
+ *
+ * Dòng duyệt phải MỚI HƠN lần đề nghị hoàn mà ảnh chụp kiện đang mang (`proposalAt`): duyệt đi sau
+ * đề nghị. Một dòng duyệt CŨ hơn 505 hiện tại nghĩa là kiện đã từng hoàn rồi được xin phát tiếp và
+ * lại hỏng — lần này chưa ai duyệt, ca vẫn còn việc. Không có mốc đề nghị thì không kết luận.
+ */
+export function relayApprovedAfterProposal(input: { relayApprovedAt: Date | null; proposalAt: Date | null }): boolean {
+  const { relayApprovedAt, proposalAt } = input;
+  if (!relayApprovedAt || !proposalAt) return false;
+  return relayApprovedAt.getTime() > proposalAt.getTime();
+}

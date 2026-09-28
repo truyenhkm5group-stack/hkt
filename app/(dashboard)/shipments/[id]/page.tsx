@@ -87,7 +87,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         }
         actions={
           <>
-            {isVtp ? <SyncOrderButton shipmentId={s.id} label="Cập nhật từ Viettel Post" /> : null}
+            {isVtp ? <SyncOrderButton orderId={s.orderId ?? undefined} shipmentId={s.id} label="Cập nhật trạng thái" /> : null}
             {isVtp ? <RepushButton shipmentId={s.id} /> : null}
             {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} vtpStatus={s.vtpStatus} rawStatus={s.vtpStatusName} tracking={number} trackingCapability={s.trackingCapability} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
             {vtpUrl ? (

@@ -3,7 +3,15 @@ import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
-import { RETURN_APPROVED_CODES, RETURN_APPROVED_TEXTS, RETURN_PROPOSED_CODES, returnApproved } from "@/lib/constants/care-return-approval";
+import {
+  isRelayedReturnApproval,
+  PANCAKE_RELAY_APPROVED_STATUSES,
+  relayApprovedAfterProposal,
+  RETURN_APPROVED_CODES,
+  RETURN_APPROVED_TEXTS,
+  RETURN_PROPOSED_CODES,
+  returnApproved,
+} from "@/lib/constants/care-return-approval";
 import { VTP_STATUS } from "@/lib/constants/viettelpost";
 import { mapVtpStatusText } from "@/lib/integrations/viettelpost/statement";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
@@ -234,8 +242,79 @@ export async function testCareReturnApproval(db: Db) {
   assert.equal(sau505.careOutcome, "PENDING", "505 mới là ĐỀ NGHỊ hoàn — shop còn xin phát tiếp được, ca phải còn mở");
   assert.equal(sau505.active, true);
 
+  /* ───── 8 · LỜI DUYỆT HOÀN ĐẾN QUA PANCAKE (webhook VTP không bao giờ gửi 515 — đo 28/09/2026) ───── */
+  // Luật thuần: khớp NGUYÊN VĂN, không khớp chuỗi con — tên 505 CHỨA tên 502.
+  const TEN_505 = "Tồn - Thông báo chuyển hoàn bưu cục gốc";
+  assert.ok(!PANCAKE_RELAY_APPROVED_STATUSES.some((t) => t.toLowerCase() === TEN_505.toLowerCase()), "không câu nào trong danh sách là tên của 505");
+  assert.equal(isRelayedReturnApproval(TEN_505), false, "505 (đề nghị) KHÔNG phải lời duyệt, dù chứa chữ “chuyển hoàn bưu cục gốc”");
+  assert.equal(isRelayedReturnApproval("Bưu cục phát duyệt hoàn"), true);
+  assert.equal(isRelayedReturnApproval("  chuyển hoàn   bưu cục gốc "), true, "chuẩn hoá khoảng trắng + chữ hoa");
+  assert.equal(isRelayedReturnApproval(null), false);
+  assert.equal(relayApprovedAfterProposal({ relayApprovedAt: gio(1), proposalAt: gio(2) }), true);
+  assert.equal(relayApprovedAfterProposal({ relayApprovedAt: gio(3), proposalAt: gio(2) }), false, "duyệt CŨ hơn đề nghị hiện tại ⇒ lần hỏng này chưa ai duyệt");
+  assert.equal(relayApprovedAfterProposal({ relayApprovedAt: gio(1), proposalAt: null }), false, "không có mốc đề nghị thì không kết luận");
+
+  const dat505 = async (id: string, luc: Date) =>
+    db
+      .update(schema.shipments)
+      .set({ stage: "RETURNING", vtpStatus: 505, vtpStatusName: TEN_505, vtpStatusDate: luc, isFinal: false })
+      .where(sql`${schema.shipments.id} = ${id}`);
+
+  // (E) Pancake chuyển tiếp "Bưu cục phát duyệt hoàn" MỚI HƠN 505 ⇒ đóng ca, KHÔNG đổi trạng thái vận đơn.
+  const sE = await dungKien(db, "s5");
+  const caE = await moCa(db, sE, gio(8));
+  await dat505(sE, gio(3));
+  await suKien(db, sE, { source: "PANCAKE", status: "Bưu cục phát duyệt hoàn", name: "Duyệt hoàn", stage: null, at: gio(1) });
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sE] });
+  const sauE = await doc(db, caE);
+  assert.equal(sauE.careOutcome, "RESCUE_FAILED", "VTP đã duyệt hoàn (qua Pancake) ⇒ ca chốt không cứu được");
+  assert.equal(sauE.active, false, "và rời hàng đợi care");
+  const kienE = await db.query.shipments.findFirst({ where: sql`${schema.shipments.id} = ${sE}`, columns: { stage: true, vtpStatus: true } });
+  assert.deepEqual(kienE, { stage: "RETURNING", vtpStatus: 505 }, "dòng Pancake KHÔNG được dựng trạng thái vận đơn — chỉ đóng ca");
+
+  // (F) Lời duyệt CŨ HƠN lần 505 hiện tại (kiện từng hoàn, được xin phát tiếp, lại hỏng) ⇒ ca còn mở.
+  const sF = await dungKien(db, "s6");
+  const caF = await moCa(db, sF, gio(8));
+  await suKien(db, sF, { source: "PANCAKE", status: "Bưu cục phát duyệt hoàn", name: "Duyệt hoàn", stage: null, at: gio(6) });
+  await dat505(sF, gio(2));
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sF] });
+  assert.equal((await doc(db, caF)).active, true, "lời duyệt cũ hơn đề nghị hiện tại không đóng ca");
+
+  // (G) Pancake chuyển tiếp chính tên 505 ⇒ vẫn là ĐỀ NGHỊ, ca còn mở.
+  const sG = await dungKien(db, "s7");
+  const caG = await moCa(db, sG, gio(8));
+  await dat505(sG, gio(3));
+  await suKien(db, sG, { source: "PANCAKE", status: TEN_505, name: "Phát thất bại nhiều lần", stage: null, at: gio(1) });
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sG] });
+  assert.equal((await doc(db, caG)).active, true, "tên 505 qua Pancake vẫn chỉ là đề nghị hoàn");
+
+  // (H) Chữ duyệt đến từ NGUỒN KHÁC Pancake theo đường này không được tính (đường VTP có luật riêng của nó).
+  const sH = await dungKien(db, "s8");
+  const caH = await moCa(db, sH, gio(8));
+  await dat505(sH, gio(3));
+  await suKien(db, sH, { source: "VTP_WEBHOOK", status: "Bưu cục phát duyệt hoàn", name: "Bưu cục phát duyệt hoàn", stage: null, at: gio(1) });
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sH] });
+  assert.equal((await doc(db, caH)).active, true, "đường này chỉ đọc dòng PANCAKE; ảnh chụp VTP đi đường returnApproved");
+
+  // (I) Đúng hình dạng PKE1529361891 (28/09/2026): ảnh chụp là dòng tệp "Chờ xử lý" KHÔNG mang mã (tới
+  // sau webhook 505 sáu giây nên thắng), chặng RETURNING — vẫn là đề nghị hoàn. Pancake chuyển tiếp lời
+  // duyệt mới hơn ⇒ đóng ca. Bản đầu của luật đòi mã 505 trên ảnh chụp và bỏ sót đúng ca chủ shop báo.
+  const sI = await dungKien(db, "s9");
+  const caI = await moCa(db, sI, gio(8));
+  await db
+    .update(schema.shipments)
+    .set({ stage: "RETURNING", vtpStatus: null, vtpStatusName: "Chờ xử lý", vtpStatusDate: gio(3), isFinal: false })
+    .where(sql`${schema.shipments.id} = ${sI}`);
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sI] });
+  assert.equal((await doc(db, caI)).active, true, "chưa có lời duyệt nào ⇒ ca còn mở (“Chờ xử lý” chỉ là chờ quyết định hoàn)");
+  await suKien(db, sI, { source: "PANCAKE", status: "Bưu cục phát duyệt hoàn", name: "Duyệt hoàn", stage: null, at: gio(1) });
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sI] });
+  const sauI = await doc(db, caI);
+  assert.equal(sauI.active, false, "ảnh chụp “Chờ xử lý” mã rỗng + Pancake đã duyệt ⇒ rời hàng đợi");
+  assert.equal(sauI.careOutcome, "RESCUE_FAILED");
+
   /* ───── dọn ───── */
-  const ids = [sA, sB, sC, sD];
+  const ids = [sA, sB, sC, sD, sE, sF, sG, sH, sI];
   await db.delete(schema.careActions).where(sql`${schema.careActions.shipmentId} in ${ids}`);
   await db.delete(schema.careCaseEvents).where(sql`${schema.careCaseEvents.shipmentId} in ${ids}`);
   await db.delete(schema.shipmentCare).where(sql`${schema.shipmentCare.shipmentId} in ${ids}`);

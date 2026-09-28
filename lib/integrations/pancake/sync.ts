@@ -21,7 +21,8 @@ import {
 } from "@/lib/integrations/pancake/mapper";
 import { publish } from "@/lib/realtime/bus";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
-import { afterShipmentStateChange } from "@/lib/care/lifecycle";
+import { afterShipmentStateChange, reconcileCareCoverage } from "@/lib/care/lifecycle";
+import { isRelayedReturnApproval } from "@/lib/constants/care-return-approval";
 import { getSyncState, runSyncJob, setSyncState, type SyncContext, type SyncTrigger } from "@/lib/sync/runner";
 
 const COD_RANK: Record<CodStatus, number> = { NOT_APPLICABLE: 0, PENDING: 1, COLLECTED: 2, RECONCILED: 3, PAID_TO_BANK: 4, DISPUTED: 5 };
@@ -482,6 +483,10 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   const settled = settleFromHistory ? await materializeShipmentState(db, shipmentId) : null;
   // Chứng từ ĐVVC đến qua Pancake làm trạng thái đổi ⇒ vòng đời care đi theo, cùng cửa với webhook.
   if (settled?.changed) await afterShipmentStateChange(db, shipmentId, { source: "PANCAKE" }).catch(() => undefined);
+  // Webhook VTP không bao giờ gửi 515 "đã duyệt hoàn"; Pancake chuyển tiếp nguyên văn. Có dòng ấy thì
+  // đối chiếu ca care của ĐÚNG kiện này ngay — không đợi lượt 10 phút (lib/constants/care-return-approval.ts).
+  // Chỉ đóng ca; trạng thái vận đơn vẫn do chứng từ VTP dựng.
+  if (s.events.some((e) => isRelayedReturnApproval(e.status))) await reconcileCareCoverage(db, new Date(), { shipmentIds: [shipmentId] }).catch(() => undefined);
   publish({ type: "shipment", shipmentId, status: (settled?.after as ShipmentStage) ?? stage });
 }
 
