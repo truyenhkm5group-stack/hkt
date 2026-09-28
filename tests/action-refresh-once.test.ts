@@ -25,6 +25,8 @@ const boChuThich = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/
 const demRefresh = (f: string) => (boChuThich(doc(f)).match(/router\.refresh\s*\(/g) ?? []).length;
 
 const D = "app/(dashboard)/";
+/** Khoá trong GIU: tương đối theo `D`, trừ tệp dùng chung ở `components/` (ghi nguyên đường dẫn). */
+const duong = (f: string) => (f.startsWith("components/") ? f : D + f);
 
 /** Đã gỡ HẾT `router.refresh()` — mọi lượt refresh cũ đều đứng sau một action đã revalidate trang này. */
 const SACH: string[] = [
@@ -39,6 +41,7 @@ const SACH: string[] = [
   "bank/supplier-link-dialog.tsx",
   "bank/unlink-button.tsx",
   "cockpit/decision-controls.tsx",
+  "cod/statement-upload.tsx",
   "cs/case-dialog.tsx",
   "cs/cs-table.tsx",
   "cs/customer-queue-table.tsx",
@@ -94,6 +97,7 @@ const SACH: string[] = [
   "models/[id]/suggestion-transition.tsx",
   "models/registry-actions.tsx",
   "my-payslip/respond-form.tsx",
+  "orders/[id]/promised-delivery.tsx",
   "outreach/outreach-config.tsx",
   "outreach/outreach-table.tsx",
   "payroll/adjustments/adjustment-manager.tsx",
@@ -108,6 +112,8 @@ const SACH: string[] = [
   "production/_components/cost-sheets.tsx",
   "production/_components/samples-panel.tsx",
   "production/topics/[id]/topic-controls.tsx",
+  "products/[id]/product-notes.tsx",
+  "reports/assumptions-form.tsx",
   "reports/returns/action-board.tsx",
   "settings/users/access-cell.tsx",
   "settings/users/department-cell.tsx",
@@ -118,7 +124,11 @@ const SACH: string[] = [
   "settings/users/roles-panel.tsx",
   "settings/users/user-dialog.tsx",
   "settings/users/users-table.tsx",
+  "shipments/[id]/reason-panel.tsx",
+  "shipments/[id]/vtp-actions.tsx",
+  "shipments/care-row-actions.tsx",
   "shipments/reconcile-panel.tsx",
+  "shipments/workbench.tsx",
   "tech/agents/agent-controls.tsx",
   "tech/deployments/deployment-form.tsx",
   "tech/incidents/[id]/incident-actions.tsx",
@@ -139,7 +149,16 @@ const SACH: string[] = [
   "work/settings/targets-panel.tsx",
   "work/settings/weights-panel.tsx",
   "work/today/panels.tsx",
-].map((f) => D + f).concat(["components/ai-copilot.tsx", "components/work/bsc-editor.tsx", "components/work/manual-task-dialog.tsx", "components/work/okr-editor.tsx", "components/work/work-list.tsx"]);
+].map((f) => D + f).concat([
+  "components/ai-copilot.tsx",
+  "components/metadata/dynamic-form.tsx",
+  "components/pages/page-action-button.tsx",
+  "components/platform/module-config-table.tsx",
+  "components/work/bsc-editor.tsx",
+  "components/work/manual-task-dialog.tsx",
+  "components/work/okr-editor.tsx",
+  "components/work/work-list.tsx",
+]);
 
 /**
  * Còn giữ refresh CÓ LÝ DO — số lượng phải đúng bằng số lượt được giữ: action lỗi GIỮA CHỪNG sau
@@ -152,6 +171,21 @@ const GIU: Record<string, number> = {
   // requestCarrierAction: bàn làm việc care (workbench.tsx) gọi CÙNG action và cố ý KHÔNG dựng lại cả
   // hàng đợi sau mỗi dòng — thêm revalidatePath vào action là bắt bàn ấy dựng lại mỗi cú bấm.
   "shipments/care-drawer.tsx": 1,
+  // Đợt 3 (28/09/2026) — refresh KHÔNG đứng sau một server action đã revalidate:
+  // payroll-autopilot: nhánh THÀNH CÔNG đã bỏ refresh (action `refresh()` phủ /payroll/autopilot); chỉ
+  // nhánh LỖI còn làm mới — lỗi của action không revalidate mà thường là lúc trang đang cũ (người khác
+  // vừa trả / vừa chuyển kỳ) hoặc đã ghi dở (gửi phiếu hỏng giữa chừng).
+  "payroll/autopilot/controls.tsx": 1,
+  "inventory/returns/receive-scan-desk.tsx": 1, // nút "Làm mới hàng đợi" người bấm chủ động
+  "landing/auto-refresh.tsx": 2, // đồng hồ tự làm mới + lúc tab hiện lại — không có action nào
+  "outreach/broadcast/broadcast-history.tsx": 1, // thăm dò theo nhịp khi có lượt gửi đang chạy
+  "integrations/backfill-form.tsx": 1, // sau fetch /api/sync/pancake-all — route không revalidate trang
+  "shipments/shipments-table.tsx": 1, // sau fetch /api/shipments/refresh
+  "chatbot/import-form.tsx": 1, // 5 giây sau fetch nạp tệp bot — đợi container dựng lại
+  "components/realtime-provider.tsx": 2, // sự kiện SSE /api/events + dự phòng 5 phút khi mất kết nối
+  "components/refresh-button.tsx": 1, // nút "Làm mới" — refreshReportData cố ý KHÔNG revalidatePath
+  "components/sync-order-button.tsx": 1, // sau fetch /api/refresh
+  "components/sync-button.tsx": 1, // sau fetch /api/sync/<job>
 };
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -213,7 +247,11 @@ const PHU: [string, string[]][] = [
   ["ads-kill-switch.ts", ["/marketing/creatives"]],
   ["fanpage-attribution.ts", ["/marketing/fanpages"]],
   ["models.ts", ["/models", "/models/${"]],
-  ["payroll-autopilot.ts", ["/my-payslip"]],
+  ["payroll-autopilot.ts", ["/my-payslip", "/payroll/autopilot"]],
+  ["shipments-vtp.ts", ["/shipments/${"]],
+  ["product-notes.ts", ["/products/${"]],
+  ["promised-delivery.ts", ["/orders/${"]],
+  ["cod-statements.ts", ["/cod"]],
   ["outreach.ts", ["/outreach"]],
   ["payroll-policy.ts", ["/payroll/adjustments", "/payroll/assignments", "/payroll/policies", "/payroll/settings", "/payroll/migration"]],
   ["payroll.ts", ["/payroll", "/ads"]],
@@ -280,6 +318,9 @@ const NHANH_SOM: [string, string, string, string][] = [
   ["payroll-policy.ts", "truoc.note === parsed.data.note) {", "revalidate();", "return { ok: true };"],
   ["ai.ts", "const r = await confirmCore(", 'revalidatePath("/", "layout");', "return r;"],
   ["work-quick.ts", "const res = await chayHanhDong(input);", "revalidatePath(p);", "return res;"],
+  // Nhánh LỖI GIỮA CHỪNG sau khi đã ghi (danh sách vận đơn vào sổ rồi một bảng kê mới hỏng): hộp
+  // "Bổ sung bảng kê" trên /cod đã thôi router.refresh() lúc đóng, nên nhánh này phải tự làm mới.
+  ["cod-statements.ts", "return { ok: true, ...result };\n  } catch (e) {", "revalidate();", 'return { error: readableError(e, "Không nhập được tệp") };'],
 ];
 
 /** Lời gọi làm mới đứng ngay trước câu return (chỉ cách nhau khoảng trắng / dòng chú thích). */
@@ -293,7 +334,7 @@ export function testActionRefreshOnce() {
     assert.equal(demRefresh(f), 0, `${f}: gọi router.refresh() sau server action đã revalidatePath — trang dựng hai lần, nút Lưu quay gấp đôi`);
   }
   for (const [f, n] of Object.entries(GIU)) {
-    assert.equal(demRefresh(D + f), n, `${D + f}: số lượt router.refresh() đổi (${n} → ${demRefresh(D + f)}) — soát action đứng trước nó: đã revalidatePath trang này thì bỏ refresh, chưa thì sửa con số ở GIU kèm lý do`);
+    assert.equal(demRefresh(duong(f)), n, `${duong(f)}: số lượt router.refresh() đổi (${n} → ${demRefresh(duong(f))}) — soát action đứng trước nó: đã revalidatePath trang này thì bỏ refresh, chưa thì sửa con số ở GIU kèm lý do`);
   }
   for (const [m, trang] of PHU) {
     const src = doc(`lib/actions/${m}`);

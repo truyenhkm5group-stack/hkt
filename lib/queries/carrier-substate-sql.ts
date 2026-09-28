@@ -39,7 +39,19 @@ function mauLike(m: string): string {
  * toàn cuối cùng, và không rõ thì trả `UNKNOWN` chứ không im lặng quy về "giao hỏng".
  */
 export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased, chang: SQL | SQL.Aliased): SQL {
-  const theoMa = Object.entries(VTP_CODE_TO_SUBSTATE).map(([code, s]) => sql`when ${ma} = ${Number(code)} then ${s}`);
+  /*
+    MÃ VÀ CHẶNG CŨNG TÍNH ĐÚNG MỘT LẦN — cùng lý do với chữ bên dưới.
+
+    Viết `when ${ma} = …` thẳng vào 29 vế theo mã nghĩa là biểu thức `ma` được CHÉP vào từng vế. Với
+    cột trần (`shipments.vtp_status`) thì rẻ, nhưng kho dữ liệu học của GTC dự phóng truyền vào
+    `nullif(regexp_replace(e.status, '[^0-9]', '', 'g'), '')::int` — tức một phép regex chạy tới 29
+    lần cho MỖI dòng sự kiện ĐVVC. Đo production 28/09/2026 (ops perf-probe): câu nạp sự kiện ấy
+    1,0–1,6 s mỗi cụm 1.000 kiện, chạy 2–3 cụm trong hầu hết hàm báo cáo (/ads, /ads/daily, báo
+    cáo hoàn, lợi nhuận danh nghĩa, phễu) — và JIT bật hay tắt đều như nhau (1.037 ↔ 1.079 ms), nên
+    chi phí là thực thi thật chứ không phải biên dịch. Đặt vào bảng con một dòng rồi đọc `v.ma`:
+    cùng kết quả (biểu thức thuần), một lần tính.
+  */
+  const theoMa = Object.entries(VTP_CODE_TO_SUBSTATE).map(([code, s]) => sql`when v.ma = ${Number(code)} then ${s}`);
   /*
     BỎ DẤU TÍNH ĐÚNG MỘT LẦN.
 
@@ -63,14 +75,14 @@ export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased
     ["RETURNED", "RETURNED"],
     ["CANCELLED", "CANCELLED"],
   ];
-  const chang2 = theoChang.map(([st, s]) => sql`when ${chang} = ${st} then ${s}`);
+  const chang2 = theoChang.map(([st, s]) => sql`when v.chang = ${st} then ${s}`);
 
   return sql`(select case
     ${sql.join(theoMa, sql` `)}
     ${sql.join(theoChu, sql` `)}
     ${sql.join(chang2, sql` `)}
     else 'UNKNOWN' end
-    from (select ${boDauSql(chu)} as chu) v)`;
+    from (select ${boDauSql(chu)} as chu, ${ma} as ma, ${chang} as chang) v)`;
 }
 
 /**

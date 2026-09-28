@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { InfoHint } from "@/components/info-hint";
@@ -38,8 +37,8 @@ export function ProductNotes({ productId, variants, notes, canWrite }: { product
   const [category, setCategory] = useState<NoteCategory>("OTHER");
   const [variantId, setVariantId] = useState<string>("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
+  // KHÔNG router.refresh(): hai action đã `revalidatePath` trang sản phẩm — gọi thêm là dựng trang hai lần.
   const luu = () => {
     if (body.trim().length < 3) return;
     start(async () => {
@@ -50,7 +49,6 @@ export function ProductNotes({ productId, variants, notes, canWrite }: { product
       }
       toast.success("Đã ghi chú");
       setBody("");
-      router.refresh();
     });
   };
 
@@ -58,10 +56,7 @@ export function ProductNotes({ productId, variants, notes, canWrite }: { product
     start(async () => {
       const r = await removeProductNote({ id });
       if ("error" in r) toast.error(r.error);
-      else {
-        toast.success("Đã gỡ ghi chú — nội dung cũ vẫn còn trong nhật ký");
-        router.refresh();
-      }
+      else toast.success("Đã gỡ ghi chú — nội dung cũ vẫn còn trong nhật ký");
     });
 
   return (

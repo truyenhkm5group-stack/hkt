@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { CalendarClock, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -41,7 +40,7 @@ export function PromisedDelivery({
   const [date, setDate] = useState(promisedDate ?? "");
   const [ly_do, setLyDo] = useState(note);
   const [pending, start] = useTransition();
-  const router = useRouter();
+  // KHÔNG router.refresh(): hai action đã `revalidatePath` trang đơn — gọi thêm là dựng trang hai lần.
 
   const luu = () => {
     start(async () => {
@@ -52,7 +51,6 @@ export function PromisedDelivery({
       }
       toast.success("Đã ghi ngày khách hẹn giao");
       setMo(false);
-      router.refresh();
     });
   };
 
@@ -69,7 +67,6 @@ export function PromisedDelivery({
         return;
       }
       toast.success("Đã bỏ lời hẹn — đơn quay lại hạn xử lý thông thường");
-      router.refresh();
     });
   };
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Pencil, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,7 +30,6 @@ export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, 
   const [noteFor, setNoteFor] = useState<VtpOrderActionType | null>(null);
   const [note, setNote] = useState("");
   const [form, setForm] = useState(receiver);
-  const router = useRouter();
   const facts = { stage, vtpStatus, vtpStatusName: rawStatus, orderNumber: tracking, trackingCapability, configured: true };
   const eligibility = (key: string): Eligibility => canRequestCarrierAction(key as CarrierActionKey, facts);
   const editOk = eligibility("edit");
@@ -43,11 +41,9 @@ export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, 
       setBusy(null);
       setNoteFor(null);
       setNote("");
+      // KHÔNG router.refresh(): vtpOrderAction đã `revalidatePath` trang vận đơn — gọi thêm là dựng trang hai lần.
       if ("error" in r) toast.error(r.error, { duration: 8000 });
-      else {
-        toast.success(r.message);
-        router.refresh();
-      }
+      else toast.success(r.message);
     });
   };
   return (
@@ -107,7 +103,6 @@ export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, 
                   else {
                     toast.success(r.message);
                     setEditOpen(false);
-                    router.refresh();
                   }
                 })
               }
