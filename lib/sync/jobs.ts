@@ -13,6 +13,7 @@ import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { runAutoAssign } from "@/lib/work/auto-assign-run";
+import { refreshPendingReturns } from "@/lib/care/pancake-refresh";
 import { runMorningBrief } from "@/lib/work/morning-brief";
 import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
@@ -387,6 +388,21 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     module: "connector_pancake",
     description: "Ép ghi đè các đơn cập nhật trong 3 ngày gần nhất (chạy hằng đêm).",
     run: (o) => syncOrdersReconcile({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
+  "care-return-check": {
+    label: "Kiểm tra duyệt hoàn (ca care)",
+    source: "PANCAKE",
+    module: "connector_pancake",
+    description:
+      "Hỏi lại Pancake cho các ca care đang ở “đề nghị hoàn” (tối đa 80 ca) — webhook Viettel Post không bao giờ báo “Đã duyệt hoàn” (515), Pancake thì có nhưng thường chỉ tới ERP lúc đêm. Ca VTP đã duyệt hoàn thì rời hàng đợi. Cùng hàm với nút “Kiểm tra duyệt hoàn” trên /shipments; chỉ đóng CA, không đổi trạng thái vận đơn, tiền hay tồn kho.",
+    run: (o) =>
+      runSyncJob({ source: "PANCAKE", job: "care-return-check", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await refreshPendingReturns(await getDb());
+        ctx.summary.imported = r.closed;
+        ctx.summary.skipped = r.failed;
+        ctx.summary.detail = r.checked ? `hỏi lại ${r.checked} ca chờ quyết định hoàn · ${r.closed} ca VTP đã duyệt hoàn nên rời hàng đợi${r.failed ? ` · ${r.failed} đơn Pancake không trả lời` : ""}` : "không có ca nào đang chờ quyết định hoàn";
+        return r;
+      }),
   },
   "pancake-products": {
     label: "Sản phẩm & tồn kho",
@@ -805,6 +821,7 @@ export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
   "pancake-orders": "pancake",
   "pancake-backfill": "pancake",
   "pancake-reconcile": "pancake",
+  "care-return-check": "pancake",
   "pancake-products": "pancake",
   "pancake-warehouses": "pancake",
   "pancake-customers": "pancake",
