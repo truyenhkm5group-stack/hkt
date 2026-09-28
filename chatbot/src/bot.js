@@ -1,6 +1,7 @@
 import { config, loadSystemPrompt } from "./config.js";
 import { PancakeClient } from "./pancake.js";
 import { generateReply } from "./ai.js";
+import { aiScope } from "./aicost.js";
 import { store } from "./store.js";
 import { ConversationQueue } from "./queue.js";
 import { log } from "./logger.js";
@@ -252,7 +253,7 @@ export class Bot {
     const t = String(text || "").toLowerCase();
     if (t.length > 160) return false;
     // Chi bat cau nham vao BOT (noi nhieu, hoi lai, lam phien) - khong bat "chi met qua, mai chot" (khach met that)
-    return /nói nhiều|lôi thôi|dài dòng|nhiều lời|nói (mệt|lắm|hoài|mãi)|phiền quá|làm phiền|đừng (nhắn|hỏi|bán|gửi|spam|tư vấn)|khỏi (tư vấn|bán|nhắn|hỏi|cần)|im đi|đủ rồi|spam|hỏi (hoài|mãi|lắm|nhiều)|nhắn (hoài|mãi|lắm|nhiều)|(tư vấn|hỏi|còn) gì nữa/i.test(t);
+    return /nói nhiều|lôi thôi|dài dòng|nhiều lời|nói (mệt|lắm|hoài|mãi)|phiền quá|làm phiền|đừng (nhắn|hỏi|bán|gửi|spam|tư vấn)|khỏi (tư vấn|bán|nhắn|hỏi|cần)|im đi|đủ rồi|spam|hỏi (hoài|mãi|lắm|nhiều)|nhắn (hoài|mãi|lắm|nhiều)|(tư vấn|hỏi|còn) gì nữa|đồ điên|điên (à|hả|ạ)|(?:^|\s)(k|ko|không|hông) (đọc|đoc|doc) (tn|tin|tin nhắn)|trở đi trở lại|(?:^|\s)(k|ko|không|hông) (mua|lấy) nữa|(hỏi|xin) (đi )?hỏi lại|(gửi|nói|cho) \d+ lần rồi|\d+ lần (gửi|nói) rồi/i.test(t);
   }
 
   /**
@@ -461,9 +462,12 @@ export class Bot {
     const eff = settings.effective(pageId);
     const chart = parseChart(eff.sizeChart);
     if (!chart) return { status: "none" };
-    const list = (messages || []).filter((m) => !this.isFromPage(m, pageId)).slice(-8).reverse();
+    // Tim so do tren MOI tin khach da tai (khong chi 8 tin cuoi): su co 2026-09-26 (Hoai Thu, Linh Tay CS1)
+    // khach nhan nhieu tin ngan ("Dung vay", "Co le"...) day tin 60kg/1m60 ra khoi 8 tin -> bot hoi lai 3 lan, khach bo di.
+    const tatCa = (messages || []).filter((m) => !this.isFromPage(m, pageId)).reverse();
+    const list = tatCa.slice(0, 8);
     let h = null, w = null;
-    for (const m of list) {
+    for (const m of tatCa) {
       const b = parseBody(this.messageText(m));
       if (h === null && b.heightCm !== null) h = b.heightCm;
       if (w === null && b.weightKg !== null) w = b.weightKg;
@@ -485,6 +489,25 @@ export class Bot {
    * He thong da tra ra size ma bot van doi hoi lai chieu cao/can nang -> thay bang cau tra loi dung.
    * Model nho hay khong tin ket qua khi khach viet thieu don vi ("cao 165 nang 55").
    */
+  /**
+   * Da co DU so do cua khach (tra ra size) ma bot van xin lai chieu cao / can nang -> thay bang cau bao size.
+   * Su co 2026-09-26 (Hoai Thu, Linh Tay CS1): khach gui 60kg/1m60 hai lan, bot van xin lai, khach "Do dien... k mua nua".
+   */
+  stopAskingMeasurementsAgain(reply, pageId, messages) {
+    const t = String(reply || "");
+    if (!/(xin|cho em|gửi em|nhắn em|cung cấp)[^.?!\n]{0,40}(chiều cao|cân nặng|số đo)/i.test(t)) return t;
+    const r = this.sizeLookupFor(pageId, messages);
+    if (r.status !== "ok") return t;
+    const eff = settings.effective(pageId);
+    const xung = eff.customerTitle || "chị";
+    const Xung = xung[0].toUpperCase() + xung.slice(1);
+    const soDo = r.h ? `cao ${(r.h / 100).toFixed(2).replace(".", "m")}, nặng ${r.w}kg` : `nặng ${r.w}kg`;
+    log.warn(`[${pageId}] Bot xin lai so do du khach da gui (${soDo}) -> thay bang cau bao size ${r.size}`);
+    store.bumpStat(pageId, "measureAgainGuard");
+    return `Dạ em xin lỗi ${xung} ạ, em đã xem lại: ${xung} ${soDo} mặc size ${r.size} là vừa đẹp ạ ❤️ Nhận hàng được kiểm tra trước, chưa vừa shop hỗ trợ đổi size nha ${xung}.
+${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
+  }
+
   fixSizeReply(reply, pageId, messages) {
     const list = (messages || []).filter((m) => !this.isFromPage(m, pageId));
     const cuoi = list[list.length - 1];
@@ -518,14 +541,23 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
    */
   ensureQuoteImage(reply, pageId, messages) {
     const t = String(reply || "");
+    if (/\[\[IMG:/i.test(t)) return t;
+    // Khach XIN ANH o tin cuoi ("cho xem anh", "gui hinh", "co anh that k") -> luon gui anh, ke ca da gui truoc do.
+    // Su co 2026-09-26 (Linh Tay CS1 chay Q005): khach xin anh ma bot chi tra loi chu.
+    const tinKhach = (messages || []).filter((m) => !this.isFromPage(m, pageId));
+    const cuoiKhach = String(this.messageText(tinKhach[tinKhach.length - 1]) || "");
+    const khachXinAnh = /(ảnh|hình|hinh|anh thật|video|clip)/i.test(cuoiKhach) && /(xem|gửi|gui|cho|có|co|xin|đâu|dau|coi)/i.test(cuoiKhach);
     // Khoi bao gia, hoac bot noi "em gui chi anh" ma quen ma anh
-    if (!/GIÁ NIÊM YẾT|Giá ưu đãi|GIÁ XẢ|giá xả|gửi (chị|anh|mình|c|a) (ảnh|hình)|gửi ảnh|gửi hình/i.test(t) || /\[\[IMG:/i.test(t)) return t;
+    if (!khachXinAnh && !/GIÁ NIÊM YẾT|Giá ưu đãi|GIÁ XẢ|giá xả|gửi (chị|anh|mình|c|a) (ảnh|hình)|gửi ảnh|gửi hình/i.test(t)) return t;
     const eff = settings.effective(pageId);
     if (eff.sendProductImages === false) return t;
-    // Da gui anh trong hoi thoai roi thi thoi (tranh gui lai moi lan nhac gia)
+    // Da gui anh trong hoi thoai roi thi thoi (tranh gui lai moi lan nhac gia) - tru khi khach vua xin anh
     const daCoAnh = (messages || []).some((m) => this.isFromPage(m, pageId) && imageUrls(m.attachments).length);
-    if (daCoAnh) return t;
-    const ma = t.match(/\bQ\d{3}\b/)?.[0] || String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
+    if (daCoAnh && !khachXinAnh) return t;
+    const ma =
+      t.match(/\bQ\d{3}\b/)?.[0] ||
+      String(eff.defaultProduct || "").trim() ||
+      String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
     if (!ma || !catalog.products.some((p) => String(p.code || "").toUpperCase() === ma.toUpperCase())) return t;
     log.info(`[${pageId}] Khoi bao gia khong kem anh -> tu them [[IMG:${ma}]]`);
     return `${t}\n[[IMG:${ma}]]`;
@@ -535,9 +567,12 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     const eff = settings.effective(pageId);
     const chart = parseChart(eff.sizeChart);
     if (!chart) return "";
-    const list = (messages || []).filter((m) => !this.isFromPage(m, pageId)).slice(-8).reverse();
+    // Tim so do tren MOI tin khach da tai (khong chi 8 tin cuoi): su co 2026-09-26 (Hoai Thu, Linh Tay CS1)
+    // khach nhan nhieu tin ngan ("Dung vay", "Co le"...) day tin 60kg/1m60 ra khoi 8 tin -> bot hoi lai 3 lan, khach bo di.
+    const tatCa = (messages || []).filter((m) => !this.isFromPage(m, pageId)).reverse();
+    const list = tatCa.slice(0, 8);
     let h = null, w = null;
-    for (const m of list) {
+    for (const m of tatCa) {
       const b = parseBody(this.messageText(m));
       if (h === null && b.heightCm !== null) h = b.heightCm;
       if (w === null && b.weightKg !== null) w = b.weightKg;
@@ -1016,7 +1051,12 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
   }
 
   /** Xu ly 1 hoi thoai: lay lich su -> Gemini -> gui tra loi (+ anh san pham) */
-  async processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
+  /** Moi lan goi AI trong luot xu ly nay duoc tinh tien cho dung page (aicost.js). */
+  processConversation(payload) {
+    return aiScope.run({ pageId: String(payload.pageId) }, () => this._processConversation(payload));
+  }
+
+  async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
     const client = this.getClient(pageId);
     if (!client) return;
     if (this.isPaused(tags, pageId)) return;
@@ -1343,6 +1383,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
       reply = FALLBACK_REPLY;
       handoff = true;
     }
+    if (reply) reply = this.stopAskingMeasurementsAgain(reply, pageId, messages);
     if (reply) reply = this.fixSizeReply(reply, pageId, messages);
     if (reply) reply = this.stripAskWhenClosed(reply, pageId, messages);
     if (reply && this.isPaymentInfoReply(reply)) {

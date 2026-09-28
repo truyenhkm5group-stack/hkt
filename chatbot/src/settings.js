@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
 import { log } from "./logger.js";
+import { DEFAULT_AI_PRICES, DEFAULT_USD_VND } from "./aicost.js";
 
 /**
  * Cai dat rieng tung page, sua tu app quan ly, luu data/pages.json:
@@ -85,6 +86,35 @@ class Settings {
   /** DRY_RUN chung dang hieu luc: gia tri doi trong app > .env */
   globalDryRun() {
     return this.global.dryRun ?? config.dryRun;
+  }
+
+  /** Bang gia AI (USD / 1 trieu token) + ty gia — mac dinh trong ma, ghi de sua trong app (global.json). */
+  aiPricing() {
+    const prices = { ...DEFAULT_AI_PRICES, ...(this.global.aiPrices || {}) };
+    const usdVnd = Number(this.global.usdVnd) > 0 ? Number(this.global.usdVnd) : DEFAULT_USD_VND;
+    return { prices, usdVnd };
+  }
+
+  setAiPricing({ aiPrices, usdVnd }) {
+    if (aiPrices !== undefined) {
+      if (!aiPrices || typeof aiPrices !== "object" || Array.isArray(aiPrices)) throw new Error("Bang gia AI khong hop le");
+      const clean = {};
+      for (const [model, p] of Object.entries(aiPrices)) {
+        const key = String(model).trim().toLowerCase();
+        if (!key || key.length > 80) continue;
+        const nums = ["input", "cached", "output"].map((k) => Number(p?.[k]));
+        if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 1000)) throw new Error(`Gia cua ${key} khong hop le`);
+        clean[key] = { input: nums[0], cached: nums[1], output: nums[2] };
+      }
+      this.global.aiPrices = clean;
+    }
+    if (usdVnd !== undefined) {
+      const n = Number(usdVnd);
+      if (!Number.isFinite(n) || n < 1000 || n > 100000) throw new Error("Ty gia USD -> VND khong hop le");
+      this.global.usdVnd = Math.round(n);
+    }
+    fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));
+    return this.aiPricing();
   }
 
   /** Bat/tat DRY_RUN chung ngay luc chay (null = quay ve gia tri trong .env) */

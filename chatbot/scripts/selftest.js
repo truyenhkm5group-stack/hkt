@@ -801,5 +801,98 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 24: ban chot don khong duoc tu chon mau khi khach chua chon (mau co >= 2 mau)");
 }
 
+// ---- 25: su co 2026-09-26 (khach Hoai Thu, Linh Tay CS1 chay Q005)
+{
+  const prevProducts = catalog.products;
+  const prevSettings = settings.get("PAGE1");
+  catalog.setProducts([{
+    id: "p5", code: "Q005", name: "Đầm Q005", note: "", attributes: { "Màu": ["Đen", "Đỏ Đô"], Size: ["L", "XL"] }, price: { min: 499000, max: 499000 },
+    images: ["https://content.pancake.vn/q005.png"], variations: [
+      { id: "v5a", sku: "Q005DENXL", fields: { "Màu": "Đen", Size: "XL" }, price: 499000, stock: 1, available: true, images: ["https://content.pancake.vn/q005-den.png"] },
+    ],
+  }]);
+  settings.update("PAGE1", { defaultProduct: "Q005", extraPrompt: "", sendProductImages: true, sizeChart: '[{"h":[0,999],"w":[[30,49,"M"],[50,55,"L"],[56,63,"XL"],[64,79,"2XL"]]}]' });
+  const shop = (t, att) => ({ from: { id: "PAGE1" }, message: t, attachments: att || [] });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+
+  // (a) So do nam NGOAI 8 tin cuoi cua khach van phai doc duoc
+  const hoiThoai = [
+    khach("60kg cao 1m60"), shop("Dạ chị mặc size XL ạ"),
+    ...["Ok", "Màu gì", "Có đen k", "Đứng vậy", "Có lẽ", "Trở đi trở lại cứ xin chiều cao cân nặng", "Các em nhiều nv à", "K đoc tn a", "2 lần gửi rồi và cho sai rồi giờ lại hỏi tiếp"].flatMap((t) => [khach(t), shop("Dạ")]),
+  ];
+  const r = bot.sizeLookupFor("PAGE1", hoiThoai);
+  assert.equal(r.status, "ok", "so do cu hon 8 tin van phai doc duoc");
+  assert.equal(r.size, "XL");
+  // (b) Da co so do ma bot van xin lai -> thay bang cau bao size
+  const xinLai = bot.stopAskingMeasurementsAgain("Dạ chị có thể cho em xin chiều cao và cân nặng của mình để em tư vấn size chuẩn nhất cho chị nha", "PAGE1", hoiThoai);
+  assert.match(xinLai, /size XL/);
+  assert.doesNotMatch(xinLai, /xin chiều cao/);
+  assert.equal(bot.stopAskingMeasurementsAgain("Dạ chị cho em xin chiều cao cân nặng ạ", "PAGE1", [khach("giá sao shop")]), "Dạ chị cho em xin chiều cao cân nặng ạ", "chua co so do thi van duoc hoi");
+
+  // (c) Khach buc minh -> nhan ra (xin loi 1 lan, chuyen nhan vien, im)
+  for (const t of ["Trở đi trở lại cứ xin chiều cao cân nặng", "K đoc tn a", "2 lần gửi rồi và cho sai rồi giờ lại hỏi tiếp", "Đồ điên", "Thôi đọc lại từ đầu đến cuối\nC k mua nữa mô"]) {
+    assert.equal(bot.isAnnoyed(t), true, "phai nhan ra khach buc: " + t);
+  }
+  for (const t of ["Ok mua nữa nha shop", "chị lấy 2 cái", "có đen không em", "60kg cao 1m60", "đọc giúp chị địa chỉ"]) {
+    assert.equal(bot.isAnnoyed(t), false, "khong duoc bat nham: " + t);
+  }
+
+  // (d) Page chay Q005: khach xin anh -> gan [[IMG:Q005]] theo mau chu luc, ke ca da gui anh truoc do
+  const daGuiAnh = [shop("", [{ type: "photo", url: "https://content.pancake.vn/q005.png" }]), khach("cho c xem ảnh thật đi")];
+  assert.match(bot.ensureQuoteImage("Dạ đây ạ, chị xem giúp em nhé", "PAGE1", daGuiAnh), /\[\[IMG:Q005\]\]/, "khach xin anh -> gui anh Q005 du da gui truoc do");
+  assert.match(bot.ensureQuoteImage("Dạ em gửi chị ảnh mẫu ạ", "PAGE1", [khach("mẫu này giá sao")]), /\[\[IMG:Q005\]\]/, "khong co ma trong cau -> dung mau chu luc");
+  assert.equal(bot.ensureQuoteImage("Dạ chị cao bao nhiêu ạ", "PAGE1", daGuiAnh.slice(0, 1).concat(khach("ok"))), "Dạ chị cao bao nhiêu ạ", "khach khong xin anh -> khong gui lai");
+  assert.match(bot.ensureQuoteImage("Dạ ảnh đây ạ [[IMG:Q005]]", "PAGE1", daGuiAnh), /^Dạ ảnh đây ạ \[\[IMG:Q005\]\]$/, "da co ma anh thi giu nguyen");
+
+  settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "", extraPrompt: prevSettings.extraPrompt || "", sizeChart: prevSettings.sizeChart || "", sendProductImages: prevSettings.sendProductImages ?? null });
+  catalog.setProducts(prevProducts);
+  console.log("OK 25: so do cu van doc duoc, khong xin lai so do, nhan ra khach buc, khach xin anh -> gui anh mau chu luc");
+}
+
+// ---- 26: chi phi AI moi don (chu shop 28/09/2026: "them so tien phai tra cho api / 1 don hang")
+{
+  const { priceFor, usageTokens, summarizeAiCost, aiScope, DEFAULT_AI_PRICES } = await import("../src/aicost.js");
+  // Gia theo TIEN TO DAI NHAT: "flash-lite-preview" khong duoc an gia cua "flash"
+  assert.deepEqual(priceFor("gemini-2.5-flash-lite-preview-06-17", DEFAULT_AI_PRICES), DEFAULT_AI_PRICES["gemini-2.5-flash-lite"]);
+  assert.deepEqual(priceFor("gemini-2.5-flash", DEFAULT_AI_PRICES), DEFAULT_AI_PRICES["gemini-2.5-flash"]);
+  assert.equal(priceFor("gemini-3.5-flash", DEFAULT_AI_PRICES), null, "model chua co gia -> null, khong doan");
+  // Token: Gemini tru phan cache khoi token vao, cong token suy nghi vao token ra; OpenAI khong cong reasoning lan hai
+  assert.deepEqual(usageTokens("gemini", { promptTokenCount: 10000, cachedContentTokenCount: 9000, candidatesTokenCount: 150, thoughtsTokenCount: 50 }), { input: 1000, cached: 9000, output: 200 });
+  assert.deepEqual(usageTokens("openai", { promptTokenCount: 8000, prompt_tokens_details: { cached_tokens: 6000 }, candidatesTokenCount: 300, thoughtsTokenCount: 100 }), { input: 2000, cached: 6000, output: 300 });
+  // Tong hop: 100 luot flash-lite, 10 don -> tien/don; co model chua gia -> "it nhat" (partial), khong in 0
+  const byDay = { "2026-09-28": { "gemini-2.5-flash-lite": { calls: 100, input: 100000, cached: 900000, output: 20000 } } };
+  const a = summarizeAiCost(byDay, ["2026-09-28"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 10 });
+  // (100000*0.1 + 900000*0.025 + 20000*0.4) / 1e6 = 0.0405 USD = 1053 d
+  assert.equal(a.costVnd, 1053);
+  assert.equal(a.perOrderVnd, 105);
+  assert.equal(a.partial, false);
+  const b = summarizeAiCost({ d: { ...byDay["2026-09-28"], "gemini-3.5-flash": { calls: 5, input: 1, cached: 0, output: 1 } } }, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 10 });
+  assert.equal(b.partial, true);
+  assert.equal(b.unpricedCalls, 5);
+  const c = summarizeAiCost({ d: { "gemini-3.5-flash": { calls: 5, input: 1, cached: 0, output: 1 } } }, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 3 });
+  assert.equal(c.costVnd, null, "toan luot chua co gia -> CHUA BIET, khong phai 0d");
+  assert.equal(c.perOrderVnd, null);
+  assert.equal(summarizeAiCost({}, ["d"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 0 }).costVnd, 0, "khong goi AI lan nao -> 0d that");
+  assert.equal(a.perOrderVnd !== null && summarizeAiCost(byDay, ["2026-09-28"], { prices: DEFAULT_AI_PRICES, usdVnd: 26000, orders: 0 }).perOrderVnd, null, "chua co don -> khong chia");
+  // Moi lan goi AI trong luot xu ly cua mot page duoc ghi cho dung page do
+  const before = JSON.stringify(store.getAiUsage("PAGE_COST"));
+  store.addAiUsage("PAGE_COST", "gemini-2.5-flash-lite", { input: 10, cached: 90, output: 5 });
+  const u = store.getAiUsage("PAGE_COST");
+  const day = Object.keys(u).sort().pop();
+  assert.equal(u[day]["gemini-2.5-flash-lite"].calls >= 1, true);
+  assert.notEqual(JSON.stringify(u), before);
+  const { currentAiPage } = await import("../src/aicost.js");
+  assert.equal(currentAiPage(), "_khac");
+  assert.equal(aiScope.run({ pageId: "PAGE9" }, () => currentAiPage()), "PAGE9");
+  // Bang gia sua trong app: chan so am / ty gia vo ly
+  assert.throws(() => settings.setAiPricing({ aiPrices: { x: { input: -1, cached: 0, output: 0 } } }), /khong hop le/);
+  assert.throws(() => settings.setAiPricing({ usdVnd: 5 }), /khong hop le/);
+  const pr = settings.setAiPricing({ aiPrices: { "gemini-3.5-flash": { input: 0.5, cached: 0.05, output: 3 } }, usdVnd: 25500 });
+  assert.equal(pr.usdVnd, 25500);
+  assert.ok(pr.prices["gemini-3.5-flash"] && pr.prices["gemini-2.5-flash-lite"], "gia moi cong them, khong xoa gia mac dinh");
+  settings.global.aiPrices = {}; settings.global.usdVnd = undefined;
+  console.log("OK 26: chi phi AI / don: gia theo tien to dai nhat, token cache/suy nghi dung nha cung cap, model chua gia = chua biet (khong phai 0d)");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
