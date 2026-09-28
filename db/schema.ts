@@ -8595,6 +8595,8 @@ export const metaPages = pgTable(
     publishedVersion: integer("published_version").notNull().default(0),
     publishedAt: ts("published_at"),
     publishedBy: text("published_by"),
+    /** Phase 5 · chống ghi đè nháp: mỗi lượt lưu nháp +1; trình soạn gửi `baseRevision`, lệch ⇒ CONFLICT (migration 0167). */
+    draftRevision: integer("draft_revision").notNull().default(0),
     createdBy: text("created_by"),
     updatedBy: text("updated_by"),
     createdAt: createdAt(),

@@ -27,13 +27,15 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { executePageAction } from "@/lib/pages/actions";
-import { COMPONENT_REGISTRY, defaultPageCatalog, normalizePageSchema, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
+import { blockCountOf, COMPONENT_REGISTRY, customRefsOf, defaultPageCatalog, normalizePageSchema, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
+import { previewBlock } from "@/lib/pages/preview";
+import { pageUsesPeriod } from "@/lib/pages/route-context";
 import { resolvePage } from "@/lib/pages/data-sources";
 import { dynamicNavFor, pageOpenableBy } from "@/lib/pages/nav";
 import { archivePage, createPage, createPageFromTemplate, getPageBySlug, getPageDraft, listNavPages, listPages, publishPage, savePageDraft, updatePageMeta } from "@/lib/pages/registry";
 import { startPageRender, type PageResolver } from "@/lib/pages/render";
 import { buildTemplateSchema, PAGE_TEMPLATES, templates } from "@/lib/pages/templates";
-import { BLOCK_TYPES, PAGE_MAX_BLOCKS, PAGE_MAX_SECTIONS, type PageBlock, type PageDefinition, type PageSchema } from "@/lib/pages/types";
+import { BLOCK_TYPES, flattenBlocks, PAGE_MAX_BLOCKS, PAGE_MAX_SECTIONS, type ColumnData, type PageBlock, type PageDefinition, type PageSchema } from "@/lib/pages/types";
 
 const A = "pr4-a";
 const B = "pr4-b";
@@ -123,7 +125,140 @@ function testValidatePure() {
   const norm = normalizePageSchema(page({ id: "txt", type: "text", span: 12, title: "", config: { heading: "  Chào  " } } as PageBlock), { modules: ON, catalog: CAT });
   assert.deepEqual(norm?.sections[0].blocks[0], { id: "txt", type: "text", span: 12, config: { heading: "Chào" } });
 
-  console.log("✓ Trang động · kiểm schema thuần: 8 loại khối, khối lạ / id trùng / nguồn lạ / module tắt / quá trần / kỳ & dạng biểu đồ / kanban hệ thống đều bị chặn");
+  console.log(`✓ Trang động · kiểm schema thuần: ${BLOCK_TYPES.length} loại khối, khối lạ / id trùng / nguồn lạ / module tắt / quá trần / kỳ & dạng biểu đồ / kanban hệ thống đều bị chặn`);
+}
+
+// ─────────────────────────── Schema 1.1 (Phase 5) — thuần ───────────────────────────
+
+/** Sổ giả có thêm action nhận MỘT bản ghi (hành động theo dòng). */
+const CAT_ROW: PageCatalog = {
+  ...CAT,
+  actions: [
+    ...CAT.actions,
+    { key: "open_record", label: "Mở bản ghi", module: null, permission: null, sideEffect: "NONE", requiresApproval: false, why: "sổ giả" },
+    { key: "update_safe_field", label: "Sửa field bổ sung", module: null, permission: null, sideEffect: "WRITE", requiresApproval: false, why: "sổ giả" },
+    { key: "request_approval", label: "Xin duyệt", module: "customers", permission: "customers:write", objectKey: "customer", sideEffect: "WRITE", requiresApproval: true, why: "sổ giả" },
+  ],
+};
+const aggKpi = (id: string, aggregate: Record<string, unknown>, extra: Record<string, unknown> = {}): PageBlock => ({ id, type: "kpi", span: 3, config: { aggregate, ...extra } } as PageBlock);
+const aggChart = (id: string, aggregate: Record<string, unknown>, groupBy: Record<string, unknown>, kind = "bar", extra: Record<string, unknown> = {}): PageBlock => ({ id, type: "chart", span: 6, config: { aggregate, kind, groupBy, ...extra } } as PageBlock);
+const column = (id: string, children: PageBlock[], span = 4): PageBlock => ({ id, type: "column", span, config: {}, children } as PageBlock);
+const filter = (id: string, fields: Record<string, unknown>[], targets: string[], extra: Record<string, unknown> = {}): PageBlock => ({ id, type: "filter", span: 12, config: { fields, targets, ...extra } } as PageBlock);
+const text = (id: string, extra: Record<string, unknown> = {}): PageBlock => ({ id, type: "text", span: 12, config: { body: "x", ...extra } } as PageBlock);
+
+function testSchema11Pure() {
+  const errs = (s: unknown, catalog: PageCatalog = CAT, extra: { partial?: boolean } = {}) => validatePageSchema(s, { modules: ON, catalog, ...extra }).errors.map((e) => `${e.path} :: ${e.message}`);
+  const expectErr = (s: unknown, re: RegExp, label: string, catalog: PageCatalog = CAT) => {
+    const e = errs(s, catalog);
+    assert.ok(e.some((x) => re.test(x)), `${label}: mong lỗi ${re}, nhận ${JSON.stringify(e)}`);
+  };
+  const expectOk = (s: unknown, label: string, catalog: PageCatalog = CAT) => assert.deepEqual(errs(s, catalog), [], label);
+
+  // ── Tương thích ngược: schema Phase 4 nguyên văn vẫn hợp lệ và chuẩn hoá ra ĐÚNG nguyên văn (không migration dữ liệu).
+  const phase4: PageSchema = { version: 1, sections: [{ key: "main", title: "Tổng quan", blocks: [kpi("orders_kpi", "t_orders", { period: "7d" }), table("customers_tbl", "customer", { columns: ["system:name"], pageSize: 20, rowLink: true }), chart("trend"), { id: "note_1", type: "text", span: 12, config: { heading: "Chào", body: "x" } } as PageBlock] }] };
+  expectOk(phase4, "schema Phase 4 vẫn hợp lệ");
+  assert.deepEqual(normalizePageSchema(phase4, { modules: ON, catalog: CAT }), phase4, "chuẩn hoá schema Phase 4 không đổi một byte nào (không thêm variant / children)");
+
+  // ── flattenBlocks: con của cột đứng ngay sau cột, đường dẫn đúng; mọi phép đếm đi qua nó.
+  const withCol: PageSchema = { version: 1, sections: [{ key: "a", blocks: [kpi("k_a"), column("cot", [kpi("k_b"), kpi("k_c")])] }, { key: "b", blocks: [kpi("k_d")] }] };
+  assert.deepEqual(flattenBlocks(withCol).map((f) => [f.block.id, f.path, f.parentId]), [
+    ["k_a", "sections.0.blocks.0", null],
+    ["cot", "sections.0.blocks.1", null],
+    ["k_b", "sections.0.blocks.1.children.0", "cot"],
+    ["k_c", "sections.0.blocks.1.children.1", "cot"],
+    ["k_d", "sections.1.blocks.0", null],
+  ]);
+  assert.equal(blockCountOf(withCol), 5, "trần khối đếm CẢ khối con");
+  expectOk(withCol, "cột hai KPI hợp lệ");
+  assert.deepEqual(flattenBlocks({ sections: "hỏng" } as unknown as PageSchema), [], "dữ liệu sai hình ⇒ rỗng, không ném");
+
+  // ── Cột: một tầng, ≤ 6 con, con không phải cột / bộ lọc, chỉ cột có children, trần 20 đếm cả con.
+  expectErr(page(column("cot", [column("cot2", [kpi("k_x")])])), /children\.0\.type :: Cột chỉ lồng MỘT tầng/, "cột trong cột");
+  expectErr(page(column("cot", [filter("loc", [], [], { period: true })])), /children\.0\.type :: Bộ lọc là một thanh ngang/, "bộ lọc trong cột");
+  expectErr(page(column("cot", Array.from({ length: 7 }, (_, i) => kpi(`k_${i}`)))), /tối đa 6 khối con/, "cột quá 6 con");
+  expectErr(page({ ...kpi("k_1"), children: [kpi("k_2")] } as PageBlock), /Chỉ khối Cột mới có khối con/, "children trên khối không phải cột");
+  expectErr(page({ id: "cot", type: "column", span: 4, config: {} } as PageBlock), /Cột cần danh sách khối con/, "cột thiếu children");
+  expectErr(page(column("cot", [kpi("k_1")]), kpi("k_1")), /Khoá khối «k_1» bị trùng/, "id con trùng id khối ngoài");
+  expectErr(page(column("cot", [kpi("k_0", "khong_co")])), /children\.0\.config\.metric :: Khoá «khong_co» không có trong sổ chỉ số/, "con của cột qua ĐỦ kiểm như khối gốc");
+  const cap = page(column("cot", Array.from({ length: 6 }, (_, i) => kpi(`c_${i}`))), ...Array.from({ length: 14 }, (_, i) => kpi(`k_${i}`)));
+  expectErr(cap, new RegExp(`Tối đa ${PAGE_MAX_BLOCKS} khối mỗi trang, đếm cả khối con`), "1 cột + 6 con + 14 khối = 21 > trần");
+  expectOk(page(column("cot", Array.from({ length: 6 }, (_, i) => kpi(`c_${i}`))), ...Array.from({ length: 13 }, (_, i) => kpi(`k_${i}`))), "đúng 20 (đếm cả con) thì được");
+
+  // ── Section variant + chữ.
+  expectErr({ version: 1, sections: [{ key: "a", variant: "khung", blocks: [kpi("k_1")] }] }, /variant :: Kiểu phần phải là một trong card, plain/, "variant lạ");
+  const plain = validatePageSchema({ version: 1, sections: [{ key: "a", variant: "plain", title: "Bị ẩn", blocks: [kpi("k_1")] }] }, { modules: ON, catalog: CAT });
+  assert.ok(plain.ok && plain.warnings.some((w) => w.path === "sections.0.title"), "hàng có tiêu đề ⇒ cảnh báo (không hiện), không phải lỗi");
+  expectOk(page(text("t_1", { variant: "note" }), text("t_2", { variant: "heading", heading: "H" })), "chữ có variant");
+  expectErr(page(text("t_1", { variant: "to" })), /config\.variant/, "variant chữ lạ");
+
+  // ── Bộ lọc.
+  const tbl = table("bang", "customer");
+  const stageF = { objectKey: "order", ref: "system:stage", op: "in" };
+  expectOk(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "contains" }], ["bang"]), tbl), "bộ lọc tên khách nhắm bảng khách");
+  expectOk(page(filter("loc", [], [], { period: true })), "bộ lọc chỉ có kỳ");
+  expectErr(page(filter("loc", [], [])), /cần ít nhất một ô lọc hoặc bộ chọn kỳ/, "bộ lọc rỗng");
+  expectErr(page(filter("loc", Array.from({ length: 5 }, () => ({ objectKey: "customer", ref: "system:name", op: "contains" })), ["bang"]), tbl), /Bộ lọc tối đa 4 ô/, "quá 4 ô");
+  expectErr(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "contains" }], ["khong_co"]), tbl), /targets\.0 :: Không có khối «khong_co»/, "đích không có thật");
+  expectErr(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "contains" }], ["loc"])), /Không có khối «loc»/, "đích là chính nó");
+  expectErr(page(filter("loc", [stageF], ["bang"]), tbl), /Khối «bang» đọc «customer», không ô lọc nào cùng đối tượng/, "đích khác đối tượng");
+  expectErr(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "contains" }], ["k_1"]), kpi("k_1")), /không nhận bộ lọc/, "đích là KPI từ sổ chỉ số");
+  expectErr(page(filter("loc", [{ objectKey: "customer", ref: "system:address", op: "eq" }], ["bang"]), tbl), /fields\.0\.ref :: Field «Địa chỉ» không lọc được/, "field không filterable");
+  expectErr(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "gte" }], ["bang"]), tbl), /fields\.0\.op :: Phép «gte» không dùng được/, "phép lọc không hợp kiểu");
+  expectErr(page(filter("loc", [{ objectKey: "employee", ref: "system:name", op: "eq" }], ["bang"]), tbl), /không có trong sổ nguồn danh sách/, "đối tượng ngoài sổ danh sách");
+  expectOk(page(column("cot", [aggKpi("dem", { objectKey: "customer", fn: "count" })]), filter("loc", [{ objectKey: "customer", ref: "system:province", op: "eq" }], ["dem"])), "đích là KPI tổng hợp nằm TRONG cột");
+  assert.deepEqual(errs(page(filter("loc", [{ objectKey: "customer", ref: "system:name", op: "contains" }], ["o_khoi_khac"])), CAT, { partial: true }), [], "xem trước một khối (partial) không kiểm đích sang khối khác");
+
+  // ── Tổng hợp: tiền của đơn không cộng được; field số khai aggregatable thì được.
+  expectErr(page(aggKpi("dt", { objectKey: "order", fn: "sum", field: "system:total" })), /Tổng tiền.*ORDER_OUTCOME/, "cộng tổng tiền đơn bị chặn — doanh thu chỉ qua sổ chỉ số");
+  expectErr(page(aggKpi("dt", { objectKey: "order", fn: "avg", field: "system:total" })), /ORDER_OUTCOME/, "trung bình tiền đơn cũng bị chặn");
+  expectErr(page(aggKpi("mua", { objectKey: "customer", fn: "sum", field: "system:purchased_amount" })), /không khai tổng hợp/, "tiền khách đã mua (Pancake) không khai tổng hợp");
+  expectErr(page(aggKpi("ten", { objectKey: "customer", fn: "sum", field: "system:name" })), /không phải số — chỉ đếm được/, "cộng field chữ");
+  expectOk(page(aggKpi("so_don", { objectKey: "customer", fn: "avg", field: "system:order_count" })), "trung bình số đơn / khách (khai aggregatable)");
+  expectOk(page(aggKpi("dem_don", { objectKey: "order", fn: "count", field: "system:total" })), "ĐẾM đơn có tổng tiền thì được — đếm không phải kết luận doanh thu");
+  expectOk(page(aggKpi("tong_diem", { objectKey: "customer", fn: "sum", field: "custom:diem" })), "field số tuỳ biến: thuần không kiểm được, registry kiểm tiếp");
+  expectErr(page(aggKpi("x_1", { objectKey: "customer", fn: "sum" })), /aggregate\.field :: Phép «sum» cần một field số/, "sum thiếu field");
+  expectErr(page(aggKpi("x_1", { objectKey: "employee", fn: "count" })), /aggregate\.objectKey :: Khoá «employee» không có trong sổ nguồn danh sách/, "đối tượng ngoài sổ danh sách");
+  expectErr(page(aggKpi("x_1", { objectKey: "customer", fn: "median" })), /aggregate\.fn/, "phép lạ");
+  expectErr(page(aggKpi("x_1", { objectKey: "customer", fn: "count" }, { period: "7d" })), /Kỳ chỉ áp khi chọn field ngày/, "kỳ không có field ngày");
+  expectErr(page(aggKpi("x_1", { objectKey: "customer", fn: "count" }, { dateField: "system:name" })), /dateField :: Field «Tên khách» không phải ngày/, "field ngày sai kiểu");
+  expectOk(page(aggKpi("x_1", { objectKey: "order", fn: "count" }, { dateField: "system:inserted_at", period: "7d" })), "đếm đơn tạo trong 7 ngày");
+  expectErr(page(aggKpi("x_1", { objectKey: "customer", fn: "count", filters: [{ ref: "system:address", op: "eq", value: "x" }] })), /aggregate\.filters\.0\.ref :: Field «Địa chỉ» không lọc được/, "lọc cố định trên field không filterable");
+  expectOk(page(aggChart("tt", { objectKey: "order", fn: "count" }, { ref: "system:stage" }, "pie")), "đơn theo trạng thái — tròn");
+  expectErr(page(aggChart("tt", { objectKey: "customer", fn: "count" }, { ref: "system:name" })), /groupBy\.ref :: Field «Tên khách» không nhóm được/, "nhóm theo field chữ");
+  expectErr(page(aggChart("tt", { objectKey: "order", fn: "count" }, { bucket: "day", dateField: "system:inserted_at" }, "pie")), /Biểu đồ tròn chỉ dùng khi nhóm theo field/, "tròn theo thời gian");
+  expectErr(page(aggChart("tt", { objectKey: "order", fn: "count" }, { bucket: "quy", dateField: "system:inserted_at" })), /groupBy\.bucket/, "mốc thời gian lạ");
+  expectErr(page(aggChart("tt", { objectKey: "order", fn: "count" }, { ref: "system:stage" }, "bar", { period: "7d" })), /Kỳ chỉ áp khi nhóm theo ngày/, "kỳ trên biểu đồ nhóm theo field");
+  expectOk(page(aggChart("tt", { objectKey: "order", fn: "count" }, { bucket: "week", dateField: "system:inserted_at" }, "line", { period: "90d" })), "đơn theo tuần");
+  expectErr(page({ id: "c_1", type: "chart", span: 6, config: { series: "t_series", kind: "bar", aggregate: { objectKey: "order", fn: "count" } } } as unknown as PageBlock), /config/, "trộn hai nhánh (series + aggregate) bị chặn");
+
+  // ── Hành động theo dòng.
+  const withRow = (rowActions: Record<string, unknown>[], source = "customer") => page(table("bang", source, { rowActions }));
+  expectOk(withRow([{ action: "open_record", label: "Mở" }, { action: "update_safe_field", label: "Lên VIP", input: { field: "hang", value: "vip" } }, { action: "request_approval", label: "Xin duyệt", input: { ruleKey: "vip" } }]), "ba hành động theo dòng", CAT_ROW);
+  expectErr(withRow(Array.from({ length: 4 }, () => ({ action: "open_record", label: "Mở" }))), /Tối đa 3 hành động theo dòng/, "quá 3", CAT_ROW);
+  expectErr(withRow([{ action: "xoa_dong", label: "Xoá" }]), /rowActions\.0\.action :: Khoá «xoa_dong» không có trong sổ action/, "action ngoài sổ", CAT_ROW);
+  expectErr(withRow([{ action: "t_open", label: "Mở trang" }]), /không nhận một bản ghi/, "action không nhận bản ghi", CAT_ROW);
+  expectErr(withRow([{ action: "open_record", label: "Mở", input: { objectKey: "order" } }]), /input\.objectKey :: Hành động theo dòng luôn chạy trên đối tượng của bảng/, "ghim đối tượng khác", CAT_ROW);
+  expectErr(withRow([{ action: "open_record", label: "Mở", input: { recordId: "x" } }]), /input\.recordId :: Bản ghi lấy từ DÒNG/, "ghim sẵn bản ghi", CAT_ROW);
+  expectErr(withRow([{ action: "update_safe_field", label: "Sửa" }]), /input\.field :: Sửa field bổ sung cần ghim field/, "sửa field không ghim field", CAT_ROW);
+  expectErr(withRow([{ action: "request_approval", label: "Duyệt", input: { ruleKey: "vip" } }], "order"), /chỉ dùng cho «customer»/, "action khai đối tượng khác bảng", CAT_ROW);
+
+  // ── Field tuỳ biến theo vai trò (registry đối chiếu định nghĩa của tổ chức) — kể cả trong cột và bộ lọc.
+  const refs = customRefsOf(page(column("cot", [aggKpi("k_1", { objectKey: "customer", fn: "sum", field: "custom:diem", filters: [{ ref: "custom:hang", op: "eq", value: "a" }] }, { dateField: "custom:ngay" })]), aggChart("c_1", { objectKey: "customer", fn: "count" }, { ref: "custom:hang" }), filter("loc", [{ objectKey: "customer", ref: "custom:tinh", op: "eq" }], ["k_1"])));
+  assert.deepEqual(refs.map((r) => [r.ref, r.role, r.path]).sort(), [
+    ["custom:diem", "aggregate", "sections.0.blocks.0.children.0.config.aggregate.field"],
+    ["custom:hang", "filter", "sections.0.blocks.0.children.0.config.aggregate.filters.0.ref"],
+    ["custom:hang", "group", "sections.0.blocks.1.config.groupBy.ref"],
+    ["custom:ngay", "date", "sections.0.blocks.0.children.0.config.dateField"],
+    ["custom:tinh", "filter", "sections.0.blocks.2.config.fields.0.ref"],
+  ].sort());
+
+  // ── Kỳ ở đầu trang: khối đọc kỳ của URL ⇒ có; thanh lọc có bộ chọn kỳ ⇒ không hiện hai lần.
+  assert.equal(pageUsesPeriod(page(aggKpi("k_1", { objectKey: "order", fn: "count" }))), false, "KPI tổng hợp không có field ngày không đọc kỳ");
+  assert.equal(pageUsesPeriod(page(aggKpi("k_1", { objectKey: "order", fn: "count" }, { dateField: "system:inserted_at" }))), true);
+  assert.equal(pageUsesPeriod(page(column("cot", [kpi("k_1")]))), true, "KPI trong cột vẫn được tính");
+  assert.equal(pageUsesPeriod(page(kpi("k_1"), filter("loc", [], [], { period: true }))), false, "bộ chọn kỳ nằm ở thanh lọc");
+
+  console.log("✓ Trang động · schema 1.1 thuần: Phase 4 nguyên văn vẫn hợp lệ · cột một tầng ≤ 6 con, trần 20 đếm cả con · bộ lọc ≤ 4 ô, đích có thật cùng đối tượng, field filterable · tổng hợp: tiền đơn KHÔNG cộng được (ORDER_OUTCOME), số khai aggregatable thì được, tròn chỉ khi nhóm theo field · hành động theo dòng ≤ 3, chỉ action nhận bản ghi, đối tượng / bản ghi không ghim được");
 }
 
 // ─────────────────────────── Dựng trang & menu (thuần) ───────────────────────────
@@ -169,6 +304,39 @@ async function testRenderIsolation() {
   } finally {
     console.error = errors;
   }
+
+  // Cột (Phase 5): mỗi khối con một kết quả — con thiếu kết quả hỏng RIÊNG; con ẩn (UX) bị bỏ TRƯỚC khi phân giải.
+  const colSchema: PageSchema = {
+    version: 1,
+    sections: [{ key: "hang", variant: "plain", blocks: [column("cot", [kpi("con_tot"), kpi("con_hong"), { ...kpi("con_an"), visibility: { permission: "finance:view" } } as PageBlock]), kpi("ben_canh")] }],
+  };
+  const seenCol: string[] = [];
+  const kpiData = (id: string) => ({ label: id, value: 1, format: "number" as const });
+  const colResolver: PageResolver = async (schemaIn) => {
+    seenCol.push(...flattenBlocks(schemaIn).map((f) => f.block.id));
+    const top = schemaIn.sections.flatMap((x) => x.blocks);
+    return {
+      sections: [
+        {
+          key: "hang",
+          blocks: top.map((block) =>
+            block.type === "column"
+              ? { ok: true as const, block, data: { children: (block.children ?? []).filter((c) => c.id !== "con_hong").map((c) => ({ ok: true as const, block: c, data: kpiData(c.id) })) } as ColumnData }
+              : { ok: true as const, block, data: kpiData(block.id) },
+          ),
+        },
+      ],
+    };
+  };
+  const colSections = startPageRender(colSchema, viewer(), ctx, "t", colResolver);
+  assert.equal(colSections[0].variant, "plain", "hàng (plain) đi tới renderer");
+  const colItem = colSections[0].blocks[0];
+  assert.deepEqual(colItem.children?.map((c) => c.block.id), ["con_tot", "con_hong"], "khối con ẩn (UX) bị bỏ khỏi cột");
+  assert.ok(!seenCol.includes("con_an"), "khối con ẩn không tới trình phân giải — không tốn truy vấn");
+  const kids = await Promise.all((colItem.children ?? []).map((c) => c.result));
+  assert.ok(kids[0].ok, "con lành có dữ liệu");
+  assert.ok(!kids[1].ok && kids[1].issue.code === "DATA_ERROR" && kids[1].issue.blockId === "con_hong", "con không có kết quả ⇒ DATA_ERROR của ĐÚNG con đó");
+  assert.ok((await colSections[0].blocks[1].result).ok, "khối cạnh cột không bị kéo theo");
 
   // Menu động
   const def = (slug: string, over: Partial<PageDefinition> = {}): PageDefinition => ({
@@ -254,6 +422,7 @@ async function testLifecycle() {
     const actorB = await adminOf(B);
     const opts = { catalog: CAT };
     const v1 = page(kpi("orders_kpi", "t_orders", { period: "7d" }), table("customers_tbl"));
+    let realPageId = "";
 
     // ── 1. Tạo → nháp → người dùng CHƯA thấy gì ──
     const idA = await withOrganization(A, async () => {
@@ -295,6 +464,25 @@ async function testLifecycle() {
       assert.ok((await savePageDraft(idA, v2, actorA, opts)).ok);
       assert.deepEqual((await getPageBySlug("bang-a"))?.schema, v1, "bản đang chạy vẫn là v1");
       assert.deepEqual((await getPageDraft(idA)).draft, v2, "trình soạn thấy nháp v2");
+
+      // ── Chống ghi đè nháp (Phase 5 §2): hai người cùng mở revision r; người lưu sau nhận CONFLICT, không ghi gì.
+      const r0 = (await getPageDraft(idA)).draftRevision;
+      assert.ok(Number.isInteger(r0) && r0 >= 2, `mỗi lượt lưu nháp tăng revision (đang ${r0})`);
+      const v2b = page(kpi("orders_kpi", "t_orders", { period: "30d" }), table("customers_tbl"), chart("trend"));
+      const first = await savePageDraft(idA, v2b, actorA, { ...opts, baseRevision: r0 });
+      assert.ok(first.ok && first.draftRevision === r0 + 1, `người lưu trước thắng, revision + 1: ${JSON.stringify(first)}`);
+      const second = await savePageDraft(idA, page(kpi("orders_kpi", "t_orders", { period: "today" })), actorA, { ...opts, baseRevision: r0 });
+      assert.ok(!second.ok && second.code === "CONFLICT" && second.draftRevision === r0 + 1, `người lưu sau nhận CONFLICT kèm revision hiện tại: ${JSON.stringify(second)}`);
+      assert.deepEqual((await getPageDraft(idA)).draft, v2b, "CONFLICT không ghi gì — bản của người lưu trước còn nguyên");
+      const staleSame = await savePageDraft(idA, v2b, actorA, { ...opts, baseRevision: r0 });
+      assert.ok(!staleSame.ok && staleSame.code === "CONFLICT", "revision cũ ⇒ CONFLICT kể cả khi nội dung trùng (người soạn phải tải bản mới trước)");
+      const same = await savePageDraft(idA, v2b, actorA, { ...opts, baseRevision: r0 + 1 });
+      assert.ok(same.ok && same.draftRevision === r0 + 1, "lưu lại đúng nội dung ⇒ không tăng revision");
+      const legacy = await savePageDraft(idA, v2, actorA, opts);
+      assert.ok(legacy.ok && legacy.draftRevision === r0 + 2, "trình soạn cũ (không baseRevision) vẫn lưu được — và revision vẫn tăng để trình kéo-thả biết");
+      const bad = await savePageDraft(idA, v2, actorA, { ...opts, baseRevision: -1 });
+      assert.ok(!bad.ok && bad.code === "INVALID");
+      assert.equal((await getPageDraft(idA)).draftRevision, r0 + 2);
       const pub2 = await publishPage(idA, actorA, opts);
       assert.ok(pub2.ok && pub2.version === 2);
       assert.ok((await getPageBySlug("bang-a"))?.schema.sections[0].blocks.some((b) => b.type === "chart"), "tải lại thấy biểu đồ");
@@ -397,11 +585,30 @@ async function testLifecycle() {
       assert.ok((await savePageDraft(created.page.id, draftOnly, actorA)).ok);
       const ghost = await executePageAction("so-lieu-that", "chi_trong_nhap", {}, adminView, { loadPublished: getPageBySlug });
       assert.ok(!ghost.ok && ghost.code === "NOT_FOUND", "khối chỉ có trong NHÁP không bấm được");
+
+      // ── Xem trước MỘT khối (Phase 5 §3): theo NGƯỜI SOẠN, cùng trình phân giải, không ghi gì.
+      realPageId = created.page.id;
+      const soan = { ...adminView, organization: { code: A, name: "A", isHome: false } };
+      const pv = await previewBlock(realPageId, { id: "dem_khach", type: "kpi", span: 3, config: { aggregate: { objectKey: "customer", fn: "count" } } }, soan);
+      assert.ok(pv.ok && pv.resolved.ok && (pv.resolved.data as { value: number }).value === 1, `xem trước KPI tổng hợp đếm đúng CSDL của tổ chức: ${JSON.stringify(pv)}`);
+      const pvBad = await previewBlock(realPageId, { id: "dt", type: "kpi", span: 3, config: { aggregate: { objectKey: "order", fn: "sum", field: "system:total" } } }, soan);
+      assert.ok(!pvBad.ok && pvBad.code === "INVALID" && pvBad.errors.some((e) => e.path === "config.aggregate.field"), `lỗi xem trước tính TỪ KHỐI (config.…): ${JSON.stringify(pvBad)}`);
+      const pvFilter = await previewBlock(realPageId, { id: "loc", type: "filter", span: 12, config: { period: true, fields: [{ objectKey: "customer", ref: "system:name", op: "contains" }], targets: ["o_trang_khac"] } }, soan, { searchParams: { pf_loc_0: "Khách" } });
+      assert.ok(pvFilter.ok && pvFilter.resolved.ok && (pvFilter.resolved.data as { fields: { value: unknown }[] }).fields[0].value === "Khách", `xem trước thanh lọc (đích ở khối khác không kiểm): ${JSON.stringify(pvFilter)}`);
+      const pvCol = await previewBlock(realPageId, { id: "cot", type: "column", span: 4, config: {}, children: [{ id: "c_dem", type: "kpi", span: 12, config: { aggregate: { objectKey: "customer", fn: "count" } } }, { id: "c_hong", type: "timeline", span: 12, config: { source: "custom_record_customer", recordParam: "id" } }] }, soan);
+      assert.ok(pvCol.ok && pvCol.resolved.ok, JSON.stringify(pvCol));
+      const kidsCol = (pvCol.ok && pvCol.resolved.ok ? (pvCol.resolved.data as ColumnData).children : []).map((c) => [c.block.id, c.ok]);
+      assert.deepEqual(kidsCol, [["c_dem", true], ["c_hong", false]], "cột xem trước: con hỏng (thiếu id bản ghi) không kéo con lành");
+      const pvDenied = await previewBlock(realPageId, { id: "x_1", type: "text", span: 12, config: { body: "x" } }, { ...soan, role: "VIEWER", permissions: ["orders:read"] });
+      assert.ok(!pvDenied.ok && pvDenied.code === "FORBIDDEN", "không có metadata:manage ⇒ không xem trước");
+      assert.deepEqual((await getPageDraft(realPageId)).draft, draftOnly, "xem trước không ghi gì vào bản nháp");
     });
     await withOrganization(B, async () => {
       const bView = viewer({ id: actorB.id!, email: actorB.email, role: "ADMIN", permissions: [] });
       const cross = await executePageAction("so-lieu-that", "sang_trang", {}, bView, { loadPublished: getPageBySlug });
       assert.ok(!cross.ok && cross.code === "NOT_FOUND", "B không bấm được nút trên trang của A");
+      const pvCross = await previewBlock(realPageId, { id: "x_1", type: "text", span: 12, config: { body: "x" } }, { ...bView, organization: { code: B, name: "B", isHome: false } });
+      assert.ok(!pvCross.ok && pvCross.code === "NOT_FOUND", "B không xem trước được khối trên trang của A");
     });
     // Mẫu dựng từ SỔ THẬT phải qua kiểm schema (không khoá bịa).
     const realOn = new Set<ModuleKey>([...ON, "inventory", "returns"]);
@@ -410,7 +617,20 @@ async function testLifecycle() {
       const v = validatePageSchema(built.schema, { modules: realOn });
       assert.equal(v.ok, true, `mẫu ${t.key} trên sổ thật: ${JSON.stringify(v.errors)}`);
       if (t.key !== "customer-workspace") assert.deepEqual(built.skipped, [], `mẫu ${t.key}: mọi khoá ứng viên có trong sổ thật`);
+      if (t.key === "sales-overview") {
+        // Mẫu chứng minh runtime 1.1: MỘT bộ lọc (kỳ + trạng thái đơn → bảng đơn) + MỘT cột hai KPI cạnh biểu đồ.
+        const flat = flattenBlocks(built.schema).map((f) => f.block);
+        const loc = flat.find((b) => b.type === "filter");
+        assert.ok(loc && (loc.config as { targets: string[]; period?: boolean }).targets.includes("orders_table") && (loc.config as { period?: boolean }).period === true, "mẫu bán hàng có bộ lọc kỳ + trạng thái nhắm bảng đơn");
+        const cot = flat.find((b) => b.type === "column");
+        assert.deepEqual(cot?.children?.map((c) => c.type), ["kpi", "kpi"], "mẫu bán hàng có cột hai KPI");
+        assert.ok(built.schema.sections.some((s) => s.variant === "plain"), "mẫu dùng hàng (plain)");
+      }
     }
+    // Sổ thiếu cả hai KPI ⇒ cột bị BỎ và nói ra; bộ lọc vẫn còn vì bảng đơn còn.
+    const thin = buildTemplateSchema("sales-overview", { catalog: { ...defaultPageCatalog(), metrics: [] }, modules: realOn, customFields: [] });
+    assert.ok(thin.skipped.some((x) => x.blockId === "kpi_cot") && !flattenBlocks(thin.schema).some((f) => f.block.type === "column"), "cột không còn con ⇒ bỏ cột + nói ra");
+    assert.equal(validatePageSchema(thin.schema, { modules: realOn }).ok, true, "bản mẫu thu gọn vẫn hợp lệ");
 
     // ── 4. Mẫu: chỉ khi bấm, sinh ở NHÁP, chỉ dùng khoá sổ có thật ──
     await withOrganization(A, async () => {
@@ -461,6 +681,7 @@ async function testLifecycle() {
 
 export async function testPageRuntime() {
   testValidatePure();
+  testSchema11Pure();
   await testRenderIsolation();
   await testLifecycle();
 }

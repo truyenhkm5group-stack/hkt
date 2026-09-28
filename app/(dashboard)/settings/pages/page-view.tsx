@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PencilRuler } from "lucide-react";
 import { PageMetaForm } from "@/components/platform/pages/page-meta-form";
 import { PageSchemaEditor } from "@/components/platform/pages/page-schema-editor";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,20 @@ export function PageEditorBody({ loaded }: { loaded: LoadedEditor }) {
         />
       </SectionCard>
       {page ? (
-        <SectionCard title="Nội dung trang" padded={false} contentClassName="p-3">
+        <SectionCard
+          title="Nội dung trang — chế độ bàn phím"
+          padded={false}
+          contentClassName="p-3"
+          actions={
+            archived ? null : (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/settings/pages/${encodeURIComponent(page.id)}/builder`}>
+                  <PencilRuler /> Mở trình kéo-thả
+                </Link>
+              </Button>
+            )
+          }
+        >
           <PageSchemaEditor
             key={`${page.id}:${page.publishedVersion}:${page.status}`}
             pageId={page.id}
