@@ -402,6 +402,14 @@ export function AlertConfigForm({
           <Input type="number" min={1} max={100} value={form.riskReturnRatePct} onChange={(e) => setForm({ ...form, riskReturnRatePct: Number(e.target.value) || 40 })} />
         </div>
         <div className="space-y-1">
+          <Label title="Số Pancake trên toàn mạng, hiện ở danh sách Đơn chờ xuất — khác tỷ lệ hoàn theo lịch sử ERP ở ô trên">Đơn chờ xuất rủi ro: tỷ lệ hoàn Pancake vượt (%)</Label>
+          <Input type="number" min={0} max={99} value={form.phoneRiskReturnRatePct} onChange={(e) => setForm({ ...form, phoneRiskReturnRatePct: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 40 })} />
+        </div>
+        <div className="space-y-1">
+          <Label title="Số lần SĐT bị shop khác báo trên Pancake">hoặc SĐT bị báo vượt (lần)</Label>
+          <Input type="number" min={0} max={1000} value={form.phoneRiskWarningCount} onChange={(e) => setForm({ ...form, phoneRiskWarningCount: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 10 })} />
+        </div>
+        <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
           <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — để trống là giữ nguyên" : "123456:ABC… (tạo bot qua @BotFather)"} />
         </div>

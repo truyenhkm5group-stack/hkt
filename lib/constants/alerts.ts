@@ -27,6 +27,13 @@ export type AlertConfig = {
   /** Đơn rủi ro: khách đã hoàn ≥ N đơn và tỷ lệ hoàn ≥ M% (theo Pancake hoặc lịch sử ERP) → báo CSKH xin cọc */
   riskMinReturned: number;
   riskReturnRatePct: number;
+  /**
+   * Đơn CHỜ XUẤT rủi ro theo UY TÍN SĐT TRÊN PANCAKE (toàn mạng, `lib/constants/phone-reputation.ts`):
+   * tỷ lệ hoàn Pancake VƯỢT N% hoặc SĐT bị shop khác báo VƯỢT M lần. Chủ shop chốt 28/09/2026: 40% · 10.
+   * TÁCH khỏi `riskReturnRatePct` ở trên — cái đó đọc lịch sử đơn của ERP, cái này đọc số Pancake.
+   */
+  phoneRiskReturnRatePct: number;
+  phoneRiskWarningCount: number;
   /** Đơn đã lên nhưng chưa xác nhận / chưa giao ĐVVC quá N giờ → cảnh báo "chờ xử lý" */
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
@@ -55,6 +62,8 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   billingWarnPercent: 80,
   riskMinReturned: 2,
   riskReturnRatePct: 40,
+  phoneRiskReturnRatePct: 40,
+  phoneRiskWarningCount: 10,
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,

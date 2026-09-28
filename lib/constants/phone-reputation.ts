@@ -82,3 +82,21 @@ export function normalizePhoneForPancake(phone: string | null | undefined): stri
   if (d.startsWith("84") && d.length >= 11) d = `0${d.slice(2)}`;
   return d.length >= 9 ? d : null;
 }
+
+/** Ngưỡng rủi ro — nguồn DUY NHẤT là cấu hình cảnh báo (`AlertConfig.phoneRisk*`, sửa trên trang Cảnh báo). */
+export type PhoneRiskThresholds = { phoneRiskReturnRatePct: number; phoneRiskWarningCount: number };
+
+export type PhoneRiskReason = "RETURN_RATE" | "WARNINGS";
+
+/**
+ * Đơn chờ xuất có RỦI RO CAO không, và vì sao. VƯỢT ngưỡng mới tính (`>`, đúng lời chủ shop
+ * "> 40%", "> 10"), và so trên ĐÚNG con số màn hình đang in (`returnRatePct` đã làm tròn như POS) —
+ * để không có ô in "40%" mà bị gắn cảnh báo "> 40%". Chưa biết (`null`) ⇒ không kết luận gì.
+ */
+export function phoneRiskReasons(rep: PhoneReputation | null | undefined, t: PhoneRiskThresholds): PhoneRiskReason[] {
+  if (!rep) return [];
+  const out: PhoneRiskReason[] = [];
+  if (rep.returnRatePct !== null && rep.returnRatePct > t.phoneRiskReturnRatePct) out.push("RETURN_RATE");
+  if (rep.warningCount > t.phoneRiskWarningCount) out.push("WARNINGS");
+  return out;
+}

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { normalizePhoneForPancake, parseBadReportInfo } from "@/lib/constants/phone-reputation";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { DEFAULT_ALERT_CONFIG } from "@/lib/constants/alerts";
+import { normalizePhoneForPancake, parseBadReportInfo, phoneRiskReasons, type PhoneReputation } from "@/lib/constants/phone-reputation";
 
 /**
  * "Tỷ lệ hoàn" / "Cảnh báo SĐT" theo Pancake trên danh sách chờ xuất — phần THUẦN.
@@ -47,5 +50,25 @@ export function testPhoneReputation() {
   assert.equal(normalizePhoneForPancake("12345"), null, "quá ngắn ⇒ không hỏi Pancake");
   assert.equal(normalizePhoneForPancake(null), null);
 
-  console.log("✓ Uy tín SĐT theo Pancake: cùng công thức POS (Σ thất bại ÷ Σ tổng) · chưa có đơn ⇒ null · không giữ danh tính người báo");
+  // ───────── Cảnh báo đơn chờ xuất rủi ro (chủ shop chốt 28/09/2026: > 40% hoặc > 10 lần báo) ─────────
+  assert.equal(DEFAULT_ALERT_CONFIG.phoneRiskReturnRatePct, 40);
+  assert.equal(DEFAULT_ALERT_CONFIG.phoneRiskWarningCount, 10);
+  const t = { phoneRiskReturnRatePct: 40, phoneRiskWarningCount: 10 };
+  const rep = (pct: number | null, warn: number): PhoneReputation => ({ orderSuccess: 0, orderFail: 0, returnRatePct: pct, warningCount: warn, warnings: [] });
+  assert.deepEqual(phoneRiskReasons(rep(40, 10), t), [], "ĐÚNG ngưỡng chưa phải VƯỢT ngưỡng — chủ shop nói '> 40%', '> 10'");
+  assert.deepEqual(phoneRiskReasons(rep(41, 10), t), ["RETURN_RATE"]);
+  assert.deepEqual(phoneRiskReasons(rep(40, 11), t), ["WARNINGS"]);
+  assert.deepEqual(phoneRiskReasons(rep(41, 11), t), ["RETURN_RATE", "WARNINGS"], "mỗi điều kiện tự đủ để bật cảnh báo, và lý do nêu đủ cả hai");
+  assert.deepEqual(phoneRiskReasons(rep(null, 0), t), [], "chưa có đơn nào trên Pancake ⇒ không kết luận rủi ro");
+  assert.deepEqual(phoneRiskReasons(null, t), [], "chưa hỏi được Pancake ⇒ không kết luận gì — CHƯA BIẾT không phải an toàn, cũng không phải rủi ro");
+  // So trên ĐÚNG số màn hình in (đã làm tròn như POS): 81/200 = 40,5% in "41%" ⇒ vượt; 80/199 = 40,2% in "40%" ⇒ không.
+  assert.deepEqual(phoneRiskReasons(parseBadReportInfo({ reports_by_phone: { a: { order_fail: 81, order_success: 119 } } }), t), ["RETURN_RATE"]);
+  assert.deepEqual(phoneRiskReasons(parseBadReportInfo({ reports_by_phone: { a: { order_fail: 80, order_success: 119 } } }), t), [], "ô in 40% thì không được gắn cảnh báo '> 40%'");
+  // Nút Lưu ở trang Cảnh báo không được làm RƠI hai ô này: z.object() cắt khoá không khai báo.
+  const luoc = readFileSync(path.join(path.resolve(__dirname, ".."), "lib", "actions", "alerts.ts"), "utf8");
+  for (const k of ["phoneRiskReturnRatePct", "phoneRiskWarningCount"]) {
+    assert.ok(new RegExp(`\\b${k}: z\\.`).test(luoc), `lược đồ lưu cấu hình cảnh báo phải khai ${k} — thiếu thì mỗi lần bấm Lưu ngưỡng lặng lẽ về mặc định`);
+  }
+
+  console.log("✓ Uy tín SĐT theo Pancake: cùng công thức POS (Σ thất bại ÷ Σ tổng) · chưa có đơn ⇒ null · không giữ danh tính người báo · cảnh báo rủi ro khi VƯỢT ngưỡng (> 40% hoặc > 10 lần báo), so trên đúng số đang in");
 }
