@@ -149,7 +149,15 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
   const f = facts(base);
   // Ba truy vấn độc lập (đơn · chi tiêu QC · chi phí vận hành) — chạy song song, không đứng chờ nhau.
   const [[o], [ads], expenseRows] = await Promise.all([
-    db
+    /*
+      TẮT JIT (`chayKhongJit`, giao dịch RIÊNG nên vẫn chạy song song với hai câu kia). Câu đọc bảng dẫn
+      xuất `orderFacts` — mang ORDER_OUTCOME — và Postgres biên dịch cả khối trước khi chạy: đo
+      production 29/09/2026 (EXPLAIN ANALYZE, máy rảnh): 4.651 ms, JIT 4.302 ms (241 hàm). `getProfitReport`
+      gọi hàm này HAI lần (kỳ này + kỳ trước) — đó là phần lớn của 6–9 s trên /reports và /reports/scenario.
+      `getDailyBreakdown` (cùng `orderFacts`) đã tắt JIT từ trước.
+    */
+    chayKhongJit(db, (tx) =>
+      tx
     .select({
       orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
       successOrders: sql<number>`count(*) filter (where ${f.success})`,
@@ -164,6 +172,7 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
       lostShipping: sql<number>`coalesce(sum(${base.partnerFee} + ${base.returnFee}) filter (where ${f.returned}), 0)`,
     })
     .from(base),
+    ),
     db
       .select({ spend: sum(schema.adSpends.spend), orders: sum(schema.adSpends.orders), revenue: sum(schema.adSpends.revenue) })
       .from(schema.adSpends)
@@ -352,8 +361,10 @@ async function getProfitReportUncached(period: Period, basis: ReportBasis) {
   const [current, previous, channels, sellers, products, daily, codPaid, codWaiting, batchesInPeriod, batchesToDate, linkedPaidToDate] = await Promise.all([
     pnl(period.from, period.to, basis),
     prev.from ? pnl(prev.from, prev.to, basis) : Promise.resolve(null),
-    db.select({ key: base.source, ...groupSelect }).from(base).groupBy(base.source).orderBy(groupOrder),
-    db.select({ key: base.sellerName, ...groupSelect }).from(base).groupBy(base.sellerName).orderBy(groupOrder).limit(20),
+    // Cùng bảng dẫn xuất `orderFacts` ⇒ cùng cái giá JIT (đo 29/09/2026: theo nguồn 4.253 ms / JIT 3.883 ms,
+    // theo người bán 5.264 / 4.654 ms). Mỗi câu một giao dịch tắt JIT để vẫn chạy song song.
+    chayKhongJit(db, (tx) => tx.select({ key: base.source, ...groupSelect }).from(base).groupBy(base.source).orderBy(groupOrder)),
+    chayKhongJit(db, (tx) => tx.select({ key: base.sellerName, ...groupSelect }).from(base).groupBy(base.sellerName).orderBy(groupOrder).limit(20)),
     db
       .select({
         productName: schema.orderItems.productName,
