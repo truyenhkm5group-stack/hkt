@@ -26,7 +26,7 @@ import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 
 /** Bộ đồ nghề chung của hộp soạn bài — dựng một lần từ dữ liệu khu gen tay. */
 function composeCtxOf(p: ManualGenPanel, canPublish: boolean): ComposeCtx {
-  return { canPublish, pricing: { unitVnd: p.pricing.unitVnd, unitUsd: p.pricing.unitUsd }, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup };
+  return { canPublish, pricing: { unitVnd: p.pricing.unitVnd, unitUsd: p.pricing.unitUsd }, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup, fanpageEvidence: p.fanpageEvidence };
 }
 
 function SpendPill({ p }: { p: ManualGenPanel }) {
