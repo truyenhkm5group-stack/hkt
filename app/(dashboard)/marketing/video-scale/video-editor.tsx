@@ -1,12 +1,12 @@
 "use client";
 
-import { Loader2, Pencil, Wand2 } from "lucide-react";
+import { Copy, Loader2, Pencil, Wand2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { rerenderVideoAction } from "@/lib/actions/video-scale";
+import { cloneVideoAction, rerenderVideoAction } from "@/lib/actions/video-scale";
 import { MUSIC_VOLUMES, SCRIPT_LIMITS, TTS_VOICES, type EffectiveRender, type VideoScript } from "@/lib/constants/video-scale";
 
 function Count({ n, max }: { n: number; max: number }) {
@@ -34,16 +34,24 @@ export function VideoEditor({ variantId, script, render, music, approved }: { va
   const setScene = (i: number, k: "overlay" | "voiceover", val: string) => setScenes((xs) => xs.map((x, j) => (j === i ? { ...x, [k]: val } : x)));
   const L = SCRIPT_LIMITS;
 
+  const payload = () => ({
+    variantId,
+    hook,
+    cta,
+    scenes,
+    options: { showText, voiceover, voice, burnSubtitles: subs, keepNativeAudio: native, musicId: musicId || null, musicVolume: volume },
+  });
+  const clone = () =>
+    start(async () => {
+      const r = await cloneVideoAction(payload());
+      if ("error" in r) return void toast.error(r.error);
+      toast.success("Đã tạo video MỚI từ clip sẵn có (không tạo clip AI mới) — xem ở tab Hàng đợi render, khoảng 1 phút.");
+      setOpen(false);
+    });
   const submit = () => {
     if (approved && !confirm("Video đã duyệt sẽ quay lại CHỜ DUYỆT sau khi dựng lại. Tiếp tục?")) return;
     start(async () => {
-      const r = await rerenderVideoAction({
-        variantId,
-        hook,
-        cta,
-        scenes,
-        options: { showText, voiceover, voice, burnSubtitles: subs, keepNativeAudio: native, musicId: musicId || null, musicVolume: volume },
-      });
+      const r = await rerenderVideoAction(payload());
       if ("error" in r) return void toast.error(r.error);
       toast.success(r.tts ? `Đang tạo ${r.tts} đoạn giọng đọc mới rồi dựng lại — theo dõi ở tab Hàng đợi render.` : "Đang dựng lại video — theo dõi ở tab Hàng đợi render (khoảng 1 phút).");
       setOpen(false);
@@ -146,10 +154,16 @@ export function VideoEditor({ variantId, script, render, music, approved }: { va
         {music.length === 0 ? <p className="text-muted-foreground">Thư viện nhạc trống — tải nhạc CÓ QUYỀN ở tab Cấu hình → Thư viện nhạc.</p> : null}
       </fieldset>
 
+      <p className="text-muted-foreground">
+        <b>Nhân bản</b> = giữ video này, tạo thêm video mới từ đúng các clip đã trả tiền — cách rẻ nhất để có nhiều biến thể thử quảng cáo.
+      </p>
       <p className="text-muted-foreground">Chi phí: dựng lại miễn phí · giọng đọc mới chỉ cho cảnh đổi lời (≈ 0,015 USD / phút) · kiểm chất lượng ≈ 0,01 USD.</p>
       <div className="flex gap-2">
         <Button size="sm" disabled={pending} onClick={submit}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Dựng lại video
+        </Button>
+        <Button size="sm" variant="outline" disabled={pending} onClick={clone} title="Giữ video này, tạo thêm một video mới từ đúng các clip này với chữ / giọng / nhạc ở trên">
+          <Copy className="size-4" /> Nhân bản thành video mới
         </Button>
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => setOpen(false)}>
           Đóng

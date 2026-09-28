@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { VIDEO_SCALE_CONFIG_KEY, normalizeVideoScaleConfig } from "@/lib/constants/video-scale";
 import { bindOrganization } from "@/lib/platform/background";
 import { listProductPhotos, type SourcePhoto } from "@/lib/queries/video-scale";
-import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, rerenderVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
+import { approveVideoVariant, cancelVideoRun, createVideoRun, drainVideoScale, readVideoScaleConfig, rejectVideoVariant, remakeVideoVariant, cloneVideoVariant, rerenderVideoVariant, retryVideoJob, switchSceneToPhoto } from "@/lib/video-scale/pipeline";
 import { storeAsset } from "@/lib/video-scale/storage";
 import { videoCaptionSchema, videoConfigSchema, videoIdSchema, videoMusicUploadSchema, videoPageConfigSchema, videoPauseSchema, videoPublishSchema, videoReviewSchema, videoRunCreateSchema, videoSkuModeSchema, videoSkuPublishingSchema } from "@/lib/validation/video-scale";
 import { VIDEO_AUTOMATION_KEY } from "@/lib/constants/video-scale";
@@ -141,6 +141,21 @@ export async function rerenderVideoAction(raw: unknown): Promise<{ ok: true; tts
   const r = await rerenderVideoVariant(db, variantId, edit, await actorOf(user.id, user.email));
   if (!r.ok) return { error: r.error };
   await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_VIDEO_EDIT", entity: "VIDEO_SCALE_VARIANT", entityId: variantId, before: before ?? null, after: edit, reason: before?.status === "APPROVED" ? "Sửa video đã duyệt — video quay lại chờ duyệt." : undefined });
+  await drainAfterResponse();
+  revalidatePath(PATH);
+  return { ok: true, tts: r.tts };
+}
+
+/** Nhân bản video: video MỚI dùng lại clip đã trả tiền, chữ / giọng / nhạc khác. Gần như miễn phí. */
+export async function cloneVideoAction(raw: unknown): Promise<{ ok: true; tts: number } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền tạo video" };
+  const parsed = videoEditSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { variantId, ...edit } = parsed.data;
+  const r = await cloneVideoVariant(await getDb(), variantId, edit, await actorOf(user.id, user.email));
+  if (!r.ok) return { error: r.error };
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_VIDEO_CLONE", entity: "VIDEO_SCALE_VARIANT", entityId: r.variantId, after: { from: variantId, ...edit } });
   await drainAfterResponse();
   revalidatePath(PATH);
   return { ok: true, tts: r.tts };

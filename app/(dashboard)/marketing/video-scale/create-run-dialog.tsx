@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * "Tạo chiến dịch media" — chọn ẢNH GỐC (ảnh sản phẩm thật của mã; người chọn = người duyệt ảnh), số biến thể, góc bán
  * (bỏ trống = máy chọn theo sổ học), ý tưởng, nhạc có quyền. Bấm là xếp việc: màn hình trả lời ngay, video sinh sau.
  */
-export function CreateRunDialog({ productId, label, music }: { productId: string; label: string; music: { id: string; title: string }[] }) {
+export function CreateRunDialog({ productId, label, music, perVideoUsd = null, costNote = "" }: { productId: string; label: string; music: { id: string; title: string }[]; perVideoUsd?: number | null; costNote?: string }) {
   const [open, setOpen] = useState(false);
   const [photos, setPhotos] = useState<SourcePhoto[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -118,6 +118,12 @@ export function CreateRunDialog({ productId, label, music }: { productId: string
             {music.length === 0 ? <span className="text-[12px] text-muted-foreground">Thư viện nhạc có quyền đang trống (tab Cấu hình).</span> : null}
           </label>
         </div>
+        <p className="rounded-md border bg-muted/40 p-2 text-[12.5px]">
+          Ước tính tiền sinh video:{" "}
+          <b>{perVideoUsd === null ? "chưa có giá cho model đang chọn" : perVideoUsd === 0 ? "0 USD (toàn ảnh động)" : `≈ ${(perVideoUsd * variants).toFixed(2)} USD cho ${variants} video (${perVideoUsd.toFixed(2)} USD / video, giữ chỗ tối đa)`}</b>
+          {costNote ? <span className="block text-muted-foreground">{costNote}</span> : null}
+          <span className="block text-muted-foreground">Rẻ hơn: tạo ít video AI rồi dùng &ldquo;Nhân bản&rdquo; ở tab Duyệt video để ra thêm biến thể từ cùng clip (gần như 0 USD).</span>
+        </p>
         <DialogFooter>
           <Button onClick={submit} disabled={pending || picked.length === 0}>
             {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null} Tạo {variants} biến thể

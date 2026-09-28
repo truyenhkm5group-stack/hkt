@@ -15,6 +15,7 @@ import {
   VEO_PRICE_USD_PER_SECOND,
   VIDEO_ADS_HARD_LIMITS,
   VIDEO_PROVIDER_LABEL,
+  FREE_MUSIC_SOURCES,
   LYRIA_CLIP_PRICE_USD,
   MUSIC_MOODS,
   MUSIC_MOOD_KEYS,
@@ -118,6 +119,18 @@ export function ConfigPanel({ config, ffmpeg, music, canConfig, canEdit, canSpen
             </select>
           </span>
         </Row>
+        {canConfig ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-2 text-[12.5px]">
+            <b>Tối ưu chi phí:</b>
+            <Button size="sm" variant="outline" onClick={() => setC((x) => ({ ...x, scenesPerVariant: 3, aiScenes: 1 }))}>
+              Tiết kiệm — 1 cảnh AI mở đầu + 2 cảnh ảnh động
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setC((x) => ({ ...x, scenesPerVariant: 3, aiScenes: 0 }))}>
+              Miễn phí — toàn ảnh động
+            </Button>
+            <span className="text-muted-foreground">Bấm rồi &ldquo;Lưu cấu hình&rdquo;. Thêm biến thể rẻ nhất: &ldquo;Nhân bản&rdquo; ở tab Duyệt video.</span>
+          </div>
+        ) : null}
         <Row label="Cảnh dùng AI mỗi video" hint="Cảnh còn lại là ẢNH ĐỘNG dựng từ chính ảnh sản phẩm (ffmpeg) — miễn phí và luôn đúng sản phẩm.">
           <select
             className="h-8 rounded border px-2"
@@ -319,6 +332,19 @@ function MusicLibrary({ music, canEdit, canGenerate }: { music: MusicRow[]; canE
         <div className="grid gap-2 sm:grid-cols-2">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Tên bản nhạc" aria-label="Tên bản nhạc" />
           <Input value={license} onChange={(e) => setLicense(e.target.value)} placeholder="Nguồn + quyền sử dụng (bắt buộc)" aria-label="Nguồn và quyền" />
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="text-muted-foreground">Nguồn nhạc MIỄN PHÍ dùng thương mại (tải về rồi tải lên đây):</span>
+            {FREE_MUSIC_SOURCES.map((s) => (
+              <span key={s.key} className="inline-flex items-center gap-1">
+                <a href={s.url} target="_blank" rel="noreferrer" className="underline">
+                  {s.label}
+                </a>
+                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11.5px]" onClick={() => setLicense(s.license)}>
+                  điền quyền
+                </Button>
+              </span>
+            ))}
+          </div>
           <input type="file" accept="audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/x-m4a" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           <Button onClick={upload} disabled={pending || !file || !title.trim() || license.trim().length < 10}>
             {pending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Tải lên

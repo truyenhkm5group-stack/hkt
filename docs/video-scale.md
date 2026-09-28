@@ -366,3 +366,16 @@ dùng thương mại; có dấu SynthID. **0,04 USD / bản**, trần 20 bản /
 - Job `video-scale-music-seed` (không trong lịch, chạy bằng ops `run-job`): tạo các phong cách CHƯA có — chạy lại không nhân đôi.
 - Mỗi bản lưu với ghi chú nguồn + quyền (model, ngày, "nhạc gốc không lời, không bắt chước…"), dùng ngay trong "Sửa video".
 
+## 19. Tối ưu chi phí + thêm nhạc (28/09/2026)
+
+- **Nhân bản video** (tab Duyệt video → Sửa video → "Nhân bản thành video mới"): video MỚI dùng lại đúng các clip đã trả tiền
+  của video gốc, với chữ / lời đọc / nhạc / phụ đề khác — chỉ tốn giọng đọc mới (nếu có) + QC ≈ 0,01 USD. Việc clip của bản nhân
+  mang tiền 0 (tiền đã tính ở video gốc). Trần 12 video / lượt kể cả bản nhân.
+- **Chế độ tiết kiệm** (tab Cấu hình): "1 cảnh AI mở đầu + 2 cảnh ảnh động" hoặc "toàn ảnh động (miễn phí)".
+- **Ước tính tiền** hiện ngay trong hộp "Tạo chiến dịch media" (theo cấu hình hiện tại, giữ chỗ tối đa).
+- **Câu lệnh cảnh ít bị chặn** (`softenScenePrompt` + `MODEST_STYLE_NOTE`): từ nói về cơ thể (eo, đường cong, chân, gợi cảm…) đổi
+  sang cách nói về chiếc váy trước khi gửi máy sinh video — lượt bị chặn là lượt phí công. Chữ trên hình giữ nguyên.
+- **16 phong cách nhạc AI** (thêm Tết, công sở, nhẹ nhàng kiểu Hàn, retro city pop, mùa thu, dạ tiệc, du lịch boho, tối giản).
+- **Nguồn nhạc miễn phí** (ô tải nhạc): Pixabay Music · Mixkit · Facebook Sound Collection — người tải về rồi tải lên; "điền quyền"
+  ghi sẵn điều khoản. Không kho nào có API cho máy tải tự động (tải ngoài API là trái điều khoản).
+

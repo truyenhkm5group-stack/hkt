@@ -16,7 +16,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 };
 
 /** Tab "Mã win": mỗi mã một thẻ — ảnh, trạng thái khai, số ảnh gốc, số video theo bước, nút tạo chiến dịch media. */
-export function WinPanel({ products, runs, music, pages, accounts, canSpend, canEdit, canMode, canMoney, canEngage, canRelease }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; accounts: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canMoney: boolean; canEngage: boolean; canRelease: boolean }) {
+export function WinPanel({ products, runs, music, pages, accounts, canSpend, canEdit, canMode, canMoney, canEngage, canRelease, perVideoUsd = null, costNote = "" }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; accounts: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canMoney: boolean; canEngage: boolean; canRelease: boolean; perVideoUsd?: number | null; costNote?: string }) {
   return (
     <div className="space-y-5">
       {products.length === 0 ? (
@@ -42,7 +42,7 @@ export function WinPanel({ products, runs, music, pages, accounts, canSpend, can
                 </div>
                 {p.photoCount === 0 ? <p className="text-[12px] text-muted-foreground">Chưa có ảnh sản phẩm thật: Thư viện Media → Nguồn ảnh → Nhập ảnh sản phẩm từ Pancake.</p> : null}
                 <div className="flex flex-wrap items-center gap-2 pt-1">
-                  {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music.map((m) => ({ id: m.id, title: m.title }))} /> : null}
+                  {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music.map((m) => ({ id: m.id, title: m.title }))} perVideoUsd={perVideoUsd} costNote={costNote} /> : null}
                   <SkuModeSelect productId={p.productId} value={p.reviewMode ?? "MANUAL"} disabled={!canMode} />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

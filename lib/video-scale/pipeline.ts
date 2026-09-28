@@ -475,6 +475,57 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
   return { ok: true, tts: needTts.length };
 }
 
+/** Trần số video MỘT lượt kể cả bản nhân — nhân bản gần như miễn phí nhưng 30 bản na ná nhau là rác, không phải biến thể. */
+export const MAX_VARIANTS_WITH_CLONES = 12;
+
+/**
+ * NHÂN BẢN VIDEO: một video MỚI dùng lại đúng các clip ĐÃ trả tiền của video gốc, với chữ / lời đọc / nhạc / phụ đề khác ⇒ chỉ
+ * tốn hậu kỳ (miễn phí) + giọng đọc mới nếu có + QC (~0,01 USD). Cách rẻ nhất để có nhiều biến thể thử quảng cáo từ một lần
+ * sinh clip. Video gốc giữ nguyên. Chữ mới qua cùng bộ kiểm; bản nhân đi chờ duyệt như mọi video.
+ */
+export async function cloneVideoVariant(db: Db, variantId: string, edit: VideoEdit, actor: Actor): Promise<{ ok: true; variantId: string; tts: number } | { ok: false; error: string }> {
+  const [src] = await db.select().from(V).where(eq(V.id, variantId)).limit(1);
+  if (!src) return { ok: false, error: "Không tìm thấy video." };
+  if (!(EDITABLE_VARIANT_STATUSES as readonly string[]).includes(src.status) || src.isTest) return { ok: false, error: "Chỉ nhân bản được video thật đã dựng xong." };
+  const [count] = await db.select({ n: sql<string>`count(*)`, maxSeq: max(V.seq) }).from(V).where(eq(V.runId, src.runId));
+  if (Number(count?.n ?? 0) >= MAX_VARIANTS_WITH_CLONES) return { ok: false, error: `Lượt này đã có ${MAX_VARIANTS_WITH_CLONES} video — tạo lượt mới thay vì nhân thêm.` };
+  const clipJobs = await db.select().from(J).where(and(eq(J.variantId, variantId), eq(J.kind, "CLIP"), eq(J.status, "SUCCEEDED"), isNotNull(J.outputAssetId))).orderBy(asc(J.createdAt));
+  const byScene = new Map<number, (typeof clipJobs)[number]>();
+  for (const j of clipJobs) byScene.set(j.sceneIndex ?? 0, j);
+  const scenes = scriptOf(src.script).scenes.length;
+  if (byScene.size !== scenes) return { ok: false, error: "Video gốc thiếu clip (đã xoá sau hạn giữ?) — không nhân bản được." };
+  const newId = crypto.randomUUID();
+  const seq = Number(count?.maxSeq ?? src.seq) + 1;
+  await db.transaction(async (tx) => {
+    await tx.insert(V).values({
+      id: newId,
+      runId: src.runId,
+      productId: src.productId,
+      seq,
+      angle: src.angle,
+      angleVocabVersion: src.angleVocabVersion,
+      script: src.script,
+      fingerprint: src.fingerprint,
+      sourceId: src.sourceId,
+      status: "REVIEW",
+      renderOptions: src.renderOptions,
+      renderRev: 0,
+      isTest: false,
+    });
+    // Clip dùng CHUNG tệp với video gốc — việc mang tiền 0 (tiền đã tính ở video gốc, không cộng hai lần).
+    for (const [i, j] of byScene) {
+      await tx.insert(J).values({ idempotencyKey: `clone:${newId}:clip:${i}`, kind: "CLIP", runId: src.runId, variantId: newId, sceneIndex: i, status: "SUCCEEDED", attempts: 1, maxAttempts: 1, provider: j.provider, model: j.model, outputAssetId: j.outputAssetId, costUsd: 0, costBasis: "", request: { clonedFrom: j.id }, isTest: false, createdByUserId: actor.id, finishedAt: new Date() });
+    }
+  });
+  const r = await rerenderVideoVariant(db, newId, edit, actor);
+  if (!r.ok) {
+    await db.delete(J).where(eq(J.variantId, newId));
+    await db.delete(V).where(eq(V.id, newId));
+    return { ok: false, error: r.error };
+  }
+  return { ok: true, variantId: newId, tts: r.tts };
+}
+
 export async function cancelVideoRun(db: Db, runId: string, now = new Date()): Promise<Result> {
   const [run] = await db.select({ status: R.status }).from(R).where(eq(R.id, runId)).limit(1);
   if (!run) return { ok: false, error: "Không tìm thấy lượt." };

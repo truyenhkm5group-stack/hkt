@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { getDb } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
-import { VIDEO_PRICE_SOURCE, fakeProviderAllowed } from "@/lib/constants/video-scale";
+import { VIDEO_PRICE_SOURCE, VIDEO_PROVIDER_LABEL, fakeProviderAllowed, variantReserveUsd, type VideoScaleConfig } from "@/lib/constants/video-scale";
 import { env } from "@/lib/env";
 import { listJobs, listMusic, listPageConfigs, listPosts, listRuns, listVariants, listWinProducts, loadVideoScaleCounts, videoSpendOnDay } from "@/lib/queries/video-scale";
 import { listAdAccountOptions, listFanpageOptions } from "@/lib/queries/creative-manual-gen";
@@ -135,7 +135,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       </nav>
 
       {tab === "ma-win" ? (
-        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} />
+        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} perVideoUsd={variantReserveUsd(cfg)} costNote={costNoteOf(cfg)} />
       ) : tab === "hang-doi" ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -211,3 +211,10 @@ async function reportTab(raw: SearchParams, canOptimize: boolean) {
     />
   );
 }
+
+/** Câu cấu hình đang áp cho lượt mới — người bấm "Tạo" biết mình đang trả cho cái gì. */
+function costNoteOf(cfg: VideoScaleConfig): string {
+  const ai = cfg.aiScenes === null ? cfg.scenesPerVariant : Math.min(cfg.aiScenes, cfg.scenesPerVariant);
+  return `${VIDEO_PROVIDER_LABEL[cfg.provider]} · ${cfg.model} · ${cfg.scenesPerVariant} cảnh / video, ${ai} cảnh AI${ai < cfg.scenesPerVariant ? `, ${cfg.scenesPerVariant - ai} cảnh ảnh động (miễn phí)` : ""}. Đổi ở tab Cấu hình.`;
+}
+
