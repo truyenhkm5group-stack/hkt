@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { ALL_PERMISSIONS, type Permission } from "@/lib/auth/permissions";
+import { checkEntitlement } from "@/lib/entitlements/check";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { isModuleKey, moduleDef } from "@/lib/constants/platform-modules";
 import { isUniqueViolation } from "@/lib/metadata/common";
@@ -158,6 +159,9 @@ export async function createObject(user: SessionUser, input: unknown): Promise<O
   if (Number(n) >= CUSTOM_OBJECT_MAX) return objectsFail("INVALID", `Tổ chức đã có ${CUSTOM_OBJECT_MAX} đối tượng tuỳ biến — lưu trữ không giải phóng khoá; liên hệ quản trị nền tảng.`);
   const [dup] = await db.select({ key: schema.metaObjects.key, status: schema.metaObjects.status }).from(schema.metaObjects).where(eq(schema.metaObjects.key, p.key)).limit(1);
   if (dup) return objectsFail("CONFLICT", `Khoá «${p.key}» đã có${dup.status === "ARCHIVED" ? " (đối tượng đã lưu trữ — khôi phục thay vì tạo lại)" : ""}. Khoá không dùng lại được.`, "key");
+  // Hạn mức gói (Phase 10 · §5): lỗi nghiệp vụ, không ném. Tổ chức nhà = nội bộ, không đếm gì.
+  const ent = await checkEntitlement("objects", 1);
+  if (!ent.ok) return objectsFail("INVALID", ent.error);
 
   let row: Row;
   try {
@@ -234,6 +238,11 @@ async function setStatus(user: SessionUser, key: string, to: "ACTIVE" | "ARCHIVE
   if (!current) return objectsFail("NOT_FOUND", `Không có đối tượng «${String(key).slice(0, 60)}» trong tổ chức này.`, "key");
   // Đã ở trạng thái xin ⇒ không ghi gì, không thêm nhật ký (cùng tinh thần luật 61).
   if (current.status === to) return { ok: true, object: summarize(current, 0, 0) };
+  // Khôi phục làm đối tượng tính lại vào hạn mức gói (bộ đếm bỏ qua đối tượng đã lưu trữ) ⇒ kiểm như một lượt tạo.
+  if (to === "ACTIVE") {
+    const ent = await checkEntitlement("objects", 1);
+    if (!ent.ok) return objectsFail("INVALID", ent.error);
+  }
   const [row] = await db
     .update(t)
     .set({ status: to, updatedBy: user.id, updatedAt: new Date() })

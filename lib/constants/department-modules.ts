@@ -475,6 +475,14 @@ export const NAV_MODULES = [
     permission: "metadata:manage",
     why: "Cài một mẫu ngành (thời trang, TMĐT chung, bán sỉ…) theo Xem trước → Xác nhận: máy chỉ gọi các màn hình cấu hình sẵn có, luật sinh ở NHÁP. Nâng mẫu lên phiên bản mới không đè thứ tổ chức đã sửa.",
   },
+  // Xuất cấu hình (Phase 11 · H3): trang còn đòi thêm `settings:manage` (xuất là đọc CẢ cấu hình) và tự nói ra khi thiếu.
+  {
+    href: "/settings/export",
+    label: "Xuất cấu hình",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Tải toàn bộ cấu hình của tổ chức (module, vai trò, đối tượng, field, form, danh sách, trang, luật) thành một tệp blueprint để khôi phục hoặc nhân bản sang tổ chức mới — không bản ghi, không người dùng, không bí mật. Việc của quản trị vì nó đọc cấu hình của cả tổ chức.",
+  },
   // Đối tượng tuỳ biến (Phase 6): cùng khoá `metadata:manage` — một đối tượng mới là một nghiệp vụ mới có menu, form,
   // danh sách của CẢ tổ chức, nên là việc của quản trị, không của phòng nào.
   {

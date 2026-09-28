@@ -8,6 +8,7 @@ import { FIELD_TYPE_LABEL, isCustomObjectKey } from "@/lib/metadata/types";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { adminObjectsAll, loadDataModel } from "@/lib/platform-ui/metadata-admin";
 import { param, type SearchParams } from "@/lib/search-params";
+import { getBrandCopy } from "@/lib/branding/service";
 
 export const metadata = { title: "Mô hình dữ liệu" };
 
@@ -37,7 +38,7 @@ export default async function DataModelPage({ searchParams }: { searchParams: Pr
     );
   }
   const current = objects.find((o) => o.key === param(raw, "object")) ?? objects[0];
-  const loaded = await loadDataModel(user, current.key);
+  const [loaded, copy] = await Promise.all([loadDataModel(user, current.key), getBrandCopy(user)]);
   // Đích quan hệ: đối tượng của sổ tĩnh có module bật + đối tượng tuỳ biến ACTIVE (Phase 6 · mục 3).
   const relationTargets = [
     ...OBJECT_REGISTRY.filter((o) => moduleOn(user, o.module)).map((o) => ({ key: o.key, label: o.label })),
@@ -52,7 +53,7 @@ export default async function DataModelPage({ searchParams }: { searchParams: Pr
         description={`${user.organization.name} · ${current.label}`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
-            <p>Field hệ thống là cột thật của ERP — chỉ xem ở đây. Field tuỳ biến là của riêng tổ chức, lưu tách khỏi dữ liệu đồng bộ nên Pancake / Viettel Post không bao giờ ghi đè.</p>
+            <p>Field hệ thống là cột thật của ERP — chỉ xem ở đây. Field tuỳ biến là của riêng tổ chức, lưu tách khỏi dữ liệu đồng bộ nên {copy.name("ORDER_SOURCE")} / {copy.name("SHIPPING")} không bao giờ ghi đè.</p>
             <p>Khoá field bất biến. Không xoá field — «Lưu trữ» giữ nguyên giá trị đã nhập, chỉ thôi hiện và thôi nhận ghi.</p>
             <p>Trạng thái nghiệp vụ riêng của tổ chức = field kiểu «Trạng thái nghiệp vụ» (tự khai giá trị và chuyển trạng thái). Trạng thái hệ thống như trạng thái đơn chỉ đổi được nhãn, ở màn hình Trạng thái.</p>
           </div>

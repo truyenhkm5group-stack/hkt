@@ -98,7 +98,8 @@ export function homeRowProblems(orgs: readonly Pick<Organization, "id" | "code" 
   return [];
 }
 
-function errorText(error: unknown): string {
+/** Câu lỗi ngắn, đã che mật khẩu trong chuỗi kết nối — dùng chung cho mọi màn chẩn đoán nền tảng. */
+export function errorText(error: unknown): string {
   const e = error as { message?: string; cause?: { message?: string } } | null;
   const text = e?.cause?.message ?? e?.message ?? String(error);
   // Chuỗi kết nối có thể lọt vào câu lỗi của driver — che phần mật khẩu trước khi in (kho mã PUBLIC).

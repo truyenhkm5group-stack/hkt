@@ -1,21 +1,24 @@
 /**
  * ═══════════ HẠN MỨC GÓI — `checkEntitlement` (Phase 10 · §5) — CHỈ MÁY CHỦ ═══════════
  *
- * Gọi ở ĐÚNG điểm tạo (tạo người dùng, trang, luật, tải tệp; đối tượng / bản ghi / bản nháp AI khi các phase đó có
- * mặt). Vượt ⇒ `{ ok: false, error }` — LỖI NGHIỆP VỤ, không ném: điểm gọi trả thẳng câu đó cho người bấm.
+ * Gọi ở ĐÚNG điểm tạo: người dùng, trang, luật, tải tệp, đối tượng tuỳ biến (`createObject` + khôi phục), bản ghi tuỳ
+ * biến (`createRecord`), bản nháp AI (`createDraft`). Vượt ⇒ `{ ok: false, error }` — LỖI NGHIỆP VỤ, không ném: điểm gọi trả thẳng câu đó cho người bấm.
  *
  *  · Tổ chức NHÀ = gói `internal`, không giới hạn, và KHÔNG đếm gì — hành vi của nhà không đổi một truy vấn (X7).
  *  · Đếm THẬT từ CSDL tổ chức (không bộ đếm riêng dễ lệch). Đệm 60 giây qua `memo` (khoá tự mang tổ chức) — NHƯNG khi
- *    số đệm đã tới 80% trần thì đếm lại tươi: đệm chỉ được phép làm nhanh lượt kiểm ở xa trần, không được để hai
- *    lượt tạo trong cùng một phút cùng lọt qua ô cuối cùng.
+ *    số đệm đã tới 80% trần thì đếm lại tươi, VÀ mỗi lượt cho qua thì QUÊN số đệm (`forgetMemo`): lượt cho qua là lời
+ *    hứa sắp có một dòng mới, nên số đệm vừa thấp hơn thật một đơn vị. Lượt ghi do NGƯỜI bấm đã xoá đệm qua `audit()`,
+ *    nhưng lượt ghi trong JOB NỀN chỉ đánh dấu cũ (đệm trả ngay số cũ) — không quên thì với trần nhỏ (vd 2) số đệm 0
+ *    cho lọt lượt thứ ba (bài kiểm H4 mô phỏng bằng một dòng chèn không qua `audit`).
  *  · Loại chưa có bộ đếm ⇒ cho qua và nói `used: null` (chưa biết ≠ 0): chặn một thứ không đo được là đoán.
  *  · Gói lạ trên tổ chức ⇒ dùng hạn mức `trial` (phía HẸP); không đọc được cả `trial` ⇒ từ chối, nói rõ vì sao.
  */
-import { count, eq, ne, sql } from "drizzle-orm";
+import { count, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
-import { memo } from "@/lib/cache";
+import { forgetMemo, memo } from "@/lib/cache";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
+import { dauNgayVN } from "@/lib/ai/budget";
 import type { Organization } from "@/lib/platform/types";
 import { ENTITLEMENT_KINDS, ENTITLEMENT_SPEC, overLimitMessage, parseLimits, type EntitlementKind, type PlanLimits } from "@/lib/entitlements/kinds";
 
@@ -85,6 +88,24 @@ const COUNTERS: Partial<Record<EntitlementKind, Counter>> = {
     const [r] = await db.select({ n: count() }).from(schema.workflowRules).where(ne(schema.workflowRules.status, "ARCHIVED"));
     return Number(r?.n ?? 0);
   },
+  objects: async () => {
+    const db = await getDb();
+    // Đối tượng đã lưu trữ không tính (như trang / luật) — khôi phục thì kiểm lại hạn mức ở `restoreObject`.
+    const [r] = await db.select({ n: count() }).from(schema.metaObjects).where(ne(schema.metaObjects.status, "ARCHIVED"));
+    return Number(r?.n ?? 0);
+  },
+  records: async () => {
+    const db = await getDb();
+    // Bản ghi còn sống (xoá mềm = `deleted_at` ⇒ không tính), mọi đối tượng tuỳ biến cộng lại.
+    const [r] = await db.select({ n: count() }).from(schema.customRecords).where(isNull(schema.customRecords.deletedAt));
+    return Number(r?.n ?? 0);
+  },
+  aiDraftsPerDay: async () => {
+    const db = await getDb();
+    // Cùng mốc "hôm nay" với trần kỹ thuật của AI Builder (00:00 giờ Việt Nam) — một ngày, một định nghĩa.
+    const [r] = await db.select({ n: count() }).from(schema.aiBlueprintDrafts).where(gte(schema.aiBlueprintDrafts.createdAt, dauNgayVN(new Date())));
+    return Number(r?.n ?? 0);
+  },
   storageMb: async () => {
     const db = await getDb();
     const [r] = await db.select({ bytes: sql<string>`coalesce(sum(${schema.customFiles.size}), 0)` }).from(schema.customFiles);
@@ -125,6 +146,7 @@ export async function checkEntitlement(kind: EntitlementKind, delta = 1, opts: {
     let used = await memo(`entitlement:${kind}`, CACHE_MS, counter);
     if (used + delta > limit * FRESH_AT) used = await counter();
     if (used + delta > limit) return { ok: false, kind, planKey: plan.key, planName: plan.name, used, limit, error: overLimitMessage(kind, plan.name, used, limit) };
+    await forgetMemo(`entitlement:${kind}`);
     return { ok: true, kind, planKey: plan.key, used, limit };
   });
 }

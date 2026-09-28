@@ -7,21 +7,21 @@ import { PageVisitBeacon } from "@/components/page-visit-beacon";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
+import { orgTabMetadata } from "@/lib/branding/copy";
 import { getOrgBrand } from "@/lib/branding/service";
 import { loadDynamicNav } from "@/lib/pages/nav-loader";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Tiêu đề tab của tổ chức KHÔNG phải nhà mang tên CỦA HỌ (Phase 10 · §4) — không để "VNXcommerce ERP" của bố cục gốc
- * lộ ra ở ERP của khách. Tổ chức nhà trả `{}` ⇒ giữ nguyên tiêu đề hiện tại.
+ * Tiêu đề tab + favicon của tổ chức KHÔNG phải nhà mang tên / logo CỦA HỌ (Phase 10 · §4, Phase 11 · H4) — không để
+ * "VNXcommerce ERP" và biểu tượng của bố cục gốc lộ ra ở ERP của khách. Tổ chức nhà trả `{}` ⇒ giữ nguyên.
  */
 export async function generateMetadata(): Promise<Metadata> {
   const user = await getCurrentUser();
   if (!user?.organization || user.organization.isHome) return {};
-  const name = (await getOrgBrand(user))?.name ?? user.organization.name;
-  // `absolute` cho tiêu đề mặc định: nếu không, mẫu của bố cục GỐC gắn tên tổ chức nhà vào sau.
-  return { title: { absolute: name, template: `%s · ${name}` }, description: `ERP của ${name}` };
+  const brand = await getOrgBrand(user);
+  return orgTabMetadata({ name: brand?.name ?? user.organization.name, logoUrl: brand?.logoUrl ?? null });
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {

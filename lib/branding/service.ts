@@ -15,6 +15,9 @@ import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { checkEntitlement } from "@/lib/entitlements/check";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { brandCopy, HOME_COPY_CONTEXT, isHomeOrg, type BrandCopy, type IntegrationRole } from "@/lib/branding/copy";
+import { findConnector } from "@/lib/connectors/registry";
+import { connectionStatusRows } from "@/lib/connectors/service";
 import { accentCss, BRANDING_NAME_MAX, BRANDING_SETTING_KEY, isAccentKey, LOGO_MAX_BYTES, sanitizeBranding, sniffImageMime, type LogoMime, type OrgBranding } from "@/lib/branding/accents";
 
 export const LOGO_OBJECT_KEY = "org_branding";
@@ -39,6 +42,29 @@ export async function getOrgBrand(user: Pick<SessionUser, "organization">): Prom
     logoUrl: b.logoFileId ? `/api/branding/logo?v=${b.logoFileId.slice(0, 8)}` : null,
     accentCss: accentCss(b.accent),
   };
+}
+
+/**
+ * Chữ của trang lõi cho phiên này (gỡ dấu VNX — `lib/branding/copy.ts`). Tổ chức nhà: KHÔNG một truy vấn nào, chữ cũ
+ * nguyên vẹn. Tổ chức khác: nhãn connector đang BẬT của chính họ theo vai (nguồn đơn / vận chuyển); đọc hỏng ⇒ danh
+ * từ trung tính (không bao giờ rơi về chữ của nhà).
+ */
+export async function getBrandCopy(user: Pick<SessionUser, "organization"> | null | undefined): Promise<BrandCopy> {
+  if (isHomeOrg(user)) return brandCopy(HOME_COPY_CONTEXT);
+  const declared: Partial<Record<IntegrationRole, string>> = {};
+  try {
+    for (const r of await connectionStatusRows()) {
+      if (r.status !== "ACTIVE" || r.orgCode !== user?.organization?.code) continue; // dây bẫy: dòng mang mã khác ⇒ không dùng
+      const spec = findConnector(r.connectorKey);
+      if (!spec || spec.tenancy !== "PER_ORG") continue;
+      if (spec.kind === "ORDER_SOURCE") declared.ORDER_SOURCE ??= spec.label;
+      if (spec.kind === "SHIPPING") declared.SHIPPING ??= spec.label;
+    }
+    if (declared.ORDER_SOURCE) declared.POS = declared.ORDER_SOURCE;
+  } catch {
+    // Không đọc được kết nối ⇒ trung tính.
+  }
+  return brandCopy({ isHome: false, declared });
 }
 
 function denial(user: SessionUser): string | null {

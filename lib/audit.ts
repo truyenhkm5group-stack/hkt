@@ -82,7 +82,7 @@ export type AuditParams = {
   `CUSTOM_FILE_DOWNLOAD` (tải tệp của field tuỳ biến — Phase 3.1): chỉ ĐỌC một tệp; không có nó ở đây thì mỗi
   lượt bấm «Tải xuống» xoá sạch đệm báo cáo của cả tổ chức.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

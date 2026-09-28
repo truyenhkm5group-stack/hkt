@@ -8,13 +8,15 @@
  * tĩnh ở lại cho mã chỉ nói về đối tượng hệ thống.
  *
  * KHÔNG ĐỆM trong tiến trình (M13): một câu nhỏ theo khoá chính mỗi lần; tạo / sửa / lưu trữ đối tượng có hiệu lực ở
- * lượt đọc kế tiếp của MỌI tiến trình. Hàm KHÔNG kiểm module / trạng thái — `requireObject` (lib/metadata/common.ts)
+ * lượt đọc kế tiếp của MỌI tiến trình. Ngoại lệ DUY NHẤT: bên trong MỘT lượt dựng trang (`lib/metadata/read-scope.ts`)
+ * cùng khoá chỉ đọc một lần — phạm vi mất khi lượt dựng xong. Hàm KHÔNG kiểm module / trạng thái — `requireObject` (lib/metadata/common.ts)
  * làm việc đó; màn hình quản trị cần đọc cả đối tượng đã lưu trữ.
  */
 import { asc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { customObjectDef } from "@/lib/metadata/custom-object-def";
+import { scopedMetadataRead } from "@/lib/metadata/read-scope";
 import { isCustomObjectKey } from "@/lib/metadata/types";
 
 export async function resolveObject(key: string): Promise<AnyObjectDef | null> {
@@ -22,8 +24,11 @@ export async function resolveObject(key: string): Promise<AnyObjectDef | null> {
   if (sys) return sys;
   if (!isCustomObjectKey(key)) return null;
   const db = await getDb();
-  const [row] = await db.select().from(schema.metaObjects).where(eq(schema.metaObjects.key, key)).limit(1);
-  return row ? customObjectDef(row) : null;
+  // Trong một lượt dựng trang (`withMetadataReadScope`) đọc MỘT lần; ngoài phạm vi ⇒ đọc thẳng như cũ (M13).
+  return scopedMetadataRead(db, `object:${key}`, async () => {
+    const [row] = await db.select().from(schema.metaObjects).where(eq(schema.metaObjects.key, key)).limit(1);
+    return row ? customObjectDef(row) : null;
+  });
 }
 
 /** Mọi đối tượng tuỳ biến của tổ chức hiện hành (mặc định chỉ ACTIVE), xếp theo tên. */

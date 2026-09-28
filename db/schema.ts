@@ -8815,6 +8815,10 @@ export const customRecords = pgTable(
   (t) => [
     index("custom_records_object_idx").on(t.objectKey, t.deletedAt, t.updatedAt),
     index("custom_records_owner_idx").on(t.ownerId),
+    // Phase 11 · H2 (migration 0171): đúng thứ tự xếp của `/o/<khoá>` (updated_at) và bảng / kanban trang động
+    // (created_at) trên bản ghi CÒN SỐNG — đo trước/sau ở drizzle/0171_custom_records_live_sort.sql.
+    index("custom_records_live_updated_idx").on(t.objectKey, t.updatedAt.desc().nullsLast(), t.id).where(sql`${t.deletedAt} is null`),
+    index("custom_records_live_created_idx").on(t.objectKey, t.createdAt.desc().nullsLast(), t.id.desc()).where(sql`${t.deletedAt} is null`),
     check("custom_records_title_check", sql`length(btrim(${t.title})) > 0`),
   ],
 );

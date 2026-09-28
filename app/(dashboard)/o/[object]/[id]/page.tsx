@@ -9,12 +9,8 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { formatDateTime } from "@/lib/format";
-import { CUSTOM_RECORD_FORM_EDIT } from "@/lib/metadata/custom-object-def";
-import { listFields } from "@/lib/metadata/fields";
-import { getPublishedForm } from "@/lib/metadata/forms";
-import { canEditField, customFileNames } from "@/lib/metadata/values";
-import { getRecord, recordGate, recordTimeline, relationOptionsFor, reverseRelations } from "@/lib/objects/records";
-import { userPickOptions } from "@/lib/queries/users";
+import { canEditField } from "@/lib/metadata/values";
+import { loadRecordDetailPage } from "@/lib/objects/record-detail";
 
 export const metadata = { title: "Chi tiết bản ghi" };
 
@@ -27,27 +23,19 @@ export default async function ObjectRecordPage({ params }: { params: Promise<{ o
   const { object, id } = await params;
   const { user, decision } = await requireResource("CUSTOM_RECORDS", "records:view");
   if (decision.allow === "NONE") return <ScopeDenied title="Chi tiết bản ghi" reason={decision.reason} fix={decision.fix} />;
-  const r = await getRecord(object, id, user);
-  if (!r.ok) return <GateMessage failure={r} title="Chi tiết bản ghi" />;
-  const gate = await recordGate(object, user, "view");
-  if (!gate.ok) notFound();
-  const def = gate.def;
+  // Mọi dữ liệu của trang trong MỘT lượt đọc (một phạm vi metadata) — lib/objects/record-detail.ts.
+  const loaded = await loadRecordDetailPage(object, id, user);
+  if (!loaded.ok) {
+    if (loaded.failure) return <GateMessage failure={loaded.failure} title="Chi tiết bản ghi" />;
+    notFound();
+  }
+  const { def, detail: r, form, fields, users, relationOptions, reverse, timeline, fileNames } = loaded.data;
   const rec = r.record;
-  const [form, fields, users, relationOptions, reverse, timeline] = await Promise.all([
-    getPublishedForm(def.key, CUSTOM_RECORD_FORM_EDIT),
-    listFields(def.key),
-    userPickOptions(),
-    r.canWrite ? relationOptionsFor(user, r.customFields) : Promise.resolve({}),
-    reverseRelations(def.key, rec.id, user),
-    recordTimeline(def.key, rec.id, user, def),
-  ]);
   // Chỉ field người xem ĐƯỢC xem đi xuống trình duyệt (dịch vụ đã lọc giá trị; định nghĩa cũng lọc theo cùng luật).
   const visibleKeys = new Set(r.customFields.map((f) => f.key));
   const custom = fields.custom.filter((f) => visibleKeys.has(f.key));
-  const fileIds = custom.filter((f) => f.type === "file" && typeof rec.values[f.key] === "string").map((f) => String(rec.values[f.key]));
-  const fileNames = fileIds.length ? await customFileNames(def.key, rec.id, fileIds, user) : {};
   // Nhãn đích quan hệ đã lưu (người xem xem được) đứng đầu danh sách chọn — ô không bao giờ in trống một giá trị đã có.
-  const options: Record<string, { id: string; label: string }[]> = { ...(relationOptions as Record<string, { id: string; label: string }[]>) };
+  const options: Record<string, { id: string; label: string }[]> = { ...relationOptions };
   for (const [fieldKey, labels] of Object.entries(r.relationLabels)) {
     const known = new Set((options[fieldKey] ?? []).map((o) => o.id));
     options[fieldKey] = [...Object.entries(labels).filter(([rid]) => !known.has(rid)).map(([rid, label]) => ({ id: rid, label })), ...(options[fieldKey] ?? [])];

@@ -22,7 +22,11 @@ export type Summary = {
   lastAt: number;
 };
 
-type Store = { series: Map<string, Sample[]>; startedAt: number };
+/** Một lần HỎNG (vd khối trang lỗi bất ngờ): tên + tổ chức + mốc — KHÔNG giữ câu lỗi (có thể mang dữ liệu). */
+export type Failure = { name: string; org: string; at: number };
+const MAX_FAILURES = 300;
+
+type Store = { series: Map<string, Sample[]>; startedAt: number; failures?: Failure[] };
 const holder = globalThis as unknown as { __erpPerf?: Store };
 if (!holder.__erpPerf) holder.__erpPerf = { series: new Map(), startedAt: Date.now() };
 const store = holder.__erpPerf;
@@ -71,11 +75,27 @@ export function summaries(): Summary[] {
   return out.sort((a, b) => b.p95 - a.p95);
 }
 
+/**
+ * Ghi một lần hỏng, gắn TỔ CHỨC (mã) — để trang chẩn đoán một tổ chức (`/platform/org/<mã>`) đọc được "khối nào của
+ * tổ chức này vừa hỏng". Vòng đệm cố định trong RAM, như `record`.
+ */
+export function recordFailure(name: string, org: string) {
+  const list = (store.failures ??= []);
+  list.push({ name, org, at: Date.now() });
+  if (list.length > MAX_FAILURES) list.splice(0, list.length - MAX_FAILURES);
+}
+
+/** Lần hỏng của MỘT tổ chức, cũ → mới, kèm mốc bắt đầu đo của tiến trình. */
+export function recentFailures(org: string): { since: number; failures: Failure[] } {
+  return { since: store.startedAt, failures: (store.failures ?? []).filter((f) => f.org === org) };
+}
+
 export function since() {
   return store.startedAt;
 }
 
 export function resetPerf() {
   store.series.clear();
+  store.failures = [];
   store.startedAt = Date.now();
 }

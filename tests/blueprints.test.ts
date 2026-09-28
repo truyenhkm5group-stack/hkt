@@ -249,7 +249,10 @@ async function cleanupOrg(code: string) {
 async function provision(code: string) {
   await cleanupOrg(code);
   rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
-  await provisionOrganization({ code, name: `Tổ chức thử mẫu ${code}`, modules: [], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Mau@12345" }, source: "TEST", actor: null });
+  // Gói «standard»: bài này cài NHIỀU mẫu vào cùng một tổ chức (bp-c: dịch vụ 2 đối tượng + sản xuất 1 đối tượng) — gói
+  // mặc định `trial` (2 đối tượng) chặn đúng lượt thứ ba từ khi hạn mức đối tượng được nối (Phase 11 · H4). Hạn mức gói
+  // có bài riêng (tests/platform-diagnostics-org.test.ts); ở đây nó không phải thứ đang được kiểm.
+  await provisionOrganization({ code, name: `Tổ chức thử mẫu ${code}`, plan: "standard", modules: [], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Mau@12345" }, source: "TEST", actor: null });
 }
 
 async function adminOf(code: string): Promise<SessionUser> {

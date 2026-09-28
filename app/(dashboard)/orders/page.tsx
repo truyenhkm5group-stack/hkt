@@ -15,6 +15,7 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { applyStatusFacet, statusLabelOverrides } from "@/components/metadata/runtime-core";
 import { objectDef } from "@/lib/constants/object-registry";
 import { getListMetadata, getSystemStatusOptions, listCustomValuesFor } from "@/lib/queries/metadata-lists";
+import { getBrandCopy } from "@/lib/branding/service";
 
 export const metadata = { title: "Đơn hàng" };
 
@@ -29,7 +30,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
-  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage")]);
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user)]);
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -73,7 +74,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         items={[
           { label: "Đơn trong bộ lọc", value: formatNumber(summary.orders), note: `${formatNumber(summary.quantity)} sản phẩm` },
           { label: "Doanh thu lên đơn", value: formatVND(summary.revenue, { compact: true }), hint: "Tiền khách chốt lúc lên đơn, chưa nói gì về việc giao được hay thu được tiền." },
-          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green", hint: "Kết luận theo chứng từ Viettel Post rồi tới COD thực thu — không theo trạng thái Pancake." },
+          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green", hint: `Kết luận theo chứng từ ${copy.name("SHIPPING")} rồi tới COD thực thu — không theo trạng thái ${copy.name("ORDER_SOURCE")}.` },
           { label: "COD", value: formatVND(summary.cod, { compact: true }), hint: "Tổng tiền thu hộ khai báo trên các đơn đang lọc. Đã thu được bao nhiêu thì xem Đối soát COD." },
         ]}
       />

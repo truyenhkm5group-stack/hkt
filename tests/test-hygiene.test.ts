@@ -153,6 +153,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Chụp lại rồi xoá ba biến danh tính agent để kiểm nhánh CHƯA CẤU HÌNH, sau đó khôi phục từng khoá (kể cả khoá vốn không tồn tại). Không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/ai-copilot.test.ts":
     "Đặt OPENAI_API_KEY giả và xoá AI_PROVIDER để kiểm cách chọn nhà cung cấp. Khoá là chuỗi bịa, không phải khoá thật của máy.",
+  "tests/page-query-budget.test.ts":
+    "ĐẶT ERP_PERF_PROBE=1 quanh ĐÚNG lượt cấp tổ chức thử `pqb-a` để client CSDL của tổ chức ấy mang bộ đếm câu có sẵn của db/index.ts, rồi trả lại nguyên trạng trong finally. Đó là dựng DỤNG CỤ ĐO; kết luận (10 dòng = 200 dòng cùng số câu) không rẽ theo giá trị sẵn có của máy.",
   "tests/memo-inflight.test.ts":
     "Đặt MEMO_INFLIGHT_TIMEOUT_MS = 40ms để cửa sổ gộp lời gọi đo được trong một bài kiểm; giữ giá trị cũ và trả lại sau.",
   "tests/tech-cto-proposal.test.ts":
@@ -169,6 +171,9 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
 
   "tests/ai-builder.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) để lưu khoá AI BỊA của tổ chức thử; ĐẶT ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL BỊA của «nhà» để chứng minh client BYOK KHÔNG đọc chúng (fetch là bản giả, không gọi mạng). Mọi biến trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
+
+  "tests/tenant-attack.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) để tổ chức thử B lưu được bí mật kết nối, và PLATFORM_SIGNUP_MODE (invite / open) để dựng B qua /start rồi tấn công đúng cửa vào đó — đều là ĐẦU VÀO của tình huống, trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
   /* ───── ĐỌC biến, nhưng đọc ĐÚNG NGUỒN mà mã sản xuất đọc ───── */
   "tests/session-renewal.test.ts":
