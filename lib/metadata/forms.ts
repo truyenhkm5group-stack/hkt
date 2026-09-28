@@ -11,10 +11,10 @@ import { loadConfigRow, publishConfig, publisherOf, upsertDraft } from "@/lib/me
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { zodFieldErrors } from "@/lib/metadata/fields";
 import { defaultFormSchema, formRefProblems, formSchemaZ, normalizeFormSchema, parseRef } from "@/lib/metadata/form-schema";
-import type { ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef } from "@/lib/constants/object-registry";
 import type { FormSchema, MetadataActor } from "@/lib/metadata/types";
 
-function requireFormKey(def: ObjectDef, formKey: string): void {
+function requireFormKey(def: AnyObjectDef, formKey: string): void {
   if (!def.forms.some((f) => f.key === formKey)) throw new MetadataError("NOT_FOUND", `${def.label} không có form "${formKey}".`);
 }
 
@@ -27,7 +27,7 @@ export async function getPublishedForm(objectKey: string, formKey: string): Prom
   const custom = def.capabilities.customFields ? await loadCustomDefs(objectKey, true) : [];
   const row = await loadConfigRow("FORM", objectKey, formKey);
   if (!row || row.published === null || row.published === undefined) {
-    return { schema: normalizeFormSchema(defaultFormSchema(objectKey, formKey, custom), def.fields, custom), version: 0, isDefault: true, publishedAt: null, publishedBy: null };
+    return { schema: normalizeFormSchema(defaultFormSchema(def, formKey, custom), def.fields, custom), version: 0, isDefault: true, publishedAt: null, publishedBy: null };
   }
   return {
     schema: normalizeFormSchema(row.published as FormSchema, def.fields, custom),
@@ -44,7 +44,7 @@ export async function getFormDraft(objectKey: string, formKey: string): Promise<
   requireFormKey(def, formKey);
   const custom = def.capabilities.customFields ? await loadCustomDefs(objectKey, true) : [];
   const row = await loadConfigRow("FORM", objectKey, formKey);
-  const base = (row?.draft ?? row?.published ?? defaultFormSchema(objectKey, formKey, custom)) as FormSchema;
+  const base = (row?.draft ?? row?.published ?? defaultFormSchema(def, formKey, custom)) as FormSchema;
   return normalizeFormSchema(base, def.fields, custom, { appendMissing: true });
 }
 

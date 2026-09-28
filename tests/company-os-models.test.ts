@@ -150,6 +150,10 @@ export function testCompanyOsModelsPure() {
     "model.code_assigned",
     // Phase 3 · W2: field custom kiểu status đổi giá trị — nguồn trigger workflow; dòng ở shared-contracts.md mục 2.
     "custom_status.changed",
+    // Phase 6: vòng đời bản ghi của đối tượng tuỳ biến — dòng ở shared-contracts.md mục 2.
+    "custom_record.created",
+    "custom_record.updated",
+    "custom_record.deleted",
   ];
   assert.deepEqual([...ten].sort(), [...hopDong].sort(), "sổ khai phải đúng bằng bảng tên đã cấp ở shared-contracts.md mục 2");
   const migName = /"domain_events_name_check" CHECK \("name" ~ '([^']+)'\)/.exec(mig);

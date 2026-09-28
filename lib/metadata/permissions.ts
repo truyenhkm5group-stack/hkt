@@ -17,7 +17,7 @@
  * Muốn hẹp hơn nữa ở từng field: khai `editPermission` (máy chủ ép ở `lib/metadata/values.ts`). Field custom là
  * dữ liệu BỔ SUNG, không đi vào công thức nào (ORDER_OUTCOME, tồn kho, COD).
  */
-import type { ObjectKey } from "@/lib/constants/object-registry";
+import { isObjectKey, type AnyObjectDef, type ObjectKey } from "@/lib/constants/object-registry";
 
 export type ObjectRecordPermissions = { view: string; edit: string };
 
@@ -33,3 +33,26 @@ export const OBJECT_RECORD_PERMISSIONS: Readonly<Record<ObjectKey, ObjectRecordP
   production_order: { view: "models:view", edit: NARROW_EDIT },
   employee: { view: "users:manage", edit: NARROW_EDIT },
 };
+
+/** Khoá tĩnh của ứng dụng tuỳ biến (Phase 6 · mục 4) — mọi đối tượng `x_…` cần chúng, cộng khoá siết của riêng đối tượng. */
+export const RECORDS_VIEW_PERMISSION = "records:view";
+export const RECORDS_WRITE_PERMISSION = "records:write";
+
+/**
+ * Khoá quyền XEM / GHI bản ghi của MỘT đối tượng — người thao tác phải có ĐỦ mọi khoá trong danh sách.
+ *  · hệ thống ⇒ đúng một khoá của `OBJECT_RECORD_PERMISSIONS` (không đổi hành vi Phase 2);
+ *  · tuỳ biến ⇒ `records:view` / `records:write` CỘNG khoá siết của đối tượng (`meta_objects.view_permission` /
+ *    `write_permission`, mặc định trùng khoá tĩnh). Khoá siết chỉ làm HẸP hơn — không bao giờ thay khoá tĩnh.
+ *  · khoá lạ (không thuộc sổ tĩnh, không mang phần tuỳ biến) ⇒ khoá không ai có — hỏng về phía hẹp.
+ */
+export function objectAccess(def: Pick<AnyObjectDef, "key" | "system" | "custom">): { view: string[]; edit: string[] } {
+  if (def.system && isObjectKey(def.key)) {
+    const p = OBJECT_RECORD_PERMISSIONS[def.key];
+    return { view: [p.view], edit: [p.edit] };
+  }
+  if (!def.system && def.custom) {
+    const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
+    return { view: uniq([RECORDS_VIEW_PERMISSION, def.custom.viewPermission]), edit: uniq([RECORDS_WRITE_PERMISSION, def.custom.writePermission]) };
+  }
+  return { view: ["__khong_ai_co__"], edit: ["__khong_ai_co__"] };
+}

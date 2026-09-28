@@ -202,7 +202,7 @@ function testChanDoanThuan() {
   assert.equal(homeRowProblems([]).length, 1);
 
   const base: PlatformHealth = { checkedAt: "2026-09-27T00:00:00Z", migrationsExpected: 10, journalNote: null, registryProblems: [], organizations: [] };
-  const org = { code: "x", name: "X", status: "ACTIVE" as const, isHome: false, templateKey: null, moduleDefault: "DISABLED" as const, enabledModules: 3, totalModules: 23, dependencyErrors: [], unknownModuleKeys: [], connected: true, connectNote: null, migrationsApplied: 10, migrationsExpected: 10, migrationsNote: null, platformTables: [{ table: "platform_audit_log", rows: 0 }], platformTablesNote: null, problems: [] };
+  const org = { code: "x", name: "X", status: "ACTIVE" as const, isHome: false, templateKey: null, moduleDefault: "DISABLED" as const, enabledModules: 3, totalModules: 24, dependencyErrors: [], unknownModuleKeys: [], connected: true, connectNote: null, migrationsApplied: 10, migrationsExpected: 10, migrationsNote: null, platformTables: [{ table: "platform_audit_log", rows: 0 }], platformTablesNote: null, problems: [] };
   assert.equal(summarizeHealth({ ...base, organizations: [org] }).exitCode, 0, "đo đủ và sạch ⇒ 0");
   const chuaDo = summarizeHealth({ ...base, organizations: [{ ...org, connected: null, connectNote: "chưa đọc được", migrationsApplied: null }] });
   assert.equal(chuaDo.exitCode, 2, "không vấn đề nhưng còn chỗ chưa đo ⇒ 2, KHÔNG phải 0");

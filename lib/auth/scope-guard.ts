@@ -34,7 +34,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { getCurrentUser, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { rowsOf } from "@/lib/sql-rows";
-import { membershipOf } from "@/lib/org/membership";
+import { activeMembershipsByUser, membershipOf } from "@/lib/org/membership";
 import { SCOPE_RESOURCE_BY_KEY, hasRowOwnership, type OwnerLink, type ScopeResource } from "@/lib/constants/data-scope-policy";
 import { ACCESS_SCOPE_LABEL } from "@/lib/constants/access-scope";
 
@@ -168,6 +168,30 @@ export async function decideScope(resourceKey: string, viewer?: SessionUser | nu
     */
     const phongDung = user.scope === "TEAM" ? phongLam : thanhVien;
     if (user.scope === "TEAM" && phongDung.length === 0) return theoDong(res, user, "ASSIGNED");
+
+    /*
+      THEO PHÒNG CỦA CHỦ DÒNG (Phase 6 · bản ghi tuỳ biến): bảng không có cột phòng nhưng mỗi dòng có chủ là một TÀI
+      KHOẢN. "Cả phòng" = dòng có chủ là thành viên còn hiệu lực của phòng người xem — đọc qua đường đọc DUY NHẤT của
+      tư cách thành viên (luật 32), không tự viết mệnh đề `department_members`.
+    */
+    if (res.ownerMembership && res.rowOwner?.by === "USER_ID") {
+      const ids = new Set(phongDung.map((m) => m.departmentId));
+      if (ids.size === 0) {
+        return {
+          allow: "NONE",
+          reason: `${user.name} chưa thuộc phòng ban nào, mà phạm vi đang là "${ACCESS_SCOPE_LABEL[user.scope]}".`,
+          fix: "Xếp người này vào một phòng ở trang Người dùng, hoặc nới phạm vi của họ.",
+        };
+      }
+      const members = new Set<string>([user.id]);
+      for (const [uid, list] of await activeMembershipsByUser()) if (list.some((m) => ids.has(m.departmentId))) members.add(uid);
+      const c = cot(res.table, res.rowOwner.column);
+      return {
+        allow: "ROWS",
+        where: sql`${c} in (${sql.join([...members].map((m) => sql`${m}`), sql`, `)})`,
+        explain: `Chỉ dòng có chủ là người trong ${ids.size} phòng của ${user.name} (${members.size} người).`,
+      };
+    }
 
     if (res.rowDepartmentColumn) {
       const ids = user.scope === "TEAM" ? phongLam.map((m) => m.departmentId) : idPhong;

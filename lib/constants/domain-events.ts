@@ -60,6 +60,9 @@ export const MODEL_SUBJECT = "product_model";
  */
 export const METADATA_RECORD_SUBJECT = "custom_record";
 
+/** Lõi dịch vụ bản ghi tuỳ biến (Phase 6) — nơi DUY NHẤT phát `custom_record.*`. */
+const CUSTOM_RECORD_EMITTER = "lib/objects/records.ts";
+
 /** Tệp lõi dịch vụ của sổ mẫu — nơi DUY NHẤT phát `model.*`. */
 const MODEL_EMITTER = "lib/models/service.ts";
 
@@ -177,6 +180,37 @@ export const DOMAIN_EVENTS = [
     emitter: "lib/metadata/values.ts",
     why: "Trạng thái nghiệp vụ do tổ chức tự khai (field custom kiểu status) đổi giá trị — nguồn trigger của workflow cho đối tượng không phát sự kiện miền.",
   },
+  /*
+    Phase 6 (0166): LIVE. Vòng đời bản ghi của đối tượng TUỲ BIẾN (`x_…`) — phát ở lõi dịch vụ DUY NHẤT ghi
+    `custom_records` (lib/objects/records.ts). Subject `custom_record`, `subject_id` = `<objectKey>:<id>` (cùng khuôn
+    `custom_status.changed`); payload `{ objectKey, recordId, … }`. Khoá chống trùng: `custom_record.created:<id>`,
+    `custom_record.updated:<id>:<phiên bản cột hệ thống>`, `custom_record.deleted:<id>` — chạy lại / bấm hai lần
+    không đẻ sự kiện thứ hai. Nguồn trigger `event:custom_record.*` của luật tự động (§6).
+  */
+  {
+    name: "custom_record.created",
+    subjectType: METADATA_RECORD_SUBJECT,
+    owner: "PLATFORM",
+    status: "LIVE",
+    emitter: CUSTOM_RECORD_EMITTER,
+    why: "Một bản ghi của đối tượng tổ chức tự tạo vừa được tạo (kèm giá trị field ban đầu) — nguồn trigger của luật tự động cho nghiệp vụ không có mã nguồn riêng.",
+  },
+  {
+    name: "custom_record.updated",
+    subjectType: METADATA_RECORD_SUBJECT,
+    owner: "PLATFORM",
+    status: "LIVE",
+    emitter: CUSTOM_RECORD_EMITTER,
+    why: "Bản ghi của đối tượng tuỳ biến đổi tên / người phụ trách / giá trị field — payload nêu đúng các khoá đã đổi, không mang giá trị.",
+  },
+  {
+    name: "custom_record.deleted",
+    subjectType: METADATA_RECORD_SUBJECT,
+    owner: "PLATFORM",
+    status: "LIVE",
+    emitter: CUSTOM_RECORD_EMITTER,
+    why: "Bản ghi của đối tượng tuỳ biến bị xoá mềm (đặt deleted_at) — dữ liệu còn nguyên, chỉ thôi hiện và thôi nhận ghi.",
+  },
 ] as const satisfies readonly DomainEventSpec[];
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[number]["name"];
@@ -209,6 +243,9 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "approval.executed": "Việc đã duyệt được thực hiện",
   "stock_receipt.linked_production": "Phiếu nhập nối lệnh / lô sản xuất",
   "custom_status.changed": "Đổi trạng thái nghiệp vụ (field tự khai)",
+  "custom_record.created": "Tạo bản ghi",
+  "custom_record.updated": "Sửa bản ghi",
+  "custom_record.deleted": "Xoá bản ghi",
 };
 
 export function domainEventLabel(name: string): string {

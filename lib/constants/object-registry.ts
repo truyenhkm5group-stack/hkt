@@ -12,7 +12,7 @@
  * `ad_spends` / `fb_ads`) — khai một đối tượng không có bảng là bịa ra thứ không đo được.
  */
 import type { ModuleKey } from "@/lib/constants/platform-modules";
-import type { FieldOption, SystemFieldDef } from "@/lib/metadata/types";
+import type { CustomObjectInfo, FieldOption, SystemFieldDef } from "@/lib/metadata/types";
 
 export const OBJECT_KEYS = ["customer", "product", "order", "order_item", "shipment", "return", "production_order", "employee"] as const;
 export type ObjectKey = (typeof OBJECT_KEYS)[number];
@@ -33,8 +33,12 @@ export type ObjectCapabilities = {
   create: false | { requiresModuleOff?: ModuleKey };
 };
 
-export type ObjectDef = {
-  key: ObjectKey;
+/**
+ * `K` mặc định là khoá của sổ tĩnh — mã chỉ nói về đối tượng hệ thống đọc `ObjectDef` như cũ. Phase 6 nới
+ * `key: string` (`AnyObjectDef`) cho đối tượng tuỳ biến `x_…` do `resolveObject` (lib/metadata/object-resolver.ts) dựng.
+ */
+export type ObjectDef<K extends string = ObjectKey> = {
+  key: K;
   label: string;
   labelPlural: string;
   module: ModuleKey;
@@ -44,7 +48,8 @@ export type ObjectDef = {
   /** Field hiển thị làm tên bản ghi (liên kết, tìm kiếm). */
   titleField: string;
   scope: "TENANT";
-  system: true;
+  /** `false` ⇒ đối tượng tuỳ biến của tổ chức (Phase 6). */
+  system: boolean;
   customizable: boolean;
   capabilities: ObjectCapabilities;
   /** Khoá form của đối tượng (form MẶC ĐỊNH dựng từ sổ khi tổ chức chưa xuất bản). */
@@ -55,7 +60,12 @@ export type ObjectDef = {
   statusFields: string[];
   fields: SystemFieldDef[];
   why: string;
+  /** Chỉ đối tượng tuỳ biến (`system: false`): phần đọc từ `meta_objects`. */
+  custom?: CustomObjectInfo;
 };
+
+/** Đối tượng hệ thống HOẶC tuỳ biến (Phase 6 · X5). */
+export type AnyObjectDef = ObjectDef<string>;
 
 const ORDER_STAGE_OPTIONS: FieldOption[] = (
   [

@@ -1,5 +1,5 @@
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER } from "@/lib/constants/departments";
-import { DOMAIN_EVENTS, domainEventLabel, type DomainEventSpec } from "@/lib/constants/domain-events";
+import { DOMAIN_EVENTS, domainEventLabel, METADATA_RECORD_SUBJECT, type DomainEventSpec } from "@/lib/constants/domain-events";
 import { objectDef } from "@/lib/constants/object-registry";
 import { WORK_PRIORITIES, WORK_PRIORITY_LABEL } from "@/lib/constants/work";
 import type { FieldError, FieldOption, FieldRef, FieldType, ListFilterOp } from "@/lib/metadata/types";
@@ -153,7 +153,14 @@ export function statusFieldsOf(catalog: readonly CatalogField[]): StatusFieldOpt
 export function subjectObjectKey(draft: Pick<RuleDraft, "triggerKind" | "event" | "objectKey">, events: readonly EventOption[]): string | null {
   if (draft.triggerKind === "custom_status") return draft.objectKey || null;
   const subject = events.find((e) => e.name === draft.event)?.subjectType ?? null;
+  // Sự kiện trên BẢN GHI metadata (`custom_record.*` — Phase 6): đối tượng do người khai chọn (`trigger.objectKey`).
+  if (subject === METADATA_RECORD_SUBJECT) return draft.objectKey || null;
   return subject && objectDef(subject) ? subject : null;
+}
+
+/** Sự kiện này có chọn được đối tượng (lọc theo `payload.objectKey`) không — chỉ sự kiện trên bản ghi metadata. */
+export function eventTakesObject(event: string, events: readonly EventOption[]): boolean {
+  return events.find((e) => e.name === event)?.subjectType === METADATA_RECORD_SUBJECT;
 }
 
 // ═══════════ BẢN NHÁP CỦA FORM ═══════════
@@ -236,7 +243,7 @@ export function ruleToDraft(rule: Pick<WorkflowRule, "name" | "key" | "descripti
     description: rule.description ?? "",
     triggerKind: t.kind,
     event: t.kind === "event" ? t.event : "",
-    objectKey: t.kind === "custom_status" ? t.objectKey : "",
+    objectKey: t.kind === "custom_status" ? t.objectKey : (t.objectKey ?? ""),
     fieldKey: t.kind === "custom_status" ? t.fieldKey : "",
     to: t.kind === "custom_status" ? [...t.to] : [],
     from: t.kind === "custom_status" ? [...(t.from ?? [])] : [],
@@ -289,7 +296,7 @@ function optionalText(s: string): string | undefined {
 export function draftToInput(draft: RuleDraft, catalog: readonly CatalogField[]): WorkflowRuleInput {
   const trigger: WorkflowTrigger =
     draft.triggerKind === "event"
-      ? { kind: "event", event: draft.event }
+      ? { kind: "event", event: draft.event, ...(draft.objectKey && draft.event !== CUSTOM_STATUS_EVENT && draft.event.startsWith("custom_record.") ? { objectKey: draft.objectKey } : {}) }
       : { kind: "custom_status", objectKey: draft.objectKey, fieldKey: draft.fieldKey, to: [...draft.to], ...(draft.from.length ? { from: [...draft.from] } : {}) };
   let conditions: WorkflowCondition | null;
   if (draft.lockedConditions) conditions = draft.lockedConditions;
@@ -390,7 +397,7 @@ export function orphanErrors(errors: readonly FieldError[], shown: readonly stri
 
 /** Một dòng «khi nào» cho bảng danh sách. */
 export function triggerSummary(trigger: WorkflowTrigger): string {
-  if (trigger.kind === "event") return `Sự kiện · ${domainEventLabel(trigger.event)}`;
+  if (trigger.kind === "event") return `Sự kiện · ${domainEventLabel(trigger.event)}${trigger.objectKey ? ` · ${objectDef(trigger.objectKey)?.label ?? trigger.objectKey}` : ""}`;
   const obj = objectDef(trigger.objectKey)?.label ?? trigger.objectKey;
   const from = trigger.from?.length ? `${trigger.from.join(" / ")} → ` : "→ ";
   return `${obj} · ${trigger.fieldKey} ${from}${trigger.to.join(" / ")}`;

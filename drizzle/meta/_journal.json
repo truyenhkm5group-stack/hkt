@@ -1156,6 +1156,13 @@
       "when": 1790566545167,
       "tag": "0165_blueprint_installs",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1790566605167,
+      "tag": "0166_custom_objects",
+      "breakpoints": true
     }
   ]
 }

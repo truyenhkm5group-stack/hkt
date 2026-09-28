@@ -16,6 +16,7 @@ export const FIELD_TYPES = [
   "status",
   "user",
   "relation",
+  "relation_many",
   "file",
   "email",
   "phone",
@@ -37,6 +38,7 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
   status: "Trạng thái nghiệp vụ",
   user: "Người dùng",
   relation: "Liên kết bản ghi",
+  relation_many: "Liên kết nhiều bản ghi",
   file: "Tệp",
   email: "Email",
   phone: "Số điện thoại",
@@ -48,7 +50,8 @@ export type FieldRef = `system:${string}` | `custom:${string}`;
 
 export type FieldOption = { value: string; label: string; color?: string; active: boolean; position: number };
 
-export type FieldValidation = { min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string; patternMessage?: string };
+/** `unique` (Phase 6 · chỉ kiểu `relation`): mỗi bản ghi đích được tối đa MỘT bản ghi trỏ tới ⇒ quan hệ một-một. */
+export type FieldValidation = { min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string; patternMessage?: string; unique?: boolean };
 
 export type FieldStatus = "ACTIVE" | "ARCHIVED";
 
@@ -112,3 +115,32 @@ export const FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]{1,40}$/;
 
 /** Người thao tác trên metadata — cùng hình `Actor` của kho (id bắt buộc, `null` = máy). */
 export type MetadataActor = { id: string | null; email: string; permissions?: readonly string[]; isAdmin?: boolean };
+
+// ═══════════ PHASE 6 — ĐỐI TƯỢNG TUỲ BIẾN (docs/platform/phase-6-contracts.md) ═══════════
+
+/** Khoá đối tượng tuỳ biến — tiền tố `x_` ⇒ không bao giờ trùng khoá hệ thống. Cùng biểu thức với CHECK của `meta_objects`. */
+export const CUSTOM_OBJECT_KEY_PATTERN = /^x_[a-z][a-z0-9_]{1,40}$/;
+
+export function isCustomObjectKey(key: unknown): key is string {
+  return typeof key === "string" && CUSTOM_OBJECT_KEY_PATTERN.test(key);
+}
+
+/** Trần số id của một field `relation_many`. */
+export const RELATION_MANY_MAX = 50;
+
+/** Kiểu field trỏ tới bản ghi của một đối tượng (`relationObject` là đích). */
+export const RELATION_TYPES: readonly FieldType[] = ["relation", "relation_many"];
+
+/** Phần của một đối tượng tuỳ biến đọc từ `meta_objects` — gắn vào `ObjectDef.custom`. */
+export type CustomObjectInfo = {
+  icon: string;
+  /** Nhóm menu (khoá module). Module đó tắt ⇒ đối tượng ẩn và bị từ chối. */
+  menuModule: string;
+  titleLabel: string;
+  description: string | null;
+  /** Khoá quyền SIẾT thêm (mặc định `records:view` / `records:write`) — luôn đi CÙNG `records:*`, không thay. */
+  viewPermission: string;
+  writePermission: string;
+  status: FieldStatus;
+  origin: string | null;
+};

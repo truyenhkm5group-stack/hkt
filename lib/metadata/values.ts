@@ -24,15 +24,17 @@ import { METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import type { Permission } from "@/lib/auth/permissions";
-import { objectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { auditActor, checkObject, existingRecordIds, idColumnOf, loadCustomDefs, recordExists, requireObject } from "@/lib/metadata/common";
+import { resolveObject } from "@/lib/metadata/object-resolver";
+import { canWriteRecord, visibleRecordIds } from "@/lib/metadata/record-access";
 import { CUSTOM_FILE_ID_PATTERN, customValueText } from "@/lib/metadata/display";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { writableCustomKeys } from "@/lib/metadata/form-schema";
 import { getPublishedForm } from "@/lib/metadata/forms";
 import { filterShapeOk } from "@/lib/metadata/list-schema";
-import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
-import { FIELD_KEY_PATTERN, type CustomFieldDef, type CustomValues, type FieldError, type ListFilter } from "@/lib/metadata/types";
+import { objectAccess } from "@/lib/metadata/permissions";
+import { FIELD_KEY_PATTERN, isCustomObjectKey, RELATION_MANY_MAX, type CustomFieldDef, type CustomValues, type FieldError, type ListFilter } from "@/lib/metadata/types";
 import { validateCustomValues } from "@/lib/metadata/validate";
 
 export const CUSTOM_FILE_MAX_BYTES = 5 * 1024 * 1024;
@@ -53,20 +55,21 @@ function isMachine(w: ValueWriter): w is MachineWriter {
   return (w as MachineWriter).kind === "MACHINE";
 }
 
-function perms(def: ObjectDef) {
-  return OBJECT_RECORD_PERMISSIONS[def.key];
+/** Người này có ĐỦ mọi khoá của danh sách không (khoá xem / ghi của đối tượng — `objectAccess`). */
+function hasAll(viewer: Viewer, keys: readonly string[]): boolean {
+  return keys.every((k) => can(viewer, k as Permission));
 }
 
-export function canViewObjectValues(viewer: Viewer, def: ObjectDef): boolean {
-  return can(viewer, perms(def).view as Permission);
+export function canViewObjectValues(viewer: Viewer, def: AnyObjectDef): boolean {
+  return hasAll(viewer, objectAccess(def).view);
 }
 
-export function canViewField(viewer: Viewer, obj: ObjectDef, field: CustomFieldDef): boolean {
+export function canViewField(viewer: Viewer, obj: AnyObjectDef, field: CustomFieldDef): boolean {
   return canViewObjectValues(viewer, obj) && (!field.viewPermission || can(viewer, field.viewPermission as Permission));
 }
 
-export function canEditField(viewer: Viewer, obj: ObjectDef, field: CustomFieldDef): boolean {
-  return canViewField(viewer, obj, field) && can(viewer, perms(obj).edit as Permission) && (!field.editPermission || can(viewer, field.editPermission as Permission));
+export function canEditField(viewer: Viewer, obj: AnyObjectDef, field: CustomFieldDef): boolean {
+  return canViewField(viewer, obj, field) && hasAll(viewer, objectAccess(obj).edit) && (!field.editPermission || can(viewer, field.editPermission as Permission));
 }
 
 function visibleOnly(values: CustomValues, visible: Set<string>): CustomValues {
@@ -88,7 +91,13 @@ export async function getCustomValues(objectKey: string, recordIds: string[], vi
   if (!canViewObjectValues(viewer, obj)) return out;
   const defs = await loadCustomDefs(objectKey, false);
   const visible = new Set(defs.filter((d) => canViewField(viewer, obj, d)).map((d) => d.key));
-  const ids = [...new Set(recordIds.filter((x) => typeof x === "string" && x.length > 0 && x.length <= 200))];
+  let ids = [...new Set(recordIds.filter((x) => typeof x === "string" && x.length > 0 && x.length <= 200))];
+  // Bản ghi tuỳ biến (Phase 6): chỉ bản ghi còn sống, đúng đối tượng, trong PHẠM VI người xem — hỏi theo id trực tiếp
+  // không phải lối vòng qua phạm vi.
+  if (!obj.system && ids.length > 0) {
+    const visibleIds = await visibleRecordIds(viewer, obj, ids);
+    ids = ids.filter((x) => visibleIds.has(x));
+  }
   if (ids.length === 0) return out;
   const db = await getDb();
   const t = schema.customValues;
@@ -106,7 +115,18 @@ export async function getCustomValues(objectKey: string, recordIds: string[], vi
 
 export type SaveValuesResult = { ok: true; values: CustomValues; version: number; changed: string[] } | MetaFailure;
 
-async function checkReferences(obj: ObjectDef, recordId: string, defs: CustomFieldDef[], input: CustomValues, merged: CustomValues): Promise<FieldError[]> {
+/** Đích của field quan hệ: đối tượng còn dùng được (sổ tĩnh, hoặc tuỳ biến ACTIVE của tổ chức này). */
+async function relationTarget(def: CustomFieldDef): Promise<AnyObjectDef | null> {
+  const target = def.relationObject ? await resolveObject(def.relationObject) : null;
+  return target && target.custom?.status !== "ARCHIVED" ? target : null;
+}
+
+/**
+ * Tham chiếu phải CÓ THẬT trong CSDL tổ chức (M6). Quan hệ (Phase 6 · mục 3): đích tồn tại, CHƯA XOÁ, và NGƯỜI GHI
+ * xem được nó (quyền + module + phạm vi của đích) — máy (luật tự động) không đi qua cửa quyền của người nhưng vẫn qua
+ * tồn tại. `unique` (một-một): không bản ghi KHÁC của cùng đối tượng đang trỏ cùng đích.
+ */
+async function checkReferences(obj: AnyObjectDef, recordId: string, defs: CustomFieldDef[], input: CustomValues, merged: CustomValues, writer: ValueWriter): Promise<FieldError[]> {
   const errors: FieldError[] = [];
   const db = await getDb();
   for (const key of Object.keys(input)) {
@@ -116,9 +136,31 @@ async function checkReferences(obj: ObjectDef, recordId: string, defs: CustomFie
     if (def.type === "user") {
       const found = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, String(value))).limit(1);
       if (found.length === 0) errors.push({ field: key, message: `${def.label}: tài khoản không tồn tại trong tổ chức này.` });
-    } else if (def.type === "relation") {
-      const target = def.relationObject ? objectDef(def.relationObject) : null;
-      if (!target || !(await recordExists(target, String(value)))) errors.push({ field: key, message: `${def.label}: bản ghi liên kết không tồn tại.` });
+    } else if (def.type === "relation" || def.type === "relation_many") {
+      const target = await relationTarget(def);
+      const ids = (Array.isArray(value) ? value : [value]).map(String);
+      if (!target) {
+        errors.push({ field: key, message: `${def.label}: đối tượng liên kết không còn dùng được.` });
+        continue;
+      }
+      if (ids.length > RELATION_MANY_MAX) {
+        errors.push({ field: key, message: `${def.label}: tối đa ${RELATION_MANY_MAX} bản ghi liên kết.` });
+        continue;
+      }
+      const ok = isMachine(writer) ? await existingRecordIds(target, ids) : await visibleRecordIds(writer, target, ids);
+      if (ids.some((id) => !ok.has(id))) {
+        errors.push({ field: key, message: `${def.label}: bản ghi liên kết không tồn tại, đã xoá, hoặc bạn không xem được.` });
+        continue;
+      }
+      if (def.type === "relation" && def.validation?.unique) {
+        const t = schema.customValues;
+        const taken = await db
+          .select({ recordId: t.recordId })
+          .from(t)
+          .where(and(eq(t.objectKey, obj.key), sql`${t.recordId} <> ${recordId}`, sql`${t.values} -> ${key}::text = to_jsonb(${ids[0]}::text)`))
+          .limit(1);
+        if (taken.length > 0) errors.push({ field: key, message: `${def.label}: bản ghi đích đã được một bản ghi khác liên kết (quan hệ một-một).` });
+      }
     } else if (def.type === "file") {
       const t = schema.customFiles;
       const found = await db
@@ -150,8 +192,11 @@ export async function saveCustomValues(
   const obj = checked.def;
   const machine = isMachine(viewer);
   const canEdit = (d: CustomFieldDef) => isMachine(viewer) || canEditField(viewer, obj, d);
-  if (!isMachine(viewer) && !can(viewer, perms(obj).edit as Permission)) return fail("FORBIDDEN", `Bạn không có quyền sửa dữ liệu bổ sung của ${obj.label}.`);
+  if (!isMachine(viewer) && !hasAll(viewer, objectAccess(obj).edit)) return fail("FORBIDDEN", `Bạn không có quyền sửa dữ liệu bổ sung của ${obj.label}.`);
   if (!(await recordExists(obj, recordId))) return fail("NOT_FOUND", `Bản ghi không tồn tại (${obj.label} "${String(recordId).slice(0, 80)}").`, "record");
+  // Bản ghi tuỳ biến: người ghi phải có bản ghi trong PHẠM VI ghi của mình (cửa action chung không phải lối vòng). Ngoài
+  // phạm vi ⇒ CÙNG câu "không tồn tại" — không cho dò id nào có thật.
+  if (!obj.system && !isMachine(viewer) && !(await canWriteRecord(viewer, obj, recordId))) return fail("NOT_FOUND", `Bản ghi không tồn tại (${obj.label} "${String(recordId).slice(0, 80)}").`, "record");
 
   const defs = await loadCustomDefs(objectKey, true);
   const inputKeys = input && typeof input === "object" && !Array.isArray(input) ? Object.keys(input) : [];
@@ -183,7 +228,7 @@ export async function saveCustomValues(
   );
   const { values: merged, errors } = validateCustomValues(effective, input, previous);
   if (errors.length > 0) return fail("INVALID", errors);
-  const refErrors = await checkReferences(obj, recordId, defs, input, merged);
+  const refErrors = await checkReferences(obj, recordId, defs, input, merged, viewer);
   if (refErrors.length > 0) return fail("INVALID", refErrors);
 
   const before = previous ?? {};
@@ -258,9 +303,10 @@ function escapeLike(s: string): string {
  * dòng giá trị nào (chưa biết ≠ bằng); `gte`/`lte` với số so theo số, với chuỗi (ngày ISO) so theo chuỗi.
  */
 export function customValuesFilterSql(objectKey: string, filters: ListFilter[]): SQL | undefined {
+  // Đối tượng tuỳ biến (Phase 6): bản ghi ở `custom_records` — biết được từ KHOÁ, không cần đọc CSDL (hàm vẫn đồng bộ).
   const def = objectDef(objectKey);
-  if (!def) throw new MetadataError("OBJECT_UNKNOWN", `Đối tượng "${objectKey}" không có trong sổ đối tượng.`);
-  const idCol = idColumnOf(def);
+  if (!def && !isCustomObjectKey(objectKey)) throw new MetadataError("OBJECT_UNKNOWN", `Đối tượng "${objectKey}" không có trong sổ đối tượng.`);
+  const idCol = def ? idColumnOf(def) : schema.customRecords.id;
   const parts: SQL[] = [];
   const exists = (cond: SQL) =>
     sql`exists (select 1 from ${schema.customValues} cv where cv.object_key = ${objectKey} and cv.record_id = ${idCol}::text and ${cond})`;
@@ -328,6 +374,7 @@ export async function saveCustomFile(objectKey: string, recordId: string, fieldK
   if (!checked.ok) return checked;
   const obj = checked.def;
   if (!(await recordExists(obj, recordId))) return fail("NOT_FOUND", `Bản ghi không tồn tại (${obj.label}).`, "record");
+  if (!obj.system && !(await canWriteRecord(viewer, obj, recordId))) return fail("NOT_FOUND", `Bản ghi không tồn tại (${obj.label}).`, "record");
   const def = (await loadCustomDefs(objectKey, false)).find((d) => d.key === fieldKey);
   if (!def || def.type !== "file") return fail("NOT_FOUND", `Field tệp "${fieldKey}" không tồn tại.`, fieldKey);
   if (!canEditField(viewer, obj, def)) return fail("FORBIDDEN", `Bạn không có quyền sửa "${def.label}".`, fieldKey);
@@ -381,6 +428,8 @@ export async function openCustomFile(
   const def = (await loadCustomDefs(row.objectKey, false)).find((d) => d.key === row.fieldKey);
   if (!def || def.type !== "file" || !canViewField(viewer, checked.def, def)) return notFound;
   if (!(await recordExists(checked.def, row.recordId))) return notFound;
+  // Bản ghi tuỳ biến: tệp theo phạm vi của BẢN GHI mang nó (chủ dòng) — ngoài phạm vi ⇒ cùng 404.
+  if (!checked.def.system && !(await visibleRecordIds(viewer, checked.def, [row.recordId])).has(row.recordId)) return notFound;
   return { ok: true, file: { filename: row.filename, mime: row.mime, size: row.size, data: row.data }, objectKey: row.objectKey, recordId: row.recordId, fieldKey: row.fieldKey };
 }
 
@@ -400,6 +449,7 @@ export async function customFileNames(objectKey: string, recordId: string, ids: 
   const obj = await requireObject(objectKey, "customFields");
   const visible = new Set((await loadCustomDefs(objectKey, false)).filter((d) => d.type === "file" && canViewField(viewer, obj, d)).map((d) => d.key));
   if (visible.size === 0) return {};
+  if (!obj.system && !(await visibleRecordIds(viewer, obj, [recordId])).has(recordId)) return {};
   const db = await getDb();
   const t = schema.customFiles;
   const rows = await db

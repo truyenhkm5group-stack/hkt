@@ -17,6 +17,8 @@ export function customValueText(def: CustomFieldDef, value: unknown): string {
       return label(value);
     case "multi_select":
       return Array.isArray(value) ? value.map(label).join("; ") : label(value);
+    case "relation_many":
+      return Array.isArray(value) ? value.map(String).join("; ") : String(value);
     case "number":
     case "currency":
       // Số nguyên VND in THÔ (không dấu phân cách) để bảng tính đọc được thành số.

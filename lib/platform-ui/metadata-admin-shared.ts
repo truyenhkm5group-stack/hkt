@@ -1,4 +1,5 @@
-import { OBJECT_REGISTRY, type ObjectDef, type ObjectKey } from "@/lib/constants/object-registry";
+import { OBJECT_REGISTRY, type AnyObjectDef, type ObjectDef } from "@/lib/constants/object-registry";
+import { isModuleKey } from "@/lib/constants/platform-modules";
 import { moduleOn, type ModuleViewer } from "@/lib/platform-ui/module-visibility";
 import {
   FIELD_KEY_PATTERN,
@@ -29,7 +30,8 @@ import {
 export type AdminCapability = "customFields" | "forms" | "lists" | "statuses";
 
 export type AdminObjectOption = {
-  key: ObjectKey;
+  /** Khoá của sổ tĩnh, hoặc khoá `x_…` của đối tượng tuỳ biến (Phase 6). */
+  key: string;
   label: string;
   forms: ObjectDef["forms"];
   lists: ObjectDef["lists"];
@@ -42,7 +44,17 @@ export type AdminObjectOption = {
  * chọn — dịch vụ cũng từ chối nó (`MODULE_DISABLED`, M14), ẩn chỉ để không ai bấm vào một lỗi.
  */
 export function adminObjects(viewer: ModuleViewer, capability: AdminCapability): AdminObjectOption[] {
-  return OBJECT_REGISTRY.filter((o) => o.customizable && o.capabilities[capability] && moduleOn(viewer, o.module))
+  return adminObjectsOf(OBJECT_REGISTRY, viewer, capability);
+}
+
+/**
+ * Cùng luật lọc cho MỘT danh sách định nghĩa bất kỳ — sổ tĩnh, hoặc đối tượng tuỳ biến đã phân giải (Phase 6: đối tượng
+ * `x_…` ACTIVE; module `apps` + nhóm menu của nó phải bật).
+ */
+export function adminObjectsOf(defs: readonly AnyObjectDef[], viewer: ModuleViewer, capability: AdminCapability): AdminObjectOption[] {
+  return defs
+    .filter((o) => o.customizable && o.capabilities[capability] && moduleOn(viewer, o.module) && o.custom?.status !== "ARCHIVED")
+    .filter((o) => !o.custom || isModuleKey(o.custom.menuModule) && moduleOn(viewer, o.custom.menuModule))
     .filter((o) => (capability === "forms" ? o.forms.length > 0 : capability === "lists" ? o.lists.length > 0 : capability === "statuses" ? o.statusFields.length > 0 : true))
     .map((o) => ({ key: o.key, label: o.label, forms: o.forms, lists: o.lists, statusFields: o.statusFields }));
 }
@@ -82,7 +94,9 @@ export const NUMERIC_TYPES: readonly FieldType[] = ["number", "currency"];
 /** Kiểu nhận độ dài + biểu thức chính quy. */
 export const TEXTUAL_TYPES: readonly FieldType[] = ["text", "textarea", "email", "phone", "url"];
 /** Kiểu không đặt được giá trị mặc định ở màn hình cấu hình (tham chiếu bản ghi / tệp). */
-export const NO_DEFAULT_TYPES: readonly FieldType[] = ["user", "relation", "file"];
+export const NO_DEFAULT_TYPES: readonly FieldType[] = ["user", "relation", "relation_many", "file"];
+/** Kiểu trỏ tới bản ghi của một đối tượng (Phase 6: thêm `relation_many`). */
+export const RELATION_FIELD_TYPES: readonly FieldType[] = ["relation", "relation_many"];
 
 /** Đầu vào tạo field custom — cùng hình `CustomFieldDef` trừ phần máy chủ tự gán. */
 export type CustomFieldInput = Pick<
@@ -144,6 +158,8 @@ export function normalizeFieldInput(input: CustomFieldInput): CustomFieldInput {
       if (src.patternMessage?.trim()) v.patternMessage = src.patternMessage.trim();
     }
   }
+  // Một-một (Phase 6): chỉ field liên kết MỘT bản ghi.
+  if (input.type === "relation" && src.unique === true) v.unique = true;
   const text = (s: string | null) => (s?.trim() ? s.trim() : null);
   return {
     ...input,
@@ -153,7 +169,7 @@ export function normalizeFieldInput(input: CustomFieldInput): CustomFieldInput {
     transitions,
     validation: v,
     defaultValue: NO_DEFAULT_TYPES.includes(input.type) || input.defaultValue === "" ? null : input.defaultValue,
-    relationObject: input.type === "relation" ? input.relationObject : null,
+    relationObject: RELATION_FIELD_TYPES.includes(input.type) ? input.relationObject : null,
     helpText: text(input.helpText),
     viewPermission: text(input.viewPermission),
     editPermission: text(input.editPermission),
@@ -201,7 +217,7 @@ export function checkFieldInput(input: CustomFieldInput, opts: { creating: boole
       }
     }
   }
-  if (input.type === "relation" && !input.relationObject) errors.push({ field: "relationObject", message: "Chọn đối tượng được liên kết." });
+  if (RELATION_FIELD_TYPES.includes(input.type) && !input.relationObject) errors.push({ field: "relationObject", message: "Chọn đối tượng được liên kết." });
   return errors;
 }
 

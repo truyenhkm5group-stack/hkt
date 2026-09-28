@@ -22,7 +22,7 @@
  * thuộc tính `pattern` của ô nhập HTML, để trình duyệt và máy chủ nói cùng một điều. Mẫu không biên dịch
  * được / không an toàn ⇒ LỖI CẤU HÌNH trả về như một lỗi field, không ném.
  */
-import type { CustomFieldDef, CustomValues, FieldError, FieldOption, FieldValidation } from "@/lib/metadata/types";
+import { RELATION_MANY_MAX, type CustomFieldDef, type CustomValues, type FieldError, type FieldOption, type FieldValidation } from "@/lib/metadata/types";
 
 export const PATTERN_MAX_LENGTH = 200;
 export const PATTERN_VALUE_MAX_LENGTH = 2_000;
@@ -355,6 +355,19 @@ export function coerceFieldValue(def: CustomFieldDef, raw: unknown, previous: un
       const s = asText(raw)?.trim() ?? null;
       if (s === null || s.length > ID_MAX_LENGTH || !ID_SHAPE.test(s)) return { error: `${def.label}: mã tham chiếu không hợp lệ.` };
       return { value: s };
+    }
+    case "relation_many": {
+      // Mảng id (Phase 6 · mục 3). Một chuỗi đơn = một id. Trùng bị gộp, thứ tự GIỮ như người chọn.
+      const list = typeof raw === "string" ? [raw] : raw;
+      if (!Array.isArray(list)) return { error: `${def.label} phải là danh sách mã bản ghi.` };
+      const ids: string[] = [];
+      for (const x of list) {
+        const s = asText(x)?.trim() ?? null;
+        if (s === null || s.length > ID_MAX_LENGTH || !ID_SHAPE.test(s)) return { error: `${def.label}: mã tham chiếu không hợp lệ.` };
+        if (!ids.includes(s)) ids.push(s);
+      }
+      if (ids.length > RELATION_MANY_MAX) return { error: `${def.label}: tối đa ${RELATION_MANY_MAX} bản ghi liên kết.` };
+      return { value: ids.length ? ids : undefined };
     }
     default:
       return { error: `${def.label}: kiểu field không hỗ trợ.` };

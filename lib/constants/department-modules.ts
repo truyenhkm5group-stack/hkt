@@ -475,6 +475,15 @@ export const NAV_MODULES = [
     permission: "metadata:manage",
     why: "Cài một mẫu ngành (thời trang, TMĐT chung, bán sỉ…) theo Xem trước → Xác nhận: máy chỉ gọi các màn hình cấu hình sẵn có, luật sinh ở NHÁP. Nâng mẫu lên phiên bản mới không đè thứ tổ chức đã sửa.",
   },
+  // Đối tượng tuỳ biến (Phase 6): cùng khoá `metadata:manage` — một đối tượng mới là một nghiệp vụ mới có menu, form,
+  // danh sách của CẢ tổ chức, nên là việc của quản trị, không của phòng nào.
+  {
+    href: "/settings/objects",
+    label: "Đối tượng tuỳ biến",
+    zone: "SYSTEM",
+    permission: "metadata:manage",
+    why: "Tạo nghiệp vụ mới không có sẵn (Hợp đồng bảo trì, Công trình, Xe…) không cần viết mã: danh sách, form, chi tiết tự sinh; field / form / danh sách soạn ở các màn metadata. Đối tượng lên menu của cả tổ chức nên là quyết định của quản trị.",
+  },
   {
     href: "/platform",
     label: "Vận hành nền tảng",

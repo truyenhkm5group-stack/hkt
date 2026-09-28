@@ -8690,3 +8690,63 @@ export const blueprintItems = pgTable(
     check("blueprint_items_action_check", sql`${t.action} in ('CREATE','UPDATE','UNCHANGED','SKIP_CUSTOMIZED','SKIP_DELETED','CONFLICT')`),
   ],
 );
+
+// ═══ PHASE 6 — ĐỐI TƯỢNG TUỲ BIẾN (docs/platform/phase-6-contracts.md mục 1) ═══
+//
+// KHÔNG có bảng vật lý cho mỗi đối tượng (X5): định nghĩa đối tượng ở `meta_objects`, bản ghi (CỘT HỆ THỐNG) ở
+// `custom_records`, giá trị field ở `custom_values` (như mọi field tuỳ biến của Phase 2), định nghĩa field ở
+// `meta_custom_fields` với `object_key = x_…`. Tiền tố `x_` ⇒ khoá tuỳ biến không bao giờ trùng khoá hệ thống.
+
+/** Định nghĩa đối tượng tuỳ biến. Khoá BẤT BIẾN; không xoá — `ARCHIVED` (dữ liệu giữ nguyên). */
+export const metaObjects = pgTable(
+  "meta_objects",
+  {
+    key: text("key").primaryKey(),
+    label: text("label").notNull(),
+    labelPlural: text("label_plural").notNull(),
+    icon: text("icon").notNull().default("box"),
+    /** Nhóm menu (khoá module có thật). Module đó tắt ⇒ đối tượng ẩn. */
+    moduleKey: text("module_key").notNull().default("apps"),
+    titleLabel: text("title_label").notNull().default("Tên"),
+    description: text("description"),
+    viewPermission: text("view_permission").notNull().default("records:view"),
+    writePermission: text("write_permission").notNull().default("records:write"),
+    status: text("status").notNull().default("ACTIVE"),
+    /** Dấu gốc (`template:<khoá>@<phiên bản>` — X4). `null` = tổ chức tự tạo. */
+    origin: text("origin"),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("meta_objects_key_check", sql`${t.key} ~ '^x_[a-z][a-z0-9_]{1,40}$'`),
+    check("meta_objects_status_check", sql`${t.status} in ('ACTIVE','ARCHIVED')`),
+  ],
+);
+
+/** Bản ghi của đối tượng tuỳ biến — chỉ cột hệ thống; mọi field khác ở `custom_values`. Xoá = `deleted_at`. */
+export const customRecords = pgTable(
+  "custom_records",
+  {
+    id: id(),
+    objectKey: text("object_key")
+      .notNull()
+      .references(() => metaObjects.key),
+    title: text("title").notNull(),
+    /** Chủ bản ghi (`users.id`) — phạm vi dữ liệu SELF / phòng ban lọc theo cột này (luật 34). */
+    ownerId: text("owner_id"),
+    /** Phiên bản của cột hệ thống — khoá lạc quan + khoá chống trùng của sự kiện `custom_record.updated`. */
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deletedAt: ts("deleted_at"),
+  },
+  (t) => [
+    index("custom_records_object_idx").on(t.objectKey, t.deletedAt, t.updatedAt),
+    index("custom_records_owner_idx").on(t.ownerId),
+    check("custom_records_title_check", sql`length(btrim(${t.title})) > 0`),
+  ],
+);

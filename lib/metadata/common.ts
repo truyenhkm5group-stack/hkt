@@ -5,10 +5,12 @@
  * chức vào truy vấn, và không hàm nào đệm kết quả trong tiến trình (M13) — định nghĩa field đọc thẳng
  * mỗi lần, nên xuất bản / thêm field có hiệu lực ở lần tải kế tiếp của MỌI tiến trình.
  */
-import { and, asc, eq, getTableColumns, is, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, is, isNull, sql, type SQL } from "drizzle-orm";
 import { PgTable, type PgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { objectDef, type ObjectCapabilities, type ObjectDef } from "@/lib/constants/object-registry";
+import type { AnyObjectDef, ObjectCapabilities } from "@/lib/constants/object-registry";
+import { isModuleKey } from "@/lib/constants/platform-modules";
+import { resolveObject } from "@/lib/metadata/object-resolver";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { fail, MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { FIELD_TYPES, type CustomFieldDef, type FieldOption, type FieldType, type FieldValidation, type MetadataActor } from "@/lib/metadata/types";
@@ -22,19 +24,44 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   statuses: "trạng thái cấu hình được",
 };
 
-/** Kiểm đối tượng + năng lực + module. Lượt ĐỌC: ném `MetadataError`. */
-export async function requireObject(objectKey: string, capability?: Capability): Promise<ObjectDef> {
-  const def = objectDef(objectKey);
+/**
+ * Module mà đối tượng cần: module của nó (+ nhóm menu của đối tượng tuỳ biến — tắt module ấy thì đối tượng ẩn). Khoá
+ * nhóm menu lạ (sổ module đổi sau khi khai) ⇒ coi như tắt — hỏng về phía hẹp.
+ */
+export function objectModules(def: AnyObjectDef): { key: string; ok: boolean }[] {
+  const out = [{ key: def.module as string, ok: true }];
+  const menu = def.custom?.menuModule;
+  if (menu && menu !== def.module) out.push({ key: menu, ok: isModuleKey(menu) });
+  return out;
+}
+
+/** Mọi module đối tượng cần có đang bật cho tổ chức hiện hành không (trả khoá module đầu tiên đang tắt, hoặc `null`). */
+export async function objectModuleOff(def: AnyObjectDef): Promise<string | null> {
+  for (const m of objectModules(def)) {
+    if (!m.ok || !isModuleKey(m.key) || !(await canUseModule(m.key))) return m.key;
+  }
+  return null;
+}
+
+/**
+ * Kiểm đối tượng + năng lực + module. Lượt ĐỌC: ném `MetadataError`. Khoá đi qua bộ phân giải (Phase 6): đối tượng
+ * tuỳ biến của tổ chức hiện hành cũng hợp lệ; đối tượng tuỳ biến đã LƯU TRỮ ⇒ `NOT_FOUND` (dữ liệu giữ nguyên, không
+ * đọc / ghi được cho tới khi khôi phục).
+ */
+export async function requireObject(objectKey: string, capability?: Capability): Promise<AnyObjectDef> {
+  const def = await resolveObject(objectKey);
   if (!def) throw new MetadataError("OBJECT_UNKNOWN", `Đối tượng "${objectKey}" không có trong sổ đối tượng.`);
+  if (def.custom?.status === "ARCHIVED") throw new MetadataError("NOT_FOUND", `${def.label} đã được lưu trữ — khôi phục ở Hệ thống → Đối tượng tuỳ biến trước.`);
   if (capability && (!def.capabilities[capability] || (capability === "customFields" && !def.customizable))) {
     throw new MetadataError("NOT_SUPPORTED", `${def.label} chưa hỗ trợ ${CAPABILITY_LABEL[capability]}.`);
   }
-  if (!(await canUseModule(def.module))) throw new MetadataError("MODULE_DISABLED", `Module "${def.module}" của ${def.label} chưa được bật cho tổ chức này.`);
+  const off = await objectModuleOff(def);
+  if (off) throw new MetadataError("MODULE_DISABLED", `Module "${off}" của ${def.label} chưa được bật cho tổ chức này.`);
   return def;
 }
 
 /** Như `requireObject` nhưng cho lượt GHI: trả `MetaFailure` thay vì ném. */
-export async function checkObject(objectKey: string, capability?: Capability): Promise<{ ok: true; def: ObjectDef } | MetaFailure> {
+export async function checkObject(objectKey: string, capability?: Capability): Promise<{ ok: true; def: AnyObjectDef } | MetaFailure> {
   try {
     return { ok: true, def: await requireObject(objectKey, capability) };
   } catch (error) {
@@ -99,7 +126,7 @@ export async function loadCustomDefs(objectKey: string, includeArchived: boolean
 }
 
 /** Cột id của bảng thật của đối tượng (drizzle), dẫn xuất từ sổ. */
-export function idColumnOf(def: ObjectDef): PgColumn {
+export function idColumnOf(def: AnyObjectDef): PgColumn {
   const table = (schema as unknown as Record<string, unknown>)[def.table];
   if (!is(table, PgTable)) throw new MetadataError("OBJECT_UNKNOWN", `Sổ đối tượng trỏ bảng "${def.table}" không có trong lược đồ.`);
   const col = getTableColumns(table)[def.idColumn];
@@ -108,22 +135,34 @@ export function idColumnOf(def: ObjectDef): PgColumn {
 }
 
 /**
+ * Điều kiện "dòng này THUỘC đối tượng và còn sống" ngoài khoá id. Đối tượng hệ thống: không có (bảng riêng). Đối tượng
+ * tuỳ biến: mọi đối tượng chung MỘT bảng `custom_records` ⇒ phải khớp `object_key` (id của Hợp đồng không được coi là
+ * một Công trình) VÀ chưa xoá mềm.
+ */
+export function recordScopeSql(def: AnyObjectDef): SQL | undefined {
+  if (def.system) return undefined;
+  const t = schema.customRecords;
+  return and(eq(t.objectKey, def.key), isNull(t.deletedAt));
+}
+
+/**
  * Bản ghi có tồn tại trong BẢNG THẬT của đối tượng, trong CSDL CỦA TỔ CHỨC HIỆN HÀNH không.
  *
  * Đây là hàng rào chống tấn công theo id chéo tổ chức: phiên của B gửi id khách của A thì `getDb()` là
- * CSDL của B, nơi không có dòng nào mang id đó ⇒ `false` ⇒ không ghi gì.
+ * CSDL của B, nơi không có dòng nào mang id đó ⇒ `false` ⇒ không ghi gì. Bản ghi tuỳ biến đã xoá mềm hoặc thuộc
+ * đối tượng khác ⇒ `false`.
  */
-export async function recordExists(def: ObjectDef, recordId: string): Promise<boolean> {
+export async function recordExists(def: AnyObjectDef, recordId: string): Promise<boolean> {
   if (typeof recordId !== "string" || recordId.length === 0 || recordId.length > 200) return false;
   const table = (schema as unknown as Record<string, unknown>)[def.table] as PgTable;
   const col = idColumnOf(def);
   const db = await getDb();
-  const rows = await db.select({ one: sql<number>`1` }).from(table).where(eq(col, recordId)).limit(1);
+  const rows = await db.select({ one: sql<number>`1` }).from(table).where(and(eq(col, recordId), recordScopeSql(def))).limit(1);
   return rows.length > 0;
 }
 
-/** Tập id (trong `ids`) có thật trong bảng của đối tượng. */
-export async function existingRecordIds(def: ObjectDef, ids: readonly string[]): Promise<Set<string>> {
+/** Tập id (trong `ids`) có thật trong bảng của đối tượng (bản ghi tuỳ biến: đúng đối tượng, chưa xoá). */
+export async function existingRecordIds(def: AnyObjectDef, ids: readonly string[]): Promise<Set<string>> {
   const clean = [...new Set(ids.filter((x) => typeof x === "string" && x.length > 0 && x.length <= 200))];
   if (clean.length === 0) return new Set();
   const table = (schema as unknown as Record<string, unknown>)[def.table] as PgTable;
@@ -135,7 +174,7 @@ export async function existingRecordIds(def: ObjectDef, ids: readonly string[]):
     const rows = await db
       .select({ id: sql<string>`${col}::text` })
       .from(table)
-      .where(sql`${col} in (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)})`);
+      .where(and(sql`${col} in (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)})`, recordScopeSql(def)));
     for (const r of rows) out.add(String(r.id));
   }
   return out;

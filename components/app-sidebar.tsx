@@ -134,11 +134,14 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/pages": LayoutTemplate,
   "/settings/connections": Plug,
   "/settings/templates": LibraryBig,
+  "/settings/objects": Boxes,
   "/platform": ServerCog,
 };
 
 export function iconOf(href: string): typeof LayoutDashboard {
   if (href.startsWith(`${DYNAMIC_PAGE_PREFIX}/`)) return LayoutTemplate;
+  // Đối tượng tuỳ biến (Phase 6) — mục menu động `/o/<khoá>`.
+  if (href.startsWith("/o/")) return Boxes;
   return MODULE_ICON[href as ModuleHref] ?? LayoutDashboard;
 }
 

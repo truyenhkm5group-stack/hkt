@@ -153,6 +153,33 @@ export function FieldInput({ field, value, onChange, error, storedValue, users, 
         <Input {...common} className="font-mono" placeholder={field.relationObject ? `Mã ${field.relationObject}` : "Mã bản ghi"} value={str(value)} onChange={(e) => onChange(e.target.value.trim() || null)} />
       );
       break;
+    case "relation_many": {
+      // Phase 6: nhiều bản ghi. Có danh sách lựa chọn ⇒ ô tích (đích người xem xem được, tối đa 200); không có ⇒ mã
+      // cách nhau bởi dấu phẩy. Máy chủ kiểm lại tồn tại + quyền xem của từng đích khi ghi.
+      const current = Array.isArray(value) ? value.map(String) : value ? [String(value)] : [];
+      control = relationOptions && relationOptions.length ? (
+        <div id={inputId} aria-invalid={invalid} className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-input px-3 py-2">
+          {relationOptions.map((r) => (
+            <label key={r.id} className="flex items-center gap-1.5 text-sm">
+              <Checkbox disabled={disabled} checked={current.includes(r.id)} onCheckedChange={(c) => onChange(c === true ? [...current, r.id] : current.filter((x) => x !== r.id))} />
+              {r.label}
+            </label>
+          ))}
+          {current.filter((id) => !relationOptions.some((r) => r.id === id)).map((id) => (
+            <span key={id} className="font-mono text-xs text-muted-foreground">{id}</span>
+          ))}
+        </div>
+      ) : (
+        <Input
+          {...common}
+          className="font-mono"
+          placeholder="Mã bản ghi, cách nhau bởi dấu phẩy"
+          value={current.join(", ")}
+          onChange={(e) => onChange(e.target.value.split(",").map((x) => x.trim()).filter(Boolean))}
+        />
+      );
+      break;
+    }
     case "file":
       control = <FileControl inputId={inputId} field={field} value={value} onChange={onChange} uploadAction={uploadAction} fileNames={fileNames} invalid={invalid} />;
       break;
