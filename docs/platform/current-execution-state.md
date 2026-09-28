@@ -3,7 +3,12 @@
 > Tệp BÀN GIAO. Phiên nào tiếp quản (hoặc phiên này sau khi nén ngữ cảnh) đọc tệp này trước, rồi `builder-roadmap.md`.
 > Cập nhật mỗi khi một phase gộp / deploy, hoặc trước khi ngữ cảnh đầy.
 
-## Production (erp.vnxcommerce.com) — cập nhật 28/09/2026 12:10 (giờ VN)
+## Tóm tắt — 28/09/2026 17:00 (giờ VN)
+
+Phase 1 → 12 đã code, gộp và lên production. Bài chấp nhận Phase 12 (`phase-12-acceptance.md`): mọi E2E ĐẠT trừ
+E2E #6 chạy với model AI THẬT — **HUMAN GATE credential**. Chưa in «COMMERCIAL MVP COMPLETE».
+
+## Production (erp.vnxcommerce.com)
 
 | Mốc | Commit | PR | Migration |
 |---|---|---|---|
@@ -15,49 +20,47 @@
 | Phase 7a — blueprint · 3 mẫu ngành | `d91067b0` | #353 | 0165 |
 | Phase 6 — đối tượng tuỳ biến | `23a2cd2c` | #356 | 0166 (module 24/24) |
 | Phase 5 — trình kéo-thả | `658fff61` | #358 | 0167 |
+| Đợt 2 — Phase 7b · 8 (AI) · 10 (tự phục vụ) | `64cd4732` | #359 | 0168, 0169 |
+| Đối tượng tuỳ biến trong trang (§7 Phase 6) | `30dd60a2` | #360 | — |
+| Phase 11 — gia cố (tấn công · tải · xuất cấu hình · chẩn đoán) | `7fb07c55` | #363 | 0171 |
+| Sao lưu CSDL `erp_org_*` | `32f1c2fa` | #365 | — |
+| Phase 12 — 5 lỗi E2E (màn duyệt lõi `/approvals` …) | `ca0fc7a6` | #366 | — |
 
-Health 12:08: `ok`, `homeModules 24/24`, commit khớp `main`.
+Production chạy `9771a4f2` (có mọi mốc trên), health `ok`, 24/24 module, 172 migration.
 
-## Đang phát hành
+## Tính năng (đều cấu hình không deploy)
 
-| Việc | Nhánh | PR | Migration |
-|---|---|---|---|
-| Đợt 2: Phase 7b (mẫu dùng đối tượng) · Phase 8 (AI dựng cấu hình) · Phase 10 (tự phục vụ) | `claude/platform-wave2` | #359 | 0168, 0169 |
-| P56 — đối tượng tuỳ biến trong trang + liên kết ngược + chọn khối con + blueprint kiểm trang theo sổ của gói | `claude/platform-p56int` | (sau #359) | — |
+Tổ chức (SILO, mỗi tổ chức một CSDL) · module bật/tắt · field tuỳ biến + tệp · form / danh sách / trạng thái · luật
+(trigger → điều kiện → cửa duyệt → hành động, đúng một lần, phục hồi lượt treo) · trang động + trình kéo-thả (KPI, bảng,
+biểu đồ, kanban, form, dòng thời gian, bộ lọc, cột, nút) · đối tượng tuỳ biến + quan hệ · blueprint + 5 mẫu ngành + nâng
+phiên bản 3 chiều · AI soạn blueprint (khoá AI của chính tổ chức) · sổ connector + kết nối theo tổ chức (bí mật mã hoá)
+· `/start` tự phục vụ (TẮT trên production) · thương hiệu · gói + hạn mức · xuất / khôi phục cấu hình · chẩn đoán từng
+tổ chức · màn duyệt lõi.
 
-## Đang làm — Phase 11 (gia cố, `phase-11-12-plan.md`)
+## Human gate (hỏi chủ nền tảng MỘT lần)
 
-| Agent | Nhánh / cây | Việc |
-|---|---|---|
-| H1 | `claude/platform-p11-h1` · `wt-h1` | bộ tấn công cô lập (E2E #7 mức mã) + quét tĩnh server action |
-| H2 | `claude/platform-p11-h2` · `wt-h2` | tải 20k bản ghi, ngân sách câu truy vấn (N+1), index nếu đo ra cần |
-| H3 | `claude/platform-p11-h3` · `wt-h3` | xuất cấu hình thành blueprint, vòng tròn khôi phục, tài liệu sao lưu |
-| H4 | `claude/platform-p11-h4` · `wt-h4` | chẩn đoán theo tổ chức, gỡ dấu VNX cho tổ chức khác, nối hạn mức |
-
-Sau Phase 11: Phase 12 — ba tổ chức mẫu qua `/start` trên máy thử + 8 E2E cuối (`phase-11-12-plan.md`).
+1. **Khoá AI thật cho E2E #6** — một trong hai: (a) khoá Anthropic/OpenAI có credit của một tổ chức thử (dán ở
+   `/settings/connections` trên máy thử), hoặc (b) cho phép thử trên tổ chức nhà bằng khoá `.env` hiện có (tốn tiền của
+   VNX; chỉ tạo BẢN NHÁP, áp dụng thử ở tổ chức thử bằng "cài từ tệp").
+2. `PLATFORM_SECRETS_KEY` trên production — để tổ chức khác lưu bí mật kết nối (thiếu ⇒ tính năng tắt, VNX không ảnh hưởng).
+3. Có mở `PLATFORM_SIGNUP_MODE` (invite/open) trên production không — hiện `off` (X7).
+4. Sao lưu tổ chức: dung lượng Drive (~11 bản / tổ chức), tải VPS 02–05 giờ, có diễn tập khôi phục cho CSDL tổ chức không.
 
 ## Quy trình phát hành
 
 `scratchpad/pr/ship_platform.py` là tiến trình chạy liền (tự thoát sau 6 giờ rảnh): chỉ cần THÊM dòng
-`<nhánh>|<tệp tiêu đề>|<tệp thân>` vào `queue.txt`. KHÔNG khởi động tiến trình thứ hai (hai tiến trình ⇒ dispatch trùng).
-Deploy đỏ: đọc log job `release` (`scratchpad/pr/joblog.py <run> release`); "chưa chạm máy chủ" ⇒ dispatch lại một lượt.
+`<nhánh>|<tệp tiêu đề>|<tệp thân>` vào `queue.txt`. KHÔNG khởi động tiến trình thứ hai. Nhánh `*-docs` không deploy.
+Deploy đỏ: đọc log (`scratchpad/pr/joblog.py <run> "<tên job>"`); gates đỏ ⇒ chưa chạm máy chủ.
 Nhánh chồng lên nhánh chưa gộp: sau khi nhánh dưới gộp squash ⇒ `git rebase --onto origin/main <commit-dưới-cũ> <nhánh>`.
-Đổi số migration: `npm run migration:renumber -- --base <ref> --apply` + thêm dòng MOI + sửa số trần trong chú thích.
+Đổi số migration: `npm run migration:renumber -- --base <ref> --apply` + dòng MOI + số trần trong chú thích.
 Commit/PR KHÔNG mang tên model AI, KHÔNG dòng Co-Authored-By (AGENTS.md 6.6).
 
-## Human gate
+## Nợ đã biết (không chặn)
 
-Không có gate nào chặn việc đang làm. Gom lại để hỏi chủ nền tảng MỘT lần ở Phase 12:
-1. `PLATFORM_SECRETS_KEY` (≥ 32 ký tự ngẫu nhiên) — để tổ chức khác lưu được bí mật kết nối trên production / máy thử.
-2. Khoá AI thật (Anthropic/OpenAI) của một tổ chức thử — cho E2E #6 với model thật; hoặc chủ shop đồng ý thử bằng khoá VNX.
-3. Mở đăng ký trên production (`PLATFORM_SIGNUP_MODE`) — hiện `off` theo X7.
-
-## Nợ đã biết
-
-- Bảng trang động không bọc `list*()` cũ (thiếu bộ lọc/cờ riêng của `/orders`).
-- `available_stock` của trang tính đường ngắn (có thể lệch nhẹ thẻ trang chủ).
-- `request_approval` chỉ gắn khách hàng.
-- Menu đọc `meta_pages` + `meta_objects` mỗi lượt tải bố cục (không đệm — M13).
-- Trang không tìm thấy trả HTTP 200 (streaming có `loading.tsx`).
+- Bảng trang động không bọc `list*()` cũ; `available_stock` của trang tính đường ngắn; `request_approval` chỉ khách hàng.
+- Menu đọc `meta_pages` + `meta_objects` mỗi lượt tải bố cục; trang không tìm thấy trả HTTP 200 (streaming).
 - AI Builder chưa chạy với model thật (schema công cụ ~11 KB chưa thử với nhà cung cấp).
 - Kéo xa khi phải cuộn trong trình kéo-thả chưa đo trên màn hình thường.
+- Cài blueprint vượt hạn mức đối tượng hỏng giữa chừng (kế hoạch chưa báo trước).
+- Sao lưu tổ chức chưa có diễn tập khôi phục tự động; đêm nhà hỏng thì tổ chức không được sao lưu.
+- `/login`, `/start` và một số trang lõi ngoài danh sách H4 còn chữ gốc VNX.
