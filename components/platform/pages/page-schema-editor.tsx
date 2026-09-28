@@ -18,6 +18,7 @@ import {
   blockCount,
   blockSummary,
   checkPageDraft,
+  filterTargetsOf,
   isBlockSpan,
   moveBlockToSection,
   newBlock,
@@ -252,7 +253,7 @@ export function PageSchemaEditor({ pageId, pageName, slug, status, publishedVers
                               patchBlock(si, bi, { id });
                             }} />
                           </label>
-                          <BlockConfigForm block={b} catalog={catalog} disabled={archived} onChange={(config) => patchBlock(si, bi, { config })} />
+                          <BlockConfigForm block={b} catalog={catalog} disabled={archived} filterTargets={filterTargetsOf(schema)} onChange={(config) => patchBlock(si, bi, { config })} />
                         </div>
                       ) : null}
                     </li>

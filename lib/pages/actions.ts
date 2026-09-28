@@ -16,6 +16,11 @@
  *
  * Lớp trình duyệt (`lib/actions/page-actions.ts`) do agent CORE nối: nó cung cấp `loadPublished` (= `getPageBySlug`)
  * và người dùng của phiên. Hàm ở đây không đọc bảng `meta_pages` — một lớp lưu trữ, một chỗ.
+ *
+ * HÀNH ĐỘNG THEO DÒNG (Phase 5): `executePageAction(..., { loadPublished, recordId, actionIndex })` — khối phải là
+ * BẢNG của bản ĐÃ XUẤT BẢN, `rowActions[actionIndex]` phải có, bản ghi `recordId` phải TỒN TẠI và nằm trong PHẠM VI
+ * người bấm (cổng của nguồn danh sách + `rowInScope`) TRƯỚC khi handler chạy. Đối tượng + bản ghi do MÁY CHỦ ghim
+ * (thắng mọi đầu vào client): dòng của bảng khách không bao giờ thành cửa sửa một đơn hàng.
  */
 import { getTableName } from "drizzle-orm";
 import { z } from "zod";
@@ -31,10 +36,11 @@ import { MetadataError, type MetaFailure } from "@/lib/metadata/errors";
 import { OBJECT_RECORD_PERMISSIONS } from "@/lib/metadata/permissions";
 import { FIELD_KEY_PATTERN, type CustomFieldDef, type FieldError } from "@/lib/metadata/types";
 import { canEditField, getCustomValues, saveCustomValues } from "@/lib/metadata/values";
-import { pageAction } from "@/lib/pages/catalog";
+import { listSource, pageAction } from "@/lib/pages/catalog";
+import { ROW_ACTION_KEYS } from "@/lib/pages/components";
 import { gateSource, moduleOn, OBJECT_SCOPE_RESOURCE, pageDetailHref } from "@/lib/pages/runtime-common";
 import { pageObjectTable } from "@/lib/queries/page-data";
-import type { ButtonConfig, KanbanConfig, PageActionSpec, PageBlock, PageDefinition, PageSchema } from "@/lib/pages/types";
+import { flattenBlocks, type ButtonConfig, type KanbanConfig, type PageActionSpec, type PageBlock, type PageDefinition, type PageSchema, type TableConfig } from "@/lib/pages/types";
 import { createCustomerCore, customerCreateGate } from "@/lib/records/customer-create";
 import { runWorkflows, triggerMatches } from "@/lib/workflow/engine";
 import { CUSTOM_STATUS_EVENT, listRules, WORKFLOW_RULE_KEY_PATTERN } from "@/lib/workflow/rules";
@@ -215,9 +221,37 @@ export async function actionAvailability(spec: PageActionSpec, pinned: Input, us
 
 // ─────────────────────────── Cửa vào duy nhất ───────────────────────────
 
+/** Khối theo id trong bản ĐÃ XUẤT BẢN — kể cả khối con của cột (một nút đặt trong cột vẫn bấm được). */
 function findBlock(schema: PageSchema, blockId: string): PageBlock | null {
-  for (const s of schema.sections ?? []) for (const b of s.blocks ?? []) if (b.id === blockId) return b;
-  return null;
+  return flattenBlocks(schema).find((f) => f.block.id === blockId)?.block ?? null;
+}
+
+/** Action nhận `objectKey` trong đầu vào (hai loại còn lại khai đối tượng ở sổ). */
+const OBJECT_INPUT_ACTIONS = new Set(["open_record", "update_safe_field"]);
+
+/**
+ * Hành động theo dòng của một BẢNG đã xuất bản: tra `rowActions[index]`, kiểm bản ghi tồn tại + trong phạm vi người
+ * bấm, rồi ghim đối tượng + bản ghi. Mọi nhánh lỗi trả `{ error }` — không có nhánh nào chạy handler khi chưa kiểm xong.
+ */
+async function rowActionOfBlock(block: PageBlock, index: unknown, recordId: unknown, user: SessionUser): Promise<{ key: string; pinned: Input } | PageActionResult> {
+  if (block.type !== "table") return { ok: false, error: "Khối này không có hành động theo dòng.", code: "INVALID" };
+  const cfg = block.config as TableConfig;
+  const list = Array.isArray(cfg.rowActions) ? cfg.rowActions : [];
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= list.length) return { ok: false, error: "Hành động theo dòng không có trong bản đã xuất bản của trang.", code: "NOT_FOUND" };
+  const ra = list[index];
+  const spec = pageAction(String(ra?.action ?? ""));
+  if (!spec || !ROW_ACTION_KEYS.includes(spec.key)) return { ok: false, error: `Action "${String(ra?.action)}" không dùng được trên từng dòng.`, code: "INVALID" };
+  const def = objectDef(String(cfg.source ?? ""));
+  const src = def ? listSource(def.key) : null;
+  if (!def || !src) return { ok: false, error: "Bảng trỏ đối tượng không có trong sổ.", code: "INVALID" };
+  if (spec.objectKey && spec.objectKey !== def.key) return { ok: false, error: `Action "${spec.label}" không dùng cho ${def.labelPlural}.`, code: "INVALID" };
+  const id = recordIdZ.safeParse(recordId);
+  if (!id.success) return { ok: false, error: "Thiếu bản ghi của dòng.", code: "INVALID" };
+  // Tồn tại + trong phạm vi NGƯỜI BẤM theo đúng cổng của bảng — id gõ tay của dòng không thấy được ⇒ "không tồn tại".
+  if (!(await recordExists(def, id.data)) || !(await scopeAllowsRecord(user, def, src.permission, id.data))) return { ok: false, error: "Bản ghi không tồn tại.", code: "NOT_FOUND" };
+  const pinned: Input = { ...(isPlainObject(ra.input) ? ra.input : {}), recordId: id.data };
+  if (OBJECT_INPUT_ACTIONS.has(spec.key)) pinned.objectKey = def.key;
+  return { key: spec.key, pinned };
 }
 
 /** Khoá action + phần ghim của một khối ĐÃ XUẤT BẢN. Khối không phát action ⇒ `null`. */
@@ -234,7 +268,15 @@ function actionOfBlock(block: PageBlock): { key: string; pinned: Input } | null 
   return null;
 }
 
-export async function executePageAction(slug: string, blockId: string, input: unknown, user: SessionUser, deps: { loadPublished: PublishedPageLoader }): Promise<PageActionResult> {
+export type ExecutePageActionDeps = {
+  loadPublished: PublishedPageLoader;
+  /** Hành động theo dòng: bản ghi của dòng được bấm (máy chủ kiểm tồn tại + phạm vi). */
+  recordId?: string;
+  /** Hành động theo dòng: vị trí trong `rowActions` ĐÃ XUẤT BẢN của bảng. */
+  actionIndex?: number;
+};
+
+export async function executePageAction(slug: string, blockId: string, input: unknown, user: SessionUser, deps: ExecutePageActionDeps): Promise<PageActionResult> {
   if (typeof slug !== "string" || !SLUG_PATTERN.test(slug) || typeof blockId !== "string" || blockId.length === 0 || blockId.length > 60) {
     return { ok: false, error: "Yêu cầu không hợp lệ." };
   }
@@ -250,7 +292,13 @@ export async function executePageAction(slug: string, blockId: string, input: un
   // Khối tra trong bản ĐÃ XUẤT BẢN — bản nháp có khối này mà chưa xuất bản ⇒ không tồn tại với người dùng.
   const block = findBlock(schema, blockId);
   if (!block) return { ok: false, error: "Nút không có trong bản đã xuất bản của trang.", code: "NOT_FOUND" };
-  const act = actionOfBlock(block);
+  const isRow = deps.actionIndex !== undefined || deps.recordId !== undefined;
+  let act: { key: string; pinned: Input } | null;
+  if (isRow) {
+    const row = await rowActionOfBlock(block, deps.actionIndex, deps.recordId, user);
+    if ("ok" in row) return row;
+    act = row;
+  } else act = actionOfBlock(block);
   if (!act) return { ok: false, error: "Khối này không có thao tác.", code: "INVALID" };
   const spec = pageAction(act.key);
   const handler = HANDLERS[act.key];
@@ -278,7 +326,7 @@ export async function executePageAction(slug: string, blockId: string, input: un
       action: "PAGE_ACTION_RUN",
       entity: "META_PAGE",
       entityId: `${slug}#${blockId}`,
-      detail: { action: spec.key, ok: result.ok, ...(result.ok ? {} : { code: result.code ?? null }) },
+      detail: { action: spec.key, ok: result.ok, ...(isRow ? { rowAction: deps.actionIndex, recordId: String(act.pinned.recordId) } : {}), ...(result.ok ? {} : { code: result.code ?? null }) },
     });
   }
   return result;

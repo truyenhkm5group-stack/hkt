@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { PencilRuler, Plus } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { PageStateBadge } from "@/components/platform/pages/page-badges";
 import { TemplatePicker } from "@/components/platform/pages/template-picker";
@@ -17,7 +17,8 @@ const TITLE = "Trang tuỳ biến";
  * TRANG TUỲ BIẾN — danh sách trang động của tổ chức NGƯỜI XEM (Phase 4).
  *
  * Trang mới (trống hoặc từ mẫu) luôn sinh ở NHÁP: người dùng chưa thấy gì cho tới khi bấm Xuất bản ở trang của
- * từng trang. Bảng chỉ đọc; sửa, xem trước, xuất bản, lưu trữ ở `/settings/pages/[id]`.
+ * từng trang. Bảng chỉ đọc; «Soạn» mở trình kéo-thả `/settings/pages/[id]/builder`, tên trang mở
+ * chế độ bàn phím `/settings/pages/[id]` (thông tin trang, lưu trữ, soạn bằng ô chọn).
  */
 export default async function CustomPagesPage() {
   const user = await requirePermission("metadata:manage");
@@ -59,7 +60,7 @@ export default async function CustomPagesPage() {
       ) : (
         <SectionCard title="Trang của tổ chức" padded={false} contentClassName="p-3">
           <div className="overflow-x-auto rounded-xl border">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[880px] text-sm">
               <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Tên</th>
@@ -68,6 +69,9 @@ export default async function CustomPagesPage() {
                   <th className="px-3 py-2">Trạng thái</th>
                   <th className="px-3 py-2 text-right">Phiên bản</th>
                   <th className="px-3 py-2">Trên menu</th>
+                  <th className="px-3 py-2">
+                    <span className="sr-only">Soạn</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -95,6 +99,15 @@ export default async function CustomPagesPage() {
                       {p.publishedVersion > 0 ? p.publishedVersion : "—"}
                     </td>
                     <td className="px-3 py-2">{p.nav.enabled ? p.nav.label || p.name : <span className="text-muted-foreground">Không</span>}</td>
+                    <td className="px-3 py-2 text-right">
+                      {p.status === "ACTIVE" ? (
+                        <Button asChild variant="outline" size="xs" title="Mở trình dựng kéo-thả (tên trang mở chế độ bàn phím)">
+                          <Link href={`/settings/pages/${encodeURIComponent(p.id)}/builder`}>
+                            <PencilRuler /> Soạn
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

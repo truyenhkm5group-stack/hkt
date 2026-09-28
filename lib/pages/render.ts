@@ -15,14 +15,18 @@
  */
 import type { Permission } from "@/lib/auth/permissions";
 import { can, type SessionUser } from "@/lib/auth/session";
-import type { PageBlock, PageRenderContext, PageSchema, ResolvedBlock } from "@/lib/pages/types";
+import type { ColumnData, PageBlock, PageRenderContext, PageSchema, ResolvedBlock, SectionVariant } from "@/lib/pages/types";
 
 /** Hình kết quả của `resolvePage` (tiêm được — bài kiểm dùng trình phân giải giả). */
 export type ResolvedPageLike = { sections: { key: string; title?: string; blocks: ResolvedBlock[] }[] };
 export type PageResolver = (schema: PageSchema, user: SessionUser, ctx: PageRenderContext, slug?: string) => Promise<ResolvedPageLike>;
 
-export type RenderBlock = { block: PageBlock; result: Promise<ResolvedBlock> };
-export type RenderSection = { key: string; title?: string; blocks: RenderBlock[] };
+/**
+ * Một khối để VẼ: kết quả là Promise (trang máy chủ — mỗi khối một Suspense) HOẶC giá trị sẵn (trình kéo-thả vẽ lại
+ * kết quả xem trước). `children`: khối con của cột, mỗi con một kết quả riêng.
+ */
+export type RenderBlock = { block: PageBlock; result: Promise<ResolvedBlock> | ResolvedBlock; children?: RenderBlock[] };
+export type RenderSection = { key: string; title?: string; variant?: SectionVariant; blocks: RenderBlock[] };
 
 /** Khối có HIỆN với người xem không — chỉ là UX, không phải ranh giới an ninh. */
 export function blockVisibleTo(block: PageBlock, user: SessionUser): boolean {
@@ -33,12 +37,23 @@ export function blockVisibleTo(block: PageBlock, user: SessionUser): boolean {
   return true;
 }
 
-/** Schema chỉ còn khối HIỆN với người xem; section rỗng sau khi lọc bị bỏ. */
+/** Schema chỉ còn khối HIỆN với người xem (kể cả khối con của cột); section rỗng sau khi lọc bị bỏ. */
 export function visibleSchema(schema: PageSchema, user: SessionUser): PageSchema {
+  const keep = (b: PageBlock): PageBlock => (b.type === "column" && Array.isArray(b.children) ? { ...b, children: b.children.filter((c) => blockVisibleTo(c, user)) } : b);
   return {
     version: 1,
-    sections: schema.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => blockVisibleTo(b, user)) })).filter((s) => s.blocks.length > 0),
+    sections: schema.sections.map((s) => ({ ...s, blocks: s.blocks.filter((b) => blockVisibleTo(b, user)).map(keep) })).filter((s) => s.blocks.length > 0),
   };
+}
+
+/** Mọi kết quả của một lượt phân giải theo id khối — kể cả khối con nằm trong dữ liệu của cột. */
+function resultsById(page: ResolvedPageLike): Map<string, ResolvedBlock> {
+  const map = new Map<string, ResolvedBlock>();
+  for (const r of page.sections.flatMap((s) => s.blocks)) {
+    map.set(r.block.id, r);
+    if (r.ok && r.block.type === "column") for (const c of (r.data as ColumnData).children ?? []) map.set(c.block.id, c);
+  }
+  return map;
 }
 
 const PAGE_FAILED = "Không dựng được trang lúc này — thử tải lại.";
@@ -53,7 +68,7 @@ export function startPageRender(schema: PageSchema, user: SessionUser, ctx: Page
   const whole: Promise<Map<string, ResolvedBlock> | null> = (async () => {
     try {
       const page = await resolve(shown, user, ctx, slug);
-      return new Map(page.sections.flatMap((s) => s.blocks).map((r) => [r.block.id, r] as const));
+      return resultsById(page);
     } catch (error) {
       console.error(`[page] ${slug} lỗi khi phân giải trang:`, error instanceof Error ? error.message : String(error));
       return null;
@@ -65,5 +80,10 @@ export function startPageRender(schema: PageSchema, user: SessionUser, ctx: Page
     if (hit) return hit;
     return { ok: false, block, issue: { blockId: block.id, code: "DATA_ERROR", message: map ? "Trình phân giải không trả kết quả cho khối này." : PAGE_FAILED } };
   };
-  return shown.sections.map((s) => ({ key: s.key, ...(s.title ? { title: s.title } : {}), blocks: s.blocks.map((block) => ({ block, result: partOf(block) })) }));
+  const item = (block: PageBlock): RenderBlock => ({
+    block,
+    result: partOf(block),
+    ...(block.type === "column" ? { children: (block.children ?? []).map((c) => ({ block: c, result: partOf(c) })) } : {}),
+  });
+  return shown.sections.map((s) => ({ key: s.key, ...(s.title ? { title: s.title } : {}), ...(s.variant ? { variant: s.variant } : {}), blocks: s.blocks.map(item) }));
 }

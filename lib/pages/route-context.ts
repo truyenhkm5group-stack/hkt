@@ -1,5 +1,5 @@
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
-import type { PageRenderContext, PageSchema } from "@/lib/pages/types";
+import { flattenBlocks, isAggregateChart, isAggregateKpi, type BlockConfigByType, type PageRenderContext, type PageSchema } from "@/lib/pages/types";
 
 /**
  * Ngữ cảnh MỘT lần dựng trang động — máy chủ dựng từ URL, không nhận từ client (`PageRenderContext`).
@@ -11,7 +11,23 @@ export function pageRenderContext(sp: SearchParams): PageRenderContext {
   return { searchParams: flat, period: resolvePeriod(sp).key };
 }
 
-/** Trang có khối nào đọc KỲ của URL không (chỉ số / biểu đồ không ghim kỳ riêng) — có thì hiện bộ chọn kỳ. */
+/**
+ * Trang có khối nào đọc KỲ của URL không (chỉ số / biểu đồ không ghim kỳ riêng; KPI tổng hợp có field ngày; biểu
+ * đồ tổng hợp theo thời gian) — có thì hiện bộ chọn kỳ ở đầu trang. Trang có THANH LỌC mang bộ chọn kỳ thì bộ chọn
+ * nằm ở đó, không hiện hai lần.
+ */
 export function pageUsesPeriod(schema: PageSchema): boolean {
-  return schema.sections.some((s) => s.blocks.some((b) => (b.type === "kpi" || b.type === "chart") && !(b.config as { period?: string }).period));
+  const blocks = flattenBlocks(schema).map((f) => f.block);
+  if (blocks.some((b) => b.type === "filter" && (b.config as BlockConfigByType["filter"]).period === true)) return false;
+  return blocks.some((b) => {
+    if (b.type === "kpi") {
+      const c = b.config as BlockConfigByType["kpi"];
+      return !c.period && (!isAggregateKpi(c) || Boolean(c.dateField));
+    }
+    if (b.type === "chart") {
+      const c = b.config as BlockConfigByType["chart"];
+      return !c.period && (!isAggregateChart(c) || "bucket" in c.groupBy);
+    }
+    return false;
+  });
 }

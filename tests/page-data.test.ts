@@ -290,6 +290,128 @@ export async function testPageData() {
       assert.ok(!ds.metrics.some((m) => m.key === "delivered_revenue") && ds.metrics.some((m) => m.key === "orders_today"), "trình soạn chỉ gợi ý nguồn người này dùng được");
       assert.ok(!ds.actions.some((a) => a.key === "run_workflow"));
 
+      // ── 8b. Phase 5: tổng hợp theo field · thanh lọc · cột ──
+      assert.ok((await createCustomField("customer", { key: "diem", label: "Điểm", type: "number", filterable: true }, actorA)).ok);
+      for (const [id, v] of [["pd-a-c1", 10], ["pd-a-c2", 5.5]] as const) assert.ok((await saveCustomValues("customer", id, { diem: v }, adminA)).ok);
+      clearMemo();
+      const agg = (id: string, aggregate: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id, type: "kpi", span: 3, config: { aggregate, ...extra } }) as unknown as PageBlock<"kpi">;
+      const aggVal = async (a: Record<string, unknown>, extra: Record<string, unknown> = {}, user: SessionUser = adminA) => (await ok<KpiData>(resolveBlock(agg("agg", a, extra), user, ctxOf()), `tổng hợp ${JSON.stringify(a)}`)).value;
+      assert.equal(await aggVal({ objectKey: "customer", fn: "count" }), 4, "đếm khách của A (không đếm của B)");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "sum", field: "custom:diem" }), 15.5, "cộng field số tuỳ biến");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "avg", field: "custom:diem" }), 7.75, "trung bình trên bản ghi CÓ giá trị");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "min", field: "custom:diem" }), 5.5);
+      assert.equal(await aggVal({ objectKey: "customer", fn: "max", field: "custom:diem" }), 10);
+      assert.equal(await aggVal({ objectKey: "customer", fn: "count", field: "custom:diem" }), 2, "đếm bản ghi CÓ giá trị field");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "count", filters: [{ ref: "custom:giai_doan", op: "eq", value: "vip" }] }), 1, "lọc cố định custom trong tổng hợp");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "sum", field: "custom:diem", filters: [{ ref: "custom:giai_doan", op: "eq", value: "lost" }] }), null, "không bản ghi nào có giá trị ⇒ CHƯA BIẾT (null), không phải 0");
+      assert.equal(await aggVal({ objectKey: "order", fn: "count" }, { dateField: "system:inserted_at", period: "today" }), 4, "đếm đơn tạo hôm nay (kể cả đơn Mới — đếm bản ghi, không phải 'đơn lên')");
+      assert.equal(await aggVal({ objectKey: "customer", fn: "avg", field: "system:order_count" }), 0, "field hệ thống khai aggregatable (số đơn đồng bộ, mặc định 0 thật)");
+      await denied(() => resolveBlock(agg("dt", { objectKey: "order", fn: "sum", field: "system:total" }), adminA, ctxOf()), "INVALID_CONFIG", "cộng tiền đơn bị từ chối — doanh thu chỉ qua ORDER_OUTCOME");
+      await denied(() => resolveBlock(agg("dt", { objectKey: "customer", fn: "sum", field: "system:purchased_amount" }), adminA, ctxOf()), "INVALID_CONFIG", "tiền khách đã mua không tổng hợp");
+      await denied(() => resolveBlock(agg("bm", { objectKey: "customer", fn: "count", field: "custom:bi_mat" }), staffA, ctxOf()), "FORBIDDEN", "tổng hợp theo field không được xem");
+      await denied(() => resolveBlock(agg("kh", { objectKey: "customer", fn: "count" }), { ...staffA, permissions: ["orders:read"] }, ctxOf()), "FORBIDDEN", "thiếu quyền xem khách");
+      await denied(() => resolveBlock(agg("nv", { objectKey: "employee", fn: "count" }), adminA, ctxOf()), "INVALID_CONFIG", "đối tượng ngoài sổ danh sách");
+
+      const chartOf = (id: string, config: Record<string, unknown>) => ({ id, type: "chart", span: 6, config }) as unknown as PageBlock<"chart">;
+      const byStage = await ok<ChartData>(resolveBlock(chartOf("tt", { aggregate: { objectKey: "order", fn: "count" }, kind: "pie", groupBy: { ref: "system:stage" } }), adminA, ctxOf()), "đơn theo trạng thái");
+      assert.deepEqual(byStage.points.map((p) => [p.x, p.y]).sort(), [["Mới", 1], ["Đang đóng hàng", 1], ["Đã xác nhận", 3]].sort(), "nhóm theo trạng thái hệ thống, nhãn theo cấu hình");
+      const byStatus = await ok<ChartData>(resolveBlock(chartOf("gd", { aggregate: { objectKey: "customer", fn: "count" }, kind: "bar", groupBy: { ref: "custom:giai_doan" } }), adminA, ctxOf()), "khách theo giai đoạn");
+      assert.deepEqual(byStatus.points.map((p) => [p.x, p.y]).sort(), [["Chưa đặt", 1], ["Mất", 1], ["Tiềm năng", 1], ["VIP", 1]].sort(), "nhóm theo trạng thái tuỳ biến — nhãn tuỳ chọn, bản ghi chưa có giá trị ở «Chưa đặt»");
+      const sumBy = await ok<ChartData>(resolveBlock(chartOf("sd", { aggregate: { objectKey: "customer", fn: "sum", field: "custom:diem" }, kind: "bar", groupBy: { ref: "custom:giai_doan" } }), adminA, ctxOf()), "tổng điểm theo giai đoạn");
+      assert.equal(sumBy.points.find((p) => p.x === "Mất")?.y, null, "nhóm không có giá trị ⇒ null, không vẽ thành 0");
+      assert.equal(sumBy.points.find((p) => p.x === "Tiềm năng")?.y, 10);
+      const perDay = await ok<ChartData>(resolveBlock(chartOf("nd", { aggregate: { objectKey: "order", fn: "count" }, kind: "bar", groupBy: { bucket: "day", dateField: "system:inserted_at" }, period: "30d" }), adminA, ctxOf()), "đơn theo ngày");
+      assert.equal(perDay.points.length, 30, "30 mốc — ngày không có bản ghi là 0 thật");
+      assert.equal(perDay.points.reduce((s, p) => s + (p.y ?? 0), 0), 4, "đơn 40 ngày trước nằm ngoài kỳ");
+      const perMonth = await ok<ChartData>(resolveBlock(chartOf("nt", { aggregate: { objectKey: "order", fn: "count" }, kind: "line", groupBy: { bucket: "month", dateField: "system:inserted_at" }, period: "all" }), adminA, ctxOf()), "đơn theo tháng");
+      assert.equal(perMonth.points.reduce((s, p) => s + (p.y ?? 0), 0), 5, "kỳ toàn bộ: mọi đơn");
+      assert.ok(perMonth.points.every((p) => /^\d{2}\/\d{4}$/.test(p.x)), `nhãn tháng MM/YYYY: ${JSON.stringify(perMonth.points)}`);
+      await denied(() => resolveBlock(chartOf("sx", { aggregate: { objectKey: "customer", fn: "count" }, kind: "bar", groupBy: { ref: "system:name" } }), adminA, ctxOf()), "INVALID_CONFIG", "nhóm theo field chữ");
+
+      // Thanh lọc: áp ĐÚNG khối đích cùng đối tượng; field không filterable / giá trị hỏng bị BỎ, không làm hỏng trang.
+      const filterPage: PageSchema = {
+        version: 1,
+        sections: [
+          {
+            key: "loc",
+            variant: "plain",
+            blocks: [
+              {
+                id: "loc",
+                type: "filter",
+                span: 12,
+                config: {
+                  period: true,
+                  fields: [
+                    { objectKey: "order", ref: "system:stage", op: "eq" },
+                    { objectKey: "customer", ref: "custom:giai_doan", op: "in", label: "Giai đoạn" },
+                    { objectKey: "customer", ref: "system:address", op: "eq" },
+                    { objectKey: "customer", ref: "custom:ghi_chu", op: "eq" },
+                  ],
+                  targets: ["don_bang", "khach_bang", "dem_khach"],
+                },
+              } as PageBlock,
+            ],
+          },
+          {
+            key: "noi_dung",
+            blocks: [
+              block("don_bang", "table", { source: "order" }),
+              block("khach_bang", "table", { source: "customer" }),
+              block("khach_all", "table", { source: "customer" }),
+              { id: "cot", type: "column", span: 4, config: {}, children: [agg("dem_khach", { objectKey: "customer", fn: "count" }), agg("dem_all", { objectKey: "customer", fn: "count" })] } as PageBlock,
+            ],
+          },
+        ],
+      };
+      const run1 = await resolvePage(filterPage, adminA, ctxOf({ pf_loc_0: "CONFIRMED", pf_loc_1: "vip,lead,khong_co", pf_loc_2: "x", pf_loc_3: "y" }), "pd-loc");
+      const got = new Map(run1.sections.flatMap((s) => s.blocks).map((b) => [b.block.id, b]));
+      const dataOf = <T,>(id: string): T => {
+        const r = got.get(id);
+        assert.ok(r?.ok, `${id}: ${JSON.stringify(r)}`);
+        return r.data as T;
+      };
+      assert.equal(dataOf<TableData>("don_bang").total, 3, "bảng đơn chỉ còn đơn Đã xác nhận");
+      assert.equal(dataOf<TableData>("don_bang").appliedFilters, 1);
+      assert.deepEqual(dataOf<TableData>("khach_bang").rows.map((r) => r.id).sort(), ["pd-a-c1", "pd-a-c2"], "bảng khách lọc theo giai đoạn (giá trị lạ trong danh sách bị bỏ)");
+      assert.equal(dataOf<TableData>("khach_all").total, 4, "bảng KHÔNG là đích ⇒ không bị lọc");
+      const cot = dataOf<{ children: { block: { id: string }; ok: boolean; data?: KpiData }[] }>("cot");
+      assert.deepEqual(cot.children.map((c) => [c.block.id, c.ok && c.data?.value]), [["dem_khach", 2], ["dem_all", 4]], "KPI tổng hợp trong cột: đích bị lọc, không đích thì không");
+      const bar = dataOf<{ fields: { param: string; value: unknown; input: string; options?: unknown[] }[]; dropped: { reason: string }[]; pageParams: string[] }>("loc");
+      assert.deepEqual(bar.fields.map((f) => [f.param, f.value]), [["pf_loc_0", "CONFIRMED"], ["pf_loc_1", ["vip", "lead"]]], "thanh lọc: hai ô dùng được, giá trị ĐÃ PARSE");
+      assert.equal(bar.dropped.length, 2, "field không bật lọc bị bỏ (kèm lý do), không làm hỏng thanh lọc");
+      assert.ok(bar.fields[0].options?.length && bar.fields[1].input === "select");
+      assert.deepEqual(bar.pageParams, ["don_bang_page", "khach_bang_page", "dem_khach_page"]);
+      const run2 = await resolvePage(filterPage, adminA, ctxOf({ pf_loc_0: "KHONG_CO_TRANG_THAI_NAY", pf_loc_1: "'; drop table customers; --" }), "pd-loc");
+      const got2 = new Map(run2.sections.flatMap((s) => s.blocks).map((b) => [b.block.id, b]));
+      const total2 = (id: string) => {
+        const r = got2.get(id);
+        assert.ok(r?.ok, `${id}: ${JSON.stringify(r)}`);
+        return (r.data as TableData).total;
+      };
+      assert.equal(total2("don_bang"), 5, "giá trị hỏng ⇒ bỏ qua, không lọc, không lỗi");
+      assert.equal(total2("khach_bang"), 4);
+      const run3 = await resolvePage(filterPage, staffA, ctxOf({ pf_loc_1: "vip" }), "pd-loc");
+      const staffBar = run3.sections[0].blocks[0];
+      assert.ok(staffBar.ok && (staffBar.data as { fields: unknown[] }).fields.length === 2, "CSKH có customers:view ⇒ vẫn lọc được theo giai đoạn");
+      assert.ok(run3.sections[1].blocks[1].ok && (run3.sections[1].blocks[1].data as TableData).total === 1, "bảng khách của CSKH lọc đúng (VIP)");
+
+      // Cột: con hỏng (thiếu quyền) không kéo con lành; trần 20 đếm cả con.
+      const colPage: PageSchema = { version: 1, sections: [{ key: "a", blocks: [{ id: "cot2", type: "column", span: 4, config: {}, children: [block("c_don", "kpi", { metric: "orders_today" }), block("c_tien", "kpi", { metric: "delivered_revenue" })] } as PageBlock, block("ben", "text", { body: "x" })] }] };
+      const colRun = await resolvePage(colPage, staffA, ctxOf(), "pd-cot");
+      const colRes = colRun.sections[0].blocks[0];
+      assert.ok(colRes.ok, "cột dựng được dù một con hỏng");
+      assert.deepEqual((colRes.data as { children: { block: { id: string }; ok: boolean; issue?: { code: string } }[] }).children.map((c) => [c.block.id, c.ok ? "ok" : c.issue?.code]), [["c_don", "ok"], ["c_tien", "FORBIDDEN"]]);
+      assert.ok(colRun.sections[0].blocks[1].ok, "khối cạnh cột không bị kéo theo");
+      const capPage: PageSchema = {
+        version: 1,
+        sections: [{ key: "a", blocks: [{ id: "cot3", type: "column", span: 4, config: {}, children: Array.from({ length: 6 }, (_, i) => block(`con_${i}`, "text", { body: "x" })) } as PageBlock, ...Array.from({ length: 14 }, (_, i) => block(`t_${i}`, "text", { body: "x" }))] }],
+      };
+      const capRun = await resolvePage(capPage, adminA, ctxOf(), "pd-tran");
+      const last = capRun.sections[0].blocks[capRun.sections[0].blocks.length - 1];
+      assert.ok(!last.ok && last.issue.code === "INVALID_CONFIG" && /trần 20/.test(last.issue.message), "khối thứ 21 (đếm cả 6 con của cột) vượt trần");
+      assert.ok(capRun.sections[0].blocks.slice(0, -1).every((b) => b.ok), "20 khối đầu (kể cả con) dựng bình thường");
+
       // ── 9. Action: đọc lại bản ĐÃ XUẤT BẢN ──
       const published: PageSchema = {
         version: 1,
@@ -363,6 +485,66 @@ export async function testPageData() {
       const yc = await db.select().from(schema.approvalRequests).where(and(eq(schema.approvalRequests.group, "WORKFLOW"), eq(schema.approvalRequests.status, "PENDING")));
       assert.equal(yc.length, 1, "đúng một yêu cầu duyệt do bộ máy workflow tạo");
       assert.equal(duyet.ok && duyet.message, "Đã gửi yêu cầu duyệt.");
+
+      // ── 12. Hành động theo dòng (Phase 5): bản ĐÃ XUẤT BẢN + bản ghi tồn tại + trong phạm vi người bấm ──
+      const rowTable = (rowActions: Record<string, unknown>[]) => block("bang_khach", "table", { source: "customer", rowActions } as never);
+      const rowPublished: PageSchema = {
+        version: 1,
+        sections: [
+          {
+            key: "chinh",
+            blocks: [
+              rowTable([
+                { action: "update_safe_field", label: "Đánh dấu mất", input: { field: "giai_doan", value: "lost" }, confirm: "Chắc chưa?" },
+                { action: "open_record", label: "Mở" },
+              ]),
+              { id: "cot_nut", type: "column", span: 4, config: {}, children: [block("nut_trong_cot", "button", { action: "open_page", label: "Sang", input: { slug: "pd-trang" } })] } as PageBlock,
+            ],
+          },
+        ],
+      };
+      const rowDraft: PageSchema = { version: 1, sections: [{ key: "chinh", blocks: [rowTable([...((rowPublished.sections[0].blocks[0].config as { rowActions: unknown[] }).rowActions as Record<string, unknown>[]), { action: "open_record", label: "Chỉ trong nháp" }])] }] };
+      await db.insert(schema.metaPages).values({ slug: "pd-trang-dong", name: "Trang hành động dòng", moduleKey: "customers", draft: rowDraft, published: rowPublished, publishedVersion: 1 });
+      const runRow = (recordId: unknown, actionIndex: unknown, user: SessionUser = adminA, input: unknown = {}) =>
+        executePageAction("pd-trang-dong", "bang_khach", input, user, { loadPublished, recordId: recordId as string, actionIndex: actionIndex as number });
+      const tbRow = await ok<TableData>(resolveBlock(rowPublished.sections[0].blocks[0] as PageBlock<"table">, adminA, ctxOf()), "bảng có hành động theo dòng");
+      assert.deepEqual(tbRow.rowActions?.map((a) => [a.index, a.label, a.enabled]), [[0, "Đánh dấu mất", true], [1, "Mở", true]]);
+      assert.equal(tbRow.rowActions?.[0].confirm, "Chắc chưa?");
+      const tbStaff = await ok<TableData>(resolveBlock(rowPublished.sections[0].blocks[0] as PageBlock<"table">, staffA, ctxOf()), "bảng (CSKH)");
+      assert.equal(tbStaff.rowActions?.[0].enabled, false, "CSKH không sửa được field ⇒ nút dòng tắt kèm lý do");
+      assert.ok(tbStaff.rowActions?.[0].reason);
+
+      assert.equal((await cvOf("pd-a-c2")).giai_doan, "vip");
+      const rOk = await runRow("pd-a-c2", 0, adminA, { recordId: "pd-a-c1", field: "ghi_chu", objectKey: "order", value: "vip" });
+      assert.ok(rOk.ok, `hành động dòng chạy: ${JSON.stringify(rOk)}`);
+      assert.equal((await cvOf("pd-a-c2")).giai_doan, "lost", "bản ghi của DÒNG (máy chủ ghim) — client không đổi được bản ghi / field / giá trị ghim");
+      assert.equal((await cvOf("pd-a-c1")).ghi_chu, undefined);
+      const open = await runRow("pd-a-c1", 1, adminA, { recordId: "pd-b-c1" });
+      assert.ok(open.ok && open.redirectTo === "/customers/pd-a-c1", `mở bản ghi của dòng: ${JSON.stringify(open)}`);
+      const cross = await runRow("pd-b-c1", 1);
+      assert.ok(!cross.ok && cross.code === "NOT_FOUND", "id khách của B ⇒ không tồn tại");
+      const crossWrite = await runRow("pd-b-c1", 0);
+      assert.ok(!crossWrite.ok && crossWrite.code === "NOT_FOUND", "sửa field trên id khách của B ⇒ không tồn tại");
+      const crossLog = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "PAGE_ACTION_RUN"), eq(schema.auditLogs.entityId, "pd-trang-dong#bang_khach")));
+      assert.ok(!crossLog.some((l) => (l.detail as { recordId?: string } | null)?.recordId === "pd-b-c1"), "bản ghi ngoài phạm vi bị chặn TRƯỚC handler — không có lượt chạy nào được ghi");
+      const ghostId = await runRow("khong-co-khach-nay", 1);
+      assert.ok(!ghostId.ok && ghostId.code === "NOT_FOUND");
+      const draftOnlyRow = await runRow("pd-a-c1", 2);
+      assert.ok(!draftOnlyRow.ok && draftOnlyRow.code === "NOT_FOUND", "hành động dòng chỉ có trong NHÁP ⇒ không chạy");
+      const badIndex = await runRow("pd-a-c1", "0");
+      assert.ok(!badIndex.ok, "vị trí không phải số nguyên ⇒ từ chối");
+      const noRecord = await runRow(undefined, 1);
+      assert.ok(!noRecord.ok && noRecord.code === "INVALID", "thiếu bản ghi của dòng");
+      // Người phạm vi HẸP (Chỉ của mình) trên khách hàng — bảng khách không có cột người ⇒ không dòng nào của họ.
+      const narrow: SessionUser = { ...staffA, id: "pd-a-narrow", permissions: ["customers:view", "customers:write"], scope: "SELF" };
+      const outScope = await runRow("pd-a-c1", 1, narrow);
+      assert.ok(!outScope.ok && outScope.code === "NOT_FOUND", `bản ghi ngoài phạm vi người bấm ⇒ không tồn tại: ${JSON.stringify(outScope)}`);
+      const onKanban = await executePageAction("pd-trang", "bang", {}, adminA, { loadPublished, recordId: "pd-a-c1", actionIndex: 0 });
+      assert.ok(!onKanban.ok && onKanban.code === "INVALID", "khối không phải bảng không có hành động theo dòng");
+      const inColumn = await executePageAction("pd-trang-dong", "nut_trong_cot", {}, adminA, { loadPublished });
+      assert.ok(inColumn.ok && inColumn.redirectTo === "/p/pd-trang", "nút nằm TRONG cột vẫn tra được trong bản đã xuất bản");
+      const rowLog = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "PAGE_ACTION_RUN"), eq(schema.auditLogs.entityId, "pd-trang-dong#bang_khach")));
+      assert.ok(rowLog.some((l) => (l.detail as { recordId?: string } | null)?.recordId === "pd-a-c2"), "nhật ký ghi bản ghi của dòng");
     });
 
     // ── 11. Tổ chức B: module tắt ⇒ MODULE_DISABLED; không thấy gì của A ──
@@ -371,6 +553,9 @@ export async function testPageData() {
       await denied(() => resolveBlock(block("dt_giao", "kpi", { metric: "delivered_revenue" }), adminB, ctxOf()), "MODULE_DISABLED", "B tắt Tài chính (kể cả quản trị)");
       await denied(() => resolveBlock(block("hoan", "kpi", { metric: "return_rate" }), adminB, ctxOf()), "MODULE_DISABLED", "B tắt Hàng hoàn");
       await denied(() => resolveBlock(block("vd", "table", { source: "shipment" }), adminB, ctxOf()), "MODULE_DISABLED", "B tắt Vận chuyển");
+      await denied(() => resolveBlock({ id: "dem_vd", type: "kpi", span: 3, config: { aggregate: { objectKey: "shipment", fn: "count" } } } as PageBlock<"kpi">, adminB, ctxOf()), "MODULE_DISABLED", "tổng hợp trên đối tượng của module tắt");
+      const demB = await ok<KpiData>(resolveBlock({ id: "dem_kh", type: "kpi", span: 3, config: { aggregate: { objectKey: "customer", fn: "count" } } } as PageBlock<"kpi">, adminB, ctxOf()), "đếm khách (B)");
+      assert.equal(demB.value, 1, "tổng hợp của B chỉ đếm khách của B (memo không lẫn tổ chức)");
       const b = await ok<KpiData>(resolveBlock(block("don_hom_nay", "kpi", { metric: "orders_today" }), adminB, ctxOf()), "orders_today (B)");
       assert.equal(b.value, 1, "B chỉ thấy đơn của mình");
       const bRows = await ok<TableData>(resolveBlock(block("khach", "table", { source: "customer", filters: [{ ref: "system:name", op: "contains", value: "Khách A" }] }), adminB, ctxOf()), "bảng khách B lọc tên của A");

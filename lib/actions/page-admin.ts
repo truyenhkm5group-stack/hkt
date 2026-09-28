@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { adminArchivePage, adminCreatePage, adminCreatePageFromTemplate, adminPublishPage, adminSavePageDraft, adminUpdatePageMeta } from "@/lib/platform-ui/page-admin";
 import type { PageWriteResult } from "@/lib/platform-ui/page-admin-shared";
+import { adminAddPageToMenu, adminLoadBuilderDraft, adminPublishFromBuilder, adminSaveBuilderDraft, type BuilderMenuResult, type BuilderPublishResult, type BuilderSaveResult } from "@/lib/platform-ui/page-builder";
 
 /**
  * ═══════════ SERVER ACTION CỦA TRÌNH SOẠN TRANG TUỲ BIẾN (Phase 4) ═══════════
@@ -65,4 +66,50 @@ export async function publishPageAction(id: string): Promise<PageWriteResult> {
 export async function archivePageAction(id: string): Promise<PageWriteResult> {
   const user = await requirePermission("metadata:manage");
   return refresh(await adminArchivePage(user, id), true);
+}
+
+// ═══════════ TRÌNH DỰNG KÉO-THẢ (Phase 5) — cùng dịch vụ, không đường ghi riêng ═══════════
+
+const builderPath = (id: string) => `${LIST_PATH}/${encodeURIComponent(id)}`;
+
+/**
+ * Tự lưu nháp từ trình kéo-thả. KHÔNG làm mới chính trang trình kéo-thả (trạng thái soạn nằm ở trình duyệt); chỉ
+ * trình soạn bàn phím `/settings/pages/[id]` (đọc nháp) phải dựng lại.
+ */
+export async function saveBuilderDraftAction(id: string, schema: unknown, baseRevision: number | null): Promise<BuilderSaveResult> {
+  const user = await requirePermission("metadata:manage");
+  const r = await adminSaveBuilderDraft(user, id, schema, baseRevision);
+  if (r.ok) revalidatePath(builderPath(id));
+  return r;
+}
+
+/** «Tải bản của họ» sau CONFLICT — chỉ đọc, không revalidate. */
+export async function loadBuilderDraftAction(id: string) {
+  const user = await requirePermission("metadata:manage");
+  return adminLoadBuilderDraft(user, id);
+}
+
+/** Xuất bản từ trình kéo-thả — trả phiên bản + mốc để thanh trên cập nhật; dựng lại trang thật + menu động. */
+export async function publishBuilderPageAction(id: string): Promise<BuilderPublishResult> {
+  const user = await requirePermission("metadata:manage");
+  const r = await adminPublishFromBuilder(user, id);
+  if (r.ok) {
+    revalidatePath(LIST_PATH);
+    revalidatePath(builderPath(id));
+    revalidatePath("/p/[slug]", "page");
+    revalidatePath("/", "layout");
+  }
+  return r;
+}
+
+/** «Thêm vào menu»: bật `nav` của trang — menu động dựng lại ở lần tải kế tiếp. */
+export async function addPageToMenuAction(id: string): Promise<BuilderMenuResult> {
+  const user = await requirePermission("metadata:manage");
+  const r = await adminAddPageToMenu(user, id);
+  if (r.ok) {
+    revalidatePath(LIST_PATH);
+    revalidatePath(builderPath(id));
+    revalidatePath("/", "layout");
+  }
+  return r;
 }

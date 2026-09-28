@@ -38,13 +38,20 @@ export type GenericChartProps = {
   points: { x: string; y: number | null }[];
   label?: string;
   className?: string;
+  /** Lời giải thích của máy chủ (nhóm gộp "Khác", mốc bị cắt, bản ghi chưa có mốc) — in dưới biểu đồ, không giấu. */
+  note?: string;
 };
 
-export function GenericChart({ kind, format, points, label = "Giá trị", className }: GenericChartProps) {
+export function GenericChart({ kind, format, points, label = "Giá trị", className, note }: GenericChartProps) {
   const known = points.filter((p) => typeof p.y === "number" && Number.isFinite(p.y));
   const missing = points.length - known.length;
   if (points.length === 0 || known.length === 0) {
-    return <div className={cn("flex h-[240px] items-center justify-center text-sm text-muted-foreground", className)}>{points.length === 0 ? "Chưa có dữ liệu trong kỳ này" : "Chưa có điểm nào đo được trong kỳ này"}</div>;
+    return (
+      <div className={cn("flex h-[240px] flex-col items-center justify-center gap-1 text-center text-sm text-muted-foreground", className)}>
+        <span>{points.length === 0 ? "Chưa có dữ liệu trong kỳ này" : "Chưa có điểm nào đo được trong kỳ này"}</span>
+        {note ? <span className="text-xs">{note}</span> : null}
+      </div>
+    );
   }
   const config = { y: { label, color: SERIES_COLOR } } satisfies ChartConfig;
   const tooltip = (
@@ -106,6 +113,7 @@ export function GenericChart({ kind, format, points, label = "Giá trị", class
         </ul>
       ) : null}
       {missing > 0 ? <p className="mt-1 text-xs text-muted-foreground">{missing} điểm chưa có số đo — để trống, không vẽ thành 0.</p> : null}
+      {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
     </div>
   );
 }

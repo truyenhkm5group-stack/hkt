@@ -17,7 +17,10 @@ export type PageActionOutcome = { ok: true; redirectTo?: string; message?: strin
  * Server action đã buộc sẵn `slug` (trang máy chủ truyền `action.bind(null, slug)` — tham chiếu server action
  * tuần tự hoá được, khác một hàm thường mà AGENTS.md mục 2 cấm). `undefined` ⇒ XEM TRƯỚC: nút không chạy.
  */
-export type PageActionRunner = (blockId: string, input: unknown) => Promise<PageActionOutcome>;
+export type PageActionRunner = (blockId: string, input: unknown, row?: PageRowTarget) => Promise<PageActionOutcome>;
+
+/** Hành động theo dòng: bản ghi của dòng + vị trí trong `rowActions` ĐÃ XUẤT BẢN (máy chủ tra lại + kiểm phạm vi). */
+export type PageRowTarget = { recordId: string; actionIndex: number };
 
 export const PREVIEW_ACTION_REASON = "Xem trước bản nháp — nút chỉ chạy trên trang đã xuất bản.";
 
@@ -26,14 +29,14 @@ export function usePageAction(run: PageActionRunner | undefined) {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const fire = React.useCallback(
-    (blockId: string, input: unknown, onDone?: (ok: boolean) => void) => {
+    (blockId: string, input: unknown, onDone?: (ok: boolean) => void, row?: PageRowTarget) => {
       if (!run) {
         toast.info(PREVIEW_ACTION_REASON);
         return;
       }
       startTransition(async () => {
         try {
-          const r = await run(blockId, input);
+          const r = row ? await run(blockId, input, row) : await run(blockId, input);
           if (!r.ok) {
             toast.error(r.error);
             onDone?.(false);

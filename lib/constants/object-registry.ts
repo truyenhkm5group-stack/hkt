@@ -121,7 +121,9 @@ export const OBJECT_REGISTRY: readonly ObjectDef[] = [
       f("phone", "Số điện thoại", "phone", "phone", { editable: true, filterable: true }),
       f("address", "Địa chỉ", "textarea", "address", { editable: true }),
       f("province", "Tỉnh / thành", "text", "province", { editable: true, filterable: true }),
-      f("order_count", "Số đơn", "number", "orderCount"),
+      // Đếm đơn của MỘT khách (đồng bộ Pancake) — cộng / trung bình được. `purchased_amount` là TIỀN (đồng bộ
+      // Pancake, không qua ORDER_OUTCOME) nên KHÔNG khai tổng hợp: cộng nó là một công thức doanh thu thứ hai.
+      f("order_count", "Số đơn", "number", "orderCount", { aggregatable: true }),
       f("purchased_amount", "Đã mua", "currency", "purchasedAmount"),
       f("last_order_at", "Đơn gần nhất", "datetime", "lastOrderAt"),
     ],

@@ -90,6 +90,12 @@ export type SystemFieldDef = {
   listable: boolean;
   filterable: boolean;
   options?: FieldOption[];
+  /**
+   * Field SỐ cộng / trung bình / min / max được trong khối tổng hợp của trang (Phase 5). Mặc định KHÔNG: phải khai
+   * tường minh. Field tiền của đơn / vận đơn / hàng hoàn không bao giờ khai — doanh thu chỉ có MỘT công thức
+   * (ORDER_OUTCOME, qua sổ chỉ số của trang), cộng thẳng một cột tiền là công thức thứ hai.
+   */
+  aggregatable?: boolean;
 };
 
 export type FormFieldConfig = { ref: FieldRef; visible: boolean; readOnly: boolean; required: boolean; defaultValue?: unknown };

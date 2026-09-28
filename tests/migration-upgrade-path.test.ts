@@ -114,6 +114,7 @@ const MOI = [
   "0164_org_connections",
   "0165_blueprint_installs",
   "0166_custom_objects",
+  "0167_meta_pages_draft_revision",
 ] as const;
 
 /*
@@ -1711,6 +1712,16 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into workflow_runs (id, rule_id, rule_version, mode, trigger_kind, trigger_ref, dedupe_key, status) values ('up-wr1', 'r1', 1, 'LIVE', 'event', 'e1', 'r1:e1', 'PENDING')`);
     assert.equal(await dem("select count(*)::int as n from workflow_runs where id = 'up-wr1' and attempt = 0 and lease_until is null and last_heartbeat_at is null"), 1, "0162: dòng cũ mang attempt 0, hai mốc NULL");
     await client.query(`delete from workflow_runs where id = 'up-wr1'`);
+
+    /*
+      0164 (Phase 5 · chống ghi đè nháp): CHỈ THÊM một cột. Trang ghi bằng câu lệnh KHÔNG nhắc tới nó — đúng như mọi
+      trang đã có trên máy chủ — mang revision 0; tệp không chứa UPDATE nào (không viết lại trang đã xuất bản).
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'meta_pages' and column_name = 'draft_revision'"), 1, "0167: cột draft_revision phải có");
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0167_meta_pages_draft_revision.sql"), "utf8").replace(/--.*$/gm, "")), "0167: migration KHÔNG được chứa UPDATE");
+    await client.query(`insert into meta_pages (id, slug, name, module_key) values ('up-pg1', 'up-trang', 'Trang cũ', 'core')`);
+    assert.equal(await dem("select count(*)::int as n from meta_pages where id = 'up-pg1' and draft_revision = 0"), 1, "0167: trang cũ mang revision 0");
+    await client.query(`delete from meta_pages where id = 'up-pg1'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

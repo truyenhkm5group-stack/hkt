@@ -20,7 +20,7 @@
  * hai ở lõi màn hình — `pageAdminDenial` dưới đây là luật dùng chung). Tệp này là DỊCH VỤ: bài kiểm gọi thẳng với
  * một `MetadataActor`; mọi lượt ghi đều trả `page` để lớp trên không phải đọc lại.
  */
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -30,11 +30,11 @@ import { objectDef } from "@/lib/constants/object-registry";
 import { ZONE_ORDER } from "@/lib/constants/department-modules";
 import { MODULE_KEYS, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
 import { auditActor, isUniqueViolation, loadCustomDefs } from "@/lib/metadata/common";
-import { loadConfigRow, PAGE_CONFIG_OBJECT, publishConfig, upsertDraft } from "@/lib/metadata/config-store";
+import { loadConfigRow, PAGE_CONFIG_OBJECT, publishConfig } from "@/lib/metadata/config-store";
 import { MetadataError } from "@/lib/metadata/errors";
 import type { MetadataActor } from "@/lib/metadata/types";
 import { getEnabledModules } from "@/lib/platform/capabilities";
-import { blockCountOf, customRefsOf, defaultPageCatalog, EMPTY_PAGE_SCHEMA, normalizePageSchema, PAGE_SLUG_PATTERN, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
+import { AGGREGATE_NUMERIC_TYPES, blockCountOf, customRefsOf, DATE_TYPES, defaultPageCatalog, EMPTY_PAGE_SCHEMA, GROUPABLE_TYPES, normalizePageSchema, PAGE_SLUG_PATTERN, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
 import { buildTemplateSchema, templateSpec } from "@/lib/pages/templates";
 import type { PageDefinition, PageNav, PageSchema, PageStatus } from "@/lib/pages/types";
 
@@ -42,7 +42,8 @@ import type { PageDefinition, PageNav, PageSchema, PageStatus } from "@/lib/page
 
 export type PageErrorCode = "INVALID" | "NOT_FOUND" | "CONFLICT" | "MODULE_DISABLED" | "SLUG_TAKEN" | "SLUG_LOCKED" | "ARCHIVED";
 export type PageIssue = { path: string; message: string };
-export type PageFailure = { ok: false; code: PageErrorCode; errors: PageIssue[] };
+/** `draftRevision`: chỉ có ở `CONFLICT` của lượt lưu nháp — revision HIỆN TẠI trong CSDL (bản của người lưu trước). */
+export type PageFailure = { ok: false; code: PageErrorCode; errors: PageIssue[]; draftRevision?: number };
 
 function pageFail(code: PageErrorCode, errors: PageIssue[] | string, path = ""): PageFailure {
   return { ok: false, code, errors: typeof errors === "string" ? [{ path, message: errors }] : errors };
@@ -159,11 +160,14 @@ export async function getPageBySlug(slug: string): Promise<{ page: PageDefinitio
   return { page: toDefinition(r), schema: asSchema(r.published) };
 }
 
-/** Bản nháp cho trình soạn / xem trước: nháp đã lưu → bản đã xuất bản → trang rỗng. Không có trang ⇒ ném `NOT_FOUND`. */
-export async function getPageDraft(id: string): Promise<{ page: PageDefinition; draft: PageSchema }> {
+/**
+ * Bản nháp cho trình soạn / xem trước: nháp đã lưu → bản đã xuất bản → trang rỗng. Không có trang ⇒ ném `NOT_FOUND`.
+ * `draftRevision` là số trình soạn gửi lại làm `baseRevision` ở lượt lưu kế tiếp (Phase 5 §2).
+ */
+export async function getPageDraft(id: string): Promise<{ page: PageDefinition; draft: PageSchema; draftRevision: number }> {
   const r = await loadRow(id);
   if (!r) throw new MetadataError("NOT_FOUND", "Không có trang này trong tổ chức.");
-  return { page: toDefinition(r), draft: asSchema(r.draft ?? r.published ?? EMPTY_PAGE_SCHEMA) };
+  return { page: toDefinition(r), draft: asSchema(r.draft ?? r.published ?? EMPTY_PAGE_SCHEMA), draftRevision: r.draftRevision };
 }
 
 /** Trang đã xuất bản, còn hoạt động, bật menu — nguyên liệu của menu động (lọc theo người xem ở `lib/pages/nav.ts`). */
@@ -182,7 +186,11 @@ export async function listNavPages(): Promise<PageDefinition[]> {
 
 // ═══ Kiểm phụ thuộc cần CSDL ═══
 
-/** Field custom mà schema trỏ tới phải còn hoạt động; `statusField` của kanban phải là field kiểu trạng thái. */
+/**
+ * Field custom mà schema trỏ tới phải còn hoạt động; `statusField` của kanban phải là field kiểu trạng thái; field
+ * tổng hợp phải là SỐ (field số tuỳ biến tổng hợp được mặc định — Phase 5); nhóm theo field chọn / trạng thái /
+ * có-không / người dùng; mốc kỳ là field ngày.
+ */
 async function customRefProblems(s: PageSchema): Promise<PageIssue[]> {
   const refs = customRefsOf(s);
   if (refs.length === 0) return [];
@@ -201,6 +209,9 @@ async function customRefProblems(s: PageSchema): Promise<PageIssue[]> {
     if (!f) out.push({ path: r.path, message: `${def.label} không có field custom «${key}» đang hoạt động.` });
     else if (r.role === "status" && f.type !== "status") out.push({ path: r.path, message: `Field «${f.label}» không phải kiểu trạng thái — kanban chỉ chạy trên field trạng thái.` });
     else if (r.role === "filter" && !f.filterable) out.push({ path: r.path, message: `Field «${f.label}» không bật lọc.` });
+    else if (r.role === "aggregate" && !AGGREGATE_NUMERIC_TYPES.has(f.type)) out.push({ path: r.path, message: `Field «${f.label}» không phải số — chỉ đếm được.` });
+    else if (r.role === "group" && !GROUPABLE_TYPES.has(f.type)) out.push({ path: r.path, message: `Field «${f.label}» không nhóm được — chỉ field chọn / trạng thái / có-không / người dùng.` });
+    else if (r.role === "date" && !DATE_TYPES.has(f.type)) out.push({ path: r.path, message: `Field «${f.label}» không phải ngày / ngày giờ.` });
   }
   return out;
 }
@@ -216,7 +227,12 @@ function pageModuleProblems(page: Pick<PageDefinition, "moduleKey" | "requiredPe
 
 // ═══ Ghi ═══
 
-export type PageWriteOptions = { catalog?: PageCatalog };
+/**
+ * `baseRevision` (chỉ lượt lưu nháp): revision trình soạn đã đọc. Có và lệch revision hiện tại ⇒ `CONFLICT`, không
+ * ghi gì. Không truyền ⇒ hành vi Phase 4 (trình soạn cũ lưu đè) — nhưng revision vẫn tăng, để trình kéo-thả đang
+ * mở cùng trang biết có người vừa lưu.
+ */
+export type PageWriteOptions = { catalog?: PageCatalog; baseRevision?: number };
 
 export async function createPage(
   input: PageMetaInput & { draft?: unknown },
@@ -308,10 +324,13 @@ export async function savePageDraft(
   schemaInput: unknown,
   actor: MetadataActor,
   opts: PageWriteOptions = {},
-): Promise<{ ok: true; page: PageDefinition; draft: PageSchema; warnings: PageIssue[] } | PageFailure> {
+): Promise<{ ok: true; page: PageDefinition; draft: PageSchema; warnings: PageIssue[]; draftRevision: number } | PageFailure> {
   const r = await loadRow(id);
   if (!r) return pageFail("NOT_FOUND", "Không có trang này trong tổ chức.");
   if (r.status === "ARCHIVED") return pageFail("ARCHIVED", "Trang đã lưu trữ — không sửa được.");
+  const base = opts.baseRevision;
+  if (base !== undefined && (!Number.isInteger(base) || base < 0)) return pageFail("INVALID", "baseRevision phải là số nguyên không âm.", "baseRevision");
+  if (base !== undefined && base !== r.draftRevision) return revisionConflict(r.draftRevision);
   const modules = await getEnabledModules();
   const v = validatePageSchema(schemaInput, { modules, catalog: opts.catalog, moduleIssues: "warning" });
   if (!v.ok) return pageFail("INVALID", v.errors);
@@ -319,10 +338,36 @@ export async function savePageDraft(
   const custom = await customRefProblems(draft);
   if (custom.length > 0) return pageFail("INVALID", custom);
   const page = toDefinition(r);
-  if (JSON.stringify(r.draft ?? null) === JSON.stringify(draft)) return { ok: true, page, draft, warnings: v.warnings };
-  await upsertDraft("PAGE", PAGE_CONFIG_OBJECT, id, draft, actor.id);
+  // So theo NỘI DUNG (khoá xếp thứ tự): jsonb của Postgres tự sắp lại khoá, so chuỗi thô thì không bao giờ bằng.
+  if (stableJson(r.draft ?? null) === stableJson(draft)) return { ok: true, page, draft, warnings: v.warnings, draftRevision: r.draftRevision };
+  // Ghi CÓ ĐIỀU KIỆN trên revision đã đọc: hai người cùng lưu từ cùng một revision ⇒ đúng một người thắng, người kia
+  // nhận CONFLICT (kể cả khi cả hai đã qua phép so ở trên cùng lúc).
+  const db = await getDb();
+  const t = schema.metaPages;
+  const expected = base ?? r.draftRevision;
+  const [row] = await db
+    .update(t)
+    .set({ draft, draftRevision: sql`${t.draftRevision} + 1`, updatedBy: actor.id, updatedAt: new Date() })
+    .where(and(eq(t.id, id), eq(t.status, "ACTIVE"), eq(t.draftRevision, expected)))
+    .returning({ draftRevision: t.draftRevision });
+  if (!row) {
+    const now = await loadRow(id);
+    if (!now || now.status === "ARCHIVED") return pageFail("ARCHIVED", "Trang vừa bị lưu trữ — không sửa được.");
+    return revisionConflict(now.draftRevision);
+  }
   await audit({ ...auditActor(actor), action: "META_PAGE_DRAFT_SAVE", entity: "META_PAGE", entityId: id, before: r.draft ?? null, after: draft });
-  return { ok: true, page, draft, warnings: v.warnings };
+  return { ok: true, page, draft, warnings: v.warnings, draftRevision: row.draftRevision };
+}
+
+/** JSON với khoá object xếp thứ tự — hai bản cùng nội dung ra cùng một chuỗi dù đi qua jsonb. */
+function stableJson(v: unknown): string {
+  const sort = (x: unknown): unknown =>
+    Array.isArray(x) ? x.map(sort) : x && typeof x === "object" ? Object.fromEntries(Object.keys(x as Record<string, unknown>).sort().map((k) => [k, sort((x as Record<string, unknown>)[k])])) : x;
+  return JSON.stringify(sort(v));
+}
+
+function revisionConflict(current: number): PageFailure {
+  return { ...pageFail("CONFLICT", "Người khác vừa lưu bản nháp của trang này — tải bản của họ hoặc ghi đè (xác nhận).", "baseRevision"), draftRevision: current };
 }
 
 export async function publishPage(id: string, actor: MetadataActor, opts: PageWriteOptions = {}): Promise<{ ok: true; page: PageDefinition; schema: PageSchema; version: number } | PageFailure> {

@@ -1,10 +1,14 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PREVIEW_ACTION_REASON, usePageAction, type PageActionRunner } from "@/components/pages/page-action-button";
 import { formatDate, formatDateTime, formatNumber, formatPercent, formatVND, MISSING_HINT, MISSING_TEXT } from "@/lib/format";
-import type { TableColumn, TableData } from "@/lib/pages/types";
+import type { TableColumn, TableData, TableRowActionData } from "@/lib/pages/types";
 
 /**
  * ═══════════ BẢNG CỦA TRANG ĐỘNG (Phase 4) ═══════════
@@ -15,6 +19,9 @@ import type { TableColumn, TableData } from "@/lib/pages/types";
  * KHÔNG dùng `DataTable`: nó gắn trang / sắp xếp vào tham số URL CHUNG (`page`, `sort`), nên hai bảng trên cùng
  * một trang động sẽ lật trang của nhau. Mỗi bảng lật trang bằng tham số RIÊNG `<blockId>_page` — đúng khoá trình
  * phân giải đọc (`resolveTable`), ≤ 100 dòng / lượt; bảng in rõ "đang hiện bao nhiêu trên tổng".
+ *
+ * HÀNH ĐỘNG THEO DÒNG (Phase 5): cột cuối mang ≤ 3 nút; bấm gửi `recordId` của dòng + vị trí hành động — máy chủ đọc
+ * lại `rowActions` ĐÃ XUẤT BẢN và kiểm bản ghi trong phạm vi người bấm. Nút tắt kèm lý do (quyền, module, xem trước).
  */
 
 function cellText(value: unknown, format: TableColumn["format"]): { text: string; missing: boolean } {
@@ -53,12 +60,53 @@ function usePageHref(blockId: string): (n: number) => string {
   };
 }
 
-export function PageTable({ blockId, data }: { blockId: string; data: TableData }) {
+function RowActions({ blockId, recordId, actions, run }: { blockId: string; recordId: string; actions: TableRowActionData[]; run?: PageActionRunner }) {
+  const { pending, fire } = usePageAction(run);
+  const [confirming, setConfirming] = React.useState<TableRowActionData | null>(null);
+  const go = (a: TableRowActionData, done?: () => void) => fire(blockId, {}, done ? () => done() : undefined, { recordId, actionIndex: a.index });
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {actions.map((a) => {
+        const reason = !a.enabled ? (a.reason ?? "Hành động này đang không dùng được.") : !run ? PREVIEW_ACTION_REASON : null;
+        return (
+          <Button key={a.index} type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={pending || reason !== null} title={reason ?? undefined} onClick={() => (a.confirm ? setConfirming(a) : go(a))}>
+            {a.label}
+          </Button>
+        );
+      })}
+      {confirming ? (
+        <AlertDialog open onOpenChange={(o) => !pending && !o && setConfirming(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{confirming.label}?</AlertDialogTitle>
+              <AlertDialogDescription>{confirming.confirm}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={pending}>Huỷ</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={pending}
+                onClick={(e) => {
+                  e.preventDefault();
+                  go(confirming, () => setConfirming(null));
+                }}
+              >
+                Xác nhận
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+    </div>
+  );
+}
+
+export function PageTable({ blockId, data, run }: { blockId: string; data: TableData; run?: PageActionRunner }) {
   const { columns, rows, total, page, pageSize } = data;
+  const actions = data.rowActions ?? [];
   const hrefOf = usePageHref(blockId);
   const pages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
   if (rows.length === 0) {
-    return <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">Chưa có dòng nào khớp cấu hình của bảng này.</p>;
+    return <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">{data.appliedFilters ? "Không có dòng nào khớp bộ lọc đang chọn." : "Chưa có dòng nào khớp cấu hình của bảng này."}</p>;
   }
   const from = (Math.max(1, page) - 1) * pageSize + 1;
   return (
@@ -72,6 +120,7 @@ export function PageTable({ blockId, data }: { blockId: string; data: TableData 
                   {c.label}
                 </TableHead>
               ))}
+              {actions.length ? <TableHead className="text-right">Thao tác</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -98,6 +147,11 @@ export function PageTable({ blockId, data }: { blockId: string; data: TableData 
                     </TableCell>
                   );
                 })}
+                {actions.length ? (
+                  <TableCell className="text-right">
+                    <RowActions blockId={blockId} recordId={r.id} actions={actions} run={run} />
+                  </TableCell>
+                ) : null}
               </TableRow>
             ))}
           </TableBody>
@@ -106,6 +160,7 @@ export function PageTable({ blockId, data }: { blockId: string; data: TableData 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <p>
           Dòng {formatNumber(from)}–{formatNumber(from + rows.length - 1)} trên tổng {formatNumber(total)}
+          {data.appliedFilters ? ` · đang lọc ${formatNumber(data.appliedFilters)} điều kiện` : ""}
         </p>
         {pages > 1 ? (
           <nav aria-label="Phân trang" className="flex items-center gap-1">

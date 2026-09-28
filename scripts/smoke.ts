@@ -579,6 +579,22 @@ async function main() {
     } catch {
       // Chưa có lần nhập nào ⇒ bỏ qua im lặng, không làm đỏ lần deploy.
     }
+    /*
+      TRÌNH DỰNG TRANG KÉO-THẢ (Phase 5) — tuyến động `/settings/pages/[id]/builder`: đọc nháp + sổ nguồn +
+      danh mục field của MỌI đối tượng đang bật. Lấy trang tuỳ biến còn dùng được sửa gần nhất; tổ chức chưa có
+      trang nào ⇒ bỏ qua im lặng.
+    */
+    try {
+      const rows = (await db.execute(`select id from meta_pages where status = 'ACTIVE' order by updated_at desc limit 1` as never)) as unknown as { rows?: { id: string }[] } | { id: string }[];
+      const list = Array.isArray(rows) ? rows : (rows.rows ?? []);
+      const id = list[0]?.id;
+      if (id) {
+        routes.push(`/settings/pages/${encodeURIComponent(id)}/builder`);
+        console.error(`  · thêm tuyến động /settings/pages/${id}/builder — trang tuỳ biến sửa gần nhất`);
+      }
+    } catch {
+      // Chưa có bảng / chưa có trang ⇒ bỏ qua im lặng.
+    }
   } catch (e) {
     console.error(`  · không phân giải được tuyến chi tiết vận đơn (bỏ qua): ${e instanceof Error ? e.message : e}`);
   }

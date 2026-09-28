@@ -1,11 +1,16 @@
 import type { ModuleKey } from "@/lib/constants/platform-modules";
-import type { FieldRef } from "@/lib/metadata/types";
-import { BLOCK_ID_PATTERN, COMPONENT_REGISTRY, PAGE_SLUG_PATTERN } from "@/lib/pages/components";
+import type { FieldRef, ListFilterOp } from "@/lib/metadata/types";
+import { objectDef } from "@/lib/constants/object-registry";
+import { AGGREGATE_NUMERIC_TYPES, BLOCK_ID_PATTERN, COMPONENT_REGISTRY, DATE_TYPES, filterOpFits, filterTargetObject, GROUPABLE_TYPES, PAGE_SLUG_PATTERN, ROW_ACTION_KEYS } from "@/lib/pages/components";
 import { stripVietnamese, type CatalogField } from "@/lib/platform-ui/metadata-admin-shared";
 import {
   BLOCK_SPANS,
+  flattenBlocks,
+  isAggregateChart,
+  isAggregateKpi,
   PAGE_MAX_BLOCKS,
   PAGE_MAX_SECTIONS,
+  type AggregateSpec,
   type BlockConfigByType,
   type BlockSpan,
   type BlockType,
@@ -19,6 +24,8 @@ import {
   type PageSchema,
   type PageStatus,
   type SeriesSourceSpec,
+  type TextVariant,
+  type TimeBucket,
   type TimelineSourceSpec,
 } from "@/lib/pages/types";
 import type { PeriodKey } from "@/lib/search-params";
@@ -62,6 +69,8 @@ export const BLOCK_TYPE_LABEL: Record<BlockType, string> = {
   form: "Form nhập liệu",
   button: "Nút thao tác",
   text: "Đoạn chữ",
+  filter: "Bộ lọc",
+  column: "Cột",
 };
 
 export const BLOCK_TYPE_HINT: Record<BlockType, string> = {
@@ -73,6 +82,8 @@ export const BLOCK_TYPE_HINT: Record<BlockType, string> = {
   form: "Form Phase 2 đã xuất bản của một đối tượng.",
   button: "Một thao tác trong sổ action — máy chủ tra lại cấu hình đã xuất bản trước khi làm.",
   text: "Tiêu đề và đoạn giải thích tĩnh.",
+  filter: "Thanh lọc cho người xem (≤ 4 ô, chọn kỳ) — áp lên bảng / kanban / KPI / biểu đồ tổng hợp cùng đối tượng.",
+  column: "Xếp dọc tối đa 6 khối con trong một ô của lưới.",
 };
 
 export const SPAN_LABEL: Record<BlockSpan, string> = { 3: "1/4 hàng", 4: "1/3 hàng", 6: "1/2 hàng", 8: "2/3 hàng", 12: "Cả hàng" };
@@ -187,8 +198,9 @@ export function blankSchema(): PageSchema {
   return { version: 1, sections: [{ key: "section_1", title: "Tổng quan", blocks: [] }] };
 }
 
+/** Tổng số khối — đếm CẢ khối con trong cột (trần 20 là trần câu truy vấn), cùng phép duyệt với máy chủ. */
 export function blockCount(schema: PageSchema): number {
-  return schema.sections.reduce((n, s) => n + s.blocks.length, 0);
+  return flattenBlocks(schema).length;
 }
 
 export function newSectionKey(schema: PageSchema): string {
@@ -221,6 +233,53 @@ export function listObjects(catalog: PageEditorCatalog): PageObjectOption[] {
 
 export function kanbanObjects(catalog: PageEditorCatalog): PageObjectOption[] {
   return listObjects(catalog).filter((o) => statusFieldsOf(o).length > 0);
+}
+
+/**
+ * Field của một đối tượng theo VAI TRÒ trong phép tổng hợp — CÙNG luật với `validatePageSchema` (lib/pages/components):
+ * số tổng hợp được (hệ thống phải khai `aggregatable` — tiền của đơn / vận đơn / hàng hoàn không bao giờ; số tuỳ biến
+ * mặc định được) · nhóm được (chọn / trạng thái / có-không / người dùng, hoặc trạng thái hệ thống) · ngày.
+ * Chỉ để UX (ô chọn không mời chọn thứ máy chủ sẽ từ chối); máy chủ vẫn kiểm lại.
+ */
+export function aggregatableFields(object: PageObjectOption | undefined): CatalogField[] {
+  const def = object ? objectDef(object.key) : null;
+  return (object?.catalog ?? []).filter((c) => {
+    if (!AGGREGATE_NUMERIC_TYPES.has(c.type)) return false;
+    if (!c.system) return true;
+    return def?.fields.find((f) => `system:${f.key}` === c.ref)?.aggregatable === true;
+  });
+}
+
+export function groupableFields(object: PageObjectOption | undefined): CatalogField[] {
+  const def = object ? objectDef(object.key) : null;
+  return (object?.catalog ?? []).filter((c) => GROUPABLE_TYPES.has(c.type) || (c.system && (def?.statusFields ?? []).some((k) => `system:${k}` === c.ref)));
+}
+
+export function dateFields(object: PageObjectOption | undefined): CatalogField[] {
+  return (object?.catalog ?? []).filter((c) => DATE_TYPES.has(c.type));
+}
+
+/** Phép lọc hợp kiểu cho ô của thanh lọc — đúng `filterOpFits` của máy chủ. */
+export function filterBarOps(field: CatalogField | undefined): ListFilterOp[] {
+  if (!field) return [];
+  return (["eq", "neq", "contains", "gte", "lte", "in", "empty", "not_empty"] as const).filter((op) => filterOpFits(field.type, op));
+}
+
+/** Action dùng được làm hành động THEO DÒNG của một bảng: nhận một bản ghi, và (nếu khai) đúng đối tượng của bảng. */
+export function rowActionOptions(catalog: PageEditorCatalog, source: string): PageActionSpec[] {
+  return catalog.actions.filter((a) => ROW_ACTION_KEYS.includes(a.key) && (!a.objectKey || a.objectKey === source));
+}
+
+/** Một khối có thể làm ĐÍCH của bộ lọc (bảng · kanban · KPI / biểu đồ tổng hợp) và đối tượng nó đọc. */
+export type FilterTargetOption = { id: string; label: string; objectKey: string };
+
+export function filterTargetsOf(schema: PageSchema): FilterTargetOption[] {
+  const out: FilterTargetOption[] = [];
+  for (const { block } of flattenBlocks(schema)) {
+    const objectKey = filterTargetObject(block.type, block.config);
+    if (objectKey) out.push({ id: block.id, label: block.title || BLOCK_TYPE_LABEL[block.type], objectKey });
+  }
+  return out;
 }
 
 export function formObjects(catalog: PageEditorCatalog): PageObjectOption[] {
@@ -264,6 +323,10 @@ export function defaultConfig<T extends BlockType>(type: T, catalog: PageEditorC
         const a = catalog.actions[0];
         return { action: a?.key ?? "", label: a?.label ?? "Thực hiện" };
       }
+      case "filter":
+        return { period: true, fields: [], targets: [] };
+      case "column":
+        return {};
       default:
         return {};
     }
@@ -272,7 +335,25 @@ export function defaultConfig<T extends BlockType>(type: T, catalog: PageEditorC
 }
 
 export function newBlock(type: BlockType, schema: PageSchema, catalog: PageEditorCatalog): PageBlock {
-  return { id: suggestBlockId(schema, type), type, span: COMPONENT_REGISTRY[type].defaultSpan, title: type === "kpi" || type === "text" ? undefined : BLOCK_TYPE_LABEL[type], config: defaultConfig(type, catalog) };
+  return {
+    id: suggestBlockId(schema, type),
+    type,
+    span: COMPONENT_REGISTRY[type].defaultSpan,
+    title: type === "kpi" || type === "text" || type === "filter" || type === "column" ? undefined : BLOCK_TYPE_LABEL[type],
+    config: defaultConfig(type, catalog),
+    ...(type === "column" ? { children: [] } : {}),
+  };
+}
+
+/**
+ * Khoá sổ chỉ số / chuỗi của KPI / biểu đồ — schema 1.1 thêm nhánh TỔNG HỢP (không có khoá sổ) ⇒ chuỗi rỗng.
+ * (Chỉ để trình soạn Phase 4 biên dịch được với kiểu hợp; trình kéo-thả dùng `isAggregateKpi/Chart`.)
+ */
+export function metricKeyOf(c: BlockConfigByType["kpi"] | null | undefined): string {
+  return c && "metric" in c && typeof c.metric === "string" ? c.metric : "";
+}
+export function seriesKeyOf(c: BlockConfigByType["chart"] | null | undefined): string {
+  return c && "series" in c && typeof c.series === "string" ? c.series : "";
 }
 
 /** Cấu hình của một khối theo ĐÚNG loại của nó — `null` nếu gọi nhầm loại. */
@@ -306,30 +387,52 @@ export function checkPageDraft(schema: PageSchema): PagePathError[] {
   if (schema.sections.length > PAGE_MAX_SECTIONS) errors.push({ path: "sections", message: `Tối đa ${PAGE_MAX_SECTIONS} nhóm mỗi trang.` });
   if (blockCount(schema) > PAGE_MAX_BLOCKS) errors.push({ path: "sections", message: `Tối đa ${PAGE_MAX_BLOCKS} khối mỗi trang — một trang không được thành hàng chục câu truy vấn.` });
   const seen = new Set<string>();
-  schema.sections.forEach((s, si) => {
-    s.blocks.forEach((b, bi) => {
-      const at = `sections.${si}.blocks.${bi}`;
-      if (!BLOCK_ID_PATTERN.test(b.id)) errors.push({ path: `${at}.id`, message: "Khoá khối chỉ gồm chữ thường không dấu, số và «_», bắt đầu bằng chữ, 2–41 ký tự." });
-      else if (seen.has(b.id)) errors.push({ path: `${at}.id`, message: `Khoá khối «${b.id}» bị trùng trong trang.` });
-      seen.add(b.id);
-      const missing = missingSource(b);
-      if (missing) errors.push({ path: `${at}.config.${missing.field}`, message: missing.message });
-    });
-  });
+  // Khối con của cột kiểm như khối thường — cùng phép duyệt phẳng với `validatePageSchema` (`flattenBlocks`).
+  for (const { block: b, path: at } of flattenBlocks(schema)) {
+    if (!BLOCK_ID_PATTERN.test(b.id)) errors.push({ path: `${at}.id`, message: "Khoá khối chỉ gồm chữ thường không dấu, số và «_», bắt đầu bằng chữ, 2–41 ký tự." });
+    else if (seen.has(b.id)) errors.push({ path: `${at}.id`, message: `Khoá khối «${b.id}» bị trùng trong trang.` });
+    seen.add(b.id);
+    const missing = missingSource(b);
+    if (missing) errors.push({ path: `${at}.${missing.field}`, message: missing.message });
+  }
   return errors;
 }
 
+/** Chỗ còn thiếu của phép tổng hợp (KPI / biểu đồ theo field) — `field` tính từ `config.aggregate`. */
+function missingAggregate(a: AggregateSpec, base: string): { field: string; message: string } | null {
+  if (!a.objectKey) return { field: `${base}.objectKey`, message: "Chọn đối tượng để tổng hợp." };
+  if (a.fn !== "count" && !a.field) return { field: `${base}.field`, message: "Chọn field số để cộng / trung bình / nhỏ nhất / lớn nhất." };
+  return null;
+}
+
+/** Ô bắt buộc còn trống của một khối; `field` là đường dẫn TỪ KHỐI (`config.metric`, `config.aggregate.field`…). */
 function missingSource(b: PageBlock): { field: string; message: string } | null {
+  const inner = missingConfig(b);
+  return inner ? { field: `config.${inner.field}`, message: inner.message } : null;
+}
+
+function missingConfig(b: PageBlock): { field: string; message: string } | null {
   switch (b.type) {
-    case "kpi":
-      return configOf(b, "kpi")?.metric ? null : { field: "metric", message: "Chọn nguồn số liệu." };
+    case "kpi": {
+      const c = configOf(b, "kpi");
+      if (isAggregateKpi(c)) return missingAggregate(c.aggregate, "aggregate");
+      return metricKeyOf(c) ? null : { field: "metric", message: "Chọn nguồn số liệu." };
+    }
     case "table": {
       const c = configOf(b, "table");
       if (!c?.source) return { field: "source", message: "Chọn đối tượng của bảng." };
       return c.columns && c.columns.length > 0 ? null : { field: "columns", message: "Bảng cần ít nhất một cột." };
     }
-    case "chart":
-      return configOf(b, "chart")?.series ? null : { field: "series", message: "Chọn chuỗi số liệu." };
+    case "chart": {
+      const c = configOf(b, "chart");
+      if (isAggregateChart(c)) {
+        const miss = missingAggregate(c.aggregate, "aggregate");
+        if (miss) return miss;
+        if ("ref" in c.groupBy) return c.groupBy.ref ? null : { field: "groupBy.ref", message: "Chọn field để nhóm." };
+        return c.groupBy.dateField ? null : { field: "groupBy.dateField", message: "Chọn field ngày cho trục thời gian." };
+      }
+      return seriesKeyOf(c) ? null : { field: "series", message: "Chọn chuỗi số liệu." };
+    }
     case "kanban": {
       const c = configOf(b, "kanban");
       if (!c?.objectKey) return { field: "objectKey", message: "Chọn đối tượng của Kanban." };
@@ -347,12 +450,34 @@ function missingSource(b: PageBlock): { field: string; message: string } | null 
       if (!c?.action) return { field: "action", message: "Chọn thao tác trong sổ." };
       return c.label.trim() ? null : { field: "label", message: "Nhãn nút không được để trống." };
     }
-    default: {
+    case "filter": {
+      const c = configOf(b, "filter");
+      if (!c) return null;
+      const bad = c.fields.findIndex((f) => !f.objectKey || !f.ref);
+      if (bad >= 0) return { field: `fields.${bad}.ref`, message: "Chọn đối tượng và field cho ô lọc." };
+      return c.period === true || c.fields.length > 0 ? null : { field: "fields", message: "Bộ lọc cần ít nhất một ô lọc hoặc bộ chọn kỳ." };
+    }
+    case "column":
+      return null;
+    case "text": {
       const c = configOf(b, "text");
       return c?.heading?.trim() || c?.body?.trim() ? null : { field: "body", message: "Đoạn chữ trống — nhập tiêu đề hoặc nội dung." };
     }
+    default:
+      return null;
   }
 }
+
+/** Tóm tắt một phép tổng hợp: «Đếm Đơn hàng», «Tổng Số đơn · Khách hàng». */
+export function aggregateSummary(a: AggregateSpec, catalog: PageEditorCatalog): string {
+  const o = objectOf(catalog, a.objectKey);
+  const field = a.field ? (o?.catalog.find((f) => f.ref === a.field)?.label ?? a.field) : null;
+  return `${AGGREGATE_FN_LABEL[a.fn]}${field ? ` ${field}` : ""} · ${o?.label ?? (a.objectKey || "chưa chọn đối tượng")}`;
+}
+
+export const AGGREGATE_FN_LABEL: Record<AggregateSpec["fn"], string> = { count: "Đếm", sum: "Tổng", avg: "Trung bình", min: "Nhỏ nhất", max: "Lớn nhất" };
+export const TIME_BUCKET_LABEL: Record<TimeBucket, string> = { day: "Theo ngày", week: "Theo tuần", month: "Theo tháng" };
+export const TEXT_VARIANT_LABEL: Record<TextVariant, string> = { heading: "Tiêu đề", paragraph: "Đoạn văn", note: "Ghi chú" };
 
 // ═══════════ LỖI THEO VỊ TRÍ ═══════════
 
@@ -404,7 +529,9 @@ export function blockSummary(block: PageBlock, catalog: PageEditorCatalog): stri
   switch (block.type) {
     case "kpi": {
       const c = configOf(block, "kpi");
-      return labelOf(catalog.metrics, (m) => m.key === c?.metric, c?.metric ?? "");
+      if (isAggregateKpi(c)) return aggregateSummary(c.aggregate, catalog);
+      const metric = metricKeyOf(c);
+      return labelOf(catalog.metrics, (m) => m.key === metric, metric);
     }
     case "table": {
       const c = configOf(block, "table");
@@ -412,7 +539,9 @@ export function blockSummary(block: PageBlock, catalog: PageEditorCatalog): stri
     }
     case "chart": {
       const c = configOf(block, "chart");
-      return `${labelOf(catalog.series, (s) => s.key === c?.series, c?.series ?? "")} · ${c ? CHART_KIND_LABEL[c.kind] : ""}`;
+      if (isAggregateChart(c)) return `${aggregateSummary(c.aggregate, catalog)} · ${CHART_KIND_LABEL[c.kind]}`;
+      const series = seriesKeyOf(c);
+      return `${labelOf(catalog.series, (s) => s.key === series, series)} · ${c ? CHART_KIND_LABEL[c.kind] : ""}`;
     }
     case "kanban": {
       const c = configOf(block, "kanban");
@@ -431,6 +560,12 @@ export function blockSummary(block: PageBlock, catalog: PageEditorCatalog): stri
       const c = configOf(block, "button");
       return `${c?.label ?? ""} → ${labelOf(catalog.actions, (a) => a.key === c?.action, c?.action ?? "")}`;
     }
+    case "filter": {
+      const c = configOf(block, "filter");
+      return `${c?.fields.length ?? 0} ô lọc${c?.period ? " + kỳ" : ""} → ${c?.targets.length ? c.targets.join(", ") : "chưa nhắm khối nào"}`;
+    }
+    case "column":
+      return `${block.children?.length ?? 0} khối xếp dọc`;
     default: {
       const c = configOf(block, "text");
       return c?.heading?.trim() || (c?.body ?? "").slice(0, 60) || "trống";

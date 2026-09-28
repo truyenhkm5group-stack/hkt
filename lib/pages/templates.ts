@@ -11,10 +11,12 @@
  *    đoán một khoá "gần giống". Bản dựng xong vẫn phải qua `validatePageSchema` như mọi bản nháp.
  *  · Cột custom / kanban chỉ dựng từ field custom ĐANG CÓ của tổ chức (máy chủ truyền vào) — không field nào
  *    được tạo hộ.
+ *  · (Phase 5) "Tổng quan bán hàng" dùng schema 1.1: một BỘ LỌC (kỳ + trạng thái đơn, nhắm bảng đơn) và một CỘT
+ *    chồng hai KPI cạnh biểu đồ. Cột không còn khối con nào ⇒ bỏ cột; bộ lọc mất hết đích ⇒ bỏ bộ lọc — cả hai nói ra.
  */
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import type { PageCatalog } from "@/lib/pages/components";
-import type { BlockType, PageBlock, PageSchema, PageSection } from "@/lib/pages/types";
+import type { BlockType, FilterConfig, PageBlock, PageSchema, PageSection, SectionVariant } from "@/lib/pages/types";
 
 export const PAGE_TEMPLATE_KEYS = ["sales-overview", "inventory-overview", "customer-workspace"] as const;
 export type PageTemplateKey = (typeof PAGE_TEMPLATE_KEYS)[number];
@@ -30,7 +32,7 @@ export type PageTemplateSpec = {
 };
 
 export const PAGE_TEMPLATES: readonly PageTemplateSpec[] = [
-  { key: "sales-overview", name: "Tổng quan bán hàng", description: "Đơn hôm nay, doanh thu lên đơn, biểu đồ đơn theo ngày và bảng đơn mới.", moduleKey: "orders", slug: "tong-quan-ban-hang" },
+  { key: "sales-overview", name: "Tổng quan bán hàng", description: "Bộ lọc kỳ + trạng thái đơn, cột hai KPI (đơn hôm nay, doanh thu lên đơn) cạnh biểu đồ đơn theo ngày, bảng đơn mới.", moduleKey: "orders", slug: "tong-quan-ban-hang" },
   { key: "inventory-overview", name: "Tổng quan kho", description: "Tồn khả dụng, hàng hoàn trong kỳ và bảng sản phẩm.", moduleKey: "inventory", slug: "tong-quan-kho" },
   { key: "customer-workspace", name: "Bàn làm việc khách hàng", description: "Bảng khách kèm cột custom; kanban theo field trạng thái custom nếu tổ chức đã tạo.", moduleKey: "customers", slug: "ban-lam-viec-khach" },
 ];
@@ -55,21 +57,47 @@ type Want = {
   candidates: readonly string[];
   extra?: Record<string, unknown>;
 };
+/** Cột: khối con là các khối ứng viên (xếp dọc). */
+type WantColumn = { id: string; type: "column"; span: PageBlock["span"]; children: Want[] };
+/** Bộ lọc: cấu hình cố định; chỉ giữ ô có nguồn + đích ĐÃ vào mẫu (dựng sau mọi khối khác). */
+type WantFilter = { id: string; type: "filter"; span: PageBlock["span"]; config: FilterConfig };
+type AnyWant = Want | WantColumn | WantFilter;
 
 /**
  * Khoá ỨNG VIÊN của sổ nguồn (`lib/pages/catalog.ts`). Nhiều ứng viên vì mẫu phải chạy cả khi sổ đổi tên
  * hiển thị — nhưng mỗi ứng viên là một KHOÁ ĐẦY ĐỦ, không so gần đúng.
  */
-const WANTS: Record<Exclude<PageTemplateKey, "customer-workspace">, { section: string; title?: string; blocks: Want[] }[]> = {
+const WANTS: Record<Exclude<PageTemplateKey, "customer-workspace">, { section: string; title?: string; variant?: SectionVariant; blocks: AnyWant[] }[]> = {
   "sales-overview": [
     {
-      section: "kpi",
+      section: "loc",
+      variant: "plain",
       blocks: [
-        { id: "orders_today", type: "kpi", span: 3, title: "Đơn hôm nay", candidates: ["orders_today"], extra: { period: "today" } },
-        { id: "revenue", type: "kpi", span: 3, title: "Doanh thu lên đơn", candidates: ["booked_revenue"] },
+        {
+          id: "bo_loc",
+          type: "filter",
+          span: 12,
+          // Trạng thái Pancake của đơn — NHÃN người bán bấm, không phải kết quả đơn (ORDER_OUTCOME); chỉ lọc bảng đơn.
+          config: { period: true, fields: [{ objectKey: "order", ref: "system:stage", op: "in", label: "Trạng thái đơn" }], targets: ["orders_table"] },
+        },
       ],
     },
-    { section: "trend", title: "Xu hướng", blocks: [{ id: "orders_by_day", type: "chart", span: 12, title: "Đơn theo ngày", candidates: ["orders_by_day"], extra: { kind: "bar" } }] },
+    {
+      section: "kpi",
+      variant: "plain",
+      blocks: [
+        {
+          id: "kpi_cot",
+          type: "column",
+          span: 4,
+          children: [
+            { id: "orders_today", type: "kpi", span: 12, title: "Đơn hôm nay", candidates: ["orders_today"], extra: { period: "today" } },
+            { id: "revenue", type: "kpi", span: 12, title: "Doanh thu lên đơn", candidates: ["booked_revenue"] },
+          ],
+        },
+        { id: "orders_by_day", type: "chart", span: 8, title: "Đơn theo ngày", candidates: ["orders_by_day"], extra: { kind: "bar" } },
+      ],
+    },
     { section: "list", title: "Đơn hàng", blocks: [{ id: "orders_table", type: "table", span: 12, title: "Đơn mới", candidates: ["order"], extra: { pageSize: 20, rowLink: true } }] },
   ],
   "inventory-overview": [
@@ -133,17 +161,61 @@ function customerWorkspace(ctx: TemplateContext): TemplateBuild {
 export function buildTemplateSchema(key: PageTemplateKey, ctx: TemplateContext): TemplateBuild {
   if (key === "customer-workspace") return customerWorkspace(ctx);
   const skipped: TemplateBuild["skipped"] = [];
-  const sections: PageSection[] = [];
-  for (const s of WANTS[key]) {
-    const blocks: PageBlock[] = [];
-    for (const w of s.blocks) {
+  // Lượt 1: mọi khối trừ bộ lọc (bộ lọc giữ CHỖ theo vị trí, dựng ở lượt 2 khi đã biết đích nào vào mẫu).
+  const drafts = WANTS[key].map((s) => ({
+    spec: s,
+    slots: s.blocks.map((w): PageBlock | WantFilter | null => {
+      if (w.type === "filter") return w;
+      if (w.type === "column") {
+        const children: PageBlock[] = [];
+        for (const c of w.children) {
+          const b = pickBlock(c, ctx);
+          if ("skip" in b) skipped.push({ blockId: c.id, reason: b.skip });
+          else children.push(b);
+        }
+        if (children.length > 0) return { id: w.id, type: "column", span: w.span, config: {}, children } as PageBlock;
+        skipped.push({ blockId: w.id, reason: "không khối con nào của cột dựng được" });
+        return null;
+      }
       const b = pickBlock(w, ctx);
-      if ("skip" in b) skipped.push({ blockId: w.id, reason: b.skip });
-      else blocks.push(b);
+      if (!("skip" in b)) return b;
+      skipped.push({ blockId: w.id, reason: b.skip });
+      return null;
+    }),
+  }));
+  const present = new Set<string>();
+  for (const d of drafts) for (const x of d.slots) if (x && !isFilterWant(x)) [x, ...(x.children ?? [])].forEach((b) => present.add(b.id));
+  // Lượt 2: bộ lọc chỉ giữ ô có nguồn danh sách đang bật + đích đã vào mẫu; không còn đích (và không chọn kỳ) ⇒ bỏ.
+  const sections: PageSection[] = [];
+  for (const { spec, slots } of drafts) {
+    const blocks: PageBlock[] = [];
+    for (const x of slots) {
+      if (!x) continue;
+      if (!isFilterWant(x)) {
+        blocks.push(x);
+        continue;
+      }
+      const targets = x.config.targets.filter((t) => present.has(t));
+      const fields = targets.length
+        ? x.config.fields.filter((f) => {
+            const list = ctx.catalog.lists.find((l) => l.objectKey === f.objectKey);
+            return list !== undefined && ctx.modules.has(list.module);
+          })
+        : [];
+      if (fields.length === 0 && !x.config.period) {
+        skipped.push({ blockId: x.id, reason: "bộ lọc không còn khối đích / nguồn nào trong mẫu" });
+        continue;
+      }
+      blocks.push({ id: x.id, type: "filter", span: x.span, config: { ...(x.config.period ? { period: true } : {}), fields, targets: fields.length ? targets : [] } } as PageBlock);
     }
-    if (blocks.length > 0) sections.push({ key: s.section, ...(s.title ? { title: s.title } : {}), blocks });
+    if (blocks.length > 0) sections.push({ key: spec.section, ...(spec.title ? { title: spec.title } : {}), ...(spec.variant === "plain" ? { variant: "plain" as const } : {}), blocks });
   }
   return { schema: { version: 1, sections }, skipped };
+}
+
+/** Chỗ giữ bộ lọc chưa dựng (khối đã dựng luôn mang `config` đã qua `pickBlock` / cột, không bao giờ là `WantFilter`). */
+function isFilterWant(x: PageBlock | WantFilter): x is WantFilter {
+  return x.type === "filter";
 }
 
 export function templateSpec(key: string): PageTemplateSpec | null {
