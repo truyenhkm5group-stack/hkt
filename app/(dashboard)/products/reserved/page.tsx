@@ -12,7 +12,8 @@ import { VALIDATION_RULES, type ValidationCode } from "@/lib/constants/preship-v
 import { getViettelPostTrackingUrl, SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, maskPhone } from "@/lib/format";
 import { listReservedQueue, type ReservedLineFinding, type ReservedQueueLine } from "@/lib/queries/stock";
-import { PhoneReputationProvider, PhoneWarningCell, ReturnRateCell } from "@/app/(dashboard)/products/reserved/reputation";
+import { PhoneReputationProvider, PhoneRiskSummary, PhoneWarningCell, ReturnRateCell } from "@/app/(dashboard)/products/reserved/reputation";
+import { loadAlertConfig } from "@/lib/alerts/config";
 
 export const metadata = { title: "Đơn chờ xuất" };
 
@@ -40,7 +41,12 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
     );
   }
 
-  const { scope, ready, incomplete } = await listReservedQueue(variantId ? { variantId } : { productId: productId as string });
+  const [{ scope, ready, incomplete }, alertCfg] = await Promise.all([
+    listReservedQueue(variantId ? { variantId } : { productId: productId as string }),
+    // Ngưỡng rủi ro uy tín SĐT — nguồn duy nhất là cấu hình cảnh báo. Không đọc được ⇒ không gắn cảnh báo.
+    loadAlertConfig().catch(() => null),
+  ]);
+  const thresholds = alertCfg ? { phoneRiskReturnRatePct: alertCfg.phoneRiskReturnRatePct, phoneRiskWarningCount: alertCfg.phoneRiskWarningCount } : null;
   if (!scope) {
     return (
       <div className="space-y-5">
@@ -56,7 +62,7 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
   const title = scope.variant ? `${scope.productName} · ${scope.variant.label || scope.variant.sku}` : scope.productName;
 
   return (
-    <PhoneReputationProvider orderIds={[...new Set([...ready, ...incomplete].map((l) => l.orderId))]}>
+    <PhoneReputationProvider orderIds={[...new Set([...ready, ...incomplete].map((l) => l.orderId))]} thresholds={thresholds}>
     <div className="space-y-5">
       <PageHeader
         eyebrow="Kho · Đơn chờ xuất"
@@ -79,6 +85,8 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
           ) : undefined
         }
       />
+
+      <PhoneRiskSummary labels={Object.fromEntries([...ready, ...incomplete].map((l) => [l.orderId, `#${l.systemId ?? l.orderId}`]))} />
 
       <SectionCard
         title={`Đủ điều kiện xuất · ${formatNumber(orders(ready))} đơn`}
