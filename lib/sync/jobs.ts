@@ -1,3 +1,6 @@
+import { phoneRiskOrderRows } from "@/lib/alerts/risk";
+import { loadAlertConfig } from "@/lib/alerts/config";
+import { warmPhoneReputations } from "@/lib/queries/phone-reputation";
 import {
   syncCustomers,
   syncInventoryHistories,
@@ -94,6 +97,9 @@ export type JobDefinition = {
   description: string;
   run: (o: JobOptions) => Promise<unknown>;
 };
+
+/** Số SĐT tối đa job `phone-reputation` hỏi Pancake mỗi lượt (client giãn 250 ms/lượt cho mọi việc). */
+const PHONE_REPUTATION_PER_RUN = 30;
 
 export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
   /*
@@ -667,6 +673,30 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         return r;
       }),
   },
+  "phone-reputation": {
+    label: "Uy tín SĐT theo Pancake",
+    source: "PANCAKE",
+    module: "connector_pancake",
+    description:
+      "Hỏi Pancake tỷ lệ hoàn và số lần bị báo (toàn mạng Pancake) của SĐT khách trên các đơn chưa gửi ĐVVC trong kỳ cảnh báo, đơn mới nhất trước, tối đa 30 SĐT chưa có trong đệm mỗi lượt. " +
+      "Kết quả đệm 6 giờ; cảnh báo “Đơn rủi ro” và danh sách Đơn chờ xuất đọc lại đệm đó. Tắt cảnh báo “Đơn rủi ro” thì lượt chạy không gọi Pancake.",
+    run: (o) =>
+      runSyncJob({ source: "PANCAKE", job: "phone_reputation", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const cfg = await loadAlertConfig();
+        if (!cfg.enabled.risk) {
+          ctx.summary.detail = "cảnh báo “Đơn rủi ro” đang tắt — không hỏi Pancake";
+          return null;
+        }
+        const lookback = new Date(Date.now() - Math.max(1, cfg.lookbackDays || 14) * 86_400_000);
+        const rows = await phoneRiskOrderRows(lookback);
+        const r = await warmPhoneReputations(rows.map((x) => x.phone || x.shipPhone), PHONE_REPUTATION_PER_RUN);
+        ctx.summary.imported = r.known;
+        ctx.summary.skipped = r.unknown;
+        if (r.unknown) ctx.summary.warning = `${r.unknown} SĐT không hỏi được Pancake — hiện “—”, hỏi lại sau 5 phút`;
+        ctx.summary.detail = `hỏi ${r.fetched} SĐT (${r.known} có số · ${r.unknown} không hỏi được) · còn ${r.pending} SĐT chờ lượt sau`;
+        return r;
+      }),
+  },
   alerts: {
     label: "Cảnh báo vận hành",
     source: "ALL",
@@ -827,6 +857,7 @@ export const HOME_CREDENTIAL_JOBS: Readonly<Record<string, string>> = {
   "pancake-customers": "pancake",
   "pancake-inventory": "pancake",
   "pancake-returns": "pancake",
+  "phone-reputation": "pancake",
   "pancake-all": "pancake",
   "landing-push": "pancake",
   "cs-chat": "pancake-pages",

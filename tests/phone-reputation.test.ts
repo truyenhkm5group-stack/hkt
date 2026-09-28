@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { inArray } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { collectCandidates } from "@/lib/alerts/rules";
 import { DEFAULT_ALERT_CONFIG } from "@/lib/constants/alerts";
+import { clearPhoneReputationCache, primePhoneReputationForTest } from "@/lib/queries/phone-reputation";
 import { normalizePhoneForPancake, parseBadReportInfo, phoneRiskReasons, type PhoneReputation } from "@/lib/constants/phone-reputation";
 
 /**
@@ -53,8 +57,10 @@ export function testPhoneReputation() {
   // ───────── Cảnh báo đơn chờ xuất rủi ro (chủ shop chốt 28/09/2026: > 40% hoặc > 10 lần báo) ─────────
   assert.equal(DEFAULT_ALERT_CONFIG.phoneRiskReturnRatePct, 40);
   assert.equal(DEFAULT_ALERT_CONFIG.phoneRiskWarningCount, 10);
-  const t = { phoneRiskReturnRatePct: 40, phoneRiskWarningCount: 10 };
-  const rep = (pct: number | null, warn: number): PhoneReputation => ({ orderSuccess: 0, orderFail: 0, returnRatePct: pct, warningCount: warn, warnings: [] });
+  assert.equal(DEFAULT_ALERT_CONFIG.phoneRiskMinOrders, 5);
+  const t = { phoneRiskReturnRatePct: 40, phoneRiskWarningCount: 10, phoneRiskMinOrders: 5 };
+  // Mặc định 100 đơn kết thúc — đủ mẫu, để các ca dưới chỉ thử NGƯỠNG %.
+  const rep = (pct: number | null, warn: number, finished = 100): PhoneReputation => ({ orderSuccess: finished - Math.round((finished * (pct ?? 0)) / 100), orderFail: Math.round((finished * (pct ?? 0)) / 100), returnRatePct: pct, warningCount: warn, warnings: [] });
   assert.deepEqual(phoneRiskReasons(rep(40, 10), t), [], "ĐÚNG ngưỡng chưa phải VƯỢT ngưỡng — chủ shop nói '> 40%', '> 10'");
   assert.deepEqual(phoneRiskReasons(rep(41, 10), t), ["RETURN_RATE"]);
   assert.deepEqual(phoneRiskReasons(rep(40, 11), t), ["WARNINGS"]);
@@ -64,11 +70,54 @@ export function testPhoneReputation() {
   // So trên ĐÚNG số màn hình in (đã làm tròn như POS): 81/200 = 40,5% in "41%" ⇒ vượt; 80/199 = 40,2% in "40%" ⇒ không.
   assert.deepEqual(phoneRiskReasons(parseBadReportInfo({ reports_by_phone: { a: { order_fail: 81, order_success: 119 } } }), t), ["RETURN_RATE"]);
   assert.deepEqual(phoneRiskReasons(parseBadReportInfo({ reports_by_phone: { a: { order_fail: 80, order_success: 119 } } }), t), [], "ô in 40% thì không được gắn cảnh báo '> 40%'");
-  // Nút Lưu ở trang Cảnh báo không được làm RƠI hai ô này: z.object() cắt khoá không khai báo.
+  // Mẫu nhỏ: 1/1 thất bại là "100%" nhưng không nói gì ⇒ chưa đủ 5 đơn thì KHÔNG xét tỷ lệ.
+  assert.deepEqual(phoneRiskReasons(rep(100, 0, 1), t), [], "1/1 thất bại (100%) chưa đủ mẫu — không bật cảnh báo tỷ lệ hoàn");
+  assert.deepEqual(phoneRiskReasons(rep(100, 0, 4), t), [], "4 đơn vẫn dưới ngưỡng tối thiểu 5");
+  assert.deepEqual(phoneRiskReasons(rep(60, 0, 5), t), ["RETURN_RATE"], "đủ 5 đơn thì xét như thường");
+  assert.deepEqual(phoneRiskReasons(rep(100, 11, 1), t), ["WARNINGS"], "ngưỡng tối thiểu CHỈ áp cho tỷ lệ hoàn — số lần bị báo vẫn tự đủ");
+  // Nút Lưu ở trang Cảnh báo không được làm RƠI các ô này: z.object() cắt khoá không khai báo.
   const luoc = readFileSync(path.join(path.resolve(__dirname, ".."), "lib", "actions", "alerts.ts"), "utf8");
-  for (const k of ["phoneRiskReturnRatePct", "phoneRiskWarningCount"]) {
+  for (const k of ["phoneRiskReturnRatePct", "phoneRiskWarningCount", "phoneRiskMinOrders"]) {
     assert.ok(new RegExp(`\\b${k}: z\\.`).test(luoc), `lược đồ lưu cấu hình cảnh báo phải khai ${k} — thiếu thì mỗi lần bấm Lưu ngưỡng lặng lẽ về mặc định`);
   }
 
-  console.log("✓ Uy tín SĐT theo Pancake: cùng công thức POS (Σ thất bại ÷ Σ tổng) · chưa có đơn ⇒ null · không giữ danh tính người báo · cảnh báo rủi ro khi VƯỢT ngưỡng (> 40% hoặc > 10 lần báo), so trên đúng số đang in");
+  // Luật cảnh báo CHỈ ĐỌC ĐỆM — lượt quét 10 phút/lần không bao giờ chờ / gọi Pancake; job riêng làm ấm.
+  const goc = path.resolve(__dirname, "..");
+  const luat = readFileSync(path.join(goc, "lib", "alerts", "rules.ts"), "utf8");
+  for (const cam of ["getPancakeClient", "warmPhoneReputations", "getPhoneReputationForOrders", "badReportInfo"]) {
+    assert.ok(!luat.includes(cam), `lib/alerts/rules.ts không được gọi Pancake (${cam}) — chỉ đọc đệm bằng cachedPhoneReputations`);
+  }
+  const lich = readFileSync(path.join(goc, "scripts", "scheduler.mjs"), "utf8");
+  assert.match(lich, /\{\s*job:\s*"phone-reputation"/, "job làm ấm uy tín SĐT phải nằm trong bộ lập lịch");
+
+  console.log("✓ Uy tín SĐT theo Pancake: cùng công thức POS (Σ thất bại ÷ Σ tổng) · chưa có đơn ⇒ null · không giữ danh tính người báo · cảnh báo rủi ro khi VƯỢT ngưỡng (> 40% hoặc > 10 lần báo), so trên đúng số đang in · tỷ lệ chỉ xét từ 5 đơn · luật cảnh báo chỉ đọc đệm");
+}
+
+/**
+ * Cảnh báo "Đơn rủi ro · xin cọc" nhận thêm lý do Pancake — chạy luật cảnh báo THẬT trên CSDL kiểm thử,
+ * với đệm uy tín SĐT đặt sẵn (không gọi mạng).
+ */
+export async function testPhoneRiskAlert(db: Db) {
+  const t0 = new Date();
+  await db.insert(schema.orders).values([
+    { id: "prisk-1", systemId: 990001, stage: "CONFIRMED", insertedAt: t0, billFullName: "Khách bị báo nhiều", billPhone: "0911000111" },
+    { id: "prisk-2", systemId: 990002, stage: "CONFIRMED", insertedAt: t0, billFullName: "Khách mẫu nhỏ", billPhone: "0911000222" },
+    { id: "prisk-3", systemId: 990003, stage: "DELIVERED", insertedAt: t0, billFullName: "Đơn đã giao", billPhone: "0911000111" },
+  ]);
+  const bao = (orderSuccess: number, orderFail: number, warningCount: number): PhoneReputation => ({ orderSuccess, orderFail, returnRatePct: orderSuccess + orderFail ? Math.round((orderFail / (orderSuccess + orderFail)) * 100) : null, warningCount, warnings: [] });
+  await primePhoneReputationForTest("0911000111", bao(213, 19, 11));
+  await primePhoneReputationForTest("0911000222", bao(0, 1, 0));
+  try {
+    const { candidates } = await collectCandidates();
+    const mot = candidates.filter((c) => c.dedupeKey === "risky-order:prisk-1");
+    assert.equal(mot.length, 1, "đơn trúng lý do Pancake ra ĐÚNG MỘT cảnh báo 'Đơn rủi ro'");
+    assert.equal(mot[0].kind, "RISKY_ORDER");
+    assert.match(mot[0].body, /SĐT bị báo 11 lần trên Pancake/, "tin cảnh báo phải nói lý do Pancake");
+    assert.ok(!candidates.some((c) => c.dedupeKey === "risky-order:prisk-2"), "1/1 thất bại chưa đủ 5 đơn — không cảnh báo");
+    assert.ok(!candidates.some((c) => c.dedupeKey === "risky-order:prisk-3"), "đơn đã giao không nằm trong tập xét (chỉ đơn chưa gửi ĐVVC)");
+  } finally {
+    await db.delete(schema.orders).where(inArray(schema.orders.id, ["prisk-1", "prisk-2", "prisk-3"]));
+    clearPhoneReputationCache();
+  }
+  console.log("✓ Cảnh báo 'Đơn rủi ro' nhận lý do Pancake: một đơn một việc · mẫu nhỏ không bật · chỉ đơn chưa gửi ĐVVC");
 }

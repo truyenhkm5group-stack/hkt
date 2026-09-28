@@ -34,6 +34,12 @@ export type AlertConfig = {
    */
   phoneRiskReturnRatePct: number;
   phoneRiskWarningCount: number;
+  /**
+   * Điều kiện TỶ LỆ HOÀN chỉ xét khi SĐT đã có ít nhất N đơn kết thúc trên Pancake: 1/1 thất bại là
+   * "100%" nhưng không nói gì. Không áp cho số lần bị báo. Mặc định 5 (28/09/2026, chủ shop giao
+   * "phương án tốt nhất"); sửa ở trang Cảnh báo.
+   */
+  phoneRiskMinOrders: number;
   /** Đơn đã lên nhưng chưa xác nhận / chưa giao ĐVVC quá N giờ → cảnh báo "chờ xử lý" */
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
@@ -64,6 +70,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   riskReturnRatePct: 40,
   phoneRiskReturnRatePct: 40,
   phoneRiskWarningCount: 10,
+  phoneRiskMinOrders: 5,
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,

@@ -24,7 +24,9 @@ import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL } from "@/lib/constants/alerts";
 import { maskAccountNumber } from "@/lib/constants/bank";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
-import { riskyOrderCandidates } from "@/lib/alerts/risk";
+import { phoneRiskOrderRows, riskyOrderCandidates } from "@/lib/alerts/risk";
+import { normalizePhoneForPancake, phoneRiskReasons, phoneRiskText } from "@/lib/constants/phone-reputation";
+import { cachedPhoneReputations } from "@/lib/queries/phone-reputation";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
 import { detectMarketingDailyAlerts } from "@/lib/marketing/alerts";
 import { ADS_ANOMALY_LABEL } from "@/lib/constants/ads-anomaly";
@@ -478,12 +480,45 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     activeKinds.push("RISKY_ORDER");
     try {
       const risky = await riskyOrderCandidates({ riskMinReturned: cfg.riskMinReturned, riskReturnRatePct: cfg.riskReturnRatePct }, lookback);
+      /*
+        UY TÍN SĐT THEO PANCAKE (toàn mạng) là MỘT LÝ DO NỮA của cùng cảnh báo này, không phải một loại
+        việc riêng: cùng một việc phải làm (gọi xác nhận / xin cọc), cùng phòng, cùng khoá chống trùng
+        theo đơn — một đơn trúng cả hai nguồn vẫn chỉ là MỘT việc. Chỉ ĐỌC ĐỆM (job `phone-reputation`
+        làm ấm), nên lượt quét cảnh báo không bao giờ chờ Pancake.
+      */
+      const phoneRisk = new Map<string, string>();
+      try {
+        const rows = await phoneRiskOrderRows(lookback);
+        const reps = await cachedPhoneReputations(rows.map((r) => r.phone || r.shipPhone));
+        const t = { phoneRiskReturnRatePct: cfg.phoneRiskReturnRatePct, phoneRiskWarningCount: cfg.phoneRiskWarningCount, phoneRiskMinOrders: cfg.phoneRiskMinOrders };
+        for (const r of rows) {
+          const phone = normalizePhoneForPancake(r.phone || r.shipPhone);
+          const rep = phone ? reps.get(phone) : undefined;
+          const ly = phoneRiskReasons(rep, t);
+          if (rep && ly.length) phoneRisk.set(r.id, phoneRiskText(rep, ly));
+          if (rep && ly.length && !risky.some((x) => x.order.id === r.id)) {
+            candidates.push({
+              kind: "RISKY_ORDER",
+              severity: ly.length > 1 ? "critical" : "warning",
+              title: `Đơn #${r.systemId ?? ""} · ${r.name || "Khách"}${r.phone ? ` · ${r.phone}` : ""} · khách rủi ro`,
+              body: `${phoneRiskText(rep, ly)} · giá trị ${formatVND(r.total ?? 0)} → xin cọc / xác nhận kỹ trước khi gửi ĐVVC`,
+              href: `/orders/${r.id}`,
+              entityType: "ORDER",
+              entityId: r.id,
+              dedupeKey: `risky-order:${r.id}`,
+              occurredAt: r.insertedAt,
+            });
+          }
+        }
+      } catch {
+        // chưa có đệm uy tín SĐT — cảnh báo theo lịch sử ERP / shop vẫn chạy như cũ
+      }
       for (const { order, risk } of risky) {
         candidates.push({
           kind: "RISKY_ORDER",
           severity: risk.severity,
           title: `Đơn #${order.systemId ?? ""} · ${order.name || "Khách"}${order.phone ? ` · ${order.phone}` : ""} · khách rủi ro`,
-          body: `GTC ${risk.succeed} · hoàn ${risk.returned}${risk.rate ? ` (${Math.round(risk.rate * 100)}%)` : ""} · ${risk.reasons.join(", ")} · giá trị ${formatVND(order.total ?? 0)} → xin cọc / xác nhận kỹ trước khi gửi ĐVVC`,
+          body: `GTC ${risk.succeed} · hoàn ${risk.returned}${risk.rate ? ` (${Math.round(risk.rate * 100)}%)` : ""} · ${risk.reasons.join(", ")}${phoneRisk.has(order.id) ? ` · ${phoneRisk.get(order.id)}` : ""} · giá trị ${formatVND(order.total ?? 0)} → xin cọc / xác nhận kỹ trước khi gửi ĐVVC`,
           href: `/orders/${order.id}`,
           entityType: "ORDER",
           entityId: order.id,

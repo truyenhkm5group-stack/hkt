@@ -46,7 +46,7 @@ export default async function ReservedOrdersPage({ searchParams }: { searchParam
     // Ngưỡng rủi ro uy tín SĐT — nguồn duy nhất là cấu hình cảnh báo. Không đọc được ⇒ không gắn cảnh báo.
     loadAlertConfig().catch(() => null),
   ]);
-  const thresholds = alertCfg ? { phoneRiskReturnRatePct: alertCfg.phoneRiskReturnRatePct, phoneRiskWarningCount: alertCfg.phoneRiskWarningCount } : null;
+  const thresholds = alertCfg ? { phoneRiskReturnRatePct: alertCfg.phoneRiskReturnRatePct, phoneRiskWarningCount: alertCfg.phoneRiskWarningCount, phoneRiskMinOrders: alertCfg.phoneRiskMinOrders } : null;
   if (!scope) {
     return (
       <div className="space-y-5">

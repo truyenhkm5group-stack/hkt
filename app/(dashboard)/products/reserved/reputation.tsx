@@ -4,7 +4,7 @@ import * as React from "react";
 import { TableCell } from "@/components/ui/table";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import { phoneRiskReasons, type PhoneReputation, type PhoneRiskReason, type PhoneRiskThresholds } from "@/lib/constants/phone-reputation";
+import { phoneRiskReasons, phoneRiskText, type PhoneReputation, type PhoneRiskReason, type PhoneRiskThresholds } from "@/lib/constants/phone-reputation";
 import { formatDate, formatNumber } from "@/lib/format";
 
 /**
@@ -118,7 +118,7 @@ export function PhoneRiskSummary({ labels }: { labels: Record<string, string> })
     <div role="alert" className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
       <div className="flex flex-wrap items-center gap-2 font-semibold">
         <AlertTriangle className="size-4" aria-hidden />
-        {formatNumber(rui.length)} đơn rủi ro cao theo Pancake — tỷ lệ hoàn trên {t.phoneRiskReturnRatePct}% hoặc SĐT bị báo trên {formatNumber(t.phoneRiskWarningCount)} lần
+        {formatNumber(rui.length)} đơn rủi ro cao theo Pancake — tỷ lệ hoàn trên {t.phoneRiskReturnRatePct}% (từ {formatNumber(t.phoneRiskMinOrders)} đơn) hoặc SĐT bị báo trên {formatNumber(t.phoneRiskWarningCount)} lần
         {dangHoi ? <span className="font-normal opacity-80">· còn {formatNumber(dangHoi)} đơn đang hỏi</span> : null}
       </div>
       <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
@@ -127,13 +127,11 @@ export function PhoneRiskSummary({ labels }: { labels: Record<string, string> })
             <Link href={`/orders/${x.id}`} className="font-semibold underline-offset-2 hover:underline">
               {labels[x.id]}
             </Link>{" "}
-            {x.ly
-              .map((l) => (l === "RETURN_RATE" ? `hoàn ${x.rep?.returnRatePct}% (${formatNumber(x.rep?.orderFail ?? 0)}/${formatNumber((x.rep?.orderFail ?? 0) + (x.rep?.orderSuccess ?? 0))} đơn)` : `bị báo ${formatNumber(x.rep?.warningCount ?? 0)} lần`))
-              .join(" · ")}
+            {x.rep ? phoneRiskText(x.rep, x.ly) : null}
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-[11px] opacity-80">Ngưỡng sửa ở trang Cảnh báo. Đây là số của toàn mạng Pancake — nên gọi xác nhận hoặc xin cọc trước khi gửi.</p>
+      <p className="mt-1.5 text-[11px] opacity-80">Ngưỡng sửa ở trang Cảnh báo. Đơn vào kỳ cảnh báo còn được gửi thành cảnh báo “Đơn rủi ro · xin cọc” (Lark) — đây là số của toàn mạng Pancake, nên gọi xác nhận hoặc xin cọc trước khi gửi.</p>
     </div>
   );
 }
