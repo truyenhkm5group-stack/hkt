@@ -264,6 +264,7 @@ import { testVideoScaleAdsDb, testVideoScaleAdsPure } from "./video-scale-ads.te
 import { testVideoScaleOptimizeDb, testVideoScaleOptimizePure } from "./video-scale-optimize.test";
 import { testVideoScaleOmniDb, testVideoScaleOmniFlow, testVideoScaleOmniPure } from "./video-scale-omni.test";
 import { testVideoScaleProgressDb, testVideoScaleProgressPure } from "./video-scale-progress.test";
+import { testVideoScaleEditDb, testVideoScaleEditPure } from "./video-scale-edit.test";
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
@@ -1847,6 +1848,8 @@ async function main() {
   await testVideoScaleOmniDb(db);
   testVideoScaleProgressPure();
   await testVideoScaleProgressDb(db);
+  testVideoScaleEditPure();
+  await testVideoScaleEditDb(db);
   testCreativeManualDesignPure();
   await testCreativeManualDesignDb(db);
   testCreativeImportPure();

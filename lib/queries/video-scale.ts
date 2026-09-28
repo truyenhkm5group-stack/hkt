@@ -3,7 +3,7 @@ import { schema, type Db } from "@/db";
 import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { MODEL_STATE_LABELS, isModelState } from "@/lib/constants/model-lifecycle";
-import type { VideoQcVerdict, VideoReviewMode, VideoScript } from "@/lib/constants/video-scale";
+import { effectiveRender, normalizeRenderOptions, normalizeVideoScaleConfig, type EffectiveRender, type VideoQcVerdict, type VideoReviewMode, type VideoScript } from "@/lib/constants/video-scale";
 import { unknownMetrics, variantMetrics, type VariantMetricsRow } from "@/lib/queries/creative-loop";
 
 /**
@@ -206,6 +206,11 @@ export type VariantCard = {
   caption: string;
   captionState: string;
   captionBy: string;
+  /** Tuỳ chọn dựng HIỆU LỰC (cấu hình lượt ⊕ tuỳ chọn riêng của video) — trình "Sửa video" mở từ đây. */
+  render: EffectiveRender;
+  renderRev: number;
+  /** Có quảng cáo từ video này chưa (có thì không sửa đè). */
+  hasAd: boolean;
   /** Bài Reel gần nhất của biến thể (nếu có). */
   post: { id: string; status: string; permalink: string; error: string; publishAt: Date | null; publishedAt: Date | null; auto: boolean } | null;
 };
@@ -239,9 +244,14 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
       caption: tVar.caption,
       captionState: tVar.captionState,
       captionBy: tVar.captionBy,
+      renderOptions: tVar.renderOptions,
+      renderRev: tVar.renderRev,
+      runSnap: tRun.configSnapshot,
+      runMusicId: tRun.musicId,
     })
     .from(tVar)
     .innerJoin(tProd, eq(tProd.id, tVar.productId))
+    .innerJoin(tRun, eq(tRun.id, tVar.runId))
     .leftJoin(tSrc, eq(tSrc.id, tVar.sourceId))
     .where(and(filter.statuses?.length ? inArray(tVar.status, filter.statuses) : undefined, filter.runId ? eq(tVar.runId, filter.runId) : undefined))
     .orderBy(desc(tVar.createdAt), asc(tVar.seq))
@@ -256,9 +266,12 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
     : [];
   const postBy = new Map<string, (typeof posts)[number]>();
   for (const p of posts) if (!postBy.has(p.variantId)) postBy.set(p.variantId, p);
-  return rows.map((r) => {
+  const adRows = rows.length ? await db.select({ variantId: schema.videoScaleAds.variantId }).from(schema.videoScaleAds).where(inArray(schema.videoScaleAds.variantId, rows.map((r) => r.id))) : [];
+  const withAd = new Set(adRows.map((a) => a.variantId));
+  return rows.map(({ runSnap, runMusicId, renderOptions, ...r }) => {
     const p = postBy.get(r.id);
-    return { ...r, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
+    const render = effectiveRender(normalizeVideoScaleConfig(runSnap), runMusicId, normalizeRenderOptions(renderOptions));
+    return { ...r, render, hasAd: withAd.has(r.id), script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
   });
 }
 

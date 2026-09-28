@@ -5,8 +5,14 @@ import {
   VIDEO_ANGLE_VOCAB_VERSION,
   VIDEO_PROMPT_VERSION,
   VIDEO_SCALE_CONFIG_KEY,
+  EDITABLE_VARIANT_STATUSES,
   VIDEO_SCALE_HARD_LIMITS,
   clipCostUsd,
+  effectiveRender,
+  normalizeRenderOptions,
+  renderJobKey,
+  type VideoRenderOptions,
+  type VideoScript,
   fakeProviderAllowed,
   normalizeVideoScaleConfig,
   type VideoJobKind,
@@ -28,6 +34,8 @@ import type { VideoProvider } from "@/lib/video-scale/providers/types";
 import { visualQc } from "@/lib/video-scale/qc";
 import { claimDueJobs, enqueueJob, failOrRetryJob, resetJob, cancelJobs, type VideoJobRow } from "@/lib/video-scale/queue";
 import { VEO_NEGATIVE_PROMPT, veoPrompt, writeScripts } from "@/lib/video-scale/script";
+import { loadProductFacts } from "@/lib/video-scale/facts";
+import { scriptProblems } from "@/lib/video-scale/script";
 import { purgeAsset } from "@/lib/video-scale/storage";
 import { synthesizeSpeech } from "@/lib/video-scale/tts";
 
@@ -270,7 +278,7 @@ export async function advanceVariant(db: Db, variantId: string): Promise<void> {
     if (production.length > 0 && clipsDone === scenes && production.every((x) => x.status === "SUCCEEDED")) {
       const [run] = await db.select({ isTest: R.isTest, createdByUserId: R.createdByUserId }).from(R).where(eq(R.id, v.runId)).limit(1);
       await db.update(V).set({ status: "RENDERING" }).where(and(eq(V.id, variantId), eq(V.status, v.status)));
-      await enqueueJob(db, { kind: "RENDER", key: `render:${variantId}`, runId: v.runId, variantId, isTest: run?.isTest ?? v.isTest, createdByUserId: run?.createdByUserId ?? null });
+      await enqueueJob(db, { kind: "RENDER", key: renderJobKey(variantId, v.renderRev), runId: v.runId, variantId, isTest: run?.isTest ?? v.isTest, createdByUserId: run?.createdByUserId ?? null });
     } else if (v.status === "SCRIPTED" && production.some((x) => x.attempts > 0 || x.providerRef)) {
       await db.update(V).set({ status: "GENERATING" }).where(and(eq(V.id, variantId), eq(V.status, "SCRIPTED")));
     }
@@ -383,6 +391,88 @@ export async function switchSceneToPhoto(db: Db, jobId: string, now = new Date()
   if (job.variantId) await db.update(V).set({ status: "GENERATING", error: "" }).where(and(eq(V.id, job.variantId), eq(V.status, "FAILED")));
   if (job.runId) await refreshRunStatus(db, job.runId);
   return { ok: true };
+}
+
+export type VideoEdit = { hook: string; cta: string; scenes: { overlay: string; voiceover: string }[]; options: VideoRenderOptions };
+
+/**
+ * SỬA VIDEO = DỰNG LẠI từ clip ĐÃ CÓ với chữ / lời đọc / nhạc / phụ đề mới — không tạo clip AI nào. Chữ mới đi qua CÙNG bộ kiểm
+ * khẳng định với kịch bản (giá ERP, size / màu đang bán, không chất liệu, không khuyến mãi ngoài câu chính sách). Chỉ tạo giọng
+ * đọc mới cho cảnh có lời / giọng ĐỔI. Video đã lên (hoặc đang lên) Reel hay đã thành quảng cáo thì KHÔNG sửa đè — bản đã đăng
+ * phải khớp bản ERP giữ. Sửa xong video quay lại "Chờ duyệt": bản đã duyệt không tự đi tiếp khi nội dung đã đổi.
+ */
+export async function rerenderVideoVariant(db: Db, variantId: string, edit: VideoEdit, actor: Actor): Promise<{ ok: true; tts: number } | { ok: false; error: string }> {
+  const [v] = await db.select().from(V).where(eq(V.id, variantId)).limit(1);
+  if (!v) return { ok: false, error: "Không tìm thấy video." };
+  if (!(EDITABLE_VARIANT_STATUSES as readonly string[]).includes(v.status)) return { ok: false, error: "Chỉ sửa được video đã dựng xong (chờ duyệt / đã duyệt / đã loại)." };
+  if (v.isTest) return { ok: false, error: "Video DỮ LIỆU THỬ không sửa được." };
+  const P = schema.videoScalePosts;
+  const [post] = await db.select({ status: P.status }).from(P).where(and(eq(P.variantId, variantId), inArray(P.status, ["QUEUED", "UPLOADING", "PROCESSING", "SCHEDULED", "PUBLISHED"]))).limit(1);
+  if (post) return { ok: false, error: "Video đã lên (hoặc đang lên) Reel — không sửa đè bản đã đăng. Huỷ bài đang chờ, hoặc tạo video mới." };
+  const [ad] = await db.select({ id: schema.videoScaleAds.id }).from(schema.videoScaleAds).where(eq(schema.videoScaleAds.variantId, variantId)).limit(1);
+  if (ad) return { ok: false, error: "Video đã thành quảng cáo — không sửa đè." };
+  const [busy] = await db.select({ id: J.id }).from(J).where(and(eq(J.variantId, variantId), inArray(J.status, ["QUEUED", "RUNNING", "WAITING"]))).limit(1);
+  if (busy) return { ok: false, error: "Video còn việc đang chạy — đợi xong rồi sửa." };
+  const [run] = await db.select().from(R).where(eq(R.id, v.runId)).limit(1);
+  if (!run) return { ok: false, error: "Không tìm thấy lượt." };
+  const old = scriptOf(v.script);
+  if (edit.scenes.length !== old.scenes.length) return { ok: false, error: `Video có ${old.scenes.length} cảnh — gửi đủ chữ cho từng cảnh.` };
+  const next: VideoScript = {
+    ...old,
+    hook: edit.hook.trim(),
+    cta: edit.cta.trim(),
+    scenes: old.scenes.map((c, i) => ({ ...c, overlay: edit.scenes[i].overlay.trim(), voiceover: edit.scenes[i].voiceover.trim() })),
+  };
+  const snap = normalizeVideoScaleConfig(run.configSnapshot);
+  const facts = await loadProductFacts(db, v.productId, v.sourceId, snap.policyLines);
+  if (!facts) return { ok: false, error: "Không đọc được dữ liệu sản phẩm để kiểm chữ." };
+  const problems = scriptProblems(next, { angle: next.angle, scenes: old.scenes.length }, facts);
+  if (problems.length) return { ok: false, error: `Chữ chưa qua kiểm: ${problems.slice(0, 4).join("; ")}.` };
+  const opts = normalizeRenderOptions(edit.options);
+  if (typeof opts.musicId === "string") {
+    const [m] = await db.select({ id: schema.videoScaleMusic.id }).from(schema.videoScaleMusic).where(and(eq(schema.videoScaleMusic.id, opts.musicId), eq(schema.videoScaleMusic.active, true))).limit(1);
+    if (!m) return { ok: false, error: "Bản nhạc đã chọn không còn trong thư viện nhạc có quyền." };
+  }
+  const eff = effectiveRender(snap, run.musicId, opts);
+  if (eff.voiceover && !next.scenes.some((c) => c.voiceover)) return { ok: false, error: "Bật giọng đọc thì cần lời đọc ở ít nhất một cảnh." };
+
+  // Cảnh nào cần giọng đọc MỚI: bật giọng, có lời, và chưa có tệp đọc đúng lời + đúng giọng này.
+  const tts = await db.select({ sceneIndex: J.sceneIndex, request: J.request }).from(J).where(and(eq(J.variantId, variantId), eq(J.kind, "TTS"), eq(J.status, "SUCCEEDED")));
+  const has = (i: number, text: string, voice: string) =>
+    tts.some((t) => {
+      if ((t.sceneIndex ?? 0) !== i) return false;
+      const r = (t.request ?? {}) as { text?: unknown; voice?: unknown };
+      const tText = typeof r.text === "string" ? r.text : old.scenes[i]?.voiceover;
+      const tVoice = typeof r.voice === "string" ? r.voice : snap.voice;
+      return tText === text && tVoice === voice;
+    });
+  const needTts = eff.voiceover ? next.scenes.map((c, i) => ({ i, text: c.voiceover })).filter((x) => x.text && !has(x.i, x.text, eff.voice)) : [];
+  const rev = v.renderRev + 1;
+  await db.transaction(async (tx) => {
+    await tx
+      .update(V)
+      .set({
+        script: next as unknown as Record<string, unknown>,
+        renderOptions: opts as Record<string, unknown>,
+        renderRev: rev,
+        status: needTts.length ? "GENERATING" : "RENDERING",
+        qcVerdict: null,
+        qc: {},
+        qcAt: null,
+        reviewedAt: null,
+        reviewedBy: "",
+        reviewedByUserId: null,
+        reviewNote: "",
+        autoApproved: false,
+        error: "",
+      })
+      .where(eq(V.id, variantId));
+    const t = tx as unknown as Db;
+    for (const x of needTts) await enqueueJob(t, { kind: "TTS", key: `tts:${variantId}:${x.i}:r${rev}`, runId: v.runId, variantId, sceneIndex: x.i, isTest: false, request: { text: x.text, voice: eff.voice }, createdByUserId: actor.id });
+    if (!needTts.length) await enqueueJob(t, { kind: "RENDER", key: renderJobKey(variantId, rev), runId: v.runId, variantId, isTest: false, createdByUserId: actor.id });
+  });
+  await refreshRunStatus(db, v.runId);
+  return { ok: true, tts: needTts.length };
 }
 
 export async function cancelVideoRun(db: Db, runId: string, now = new Date()): Promise<Result> {

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ReviewActions } from "./review-actions";
 import { RemakeVariantButton } from "./small-actions";
 import { ContentEditor } from "./content-editor";
+import { VideoEditor } from "./video-editor";
 import { captionOptionsOf } from "@/lib/video-scale/publish";
 import { VIDEO_POST_STATUS_LABEL, type VideoPostStatus } from "@/lib/constants/video-scale";
 import { formatDateTime } from "@/lib/format";
@@ -39,7 +40,7 @@ function QcBlock({ v }: { v: VariantCard }) {
   );
 }
 
-function VariantBlock({ v, canEdit, canSpend, pageLabel }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null }) {
+function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null; music: { id: string; title: string }[] }) {
   return (
     <article className="space-y-3 rounded-lg border p-3">
       <header className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -105,6 +106,9 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel }: { v: VariantCard; can
         </p>
       ) : null}
       {canEdit && v.status === "REVIEW" ? <ReviewActions variantId={v.id} /> : null}
+      {canEdit && !v.isTest && !v.hasAd && (!v.post || ["FAILED", "CANCELLED"].includes(v.post.status)) && ["REVIEW", "APPROVED", "REJECTED", "QC_FAILED"].includes(v.status) ? (
+        <VideoEditor variantId={v.id} script={v.script} render={v.render} music={music} approved={v.status === "APPROVED"} />
+      ) : null}
       {v.post ? (
         <p className="text-[12.5px]">
           Reel: <b>{VIDEO_POST_STATUS_LABEL[v.post.status as VideoPostStatus] ?? v.post.status}</b>
@@ -126,16 +130,16 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel }: { v: VariantCard; can
 }
 
 /** Tab "Duyệt video": chờ duyệt ở trên, đã quyết gần đây ở dưới. */
-export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend }: { review: VariantCard[]; decided: VariantCard[]; pageOf: Record<string, string | null>; canEdit: boolean; canSpend: boolean }) {
+export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend, music }: { review: VariantCard[]; decided: VariantCard[]; pageOf: Record<string, string | null>; canEdit: boolean; canSpend: boolean; music: { id: string; title: string }[] }) {
   return (
     <div className="space-y-6">
       <section className="space-y-3">
         <h2 className="text-[14px] font-semibold">Chờ duyệt ({review.length})</h2>
-        {review.length === 0 ? <p className="text-[13px] text-muted-foreground">Không có video chờ duyệt.</p> : <div className="grid gap-3 lg:grid-cols-2">{review.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} />)}</div>}
+        {review.length === 0 ? <p className="text-[13px] text-muted-foreground">Không có video chờ duyệt.</p> : <div className="grid gap-3 lg:grid-cols-2">{review.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} music={music} />)}</div>}
       </section>
       <section className="space-y-3">
         <h2 className="text-[14px] font-semibold">Đã quyết gần đây</h2>
-        {decided.length === 0 ? <p className="text-[13px] text-muted-foreground">Chưa có.</p> : <div className="grid gap-3 lg:grid-cols-2">{decided.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} />)}</div>}
+        {decided.length === 0 ? <p className="text-[13px] text-muted-foreground">Chưa có.</p> : <div className="grid gap-3 lg:grid-cols-2">{decided.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} music={music} />)}</div>}
       </section>
     </div>
   );

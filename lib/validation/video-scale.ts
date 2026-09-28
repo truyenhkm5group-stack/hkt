@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CAPTION_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, SELECTABLE_VIDEO_PROVIDERS, TTS_VOICES, VIDEO_ANGLES, VIDEO_MODELS, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
+import { CAPTION_LIMITS, SCRIPT_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, SELECTABLE_VIDEO_PROVIDERS, TTS_VOICES, VIDEO_ANGLES, VIDEO_MODELS, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
 const id = z.string().trim().min(1).max(80);
 
@@ -87,3 +87,23 @@ export const videoAdIdSchema = z.object({ adId: id });
 export const videoAdCreateSchema = z.object({ adId: id, activate: z.boolean() });
 export const videoAdPauseSchema = z.object({ adId: id, reason: z.string().trim().min(3, "Ghi lý do tắt").max(300) });
 export const videoAdBudgetSchema = z.object({ adId: id, budgetVnd: z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd) });
+
+/** Sửa video = dựng lại từ clip đã có. Giới hạn độ dài lấy từ CÙNG `SCRIPT_LIMITS` của kịch bản. */
+export const videoEditSchema = z.object({
+  variantId: id,
+  hook: z.string().max(SCRIPT_LIMITS.hookMaxChars),
+  cta: z.string().max(SCRIPT_LIMITS.ctaMaxChars),
+  scenes: z
+    .array(z.object({ overlay: z.string().max(SCRIPT_LIMITS.overlayMaxChars), voiceover: z.string().max(SCRIPT_LIMITS.voiceoverMaxCharsPerScene) }))
+    .min(1)
+    .max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant),
+  options: z.object({
+    musicId: z.union([z.null(), z.string().max(64)]).optional(),
+    musicVolume: z.number().min(0.01).max(0.5).optional(),
+    voiceover: z.boolean().optional(),
+    voice: z.enum(TTS_VOICES).optional(),
+    burnSubtitles: z.boolean().optional(),
+    keepNativeAudio: z.boolean().optional(),
+    showText: z.boolean().optional(),
+  }),
+});

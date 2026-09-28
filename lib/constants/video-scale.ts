@@ -882,3 +882,59 @@ export function humanProviderError(msg: string): string {
   if (!isContentBlock(msg) || msg.startsWith("Google CHẶN")) return msg.slice(0, 1000);
   return `Google CHẶN cảnh này theo chính sách nội dung (thường do câu lệnh nhắc tới cơ thể / người mẫu). Thử lại y nguyên sẽ bị chặn tiếp — bấm "Dùng ảnh động (miễn phí)" cho cảnh này, hoặc "Làm lại" cả video. Câu gốc: ${msg}`.slice(0, 1000);
 }
+
+// ───────────────────────────── SỬA VIDEO (DỰNG LẠI TỪ CLIP ĐÃ CÓ) ─────────────────────────────
+
+/**
+ * Tuỳ chọn dựng RIÊNG của một video — ghi đè cấu hình của lượt khi dựng lại. Trường vắng = theo lượt. `musicId = null` =
+ * KHÔNG nhạc (khác vắng = nhạc của lượt). Chỉ dựng lại từ clip ĐÃ CÓ: không tạo clip AI mới.
+ */
+export type VideoRenderOptions = {
+  musicId?: string | null;
+  musicVolume?: number;
+  voiceover?: boolean;
+  voice?: string;
+  burnSubtitles?: boolean;
+  keepNativeAudio?: boolean;
+  /** Chữ trên hình (móc câu · chữ từng cảnh · CTA). Tắt ⇒ chỉ còn phụ đề (nếu bật). */
+  showText?: boolean;
+};
+
+export const MUSIC_VOLUME_DEFAULT = 0.18;
+export const MUSIC_VOLUMES = [0.08, 0.12, 0.18, 0.25, 0.35] as const;
+
+/** Đọc tuỳ chọn dựng từ jsonb — giá trị lạ bị BỎ (không đoán). Hàm THUẦN. */
+export function normalizeRenderOptions(raw: unknown): VideoRenderOptions {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: VideoRenderOptions = {};
+  if (r.musicId === null) out.musicId = null;
+  else if (typeof r.musicId === "string" && r.musicId.trim()) out.musicId = r.musicId.trim().slice(0, 64);
+  if (typeof r.musicVolume === "number" && r.musicVolume > 0 && r.musicVolume <= 0.5) out.musicVolume = Math.round(r.musicVolume * 100) / 100;
+  for (const k of ["voiceover", "burnSubtitles", "keepNativeAudio", "showText"] as const) if (typeof r[k] === "boolean") out[k] = r[k];
+  if (typeof r.voice === "string" && (TTS_VOICES as readonly string[]).includes(r.voice)) out.voice = r.voice;
+  return out;
+}
+
+export type EffectiveRender = { musicId: string | null; musicVolume: number; voiceover: boolean; voice: string; burnSubtitles: boolean; keepNativeAudio: boolean; showText: boolean };
+
+/** Tuỳ chọn dựng HIỆU LỰC = cấu hình lượt ⊕ tuỳ chọn riêng của video. Hàm THUẦN. */
+export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voice" | "burnSubtitles" | "keepNativeAudio">, runMusicId: string | null, opts: VideoRenderOptions): EffectiveRender {
+  return {
+    musicId: opts.musicId === undefined ? runMusicId : opts.musicId,
+    musicVolume: opts.musicVolume ?? MUSIC_VOLUME_DEFAULT,
+    voiceover: opts.voiceover ?? snap.voiceover,
+    voice: opts.voice ?? snap.voice,
+    burnSubtitles: opts.burnSubtitles ?? snap.burnSubtitles,
+    keepNativeAudio: opts.keepNativeAudio ?? snap.keepNativeAudio,
+    showText: opts.showText ?? true,
+  };
+}
+
+/** Khoá việc dựng theo lần dựng lại — lần 0 giữ đúng khoá cũ (`render:<id>`) để việc đã có không bị xếp lại. Hàm THUẦN. */
+export function renderJobKey(variantId: string, rev: number): string {
+  return rev > 0 ? `render:${variantId}:r${rev}` : `render:${variantId}`;
+}
+
+/** Video ở trạng thái này thì sửa được (đã có bản hoàn chỉnh, không đang sản xuất). */
+export const EDITABLE_VARIANT_STATUSES = ["REVIEW", "APPROVED", "REJECTED", "QC_FAILED"] as const;
+
