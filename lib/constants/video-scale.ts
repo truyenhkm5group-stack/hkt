@@ -898,7 +898,118 @@ export type VideoRenderOptions = {
   keepNativeAudio?: boolean;
   /** Chữ trên hình (móc câu · chữ từng cảnh · CTA). Tắt ⇒ chỉ còn phụ đề (nếu bật). */
   showText?: boolean;
+  /** Kiểu chữ trên hình (móc câu + chữ cảnh; CTA luôn ở giữa khung). */
+  text?: TextStyleOptions;
+  /** Kiểu phụ đề. */
+  sub?: TextStyleOptions;
+  transition?: VideoTransition;
+  filter?: VideoColorFilter;
+  /** Thứ tự cảnh (chỉ số cảnh gốc, không trùng, ≥ 1 cảnh) — bỏ một chỉ số = bỏ cảnh đó khỏi video. Vắng = thứ tự gốc. */
+  sceneOrder?: number[];
+  /** Tệp giọng đọc TỰ THU (tài sản VOICE của chính video) — có thì thay giọng đọc AI từng cảnh. `null` = không. */
+  voiceAssetId?: string | null;
 };
+
+// ───────────────────────────── KIỂU CHỮ · CHUYỂN CẢNH · BỘ LỌC ─────────────────────────────
+
+/** Font có sẵn trong image Docker (`font-dejavu`, đủ dấu tiếng Việt). Thiếu tệp ⇒ hậu kỳ dùng font mặc định. */
+export const VIDEO_FONTS = {
+  SANS_BOLD: { label: "Đậm (mặc định)", file: "DejaVuSans-Bold.ttf" },
+  SANS: { label: "Thường", file: "DejaVuSans.ttf" },
+  SERIF_BOLD: { label: "Có chân, đậm", file: "DejaVuSerif-Bold.ttf" },
+  CONDENSED_BOLD: { label: "Hẹp, đậm", file: "DejaVuSansCondensed-Bold.ttf" },
+} as const;
+export type VideoFont = keyof typeof VIDEO_FONTS;
+
+export const TEXT_COLORS = {
+  WHITE: { label: "Trắng", hex: "FFFFFF" },
+  YELLOW: { label: "Vàng", hex: "FFE14D" },
+  ORANGE: { label: "Cam", hex: "FF7A1A" },
+  PINK: { label: "Hồng", hex: "FF6FA8" },
+  RED: { label: "Đỏ", hex: "E53935" },
+  MINT: { label: "Xanh bạc hà", hex: "7CF5C8" },
+  BLACK: { label: "Đen", hex: "111111" },
+} as const;
+export type TextColor = keyof typeof TEXT_COLORS;
+
+/** Nền sau chữ. `NONE` = chỉ viền chữ (đọc được nhờ viền tương phản). */
+export const TEXT_BOXES = {
+  NONE: { label: "Không nền (viền chữ)", color: null },
+  DARK: { label: "Nền tối", color: "black@0.55" },
+  LIGHT: { label: "Nền sáng", color: "white@0.78" },
+  BRAND: { label: "Nền cam thương hiệu", color: "0xE8541E@0.88" },
+} as const;
+export type TextBox = keyof typeof TEXT_BOXES;
+
+export const TEXT_SIZES = { S: { label: "Nhỏ", k: 0.85 }, M: { label: "Vừa", k: 1 }, L: { label: "Lớn", k: 1.2 } } as const;
+export type TextSize = keyof typeof TEXT_SIZES;
+
+export type TextStyleOptions = { font?: VideoFont; size?: TextSize; color?: TextColor; box?: TextBox; y?: number };
+export type TextStyle = Required<TextStyleOptions>;
+
+/** Mặc định: chữ trên hình ở ≈ 60% chiều cao (không đè mặt người mẫu), phụ đề ở 82%. */
+export const DEFAULT_TEXT_STYLE: TextStyle = { font: "SANS_BOLD", size: "M", color: "WHITE", box: "DARK", y: 0.6 };
+export const DEFAULT_SUB_STYLE: TextStyle = { font: "SANS_BOLD", size: "M", color: "WHITE", box: "NONE", y: 0.82 };
+/** Vị trí dọc cho phép (phần trăm chiều cao, tính ở MÉP TRÊN khối chữ) — quá gần mép dưới thì dòng thứ hai rơi ra ngoài. */
+export const TEXT_Y_MIN = 0.05;
+export const TEXT_Y_MAX = 0.86;
+
+/** Chuyển cảnh = bộ lọc `xfade` của ffmpeg (≥ 4.3), dài 0,4 giây, âm thanh đan chéo cùng lúc. */
+export const VIDEO_TRANSITIONS = {
+  NONE: { label: "Cắt thẳng", xfade: null },
+  FADE: { label: "Mờ dần", xfade: "fade" },
+  DISSOLVE: { label: "Hoà tan", xfade: "dissolve" },
+  SLIDE: { label: "Trượt ngang", xfade: "slideleft" },
+  WIPE: { label: "Quét", xfade: "wipeleft" },
+  ZOOM: { label: "Phóng to", xfade: "zoomin" },
+  CIRCLE: { label: "Mở vòng tròn", xfade: "circleopen" },
+} as const;
+export type VideoTransition = keyof typeof VIDEO_TRANSITIONS;
+export const TRANSITION_SECONDS = 0.4;
+
+/** Bộ lọc màu cả video (chuỗi bộ lọc ffmpeg viết TẠI ĐÂY — không nhận chuỗi của người). `css` chỉ để XEM TRƯỚC gần đúng trên trình duyệt. */
+export const VIDEO_COLOR_FILTERS = {
+  NONE: { label: "Không", ff: "", css: "none" },
+  BRIGHT: { label: "Tươi sáng", ff: "eq=brightness=0.04:saturation=1.12", css: "brightness(1.08) saturate(1.12)" },
+  WARM: { label: "Ấm áp", ff: "colorbalance=rs=0.08:gs=0.02:bs=-0.08", css: "sepia(0.2) saturate(1.1)" },
+  COOL: { label: "Mát lạnh", ff: "colorbalance=rs=-0.06:gs=0:bs=0.08", css: "hue-rotate(-10deg) saturate(0.92) brightness(1.03)" },
+  BW: { label: "Đen trắng", ff: "hue=s=0", css: "grayscale(1)" },
+  CINEMA: { label: "Điện ảnh", ff: "eq=contrast=1.12:saturation=0.88,colorbalance=rs=0.03:bs=0.05", css: "contrast(1.12) saturate(0.88)" },
+  VIVID: { label: "Rực rỡ", ff: "eq=saturation=1.35:contrast=1.05", css: "saturate(1.35) contrast(1.05)" },
+} as const;
+export type VideoColorFilter = keyof typeof VIDEO_COLOR_FILTERS;
+
+function pickKey<T extends Record<string, unknown>>(table: T, v: unknown): keyof T | undefined {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(table, v) ? (v as keyof T) : undefined;
+}
+
+/** Đọc kiểu chữ từ nguồn không tin được — khoá lạ bị BỎ, vị trí kẹp vào khoảng cho phép. Hàm THUẦN. */
+export function normalizeTextStyle(raw: unknown): TextStyleOptions | undefined {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+  if (!r) return undefined;
+  const out: TextStyleOptions = {};
+  const font = pickKey(VIDEO_FONTS, r.font);
+  if (font) out.font = font;
+  const size = pickKey(TEXT_SIZES, r.size);
+  if (size) out.size = size;
+  const color = pickKey(TEXT_COLORS, r.color);
+  if (color) out.color = color;
+  const box = pickKey(TEXT_BOXES, r.box);
+  if (box) out.box = box;
+  if (typeof r.y === "number" && Number.isFinite(r.y)) out.y = Math.round(Math.min(TEXT_Y_MAX, Math.max(TEXT_Y_MIN, r.y)) * 100) / 100;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Thứ tự cảnh hợp lệ cho `scenes` cảnh: chỉ số nguyên trong khoảng, không trùng, ≥ 1. Lạ ⇒ `undefined` (thứ tự gốc). Hàm THUẦN. */
+export function normalizeSceneOrder(raw: unknown, scenes?: number): number[] | undefined {
+  if (!Array.isArray(raw) || !raw.length) return undefined;
+  const out: number[] = [];
+  for (const x of raw) {
+    if (typeof x !== "number" || !Number.isInteger(x) || x < 0 || (scenes !== undefined && x >= scenes) || out.includes(x)) return undefined;
+    out.push(x);
+  }
+  return out;
+}
 
 export const MUSIC_VOLUME_DEFAULT = 0.18;
 export const MUSIC_VOLUMES = [0.08, 0.12, 0.18, 0.25, 0.35] as const;
@@ -912,10 +1023,36 @@ export function normalizeRenderOptions(raw: unknown): VideoRenderOptions {
   if (typeof r.musicVolume === "number" && r.musicVolume > 0 && r.musicVolume <= 0.5) out.musicVolume = Math.round(r.musicVolume * 100) / 100;
   for (const k of ["voiceover", "burnSubtitles", "keepNativeAudio", "showText"] as const) if (typeof r[k] === "boolean") out[k] = r[k];
   if (typeof r.voice === "string" && (TTS_VOICES as readonly string[]).includes(r.voice)) out.voice = r.voice;
+  const text = normalizeTextStyle(r.text);
+  if (text) out.text = text;
+  const subStyle = normalizeTextStyle(r.sub);
+  if (subStyle) out.sub = subStyle;
+  const tr = pickKey(VIDEO_TRANSITIONS, r.transition);
+  if (tr) out.transition = tr;
+  const fl = pickKey(VIDEO_COLOR_FILTERS, r.filter);
+  if (fl) out.filter = fl;
+  const order = normalizeSceneOrder(r.sceneOrder);
+  if (order) out.sceneOrder = order;
+  if (r.voiceAssetId === null) out.voiceAssetId = null;
+  else if (typeof r.voiceAssetId === "string" && /^[\w-]{8,64}$/.test(r.voiceAssetId)) out.voiceAssetId = r.voiceAssetId;
   return out;
 }
 
-export type EffectiveRender = { musicId: string | null; musicVolume: number; voiceover: boolean; voice: string; burnSubtitles: boolean; keepNativeAudio: boolean; showText: boolean };
+export type EffectiveRender = {
+  musicId: string | null;
+  musicVolume: number;
+  voiceover: boolean;
+  voice: string;
+  burnSubtitles: boolean;
+  keepNativeAudio: boolean;
+  showText: boolean;
+  text: TextStyle;
+  sub: TextStyle;
+  transition: VideoTransition;
+  filter: VideoColorFilter;
+  sceneOrder: number[] | null;
+  voiceAssetId: string | null;
+};
 
 /** Tuỳ chọn dựng HIỆU LỰC = cấu hình lượt ⊕ tuỳ chọn riêng của video. Hàm THUẦN. */
 export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voice" | "burnSubtitles" | "keepNativeAudio">, runMusicId: string | null, opts: VideoRenderOptions): EffectiveRender {
@@ -927,6 +1064,12 @@ export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voic
     burnSubtitles: opts.burnSubtitles ?? snap.burnSubtitles,
     keepNativeAudio: opts.keepNativeAudio ?? snap.keepNativeAudio,
     showText: opts.showText ?? true,
+    text: { ...DEFAULT_TEXT_STYLE, ...(opts.text ?? {}) },
+    sub: { ...DEFAULT_SUB_STYLE, ...(opts.sub ?? {}) },
+    transition: opts.transition ?? "NONE",
+    filter: opts.filter ?? "NONE",
+    sceneOrder: opts.sceneOrder ?? null,
+    voiceAssetId: opts.voiceAssetId ?? null,
   };
 }
 

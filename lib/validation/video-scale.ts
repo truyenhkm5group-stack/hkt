@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TEXT_BOXES, TEXT_COLORS, TEXT_SIZES, TEXT_Y_MAX, TEXT_Y_MIN, VIDEO_COLOR_FILTERS, VIDEO_FONTS, VIDEO_TRANSITIONS } from "@/lib/constants/video-scale";
 import { CAPTION_LIMITS, SCRIPT_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, SELECTABLE_VIDEO_PROVIDERS, TTS_VOICES, VIDEO_ANGLES, VIDEO_MODELS, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
 const id = z.string().trim().min(1).max(80);
@@ -89,6 +90,18 @@ export const videoAdPauseSchema = z.object({ adId: id, reason: z.string().trim()
 export const videoAdBudgetSchema = z.object({ adId: id, budgetVnd: z.coerce.number().int().min(VIDEO_ADS_HARD_LIMITS.minDailyBudgetVnd).max(VIDEO_ADS_HARD_LIMITS.maxDailyBudgetPerAdVnd) });
 
 /** Sửa video = dựng lại từ clip đã có. Giới hạn độ dài lấy từ CÙNG `SCRIPT_LIMITS` của kịch bản. */
+function keysOf<T extends Record<string, unknown>>(table: T) {
+  return z.enum(Object.keys(table) as [Extract<keyof T, string>, ...Extract<keyof T, string>[]]);
+}
+
+const textStyleSchema = z.object({
+  font: keysOf(VIDEO_FONTS).optional(),
+  size: keysOf(TEXT_SIZES).optional(),
+  color: keysOf(TEXT_COLORS).optional(),
+  box: keysOf(TEXT_BOXES).optional(),
+  y: z.number().min(TEXT_Y_MIN).max(TEXT_Y_MAX).optional(),
+});
+
 export const videoEditSchema = z.object({
   variantId: id,
   hook: z.string().max(SCRIPT_LIMITS.hookMaxChars),
@@ -105,7 +118,21 @@ export const videoEditSchema = z.object({
     burnSubtitles: z.boolean().optional(),
     keepNativeAudio: z.boolean().optional(),
     showText: z.boolean().optional(),
+    text: textStyleSchema.optional(),
+    sub: textStyleSchema.optional(),
+    transition: keysOf(VIDEO_TRANSITIONS).optional(),
+    filter: keysOf(VIDEO_COLOR_FILTERS).optional(),
+    sceneOrder: z.array(z.number().int().min(0).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant - 1)).min(1).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant).optional(),
+    voiceAssetId: z.union([z.null(), z.string().regex(/^[\w-]{8,64}$/)]).optional(),
   }),
+  replacePhotos: z.array(z.object({ scene: z.number().int().min(0), sourceId: id })).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant).default([]),
+});
+
+/** Giọng tự thu cho một video (base64 ≤ ~4 MB tệp). */
+export const videoVoiceUploadSchema = z.object({
+  variantId: id,
+  contentType: z.enum(["audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/x-m4a", "audio/webm", "audio/ogg"]),
+  base64: z.string().min(10).max(6_000_000),
 });
 /** Phong cách nhạc AI — khoá trong `MUSIC_MOODS` (lib/video-scale/music-gen.ts), tối đa 8 một lần. */
 export const videoMusicGenSchema = z.object({ moods: z.array(z.string().regex(/^[A-Z_]{3,30}$/)).min(1).max(8) });

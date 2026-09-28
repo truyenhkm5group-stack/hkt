@@ -10,6 +10,7 @@ import {
   clipCostUsd,
   effectiveRender,
   normalizeRenderOptions,
+  normalizeSceneOrder,
   renderJobKey,
   type VideoRenderOptions,
   type VideoScript,
@@ -36,7 +37,7 @@ import { claimDueJobs, enqueueJob, failOrRetryJob, resetJob, cancelJobs, type Vi
 import { VEO_NEGATIVE_PROMPT, veoPrompt, writeScripts } from "@/lib/video-scale/script";
 import { loadProductFacts } from "@/lib/video-scale/facts";
 import { scriptProblems } from "@/lib/video-scale/script";
-import { purgeAsset } from "@/lib/video-scale/storage";
+import { getAssetMeta, purgeAsset, storeAsset } from "@/lib/video-scale/storage";
 import { synthesizeSpeech } from "@/lib/video-scale/tts";
 
 /**
@@ -267,14 +268,15 @@ export async function drainVideoScale(db: Db, opts: { maxMs: number; deps?: Vide
 export async function advanceVariant(db: Db, variantId: string): Promise<void> {
   const [v] = await db.select().from(V).where(eq(V.id, variantId)).limit(1);
   if (!v) return;
-  const jobs = await db.select({ kind: J.kind, status: J.status, error: J.error, attempts: J.attempts, providerRef: J.providerRef }).from(J).where(eq(J.variantId, variantId));
+  const jobs = await db.select({ kind: J.kind, status: J.status, error: J.error, attempts: J.attempts, providerRef: J.providerRef, sceneIndex: J.sceneIndex }).from(J).where(eq(J.variantId, variantId));
   const failed = jobs.find((x) => x.status === "FAILED");
   if (["SCRIPTED", "GENERATING", "RENDERING", "QC"].includes(v.status) && failed) {
     await db.update(V).set({ status: "FAILED", error: `${failed.kind}: ${failed.error}`.slice(0, 1000) }).where(and(eq(V.id, variantId), eq(V.status, v.status)));
   } else if (v.status === "SCRIPTED" || v.status === "GENERATING") {
     const production = jobs.filter((x) => x.kind === "CLIP" || x.kind === "TTS");
     const scenes = scriptOf(v.script).scenes.length;
-    const clipsDone = jobs.filter((x) => x.kind === "CLIP" && x.status === "SUCCEEDED").length;
+    // Đếm CẢNH đã có clip, không đếm việc: "Đổi cảnh" ở trang sửa sinh thêm một việc clip cho CÙNG cảnh.
+    const clipsDone = new Set(jobs.filter((x) => x.kind === "CLIP" && x.status === "SUCCEEDED").map((x) => x.sceneIndex ?? 0)).size;
     if (production.length > 0 && clipsDone === scenes && production.every((x) => x.status === "SUCCEEDED")) {
       const [run] = await db.select({ isTest: R.isTest, createdByUserId: R.createdByUserId }).from(R).where(eq(R.id, v.runId)).limit(1);
       await db.update(V).set({ status: "RENDERING" }).where(and(eq(V.id, variantId), eq(V.status, v.status)));
@@ -393,7 +395,14 @@ export async function switchSceneToPhoto(db: Db, jobId: string, now = new Date()
   return { ok: true };
 }
 
-export type VideoEdit = { hook: string; cta: string; scenes: { overlay: string; voiceover: string }[]; options: VideoRenderOptions };
+export type VideoEdit = {
+  hook: string;
+  cta: string;
+  scenes: { overlay: string; voiceover: string }[];
+  options: VideoRenderOptions;
+  /** "Đổi cảnh": thay clip của cảnh bằng ẢNH ĐỘNG dựng từ một ảnh sản phẩm thật (miễn phí, không gọi AI). */
+  replacePhotos?: { scene: number; sourceId: string }[];
+};
 
 /**
  * SỬA VIDEO = DỰNG LẠI từ clip ĐÃ CÓ với chữ / lời đọc / nhạc / phụ đề mới — không tạo clip AI nào. Chữ mới đi qua CÙNG bộ kiểm
@@ -433,8 +442,21 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
     const [m] = await db.select({ id: schema.videoScaleMusic.id }).from(schema.videoScaleMusic).where(and(eq(schema.videoScaleMusic.id, opts.musicId), eq(schema.videoScaleMusic.active, true))).limit(1);
     if (!m) return { ok: false, error: "Bản nhạc đã chọn không còn trong thư viện nhạc có quyền." };
   }
+  if (opts.sceneOrder && !normalizeSceneOrder(opts.sceneOrder, old.scenes.length)) return { ok: false, error: `Thứ tự cảnh không hợp lệ — video có ${old.scenes.length} cảnh.` };
+  if (opts.voiceAssetId) {
+    const meta = await getAssetMeta(db, opts.voiceAssetId);
+    // Giọng tự thu phải thuộc CÙNG lượt (bản nhân dùng lại giọng của video gốc được) — không lấy tệp của lượt khác.
+    if (!meta || meta.kind !== "VOICE" || meta.runId !== v.runId) return { ok: false, error: "Tệp giọng tự thu không thuộc video này — tải lại." };
+  }
+  const replace = new Map<number, string>();
+  for (const x of edit.replacePhotos ?? []) {
+    if (!Number.isInteger(x.scene) || x.scene < 0 || x.scene >= old.scenes.length) return { ok: false, error: `Cảnh ${x.scene + 1} không có trong video.` };
+    const [src] = await db.select({ kind: schema.creativeSources.kind, productId: schema.creativeSources.productId, imageId: schema.creativeSources.imageId }).from(schema.creativeSources).where(eq(schema.creativeSources.id, x.sourceId)).limit(1);
+    if (!src || src.kind !== "PRODUCT_PHOTO" || src.productId !== v.productId || !src.imageId) return { ok: false, error: `Ảnh chọn cho cảnh ${x.scene + 1} không phải ảnh sản phẩm của mã này.` };
+    replace.set(x.scene, x.sourceId);
+  }
   const eff = effectiveRender(snap, run.musicId, opts);
-  if (eff.voiceover && !next.scenes.some((c) => c.voiceover)) return { ok: false, error: "Bật giọng đọc thì cần lời đọc ở ít nhất một cảnh." };
+  if (eff.voiceover && !eff.voiceAssetId && !next.scenes.some((c) => c.voiceover)) return { ok: false, error: "Bật giọng đọc thì cần lời đọc ở ít nhất một cảnh." };
 
   // Cảnh nào cần giọng đọc MỚI: bật giọng, có lời, và chưa có tệp đọc đúng lời + đúng giọng này.
   const tts = await db.select({ sceneIndex: J.sceneIndex, request: J.request }).from(J).where(and(eq(J.variantId, variantId), eq(J.kind, "TTS"), eq(J.status, "SUCCEEDED")));
@@ -446,7 +468,7 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
       const tVoice = typeof r.voice === "string" ? r.voice : snap.voice;
       return tText === text && tVoice === voice;
     });
-  const needTts = eff.voiceover ? next.scenes.map((c, i) => ({ i, text: c.voiceover })).filter((x) => x.text && !has(x.i, x.text, eff.voice)) : [];
+  const needTts = eff.voiceover && !eff.voiceAssetId ? next.scenes.map((c, i) => ({ i, text: c.voiceover })).filter((x) => x.text && !has(x.i, x.text, eff.voice)) : [];
   const rev = v.renderRev + 1;
   await db.transaction(async (tx) => {
     await tx
@@ -455,7 +477,7 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
         script: next as unknown as Record<string, unknown>,
         renderOptions: opts as Record<string, unknown>,
         renderRev: rev,
-        status: needTts.length ? "GENERATING" : "RENDERING",
+        status: needTts.length || replace.size ? "GENERATING" : "RENDERING",
         qcVerdict: null,
         qc: {},
         qcAt: null,
@@ -469,10 +491,29 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
       .where(eq(V.id, variantId));
     const t = tx as unknown as Db;
     for (const x of needTts) await enqueueJob(t, { kind: "TTS", key: `tts:${variantId}:${x.i}:r${rev}`, runId: v.runId, variantId, sceneIndex: x.i, isTest: false, request: { text: x.text, voice: eff.voice }, createdByUserId: actor.id });
-    if (!needTts.length) await enqueueJob(t, { kind: "RENDER", key: renderJobKey(variantId, rev), runId: v.runId, variantId, isTest: false, createdByUserId: actor.id });
+    // Cảnh ảnh động dựng bằng ffmpeg từ ảnh thật — 0 đồng; xong thì `advanceVariant` tự xếp lượt dựng (đủ cảnh + đủ giọng).
+    for (const [i, sourceId] of replace) await enqueueJob(t, { kind: "CLIP", key: `clip:${variantId}:${i}:r${rev}:photo`, runId: v.runId, variantId, sceneIndex: i, isTest: false, request: { mode: "PHOTO", sourceId }, createdByUserId: actor.id });
+    if (!needTts.length && !replace.size) await enqueueJob(t, { kind: "RENDER", key: renderJobKey(variantId, rev), runId: v.runId, variantId, isTest: false, createdByUserId: actor.id });
   });
   await refreshRunStatus(db, v.runId);
   return { ok: true, tts: needTts.length };
+}
+
+/** Trần tệp giọng tự thu: ~ 2 phút mp3 128 kbps — dư cho một Reel 15–30 giây. */
+export const VOICE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Tải GIỌNG TỰ THU (chủ shop / nhân viên đọc) cho một video. Chỉ LƯU tệp — chưa dựng: người chọn tệp ở trang sửa rồi bấm "Dựng lại"
+ * như mọi chỉnh sửa khác. Tệp gắn với video + lượt để lượt dựng kiểm được nó đúng chủ.
+ */
+export async function storeVideoVoice(db: Db, variantId: string, file: { bytes: Uint8Array; contentType: string }): Promise<{ ok: true; assetId: string } | { ok: false; error: string }> {
+  const [v] = await db.select({ runId: V.runId, isTest: V.isTest }).from(V).where(eq(V.id, variantId)).limit(1);
+  if (!v) return { ok: false, error: "Không tìm thấy video." };
+  if (v.isTest) return { ok: false, error: "Video DỮ LIỆU THỬ không sửa được." };
+  if (file.bytes.byteLength < 1024) return { ok: false, error: "Tệp âm thanh rỗng hoặc hỏng." };
+  if (file.bytes.byteLength > VOICE_UPLOAD_MAX_BYTES) return { ok: false, error: `Tệp giọng tối đa ${VOICE_UPLOAD_MAX_BYTES / 1024 / 1024} MB.` };
+  const a = await storeAsset(db, { kind: "VOICE", bytes: file.bytes, contentType: file.contentType, runId: v.runId, variantId, isTest: false });
+  return { ok: true, assetId: a.id };
 }
 
 /** Trần số video MỘT lượt kể cả bản nhân — nhân bản gần như miễn phí nhưng 30 bản na ná nhau là rác, không phải biến thể. */

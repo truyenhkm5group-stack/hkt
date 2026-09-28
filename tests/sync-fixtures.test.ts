@@ -267,6 +267,7 @@ import { testVideoScaleOptimizeDb, testVideoScaleOptimizePure } from "./video-sc
 import { testVideoScaleOmniDb, testVideoScaleOmniFlow, testVideoScaleOmniPure } from "./video-scale-omni.test";
 import { testVideoScaleProgressDb, testVideoScaleProgressPure } from "./video-scale-progress.test";
 import { testVideoScaleEditDb, testVideoScaleEditPure } from "./video-scale-edit.test";
+import { testVideoScaleEditorDb, testVideoScaleEditorPure } from "./video-scale-editor.test";
 import { testVideoScaleMusicDb, testVideoScaleMusicPure } from "./video-scale-music.test";
 import { testIdeaPresets } from "./idea-presets.test";
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
@@ -1862,6 +1863,8 @@ async function main() {
   await testVideoScaleProgressDb(db);
   testVideoScaleEditPure();
   await testVideoScaleEditDb(db);
+  testVideoScaleEditorPure();
+  await testVideoScaleEditorDb(db);
   testIdeaPresets();
   testVideoScaleMusicPure();
   await testVideoScaleMusicDb(db);

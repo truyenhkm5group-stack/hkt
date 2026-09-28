@@ -162,7 +162,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
           </details>
         </div>
       ) : tab === "duyet" ? (
-        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} music={(await listMusic(db)).filter((m) => m.active).map((m) => ({ id: m.id, title: m.title }))} />
+        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} music={(await listMusic(db)).filter((m) => m.active).map((m) => ({ id: m.id, title: m.title, assetId: m.assetId }))} />
       ) : tab === "quang-cao" ? (
         <AdsPanel ads={await listAds(db)} actions={await listAdActions(db)} activeVnd={await activeAdsDailyVnd(db)} globalCapVnd={cfg.adsGlobalDailyCapVnd} killRules={await killRuleCount(db)} templateAdId={await templateAdIdFor(db, cfg)} writeBlocked={adsWriteDisabledReason()} canSpend={canMoney} canPause={canEngage} />
       ) : tab === "bao-cao" ? (

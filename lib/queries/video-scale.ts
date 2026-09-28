@@ -211,6 +211,8 @@ export type VariantCard = {
   renderRev: number;
   /** Có quảng cáo từ video này chưa (có thì không sửa đè). */
   hasAd: boolean;
+  /** Clip MỚI NHẤT của từng cảnh (theo chỉ số cảnh gốc) — trình sửa xem trước và sắp cảnh bằng nó. `null` = chưa có / đã xoá. */
+  sceneClips: (string | null)[];
   /** Bài Reel gần nhất của biến thể (nếu có). */
   post: { id: string; status: string; permalink: string; error: string; publishAt: Date | null; publishedAt: Date | null; auto: boolean } | null;
 };
@@ -268,10 +270,26 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
   for (const p of posts) if (!postBy.has(p.variantId)) postBy.set(p.variantId, p);
   const adRows = rows.length ? await db.select({ variantId: schema.videoScaleAds.variantId }).from(schema.videoScaleAds).where(inArray(schema.videoScaleAds.variantId, rows.map((r) => r.id))) : [];
   const withAd = new Set(adRows.map((a) => a.variantId));
+  const clipRows = rows.length
+    ? await db
+        .select({ variantId: tJob.variantId, sceneIndex: tJob.sceneIndex, assetId: tJob.outputAssetId })
+        .from(tJob)
+        .where(and(inArray(tJob.variantId, rows.map((r) => r.id)), eq(tJob.kind, "CLIP"), eq(tJob.status, "SUCCEEDED")))
+        .orderBy(asc(tJob.createdAt))
+    : [];
+  const clipsOf = new Map<string, Map<number, string | null>>();
+  for (const c of clipRows) {
+    if (!c.variantId) continue;
+    const m = clipsOf.get(c.variantId) ?? new Map<number, string | null>();
+    m.set(c.sceneIndex ?? 0, c.assetId);
+    clipsOf.set(c.variantId, m);
+  }
   return rows.map(({ runSnap, runMusicId, renderOptions, ...r }) => {
     const p = postBy.get(r.id);
     const render = effectiveRender(normalizeVideoScaleConfig(runSnap), runMusicId, normalizeRenderOptions(renderOptions));
-    return { ...r, render, hasAd: withAd.has(r.id), script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
+    const script = r.script as unknown as VideoScript;
+    const sceneClips = (script.scenes ?? []).map((_, i) => clipsOf.get(r.id)?.get(i) ?? null);
+    return { ...r, render, hasAd: withAd.has(r.id), sceneClips, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
   });
 }
 

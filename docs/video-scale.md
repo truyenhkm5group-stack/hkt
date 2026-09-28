@@ -379,3 +379,28 @@ dùng thương mại; có dấu SynthID. **0,04 USD / bản**, trần 20 bản /
 - **Nguồn nhạc miễn phí** (ô tải nhạc): Pixabay Music · Mixkit · Facebook Sound Collection — người tải về rồi tải lên; "điền quyền"
   ghi sẵn điều khoản. Không kho nào có API cho máy tải tự động (tải ngoài API là trái điều khoản).
 
+
+## 20. Trình sửa video chuyên sâu (28/09/2026)
+
+Tab Duyệt video → **Sửa video** mở hộp thoại lớn: khung xem trước 9:16 (clip thật của cảnh đang chọn, chữ / phụ đề / màu GẦN
+ĐÚNG — bấm vào khung để đặt vị trí) + 4 thẻ. Mọi chỉnh sửa vẫn là DỰNG LẠI từ clip đã có, chữ vẫn qua bộ kiểm khẳng định, video
+vẫn quay lại chờ duyệt (mục 17).
+
+| Thẻ | Làm được | Tiền |
+|---|---|---|
+| Chữ & phụ đề | font (4 font DejaVu đủ dấu), cỡ (nhỏ · vừa · lớn), 7 màu, nền chữ (không nền · tối · sáng · cam thương hiệu), vị trí dọc 5–86% cho chữ trên hình và phụ đề RIÊNG | 0 |
+| Cảnh & chuyển cảnh | sắp thứ tự, bỏ cảnh (còn ≥ 1), **đổi cảnh bằng ảnh sản phẩm thật** (ảnh động ffmpeg), 7 kiểu chuyển cảnh `xfade` 0,4 giây | 0 |
+| Âm thanh & giọng | nhạc + nghe thử, âm lượng, âm gốc, giọng AI, **giọng tự thu** (tải tệp ≤ 4 MB hoặc thu âm ngay trên trình duyệt) | giọng AI ≈ 0,015 USD/phút; giọng tự thu 0 |
+| Màu & hiệu ứng | 7 bộ lọc màu cả video (tươi sáng · ấm · mát · đen trắng · điện ảnh · rực rỡ) | 0 |
+
+Ranh giới:
+- Kiểu chữ / chuyển cảnh / bộ lọc là **KHOÁ trong bảng hằng** (`lib/constants/video-scale.ts`); chuỗi bộ lọc ffmpeg viết tại
+  đó, không bao giờ nhận chuỗi của người. Khoá lạ bị bỏ, vị trí bị kẹp; bài kiểm quét bảng hằng chỉ chứa ký tự an toàn.
+- Lọc màu chạy TRƯỚC khi vẽ chữ — chữ giữ đúng màu đã chọn.
+- Chuyển cảnh chồng hai cảnh lên nhau ⇒ video ngắn đi 0,4 giây mỗi chỗ nối (trần 1/3 cảnh). Bộ dựng ghi `plannedSec` vào việc
+  RENDER và QC kỹ thuật so độ dài với ĐÚNG con số đó (bỏ cảnh / chuyển cảnh không làm QC báo "sai độ dài").
+- Đổi cảnh: ảnh phải là `PRODUCT_PHOTO` của ĐÚNG mã (kiểm ở cả lượt sửa lẫn lúc dựng). Sinh một việc CLIP ảnh động mới cho cảnh
+  đó; clip mới nhất của cảnh thắng; `advanceVariant` đếm CẢNH đã có clip chứ không đếm việc.
+- Giọng tự thu: tài sản `VOICE` gắn video + lượt; lượt dựng chỉ nhận tệp của CÙNG lượt (bản nhân dùng lại được). Có giọng tự thu
+  thì KHÔNG trộn giọng AI và không tạo đoạn giọng AI nào; giọng đặt ở giây 0, dài quá video thì cắt.
+- Font khác mặc định nằm cạnh `VIDEO_FONT_FILE` (gói `font-dejavu`); thiếu tệp thì dùng font mặc định đã kiểm có dấu.

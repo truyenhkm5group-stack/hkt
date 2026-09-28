@@ -603,6 +603,9 @@ deploy dừng, không phải cảnh báo.
     không hỏi lại tới hết hạn. Cảnh ẢNH ĐỘNG dựng từ ảnh sản phẩm thật, tiền 0 là số THẬT.
     Sửa video = dựng lại từ clip ĐÃ CÓ, chữ mới qua cùng bộ kiểm khẳng định, video quay lại chờ duyệt;
     video đã lên Reel / thành quảng cáo không sửa đè.
+    Trình sửa chuyên sâu (kiểu chữ · vị trí · chuyển cảnh · lọc màu · thứ tự / bỏ / đổi cảnh · giọng tự thu) chỉ
+    nhận KHOÁ của bảng hằng — chuỗi bộ lọc ffmpeg không bao giờ đến từ người; ảnh đổi cảnh phải là ảnh sản phẩm
+    của đúng mã, giọng tự thu phải thuộc cùng lượt; QC so độ dài với `plannedSec` của bộ dựng (mục 20).
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
