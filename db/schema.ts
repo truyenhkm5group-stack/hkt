@@ -8157,6 +8157,8 @@ export const videoScaleRuns = pgTable(
     /** Ảnh chụp cấu hình lúc bấm (nhà cung cấp, model, độ phân giải, số cảnh, giọng đọc…) — lượt chạy sau không đổi theo cấu hình mới. */
     configSnapshot: jsonb("config_snapshot").$type<Record<string, unknown>>().notNull(),
     musicId: text("music_id"),
+    /** Đoạn BẢNG MÀU cuối video (`ShowcaseItem[]`, migration 0175): ảnh thật từng màu của mã. `[]` = không có đoạn ấy. */
+    showcase: jsonb("showcase").$type<Record<string, unknown>[]>().notNull().default([]),
     /** Ghi chú / ý tưởng của người bấm — đi vào bản giao việc cho người viết kịch bản. */
     brief: text("brief").notNull().default(""),
     scriptModel: text("script_model").notNull().default(""),

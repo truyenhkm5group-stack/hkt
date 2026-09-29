@@ -422,3 +422,25 @@ Chủ shop: *"làm lại UI/UX… thông minh hơn, tối ưu hơn và thêm tí
 - **Duyệt video**: "Duyệt tất cả video QC đạt" — CHỈ `PASS` (video QC nghi ngờ `FLAG` vẫn duyệt từng cái: nghi ngờ nghĩa là máy
   muốn người nhìn kỹ); mỗi video vẫn đi `approveVideoVariant` và có dòng nhật ký riêng. Nút Tải video (mp4).
 - Thanh tab trong hộp Sửa video: `TabsList` ghim `h-9` nên xuống dòng trên điện thoại thì đè nội dung — ghi đè đúng lớp ấy.
+
+## 22. Concept "Clip mở đầu + Bảng màu" và làm gọn giao diện (29/09/2026)
+
+Chủ shop: *"concept video sẽ là 1 video đoạn đầu ghép với đoạn sau là show ra các ảnh các SKU màu khác nhau (màu của mã)"* và
+*"thiết kế lại UI/UX cho gọn gàng hơn"*.
+
+- **Video = đoạn mở đầu + đoạn bảng màu.** Đoạn mở đầu là các cảnh clip như trước. Đoạn bảng màu: mỗi màu của mã một ảnh mẫu mã
+  THẬT (ảnh Pancake của `product_variants`), ~1,8 giây, chuyển động nhẹ, chữ "Màu …" = tên màu ERP; CTA ở cuối. Dựng bằng ffmpeg —
+  0 đồng. Tối đa 6 màu.
+- **Màu** đọc từ cột `color`, không có thì từ thuộc tính "Màu" trong `attributes` (`variantColor`); gộp không phân biệt hoa
+  thường; mẫu mã xoá / ẩn không tính (`productColorsFrom`). Đo production 29/09: 5/7 mã nhiều màu, 12/12 màu có ảnh.
+- **Ảnh màu** nhập khi bấm Tạo video thành nguồn `PRODUCT_PHOTO` của đúng mã (lũy đẳng theo mã + URL, dùng lại `downloadImage` của
+  bộ nhập Pancake); màu không có ảnh / tải hỏng được NÓI RA và bỏ khỏi bảng màu. Đường dựng đọc ảnh qua `loadSourceImage` (đúng
+  loại, đúng mã) — ảnh của mã khác bị chặn ở tạo lượt, sửa video và lúc dựng.
+- **QC hình ảnh chỉ cắt khung đoạn mở đầu** (việc RENDER ghi `introSec`): đoạn bảng màu cố ý khác màu ảnh gốc và không do máy sinh
+  vẽ; so nó với một ảnh gốc là chấm "sai màu" cho mọi màu khác (bài kiểm dùng màu thật của khung để khoá điều này).
+- `video_scale_runs.showcase` (migration 0175) giữ bảng màu của lượt; "Sửa video" bật / tắt từng màu (`renderOptions.showcase`,
+  `[]` = tắt, vắng = theo lượt).
+- **Gọn giao diện**: hộp Tạo video hai cột (kiểu video · ảnh mở đầu · bảng màu | số video · góc bán · ý tưởng · nhạc), chữ giải
+  thích dồn vào ⓘ; đầu trang gộp "việc tiếp theo" + số liệu thành một khối; thẻ duyệt video: video cột trái, thông tin cột phải,
+  ảnh gốc thu nhỏ, QC chỉ in điểm lỗi / nghi ngờ (đủ danh sách khi mở). Tạo ảnh: gợi ý của từng bước vào ⓘ, gợi ý ý tưởng mặc định
+  thu gọn, thẻ ảnh gom gen vào một dòng mở ra được, nút Câu lệnh / Tải đè góc ảnh.

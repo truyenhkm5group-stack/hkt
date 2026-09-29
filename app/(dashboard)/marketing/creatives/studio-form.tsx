@@ -3,6 +3,7 @@
 import { Check, Clock, Images, Loader2, Palette, Plus, Search, Sparkles, Wand2, X } from "lucide-react";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
+import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,15 +50,15 @@ const SIZE_SHORT: Record<ImageSize, string> = { "1024x1024": "Vuông 1:1", "1024
 
 function Step({ n, title, hint, children, right }: { n: number; title: string; hint?: string; children: ReactNode; right?: ReactNode }) {
   return (
-    <section className="space-y-2 rounded-lg border bg-card p-3">
+    <section className="space-y-2 rounded-lg border bg-card p-2.5">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="flex items-center gap-2 text-[13px] font-semibold">
           <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[11px] text-primary-foreground">{n}</span>
           {title}
+          {hint ? <InfoHint label={`Giải thích: ${title}`}>{hint}</InfoHint> : null}
         </h3>
         {right}
       </header>
-      {hint ? <p className="text-[11.5px] text-muted-foreground">{hint}</p> : null}
       {children}
     </section>
   );
@@ -209,13 +210,13 @@ export function StudioGenForm({
                 type="button"
                 aria-pressed={kind === k}
                 onClick={() => setKind(k)}
-                className={cn("rounded-md border p-2.5 text-left transition-colors", kind === k ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/50")}
+                className={cn("rounded-md border px-2.5 py-1.5 text-left transition-colors", kind === k ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/50")}
               >
                 <p className="flex items-center gap-1.5 text-[13px] font-semibold">
                   {k === "DESIGN" ? <Sparkles className="size-4" /> : <Wand2 className="size-4" />} {MANUAL_GEN_KIND_LABEL[k]}
                 </p>
                 <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                  {k === "DESIGN" ? "Mẫu MỚI hoàn toàn, lai từ các mẫu đã bán tốt — để tìm mẫu thắng tiếp theo." : "Ảnh quảng cáo mới cho ĐÚNG sản phẩm đang bán (giữ nguyên món hàng) — để đổi gió / xả tồn."}
+                  {k === "DESIGN" ? "Mẫu mới lai từ mẫu bán tốt" : "Ảnh mới cho đúng sản phẩm đang bán"}
                 </p>
               </button>
             ))}
@@ -338,7 +339,6 @@ export function StudioGenForm({
                   </Chip>
                 ))}
               </div>
-              {activeStyles.length ? <p className="text-[11px] text-muted-foreground">{activeStyles.map((k) => `${OUTPUT_STYLES[k].label}: ${OUTPUT_STYLES[k].hint}`).join(" · ")}</p> : null}
             </div>
 
             <div className="space-y-1.5">

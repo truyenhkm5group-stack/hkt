@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray } from "drizzle-orm";
+import { ensureColorPhotos, listProductColors, type ColorOption } from "@/lib/video-scale/colors";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { getDb, schema } from "@/db";
@@ -61,7 +62,7 @@ async function drainAfterResponse() {
   );
 }
 
-export async function createVideoRunAction(raw: unknown): Promise<{ ok: true; runId: string } | Fail> {
+export async function createVideoRunAction(raw: unknown): Promise<{ ok: true; runId: string; showcaseFailed: string[] } | Fail> {
   const user = await requireUser();
   if (!can(user, "ideas:write") || !can(user, "expenses:write")) return { error: "Tạo chiến dịch media tiêu tiền sinh video — cần quyền ý tưởng: sửa VÀ chi phí: sửa." };
   const parsed = videoRunCreateSchema.safeParse(raw);
@@ -69,12 +70,24 @@ export async function createVideoRunAction(raw: unknown): Promise<{ ok: true; ru
   const d = parsed.data;
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
-  const r = await createVideoRun(db, { productId: d.productId, sourceIds: d.sourceIds, variants: d.variants, angles: d.angles, brief: d.brief, musicId: d.musicId || null }, actor);
+  // Đoạn BẢNG MÀU: nhập ảnh mẫu mã từng màu (lũy đẳng — màu đã có nguồn thì dùng lại). Màu tải hỏng được NÓI RA, không chặn lượt.
+  const show = await ensureColorPhotos(db, d.productId, d.showcaseColors, { id: actor.id, name: actor.label });
+  if (d.showcaseColors.length && !show.items.length) return { error: `Không lấy được ảnh màu nào cho đoạn bảng màu: ${show.failed.map((f) => `${f.color} (${f.reason})`).join("; ")}.` };
+  const r = await createVideoRun(db, { productId: d.productId, sourceIds: d.sourceIds, variants: d.variants, angles: d.angles, brief: d.brief, musicId: d.musicId || null, showcase: show.items }, actor);
   if (!r.ok) return { error: r.error };
-  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_RUN_CREATE", entity: "VIDEO_SCALE_RUN", entityId: r.runId, after: d });
+  await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_RUN_CREATE", entity: "VIDEO_SCALE_RUN", entityId: r.runId, after: { ...d, showcase: show.items, showcaseFailed: show.failed } });
   await drainAfterResponse();
   revalidatePath(PATH);
-  return { ok: true, runId: r.runId };
+  return { ok: true, runId: r.runId, showcaseFailed: show.failed.map((f) => `${f.color}: ${f.reason}`) };
+}
+
+/** Màu của mã (từ mẫu mã đang bán) + ảnh từng màu — cho ô "Bảng màu" của hộp tạo video. Chỉ đọc. */
+export async function loadVideoColorsAction(raw: unknown): Promise<{ ok: true; colors: ColorOption[] } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:view")) return { error: "Bạn không có quyền xem" };
+  const parsed = videoIdSchema.safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu mã" };
+  return { ok: true, colors: await listProductColors(await getDb(), parsed.data.id) };
 }
 
 export async function reviewVideoVariantAction(raw: unknown): Promise<{ ok: true } | Fail> {

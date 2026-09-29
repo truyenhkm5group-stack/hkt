@@ -1,3 +1,5 @@
+import { normalizeShowcase, type ShowcaseItem } from "@/lib/constants/video-scale-colors";
+
 /**
  * ═══════════ VIDEO SCALE CHO MÃ WIN — HỢP ĐỒNG CHUNG ═══════════
  *
@@ -908,6 +910,8 @@ export type VideoRenderOptions = {
   sceneOrder?: number[];
   /** Tệp giọng đọc TỰ THU (tài sản VOICE của chính video) — có thì thay giọng đọc AI từng cảnh. `null` = không. */
   voiceAssetId?: string | null;
+  /** Đoạn BẢNG MÀU cuối video (ảnh thật từng màu). `[]` = tắt; vắng = theo lượt. */
+  showcase?: ShowcaseItem[];
 };
 
 // ───────────────────────────── KIỂU CHỮ · CHUYỂN CẢNH · BỘ LỌC ─────────────────────────────
@@ -1035,6 +1039,8 @@ export function normalizeRenderOptions(raw: unknown): VideoRenderOptions {
   if (order) out.sceneOrder = order;
   if (r.voiceAssetId === null) out.voiceAssetId = null;
   else if (typeof r.voiceAssetId === "string" && /^[\w-]{8,64}$/.test(r.voiceAssetId)) out.voiceAssetId = r.voiceAssetId;
+  const showcase = normalizeShowcase(r.showcase);
+  if (showcase) out.showcase = showcase;
   return out;
 }
 
@@ -1052,10 +1058,11 @@ export type EffectiveRender = {
   filter: VideoColorFilter;
   sceneOrder: number[] | null;
   voiceAssetId: string | null;
+  showcase: ShowcaseItem[];
 };
 
 /** Tuỳ chọn dựng HIỆU LỰC = cấu hình lượt ⊕ tuỳ chọn riêng của video. Hàm THUẦN. */
-export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voice" | "burnSubtitles" | "keepNativeAudio">, runMusicId: string | null, opts: VideoRenderOptions): EffectiveRender {
+export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voice" | "burnSubtitles" | "keepNativeAudio">, runMusicId: string | null, opts: VideoRenderOptions, runShowcase: readonly ShowcaseItem[] = []): EffectiveRender {
   return {
     musicId: opts.musicId === undefined ? runMusicId : opts.musicId,
     musicVolume: opts.musicVolume ?? MUSIC_VOLUME_DEFAULT,
@@ -1070,6 +1077,7 @@ export function effectiveRender(snap: Pick<VideoScaleConfig, "voiceover" | "voic
     filter: opts.filter ?? "NONE",
     sceneOrder: opts.sceneOrder ?? null,
     voiceAssetId: opts.voiceAssetId ?? null,
+    showcase: opts.showcase ?? [...runShowcase],
   };
 }
 

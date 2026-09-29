@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
+import { InfoHint } from "@/components/info-hint";
 import { getDb } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
 import { VIDEO_PRICE_SOURCE, VIDEO_PROVIDER_LABEL, fakeProviderAllowed, variantReserveUsd, type VideoScaleConfig } from "@/lib/constants/video-scale";
@@ -57,10 +58,12 @@ const TONE: Record<NextStep["tone"], { box: string; icon: typeof Sparkles }> = {
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
   return (
-    <div className={cn("rounded-lg border p-2.5", tone === "warn" && "border-amber-500/60 bg-amber-500/5")}>
-      <p className="text-[11.5px] text-muted-foreground">{label}</p>
-      <p className="text-[17px] font-semibold tabular-nums leading-tight">{value}</p>
-      {sub ? <p className="text-[11px] text-muted-foreground">{sub}</p> : null}
+    <div className={cn("bg-card px-3 py-1.5", tone === "warn" && "bg-amber-500/10")}>
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className="flex items-baseline gap-1.5">
+        <span className="text-[15px] font-semibold tabular-nums">{value}</span>
+        {sub ? <span className="truncate text-[11px] text-muted-foreground">{sub}</span> : null}
+      </dd>
     </div>
   );
 }
@@ -98,10 +101,10 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       <PageHeader
         eyebrow="Marketing"
         title="Video Scale"
-        description="Mã win + ảnh sản phẩm thật → kịch bản theo góc bán → clip Veo 9:16 → hậu kỳ (chữ, giọng đọc, nhạc có quyền, CTA) → QC → duyệt."
+        description="Mã win → video 9:16 (clip + bảng màu) → duyệt → Reel → quảng cáo."
         hint={
           <>
-            Máy chỉ nói điều có trong ERP (giá, màu, size đang bán, chính sách đã khai) — không bịa chất liệu hay khuyến mãi. Video bị QC loại không duyệt
+            Video = cảnh clip mở đầu (từ ảnh sản phẩm thật) + đoạn bảng màu (ảnh thật từng màu của mã) + chữ, giọng đọc, nhạc có quyền, CTA → QC → duyệt. Máy chỉ nói điều có trong ERP (giá, màu, size đang bán, chính sách đã khai) — không bịa chất liệu hay khuyến mãi. Video bị QC loại không duyệt
             được. Tiền sinh video là <b>ước tính theo bảng giá công bố</b>: {VIDEO_PRICE_SOURCE} Đặc tả: <code>docs/video-scale.md</code>.
           </>
         }
@@ -113,47 +116,49 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
         </p>
       ) : null}
 
-      {/* VIỆC TIẾP THEO — một việc, một nút (nextVideoScaleStep). */}
-      <div className={cn("flex flex-wrap items-center gap-3 rounded-lg border p-3", TONE[next.tone].box)}>
-        <NextIcon className="size-5 shrink-0" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-semibold">{next.title}</p>
-          <p className="text-[12.5px] text-muted-foreground">
-            {next.detail}
-            {automation.paused && automation.reason ? ` Lý do dừng: ${automation.reason}.` : ""}
-          </p>
+      {/* VIỆC TIẾP THEO + SỐ LIỆU — MỘT khối (chủ shop 29/09/2026: "gọn gàng hơn"). */}
+      <div className={cn("rounded-lg border", TONE[next.tone].box)}>
+        <div className="flex flex-wrap items-center gap-3 p-3">
+          <NextIcon className="size-5 shrink-0" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1 text-[14px] font-semibold">
+              {next.title}
+              {blockers.length > 1 ? (
+                <InfoHint label="Mọi lý do chưa sinh được video">
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {blockers.map((b) => (
+                      <li key={b}>{b}</li>
+                    ))}
+                  </ul>
+                </InfoHint>
+              ) : null}
+            </p>
+            <p className="text-[12.5px] text-muted-foreground">
+              {next.detail}
+              {automation.paused && automation.reason ? ` Lý do dừng: ${automation.reason}.` : ""}
+            </p>
+          </div>
+          {tab !== next.tab ? (
+            <Link href={`?tab=${next.tab}`} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
+              {next.cta} <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          ) : null}
         </div>
-        {tab !== next.tab ? (
-          <Link href={`?tab=${next.tab}`} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
-            {next.cta} <ArrowRight className="size-4" aria-hidden />
-          </Link>
-        ) : null}
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-b-lg border-t bg-border text-[12px] sm:grid-cols-4">
+          <Stat
+            label="Chi hôm nay"
+            value={`${spend.reservedUsd.toFixed(2)}${cfg.dailyUsdCap === null ? "" : ` / ${cfg.dailyUsdCap.toFixed(2)}`} USD`}
+            sub={`${spend.clips} clip${cfg.dailyUsdCap === null ? " · chưa khai trần" : ""}`}
+            tone={cfg.dailyUsdCap !== null && spend.reservedUsd >= cfg.dailyUsdCap * 0.9 ? "warn" : undefined}
+          />
+          <Stat label="Đang tạo" value={`${counts.activeJobs}`} sub={`${counts.blockedJobs} bị chặn · ${counts.failedJobs24h} hỏng 24h`} tone={counts.blockedJobs ? "warn" : undefined} />
+          <Stat label="Chờ duyệt" value={`${counts.review}`} sub="video" />
+          <Stat label="Chưa đăng" value={`${counts.approvedUnposted}`} sub={`video đã duyệt · ${winProducts.length} mã win`} />
+        </dl>
       </div>
-      {blockers.length > 1 ? (
-        <details className="rounded-lg border border-amber-500/60 bg-amber-500/5 p-2.5 text-[12.5px]">
-          <summary className="cursor-pointer font-medium">Tất cả {blockers.length} lý do chưa sinh được video thật</summary>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            {blockers.map((b) => (
-              <li key={b}>{b}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
       {cfg.provider === "FAKE" && fakeProviderAllowed(process.env.NODE_ENV, env.videoScale.fakeProviderFlag) ? (
         <p className="rounded-lg border border-amber-500/60 bg-amber-500/10 px-2.5 py-1.5 text-[12.5px] font-medium">BỘ SINH GIẢ — mọi video là DỮ LIỆU THỬ, không đăng, không quảng cáo.</p>
       ) : null}
-
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <Stat
-          label={`Chi sinh video hôm nay (${spend.day})`}
-          value={`${spend.reservedUsd.toFixed(2)} USD`}
-          sub={`${cfg.dailyUsdCap === null ? "chưa khai trần ngày" : `trần ${cfg.dailyUsdCap.toFixed(2)} USD`} · ${spend.clips} clip`}
-          tone={cfg.dailyUsdCap !== null && spend.reservedUsd >= cfg.dailyUsdCap * 0.9 ? "warn" : undefined}
-        />
-        <Stat label="Đang tạo" value={`${counts.activeJobs} việc`} sub={`${counts.blockedJobs} bị chặn · ${counts.failedJobs24h} hỏng 24 giờ`} tone={counts.blockedJobs ? "warn" : undefined} />
-        <Stat label="Chờ duyệt" value={`${counts.review} video`} sub="QC đạt duyệt được hàng loạt" />
-        <Stat label="Đã duyệt, chưa đăng" value={`${counts.approvedUnposted} video`} sub={`${winProducts.length} mã win · ${winProducts.filter((p) => p.photoCount > 0).length} có ảnh gốc`} />
-      </div>
 
       <nav className="flex flex-wrap items-center gap-1.5 border-b pb-2" aria-label="Các bước Video Scale">
         {TABS.map((t, i) => [
@@ -171,7 +176,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
       </nav>
 
       {tab === "ma-win" ? (
-        <WinPanel products={winProducts} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} perVideoUsd={variantReserveUsd(cfg)} costNote={costNoteOf(cfg)} />
+        <WinPanel products={winProducts} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} perVideoUsd={variantReserveUsd(cfg)} costNote={costNoteOf(cfg)} introSeconds={cfg.scenesPerVariant * cfg.clipSeconds} />
       ) : tab === "hang-doi" ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

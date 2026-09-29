@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Brush, Check, Copy, Download, FileText, ImagePlus, Loader2, Repeat2, Rocket, Save, Send, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -128,7 +129,8 @@ export function UploadPicker({ value, onChange, disabled }: { value: Upload[]; o
         <input ref={ref} type="file" accept="image/*" multiple hidden onChange={(e) => void pick(e.target.files)} />
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Tuỳ chọn, tối đa {MANUAL_GEN_RUN.maxUploads} ảnh: dáng, bối cảnh, người mẫu, cách phối muốn máy bám theo — ghi trong ô ý tưởng cách dùng. Chỉ tải ảnh của shop / ảnh bạn có quyền dùng; máy vẽ luôn kèm ảnh sản phẩm thật của mã đã chọn.
+        Tối đa {MANUAL_GEN_RUN.maxUploads} ảnh{" "}
+        <InfoHint label="Ảnh tải lên">Dáng, bối cảnh, người mẫu, cách phối muốn máy bám theo — ghi trong ô ý tưởng cách dùng. Chỉ tải ảnh của shop / ảnh bạn có quyền dùng; máy vẽ luôn kèm ảnh sản phẩm thật của mã đã chọn.</InfoHint>
       </p>
     </div>
   );
@@ -194,6 +196,15 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             {formatVND(img.costVnd)}
           </span>
         ) : null}
+        {/* Câu lệnh · Tải — nút biểu tượng đè góc ảnh (gọn, 29/09/2026). */}
+        <span className="absolute bottom-1.5 left-1.5 flex gap-1">
+          <PromptButton img={img} canEdit={canEdit} />
+          {img.imageAvailable && img.imageId ? (
+            <a href={`/api/creative/images/${img.imageId}`} download={`anh-gen-${img.seq}.png`} title="Tải ảnh về máy" aria-label="Tải ảnh về máy" className="flex size-7 items-center justify-center rounded bg-background/90 shadow hover:bg-background">
+              <Download className="size-3.5" />
+            </a>
+          ) : null}
+        </span>
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2">
         {img.design ? (
@@ -214,7 +225,10 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             {img.color ? <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">Màu: {img.color}</span> : null}
           </p>
         ) : null}
-        <GeneChips genes={img.genes} className="gap-0.5" />
+        <details className="text-[10.5px] text-muted-foreground">
+          <summary className="cursor-pointer select-none">Gen máy học</summary>
+          <GeneChips genes={img.genes} className="mt-1 gap-0.5" />
+        </details>
         {img.error ? (
           <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>
             {img.error}
@@ -258,16 +272,6 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             ) : null}
           </div>
         ) : null}
-        <div className={cn("flex flex-wrap gap-1", !canEdit && "mt-auto border-t pt-1.5")}>
-          <PromptButton img={img} canEdit={canEdit} />
-          {img.imageAvailable && img.imageId ? (
-            <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-[11.5px]" title="Tải ảnh gốc về máy">
-              <a href={`/api/creative/images/${img.imageId}`} download={`anh-gen-${img.seq}.png`}>
-                <Download className="size-3.5" /> Tải
-              </a>
-            </Button>
-          ) : null}
-        </div>
         {canEdit ? (
           <div className="mt-auto flex flex-wrap gap-1 border-t pt-1.5">
             {img.status === "GENERATED" || img.status === "REJECTED" ? (
@@ -322,9 +326,9 @@ function PromptButton({ img, canEdit }: { img: ManualGenImageCard; canEdit: bool
   const nhan = studioCellLabel(img.outputStyle, img.color);
   return (
     <>
-      <Button size="sm" variant="ghost" className="h-7 px-2 text-[11.5px]" onClick={mo} title="Xem câu lệnh đã gửi máy vẽ">
-        <FileText className="size-3.5" /> Câu lệnh
-      </Button>
+      <button type="button" onClick={mo} title="Xem câu lệnh đã gửi máy vẽ" aria-label="Xem câu lệnh" className="flex size-7 items-center justify-center rounded bg-background/90 shadow hover:bg-background">
+        <FileText className="size-3.5" />
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { normalizeShowcase } from "@/lib/constants/video-scale-colors";
 import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { MODEL_STATE_LABELS, isModelState } from "@/lib/constants/model-lifecycle";
@@ -213,6 +214,8 @@ export type VariantCard = {
   hasAd: boolean;
   /** Clip MỚI NHẤT của từng cảnh (theo chỉ số cảnh gốc) — trình sửa xem trước và sắp cảnh bằng nó. `null` = chưa có / đã xoá. */
   sceneClips: (string | null)[];
+  /** Bảng màu CỦA LƯỢT (ô chọn được ở "Sửa video") kèm ảnh — `render.showcase` là phần đang bật của video này. */
+  showcaseOptions: { sourceId: string; color: string; imageId: string | null }[];
   /** Bài Reel gần nhất của biến thể (nếu có). */
   post: { id: string; status: string; permalink: string; error: string; publishAt: Date | null; publishedAt: Date | null; auto: boolean } | null;
 };
@@ -250,6 +253,7 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
       renderRev: tVar.renderRev,
       runSnap: tRun.configSnapshot,
       runMusicId: tRun.musicId,
+      runShowcase: tRun.showcase,
     })
     .from(tVar)
     .innerJoin(tProd, eq(tProd.id, tVar.productId))
@@ -284,12 +288,18 @@ export async function listVariants(db: Db, filter: { statuses?: string[]; runId?
     m.set(c.sceneIndex ?? 0, c.assetId);
     clipsOf.set(c.variantId, m);
   }
-  return rows.map(({ runSnap, runMusicId, renderOptions, ...r }) => {
+  const showIds = [...new Set(rows.flatMap((r) => (normalizeShowcase(r.runShowcase) ?? []).map((x) => x.sourceId)))];
+  const showImg = new Map(
+    (showIds.length ? await db.select({ id: schema.creativeSources.id, imageId: schema.creativeSources.imageId }).from(schema.creativeSources).where(inArray(schema.creativeSources.id, showIds)) : []).map((x) => [x.id, x.imageId]),
+  );
+  return rows.map(({ runSnap, runMusicId, runShowcase, renderOptions, ...r }) => {
+    const runShow = normalizeShowcase(runShowcase) ?? [];
     const p = postBy.get(r.id);
-    const render = effectiveRender(normalizeVideoScaleConfig(runSnap), runMusicId, normalizeRenderOptions(renderOptions));
+    const render = effectiveRender(normalizeVideoScaleConfig(runSnap), runMusicId, normalizeRenderOptions(renderOptions), runShow);
+    const showcaseOptions = runShow.map((x) => ({ ...x, imageId: showImg.get(x.sourceId) ?? null }));
     const script = r.script as unknown as VideoScript;
     const sceneClips = (script.scenes ?? []).map((_, i) => clipsOf.get(r.id)?.get(i) ?? null);
-    return { ...r, render, hasAd: withAd.has(r.id), sceneClips, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
+    return { ...r, render, hasAd: withAd.has(r.id), sceneClips, showcaseOptions, script: r.script as unknown as VideoScript, qcVerdict: r.qcVerdict as VideoQcVerdict | null, post: p ? { id: p.id, status: p.status, permalink: p.permalink, error: p.error, publishAt: p.publishAt, publishedAt: p.publishedAt, auto: p.auto } : null };
   });
 }
 

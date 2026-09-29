@@ -27,7 +27,7 @@ export function testVideoScaleEditPure() {
   const base = effectiveRender(snap, "m1", {});
   assert.deepEqual(
     base,
-    { musicId: "m1", musicVolume: 0.18, voiceover: false, voice: "marin", burnSubtitles: true, keepNativeAudio: true, showText: true, text: DEFAULT_TEXT_STYLE, sub: DEFAULT_SUB_STYLE, transition: "NONE", filter: "NONE", sceneOrder: null, voiceAssetId: null },
+    { musicId: "m1", musicVolume: 0.18, voiceover: false, voice: "marin", burnSubtitles: true, keepNativeAudio: true, showText: true, text: DEFAULT_TEXT_STYLE, sub: DEFAULT_SUB_STYLE, transition: "NONE", filter: "NONE", sceneOrder: null, voiceAssetId: null, showcase: [] },
     "không sửa ⇒ theo lượt",
   );
   const ed = effectiveRender(snap, "m1", { musicId: null, voiceover: true, voice: "cedar", burnSubtitles: false });

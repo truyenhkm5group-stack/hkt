@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SHOWCASE } from "@/lib/constants/video-scale-colors";
 import { TEXT_BOXES, TEXT_COLORS, TEXT_SIZES, TEXT_Y_MAX, TEXT_Y_MIN, VIDEO_COLOR_FILTERS, VIDEO_FONTS, VIDEO_TRANSITIONS } from "@/lib/constants/video-scale";
 import { CAPTION_LIMITS, SCRIPT_LIMITS, POLICY_LINES_MAX, POLICY_LINE_MAX_CHARS, SELECTABLE_VIDEO_PROVIDERS, TTS_VOICES, VIDEO_ANGLES, VIDEO_MODELS, VIDEO_ADS_HARD_LIMITS, VIDEO_ADS_MODES, VIDEO_PUBLISH_MODES, VIDEO_REVIEW_MODES, VIDEO_SCALE_HARD_LIMITS } from "@/lib/constants/video-scale";
 
@@ -11,6 +12,8 @@ export const videoRunCreateSchema = z.object({
   angles: z.array(z.enum(VIDEO_ANGLES)).max(VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun).default([]),
   brief: z.string().max(600).default(""),
   musicId: z.string().trim().max(80).default(""),
+  /** Đoạn BẢNG MÀU: các màu của mã người chọn (theo thứ tự). Rỗng = video chỉ có clip. */
+  showcaseColors: z.array(z.string().trim().min(1).max(SHOWCASE.colorMaxChars)).max(SHOWCASE.maxColors).default([]),
 });
 
 export const videoReviewSchema = z.object({
@@ -124,6 +127,7 @@ export const videoEditSchema = z.object({
     filter: keysOf(VIDEO_COLOR_FILTERS).optional(),
     sceneOrder: z.array(z.number().int().min(0).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant - 1)).min(1).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant).optional(),
     voiceAssetId: z.union([z.null(), z.string().regex(/^[\w-]{8,64}$/)]).optional(),
+    showcase: z.array(z.object({ sourceId: z.string().regex(/^[\w-]{1,80}$/), color: z.string().trim().min(1).max(SHOWCASE.colorMaxChars) })).max(SHOWCASE.maxColors).optional(),
   }),
   replacePhotos: z.array(z.object({ scene: z.number().int().min(0), sourceId: id })).max(VIDEO_SCALE_HARD_LIMITS.maxScenesPerVariant).default([]),
 });

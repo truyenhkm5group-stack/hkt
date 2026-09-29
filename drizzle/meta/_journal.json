@@ -1219,6 +1219,13 @@
       "when": 1790567085167,
       "tag": "0174_creative_studio_options",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1790662000000,
+      "tag": "0175_video_scale_showcase",
+      "breakpoints": true
     }
   ]
 }

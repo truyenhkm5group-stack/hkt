@@ -318,6 +318,7 @@ export function VideoEditor({
   approved,
   sceneClips,
   posterUrl,
+  showcaseOptions = [],
 }: {
   variantId: string;
   productId: string;
@@ -327,6 +328,8 @@ export function VideoEditor({
   approved: boolean;
   sceneClips: (string | null)[];
   posterUrl: string | null;
+  /** Bảng màu của LƯỢT (ảnh thật từng màu) — video này bật / tắt từng màu. */
+  showcaseOptions?: { sourceId: string; color: string; imageId: string | null }[];
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -346,6 +349,7 @@ export function VideoEditor({
   const [filter, setFilter] = useState<VideoColorFilter>(render.filter);
   const [order, setOrder] = useState<number[]>(render.sceneOrder ?? script.scenes.map((_, i) => i));
   const [voiceAssetId, setVoiceAssetId] = useState<string | null>(render.voiceAssetId);
+  const [showIds, setShowIds] = useState<string[]>(render.showcase.map((x) => x.sourceId));
   const [replace, setReplace] = useState<Record<number, SourcePhoto>>({});
   const [photos, setPhotos] = useState<SourcePhoto[] | null>(null);
   const [picking, setPicking] = useState<number | null>(null);
@@ -402,6 +406,7 @@ export function VideoEditor({
       filter,
       sceneOrder: order.length === n && order.every((x, i) => x === i) ? undefined : order,
       voiceAssetId,
+      ...(showcaseOptions.length ? { showcase: showcaseOptions.filter((x) => showIds.includes(x.sourceId)).map((x) => ({ sourceId: x.sourceId, color: x.color })) } : {}),
     },
     replacePhotos: Object.entries(replace).map(([scene, p]) => ({ scene: Number(scene), sourceId: p.id })),
   });
@@ -631,6 +636,33 @@ export function VideoEditor({
                         Đóng
                       </Button>
                     </div>
+                  </Panel>
+                ) : null}
+                {showcaseOptions.length ? (
+                  <Panel title={`Bảng màu cuối video (${showIds.length}/${showcaseOptions.length})`}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {showcaseOptions.map((o) => {
+                        const on = showIds.includes(o.sourceId);
+                        return (
+                          <button
+                            key={o.sourceId}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => setShowIds((x) => (on ? x.filter((y) => y !== o.sourceId) : [...x, o.sourceId]))}
+                            className={cn("flex w-14 flex-col items-center gap-0.5 rounded border-2 p-0.5 text-[10.5px]", on ? "border-primary" : "border-transparent opacity-50 hover:opacity-100")}
+                          >
+                            {o.imageId ? (
+                              // eslint-disable-next-line @next/next/no-img-element -- ảnh trong CSDL qua route có kiểm quyền
+                              <img src={photoUrl(o.imageId)} alt={o.color} className="aspect-[4/5] w-full rounded object-cover" />
+                            ) : (
+                              <span className="aspect-[4/5] w-full rounded bg-muted" />
+                            )}
+                            <span className="w-full truncate text-center">{o.color}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-muted-foreground">Mỗi màu một ảnh thật, ~1,8 giây, chữ &ldquo;Màu …&rdquo;. Bỏ hết = video chỉ còn đoạn clip.</p>
                   </Panel>
                 ) : null}
                 <Panel title="Hiệu ứng chuyển cảnh">

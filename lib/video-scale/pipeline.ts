@@ -21,6 +21,8 @@ import {
   type VideoScaleConfig,
 } from "@/lib/constants/video-scale";
 import { env } from "@/lib/env";
+import { normalizeShowcase, type ShowcaseItem } from "@/lib/constants/video-scale-colors";
+import { showcaseProblem } from "@/lib/video-scale/colors";
 import { organizationStateKey } from "@/lib/platform/process-state";
 import { CAMPAIGN_WIN_STATES } from "@/lib/constants/campaign-setup";
 import { ffmpegVersion, resolveFontFile } from "@/lib/video-scale/ffmpeg";
@@ -135,7 +137,7 @@ export async function isDeclaredWin(db: Db, productId: string): Promise<boolean>
   return Boolean(m);
 }
 
-export type CreateRunInput = { productId: string; sourceIds: string[]; variants: number; angles: string[]; brief: string; musicId: string | null };
+export type CreateRunInput = { productId: string; sourceIds: string[]; variants: number; angles: string[]; brief: string; musicId: string | null; showcase?: ShowcaseItem[] };
 
 export async function createVideoRun(db: Db, input: CreateRunInput, actor: Actor): Promise<{ ok: true; runId: string } | { ok: false; error: string }> {
   const cfg = await readVideoScaleConfig(db);
@@ -155,6 +157,9 @@ export async function createVideoRun(db: Db, input: CreateRunInput, actor: Actor
     const [m] = await db.select({ id: schema.videoScaleMusic.id }).from(schema.videoScaleMusic).where(and(eq(schema.videoScaleMusic.id, input.musicId), eq(schema.videoScaleMusic.active, true))).limit(1);
     if (!m) return { ok: false, error: "Bản nhạc đã chọn không còn trong thư viện nhạc có quyền." };
   }
+  const showcase = normalizeShowcase(input.showcase ?? []) ?? [];
+  const badShow = await showcaseProblem(db, input.productId, showcase);
+  if (badShow) return { ok: false, error: badShow };
   const variants = Math.max(1, Math.min(VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun, Math.floor(input.variants)));
   const isTest = cfg.provider === "FAKE";
   const runId = crypto.randomUUID();
@@ -171,6 +176,7 @@ export async function createVideoRun(db: Db, input: CreateRunInput, actor: Actor
       anglesRequested: input.angles.slice(0, variants),
       configSnapshot: cfg as unknown as Record<string, unknown>,
       musicId: input.musicId,
+      showcase: showcase as unknown as Record<string, unknown>[],
       brief: input.brief.trim().slice(0, 600),
       isTest,
       createdByUserId: actor.id,
@@ -455,7 +461,11 @@ export async function rerenderVideoVariant(db: Db, variantId: string, edit: Vide
     if (!src || src.kind !== "PRODUCT_PHOTO" || src.productId !== v.productId || !src.imageId) return { ok: false, error: `Ảnh chọn cho cảnh ${x.scene + 1} không phải ảnh sản phẩm của mã này.` };
     replace.set(x.scene, x.sourceId);
   }
-  const eff = effectiveRender(snap, run.musicId, opts);
+  if (opts.showcase) {
+    const badShow = await showcaseProblem(db, v.productId, opts.showcase);
+    if (badShow) return { ok: false, error: badShow };
+  }
+  const eff = effectiveRender(snap, run.musicId, opts, normalizeShowcase(run.showcase) ?? []);
   if (eff.voiceover && !eff.voiceAssetId && !next.scenes.some((c) => c.voiceover)) return { ok: false, error: "Bật giọng đọc thì cần lời đọc ở ít nhất một cảnh." };
 
   // Cảnh nào cần giọng đọc MỚI: bật giọng, có lời, và chưa có tệp đọc đúng lời + đúng giọng này.
