@@ -293,7 +293,8 @@ export function testCompanyOsStockFeedbackPure() {
   assert.match(trangCr, /preselectProductId=\{param\(raw, "product"\) \|\| null\}/, "trang vòng mẫu đọc ?product=");
   const panel = readFileSync("app/(dashboard)/marketing/creatives/manual-gen-panel.tsx", "utf8");
   assert.ok(panel.includes("manualGenPreselect(p.sources, preselectProductId)") && !panel.includes("startManualGenRun"), "khối gen chỉ CHỌN SẴN, không gọi lượt vẽ");
-  const form = readFileSync("app/(dashboard)/marketing/creatives/manual-gen.tsx", "utf8");
+  // Form gen chuyển sang Studio (29/09/2026) — cùng khẳng định: ảnh chọn sẵn chỉ là giá trị khởi đầu, không kích lượt vẽ.
+  const form = readFileSync("app/(dashboard)/marketing/creatives/studio-form.tsx", "utf8");
   assert.ok(!/useEffect\([^)]*startManualGenRun/.test(form) && /useState\(initialPhotoId/.test(form), "ảnh chọn sẵn chỉ là giá trị khởi đầu của ô chọn");
   const blocks = readFileSync("app/(dashboard)/models/[id]/blocks.tsx", "utf8");
   assert.match(blocks, /pid && ctx\.allowed\.INVENTORY \? loadSource\("phản hồi tồn → creative \/ quảng cáo", \(\) => getStockFeedbackForProduct\(pid, ctx\.allowed\.ADS\)\)/, "trang 360 gác quyền tồn, phần quảng cáo theo quyền quảng cáo, đọc qua loadSource");

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GENE_LABEL, GENE_VOCAB, IMAGE_MODES, IMAGE_QUALITIES, IMAGE_SIZES, CAMPAIGN_NAME_MAX_CHARS, MANUAL_DESIGN, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_UPLOAD_SOURCE_KINDS, normalizeCreativeConfig, type ConfigProblem, type CreativeLoopConfig, IMAGE_EDIT, IMAGE_EDIT_LAYOUTS } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
+import { OUTPUT_STYLE_KEYS, STUDIO_LIMITS } from "@/lib/constants/creative-studio";
 import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS } from "@/lib/constants/campaign-setup";
 
 /**
@@ -153,6 +154,17 @@ const runUploads = z
   .max(MANUAL_GEN_RUN.maxUploads, `Tải lên tối đa ${MANUAL_GEN_RUN.maxUploads} ảnh đầu vào mỗi lượt`)
   .default([]);
 
+/** Studio: kiểu ảnh đầu ra · biến thể màu · khổ · chất lượng. Trần lưới (mẫu × màu × kiểu) kiểm lại ở đường ghi. */
+const runStudio = z
+  .object({
+    styles: z.array(z.enum(OUTPUT_STYLE_KEYS)).max(STUDIO_LIMITS.maxStyles, `Chọn tối đa ${STUDIO_LIMITS.maxStyles} kiểu ảnh`).default([]),
+    colors: z.array(z.string().trim().max(IMAGE_EDIT.colorMaxChars, `Tên màu tối đa ${IMAGE_EDIT.colorMaxChars} ký tự`)).max(STUDIO_LIMITS.maxColors, `Chọn tối đa ${STUDIO_LIMITS.maxColors} màu`).default([]),
+    size: z.enum(IMAGE_SIZES).nullable().default(null),
+    quality: z.enum(IMAGE_QUALITIES).nullable().default(null),
+  })
+  .strict()
+  .default({ styles: [], colors: [], size: null, quality: null });
+
 export const manualGenStartSchema = z
   .object({
     productPhotoSourceId: z.string().trim().min(1, "Chọn ảnh sản phẩm thật làm gốc"),
@@ -160,6 +172,7 @@ export const manualGenStartSchema = z
     idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
     count: runCount,
     uploads: runUploads,
+    studio: runStudio,
   })
   .strict();
 
@@ -185,6 +198,7 @@ export const manualDesignStartSchema = z
     idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
     count: runCount,
     uploads: runUploads,
+    studio: runStudio,
   })
   .strict();
 

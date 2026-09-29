@@ -211,6 +211,9 @@ function testSourceLevel() {
   const genUi = doc(`${DIR}/manual-gen.tsx`);
   assert.ok(/alt=\{`Ảnh gen tay #\$\{img\.seq\}`\}[^>]*zoomable/.test(genUi), "ảnh gen bấm phóng to được");
   assert.ok(!/alt=\{o\.label\}[^>]*zoomable/.test(genUi), "ô chọn mẫu cảm hứng không bật phóng to");
+  const studioUi = doc(`${DIR}/studio-form.tsx`);
+  assert.ok(studioUi.includes("alt={o.label}") && !/alt=\{o\.label\}[^>]*zoomable/.test(studioUi), "Studio: ô chọn mẫu cảm hứng không bật phóng to (cú bấm là tích chọn)");
+  assert.ok(!/alt=\{s\.productLabel\}[^>]*zoomable/.test(studioUi), "Studio: ô chọn ảnh gốc không bật phóng to (cú bấm là chọn)");
   for (const f of ["live-tab.tsx", "library-tab.tsx", "design-tab.tsx", "manual-gen-panel.tsx"]) assert.ok(doc(`${DIR}/${f}`).includes("zoomable"), `${f} phải bật phóng to ảnh`);
 
   // Nút thật gọi action thật — không nút "đánh dấu xong" nào.

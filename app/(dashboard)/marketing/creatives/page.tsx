@@ -37,9 +37,11 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
   const db = await getDb();
   const [counts, pending] = await Promise.all([loadMediaCounts(db), getPendingBatch(db)]);
   const product = param(raw, "product") || null;
+  // "Tạo lại tương tự" (`?remix=<lượt>`) luôn mở ① Tạo ảnh với thiết lập điền sẵn.
+  const remix = param(raw, "remix") || null;
   const defaultTab = SOURCE_KEYS.some((k) => param(raw, k)) ? "nguon" : counts.review > 0 ? "duyet" : counts.queue > 0 ? "dang" : "tao";
   const tabRaw = param(raw, "tab");
-  const tab = product && (tabRaw === "" || tabRaw === "duyet" || tabRaw === "tao") ? "tao" : TABS.has(tabRaw) ? tabRaw : defaultTab;
+  const tab = remix || (product && (tabRaw === "" || tabRaw === "duyet" || tabRaw === "tao")) ? "tao" : TABS.has(tabRaw) ? tabRaw : defaultTab;
   const canEdit = can(user, "ideas:write");
   const canPublish = canEdit && can(user, "expenses:write");
   // ② Duyệt ảnh lọc kết quả theo ngày (giờ VN): mặc định hôm nay, `?ngay=` chọn ngày khác.
@@ -72,7 +74,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       />
 
       {tab === "tao" ? (
-        <CreateStep canEdit={canEdit} preselectProductId={param(raw, "product") || null} />
+        <CreateStep canEdit={canEdit} canPublish={canPublish} preselectProductId={param(raw, "product") || null} remixId={remix} />
       ) : tab === "duyet" ? (
         <ReviewStep canEdit={canEdit} canPublish={canPublish} day={reviewDay} today={today} />
       ) : tab === "dang" ? (

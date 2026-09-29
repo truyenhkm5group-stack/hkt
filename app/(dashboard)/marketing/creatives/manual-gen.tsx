@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Brush, Check, ImagePlus, Loader2, Rocket, Save, Send, Sparkles, Wand2, X } from "lucide-react";
+import { Brush, Check, Copy, Download, FileText, ImagePlus, Loader2, Repeat2, Rocket, Save, Send, Sparkles, X } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualDesignRun, startManualEditRun, startManualGenRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
+import { loadManualGenPromptAction, publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualEditRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
 import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
@@ -20,23 +21,18 @@ import {
   IMAGE_EDIT_LAYOUTS,
   IMAGE_EDIT_LAYOUT_LABEL,
   DESIGN_DNA_VALUE_LABEL,
-  MANUAL_DESIGN,
-  MANUAL_GEN,
   MANUAL_GEN_IMAGE_STATUS_LABEL,
-  MANUAL_GEN_KINDS,
-  MANUAL_GEN_KIND_LABEL,
   MANUAL_GEN_RUN,
   adsetNameForGoal,
   type ImageEditLayout,
   type ManualGenImageStatus,
-  type ManualGenKind,
 } from "@/lib/constants/creative-loop";
 import { rankFanpagesForCamp, type CampPageTarget, type FanpageEvidence, type RankedFanpages } from "@/lib/constants/fanpage-rank";
 import { formatVND, vnShortStamp } from "@/lib/format";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
-import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
+import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
-import { IdeaPresets } from "./idea-presets";
+import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, studioCellLabel } from "@/lib/constants/creative-studio";
 import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
 /**
@@ -46,10 +42,8 @@ import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema } fro
  * đưa với số ảnh người chọn để người thấy trước khi bấm — không tự tính tiền thật nào.
  */
 
-const box = "h-8 w-full rounded-md border bg-background px-2 text-[12.5px] disabled:opacity-60";
-
 type InstantInfo = ManualGenPanel["instant"];
-type Upload = AnhDaThuNho & { ten: string };
+export type Upload = AnhDaThuNho & { ten: string };
 
 /** Tự tải lại mỗi vài giây khi còn ảnh chờ vẽ / đang vẽ — tiến độ hiện ra mà không ai phải bấm F5. */
 export function ManualGenAutoRefresh({ active }: { active: boolean }) {
@@ -66,72 +60,15 @@ export function ManualGenAutoRefresh({ active }: { active: boolean }) {
   ) : null;
 }
 
-/**
- * Khối "Gen ảnh bằng tay": hai kiểu, mặc định THIẾT KẾ MỚI (chủ shop 25/09/2026 — "mẫu mới hoàn toàn từ các
- * mẫu đã win / chỉ số tốt, không phải mockup mẫu cũ"). Kiểu "ảnh mới cho mẫu đang có" còn cho đề xuất đẩy tồn
- * (`?product=` mở thẳng kiểu ấy — xả hàng đang có cần ảnh của chính mẫu ấy).
- */
-export function ManualGenForm({
-  initialKind,
-  inspirations,
-  ...rest
-}: {
-  initialKind: ManualGenKind;
-  inspirations: DesignInspirationOption[];
-  sources: PixelSourceOption[];
-  unitVnd: number | null;
-  unitUsd: number;
-  initialPhotoId?: string;
-}) {
-  const [kind, setKind] = useState<ManualGenKind>(initialKind);
-  return (
-    <div className="space-y-2.5">
-      <div className="inline-flex rounded-md border p-0.5" role="tablist" aria-label="Kiểu gen">
-        {MANUAL_GEN_KINDS.map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={kind === k}
-            onClick={() => setKind(k)}
-            className={cn("rounded px-2.5 py-1 text-[12px] font-medium", kind === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
-          >
-            {MANUAL_GEN_KIND_LABEL[k]}
-          </button>
-        ))}
-      </div>
-      {kind === "DESIGN" ? <DesignGenForm inspirations={inspirations} unitVnd={rest.unitVnd} unitUsd={rest.unitUsd} /> : <MockupGenForm {...rest} />}
-    </div>
-  );
-}
-
 /** Chi mỗi tin nhắn để HIỂN THỊ — chưa có chi / tin nhắn ⇒ CHƯA BIẾT (`—`), không phải 0 (mục 42). */
-function costPerMessage(o: DesignInspirationOption): string {
+export function costPerMessage(o: DesignInspirationOption): string {
   return o.spendVnd !== null && o.messages !== null && o.messages > 0 ? `${formatVND(Math.round(o.spendVnd / o.messages))}/tin` : "chi/tin —";
 }
 
-function describeDna(dna: Record<string, string>): string {
+export function describeDna(dna: Record<string, string>): string {
   return DESIGN_DNA_KEYS.filter((k) => dna[k] && !(dna[k] === "NONE" && (k === "neckline" || k === "sleeve")))
     .map((k) => (DESIGN_DNA_VALUE_LABEL[k] as Record<string, string>)[dna[k]] ?? dna[k])
     .join(" · ");
-}
-
-/** Số ảnh một lần bấm: thanh kéo + ô số, kẹp trong khoảng min…max (máy chủ kẹp lại lần nữa). */
-function CountPicker({ id, value, onChange, disabled }: { id: string; value: number; onChange: (n: number) => void; disabled?: boolean }) {
-  const { minImagesPerRun: min, maxImagesPerRun: max } = MANUAL_GEN_RUN;
-  const set = (n: number) => onChange(Math.max(min, Math.min(max, Number.isFinite(n) ? Math.round(n) : MANUAL_GEN.imagesPerRun)));
-  return (
-    <div className="flex items-center gap-2">
-      <Label htmlFor={id} className="shrink-0 text-[12px]">
-        Số ảnh
-      </Label>
-      <input type="range" min={min} max={max} step={1} value={value} disabled={disabled} onChange={(e) => set(Number(e.target.value))} className="min-w-0 flex-1 accent-primary" aria-label="Số ảnh (kéo)" />
-      <Input id={id} type="number" min={min} max={max} step={1} value={value} disabled={disabled} onChange={(e) => set(Number(e.target.value))} className="h-8 w-16 text-center text-[12.5px]" />
-      <span className="shrink-0 text-[11px] text-muted-foreground">
-        ({min}–{max})
-      </span>
-    </div>
-  );
 }
 
 /** Tiền ƯỚC TÍNH của lượt = giá ước tính một ảnh × số ảnh. Nhãn "ước tính" luôn đi kèm (mục 8.6). */
@@ -147,7 +84,7 @@ function EstimateLine({ count, unitVnd, unitUsd, uploads }: { count: number; uni
  * Ảnh đầu vào NGƯỜI TẢI LÊN (chủ shop 26/09/2026) — gửi máy vẽ KÈM ảnh sản phẩm thật của mã đã chọn, không thay
  * nó. Thu nhỏ ngay trên máy người dùng (cùng hàm của form ý tưởng) trước khi gửi.
  */
-function UploadPicker({ value, onChange, disabled }: { value: Upload[]; onChange: (v: Upload[]) => void; disabled?: boolean }) {
+export function UploadPicker({ value, onChange, disabled }: { value: Upload[]; onChange: (v: Upload[]) => void; disabled?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const room = MANUAL_GEN_RUN.maxUploads - value.length;
@@ -193,203 +130,6 @@ function UploadPicker({ value, onChange, disabled }: { value: Upload[]; onChange
       <p className="text-[11px] text-muted-foreground">
         Tuỳ chọn, tối đa {MANUAL_GEN_RUN.maxUploads} ảnh: dáng, bối cảnh, người mẫu, cách phối muốn máy bám theo — ghi trong ô ý tưởng cách dùng. Chỉ tải ảnh của shop / ảnh bạn có quyền dùng; máy vẽ luôn kèm ảnh sản phẩm thật của mã đã chọn.
       </p>
-    </div>
-  );
-}
-
-function DesignGenForm({ inspirations, unitVnd, unitUsd }: { inspirations: DesignInspirationOption[]; unitVnd: number | null; unitUsd: number }) {
-  // Tích sẵn các mẫu điểm cao nhất CÓ ảnh sản phẩm thật — chỉ là giá trị khởi đầu, không kích lượt vẽ nào.
-  const [picked, setPicked] = useState<string[]>(() =>
-    inspirations
-      .filter((o) => o.imageId)
-      .slice(0, MANUAL_DESIGN.preselect)
-      .map((o) => o.productId),
-  );
-  const [idea, setIdea] = useState("");
-  const [count, setCount] = useState<number>(MANUAL_GEN.pickerDefault);
-  const [uploads, setUploads] = useState<Upload[]>([]);
-  const [pending, start] = useTransition();
-  const toggle = (id: string) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= MANUAL_DESIGN.maxInspirations ? cur : [...cur, id]));
-  const coAnh = inspirations.some((o) => picked.includes(o.productId) && o.imageId);
-
-  const gen = () =>
-    start(async () => {
-      const r = await startManualDesignRun({ inspirationProductIds: picked, idea, count, uploads: uploads.map((u) => u.base64) });
-      if ("error" in r) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success(r.note ? `Đang vẽ ${r.allowed} thiết kế mới. ${r.note}` : `Đang vẽ ${r.allowed} thiết kế mới — ảnh hiện dần ở "Kết quả gen tay".`);
-      setIdea("");
-      setUploads([]);
-    });
-
-  const khoa =
-    inspirations.length === 0 ? "Chưa có mẫu nào đủ điều kiện làm cảm hứng." : picked.length === 0 ? "Chọn ít nhất một mẫu cảm hứng." : !coAnh ? "Cần ít nhất một mẫu có ảnh sản phẩm thật — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu." : null;
-
-  return (
-    <div className="grid gap-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-      <div className="space-y-1.5">
-        <div className="flex items-baseline justify-between gap-2">
-          <Label>Mẫu cảm hứng — đã bán tốt / chỉ số quảng cáo tốt</Label>
-          <span className="numeric text-[11px] text-muted-foreground">
-            đã chọn {picked.length}/{MANUAL_DESIGN.maxInspirations}
-          </span>
-        </div>
-        {inspirations.length === 0 ? (
-          <p className="rounded-md border border-dashed px-2.5 py-2 text-[12px] text-muted-foreground">
-            Chưa có mẫu nào đủ điều kiện: cần mã bán tốt trong 90 ngày (đơn giao thành công hoặc chi mỗi tin nhắn tốt) VÀ đã đọc được DNA thiết kế — máy đọc DNA dần mỗi lượt dựng lô. Tạm thời dùng kiểu “{MANUAL_GEN_KIND_LABEL.MOCKUP}”.
-          </p>
-        ) : (
-          <div className="grid max-h-[300px] grid-cols-1 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-2">
-            {inspirations.map((o) => {
-              const on = picked.includes(o.productId);
-              return (
-                <button
-                  key={o.productId}
-                  type="button"
-                  disabled={pending}
-                  onClick={() => toggle(o.productId)}
-                  aria-pressed={on}
-                  className={cn("flex items-center gap-2 rounded-md border p-1.5 text-left transition-colors", on ? "border-primary bg-primary/5" : "hover:bg-muted/50")}
-                >
-                  <VariantImage imageId={o.imageId} available={o.imageId !== null} alt={o.label} className="size-12 shrink-0 rounded" iconClassName="size-4" />
-                  <span className="min-w-0 flex-1 space-y-0.5">
-                    <span className="flex items-center gap-1">
-                      <span className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-sm border", on && "border-primary bg-primary text-primary-foreground")}>{on ? <Check className="size-3" /> : null}</span>
-                      <span className="truncate text-[12px] font-semibold">{o.label}</span>
-                    </span>
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      <span className="numeric">{o.delivered}</span> giao · <span className="numeric">{o.returned}</span> hoàn · {costPerMessage(o)}
-                    </span>
-                    <span className="block truncate text-[10.5px] text-muted-foreground" title={describeDna(o.dna)}>
-                      {o.imageId ? describeDna(o.dna) : "Chưa có ảnh thật — chỉ góp DNA"}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <p className="text-[11px] text-muted-foreground">Mỗi ảnh là một THIẾT KẾ MỚI lai DNA của hai mẫu đã chọn + đột biến, bắt buộc khác mọi mẫu đang có. Máy vẽ nhận ảnh sản phẩm THẬT của mẫu cha (+ ảnh bạn tải lên) làm tham chiếu.</p>
-        <UploadPicker value={uploads} onChange={setUploads} disabled={pending} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between">
-          <Label htmlFor="md-idea">Ý tưởng / câu lệnh (tuỳ chọn)</Label>
-          <span className="numeric text-[11px] text-muted-foreground">
-            {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
-          </span>
-        </div>
-        <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design disabled={pending} />
-        <Textarea id="md-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: chất thun rayon, đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" />
-        <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT: đè bối cảnh / không khí / cách phối và cả thuộc tính thiết kế bạn nói ra (chất liệu, màu, độ dài…); phần không nhắc tới đi theo DNA máy lập.</p>
-        <div className="mt-auto space-y-1.5">
-          <CountPicker id="md-count" value={count} onChange={setCount} disabled={pending} />
-          <EstimateLine count={count} unitVnd={unitVnd} unitUsd={unitUsd} uploads={uploads.length} />
-          <div className="flex justify-end">
-            <Button onClick={gen} disabled={pending || !!khoa} title={khoa ?? undefined}>
-              {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Gen {count} thiết kế mới
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MockupGenForm({
-  sources,
-  unitVnd,
-  unitUsd,
-  initialPhotoId,
-}: {
-  sources: PixelSourceOption[];
-  unitVnd: number | null;
-  unitUsd: number;
-  /** Ảnh chọn sẵn (vd `?product=` từ đề xuất đẩy tồn). Chỉ là giá trị khởi đầu — không kích lượt vẽ nào. */
-  initialPhotoId?: string;
-}) {
-  const photos = sources.filter((s) => s.kind === "PRODUCT_PHOTO");
-  const [photoId, setPhotoId] = useState(initialPhotoId && photos.some((s) => s.id === initialPhotoId) ? initialPhotoId : (photos[0]?.id ?? ""));
-  const [ownAdId, setOwnAdId] = useState("");
-  const [idea, setIdea] = useState("");
-  const [count, setCount] = useState<number>(MANUAL_GEN.pickerDefault);
-  const [uploads, setUploads] = useState<Upload[]>([]);
-  const [pending, start] = useTransition();
-  const productOf = sources.find((s) => s.id === photoId)?.productId ?? "";
-  const ownAds = sources.filter((s) => s.kind === "OWN_AD" && s.productId === productOf);
-
-  const gen = () =>
-    start(async () => {
-      const r = await startManualGenRun({ productPhotoSourceId: photoId, ownAdSourceId: ownAdId, idea, count, uploads: uploads.map((u) => u.base64) });
-      if ("error" in r) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success(`Đang vẽ ${r.requested} ảnh — ảnh hiện dần ở "Kết quả gen tay".`);
-      setIdea("");
-      setUploads([]);
-    });
-
-  const khoa = photos.length === 0 ? "Chưa có ảnh sản phẩm thật nào — nhập ở tab Nguồn ảnh trước." : null;
-
-  return (
-    <div className="grid gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="space-y-1.5">
-        <Label htmlFor="mg-photo">Ảnh sản phẩm thật làm gốc</Label>
-        <select
-          id="mg-photo"
-          className={box}
-          value={photoId}
-          disabled={pending}
-          onChange={(e) => {
-            setPhotoId(e.target.value);
-            setOwnAdId("");
-          }}
-        >
-          {photos.length === 0 ? <option value="">— chưa có ảnh sản phẩm thật —</option> : null}
-          {photos.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.productLabel}
-              {s.title ? ` — ${s.title}` : ""}
-            </option>
-          ))}
-        </select>
-        <Label htmlFor="mg-own" className="pt-1">
-          Quảng cáo cũ của shop cùng mã (tuỳ chọn — tham chiếu bố cục)
-        </Label>
-        <select id="mg-own" className={box} value={ownAdId} disabled={pending || ownAds.length === 0} onChange={(e) => setOwnAdId(e.target.value)}>
-          <option value="">{ownAds.length ? "— không dùng —" : "— mã này chưa có quảng cáo cũ đã nhập —"}</option>
-          {ownAds.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title || s.id}
-            </option>
-          ))}
-        </select>
-        <Label className="pt-1">Ảnh đầu vào thêm (tải lên)</Label>
-        <UploadPicker value={uploads} onChange={setUploads} disabled={pending} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between">
-          <Label htmlFor="mg-idea">Ý tưởng / câu lệnh (tuỳ chọn)</Label>
-          <span className="numeric text-[11px] text-muted-foreground">
-            {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
-          </span>
-        </div>
-        <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design={false} disabled={pending} />
-        <Textarea id="mg-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: mặc đi biển Đà Nẵng buổi chiều, ánh nắng vàng, dáng đi tự nhiên…" />
-        <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, dáng, người mẫu, ánh sáng, cách phối) — chỉ trừ chính sản phẩm: máy luôn giữ đúng món hàng trong ảnh thật.</p>
-        <div className="mt-auto space-y-1.5">
-          <CountPicker id="mg-count" value={count} onChange={setCount} disabled={pending} />
-          <EstimateLine count={count} unitVnd={unitVnd} unitUsd={unitUsd} uploads={uploads.length} />
-          <div className="flex justify-end">
-            <Button onClick={gen} disabled={pending || !!khoa || !photoId} title={khoa ?? undefined}>
-              {pending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Gen {count} ảnh
-            </Button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -468,6 +208,12 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             {img.design.parentLabels.length ? <p className="line-clamp-1 text-[10.5px] text-muted-foreground">Lai từ: {img.design.parentLabels.join(" × ")}</p> : null}
           </div>
         ) : null}
+        {studioCellLabel(img.outputStyle, img.color) ? (
+          <p className="flex flex-wrap gap-1 text-[10.5px]">
+            {(OUTPUT_STYLE_KEYS as readonly string[]).includes(img.outputStyle) && img.outputStyle !== "AUTO" ? <span className="rounded bg-muted px-1.5 py-0.5">{OUTPUT_STYLES[img.outputStyle as keyof typeof OUTPUT_STYLES].label}</span> : null}
+            {img.color ? <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">Màu: {img.color}</span> : null}
+          </p>
+        ) : null}
         <GeneChips genes={img.genes} className="gap-0.5" />
         {img.error ? (
           <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>
@@ -512,6 +258,16 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
             ) : null}
           </div>
         ) : null}
+        <div className={cn("flex flex-wrap gap-1", !canEdit && "mt-auto border-t pt-1.5")}>
+          <PromptButton img={img} canEdit={canEdit} />
+          {img.imageAvailable && img.imageId ? (
+            <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-[11.5px]" title="Tải ảnh gốc về máy">
+              <a href={`/api/creative/images/${img.imageId}`} download={`anh-gen-${img.seq}.png`}>
+                <Download className="size-3.5" /> Tải
+              </a>
+            </Button>
+          ) : null}
+        </div>
         {canEdit ? (
           <div className="mt-auto flex flex-wrap gap-1 border-t pt-1.5">
             {img.status === "GENERATED" || img.status === "REJECTED" ? (
@@ -530,6 +286,87 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * CÂU LỆNH CỦA ẢNH (chủ shop 29/09/2026: "hiển thị câu lệnh ở kết quả ảnh đầu ra") — đọc khi mở (không chở theo mọi thẻ): ý
+ * tưởng người gõ, kiểu + màu, khổ / chất lượng / model, và câu lệnh ĐẦY ĐỦ đã gửi máy vẽ (tiếng Anh) kèm nút chép. "Tạo lại
+ * tương tự" mở ① Tạo ảnh với đúng thiết lập của lượt này điền sẵn — không vẽ gì cho tới khi người bấm Gen.
+ */
+function PromptButton({ img, canEdit }: { img: ManualGenImageCard; canEdit: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ prompt: string; idea: string; size: string; quality: string; model: string } | null>(null);
+  const [pending, start] = useTransition();
+  const mo = () => {
+    setOpen(true);
+    if (data) return;
+    start(async () => {
+      const r = await loadManualGenPromptAction({ imageId: img.id });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      setData(r);
+    });
+  };
+  const chep = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(data.prompt);
+      toast.success("Đã chép câu lệnh.");
+    } catch {
+      toast.error("Trình duyệt không cho chép — bôi đen rồi Ctrl+C.");
+    }
+  };
+  const nhan = studioCellLabel(img.outputStyle, img.color);
+  return (
+    <>
+      <Button size="sm" variant="ghost" className="h-7 px-2 text-[11.5px]" onClick={mo} title="Xem câu lệnh đã gửi máy vẽ">
+        <FileText className="size-3.5" /> Câu lệnh
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Câu lệnh ảnh #{img.seq}</DialogTitle>
+            <DialogDescription>Đúng câu lệnh đã gửi máy vẽ (tiếng Anh). Ý tưởng của bạn đứng đầu và được nhắc lại ở cuối.</DialogDescription>
+          </DialogHeader>
+          {pending || !data ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <div className="space-y-2 text-[12.5px]">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">Ý tưởng</dt>
+                <dd>{data.idea || "— (không gõ, máy tự chọn)"}</dd>
+                {nhan ? (
+                  <>
+                    <dt className="text-muted-foreground">Kiểu · màu</dt>
+                    <dd>{nhan}</dd>
+                  </>
+                ) : null}
+                <dt className="text-muted-foreground">Khổ · chất lượng</dt>
+                <dd>
+                  {data.size} · {data.quality} · {data.model}
+                </dd>
+              </dl>
+              <pre className="max-h-[45vh] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-2 font-mono text-[11.5px] leading-relaxed">{data.prompt}</pre>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" size="sm" onClick={() => void chep()} disabled={!data}>
+              <Copy className="size-4" /> Chép câu lệnh
+            </Button>
+            {canEdit ? (
+              <Button asChild size="sm">
+                <Link href={`/marketing/creatives?tab=tao&remix=${encodeURIComponent(img.genId)}`} onClick={() => setOpen(false)}>
+                  <Repeat2 className="size-4" /> Tạo lại tương tự
+                </Link>
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

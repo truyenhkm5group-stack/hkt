@@ -37,12 +37,14 @@ export type StepBadges = Partial<Record<(typeof CREATIVE_STEPS)[number]["value"]
 export function CreativeTabs({ active, defaultTab, badges = {} }: { active: string; defaultTab: string; badges?: StepBadges }) {
   const [dangChuyen, startTransition] = useNavTransition();
   const [, setState] = useQueryStates(
-    { tab: parseAsString, page: parseAsString, q: parseAsString, loai: parseAsString, bat: parseAsString, lo: parseAsString, ngay: parseAsString, product: parseAsString },
+    { tab: parseAsString, page: parseAsString, q: parseAsString, loai: parseAsString, bat: parseAsString, lo: parseAsString, ngay: parseAsString, product: parseAsString, remix: parseAsString },
     { shallow: false, history: "push", startTransition },
   );
   return (
-    <Tabs value={active} onValueChange={(value) => void setState({ tab: value === defaultTab ? null : value, page: null, q: null, loai: null, bat: null, lo: null, ngay: null, product: null })}>
-      <TabsList className={cn("h-auto flex-wrap justify-start transition-opacity", dangChuyen && "pointer-events-none opacity-60")}>
+    <Tabs value={active} onValueChange={(value) => void setState({ tab: value === defaultTab ? null : value, page: null, q: null, loai: null, bat: null, lo: null, ngay: null, product: null, remix: null })}>
+      {/* `TabsList` ghim `h-9` bằng lớp theo nhóm (ưu tiên cao hơn `h-auto`) — xuống dòng trên điện thoại thì tab tràn đè khung dưới.
+          Ghi đè ĐÚNG lớp ấy (tailwind-merge giữ lớp sau). */}
+      <TabsList className={cn("h-auto flex-wrap justify-start rounded-xl transition-opacity group-data-[orientation=horizontal]/tabs:h-auto", dangChuyen && "pointer-events-none opacity-60")}>
         {CREATIVE_STEPS.map((t) => {
           const b = badges[t.value];
           return (

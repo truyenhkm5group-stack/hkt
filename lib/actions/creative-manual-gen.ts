@@ -11,6 +11,7 @@ import { priceWarnings } from "@/lib/creative/copy-edit";
 import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
+import { loadManualGenImagePrompt } from "@/lib/queries/creative-manual-gen";
 import { manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 import { bindOrganization } from "@/lib/platform/background";
 
@@ -49,7 +50,7 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
   const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads) }, config, actor);
+  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, config, actor);
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -58,7 +59,7 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
     action: "CREATIVE_MANUAL_GEN_START",
     entity: "CREATIVE_MANUAL_GEN",
     entityId: r.genId,
-    after: { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, requested: r.requested, uploads: d.uploads.length },
+    after: { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, requested: r.requested, uploads: d.uploads.length, studio: d.studio },
   });
   await drawAfterResponse(r.genId);
   revalidatePath(PATH);
@@ -123,7 +124,7 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
   const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads) }, config, actor, new Date());
+  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, config, actor, new Date());
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -132,7 +133,7 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
     action: "CREATIVE_MANUAL_GEN_START",
     entity: "CREATIVE_MANUAL_GEN",
     entityId: r.genId,
-    after: { kind: "DESIGN", inspirationProductIds: d.inspirationProductIds, idea: d.idea, requested: r.requested, allowed: r.allowed, uploads: d.uploads.length, note: r.reason },
+    after: { kind: "DESIGN", inspirationProductIds: d.inspirationProductIds, idea: d.idea, requested: r.requested, allowed: r.allowed, uploads: d.uploads.length, note: r.reason, studio: d.studio },
   });
   await drawAfterResponse(r.genId);
   revalidatePath(PATH);
@@ -282,4 +283,15 @@ export async function requeueFailedManualGenImageAction(raw: unknown): Promise<{
   await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_MANUAL_GEN_REQUEUED", entity: "CREATIVE_MANUAL_GEN_IMAGE", entityId: parsed.data.imageId, after: {} });
   revalidatePath(PATH);
   return { ok: true };
+}
+
+/** Câu lệnh đã gửi máy vẽ của một ảnh — mở từ nút "Câu lệnh" trên thẻ ảnh (chỉ đọc). */
+export async function loadManualGenPromptAction(raw: unknown): Promise<{ ok: true; prompt: string; idea: string; size: string; quality: string; model: string } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:view")) return { error: "Không có quyền" };
+  const parsed = z.object({ imageId: z.string().trim().min(1).max(80) }).safeParse(raw);
+  if (!parsed.success) return { error: "Thiếu mã ảnh" };
+  const r = await loadManualGenImagePrompt(await getDb(), parsed.data.imageId);
+  if (!r) return { error: "Không tìm thấy ảnh." };
+  return { ok: true, ...r };
 }

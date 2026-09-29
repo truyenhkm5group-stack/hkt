@@ -121,6 +121,7 @@ const MOI = [
   "0171_custom_records_live_sort",
   "0172_platform_settings",
   "0173_fb_ads_post_link",
+  "0174_creative_studio_options",
 ] as const;
 
 /*
