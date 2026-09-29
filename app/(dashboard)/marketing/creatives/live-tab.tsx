@@ -1,6 +1,9 @@
 import { Activity } from "lucide-react";
 import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
 import { ExtendButton, PauseNowButton } from "@/app/(dashboard)/marketing/creatives/live-actions";
+import { RepublishButton } from "@/app/(dashboard)/marketing/creatives/manual-gen";
+import { loadRepublishCtx } from "@/lib/queries/creative-manual-gen";
+import { REPUBLISHABLE_STATUSES } from "@/lib/creative/manual-gen";
 import { ScalePanel } from "@/app/(dashboard)/marketing/creatives/scale-panel";
 import { MODE_LABEL, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
@@ -52,10 +55,13 @@ function KeepChecks({ v }: { v: JudgedVariant }) {
   );
 }
 
-export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boolean; canKill: boolean; canRelease: boolean }) {
+/** `canRepublish` = soạn bài VÀ duyệt chi (ideas:write + expenses:write) — "Đăng lại camp" là một lượt chi mới. */
+export async function LiveTab({ canWrite, canKill, canRelease, canRepublish = false }: { canWrite: boolean; canKill: boolean; canRelease: boolean; canRepublish?: boolean }) {
   const db = await getDb();
   const now = new Date();
   const [rows, kill] = await Promise.all([listLiveVariants(db, now), readAdsKillSwitch()]);
+  // "Đăng lại camp" (chủ shop 29/09/2026: scale mẫu sang TKQC / fanpage khác) — bộ đồ nghề của hộp chỉ đọc khi người xem bấm được.
+  const rp = canRepublish && rows.length ? await loadRepublishCtx(db, now, rows.map((r) => r.productId).filter((x): x is string => !!x)) : null;
 
   // Camp hẹn giờ đã lên Facebook (LIVE) mà chưa tới giờ chạy — đếm riêng, không gộp vào "đang chạy".
   const choGio = rows.filter((r) => r.status === "LIVE" && new Date(r.startAt) > now);
@@ -170,10 +176,17 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                         <KeepChecks v={v} />
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {canWrite ? (
+                        {canWrite || rp ? (
                           <div className="flex flex-col items-end gap-1">
-                            {v.status === "LIVE" ? <PauseNowButton variantId={v.id} slot={v.slot} /> : null}
-                            {v.verdict === "PROMISING" && !v.dailyBudget ? <ExtendButton variantId={v.id} slot={v.slot} /> : null}
+                            {rp && v.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(v.status) ? (
+                              <RepublishButton
+                                v={{ id: v.id, slot: v.slot, headline: v.headline, primaryText: v.primaryText, imageId: v.imageId, imageAvailable: v.imageAvailable, productId: v.productId, productName: v.productName, designDna: v.design?.dna ?? null, campaignName: v.campaignName }}
+                                ctx={{ ...rp.ctx, canPublish: true }}
+                                winCode={v.productId ? (rp.winCodes[v.productId] ?? null) : null}
+                              />
+                            ) : null}
+                            {canWrite && v.status === "LIVE" ? <PauseNowButton variantId={v.id} slot={v.slot} /> : null}
+                            {canWrite && v.verdict === "PROMISING" && !v.dailyBudget ? <ExtendButton variantId={v.id} slot={v.slot} /> : null}
                           </div>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">—</span>

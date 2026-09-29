@@ -9,7 +9,7 @@ import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { addUploadedDraft, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, republishVariantInstant, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
@@ -831,6 +831,46 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(v6.committedBudgetVnd, 150_000);
     const vuot = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: { ...setup6, budgetVnd: 900_000 } }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!vuot.ok, "ngân sách vượt trần ⇒ từ chối trước mọi lời gọi");
+
+    // (f6c) ĐĂNG LẠI CAMP (chủ shop 29/09/2026: scale mẫu đang chạy sang TKQC / fanpage khác) — camp MỚI từ ảnh + câu chữ của
+    //       mẫu LIVE, trên đúng TKQC / fanpage / ngân sách đã chọn, lô INSTANT riêng ghi nguồn; mẫu gốc không bị đụng.
+    const setupScale: CampaignSetup = { ...setup6, adAccountId: "8880077", pageId: "9990077", budgetVnd: 200_000 };
+    const rpIn = (variantId: string, setup: CampaignSetup) => ({ variantId, headline: "Đầm đi biển — bản scale", primaryText: "Nhắn shop để được tư vấn size.", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null, scheduleAt: null, setup });
+    campaignsSent.length = 0;
+    adsetsSent.length = 0;
+    specsSent.length = 0;
+    const goc6Truoc = { ...v6 };
+    const rp = await republishVariantInstant(db, rpIn(v6.id, setupScale), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(rp.ok && rp.outcome === "LIVE", rp.ok ? rp.detail : rp.error);
+    if (rp.ok) {
+      instantIds.push(rp.batchId);
+      assert.notEqual(rp.variantId, v6.id, "mẫu MỚI, không ghi đè mẫu gốc");
+      assert.deepEqual(campaignsSent, [{ account: "8880077", objective: "OUTCOME_ENGAGEMENT" }], "chiến dịch mới trong TKQC đã chọn");
+      assert.equal(specsSent[0]?.page_id, "9990077", "bài đứng tên fanpage đã chọn");
+      assert.equal(adsetsSent[0]?.budget, 200_000, "ngân sách ngày theo setup");
+      const [nv] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, rp.variantId));
+      assert.equal(nv.imageId, v6.imageId, "cùng ảnh");
+      assert.equal(nv.headline, "Đầm đi biển — bản scale", "câu chữ người sửa");
+      assert.equal(nv.parentVariantId, null, "không phải quan hệ lai / đột biến của sổ học");
+      assert.equal(nv.productId, v6.productId);
+      assert.equal(nv.committedBudgetVnd, 200_000);
+      assert.ok(nv.why.includes(`Đăng lại mẫu #${v6.slot}`));
+      const [nb] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, rp.batchId));
+      assert.equal(nb.kind, "INSTANT");
+      assert.equal((nb.plan as Record<string, unknown>).republishOf, v6.id, "lô ghi nguồn đăng lại");
+      assert.equal(nb.approvedByUserId, actor.id, "người bấm là lượt duyệt chi");
+      const [goc6Sau] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, v6.id));
+      assert.deepEqual([goc6Sau.status, goc6Sau.committedBudgetVnd, goc6Sau.fbAdId], [goc6Truoc.status, goc6Truoc.committedBudgetVnd, goc6Truoc.fbAdId], "mẫu gốc không bị đụng");
+    }
+    const rpVuot = await republishVariantInstant(db, rpIn(v6.id, { ...setupScale, budgetVnd: 900_000 }), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(!rpVuot.ok, "đăng lại vẫn chịu trần một camp");
+    const rpTat = await republishVariantInstant(db, rpIn(v6.id, setupScale), cfgPub(), actor, new Date(), { writer: fbGia, env: { hardEnabled: false, mode: "COPILOT" }, killSwitch: khongKeo });
+    assert.ok(!rpTat.ok && rpTat.error.includes("Chưa đăng được"), "cổng ghi tắt ⇒ không đăng lại");
+    const chuaDang = (await db.select({ id: schema.creativeVariants.id }).from(schema.creativeVariants).where(eq(schema.creativeVariants.status, "GENERATED")).limit(1))[0];
+    if (chuaDang) {
+      const rpSai = await republishVariantInstant(db, rpIn(chuaDang.id, setupScale), cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+      assert.ok(!rpSai.ok && rpSai.error.includes("ĐÃ lên Facebook"), "mẫu chưa từng lên Facebook ⇒ không đăng lại");
+    }
 
     // (f6b) SỔ TRẦN NGÀY cộng ngân sách ngày của camp ngân sách ngày CÒN CHẠY từ những ngày trước — nếu không, camp chạy
     //       liên tục thành vô hình với trần 4 triệu / ngày.

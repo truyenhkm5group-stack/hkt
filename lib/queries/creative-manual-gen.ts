@@ -745,3 +745,42 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     recentIdeas,
   };
 }
+
+/**
+ * Bộ đồ nghề của hộp "Đăng lại camp" (tab ④ Đang chạy) — ĐÚNG các mảnh hộp "Đăng camp" dùng (lựa chọn setup, khung đăng lẻ +
+ * cổng chặn, tên theo khuôn của ngày, bằng chứng xếp fanpage, mã win) nhưng không đọc kết quả gen / hàng đợi như
+ * `loadManualGenPanel`: tab Đang chạy không cần chúng.
+ */
+export async function loadRepublishCtx(db: Db, now: Date, productIds: readonly string[]) {
+  const { config } = await readCurrentCreativeConfig(db);
+  const ids = [...new Set(productIds.filter(Boolean))];
+  const [setup, blockers, ctx, seq, pageName, fanpageEvidence, wins] = await Promise.all([
+    loadCampaignSetupOptions(db, now, config),
+    instantPublishBlockers(db, config, vnDay(now)),
+    loadNamingContext(db, config),
+    nextNameSeqOnDay(db, vnDay(now)),
+    fanpageDisplayName(db, config.pageId),
+    loadFanpageEvidence(db, ids),
+    productWinCodes(db, ids),
+  ]);
+  const names = defaultNames(ctx, vnDay(now), seq);
+  return {
+    ctx: {
+      pricing: { unitVnd: null, unitUsd: 0 },
+      instant: {
+        budgetVnd: config.budgetPerVariantVnd,
+        testDays: Math.max(1, Math.min(config.testDays, CREATIVE_HARD_LIMITS.maxTestDays)),
+        leadSeconds: INSTANT_PUBLISH.leadSeconds,
+        minScheduleLeadMinutes: INSTANT_PUBLISH.minScheduleLeadMinutes,
+        maxScheduleDays: INSTANT_PUBLISH.maxScheduleDays,
+        blockers,
+      },
+      pageName,
+      defaults: names,
+      campDefaults: names,
+      setup,
+      fanpageEvidence,
+    },
+    winCodes: Object.fromEntries(wins) as Record<string, ProductWinCode>,
+  };
+}

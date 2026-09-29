@@ -273,6 +273,18 @@ export const manualGenInstantSchema = manualGenPromoteSchema.extend({
 });
 
 /**
+ * "Đăng lại camp" một mẫu đã lên Facebook (tab ④ Đang chạy) — cùng câu chữ, ba tên, giờ hẹn như "Đăng camp", nhưng SETUP BẮT
+ * BUỘC: đăng lại là để chọn TKQC / fanpage khác, không có "theo cấu hình".
+ */
+export const creativeRepublishSchema = manualGenPromoteSchema
+  .omit({ imageId: true })
+  .extend({
+    variantId: z.string().trim().min(1, "Thiếu mẫu").max(200),
+    scheduleAt: z.string().datetime({ offset: true, message: "Giờ hẹn không hợp lệ" }).nullable().default(null),
+    setup: campaignSetupSchema,
+  });
+
+/**
  * Công tắc "Chạy mockup hằng ngày" trên thẻ nguồn (tab Nguồn ảnh). `kind = SOURCE` ⇒ id nguồn `OWN_AD`;
  * `kind = PRODUCT` ⇒ id mã hàng (thẻ ảnh sản phẩm thật). Máy chủ kiểm lại loại nguồn / mã có thật.
  */

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { loadManualGenPromptAction, publishManualGenImageNowAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualEditRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
+import { loadManualGenPromptAction, publishManualGenImageNowAction, republishVariantAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualEditRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
 import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
@@ -34,7 +34,7 @@ import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
 import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, studioCellLabel } from "@/lib/constants/creative-studio";
-import { VARIANT_COPY_LIMITS, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
+import { VARIANT_COPY_LIMITS, creativeRepublishSchema, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
 /**
  * GEN ẢNH BẰNG TAY (§5i) — phía trình duyệt: form "Gen ảnh" (số ảnh · ảnh tải lên · tiền ước tính), thẻ từng ảnh
@@ -1073,5 +1073,191 @@ export function PublishQueue({ items, canEdit, ctx }: { items: PublishQueueItem[
         );
       })}
     </div>
+  );
+}
+
+
+/** Mẫu đã lên Facebook cần cho hộp "Đăng lại camp" — đủ để xem trước, xếp fanpage và dựng tên. */
+export type RepublishSource = {
+  id: string;
+  slot: number;
+  headline: string;
+  primaryText: string;
+  imageId: string | null;
+  imageAvailable: boolean;
+  productId: string | null;
+  productName: string | null;
+  /** DNA của thiết kế (mẫu thiết kế mới) — xếp fanpage theo mẫu tương tự. */
+  designDna: Record<string, string> | null;
+  campaignName: string;
+};
+
+/**
+ * "ĐĂNG LẠI CAMP" (chủ shop 29/09/2026: "scale mẫu trên các TKQC khác, fanpages khác") — CÙNG khối Setup camp, tên theo khuôn,
+ * giờ hẹn và xem trước của hộp "Đăng camp". Mỗi lần bấm là MỘT camp mới (chiến dịch → nhóm → quảng cáo) từ ảnh + câu chữ của
+ * mẫu này; camp gốc không bị đụng. Người bấm là lượt duyệt chi — cần quyền duyệt chi quảng cáo.
+ */
+export function RepublishButton({ v, ctx, winCode }: { v: RepublishSource; ctx: ComposeCtx; winCode: ProductWinCode | null }) {
+  const target = (kind: CampaignSetup["campaignKind"]): CampPageTarget => ({ kind: kind === "WIN" && winCode ? "WIN" : "TEST", productId: v.designDna ? null : v.productId, dna: v.designDna });
+  const initSetup = (): CampaignSetup => {
+    const campaignKind = winCode?.declaredWin && !v.designDna ? "WIN" : "TEST";
+    const r = rankFanpagesForCamp(ctx.setup.pages, ctx.fanpageEvidence, target(campaignKind));
+    return { ...ctx.setup.defaults, campaignKind, pageId: r.prioritized > 0 ? r.pages[0].id : ctx.setup.defaults.pageId };
+  };
+  const [open, setOpen] = useState(false);
+  const [h, setH] = useState(v.headline);
+  const [t, setT] = useState(v.primaryText);
+  const [setup, setSetup] = useState<CampaignSetup>(initSetup);
+  const [names, setNames] = useState<Names3>({ campaign: "", adset: "", ad: "" });
+  const [hen, setHen] = useState(false);
+  const [henLuc, setHenLuc] = useState("");
+  const [pending, start] = useTransition();
+  const { instant } = ctx;
+  const wc = v.designDna ? null : winCode;
+
+  const mo = () => {
+    setH(v.headline);
+    setT(v.primaryText);
+    setSetup(initSetup());
+    setNames({ campaign: "", adset: "", ad: "" });
+    setHen(false);
+    setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
+    setOpen(true);
+  };
+  const auto = autoNamesFor(ctx, setup, wc);
+  const doiSetup = (next: CampaignSetup) => {
+    setSetup(next);
+    const to = namePartsOf(ctx, next, wc);
+    const known = nameKnownOf(ctx, wc);
+    setNames((cur) => ({
+      campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
+      adset: cur.adset ? adsetNameForGoal(cur.adset, setupOptimizationGoal(next)) : "",
+      ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
+    }));
+  };
+  const shown: Names3 = { campaign: names.campaign || auto.campaign, adset: names.adset || auto.adset, ad: names.ad || auto.ad };
+  const setName = (k: keyof Names3, val: string) => setNames((cur) => ({ ...cur, [k]: val.trim() === auto[k].trim() ? "" : val }));
+  const scheduleAt = hen ? vnInputToIso(henLuc) : null;
+  const setupOut = useMemo<CampaignSetup>(() => ({ ...setup, startAt: scheduleAt }), [setup, scheduleAt]);
+  const payload = { variantId: v.id, headline: h, primaryText: t, campaignName: names.campaign, adsetName: names.adset, adName: names.ad, predictedSeq: null, scheduleAt, setup: setupOut };
+  const loi = (() => {
+    if (hen && !scheduleAt) return "Chọn giờ hẹn.";
+    if (setup.budgetVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) return `Ngân sách tối đa ${formatVND(CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd)} một camp.`;
+    const r = creativeRepublishSchema.safeParse(payload);
+    return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
+  })();
+  const chan = instant.blockers.length > 0;
+  const dang = () =>
+    start(async () => {
+      const r = await republishVariantAction(payload);
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      const msg = `${r.names.campaign || "Camp mới"}: ${r.detail}`;
+      if (r.outcome === "LIVE" || r.outcome === "SCHEDULED") toast.success(msg);
+      else if (r.outcome === "PENDING") toast.warning(msg);
+      else toast.error(msg);
+      if (r.outcome !== "FAILED") setOpen(false);
+    });
+  const startPreview = hen ? (scheduleAt ? new Date(scheduleAt) : null) : new Date(Date.now() + instant.leadSeconds * 1000);
+
+  return (
+    <>
+      <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={mo} title="Đăng mẫu này thành một camp MỚI trên TKQC / fanpage khác — camp gốc giữ nguyên">
+        <Repeat2 className="size-3.5" /> Đăng lại camp
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
+        <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>
+              Đăng lại camp — mẫu #{v.slot}
+              {v.productName ? <span className="ml-1.5 text-[13px] font-normal text-muted-foreground">{v.productName}</span> : null}
+            </DialogTitle>
+            <DialogDescription>
+              Tạo một camp MỚI từ ảnh + câu chữ của mẫu này trên TKQC / fanpage bạn chọn. Camp gốc{v.campaignName ? ` (${v.campaignName})` : ""} vẫn chạy như cũ; camp mới có số đo và luật tắt riêng.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_280px]">
+            <div className="space-y-2.5">
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor={`rp-h-${v.id}`}>Tiêu đề</Label>
+                  <span className="numeric text-[11px] text-muted-foreground">
+                    {h.trim().length}/{VARIANT_COPY_LIMITS.headlineMaxChars}
+                  </span>
+                </div>
+                <Input id={`rp-h-${v.id}`} value={h} maxLength={VARIANT_COPY_LIMITS.headlineMaxChars} onChange={(e) => setH(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor={`rp-t-${v.id}`}>Nội dung chính</Label>
+                  <span className="numeric text-[11px] text-muted-foreground">
+                    {t.trim().length}/{VARIANT_COPY_LIMITS.primaryTextMaxChars}
+                  </span>
+                </div>
+                <Textarea id={`rp-t-${v.id}`} rows={7} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
+              </div>
+              <div className="space-y-1.5 rounded-lg border p-2.5">
+                <p className="text-[12.5px] font-semibold">Tên trên Ads Manager</p>
+                <Label htmlFor={`rp-c-${v.id}`} className="text-[11.5px]">
+                  Chiến dịch
+                </Label>
+                <Input id={`rp-c-${v.id}`} value={shown.campaign} onChange={(e) => setName("campaign", e.target.value)} />
+                <Label htmlFor={`rp-a-${v.id}`} className="text-[11.5px]">
+                  Nhóm quảng cáo
+                </Label>
+                <Input id={`rp-a-${v.id}`} value={shown.adset} onChange={(e) => setName("adset", e.target.value)} placeholder="(để trống = tên mặc định)" />
+                <Label htmlFor={`rp-d-${v.id}`} className="text-[11.5px]">
+                  Quảng cáo
+                </Label>
+                <Input id={`rp-d-${v.id}`} value={shown.ad} onChange={(e) => setName("ad", e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              <SetupFields value={setup} onChange={doiSetup} options={ctx.setup} winCode={wc} ranked={rankFanpagesForCamp(ctx.setup.pages, ctx.fanpageEvidence, target(setup.campaignKind))}>
+                <div className="space-y-1.5 rounded-md border border-brand/40 bg-brand/5 p-2">
+                  <p className="text-[11.5px] font-semibold">Thời gian bắt đầu</p>
+                  <div className="flex flex-wrap gap-3 text-[12.5px]">
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name={`rp-hen-${v.id}`} checked={!hen} onChange={() => setHen(false)} /> Chạy ngay
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name={`rp-hen-${v.id}`} checked={hen} onChange={() => setHen(true)} /> Hẹn giờ (giờ VN)
+                    </label>
+                    {hen ? <Input type="datetime-local" value={henLuc} onChange={(e) => setHenLuc(e.target.value)} className="h-8 w-auto text-[12.5px]" /> : null}
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Chạy LIÊN TỤC{startPreview ? ` từ ${vnShortStamp(startPreview)}` : ""} · {formatVND(setup.budgetVnd)}/ngày, không có giờ kết thúc — luật tắt QC tắt khi không hiệu quả, hoặc bạn tắt tay.
+                  </p>
+                </div>
+              </SetupFields>
+              {chan ? (
+                <ul className="list-disc rounded-lg border border-destructive/40 p-2.5 pl-6 text-[11.5px] text-destructive">
+                  {instant.blockers.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">Xem trước</p>
+              <AdPreview pageName={ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? ctx.pageName} primaryText={t.trim()} headline={h.trim()} imageId={v.imageId} imageAvailable={v.imageAvailable} alt={h || `Mẫu #${v.slot}`} />
+            </div>
+          </div>
+          <DialogFooter className="items-center gap-2 sm:justify-between">
+            <p className="text-[11.5px] text-muted-foreground">{loi ?? (chan ? "Cổng ghi đang chặn — xem lý do ở trên." : `Camp mới = ${formatVND(setup.budgetVnd)}/ngày, chạy tới khi tắt.`)}</p>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+                Đóng
+              </Button>
+              <Button type="button" onClick={dang} disabled={pending || !!loi || chan} title={chan ? instant.blockers.join(" ") : undefined}>
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />} {hen ? "Hẹn giờ đăng lại" : "Đăng lại camp ngay"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

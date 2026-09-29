@@ -8,11 +8,11 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, republishVariantInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { loadManualGenImagePrompt } from "@/lib/queries/creative-manual-gen";
-import { manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { creativeRepublishSchema, manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 import { bindOrganization } from "@/lib/platform/background";
 
 /**
@@ -294,4 +294,37 @@ export async function loadManualGenPromptAction(raw: unknown): Promise<{ ok: tru
   const r = await loadManualGenImagePrompt(await getDb(), parsed.data.imageId);
   if (!r) return { error: "Không tìm thấy ảnh." };
   return { ok: true, ...r };
+}
+
+/**
+ * "Đăng lại camp" (tab ④ Đang chạy) — camp MỚI từ ảnh + câu chữ của một mẫu đã lên Facebook, trên TKQC / fanpage / setup người
+ * chọn. Cùng quyền với "Đăng camp": soạn bài VÀ duyệt chi (người bấm là lượt duyệt của lô `INSTANT` riêng).
+ */
+export async function republishVariantAction(raw: unknown): Promise<{ ok: true; outcome: InstantOutcome; detail: string; names: { campaign: string; adset: string; ad: string } } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write") || !can(user, "expenses:write")) return { error: "Đăng lại camp cần cả quyền soạn bài (ideas:write) lẫn quyền duyệt chi quảng cáo (expenses:write)." };
+  const parsed = creativeRepublishSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const { config } = await readCurrentCreativeConfig(db);
+  const r = await republishVariantInstant(
+    db,
+    { variantId: d.variantId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, predictedSeq: d.predictedSeq, scheduleAt: d.scheduleAt ? new Date(d.scheduleAt) : null, setup: d.setup },
+    config,
+    actor,
+    new Date(),
+  );
+  if (!r.ok) return { error: r.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CREATIVE_REPUBLISH",
+    entity: "CREATIVE_VARIANT",
+    entityId: r.variantId,
+    after: { from: d.variantId, batchId: r.batchId, startAt: r.startAt.toISOString(), scheduled: r.scheduled, outcome: r.outcome, detail: r.detail, names: r.names, setup: d.setup },
+  });
+  revalidatePath(PATH);
+  return { ok: true, outcome: r.outcome, detail: r.detail, names: r.names };
 }

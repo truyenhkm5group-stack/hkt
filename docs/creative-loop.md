@@ -722,6 +722,21 @@ Luật (`lib/constants/creative-studio.ts`, đường ghi `lib/creative/manual-g
 - **Tạo lại tương tự** (`?tab=tao&remix=<lượt>`): điền lại form từ `creative_manual_gens.options` (migration 0174) + nguồn +
   ý tưởng của lượt đó. CHỈ điền sẵn — không vẽ gì cho tới khi người bấm Gen.
 
+## 5m. Đăng lại camp — scale mẫu sang TKQC / fanpage khác (chủ shop 29/09/2026)
+
+Chủ shop: *"các mẫu đang chạy thì thêm nút cho đăng lại camp để tôi có thể scale mẫu trên các TKQC khác, fanpages khác"*.
+
+- Tab ④ Đang chạy, cột Thao tác: **Đăng lại camp** trên mọi mẫu đã lên Facebook (đang chạy / đã tắt / hết khung) còn ảnh. Hộp
+  dùng ĐÚNG khối Setup camp của "Đăng camp" (TKQC · fanpage xếp theo bằng chứng · mục tiêu · ngân sách · vị trí · tuổi · giới tính
+  · MKTer · TEST / mã win), tên theo khuôn, hẹn giờ, xem trước; câu chữ sửa được.
+- Đường ghi `republishVariantInstant` (`lib/creative/manual-gen.ts`) đi đúng các bước của `publishManualGenImageInstant`: cấu hình
+  theo setup (trần một camp), khung giờ, mọi cổng chặn, MKTer, camp mã win, kiểm quảng cáo mẫu, lô `INSTANT` riêng mà người bấm là
+  lượt duyệt chi (cần `ideas:write` + `expenses:write`), rồi đăng.
+- Mỗi lần bấm là MỘT mẫu mới (`creative_variants` riêng): số đo, phán quyết, luật tắt đi theo nó — một TKQC chạy tốt không che
+  một TKQC chạy tệ. Camp gốc KHÔNG bị đụng. Mẫu mới không mang `parent_variant_id` (đó là quan hệ lai / đột biến của sổ học);
+  nguồn ghi ở `plan.republishOf` của lô và lý do của mẫu. Thiết kế mới giữ đúng mã TK cũ.
+- Hỏng trước khi có nhóm / mẩu nào trên Facebook ⇒ mẫu mới bị gạt + lô đánh dấu hỏng, không để dòng "đang đăng" treo.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

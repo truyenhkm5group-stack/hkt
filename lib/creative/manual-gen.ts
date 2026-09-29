@@ -1028,17 +1028,10 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
           }
         : undefined,
       names: async (batch) => {
-        const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
-        const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
-        const mk = input.marketerCode ?? null;
-        const kind = input.kindLabel ?? "TEST";
-        const goal = input.adsetGoal ?? null;
-        const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameForGoal(n.adset, goal) });
-        const d = withGoal(defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind));
-        const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind)) : null;
-        finalSeq = seq;
-        finalNames = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
-        return { nameSeq: seq, campaignName: finalNames.campaign, adsetName: finalNames.adset, adName: finalNames.ad };
+        const n = await batchNames(db, batch, input);
+        finalSeq = n.seq;
+        finalNames = n.names;
+        return n.row;
       },
     },
     cfg,
@@ -1054,6 +1047,23 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
     .returning({ id: schema.creativeManualGenImages.id });
   if (upd.length === 0) throw new Error("PROMOTE_RACE");
   return { ok: true, variantId: ins.variantId, batchId: ins.batchId, batchDay: ins.batchDay, slot: ins.slot, nameSeq: finalSeq, names: finalNames, designCode: code, priceVnd };
+}
+
+/**
+ * Ba tên theo khuôn của MỘT bài trong lô `batch` (số thứ tự theo NGÀY với lô `INSTANT`, theo lô với lô hằng ngày) — tên người
+ * đã sửa thắng, tên còn nguyên chữ theo khuôn ⇒ máy đặt đúng số thật lúc ghi. Dùng chung cho ảnh gen tay và "Đăng lại camp".
+ */
+async function batchNames(db: Db, batch: typeof schema.creativeBatches.$inferSelect, input: Pick<PromoteInput, "names" | "predictedSeq" | "marketerCode" | "kindLabel" | "adsetGoal">) {
+  const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
+  const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
+  const mk = input.marketerCode ?? null;
+  const kind = input.kindLabel ?? "TEST";
+  const goal = input.adsetGoal ?? null;
+  const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameForGoal(n.adset, goal) });
+  const d = withGoal(defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind));
+  const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind)) : null;
+  const names = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
+  return { seq, names, row: { nameSeq: seq, campaignName: names.campaign, adsetName: names.adset, adName: names.ad } };
 }
 
 /** Lỗi ghi đã biết ⇒ câu cho người; lỗi lạ ⇒ `null` (nơi gọi ném tiếp). */
@@ -1351,4 +1361,159 @@ export async function requeueFailedManualGenImage(db: Db, imageId: string): Prom
   const why = (await lastFailureOf(db, r.v.batchId)) ?? "lượt đăng trước hỏng";
   const ok = await requeueIfNothingSpendable(db, imageId, r.v.id, null, why, true);
   return ok ? { ok: true } : { ok: false, error: "Ảnh vừa đổi trạng thái — tải lại để xem." };
+}
+
+
+// ───────────────────────────── ĐĂNG LẠI CAMP (SCALE SANG TKQC / FANPAGE KHÁC) ─────────────────────────────
+
+/** Mẫu đã từng lên Facebook — đăng lại được. */
+export const REPUBLISHABLE_STATUSES = ["LIVE", "PAUSED", "ENDED"] as const;
+
+export type RepublishInput = Pick<PromoteInput, "headline" | "primaryText" | "names" | "predictedSeq"> & { variantId: string; scheduleAt: Date | null; setup: CampaignSetup };
+
+export type RepublishResult =
+  | { ok: true; variantId: string; batchId: string; names: { campaign: string; adset: string; ad: string }; startAt: Date; endAt: Date; scheduled: boolean; outcome: InstantOutcome; detail: string }
+  | { ok: false; error: string };
+
+/**
+ * "ĐĂNG LẠI CAMP" (chủ shop 29/09/2026: "thêm nút cho đăng lại camp để tôi có thể scale mẫu trên các TKQC khác, fanpages
+ * khác"). Mỗi lần bấm dựng MỘT camp MỚI (chiến dịch → nhóm → quảng cáo) từ ĐÚNG ảnh + câu chữ (người sửa được) của một mẫu đã
+ * lên Facebook, trên TKQC / fanpage / mục tiêu / ngân sách người chọn — ĐÚNG đường của "Đăng camp ngay": cấu hình theo setup,
+ * khung giờ, mọi cổng chặn, MKTer, camp mã win, kiểm quảng cáo mẫu, lô `INSTANT` riêng mà người bấm là lượt duyệt chi, trần
+ * ngân sách một camp. Camp gốc KHÔNG bị đụng (không tắt, không đổi ngân sách).
+ *
+ * Mẫu mới là một dòng `creative_variants` RIÊNG: số đo, phán quyết, luật tắt đi theo nó — một TKQC chạy tốt không che một TKQC
+ * chạy tệ. Nó KHÔNG mang `parent_variant_id` (đó là quan hệ "lai / đột biến" của sổ học); nguồn gốc ghi ở `plan.republishOf`
+ * của lô và ở lý do của mẫu. Thiết kế mới giữ ĐÚNG mã TK cũ (đơn đi theo một mã, không cấp mã thứ hai cho cùng thiết kế).
+ */
+export async function republishVariantInstant(db: Db, input: RepublishInput, baseCfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: InstantPublishDeps = {}): Promise<RepublishResult> {
+  const V = schema.creativeVariants;
+  const B = schema.creativeBatches;
+  const [src] = await db.select({ v: V, batchDay: B.batchDay }).from(V).innerJoin(B, eq(B.id, V.batchId)).where(eq(V.id, input.variantId)).limit(1);
+  if (!src) return { ok: false, error: "Không tìm thấy mẫu." };
+  const v = src.v;
+  if (!(REPUBLISHABLE_STATUSES as readonly string[]).includes(v.status)) return { ok: false, error: "Chỉ đăng lại được mẫu ĐÃ lên Facebook (đang chạy / đã tắt / đã hết khung)." };
+  if (!v.imageId) return { ok: false, error: "Mẫu không còn ảnh — không đăng lại được." };
+  const [img] = await db.select({ purgedAt: schema.creativeImages.purgedAt }).from(schema.creativeImages).where(eq(schema.creativeImages.id, v.imageId)).limit(1);
+  if (!img || img.purgedAt) return { ok: false, error: "Điểm ảnh của mẫu đã bị dọn — không đăng lại được." };
+  const genes = parseGenes(v.genes);
+  if (!genes) return { ok: false, error: "Bộ gen của mẫu hỏng — máy không học được từ bài đăng lại." };
+  if (!v.productId && !v.designConceptId) return { ok: false, error: "Mẫu không gắn mã hàng hay mã thiết kế — đơn của camp mới sẽ không quy về đâu." };
+
+  const eff = instantConfig(baseCfg, input.setup);
+  if (!eff.ok) return eff;
+  const cfg = eff.cfg;
+  const setup = input.setup;
+  const w = instantWindow(now, input.scheduleAt, cfg);
+  if (!w.ok) return w;
+  const blockers = await instantPublishBlockers(db, cfg, w.batchDay, deps);
+  if (blockers.length) return { ok: false, error: `Chưa đăng được: ${blockers.join(" ")}` };
+  const employees = setup.marketerId ? await readPayrollEmployees(db) : [];
+  const marketer = setup.marketerId ? pickMarketerOption(marketerOptions(employees), setup.marketerId, setup.marketerCode) : null;
+  if (setup.marketerId && !marketer) return { ok: false, error: setup.marketerCode ? `Mã MKTer ${setup.marketerCode} không còn là bí danh của MKTer đã chọn (trang Lương) — chọn lại.` : "MKTer đã chọn không còn trong danh sách nhân sự (trang Lương) hoặc chưa khai bí danh — chọn lại MKTer." };
+  if (marketer && input.names.campaign.trim()) {
+    const problem = marketerNameProblem(input.names.campaign.trim(), marketer, employees);
+    if (problem) return { ok: false, error: problem };
+  }
+  const winProductId = v.designConceptId ? null : v.productId;
+  const codeIndex = setup.campaignKind === "WIN" ? await loadProductCodeIndex(db) : [];
+  const win = setup.campaignKind === "WIN" && winProductId ? ((await productWinCodes(db, [winProductId], codeIndex)).get(winProductId) ?? null) : null;
+  if (setup.campaignKind === "WIN" && !win) return { ok: false, error: v.designConceptId ? "Mẫu thiết kế mới chưa có mã hàng — chỉ đăng được camp TEST." : "Mã hàng của mẫu không có mã đọc được trong tên chiến dịch — chỉ đăng được camp TEST." };
+  if (win && input.names.campaign.trim()) {
+    const problem = winNameProblem(input.names.campaign.trim(), win, codeIndex);
+    if (problem) return { ok: false, error: problem };
+  }
+  const writer = deps.writer ?? REAL_CREATIVE_WRITER;
+  let shape: string | null;
+  try {
+    shape = templateShapeError(applyCampaignSetup(await writer.readTemplateAd(cfg.templateAdId), setup), cfg.pageId, true);
+  } catch (e) {
+    shape = `không đọc được (${errText(e)})`;
+  }
+  if (shape) return { ok: false, error: `Chưa đăng được — quảng cáo mẫu ${cfg.templateAdId || "(chưa khai)"} ở tab Cấu hình & luật: ${shape} Chưa có gì lên Facebook.` };
+
+  let made: { variantId: string; batchId: string; names: { campaign: string; adset: string; ad: string } };
+  try {
+    made = await db.transaction(async (tx: Tx) => {
+      const t = tx as unknown as Db;
+      const [batch] = await tx
+        .insert(B)
+        .values({
+          kind: "INSTANT",
+          batchDay: w.batchDay,
+          status: "PENDING_APPROVAL",
+          slotCount: 1,
+          startAt: w.startAt,
+          endAt: w.endAt,
+          approvalDeadline: w.startAt,
+          plan: { instant: true, scheduled: w.scheduled, republishOf: v.id, budgetMode: DAILY_BUDGET_MODE, setup },
+          configSnapshot: cfg as unknown as Record<string, unknown>,
+          ruleVersion: CREATIVE_RULE_VERSION,
+        })
+        .returning();
+      let names = { campaign: "", adset: "", ad: "" };
+      const ins = await insertManualVariant(
+        t,
+        {
+          productId: v.productId,
+          genes,
+          primaryText: input.primaryText,
+          headline: input.headline,
+          why: `Đăng lại mẫu #${v.slot} (lô ${src.batchDay}) — ${actor.name}`,
+          imageId: v.imageId as string,
+          genModel: v.genModel,
+          extra: { imagePrompt: v.imagePrompt, productPhotoSourceId: v.productPhotoSourceId, inspirationSourceId: v.inspirationSourceId },
+          design: v.designConceptId ? async () => ({ designConceptId: v.designConceptId as string, why: `Đăng lại mẫu #${v.slot} (lô ${src.batchDay}) — cùng thiết kế — ${actor.name}` }) : undefined,
+          names: async (b) => {
+            const n = await batchNames(t, b, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setupOptimizationGoal(setup) });
+            names = n.names;
+            return n.row;
+          },
+        },
+        cfg,
+        actor,
+        now,
+        batch,
+      );
+      if (!ins.ok) throw new InstantAbort(ins.error);
+      const winProblem = win ? winNameProblem(names.campaign, win, codeIndex) : null;
+      if (winProblem) throw new InstantAbort(winProblem);
+      const nameProblem = marketer ? marketerNameProblem(names.campaign, marketer, employees) : null;
+      if (nameProblem) throw new InstantAbort(nameProblem);
+      const digest = approvalDigest(await batchApprovalContent(t, batch));
+      await tx.update(B).set({ status: "APPROVED", approvalDigest: digest, approvedAt: now, approvedByUserId: actor.id, approvedByName: actor.name, updatedAt: now }).where(eq(B.id, batch.id));
+      return { variantId: ins.variantId, batchId: batch.id, names };
+    });
+  } catch (e) {
+    if (e instanceof InstantAbort) return { ok: false, error: e.message };
+    const known = promoteErrorText(errText(e));
+    if (known) return { ok: false, error: known };
+    throw e;
+  }
+
+  let publishError = "";
+  let report: PublishBatchReport | null = null;
+  try {
+    report = await publishBatchNow(db, made.batchId, now, deps);
+  } catch (e) {
+    publishError = errText(e);
+  }
+  const [nv] = await db.select().from(V).where(eq(V.id, made.variantId)).limit(1);
+  const base = { ok: true as const, ...made, startAt: w.startAt, endAt: w.endAt, scheduled: w.scheduled };
+  if (nv?.status === "LIVE") return { ...base, outcome: w.scheduled ? "SCHEDULED" : "LIVE", detail: w.scheduled ? "Camp mới đã lên Facebook, tự chạy đúng giờ hẹn." : "Camp mới đã lên Facebook và đang chạy." };
+  const why = publishError || (await lastFailureOf(db, made.batchId)) || report?.detail || "Không rõ lý do — xem sổ ghi Facebook của lô.";
+  if (nv && nv.status !== "PAUSED" && nv.status !== "ENDED") {
+    // Chưa có nhóm / mẩu nào trên Facebook ⇒ gạt mẫu mới + đánh dấu lô hỏng, KHÔNG để một dòng "đang đăng" treo mãi.
+    const gat = await db
+      .update(V)
+      .set({ status: sql`case when ${V.status} = 'GENERATED' then 'REJECTED' else 'PUBLISH_FAILED' end`, genError: `Đăng lại chưa được: ${why}`.slice(0, 1000), updatedAt: new Date() })
+      .where(and(eq(V.id, nv.id), inArray(V.status, ["GENERATED", "PUBLISH_FAILED", "REJECTED"]), eq(V.fbPendingStep, ""), isNull(V.fbCampaignId), isNull(V.fbAdsetId), isNull(V.fbAdId)))
+      .returning({ id: V.id });
+    if (gat.length) {
+      await db.update(B).set({ status: "FAILED", error: `Đăng lại chưa được: ${why}`.slice(0, 2000), updatedAt: new Date() }).where(and(eq(B.id, made.batchId), inArray(B.status, ["APPROVED", "FAILED", "PUBLISHED"])));
+      return { ...base, outcome: "FAILED", detail: `Chưa đăng được — chưa có chiến dịch / nhóm nào trên Facebook, không đồng nào chảy. Lý do: ${why}` };
+    }
+  }
+  if (nv?.status === "PUBLISH_FAILED") return { ...base, outcome: "FAILED", detail: `Đăng hỏng giữa chừng: ${why} Chiến dịch đã tạo vẫn TẮT, không đồng nào chảy — xem sổ ghi Facebook của lô.` };
+  return { ...base, outcome: "PENDING", detail: `Chưa đăng xong: ${why} Lượt vòng mẫu (10 phút / lần) đi tiếp tới giờ chạy.` };
 }
