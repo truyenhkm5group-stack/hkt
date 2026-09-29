@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { PlatformAiSwitchControl } from "@/components/ai-usage/ai-controls";
 import { PageHeader } from "@/components/page-header";
 import { InvitePanel, RetrySetupButton, RevokeInviteButton, SignupModeControl } from "@/components/onboarding/platform-signup";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
@@ -7,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
+import { AI_BILLING_SOURCE_LABEL, formatUsd } from "@/lib/ai-usage/types";
+import { loadPlatformAiSummary } from "@/lib/ai-usage/view";
 import { listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
 import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
@@ -71,7 +74,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const selected = selectedCode ? health.organizations.find((o) => o.code === selectedCode) : undefined;
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
-  const [onboarding, invites, plans, registry, signup] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState()]);
+  const [onboarding, invites, plans, registry, signup, aiSummary] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState(), loadPlatformAiSummary(user)]);
   const secretsKey = secretsKeyPublicStatus();
   const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
   const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
@@ -219,6 +222,69 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           </div>
         </div>
       </SectionCard>
+
+      {aiSummary.ok ? (
+        <SectionCard
+          id="ai-usage"
+          title="D · AI — công tắc & chi phí tháng này"
+          description={`Top tổ chức theo chi phí AI ước tính · AI do nền tảng trả tiền: ${aiSummary.value.platformProvider.ready ? "SẴN SÀNG" : "TẮT"}`}
+          hint="Công tắc chỉ chặn AI Builder (mọi tổ chức, kể cả nhà); Copilot và job AI của nhà có trần tiền ngày riêng. AI do nền tảng trả tiền cần chủ nền tảng quyết (docs/platform/launch-gates.md mục D) — màn hình chỉ in có / chưa có, không bao giờ in khoá. Tiền là ƯỚC TÍNH theo bảng giá model; “chưa rõ” ≠ 0."
+          padded={false}
+        >
+          <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+            <div className="space-y-3 text-sm" data-launch-gate="ai">
+              <p className="font-semibold">Công tắc AI Builder toàn nền tảng</p>
+              <PlatformAiSwitchControl
+                enabled={aiSummary.value.platformSwitch.enabled}
+                stored={aiSummary.value.platformSwitch.stored}
+                readError={aiSummary.value.platformSwitch.readError}
+                updatedAt={aiSummary.value.platformSwitch.updatedAt ? formatDateTime(new Date(aiSummary.value.platformSwitch.updatedAt)) : null}
+                updatedByEmail={aiSummary.value.platformSwitch.updatedByEmail}
+                cacheSeconds={aiSummary.value.cacheSeconds}
+              />
+              <p className="text-xs text-muted-foreground" data-platform-ai={aiSummary.value.platformProvider.ready ? "ready" : "off"}>
+                AI của nền tảng ({aiSummary.value.platformProvider.envNames.enabled} + {aiSummary.value.platformProvider.envNames.apiKey}): {aiSummary.value.platformProvider.ready ? "có cấu hình — chỉ chạy cho tổ chức có gói mang credit > 0" : aiSummary.value.platformProvider.reason}
+              </p>
+            </div>
+            {aiSummary.value.top.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Chưa có lượt AI nào trong tháng này.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm" data-ai-top>
+                  <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2">Tổ chức</th>
+                      <th className="px-3 py-2">Nguồn</th>
+                      <th className="px-3 py-2 text-right">Lượt</th>
+                      <th className="px-3 py-2 text-right">Tiền ước tính</th>
+                      <th className="px-3 py-2 text-right">Bị chặn</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aiSummary.value.top.map((r) => (
+                      <tr key={r.orgCode} className="border-t border-hairline">
+                        <td className="px-3 py-1.5">
+                          <Link href={`/platform/org/${encodeURIComponent(r.orgCode)}#ai-usage`} className="font-medium text-primary hover:underline">
+                            {r.orgName ?? r.orgCode}
+                          </Link>
+                          <div className="font-mono text-[11px] text-muted-foreground">{r.orgCode}</div>
+                        </td>
+                        <td className="px-3 py-1.5 text-xs">{r.sources.map((x) => AI_BILLING_SOURCE_LABEL[x] ?? x).join(" · ")}</td>
+                        <td className="numeric px-3 py-1.5 text-right">{r.turns.toLocaleString("vi-VN")}</td>
+                        <td className="numeric px-3 py-1.5 text-right">
+                          {formatUsd(r.costUsd)}
+                          {r.unknownCost ? <span className="ml-1 text-[11px] text-muted-foreground">+{r.unknownCost} chưa rõ</span> : null}
+                        </td>
+                        <td className={cn("numeric px-3 py-1.5 text-right", r.blocked > 0 && "font-semibold text-destructive")}>{r.blocked.toLocaleString("vi-VN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Tự phục vụ — mã mời & tạo tổ chức"

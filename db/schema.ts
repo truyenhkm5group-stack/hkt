@@ -4317,7 +4317,8 @@ export const platformPlans = pgTable(
     key: text("key").primaryKey(),
     name: text("name").notNull(),
     description: text("description"),
-    limits: jsonb("limits").$type<Record<string, number | null>>().notNull().default({}),
+    /** Ô số (`null` = không giới hạn) + khoá `ai` (0175) là một đối tượng — `lib/ai-usage/types.ts::parseAiLimits`. */
+    limits: jsonb("limits").$type<Record<string, unknown>>().notNull().default({}),
     position: integer("position").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -4424,6 +4425,46 @@ export const platformSettings = pgTable(
     updatedByEmail: text("updated_by_email"),
   },
   () => [check("platform_settings_signup_mode_check", sql`"key" <> 'platform.signup.mode' OR ("value" #>> '{}') IN ('off','invite','open')`)],
+);
+
+/**
+ * SỔ DÙNG AI THỐNG NHẤT (0175 · docs/platform/ai-usage.md) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ. Một dòng cho MỘT
+ * lượt AI (một bản nháp AI Builder = một dòng, `requests` = số lời gọi model của lượt đó; một câu hỏi Copilot = một dòng).
+ * Ghi DUY NHẤT qua `recordAiUsage()` (`lib/ai-usage/ledger.ts`). Không lưu prompt, câu trả lời hay khoá.
+ *
+ *  · `billing_source` — AI TRẢ TIỀN: `BYOK` (khoá của chính tổ chức) · `PLATFORM` (credit của nền tảng) · `HOME` (khoá
+ *    `.env` của tổ chức nhà). Hạn mức đếm RIÊNG theo nguồn: BYOK của A không bao giờ trừ vào credit nền tảng.
+ *  · `cost_usd` / token `NULL` = CHƯA BIẾT (model chưa có trong bảng giá, lời gọi hỏng giữa chừng) — không phải 0 (luật 42).
+ *  · `status` `BLOCKED_QUOTA` = hạn mức chặn TRƯỚC khi gọi model: `requests = 0`, không token, không tiền.
+ */
+export const platformAiUsage = pgTable(
+  "platform_ai_usage",
+  {
+    id: id(),
+    at: ts("at").notNull().defaultNow(),
+    orgCode: text("org_code").notNull(),
+    feature: text("feature").notNull(),
+    billingSource: text("billing_source").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    requests: integer("requests").notNull().default(0),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    costUsd: doublePrecision("cost_usd"),
+    status: text("status").notNull(),
+    /** Khoá tài khoản người bấm (luật 34) — `NULL` = máy. */
+    actorId: text("actor_id"),
+    /** Id dòng của miền sinh ra lượt (bản nháp AI, lượt Copilot) — để tra ngược, không mang nội dung. */
+    ref: text("ref"),
+  },
+  (t) => [
+    index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
+    index("platform_ai_usage_at_idx").on(t.at),
+    check("platform_ai_usage_source_check", sql`${t.billingSource} in ('BYOK','PLATFORM','HOME')`),
+    check("platform_ai_usage_status_check", sql`${t.status} in ('OK','ERROR','BLOCKED_QUOTA')`),
+    check("platform_ai_usage_feature_check", sql`${t.feature} ~ '^[a-z][a-z0-9_]{1,40}$'`),
+    check("platform_ai_usage_requests_check", sql`${t.requests} >= 0`),
+  ],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
@@ -8928,6 +8969,7 @@ export const aiBlueprintDrafts = pgTable(
     check("ai_blueprint_drafts_mode_check", sql`${t.mode} in ('new','edit')`),
     check("ai_blueprint_drafts_status_check", sql`${t.status} in ('DRAFT','APPLIED','DISCARDED')`),
     check("ai_blueprint_drafts_applied_check", sql`${t.status} <> 'APPLIED' or ${t.installId} is not null`),
-    check("ai_blueprint_drafts_source_check", sql`${t.aiSource} is null or ${t.aiSource} in ('ORG_CONNECTION','HOME')`),
+    // 0175: thêm `PLATFORM` (AI do nền tảng trả tiền) — tập LỚN hơn, mọi dòng cũ vẫn hợp lệ.
+    check("ai_blueprint_drafts_source_check", sql`${t.aiSource} is null or ${t.aiSource} in ('ORG_CONNECTION','HOME','PLATFORM')`),
   ],
 );

@@ -260,7 +260,7 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/actions/workshop-ledger.ts": "Link Google Sheet công khai do người dùng dán vào form — không có credential môi trường.",
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",
   "lib/ai-builder/providers.ts":
-    "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials).",
+    "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials). Nhánh AI do NỀN TẢNG trả tiền (mặc định tắt) cũng dựng provider này với khoá TƯỜNG MINH `PLATFORM_AI_API_KEY` (lib/ai-usage/platform-ai.ts — từ chối khi trùng khoá của nhà), không bao giờ `ANTHROPIC_API_KEY`.",
   "lib/connectors/testers.ts":
     "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường nào; đích chỉ là máy chủ Lark / api.telegram.org, không theo chuyển hướng.",
 };

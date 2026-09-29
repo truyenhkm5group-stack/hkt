@@ -26,15 +26,17 @@ export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 /** Một lượt soạn blueprint có người đang chờ trước màn hình — hết 5 phút thì báo lỗi thay vì treo. */
 export const BUILDER_TIMEOUT_MS = 300_000;
 
-export type ByokOptions = { apiKey: string; model?: string | null; fetch?: typeof fetch };
+/** `name` chỉ đổi NHÃN (vd `anthropic-platform` cho khoá của nền tảng) — đường gửi, địa chỉ, cách đọc khoá giữ nguyên. */
+export type ByokOptions = { apiKey: string; model?: string | null; fetch?: typeof fetch; name?: string };
 
 export class ByokAnthropicProvider implements AiProvider {
-  readonly name = "anthropic-byok";
+  readonly name: string;
   readonly model: string;
   readonly schemaDialect: AiSchemaDialect = "anthropic";
   private client: Anthropic;
 
   constructor(opts: ByokOptions) {
+    this.name = opts.name ?? "anthropic-byok";
     this.model = opts.model?.trim() || MODEL_BY_TIER.anthropic.copilot;
     this.client = new Anthropic({
       apiKey: opts.apiKey,

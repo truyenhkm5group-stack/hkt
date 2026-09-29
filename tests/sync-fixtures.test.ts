@@ -439,6 +439,7 @@ import { testPlatformUi } from "./platform-ui.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
+import { testAiUsage } from "./ai-usage.test";
 import { testOrgExport } from "./org-export.test";
 import { testRestoreDrillConfig } from "./restore-drill-config.test";
 import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
@@ -2564,6 +2565,9 @@ async function main() {
   // Phase 12 · năm lỗi của bài chấp nhận: trang Duyệt LÕI + lối duyệt, /platform chỉ ở nhà, not-found theo thương hiệu,
   // số tiền của yêu cầu duyệt, bộ quét menu × module tắt — hai tổ chức THẬT `ap-svc` (cài mẫu dịch vụ) / `ap-si` (tự cấp, tự dọn).
   await testApprovalsCore();
+  // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
+  // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
+  await testAiUsage();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

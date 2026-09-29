@@ -9,6 +9,9 @@
  *  · Ghi: CHỈ bảng `ai_blueprint_drafts` của CSDL tổ chức ngữ cảnh. Mọi thực thể cấu hình do `installBlueprint` ghi
  *    qua dịch vụ sẵn có, với `expectedPlanHash` của đúng kế hoạch người đã xem.
  *  · Người bỏ chọn mục ⇒ MÁY CHỦ lọc gói đã lưu theo danh sách khoá (`filterBlueprint`) — client không gửi gói.
+ *  · Sổ dùng AI (`platform_ai_usage`, ai-usage.md): MỖI lượt soạn ghi ĐÚNG một dòng qua `recordAiUsage()` với nguồn tính
+ *    tiền đúng (BYOK · PLATFORM · HOME). Hạn mức AI (`checkAiQuota`) kiểm SAU khi biết nguồn và TRƯỚC khi gọi model:
+ *    vượt trần ⇒ một dòng `BLOCKED_QUOTA`, không gọi model, không tạo nháp.
  *  · Vòng đời DRAFT → APPLIED | DISCARDED, chuyển có điều kiện `status = 'DRAFT'` trong câu UPDATE (bấm hai lần không
  *    áp dụng hai lần). Mỗi bước một dòng `audit_logs` mang khoá tài khoản (luật 34).
  */
@@ -26,6 +29,9 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { draftBlueprint } from "@/lib/ai-builder/draft";
 import { readOrgBuilderState } from "@/lib/ai-builder/metadata";
 import { getBuilderAi } from "@/lib/ai-builder/provider";
+import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { checkAiQuota } from "@/lib/ai-usage/quota";
+import type { AiBillingSource } from "@/lib/ai-usage/types";
 import { filterBlueprint, sanitizeExcludedKeys, summarizeDraft } from "@/lib/ai-builder/select";
 import {
   AI_BUILDER_LIMITS,
@@ -41,6 +47,11 @@ import {
 
 type Row = typeof schema.aiBlueprintDrafts.$inferSelect;
 type OrgRef = { code: string; name: string; isHome: boolean };
+
+/** Nguồn tính tiền của sổ AI theo nguồn provider của AI Builder. */
+export function billingSourceOf(source: AiSourceKind): AiBillingSource {
+  return source === "ORG_CONNECTION" ? "BYOK" : source;
+}
 
 function fail<T>(error: string): AiBuilderResult<T> {
   return { ok: false, error };
@@ -156,6 +167,13 @@ export async function createDraft(user: SessionUser, input: { mode?: unknown; pr
   if (!ent.ok) return fail(ent.error);
   const ai = await getBuilderAi();
   if (!ai.ok) return fail(ai.reason);
+  const billing = billingSourceOf(ai.ai.source);
+  const usageBase = { orgCode: org.code, feature: "ai_builder" as const, source: billing, provider: ai.ai.provider.name, model: ai.ai.provider.model, actorId: user.id };
+  const quota = await checkAiQuota(org.code, billing);
+  if (!quota.ok) {
+    await recordAiUsage({ ...usageBase, requests: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, status: "BLOCKED_QUOTA" });
+    return fail(quota.error);
+  }
 
   const state = await readOrgBuilderState();
   let outcome: Awaited<ReturnType<typeof draftBlueprint>> | null = null;
@@ -190,6 +208,18 @@ export async function createDraft(user: SessionUser, input: { mode?: unknown; pr
       createdByEmail: user.email,
     })
     .returning();
+  // Lượt hỏng giữa chừng (SDK ném): số lời gọi / token / tiền CHƯA BIẾT ⇒ NULL, không phải 0 (luật 42).
+  await recordAiUsage({
+    ...usageBase,
+    provider: row.provider,
+    model: row.model,
+    requests: outcome?.calls ?? 1,
+    inputTokens: outcome ? row.inputTokens : null,
+    outputTokens: outcome ? row.outputTokens : null,
+    costUsd: outcome ? outcome.costUsd : null,
+    status: outcome ? "OK" : "ERROR",
+    ref: row.id,
+  });
   await audit({
     userId: user.id,
     userEmail: user.email,
@@ -199,7 +229,7 @@ export async function createDraft(user: SessionUser, input: { mode?: unknown; pr
     after: { mode, valid: row.valid, errors: (outcome?.validation.errors.length ?? 1), calls: row.aiCalls, source: row.aiSource, provider: row.provider, model: row.model, inputTokens: row.inputTokens, outputTokens: row.outputTokens, costUsd: row.costUsd, blueprintKey: outcome?.blueprint?.key ?? null },
     reason: prompt.slice(0, 300),
   });
-  return { ok: true, value: toView(row) };
+  return { ok: true, value: { ...toView(row), quotaWarning: quota.warning } };
 }
 
 // ───────────────────────────── XEM TRƯỚC / ÁP DỤNG / BỎ ─────────────────────────────

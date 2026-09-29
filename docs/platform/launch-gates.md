@@ -1,4 +1,4 @@
-# Cổng mở bán nền tảng — A · khoá bí mật kết nối · B · /start · C · sao lưu / khôi phục
+# Cổng mở bán nền tảng — A · khoá bí mật kết nối · B · /start · C · sao lưu / khôi phục · D · AI
 
 > Hai việc cuối cùng giữa "Phase 1 → 12 đã lên production" và "tổ chức thứ hai dùng được thật". Cả hai đều MẶC ĐỊNH TẮT
 > và tắt thì tổ chức nhà (VNX) không đổi gì. Trạng thái của cả hai hiện ở `/platform` → khung **Cổng mở bán**.
@@ -96,12 +96,35 @@ tập khôi phục cấu hình bằng blueprint ĐẠT trên PGlite và chạy t
 khôi phục cấu hình từ tệp (`/settings/export` → «Cài từ tệp JSON») — đã diễn tập tự động (`scripts/restore-drill-org-config.ts`).
 
 
+## D — AI: ai trả tiền, hạn mức, công tắc
+
+Hiện trạng đã có trong mã (`docs/platform/ai-usage.md`): sổ dùng AI thống nhất `platform_ai_usage` (0175) ghi MỌI lượt AI
+Builder (BYOK · PLATFORM · HOME) và mọi lượt Copilot của nhà; hạn mức AI theo gói (`limits.ai`, gieo cho trial /
+standard / internal) + ghi đè theo tổ chức; `checkAiQuota` chặn TRƯỚC khi gọi model; công tắc AI toàn nền tảng + theo tổ
+chức (không cần deploy, đệm 10 s); `/settings/plan`, `/platform/org/<mã>`, `/platform` hiện lượt / token / tiền ước tính.
+Mô hình A (BYOK — khách tự mang khoá) đang chạy. Mô hình B (nền tảng trả tiền) đã dựng nền và **TẮT**.
+
+| # | Cổng | Loại | Ai | Điều kiện đạt |
+|---|---|---|---|---|
+| D1 | **Ai trả tiền AI cho tổ chức khách: chỉ BYOK, hay có thêm credit nền tảng (B)** | quyết định kinh doanh | chủ nền tảng | Chỉ BYOK ⇒ không làm gì thêm (credit 0 ở mọi gói là trạng thái hiện tại). Có B ⇒ làm D2 → D4 theo thứ tự |
+| D2 | **Tài khoản AI RIÊNG của nền tảng** + trần chi tiêu phía nhà cung cấp | việc tay + quyết định | chủ nền tảng | Một tài khoản Anthropic KHÁC tài khoản của VNX (khoá trùng khoá nhà bị mã từ chối), có trần chi tiêu tháng ở console nhà cung cấp — lớp chặn cuối nếu sổ ước tính lệch hoá đơn |
+| D3 | **Nối `PLATFORM_AI_ENABLED` + `PLATFORM_AI_API_KEY` (+ `PLATFORM_AI_MODEL`) vào đường deploy** | thay đổi mã (PR riêng) | chủ nền tảng duyệt | Cùng khuôn đường ống của mục A (GitHub Secret → workflow → install-vps.sh ghi `.env` khi khác rỗng → container), có bài kiểm như `tests/launch-gates.test.ts`. HÔM NAY chưa nối: tên biến chỉ khai ở `.env.example` (không giá trị) |
+| D4 | **Credit / tháng cho từng gói** | quyết định kinh doanh | chủ nền tảng | Người vận hành sửa `platform_plans.limits.ai.platformCreditUsdPerMonth` (đề xuất `trial` 5 USD ≈ 4 bản nháp, `standard` 30 USD) hoặc ghi đè từng tổ chức ở `/platform/org/<mã>`. Kiểm: `/platform` khung D in "AI của nền tảng: có cấu hình"; một tổ chức thử không BYOK soạn được bản nháp, dòng sổ mang nguồn `PLATFORM` |
+| D5 | **Hạn mức mặc định cho BYOK** (10 lượt/ngày · 100/tháng · cảnh báo 20 / trần 50 USD ở `trial`) | quyết định | chủ nền tảng | Giữ hoặc sửa số trong `platform_plans`. Trần tiền của BYOK là tiền của KHÁCH — trần ở đây bảo vệ khách khỏi hoá đơn bất ngờ, không phải doanh thu |
+
+**Tắt khẩn cấp AI (không cần deploy):** `/platform` → khung «D · AI» → Tắt AI… → lý do → Xác nhận (mọi tổ chức, kể cả
+nhà, chỉ AI Builder). Một tổ chức: `/platform/org/<mã>` → «Dùng AI» → tích "Tắt AI Builder" → lý do → Lưu. Tắt cứng
+nhánh B: bỏ `PLATFORM_AI_ENABLED` khỏi `.env` rồi dựng lại container app.
+
 ## Bài kiểm
 
 - `tests/launch-gates.test.ts` — ba chặng của A (quét mã + CHẠY THẬT khối ghi `.env` dưới `bash -euo pipefail`: rỗng giữ
   nguyên từng byte, base64 qua `sed` nguyên vẹn, ký tự lạ bị từ chối, không in giá trị).
 - `tests/connectors.test.ts` — lưu → kiểm tra → bật → `openActiveConnection` ra đúng bản rõ; màn hình / action chỉ có
   `••••` + 4 ký tự và mã khoá rút gọn.
+- `tests/ai-usage.test.ts` — mục D: một dòng sổ / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, cảnh báo một lần / ngày,
+  A không trừ B, BYOK không trừ credit nền tảng, không cấu hình ⇒ không PLATFORM và không rơi về khoá nhà, công tắc chặn
+  trước model, người không vận hành không đổi được, chi phí chưa biết giữ NULL.
 - `tests/onboarding.test.ts` — bảng chân lý 6 trần × 3 cài đặt; trần `off` thắng; không phải người vận hành / tổ chức khác
   không đổi được và không để lại dòng; nhật ký có dòng; `/start` phản ánh ngay; qua hạn đệm thì thấy lượt ghi của tiến
   trình khác. `tests/tenant-attack.test.ts` — phiên của tổ chức khác gọi thẳng `setSignupModeAction` bị từ chối.
