@@ -850,7 +850,11 @@ export function testNoSecretPathsStatic() {
   const files = tepKho().filter((t) => /\.(ts|tsx)$/.test(t) && !t.startsWith("tests/"));
   const src = new Map(files.map((f) => [f, boChuThich(doc(f))]));
   const giaiMa = files.filter((f) => /\bopenSecrets\s*\(/.test(src.get(f) ?? "") && f !== "lib/connectors/secrets.ts");
-  assert.deepEqual(giaiMa, ["lib/connectors/service.ts"], "chỉ lib/connectors/service.ts được giải mã bí mật kết nối");
+  // Ngoại lệ DUY NHẤT: script kiểm khoá của người vận hành (ops platform-secrets-verify) giải CANARY tổng hợp của chính
+  // nó (tổ chức giả `__canary__`) để chứng minh khoá production giải được bản mã đã lưu qua deploy. Nó không chạm
+  // `org_connections` / `secrets_enc` — hai phép quét ngay dưới vẫn chặn điều đó.
+  assert.deepEqual(giaiMa, ["lib/connectors/service.ts", "scripts/platform-secrets-verify.ts"], "chỉ lib/connectors/service.ts được giải mã bí mật kết nối (cộng canary của script kiểm khoá)");
+  assert.ok(!/\borgConnections\b|secretsEnc|secrets_enc/.test(src.get("scripts/platform-secrets-verify.ts") ?? ""), "script kiểm khoá không chạm bảng / cột bí mật kết nối");
   const chamBanMa = files.filter((f) => /\bsecretsEnc\b|secrets_enc/.test(src.get(f) ?? "") && !["db/schema.ts", "lib/connectors/service.ts"].includes(f));
   assert.deepEqual(chamBanMa, [], "chỉ schema + service chạm cột bản mã");
   const chamBang = files.filter((f) => /\borgConnections\b/.test(src.get(f) ?? "") && !["db/schema.ts", "lib/connectors/service.ts"].includes(f));

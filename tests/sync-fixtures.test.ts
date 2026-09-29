@@ -450,6 +450,7 @@ import { testRestoreDrillPg } from "./restore-drill-pg.test";
 import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
 import { testConnectors } from "./connectors.test";
 import { testLaunchGatesPipeline } from "./launch-gates.test";
+import { testPlatformSecretsVerify } from "./platform-secrets-verify.test";
 import { testBlueprints } from "./blueprints.test";
 import { testCustomObjects } from "./custom-objects.test";
 import { testAiBuilder } from "./ai-builder.test";
@@ -2544,6 +2545,8 @@ async function main() {
   await testConnectors();
   // Cổng mở bán A: PLATFORM_SECRETS_KEY đi đủ ba chặng secret → workflow → bootstrap/install → .env, rỗng không đè, không in.
   await testLaunchGatesPipeline();
+  // ops platform-secrets-verify: kiểm khoá bí mật trên production (canary niêm / giải / xoay, quét CSDL + log) — khoá giả.
+  await testPlatformSecretsVerify();
   await testCustomObjects();
   // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
   // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.
