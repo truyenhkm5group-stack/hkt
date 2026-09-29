@@ -14,25 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
 import { OrderValueFilterControl } from "@/components/order-value-filter";
 import { ValueTierSection } from "@/app/(dashboard)/reports/returns/value-tier-section";
-import { orderValueActive, orderValueLabel, parseOrderValue } from "@/lib/constants/order-value";
+import { orderValueLabel } from "@/lib/constants/order-value";
 import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/queries/order-source";
-import { logisticsPerformance, SUCCESS_RATE_TERMINAL_LABEL } from "@/lib/queries/logistics";
+import { SUCCESS_RATE_TERMINAL_LABEL } from "@/lib/queries/logistics";
 import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
-import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
-import { getReturnIntelligence, TREND_GRAINS, type TrendGrain } from "@/lib/queries/return-intelligence";
-import { listAttributedMarketers } from "@/lib/queries/order-marketer";
-import { listProductCodes } from "@/lib/queries/product-code";
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
-import { RETURN_REASONS, RETURN_REASON_GROUPS, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
-import { param, parseListParams, type SearchParams } from "@/lib/search-params";
-import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
+import { type SearchParams } from "@/lib/search-params";
+import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION } from "@/lib/constants/report-time-basis";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
@@ -64,93 +59,11 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
-  const params = parseListParams(raw, {
-    defaultSort: "successRate",
-    defaultDir: "asc",
-    filterKeys: ["min", "product", "basis", "group", "reason", "marketer", "trend"],
-    sortable: RETURN_RATE_SORTABLE,
-    defaultPeriod: "90d",
-    defaultPageSize: 50,
-  });
-  const minShipped = Math.max(1, Number(params.filters.min?.[0] ?? "1") || 1);
-  const variantKey = param(raw, "variant");
-  /*
-    BỘ LỌC GIÁ TRỊ ĐƠN — xem `lib/constants/order-value.ts` cho định nghĩa và lý do chọn giá chốt.
-    Nó áp cho KPI tổng quan, bảng theo mã, bảng theo nguồn đơn và bảng lý do hoàn, tức mọi con số
-    trên trang trừ bảng "theo bậc giá trị đơn" (bảng ấy CHÍNH LÀ phép phân bậc).
-  */
-  const giaTriDon = parseOrderValue(raw);
-  const dangLocGiaTri = orderValueActive(giaTriDon);
-  /*
-    MỐC LỌC LÀ MỘT LỰA CHỌN CÓ TÊN, KHÔNG PHẢI MỘT GIẢ ĐỊNH NGẦM.
-
-    Mặc định `SHIPPED` vì bảng này có cột "Đã gửi" — nó trả lời "lô hàng gửi trong khoảng này đi
-    tới đâu rồi". Người muốn hỏi câu khác ("đơn chốt tuần này ra sao") đổi sang `ORDERED`, và màn
-    hình nói rõ đang ở mốc nào.
-  */
-  const basis: TimeBasis = TIME_BASES.includes((params.filters.basis?.[0] ?? "") as TimeBasis) ? (params.filters.basis![0] as TimeBasis) : "SHIPPED";
-  const codes = params.filters.product?.length ? params.filters.product : undefined;
-  const marketerIds = params.filters.marketer?.length ? params.filters.marketer : undefined;
-  const trendGrain: TrendGrain = TREND_GRAINS.includes((params.filters.trend?.[0] ?? "") as TrendGrain) ? (params.filters.trend![0] as TrendGrain) : "DAY";
-  /*
-    ═══ DRILLDOWN BA TẦNG SỐNG TRONG URL ═══
-
-    `group` → `reason` → `pcode`. Ba tham số riêng, không phải một chuỗi ghép, để nút Lùi của
-    trình duyệt đi ngược đúng từng tầng và người đọc dán được đường dẫn đúng chỗ mình đang nhìn.
-    Giá trị lạ bị bỏ về `null` chứ không làm sập trang — URL là đầu vào của người ngoài.
-  */
-  const openReason = (RETURN_REASONS as readonly string[]).includes(params.filters.reason?.[0] ?? "") ? (params.filters.reason![0] as ReturnReason) : null;
-  const openGroup = (RETURN_REASON_GROUPS as readonly string[]).includes(params.filters.group?.[0] ?? "") ? (params.filters.group![0] as ReturnReasonGroup) : null;
-  const openProduct = (param(raw, "pcode") || "").trim() || null;
-
-  /*
-    ═══ KỲ TRƯỚC CÙNG ĐỘ DÀI — TÍNH MỘT LẦN, DÙNG CHO MỌI PHÉP SO ═══
-
-    Chỉ có kỳ trước khi kỳ hiện tại CÓ CẢ HAI ĐẦU MỐC. Xem "tất cả" thì không có gì để so, và bịa
-    ra một "kỳ trước" cho nó là bịa ra một mũi tên xu hướng.
-  */
-  const previous =
-    params.period.from && params.period.to
-      ? (() => {
-          const doDai = params.period.to.getTime() - params.period.from.getTime();
-          return { from: new Date(params.period.from.getTime() - doDai - 1), to: new Date(params.period.from.getTime() - 1) };
-        })()
-      : null;
-
-  const reasonFilter = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
-
-  /*
-    MỘT LƯỢT SONG SONG, KHÔNG PHẢI HAI LƯỢT NỐI ĐUÔI.
-
-    Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca. Nó
-    chỉ cần ĐÚNG báo cáo đó, nên bắt đầu ngay khi báo cáo lý do xong (`reasonP.then`), không đứng chờ
-    bảng theo mẫu mã.
-
-    ĐỪNG TRÔNG ĐỢI NÓ NHANH HƠN NHIỀU: đo sau deploy (#382) trang vẫn 7,4 s so với 6,9 s trước đó.
-    Máy chủ có hai nhân và bể năm kết nối; các câu nặng tranh nhau đúng hai nhân ấy, nên xếp lại thứ
-    tự không bớt được việc. Chỗ sửa thật là BỚT VIỆC: `reasonsForShipments` thôi kéo mọi sự kiện
-    (#383, trang còn 4,7 s), và câu dự phóng GTC + câu xu hướng thôi tính trạng thái con / mốc bàn giao
-    lặp lại cho từng đơn (xem `getProjectedDeliveryMetrics`).
-
-    (Một lần đọc số sai đáng ghi lại: cột "ứng dụng" của `ops perf-probe` gồm CẢ các câu chạy trong
-    `chayKhongJit` — chúng đi `Client.query`, bộ đếm "CSDL" chỉ bọc `Pool.query`. Từng đọc cột ấy
-    thành "Node một luồng đang bận"; EXPLAIN cho thấy đó là SQL.)
-
-    Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
-  */
-  const reasonP = getReturnReasonReport(reasonFilter);
-  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia] = await Promise.all([
-    getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
-    getReturnRateSummary(params.period, params.q, basis, giaTriDon),
-    variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
-    getReturnRateBySource(params.period, params.q, giaTriDon),
-    reasonP,
-    listProductCodes(),
-    listAttributedMarketers(),
-    logisticsPerformance(params.period, giaTriDon),
-    reasonP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
-    getReturnRateByTier(params.period, params.q, basis),
-  ]);
+  // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
+  // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
+  const thamSo = returnsPageParams(raw);
+  const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
+  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia } = await loadReturnsPage(thamSo);
 
   const selected = variantKey ? all.find((r) => r.key === variantKey) : null;
 

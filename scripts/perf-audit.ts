@@ -188,6 +188,47 @@ async function main() {
     await doKhoi("/reports/returns · theo bậc giá trị đơn", () => rr.getReturnRateByTier(D90, "", "SHIPPED"));
   }
 
+  /*
+    ═══════════ /inventory/returns: THỜI GIAN VÀ DUNG LƯỢNG TỪNG KHỐI ═══════════
+
+    Smoke 29/09/2026: 4,2–5,2 s · 1.563 kB — đầu phản hồi 0,4–0,9 s, thân 3,8–4,3 s. Trang CỐ Ý tải
+    trọn hàng đợi đếm (tới `PENDING_STATION_CAP`) để bộ lọc ở trạm đếm không nói "0 kiện" trên một danh
+    sách bị cắt — nên trước khi đề xuất bớt gì phải biết khối nào nặng, và nặng vì thời gian hay vì byte.
+    Tham số là CHÍNH các hằng của `app/(dashboard)/inventory/returns/page.tsx`. Chỉ in thời gian, dung
+    lượng và số dòng — không in dữ liệu khách (kho PUBLIC).
+  */
+  {
+    const ins = await import("@/lib/returns/inspection");
+    const { PENDING_STATION_CAP } = await import("@/lib/returns/inspection-filter");
+    const { receiveQueue } = await import("@/lib/returns/receive-queue");
+    const { hmtRunSummary } = await import("@/lib/returns/hmt-provenance");
+    const { latestHmtWorkbookMeta } = await import("@/lib/returns/hmt-source");
+    const ex = await import("@/lib/queries/return-exceptions");
+    const kpi = await import("@/lib/queries/return-warehouse-kpi");
+    const { inspectionTruth } = await import("@/lib/queries/inspection-truth");
+    const un = await import("@/lib/returns/unidentified");
+    const dis = await import("@/lib/queries/return-dispositions");
+    const { getReturnPipeline } = await import("@/lib/queries/return-pipeline");
+    await doKhoi("/inventory/returns · bảng đếm", () => ins.inspectionDashboard());
+    await doKhoi("/inventory/returns · hàng đợi đếm (thô)", () => ins.listPendingInspections(PENDING_STATION_CAP));
+    await doKhoi("/inventory/returns · hàng đợi đếm (gửi xuống trình duyệt)", async () => (await ins.listPendingInspections(PENDING_STATION_CAP)).map(ins.toStationRow));
+    await doKhoi("/inventory/returns · hàng chờ nhận", () => receiveQueue({ limit: 400, q: "" }));
+    await doKhoi("/inventory/returns · lượt HMT", () => hmtRunSummary());
+    await doKhoi("/inventory/returns · sổ HMT (meta)", () => latestHmtWorkbookMeta());
+    await doKhoi("/inventory/returns · hàng đợi ngoại lệ", () => ex.returnExceptionQueues());
+    await doKhoi("/inventory/returns · chất lượng dữ liệu", () => ex.returnDataQuality());
+    await doKhoi("/inventory/returns · KPI kho", () => kpi.returnWarehouseKpi());
+    await doKhoi("/inventory/returns · năng suất 30 ngày", () => kpi.returnThroughput(30));
+    await doKhoi("/inventory/returns · theo người đếm", () => kpi.returnByInspector(30));
+    await doKhoi("/inventory/returns · theo mã 90 ngày", () => kpi.returnBySku(90));
+    await doKhoi("/inventory/returns · sự thật kiểm hàng", () => inspectionTruth());
+    await doKhoi("/inventory/returns · món không nhãn", () => un.listUnidentifiedReturns({ limit: 60 }));
+    await doKhoi("/inventory/returns · tóm tắt không nhãn", () => un.unidentifiedSummary());
+    await doKhoi("/inventory/returns · hàng đợi kết cục", () => dis.listDispositionQueue({ limit: 300 }));
+    await doKhoi("/inventory/returns · kết cục gần đây", () => dis.listRecentDispositions(30));
+    await doKhoi("/inventory/returns · đường ống hoàn (Suspense)", () => getReturnPipeline());
+  }
+
   results.sort((a, b) => b.ms - a.ms);
   const total = results.reduce((t, r) => t + r.ms, 0);
   kichThuoc.sort((a, b) => b.kb - a.kb);

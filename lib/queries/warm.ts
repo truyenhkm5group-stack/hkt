@@ -6,6 +6,7 @@ import { getInventoryDecisionReport } from "@/lib/queries/inventory-decision";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { ownerDecisionAdsPeriod } from "@/lib/queries/owner-decisions";
 import { getPurchasingReport } from "@/lib/queries/purchasing";
+import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -39,11 +40,21 @@ import { resolvePeriod } from "@/lib/search-params";
  */
 const KY_HAY_MO = ["30d"] as const;
 
-/** Một mục giữ ấm: `key` là nhãn trong nhật ký job (KHÔNG phải khoá đệm — khoá đệm do chính hàm đọc dựng). */
-export type WarmTask = { key: string; run: () => Promise<unknown> };
+/**
+ * Một mục giữ ấm: `key` là nhãn trong nhật ký job (KHÔNG phải khoá đệm — khoá đệm do chính hàm đọc dựng).
+ *
+ * `everyMinutes` — NHỊP RIÊNG của mục, thưa hơn nhịp job (4 phút). Mục đắt mà trang của nó ít người mở
+ * không đáng tính lại mỗi 4 phút trên máy 2 nhân: `memo` vẫn trả số cũ ngay tới 15 phút sau khi hết
+ * hạn (`NGUONG_QUA_CU`) rồi tự làm mới phía sau, nên nhịp dưới 15 phút là đủ để người mở trang không
+ * bao giờ phải chờ lượt tính nguội. Chỉ lượt THÀNH CÔNG mới ghi mốc — mục hỏng thử lại ở lượt kế.
+ */
+export type WarmTask = { key: string; run: () => Promise<unknown>; everyMinutes?: number };
 
-export type WarmTiming = { key: string; ms: number; ok: boolean };
-export type WarmResult = { warmed: string[]; failed: { key: string; error: string }[]; timings: WarmTiming[]; ms: number };
+export type WarmTiming = { key: string; ms: number; ok: boolean; skipped?: boolean };
+export type WarmResult = { warmed: string[]; failed: { key: string; error: string }[]; skipped: string[]; timings: WarmTiming[]; ms: number };
+
+/** Mốc làm ấm THÀNH CÔNG gần nhất của mục có nhịp riêng — sống cùng tiến trình giữ bộ nhớ đệm. */
+const lanAmCuoi = new Map<string, number>();
 
 /**
  * Chạy lần lượt từng mục, mỗi mục một `try/catch` RIÊNG: một nguồn hỏng (vd tín hiệu mẫu ném vì bảng
@@ -53,17 +64,27 @@ export type WarmResult = { warmed: string[]; failed: { key: string; error: strin
  * Mục trúng đệm CŨ (`memo` trả số cũ ngay, làm mới phía sau) đo ra gần 0 ms: lượt làm mới vẫn chạy trong
  * tiến trình, người mở trang kế tiếp nhận số mới. Con số nhỏ ở đây KHÔNG có nghĩa là nguồn rẻ.
  */
-export async function runWarms(tasks: readonly WarmTask[]): Promise<WarmResult> {
+export async function runWarms(tasks: readonly WarmTask[], opts: { now?: () => number; lastRun?: Map<string, number> } = {}): Promise<WarmResult> {
+  const now = opts.now ?? Date.now;
+  const lastRun = opts.lastRun ?? lanAmCuoi;
   const t0 = Date.now();
   const warmed: string[] = [];
   const failed: { key: string; error: string }[] = [];
+  const skipped: string[] = [];
   const timings: WarmTiming[] = [];
   // TUẦN TỰ, không song song: máy chỉ có 2 nhân và mục đích ở đây là dựng đệm nền, không phải
   // giành CPU với người đang mở trang. Chạy song song sẽ làm chậm đúng thứ nó định làm nhanh.
   for (const task of tasks) {
+    const truoc = lastRun.get(task.key);
+    if (task.everyMinutes && truoc !== undefined && now() - truoc < task.everyMinutes * 60_000) {
+      skipped.push(task.key);
+      timings.push({ key: task.key, ms: 0, ok: true, skipped: true });
+      continue;
+    }
     const t = Date.now();
     try {
       await task.run();
+      if (task.everyMinutes) lastRun.set(task.key, now());
       warmed.push(task.key);
       timings.push({ key: task.key, ms: Date.now() - t, ok: true });
     } catch (error) {
@@ -71,7 +92,7 @@ export async function runWarms(tasks: readonly WarmTask[]): Promise<WarmResult> 
       timings.push({ key: task.key, ms: Date.now() - t, ok: false });
     }
   }
-  return { warmed, failed, timings, ms: Date.now() - t0 };
+  return { warmed, failed, skipped, timings, ms: Date.now() - t0 };
 }
 
 /** Tổng quan + Tóm tắt & rủi ro — kỳ mặc định. */
@@ -119,13 +140,25 @@ export async function warmCockpit(): Promise<WarmResult> {
   return runWarms(cockpitWarmTasks());
 }
 
+/**
+ * ═══════ BÁO CÁO NẶNG TRONG MENU — NHỊP 10 PHÚT ═══════
+ *
+ * /reports/returns (Tỷ lệ giao thành công) mất 4–5 s ở lượt nguội (smoke 29/09/2026), chủ yếu vì dự
+ * phóng GTC + tầng quyết định + lý do hoàn. Mục này gọi ĐÚNG hai hàm mà trang gọi, với `{}` — trang
+ * mặc định người dùng mở từ menu — nên khoá đệm trùng khoá trang đọc theo cấu trúc. Bộ lọc khác
+ * (kỳ khác, lọc mã, lọc giá trị) người dùng vẫn tự trả giá một lần rồi được đệm.
+ */
+export function reportWarmTasks(): WarmTask[] {
+  return [{ key: "reports:returns", everyMinutes: 10, run: () => loadReturnsPage(returnsPageParams({})) }];
+}
+
 export async function warmDashboard(): Promise<WarmResult> {
-  return runWarms([...dashboardWarmTasks(), ...cockpitWarmTasks()]);
+  return runWarms([...dashboardWarmTasks(), ...cockpitWarmTasks(), ...reportWarmTasks()]);
 }
 
 /** Một dòng cho `sync_runs.detail`: mỗi mục kèm thời gian, mục hỏng kèm câu lỗi. */
 export function warmDetail(r: WarmResult): string {
-  const muc = r.timings.map((t) => `${t.key} ${t.ms} ms${t.ok ? "" : " ✗"}`).join(" · ") || "không mục nào";
+  const muc = r.timings.map((t) => (t.skipped ? `${t.key} chưa tới nhịp` : `${t.key} ${t.ms} ms${t.ok ? "" : " ✗"}`)).join(" · ") || "không mục nào";
   const loi = r.failed.length ? ` · LỖI ${r.failed.map((f) => `${f.key}: ${f.error}`).join(" | ")}` : "";
-  return `ấm ${r.warmed.length}/${r.timings.length} mục (${muc}) · ${r.ms} ms${loi}`.slice(0, 900);
+  return `ấm ${r.warmed.length}/${r.timings.length - r.skipped.length} mục (${muc}) · ${r.ms} ms${loi}`.slice(0, 900);
 }

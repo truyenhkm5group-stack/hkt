@@ -20,6 +20,7 @@
  */
 import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { clearMemo } from "@/lib/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -146,6 +147,8 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     },
   });
 
+  // Báo cáo lý do hoàn nhớ đệm 90 giây — người vừa xác nhận phải thấy NGAY con số mới.
+  clearMemo();
   revalidatePath("/shipments");
   revalidatePath("/reports/returns");
   return { ok: true };
