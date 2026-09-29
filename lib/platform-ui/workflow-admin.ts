@@ -11,6 +11,8 @@ import { listRuns, listStaleRuns, previewRule, runWorkflows } from "@/lib/workfl
 import { getRule, listRules, saveRule, setRuleMode, setRuleStatus } from "@/lib/workflow/rules";
 import { STALE_RUN_KIND_LABEL, type StaleRun } from "@/lib/workflow/stale";
 import type { WorkflowMode, WorkflowRule, WorkflowRunRow } from "@/lib/workflow/types";
+import { WORKFLOW_CADENCE_DEFAULT_MINUTES, workflowScheduleSentence } from "@/lib/constants/workflow-cadence";
+import { workflowCadenceOf } from "@/lib/workflow/scheduled";
 
 /**
  * ═══════════ LÕI CỦA MÀN HÌNH LUẬT TỰ ĐỘNG ═══════════
@@ -67,6 +69,16 @@ export async function loadWorkflowList(user: SessionUser): Promise<Loaded<Workfl
 }
 
 /**
+ * Câu «máy tự chạy luật mấy phút một lượt» cho màn hình luật — đọc CÙNG nhịp mà job `workflows` dùng
+ * (`lib/constants/workflow-cadence.ts` + gói của tổ chức người xem). Tổ chức lấy từ PHIÊN, không tham số nào nhận mã.
+ */
+export async function loadWorkflowScheduleSentence(user: SessionUser): Promise<string | null> {
+  if (workflowAdminDenial(user) || !user.organization) return null;
+  const org = user.organization;
+  return workflowScheduleSentence(org, org.isHome ? { minutes: WORKFLOW_CADENCE_DEFAULT_MINUTES } : await workflowCadenceOf(org.code));
+}
+
+/**
  * Đối tượng chọn được trong form luật: `customizable` + module đang bật (cùng luật với màn hình Mô hình dữ liệu),
  * mỗi đối tượng kèm danh mục field (điều kiện) và field trạng thái custom (trigger). Đối tượng mà dịch vụ metadata
  * từ chối đọc (module vừa tắt) bị bỏ, không làm hỏng cả trang.
@@ -109,6 +121,8 @@ export type WorkflowEditorView = {
   events: EventOption[];
   objects: WorkflowObjectOption[];
   runs: WorkflowRunRow[];
+  /** Câu nhịp tự chạy của tổ chức người xem (`loadWorkflowScheduleSentence`). */
+  schedule: string | null;
 };
 
 export const RECENT_RUNS_LIMIT = 30;
@@ -119,11 +133,12 @@ export async function loadWorkflowEditor(user: SessionUser, id: string | null): 
   const [rules, objects] = await Promise.all([listRules(), workflowObjects(user)]);
   const events = workflowEventOptions();
   const takenKeys = rules.map((r) => r.key);
-  if (id === null) return { ok: true, value: { rule: null, takenKeys, events, objects, runs: [] } };
+  const schedule = await loadWorkflowScheduleSentence(user);
+  if (id === null) return { ok: true, value: { rule: null, takenKeys, events, objects, runs: [], schedule } };
   const rule = await getRule(id);
   if (!rule) return denied(`Không có luật «${id}» trong tổ chức này.`);
   const runs = await listRuns({ ruleId: rule.id, limit: RECENT_RUNS_LIMIT });
-  return { ok: true, value: { rule, takenKeys, events, objects, runs } };
+  return { ok: true, value: { rule, takenKeys, events, objects, runs, schedule } };
 }
 
 // ═══════════ GHI ═══════════
@@ -192,8 +207,8 @@ export type WorkflowRunNowResult = { ok: true; events: number; runs: number; exe
 /**
  * «Chạy lượt kiểm tra ngay» — một lượt `runWorkflows()` cho ĐÚNG tổ chức của người bấm.
  *
- * Máy chạy ké job `alerts` (10 phút). Tổ chức tắt module Cần xử lý (vd mẫu bán buôn) thì không có lượt tự động nào:
- * nút này là đường chạy cho họ mà KHÔNG đổi lịch scheduler (AGENTS.md §7). Bọc `withOrganization(mã trong phiên)`
+ * Tổ chức nhà: máy chạy ké job `alerts` (10 phút). Tổ chức khách: job `workflows` tự chạy theo nhịp của gói (mặc định
+ * 10 phút, G-SCHED — `lib/constants/workflow-cadence.ts`); nút này là lượt chạy NGAY, không chờ kỳ. Bọc `withOrganization(mã trong phiên)`
  * tường minh — lượt chạy không bao giờ rơi sang tổ chức khác vì ngữ cảnh xung quanh (bài kiểm gọi từ ngữ cảnh nhà).
  * Cùng một hàm với lượt của job: con trỏ chỉ tiến, `dedupe_key` chặn nhân đôi, nên bấm hai lần không làm hai lần.
  */

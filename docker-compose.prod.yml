@@ -50,6 +50,11 @@ services:
     environment:
       DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD:-erp_secret}@db:5432/erp?schema=public
       ERP_INTERNAL_URL: http://app:3000
+      # G-SCHED (chủ nền tảng duyệt 29/09/2026): luật tự động + việc định kỳ của TỔ CHỨC KHÁCH tự chạy — tuần tự
+      # từng tổ chức, nhịp theo gói (mặc định 10 phút). BẬT mặc định; đặt SCHEDULER_AUTOMATION_FANOUT="0" trong .env
+      # rồi khởi động lại scheduler để tắt cho CẢ nền tảng (tắt MỘT tổ chức: công tắc khẩn «Tạm dừng mọi luật»).
+      # Tầng fan-out TOÀN BỘ (SCHEDULER_FANOUT — giữ ấm bảng điều khiển…) KHÔNG đặt ở đây: vẫn tắt.
+      SCHEDULER_AUTOMATION_FANOUT: ${SCHEDULER_AUTOMATION_FANOUT:-1}
     command: ["node", "scripts/scheduler.mjs"]
     depends_on:
       - app

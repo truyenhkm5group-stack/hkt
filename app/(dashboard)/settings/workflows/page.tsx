@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
-import { loadStaleWorkflowRuns, loadWorkflowList, type StaleRunView } from "@/lib/platform-ui/workflow-admin";
+import { loadStaleWorkflowRuns, loadWorkflowList, loadWorkflowScheduleSentence, type StaleRunView } from "@/lib/platform-ui/workflow-admin";
 import { triggerSummary } from "@/lib/platform-ui/workflow-admin-shared";
 import { WORKFLOW_MAX_ATTEMPTS } from "@/lib/workflow/types";
 
@@ -25,7 +25,7 @@ export default async function WorkflowsPage({ searchParams }: { searchParams: Pr
   const user = await requirePermission("workflow:manage");
   const sp = await searchParams;
   const showStale = sp.view === "stale";
-  const [loaded, stale] = await Promise.all([loadWorkflowList(user), loadStaleWorkflowRuns(user)]);
+  const [loaded, stale, schedule] = await Promise.all([loadWorkflowList(user), loadStaleWorkflowRuns(user), loadWorkflowScheduleSentence(user)]);
   const staleRuns = stale.ok ? stale.value : [];
   const newButton = (
     <Button asChild size="sm">
@@ -53,7 +53,8 @@ export default async function WorkflowsPage({ searchParams }: { searchParams: Pr
           <div className="space-y-1.5 text-xs leading-5">
             <p>Mỗi luật: KHI NÀO (sự kiện hệ thống hoặc trạng thái nghiệp vụ đổi) · ĐIỀU KIỆN · LÀM GÌ (tạo việc, báo trong ERP, ghi giá trị field tuỳ biến) · có cần người duyệt không.</p>
             <p>Luật mới luôn ở NHÁP + CHẠY THỬ. Bật rồi xem lượt chạy thử trước, sau đó mới chuyển CHẠY THẬT. Luật không bao giờ đổi đơn, vận đơn, COD hay tồn kho.</p>
-            <p>Máy kiểm luật mỗi lượt của job cảnh báo (10 phút). Tổ chức tắt module Cần xử lý thì không có lượt tự động — bấm «Chạy lượt kiểm tra ngay». Bấm nhiều lần không làm hai lần một việc.</p>
+            {/* Câu nhịp đọc CÙNG hằng số / gói mà job `workflows` dùng (`lib/constants/workflow-cadence.ts`) — không gõ số ở đây. */}
+            <p>{schedule ? `${schedule} ` : ""}«Chạy lượt kiểm tra ngay» chạy một lượt ngay, không chờ kỳ. Bấm nhiều lần không làm hai lần một việc.</p>
           </div>
         }
       />

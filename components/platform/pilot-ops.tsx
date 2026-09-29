@@ -7,6 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WORKFLOW_CADENCE_DEFAULT_MINUTES } from "@/lib/constants/workflow-cadence";
 import { confirmPilotUatAction, disableOrgConnectionAction, setOrgPlanAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
 import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_STAGES, type PilotStage } from "@/lib/constants/pilot";
 
@@ -150,7 +151,7 @@ export function WorkflowPauseSwitch({ orgCode, orgName, paused }: { orgCode: str
       title={paused ? `Cho luật tự động của «${orgName}» chạy lại?` : `Tạm dừng MỌI luật tự động của «${orgName}»?`}
       consequence={
         paused
-          ? "Lượt kế tiếp (≤ 10 phút, hoặc nút «Chạy lượt kiểm tra ngay» của tổ chức) xét tiếp đúng từ sự kiện đã dừng — mỗi sự kiện vẫn chỉ tạo đúng một lượt chạy, không làm lại việc đã làm."
+          ? `Lượt kế tiếp (lịch tự chạy — mặc định ${WORKFLOW_CADENCE_DEFAULT_MINUTES} phút, theo gói — hoặc nút «Chạy lượt kiểm tra ngay» của tổ chức) xét tiếp đúng từ sự kiện đã dừng — mỗi sự kiện vẫn chỉ tạo đúng một lượt chạy, không làm lại việc đã làm.`
           : "Bộ máy luật bỏ qua tổ chức này từ lượt kế tiếp: không xét sự kiện mới, không thực thi lượt nào, kể cả lượt đã được duyệt. Lượt đang chờ duyệt GIỮ NGUYÊN. Luật của khách không bị sửa; tổ chức vẫn dùng ERP bình thường."
       }
       minReason={PILOT_REASON_MIN}

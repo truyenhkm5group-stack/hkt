@@ -66,6 +66,29 @@ Có hiệu lực ngay ở máy chủ nhận lượt bấm; tiến trình khác t
 | **Tắt AI** (`settings.ai.disabled`) | Tiền AI tăng bất thường, nghi lộ khoá BYOK | AI Builder của tổ chức từ chối TRƯỚC khi gọi model (hiệu lực ngay ở máy chủ này, tiến trình khác trễ tối đa thời gian đệm công tắc); ERP vẫn dùng bình thường. Nút ở khung «Dùng AI» (`#ai-usage`) cùng trang — lý do + xác nhận + nhật ký `AI_ORG_CONTROL_SET` | Cùng chỗ |
 | **Đăng ký công khai `/start`** | Nghi lạm dụng đăng ký | Cổng B ở `/platform` (`launch-gates.md` mục B): «TẮT» ⇒ `/start` đóng ngay; tắt cứng bằng `PLATFORM_SIGNUP_MODE=off` | Cổng B |
 
+### 3a. Luật tự động của khách tự chạy (G-SCHED — chủ nền tảng duyệt 29/09/2026)
+
+Luật tự động (và việc định kỳ) của tổ chức khách **tự chạy**, không còn phải bấm «Chạy lượt kiểm tra ngay»:
+
+- **Nhịp**: mặc định **10 phút / lượt** (`lib/constants/workflow-cadence.ts`). Gói có thể khai
+  `platform_plans.limits.workflowCadenceMinutes` (số phút nguyên, 5 … 1440); nhỏ hơn 5 phút bị **từ chối** — dùng 10 và
+  `sync_runs` của khách ghi PARTIAL kèm lý do. Chưa có màn hình sửa nhịp (để sau). Màn hình luật của khách in đúng nhịp
+  của gói họ.
+- **Đường chạy**: bộ lập lịch gõ job `workflows` mỗi 5 phút cho TỪNG tổ chức khách ĐANG HOẠT ĐỘNG (không có lượt của
+  nhà); job tự bỏ qua lượt chưa tới kỳ mà không ghi sổ. Việc định kỳ (`work-recurrence`) đi cùng tầng, theo lượt 15 phút.
+  Mỗi lượt chạy trong `withOrganization` của đúng tổ chức, ghi `sync_runs` (job `workflows`) trong CSDL của nó.
+- **Giới hạn**: tuần tự — không bao giờ hai tổ chức chạy cùng lúc; trần **60 giây** mỗi tổ chức mỗi lượt (quá trần thì
+  dừng trước sự kiện chưa xét, lượt sau làm tiếp); trần 200 sự kiện · 50 hành động mỗi lượt của bộ máy; một tổ chức lỗi
+  không chặn tổ chức sau; lượt gõ tới khi lượt trước còn chạy thì bỏ.
+- **Bỏ qua**: tổ chức SUSPENDED / không ACTIVE (không có trong danh sách) · tổ chức đang **Tạm dừng mọi luật** (không ghi
+  sổ) · tổ chức nhà (luật của VNX vẫn chạy ké job cảnh báo, lịch giữ nguyên).
+- **Tạm dừng**: MỘT tổ chức ⇒ công tắc khẩn «Tạm dừng mọi luật…» ở trên (hiệu lực ≤ 5 giây). CẢ nền tảng ⇒ đặt
+  `SCHEDULER_AUTOMATION_FANOUT="0"` trong `.env` trên VPS rồi `docker compose -f docker-compose.prod.yml up -d scheduler`
+  (mặc định `1` do `docker-compose.prod.yml` đặt). Tầng fan-out toàn bộ (`SCHEDULER_FANOUT` — giữ ấm bảng điều khiển,
+  dựng lại kết quả đơn… cho khách) **vẫn tắt**: G-SCHED chỉ duyệt tự động hoá.
+- **Theo dõi**: log container `erp-scheduler` in `workflows@<mã> 200 …` cho mỗi tổ chức mỗi lượt (`bỏ qua NOT_DUE` ở lượt
+  giữa kỳ); lượt thật nằm ở `sync_runs` của tổ chức (trang Kết nối dữ liệu của họ).
+
 ## 4. Trang sức khoẻ `/platform/org/<mã>`
 
 Mở từ `/platform` → cột cuối **Sức khoẻ & công tắc**. Cột **Pilot · dùng** ở `/platform` tóm tắt giai đoạn, cờ luật

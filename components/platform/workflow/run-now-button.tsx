@@ -11,9 +11,9 @@ import type { FieldError } from "@/lib/metadata/types";
 type Counts = { events: number; runs: number; executed: number; waiting: number; failed: number };
 
 /**
- * «Chạy lượt kiểm tra ngay» — một lượt của bộ máy luật cho tổ chức người bấm. Máy vốn chạy ké job cảnh báo
- * (10 phút); tổ chức tắt module Cần xử lý thì không có lượt tự động, và đây là đường chạy của họ mà không đổi
- * lịch. Kết quả in đủ năm con số — «0 sự kiện» là câu trả lời thật (chưa có gì mới từ lượt trước), không phải lỗi.
+ * «Chạy lượt kiểm tra ngay» — một lượt của bộ máy luật cho tổ chức người bấm, NGAY, không chờ kỳ. Lượt tự động:
+ * tổ chức nhà chạy ké job cảnh báo; tổ chức khách có job `workflows` theo nhịp của gói (G-SCHED, `lib/constants/workflow-cadence.ts`).
+ * Kết quả in đủ năm con số — «0 sự kiện» là câu trả lời thật (chưa có gì mới từ lượt trước), không phải lỗi.
  */
 export function RunNowButton() {
   const [pending, startTransition] = useTransition();

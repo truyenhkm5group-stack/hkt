@@ -3,7 +3,18 @@
  * Gọi các API /api/sync/<job> của ERP theo chu kỳ. Không cần build TypeScript.
  */
 import { nextRunAt } from "./scheduler-clock.mjs";
-import { fanOutEnabled, fanOutUrls, FANOUT_JOBS } from "./scheduler-fanout.mjs";
+import {
+  AUTOMATION_CALL_TIMEOUT_MS,
+  AUTOMATION_FANOUT_JOBS,
+  callsHome,
+  createSerialQueue,
+  fanOutEnabled,
+  fanOutPlan,
+  fanOutUrls,
+  FANOUT_JOBS,
+  runSequential,
+  WORKFLOW_FANOUT_TICK_MINUTES,
+} from "./scheduler-fanout.mjs";
 
 const BASE = (process.env.ERP_INTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
 const SECRET = process.env.CRON_SECRET || "";
@@ -55,6 +66,15 @@ const JOBS = [
     nhiên (recurrence_id, occurrence_key) chặn ở CSDL.
   */
   { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
+  /*
+    LUẬT TỰ ĐỘNG CỦA TỔ CHỨC KHÁCH (G-SCHED — chủ nền tảng duyệt 29/09/2026) — CHỈ FAN-OUT.
+
+    Không có lượt của nhà (`callsHome("workflows") === false`): luật của nhà vẫn chạy ké `alerts` như cũ.
+    Gõ mỗi 5 phút — nhịp nhỏ nhất được phép, KHÔNG đọc biến môi trường (đổi nhịp là việc của gói, không
+    phải của máy chủ); job tự bỏ qua lượt chưa tới kỳ (mặc định 10 phút) mà không ghi sổ. Lệch 2,5 phút
+    để mốc gõ nằm xa ranh giới ô nhịp (xem `workflowRunDue`). Chỉ chạy khi tầng tự động hoá bật.
+  */
+  { job: "workflows", every: WORKFLOW_FANOUT_TICK_MINUTES, offset: 2.5 },
   /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
@@ -260,8 +280,13 @@ const DAILY = [
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);
 
-// Lịch cho tổ chức khác nhà — MẶC ĐỊNH TẮT, lý do ở scripts/scheduler-fanout.mjs.
+// Lịch cho tổ chức khác nhà — hai tầng, lý do ở scripts/scheduler-fanout.mjs.
+// Tầng TOÀN BỘ: mặc định TẮT.
 const FANOUT = fanOutEnabled(process.env.SCHEDULER_FANOUT);
+// Tầng TỰ ĐỘNG HOÁ (G-SCHED): docker-compose.prod.yml đặt "1" cho container scheduler (tắt: đặt "0" trong .env).
+const AUTOMATION_FANOUT = fanOutEnabled(process.env.SCHEDULER_AUTOMATION_FANOUT);
+// MỘT hàng đợi cho mọi lượt tự động hoá — không bao giờ hai tổ chức chạy cùng lúc.
+const automationQueue = createSerialQueue();
 
 /*
   Danh sách tổ chức đệm 5 phút: hỏi mỗi lượt job là thêm một request cho mỗi tick của mọi job. Hỏi
@@ -286,22 +311,34 @@ async function fanOutOrganizations() {
   }
 }
 
-async function call(label, url) {
+async function call(label, url, { timeoutMs } = {}) {
   try {
-    const res = await fetch(url, { method: "POST", headers: { "x-cron-secret": SECRET } });
+    const res = await fetch(url, { method: "POST", headers: { "x-cron-secret": SECRET }, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}) });
     const body = await res.json().catch(() => ({}));
-    log(label, res.status, body.message || (body.started ? "started" : JSON.stringify(body).slice(0, 120)));
+    const skipped = body.result && typeof body.result === "object" && body.result.skipped ? `bỏ qua ${body.result.skipped}` : null;
+    log(label, res.status, body.message || skipped || (body.started ? "started" : JSON.stringify(body).slice(0, 120)));
   } catch (error) {
     log(label, "lỗi:", error.message);
   }
 }
 
 async function trigger(job, query = "") {
-  // Lượt của tổ chức NHÀ: cùng URL, cùng thời điểm như trước khi có fan-out.
-  await call(job, `${BASE}/api/sync/${job}?wait=0${query ? `&${query}` : ""}`);
-  if (!FANOUT || !FANOUT_JOBS.includes(job)) return;
-  // Tuần tự từng tổ chức: `wait=0` nên mỗi lượt gọi trả ngay, nhưng không bắn cả loạt cùng một lúc.
+  // Lượt của tổ chức NHÀ — trừ job CHỈ fan-out (`workflows`): cùng URL, cùng thời điểm như trước khi có fan-out.
+  if (callsHome(job)) await call(job, `${BASE}/api/sync/${job}?wait=0${query ? `&${query}` : ""}`);
+  const plan = fanOutPlan({ job, all: FANOUT, automation: AUTOMATION_FANOUT });
+  if (plan === "OFF") return;
   const organizations = await fanOutOrganizations();
+  if (plan === "AUTOMATION") {
+    /*
+      TẦNG TỰ ĐỘNG HOÁ: qua hàng đợi chung, từng tổ chức một, CHỜ kết quả (`wait=1`) có trần — tổ chức lỗi
+      hay hết giờ thì ghi log và sang tổ chức sau. Lượt trước của job còn chạy ⇒ bỏ lượt gõ này.
+    */
+    const urls = fanOutUrls({ base: BASE, job, query, organizations, enabled: true, wait: true });
+    const r = await automationQueue.run(job, () => runSequential(urls, (url) => call(`${job}@${new URL(url).searchParams.get("org")}`, url, { timeoutMs: AUTOMATION_CALL_TIMEOUT_MS })));
+    if (r && r.skipped === "BUSY") log(`${job}: lượt tự động hoá trước còn chạy — bỏ lượt gõ này`);
+    return;
+  }
+  // TẦNG TOÀN BỘ (đường cũ): `wait=0` nên mỗi lượt gọi trả ngay, nhưng không bắn cả loạt cùng một lúc.
   for (const url of fanOutUrls({ base: BASE, job, query, organizations, enabled: FANOUT })) {
     await call(`${job}@${new URL(url).searchParams.get("org")}`, url);
   }
@@ -345,7 +382,12 @@ async function main() {
     hen(nextRunAt(Date.now(), item.every, item.offset));
   }
   log("Lịch chạy (theo đồng hồ):", JOBS.map((j) => `${j.job}/${j.every}p`).join(", "));
-  log(FANOUT ? `Fan-out tổ chức khác nhà: BẬT cho ${FANOUT_JOBS.join(", ")}` : "Fan-out tổ chức khác nhà: TẮT (SCHEDULER_FANOUT khác \"1\")");
+  log(FANOUT ? `Fan-out tổ chức khác nhà (toàn bộ): BẬT cho ${FANOUT_JOBS.join(", ")}` : "Fan-out tổ chức khác nhà (toàn bộ): TẮT (SCHEDULER_FANOUT khác \"1\")");
+  log(
+    AUTOMATION_FANOUT || FANOUT
+      ? `Fan-out tự động hoá (G-SCHED): BẬT cho ${AUTOMATION_FANOUT_JOBS.join(", ")} — tuần tự từng tổ chức`
+      : "Fan-out tự động hoá (G-SCHED): TẮT (SCHEDULER_AUTOMATION_FANOUT khác \"1\") — luật của tổ chức khách chỉ chạy khi bấm tay",
+  );
 
   const firedToday = new Set();
   setInterval(() => {

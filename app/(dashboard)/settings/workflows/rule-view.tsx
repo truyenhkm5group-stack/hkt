@@ -45,7 +45,7 @@ export function ruleHeader(loaded: LoadedEditor, user: SessionUser): { title: st
 
 export function WorkflowRuleBody({ loaded }: { loaded: LoadedEditor }) {
   if (!loaded.ok) return <EmptyState title="Không mở được luật này" description={loaded.errors.map((e) => e.message).join(" · ")} />;
-  const { rule, takenKeys, events, objects, runs } = loaded.value;
+  const { rule, takenKeys, events, objects, runs, schedule } = loaded.value;
   const initial = rule ? ruleToDraft(rule) : blankRuleDraft();
   const previewKey = rule ? subjectObjectKey(initial, events) : null;
   const previewDef = previewKey ? objectDef(previewKey) : null;
@@ -66,7 +66,7 @@ export function WorkflowRuleBody({ loaded }: { loaded: LoadedEditor }) {
       <RuleEditor key={rule ? `${rule.id}:${rule.version}:${rule.status}` : "new"} ruleId={rule?.id ?? null} status={rule?.status ?? null} initial={initial} takenKeys={takenKeys} events={events} objects={objects} />
       {rule ? (
         <SectionCard title="Lượt chạy gần đây" description={`${runs.length} lượt mới nhất (tối đa ${RECENT_RUNS_LIMIT})`} padded={false} contentClassName="p-3">
-          <WorkflowRunsTable runs={runs} />
+          <WorkflowRunsTable runs={runs} schedule={schedule} />
         </SectionCard>
       ) : null}
     </>
