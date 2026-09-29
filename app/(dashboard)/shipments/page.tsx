@@ -17,7 +17,7 @@ import { FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LinkPending, NavLink, StaleWhileRefreshing } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignableUsers } from "@/lib/actions/alerts";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -118,8 +118,8 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
                 </NavLink>
               </span>
             ) : null}
-            <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
-            {view === "all" ? <SyncButton job="vtp-import" label="Nhập từ tài khoản VTP" params={{ days: "30" }} /> : null}
+            <ModuleSyncButton viewer={user} job="vtp-tracking" label="Cập nhật từ Viettel Post" />
+            {view === "all" ? <ModuleSyncButton viewer={user} job="vtp-import" label="Nhập từ tài khoản VTP" params={{ days: "30" }} /> : null}
             {/*
               ĐƯỜNG CỨU PHẢI Ở NGAY CHỖ NGƯỜI TA PHÁT HIỆN RA VẤN ĐỀ.
 

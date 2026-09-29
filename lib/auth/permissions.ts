@@ -52,6 +52,7 @@ export const PERMISSION_GROUPS = [
     module: "Kho & sản xuất",
     items: [
       { key: "products:view", label: "Sản phẩm & tồn kho", hint: "Sản phẩm, tồn kho, nhật ký kho" },
+      { key: "products:write", label: "Sản phẩm: tạo & sửa mã hàng tạo tay", hint: "Tạo sản phẩm + mẫu mã trên ERP và sửa những mã tạo tay — chỉ khi tổ chức không đồng bộ sản phẩm từ Pancake. Mã đồng bộ không sửa được ở ERP." },
       { key: "inventory:write", label: "Nhập hàng & kiểm kê", hint: "Tạo / xoá phiếu nhập, điều chỉnh kiểm kê" },
       /*
         CỐ Ý TÁCH KHỎI `inventory:write`. Mọi lượt tái nhập hàng hoàn khác đều đứng trên một chứng
@@ -310,7 +311,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "records:view", "records:write"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

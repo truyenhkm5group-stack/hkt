@@ -7,7 +7,7 @@ import { JsonViewer } from "@/components/misc";
 import { ReverseRelationsCard } from "@/components/objects/reverse-relations-card";
 import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -28,6 +28,9 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { ProductNotes } from "@/app/(dashboard)/products/[id]/product-notes";
 import { listProductNotes } from "@/lib/queries/product-notes";
 import { getModelByProductId } from "@/lib/queries/models";
+import { isManualRecordId, manualProductUnit } from "@/lib/constants/manual-products";
+import { productCreateGate } from "@/lib/records/product-create";
+import { ProductForm } from "@/app/(dashboard)/products/product-form";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
 
@@ -52,19 +55,23 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
-  const pancakeUrl = pancakePosProductsUrl(env.pancake.shopId);
+  // Mã TẠO TAY (id `erp-`, tổ chức không đồng bộ sản phẩm): không có gì "trên Pancake" để mở / nói tới.
+  const manual = isManualRecordId(product.id);
+  const pancakeUrl = manual ? null : pancakePosProductsUrl(env.pancake.shopId);
+  const unit = manualProductUnit(product.raw);
+  const editable = manual && (await productCreateGate(user)).allowed;
 
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={`Sản phẩm · ${product.customId || (product.displayId ? `#${product.displayId}` : "Pancake")}`}
+        eyebrow={`Sản phẩm · ${product.customId || (product.displayId ? `#${product.displayId}` : manual ? "tạo tay" : "Pancake")}`}
         title={
           <span className="flex flex-wrap items-center gap-3">
             {product.name}
             <span className={cn("inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold", statusTone)}>{statusLabel}</span>
           </span>
         }
-        description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · đồng bộ ${formatDateTime(product.syncedAt)}`}
+        description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · ${manual ? `tạo trên ERP ${formatDateTime(product.insertedAt ?? product.createdAt)}${unit ? ` · đơn vị ${unit}` : ""}` : `đồng bộ ${formatDateTime(product.syncedAt)}`}`}
         actions={
           <>
             {mau ? (
@@ -72,7 +79,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <Link href={`/models/${mau.id}`}>Vòng đời mẫu</Link>
               </Button>
             ) : null}
-            <SyncButton job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
+            <ModuleSyncButton viewer={user} job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
             {pancakeUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={pancakeUrl} target="_blank" rel="noreferrer">
@@ -248,24 +255,49 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 columns={2}
                 items={[
                   { label: "Mã sản phẩm", value: product.customId || "—" },
-                  { label: "Mã Pancake", value: <span className="font-mono text-xs">{product.displayId ?? product.id}</span> },
+                  manual ? { label: "Đơn vị tính", value: unit ?? "—" } : { label: "Mã Pancake", value: <span className="font-mono text-xs">{product.displayId ?? product.id}</span> },
                   { label: "Danh mục", value: product.categories.length ? <span className="flex flex-wrap gap-1">{product.categories.map((c) => <Link key={c} href={`/products?category=${encodeURIComponent(c)}`} className="rounded bg-muted px-1.5 py-0.5 text-xs hover:text-primary">{c}</Link>)}</span> : "—" },
                   { label: "Thẻ", value: product.tags.length ? <span className="flex flex-wrap gap-1">{product.tags.map((t) => <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-xs">{t}</span>)}</span> : "—" },
                   { label: "Trạng thái", value: `${statusLabel}${product.isPublished === false ? " · chưa đăng bán" : ""}` },
                   { label: "Số mẫu mã", value: `${formatNumber(product.variants.length)} (${formatNumber(totals.selling)} đang bán)` },
-                  { label: "Tạo trên Pancake", value: formatDateTime(product.insertedAt) },
-                  { label: "Đồng bộ lần cuối", value: formatDateTime(product.syncedAt) },
+                  ...(manual
+                    ? [{ label: "Tạo trên ERP", value: formatDateTime(product.insertedAt ?? product.createdAt) }, { label: "Sửa lần cuối", value: formatDateTime(product.updatedAt) }]
+                    : [{ label: "Tạo trên Pancake", value: formatDateTime(product.insertedAt) }, { label: "Đồng bộ lần cuối", value: formatDateTime(product.syncedAt) }]),
                   {
-                    label: "Ghi chú từ Pancake",
+                    label: manual ? "Ghi chú gốc" : "Ghi chú từ Pancake",
                     // Cột này ĐỒNG BỘ TỪ PANCAKE và bị ghi đè ở mỗi lần đồng bộ. Nói thẳng điều đó
                     // ra, nếu không người dùng sẽ đi tìm chỗ sửa nó và không bao giờ thấy.
-                    value: product.note ? <span className="text-muted-foreground">{product.note}</span> : <span className="text-muted-foreground">— (ô này đồng bộ từ Pancake, không sửa được ở ERP)</span>,
+                    value: product.note ? <span className="text-muted-foreground">{product.note}</span> : <span className="text-muted-foreground">{manual ? "— (ghi chú vận hành viết ở khối bên dưới)" : "— (ô này đồng bộ từ Pancake, không sửa được ở ERP)"}</span>,
                     span: true,
                   },
                 ]}
               />
             </div>
           </SectionCard>
+
+          {editable ? (
+            <SectionCard title="Sửa sản phẩm" description="Mã tạo trên ERP — sửa tên, mã, đơn vị, giá, thêm mẫu mã" hint="Mẫu mã đã có không xoá ở đây (xoá là mất dòng phiếu kho của nó): thôi bán thì bỏ ô «Đang bán». Tồn kho đổi bằng phiếu Nhập hàng / Kiểm kê, không đổi ở form này.">
+              <details>
+                <summary className="cursor-pointer text-sm font-semibold text-primary">Mở form sửa</summary>
+                <div className="mt-4">
+                  {/* `key` theo mốc sửa: lưu xong trang dựng lại với mốc mới ⇒ form nạp lại mẫu mã vừa thêm (kèm id). */}
+                  <ProductForm
+                    key={product.updatedAt.toISOString()}
+                    mode="edit"
+                    productId={product.id}
+                    initial={{
+                      name: product.name,
+                      code: product.customId ?? "",
+                      unit: unit ?? "",
+                      retailPrice: "",
+                      cost: "",
+                      variants: product.variants.map((v) => ({ id: v.id, sku: v.sku, size: v.size, color: v.color, retailPrice: v.retailPrice ? String(v.retailPrice) : "", cost: v.lastImportedPrice ? String(v.lastImportedPrice) : "", selling: !v.isHidden })),
+                    }}
+                  />
+                </div>
+              </details>
+            </SectionCard>
+          ) : null}
 
           {/*
             GHI CHÚ VẬN HÀNH — đường ghi thật, khác hẳn ô "Ghi chú từ Pancake" ở trên.

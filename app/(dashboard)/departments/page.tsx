@@ -24,6 +24,8 @@ import {
 import { MODULE_GROUPS, NO_MODULE_REASON } from "@/lib/constants/department-modules";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, DEPARTMENT_TONE, TEAM_DEPARTMENT_DIVERGENCE, type DepartmentCode } from "@/lib/constants/departments";
 import { activeMembershipsByUser } from "@/lib/org/membership";
+import { isHomeOrg } from "@/lib/branding/copy";
+import { hrefVisible } from "@/lib/platform-ui/module-visibility";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Bản đồ phòng ban & AI" };
@@ -39,7 +41,14 @@ export const metadata = { title: "Bản đồ phòng ban & AI" };
  * LÀM TỐT. Phòng Kho mãi mãi không có nấc BÀN TAY và đó là quyết định an toàn, không phải điểm kém.
  */
 export default async function DepartmentMapPage() {
-  await requirePermission("dashboard:view");
+  const user = await requirePermission("dashboard:view");
+  /*
+    SỐ ĐO NỘI BỘ CỦA TỔ CHỨC NHÀ (pilot P1 #13). Thang tự động hoá, lý do sở hữu từng module và chỗ lệch nhóm → phòng là
+    sổ khai VỀ BỘ MÁY CỦA NHÀ: chúng dẫn số đo production của nhà (`WEBHOOK_ONLY`, "chủ shop xác nhận…", sổ quảng cáo
+    trống…). Tổ chức khác đọc chúng như thể đó là tình trạng của CHÍNH họ. Ở đó trang chỉ còn: màn hình nào thuộc phòng
+    nào (lọc theo module đang bật) và mỗi phòng có bao nhiêu người.
+  */
+  const home = isHomeOrg(user);
 
   // Đường đọc tư cách thành viên DUY NHẤT (AGENTS.md mục 32) — không truy vấn `department_members` ở đây.
   const byUser = await activeMembershipsByUser();
@@ -71,6 +80,7 @@ export default async function DepartmentMapPage() {
       />
 
       {/* ───────────── THANG TỰ ĐỘNG HOÁ ───────────── */}
+      {home ? (
       <SectionCard
         title={
           <span className="flex items-center gap-1.5">
@@ -200,19 +210,20 @@ export default async function DepartmentMapPage() {
           </Table>
         </div>
       </SectionCard>
+      ) : null}
 
       {/* ───────────── BẢN ĐỒ MÀN HÌNH ───────────── */}
       <SectionCard
         title="Màn hình thuộc phòng nào"
-        hint="Mỗi module có đúng một chủ. Dấu ⓘ cạnh mỗi module là lý do phòng đó sở hữu nó, chứ không phải phòng bên cạnh."
+        hint={home ? "Mỗi module có đúng một chủ. Dấu ⓘ cạnh mỗi module là lý do phòng đó sở hữu nó, chứ không phải phòng bên cạnh." : "Mỗi màn hình đang bật của tổ chức thuộc đúng một phòng."}
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {MODULE_GROUPS.map((g) => (
+          {(home ? MODULE_GROUPS : MODULE_GROUPS.map((g) => ({ ...g, items: g.items.filter((m) => hrefVisible(user, m.href)) })).filter((g) => g.items.length)).map((g) => (
             <div key={g.zone} className="rounded-lg border bg-surface-sunken/30 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="flex items-center gap-1 text-[13px] font-bold">
                   {g.label}
-                  <InfoHint>{g.hint}</InfoHint>
+                  {home ? <InfoHint>{g.hint}</InfoHint> : null}
                 </h3>
                 <span className="text-[11px] text-muted-foreground">{g.items.length} màn hình</span>
               </div>
@@ -222,7 +233,7 @@ export default async function DepartmentMapPage() {
                     <Link href={m.href} className="text-[13px] font-medium text-primary underline-offset-2 hover:underline">
                       {m.label}
                     </Link>
-                    <InfoHint>{m.why}</InfoHint>
+                    {home ? <InfoHint>{m.why}</InfoHint> : null}
                   </li>
                 ))}
               </ul>
@@ -232,7 +243,7 @@ export default async function DepartmentMapPage() {
 
         {/* Phòng không sở hữu màn hình nào vẫn phải hiện ra — một ô rỗng đọc như "phòng này không làm gì". */}
         <div className="mt-4 flex flex-col gap-3">
-          {DEPARTMENT_ORDER.filter((d) => NO_MODULE_REASON[d]).map((d) => (
+          {DEPARTMENT_ORDER.filter((d) => home && NO_MODULE_REASON[d]).map((d) => (
             <div key={d} className="rounded-lg border border-dashed p-3">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className={cn("text-[11px]", DEPARTMENT_TONE[d])}>
@@ -247,6 +258,7 @@ export default async function DepartmentMapPage() {
       </SectionCard>
 
       {/* ───────────── CHỖ LỆCH CỐ Ý ───────────── */}
+      {home ? (
       <SectionCard
         title={
           <span className="flex items-center gap-1.5">
@@ -275,6 +287,7 @@ export default async function DepartmentMapPage() {
           ))}
         </ul>
       </SectionCard>
+      ) : null}
     </div>
   );
 }

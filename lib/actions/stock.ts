@@ -16,9 +16,10 @@ import { linkExistingReceiptCore, writeStockReceiptCore } from "@/lib/inventory/
 import { validateProductionLink } from "@/lib/inventory/production-link";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { supplierCatalog } from "@/lib/queries/suppliers";
-import { priceReceiptLines } from "@/lib/inventory/receipt-pricing";
+import { priceReceiptLines, receiptPricingModeFor } from "@/lib/inventory/receipt-pricing";
+import { isHomeOrg } from "@/lib/branding/copy";
 
-/** `missingPrice`: mã trên phiếu nhập chưa có giá báo MKT ⇒ dòng đó lưu với giá CHƯA BIẾT (0). */
+/** `missingPrice`: mã trên phiếu nhập chưa có giá (giá báo MKT, hoặc đơn giá khai tay bỏ trống) ⇒ dòng đó lưu với giá CHƯA BIẾT (0). */
 export type ActionResult = { ok: true; id?: string; missingPrice?: string[] } | { error: string };
 
 
@@ -36,6 +37,9 @@ function revalidate() {
  * Phiếu NHẬP HÀNG MỚI: đơn giá = GIÁ BÁO MKT của mã theo ngày nhập, máy chủ tự đọc; giá client gửi lên
  * bị bỏ qua (chủ shop chốt 25/09/2026 "Luôn lấy giá báo MKT" — kho không cần biết giá). Mã chưa có
  * giá báo ⇒ dòng ghi 0 = chưa biết giá, phiếu VẪN lưu và kết quả trả về tên mã để màn hình nói ra.
+ *
+ * Tổ chức khác nhà có thể ở chế độ `MANUAL` (`lib/constants/receipt-pricing-mode.ts`): khi đó đơn giá là số người lập
+ * gõ trên từng dòng, ô bỏ trống = 0 = CHƯA BIẾT (nói ra y như mã thiếu giá báo). Tổ chức nhà LUÔN theo giá báo MKT.
  */
 export async function createStockReceipt(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
@@ -53,12 +57,16 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
   const db = await getDb();
   const variantIds = [...new Set(signed.map((i) => i.variantId))];
   const known = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantIds));
-  if (known.length !== variantIds.length) return { error: "Có mẫu mã không tồn tại trong ERP — hãy đồng bộ sản phẩm từ Pancake trước" };
+  if (known.length !== variantIds.length) return { error: isHomeOrg(user) ? "Có mẫu mã không tồn tại trong ERP — hãy đồng bộ sản phẩm từ Pancake trước" : "Có mẫu mã không tồn tại trong ERP — hãy tạo sản phẩm trước (Sản phẩm → Tạo sản phẩm)" };
   // Nối lệnh SX / lô xưởng: người chọn, máy kiểm TỒN TẠI + đúng loại phiếu (lib/inventory/production-link.ts).
   const noiXuong = await validateProductionLink(db, { kind: data.kind, productionOrderId: data.productionOrderId, productionBatchId: data.productionBatchId });
   if ("error" in noiXuong) return { error: noiXuong.error };
-  const dinhGia = data.kind === "RECEIPT" ? await priceReceiptLines(db, variantIds, vnStartOfDay(data.receivedAt)) : null;
+  const cheDoGia = data.kind === "RECEIPT" ? await receiptPricingModeFor(db, { isHome: isHomeOrg(user) }) : null;
+  const dinhGia = cheDoGia?.mode === "MKT_QUOTE" ? await priceReceiptLines(db, variantIds, vnStartOfDay(data.receivedAt)) : null;
   const items = signed.map((i) => ({ ...i, unitCost: dinhGia ? (dinhGia.price.get(i.variantId) ?? 0) : i.unitCost }));
+  // Chế độ khai tay: dòng nhập hàng giá 0 = CHƯA BIẾT giá — nói ra bằng SKU, như mã thiếu giá báo.
+  const khaiTayThieuGia = cheDoGia?.mode === "MANUAL" ? await manualMissingPrice(db, items) : [];
+  const thieuGia = dinhGia ? dinhGia.missing : khaiTayThieuGia;
 
   const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
   const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
@@ -119,11 +127,19 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : data.kind === "RETURN" ? "STOCK_RETURN_CREATE" : data.kind === "ISSUE" ? "STOCK_ISSUE_CREATE" : "STOCK_ADJUST_CREATE",
     entity: "STOCK_RECEIPT",
     entityId: receiptId,
-    detail: { ...data, items: lines, totalQuantity, totalCost, settledShipmentIds, ...(dinhGia ? { priceSource: "MARKETER_PRICE", missingPrice: dinhGia.missing } : {}) },
+    detail: { ...data, items: lines, totalQuantity, totalCost, settledShipmentIds, ...(dinhGia ? { priceSource: "MARKETER_PRICE", missingPrice: dinhGia.missing } : cheDoGia?.mode === "MANUAL" ? { priceSource: "MANUAL_ENTRY", priceModeSource: cheDoGia.source, missingPrice: khaiTayThieuGia } : {}) },
   });
   for (const id of variantIds) publish({ type: "stock", variantId: id });
   revalidate();
-  return { ok: true, id: receiptId, ...(dinhGia?.missing.length ? { missingPrice: dinhGia.missing } : {}) };
+  return { ok: true, id: receiptId, ...(thieuGia.length ? { missingPrice: thieuGia } : {}) };
+}
+
+/** SKU (hoặc id) của các dòng nhập hàng khai tay mà đơn giá để trống — đã sắp xếp, không trùng. */
+async function manualMissingPrice(db: Awaited<ReturnType<typeof getDb>>, items: readonly { variantId: string; quantity: number; unitCost: number }[]): Promise<string[]> {
+  const ids = [...new Set(items.filter((i) => i.quantity > 0 && !i.unitCost).map((i) => i.variantId))];
+  if (!ids.length) return [];
+  const rows = await db.select({ id: schema.productVariants.id, sku: schema.productVariants.sku }).from(schema.productVariants).where(inArray(schema.productVariants.id, ids));
+  return [...new Set(rows.map((r) => r.sku || r.id))].sort();
 }
 
 /**

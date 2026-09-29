@@ -113,3 +113,28 @@ export function dataQualityHrefVisible(viewer: ModuleViewer, href: string): bool
   const block = (DATA_QUALITY_BLOCKS as Record<string, AggregateBlock>)[issue];
   return block ? modulesOn(viewer, block.modules) : true;
 }
+
+// ═══════════ NÚT «ĐỒNG BỘ …» (pilot P1 #12) ═══════════
+
+/**
+ * Nút đồng bộ chạy job nào ⇒ job đó cần module nào. Nút hiện ⇔ mọi module của job bật cho tổ chức người xem — tổ chức
+ * không có nguồn (Pancake / Viettel Post / Meta là connector HOME_ONLY) không thấy một nút bấm vào chỉ để nhận
+ * «Không có quyền» hay «SKIPPED». Bảng PHẢI khớp `jobModules(JOB_DEFINITIONS[job])` (lib/sync/jobs.ts — chỉ máy chủ,
+ * nên tệp client-safe này giữ bản khai; `tests/pilot-products.test.ts` so từng dòng, lệch là đỏ). Job không có trong
+ * bảng ⇒ ẨN (hỏng về phía hẹp) — và bài kiểm đòi mọi `<ModuleSyncButton job=…>` trong `app/` có mặt ở đây.
+ */
+export const SYNC_JOB_MODULES = {
+  "pancake-products": ["connector_pancake"],
+  "pancake-customers": ["connector_pancake"],
+  "pancake-orders": ["connector_pancake"],
+  "pancake-inventory": ["connector_pancake"],
+  "pancake-returns": ["connector_pancake"],
+  "pancake-all": ["connector_pancake"],
+  "vtp-tracking": ["connector_viettelpost"],
+  "vtp-import": ["connector_viettelpost"],
+} as const satisfies Record<string, readonly ModuleKey[]>;
+
+export function syncJobVisible(viewer: ModuleViewer, job: string): boolean {
+  const mods = (SYNC_JOB_MODULES as Record<string, readonly ModuleKey[]>)[job];
+  return mods ? modulesOn(viewer, mods) : false;
+}

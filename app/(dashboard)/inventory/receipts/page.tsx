@@ -2,7 +2,10 @@ import { ArrowDownToLine, ClipboardCheck, Coins, Info, ListOrdered } from "lucid
 import Link from "next/link";
 import { activeSupplierNames } from "@/lib/queries/suppliers";
 import { getDb } from "@/db";
-import { productIdsHavingMarketerPrice } from "@/lib/inventory/receipt-pricing";
+import { productIdsHavingMarketerPrice, receiptPricingModeFor } from "@/lib/inventory/receipt-pricing";
+import { PricingModeControl } from "@/app/(dashboard)/inventory/receipts/pricing-mode-control";
+import { getBrandCopy } from "@/lib/branding/service";
+import { isHomeOrg } from "@/lib/branding/copy";
 import { DeleteReceiptButton } from "@/app/(dashboard)/inventory/receipts/delete-receipt-button";
 import { ReceiptDialog, type ReceiptPrefillView } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
 import { RECEIPT_PREFILL_PARAM } from "@/lib/constants/production-shortcuts";
@@ -34,6 +37,9 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
+  // Cách định giá phiếu NHẬP HÀNG (lib/constants/receipt-pricing-mode.ts): nhà luôn giá báo MKT, không truy vấn gì thêm.
+  const [pricing, copy] = await Promise.all([getDb().then((db) => receiptPricingModeFor(db, { isHome: isHomeOrg(user) })), getBrandCopy(user)]);
+  const khaiGia = pricing.mode === "MANUAL";
   const [receipts, summary, variants, pendingMap, supplierOptions, productionLinks, pricedProductIds] = await Promise.all([
     listStockReceipts(200),
     stockReceiptSummary(),
@@ -41,7 +47,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
     canWrite ? pendingReturnsByVariant() : Promise.resolve(new Map<string, number>()),
     canWrite ? activeSupplierNames() : Promise.resolve([] as string[]),
     canWrite ? listOpenProductionLinks() : Promise.resolve([]),
-    canWrite ? getDb().then(productIdsHavingMarketerPrice) : Promise.resolve([] as string[]),
+    canWrite && !khaiGia ? getDb().then(productIdsHavingMarketerPrice) : Promise.resolve([] as string[]),
   ]);
   /*
     LỐI TẮT "Nhập kho theo lệnh SX" (Agent SC): `?nhap-lenh=<lệnh>` mở hộp thoại Nhập hàng CÓ SẴN, điền
@@ -81,13 +87,15 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
         actions={
           canWrite ? (
             <>
-              <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={linkOptions} pricedProductIds={pricedProductIds} prefill={prefill} />
+              <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} pricingMode={pricing.mode} emptyHint={copy.text("receipts.emptyVariants")} />
+              <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} pricingMode={pricing.mode} emptyHint={copy.text("receipts.emptyVariants")} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={linkOptions} pricedProductIds={pricedProductIds} prefill={prefill} pricingMode={pricing.mode} emptyHint={copy.text("receipts.emptyVariants")} />
             </>
           ) : null
         }
       />
+
+      {!isHomeOrg(user) && can(user, "settings:manage") ? <PricingModeControl mode={pricing.mode} source={pricing.source} /> : null}
 
       {poParam && !prefill ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
@@ -98,14 +106,14 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng đã nhập" value={`+${formatNumber(summary.received)}`} note={`${formatNumber(summary.receipts)} phiếu nhập hàng`} icon={ArrowDownToLine} tone="green" />
         <MetricCard label="Điều chỉnh kiểm kê" value={`${summary.adjusted > 0 ? "+" : ""}${formatNumber(summary.adjusted)}`} note={`${formatNumber(summary.adjustments)} phiếu điều chỉnh`} icon={ClipboardCheck} tone={summary.adjusted < 0 ? "rose" : "slate"} />
-        <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note="Theo giá ghi trên phiếu — phiếu nhập mới lấy giá báo MKT" icon={Coins} tone="primary" />
+        <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note={khaiGia ? "Theo giá ghi trên phiếu — đơn giá khai trên phiếu nhập" : "Theo giá ghi trên phiếu — phiếu nhập mới lấy giá báo MKT"} icon={Coins} tone="primary" />
         <MetricCard label="Mẫu mã trong ERP" value={formatNumber(variants.length || 0)} note={`${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`} icon={ListOrdered} tone="blue" />
       </section>
 
       <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b className="text-foreground">Cách dùng lần đầu:</b> bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → ERP tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. Tồn khả dụng = Nhập − Giao thành công thật − Đang giao; hàng hoàn tự động được coi là về kho. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
+          <b className="text-foreground">Cách dùng lần đầu:</b> bấm <b className="text-foreground">Kiểm kê</b>, nhập số đếm thực tế của từng mẫu mã đang có trong kho → ERP tạo phiếu điều chỉnh để tồn khả dụng bằng đúng số đếm (đã tính hàng đang giao). Từ đó về sau, mỗi lần hàng về thì bấm <b className="text-foreground">Nhập hàng</b>. <b className="text-foreground">Tồn thực tế</b> = tổng phiếu kho − hàng đã xuất; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chưa xuất. Hàng hoàn <b className="text-foreground">KHÔNG</b> tự về kho: chỉ khi kho lập phiếu <b className="text-foreground">Tái nhập hàng hoàn</b> với số đếm thực tế — đơn vị vận chuyển báo &ldquo;đã hoàn&rdquo; là chưa đủ. Xem tồn tại <Link href="/products" className="font-semibold text-primary hover:underline">Sản phẩm &amp; tồn kho</Link>.
         </div>
       </div>
 
@@ -210,9 +218,9 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
                       {it.quantity > 0 ? "+" : ""}
                       {formatNumber(it.quantity)}
                     </TableCell>
-                    {/* Dòng NHẬP HÀNG giá 0 = phiếu không ghi đơn giá (mã chưa có giá báo MKT) ⇒ CHƯA BIẾT, in "—" chứ không in 0 ₫ (mục 42). */}
+                    {/* Dòng NHẬP HÀNG giá 0 = phiếu không ghi đơn giá (mã chưa có giá báo MKT / ô đơn giá bỏ trống) ⇒ CHƯA BIẾT, in "—" chứ không in 0 ₫ (mục 42). */}
                     <TableCell className="text-right">
-                      {selected.kind === "RECEIPT" && !it.unitCost ? <span className="text-muted-foreground" title="Chưa có giá — mã chưa có giá báo MKT lúc nhập">—</span> : <Money value={it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />}
+                      {selected.kind === "RECEIPT" && !it.unitCost ? <span className="text-muted-foreground" title={khaiGia ? "Chưa có giá — ô đơn giá để trống lúc nhập" : "Chưa có giá — mã chưa có giá báo MKT lúc nhập"}>—</span> : <Money value={it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />}
                     </TableCell>
                     <TableCell className="text-right">
                       {selected.kind === "RECEIPT" && !it.unitCost ? <span className="text-muted-foreground">—</span> : <Money value={Math.max(it.quantity, 0) * it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />}

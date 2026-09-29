@@ -106,3 +106,27 @@ export function invalidateCapabilities(orgCode?: string) {
   if (orgCode) cache.delete(orgCode);
   else cache.clear();
 }
+
+// ═══════════ TỔ CHỨC CÓ NGUỒN ĐỒNG BỘ CHO LOẠI BẢN GHI NÀY KHÔNG (pilot bán buôn) ═══════════
+
+export type SyncedSourceKind = "orders" | "products" | "customers";
+
+/**
+ * Loại bản ghi ⇒ module connector ĐỒNG BỘ ra nó. Hôm nay cả ba đến từ Pancake POS (connector HOME_ONLY). Đây là bảng
+ * khai DUY NHẤT của câu hỏi "bản ghi loại này do đồng bộ tạo hay do người tạo": cổng tạo tay (sản phẩm / đơn / khách)
+ * và nút «Đồng bộ …» cùng đọc nó — `tests/pilot-products.test.ts` khoá sổ đối tượng (`requiresModuleOff`) và bảng nút
+ * đồng bộ (`SYNC_JOB_MODULES`) phải nói cùng một module.
+ */
+export const SYNCED_SOURCE_MODULE: Readonly<Record<SyncedSourceKind, ModuleKey>> = {
+  orders: "connector_pancake",
+  products: "connector_pancake",
+  customers: "connector_pancake",
+};
+
+/**
+ * Tổ chức (ngữ cảnh hiện hành, hoặc `orgCode`) có nguồn ĐỒNG BỘ cho loại bản ghi này không. `true` ⇒ bản ghi do đồng bộ
+ * tạo: KHÔNG tạo / sửa tay (hai bản cho cùng một thứ), nút «Đồng bộ …» có nghĩa. `false` ⇒ ngược lại.
+ */
+export async function orgHasSyncedSource(kind: SyncedSourceKind, orgCode?: string): Promise<boolean> {
+  return canUseModule(SYNCED_SOURCE_MODULE[kind], orgCode);
+}

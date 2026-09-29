@@ -3,7 +3,7 @@ import { ReturnsTable } from "@/app/(dashboard)/returns/returns-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listReturns, returnFacets, returnSummary, RETURN_SORTABLE } from "@/lib/queries/returns";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -32,7 +32,7 @@ export default async function ReturnsPage({ searchParams }: { searchParams: Prom
         eyebrow={copy.text("returns.eyebrow")}
         title={copy.text("returns.title")}
         description={`Phiếu trên ${copy.name("POS")}, chưa phải hàng đã về kho · ${params.period.label.toLowerCase()} · ${formatNumber(summary.total)} phiếu trên ${formatNumber(summary.orders)} đơn`}
-        actions={<SyncButton job="pancake-returns" label="Đồng bộ đổi/trả" />}
+        actions={<ModuleSyncButton viewer={user} job="pancake-returns" label="Đồng bộ đổi/trả" />}
       />
 
       <section className="grid gap-4 sm:grid-cols-3">

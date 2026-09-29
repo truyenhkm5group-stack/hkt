@@ -11,7 +11,7 @@ import { FinanceNav } from "@/components/finance-nav";
 import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,7 +35,7 @@ export const metadata = { title: "Đối soát COD" };
 const TINH_TRANG_HOP_LE = new Set<string>(["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "GIAO_NHUNG_HOAN", "KHONG_PHAI_TRA", "ALL"]);
 
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("FINANCE", "cod:view");
+  const { user, decision } = await requireResource("FINANCE", "cod:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Đối soát COD" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
@@ -99,7 +99,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
             <Button asChild variant="outline" size="sm">
               <Link href="/import-vtp"><FileUp className="size-4" /> Bổ sung danh sách vận đơn</Link>
             </Button>
-            <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
+            <ModuleSyncButton viewer={user} job="vtp-tracking" label="Cập nhật từ Viettel Post" />
           </>
         }
       />

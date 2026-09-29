@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -14,6 +14,7 @@ import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { getBrandCopy } from "@/lib/branding/service";
+import { productCreateGate } from "@/lib/records/product-create";
 
 export const metadata = { title: "Sản phẩm & tồn kho" };
 
@@ -23,7 +24,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   if (decision.allow === "NONE") return <ScopeDenied title="Sản phẩm" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all", defaultPageSize: PRODUCT_LIST_PAGE_SIZE, maxPageSize: PRODUCT_LIST_PAGE_SIZE });
-  const [{ rows, total, pageCount }, facets, summary, warehouses, copy] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user)]);
+  const [{ rows, total, pageCount }, facets, summary, warehouses, copy, createGate] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses(), getBrandCopy(user), productCreateGate(user)]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
   return (
@@ -37,7 +38,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             <b>SỔ KHO.</b> <b>Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay −{" "}
             <b>Đã xuất</b>; <b>Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chờ xuất.
             &ldquo;Đã xuất&rdquo; đếm theo xác nhận <b>lấy hàng của {copy.name("SHIPPING")}</b>, không theo
-            trạng thái {copy.name("ORDER_SOURCE")} và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập{" "}
+            trạng thái {copy.name("ORDER_SOURCE")} và {copy.text("products.notByCod")}. Hàng hoàn chỉ quay lại tồn khi kho lập{" "}
             <b>phiếu tái nhập</b> với số đếm thực tế — ĐVVC báo &ldquo;đã hoàn&rdquo; mới chỉ là
             hàng đang trên đường về. Mẫu mã chưa có phiếu nhập thì ERP báo &ldquo;Chưa có phiếu
             nhập&rdquo; thay vì hiện số bịa.
@@ -45,6 +46,14 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         }
         actions={
           <>
+            {/* Tạo tay: CHỈ tổ chức không đồng bộ sản phẩm (cùng cổng với trang /products/new và action — productCreateGate). */}
+            {createGate.allowed ? (
+              <Button asChild size="sm">
+                <Link href="/products/new">
+                  <Plus className="size-4" /> Tạo sản phẩm
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/products?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV
@@ -55,7 +64,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                 <PackagePlus className="size-4" /> Nhập hàng / kiểm kê
               </Link>
             </Button>
-            <SyncButton job="pancake-products" label="Đồng bộ sản phẩm" />
+            <ModuleSyncButton viewer={user} job="pancake-products" label="Đồng bộ sản phẩm" />
           </>
         }
       />
@@ -108,7 +117,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             label: "Đã xuất kho",
             value: formatNumber(summary.shipped),
             note: `nhập mới ${formatNumber(summary.receiptIn)} · tái nhập ${formatNumber(summary.returnIn)}${summary.shrinkage ? ` · hụt ${formatNumber(summary.shrinkage)}` : ""}`,
-            hint: `Đếm theo xác nhận LẤY HÀNG của ${copy.name("SHIPPING")} — không theo trạng thái ${copy.name("ORDER_SOURCE")}, không theo tiền COD.`,
+            hint: `Đếm theo xác nhận LẤY HÀNG của ${copy.name("SHIPPING")} — không theo trạng thái ${copy.name("ORDER_SOURCE")}, ${copy.text("products.notByCod")}.`,
             icon: ShoppingBag,
           },
           {
@@ -134,7 +143,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         ]}
         resultLabel={`${formatNumber(total)} mẫu mã phù hợp`}
       />
-      <ProductsTable rows={rows} pageCount={pageCount} total={total} warehouses={warehouses} />
+      <ProductsTable rows={rows} pageCount={pageCount} total={total} warehouses={warehouses} emptyDescription={copy.text("products.emptyList")} />
     </div>
   );
 }

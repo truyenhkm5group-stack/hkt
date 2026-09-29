@@ -6,7 +6,7 @@ import { ReverseRelationsCard } from "@/components/objects/reverse-relations-car
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,6 +21,9 @@ import { listFields } from "@/lib/metadata/fields";
 import { getPublishedForm } from "@/lib/metadata/forms";
 import { canEditField, customFileNames, getCustomValues } from "@/lib/metadata/values";
 import { userPickOptions } from "@/lib/queries/users";
+import { getBrandCopy } from "@/lib/branding/service";
+import { moduleOn } from "@/lib/platform-ui/module-visibility";
+import { customerBasicsGate } from "@/lib/records/customer-create";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -42,10 +45,11 @@ function addressText(a: AddressRecord) {
  * chưa có field custom nào VÀ chưa xuất bản form (tổ chức nhà không thấy một khối trống), hoặc lớp
  * metadata từ chối đọc (module / năng lực) — trang khách vẫn đứng nguyên.
  */
-async function loadProfileBlock(user: SessionUser, customer: Record<string, unknown> & { id: string }) {
+async function loadProfileBlock(user: SessionUser, customer: Record<string, unknown> & { id: string }, basicsEditable: boolean) {
   try {
     const [form, fields] = await Promise.all([getPublishedForm("customer", "profile"), listFields("customer")]);
-    if (!fields.custom.length && form.isDefault) return null;
+    // Khách tạo tay sửa được thông tin cơ bản ⇒ khối luôn hiện, kể cả khi tổ chức chưa có field custom nào.
+    if (!fields.custom.length && form.isDefault && !basicsEditable) return null;
     const obj = objectDef("customer")!;
     const [stored, users] = await Promise.all([getCustomValues("customer", [customer.id], user), fields.custom.some((f) => f.type === "user") ? userPickOptions() : Promise.resolve(undefined)]);
     const system = Object.fromEntries(fields.system.map((f) => [f.key, customer[f.column] ?? null]));
@@ -73,7 +77,11 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   const customer = await getCustomerDetail(id);
   if (!customer) notFound();
-  const profile = await loadProfileBlock(user, customer);
+  // Thông tin cơ bản sửa được khi khách TẠO TAY ở tổ chức không bật Pancake (cùng cổng với action — pilot P1 #11).
+  const [basics, copy] = await Promise.all([customerBasicsGate(user, customer), getBrandCopy(user)]);
+  const profile = await loadProfileBlock(user, customer, basics.allowed);
+  // Số đo "Hoàn / tỷ lệ hoàn" thuộc module Hàng hoàn — tổ chức không bật module ấy không thấy một ô 0% vô nghĩa.
+  const showReturns = moduleOn(user, "returns");
   const { stats } = customer;
   const addresses = parseAddresses(customer.addresses);
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
@@ -94,7 +102,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         description={`${phones[0] ? `${phones[0]} · ` : ""}${customer.province || "Chưa rõ tỉnh/TP"} · tạo ${formatDate(customer.insertedAt ?? customer.createdAt)} · đơn gần nhất ${stats.lastOrderAt ? formatTimeAgo(stats.lastOrderAt) : "chưa có"}`}
         actions={
           <>
-            <SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />
+            <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
             {customer.conversationLink ? (
               <Button asChild variant="outline" size="sm">
                 <a href={customer.conversationLink} target="_blank" rel="noreferrer">
@@ -109,7 +117,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Số đơn" value={formatNumber(stats.orders)} note={stats.cancelled ? `${formatNumber(stats.cancelled)} đơn huỷ/xoá không tính` : "Không tính đơn huỷ/xoá"} icon={ShoppingBag} tone="blue" />
         <MetricCard label="Thành công" value={formatNumber(stats.succeed)} note={`Tỷ lệ ${successRate.toFixed(0)}% · ${formatVND(stats.successRevenue, { compact: true })}`} icon={PackageCheck} tone="green" />
-        <MetricCard label="Hoàn" value={formatNumber(stats.returned)} note={`Tỷ lệ hoàn ${returnRate.toFixed(0)}%`} icon={RotateCcw} tone={stats.returned > 0 ? "rose" : "slate"} />
+        {showReturns ? <MetricCard label="Hoàn" value={formatNumber(stats.returned)} note={`Tỷ lệ hoàn ${returnRate.toFixed(0)}%`} icon={RotateCcw} tone={stats.returned > 0 ? "rose" : "slate"} /> : null}
         <MetricCard label="Tổng mua" value={formatVND(stats.amount, { compact: true })} note="Tiền hàng lên đơn, không tính đơn huỷ" icon={CircleDollarSign} tone="primary" />
         <MetricCard label="Trung bình mỗi đơn" value={formatVND(stats.aov, { compact: true })} note={stats.firstOrderAt ? `Mua lần đầu ${formatDate(stats.firstOrderAt)}` : "Chưa có đơn"} icon={Boxes} tone="amber" />
       </section>
@@ -233,25 +241,34 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                 { label: "Điểm thưởng", value: formatNumber(customer.rewardPoint) },
                 { label: "Tỉnh/TP", value: customer.province || "—" },
                 { label: "Thẻ", value: customer.tags.length ? <span className="flex flex-wrap gap-1">{customer.tags.map((t) => <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-xs">{t}</span>)}</span> : "—", span: true },
-                { label: "Facebook", value: fbUrl ? <a href={fbUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{customer.fbId}<ExternalLink className="size-3" /></a> : "—" },
-                { label: "Hội thoại", value: customer.conversationLink ? <a href={customer.conversationLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Mở trên Pancake<ExternalLink className="size-3" /></a> : "—" },
-                { label: "Mã Pancake", value: <span className="font-mono text-xs">{customer.pancakeId ?? "—"}</span> },
-                { label: "Đồng bộ", value: formatDateTime(customer.syncedAt) },
-                { label: "Tạo trên Pancake", value: formatDateTime(customer.insertedAt) },
-                { label: "Cập nhật Pancake", value: formatDateTime(customer.updatedAtExternal) },
+                // Bốn dòng Pancake + Facebook/hội thoại là của tổ chức NHÀ (connector HOME_ONLY): tổ chức khác thấy mốc tạo /
+                // sửa trên ERP thay vì năm ô "—" mang tên một hệ thống họ không dùng.
+                ...(copy.isHome
+                  ? [
+                      { label: "Facebook", value: fbUrl ? <a href={fbUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{customer.fbId}<ExternalLink className="size-3" /></a> : "—" },
+                      { label: "Hội thoại", value: customer.conversationLink ? <a href={customer.conversationLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Mở trên Pancake<ExternalLink className="size-3" /></a> : "—" },
+                      { label: "Mã Pancake", value: <span className="font-mono text-xs">{customer.pancakeId ?? "—"}</span> },
+                      { label: "Đồng bộ", value: formatDateTime(customer.syncedAt) },
+                      { label: "Tạo trên Pancake", value: formatDateTime(customer.insertedAt) },
+                      { label: "Cập nhật Pancake", value: formatDateTime(customer.updatedAtExternal) },
+                    ]
+                  : [
+                      { label: "Tạo trên ERP", value: formatDateTime(customer.createdAt) },
+                      { label: "Sửa lần cuối", value: formatDateTime(customer.updatedAt) },
+                    ]),
               ]}
             />
           </SectionCard>
 
           {profile ? (
-            <SectionCard title="Hồ sơ bổ sung" description={profile.version ? `Form phiên bản ${profile.version}` : "Form mặc định"} hint="Trường do tổ chức tự khai. Thông tin hệ thống của khách chỉ đọc ở đây: khách đồng bộ từ Pancake, sửa ở ERP sẽ bị lượt đồng bộ kế tiếp ghi đè.">
-              <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} fileNames={profile.fileNames} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} />
+            <SectionCard title="Hồ sơ bổ sung" description={profile.version ? `Form phiên bản ${profile.version}` : "Form mặc định"} hint={copy.text("customer.profileHint")}>
+              <CustomerProfileForm recordId={customer.id} schema={profile.schema} system={profile.system} custom={profile.custom} values={profile.values} customEditable={profile.customEditable} users={profile.users} fileNames={profile.fileNames} syncedFromPancake={user.modules?.includes("connector_pancake") ?? true} basicsEditable={basics.allowed} />
             </SectionCard>
           ) : null}
 
           <ReverseRelationsCard objectKey="customer" recordId={customer.id} user={user} />
 
-          <SectionCard title={`Địa chỉ (${formatNumber(addresses.length)})`} description="Sổ địa chỉ giao hàng từ Pancake" padded={false}>
+          <SectionCard title={`Địa chỉ (${formatNumber(addresses.length)})`} description={copy.text("customer.addressBook")} padded={false}>
             {addresses.length ? (
               <ul className="divide-y">
                 {addresses.map((a, i) => (

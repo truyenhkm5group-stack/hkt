@@ -140,12 +140,14 @@ export const OBJECT_REGISTRY: readonly ObjectDef[] = [
     scope: "TENANT",
     system: true,
     customizable: true,
-    capabilities: { customFields: true, forms: false, lists: false, statuses: false, create: false },
+    // `create` giống hệt khách hàng: tổ chức BẬT Pancake có sản phẩm do đồng bộ tạo (id = uuid Pancake) — tạo tay ở đó
+    // là đẻ một mã thứ hai cho cùng món hàng. Tổ chức không bật Pancake tạo qua `/products/new` (lib/records/product-create.ts).
+    capabilities: { customFields: true, forms: false, lists: false, statuses: false, create: { requiresModuleOff: "connector_pancake" } },
     forms: [],
     lists: [],
     statusFields: [],
     fields: [f("name", "Tên sản phẩm", "text", "name", { required: true }), f("custom_id", "Mã sản phẩm", "text", "customId", { filterable: true })],
-    why: "Sản phẩm đồng bộ từ Pancake; Phase 2 chỉ cho lưu field custom qua dịch vụ, chưa có form runtime.",
+    why: "Sản phẩm đồng bộ từ Pancake ở tổ chức bật Pancake; tổ chức không bật Pancake tạo / sửa mã hàng tạo tay (id `erp-…`) qua trang riêng — chưa có form metadata runtime.",
   },
   {
     key: "order",

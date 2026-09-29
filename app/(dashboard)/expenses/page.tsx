@@ -7,6 +7,7 @@ import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { can,  } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { getBrandCopy } from "@/lib/branding/service";
 import { ScopeDenied } from "@/components/scope-denied";
 import { isExpenseTab, type ExpenseTab } from "@/lib/constants/expense-tabs";
 import { getExpenseReport } from "@/lib/queries/expense-report";
@@ -41,16 +42,16 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     Con số trên tab đọc từ CÙNG báo cáo mà tab kia sẽ hiển thị, nên nó không tốn thêm truy vấn nào:
     `getExpenseReport` có lớp đệm riêng 90 giây và cả hai lượt gọi trúng cùng một khoá.
   */
-  const chuaPhanLoai = (await getExpenseReport(period)).unclassifiedOutflow.count;
+  const [chuaPhanLoai, copy] = await Promise.all([getExpenseReport(period).then((r) => r.unclassifiedOutflow.count), getBrandCopy(user)]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Tài chính"
         title="Chi phí vận hành"
-        description="Kê khai chi phí vận hành kinh doanh ngoài Pancake"
-        hint="Kê khai chi phí vận hành kinh doanh ngoài Pancake: lương, mặt bằng, điện nước, phần mềm, đóng gói… Số liệu đưa vào Báo cáo lợi nhuận (dòng tiền & danh nghĩa). Sao kê ngân hàng KHÔNG tạo chi phí: nhập sao kê ở Sổ ngân hàng (tab Nhập sao kê), phân loại, rồi nối dòng tiền với khoản chi để đối chiếu."
-        actions={canWrite ? <ExpenseDialog /> : null}
+        description={copy.text("expenses.description")}
+        hint={copy.text("expenses.hint")}
+        actions={canWrite ? <ExpenseDialog description={copy.text("expenses.dialog")} /> : null}
       />
       <FinanceNav badges={{ expenses: chuaPhanLoai }} />
       <ExpenseTabs active={tab} unclassified={chuaPhanLoai} />

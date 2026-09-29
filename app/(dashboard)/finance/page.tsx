@@ -10,6 +10,8 @@ import { DataWarnings } from "@/components/data-warnings";
 import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { getBrandCopy } from "@/lib/branding/service";
+import { DASHBOARD_BLOCKS, modulesOn } from "@/lib/platform-ui/module-visibility";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { BALANCE_CONFIDENCE_LABEL } from "@/lib/queries/cash-position";
@@ -45,7 +47,11 @@ export const metadata = { title: "Tổng quan tài chính" };
  */
 export default async function FinancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const { decision } = await requireResource("FINANCE", "bank:view");
+  const { user, decision } = await requireResource("FINANCE", "bank:view");
+  const copy = await getBrandCopy(user);
+  // «Tiền … còn giữ» là tiền THU HỘ của đơn vị vận chuyển: cùng điều kiện module với thẻ trên trang chủ (Tài chính + Vận
+  // chuyển). Tổ chức không có vận chuyển thu hộ không thấy bốn ô 0 ₫ nói về một khoản không tồn tại.
+  const showCarrierHolding = modulesOn(user, DASHBOARD_BLOCKS.carrierHolding.modules);
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tài chính" reason={decision.reason} fix={decision.fix} />;
   const period = resolvePeriod(raw, "month");
@@ -251,10 +257,11 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       </SectionCard>
 
       {/* ───────── 4. TIỀN CHƯA VỀ ───────── */}
+      {showCarrierHolding ? (
       <SectionCard
-        title="Tiền Viettel Post còn giữ"
+        title={copy.text("finance.carrierHoldingTitle")}
         description={`Kỳ đối soát thông thường ${cod.overdueDays} ngày · trung vị thực tế ${cod.soNgayTraTB === null ? "chưa đo được" : `${cod.soNgayTraTB} ngày`}`}
-        hint="Đây là khoản làm một shop bán COD 'lãi trên giấy mà hết tiền mặt': hàng đã tới tay khách nên doanh thu được ghi, còn tiền thì Viettel Post giữ cả tuần, trong khi tiền quảng cáo và tiền hàng phải trả ngay."
+        hint={copy.text("finance.carrierHoldingHint")}
         actions={
           <Link href={withPeriod("/cod")} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
             Đối soát COD <ArrowRight className="size-3" />
@@ -313,6 +320,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           </div>
         ) : null}
       </SectionCard>
+      ) : null}
 
       {/* ───────── 5. LỢI NHUẬN ≠ TIỀN ───────── */}
       <SectionCard

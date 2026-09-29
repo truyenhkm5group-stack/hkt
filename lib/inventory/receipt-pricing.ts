@@ -1,6 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { receiptUnitCostFromMarketer, type MarketerPriceEntry } from "@/lib/constants/marketer-price";
+import { RECEIPT_PRICING_SETTING_KEY, resolveReceiptPricingMode, type ReceiptPricingResolution } from "@/lib/constants/receipt-pricing-mode";
+import { getSettingJson } from "@/lib/settings";
 
 /**
  * ═══════════ GIÁ NHẬP KHO = GIÁ BÁO MKT (chủ shop chốt 25/09/2026) ═══════════
@@ -49,6 +51,17 @@ export async function marketerPriceEntriesByVariant(db: Db, variantIds: readonly
     out.set(row.variantId, cur);
   }
   return out;
+}
+
+/**
+ * Phiếu nhập hàng mới của tổ chức NGỮ CẢNH lấy đơn giá theo cách nào — luật chọn ở
+ * `lib/constants/receipt-pricing-mode.ts`. Tổ chức nhà: trả ngay `MKT_QUOTE`, KHÔNG một truy vấn nào (hành vi cũ nguyên
+ * vẹn). Tổ chức khác: đọc khoá `inventory.receiptPricing` + có hay chưa có dòng giá báo nào.
+ */
+export async function receiptPricingModeFor(db: Db, org: { isHome: boolean }): Promise<ReceiptPricingResolution> {
+  if (org.isHome) return resolveReceiptPricingMode({ isHome: true, saved: null, hasMarketerPrices: true });
+  const [saved, anyQuote] = await Promise.all([getSettingJson<unknown>(RECEIPT_PRICING_SETTING_KEY, null), db.select({ productId: mp.productId }).from(mp).limit(1)]);
+  return resolveReceiptPricingMode({ isHome: false, saved, hasMarketerPrices: anyQuote.length > 0 });
 }
 
 /** Sản phẩm nào đã có ít nhất một dòng giá báo — form nhập hàng dùng để báo trước mã nào sẽ "chưa biết giá". */

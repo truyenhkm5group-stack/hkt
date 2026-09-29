@@ -148,8 +148,8 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "products.notes", label: "Ghi chú sản phẩm", defaultEnabled: true, why: "Ô chữ tự do cho người đọc; không chạm con số nào (luật 46)." },
     ],
     routes: ["/products", "/api/export/products", "/api/phone-reputation"],
-    permissions: ["products:view"],
-    why: "Danh mục hàng là nền của đơn, kho và sản xuất. `products:view` là cổng vào của cả trang Kho — Kho phụ thuộc Sản phẩm nên khoá thuộc về đây.",
+    permissions: ["products:view", "products:write"],
+    why: "Danh mục hàng là nền của đơn, kho và sản xuất. `products:view` là cổng vào của cả trang Kho — Kho phụ thuộc Sản phẩm nên khoá thuộc về đây. `products:write` = tạo / sửa mã hàng TẠO TAY (chỉ khi tổ chức không bật `connector_pancake`).",
   },
   {
     key: "orders",

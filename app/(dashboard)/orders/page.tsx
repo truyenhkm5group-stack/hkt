@@ -4,7 +4,7 @@ import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listOrders, orderFacets, orderSummary, ORDER_SORTABLE } from "@/lib/queries/orders";
@@ -60,7 +60,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <Download className="size-4" /> Xuất CSV
               </a>
             </Button>
-            <SyncButton job="pancake-orders" label="Đồng bộ đơn" />
+            <ModuleSyncButton viewer={user} job="pancake-orders" label="Đồng bộ đơn" />
           </>
         }
       />
