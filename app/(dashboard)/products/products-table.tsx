@@ -6,7 +6,8 @@ import { DataTable } from "@/components/data-table/data-table";
 import { PRODUCT_LIST_PAGE_SIZE } from "@/lib/constants/inventory";
 import type { ProductListRow } from "@/lib/queries/products";
 
-export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: ProductListRow[]; pageCount: number; total: number; warehouses: { id: string; name: string }[] }) {
+/** `emptyDescription`: chữ của trang lõi theo tổ chức (`lib/branding/copy.ts` · `products.emptyList`) — nhà giữ nguyên câu cũ. */
+export function ProductsTable({ rows, pageCount, total, warehouses, emptyDescription }: { rows: ProductListRow[]; pageCount: number; total: number; warehouses: { id: string; name: string }[]; emptyDescription: string }) {
   const columns = useMemo(() => buildProductColumns(warehouses), [warehouses]);
   return (
     <DataTable
@@ -72,7 +73,7 @@ export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: Pr
         },
       }}
       emptyTitle="Không có mẫu mã"
-      emptyDescription="Thử đổi bộ lọc hoặc từ khoá. Nếu chưa đồng bộ, bấm “Đồng bộ sản phẩm & tồn kho”."
+      emptyDescription={emptyDescription}
     />
   );
 }

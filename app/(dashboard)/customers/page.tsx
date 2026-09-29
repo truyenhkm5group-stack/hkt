@@ -4,7 +4,7 @@ import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { customerFacets, customerSummary, CUSTOMER_SORTABLE, listCustomers } from "@/lib/queries/customers";
@@ -56,7 +56,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             <Button asChild variant="outline" size="sm">
               <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
             </Button>
-            <SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />
+            <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
           </div>
         }
       />

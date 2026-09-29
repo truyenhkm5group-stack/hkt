@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
+import { getBrandCopy } from "@/lib/branding/service";
 import { DATA_QUALITY_BLOCKS, dataQualityHrefVisible, visibleBlocks } from "@/lib/platform-ui/module-visibility";
 import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
 import { successTone, type OrderOutcome } from "@/lib/constants/returns";
@@ -100,6 +101,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
     : undefined;
 
+  const copy = await getBrandCopy(user);
   const drillHref = (key: DqIssue) => `/data-quality?issue=${key}&period=${params.period.key}`;
   const rule = summary.rule;
 
@@ -112,7 +114,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
         hint="Phát hiện chênh lệch trong dữ liệu đơn hàng, vận đơn và tiền đã ghi nhận. Các phép đối chiếu dưới đây vẫn dựa trên dữ liệu legacy."
       />
       <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-        Các số đối chiếu vẫn có COD khai báo/fallback và prepaid chưa kiểm chứng chứng từ. Chúng chưa phải tiền thực thu đã xác minh và chưa đủ để chốt doanh thu, lương hoặc đối soát ngân hàng. Cần đối chiếu bảng kê COD, chứng từ thanh toán và chiều giao/hoàn.
+        {copy.text("dataQuality.legacyNote")}
       </div>
 
       <DataTableToolbar period={{ defaultKey: "90d" }} searchPlaceholder={issue ? "Tìm mã đơn, mã vận đơn, tên, SĐT…" : undefined} resultLabel={`Kỳ: ${params.period.label}`} />

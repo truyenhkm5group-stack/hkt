@@ -43,7 +43,10 @@ export function ExpenseDialog({
   onOpenChange,
   defaultValues,
   onCreated,
+  description = "Chi phí vận hành ngoài Pancake (lương, mặt bằng, phần mềm, đóng gói…). Số tiền tính bằng VND.",
 }: {
+  /** Chữ mô tả của hộp thoại — trang lõi truyền `copy.text("expenses.dialog")`; mặc định là chữ của tổ chức nhà. */
+  description?: string;
   expense?: ExpenseRow | null;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -89,7 +92,7 @@ export function ExpenseDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{expense ? "Sửa chi phí" : "Thêm chi phí"}</DialogTitle>
-          <DialogDescription>Chi phí vận hành ngoài Pancake (lương, mặt bằng, phần mềm, đóng gói…). Số tiền tính bằng VND.</DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(submit)} className="space-y-4">

@@ -3,7 +3,7 @@ import { InventoryTable } from "@/app/(dashboard)/inventory/inventory-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
-import { SyncButton } from "@/components/sync-button";
+import { ModuleSyncButton } from "@/components/module-sync-button";
 import { formatNumber } from "@/lib/format";
 import { inventoryFacets, inventorySummary, INVENTORY_SORTABLE, listInventory } from "@/lib/queries/inventory";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -27,7 +27,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         eyebrow="Kho"
         title="Nhật ký kho"
         description={`Lịch sử xuất / nhập / chuyển kho ghi nhận từ ${copy.name("POS")} · ${params.period.label.toLowerCase()} · ${formatNumber(summary.variants)} mẫu mã có biến động`}
-        actions={<SyncButton job="pancake-inventory" label="Đồng bộ nhật ký kho" />}
+        actions={<ModuleSyncButton viewer={user} job="pancake-inventory" label="Đồng bộ nhật ký kho" />}
       />
 
       <section className="grid gap-4 sm:grid-cols-3">

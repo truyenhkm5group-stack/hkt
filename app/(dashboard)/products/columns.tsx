@@ -8,6 +8,7 @@ import { Money } from "@/components/ui-bits";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import type { ProductListRow } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
+import { isManualRecordId } from "@/lib/constants/manual-products";
 
 export function stockTone(remain: number) {
   if (remain <= 0) return "text-destructive";
@@ -76,7 +77,8 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
           <Money value={row.original.unitCost} className={row.original.unitCost ? "" : "text-muted-foreground"} />
           {row.original.unitCost !== row.original.lastImportedPrice && row.original.lastImportedPrice > 0 ? (
             <div className="text-[10.5px] text-muted-foreground">
-              Pancake <Money value={row.original.lastImportedPrice} />
+              {/* Mã tạo tay (id `erp-`): cột này là giá vốn KHAI TAY, không phải giá của Pancake. */}
+              {isManualRecordId(row.original.productId) ? "Khai" : "Pancake"} <Money value={row.original.lastImportedPrice} />
             </div>
           ) : null}
         </div>

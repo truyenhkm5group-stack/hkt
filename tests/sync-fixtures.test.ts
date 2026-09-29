@@ -437,6 +437,7 @@ import { testPlatformContext } from "./platform-context.test";
 import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
+import { testPilotProducts } from "./pilot-products.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
@@ -2567,6 +2568,10 @@ async function main() {
   // Phase 12 · năm lỗi của bài chấp nhận: trang Duyệt LÕI + lối duyệt, /platform chỉ ở nhà, not-found theo thương hiệu,
   // số tiền của yêu cầu duyệt, bộ quét menu × module tắt — hai tổ chức THẬT `ap-svc` (cài mẫu dịch vụ) / `ap-si` (tự cấp, tự dọn).
   await testApprovalsCore();
+  // Pilot bán buôn · P0 #1/#2 + P1 #9/#11–#14: tổ chức THẬT `pp-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — tạo sản
+  // phẩm + mẫu mã tay (erp-, SKU duy nhất, products:write) ⇒ phiếu nhập đơn giá khai tay ⇒ sổ kho; nhà: không nút, action từ
+  // chối, giá báo MKT, chữ trang lõi nguyên từng ký tự; nút đồng bộ theo nguồn; khách tạo tay sửa được, khách Pancake không.
+  await testPilotProducts();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

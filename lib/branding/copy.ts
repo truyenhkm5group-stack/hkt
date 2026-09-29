@@ -71,6 +71,51 @@ export const CORE_TEXT = {
     home: "Tích hợp đang chạy của tổ chức nhà (Pancake, Viettel Post, Meta, SePay…) giữ nguyên đường cũ và credential ở máy chủ — màn hình này chỉ NÓI RA chúng, không đổi được và không hiện bí mật nào.",
     other: () => "Dòng «Chỉ tổ chức nhà» là tích hợp dùng chung của nền tảng, chưa mở cho tổ chức này — màn hình chỉ nói ra chúng, không đổi được và không hiện bí mật nào.",
   },
+  // ─── Pilot bán buôn (P1 #12): trang lõi trong luồng bán buôn. Chữ nhà giữ NGUYÊN từng ký tự (bài kiểm so chuỗi). ───
+  "products.notByCod": {
+    home: "không theo tiền COD",
+    other: () => "không theo tiền thu hộ",
+  },
+  "products.emptyList": {
+    home: "Thử đổi bộ lọc hoặc từ khoá. Nếu chưa đồng bộ, bấm “Đồng bộ sản phẩm & tồn kho”.",
+    other: () => "Thử đổi bộ lọc hoặc từ khoá. Chưa có mã hàng nào thì bấm «Tạo sản phẩm».",
+  },
+  "receipts.emptyVariants": {
+    home: "Không có mẫu mã phù hợp. Nếu danh sách trống, hãy đồng bộ sản phẩm từ Pancake trước.",
+    other: () => "Không có mẫu mã phù hợp. Nếu danh sách trống, hãy tạo sản phẩm trước (Sản phẩm → Tạo sản phẩm).",
+  },
+  "expenses.description": {
+    home: "Kê khai chi phí vận hành kinh doanh ngoài Pancake",
+    other: () => "Kê khai chi phí vận hành kinh doanh",
+  },
+  "expenses.hint": {
+    home: "Kê khai chi phí vận hành kinh doanh ngoài Pancake: lương, mặt bằng, điện nước, phần mềm, đóng gói… Số liệu đưa vào Báo cáo lợi nhuận (dòng tiền & danh nghĩa). Sao kê ngân hàng KHÔNG tạo chi phí: nhập sao kê ở Sổ ngân hàng (tab Nhập sao kê), phân loại, rồi nối dòng tiền với khoản chi để đối chiếu.",
+    other: () => "Kê khai chi phí vận hành kinh doanh: lương, mặt bằng, điện nước, phần mềm, đóng gói… Số liệu đưa vào Báo cáo lợi nhuận (dòng tiền & danh nghĩa). Sao kê ngân hàng KHÔNG tạo chi phí: nhập sao kê ở Sổ ngân hàng (tab Nhập sao kê), phân loại, rồi nối dòng tiền với khoản chi để đối chiếu.",
+  },
+  "expenses.dialog": {
+    home: "Chi phí vận hành ngoài Pancake (lương, mặt bằng, phần mềm, đóng gói…). Số tiền tính bằng VND.",
+    other: () => "Chi phí vận hành (lương, mặt bằng, phần mềm, đóng gói…). Số tiền tính bằng VND.",
+  },
+  "customer.addressBook": {
+    home: "Sổ địa chỉ giao hàng từ Pancake",
+    other: () => "Sổ địa chỉ giao hàng",
+  },
+  "customer.profileHint": {
+    home: "Trường do tổ chức tự khai. Thông tin hệ thống của khách chỉ đọc ở đây: khách đồng bộ từ Pancake, sửa ở ERP sẽ bị lượt đồng bộ kế tiếp ghi đè.",
+    other: () => "Trường do tổ chức tự khai. Khách tạo trên ERP sửa được tên, số điện thoại, địa chỉ ngay ở form này.",
+  },
+  "dataQuality.legacyNote": {
+    home: "Các số đối chiếu vẫn có COD khai báo/fallback và prepaid chưa kiểm chứng chứng từ. Chúng chưa phải tiền thực thu đã xác minh và chưa đủ để chốt doanh thu, lương hoặc đối soát ngân hàng. Cần đối chiếu bảng kê COD, chứng từ thanh toán và chiều giao/hoàn.",
+    other: () => "Các số đối chiếu vẫn có tiền khai báo trên đơn và tiền trả trước chưa kiểm chứng chứng từ. Chúng chưa phải tiền thực thu đã xác minh và chưa đủ để chốt doanh thu, lương hoặc đối soát ngân hàng. Cần đối chiếu chứng từ thanh toán và chiều giao/hoàn.",
+  },
+  "finance.carrierHoldingTitle": {
+    home: "Tiền Viettel Post còn giữ",
+    other: (n: NameOf) => `Tiền ${n("SHIPPING")} còn giữ`,
+  },
+  "finance.carrierHoldingHint": {
+    home: "Đây là khoản làm một shop bán COD 'lãi trên giấy mà hết tiền mặt': hàng đã tới tay khách nên doanh thu được ghi, còn tiền thì Viettel Post giữ cả tuần, trong khi tiền quảng cáo và tiền hàng phải trả ngay.",
+    other: (n: NameOf) => `Tiền thu hộ ${n("SHIPPING")} đang giữ: hàng đã tới tay khách nên doanh thu được ghi, còn tiền chưa về tài khoản.`,
+  },
 } satisfies Record<string, { home: string; other: (n: NameOf, ctx: CopyContext) => string }>;
 
 export type CoreTextKey = keyof typeof CORE_TEXT;

@@ -155,3 +155,78 @@ export async function createCustomerCore(user: SessionUser, rawInput: unknown): 
   });
   return { ok: true, id: created.id };
 }
+
+// ─────────────────────────── Sửa thông tin cơ bản của khách TẠO TAY (pilot P1 #11) ───────────────────────────
+
+export const CUSTOMER_PROFILE_FORM = "profile";
+
+/**
+ * Thông tin cơ bản (tên · SĐT · địa chỉ · tỉnh) sửa được khi và chỉ khi: cùng cổng tạo khách (module bật, tổ chức KHÔNG
+ * bật `connector_pancake`, có `customers:write`) VÀ khách không mang `pancake_id` (không phải bản đồng bộ). Khách Pancake
+ * giữ chỉ đọc như cũ: sửa ở ERP thì lượt đồng bộ kế tiếp ghi đè lại, người sửa tưởng đã lưu mà dữ liệu tự quay về.
+ */
+export async function customerBasicsGate(user: SessionUser, customer: { pancakeId: string | null }): Promise<CreateGate> {
+  if (customer.pancakeId) return { allowed: false, code: "NOT_SUPPORTED", reason: "Khách đồng bộ từ Pancake — sửa ở Pancake, không sửa ở ERP." };
+  return customerCreateGate(user);
+}
+
+export type UpdateCustomerBasicsResult = { ok: true; changed: string[] } | MetaFailure;
+
+/** Ghi thông tin cơ bản qua form `profile` đã xuất bản — chỉ ô hiện và không chỉ đọc; cùng luật chuẩn hoá với lượt tạo. */
+export async function updateCustomerBasicsCore(user: SessionUser, customerId: string, rawSystem: unknown): Promise<UpdateCustomerBasicsResult> {
+  const parsed = z.record(z.string(), z.unknown()).safeParse(rawSystem ?? {});
+  if (!parsed.success) return fail("INVALID", "Dữ liệu gửi lên không đúng dạng.");
+  const sysIn = parsed.data;
+  const db = await getDb();
+  const customer = await db.query.customers.findFirst({ where: eq(schema.customers.id, customerId), columns: { id: true, pancakeId: true, name: true, phone: true, address: true, province: true } });
+  if (!customer) return fail("NOT_FOUND", "Không tìm thấy khách trong tổ chức này.");
+  const gate = await customerBasicsGate(user, customer);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+
+  const [form, fields] = await Promise.all([getPublishedForm("customer", CUSTOMER_PROFILE_FORM), listFields("customer")]);
+  const writable = writableRefs(form.schema);
+  const errors: FieldError[] = [];
+  const patch: { name?: string; phone?: string | null; phones?: string[]; address?: string; province?: string } = {};
+  for (const key of Object.keys(sysIn)) {
+    if (!writable.system.has(key) || !SYSTEM_LIMITS[key]) errors.push({ field: `system:${key}`, message: `Trường "${key}" không nhận ghi qua form này (ẩn hoặc chỉ đọc).` });
+  }
+  for (const f of fields.system) {
+    const lim = SYSTEM_LIMITS[f.key];
+    if (!lim || !(f.key in sysIn) || !writable.system.has(f.key)) continue;
+    const raw = sysIn[f.key];
+    if (raw !== undefined && raw !== null && typeof raw !== "string") {
+      errors.push({ field: `system:${f.key}`, message: `${f.label} phải là chữ.` });
+      continue;
+    }
+    let v = (raw ?? "").trim();
+    if (f.key === "phone" && v) {
+      v = v.replace(/[\s.-]/g, "");
+      if (!PHONE_RE.test(v)) {
+        errors.push({ field: "system:phone", message: "Số điện thoại chỉ gồm 8–15 chữ số (có thể có dấu + ở đầu)." });
+        continue;
+      }
+    }
+    if (v.length > lim.max) errors.push({ field: `system:${f.key}`, message: `${f.label} tối đa ${lim.max} ký tự.` });
+    else if (!v && (f.required || writable.system.get(f.key))) errors.push({ field: `system:${f.key}`, message: `${f.label} là bắt buộc.` });
+    else if (lim.column === "phone") {
+      patch.phone = v || null;
+      patch.phones = v ? [v] : [];
+    } else patch[lim.column] = v;
+  }
+  if (errors.length) return fail("INVALID", errors);
+  const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => k !== "phones" && patch[k] !== customer[k as "name" | "phone" | "address" | "province"]);
+  if (!changed.length) return { ok: true, changed: [] };
+
+  await db.update(schema.customers).set({ ...patch, updatedAt: new Date() }).where(eq(schema.customers.id, customerId));
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CUSTOMER_UPDATE_BASICS",
+    entity: "CUSTOMER",
+    entityId: customerId,
+    before: Object.fromEntries(changed.map((k) => [k, customer[k as "name" | "phone" | "address" | "province"]])),
+    after: Object.fromEntries(changed.map((k) => [k, patch[k]])),
+    reason: `Sửa thông tin cơ bản của khách tạo tay qua form "${CUSTOMER_PROFILE_FORM}" (phiên bản ${form.version}${form.isDefault ? ", mặc định" : ""})`,
+  });
+  return { ok: true, changed };
+}

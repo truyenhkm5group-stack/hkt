@@ -252,6 +252,9 @@ export function testNavigationCoverage() {
     // Phase 2 · metadata: form TẠO khách — vào từ nút 'Tạo khách hàng' ở đầu /customers, chỉ hiện khi tổ chức
     // KHÔNG bật connector_pancake và người xem có customers:write (cùng cổng với trang và server action).
     "/customers/new": "nút 'Tạo khách hàng' ở đầu trang /customers (chỉ khi không bật Pancake + có customers:write)",
+    // Pilot bán buôn: form TẠO sản phẩm tay — vào từ nút 'Tạo sản phẩm' ở đầu /products, chỉ hiện khi tổ chức KHÔNG bật
+    // connector_pancake và người xem có products:write (cùng cổng productCreateGate với trang và server action).
+    "/products/new": "nút 'Tạo sản phẩm' ở đầu trang /products (chỉ khi không bật Pancake + có products:write)",
     // Phase 3 · luật tự động: form TẠO luật — vào từ nút 'Luật mới' ở đầu /settings/workflows. Trang của MỘT luật
     // (`/settings/workflows/[id]`) là route động nên tự đứng ngoài bài này: vào từ tên luật trong bảng danh sách.
     "/settings/workflows/new": "nút 'Luật mới' ở đầu /settings/workflows; trang một luật /settings/workflows/[id] vào từ tên luật trong bảng",

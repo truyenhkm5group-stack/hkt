@@ -14,9 +14,11 @@ import { formatNumber, todayVN } from "@/lib/format";
 import type { ProductionLinkOption, VariantPickerRow } from "@/lib/queries/stock";
 import { STOCK_RECEIPT_KIND_HINT, STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
 import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import type { ReceiptPricingMode } from "@/lib/constants/receipt-pricing-mode";
 import { cn } from "@/lib/utils";
 
-type RowInput = { qty: string; counted: string };
+/** `cost`: đơn giá khai tay — chỉ dùng khi tổ chức ở chế độ `MANUAL` (lib/constants/receipt-pricing-mode.ts). */
+type RowInput = { qty: string; counted: string; cost: string };
 
 /**
  * Điền sẵn "Nhập kho theo lệnh SX" (Company OS · Agent SC): xưởng, lệnh, và số còn phải nhập từng mẫu mã
@@ -35,7 +37,7 @@ export type ReceiptPrefillView = {
 
 function inputsOf(prefill: ReceiptPrefillView | null | undefined): Record<string, RowInput> {
   const out: Record<string, RowInput> = {};
-  for (const [id, n] of Object.entries(prefill?.qty ?? {})) if (n > 0) out[id] = { qty: String(n), counted: "" };
+  for (const [id, n] of Object.entries(prefill?.qty ?? {})) if (n > 0) out[id] = { qty: String(n), counted: "", cost: "" };
   return out;
 }
 
@@ -53,6 +55,8 @@ export function ReceiptDialog({
   productionLinks = [],
   pricedProductIds,
   prefill = null,
+  pricingMode = "MKT_QUOTE",
+  emptyHint = "Không có mẫu mã phù hợp. Nếu danh sách trống, hãy đồng bộ sản phẩm từ Pancake trước.",
 }: {
   variants: VariantPickerRow[];
   defaultKind?: StockReceiptKind;
@@ -68,6 +72,13 @@ export function ReceiptDialog({
   pricedProductIds?: string[];
   /** Mở từ "Nhập kho theo lệnh SX": hộp thoại tự mở và điền sẵn. */
   prefill?: ReceiptPrefillView | null;
+  /**
+   * Cách định giá phiếu NHẬP HÀNG của tổ chức (máy chủ quyết, `receiptPricingModeFor`). `MANUAL` (tổ chức khác nhà không
+   * có giá báo) ⇒ mỗi dòng có ô đơn giá; tổ chức nhà luôn `MKT_QUOTE` ⇒ không có ô giá, y như cũ.
+   */
+  pricingMode?: ReceiptPricingMode;
+  /** Câu khi danh sách mẫu mã trống — chữ của trang lõi theo tổ chức (`receipts.emptyVariants`). */
+  emptyHint?: string;
 }) {
   const [open, setOpen] = useState(Boolean(prefill));
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
@@ -83,7 +94,8 @@ export function ReceiptDialog({
   const [inputs, setInputs] = useState<Record<string, RowInput>>(() => inputsOf(prefill));
   const prefillIds = useMemo(() => new Set(Object.keys(prefill?.qty ?? {})), [prefill]);
   const [pending, startTransition] = useTransition();
-  const coGiaBao = useMemo(() => (pricedProductIds ? new Set(pricedProductIds) : null), [pricedProductIds]);
+  const coGiaBao = useMemo(() => (pricedProductIds && pricingMode === "MKT_QUOTE" ? new Set(pricedProductIds) : null), [pricedProductIds, pricingMode]);
+  const khaiGia = kind === "RECEIPT" && pricingMode === "MANUAL";
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -91,25 +103,26 @@ export function ReceiptDialog({
     return variants.filter((v) => (prefill && onlyPrefill ? prefillIds.has(v.id) : !onlySelling || v.selling) && (!term || `${v.productName} ${v.sku} ${v.color} ${v.size}`.toLowerCase().includes(term)));
   }, [variants, search, onlySelling, onlyPrefill, prefill, prefillIds]);
 
-  const setField = (id: string, field: keyof RowInput, value: string) => setInputs((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { qty: "", counted: "" }), [field]: value } }));
+  const setField = (id: string, field: keyof RowInput, value: string) => setInputs((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { qty: "", counted: "", cost: "" }), [field]: value } }));
 
   const items = useMemo(() => {
-    const list: { variantId: string; productId: string; quantity: number }[] = [];
+    const list: { variantId: string; productId: string; quantity: number; unitCost: number }[] = [];
     for (const v of variants) {
       const input = inputs[v.id];
       if (!input) continue;
       if (kind !== "ADJUSTMENT") {
         const quantity = toInt(input.qty);
-        if (quantity > 0) list.push({ variantId: v.id, productId: v.productId, quantity });
+        // Ô đơn giá bỏ trống = 0 = CHƯA BIẾT giá (máy chủ nói ra bằng SKU), không phải "hàng cho không".
+        if (quantity > 0) list.push({ variantId: v.id, productId: v.productId, quantity, unitCost: Math.max(toInt(input.cost ?? ""), 0) });
       } else if (input.counted !== "") {
         const quantity = toInt(input.counted) - v.currentStock;
-        if (quantity !== 0) list.push({ variantId: v.id, productId: v.productId, quantity });
+        if (quantity !== 0) list.push({ variantId: v.id, productId: v.productId, quantity, unitCost: 0 });
       }
     }
     return list;
   }, [variants, inputs, kind]);
   // Mẫu mã trên phiếu NHẬP mà sản phẩm chưa có giá báo ⇒ sẽ lưu với giá chưa biết.
-  const chuaCoGia = kind === "RECEIPT" && coGiaBao ? items.filter((i) => !coGiaBao.has(i.productId)).length : 0;
+  const chuaCoGia = kind === "RECEIPT" && coGiaBao ? items.filter((i) => !coGiaBao.has(i.productId)).length : khaiGia ? items.filter((i) => !i.unitCost).length : 0;
 
   // Đã gõ tên xưởng ⇒ chỉ hiện lệnh / lô của ĐÚNG xưởng đó (so tên đã chuẩn hoá); chưa gõ ⇒ tất cả.
   const linkOptions = useMemo(() => {
@@ -151,8 +164,9 @@ export function ReceiptDialog({
     }
     startTransition(async () => {
       const link = kind === "RECEIPT" ? { productionOrderId: chosenOrderId || undefined, productionBatchId: chosenBatchId || undefined } : {};
-      // Không gửi giá: phiếu nhập lấy giá báo MKT ở máy chủ; các loại phiếu khác không mang giá.
-      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, ...link, items: items.map(({ variantId, quantity }) => ({ variantId, quantity })) });
+      // Không gửi giá: phiếu nhập lấy giá báo MKT ở máy chủ; các loại phiếu khác không mang giá. Chế độ khai tay
+      // (tổ chức khác nhà) gửi đơn giá từng dòng — máy chủ chỉ dùng nó khi CHÍNH nó phân giải ra `MANUAL`.
+      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, ...link, items: items.map(({ variantId, quantity, unitCost }) => ({ variantId, quantity, ...(khaiGia ? { unitCost } : {}) })) });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -163,7 +177,7 @@ export function ReceiptDialog({
         : kind === "ISSUE" ? `Đã xuất tay ${formatNumber(totalQty)} sản phẩm (${items.length} mẫu mã)`
         : `Đã điều chỉnh ${items.length} mẫu mã`;
       toast.success(done);
-      if (result.missingPrice?.length) toast.warning(`Mã chưa có giá báo MKT: ${result.missingPrice.join(", ")} — phiếu đã lưu, giá nhập để CHƯA BIẾT cho tới khi có giá báo`, { duration: 10_000 });
+      if (result.missingPrice?.length) toast.warning(khaiGia ? `Dòng chưa khai đơn giá: ${result.missingPrice.join(", ")} — phiếu đã lưu, giá nhập để CHƯA BIẾT` : `Mã chưa có giá báo MKT: ${result.missingPrice.join(", ")} — phiếu đã lưu, giá nhập để CHƯA BIẾT cho tới khi có giá báo`, { duration: 10_000 });
       setOpen(false);
       reset();
     });
@@ -190,7 +204,7 @@ export function ReceiptDialog({
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle>{STOCK_RECEIPT_KIND_LABEL[kind]}</DialogTitle>
           <DialogDescription>
-{STOCK_RECEIPT_KIND_HINT[kind]}
+{khaiGia ? "Hàng về từ xưởng / nhà cung cấp. Nhập số lượng và đơn giá nhập của từng mẫu mã — ô đơn giá bỏ trống = chưa biết giá." : STOCK_RECEIPT_KIND_HINT[kind]}
           </DialogDescription>
           {prefill && kind === "RECEIPT" ? (
             <p className="mt-1 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200">
@@ -287,6 +301,7 @@ export function ReceiptDialog({
                   <>
                     {kind === "RETURN" ? <th className="w-28 px-3 py-2 text-right">Hoàn chờ nhận</th> : null}
                     <th className="w-28 px-3 py-2 text-right">{kind === "RECEIPT" ? "Số lượng nhập" : kind === "RETURN" ? "Thực nhận" : "Số lượng xuất"}</th>
+                    {khaiGia ? <th className="w-32 px-3 py-2 text-right">Đơn giá (₫)</th> : null}
                     <th className="px-3 py-2 text-right">Tồn sau phiếu</th>
                   </>
                 ) : (
@@ -299,7 +314,7 @@ export function ReceiptDialog({
             </thead>
             <tbody>
               {visible.map((v) => {
-                const input = inputs[v.id] ?? { qty: "", counted: "" };
+                const input = inputs[v.id] ?? { qty: "", counted: "", cost: "" };
                 const qty = toInt(input.qty);
                 const counted = input.counted === "" ? null : toInt(input.counted);
                 const diff = counted === null ? 0 : counted - v.currentStock;
@@ -340,6 +355,11 @@ export function ReceiptDialog({
                         <td className="px-3 py-1.5">
                           <Input type="number" inputMode="numeric" min={0} className="numeric h-8 text-right" placeholder={kind === "RETURN" && waiting ? String(waiting) : "0"} value={input.qty} onChange={(e) => setField(v.id, "qty", e.target.value)} />
                         </td>
+                        {khaiGia ? (
+                          <td className="px-3 py-1.5">
+                            <Input type="number" inputMode="numeric" min={0} aria-label={`Đơn giá ${v.sku || v.productName}`} className="numeric h-8 text-right" placeholder={v.lastCost > 0 ? String(v.lastCost) : "chưa biết"} value={input.cost ?? ""} onChange={(e) => setField(v.id, "cost", e.target.value)} />
+                          </td>
+                        ) : null}
                         <td className="numeric px-3 py-1.5 text-right text-muted-foreground">
                           {qty > 0 ? <span className="font-semibold text-foreground">{formatNumber(v.currentStock + (kind === "ISSUE" ? -qty : qty))}</span> : "—"}
                         </td>
@@ -357,8 +377,8 @@ export function ReceiptDialog({
               })}
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    Không có mẫu mã phù hợp. Nếu danh sách trống, hãy đồng bộ sản phẩm từ Pancake trước.
+                  <td colSpan={6} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                    {emptyHint}
                   </td>
                 </tr>
               ) : null}
@@ -371,8 +391,8 @@ export function ReceiptDialog({
             {items.length ? (
               <>
                 <b className="text-foreground">{items.length}</b> mẫu mã · <b className={cn("numeric", totalQty < 0 ? "text-rose-600" : "text-foreground")}>{totalQty > 0 ? "+" : ""}{formatNumber(totalQty)}</b> sản phẩm
-                {kind === "RECEIPT" ? <> · giá nhập theo <b className="text-foreground">giá báo MKT</b></> : null}
-                {chuaCoGia ? <span className="text-amber-700 dark:text-amber-400"> · {chuaCoGia} mẫu mã chưa có giá báo</span> : null}
+                {kind === "RECEIPT" ? khaiGia ? <> · giá nhập theo <b className="text-foreground">đơn giá khai trên phiếu</b></> : <> · giá nhập theo <b className="text-foreground">giá báo MKT</b></> : null}
+                {chuaCoGia ? <span className="text-amber-700 dark:text-amber-400"> · {chuaCoGia} mẫu mã {khaiGia ? "chưa khai đơn giá" : "chưa có giá báo"}</span> : null}
                 {kind === "ISSUE" ? <> · <span className="text-rose-600">trừ khỏi tồn</span></> : null}
               </>
             ) : (
