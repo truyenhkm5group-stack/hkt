@@ -21,7 +21,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { FakeProvider, setAiProviderForTests, type AiRequest, type AiResponse } from "@/lib/ai/provider";
-import { findUnsupportedKeywords, toDialectSchema } from "@/lib/ai/schema-dialect";
+import { findUnsupportedKeywords, schemaShapeProblems, toDialectSchema } from "@/lib/ai/schema-dialect";
 import type { SessionUser } from "@/lib/auth/session";
 import { findConnector, isOrgConfigurable } from "@/lib/connectors/registry";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
@@ -123,6 +123,15 @@ function testPure() {
   const pageHint = JSON.stringify(((props.pages.items as Record<string, unknown>).properties as Record<string, unknown>).schema);
   for (const t of ["kpi", "table", "chart", "kanban"]) assert.ok(pageHint.includes(`"const":"${t}"`), `gợi ý trang có khối ${t}`);
   assert.deepEqual(findUnsupportedKeywords(toDialectSchema(tool.inputSchema, "anthropic")), [], "phương ngữ Anthropic sạch khoá không nhận");
+  // Đo thật 29/09/2026 (E2E #6, Anthropic): bản cũ chèn chuỗi `description` vào MAP `properties` của
+  // `validation` (vì coi field tên `pattern` / `minLength` là từ khoá) ⇒ 400 "JSON schema is invalid". Hình của
+  // schema gửi đi phải hợp lệ, và field trùng tên từ khoá phải CÒN NGUYÊN (chỉ từ khoá ở vị trí từ khoá bị gỡ).
+  const wire = toDialectSchema(tool.inputSchema, "anthropic");
+  assert.deepEqual(schemaShapeProblems(wire), [], "schema blueprint gửi cho Anthropic có hình JSON Schema hợp lệ");
+  assert.deepEqual(schemaShapeProblems(toDialectSchema(tool.inputSchema, "openai")), [], "schema blueprint gửi cho OpenAI có hình hợp lệ");
+  const validationProps = ((((wire.properties as Record<string, Record<string, unknown>>).fields.items as Record<string, unknown>).properties as Record<string, Record<string, unknown>>).validation.properties ?? {}) as Record<string, unknown>;
+  for (const f of ["pattern", "minLength", "maxLength"]) assert.ok(f in validationProps, `field «validation.${f}» (TÊN field trùng từ khoá) còn nguyên sau khi dịch phương ngữ`);
+  assert.ok(!("description" in validationProps), "không chèn khoá lạ vào map properties");
   const sys = buildSystemPrompt("new");
   assert.ok(sys.includes(BLUEPRINT_TOOL_NAME) && sys.includes("users:manage") && sys.includes("## Module"), "system prompt tóm tắt sổ + luật an toàn");
   assert.ok(!/connector_pancake ·/.test(sys), "module chỉ-nhà không được liệt kê như module dùng được");
