@@ -4295,6 +4295,12 @@ export const platformOrganizations = pgTable(
     plan: text("plan"),
     templateKey: text("template_key"),
     settings: jsonb("settings").notNull().default({}),
+    /**
+     * Vòng đời khách pilot (0177): `CREATED` · `CONFIGURING` · `READY_FOR_UAT` · `ACTIVE`. TÁCH khỏi `status` — `status`
+     * nói "có được chạy không" (SUSPENDED là công tắc khẩn), cột này nói "khách đang ở bước nào". `NULL` = không theo
+     * dõi (tổ chức nhà / tổ chức có từ trước 0177) — không backfill. Chỉ `lib/platform/pilot.ts` ghi.
+     */
+    pilotStage: text("pilot_stage"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -4304,6 +4310,7 @@ export const platformOrganizations = pgTable(
     check("platform_organizations_status_check", sql`${t.status} in ('ACTIVE','SUSPENDED','ARCHIVED','SETUP_FAILED')`),
     check("platform_organizations_module_default_check", sql`${t.moduleDefault} in ('ENABLED','DISABLED')`),
     check("platform_organizations_code_check", sql`${t.code} ~ '^[a-z][a-z0-9-]{1,30}$'`),
+    check("platform_organizations_pilot_stage_check", sql`${t.pilotStage} IS NULL OR ${t.pilotStage} IN ('CREATED','CONFIGURING','READY_FOR_UAT','ACTIVE')`),
   ],
 );
 

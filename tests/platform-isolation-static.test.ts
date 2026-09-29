@@ -127,6 +127,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/platform/organizations.ts::__erpOrgs": { loai: "NEN_TANG", lyDo: "Sổ tổ chức của mặt phẳng điều khiển (CSDL nhà), đệm 10 giây." },
   "lib/ai-usage/control.ts::__erpAiControl": { loai: "THEO_TO_CHUC", lyDo: "Đệm ≤ 10 giây của công tắc AI toàn nền tảng (một giá trị) + công tắc / ghi đè hạn mức AI của TỪNG tổ chức (Map khoá theo mã tổ chức, CSDL nhà) — không chứa prompt, khoá hay dữ liệu nghiệp vụ; lượt ghi xoá đệm ngay." },
   "lib/onboarding/signup-mode.ts::__erpSignupSetting": { loai: "NEN_TANG", lyDo: "Đệm ≤ 10 giây của MỘT cài đặt nền tảng (chế độ đăng ký /start, CSDL nhà) — không thuộc tổ chức nào, không chứa dữ liệu nghiệp vụ; lượt ghi xoá đệm ngay." },
+  "lib/platform/org-flags.ts::__erpOrgFlags": { loai: "THEO_TO_CHUC", lyDo: "Đệm 5 giây của cờ nền tảng theo tổ chức (công tắc khẩn `workflows.paused`), KHOÁ theo mã tổ chức + khoá cờ; lượt ghi xoá đệm." },
   "lib/platform/capabilities.ts::__erpCapabilities": { loai: "THEO_TO_CHUC", lyDo: "Đệm 5 giây của dòng cấu hình module, KHOÁ theo mã tổ chức (`Map<mã, dòng>`); ghi cấu hình xoá đúng khoá của tổ chức đó." },
 };
 
@@ -596,6 +597,11 @@ export function testServerActionQuaCongPhien(): number {
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
   "lib/actions/ai-usage.ts::setOrgAiControlAction": { loai: "VAN_HANH", lyDo: "Người vận hành tắt AI / ghi đè hạn mức AI của MỘT tổ chức từ /platform/org/<mã> — requirePermission(platform:operate), lõi setOrgAiControl kiểm lại người vận hành + tổ chức nhà, bắt buộc lý do, ghi platform_audit_log." },
+  "lib/actions/platform-ops.ts::setPilotStageAction": { loai: "VAN_HANH", lyDo: "Người vận hành đổi giai đoạn pilot của một tổ chức (/platform/org/<mã>) — requirePermission(platform:operate) + platformOperatorDenial ở lõi, lý do, nhật ký nền tảng." },
+  "lib/actions/platform-ops.ts::confirmPilotUatAction": { loai: "VAN_HANH", lyDo: "Người vận hành xác nhận UAT của một tổ chức — requirePermission(platform:operate) + platformOperatorDenial ở lõi, nhật ký nền tảng." },
+  "lib/actions/platform-ops.ts::setOrgSuspendedAction": { loai: "VAN_HANH", lyDo: "Công tắc khẩn: đình chỉ / bật lại một tổ chức — requirePermission(platform:operate) + platformOperatorDenial ở lõi, lý do, nhật ký nền tảng." },
+  "lib/actions/platform-ops.ts::setWorkflowsPausedAction": { loai: "VAN_HANH", lyDo: "Công tắc khẩn: tạm dừng luật tự động của một tổ chức (cờ control plane) — requirePermission(platform:operate) + platformOperatorDenial ở lõi, lý do, nhật ký nền tảng." },
+  "lib/actions/platform-ops.ts::disableOrgConnectionAction": { loai: "VAN_HANH", lyDo: "Công tắc khẩn: tắt một kết nối của tổ chức qua sổ kết nối (lõi bọc withOrganization ĐÍCH, không phải action) — requirePermission(platform:operate) + platformOperatorDenial." },
   "lib/actions/onboarding.ts::retrySetupAction": { loai: "VAN_HANH", lyDo: "Người vận hành chạy lại việc dựng một tổ chức SETUP_FAILED — requireOperator (platform:operate + tổ chức nhà)." },
   "lib/actions/onboarding.ts::checkOrgAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức ĐỀ XUẤT cho tổ chức sắp tạo — chỉ kiểm trùng ở sổ tổ chức, không mở CSDL nào." },
   "lib/actions/onboarding.ts::previewSignupAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức đi cùng mã mời để tra mã mời đã gắn đúng tổ chức — xem trước chạy trên tổ chức TRẮNG tưởng tượng." },

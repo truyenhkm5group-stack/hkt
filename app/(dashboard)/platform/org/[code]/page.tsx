@@ -3,17 +3,20 @@ import { notFound, redirect } from "next/navigation";
 import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
 import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { PageHeader } from "@/components/page-header";
+import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { loadOperatorOrgAi } from "@/lib/ai-usage/view";
+import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
+import { loadOrgSupport } from "@/lib/platform/support";
 import { loadOrgDiagnostics, type Measured } from "@/lib/queries/platform-org-diagnostics";
 import { STALE_RUN_KINDS } from "@/lib/workflow/stale";
 import { cn } from "@/lib/utils";
 
-export const metadata = { title: "Chẩn đoán tổ chức" };
+export const metadata = { title: "Sức khoẻ tổ chức" };
 
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Đang chạy", SUSPENDED: "Đình chỉ", ARCHIVED: "Lưu trữ", SETUP_FAILED: "Dựng hỏng" };
 const RULE_STATUS_LABEL: Record<string, string> = { DRAFT: "Nháp", ACTIVE: "Đang bật", PAUSED: "Tạm dừng", ARCHIVED: "Lưu trữ" };
@@ -45,13 +48,29 @@ const thead = "bg-muted/40 text-left text-[11.5px] font-semibold uppercase track
  * CHẨN ĐOÁN MỘT TỔ CHỨC — chỉ người của TỔ CHỨC NHÀ có `platform:operate` (như `/platform`).
  *
  * Kiểm hai lần: `requirePermission` rồi `platformOperatorDenial` ở trang, VÀ lại ở `loadOrgDiagnostics` (hàm đọc xuyên
- * ranh giới tổ chức). Trang không ghi vào CSDL tổ chức; sửa module vẫn ở `/platform?org=<mã>`. Khung «Dùng AI» có công tắc AI
- * + ghi đè hạn mức — chúng ghi vào MẶT PHẲNG ĐIỀU KHIỂN (`platform_organizations.settings.ai`), có lý do và nhật ký nền tảng.
+ * ranh giới tổ chức). Phần chẩn đoán CHỈ ĐỌC. Ba khung đầu (docs/platform/pilot-operations.md): công tắc khẩn + vòng
+ * đời pilot có nút GHI — mỗi nút qua hộp xác nhận + lý do + server action kiểm lại người vận hành + nhật ký nền tảng; tắt
+ * kết nối đi qua sổ kết nối của tổ chức (không ghi thẳng bảng). MỖI lượt mở trang ghi `SUPPORT_VIEW` (`loadOrgSupport`).
+ * Sửa module vẫn ở `/platform?org=<mã>`. Khung «Dùng AI» có công tắc AI + ghi đè hạn mức — chúng ghi vào MẶT PHẲNG
+ * ĐIỀU KHIỂN (`platform_organizations.settings.ai`), có lý do và nhật ký nền tảng.
  */
 export default async function PlatformOrgPage({ params }: { params: Promise<{ code: string }> }) {
   const user = await requirePermission("platform:operate");
   if (platformOperatorDenial(user)) redirect("/?forbidden=1");
   const { code } = await params;
+  // Sức khoẻ / hỗ trợ TRƯỚC: nó ghi vết SUPPORT_VIEW vào nhật ký nền tảng rồi mới đọc CSDL của khách. Vết không ghi
+  // được ⇒ không mở trang (không đọc chẩn đoán luôn).
+  const support = await loadOrgSupport(user, code);
+  if (!support.ok) {
+    if (support.code === "NOT_FOUND") notFound();
+    if (support.code === "FORBIDDEN") redirect("/?forbidden=1");
+    return (
+      <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+        {support.error}
+      </div>
+    );
+  }
+  const s = support.value;
   const result = await loadOrgDiagnostics(user, code);
   if (!result.ok) {
     if (result.code === "NOT_FOUND") notFound();
@@ -60,13 +79,14 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const d = result.value;
   const o = d.organization;
   const ai = await loadOperatorOrgAi(user, o.code);
+  const stage = s.pilot?.record.stage ?? null;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Vận hành nền tảng"
-        title={`Chẩn đoán · ${o.name}`}
-        description={`${o.code} · ${STATUS_LABEL[o.status] ?? o.status}${o.isHome ? " · tổ chức nhà" : ""} · gói ${d.plan.value?.plan?.name ?? d.planKey} · đo lúc ${formatDateTime(d.checkedAt)}`}
+        title={`Sức khoẻ & chẩn đoán · ${o.name}`}
+        description={`${o.code} · ${STATUS_LABEL[o.status] ?? o.status}${o.isHome ? " · tổ chức nhà" : stage ? ` · pilot: ${PILOT_STAGE_LABEL[stage]}` : ""}${s.killSwitches.workflowsPaused ? " · LUẬT TẠM DỪNG" : ""} · gói ${d.plan.value?.plan?.name ?? d.planKey} · đo lúc ${formatDateTime(d.checkedAt)}`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
             <p>Chỉ ĐỌC CSDL của tổ chức này (mở như khi người của họ đăng nhập). Không hiện bí mật kết nối, không hiện nội dung người dùng gõ (mô tả gửi AI, câu lỗi của job) — chi tiết ở màn hình của chính tổ chức.</p>
@@ -75,7 +95,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
         }
         actions={
           <div className="flex gap-3 text-xs">
-            <Link href={`/platform?org=${encodeURIComponent(o.code)}#module-editor`} className="font-medium text-primary hover:underline">
+            <Link href={`/platform?org=${encodeURIComponent(o.code)}#module-editor`} prefetch={false} className="font-medium text-primary hover:underline">
               Sửa module
             </Link>
             <Link href="/platform" className="text-muted-foreground hover:text-foreground">
@@ -90,6 +110,10 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
           {d.connectNote}
         </div>
       ) : null}
+
+      <KillSwitchPanel s={s} connections={d.connections.value ? d.connections.value.map((c) => ({ connectorKey: c.connectorKey, label: c.label, status: c.status })) : null} />
+      <PilotPanel s={s} />
+      <SupportHealthPanel s={s} />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <SectionCard title="Tổ chức & gói" description={`Mẫu ${o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : "—"} · dòng module thiếu = ${o.moduleDefault === "ENABLED" ? "BẬT" : "TẮT"}`} padded={false}>

@@ -167,6 +167,7 @@ async function updateSafeField(input: Input, user: SessionUser): Promise<PageAct
 
 async function runWorkflowNow(): Promise<PageActionResult> {
   const r = await runWorkflows();
+  if (r.paused) return { ok: false, error: r.paused.reason, code: "INVALID" };
   return { ok: true, message: `Đã xét ${r.events} sự kiện · ${r.runs} lượt chạy · ${r.executed} đã làm · ${r.waiting} chờ duyệt · ${r.failed} lỗi.` };
 }
 
@@ -201,7 +202,7 @@ async function requestApproval(input: Input, user: SessionUser, spec: PageAction
   const r = await runWorkflows();
   return {
     ok: true,
-    message: r.waiting > 0 ? "Đã gửi yêu cầu duyệt." : "Đã đổi trạng thái; luật không tạo yêu cầu duyệt ở lượt này (điều kiện của luật không khớp hoặc lượt chạy kế tiếp sẽ xét).",
+    message: r.paused ? `Đã đổi trạng thái; ${r.paused.reason}` : r.waiting > 0 ? "Đã gửi yêu cầu duyệt." : "Đã đổi trạng thái; luật không tạo yêu cầu duyệt ở lượt này (điều kiện của luật không khớp hoặc lượt chạy kế tiếp sẽ xét).",
   };
 }
 

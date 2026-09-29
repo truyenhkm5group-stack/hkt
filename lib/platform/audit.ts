@@ -10,7 +10,13 @@ import { getPlatformDb, schema } from "@/db";
  * Hàm này NÉM khi ghi hỏng, và bên gọi phải ghi nhật ký TRƯỚC khi coi lượt đổi cấu hình là xong:
  * một cấu hình đổi mà không có vết thì không ai trả lời được "vì sao hôm qua tổ chức X mất module Y".
  */
-export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_SET" | "FLAG_SET" | "ORG_CREATE" | "ORG_STATUS" | "ORG_SETUP" | "INVITE_CREATE" | "INVITE_REVOKE" | "SIGNUP_MODE_SET" | "SECRETS_SELF_TEST" | "AI_SWITCH_SET" | "AI_ORG_CONTROL_SET";
+export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_SET" | "FLAG_SET" | "ORG_CREATE" | "ORG_STATUS" | "ORG_SETUP" | "INVITE_CREATE" | "INVITE_REVOKE" | "SIGNUP_MODE_SET" | "SECRETS_SELF_TEST" | "AI_SWITCH_SET" | "AI_ORG_CONTROL_SET"
+  // Vận hành khách pilot (docs/platform/pilot-operations.md): lượt MỞ trang sức khoẻ một tổ chức (hỗ trợ có vết), đổi
+  // giai đoạn / xác nhận UAT, tắt kết nối của tổ chức. Đình chỉ ⇒ `ORG_STATUS`; tạm dừng luật ⇒ `FLAG_SET`.
+  | "SUPPORT_VIEW"
+  | "PILOT_STAGE"
+  | "PILOT_UAT"
+  | "CONNECTION_DISABLE";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

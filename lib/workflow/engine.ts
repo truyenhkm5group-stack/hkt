@@ -53,6 +53,8 @@ import type { DbOrTx } from "@/lib/db-transaction";
 import { recordExists } from "@/lib/metadata/common";
 import { resolveObject } from "@/lib/metadata/object-resolver";
 import { canUseModule } from "@/lib/platform/capabilities";
+import { currentOrganization } from "@/lib/platform/context";
+import { workflowsPaused } from "@/lib/platform/org-flags";
 import { executeActions, planSteps, retryBlocker } from "@/lib/workflow/actions";
 import { advanceEventCursor, ensureEventCursor, RECORDED_AT_TEXT, type CursorPos } from "@/lib/workflow/cursor";
 import { evaluateCondition } from "@/lib/workflow/evaluate";
@@ -82,7 +84,12 @@ const WAITING_BATCH = 200;
 /** Số lượt treo tối đa xét trong một lượt phục hồi. */
 const RECOVERY_BATCH = 50;
 
-export type RunWorkflowsResult = { events: number; runs: number; executed: number; waiting: number; failed: number; recovered: number };
+/**
+ * `paused` có mặt ⇔ lượt này BỎ QUA vì người vận hành nền tảng tạm dừng luật của tổ chức (công tắc khẩn
+ * `workflows.paused`, `lib/platform/org-flags.ts`). Khi đó con trỏ KHÔNG tiến, lượt chờ duyệt KHÔNG bị quét, lượt treo
+ * KHÔNG bị chiếm lại — bật lại thì lượt kế tiếp xét tiếp đúng từ chỗ dừng, `dedupe_key` giữ đúng-một-lần.
+ */
+export type RunWorkflowsResult = { events: number; runs: number; executed: number; waiting: number; failed: number; recovered: number; paused?: { reason: string; since: string } };
 
 type EventRow = EventLike & { id: string; at: string; causationId: string | null };
 
@@ -465,6 +472,19 @@ async function recoverStaleRuns(db: Db, c: Counters, now: Date) {
 export async function runWorkflows(opts: { limit?: number } = {}): Promise<RunWorkflowsResult> {
   const c: Counters = { events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0, actions: 0 };
   if (!(await canUseModule("work"))) return { events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0 };
+  // CÔNG TẮC KHẨN của người vận hành: hỏi TRƯỚC mọi lượt đọc / ghi CSDL của tổ chức — tạm dừng là không chạm gì cả.
+  const pause = await workflowsPaused((await currentOrganization()).code);
+  if (pause) {
+    return {
+      events: 0,
+      runs: 0,
+      executed: 0,
+      waiting: 0,
+      failed: 0,
+      recovered: 0,
+      paused: { reason: "Người vận hành nền tảng đã tạm dừng luật tự động của tổ chức này (công tắc khẩn) — không xét sự kiện, không thực thi lượt nào cho tới khi bật lại.", since: pause.updatedAt.toISOString() },
+    };
+  }
   const db = await getDb();
   const now = new Date();
   const limit = Math.max(1, Math.min(opts.limit ?? EVENT_BATCH, EVENT_BATCH));
