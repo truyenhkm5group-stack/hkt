@@ -74,6 +74,7 @@ const KET_NOI_CSDL = [/new\s+(?:pg\.)?Pool\s*\(/, /new\s+PGlite\s*\(/, /from\s+[
 const KET_NOI_DUOC_PHEP: Record<string, string> = {
   "db/index.ts": "Chỗ DUY NHẤT mở kết nối: `getDb()` định tuyến theo tổ chức, bể theo tổ chức nằm trên `globalThis`.",
   "db/migrate.ts": "Chỉ `import type { Pool }` để nhận bể của chính `db/index.ts` khi áp migration — không mở kết nối.",
+  "scripts/restore-drill-pg.ts": "Script DIỄN TẬP KHÔI PHỤC chạy tay / trên CI với Postgres TẠM (hàng rào môi trường: ERP_RESTORE_DRILL_EPHEMERAL=1 + localhost + CSDL nhà rỗng + không erp_org_* nào khác): cần một Client quản trị để CREATE / DROP / đổi tên CSDL tạm của lượt diễn tập và băm từng bảng — việc mà getDb() (định tuyến theo tổ chức) không làm được; dữ liệu tổ chức vẫn ghi qua dịch vụ trong withOrganization.",
   "scripts/perf-probe.ts": "Script ĐO của người vận hành, chạy tay trên máy chủ với CSDL nhà; không nằm trong đường chạy của ứng dụng (ISO-24 còn mở).",
 };
 
