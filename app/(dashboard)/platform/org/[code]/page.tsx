@@ -4,9 +4,11 @@ import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
 import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { PageHeader } from "@/components/page-header";
 import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
+import { OrgPlanControl } from "@/components/platform/pilot-ops";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
+import { HOME_PLAN_KEY, listPlans } from "@/lib/entitlements/check";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { loadOperatorOrgAi } from "@/lib/ai-usage/view";
@@ -79,6 +81,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const d = result.value;
   const o = d.organization;
   const ai = await loadOperatorOrgAi(user, o.code);
+  const plans = o.isHome ? [] : (await listPlans()).filter((x) => x.key !== HOME_PLAN_KEY).map((x) => ({ key: x.key, name: x.name }));
   const stage = s.pilot?.record.stage ?? null;
 
   return (
@@ -139,6 +142,11 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
               </tbody>
             </table>
           ))}
+          {!o.isHome && plans.length ? (
+            <div className="border-t border-hairline px-3 py-3" data-org-plan-control={o.code}>
+              <OrgPlanControl orgCode={o.code} orgName={o.name} current={d.planKey} plans={plans} />
+            </div>
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Module đang bật" description={`${d.modules.enabled.length}/${d.modules.total}`}>

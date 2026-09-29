@@ -16,7 +16,9 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "SUPPORT_VIEW"
   | "PILOT_STAGE"
   | "PILOT_UAT"
-  | "CONNECTION_DISABLE";
+  | "CONNECTION_DISABLE"
+  // Người vận hành đổi gói của một tổ chức sau lúc tạo (`lib/platform/org-plan.ts`).
+  | "ORG_PLAN_SET";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

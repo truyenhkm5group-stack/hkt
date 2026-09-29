@@ -13,14 +13,17 @@
 1. **Tạo tổ chức hộ khách.** `/platform` → khung «Tự phục vụ» → **Tạo tổ chức cho khách** → đi luồng `/start` (tên, mã,
    quản trị đầu tiên, loại hình, mẫu, module, xem trước) → Tạo. Phiên của bạn không đổi.
    Tổ chức mới vào giai đoạn **Vừa tạo**, cài mẫu xong tự sang **Đang cấu hình** (hai bước này do máy ghi, có nhật ký).
-2. **Gửi thông tin đăng nhập cho quản trị của khách** (mã tổ chức + email + mật khẩu đã đặt) qua kênh riêng.
-3. **Cấu hình cùng khách** (khách tự làm trong ERP của họ, hoặc bạn hướng dẫn): mời người dùng, xem lại module,
+2. **Chọn gói.** Gói chọn lúc tạo (mặc định `trial`: 3 người dùng). Đổi sau đó ở `/platform/org/<mã>` → khung «Tổ chức &
+   gói» → **Đổi gói…** (lý do + xác nhận + nhật ký `ORG_PLAN_SET`; không SQL). Hạ gói không xoá dữ liệu — chỉ chặn lượt tạo
+   vượt trần kế tiếp. Gói nội bộ (không giới hạn) không cấp được cho khách.
+3. **Gửi thông tin đăng nhập cho quản trị của khách** (mã tổ chức + email + mật khẩu đã đặt) qua kênh riêng.
+4. **Cấu hình cùng khách** (khách tự làm trong ERP của họ, hoặc bạn hướng dẫn): mời người dùng, xem lại module,
    xuất bản trang, bật luật tự động nếu có, khai + kiểm kết nối mà mẫu gợi ý.
-4. **Theo dõi danh sách kiểm** ở `/platform/org/<mã>` → khung «Vòng đời pilot». Khi mọi mục của «Sẵn sàng UAT» đạt ⇒
+5. **Theo dõi danh sách kiểm** ở `/platform/org/<mã>` → khung «Vòng đời pilot». Khi mọi mục của «Sẵn sàng UAT» đạt ⇒
    bấm **Chuyển sang «Sẵn sàng UAT»**.
-5. **Khách chạy nghiệm thu (UAT)** trên dữ liệu thật của họ. Xong ⇒ bạn bấm **Xác nhận UAT** kèm ghi chú (ai thử, thử gì).
-6. **Đợi bản sao lưu đêm đầu tiên** của CSDL tổ chức (lịch đêm 02–05 giờ). Khi có ⇒ bấm **Chuyển sang «Đang dùng thật»**.
-7. Từ đó, mở `/platform/org/<mã>` khi khách báo lỗi hoặc định kỳ; mọi lượt mở đều được ghi vết (mục 5).
+6. **Khách chạy nghiệm thu (UAT)** trên dữ liệu thật của họ. Xong ⇒ bạn bấm **Xác nhận UAT** kèm ghi chú (ai thử, thử gì).
+7. **Đợi bản sao lưu đêm đầu tiên** của CSDL tổ chức (lịch đêm 02–05 giờ). Khi có ⇒ bấm **Chuyển sang «Đang dùng thật»**.
+8. Từ đó, mở `/platform/org/<mã>` khi khách báo lỗi hoặc định kỳ; mọi lượt mở đều được ghi vết (mục 5).
 
 ## 2. Giai đoạn và danh sách kiểm
 

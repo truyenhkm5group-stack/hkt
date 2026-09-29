@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { confirmPilotUatAction, disableOrgConnectionAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
+import { confirmPilotUatAction, disableOrgConnectionAction, setOrgPlanAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
 import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_STAGES, type PilotStage } from "@/lib/constants/pilot";
 
 /**
@@ -91,6 +91,36 @@ const toOutcome = (r: { ok: true; message?: string } | { ok: true; changed: bool
   "error" in r ? r : { ok: true, message: "message" in r && r.message ? r.message : fallback };
 
 // ═══ Công tắc khẩn ═══
+
+/** Đổi gói của tổ chức (sau lúc tạo). Danh sách gói do trang truyền vào — đã bỏ gói nội bộ. */
+export function OrgPlanControl({ orgCode, orgName, current, plans }: { orgCode: string; orgName: string; current: string; plans: { key: string; name: string }[] }) {
+  const [planKey, setPlanKey] = useState(current);
+  const target = plans.find((x) => x.key === planKey);
+  return (
+    <ConfirmWithReason
+      id={`plan-${orgCode}`}
+      label="Đổi gói…"
+      title={`Chuyển «${orgName}» sang gói ${target?.name ?? planKey}?`}
+      consequence="Hạn mức của gói mới (người dùng, trang, luật, dung lượng, AI) áp cho lượt TẠO kế tiếp. Hạ gói không xoá dữ liệu nào: phần đang vượt trần giữ nguyên, chỉ không tạo thêm được. Ghi vào nhật ký nền tảng."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Khách chốt UAT, cần thêm người dùng"
+      disabled={planKey === current}
+      run={async (reason) => toOutcome(await setOrgPlanAction({ orgCode, planKey, reason }), "Đã đổi gói")}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <Label htmlFor={`plan-select-${orgCode}`}>Gói mới</Label>
+        <select id={`plan-select-${orgCode}`} value={planKey} onChange={(e) => setPlanKey(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm sm:w-60" data-org-plan={current}>
+          {plans.map((x) => (
+            <option key={x.key} value={x.key}>
+              {x.name}
+              {x.key === current ? " (đang dùng)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+    </ConfirmWithReason>
+  );
+}
 
 export function SuspendSwitch({ orgCode, orgName, suspended }: { orgCode: string; orgName: string; suspended: boolean }) {
   return (

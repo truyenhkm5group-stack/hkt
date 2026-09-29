@@ -31,6 +31,8 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization, OrgContextError, setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { disableOrgConnection, setOrganizationSuspended, setWorkflowsPaused } from "@/lib/platform/kill-switches";
 import { invalidateOrgFlags } from "@/lib/platform/org-flags";
+import { setOrganizationPlan } from "@/lib/platform/org-plan";
+import { checkEntitlement, listPlans } from "@/lib/entitlements/check";
 import { fanOutOrganizationCodes, getHomeOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
 import { confirmPilotUat, loadPilotView, readPilotRecord, setPilotStage } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
@@ -445,6 +447,39 @@ async function testConnectionDisable(op: SessionUser, outsiders: SessionUser[]) 
   assert.ok(!/orgConnections|org_connections/.test(readFileSync("lib/platform/kill-switches.ts", "utf8")), "công tắc đi qua sổ kết nối, không chạm bảng");
 }
 
+/** 8 · ĐỔI GÓI sau lúc tạo — không SQL: chỉ người vận hành, có lý do + nhật ký; không cấp gói nội bộ; nhà không đổi. */
+async function testOrgPlan(op: SessionUser, outsiders: SessionUser[]) {
+  const planOf = async () => (await (await getPlatformDb()).query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, B) }))?.plan ?? null;
+  const keys = (await listPlans()).map((x) => x.key);
+  assert.ok(keys.includes("trial") && keys.includes("standard"), `sổ gói phải có trial + standard: ${keys.join(",")}`);
+  const before = await planOf();
+  for (const u of outsiders) assert.ok("error" in (await setOrganizationPlan(u, { orgCode: B, planKey: "standard", reason: "tự nâng gói cho mình" })), `${u.email} không đổi được gói`);
+  assert.equal(await planOf(), before, "người ngoài không đổi một byte");
+  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "" })), "thiếu lý do ⇒ từ chối");
+  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "internal", reason: "cho khách không giới hạn" })), "không cấp gói nội bộ cho khách");
+  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: B, planKey: "khong-co-goi", reason: "gói không tồn tại" })), "gói lạ ⇒ từ chối");
+  assert.ok("error" in (await setOrganizationPlan(op, { orgCode: (await getHomeOrganization()).code, planKey: "trial", reason: "hạ gói nhà thử xem" })), "nhà không đổi gói");
+  assert.equal((await auditRows(B, "ORG_PLAN_SET")).length, 0, "lượt bị từ chối không ghi nhật ký");
+
+  const trialUsers = await withOrganization(B, () => checkEntitlement("users", 0));
+  const up = await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "Khách chốt UAT, cần thêm người" });
+  assert.ok("ok" in up && up.changed, JSON.stringify(up));
+  assert.equal(await planOf(), "standard");
+  invalidateOrganizations();
+  const stdUsers = await withOrganization(B, () => checkEntitlement("users", 0));
+  assert.equal(stdUsers.planKey, "standard", "hạn mức đọc gói mới ngay trong tiến trình");
+  assert.ok(stdUsers.ok && trialUsers.planKey !== "standard", "trước là gói cũ, sau là gói mới");
+  const rows = await auditRows(B, "ORG_PLAN_SET");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].actorEmail, op.email);
+  const again = await setOrganizationPlan(op, { orgCode: B, planKey: "standard", reason: "bấm lại lần hai" });
+  assert.ok("ok" in again && !again.changed, "bấm lại không đổi");
+  assert.equal((await auditRows(B, "ORG_PLAN_SET")).length, 1, "bấm lại không ghi thêm");
+  const down = await setOrganizationPlan(op, { orgCode: B, planKey: "trial", reason: "Khách xin quay lại gói dùng thử" });
+  assert.ok("ok" in down && down.changed);
+  assert.equal(await planOf(), "trial");
+}
+
 export async function testPilotOps() {
   testPure();
   await cleanup();
@@ -461,6 +496,7 @@ export async function testPilotOps() {
     await testSuspend(op, outsiders);
     await testWorkflowPause(op, outsiders);
     await testConnectionDisable(op, outsiders);
+    await testOrgPlan(op, outsiders);
     // pop-b (tổ chức khác) không bị công tắc nào của pop-a chạm tới.
     assert.equal((await auditRows(B)).filter((r) => ["ORG_STATUS", "FLAG_SET", "CONNECTION_DISABLE", "SUPPORT_VIEW"].includes(r.action)).length, 0);
   } finally {
@@ -469,6 +505,6 @@ export async function testPilotOps() {
     for (const code of ORGS) rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
   }
   console.log(
-    "✓ Vận hành khách pilot: /start ⇒ CREATED → CONFIGURING có nhật ký; không nhảy bậc, checklist chưa đạt bị chặn, ghi đè cần lý do và ghi cổng bị vượt, đủ dữ liệu thật thì qua không ghi đè, UAT + sao lưu đêm đầu ⇒ ACTIVE; trang sức khoẻ không lộ tên khách / tiền đơn / giá trị field và MỖI lượt xem có vết; đình chỉ chặn phiên + job + webhook rồi bật lại chạy; tạm dừng luật bỏ qua đúng tổ chức, lượt chờ duyệt giữ nguyên, bật lại không nhân đôi; tắt kết nối qua sổ kết nối; người ngoài bị từ chối mọi thao tác",
+    "✓ Vận hành khách pilot: /start ⇒ CREATED → CONFIGURING có nhật ký; không nhảy bậc, checklist chưa đạt bị chặn, ghi đè cần lý do và ghi cổng bị vượt, đủ dữ liệu thật thì qua không ghi đè, UAT + sao lưu đêm đầu ⇒ ACTIVE; trang sức khoẻ không lộ tên khách / tiền đơn / giá trị field và MỖI lượt xem có vết; đình chỉ chặn phiên + job + webhook rồi bật lại chạy; tạm dừng luật bỏ qua đúng tổ chức, lượt chờ duyệt giữ nguyên, bật lại không nhân đôi; tắt kết nối qua sổ kết nối; đổi gói không SQL (có lý do + nhật ký, không cấp gói nội bộ, nhà không đổi); người ngoài bị từ chối mọi thao tác",
   );
 }

@@ -133,6 +133,9 @@ export async function disableOrgConnection(user: SessionUser, input: unknown): P
   return { ok: true, changed: true, message: r.message ?? "Đã tắt." };
 }
 
+/** Kiểm người vận hành + mã tổ chức đích + lý do — dùng chung cho mọi thao tác ghi của người vận hành lên một tổ chức. */
+export const parseOperatorTarget = parseCommon;
+
 // ═══════════ ĐỌC — trạng thái công tắc của một tổ chức ═══════════
 
 export type SwitchReason = { at: string; byEmail: string | null; reason: string | null } | null;
