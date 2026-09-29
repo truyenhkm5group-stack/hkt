@@ -5,8 +5,9 @@ import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { ELIGIBLE_SENT_SQL, RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
-import { NO_ORDER_VALUE_FILTER, ORDER_VALUE_SQL, ORDER_VALUE_TIERS, ORDER_VALUE_UNKNOWN_SQL, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
+import { NO_ORDER_VALUE_FILTER, ORDER_VALUE_SQL, ORDER_VALUE_TIERS, ORDER_VALUE_UNKNOWN_SQL, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import type { Period } from "@/lib/search-params";
+import { memo } from "@/lib/cache";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 
@@ -729,7 +730,28 @@ function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED", valu
 }
 
 /** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
-export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; productRows: ProductRateRow[]; projectionError: string | null }> {
+/**
+ * ═══ ĐỆM 90 GIÂY CHO BỐN BẢNG CỦA /reports/returns (AGENTS mục 2) ═══
+ *
+ * Job giữ ấm (`reportWarmTasks`) tính sẵn trang mặc định mỗi 10 phút, nhưng bốn bảng này từng KHÔNG có
+ * đệm: đo production 29/09/2026 ngay sau lượt làm ấm, trang vẫn 4,5 s — mỗi lượt xem tự chạy lại truy
+ * vấn của chúng (theo mẫu mã ~0,7 s, theo bậc giá ~0,5 s, tổng hợp ~0,3 s lúc ấm), và phải giành hai
+ * nhân với những lượt làm mới phía sau mà `memo` vừa kích hoạt. Có đệm thì mọi lời gọi của trang đều
+ * trúng; phần làm mới chạy SAU khi trang đã trả lời.
+ *
+ * Khoá gồm ĐỦ mọi tham số của hàm. Kết quả dùng chung giữa các lượt đọc — nơi nhận không được sửa tại
+ * chỗ (trang và route xuất tệp chỉ đọc; mọi `sort` phía sau chạy trên mảng mới).
+ */
+function khoaKy(period: Period) {
+  return `${period.from?.toISOString() ?? "-"}..${period.to?.toISOString() ?? "-"}`;
+}
+
+export async function getReturnRateByVariant(query: ReturnRateQuery): ReturnType<typeof getReturnRateByVariantUncached> {
+  const key = ["return-rate-variant", khoaKy(query.period), query.basis ?? "SHIPPED", orderValueKey(query.value ?? NO_ORDER_VALUE_FILTER), query.q, query.minShipped, query.sort, query.dir, query.page, query.pageSize].join(":");
+  return memo(key, 90_000, () => getReturnRateByVariantUncached(query));
+}
+
+async function getReturnRateByVariantUncached(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; productRows: ProductRateRow[]; projectionError: string | null }> {
   const db = await getDb();
   // 11 cột gộp trên cùng một biểu thức kết quả đơn ⇒ tính một lần cho mỗi dòng bằng bảng dẫn xuất.
   const base = db
@@ -1038,6 +1060,10 @@ export type ReturnRateSummary = {
 
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
 export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED", value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateSummary> {
+  return memo(["return-rate-summary", khoaKy(period), q, basis, orderValueKey(value)].join(":"), 90_000, () => getReturnRateSummaryUncached(period, q, basis, value));
+}
+
+async function getReturnRateSummaryUncached(period: Period, q: string, basis: TimeBasis, value: OrderValueFilter): Promise<ReturnRateSummary> {
   const db = await getDb();
   /*
     CÙNG MỐC VỚI BẢNG BÊN DƯỚI — nếu không thì khối tổng đầu trang và bảng theo mã nói hai con số
@@ -1285,6 +1311,10 @@ export type ReturnRateBySource = {
  * các nguồn lại đúng bằng tổng toàn shop.
  */
 export async function getReturnRateBySource(period: Period, q: string, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateBySource[]> {
+  return memo(["return-rate-source", khoaKy(period), q, orderValueKey(value)].join(":"), 90_000, () => getReturnRateBySourceUncached(period, q, value));
+}
+
+async function getReturnRateBySourceUncached(period: Period, q: string, value: OrderValueFilter): Promise<ReturnRateBySource[]> {
   const db = await getDb();
   const conds: SQL[] = [REPORTABLE_ORDER];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
@@ -1445,6 +1475,10 @@ function tierCaseSql(): string {
 }
 
 export async function getReturnRateByTier(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<OrderValueTierReport> {
+  return memo(["return-rate-tier", khoaKy(period), q, basis].join(":"), 90_000, () => getReturnRateByTierUncached(period, q, basis));
+}
+
+async function getReturnRateByTierUncached(period: Period, q: string, basis: TimeBasis): Promise<OrderValueTierReport> {
   const db = await getDb();
   const conds: SQL[] = [REPORTABLE_ORDER];
   const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
