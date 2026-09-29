@@ -10,7 +10,7 @@ import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { addUploadedDraft, republishVariantInstant, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, writeCopyOptions, republishVariantInstant, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
@@ -1068,6 +1068,20 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.ok(hUp && hUp.img.status === "APPROVED" && hUp.img.headline === "Tự làm" && hUp.runLabel.length > 0, "mẫu tự làm nằm ở hàng đợi, coi như đã duyệt");
     const [runUp] = await db.select().from(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, up.ok ? up.genId : ""));
     assert.equal(runUp.kind, "UPLOAD");
+    // AI viết theo công thức (29/09/2026): công thức + không ghi giá tới bộ viết; phương án đầu thành nháp của mẫu tự làm.
+    let nhanViet: { formulas?: unknown; noPrice?: unknown } = {};
+    const vietGia: VariantCaptioner = async (_db, inp) => {
+      nhanViet = { formulas: inp.formulas, noPrice: inp.noPrice };
+      return { ok: true, headline: "Đi tiệc mặc gì?", primaryText: "Đi tiệc mặc gì cho nổi? Nhắn shop tư vấn size.", options: [{ headline: "Đi tiệc mặc gì?", primaryText: "Đi tiệc mặc gì cho nổi? Nhắn shop tư vấn size.", formula: "HOOK_QUESTION" }, { headline: "Hết lo", primaryText: "Sợ bị quê?", formula: "PAS" }], seen: "", model: "fake", costUsd: null, attempts: 1, priceStripped: false };
+    };
+    const wc = await writeCopyOptions(db, up.ok ? up.imageId : "", { formulas: ["HOOK_QUESTION", "PAS"], noPrice: true, persistFirst: true }, new Date(), { caption: vietGia });
+    assert.ok(wc.ok && wc.options.length === 2, wc.ok ? "" : wc.error);
+    assert.deepEqual(nhanViet, { formulas: ["HOOK_QUESTION", "PAS"], noPrice: true }, "công thức + không ghi giá tới bộ viết");
+    assert.equal((await trongHang(up.ok ? up.imageId : ""))?.img.headline, "Đi tiệc mặc gì?", "phương án đầu thành nháp của mẫu tự làm");
+    const wc2 = await writeCopyOptions(db, up.ok ? up.imageId : "", { formulas: [], noPrice: true }, new Date(), { caption: vietGia });
+    assert.ok(wc2.ok);
+    assert.deepEqual(nhanViet.formulas, ["HOOK_QUESTION", "PAS", "STORY"], "không chọn công thức ⇒ bộ mặc định");
+    assert.equal((await trongHang(up.ok ? up.imageId : ""))?.img.headline, "Đi tiệc mặc gì?", "không persistFirst ⇒ không ghi gì");
     assert.ok(!(await addUploadedDraft(db, { productId: `${P}khong-co`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "", primaryText: "x", note: "", imageBytes: fakeJpeg(9_102) }, actor, new Date())).ok, "mã hàng không có ⇒ từ chối");
 
     // ── (d) SỬA TÊN ⇒ DIGEST ĐỔI ⇒ PHIẾU CŨ VÔ HIỆU; lô đã duyệt thì không sửa được ──

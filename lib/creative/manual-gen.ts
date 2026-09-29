@@ -34,7 +34,8 @@ import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupBidStrategy, setupOptim
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
-import { captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
+import { captionFromImage, type CaptionInput, type CaptionOption, type VariantCaptioner } from "@/lib/creative/caption";
+import { normalizeFormulas, type CopyFormula } from "@/lib/constants/copy-formulas";
 import { describeDnaVi, designPromptEn, planDesigns, type DesignParent, type DesignPlanInput } from "@/lib/creative/design";
 import { gatherPixels } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
@@ -757,27 +758,23 @@ export type CaptionOutcome = { ok: true; headline: string; primaryText: string; 
  * giá: sai giá ERP ⇒ viết lại ⇒ vẫn sai thì bỏ con số). Ghi vào dòng ảnh (người còn sửa trước khi đưa vào lô).
  * Hỏng ⇒ ghi lý do, giữ câu cũ; không ném.
  */
-export async function captionManualGenImage(db: Db, id: string, now: Date, deps: { caption?: VariantCaptioner } = {}): Promise<CaptionOutcome> {
-  const r = await loadImage(db, id);
-  if (!r) return { ok: false, error: "Không tìm thấy ảnh." };
-  if (r.img.status !== "APPROVED") return { ok: false, error: "Chỉ viết câu chữ cho ảnh đã duyệt, chưa đưa vào lô." };
+/**
+ * Ngữ cảnh viết câu chữ cho MỘT ảnh gen tay / mẫu tự làm: điểm ảnh, sản phẩm + giá (thiết kế mới: giá đề nghị), gen, nháp, câu
+ * chữ mẫu đã thắng. Dùng chung cho "máy viết khi duyệt" và "AI viết theo công thức" — một cách dựng, không hai.
+ */
+async function captionContext(db: Db, r: { img: ImageRow; run: GenRow }): Promise<{ ok: true; input: CaptionInput } | { ok: false; error: string }> {
   // Thiết kế mới: "sản phẩm" là thiết kế chưa có mã — giá = GIÁ ĐỀ NGHỊ (null ⇒ câu chữ không ghi con số giá),
   // giọng văn học từ cha trội (cùng cách ô thiết kế của lô viết câu chữ).
   const spec = r.img.design ? parseManualDesignSpec(r.img.design) : null;
   const product = spec ? { name: "Mẫu mới", code: "", priceVnd: spec.priceVnd } : r.run.productId ? await loadProductBrief(db, r.run.productId) : null;
   const pixels = r.img.imageId ? await readCreativeImage(db, r.img.imageId) : null;
   const genes = parseGenes(r.img.genes);
-  const fail = async (error: string): Promise<CaptionOutcome> => {
-    await db.update(schema.creativeManualGenImages).set({ captionError: error.slice(0, 1000), updatedAt: now }).where(eq(schema.creativeManualGenImages.id, id));
-    return { ok: false, error };
-  };
-  if (r.img.design && !spec) return fail("Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ.");
-  if (!product) return fail("Không tìm thấy mã hàng — không biết giá để viết câu chữ.");
-  if (!pixels) return fail("Ảnh đã mất điểm ảnh.");
-  const caption = deps.caption ?? captionFromImage;
-  const res = await caption(
-    db,
-    {
+  if (r.img.design && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ." };
+  if (!product) return { ok: false, error: "Không tìm thấy mã hàng — không biết giá để viết câu chữ." };
+  if (!pixels) return { ok: false, error: "Ảnh đã mất điểm ảnh." };
+  return {
+    ok: true,
+    input: {
       image: { bytes: new Uint8Array(pixels.bytes), contentType: pixels.contentType },
       product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
       genes: genes ?? {},
@@ -786,14 +783,60 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
       options: 1,
       ...(spec ? { productNote: `Đây là MẪU MỚI của shop — thiết kế: ${describeDnaVi(spec.dna)}. Có thể nói "mẫu mới"; không hứa ngày giao cụ thể.` } : {}),
     },
-    { now, entityId: id },
-  ).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
+  };
+}
+
+export async function captionManualGenImage(db: Db, id: string, now: Date, deps: { caption?: VariantCaptioner } = {}): Promise<CaptionOutcome> {
+  const r = await loadImage(db, id);
+  if (!r) return { ok: false, error: "Không tìm thấy ảnh." };
+  if (r.img.status !== "APPROVED") return { ok: false, error: "Chỉ viết câu chữ cho ảnh đã duyệt, chưa đưa vào lô." };
+  const fail = async (error: string): Promise<CaptionOutcome> => {
+    await db.update(schema.creativeManualGenImages).set({ captionError: error.slice(0, 1000), updatedAt: now }).where(eq(schema.creativeManualGenImages.id, id));
+    return { ok: false, error };
+  };
+  const ctx = await captionContext(db, r);
+  if (!ctx.ok) return fail(ctx.error);
+  const caption = deps.caption ?? captionFromImage;
+  const res = await caption(db, ctx.input, { now, entityId: id }).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
   if (!res.ok) return fail(res.error);
   await db
     .update(schema.creativeManualGenImages)
     .set({ headline: res.headline, primaryText: res.primaryText, captionModel: res.model, captionError: "", updatedAt: now })
     .where(and(eq(schema.creativeManualGenImages.id, id), eq(schema.creativeManualGenImages.status, "APPROVED")));
   return { ok: true, headline: res.headline, primaryText: res.primaryText, model: res.model };
+}
+
+export type CopyOptionsResult = { ok: true; options: CaptionOption[]; model: string; priceStripped: boolean } | { ok: false; error: string };
+
+/**
+ * "AI VIẾT THEO CÔNG THỨC" (chủ shop 29/09/2026: "content viết theo các công thức, concept khác nhau nhằm tạo được CTR, CR cao",
+ * "không để giá bán trên content") — MỖI phương án theo một công thức (`COPY_FORMULAS`), mặc định KHÔNG ghi giá. Chỉ ĐỌC + viết:
+ * người chọn phương án nào thì lưu / đăng bằng đường soạn bài như cũ. `persistFirst` (mẫu tự làm vừa tải lên, chưa có câu chữ)
+ * ⇒ ghi phương án đầu làm nháp của ảnh. Cùng luật khẳng định của bộ viết (không bịa chất liệu, khuyến mãi, số liệu).
+ */
+export async function writeCopyOptions(
+  db: Db,
+  imageId: string,
+  opts: { formulas: CopyFormula[]; noPrice: boolean; persistFirst?: boolean },
+  now: Date,
+  deps: { caption?: VariantCaptioner } = {},
+): Promise<CopyOptionsResult> {
+  const r = await loadImage(db, imageId);
+  if (!r) return { ok: false, error: "Không tìm thấy ảnh." };
+  if (r.img.status !== "APPROVED") return { ok: false, error: "Chỉ viết câu chữ cho ảnh đã duyệt / mẫu tự làm chưa đăng." };
+  const ctx = await captionContext(db, r);
+  if (!ctx.ok) return ctx;
+  const formulas = normalizeFormulas(opts.formulas);
+  const caption = deps.caption ?? captionFromImage;
+  const res = await caption(db, { ...ctx.input, formulas, noPrice: opts.noPrice }, { now, entityId: imageId }).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
+  if (!res.ok) return res;
+  if (opts.persistFirst) {
+    await db
+      .update(schema.creativeManualGenImages)
+      .set({ headline: res.options[0].headline, primaryText: res.options[0].primaryText, captionModel: res.model, captionError: "", updatedAt: now })
+      .where(and(eq(schema.creativeManualGenImages.id, imageId), eq(schema.creativeManualGenImages.status, "APPROVED")));
+  }
+  return { ok: true, options: res.options, model: res.model, priceStripped: res.priceStripped };
 }
 
 export type ReviewResult = { ok: true; status: "APPROVED" | "REJECTED"; caption: CaptionOutcome | null } | { ok: false; error: string };

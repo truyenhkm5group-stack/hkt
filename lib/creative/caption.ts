@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { COPY_CONVERSION_RULES, COPY_FORMULAS, COPY_MAX_FORMULAS, NO_PRICE_RULE, type CopyFormula } from "@/lib/constants/copy-formulas";
 import { schema, type Db } from "@/db";
 import { estimateCostUsd, type AiUsage } from "@/lib/ai/provider";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
@@ -62,9 +63,16 @@ export type CaptionInput = {
   productNote?: string;
   /** Số phương án xin (1…3). Đường sinh xin 1; nút gợi ý xin 3. */
   options?: number;
+  /**
+   * Công thức content (chủ shop 29/09/2026) — có thì MỖI phương án theo đúng một công thức, theo thứ tự; số phương án = số công
+   * thức (tối đa `COPY_MAX_FORMULAS`), bỏ qua `options`.
+   */
+  formulas?: CopyFormula[];
+  /** KHÔNG ghi giá (chủ shop: "không để giá bán trên content") — mọi con số giá là lỗi, viết lại rồi bỏ. */
+  noPrice?: boolean;
 };
 
-export type CaptionOption = { headline: string; primaryText: string };
+export type CaptionOption = { headline: string; primaryText: string; formula?: CopyFormula };
 
 export type CaptionResult =
   | {
@@ -183,6 +191,7 @@ export function finalizeCaption(o: CaptionOption, priceVnd: number | null): Capt
 }
 
 function briefOf(input: CaptionInput, priceVnd: number | null, n: number): string {
+  const formulas = input.formulas?.length ? input.formulas.slice(0, n) : null;
   const genes = GENE_KEYS.filter((k) => input.genes[k])
     .map((k) => `- ${GENE_LABEL[k]}: ${GENE_VALUE_LABEL[input.genes[k] as string] ?? input.genes[k]}`)
     .join("\n");
@@ -192,8 +201,10 @@ function briefOf(input: CaptionInput, priceVnd: number | null, n: number): strin
     .join("\n");
   return [
     `Viết ${n} phương án câu chữ cho ảnh quảng cáo đính kèm.`,
+    formulas ? `MỖI phương án theo ĐÚNG một công thức, theo thứ tự:\n${formulas.map((f, i) => `${i + 1}. ${COPY_FORMULAS[f].label}: ${COPY_FORMULAS[f].instruction}`).join("\n")}` : "",
+    formulas ? `Để tăng tỷ lệ nhấp và tỷ lệ nhắn tin:\n${COPY_CONVERSION_RULES}` : "",
     `Sản phẩm: ${input.product.name} (mã ${input.product.code || "không rõ"})`,
-    `Giá bán ERP: ${priceVnd !== null ? formatVnd(priceVnd) : "KHÔNG RÕ — không được viết con số giá nào"}`,
+    input.noPrice ? `Giá bán: KHÔNG GHI GIÁ.\n${NO_PRICE_RULE}` : `Giá bán ERP: ${priceVnd !== null ? formatVnd(priceVnd) : "KHÔNG RÕ — không được viết con số giá nào"}`,
     input.productNote ? input.productNote : "",
     genes ? `Ý đồ của mẫu (tham khảo — ảnh thật mới là căn cứ, ảnh khác ý đồ thì theo ảnh):\n${genes}` : "",
     input.draft && (input.draft.headline || input.draft.primaryText) ? `Câu chữ nháp viết TRƯỚC khi có ảnh (có thể không khớp ảnh — sửa theo ảnh):\nTiêu đề: ${input.draft.headline}\nCâu chữ: ${input.draft.primaryText}` : "",
@@ -245,8 +256,9 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
   const now = deps.now ?? new Date();
   const model = deps.model ?? MODEL_BY_TIER.openai.routine;
   const entityId = deps.entityId ?? "";
-  const n = Math.max(1, Math.min(CAPTION_MAX_OPTIONS, Math.floor(input.options ?? 1)));
-  const priceVnd = input.product.priceVnd !== null && input.product.priceVnd > 0 ? Math.round(input.product.priceVnd) : null;
+  const n = input.formulas?.length ? Math.min(COPY_MAX_FORMULAS, input.formulas.length) : Math.max(1, Math.min(CAPTION_MAX_OPTIONS, Math.floor(input.options ?? 1)));
+  // Không ghi giá ⇒ coi như KHÔNG BIẾT giá: mọi con số giá là lỗi (viết lại một lần, còn thì bỏ) — cùng luật `wrongPrices`.
+  const priceVnd = !input.noPrice && input.product.priceVnd !== null && input.product.priceVnd > 0 ? Math.round(input.product.priceVnd) : null;
   const brief = briefOf(input, priceVnd, n);
   const started = Date.now();
   let usage = ZERO_USAGE;
@@ -335,12 +347,13 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
     // Lượt viết lại vẫn sai giá ⇒ BỎ con số giá; vẫn dài ⇒ cắt ở ranh giới từ. Trùng nhau ⇒ bỏ bản sau.
     let priceStripped = false;
     const options: CaptionOption[] = [];
-    for (const o of parsed.options.slice(0, n)) {
+    for (const [i, o] of parsed.options.slice(0, n).entries()) {
       const f = finalizeCaption(o, priceVnd);
       priceStripped = priceStripped || f.priceStripped;
       if (!f.primaryText) continue;
       if (options.some((x) => x.headline === f.headline && x.primaryText === f.primaryText)) continue;
-      options.push({ headline: f.headline, primaryText: f.primaryText });
+      const formula = input.formulas?.[i];
+      options.push({ headline: f.headline, primaryText: f.primaryText, ...(formula ? { formula } : {}) });
     }
     if (!options.length) {
       await logCaption(db, { model: usedModel, entityId, prompt: brief, answer: lastAnswer, usage, costUsd, latencyMs: Date.now() - started, rounds: attempts, status: "ERROR", error: "Không còn phương án nào sau khi bỏ giá sai" });

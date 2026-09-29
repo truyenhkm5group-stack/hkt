@@ -748,6 +748,21 @@ Chủ shop: *"các mẫu đang chạy thì thêm nút cho đăng lại camp đ�
   (tên tự đặt) và bản xem trước trên màn hình dùng CHUNG một hàm.
 - Có ở mọi hộp setup: Đăng camp, Đăng lại camp. Mã băm phiếu duyệt KHÔNG gồm setup (như trước) nên lô đang đăng dở không đổi.
 
+## 5o. AI viết content theo công thức, không ghi giá (chủ shop 29/09/2026)
+
+Chủ shop: *"ảnh video tự tải lên sẽ mix với content, tiêu đề do AI tạo để tạo thành 1 bài post hoàn chỉnh, không để giá bán trên
+content, content viết theo các công thức, concept khác nhau nhằm tạo được CTR, CR cao"*.
+
+- `lib/constants/copy-formulas.ts`: 9 công thức (Câu hỏi mở đầu · AIDA · PAS · Trước–Sau–Cầu nối · Đặc điểm–Lợi ích · Kể chuyện ·
+  Giọng khách thật · 3 lý do · Theo dịp mặc), lời dặn cho mô hình viết tại bảng hằng; luật chung để tăng CTR / CR (dòng đầu dừng
+  lướt, câu ngắn, CTA nhắn tin cụ thể). Không công thức nào được bịa số liệu / khuyến mãi — luật khẳng định của bộ viết vẫn áp.
+- `captionFromImage` nhận `formulas` (mỗi phương án một công thức, đúng thứ tự, tối đa 4) và `noPrice`: giá ERP KHÔNG tới mô hình,
+  mọi con số giá là lỗi ⇒ viết lại một lần ⇒ còn thì bỏ (`wrongPrices` / `stripPrices` như cũ).
+- `writeCopyOptions` (một ảnh gen tay / mẫu tự làm): dùng chung ngữ cảnh viết với "máy viết khi duyệt" (`captionContext`); chỉ trả
+  phương án, `persistFirst` ghi phương án đầu làm nháp.
+- Hộp soạn bài: khối **AI viết theo công thức** (chọn công thức, "Không ghi giá" mặc định bật, bấm "Dùng" điền vào ô).
+- Mẫu tự làm: **AI viết tiêu đề + content theo ảnh** mặc định bật — không phải gõ content; AI hỏng thì mẫu vẫn vào hàng đợi.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

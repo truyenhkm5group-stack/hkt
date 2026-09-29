@@ -14,6 +14,8 @@ import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, GENE_VOCAB, type GeneKey } fro
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { ProductOption } from "@/lib/queries/creative-sources";
 import { manualCreativeInputSchema } from "@/lib/validation/creative";
+import type { CopyFormula } from "@/lib/constants/copy-formulas";
+import { FormulaPicker } from "./copy-ai";
 
 /**
  * Tải MẪU TỰ LÀM (vẽ trên web ChatGPT / Grok, hoặc chụp tay) vào THẲNG hàng đợi đăng camp (chủ shop 26/09/2026 bỏ lô
@@ -26,6 +28,8 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
   const [primaryText, setPrimaryText] = useState("");
   const [headline, setHeadline] = useState("");
   const [note, setNote] = useState("");
+  const [aiWrite, setAiWrite] = useState(true);
+  const [aiFormulas, setAiFormulas] = useState<CopyFormula[]>(["HOOK_QUESTION"]);
   const [genes, setGenes] = useState<Partial<Record<GeneKey, string>>>({});
   const [anh, setAnh] = useState<(AnhDaThuNho & { ten: string }) | null>(null);
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
@@ -60,7 +64,7 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
     setAnh(null);
   };
 
-  const input = useMemo(() => ({ productId, primaryText, headline, note, genes, imageBase64: anh?.base64 ?? "" }), [productId, primaryText, headline, note, genes, anh]);
+  const input = useMemo(() => ({ productId, primaryText, headline, note, genes, imageBase64: anh?.base64 ?? "", aiWrite, aiFormulas }), [productId, primaryText, headline, note, genes, anh, aiWrite, aiFormulas]);
   // Báo trước khi bấm bằng ĐÚNG lược đồ máy chủ dùng.
   const loiTruoc = useMemo(() => {
     const kiemTra = manualCreativeInputSchema.safeParse(input);
@@ -74,7 +78,8 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
         toast.error(r.error);
         return;
       }
-      toast.success("Đã thêm mẫu tự làm vào hàng đợi đăng camp — mở tab ③ Hàng đợi & Đăng để đăng.");
+      toast.success(aiWrite && !r.aiError ? "Đã thêm mẫu tự làm — AI đã viết tiêu đề + content (không ghi giá). Mở tab ③ Hàng đợi & Đăng để xem, sửa, chọn công thức khác và đăng camp." : "Đã thêm mẫu tự làm vào hàng đợi đăng camp — mở tab ③ Hàng đợi & Đăng để đăng.");
+      if (r.aiError) toast.warning(`AI chưa viết được content (${r.aiError}) — gõ tay hoặc bấm “AI viết theo công thức” trong hộp soạn bài.`);
       for (const w of r.warnings) toast.warning(w);
       dong();
     });
@@ -134,6 +139,17 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                     Mã hàng <span className="text-destructive">(bắt buộc)</span>
                   </Label>
                   <ProductSearch id="mm-product" products={products} value={productId} onChange={setProductId} />
+                </div>
+                <div className="space-y-1.5 rounded-md border border-primary/30 bg-primary/5 p-2">
+                  <label className="flex items-center gap-2 text-[12.5px] font-medium">
+                    <input type="checkbox" checked={aiWrite} onChange={(e) => setAiWrite(e.target.checked)} /> AI viết tiêu đề + content theo ảnh (không ghi giá)
+                  </label>
+                  {aiWrite ? (
+                    <>
+                      <FormulaPicker value={aiFormulas} onChange={(v) => setAiFormulas(v.slice(-1))} max={1} />
+                      <p className="text-[11px] text-muted-foreground">Chọn một công thức cho bản đầu — trong hộp soạn bài bấm “AI viết theo công thức” để ra thêm phương án khác. Để trống hai ô dưới để AI viết.</p>
+                    </>
+                  ) : null}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="mm-headline">Tiêu đề (≤ 40 ký tự)</Label>

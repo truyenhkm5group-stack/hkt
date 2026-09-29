@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GENE_LABEL, GENE_VOCAB, IMAGE_MODES, IMAGE_QUALITIES, IMAGE_SIZES, CAMPAIGN_NAME_MAX_CHARS, MANUAL_DESIGN, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_UPLOAD_SOURCE_KINDS, normalizeCreativeConfig, type ConfigProblem, type CreativeLoopConfig, IMAGE_EDIT, IMAGE_EDIT_LAYOUTS } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
+import { COPY_FORMULA_KEYS, COPY_MAX_FORMULAS } from "@/lib/constants/copy-formulas";
 import { OUTPUT_STYLE_KEYS, STUDIO_LIMITS } from "@/lib/constants/creative-studio";
 import { CAMPAIGN_BIDS, CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, bidNeedsAmount } from "@/lib/constants/campaign-setup";
 
@@ -75,9 +76,12 @@ const geneField = <K extends keyof typeof GENE_VOCAB>(key: K) => z.enum(GENE_VOC
 export const manualCreativeInputSchema = z
   .object({
     productId: z.string().trim().min(1, "Chọn mã hàng của mẫu"),
-    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(500, "Nội dung chính tối đa 500 ký tự"),
+    primaryText: z.string().trim().max(500, "Nội dung chính tối đa 500 ký tự").default(""),
     headline: z.string().trim().max(40, "Tiêu đề tối đa 40 ký tự").default(""),
     note: z.string().trim().max(300, "Ghi chú tối đa 300 ký tự").default(""),
+    /** AI viết tiêu đề + nội dung theo ảnh (không ghi giá) — lúc ấy ô nội dung được để trống. */
+    aiWrite: z.boolean().default(false),
+    aiFormulas: z.array(z.enum(COPY_FORMULA_KEYS)).max(COPY_MAX_FORMULAS).default([]),
     genes: z
       .object({
         angle: geneField("angle"),
@@ -94,6 +98,12 @@ export const manualCreativeInputSchema = z
       .max(IDEA_IMAGE_MAX_BASE64, "Ảnh quá lớn — thu nhỏ trước khi tải lên")
       .regex(BASE64, "Dữ liệu ảnh không hợp lệ"),
   })
+  .strict()
+  .refine((d) => d.aiWrite || d.primaryText.length > 0, "Nhập nội dung chính, hoặc bật “AI viết content”");
+
+/** "AI viết theo công thức" cho một ảnh trong hộp soạn bài — mặc định KHÔNG ghi giá. */
+export const copyOptionsSchema = z
+  .object({ imageId: z.string().trim().min(1, "Thiếu mã ảnh").max(200), formulas: z.array(z.enum(COPY_FORMULA_KEYS)).max(COPY_MAX_FORMULAS).default([]), noPrice: z.boolean().default(true) })
   .strict();
 
 export type ManualCreativeInput = z.infer<typeof manualCreativeInputSchema>;

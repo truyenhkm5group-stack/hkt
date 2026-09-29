@@ -34,6 +34,7 @@ import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
 import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, studioCellLabel } from "@/lib/constants/creative-studio";
+import { CopyAiPanel } from "./copy-ai";
 import { VARIANT_COPY_LIMITS, creativeRepublishSchema, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
 /**
@@ -678,9 +679,16 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
                   </span>
                 </div>
                 <Textarea id={`pg-t-${img.id}`} rows={7} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
-                <Button type="button" size="sm" variant="secondary" onClick={vietLai} disabled={writing}>
-                  {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại theo ảnh
+                <Button type="button" size="sm" variant="ghost" onClick={vietLai} disabled={writing} title="Viết lại một phương án theo ảnh (luật giá như cũ)">
+                  {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại nhanh
                 </Button>
+                <CopyAiPanel
+                  imageId={img.id}
+                  onUse={(o) => {
+                    setH(o.headline);
+                    setT(o.primaryText);
+                  }}
+                />
               </div>
               <div className="space-y-1.5 rounded-lg border p-2.5">
                 <p className="text-[12.5px] font-semibold">Tên trên Ads Manager (1 chiến dịch → 1 nhóm → 1 quảng cáo)</p>
