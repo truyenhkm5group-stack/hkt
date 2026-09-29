@@ -182,6 +182,9 @@ export async function testCompanyOsWarmDb() {
   const amBaoCao = new Set(memoKeys());
   assert.ok([...amBaoCao].some((k) => k.startsWith("return-reason-report:")), "làm ấm phải để lại khoá báo cáo lý do hoàn");
   assert.ok([...amBaoCao].some((k) => k.startsWith("projected-metrics:")), "làm ấm phải để lại khoá dự phóng GTC");
+  for (const tien of ["return-rate-variant:", "return-rate-summary:", "return-rate-source:", "return-rate-tier:", "return-intel:", "logistics-performance:"]) {
+    assert.ok([...amBaoCao].some((k) => k.startsWith(tien)), `làm ấm phải để lại khoá ${tien} — bảng không có đệm thì mỗi lượt xem tự tính lại`);
+  }
   await loadReturnsPage(returnsPageParams({}));
   const moiSinh = memoKeys().filter((k) => !amBaoCao.has(k));
   assert.deepEqual(moiSinh, [], `trang mặc định đọc khoá job KHÔNG làm ấm: ${moiSinh.join(", ")}`);
