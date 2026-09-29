@@ -379,6 +379,8 @@ export type VariantCard = {
   imageId: string | null;
   /** Điểm ảnh còn đọc được (chưa bị xoá sau hạn giữ). */
   imageAvailable: boolean;
+  /** Bài VIDEO (migration 0179) — `imageId` lúc ấy là ảnh bìa. `null` = bài ảnh. */
+  videoAssetId: string | null;
   genModel: string;
   genCostUsd: string;
   genError: string;
@@ -609,6 +611,7 @@ function toVariantCard(r: VariantJoined): VariantCard {
     writerCostUsd: v.writerCostUsd,
     imageId: v.imageId,
     imageAvailable: v.imageId !== null && r.imageRowId !== null && r.imagePurgedAt === null,
+    videoAssetId: v.videoAssetId,
     genModel: v.genModel,
     genCostUsd: v.genCostUsd,
     genError: v.genError,

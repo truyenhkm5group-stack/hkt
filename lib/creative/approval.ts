@@ -39,6 +39,11 @@ export type ApprovalVariant = {
    * tên SAU khi duyệt ⇒ digest đổi ⇒ phiếu cũ vô hiệu, như câu chữ.
    */
   names?: { campaign: string; adset: string; ad: string } | null;
+  /**
+   * BÀI VIDEO (migration 0179): băm của video người tải lên + id video trên TKQC. Thiếu = bài ảnh ⇒ khoá `video` VẮNG khỏi
+   * digest (phiếu của mọi lô cũ tính lại vẫn khớp). Tráo video sau khi duyệt ⇒ digest đổi ⇒ không đăng.
+   */
+  video?: { sha256: string; fbVideoId: string } | null;
 };
 
 export type ApprovalContent = {
@@ -66,7 +71,7 @@ export function approvalDigest(c: ApprovalContent): string {
     killRules: c.killRules,
     variants: [...c.variants]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline, ...(v.rules ? { rules: v.rules } : {}), ...(hasNames(v.names) ? { names: v.names } : {}) })),
+      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline, ...(v.rules ? { rules: v.rules } : {}), ...(hasNames(v.names) ? { names: v.names } : {}), ...(v.video ? { video: v.video } : {}) })),
   };
   return createHash("sha256").update(stableStringify(payload)).digest("hex");
 }

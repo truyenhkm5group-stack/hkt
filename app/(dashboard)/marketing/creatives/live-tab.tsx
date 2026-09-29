@@ -180,7 +180,7 @@ export async function LiveTab({ canWrite, canKill, canRelease, canRepublish = fa
                           <div className="flex flex-col items-end gap-1">
                             {rp && v.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(v.status) ? (
                               <RepublishButton
-                                v={{ id: v.id, slot: v.slot, headline: v.headline, primaryText: v.primaryText, imageId: v.imageId, imageAvailable: v.imageAvailable, productId: v.productId, productName: v.productName, designDna: v.design?.dna ?? null, campaignName: v.campaignName }}
+                                v={{ id: v.id, slot: v.slot, headline: v.headline, primaryText: v.primaryText, imageId: v.imageId, imageAvailable: v.imageAvailable, videoAssetId: v.videoAssetId, productId: v.productId, productName: v.productName, designDna: v.design?.dna ?? null, campaignName: v.campaignName }}
                                 ctx={{ ...rp.ctx, canPublish: true }}
                                 winCode={v.productId ? (rp.winCodes[v.productId] ?? null) : null}
                               />

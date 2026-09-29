@@ -22,6 +22,7 @@ import {
   parseDna,
   parseGenes,
   type CreativeLoopConfig,
+  type CreativeMediaKind,
   type DesignDna,
   type Genes,
   type ImageEditRequest,
@@ -45,7 +46,8 @@ import { productWinCodes, winNameProblem } from "@/lib/creative/win-code";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
 import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay, type DefaultNames } from "@/lib/creative/naming";
 import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
-import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
+import { ensureAdVideo, type AdVideoApi } from "@/lib/creative/ad-video";
+import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, mediaOf, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
 import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
 import { adsWriteHardEnabled, adsWriteMode, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
@@ -917,7 +919,17 @@ export async function unqueueManualGenDraft(db: Db, imageId: string, now: Date):
 
 // ───────────────────────────── MẪU TỰ LÀM ⇒ HÀNG ĐỢI ─────────────────────────────
 
-export type UploadDraftInput = { productId: string; genes: Genes; headline: string; primaryText: string; note: string; imageBytes: Uint8Array };
+export type UploadDraftInput = {
+  productId: string;
+  genes: Genes;
+  headline: string;
+  primaryText: string;
+  note: string;
+  /** Ảnh của mẫu — với mẫu VIDEO là ảnh bìa (khung hình người chọn ở trình duyệt). */
+  imageBytes: Uint8Array;
+  /** Video đã tải xong (`attachableAdVideo` kiểm ở server action). `null` / vắng = mẫu ảnh. */
+  videoAssetId?: string | null;
+};
 
 /**
  * "MẪU TỰ LÀM" (ảnh người vẽ trên ChatGPT / Grok hay chụp tay) — chủ shop 26/09/2026 bỏ hẳn lô hằng ngày, nên mẫu tự làm
@@ -945,6 +957,7 @@ export async function addUploadedDraft(db: Db, input: UploadDraftInput, actor: M
       genes: input.genes as Record<string, string>,
       prompt: "",
       imageId: stored.id,
+      videoAssetId: input.videoAssetId ?? null,
       status: "APPROVED",
       drawnAt: now,
       headline: input.headline,
@@ -978,6 +991,10 @@ export type PromoteInput = {
   adsetBid?: string | null;
   /** Mục tiêu tối ưu nhóm thật sẽ mang (`setupOptimizationGoal`) — đổi đoạn đầu tên nhóm theo khuôn. Vắng / `null` = như mẫu. */
   adsetGoal?: string | null;
+  /** Bài ảnh hay bài video — nhãn media trong tên quảng cáo theo khuôn. Vắng = ảnh. */
+  media?: CreativeMediaKind;
+  /** Bài VIDEO: video + id của nó trong thư viện TKQC đăng bài (máy chủ tải lên trước khi dựng lô — `ensureAdVideo`). */
+  video?: { assetId: string; fbVideoId: string } | null;
 };
 
 type PromoteOk = {
@@ -1054,7 +1071,13 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
       why: `Gen tay — ${who}${ideaNote}`,
       imageId,
       genModel: r.run.model,
-      extra: { imagePrompt: r.img.prompt, genCostUsd: r.img.costUsd, productPhotoSourceId: spec ? spec.photoSourceIds[0] : r.run.productPhotoSourceId, inspirationSourceId: spec ? null : r.run.ownAdSourceId },
+      extra: {
+        imagePrompt: r.img.prompt,
+        genCostUsd: r.img.costUsd,
+        productPhotoSourceId: spec ? spec.photoSourceIds[0] : r.run.productPhotoSourceId,
+        inspirationSourceId: spec ? null : r.run.ownAdSourceId,
+        ...(input.video ? { videoAssetId: input.video.assetId, fbVideoId: input.video.fbVideoId } : {}),
+      },
       design: spec
         ? async (batch) => {
             const taken = await tx.select({ code: dc.code }).from(dc).where(like(dc.code, `${designCode(batch.batchDay, 0).slice(0, -2)}%`));
@@ -1098,15 +1121,16 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
  * Ba tên theo khuôn của MỘT bài trong lô `batch` (số thứ tự theo NGÀY với lô `INSTANT`, theo lô với lô hằng ngày) — tên người
  * đã sửa thắng, tên còn nguyên chữ theo khuôn ⇒ máy đặt đúng số thật lúc ghi. Dùng chung cho ảnh gen tay và "Đăng lại camp".
  */
-async function batchNames(db: Db, batch: typeof schema.creativeBatches.$inferSelect, input: Pick<PromoteInput, "names" | "predictedSeq" | "marketerCode" | "kindLabel" | "adsetGoal" | "adsetBid">) {
+async function batchNames(db: Db, batch: typeof schema.creativeBatches.$inferSelect, input: Pick<PromoteInput, "names" | "predictedSeq" | "marketerCode" | "kindLabel" | "adsetGoal" | "adsetBid" | "media">) {
   const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
   const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
   const mk = input.marketerCode ?? null;
   const kind = input.kindLabel ?? "TEST";
   const goal = input.adsetGoal ?? null;
   const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameFor(n.adset, goal, input.adsetBid ?? null) });
-  const d = withGoal(defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind));
-  const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind)) : null;
+  const media = input.media ?? "IMAGE";
+  const d = withGoal(defaultNames(ctx, batch.batchDay, seq, media, mk, kind));
+  const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, media, mk, kind)) : null;
   const names = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
   return { seq, names, row: { nameSeq: seq, campaignName: names.campaign, adsetName: names.adset, adName: names.ad } };
 }
@@ -1127,6 +1151,8 @@ function promoteErrorText(msg: string): string | null {
 export async function promoteManualGenImage(db: Db, input: PromoteInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<PromoteResult> {
   const x = await readyImage(db, input.imageId);
   if ("ok" in x) return x;
+  // Lô hằng ngày không có bước tải video lên TKQC — bài video chỉ đi đường "Đăng camp".
+  if (x.r.img.videoAssetId) return { ok: false, error: "Mẫu video chỉ đăng được bằng nút Đăng camp." };
   try {
     return await db.transaction((tx: Tx) => insertImageVariant(tx, x, input, cfg, actor, now));
   } catch (e) {
@@ -1162,6 +1188,8 @@ export function instantWindow(now: Date, scheduleAt: Date | null, cfg: Pick<Crea
 
 export type InstantPublishDeps = CreativeDeps & {
   killSwitch?: () => Promise<AdsKillSwitchState>;
+  /** Tải video lên thư viện TKQC + đọc trạng thái xử lý. Kiểm thử tiêm bản giả. */
+  adVideo?: AdVideoApi;
   /** Câu "token thuộc ứng dụng …" khi Facebook báo ứng dụng ở chế độ phát triển (1885183). Kiểm thử tiêm bản giả. */
   tokenApp?: () => Promise<string>;
 };
@@ -1268,14 +1296,23 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   // Quảng cáo mẫu kiểm TRƯỚC khi ghi dòng nào (một lượt ĐỌC Facebook): mẫu không dùng được thì không dựng lô, không
   // cấp mã TK, ảnh vẫn "Đã duyệt". 26/09/2026 lần bấm đầu tiên của chủ shop cấp mã TK-260926-103 rồi mới vấp ở đây.
   const writer = deps.writer ?? REAL_CREATIVE_WRITER;
+  const media: CreativeMediaKind = x.r.img.videoAssetId ? "VIDEO" : "IMAGE";
   let shape: string | null;
   try {
     const tpl = await writer.readTemplateAd(cfg.templateAdId);
-    shape = templateShapeError(setup ? applyCampaignSetup(tpl, setup) : tpl, cfg.pageId, true);
+    shape = templateShapeError(setup ? applyCampaignSetup(tpl, setup) : tpl, cfg.pageId, true, media);
   } catch (e) {
     shape = `không đọc được (${errText(e)})`;
   }
   if (shape) return { ok: false, error: `Chưa đăng được — quảng cáo mẫu ${cfg.templateAdId || "(chưa khai)"} ở tab Cấu hình & luật: ${shape} Chưa có gì lên Facebook, ảnh vẫn ở "Đã duyệt".` };
+  // BÀI VIDEO: video lên thư viện TKQC và Facebook xử lý XONG trước khi dựng lô — lô chỉ còn sáu lời gọi như bài ảnh, nên
+  // khung "chạy ngay" (`leadSeconds`) vẫn đủ. Facebook còn xử lý ⇒ dừng ở câu "bấm lại sau", chưa có lô / camp nào.
+  let video: { assetId: string; fbVideoId: string } | null = null;
+  if (x.r.img.videoAssetId) {
+    const ev = await ensureAdVideo(db, { rowId: input.imageId, account: cfg.adAccountId, name: input.names.ad.trim() || `Video mẫu ${input.imageId.slice(0, 8)}`, now }, deps.adVideo);
+    if (!ev.ok) return { ok: false, error: ev.error };
+    video = { assetId: x.r.img.videoAssetId, fbVideoId: ev.videoId };
+  }
 
   const B = schema.creativeBatches;
   let made: PromoteOk & { batchId: string };
@@ -1298,7 +1335,7 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           ruleVersion: CREATIVE_RULE_VERSION,
         })
         .returning();
-      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setup ? setupOptimizationGoal(setup) : null, adsetBid: setup ? setupBidStrategy(setup) : null }, cfg, actor, now, batch);
+      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setup ? setupOptimizationGoal(setup) : null, adsetBid: setup ? setupBidStrategy(setup) : null, media, video }, cfg, actor, now, batch);
       if (!ins.ok) throw new InstantAbort(ins.error);
       const winProblem = win ? winNameProblem(ins.names.campaign, win, codeIndex) : null;
       if (winProblem) throw new InstantAbort(winProblem);
@@ -1469,13 +1506,24 @@ export async function republishVariantInstant(db: Db, input: RepublishInput, bas
     if (problem) return { ok: false, error: problem };
   }
   const writer = deps.writer ?? REAL_CREATIVE_WRITER;
+  const media = mediaOf(v);
   let shape: string | null;
   try {
-    shape = templateShapeError(applyCampaignSetup(await writer.readTemplateAd(cfg.templateAdId), setup), cfg.pageId, true);
+    shape = templateShapeError(applyCampaignSetup(await writer.readTemplateAd(cfg.templateAdId), setup), cfg.pageId, true, media);
   } catch (e) {
     shape = `không đọc được (${errText(e)})`;
   }
   if (shape) return { ok: false, error: `Chưa đăng được — quảng cáo mẫu ${cfg.templateAdId || "(chưa khai)"} ở tab Cấu hình & luật: ${shape} Chưa có gì lên Facebook.` };
+  // Bài VIDEO: video phải nằm trong thư viện của TKQC MỚI (id video không dùng chéo TKQC) — tải một lần, nhớ theo TKQC ở dòng
+  // mẫu tự làm gốc; cùng TKQC thì dùng lại.
+  let videoCols: { videoAssetId: string; fbVideoId: string } | null = null;
+  if (v.videoAssetId) {
+    const [origin] = await db.select({ id: schema.creativeManualGenImages.id }).from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.videoAssetId, v.videoAssetId)).limit(1);
+    if (!origin) return { ok: false, error: "Không tìm thấy mẫu tự làm gốc của video — không đăng lại được." };
+    const ev = await ensureAdVideo(db, { rowId: origin.id, account: cfg.adAccountId, name: input.names.ad.trim() || v.adName || `Video mẫu #${v.slot}`, now }, deps.adVideo);
+    if (!ev.ok) return { ok: false, error: ev.error };
+    videoCols = { videoAssetId: v.videoAssetId, fbVideoId: ev.videoId };
+  }
 
   let made: { variantId: string; batchId: string; names: { campaign: string; adset: string; ad: string } };
   try {
@@ -1507,10 +1555,10 @@ export async function republishVariantInstant(db: Db, input: RepublishInput, bas
           why: `Đăng lại mẫu #${v.slot} (lô ${src.batchDay}) — ${actor.name}`,
           imageId: v.imageId as string,
           genModel: v.genModel,
-          extra: { imagePrompt: v.imagePrompt, productPhotoSourceId: v.productPhotoSourceId, inspirationSourceId: v.inspirationSourceId },
+          extra: { imagePrompt: v.imagePrompt, productPhotoSourceId: v.productPhotoSourceId, inspirationSourceId: v.inspirationSourceId, ...(videoCols ?? {}) },
           design: v.designConceptId ? async () => ({ designConceptId: v.designConceptId as string, why: `Đăng lại mẫu #${v.slot} (lô ${src.batchDay}) — cùng thiết kế — ${actor.name}` }) : undefined,
           names: async (b) => {
-            const n = await batchNames(t, b, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setupOptimizationGoal(setup), adsetBid: setupBidStrategy(setup) });
+            const n = await batchNames(t, b, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setupOptimizationGoal(setup), adsetBid: setupBidStrategy(setup), media });
             names = n.names;
             return n.row;
           },

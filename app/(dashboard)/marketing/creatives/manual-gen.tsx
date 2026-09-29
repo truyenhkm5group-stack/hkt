@@ -24,7 +24,9 @@ import {
   DESIGN_DNA_VALUE_LABEL,
   MANUAL_GEN_IMAGE_STATUS_LABEL,
   MANUAL_GEN_RUN,
+  adNameForMedia,
   adsetNameFor,
+  type CreativeMediaKind,
   type ImageEditLayout,
   type ManualGenImageStatus,
 } from "@/lib/constants/creative-loop";
@@ -499,11 +501,12 @@ type Names3 = { campaign: string; adset: string; ad: string };
  * fanpage của CẤU HÌNH — người chọn TKQC / fanpage khác thì thay đúng hai phần tên ấy để ô nói đúng tên sẽ đăng. Máy chủ
  * vẫn tự đặt lại khi ô còn nguyên (gửi rỗng), nên đây chỉ là bản xem trước.
  */
-function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode | null): Names3 {
+function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode | null, media: CreativeMediaKind): Names3 {
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
   const to = namePartsOf(ctx, setup, win);
   const known = nameKnownOf(ctx, win);
-  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameFor(d.adset, setupOptimizationGoal(setup), setupBidStrategy(setup)), ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
+  // Bài video: nhãn media của tên quảng cáo là "video" — cùng khuôn máy chủ đặt (`defaultNames(…, "VIDEO")`).
+  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameFor(d.adset, setupOptimizationGoal(setup), setupBidStrategy(setup)), ad: adNameForMedia(rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }), media) };
 }
 
 /** Phần tên mà setup quyết định: tên TKQC · mã MKTer · TEST / mã win · tên fanpage — cùng khuôn máy chủ ghép lúc đăng. */
@@ -571,7 +574,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     setOpen(true);
   };
   // Ô tên RỖNG trong state = "theo khuôn" (hiện bản xem trước); người gõ ⇒ đúng chữ người gõ.
-  const auto = autoNamesFor(ctx, setup, img.winCode);
+  const auto = autoNamesFor(ctx, setup, img.winCode, img.videoAssetId ? "VIDEO" : "IMAGE");
   // Đổi setup ⇒ tên đổi NGAY, kể cả tên đã lưu / sửa tay: chèn / thay mã MKTer, thay TKQC · fanpage · TEST ↔ mã win.
   const doiSetup = (next: CampaignSetup) => {
     setSetup(next);
@@ -746,7 +749,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
             </div>
             <div className="space-y-1.5">
               <p className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">Xem trước</p>
-              <AdPreview pageName={ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? ctx.pageName} primaryText={t.trim()} headline={h.trim()} imageId={img.imageId} imageAvailable={img.imageAvailable} alt={h || `Ảnh #${img.seq}`} />
+              <AdPreview pageName={ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? ctx.pageName} primaryText={t.trim()} headline={h.trim()} imageId={img.imageId} imageAvailable={img.imageAvailable} videoAssetId={img.videoAssetId} alt={h || `Ảnh #${img.seq}`} />
             </div>
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">
@@ -1129,6 +1132,8 @@ export type RepublishSource = {
   primaryText: string;
   imageId: string | null;
   imageAvailable: boolean;
+  /** Bài VIDEO — đăng lại tải video sang thư viện của TKQC mới. `null` = bài ảnh. */
+  videoAssetId: string | null;
   productId: string | null;
   productName: string | null;
   /** DNA của thiết kế (mẫu thiết kế mới) — xếp fanpage theo mẫu tương tự. */
@@ -1168,7 +1173,7 @@ export function RepublishButton({ v, ctx, winCode }: { v: RepublishSource; ctx: 
     setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
     setOpen(true);
   };
-  const auto = autoNamesFor(ctx, setup, wc);
+  const auto = autoNamesFor(ctx, setup, wc, v.videoAssetId ? "VIDEO" : "IMAGE");
   const doiSetup = (next: CampaignSetup) => {
     setSetup(next);
     const to = namePartsOf(ctx, next, wc);
@@ -1286,7 +1291,7 @@ export function RepublishButton({ v, ctx, winCode }: { v: RepublishSource; ctx: 
             </div>
             <div className="space-y-1.5">
               <p className="text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">Xem trước</p>
-              <AdPreview pageName={ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? ctx.pageName} primaryText={t.trim()} headline={h.trim()} imageId={v.imageId} imageAvailable={v.imageAvailable} alt={h || `Mẫu #${v.slot}`} />
+              <AdPreview pageName={ctx.setup.pages.find((p) => p.id === setup.pageId)?.name ?? ctx.pageName} primaryText={t.trim()} headline={h.trim()} imageId={v.imageId} imageAvailable={v.imageAvailable} videoAssetId={v.videoAssetId} alt={h || `Mẫu #${v.slot}`} />
             </div>
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">

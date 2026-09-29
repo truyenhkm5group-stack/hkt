@@ -763,6 +763,31 @@ content, content viết theo các công thức, concept khác nhau nhằm tạo 
 - Hộp soạn bài: khối **AI viết theo công thức** (chọn công thức, "Không ghi giá" mặc định bật, bấm "Dùng" điền vào ô).
 - Mẫu tự làm: **AI viết tiêu đề + content theo ảnh** mặc định bật — không phải gõ content; AI hỏng thì mẫu vẫn vào hàng đợi.
 
+## 5p. Video tự tải lên ⇒ Đăng camp (chủ shop 29/09/2026)
+
+Chủ shop: *"ảnh/video tự tải lên sẽ mix với content, tiêu đề do AI tạo để tạo thành 1 bài post hoàn chỉnh … Vẫn cho chọn MKTer, TKQC,
+fanpage, mục tiêu chiến dịch, mục tiêu tối ưu, manual bidcap hoặc autobid, ngân sách … và sync tên chiến dịch, nhóm, quảng cáo
+theo rules"*.
+
+- **Tải lên**: "Thêm mẫu tự làm" nhận MP4 / MOV ≤ 60 MB (`lib/constants/ad-video.ts`). Video đi vào kho tệp Video Scale
+  (`video_scale_assets`, loại `AD_UPLOAD`, migration 0179) theo khúc 2 MB — ba bước xin chỗ → gửi khúc → hoàn tất (băm sha256 từ
+  đúng các khúc đã ghi), vì Server Action chỉ nhận ≤ 8 MB. Chỉ người xin chỗ gửi khúc / hoàn tất / gắn video được (mục 34); một
+  video gắn đúng một mẫu. Lượt tải dở quá 6 giờ bị dọn ở lượt xin chỗ kế tiếp.
+- **Ảnh bìa**: người kéo thanh chọn MỘT khung hình ở trình duyệt; ảnh ấy lưu như ảnh mẫu tự làm (`image_id`). AI viết tiêu đề +
+  content NHÌN ảnh bìa (§5o — công thức, không ghi giá); Facebook dùng nó làm `image_hash` của `video_data`.
+- **Đăng camp**: cùng hộp soạn bài, cùng setup (MKTer · TKQC · fanpage · mục tiêu · tối ưu · giá thầu · ngân sách · vị trí ·
+  tuổi · giới tính), cùng cổng / phiếu duyệt / trần. Khác duy nhất: TRƯỚC khi dựng lô, máy tải video lên thư viện TKQC bằng link
+  ký tên ≤ 2 giờ (`/api/video-scale/public/…` — chỉ mở cho video của mẫu đã duyệt / đã đăng) và chờ Facebook xử lý (tối đa
+  6 × 5 giây). Chưa xong ⇒ dừng ở câu "đang xử lý — bấm lại sau 1–2 phút", chưa có lô / camp nào; bấm lại cùng TKQC KHÔNG tải
+  lại (id nhớ theo TKQC ở `creative_manual_gen_images.fb_videos`). Facebook báo lỗi xử lý ⇒ quên id đó, lượt sau tải bản mới.
+- **Bài quảng cáo**: `buildVideoStorySpec` (chung với Video Scale) — nút kêu gọi / đích / lời chào chép từ mẩu mẫu, mẩu mẫu không
+  có nút đọc được ⇒ không dựng, không đoán. Phiếu duyệt khoá thêm `video: { sha256, fbVideoId }` (vắng ở bài ảnh ⇒ digest của
+  mọi lô cũ không đổi).
+- **Tên theo khuôn**: tên quảng cáo mang nhãn `video` thay `ảnh` (`defaultNames(…, "VIDEO")`; ô xem trước dùng `adNameForMedia`).
+- **Đăng lại camp** (§5n) bài video sang TKQC khác ⇒ tải video thêm MỘT lần cho TKQC ấy. "Đưa vào lô" hằng ngày từ chối bài video
+  (lô không có bước tải video).
+- Chưa đo trên Facebook thật: đường `file_url` của `advideos` là đường Video Scale đã dựng, chưa có lượt đăng thật nào.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

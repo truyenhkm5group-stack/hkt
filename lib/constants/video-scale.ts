@@ -152,7 +152,8 @@ export const VIDEO_ERROR_KINDS = ["TRANSIENT", "PERMANENT", "AMBIGUOUS", "TIMEOU
 export type VideoErrorKind = (typeof VIDEO_ERROR_KINDS)[number];
 
 /** Loại tệp. */
-export const VIDEO_ASSET_KINDS = ["SOURCE_CLIP", "VOICE", "MUSIC", "FINAL", "THUMBNAIL"] as const;
+/** `AD_UPLOAD` (migration 0179) = video người tự tải lên để đăng camp ở trang Mẫu quảng cáo — không thuộc lượt Video Scale nào. */
+export const VIDEO_ASSET_KINDS = ["SOURCE_CLIP", "VOICE", "MUSIC", "FINAL", "THUMBNAIL", "AD_UPLOAD"] as const;
 export type VideoAssetKind = (typeof VIDEO_ASSET_KINDS)[number];
 
 /** Kết luận QC: `PASS` đi tiếp · `FLAG` chỉ NGƯỜI duyệt được (kể cả khi bật tự duyệt) · `FAIL` không đi tiếp. */
