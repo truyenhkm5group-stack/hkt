@@ -316,6 +316,12 @@ Hai tầng trả lời hai câu hỏi khác nhau, và không tầng nào thay t�
 | **CSDL** (pg_dump) | Bản dump đêm của `erp_org_<mã>` có nạp lại được MỌI THỨ không (bản ghi, tệp, người dùng, cấu hình) | VPS, người vận hành bấm | ops `restore-drill-org` |
 | **Cấu hình** (blueprint) | Mất hẳn CSDL, chỉ còn tệp xuất cấu hình, dựng lại được KHUNG của tổ chức không | máy lập trình / CI (PGlite) | `npx tsx --tsconfig tsconfig.json scripts/restore-drill-org-config.ts` |
 
+Tầng thứ ba, ĐẦU-CUỐI trên Postgres tạm (không đụng VPS): tổ chức thử được tạo → tuỳ biến → dump bằng ĐÚNG lệnh ở
+mục 7 → phá + `DROP DATABASE` → khôi phục bằng ĐÚNG các lệnh `createdb` / `pg_restore` / đổi tên ở mục 7 → bằng từng
+bảng và CHẠY ĐƯỢC qua mã ứng dụng. Workflow **Diễn tập khôi phục tổ chức (Postgres tạm)** (`scripts/restore-drill-pg.ts`);
+chi tiết, RPO / RTO đo được và xử lý lỗi: `docs/platform/backup-recovery.md` §8. `tests/restore-drill-pg.test.ts` khoá
+để các lệnh của diễn tập không trôi khỏi các lệnh trong mục 7.
+
 ### 8.1 Tầng CSDL — ops `restore-drill-org` (CHẠY TAY)
 
 *Actions* → **Vận hành ERP trên VPS** → `restore-drill-org`, ô *arg* = mã tổ chức (vd `bp-a`; nhận cả tên

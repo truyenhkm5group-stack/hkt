@@ -442,6 +442,7 @@ import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testOrgExport } from "./org-export.test";
 import { testRestoreDrillConfig } from "./restore-drill-config.test";
+import { testRestoreDrillPg } from "./restore-drill-pg.test";
 import { testPlatformDiagnosticsOrg } from "./platform-diagnostics-org.test";
 import { testConnectors } from "./connectors.test";
 import { testLaunchGatesPipeline } from "./launch-gates.test";
@@ -2561,6 +2562,9 @@ async function main() {
   // Commercial readiness C · diễn tập khôi phục cấu hình: phán quyết (đột biến từng vế) + phạm vi khai báo khớp lược đồ /
   // migrateOrganizationDb + CHẠY THẬT scripts/restore-drill-org-config.ts (cùng mã, CSDL + sổ bị xoá giữa hai tiến trình).
   testRestoreDrillConfig();
+  // Launch gates C · diễn tập khôi phục tổ chức trên Postgres THẬT (lượt chạy ở .github/workflows/restore-drill.yml):
+  // tên + hàng rào DROP / môi trường, lệnh = erp-backup.sh + runbook, phán quyết (34 đột biến), workflow 0 secret 0 SSH.
+  testRestoreDrillPg();
   // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
   // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
   await testPlatformDiagnosticsOrg();

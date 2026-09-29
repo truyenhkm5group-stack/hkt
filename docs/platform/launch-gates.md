@@ -150,19 +150,24 @@ dòng `SIGNUP_MODE_SET` mang email của bạn.
 Hiện trạng đã có trong mã (commit của mục này): sao lưu đêm dump mọi CSDL `erp_org_*` (PR #365); phạm vi cấu hình
 tổ chức đã xác minh nằm trọn trong CSDL của nó, mặt phẳng điều khiển nằm ở CSDL nhà (`backup-recovery.md` §6); diễn
 tập khôi phục cấu hình bằng blueprint ĐẠT trên PGlite và chạy trong `npm test`; diễn tập CSDL cho một tổ chức là ops
-`restore-drill-org` — **chạy tay**, chưa từng chạy trên VPS.
+`restore-drill-org` — **chạy tay**, chưa từng chạy trên VPS. Diễn tập ĐẦU-CUỐI trên Postgres thật (tạo → tuỳ biến →
+`pg_dump` → phá + `DROP DATABASE` → khôi phục theo runbook → so từng bảng → CHẠY THẬT qua mã ứng dụng) là workflow
+**Diễn tập khôi phục tổ chức (Postgres tạm)** trên service container dùng một lần, không đụng production
+(`backup-recovery.md` §8): ĐẠT trên máy lập trình 29/09/2026; lượt CI đầu tiên do phiên tích hợp chạy.
 
 | # | Cổng | Loại | Ai | Điều kiện đạt |
 |---|---|---|---|---|
 | C1 | **Lượt `restore-drill-org` đầu tiên trên VPS** cho tổ chức thật đầu tiên (sau khi nó có ít nhất một bản sao lưu đêm) | việc chạy thật | người vận hành | ops `restore-drill-org` arg = mã tổ chức ⇒ thoát 0, dòng `DIỄN TẬP TỔ CHỨC ĐẠT`, thẻ Sao lưu của tổ chức đó hết vàng "Chưa diễn tập" (`docs/backup-restore.md` mục 8.1) |
 | C2 | **Bật diễn tập tổ chức TỰ ĐỘNG hay không** — vd luân phiên một CSDL `erp_org_*` mỗi Chủ nhật sau lượt sao lưu | quyết định (đổi lịch / hành vi vận hành, AGENTS.md mục 7) | chủ nền tảng | Có ⇒ một PR thêm lời gọi `restore-drill-org` (không mã = luân phiên) vào `install-cron`, kèm con số RAM/thời gian đo từ C1. Không ⇒ ghi lịch chạy tay (đề xuất: mỗi tháng một lượt / tổ chức, cùng nhịp `restore-drill` của nhà). Máy 2 nhân / ~1,9 GB đang phục vụ người dùng thật — container diễn tập trần 512 MB |
-| C3 | **Cất `PLATFORM_SECRETS_KEY` ra ngoài VPS** | quyết định + việc tay | chủ nền tảng | Khoá chỉ nằm trong `/root/erp/.env`, không thuộc phạm vi `erp-backup.sh`, không đi qua GitHub Secrets (đo 28/09/2026). Mất VPS ⇒ bí mật kết nối (`org_connections`) trong mọi bản dump tổ chức không giải mã được. Đạt khi khoá có bản sao ở trình quản lý mật khẩu / giấy cất riêng, như mật khẩu crypt của Drive |
+| C3 | **Cất `PLATFORM_SECRETS_KEY` ra ngoài VPS** | quyết định + việc tay | chủ nền tảng | Khoá không thuộc phạm vi `erp-backup.sh`. Từ cổng A nó đi GitHub Secret → deploy → `/root/erp/.env`; mất VPS thì deploy lên máy mới ghi lại đúng khoá, nhưng GitHub Secret KHÔNG đọc lại được — đổi / xoá nhầm secret ⇒ bí mật kết nối (`org_connections`) trong mọi bản dump tổ chức không giải mã được (diễn tập Postgres đo: khoá khác ⇒ từ chối). Đạt khi khoá có bản sao ở trình quản lý mật khẩu / giấy cất riêng, như mật khẩu crypt của Drive (`backup-recovery.md` §8.7) |
 | C4 | **Bản sao ngoài máy đã bật** (Google Drive + crypt) trước khi nhận tổ chức trả tiền đầu tiên | điều kiện tiên quyết | chủ nền tảng | `backup-status` liệt kê bản dưới `gcrypt:orgs/<csdl>/…`; thẻ Sao lưu không còn "CHƯA CÓ BẢN SAO NGOÀI MÁY" (`docs/backup-restore.md` mục 5) |
 | C5 | **Tổ chức đặt CSDL ở máy khác** (`ORG_DATABASE_URL__<MÃ>`) | quyết định từng ca | chủ nền tảng | `erp-backup.sh` KHÔNG sao lưu được nó (chỉ nêu `missingDatabases`). Cấp một tổ chức như thế phải kèm lịch sao lưu + diễn tập riêng, ghi trong hồ sơ tổ chức |
-| C6 | **Lời hứa với khách về RPO / RTO** | quyết định kinh doanh | chủ nền tảng | Số đo được hôm nay: RPO ≤ 1 ngày (một bản / đêm, khung 02–05 giờ VN; tổ chức chạy SAU nhà, nhà hỏng thì tổ chức không có bản đêm đó). RTO chưa đo — lấy từ thời gian của C1. Không hứa con số chưa đo |
+| C6 | **Lời hứa với khách về RPO / RTO** | quyết định kinh doanh | chủ nền tảng | Số đo được hôm nay: RPO ≤ 1 ngày (một bản / đêm, khung 02–05 giờ VN; tổ chức chạy SAU nhà, nhà hỏng thì tổ chức không có bản đêm đó — xấu nhất ~2 ngày). RTO phần MÁY đo ở diễn tập Postgres (`backup-recovery.md` §8.3: tổ chức 187 bảng / 736 KB dump ⇒ createdb → đổi tên 1,1 giây, tới khi chạy được ~4 giây, máy lập trình); chưa gồm tải từ Drive, thao tác người và cỡ dữ liệu thật — lấy thêm từ C1. Không hứa con số chưa đo |
+| C7 | **Lịch tự động cho diễn tập Postgres** (workflow **Diễn tập khôi phục tổ chức (Postgres tạm)**) | quyết định (thêm lịch, AGENTS.md mục 7) | chủ nền tảng | Hôm nay CHỈ `workflow_dispatch`. Đề xuất: thêm `schedule` hằng tuần (vd `cron: "0 20 * * 6"` = 03:00 sáng Chủ nhật giờ VN) + chạy trên PR chạm `scripts/erp-backup.sh`, `scripts/restore-drill-pg.ts`, `db/index.ts`, `lib/platform/provision.ts`, `drizzle/**`. Máy của GitHub, không đụng VPS, không chặn deploy (không nằm trong `gates.yml`); cái giá là một lượt đỏ gửi thông báo tới người theo dõi kho. Có ⇒ một PR sửa khối `on:` và bài kiểm `tests/restore-drill-pg.test.ts` (đang khoá "chỉ chạy tay") |
 
 Đã có sẵn, không cần cổng: dump + xoay vòng + kiểm toàn vẹn theo từng tổ chức; trạng thái theo tổ chức trên ERP;
-khôi phục cấu hình từ tệp (`/settings/export` → «Cài từ tệp JSON») — đã diễn tập tự động (`scripts/restore-drill-org-config.ts`).
+khôi phục cấu hình từ tệp (`/settings/export` → «Cài từ tệp JSON») — đã diễn tập tự động (`scripts/restore-drill-org-config.ts`);
+khôi phục CSDL tổ chức từ `pg_dump` + chạy được sau khôi phục — đã diễn tập trên Postgres tạm (`scripts/restore-drill-pg.ts`).
 
 
 ## Bài kiểm
