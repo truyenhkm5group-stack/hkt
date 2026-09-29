@@ -70,6 +70,11 @@ export type ManualGenImageCard = {
   winCode: ProductWinCode | null;
   /** Mã hàng ảnh thể hiện — để xếp fanpage theo đơn / mẫu tương tự của mã. `null` = ảnh thiết kế mới / lượt không gắn mã. */
   productId: string | null;
+  /** Studio (migration 0174): biến thể màu + kiểu ảnh đầu ra của ảnh này. Rỗng = ảnh cũ / giữ màu. Câu lệnh đọc riêng khi mở. */
+  color: string;
+  outputStyle: string;
+  /** Lượt sinh ra ảnh — cho "Tạo lại tương tự". */
+  genId: string;
 };
 
 type VariantBrief = { status: string | null; batchId: string | null; fbCampaignId: string | null; fbAdsetId: string | null; fbAdId: string | null; fbPendingStep: string | null };
@@ -108,6 +113,9 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
     // Ảnh thiết kế mới không mang mã hàng cha (đơn / chấm đi theo mã TK) ⇒ không có camp mã win.
     winCode: d ? null : winCode,
     productId: d ? null : productId,
+    color: i.color,
+    outputStyle: i.outputStyle,
+    genId: i.genId,
   };
 }
 
@@ -137,9 +145,11 @@ export type ManualGenRunCard = {
   cost: { usd: number; vnd: number | null; pricedImages: number; unpricedImages: number };
   images: ManualGenImageCard[];
   counts: Partial<Record<ManualGenImageStatus, number>>;
+  /** Tuỳ chọn studio lúc bấm (`{}` = lượt cũ) — thẻ lượt in ra "2 mẫu × 3 màu × 1 kiểu". */
+  options: Record<string, unknown>;
 };
 
-export type PixelSourceOption = { id: string; kind: "PRODUCT_PHOTO" | "OWN_AD"; productId: string; productLabel: string; title: string };
+export type PixelSourceOption = { id: string; kind: "PRODUCT_PHOTO" | "OWN_AD"; productId: string; productLabel: string; title: string; imageId: string | null };
 
 /**
  * Một mẫu BÁN TỐT chọn được làm cảm hứng cho gen tay kiểu thiết kế mới — đúng tập mã cha của ô thiết kế
@@ -194,7 +204,75 @@ export type ManualGenPanel = {
   /** Ngày đang lọc (`YYYY-MM-DD`, giờ VN) — "Kết quả gen tay" và tiền trong ngày đều theo ngày này. */
   day: string;
   isToday: boolean;
+  /** Ý tưởng đã dùng gần đây (mới trước, không trùng) — chọn nhanh lại ở form Tạo ảnh. */
+  recentIdeas: string[];
 };
+
+/** Số ý tưởng gần đây hiện ở form — đủ để nhận ra, không thành một danh sách phải cuộn. */
+const RECENT_IDEAS = 8;
+
+/** Ý tưởng người đã gõ ở các lượt gen gần đây (mockup + thiết kế), mới trước, bỏ trùng. */
+export async function listRecentIdeas(db: Db, limit = RECENT_IDEAS): Promise<string[]> {
+  const g = schema.creativeManualGens;
+  const rows = await db
+    .select({ idea: g.idea })
+    .from(g)
+    .where(and(inArray(g.kind, ["MOCKUP", "DESIGN"]), sql`btrim(${g.idea}) <> ''`))
+    .orderBy(desc(g.createdAt))
+    .limit(limit * 4);
+  const out: string[] = [];
+  for (const r of rows) {
+    const x = r.idea.trim();
+    if (!out.includes(x)) out.push(x);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Thiết lập để "Tạo lại tương tự" điền lại form Tạo ảnh — chỉ lượt gen (mockup / thiết kế), không lượt sửa / tự làm. */
+export type ManualGenRemix = {
+  genId: string;
+  kind: "MOCKUP" | "DESIGN";
+  idea: string;
+  units: number;
+  styles: string[];
+  colors: string[];
+  size: string;
+  quality: string;
+  productPhotoSourceId: string | null;
+  ownAdSourceId: string | null;
+  inspirationProductIds: string[];
+};
+
+export async function loadManualGenRemix(db: Db, genId: string): Promise<ManualGenRemix | null> {
+  const g = schema.creativeManualGens;
+  const [r] = await db.select().from(g).where(eq(g.id, genId)).limit(1);
+  if (!r || (r.kind !== "MOCKUP" && r.kind !== "DESIGN")) return null;
+  const o = (r.options ?? {}) as Record<string, unknown>;
+  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string") : []);
+  const units = typeof o.units === "number" && Number.isInteger(o.units) && o.units > 0 ? o.units : r.requested;
+  return {
+    genId: r.id,
+    kind: r.kind,
+    idea: r.idea,
+    units,
+    styles: strs(o.styles),
+    colors: strs(o.colors),
+    size: r.size,
+    quality: r.quality,
+    productPhotoSourceId: r.productPhotoSourceId,
+    ownAdSourceId: r.ownAdSourceId,
+    inspirationProductIds: r.inspirationProductIds,
+  };
+}
+
+/** Câu lệnh ĐÃ GỬI máy vẽ của một ảnh (đọc khi người mở "Câu lệnh" — không chở theo mọi thẻ). */
+export async function loadManualGenImagePrompt(db: Db, imageId: string): Promise<{ prompt: string; idea: string; size: string; quality: string; model: string } | null> {
+  const im = schema.creativeManualGenImages;
+  const g = schema.creativeManualGens;
+  const [r] = await db.select({ prompt: im.prompt, idea: g.idea, size: g.size, quality: g.quality, model: g.model }).from(im).innerJoin(g, eq(g.id, im.genId)).where(eq(im.id, imageId)).limit(1);
+  return r ?? null;
+}
 
 /** Số lượt tối đa hiện cho MỘT ngày (mới → cũ) — một ngày bấm nhiều hơn thế là hiếm, và trang vẫn phải nhẹ. */
 const RUNS_PER_DAY = 50;
@@ -283,6 +361,7 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
       cost: { usd, vnd: priced.length ? usdToVndRounded(usd, rate) : null, pricedImages: priced.length, unpricedImages: images.filter((im) => im.costUsd === "" && im.imageId !== null).length },
       images,
       counts,
+      options: run.options ?? {},
     };
   });
 }
@@ -292,13 +371,13 @@ export async function listPixelSafeSourceOptions(db: Db): Promise<PixelSourceOpt
   const s = schema.creativeSources;
   const p = schema.products;
   const rows = await db
-    .select({ id: s.id, kind: s.kind, productId: s.productId, title: s.title, name: p.name, customId: p.customId })
+    .select({ id: s.id, kind: s.kind, productId: s.productId, title: s.title, name: p.name, customId: p.customId, imageId: s.imageId })
     .from(s)
     .innerJoin(p, eq(p.id, s.productId))
     .where(and(inArray(s.kind, [...PIXEL_SAFE_SOURCE_KINDS]), eq(s.active, true), isNotNull(s.imageId)))
     .orderBy(p.name, s.kind, desc(s.createdAt))
     .limit(400);
-  return rows.map((r) => ({ id: r.id, kind: r.kind === "OWN_AD" ? "OWN_AD" : "PRODUCT_PHOTO", productId: r.productId ?? "", productLabel: r.customId ? `${r.customId} · ${r.name}` : r.name, title: r.title }));
+  return rows.map((r) => ({ id: r.id, kind: r.kind === "OWN_AD" ? "OWN_AD" : "PRODUCT_PHOTO", productId: r.productId ?? "", productLabel: r.customId ? `${r.customId} · ${r.name}` : r.name, title: r.title, imageId: r.imageId }));
 }
 
 /**
@@ -608,7 +687,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
   const B = schema.creativeBatches;
   const [batch] = await db.select().from(B).where(and(eq(B.batchDay, targetDay), eq(B.kind, "LOOP"))).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
-  const [runs, queue, sources, inspirations, today, ctx, predictedSeq, pageName, blockers, setup] = await Promise.all([
+  const [runs, queue, sources, inspirations, today, ctx, predictedSeq, pageName, blockers, setup, recentIdeas] = await Promise.all([
     listManualGenRuns(db, RUNS_PER_DAY, rate, day),
     listPublishQueue(db, rate),
     listPixelSafeSourceOptions(db),
@@ -620,6 +699,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     fanpageDisplayName(db, namingCfg.pageId),
     instantPublishBlockers(db, config, vnDay(now)),
     loadCampaignSetupOptions(db, now, config),
+    listRecentIdeas(db),
   ]);
   const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
   const shownImages = [...runs.flatMap((r) => r.images), ...queue.map((q) => q.img)];
@@ -662,5 +742,6 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     drawing: runs.some((r) => (r.counts.PLANNED ?? 0) + (r.counts.DRAWING ?? 0) > 0),
     day,
     isToday: day === vnDay(now),
+    recentIdeas,
   };
 }

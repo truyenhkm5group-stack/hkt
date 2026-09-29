@@ -29,6 +29,7 @@ import {
   type ImageSize,
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
+import { PRESERVE_PRODUCT_RECOLOR_CLAUSE, applyStyleGenes, normalizeStudioOptions, planStudioCells, studioDirectives, studioProblem, studioTotal, type StudioCell, type StudioOptions } from "@/lib/constants/creative-studio";
 import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -208,16 +209,18 @@ function uploadsLine(n: number): string {
 }
 
 /** Câu lệnh cho MỘT ảnh mockup — hàm THUẦN: ý tưởng người (ưu tiên cao nhất) + sáu chỉ thị gen mặc định + giữ nguyên sản phẩm. */
-export function manualGenPrompt(i: { idea: string; genes: Genes; productName: string; hasOwnAd: boolean; uploadCount?: number }): string {
+export function manualGenPrompt(i: { idea: string; genes: Genes; productName: string; hasOwnAd: boolean; uploadCount?: number; cell?: Pick<StudioCell, "style" | "color"> }): string {
   const idea = i.idea.trim();
+  const recolor = Boolean(i.cell?.color.trim());
   return [
     idea ? ownerIdeaHead(idea, "every default direction below (scene, pose, composition, model, colour palette, lighting, styling) — but never the product itself") : "",
     `Facebook feed advertising photo for a Vietnamese fashion shop. Product: "${i.productName}" — exactly the garment in the attached REAL product photo.`,
     i.hasOwnAd ? "Another attached image is one of the shop's OWN previous ads — use it only as a layout and style reference, never copy its product." : "",
     uploadsLine(i.uploadCount ?? 0),
+    ...(i.cell ? studioDirectives(i.cell, "MOCKUP") : []),
     idea ? "Default directions (apply only where the owner's direction above says nothing):" : "",
     ...geneDirectives(i.genes, null, ""),
-    PRESERVE_PRODUCT_CLAUSE,
+    recolor ? PRESERVE_PRODUCT_RECOLOR_CLAUSE : PRESERVE_PRODUCT_CLAUSE,
     idea ? `Reminder — the owner's direction has priority over the defaults: ${idea}` : "",
   ]
     .filter(Boolean)
@@ -231,7 +234,7 @@ export function manualGenPrompt(i: { idea: string; genes: Genes; productName: st
  * theo DNA. Hệ quả phải biết: nhãn DNA của ảnh ấy có thể lệch đúng ở thuộc tính người đã đè — `ownerIdea` được
  * lưu kèm bản mô tả thiết kế và ghi vào lý do của mã TK để người đọc sau biết.
  */
-export function manualDesignPrompt(i: { idea: string; genes: Genes; dna: DesignDna; refCount: number; uploadCount?: number }): string {
+export function manualDesignPrompt(i: { idea: string; genes: Genes; dna: DesignDna; refCount: number; uploadCount?: number; cell?: Pick<StudioCell, "style" | "color"> }): string {
   const idea = i.idea.trim();
   return [
     idea ? ownerIdeaHead(idea, "the default scene / pose / composition / palette directions below AND any attribute of the NEW GARMENT DESIGN below that it explicitly names (fabric, colour, pattern, length, sleeves, neckline, details…); keep the design's other attributes") : "",
@@ -240,6 +243,7 @@ export function manualDesignPrompt(i: { idea: string; genes: Genes; dna: DesignD
       ? `The ${i.refCount} attached photos are REAL best-selling products of the shop — the new design is inspired by them but is a different garment.`
       : "The attached photo is a REAL best-selling product of the shop — the new design is inspired by it but is a different garment.",
     uploadsLine(i.uploadCount ?? 0),
+    ...(i.cell ? studioDirectives(i.cell, "DESIGN") : []),
     idea ? "Defaults (apply only where the owner's direction above says nothing):" : "",
     designPromptEn(i.dna),
     ...geneDirectives(i.genes, null, ""),
@@ -330,7 +334,14 @@ export type StartManualGenInput = {
   count?: number;
   /** Điểm ảnh người tải lên ngay trong khối gen tay — gửi máy vẽ KÈM ảnh sản phẩm thật. */
   uploads?: Uint8Array[];
+  /** Studio: kiểu ảnh · biến thể màu · khổ · chất lượng. Bỏ trống ⇒ như trước (máy tự chọn, giữ màu, khổ + chất lượng của cấu hình). */
+  studio?: Partial<StudioOptions>;
 };
+
+/** Tuỳ chọn studio lưu cùng lượt — đủ để "Tạo lại tương tự" điền lại đúng form. */
+function studioRecord(units: number, st: StudioOptions): Record<string, unknown> {
+  return { units, styles: st.styles, colors: st.colors, size: st.size, quality: st.quality };
+}
 
 export type StartManualGenResult = { ok: true; genId: string; requested: number; allowed: number; reason: string | null } | { ok: false; error: string };
 
@@ -357,7 +368,12 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
   const up = await storeUploads(db, input.uploads ?? []);
   if (!up.ok) return up;
 
-  const want = manualGenRunCount(input.count);
+  const units = manualGenRunCount(input.count);
+  const st = normalizeStudioOptions(input.studio ?? {}, "MOCKUP");
+  const problem = studioProblem(units, st);
+  if (problem) return { ok: false, error: problem };
+  const cells = planStudioCells(units, st);
+  const want = cells.length;
   const idea = input.idea.trim().slice(0, MANUAL_GEN.ideaMaxChars);
   const genId = await db.transaction(async (tx) => {
     const [g] = await tx
@@ -371,22 +387,29 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
         idea,
         requested: want,
         model: cfg.imageModel,
-        size: cfg.imageSize,
-        quality: cfg.imageQuality,
+        size: st.size ?? cfg.imageSize,
+        quality: st.quality ?? cfg.imageQuality,
+        options: studioRecord(units, st),
         note: "",
         createdByUserId: actor.id,
         createdByName: actor.name,
       })
       .returning({ id: schema.creativeManualGens.id });
-    const genes = manualGenGenes(g.id, want);
+    // Bộ gen theo MẪU (không theo ô): các biến thể màu của cùng một mẫu giữ cùng bố cục — khác nhau đúng ở màu, so được.
+    const genes = manualGenGenes(g.id, units);
     await tx.insert(schema.creativeManualGenImages).values(
-      genes.map((gg, i) => ({
-        genId: g.id,
-        seq: i + 1,
-        genes: gg as Record<string, string>,
-        prompt: manualGenPrompt({ idea, genes: gg, productName: product.name, hasOwnAd: ownAdId !== null, uploadCount: up.ids.length }),
-        status: "PLANNED",
-      })),
+      cells.map((cell, i) => {
+        const gg = applyStyleGenes(genes[cell.unit], cell.style);
+        return {
+          genId: g.id,
+          seq: i + 1,
+          genes: gg as Record<string, string>,
+          prompt: manualGenPrompt({ idea, genes: gg, productName: product.name, hasOwnAd: ownAdId !== null, uploadCount: up.ids.length, cell }),
+          color: cell.color,
+          outputStyle: cell.style,
+          status: "PLANNED",
+        };
+      }),
     );
     return g.id;
   });
@@ -395,7 +418,7 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
 
 // ───────────────────────────── BẤM "GEN THIẾT KẾ MỚI" ─────────────────────────────
 
-export type StartManualDesignInput = { inspirationProductIds: string[]; idea: string; count?: number; uploads?: Uint8Array[] };
+export type StartManualDesignInput = { inspirationProductIds: string[]; idea: string; count?: number; uploads?: Uint8Array[]; studio?: Partial<StudioOptions> };
 
 /** DNA các thiết kế gen tay gần đây (trừ ảnh vẽ hỏng — chưa ai thấy nó) — để lượt sau không lặp lại lượt trước. */
 async function recentManualDesignDna(db: Db, now: Date): Promise<DesignDna[]> {
@@ -428,7 +451,12 @@ export async function startManualDesignGen(db: Db, input: StartManualDesignInput
     return { ok: false, error: "Cần ít nhất một mẫu có ẢNH SẢN PHẨM THẬT (nguồn PRODUCT_PHOTO) — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu. Nhập ảnh ở tab Nguồn ảnh." };
   }
 
-  const want = manualGenRunCount(input.count);
+  // "Số mẫu" của lượt thiết kế = số THIẾT KẾ; mỗi thiết kế được vẽ ở mọi màu × kiểu đã chọn.
+  const units = manualGenRunCount(input.count);
+  const st = normalizeStudioOptions(input.studio ?? {}, "DESIGN");
+  const problem = studioProblem(units, st);
+  if (problem) return { ok: false, error: problem };
+  const want = units;
   const genId = crypto.randomUUID();
   // Hạt giống = id lượt. Kiểm thử truyền hạt giống cố định để chứng minh lượt sau không lặp lượt trước vì LUẬT,
   // không vì hai id ngẫu nhiên tình cờ khác nhau.
@@ -441,6 +469,7 @@ export async function startManualDesignGen(db: Db, input: StartManualDesignInput
 
   const idea = input.idea.trim().slice(0, MANUAL_GEN.ideaMaxChars);
   const genes = manualGenGenes(seed, plan.specs.length, { design: true });
+  const cells = planStudioCells(plan.specs.length, st);
   await db.transaction(async (tx) => {
     await tx.insert(schema.creativeManualGens).values({
       id: genId,
@@ -451,29 +480,35 @@ export async function startManualDesignGen(db: Db, input: StartManualDesignInput
       inspirationProductIds: ids,
       uploadImageIds: up.ids,
       idea,
-      requested: want,
+      requested: studioTotal(units, st),
       model: cfg.imageModel,
-      size: cfg.imageSize,
-      quality: cfg.imageQuality,
+      size: st.size ?? cfg.imageSize,
+      quality: st.quality ?? cfg.imageQuality,
+      options: studioRecord(units, st),
       note,
       createdByUserId: actor.id,
       createdByName: actor.name,
     });
     await tx.insert(schema.creativeManualGenImages).values(
-      plan.specs.map((spec0, i) => {
-        const spec: ManualDesignSpec = { ...spec0, ownerIdea: idea };
+      cells.map((cell, i) => {
+        const spec0 = plan.specs[cell.unit];
+        // Màu người chọn đè màu của DNA ⇒ ghi vào `ownerIdea` để người đọc biết nhãn DNA lệch ở thuộc tính màu.
+        const spec: ManualDesignSpec = { ...spec0, ownerIdea: [idea, cell.color ? `Màu: ${cell.color}` : ""].filter(Boolean).join(" · ") };
+        const gg = applyStyleGenes(genes[cell.unit], cell.style);
         return {
           genId,
           seq: i + 1,
-          genes: genes[i] as Record<string, string>,
-          prompt: manualDesignPrompt({ idea, genes: genes[i], dna: spec.dna, refCount: spec.photoSourceIds.length, uploadCount: up.ids.length }),
+          genes: gg as Record<string, string>,
+          prompt: manualDesignPrompt({ idea, genes: gg, dna: spec.dna, refCount: spec.photoSourceIds.length, uploadCount: up.ids.length, cell }),
           design: spec as unknown as Record<string, unknown>,
+          color: cell.color,
+          outputStyle: cell.style,
           status: "PLANNED",
         };
       }),
     );
   });
-  return { ok: true, genId, requested: want, allowed: plan.specs.length, reason: note || null };
+  return { ok: true, genId, requested: studioTotal(units, st), allowed: cells.length, reason: note || null };
 }
 
 // ───────────────────────────── BẤM "SỬA ẢNH" ─────────────────────────────

@@ -689,6 +689,39 @@ fanpage lấy từ dữ liệu **đã đồng bộ**.
 - **Mẫu quảng cáo động** (PR #298): bài mẫu `asset_feed_spec` dạng ảnh đơn ⇒ dựng một `link_data` ảnh đơn theo nút / đường dẫn
   / lời chào của mẫu; Đăng camp đọc và kiểm mẫu TRƯỚC khi ghi dòng nào (`templateShapeError`).
 
+## 5l. Studio Tạo ảnh — kiểu ảnh đầu ra · biến thể màu · khổ · chất lượng (chủ shop 29/09/2026)
+
+Chủ shop: *"code thêm phần chọn số lượng biến thể màu sắc, chọn kiểu ảnh đầu ra, hiển thị câu lệnh ở kết quả ảnh đầu ra… làm lại
+UI/UX thông minh hơn, tối ưu hơn"*. Bước ① Tạo ảnh là một STUDIO bốn bước + cột tóm tắt:
+
+1. **Kiểu tạo** — Thiết kế mới / Ảnh mới cho mẫu đang có (hai thẻ lớn có mô tả).
+2. **Nguồn** — mẫu cảm hứng (như cũ) hoặc ảnh sản phẩm thật dạng LƯỚI ẢNH có ô tìm (thay ô chọn chữ), quảng cáo cũ cùng mã,
+   ảnh tải lên.
+3. **Đầu ra** — kiểu ảnh (tối đa 4: Studio nền trơn · Toàn thân · Đời thường · Selfie gương kiểu khách · Ghép 4 khung · Ghép
+   nhiều màu · Cận chi tiết · Trải phẳng · Ma-nơ-canh; không chọn = Tự động), biến thể màu (tối đa 6, chip có ô màu + gõ màu
+   khác), khổ (1:1 · 2:3 · 4:5 feed), chất lượng (Thấp · Vừa · Cao, mỗi mức in giá/ảnh), số bố cục / số thiết kế.
+4. **Ý tưởng** — ý tưởng đã dùng gần đây (8, bấm để dùng lại) + gợi ý chọn nhanh + ô gõ.
+
+Cột phải: **"N mẫu × C màu × S kiểu = T ảnh"**, tiền ước tính theo ĐÚNG khổ + chất lượng đã chọn, thời gian vẽ ước chừng,
+lý do nút Gen bị khoá. Dưới form là **Kết quả mới nhất** (2 lượt gần nhất hôm nay, duyệt / soạn bài ngay tại chỗ).
+
+Luật (`lib/constants/creative-studio.ts`, đường ghi `lib/creative/manual-gen.ts`):
+
+- **Lưới** `planStudioCells`: thứ tự mẫu → màu → kiểu, để các biến thể của CÙNG một mẫu đứng liền nhau. Trần một lần bấm vẫn
+  là `MANUAL_GEN_RUN.maxImagesPerRun` — kiểm ở màn hình VÀ đường ghi (`studioProblem`), vượt ⇒ từ chối, không ghi gì.
+- **Mockup**: bộ gen theo BỐ CỤC, không theo ô — hai màu của cùng bố cục có cùng gen, khác đúng ở màu. **Thiết kế mới**: mỗi
+  thiết kế được vẽ ở mọi màu × kiểu; màu người chọn đè màu DNA và được ghi vào `ownerIdea` (nhãn DNA có thể lệch ở màu).
+- **Kiểu ảnh ghi đè GEN** tương ứng (bối cảnh / bố cục / người mẫu), không chỉ thêm một câu — gen là thứ máy học; bộ gen
+  sau khi áp kiểu luôn hợp lệ (có kiểm thử trên mọi kiểu × mọi gen gốc). Trải phẳng không dùng cho thiết kế mới. Không kiểu nào
+  in chữ lên ảnh.
+- **Đổi màu ảnh mockup** thay câu "giữ ĐÚNG màu sản phẩm" bằng câu "giữ mọi thứ TRỪ màu"; màn hình nhắc đó có thể là màu shop
+  chưa có hàng. Không chọn gì ⇒ câu lệnh GIỐNG HỆT trước studio (kiểm thử khoá).
+- **Khổ + chất lượng** chọn theo lượt (`creative_manual_gens.size/quality`); máy vẽ đọc từ lượt. Model vẫn theo cấu hình.
+- **Câu lệnh ở kết quả**: nút "Câu lệnh" trên mỗi thẻ ảnh đọc câu lệnh ĐÃ GỬI (`creative_manual_gen_images.prompt`) khi mở —
+  không chở theo mọi thẻ — kèm ý tưởng, kiểu · màu, khổ · chất lượng · model, nút chép. Thẻ ảnh in nhãn kiểu + màu, có nút Tải.
+- **Tạo lại tương tự** (`?tab=tao&remix=<lượt>`): điền lại form từ `creative_manual_gens.options` (migration 0174) + nguồn +
+  ý tưởng của lượt đó. CHỈ điền sẵn — không vẽ gì cho tới khi người bấm Gen.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

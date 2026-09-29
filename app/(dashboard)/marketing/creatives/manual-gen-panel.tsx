@@ -1,14 +1,17 @@
-import { ImagePlus, Rocket, ScanEye, Wand2 } from "lucide-react";
+import Link from "next/link";
+import { ImagePlus, Repeat2, Rocket, ScanEye, Wand2 } from "lucide-react";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
-import { ManualGenAutoRefresh, ManualGenForm, ManualGenImageTile, PublishQueue, type ComposeCtx } from "@/app/(dashboard)/marketing/creatives/manual-gen";
+import { ManualGenAutoRefresh, ManualGenImageTile, PublishQueue, type ComposeCtx } from "@/app/(dashboard)/marketing/creatives/manual-gen";
+import { StudioGenForm } from "@/app/(dashboard)/marketing/creatives/studio-form";
+import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, type OutputStyle } from "@/lib/constants/creative-studio";
 import { ReviewDayFilter } from "@/app/(dashboard)/marketing/creatives/review-day-filter";
 import { VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
-import { MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL, MANUAL_GEN_KIND_LABEL, MANUAL_GEN_RUN, REVIEW_DAY } from "@/lib/constants/creative-loop";
+import { IMAGE_QUALITY_LABEL, MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL, MANUAL_GEN_KIND_LABEL, REVIEW_DAY, type ImageQuality } from "@/lib/constants/creative-loop";
 import { manualGenPreselect } from "@/lib/constants/stock-feedback";
 import { formatDate, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
-import { listReviewDays, loadManualGenPanel, type ManualGenPanel, type ManualGenRunCard } from "@/lib/queries/creative-manual-gen";
+import { listReviewDays, loadManualGenPanel, loadManualGenRemix, type ManualGenPanel, type ManualGenRunCard } from "@/lib/queries/creative-manual-gen";
 import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 
 /**
@@ -39,13 +42,18 @@ function SpendPill({ p }: { p: ManualGenPanel }) {
   );
 }
 
-/** ① TẠO ẢNH — gen tay + mẫu tự làm. */
-export async function CreateStep({ canEdit, preselectProductId = null }: { canEdit: boolean; preselectProductId?: string | null }) {
+/** Số lượt mới nhất hiện ngay dưới form Tạo ảnh — đủ để thấy lượt vừa bấm vẽ tới đâu mà không phải sang ② Duyệt ảnh. */
+const LATEST_RUNS = 2;
+
+/** ① TẠO ẢNH — studio gen tay + kết quả mới nhất + mẫu tự làm. `remixId` = "Tạo lại tương tự" (chỉ điền sẵn form). */
+export async function CreateStep({ canEdit, canPublish = false, preselectProductId = null, remixId = null }: { canEdit: boolean; canPublish?: boolean; preselectProductId?: string | null; remixId?: string | null }) {
   const db = await getDb();
-  const [p, products] = await Promise.all([loadManualGenPanel(db, new Date()), canEdit ? listCreativeProductOptions() : Promise.resolve([])]);
+  const [p, products, remix] = await Promise.all([loadManualGenPanel(db, new Date()), canEdit ? listCreativeProductOptions() : Promise.resolve([]), remixId ? loadManualGenRemix(db, remixId) : Promise.resolve(null)]);
   // `?product=` chỉ CHỌN SẴN ô ảnh gốc — không vẽ gì cho tới khi người bấm Gen (vẽ ảnh tốn tiền).
   const chon = manualGenPreselect(p.sources, preselectProductId);
   const pr = p.pricing;
+  const latest = p.runs.filter((r) => r.kind !== "UPLOAD").slice(0, LATEST_RUNS);
+  const ctx = composeCtxOf(p, canPublish);
   return (
     <div className="space-y-4">
       <SectionCard
@@ -54,10 +62,10 @@ export async function CreateStep({ canEdit, preselectProductId = null }: { canEd
             <Wand2 className="size-4" /> Gen ảnh bằng máy <ManualGenAutoRefresh active={p.drawing} /> <SpendPill p={p} />
           </span>
         }
-        description={`Chọn mẫu cảm hứng (hoặc ảnh sản phẩm thật), gõ ý tưởng, chọn ${MANUAL_GEN_RUN.minImagesPerRun}–${MANUAL_GEN_RUN.maxImagesPerRun} ảnh rồi bấm Gen. Ảnh vẽ xong hiện ở bước ② Duyệt ảnh.`}
+        description="Chọn kiểu tạo → nguồn → kiểu ảnh, biến thể màu, khổ, chất lượng → ý tưởng. Cột phải cho biết trước số ảnh và tiền ước tính. Ảnh vẽ xong hiện ngay bên dưới và ở ② Duyệt ảnh."
         hint={
           <>
-            Giá ước tính mỗi ảnh theo cấu hình đang chạy ({pr.model} · {pr.quality} · {pr.size}): ~{formatVND(pr.unitVnd)} ({pr.unitUsd} USD, tỷ giá {formatNumber(pr.usdToVnd)} ₫/USD). Tiền từng ảnh là tiền THẬT máy vẽ báo về; ảnh không có giá hiện “—” và
+            Giá ước tính mỗi ảnh theo model {pr.model} và ĐÚNG khổ + chất lượng bạn chọn (mặc định của cấu hình: {pr.quality} · {pr.size} ~{formatVND(pr.unitVnd)}; tỷ giá {formatNumber(pr.usdToVnd)} ₫/USD). Tiền từng ảnh là tiền THẬT máy vẽ báo về; ảnh không có giá hiện “—” và
             không cộng vào tổng. Máy vẽ sau khi bạn bấm (không bắt chờ); tiến trình chết giữa chừng thì lượt vòng mẫu vẽ nốt.
           </>
         }
@@ -65,12 +73,38 @@ export async function CreateStep({ canEdit, preselectProductId = null }: { canEd
         <div className="space-y-3">
           {canEdit && chon.note ? <p className="rounded-md border border-dashed px-2.5 py-1.5 text-[12px] text-muted-foreground">{chon.note}</p> : null}
           {canEdit ? (
-            <ManualGenForm key={chon.photoId} initialKind={preselectProductId ? "MOCKUP" : "DESIGN"} inspirations={p.inspirations} sources={p.sources} unitVnd={pr.unitVnd} unitUsd={pr.unitUsd} initialPhotoId={chon.photoId} />
+            <StudioGenForm
+              key={remix?.genId ?? chon.photoId}
+              initialKind={preselectProductId ? "MOCKUP" : "DESIGN"}
+              inspirations={p.inspirations}
+              sources={p.sources}
+              pricing={{ model: pr.model, quality: pr.quality, size: pr.size, usdToVnd: pr.usdToVnd }}
+              recentIdeas={p.recentIdeas}
+              remix={remix}
+              initialPhotoId={remix?.productPhotoSourceId ?? chon.photoId}
+            />
           ) : (
             <EmptyState title="Bạn chỉ có quyền xem" description="Gen ảnh cần quyền soạn nội dung (ideas:write)." />
           )}
+          {remixId && !remix ? <p className="text-[12px] text-warning">Không điền lại được lượt cũ (lượt sửa ảnh / mẫu tự làm, hoặc đã bị xoá) — form đang ở mặc định.</p> : null}
         </div>
       </SectionCard>
+      {latest.length ? (
+        <SectionCard
+          title={
+            <span className="flex flex-wrap items-center gap-2">
+              <ScanEye className="size-4" /> Kết quả mới nhất <ManualGenAutoRefresh active={p.drawing} />
+            </span>
+          }
+          description="Hai lượt gần nhất hôm nay. Duyệt / Loại / Soạn bài ngay tại đây; mọi lượt của ngày ở ② Duyệt ảnh."
+        >
+          <div className="space-y-3">
+            {latest.map((run) => (
+              <RunBlock key={run.id} run={run} canEdit={canEdit} ctx={ctx} />
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
       {canEdit ? (
         <SectionCard
           title={
@@ -176,6 +210,12 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
           </p>
         )}
         <p className="flex flex-wrap items-center gap-1">
+          <StudioSummary run={run} />
+          {canEdit && (run.kind === "MOCKUP" || run.kind === "DESIGN") ? (
+            <Link href={`/marketing/creatives?tab=tao&remix=${encodeURIComponent(run.id)}`} className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] hover:bg-muted" title="Mở ① Tạo ảnh với đúng thiết lập của lượt này — chưa vẽ gì cho tới khi bấm Gen">
+              <Repeat2 className="size-3" /> Tạo lại tương tự
+            </Link>
+          ) : null}
           <RunCost run={run} />
           {MANUAL_GEN_IMAGE_STATUSES.filter((s) => (run.counts[s] ?? 0) > 0).map((s) => (
             <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[10.5px]">
@@ -204,6 +244,20 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
         ))}
       </div>
     </div>
+  );
+}
+
+/** "2 mẫu × 3 màu × 1 kiểu · Dọc 4:5 · Vừa" — chỉ lượt có studio (từ 29/09/2026). */
+function StudioSummary({ run }: { run: ManualGenRunCard }) {
+  const o = run.options;
+  if (typeof o.units !== "number") return null;
+  const colors = Array.isArray(o.colors) ? o.colors.filter((x): x is string => typeof x === "string") : [];
+  const styles = (Array.isArray(o.styles) ? o.styles : []).filter((x): x is OutputStyle => typeof x === "string" && (OUTPUT_STYLE_KEYS as readonly string[]).includes(x));
+  const q = run.quality as ImageQuality;
+  return (
+    <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px]" title={[styles.length ? `Kiểu: ${styles.map((s) => OUTPUT_STYLES[s].label).join(", ")}` : "Kiểu: tự động", colors.length ? `Màu: ${colors.join(", ")}` : "Giữ màu"].join(" · ")}>
+      <span className="numeric">{o.units}</span> mẫu × <span className="numeric">{Math.max(1, colors.length)}</span> màu × <span className="numeric">{Math.max(1, styles.length)}</span> kiểu · {run.size} · {IMAGE_QUALITY_LABEL[q] ?? run.quality}
+    </span>
   );
 }
 

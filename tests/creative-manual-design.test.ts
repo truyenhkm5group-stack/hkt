@@ -240,6 +240,26 @@ export async function testCreativeManualDesignDb(db: Db) {
       assert.match(s1b.error, /mới lạ/, `không lập thêm được thì nói ra, không vẽ lại thiết kế cũ (nhận: ${s1b.error})`);
     }
 
+    // ── (b2c) Studio cho thiết kế mới (29/09/2026): mỗi THIẾT KẾ vẽ ở mọi màu × kiểu; trải phẳng bị bỏ (thiết kế cần người mặc) ──
+    const sm = await startManualDesignGen(db, { inspirationProductIds: [`${P}A`, `${P}B`, `${P}C`], idea: "", count: 2, studio: { styles: ["STUDIO", "FLATLAY"], colors: ["Đỏ đô", "Đen"] } }, cfgRong, actor, now, { seed: `${P}hat-giong-studio` });
+    if (sm.ok) {
+      const rm = (await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, sm.genId))).sort((a, b) => a.seq - b.seq);
+      assert.equal(sm.requested, 4, "2 thiết kế × 2 màu × 1 kiểu (trải phẳng bị bỏ)");
+      assert.equal(rm.length % 2, 0);
+      assert.ok(rm.every((r) => r.outputStyle === "STUDIO" && r.genes.scene === "STUDIO_PLAIN"), "không ảnh nào trải phẳng");
+      for (let k = 0; k + 1 < rm.length; k += 2) {
+        const a = parseManualDesignSpec(rm[k].design);
+        const b = parseManualDesignSpec(rm[k + 1].design);
+        assert.ok(a && b && dnaSignature(a.dna) === dnaSignature(b.dna), "hai màu của CÙNG một thiết kế");
+        assert.deepEqual([rm[k].color, rm[k + 1].color], ["Đỏ đô", "Đen"]);
+        assert.ok(a?.ownerIdea.includes("Màu: Đỏ đô") && rm[k].prompt.includes("COLOUR VARIANT"), "màu đè DNA được ghi lại");
+      }
+      await db.delete(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, sm.genId));
+      await db.delete(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, sm.genId));
+    } else {
+      assert.match(sm.error, /mới lạ/, sm.error);
+    }
+
     const d1 = await drawManualGen(db, { genId: s1.genId, imageClient });
     assert.equal(d1.drawn, s1.allowed);
     assert.ok(seen.length > 0 && seen.every((k) => k.length >= 1 && k.length <= MANUAL_DESIGN.refPhotos && k.every((kind) => kind === "PRODUCT_PHOTO")), "máy vẽ chỉ nhận ẢNH SẢN PHẨM THẬT của mã cha — không quảng cáo cũ, không spy");

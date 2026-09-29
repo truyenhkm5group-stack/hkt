@@ -3849,6 +3849,11 @@ export const creativeManualGens = pgTable(
     quality: text("quality").notNull(),
     /** Vì sao một phần không được vẽ ngay lúc bấm (chạm trần). Rỗng = xin đủ. */
     note: text("note").notNull().default(""),
+    /**
+     * Studio (migration 0174, chủ shop 29/09/2026): tuỳ chọn người chọn lúc bấm — số mẫu, kiểu ảnh đầu ra, biến thể màu, khổ,
+     * chất lượng (`StudioOptions` + `units`). Để "Tạo lại tương tự" điền lại đúng form. `{}` = lượt trước khi có studio.
+     */
+    options: jsonb("options").$type<Record<string, unknown>>().notNull().default({}),
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdByName: text("created_by_name").notNull().default(""),
     createdAt: createdAt(),
@@ -3869,6 +3874,10 @@ export const creativeManualGenImages = pgTable(
     /** Bộ gen ĐỦ sáu khoá — máy học được từ bài này như mọi mẫu. */
     genes: jsonb("genes").$type<Record<string, string>>().notNull(),
     prompt: text("prompt").notNull().default(""),
+    /** Biến thể màu người chọn cho ảnh này (migration 0174). Rỗng = giữ màu gốc / màu DNA. */
+    color: text("color").notNull().default(""),
+    /** Kiểu ảnh đầu ra (`OutputStyle`, migration 0174). Rỗng = lượt trước khi có studio; `AUTO` = máy tự chọn. */
+    outputStyle: text("output_style").notNull().default(""),
     /**
      * Lượt `DESIGN`: bản mô tả THIẾT KẾ MỚI của ảnh này (`ManualDesignSpec` — DNA đủ mười thuộc tính, mã cha,
      * nguồn ảnh tham chiếu, giá đề nghị, lý do). `NULL` ở lượt `MOCKUP`. Mã `TK-…` chỉ cấp khi đưa vào lô.
