@@ -1,6 +1,8 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, num, sleep, str } from "@/lib/integrations/http";
 import { assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
+import { maskFbSecrets } from "@/lib/constants/fb-token-scopes";
+import { classifyMetaError, pickStoryFromCreative, type MetaAdPostError, type MetaGraphErrorInfo, type PostResolutionSource } from "@/lib/constants/meta-ad-post";
 
 export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" };
 
@@ -77,7 +79,44 @@ export type FbAdInfo = {
   postId?: string | null;
   /** Chuỗi gốc "<page_id>_<post_id>" — giữ lại để truy nguyên. */
   storyId?: string | null;
+  /** Creative của mẩu, và fanpage tách từ `storyId`. */
+  creativeId?: string | null;
+  pageId?: string | null;
+  /** Hai trường thô của creative — `storyId` là trường đã DÙNG theo `pickStoryFromCreative`. */
+  rawEffectiveObjectStoryId?: string | null;
+  rawObjectStoryId?: string | null;
+  postResolutionSource?: PostResolutionSource | null;
+  /** Mã lỗi ổn định khi tra hỏng (`classifyMetaError`); `undefined` khi tra được. */
+  errorCode?: MetaAdPostError;
+  graphError?: MetaGraphErrorInfo;
+  /** Lượt tra này CÓ đọc creative không. `false` ⇒ các trường bài viết là CHƯA BIẾT, không được ghi đè. */
+  creativeRead?: boolean;
 };
+
+/** Lỗi của cả kết nối — gặp ở một mã là biết mọi mã sau cũng hỏng như thế. */
+const CONNECTION_FATAL: ReadonlySet<MetaAdPostError> = new Set(["TOKEN_EXPIRED", "MISSING_PERMISSION", "META_RATE_LIMIT"]);
+
+/** Một nút Graph đọc theo mã: có nút · Graph trả lời nhưng không có mã đó · lỗi (đã bóc, đã che). */
+export type GraphNodeResult = { kind: "node"; node: Record<string, unknown> } | { kind: "absent" } | { kind: "error"; error: MetaGraphErrorInfo };
+
+/**
+ * Lỗi bất kỳ → hình dạng lỗi Graph, ĐÃ CHE. `IntegrationError.body` mang phong bì `{ error: {...} }`
+ * nguyên văn của Graph; chỉ bóc đúng sáu trường cần để phân loại và gỡ lỗi. URL (mang token trong
+ * query) không bao giờ được chép vào đây.
+ */
+export function graphErrorInfo(error: unknown): MetaGraphErrorInfo {
+  const body = error instanceof IntegrationError ? asRecord(error.body) : {};
+  const fb = asRecord(body.error);
+  const raw = str(fb.error_user_msg) || str(fb.message) || (error instanceof Error ? error.message : String(error));
+  return {
+    httpStatus: error instanceof IntegrationError ? error.status : null,
+    code: fb.code === undefined ? null : num(fb.code),
+    subcode: fb.error_subcode === undefined ? null : num(fb.error_subcode),
+    type: str(fb.type),
+    message: maskFbSecrets(raw).slice(0, 500),
+    fbtraceId: str(fb.fbtrace_id),
+  };
+}
 
 export class FacebookAdsClient {
   constructor(
@@ -210,34 +249,127 @@ export class FacebookAdsClient {
        * Nên hỏng là lùi về đúng danh sách trường cũ — mất phần nối mới, KHÔNG mất phần đang chạy.
        */
       const FIELDS_BASE = "id,name,adset_id,campaign_id,account_id,status,campaign{id,name}";
-      const FIELDS_WITH_CREATIVE = `${FIELDS_BASE},creative{effective_object_story_id}`;
+      /*
+        Xin CẢ HAI trường bài viết của creative: `effective_object_story_id` là bài Meta thật sự phân
+        phối (dark post của "Tạo quảng cáo" chỉ có trường này), `object_story_id` là dự phòng khi
+        quảng cáo dùng bài có sẵn. Thứ tự ưu tiên nằm ở MỘT chỗ — `pickStoryFromCreative`.
+      */
+      const FIELDS_WITH_CREATIVE = `${FIELDS_BASE},creative{id,effective_object_story_id,object_story_id}`;
+      // Lượt lùi về FIELDS_BASE KHÔNG đọc creative ⇒ "không có bài" ở lượt đó là CHƯA BIẾT, không phải "không có".
+      let creativeRead = true;
       try {
         try {
           record = await this.get("", { ids: chunk.join(","), fields: FIELDS_WITH_CREATIVE });
         } catch {
+          creativeRead = false;
           record = await this.get("", { ids: chunk.join(","), fields: FIELDS_BASE });
         }
       } catch (error) {
         // một id lỗi làm hỏng cả lô → tra từng id
         if (chunk.length > 1) {
-          for (const id of chunk) out.push(...(await this.getAdsByIds([id])));
+          for (const [k, id] of chunk.entries()) {
+            const one = await this.getAdsByIds([id]);
+            out.push(...one);
+            /*
+              Token hết hạn / hết hạn mức ở một mã thì mọi mã sau cũng thế. Tra tiếp từng mã là 50 lời
+              gọi hỏng cho mỗi lô, mỗi giờ — tự gây bão request đúng lúc kết nối đang có vấn đề.
+            */
+            const code = one[0]?.errorCode;
+            if (code && CONNECTION_FATAL.has(code)) {
+              for (const rest of [...chunk.slice(k + 1), ...clean.slice(i + 50)]) out.push({ ...one[0], id: rest });
+              return out;
+            }
+          }
           continue;
         }
-        const message = error instanceof Error ? error.message : String(error);
-        out.push({ id: chunk[0], name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true, error: message });
+        const graphError = graphErrorInfo(error);
+        out.push({ id: chunk[0], name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true, error: graphError.message, errorCode: classifyMetaError(graphError), graphError });
         continue;
       }
       for (const id of chunk) {
         const item = asRecord(record[id]);
         if (!str(item.id)) {
-          out.push({ id, name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true });
+          out.push({ id, name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true, errorCode: "AD_NOT_FOUND" });
           continue;
         }
         const campaign = asRecord(item.campaign);
-        // "<page_id>_<post_id>" → lấy phần sau dấu gạch dưới, đúng thứ Pancake ghi vào orders.post_id.
-        const story = str(asRecord(item.creative).effective_object_story_id);
-        const postId = story.includes("_") ? story.split("_").slice(1).join("_") : story || null;
-        out.push({ id, name: str(item.name), adsetId: str(item.adset_id) || null, campaignId: str(item.campaign_id) || str(campaign.id) || null, campaignName: str(campaign.name), accountId: str(item.account_id).replace(/^act_/, "") || null, status: str(item.status), missing: false, postId: postId || null, storyId: story || null });
+        const creative = asRecord(item.creative);
+        const rawEffective = str(creative.effective_object_story_id) || null;
+        const rawObject = str(creative.object_story_id) || null;
+        // "<page_id>_<post_id>" → phần sau dấu gạch dưới là thứ Pancake ghi vào orders.post_id.
+        const story = pickStoryFromCreative({ effectiveObjectStoryId: rawEffective, objectStoryId: rawObject });
+        out.push({
+          id,
+          name: str(item.name),
+          adsetId: str(item.adset_id) || null,
+          campaignId: str(item.campaign_id) || str(campaign.id) || null,
+          campaignName: str(campaign.name),
+          accountId: str(item.account_id).replace(/^act_/, "") || null,
+          status: str(item.status),
+          missing: false,
+          postId: story?.postId ?? null,
+          storyId: story?.objectStoryId ?? null,
+          creativeId: str(creative.id) || null,
+          pageId: story?.pageId ?? null,
+          rawEffectiveObjectStoryId: rawEffective,
+          rawObjectStoryId: rawObject,
+          postResolutionSource: story?.source ?? null,
+          creativeRead,
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * ĐỌC MỘT NÚT Graph theo mã, trả lỗi THÀNH GIÁ TRỊ thay vì ném — người gọi cần phân loại lỗi của
+   * TỪNG mã (mẩu này hết quyền, mẩu kia không tồn tại), không phải một ngoại lệ cho cả lượt.
+   * `ConnectorUnavailableError` (tổ chức không có token) vẫn NÉM: đó là lỗi của cả lượt.
+   */
+  async readNode(id: string, fields: string): Promise<GraphNodeResult> {
+    try {
+      const node = await this.get(id, { fields });
+      return Object.keys(node).length ? { kind: "node", node } : { kind: "absent" };
+    } catch (error) {
+      if (error instanceof ConnectorUnavailableError) throw error;
+      return { kind: "error", error: graphErrorInfo(error) };
+    }
+  }
+
+  /**
+   * ĐỌC NHIỀU NÚT CÙNG BỘ TRƯỜNG — `GET /?ids=a,b,…` từng lô 50. Graph hỏng CẢ LÔ khi một mã lỗi,
+   * nên lô hỏng thì đọc lại TỪNG mã: một mẩu hết quyền không được kéo 49 mẩu kia xuống theo.
+   */
+  async readNodes(ids: string[], fields: string): Promise<Map<string, GraphNodeResult>> {
+    const out = new Map<string, GraphNodeResult>();
+    const clean = [...new Set(ids.map((x) => x.trim()).filter(Boolean))];
+    for (let i = 0; i < clean.length; i += 50) {
+      const chunk = clean.slice(i, i + 50);
+      let record: Record<string, unknown> | null = null;
+      try {
+        record = await this.get("", { ids: chunk.join(","), fields });
+      } catch (error) {
+        if (error instanceof ConnectorUnavailableError) throw error;
+        if (chunk.length === 1) {
+          out.set(chunk[0], { kind: "error", error: graphErrorInfo(error) });
+          continue;
+        }
+      }
+      if (record === null) {
+        for (const [k, id] of chunk.entries()) {
+          const one = await this.readNode(id, fields);
+          out.set(id, one);
+          // Lỗi của cả kết nối ở một mã ⇒ không gọi tiếp cho từng mã còn lại (xem getAdsByIds).
+          if (one.kind === "error" && CONNECTION_FATAL.has(classifyMetaError(one.error))) {
+            for (const rest of [...chunk.slice(k + 1), ...clean.slice(i + 50)]) out.set(rest, one);
+            return out;
+          }
+        }
+        continue;
+      }
+      for (const id of chunk) {
+        const node = asRecord(record[id]);
+        out.set(id, Object.keys(node).length ? { kind: "node", node } : { kind: "absent" });
       }
     }
     return out;

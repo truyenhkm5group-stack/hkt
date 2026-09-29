@@ -3060,13 +3060,47 @@ export const fbAds = pgTable(
      * cách DUY NHẤT tăng độ phủ mà không phải suy đoán.
      */
     postId: text("post_id"),
-    /** Chuỗi gốc "<page_id>_<post_id>" của Facebook — giữ để truy nguyên. */
+    /**
+     * Chuỗi "<page_id>_<post_id>" ĐÃ DÙNG để ra `post_id` — theo thứ tự `effective_object_story_id`
+     * → `object_story_id` (`pickStoryFromCreative`). Cột nguồn ghi trường nào đã thắng.
+     */
     storyId: text("story_id"),
+    /**
+     * ─── MẮT XÍCH MẪU → BÀI → MẨU (migration 0173) ───
+     *
+     * Cùng dòng với mẩu quảng cáo, không phải bảng mới: khoá tự nhiên là `ad_id`, và mọi truy vấn
+     * quy kết đang đọc bảng này. `story_id` KHÔNG unique — một bài có sẵn được nhiều mẩu dùng lại,
+     * đó chính là cách nối "một mẫu ảnh → nhiều mẩu → nhiều chiến dịch".
+     *
+     * `fetched_at` là "lần cuối hỏi Meta" (last synced); `post_resolved_at` là lần cuối RA ĐƯỢC bài.
+     */
+    creativeId: text("creative_id"),
+    /** Fanpage tách từ `story_id`. `NULL` = chưa ra được bài — KHÔNG phải "không có fanpage". */
+    pageId: text("page_id"),
+    /** Hai trường THÔ của creative, lưu nguyên văn để truy nguyên kể cả khi hai trường khác nhau. */
+    effectiveObjectStoryId: text("effective_object_story_id"),
+    objectStoryId: text("object_story_id"),
+    /** `EFFECTIVE_OBJECT_STORY_ID` · `OBJECT_STORY_ID` (`POST_RESOLUTION_SOURCES`). `NULL` = chưa ra bài. */
+    postResolutionSource: text("post_resolution_source"),
+    /** Tên fanpage lúc tra (Meta, hoặc sổ `fanpages` của ERP khi Meta không cho đọc). Ảnh chụp để đọc, không phải khoá. */
+    pageName: text("page_name"),
+    /** `permalink_url` do META trả. Link DỰNG từ page_id + post_id không bao giờ được ghi vào đây. */
+    permalinkUrl: text("permalink_url"),
+    postResolvedAt: ts("post_resolved_at"),
+    /** Lỗi có cấu trúc của lần tra gần nhất (mã ổn định + mã Graph, ĐÃ CHE token). `NULL` = lần gần nhất không lỗi. */
+    resolveError: jsonb("resolve_error").$type<{ code: string; graphCode: number | null; graphSubcode: number | null; message: string; fbtraceId: string; at: string }>(),
     fetchedAt: ts("fetched_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("fb_ads_campaign_idx").on(t.campaignId), index("fb_ads_post_idx").on(t.postId)],
+  (t) => [
+    index("fb_ads_campaign_idx").on(t.campaignId),
+    index("fb_ads_post_idx").on(t.postId),
+    index("fb_ads_story_idx").on(t.storyId),
+    index("fb_ads_page_post_idx").on(t.pageId, t.postId),
+    index("fb_ads_creative_idx").on(t.creativeId),
+    check("fb_ads_post_source_check", sql`${t.postResolutionSource} IS NULL OR ${t.postResolutionSource} IN ('EFFECTIVE_OBJECT_STORY_ID', 'OBJECT_STORY_ID')`),
+  ],
 );
 export type FbAd = typeof fbAds.$inferSelect;
 

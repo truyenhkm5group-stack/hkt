@@ -198,6 +198,7 @@ export function testNavigationCoverage() {
     "/operations/dwell": "tab 'Đứng yên quá lâu' ngay trên trang Cần xử lý, và từ ô lệnh ⌘K",
     "/reports/funnel": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
     "/ads/daily": "tab 'Hiệu quả theo ngày' ngay trên trang Quảng cáo (cùng module, hai góc nhìn: theo chiến dịch vs theo ngày), và từ ô lệnh ⌘K",
+    "/ads/post-resolver": "tab 'Ad → Bài viết' ngay trên trang Quảng cáo — công cụ tra / dự phòng của mối nối mẩu → bài mà job facebook-ads tự điền",
     "/orders/verify": "một GÓC NHÌN của chính danh sách đơn (đơn còn trong kho, xếp theo khả năng hoàn), vào từ nút 'Cần xác minh trước khi giao' ngay trên trang Đơn hàng",
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
     "/reports/target": "vào từ dòng “Xem thêm” của Báo cáo lợi nhuận và từ trang Mô phỏng kịch bản, và từ ô lệnh ⌘K",

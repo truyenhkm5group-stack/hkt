@@ -122,6 +122,7 @@ const ROUTES = [
   "/customers/retention",
   "/ads",
   "/ads/daily",
+  "/ads/post-resolver",
   "/payroll",
   /*
     ═══ TÁM MÀN HÌNH LƯƠNG, KHÔNG PHẢI MỘT ═══

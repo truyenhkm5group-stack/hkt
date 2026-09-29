@@ -65,6 +65,7 @@ on:
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)
+          - meta-ad-post-probe  # Ad ID → creative → bài viết qua ĐÚNG hàm của /ads/post-resolver, mã in ĐÃ CHE (CHỈ ĐỌC; arg: các Ad ID, thêm "--apply" = ghi fb_ads như nút Đồng bộ)
           - ads-level-probe     # chi tiêu cấp MẨU có cộng đúng bằng cấp CHIẾN DỊCH không (CHỈ ĐỌC; arg: "--days=30")
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
@@ -478,7 +479,7 @@ jobs:
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status"
-            DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
+            DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
             DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org"
 
             LOP=GHI
@@ -957,6 +958,11 @@ jobs:
                 # Không ghi một dòng nào vào CSDL.
                 fetch_script meta-id-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/meta-id-probe.ts'
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/meta-id-probe.ts ;;
+              meta-ad-post-probe)
+                # Mặc định CHỈ ĐỌC Meta. "--apply" ghi đúng những mẩu vừa tra vào fb_ads bằng CÙNG hàm của nút
+                # "Đồng bộ vào ERP" (idempotent theo ad_id) — cờ đó đẩy lượt chạy sang lớp GHI ở trên.
+                fetch_script meta-ad-post-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/meta-ad-post-probe.ts'
+                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/meta-ad-post-probe.ts ;;
               pages-debug)
                 fetch_script pages-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
