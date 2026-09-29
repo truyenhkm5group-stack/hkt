@@ -137,7 +137,11 @@ function registrySummary(): string {
   lines.push("", "## Trang: loại khối");
   for (const t of BLOCK_TYPES) lines.push(`- ${t} · ${COMPONENT_REGISTRY[t].label}: ${COMPONENT_REGISTRY[t].description}`);
   lines.push(`span ∈ {${BLOCK_SPANS.join(", ")}} (lưới 12 cột) · kỳ: ${PAGE_PERIODS.join(", ")} · biểu đồ: ${CHART_KINDS.join(", ")}`);
-  lines.push(`- Chỉ số (kpi.metric): ${METRIC_SOURCES.map((s) => `${s.key}[${s.module}]`).join(", ")}`);
+  lines.push(`- Chỉ số (kpi.metric): ${METRIC_SOURCES.filter((s) => !s.requiresAnyModule?.length).map((s) => `${s.key}[${s.module}]`).join(", ")}`);
+  // Pilot P1 #8: chỉ số cần kết nối (vd COD cần kết nối vận chuyển) chỉ gợi ý khi tổ chức ĐÃ bật kết nối đó — gói mới không bao giờ có.
+  const gated = METRIC_SOURCES.filter((s) => s.requiresAnyModule?.length);
+  if (gated.length) lines.push(`- Chỉ số CHỈ dùng khi «Module đang bật» có kết nối tương ứng (không có thì KHÔNG dùng): ${gated.map((s) => `${s.key}[cần ${s.requiresAnyModule!.join(" | ")}]`).join(", ")}`);
+  lines.push("- Nhãn của khối KPI chỉ số là nhãn CỐ ĐỊNH của sổ; label / title chỉ là tên phụ — KHÔNG đặt tên mang nghĩa khác chỉ số (vd «công nợ phải thu» cho một chỉ số COD).");
   lines.push(`- Chuỗi (chart.series): ${SERIES_SOURCES.map((s) => `${s.key}[${s.module}]`).join(", ")}`);
   lines.push(`- Bảng (table.source = khoá đối tượng): ${LIST_SOURCES.map((s) => `${s.objectKey}[${s.module}]`).join(", ")}`);
   lines.push(`- Dòng thời gian (timeline.source): ${TIMELINE_SOURCES.map((s) => `${s.key}[${s.module}]`).join(", ")}`);
@@ -147,12 +151,13 @@ function registrySummary(): string {
   lines.push("", "## Luật tự động (luôn cài ở NHÁP + CHẠY THỬ — người bật sau)");
   lines.push(`- trigger event: ${DOMAIN_EVENTS.filter((e) => e.status === "LIVE" && !e.name.startsWith("workflow.")).map((e) => e.name).join(", ")}`);
   lines.push('- trigger custom_status: { kind: "custom_status", objectKey, fieldKey (field kiểu status khai trong gói), to: [giá trị], from?: [...] }');
+  lines.push("- custom_record.* (tạo / sửa / xoá bản ghi) CHỈ phát cho đối tượng tự tạo x_…; với đối tượng hệ thống (khách, đơn, sản phẩm…) dùng trigger custom_status.");
   lines.push(`- action: create_task { title, summary?, departmentCode ∈ ${DEPARTMENT_CODES.join("|")}, priority ∈ LOW|NORMAL|HIGH|URGENT, dueInHours } · notify { message } (tối đa MỘT) · set_custom_value { field, value } (không ghi field đang nghe)`);
   lines.push('- gate: { kind: "approval", reason } = bước DUYỆT trước khi chạy action.');
 
   lines.push("", "## Vai trò tuỳ chỉnh");
   lines.push(`base ∈ ${ROLE_ORDER.filter((r) => r !== "ADMIN").join(", ")} (KHÔNG ADMIN). KHÔNG BAO GIỜ cấp: ${ROLE_BUILDER_FORBIDDEN.join(", ")}.`);
-  lines.push("Khoá quyền dùng được (module chủ trong ngoặc):");
+  lines.push("Khoá quyền dùng được (module chủ trong ngoặc) — quyền của module KHÔNG có trong gói bị từ chối:");
   const forbidden = new Set(ROLE_BUILDER_FORBIDDEN);
   for (const g of PERMISSION_GROUPS) {
     const keys = g.items.map((i) => i.key).filter((k) => !forbidden.has(k));

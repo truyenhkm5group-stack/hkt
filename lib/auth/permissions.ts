@@ -13,6 +13,13 @@ export const PERMISSION_GROUPS = [
       { key: "dashboard:view", label: "Tổng quan", hint: "Trang tổng quan, KPI, biểu đồ" },
       { key: "orders:read", label: "Đơn hàng: xem", hint: "Danh sách & chi tiết đơn" },
       { key: "orders:export", label: "Đơn hàng: xuất CSV" },
+      /*
+        Pilot P0 #3: tạo / sửa / huỷ ĐƠN TẠO TAY — chỉ ở tổ chức KHÔNG đồng bộ đơn từ Pancake (`orgHasSyncedSource`).
+        Mặc định CHỈ Quản trị: loại khỏi mẫu Quản lý (dựng bằng phép trừ) và KHÔNG nằm trong
+        `PERMISSIONS_ADDED_AFTER_SNAPSHOT` — tài khoản có danh sách quyền lưu từ trước không tự nhận nó. Vai trò khác cần
+        thì chủ tổ chức cấp tay. Đơn Pancake không bao giờ sửa được ở ERP, có khoá này hay không.
+      */
+      { key: "orders:write", label: "Đơn hàng: tạo & sửa đơn tạo tay", hint: "Tạo đơn trên ERP (chọn khách, mẫu mã, giá, chiết khấu, phí ship), sửa / huỷ đơn tạo tay — chỉ khi tổ chức không đồng bộ đơn từ Pancake. Không trừ tồn: xuất kho bằng phiếu xuất." },
       { key: "shipments:view", label: "Vận đơn", hint: "Vận đơn, hành trình, cập nhật từ Viettel Post" },
       /*
         MỘT KHOÁ, HAI VIỆC — VÀ NHÃN PHẢI NÓI RA CẢ HAI.
@@ -311,7 +318,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

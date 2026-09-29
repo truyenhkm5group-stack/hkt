@@ -203,7 +203,8 @@ export async function draftBlueprint(prompt: string, opts: DraftOptions): Promis
     }
     const n = normalizeToolInput(call.input, opts.mode, key, opts.org);
     if (n.ok) {
-      validation = validateBlueprint(n.bp);
+      // Vai trò AI đề xuất không được mang quyền của module ngoài gói (pilot P2 #18) — trả về để AI tự bỏ, không cài quyền chết.
+      validation = validateBlueprint(n.bp, { roleModulePermissions: "error" });
       best = { bp: n.bp, contextKeys: n.contextKeys };
     } else validation = { ok: false, errors: [{ path: "", message: n.message }], warnings: [] };
     if (validation.ok) {

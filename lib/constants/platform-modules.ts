@@ -164,8 +164,8 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "orders.export", label: "Xuất CSV đơn hàng", defaultEnabled: true, why: "Dữ liệu rời khỏi hệ thống — tổ chức có thể muốn tắt." },
     ],
     routes: ["/orders", "/api/export/orders"],
-    permissions: ["orders:read", "orders:export"],
-    why: "Một đơn là một khách mua một số sản phẩm — không có hai sổ kia thì đơn không có nghĩa.",
+    permissions: ["orders:read", "orders:export", "orders:write"],
+    why: "Một đơn là một khách mua một số sản phẩm — không có hai sổ kia thì đơn không có nghĩa. `orders:write` = tạo / sửa / huỷ đơn TẠO TAY (chỉ khi tổ chức không bật `connector_pancake`).",
   },
   {
     key: "inventory",

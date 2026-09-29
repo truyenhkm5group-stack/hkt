@@ -255,6 +255,9 @@ export function testNavigationCoverage() {
     // Pilot bán buôn: form TẠO sản phẩm tay — vào từ nút 'Tạo sản phẩm' ở đầu /products, chỉ hiện khi tổ chức KHÔNG bật
     // connector_pancake và người xem có products:write (cùng cổng productCreateGate với trang và server action).
     "/products/new": "nút 'Tạo sản phẩm' ở đầu trang /products (chỉ khi không bật Pancake + có products:write)",
+    // Pilot P0 #3: form TẠO đơn tay — vào từ nút 'Tạo đơn hàng' ở đầu /orders, chỉ hiện khi tổ chức KHÔNG đồng bộ đơn
+    // (orgHasSyncedSource) và người xem có orders:write (cùng cổng manualOrderGate với trang và server action).
+    "/orders/new": "nút 'Tạo đơn hàng' ở đầu trang /orders (chỉ khi không đồng bộ đơn + có orders:write)",
     // Phase 3 · luật tự động: form TẠO luật — vào từ nút 'Luật mới' ở đầu /settings/workflows. Trang của MỘT luật
     // (`/settings/workflows/[id]`) là route động nên tự đứng ngoài bài này: vào từ tên luật trong bảng danh sách.
     "/settings/workflows/new": "nút 'Luật mới' ở đầu /settings/workflows; trang một luật /settings/workflows/[id] vào từ tên luật trong bảng",

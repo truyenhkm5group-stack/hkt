@@ -30,6 +30,26 @@ const SNAPSHOT: PeriodKey[] = ["all"];
 /** Chuỗi theo NGÀY — có trần kỳ để một biểu đồ không thành hàng nghìn điểm. */
 const DAILY: PeriodKey[] = ["7d", "30d", "month", "last_month", "90d", "custom"];
 
+/** Chỉ số dùng được với tập module này (`requiresAnyModule` rỗng / vắng ⇒ luôn được) — MỘT luật cho trình soạn và AI. */
+export function metricAvailableFor(spec: Pick<MetricSourceSpec, "requiresAnyModule">, modules: readonly string[] | ReadonlySet<string> | undefined): boolean {
+  if (!spec.requiresAnyModule?.length || modules === undefined) return true;
+  const has = (m: string) => (Array.isArray(modules) ? (modules as readonly string[]).includes(m) : (modules as ReadonlySet<string>).has(m));
+  return spec.requiresAnyModule.some(has);
+}
+
+/**
+ * Tiêu đề hiển thị của một khối KPI (pilot P1 #8) — hàm THUẦN cho renderer. Chỉ số SỔ (`labelLocked`): nhãn chính LUÔN là
+ * nhãn gốc của sổ; tên trang / AI đặt (tiêu đề khối hoặc `label` của cấu hình) khác nhãn gốc thì hiện NHỎ ở dòng ghi chú,
+ * không thay nhãn. KPI tổng hợp: tiêu đề khối (nếu có) thắng như trước.
+ */
+export function kpiHeading(blockTitle: string | undefined, d: { label: string; note?: string; customLabel?: string; labelLocked?: boolean }): { label: string; note?: string } {
+  if (!d.labelLocked) return { label: blockTitle ?? d.label, ...(d.note ? { note: d.note } : {}) };
+  const title = blockTitle?.trim();
+  const custom = title && title !== d.label ? title : d.customLabel;
+  const note = [custom ? `Tên trên trang: ${custom}` : null, d.note ?? null].filter((x): x is string => Boolean(x)).join(" · ");
+  return { label: d.label, ...(note ? { note } : {}) };
+}
+
 export const METRIC_SOURCES: readonly MetricSourceSpec[] = [
   {
     key: "orders_today",
@@ -119,7 +139,8 @@ export const METRIC_SOURCES: readonly MetricSourceSpec[] = [
     permission: "cod:view",
     format: "vnd",
     periods: SNAPSHOT,
-    why: "Khoá `cod_outstanding` của METRIC_BINDINGS — tiền THỰC THU có chứng từ, chưa tới PAID_TO_BANK. Cổng `cod:view` = cổng của /cod.",
+    why: "Khoá `cod_outstanding` của METRIC_BINDINGS — tiền THỰC THU có chứng từ, chưa tới PAID_TO_BANK. Cổng `cod:view` = cổng của /cod. Chỉ có nghĩa khi tổ chức có kết nối vận chuyển (COD do ĐVVC thu hộ) — tổ chức không có thì trình soạn và AI không gợi ý (pilot P1 #8).",
+    requiresAnyModule: ["connector_viettelpost"],
   },
   {
     key: "unclassified_bank_txns",

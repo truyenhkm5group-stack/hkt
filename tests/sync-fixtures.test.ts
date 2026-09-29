@@ -438,6 +438,7 @@ import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPilotProducts } from "./pilot-products.test";
+import { testPilotOrders } from "./pilot-orders.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
@@ -2572,6 +2573,10 @@ async function main() {
   // phẩm + mẫu mã tay (erp-, SKU duy nhất, products:write) ⇒ phiếu nhập đơn giá khai tay ⇒ sổ kho; nhà: không nút, action từ
   // chối, giá báo MKT, chữ trang lõi nguyên từng ký tự; nút đồng bộ theo nguồn; khách tạo tay sửa được, khách Pancake không.
   await testPilotProducts();
+  // Pilot bán buôn · P0 #3 + P1 #7/#8 + P2 #17/#18: tổ chức THẬT `po-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — đơn tay
+  // (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; nhà: action từ chối, marketer 3.9 không đổi
+  // khi có đơn erp-; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định; số tiền duyệt; vai trò AI.
+  await testPilotOrders();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

@@ -56,7 +56,7 @@ import { withMetadataReadScope } from "@/lib/metadata/read-scope";
 import { canEditField, canViewField, customValuesFilterSql, getCustomValues } from "@/lib/metadata/values";
 import { recordTimeline, relationLabelsFor, relationOptionsFor } from "@/lib/objects/records";
 import { actionAvailability } from "@/lib/pages/actions";
-import { CUSTOM_RECORD_TIMELINE_PREFIX, listSource, METRIC_SOURCES, metricSource, pageAction, SERIES_SOURCES, seriesSource, TIMELINE_SOURCES, timelineSource } from "@/lib/pages/catalog";
+import { CUSTOM_RECORD_TIMELINE_PREFIX, listSource, METRIC_SOURCES, metricAvailableFor, metricSource, pageAction, SERIES_SOURCES, seriesSource, TIMELINE_SOURCES, timelineSource } from "@/lib/pages/catalog";
 import { customObjectGate, customRecordVisible, isCustomKey, recordHref } from "@/lib/pages/page-objects";
 import { gateSource, OBJECT_SCOPE_RESOURCE } from "@/lib/pages/runtime-common";
 import { AGGREGATE_NUMERIC_TYPES, DATE_TYPES, defaultPageCatalog, filterOpFits, filterTargetObject, GROUPABLE_TYPES, ROW_ACTION_KEYS, type PageCatalog } from "@/lib/pages/components";
@@ -245,7 +245,17 @@ async function resolveKpi(block: PageBlock<"kpi">, user: SessionUser, ctx: PageR
   requireWholeScope(decision, spec.label);
   probe();
   const r = await memo(`pageMetric:${spec.key}:${periodKey(period)}`, 60_000, () => run(period));
-  return { label: cfg.label?.trim() || spec.label, value: r.value === null || r.value === undefined || !Number.isFinite(r.value) ? null : r.value, format: spec.format, ...(r.note ? { note: r.note } : {}), ...(METRIC_HREF[spec.key] ? { href: METRIC_HREF[spec.key] } : {}) };
+  // Nhãn của chỉ số SỔ là nhãn GỐC (pilot P1 #8): `cfg.label` chỉ là tên phụ — đổi nhãn không đổi được nghĩa của con số.
+  const custom = cfg.label?.trim();
+  return {
+    label: spec.label,
+    ...(custom && custom !== spec.label ? { customLabel: custom.slice(0, 80) } : {}),
+    labelLocked: true,
+    value: r.value === null || r.value === undefined || !Number.isFinite(r.value) ? null : r.value,
+    format: spec.format,
+    ...(r.note ? { note: r.note } : {}),
+    ...(METRIC_HREF[spec.key] ? { href: METRIC_HREF[spec.key] } : {}),
+  };
 }
 
 // ─────────────────────────── Biểu đồ ───────────────────────────
@@ -1272,7 +1282,7 @@ export function listDataSources(
 ): { metrics: MetricSourceSpec[]; series: SeriesSourceSpec[]; lists: ListSourceSpec[]; timelines: TimelineSourceSpec[]; actions: PageActionSpec[] } {
   const ok = (m: string | null, p: string | null, all?: readonly string[]) => (!m || !user.modules || user.modules.includes(m)) && (all ?? (p ? [p] : [])).every((k) => can(user, k as Permission));
   return {
-    metrics: catalog.metrics.filter((s) => ok(s.module, s.permission)),
+    metrics: catalog.metrics.filter((s) => ok(s.module, s.permission) && metricAvailableFor(s, user.modules)),
     series: catalog.series.filter((s) => ok(s.module, s.permission)),
     lists: catalog.lists.filter((s) => ok(s.module, s.permission, s.permissions)),
     timelines: catalog.timelines.filter((s) => ok(s.module, s.permission, s.permissions)),

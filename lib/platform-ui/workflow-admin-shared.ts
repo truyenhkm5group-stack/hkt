@@ -5,6 +5,7 @@ import { objectDef } from "@/lib/constants/object-registry";
 import { WORK_PRIORITIES, WORK_PRIORITY_LABEL } from "@/lib/constants/work";
 import type { FieldError, FieldOption, FieldRef, FieldType, ListFilterOp } from "@/lib/metadata/types";
 import { errorsFor, FILTER_OP_LABEL, filterOpsFor, NUMERIC_TYPES, suggestFieldKey, type CatalogField } from "@/lib/platform-ui/metadata-admin-shared";
+import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
 import type {
   TaskPriority,
   WorkflowAction,
@@ -366,6 +367,10 @@ export function checkRuleDraft(draft: RuleDraft, opts: { creating: boolean; take
   }
   if (draft.triggerKind === "event") {
     if (!draft.event) errors.push({ field: "trigger.event", message: "Chọn sự kiện kích hoạt luật." });
+    else {
+      const recordProblem = recordEventObjectProblem(draft.event, draft.objectKey);
+      if (recordProblem) errors.push({ field: "trigger.objectKey", message: recordProblem });
+    }
   } else {
     if (!draft.objectKey) errors.push({ field: "trigger.objectKey", message: "Chọn đối tượng." });
     else if (!draft.fieldKey) errors.push({ field: "trigger.fieldKey", message: "Chọn field trạng thái nghiệp vụ." });

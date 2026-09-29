@@ -9,6 +9,7 @@ import { Money } from "@/components/ui-bits";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
+import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 
 export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
   {
@@ -17,7 +18,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     header: "Mã đơn",
     cell: ({ row }) => (
       <div className="min-w-[72px]">
-        <RowLink href={`/orders/${row.original.id}`}>#{row.original.systemId ?? row.original.id}</RowLink>
+        <RowLink href={`/orders/${row.original.id}`}>#{row.original.systemId ?? manualOrderShortCode(row.original.id)}</RowLink>
         {row.original.tags.length ? <div className="mt-0.5 flex flex-wrap gap-1">{row.original.tags.slice(0, 2).map((t) => <span key={t} className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{t}</span>)}</div> : null}
       </div>
     ),
