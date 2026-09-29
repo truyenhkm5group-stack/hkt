@@ -23,7 +23,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
-import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { CARRIER_SUBSTATE_LABEL, shipmentSubstateCache, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { resolveTarget, verdict as targetVerdict, type TargetRow } from "@/lib/constants/metric-targets";
 import { MARKETER_COVERAGE_WARN_PCT, type MarketerCoverage, type MarketerEvidence } from "@/lib/constants/marketer-attribution";
@@ -42,7 +42,6 @@ import {
   type RiskLevel,
 } from "@/lib/constants/return-intelligence";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
-import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { listTargets } from "@/lib/queries/metric-targets";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 import { getProjectedDeliveryMetrics, getProbabilityLookup } from "@/lib/queries/projected-delivery";
@@ -535,8 +534,14 @@ async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilte
 async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<TrendPoint[]> {
   const db = await getDb();
   const lookup = await getProbabilityLookup();
-  const moc = sql.raw(timeBasisColumnSql(basis));
-  const con = carrierSubstateSql(sql`"shipments"."vtp_status"`, sql`"shipments"."vtp_status_name"`, sql`"shipments"."stage"::text`);
+  /*
+    Mốc kỳ và mốc bàn giao tính MỘT LẦN mỗi dòng (`mb`, lateral có `offset 0`) — bản cũ tính mốc ở
+    ba vế `where` + `select`, và tuổi kiện thêm một lần nữa. Trạng thái con trả CỘT THÔ và dịch ở
+    tầng ứng dụng (`shipmentSubstateCache`) thay vì `carrierSubstateSql` cho từng dòng. Đo production
+    29/09/2026: câu này 1.357 ms (JIT 278 ms); riêng trạng thái con SQL ~434 ms.
+  */
+  const moc = basis === "ORDERED" ? sql.raw(timeBasisColumnSql(basis)) : basis === "SHIPPED" ? sql`mb.handoff_at` : sql`mb.moc`;
+  const conCua = shipmentSubstateCache();
   const dk: SQL[] = [REPORTABLE_ORDER];
   const locGiaTri = orderValueWhereSql(value);
   if (locGiaTri) dk.push(sql.raw(locGiaTri));
@@ -545,23 +550,29 @@ async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, 
   dk.push(sql`${moc} is not null`);
 
   // TẮT JIT: ORDER_OUTCOME_FAST + mốc bàn giao (truy vấn con tương quan) cho mọi đơn của kỳ — cùng họ câu với `baseRows` đã đo 95 % là JIT biên dịch.
-  const rows = rowsOf<{ bucket: unknown; outcome: string; con: string; age_hours: string | number | null; n: string | number }>(
+  const rows = rowsOf<{ bucket: unknown; outcome: string; vtp_ma: number | string | null; vtp_chu: string | null; vtp_chang: string | null; age_hours: string | number | null; n: string | number }>(
     await chayKhongJit(db, (tx) => tx.execute(sql`
-      select date_trunc(${grain === "WEEK" ? "week" : "day"}, b.moc) as bucket, b.outcome, b.con,
+      select date_trunc(${grain === "WEEK" ? "week" : "day"}, b.moc) as bucket, b.outcome, b.vtp_ma, b.vtp_chu, b.vtp_chang,
              /* Tuổi gom về rổ ngay ở SQL: rổ mới là thứ mô hình dùng, không phải từng giờ lẻ. */
              round(b.age_hours) as age_hours,
              count(*)::int as n
         from (
           select ${moc} as moc,
                  ${ORDER_OUTCOME_FAST} as outcome,
-                 ${con} as con,
-                 extract(epoch from (now() - ${sql.raw(CARRIER_HANDOFF_AT_SQL)})) / 3600 as age_hours
+                 "shipments"."vtp_status" as vtp_ma,
+                 "shipments"."vtp_status_name" as vtp_chu,
+                 "shipments"."stage"::text as vtp_chang,
+                 extract(epoch from (now() - mb.handoff_at)) / 3600 as age_hours
             from "orders"
             left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+            cross join lateral (
+              select ${sql.raw(CARRIER_HANDOFF_AT_SQL)} as handoff_at${basis === "OUTCOME" ? sql`, ${sql.raw(timeBasisColumnSql(basis))} as moc` : sql``}
+              offset 0
+            ) mb
            where ${sql.join(dk, sql` and `)}
           offset 0
         ) b
-       group by 1, 2, 3, 4
+       group by 1, 2, 3, 4, 5, 6
        order by 1
     `)),
   );
@@ -583,7 +594,8 @@ async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, 
       cur.eligibleSent += n;
       cur.active += n;
       const tuoi = r.age_hours === null || r.age_hours === undefined ? null : Number(r.age_hours);
-      const tra = isModelledSubstate(r.con) ? lookup.of(r.con, { ageHours: tuoi }) : null;
+      const con = conCua(r.vtp_ma, r.vtp_chu, r.vtp_chang);
+      const tra = isModelledSubstate(con) ? lookup.of(con, { ageHours: tuoi }) : null;
       if (!tra || tra.p === null) cur.unmodelled += n;
       else cur.projected += n * tra.p;
     }

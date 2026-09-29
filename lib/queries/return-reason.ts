@@ -94,8 +94,8 @@ export function reasonFromStatusText(statusName: string): ReturnReason | null {
  * để giữ lại dòng muộn nhất dịch ra lý do. Đo production 29/09/2026 (`ops perf-probe`, kỳ 90 ngày):
  * báo cáo lý do hoàn kéo 116.416 dòng, tầng quyết định 123.854 dòng (nó gọi hàm này cho cả kỳ
  * trước); hai câu đọc sự kiện của hàm này trong tầng quyết định mất 772 ms và 540 ms tính từ lúc gọi
- * tới lúc Node đọc xong, trong khi EXPLAIN của chính chúng chỉ 70–94 ms — phần còn lại là truyền và
- * phân tích hàng chục nghìn dòng trên một luồng Node đang bận.
+ * tới lúc Node đọc xong, trong khi EXPLAIN của chính chúng chỉ 70–94 ms — phần còn lại là chờ tới
+ * lượt trong bể kết nối và truyền + đọc hàng chục nghìn dòng.
  *
  * Câu chữ lặp lại, dù không ít như tưởng: đo production 29/09/2026, 61.668 sự kiện có chữ của 3.064
  * kiện (120 ngày) chỉ có 9.834 câu KHÁC NHAU (chữ ĐVVC mang cả tên bưu tá, số điện thoại…). Nên làm

@@ -127,10 +127,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
     bảng theo mẫu mã.
 
     ĐỪNG TRÔNG ĐỢI NÓ NHANH HƠN NHIỀU: đo sau deploy (#382) trang vẫn 7,4 s so với 6,9 s trước đó.
-    `ops perf-probe` cho thấy vì sao — phần lớn thời gian là NODE (một luồng) tính dự phóng GTC và duyệt
-    hàng trăm nghìn dòng sự kiện, không phải CSDL chờ; chạy song song thêm không làm một luồng nhanh
-    hơn. Chỗ sửa thật là giảm việc: `reasonsForShipments` thôi kéo mọi sự kiện (xem hàm ấy); ~2 s
-    ứng dụng còn lại của bảng theo mẫu mã / tổng hợp là dự phóng GTC — một việc riêng, chưa sửa.
+    Máy chủ có hai nhân và bể năm kết nối; các câu nặng tranh nhau đúng hai nhân ấy, nên xếp lại thứ
+    tự không bớt được việc. Chỗ sửa thật là BỚT VIỆC: `reasonsForShipments` thôi kéo mọi sự kiện
+    (#383, trang còn 4,7 s), và câu dự phóng GTC + câu xu hướng thôi tính trạng thái con / mốc bàn giao
+    lặp lại cho từng đơn (xem `getProjectedDeliveryMetrics`).
+
+    (Một lần đọc số sai đáng ghi lại: cột "ứng dụng" của `ops perf-probe` gồm CẢ các câu chạy trong
+    `chayKhongJit` — chúng đi `Client.query`, bộ đếm "CSDL" chỉ bọc `Pool.query`. Từng đọc cột ấy
+    thành "Node một luồng đang bận"; EXPLAIN cho thấy đó là SQL.)
 
     Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
   */

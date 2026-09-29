@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE } from "@/lib/constants/carrier-substate";
+import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, shipmentSubstateCache, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE } from "@/lib/constants/carrier-substate";
 import { FULFILLMENT_BUCKETS, FULFILLMENT_BUCKET_LABEL, getOrderFulfillmentBucket, isActivelyShippedOrder, kiemTraBangRo, pickAttempt, type AttemptFacts } from "@/lib/constants/fulfillment-bucket";
 import { canApproveReturn, canRequestCarrierAction, canRequestRedelivery } from "@/lib/care/redelivery-eligibility";
 import { CARE_ENTRY_SUBSTATES, careEntryFor, legAwareStage, legAwareSubstate } from "@/lib/care/entry";
@@ -201,13 +201,28 @@ export async function test15TsVaSqlNoiCungMotDieu(db: Db) {
     { ma: null, chu: "Rác XYZ chưa từng thấy", chang: null },
     { ma: null, chu: null, chang: "RETURNED" },
     { ma: null, chu: "CHO PHAT LAI", chang: null },
+    // Đơn chưa có vận đơn (LEFT JOIN rỗng) và vận đơn chữ rỗng — báo cáo quét cả kỳ gặp cả hai.
+    { ma: null, chu: null, chang: null },
+    { ma: null, chu: "", chang: null },
+    { ma: null, chu: "", chang: "DELIVERED" },
+    // Vận đơn chiều hoàn: Pancake chuyển tiếp chữ "Giao thành công" khi chặng đã là RETURNED.
+    { ma: null, chu: "Giao thành công", chang: "RETURNED" },
+    { ma: null, chu: "Chờ xử lý", chang: "RETURNING" },
   ];
-  for (const c of caThu) {
-    const ts = carrierSubstate({ code: c.ma, text: c.chu, stage: c.chang as never }).substate;
-    const bieuThuc = carrierSubstateSql(sql`${c.ma}::int`, sql`${c.chu}::text`, sql`${c.chang}::text`);
-    const [row] = (await db.execute(sql`select ${bieuThuc} as con`)).rows as { con: string }[];
-    assert.equal(row.con, ts, `TS và SQL lệch nhau ở (mã=${c.ma}, chữ="${c.chu}", chặng=${c.chang})`);
+  // Báo cáo dịch trạng thái con ở tầng ứng dụng bằng hàm nhớ theo bộ ba (`shipmentSubstateCache`) —
+  // nó phải nói ĐÚNG điều bản SQL nói, kể cả khi cùng một bộ ba được hỏi lại lần hai (đi qua bộ nhớ).
+  const conCua = shipmentSubstateCache();
+  for (const lan of [1, 2]) {
+    for (const c of caThu) {
+      const ts = carrierSubstate({ code: c.ma, text: c.chu, stage: c.chang as never }).substate;
+      const bieuThuc = carrierSubstateSql(sql`${c.ma}::int`, sql`${c.chu}::text`, sql`${c.chang}::text`);
+      const [row] = (await db.execute(sql`select ${bieuThuc} as con`)).rows as { con: string }[];
+      assert.equal(row.con, ts, `TS và SQL lệch nhau ở (mã=${c.ma}, chữ="${c.chu}", chặng=${c.chang})`);
+      assert.equal(conCua(c.ma, c.chu, c.chang), row.con, `bộ nhớ theo bộ ba lệch SQL ở lượt ${lan} (mã=${c.ma}, chữ="${c.chu}", chặng=${c.chang})`);
+    }
   }
+  // Mã về từ CSDL có thể là chuỗi — cùng một mã phải ra cùng trạng thái.
+  assert.equal(conCua("506", "x", "DELIVERY_FAILED"), conCua(506, "x", "DELIVERY_FAILED"));
 }
 
 /* ───── 16 · Rổ đếm trên CSDL: tổng các rổ = tổng đơn, không đơn nào đếm hai lần ───── */
