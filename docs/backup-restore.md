@@ -20,11 +20,15 @@ Một tệp làm mọi việc: `scripts/erp-backup.sh`. Cron, ops `backup` / `ba
 | Trạng thái | `/root/backups/status/last-run.json` · `last-success.json` · `last-drill.json` | ERP mount thư mục này CHỈ-ĐỌC (`/erp-backup-status`) và hiện ở **Kết nối dữ liệu → Sao lưu dữ liệu** và **Phòng Tech** |
 | Log | `/var/log/erp-backup.log` (logrotate hằng tuần) | |
 | CSDL tổ chức khác nhà | mọi CSDL `erp_org_*` trên `erp-db`, chạy **sau** khi bản của nhà đã ghi trạng thái xong, cùng lượt, cùng khoá — **mục 7** | không có CSDL nào (production 28/09/2026) ⇒ không làm gì thêm, không ghi tệp nào |
+| Tổ chức: bản MỖI GIỜ | cron **phút 47 mỗi giờ** gọi `erp-backup.sh hourly-org` — chỉ CSDL `erp_org_*`, **không bao giờ CSDL nhà**, vào `orgs/<csdl>/hourly/`, giữ 48 bản (quyết định C6: RPO ≤ 1 giờ cho tổ chức khách) — **mục 7** | không có tổ chức ⇒ thoát 0, không khoá, không ghi gì. CSDL nhà giữ lịch đêm: RPO của nhà vẫn ≤ 1 ngày cho tới khi có PITR (`docs/platform/backup-recovery.md` §9.4) |
+| Tổ chức: diễn tập MỖI TUẦN | cron **phút 37 mỗi giờ** gọi `erp-backup.sh drill-org-weekly` — chỉ Chủ nhật 06:00–07:59 giờ VN, luân phiên MỘT CSDL vào CSDL TẠM trong container TẠM (quyết định C7) — **mục 8.1** | không bao giờ khôi phục đè production; `erp-db` chỉ bị đọc |
 
 ### ERP chấm thế nào (`lib/constants/backup.ts::evaluateBackupHealth`)
 
 **Đang chạy tốt** chỉ khi đủ năm vế: bản CSDL thành công trong **36 giờ** · lượt gần nhất không hỏng ·
-có bản **ngoài máy** · dữ liệu bot được sao lưu · **diễn tập khôi phục** đạt trong **35 ngày**.
+có bản **ngoài máy** · dữ liệu bot được sao lưu · **diễn tập khôi phục** đạt trong **35 ngày**. Thẻ của một
+**tổ chức khách** thêm vế RPO giờ: bản thành công gần nhất cũ hơn **3 giờ** ⇒ vàng, lượt giờ gần nhất hỏng ⇒ vàng
+(`ORG_BACKUP_RPO_ALERT_HOURS`); thẻ của nhà không có vế này.
 
 | Tình huống | Mức |
 |---|---|
@@ -261,7 +265,8 @@ khoá điều đó (xem `BAM_PHAN_NHA`).
 |---|---|
 | Danh sách | hỏi CHÍNH Postgres: `select datname from pg_database where datname like 'erp\_org\_%'`; tên phải khớp `^erp_org_[a-z0-9_]+$`, tên lạ bị bỏ và nói ra (không bao giờ vào đường dẫn hay lệnh) |
 | Thứ tự | SAU khi bản của nhà đã kiểm, xoay vòng, đẩy ngoài máy và **ghi trạng thái** — lỗi của một tổ chức không chạm được bản của nhà. Nhà thất bại (ổ đầy, `pg_dump erp` lỗi…) thì lượt dừng như trước và **tổ chức không chạy đêm đó** |
-| Dump | `docker exec erp-db pg_dump -U erp -d erp_org_<mã> -Fc` → `/root/backups/orgs/<csdl>/{daily,manual}/<csdl>-YYYYmmdd-HHMM.dump`; Chủ nhật (cron) liên kết cứng sang `weekly/` |
+| Dump | `docker exec erp-db pg_dump -U erp -d erp_org_<mã> -Fc` → `/root/backups/orgs/<csdl>/{daily,manual,hourly}/<csdl>-YYYYmmdd-HHMM.dump`; Chủ nhật (cron đêm) liên kết cứng sang `weekly/` |
+| Mỗi giờ | `erp-backup.sh hourly-org` (cron phút 47): cùng hàm dump / kiểm / xoay vòng / đẩy Drive với lượt đêm, vào `hourly/`, giữ `GIU_BAN_GIO` = 48 bản, Drive `gcrypt:orgs/<csdl>/hourly/` xoá theo tuổi > 49 giờ. Khoá sao lưu bận (bản đêm, diễn tập, lượt giờ trước) ⇒ bỏ lượt, thoát 0; khung 02:00–05:59 mà bản đêm hôm nay chưa xong ⇒ nhường bản đêm. Lỗi đẩy Drive không xoá bản cục bộ (`PARTIAL`) |
 | Ổ đĩa | kiểm riêng từng tổ chức: ước lượng 2 × bản gần nhất của CHÍNH nó + cùng 3.000 MB dự trữ |
 | Toàn vẹn | kích thước > 0, `pg_restore --list` đọc được, mục lục có dữ liệu `public.users`, `public.settings`, `drizzle.__drizzle_migrations` — **không** đòi `orders`/`shipments` (tổ chức dịch vụ không có đơn) |
 | Xoay vòng | cùng `GIU_BAN_NGAY/TUAN/TAY`, đếm RIÊNG theo tiền tố tên CSDL trong thư mục riêng — bản của năm tổ chức không đẩy bản của nhà ra khỏi 7 bản giữ |
@@ -269,14 +274,15 @@ khoá điều đó (xem `BAM_PHAN_NHA`).
 | Lỗi | một tổ chức hỏng ⇒ ghi lỗi của nó, sang tổ chức kế tiếp; trạng thái của NHÀ vẫn ghi `OK`; lượt thoát 1 (ops `backup` đỏ) với dòng cuối `CSDL nhà đã sao lưu ĐẠT; CSDL tổ chức khác hỏng: …` |
 | Không liệt kê được | `psql` lỗi ⇒ CHƯA BIẾT có ai bị bỏ sót: ghi `listError`, thoát 1 — không im lặng coi như không có tổ chức |
 | Trong sổ mà không có CSDL | tổ chức `ACTIVE`/`SUSPENDED` không có CSDL trên `erp-db` (vd khai `ORG_DATABASE_URL__<MÃ>` — CSDL ở máy khác) ⇒ `::warning::` + `missingDatabases`; script **không** sao lưu được nó, cần lịch riêng |
-| Trạng thái | `/root/backups/status/orgs/<csdl>/last-run.json` · `last-success.json` (kind `org-backup`, mang tên CSDL) · `/root/backups/status/orgs-last-run.json` (tổng hợp) |
+| Trạng thái | `/root/backups/status/orgs/<csdl>/last-run.json` (bản đêm / tay) · `last-hourly.json` (lượt giờ) · `last-success.json` (bản dùng được gần nhất, của lượt nào cũng vậy) · `last-drill.json` (kind `org-backup` / `restore-drill`, mang tên CSDL) · `/root/backups/status/orgs-last-run.json` + `orgs-last-hourly.json` (tổng hợp) · `drill-org-week-done` (ngày VN của lượt diễn tập tuần gần nhất đi tới kết luận) |
 
 **Ai thấy gì trên ERP.** Thẻ *Kết nối dữ liệu → Sao lưu dữ liệu* của một tổ chức khác chỉ đọc
 `status/orgs/<CSDL của chính nó>/` — không có ⇒ **"Chưa có bản sao lưu nào cho CSDL của tổ chức này"**
 (đỏ), KHÔNG BAO GIỜ mượn "sao lưu tốt" của nhà. Tệp của CSDL khác nằm nhầm chỗ bị bỏ và nói ra. Tổ chức
 không có vế bot chat. `restore-drill` chỉ phủ CSDL nhà, nên thẻ của tổ chức ghi **vàng "Chưa diễn tập
-khôi phục CSDL của tổ chức này"** cho tới khi chạy `restore-drill-org` cho CHÍNH tổ chức đó (mục 8) — nói
-thật, không mượn lượt diễn tập của nhà. Thẻ của NHÀ có thêm dòng *CSDL tổ chức khác (lượt gần nhất)* đọc từ
+khôi phục CSDL của tổ chức này"** cho tới khi `restore-drill-org` (tay, hoặc lượt tự động Chủ nhật) chạy cho CHÍNH
+tổ chức đó (mục 8) — nói thật, không mượn lượt diễn tập của nhà. Thẻ của tổ chức có thêm dòng *Lượt mỗi giờ gần
+nhất* và vàng khi bản thành công gần nhất cũ hơn 3 giờ. Thẻ của NHÀ có thêm dòng *CSDL tổ chức khác (lượt gần nhất)* đọc từ
 `orgs-last-run.json`; dòng ấy KHÔNG đổi mức của nhà.
 
 `status` (ops `backup-status`) in thêm khối *CSDL tổ chức khác nhà*: tệp tổng hợp, trạng thái và danh
@@ -313,7 +319,7 @@ Hai tầng trả lời hai câu hỏi khác nhau, và không tầng nào thay t�
 
 | Tầng | Câu hỏi | Chạy ở đâu | Lệnh |
 |---|---|---|---|
-| **CSDL** (pg_dump) | Bản dump đêm của `erp_org_<mã>` có nạp lại được MỌI THỨ không (bản ghi, tệp, người dùng, cấu hình) | VPS, người vận hành bấm | ops `restore-drill-org` |
+| **CSDL** (pg_dump) | Bản dump mới nhất (giờ / đêm) của `erp_org_<mã>` có nạp lại được MỌI THỨ không (bản ghi, tệp, người dùng, cấu hình) | VPS — người vận hành bấm, và tự động mỗi Chủ nhật | ops `restore-drill-org` · cron `drill-org-weekly` |
 | **Cấu hình** (blueprint) | Mất hẳn CSDL, chỉ còn tệp xuất cấu hình, dựng lại được KHUNG của tổ chức không | máy lập trình / CI (PGlite) | `npx tsx --tsconfig tsconfig.json scripts/restore-drill-org-config.ts` |
 
 Tầng thứ ba, ĐẦU-CUỐI trên Postgres tạm (không đụng VPS): tổ chức thử được tạo → tuỳ biến → dump bằng ĐÚNG lệnh ở
@@ -322,7 +328,7 @@ bảng và CHẠY ĐƯỢC qua mã ứng dụng. Workflow **Diễn tập khôi p
 chi tiết, RPO / RTO đo được và xử lý lỗi: `docs/platform/backup-recovery.md` §8. `tests/restore-drill-pg.test.ts` khoá
 để các lệnh của diễn tập không trôi khỏi các lệnh trong mục 7.
 
-### 8.1 Tầng CSDL — ops `restore-drill-org` (CHẠY TAY)
+### 8.1 Tầng CSDL — ops `restore-drill-org` (tay) + `drill-org-weekly` (tự động mỗi Chủ nhật)
 
 *Actions* → **Vận hành ERP trên VPS** → `restore-drill-org`, ô *arg* = mã tổ chức (vd `bp-a`; nhận cả tên
 `erp_org_bp_a`). Để trống ⇒ **luân phiên**: chọn CSDL có bản sao mà lượt diễn tập gần nhất cũ nhất (chưa từng
@@ -350,10 +356,13 @@ chi tiết, RPO / RTO đo được và xử lý lỗi: `docs/platform/backup-rec
 `last-drill.json` có `"result":"OK"`, và không bảng nào `THIẾU` hay `(rỗng)` trong khi CSDL sống có dòng. `CHÊNH`
 dương nhỏ là bình thường (dữ liệu sinh sau lúc dump). `SKIPPED` (thiếu RAM / ổ / chưa có bản) KHÔNG phải đạt.
 
-**Không nằm trong cron.** Dựng một Postgres thứ hai trên VPS 2 nhân / ~1,9 GB là đổi hành vi vận hành; bật tự
-động (vd luân phiên một tổ chức mỗi Chủ nhật) là quyết định của chủ nền tảng — `docs/platform/launch-gates.md`
-mục C. Nên chạy lúc thấp điểm và không chồng với `restore-drill` của nhà (hai lệnh cùng làn khoá đọc nặng nên
-ops tự xếp hàng).
+**Tự động mỗi tuần (quyết định C7, 29/09/2026).** Cron phút 37 mỗi giờ gọi `erp-backup.sh drill-org-weekly`; script
+chỉ chạy Chủ nhật 06:00–07:59 giờ VN (sau khung bản đêm), mỗi tuần MỘT lượt, luân phiên một CSDL có bản trên máy, qua
+ĐÚNG các bước 1–7 ở trên. Nó cầm khoá sao lưu (không chờ) trước khi dựng container tạm — không dựng Postgres thứ hai
+giữa lúc một lượt dump đang chạy. Đánh dấu tuần xong (`status/drill-org-week-done`) chỉ khi lượt đi tới kết luận
+OK / FAILED; `SKIPPED` (thiếu RAM / ổ) hay khoá bận ⇒ 07 giờ thử lại. Không có tổ chức nào có bản ⇒ thoát 0, im lặng.
+Chạy tay vẫn nên lúc thấp điểm và không chồng với `restore-drill` của nhà (hai lệnh cùng làn khoá đọc nặng nên ops
+tự xếp hàng). Tầng CI chạy song song mỗi tuần trên dữ liệu tổng hợp — `docs/platform/backup-recovery.md` §9.3.
 
 ### 8.2 Tầng cấu hình — `scripts/restore-drill-org-config.ts` (máy cục bộ / CI)
 

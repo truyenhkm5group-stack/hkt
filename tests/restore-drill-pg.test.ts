@@ -269,8 +269,17 @@ function testWorkflow() {
   assert.ok(!/PLATFORM_SECRETS_KEY/.test(y), "khoá bí mật kết nối KHÔNG khai trong workflow — kịch bản tự sinh khoá GIẢ trong bộ nhớ");
 
   const on = /^on:\n((?:[ \t].*\n?)*)/m.exec(y)?.[1] ?? "";
-  assert.match(on, /^ {2}workflow_dispatch:/m, "chạy tay");
-  assert.deepEqual([...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]), ["workflow_dispatch"], "CHỈ workflow_dispatch — lịch tự động là quyết định của chủ nền tảng (launch-gates C7)");
+  assert.match(on, /^ {2}workflow_dispatch:/m, "chạy tay vẫn được");
+  // Quyết định C7 (29/09/2026): tự động diễn tập MỖI TUẦN trên môi trường test. Đúng hai cửa vào — không `push`,
+  // không `pull_request` (PR từ fork chạy với mã lạ), không `workflow_run`.
+  assert.deepEqual([...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]).sort(), ["schedule", "workflow_dispatch"], "đúng hai cửa vào: lịch tuần + chạy tay (launch-gates C7)");
+  const lich = [...on.matchAll(/^ {4}- cron:\s*"([^"]+)"\s*$/gm)].map((m) => m[1]);
+  assert.equal(lich.length, 1, "đúng MỘT lịch");
+  const [phut, gio, ngayThang, thang, thu] = lich[0].split(/\s+/);
+  assert.ok(/^\d+$/.test(phut) && /^\d+$/.test(gio), `lịch "${lich[0]}": một giờ cố định mỗi lượt`);
+  assert.ok(ngayThang === "*" && thang === "*" && /^[0-6]$/.test(thu), `lịch "${lich[0]}" phải là HẰNG TUẦN — đúng một thứ trong tuần, mọi ngày trong tháng`);
+  // Lượt lịch không có ô `ma` ⇒ kịch bản phải nhận mặc định, không nhận chuỗi rỗng.
+  assert.match(y, /--ma="\$\{DRILL_MA:-drill-ws\}"/, "lượt lịch (không có inputs.ma) rơi về mã drill-ws");
 
   const quyen = /^permissions:\s*\n((?: {2}\S[^\n]*\n)+)/m.exec(y)?.[1] ?? "";
   assert.match(quyen, /contents:\s*read/);
@@ -294,7 +303,7 @@ function testWorkflow() {
   for (const f of [".github/workflows/gates.yml", ".github/workflows/deploy-vps.yml", ".github/workflows/ci.yml"]) {
     assert.ok(!doc(f).includes("restore-drill-pg") && !doc(f).includes("restore-drill.yml"), `${f} không được gọi diễn tập — nó không chặn deploy`);
   }
-  console.log("✓ Diễn tập Postgres · workflow: chỉ chạy tay, 0 secret, 0 SSH, cùng ảnh postgres với production, không chặn deploy");
+  console.log(`✓ Diễn tập Postgres · workflow: lịch tuần "${lich[0]}" + chạy tay, 0 secret, 0 SSH, 0 quyền ghi, cùng ảnh postgres với production, không chặn deploy`);
 }
 
 export function testRestoreDrillPg() {

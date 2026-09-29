@@ -18,14 +18,20 @@ liệu thì không.
 
 ## 2. Sao lưu CSDL hiện có — đọc từ `scripts/erp-backup.sh`
 
-- **Lịch:** `/etc/cron.d/erp-backup` do `install-vps.sh` cài ở MỖI lần deploy — cron phút 17 mỗi giờ, chỉ chạy trong
-  khung 02:00–05:59 giờ Việt Nam, mỗi ngày đúng một bản (`daily-done`), lượt hỏng thử lại giờ sau.
+- **Lịch:** `/etc/cron.d/erp-backup` do `install-vps.sh` cài ở MỖI lần deploy, BA dòng (quyết định C4/C6/C7,
+  29/09/2026 — §9):
+  - phút 17 mỗi giờ, `cron` — bản ĐÊM của nhà + mọi CSDL tổ chức, chỉ trong khung 02:00–05:59 giờ VN, mỗi ngày đúng một
+    bản (`daily-done`), lượt hỏng thử lại giờ sau. **Không đổi.**
+  - phút 47 mỗi giờ, `hourly-org` — bản GIỜ của mọi CSDL `erp_org_*` (không bao giờ CSDL nhà) vào
+    `orgs/<csdl>/hourly/`, giữ 48 bản (`GIU_BAN_GIO`). Không có tổ chức nào ⇒ thoát 0, không ghi gì.
+  - phút 37 mỗi giờ, `drill-org-weekly` — chỉ Chủ nhật 06:00–07:59 giờ VN: diễn tập khôi phục luân phiên MỘT CSDL tổ
+    chức vào CSDL TẠM trong container TẠM, mỗi tuần một lượt.
 - **Giữ:** 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay (`GIU_BAN_NGAY` / `GIU_BAN_TUAN` / `GIU_BAN_TAY`).
 - **Ngoài máy:** Google Drive qua remote `gcrypt:` (rclone crypt — Drive chỉ thấy byte mã hoá), cấu hình từ
   Secrets ở `/root/.config/erp-backup/offsite.env`.
 - **Kiểm:** kích thước > 0, `pg_restore --list` đọc lại được, mục lục phải có dữ liệu `orders` + `shipments`; ops
   `restore-drill` nạp bản mới nhất vào container tạm rồi đếm 14 bảng then chốt. CSDL tổ chức: ops `restore-drill-org`
-  (CHẠY TAY, §7).
+  (tay, và tự động mỗi Chủ nhật — §7).
 - **PHẠM VI:** CSDL nhà `docker exec erp-db pg_dump -U erp -d erp -Fc` (`cmd_run`, bước 2) + volume bot chat, rồi
   (từ Phase 11 · P11-BACKUP, bước 9) **mọi CSDL `erp_org_*` trên `erp-db`** — xem §2.1 và `docs/backup-restore.md`
   mục 7. Mặt phẳng điều khiển (`platform_organizations`, `platform_organization_modules`, gói, mã mời) nằm trong CSDL
@@ -61,11 +67,11 @@ gỡ các khối đó ra và băm phần còn lại (`BAM_PHAN_NHA` = đúng b�
 | 2 · dump + xoay vòng riêng | ✓ thư mục RIÊNG `/root/backups/orgs/<csdl>/{daily,weekly,manual}/`, tệp `<csdl>-<mốc>.dump`, xoay vòng theo tiền tố của CHÍNH CSDL, cùng `GIU_BAN_*`; ngoài máy `gcrypt:orgs/<csdl>/…` |
 | 3 · kiểm toàn vẹn theo loại | ✓ tổ chức: dữ liệu `public.users` + `public.settings` + `drizzle.__drizzle_migrations` trong mục lục; không đòi orders |
 | 4 · trạng thái theo tổ chức | ✓ khác đề xuất ở chỗ: KHÔNG thêm mảng vào `last-run.json` của nhà (đổi tệp của nhà); mỗi CSDL một thư mục `status/orgs/<csdl>/` + tệp tổng hợp `status/orgs-last-run.json`. Tổ chức chỉ đọc thư mục của chính nó; chưa có ⇒ "Chưa có bản sao lưu nào cho CSDL của tổ chức này" (đỏ) |
-| 5 · diễn tập luân phiên | ✓ CHẠY TAY (Commercial readiness C) — ops `restore-drill-org` (`erp-backup.sh restore-drill-org [mã]`; không mã ⇒ luân phiên theo lượt diễn tập cũ nhất). Ghi `status/orgs/<csdl>/last-drill.json` nên thẻ của ĐÚNG tổ chức đó hết vàng. **Chưa nằm trong cron** — bật tự động là quyết định của chủ nền tảng (`launch-gates.md` mục C). §7 |
+| 5 · diễn tập luân phiên | ✓ ops `restore-drill-org` (`erp-backup.sh restore-drill-org [mã]`; không mã ⇒ luân phiên theo lượt diễn tập cũ nhất). Ghi `status/orgs/<csdl>/last-drill.json` nên thẻ của ĐÚNG tổ chức đó hết vàng. **Tự động từ quyết định C7 (29/09/2026)**: `drill-org-weekly` mỗi Chủ nhật 06–07 giờ VN, luân phiên một CSDL / tuần (§9.3). §7 |
 | 6 · bài kiểm | ✓ (xem trên) |
 | 7 · CSDL ở máy khác | ✓ nêu ra ở hai phía: script (`missingDatabases`) và thẻ của tổ chức (`ORG_DATABASE_URL__…` ⇒ đỏ "không được sao lưu tự động"). Lịch sao lưu riêng cho chúng vẫn là việc của chủ nền tảng |
 
-Hai giới hạn còn lại, cố ý:
+Hai giới hạn còn lại của BẢN ĐÊM, cố ý (lượt giờ §9.2 bù phần RPO: tổ chức có bản mỗi giờ dù bản đêm hỏng):
 
 - Tổ chức chạy SAU nhà trong cùng lượt. Nhà thất bại (ổ đầy, `pg_dump erp` lỗi, hết giờ chờ khoá) thì lượt dừng như
   trước và tổ chức **không được sao lưu đêm đó** — đổi điều này là đổi đường của nhà.
@@ -227,8 +233,8 @@ Chi tiết lệnh + tiêu chí đạt: `docs/backup-restore.md` mục 8.
 | Tầng | Chứng minh | Chạy | Kết quả đo |
 |---|---|---|---|
 | **Cấu hình** (blueprint) | xuất → MẤT CSDL + sổ → cấp lại CÙNG mã trống → cài từ tệp → xuất lại ⇒ cùng băm | `scripts/restore-drill-org-config.ts` (PGlite, 3 tiến trình); `npm test` chạy nó | 28/09/2026, máy Windows: **ĐẠT** — tệp 16.251 byte; băm nội dung nguồn `f308c4b1f0623ae188a062904a78a11e` = sau khôi phục; tổ chức trống `4a3cdd1d196a87e281542687f4b11593` (khác — phép so không mù); 0 xung đột, 0 bị chặn; cài lại 0 mục phải ghi; 1 → 0 bản ghi; 0 rò; ~20 giây |
-| **CSDL** (pg_dump) | bản dump đêm của `erp_org_<mã>` nạp sạch vào Postgres thật, bảng lõi có dòng | ops `restore-drill-org` trên VPS, người vận hành bấm | CHƯA CHẠY trên VPS (production chưa có CSDL `erp_org_*`). Đã kiểm bằng `bash` thật với `docker` giả: đích là CSDL tạm `tam_khoiphuc_<mã>` trong container tạm, `erp-db` chỉ bị đọc, dọn cả khi hỏng |
-| **Đầu-cuối trên Postgres tạm** | tạo → tuỳ biến → `pg_dump` → phá + `DROP DATABASE` → khôi phục theo runbook → BẰNG từng bảng + tổ chức CHẠY ĐƯỢC qua mã ứng dụng | workflow **Diễn tập khôi phục tổ chức (Postgres tạm)** (`scripts/restore-drill-pg.ts`) | §8 — ĐẠT trên máy lập trình (Postgres 18.4); lượt CI trên `postgres:16-alpine` do phiên tích hợp chạy |
+| **CSDL** (pg_dump) | bản dump MỚI NHẤT (giờ / đêm) của `erp_org_<mã>` nạp sạch vào Postgres thật, bảng lõi có dòng | ops `restore-drill-org` trên VPS (tay) + `drill-org-weekly` (cron, mỗi Chủ nhật, luân phiên) | CHƯA CHẠY trên VPS (production chưa có CSDL `erp_org_*` — lượt tuần thoát 0 không làm gì). Đã kiểm bằng `bash` thật với `docker` giả: đích là CSDL tạm `tam_khoiphuc_<mã>` trong container tạm, `erp-db` chỉ bị đọc, dọn cả khi hỏng |
+| **Đầu-cuối trên Postgres tạm** | tạo → tuỳ biến → `pg_dump` → phá + `DROP DATABASE` → khôi phục theo runbook → BẰNG từng bảng + tổ chức CHẠY ĐƯỢC qua mã ứng dụng | workflow **Diễn tập khôi phục tổ chức (Postgres tạm)** (`scripts/restore-drill-pg.ts`) — tay + lịch MỖI TUẦN (C7) | §8 — ĐẠT trên máy lập trình (Postgres 18.4) và CI `postgres:16-alpine` (run 36545135985) |
 
 Tầng cấu hình KHÔNG thay tầng CSDL: blueprint không mang bản ghi, tệp, người dùng hay bí mật (§3). Tầng CSDL là lời
 hứa cho tới lượt `restore-drill-org` đầu tiên chạy trên VPS sau khi có tổ chức thật — đó là mục của `launch-gates.md` C.
@@ -252,7 +258,8 @@ Tầng thứ ba này trả lời câu đó trên một máy Postgres **dùng m�
 buộc bắt đầu bằng `drill-`). Kết quả: log `[drill] …`, tóm tắt của lượt chạy, artifact `restore-drill-report`
 (JSON: số, tên bảng, băm, thời gian — không bí mật, không dòng dữ liệu; bản dump KHÔNG được tải lên). Thoát 0 = ĐẠT,
 1 = KHÔNG ĐẠT (kèm từng câu hỏng), 2 = dùng sai / môi trường không phải máy tạm. Job này không nằm trong `gates.yml` /
-`deploy-vps.yml` nên không chặn deploy, và chỉ chạy tay (lịch tự động: `launch-gates.md` C7).
+`deploy-vps.yml` nên không chặn deploy. Từ quyết định C7 (29/09/2026) nó chạy thêm theo lịch **mỗi tuần**
+(`cron: "0 20 * * 6"` = 03:00 Chủ nhật giờ VN, mã mặc định `drill-ws`) — vẫn 0 secret, 0 SSH, không đụng VPS.
 
 **Cục bộ** (máy có Postgres ≥ 16 cài sẵn — không đụng cụm đang chạy, dựng một cụm tạm; một cụm = một lượt):
 
@@ -305,13 +312,13 @@ ngừng / mở lại ở `/platform`; và nó tăng theo cỡ CSDL (`pg_restore`
 
 | | Giá trị | Nguồn |
 |---|---|---|
-| **RPO** danh nghĩa | ≤ 1 ngày — một bản mỗi đêm: cron phút 17 mỗi giờ, chỉ chạy trong khung 02:00–05:59 giờ VN, ngày nào xong thì thôi | `PHUT_CRON=17`, `GIO_BAT_DAU=2`, `GIO_KET_THUC=5`, `/etc/cron.d/erp-backup` |
-| **RPO** xấu nhất | ~2 ngày: tổ chức chạy SAU nhà trong cùng lượt và `daily-done` ghi theo kết quả của NHÀ ⇒ tổ chức hỏng đêm nay không được thử lại lúc 03–05 giờ; nhà hỏng cả khung ⇒ tổ chức cũng không có bản đêm đó. Bù bằng ops `backup` bấm tay | §2.2 |
-| **RPO** ngoài máy | = RPO trên máy KHI đã bật Drive (C4); chưa bật ⇒ mất VPS là mất mọi bản | `day_ngoai_may_to_chuc` |
-| **RTO** | phần máy đo ở §8.3; lời hứa với khách vẫn là quyết định C6 | §8.3 |
-| **Nơi lưu** | VPS `/root/backups/orgs/<csdl>/{daily,weekly,manual}/<csdl>-YYYYmmdd-HHMM.dump` (thư mục 700); Drive `gcrypt:orgs/<csdl>/{daily,weekly,manual}/` (rclone crypt — Drive chỉ thấy byte mã hoá) | `THU_MUC_TO_CHUC`, `REMOTE_CRYPT` |
-| **Giữ trên VPS** | 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay, đếm RIÊNG theo tiền tố từng CSDL | `GIU_BAN_NGAY=7`, `GIU_BAN_TUAN=4`, `GIU_BAN_TAY=3` |
-| **Giữ trên Drive** | xoá theo tuổi: `daily` > 8 ngày, `weekly` > 29 ngày, `manual` > 8 ngày | `rclone delete --min-age` trong `erp-backup.sh` |
+| **RPO** danh nghĩa | **≤ 1 giờ** — bản GIỜ phút 47 (`hourly-org`, §9.2) cộng bản ĐÊM 02:17 | `PHUT_CRON_GIO=47`, `PHUT_CRON=17`, `/etc/cron.d/erp-backup` |
+| **RPO** xấu nhất (bình thường) | ~2 giờ: một lượt giờ bị bỏ vì khoá bận (bản đêm / diễn tập / deploy / đọc nặng quá 10 phút) thì giờ sau làm lại. Khung 02:00–05:59 mà bản đêm chưa xong thì lượt giờ nhường, bản đêm dump cả tổ chức. Thẻ Sao lưu của tổ chức báo vàng khi bản thành công gần nhất > 3 giờ (`ORG_BACKUP_RPO_ALERT_HOURS`) | §9.2 |
+| **RPO** ngoài máy | = RPO trên máy cộng thời gian đẩy Drive KHI đã bật Drive (C4); chưa bật ⇒ mất VPS là mất mọi bản. Lỗi đẩy không xoá bản cục bộ (trạng thái PARTIAL) | `day_ngoai_may_to_chuc` |
+| **RTO** | phần máy đo ở §8.3 (6,3 giây, tổ chức nhỏ); runbook có thời gian từng bước ở §10 | §8.3, §10 |
+| **Nơi lưu** | VPS `/root/backups/orgs/<csdl>/{hourly,daily,weekly,manual}/<csdl>-YYYYmmdd-HHMM.dump` (thư mục 700); Drive `gcrypt:orgs/<csdl>/{hourly,daily,weekly,manual}/` (rclone crypt — Drive chỉ thấy byte mã hoá) | `THU_MUC_TO_CHUC`, `REMOTE_CRYPT` |
+| **Giữ trên VPS** | 48 bản giờ · 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay, đếm RIÊNG theo tiền tố từng CSDL | `GIU_BAN_GIO=48`, `GIU_BAN_NGAY=7`, `GIU_BAN_TUAN=4`, `GIU_BAN_TAY=3` |
+| **Giữ trên Drive** | xoá theo tuổi: `hourly` > 49 giờ, `daily` > 8 ngày, `weekly` > 29 ngày, `manual` > 8 ngày | `rclone delete --min-age` trong `erp-backup.sh` |
 
 ### 8.5 Quy trình khôi phục từng bước
 
@@ -349,3 +356,183 @@ Lệnh copy-dán: `docs/backup-restore.md` §7 — đúng các lệnh diễn t�
 - **Khôi phục cần CÙNG khoá.** Diễn tập chứng minh cả hai chiều bằng một khoá GIẢ sinh trong bộ nhớ của lượt chạy: cùng
   khoá ⇒ đúng bản rõ; khoá khác ⇒ từ chối. Vì GitHub Secret không đọc lại được, bản sao của khoá ở trình quản lý mật
   khẩu của chủ nền tảng là điều kiện để "đổi / xoá nhầm secret" không thành "mất mọi bí mật" (`launch-gates.md` C3).
+
+## 9. Quyết định C4 / C6 / C7 (29/09/2026) — mục tiêu, cái đạt được hôm nay, và PITR
+
+Nguyên văn quyết định của chủ nền tảng: «C4/C6/C7: full backup hằng đêm; incremental/PITR mỗi giờ nếu hạ tầng DB hỗ
+trợ; target RPO <= 1 giờ; target RTO <= 4 giờ; tự động restore drill mỗi tuần trên môi trường test, không restore đè
+production.»
+
+### 9.1 Mục tiêu so với hôm nay
+
+"Hôm nay" = mã của commit này SAU khi deploy (lịch cron cài ở lần deploy kế tiếp). Chữ **ĐO** = có số chạy thật; chữ
+**ƯỚC LƯỢNG** = suy luận, chưa có số.
+
+| | Mục tiêu | CSDL NHÀ (`erp`, VNX) | CSDL tổ chức khách (`erp_org_*`) |
+|---|---|---|---|
+| Bản đầy đủ | hằng đêm | ✓ `pg_dump -Fc` 02:17 giờ VN (khung 02–05, thử lại mỗi giờ) — **không đổi** | ✓ cùng lượt đêm, sau nhà |
+| Bản gia tăng / PITR mỗi giờ | "nếu hạ tầng hỗ trợ" | ✗ **CHƯA** — `erp-db` chạy `archive_mode=off`; bật cần khởi động lại `erp-db` (§9.4). Bản logic mỗi giờ của cả CSDL nhà thì không: dump CSDL đang gánh VNX mỗi giờ trên máy 2 nhân đang bão hoà là thêm đúng loại tải đã đo gây nghẽn | ✓ bản LOGIC mỗi giờ (`hourly-org`, §9.2) — CSDL tổ chức nhỏ, dump giây; không cần đổi cấu hình Postgres |
+| RPO | ≤ 1 giờ | **≤ 1 ngày** (bản đêm; hỏng cả khung 02–05 ⇒ tới ~2 ngày, thẻ đỏ ở 36 giờ). Đạt ≤ 1 giờ CHỈ khi bật PITR (§9.4) | **≤ 1 giờ** (lượt phút 47); lỡ một lượt ⇒ ~2 giờ, tự lành giờ sau; thẻ vàng khi > 3 giờ |
+| RPO ngoài máy | ≤ 1 giờ | = trên máy khi Drive đã cấu hình (C4) | = trên máy + thời gian đẩy (`gcrypt:orgs/<csdl>/hourly/`), khi Drive đã cấu hình (C4) |
+| RTO | ≤ 4 giờ | **CHƯA ĐO** cỡ production — runbook §10.2, ước lượng 1–2 giờ nếu CSDL vài GB | phần máy **ĐO** 6,3 giây (tổ chức nhỏ, CI 36545135985); cả quy trình **ƯỚC LƯỢNG** 1–1,5 giờ trên VPS còn sống, 2–3 giờ khi mất VPS (§10.1) |
+| Diễn tập tự động mỗi tuần, môi trường test | mỗi tuần | ✗ `restore-drill` của nhà vẫn **chạy tay** (tháng một lần). Đưa nó vào cron = dựng một Postgres cỡ CSDL nhà mỗi tuần trên máy 1,9 GB — cần số đo RAM/thời gian của một lượt tay trước (§10.2 bước 2) | ✓ **hai tầng**: (a) CI mỗi tuần — workflow **Diễn tập khôi phục tổ chức (Postgres tạm)**, `cron: "0 20 * * 6"`, dữ liệu tổng hợp, máy GitHub; (b) VPS mỗi Chủ nhật 06–07 giờ VN — `drill-org-weekly` luân phiên một CSDL thật vào CSDL TẠM trong container TẠM (§9.3) |
+| Không restore đè production | tuyệt đối | ✓ diễn tập chỉ vào container tạm | ✓ đích luôn `tam_khoiphuc_<mã>` trong container tạm không mạng; `erp-db` chỉ bị đọc `count(*)` / `pg_database_size` (bài kiểm chạy bash thật khoá) |
+
+### 9.2 Lượt sao lưu MỖI GIỜ cho tổ chức — `erp-backup.sh hourly-org`
+
+- **Chỉ `erp_org_*`.** Danh sách hỏi `pg_database` qua đúng hàng rào tên của lượt đêm; mỗi CSDL đi qua đúng
+  `sao_luu_mot_to_chuc` (kiểm ổ đĩa, `pg_dump -Fc`, `pg_restore --list` phải có `users` / `settings` /
+  `__drizzle_migrations`, xoay vòng, đẩy Drive). KHÔNG một lời gọi `pg_dump -d erp`, không bot chat, không ghi
+  `last-run.json` / `last-success.json` / `daily-done` của nhà — phần của nhà trong `scripts/erp-backup.sh` vẫn đúng băm
+  `BAM_PHAN_NHA`.
+- **Thư mục:** `/root/backups/orgs/<csdl>/hourly/<csdl>-YYYYmmdd-HHMM.dump`, giữ 48 bản (2 ngày); Drive
+  `gcrypt:orgs/<csdl>/hourly/`, xoá theo tuổi > 49 giờ (chỉ dọn `hourly/` — không 72 lượt gọi Drive vô ích mỗi ngày).
+  Lỗi đẩy Drive KHÔNG xoá bản cục bộ: trạng thái `PARTIAL`, thoát 1.
+- **Không chạy chồng:** cùng ổ khoá với bản đêm / ops / deploy. FD 7 KHÔNG chờ — bận ⇒ bỏ lượt, thoát 0, giờ sau làm
+  lại; FD 8 / FD 9 chờ tối đa 10 phút (`TRAN_CHO_KHOA_GIO_GIAY`) để không treo sang lượt sau. Trong khung 02:00–05:59 mà
+  bản đêm hôm nay chưa xong ⇒ nhường (bản đêm dump cả tổ chức).
+- **Không có tổ chức nào** (production 29/09/2026) ⇒ một câu đọc `pg_database`, thoát 0, không khoá, không tệp, không
+  một dòng log. `psql` lỗi ⇒ CHƯA BIẾT, thoát 1, không ghi tệp (thẻ tự lộ khi bản quá cũ).
+- **Trạng thái:** `status/orgs/<csdl>/last-hourly.json` (mọi lượt, `trigger: "hourly"`) + `last-success.json` (khi có
+  bản dùng được) + `status/orgs-last-hourly.json` (tổng hợp). `last-run.json` của tổ chức vẫn là lời khai bản ĐÊM. Thẻ
+  Sao lưu của tổ chức (`evaluateBackupHealth`) thêm: bản thành công gần nhất > 3 giờ ⇒ vàng "RPO ≤ 1 giờ KHÔNG giữ
+  được"; lượt giờ gần nhất hỏng (sau bản tốt) ⇒ vàng; dòng "Lượt mỗi giờ gần nhất". Thẻ của NHÀ không đổi và không đọc
+  tệp giờ.
+- **Dung lượng:** 48 × cỡ bản dump của mỗi tổ chức, cộng dự trữ 3.000 MB kiểm TRƯỚC mỗi lượt như bản đêm. Tổ chức đo ở
+  §8.3 dump 0,7 MB ⇒ 48 bản ≈ 35 MB.
+
+### 9.3 Diễn tập tự động mỗi tuần — hai tầng, không tầng nào đè production
+
+**(a) CI — dữ liệu tổng hợp.** `.github/workflows/restore-drill.yml` có thêm `schedule: cron "0 20 * * 6"` (Thứ Bảy
+20:00 UTC = Chủ nhật 03:00 giờ VN). Service container `postgres:16-alpine` (cùng ảnh `erp-db`) sống và chết cùng job;
+0 secret, 0 SSH, 0 quyền ghi (`tests/restore-drill-pg.test.ts` khoá: đúng hai cửa vào `schedule` + `workflow_dispatch`,
+lịch đúng một thứ trong tuần). GitHub chỉ chạy lịch trên `main`; một lượt đỏ gửi thông báo tới người theo dõi kho.
+
+**(b) VPS — bản thật của một tổ chức.** Dòng cron phút 37 gọi `erp-backup.sh drill-org-weekly`, script tự lọc Chủ nhật
+06:00–07:59 giờ VN (SAU khung bản đêm — diễn tập đúng bản vừa sinh):
+
+1. Đã có kết luận tuần này (`status/drill-org-week-done` = hôm nay) ⇒ thoát 0, im lặng.
+2. Chọn luân phiên MỘT CSDL có bản trên máy (chưa diễn tập / diễn tập lâu nhất đứng đầu). Không có ⇒ thoát 0, không
+   ghi gì.
+3. Cầm FD 7 (khoá sao lưu, không chờ): không dựng Postgres thứ hai giữa lúc một lượt dump đang ăn RAM. Bận ⇒ giờ sau.
+4. Gọi ĐÚNG `cmd_restore_drill_to_chuc` của ops `restore-drill-org`: kiểm RAM ≥ 700 MB + ổ đĩa TRƯỚC khi dựng; container
+   tạm cùng ảnh, `--network none`, `--memory 512m`, `--cpus 1`; CSDL TẠM `tam_khoiphuc_<mã>` bên trong container đó;
+   `pg_restore` bản MỚI NHẤT (kể cả bản giờ); đếm 12 bảng lõi ở bản khôi phục và CSDL sống; `trap EXIT` xoá container.
+5. Ghi `status/orgs/<csdl>/last-drill.json` (thẻ của tổ chức đó đọc). Chỉ đánh dấu "tuần này xong" khi lượt đi tới KẾT
+   LUẬN của CHÍNH nó (OK / FAILED, `finishedAt` ≥ lúc bắt đầu). SKIPPED (thiếu RAM / ổ) hay hết giờ chờ khoá ⇒ 07 giờ thử
+   lại. FAILED không thử lại — cùng bản cho cùng kết luận; nó là tín hiệu đỏ trên thẻ.
+
+Giới hạn, nói thẳng: một CSDL mỗi tuần. Có N tổ chức thì mỗi tổ chức được diễn tập mỗi N tuần; thẻ chuyển vàng khi lượt
+đạt gần nhất quá 35 ngày (`BACKUP_DRILL_MAX_AGE_DAYS`) ⇒ từ tổ chức thứ 6 trở đi cần tăng nhịp (nhiều CSDL / lượt, hoặc
+thêm ngày) — một quyết định vận hành, không tự đổi.
+
+### 9.4 PITR cho cả cụm `erp-db` — đánh giá và ĐỀ XUẤT (cần cửa sổ bảo trì, KHÔNG làm trong PR này)
+
+**Hiện trạng, đọc từ kho (không đoán):** `docker-compose.prod.yml` dịch vụ `db` = `postgres:16-alpine`, KHÔNG có
+`command:` ⇒ mọi tham số là mặc định của Postgres 16: `wal_level = replica` (mặc định từ bản 10 — đã đủ cho lưu trữ
+WAL), `archive_mode = off`, `archive_command` rỗng, `archive_timeout = 0`, `max_wal_senders = 10`, `max_wal_size = 1GB`,
+`checkpoint_timeout = 5min`. Dữ liệu ở volume `erp_pgdata`. Không có thư mục lưu trữ WAL, không có `pg_basebackup` ở
+đâu trong kho. Deploy chạy `docker compose up -d --build db` MỖI lần (`scripts/install-vps.sh`) ⇒ đổi cấu hình dịch vụ
+`db` trong compose = compose TẠO LẠI container `erp-db` ở lần deploy kế tiếp — tức cửa sổ bảo trì là lần deploy mang
+thay đổi đó, không phải lúc gộp PR.
+
+Xác nhận trên máy chủ trước khi làm gì (CHỈ ĐỌC, ops `db-query`, mỗi câu một lượt):
+
+```sql
+select name, setting from pg_settings where name in ('wal_level','archive_mode','archive_command','archive_timeout','max_wal_size','checkpoint_timeout','full_page_writes','wal_compression','max_wal_senders');
+select datname, pg_database_size(datname) as bytes from pg_database order by 2 desc;
+select wal_bytes, wal_fpi, stats_reset from pg_stat_wal;          -- tổng WAL sinh ra từ lần reset thống kê
+select pg_current_wal_lsn();                                      -- chạy lại sau đúng 24 giờ, rồi:
+select pg_wal_lsn_diff('<lsn lần 2>', '<lsn lần 1>') as wal_bytes_24h;
+```
+
+**Dung lượng WAL mỗi ngày: CHƯA ĐO** — kho không có con số nào. Chỉ nói được cấu trúc: dung lượng lưu trữ = (bản cơ
+sở ≈ cỡ cụm sau nén) × số bản giữ + (WAL/ngày ĐO ở câu trên, sau nén) × số ngày giữ. `archive_timeout = 900` ép tối
+thiểu 96 đoạn 16 MiB/ngày (1,5 GiB thô) ngay cả khi máy rảnh; phần trống của đoạn bị ép sớm là byte 0 nên nén còn rất
+nhỏ. Phần trên sàn tỉ lệ với lượng ghi thật (đơn, vận đơn, webhook VTP, đồng bộ Pancake) — đo rồi mới chốt số ngày giữ,
+vì máy này đã từng đầy ổ 100% (#242).
+
+**Đề xuất cụ thể (một PR riêng, deploy trong cửa sổ bảo trì):**
+
+1. **Bước 0 — đo** (không gián đoạn): chạy các câu ở trên, ghi `wal_bytes_24h`, cỡ cụm, ổ trống. Tính dung lượng cho
+   7 ngày PITR; không đủ ⇒ dừng, không bật.
+2. **Thư mục lưu trữ** trên VPS: `install -d -o 70 -g 70 -m 700 /root/backups/wal` (uid 70 = `postgres` của ảnh alpine).
+3. **Kịch bản lưu trữ** `scripts/pg-archive-wal.sh` (vào kho, có bài kiểm như `tests/backup.test.ts`): ghi
+   `gzip -c %p` ra tệp tạm → `fsync` → `mv` thành `%f.gz`; tệp đích đã có và giải nén ra CÙNG nội dung ⇒ thoát 0 (lượt
+   thử lại sau sự cố), khác nội dung ⇒ thoát 1 (không bao giờ ghi đè).
+4. **Compose**, dịch vụ `db`:
+   ```yaml
+   command: ["postgres", "-c", "archive_mode=on", "-c", "archive_timeout=900",
+             "-c", "archive_command=/wal-archive-bin/pg-archive-wal.sh %p %f"]
+   volumes:
+     - erp_pgdata:/var/lib/postgresql/data
+     - /root/backups/wal:/wal-archive
+     - /root/erp/scripts/pg-archive-wal.sh:/wal-archive-bin/pg-archive-wal.sh:ro
+   ```
+   `archive_mode` chỉ đổi được khi KHỞI ĐỘNG LẠI máy chủ Postgres — đó là toàn bộ lý do cần cửa sổ.
+5. **Bản cơ sở** hằng đêm trong `erp-backup.sh` (đổi đường của nhà ⇒ cập nhật `BAM_PHAN_NHA` cùng commit, có lý do):
+   `docker exec erp-db pg_basebackup -U erp -D - -Ft -X none -z > base-<mốc>.tar.gz` (`-X none`: WAL lấy từ kho lưu
+   trữ). Cần `pg_hba.conf` có dòng `local replication` — KIỂM trước:
+   `docker exec erp-db grep replication /var/lib/postgresql/data/pg_hba.conf`. Giữ `pg_dump -Fc` hằng đêm như cũ: nó là
+   đường khôi phục CHỌN LỌC (một bảng, một tổ chức) mà PITR cấp cụm không cho.
+6. **Ngoài máy:** cron 15 phút `rclone copy /root/backups/wal gcrypt:wal/` (copy, KHÔNG sync) + dọn theo tuổi khớp số
+   bản cơ sở giữ. RPO: ≤ 15 phút trên máy, ≤ ~30 phút ngoài máy — cho CẢ nhà lẫn mọi tổ chức (PITR là cấp cụm).
+7. **Giám sát:** đọc `pg_stat_archiver` (`failed_count`, `last_failed_time` > `last_archived_time`) vào trạng thái sao
+   lưu và thẻ; cùng cổng ổ đĩa.
+
+**Gián đoạn (ƯỚC LƯỢNG, chưa đo trên máy này):** tạo lại `erp-db` = dừng nhanh (checkpoint, `shared_buffers` mặc định
+128 MB) + khởi động không cần phục hồi ⇒ CSDL không nhận kết nối **khoảng 10–30 giây**; healthcheck 5 giây. Trong khoảng
+đó ERP trả lỗi cho yêu cầu đang chạy, job của scheduler đang dở có thể hỏng và chạy lại ở nhịp sau, webhook Viettel Post
+được VTP thử lại (tối đa 5 lần, idempotent). Nếu compose tạo lại cả `app` / `scheduler` thì cộng thời gian khởi động app.
+**Xin cửa sổ 15 phút**, lúc thấp điểm SAU bản đêm (vd 03:30 giờ VN, sau `daily-done`), không trùng deploy khác.
+
+**Rủi ro chính và cách lùi:**
+
+| Rủi ro | Hệ quả | Chặn / lùi |
+|---|---|---|
+| `archive_command` hỏng liên tục (thư mục đầy, sai quyền) | Postgres GIỮ mọi đoạn WAL chưa lưu trong `pg_wal` ⇒ ổ đầy ⇒ Postgres dừng (PANIC) — production sập | Giám sát `pg_stat_archiver` + cổng ổ đĩa. **Phanh khẩn cấp KHÔNG cần khởi động lại:** `ALTER SYSTEM SET archive_command = '/bin/true'; SELECT pg_reload_conf();` (ghi cấu hình production ⇒ cần chủ nền tảng đồng ý) — WAL thôi dồn, chuỗi PITR đứt tới bản cơ sở kế tiếp |
+| Tăng IO / ổ đĩa trên máy đang bão hoà | trang chậm hơn giờ cao điểm | `archive_timeout = 900` (không nhỏ hơn); gzip trong kịch bản lưu trữ; đo lại sau 1 tuần |
+| Cấu hình sai làm Postgres không lên | gián đoạn kéo dài | **Rollback:** revert PR compose → deploy ⇒ `erp-db` tạo lại với `archive_mode = off` (thêm 10–30 giây). Dữ liệu không đổi định dạng (`wal_level` vẫn `replica`); thư mục WAL xoá sau |
+
+**Khôi phục bằng PITR** (ghi sẵn, chưa diễn tập): container Postgres TẠM từ bản cơ sở + `restore_command` giải nén từ
+`/wal-archive` + `recovery_target_time` + `recovery.signal` ⇒ cụm ở đúng mốc. Khôi phục MỘT tổ chức về một mốc = dựng
+cụm tạm như trên rồi `pg_dump -d erp_org_<mã>` từ nó và đi tiếp §5 — không bao giờ phục hồi đè cụm production. Diễn tập
+PITR phải vào lịch tuần cùng §9.3 ngay khi bật.
+
+## 10. Runbook RTO ≤ 4 giờ — thời gian từng bước
+
+RTO tính từ lúc chủ nền tảng quyết định khôi phục tới lúc tổ chức (hoặc nhà) chạy lại được. Cột **Nguồn**: **ĐO** = có
+lượt chạy thật; **ƯỚC LƯỢNG** = suy luận, phải thay bằng số đo khi có.
+
+### 10.1 Một tổ chức khách (lệnh: `docs/backup-restore.md` §7; lý do: §5, §8.5)
+
+| # | Bước | Thời gian | Nguồn |
+|---|---|---|---|
+| 1 | Chủ nền tảng đồng ý; chọn mốc bản (`ops backup-status`, khối tổ chức — bản giờ mới nhất ≤ 1 giờ tuổi) | 10–30 phút | ƯỚC LƯỢNG (người) |
+| 2 | `/platform` → tổ chức → SUSPENDED | 1–2 phút | ƯỚC LƯỢNG |
+| 3 | `ops backup` — dump hiện trạng làm đường lui | dump 0,4 giây (tổ chức 0,7 MB) + 2–5 phút xếp hàng / SSH của ops | ĐO (dump, CI 36545135985) · ƯỚC LƯỢNG (ops) |
+| 4 | Lấy bản: trên VPS (`orgs/<csdl>/hourly/…`) hoặc `rclone copy gcrypt:orgs/<csdl>/hourly/<tệp>` | 0 · 1–5 phút cho < 1 GB | ƯỚC LƯỢNG (băng thông Drive) |
+| 5 | `createdb tam_khoiphuc_<mã>` + `pg_restore --no-owner --no-privileges` | 3,6 giây (187 bảng, 356 dòng, dump 729 KB); tỉ lệ với dữ liệu + chỉ mục — vài phút / GB trên máy 2 nhân đang bão hoà | ĐO (CI) · ƯỚC LƯỢNG (cỡ production) |
+| 6 | Kiểm ĐÚNG tổ chức (`org_connections.org_code`, thương hiệu, email quản trị) + đối chiếu số dòng | 5–15 phút | ƯỚC LƯỢNG (người) |
+| 7 | Ngắt kết nối → đổi tên cũ ⇒ `hong_<mã>_<mốc>` → tạm ⇒ `erp_org_<mã>` | giây (nằm trong 3,6 giây ở bước 5) | ĐO |
+| 8 | ACTIVE → mở (tự migrate) → kiểm `/settings/export`, `/settings/connections`, đăng nhập | máy: tới "chạy được" 6,3 giây tổng; người 10–20 phút | ĐO (máy) · ƯỚC LƯỢNG (người) |
+| | **Tổng — VPS còn sống** | **máy < 10 phút (tổ chức < 1 GB) · cả quy trình ~1–1,5 giờ** | phần máy ĐO trên tổ chức nhỏ, phần còn lại ƯỚC LƯỢNG |
+| | **Tổng — mất VPS** | thêm: dựng VPS mới + deploy (30–60 phút) + tải bản từ Drive + đặt lại `PLATFORM_SECRETS_KEY` (C3) ⇒ **~2–3 giờ** | ƯỚC LƯỢNG — CHƯA diễn tập |
+
+### 10.2 CSDL nhà (VNX) — khôi phục toàn phần (lệnh: `docs/backup-restore.md` §3)
+
+| # | Bước | Thời gian | Nguồn |
+|---|---|---|---|
+| 1 | Chủ shop đồng ý; chọn bản (`ops backup-status`) | 10–30 phút | ƯỚC LƯỢNG (người) |
+| 2 | (nên làm) diễn tập chính bản đó: `ops restore-drill` | = `finishedAt − startedAt` trong `status/last-drill.json` | ĐỌC ĐƯỢC trên máy chủ, **chưa ghi vào tài liệu** — lấy số này trước khi hứa RTO của nhà |
+| 3 | Dừng `app` `scheduler` `chatbot` | < 1 phút | ƯỚC LƯỢNG |
+| 4 | `erp-backup.sh run` — dump hiện trạng | = thời lượng một bản đêm (`last-run.json`) | ĐỌC ĐƯỢC, chưa ghi vào tài liệu |
+| 5 | `dropdb` / `createdb` / `pg_restore` | tỉ lệ cỡ CSDL nhà — **cỡ chưa đo trong kho** (câu `pg_database_size` ở §9.4) | CHƯA ĐO |
+| 6 | Khôi phục volume bot chat | < 1 phút | ƯỚC LƯỢNG |
+| 7 | `docker compose up -d` → `/api/health` → `ops verify` | 3–10 phút | ƯỚC LƯỢNG |
+| 8 | Kéo lại phần hụt (Pancake / Viettel Post — idempotent) | dịch vụ đã chạy lại; dữ liệu hụt ≤ RPO của nhà (≤ 1 ngày) | ngoài RTO dịch vụ |
+| | **Tổng** | **ƯỚC LƯỢNG 1–2 giờ nếu CSDL nhà vài GB; mất VPS thêm 30–60 phút** — trong 4 giờ, nhưng CHƯA có số đo nào cho nhà | thay bằng số ĐO của bước 2 + 4 |
+
+Việc để biến ƯỚC LƯỢNG thành ĐO (không gián đoạn, không ghi dữ liệu): (1) đọc `startedAt` / `finishedAt` của
+`status/last-run.json` và `status/last-drill.json` (ops `backup-status`); (2) chạy `ops restore-drill` một lượt lúc thấp
+điểm; (3) lượt `drill-org-weekly` đầu tiên sau khi có tổ chức thật (launch-gates C1) cho số cỡ production của tổ chức.

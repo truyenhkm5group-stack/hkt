@@ -83,7 +83,7 @@ on:
           - backup              # sao lưu NGAY bằng scripts/erp-backup.sh: CSDL (-Fc) + dữ liệu bot chat, kiểm toàn vẹn, xoay vòng, đẩy ngoài máy nếu đã khai (vào /root/backups/manual)
           - backup-status       # trạng thái sao lưu: lịch cron, lượt gần nhất, bản trên máy, ngoài máy, ổ đĩa — KHÔNG in dữ liệu
           - restore-drill       # DIỄN TẬP khôi phục bản mới nhất vào container Postgres TẠM (không mạng, trần RAM), đếm dòng bảng then chốt so với CSDL sống, rồi xoá container
-          - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — CHẠY TAY, không nằm trong cron
+          - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI

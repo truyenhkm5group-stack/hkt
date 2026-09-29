@@ -9,6 +9,7 @@ import {
   BACKUP_MAX_AGE_HOURS,
   BACKUP_STATUS_DIR_DEFAULT,
   ORG_BACKUP_DATABASE_PATTERN,
+  ORG_BACKUP_RPO_ALERT_HOURS,
   UNPARSABLE,
   evaluateBackupHealth,
   formatBackupSize,
@@ -1019,7 +1020,7 @@ export function testToChucHamThuan() {
  * tên CSDL từ tham số `-d` và ghi nó vào bản dump giả, để `pg_restore --list` giả trả mục lục đúng
  * LOẠI (nhà: có orders/shipments; tổ chức: bảng lõi, KHÔNG có orders).
  */
-function khungToChuc(truoc = ""): string {
+function khungToChuc(truoc = "", lenh = "TRIGGER=cron; cmd_run"): string {
   return [
     "#!/usr/bin/env bash",
     "set -uo pipefail",
@@ -1065,7 +1066,7 @@ function khungToChuc(truoc = ""): string {
     'echo "rclone $*" >> "$DOCKER_LOG"',
     'dich() { printf "%s" "$REMOTE_DIR/${1#gia:}"; }',
     'case "$1" in',
-    '  copyto) shift; while [ "${1#--}" != "$1" ]; do shift; [ "$1" = 3 ] && shift; done; mkdir -p "$(dirname "$(dich "$2")")"; cp "$1" "$(dich "$2")" ;;',
+    '  copyto) [ "${STUB_RCLONE_LOI:-0}" = 1 ] && { echo "rclone: loi mang gia" >&2; exit 1; }; shift; while [ "${1#--}" != "$1" ]; do shift; [ "$1" = 3 ] && shift; done; mkdir -p "$(dirname "$(dich "$2")")"; cp "$1" "$(dich "$2")" ;;',
     '  lsf) f="$(dich "${!#}")"; [ -f "$f" ] || exit 1; stat -c %s "$f" ;;',
     "  delete) : ;;",
     "esac",
@@ -1079,7 +1080,7 @@ function khungToChuc(truoc = ""): string {
     "khoa_chong_chong() { return 0; }   # khoá: đo riêng bằng flock THẬT",
     "giu_khoa() { return 0; }",
     truoc,
-    '( set -e; TRIGGER=cron; cmd_run ) > "$T/out" 2>&1; rc=$?', // set -e: ĐÚNG cờ của script khi chạy thật
+    `( set -e; ${lenh} ) > "$T/out" 2>&1; rc=$?`, // set -e: ĐÚNG cờ của script khi chạy thật
     'echo "@@EXIT"; echo "$rc"',
     'echo "@@OUT"; cat "$T/out"',
     'echo "@@RUN"; cat "$T/backups/status/last-run.json" 2>/dev/null',
@@ -1090,6 +1091,10 @@ function khungToChuc(truoc = ""): string {
     'echo "@@SUMMARY"; cat "$T/backups/status/orgs-last-run.json" 2>/dev/null',
     'echo "@@ALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-run.json" 2>/dev/null',
     'echo "@@BETA"; cat "$T/backups/status/orgs/erp_org_beta/last-run.json" 2>/dev/null',
+    'echo "@@HALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-hourly.json" 2>/dev/null',
+    'echo "@@HBETA"; cat "$T/backups/status/orgs/erp_org_beta/last-hourly.json" 2>/dev/null',
+    'echo "@@SALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-success.json" 2>/dev/null',
+    'echo "@@HSUMMARY"; cat "$T/backups/status/orgs-last-hourly.json" 2>/dev/null',
     'echo "@@REMOTE"; (cd "$T/remote" && find . -type f | sort)',
     'echo "@@DOCKER"; cat "$DOCKER_LOG"',
     'echo "@@HET"',
@@ -1310,8 +1315,14 @@ export function testDienTapToChucMaNguon() {
   const tienTo = /^TIEN_TO_CSDL_TAM="([^"]+)"$/m.exec(src())?.[1];
   assert.equal(tienTo, "tam_khoiphuc_");
   assert.ok(!ORG_BACKUP_DATABASE_PATTERN.test(`${tienTo}x`) && !`${tienTo}`.startsWith("erp_org_"), "tiền tố CSDL tạm không được khớp mẫu erp_org_*");
-  // CHẠY TAY: không đường tự động nào gọi nó.
-  for (const ham of ["cmd_run", "cmd_cron", "cmd_install_cron", "sao_luu_cac_to_chuc"]) assert.ok(!/restore_drill_to_chuc|restore-drill-org/.test(thanHam(ham)), `${ham} không được gọi diễn tập tổ chức — bật tự động là quyết định của chủ nền tảng`);
+  // Tự động CHỈ qua MỘT cửa: `drill-org-weekly` (quyết định C7, 29/09/2026). Các đường SAO LƯU không bao giờ gọi diễn tập —
+  // dựng Postgres thứ hai giữa một lượt dump là hai tiến trình nặng cùng lúc trên máy ~1,9 GB.
+  for (const ham of ["cmd_run", "cmd_cron", "sao_luu_cac_to_chuc", "cmd_sao_luu_gio_to_chuc"]) assert.ok(!/restore_drill_to_chuc|restore-drill-org|drill-org-weekly|dien_tap_tuan/.test(thanHam(ham)), `${ham} không được gọi diễn tập tổ chức`);
+  assert.deepEqual(thanHam("cmd_install_cron").match(/erp-backup\.sh (restore-drill-org|drill-org-weekly)\b/g), ["erp-backup.sh drill-org-weekly"], "cron gọi diễn tập tổ chức qua ĐÚNG lệnh drill-org-weekly (tự lọc Chủ nhật), không gọi thẳng restore-drill-org mỗi giờ");
+  const tuan = thanHam("cmd_dien_tap_tuan_to_chuc");
+  assert.deepEqual(tuan.match(/\bcmd_restore_drill\w*/g), ["cmd_restore_drill_to_chuc"], "diễn tập tuần đi qua ĐÚNG hàm diễn tập tổ chức (CSDL tạm trong container tạm) — không qua diễn tập của nhà");
+  assert.ok(!/docker |psql|pg_restore|createdb|dropdb/.test(tuan), "diễn tập tuần không tự chạm Postgres — mọi lệnh đi qua cmd_restore_drill_to_chuc");
+  assert.ok(tuan.indexOf("khoa_chong_chong") > 0 && tuan.indexOf("khoa_chong_chong") < tuan.indexOf("cmd_restore_drill_to_chuc"), "cầm khoá sao lưu (FD 7) TRƯỚC khi dựng container tạm");
   // Bảng đếm có thật trong lược đồ, và gồm đủ bảng lõi mà lượt sao lưu đã kiểm.
   const bang = hangSoChuoi("BANG_DIEN_TAP_TO_CHUC");
   const schema = readFileSync("db/schema.ts", "utf8");
@@ -1330,7 +1341,7 @@ export function testDienTapToChucMaNguon() {
   const nhanh = ops.slice(i, ops.indexOf('"$ARG" ;;', i) + '"$ARG" ;;'.length);
   assert.match(nhanh, /case "\$ARG" in\s*\n\s*\*\[!a-z0-9_-\]\*\)/, "ô arg phải qua danh sách ký tự CHO PHÉP trước khi tới script");
   assert.match(nhanh, /bash "\$SB" restore-drill-org "\$ARG" ;;$/, "ops gọi CHUNG scripts/erp-backup.sh");
-  console.log(`✓ Diễn tập tổ chức (mã nguồn): đích là CSDL tạm ${tienTo}<mã> trong container tạm (không mạng, không cổng, trần RAM, trap dọn), 0 lệnh createdb/dropdb/alter database, erp-db chỉ bị ĐỌC · kiểm RAM + tên tạm TRƯỚC khi dựng · không đường tự động nào gọi (cron/run) · ${bang.length} bảng đều có trong lược đồ · ops restore-drill-org làn DOC_NANG, soát arg`);
+  console.log(`✓ Diễn tập tổ chức (mã nguồn): đích là CSDL tạm ${tienTo}<mã> trong container tạm (không mạng, không cổng, trần RAM, trap dọn), 0 lệnh createdb/dropdb/alter database, erp-db chỉ bị ĐỌC · kiểm RAM + tên tạm TRƯỚC khi dựng · tự động chỉ qua drill-org-weekly (cầm FD 7 trước), không đường sao lưu nào gọi · ${bang.length} bảng đều có trong lược đồ · ops restore-drill-org làn DOC_NANG, soát arg`);
 }
 
 /** Khung chạy diễn tập tổ chức THẬT với docker / free / df giả. */
@@ -1389,6 +1400,7 @@ function khungDienTap(lenh: string, truoc = ""): string {
     'echo "@@ALPHA"; cat "$T/backups/status/orgs/erp_org_alpha/last-drill.json" 2>/dev/null',
     'echo "@@BETA"; cat "$T/backups/status/orgs/erp_org_beta/last-drill.json" 2>/dev/null',
     'echo "@@NHA"; ls "$T/backups/status/last-drill.json" 2>/dev/null',
+    'echo "@@TUAN"; cat "$T/backups/status/drill-org-week-done" 2>/dev/null',
     'echo "@@DOCKER"; cat "$DOCKER_LOG"',
     'echo "@@HET"',
     'rm -rf "$T"',
@@ -1508,6 +1520,360 @@ export function testDienTapToChucChayThat() {
   console.log(`✓ Diễn tập tổ chức (chạy bash thật qua main): ĐẠT ⇒ bản mới nhất theo tên, CSDL tạm tam_khoiphuc_alpha trong container tạm, ${bang.length} bảng đếm, erp-db chỉ bị đọc, lệnh cuối là xoá container, trạng thái đọc được bằng bộ đọc của ERP và làm thẻ tổ chức HEALTHY (không phải của nhà) · pg_restore lỗi ⇒ FAILED + vẫn dọn · bảng rỗng ⇒ FAILED nêu tên · không bản / thiếu RAM ⇒ SKIPPED, không dựng gì · 5 tham số lạ ⇒ thoát 2, 0 lệnh docker · luân phiên chọn tổ chức chưa diễn tập`);
 }
 
+/* ═════════════ 12 · RPO ≤ 1 GIỜ CHO TỔ CHỨC KHÁCH + DIỄN TẬP TỰ ĐỘNG MỖI TUẦN (quyết định C4/C6/C7, 29/09/2026) ═════════════ */
+
+/**
+ * Đồng hồ giả của script: MỌI phép tính giờ VN đi qua `gio_vn`. Ghim nó thì bài kiểm không phụ thuộc giờ máy chạy
+ * (AGENTS.md mục 50/65) — không có mốc tuyệt đối nào được so với `now()` thật.
+ */
+const DONG_HO_GIA = 'gio_vn() { date -u -d "$STUB_GIO_VN" "$@"; }';
+/** Ghi MỌI lần xin khoá sao lưu (FD 7) vào nhật ký giả — để khẳng định "không lấy khoá", không chỉ "không dump". */
+const KHOA_GHI_LAI = 'khoa_chong_chong() { echo "KHOA-SAO-LUU" >> "$DOCKER_LOG"; [ "${STUB_KHOA_BAN:-0}" != 1 ]; }';
+
+export function testLuotGioToChucMaNguon() {
+  const code = boChuThichShell(src().replace(/\r\n/g, "\n"));
+  const gio = thanHam("cmd_sao_luu_gio_to_chuc");
+  // CSDL NHÀ giữ nguyên lịch đêm: lượt giờ không có một lời gọi pg_dump nào — mọi bản đi qua đúng hàm của tổ chức.
+  assert.ok(!/pg_dump|-d erp\b/.test(gio), "lượt giờ không tự gọi pg_dump và không bao giờ nhắc `-d erp`");
+  assert.match(gio, /sao_luu_mot_to_chuc "\$csdl" "\$moc" hourly/, "mỗi CSDL tổ chức đi qua ĐÚNG hàm của lượt đêm (kiểm ổ đĩa, dump, kiểm mục lục, xoay vòng, ngoài máy)");
+  assert.match(gio, /ds="\$\(liet_ke_csdl_to_chuc\)"/, "danh sách lấy từ pg_database qua cùng hàng rào tên với lượt đêm");
+  assert.ok(!/\b(sao_luu_bot|cmd_run|xoay_vong_tat_ca|day_ngoai_may) /.test(gio), "lượt giờ không đụng bot chat, không chạy lượt của nhà, không xoay vòng / đẩy thư mục của nhà");
+  assert.ok(!/ghi_json "\$STATUS_DIR\/last-|>\s*"\$STATUS_DIR\/daily-done"/.test(gio), "lượt giờ không ghi last-*.json hay daily-done của NHÀ");
+  // Thứ tự: liệt kê (rẻ, không khoá) → FD 7 KHÔNG CHỜ → FD 8 → FD 9 → dump.
+  const vt = ["liet_ke_csdl_to_chuc", "khoa_chong_chong", "giu_khoa 8", "giu_khoa 9", "sao_luu_mot_to_chuc"].map((x) => gio.indexOf(x));
+  assert.ok(vt.every((v, i) => v > 0 && (i === 0 || v > vt[i - 1])), `thứ tự phải là liệt kê → FD 7 → FD 8 → FD 9 → dump (đang ${vt.join(" · ")})`);
+  assert.match(gio, /giu_khoa 8 "\$KHOA_DOC_DB" -x "\$TRAN_CHO_KHOA_GIO_GIAY"/);
+  assert.match(gio, /giu_khoa 9 "\$KHOA_VONG_DOI" -s "\$TRAN_CHO_KHOA_GIO_GIAY"/);
+  assert.ok(hangSo("TRAN_CHO_KHOA_GIO_GIAY") < 3600, "lượt giờ chờ khoá phải NGẮN hơn một giờ — không được treo sang lượt giờ sau");
+  // Khung đêm: đọc daily-done của nhà để BỎ lượt, không bao giờ để chạy chen.
+  assert.match(gio, /\$GIO_BAT_DAU" \] && \[ "\$gio" -le "\$GIO_KET_THUC" \] && \[ "\$\(cat "\$STATUS_DIR\/daily-done"/, "khung bản đêm mà bản đêm chưa xong ⇒ bỏ lượt");
+  // Xoay vòng + dọn ngoài máy của hourly/ suy từ ĐÚNG MỘT hằng số.
+  assert.equal((code.match(/^GIU_BAN_GIO=/gm) ?? []).length, 1, "GIU_BAN_GIO khai đúng một lần");
+  assert.ok(hangSo("GIU_BAN_GIO") >= 24, "giữ ít nhất một ngày bản giờ — phủ tới bản đêm kế tiếp");
+  assert.match(thanHam("sao_luu_mot_to_chuc"), /xoay_vong "\$goc\/hourly" "\$csdl" "\$GIU_BAN_GIO"/);
+  assert.match(thanHam("day_ngoai_may_to_chuc"), /rclone delete "\$\(noi_duong "\$remote" "orgs\/\$csdl\/hourly"\)" --min-age "\$\(\(GIU_BAN_GIO \+ 1\)\)h"/);
+  // Ba lịch, ba phút khác nhau.
+  const phut = ["PHUT_CRON", "PHUT_CRON_GIO", "PHUT_CRON_DIEN_TAP"].map(hangSo);
+  assert.equal(new Set(phut).size, 3, `ba lịch phải ở ba phút khác nhau (đang ${phut.join(", ")})`);
+  for (const p of phut) assert.ok(p >= 0 && p <= 59);
+  assert.ok(hangSo("GIO_DIEN_TAP_BAT_DAU") > hangSo("GIO_KET_THUC"), "diễn tập tuần chạy SAU khung bản đêm — diễn tập bản vừa sinh, không tranh máy với nó");
+  console.log(`✓ Lượt giờ tổ chức (mã nguồn): 0 lời gọi pg_dump / -d erp, qua đúng sao_luu_mot_to_chuc · liệt kê → FD 7 → FD 8 → FD 9 · chờ khoá ${hangSo("TRAN_CHO_KHOA_GIO_GIAY")}s < 1 giờ · bỏ lượt khi bản đêm chưa xong · giữ ${hangSo("GIU_BAN_GIO")} bản giờ, dọn Drive suy từ cùng hằng số · ba lịch ba phút`);
+}
+
+export function testLuotGioToChucChayThat() {
+  const giu = hangSo("GIU_BAN_GIO");
+  const gio = (env: Record<string, string>, truoc = "", lenh = "main hourly-org") =>
+    chayBash(khungToChuc([DONG_HO_GIA, KHOA_GHI_LAI, truoc].join("\n"), lenh), { STUB_GIO_VN: "2026-09-29 10:47", ...env });
+  const dong = (ra: string, ten: string) => phan(ra, ten).split("\n").filter(Boolean);
+  const dump = (ra: string) => dong(ra, "DOCKER").filter((l) => l.includes("pg_dump"));
+
+  // ───────── KHÔNG CÓ CSDL erp_org_* (production hôm nay) ⇒ thoát 0, im lặng, không khoá, không tệp ─────────
+  const khong = gio({ STUB_ORGS: "" });
+  assert.equal(phan(khong.ra, "EXIT"), "0", `không có tổ chức ⇒ thoát 0:\n${khong.ra}`);
+  assert.equal(phan(khong.ra, "OUT"), "", "không có tổ chức ⇒ không một dòng log (cron gọi mỗi giờ)");
+  assert.deepEqual(dong(khong.ra, "DOCKER").map((l) => l.replace(/ -Atc .*/, "")), ["exec erp-db psql -U erp -d erp"], "chỉ đúng MỘT câu đọc pg_database — không khoá, không dump");
+  assert.equal(phan(khong.ra, "STATUSFILES"), "", "không ghi tệp trạng thái nào");
+  assert.equal(phan(khong.ra, "ORGFILES"), "");
+
+  // ───────── HAI TỔ CHỨC: alpha tốt (đã có đầy hourly/), beta pg_dump lỗi ─────────
+  const tao = [
+    'mkdir -p "$ERP_BACKUP_DIR/orgs/erp_org_alpha/hourly" "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily" "$ERP_BACKUP_DIR/daily"',
+    `for i in $(seq 1 ${giu + 3}); do touch "$ERP_BACKUP_DIR/orgs/erp_org_alpha/hourly/erp_org_alpha-20260926-$(printf %04d $i).dump"; done`,
+    'touch "$ERP_BACKUP_DIR/orgs/erp_org_alpha/daily/erp_org_alpha-20260929-0217.dump" "$ERP_BACKUP_DIR/daily/erp-20260929-0217.dump"',
+  ].join("\n");
+  const hai = gio({ STUB_ORGS: "erp_org_alpha\nerp_org_beta\n", STUB_DUMP_HONG: "erp_org_beta" }, tao);
+  assert.equal(phan(hai.ra, "EXIT"), "1", `một tổ chức hỏng ⇒ lượt giờ thoát 1 (log cron đỏ):\n${hai.ra}`);
+  // CSDL NHÀ: không một byte nào.
+  assert.deepEqual(dump(hai.ra), ["exec erp-db pg_dump -U erp -d erp_org_alpha -Fc", "exec erp-db pg_dump -U erp -d erp_org_beta -Fc"], "lượt giờ chỉ dump CSDL erp_org_* — KHÔNG BAO GIỜ `-d erp`");
+  assert.ok(!dong(hai.ra, "DOCKER").some((l) => l.startsWith("run ")), "lượt giờ không đụng volume bot chat");
+  assert.ok(!dong(hai.ra, "DOCKER").some((l) => l.includes("platform_organizations")), "đối chiếu sổ là việc của lượt đêm");
+  assert.equal(dong(hai.ra, "DOCKER").filter((l) => l === "KHOA-SAO-LUU").length, 1, "xin khoá sao lưu đúng một lần");
+  assert.deepEqual(dong(hai.ra, "DAILY"), ["erp-20260929-0217.dump"], "daily/ của nhà không đổi");
+  assert.deepEqual(
+    phan(hai.ra, "STATUSFILES").split("\n"),
+    ["./orgs-last-hourly.json", "./orgs/erp_org_alpha/last-hourly.json", "./orgs/erp_org_alpha/last-success.json", "./orgs/erp_org_beta/last-hourly.json"],
+    "chỉ tệp trạng thái của TỔ CHỨC: không last-run / last-success / daily-done của nhà, không last-run.json của tổ chức (đó là lời khai bản đêm), beta hỏng không có last-success",
+  );
+  // alpha: xoay vòng hourly/ giữ đúng GIU_BAN_GIO, bản đêm của alpha không bị đụng.
+  const files = dong(hai.ra, "ORGFILES");
+  const hourly = files.filter((f) => f.startsWith("orgs/erp_org_alpha/hourly/"));
+  assert.equal(hourly.length, giu, `hourly/ giữ đúng ${giu} bản`);
+  assert.ok(hourly.includes("orgs/erp_org_alpha/hourly/erp_org_alpha-20260929-1047.dump"), "bản giờ mới mang mốc giờ VN trong tên");
+  assert.ok(["0001", "0002", "0003", "0004"].every((m) => !hourly.includes(`orgs/erp_org_alpha/hourly/erp_org_alpha-20260926-${m}.dump`)), "bốn bản cũ nhất bị xoay đi");
+  assert.ok(files.includes("orgs/erp_org_alpha/daily/erp_org_alpha-20260929-0217.dump"), "bản đêm của tổ chức KHÔNG bị lượt giờ đụng");
+  assert.ok(!files.some((f) => f.startsWith("orgs/erp_org_beta/") && f.endsWith(".dump")) && !files.some((f) => f.includes(".dang-ghi")), "beta hỏng ⇒ không bản nào, không tệp dở");
+  // Ngoài máy: đúng thư mục hourly/ của alpha; dọn theo tuổi suy từ GIU_BAN_GIO; không đụng daily/weekly/manual.
+  assert.deepEqual(dong(hai.ra, "REMOTE"), ["./orgs/erp_org_alpha/hourly/erp_org_alpha-20260929-1047.dump"]);
+  assert.deepEqual(dong(hai.ra, "DOCKER").filter((l) => l.startsWith("rclone delete")), [`rclone delete gia:orgs/erp_org_alpha/hourly --min-age ${giu + 1}h`], "lượt giờ chỉ dọn hourly/ — không 72 lượt gọi Drive vô ích mỗi ngày");
+  // Trạng thái đọc được bằng CHÍNH bộ đọc của ERP.
+  const h = parseBackupRun(JSON.parse(phan(hai.ra, "HALPHA")));
+  assert.ok(h, "last-hourly.json đọc được bằng bộ đọc của ERP");
+  assert.equal(h.scope, "ORGANIZATION");
+  assert.equal(h.database, "erp_org_alpha");
+  assert.equal(h.trigger, "hourly");
+  assert.equal(h.result, "OK");
+  assert.equal(h.retention.hourly, giu, "số bản giờ in lên ERP là lời khai của script");
+  assert.deepEqual(JSON.parse(phan(hai.ra, "SALPHA")), JSON.parse(phan(hai.ra, "HALPHA")), "bản giờ dùng được ⇒ nó LÀ bản thành công gần nhất");
+  assert.match(parseBackupRun(JSON.parse(phan(hai.ra, "HBETA")))?.reason ?? "", /pg_dump erp_org_beta lỗi: pg_dump: loi gia erp_org_beta/);
+  const tong = parseOrgBackupSummary(JSON.parse(phan(hai.ra, "HSUMMARY")));
+  assert.deepEqual(tong?.organizations.map((o) => `${o.database}=${o.result}`), ["erp_org_alpha=OK", "erp_org_beta=FAILED"]);
+  // Thẻ của từng tổ chức đọc được lượt giờ.
+  const A: BackupTarget = { scope: "ORGANIZATION", database: "erp_org_alpha" };
+  const B: BackupTarget = { scope: "ORGANIZATION", database: "erp_org_beta" };
+  const luc = new Date(h.finishedAt.getTime() + 30 * 60_000);
+  const theA = evaluateBackupHealth({ dirReadable: true, lastSuccess: JSON.parse(phan(hai.ra, "SALPHA")), lastHourly: JSON.parse(phan(hai.ra, "HALPHA")) }, luc, A);
+  assert.equal(theA.lastHourly?.trigger, "hourly");
+  assert.ok(!theA.issues.some((i) => /RPO|mỗi giờ/.test(i.text)), `bản giờ 30 phút tuổi ⇒ không vế RPO: ${theA.issues.map((i) => i.text).join(" | ")}`);
+  const theB = evaluateBackupHealth({ dirReadable: true, lastHourly: JSON.parse(phan(hai.ra, "HBETA")) }, luc, B);
+  assert.equal(theB.state, "DOWN");
+  assert.ok(theB.issues.some((i) => /Lượt sao lưu mỗi giờ gần nhất THẤT BẠI: pg_dump erp_org_beta lỗi/.test(i.text)), "lượt giờ hỏng phải hiện trên thẻ của CHÍNH tổ chức đó");
+
+  // ───────── Ngoài máy hỏng ⇒ bản cục bộ GIỮ NGUYÊN, PARTIAL, thoát 1 ─────────
+  const ngoai = gio({ STUB_ORGS: "erp_org_alpha\n", STUB_RCLONE_LOI: "1" });
+  assert.equal(phan(ngoai.ra, "EXIT"), "1");
+  assert.ok(dong(ngoai.ra, "ORGFILES").includes("orgs/erp_org_alpha/hourly/erp_org_alpha-20260929-1047.dump"), "lỗi đẩy Drive KHÔNG làm mất bản cục bộ đã kiểm toàn vẹn");
+  const hn = parseBackupRun(JSON.parse(phan(ngoai.ra, "HALPHA")));
+  assert.equal(hn?.result, "PARTIAL");
+  assert.equal(hn?.offsite.state, "FAILED");
+  assert.match(hn?.offsite.reason ?? "", /rclone: loi mang gia/);
+  assert.ok(phan(ngoai.ra, "SALPHA").length > 0, "bản cục bộ dùng được ⇒ vẫn là bản thành công gần nhất (thẻ báo vàng vế ngoài máy)");
+
+  // ───────── Khung bản đêm: bản đêm hôm nay CHƯA xong ⇒ bỏ lượt; ĐÃ xong ⇒ chạy ─────────
+  const dem = gio({ STUB_ORGS: "erp_org_alpha\n", STUB_GIO_VN: "2026-09-29 03:47" });
+  assert.equal(phan(dem.ra, "EXIT"), "0");
+  assert.deepEqual(dump(dem.ra), [], "khung đêm, bản đêm chưa xong ⇒ KHÔNG dump (bản đêm sẽ dump cả tổ chức)");
+  assert.ok(!dong(dem.ra, "DOCKER").includes("KHOA-SAO-LUU"), "…và không tranh khoá với nó");
+  assert.match(phan(dem.ra, "OUT"), /bản đêm hôm nay chưa xong — bỏ lượt/);
+  const demXong = gio({ STUB_ORGS: "erp_org_alpha\n", STUB_GIO_VN: "2026-09-29 03:47" }, 'mkdir -p "$ERP_BACKUP_DIR/status"; echo 2026-09-29 > "$ERP_BACKUP_DIR/status/daily-done"');
+  assert.equal(phan(demXong.ra, "EXIT"), "0", demXong.ra);
+  assert.deepEqual(dump(demXong.ra), ["exec erp-db pg_dump -U erp -d erp_org_alpha -Fc"], "bản đêm hôm nay đã xong ⇒ lượt giờ trong khung vẫn chạy");
+  const demHomQua = gio({ STUB_ORGS: "erp_org_alpha\n", STUB_GIO_VN: "2026-09-29 03:47" }, 'mkdir -p "$ERP_BACKUP_DIR/status"; echo 2026-09-28 > "$ERP_BACKUP_DIR/status/daily-done"');
+  assert.deepEqual(dump(demHomQua.ra), [], "daily-done của HÔM QUA không phải của hôm nay");
+
+  // ───────── Khoá sao lưu BẬN (bản đêm / diễn tập / lượt giờ trước còn chạy) ⇒ bỏ lượt, thoát 0, không ghi gì ─────────
+  const ban = gio({ STUB_ORGS: "erp_org_alpha\n", STUB_KHOA_BAN: "1" });
+  assert.equal(phan(ban.ra, "EXIT"), "0", "khoá bận là trạng thái BÌNH THƯỜNG của lượt giờ — không đỏ log mỗi giờ");
+  assert.deepEqual(dump(ban.ra), [], "khoá bận ⇒ KHÔNG dump");
+  assert.equal(phan(ban.ra, "STATUSFILES"), "", "khoá bận ⇒ không ghi đè trạng thái của lượt đang chạy");
+  assert.match(phan(ban.ra, "OUT"), /bỏ lượt giờ này/);
+
+  // ───────── Không liệt kê được ⇒ CHƯA BIẾT: thoát 1, không khoá, không tệp ─────────
+  const loiLiet = gio({ STUB_LIST_ORG: "loi" });
+  assert.equal(phan(loiLiet.ra, "EXIT"), "1", "không hỏi được Postgres ⇒ KHÔNG im lặng coi như không có tổ chức");
+  assert.ok(!dong(loiLiet.ra, "DOCKER").includes("KHOA-SAO-LUU"));
+  assert.equal(phan(loiLiet.ra, "STATUSFILES"), "");
+  assert.equal(phan(gio({ STUB_ORGS: "" }, "", "main hourly-org thua").ra, "EXIT"), "2", "tham số lạ ⇒ thoát 2");
+
+  // ───────── Khoá THẬT (flock): lượt giờ tới khi một lượt khác cầm FD 7 ⇒ thoát 0 NGAY, 0 lệnh dump ─────────
+  if (!coFlock()) {
+    assert.notEqual(process.platform, "linux", "Linux PHẢI có flock");
+    console.log(`⚠ Lượt giờ + khoá THẬT: CHƯA ĐO ĐƯỢC trên ${process.platform} (không có flock). Nhánh "khoá bận" đã chạy thật với khoá giả ở trên; flock thật đo trên Linux/CI.`);
+  } else {
+    const r = chayBash(
+      [
+        "#!/usr/bin/env bash",
+        'T="$(mktemp -d)"; mkdir -p "$T/bin" "$T/khoa"',
+        "cat > \"$T/bin/docker\" <<'EOF'",
+        "#!/usr/bin/env bash",
+        'echo "$*" >> "$T_LOG"',
+        'case "$*" in *pg_database*) echo erp_org_alpha ;; esac',
+        "EOF",
+        'chmod +x "$T/bin/docker"',
+        'export PATH="$T/bin:$PATH" T_LOG="$T/docker.log" ERP_BACKUP_DIR="$T/backups" ERP_DIR="$T/erp" ERP_LOCK_DIR="$T/khoa"',
+        ': > "$T_LOG"',
+        // Script chạy với đồng hồ THẬT ở đây: đánh dấu bản đêm hôm nay (giờ VN) đã xong để nhánh "khung đêm" không
+        // phụ thuộc giờ CI chạy (mục 50) — bài này đo KHOÁ, không đo khung giờ.
+        'mkdir -p "$T/backups/status"; date -u -d "@$(( $(date +%s) + 25200 ))" +%F > "$T/backups/status/daily-done"',
+        '( flock -x "$T/khoa/erp-backup.lock" sleep 6 ) & sleep 1',
+        `timeout 20 bash "${bashPath(SCRIPT)}" hourly-org > "$T/out" 2>&1; rc=$?`,
+        'echo "@@MA"; echo $rc; echo "@@DUMP"; grep -c pg_dump "$T_LOG" || true; echo "@@OUT"; cat "$T/out"',
+        "wait",
+        'echo "@@HET"; rm -rf "$T"',
+        "",
+      ].join("\n"),
+    );
+    assert.equal(phan(r.ra, "MA"), "0", `khoá thật bận ⇒ thoát 0:\n${r.ra}`);
+    assert.equal(phan(r.ra, "DUMP"), "0", "khoá thật bận ⇒ 0 lệnh pg_dump");
+    assert.match(phan(r.ra, "OUT"), /bỏ lượt giờ này/);
+  }
+
+  console.log(`✓ Lượt giờ tổ chức (chạy bash thật qua main): 0 tổ chức ⇒ thoát 0, 0 dòng log, 1 câu đọc, 0 khoá, 0 tệp · 2 tổ chức ⇒ chỉ dump -d erp_org_*, 0 lệnh vào bot / sổ, daily/ + trạng thái của nhà không đổi · hourly/ giữ ${giu} bản, bản đêm của tổ chức không bị đụng · Drive chỉ orgs/<csdl>/hourly/, dọn --min-age ${giu + 1}h · last-hourly.json + last-success.json đọc được bằng bộ đọc ERP, thẻ tổ chức thấy lượt hỏng · Drive lỗi ⇒ bản cục bộ giữ, PARTIAL · khung đêm chưa xong ⇒ bỏ · khoá bận ⇒ thoát 0, 0 dump · psql lỗi ⇒ thoát 1`);
+}
+
+export function testDienTapTuanToChucChayThat() {
+  const dt = (env: Record<string, string>, truoc = "", lenh = "main drill-org-weekly") =>
+    chayBash(khungDienTap(lenh, [DONG_HO_GIA, KHOA_GHI_LAI, truoc].join("\n")), { STUB_GIO_VN: "2026-09-27 06:37", ...env });
+  const ld = (ra: string) => phan(ra, "DOCKER").split("\n").filter(Boolean);
+  const chiDocErpDb = (ra: string) => {
+    for (const l of ld(ra).filter((d) => /^exec (-i )?erp-db /.test(d))) {
+      assert.match(l, /^exec erp-db psql -U erp -d \S+ -Atc select (count\(\*\) from |\(pg_database_size)/, `lệnh vào erp-db phải chỉ ĐỌC: ${l}`);
+    }
+  };
+  assert.equal(new Date("2026-09-27T06:37:00Z").getUTCDay(), 0, "mốc thử là Chủ nhật");
+
+  // ───────── Chủ nhật 06:37 ⇒ diễn tập luân phiên vào CSDL TẠM, erp-db chỉ bị đọc, đánh dấu tuần xong ─────────
+  const dat = dt({});
+  assert.equal(phan(dat.ra, "EXIT"), "0", `diễn tập tuần đạt ⇒ thoát 0:\n${dat.ra}`);
+  const l = ld(dat.ra);
+  const iKhoa = l.indexOf("KHOA-SAO-LUU");
+  const iRun = l.findIndex((x) => x.startsWith("run "));
+  assert.ok(iKhoa >= 0 && iRun > iKhoa, "cầm khoá sao lưu TRƯỚC khi dựng container tạm");
+  assert.match(l[iRun], /--network none --memory 512m --memory-swap 512m .*-e POSTGRES_DB=tam_khoiphuc_alpha /, "đích là CSDL TẠM trong container TẠM (không mạng, trần RAM)");
+  assert.ok(l.some((x) => /^exec erp-restore-drill-org-\d+ pg_restore -U erp -d tam_khoiphuc_alpha /.test(x)), "pg_restore vào CSDL tạm");
+  assert.ok(!l.some((x) => /^exec (-i )?erp-db (pg_restore|createdb|dropdb)|^exec (-i )?erp-db .*alter database/i.test(x)), "KHÔNG BAO GIỜ khôi phục đè production");
+  chiDocErpDb(dat.ra);
+  assert.match(l.at(-1) ?? "", /^rm -f -v erp-restore-drill-org-\d+$/, "lệnh docker cuối là xoá container tạm");
+  assert.match(phan(dat.ra, "OUT"), /luân phiên chọn erp_org_alpha/, "beta không có bản trên máy ⇒ luân phiên chọn alpha");
+  assert.equal(parseBackupDrill(JSON.parse(phan(dat.ra, "ALPHA")))?.result, "OK", "trạng thái ghi vào status/orgs/<csdl>/last-drill.json — thẻ của tổ chức đọc");
+  assert.equal(phan(dat.ra, "NHA"), "", "không ghi last-drill.json của nhà");
+  assert.equal(phan(dat.ra, "TUAN"), "2026-09-27", "tuần này đã xong");
+
+  // ───────── Đã xong tuần này / ngoài Chủ nhật / ngoài khung / không tổ chức ⇒ thoát 0, 0 lệnh ─────────
+  const daXong = dt({}, 'mkdir -p "$ERP_BACKUP_DIR/status"; echo 2026-09-27 > "$ERP_BACKUP_DIR/status/drill-org-week-done"');
+  const ngoai: [string, Ra][] = [
+    ["đã diễn tập tuần này", daXong],
+    ["thứ Ba", dt({ STUB_GIO_VN: "2026-09-29 06:37" })],
+    ["Chủ nhật 05:37 (còn khung bản đêm)", dt({ STUB_GIO_VN: "2026-09-27 05:37" })],
+    ["Chủ nhật 08:37 (hết khung)", dt({ STUB_GIO_VN: "2026-09-27 08:37" })],
+    ["không tổ chức nào có bản", dt({}, 'rm -rf "$ERP_BACKUP_DIR/orgs"')],
+  ];
+  for (const [ten, r] of ngoai) {
+    assert.equal(phan(r.ra, "EXIT"), "0", `${ten} ⇒ thoát 0`);
+    assert.deepEqual(ld(r.ra), [], `${ten} ⇒ không khoá, không một lệnh docker`);
+    assert.equal(phan(r.ra, "OUT"), "", `${ten} ⇒ im lặng (cron gọi mỗi giờ)`);
+  }
+  assert.equal(phan(daXong.ra, "TUAN"), "2026-09-27");
+
+  // ───────── Thiếu RAM ⇒ SKIPPED, KHÔNG đánh dấu (giờ sau thử lại); khoá bận ⇒ không dựng gì, không đánh dấu ─────────
+  const ram = dt({ STUB_RAM: "300" });
+  assert.equal(parseBackupDrill(JSON.parse(phan(ram.ra, "ALPHA")))?.result, "SKIPPED");
+  assert.ok(!ld(ram.ra).some((x) => x.startsWith("run ")));
+  assert.equal(phan(ram.ra, "TUAN"), "", "SKIPPED không phải kết luận ⇒ 07 giờ thử lại");
+  const ban = dt({ STUB_KHOA_BAN: "1" });
+  assert.equal(phan(ban.ra, "EXIT"), "0");
+  assert.deepEqual(ld(ban.ra), ["KHOA-SAO-LUU"], "khoá sao lưu bận ⇒ không dựng Postgres thứ hai");
+  assert.equal(phan(ban.ra, "TUAN"), "");
+  // Kết luận CŨ không được tính là của lượt này: hết giờ chờ khoá (không ghi trạng thái) mà tệp cũ ghi OK.
+  const cu = dt(
+    {},
+    [
+      "giu_khoa() { return 1; }",
+      'mkdir -p "$ERP_BACKUP_DIR/status/orgs/erp_org_alpha"',
+      'printf \'{"schema":1,"kind":"restore-drill","database":"erp_org_alpha","result":"OK","finishedAt":"2026-09-20T00:00:00Z"}\\n\' > "$ERP_BACKUP_DIR/status/orgs/erp_org_alpha/last-drill.json"',
+    ].join("\n"),
+  );
+  assert.equal(phan(cu.ra, "EXIT"), "75", `hết giờ chờ khoá ⇒ mã 75:\n${cu.ra}`);
+  assert.equal(phan(cu.ra, "TUAN"), "", "kết luận OK của tuần TRƯỚC không được đánh dấu tuần này xong");
+
+  // ───────── pg_restore lỗi ⇒ FAILED, container vẫn dọn, ĐÁNH DẤU (không thử lại cùng bản) ─────────
+  const hong = dt({ STUB_RESTORE: "loi" });
+  assert.equal(phan(hong.ra, "EXIT"), "1");
+  assert.equal(parseBackupDrill(JSON.parse(phan(hong.ra, "ALPHA")))?.result, "FAILED", "thẻ của tổ chức chuyển đỏ");
+  assert.match(ld(hong.ra).at(-1) ?? "", /^rm -f -v erp-restore-drill-org-\d+$/);
+  assert.equal(phan(hong.ra, "TUAN"), "2026-09-27", "FAILED là kết luận — không dựng lại Postgres thứ hai mỗi giờ để nhận cùng kết luận");
+  chiDocErpDb(hong.ra);
+  assert.equal(phan(dt({}, "", "main drill-org-weekly erp_org_alpha").ra, "EXIT"), "2", "tham số lạ ⇒ thoát 2 (chọn tổ chức là việc của restore-drill-org)");
+
+  console.log("✓ Diễn tập tuần (chạy bash thật qua main): Chủ nhật 06:37 ⇒ khoá sao lưu TRƯỚC, container tạm không mạng / trần 512m, CSDL tạm tam_khoiphuc_alpha, erp-db chỉ bị đọc, xoá container, trạng thái vào thư mục của tổ chức, đánh dấu tuần · đã xong / thứ Ba / 05:37 / 08:37 / 0 tổ chức ⇒ 0 lệnh, 0 log · thiếu RAM / khoá bận / kết luận cũ ⇒ không đánh dấu (thử lại giờ sau) · pg_restore lỗi ⇒ FAILED + dọn + đánh dấu");
+}
+
+export function testLichToChucMoi() {
+  // Dòng của NHÀ không đổi: chạy install-cron của bản ĐÃ GỠ khối tổ chức (đúng bản trước Phase 11 — BAM_PHAN_NHA) và
+  // của bản đầy đủ, rồi so. Bản đầy đủ = bản của nhà + ĐÚNG ba dòng nối sau (một chú thích + hai lịch).
+  const tmp = mkdtempSync(path.join(tmpdir(), "lich-to-chuc-"));
+  try {
+    const nhaTep = path.join(tmp, "erp-backup-nha.sh");
+    writeFileSync(nhaTep, tachPhanToChuc().nha);
+    const r = chayBash(
+      [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        'T="$(mktemp -d)"; mkdir -p "$T/bin" "$T/erp"',
+        'printf "#!/usr/bin/env bash\\nexit 0\\n" > "$T/bin/cron"; cp "$T/bin/cron" "$T/bin/systemctl"; chmod +x "$T/bin/cron" "$T/bin/systemctl"',
+        'export PATH="$T/bin:$PATH" ERP_DIR="$T/erp" ERP_BACKUP_DIR="$T/backups" ERP_LOGROTATE_FILE="$T/logrotate" ERP_BACKUP_LOG="$T/erp-backup.log"',
+        "unset BACKUP_OFFSITE_REMOTE",
+        `ERP_CRON_FILE="$T/moi" bash "${bashPath(SCRIPT)}" install-cron > /dev/null 2>&1; a=$?`,
+        `ERP_CRON_FILE="$T/cu" bash "${bashPath(nhaTep)}" install-cron > /dev/null 2>&1; b=$?`,
+        'echo "@@MA"; echo "$a $b"',
+        'echo "@@MOI"; cat "$T/moi"',
+        'echo "@@CU"; cat "$T/cu"',
+        'echo "@@HET"; rm -rf "$T"',
+        "",
+      ].join("\n"),
+    );
+    assert.equal(phan(r.ra, "MA"), "0 0", `cả hai bản cài được lịch:\n${r.ra}`);
+    const moi = phan(r.ra, "MOI").split("\n");
+    const cu = phan(r.ra, "CU").split("\n");
+    assert.ok(cu.length >= 5 && cu.some((d) => /erp-backup\.sh cron >> /.test(d)), "bản của nhà có lịch đêm");
+    assert.deepEqual(moi.slice(0, cu.length), cu, "mọi dòng lịch của NHÀ giữ nguyên từng byte, đúng thứ tự");
+    const them = moi.slice(cu.length);
+    assert.equal(them.length, 3, `đúng ba dòng thêm (một chú thích + HAI lịch mới): ${JSON.stringify(them)}`);
+    assert.match(them[0], /^# /);
+    assert.match(them[1], new RegExp(`^${hangSo("PHUT_CRON_GIO")} \\* \\* \\* \\* root ERP_DIR=\\S+ ERP_BACKUP_DIR=\\S+ /bin/bash \\S+/scripts/erp-backup\\.sh hourly-org >> \\S+ 2>&1$`), `lịch giờ: ${them[1]}`);
+    assert.match(them[2], new RegExp(`^${hangSo("PHUT_CRON_DIEN_TAP")} \\* \\* \\* \\* root ERP_DIR=\\S+ ERP_BACKUP_DIR=\\S+ /bin/bash \\S+/scripts/erp-backup\\.sh drill-org-weekly >> \\S+ 2>&1$`), `lịch diễn tập: ${them[2]}`);
+    assert.ok(!moi.join("\n").includes("%"), "`%` là ký tự đặc biệt của crontab");
+    assert.equal(moi.filter((d) => /erp-backup\.sh /.test(d) && !d.startsWith("#")).length, 3, "tổng cộng đúng BA lịch: đêm (nhà + tổ chức), giờ (tổ chức), diễn tập tuần (tổ chức)");
+    console.log(`✓ Lịch cron: ${cu.length} dòng của nhà giữ nguyên từng byte (so với bản gỡ khối tổ chức) · thêm đúng hai lịch: hourly-org phút ${hangSo("PHUT_CRON_GIO")}, drill-org-weekly phút ${hangSo("PHUT_CRON_DIEN_TAP")}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+export async function testChamRpoGio() {
+  const BAY_GIO = new Date("2026-09-29T04:00:00Z");
+  const truoc = (gio: number) => new Date(BAY_GIO.getTime() - gio * 3_600_000).toISOString();
+  const A: BackupTarget = { scope: "ORGANIZATION", database: "erp_org_alpha" };
+  const ban = (gio: number, over: Record<string, unknown> = {}) => ({
+    schema: 1,
+    kind: "org-backup",
+    database: "erp_org_alpha",
+    result: "OK",
+    trigger: "hourly",
+    finishedAt: truoc(gio),
+    db: { file: "erp_org_alpha-x.dump", bytes: 1, tableData: 90 },
+    offsite: { state: "OK", remote: "gcrypt:" },
+    retention: { daily: 7, weekly: 4, manual: 3, hourly: 48 },
+    ...over,
+  });
+  const dienTap = { schema: 1, kind: "restore-drill", database: "erp_org_alpha", result: "OK", finishedAt: truoc(30), tables: [] };
+  const rpo = (h: ReturnType<typeof evaluateBackupHealth>) => h.issues.filter((i) => /RPO mục tiêu ≤ 1 giờ/.test(i.text));
+
+  const moi = evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(1), lastHourly: ban(1), lastDrill: dienTap }, BAY_GIO, A);
+  assert.equal(moi.state, "HEALTHY", `bản giờ 1 giờ tuổi + diễn tập ⇒ khoẻ: ${moi.issues.map((i) => i.text).join(" | ")}`);
+  assert.equal(moi.lastSuccess?.retention.hourly, 48);
+  assert.deepEqual(rpo(evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(ORG_BACKUP_RPO_ALERT_HOURS), lastDrill: dienTap }, BAY_GIO, A)), [], "đúng ngưỡng chưa phải quá ngưỡng");
+  const cham = evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(ORG_BACKUP_RPO_ALERT_HOURS + 1), lastDrill: dienTap }, BAY_GIO, A);
+  assert.equal(rpo(cham).length, 1, "quá ngưỡng ⇒ vế RPO");
+  assert.equal(cham.state, "DEGRADED", "lỡ vài lượt giờ là VÀNG — bản đêm vẫn còn, không phải mất sao lưu");
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(BACKUP_MAX_AGE_HOURS + 1), lastDrill: dienTap }, BAY_GIO, A).state, "DOWN", "quá ngưỡng ngày ⇒ vẫn ĐỎ như trước");
+  // NHÀ không bị chấm theo mục tiêu giờ — RPO của nhà vẫn ≤ 1 ngày cho tới khi có PITR.
+  const nha = { ...ban(20), kind: "backup", database: undefined, trigger: "cron", chatbot: { state: "OK" } };
+  const theNha = evaluateBackupHealth({ dirReadable: true, lastRun: nha, lastSuccess: nha, lastDrill: { ...dienTap, database: undefined }, lastHourly: ban(0) }, BAY_GIO);
+  assert.equal(theNha.state, "HEALTHY", `nhà: bản đêm 20 giờ tuổi vẫn khoẻ, lượt giờ của tổ chức không bao giờ chạm thẻ của nhà: ${theNha.issues.map((i) => i.text).join(" | ")}`);
+  assert.equal(theNha.lastHourly, null);
+  // Lượt giờ hỏng SAU bản thành công ⇒ vàng, nêu lý do; lượt giờ của CSDL khác ⇒ không dùng, nói ra.
+  const hong = evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(1), lastHourly: ban(0, { result: "FAILED", reason: "ổ đầy giả" }), lastDrill: dienTap }, BAY_GIO, A);
+  assert.ok(hong.issues.some((i) => i.state === "DEGRADED" && /Lượt sao lưu mỗi giờ gần nhất THẤT BẠI: ổ đầy giả/.test(i.text)));
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(0), lastHourly: ban(1, { result: "FAILED" }), lastDrill: dienTap }, BAY_GIO, A).state, "HEALTHY", "lượt hỏng CŨ hơn bản thành công đã tự lành");
+  const khac = evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(1), lastHourly: ban(0, { database: "erp_org_beta", result: "FAILED" }), lastDrill: dienTap }, BAY_GIO, A);
+  assert.equal(khac.lastHourly, null, "lượt giờ của erp_org_beta không phải của erp_org_alpha");
+  assert.ok(khac.issues.some((i) => /CSDL KHÁC/.test(i.text)));
+  assert.equal(evaluateBackupHealth({ dirReadable: true, lastSuccess: ban(1), lastHourly: UNPARSABLE, lastDrill: dienTap }, BAY_GIO, A).state, "UNKNOWN", "tệp giờ hỏng ⇒ CHƯA BIẾT, không phải khoẻ");
+
+  // Đọc đĩa thật: tổ chức đọc last-hourly.json của CHÍNH nó; nhà không đọc.
+  const dir = mkdtempSync(path.join(tmpdir(), "trang-thai-gio-"));
+  try {
+    mkdirSync(path.join(dir, "orgs", "erp_org_alpha"), { recursive: true });
+    writeFileSync(path.join(dir, "orgs", "erp_org_alpha", "last-hourly.json"), JSON.stringify(ban(0)));
+    writeFileSync(path.join(dir, "last-hourly.json"), JSON.stringify(ban(0)));
+    assert.equal(parseBackupRun((await readBackupStatusFiles(dir, A)).lastHourly)?.trigger, "hourly");
+    assert.equal((await readBackupStatusFiles(dir)).lastHourly, undefined, "nhà không đọc tệp lượt giờ");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  console.log(`✓ Thẻ sao lưu · RPO giờ: tổ chức quá ${ORG_BACKUP_RPO_ALERT_HOURS} giờ ⇒ vàng (quá ${BACKUP_MAX_AGE_HOURS} giờ vẫn đỏ) · nhà không bị chấm theo giờ và không bao giờ đọc lượt giờ · lượt giờ hỏng sau bản tốt ⇒ vàng, hỏng cũ đã tự lành · lượt giờ của CSDL khác / tệp hỏng không làm căn cứ`);
+}
+
 export async function testSaoLuu() {
   testLichSaoLuuDuocCai();
   testXoayVongMotChoKhai();
@@ -1524,5 +1890,10 @@ export async function testSaoLuu() {
   await testChamSaoLuuToChuc();
   testDienTapToChucMaNguon();
   testDienTapToChucChayThat();
+  testLuotGioToChucMaNguon();
+  testLuotGioToChucChayThat();
+  testDienTapTuanToChucChayThat();
+  testLichToChucMoi();
+  await testChamRpoGio();
 }
 
