@@ -6,37 +6,106 @@
 ## A · `PLATFORM_SECRETS_KEY` — khoá mã hoá bí mật kết nối theo tổ chức
 
 **Nó làm gì.** Tổ chức khác lưu bí mật của chính họ (Lark, Telegram, khoá AI) ở `/settings/connections`; bí mật được mã
-hoá AES-256-GCM bằng khoá dẫn xuất từ biến này (`lib/connectors/secrets.ts`). Thiếu khoá ⇒ lưu bí mật bị TỪ CHỐI, màn
-hình nói rõ; không có đường lùi về khoá nào khác.
+hoá AES-256-GCM bằng khoá dẫn xuất HKDF-SHA256 từ biến này (`lib/connectors/secrets.ts`), AAD gắn mã tổ chức + khoá
+connector. Thiếu khoá ⇒ lưu bí mật bị TỪ CHỐI, màn hình nói rõ; không có đường lùi về khoá nào khác (không `AUTH_SECRET`,
+không hằng số trong mã — kho PUBLIC).
 
-**Đường ống (đã nối, kiểm ở `tests/launch-gates.test.ts`):**
+### A.1 · Kiểm toán đường ống (đọc mã thật 29/09/2026)
 
-```
-GitHub Secret PLATFORM_SECRETS_KEY
-  → .github/workflows/deploy-vps.yml   bước SSH: env + envs + export
-  → scripts/bootstrap.sh               exec sang install-vps.sh, môi trường giữ nguyên
-  → scripts/install-vps.sh             ghi .env CHỈ khi khác rỗng (rỗng ⇒ giữ giá trị cũ, không dòng rỗng)
-  → docker-compose.prod.yml            env_file: .env ⇒ container app + scheduler
-```
+| # | Chặng | Kết luận | Căn cứ |
+|---|---|---|---|
+| 1 | GitHub Secret → `deploy-vps.yml` | ĐỦ: env của bước SSH đọc `secrets.PLATFORM_SECRETS_KEY`, tên có trong `envs` (appleboy chỉ chở biến có tên ở đó) VÀ trong `export` của script trên VPS. Bước "Kiểm tra Secrets bắt buộc" chỉ in `có / chưa có`, KHÔNG chặn deploy khi thiếu. | `tests/launch-gates.test.ts` (quét) |
+| 2 | `bootstrap.sh` → `install-vps.sh` | ĐỦ: `exec bash scripts/install-vps.sh` — môi trường đi nguyên, không `env -i`, không `unset`. | như trên |
+| 3 | `install-vps.sh` → `/root/erp/.env` | ĐỦ: ghi CHỈ khi khác rỗng (Secret bị xoá ⇒ `.env` giữ nguyên từng byte), từ chối ký tự ngoài base64 (`&` sẽ làm `sed` ghi SAI khoá một cách im lặng), chạy SAU cả hai nhánh tạo / giữ `.env`. Không in giá trị, không `set -x`. | chạy THẬT khối shell dưới `bash -euo pipefail` |
+| 4 | `.env` → container | ĐỦ: `docker-compose.prod.yml` — `app` và `scheduler` có `env_file: .env`; `chatbot`, `caddy`, `db` KHÔNG nạp `.env` (chatbot chỉ nhận biến khai tường minh) ⇒ khoá chỉ ở hai tiến trình cần nó. Cuối `install-vps.sh` là `docker compose up -d` (nhánh ảnh) / `up -d --build`: compose dựng lại container khi nội dung `env_file` đổi, và mỗi lượt deploy đổi ảnh + `ERP_COMMIT` nên container luôn được dựng lại. Compose v2 bỏ dấu nháy của `KEY="…"` (cùng cách `AUTH_SECRET` đang chạy nhiều tháng); `secretsKeyState()` cắt khoảng trắng thừa. | đọc compose thật; bài kiểm quét `env_file` của hai service |
 
-Không bước nào in giá trị; log deploy chỉ nói "có / chưa có". Secret bị xoá nhầm KHÔNG xoá khoá trên máy (xoá khoá là
-làm mọi bí mật đã lưu thành rác). Giá trị có ký tự ngoài base64 bị từ chối ghi (không làm hỏng `.env`).
+**Chỗ dễ sai (không phải lỗi mã, là thao tác):**
 
-**Việc của chủ nền tảng — đúng MỘT thao tác:**
+- **`reset_env = 1`** chuyển `.env` sang `.env.bak-<giây>` rồi sinh `.env` MỚI: khoá chỉ được ghi lại nếu secret GitHub
+  còn. Secret đã bị xoá mà bấm `reset_env` ⇒ `.env` sống KHÔNG có khoá (khoá cũ vẫn nằm trong `.env.bak-*`). Đừng bấm
+  `reset_env` khi secret không còn.
+- **ops `restart`** là `docker compose restart` — KHÔNG nạp lại `.env`. Sửa `.env` bằng tay thì dựng lại:
+  `docker compose -f docker-compose.prod.yml up -d app scheduler`.
 
-1. GitHub → Settings → Secrets and variables → Actions → **New repository secret**: tên `PLATFORM_SECRETS_KEY`, giá trị
-   là đầu ra của `openssl rand -base64 48` (chạy trên máy của bạn, dán thẳng vào ô, không lưu ở đâu khác).
-2. Actions → **Deploy ERP to VPS** → Run workflow (nhánh `main`, `reset_env` để trống).
+**Đổi khoá thì sao.** Mỗi dòng `org_connections` mang `secrets_key_id` (8 byte đầu HMAC của khoá dẫn xuất). Khoá đổi mà
+KHÔNG theo kế hoạch A.4 ⇒ `openSecrets` từ chối NGAY bằng mã khoá, không phải một lỗi GCM mơ hồ:
+`SECRETS_DECRYPT_FAILED` — "Bí mật được mã hoá bằng một PLATFORM_SECRETS_KEY khác (mã khoá xxxxxxxx…, hiện tại
+yyyyyyyy…) — nhập lại bí mật của kết nối này." Câu này tới người dùng ở nút Kiểm tra, ở `openActiveConnection` (AI Builder
+nói "không có kết nối"), và lượt Lưu kế tiếp bỏ bản mã cũ, chỉ giữ ô vừa nhập lại. Không bao giờ trả bản rõ rác: thiếu mã
+khoá thì thẻ xác thực GCM vẫn chặn.
 
-**Kiểm sau khi bật:**
+**Khoá có lọt ra đâu không:**
 
-- Log bước "Kiểm tra Secrets bắt buộc" in `PLATFORM_SECRETS_KEY: có`; bước SSH in `PLATFORM_SECRETS_KEY: đã ghi vào .env`.
-- `/platform` → Cổng mở bán → **A · Sẵn sàng · mã khoá `xxxxxxxx…`** (8 ký tự đầu của MÃ khoá — HMAC, không suy ngược ra
-  khoá; dùng để biết khoá có bị đổi hay không).
-- Một tổ chức thử: `/settings/connections` → Lark webhook hoặc Telegram → Lưu → Kiểm tra → Bật. Lưu được là xong.
+| Nơi | Kết luận |
+|---|---|
+| Log Actions | Chỉ `có / chưa có` / `đã ghi vào .env (không in giá trị)`; GitHub còn tự che secret. Bài kiểm quét mọi dòng chạm biến. |
+| Log ứng dụng | `lib/connectors/*` không có `console.*` (quét). Bài kiểm vòng đời BẮT mọi `console.*` trong lúc lưu / kiểm / xoay và tìm từng bí mật: 0. |
+| `/api/health` (công khai) | `secretsKey: ready \| missing \| invalid`, `secretsKeyIdShort` (8 hex của MÃ khoá — HMAC, không suy ngược, đủ để so hai lượt deploy), `secretsKeyPrevious`. Không khoá, không khoá dẫn xuất, không mã khoá đầy đủ, không câu lý do. |
+| `/platform`, `/settings/connections` | Mã khoá rút gọn `xxxxxxxx…`. |
+| CSDL / bản sao lưu | Khoá không nằm trong bảng nào (bài kiểm QUÉT mọi bảng của hai tổ chức thử + nhà, cả dạng chữ lẫn hex). `.env` KHÔNG thuộc phạm vi `erp-backup.sh` ⇒ bản dump một mình không giải được — vì thế C3 bắt buộc cất khoá ra ngoài VPS. Xuất cấu hình (`/settings/export`) không chạm `org_connections` (chỉ `service.ts` chạm bảng — quét). |
+| Tiến trình con của agent | `sandboxEnv()` là danh sách CHO PHÉP; hai tên khoá nay nằm trong `SECRET_ENV_NAMES` để bài kiểm chứng minh chúng không lọt xuống. |
+| Còn lại, chấp nhận có chủ ý | Root trên VPS đọc được `.env` / `docker inspect erp-app`. Root trên VPS là mất tất cả — khoá này không bảo vệ được điều đó và không giả vờ bảo vệ. |
 
-**Lưu ý không đảo ngược được:** đổi hoặc mất khoá ⇒ mọi bí mật đã lưu phải nhập lại (không có đường khôi phục — có chủ
-ý). Sao lưu khoá ở kho mật khẩu của chủ nền tảng; bản dump CSDL KHÔNG giải được nếu thiếu nó (`backup-recovery.md` mục 7).
+### A.2 · Tự kiểm trên production — không cần tổ chức thứ hai
+
+`/platform` → **Cổng mở bán** → A → nút **«Tự kiểm khoá bí mật»** (người vận hành: tổ chức nhà + `platform:operate`).
+Máy chủ, TRONG BỘ NHỚ, trên một tổ chức GIẢ (`__tu_kiem__`, không phải mã hợp lệ): mã hoá một chuỗi NGẪU NHIÊN, giải lại
+đúng, rồi đòi bốn lượt giải sai phải bị TỪ CHỐI — AAD tổ chức khác · AAD connector khác · khoá khác (có và không mang mã
+khoá cũ) · bản mã sửa một byte; thêm "bản mã không chứa bản rõ" và "nonce mới mỗi lần"; có PREVIOUS thì thêm "bản mã của
+khoá cũ vẫn giải được". Một lượt "giải được" ở chỗ phải từ chối ⇒ **HỎNG** (fail closed). Trả `{ ok, mã khoá rút gọn,
+nguồn = PLATFORM_SECRETS_KEY, PREVIOUS, danh sách phép thử }` — không một ký tự của khoá hay chuỗi thử. KHÔNG đọc/ghi
+`org_connections`; ghi ĐÚNG một dòng `platform_audit_log` (`SECRETS_SELF_TEST`: ai, lúc nào, đạt/hỏng, mã khoá rút gọn).
+
+Từ ngoài (không đăng nhập): `curl -s https://<miền>/api/health` → `platform.secretsKey`.
+
+### A.3 · Việc của chủ nền tảng — ONE HUMAN GATE (đã giao)
+
+1. Chạy `openssl rand -base64 48` trên máy của bạn. GitHub → Settings → Secrets and variables → Actions → **New repository
+   secret**: tên `PLATFORM_SECRETS_KEY`, dán giá trị.
+2. Cất **một bản sao** ở trình quản lý mật khẩu / giấy cất riêng (cùng chỗ mật khẩu crypt của Drive) — đây cũng là C3.
+   GitHub KHÔNG cho đọc lại secret; mất bản sao + mất VPS = mọi bí mật kết nối của mọi tổ chức thành rác.
+3. Actions → **Deploy ERP to VPS** → Run workflow (nhánh `main`, `reset_env` để trống).
+
+Không tạo tổ chức thứ hai để "thử" — A.2 đã trả lời câu "khoá dùng được chưa" mà không cần nó.
+
+### A.4 · Xoay khoá (khi nghi khoá lộ, hoặc theo lịch) — có kế hoạch, không mất bí mật nào
+
+Nguyên tắc: `PLATFORM_SECRETS_KEY_PREVIOUS` giữ khoá CŨ trong lúc xoay. `openSecrets` chọn khoá theo MÃ KHOÁ lưu cạnh bản
+mã (hiện tại, hoặc PREVIOUS nếu khớp — không "thử bừa"); mã hoá LUÔN bằng khoá hiện tại. Biến PREVIOUS đi CÙNG đường ống
+với khoá chính (secret → workflow env/envs/export → `install-vps.sh`, rỗng ⇒ không ghi, ký tự lạ ⇒ từ chối).
+
+1. `openssl rand -base64 48` ⇒ khoá MỚI; cất bản sao.
+2. GitHub: secret `PLATFORM_SECRETS_KEY_PREVIOUS` = khoá ĐANG chạy (lấy từ bản sao đã cất); `PLATFORM_SECRETS_KEY` = khoá
+   MỚI. Deploy. Kiểm: `/api/health` → `secretsKey: ready`, `secretsKeyPrevious: ready`, `secretsKeyIdShort` ĐỔI; `/platform`
+   → Tự kiểm = ĐẠT (có dòng "Bản mã của PLATFORM_SECRETS_KEY_PREVIOUS vẫn giải được"). Lúc này KHÔNG kết nối nào chết.
+3. SSH VPS: `docker exec erp-app npm run platform:rotate-secrets` — CHẠY THỬ, không ghi gì. Đọc báo cáo từng tổ chức:
+   `WOULD_REKEY` (sẽ mã hoá lại) · `CURRENT` · `UNKNOWN_KEY` / `DECRYPT_FAILED` (người của tổ chức phải nhập lại — máy
+   không sửa hộ) · `TRIPWIRE` · tổ chức không ACTIVE bị BỎ QUA.
+4. `docker exec erp-app npm run platform:rotate-secrets -- --apply --confirm-production`. Mỗi dòng mã hoá lại ghi một dòng
+   `audit_logs` (`ORG_CONNECTION_REKEY`, mã khoá rút gọn trước → sau) trong CSDL của tổ chức đó. Trạng thái / kết quả kiểm
+   tra / mốc bật KHÔNG đổi (bản rõ không đổi). Ghi có điều kiện "mã khoá vẫn là khoá cũ" ⇒ không đè lượt lưu tay xen giữa.
+5. Chạy thử lại: dòng cuối phải là `Gỡ PLATFORM_SECRETS_KEY_PREVIOUS: ĐƯỢC` (mã thoát 0). Chạy thật lần hai = không đổi.
+6. Gỡ khoá cũ — theo ĐÚNG thứ tự: xoá secret GitHub `PLATFORM_SECRETS_KEY_PREVIOUS` (không thì lần deploy sau ghi lại
+   nó) → trên VPS `sed -i '/^PLATFORM_SECRETS_KEY_PREVIOUS=/d' /root/erp/.env` →
+   `docker compose -f docker-compose.prod.yml up -d app scheduler` → `/api/health` → `secretsKeyPrevious: absent`.
+
+Tổ chức đình chỉ không mở được bằng ngữ cảnh ⇒ bị BỎ QUA ở bước 3–5 và bí mật của nó chỉ sống nhờ PREVIOUS: kích hoạt tạm
+hoặc chấp nhận để họ nhập lại TRƯỚC khi gỡ PREVIOUS. Chưa có ops action cho bước 3–4 (chạy tay qua SSH, có chủ ý: đây là
+lượt ghi hàng loạt vào CSDL của mọi tổ chức — AGENTS.md mục 7).
+
+### A.5 · Checklist xác minh sau khi đặt khoá (phiên tích hợp chạy)
+
+| # | Kiểm | Đạt khi |
+|---|---|---|
+| V1 | Log run Deploy: bước "Kiểm tra Secrets bắt buộc" | `PLATFORM_SECRETS_KEY: có`; bước SSH in `PLATFORM_SECRETS_KEY: đã ghi vào .env (không in giá trị)` |
+| V2 | `curl -s https://erp.vnxcommerce.com/api/health` | `platform.secretsKey = "ready"`, `secretsKeyPrevious = "absent"`, ghi lại `secretsKeyIdShort` |
+| V3 | `/platform` → Cổng mở bán → A | "Sẵn sàng · mã khoá `xxxxxxxx…`" trùng 8 ký tự của V2 |
+| V4 | `/platform` → «Tự kiểm khoá bí mật» | "Tự kiểm ĐẠT", mọi dòng ✓; `platform_audit_log` có một dòng `SECRETS_SELF_TEST` mang email người bấm |
+| V5 | Deploy lần hai (không đổi secret), đọc lại `/api/health` | `secretsKeyIdShort` KHÔNG đổi (khoá bền qua deploy / dựng lại container) |
+| V6 | Bản sao khoá ngoài VPS (C3) | Chủ nền tảng xác nhận đã cất — không ai kiểm được hộ điều này |
+| V7 | Kế hoạch xoay khoá | A.4 đọc được, lệnh `npm run platform:rotate-secrets` có trong ảnh đang chạy (chạy thử = chỉ đọc) |
+
+Chưa làm V1–V5 trước khi có tổ chức trả tiền đầu tiên thì A chưa "mở".
 
 ## B · `/start` — đăng ký tổ chức mới, bật KHÔNG CẦN DEPLOY
 
@@ -102,6 +171,13 @@ khôi phục cấu hình từ tệp (`/settings/export` → «Cài từ tệp JS
   nguyên từng byte, base64 qua `sed` nguyên vẹn, ký tự lạ bị từ chối, không in giá trị).
 - `tests/connectors.test.ts` — lưu → kiểm tra → bật → `openActiveConnection` ra đúng bản rõ; màn hình / action chỉ có
   `••••` + 4 ký tự và mã khoá rút gọn.
+  Cổng A (29/09): tự kiểm fail-closed (bộ giải bỏ qua AAD / nuốt lỗi / ném lỗi lạ ⇒ HỎNG), chỉ người vận hành, đúng một
+  dòng `platform_audit_log`; PREVIOUS giải bản mã cũ, trùng / ngắn ⇒ `invalid`; vòng đời trên hai tổ chức thật: cập nhật
+  ⇒ Nháp và luồng chạy không nhận bí mật tới khi bật lại, khởi động lại vẫn giải được, khoá sai ⇒ từ chối không rác, A
+  không đọc được bản mã của B; xoay khoá chạy thử 0 byte + 0 nhật ký, chạy thật mã hoá lại mọi dòng giải được (trạng thái
+  không đổi, dòng hỏng giữ nguyên), chạy lại 0 đổi, gỡ PREVIOUS vẫn đúng bản rõ; QUÉT mọi bảng của A / B / nhà và mọi
+  `console.*`: không bản rõ nào. `tests/launch-gates.test.ts` thêm: PREVIOUS đi đủ ba chặng (chạy thật: không đụng dòng
+  khoá hiện tại), `/api/health` chỉ trạng thái + 8 hex.
 - `tests/onboarding.test.ts` — bảng chân lý 6 trần × 3 cài đặt; trần `off` thắng; không phải người vận hành / tổ chức khác
   không đổi được và không để lại dòng; nhật ký có dòng; `/start` phản ánh ngay; qua hạn đệm thì thấy lượt ghi của tiến
   trình khác. `tests/tenant-attack.test.ts` — phiên của tổ chức khác gọi thẳng `setSignupModeAction` bị từ chối.

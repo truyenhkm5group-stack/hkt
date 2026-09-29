@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { InvitePanel, RetrySetupButton, RevokeInviteButton, SignupModeControl } from "@/components/onboarding/platform-signup";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
+import { SecretsSelfTestButton } from "@/components/platform/secrets-self-test";
 import { Button } from "@/components/ui/button";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -11,7 +12,7 @@ import { listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
 import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
 import { listOrganizations } from "@/lib/platform/organizations";
-import { secretsKeyPublicStatus, SECRETS_KEY_ENV } from "@/lib/connectors/secrets";
+import { secretsKeyPublicStatus, SECRETS_KEY_ENV, SECRETS_KEY_PREVIOUS_ENV } from "@/lib/connectors/secrets";
 import { listOnboardingStates } from "@/lib/onboarding/service";
 import { SIGNUP_MODE_LABEL } from "@/lib/onboarding/shared";
 import { signupModeState } from "@/lib/onboarding/signup-mode";
@@ -195,7 +196,14 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
             {secretsKey.ready ? (
               <p>
                 <span className="font-medium text-emerald-700 dark:text-emerald-300">Sẵn sàng</span> · mã khoá <span className="font-mono">{secretsKey.keyIdShort}</span>
-                <span className="block text-xs text-muted-foreground">Tổ chức lưu được bí mật Lark / Telegram / khoá AI ở /settings/connections. Đổi khoá ⇒ mọi bí mật đã lưu phải nhập lại.</span>
+                <span className="block text-xs text-muted-foreground">Tổ chức lưu được bí mật Lark / Telegram / khoá AI ở /settings/connections. Đổi khoá KHÔNG theo kế hoạch xoay khoá ⇒ mọi bí mật đã lưu phải nhập lại.</span>
+                {secretsKey.previous === "ready" ? (
+                  <span className="block text-xs text-amber-800 dark:text-amber-300">
+                    Đang xoay khoá: {SECRETS_KEY_PREVIOUS_ENV} có (mã <span className="font-mono">{secretsKey.previousKeyIdShort}</span>) — chạy <span className="font-mono">npm run platform:rotate-secrets</span> rồi gỡ biến này (launch-gates.md mục A).
+                  </span>
+                ) : secretsKey.previous === "invalid" ? (
+                  <span className="block text-xs text-destructive">{SECRETS_KEY_PREVIOUS_ENV} đặt nhưng KHÔNG dùng được (ngắn hơn 32 ký tự hoặc trùng khoá hiện tại) — bí mật mang khoá cũ sẽ không giải được.</span>
+                ) : null}
               </p>
             ) : (
               <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
@@ -203,6 +211,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                 <span className="block text-xs">{secretsKey.reason}</span>
               </p>
             )}
+            <SecretsSelfTestButton />
           </div>
           <div className="space-y-1.5 text-sm" data-launch-gate="signup-mode">
             <p className="font-semibold">B · Đăng ký tổ chức mới (/start)</p>

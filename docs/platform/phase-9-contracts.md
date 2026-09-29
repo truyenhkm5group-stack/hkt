@@ -87,5 +87,7 @@ Mỗi điểm: hình dạng, bài kiểm bắt buộc, cách thêm một mục m
 
 - `PLATFORM_SECRETS_KEY` trên production: chuỗi ngẫu nhiên ≥ 32 ký tự (vd `openssl rand -base64 48`), đặt ở `.env`
   máy chủ / GitHub Secret (đường ống secret → deploy → `.env` đã nối — `launch-gates.md` mục A). Thiếu nó KHÔNG làm hỏng gì của VNX — chỉ tắt việc lưu bí mật kết nối theo tổ chức (màn hình
-  nói rõ). Đổi / mất khoá ⇒ mọi bí mật đã lưu phải nhập lại (không có đường khôi phục — có chủ ý). Là quyết định của
+  nói rõ). MẤT khoá ⇒ mọi bí mật đã lưu phải nhập lại (không có đường khôi phục — có chủ ý). ĐỔI khoá có kế hoạch thì
+  không mất gì: `PLATFORM_SECRETS_KEY_PREVIOUS` + `npm run platform:rotate-secrets` (`launch-gates.md` A.4). Kiểm khoá trên
+  production không cần tổ chức thứ hai: `/platform` → «Tự kiểm khoá bí mật» và `/api/health` → `platform.secretsKey` (A.2). Là quyết định của
   chủ nền tảng: thêm một secret mới vào môi trường production (AGENTS.md mục 7).

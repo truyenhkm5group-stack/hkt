@@ -240,4 +240,7 @@ export const SECRET_ENV_NAMES: readonly string[] = [
   "VIETTELPOST_API_KEY",
   "PANCAKE_WEBHOOK_SECRET",
   "SEPAY_API_TOKEN",
+  // Khoá mã hoá bí mật kết nối theo tổ chức (hiện tại + khoá cũ lúc xoay) — lộ nó là lộ mọi bí mật trong org_connections.
+  "PLATFORM_SECRETS_KEY",
+  "PLATFORM_SECRETS_KEY_PREVIOUS",
 ];

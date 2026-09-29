@@ -2534,7 +2534,7 @@ async function main() {
   // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
   await testConnectors();
   // Cổng mở bán A: PLATFORM_SECRETS_KEY đi đủ ba chặng secret → workflow → bootstrap/install → .env, rỗng không đè, không in.
-  testLaunchGatesPipeline();
+  await testLaunchGatesPipeline();
   await testCustomObjects();
   // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
   // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.

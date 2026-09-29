@@ -184,6 +184,15 @@ if [ -n "${PLATFORM_SECRETS_KEY:-}" ]; then
     *) upsert_env PLATFORM_SECRETS_KEY "${PLATFORM_SECRETS_KEY}"; say "PLATFORM_SECRETS_KEY: đã ghi vào .env (không in giá trị)" ;;
   esac
 fi
+# Khoá CŨ trong lúc xoay khoá (docs/platform/launch-gates.md mục A · Xoay khoá): cùng khuôn, cùng luật — rỗng ⇒ GIỮ
+# nguyên (Secret bị xoá không gỡ khoá cũ khỏi .env: gỡ nó là việc tay SAU khi scripts/rotate-platform-secrets.ts báo
+# "được gỡ"), ký tự ngoài base64 ⇒ từ chối, không bao giờ in giá trị.
+if [ -n "${PLATFORM_SECRETS_KEY_PREVIOUS:-}" ]; then
+  case "$PLATFORM_SECRETS_KEY_PREVIOUS" in
+    *[!A-Za-z0-9+/=_.-]*) warn "PLATFORM_SECRETS_KEY_PREVIOUS có ký tự ngoài base64 — KHÔNG ghi (giữ giá trị cũ)." ;;
+    *) upsert_env PLATFORM_SECRETS_KEY_PREVIOUS "${PLATFORM_SECRETS_KEY_PREVIOUS}"; say "PLATFORM_SECRETS_KEY_PREVIOUS: đã ghi vào .env (không in giá trị)" ;;
+  esac
+fi
 
 # ═══ CÔNG TẮC AN TOÀN — FAIL-CLOSED: VARIABLE BỊ XOÁ / RỖNG ⇒ TẮT ═══
 #

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb, getPlatformDb } from "@/db";
+import { secretsKeyHealth } from "@/lib/connectors/secrets";
 import { MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { getEnabledModules } from "@/lib/platform/capabilities";
 import { getHomeOrganization, FALLBACK_HOME_CODE } from "@/lib/platform/organizations";
@@ -28,6 +29,11 @@ export const dynamic = "force-dynamic";
  * tuyến này công khai, nên nó KHÔNG in mã / tên / số lượng tổ chức nào — chỉ nói về tổ chức nhà bằng
  * cờ đúng/sai. Khối này hỏng thì `ok` của cả phong bì vẫn giữ nguyên nghĩa cũ (tiến trình + CSDL):
  * không để một phép đo phụ đánh sập bước kiểm của workflow deploy.
+ *
+ * `secretsKey` (cổng mở bán A): `ready` | `missing` | `invalid` + 8 ký tự hex đầu của MÃ khoá (HMAC của khoá dẫn xuất,
+ * không suy ngược) + trạng thái biến PREVIOUS. Không mã khoá đầy đủ, không câu lý do, không một byte của khoá — đủ để
+ * kiểm từ ngoài "khoá đã tới container chưa" và "hai lượt deploy có đổi khoá không". Khoá TUỲ CHỌN nên nó KHÔNG góp vào
+ * `platform.ok`: thiếu khoá chỉ tắt việc lưu bí mật kết nối, tổ chức nhà không ảnh hưởng.
  */
 export async function GET() {
   const running = runningVersion();
@@ -56,8 +62,9 @@ async function platformHealth() {
       homeResolved: home.isHome && home.status === "ACTIVE",
       homeModules: `${enabled.size}/${MODULE_KEYS.length}`,
       migrations: rows?.[0]?.n ?? null,
+      ...secretsKeyHealth(),
     };
   } catch (error) {
-    return { ok: false, error: redactedErrorMessage(error) };
+    return { ok: false, error: redactedErrorMessage(error), ...secretsKeyHealth() };
   }
 }
