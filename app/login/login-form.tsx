@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DENY_REASON_MESSAGE } from "@/lib/constants/session-revocation";
 
-export function LoginForm({ next, reason, showOrgField = false }: { next?: string; reason?: string; showOrgField?: boolean }) {
+export function LoginForm({ next, reason, showOrgField = false, showSetupHint = true }: { next?: string; reason?: string; showOrgField?: boolean; showSetupHint?: boolean }) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
 
   return (
@@ -48,7 +48,7 @@ export function LoginForm({ next, reason, showOrgField = false }: { next?: strin
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}
             Đăng nhập
           </Button>
-          <p className="text-center text-xs text-muted-foreground">Tài khoản mặc định lấy từ ADMIN_EMAIL / ADMIN_PASSWORD trong file .env</p>
+          {showSetupHint ? <p className="text-center text-xs text-muted-foreground">Tài khoản mặc định lấy từ ADMIN_EMAIL / ADMIN_PASSWORD trong file .env</p> : null}
         </form>
       </CardContent>
       </Card>
