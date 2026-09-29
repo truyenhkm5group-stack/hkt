@@ -105,9 +105,13 @@ export async function subjectLabel(ref: SubjectRef | null, fields: Record<string
  *
  * Lượt chạy có cửa duyệt từng ghi `approval_requests.amount = null` cho MỌI luật, nên người duyệt hợp đồng 25.000.000 ₫
  * đọc «chưa rõ số tiền» — dù chính điều kiện của luật đang so field tiền đó với 20 triệu. Nay số tiền đọc từ SUBJECT
- * (cùng ảnh chụp mà điều kiện vừa xét — không truy vấn lại, không đọc giá trị khác lúc duyệt):
- *  1. field kiểu `currency` mà ĐIỀU KIỆN của luật tham chiếu, theo thứ tự xuất hiện;
- *  2. không có ⇒ field `currency` ĐẦU TIÊN của đối tượng (field hệ thống trước, rồi field custom theo vị trí khai).
+ * (cùng ảnh chụp mà điều kiện vừa xét — không truy vấn lại, không đọc giá trị khác lúc duyệt). Thứ tự ưu tiên (pilot P2
+ * #17 — trước đây field HỆ THỐNG đứng trước, nên luật "hợp đồng giá trị ≥ 20 triệu" trên đơn hàng xin duyệt với số tiền
+ * của cột tổng đơn thay vì field giá trị hợp đồng mà chính điều kiện đang so):
+ *  1. field tiền TUỲ BIẾN (`custom:`) mà ĐIỀU KIỆN tham chiếu, theo thứ tự xuất hiện;
+ *  2. field tiền tuỳ biến còn lại, theo vị trí khai;
+ *  3. field tiền HỆ THỐNG mà điều kiện tham chiếu;
+ *  4. field tiền hệ thống còn lại, theo thứ tự của sổ đối tượng.
  * Field nào có giá trị số nguyên hợp lệ trước thì dùng. Không field tiền nào có giá trị ⇒ `null` — "chưa rõ số tiền"
  * (luật 42: CHƯA BIẾT không in thành 0). Giá trị 0 THẬT vẫn là 0.
  */
@@ -128,7 +132,10 @@ export function conditionFieldRefs(cond: WorkflowCondition | null | undefined): 
 /** Số tiền của yêu cầu duyệt — hàm THUẦN. `currencyRefs` = field kiểu tiền của đối tượng theo thứ tự khai. */
 export function approvalAmountOf(conditions: WorkflowCondition | null | undefined, fields: Record<string, unknown>, currencyRefs: readonly string[]): number | null {
   const referenced = conditionFieldRefs(conditions).filter((r) => currencyRefs.includes(r));
-  for (const ref of [...referenced, ...currencyRefs]) {
+  const custom = (refs: readonly string[]) => refs.filter((r) => r.startsWith("custom:"));
+  const system = (refs: readonly string[]) => refs.filter((r) => !r.startsWith("custom:"));
+  const order = [...custom(referenced), ...custom(currencyRefs), ...system(referenced), ...system(currencyRefs)];
+  for (const ref of order) {
     const v = fields[ref];
     // Cột tiền hệ thống kiểu `numeric` về dạng chuỗi ("150000" / "150000.00") — nhận khi là số nguyên đồng.
     const n = typeof v === "string" && /^-?[0-9]+(?:[.]0+)?$/.test(v.trim()) ? Number(v.trim()) : v;

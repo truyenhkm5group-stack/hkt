@@ -37,11 +37,12 @@ import { formRefProblems } from "@/lib/metadata/form-schema";
 import { listRefProblems } from "@/lib/metadata/list-schema";
 import type { CustomFieldDef, FieldOption } from "@/lib/metadata/types";
 import { compilePattern } from "@/lib/metadata/validate";
-import { customObjectListSource, customObjectTimelineSource } from "@/lib/pages/catalog";
+import { customObjectListSource, customObjectTimelineSource, metricAvailableFor, metricSource } from "@/lib/pages/catalog";
 import { customRefsOf, defaultPageCatalog, validatePageSchema, type PageCatalog } from "@/lib/pages/components";
-import type { PageSchema } from "@/lib/pages/types";
+import { flattenBlocks, type PageSchema } from "@/lib/pages/types";
 import { conditionDepth, WORKFLOW_CONDITION_MAX_DEPTH, WORKFLOW_CONDITION_OPS } from "@/lib/workflow/evaluate";
 import { EVENT_SUBJECT_REFS, PAYLOAD_REF_PREFIX } from "@/lib/workflow/subject";
+import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
 import { blueprintZ, SAFE_SETTING_VALUE_Z } from "@/lib/blueprints/schema";
 import { SAFE_SETTING_SPEC, type Blueprint, type BlueprintField, type BlueprintIssue, type BlueprintValidation } from "@/lib/blueprints/types";
 
@@ -177,7 +178,16 @@ function checkConditionRefs(cond: unknown, path: string, out: BlueprintIssue[], 
  * Kiểm một blueprint. `ok = errors.length === 0`. Không dừng ở lỗi đầu tiên — người soạn (hoặc AI ở Phase 8) thấy
  * MỌI chỗ sai trong một lượt.
  */
-export function validateBlueprint(input: unknown): BlueprintValidation {
+export type ValidateBlueprintOptions = {
+  /**
+   * Quyền của vai trò thuộc module KHÔNG có trong gói (pilot P2 #18): `"warn"` (mặc định — mẫu, tệp nhập tay: cài được,
+   * quyền đó chỉ không có hiệu lực) hoặc `"error"` (AI Builder: gói do AI đề xuất bị trả về để AI BỎ quyền đó hoặc khai
+   * module — không cài một vai trò mang quyền chết mà người duyệt tưởng là có thật).
+   */
+  roleModulePermissions?: "warn" | "error";
+};
+
+export function validateBlueprint(input: unknown, opts: ValidateBlueprintOptions = {}): BlueprintValidation {
   const parsed = blueprintZ.safeParse(input);
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((i) => ({ path: i.path.map(String).join("."), message: i.message })), warnings: [] };
@@ -225,7 +235,10 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
       else if (!PERMISSION_SET.has(perm)) errors.push({ path: `${p}.permissions`, message: `Khoá quyền «${perm}» không có trong danh mục quyền.` });
       else {
         const owner = moduleOfPermission(perm);
-        if (owner && !modules.has(owner)) warnings.push({ path: `${p}.permissions`, message: `«${perm}» thuộc module «${owner}» không có trong gói — quyền này sẽ không có hiệu lực.` });
+        if (owner && !modules.has(owner)) {
+          if (opts.roleModulePermissions === "error") errors.push({ path: `${p}.permissions`, message: `«${perm}» thuộc module «${owner}» không có trong gói — bỏ quyền này khỏi vai trò «${r.key}» (hoặc khai module «${owner}» nếu tổ chức thật sự cần).` });
+          else warnings.push({ path: `${p}.permissions`, message: `«${perm}» thuộc module «${owner}» không có trong gói — quyền này sẽ không có hiệu lực.` });
+        }
       }
     }
   });
@@ -352,6 +365,14 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
     if (!v.ok) return;
     const schema = pg.schema as PageSchema;
     if (pg.publish && schema.sections.every((s) => s.blocks.length === 0)) errors.push({ path: `${p}.schema`, message: "Trang khai xuất bản nhưng chưa có khối nào." });
+    // Chỉ số chỉ có nghĩa khi có kết nối tương ứng (pilot P1 #8 — vd COD cần kết nối vận chuyển): gói không có ⇒ LỖI, vì ô
+    // ấy sẽ luôn trống trên trang và người đọc tưởng là "0 đồng".
+    for (const fb of flattenBlocks(schema)) {
+      if (fb.block.type !== "kpi") continue;
+      const metricKey = (fb.block.config as { metric?: unknown }).metric;
+      const spec = typeof metricKey === "string" ? metricSource(metricKey) : null;
+      if (spec && !metricAvailableFor(spec, modules)) errors.push({ path: `${p}.schema.${fb.path}.config.metric`, message: `Chỉ số «${spec.label}» cần ${(spec.requiresAnyModule ?? []).map((m) => `«${moduleDef(m)?.label ?? m}»`).join(" hoặc ")} — tổ chức không có kết nối đó thì ô này luôn trống. Bỏ khối này hoặc chọn chỉ số khác.` });
+    }
     for (const r of customRefsOf(schema)) {
       const f = fieldByRef.get(`${r.objectKey}.${r.ref.slice("custom:".length)}`);
       if (!f) errors.push({ path: `${p}.schema.${r.path}`, message: `Field tuỳ biến «${r.ref}» của «${r.objectKey}» không khai trong gói.` });
@@ -373,7 +394,10 @@ export function validateBlueprint(input: unknown): BlueprintValidation {
       else if (!spec) errors.push({ path: `${p}.trigger.event`, message: `Sự kiện «${w.trigger.event}» không có trong sổ sự kiện.` });
       else if (w.trigger.objectKey) {
         // Chỉ sự kiện trên BẢN GHI metadata (`custom_record.*`, `custom_status.changed`) mang `objectKey` — cùng luật `validateRuleInput`.
+        const recordProblem = recordEventObjectProblem(w.trigger.event, w.trigger.objectKey);
         if (spec.subjectType !== METADATA_RECORD_SUBJECT) errors.push({ path: `${p}.trigger.objectKey`, message: `Sự kiện «${w.trigger.event}» không gắn với bản ghi của một đối tượng — bỏ objectKey.` });
+        // `custom_record.*` chỉ phát cho đối tượng tuỳ biến (P1 #7) — cùng câu với `validateRuleInput`.
+        else if (recordProblem) errors.push({ path: `${p}.trigger.objectKey`, message: recordProblem });
         else if (!objectOf(bp, w.trigger.objectKey)?.capabilities.customFields) errors.push({ path: `${p}.trigger.objectKey`, message: `Đối tượng «${w.trigger.objectKey}» không có trong sổ hoặc trong gói.` });
         else objectKey = w.trigger.objectKey;
       } else if (objectDef(spec.subjectType)) objectKey = spec.subjectType;

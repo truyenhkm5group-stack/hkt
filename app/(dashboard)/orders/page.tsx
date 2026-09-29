@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Download, ShieldAlert } from "lucide-react";
+import { Download, Plus, ShieldAlert } from "lucide-react";
+import { manualOrderGate } from "@/lib/records/order-create";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
@@ -30,7 +31,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     ẩn-khỏi-bộ-lọc của `orders.stage`. Truy vấn nghiệp vụ, ORDER_OUTCOME và bộ lọc giữ nguyên — danh sách
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
-  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user)]);
+  const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user)]);
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -43,6 +44,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         title="Đơn hàng"
         actions={
           <>
+            {/* Đơn TẠO TAY (pilot P0 #3): chỉ khi tổ chức không đồng bộ đơn + có `orders:write` — cùng cổng với /orders/new. */}
+            {createGate.allowed ? (
+              <Button asChild size="sm">
+                <Link href="/orders/new">
+                  <Plus className="size-4" /> Tạo đơn hàng
+                </Link>
+              </Button>
+            ) : null}
             {/*
               LỐI VÀO DANH SÁCH SOÁT TRƯỚC KHI GỬI.
 

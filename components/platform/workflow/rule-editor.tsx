@@ -35,6 +35,7 @@ import {
 } from "@/lib/platform-ui/workflow-admin-shared";
 import type { TaskPriority, WorkflowRuleStatus } from "@/lib/workflow/types";
 import { cn } from "@/lib/utils";
+import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
 
 /**
  * ═══════════ FORM LUẬT TỰ ĐỘNG ═══════════
@@ -201,7 +202,8 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
                 <Row label="Của đối tượng" errors={errorsFor(errors, "trigger.objectKey")}>
                   <select className={cn(SELECT_CLASS, "h-9")} value={draft.objectKey} onChange={(e) => set("objectKey", e.target.value)}>
                     <option value="">— mọi đối tượng —</option>
-                    {objects.map((o) => (
+                    {/* `custom_record.*` chỉ phát cho đối tượng tự tạo (P1 #7): không mời chọn đối tượng hệ thống — lựa chọn cũ vẫn hiện để lỗi có chỗ đứng. */}
+                    {objects.filter((o) => o.key === draft.objectKey || !recordEventObjectProblem(draft.event, o.key)).map((o) => (
                       <option key={o.key} value={o.key}>
                         {o.label}
                       </option>

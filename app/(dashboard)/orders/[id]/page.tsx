@@ -30,6 +30,9 @@ import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-deliver
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
 import { can, requirePermission } from "@/lib/auth/session";
+import { CancelManualOrderButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
+import { issueReceiptHref, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { manualOrderGate } from "@/lib/records/order-create";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -83,7 +86,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const paid = order.prepaid + order.transferMoney + order.cash;
   // Đường dẫn POS Pancake tự gửi kèm đơn (mã nội bộ POS ≠ orders.id). Thiếu thì mở danh sách đơn của
   // shop, lọc sẵn theo số đơn.
-  const pancakeUrl = pancakePosOrderUrlFromRaw(order.raw) ?? pancakePosOrderSearchUrl(order.shopId || env.pancake.shopId, order.systemId);
+  /*
+    ĐƠN TẠO TAY (pilot P0 #3): không có bản Pancake để mở, không có gì để đồng bộ lại. Sửa / huỷ đi qua CÙNG cổng với
+    server action (`manualOrderGate`); xuất kho đi qua phiếu XUẤT TAY sẵn có — tạo đơn không trừ tồn (luật 10).
+  */
+  const manual = isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null;
+  const manualGate = manual ? await manualOrderGate(user) : null;
+  const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED";
+  const canIssue = manual && order.stage !== "CANCELLED" && can(user, "inventory:write") && (!user.modules || user.modules.includes("inventory"));
+  const pancakeUrl = manual ? null : (pancakePosOrderUrlFromRaw(order.raw) ?? pancakePosOrderSearchUrl(order.shopId || env.pancake.shopId, order.systemId));
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
   return (
@@ -92,14 +103,25 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         eyebrow={`Đơn hàng · ${order.source}`}
         title={
           <span className="flex flex-wrap items-center gap-3">
-            #{order.systemId ?? order.id}
+            #{manual ? manualOrderShortCode(order.id) : (order.systemId ?? order.id)}
             <OrderStageBadge stage={order.stage} label={pancakeStatusName(order.status)} className="text-xs" />
           </span>
         }
-        description={`Tạo ${formatDateTime(order.insertedAt)} · cập nhật Pancake ${formatDateTime(order.updatedAtExternal)} · đồng bộ ${formatDateTime(order.syncedAt)}`}
+        description={manual ? `Đơn tạo tay trên ERP · tạo ${formatDateTime(order.insertedAt)}${order.creatorName ? ` bởi ${order.creatorName}` : ""}` : `Tạo ${formatDateTime(order.insertedAt)} · cập nhật Pancake ${formatDateTime(order.updatedAtExternal)} · đồng bộ ${formatDateTime(order.syncedAt)}`}
         actions={
           <>
-            <SyncOrderButton orderId={order.id} />
+            {manual ? null : <SyncOrderButton orderId={order.id} />}
+            {manualEditable ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/orders/${encodeURIComponent(order.id)}/edit`}>Sửa đơn</Link>
+              </Button>
+            ) : null}
+            {canIssue ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href={issueReceiptHref(order.id)}>Lập phiếu xuất kho</Link>
+              </Button>
+            ) : null}
+            {manualEditable ? <CancelManualOrderButton orderId={order.id} /> : null}
             {pancakeUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={pancakeUrl} target="_blank" rel="noreferrer">

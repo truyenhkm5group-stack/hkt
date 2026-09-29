@@ -25,6 +25,8 @@ import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/forma
 import { pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { listOpenProductionLinks, listStockReceipts, listVariantsForReceipt, stockReceiptSummary, type StockReceiptRow } from "@/lib/queries/stock";
 import { param, type SearchParams } from "@/lib/search-params";
+import { ISSUE_PREFILL_PARAM, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { manualOrderIssuePrefill } from "@/lib/records/order-create";
 import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +76,13 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       : productionLinks;
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
+  /*
+    LỐI TẮT "Lập phiếu xuất kho" từ một ĐƠN TẠO TAY (pilot P0 #3): `?xuat-don=<mã đơn>` mở hộp thoại XUẤT TAY có sẵn, điền
+    mẫu mã + số lượng của đơn. Đơn tay không trừ tồn lúc tạo (luật 10) — hàng chỉ rời sổ khi kho LƯU phiếu này.
+  */
+  const issueParam = param(raw, ISSUE_PREFILL_PARAM);
+  const theoDon = issueParam && canWrite ? await manualOrderIssuePrefill(issueParam) : null;
+  const issuePrefill: ReceiptPrefillView | null = theoDon ? { poId: "", poCode: "", productLabel: "", supplier: theoDon.customerName, reference: theoDon.orderId, qty: theoDon.qty, unmapped: theoDon.unmapped } : null;
   const selected = selectedId ? receipts.find((r) => r.id === selectedId) : null;
   // Phiếu NHẬP HÀNG đang mở mà chưa nối: lệnh SX khớp (Agent P2) — chỉ ĐỀ XUẤT, người bấm nối.
   const linkable = canWrite && selected && selected.kind === "RECEIPT" && !selected.productionOrder && !selected.productionBatch ? ((await listLinkableReceipts({ receiptIds: [selected.id] }))[0] ?? null) : null;
@@ -101,6 +110,21 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
           Nhập kho theo lệnh: {theoLenh ? `lệnh ${theoLenh.po.code} — ${theoLenh.state.enabled ? "" : theoLenh.state.reason}` : "không tìm thấy lệnh sản xuất trên đường dẫn"}.
         </p>
+      ) : null}
+
+      {issueParam ? (
+        issuePrefill ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <span>
+              Xuất kho cho đơn tạo tay <b>{manualOrderShortCode(issuePrefill.reference)}</b> — số điền sẵn là số trên đơn; sửa theo số ĐẾM THẬT rồi lưu.
+            </span>
+            <ReceiptDialog variants={variants} defaultKind="ISSUE" pendingReturns={pendingReturns} prefill={issuePrefill} />
+          </div>
+        ) : (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+            Xuất kho theo đơn: {canWrite ? "không tìm thấy đơn tạo tay còn hiệu lực trên đường dẫn (đơn đồng bộ rời kho qua đơn vị vận chuyển, không qua phiếu này)" : "bạn không có quyền lập phiếu kho"}.
+          </p>
+        )
       ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

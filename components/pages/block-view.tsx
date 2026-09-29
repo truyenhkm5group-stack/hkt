@@ -9,6 +9,7 @@ import { PageKanban } from "@/components/pages/page-kanban";
 import { PageTable } from "@/components/pages/page-table";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { kpiHeading } from "@/lib/pages/catalog";
 import type { BlockDataByType, BlockType, ResolvedBlock, ValueFormat } from "@/lib/pages/types";
 
 /**
@@ -68,7 +69,9 @@ export function BlockView({ resolved, diagnose, run }: { resolved: ResolvedBlock
 
   if (type === "kpi") {
     const d = resolved.data as BlockDataByType["kpi"];
-    return <MetricCard label={block.title ?? d.label} value={formatKpi(d.value, d.format)} note={d.note} href={d.href} goodWhen="neutral" />;
+    // Chỉ số SỔ giữ nhãn gốc; tên trang / AI đặt chỉ hiện nhỏ ở dòng ghi chú (pilot P1 #8 — `kpiHeading`).
+    const heading = kpiHeading(block.title, d);
+    return <MetricCard label={heading.label} value={formatKpi(d.value, d.format)} note={heading.note} href={d.href} goodWhen="neutral" />;
   }
   if (type === "text") return <TextBlock d={resolved.data as BlockDataByType["text"]} />;
   if (type === "button") {

@@ -199,7 +199,12 @@ export type PageValidation = { ok: boolean; errors: { path: string; message: str
 
 export type ValueFormat = "vnd" | "number" | "percent";
 
-export type MetricSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; format: ValueFormat; periods: PeriodKey[]; why: string };
+/**
+ * `requiresAnyModule` (pilot P1 #8): chỉ số chỉ có nghĩa khi tổ chức bật ít nhất một trong các module này (vd COD cần một
+ * kết nối vận chuyển). Trình soạn (`listDataSources`) và sổ gửi AI không gợi ý nó cho tổ chức không có — một ô luôn trống
+ * trên trang của tổ chức ấy trông như "0 đồng chưa về", không phải "chỉ số này không áp dụng".
+ */
+export type MetricSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; format: ValueFormat; periods: PeriodKey[]; why: string; requiresAnyModule?: readonly ModuleKey[] };
 export type SeriesSourceSpec = { key: string; label: string; module: ModuleKey; permission: string; kinds: ChartKind[]; format: ValueFormat; periods: PeriodKey[]; why: string };
 /**
  * Nguồn danh sách = một đối tượng của sổ đối tượng; trường lấy từ field hệ thống `listable` + field custom.
@@ -212,7 +217,12 @@ export type PageActionSpec = { key: string; label: string; module: ModuleKey | n
 
 // ═══ DỮ LIỆU ĐÃ PHÂN GIẢI của từng loại khối — máy chủ trả, renderer vẽ ═══
 
-export type KpiData = { label: string; value: number | null; format: ValueFormat; note?: string; href?: string };
+/**
+ * `label` của chỉ số SỔ (`METRIC_SOURCES`) LUÔN là nhãn gốc của sổ; tên do trang / AI đặt đi vào `customLabel` (hiện nhỏ
+ * bên dưới) — pilot P1 #8: AI không được đổi nghĩa một con số bằng cách đổi nhãn của nó. KPI tổng hợp (`aggregate`) không
+ * có nhãn gốc nào nên nhãn trang là nhãn chính.
+ */
+export type KpiData = { label: string; value: number | null; format: ValueFormat; note?: string; href?: string; customLabel?: string; labelLocked?: boolean };
 export type TableColumn = { id: string; label: string; format?: ValueFormat | "text" | "date" | "datetime" | "status" };
 /** Hành động theo dòng như người xem thấy — `index` là vị trí trong `rowActions` ĐÃ XUẤT BẢN (máy chủ tra lại theo nó). */
 export type TableRowActionData = { index: number; label: string; confirm?: string; enabled: boolean; reason?: string };

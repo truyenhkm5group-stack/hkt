@@ -160,7 +160,10 @@ export const OBJECT_REGISTRY: readonly ObjectDef[] = [
     scope: "TENANT",
     system: true,
     customizable: true,
-    capabilities: { customFields: true, forms: false, lists: true, statuses: true, create: false },
+    // `create` giống khách / sản phẩm: tổ chức BẬT Pancake có đơn do đồng bộ tạo (id Pancake) — tạo tay ở đó là đẻ đơn thứ
+    // hai cho cùng một lần mua. Tổ chức không bật Pancake tạo qua `/orders/new` (lib/records/order-create.ts) — trang
+    // riêng, KHÔNG form metadata (`forms: false`): dòng hàng + tiền đi qua một phép tính thuần, không qua ô tự do.
+    capabilities: { customFields: true, forms: false, lists: true, statuses: true, create: { requiresModuleOff: "connector_pancake" } },
     forms: [],
     lists: [{ key: "default", label: "Danh sách đơn hàng", route: "/orders" }],
     statusFields: ["stage"],
@@ -172,7 +175,7 @@ export const OBJECT_REGISTRY: readonly ObjectDef[] = [
       f("total", "Tổng tiền", "currency", "totalPriceAfterDiscount"),
       f("inserted_at", "Ngày tạo", "datetime", "insertedAt"),
     ],
-    why: "Đơn hàng mang luật không thương lượng (ORDER_OUTCOME): Phase 2 chỉ cho cấu hình HIỂN THỊ danh sách, field custom và nhãn trạng thái — không form ghi, không đổi chuyển trạng thái.",
+    why: "Đơn hàng mang luật không thương lượng (ORDER_OUTCOME): chỉ cấu hình HIỂN THỊ danh sách, field custom và nhãn trạng thái — không form metadata ghi, không đổi chuyển trạng thái. Tổ chức không bật Pancake tạo / sửa / huỷ đơn TAY (id `erp-…`) qua trang riêng; kết quả đơn vẫn chỉ do ORDER_OUTCOME quyết.",
   },
   {
     key: "order_item",

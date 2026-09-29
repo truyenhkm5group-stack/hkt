@@ -32,6 +32,7 @@ import { validateCustomValues } from "@/lib/metadata/validate";
 import { ensureEventCursor } from "@/lib/workflow/cursor";
 import { conditionDepth, WORKFLOW_CONDITION_MAX_DEPTH, WORKFLOW_CONDITION_OPS } from "@/lib/workflow/evaluate";
 import { EVENT_SUBJECT_REFS, PAYLOAD_REF_PREFIX } from "@/lib/workflow/subject";
+import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
 import type { WorkflowAction, WorkflowCondition, WorkflowGate, WorkflowMode, WorkflowRule, WorkflowRuleStatus, WorkflowTrigger } from "@/lib/workflow/types";
 
 export const WORKFLOW_RULE_KEY_PATTERN = /^[a-z][a-z0-9_]{1,40}$/;
@@ -211,7 +212,10 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
     else if (!DOMAIN_EVENT_BY_NAME[trigger.event]) errors.push({ field: "trigger.event", message: `Sự kiện "${trigger.event}" không có trong sổ sự kiện.` });
     else if (trigger.objectKey) {
       // Chỉ sự kiện trên BẢN GHI metadata mang `objectKey` trong payload — sự kiện của miền khác không lọc theo đối tượng được.
+      const recordProblem = recordEventObjectProblem(trigger.event, trigger.objectKey);
       if (DOMAIN_EVENT_BY_NAME[trigger.event].subjectType !== METADATA_RECORD_SUBJECT) errors.push({ field: "trigger.objectKey", message: `Sự kiện "${trigger.event}" không gắn với bản ghi của một đối tượng — bỏ chọn đối tượng.` });
+      // `custom_record.*` chỉ phát cho đối tượng tuỳ biến — trên đối tượng hệ thống luật lưu được nhưng không bao giờ chạy (P1 #7).
+      else if (recordProblem) errors.push({ field: "trigger.objectKey", message: recordProblem });
       else {
         const checked = await checkObject(trigger.objectKey, "customFields");
         if (!checked.ok) errors.push({ field: "trigger.objectKey", message: checked.errors[0]?.message ?? "Đối tượng không hỗ trợ field custom." });
