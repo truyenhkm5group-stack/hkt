@@ -84,13 +84,39 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Gỡ các khoá không được hỗ trợ khỏi MỘT nút, đệ quy xuống mọi nút con (`properties`, `items`,
- * `anyOf`, `allOf`, `$defs`…). Thứ tự khoá được GIỮ NGUYÊN và phần chữ thêm vào là hàm thuần của
- * đầu vào ⇒ cùng một tool luôn ra cùng một chuỗi JSON, nên đệm prompt của provider không bị vỡ.
+ * ═══════════ TỪ KHOÁ CHỈ LÀ TỪ KHOÁ Ở VỊ TRÍ TỪ KHOÁ ═══════════
+ *
+ * ĐO THẬT 29/09/2026 (E2E #6, AI Builder, khoá Anthropic của tổ chức thử):
+ *
+ *     400 invalid_request_error — tools.0.custom.input_schema: JSON schema is invalid.
+ *     It must match JSON Schema draft 2020-12
+ *
+ * Bản cũ gỡ `minLength` / `pattern`… ở MỌI tầng, kể cả BÊN TRONG map `properties` — nơi chúng là TÊN FIELD
+ * (blueprint có field `validation.pattern`, `validation.minLength`). Tệ hơn, nó coi chính map `properties` là
+ * một nút schema và chèn `description: "Ràng buộc: …"` vào đó ⇒ một "field" tên `description` có giá trị là
+ * CHUỖI thay vì schema ⇒ cả schema sai chuẩn. Copilot không dính vì chưa tool nào có field trùng tên từ khoá.
+ *
+ * Luật: đi theo CẤU TRÚC của JSON Schema. Nút schema ⇒ gỡ từ khoá không hỗ trợ; giá trị của `properties` /
+ * `patternProperties` / `$defs` / `definitions` / `dependentSchemas` là MAP tên → schema (tên giữ nguyên, chỉ
+ * đệ quy vào schema con); `items` / `anyOf` / … là schema con; `enum` / `const` / `required` / `default` /
+ * `examples` / chữ mô tả là DỮ LIỆU — chép nguyên, không bao giờ gỡ gì bên trong.
+ */
+const SCHEMA_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+const SCHEMA_VALUE_KEYWORDS = new Set(["items", "additionalItems", "additionalProperties", "propertyNames", "contains", "not", "if", "then", "else", "unevaluatedItems", "unevaluatedProperties"]);
+const SCHEMA_LIST_KEYWORDS = new Set(["anyOf", "oneOf", "allOf", "prefixItems"]);
+
+function mapSchemaMap(value: unknown, fn: (schema: unknown) => unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([name, schema]) => [name, fn(schema)]));
+}
+
+/**
+ * Gỡ các khoá không được hỗ trợ khỏi MỘT nút SCHEMA, đệ quy xuống đúng các vị trí schema con. Thứ tự khoá được
+ * GIỮ NGUYÊN và phần chữ thêm vào là hàm thuần của đầu vào ⇒ cùng một tool luôn ra cùng một chuỗi JSON, nên đệm
+ * prompt của provider không bị vỡ.
  */
 function stripNode(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(stripNode);
-  if (!isPlainObject(node)) return node;
+  if (!isPlainObject(node)) return node; // schema boolean (`true` / `false`) hoặc giá trị lạ: giữ nguyên
 
   const out: Record<string, unknown> = {};
   const hints: string[] = [];
@@ -100,7 +126,10 @@ function stripNode(node: unknown): unknown {
       if (hint) hints.push(hint);
       continue;
     }
-    out[key] = stripNode(value);
+    if (SCHEMA_MAP_KEYWORDS.has(key)) out[key] = mapSchemaMap(value, stripNode);
+    else if (SCHEMA_VALUE_KEYWORDS.has(key)) out[key] = Array.isArray(value) ? value.map(stripNode) : stripNode(value);
+    else if (SCHEMA_LIST_KEYWORDS.has(key)) out[key] = Array.isArray(value) ? value.map(stripNode) : value;
+    else out[key] = structuredClone(value);
   }
   if (hints.length) {
     const note = `Ràng buộc: ${hints.join(", ")} (máy chủ kiểm lại, sai thì lượt gọi bị từ chối).`;
@@ -123,14 +152,43 @@ export function toDialectSchema(schema: Record<string, unknown>, dialect: AiSche
   return stripNode(schema) as Record<string, unknown>;
 }
 
-/** Khoá không được hỗ trợ còn sót lại trong một schema — dùng cho kiểm thử và chẩn đoán. */
+/**
+ * Khoá không được hỗ trợ còn sót lại ở VỊ TRÍ TỪ KHOÁ của một schema — dùng cho kiểm thử và chẩn đoán. Tên field
+ * trùng tên từ khoá (field `pattern` trong `properties`) KHÔNG phải từ khoá và không bị tính.
+ */
 export function findUnsupportedKeywords(schema: unknown, path = ""): string[] {
-  if (Array.isArray(schema)) return schema.flatMap((v, i) => findUnsupportedKeywords(v, `${path}[${i}]`));
   if (!isPlainObject(schema)) return [];
   const found: string[] = [];
   for (const [key, value] of Object.entries(schema)) {
-    if ((ANTHROPIC_UNSUPPORTED_KEYWORDS as readonly string[]).includes(key)) found.push(`${path}.${key}`);
-    found.push(...findUnsupportedKeywords(value, `${path}.${key}`));
+    const here = `${path}.${key}`;
+    if ((ANTHROPIC_UNSUPPORTED_KEYWORDS as readonly string[]).includes(key)) found.push(here);
+    else if (SCHEMA_MAP_KEYWORDS.has(key) && isPlainObject(value)) for (const [name, sub] of Object.entries(value)) found.push(...findUnsupportedKeywords(sub, `${here}.${name}`));
+    else if (SCHEMA_VALUE_KEYWORDS.has(key)) found.push(...(Array.isArray(value) ? value.flatMap((v, i) => findUnsupportedKeywords(v, `${here}[${i}]`)) : findUnsupportedKeywords(value, here)));
+    else if (SCHEMA_LIST_KEYWORDS.has(key) && Array.isArray(value)) found.push(...value.flatMap((v, i) => findUnsupportedKeywords(v, `${here}[${i}]`)));
+  }
+  return found;
+}
+
+/**
+ * Kiểm HÌNH của một nút schema sau khi serialize: mọi giá trị trong map `properties` (và các map tương tự) phải là
+ * schema (object hoặc boolean). Bắt đúng lớp lỗi 29/09/2026 (chuỗi `description` lọt vào `properties`) trước khi
+ * nhà cung cấp trả 400 — dùng trong kiểm thử.
+ */
+export function schemaShapeProblems(schema: unknown, path = ""): string[] {
+  if (typeof schema === "boolean") return [];
+  if (!isPlainObject(schema)) return [`${path || "$"}: nút schema phải là object hoặc boolean`];
+  const found: string[] = [];
+  for (const [key, value] of Object.entries(schema)) {
+    const here = `${path}.${key}`;
+    if (SCHEMA_MAP_KEYWORDS.has(key)) {
+      if (!isPlainObject(value)) found.push(`${here}: phải là map tên → schema`);
+      else for (const [name, sub] of Object.entries(value)) found.push(...schemaShapeProblems(sub, `${here}.${name}`));
+    } else if (SCHEMA_VALUE_KEYWORDS.has(key)) {
+      found.push(...(Array.isArray(value) ? value.flatMap((v, i) => schemaShapeProblems(v, `${here}[${i}]`)) : schemaShapeProblems(value, here)));
+    } else if (SCHEMA_LIST_KEYWORDS.has(key)) {
+      if (!Array.isArray(value) || value.length === 0) found.push(`${here}: phải là mảng schema khác rỗng`);
+      else found.push(...value.flatMap((v, i) => schemaShapeProblems(v, `${here}[${i}]`)));
+    }
   }
   return found;
 }
