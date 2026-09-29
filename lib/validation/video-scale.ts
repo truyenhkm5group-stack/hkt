@@ -136,3 +136,6 @@ export const videoVoiceUploadSchema = z.object({
 });
 /** Phong cách nhạc AI — khoá trong `MUSIC_MOODS` (lib/video-scale/music-gen.ts), tối đa 8 một lần. */
 export const videoMusicGenSchema = z.object({ moods: z.array(z.string().regex(/^[A-Z_]{3,30}$/)).min(1).max(8) });
+
+/** Duyệt hàng loạt: chỉ video QC ĐẠT (máy chủ kiểm lại từng video). Trần 50 — một trang duyệt không bao giờ dài hơn thế. */
+export const videoBulkApproveSchema = z.object({ variantIds: z.array(id).min(1, "Chưa chọn video nào").max(50) });

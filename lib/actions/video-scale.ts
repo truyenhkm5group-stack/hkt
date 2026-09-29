@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { getDb, schema } from "@/db";
@@ -19,7 +19,7 @@ import { cancelReelPost, readVideoAutomation, requestReelPost } from "@/lib/vide
 import { activateVideoAd, pauseVideoAd, queueCreateAd, queuePauseAds, setVideoAdBudget } from "@/lib/video-scale/ads";
 import { listAdAccountOptions } from "@/lib/queries/creative-manual-gen";
 import { readTokenPages } from "@/lib/queries/facebook-pages";
-import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema, videoVoiceUploadSchema } from "@/lib/validation/video-scale";
+import { videoAdBudgetSchema, videoAdCreateSchema, videoAdIdSchema, videoAdPauseSchema, videoEditSchema, videoMusicGenSchema, videoSkuAdsSchema, videoVoiceUploadSchema, videoBulkApproveSchema } from "@/lib/validation/video-scale";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { LYRIA_CLIP_PRICE_USD, MUSIC_MOODS, generateMusicLibrary, type MusicMood } from "@/lib/video-scale/music-gen";
 import { DEFAULT_OPTIMIZE_DEPS, runOptimize } from "@/lib/video-scale/optimize";
@@ -89,6 +89,31 @@ export async function reviewVideoVariantAction(raw: unknown): Promise<{ ok: true
   await audit({ userId: user.id, userEmail: user.email, action: parsed.data.decision === "APPROVE" ? "VIDEO_SCALE_VARIANT_APPROVE" : "VIDEO_SCALE_VARIANT_REJECT", entity: "VIDEO_SCALE_VARIANT", entityId: parsed.data.variantId, after: { note: parsed.data.note } });
   revalidatePath(PATH);
   return { ok: true };
+}
+
+/**
+ * DUYỆT HÀNG LOẠT — chỉ video QC ĐẠT (`PASS`). Video QC "nghi ngờ" (`FLAG`) KHÔNG đi đường này: nghi ngờ nghĩa là máy muốn một
+ * người nhìn kỹ, duyệt gộp là bỏ qua đúng lời nhắc ấy. Mỗi video vẫn đi `approveVideoVariant` (cùng điều kiện, cùng việc viết
+ * content) và có dòng nhật ký riêng.
+ */
+export async function approveVideoVariantsAction(raw: unknown): Promise<{ ok: true; approved: number; skipped: number } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền duyệt video" };
+  const parsed = videoBulkApproveSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const V = schema.videoScaleVariants;
+  const rows = await db.select({ id: V.id }).from(V).where(and(inArray(V.id, parsed.data.variantIds), eq(V.status, "REVIEW"), eq(V.qcVerdict, "PASS")));
+  let approved = 0;
+  for (const r of rows) {
+    const x = await approveVideoVariant(db, r.id, actor, "Duyệt hàng loạt (QC đạt)");
+    if (!x.ok) continue;
+    approved += 1;
+    await audit({ userId: user.id, userEmail: user.email, action: "VIDEO_SCALE_VARIANT_APPROVE", entity: "VIDEO_SCALE_VARIANT", entityId: r.id, after: { note: "Duyệt hàng loạt (QC đạt)", bulk: true } });
+  }
+  revalidatePath(PATH);
+  return { ok: true, approved, skipped: parsed.data.variantIds.length - approved };
 }
 
 export async function remakeVideoVariantAction(raw: unknown): Promise<{ ok: true } | Fail> {

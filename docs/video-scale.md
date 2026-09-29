@@ -404,3 +404,21 @@ Ranh giới:
 - Giọng tự thu: tài sản `VOICE` gắn video + lượt; lượt dựng chỉ nhận tệp của CÙNG lượt (bản nhân dùng lại được). Có giọng tự thu
   thì KHÔNG trộn giọng AI và không tạo đoạn giọng AI nào; giọng đặt ở giây 0, dài quá video thì cắt.
 - Font khác mặc định nằm cạnh `VIDEO_FONT_FILE` (gói `font-dejavu`); thiếu tệp thì dùng font mặc định đã kiểm có dấu.
+
+## 21. Làm lại UX trang Video Scale (29/09/2026)
+
+Chủ shop: *"làm lại UI/UX… thông minh hơn, tối ưu hơn và thêm tính năng hữu ích"*.
+
+- **Việc tiếp theo** (`lib/constants/video-scale-next.ts`, hàm THUẦN): đầu trang nói ĐÚNG MỘT việc nên làm lúc này + một nút
+  sang đúng tab, theo thứ tự: đang dừng khẩn cấp → cấu hình chặn sinh video → việc bị chặn → video chờ duyệt → video đã duyệt
+  chưa đăng → đang tạo (chỉ cần đợi) → thiếu mã win / ảnh gốc → tạo video mới. Thay ba ô số + danh sách cảnh báo cũ.
+- **Bốn ô số gọn**: chi hôm nay / trần (vàng khi ≥ 90% trần), đang tạo (bị chặn · hỏng 24 giờ), chờ duyệt, đã duyệt chưa đăng
+  (`approvedUnposted`: video thật APPROVED chưa có bài Reel đang chờ / đã đăng — bài hỏng / huỷ VẪN đếm vì phải đăng lại).
+- **Thanh bước đánh số**: ① Mã win → ② Đang tạo → ③ Duyệt video → ④ Đăng Reel → ⑤ Quảng cáo | Báo cáo · Cấu hình; khoá tab
+  giữ nguyên (link cũ vẫn mở đúng). Đăng Reel mang số video đã duyệt chưa đăng.
+- **Mã win**: ô tìm mã / tên + lọc (chưa có video · đang tạo · chờ duyệt · thiếu ảnh gốc); nút Tạo video đứng đầu thẻ, thiết lập
+  ít đổi (chế độ duyệt, fanpage, dừng khẩn cấp, quảng cáo) gọn vào mục thu gọn.
+- **Tạo chiến dịch media**: chọn nhanh ảnh gốc, nút +/− số video, gợi ý ý tưởng chọn nhanh, nghe thử nhạc.
+- **Duyệt video**: "Duyệt tất cả video QC đạt" — CHỈ `PASS` (video QC nghi ngờ `FLAG` vẫn duyệt từng cái: nghi ngờ nghĩa là máy
+  muốn người nhìn kỹ); mỗi video vẫn đi `approveVideoVariant` và có dòng nhật ký riêng. Nút Tải video (mp4).
+- Thanh tab trong hộp Sửa video: `TabsList` ghim `h-9` nên xuống dòng trên điện thoại thì đè nội dung — ghi đè đúng lớp ấy.

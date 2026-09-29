@@ -12,12 +12,13 @@ import { createVideoRunAction, loadVideoPhotosAction } from "@/lib/actions/video
 import { VIDEO_ANGLES, VIDEO_ANGLE_LABEL, VIDEO_SCALE_HARD_LIMITS, type VideoAngle } from "@/lib/constants/video-scale";
 import type { SourcePhoto } from "@/lib/queries/video-scale";
 import { cn } from "@/lib/utils";
+import { IdeaPresets } from "@/app/(dashboard)/marketing/creatives/idea-presets";
 
 /**
  * "Tạo chiến dịch media" — chọn ẢNH GỐC (ảnh sản phẩm thật của mã; người chọn = người duyệt ảnh), số biến thể, góc bán
  * (bỏ trống = máy chọn theo sổ học), ý tưởng, nhạc có quyền. Bấm là xếp việc: màn hình trả lời ngay, video sinh sau.
  */
-export function CreateRunDialog({ productId, label, music, perVideoUsd = null, costNote = "" }: { productId: string; label: string; music: { id: string; title: string }[]; perVideoUsd?: number | null; costNote?: string }) {
+export function CreateRunDialog({ productId, label, music, perVideoUsd = null, costNote = "" }: { productId: string; label: string; music: { id: string; title: string; assetId?: string }[]; perVideoUsd?: number | null; costNote?: string }) {
   const [open, setOpen] = useState(false);
   const [photos, setPhotos] = useState<SourcePhoto[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -65,7 +66,20 @@ export function CreateRunDialog({ productId, label, music, perVideoUsd = null, c
         </DialogHeader>
         <div className="space-y-4 text-[13px]">
           <div>
-            <p className="mb-1.5 font-medium">Ảnh gốc ({picked.length} đã chọn)</p>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium">Ảnh gốc ({picked.length} đã chọn · tối đa 6)</p>
+              {photos && photos.length > 1 ? (
+                <span className="flex gap-1">
+                  <Button type="button" size="sm" variant="ghost" className="h-7 text-[12px]" onClick={() => setPicked(photos.slice(0, 6).map((p) => p.id))}>
+                    Chọn {Math.min(6, photos.length)} ảnh đầu
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" className="h-7 text-[12px]" onClick={() => setPicked([])} disabled={picked.length === 0}>
+                    Bỏ chọn
+                  </Button>
+                </span>
+              ) : null}
+            </div>
+            <p className="mb-1.5 text-[12px] text-muted-foreground">Nhiều ảnh ⇒ mỗi cảnh dùng một ảnh khác (video không lặp khung).</p>
             {loading || photos === null ? (
               <Loader2 className="size-4 animate-spin" aria-label="Đang tải ảnh" />
             ) : photos.length === 0 ? (
@@ -87,10 +101,17 @@ export function CreateRunDialog({ productId, label, music, perVideoUsd = null, c
               </div>
             )}
           </div>
-          <label className="flex items-center gap-2">
-            <span className="font-medium">Số biến thể</span>
-            <input type="number" min={1} max={VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun} value={variants} onChange={(e) => setVariants(Number(e.target.value) || 1)} className="h-8 w-20 rounded border px-2" />
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">Số video (biến thể)</span>
+            <Button type="button" size="icon" variant="outline" className="size-8" disabled={variants <= 1} onClick={() => setVariants((n) => Math.max(1, n - 1))} aria-label="Bớt một video">
+              −
+            </Button>
+            <input type="number" min={1} max={VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun} value={variants} onChange={(e) => setVariants(Math.max(1, Math.min(VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun, Number(e.target.value) || 1)))} className="h-8 w-16 rounded-md border border-input bg-background px-2 text-center" aria-label="Số video" />
+            <Button type="button" size="icon" variant="outline" className="size-8" disabled={variants >= VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun} onClick={() => setVariants((n) => Math.min(VIDEO_SCALE_HARD_LIMITS.maxVariantsPerRun, n + 1))} aria-label="Thêm một video">
+              +
+            </Button>
+            <span className="text-[12px] text-muted-foreground">mỗi video một góc bán khác nhau</span>
+          </div>
           <div>
             <p className="mb-1.5 font-medium">Góc bán (bỏ trống = máy chọn theo kết quả đã học)</p>
             <div className="flex flex-wrap gap-1.5">
@@ -101,13 +122,16 @@ export function CreateRunDialog({ productId, label, music, perVideoUsd = null, c
               ))}
             </div>
           </div>
-          <label className="block">
-            <span className="font-medium">Ý tưởng (tuỳ chọn)</span>
-            <Textarea value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={600} rows={2} placeholder="vd: nhấn mạnh dáng che bắp tay, bối cảnh công sở" />
-          </label>
+          <div className="space-y-1.5">
+            <span className="flex justify-between font-medium">
+              Ý tưởng (tuỳ chọn) <span className="text-[11px] font-normal tabular-nums text-muted-foreground">{brief.length}/600</span>
+            </span>
+            <IdeaPresets idea={brief} onChange={setBrief} maxChars={600} design={false} disabled={pending} />
+            <Textarea value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={600} rows={2} placeholder="vd: nhấn mạnh dáng che bắp tay, bối cảnh công sở" aria-label="Ý tưởng video" />
+          </div>
           <label className="flex flex-wrap items-center gap-2">
             <span className="font-medium">Nhạc nền</span>
-            <select value={musicId} onChange={(e) => setMusicId(e.target.value)} className="h-8 rounded border px-2">
+            <select value={musicId} onChange={(e) => setMusicId(e.target.value)} className="h-8 max-w-full rounded-md border border-input bg-background px-2 text-foreground">
               <option value="">Không nhạc (âm gốc của clip)</option>
               {music.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -117,6 +141,7 @@ export function CreateRunDialog({ productId, label, music, perVideoUsd = null, c
             </select>
             {music.length === 0 ? <span className="text-[12px] text-muted-foreground">Thư viện nhạc có quyền đang trống (tab Cấu hình).</span> : null}
           </label>
+          {music.find((m) => m.id === musicId)?.assetId ? <audio key={musicId} controls src={`/api/video-scale/assets/${music.find((m) => m.id === musicId)?.assetId}`} className="h-8 w-full" aria-label="Nghe thử nhạc" /> : null}
         </div>
         <p className="rounded-md border bg-muted/40 p-2 text-[12.5px]">
           Ước tính tiền sinh video:{" "}

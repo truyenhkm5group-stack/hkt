@@ -367,11 +367,12 @@ export async function listMusic(db: Db): Promise<MusicRow[]> {
   return db.select({ id: tModel.id, title: tModel.title, licenseNote: tModel.licenseNote, assetId: tModel.assetId, active: tModel.active, uploadedBy: tModel.uploadedBy, createdAt: tModel.createdAt }).from(tModel).orderBy(desc(tModel.createdAt));
 }
 
-export type VideoScaleCounts = { review: number; activeJobs: number; blockedJobs: number; failedJobs24h: number };
+/** `approvedUnposted` = video ĐÃ DUYỆT, thật, chưa có bài Reel đang chờ / đã đăng — việc của bước Đăng Reel. */
+export type VideoScaleCounts = { review: number; activeJobs: number; blockedJobs: number; failedJobs24h: number; approvedUnposted: number };
 
 export async function loadVideoScaleCounts(db: Db, now = new Date()): Promise<VideoScaleCounts> {
   const since = new Date(now.getTime() - 86_400_000);
-  const [v, j] = await Promise.all([
+  const [v, j, a] = await Promise.all([
     db.select({ n: sql<string>`count(*)` }).from(tVar).where(eq(tVar.status, "REVIEW")),
     db
       .select({
@@ -380,8 +381,19 @@ export async function loadVideoScaleCounts(db: Db, now = new Date()): Promise<Vi
         failed: sql<string>`count(*) filter (where ${tJob.status} = 'FAILED' and ${tJob.updatedAt} >= ${since})`,
       })
       .from(tJob),
+    db
+      .select({ n: sql<string>`count(*)` })
+      .from(tVar)
+      .where(
+        and(
+          eq(tVar.status, "APPROVED"),
+          eq(tVar.isTest, false),
+          // Tên bảng / cột TƯỜNG MINH: `${cột}` trần trong câu con tương quan có thể in thành "id" và so nhầm với cột của bảng con.
+          sql`not exists (select 1 from "video_scale_posts" p where p."variant_id" = "video_scale_variants"."id" and p."status" in ('QUEUED', 'UPLOADING', 'PROCESSING', 'SCHEDULED', 'PUBLISHED'))`,
+        ),
+      ),
   ]);
-  return { review: Number(v[0]?.n ?? 0), activeJobs: Number(j[0]?.active ?? 0), blockedJobs: Number(j[0]?.blocked ?? 0), failedJobs24h: Number(j[0]?.failed ?? 0) };
+  return { review: Number(v[0]?.n ?? 0), activeJobs: Number(j[0]?.active ?? 0), blockedJobs: Number(j[0]?.blocked ?? 0), failedJobs24h: Number(j[0]?.failed ?? 0), approvedUnposted: Number(a[0]?.n ?? 0) };
 }
 
 // ───────────────────────────── PR 2 — ĐĂNG REEL ─────────────────────────────
