@@ -3,10 +3,10 @@
 > Tệp BÀN GIAO. Phiên nào tiếp quản (hoặc phiên này sau khi nén ngữ cảnh) đọc tệp này trước, rồi `builder-roadmap.md`.
 > Cập nhật mỗi khi một phase gộp / deploy, hoặc trước khi ngữ cảnh đầy.
 
-## Tóm tắt — 28/09/2026 17:00 (giờ VN)
+## Tóm tắt — 29/09/2026 12:30 (giờ VN)
 
-Phase 1 → 12 đã code, gộp và lên production. Bài chấp nhận Phase 12 (`phase-12-acceptance.md`): mọi E2E ĐẠT trừ
-E2E #6 chạy với model AI THẬT — **HUMAN GATE credential**. Chưa in «COMMERCIAL MVP COMPLETE».
+**ERP BUILDER PLATFORM — COMMERCIAL MVP COMPLETE.** Phase 1 → 12 đã code, gộp và lên production; bài chấp nhận Phase 12
+(`phase-12-acceptance.md`) 8/8 ĐẠT, kể cả E2E #6 AI dựng ERP với model thật (khoá riêng của tổ chức thử).
 
 ## Production (erp.vnxcommerce.com)
 
@@ -25,8 +25,10 @@ E2E #6 chạy với model AI THẬT — **HUMAN GATE credential**. Chưa in «CO
 | Phase 11 — gia cố (tấn công · tải · xuất cấu hình · chẩn đoán) | `7fb07c55` | #363 | 0171 |
 | Sao lưu CSDL `erp_org_*` | `32f1c2fa` | #365 | — |
 | Phase 12 — 5 lỗi E2E (màn duyệt lõi `/approvals` …) | `ca0fc7a6` | #366 | — |
+| Sẵn sàng thương mại A–D (khoá bí mật · /start không deploy · diễn tập khôi phục · 176 mặt) | `559099c1` | #378 | 0172 |
+| AI Builder gọi Anthropic thật (schema công cụ) | `a483e1d6` | #386 | — |
 
-Production chạy `9771a4f2` (có mọi mốc trên), health `ok`, 24/24 module, 172 migration.
+Production chạy `a483e1d6` (có mọi mốc trên), health `ok`, 24/24 module, 174 migration.
 
 ## Tính năng (đều cấu hình không deploy)
 
@@ -37,17 +39,13 @@ phiên bản 3 chiều · AI soạn blueprint (khoá AI của chính tổ chức
 · `/start` tự phục vụ (TẮT trên production) · thương hiệu · gói + hạn mức · xuất / khôi phục cấu hình · chẩn đoán từng
 tổ chức · màn duyệt lõi.
 
-## Human gate (hỏi chủ nền tảng MỘT lần)
+## Cổng mở bán — CHỦ ĐỘNG TẮT, bật khi chủ nền tảng quyết (`launch-gates.md`)
 
-1. **Khoá AI thật cho E2E #6** — một trong hai: (a) khoá Anthropic/OpenAI có credit của một tổ chức thử (dán ở
-   `/settings/connections` trên máy thử), hoặc (b) cho phép thử trên tổ chức nhà bằng khoá `.env` hiện có (tốn tiền của
-   VNX; chỉ tạo BẢN NHÁP, áp dụng thử ở tổ chức thử bằng "cài từ tệp").
-2. `PLATFORM_SECRETS_KEY` trên production — để tổ chức khác lưu bí mật kết nối (thiếu ⇒ tính năng tắt, VNX không ảnh hưởng).
-   Đường ống secret GitHub → deploy → `.env` đã nối: chủ nền tảng chỉ còn tạo secret (`openssl rand -base64 48`) rồi
-   dispatch deploy — `launch-gates.md` mục A.
-3. Có mở `/start` (invite/open) trên production không — hiện TẮT. Không còn cần deploy: người vận hành bật «Cần mã mời» ở
-   `/platform` → Cổng mở bán (cài đặt control plane, 0172); mở hẳn `open` cần trần `PLATFORM_SIGNUP_MODE=open` — mục B.
-4. Sao lưu tổ chức: dung lượng Drive (~11 bản / tổ chức), tải VPS 02–05 giờ, có diễn tập khôi phục cho CSDL tổ chức không.
+1. `PLATFORM_SECRETS_KEY` trên production: tạo secret GitHub (`openssl rand -base64 48`) rồi dispatch deploy — thiếu thì
+   tổ chức khác không lưu được bí mật kết nối (VNX không ảnh hưởng).
+2. Đăng ký `/start`: TẮT. Bật «Cần mã mời» ở `/platform` → Cổng mở bán (không deploy); `open` cần trần môi trường.
+3. Sao lưu tổ chức: dung lượng Drive, tải VPS 02–05 giờ, diễn tập khôi phục tự động (C1–C6).
+4. Ai trả tiền token Copilot cho tổ chức khác (hiện Copilot chỉ ở tổ chức nhà; AI Builder dùng khoá của chính tổ chức).
 
 ## Quy trình phát hành
 
@@ -62,7 +60,7 @@ Commit/PR KHÔNG mang tên model AI, KHÔNG dòng Co-Authored-By (AGENTS.md 6.6)
 
 - Bảng trang động không bọc `list*()` cũ; `available_stock` của trang tính đường ngắn; `request_approval` chỉ khách hàng.
 - Menu đọc `meta_pages` + `meta_objects` mỗi lượt tải bố cục; trang không tìm thấy trả HTTP 200 (streaming).
-- AI Builder chưa chạy với model thật (schema công cụ ~11 KB chưa thử với nhà cung cấp).
+- AI Builder: một lượt dựng mới ~1,1 USD (3 lượt gọi claude-opus-5); chưa có trần chi phí theo gói ngoài 20 lượt/ngày.
 - Kéo xa khi phải cuộn trong trình kéo-thả chưa đo trên màn hình thường.
 - Cài blueprint vượt hạn mức đối tượng hỏng giữa chừng (kế hoạch chưa báo trước).
 - Sao lưu tổ chức chưa có diễn tập khôi phục TỰ ĐỘNG (có ops `restore-drill-org` chạy tay — bật tự động là cổng C2 ở `launch-gates.md`); đêm nhà hỏng thì tổ chức không được sao lưu.

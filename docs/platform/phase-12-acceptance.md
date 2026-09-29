@@ -1,9 +1,8 @@
 # Phase 12 — Bài chấp nhận thương mại (máy thử, 28/09/2026)
 
-**Kết luận (cập nhật sau lượt sửa, 28/09/2026 17:00):** 8/8 bài chấp nhận ĐẠT ở mức sản phẩm, TRỪ E2E #6 chạy với model
-AI thật — HUMAN GATE credential. Lượt đầu (bảng dưới) E2E #3 KHÔNG ĐẠT vì lỗi #1; lỗi #1–#5 đã sửa (PR #366, xem "Sau
-khi sửa" cuối tệp) và E2E #3 chạy lại trên trình duyệt ĐẠT. Chưa in «COMMERCIAL MVP COMPLETE» cho tới khi E2E #6 chạy
-với model thật.
+**Kết luận (29/09/2026 12:30): 8/8 bài chấp nhận ĐẠT — ERP BUILDER PLATFORM — COMMERCIAL MVP COMPLETE.** Lượt đầu
+(28/09) E2E #3 KHÔNG ĐẠT (lỗi #1, đã sửa ở PR #366) và E2E #6 chờ khoá AI thật; E2E #6 chạy với model thật ngày 29/09,
+tìm ra một lỗi sản phẩm (schema công cụ — PR #386) rồi ĐẠT 10/10 trên bản build của `main` (xem mục cuối tệp).
 
 ## Môi trường
 
@@ -109,4 +108,46 @@ Bài kiểm `tests/approvals-core.test.ts` + quét menu × module tắt (22 modu
 
 Kiểm production sau deploy: `/approvals`, `/platform/org/<mã>`, `/settings/export` tồn tại (307 → đăng nhập);
 `/start` in «Chưa mở đăng ký» (cờ `off`); health `ok`, 24/24 module.
+
+## E2E #6 — AI dựng ERP với model THẬT (29/09/2026, PR #386 — `a483e1d6`, đang chạy production)
+
+Khoá AI RIÊNG của tổ chức thử (Anthropic, 108 ký tự) do chủ nền tảng đặt ở tệp cục bộ ngoài kho; bộ chạy nhập nó vào
+kết nối `anthropic-byok` của TỔ CHỨC THỬ qua giao diện `/settings/connections` (ô password) → Lưu → Kiểm tra (Anthropic
+nhận khoá, lời gọi chỉ đọc) → Bật. Không dùng credential VNX. Không in / ghi / chụp khoá: nhật ký máy chủ (2.883 byte),
+CSDL tổ chức thử (187 bảng), CSDL nhà (186 bảng, 0 kết nối, 0 nháp AI) — 0 chỗ chứa khoá rõ.
+
+**Lượt đầu tìm ra lỗi sản phẩm:** Anthropic trả `400 tools.0.custom.input_schema: JSON schema is invalid` — bản dịch
+phương ngữ Anthropic (`lib/ai/schema-dialect.ts`) coi field TÊN `pattern` / `minLength` của blueprint là từ khoá và
+chèn chuỗi `description` vào map `properties`. Sửa: dịch theo cấu trúc JSON Schema + `schemaShapeProblems()`; 22 công cụ
+Copilot của VNX ra chuỗi JSON Y HỆT bản cũ. PR #386 → gates → gộp → deploy.
+
+**Lượt cuối (dữ liệu mới, tổ chức thử mới, bản build `main` a483e1d6, BUILD_ID `5YpMUtBXX_pOvbfxcL5Ki`, cùng một tiến
+trình suốt từ tạo tổ chức tới kiểm):**
+
+| Bước | Kết quả |
+|---|---|
+| Người vận hành bật `/start` ở `/platform` (off → invite, có nhật ký) → mã mời → tổ chức «AI Test Bán Buôn» **bắt đầu trắng** | ĐẠT |
+| Prompt nguyên văn «Tạo ERP cho công ty bán buôn có CRM, đơn hàng, mua hàng, kho và tài chính.» | claude-opus-5 · 3 lượt gọi (tự sửa lỗi theo `path`) · 128.612 token · ~1,10 USD · 315 s |
+| Bản nháp (blueprint) | HỢP LỆ qua `validateBlueprint`: 8 module (core · work · customers · products · orders · inventory · purchasing · finance), 3 vai trò (không `users:manage`), 13+ field, 2 form, 2 danh sách, 3 trang, 3 luật NHÁP (có luật cửa duyệt), ngữ cảnh AI, gợi ý tích hợp |
+| Xem trước (`planForOrg`) | Tạo mới 33 · Không đổi 2 · 0 bị chặn |
+| Áp dụng (`installBlueprint` + planHash) | «Đã áp dụng — 33 bước đã ghi. Luật ở NHÁP + CHẠY THỬ.» |
+
+**Kiểm sau áp dụng — 10/10 ĐẠT:** (1) tạo khách qua form do AI soạn (ô «Loại khách hàng» bắt buộc được kiểm) → khách vào
+danh sách · (2) `/orders` · (3) mua hàng (`/inventory/purchasing`, `/inventory/shortage`, `/inventory/decisions`) · (4)
+`/inventory` · (5) tài chính bật, `/finance` · (6) menu: mỗi module có mục, 3 trang AI trên menu · (7) `/p/crm-cong-no`,
+`/p/kho-va-mua-hang`, `/p/tong-quan-ban-buon` render, 0 lỗi khối (kanban khách hiện đúng khách vừa tạo) · (8) 3 luật ở
+NHÁP + CHẠY THỬ, form/danh sách xuất bản, module khớp blueprint · (9) tổ chức thử mở đơn / khách của nhà ⇒ không lộ; nhà
+không thấy trang/đối tượng của tổ chức thử · (10) tổ chức nhà `/`, `/orders`, `/inventory`: số trước = sau.
+
+Không fork mã, không build riêng cho tổ chức, không deploy để dựng ERP này — chỉ metadata qua bộ cài Phase 7.
+
+## Bằng chứng production (29/09/2026)
+
+- Production `a483e1d6` (PR #386), health `ok`, 24/24 module, 174 migration; lượt deploy 36524094969 xanh (gates +
+  release + smoke trang VNX).
+- Gates của CHÍNH lượt deploy đó chạy `npm test` hai lượt (ẩn danh + token giả) — «TẤT CẢ KIỂM THỬ ĐẠT» cả hai, gồm:
+  Phase 11 H1 tấn công cô lập **178 mặt** · cô lập mức tiến trình · phiên & RBAC · metadata hai tổ chức · đối tượng tuỳ
+  biến · trang động + trình kéo-thả · blueprint + mẫu · connector + bí mật · AI Builder · xuất / diễn tập khôi phục cấu
+  hình · chẩn đoán + hạn mức · duyệt lõi · cổng mở bán A/B.
+- `/start` trên production: «Chưa mở đăng ký» (cài đặt control plane = off).
 
