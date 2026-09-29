@@ -3,10 +3,15 @@
 > Tệp BÀN GIAO. Phiên nào tiếp quản (hoặc phiên này sau khi nén ngữ cảnh) đọc tệp này trước, rồi `builder-roadmap.md`.
 > Cập nhật mỗi khi một phase gộp / deploy, hoặc trước khi ngữ cảnh đầy.
 
-## Tóm tắt — 29/09/2026 12:30 (giờ VN)
+## Tóm tắt — 29/09/2026 (giờ VN)
 
-**ERP BUILDER PLATFORM — COMMERCIAL MVP COMPLETE.** Phase 1 → 12 đã code, gộp và lên production; bài chấp nhận Phase 12
-(`phase-12-acceptance.md`) 8/8 ĐẠT, kể cả E2E #6 AI dựng ERP với model thật (khoá riêng của tổ chức thử).
+**ERP BUILDER PLATFORM — READY FOR CONTROLLED PILOT** (`pilot-readiness.md`). Sau MVP thương mại (Phase 1 → 12,
+`phase-12-acceptance.md` 8/8), chương trình Commercial Pilot Readiness đã lên production: khoá bí mật sẵn sàng (chờ chủ
+đặt khoá), diễn tập khôi phục Postgres ĐẠT, sổ dùng AI + hạn mức + công tắc, sản phẩm / đơn tạo tay, vòng đời pilot +
+trang sức khoẻ + công tắc khẩn + đổi gói, chạy lại cô lập 243 mặt. Bài chấp nhận pilot bán buôn 9/9 qua giao diện, 0 P0.
+
+**DỪNG MỞ RỘNG NỀN TẢNG Ở ĐÂY.** Việc kế tiếp là khách thương mại đầu tiên HSLC SHOP — workstream / phiên RIÊNG, đọc
+`hslc-commercial-pilot-handoff.md` (bảng HSLC SELF-SERVICE GAP + thứ tự gap P0). Chưa triển khai HSLC trong phiên này.
 
 ## Production (erp.vnxcommerce.com)
 
@@ -27,8 +32,15 @@
 | Phase 12 — 5 lỗi E2E (màn duyệt lõi `/approvals` …) | `ca0fc7a6` | #366 | — |
 | Sẵn sàng thương mại A–D (khoá bí mật · /start không deploy · diễn tập khôi phục · 176 mặt) | `559099c1` | #378 | 0172 |
 | AI Builder gọi Anthropic thật (schema công cụ) | `a483e1d6` | #386 | — |
+| Pilot A1 — khoá bí mật: tự kiểm, health, xoay khoá | `ad71adf5` | #391 | — |
+| Pilot A2 — diễn tập khôi phục Postgres thật (CI) | `715fafc2` | #392 | — |
+| Pilot B1 — sản phẩm / mẫu mã tay, nhập kho có đơn giá | `0e846632` | #396 | — |
+| Pilot B2 — đơn tạo tay | `9df34708` | #398 | — |
+| Pilot A3 — sổ dùng AI · hạn mức · công tắc AI | `f1c96673` | #393 | 0176 |
+| Pilot A4 — vòng đời pilot · sức khoẻ · công tắc khẩn · đổi gói | `e571a9de` | #399 | 0177 |
+| Pilot — chạy lại cô lập 243 mặt · `/login` không lộ cấu hình nhà | `a8f7887d` | #402 | — |
 
-Production chạy `a483e1d6` (có mọi mốc trên), health `ok`, 24/24 module, 174 migration.
+Production chạy `a8f7887d` (có mọi mốc trên), health `ok`, 24/24 module, 178 migration.
 
 ## Tính năng (đều cấu hình không deploy)
 
@@ -42,7 +54,8 @@ tổ chức · màn duyệt lõi.
 ## Cổng mở bán — CHỦ ĐỘNG TẮT, bật khi chủ nền tảng quyết (`launch-gates.md`)
 
 1. `PLATFORM_SECRETS_KEY` trên production: tạo secret GitHub (`openssl rand -base64 48`) rồi dispatch deploy — thiếu thì
-   tổ chức khác không lưu được bí mật kết nối (VNX không ảnh hưởng).
+   tổ chức khác không lưu được bí mật kết nối (VNX không ảnh hưởng). Sau khi đặt: checklist V1–V7 (`launch-gates.md` A.5).
+   Quyết định kinh doanh còn treo cho pilot: G-ORDER · G-SCHED (`pilot-readiness.md` mục 4–5).
 2. Đăng ký `/start`: TẮT. Bật «Cần mã mời» ở `/platform` → Cổng mở bán (không deploy); `open` cần trần môi trường.
 3. Sao lưu tổ chức: dung lượng Drive, tải VPS 02–05 giờ, diễn tập khôi phục tự động (C1–C6).
 4. Ai trả tiền token Copilot cho tổ chức khác (hiện Copilot chỉ ở tổ chức nhà; AI Builder dùng khoá của chính tổ chức).
@@ -60,8 +73,10 @@ Commit/PR KHÔNG mang tên model AI, KHÔNG dòng Co-Authored-By (AGENTS.md 6.6)
 
 - Bảng trang động không bọc `list*()` cũ; `available_stock` của trang tính đường ngắn; `request_approval` chỉ khách hàng.
 - Menu đọc `meta_pages` + `meta_objects` mỗi lượt tải bố cục; trang không tìm thấy trả HTTP 200 (streaming).
-- AI Builder: một lượt dựng mới ~1,1 USD (3 lượt gọi claude-opus-5); chưa có trần chi phí theo gói ngoài 20 lượt/ngày.
+- AI Builder: một lượt dựng mới ~1,1 USD, một lượt sửa ~0,14 USD; trần theo gói ở sổ dùng AI (`ai-usage.md`).
 - Kéo xa khi phải cuộn trong trình kéo-thả chưa đo trên màn hình thường.
 - Cài blueprint vượt hạn mức đối tượng hỏng giữa chừng (kế hoạch chưa báo trước).
 - Sao lưu tổ chức chưa có diễn tập khôi phục TỰ ĐỘNG (có ops `restore-drill-org` chạy tay — bật tự động là cổng C2 ở `launch-gates.md`); đêm nhà hỏng thì tổ chức không được sao lưu.
-- `/login`, `/start` và một số trang lõi ngoài danh sách H4 còn chữ gốc VNX.
+- `/login`, `/start` và một số trang lõi ngoài danh sách H4 còn chữ gốc VNX (trạng thái tích hợp của nhà + gợi ý `.env` trên
+  `/login` đã ẩn khi có tổ chức thứ hai).
+- Nợ P0/P1/P2 của đợt pilot: `pilot-readiness.md` mục 4.
