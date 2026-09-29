@@ -78,6 +78,14 @@
   .act.ok{border-color:var(--ok);color:var(--ok)} .act.err{border-color:var(--err);color:var(--err)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
   .chips button{font-size:12px;padding:4px 10px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+  .grid2 .card{margin-bottom:0}.grid2{margin-bottom:14px}
+  svg.chart{width:100%;height:auto;display:block}
+  svg.chart .bar{fill:var(--acc)} svg.chart .bar.part{fill:var(--acc);opacity:.55} svg.chart .bar.hov{opacity:.75}
+  svg.chart .bar.now{fill:var(--acc)} svg.chart .unk{fill:var(--line)}
+  svg.chart .base{stroke:var(--line);stroke-width:1} svg.chart .ax{fill:var(--muted);font-size:14px;font-family:var(--font)}
+  #charttip{position:fixed;display:none;pointer-events:none;z-index:50;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;box-shadow:0 4px 14px rgb(0 0 0 / 15%)}
+  .feed{padding:8px 0;border-bottom:1px solid var(--line)}.feed:last-child{border-bottom:0}
 </style>
 <script>
 /* Theo che do sang/toi va phong chu cua ERP khi mo trong khung cua ERP (cung nguon nen doc duoc trang cha). */
@@ -113,6 +121,7 @@
   <div class="head">Pancake Bot Manager<div class="small muted" id="gstatus">đang tải…</div></div>
   <div id="pages"></div>
   <div id="globalnav">
+    <div class="pg" data-view="home" id="nav_home">📊 <span class="n"><b>Tổng quan</b><div class="c">Tin trả lời · chi phí AI theo ngày, theo giờ</div></span></div>
     <div class="pg" data-view="assistant" id="nav_assistant">🤖 <span class="n"><b>Trợ lý AI</b><div class="c">Ra lệnh cho bot bằng tiếng Việt</div></span></div>
     <div class="pg" data-view="prompt">📝 <span class="n">Prompt chung</span></div>
     <div class="pg" data-view="catalog">🛍️ <span class="n">Sản phẩm (POS)</span></div>
@@ -127,6 +136,7 @@
   <div id="content"></div>
 </div>
 <div id="toast"></div>
+<div id="charttip"></div>
 
 <script>
 const $ = (s, r = document) => r.querySelector(s);
@@ -144,7 +154,7 @@ function shrinkImage(file, max = 1600) {
 }
 // markdown toi gian cho tin cua tro ly: **dam**, gach dau dong, xuong dong
 const md = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*\-]\s+/gm, "• ").replace(/^#{1,6}\s+/gm, "");
-let STATE = null, view = { kind: "page", id: null, tab: "settings" }, models = [];
+let STATE = null, view = { kind: "home" }, models = [];
 const testChat = {}; // pageId -> history
 
 // Token truy cap tu xa (khi bot chay tren VPS): lay tu ?token=... roi nho lai trong trinh duyet
@@ -239,24 +249,73 @@ function aiNote(a) {
   if (!a.calls) return "Chưa có lượt gọi AI nào trong kỳ";
   let t = `${a.calls.toLocaleString("vi-VN")} lượt gọi AI`;
   if (a.unpricedCalls) t += ` · ${a.unpricedCalls} lượt chưa tính được tiền (model chưa có giá: ${a.unpricedModels.join(", ")})`;
-  if (a.perOrderVnd == null && a.calls) t += " · chưa có đơn nên chưa chia được theo đơn";
+  if (a.perSdtVnd == null && a.calls) t += " · chưa có SĐT nào nên chưa chia được";
   return t;
 }
+function vndOr(v, partial) {
+  return v == null ? "—" : (partial ? "≥ " : "") + Number(v).toLocaleString("vi-VN") + "đ";
+}
+function meterLabel() {
+  const t = STATE.aiShop?.meterSince;
+  return t ? new Date(t).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "";
+}
+// Tien AI chia cho SDT khach de lai — CA HAI chi dem tu moc do, nen hai ve cung mot khung gio.
 function aiTotalCard() {
   const sh = STATE.aiShop;
   if (!sh?.periods) return "";
-  const cell = (a, label) => `<div title="${esc(aiNote(a))}"><b>${fmtVnd(a)}</b><span class="muted">${label}${a?.perOrderVnd != null ? ` · ${(a.partial ? "≥ " : "") + a.perOrderVnd.toLocaleString("vi-VN")}đ/đơn (${a.orders} đơn)` : ""}</span></div>`;
-  const rows = (sh.byPage || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.calls.toLocaleString("vi-VN")}</td><td>${r.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : (r.partial ? "≥ " : "") + r.costVnd.toLocaleString("vi-VN") + "đ"}</td><td>${r.orders || "—"}</td><td>${r.perOrderVnd == null ? "—" : (r.partial ? "≥ " : "") + r.perOrderVnd.toLocaleString("vi-VN") + "đ"}</td></tr>`).join("");
-  return `<div class="card"><h3>Tổng chi phí AI cả shop (ước tính)</h3><div class="stat">
-    ${cell(sh.periods.today, "hôm nay")}${cell(sh.periods.d7, "7 ngày")}${cell(sh.periods.d30, "30 ngày")}</div>
-    ${rows ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Chia theo page · 30 ngày</summary><table style="margin-top:8px"><tr><th>Page</th><th>Lượt gọi AI</th><th>Tiền</th><th>Đơn POS</th><th>AI / đơn</th></tr>${rows}</table></details>` : ""}</div>`;
+  const since = meterLabel();
+  const cell = (a, label) => `<div title="${esc(aiNote(a))}"><b>${fmtVnd(a)}</b><span class="muted">${label}${a && !a.fullWindow && label !== "hôm nay" && since ? ` (từ ${since})` : ""} <br>${a?.uniqueOrders ?? 0} đơn · ${a?.perUniqueOrderVnd != null ? `<b>${vndOr(a.perUniqueOrderVnd, a.partial)}</b>/đơn` : "—/đơn"} · ${a?.sdt ?? 0} SĐT · ${a?.perSdtVnd != null ? `<b>${vndOr(a.perSdtVnd, a.partial)}</b>/SĐT` : "—/SĐT"}</span></div>`;
+  const rows = (sh.byPage || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.calls.toLocaleString("vi-VN")}</td><td>${r.costVnd == null && r.calls ? '<span class="pill warn">chưa có giá</span>' : vndOr(r.costVnd, r.partial)}</td><td>${r.id === "_khac" ? "—" : r.orders}</td><td>${vndOr(r.perOrderVnd, r.partial)}</td><td>${r.id === "_khac" ? "—" : r.sdt}</td><td>${vndOr(r.perSdtVnd, r.partial)}</td></tr>`).join("");
+  const bills = (sh.bills || []).map((b, i) => `<tr><td>${esc(b.from)} → ${esc(b.to)}${b.note ? `<div class="muted small">${esc(b.note)}</div>` : ""}</td><td>${Number(b.amountVnd).toLocaleString("vi-VN")}đ</td><td>${b.orders ?? "—"} đơn · ${b.sdt ?? "—"} SĐT</td><td>${b.perOrderVnd != null ? `<b>${b.perOrderVnd.toLocaleString("vi-VN")}đ</b>/đơn · ` : ""}${b.perSdtVnd != null ? `<b>${b.perSdtVnd.toLocaleString("vi-VN")}đ</b>` : ""}${b.reason ? `<div class="muted small">${esc(b.reason)}</div>` : ""}</td><td>${vndOr(b.estimateVnd)}</td><td><button data-bill-del="${i}">Xoá</button></td></tr>`).join("");
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  return `<div class="card"><h3>Chi phí AI cả shop ÷ đơn và SĐT</h3>
+    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tiền = token thật × bảng giá (ước tính). Đơn = mã đơn bot ghi vào POS, mỗi đơn đếm một lần (tạo mới hay cập nhật đơn nháp). SĐT = số điện thoại MỚI khách gõ trong hội thoại bot phụ trách. "/đơn" chia TỔNG tiền (kể cả hội thoại không ra đơn) cho số đơn. Cả tiền, đơn lẫn SĐT chỉ tính từ <b>${esc(since || "—")}</b> — trước mốc này bot chưa đếm SĐT, chia tiền ít ngày cho đơn nhiều ngày sẽ ra số sai.</div>
+    <div class="stat">${cell(sh.periods.today, "hôm nay")}${cell(sh.periods.d7, "7 ngày")}${cell(sh.periods.d30, "30 ngày")}</div>
+    ${rows ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Chia theo page · 30 ngày</summary><table style="margin-top:8px"><tr><th>Page</th><th>Lượt gọi AI</th><th>Tiền</th><th>Đơn</th><th>AI / đơn</th><th>SĐT</th><th>AI / SĐT</th></tr>${rows}</table></details>` : ""}
+    ${orderCostBlock(sh.orderCosts)}
+    <details style="margin-top:10px" ${bills ? "open" : ""}><summary class="small" style="cursor:pointer">Tiền THỰC TRẢ API (hoá đơn Google) ÷ SĐT</summary>
+      <div class="hint" style="margin:6px 0">Bot không đọc được hoá đơn Google bằng khoá API. Xem số tiền ở Google AI Studio → Billing (hoặc Google Cloud → Billing → Reports), nhập tổng tiền của một khoảng ngày; ERP chia cho số SĐT của đúng khoảng đó. Cột "Ước tính" để so với số token.</div>
+      ${bills ? `<table><tr><th>Khoảng ngày</th><th>Thực trả</th><th>Đơn · SĐT</th><th>Thực trả / đơn · / SĐT</th><th>Ước tính cùng kỳ</th><th></th></tr>${bills}</table>` : ""}
+      <div class="row" style="margin-top:8px">
+        <div style="width:150px"><label>Từ ngày</label><input id="bill_from" type="date" value="${today}"></div>
+        <div style="width:150px"><label>Đến ngày</label><input id="bill_to" type="date" value="${today}"></div>
+        <div style="width:160px"><label>Số tiền (đ)</label><input id="bill_amount" type="number" min="0" step="1000"></div>
+        <div style="flex:1;min-width:140px"><label>Ghi chú</label><input id="bill_note" placeholder="vd hoá đơn tháng 10"></div>
+        <button class="primary" id="bill_add" style="align-self:flex-end">Thêm</button>
+      </div>
+    </details></div>`;
+}
+// Tien AI cua CHINH hoi thoai ra tung don — khac "/don" o tren (cai do chia ca tien hoi thoai khong ra don)
+function orderCostBlock(oc) {
+  if (!oc || !oc.rows?.length) return "";
+  const rows = oc.rows.map((r) => `<tr><td>${esc(fmtTime(r.at))}</td><td>${esc(r.page)}</td><td>#${esc(r.id)}</td><td>${r.calls || "—"}</td><td>${r.calls ? (r.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : vndOr(r.costVnd, r.partial)) : '<span class="muted small">không ghi được</span>'}</td></tr>`).join("");
+  return `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Tiền AI của chính hội thoại ra đơn · ${oc.sample ? `trung vị <b>${vndOr(oc.median, oc.partial)}</b> · trung bình ${vndOr(oc.avg, oc.partial)} (${oc.sample} đơn)` : "chưa có đơn nào đo được"}</summary>
+    <div class="hint" style="margin:6px 0">Mọi lượt gọi AI trong hội thoại đó (trả lời, xem ảnh, trích đơn) cộng lại. Đây là giá "làm ra" một đơn nếu chỉ tính hội thoại thành công; còn "/đơn" ở trên chia cả tiền của hội thoại không ra đơn. "≥" = hội thoại bắt đầu trước mốc đo nên có thể đã tốn thêm trước đó.</div>
+    <table><tr><th>Lúc ghi</th><th>Page</th><th>Đơn</th><th>Lượt gọi AI</th><th>Tiền AI</th></tr>${rows}</table></details>`;
+}
+function bindAiBills() {
+  const cur = () => (STATE.aiShop?.bills || []).map(({ from, to, amountVnd, note }) => ({ from, to, amountVnd, note }));
+  const save = async (list, msg) => {
+    try { await api("/api/global", { method: "POST", body: { aiBills: list } }); toast(msg); await refreshState(); } catch (e) { toast("Lỗi: " + e.message, 6000); }
+  };
+  const add = $("#bill_add");
+  if (add) add.onclick = () => {
+    const amount = $("#bill_amount").value;
+    if (amount === "") return toast("Nhập số tiền thực trả", 4000);
+    save([...cur(), { from: $("#bill_from").value, to: $("#bill_to").value, amountVnd: Number(amount), note: $("#bill_note").value.trim() }], "Đã thêm hoá đơn API");
+  };
+  document.querySelectorAll("[data-bill-del]").forEach((b) => (b.onclick = () => {
+    const list = cur();
+    list.splice(Number(b.dataset.billDel), 1);
+    save(list, "Đã xoá dòng hoá đơn");
+  }));
 }
 function aiCostCard(p) {
   const a = p.ai?.last7, shop = STATE.aiShop, pr = STATE.aiPricing || { prices: {}, usdVnd: 0 };
   const rows = (a?.perModel || []).map((m) => `<tr><td>${esc(m.model)}</td><td>${m.calls.toLocaleString("vi-VN")}</td><td>${(m.input + m.cached).toLocaleString("vi-VN")}${m.cached ? ` <span class="muted small">(${Math.round((m.cached / Math.max(1, m.input + m.cached)) * 100)}% cache)</span>` : ""}</td><td>${m.output.toLocaleString("vi-VN")}</td><td>${m.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : m.costVnd.toLocaleString("vi-VN") + "đ"}</td></tr>`).join("");
   const priceRows = Object.entries(pr.prices).map(([k, v]) => `<tr><td><input data-pm="${esc(k)}" value="${esc(k)}"></td><td><input data-pi="${esc(k)}" type="number" step="0.001" value="${v.input}"></td><td><input data-pc="${esc(k)}" type="number" step="0.001" value="${v.cached}"></td><td><input data-po="${esc(k)}" type="number" step="0.001" value="${v.output}"></td></tr>`).join("");
   return `<div class="card"><h3>Chi phí AI 7 ngày (ước tính)</h3>
-    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tính từ số token thật của mọi lượt gọi AI (trả lời, nhận diện ảnh, trích xuất đơn) × bảng giá bên dưới. "AI / 1 đơn" = chi phí AI của page ÷ số đơn bot ghi vào POS — tiền của hội thoại không ra đơn vẫn tính vào. Cả shop 7 ngày: <b>${fmtVnd(shop)}</b>${shop?.perOrderVnd != null ? ` · <b>${(shop.partial ? "≥ " : "") + shop.perOrderVnd.toLocaleString("vi-VN")}đ</b>/đơn (${shop.orders} đơn)` : ""}.</div>
+    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tính từ số token thật của mọi lượt gọi AI (trả lời, nhận diện ảnh, trích xuất đơn) × bảng giá bên dưới. "AI / 1 SĐT" = chi phí AI của page ÷ số SĐT mới khách để lại, cùng khung giờ (từ ${esc(meterLabel())}) — tiền của hội thoại không ra SĐT vẫn tính vào. Cả shop 7 ngày: <b>${fmtVnd(shop)}</b> · ${shop?.sdt ?? 0} SĐT${shop?.perSdtVnd != null ? ` · <b>${vndOr(shop.perSdtVnd, shop.partial)}</b>/SĐT` : ""}.</div>
     ${rows ? `<table><tr><th>Model</th><th>Lượt gọi</th><th>Token vào</th><th>Token ra</th><th>Tiền</th></tr>${rows}</table>` : '<div class="muted small">Chưa có lượt gọi AI nào được ghi (bộ đếm bắt đầu từ bản cập nhật này).</div>'}
     <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Bảng giá AI (USD / 1 triệu token) · tỷ giá ${pr.usdVnd.toLocaleString("vi-VN")}đ/USD</summary>
       <table id="ai_prices" style="margin-top:8px"><tr><th>Model (khớp theo tiền tố)</th><th>Vào</th><th>Vào từ cache</th><th>Ra (gồm suy nghĩ)</th></tr>${priceRows}
@@ -290,7 +349,9 @@ function renderSettings(p) {
     <div><b>${st.last7.skippedStaff}</b><span class="muted">nhường nhân viên</span></div>
     <div><b>${st.last7.orders || 0}</b><span class="muted">đơn ghi vào POS</span></div>
     <div title="${esc(aiNote(p.ai?.last7))}"><b>${fmtVnd(p.ai?.last7)}</b><span class="muted">chi phí AI (ước tính)</span></div>
-    <div title="${esc(aiNote(p.ai?.last7))}"><b>${p.ai?.last7?.perOrderVnd == null ? "—" : (p.ai.last7.partial ? "≥ " : "") + p.ai.last7.perOrderVnd.toLocaleString("vi-VN") + "đ"}</b><span class="muted">AI / 1 đơn POS</span></div>
+    <div title="SĐT mới khách gõ trong hội thoại bot phụ trách, từ ${esc(meterLabel())}"><b>${p.ai?.last7?.sdt ?? 0}</b><span class="muted">SĐT khách để lại</span></div>
+    <div title="${esc(aiNote(p.ai?.last7))}"><b>${vndOr(p.ai?.last7?.perUniqueOrderVnd, p.ai?.last7?.partial)}</b><span class="muted">AI / 1 đơn (${p.ai?.last7?.uniqueOrders ?? 0} đơn)</span></div>
+    <div title="${esc(aiNote(p.ai?.last7))}"><b>${vndOr(p.ai?.last7?.perSdtVnd, p.ai?.last7?.partial)}</b><span class="muted">AI / 1 SĐT</span></div>
     <div><b class="small" style="font-size:13px;margin-top:4px">${fmtTime(st.lastActivity)}</b><span class="muted">hoạt động cuối</span></div></div></div>
   ${aiCostCard(p)}
   <div class="card"><h3>Tên page</h3>
@@ -343,6 +404,7 @@ function renderSettings(p) {
     try { await api(`/api/pages/${p.id}/settings`, { method: "PUT", body }); toast("Đã lưu cài đặt cho " + (p.name || p.id)); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
   };
   bindAiPrices();
+  bindAiBills();
   $("#viewPrompt").onclick = async () => { const d = await api(`/api/pages/${p.id}/prompt`); const pre = $("#fullPrompt"); pre.textContent = d.text; pre.style.display = "block"; };
 }
 
@@ -762,6 +824,7 @@ function renderAddPage() {
 async function renderGlobal() {
   const c = $("#content");
   if (view.kind === "addpage") return renderAddPage();
+  if (view.kind === "home") return renderHome();
   if (view.kind === "assistant") return renderAssistant();
   if (view.kind === "prompt") {
     $("#title").textContent = "Prompt chung (prompts/system.md)"; $("#topinfo").textContent = "Áp dụng cho tất cả page. {{SHOP_NAME}} = tên page, {{CATALOG}} = sản phẩm POS.";
@@ -786,6 +849,88 @@ async function renderGlobal() {
     $("#logbox").scrollTop = 1e9;
   }
 }
+/* ---------- Tổng quan: tin trả lời + chi phí AI theo ngày / theo giờ, cập nhật trực tiếp ---------- */
+let homeTimer = null, homeBusy = false;
+const vndCell = (v, partial) => (v == null ? "—" : (partial ? "≥ " : "") + Number(v).toLocaleString("vi-VN") + "đ");
+const numCell = (v) => (v == null ? "—" : Number(v).toLocaleString("vi-VN"));
+// Biểu đồ cột một chuỗi: null = CHƯA BIẾT (không vẽ cột, không phải 0). Nhãn trục chữ muted, cột màu nhấn của ERP.
+function barChart(items, { height = 190, every = 1, fmt = numCell, name = "" } = {}) {
+  const W = 720, H = height, padB = 26, padT = 22, n = items.length, gap = 2;
+  const max = Math.max(0, ...items.map((i) => i.value ?? 0));
+  const bw = (W - gap * (n - 1)) / n, plotH = H - padB - padT;
+  const bars = items.map((it, i) => {
+    const x = i * (bw + gap);
+    const label = i % every === 0 ? `<text x="${i === 0 ? x : x + bw / 2}" y="${H - 6}" text-anchor="${i === 0 ? "start" : "middle"}" class="ax">${esc(it.label)}</text>` : "";
+    const tip = `${it.tipLabel || it.label}: ${it.value == null ? "chưa đo" : fmt(it.value, it.partial)}`;
+    const hit = `<rect x="${x}" y="${padT}" width="${bw}" height="${plotH}" fill="transparent" data-tip="${esc(tip)}"></rect>`;
+    if (it.value == null) return label + `<rect x="${x}" y="${H - padB - 2}" width="${bw}" height="2" class="unk"></rect>` + hit;
+    const h = max > 0 ? Math.max(it.value > 0 ? 2 : 0, (it.value / max) * plotH) : 0;
+    const y = H - padB - h, r = Math.min(4, bw / 2, h);
+    const path = h > 0 ? `<path d="M${x},${H - padB} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${H - padB} Z" class="bar${it.partial ? " part" : ""}${it.now ? " now" : ""}"></path>` : "";
+    return label + path + hit;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(name)}"><text x="0" y="14" class="ax">${esc(max ? "cao nhất " + fmt(max) : "")}</text><line x1="0" x2="${W}" y1="${H - padB}" y2="${H - padB}" class="base"></line>${bars}</svg>`;
+}
+function bindChartTips() {
+  const tip = $("#charttip");
+  document.querySelectorAll("svg.chart [data-tip]").forEach((el) => {
+    el.onmousemove = (e) => { tip.textContent = el.dataset.tip; tip.style.display = "block"; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY - 28 + "px"; el.previousElementSibling?.classList?.add("hov"); };
+    el.onmouseleave = () => { tip.style.display = "none"; el.previousElementSibling?.classList?.remove("hov"); };
+  });
+}
+async function renderHome() {
+  clearInterval(homeTimer);
+  $("#title").textContent = "Tổng quan bot chat";
+  await loadHome();
+  homeTimer = setInterval(() => (view.kind === "home" ? loadHome() : clearInterval(homeTimer)), 15000);
+}
+async function loadHome() {
+  if (homeBusy) return;
+  homeBusy = true;
+  try {
+    const d = await api("/api/overview");
+    if (view.kind !== "home") return;
+    const t = d.today, nowH = new Date(Date.now() + 7 * 3600e3).getUTCHours();
+    const fmtHm = (ms) => (ms ? new Date(ms).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—");
+    $("#topinfo").innerHTML = `<span class="pill ok">● trực tiếp</span> cập nhật ${new Date(d.generatedAt).toLocaleTimeString("vi-VN")} · tự làm mới 15 giây và mỗi khi bot trả lời`;
+    const hourItems = d.hourly.map((h) => ({ label: String(h.hour).padStart(2, "0"), tipLabel: `${String(h.hour).padStart(2, "0")}:00–${String(h.hour).padStart(2, "0")}:59`, value: h.replies, partial: h.partial, now: h.hour === nowH }));
+    const hourCost = d.hourly.map((h) => ({ label: String(h.hour).padStart(2, "0"), tipLabel: `${String(h.hour).padStart(2, "0")}:00–${String(h.hour).padStart(2, "0")}:59`, value: h.costVnd, partial: h.partial || h.costPartial, now: h.hour === nowH }));
+    const dayLbl = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
+    const dayReplies = d.days.map((x) => ({ label: dayLbl(x.day), value: x.replies }));
+    const dayCost = d.days.map((x) => ({ label: dayLbl(x.day), value: x.costVnd, partial: x.partial }));
+    const rows = d.days.slice().reverse().map((x) => `<tr><td>${esc(dayLbl(x.day))}${x.day === t.day ? ' <span class="pill">hôm nay</span>' : ""}</td><td>${numCell(x.replies)}</td><td>${numCell(x.handoffs)}</td><td>${vndCell(x.costVnd, x.partial)}</td><td>${numCell(x.orders)}</td><td>${vndCell(x.perOrderVnd, x.partial)}</td><td>${numCell(x.sdt)}</td><td>${vndCell(x.perSdtVnd, x.partial)}</td></tr>`).join("");
+    const pages = d.pages.map((p) => `<tr><td>${esc(p.name)}</td><td>${numCell(p.replies)}</td><td>${numCell(p.handoffs)}</td><td>${vndCell(p.costVnd, p.partial)}</td><td>${numCell(p.orders)}</td><td>${vndCell(p.perOrderVnd, p.partial)}</td></tr>`).join("");
+    const recent = d.recent.map((r) => `<div class="feed"><div class="small muted">${esc(fmtTime(r.at))} · ${esc(r.page)}${r.customer ? " · " + esc(r.customer) : ""}${r.handoff ? ' <span class="pill warn">chuyển NV</span>' : ""}${r.dryRun ? ' <span class="pill">chỉ log</span>' : ""}</div><div class="small"><span class="muted">Khách:</span> ${esc(r.question)}</div><div class="small"><span class="muted">Bot:</span> ${esc(r.reply)}</div></div>`).join("") || '<div class="muted small">Chưa có câu trả lời nào.</div>';
+    $("#content").innerHTML = `
+    <div class="card"><h3>Hôm nay</h3><div class="stat">
+      <div><b>${numCell(t.replies)}</b><span class="muted">tin bot trả lời</span></div>
+      <div><b>${numCell(t.handoffs)}</b><span class="muted">chuyển nhân viên</span></div>
+      <div><b>${vndCell(t.costVnd, t.partial)}</b><span class="muted">chi phí AI (ước tính)</span></div>
+      <div><b>${numCell(t.orders)}</b><span class="muted">đơn bot ghi POS</span></div>
+      <div><b>${vndCell(t.perOrderVnd, t.partial)}</b><span class="muted">AI / 1 đơn</span></div>
+      <div><b>${numCell(t.sdt)}</b><span class="muted">SĐT khách để lại</span></div>
+      <div><b>${vndCell(t.perSdtVnd, t.partial)}</b><span class="muted">AI / 1 SĐT</span></div></div>
+      <div class="hint" style="margin-top:8px">Chi phí = token thật × bảng giá (ước tính; số chuẩn: nhập hoá đơn Google ở tab Cài đặt của page). Đơn và SĐT đếm từ ${esc(fmtHm(d.meterSince))}; theo giờ đếm từ ${esc(fmtHm(d.hourlySince))} — giờ trước đó để trống, không phải 0. "≥" = khoảng đó bắt đầu đếm giữa chừng.</div></div>
+    <div class="grid2">
+      <div class="card"><h3>Tin bot trả lời theo giờ · hôm nay</h3>${barChart(hourItems, { every: 3, name: "Tin bot trả lời theo giờ hôm nay" })}</div>
+      <div class="card"><h3>Chi phí AI theo giờ · hôm nay</h3>${barChart(hourCost, { every: 3, fmt: vndCell, name: "Chi phí AI theo giờ hôm nay" })}</div>
+      <div class="card"><h3>Tin bot trả lời · 30 ngày</h3>${barChart(dayReplies, { every: 5, name: "Tin bot trả lời 30 ngày" })}</div>
+      <div class="card"><h3>Chi phí AI · 30 ngày</h3>${barChart(dayCost, { every: 5, fmt: vndCell, name: "Chi phí AI 30 ngày" })}</div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>Theo page · hôm nay</h3><table><tr><th>Page</th><th>Tin trả lời</th><th>Chuyển NV</th><th>Chi phí AI</th><th>Đơn</th><th>AI / đơn</th></tr>${pages}</table></div>
+      <div class="card"><h3>Bot vừa trả lời</h3>${recent}</div>
+    </div>
+    <div class="card"><h3>Từng ngày · 30 ngày</h3><table><tr><th>Ngày</th><th>Tin trả lời</th><th>Chuyển NV</th><th>Chi phí AI</th><th>Đơn</th><th>AI / đơn</th><th>SĐT</th><th>AI / SĐT</th></tr>${rows}</table>
+      <div class="hint">Chi phí "—" = ngày bot chưa đếm token (trước bản cập nhật), không phải 0đ. Đơn / SĐT "—" = trước mốc đo.</div></div>`;
+    bindChartTips();
+  } catch (e) {
+    if (view.kind === "home") $("#content").innerHTML = `<div class="card">Không tải được tổng quan: ${esc(e.message)}</div>`;
+  } finally {
+    homeBusy = false;
+  }
+}
+
 let choTimer = null;
 async function renderCho() {
   clearInterval(choTimer);
@@ -940,7 +1085,7 @@ function drawAudit(d) {
 }
 function logLine(e) { return `<div class="${e.level}">${esc(e.ts.slice(11, 19))} ${esc(e.msg)}</div>`; }
 // live log + auto refresh sidebar
-try { const es = new EventSource(withToken(BASE + "/api/events")); es.onmessage = (ev) => { const e = JSON.parse(ev.data); const box = $("#logbox"); if (box) { box.insertAdjacentHTML("beforeend", logLine(e)); box.scrollTop = 1e9; } if (/Bot ->|HANDOFF|Cap nhat cai dat/.test(e.msg)) clearTimeout(window._rs), (window._rs = setTimeout(() => api("/api/state").then((s) => { STATE = s; renderSidebar(); }), 1500)); }; } catch {}
+try { const es = new EventSource(withToken(BASE + "/api/events")); es.onmessage = (ev) => { const e = JSON.parse(ev.data); const box = $("#logbox"); if (box) { box.insertAdjacentHTML("beforeend", logLine(e)); box.scrollTop = 1e9; } if (/Bot ->|HANDOFF|Cap nhat cai dat/.test(e.msg)) clearTimeout(window._rs), (window._rs = setTimeout(() => { api("/api/state").then((s) => { STATE = s; renderSidebar(); }); if (view.kind === "home") loadHome(); }, 1500)); }; } catch {}
 refreshState().catch((e) => ($("#content").innerHTML = `<div class="card">Không kết nối được bot: ${esc(e.message)}</div>`));
 </script>
 </body>

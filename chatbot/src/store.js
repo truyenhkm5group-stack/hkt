@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
@@ -10,7 +11,8 @@ import { log } from "./logger.js";
  * - lastHandled: { conversationId: messageId cuoi cung bot da tra loi }
  * - convUpdatedAt: { conversationId: updated_at } dung cho che do poll
  */
-const MAX_IDS = 20000; // tang de nho lau hon tin cua bot (phan biet voi tin tu dong cua Facebook)
+const MAX_IDS = 20000;
+const vnDay = (ms) => new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10); // tang de nho lau hon tin cua bot (phan biet voi tin tu dong cua Facebook)
 
 class Store {
   constructor() {
@@ -18,6 +20,8 @@ class Store {
     this.file = path.join(config.dataDir, "state.json");
     this.state = { processed: [], botMessages: [], lastHandled: {}, convUpdatedAt: {}, stats: {}, recent: {} };
     this._load();
+    this._startMeter();
+    if (!this.state.hourlySince) this.state.hourlySince = Date.now();
     this._processed = new Set(this.state.processed);
     this._bot = new Set(this.state.botMessages);
     this._timer = null;
@@ -75,8 +79,30 @@ class Store {
     this._save();
   }
 
+  /**
+   * THEO GIO (gio VN, ca shop) cho trang Tong quan: tin tra loi, chuyen nhan vien, token AI. Giu 72 gio.
+   * Moc bat dau dem theo gio nam o hourlySince — gio truoc moc la CHUA BIET, khong phai 0.
+   */
+  _hour(ms = Date.now()) {
+    if (!this.state.hourlySince) this.state.hourlySince = ms;
+    const key = new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 13);
+    const all = (this.state.hourly ||= {});
+    if (!all[key]) {
+      all[key] = {};
+      const cutoff = new Date(ms + 7 * 3600 * 1000 - 72 * 3600e3).toISOString().slice(0, 13);
+      for (const k of Object.keys(all)) if (k < cutoff) delete all[k];
+    }
+    return all[key];
+  }
+  getHourly() {
+    return { since: this.state.hourlySince || null, hours: this.state.hourly || {} };
+  }
   /** Thong ke theo page theo ngay (gio VN): replies, handoffs, skippedStaff */
   bumpStat(pageId, key) {
+    if (key === "replies" || key === "handoffs") {
+      const h = this._hour();
+      h[key] = (h[key] || 0) + 1;
+    }
     const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
     const s = (this.state.stats ||= {});
     const p = (s[String(pageId)] ||= {});
@@ -98,9 +124,111 @@ class Store {
     x.input += t.input || 0;
     x.cached += t.cached || 0;
     x.output += t.output || 0;
+    const hm = ((this._hour().ai ||= {})[String(model)] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+    hm.calls += 1;
+    hm.input += t.input || 0;
+    hm.cached += t.cached || 0;
+    hm.output += t.output || 0;
     const days = Object.keys(p).sort();
     while (days.length > 35) delete p[days.shift()];
     this._save();
+  }
+  /**
+   * MOC DO CHI PHI / SDT: tu luc nay moi dem SDT, nen phep chia chi dung ngay tu moc (truoc do chi co tien, khong co
+   * SDT — chia 30 ngay tien cho 30 ngay don la chia hai tap khac nhau). Token cua NGAY BAT DAU ghi truoc moc duoc chup
+   * lai (baseline) de tru ra, nen ngay dau cung khop dung khung gio.
+   */
+  _startMeter() {
+    if (this.state.meter?.since) return;
+    const since = Date.now();
+    const day = vnDay(since);
+    const baseline = {};
+    for (const [page, byDay] of Object.entries(this.state.aiUsage || {})) {
+      if (byDay[day]) baseline[page] = JSON.parse(JSON.stringify(byDay[day]));
+    }
+    this.state.meter = { since, day, baseline };
+    this._save();
+  }
+  getMeter() {
+    return this.state.meter;
+  }
+  /**
+   * SDT khach de lai trong hoi thoai bot phu trach: moi so dem MOT lan, o ngay khach go no (gio VN). Chi luu BAM cua
+   * so (khong luu so that). Tin go truoc moc do khong dem — do la SDT cua ky truoc, khong phai ket qua cua tien nay.
+   */
+  addPhone(pageId, phone, atMs) {
+    if (!phone || !Number.isFinite(atMs) || atMs < (this.state.meter?.since || 0)) return false;
+    const key = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+    const all = (this.state.phones ||= {});
+    if (all[key]) return false;
+    all[key] = { p: String(pageId), d: vnDay(atMs) };
+    const cutoff = vnDay(Date.now() - 35 * 86400000);
+    for (const [k, v] of Object.entries(all)) if (v.d < cutoff) delete all[k];
+    this._save();
+    return true;
+  }
+  /** So SDT moi theo page trong cac ngay cho truoc. */
+  countPhones(days, pageId) {
+    const set = new Set(days);
+    let n = 0;
+    for (const v of Object.values(this.state.phones || {})) if (set.has(v.d) && (pageId === undefined || v.p === String(pageId))) n++;
+    return n;
+  }
+  /**
+   * TIEN AI THEO TUNG HOI THOAI: moi luot goi AI trong luot xu ly mot hoi thoai ghi vao dung hoi thoai do, nen don nao
+   * cung biet chinh hoi thoai cua no ton bao nhieu. Giu 35 ngay theo lan goi cuoi, toi da 30000 hoi thoai.
+   */
+  addConvAiUsage(pageId, conversationId, model, t) {
+    if (!conversationId) return;
+    const all = (this.state.convAi ||= {});
+    const now = Date.now();
+    const c = (all[String(conversationId)] ||= { p: String(pageId), first: now, last: now, m: {} });
+    c.last = now;
+    const x = (c.m[String(model)] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+    x.calls += 1;
+    x.input += t.input || 0;
+    x.cached += t.cached || 0;
+    x.output += t.output || 0;
+    const keys = Object.keys(all);
+    if (keys.length > 30000 || Math.random() < 0.01) {
+      const cutoff = now - 35 * 86400000;
+      for (const k of keys) if (all[k].last < cutoff) delete all[k];
+      const left = Object.keys(all).sort((a, b) => all[a].last - all[b].last);
+      while (left.length > 30000) delete all[left.shift()];
+    }
+    this._save();
+  }
+  getConvAi(conversationId) {
+    return (this.state.convAi || {})[String(conversationId)] || null;
+  }
+  /**
+   * DON BOT GHI VAO POS, moi ma don dem MOT lan (tao moi hay cap nhat don nhap deu la mot don), theo lan ghi dau.
+   * Bo dem "orders" cu cong ca lan cap nhat nen mot don co the dem 2-3 lan. Chi dem tu moc do.
+   */
+  addBotOrder(pageId, orderId, conversationId) {
+    if (!orderId) return false;
+    const all = (this.state.botOrders ||= {});
+    const key = String(orderId);
+    if (all[key]) return false;
+    const now = Date.now();
+    if (now < (this.state.meter?.since || 0)) return false;
+    all[key] = { p: String(pageId), c: conversationId ? String(conversationId) : "", t: now, d: vnDay(now) };
+    const cutoff = vnDay(now - 35 * 86400000);
+    for (const [k, v] of Object.entries(all)) if (v.d < cutoff) delete all[k];
+    this._save();
+    return true;
+  }
+  countOrders(days, pageId) {
+    const set = new Set(days);
+    let n = 0;
+    for (const v of Object.values(this.state.botOrders || {})) if (set.has(v.d) && (pageId === undefined || v.p === String(pageId))) n++;
+    return n;
+  }
+  recentBotOrders(limit = 30) {
+    return Object.entries(this.state.botOrders || {})
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.t - a.t)
+      .slice(0, limit);
   }
   getAiUsage(pageId) {
     return (this.state.aiUsage || {})[String(pageId)] || {};

@@ -8,7 +8,7 @@ import { log } from "./logger.js";
 import { catalog } from "./catalog.js";
 import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
-import { orderSync, describeOrder } from "./orders.js";
+import { orderSync, describeOrder, phonesInText } from "./orders.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
@@ -789,6 +789,11 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
    */
   /** Ghi don nhap POS tu mot hoi thoai bat ky (nut trong app / tro ly AI). Doc lai toi da 60 tin. */
   async syncOrderForConversation(pageId, conversationId) {
+    // Luot trich don bam tay cung la tien cua CHINH hoi thoai do
+    return aiScope.run({ pageId: String(pageId), conversationId: String(conversationId) }, () => this._syncOrderForConversation(pageId, conversationId));
+  }
+
+  async _syncOrderForConversation(pageId, conversationId) {
     const client = this.getClient(pageId);
     if (!client) throw new Error("Khong co page " + pageId);
     if (!orderSync.enabled) throw new Error("POS chưa cấu hình");
@@ -1053,7 +1058,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
   /** Xu ly 1 hoi thoai: lay lich su -> Gemini -> gui tra loi (+ anh san pham) */
   /** Moi lan goi AI trong luot xu ly nay duoc tinh tien cho dung page (aicost.js). */
   processConversation(payload) {
-    return aiScope.run({ pageId: String(payload.pageId) }, () => this._processConversation(payload));
+    return aiScope.run({ pageId: String(payload.pageId), conversationId: payload.conversationId ? String(payload.conversationId) : null }, () => this._processConversation(payload));
   }
 
   async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
@@ -1409,6 +1414,11 @@ ${eff.afterOrderText.trim()}`;
 
     store.bumpStat(pageId, "replies");
     if (handoff) store.bumpStat(pageId, "handoffs");
+    // SDT khach da go trong hoi thoai bot dang phu trach — mau so cua "chi phi AI / 1 SDT"
+    for (const m of messages) {
+      if (this.isFromPage(m, pageId)) continue;
+      for (const ph of phonesInText(this.messageText(m))) store.addPhone(pageId, ph, parseTs(m.inserted_at));
+    }
     store.recordReply(pageId, { conversationId, customerName: name, question: this.messageText(last).slice(0, 200), reply: reply.slice(0, 500), handoff, dryRun: eff.dryRun });
     if (eff.dryRun) {
       log.info(`[${pageId}] DRY_RUN: khong gui tin cho khach`);

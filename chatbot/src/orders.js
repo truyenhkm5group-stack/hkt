@@ -76,6 +76,12 @@ export function phoneInText(text, phone) {
   return digits.includes(p) || digits.includes("84" + bare) || digits.includes(bare);
 }
 
+/** Moi SDT (da chuan hoa) khach go trong mot doan chu; bo dau cham / cach / gach giua cac so. */
+export function phonesInText(text) {
+  const t = String(text || "").replace(/(\d)[.\s-]+(?=\d)/g, "$1");
+  return [...new Set((t.match(/(?<![0-9])(?:0|\+?84)[1-9][0-9]{7,9}(?![0-9])/g) || []).map(normalizePhone).filter(Boolean))];
+}
+
 export function normalizePhone(p) {
   let d = String(p || "").replace(/\D/g, "");
   if (d.startsWith("84") && d.length === 11) d = "0" + d.slice(2);
@@ -491,6 +497,8 @@ export class OrderSync {
     const summary = `${status === "updated" ? "Cập nhật đơn nháp" : "Tạo đơn nháp"} #${orderId}: ${mapped.map((m) => `${m.display} x${m.quantity}`).join(", ")} | ${body.bill_full_name} ${phone} | ${addr.fullAddress}${addr.ok ? "" : " (⚠ địa chỉ cần kiểm tra)"}`;
     log.info(`[${pageId}] ${conversationId}: ${summary}`);
     store.bumpStat(pageId, "orders");
+    store.addPhone(pageId, phone, Date.now());
+    store.addBotOrder(pageId, orderId, conversationId);
     return { status, orderId, summary, address: addr, items: mapped, discount, agreed };
   }
 }

@@ -117,6 +117,30 @@ class Settings {
     return this.aiPricing();
   }
 
+  /**
+   * TIEN THUC TRA API (hoa don cua nha cung cap AI) chu shop nhap tay theo khoang ngay — bot khong doc duoc hoa don
+   * Google bang khoa API, nen day la cach duy nhat co so tien that. Toi da 24 dong, moi dong mot khoang.
+   */
+  aiBills() {
+    return Array.isArray(this.global.aiBills) ? this.global.aiBills : [];
+  }
+
+  setAiBills(list) {
+    if (!Array.isArray(list)) throw new Error("Danh sach hoa don khong hop le");
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    const clean = list.slice(0, 24).map((b) => {
+      const from = String(b?.from || "");
+      const to = String(b?.to || "");
+      const amountVnd = Math.round(Number(b?.amountVnd));
+      if (!day.test(from) || !day.test(to) || from > to) throw new Error("Khoang ngay khong hop le (tu ngay <= den ngay)");
+      if (!Number.isFinite(amountVnd) || amountVnd < 0 || amountVnd > 1e10) throw new Error("So tien khong hop le");
+      return { from, to, amountVnd, note: String(b?.note || "").slice(0, 120) };
+    });
+    this.global.aiBills = clean;
+    fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));
+    return clean;
+  }
+
   /** Bat/tat DRY_RUN chung ngay luc chay (null = quay ve gia tri trong .env) */
   setGlobalDryRun(value) {
     this.global.dryRun = value === null || value === undefined ? null : !!value;

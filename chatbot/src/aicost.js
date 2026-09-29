@@ -19,6 +19,11 @@ export function currentAiPage() {
   return aiScope.getStore()?.pageId || "_khac";
 }
 
+/** Hoi thoai cua luot goi AI hien tai (neu co) — de tinh tien AI cua CHINH hoi thoai ra don. */
+export function currentAiConversation() {
+  return aiScope.getStore()?.conversationId || null;
+}
+
 // USD / 1 trieu token. input = token vao khong duoc cache; cached = token vao doc tu cache; output = token ra (ke ca
 // token "suy nghi" — Gemini tinh gia nhu token ra).
 export const DEFAULT_AI_PRICES = {
@@ -101,4 +106,37 @@ export function summarizeAiCost(byDay, days, { prices, usdVnd, orders }) {
     perOrderVnd: costVnd !== null && orders > 0 ? Math.round(costVnd / orders) : null,
     perModel,
   };
+}
+
+/**
+ * Token TU MOC DO tro di: bo ngay truoc moc, ngay cua moc thi tru phan da ghi truoc moc (baseline). Ham thuan.
+ * Khong co moc (du lieu cu) => tra nguyen.
+ */
+export function meteredUsage(byDay, meter, baseline) {
+  if (!meter?.day) return byDay || {};
+  const out = {};
+  for (const [d, models] of Object.entries(byDay || {})) {
+    if (d < meter.day) continue;
+    if (d !== meter.day || !baseline) {
+      out[d] = models;
+      continue;
+    }
+    out[d] = {};
+    for (const [model, t] of Object.entries(models)) {
+      const b = baseline[model] || {};
+      const x = {
+        calls: Math.max(0, (t.calls || 0) - (b.calls || 0)),
+        input: Math.max(0, (t.input || 0) - (b.input || 0)),
+        cached: Math.max(0, (t.cached || 0) - (b.cached || 0)),
+        output: Math.max(0, (t.output || 0) - (b.output || 0)),
+      };
+      if (x.calls) out[d][model] = x;
+    }
+  }
+  return out;
+}
+
+/** Chia tien cho SDT: chua co SDT nao thi KHONG chia (null), tien chua biet thi cung null. */
+export function perSdt(costVnd, sdt) {
+  return costVnd !== null && costVnd !== undefined && sdt > 0 ? Math.round(costVnd / sdt) : null;
 }
