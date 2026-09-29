@@ -255,6 +255,7 @@ async function testWholesaleOrg() {
       assert.deepEqual(manualOrderRaw(row.raw), { origin: "ERP_MANUAL", orderDiscount: 10_000, createdBy: u.id }, "nguồn ERP khai rõ");
       assert.deepEqual([row.stage, row.status, row.customerId, row.billFullName, row.shipProvince, row.source], ["CONFIRMED", 1, c.id, "Đại lý Pilot", "Hà Nội", "Gọi điện"]);
       assert.deepEqual([row.totalPrice, row.totalDiscount, row.totalPriceAfterDiscount, row.shippingFee, row.totalQuantity, row.itemsCount], [490_000, 15_000, 475_000, 30_000, 5, 2]);
+      assert.equal(row.customerPayFee, true, "phí ship của đơn tay là tiền khách trả — trang đơn in dòng «Phí ship thu của khách» theo cờ này");
       const items = await db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, created.id));
       assert.deepEqual(items.map((i) => [i.variantId, i.quantity, i.lineTotal]).sort(), [["erp-po-var-a", 3, 360_000], ["erp-po-var-b", 2, 125_000]].sort());
       const logs = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "ORDER_MANUAL_CREATE"), eq(schema.auditLogs.entityId, created.id)));

@@ -43,6 +43,7 @@ import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { findOrganization } from "@/lib/platform/organizations";
 import { canUseModule } from "@/lib/platform/capabilities";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
@@ -896,7 +897,8 @@ export const HOME_CREDENTIAL_EXEMPT: Readonly<Record<string, string>> = {
 
 export type JobSkipped =
   | { skipped: "CONNECTOR_NOT_CONFIGURED"; job: string; org: string; connector: string; detail: string }
-  | { skipped: "MODULE_DISABLED"; job: string; org: string; module: ModuleKey; detail: string };
+  | { skipped: "MODULE_DISABLED"; job: string; org: string; module: ModuleKey; detail: string }
+  | { skipped: "ORG_INACTIVE"; job: string; org: string; status: string; detail: string };
 
 /** Mọi module mà job cần bật: module chính trước, rồi các module nghiệp vụ đi kèm. */
 export function jobModules(definition: Pick<JobDefinition, "module" | "alsoRequires">): ModuleKey[] {
@@ -913,6 +915,16 @@ export async function runJob(job: string, options: JobOptions) {
     việc bỏ rơi của `?wait=0` — đều đi đúng tổ chức, kể cả khi request đã trả lời xong.
   */
   const orgCode = options.org ?? (await currentOrganization()).code;
+  /*
+    TỔ CHỨC BỊ ĐÌNH CHỈ (công tắc khẩn ở /platform/org/<mã>) ⇒ BỎ QUA có lý do, không chạy, không ghi `sync_runs`. Hỏi
+    sổ tổ chức TRƯỚC `withOrganization` — hàm đó sẽ NÉM cho tổ chức không ACTIVE, và một lượt lịch bị ném thì trông
+    giống lỗi hạ tầng. Tổ chức không có trong sổ vẫn đi tiếp để `withOrganization` ném ORG_UNKNOWN như trước.
+  */
+  const target = await findOrganization(orgCode);
+  if (target && target.status !== "ACTIVE") {
+    const skipped: JobSkipped = { skipped: "ORG_INACTIVE", job, org: orgCode, status: target.status, detail: `Bỏ qua: tổ chức "${orgCode}" đang ${target.status} — không chạy job cho tới khi người vận hành bật lại.` };
+    return skipped;
+  }
   return withOrganization(orgCode, async () => {
     const org = await currentOrganization();
     const connector = HOME_CREDENTIAL_JOBS[job];

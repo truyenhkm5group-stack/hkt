@@ -9,7 +9,7 @@ import { Money } from "@/components/ui-bits";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
-import { manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { isManualOrderId, manualOrderShortCode } from "@/lib/constants/manual-orders";
 
 export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
   {
@@ -119,7 +119,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="text-right">
         <Money value={row.original.totalPriceAfterDiscount} className="font-bold" />
-        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[10px]" /> : <span className="text-[10.5px] text-muted-foreground">{row.original.moneyToCollect > 0 ? "COD" : "Đã thanh toán"}</span>}</div>
+        <div className="mt-0.5 flex justify-end">{row.original.moneyToCollect > 0 && row.original.shipment ? <CodStatusBadge status={row.original.shipment.codStatus} className="px-1.5 text-[10px]" /> : <span className="text-[10.5px] text-muted-foreground">{isManualOrderId(row.original.id) ? "Chưa đối chiếu tiền" : row.original.moneyToCollect > 0 ? "COD" : "Đã thanh toán"}</span>}</div>
       </div>
     ),
   },

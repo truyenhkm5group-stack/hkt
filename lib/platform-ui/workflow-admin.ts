@@ -201,5 +201,6 @@ export async function adminRunWorkflowsNow(user: SessionUser): Promise<WorkflowR
   const denial = workflowAdminDenial(user);
   if (denial || !user.organization) return denied(denial ?? "Phiên chưa gắn tổ chức — đăng nhập lại.");
   const r = await withOrganization(user.organization.code, () => runWorkflows());
+  if (r.paused) return denied(r.paused.reason);
   return { ok: true, events: r.events, runs: r.runs, executed: r.executed, waiting: r.waiting, failed: r.failed, recovered: r.recovered };
 }

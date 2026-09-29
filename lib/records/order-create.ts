@@ -164,6 +164,9 @@ function orderColumns(p: Prepared, user: SessionUser) {
     totalDiscount: t.totalDiscount,
     totalPriceAfterDiscount: t.totalPriceAfterDiscount,
     shippingFee: t.shippingFee,
+    // Phí ship của đơn tay là tiền KHÁCH trả (form ghi «Khách trả (gồm ship)»): cờ này là thứ trang đơn + tệp xuất đọc
+    // để in dòng «Phí ship thu của khách» — thiếu nó thì 30.000 ₫ khách trả biến mất khỏi trang chi tiết.
+    customerPayFee: t.shippingFee > 0,
     ...(p.channel ? { source: p.channel } : {}),
     creatorName: user.name,
     note: p.note,

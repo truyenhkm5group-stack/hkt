@@ -1233,6 +1233,13 @@
       "when": 1790662060000,
       "tag": "0176_platform_ai_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "7",
+      "when": 1790662120000,
+      "tag": "0177_platform_pilot_stage",
+      "breakpoints": true
     }
   ]
 }

@@ -124,6 +124,7 @@ const MOI = [
   "0174_creative_studio_options",
   "0175_video_scale_showcase",
   "0176_platform_ai_usage",
+  "0177_platform_pilot_stage",
 ] as const;
 
 /*

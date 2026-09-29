@@ -35,6 +35,7 @@ import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { markPilotConfigured, markPilotCreated } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { buildSignupBlueprint, freshOrgState, type SignupBlueprint } from "@/lib/onboarding/blueprint";
 import { claimInvite, lookupInvite, type InviteRow } from "@/lib/onboarding/invites";
@@ -331,6 +332,9 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   const source = "UI" as const;
   step.current = "PROVISION";
   await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, modules: CORE_MODULES, source, actor });
+  // Vòng đời pilot (docs/platform/pilot-operations.md): tổ chức MỚI của luồng này bắt đầu ở «Vừa tạo». Chỉ ghi khi chưa
+  // có giai đoạn — chạy lại sau hỏng không đè giai đoạn người vận hành đã đổi.
+  if (input.isNew) await markPilotCreated(input.code, actor, source);
   const prev = await readOnboarding(input.code);
   await claimRunning(input.code, {
     ...prev,
@@ -390,6 +394,8 @@ async function markFailed(code: string, stepName: SetupStepName, message: string
 async function markDone(code: string, installId: string | null, who: SignupActor) {
   await writeOnboarding(code, { state: "DONE", installId, finishedAt: new Date().toISOString(), failedStep: null, error: null }, "ACTIVE");
   await platformAudit({ action: "ORG_SETUP", targetOrgCode: code, subject: code, after: { state: "DONE", installId }, source: "UI", actor: platformActorOf(who) });
+  // Cài mẫu xong ⇒ «Vừa tạo» → «Đang cấu hình». Tổ chức không ở «Vừa tạo» (cũ, hoặc người vận hành đã đổi) thì không đụng.
+  await markPilotConfigured(code, platformActorOf(who), "UI");
 }
 
 /** Đưa tổ chức `SETUP_FAILED` về `ACTIVE` trước khi chạy lại: `withOrganization` chỉ vào được tổ chức đang chạy. */

@@ -439,6 +439,7 @@ import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPilotProducts } from "./pilot-products.test";
 import { testPilotOrders } from "./pilot-orders.test";
+import { testPilotOps } from "./pilot-ops.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
@@ -2585,6 +2586,10 @@ async function main() {
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();
+  // Vận hành khách pilot: vòng đời (checklist tính từ dữ liệu thật, ghi đè có lý do), trang sức khoẻ (không dữ liệu
+  // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
+  // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
+  await testPilotOps();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

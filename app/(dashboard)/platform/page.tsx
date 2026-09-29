@@ -20,6 +20,8 @@ import { listOnboardingStates } from "@/lib/onboarding/service";
 import { SIGNUP_MODE_LABEL } from "@/lib/onboarding/shared";
 import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
+import { listOrgSupportSummaries } from "@/lib/platform/support";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
 import { getOrganizationModuleView } from "@/lib/queries/platform-modules";
 import { cn } from "@/lib/utils";
@@ -76,6 +78,11 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
   const [onboarding, invites, plans, registry, signup, aiSummary] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState(), loadPlatformAiSummary(user)]);
+  // Tóm tắt vận hành khách (giai đoạn pilot, luật tạm dừng, người dùng, đăng nhập cuối) — chỉ số đếm + mốc, không ghi vết
+  // (vết SUPPORT_VIEW ghi khi mở trang của MỘT tổ chức).
+  const support = await listOrgSupportSummaries(user);
+  const suspended = registry.filter((o) => o.status === "SUSPENDED");
+  const paused = registry.filter((o) => support[o.code]?.workflowsPaused);
   const secretsKey = secretsKeyPublicStatus();
   const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
   const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
@@ -109,11 +116,12 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <EmptyState title="Chưa có tổ chức nào trong sổ" description="Sổ tổ chức rỗng — migration nền tảng chưa áp? Tổ chức nhà luôn phải có một dòng." className="m-4" />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Tổ chức</th>
                   <th className="px-3 py-2">Trạng thái</th>
+                  <th className="px-3 py-2">Pilot · dùng</th>
                   <th className="px-3 py-2">Mẫu</th>
                   <th className="px-3 py-2 text-right">Module bật</th>
                   <th className="px-3 py-2">Kết nối</th>
@@ -146,6 +154,13 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                         </div>
                       ) : null}
                     </td>
+                    <td className="px-3 py-2 text-xs" data-org-pilot={o.code}>
+                      {support[o.code]?.stage ? PILOT_STAGE_LABEL[support[o.code]!.stage!] : <span className="text-muted-foreground">{o.isHome ? "Nhà" : "Không theo dõi"}</span>}
+                      {support[o.code]?.workflowsPaused ? <div className="font-semibold text-destructive">Luật tạm dừng</div> : null}
+                      <div className="text-[11px] text-muted-foreground" title={support[o.code]?.note ?? undefined}>
+                        {support[o.code]?.activeUsers ?? "—"} người · đăng nhập cuối {support[o.code]?.lastLoginAt ? formatDateTime(new Date(support[o.code]!.lastLoginAt!)) : "—"}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-xs">
                       {o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : <span className="text-muted-foreground">—</span>}
                       <div className="text-[11px] text-muted-foreground">Gói {planName(planOfCode(o.code, o.isHome))}</div>
@@ -172,8 +187,8 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                       )}
                     </td>
                     <td className="space-y-1 px-3 py-2 text-right">
-                      <Link href={`/platform/org/${encodeURIComponent(o.code)}`} className="block whitespace-nowrap text-xs font-medium text-primary hover:underline">
-                        Chẩn đoán
+                      <Link href={`/platform/org/${encodeURIComponent(o.code)}`} prefetch={false} className="block whitespace-nowrap text-xs font-medium text-primary hover:underline" title="Mở trang sức khoẻ — lượt mở được ghi vào nhật ký nền tảng">
+                        Sức khoẻ & công tắc
                       </Link>
                       <Link href={`/platform?org=${encodeURIComponent(o.code)}`} className="block whitespace-nowrap text-xs font-medium text-primary hover:underline">
                         Sửa module
@@ -185,6 +200,65 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
             </table>
           </div>
         )}
+      </SectionCard>
+
+      <SectionCard
+        id="kill-switches"
+        title="Công tắc khẩn — toàn nền tảng"
+        description={`${suspended.length} tổ chức đình chỉ · ${paused.length} tổ chức tạm dừng luật · đăng ký /start: ${SIGNUP_MODE_LABEL[signup.effective]}`}
+        hint="Công tắc theo TỪNG tổ chức (đình chỉ · tạm dừng luật · tắt kết nối) nằm ở trang Sức khoẻ của tổ chức đó. Đăng ký công khai là công tắc của cả nền tảng — cổng B ngay dưới. Không công tắc nào cần deploy; mọi lượt bấm vào nhật ký nền tảng. Xem docs/platform/pilot-operations.md."
+      >
+        <div className="grid gap-4 text-sm lg:grid-cols-3">
+          <div data-platform-kill="suspended">
+            <p className="font-semibold">Đang đình chỉ</p>
+            {suspended.length ? (
+              <ul className="text-xs">
+                {suspended.map((o) => (
+                  <li key={o.code}>
+                    <Link href={`/platform/org/${encodeURIComponent(o.code)}#kill-switches`} prefetch={false} className="text-primary hover:underline">
+                      {o.name}
+                    </Link>{" "}
+                    <span className="font-mono text-muted-foreground">{o.code}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">Không có.</p>
+            )}
+          </div>
+          <div data-platform-kill="workflows">
+            <p className="font-semibold">Luật tự động tạm dừng</p>
+            {paused.length ? (
+              <ul className="text-xs">
+                {paused.map((o) => (
+                  <li key={o.code}>
+                    <Link href={`/platform/org/${encodeURIComponent(o.code)}#kill-switches`} prefetch={false} className="text-primary hover:underline">
+                      {o.name}
+                    </Link>{" "}
+                    <span className="font-mono text-muted-foreground">{o.code}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">Không có.</p>
+            )}
+          </div>
+          <div data-platform-kill="signup-ai">
+            <p className="font-semibold">Đăng ký công khai · AI</p>
+            <p className="text-xs">
+              /start đang: <span className="font-semibold">{SIGNUP_MODE_LABEL[signup.effective]}</span> —{" "}
+              <a href="#launch-gates" className="text-primary hover:underline">
+                đổi ở cổng B
+              </a>
+            </p>
+            <p className="text-xs">
+              AI Builder toàn nền tảng: <span className="font-semibold">{aiSummary.ok ? (aiSummary.value.platformSwitch.enabled ? "BẬT" : "TẮT") : "—"}</span> —{" "}
+              <a href="#ai-usage" className="text-primary hover:underline">
+                đổi ở cổng D
+              </a>
+            </p>
+          </div>
+        </div>
       </SectionCard>
 
       <SectionCard

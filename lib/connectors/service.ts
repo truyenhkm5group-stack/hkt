@@ -482,3 +482,40 @@ export async function setConnectionStatus(user: SessionUser, connectorKey: strin
   });
   return { ok: true, status, message: status === "ACTIVE" ? `Đã bật «${spec.label}».` : `Đã tắt «${spec.label}».` };
 }
+
+/**
+ * ═══ CÔNG TẮC KHẨN CỦA NGƯỜI VẬN HÀNH NỀN TẢNG: TẮT một kết nối của tổ chức (không bao giờ BẬT) ═══
+ *
+ * Đi qua ĐÚNG đường ghi của tệp này (không ai ghi thẳng `org_connections` từ ngoài). Chạy trong ngữ cảnh của tổ chức
+ * ĐÍCH — nơi gọi (`lib/platform/kill-switches.ts`) đã kiểm `platformOperatorDenial` và bọc `withOrganization(mã)`.
+ * Người vận hành không phải tài khoản trong CSDL tổ chức ⇒ `userId = null`, email mang nhãn «vận hành nền tảng» (như
+ * lượt tạo hộ của /start), để quản trị của tổ chức đọc được trong nhật ký của CHÍNH họ ai đã tắt và vì sao.
+ *
+ * Chỉ TẮT: bật lại vẫn là việc của quản trị tổ chức ở /settings/connections, sau một lần Kiểm tra ĐẠT với cấu hình
+ * hiện tại — công tắc khẩn không được thành đường vòng qua luật "bật = người bấm, sau khi kiểm tra đạt".
+ */
+export async function disableConnectionAsOperator(input: { connectorKey: string; operator: { orgCode: string; userId: string; email: string }; reason: string }): Promise<ConnectionActionResult & { changed?: boolean }> {
+  const spec = findConnector(input.connectorKey);
+  if (!spec) return { error: `Không có connector «${input.connectorKey}» trong sổ.` };
+  const ctx = await currentOrganization();
+  const org: OrgRef = { code: ctx.code, name: ctx.code, isHome: ctx.isHome };
+  const row = await findRow(spec.key);
+  const trip = tripwire(row, org);
+  if (trip) return { error: trip };
+  if (!row) return { error: `Tổ chức chưa khai kết nối «${spec.label}».` };
+  if (row.status === "DISABLED") return { ok: true, status: "DISABLED", changed: false, message: `«${spec.label}» đã tắt sẵn.` };
+  const who = `${input.operator.email} (vận hành nền tảng · ${input.operator.orgCode})`;
+  const db = await getDb();
+  await db.update(schema.orgConnections).set({ status: "DISABLED", updatedBy: who, updatedAt: new Date() }).where(eq(schema.orgConnections.id, row.id));
+  await audit({
+    userId: null,
+    userEmail: who,
+    action: "ORG_CONNECTION_DISABLE",
+    entity: "org_connection",
+    entityId: spec.key,
+    before: { status: row.status },
+    after: { status: "DISABLED", by: "PLATFORM_OPERATOR" },
+    reason: input.reason,
+  });
+  return { ok: true, status: "DISABLED", changed: true, message: `Đã tắt «${spec.label}» của tổ chức.` };
+}
