@@ -26,6 +26,7 @@ import { parseVeoOperation, veoRequestBody } from "@/lib/video-scale/providers/v
 import { combineQc, technicalQc, visualVerdict, type VisualCheck } from "@/lib/video-scale/qc";
 import { enqueueJob } from "@/lib/video-scale/queue";
 import { batchProblems, scriptProblems, stripWrongPrices, veoPrompt, VEO_KEEP_PRODUCT } from "@/lib/video-scale/script";
+import { claimProblems, sizeMentions } from "@/lib/video-scale/claims";
 
 /**
  * ═══════════ VIDEO SCALE — KIỂM THỬ ═══════════
@@ -115,6 +116,21 @@ export function testVideoScalePure() {
   assert.ok(scriptProblems(good, { angle: "COVERS_FLAWS", scenes: 2 }, { ...f, priceVnd: null }).some((p) => p.includes("499k")), "giá chưa rõ ⇒ mọi con số giá đều sai");
   assert.ok(!stripWrongPrices(bad, 499_000).scenes[0].overlay.includes("399"), "gỡ giá sai");
   assert.ok(scriptProblems(good, { angle: "OCCASION", scenes: 3 }, f).length >= 2, "sai góc / sai số cảnh bị bắt");
+
+  // SIZE (chủ shop báo 29/09/2026): chữ thường sau "size" KHÔNG phải một size — "size TỪ M đến 2XL", "hết size NHÉ" từng bị chặn.
+  const fq = { ...f, sizes: ["L", "M", "XL", "2XL"] };
+  assert.deepEqual(claimProblems("chữ cảnh 2", "Đủ size từ M đến 2XL cho các chị lựa chọn.", fq), [], "câu đúng không bị chặn");
+  assert.deepEqual(claimProblems("CTA", "NHẮN TIN ĐẶT HÀNG NGAY KẺO HẾT SIZE NHÉ!", fq), []);
+  assert.deepEqual(claimProblems("x", "Có size XXL cho chị đầy đặn", fq), [], "XXL ≡ 2XL");
+  assert.deepEqual(claimProblems("x", "Size M cho chị 45-52kg", fq), [], "cân nặng không phải size khi shop bán size chữ");
+  assert.deepEqual(claimProblems("x", "Đủ size từ M đến 3XL", fq), ['x nhắc "size 3XL" — size đang bán: L, M, XL, 2XL'], "size không bán trong cụm vẫn bị bắt");
+  assert.equal(claimProblems("x", "Có size S nhé", fq).length, 1, "size S không bán vẫn bị bắt");
+  assert.deepEqual(claimProblems("x", "size 28 vừa eo 68", { ...f, sizes: ["26", "28"] }), [], "số đo eo không phải size");
+  assert.deepEqual(claimProblems("x", "Có size 26 đến 30", { ...f, sizes: ["26", "28"] }), ['x nhắc "size 30" — size đang bán: 26, 28'], "size số trong khoảng vẫn bị bắt");
+  assert.deepEqual(sizeMentions("size 26-28 eo 68", true), ["26", "28"]);
+  assert.equal(claimProblems("x", "Có size 30 nè", { ...f, sizes: ["26", "28"] }).length, 1, "size số không bán bị bắt khi shop bán size số");
+  assert.deepEqual(claimProblems("x", "Mặc size free thoải mái", { ...f, sizes: ["Freesize"] }), [], "Free ≡ Freesize");
+  assert.deepEqual(sizeMentions("size từ M đến 2xl, màu đen; hết size nhé", false), ["m", "2xl"]);
   // Chống lặp: hai kịch bản gần như y hệt.
   const dup = batchProblems([good, { ...good }], { angles: ["COVERS_FLAWS", "COVERS_FLAWS"], scenes: 2, facts: { ...f, productId: "p", code: "Q005", styleSummary: "", sourceSummary: "" }, existing: [] });
   assert.ok(dup.some((p) => p.includes("gần giống")), "kịch bản thứ hai gần giống kịch bản thứ nhất ⇒ bắt");
