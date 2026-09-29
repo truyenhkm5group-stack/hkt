@@ -789,6 +789,11 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
    */
   /** Ghi don nhap POS tu mot hoi thoai bat ky (nut trong app / tro ly AI). Doc lai toi da 60 tin. */
   async syncOrderForConversation(pageId, conversationId) {
+    // Luot trich don bam tay cung la tien cua CHINH hoi thoai do
+    return aiScope.run({ pageId: String(pageId), conversationId: String(conversationId) }, () => this._syncOrderForConversation(pageId, conversationId));
+  }
+
+  async _syncOrderForConversation(pageId, conversationId) {
     const client = this.getClient(pageId);
     if (!client) throw new Error("Khong co page " + pageId);
     if (!orderSync.enabled) throw new Error("POS chưa cấu hình");
@@ -1053,7 +1058,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
   /** Xu ly 1 hoi thoai: lay lich su -> Gemini -> gui tra loi (+ anh san pham) */
   /** Moi lan goi AI trong luot xu ly nay duoc tinh tien cho dung page (aicost.js). */
   processConversation(payload) {
-    return aiScope.run({ pageId: String(payload.pageId) }, () => this._processConversation(payload));
+    return aiScope.run({ pageId: String(payload.pageId), conversationId: payload.conversationId ? String(payload.conversationId) : null }, () => this._processConversation(payload));
   }
 
   async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {

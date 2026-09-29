@@ -926,5 +926,27 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 27: chi phi AI / SDT: tu so va mau so cung khung gio tu moc do, SDT dem mot lan (chi luu bam), hoa don that nhap tay");
 }
 
+// ---- 28: tien AI / DON chuan (chu shop 29/09/2026: "tinh toan chuan chi phi cho 1 don hang cua bot chat")
+{
+  const { aiScope, currentAiConversation } = await import("../src/aicost.js");
+  assert.equal(currentAiConversation(), null, "ngoai luot xu ly hoi thoai -> khong gan cho hoi thoai nao");
+  assert.equal(aiScope.run({ pageId: "P28", conversationId: "C28" }, () => currentAiConversation()), "C28");
+  // Moi luot goi AI cua mot hoi thoai cong vao DUNG hoi thoai do
+  store.addConvAiUsage("P28", "C28", "gemini-2.5-flash-lite", { input: 1000, cached: 9000, output: 200 });
+  store.addConvAiUsage("P28", "C28", "gemini-2.5-flash-lite", { input: 500, cached: 0, output: 100 });
+  store.addConvAiUsage("P28", null, "gemini-2.5-flash-lite", { input: 1, cached: 0, output: 1 });
+  const conv = store.getConvAi("C28");
+  assert.equal(conv.m["gemini-2.5-flash-lite"].calls, 2);
+  assert.equal(conv.m["gemini-2.5-flash-lite"].input, 1500);
+  // Mot don dem MOT lan du bot tao roi cap nhat don nhap (bo dem "orders" cu dem 2 lan)
+  assert.equal(store.addBotOrder("P28", "9001", "C28"), true);
+  assert.equal(store.addBotOrder("P28", "9001", "C28"), false, "cap nhat don nhap cu khong thanh don moi");
+  assert.equal(store.addBotOrder("P28", "", "C28"), false, "khong co ma don -> khong dem");
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  assert.equal(store.countOrders([today], "P28"), 1);
+  assert.equal(store.recentBotOrders(5)[0].c, "C28", "don nho hoi thoai sinh ra no");
+  console.log("OK 28: tien AI / don: ghi theo tung hoi thoai, don dem mot lan, moi don truy duoc ve hoi thoai cua no");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

@@ -498,6 +498,7 @@ export class OrderSync {
     log.info(`[${pageId}] ${conversationId}: ${summary}`);
     store.bumpStat(pageId, "orders");
     store.addPhone(pageId, phone, Date.now());
+    store.addBotOrder(pageId, orderId, conversationId);
     return { status, orderId, summary, address: addr, items: mapped, discount, agreed };
   }
 }

@@ -254,17 +254,18 @@ function aiTotalCard() {
   const sh = STATE.aiShop;
   if (!sh?.periods) return "";
   const since = meterLabel();
-  const cell = (a, label) => `<div title="${esc(aiNote(a))}"><b>${fmtVnd(a)}</b><span class="muted">${label}${a && !a.fullWindow && label !== "hôm nay" && since ? ` (từ ${since})` : ""} · ${a?.sdt ?? 0} SĐT · ${a?.perSdtVnd != null ? `<b>${vndOr(a.perSdtVnd, a.partial)}</b>/SĐT` : "chưa chia được"}</span></div>`;
-  const rows = (sh.byPage || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.calls.toLocaleString("vi-VN")}</td><td>${r.costVnd == null && r.calls ? '<span class="pill warn">chưa có giá</span>' : vndOr(r.costVnd, r.partial)}</td><td>${r.id === "_khac" ? "—" : r.sdt}</td><td>${vndOr(r.perSdtVnd, r.partial)}</td><td>${r.orders || "—"}</td></tr>`).join("");
-  const bills = (sh.bills || []).map((b, i) => `<tr><td>${esc(b.from)} → ${esc(b.to)}${b.note ? `<div class="muted small">${esc(b.note)}</div>` : ""}</td><td>${Number(b.amountVnd).toLocaleString("vi-VN")}đ</td><td>${b.sdt ?? "—"}</td><td>${b.perSdtVnd != null ? `<b>${b.perSdtVnd.toLocaleString("vi-VN")}đ</b>` : ""}${b.reason ? `<div class="muted small">${esc(b.reason)}</div>` : ""}</td><td>${vndOr(b.estimateVnd)}</td><td><button data-bill-del="${i}">Xoá</button></td></tr>`).join("");
+  const cell = (a, label) => `<div title="${esc(aiNote(a))}"><b>${fmtVnd(a)}</b><span class="muted">${label}${a && !a.fullWindow && label !== "hôm nay" && since ? ` (từ ${since})` : ""} <br>${a?.uniqueOrders ?? 0} đơn · ${a?.perUniqueOrderVnd != null ? `<b>${vndOr(a.perUniqueOrderVnd, a.partial)}</b>/đơn` : "—/đơn"} · ${a?.sdt ?? 0} SĐT · ${a?.perSdtVnd != null ? `<b>${vndOr(a.perSdtVnd, a.partial)}</b>/SĐT` : "—/SĐT"}</span></div>`;
+  const rows = (sh.byPage || []).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.calls.toLocaleString("vi-VN")}</td><td>${r.costVnd == null && r.calls ? '<span class="pill warn">chưa có giá</span>' : vndOr(r.costVnd, r.partial)}</td><td>${r.id === "_khac" ? "—" : r.orders}</td><td>${vndOr(r.perOrderVnd, r.partial)}</td><td>${r.id === "_khac" ? "—" : r.sdt}</td><td>${vndOr(r.perSdtVnd, r.partial)}</td></tr>`).join("");
+  const bills = (sh.bills || []).map((b, i) => `<tr><td>${esc(b.from)} → ${esc(b.to)}${b.note ? `<div class="muted small">${esc(b.note)}</div>` : ""}</td><td>${Number(b.amountVnd).toLocaleString("vi-VN")}đ</td><td>${b.orders ?? "—"} đơn · ${b.sdt ?? "—"} SĐT</td><td>${b.perOrderVnd != null ? `<b>${b.perOrderVnd.toLocaleString("vi-VN")}đ</b>/đơn · ` : ""}${b.perSdtVnd != null ? `<b>${b.perSdtVnd.toLocaleString("vi-VN")}đ</b>` : ""}${b.reason ? `<div class="muted small">${esc(b.reason)}</div>` : ""}</td><td>${vndOr(b.estimateVnd)}</td><td><button data-bill-del="${i}">Xoá</button></td></tr>`).join("");
   const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
-  return `<div class="card"><h3>Chi phí AI cả shop ÷ SĐT khách để lại</h3>
-    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tiền = token thật × bảng giá (ước tính). SĐT = số điện thoại MỚI khách gõ trong hội thoại bot phụ trách, mỗi số đếm một lần. Cả tiền lẫn SĐT chỉ tính từ <b>${esc(since || "—")}</b> — trước mốc này bot chưa đếm SĐT, chia tiền ít ngày cho đơn nhiều ngày sẽ ra số sai.</div>
+  return `<div class="card"><h3>Chi phí AI cả shop ÷ đơn và SĐT</h3>
+    <div class="hint" style="margin-top:-4px;margin-bottom:8px">Tiền = token thật × bảng giá (ước tính). Đơn = mã đơn bot ghi vào POS, mỗi đơn đếm một lần (tạo mới hay cập nhật đơn nháp). SĐT = số điện thoại MỚI khách gõ trong hội thoại bot phụ trách. "/đơn" chia TỔNG tiền (kể cả hội thoại không ra đơn) cho số đơn. Cả tiền, đơn lẫn SĐT chỉ tính từ <b>${esc(since || "—")}</b> — trước mốc này bot chưa đếm SĐT, chia tiền ít ngày cho đơn nhiều ngày sẽ ra số sai.</div>
     <div class="stat">${cell(sh.periods.today, "hôm nay")}${cell(sh.periods.d7, "7 ngày")}${cell(sh.periods.d30, "30 ngày")}</div>
-    ${rows ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Chia theo page · 30 ngày</summary><table style="margin-top:8px"><tr><th>Page</th><th>Lượt gọi AI</th><th>Tiền</th><th>SĐT</th><th>AI / SĐT</th><th>Đơn POS</th></tr>${rows}</table></details>` : ""}
+    ${rows ? `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Chia theo page · 30 ngày</summary><table style="margin-top:8px"><tr><th>Page</th><th>Lượt gọi AI</th><th>Tiền</th><th>Đơn</th><th>AI / đơn</th><th>SĐT</th><th>AI / SĐT</th></tr>${rows}</table></details>` : ""}
+    ${orderCostBlock(sh.orderCosts)}
     <details style="margin-top:10px" ${bills ? "open" : ""}><summary class="small" style="cursor:pointer">Tiền THỰC TRẢ API (hoá đơn Google) ÷ SĐT</summary>
       <div class="hint" style="margin:6px 0">Bot không đọc được hoá đơn Google bằng khoá API. Xem số tiền ở Google AI Studio → Billing (hoặc Google Cloud → Billing → Reports), nhập tổng tiền của một khoảng ngày; ERP chia cho số SĐT của đúng khoảng đó. Cột "Ước tính" để so với số token.</div>
-      ${bills ? `<table><tr><th>Khoảng ngày</th><th>Thực trả</th><th>SĐT</th><th>Thực trả / SĐT</th><th>Ước tính cùng kỳ</th><th></th></tr>${bills}</table>` : ""}
+      ${bills ? `<table><tr><th>Khoảng ngày</th><th>Thực trả</th><th>Đơn · SĐT</th><th>Thực trả / đơn · / SĐT</th><th>Ước tính cùng kỳ</th><th></th></tr>${bills}</table>` : ""}
       <div class="row" style="margin-top:8px">
         <div style="width:150px"><label>Từ ngày</label><input id="bill_from" type="date" value="${today}"></div>
         <div style="width:150px"><label>Đến ngày</label><input id="bill_to" type="date" value="${today}"></div>
@@ -273,6 +274,14 @@ function aiTotalCard() {
         <button class="primary" id="bill_add" style="align-self:flex-end">Thêm</button>
       </div>
     </details></div>`;
+}
+// Tien AI cua CHINH hoi thoai ra tung don — khac "/don" o tren (cai do chia ca tien hoi thoai khong ra don)
+function orderCostBlock(oc) {
+  if (!oc || !oc.rows?.length) return "";
+  const rows = oc.rows.map((r) => `<tr><td>${esc(fmtTime(r.at))}</td><td>${esc(r.page)}</td><td>#${esc(r.id)}</td><td>${r.calls || "—"}</td><td>${r.calls ? (r.costVnd == null ? '<span class="pill warn">chưa có giá</span>' : vndOr(r.costVnd, r.partial)) : '<span class="muted small">không ghi được</span>'}</td></tr>`).join("");
+  return `<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Tiền AI của chính hội thoại ra đơn · ${oc.sample ? `trung vị <b>${vndOr(oc.median, oc.partial)}</b> · trung bình ${vndOr(oc.avg, oc.partial)} (${oc.sample} đơn)` : "chưa có đơn nào đo được"}</summary>
+    <div class="hint" style="margin:6px 0">Mọi lượt gọi AI trong hội thoại đó (trả lời, xem ảnh, trích đơn) cộng lại. Đây là giá "làm ra" một đơn nếu chỉ tính hội thoại thành công; còn "/đơn" ở trên chia cả tiền của hội thoại không ra đơn. "≥" = hội thoại bắt đầu trước mốc đo nên có thể đã tốn thêm trước đó.</div>
+    <table><tr><th>Lúc ghi</th><th>Page</th><th>Đơn</th><th>Lượt gọi AI</th><th>Tiền AI</th></tr>${rows}</table></details>`;
 }
 function bindAiBills() {
   const cur = () => (STATE.aiShop?.bills || []).map(({ from, to, amountVnd, note }) => ({ from, to, amountVnd, note }));
@@ -331,6 +340,7 @@ function renderSettings(p) {
     <div><b>${st.last7.orders || 0}</b><span class="muted">đơn ghi vào POS</span></div>
     <div title="${esc(aiNote(p.ai?.last7))}"><b>${fmtVnd(p.ai?.last7)}</b><span class="muted">chi phí AI (ước tính)</span></div>
     <div title="SĐT mới khách gõ trong hội thoại bot phụ trách, từ ${esc(meterLabel())}"><b>${p.ai?.last7?.sdt ?? 0}</b><span class="muted">SĐT khách để lại</span></div>
+    <div title="${esc(aiNote(p.ai?.last7))}"><b>${vndOr(p.ai?.last7?.perUniqueOrderVnd, p.ai?.last7?.partial)}</b><span class="muted">AI / 1 đơn (${p.ai?.last7?.uniqueOrders ?? 0} đơn)</span></div>
     <div title="${esc(aiNote(p.ai?.last7))}"><b>${vndOr(p.ai?.last7?.perSdtVnd, p.ai?.last7?.partial)}</b><span class="muted">AI / 1 SĐT</span></div>
     <div><b class="small" style="font-size:13px;margin-top:4px">${fmtTime(st.lastActivity)}</b><span class="muted">hoạt động cuối</span></div></div></div>
   ${aiCostCard(p)}

@@ -1,7 +1,7 @@
 import { config } from "./config.js";
 import * as gemini from "./gemini.js";
 import * as openai from "./openai.js";
-import { currentAiPage, usageTokens } from "./aicost.js";
+import { currentAiPage, currentAiConversation, usageTokens } from "./aicost.js";
 import { store } from "./store.js";
 
 /**
@@ -27,7 +27,12 @@ function defaultModel() {
 /** Ghi token cua MOI lan goi AI (xem aicost.js). Loi ghi so khong duoc lam hong cau tra loi. */
 function tally(opts, res) {
   try {
-    if (res && res.usage) store.addAiUsage(currentAiPage(), (opts && opts.model) || defaultModel(), usageTokens(config.ai.provider, res.usage));
+    if (res && res.usage) {
+      const model = (opts && opts.model) || defaultModel();
+      const t = usageTokens(config.ai.provider, res.usage);
+      store.addAiUsage(currentAiPage(), model, t);
+      store.addConvAiUsage(currentAiPage(), currentAiConversation(), model, t);
+    }
   } catch {}
   return res;
 }

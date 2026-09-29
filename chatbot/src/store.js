@@ -146,6 +146,62 @@ class Store {
     for (const v of Object.values(this.state.phones || {})) if (set.has(v.d) && (pageId === undefined || v.p === String(pageId))) n++;
     return n;
   }
+  /**
+   * TIEN AI THEO TUNG HOI THOAI: moi luot goi AI trong luot xu ly mot hoi thoai ghi vao dung hoi thoai do, nen don nao
+   * cung biet chinh hoi thoai cua no ton bao nhieu. Giu 35 ngay theo lan goi cuoi, toi da 30000 hoi thoai.
+   */
+  addConvAiUsage(pageId, conversationId, model, t) {
+    if (!conversationId) return;
+    const all = (this.state.convAi ||= {});
+    const now = Date.now();
+    const c = (all[String(conversationId)] ||= { p: String(pageId), first: now, last: now, m: {} });
+    c.last = now;
+    const x = (c.m[String(model)] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+    x.calls += 1;
+    x.input += t.input || 0;
+    x.cached += t.cached || 0;
+    x.output += t.output || 0;
+    const keys = Object.keys(all);
+    if (keys.length > 30000 || Math.random() < 0.01) {
+      const cutoff = now - 35 * 86400000;
+      for (const k of keys) if (all[k].last < cutoff) delete all[k];
+      const left = Object.keys(all).sort((a, b) => all[a].last - all[b].last);
+      while (left.length > 30000) delete all[left.shift()];
+    }
+    this._save();
+  }
+  getConvAi(conversationId) {
+    return (this.state.convAi || {})[String(conversationId)] || null;
+  }
+  /**
+   * DON BOT GHI VAO POS, moi ma don dem MOT lan (tao moi hay cap nhat don nhap deu la mot don), theo lan ghi dau.
+   * Bo dem "orders" cu cong ca lan cap nhat nen mot don co the dem 2-3 lan. Chi dem tu moc do.
+   */
+  addBotOrder(pageId, orderId, conversationId) {
+    if (!orderId) return false;
+    const all = (this.state.botOrders ||= {});
+    const key = String(orderId);
+    if (all[key]) return false;
+    const now = Date.now();
+    if (now < (this.state.meter?.since || 0)) return false;
+    all[key] = { p: String(pageId), c: conversationId ? String(conversationId) : "", t: now, d: vnDay(now) };
+    const cutoff = vnDay(now - 35 * 86400000);
+    for (const [k, v] of Object.entries(all)) if (v.d < cutoff) delete all[k];
+    this._save();
+    return true;
+  }
+  countOrders(days, pageId) {
+    const set = new Set(days);
+    let n = 0;
+    for (const v of Object.values(this.state.botOrders || {})) if (set.has(v.d) && (pageId === undefined || v.p === String(pageId))) n++;
+    return n;
+  }
+  recentBotOrders(limit = 30) {
+    return Object.entries(this.state.botOrders || {})
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.t - a.t)
+      .slice(0, limit);
+  }
   getAiUsage(pageId) {
     return (this.state.aiUsage || {})[String(pageId)] || {};
   }

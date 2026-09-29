@@ -19,6 +19,11 @@ export function currentAiPage() {
   return aiScope.getStore()?.pageId || "_khac";
 }
 
+/** Hoi thoai cua luot goi AI hien tai (neu co) — de tinh tien AI cua CHINH hoi thoai ra don. */
+export function currentAiConversation() {
+  return aiScope.getStore()?.conversationId || null;
+}
+
 // USD / 1 trieu token. input = token vao khong duoc cache; cached = token vao doc tu cache; output = token ra (ke ca
 // token "suy nghi" — Gemini tinh gia nhu token ra).
 export const DEFAULT_AI_PRICES = {
