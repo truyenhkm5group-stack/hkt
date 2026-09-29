@@ -15,9 +15,14 @@
 #   erp-backup.sh status                       in trạng thái — KHÔNG in một dòng dữ liệu nào
 #   erp-backup.sh restore-drill                khôi phục bản mới nhất vào container TẠM rồi đếm dòng
 # >>> TỔ CHỨC KHÁC NHÀ
-#   erp-backup.sh restore-drill-org [mã]       CHẠY TAY (ops `restore-drill-org`): khôi phục bản mới nhất của MỘT CSDL
-#                                              erp_org_* vào CSDL TẠM `tam_khoiphuc_<mã>` trong container TẠM, đếm bảng
-#                                              lõi, xoá container. Không mã ⇒ luân phiên (tổ chức diễn tập lâu nhất).
+#   erp-backup.sh restore-drill-org [mã]       ops `restore-drill-org` (và lượt tuần bên dưới): khôi phục bản mới nhất của
+#                                              MỘT CSDL erp_org_* vào CSDL TẠM `tam_khoiphuc_<mã>` trong container TẠM, đếm
+#                                              bảng lõi, xoá container. Không mã ⇒ luân phiên (tổ chức diễn tập lâu nhất).
+#   erp-backup.sh hourly-org                   cron gọi MỖI GIỜ (phút PHUT_CRON_GIO): dump -Fc MỌI CSDL erp_org_* vào
+#                                              orgs/<csdl>/hourly/, giữ GIU_BAN_GIO bản — RPO ≤ 1 giờ cho tổ chức khách.
+#                                              KHÔNG BAO GIỜ dump CSDL nhà (nhà giữ lịch đêm). Không có erp_org_* ⇒ thoát 0.
+#   erp-backup.sh drill-org-weekly             cron gọi MỖI GIỜ (phút PHUT_CRON_DIEN_TAP); chỉ chạy Chủ nhật, khung
+#                                              GIO_DIEN_TAP_* giờ VN, mỗi tuần một lượt `restore-drill-org` luân phiên.
 # <<< TỔ CHỨC KHÁC NHÀ
 #   erp-backup.sh install-cron                 cài /etc/cron.d/erp-backup (install-vps.sh gọi mỗi lần deploy)
 #   erp-backup.sh configure-offsite            dựng cấu hình Google Drive + crypt từ Secrets/Variables mà
@@ -444,6 +449,24 @@ THU_MUC_TO_CHUC="$BACKUP_DIR/orgs"
 STATUS_TO_CHUC="$STATUS_DIR/orgs"
 TO_CHUC_HONG=""
 
+# ─── LƯỢT GIỜ + DIỄN TẬP TUẦN (quyết định C4/C6/C7 của chủ nền tảng, 29/09/2026) ───
+#
+# «full backup hằng đêm; incremental/PITR mỗi giờ nếu hạ tầng DB hỗ trợ; target RPO <= 1 giờ; target RTO <= 4 giờ;
+#  tự động restore drill mỗi tuần trên môi trường test, không restore đè production.»
+#
+# erp-db (postgres:16-alpine, docker-compose.prod.yml) chạy mặc định: wal_level=replica, archive_mode=off. Bật PITR
+# thật cần đổi archive_mode = KHỞI ĐỘNG LẠI erp-db = gián đoạn production ⇒ đề xuất riêng cần cửa sổ bảo trì
+# (docs/platform/backup-recovery.md §9). Trong lúc chờ: CSDL tổ chức khách NHỎ, nên một bản LOGIC (`pg_dump -Fc`)
+# mỗi giờ đủ giữ RPO ≤ 1 giờ cho chúng mà không đụng cấu hình Postgres. CSDL NHÀ giữ nguyên lịch đêm — RPO của nhà
+# vẫn ≤ 1 ngày cho tới khi có PITR (lượt giờ này KHÔNG BAO GIỜ dump `-d erp`; tests/backup.test.ts khoá).
+GIU_BAN_GIO=48            # orgs/<csdl>/hourly/: giữ 48 bản giờ gần nhất (2 ngày), đếm riêng từng CSDL
+PHUT_CRON_GIO=47          # lượt giờ: phút 47 — cách lượt đêm (phút 17) nửa giờ, lệch khỏi phút 0
+TRAN_CHO_KHOA_GIO_GIAY=600 # lượt giờ chờ khoá đọc nặng / vòng đời tối đa 10 phút — quá thì bỏ lượt, giờ sau làm lại
+PHUT_CRON_DIEN_TAP=37     # diễn tập tuần: cron gọi phút 37 mỗi giờ, script tự lọc Chủ nhật + khung dưới
+GIO_DIEN_TAP_BAT_DAU=6    # Chủ nhật 06:00 … (SAU khung bản đêm 02:00–05:59 — diễn tập bản đêm vừa xong)
+GIO_DIEN_TAP_KET_THUC=7   # … 07:59 giờ VN. Lượt bị bỏ vì thiếu RAM / khoá bận lúc 06 giờ được thử lại lúc 07.
+LICH_GIO_MO_TA="mỗi giờ (phút ${PHUT_CRON_GIO}) cho CSDL tổ chức, cộng bản đêm 02:00–05:59 giờ Việt Nam"
+
 ten_csdl_to_chuc_hop_le() { [[ "${1:-}" =~ $MAU_CSDL_TO_CHUC ]]; }
 ten_tep_to_chuc() { printf '%s-%s.dump' "$1" "$2"; } # $1=csdl $2=mốc
 
@@ -476,7 +499,7 @@ liet_ke_csdl_to_chuc() {
 # Ước lượng như `uoc_tinh_mb` của nhà nhưng trên bản của CHÍNH tổ chức này (2 × bản gần nhất).
 uoc_tinh_mb_to_chuc() { # $1=csdl
   local d f tot="" mb=$TOI_THIEU_UOC_TINH_MB
-  for d in daily weekly manual; do
+  for d in daily weekly manual hourly; do
     for f in "$THU_MUC_TO_CHUC/$1/$d/$1"-*.dump; do
       [ -f "$f" ] || continue
       if [ -z "$tot" ] || [[ "$(basename "$f")" > "$(basename "$tot")" ]]; then tot="$f"; fi
@@ -525,6 +548,11 @@ day_ngoai_may_to_chuc() { # $1=csdl $2=thư mục con $3...=tệp cục bộ
   rm -f "$tep_loi"
   ORG_OFFSITE_STATE="OK"
   ORG_OFFSITE_REASON=""
+  # Lượt giờ chỉ dọn thư mục hourly/ của chính nó — ba lệnh dọn bên dưới mỗi giờ là 72 lượt gọi Drive vô ích mỗi ngày.
+  if [ "$sub" = "hourly" ]; then
+    timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/hourly")" --min-age "$((GIU_BAN_GIO + 1))h" 2>/dev/null || true
+    return 0
+  fi
   timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/daily")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
   timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/weekly")" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
   timeout 900 rclone delete "$(noi_duong "$remote" "orgs/$csdl/manual")" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
@@ -532,17 +560,18 @@ day_ngoai_may_to_chuc() { # $1=csdl $2=thư mục con $3...=tệp cục bộ
 
 # MỘT tổ chức: ổ đĩa → dump → kiểm toàn vẹn → (bản tuần) → xoay vòng → ngoài máy. Đặt ORG_*; trả 1
 # khi KHÔNG có bản dùng được (ORG_LY_DO nói vì sao). Bản hỏng / dở bị xoá như luật của nhà.
-sao_luu_mot_to_chuc() { # $1=csdl $2=mốc $3=thư mục con (daily|manual)
+sao_luu_mot_to_chuc() { # $1=csdl $2=mốc $3=thư mục con (daily|manual|hourly)
   local csdl="$1" moc="$2" sub="$3" goc thu_muc tam danh_sach thieu dong_loi tep_loi="$STATUS_DIR/.dump-to-chuc.err" tep_tuan=""
   ORG_FILE=""; ORG_BYTES=""; ORG_TABLES=""; ORG_LY_DO=""; ORG_TU_DO_MB=""; ORG_CAN_MB=""
   ORG_OFFSITE_STATE="NOT_RUN"; ORG_OFFSITE_REMOTE=""; ORG_OFFSITE_REASON=""
   ten_csdl_to_chuc_hop_le "$csdl" || { ORG_LY_DO="Tên CSDL không hợp lệ — không sao lưu."; return 1; }
+  case "$sub" in daily | manual | hourly) ;; *) ORG_LY_DO="Thư mục con '$sub' không hợp lệ — không sao lưu."; return 1 ;; esac
   goc="$THU_MUC_TO_CHUC/$csdl"
   thu_muc="$goc/$sub"
-  if ! mkdir -p "$goc/daily" "$goc/weekly" "$goc/manual"; then
+  if ! mkdir -p "$goc/daily" "$goc/weekly" "$goc/manual" "$goc/hourly"; then
     ORG_LY_DO="Không tạo được thư mục $goc."; return 1
   fi
-  chmod 700 "$THU_MUC_TO_CHUC" "$goc" "$goc/daily" "$goc/weekly" "$goc/manual" 2>/dev/null || true
+  chmod 700 "$THU_MUC_TO_CHUC" "$goc" "$goc/daily" "$goc/weekly" "$goc/manual" "$goc/hourly" 2>/dev/null || true
 
   ORG_TU_DO_MB="$(o_trong_mb "$BACKUP_DIR")"
   ORG_CAN_MB=$(( $(uoc_tinh_mb_to_chuc "$csdl") + DU_TRU_O_DIA_MB ))
@@ -593,6 +622,7 @@ sao_luu_mot_to_chuc() { # $1=csdl $2=mốc $3=thư mục con (daily|manual)
   xoay_vong "$goc/daily" "$csdl" "$GIU_BAN_NGAY" || true
   xoay_vong "$goc/weekly" "$csdl" "$GIU_BAN_TUAN" || true
   xoay_vong "$goc/manual" "$csdl" "$GIU_BAN_TAY" || true
+  xoay_vong "$goc/hourly" "$csdl" "$GIU_BAN_GIO" || true
 
   day_ngoai_may_to_chuc "$csdl" "$sub" "$thu_muc/$ORG_FILE"
   if [ -n "$tep_tuan" ] && [ "$ORG_OFFSITE_STATE" = "OK" ]; then
@@ -607,8 +637,8 @@ noi_dung_trang_thai_to_chuc() { # $1=csdl $2=kết quả $3=lý do $4=bắt đ�
   printf '"freeMbBefore":%s,"needMb":%s,' "$(jn "$ORG_TU_DO_MB")" "$(jn "$ORG_CAN_MB")"
   printf '"db":{"file":%s,"bytes":%s,"tableData":%s},' "$(js "$ORG_FILE")" "$(jn "$ORG_BYTES")" "$(jn "$ORG_TABLES")"
   printf '"offsite":{"state":%s,"remote":%s,"reason":%s},' "$(js "$ORG_OFFSITE_STATE")" "$(js "$ORG_OFFSITE_REMOTE")" "$(js "$ORG_OFFSITE_REASON")"
-  printf '"retention":{"daily":%s,"weekly":%s,"manual":%s},"schedule":%s,"host":%s}' \
-    "$GIU_BAN_NGAY" "$GIU_BAN_TUAN" "$GIU_BAN_TAY" "$(js "$LICH_MO_TA")" "$(js "$(hostname 2>/dev/null || true)")"
+  printf '"retention":{"daily":%s,"weekly":%s,"manual":%s,"hourly":%s},"schedule":%s,"host":%s}' \
+    "$GIU_BAN_NGAY" "$GIU_BAN_TUAN" "$GIU_BAN_TAY" "$GIU_BAN_GIO" "$(js "$LICH_GIO_MO_TA")" "$(js "$(hostname 2>/dev/null || true)")"
 }
 
 # Mọi tổ chức. Đặt TO_CHUC_HONG (rỗng = không tổ chức nào hỏng); trả 1 khi có. Gọi SAU khi trạng thái
@@ -681,15 +711,17 @@ trang_thai_to_chuc() {
   echo
   echo "── CSDL tổ chức khác nhà (erp_org_*) ──"
   if [ -f "$STATUS_DIR/orgs-last-run.json" ]; then echo "orgs-last-run.json:"; cat "$STATUS_DIR/orgs-last-run.json"; else echo "orgs-last-run.json: (chưa có — chưa lượt sao lưu nào gặp CSDL erp_org_*)"; fi
+  if [ -f "$STATUS_DIR/orgs-last-hourly.json" ]; then echo "orgs-last-hourly.json:"; cat "$STATUS_DIR/orgs-last-hourly.json"; else echo "orgs-last-hourly.json: (chưa có — chưa lượt giờ nào gặp CSDL erp_org_*)"; fi
+  echo "Lượt giờ: $LICH_GIO_MO_TA · giữ $GIU_BAN_GIO bản giờ / CSDL · diễn tập tuần: Chủ nhật ${GIO_DIEN_TAP_BAT_DAU}:00–${GIO_DIEN_TAP_KET_THUC}:59 giờ VN, lượt gần nhất: $(cat "$STATUS_DIR/drill-org-week-done" 2>/dev/null || echo 'chưa có')"
   [ -d "$THU_MUC_TO_CHUC" ] || return 0
   for d in "$THU_MUC_TO_CHUC"/*/; do
     csdl="$(basename "$d")"
     ten_csdl_to_chuc_hop_le "$csdl" || continue
     echo "$csdl:"
-    for tep in last-run.json last-success.json last-drill.json; do
+    for tep in last-run.json last-hourly.json last-success.json last-drill.json; do
       if [ -f "$STATUS_TO_CHUC/$csdl/$tep" ]; then echo "  $tep: $(cat "$STATUS_TO_CHUC/$csdl/$tep")"; else echo "  $tep: (chưa có)"; fi
     done
-    for sub in daily weekly manual; do
+    for sub in daily weekly manual hourly; do
       echo "  $sub/:"
       ls -lh "$d$sub" 2>/dev/null | sed '1d' | sed 's/^/    /' || true
     done
@@ -704,8 +736,8 @@ trang_thai_to_chuc() {
 # không đổi một byte (xem BAM_PHAN_NHA), và thẻ của tổ chức chỉ tin diễn tập mang ĐÚNG tên CSDL của nó.
 #
 # LUẬT:
-#  · CHẠY TAY (ops `restore-drill-org`). KHÔNG nằm trong cron: dựng một Postgres thứ hai lúc 02–05 giờ trên máy 2 nhân /
-#    ~1,9 GB là đổi hành vi vận hành — bật tự động là quyết định của chủ nền tảng (docs/platform/launch-gates.md mục C).
+#  · Chạy tay (ops `restore-drill-org`) VÀ tự động mỗi tuần qua `drill-org-weekly` (quyết định C7 của chủ nền tảng,
+#    29/09/2026): Chủ nhật sau bản đêm, luân phiên một CSDL. Không đường nào khác gọi nó (cmd_run / cmd_cron / lượt giờ).
 #  · Đích khôi phục là CSDL TẠM `tam_khoiphuc_<mã>` BÊN TRONG container tạm — KHÔNG BAO GIỜ trên erp-db. Khối này không
 #    có một lệnh `createdb` / `dropdb` / `pg_restore` / `alter database` nào nhắm vào $DB_CONTAINER.
 #  · Tên tạm KHÔNG bắt đầu bằng `erp_org_`: lượt sao lưu đêm liệt kê `erp_org_%` và sẽ dump một CSDL tạm như một tổ chức
@@ -742,7 +774,7 @@ ten_csdl_tam() { # $1=csdl
 # Bản dump mới nhất của MỘT CSDL tổ chức, theo MỐC TRONG TÊN (không tin mtime), cả ba thư mục.
 ban_moi_nhat_to_chuc() { # $1=csdl
   local d f ten tot="" ten_tot=""
-  for d in daily weekly manual; do
+  for d in daily weekly manual hourly; do
     for f in "$THU_MUC_TO_CHUC/$1/$d/$1"-*.dump; do
       [ -f "$f" ] || continue
       ten="$(basename "$f")"
@@ -883,6 +915,128 @@ cmd_restore_drill_to_chuc() { # $1 = mã tổ chức | tên CSDL erp_org_* | r�
   ghi_dien_tap_to_chuc "$csdl" "OK" "" "$ten_ban" "$tam" "[$bang_json]" "$bat_dau"
   bao "DIỄN TẬP TỔ CHỨC ĐẠT: $ten_ban khôi phục sạch vào CSDL tạm $tam (container tạm, sẽ bị xoá), $(echo "$BANG_DIEN_TAP_TO_CHUC" | wc -w) bảng lõi đối chiếu với $csdl."
   return 0
+}
+
+# ═══════════════ LỆNH: hourly-org — SAO LƯU MỖI GIỜ CÁC CSDL TỔ CHỨC (RPO ≤ 1 giờ, quyết định C6) ═══════════════
+#
+# LUẬT:
+#  · CHỈ CSDL erp_org_* — danh sách từ `liet_ke_csdl_to_chuc` (pg_database + MAU_CSDL_TO_CHUC, cùng hàng rào tên với lượt
+#    đêm), mỗi CSDL qua đúng `sao_luu_mot_to_chuc` của lượt đêm (kiểm ổ đĩa, dump -Fc, kiểm mục lục, xoay vòng, ngoài máy).
+#    KHÔNG có lời gọi pg_dump nào mang `-d erp`, không bot chat, không ghi last-run.json / last-success.json / daily-done
+#    của NHÀ (tests/backup.test.ts chạy thật với docker giả và so).
+#  · Khung đêm (GIO_BAT_DAU–GIO_KET_THUC) mà bản đêm HÔM NAY chưa xong ⇒ bỏ lượt: bản đêm đang chạy / sắp chạy, và nó dump
+#    cả CSDL tổ chức. Chạy chen vào chỉ tranh khoá với nó.
+#  · Cùng ổ khoá với bản đêm, ops và deploy: FD 7 KHÔNG CHỜ (bận ⇒ bỏ lượt, thoát 0 — giờ sau làm lại), rồi FD 8 / FD 9 với
+#    trần NGẮN (TRAN_CHO_KHOA_GIO_GIAY) — lượt giờ không được treo sang lượt giờ sau.
+#  · Không có CSDL erp_org_* nào (production 29/09/2026) ⇒ thoát 0: không lấy khoá, không ghi tệp, không một dòng log.
+#  · Không liệt kê được ⇒ CHƯA BIẾT: thoát 1 (log cron), không ghi tệp. Thẻ Sao lưu của từng tổ chức vẫn tự lộ ra khi bản
+#    thành công gần nhất quá cũ (ORG_BACKUP_RPO_ALERT_HOURS, lib/constants/backup.ts).
+#  · Trạng thái: status/orgs/<csdl>/last-hourly.json (mọi lượt) + last-success.json (khi có bản dùng được — đó là bản thành
+#    công gần nhất thật) + status/orgs-last-hourly.json (tổng hợp). last-run.json của tổ chức vẫn là lời khai của bản ĐÊM.
+#  · Lỗi đẩy ngoài máy KHÔNG xoá bản cục bộ: bản đã kiểm toàn vẹn nằm lại hourly/, trạng thái PARTIAL, thoát 1.
+cmd_sao_luu_gio_to_chuc() {
+  local gio hom_nay ds moc csdl ket ly_do bat_dau json_ds="" noi_dung n=0 hong=""
+  if [ "$#" -gt 0 ]; then loi "hourly-org không nhận tham số."; return 2; fi
+  TRIGGER="hourly"
+  if ! ds="$(liet_ke_csdl_to_chuc)"; then
+    loi "lượt giờ: không liệt kê được CSDL erp_org_* ($DB_CONTAINER không chạy hoặc psql lỗi) — CHƯA BIẾT có tổ chức nào lỡ lượt giờ này; giờ sau thử lại."
+    return 1
+  fi
+  [ -n "$ds" ] || return 0
+
+  gio=$((10#$(gio_vn +%H)))
+  hom_nay="$(gio_vn +%F)"
+  if [ "$gio" -ge "$GIO_BAT_DAU" ] && [ "$gio" -le "$GIO_KET_THUC" ] && [ "$(cat "$STATUS_DIR/daily-done" 2>/dev/null || true)" != "$hom_nay" ]; then
+    bao "lượt giờ: khung bản đêm ${GIO_BAT_DAU}:00–${GIO_KET_THUC}:59 và bản đêm hôm nay chưa xong — bỏ lượt (bản đêm dump cả CSDL tổ chức)."
+    return 0
+  fi
+
+  chuan_bi_thu_muc || { loi "lượt giờ: không chuẩn bị được thư mục sao lưu."; return 1; }
+  nap_cau_hinh
+  if ! khoa_chong_chong; then
+    bao "lượt giờ: một lượt sao lưu / diễn tập khác đang giữ $KHOA_SAO_LUU — bỏ lượt giờ này, giờ sau làm lại."
+    return 0
+  fi
+  giu_khoa 8 "$KHOA_DOC_DB" -x "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá đọc nặng — bỏ lượt."; return 75; }
+  giu_khoa 9 "$KHOA_VONG_DOI" -s "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá vòng đời (deploy?) — bỏ lượt."; return 75; }
+
+  moc="$(gio_vn +%Y%m%d-%H%M)"
+  mkdir -p "$STATUS_TO_CHUC" 2>/dev/null && chmod 755 "$STATUS_TO_CHUC" 2>/dev/null || true
+  while IFS= read -r csdl; do
+    [ -n "$csdl" ] || continue
+    n=$((n + 1))
+    bat_dau="$(bay_gio_utc)"
+    if sao_luu_mot_to_chuc "$csdl" "$moc" hourly; then
+      if [ "$ORG_OFFSITE_STATE" = "FAILED" ]; then
+        ket="PARTIAL"; ly_do="CSDL $csdl đã sao lưu giờ và kiểm toàn vẹn (bản cục bộ giữ nguyên); phần hỏng: bản ngoài máy."
+        hong="$hong $csdl(ngoài máy)"
+      else
+        ket="OK"; ly_do=""
+      fi
+    else
+      ket="FAILED"; ly_do="$ORG_LY_DO"
+      hong="$hong $csdl"
+      loi "$ly_do"
+    fi
+    noi_dung="$(noi_dung_trang_thai_to_chuc "$csdl" "$ket" "$ly_do" "$bat_dau")"
+    if mkdir -p "$STATUS_TO_CHUC/$csdl" 2>/dev/null; then
+      chmod 755 "$STATUS_TO_CHUC/$csdl" 2>/dev/null || true
+      ghi_json "$STATUS_TO_CHUC/$csdl/last-hourly.json" "$noi_dung" || loi "không ghi được trạng thái giờ của $csdl"
+      [ "$ket" = "FAILED" ] || ghi_json "$STATUS_TO_CHUC/$csdl/last-success.json" "$noi_dung" || loi "không ghi được trạng thái của $csdl"
+    else
+      loi "không tạo được thư mục trạng thái của $csdl"
+    fi
+    json_ds="${json_ds:+$json_ds,}{\"database\":$(js "$csdl"),\"result\":$(js "$ket"),\"file\":$(js "$ORG_FILE"),\"bytes\":$(jn "$ORG_BYTES"),\"offsite\":$(js "$ORG_OFFSITE_STATE"),\"reason\":$(js "$ly_do")}"
+    bao "lượt giờ $csdl: $ket${ly_do:+ — $ly_do}"
+  done <<< "$ds"
+
+  ghi_json "$STATUS_DIR/orgs-last-hourly.json" "$(printf '{"schema":1,"kind":"org-backup-summary","trigger":"hourly","finishedAt":%s,"listError":null,"organizations":[%s],"missingDatabases":[]}' \
+    "$(js "$(bay_gio_utc)")" "$json_ds")" || loi "không ghi được $STATUS_DIR/orgs-last-hourly.json"
+  bao "LƯỢT GIỜ: $n CSDL tổ chức · hỏng:${hong:- không}"
+  [ -z "$hong" ] || return 1
+  return 0
+}
+
+# ═══════════════ LỆNH: drill-org-weekly — DIỄN TẬP TỔ CHỨC TỰ ĐỘNG MỖI TUẦN (quyết định C7) ═══════════════
+#
+# LUẬT:
+#  · Chỉ Chủ nhật (THU_BAN_TUAN, giờ VN), khung GIO_DIEN_TAP_BAT_DAU–GIO_DIEN_TAP_KET_THUC — SAU khung bản đêm, nên nó diễn
+#    tập bản mới nhất vừa sinh. Ngoài lúc đó thoát 0, im lặng.
+#  · MỘT CSDL mỗi tuần, luân phiên (`chon_to_chuc_luan_phien`: chưa diễn tập / diễn tập lâu nhất đứng đầu). Không tổ chức
+#    nào có bản trên máy ⇒ thoát 0, không ghi gì, không lấy khoá.
+#  · Đường DUY NHẤT tới Postgres là `cmd_restore_drill_to_chuc`: container TẠM (không mạng, trần RAM), CSDL TẠM
+#    `tam_khoiphuc_<mã>`, kiểm RAM/ổ trước khi dựng, erp-db chỉ bị ĐỌC. Không bao giờ khôi phục đè production.
+#  · Cầm FD 7 (khoá sao lưu, KHÔNG CHỜ): không dựng Postgres thứ hai trong lúc một lượt dump đang ăn RAM/IO. Bận ⇒ giờ sau.
+#  · Đánh dấu "tuần này xong" (status/drill-org-week-done = ngày VN) CHỈ khi lượt đi tới KẾT LUẬN (OK / FAILED) và kết
+#    luận ấy là của CHÍNH lượt này (finishedAt ≥ lúc bắt đầu). SKIPPED (thiếu RAM / ổ) hay hết giờ chờ khoá ⇒ không đánh
+#    dấu, giờ sau trong khung thử lại. FAILED không thử lại: cùng bản cho cùng kết luận — nó là tín hiệu, đỏ trên thẻ.
+cmd_dien_tap_tuan_to_chuc() {
+  local gio hom_nay csdl bat_dau ma=0 ket moc
+  if [ "$#" -gt 0 ]; then loi "drill-org-weekly không nhận tham số (muốn chọn tổ chức: restore-drill-org <mã>)."; return 2; fi
+  [ "$(gio_vn +%u)" = "$THU_BAN_TUAN" ] || return 0
+  gio=$((10#$(gio_vn +%H)))
+  if [ "$gio" -lt "$GIO_DIEN_TAP_BAT_DAU" ] || [ "$gio" -gt "$GIO_DIEN_TAP_KET_THUC" ]; then return 0; fi
+  hom_nay="$(gio_vn +%F)"
+  [ "$(cat "$STATUS_DIR/drill-org-week-done" 2>/dev/null || true)" != "$hom_nay" ] || return 0
+  csdl="$(chon_to_chuc_luan_phien)"
+  [ -n "$csdl" ] || return 0
+
+  if ! khoa_chong_chong; then
+    bao "diễn tập tuần: một lượt sao lưu khác đang giữ $KHOA_SAO_LUU — không dựng Postgres thứ hai lúc này; giờ sau thử lại."
+    return 0
+  fi
+  bat_dau="$(bay_gio_utc)"
+  bao "diễn tập tuần: Chủ nhật $hom_nay — luân phiên chọn $csdl"
+  cmd_restore_drill_to_chuc "$csdl" || ma=$?
+  ket="$(sed -n 's/.*"result":"\([A-Z]*\)".*/\1/p' "$STATUS_TO_CHUC/$csdl/last-drill.json" 2>/dev/null | head -n 1 || true)"
+  moc="$(sed -n 's/.*"finishedAt":"\([^"]*\)".*/\1/p' "$STATUS_TO_CHUC/$csdl/last-drill.json" 2>/dev/null | head -n 1 || true)"
+  if { [ "$ket" = "OK" ] || [ "$ket" = "FAILED" ]; } && [ -n "$moc" ] && [[ ! "$moc" < "$bat_dau" ]]; then
+    printf '%s\n' "$hom_nay" > "$STATUS_DIR/drill-org-week-done" || loi "không ghi được $STATUS_DIR/drill-org-week-done"
+    bao "diễn tập tuần: $csdl — $ket; tuần này xong."
+  else
+    bao "diễn tập tuần: $csdl chưa đi tới kết luận (${ket:-không có trạng thái}) — giờ sau trong khung thử lại."
+  fi
+  return "$ma"
 }
 
 # <<< TỔ CHỨC KHÁC NHÀ ─────────────────────────────────────────────────────────────────────────
@@ -1198,6 +1352,13 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 HOME=/root
 $PHUT_CRON * * * * root ERP_DIR=$ERP_DIR ERP_BACKUP_DIR=$BACKUP_DIR /bin/bash $ERP_DIR/scripts/erp-backup.sh cron >> $TEP_LOG 2>&1"
+  # >>> TỔ CHỨC KHÁC NHÀ — hai lịch MỚI (quyết định C4/C6/C7, 29/09/2026), NỐI SAU dòng của nhà: dòng của nhà giữ nguyên
+  # từng byte. Cả hai gọi mỗi giờ và tự lọc giờ VN trong script (như dòng của nhà) — không phụ thuộc múi giờ của máy.
+  noi_dung="$noi_dung
+# CSDL tổ chức khác nhà (erp_org_*): sao lưu mỗi giờ (RPO ≤ 1 giờ) · diễn tập khôi phục vào CSDL TẠM mỗi Chủ nhật ${GIO_DIEN_TAP_BAT_DAU}:00–${GIO_DIEN_TAP_KET_THUC}:59 giờ VN.
+$PHUT_CRON_GIO * * * * root ERP_DIR=$ERP_DIR ERP_BACKUP_DIR=$BACKUP_DIR /bin/bash $ERP_DIR/scripts/erp-backup.sh hourly-org >> $TEP_LOG 2>&1
+$PHUT_CRON_DIEN_TAP * * * * root ERP_DIR=$ERP_DIR ERP_BACKUP_DIR=$BACKUP_DIR /bin/bash $ERP_DIR/scripts/erp-backup.sh drill-org-weekly >> $TEP_LOG 2>&1"
+  # <<< TỔ CHỨC KHÁC NHÀ
   cu="$(cat "$TEP_CRON" 2>/dev/null || true)"
   if [ "$cu" != "$noi_dung" ]; then
     mkdir -p "$(dirname "$TEP_CRON")"
@@ -1334,6 +1495,16 @@ main() {
     local ma_dien_tap=0
     cmd_restore_drill_to_chuc "$@" || ma_dien_tap=$?
     return "$ma_dien_tap"
+  fi
+  if [ "$lenh" = "hourly-org" ]; then
+    local ma_gio=0
+    cmd_sao_luu_gio_to_chuc "$@" || ma_gio=$?
+    return "$ma_gio"
+  fi
+  if [ "$lenh" = "drill-org-weekly" ]; then
+    local ma_tuan=0
+    cmd_dien_tap_tuan_to_chuc "$@" || ma_tuan=$?
+    return "$ma_tuan"
   fi
   # <<< TỔ CHỨC KHÁC NHÀ
   local a

@@ -9,14 +9,19 @@
 #     Mật khẩu dưới đây là mật khẩu của container TẠM — không phải bí mật, nhìn là biết.
 #   · `PLATFORM_SECRETS_KEY` KHÔNG khai ở đây: kịch bản tự sinh một khoá GIẢ trong bộ nhớ cho mỗi lượt, rồi thử cả khoá
 #     KHÁC để chứng minh bí mật kết nối fail closed.
-#   · CHỈ `workflow_dispatch`. Lịch tự động (vd hằng tuần) là quyết định của chủ nền tảng — đề xuất ở
-#     docs/platform/launch-gates.md mục C (C7). Job này KHÔNG nằm trong `gates.yml` / `deploy-vps.yml`: không chặn deploy.
+#   · `workflow_dispatch` + `schedule` HẰNG TUẦN — quyết định C7 của chủ nền tảng (29/09/2026): «tự động restore drill
+#     mỗi tuần trên môi trường test, không restore đè production». Môi trường test = service container của job này; lượt
+#     lịch không có ô `ma` nên dùng mặc định `drill-ws`. Job này KHÔNG nằm trong `gates.yml` / `deploy-vps.yml`: không
+#     chặn deploy; một lượt lịch đỏ chỉ gửi thông báo tới người theo dõi kho.
 #   · createdb / pg_dump / pg_restore chạy BÊN TRONG container bằng `docker exec -i` — đúng cách `erp-backup.sh` gọi
 #     `docker exec erp-db pg_dump …` trên VPS, và đúng phiên bản công cụ của máy chủ.
 #   · Ô `ma` đi qua `env:` rồi `"$DRILL_MA"`, không nội suy vào `run:`; kịch bản chỉ nhận mã khớp `^drill-…`.
 name: Diễn tập khôi phục tổ chức (Postgres tạm)
 
 on:
+  # Thứ Bảy 20:00 UTC = Chủ nhật 03:00 giờ VN. GitHub chỉ chạy lịch trên nhánh mặc định (main).
+  schedule:
+    - cron: "0 20 * * 6"
   workflow_dispatch:
     inputs:
       ma:

@@ -31,8 +31,16 @@ import type { HealthState } from "@/lib/queries/integration-health";
  * Phase 11 mọi tổ chức đọc CÙNG thư mục — tổ chức B thấy "sao lưu tốt" của VNX trong khi CSDL của B
  * không có bản sao nào. Nên phép chấm luôn đi kèm ĐÍCH ({@link BackupTarget}): tệp của CSDL khác
  * (hoặc của nhà) KHÔNG BAO GIỜ làm căn cứ cho một tổ chức, kể cả khi bị đặt nhầm vào thư mục của nó.
- * Tổ chức khác không có bot chat (vế 4 bỏ), và diễn tập tự động mới phủ CSDL nhà — vế 5 của tổ
- * chức vì thế nói thẳng "chưa diễn tập", không mượn lượt diễn tập của nhà.
+ * Tổ chức khác không có bot chat (vế 4 bỏ); vế 5 chỉ nhận lượt diễn tập mang ĐÚNG tên CSDL của nó (ops
+ * `restore-drill-org` hoặc lượt tự động mỗi Chủ nhật, luân phiên) — không mượn lượt diễn tập của nhà.
+ *
+ * ─── RPO THEO GIỜ CHO TỔ CHỨC KHÁCH (quyết định C6, 29/09/2026: mục tiêu RPO ≤ 1 giờ) ───
+ *
+ * Script sao lưu MỖI GIỜ mọi CSDL `erp_org_*` (`hourly-org`), ghi `orgs/<csdl>/last-hourly.json` và cập nhật
+ * `last-success.json`. Với đích tổ chức, thẻ thêm vế 1b: bản thành công gần nhất cũ hơn
+ * {@link ORG_BACKUP_RPO_ALERT_HOURS} giờ ⇒ vàng "RPO ≤ 1 giờ không giữ được", và lượt giờ gần nhất hỏng ⇒ vàng. NHÀ
+ * không có vế này: CSDL nhà vẫn một bản mỗi đêm (RPO ≤ 1 ngày) cho tới khi có PITR
+ * (docs/platform/backup-recovery.md §9) — chấm nhà theo mục tiêu giờ là báo đỏ một việc chưa ai làm.
  */
 
 /** Bản thành công gần nhất cũ hơn chừng này ⇒ `DOWN`. Lịch là hằng ngày; 36 giờ chừa một lần hỏng. */
@@ -41,6 +49,13 @@ export const BACKUP_MAX_AGE_HOURS = 36;
 /** Diễn tập khôi phục cũ hơn chừng này ⇒ chưa chứng minh bản HIỆN TẠI còn khôi phục được. Nhịp: mỗi tháng. */
 export const BACKUP_DRILL_MAX_AGE_DAYS = 35;
 
+/**
+ * Tổ chức khách: bản thành công gần nhất cũ hơn chừng này ⇒ vàng. Mục tiêu là 1 giờ (lượt giờ phút 47); quá 3 giờ = đã
+ * lỡ HAI lượt liên tiếp. Một lượt lỡ vì khoá bận / deploy là chuyện thường và tự lành ở giờ sau — báo nó là tập cho người
+ * đọc bỏ qua thẻ này. Đây là NGƯỠNG BÁO, không phải lời hứa RPO (lời hứa nằm ở launch-gates.md C6).
+ */
+export const ORG_BACKUP_RPO_ALERT_HOURS = 3;
+
 /** Nơi compose mount `${ERP_BACKUP_DIR:-/root/backups}/status` CHỈ-ĐỌC (docker-compose.prod.yml). */
 export const BACKUP_STATUS_DIR_DEFAULT = "/erp-backup-status";
 
@@ -48,6 +63,8 @@ export const BACKUP_STATUS_DIR_DEFAULT = "/erp-backup-status";
 export const ORG_BACKUP_STATUS_SUBDIR = "orgs";
 /** Tệp tổng hợp các CSDL tổ chức của lượt gần nhất — khớp script (`orgs-last-run.json`). */
 export const ORG_BACKUP_SUMMARY_FILE = "orgs-last-run.json";
+/** Lời khai của lượt sao lưu MỖI GIỜ, trong thư mục của từng CSDL tổ chức — khớp `cmd_sao_luu_gio_to_chuc` của script. */
+export const ORG_BACKUP_HOURLY_FILE = "last-hourly.json";
 /** Tên CSDL được phép làm một đoạn đường dẫn — chặt như `MAU_CSDL_TO_CHUC` của script, không hơn. */
 export const ORG_BACKUP_DATABASE_PATTERN = /^erp_org_[a-z0-9_]+$/;
 
@@ -82,7 +99,8 @@ export type BackupRunRecord = {
   db: { file: string | null; bytes: number | null; tableData: number | null };
   chatbot: { state: BackupBotState; bytes: number | null; reason: string | null };
   offsite: { state: BackupOffsiteState; remote: string | null; reason: string | null };
-  retention: { daily: number | null; weekly: number | null; manual: number | null };
+  /** `hourly` chỉ có ở lời khai CSDL tổ chức (lượt giờ); nhà ⇒ `null`. */
+  retention: { daily: number | null; weekly: number | null; manual: number | null; hourly: number | null };
   schedule: string | null;
 };
 
@@ -153,7 +171,7 @@ export function parseBackupRun(raw: unknown): BackupRunRecord | null {
         ? { state: "NOT_APPLICABLE", bytes: null, reason: null }
         : { state: oneOf(bot.state, ["OK", "FAILED", "NOT_FOUND", "NOT_RUN"] as const) ?? "NOT_RUN", bytes: num(bot.bytes), reason: str(bot.reason) },
     offsite: { state: oneOf(off.state, ["NOT_CONFIGURED", "OK", "FAILED"] as const) ?? "FAILED", remote: str(off.remote), reason: str(off.reason) },
-    retention: { daily: num(ret.daily), weekly: num(ret.weekly), manual: num(ret.manual) },
+    retention: { daily: num(ret.daily), weekly: num(ret.weekly), manual: num(ret.manual), hourly: num(ret.hourly) },
     schedule: str(raw.schedule),
   };
 }
@@ -200,6 +218,8 @@ export type BackupHealth = {
   lastRun: BackupRunRecord | null;
   lastSuccess: BackupRunRecord | null;
   lastDrill: BackupDrillRecord | null;
+  /** CHỈ với đích tổ chức: lượt sao lưu MỖI GIỜ gần nhất (`last-hourly.json`). `null` = chưa có / không áp dụng. */
+  lastHourly: BackupRunRecord | null;
   /** Tuổi bản thành công gần nhất, giờ. `null` = CHƯA CÓ bản nào. */
   ageHours: number | null;
   /**
@@ -216,6 +236,8 @@ export type BackupStatusFiles = {
   lastRun?: unknown;
   lastSuccess?: unknown;
   lastDrill?: unknown;
+  /** Chỉ với đích tổ chức: `orgs/<csdl>/last-hourly.json`. */
+  lastHourly?: unknown;
   /** Chỉ với đích nhà: `orgs-last-run.json`. */
   orgSummary?: unknown;
 };
@@ -235,7 +257,7 @@ function thuocVe(rec: { scope?: string; database: string | null }, target: Backu
  */
 export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target: BackupTarget = HOME_BACKUP_TARGET): BackupHealth {
   const toChuc = target.scope === "ORGANIZATION";
-  const empty = { target, lastRun: null, lastSuccess: null, lastDrill: null, ageHours: null, organizations: null };
+  const empty = { target, lastRun: null, lastSuccess: null, lastDrill: null, lastHourly: null, ageHours: null, organizations: null };
   if (!files.dirReadable) {
     const text =
       "ERP không đọc được thư mục trạng thái sao lưu — máy này không mount /root/backups/status (bình thường ở máy chạy thử / dev; trên máy chủ nghĩa là lượt deploy chưa gắn thư mục). Không có căn cứ để nói có hay không có bản sao lưu.";
@@ -250,12 +272,14 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
     });
   }
   const hong = (v: unknown) => v === UNPARSABLE;
-  if (hong(files.lastRun) || hong(files.lastSuccess) || hong(files.lastDrill)) {
+  if (hong(files.lastRun) || hong(files.lastSuccess) || hong(files.lastDrill) || (toChuc && hong(files.lastHourly))) {
     issues.push({ state: "UNKNOWN", text: "Có tệp trạng thái sao lưu nhưng không đọc được (sai định dạng) — đọc bằng ops backup-status." });
   }
   const runRaw = files.lastRun === undefined || hong(files.lastRun) ? null : parseBackupRun(files.lastRun);
   const successRaw = files.lastSuccess === undefined || hong(files.lastSuccess) ? null : parseBackupRun(files.lastSuccess);
   const drillRaw = files.lastDrill === undefined || hong(files.lastDrill) ? null : parseBackupDrill(files.lastDrill);
+  // Lượt giờ chỉ tồn tại cho CSDL tổ chức — nhà không bao giờ đọc tệp này (kể cả khi nó bị đặt nhầm vào đó).
+  const hourlyRaw = !toChuc || files.lastHourly === undefined || hong(files.lastHourly) ? null : parseBackupRun(files.lastHourly);
   if ((files.lastRun !== undefined && !hong(files.lastRun) && !runRaw) || (files.lastSuccess !== undefined && !hong(files.lastSuccess) && !successRaw)) {
     issues.push({ state: "UNKNOWN", text: "Tệp trạng thái sao lưu không đúng hình dạng mong đợi (schema 1) — không dùng làm căn cứ." });
   }
@@ -263,7 +287,8 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
   const lastRun = runRaw && thuocVe(runRaw, target) ? runRaw : null;
   const lastSuccess = successRaw && thuocVe(successRaw, target) ? successRaw : null;
   const lastDrill = drillRaw && thuocVe(drillRaw, target) ? drillRaw : null;
-  if ((runRaw && !lastRun) || (successRaw && !lastSuccess) || (drillRaw && !lastDrill)) {
+  const lastHourly = hourlyRaw && thuocVe(hourlyRaw, target) ? hourlyRaw : null;
+  if ((runRaw && !lastRun) || (successRaw && !lastSuccess) || (drillRaw && !lastDrill) || (hourlyRaw && !lastHourly)) {
     issues.push({ state: "UNKNOWN", text: "Có tệp trạng thái sao lưu của một CSDL KHÁC nằm ở chỗ của CSDL này — không dùng làm căn cứ." });
   }
 
@@ -278,11 +303,20 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
         lastRun && lastRun.result === "FAILED"
           ? `Chưa có bản sao lưu thành công nào${cuaAi}; lượt gần nhất THẤT BẠI: ${lastRun.reason ?? "không rõ lý do"}`
           : toChuc
-            ? `Chưa có bản sao lưu nào${cuaAi} — lịch tự động chạy lúc thấp điểm đêm; bản của tổ chức khác (kể cả tổ chức nhà) KHÔNG phủ CSDL này.`
+            ? `Chưa có bản sao lưu nào${cuaAi} — lịch tự động chạy mỗi giờ và mỗi đêm; bản của tổ chức khác (kể cả tổ chức nhà) KHÔNG phủ CSDL này.`
             : "Chưa có bản sao lưu nào được ghi nhận — lịch tự động chạy lúc thấp điểm đêm; muốn có ngay thì chạy ops backup.",
     });
   } else if ((ageHours ?? 0) > BACKUP_MAX_AGE_HOURS) {
     issues.push({ state: "DOWN", text: `Bản sao lưu thành công gần nhất${cuaAi} cách đây ${Math.floor(ageHours ?? 0)} giờ (quá ${BACKUP_MAX_AGE_HOURS} giờ) — lịch hằng ngày đã không chạy được.` });
+  } else if (toChuc && (ageHours ?? 0) > ORG_BACKUP_RPO_ALERT_HOURS) {
+    // ─── Vế 1b · RPO THEO GIỜ — chỉ tổ chức khách (mục tiêu C6: ≤ 1 giờ) ───
+    issues.push({
+      state: "DEGRADED",
+      text: `RPO mục tiêu ≤ 1 giờ KHÔNG giữ được: bản thành công gần nhất${cuaAi} cách đây ${Math.floor(ageHours ?? 0)} giờ (quá ${ORG_BACKUP_RPO_ALERT_HOURS} giờ = lỡ ít nhất hai lượt sao lưu mỗi giờ) — xem ops backup-status, khối "CSDL tổ chức khác nhà".`,
+    });
+  }
+  if (lastHourly && lastHourly.result === "FAILED" && (!lastSuccess || lastHourly.finishedAt.getTime() > lastSuccess.finishedAt.getTime())) {
+    issues.push({ state: "DEGRADED", text: `Lượt sao lưu mỗi giờ gần nhất THẤT BẠI: ${lastHourly.reason ?? "không rõ lý do"}` });
   }
 
   // ─── Vế 2 · LƯỢT GẦN NHẤT CÓ HỎNG KHÔNG ───
@@ -308,7 +342,7 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
     issues.push({
       state: "DEGRADED",
       text: toChuc
-        ? "Chưa diễn tập khôi phục CSDL của tổ chức này — ops restore-drill chỉ phủ CSDL nhà; chạy ops restore-drill-org với mã tổ chức (docs/backup-restore.md mục 8)."
+        ? "Chưa diễn tập khôi phục CSDL của tổ chức này — lượt tự động mỗi Chủ nhật luân phiên từng tổ chức; muốn có ngay thì chạy ops restore-drill-org với mã tổ chức (docs/backup-restore.md mục 8). Diễn tập của nhà không phủ CSDL này."
         : "Chưa từng diễn tập khôi phục — chưa chứng minh được bản sao lưu dùng được (ops restore-drill).",
     });
   } else if (lastDrill.result === "FAILED") {
@@ -331,7 +365,7 @@ export function evaluateBackupHealth(files: BackupStatusFiles, now: Date, target
       : `Bản CSDL cách đây ${Math.floor(ageHours ?? 0)} giờ · có bản ngoài máy · diễn tập khôi phục đạt.`;
   const organizations =
     target.scope === "HOME" && files.orgSummary !== undefined && !hong(files.orgSummary) ? parseOrgBackupSummary(files.orgSummary) : null;
-  return { target, state, reason, issues, lastRun, lastSuccess, lastDrill, ageHours, organizations };
+  return { target, state, reason, issues, lastRun, lastSuccess, lastDrill, lastHourly, ageHours, organizations };
 }
 
 /** Kích thước tệp để hiển thị. `null` ⇒ "—" (CHƯA BIẾT), không bao giờ "0 MB". */

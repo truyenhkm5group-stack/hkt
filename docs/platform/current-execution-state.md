@@ -82,7 +82,7 @@ Commit/PR KHÔNG mang tên model AI, KHÔNG dòng Co-Authored-By (AGENTS.md 6.6)
 - AI Builder: một lượt dựng mới ~1,1 USD, một lượt sửa ~0,14 USD; trần theo gói ở sổ dùng AI (`ai-usage.md`).
 - Kéo xa khi phải cuộn trong trình kéo-thả chưa đo trên màn hình thường.
 - Cài blueprint vượt hạn mức đối tượng hỏng giữa chừng (kế hoạch chưa báo trước).
-- Sao lưu tổ chức chưa có diễn tập khôi phục TỰ ĐỘNG (có ops `restore-drill-org` chạy tay — bật tự động là cổng C2 ở `launch-gates.md`); đêm nhà hỏng thì tổ chức không được sao lưu.
+- Sao lưu tổ chức: từ quyết định C4/C6/C7 (29/09/2026) có bản mỗi giờ (RPO ≤ 1 giờ) và diễn tập tự động mỗi Chủ nhật (`backup-recovery.md` §9) — cả hai chưa chạy trên VPS vì chưa có tổ chức thật. CSDL NHÀ vẫn RPO ≤ 1 ngày cho tới khi bật PITR (§9.4, cần cửa sổ bảo trì).
 - `/login`, `/start` và một số trang lõi ngoài danh sách H4 còn chữ gốc VNX (trạng thái tích hợp của nhà + gợi ý `.env` trên
   `/login` đã ẩn khi có tổ chức thứ hai).
 - Nợ P0/P1/P2 của đợt pilot: `pilot-readiness.md` mục 4.

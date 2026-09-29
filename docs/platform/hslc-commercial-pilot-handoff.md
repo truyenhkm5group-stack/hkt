@@ -345,9 +345,11 @@ của gói chỉ đếm `custom_records`, KHÔNG đếm sản phẩm (`lib/entit
 - **Sao lưu đêm theo tổ chức**: `scripts/erp-backup.sh` (khối `# >>> TỔ CHỨC KHÁC NHÀ`) dump mọi CSDL `erp_org_*` trong
   khung 02:00–05:59 giờ VN, thư mục riêng `/root/backups/orgs/<csdl>/{daily,weekly,manual}/`, giữ 7 ngày · 4 Chủ nhật ·
   3 bấm tay, kiểm mục lục có `users` + `settings` + `__drizzle_migrations`; ngoài máy `gcrypt:orgs/<csdl>/…` KHI đã bật
-  Drive (C4) (`docs/platform/backup-recovery.md` §2.2, §8.4).
+  Drive (C4) (`docs/platform/backup-recovery.md` §2.2, §8.4). Từ quyết định C6 (29/09/2026) thêm bản **mỗi giờ**
+  (`erp-backup.sh hourly-org`, cron phút 47, `orgs/<csdl>/hourly/`, giữ 48 bản) ⇒ RPO ≤ 1 giờ cho tổ chức khách (§9.2).
 - **Diễn tập khôi phục một tổ chức trên VPS**: ops `restore-drill-org` (`.github/workflows/ops-vps.yml`,
-  `erp-backup.sh restore-drill-org [mã]`) — CHẠY TAY, chưa từng chạy trên VPS vì chưa có tổ chức thật (C1).
+  `erp-backup.sh restore-drill-org [mã]`) + tự động mỗi Chủ nhật (`drill-org-weekly`, luân phiên, quyết định C7) —
+  chưa từng chạy trên VPS vì chưa có tổ chức thật (C1).
 - **Diễn tập đầu-cuối trên Postgres tạm (CI)**: workflow `.github/workflows/restore-drill.yml` + `scripts/restore-drill-pg.ts`
   (tạo → tuỳ biến → `pg_dump` → `DROP DATABASE` → khôi phục theo runbook → so từng bảng → chạy thật).
   **ĐẠT ở run `36545135985` trên Postgres 16.15 (cùng ảnh `erp-db`): 187 bảng · 356 dòng, dump 397 ms, khôi phục

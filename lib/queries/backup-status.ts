@@ -6,6 +6,7 @@ import {
   BACKUP_STATUS_DIR_DEFAULT,
   HOME_BACKUP_TARGET,
   ORG_BACKUP_DATABASE_PATTERN,
+  ORG_BACKUP_HOURLY_FILE,
   ORG_BACKUP_STATUS_SUBDIR,
   ORG_BACKUP_SUMMARY_FILE,
   UNPARSABLE,
@@ -66,12 +67,13 @@ export async function readBackupStatusFiles(dir = backupStatusDir(), target: Bac
     // phải `erp`) thì script không sao lưu nó — thư mục đọc được, nhưng không có lời khai nào.
     if (!ORG_BACKUP_DATABASE_PATTERN.test(target.database)) return { dirReadable: true };
     const goc = path.join(dir, ORG_BACKUP_STATUS_SUBDIR, target.database);
-    const [lastRun, lastSuccess, lastDrill] = await Promise.all([
+    const [lastRun, lastSuccess, lastDrill, lastHourly] = await Promise.all([
       docJson(path.join(goc, "last-run.json")),
       docJson(path.join(goc, "last-success.json")),
       docJson(path.join(goc, "last-drill.json")),
+      docJson(path.join(goc, ORG_BACKUP_HOURLY_FILE)),
     ]);
-    return { dirReadable: true, lastRun, lastSuccess, lastDrill };
+    return { dirReadable: true, lastRun, lastSuccess, lastDrill, lastHourly };
   }
   const [lastRun, lastSuccess, lastDrill, orgSummary] = await Promise.all([
     docJson(path.join(dir, "last-run.json")),
