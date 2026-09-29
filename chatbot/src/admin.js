@@ -193,6 +193,61 @@ function shopAiCost(bot) {
   return { ...periods.d7, periods, byPage, bills, orderCosts: orderCosts(bot, pricing, meter), meterSince: meter?.since || null };
 }
 
+/**
+ * TRANG TONG QUAN: so tin bot tra loi + chi phi AI theo NGAY (30 ngay) va theo GIO (hom nay, cap nhat truc tiep).
+ * Ba luat in so:
+ *  - Ngay chua co bo dem token => chi phi CHUA BIET (null), khong phai 0d; ngay dau dem giua chung => "≥".
+ *  - Don / SDT chi co tu moc do; ngay truoc moc => null.
+ *  - Gio truoc luc bat dau dem theo gio => null (bieu do de trong), khong ve cot 0.
+ */
+function overview(bot) {
+  const pricing = settings.aiPricing();
+  const meter = store.getMeter();
+  const raw = store.getAllAiUsage();
+  const metered = meteredAll();
+  const ids = [...bot.clients.keys()];
+  const d30 = lastDays(30).reverse();
+  const today = d30[d30.length - 1];
+  const usageDays = Object.values(raw).flatMap((byDay) => Object.keys(byDay)).sort();
+  const firstUsageDay = usageDays[0] || null;
+  // Tin tra loi cong MOI page co thong ke (ke ca page da go: tin do van da gui that)
+  const statIds = [...new Set([...ids, ...Object.keys(store.state.stats || {})])];
+  const statSum = (d, key) => statIds.reduce((n, id) => n + (store.getStats(id)[d]?.[key] || 0), 0);
+  const costOf = (d) => {
+    if (meter?.day && d >= meter.day) return summarizeAiCost(mergeUsage(metered, [d]), [d], { ...pricing, orders: 0 });
+    if (!firstUsageDay || d < firstUsageDay) return null;
+    const a = summarizeAiCost(mergeUsage(raw, [d]), [d], { ...pricing, orders: 0 });
+    return { ...a, partial: a.partial || d === firstUsageDay };
+  };
+  const days = d30.map((d) => {
+    const a = costOf(d);
+    const inMeter = !!(meter?.day && d >= meter.day);
+    const orders = inMeter ? store.countOrders([d]) : null;
+    const sdt = inMeter ? store.countPhones([d]) : null;
+    const costVnd = a ? a.costVnd : null;
+    return { day: d, replies: statSum(d, "replies"), handoffs: statSum(d, "handoffs"), calls: a?.calls ?? null, costVnd, partial: !!a?.partial, orders, sdt, perOrderVnd: perSdt(costVnd, orders || 0), perSdtVnd: perSdt(costVnd, sdt || 0) };
+  });
+  const { since: hourlySince, hours } = store.getHourly();
+  const nowKey = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 13);
+  const sinceKey = hourlySince ? new Date(hourlySince + 7 * 3600 * 1000).toISOString().slice(0, 13) : null;
+  const hourly = [...Array(24)].map((_, h) => {
+    const key = `${today}T${String(h).padStart(2, "0")}`;
+    const known = !!sinceKey && key >= sinceKey && key <= nowKey;
+    const b = hours[key] || {};
+    const a = b.ai ? summarizeAiCost({ x: b.ai }, ["x"], { ...pricing, orders: 0 }) : null;
+    return { hour: h, known, partial: known && key === sinceKey, replies: known ? b.replies || 0 : null, handoffs: known ? b.handoffs || 0 : null, costVnd: known ? (a ? a.costVnd : 0) : null, costPartial: !!a?.partial };
+  });
+  const pages = statIds.map((id) => {
+    const a = summarizeAiCost(metered[id] || {}, [today], { ...pricing, orders: 0 });
+    const st = store.getStats(id)[today] || {};
+    const orders = store.countOrders([today], id);
+    return { id, name: bot.pageNames.get(id) || id, replies: st.replies || 0, handoffs: st.handoffs || 0, costVnd: a.costVnd, partial: a.partial, orders, perOrderVnd: perSdt(a.costVnd, orders) };
+  }).filter((p) => ids.includes(p.id) || p.replies || p.costVnd).sort((x, y) => y.replies - x.replies);
+  const recent = ids.flatMap((id) => store.getRecent(id).slice(0, 12).map((r) => ({ page: bot.pageNames.get(id) || id, at: r.at, customer: r.customerName || "", question: r.question || "", reply: (r.reply || "").slice(0, 160), handoff: !!r.handoff, dryRun: !!r.dryRun })))
+    .sort((a, b) => b.at - a.at).slice(0, 12);
+  return { today: days[days.length - 1], days, hourly, hourlySince, meterSince: meter?.since || null, firstUsageDay, pages, recent, generatedAt: Date.now() };
+}
+
 export function createAdminHandler(bot) {
   const assistant = createAssistant(bot);
   return async function handleAdmin(req, res, url) {
@@ -231,6 +286,10 @@ export function createAdminHandler(bot) {
       let p;
 
       // ---- Tong quan
+      if (m("GET", "/api/overview")) {
+        return json(res, 200, overview(bot)), true;
+      }
+
       if (m("GET", "/api/state")) {
         return json(res, 200, {
           ok: true,

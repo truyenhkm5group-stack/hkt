@@ -21,6 +21,7 @@ class Store {
     this.state = { processed: [], botMessages: [], lastHandled: {}, convUpdatedAt: {}, stats: {}, recent: {} };
     this._load();
     this._startMeter();
+    if (!this.state.hourlySince) this.state.hourlySince = Date.now();
     this._processed = new Set(this.state.processed);
     this._bot = new Set(this.state.botMessages);
     this._timer = null;
@@ -78,8 +79,30 @@ class Store {
     this._save();
   }
 
+  /**
+   * THEO GIO (gio VN, ca shop) cho trang Tong quan: tin tra loi, chuyen nhan vien, token AI. Giu 72 gio.
+   * Moc bat dau dem theo gio nam o hourlySince — gio truoc moc la CHUA BIET, khong phai 0.
+   */
+  _hour(ms = Date.now()) {
+    if (!this.state.hourlySince) this.state.hourlySince = ms;
+    const key = new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 13);
+    const all = (this.state.hourly ||= {});
+    if (!all[key]) {
+      all[key] = {};
+      const cutoff = new Date(ms + 7 * 3600 * 1000 - 72 * 3600e3).toISOString().slice(0, 13);
+      for (const k of Object.keys(all)) if (k < cutoff) delete all[k];
+    }
+    return all[key];
+  }
+  getHourly() {
+    return { since: this.state.hourlySince || null, hours: this.state.hourly || {} };
+  }
   /** Thong ke theo page theo ngay (gio VN): replies, handoffs, skippedStaff */
   bumpStat(pageId, key) {
+    if (key === "replies" || key === "handoffs") {
+      const h = this._hour();
+      h[key] = (h[key] || 0) + 1;
+    }
     const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
     const s = (this.state.stats ||= {});
     const p = (s[String(pageId)] ||= {});
@@ -101,6 +124,11 @@ class Store {
     x.input += t.input || 0;
     x.cached += t.cached || 0;
     x.output += t.output || 0;
+    const hm = ((this._hour().ai ||= {})[String(model)] ||= { calls: 0, input: 0, cached: 0, output: 0 });
+    hm.calls += 1;
+    hm.input += t.input || 0;
+    hm.cached += t.cached || 0;
+    hm.output += t.output || 0;
     const days = Object.keys(p).sort();
     while (days.length > 35) delete p[days.shift()];
     this._save();

@@ -78,6 +78,14 @@
   .act.ok{border-color:var(--ok);color:var(--ok)} .act.err{border-color:var(--err);color:var(--err)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
   .chips button{font-size:12px;padding:4px 10px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+  .grid2 .card{margin-bottom:0}.grid2{margin-bottom:14px}
+  svg.chart{width:100%;height:auto;display:block}
+  svg.chart .bar{fill:var(--acc)} svg.chart .bar.part{fill:var(--acc);opacity:.55} svg.chart .bar.hov{opacity:.75}
+  svg.chart .bar.now{fill:var(--acc)} svg.chart .unk{fill:var(--line)}
+  svg.chart .base{stroke:var(--line);stroke-width:1} svg.chart .ax{fill:var(--muted);font-size:14px;font-family:var(--font)}
+  #charttip{position:fixed;display:none;pointer-events:none;z-index:50;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;box-shadow:0 4px 14px rgb(0 0 0 / 15%)}
+  .feed{padding:8px 0;border-bottom:1px solid var(--line)}.feed:last-child{border-bottom:0}
 </style>
 <script>
 /* Theo che do sang/toi va phong chu cua ERP khi mo trong khung cua ERP (cung nguon nen doc duoc trang cha). */
@@ -113,6 +121,7 @@
   <div class="head">Pancake Bot Manager<div class="small muted" id="gstatus">đang tải…</div></div>
   <div id="pages"></div>
   <div id="globalnav">
+    <div class="pg" data-view="home" id="nav_home">📊 <span class="n"><b>Tổng quan</b><div class="c">Tin trả lời · chi phí AI theo ngày, theo giờ</div></span></div>
     <div class="pg" data-view="assistant" id="nav_assistant">🤖 <span class="n"><b>Trợ lý AI</b><div class="c">Ra lệnh cho bot bằng tiếng Việt</div></span></div>
     <div class="pg" data-view="prompt">📝 <span class="n">Prompt chung</span></div>
     <div class="pg" data-view="catalog">🛍️ <span class="n">Sản phẩm (POS)</span></div>
@@ -127,6 +136,7 @@
   <div id="content"></div>
 </div>
 <div id="toast"></div>
+<div id="charttip"></div>
 
 <script>
 const $ = (s, r = document) => r.querySelector(s);
@@ -144,7 +154,7 @@ function shrinkImage(file, max = 1600) {
 }
 // markdown toi gian cho tin cua tro ly: **dam**, gach dau dong, xuong dong
 const md = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*\-]\s+/gm, "• ").replace(/^#{1,6}\s+/gm, "");
-let STATE = null, view = { kind: "page", id: null, tab: "settings" }, models = [];
+let STATE = null, view = { kind: "home" }, models = [];
 const testChat = {}; // pageId -> history
 
 // Token truy cap tu xa (khi bot chay tren VPS): lay tu ?token=... roi nho lai trong trinh duyet
@@ -814,6 +824,7 @@ function renderAddPage() {
 async function renderGlobal() {
   const c = $("#content");
   if (view.kind === "addpage") return renderAddPage();
+  if (view.kind === "home") return renderHome();
   if (view.kind === "assistant") return renderAssistant();
   if (view.kind === "prompt") {
     $("#title").textContent = "Prompt chung (prompts/system.md)"; $("#topinfo").textContent = "Áp dụng cho tất cả page. {{SHOP_NAME}} = tên page, {{CATALOG}} = sản phẩm POS.";
@@ -838,6 +849,88 @@ async function renderGlobal() {
     $("#logbox").scrollTop = 1e9;
   }
 }
+/* ---------- Tổng quan: tin trả lời + chi phí AI theo ngày / theo giờ, cập nhật trực tiếp ---------- */
+let homeTimer = null, homeBusy = false;
+const vndCell = (v, partial) => (v == null ? "—" : (partial ? "≥ " : "") + Number(v).toLocaleString("vi-VN") + "đ");
+const numCell = (v) => (v == null ? "—" : Number(v).toLocaleString("vi-VN"));
+// Biểu đồ cột một chuỗi: null = CHƯA BIẾT (không vẽ cột, không phải 0). Nhãn trục chữ muted, cột màu nhấn của ERP.
+function barChart(items, { height = 190, every = 1, fmt = numCell, name = "" } = {}) {
+  const W = 720, H = height, padB = 26, padT = 22, n = items.length, gap = 2;
+  const max = Math.max(0, ...items.map((i) => i.value ?? 0));
+  const bw = (W - gap * (n - 1)) / n, plotH = H - padB - padT;
+  const bars = items.map((it, i) => {
+    const x = i * (bw + gap);
+    const label = i % every === 0 ? `<text x="${i === 0 ? x : x + bw / 2}" y="${H - 6}" text-anchor="${i === 0 ? "start" : "middle"}" class="ax">${esc(it.label)}</text>` : "";
+    const tip = `${it.tipLabel || it.label}: ${it.value == null ? "chưa đo" : fmt(it.value, it.partial)}`;
+    const hit = `<rect x="${x}" y="${padT}" width="${bw}" height="${plotH}" fill="transparent" data-tip="${esc(tip)}"></rect>`;
+    if (it.value == null) return label + `<rect x="${x}" y="${H - padB - 2}" width="${bw}" height="2" class="unk"></rect>` + hit;
+    const h = max > 0 ? Math.max(it.value > 0 ? 2 : 0, (it.value / max) * plotH) : 0;
+    const y = H - padB - h, r = Math.min(4, bw / 2, h);
+    const path = h > 0 ? `<path d="M${x},${H - padB} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${H - padB} Z" class="bar${it.partial ? " part" : ""}${it.now ? " now" : ""}"></path>` : "";
+    return label + path + hit;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(name)}"><text x="0" y="14" class="ax">${esc(max ? "cao nhất " + fmt(max) : "")}</text><line x1="0" x2="${W}" y1="${H - padB}" y2="${H - padB}" class="base"></line>${bars}</svg>`;
+}
+function bindChartTips() {
+  const tip = $("#charttip");
+  document.querySelectorAll("svg.chart [data-tip]").forEach((el) => {
+    el.onmousemove = (e) => { tip.textContent = el.dataset.tip; tip.style.display = "block"; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY - 28 + "px"; el.previousElementSibling?.classList?.add("hov"); };
+    el.onmouseleave = () => { tip.style.display = "none"; el.previousElementSibling?.classList?.remove("hov"); };
+  });
+}
+async function renderHome() {
+  clearInterval(homeTimer);
+  $("#title").textContent = "Tổng quan bot chat";
+  await loadHome();
+  homeTimer = setInterval(() => (view.kind === "home" ? loadHome() : clearInterval(homeTimer)), 15000);
+}
+async function loadHome() {
+  if (homeBusy) return;
+  homeBusy = true;
+  try {
+    const d = await api("/api/overview");
+    if (view.kind !== "home") return;
+    const t = d.today, nowH = new Date(Date.now() + 7 * 3600e3).getUTCHours();
+    const fmtHm = (ms) => (ms ? new Date(ms).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—");
+    $("#topinfo").innerHTML = `<span class="pill ok">● trực tiếp</span> cập nhật ${new Date(d.generatedAt).toLocaleTimeString("vi-VN")} · tự làm mới 15 giây và mỗi khi bot trả lời`;
+    const hourItems = d.hourly.map((h) => ({ label: String(h.hour).padStart(2, "0"), tipLabel: `${String(h.hour).padStart(2, "0")}:00–${String(h.hour).padStart(2, "0")}:59`, value: h.replies, partial: h.partial, now: h.hour === nowH }));
+    const hourCost = d.hourly.map((h) => ({ label: String(h.hour).padStart(2, "0"), tipLabel: `${String(h.hour).padStart(2, "0")}:00–${String(h.hour).padStart(2, "0")}:59`, value: h.costVnd, partial: h.partial || h.costPartial, now: h.hour === nowH }));
+    const dayLbl = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
+    const dayReplies = d.days.map((x) => ({ label: dayLbl(x.day), value: x.replies }));
+    const dayCost = d.days.map((x) => ({ label: dayLbl(x.day), value: x.costVnd, partial: x.partial }));
+    const rows = d.days.slice().reverse().map((x) => `<tr><td>${esc(dayLbl(x.day))}${x.day === t.day ? ' <span class="pill">hôm nay</span>' : ""}</td><td>${numCell(x.replies)}</td><td>${numCell(x.handoffs)}</td><td>${vndCell(x.costVnd, x.partial)}</td><td>${numCell(x.orders)}</td><td>${vndCell(x.perOrderVnd, x.partial)}</td><td>${numCell(x.sdt)}</td><td>${vndCell(x.perSdtVnd, x.partial)}</td></tr>`).join("");
+    const pages = d.pages.map((p) => `<tr><td>${esc(p.name)}</td><td>${numCell(p.replies)}</td><td>${numCell(p.handoffs)}</td><td>${vndCell(p.costVnd, p.partial)}</td><td>${numCell(p.orders)}</td><td>${vndCell(p.perOrderVnd, p.partial)}</td></tr>`).join("");
+    const recent = d.recent.map((r) => `<div class="feed"><div class="small muted">${esc(fmtTime(r.at))} · ${esc(r.page)}${r.customer ? " · " + esc(r.customer) : ""}${r.handoff ? ' <span class="pill warn">chuyển NV</span>' : ""}${r.dryRun ? ' <span class="pill">chỉ log</span>' : ""}</div><div class="small"><span class="muted">Khách:</span> ${esc(r.question)}</div><div class="small"><span class="muted">Bot:</span> ${esc(r.reply)}</div></div>`).join("") || '<div class="muted small">Chưa có câu trả lời nào.</div>';
+    $("#content").innerHTML = `
+    <div class="card"><h3>Hôm nay</h3><div class="stat">
+      <div><b>${numCell(t.replies)}</b><span class="muted">tin bot trả lời</span></div>
+      <div><b>${numCell(t.handoffs)}</b><span class="muted">chuyển nhân viên</span></div>
+      <div><b>${vndCell(t.costVnd, t.partial)}</b><span class="muted">chi phí AI (ước tính)</span></div>
+      <div><b>${numCell(t.orders)}</b><span class="muted">đơn bot ghi POS</span></div>
+      <div><b>${vndCell(t.perOrderVnd, t.partial)}</b><span class="muted">AI / 1 đơn</span></div>
+      <div><b>${numCell(t.sdt)}</b><span class="muted">SĐT khách để lại</span></div>
+      <div><b>${vndCell(t.perSdtVnd, t.partial)}</b><span class="muted">AI / 1 SĐT</span></div></div>
+      <div class="hint" style="margin-top:8px">Chi phí = token thật × bảng giá (ước tính; số chuẩn: nhập hoá đơn Google ở tab Cài đặt của page). Đơn và SĐT đếm từ ${esc(fmtHm(d.meterSince))}; theo giờ đếm từ ${esc(fmtHm(d.hourlySince))} — giờ trước đó để trống, không phải 0. "≥" = khoảng đó bắt đầu đếm giữa chừng.</div></div>
+    <div class="grid2">
+      <div class="card"><h3>Tin bot trả lời theo giờ · hôm nay</h3>${barChart(hourItems, { every: 3, name: "Tin bot trả lời theo giờ hôm nay" })}</div>
+      <div class="card"><h3>Chi phí AI theo giờ · hôm nay</h3>${barChart(hourCost, { every: 3, fmt: vndCell, name: "Chi phí AI theo giờ hôm nay" })}</div>
+      <div class="card"><h3>Tin bot trả lời · 30 ngày</h3>${barChart(dayReplies, { every: 5, name: "Tin bot trả lời 30 ngày" })}</div>
+      <div class="card"><h3>Chi phí AI · 30 ngày</h3>${barChart(dayCost, { every: 5, fmt: vndCell, name: "Chi phí AI 30 ngày" })}</div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>Theo page · hôm nay</h3><table><tr><th>Page</th><th>Tin trả lời</th><th>Chuyển NV</th><th>Chi phí AI</th><th>Đơn</th><th>AI / đơn</th></tr>${pages}</table></div>
+      <div class="card"><h3>Bot vừa trả lời</h3>${recent}</div>
+    </div>
+    <div class="card"><h3>Từng ngày · 30 ngày</h3><table><tr><th>Ngày</th><th>Tin trả lời</th><th>Chuyển NV</th><th>Chi phí AI</th><th>Đơn</th><th>AI / đơn</th><th>SĐT</th><th>AI / SĐT</th></tr>${rows}</table>
+      <div class="hint">Chi phí "—" = ngày bot chưa đếm token (trước bản cập nhật), không phải 0đ. Đơn / SĐT "—" = trước mốc đo.</div></div>`;
+    bindChartTips();
+  } catch (e) {
+    if (view.kind === "home") $("#content").innerHTML = `<div class="card">Không tải được tổng quan: ${esc(e.message)}</div>`;
+  } finally {
+    homeBusy = false;
+  }
+}
+
 let choTimer = null;
 async function renderCho() {
   clearInterval(choTimer);
@@ -992,7 +1085,7 @@ function drawAudit(d) {
 }
 function logLine(e) { return `<div class="${e.level}">${esc(e.ts.slice(11, 19))} ${esc(e.msg)}</div>`; }
 // live log + auto refresh sidebar
-try { const es = new EventSource(withToken(BASE + "/api/events")); es.onmessage = (ev) => { const e = JSON.parse(ev.data); const box = $("#logbox"); if (box) { box.insertAdjacentHTML("beforeend", logLine(e)); box.scrollTop = 1e9; } if (/Bot ->|HANDOFF|Cap nhat cai dat/.test(e.msg)) clearTimeout(window._rs), (window._rs = setTimeout(() => api("/api/state").then((s) => { STATE = s; renderSidebar(); }), 1500)); }; } catch {}
+try { const es = new EventSource(withToken(BASE + "/api/events")); es.onmessage = (ev) => { const e = JSON.parse(ev.data); const box = $("#logbox"); if (box) { box.insertAdjacentHTML("beforeend", logLine(e)); box.scrollTop = 1e9; } if (/Bot ->|HANDOFF|Cap nhat cai dat/.test(e.msg)) clearTimeout(window._rs), (window._rs = setTimeout(() => { api("/api/state").then((s) => { STATE = s; renderSidebar(); }); if (view.kind === "home") loadHome(); }, 1500)); }; } catch {}
 refreshState().catch((e) => ($("#content").innerHTML = `<div class="card">Không kết nối được bot: ${esc(e.message)}</div>`));
 </script>
 </body>
