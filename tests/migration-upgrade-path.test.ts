@@ -120,6 +120,7 @@ const MOI = [
   "0170_video_scale_render_options",
   "0171_custom_records_live_sort",
   "0172_platform_settings",
+  "0173_fb_ads_post_link",
 ] as const;
 
 /*

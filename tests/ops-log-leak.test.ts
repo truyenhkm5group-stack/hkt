@@ -287,6 +287,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   "marketing-calibrate": "bảng theo NGÀY toàn shop; `--explain` (từng đơn + tên người chốt) bị TỪ CHỐI — dùng marketing-explain",
   "set-setting": "khoá + số trường; JSON không in (ô arg đã che)",
   "meta-id-probe": "mã Meta, tên chiến dịch / nhóm QC (đối tượng kinh doanh), số đơn",
+  "meta-ad-post-probe": "mã Ad / creative / page / post ĐÃ CHE (4 số cuối), trạng thái + nguồn + có/không — không tên quảng cáo, tên fanpage hay permalink",
   "ads-level-probe": "tên tài khoản QC + chi tiêu theo ngày",
   "pages-debug": "220 ký tự đầu phản hồi /pages (danh sách fanpage), token đã bỏ",
   "vtp-capability": "danh tính tài khoản API VTP ĐÃ CHE (mục 55); số đếm",

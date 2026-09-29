@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
  *
  * `/ads` trả lời "chiến dịch nào nên tăng, nên cắt" — nhìn theo CẢ KỲ.
  * `/ads/daily` trả lời "hôm nào lãi, hôm nào lỗ, và vì sao" — nhìn theo TỪNG NGÀY.
+ * `/ads/post-resolver` là CÔNG CỤ TRA: mẩu quảng cáo → creative → bài viết (kiểm tra / dự phòng cho job tự đồng bộ).
  *
  * Cố ý là TAB chứ không phải hai mục sidebar: thanh bên trái là bản đồ của cả ERP, nhét hai mục
  * của một module vào đó làm loãng bản đồ của mọi module khác (cùng quy ước với /work và /payroll).
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/ads", label: "Theo chiến dịch", hint: "Nên tăng tiền, giữ, theo dõi hay cắt — nhìn theo cả kỳ." },
   { href: "/ads/daily", label: "Hiệu quả theo ngày", hint: "Mỗi ngày tiêu bao nhiêu → ra bao nhiêu đơn → lãi hay lỗ. Mốc mặc định: ngày phát sinh đơn." },
+  { href: "/ads/post-resolver", label: "Ad → Bài viết", hint: "Dán Ad ID (hoặc link feed_demo_ad) → ERP hỏi Meta ra Creative, Page, Post — kể cả bài ẩn của “Tạo quảng cáo”." },
 ];
 
 export function AdsTabs() {

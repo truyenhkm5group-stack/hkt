@@ -6,7 +6,8 @@
 import { and, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
-import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
+import { getFacebookAdsClient, type FbAdInfo } from "@/lib/integrations/facebook/client";
+import { TRANSIENT_META_ERRORS } from "@/lib/constants/meta-ad-post";
 import { loadAdsMapping, resolveMarketer } from "@/lib/integrations/facebook/mapping";
 import { isUsableAdId } from "@/lib/constants/ads-identity";
 import { staleMemo } from "@/lib/cache";
@@ -32,6 +33,8 @@ export type AdIndexResult = {
   /** Tra ra nhưng Facebook không cho biết bài viết nào — không phải lỗi, chỉ là không có dữ liệu. */
   withoutPostLink: number;
   missing: number;
+  /** Lỗi tạm thời (token, hạn mức, Graph) — KHÔNG ghi, tra lại ở lượt sau thay vì đánh dấu missing. */
+  transient: number;
   /** Mã trong đơn nhưng KHÔNG đúng dạng số Facebook — dữ liệu hỏng, không tra. */
   invalid: number;
   errors: string[];
@@ -48,7 +51,7 @@ const POST_LINK_BATCH = 300;
 
 /** Tra Facebook cho các ad_id trong đơn N ngày gần đây chưa có trong fb_ads */
 export async function syncFacebookAdIndex(options: { days?: number; log?: (m: string) => void } = {}): Promise<AdIndexResult> {
-  const result: AdIndexResult = { eligible: 0, fromSpend: 0, alreadyIndexed: 0, needPostLink: 0, candidates: 0, fetched: 0, resolved: 0, withoutPostLink: 0, missing: 0, invalid: 0, errors: [] };
+  const result: AdIndexResult = { eligible: 0, fromSpend: 0, alreadyIndexed: 0, needPostLink: 0, candidates: 0, fetched: 0, resolved: 0, withoutPostLink: 0, missing: 0, transient: 0, invalid: 0, errors: [] };
   const log = options.log ?? (() => undefined);
   if (!env.facebook.accessToken) {
     result.errors.push("Chưa cấu hình FACEBOOK_ACCESS_TOKEN");
@@ -141,10 +144,13 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
   const infos = await client.getAdsByIds(todo);
   const now = new Date();
   for (const info of infos) {
-    await db
-      .insert(schema.fbAds)
-      .values({ id: info.id, name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, fetchedAt: now })
-      .onConflictDoUpdate({ target: schema.fbAds.id, set: { name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, postId: info.postId ?? null, storyId: info.storyId ?? null, fetchedAt: now, updatedAt: now } });
+    const row = fbAdRowFromInfo(info, now);
+    if (!row) {
+      result.transient += 1;
+      if (result.errors.length < 5) result.errors.push(`${info.id}: ${info.errorCode} — ${info.error ?? ""} (lỗi tạm thời, KHÔNG đánh dấu missing, tra lại lượt sau)`);
+      continue;
+    }
+    await db.insert(schema.fbAds).values(row.values).onConflictDoUpdate({ target: schema.fbAds.id, set: row.set });
     if (!info.missing && !info.postId) result.withoutPostLink += 1;
     if (info.missing) {
       result.missing += 1;
@@ -158,6 +164,42 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
     `Tra ${todo.length} ad_id (${todoTuDon.length} từ đơn · ${result.fromSpend} từ chi tiêu): ${result.fetched} có chiến dịch, ${result.missing} không tra được, ${result.resolved} nhận diện được marketer`,
   );
   return result;
+}
+
+/**
+ * MỘT KẾT QUẢ TRA → DÒNG `fb_ads` (hàm thuần). `null` = KHÔNG GHI.
+ *
+ * Ba ca, ba cách ghi:
+ *  · LỖI TẠM THỜI (token hết hạn, hết hạn mức, lỗi Graph chung) ⇒ không ghi. Trước đây chúng thành
+ *    `missing = true` rồi nằm im 7 ngày — một giờ token hết hạn là mọi mẩu tra trong giờ đó mất tên,
+ *    mất chiến dịch, mất bài viết.
+ *  · KHÔNG TỒN TẠI / KHÔNG CÓ QUYỀN ⇒ như cũ (`missing = true`), kèm lỗi có cấu trúc.
+ *  · TRA ĐƯỢC ⇒ ghi mẩu; phần bài viết CHỈ ghi khi lượt đó thật sự đọc creative (`creativeRead`):
+ *    lượt lùi về bộ trường cũ không đọc creative nên "không có bài" ở lượt ấy là CHƯA BIẾT.
+ *
+ * Nhánh CHÈN MỚI mang đủ cột bài viết. Trước bản này chỉ nhánh cập nhật mang `post_id`, nên một mẩu
+ * lần đầu vào sổ không có bài cho tới khi được tra lại sau 7 ngày.
+ */
+export function fbAdRowFromInfo(info: FbAdInfo, now: Date) {
+  if (info.errorCode && TRANSIENT_META_ERRORS.has(info.errorCode)) return null;
+  const resolveError = info.missing
+    ? { code: info.errorCode ?? "AD_NOT_FOUND", graphCode: info.graphError?.code ?? null, graphSubcode: info.graphError?.subcode ?? null, message: info.graphError?.message ?? info.error ?? "", fbtraceId: info.graphError?.fbtraceId ?? "", at: now.toISOString() }
+    : null;
+  const adPart = { name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, resolveError, fetchedAt: now };
+  const postPart =
+    info.missing || info.creativeRead
+      ? {
+          postId: info.postId ?? null,
+          storyId: info.storyId ?? null,
+          pageId: info.pageId ?? null,
+          creativeId: info.creativeId ?? null,
+          effectiveObjectStoryId: info.rawEffectiveObjectStoryId ?? null,
+          objectStoryId: info.rawObjectStoryId ?? null,
+          postResolutionSource: info.postResolutionSource ?? null,
+          postResolvedAt: info.postId ? now : null,
+        }
+      : {};
+  return { values: { id: info.id, ...adPart, ...postPart }, set: { ...adPart, ...postPart, updatedAt: now } };
 }
 
 /** ad_id → marketerId theo chiến dịch (ghép tay / bí danh / tài khoản); null nếu chưa tra được hoặc không nhận diện */

@@ -13,6 +13,7 @@ import { testOrderSource } from "./order-source.test";
 import { testDuplicateEvidencePure, testFanpageAttribution } from "./fanpage-attribution.test";
 import { testFanpageAccessPure, testFanpageHistoryDb, testPageEvidencePure } from "./fanpage-history.test";
 import { testLandingAttributionDb, testLandingAttributionPure } from "./landing-attribution.test";
+import { testMetaAdPostPure, testMetaAdPostResolver, testMetaAdPostStoreDb } from "./meta-ad-post.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
@@ -2108,6 +2109,10 @@ async function main() {
   await testFanpageHistoryDb();
   testLandingAttributionPure();
   await testLandingAttributionDb();
+  // Mẩu quảng cáo → creative → bài viết (kể cả dark post): chuẩn hoá đầu vào, bộ tra với Graph GIẢ, ghi idempotent vào fb_ads.
+  testMetaAdPostPure();
+  await testMetaAdPostResolver();
+  await testMetaAdPostStoreDb();
   await testIdeas();
   await testPermissions();
   await testPlatformModules();
