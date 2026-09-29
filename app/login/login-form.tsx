@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DENY_REASON_MESSAGE } from "@/lib/constants/session-revocation";
 
-export function LoginForm({ next, reason, showOrgField = false, showSetupHint = true }: { next?: string; reason?: string; showOrgField?: boolean; showSetupHint?: boolean }) {
+export function LoginForm({ next, reason, showOrgField = false, showSetupHint = true, orgName = null }: { next?: string; reason?: string; showOrgField?: boolean; showSetupHint?: boolean; orgName?: string | null }) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
 
   return (
@@ -23,7 +23,7 @@ export function LoginForm({ next, reason, showOrgField = false, showSetupHint = 
           <LockKeyhole className="size-5" />
         </div>
         <CardTitle className="text-xl">Đăng nhập</CardTitle>
-        <CardDescription>Dùng tài khoản nội bộ do quản trị viên cấp.</CardDescription>
+        <CardDescription>{orgName ? `ERP của ${orgName} — dùng tài khoản do quản trị của bạn cấp hoặc mời.` : "Dùng tài khoản nội bộ do quản trị viên cấp."}</CardDescription>
       </CardHeader>
       <CardContent>
         <form action={action} className="space-y-4">

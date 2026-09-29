@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
+import { hostSlug } from "@/lib/platform/host";
 import {
   ERP_HEADER_PREFIX,
+  ERP_HOST_SLUG_HEADER,
   ERP_PATH_HEADER,
   SESSION_COOKIE,
   claimsFrom,
@@ -39,8 +41,22 @@ import {
  *
  * `/start` (Phase 10 · tạo tổ chức tự phục vụ): trang KHÔNG cần phiên; cổng của nó là cờ `PLATFORM_SIGNUP_MODE` đọc ở
  * máy chủ — `off` (mặc định) thì trang chỉ in "chưa mở đăng ký" và mọi server action của nó từ chối.
+ *
+ * `/join/` (mời người dùng qua liên kết): người được mời CHƯA có tài khoản. Trang chỉ đọc; cổng của nó là mã mời
+ * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
+ * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
  */
-const PUBLIC_PREFIXES = ["/login", "/start", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/start", "/join/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+
+/**
+ * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot
+ * Pancake của nhà). Mỗi mục tự gác:
+ *  · `/chat` — trang chat của chatbot bán hàng; chỉ chạy trên tên miền con của tổ chức ĐÃ XUẤT BẢN có bot đang bật
+ *    (tra ở máy chủ), miền chính / tên miền lạ ⇒ "không có".
+ *  · `/api/platform/domain-allowed` — Caddy on-demand TLS hỏi "có cấp chứng chỉ cho host này không": chỉ trả 200 cho tên
+ *    miền con của tổ chức đã xuất bản, không lộ gì khác.
+ */
+const PUBLIC_EXACT = ["/chat", "/api/platform/domain-allowed"];
 const COOKIE = SESSION_COOKIE;
 
 /**
@@ -83,13 +99,16 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
   const clientSent = [...headers.keys()].filter((name) => name.toLowerCase().startsWith(ERP_HEADER_PREFIX));
   for (const name of clientSent) headers.delete(name);
   headers.set(ERP_PATH_HEADER, pathname);
+  // Tên miền con (0180): đặt SAU khi xoá header client — trình duyệt không tự khai được mình đang ở ERP nào.
+  const slug = hostSlug(request.headers.get("host"), process.env.PLATFORM_BASE_DOMAIN);
+  if (slug) headers.set(ERP_HOST_SLUG_HEADER, slug);
   return headers;
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const next = () => NextResponse.next({ request: { headers: serverHeaders(request, pathname) } });
-  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
+  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || PUBLIC_EXACT.includes(pathname)) return next();
 
   const token = request.cookies.get(COOKIE)?.value;
   /*

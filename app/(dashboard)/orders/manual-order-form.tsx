@@ -22,7 +22,9 @@ import { cn } from "@/lib/utils";
  */
 
 type Line = { variantId: string; quantity: string; unitPrice: string; discount: string };
-export type ManualOrderFormValues = { customerId: string; stage: ManualOrderStage; channel: string; note: string; orderDiscount: string; shippingFee: string; lines: Line[] };
+type RecipientDraft = { name: string; phone: string; address: string; province: string };
+export type ManualOrderFormValues = { customerId: string; stage: ManualOrderStage; channel: string; note: string; orderDiscount: string; shippingFee: string; lines: Line[]; recipient?: RecipientDraft };
+const EMPTY_RECIPIENT: RecipientDraft = { name: "", phone: "", address: "", province: "" };
 
 const EMPTY_LINE: Line = { variantId: "", quantity: "1", unitPrice: "", discount: "" };
 const SELECT = "h-9 w-full rounded-md border bg-background px-2 text-sm";
@@ -61,7 +63,11 @@ export function ManualOrderForm({
     orderDiscount: toInt(values.orderDiscount, 0),
     shippingFee: toInt(values.shippingFee, 0),
     lines: values.lines.map((l) => ({ variantId: l.variantId, quantity: toInt(l.quantity), unitPrice: toInt(l.unitPrice), discount: toInt(l.discount, 0) })),
+    // Ô trống = lấy của hồ sơ khách (máy chủ quyết); chỉ gửi khi có ít nhất một ô.
+    ...(values.recipient && Object.values(values.recipient).some((x) => x.trim()) ? { recipient: values.recipient } : {}),
   });
+  const recipient = values.recipient ?? EMPTY_RECIPIENT;
+  const setRecipient = (patch: Partial<RecipientDraft>) => setValues((prev) => ({ ...prev, recipient: { ...(prev.recipient ?? EMPTY_RECIPIENT), ...patch } }));
   const preview = manualOrderTotals(payload().lines, toInt(values.orderDiscount, 0), toInt(values.shippingFee, 0));
 
   const set = <K extends keyof Omit<ManualOrderFormValues, "lines">>(key: K, v: ManualOrderFormValues[K]) => setValues((prev) => ({ ...prev, [key]: v }));
@@ -203,6 +209,14 @@ export function ManualOrderForm({
           <Input id="mo-ship" inputMode="numeric" value={values.shippingFee} onChange={(e) => set("shippingFee", e.target.value)} placeholder="0" className="numeric" />
           {err("shippingFee")}
         </div>
+        <fieldset className="grid gap-3 rounded-lg border p-3 sm:col-span-2 sm:grid-cols-2">
+          <legend className="px-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Người nhận / địa chỉ giao (để trống = theo hồ sơ khách)</legend>
+          <Input aria-label="Tên người nhận" placeholder="Tên người nhận" value={recipient.name} onChange={(e) => setRecipient({ name: e.target.value })} />
+          <Input aria-label="SĐT người nhận" placeholder="SĐT người nhận" inputMode="tel" value={recipient.phone} onChange={(e) => setRecipient({ phone: e.target.value })} />
+          <Input aria-label="Địa chỉ giao" placeholder="Địa chỉ giao" className="sm:col-span-2" value={recipient.address} onChange={(e) => setRecipient({ address: e.target.value })} />
+          <Input aria-label="Tỉnh / thành" placeholder="Tỉnh / thành" value={recipient.province} onChange={(e) => setRecipient({ province: e.target.value })} />
+          {err("recipient")}
+        </fieldset>
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor="mo-note">Ghi chú</Label>
           <Textarea id="mo-note" value={values.note} onChange={(e) => set("note", e.target.value)} rows={3} />

@@ -1,4 +1,14 @@
 # Caddy tự xin và gia hạn chứng chỉ Let's Encrypt cho {$ERP_DOMAIN}
+#
+# TÊN MIỀN CON CỦA TỔ CHỨC (0180): on-demand TLS — Caddy chỉ xin chứng chỉ cho `<slug>.{$ERP_DOMAIN}` khi app trả 200 ở
+# /api/platform/domain-allowed (chỉ tổ chức ĐÃ XUẤT BẢN). Không có bản ghi DNS `*.{$ERP_DOMAIN}` thì khối dưới cùng không
+# bao giờ nhận request nào — cấu hình một lần cho cả nền tảng, không sửa gì cho từng khách.
+{
+	on_demand_tls {
+		ask http://app:3000/api/platform/domain-allowed
+	}
+}
+
 {$ERP_DOMAIN} {
 	encode gzip zstd
 
@@ -57,6 +67,34 @@
 				request>headers>X-Webhook-Secret delete
 				request>headers>X-Api-Key delete
 				request>headers>X-Cron-Secret delete
+			}
+		}
+	}
+}
+
+# ERP của tổ chức đã xuất bản: `<slug>.{$ERP_DOMAIN}` → cùng app; app đọc host để chọn tổ chức (lib/platform/host-org.ts).
+*.{$ERP_DOMAIN} {
+	tls {
+		on_demand
+	}
+	encode gzip zstd
+	reverse_proxy app:3000 {
+		flush_interval -1
+		transport http {
+			read_timeout 0
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+	}
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "([?&](?i:token|secret|access_token)=)[^&]*" "${1}REDACTED"
 			}
 		}
 	}

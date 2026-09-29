@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/self-service-journey.test.ts":
+    "ĐẶT PLATFORM_BASE_DOMAIN = «erp.test» (giá trị BỊA) để kiểm liên kết của tổ chức đã xuất bản đi theo tên miền con — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai miền gốc hay không.",
   "tests/launch-gates.test.ts":
     "CHÉP process.env (để tiến trình bash con còn PATH) rồi ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA sinh lúc chạy cho khối ghi .env được trích từ install-vps.sh — đầu vào của tình huống; không đọc giá trị sẵn có nào của máy, kết luận không rẽ nhánh theo môi trường.",
   "tests/onboarding.test.ts":

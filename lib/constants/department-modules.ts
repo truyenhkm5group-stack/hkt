@@ -109,6 +109,14 @@ export const NAV_MODULES = [
     permission: "orders:read",
     why: "Sổ đơn là kết quả của khâu chốt đơn; người sửa một đơn sai địa chỉ là người gọi được khách.",
   },
+  // AI bán hàng (0180): chatbot trả lời khách của CHÍNH tổ chức — cấu hình, khung thử, hội thoại đã chat.
+  {
+    href: "/ai/sales-chatbot",
+    label: "Chatbot bán hàng",
+    zone: "SALES",
+    permission: "ai_sales:view",
+    why: "Bot bán hàng là một người bán: người của phòng Kinh doanh đọc hội thoại bot đã chat, nhận ca bot chuyển sang và xem đơn bot đã lên.",
+  },
   {
     href: "/landing",
     label: "Đơn landing page",
@@ -483,6 +491,23 @@ export const NAV_MODULES = [
     zone: "SYSTEM",
     permission: "settings:manage",
     why: "Sổ connector: tích hợp của tổ chức nhà hiện CHỈ ĐỌC (không bí mật nào), kết nối do chính tổ chức khai thì mã hoá, kiểm tra thật rồi mới bật. Bí mật kết nối là việc của quản trị, không của phòng nào.",
+  },
+  // Hành trình tự phục vụ (0180): bàn thiết lập của CHỦ tổ chức — danh sách việc cần làm, xem trước, tên miền con, Xuất
+  // bản, mở ERP. Cùng khoá `settings:manage` với kết nối: xuất bản là quyết định cấu hình của cả tổ chức.
+  {
+    href: "/setup",
+    label: "Thiết lập & xuất bản",
+    zone: "SYSTEM",
+    permission: "settings:manage",
+    why: "Một chỗ cho người vừa tạo tổ chức: làm tới đâu, còn thiếu gì, xem trước ERP, chọn tên miền con, Xuất bản — không cần người vận hành nền tảng.",
+  },
+  // Thông báo nhóm (0180): cấu hình sẵn cho luật tự động «đơn chốt / sửa / huỷ ⇒ gửi nhóm chat» — cùng khoá với luật.
+  {
+    href: "/settings/notifications",
+    label: "Thông báo nhóm",
+    zone: "SYSTEM",
+    permission: "workflow:manage",
+    why: "Chọn kênh (Lark / Telegram / hộp thử), nơi nhận và mẫu tin cho đơn chốt / sửa / huỷ; gửi thử; xem sổ tin đã gửi. Lưu là tạo luật tự động THẬT qua bộ máy luật — không có đường gửi thứ hai.",
   },
   // Mẫu cấu hình (Phase 7): cùng khoá `metadata:manage` — cài một mẫu dựng field, form, danh sách, trang và luật cho CẢ
   // tổ chức; bước bật module / vai trò / luật còn đòi thêm quyền riêng của chúng (kế hoạch đánh dấu BỊ CHẶN nếu thiếu).

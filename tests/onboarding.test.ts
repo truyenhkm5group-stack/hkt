@@ -183,7 +183,8 @@ function testSource() {
   const home = readFileSync("app/(dashboard)/page.tsx", "utf8");
   assert.ok(home.includes("if (user.organization && !user.organization.isHome) return <GettingStartedHome"), "trang chủ chỉ rẽ nhánh cho tổ chức KHÔNG phải nhà");
   const hooks: [string, string][] = [
-    ["lib/actions/users.ts", 'checkEntitlement("users"'],
+    // Tạo người dùng (tạo hộ + nhận lời mời) đi qua MỘT đường ghi: lib/users/create-user.ts.
+    ["lib/users/create-user.ts", 'checkEntitlement("users"'],
     ["lib/platform-ui/page-admin.ts", 'checkEntitlement("pages"'],
     ["lib/platform-ui/workflow-admin.ts", 'checkEntitlement("workflows"'],
     ["lib/actions/metadata-records.ts", 'checkEntitlement("storageMb"'],

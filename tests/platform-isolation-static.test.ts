@@ -264,6 +264,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",
   "lib/ai-builder/providers.ts":
     "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials). Nhánh AI do NỀN TẢNG trả tiền (mặc định tắt) cũng dựng provider này với khoá TƯỜNG MINH `PLATFORM_AI_API_KEY` (lib/ai-usage/platform-ai.ts — từ chối khi trùng khoá của nhà), không bao giờ `ANTHROPIC_API_KEY`.",
+  "lib/messaging/providers.ts":
+    "Gửi tin nhóm (0180) bằng bí mật của CHÍNH tổ chức ngữ cảnh qua `openActiveConnection` (AAD gắn tổ chức) — không đọc biến môi trường nào; chỉ hai loại đích cố định (webhook Custom Bot của Lark · api.telegram.org), không theo chuyển hướng; hộp thử không gọi mạng.",
   "lib/connectors/testers.ts":
     "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường nào; đích chỉ là máy chủ Lark / api.telegram.org, không theo chuyển hướng.",
 };
@@ -439,6 +441,10 @@ const DUNG_PHIEN = /\b(?:getCurrentUser|requireUser|requirePermission|resolveCur
  * chức). Khoá kết thúc bằng `/` là cả thư mục.
  */
 const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
+  "app/api/platform/domain-allowed/route.ts": {
+    lyDo: "Caddy on-demand TLS hỏi (0180) — không phiên. KHÔNG gọi getDb(): chỉ tra sổ tổ chức ở mặt phẳng điều khiển (organizationForHostSlug — chỉ tổ chức ĐÃ XUẤT BẢN) và trả 200 / 404, không một dòng dữ liệu nghiệp vụ nào.",
+    cong: /organizationForHostSlug\(/,
+  },
   "app/api/webhooks/": {
     lyDo: "Webhook máy-gọi-máy: xác thực bằng bí mật trong URL / chữ ký của nhà cung cấp và phân giải tổ chức qua resolveWebhookOrganization (S11) — không có phiên người dùng để đi qua.",
     cong: /\bresolveWebhookOrganization\(/,
@@ -510,6 +516,9 @@ const ACTION_CONG_KHAI: Record<string, string> = {
   "lib/actions/onboarding.ts::checkAdminAction": "Bước 3 của /start: chỉ kiểm lược đồ (tên, email, độ dài mật khẩu) — hàm thuần, không đọc CSDL nào.",
   "lib/actions/onboarding.ts::previewSignupAction": "Xem trước của /start: lập kế hoạch cài trên một tổ chức TRẮNG tưởng tượng (freshOrgState) — không đọc dữ liệu của tổ chức nào có thật.",
   "lib/actions/onboarding.ts::createOrganizationAction": "Tạo tổ chức từ /start: cổng là cờ + mã mời + trần IP trong lõi; mã đã có chủ ⇒ «đã có người dùng», chỉ đúng chủ (cùng mã mời / người vận hành) mới chạy lại.",
+  "lib/actions/user-invites.ts::acceptUserInviteAction": "Nhận lời mời người dùng ở /join/<tổ chức>/<mã> — người được mời CHƯA có tài khoản. Lõi (lib/users/invites.ts) kiểm mã mời 256 bit (băm sha256, dùng một lần, điều kiện trong cùng giao dịch tạo tài khoản) trong withOrganization(mã trong đường dẫn) tường minh, chặn dò theo IP, mọi lý do sai ra một câu chung.",
+  "lib/actions/public-chat.ts::startPublicChatAction": "Trang chat CÔNG KHAI của chatbot bán hàng (0180) — khách của shop không có tài khoản. Tổ chức lấy từ HOST (header máy chủ x-erp-host-slug → CHỈ tổ chức đã xuất bản), mọi lượt đọc / ghi trong withOrganization(mã đó) tường minh; module «AI bán hàng» + bot đang bật mới mở; không nhận mã tổ chức nào từ client.",
+  "lib/actions/public-chat.ts::sendPublicChatAction": "Như startPublicChatAction; hội thoại khoá theo băm của cookie khách truy cập (httpOnly) — đoán được id hội thoại cũng không gõ tiếp hội thoại của người khác; trần tin theo khách / ngày / hội thoại ở lib/sales-chatbot/engine.ts.",
   "lib/actions/refresh.ts::refreshReportData": "Chỉ xoá đệm của tiến trình (clearMemo) khi có phiên — không đọc / ghi dòng nào; không phiên ⇒ trả lỗi, không làm gì.",
 };
 
@@ -606,6 +615,7 @@ const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | 
   "lib/actions/onboarding.ts::retrySetupAction": { loai: "VAN_HANH", lyDo: "Người vận hành chạy lại việc dựng một tổ chức SETUP_FAILED — requireOperator (platform:operate + tổ chức nhà)." },
   "lib/actions/onboarding.ts::checkOrgAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức ĐỀ XUẤT cho tổ chức sắp tạo — chỉ kiểm trùng ở sổ tổ chức, không mở CSDL nào." },
   "lib/actions/onboarding.ts::previewSignupAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức đi cùng mã mời để tra mã mời đã gắn đúng tổ chức — xem trước chạy trên tổ chức TRẮNG tưởng tượng." },
+  "lib/actions/user-invites.ts::acceptUserInviteAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức trong liên kết mời: tài khoản được tạo TRONG tổ chức đó, và chỉ khi mã mời (băm) khớp một lời mời còn hạn trong CSDL của chính nó — mã của tổ chức A đem sang đường dẫn B không khớp gì." },
   "lib/actions/auth.ts::loginAction": { loai: "CONG_KHAI", lyDo: "Ô «Mã tổ chức» của màn đăng nhập: người dùng chọn tổ chức để đăng nhập VÀO — mật khẩu kiểm trong CSDL của chính tổ chức đó." },
 };
 

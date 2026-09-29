@@ -231,6 +231,18 @@ export const PERMISSION_GROUPS = [
       { key: "records:write", label: "Ứng dụng tuỳ biến: tạo & sửa bản ghi", hint: "Tạo, sửa, xoá (lưu vết) bản ghi của đối tượng tự tạo. Định nghĩa đối tượng / field vẫn cần «Cấu hình dữ liệu»." },
     ],
   },
+  /*
+    AI BÁN HÀNG (0180 · lib/sales-chatbot/*). `view` = đọc hội thoại khách đã chat với bot; `manage` = cấu hình bot,
+    chọn khoá AI, chạy khung thử, xuất bản. Bot tự tạo khách / đơn thay người ⇒ `manage` là quyền cấu hình cấp cao:
+    loại khỏi mẫu MANAGER (mẫu dựng bằng phép trừ), Quản trị cấp tay cho người cần.
+  */
+  {
+    module: "AI bán hàng",
+    items: [
+      { key: "ai_sales:view", label: "AI bán hàng: xem hội thoại", hint: "Đọc hội thoại khách đã chat với chatbot bán hàng và đơn bot đã lên." },
+      { key: "ai_sales:manage", label: "AI bán hàng: cấu hình & xuất bản chatbot", hint: "Chọn khoá AI, giọng điệu, giờ làm việc, chính sách chuyển người / chốt đơn, công cụ bot được dùng; chạy khung thử; bật trang chat công khai." },
+    ],
+  },
 ] as const;
 
 /**
@@ -318,7 +330,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

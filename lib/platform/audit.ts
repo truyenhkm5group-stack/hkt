@@ -18,7 +18,10 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "PILOT_UAT"
   | "CONNECTION_DISABLE"
   // Người vận hành đổi gói của một tổ chức sau lúc tạo (`lib/platform/org-plan.ts`).
-  | "ORG_PLAN_SET";
+  | "ORG_PLAN_SET"
+  // Hành trình tự phục vụ (0180, `lib/platform/publish.ts`): khách chọn tên miền con, khách bấm Xuất bản.
+  | "ORG_DOMAIN_SET"
+  | "ORG_PUBLISH";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

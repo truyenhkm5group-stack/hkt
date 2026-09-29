@@ -66,6 +66,9 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   // thanh đầu của người ít quyền nhất. Không nhận id / mã tổ chức: chỉ trả logo của CHÍNH tổ chức trong phiên.
   "app/api/branding/logo/route.ts": "chỉ cần phiên: logo của CHÍNH tổ chức trong phiên (thanh đầu của mọi người), không nhận id hay mã tổ chức",
   "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
+  // 0180 · Caddy on-demand TLS hỏi trước khi xin chứng chỉ cho `<slug>.<miền gốc>`: KHÔNG có phiên (Caddy gọi), chỉ trả
+  // "ok"/"no" cho đúng tổ chức ĐÃ XUẤT BẢN — không đọc / trả dữ liệu nghiệp vụ nào (tests/self-service-journey.test.ts).
+  "app/api/platform/domain-allowed/route.ts": "công khai cho Caddy on-demand TLS: chỉ trả 200/404 cho tên miền con của tổ chức đã xuất bản, không dữ liệu nào",
 };
 
 export function testAccessControl() {

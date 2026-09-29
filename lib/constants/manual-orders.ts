@@ -157,3 +157,10 @@ export const MANUAL_DELIVERY_FROM_STAGES = ["CONFIRMED"] as const satisfies read
 export function canConfirmManualDelivery(stage: string): boolean {
   return (MANUAL_DELIVERY_FROM_STAGES as readonly string[]).includes(stage);
 }
+
+/**
+ * Phần của một đơn ĐÃ CHỐT mà nhóm vận hành phải biết khi nó đổi (0180) — tên đi trong payload `order.updated` và
+ * trong tin «cập nhật đơn». Ghi chú / kênh bán không nằm đây: đổi chúng không đổi việc đóng gói / giao / thu.
+ */
+export const ORDER_MATERIAL_CHANGE_LABEL = { lines: "Hàng / số lượng / giá", shipping_address: "Người nhận / địa chỉ", amount_due: "Tiền thu (COD)", customer: "Khách hàng", stage: "Trạng thái" } as const;
+export type OrderMaterialChange = keyof typeof ORDER_MATERIAL_CHANGE_LABEL;

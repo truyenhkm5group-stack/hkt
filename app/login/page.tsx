@@ -5,6 +5,7 @@ import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { getSession } from "@/lib/auth/session";
 import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
+import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-org";
 import { listOrganizations } from "@/lib/platform/organizations";
 
 export const dynamic = "force-dynamic";
@@ -30,13 +31,28 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     (hôm nay) màn đăng nhập y hệt trước — không ai phải học thêm một ô không dùng tới. Chỉ đếm, không
     liệt kê: in danh sách tổ chức ra trang công khai là tự dâng sổ khách hàng của nền tảng.
   */
-  const showOrgField = (await listOrganizations()).filter((o) => o.status === "ACTIVE").length > 1;
+  /*
+    TÊN MIỀN CON (0180): host `<slug>.<miền gốc>` GẮN CỨNG tổ chức đã xuất bản — không ô «Mã tổ chức», tiêu đề mang tên
+    tổ chức. Tên miền con không trỏ tới ERP nào ⇒ nói thẳng, không hiện form (đăng nhập ở đây không có đích nào).
+  */
+  const host = await hostOrganization();
+  if (host.slug && !host.org) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="max-w-md space-y-2 text-center">
+          <h1 className="text-xl font-semibold">Không tìm thấy ERP</h1>
+          <p className="text-sm text-muted-foreground">{HOST_NOT_FOUND_MESSAGE}</p>
+        </div>
+      </div>
+    );
+  }
+  const showOrgField = host.org ? false : (await listOrganizations()).filter((o) => o.status === "ACTIVE").length > 1;
   /*
     Trang này CÔNG KHAI và dùng chung cho mọi tổ chức. Khi nền tảng đã có tổ chức thứ hai, trạng thái cấu hình Pancake /
     Viettel Post là thông tin vận hành của RIÊNG tổ chức nhà (người lạ đọc được nhà đang nối gì), và gợi ý tên biến `.env`
     là chỉ dẫn cho người cài máy chủ, không phải cho khách. Một tổ chức (hôm nay) ⇒ trang y hệt trước.
   */
-  const homeOnly = !showOrgField;
+  const homeOnly = !showOrgField && !host.org;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
@@ -48,12 +64,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <BrandGlyph className="h-4" />
           </span>
           <div>
-            <BrandWordmark className="block text-xl text-brand-bright" />
+            {host.org ? <span className="block text-xl font-bold text-brand-bright">{host.org.name}</span> : <BrandWordmark className="block text-xl text-brand-bright" />}
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/55">Hệ thống quản trị bán hàng</p>
           </div>
         </div>
         <div className="relative max-w-md space-y-6">
-          <h1 className="text-3xl font-bold leading-tight">Đơn hàng, vận đơn, COD và lợi nhuận — trong một màn hình.</h1>
+          <h1 className="text-3xl font-bold leading-tight">{host.org ? "Đơn hàng, khách, kho và chatbot bán hàng — trong một màn hình." : "Đơn hàng, vận đơn, COD và lợi nhuận — trong một màn hình."}</h1>
           {homeOnly ? (
             <>
               <p className="text-sm leading-6 text-sidebar-foreground/70">
@@ -72,10 +88,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </>
           ) : null}
         </div>
-        <p className="relative text-xs text-sidebar-foreground/50">© {new Date().getFullYear()} VNXcommerce · Nội bộ</p>
+        <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : `© ${new Date().getFullYear()} VNXcommerce · Nội bộ`}</p>
       </div>
       <div className="flex items-center justify-center p-6">
-        <LoginForm next={params.next} reason={params.reason} showOrgField={showOrgField} showSetupHint={homeOnly} />
+        <LoginForm next={params.next} reason={params.reason} showOrgField={showOrgField} showSetupHint={homeOnly} orgName={host.org?.name ?? null} />
       </div>
     </div>
   );

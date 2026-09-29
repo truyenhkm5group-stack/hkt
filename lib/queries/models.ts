@@ -570,6 +570,11 @@ export const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDi
   */
   approval_request: "LIFECYCLE",
   /*
+    0180: đơn tạo tay / do chatbot lên được chốt / sửa / huỷ — `model_id = NULL` nên không hiện trên dòng thời gian mẫu nào;
+    khai tường minh cùng lý do với `approval_request` (đơn là miền bán hàng, không phải sản xuất hay kho).
+  */
+  order: "LIFECYCLE",
+  /*
     Phase 3: trạng thái nghiệp vụ tự khai (field custom kiểu status) đổi giá trị. `model_id = NULL` nên không
     hiện trên dòng thời gian mẫu nào — khai tường minh cùng lý do với `approval_request`.
   */

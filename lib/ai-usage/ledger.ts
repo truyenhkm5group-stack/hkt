@@ -73,14 +73,22 @@ const t = schema.platformAiUsage;
 /** Lượt BỊ CHẶN không phải một lượt dùng: không gọi model, không tốn tiền. */
 const used = ne(t.status, "BLOCKED_QUOTA");
 
-/** Mức dùng của ĐÚNG một tổ chức × ĐÚNG một nguồn — đầu vào của `evaluateAiQuota`. Luôn đọc TƯƠI (không đệm). */
+/**
+ * Mức dùng của ĐÚNG một tổ chức × ĐÚNG một nguồn — đầu vào của `evaluateAiQuota`. Luôn đọc TƯƠI (không đệm).
+ *
+ * TRẦN LƯỢT (hôm nay / tháng) đếm lượt SOẠN — AI Builder và Copilot, mỗi lượt là một người bấm. Lượt của chatbot bán
+ * hàng (`sales_chatbot`, 0180) là mỗi câu KHÁCH của shop gõ: đếm chung vào trần 10 lượt/ngày của gói `trial` là để một
+ * shop mất chatbot sau câu thứ mười của khách đầu tiên. Chatbot có trần kỹ thuật riêng (`SALES_CHATBOT_LIMITS`). TRẦN
+ * TIỀN (USD tháng) thì đếm MỌI tính năng — đó là thứ bảo vệ hoá đơn của khách, bất kể ai gọi model.
+ */
 export async function sourceUsage(orgCode: string, source: AiBillingSource, now: Date = new Date()): Promise<AiSourceUsage> {
   const pdb = await getPlatformDb();
   const day = dauNgayVN(now);
+  const counted = sql`${t.feature} <> 'sales_chatbot'`;
   const [r] = await pdb
     .select({
-      today: sql<number>`count(*) filter (where ${t.at} >= ${day.toISOString()}::timestamptz)`,
-      month: sql<number>`count(*)`,
+      today: sql<number>`count(*) filter (where ${t.at} >= ${day.toISOString()}::timestamptz and ${counted})`,
+      month: sql<number>`count(*) filter (where ${counted})`,
       cost: sql<string | null>`sum(${t.costUsd})`,
       unknown: sql<number>`count(*) filter (where ${t.costUsd} is null)`,
     })

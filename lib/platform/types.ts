@@ -23,6 +23,10 @@ export type Organization = {
   /** Chỗ cho gói dịch vụ — Phase 1 không có luật nào đọc. */
   plan: string | null;
   templateKey: string | null;
+  /** Tên miền con khách chọn (0180) — `null` = chưa chọn. Chỉ tổ chức `PUBLISHED` mới được định tuyến theo nó. */
+  domainSlug?: string | null;
+  /** `null` = không theo dõi (nhà / tổ chức có từ trước 0180) · `DRAFT` · `PUBLISHED`. */
+  publishState?: "DRAFT" | "PUBLISHED" | null;
 };
 
 /**

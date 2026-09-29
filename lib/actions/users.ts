@@ -8,9 +8,9 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
 import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
 import { applySessionRevocation } from "@/lib/auth/session-revoke";
-import { checkEntitlement } from "@/lib/entitlements/check";
 import { setSettingJson } from "@/lib/settings";
-import { changePasswordSchema, createUserSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
+import { createUserCore } from "@/lib/users/create-user";
+import { changePasswordSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
 
 export type ActionResult = { ok: true; id?: string; signedOut?: boolean } | { error: string };
 
@@ -30,23 +30,12 @@ async function otherActiveAdmins(exceptId: string) {
 
 export async function createUser(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user, "users:manage")) return { error: "Không có quyền" };
-  const parsed = createUserSchema.safeParse(input);
-  if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const data = parsed.data;
-  const db = await getDb();
-  const existing = await db.query.users.findFirst({ where: eq(schema.users.email, data.email), columns: { id: true } });
-  if (existing) return { error: "Email này đã được sử dụng" };
-  // Hạn mức gói (Phase 10 · §5): tổ chức nhà không giới hạn và không đếm gì.
-  const ent = await checkEntitlement("users", 1);
-  if (!ent.ok) return { error: ent.error };
-  const [row] = await db
-    .insert(schema.users)
-    .values({ email: data.email, name: data.name, role: data.role, passwordHash: await hashPassword(data.password), active: true })
-    .returning({ id: schema.users.id });
-  await audit({ userId: user.id, userEmail: user.email, action: "USER_CREATE", entity: "USER", entityId: row.id, detail: { email: data.email, name: data.name, role: data.role } });
+  // Đường ghi DUY NHẤT tạo tài khoản (lib/users/create-user.ts): quyền, lược đồ, email trùng, hạn mức gói (kể cả ghế đã
+  // hứa cho lời mời còn hạn), băm mật khẩu, nhật ký — dùng chung với cửa nhận lời mời.
+  const result = await createUserCore(user, input);
+  if ("error" in result) return result;
   revalidatePath("/settings/users");
-  return { ok: true, id: row.id };
+  return { ok: true, id: result.id };
 }
 
 export async function updateUser(input: unknown): Promise<ActionResult> {

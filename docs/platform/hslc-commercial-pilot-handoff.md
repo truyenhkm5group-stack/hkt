@@ -13,6 +13,33 @@
 
 ---
 
+## CẬP NHẬT 29/09/2026 — hành trình tự phục vụ (0180, `docs/platform/self-service-journey.md`)
+
+Các mục 2–18 và bảng gap bên dưới là ẢNH CHỤP TRƯỚC đợt này. Sau đợt này:
+
+| Step | Cách làm hôm nay | Khách tự làm qua UI? | Còn việc tay? |
+|---|---|---|---|
+| Register | `/start` + mã mời (chế độ «Cần mã mời» bật ở `/platform`, không deploy) | Có | Người vận hành bật chế độ + phát mã (UI) |
+| Create Organization | Bước cuối `/start` — tổ chức sinh ra ở BẢN NHÁP | Có | Không |
+| Food Commerce Template | Loại hình «Thực phẩm đóng gói» → mẫu `food-commerce` | Có | Không |
+| Choose Modules | Bước Module của `/start`, `/settings/modules`; module mới «AI bán hàng» | Có | Không |
+| Import Products | `/products/import` — CSV / XLSX, xem trước, ghép cột, chạy thử, nhập, tồn đầu = một phiếu nhập | Có | Không |
+| Configure AI Chatbot | `/ai/sales-chatbot` — khoá BYOK của tổ chức, giọng, giờ, chuyển người, chốt đơn, công cụ, khung THỬ | Có | Không — khoá AI của chính shop (`PLATFORM_SECRETS_KEY` đã có trên production) |
+| Group Notification | `/settings/connections` (Lark · Telegram · Hộp thử) + `/settings/notifications` (đơn chốt / sửa / huỷ ⇒ luật `send_message`), gửi thử | Có | Không — khai webhook / bot của nhóm; hộp thử cho lúc chưa có nhóm |
+| Preview | ERP nháp chính là bản xem trước + `/setup` (menu, module, trang, form, thương hiệu) | Có | Không |
+| Subdomain | `/setup` → chọn tên (dạng · dành riêng · trùng) | Có | MỘT lần cho nền tảng: DNS `*.<miền>` + Variable `PLATFORM_BASE_DOMAIN` (Caddy on-demand TLS đã có trong `deploy/Caddyfile`) |
+| Publish | `/setup` → kiểm trước → XUẤT BẢN (không git / build / deploy) | Có | Không |
+| Open ERP | «MỞ ERP CỦA TÔI» → `https://<slug>.<miền>/login` (không ô mã tổ chức, không chữ VNX) | Có | Như Subdomain |
+| Invite User | `/settings/users` → «Mời người dùng» → liên kết `/join/…` một lần, 7 ngày | Có | Gửi liên kết cho nhân viên qua kênh của shop |
+
+G3 (nhóm thông báo), G2 (nhập CSV), G1 (mẫu thực phẩm, không HSD / lô), G6 (chatbot theo tổ chức — kênh web của chính tổ chức;
+Messenger / Zalo theo tổ chức vẫn CHƯA có), G7 (tên miền con), G9 (mời qua liên kết), G11 (xuất bản) đã có đường UI. G4 (luật của tổ chức khách tự chạy) đã đóng bởi G-SCHED (#405); luật nghe sự kiện ĐƠN còn chạy ngay sau lượt ghi đơn. Còn
+mở: G5 (doanh thu
+đơn không qua ĐVVC — G-ORDER), G8 (khách tự nâng gói). E2E tài khoản mới: `self-service-journey.md` mục 8.
+
+Đo `https://erp.vnxcommerce.com/api/health` lúc 17:55Z 29/09/2026: `secretsKey: "ready"` — `PLATFORM_SECRETS_KEY` ĐÃ
+đặt trên production, HUMAN GATE #1 (mục 13, G-A, M1 bên dưới) đã đóng; các mục đó là ảnh chụp trước lúc đặt khoá.
+
 ## Tóm tắt readiness
 
 Nền tảng đạt **READY FOR CONTROLLED PILOT** (`pilot-readiness.md`): người vận hành tạo tổ chức hộ khách, khách tự cấu hình

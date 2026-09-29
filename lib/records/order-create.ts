@@ -23,7 +23,21 @@
  * "Đã xác nhận" ⇒ stage `DELIVERED`; từ đó `ORDER_OUTCOME` = `DELIVERED` và hàng rời kho (`ORDER_LEFT_WAREHOUSE`) — cả hai
  * đọc DÒNG PHIẾU, không đọc stage. Tiền KHÔNG đổi: không ghi thanh toán, không đổi COD nào. Ghi nhầm ⇒
  * `voidManualDeliveryCore` (bắt buộc lý do, không xoá cứng) ⇒ đơn về "Đã xác nhận". Đơn đã giao không sửa / huỷ được.
+ *
+ * ─── SỰ KIỆN ĐƠN (0180 · hành trình tự phục vụ) ───
+ * Đơn CHỐT («Đã xác nhận»), đơn đã chốt bị SỬA ở phần vận hành phải biết, và đơn bị HUỶ phát `order.confirmed` ·
+ * `order.updated` · `order.cancelled` TRONG CÙNG giao dịch với lượt ghi đơn (không bao giờ có đơn mà thiếu sự kiện). Ngay
+ * sau khi giao dịch xong, bộ máy luật chạy MỘT lượt cho tổ chức hiện hành (`runWorkflows`, đúng hàm của job và của nút
+ * trên trang — không engine thứ hai) để luật «báo nhóm vận hành» gửi tin khi đơn vừa chốt, không đợi lịch. Lỗi của lượt
+ * chạy luật KHÔNG làm hỏng lượt ghi đơn đã xong: sự kiện nằm trong sổ, lượt chạy sau xét tiếp từ con trỏ.
+ *
+ * ─── AI GHI ĐƠN ───
+ * Người (phiên đăng nhập, cần `orders:write`) hoặc MÁY — chatbot bán hàng của tổ chức (`createOrderAsAgent` …). Máy
+ * không giả làm người (luật 36): nhật ký và sự kiện mang tác nhân `AGENT`, không mang `users.id` nào; lời khai gốc
+ * `raw.createdBy = null`, `raw.agent` nói máy nào. Cổng module / nguồn đồng bộ áp y hệt; quyền của máy do lớp gọi
+ * (cấu hình chatbot, công cụ được bật) quyết.
  */
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -46,25 +60,43 @@ import {
   type ManualOrderRaw,
   type ManualOrderStage,
   type ManualOrderVariantOption,
+  type OrderMaterialChange,
 } from "@/lib/constants/manual-orders";
 import { objectDef } from "@/lib/constants/object-registry";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
+import { emitDomainEvent } from "@/lib/events/emit";
 import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
+import { runWorkflows } from "@/lib/workflow/engine";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
-/** Người này có được tạo / sửa đơn tay ở tổ chức hiện hành không — trang dùng để hiện nút / trả 404, action dùng để chặn. */
-export async function manualOrderGate(user: SessionUser): Promise<OrderGate> {
+/** Cổng CỦA TỔ CHỨC (không hỏi người): module Đơn hàng bật + tổ chức không đồng bộ đơn. Người và máy cùng đi qua. */
+export async function manualOrderOrgGate(): Promise<OrderGate> {
   const def = objectDef("order");
   if (!def || !def.capabilities.create) return { allowed: false, code: "NOT_SUPPORTED", reason: "Đơn hàng không có đường tạo tay." };
   if (!(await canUseModule(def.module))) return { allowed: false, code: "MODULE_DISABLED", reason: "Module Đơn hàng chưa bật cho tổ chức này." };
   if (await orgHasSyncedSource("orders")) {
     return { allowed: false, code: "NOT_SUPPORTED", reason: "Tổ chức đang đồng bộ đơn từ Pancake: đơn do đồng bộ tạo, không tạo / sửa tay (tránh hai bản cho cùng một lần mua)." };
   }
+  return { allowed: true };
+}
+
+/** Người này có được tạo / sửa đơn tay ở tổ chức hiện hành không — trang dùng để hiện nút / trả 404, action dùng để chặn. */
+export async function manualOrderGate(user: SessionUser): Promise<OrderGate> {
+  const org = await manualOrderOrgGate();
+  if (!org.allowed) return org;
   if (!can(user, "orders:write")) return { allowed: false, code: "FORBIDDEN", reason: "Bạn không có quyền tạo / sửa đơn hàng (orders:write)." };
   return { allowed: true };
 }
+
+/** Máy ghi đơn thay người — chatbot bán hàng của tổ chức. `source` đi vào nhật ký / sự kiện. */
+export type OrderAgent = { name: string; source: string };
+
+/** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
+type Writer = { userId: string | null; email: string; name: string; actorKind: "USER" | "AGENT"; source: string; agent: string | null };
+const userWriter = (u: SessionUser): Writer => ({ userId: u.id, email: u.email, name: u.name, actorKind: "USER", source: "lib/records/order-create.ts", agent: null });
+const agentWriter = (a: OrderAgent): Writer => ({ userId: null, email: `agent:${a.source}`, name: a.name, actorKind: "AGENT", source: a.source, agent: a.name });
 
 const money = (label: string) =>
   z
@@ -89,6 +121,19 @@ const orderInputZ = z
     shippingFee: money("phí ship").default(0),
     note: z.string().max(MANUAL_ORDER_LIMITS.noteMax).default(""),
     channel: z.string().trim().max(MANUAL_ORDER_LIMITS.channelMax).default(""),
+    /**
+     * Người nhận / địa chỉ GIAO của RIÊNG đơn này (0180) — khách đặt hộ người khác, hay giao tới chỗ làm. Bỏ trống ⇒ lấy
+     * của khách như trước. Chỉ ô đã điền mới đè; ô trống lấy của khách.
+     */
+    recipient: z
+      .object({
+        name: z.string().trim().max(120).default(""),
+        phone: z.string().trim().max(30).default(""),
+        address: z.string().trim().max(300).default(""),
+        province: z.string().trim().max(120).default(""),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ManualOrderInput = z.input<typeof orderInputZ>;
@@ -97,8 +142,11 @@ function zodErrors(error: z.ZodError): FieldError[] {
   return error.issues.map((i) => ({ field: i.path.map(String).join(".") || "_", message: i.message }));
 }
 
+type Recipient = { name: string; phone: string; address: string; province: string };
 type Prepared = {
   customer: { id: string; name: string; phone: string | null; address: string; province: string };
+  /** Người nhận của đơn — của khách, đè bởi ô `recipient` đã điền. */
+  recipient: Recipient;
   stage: ManualOrderStage;
   note: string;
   channel: string;
@@ -146,7 +194,15 @@ async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | M
     else if (found.removed) errors.push({ field: `lines.${i}.variantId`, message: `Mẫu mã ${found.sku || found.productName} đã gỡ — không nhận đơn mới.` });
   });
   if (errors.length || !customer) return fail("INVALID", errors);
-  return { ok: true, p: { customer, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants } };
+  const r = v.recipient;
+  const recipient: Recipient = {
+    name: r?.name || customer.name,
+    phone: r?.phone || (customer.phone ?? ""),
+    address: r?.address || customer.address,
+    // Địa chỉ giao khác mà không nói tỉnh ⇒ KHÔNG mượn tỉnh của địa chỉ khách (hai địa chỉ, hai tỉnh có thể khác nhau).
+    province: r?.province || (r?.address ? "" : customer.province),
+  };
+  return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants } };
 }
 
 /** Chữ mô tả mẫu mã trên dòng đơn — cùng dạng "màu · size" mà dòng Pancake mang. */
@@ -154,9 +210,9 @@ function variationText(v: { detail: string; color: string; size: string }): stri
   return v.detail.trim() || [v.color, v.size].filter((x) => x.trim()).join(" · ");
 }
 
-function orderColumns(p: Prepared, user: SessionUser) {
+function orderColumns(p: Prepared, w: Writer) {
   const t = p.totals;
-  const raw: ManualOrderRaw = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: user.id };
+  const raw: ManualOrderRaw & { agent?: string } = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: w.userId, ...(w.agent ? { agent: w.agent } : {}) };
   return {
     status: MANUAL_ORDER_STATUS_CODE[p.stage],
     statusName: manualOrderStageLabel(p.stage),
@@ -164,11 +220,11 @@ function orderColumns(p: Prepared, user: SessionUser) {
     customerId: p.customer.id,
     billFullName: p.customer.name,
     billPhone: p.customer.phone ?? "",
-    shipFullName: p.customer.name,
-    shipPhone: p.customer.phone ?? "",
-    shipAddress: p.customer.address,
-    shipFullAddress: [p.customer.address, p.customer.province].filter((x) => x.trim()).join(", "),
-    shipProvince: p.customer.province,
+    shipFullName: p.recipient.name,
+    shipPhone: p.recipient.phone,
+    shipAddress: p.recipient.address,
+    shipFullAddress: [p.recipient.address, p.recipient.province].filter((x) => x.trim()).join(", "),
+    shipProvince: p.recipient.province,
     totalPrice: t.totalPrice,
     totalDiscount: t.totalDiscount,
     totalPriceAfterDiscount: t.totalPriceAfterDiscount,
@@ -177,7 +233,7 @@ function orderColumns(p: Prepared, user: SessionUser) {
     // để in dòng «Phí ship thu của khách» — thiếu nó thì 30.000 ₫ khách trả biến mất khỏi trang chi tiết.
     customerPayFee: t.shippingFee > 0,
     ...(p.channel ? { source: p.channel } : {}),
-    creatorName: user.name,
+    creatorName: w.name,
     note: p.note,
     itemsCount: t.lines.length,
     totalQuantity: t.totalQuantity,
@@ -220,7 +276,55 @@ function snapshotOf(p: Prepared) {
     totalPriceAfterDiscount: p.totals.totalPriceAfterDiscount,
     channel: p.channel || null,
     note: p.note,
+    recipient: p.recipient,
   };
+}
+
+/**
+ * Phần của đơn mà NHÓM VẬN HÀNH phải biết khi nó đổi — hàm THUẦN. Đổi ghi chú / kênh bán thì không báo (không đổi việc
+ * đóng gói / giao / thu); đổi dòng hàng, người nhận, tiền phải thu, khách, hay rút lại lượt chốt thì báo.
+ */
+export type OrderMaterial = {
+  customerId: string;
+  stage: string;
+  lines: { variantId: string; quantity: number; unitPrice: number; discount: number }[];
+  recipient: Recipient;
+  /** Tiền khách phải trả khi nhận = tiền hàng sau chiết khấu + phí ship (COD của đơn tay). */
+  amountDue: number;
+};
+
+export function materialChanges(before: OrderMaterial, after: OrderMaterial): OrderMaterialChange[] {
+  const out: OrderMaterialChange[] = [];
+  const norm = (l: OrderMaterial["lines"]) => JSON.stringify(l.map((x) => [x.variantId, x.quantity, x.unitPrice, x.discount]).sort());
+  if (norm(before.lines) !== norm(after.lines)) out.push("lines");
+  const rc = (r: Recipient) => [r.name, r.phone, r.address, r.province].map((x) => x.trim()).join("|");
+  if (rc(before.recipient) !== rc(after.recipient)) out.push("shipping_address");
+  if (before.amountDue !== after.amountDue) out.push("amount_due");
+  if (before.customerId !== after.customerId) out.push("customer");
+  if (before.stage !== after.stage) out.push("stage");
+  return out;
+}
+
+function materialOf(p: Prepared): OrderMaterial {
+  return { customerId: p.customer.id, stage: p.stage, lines: snapshotOf(p).lines, recipient: p.recipient, amountDue: p.totals.totalPriceAfterDiscount + p.totals.shippingFee };
+}
+
+type Tx = Parameters<Parameters<Awaited<ReturnType<typeof getDb>>["transaction"]>[0]>[0];
+
+async function emitOrderEvent(tx: Tx, w: Writer, name: "order.confirmed" | "order.updated" | "order.cancelled", orderId: string, dedupeKey: string, payload: Record<string, unknown>) {
+  await emitDomainEvent(tx, { name, subjectType: "order", subjectId: orderId, payload: { orderId, ...payload }, actorKind: w.actorKind, actorId: w.userId, source: w.source, dedupeKey });
+}
+
+/**
+ * Một lượt bộ máy luật cho tổ chức hiện hành, NGAY sau lượt ghi đơn — để luật nghe `order.*` chạy không đợi lịch. Không
+ * ném: đơn đã ghi xong; sự kiện nằm trong sổ, lượt sau xét tiếp từ con trỏ.
+ */
+async function kickWorkflows() {
+  try {
+    await runWorkflows();
+  } catch (error) {
+    console.error("[order-create] lượt chạy luật sau khi ghi đơn hỏng — sự kiện vẫn nằm trong sổ, lượt sau xét tiếp:", error instanceof Error ? error.message : error);
+  }
 }
 
 export type ManualOrderResult = { ok: true; id: string } | MetaFailure;
@@ -228,6 +332,17 @@ export type ManualOrderResult = { ok: true; id: string } | MetaFailure;
 export async function createManualOrderCore(user: SessionUser, rawInput: unknown): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
+  return createOrder(userWriter(user), rawInput);
+}
+
+/** Máy (chatbot bán hàng) tạo đơn — cổng tổ chức y hệt, quyền do lớp gọi quyết. */
+export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  return createOrder(agentWriter(agent), rawInput);
+}
+
+async function createOrder(w: Writer, rawInput: unknown): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
   const p = prep.p;
@@ -235,11 +350,13 @@ export async function createManualOrderCore(user: SessionUser, rawInput: unknown
   const now = new Date();
   const db = await getDb();
   await db.transaction(async (tx) => {
-    await tx.insert(schema.orders).values({ id, ...orderColumns(p, user), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
+    await tx.insert(schema.orders).values({ id, ...orderColumns(p, w), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
-    await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: user.name, updatedAt: now });
+    await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
+    if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });
   });
-  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
+  await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: w.agent ? `Tạo đơn bởi ${w.agent}` : "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
+  if (p.stage === "CONFIRMED") await kickWorkflows();
   return { ok: true, id };
 }
 
@@ -266,6 +383,21 @@ async function itemsSnapshot(orderId: string) {
 export async function updateManualOrderCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
+  return updateOrder(userWriter(user), orderId, rawInput);
+}
+
+export async function updateOrderAsAgent(agent: OrderAgent, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  return updateOrder(agentWriter(agent), orderId, rawInput);
+}
+
+/** Người nhận đang lưu trên dòng đơn — để so với bản mới. */
+function storedRecipient(row: typeof schema.orders.$inferSelect): Recipient {
+  return { name: row.shipFullName ?? "", phone: row.shipPhone ?? "", address: row.shipAddress ?? "", province: row.shipProvince ?? "" };
+}
+
+async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
@@ -276,25 +408,47 @@ export async function updateManualOrderCore(user: SessionUser, orderId: unknown,
   const now = new Date();
   const db = await getDb();
   const stageChanged = row.stage !== p.stage;
+  const before: OrderMaterial = {
+    customerId: row.customerId ?? "",
+    stage: row.stage,
+    lines: beforeItems.map((i) => ({ variantId: i.variantId ?? "", quantity: i.quantity, unitPrice: i.unitPrice, discount: i.discount })),
+    recipient: storedRecipient(row),
+    amountDue: row.totalPriceAfterDiscount + row.shippingFee,
+  };
+  const after = materialOf(p);
+  const wasConfirmed = row.stage === "CONFIRMED";
+  const changes = materialChanges(before, after);
+  // Chốt LẦN ĐẦU qua lượt sửa ⇒ `confirmed`. Đơn ĐÃ chốt đổi phần vận hành phải biết ⇒ `updated`, khoá theo mốc sửa TRƯỚC
+  // đó + bản mới: gửi lại đúng lượt sửa này thì bản mới = bản đang lưu ⇒ không đổi gì ⇒ không sự kiện; A→B→A→B thì mỗi
+  // lượt một mốc khác ⇒ mỗi lượt một sự kiện.
+  const event: { name: "order.confirmed" | "order.updated"; key: string } | null =
+    !wasConfirmed && p.stage === "CONFIRMED"
+      ? { name: "order.confirmed", key: `order.confirmed:${row.id}` }
+      : wasConfirmed && changes.length > 0
+        ? { name: "order.updated", key: `order.updated:${row.id}:${createHash("sha256").update(`${row.updatedAt.toISOString()}|${JSON.stringify(after)}`).digest("hex").slice(0, 24)}` }
+        : null;
   await db.transaction(async (tx) => {
     await tx
       .update(schema.orders)
-      .set({ ...orderColumns(p, user), creatorName: row.creatorName, raw: { ...(manualOrderRaw(row.raw) as ManualOrderRaw), orderDiscount: p.orderDiscount }, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })
+      .set({ ...orderColumns(p, w), creatorName: row.creatorName, raw: { ...(row.raw as Record<string, unknown>), ...(manualOrderRaw(row.raw) as ManualOrderRaw), orderDiscount: p.orderDiscount }, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })
       .where(and(eq(schema.orders.id, row.id)));
     await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, row.id));
     await tx.insert(schema.orderItems).values(itemRows(row.id, p));
-    if (stageChanged) await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: row.status, editorName: user.name, updatedAt: now });
+    if (stageChanged) await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: row.status, editorName: w.name, updatedAt: now });
+    if (event) await emitOrderEvent(tx, w, event.name, row.id, event.key, { stage: p.stage, wasConfirmed, changes });
   });
   await audit({
-    userId: user.id,
-    userEmail: user.email,
+    userId: w.userId,
+    userEmail: w.email,
+    actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined,
     action: "ORDER_MANUAL_UPDATE",
     entity: "ORDER",
     entityId: row.id,
-    before: { customerId: row.customerId, stage: row.stage, lines: beforeItems, shippingFee: row.shippingFee, totalPriceAfterDiscount: row.totalPriceAfterDiscount, note: row.note },
+    before: { customerId: row.customerId, stage: row.stage, lines: beforeItems, shippingFee: row.shippingFee, totalPriceAfterDiscount: row.totalPriceAfterDiscount, note: row.note, recipient: before.recipient },
     after: snapshotOf(p),
-    reason: "Sửa đơn tạo tay",
+    reason: w.agent ? `Sửa đơn bởi ${w.agent}` : "Sửa đơn tạo tay",
   });
+  if (event) await kickWorkflows();
   return { ok: true, id: row.id };
 }
 
@@ -303,6 +457,10 @@ const cancelZ = z.object({ reason: z.string().trim().min(MANUAL_ORDER_LIMITS.rea
 export async function cancelManualOrderCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
+  return cancelOrder(userWriter(user), orderId, rawInput);
+}
+
+async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const parsed = cancelZ.safeParse(rawInput);
@@ -312,9 +470,11 @@ export async function cancelManualOrderCore(user: SessionUser, orderId: unknown,
   const db = await getDb();
   await db.transaction(async (tx) => {
     await tx.update(schema.orders).set({ stage: "CANCELLED", status: MANUAL_ORDER_STATUS_CODE.CANCELLED, statusName: manualOrderStageLabel("CANCELLED"), lastUpdateStatusAt: now, updatedAt: now }).where(eq(schema.orders.id, row.id));
-    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CANCELLED, oldStatus: row.status, editorName: user.name, updatedAt: now });
+    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CANCELLED, oldStatus: row.status, editorName: w.name, updatedAt: now });
+    await emitOrderEvent(tx, w, "order.cancelled", row.id, `order.cancelled:${row.id}`, { stage: "CANCELLED", wasConfirmed: row.stage === "CONFIRMED", changes: ["stage"], reason: parsed.data.reason });
   });
-  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED" }, reason: parsed.data.reason });
+  await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED" }, reason: parsed.data.reason });
+  await kickWorkflows();
   return { ok: true, id: row.id };
 }
 
@@ -344,7 +504,7 @@ export async function manualOrderFormOptions(): Promise<{ customers: ManualOrder
 }
 
 /** Giá trị ban đầu của form SỬA — đọc từ đơn tay đã lưu. `null` ⇒ không phải đơn tay / không có. */
-export async function manualOrderFormValues(orderId: string): Promise<{ customerId: string; stage: ManualOrderStage; lines: { variantId: string; quantity: number; unitPrice: number; discount: number }[]; orderDiscount: number; shippingFee: number; note: string; channel: string } | null> {
+export async function manualOrderFormValues(orderId: string): Promise<{ customerId: string; stage: ManualOrderStage; lines: { variantId: string; quantity: number; unitPrice: number; discount: number }[]; orderDiscount: number; shippingFee: number; note: string; channel: string; recipient: Recipient } | null> {
   const db = await getDb();
   const [row] = await db.select().from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
   const raw = row ? manualOrderRaw(row.raw) : null;
@@ -358,6 +518,7 @@ export async function manualOrderFormValues(orderId: string): Promise<{ customer
     shippingFee: row.shippingFee,
     note: row.note,
     channel: row.source === "Khác" ? "" : row.source,
+    recipient: storedRecipient(row),
   };
 }
 

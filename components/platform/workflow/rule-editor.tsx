@@ -33,6 +33,7 @@ import {
   type RuleDraft,
   type WorkflowObjectOption,
 } from "@/lib/platform-ui/workflow-admin-shared";
+import { isMessagingConnector, MESSAGING_CONNECTOR_KEYS, MESSAGING_CONNECTOR_LABEL, MESSAGING_DESTINATION_HINT } from "@/lib/messaging/types";
 import type { TaskPriority, WorkflowRuleStatus } from "@/lib/workflow/types";
 import { cn } from "@/lib/utils";
 import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
@@ -325,7 +326,7 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
       {/* ───────────── LÀM GÌ ───────────── */}
       <SectionCard
         title="Làm gì"
-        hint="Tập hành động ĐÓNG: tạo việc cho một phòng, báo trong ERP, ghi giá trị field tuỳ biến của chính bản ghi. Không có hành động đổi đơn / vận đơn / COD / kho. Làm theo thứ tự từ trên xuống."
+        hint="Tập hành động ĐÓNG: tạo việc cho một phòng, báo trong ERP, ghi giá trị field tuỳ biến của chính bản ghi, gửi tin tới nhóm chat qua kết nối nhắn tin của tổ chức. Không có hành động đổi đơn / vận đơn / COD / kho. Làm theo thứ tự từ trên xuống."
         actions={
           <span className="inline-flex flex-wrap gap-1.5">
             <Button type="button" size="sm" variant="outline" onClick={() => set("actions", [...draft.actions, blankAction("create_task")])}>
@@ -336,6 +337,9 @@ export function RuleEditor({ ruleId, status, initial, takenKeys, events, objects
             </Button>
             <Button type="button" size="sm" variant="outline" disabled={customFields.length === 0} title={customFields.length === 0 ? "Bản ghi của kích hoạt này không có field tuỳ biến nào" : undefined} onClick={() => set("actions", [...draft.actions, blankAction("set_custom_value")])}>
               <PenLine /> Ghi giá trị
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => set("actions", [...draft.actions, blankAction("send_message")])}>
+              <Bell /> Gửi tin nhóm chat
             </Button>
           </span>
         }
@@ -476,7 +480,7 @@ function ValueInput({ field, op, value, onChange, label }: { field: CatalogField
 
 function ActionFields({ action, index, customFields, errors, onChange }: { action: ActionDraft; index: number; customFields: CatalogField[]; errors: FieldError[]; onChange: (a: ActionDraft) => void }) {
   const at = (name: string) => errorsFor(errors, `actions.${index}.${name}`);
-  const placed = action.kind === "create_task" ? ["title", "summary", "departmentCode", "priority", "dueInHours"] : action.kind === "notify" ? ["message"] : ["field", "value"];
+  const placed = action.kind === "create_task" ? ["title", "summary", "departmentCode", "priority", "dueInHours"] : action.kind === "notify" ? ["message"] : action.kind === "send_message" ? ["connectorKey", "destination", "template"] : ["field", "value"];
   const rest = blockErrors(errors, `actions.${index}`, placed.map((p) => `actions.${index}.${p}`));
   if (action.kind === "create_task") {
     return (
@@ -522,6 +526,32 @@ function ActionFields({ action, index, customFields, errors, onChange }: { actio
       <div className="space-y-2">
         <Row label="Nội dung báo" errors={at("message")}>
           <Textarea rows={2} value={action.message} maxLength={500} onChange={(e) => onChange({ ...action, message: e.target.value })} />
+        </Row>
+        <FieldErrors errors={rest} />
+      </div>
+    );
+  }
+  if (action.kind === "send_message") {
+    const key = isMessagingConnector(action.connectorKey) ? action.connectorKey : null;
+    return (
+      <div className="space-y-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Row label="Kết nối nhắn tin" errors={at("connectorKey")} hint="Khai và kiểm ở Cài đặt → Kết nối; kết nối phải đang BẬT thì tin mới đi.">
+            <select className={cn(SELECT_CLASS, "h-9")} value={action.connectorKey} onChange={(e) => onChange({ ...action, connectorKey: e.target.value })}>
+              <option value="">— chọn kết nối —</option>
+              {MESSAGING_CONNECTOR_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {MESSAGING_CONNECTOR_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="Nơi nhận (tuỳ chọn)" errors={at("destination")} hint={key ? MESSAGING_DESTINATION_HINT[key] : "Chọn kết nối trước."}>
+            <Input value={action.destination} maxLength={120} disabled={key === "lark-webhook"} onChange={(e) => onChange({ ...action, destination: e.target.value })} />
+          </Row>
+        </div>
+        <Row label="Mẫu tin" errors={at("template")} hint="Ô điền dạng {{order_code}}, {{cod}}… — xem danh sách ở Cài đặt → Thông báo nhóm.">
+          <Textarea rows={6} value={action.template} maxLength={2000} onChange={(e) => onChange({ ...action, template: e.target.value })} />
         </Row>
         <FieldErrors errors={rest} />
       </div>

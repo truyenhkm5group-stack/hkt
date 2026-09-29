@@ -96,7 +96,7 @@ function testModuleViewPure() {
   assert.deepEqual(fresh.unknownKeys, ["khoa-la"]);
   assert.deepEqual(
     rows.get("orders")?.dependents.map((d) => d.key).sort(),
-    ["alerts", "connector_pancake", "logistics", "marketing", "returns", "sales_channels"].sort(),
+    ["ai_sales", "alerts", "connector_pancake", "logistics", "marketing", "returns", "sales_channels"].sort(),
     "cột «Module dựa vào nó» dựng từ sổ",
   );
 }

@@ -16,6 +16,10 @@ import { getBranding } from "@/lib/branding/service";
 import { loadConnectionsView } from "@/lib/connectors/service";
 import { planKeyOf, resolvePlan } from "@/lib/entitlements/check";
 import { findOrganization } from "@/lib/platform/organizations";
+import { publicationOf } from "@/lib/platform/publish";
+import { productCreateGate } from "@/lib/records/product-create";
+import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
+import { listRules } from "@/lib/workflow/rules";
 
 export type GettingStartedStep = { key: string; label: string; detail: string; href: string; cta: string; done: boolean | null };
 export type GettingStarted = { steps: GettingStartedStep[]; done: number; measurable: number; pages: { slug: string; name: string }[]; planName: string | null };
@@ -50,12 +54,14 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
 
   const steps: GettingStartedStep[] = [];
   if (products >= 0) {
+    // Tổ chức tự nhập sản phẩm (không đồng bộ Pancake) ⇒ lối vào là «Nhập từ tệp» (0180); tổ chức đồng bộ ⇒ danh sách.
+    const canImport = (await productCreateGate(user)).allowed;
     steps.push({
       key: "products",
       label: "Nhập sản phẩm",
-      detail: products > 0 ? `${products.toLocaleString("vi-VN")} sản phẩm đã có` : "Chưa có sản phẩm nào — sản phẩm vào ERP qua kết nối bán hàng của tổ chức.",
-      href: "/products",
-      cta: "Mở danh sách sản phẩm",
+      detail: products > 0 ? `${products.toLocaleString("vi-VN")} sản phẩm đã có` : canImport ? "Chưa có sản phẩm nào — nhập cả danh mục từ tệp CSV / Excel." : "Chưa có sản phẩm nào — sản phẩm vào ERP qua kết nối bán hàng của tổ chức.",
+      href: canImport ? "/products/import" : "/products",
+      cta: canImport ? "Nhập từ tệp" : "Mở danh sách sản phẩm",
       done: products > 0,
     });
   }
@@ -72,6 +78,26 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
     cta: "Mở kết nối",
     done: connections === null ? null : connections > 0,
   });
+  // Hành trình tự phục vụ (0180): chatbot bán hàng · thông báo nhóm · xuất bản — đo từ cấu hình / luật / sổ tổ chức thật.
+  if (on("ai_sales")) {
+    const bot = await loadSalesChatbotConfig();
+    steps.push({ key: "chatbot", label: "Cấu hình chatbot bán hàng", detail: bot.enabled ? `Bot «${bot.botName}» đang bật` : "Chưa bật — khai khoá AI, cấu hình, chạy khung thử rồi bật.", href: "/ai/sales-chatbot", cta: "Mở chatbot", done: bot.enabled });
+  }
+  const liveNotify = (await listRules()).filter((r) => r.status === "ACTIVE" && r.mode === "LIVE" && r.actions.some((a) => a.kind === "send_message")).length;
+  steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });
+  if (user.organization && !user.organization.isHome) {
+    const pub = await publicationOf(user.organization.code);
+    if (pub.state !== "UNTRACKED") {
+      steps.push({
+        key: "publish",
+        label: "Chọn tên miền & xuất bản",
+        detail: pub.state === "PUBLISHED" ? `Đã xuất bản${pub.url ? ` — ${pub.url.replace(/^https?:\/\//, "")}` : ""}` : pub.slug ? `Tên miền «${pub.slug}» đã giữ — chưa xuất bản` : "ERP đang là BẢN NHÁP.",
+        href: "/setup",
+        cta: pub.state === "PUBLISHED" ? "Mở ERP của tôi" : "Xuất bản",
+        done: pub.state === "PUBLISHED",
+      });
+    }
+  }
   steps.push({
     key: "pages",
     label: "Xem trang của mẫu",

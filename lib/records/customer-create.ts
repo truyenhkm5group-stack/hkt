@@ -156,6 +156,49 @@ export async function createCustomerCore(user: SessionUser, rawInput: unknown): 
   return { ok: true, id: created.id };
 }
 
+// ─────────────────────────── Khách do MÁY tạo — chatbot bán hàng (0180) ───────────────────────────
+
+/** Cổng CỦA TỔ CHỨC cho lượt tạo khách (không hỏi người): module Khách bật + tổ chức không đồng bộ khách từ Pancake. */
+export async function customerOrgGate(): Promise<CreateGate> {
+  const def = objectDef("customer");
+  const create = def?.capabilities.create;
+  if (!def || !create) return { allowed: false, code: "NOT_SUPPORTED", reason: "Khách hàng không có form tạo." };
+  if (!(await canUseModule(def.module))) return { allowed: false, code: "MODULE_DISABLED", reason: "Module Khách hàng chưa bật cho tổ chức này." };
+  if (create.requiresModuleOff && (await canUseModule(create.requiresModuleOff))) return { allowed: false, code: "NOT_SUPPORTED", reason: "Tổ chức đang dùng kết nối Pancake: khách do đồng bộ tạo." };
+  return { allowed: true };
+}
+
+/** SĐT về dạng lưu (bỏ khoảng trắng / chấm / gạch); sai dạng ⇒ `null`. */
+export function normalizeCustomerPhone(raw: string): string | null {
+  const v = raw.trim().replace(/[\s.-]/g, "");
+  return PHONE_RE.test(v) ? v : null;
+}
+
+/**
+ * Chatbot bán hàng tạo (hoặc tìm lại) khách. Cùng cột, cùng luật SĐT với form tạo khách; KHÁCH ĐÃ CÓ cùng SĐT ⇒ dùng lại
+ * ĐÚNG khách đó (một người, một bản ghi) nhưng KHÔNG đổi tên / địa chỉ đang lưu (AGENTS.md mục 3.12: không tự điền đè).
+ * Địa chỉ giao của lần mua này đi vào ĐƠN (người nhận), không vào hồ sơ khách. Máy không giả làm người (luật 36).
+ */
+export async function createCustomerAsAgent(agent: { name: string; source: string }, input: { name: string; phone: string; address: string; province?: string }): Promise<{ ok: true; id: string; existing: boolean } | MetaFailure> {
+  const gate = await customerOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const name = input.name.trim().slice(0, 200);
+  const phone = normalizeCustomerPhone(input.phone);
+  const address = input.address.trim().slice(0, 500);
+  const province = (input.province ?? "").trim().slice(0, 100);
+  const errors: FieldError[] = [];
+  if (name.length < 2) errors.push({ field: "system:name", message: "Tên khách ít nhất 2 ký tự." });
+  if (!phone) errors.push({ field: "system:phone", message: "Số điện thoại chỉ gồm 8–15 chữ số (có thể có dấu + ở đầu)." });
+  if (address.length < 5) errors.push({ field: "system:address", message: "Địa chỉ quá ngắn." });
+  if (errors.length || !phone) return fail("INVALID", errors);
+  const db = await getDb();
+  const [found] = await db.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
+  if (found) return { ok: true, id: found.id, existing: true };
+  const [created] = await db.insert(schema.customers).values({ name, phone, phones: [phone], address, province }).returning({ id: schema.customers.id });
+  await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "CUSTOMER_CREATE", entity: "CUSTOMER", entityId: created.id, before: null, after: { name, phone, address, province }, reason: `Tạo bởi ${agent.name}` });
+  return { ok: true, id: created.id, existing: false };
+}
+
 // ─────────────────────────── Sửa thông tin cơ bản của khách TẠO TAY (pilot P1 #11) ───────────────────────────
 
 export const CUSTOMER_PROFILE_FORM = "profile";

@@ -127,6 +127,7 @@ const MOI = [
   "0177_platform_pilot_stage",
   "0178_order_delivery_notes",
   "0179_creative_video_upload",
+  "0180_self_service_journey",
 ] as const;
 
 /*

@@ -1,5 +1,6 @@
 "use server";
 
+import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-org";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
@@ -18,7 +19,11 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const next = String(formData.get("next") ?? "/");
   if (!email || !password) return { error: "Vui lòng nhập email và mật khẩu." };
   // Ô "Mã tổ chức" chỉ hiện khi nền tảng có hơn một tổ chức; bỏ trống ⇒ tổ chức nhà, như trước đây.
-  const orgCode = await loginOrgCode(String(formData.get("org") ?? ""));
+  // Tên miền con của một tổ chức đã xuất bản (0180) GẮN CỨNG tổ chức — ô «Mã tổ chức» của form bị bỏ qua. Tên miền con
+  // không trỏ tới ERP nào ⇒ từ chối, KHÔNG rơi về tổ chức nhà.
+  const host = await hostOrganization();
+  if (host.slug && !host.org) return { error: HOST_NOT_FOUND_MESSAGE };
+  const orgCode = host.org ? host.org.code : await loginOrgCode(String(formData.get("org") ?? ""));
 
   // Chặn dò mật khẩu theo CẶP (email, IP) và theo IP (xem lib/auth/login-throttle.ts) — không theo
   // email trần, nếu không ai cũng khoá được tài khoản người khác. Kiểm TRƯỚC khi băm để lần thử bị

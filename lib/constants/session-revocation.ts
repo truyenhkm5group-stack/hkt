@@ -104,7 +104,12 @@ export type SessionDenyReason =
    * phiên đều hợp lệ — chỉ trang này không dùng được, nên nó KHÔNG đưa về `/login` mà về
    * `/module-disabled?m=<khoá>`. Tham số dưới đây chỉ để câu hiển thị có mặt nếu nó lọt tới `/login`.
    */
-  | "MODULE_DISABLED";
+  | "MODULE_DISABLED"
+  /**
+   * Host đang mở là tên miền con của MỘT tổ chức (0180) mà phiên thuộc tổ chức KHÁC — hoặc tên miền con không trỏ tới ERP
+   * đã xuất bản nào. Không chọn bên nào: đăng nhập lại bằng tài khoản của ERP ở địa chỉ này.
+   */
+  | "HOST_MISMATCH";
 
 /** Tham số `?reason=` trên `/login` cho từng nguyên nhân. */
 export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
@@ -113,6 +118,7 @@ export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
   REVOKED: "revoked",
   ORG_INACTIVE: "org-inactive",
   MODULE_DISABLED: "module-disabled",
+  HOST_MISMATCH: "host-mismatch",
 };
 
 /** Trang giải thích "module chưa bật" — `requireUser()` chuyển tới đây kèm `?m=<khoá module>`. */
@@ -127,6 +133,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
   revoked: "Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.",
   "org-inactive": "Tổ chức của phiên đăng nhập này đang tạm ngừng hoặc không còn tồn tại. Liên hệ quản trị viên của tổ chức.",
   "module-disabled": "Chức năng này chưa được bật cho tổ chức của bạn. Liên hệ quản trị viên của tổ chức.",
+  "host-mismatch": "Phiên đăng nhập này thuộc một ERP khác địa chỉ đang mở. Đăng nhập bằng tài khoản của ERP ở địa chỉ này.",
   // KHÔNG dùng chung câu "đã bị thu hồi": người vừa tự bấm đổi mật khẩu mà đọc câu ấy sẽ tưởng
   // mình bị quản trị đá ra. Cùng một cơ chế, hai tình huống, hai câu.
   [REASON_PASSWORD_CHANGED]: "Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.",
@@ -141,7 +148,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
  * trang trong, trang đó gọi `requireUser()` → bị từ chối → đẩy ngược ra `/login` → **vòng lặp vô
  * tận**. Mọi nguyên nhân từ chối phải nằm trong danh sách này.
  */
-export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", REASON_PASSWORD_CHANGED];
+export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", "host-mismatch", REASON_PASSWORD_CHANGED];
 
 export function loginShouldStay(reason: string | undefined): boolean {
   return !!reason && LOGIN_REASONS_STAY.includes(reason);

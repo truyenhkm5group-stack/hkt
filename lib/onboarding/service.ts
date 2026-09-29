@@ -37,6 +37,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { markPilotConfigured, markPilotCreated } from "@/lib/platform/pilot";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { markOrganizationDraft } from "@/lib/platform/publish";
 import { buildSignupBlueprint, freshOrgState, type SignupBlueprint } from "@/lib/onboarding/blueprint";
 import { claimInvite, lookupInvite, type InviteRow } from "@/lib/onboarding/invites";
 import { checkSignupRate, hashIp, recordAttempt, type AttemptMode } from "@/lib/onboarding/rate";
@@ -335,6 +336,9 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   // Vòng đời pilot (docs/platform/pilot-operations.md): tổ chức MỚI của luồng này bắt đầu ở «Vừa tạo». Chỉ ghi khi chưa
   // có giai đoạn — chạy lại sau hỏng không đè giai đoạn người vận hành đã đổi.
   if (input.isNew) await markPilotCreated(input.code, actor, source);
+  // Hành trình tự phục vụ (0180): tổ chức mới là NHÁP tới khi chủ tổ chức tự bấm Xuất bản ở /setup — ERP của họ chính là
+  // bản xem trước. Không đè trạng thái đã có (chạy lại sau hỏng).
+  await markOrganizationDraft(input.code);
   const prev = await readOnboarding(input.code);
   await claimRunning(input.code, {
     ...prev,

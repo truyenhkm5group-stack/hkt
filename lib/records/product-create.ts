@@ -44,7 +44,8 @@ export async function productCreateGate(user: SessionUser): Promise<ProductCreat
   return { allowed: true };
 }
 
-export type ProductWriteResult = { ok: true; id: string } | MetaFailure;
+/** `variantIds`: mẫu mã vừa TẠO trong lượt này (theo thứ tự gửi lên) — lượt tạo luôn có; lượt sửa không mang. */
+export type ProductWriteResult = { ok: true; id: string; variantIds?: string[] } | MetaFailure;
 
 function zodErrors(issues: readonly { path: readonly PropertyKey[]; message: string }[]): FieldError[] {
   return issues.map((i) => ({ field: i.path.map(String).join(".") || "_", message: i.message }));
@@ -134,7 +135,7 @@ export async function createProductCore(user: SessionUser, rawInput: unknown): P
     after: { ...data, variantIds: result.variantIds },
     reason: "Tạo tay trên ERP — tổ chức không đồng bộ sản phẩm từ nguồn ngoài",
   });
-  return { ok: true, id: productId };
+  return { ok: true, id: productId, variantIds: result.variantIds };
 }
 
 export async function updateProductCore(user: SessionUser, productId: string, rawInput: unknown): Promise<ProductWriteResult> {
