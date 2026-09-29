@@ -5,6 +5,7 @@ import { HOME_PLAN_KEY, listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { platformAudit } from "@/lib/platform/audit";
 import { parseOperatorTarget, type KillSwitchResult } from "@/lib/platform/kill-switches";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
+import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 /**
  * ═══════════ ĐỔI GÓI CỦA MỘT TỔ CHỨC — NGƯỜI VẬN HÀNH, KHÔNG SQL (docs/platform/pilot-operations.md §4) ═══════════
@@ -20,6 +21,9 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
  * Hạn mức AI đọc gói qua cùng `planKeyOf` nên đổi theo, trễ tối đa thời gian đệm của sổ tổ chức.
  */
 export async function setOrganizationPlan(user: SessionUser, input: unknown): Promise<KillSwitchResult> {
+  // Hỏi người vận hành NGAY tại lõi, trước mọi lượt đọc (S21) — `parseOperatorTarget` hỏi lại lần nữa, vô hại.
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
   const raw = (input && typeof input === "object" ? input : {}) as { orgCode?: unknown; reason?: unknown; planKey?: unknown };
   const p = await parseOperatorTarget(user, raw);
   if ("error" in p) return p;

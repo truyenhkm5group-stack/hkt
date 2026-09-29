@@ -671,6 +671,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform/kill-switches.ts::setOrganizationSuspended": "Công tắc khẩn: đình chỉ / bật lại một tổ chức (hỏi qua parseCommon).",
   "lib/platform/kill-switches.ts::setWorkflowsPaused": "Công tắc khẩn: tạm dừng luật tự động của một tổ chức (hỏi qua parseCommon).",
   "lib/platform/kill-switches.ts::disableOrgConnection": "Công tắc khẩn: tắt một kết nối trong CSDL của tổ chức đích (hỏi qua parseCommon).",
+  "lib/platform/org-plan.ts::setOrganizationPlan": "Đổi gói của một tổ chức sau lúc tạo — ghi cột plan của mặt phẳng điều khiển + nhật ký nền tảng.",
   "lib/platform/pilot.ts::setPilotStage": "Đổi giai đoạn pilot của một tổ chức — ghi mặt phẳng điều khiển + đo CSDL của khách.",
   "lib/platform/pilot.ts::confirmPilotUat": "Xác nhận UAT của một tổ chức — ghi mặt phẳng điều khiển.",
   "lib/platform/support.ts::loadOrgSupport": "Trang sức khoẻ một tổ chức: ghi SUPPORT_VIEW rồi ĐẾM trong CSDL của khách.",
