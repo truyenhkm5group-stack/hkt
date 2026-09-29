@@ -1,0 +1,72 @@
+# ═══════════ DIỄN TẬP KHÔI PHỤC MỘT TỔ CHỨC — POSTGRES TẠM, KHÔNG ĐỤNG PRODUCTION ═══════════
+#
+# Chứng minh bản sao lưu CSDL của một tổ chức (`erp_org_*`) khôi phục được VÀ CHẠY ĐƯỢC, trên một máy Postgres dùng
+# một lần: service container `postgres` của job này, CÙNG ẢNH với `erp-db` production (docker-compose.prod.yml — bài
+# kiểm khoá). Kịch bản: scripts/restore-drill-pg.ts · tài liệu: docs/platform/backup-recovery.md mục 8.
+#
+# LUẬT CỦA TỆP NÀY (tests/restore-drill-pg.test.ts quét):
+#   · KHÔNG secret nào (`secrets.*`), KHÔNG SSH, KHÔNG chạm VPS. Kho PUBLIC; máy Postgres sống và chết cùng job.
+#     Mật khẩu dưới đây là mật khẩu của container TẠM — không phải bí mật, nhìn là biết.
+#   · `PLATFORM_SECRETS_KEY` KHÔNG khai ở đây: kịch bản tự sinh một khoá GIẢ trong bộ nhớ cho mỗi lượt, rồi thử cả khoá
+#     KHÁC để chứng minh bí mật kết nối fail closed.
+#   · CHỈ `workflow_dispatch`. Lịch tự động (vd hằng tuần) là quyết định của chủ nền tảng — đề xuất ở
+#     docs/platform/launch-gates.md mục C (C7). Job này KHÔNG nằm trong `gates.yml` / `deploy-vps.yml`: không chặn deploy.
+#   · createdb / pg_dump / pg_restore chạy BÊN TRONG container bằng `docker exec -i` — đúng cách `erp-backup.sh` gọi
+#     `docker exec erp-db pg_dump …` trên VPS, và đúng phiên bản công cụ của máy chủ.
+#   · Ô `ma` đi qua `env:` rồi `"$DRILL_MA"`, không nội suy vào `run:`; kịch bản chỉ nhận mã khớp `^drill-…`.
+name: Diễn tập khôi phục tổ chức (Postgres tạm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ma:
+        description: "Mã tổ chức diễn tập (bắt buộc bắt đầu bằng drill-)"
+        type: string
+        required: false
+        default: drill-ws
+
+permissions:
+  contents: read
+
+jobs:
+  restore_drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: dien_tap_tam_khong_phai_bi_mat
+          POSTGRES_DB: erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp -d erp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
+      - name: Diễn tập tạo → tuỳ biến → sao lưu → phá → khôi phục → so → chạy thật
+        env:
+          ERP_RESTORE_DRILL_EPHEMERAL: "1"
+          DATABASE_URL: postgres://erp:dien_tap_tam_khong_phai_bi_mat@localhost:5432/erp
+          ERP_DRILL_PG_CONTAINER: ${{ job.services.postgres.id }}
+          DRILL_MA: ${{ inputs.ma }}
+        run: npx tsx --tsconfig tsconfig.json scripts/restore-drill-pg.ts --ma="${DRILL_MA:-drill-ws}" --bao-cao=restore-drill-report.json
+      # Báo cáo chỉ có số, tên bảng, băm, thời gian — không bí mật, không dòng dữ liệu. Bản dump KHÔNG được tải lên.
+      - name: Lưu báo cáo diễn tập
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-drill-report
+          path: restore-drill-report.json
+          if-no-files-found: warn
+          retention-days: 30
