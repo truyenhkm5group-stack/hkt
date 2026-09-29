@@ -16,10 +16,13 @@ export type AiDraftStatus = (typeof AI_DRAFT_STATUSES)[number];
 
 export const AI_DRAFT_STATUS_LABEL: Record<AiDraftStatus, string> = { DRAFT: "Nháp", APPLIED: "Đã áp dụng", DISCARDED: "Đã bỏ" };
 
-/** `ORG_CONNECTION` = khoá của chính tổ chức; `HOME` = khoá `.env` của tổ chức nhà (chỉ tổ chức nhà). */
-export type AiSourceKind = "ORG_CONNECTION" | "HOME";
+/**
+ * `ORG_CONNECTION` = khoá của chính tổ chức (sổ AI ghi nguồn `BYOK`); `HOME` = khoá `.env` của tổ chức nhà (chỉ tổ chức
+ * nhà); `PLATFORM` = khoá của NỀN TẢNG, trừ credit theo gói — mặc định TẮT (`lib/ai-usage/platform-ai.ts`).
+ */
+export type AiSourceKind = "ORG_CONNECTION" | "HOME" | "PLATFORM";
 
-export const AI_SOURCE_LABEL: Record<AiSourceKind, string> = { ORG_CONNECTION: "Khoá AI của tổ chức", HOME: "AI của tổ chức nhà" };
+export const AI_SOURCE_LABEL: Record<AiSourceKind, string> = { ORG_CONNECTION: "Khoá AI của tổ chức", HOME: "AI của tổ chức nhà", PLATFORM: "Credit AI của nền tảng" };
 
 /**
  * Trần của MỘT tổ chức. Lượt soạn = tối đa `1 + maxRepairRounds` lời gọi AI; trần theo ngày đếm LƯỢT SOẠN (bản nháp)
@@ -95,6 +98,8 @@ export type AiDraftView = {
   createdByEmail: string | null;
   appliedAt: string | null;
   discardedAt: string | null;
+  /** Chỉ có ngay sau lượt tạo: chi phí AI đã vượt ngưỡng cảnh báo của gói (lượt vẫn chạy). */
+  quotaWarning?: string | null;
 };
 
 export type AiDraftListRow = Pick<AiDraftView, "id" | "mode" | "prompt" | "status" | "name" | "valid" | "aiCalls" | "costUsd" | "createdAt" | "createdByEmail">;

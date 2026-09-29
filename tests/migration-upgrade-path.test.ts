@@ -123,6 +123,7 @@ const MOI = [
   "0173_fb_ads_post_link",
   "0174_creative_studio_options",
   "0175_video_scale_showcase",
+  "0176_platform_ai_usage",
 ] as const;
 
 /*
@@ -310,6 +311,15 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'platform_settings'"), 1, "bước 2: 0172 phải tạo bảng platform_settings");
     assert.equal(await dem("select count(*)::int as n from platform_settings"), 0, "bước 2: 0172 không được gieo dòng nào — mở /start là việc của người vận hành");
     await assert.rejects(client.query(`insert into platform_settings (key, value) values ('platform.signup.mode', '"mo-het"'::jsonb)`), "bước 2: 0172 — giá trị ngoài off/invite/open phải bị CSDL từ chối");
+
+    // 0176 (sổ dùng AI): bảng mới RỖNG (không dựng lại lượt AI cũ — mục 8.8, 35); ba gói có khoá `ai` và KHÔNG gói nào
+    // có credit nền tảng > 0 (AI do nền tảng trả tiền không bật bằng migration); CHECK chặn nguồn / trạng thái lạ.
+    assert.equal(await dem("select count(*)::int as n from platform_ai_usage"), 0, "bước 2: 0176 không được gieo dòng sổ AI nào");
+    assert.equal(await dem("select count(*)::int as n from platform_plans where limits ? 'ai'"), 3, "bước 2: 0176 gieo khoá ai cho trial / standard / internal");
+    assert.equal(await dem("select count(*)::int as n from platform_plans where coalesce((limits->'ai'->>'platformCreditUsdPerMonth')::numeric, 0) > 0"), 0, "bước 2: 0176 — không gói nào có credit AI của nền tảng");
+    assert.equal(await dem("select count(*)::int as n from platform_plans where key = 'trial' and (limits->'ai'->>'requestsPerDay')::int = 10 and (limits->'ai'->'costUsdPerMonth'->>'hard')::numeric = 50"), 1, "bước 2: 0176 — hạn mức AI của trial đúng số đề xuất");
+    await assert.rejects(client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, status) values ('up-ai1', 'x', 'ai_builder', 'VNX', 'OK')`), "bước 2: 0176 — nguồn tính tiền ngoài BYOK/PLATFORM/HOME bị từ chối");
+    await assert.rejects(client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, status) values ('up-ai2', 'x', 'ai_builder', 'BYOK', 'FREE')`), "bước 2: 0176 — trạng thái lạ bị từ chối");
 
     // 0132 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
     // job `model-registry` do người bấm, trạng thái vòng đời không backfill (mục 8.8, 35).

@@ -14,6 +14,7 @@ import { aiDisabledReason } from "@/lib/ai/router";
 import { bacChoLuotHoi, xetTranNgay } from "@/lib/constants/ai-budget";
 import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
 import { currentOrganization } from "@/lib/platform/context";
+import { recordAiUsage } from "@/lib/ai-usage/ledger";
 
 /**
  * ═══════════ VÒNG LẶP COPILOT — ERP TRUTH → TYPED TOOLS → AI ═══════════
@@ -248,6 +249,26 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
     interactionId = row?.id ?? null;
   } catch (e) {
     warnings.push(`Không ghi được nhật ký AI: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // Sổ dùng AI thống nhất (docs/platform/ai-usage.md): Copilot chỉ chạy ở tổ chức nhà ⇒ nguồn HOME. KHÔNG đổi hành vi
+  // Copilot — ghi sổ hỏng thì nuốt, câu trả lời / cảnh báo của người dùng giữ nguyên.
+  try {
+    await recordAiUsage({
+      orgCode: (await currentOrganization()).code,
+      feature: "copilot",
+      source: "HOME",
+      provider: provider.name,
+      model,
+      requests: rounds,
+      inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens,
+      outputTokens: usage.outputTokens,
+      costUsd,
+      status: status === "ERROR" ? "ERROR" : "OK",
+      actorId: input.user.id,
+      ref: interactionId,
+    });
+  } catch {
+    // Không có đường nào khác: sổ AI là phụ với Copilot.
   }
   return { interactionId, status, answer, toolCalls, pendingActions: pending, warnings: [...new Set(warnings)], usage, costUsd, latencyMs, rounds, model, error };
 }

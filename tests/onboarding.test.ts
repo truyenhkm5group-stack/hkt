@@ -260,7 +260,7 @@ async function testInviteFlow(): Promise<SessionSubject> {
       const page = await getPageBySlug("cong-no-khach-hang");
       assert.ok(page && page.page.publishedVersion > 0, "trang của mẫu có và đã xuất bản");
       const db = await getDb();
-      for (const t of ["platform_plans", "platform_signup_invites", "platform_signup_attempts", "platform_settings"]) {
+      for (const t of ["platform_plans", "platform_signup_invites", "platform_signup_attempts", "platform_settings", "platform_ai_usage"]) {
         const res = (await db.execute(sql.raw(`select count(*)::int as n from ${t}`))) as unknown as { rows: { n: number }[] };
         assert.equal(res.rows[0].n, 0, `${t} trong CSDL tổ chức phải rỗng`);
       }

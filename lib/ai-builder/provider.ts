@@ -2,21 +2,30 @@ import { getAiProvider, type AiProvider } from "@/lib/ai/provider";
 import { aiDisabledReason } from "@/lib/ai/router";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
+import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
+import { defaultEnvReader, platformAiConfig, type EnvReader } from "@/lib/ai-usage/platform-ai";
+import { checkAiQuota, resolveAiLimits } from "@/lib/ai-usage/quota";
 import { ByokAnthropicProvider, ByokOpenAiProvider, BUILDER_TIMEOUT_MS } from "@/lib/ai-builder/providers";
 import type { AiSourceKind } from "@/lib/ai-builder/types";
 
 /**
- * ═══════════ AI CỦA AI BUILDER — AI TRẢ TIỀN, KHOÁ NẰM ĐÂU (Phase 8 · §1, X6, X7) — CHỈ MÁY CHỦ ═══════════
+ * ═══════════ AI CỦA AI BUILDER — AI TRẢ TIỀN, KHOÁ NẰM ĐÂU (Phase 8 · §1, X6, X7 · ai-usage.md) — CHỈ MÁY CHỦ ═══════════
+ *
+ * Trước mọi thứ: CÔNG TẮC AI của người vận hành (toàn nền tảng + riêng tổ chức, `lib/ai-usage/control.ts`). Tắt ⇒
+ * `AI_DISABLED_BY_OPERATOR`, không chọn provider nào, không một byte rời máy — kể cả khi kiểm thử đã ép provider giả.
  *
  * Thứ tự, không bao giờ lẫn sang tổ chức khác:
  *   1. Kết nối AI ĐANG BẬT của CHÍNH tổ chức ngữ cảnh (`anthropic-byok`, rồi `openai-byok`) — khoá giải mã qua
- *      `openActiveConnection` (AAD gắn tổ chức: bản mã chép sang tổ chức khác không giải được).
- *   2. Tổ chức NHÀ — provider sẵn có (`getAiProvider`, khoá `.env` của nhà), đúng như Copilot.
- *   3. Không có ⇒ `null` + lý do. KHÔNG có khoá "của nền tảng" dùng chung.
+ *      `openActiveConnection` (AAD gắn tổ chức: bản mã chép sang tổ chức khác không giải được). Sổ AI ghi `BYOK`.
+ *   2. Tổ chức NHÀ — provider sẵn có (`getAiProvider`, khoá `.env` của nhà), đúng như Copilot. Sổ AI ghi `HOME`.
+ *   3. NỀN TẢNG trả tiền (`PLATFORM`) — CHỈ tổ chức KHÔNG phải nhà, CHỈ khi đủ ba điều: biến môi trường bật + có khoá
+ *      của nền tảng (KHÁC khoá của nhà), gói có credit > 0, còn credit tháng này. Mặc định TẮT.
+ *   4. Không có ⇒ `null` + lý do.
  *
  * Bước 2 hỏi `currentOrganization()` (ngữ cảnh tường minh HOẶC phiên đã ký), không hỏi `peekIsNonHome()`: request thường
  * của một tổ chức khác không mang ngữ cảnh tường minh, và `getAiProvider()` khi đó sẽ trả provider của nhà. Hỏi sai
- * câu ở đây là để khoá của nhà trả tiền (và nhìn thấy dữ liệu cấu hình) cho tổ chức khác.
+ * câu ở đây là để khoá của nhà trả tiền (và nhìn thấy dữ liệu cấu hình) cho tổ chức khác. Bước 3 KHÔNG BAO GIỜ gọi
+ * `getAiProvider()` — khoá của nền tảng đi tường minh vào provider BYOK-dạng (`baseURL` hằng, `authToken: null`).
  *
  * Tệp này là nơi DUY NHẤT của `lib/ai-builder/*` được import `lib/connectors/*` (bài kiểm quét): phần soạn prompt và
  * tóm tắt metadata không bao giờ chạm bí mật.
@@ -35,9 +44,14 @@ export function setBuilderAiForTests(ai: BuilderAi | null | undefined) {
   override = ai;
 }
 
-export async function getBuilderAi(deps: { fetch?: typeof fetch } = {}): Promise<BuilderAiResolution> {
-  if (override !== undefined) return override ? { ok: true, ai: override } : { ok: false, reason: "AI Builder đang tắt (kiểm thử)." };
+/**
+ * `deps.env` chỉ để bài kiểm đưa môi trường GIẢ vào nhánh nền tảng (không đọc / đặt `process.env` của máy chạy — luật 65).
+ */
+export async function getBuilderAi(deps: { fetch?: typeof fetch; env?: EnvReader } = {}): Promise<BuilderAiResolution> {
   const ctx = await currentOrganization();
+  const killed = await aiKillSwitchDenial(ctx.code);
+  if (killed) return { ok: false, reason: killed };
+  if (override !== undefined) return override ? { ok: true, ai: override } : { ok: false, reason: "AI Builder đang tắt (kiểm thử)." };
   const pending: string[] = [];
   for (const key of BYOK_CONNECTORS) {
     const conn = await openActiveConnection(key);
@@ -58,7 +72,26 @@ export async function getBuilderAi(deps: { fetch?: typeof fetch } = {}): Promise
     const home = getAiProvider("copilot", { hanChoMs: BUILDER_TIMEOUT_MS });
     if (home) return { ok: true, ai: { provider: home, source: "HOME", connectorKey: null } };
     pending.push(`Tổ chức nhà chưa cấu hình AI: ${aiDisabledReason() ?? "không rõ"}.`);
+  } else {
+    const platform = await platformAi(ctx.code, deps);
+    if (platform.ok) return platform;
+    if (platform.reason) pending.push(platform.reason);
   }
   const head = "Tổ chức chưa có kết nối AI đang bật — khai khoá Anthropic hoặc OpenAI của tổ chức ở Kết nối theo tổ chức (/settings/connections), kiểm tra rồi bật.";
   return { ok: false, reason: pending.length ? `${head} ${pending.join(" ")}` : head };
+}
+
+/**
+ * Nhánh 3 — AI do NỀN TẢNG trả tiền. `reason: null` = nhánh chưa bật (không nói gì thêm với khách: "chưa có kết nối AI"
+ * là câu đúng); lý do cụ thể chỉ khi nền tảng ĐÃ bật mà tổ chức này không dùng được.
+ */
+async function platformAi(orgCode: string, deps: { fetch?: typeof fetch; env?: EnvReader }): Promise<{ ok: true; ai: BuilderAi } | { ok: false; reason: string | null }> {
+  const cfg = platformAiConfig(deps.env ?? defaultEnvReader);
+  if (!cfg.ready) return { ok: false, reason: null };
+  const limits = await resolveAiLimits(orgCode);
+  if (!limits || !(limits.limits.platformCreditUsdPerMonth > 0)) return { ok: false, reason: null };
+  const quota = await checkAiQuota(orgCode, "PLATFORM", { notify: false });
+  if (!quota.ok) return { ok: false, reason: quota.error };
+  const provider = new ByokAnthropicProvider({ apiKey: cfg.apiKey, model: cfg.model, fetch: deps.fetch, name: "anthropic-platform" });
+  return { ok: true, ai: { provider, source: "PLATFORM", connectorKey: null } };
 }

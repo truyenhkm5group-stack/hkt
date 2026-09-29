@@ -65,6 +65,7 @@ export function AiBuilderPanel({ view, initialDraft }: { view: AiBuilderView; in
         setResolutions({});
         if (r.value.valid) toast.success("AI đã soạn xong bản nháp — xem lại từng mục rồi bấm Xem trước.");
         else toast.warning("Bản nháp còn lỗi — xem lỗi bên dưới.");
+        if (r.value.quotaWarning) toast.warning(r.value.quotaWarning);
       } catch {
         setError("Không tạo được bản nháp — thử lại.");
       }
