@@ -13,6 +13,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { generateRecurringTasks } from "@/lib/work/service";
+import { runScheduledWorkflows } from "@/lib/workflow/scheduled";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { runAutoAssign } from "@/lib/work/auto-assign-run";
@@ -649,6 +650,24 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.detail = `sinh ${r.created} việc · ${r.skipped} định nghĩa chưa tới kỳ / đã có việc kỳ này`;
         return r;
       }),
+  },
+  /*
+    LUẬT TỰ ĐỘNG CỦA TỔ CHỨC KHÁCH (G-SCHED — chủ nền tảng duyệt 29/09/2026).
+
+    CHỈ cho tổ chức khác nhà: bộ lập lịch gọi nó qua fan-out TỰ ĐỘNG HOÁ (`AUTOMATION_FANOUT_JOBS`, không có lượt
+    của nhà), mỗi tổ chức một lượt TUẦN TỰ. Gọi cho nhà ⇒ bỏ qua có lý do: luật của nhà vẫn chạy ké `alerts` như cũ.
+    Nhịp, trần thời gian và các lượt bỏ qua ở `lib/workflow/scheduled.ts` + `lib/constants/workflow-cadence.ts`.
+  */
+  workflows: {
+    label: "Luật tự động (tổ chức khách)",
+    source: "ALL",
+    module: "work",
+    fanOut: true,
+    description:
+      "Một lượt bộ máy luật tự động cho tổ chức KHÁCH: đọc sự kiện mới theo con trỏ, ghi lượt chạy, thực thi lượt đã được duyệt, phục hồi lượt treo. " +
+      "Nhịp mặc định 10 phút (gói có thể khai `workflowCadenceMinutes` ≥ 5), trần 60 giây mỗi tổ chức mỗi lượt, trần sự kiện / hành động của bộ máy. " +
+      "Bỏ qua (không ghi sổ) khi: tổ chức nhà (luật của nhà chạy ké job cảnh báo) · công tắc khẩn tạm dừng luật đang bật · chưa tới kỳ.",
+    run: (o) => runScheduledWorkflows({ trigger: o.trigger, actor: o.actor }),
   },
   "work-auto-assign": {
     label: "Phân việc tự động",

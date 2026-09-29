@@ -469,6 +469,7 @@ import { testPlatformIsolationStatic } from "./platform-isolation-static.test";
 import { testPlatformNoDb } from "./platform-no-db.test";
 import { testPlatformProcessIsolation } from "./platform-process-isolation.test";
 import { testPlatformJobs } from "./platform-jobs.test";
+import { testGSched } from "./g-sched.test";
 
 async function main() {
   await ensureMigrated();
@@ -2597,6 +2598,8 @@ async function main() {
   // Nền tảng 1.x: module của từng job, client chia ngăn theo tổ chức, fan-out lịch, webhook, R-17 (mã `ph-`,
   // tự cấp và tự dọn; tắt thử một module của nhà rồi khôi phục trong finally).
   await testPlatformJobs();
+  // G-SCHED: luật tự động của tổ chức khách tự chạy qua fan-out tuần tự (mã `gs-`, tự cấp và tự dọn); nhà giữ nguyên.
+  await testGSched();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

@@ -2,8 +2,10 @@
  * ═══════════ BỘ MÁY CHẠY LUẬT (Phase 3 · W5–W8) — CHỈ MÁY CHỦ ═══════════
  *
  * Hợp đồng: docs/platform/phase-3-contracts.md mục 3–4. KHÔNG phải một hàng đợi hay một lịch thứ hai: đọc
- * `domain_events` theo con trỏ, ghi sổ `workflow_runs`, cửa duyệt là `approval_requests`, chạy ké job `alerts`
- * (10 phút/lần — không thêm lịch, AGENTS.md mục 7). Mọi truy vấn qua `getDb()` ⇒ CSDL của tổ chức hiện hành.
+ * `domain_events` theo con trỏ, ghi sổ `workflow_runs`, cửa duyệt là `approval_requests`. Tổ chức NHÀ: chạy ké job
+ * `alerts` (10 phút/lần — lịch VNX giữ nguyên). Tổ chức KHÁCH (G-SCHED, chủ nền tảng duyệt 29/09/2026): job riêng
+ * `workflows` qua fan-out của bộ lập lịch, nhịp ở `lib/constants/workflow-cadence.ts`, trần thời gian `deadline` mỗi lượt.
+ * Mọi truy vấn qua `getDb()` ⇒ CSDL của tổ chức hiện hành.
  *
  * MỘT LƯỢT `runWorkflows()`:
  *  1. Đọc tối đa `EVENT_BATCH` sự kiện sau con trỏ (con trỏ chưa có ⇒ khởi tạo ở sự kiện mới nhất, lượt đầu
@@ -89,7 +91,17 @@ const RECOVERY_BATCH = 50;
  * `workflows.paused`, `lib/platform/org-flags.ts`). Khi đó con trỏ KHÔNG tiến, lượt chờ duyệt KHÔNG bị quét, lượt treo
  * KHÔNG bị chiếm lại — bật lại thì lượt kế tiếp xét tiếp đúng từ chỗ dừng, `dedupe_key` giữ đúng-một-lần.
  */
-export type RunWorkflowsResult = { events: number; runs: number; executed: number; waiting: number; failed: number; recovered: number; paused?: { reason: string; since: string } };
+export type RunWorkflowsResult = {
+  events: number;
+  runs: number;
+  executed: number;
+  waiting: number;
+  failed: number;
+  recovered: number;
+  paused?: { reason: string; since: string };
+  /** Lượt dừng sớm vì hết TRẦN THỜI GIAN (`deadline`, G-SCHED) — phần còn lại để lượt sau, con trỏ không nhảy qua. */
+  timeBudgetHit?: true;
+};
 
 type EventRow = EventLike & { id: string; at: string; causationId: string | null };
 
@@ -156,7 +168,14 @@ async function eventDepth(db: Db, ev: EventRow, cache: Map<string, number>): Pro
   return run.depth + 1;
 }
 
-type Counters = RunWorkflowsResult & { actions: number };
+type Counters = RunWorkflowsResult & { actions: number; deadline?: number };
+
+/** Đã quá trần thời gian của lượt chưa (không khai trần ⇒ không bao giờ) — ghi dấu để kết quả nói ra. */
+function pastDeadline(c: Counters): boolean {
+  if (c.deadline === undefined || Date.now() < c.deadline) return false;
+  c.timeBudgetHit = true;
+  return true;
+}
 
 function subjectCols(s: Subject, ev: EventRow): { subjectType: string; subjectId: string } {
   return s.ref ? { subjectType: s.ref.objectKey, subjectId: s.ref.recordId } : { subjectType: ev.subjectType, subjectId: ev.subjectId };
@@ -367,6 +386,7 @@ async function sweepWaiting(db: Db, c: Counters, now: Date) {
       continue;
     }
     if (c.actions > 0 && c.actions + rule!.actions.length > ACTION_BUDGET) break;
+    if (pastDeadline(c)) break;
     const claimed = await claimRun(db, run.id);
     if (!claimed) continue;
     const ref = runSubjectRef(run.subjectType, run.subjectId);
@@ -442,6 +462,7 @@ async function recoverStaleRuns(db: Db, c: Counters, now: Date) {
       continue;
     }
     if (c.actions > 0 && c.actions + rule!.actions.length > ACTION_BUDGET) break;
+    if (pastDeadline(c)) break;
     const claimed = await claimRun(db, run.id);
     if (!claimed) continue;
     c.recovered += 1;
@@ -466,11 +487,15 @@ async function recoverStaleRuns(db: Db, c: Counters, now: Date) {
 }
 
 /**
- * Một lượt của bộ máy — gọi từ job `alerts` (đã ở trong `withOrganization`). Không ném vì lỗi của MỘT luật;
- * lỗi hạ tầng (CSDL) thì ném để nơi gọi ghi lại.
+ * Một lượt của bộ máy — gọi từ job `alerts` của tổ chức NHÀ, từ job `workflows` của tổ chức khách (G-SCHED,
+ * `lib/workflow/scheduled.ts`), hoặc nút «Chạy lượt kiểm tra ngay» — luôn đã ở trong `withOrganization`. Không ném vì
+ * lỗi của MỘT luật; lỗi hạ tầng (CSDL) thì ném để nơi gọi ghi lại.
+ *
+ * `deadline` (mốc `Date.now()`, tuỳ chọn): TRẦN THỜI GIAN của lượt. Quá mốc thì dừng TRƯỚC sự kiện / lượt chờ duyệt /
+ * lượt treo chưa xét — y như trần hành động — và kết quả mang `timeBudgetHit`. Không khai ⇒ hành vi như trước (nhà).
  */
-export async function runWorkflows(opts: { limit?: number } = {}): Promise<RunWorkflowsResult> {
-  const c: Counters = { events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0, actions: 0 };
+export async function runWorkflows(opts: { limit?: number; deadline?: number } = {}): Promise<RunWorkflowsResult> {
+  const c: Counters = { events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0, actions: 0, deadline: opts.deadline };
   if (!(await canUseModule("work"))) return { events: 0, runs: 0, executed: 0, waiting: 0, failed: 0, recovered: 0 };
   // CÔNG TẮC KHẨN của người vận hành: hỏi TRƯỚC mọi lượt đọc / ghi CSDL của tổ chức — tạm dừng là không chạm gì cả.
   const pause = await workflowsPaused((await currentOrganization()).code);
@@ -498,6 +523,8 @@ export async function runWorkflows(opts: { limit?: number } = {}): Promise<RunWo
     const cost = matching.filter((r) => r.mode === "LIVE" && !r.gate).reduce((s, r) => s + r.actions.length, 0);
     // Quá trần hành động: dừng TRƯỚC sự kiện này, con trỏ không đi qua nó — lượt sau xét tiếp.
     if (cost > 0 && c.actions > 0 && c.actions + cost > ACTION_BUDGET) break;
+    // Quá trần thời gian: cùng cách dừng — con trỏ đứng trước sự kiện chưa xét.
+    if (pastDeadline(c)) break;
     if (matching.length) {
       const subject = await subjectOfEvent(ev);
       const depth = await eventDepth(db, ev, depthCache);
@@ -509,7 +536,7 @@ export async function runWorkflows(opts: { limit?: number } = {}): Promise<RunWo
   await advanceEventCursor(db, cursor, last);
   await sweepWaiting(db, c, now);
   await recoverStaleRuns(db, c, now);
-  return { events: c.events, runs: c.runs, executed: c.executed, waiting: c.waiting, failed: c.failed, recovered: c.recovered };
+  return { events: c.events, runs: c.runs, executed: c.executed, waiting: c.waiting, failed: c.failed, recovered: c.recovered, ...(c.timeBudgetHit ? { timeBudgetHit: true as const } : {}) };
 }
 
 /** Lượt chạy treo của tổ chức hiện hành (xem `lib/workflow/stale.ts`) — CHỈ ĐỌC. */

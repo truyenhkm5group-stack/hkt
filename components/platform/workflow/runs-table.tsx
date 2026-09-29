@@ -12,9 +12,10 @@ import { cn } from "@/lib/utils";
  * Mỗi trạng thái có nhãn tiếng Việt riêng: «Chạy thử — không làm thật» KHÁC «Đã làm» (người đọc phải biết máy
  * đã thật sự tạo việc hay chưa). Lượt chờ duyệt trỏ về hàng đợi duyệt đã có — không có nút duyệt thứ hai ở đây.
  */
-export function WorkflowRunsTable({ runs }: { runs: WorkflowRunRow[] }) {
+export function WorkflowRunsTable({ runs, schedule }: { runs: WorkflowRunRow[]; schedule: string | null }) {
   if (runs.length === 0) {
-    return <p className="p-4 text-sm text-muted-foreground">Chưa có lượt chạy nào — luật chạy ké job cảnh báo (10 phút / lượt) sau khi được bật.</p>;
+    // Câu nhịp dựng ở máy chủ từ CÙNG hằng số / gói mà job `workflows` dùng (`lib/constants/workflow-cadence.ts`) — không gõ số ở đây.
+    return <p className="p-4 text-sm text-muted-foreground">Chưa có lượt chạy nào — máy bắt đầu xét luật sau khi được bật.{schedule ? ` ${schedule}` : ""}</p>;
   }
   return (
     <div className="overflow-x-auto rounded-xl border">

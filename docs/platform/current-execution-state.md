@@ -13,6 +13,12 @@ trang sức khoẻ + công tắc khẩn + đổi gói, chạy lại cô lập 24
 **DỪNG MỞ RỘNG NỀN TẢNG Ở ĐÂY.** Việc kế tiếp là khách thương mại đầu tiên HSLC SHOP — workstream / phiên RIÊNG, đọc
 `hslc-commercial-pilot-handoff.md` (bảng HSLC SELF-SERVICE GAP + thứ tự gap P0). Chưa triển khai HSLC trong phiên này.
 
+**G-SCHED (chủ duyệt 29/09/2026) — nhánh `claude/platform-pilot-g-sched`, CHƯA gộp / deploy.** Luật tự động + việc định
+kỳ của tổ chức khách tự chạy mỗi 10 phút (nhịp theo gói, ≥ 5 phút; `lib/constants/workflow-cadence.ts`), tuần tự từng tổ
+chức, trần 60 giây / tổ chức / lượt, qua job `workflows` + tầng fan-out tự động hoá (`SCHEDULER_AUTOMATION_FANOUT`, compose
+đặt `1`). Luật của VNX vẫn chạy ké job cảnh báo, lịch giữ nguyên. Tạm dừng một tổ chức: công tắc khẩn «Tạm dừng mọi
+luật»; cả nền tảng: `.env` `SCHEDULER_AUTOMATION_FANOUT="0"` + khởi động lại scheduler (`pilot-operations.md` mục 3a).
+
 ## Production (erp.vnxcommerce.com)
 
 | Mốc | Commit | PR | Migration |
@@ -55,7 +61,7 @@ tổ chức · màn duyệt lõi.
 
 1. `PLATFORM_SECRETS_KEY` trên production: tạo secret GitHub (`openssl rand -base64 48`) rồi dispatch deploy — thiếu thì
    tổ chức khác không lưu được bí mật kết nối (VNX không ảnh hưởng). Sau khi đặt: checklist V1–V7 (`launch-gates.md` A.5).
-   Quyết định kinh doanh còn treo cho pilot: G-ORDER · G-SCHED (`pilot-readiness.md` mục 4–5).
+   Quyết định kinh doanh còn treo cho pilot: G-ORDER (`pilot-readiness.md` mục 4–5). G-SCHED đã duyệt 29/09 (xem trên).
 2. Đăng ký `/start`: TẮT. Bật «Cần mã mời» ở `/platform` → Cổng mở bán (không deploy); `open` cần trần môi trường.
 3. Sao lưu tổ chức: dung lượng Drive, tải VPS 02–05 giờ, diễn tập khôi phục tự động (C1–C6).
 4. Ai trả tiền token Copilot cho tổ chức khác (hiện Copilot chỉ ở tổ chức nhà; AI Builder dùng khoá của chính tổ chức).

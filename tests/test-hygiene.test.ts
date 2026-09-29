@@ -167,6 +167,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT VIETTELPOST_WEBHOOK_SECRET (chuỗi BỊA) để route webhook có một bí mật để so, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của route đang đo (401/413/429), không phải điều kiện của kết luận.",
   "tests/platform-jobs.test.ts":
     "ĐẶT khoá BỊA (PANCAKE_*, FACEBOOK_ACCESS_TOKEN, VIETTELPOST_API_KEY, ERP_AGENT_GITHUB_*, CRON_SECRET) để đối chứng 'nhà thấy có kết nối / tổ chức khác thì không', token GitHub đang đệm, và 401/200 của tuyến danh sách tổ chức; chụp lại rồi trả từng khoá về nguyên trạng trong finally. Đó là ĐẦU VÀO; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
+  "tests/g-sched.test.ts":
+    "ĐẶT CRON_SECRET (chuỗi BỊA) để lượt fan-out thử gọi đúng tuyến /api/sync/workflows?wait=1&org=… như bộ lập lịch, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của tuyến đang đo; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/ads-kill-switch.test.ts":
     "ĐẶT ADS_WRITE_ENABLED / ADS_WRITE_MODE / FACEBOOK_ACCESS_TOKEN (token BỊA) để chốt env mở ra, rồi mới đo được thứ bài này hỏi — công tắc settings có chặn lời gọi ghi ra mạng không (fetch là bản giả đếm lượt gọi). Trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
