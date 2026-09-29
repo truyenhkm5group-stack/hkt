@@ -525,16 +525,36 @@ export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED'
  *     bằng định danh ở `lib/returns/product-context.ts`.
  *  4. ...nhưng KHÔNG tính khi vận đơn chiều đi cùng mã gốc đã tự nằm trong hàng chờ, hoặc đã được
  *     kho nhận / đếm: cùng một kiện vật lý mà hiện hai dòng thì kho đếm hai lần, tồn cộng hai lần.
+ *
+ * ─── MỆNH ĐỀ 4 LÀ TRUY VẤN CON KHÔNG TƯƠNG QUAN (29/09/2026) ───
+ *
+ * Bản cũ viết `not exists (select 1 from shipments g where g.id <> "shipments"."id" and … in
+ * (upper(g.vtp_order_number), upper(g.tracking_code)) …)`: tương quan theo từng vận đơn chiều về, và
+ * `upper(...)` trên cột nên không index nào đỡ — đo production: 95 lượt × 6,6 ms quét 2.770 dòng mỗi
+ * lượt ≈ 627 ms, trong CẢ BỐN nơi dùng vị ngữ này (bảng đếm · hàng chờ nhận · KPI kho · xác nhận
+ * hàng loạt — /inventory/returns 4–5 s).
+ *
+ * `g.id <> "shipments"."id"` là THỪA: nhánh này chỉ chạy khi vận đơn đang xét có `order_id` NULL, còn
+ * `g` bắt buộc `order_id` khác NULL — hai dòng không thể trùng. Bỏ nó đi thì tập mã của các vận đơn
+ * chiều đi đã về không còn phụ thuộc dòng đang xét: Postgres dựng bảng băm MỘT lần (hashed SubPlan).
+ * `coalesce(… in (…), false)` giữ đúng nghĩa của `not exists` khi mã gốc rỗng (NULL ⇒ không khớp ⇒
+ * vẫn tính), và mã NULL bị loại khỏi tập để `in` không bao giờ trả NULL vì phía phải.
+ * Đối chiếu trên TOÀN bảng shipments production: 3.130 vận đơn, cũ 626 · mới 626 · lệch 0 (có 315 vận
+ * đơn chiều về đã trả — đúng nhánh viết lại).
  */
+const DA_VE_KHO_G = sql.raw(`(g.stage = 'RETURNED' or g.return_received_at is not null or exists (select 1 from return_inspections ri2 where ri2.shipment_id = g.id))`);
 export const IS_RETURN_AWAITING_WAREHOUSE = sql`(${s.stage} = 'RETURNED'
   and ${s.returnReceivedAt} is null
   and not exists (select 1 from return_inspections ri where ri.shipment_id = ${s.id})
-  and (${s.orderId} is not null or not exists (
-    select 1 from shipments g
-    where g.id <> ${s.id} and g.order_id is not null
-      and nullif(upper(trim(coalesce(${s.orderReference}, ''))), '') in (upper(g.vtp_order_number), upper(g.tracking_code))
-      and (g.stage = 'RETURNED' or g.return_received_at is not null or exists (select 1 from return_inspections ri2 where ri2.shipment_id = g.id))
-  )))`;
+  and (${s.orderId} is not null or not coalesce(
+    nullif(upper(trim(coalesce(${s.orderReference}, ''))), '') in (
+      select m.k from (
+        select upper(g.vtp_order_number) as k from shipments g where g.order_id is not null and ${DA_VE_KHO_G}
+        union all
+        select upper(g.tracking_code) from shipments g where g.order_id is not null and ${DA_VE_KHO_G}
+      ) m
+      where m.k is not null
+    ), false)))`;
 
 /**
  * Hàng hoàn ở GRAIN ĐƠN (cần orders LEFT JOIN shipments) — dùng cho tồn kho.
