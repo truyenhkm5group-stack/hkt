@@ -31,6 +31,7 @@ import { provinceRegion } from "@/lib/constants/vn-regions";
 import { todayVN, vnDateKey } from "@/lib/format";
 import { CONFIRMED_AT } from "@/lib/queries/conversion-funnel";
 import { MIN_TIER_SAMPLE, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { rowsOf } from "@/lib/sql-rows";
@@ -95,6 +96,8 @@ async function waitCells(period: Period, origin: WaitOrigin, filter: ProductFilt
       province: o.shipProvince,
       value: o.totalPriceAfterDiscount,
       outcome: outcomeColumn(),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
       originAt: sql<Date | null>`${originSql(origin)}`.as("origin_at"),
       handoffAt: sql<Date | null>`${sql.raw(CARRIER_HANDOFF_AT_SQL)}`.as("handoff_at"),
       cancelAt: sql<Date | null>`(select min(h.updated_at) from order_status_history h where h.order_id = ${o.id} and h.status in ${codeList(PANCAKE_CANCEL_CODES)})`.as("cancel_at"),
@@ -144,7 +147,7 @@ async function waitCells(period: Period, origin: WaitOrigin, filter: ProductFilt
         returned: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
         cancelledBeforeShip: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED' and ${base.handoffAt} is null)`,
-        deliveredValue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+        deliveredValue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery}), 0)`,
         returnedValue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       })
       .from(base)

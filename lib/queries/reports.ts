@@ -6,6 +6,7 @@ import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
 import { COD_COLLECTABLE, ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { populationFilter } from "@/lib/queries/metrics";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
@@ -81,6 +82,8 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
       */
       duplicate: sql<boolean>`exists (select 1 from order_attributions oa where oa.order_id = ${schema.orders.id} and oa.status = 'DUPLICATE')`.as("order_duplicate"),
       deliveryRate: sql<number | null>`${deliveryRate ?? sql`null::numeric`}`.as("projected_delivery_rate"),
+      /** "Giao" có kéo theo doanh thu không — đơn tay giao bằng phiếu ký nhận thì KHÔNG (G-ORDER, ORDER_OUTCOME.md mục 11). */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
@@ -113,6 +116,11 @@ export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBas
 function facts(base: ReturnType<typeof orderFacts>) {
   return {
     success: sql`${base.outcome} = 'DELIVERED'`,
+    /**
+     * Population của mọi tổng TIỀN (doanh thu, giá vốn, trả trước) theo giao thành công. Đơn tay giao bằng phiếu ký nhận
+     * đứng ngoài — phiếu giao không phải chứng từ thanh toán (G-ORDER); nó vẫn nằm trong số ĐƠN `success`.
+     */
+    successRevenue: sql`(${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery})`,
     notCancelled: sql`${base.orderStage} not in ('CANCELLED','DELETED')`,
     shipped: sql`${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)})`,
     returned: sql`${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`,
@@ -161,12 +169,12 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
     .select({
       orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
       successOrders: sql<number>`count(*) filter (where ${f.success})`,
-      revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.success}), 0)`,
-      cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.success}), 0)`,
+      revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.successRevenue}), 0)`,
+      cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.successRevenue}), 0)`,
       shipping: sql<number>`coalesce(sum(${base.partnerFee}) filter (where ${f.shipped}), 0)`,
       returnFee: sql<number>`coalesce(sum(${base.returnFee}) filter (where ${f.notCancelled}), 0)`,
       marketplaceFee: sql<number>`coalesce(sum(${base.feeMarketplace}) filter (where ${f.notCancelled}), 0)`,
-      prepaid: sql<number>`coalesce(sum(${base.prepaidTotal}) filter (where ${f.success}), 0)`,
+      prepaid: sql<number>`coalesce(sum(${base.prepaidTotal}) filter (where ${f.successRevenue}), 0)`,
       returned: sql<number>`count(*) filter (where ${f.returned})`,
       cancelled: sql<number>`count(*) filter (where ${f.cancelled})`,
       lostShipping: sql<number>`coalesce(sum(${base.partnerFee} + ${base.returnFee}) filter (where ${f.returned}), 0)`,
@@ -271,8 +279,8 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
         day: base.day,
         orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
         success: sql<number>`count(*) filter (where ${f.success})`,
-        revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.success}), 0)`,
-        cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.success}), 0)`,
+        revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.successRevenue}), 0)`,
+        cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.successRevenue}), 0)`,
         shipping: sql<number>`coalesce(sum(${base.partnerFee}) filter (where ${f.shipped}), 0)`,
         returnFee: sql<number>`coalesce(sum(${base.returnFee}) filter (where ${f.notCancelled}), 0)`,
         marketplaceFee: sql<number>`coalesce(sum(${base.feeMarketplace}) filter (where ${f.notCancelled}), 0)`,
@@ -353,10 +361,10 @@ async function getProfitReportUncached(period: Period, basis: ReportBasis) {
   const groupSelect = {
     orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
     success: sql<number>`count(*) filter (where ${f.success})`,
-    revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.success}), 0)`,
-    cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.success}), 0)`,
+    revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${f.successRevenue}), 0)`,
+    cogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${f.successRevenue}), 0)`,
   };
-  const groupOrder = desc(sql`coalesce(sum(${base.revenue}) filter (where ${f.success}), 0)`);
+  const groupOrder = desc(sql`coalesce(sum(${base.revenue}) filter (where ${f.successRevenue}), 0)`);
 
   const [current, previous, channels, sellers, products, daily, codPaid, codWaiting, batchesInPeriod, batchesToDate, linkedPaidToDate] = await Promise.all([
     pnl(period.from, period.to, basis),
@@ -381,7 +389,7 @@ async function getProfitReportUncached(period: Period, basis: ReportBasis) {
       // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
       .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
       .leftJoin(lastCost, eq(lastCost.variantId, schema.productVariants.id))
-      .where(and(inPeriod, SUCCESS))
+      .where(and(inPeriod, SUCCESS, REVENUE_RECOGNIZED_ON_DELIVERY))
       .groupBy(schema.orderItems.productName)
       .orderBy(desc(sql`coalesce(sum(${schema.orderItems.lineTotal}), 0) - coalesce(sum(${unitCost} * ${schema.orderItems.quantity}), 0)`))
       .limit(15),

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_EVER_CONFIRMED } from "@/lib/queries/conversion-funnel";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
@@ -243,7 +244,8 @@ async function funnelBySourceUncached(period: Period): Promise<FunnelBySource[]>
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
-      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+      // Doanh thu giao thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)`,
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).

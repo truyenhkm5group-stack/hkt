@@ -30,6 +30,7 @@ import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { RECONCILIATION_RULES, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { sqlIsTestTracking } from "@/lib/constants/truth";
+import { NOT_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
 
 const s = schema.shipments;
 const o = schema.orders;
@@ -151,7 +152,8 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
         .select({ code: sql<string>`coalesce(${o.customId}, ${o.id})` })
         .from(o)
         .leftJoin(s, eq(s.orderId, o.id))
-        .where(and(isNull(s.id), inArray(o.stage, ["SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"])))
+        // Đơn TẠO TAY không qua ĐVVC: "Đã nhận" đến từ phiếu giao có ký nhận (G-ORDER), không phải một vận đơn bị thiếu.
+        .where(and(isNull(s.id), inArray(o.stage, ["SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"]), NOT_MANUAL_ORDER))
         .limit(500),
       // Vận đơn CHIỀU HOÀN không có đơn là ĐÚNG THIẾT KẾ (dòng riêng, `order_reference` trỏ về vận
       // đơn gốc), và gói tin TEST của ĐVVC không phải gói hàng thật. Đếm chúng như sự cố hệ thống

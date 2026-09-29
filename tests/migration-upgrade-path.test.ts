@@ -125,6 +125,7 @@ const MOI = [
   "0175_video_scale_showcase",
   "0176_platform_ai_usage",
   "0177_platform_pilot_stage",
+  "0178_order_delivery_notes",
 ] as const;
 
 /*
@@ -312,6 +313,19 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'platform_settings'"), 1, "bước 2: 0172 phải tạo bảng platform_settings");
     assert.equal(await dem("select count(*)::int as n from platform_settings"), 0, "bước 2: 0172 không được gieo dòng nào — mở /start là việc của người vận hành");
     await assert.rejects(client.query(`insert into platform_settings (key, value) values ('platform.signup.mode', '"mo-het"'::jsonb)`), "bước 2: 0172 — giá trị ngoài off/invite/open phải bị CSDL từ chối");
+
+    // 0178 (G-ORDER — phiếu giao có ký nhận của đơn tạo tay): bảng mới RỖNG (không đoán đơn nào "đã giao" — mục 8.8, 35);
+    // CHECK chỉ nhận đơn `erp-`, bắt buộc tên người ký, huỷ phải có lý do; một phiếu còn hiệu lực mỗi đơn.
+    assert.equal(await dem("select count(*)::int as n from order_delivery_notes"), 0, "bước 2: 0178 không được gieo phiếu giao nào");
+    await client.query(`insert into orders (id, stage, inserted_at) values ('erp-up-dn1', 'CONFIRMED', now()), ('88990011', 'CONFIRMED', now())`);
+    await assert.rejects(client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn0', '88990011', now(), 'Khách')`), "bước 2: 0178 — đơn Pancake (id không `erp-`) không nhận phiếu giao");
+    await assert.rejects(client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn1', 'erp-up-dn1', now(), '  ')`), "bước 2: 0178 — thiếu tên người ký nhận bị từ chối");
+    await client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn2', 'erp-up-dn1', now(), 'Chị Lan')`);
+    await assert.rejects(client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn3', 'erp-up-dn1', now(), 'Chị Lan')`), "bước 2: 0178 — hai phiếu còn hiệu lực cho một đơn bị từ chối");
+    await assert.rejects(client.query(`update order_delivery_notes set voided_at = now() where id = 'up-dn2'`), "bước 2: 0178 — huỷ phiếu không lý do bị từ chối");
+    await client.query(`update order_delivery_notes set voided_at = now(), void_reason = 'ghi nhầm đơn' where id = 'up-dn2'`);
+    await client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn3', 'erp-up-dn1', now(), 'Anh Nam')`);
+    assert.equal(await dem("select count(*)::int as n from order_delivery_notes where order_id = 'erp-up-dn1'"), 2, "bước 2: 0178 — huỷ phiếu giữ vết, phiếu mới ghi được sau khi huỷ");
 
     // 0176 (sổ dùng AI): bảng mới RỖNG (không dựng lại lượt AI cũ — mục 8.8, 35); ba gói có khoá `ai` và KHÔNG gói nào
     // có credit nền tảng > 0 (AI do nền tảng trả tiền không bật bằng migration); CHECK chặn nguồn / trạng thái lạ.

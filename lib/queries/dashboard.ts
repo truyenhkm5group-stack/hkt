@@ -149,7 +149,7 @@ async function getDashboardDataUncached(period: Period) {
           orders: count(),
           revenue: sum(scopeFacts.revenue),
           success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)`,
-          successRevenue: sql<number>`sum(case when ${scopeMetrics.isDelivered} then ${scopeFacts.revenue} else 0 end)`,
+          successRevenue: sql<number>`sum(case when ${scopeMetrics.isDeliveredRevenue} then ${scopeFacts.revenue} else 0 end)`,
         })
         .from(scopeFacts)
         .groupBy(scopeFacts.day)

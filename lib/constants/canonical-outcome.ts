@@ -30,4 +30,12 @@
  * Trong lúc đó báo cáo chạy đường tính trực tiếp — chậm hơn nhưng ĐÚNG, vì `ORDER_OUTCOME_FAST` rơi
  * về chính công thức mới.
  */
+/*
+ * ─── G-ORDER (29/09/2026): nhánh "đơn tay + phiếu giao có ký nhận ⇒ DELIVERED" — CỐ Ý KHÔNG tăng số ───
+ *
+ * Nhánh mới chỉ khớp đơn `erp-` CÓ phiếu còn hiệu lực, và bảng `order_delivery_notes` sinh ra RỖNG (0178): lúc deploy
+ * không dòng vật chất hoá nào đổi kết luận. Mỗi lượt ghi / huỷ phiếu đều đặt `orders.updated_at` ⇒ dòng của ĐÚNG đơn
+ * đó thành cũ theo điều kiện tươi mới và `ORDER_OUTCOME_FAST` tự tính lại. Tăng số ở đây chỉ làm mọi dòng của nhà
+ * thành cũ cùng lúc mà không một con số nào đổi.
+ */
 export const CANONICAL_OUTCOME_VERSION = 3;

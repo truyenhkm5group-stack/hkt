@@ -16,15 +16,24 @@
  * Sửa / huỷ: CHỈ đơn mang id `erp-` (đơn Pancake ⇒ NOT_SUPPORTED — lượt đồng bộ kế tiếp ghi đè lại, người sửa tưởng đã
  * lưu mà dữ liệu tự quay về). Đơn đã huỷ không sửa được, không huỷ lại (bấm hai lần không ghi gì thêm — mục 61).
  *
- * KHÔNG ghi phiếu kho, KHÔNG tạo vận đơn, KHÔNG chạm tiền thực thu: tồn thực tế và ORDER_OUTCOME không đổi (luật 10, 3.1).
+ * Tạo / sửa / huỷ KHÔNG ghi phiếu kho, KHÔNG tạo vận đơn, KHÔNG chạm tiền thực thu: tồn thực tế và ORDER_OUTCOME không đổi
+ * (luật 10, 3.1).
+ *
+ * XÁC NHẬN GIAO (G-ORDER — ORDER_OUTCOME.md mục 11): `confirmManualDeliveryCore` ghi PHIẾU GIAO CÓ KÝ NHẬN cho đơn
+ * "Đã xác nhận" ⇒ stage `DELIVERED`; từ đó `ORDER_OUTCOME` = `DELIVERED` và hàng rời kho (`ORDER_LEFT_WAREHOUSE`) — cả hai
+ * đọc DÒNG PHIẾU, không đọc stage. Tiền KHÔNG đổi: không ghi thanh toán, không đổi COD nào. Ghi nhầm ⇒
+ * `voidManualDeliveryCore` (bắt buộc lý do, không xoá cứng) ⇒ đơn về "Đã xác nhận". Đơn đã giao không sửa / huỷ được.
  */
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
+  canConfirmManualDelivery,
+  DELIVERY_NOTE_LIMITS,
   isManualOrderId,
+  MANUAL_DELIVERY_FROM_STAGES,
   manualOrderRaw,
   manualOrderStageLabel,
   manualOrderTotals,
@@ -243,6 +252,8 @@ async function loadEditable(orderId: unknown): Promise<ExistingManual> {
   if (!row) return fail("NOT_FOUND", "Không có đơn này.");
   if (!isManualOrderId(row.id) || !manualOrderRaw(row.raw)) return fail("NOT_SUPPORTED", "Đơn đồng bộ từ nguồn khác — sửa ở nguồn; ERP không ghi đè đơn đồng bộ.");
   if (row.stage === "CANCELLED") return fail("CONFLICT", "Đơn đã huỷ — không sửa được.");
+  // Đơn đã giao (phiếu ký nhận) là chứng từ đã khép: sửa dòng hàng / huỷ đơn lúc này là viết lại thứ khách đã ký nhận.
+  if (row.stage === "DELIVERED") return fail("CONFLICT", "Đơn đã giao (có phiếu ký nhận) — không sửa / huỷ được. Ghi nhầm thì huỷ phiếu giao trước.");
   return { ok: true, row };
 }
 
@@ -337,7 +348,7 @@ export async function manualOrderFormValues(orderId: string): Promise<{ customer
   const db = await getDb();
   const [row] = await db.select().from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
   const raw = row ? manualOrderRaw(row.raw) : null;
-  if (!row || !raw || !isManualOrderId(row.id) || row.stage === "CANCELLED") return null;
+  if (!row || !raw || !isManualOrderId(row.id) || row.stage === "CANCELLED" || row.stage === "DELIVERED") return null;
   const items = await itemsSnapshot(row.id);
   return {
     customerId: row.customerId ?? "",
@@ -350,22 +361,140 @@ export async function manualOrderFormValues(orderId: string): Promise<{ customer
   };
 }
 
-/**
- * Điền sẵn hộp thoại XUẤT TAY (`/inventory/receipts?xuat-don=<id>`) cho MỘT đơn tay: mẫu mã + số lượng của đơn, người
- * nhận = khách, tham chiếu = mã đơn. Chỉ là số KHỞI TẠO — người kho sửa theo số ĐẾM THẬT rồi lưu qua đúng
- * `createStockReceipt`. Đơn đồng bộ / đã huỷ / không có ⇒ `null` (đơn đồng bộ rời kho qua ĐVVC, không qua phiếu này).
- */
-export async function manualOrderIssuePrefill(orderId: string): Promise<{ orderId: string; customerName: string; qty: Record<string, number>; unmapped: { cell: string; qty: number }[] } | null> {
-  if (!isManualOrderId(orderId) || orderId.length > 200) return null;
+// ─────────────────────────── Xác nhận giao bằng phiếu có ký nhận (G-ORDER) ───────────────────────────
+
+const deliveryZ = z
+  .object({
+    signedAt: z.iso.datetime({ offset: true, error: "Nhập mốc người nhận ký (ngày giờ)" }),
+    receiverName: z.string({ error: "Nhập tên người ký nhận" }).trim().min(1, "Nhập tên người ký nhận trên phiếu").max(DELIVERY_NOTE_LIMITS.receiverMax, "Tên người ký nhận quá dài"),
+    note: z.string().max(DELIVERY_NOTE_LIMITS.noteMax, "Ghi chú quá dài").default(""),
+  })
+  .strict();
+const voidDeliveryZ = z.object({ reason: z.string().trim().min(DELIVERY_NOTE_LIMITS.reasonMin, "nói vì sao huỷ phiếu giao").max(DELIVERY_NOTE_LIMITS.reasonMax) }).strict();
+
+async function loadManual(orderId: unknown): Promise<ExistingManual> {
+  if (typeof orderId !== "string" || !orderId || orderId.length > 200) return fail("NOT_FOUND", "Không có đơn này.");
   const db = await getDb();
-  const [row] = await db.select({ id: schema.orders.id, stage: schema.orders.stage, raw: schema.orders.raw, name: schema.orders.billFullName }).from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
-  if (!row || row.stage === "CANCELLED" || !manualOrderRaw(row.raw)) return null;
-  const items = await db.select({ variantId: schema.orderItems.variantId, quantity: schema.orderItems.quantity, name: schema.orderItems.productName, sku: schema.orderItems.sku }).from(schema.orderItems).where(eq(schema.orderItems.orderId, row.id));
-  const qty: Record<string, number> = {};
-  const unmapped: { cell: string; qty: number }[] = [];
-  for (const it of items) {
-    if (it.variantId) qty[it.variantId] = (qty[it.variantId] ?? 0) + it.quantity;
-    else unmapped.push({ cell: it.sku || it.name, qty: it.quantity });
+  const [row] = await db.select().from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
+  if (!row) return fail("NOT_FOUND", "Không có đơn này.");
+  if (!isManualOrderId(row.id) || !manualOrderRaw(row.raw)) return fail("NOT_SUPPORTED", "Đơn đồng bộ từ nguồn khác — kết quả giao theo chứng từ đơn vị vận chuyển, không theo phiếu giao tay.");
+  return { ok: true, row };
+}
+
+/**
+ * XÁC NHẬN ĐÃ GIAO bằng phiếu giao có ký nhận. Cổng: cùng `manualOrderGate` (tổ chức không đồng bộ đơn + `orders:write`)
+ * → đơn tay → CHỈ "Đã xác nhận" → không có vận đơn nào (đơn có vận đơn đi theo chứng từ ĐVVC, không nhận phiếu tay) →
+ * zod → mốc ký không ở tương lai. MỘT giao dịch: stage `DELIVERED` (chỉ khi stage còn là CONFIRMED — bấm hai lần hay hai
+ * người bấm cùng lúc thì lượt sau không ghi gì) + phiếu + lịch sử trạng thái. Nhật ký `ORDER_MANUAL_DELIVER`.
+ */
+export async function confirmManualDeliveryCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const existing = await loadManual(orderId);
+  if (!existing.ok) return existing;
+  const row = existing.row;
+  if (!canConfirmManualDelivery(row.stage)) {
+    return fail("CONFLICT", row.stage === "DELIVERED" ? "Đơn đã có phiếu giao còn hiệu lực." : `Chỉ đơn «${manualOrderStageLabel("CONFIRMED")}» mới xác nhận giao được — chốt đơn với khách trước.`);
   }
-  return { orderId: row.id, customerName: row.name, qty, unmapped };
+  const db = await getDb();
+  const [ship] = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id)).limit(1);
+  if (ship) return fail("NOT_SUPPORTED", "Đơn đã có vận đơn — kết quả giao theo chứng từ đơn vị vận chuyển, không theo phiếu giao tay.");
+  const parsed = deliveryZ.safeParse(rawInput);
+  if (!parsed.success) return fail("INVALID", zodErrors(parsed.error));
+  const signedAt = new Date(parsed.data.signedAt);
+  const now = new Date();
+  if (signedAt.getTime() > now.getTime() + DELIVERY_NOTE_LIMITS.futureSkewMs) return fail("INVALID", [{ field: "signedAt", message: "Mốc ký nhận ở tương lai — nhập đúng ngày giờ trên phiếu." }]);
+  const note = { orderId: row.id, signedAt, receiverName: parsed.data.receiverName, note: parsed.data.note.trim(), recordedByUserId: user.id, recordedByName: user.name, recordedAt: now };
+  const noteId = await db.transaction(async (tx) => {
+    const moved = await tx
+      .update(schema.orders)
+      .set({ stage: "DELIVERED", status: MANUAL_ORDER_STATUS_CODE.DELIVERED, statusName: manualOrderStageLabel("DELIVERED"), lastUpdateStatusAt: now, updatedAt: now })
+      .where(and(eq(schema.orders.id, row.id), inArray(schema.orders.stage, [...MANUAL_DELIVERY_FROM_STAGES])))
+      .returning({ id: schema.orders.id });
+    if (!moved.length) return null;
+    const [ins] = await tx.insert(schema.orderDeliveryNotes).values(note).returning({ id: schema.orderDeliveryNotes.id });
+    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.DELIVERED, oldStatus: row.status, editorName: user.name, updatedAt: now });
+    return ins.id;
+  });
+  if (!noteId) return fail("CONFLICT", "Đơn vừa đổi trạng thái — tải lại trang rồi thử lại.");
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "ORDER_MANUAL_DELIVER",
+    entity: "ORDER",
+    entityId: row.id,
+    before: { stage: row.stage },
+    after: { stage: "DELIVERED", deliveryNoteId: noteId, signedAt: signedAt.toISOString(), receiverName: note.receiverName, note: note.note || null },
+    reason: "Xác nhận đã giao bằng phiếu giao có ký nhận (G-ORDER) — không ghi nhận tiền",
+  });
+  return { ok: true, id: row.id };
+}
+
+/**
+ * HUỶ PHIẾU GIAO (ghi nhầm): bắt buộc lý do; phiếu giữ nguyên làm vết (`voided_*`), đơn về "Đã xác nhận" ⇒ `ORDER_OUTCOME`
+ * thôi `DELIVERED`, hàng quay lại kho (vào lại phần giữ ở khả dụng). Không có phiếu còn hiệu lực ⇒ CONFLICT, không ghi gì
+ * (bấm hai lần — mục 61). Nhật ký `ORDER_MANUAL_DELIVERY_VOID`.
+ */
+export async function voidManualDeliveryCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const existing = await loadManual(orderId);
+  if (!existing.ok) return existing;
+  const parsed = voidDeliveryZ.safeParse(rawInput);
+  if (!parsed.success) return fail("INVALID", zodErrors(parsed.error));
+  const row = existing.row;
+  const now = new Date();
+  const db = await getDb();
+  const voided = await db.transaction(async (tx) => {
+    const [n] = await tx
+      .update(schema.orderDeliveryNotes)
+      .set({ voidedAt: now, voidedByUserId: user.id, voidedByName: user.name, voidReason: parsed.data.reason })
+      .where(and(eq(schema.orderDeliveryNotes.orderId, row.id), isNull(schema.orderDeliveryNotes.voidedAt)))
+      .returning({ id: schema.orderDeliveryNotes.id, signedAt: schema.orderDeliveryNotes.signedAt, receiverName: schema.orderDeliveryNotes.receiverName });
+    if (!n) return null;
+    await tx
+      .update(schema.orders)
+      .set({ stage: "CONFIRMED", status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, statusName: manualOrderStageLabel("CONFIRMED"), lastUpdateStatusAt: now, updatedAt: now })
+      .where(and(eq(schema.orders.id, row.id), eq(schema.orders.stage, "DELIVERED")));
+    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, oldStatus: row.status, editorName: user.name, updatedAt: now });
+    return n;
+  });
+  if (!voided) return fail("CONFLICT", "Đơn không có phiếu giao còn hiệu lực.");
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "ORDER_MANUAL_DELIVERY_VOID",
+    entity: "ORDER",
+    entityId: row.id,
+    before: { stage: row.stage, deliveryNoteId: voided.id, signedAt: voided.signedAt.toISOString(), receiverName: voided.receiverName },
+    after: { stage: "CONFIRMED", deliveryNoteId: voided.id, voided: true },
+    reason: parsed.data.reason,
+  });
+  return { ok: true, id: row.id };
+}
+
+export type DeliveryNoteView = { id: string; signedAt: Date; receiverName: string; note: string; recordedByName: string; recordedAt: Date; voidedAt: Date | null; voidedByName: string; voidReason: string | null };
+
+/**
+ * Phiếu giao của MỘT đơn tay (còn hiệu lực + đã huỷ, mới nhất trước) và các phiếu XUẤT TAY cũ tham chiếu tới đơn — bản
+ * trước có lối "Lập phiếu xuất kho" điền `reference` = id đơn. Có phiếu xuất như vậy thì xác nhận giao sẽ trừ tồn LẦN
+ * HAI: trang đơn nêu ra để kho lập phiếu điều chỉnh tăng (ORDER_OUTCOME.md mục 11). ERP không tự sửa dữ liệu kho.
+ */
+export async function manualOrderDeliveryView(orderId: string): Promise<{ active: DeliveryNoteView | null; voided: DeliveryNoteView[]; priorIssues: { id: string; receivedAt: Date; totalQuantity: number }[] }> {
+  if (!isManualOrderId(orderId) || orderId.length > 200) return { active: null, voided: [], priorIssues: [] };
+  const db = await getDb();
+  const n = schema.orderDeliveryNotes;
+  const [notes, issues] = await Promise.all([
+    db
+      .select({ id: n.id, signedAt: n.signedAt, receiverName: n.receiverName, note: n.note, recordedByName: n.recordedByName, recordedAt: n.recordedAt, voidedAt: n.voidedAt, voidedByName: n.voidedByName, voidReason: n.voidReason })
+      .from(n)
+      .where(eq(n.orderId, orderId))
+      .orderBy(desc(n.recordedAt)),
+    db
+      .select({ id: schema.stockReceipts.id, receivedAt: schema.stockReceipts.receivedAt, totalQuantity: schema.stockReceipts.totalQuantity })
+      .from(schema.stockReceipts)
+      .where(and(eq(schema.stockReceipts.kind, "ISSUE"), eq(schema.stockReceipts.reference, orderId)))
+      .orderBy(asc(schema.stockReceipts.receivedAt)),
+  ]);
+  return { active: notes.find((x) => !x.voidedAt) ?? null, voided: notes.filter((x) => x.voidedAt), priorIssues: issues.map((r) => ({ id: r.id, receivedAt: r.receivedAt, totalQuantity: Math.abs(Number(r.totalQuantity ?? 0)) })) };
 }

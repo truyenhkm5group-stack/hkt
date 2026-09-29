@@ -3,7 +3,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { KR_DEFAULT_MINIMUM_SAMPLE, METRIC_BINDINGS, metricStateOf, type MetricValue } from "@/lib/constants/metric-bindings";
 import { slaStateOf } from "@/lib/constants/work";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
-import { COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, metricScope, successRate } from "@/lib/queries/metrics";
+import { COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED_REVENUE, metricScope, successRate } from "@/lib/queries/metrics";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { rowsOf } from "@/lib/sql-rows";
@@ -57,13 +57,15 @@ async function outcomeAggregate(period: Period) {
       revenue: DELIVERED_REVENUE,
       cogs: DELIVERED_COGS,
       // Bao nhiêu đơn giao thành công tra được giá vốn — mẫu số của cảnh báo độ phủ.
-      cogsKnown: sql<number>`count(*) filter (where ${IS_DELIVERED} and ${DELIVERED_COGS_KNOWN})`,
+      cogsKnown: sql<number>`count(*) filter (where ${IS_DELIVERED_REVENUE} and ${DELIVERED_COGS_KNOWN})`,
+      // Mẫu số của độ phủ giá vốn: CÙNG population với doanh thu / giá vốn (đơn tay giao bằng phiếu đứng ngoài — G-ORDER).
+      revenueOrders: sql<number>`count(*) filter (where ${IS_DELIVERED_REVENUE})`,
     })
     .from(o)
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
     .where(metricScope(period)));
   const r = rows[0];
-  return { delivered: Number(r?.delivered ?? 0), returned: Number(r?.returned ?? 0), revenue: Number(r?.revenue ?? 0), cogs: Number(r?.cogs ?? 0), cogsKnown: Number(r?.cogsKnown ?? 0) };
+  return { delivered: Number(r?.delivered ?? 0), returned: Number(r?.returned ?? 0), revenue: Number(r?.revenue ?? 0), cogs: Number(r?.cogs ?? 0), cogsKnown: Number(r?.cogsKnown ?? 0), revenueOrders: Number(r?.revenueOrders ?? 0) };
 }
 
 /** Đơn có tra được giá vốn hay không — dùng để báo độ phủ, không để lọc. */
@@ -109,8 +111,8 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
   },
   async delivered_contribution({ period }) {
     const a = await outcomeAggregate(period);
-    if (!a.delivered) return { value: null, coverage: null, sample: 0, note: "Chưa có đơn giao thành công nào trong kỳ" };
-    const coverage = a.cogsKnown / a.delivered;
+    if (!a.revenueOrders) return { value: null, coverage: null, sample: 0, note: "Chưa có đơn giao thành công nào trong kỳ" };
+    const coverage = a.cogsKnown / a.revenueOrders;
     return { value: a.revenue - a.cogs, coverage, sample: null, note: coverage < 1 ? `Chỉ ${Math.round(coverage * 100)}% đơn giao thành công tra được giá vốn` : "" };
   },
 

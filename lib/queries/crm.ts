@@ -3,6 +3,7 @@ import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CRM_RULE, CRM_SEGMENT_ORDER, type CrmSegment } from "@/lib/constants/crm";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 
 /**
  * ───────────── GIỮ CHÂN KHÁCH ─────────────
@@ -54,7 +55,9 @@ const ORDER_FACTS = sql`
   select orders.customer_id as customer_id,
          orders.inserted_at as at,
          coalesce(orders.total_price_after_discount, 0) as revenue,
-         ${ORDER_OUTCOME_FAST} as outcome
+         ${ORDER_OUTCOME_FAST} as outcome,
+         -- Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — REVENUE_RECOGNIZED_ON_DELIVERY.
+         ${REVENUE_RECOGNIZED_ON_DELIVERY} as revenue_on_delivery
   from orders
   -- MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng doanh thu nhiều lần.
   left join shipments on shipments.order_id = orders.id and ${PRIMARY_ATTEMPT}
@@ -171,7 +174,7 @@ async function dsKhach(db: Awaited<ReturnType<typeof getDb>>) {
       with facts as (${ORDER_FACTS})
       select customer_id,
              count(*) as orders_n,
-             coalesce(sum(revenue), 0) as revenue,
+             coalesce(sum(revenue) filter (where revenue_on_delivery), 0) as revenue,
              min(at) as first_at,
              max(at) as last_at,
              floor(extract(epoch from now() - max(at)) / 86400) as days_since

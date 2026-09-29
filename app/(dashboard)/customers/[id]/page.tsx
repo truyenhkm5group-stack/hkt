@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { requirePermission, type SessionUser } from "@/lib/auth/session";
 import { CustomerProfileForm } from "@/app/(dashboard)/customers/[id]/customer-profile-form";
 import { objectDef } from "@/lib/constants/object-registry";
+import { isManualOrderId } from "@/lib/constants/manual-orders";
 import { MetadataError } from "@/lib/metadata/errors";
 import { listFields } from "@/lib/metadata/fields";
 import { getPublishedForm } from "@/lib/metadata/forms";
@@ -173,7 +174,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                               {o.shipment ? <CodStatusBadge status={o.shipment.codStatus} className="px-1.5 text-[10px]" /> : <span>COD</span>}
                             </div>
                           ) : (
-                            <div className="mt-0.5 text-[11px] text-muted-foreground">Đã thanh toán</div>
+                            // Đơn tạo tay không có COD nào để đọc: "0 thu hộ" KHÔNG có nghĩa là đã thu (G-ORDER — tiền theo chứng từ).
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">{isManualOrderId(o.id) ? "Chưa đối chiếu tiền" : "Đã thanh toán"}</div>
                           )}
                         </TableCell>
                       </TableRow>

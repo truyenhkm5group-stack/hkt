@@ -11,6 +11,7 @@ import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID, orderAdCandidates, orde
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { AD_MESSAGES, spendPeriod } from "@/lib/queries/ads-roas";
 import { metricScope } from "@/lib/queries/metrics";
 import { pnlFacts } from "@/lib/queries/reports";
@@ -553,6 +554,8 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
       orderShipping: sql<number>`coalesce(${o.partnerFee}, 0) + coalesce(${o.returnFee}, 0) + coalesce(${o.feeMarketplace}, 0)`.as("md_ship"),
       outcome: ORDER_OUTCOME_FAST.as("md_outcome"),
       duplicate: sql<boolean>`${IS_DUPLICATE_ORDER}`.as("md_dup"),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("md_revenue_on_delivery"),
     })
     .from(o)
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
@@ -564,6 +567,8 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
     .as("md_product_facts");
 
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
+  /** "Doanh thu thực" chỉ trên đơn mà "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER). */
+  const deliveredRevenue = sql`(${delivered} and ${facts.revenueOnDelivery})`;
   const returned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
@@ -578,21 +583,21 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
       orders: cnt(booked),
       units: sql<number>`coalesce(sum(${facts.qty}) filter (where ${booked} and ${live}), 0)`,
       posRevenue: money(sql`${facts.lineRevenue}`, booked),
-      deliveredRevenue: money(sql`${facts.lineRevenue}`, delivered),
+      deliveredRevenue: money(sql`${facts.lineRevenue}`, deliveredRevenue),
       deliveredOrders: cnt(delivered),
       returnedOrders: cnt(returned),
       cancelledOrders: cnt(sql`${facts.outcome} = 'CANCELLED'`),
       pendingOrders: cnt(open),
       shippedOrders: cnt(shipped),
-      cogs: money(sql`${facts.lineCogs}`, delivered),
+      cogs: money(sql`${facts.lineCogs}`, deliveredRevenue),
       shippingCost: money(sql`${facts.orderShipping} * coalesce(${facts.shipShare}, 0)`, sql`(${delivered} or ${returned})`),
       // Tiền của đơn CHƯA NGÃ NGŨ, chưa nhân tỷ lệ: lọc theo mã thì cả ngày chỉ có MỘT tỷ lệ, nên
       // phép nhân làm ở TypeScript — rẻ hơn, và đọc ra được ngay tỷ lệ nào đã được dùng.
       openRevenue: money(sql`${facts.lineRevenue}`, open),
       openCogs: money(sql`${facts.lineCogs}`, open),
       dupOrders: sql<number>`count(distinct ${facts.orderId}) filter (where ${booked} and ${facts.duplicate})`,
-      dupDeliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered} and ${facts.duplicate}), 0)`,
-      dupCogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered} and ${facts.duplicate}), 0)`,
+      dupDeliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${deliveredRevenue} and ${facts.duplicate}), 0)`,
+      dupCogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${deliveredRevenue} and ${facts.duplicate}), 0)`,
       dupShipping: sql<number>`coalesce(sum(${facts.orderShipping} * coalesce(${facts.shipShare}, 0)) filter (where (${delivered} or ${returned}) and ${facts.duplicate}), 0)`,
     })
     .from(facts)
@@ -612,20 +617,20 @@ async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra
       day: base.day,
       orders: cnt(predicates.notCancelled as SQL),
       posRevenue: money(sql`${base.revenue}`, predicates.notCancelled as SQL),
-      deliveredRevenue: money(sql`${base.revenue}`, predicates.success as SQL),
+      deliveredRevenue: money(sql`${base.revenue}`, predicates.successRevenue as SQL),
       deliveredOrders: cnt(predicates.success as SQL),
       returnedOrders: cnt(predicates.returned as SQL),
       cancelledOrders: cnt(predicates.cancelled as SQL),
       pendingOrders: cnt(sql`${base.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`),
       shippedOrders: cnt(predicates.shipped as SQL),
-      cogs: money(sql`${base.cogs}`, predicates.success as SQL),
+      cogs: money(sql`${base.cogs}`, predicates.successRevenue as SQL),
       // CƯỚC: cùng bậc thang với bộ máy lợi nhuận — cước của đơn ĐÃ GỬI, phí hoàn và phí sàn của
       // đơn không huỷ. Gộp thành một cột vì ba khoản đều là chi phí giao nhận của chính đơn đó.
       shippingCost: sql<number>`coalesce(sum(${base.partnerFee}) filter (where ${predicates.shipped} and ${live}), 0)
         + coalesce(sum(${base.returnFee} + ${base.feeMarketplace}) filter (where ${predicates.notCancelled} and ${live}), 0)`,
       dupOrders: sql<number>`count(*) filter (where ${predicates.notCancelled} and ${base.duplicate})`,
-      dupDeliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${predicates.success} and ${base.duplicate}), 0)`,
-      dupCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${predicates.success} and ${base.duplicate}), 0)`,
+      dupDeliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${predicates.successRevenue} and ${base.duplicate}), 0)`,
+      dupCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${predicates.successRevenue} and ${base.duplicate}), 0)`,
       dupShipping: sql<number>`coalesce(sum(${ship}) filter (where ${predicates.notCancelled} and ${base.duplicate}), 0)`,
       /*
         PHẦN ĐANG ĐI, ĐÃ CÂN THEO TỶ LỆ — cộng vào phần đã đo ở tầng TypeScript.

@@ -30,9 +30,9 @@ import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-deliver
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CancelManualOrderButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
-import { issueReceiptHref, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
-import { manualOrderGate } from "@/lib/records/order-create";
+import { CancelManualOrderButton, ConfirmManualDeliveryButton, VoidManualDeliveryButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
+import { canConfirmManualDelivery, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { manualOrderDeliveryView, manualOrderGate } from "@/lib/records/order-create";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -87,13 +87,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // Đường dẫn POS Pancake tự gửi kèm đơn (mã nội bộ POS ≠ orders.id). Thiếu thì mở danh sách đơn của
   // shop, lọc sẵn theo số đơn.
   /*
-    ĐƠN TẠO TAY (pilot P0 #3): không có bản Pancake để mở, không có gì để đồng bộ lại. Sửa / huỷ đi qua CÙNG cổng với
-    server action (`manualOrderGate`); xuất kho đi qua phiếu XUẤT TAY sẵn có — tạo đơn không trừ tồn (luật 10).
+    ĐƠN TẠO TAY (pilot P0 #3): không có bản Pancake để mở, không có gì để đồng bộ lại. Sửa / huỷ / xác nhận giao đi qua
+    CÙNG cổng với server action (`manualOrderGate`). Hàng rời kho bằng PHIẾU GIAO CÓ KÝ NHẬN (G-ORDER — ORDER_OUTCOME.md
+    mục 11), KHÔNG bằng phiếu XUẤT TAY: lối "Lập phiếu xuất kho" của bản trước đã bỏ — làm cả hai là trừ tồn hai lần.
   */
   const manual = isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null;
-  const manualGate = manual ? await manualOrderGate(user) : null;
-  const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED";
-  const canIssue = manual && order.stage !== "CANCELLED" && can(user, "inventory:write") && (!user.modules || user.modules.includes("inventory"));
+  const [manualGate, delivery] = manual ? await Promise.all([manualOrderGate(user), manualOrderDeliveryView(order.id)]) : [null, null];
+  const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED" && order.stage !== "DELIVERED";
+  const canDeliver = manual && manualGate?.allowed === true && canConfirmManualDelivery(order.stage) && !delivery?.active && attempts.length === 0;
+  const canVoidDelivery = manual && manualGate?.allowed === true && Boolean(delivery?.active);
   const pancakeUrl = manual ? null : (pancakePosOrderUrlFromRaw(order.raw) ?? pancakePosOrderSearchUrl(order.shopId || env.pancake.shopId, order.systemId));
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
@@ -114,11 +116,6 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             {manualEditable ? (
               <Button asChild variant="outline" size="sm">
                 <Link href={`/orders/${encodeURIComponent(order.id)}/edit`}>Sửa đơn</Link>
-              </Button>
-            ) : null}
-            {canIssue ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href={issueReceiptHref(order.id)}>Lập phiếu xuất kho</Link>
               </Button>
             ) : null}
             {manualEditable ? <CancelManualOrderButton orderId={order.id} /> : null}
@@ -255,6 +252,54 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Row label={<span className="font-bold">Lãi gộp ước tính</span>} value={<Money value={grossProfit} className={`font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`} />} />
             </div>
           </SectionCard>
+
+          {manual && delivery ? (
+            <SectionCard
+              title="Giao hàng · phiếu giao có ký nhận"
+              description="Đơn không qua đơn vị vận chuyển: phiếu có chữ ký người nhận là chứng từ giao. Phiếu KHÔNG phải chứng từ thanh toán — tiền chờ chứng từ riêng."
+            >
+              <div className="space-y-3 text-sm">
+                {delivery.active ? (
+                  <DescriptionList
+                    columns={3}
+                    items={[
+                      { label: "Người nhận ký", value: formatDateTime(delivery.active.signedAt) },
+                      { label: "Người ký nhận", value: delivery.active.receiverName },
+                      { label: "Ghi vào ERP", value: `${formatDateTime(delivery.active.recordedAt)}${delivery.active.recordedByName ? ` · ${delivery.active.recordedByName}` : ""}` },
+                      { label: "Tiền", value: "Chưa xác minh — chờ chứng từ thanh toán" },
+                      ...(delivery.active.note ? [{ label: "Ghi chú", value: delivery.active.note }] : []),
+                    ]}
+                  />
+                ) : (
+                  <p className="text-muted-foreground">
+                    {order.stage === "CONFIRMED" ? "Chưa có phiếu giao — hàng còn giữ trong kho (khả dụng đã trừ phần này)." : "Chỉ đơn «Đã xác nhận» mới xác nhận giao được."}
+                  </p>
+                )}
+                {delivery.priorIssues.length ? (
+                  <p className="rounded-md bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                    Đơn này đã có {delivery.priorIssues.length} phiếu XUẤT TAY cũ ({delivery.priorIssues.map((r) => `${formatNumber(r.totalQuantity)} cái · ${formatDateTime(r.receivedAt)}`).join("; ")}). Xác nhận giao cũng trừ tồn, nên kho phải lập MỘT phiếu
+                    điều chỉnh tăng đúng bằng số đó (tham chiếu «hoàn phiếu xuất — đơn {manualOrderShortCode(order.id)} đã xác nhận giao»). ERP không tự sửa dữ liệu kho.
+                  </p>
+                ) : null}
+                {canDeliver || canVoidDelivery ? (
+                  <div className="flex flex-wrap gap-2">
+                    {canDeliver ? <ConfirmManualDeliveryButton orderId={order.id} /> : null}
+                    {canVoidDelivery ? <VoidManualDeliveryButton orderId={order.id} /> : null}
+                  </div>
+                ) : null}
+                {delivery.voided.length ? (
+                  <ul className="space-y-1 border-t pt-2 text-[12px] text-muted-foreground">
+                    {delivery.voided.map((v) => (
+                      <li key={v.id}>
+                        Phiếu đã huỷ: ký {formatDateTime(v.signedAt)} · {v.receiverName} — huỷ {formatDateTime(v.voidedAt)}
+                        {v.voidedByName ? ` bởi ${v.voidedByName}` : ""}: {v.voidReason}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </SectionCard>
+          ) : null}
 
           <SectionCard
             title={attempts.length > 1 ? `Vận chuyển & COD · ${attempts.length} lần gửi` : "Vận chuyển & COD"}

@@ -36,8 +36,10 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 1. **Tối đa 3 tổ chức cùng lúc** trong 2 tuần đầu (trần 5), mỗi tổ chức do người vận hành tạo; `/start` giữ TẮT.
 2. Gói `trial` khi cấu hình, chuyển `standard` sau UAT bằng nút đổi gói; **≤ 10 người dùng / tổ chức**.
 3. **AI chỉ BYOK** (khoá của chính khách) cho tới khi chủ quyết D1; công tắc AI toàn nền tảng sẵn sàng.
-4. Khách **không dùng ĐVVC tích hợp**: đơn tạo tay, kết quả/doanh thu giao thành công hiện CHƯA BIẾT (không phải 0) cho tới
-   quyết định G-ORDER. Khách cần báo cáo doanh thu thực thu ngay từ đầu ⇒ chưa phù hợp đợt này.
+4. Khách **không dùng ĐVVC tích hợp**: đơn tạo tay giao bằng **phiếu giao có ký nhận** (G-ORDER, chủ nền tảng quyết
+   29/09/2026 — `docs/business-rules/ORDER_OUTCOME.md` mục 11): có phiếu ⇒ giao thành công + trừ tồn; TIỀN vẫn CHƯA XÁC
+   MINH vì ERP chưa có đường ghi chứng từ thanh toán cho đơn tay — doanh thu thực thu của đơn tay chưa hiện ở báo cáo nào.
+   Khách cần báo cáo doanh thu thực thu ngay từ đầu ⇒ chưa phù hợp đợt này.
 5. Luật tự động của tổ chức khách **chạy khi bấm «Chạy lượt kiểm tra ngay»** cho tới quyết định G-SCHED.
 6. Danh mục sản phẩm **nhập tay** (không CSV): phù hợp khách ≤ ~200 mã.
 7. Không nhóm chat thông báo ra ngoài (Lark/Telegram của tổ chức khai + kiểm được nhưng chưa luồng nào gửi) — thông báo
@@ -51,9 +53,9 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 |---|---|---|---|
 | P0 | Không tạo được sản phẩm / mẫu mã, không nhập kho (A5 #1 #2) | ĐÃ SỬA #396 | — |
 | P0 | Không tạo được đơn (A5 #3) | ĐÃ SỬA #398 | — |
-| P0 | Đơn không qua ĐVVC không có kết quả / doanh thu (A5 #4) | MỞ — **G-ORDER** | Chủ shop quyết: phiếu giao ký nhận làm chứng cứ giao cho tổ chức không có connector vận chuyển; tiền theo chứng từ thanh toán. Sửa `ORDER_OUTCOME.md` trước khi làm mã |
+| P0 | Đơn không qua ĐVVC không có kết quả / doanh thu (A5 #4) | ĐÃ SỬA phần giao + tồn — **G-ORDER** (chủ nền tảng quyết 29/09/2026) | `ORDER_OUTCOME.md` mục 11: phiếu giao có ký nhận (`order_delivery_notes`, migration 0178) ⇒ `DELIVERED` + trừ tồn; tiền `UNVERIFIED` — đường ghi chứng từ thanh toán cho đơn tay là việc SAU (chưa có) |
 | P0 | Luật / việc định kỳ không tự chạy ở tổ chức khác nhà (A5 #6) | MỞ — **G-SCHED** | Chủ shop đồng ý tách job `workflows` vào fan-out + `SCHEDULER_FANOUT=1` (lịch VNX không đổi); tạm thời bấm tay |
-| P1 | Tồn khả dụng trừ hai lần sau khi xuất ISSUE cho đơn tay đã xác nhận (chấp nhận #3) | MỞ — đi cùng G-ORDER | Tồn THỰC TẾ đúng; khả dụng thấp hơn thật bằng số đã xuất của đơn tay chưa kết thúc |
+| P1 | Tồn khả dụng trừ hai lần sau khi xuất ISSUE cho đơn tay đã xác nhận (chấp nhận #3) | ĐÃ SỬA cùng G-ORDER | Đơn tay rời kho bằng phiếu giao (`ORDER_LEFT_WAREHOUSE` — một vị ngữ cho "đã xuất" và "thôi giữ"); lối "Lập phiếu xuất kho" đã bỏ. Đơn đã lỡ lập ISSUE trước bản này: trang đơn nêu phiếu đó, kho lập MỘT phiếu điều chỉnh tăng đúng số — ERP không tự sửa kho (`ORDER_OUTCOME.md` mục 11) |
 | P1 | Không đổi gói sau khi tạo (khảo sát bàn giao) | ĐÃ SỬA #399 | — |
 | P1 | Phí ship đơn tay mất ở trang đơn; /orders ghi «Đã thanh toán» cho đơn tay (chấp nhận #1 #2) | ĐÃ SỬA #399 | — |
 | P1 | Luật «khách mới» không bao giờ chạy; nhãn KPI sai nghĩa; giá nhập = giá báo MKT; sửa khách tạo tay; chữ VNX; số đo nội bộ VNX ở `/departments`; câu sai về hàng hoàn (A5 #7–#9 #11–#14) | ĐÃ SỬA #396 #398 | — |
@@ -67,7 +69,7 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 | # | Việc của chủ nền tảng | Chặn gì |
 |---|---|---|
 | **1** | **Tạo GitHub Secret `PLATFORM_SECRETS_KEY`** (repo → Settings → Secrets and variables → Actions → New repository secret; giá trị do chủ tự sinh `openssl rand -base64 48` trên máy mình, cất bản sao ngoài VPS — C3). Không dán vào chat. Xong báo một câu; phiên tích hợp dispatch deploy và chạy V1–V7 | Khách lưu khoá AI BYOK, Lark, Telegram — tức AI Builder cho khách trên production |
-| 2 | G-ORDER (mục 4) | Doanh thu / kết quả đơn của khách không dùng ĐVVC |
+| 2 | ~~G-ORDER~~ — đã quyết 29/09/2026, đã làm phần giao + tồn (mục 4). Còn: đường ghi chứng từ thanh toán cho đơn tay | Doanh thu thực thu của khách không dùng ĐVVC |
 | 3 | G-SCHED (mục 4) | Luật tự chạy cho khách |
 | 4 | D1 — chỉ BYOK hay có AI nền tảng trả tiền | AI cho khách không có khoá riêng |
 | 5 | C4 bản sao ngoài máy cho `erp_org_*` · C7 lịch diễn tập tự động · C6 lời hứa RPO/RTO | Nhận khách TRẢ TIỀN |

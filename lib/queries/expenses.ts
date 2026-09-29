@@ -5,6 +5,7 @@ import type { ExpenseCategory } from "@/db/schema";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { previousPeriod, type ListParams, type Period } from "@/lib/search-params";
 import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
@@ -244,7 +245,8 @@ export async function adOrdersFromErp(from: Date | null, to: Date | null) {
         adOrders: sql<number>`count(*) filter (where ${hasAd})`,
         adRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${hasAd}), 0)`,
         delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        // Doanh thu giao thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
+        deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)`,
       })
       .from(o)
       // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).

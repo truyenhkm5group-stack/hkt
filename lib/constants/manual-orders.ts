@@ -11,12 +11,17 @@
  *    tố với sản phẩm / mẫu mã tạo tay. "Đơn này tạo tay hay đồng bộ" đọc được từ CHÍNH id, và `orders.raw` mang lời khai
  *    gốc `{ origin: "ERP_MANUAL" }` (cột `raw` là "lời khai gốc" của bản ghi: payload Pancake với đơn đồng bộ). KHÔNG cột
  *    mới, KHÔNG migration — `orders.source` đã là KÊNH BÁN (Facebook / Zalo / …), dùng nó làm cờ nguồn là trộn hai nghĩa.
- *  · KẾT QUẢ ĐƠN KHÔNG ĐỔI: đơn tay không có vận đơn ⇒ `ORDER_OUTCOME` cho đúng nhánh sẵn có (`NOT_SHIPPED`, huỷ ⇒
- *    `CANCELLED`). Không thêm nhánh nào — "đơn không qua ĐVVC thì giao / thu thế nào" là quyết định còn chờ chủ nền tảng
- *    (G-ORDER). Vì vậy trạng thái chọn được chỉ là các bước TRƯỚC khi gửi: không có "Đã nhận", "Đã thu tiền".
- *  · TỒN KHO KHÔNG ĐỔI: tạo đơn không ghi phiếu kho nào (luật 10 — tồn thực tế chỉ giảm qua `SHIPMENT_LEFT_WAREHOUSE`
- *    hoặc phiếu XUẤT TAY). Đơn "Đã xác nhận" giữ hàng ở cột khả dụng như mọi đơn đã chốt. Trang đơn có lối "Lập phiếu
- *    xuất kho" dẫn tới luồng ISSUE sẵn có, điền sẵn mẫu mã + số lượng — người kho sửa theo số ĐẾM THẬT rồi lưu.
+ *  · GIAO HÀNG (G-ORDER — chủ nền tảng quyết 29/09/2026, docs/business-rules/ORDER_OUTCOME.md mục 11): đơn tay
+ *    "Đã xác nhận" được XÁC NHẬN ĐÃ GIAO bằng PHIẾU GIAO CÓ KÝ NHẬN (`order_delivery_notes`). Có phiếu còn hiệu lực ⇒
+ *    stage `DELIVERED`, `ORDER_OUTCOME` = `DELIVERED` (nhánh đầu bảng, chỉ đơn `erp-` không vận đơn), hàng ra khỏi kho
+ *    (`ORDER_LEFT_WAREHOUSE`: tồn thực tế giảm, thôi giữ ở khả dụng). Chưa có phiếu ⇒ như trước: `NOT_SHIPPED`, huỷ ⇒
+ *    `CANCELLED`. Trạng thái chọn được ở form tạo / sửa vẫn chỉ là các bước TRƯỚC khi giao — "Đã nhận" chỉ tới bằng phiếu.
+ *  · TIỀN KHÔNG ĐI THEO PHIẾU GIAO: phiếu không chứng minh đã thu. Doanh thu / thanh toán theo chứng từ thanh toán —
+ *    đơn tay đã giao đứng ngoài mọi tổng TIỀN dựng trên DELIVERED (`REVENUE_RECOGNIZED_ON_DELIVERY`) và là `UNVERIFIED` ở
+ *    `ORDER_OUTCOME_VERIFIED`. Không có "Đã thu tiền".
+ *  · TỒN KHO: tạo / sửa đơn không ghi phiếu kho nào (luật 10). Đơn "Đã xác nhận" giữ hàng ở cột khả dụng như mọi đơn đã
+ *    chốt; XÁC NHẬN GIAO mới đưa hàng ra khỏi kho. KHÔNG lập phiếu XUẤT TAY cho đơn tay — làm cả hai là trừ hai lần
+ *    (lối "Lập phiếu xuất kho" của bản trước đã bỏ). Huỷ phiếu giao (ghi nhầm, bắt buộc lý do) ⇒ đơn về "Đã xác nhận".
  *  · BÁO CÁO MARKETER (luật 3.9 — tổng = số đơn XÁC NHẬN PANCAKE): đơn tay nằm NGOÀI phép so ấy (`NOT_MANUAL_ORDER` ở
  *    `lib/queries/manual-order-sql.ts`).
  */
@@ -48,15 +53,15 @@ export function manualOrderShortCode(id: string): string {
 export const MANUAL_ORDER_STAGES = ["NEW", "WAITING", "CONFIRMED"] as const satisfies readonly OrderStage[];
 export type ManualOrderStage = (typeof MANUAL_ORDER_STAGES)[number];
 
-export const MANUAL_ORDER_STATUS_CODE: Record<ManualOrderStage | "CANCELLED", number> = { NEW: 0, WAITING: 11, CONFIRMED: 1, CANCELLED: 6 };
+export const MANUAL_ORDER_STATUS_CODE: Record<ManualOrderStage | "CANCELLED" | "DELIVERED", number> = { NEW: 0, WAITING: 11, CONFIRMED: 1, CANCELLED: 6, DELIVERED: 3 };
 
 export const MANUAL_ORDER_STAGE_HINT: Record<ManualOrderStage, string> = {
   NEW: "Mới ghi nhận, chưa chốt — chưa giữ hàng, chưa vào số đơn xác nhận.",
   WAITING: "Khách đã đặt nhưng đang chờ hàng về — chưa giữ hàng.",
-  CONFIRMED: "Đã chốt với khách — giữ hàng ở cột khả dụng cho tới khi xuất kho.",
+  CONFIRMED: "Đã chốt với khách — giữ hàng ở cột khả dụng cho tới khi xác nhận đã giao (phiếu giao có ký nhận).",
 };
 
-export function manualOrderStageLabel(stage: ManualOrderStage | "CANCELLED"): string {
+export function manualOrderStageLabel(stage: ManualOrderStage | "CANCELLED" | "DELIVERED"): string {
   return ORDER_STAGE_LABEL[stage];
 }
 
@@ -137,9 +142,18 @@ export function manualOrderRaw(raw: unknown): ManualOrderRaw | null {
   return r.origin === MANUAL_ORDER_ORIGIN ? { origin: MANUAL_ORDER_ORIGIN, orderDiscount: Number.isSafeInteger(r.orderDiscount) ? Number(r.orderDiscount) : 0, createdBy: typeof r.createdBy === "string" ? r.createdBy : null } : null;
 }
 
-/** Tham số trên /inventory/receipts mở hộp thoại XUẤT TAY điền sẵn theo một đơn tay. */
-export const ISSUE_PREFILL_PARAM = "xuat-don";
+// ─────────────────────────── Phiếu giao có ký nhận (G-ORDER) ───────────────────────────
 
-export function issueReceiptHref(orderId: string): string {
-  return `/inventory/receipts?${ISSUE_PREFILL_PARAM}=${encodeURIComponent(orderId)}`;
+/** Trần của phiếu giao — chặn đầu vào vô lý trước khi chạm CSDL. `futureSkewMs`: lệch đồng hồ máy người ghi. */
+export const DELIVERY_NOTE_LIMITS = { receiverMax: 120, noteMax: 1000, reasonMin: 3, reasonMax: 500, futureSkewMs: 5 * 60_000 } as const;
+
+/**
+ * Đơn ở trạng thái nào thì XÁC NHẬN GIAO được — CHỈ "Đã xác nhận". `NEW` / `WAITING` chưa chốt với khách (chưa giữ hàng,
+ * chưa vào số đơn xác nhận): nhận phiếu ở đó là bỏ qua bước chốt. `CANCELLED` / `DELIVERED`: đã kết thúc.
+ */
+export const MANUAL_DELIVERY_FROM_STAGES = ["CONFIRMED"] as const satisfies readonly OrderStage[];
+
+/** Cùng tập với điều kiện SQL của giao dịch ghi phiếu (`confirmManualDeliveryCore`) — một danh sách, hai chỗ đọc. */
+export function canConfirmManualDelivery(stage: string): boolean {
+  return (MANUAL_DELIVERY_FROM_STAGES as readonly string[]).includes(stage);
 }

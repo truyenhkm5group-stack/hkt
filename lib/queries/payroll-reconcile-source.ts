@@ -10,6 +10,7 @@
 import { and, gte, lt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { getSettingJson } from "@/lib/settings";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
@@ -124,7 +125,8 @@ export async function periodActivity(period: Period): Promise<PeriodActivity> {
       .select({
         tong: sql<number>`count(*)::int`,
         giao: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')::int`,
-        doanhThu: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)::bigint`,
+        // Doanh thu theo giao chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
+        doanhThu: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)::bigint`,
       })
       .from(o)
       /*

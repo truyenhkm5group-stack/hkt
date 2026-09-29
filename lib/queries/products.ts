@@ -5,7 +5,7 @@ import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { toDate } from "@/lib/format";
 import { getProductStockPlan, isPlanRowActive } from "@/lib/queries/planning";
-import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_LEFT_WAREHOUSE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { successRate } from "@/lib/queries/metrics";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, productOutcomeOrders, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
@@ -46,7 +46,7 @@ const ERP_STOCK_SUB = sql<number>`(
       join ${schema.orders} on ${schema.orders.id} = ${schema.orderItems.orderId}
       left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
       where ${schema.orderItems.variantId} = ${pv.id}
-        and ${SHIPMENT_LEFT_WAREHOUSE}), 0)
+        and ${ORDER_LEFT_WAREHOUSE}), 0)
 )`;
 
 /** Mẫu mã đang bán: không ẩn / khoá / xoá ở cả cấp mẫu mã lẫn sản phẩm */

@@ -5,6 +5,7 @@ import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -86,11 +87,18 @@ export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTC
  */
 export const BOOKED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
 
-/** DOANH THU GIAO THÀNH CÔNG (delivered revenue) — giá trị đơn ĐÃ tới tay khách. */
-export const DELIVERED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_DELIVERED}), 0)`;
+/**
+ * Giao thành công VÀ "giao" kéo theo doanh thu — population của mọi tổng TIỀN theo DELIVERED. Đơn tay giao bằng phiếu ký
+ * nhận đứng ngoài (G-ORDER: phiếu giao không phải chứng từ thanh toán — `REVENUE_RECOGNIZED_ON_DELIVERY`); nó vẫn nằm
+ * trong `COUNT_DELIVERED`. Tổ chức nhà: vế sau luôn đúng.
+ */
+export const IS_DELIVERED_REVENUE = sql`(${IS_DELIVERED} and ${REVENUE_RECOGNIZED_ON_DELIVERY})`;
+
+/** DOANH THU GIAO THÀNH CÔNG (delivered revenue) — giá trị đơn ĐÃ tới tay khách, với "giao" mang chứng cứ tiền. */
+export const DELIVERED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_DELIVERED_REVENUE}), 0)`;
 
 /** GIÁ VỐN của đơn giao thành công — PHẢI cùng population với DELIVERED_REVENUE. */
-export const DELIVERED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${IS_DELIVERED}), 0)`;
+export const DELIVERED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${IS_DELIVERED_REVENUE}), 0)`;
 
 /** Giá vốn của mọi đơn không huỷ — dùng cho báo cáo danh nghĩa. */
 export const BOOKED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
@@ -150,6 +158,8 @@ export function orderMetricFacts(db: Db, where: SQL | undefined) {
       revenue: schema.orders.totalPriceAfterDiscount,
       cogs: sql<number>`coalesce(${schema.canonicalOrderOutcome.recognizedCogs}, ${schema.canonicalOrderOutcome.cogs}, ${orderCogsFast()})`.as("order_cogs"),
       outcome: sql<string>`coalesce(${schema.canonicalOrderOutcome.outcome}, ${ORDER_OUTCOME_FAST})`.as("outcome"),
+      /** "Giao" của đơn này có kéo theo doanh thu không (đơn tay giao bằng phiếu ký nhận thì KHÔNG — G-ORDER). */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT trong return-rate.ts).
@@ -188,8 +198,11 @@ export function factMetrics(base: OrderMetricFacts) {
   const delivered = sql`${base.outcome} = 'DELIVERED'`;
   const returned = sql`${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${base.outcome} <> 'CANCELLED'`;
+  /** Cùng population với `IS_DELIVERED_REVENUE` — tổng TIỀN theo DELIVERED không nhận đơn tay giao bằng phiếu. */
+  const deliveredRevenue = sql`(${delivered} and ${base.revenueOnDelivery})`;
   return {
     isDelivered: delivered,
+    isDeliveredRevenue: deliveredRevenue,
     isReturned: returned,
     isBooked: booked,
     countBooked: sql<number>`count(*) filter (where ${booked})`,
@@ -200,8 +213,8 @@ export function factMetrics(base: OrderMetricFacts) {
     countUnknown: sql<number>`count(*) filter (where ${base.outcome} = 'UNKNOWN')`,
     bookedRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${booked}), 0)`,
     bookedCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${booked}), 0)`,
-    deliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${delivered}), 0)`,
-    deliveredCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${delivered}), 0)`,
+    deliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${deliveredRevenue}), 0)`,
+    deliveredCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${deliveredRevenue}), 0)`,
   };
 }
 

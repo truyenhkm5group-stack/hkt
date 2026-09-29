@@ -327,6 +327,8 @@ export async function testOrderOutcomeContract(db: Db) {
   const viPhamOpen = [...new Set([...goLaiTap(OPEN_OUTCOMES), ...tepMa.filter((f) => OPEN_LITERAL.test(readFileSync(f, "utf8")))])];
   assert.deepEqual(viPhamOpen, [], `gõ lại danh sách 'chưa ngã ngũ' — dùng OPEN_OUTCOMES_SQL (lib/constants/truth.ts) thay vì chép: ${viPhamOpen.join(", ")}`);
 
+  await testManualOrderDeliveryNote(db);
+
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
   const spec = readFileSync("docs/business-rules/ORDER_OUTCOME.md", "utf8");
   assert.ok(spec.includes("ORDER_OUTCOME"), "đặc tả phải tồn tại và nêu tên công thức chuẩn");
@@ -338,7 +340,61 @@ export async function testOrderOutcomeContract(db: Db) {
   testOpenOutcomesKhongChepTay();
   testHoanVaNgaNguKhongChepTay();
 
-  console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · CHỜ LẤY HÀNG≠đang giao≠chưa gửi · tồn kho)`);
+  console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · CHỜ LẤY HÀNG≠đang giao≠chưa gửi · tồn kho · phiếu giao ký nhận của đơn tay)`);
+}
+
+/**
+ * ───────── ĐƠN KHÔNG QUA ĐVVC: PHIẾU GIAO CÓ KÝ NHẬN (G-ORDER — ORDER_OUTCOME.md mục 11) ─────────
+ *
+ * CHỈ THÊM tình huống, không đổi kỳ vọng nào ở trên. Đơn tay (id `erp-`, không vận đơn):
+ *  · có phiếu còn hiệu lực ⇒ `DELIVERED` — ngang mã cuối 501 chiều đi;
+ *  · có phiếu mà KHÔNG chứng từ tiền ⇒ tiền `UNVERIFIED` (không phải 0, không phải đã thu, không phải 'RETURNED');
+ *  · không phiếu / phiếu đã huỷ ⇒ KHÔNG `DELIVERED` — kể cả khi ai đó đặt stage 'DELIVERED' (căn cứ là phiếu, không là stage);
+ *  · đơn Pancake không bao giờ mang được phiếu (CHECK ở CSDL) và "Đã nhận" không vận đơn vẫn là 'UNKNOWN' như cũ.
+ * Tự dọn dữ liệu của mình: bài này chạy giữa khối fixture dùng chung.
+ */
+async function testManualOrderDeliveryNote(db: Db) {
+  const ids: string[] = [];
+  const manual = async (stage: string, note?: "ACTIVE" | "VOIDED") => {
+    const id = `erp-${next()}`;
+    ids.push(id);
+    await db.insert(schema.orders).values({ id, stage: stage as never, insertedAt: new Date(), totalPriceAfterDiscount: 750_000, raw: { origin: "ERP_MANUAL", orderDiscount: 0, createdBy: null } });
+    if (note) {
+      await db.insert(schema.orderDeliveryNotes).values({
+        orderId: id,
+        signedAt: new Date("2026-09-20T03:00:00Z"),
+        receiverName: "Chị Hoa",
+        ...(note === "VOIDED" ? { voidedAt: new Date("2026-09-20T04:00:00Z"), voidReason: "ghi nhầm đơn" } : {}),
+      });
+    }
+    return id;
+  };
+  try {
+    const giao = await outcome(db, await manual("DELIVERED", "ACTIVE"));
+    assert.equal(giao?.v, "DELIVERED", "đơn tay + phiếu giao có ký nhận ⇒ GIAO THÀNH CÔNG — xem ORDER_OUTCOME.md mục 11");
+    assert.equal(giao?.verified, "UNVERIFIED", "phiếu giao KHÔNG phải chứng từ tiền ⇒ tiền CHƯA XÁC MINH (không phải 0, không phải 'RETURNED')");
+
+    const chuaGiao = await outcome(db, await manual("CONFIRMED"));
+    assert.equal(chuaGiao?.v, "NOT_SHIPPED", "đơn tay chưa có phiếu giao ⇒ chưa giao, không bao giờ DELIVERED");
+    assert.notEqual(chuaGiao?.verified, "DELIVERED");
+
+    const stageSuong = await outcome(db, await manual("DELIVERED"));
+    assert.notEqual(stageSuong?.v, "DELIVERED", "stage 'DELIVERED' mà KHÔNG có phiếu ⇒ không phải giao thành công — căn cứ là phiếu, không là stage");
+
+    const phieuHuy = await outcome(db, await manual("CONFIRMED", "VOIDED"));
+    assert.equal(phieuHuy?.v, "NOT_SHIPPED", "phiếu giao đã huỷ ⇒ như chưa giao");
+
+    // Đơn Pancake (id số): CSDL không nhận phiếu, và "Đã nhận" không vận đơn vẫn là CHƯA BIẾT như trước.
+    const pancakeId = `${Date.now()}${seq}`;
+    ids.push(pancakeId);
+    await db.insert(schema.orders).values({ id: pancakeId, stage: "DELIVERED", insertedAt: new Date() });
+    await assert.rejects(async () => {
+      await db.insert(schema.orderDeliveryNotes).values({ orderId: pancakeId, signedAt: new Date(), receiverName: "Khách" });
+    }, "đơn Pancake không nhận phiếu giao tay (CHECK order_id LIKE 'erp-%')");
+    assert.equal((await outcome(db, pancakeId))?.v, "UNKNOWN", "đơn Pancake 'Đã nhận' không vận đơn: luật cũ không đổi");
+  } finally {
+    for (const id of ids) await db.delete(schema.orders).where(eq(schema.orders.id, id));
+  }
 }
 
 /**

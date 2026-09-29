@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
@@ -255,7 +256,8 @@ export async function getCustomerDetail(id: string) {
         returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
         revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
-        successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
+        // Doanh thu thành công chỉ khi "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu đứng ngoài (G-ORDER).
+        successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
         firstOrderAt: sql<Date | string | null>`min(${o.insertedAt})`,
         lastOrderAt: sql<Date | string | null>`max(${o.insertedAt})`,
       })

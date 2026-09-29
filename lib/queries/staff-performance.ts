@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_EVER_CONFIRMED } from "@/lib/queries/conversion-funnel";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
@@ -106,6 +107,8 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
   const from = period.from ? sql`${o.insertedAt} >= ${period.from.toISOString()}::timestamptz` : sql`true`;
   const to = period.to ? sql`${o.insertedAt} <= ${period.to.toISOString()}::timestamptz` : sql`true`;
   const isDelivered = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
+  /** Population của tổng TIỀN theo giao thành công — đơn tay giao bằng phiếu ký nhận đứng ngoài (G-ORDER). */
+  const isDeliveredRevenue = sql`(${isDelivered} and ${REVENUE_RECOGNIZED_ON_DELIVERY})`;
   const isReturned = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
   /*
@@ -133,11 +136,13 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
       unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       // Doanh số CHỐT (POS): đơn từng được xác nhận, kể cả huỷ SAU xác nhận — không gồm đơn huỷ khi chưa ai xác nhận.
       bookedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_EVER_CONFIRMED}), 0)`,
-      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${isDelivered}), 0)`,
-      cogs: sql<number>`coalesce(sum(${o.cogs}) filter (where ${isDelivered} and ${o.cogs} is not null), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${isDeliveredRevenue}), 0)`,
+      // Số đơn của CÙNG population với doanh thu — mẫu số của giá trị đơn trung bình và độ phủ giá vốn.
+      deliveredRevenueOrders: sql<number>`count(distinct ${o.id}) filter (where ${isDeliveredRevenue})`,
+      cogs: sql<number>`coalesce(sum(${o.cogs}) filter (where ${isDeliveredRevenue} and ${o.cogs} is not null), 0)`,
       // Đếm riêng phần giao thành công TRA ĐƯỢC giá vốn: thiếu giá vốn phải hiện thành thiếu,
       // không được lặng lẽ tính bằng 0 rồi thổi phồng đóng góp.
-      cogsKnown: sql<number>`count(distinct ${o.id}) filter (where ${isDelivered} and ${o.cogs} is not null)`,
+      cogsKnown: sql<number>`count(distinct ${o.id}) filter (where ${isDeliveredRevenue} and ${o.cogs} is not null)`,
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
@@ -157,12 +162,13 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
     const returned = Number(r.returned ?? 0);
     const settled = delivered + returned;
     const deliveredRevenue = Number(r.deliveredRevenue ?? 0);
+    const deliveredRevenueOrders = Number(r.deliveredRevenueOrders ?? 0);
     const cogsKnown = Number(r.cogsKnown ?? 0);
     const cogs = cogsKnown > 0 ? Number(r.cogs ?? 0) : null;
 
     totalOrders += orders;
     if (name) assignedOrders += orders;
-    deliveredAll += delivered;
+    deliveredAll += deliveredRevenueOrders;
     cogsKnownAll += cogsKnown;
 
     return {
@@ -180,7 +186,7 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
       // Mẫu số là đơn ĐÃ KẾT THÚC. Chia cho tổng đơn sẽ trừng phạt người vừa nhận đơn hôm qua.
       gtc: settled > 0 ? delivered / settled : null,
       returnRate: settled > 0 ? returned / settled : null,
-      aov: delivered > 0 ? deliveredRevenue / delivered : null,
+      aov: deliveredRevenueOrders > 0 ? deliveredRevenue / deliveredRevenueOrders : null,
     };
   });
 

@@ -1385,6 +1385,47 @@ export const orderStatusHistory = pgTable(
 );
 
 /**
+ * ═══ PHIẾU GIAO CÓ KÝ NHẬN CỦA ĐƠN TẠO TAY (G-ORDER — docs/business-rules/ORDER_OUTCOME.md mục 11) ═══
+ *
+ * Đơn không qua ĐVVC không có sự kiện Viettel Post nào để kết luận "đã giao". Chủ nền tảng quyết 29/09/2026: phiếu giao
+ * có chữ ký người nhận là chứng cứ giao thành công, ngang mã cuối 501 chiều đi — và CHỈ cho chiều logistics + tồn kho.
+ * Phiếu KHÔNG phải chứng từ tiền: không phép tính doanh thu / thanh toán nào đọc nó.
+ *
+ *  · CHỈ đơn tạo tay (`order_id LIKE 'erp-%'` — CHECK ở CSDL, không chỉ ở action).
+ *  · MỘT phiếu còn hiệu lực mỗi đơn (chỉ mục duy nhất một phần trên `voided_at IS NULL`).
+ *  · Ghi nhầm ⇒ HUỶ phiếu (mốc + người + lý do, CHECK bắt buộc lý do), KHÔNG xoá cứng: phiếu đã huỷ vẫn là vết.
+ *  · Người ghi / người huỷ đi bằng KHOÁ `users.id` (AGENTS 34); cột tên chỉ là ảnh chụp do máy chủ đọc từ `users`.
+ *  · `receiver_name` là ẢNH CHỤP chữ trên phiếu (người ký nhận) — không phải khoá, người nhận thường không có tài khoản.
+ */
+export const orderDeliveryNotes = pgTable(
+  "order_delivery_notes",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** Mốc người nhận ký trên phiếu (người ghi khai theo phiếu giấy) — KHÁC `recorded_at` (lúc nhập vào ERP). */
+    signedAt: ts("signed_at").notNull(),
+    receiverName: text("receiver_name").notNull(),
+    note: text("note").notNull().default(""),
+    recordedByUserId: text("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    recordedByName: text("recorded_by_name").notNull().default(""),
+    recordedAt: ts("recorded_at").notNull().defaultNow(),
+    voidedAt: ts("voided_at"),
+    voidedByUserId: text("voided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    voidedByName: text("voided_by_name").notNull().default(""),
+    voidReason: text("void_reason"),
+  },
+  (t) => [
+    index("order_delivery_notes_order_idx").on(t.orderId),
+    uniqueIndex("order_delivery_notes_active_uq").on(t.orderId).where(sql`${t.voidedAt} IS NULL`),
+    check("order_delivery_notes_manual_check", sql`${t.orderId} LIKE 'erp-%'`),
+    check("order_delivery_notes_receiver_check", sql`length(btrim(${t.receiverName})) > 0`),
+    check("order_delivery_notes_void_check", sql`(${t.voidedAt} IS NULL AND ${t.voidReason} IS NULL) OR (${t.voidedAt} IS NOT NULL AND length(btrim(coalesce(${t.voidReason}, ''))) >= 3)`),
+  ],
+);
+
+/**
  * ═══ SỔ ĐƠN CHỜ HÀNG (`lib/alerts/stock-wait-log.ts`) ═══
  *
  * Phép phân bổ thiếu hàng (`allocateStock`) chỉ trả lời "BÂY GIỜ đơn nào chờ hàng". Không ghi lại thì
