@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -37,8 +37,9 @@ import { findOrganization } from "@/lib/platform/organizations";
  *
  * ─── BÍ MẬT KHÔNG RỜI KHỎI TỆP NÀY Ở DẠNG RÕ ───
  *
- * `openSecrets` chỉ được gọi ở `testOrgConnection` (đưa cho hàm kiểm tra) và ở `saveConnection` (gộp
- * với giá trị mới). Không hàm nào trả chúng ra; nhật ký ghi `secretHints` (`••••` + 4 ký tự), không
+ * `openSecrets` chỉ được gọi ở `testOrgConnection` (đưa cho hàm kiểm tra), `saveConnection` (gộp với giá trị
+ * mới), `openActiveConnection` (consumer đã khai) và `rekeyOrgConnections` (xoay khoá — mã hoá lại ngay tại chỗ).
+ * Không hàm nào trả chúng ra cho người; nhật ký ghi `secretHints` (`••••` + 4 ký tự), không
  * ghi giá trị; không `console.*` nào ở đây. Công cụ AI không import tệp này (bài kiểm quét).
  *
  * ─── BẬT = NGƯỜI BẤM, SAU KHI KIỂM TRA ĐẠT ───
@@ -376,6 +377,80 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
   });
   if (!passed) return { error: nextStatus !== row.status ? `${message} — kết nối đang bật đã về Nháp.` : message };
   return { ok: true, status: nextStatus, message };
+}
+
+// ───────────────────────── XOAY KHOÁ (chạy tay, qua scripts/rotate-platform-secrets.ts) ─────────────────────────
+
+/**
+ *  · `CURRENT` — đã mang khoá hiện tại và giải được: không làm gì (chạy lại = không đổi).
+ *  · `WOULD_REKEY` / `REKEYED` — mang khoá PREVIOUS, giải được: chạy thử chỉ báo; chạy thật mã hoá lại bằng khoá hiện tại.
+ *  · `UNKNOWN_KEY` — mang mã khoá không khớp khoá nào máy đang có: KHÔNG sửa được bằng máy — người của tổ chức nhập lại.
+ *  · `DECRYPT_FAILED` — khớp mã khoá mà thẻ xác thực hỏng (bản mã bị sửa / chép từ tổ chức khác): nhập lại.
+ *  · `TRIPWIRE` — dòng mang mã tổ chức khác ngữ cảnh: không đọc, không ghi (báo người vận hành).
+ *  · `NO_SECRETS` — dòng chưa có bí mật nào.
+ */
+export type RekeyVerdict = "CURRENT" | "WOULD_REKEY" | "REKEYED" | "UNKNOWN_KEY" | "DECRYPT_FAILED" | "TRIPWIRE" | "NO_SECRETS";
+export const REKEY_VERDICTS: readonly RekeyVerdict[] = ["CURRENT", "WOULD_REKEY", "REKEYED", "UNKNOWN_KEY", "DECRYPT_FAILED", "TRIPWIRE", "NO_SECRETS"];
+export type RekeyReport = { orgCode: string; apply: boolean; rows: { connectorKey: string; verdict: RekeyVerdict; keyBefore: string | null; keyAfter: string | null }[]; counts: Record<RekeyVerdict, number> };
+
+const short = (k: string | null | undefined) => (k ? `${k.slice(0, 8)}…` : null);
+
+/**
+ * Mã hoá lại MỌI bí mật kết nối của tổ chức NGỮ CẢNH đang mang khoá `PLATFORM_SECRETS_KEY_PREVIOUS` sang khoá hiện
+ * tại. Mặc định CHẠY THỬ (`apply: false` ⇒ không một lượt ghi nào, kể cả nhật ký). Idempotent: chạy lại sau lượt thật
+ * ⇒ mọi dòng `CURRENT`, không byte nào đổi. KHÔNG đổi trạng thái / kết quả kiểm tra của kết nối — bản rõ không đổi, nên
+ * một kết nối đang bật vẫn bật. Lượt ghi có điều kiện `secrets_key_id = mã khoá cũ`: một lượt lưu tay xen giữa (đã
+ * mã hoá bằng khoá mới) không bị đè. Không trả bản rõ, không log; nhật ký chỉ có mã khoá rút gọn trước → sau.
+ */
+export async function rekeyOrgConnections(opts: { apply: boolean; keyState?: SecretsKeyState; actorLabel?: string }): Promise<RekeyReport | { error: string }> {
+  const keyState = opts.keyState ?? secretsKeyState();
+  if (!keyState.ok) return { error: keyState.reason };
+  const ctx = await currentOrganization();
+  const db = await getDb();
+  const rows = await db.select().from(schema.orgConnections).orderBy(schema.orgConnections.connectorKey);
+  const out: RekeyReport = { orgCode: ctx.code, apply: opts.apply, rows: [], counts: Object.fromEntries(REKEY_VERDICTS.map((v) => [v, 0])) as Record<RekeyVerdict, number> };
+  for (const row of rows) {
+    let verdict: RekeyVerdict;
+    let keyAfter: string | null = row.secretsKeyId;
+    if (row.orgCode !== ctx.code) verdict = "TRIPWIRE";
+    else if (!row.secretsEnc) verdict = "NO_SECRETS";
+    else if (row.secretsKeyId !== keyState.keyId && row.secretsKeyId !== keyState.previous?.keyId) verdict = "UNKNOWN_KEY";
+    else {
+      let plain: Record<string, string> | null = null;
+      try {
+        plain = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: row.connectorKey, keyId: row.secretsKeyId }, keyState);
+      } catch {
+        plain = null;
+      }
+      if (!plain) verdict = "DECRYPT_FAILED";
+      else if (row.secretsKeyId === keyState.keyId) verdict = "CURRENT";
+      else if (!opts.apply) verdict = "WOULD_REKEY";
+      else {
+        const sealed = sealSecrets(plain, { orgCode: ctx.code, connectorKey: row.connectorKey }, keyState);
+        const done = await db
+          .update(schema.orgConnections)
+          .set({ secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId })
+          .where(and(eq(schema.orgConnections.id, row.id), eq(schema.orgConnections.secretsKeyId, row.secretsKeyId ?? "")))
+          .returning({ id: schema.orgConnections.id });
+        verdict = done.length ? "REKEYED" : "CURRENT";
+        keyAfter = sealed.keyId;
+        if (done.length) {
+          await audit({
+            userEmail: opts.actorLabel ?? "script:rotate-platform-secrets",
+            action: "ORG_CONNECTION_REKEY",
+            entity: "org_connection",
+            entityId: row.connectorKey,
+            before: { keyBefore: short(row.secretsKeyId) },
+            after: { keyAfter: short(sealed.keyId) },
+            reason: "Xoay PLATFORM_SECRETS_KEY: mã hoá lại bằng khoá mới, bản rõ và trạng thái không đổi",
+          });
+        }
+      }
+    }
+    out.counts[verdict] += 1;
+    out.rows.push({ connectorKey: row.connectorKey, verdict, keyBefore: short(row.secretsKeyId), keyAfter: short(keyAfter) });
+  }
+  return out;
 }
 
 export async function setConnectionStatus(user: SessionUser, connectorKey: string, status: string): Promise<ConnectionActionResult> {

@@ -14,6 +14,7 @@
     "seed:demo": "tsx --tsconfig tsconfig.json scripts/seed-demo.ts",
     "platform:provision": "tsx --tsconfig tsconfig.json scripts/platform-provision-org.ts",
     "platform:diagnostics": "tsx --tsconfig tsconfig.json scripts/platform-diagnostics.ts",
+    "platform:rotate-secrets": "tsx --tsconfig tsconfig.json scripts/rotate-platform-secrets.ts",
     "demo:clear": "tsx --tsconfig tsconfig.json scripts/seed-demo.ts --clear",
     "scheduler": "node scripts/scheduler.mjs",
     "sync": "tsx --tsconfig tsconfig.json scripts/sync.ts",

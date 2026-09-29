@@ -30,17 +30,19 @@ import {
   maskSecret,
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
-import { SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyState } from "@/lib/connectors/secrets";
-import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
+import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot } from "@/lib/connectors/testers";
 import type { ConnectionsView } from "@/lib/connectors/types";
 import { MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { CUSTOMER_CREDENTIAL_ENV } from "@/lib/env";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
-import { invalidateOrganizations } from "@/lib/platform/organizations";
+import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { runSecretsSelfTest } from "@/lib/platform/secrets-self-test";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { WEBHOOK_BINDINGS } from "@/lib/platform/webhooks";
+import { rotateAllOrganizations } from "../scripts/rotate-platform-secrets";
 
 const goc = path.resolve(__dirname, "..");
 const A = "pc-a";
@@ -232,6 +234,106 @@ export function testSecretsCrypto() {
   const src = boChuThich(doc("lib/connectors/secrets.ts"));
   assert.ok(!/AUTH_SECRET|authSecret|env\.auth/.test(src), "secrets.ts không được đọc khoá ký phiên");
   assert.ok(!/createCipheriv\(\s*["']aes-256-(cbc|ecb|ctr)/.test(src) && src.includes('"aes-256-gcm"'), "chỉ AES-256-GCM");
+
+  // ── Xoay khoá: PREVIOUS giải bản mã mang ĐÚNG mã khoá cũ; không có PREVIOUS ⇒ câu "nhập lại", không phải rác ──
+  const rotating = secretsKeyState(env({ PLATFORM_SECRETS_KEY: MASTER_2, PLATFORM_SECRETS_KEY_PREVIOUS: MASTER }));
+  assert.ok(rotating.ok && rotating.previousState === "ready" && rotating.previous?.keyId === state.keyId, "PREVIOUS hợp lệ ⇒ dùng được, mã khoá = mã của khoá cũ");
+  assert.deepEqual(openSecrets(s1.ciphertext, { ...bind, keyId: s1.keyId }, rotating), plain, "deploy khoá mới + PREVIOUS ⇒ bản mã cũ vẫn giải được");
+  assert.equal(sealSecrets(plain, bind, rotating).keyId, other.ok ? other.keyId : "", "mã hoá LUÔN bằng khoá hiện tại, kể cả khi có PREVIOUS");
+  try {
+    openSecrets(s1.ciphertext, { ...bind, keyId: s1.keyId }, other);
+    assert.fail("khoá mới không PREVIOUS phải từ chối");
+  } catch (e) {
+    assert.ok(e instanceof SecretsDecryptError && e.code === "SECRETS_DECRYPT_FAILED" && /nhập lại/.test(e.message), "SECRETS_DECRYPT_FAILED kèm câu nhập lại");
+    assert.ok(!e.message.includes(s1.keyId), "câu lỗi chỉ có mã khoá RÚT GỌN");
+  }
+  assert.throws(() => openSecrets(s1.ciphertext, { ...bind, keyId: "0123456789abcdef" }, rotating), /nhập lại/, "mã khoá lạ (không khớp hiện tại lẫn PREVIOUS) ⇒ từ chối");
+  const fresh = sealSecrets(plain, bind, other);
+  assert.throws(() => openSecrets(fresh.ciphertext, { ...bind, keyId: state.keyId }, rotating), SecretsDecryptError, "bản mã khoá MỚI khai man mã khoá cũ ⇒ thẻ xác thực chặn (không thử khoá khác)");
+  assert.throws(() => openSecrets(s1.ciphertext, { orgCode: B, connectorKey: "lark-webhook", keyId: s1.keyId }, rotating), SecretsDecryptError, "PREVIOUS vẫn giữ AAD tổ chức");
+  const same = secretsKeyState(env({ PLATFORM_SECRETS_KEY: MASTER, PLATFORM_SECRETS_KEY_PREVIOUS: MASTER }));
+  assert.ok(same.ok && same.previous === null && same.previousState === "invalid", "PREVIOUS trùng khoá hiện tại ⇒ invalid, không dùng");
+  const shortPrev = secretsKeyState(env({ PLATFORM_SECRETS_KEY: MASTER, PLATFORM_SECRETS_KEY_PREVIOUS: "ngan" }));
+  assert.ok(shortPrev.ok && shortPrev.previous === null && shortPrev.previousState === "invalid", "PREVIOUS ngắn ⇒ invalid");
+  assert.equal(secretsKeyState(env({ PLATFORM_SECRETS_KEY_PREVIOUS: MASTER })).ok, false, "chỉ có PREVIOUS mà không có khoá hiện tại ⇒ TẮT (không lấy khoá cũ làm khoá chính)");
+  // "Khởi động lại": không đệm — cùng chuỗi ⇒ cùng khoá, cùng mã khoá, giải được bản mã của lần chạy trước.
+  const restarted = secretsKeyState(env({ PLATFORM_SECRETS_KEY: `  ${MASTER}\n` }));
+  assert.ok(restarted.ok && restarted.keyId === s1.keyId, "nạp lại từ .env (kể cả khoảng trắng thừa) ⇒ cùng mã khoá");
+  assert.deepEqual(openSecrets(s1.ciphertext, { ...bind, keyId: s1.keyId }, restarted), plain);
+  assert.ok(!/^(?:const|let)\s+\w+\s*(?::[^=]+)?=\s*(?:secretsKeyState|derive)\(/m.test(src), "secrets.ts không đóng băng khoá ở cấp module");
+
+  // ── Dòng /api/health: chỉ trạng thái + 8 hex ──
+  assert.deepEqual(secretsKeyHealth(missing), { secretsKey: "missing", secretsKeyIdShort: null, secretsKeyPrevious: "absent" });
+  assert.equal(secretsKeyHealth(secretsKeyState(env({ PLATFORM_SECRETS_KEY: "ngan-qua" }))).secretsKey, "invalid");
+  const h = secretsKeyHealth(rotating);
+  assert.deepEqual(h, { secretsKey: "ready", secretsKeyIdShort: rotating.ok ? rotating.keyId.slice(0, 8) : "", secretsKeyPrevious: "ready" });
+  assert.ok(!JSON.stringify(h).includes(MASTER) && !JSON.stringify(h).includes(MASTER_2) && rotating.ok && !JSON.stringify(h).includes(rotating.keyId), "health: không khoá, không mã khoá đầy đủ");
+}
+
+/* ═════════════ 2b · TỰ KIỂM KHOÁ — TRONG BỘ NHỚ, FAIL CLOSED ═════════════ */
+
+export async function testSecretsSelfTest() {
+  const env = (v: Record<string, string>) => (n: string) => v[n];
+  const state = secretsKeyState(env({ PLATFORM_SECRETS_KEY: MASTER }));
+  assert.ok(state.ok);
+  const good = selfTestSecrets(state);
+  assert.equal(good.ok, true, `khoá tốt ⇒ tự kiểm ĐẠT: ${good.reason}`);
+  assert.ok(good.checks.length >= 9 && good.checks.every((c) => c.ok), "đủ các phép thử: vòng tròn, nonce, 4 lượt từ chối…");
+  for (const need of ["AAD tổ chức khác", "AAD connector khác", "Khoá khác", "sửa một byte"]) assert.ok(good.checks.some((c) => c.name.includes(need)), `có phép thử «${need}»`);
+  assert.equal(good.keyIdShort, `${state.keyId.slice(0, 8)}…`);
+  assert.equal(good.keySource, "PLATFORM_SECRETS_KEY");
+  assert.ok(!JSON.stringify(good).includes(MASTER) && !JSON.stringify(good).includes(state.keyId), "kết quả không có khoá / mã khoá đầy đủ");
+
+  const withPrev = selfTestSecrets(secretsKeyState(env({ PLATFORM_SECRETS_KEY: MASTER_2, PLATFORM_SECRETS_KEY_PREVIOUS: MASTER })));
+  assert.ok(withPrev.ok && withPrev.previous === "ready" && withPrev.checks.some((c) => c.name.includes("PREVIOUS") && c.ok), "có PREVIOUS ⇒ thêm phép thử khoá cũ, và nó đạt");
+
+  const none = selfTestSecrets(secretsKeyState(env({})));
+  assert.equal(none.ok, false);
+  assert.match(none.reason ?? "", /PLATFORM_SECRETS_KEY/);
+
+  // FAIL CLOSED: bộ giải HỎNG (bỏ qua AAD / nuốt lỗi / ném lỗi lạ) ⇒ tự kiểm HỎNG, không bao giờ "đạt".
+  const ignoresAad: typeof openSecrets = (ct, b, st) => openSecrets(ct, { orgCode: SELF_TEST_ORG, connectorKey: "tu-kiem-khoa", keyId: b.keyId }, st);
+  const r1 = selfTestSecrets(state, { open: ignoresAad });
+  assert.equal(r1.ok, false, "bộ giải bỏ qua AAD ⇒ HỎNG");
+  assert.ok(r1.checks.filter((c) => !c.ok).every((c) => c.name.includes("AAD")), "chỉ đúng hai phép thử AAD hỏng");
+  const swallows: typeof openSecrets = (ct, b, st) => {
+    try {
+      return openSecrets(ct, b, st);
+    } catch {
+      return {};
+    }
+  };
+  assert.equal(selfTestSecrets(state, { open: swallows }).ok, false, "bộ giải nuốt lỗi (trả {} thay vì ném) ⇒ HỎNG");
+  const wrongError: typeof openSecrets = () => {
+    throw new Error("lạ");
+  };
+  assert.equal(selfTestSecrets(state, { open: wrongError }).ok, false, "bộ giải ném lỗi lạ (không phải SECRETS_DECRYPT_FAILED) ⇒ HỎNG");
+
+  // Người vận hành: chỉ tổ chức nhà + platform:operate; ĐÚNG một dòng platform_audit_log; không ghi org_connections.
+  const home = await getHomeOrganization();
+  const operator: SessionUser = { id: "pc-op", email: "op@nha.local", name: "Vận hành", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } };
+  const viewer: SessionUser = { ...operator, id: "pc-xem", role: "VIEWER", permissions: ["dashboard:view"] };
+  const otherOrg: SessionUser = { ...operator, id: "pc-khac", permissions: ["platform:operate"], organization: { code: A, name: "Khác", isHome: false } };
+  const pdb = await getPlatformDb();
+  const logRows = async () => pdb.select().from(schema.platformAuditLog).where(eq(schema.platformAuditLog.action, "SECRETS_SELF_TEST")).orderBy(schema.platformAuditLog.at);
+  const before = (await logRows()).length;
+  const conn0 = await homeFingerprint();
+  assert.ok("error" in (await runSecretsSelfTest(viewer, { keyState: state })), "không có platform:operate ⇒ từ chối");
+  assert.ok("error" in (await runSecretsSelfTest(otherOrg, { keyState: state })), "tổ chức khác (kể cả mang khoá platform:operate) ⇒ từ chối");
+  assert.equal((await logRows()).length, before, "bị từ chối ⇒ không một dòng nhật ký");
+  const ran = await runSecretsSelfTest(operator, { keyState: state });
+  assert.ok(!("error" in ran) && ran.ok && ran.audited, `người vận hành ⇒ tự kiểm ĐẠT và có vết: ${JSON.stringify(ran)}`);
+  const rows = await logRows();
+  assert.equal(rows.length, before + 1, "ĐÚNG một dòng platform_audit_log");
+  const last = rows[rows.length - 1];
+  assert.equal(last.actorEmail, operator.email);
+  assert.equal(last.targetOrgCode, home.code);
+  assertNoSecret("nhật ký tự kiểm", [last, ran], [MASTER, state.keyId]);
+  assert.deepEqual(await homeFingerprint(), conn0, "tự kiểm không ghi org_connections / settings / nhật ký kết nối");
+  const broken = await runSecretsSelfTest(operator, { keyState: secretsKeyState(env({})) });
+  assert.ok(!("error" in broken) && broken.ok === false && broken.checks.length === 0, "thiếu khoá ⇒ tự kiểm HỎNG, vẫn có vết");
+  const act = boChuThich(doc("lib/actions/platform-secrets.ts"));
+  assert.ok(/requirePermission\(\s*["']platform:operate["']\s*\)/.test(act) && /runSecretsSelfTest\(user\)/.test(act) && !/\bopenSecrets\b|orgConnections|getDb\(/.test(act), "action: đọc phiên platform:operate rồi gọi lõi — không đối số, không chạm bảng");
 }
 
 /* ═════════════ 3 · HÀM KIỂM TRA (máy chủ giả) ═════════════ */
@@ -329,8 +431,233 @@ function assertNoSecret(label: string, value: unknown, secrets: readonly string[
   for (const s of secrets) if (s && s.length >= 6) assert.ok(!json.includes(s), `${label}: lộ bí mật "${s.slice(0, 3)}…"`);
 }
 
+const LARK_SIGN_2 = "ky-lark-moi-sau-khi-doi-cua-a-4c3b2a";
+const TG_TOKEN_B = "9876543210:BBH-bi-mat-telegram-cua-to-chuc-b_q9w8";
+const TG_TOKEN_A2 = "1122334455:CCH-token-nhap-lai-cua-to-chuc-a_z7y6";
+const AI_KEY_2 = "sk-ant-api03-khoa-bia-thu-hai-pc-a-9876543210abcd";
+const LARK_URL_B = "https://open.larksuite.com/open-apis/bot/v2/hook/eeee5555-ffff-6666-aaaa-7777bbbb8888";
+const ALL_SECRETS = [LARK_URL, LARK_SIGN, LARK_SIGN_2, TG_TOKEN, TG_TOKEN_B, TG_TOKEN_A2, AI_KEY, AI_KEY_2, LARK_URL_B, MASTER, MASTER_2, "aaaa1111-bbbb-2222-cccc-3333dddd4444", "eeee5555-ffff-6666-aaaa-7777bbbb8888"];
+
+type RowSnap = { key: string; enc: string; kid: string | null; status: string; lastTestOk: boolean | null; activatedAt: string | null };
+async function snapRows(org: string): Promise<RowSnap[]> {
+  return withOrganization(org, async () =>
+    (await (await getDb()).select().from(schema.orgConnections).orderBy(schema.orgConnections.connectorKey)).map((r) => ({
+      key: r.connectorKey,
+      enc: r.secretsEnc ? Buffer.from(r.secretsEnc).toString("hex") : "",
+      kid: r.secretsKeyId,
+      status: r.status,
+      lastTestOk: r.lastTestOk,
+      activatedAt: r.activatedAt ? r.activatedAt.toISOString() : null,
+    })),
+  );
+}
+
+async function rekeyAudits(org: string): Promise<unknown[]> {
+  return withOrganization(org, async () => (await getDb()).select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "ORG_CONNECTION_REKEY")));
+}
+
+/** Mọi bảng `public` của CSDL đang ngữ cảnh, mỗi dòng ở dạng chữ (`bảng::text`) — để QUÉT bản rõ ở bất kỳ đâu. */
+async function dumpAllTables(): Promise<string> {
+  const db = await getDb();
+  const names = (await db.execute(sql`select table_name as t from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by 1`)) as unknown as { rows: { t: string }[] };
+  const parts: string[] = [];
+  for (const { t } of names.rows) {
+    const r = (await db.execute(sql.raw(`select coalesce(string_agg(x::text, '|'), '') as s from "${t.replace(/"/g, '""')}" x`))) as unknown as { rows: { s: string }[] };
+    parts.push(r.rows[0]?.s ?? "");
+  }
+  assert.ok(names.rows.length >= 50, `phải quét được các bảng của CSDL — mới thấy ${names.rows.length}`);
+  return parts.join("\n");
+}
+
+function countOf(sum: { totals: Record<RekeyVerdict, number> }, v: RekeyVerdict) {
+  return sum.totals[v];
+}
+
+/**
+ * VÒNG ĐỜI BÍ MẬT TRÊN HAI TỔ CHỨC THẬT (tiếp nối trạng thái của `testConnectionsTwoOrgs`): cập nhật giữ trạng thái đúng
+ * · khởi động lại vẫn giải được · khoá sai ⇒ từ chối, không bản rõ rác · A không đọc được bản mã của B · xoay khoá
+ * (chạy thử không ghi, chạy thật mã hoá lại mọi dòng, chạy lại = không đổi) · QUÉT mọi bảng của A, B và nhà: không bản
+ * rõ nào · QUÉT log: không bản rõ nào.
+ */
+async function secretsLifecycle(adminA: SessionUser, adminB: SessionUser) {
+  const logs: string[] = [];
+  const methods = ["log", "info", "warn", "error", "debug"] as const;
+  const original = methods.map((m) => console[m]);
+  methods.forEach((m) => {
+    console[m] = (...args: unknown[]) => {
+      logs.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+    };
+  });
+  const larkOk = fakeFetch(() => ({ body: { code: 0 } }));
+  const tgOk = () => fakeFetch((url) => (url.endsWith("/getMe") ? { body: { ok: true, result: { username: "bot" } } } : { body: { ok: true } }));
+  const kidOf = (m: string) => {
+    const s = secretsKeyState((n) => (n === "PLATFORM_SECRETS_KEY" ? m : undefined));
+    assert.ok(s.ok);
+    return s.keyId;
+  };
+  try {
+    process.env.PLATFORM_SECRETS_KEY = MASTER;
+    delete process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
+
+    await withOrganization(A, async () => {
+      const db = await getDb();
+      const rowOf = async (k: string) => (await db.select().from(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, k)))[0];
+
+      // ── CẬP NHẬT bí mật của kết nối ĐANG BẬT ⇒ về Nháp, kết quả kiểm tra cũ xoá, lúc chạy KHÔNG đọc được tới khi bật lại ──
+      assert.equal((await rowOf("anthropic-byok")).status, "ACTIVE", "tiền đề: khoá AI của A đang bật");
+      const upd = await saveConnection(adminA, { connectorKey: "anthropic-byok", secrets: { apiKey: AI_KEY_2 } });
+      assert.ok("ok" in upd && upd.status === "DRAFT", JSON.stringify(upd));
+      const ai = await rowOf("anthropic-byok");
+      assert.ok(ai.status === "DRAFT" && ai.lastTestOk === null && ai.activatedAt === null, "cập nhật ⇒ Nháp, xoá kết quả kiểm tra + mốc bật");
+      assert.deepEqual(ai.secretHints, { apiKey: `••••${AI_KEY_2.slice(-4)}` }, "gợi ý theo giá trị MỚI");
+      const blocked = await openActiveConnection("anthropic-byok");
+      assert.ok(!blocked.ok && !("secrets" in blocked), "chưa kiểm tra lại ⇒ luồng chạy KHÔNG nhận bí mật (cũ lẫn mới)");
+      assert.ok("ok" in (await testOrgConnection(adminA, "anthropic-byok", { tester: { fetch: fakeFetch(() => ({ body: { data: [] } })).fetch } })));
+      assert.ok("ok" in (await setConnectionStatus(adminA, "anthropic-byok", "ACTIVE")));
+      const reopened = await openActiveConnection("anthropic-byok");
+      assert.ok(reopened.ok && reopened.secrets.apiKey === AI_KEY_2, "kiểm tra + bật lại ⇒ đọc ra giá trị MỚI");
+
+      // Cập nhật MỘT ô bí mật: ô kia giữ nguyên (gộp trong bản rõ, không mất webhook khi đổi khoá ký).
+      const part = await saveConnection(adminA, { connectorKey: "lark-webhook", secrets: { signSecret: LARK_SIGN_2 } });
+      assert.ok("ok" in part);
+      assert.deepEqual((await rowOf("lark-webhook")).secretHints, { webhookUrl: "••••4444", signSecret: `••••${LARK_SIGN_2.slice(-4)}` }, "ô không nhập giữ gợi ý cũ, ô nhập đổi gợi ý");
+      const callsBefore = larkOk.calls.length;
+      assert.ok("ok" in (await testOrgConnection(adminA, "lark-webhook", { tester: { fetch: larkOk.fetch } })));
+      assert.equal(larkOk.calls[callsBefore]?.url, LARK_URL, "webhook cũ vẫn còn trong bản mã sau khi chỉ đổi khoá ký");
+
+      // ── "KHỞI ĐỘNG LẠI": biến môi trường mất rồi nạp lại từ .env (cùng chuỗi) ⇒ cùng mã khoá, vẫn giải được ──
+      delete process.env.PLATFORM_SECRETS_KEY;
+      const down = await openActiveConnection("anthropic-byok");
+      assert.ok(!down.ok && /PLATFORM_SECRETS_KEY/.test(down.reason) && !("secrets" in down), "không có khoá ⇒ từ chối, không bản rõ");
+      process.env.PLATFORM_SECRETS_KEY = `${MASTER.slice(0, 10)}${MASTER.slice(10)}`;
+      const up = await openActiveConnection("anthropic-byok");
+      assert.ok(up.ok && up.secrets.apiKey === AI_KEY_2, "nạp lại cùng khoá ⇒ giải được");
+      assert.equal((await rowOf("anthropic-byok")).secretsKeyId, kidOf(MASTER), "mã khoá trên dòng = mã khoá tính lại từ cùng chuỗi");
+
+      // ── KHOÁ SAI ⇒ từ chối, KHÔNG trả bản rõ rác — kể cả khi dòng mất mã khoá (chỉ còn thẻ xác thực đứng gác) ──
+      process.env.PLATFORM_SECRETS_KEY = MASTER_2;
+      const wrong = await openActiveConnection("anthropic-byok");
+      assert.ok(!wrong.ok && /nhập lại/.test(wrong.reason) && !("secrets" in wrong), "khoá sai ⇒ câu nhập lại");
+      const kid0 = (await rowOf("anthropic-byok")).secretsKeyId;
+      await db.update(schema.orgConnections).set({ secretsKeyId: null }).where(eq(schema.orgConnections.connectorKey, "anthropic-byok"));
+      const noKid = await openActiveConnection("anthropic-byok");
+      assert.ok(!noKid.ok && /giải mã/.test(noKid.reason) && !("secrets" in noKid), "không mã khoá + khoá sai ⇒ GCM từ chối, không rác");
+      await db.update(schema.orgConnections).set({ secretsKeyId: kid0 }).where(eq(schema.orgConnections.connectorKey, "anthropic-byok"));
+      const larkCalls = larkOk.calls.length;
+      const wrongTest = await testOrgConnection(adminA, "lark-webhook", { tester: { fetch: larkOk.fetch } });
+      assert.ok("error" in wrongTest && /nhập lại/.test(wrongTest.error), "kiểm tra với khoá sai ⇒ câu nhập lại");
+      assert.equal(larkOk.calls.length, larkCalls, "khoá sai ⇒ không một request nào rời máy");
+      process.env.PLATFORM_SECRETS_KEY = MASTER;
+    });
+
+    // ── A KHÔNG đọc được của B, kể cả chép nguyên bản mã + mã khoá sang dòng của A ──
+    const bRow = await withOrganization(B, async () => {
+      const saved = await saveConnection(adminB, { connectorKey: "telegram-bot", settings: { chatId: "-1009876543" }, secrets: { botToken: TG_TOKEN_B } });
+      assert.ok("ok" in saved, JSON.stringify(saved));
+      return (await (await getDb()).select().from(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, "telegram-bot")))[0];
+    });
+    await withOrganization(A, async () => {
+      const db = await getDb();
+      await db.update(schema.orgConnections).set({ secretsEnc: bRow.secretsEnc, secretsKeyId: bRow.secretsKeyId }).where(eq(schema.orgConnections.connectorKey, "telegram-bot"));
+      const tg = tgOk();
+      const stolen = await testOrgConnection(adminA, "telegram-bot", { tester: { fetch: tg.fetch } });
+      assert.ok("error" in stolen && /giải mã/.test(stolen.error), `A không giải được bản mã của B: ${JSON.stringify(stolen)}`);
+      assert.equal(tg.calls.length, 0, "không giải được ⇒ token của B không đi đâu cả");
+      assertNoSecret("lỗi khi A đọc bản mã của B", stolen, ALL_SECRETS);
+    });
+
+    // ── XOAY KHOÁ ──
+    const codes = [A, B];
+    const beforeDeploy = { a: await snapRows(A), b: await snapRows(B) };
+    // Deploy khoá MỚI kèm PREVIOUS = khoá cũ: chưa xoay mà không kết nối nào chết.
+    process.env.PLATFORM_SECRETS_KEY = MASTER_2;
+    process.env.PLATFORM_SECRETS_KEY_PREVIOUS = MASTER;
+    await withOrganization(A, async () => {
+      const live = await openActiveConnection("anthropic-byok");
+      assert.ok(live.ok && live.secrets.apiKey === AI_KEY_2, "khoá mới + PREVIOUS ⇒ bí mật cũ vẫn sống trước khi xoay");
+      delete process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
+      const dead = await openActiveConnection("anthropic-byok");
+      assert.ok(!dead.ok && /nhập lại/.test(dead.reason), "thiếu PREVIOUS ⇒ bí mật cũ chết (lý do PREVIOUS phải đi qua deploy)");
+      process.env.PLATFORM_SECRETS_KEY_PREVIOUS = MASTER;
+    });
+
+    // CHẠY THỬ: không một byte, không một dòng nhật ký.
+    const dry = await rotateAllOrganizations({ apply: false, codes });
+    assert.equal(dry.reports.length, 2, JSON.stringify(dry.skipped));
+    assert.equal(countOf(dry, "WOULD_REKEY"), 3, `chạy thử: A lark + A khoá AI + B telegram mang khoá cũ — ${JSON.stringify(dry.totals)}`);
+    assert.equal(countOf(dry, "DECRYPT_FAILED"), 2, "dòng chép chéo (A mang bản mã B · B mang bản mã A) ⇒ DECRYPT_FAILED, không sửa hộ");
+    assert.equal(countOf(dry, "REKEYED"), 0);
+    assert.equal(dry.previousRemovable, false);
+    assert.equal(dry.exitCode, 2, "còn dòng cần người ⇒ mã thoát 2");
+    assert.deepEqual({ a: await snapRows(A), b: await snapRows(B) }, beforeDeploy, "CHẠY THỬ không ghi một byte");
+    assert.equal((await rekeyAudits(A)).length + (await rekeyAudits(B)).length, 0, "CHẠY THỬ không ghi nhật ký");
+
+    // CHẠY THẬT: mọi dòng giải được đều sang khoá mới; trạng thái / kết quả kiểm tra / mốc bật KHÔNG đổi.
+    const run = await rotateAllOrganizations({ apply: true, codes });
+    assert.equal(countOf(run, "REKEYED"), 3, JSON.stringify(run.totals));
+    assert.equal(countOf(run, "DECRYPT_FAILED"), 2);
+    const after = { a: await snapRows(A), b: await snapRows(B) };
+    for (const [org, rows] of Object.entries(after)) {
+      for (const r of rows) {
+        const was = beforeDeploy[org as "a" | "b"].find((x) => x.key === r.key)!;
+        const rotated = run.reports.flatMap((x) => x.rows).some((x) => x.connectorKey === r.key && x.verdict === "REKEYED" && x.keyAfter?.startsWith(r.kid?.slice(0, 8) ?? "-"));
+        assert.deepEqual({ status: r.status, lastTestOk: r.lastTestOk, activatedAt: r.activatedAt }, { status: was.status, lastTestOk: was.lastTestOk, activatedAt: was.activatedAt }, `${org}/${r.key}: xoay khoá không đổi trạng thái`);
+        if (r.kid === kidOf(MASTER_2)) assert.ok(rotated && r.enc !== was.enc, `${org}/${r.key}: đã mã hoá lại`);
+        else assert.deepEqual(r, was, `${org}/${r.key}: dòng không giải được giữ NGUYÊN (người nhập lại)`);
+      }
+    }
+    assert.equal((await rekeyAudits(A)).length + (await rekeyAudits(B)).length, 3, "mỗi dòng mã hoá lại ĐÚNG một dòng nhật ký");
+    assertNoSecret("nhật ký xoay khoá", [await rekeyAudits(A), await rekeyAudits(B), run], ALL_SECRETS);
+    assert.ok(!JSON.stringify(run).includes(kidOf(MASTER)) && !JSON.stringify(run).includes(kidOf(MASTER_2)), "báo cáo chỉ có mã khoá rút gọn");
+
+    // CHẠY LẠI = không đổi.
+    const again = await rotateAllOrganizations({ apply: true, codes });
+    assert.equal(countOf(again, "REKEYED"), 0, "chạy lại ⇒ không mã hoá lại gì");
+    assert.equal(countOf(again, "CURRENT"), 3);
+    assert.deepEqual({ a: await snapRows(A), b: await snapRows(B) }, after, "chạy lại ⇒ không byte nào đổi");
+
+    // Gỡ PREVIOUS: mọi dòng đã xoay vẫn dùng được với CHỈ khoá mới.
+    delete process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
+    await withOrganization(A, async () => {
+      const ai = await openActiveConnection("anthropic-byok");
+      assert.ok(ai.ok && ai.secrets.apiKey === AI_KEY_2, "sau xoay, bỏ PREVIOUS ⇒ vẫn đúng bản rõ");
+      const n = larkOk.calls.length;
+      assert.ok("ok" in (await testOrgConnection(adminA, "lark-webhook", { tester: { fetch: larkOk.fetch } })));
+      assert.equal(larkOk.calls[n]?.url, LARK_URL);
+      // Dòng hỏng: người nhập lại ⇒ mã hoá bằng khoá mới.
+      assert.ok("ok" in (await saveConnection(adminA, { connectorKey: "telegram-bot", settings: { chatId: "-1001234567" }, secrets: { botToken: TG_TOKEN_A2 } })));
+    });
+    await withOrganization(B, async () => {
+      const tg = tgOk();
+      assert.ok("ok" in (await testOrgConnection(adminB, "telegram-bot", { tester: { fetch: tg.fetch } })));
+      assert.ok(tg.calls[0]?.url.includes(`/bot${TG_TOKEN_B}/`), "B sau xoay ⇒ đúng token của B");
+      const fixed = await saveConnection(adminB, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL_B } });
+      assert.ok("ok" in fixed, JSON.stringify(fixed));
+    });
+    const clean = await rotateAllOrganizations({ apply: false, codes });
+    assert.ok(clean.previousRemovable && clean.exitCode === 0 && countOf(clean, "CURRENT") === 5, `nhập lại xong ⇒ được gỡ PREVIOUS: ${JSON.stringify(clean.totals)}`);
+
+    // ── QUÉT: không bản rõ nào trong BẤT KỲ bảng nào của A, B, nhà — dạng chữ lẫn dạng hex (cột bytea) ──
+    const needles = ALL_SECRETS.flatMap((s) => [s, Buffer.from(s, "utf8").toString("hex")]);
+    for (const org of [A, B]) {
+      const dump = await withOrganization(org, dumpAllTables);
+      for (const s of needles) assert.ok(!dump.includes(s), `${org}: bảng nào đó chứa bản rõ "${s.slice(0, 6)}…"`);
+    }
+    const homeDump = await dumpAllTables();
+    for (const s of needles) assert.ok(!homeDump.includes(s), `nhà: bảng nào đó chứa bản rõ "${s.slice(0, 6)}…"`);
+  } finally {
+    methods.forEach((m, i) => {
+      console[m] = original[i];
+    });
+  }
+  const logText = logs.join("\n");
+  for (const s of ALL_SECRETS) assert.ok(!logText.includes(s), `log chứa bí mật "${s.slice(0, 6)}…"`);
+}
+
 export async function testConnectionsTwoOrgs() {
   const savedKey = process.env.PLATFORM_SECRETS_KEY;
+  const savedPrev = process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
+  delete process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
   const home0 = await homeFingerprint();
   for (const code of [A, B]) {
     await cleanupOrg(code);
@@ -506,9 +833,13 @@ export async function testConnectionsTwoOrgs() {
     assert.ok("error" in (await saveConnection(homeUser, { connectorKey: "viettelpost", secrets: { password: "x".repeat(20) } })), "nhà không đổi được connector HOME_ONLY qua màn hình này");
     const home1 = await homeFingerprint();
     assert.deepEqual(home1, home0, "CSDL nhà: org_connections, settings, nhật ký kết nối — không đổi một dòng");
+
+    await secretsLifecycle(adminA, adminB);
   } finally {
     if (savedKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;
     else process.env.PLATFORM_SECRETS_KEY = savedKey;
+    if (savedPrev === undefined) delete process.env.PLATFORM_SECRETS_KEY_PREVIOUS;
+    else process.env.PLATFORM_SECRETS_KEY_PREVIOUS = savedPrev;
     for (const code of [A, B]) await cleanupOrg(code);
   }
 }
@@ -541,13 +872,14 @@ export function testNoSecretPathsStatic() {
 export async function testConnectors() {
   const sum = testRegistryMatchesCode();
   testSecretsCrypto();
+  await testSecretsSelfTest();
   await testTesters();
   testNoSecretPathsStatic();
   await testConnectionsTwoOrgs();
   console.log(
     `✓ Phase 9 · connector: sổ ${CONNECTORS.length} mục (${sum.homeOnly} chỉ nhà · ${sum.perOrg} theo tổ chức · ${Object.entries(sum.perKind)
       .map(([k, n]) => `${k} ${n}`)
-      .join(" · ")}) khớp lib/integrations + route webhook + WEBHOOK_BINDINGS + CUSTOMER_CREDENTIAL_ENV · AES-256-GCM vòng tròn, nonce mới, AAD chặn chép chéo tổ chức / connector, thiếu PLATFORM_SECRETS_KEY ⇒ từ chối · kiểm tra chỉ gọi Lark / Telegram, không theo chuyển hướng · hai tổ chức thật không thấy nhau, bật chỉ sau kiểm tra đạt · nhà chỉ đọc, CSDL nhà không đổi · không đường nào trả bí mật`,
+      .join(" · ")}) khớp lib/integrations + route webhook + WEBHOOK_BINDINGS + CUSTOMER_CREDENTIAL_ENV · AES-256-GCM vòng tròn, nonce mới, AAD chặn chép chéo tổ chức / connector, thiếu PLATFORM_SECRETS_KEY ⇒ từ chối · kiểm tra chỉ gọi Lark / Telegram, không theo chuyển hướng · hai tổ chức thật không thấy nhau, bật chỉ sau kiểm tra đạt · nhà chỉ đọc, CSDL nhà không đổi · không đường nào trả bí mật · tự kiểm khoá trong bộ nhớ fail-closed (bộ giải hỏng ⇒ HỎNG), một dòng nhật ký nền tảng · cập nhật ⇒ Nháp, khởi động lại vẫn giải được, khoá sai ⇒ từ chối không rác, A không đọc bản mã của B · xoay khoá: PREVIOUS giữ bí mật cũ sống, chạy thử 0 byte, chạy thật mã hoá lại 3 dòng, chạy lại 0 đổi · quét mọi bảng A/B/nhà + log: không bản rõ`,
   );
 }
 

@@ -61,3 +61,16 @@ export type ConnectionsView = {
 };
 
 export type ConnectionActionResult = { ok: true; status: ConnectionStatus; message?: string } | { error: string };
+
+/**
+ * Kết quả «Tự kiểm khoá bí mật» (`/platform`, người vận hành nền tảng). KHÔNG có khoá, KHÔNG có chuỗi thử (sinh ngẫu
+ * nhiên lúc chạy và bỏ đi), KHÔNG có bản mã — chỉ tên từng phép thử + đạt / hỏng, mã khoá rút gọn và TÊN biến nguồn.
+ */
+export type SecretsSelfTestReport = {
+  ok: boolean;
+  keyIdShort: string | null;
+  keySource: string;
+  previous: "absent" | "ready" | "invalid";
+  reason: string | null;
+  checks: { name: string; ok: boolean }[];
+};
