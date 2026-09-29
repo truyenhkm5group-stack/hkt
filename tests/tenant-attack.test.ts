@@ -37,6 +37,16 @@
  * custom · luật bỏ chặn vòng lặp trực tiếp · gói cho vai trò khoá cấm · sao lưu đọc lời khai của nhà · tìm kiếm của
  * Copilot đọc CSDL nhà.
  *
+ * Chạy lại cho pilot readiness (29/09/2026 — docs/platform/security-final.md): sổ dùng AI (`/settings/plan` chỉ cộng dòng
+ * mang mã tổ chức của PHIÊN, `?org=` không đổi được gì), mọi cửa vận hành pilot / công tắc khẩn / công tắc AI / trang sức
+ * khoẻ / tự kiểm khoá bí mật với đích B và đích NHÀ — ở vỏ action VÀ lõi gọi thẳng — bị từ chối VÌ «không phải người vận
+ * hành»; đơn / sản phẩm / khách tạo tay của B bằng id; A không tự mở khoá công tắc người vận hành đã đóng với chính A
+ * (tạm dừng luật, tắt AI, đình chỉ). Người vận hành NHÀ mở sức khoẻ của B: đúng một dòng SUPPORT_VIEW, CSDL B y nguyên,
+ * 0 dữ liệu nghiệp vụ (tên khách, email, số tiền đơn, mã / tên sản phẩm, giá trị field), sao lưu không mượn lời khai nhà.
+ * Đột biến (29/09/2026), mỗi cái ĐỎ: lõi công tắc khẩn bỏ câu hỏi người vận hành · lõi công tắc AI bỏ câu hỏi · trang sức
+ * khoẻ bỏ câu hỏi · sổ AI bỏ lọc mã tổ chức · trang sức khoẻ không ghi SUPPORT_VIEW · sao lưu của trang sức khoẻ đọc đích
+ * nhà · sản phẩm tay bỏ kiểm «mẫu mã thuộc sản phẩm» · `/settings/plan` nhận `?org=` · bỏ qua công tắc AI của tổ chức.
+ *
  * Chạy qua `npm test` (cần `./setup-env` + `ensureMigrated()` của bộ chạy chung).
  */
 import assert from "node:assert/strict";
@@ -56,6 +66,13 @@ import ApprovalsPage from "@/app/(dashboard)/approvals/page";
 import { BackupStatusCard } from "@/app/(dashboard)/integrations/backup-status-card";
 import ObjectRecordsPage from "@/app/(dashboard)/o/[object]/page";
 import ObjectRecordPage from "@/app/(dashboard)/o/[object]/[id]/page";
+import CustomerDetailPage from "@/app/(dashboard)/customers/[id]/page";
+import EditManualOrderPage from "@/app/(dashboard)/orders/[id]/edit/page";
+import OrderDetailPage from "@/app/(dashboard)/orders/[id]/page";
+import PlatformOrgPage from "@/app/(dashboard)/platform/org/[code]/page";
+import PlatformPage from "@/app/(dashboard)/platform/page";
+import ProductDetailPage from "@/app/(dashboard)/products/[id]/page";
+import PlanPage from "@/app/(dashboard)/settings/plan/page";
 import DynamicPage from "@/app/(dashboard)/p/[slug]/page";
 import { GET as logoGET } from "@/app/api/branding/logo/route";
 import { GET as blueprintExportGET } from "@/app/api/metadata/blueprint-export/route";
@@ -63,11 +80,14 @@ import { GET as metadataFileGET } from "@/app/api/metadata/files/[id]/route";
 import { POST as syncPOST } from "@/app/api/sync/[job]/route";
 import { askCopilot, confirmCopilotActions, copilotStatus } from "@/lib/actions/ai";
 import { applyAiDraftAction, createAiDraftAction, discardAiDraftAction, previewAiDraftAction } from "@/lib/actions/ai-builder";
+import { setOrgAiControlAction, setPlatformAiEnabledAction } from "@/lib/actions/ai-usage";
 import { decideApproval, listPendingApprovals } from "@/lib/actions/approvals";
 import { loginAction } from "@/lib/actions/auth";
 import { installBlueprintFileAction, installTemplateAction, previewBlueprintFileAction, previewTemplateAction } from "@/lib/actions/blueprints";
 import { removeLogoAction } from "@/lib/actions/branding";
 import { saveConnectionAction, setConnectionStatusAction, testConnectionAction } from "@/lib/actions/connections";
+import { cancelManualOrderAction, createManualOrderAction, updateManualOrderAction } from "@/lib/actions/manual-orders";
+import { createProductAction, updateProductAction } from "@/lib/actions/manual-products";
 import { saveCustomValuesAction } from "@/lib/actions/metadata";
 import {
   archiveFieldAction,
@@ -80,13 +100,15 @@ import {
   saveStatusOverridesAdminAction,
   updateFieldAction,
 } from "@/lib/actions/metadata-admin";
-import { uploadCustomerFileAction } from "@/lib/actions/metadata-records";
+import { saveCustomerProfileAction, uploadCustomerFileAction } from "@/lib/actions/metadata-records";
 import { createRecordAction, deleteRecordAction, setObjectArchivedAction, updateObjectAction, updateRecordAction, uploadRecordFileAction } from "@/lib/actions/objects";
 import { checkOrgAction, createInviteAction, createOrganizationAction, previewSignupAction, retrySetupAction, revokeInviteAction, setSignupModeAction } from "@/lib/actions/onboarding";
 import { runPageAction } from "@/lib/actions/page-actions";
 import { addPageToMenuAction, archivePageAction, createPageAction, loadBuilderDraftAction, publishBuilderPageAction, publishPageAction, savePageDraftAction, saveBuilderDraftAction, updatePageMetaAction } from "@/lib/actions/page-admin";
 import { previewPageBlock } from "@/lib/actions/page-preview";
 import { toggleModuleForOrgAction } from "@/lib/actions/platform-modules";
+import { confirmPilotUatAction, disableOrgConnectionAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
+import { secretsSelfTestAction } from "@/lib/actions/platform-secrets";
 import { previewWorkflowRuleAction, runWorkflowsNowAction, saveWorkflowRuleAction, setWorkflowRuleModeAction, setWorkflowRuleStatusAction } from "@/lib/actions/workflow-admin";
 import { readOrgBuilderState } from "@/lib/ai-builder/metadata";
 import { BLUEPRINT_TOOL_NAME } from "@/lib/ai-builder/prompt";
@@ -94,6 +116,10 @@ import { getBuilderAi, setBuilderAiForTests } from "@/lib/ai-builder/provider";
 import { createDraft, loadAiBuilderView, loadDraft, previewDraft } from "@/lib/ai-builder/service";
 import { COPILOT_ORG_UNAVAILABLE, copilotOrgDenial, runCopilot } from "@/lib/ai/copilot";
 import { FakeProvider, setAiProviderForTests, type AiRequest, type AiResponse } from "@/lib/ai/provider";
+import { invalidateAiControl, PLATFORM_AI_SWITCH_KEY, readOrgAiControl, setOrgAiControl, setPlatformAiEnabled } from "@/lib/ai-usage/control";
+import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { AI_DISABLED_BY_OPERATOR } from "@/lib/ai-usage/types";
+import { loadOperatorOrgAi, loadOrgAiUsage, loadPlatformAiSummary } from "@/lib/ai-usage/view";
 import { getTool, TOOL_MODULE_DISABLED } from "@/lib/ai/tools/registry";
 import { verifyLogin } from "@/lib/auth/login";
 import { requireUser, setRequestPathSourceForTests, signSession, type SessionUser } from "@/lib/auth/session";
@@ -109,6 +135,8 @@ import type { MetadataActor } from "@/lib/metadata/types";
 import { openCustomFile, saveCustomFile, saveCustomValues } from "@/lib/metadata/values";
 import { createObject } from "@/lib/objects/objects";
 import { createRecord, getRecord, listRecords, reverseRelations } from "@/lib/objects/records";
+import { createManualOrderCore, manualOrderFormValues } from "@/lib/records/order-create";
+import { createProductCore } from "@/lib/records/product-create";
 import { claimInvite, createInvite } from "@/lib/onboarding/invites";
 import { hashIp } from "@/lib/onboarding/rate";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
@@ -119,7 +147,12 @@ import { createPage, getPageBySlug, publishPage, savePageDraft } from "@/lib/pag
 import type { BlockType, KpiData, PageBlock, PageRenderContext, PageSchema, ResolvedBlock } from "@/lib/pages/types";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
-import { invalidateOrganizations } from "@/lib/platform/organizations";
+import { disableOrgConnection, setOrganizationSuspended, setWorkflowsPaused } from "@/lib/platform/kill-switches";
+import { invalidateOrgFlags, readOrgFlag, WORKFLOWS_PAUSED_FLAG } from "@/lib/platform/org-flags";
+import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { confirmPilotUat, setPilotStage } from "@/lib/platform/pilot";
+import { runSecretsSelfTest } from "@/lib/platform/secrets-self-test";
+import { listOrgSupportSummaries, loadOrgSupport } from "@/lib/platform/support";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { loadPageBuilder, adminLoadBuilderDraft } from "@/lib/platform-ui/page-builder";
 import { loadFormEditor, loadListEditor } from "@/lib/platform-ui/metadata-admin";
@@ -153,6 +186,16 @@ const AI_KEY_B = `sk-ant-api03-khoa-bia-${MARK}-0123456789abcdef`;
 const SECRETS_B = [LARK_B, SIGN_B, "bbbb2222-cccc-3333", AI_KEY_B];
 const PNG_B = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`logo-${MARK}`), Buffer.alloc(64, 7)]);
 const PDF_B = Buffer.from(`%PDF-1.4 hop dong ${MARK}`);
+/**
+ * Dữ liệu NGHIỆP VỤ của B cho mặt pilot readiness: email khách, số tiền đơn tay (chữ số hiếm — dò được trong JSON), mã
+ * sản phẩm tay. Trang sức khoẻ mà người vận hành NHÀ mở cho B không được chứa chuỗi nào (chỉ số đếm, mốc, loại).
+ */
+const EMAIL_KHACH_B = `khach.${MARK}@ta-b.local`;
+const TIEN_DON_B = 7_319_007;
+const MA_SP_B = "TAB-SP-7Q";
+/** Sổ dùng AI: số token HIẾM của từng tổ chức — `/settings/plan` của A chỉ được cộng dòng của A. */
+const TOKEN_AI_B = { input: 918_273, output: 564_738 };
+const TOKEN_AI_A = { input: 111_222, output: 333_444 };
 
 // ─────────────────────────── dựng / dọn ───────────────────────────
 
@@ -168,8 +211,13 @@ async function cleanup() {
   }
   await pdb.delete(schema.platformSignupInvites).where(or(like(schema.platformSignupInvites.note, `${NOTE}%`), inArray(schema.platformSignupInvites.organizationCode, [A, B])));
   await pdb.delete(schema.platformSignupAttempts).where(or(inArray(schema.platformSignupAttempts.organizationCode, [A, B]), inArray(schema.platformSignupAttempts.ipHash, [hashIp(IP_A), hashIp(IP_B)])));
+  // Sổ dùng AI + nhật ký nền tảng của hai tổ chức thử (mặt pilot readiness gieo / ghi vào đó).
+  await pdb.delete(schema.platformAiUsage).where(inArray(schema.platformAiUsage.orgCode, [A, B]));
+  await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, [A, B]));
   invalidateOrganizations();
   invalidateCapabilities();
+  invalidateOrgFlags();
+  invalidateAiControl();
 }
 
 async function withEnv<T>(key: string, value: string | undefined, fn: () => Promise<T>): Promise<T> {
@@ -344,6 +392,11 @@ async function snapshotControlPlane(inviteIds: string[]): Promise<Snapshot> {
     await one("platform_flag_overrides", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_flag_overrides x where organization_id = ${org.id}`),
     await one("platform_signup_invites", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_signup_invites x where organization_code = ${B} or id in (${ids})`),
     await one("platform_audit_log", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_audit_log x where target_org_code = ${B}`),
+    // Pilot readiness: sổ dùng AI của B, công tắc AI toàn nền tảng, và dòng tổ chức NHÀ (A không được đổi hộ nhà).
+    await one("platform_ai_usage", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_ai_usage x where org_code = ${B}`),
+    await one("platform_settings[platform.ai.enabled]", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_settings x where key = ${PLATFORM_AI_SWITCH_KEY}`),
+    await one("platform_organizations[nhà]", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_organizations x where is_home`),
+    await one("platform_flag_overrides[nhà]", sql`select count(*)::int as n, coalesce(md5(string_agg(md5(x::text), '' order by md5(x::text))), '') as h from platform_flag_overrides x where organization_id in (select id from platform_organizations where is_home)`),
   ]);
 }
 
@@ -665,6 +718,18 @@ export async function testTenantAttack() {
       assert.ok("ok" in logo, JSON.stringify(logo));
       idB.logoFile = logo.branding.logoFileId ?? "";
 
+      // Pilot readiness (B1 · B2 · A3): sản phẩm TẠO TAY + đơn TẠO TAY qua ĐÚNG lõi của action, email khách, sổ dùng AI.
+      await db.update(schema.customers).set({ emails: [EMAIL_KHACH_B] }).where(eq(schema.customers.id, "ta-b-cus1"));
+      const sp = await createProductCore(qtB, { name: `Áo ${MARK}`, code: MA_SP_B, unit: "cái", retailPrice: 250_000, cost: null, variants: [{ sku: `${MA_SP_B}-M`, size: "M", color: "Đỏ", selling: true }] });
+      assert.ok(sp.ok, `B tạo sản phẩm tay: ${JSON.stringify(sp)}`);
+      idB.product = sp.id;
+      const [vB] = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, sp.id));
+      idB.variant = vB.id;
+      const don = await createManualOrderCore(qtB, { customerId: "ta-b-cus1", stage: "NEW", lines: [{ variantId: vB.id, quantity: 1, unitPrice: TIEN_DON_B }], note: `Ghi chú ${MARK}`, channel: "Zalo" });
+      assert.ok(don.ok, `B tạo đơn tay: ${JSON.stringify(don)}`);
+      idB.order = don.id;
+      await recordAiUsage({ orgCode: B, feature: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-b", requests: 3, inputTokens: TOKEN_AI_B.input, outputTokens: TOKEN_AI_B.output, costUsd: 0.4242, status: "OK", actorId: qtB.id, ref: idB.aiDraft });
+
       // Kế hoạch mẫu bán sỉ của B (đã cài ⇒ mọi mục UNCHANGED) — A sẽ thử cài bằng đúng planHash này.
       const pv = await previewTemplate(qtB, "wholesale");
       assert.ok(pv.ok && pv.value.plan.installedVersion, "B đã cài mẫu bán sỉ qua /start");
@@ -689,6 +754,12 @@ export async function testTenantAttack() {
       assert.ok((await savePageDraft(p.page.id, CHUNG, actorA)).ok);
       assert.ok((await publishPage(p.page.id, actorA)).ok);
       idB.pageA = p.page.id;
+      // Sản phẩm tay CỦA A (đòn "cài mẫu mã của B vào sản phẩm của mình") + một dòng sổ AI của A.
+      const spA = await createProductCore(qtA, { name: "Áo của A", code: "TA-A-SP", unit: "cái", retailPrice: 100_000, cost: null, variants: [{ sku: "TA-A-SP-M", size: "M", color: "Xanh", selling: true }] });
+      assert.ok(spA.ok, `A tạo sản phẩm tay: ${JSON.stringify(spA)}`);
+      idB.productA = spA.id;
+      idB.variantA = (await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, spA.id)))[0].id;
+      await recordAiUsage({ orgCode: A, feature: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-a", requests: 1, inputTokens: TOKEN_AI_A.input, outputTokens: TOKEN_AI_A.output, costUsd: 0.01, status: "OK", actorId: qtA.id, ref: null });
       // Bản nháp form / danh sách THẬT của A — đòn thao túng metadata chỉ cài đúng một tham chiếu độc vào đó.
       const f = await loadFormEditor(qtA, "customer", "profile");
       const l = await loadListEditor(qtA, "customer", "default");
@@ -737,6 +808,49 @@ export async function testTenantAttack() {
     assert.ok(sessA.ok, "phiên A hợp lệ");
     const modsA = (sessA.value as SessionUser).modules ?? [];
     assert.ok(!modsA.includes("finance") && !modsA.includes("inventory"), `ĐỆM NĂNG LỰC RÒ: phiên A mang module của B — ${modsA.join(", ")}`);
+
+    /** Lượt gọi phải bị từ chối VÌ đúng lý do (khớp câu), không chỉ «có lỗi». */
+    const tuChoiVi = async (loai: string, mat: string, fn: () => Promise<unknown>, why: RegExp, reqPath = "/") => {
+      const s = await attack(loai, mat, fn, { path: reqPath });
+      const text = await payloadOf(s);
+      assert.match(text, why, `${loai} · ${mat}: bị từ chối nhưng không vì lý do mong đợi — ${text.slice(0, 300)}`);
+      return s;
+    };
+
+    // ══════════ ĐÒN 0b · SỔ DÙNG AI (pilot readiness A3) — `/settings/plan` lấy mã tổ chức từ PHIÊN ══════════
+    // Sổ `platform_ai_usage` nằm ở CSDL NHÀ (mặt phẳng điều khiển) — silo không che nó; chỉ bộ lọc `org_code` của máy chủ
+    // tách sổ của A khỏi sổ của B. B có một dòng mang số token HIẾM; màn của A chỉ được cộng đúng các dòng của A.
+    const Q = "Sổ dùng AI";
+    const soCuaA = async () => {
+      const [r] = rowsOf<{ n: number; i: string }>(await (await getPlatformDb()).execute(sql`select count(*)::int as n, coalesce(sum(input_tokens), 0)::text as i from platform_ai_usage where org_code = ${A} and status <> 'BLOCKED_QUOTA'`));
+      return { turns: Number(r.n), input: Number(r.i) };
+    };
+    const khongSoCuaB = (v: unknown) => {
+      const text = serialize(v);
+      assert.ok(!text.includes(String(TOKEN_AI_B.input)) && !text.includes(String(TOKEN_AI_B.output)) && !text.includes("fake-model-b"), `sổ AI của B lọt sang A: ${text.slice(0, 300)}`);
+    };
+    await attack(Q, "/settings/plan (page component) — sổ AI của CHÍNH A, không dòng của B", () => PlanPage(), {
+      path: "/settings/plan",
+      ownOnly: (v) => {
+        khongSoCuaB(v);
+        assert.ok(serialize(v).includes(String(TOKEN_AI_A.input)), "đối chứng: màn Gói & hạn mức của A cộng đúng dòng sổ AI của A");
+      },
+    });
+    const PlanPageVoiThamSo = PlanPage as unknown as (p: unknown) => Promise<unknown>;
+    await attack(Q, "/settings/plan?org=ta-b — tham số URL không đổi được tổ chức", () => PlanPageVoiThamSo({ params: Promise.resolve({ org: B }), searchParams: Promise.resolve({ org: B, orgCode: B }) }), {
+      path: "/settings/plan",
+      ownOnly: (v) => {
+        khongSoCuaB(v);
+        assert.ok(serialize(v).includes(String(TOKEN_AI_A.input)), "vẫn là sổ của A");
+      },
+    });
+    const soA = await attack(Q, "loadOrgAiUsage(mã tổ chức của PHIÊN A)", async () => loadOrgAiUsage((await requireUser()).organization!.code), { path: "/settings/plan", ownOnly: khongSoCuaB });
+    const thangA = (soA.ok ? (soA.value as { month: { turns: number; inputTokens: number }[] }).month : []) ?? [];
+    const soThat = await soCuaA();
+    assert.equal(thangA.reduce((n, r) => n + r.turns, 0), soThat.turns, "số lượt AI tháng của A = đúng số dòng sổ mang mã A");
+    assert.equal(thangA.reduce((n, r) => n + r.inputTokens, 0), soThat.input, "token vào tháng của A = đúng tổng sổ mang mã A");
+    await tuChoiVi(Q, "màn AI của người vận hành cho B (loadOperatorOrgAi)", () => loadOperatorOrgAi(qtA, B), /Chỉ người của tổ chức nhà/);
+    await tuChoiVi(Q, "tổng hợp AI toàn nền tảng (loadPlatformAiSummary)", () => loadPlatformAiSummary(qtA), /Chỉ người của tổ chức nhà/);
 
     // ══════════ ĐÒN 1 · FIELD / GIÁ TRỊ / TỆP (Phase 2–3) ══════════
     const M = "Field & giá trị";
@@ -1196,6 +1310,112 @@ export async function testTenantAttack() {
     });
     clearMemo();
 
+    // ══════════ ĐÒN 12 · VẬN HÀNH PILOT / CÔNG TẮC KHẨN / HỖ TRỢ / AI (pilot readiness A3 · A4) ══════════
+    // Mọi cửa của người vận hành nền tảng, gọi bởi QUẢN TRỊ của A với đích B và đích NHÀ — hai lớp: vỏ action (phiên thật,
+    // `requirePermission("platform:operate")`) VÀ lõi gọi thẳng với người dùng của A (phòng khi vỏ hỏng). Mỗi lượt phải bị
+    // từ chối VÌ «không phải người vận hành» (khớp câu), không vì lý do phụ (lý do ngắn, sai giai đoạn…).
+    const V = "Vận hành pilot · công tắc · hỗ trợ";
+    const home = await getHomeOrganization();
+    const KHONG_VAN_HANH = /Chỉ người của tổ chức nhà mới vận hành|forbidden=1/;
+    const LY_DO = "kẻ lạ thử đổi hộ tổ chức khác";
+    for (const [dich, code] of [
+      ["B", B],
+      ["NHÀ", home.code],
+    ] as const) {
+      const p = `/platform/org/${code}`;
+      const hai = async (ten: string, action: () => Promise<unknown>, loi: () => Promise<unknown>) => {
+        await tuChoiVi(V, `${ten} của ${dich} (action)`, action, KHONG_VAN_HANH, p);
+        await tuChoiVi(V, `${ten} của ${dich} (lõi, bỏ qua vỏ action)`, loi, KHONG_VAN_HANH, p);
+      };
+      await hai("lùi giai đoạn pilot (kèm ghi đè + lý do)", () => setPilotStageAction({ orgCode: code, stage: "CREATED", reason: LY_DO, override: true }), () => setPilotStage(qtA, { orgCode: code, stage: "CREATED", reason: LY_DO, override: true }));
+      await hai("xác nhận UAT", () => confirmPilotUatAction({ orgCode: code, note: LY_DO }), () => confirmPilotUat(qtA, { orgCode: code, note: LY_DO }));
+      await hai("đình chỉ tổ chức", () => setOrgSuspendedAction({ orgCode: code, suspend: true, reason: LY_DO }), () => setOrganizationSuspended(qtA, { orgCode: code, suspend: true, reason: LY_DO }));
+      await hai("tạm dừng luật tự động", () => setWorkflowsPausedAction({ orgCode: code, paused: true, reason: LY_DO }), () => setWorkflowsPaused(qtA, { orgCode: code, paused: true, reason: LY_DO }));
+      await hai("tắt kết nối lark-webhook", () => disableOrgConnectionAction({ orgCode: code, connectorKey: "lark-webhook", reason: LY_DO }), () => disableOrgConnection(qtA, { orgCode: code, connectorKey: "lark-webhook", reason: LY_DO }));
+      await hai("tắt AI + hạ hạn mức AI", () => setOrgAiControlAction({ orgCode: code, disabled: true, limits: { requestsPerDay: 0 }, reason: LY_DO }), () => setOrgAiControl(qtA, { orgCode: code, disabled: true, limits: { requestsPerDay: 0 }, reason: LY_DO }));
+      await tuChoiVi(V, `trang sức khoẻ của ${dich} (loadOrgSupport — không ghi SUPPORT_VIEW)`, () => loadOrgSupport(qtA, code), KHONG_VAN_HANH, p);
+      await tuChoiVi(V, `mở /platform/org/${code} (page component)`, () => PlatformOrgPage({ params: Promise.resolve({ code }) }), KHONG_VAN_HANH, p);
+    }
+    await tuChoiVi(V, "tắt AI toàn nền tảng (action)", () => setPlatformAiEnabledAction({ enabled: false, reason: LY_DO }), KHONG_VAN_HANH, "/platform");
+    await tuChoiVi(V, "tắt AI toàn nền tảng (lõi)", () => setPlatformAiEnabled(qtA, { enabled: false, reason: LY_DO }), KHONG_VAN_HANH, "/platform");
+    await tuChoiVi(V, "tự kiểm khoá bí mật của nền tảng (action)", () => secretsSelfTestAction(), KHONG_VAN_HANH, "/platform");
+    await tuChoiVi(V, "tự kiểm khoá bí mật của nền tảng (lõi)", () => runSecretsSelfTest(qtA), KHONG_VAN_HANH, "/platform");
+    await tuChoiVi(V, "mở /platform?org=ta-b (page component)", () => PlatformPage({ searchParams: Promise.resolve({ org: B }) }), KHONG_VAN_HANH, "/platform");
+    await attack(V, "tóm tắt hỗ trợ mọi tổ chức (listOrgSupportSummaries) — rỗng", () => listOrgSupportSummaries(qtA), {
+      path: "/platform",
+      ownOnly: (v) => assert.deepEqual(v, {}, "người không vận hành không nhận dòng tóm tắt nào (kể cả của chính A)"),
+    });
+
+    // ══════════ ĐÒN 13 · ĐƠN / SẢN PHẨM / KHÁCH TẠO TAY (pilot readiness B1 · B2) — id của B ══════════
+    // A là tổ chức KHÔNG đồng bộ Pancake nên cổng tạo tay MỞ với A: mọi lời từ chối dưới đây là vì id / khách / mẫu mã
+    // không có trong CSDL của A (khớp câu), không vì cổng tổ chức.
+    const R = "Đơn · sản phẩm · khách tạo tay";
+    const donVoi = (customerId: string, variantId: string, stage = "NEW") => ({ customerId, stage, lines: [{ variantId, quantity: 1, unitPrice: 1_000 }], orderDiscount: 0, shippingFee: 0, note: "", channel: "" });
+    const spVoi = (code: string, variants: Record<string, unknown>[]) => ({ name: "Sản phẩm của A", code, unit: "cái", retailPrice: 120_000, cost: null, variants });
+    await tuChoiVi(R, "sửa đơn tay của B bằng id (dòng hàng của A)", () => updateManualOrderAction(idB.order, donVoi("ta-a-cus1", idB.variantA)), /Không có đơn này/, "/orders");
+    await tuChoiVi(R, "xác nhận đơn tay của B (CONFIRMED, đúng khách + mẫu mã của B)", () => updateManualOrderAction(idB.order, donVoi("ta-b-cus1", idB.variant, "CONFIRMED")), /Không có đơn này/, "/orders");
+    await tuChoiVi(R, "huỷ đơn tay của B bằng id", () => cancelManualOrderAction(idB.order, { reason: "kẻ lạ huỷ hộ" }), /Không có đơn này/, "/orders");
+    await tuChoiVi(R, "tạo đơn ở A cho khách của B", () => createManualOrderAction(donVoi("ta-b-cus1", idB.variantA)), /Khách hàng không tồn tại trong tổ chức này/, "/orders/new");
+    await tuChoiVi(R, "tạo đơn ở A với mẫu mã của B", () => createManualOrderAction(donVoi("ta-a-cus1", idB.variant)), /Mẫu mã không tồn tại trong tổ chức này/, "/orders/new");
+    await attack(R, "đọc giá trị form sửa đơn của B (lõi)", () => manualOrderFormValues(idB.order), { path: "/orders" });
+    await tuChoiVi(R, "mở /orders/<đơn B>/edit (page component)", () => EditManualOrderPage({ params: Promise.resolve({ id: idB.order }) }), /^404|NEXT_HTTP_ERROR_FALLBACK;404/, `/orders/${idB.order}/edit`);
+    await tuChoiVi(R, "mở /orders/<đơn B> (page component)", () => OrderDetailPage({ params: Promise.resolve({ id: idB.order }) }), /NEXT_HTTP_ERROR_FALLBACK;404/, `/orders/${idB.order}`);
+    await tuChoiVi(R, "sửa sản phẩm tay của B bằng id", () => updateProductAction(idB.product, spVoi("TA-A-CHIEM", [{ sku: "TA-A-CHIEM-M", size: "M", color: "Đỏ", selling: true }])), /Không tìm thấy sản phẩm trong tổ chức này/, "/products");
+    await tuChoiVi(R, "cài mẫu mã của B vào sản phẩm tay của A", () => updateProductAction(idB.productA, spVoi("TA-A-SP", [{ id: idB.variant, sku: "TA-A-SP-X", size: "M", color: "Đỏ", selling: true }])), /Mẫu mã không thuộc sản phẩm này/, "/products");
+    await tuChoiVi(R, "mở /products/<sản phẩm B> (page component)", () => ProductDetailPage({ params: Promise.resolve({ id: idB.product }) }), /NEXT_HTTP_ERROR_FALLBACK;404/, `/products/${idB.product}`);
+    await tuChoiVi(R, "mở /products/<mẫu mã B> (page component — lối tra ngược mẫu mã)", () => ProductDetailPage({ params: Promise.resolve({ id: idB.variant }) }), /NEXT_HTTP_ERROR_FALLBACK;404/, `/products/${idB.variant}`);
+    await tuChoiVi(R, "sửa thông tin cơ bản của khách B (form profile)", () => saveCustomerProfileAction({ recordId: "ta-b-cus1", system: { name: "Chiếm" }, custom: {} }), /Không tìm thấy khách trong tổ chức này/, "/customers");
+    await tuChoiVi(R, "mở /customers/<khách B> (page component)", () => CustomerDetailPage({ params: Promise.resolve({ id: "ta-b-cus1" }) }), /NEXT_HTTP_ERROR_FALLBACK;404/, "/customers/ta-b-cus1");
+    // Mã / SKU là duy nhất THEO TỔ CHỨC: A dùng lại đúng mã của B phải lưu được — nếu bị chặn thì lời chặn là một máy dò
+    // danh mục của B.
+    await attack(R, "tạo sản phẩm ở A trùng mã + SKU của B (không có máy dò chéo tổ chức)", () => createProductAction(spVoi(MA_SP_B, [{ sku: `${MA_SP_B}-M`, size: "M", color: "Đỏ", selling: true }])), {
+      path: "/products/new",
+      ownOnly: (v) => assert.equal((v as { ok?: boolean }).ok, true, "mã của B không chặn A"),
+    });
+
+    // ══════════ ĐÒN 14 · A KHÔNG TỰ MỞ KHOÁ CÔNG TẮC NGƯỜI VẬN HÀNH ĐÃ ĐÓNG VỚI CHÍNH A ══════════
+    // Người vận hành NHÀ (lõi, người dùng tổ chức nhà có `platform:operate`) tạm dừng luật + tắt AI của A, rồi đình chỉ A.
+    // A gọi đúng các cửa ấy với ĐÍCH LÀ CHÍNH MÌNH ⇒ bị từ chối, công tắc đứng nguyên; đối chứng: công tắc có hiệu lực thật.
+    const OP: SessionUser = { id: "ta-op", email: "van-hanh@ta-nha.local", name: "Người vận hành", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } };
+    const phaiDat = (r: unknown, what: string) => assert.ok(r && typeof r === "object" && "ok" in r, `${what}: ${serialize(r)}`);
+    const Z = "Công tắc của người vận hành";
+    phaiDat(await setWorkflowsPaused(OP, { orgCode: A, paused: true, reason: "tạm dừng để thử cổng" }), "người vận hành tạm dừng luật của A");
+    phaiDat(await setOrgAiControl(OP, { orgCode: A, disabled: true, reason: "tắt AI để thử cổng" }), "người vận hành tắt AI của A");
+    try {
+      const pA = `/platform/org/${A}`;
+      await tuChoiVi(Z, "A tự bỏ tạm dừng luật của mình (action)", () => setWorkflowsPausedAction({ orgCode: A, paused: false, reason: "tự mở khoá cho mình" }), KHONG_VAN_HANH, pA);
+      await tuChoiVi(Z, "A tự bỏ tạm dừng luật của mình (lõi)", () => setWorkflowsPaused(qtA, { orgCode: A, paused: false, reason: "tự mở khoá cho mình" }), KHONG_VAN_HANH, pA);
+      await tuChoiVi(Z, "A tự bật lại AI của mình (action)", () => setOrgAiControlAction({ orgCode: A, disabled: false, reason: "tự mở khoá cho mình" }), KHONG_VAN_HANH, pA);
+      await tuChoiVi(Z, "A tự bật lại AI + nâng hạn mức của mình (lõi)", () => setOrgAiControl(qtA, { orgCode: A, disabled: false, limits: { requestsPerDay: 999_999 }, reason: "tự mở khoá cho mình" }), KHONG_VAN_HANH, pA);
+      await tuChoiVi(Z, "A tự đẩy giai đoạn pilot của mình", () => setPilotStage(qtA, { orgCode: A, stage: "CREATED", reason: "tự đẩy cho mình" }), KHONG_VAN_HANH, pA);
+      assert.equal((await readOrgFlag(A, WORKFLOWS_PAUSED_FLAG, { fresh: true }))?.enabled, true, "luật của A vẫn tạm dừng");
+      assert.equal((await readOrgAiControl(A, { fresh: true })).disabled, true, "AI của A vẫn tắt");
+      // Đối chứng: công tắc AI có hiệu lực THẬT — AI Builder của A dừng trước provider (model giả được tiêm vẫn 0 lượt gọi).
+      const spyTat = new FakeProvider([() => ({ content: [{ type: "text", text: "không được tới đây" }], stopReason: "end_turn" })]);
+      setBuilderAiForTests({ provider: spyTat, source: "ORG_CONNECTION", connectorKey: "anthropic-byok" });
+      try {
+        await tuChoiVi(Z, "đối chứng: AI Builder của A khi người vận hành đã tắt AI", () => createAiDraftAction({ mode: "new", prompt: "Dựng ERP bán buôn có CRM và kho." }), new RegExp(AI_DISABLED_BY_OPERATOR), "/settings/ai-builder");
+      } finally {
+        setBuilderAiForTests(undefined);
+      }
+      assert.equal(spyTat.calls.length, 0, "AI tắt ⇒ model không được gọi");
+    } finally {
+      phaiDat(await setWorkflowsPaused(OP, { orgCode: A, paused: false, reason: "trả lại sau bài thử" }), "người vận hành bỏ tạm dừng luật của A");
+      phaiDat(await setOrgAiControl(OP, { orgCode: A, disabled: false, reason: "trả lại sau bài thử" }), "người vận hành bật lại AI của A");
+    }
+    phaiDat(await setOrganizationSuspended(OP, { orgCode: A, suspend: true, reason: "đình chỉ để thử cổng" }), "người vận hành đình chỉ A");
+    try {
+      await attack(Z, "A (đã bị đình chỉ) tự bỏ đình chỉ (action, phiên thật)", () => setOrgSuspendedAction({ orgCode: A, suspend: false, reason: "tự mở khoá cho mình" }), { path: `/platform/org/${A}` });
+      await tuChoiVi(Z, "A (đã bị đình chỉ) tự bỏ đình chỉ (lõi)", () => setOrganizationSuspended(qtA, { orgCode: A, suspend: false, reason: "tự mở khoá cho mình" }), KHONG_VAN_HANH, `/platform/org/${A}`);
+      invalidateOrganizations();
+      assert.equal((await findOrganization(A))?.status, "SUSPENDED", "A vẫn bị đình chỉ");
+    } finally {
+      phaiDat(await setOrganizationSuspended(OP, { orgCode: A, suspend: false, reason: "trả lại sau bài thử" }), "người vận hành bật lại A");
+    }
+    // Không một dòng nhật ký nền tảng nào mang người của A làm tác nhân (A không đổi được gì ở mặt phẳng điều khiển).
+    const [cuaA] = rowsOf<{ n: number }>(await (await getPlatformDb()).execute(sql`select count(*)::int as n from platform_audit_log where actor_org_code = ${A}`));
+    assert.equal(cuaA.n, 0, "platform_audit_log không có dòng nào do người của A ghi");
+
     // ══════════ ĐÒN 9 · PHIÊN GIẢ (claim org = ta-b, sub = quản trị B, ký bằng khoá sai) ══════════
     const F = "Phiên giả";
     await attack(F, "tạo bản ghi trong x_b_hd", () => createRecordAction("x_b_hd", { system: { title: "giả" }, custom: {} }), { token: FORGED, path: "/o/x_b_hd" });
@@ -1212,6 +1432,9 @@ export async function testTenantAttack() {
     await attack(F, "tải logo của B qua route", () => logoGET(), { token: FORGED, path: "/api/branding/logo" });
     await attack(F, "tải gói cấu hình của B qua route xuất", () => blueprintExportGET(), { token: FORGED, path: "/api/metadata/blueprint-export" });
     await attack(F, "mở /p/trang-b", () => DynamicPage({ params: Promise.resolve({ slug: "trang-b" }), searchParams: Promise.resolve({}) }), { token: FORGED, path: "/p/trang-b" });
+    await attack(F, "huỷ đơn tay của B", () => cancelManualOrderAction(idB.order, { reason: "phiên giả huỷ" }), { token: FORGED, path: "/orders" });
+    await attack(F, "sửa sản phẩm tay của B", () => updateProductAction(idB.product, { name: "giả", code: MA_SP_B, unit: "cái", retailPrice: 1, cost: null, variants: [{ id: idB.variant, sku: `${MA_SP_B}-M`, selling: true }] }), { token: FORGED, path: "/products" });
+    await attack(F, "bật lại AI / đổi hạn mức AI của B", () => setOrgAiControlAction({ orgCode: B, disabled: false, limits: { requestsPerDay: 999_999 }, reason: "phiên giả đổi hạn mức" }), { token: FORGED, path: `/platform/org/${B}` });
 
     // ══════════ SAU: B không đổi một dòng, không request mạng nào ══════════
     globalThis.fetch = realFetch;
@@ -1225,12 +1448,34 @@ export async function testTenantAttack() {
       assert.ok(await getPageBySlug("trang-b"), "trang của B còn xuất bản");
     });
 
+    // ══════════ SAU · NGƯỜI VẬN HÀNH NHÀ MỞ TRANG SỨC KHOẺ CỦA B (A4 — hỗ trợ có vết, không dữ liệu nghiệp vụ) ══════════
+    // Chạy SAU ảnh chụp: lượt mở chính đáng ghi đúng một dòng SUPPORT_VIEW vào nhật ký nền tảng của B. CSDL của B vẫn y
+    // nguyên (xem là chỉ ĐẾM), và kết quả không chứa dữ liệu nghiệp vụ nào của B: tên khách, email, số tiền đơn, giá trị
+    // field, tên sản phẩm, ghi chú đơn — tên TỔ CHỨC là dữ liệu của mặt phẳng điều khiển nên được tách riêng ra.
+    const supportViews = async () => rowsOf<{ n: number }>(await (await getPlatformDb()).execute(sql`select count(*)::int as n from platform_audit_log where target_org_code = ${B} and action = 'SUPPORT_VIEW' and actor_org_code = ${home.code} and actor_email = ${OP.email}`))[0].n;
+    const v0 = await supportViews();
+    const bk = backupDir;
+    assert.ok(bk, "thư mục trạng thái sao lưu của đòn 11 còn đó (nhà có bản sao THÀNH CÔNG)");
+    const hoTro = await withEnv("ERP_BACKUP_STATUS_DIR", bk, () => loadOrgSupport(OP, B));
+    assert.ok(hoTro.ok, `người vận hành nhà mở được trang sức khoẻ của B: ${serialize(hoTro)}`);
+    assert.equal(await supportViews(), v0 + 1, "mỗi lượt mở trang sức khoẻ = đúng một dòng SUPPORT_VIEW mang người vận hành");
+    const { organization: toChucB, ...sucKhoe } = hoTro.value;
+    assert.equal(toChucB.code, B);
+    const chuSucKhoe = serialize(sucKhoe);
+    for (const bi of [MARK, EMAIL_KHACH_B, String(TIEN_DON_B), MA_SP_B, B_EMAIL, HOME_MARK, ...SECRETS_B]) assert.ok(!chuSucKhoe.includes(bi), `trang sức khoẻ của B mang dữ liệu nghiệp vụ / bí mật («${bi}»): ${chuSucKhoe.slice(0, 400)}`);
+    assert.ok((hoTro.value.users.value?.active ?? 0) >= 1 && (hoTro.value.connections.value?.active ?? 0) >= 2, `đối chứng: trang sức khoẻ ĐO THẬT CSDL của B (người dùng, kết nối) — ${serialize({ u: hoTro.value.users, c: hoTro.value.connections })}`);
+    assert.equal(hoTro.value.backup.lastSuccessAt, null, "sao lưu của B không mượn lời khai THÀNH CÔNG của nhà (đích sao lưu theo tổ chức)");
+    assert.equal(hoTro.value.aiUsage.value?.requestsMonth, rowsOf<{ n: number }>(await (await getPlatformDb()).execute(sql`select coalesce(sum(requests), 0)::int as n from platform_ai_usage where org_code = ${B} and status <> 'BLOCKED_QUOTA'`))[0].n, "ô Dùng AI của B = đúng sổ mang mã B");
+    const aiB = await loadOperatorOrgAi(OP, B);
+    assert.ok(aiB.ok && serialize(aiB.value).includes(String(TOKEN_AI_B.input)) && !serialize(aiB.value).includes(String(TOKEN_AI_A.input)), `màn AI của người vận hành cho B: đúng sổ của B, không dòng của A — ${serialize(aiB).slice(0, 300)}`);
+    assert.deepEqual(diff(after, await withOrganization(B, snapshotOrgDb)), [], "người vận hành xem sức khoẻ B chỉ ĐẾM — không ghi một dòng nào vào CSDL của B");
+
     const byType = new Map<string, number>();
     for (const a of log) byType.set(a.loai, (byType.get(a.loai) ?? 0) + 1);
     console.log(
       `✓ Phase 11 · H1 tấn công cô lập: phiên thật của A gọi thẳng ${log.length} mặt bằng id / khoá / slug / tệp / mã mời của B — ` +
         [...byType].map(([k, n]) => `${k} ${n}`).join(" · ") +
-        ` — mọi lượt bị từ chối hoặc chỉ chạm A, 0 kết quả mang dữ liệu / bí mật của B, 0 request mạng; CSDL B (${before.size} bảng) + 5 nhóm dòng mặt phẳng điều khiển của B y nguyên. Mặt đã tấn công: ` +
+        ` — mọi lượt bị từ chối hoặc chỉ chạm A, 0 kết quả mang dữ liệu / bí mật của B, 0 request mạng; CSDL B (${before.size} bảng) + ${cpBefore.size} nhóm dòng mặt phẳng điều khiển (B + công tắc AI + dòng nhà) y nguyên; người vận hành nhà xem sức khoẻ B: 1 dòng SUPPORT_VIEW, 0 dữ liệu nghiệp vụ. Mặt đã tấn công: ` +
         log.map((a) => `[${a.loai}] ${a.mat} ⇒ ${a.ket}`).join("; "),
     );
   } finally {
