@@ -1,7 +1,7 @@
 import { and, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
-import { CARRIER_SUBSTATE_LABEL, carrierSubstate, eventStatusCode, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { CARRIER_SUBSTATE_LABEL, carrierSubstate, eventStatusCode, shipmentSubstateCache, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import {
   AGE_BUCKET_LABEL,
   ageBucketOf,
@@ -29,7 +29,6 @@ import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderVal
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
-import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
@@ -1068,12 +1067,20 @@ export async function getProjectedDeliveryMetrics(
   return memo(key, 90_000, async () => {
     const db = await getDb();
     const lookup = await getProbabilityLookup();
-    const con = carrierSubstateSql(sql`"shipments"."vtp_status"`, sql`"shipments"."vtp_status_name"`, sql`"shipments"."stage"::text`);
+    const conCua = shipmentSubstateCache();
 
+    /*
+      MỐC BÀN GIAO TÍNH MỘT LẦN MỖI DÒNG (`mb`, lateral có `offset 0`).
+
+      Bản cũ viết thẳng biểu thức mốc vào `where` (khác null · ≥ từ · ≤ đến) VÀ vào `select` (tuổi
+      kiện) — bốn truy vấn con tương quan trên `shipment_events` cho mỗi đơn, ba trong số đó chạy trên
+      MỌI đơn trước khi lọc. Đo production 29/09/2026: ~490 ms trong 1,17 s của câu này. `offset 0` là
+      bắt buộc: thiếu nó Postgres kéo biểu thức lên lại chỗ dùng và tính lặp y như cũ.
+    */
     const MOC_THEO_BASIS: Record<TimeBasis, { expr: SQL; coTheRong: boolean }> = {
       ORDERED: { expr: sql`"orders"."inserted_at"`, coTheRong: false },
-      SHIPPED: { expr: sql.raw(CARRIER_HANDOFF_AT_SQL), coTheRong: true },
-      OUTCOME: { expr: sql.raw(FINAL_OUTCOME_AT_SQL), coTheRong: true },
+      SHIPPED: { expr: sql`mb.handoff_at`, coTheRong: true },
+      OUTCOME: { expr: sql`mb.final_at`, coTheRong: true },
     };
     const { expr: moc, coTheRong } = MOC_THEO_BASIS[basis];
     // CÙNG phạm vi đơn với trang hiệu quả theo mã và bảng lợi nhuận: đơn "Mới" chưa chốt không vào.
@@ -1115,20 +1122,26 @@ export async function getProjectedDeliveryMetrics(
       trạng thái con ĐVVC + mốc bàn giao, toàn truy vấn con tương quan). `perf-probe` production
       23/09/2026: câu này 18,3 giây trên kỳ 30 ngày chỉ ~1.500 đơn. Kết quả không đổi.
     */
-    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_qty: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
+    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_qty: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; vtp_ma: number | string | null; vtp_chu: string | null; vtp_chang: string | null; age_hours: string | number | null; product_code: string | null }>(
       await chayKhongJit(db, (tx) => tx.execute(sql`
         with don as (
           select "orders"."id" as order_id,
                  coalesce("orders"."total_price_after_discount", 0) as order_total,
-                 ${con} as con,
+                 "shipments"."vtp_status" as vtp_ma,
+                 "shipments"."vtp_status_name" as vtp_chu,
+                 "shipments"."stage"::text as vtp_chang,
                  ${ORDER_OUTCOME_FAST} as outcome,
-                 extract(epoch from (now() - ${sql.raw(CARRIER_HANDOFF_AT_SQL)})) / 3600 as age_hours
+                 extract(epoch from (now() - mb.handoff_at)) / 3600 as age_hours
             from "orders"
             left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+            cross join lateral (
+              select ${sql.raw(CARRIER_HANDOFF_AT_SQL)} as handoff_at${basis === "OUTCOME" ? sql`, ${sql.raw(FINAL_OUTCOME_AT_SQL)} as final_at` : sql``}
+              offset 0
+            ) mb
            where ${and(...dk)}
           offset 0
         )
-        select d.order_id, d.order_total, d.con, d.outcome, d.age_hours,
+        select d.order_id, d.order_total, d.vtp_ma, d.vtp_chu, d.vtp_chang, d.outcome, d.age_hours,
                ${khoa} as key,
                ${ma} as code,
                ${ten} as name,
@@ -1141,7 +1154,7 @@ export async function getProjectedDeliveryMetrics(
           left join "order_items" on "order_items"."order_id" = d.order_id and "order_items"."is_bonus" = false
           left join "product_variants" on "product_variants"."id" = "order_items"."variant_id"
           left join "products" on "products"."id" = coalesce("product_variants"."product_id", "order_items"."product_id")
-         group by d.order_id, d.order_total, d.con, d.outcome, d.age_hours, ${khoa}, ${ma}, ${ten}
+         group by d.order_id, d.order_total, d.vtp_ma, d.vtp_chu, d.vtp_chang, d.outcome, d.age_hours, ${khoa}, ${ma}, ${ten}
       `)),
     );
 
@@ -1156,6 +1169,7 @@ export async function getProjectedDeliveryMetrics(
     const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; orderId: string; productCode: string | null }[] = [];
 
     for (const r of rows) {
+      const con = conCua(r.vtp_ma, r.vtp_chu, r.vtp_chang);
       const cogs = Number(r.line_cogs ?? 0);
       const soLuong = Number(r.line_qty ?? 0);
       const tuoi = r.age_hours === null || r.age_hours === undefined ? null : Number(r.age_hours);
@@ -1163,7 +1177,7 @@ export async function getProjectedDeliveryMetrics(
         donTheoId.get(r.order_id) ??
         {
           outcome: r.outcome,
-          con: r.con,
+          con,
           revenue: Number(r.order_total ?? 0),
           cogs: 0,
           qty: 0,
@@ -1195,7 +1209,7 @@ export async function getProjectedDeliveryMetrics(
       if (!theoMa.has(key)) theoMa.set(key, { ...accMoi(), key, code: (r.code ?? "").trim() || key, name: r.name ?? "" });
       // Doanh thu của mã trong đơn = tổng dòng hàng của mã đó; không có dòng nào thì lấy tiền đơn.
       const doanhThu = Number(r.line_total ?? 0) || Number(r.order_total ?? 0);
-      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, qty: soLuong, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id, productCode: maHang || null });
+      choCan.push({ key, outcome: r.outcome, con, revenue: doanhThu, cogs, qty: soLuong, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id, productCode: maHang || null });
     }
 
     /*

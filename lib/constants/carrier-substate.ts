@@ -260,3 +260,32 @@ export function carrierSubstate(input: { code?: number | null; text?: string | n
   }
   return { substate: "UNKNOWN", basis: "unknown" };
 }
+
+/**
+ * ═══════════ TRẠNG THÁI CON CỦA VẬN ĐƠN, TÍNH Ở TẦNG ỨNG DỤNG — NHỚ THEO BỘ BA ═══════════
+ *
+ * Báo cáo quét cả kỳ đơn từng tính `carrierSubstateSql(vtp_status, vtp_status_name, stage)` trong
+ * Postgres cho TỪNG dòng: đo production 29/09/2026 (EXPLAIN ANALYZE), 0,17 ms × 2.481 đơn ≈ 424 ms
+ * mỗi câu, trong khi cả bảng `shipments` chỉ có 33 bộ ba (mã, chữ, chặng) khác nhau. Kết quả chỉ
+ * phụ thuộc bộ ba đó, nên SQL trả cột thô và hàm này dịch — mỗi bộ ba đúng một lần.
+ *
+ * CÙNG luật với bản SQL: đối chiếu 33/33 bộ ba trên production ngày đo (chữ trống thử cả `NULL` lẫn
+ * chuỗi rỗng), và `tests/care-states.test.ts` (mục 15) so hai bản trên cùng ca thử.
+ *
+ * Mỗi lượt báo cáo tạo MỘT bộ nhớ riêng (gọi hàm này một lần rồi dùng hàm trả về), không có
+ * trạng thái sống qua lượt.
+ */
+export function shipmentSubstateCache(): (code: unknown, text: string | null | undefined, stage: string | null | undefined) => CarrierSubstate {
+  const nho = new Map<string, CarrierSubstate>();
+  return (code, text, stage) => {
+    const so = code === null || code === undefined || code === "" ? null : Number(code);
+    const ma = so !== null && Number.isFinite(so) ? so : null;
+    const khoa = `${ma ?? "\u0000"}\u0001${text ?? "\u0000"}\u0001${stage ?? "\u0000"}`;
+    let con = nho.get(khoa);
+    if (con === undefined) {
+      con = carrierSubstate({ code: ma, text: text ?? null, stage: (stage ?? null) as ShipmentStage | null }).substate;
+      nho.set(khoa, con);
+    }
+    return con;
+  };
+}
