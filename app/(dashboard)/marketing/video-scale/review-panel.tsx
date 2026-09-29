@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { VIDEO_ANGLE_LABEL, VIDEO_QC_CHECK_LABEL, VIDEO_VARIANT_STATUS_LABEL, isVideoAngle, type VideoQcCheck, type VideoVariantStatus } from "@/lib/constants/video-scale";
 import type { VariantCard } from "@/lib/queries/video-scale";
 import { cn } from "@/lib/utils";
-import { ReviewActions } from "./review-actions";
+import { BulkApproveButton, ReviewActions } from "./review-actions";
 import { RemakeVariantButton } from "./small-actions";
 import { ContentEditor } from "./content-editor";
 import { VideoEditor } from "./video-editor";
@@ -60,6 +60,11 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCa
             <video controls playsInline preload="metadata" poster={v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : undefined} className="aspect-[9/16] w-full max-w-xs rounded bg-black">
               <source src={`/api/video-scale/assets/${v.finalAssetId}`} type="video/mp4" />
             </video>
+          ) : null}
+          {v.finalAssetId ? (
+            <a href={`/api/video-scale/assets/${v.finalAssetId}`} download={`video-${v.seq}.mp4`} className="mt-1 inline-block text-[12px] text-primary underline underline-offset-2">
+              Tải video (mp4)
+            </a>
           ) : (
             <p className="text-[12.5px] text-muted-foreground">Chưa có bản hoàn chỉnh.</p>
           )}
@@ -134,7 +139,17 @@ export function ReviewPanel({ review, decided, pageOf, canEdit, canSpend, music 
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <h2 className="text-[14px] font-semibold">Chờ duyệt ({review.length})</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[14px] font-semibold">
+            Chờ duyệt ({review.length})
+            {review.length ? (
+              <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+                {review.filter((v) => v.qcVerdict === "PASS").length} QC đạt · {review.filter((v) => v.qcVerdict === "FLAG").length} nghi ngờ — xem kỹ
+              </span>
+            ) : null}
+          </h2>
+          {canEdit ? <BulkApproveButton variantIds={review.filter((v) => v.qcVerdict === "PASS").map((v) => v.id)} /> : null}
+        </div>
         {review.length === 0 ? <p className="text-[13px] text-muted-foreground">Không có video chờ duyệt.</p> : <div className="grid gap-3 lg:grid-cols-2">{review.map((v) => <VariantBlock key={v.id} v={v} canEdit={canEdit} canSpend={canSpend} pageLabel={pageOf[v.productId] ?? null} music={music} />)}</div>}
       </section>
       <section className="space-y-3">

@@ -1,11 +1,11 @@
 "use client";
 
-import { Check, Loader2, X } from "lucide-react";
+import { Check, CheckCheck, Loader2, X } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { reviewVideoVariantAction } from "@/lib/actions/video-scale";
+import { approveVideoVariantsAction, reviewVideoVariantAction } from "@/lib/actions/video-scale";
 
 /** Duyệt / loại một video. Loại bắt buộc lý do — máy học từ lý do ấy. */
 export function ReviewActions({ variantId }: { variantId: string }) {
@@ -28,5 +28,24 @@ export function ReviewActions({ variantId }: { variantId: string }) {
         <X className="size-4" /> Loại
       </Button>
     </div>
+  );
+}
+
+/** "Duyệt tất cả video QC đạt" — máy chủ kiểm lại từng video; video QC nghi ngờ vẫn phải duyệt từng cái. */
+export function BulkApproveButton({ variantIds }: { variantIds: string[] }) {
+  const [pending, start] = useTransition();
+  if (variantIds.length < 2) return null;
+  const go = () => {
+    if (!confirm(`Duyệt ${variantIds.length} video QC ĐẠT? Máy sẽ viết content cho từng video. Video QC nghi ngờ không nằm trong lượt này.`)) return;
+    start(async () => {
+      const r = await approveVideoVariantsAction({ variantIds });
+      if ("error" in r) return void toast.error(r.error);
+      toast.success(`Đã duyệt ${r.approved} video${r.skipped ? ` · ${r.skipped} video bỏ qua (đã đổi trạng thái hoặc không còn QC đạt)` : ""}.`);
+    });
+  };
+  return (
+    <Button size="sm" variant="outline" disabled={pending} onClick={go}>
+      {pending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />} Duyệt tất cả {variantIds.length} video QC đạt
+    </Button>
   );
 }

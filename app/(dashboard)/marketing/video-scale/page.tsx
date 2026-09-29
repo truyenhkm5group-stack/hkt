@@ -31,18 +31,39 @@ import { AutoRefresh } from "./auto-refresh";
 import { listRunProgress } from "@/lib/queries/video-scale";
 import { ReviewPanel } from "./review-panel";
 import { WinPanel } from "./win-panel";
+import { ArrowRight, CircleAlert, Clapperboard, Hourglass, OctagonAlert, Sparkles } from "lucide-react";
+import { nextVideoScaleStep, type NextStep } from "@/lib/constants/video-scale-next";
 
 export const metadata = { title: "Video Scale" };
 
+/** Năm BƯỚC theo đúng thứ tự làm việc (đánh số) + hai tab phụ sau vạch ngăn. Khoá tab giữ nguyên để link cũ vẫn mở đúng. */
 const TABS = [
-  { value: "ma-win", label: "Mã win" },
-  { value: "hang-doi", label: "Hàng đợi render" },
-  { value: "duyet", label: "Duyệt video" },
-  { value: "dang-reel", label: "Đăng Reel" },
-  { value: "quang-cao", label: "Quảng cáo" },
-  { value: "bao-cao", label: "Báo cáo" },
-  { value: "cau-hinh", label: "Cấu hình" },
+  { value: "ma-win", label: "① Mã win", step: true },
+  { value: "hang-doi", label: "② Đang tạo", step: true },
+  { value: "duyet", label: "③ Duyệt video", step: true },
+  { value: "dang-reel", label: "④ Đăng Reel", step: true },
+  { value: "quang-cao", label: "⑤ Quảng cáo", step: true },
+  { value: "bao-cao", label: "Báo cáo", step: false },
+  { value: "cau-hinh", label: "Cấu hình", step: false },
 ] as const;
+
+const TONE: Record<NextStep["tone"], { box: string; icon: typeof Sparkles }> = {
+  danger: { box: "border-destructive/60 bg-destructive/5", icon: OctagonAlert },
+  warn: { box: "border-amber-500/60 bg-amber-500/5", icon: CircleAlert },
+  action: { box: "border-primary/50 bg-primary/5", icon: Sparkles },
+  wait: { box: "border-sky-500/50 bg-sky-500/5", icon: Hourglass },
+  idle: { box: "border-border bg-muted/30", icon: Clapperboard },
+};
+
+function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
+  return (
+    <div className={cn("rounded-lg border p-2.5", tone === "warn" && "border-amber-500/60 bg-amber-500/5")}>
+      <p className="text-[11.5px] text-muted-foreground">{label}</p>
+      <p className="text-[17px] font-semibold tabular-nums leading-tight">{value}</p>
+      {sub ? <p className="text-[11px] text-muted-foreground">{sub}</p> : null}
+    </div>
+  );
+}
 
 /**
  * VIDEO SCALE CHO MÃ WIN — từ ảnh sản phẩm thật tới video 9:16 đã duyệt. Đặc tả: `docs/video-scale.md`.
@@ -67,7 +88,10 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
   const canEngage = canEdit || can(user, "expenses:write");
   const canRelease = can(user, "expenses:write") || canConfig;
   const canMoney = can(user, "expenses:write");
-  const badge: Record<string, number> = { duyet: counts.review, "hang-doi": counts.activeJobs + counts.blockedJobs };
+  const badge: Record<string, number> = { duyet: counts.review, "hang-doi": counts.activeJobs + counts.blockedJobs, "dang-reel": counts.approvedUnposted };
+  const winProducts = await listWinProducts(db);
+  const next = nextVideoScaleStep({ paused: automation.paused, blockers, blockedJobs: counts.blockedJobs, failedJobs24h: counts.failedJobs24h, review: counts.review, activeJobs: counts.activeJobs, approvedUnposted: counts.approvedUnposted, winProducts: winProducts.length, winWithPhotos: winProducts.filter((p) => p.photoCount > 0).length });
+  const NextIcon = TONE[next.tone].icon;
 
   return (
     <div className="space-y-4">
@@ -89,62 +113,65 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
         </p>
       ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        <div className="rounded-lg border p-3 text-[13px]">
-          <p className="text-muted-foreground">Chi sinh video hôm nay ({spend.day})</p>
-          <p className="text-lg font-semibold tabular-nums">
-            {spend.reservedUsd.toFixed(2)} USD <span className="text-sm font-normal text-muted-foreground">/ {cfg.dailyUsdCap === null ? "chưa khai trần" : `${cfg.dailyUsdCap.toFixed(2)} USD`}</span>
-          </p>
-          <p className="text-[12px] text-muted-foreground">
-            {spend.clips} clip · {spend.estimatedUsd.toFixed(2)} USD của clip đã xong (giữ chỗ gồm cả lượt hỏng)
+      {/* VIỆC TIẾP THEO — một việc, một nút (nextVideoScaleStep). */}
+      <div className={cn("flex flex-wrap items-center gap-3 rounded-lg border p-3", TONE[next.tone].box)}>
+        <NextIcon className="size-5 shrink-0" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold">{next.title}</p>
+          <p className="text-[12.5px] text-muted-foreground">
+            {next.detail}
+            {automation.paused && automation.reason ? ` Lý do dừng: ${automation.reason}.` : ""}
           </p>
         </div>
-        <div className="rounded-lg border p-3 text-[13px]">
-          <p className="text-muted-foreground">Hàng đợi</p>
-          <p className="text-lg font-semibold tabular-nums">
-            {counts.activeJobs} đang chạy · {counts.blockedJobs} bị chặn
-          </p>
-          <p className="text-[12px] text-muted-foreground">{counts.failedJobs24h} việc hỏng trong 24 giờ</p>
-        </div>
-        <div className={cn("rounded-lg border p-3 text-[13px]", blockers.length ? "border-amber-500/60 bg-amber-500/5" : "")}>
-          <p className="text-muted-foreground">Sẵn sàng sinh video thật?</p>
-          {blockers.length ? (
-            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[12.5px]">
-              {blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-lg font-semibold">Sẵn sàng</p>
-          )}
-          {cfg.provider === "FAKE" && fakeProviderAllowed(process.env.NODE_ENV, env.videoScale.fakeProviderFlag) ? (
-            <p className="mt-1 rounded bg-amber-500/15 px-2 py-1 text-[12px] font-medium">BỘ SINH GIẢ — mọi video là DỮ LIỆU THỬ, không đăng, không quảng cáo.</p>
-          ) : null}
-        </div>
+        {tab !== next.tab ? (
+          <Link href={`?tab=${next.tab}`} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
+            {next.cta} <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        ) : null}
       </div>
-
-      {automation.paused ? (
-        <p className="rounded-lg border border-destructive/60 bg-destructive/5 p-2 text-[13px] font-medium">
-          Video Scale đang DỪNG mọi tự động (không đăng Reel, không tạo / bật quảng cáo){automation.reason ? ` — ${automation.reason}` : ""}. Mở lại ở tab Đăng Reel.
-        </p>
+      {blockers.length > 1 ? (
+        <details className="rounded-lg border border-amber-500/60 bg-amber-500/5 p-2.5 text-[12.5px]">
+          <summary className="cursor-pointer font-medium">Tất cả {blockers.length} lý do chưa sinh được video thật</summary>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {cfg.provider === "FAKE" && fakeProviderAllowed(process.env.NODE_ENV, env.videoScale.fakeProviderFlag) ? (
+        <p className="rounded-lg border border-amber-500/60 bg-amber-500/10 px-2.5 py-1.5 text-[12.5px] font-medium">BỘ SINH GIẢ — mọi video là DỮ LIỆU THỬ, không đăng, không quảng cáo.</p>
       ) : null}
 
-      <nav className="flex flex-wrap gap-1.5 border-b pb-2" aria-label="Các bước Video Scale">
-        {TABS.map((t) => (
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <Stat
+          label={`Chi sinh video hôm nay (${spend.day})`}
+          value={`${spend.reservedUsd.toFixed(2)} USD`}
+          sub={`${cfg.dailyUsdCap === null ? "chưa khai trần ngày" : `trần ${cfg.dailyUsdCap.toFixed(2)} USD`} · ${spend.clips} clip`}
+          tone={cfg.dailyUsdCap !== null && spend.reservedUsd >= cfg.dailyUsdCap * 0.9 ? "warn" : undefined}
+        />
+        <Stat label="Đang tạo" value={`${counts.activeJobs} việc`} sub={`${counts.blockedJobs} bị chặn · ${counts.failedJobs24h} hỏng 24 giờ`} tone={counts.blockedJobs ? "warn" : undefined} />
+        <Stat label="Chờ duyệt" value={`${counts.review} video`} sub="QC đạt duyệt được hàng loạt" />
+        <Stat label="Đã duyệt, chưa đăng" value={`${counts.approvedUnposted} video`} sub={`${winProducts.length} mã win · ${winProducts.filter((p) => p.photoCount > 0).length} có ảnh gốc`} />
+      </div>
+
+      <nav className="flex flex-wrap items-center gap-1.5 border-b pb-2" aria-label="Các bước Video Scale">
+        {TABS.map((t, i) => [
+          i > 0 && !t.step && TABS[i - 1].step ? <span key={`sep-${t.value}`} className="mx-1 h-5 w-px bg-border" aria-hidden /> : null,
           <Link
             key={t.value}
             href={`?tab=${t.value}`}
-            className={cn("rounded-md px-3 py-1.5 text-[13px] font-medium", tab === t.value ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/70")}
+            className={cn("rounded-md px-3 py-1.5 text-[13px] font-medium", tab === t.value ? "bg-primary text-primary-foreground" : t.step ? "bg-muted hover:bg-muted/70" : "text-muted-foreground hover:bg-muted")}
             aria-current={tab === t.value ? "page" : undefined}
           >
             {t.label}
-            {badge[t.value] ? <span className="ml-1.5 rounded-full bg-background/30 px-1.5 text-[11px] tabular-nums">{badge[t.value]}</span> : null}
-          </Link>
-        ))}
+            {badge[t.value] ? <span className={cn("ml-1.5 rounded-full px-1.5 text-[11px] tabular-nums", tab === t.value ? "bg-background/30" : "bg-brand text-white")}>{badge[t.value]}</span> : null}
+          </Link>,
+        ])}
       </nav>
 
       {tab === "ma-win" ? (
-        <WinPanel products={await listWinProducts(db)} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} perVideoUsd={variantReserveUsd(cfg)} costNote={costNoteOf(cfg)} />
+        <WinPanel products={winProducts} runs={await listRuns(db)} music={(await listMusic(db)).filter((m) => m.active)} pages={fanpages} accounts={canMoney ? await listAdAccountOptions(db, new Date(), "") : []} canSpend={canSpend} canEdit={canEdit} canMode={canMode} canMoney={canMoney} canEngage={canEngage} canRelease={canRelease} perVideoUsd={variantReserveUsd(cfg)} costNote={costNoteOf(cfg)} />
       ) : tab === "hang-doi" ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -162,7 +189,7 @@ export default async function VideoScalePage({ searchParams }: { searchParams: P
           </details>
         </div>
       ) : tab === "duyet" ? (
-        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries((await listWinProducts(db)).map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} music={(await listMusic(db)).filter((m) => m.active).map((m) => ({ id: m.id, title: m.title, assetId: m.assetId }))} />
+        <ReviewPanel review={await listVariants(db, { statuses: ["REVIEW"] })} decided={await listVariants(db, { statuses: ["APPROVED", "REJECTED", "QC_FAILED"], limit: 24 })} pageOf={Object.fromEntries(winProducts.map((p) => [p.productId, p.pageId ? (pageName.get(p.pageId) ?? p.pageId) : null]))} canEdit={canEdit} canSpend={canSpend} music={(await listMusic(db)).filter((m) => m.active).map((m) => ({ id: m.id, title: m.title, assetId: m.assetId }))} />
       ) : tab === "quang-cao" ? (
         <AdsPanel ads={await listAds(db)} actions={await listAdActions(db)} activeVnd={await activeAdsDailyVnd(db)} globalCapVnd={cfg.adsGlobalDailyCapVnd} killRules={await killRuleCount(db)} templateAdId={await templateAdIdFor(db, cfg)} writeBlocked={adsWriteDisabledReason()} canSpend={canMoney} canPause={canEngage} />
       ) : tab === "bao-cao" ? (

@@ -466,7 +466,7 @@ export function VideoEditor({
             </div>
 
             <Tabs defaultValue="text" className="min-w-0">
-              <TabsList className="flex h-auto flex-wrap">
+              <TabsList className="flex h-auto flex-wrap rounded-xl group-data-[orientation=horizontal]/tabs:h-auto">
                 <TabsTrigger value="text">Chữ &amp; phụ đề</TabsTrigger>
                 <TabsTrigger value="scenes">Cảnh &amp; chuyển cảnh</TabsTrigger>
                 <TabsTrigger value="audio">Âm thanh &amp; giọng</TabsTrigger>

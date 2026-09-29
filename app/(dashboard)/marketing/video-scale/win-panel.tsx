@@ -1,10 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/format";
 import type { MusicRow, RunRow, WinProductRow } from "@/lib/queries/video-scale";
-import { CreateRunDialog } from "./create-run-dialog";
-import { CancelRunButton, SkuModeSelect } from "./small-actions";
-import { PauseButton, SkuPublishingSelect } from "./publishing-controls";
-import { SkuAdsForm } from "./ads-controls";
+import { CancelRunButton } from "./small-actions";
+import { WinGrid } from "./win-grid";
 
 const RUN_STATUS_LABEL: Record<string, string> = {
   SCRIPTING: "Đang viết kịch bản",
@@ -24,37 +22,19 @@ export function WinPanel({ products, runs, music, pages, accounts, canSpend, can
           Chưa có mã nào được KHAI từ &ldquo;Thắng test&rdquo; trở đi ở trang Mẫu. Video Scale chỉ chạy cho mã win — máy không tự coi một mã là thắng.
         </p>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {products.map((p) => (
-            <div key={p.productId} className="flex gap-3 rounded-lg border p-3">
-              {/* eslint-disable-next-line @next/next/no-img-element -- ảnh Pancake, URL ngoài */}
-              {p.image ? <img src={p.image} alt="" className="size-20 shrink-0 rounded object-cover" loading="lazy" /> : <div className="size-20 shrink-0 rounded bg-muted" />}
-              <div className="min-w-0 flex-1 space-y-1 text-[13px]">
-                <p className="font-semibold">
-                  {p.code || "—"} <span className="font-normal text-muted-foreground">{p.name}</span>
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  <Badge variant="secondary">{p.stateLabel || "Mã win"}</Badge>
-                  <Badge variant={p.photoCount ? "outline" : "destructive"}>{p.photoCount} ảnh gốc</Badge>
-                  {p.inProduction ? <Badge variant="outline">{p.inProduction} đang làm</Badge> : null}
-                  {p.awaitingReview ? <Badge>{p.awaitingReview} chờ duyệt</Badge> : null}
-                  {p.approved ? <Badge variant="outline">{p.approved} đã duyệt</Badge> : null}
-                </div>
-                {p.photoCount === 0 ? <p className="text-[12px] text-muted-foreground">Chưa có ảnh sản phẩm thật: Thư viện Media → Nguồn ảnh → Nhập ảnh sản phẩm từ Pancake.</p> : null}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music.map((m) => ({ id: m.id, title: m.title }))} perVideoUsd={perVideoUsd} costNote={costNote} /> : null}
-                  <SkuModeSelect productId={p.productId} value={p.reviewMode ?? "MANUAL"} disabled={!canMode} />
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <SkuPublishingSelect productId={p.productId} pageId={p.pageId} publishMode={p.publishMode} pages={pages} disabled={!canMode} />
-                  <PauseButton scope="SKU" id={p.productId} paused={Boolean(p.pausedAt)} reason={p.pausedReason} canEngage={canEngage} canRelease={canRelease} label="mã" />
-                </div>
-                {p.pausedAt ? <p className="text-[12px] text-destructive">Mã đang dừng khẩn cấp{p.pausedReason ? `: ${p.pausedReason}` : ""}.</p> : null}
-                <SkuAdsForm productId={p.productId} accounts={accounts} value={{ adAccountId: p.adAccountId, adsMode: p.adsMode, dailyBudgetPerAdVnd: p.dailyBudgetPerAdVnd, skuDailyCapVnd: p.skuDailyCapVnd, autoScale: p.autoScale, autoNextRound: p.autoNextRound, adsModeBy: p.adsModeBy }} disabled={!canMoney} />
-              </div>
-            </div>
-          ))}
-        </div>
+        <WinGrid
+          products={products}
+          music={music.map((m) => ({ id: m.id, title: m.title, assetId: m.assetId }))}
+          pages={pages}
+          accounts={accounts}
+          canSpend={canSpend}
+          canMode={canMode}
+          canMoney={canMoney}
+          canEngage={canEngage}
+          canRelease={canRelease}
+          perVideoUsd={perVideoUsd}
+          costNote={costNote}
+        />
       )}
 
       <section className="space-y-2">
