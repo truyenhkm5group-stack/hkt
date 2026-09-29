@@ -114,7 +114,7 @@ export type ManualVariantRow = {
   why: string;
   imageId: string;
   genModel: string;
-  extra?: Partial<Pick<VariantInsert, "imagePrompt" | "genCostUsd" | "productPhotoSourceId" | "inspirationSourceId">>;
+  extra?: Partial<Pick<VariantInsert, "imagePrompt" | "genCostUsd" | "productPhotoSourceId" | "inspirationSourceId" | "videoAssetId" | "fbVideoId">>;
   names?: (batch: BatchRow) => Promise<Pick<VariantInsert, "nameSeq" | "campaignName" | "adsetName" | "adName">>;
   /**
    * (tuỳ chọn) chạy SAU khi biết lô đích và đã qua mọi kiểm tra của lô — ghi thiết kế (`design_concepts`, mã

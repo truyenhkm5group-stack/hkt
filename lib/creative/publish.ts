@@ -11,6 +11,7 @@ import {
   normalizeCreativeConfig,
   variantRuleSet,
   type CreativeLoopConfig,
+  type CreativeMediaKind,
   type CreativeRule,
   type CreativeWriteAction,
   type CreativeWriteDenial,
@@ -41,6 +42,7 @@ import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { sha256Hex } from "@/lib/creative/images";
 import { describeRule } from "@/lib/creative/judge";
 import { buildObjectStorySpec } from "@/lib/creative/story-spec";
+import { buildVideoStorySpec } from "@/lib/video-scale/ad-spec";
 import { publishOrder } from "@/lib/creative/manual";
 
 /**
@@ -150,9 +152,13 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
       adsetName: T.creativeVariants.adsetName,
       adName: T.creativeVariants.adName,
       sha256: T.creativeImages.sha256,
+      videoAssetId: T.creativeVariants.videoAssetId,
+      fbVideoId: T.creativeVariants.fbVideoId,
+      videoSha256: T.videoScaleAssets.sha256,
     })
     .from(T.creativeVariants)
     .leftJoin(T.creativeImages, eq(T.creativeImages.id, T.creativeVariants.imageId))
+    .leftJoin(T.videoScaleAssets, and(eq(T.videoScaleAssets.id, T.creativeVariants.videoAssetId), eq(T.videoScaleAssets.status, "READY")))
     .where(and(eq(T.creativeVariants.batchId, batch.id), inArray(T.creativeVariants.status, DIGEST_STATUSES)));
   return {
     batchDay: batch.batchDay,
@@ -161,7 +167,16 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
     budgetPerVariantVnd: cfg.budgetPerVariantVnd,
     ...(isDailyBudgetPlan(batch.plan) ? { budgetMode: DAILY_BUDGET_MODE } : {}),
     killRules: cfg.config.killRules,
-    variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline, rules: r.rules ?? null, names: { campaign: r.campaignName, adset: r.adsetName, ad: r.adName } })),
+    variants: rows.map((r) => ({
+      id: r.id,
+      imageSha256: r.sha256 ?? "",
+      primaryText: r.primaryText,
+      headline: r.headline,
+      rules: r.rules ?? null,
+      names: { campaign: r.campaignName, adset: r.adsetName, ad: r.adName },
+      // Video đã xoá nội dung ⇒ băm rỗng ⇒ digest đổi ⇒ không đăng (không đăng một bài video mà không còn video).
+      video: r.videoAssetId ? { sha256: r.videoSha256 ?? "", fbVideoId: r.fbVideoId } : null,
+    })),
   };
 }
 
@@ -414,8 +429,11 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
     // Lô "Đăng camp" mang setup người đã chọn (TKQC · fanpage · mục tiêu · vị trí · tuổi · giới tính) — áp lên mẫu MỘT lần.
     const setup = parseCampaignSetup((b.plan as Record<string, unknown> | null)?.setup);
     if (setup) template = applyCampaignSetup(template, setup, (vnd) => vndToFbMinor(vnd, config.currency));
-    // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào.
-    const shape = templateShapeError(template, config.pageId, pending.some(needsOwnCampaign));
+    // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào. Lô có bài
+    // video thì kiểm cả hình dạng bài video (nút kêu gọi chép từ mẩu mẫu — `buildVideoStorySpec`).
+    const needCampaign = pending.some(needsOwnCampaign);
+    const medias = [...new Set(pending.map(mediaOf))];
+    const shape = medias.map((m) => templateShapeError(template, config.pageId, needCampaign, m)).find((x) => x !== null) ?? null;
     if (shape) {
       await db.update(T.creativeBatches).set({ error: shape, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
       return { ...report, result: "ERROR", detail: shape };
@@ -486,13 +504,21 @@ export function nextStep(v: IdCols): CreativeWriteAction {
  *  · Bài mẫu dựng lại được thành bài của mình (`buildObjectStorySpec`, kể cả mẫu là quảng cáo động dạng ảnh đơn).
  * Được ⇒ `null`; không ⇒ câu lỗi cho người.
  */
-export function templateShapeError(template: TemplateAd, pageId: string, needCampaign: boolean): string | null {
+export function templateShapeError(template: TemplateAd, pageId: string, needCampaign: boolean, media: CreativeMediaKind = "IMAGE"): string | null {
   const promotedPage = typeof template.adset.promotedObject?.page_id === "string" ? template.adset.promotedObject.page_id : null;
   if (promotedPage && promotedPage !== pageId) return `Nhóm của mẩu mẫu gửi tin nhắn về fanpage ${promotedPage}, khác fanpage đã khai ${pageId} — sửa cấu hình hoặc chọn mẩu mẫu khác.`;
   const camp = needCampaign ? campaignShapeError(template) : null;
   if (camp) return camp;
-  const thu = buildObjectStorySpec(template.objectStorySpec, { pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" }, template.assetFeedSpec);
+  const thu =
+    media === "VIDEO"
+      ? buildVideoStorySpec(template, { pageId, videoId: "kiem-tra", imageHash: "kiem-tra", message: "kiem-tra", title: "" })
+      : buildObjectStorySpec(template.objectStorySpec, { pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" }, template.assetFeedSpec);
   return thu.ok ? null : thu.error;
+}
+
+/** Bài ảnh hay bài video — bài video mang `video_asset_id` (ảnh của nó là ảnh bìa). */
+export function mediaOf(v: Pick<VariantRow, "videoAssetId">): CreativeMediaKind {
+  return v.videoAssetId ? "VIDEO" : "IMAGE";
 }
 
 /** Chiến dịch của mẩu mẫu KHÔNG dựng được chiến dịch riêng ⇒ câu lỗi; được ⇒ `null`. Hàm thuần. */
@@ -650,7 +676,14 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
   if (!v.fbCreativeId) {
     const g = await gate("CREATE_CREATIVE");
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
-    const spec = buildObjectStorySpec(c.template.objectStorySpec, { pageId: cfg.pageId, imageHash: v.fbImageHash, primaryText: v.primaryText, headline: v.headline }, c.template.assetFeedSpec);
+    // Bài VIDEO: ảnh vừa tải ở bước 1 là ẢNH BÌA; video đã nằm sẵn trong thư viện TKQC (tải + chờ xử lý TRƯỚC khi dựng lô —
+    // `ensureAdVideo`), id của nó nằm trong phiếu duyệt.
+    const spec =
+      mediaOf(v) === "VIDEO"
+        ? v.fbVideoId
+          ? buildVideoStorySpec(c.template, { pageId: cfg.pageId, videoId: v.fbVideoId, imageHash: v.fbImageHash, message: v.primaryText, title: v.headline })
+          : { ok: false as const, error: "Bài video chưa có id video trên tài khoản quảng cáo — bấm Đăng camp lại." }
+        : buildObjectStorySpec(c.template.objectStorySpec, { pageId: cfg.pageId, imageHash: v.fbImageHash, primaryText: v.primaryText, headline: v.headline }, c.template.assetFeedSpec);
     const name = names.creative;
     if (!spec.ok) {
       await c.log({ variantId: v.id, action: "CREATE_CREATIVE", outcome: "FAILED", detail: spec.error });

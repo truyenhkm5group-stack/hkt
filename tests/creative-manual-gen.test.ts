@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, adsetNameFor, adsetNameForGoal, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, adNameForMedia, adsetNameFor, adsetNameForGoal, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
 import { campaignSetupSchema } from "@/lib/validation/creative";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
@@ -12,10 +13,12 @@ import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
 import { addUploadedDraft, writeCopyOptions, republishVariantInstant, manualEditPrompt, startManualEdit, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
-import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
+import { batchApprovalContent, committedTestSpendForDay, isLegacyStructure, mediaOf, nextStep, publishNames, templateShapeError, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
-import { campaignKindLabel, describeCampaignSetup, marketerCampaignCodes, parseCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { adUploadPublishable, attachableAdVideo, ensureAdVideo, finishAdVideoUpload, putAdVideoChunk, startAdVideoUpload, type AdVideoApi } from "@/lib/creative/ad-video";
+import { AD_VIDEO_UPLOAD, checkAdVideo } from "@/lib/constants/ad-video";
+import { CAMPAIGN_SETUP_LIMITS, campaignKindLabel, describeCampaignSetup, marketerCampaignCodes, parseCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { pickWinCode, winNameProblem } from "@/lib/creative/win-code";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { marketerNameProblem, marketerOptions } from "@/lib/creative/marketer-code";
@@ -67,6 +70,13 @@ function fakeJpeg(tag: number): Uint8Array {
 const TARGETING = { geo_locations: { countries: ["VN"] }, age_min: 18, age_max: 65 };
 
 export function testCreativeManualGenPure() {
+  // Bài VIDEO (29/09/2026): nhãn media của tên quảng cáo theo khuôn; tên người gõ lại giữ nguyên.
+  assert.equal(adNameForMedia("Page A_ảnh_3_TXT", "VIDEO"), "Page A_video_3_TXT");
+  assert.equal(adNameForMedia("Page A_video_3_TXT", "IMAGE"), "Page A_ảnh_3_TXT");
+  assert.equal(adNameForMedia("Page A_video_3_TXT", "VIDEO"), "Page A_video_3_TXT");
+  assert.equal(adNameForMedia("Tên tôi gõ", "VIDEO"), "Tên tôi gõ");
+  assert.equal(mediaOf({ videoAssetId: "a1" }), "VIDEO");
+  assert.equal(mediaOf({ videoAssetId: null }), "IMAGE");
   // ── Gen: 10 bộ, đủ sáu khoá, khác nhau, tất định ──
   const g1 = manualGenGenes("lượt-1");
   assert.equal(g1.length, MANUAL_GEN.imagesPerRun, `mỗi lần bấm đúng ${MANUAL_GEN.imagesPerRun} ảnh`);
@@ -1083,6 +1093,93 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.deepEqual(nhanViet.formulas, ["HOOK_QUESTION", "PAS", "STORY"], "không chọn công thức ⇒ bộ mặc định");
     assert.equal((await trongHang(up.ok ? up.imageId : ""))?.img.headline, "Đi tiệc mặc gì?", "không persistFirst ⇒ không ghi gì");
     assert.ok(!(await addUploadedDraft(db, { productId: `${P}khong-co`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "", primaryText: "x", note: "", imageBytes: fakeJpeg(9_102) }, actor, new Date())).ok, "mã hàng không có ⇒ từ chối");
+
+    // (g3) MẪU TỰ LÀM LÀ VIDEO (chủ shop 29/09/2026: "ảnh/video tự tải lên … tạo thành 1 bài post hoàn chỉnh"): tải theo khúc →
+    //      mẫu (ảnh bìa + video) ở hàng đợi → Đăng camp tải video lên TKQC, CHỜ Facebook xử lý rồi mới dựng lô → bài `video_data`.
+    {
+      const mb = 1024 * 1024;
+      assert.equal(templateShapeError(tplPub, `${P}page`, false, "VIDEO"), null, "mẩu mẫu có nút Gửi tin nhắn ⇒ dựng được bài video");
+      assert.ok(templateShapeError({ ...tplPub, objectStorySpec: { page_id: `${P}page`, link_data: { link: "x" } } }, `${P}page`, false, "VIDEO")?.includes("nút kêu gọi"), "mẩu mẫu không có nút kêu gọi ⇒ không dựng bài video, không đoán");
+      const vidBytes = Buffer.alloc(AD_VIDEO_UPLOAD.chunkBytes + mb, 7);
+      assert.ok(!checkAdVideo({ contentType: "video/webm", bytes: 10 }).ok, "chỉ MP4 / MOV");
+      assert.ok(!checkAdVideo({ contentType: "video/mp4", bytes: AD_VIDEO_UPLOAD.maxBytes + 1 }).ok, "quá trần một tệp ⇒ từ chối trước khi xin chỗ");
+      const st = await startAdVideoUpload(db, { contentType: "video/mp4", bytes: vidBytes.length, durationMs: 8_000, width: 720, height: 1280, userId: actor.id, now: new Date() });
+      assert.ok(st.ok && st.chunkCount === 2, st.ok ? "" : st.error);
+      const assetId = st.ok ? st.assetId : "";
+      const khuc = (seq: number) => vidBytes.subarray(seq * AD_VIDEO_UPLOAD.chunkBytes, Math.min(vidBytes.length, (seq + 1) * AD_VIDEO_UPLOAD.chunkBytes));
+      assert.ok(!(await putAdVideoChunk(db, { assetId, seq: 0, data: khuc(0), userId: "nguoi-khac" })).ok, "chỉ người xin chỗ gửi được khúc (mục 34)");
+      assert.ok(!(await putAdVideoChunk(db, { assetId, seq: 0, data: khuc(1), userId: actor.id })).ok, "khúc sai cỡ ⇒ từ chối");
+      assert.ok((await putAdVideoChunk(db, { assetId, seq: 0, data: khuc(0), userId: actor.id })).ok);
+      const thieu = await finishAdVideoUpload(db, { assetId, userId: actor.id, now: new Date() });
+      assert.ok(!thieu.ok && thieu.error.includes("1/2"), "thiếu khúc ⇒ không READY");
+      assert.ok(!(await attachableAdVideo(db, assetId, actor.id)).ok, "video chưa tải xong ⇒ không gắn được");
+      assert.ok((await putAdVideoChunk(db, { assetId, seq: 1, data: khuc(1), userId: actor.id })).ok);
+      assert.ok((await putAdVideoChunk(db, { assetId, seq: 1, data: khuc(1), userId: actor.id })).ok, "gửi lại cùng khúc = ghi đè, vô hại");
+      const xong = await finishAdVideoUpload(db, { assetId, userId: actor.id, now: new Date() });
+      assert.ok(xong.ok && xong.sha256 === createHash("sha256").update(vidBytes).digest("hex"), "băm từ đúng các khúc đã ghi");
+      assert.ok((await attachableAdVideo(db, assetId, actor.id)).ok);
+      assert.ok(!(await attachableAdVideo(db, assetId, "nguoi-khac")).ok, "video của người khác không gắn được");
+      assert.ok(!(await adUploadPublishable(db, assetId)), "video chưa gắn mẫu ⇒ link ký tên không mở");
+
+      const upV = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "Video tự quay", primaryText: "Mặc thử cho chị xem nè — nhắn shop tư vấn size.", note: "", imageBytes: fakeJpeg(9_301), videoAssetId: assetId }, actor, new Date());
+      assert.ok(upV.ok, upV.ok ? "" : upV.error);
+      const vidRowId = upV.ok ? upV.imageId : "";
+      assert.equal((await trongHang(vidRowId))?.img.videoAssetId, assetId, "mẫu video ở hàng đợi, ảnh là ảnh bìa");
+      assert.ok(!(await attachableAdVideo(db, assetId, actor.id)).ok, "một video chỉ gắn một mẫu");
+      assert.ok(await adUploadPublishable(db, assetId), "mẫu đã duyệt ⇒ Facebook tải được qua link ký tên");
+      const loVid = await promoteManualGenImage(db, { imageId: vidRowId, headline: "x", primaryText: "y", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null }, cfgPub(), actor, new Date());
+      assert.ok(!loVid.ok && loVid.error.includes("Đăng camp"), "lô hằng ngày không có bước tải video ⇒ chỉ Đăng camp");
+
+      const vidCalls: string[] = [];
+      let vidStatus = "processing";
+      const fbVideo: AdVideoApi = {
+        upload: async (acc, i) => (vidCalls.push(`upload:${acc}:${i.fileUrl.includes(`/api/video-scale/public/${assetId}?`) ? "link-ky-ten" : i.fileUrl}`), `vid-${acc}`),
+        status: async () => (vidCalls.push("status"), { status: vidStatus, error: null }),
+        signUrl: (id) => `https://erp.test/api/video-scale/public/${id}?exp=1&sig=x`,
+        sleep: async () => undefined,
+      };
+      const setupVid: CampaignSetup = { ...setup6, budgetVnd: CAMPAIGN_SETUP_LIMITS.minBudgetVnd };
+      const truocVid = fbCalls.length;
+      const cho = await publishManualGenImageInstant(db, { ...camInput(vidRowId, null), setup: setupVid }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, adVideo: fbVideo });
+      assert.ok(!cho.ok && cho.error.includes("đang xử lý"), "Facebook còn xử lý video ⇒ dừng ở câu bấm lại sau");
+      assert.deepEqual(vidCalls.filter((c) => c.startsWith("upload")), ["upload:8880009:link-ky-ten"], "video tải lên đúng TKQC của setup, bằng link ký tên");
+      assert.ok(!fbCalls.slice(truocVid).includes("createTestCampaign"), "chưa dựng lô / camp nào khi video chưa sẵn sàng");
+      assert.equal((await trongHang(vidRowId))?.img.status, "APPROVED", "mẫu vẫn ở hàng đợi");
+      vidStatus = "ready";
+      specsSent.length = 0;
+      const cVid = await publishManualGenImageInstant(db, { ...camInput(vidRowId, null), setup: setupVid }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, adVideo: fbVideo });
+      assert.ok(cVid.ok && cVid.outcome === "LIVE", cVid.ok ? cVid.detail : cVid.error);
+      assert.equal(vidCalls.filter((c) => c.startsWith("upload")).length, 1, "bấm lại cùng TKQC ⇒ KHÔNG tải lại video");
+      const vd = specsSent[0]?.video_data as Record<string, unknown> | undefined;
+      assert.ok(vd && !specsSent[0]?.link_data, "bài quảng cáo là video_data");
+      assert.equal(vd?.video_id, "vid-8880009");
+      assert.ok(typeof vd?.image_hash === "string" && String(vd?.image_hash).startsWith("hash-"), "ảnh bìa đã tải lên làm image_hash");
+      assert.equal(vd?.message, "Nhắn shop để được tư vấn size.", "content người duyệt");
+      assert.deepEqual(vd?.call_to_action, { type: "MESSAGE_PAGE", value: { app_destination: "MESSENGER" } }, "nút kêu gọi chép từ mẩu mẫu");
+      if (cVid.ok) {
+        instantIds.push(cVid.batchId);
+        assert.match(cVid.names.ad, /(^|_)video_\d+_TXT$/, "tên quảng cáo theo khuôn mang nhãn video");
+        const [vv] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, cVid.variantId));
+        assert.deepEqual([vv.videoAssetId, vv.fbVideoId], [assetId, "vid-8880009"]);
+        const [bv] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, cVid.batchId));
+        const nd = await batchApprovalContent(db, bv);
+        assert.deepEqual(nd.variants[0]?.video, { sha256: xong.ok ? xong.sha256 : "", fbVideoId: "vid-8880009" }, "phiếu duyệt khoá băm video + id video");
+        // Đăng lại sang TKQC khác ⇒ tải video thêm MỘT lần cho TKQC ấy; bài vẫn là video.
+        specsSent.length = 0;
+        const rpV = await republishVariantInstant(db, { variantId: cVid.variantId, headline: "Video — bản scale", primaryText: "Nhắn shop.", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null, scheduleAt: null, setup: { ...setupScale, budgetVnd: CAMPAIGN_SETUP_LIMITS.minBudgetVnd } }, cfgPub(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo, adVideo: fbVideo });
+        assert.ok(rpV.ok && rpV.outcome === "LIVE", rpV.ok ? rpV.detail : rpV.error);
+        if (rpV.ok) instantIds.push(rpV.batchId);
+        assert.deepEqual(vidCalls.filter((c) => c.startsWith("upload")), ["upload:8880009:link-ky-ten", "upload:8880077:link-ky-ten"], "TKQC mới ⇒ tải thêm một lần");
+        assert.equal((specsSent[0]?.video_data as Record<string, unknown> | undefined)?.video_id, "vid-8880077", "bài đăng lại dùng video của TKQC mới");
+        const [goc] = await db.select({ fbVideos: schema.creativeManualGenImages.fbVideos }).from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, vidRowId));
+        assert.deepEqual(goc.fbVideos, { "8880009": "vid-8880009", "8880077": "vid-8880077" }, "nhớ id video theo TKQC");
+      }
+      // Facebook báo lỗi xử lý ⇒ quên id đã nhớ để lượt sau tải lại bản mới; không dựng gì.
+      const loiXuLy = await ensureAdVideo(db, { rowId: vidRowId, account: "8880009", name: "x", now: new Date() }, { ...fbVideo, status: async () => ({ status: "error", error: "Định dạng không hỗ trợ." }) });
+      assert.ok(!loiXuLy.ok && !loiXuLy.pending && loiXuLy.error.includes("Định dạng"));
+      const [sauLoi] = await db.select({ fbVideos: schema.creativeManualGenImages.fbVideos }).from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, vidRowId));
+      assert.deepEqual(sauLoi.fbVideos, { "8880077": "vid-8880077" }, "lỗi xử lý ⇒ bỏ id video của TKQC ấy");
+    }
 
     // ── (d) SỬA TÊN ⇒ DIGEST ĐỔI ⇒ PHIẾU CŨ VÔ HIỆU; lô đã duyệt thì không sửa được ──
     const dg0 = approvalDigest(await batchApprovalContent(db, lo));

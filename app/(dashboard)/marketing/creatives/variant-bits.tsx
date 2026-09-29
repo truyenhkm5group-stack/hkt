@@ -92,6 +92,7 @@ export function AdPreview({
   alt,
   imageOverlay,
   className,
+  videoAssetId,
 }: {
   pageName: string | null;
   primaryText: string;
@@ -101,6 +102,8 @@ export function AdPreview({
   alt: string;
   imageOverlay?: ReactNode;
   className?: string;
+  /** Bài VIDEO: phát video người tải lên, ảnh là ảnh bìa (`poster`). */
+  videoAssetId?: string | null;
 }) {
   const ten = pageName?.trim() || "";
   return (
@@ -118,7 +121,19 @@ export function AdPreview({
       </div>
       <ExpandText text={primaryText} className="px-2.5 pb-2" />
       <div className="relative">
-        <VariantImage imageId={imageId} available={imageAvailable} alt={alt} className="aspect-square w-full" zoomable />
+        {videoAssetId ? (
+          <video
+            src={`/api/video-scale/assets/${encodeURIComponent(videoAssetId)}`}
+            poster={imageId && imageAvailable ? `/api/creative/images/${imageId}` : undefined}
+            controls
+            preload="none"
+            playsInline
+            className="aspect-square w-full bg-black object-contain"
+            aria-label={alt}
+          />
+        ) : (
+          <VariantImage imageId={imageId} available={imageAvailable} alt={alt} className="aspect-square w-full" zoomable />
+        )}
         {imageOverlay}
       </div>
       <div className="flex items-center gap-2 border-t bg-muted/50 px-2.5 py-2">

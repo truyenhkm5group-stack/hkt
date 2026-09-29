@@ -3602,6 +3602,14 @@ export const creativeVariants = pgTable(
      */
     fbPendingStep: text("fb_pending_step").notNull().default(""),
     fbPendingAt: ts("fb_pending_at"),
+    /**
+     * BÀI VIDEO (migration 0179, chủ shop 29/09/2026 — "ảnh/video tự tải lên"): video người tải lên (`video_scale_assets`
+     * loại `AD_UPLOAD`). `NULL` = bài ảnh. Bài video vẫn có `image_id` — đó là ẢNH BÌA (khung hình người chọn), Facebook
+     * bắt buộc có ảnh bìa cho `video_data`. Phiếu duyệt khoá cả băm của video.
+     */
+    videoAssetId: text("video_asset_id").references((): AnyPgColumn => videoScaleAssets.id, { onDelete: "set null" }),
+    /** Id video trong thư viện của TKQC đăng bài (`act_x/advideos`). Rỗng = bài ảnh / chưa tải. */
+    fbVideoId: text("fb_video_id").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -3960,6 +3968,16 @@ export const creativeManualGenImages = pgTable(
      * giới tính (`CampaignSetup`). `NULL` = chưa chọn ⇒ hộp đăng điền mặc định theo lựa chọn dùng nhiều.
      */
     campaignSetup: jsonb("campaign_setup").$type<Record<string, unknown>>(),
+    /**
+     * MẪU TỰ LÀM LÀ VIDEO (migration 0179): video người tải lên; `image_id` là ảnh bìa (khung hình trích ở trình duyệt) — AI viết
+     * content nhìn ảnh bìa này. `NULL` = mẫu ảnh.
+     */
+    videoAssetId: text("video_asset_id").references((): AnyPgColumn => videoScaleAssets.id, { onDelete: "set null" }),
+    /**
+     * Video đã tải lên thư viện TKQC nào: `{ "<id TKQC>": "<id video>" }`. Một video tải lên TKQC này không dùng được ở
+     * TKQC khác — đăng lại sang TKQC mới thì tải thêm một lần, bấm lại cùng TKQC thì KHÔNG tải lại.
+     */
+    fbVideos: jsonb("fb_videos").$type<Record<string, string>>().notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -8286,13 +8304,15 @@ export const videoScaleAssets = pgTable(
     chunkCount: integer("chunk_count").notNull(),
     status: text("status").notNull().default("UPLOADING"),
     isTest: boolean("is_test").notNull().default(false),
+    /** Người tải lên (migration 0179) — chỉ người xin chỗ mới gửi khúc / hoàn tất được lượt tải `AD_UPLOAD` (mục 34). */
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     completedAt: ts("completed_at"),
     purgedAt: ts("purged_at"),
   },
   (t) => [
     index("video_scale_assets_variant_idx").on(t.variantId),
-    check("video_scale_assets_kind_check", sql`${t.kind} IN ('SOURCE_CLIP', 'VOICE', 'MUSIC', 'FINAL', 'THUMBNAIL')`),
+    check("video_scale_assets_kind_check", sql`${t.kind} IN ('SOURCE_CLIP', 'VOICE', 'MUSIC', 'FINAL', 'THUMBNAIL', 'AD_UPLOAD')`),
     check("video_scale_assets_status_check", sql`${t.status} IN ('UPLOADING', 'READY', 'PURGED')`),
     check("video_scale_assets_size_check", sql`${t.bytes} > 0 AND ${t.chunkCount} > 0`),
     check("video_scale_assets_ready_check", sql`${t.status} <> 'READY' OR ${t.completedAt} IS NOT NULL`),

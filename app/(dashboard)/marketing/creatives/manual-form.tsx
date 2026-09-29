@@ -1,6 +1,6 @@
 "use client";
 
-import { ImagePlus, Loader2, ShieldAlert, Upload, X } from "lucide-react";
+import { Clapperboard, ImagePlus, Loader2, ShieldAlert, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,11 +15,16 @@ import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { ProductOption } from "@/lib/queries/creative-sources";
 import { manualCreativeInputSchema } from "@/lib/validation/creative";
 import type { CopyFormula } from "@/lib/constants/copy-formulas";
+import { AD_MEDIA_ACCEPT, AD_VIDEO_UPLOAD, checkAdVideo } from "@/lib/constants/ad-video";
 import { FormulaPicker } from "./copy-ai";
+import { grabFrame, readVideoMeta, uploadAdVideo, type VideoMeta } from "./video-upload";
+
+type ChosenVideo = { file: File; url: string; meta: VideoMeta };
 
 /**
  * Tải MẪU TỰ LÀM (vẽ trên web ChatGPT / Grok, hoặc chụp tay) vào THẲNG hàng đợi đăng camp (chủ shop 26/09/2026 bỏ lô
- * hằng ngày) — từ đó Soạn bài → Đăng camp như ảnh gen tay.
+ * hằng ngày) — từ đó Soạn bài → Đăng camp như ảnh gen tay. Từ 29/09/2026 nhận cả VIDEO (MP4 / MOV): ảnh bìa là một khung
+ * hình người chọn — AI viết content nhìn ảnh ấy; video tải theo khúc lúc bấm "Thêm vào hàng đợi".
  * Mẫu đi qua đúng cổng duyệt · đăng · chấm · học như mẫu máy làm — xem `lib/creative/manual.ts`.
  */
 export function ManualForm({ products }: { products: ProductOption[] }) {
@@ -33,16 +38,64 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
   const [genes, setGenes] = useState<Partial<Record<GeneKey, string>>>({});
   const [anh, setAnh] = useState<(AnhDaThuNho & { ten: string }) | null>(null);
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
+  const [video, setVideo] = useState<ChosenVideo | null>(null);
+  const [khungGiay, setKhungGiay] = useState(1);
+  const [tien, setTien] = useState<{ done: number; total: number } | null>(null);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const boVideo = () => {
+    setVideo((v) => {
+      if (v) URL.revokeObjectURL(v.url);
+      return null;
+    });
+  };
+
+  const layAnhBia = async (url: string, giay: number) => {
+    setDangXuLyAnh(true);
+    try {
+      setAnh({ ...(await thuNhoAnh(await grabFrame(url, giay))), ten: `ảnh bìa ${giay.toFixed(1)}s` });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không lấy được ảnh bìa");
+    } finally {
+      setDangXuLyAnh(false);
+    }
+  };
 
   const chonAnh = async (list: FileList | null) => {
     const f = list?.[0];
     if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      toast.error(`${f.name} không phải ảnh`);
+    if (f.type.startsWith("video/")) {
+      const kiem = checkAdVideo({ contentType: f.type, bytes: f.size });
+      if (!kiem.ok) {
+        toast.error(kiem.error);
+        if (inputRef.current) inputRef.current.value = "";
+        return;
+      }
+      boVideo();
+      const url = URL.createObjectURL(f);
+      setDangXuLyAnh(true);
+      try {
+        const meta = await readVideoMeta(url);
+        const giay = meta.durationMs ? Math.min(1, meta.durationMs / 10_000) : 0;
+        setVideo({ file: f, url, meta });
+        setKhungGiay(giay);
+        setAnh({ ...(await thuNhoAnh(await grabFrame(url, giay))), ten: f.name });
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        setVideo(null);
+        toast.error(e instanceof Error ? e.message : "Không đọc được video");
+      } finally {
+        setDangXuLyAnh(false);
+        if (inputRef.current) inputRef.current.value = "";
+      }
       return;
     }
+    if (!f.type.startsWith("image/")) {
+      toast.error(`${f.name} không phải ảnh hay video`);
+      return;
+    }
+    boVideo();
     setDangXuLyAnh(true);
     try {
       setAnh({ ...(await thuNhoAnh(f)), ten: f.name });
@@ -62,6 +115,8 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
     setNote("");
     setGenes({});
     setAnh(null);
+    boVideo();
+    setTien(null);
   };
 
   const input = useMemo(() => ({ productId, primaryText, headline, note, genes, imageBase64: anh?.base64 ?? "", aiWrite, aiFormulas }), [productId, primaryText, headline, note, genes, anh, aiWrite, aiFormulas]);
@@ -73,7 +128,19 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
 
   const gui = () =>
     start(async () => {
-      const r = await addManualCreative(input);
+      // Mẫu VIDEO: tải video theo khúc TRƯỚC, rồi mới tạo mẫu (ảnh bìa + id video) — hỏng giữa chừng thì chưa có mẫu nào.
+      let videoAssetId: string | null = null;
+      if (video) {
+        const up = await uploadAdVideo(video.file, video.meta, (done, total) => setTien({ done, total }));
+        if (!up.ok) {
+          setTien(null);
+          toast.error(up.error);
+          return;
+        }
+        videoAssetId = up.assetId;
+      }
+      const r = await addManualCreative({ ...input, videoAssetId });
+      setTien(null);
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -94,7 +161,7 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
           <DialogHeader>
             <DialogTitle>Thêm mẫu tự làm vào hàng đợi đăng camp</DialogTitle>
             <DialogDescription>
-              Ảnh bạn tự làm vào thẳng hàng đợi (coi như đã duyệt). Đăng lên Facebook khi bấm Đăng camp ở tab ③ Hàng đợi & Đăng.
+              Ảnh / video bạn tự làm vào thẳng hàng đợi (coi như đã duyệt). Đăng lên Facebook khi bấm Đăng camp ở tab ③ Hàng đợi & Đăng.
             </DialogDescription>
           </DialogHeader>
 
@@ -115,9 +182,46 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
           >
             <div className="grid gap-4 sm:grid-cols-[176px_1fr]">
               <div className="space-y-2">
-                <Label>Ảnh mẫu</Label>
-                <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void chonAnh(e.target.files)} />
-                {anh ? (
+                <Label>Ảnh / video mẫu</Label>
+                <input ref={inputRef} type="file" accept={AD_MEDIA_ACCEPT} className="hidden" onChange={(e) => void chonAnh(e.target.files)} />
+                {video ? (
+                  <div className="w-44 space-y-1.5">
+                    <div className="relative overflow-hidden rounded-md border bg-black">
+                      <video src={video.url} controls muted playsInline className="aspect-square w-full object-contain" />
+                      <button type="button" aria-label="Bỏ video" className="absolute right-1 top-1 rounded-full bg-background/90 p-1" onClick={() => { boVideo(); setAnh(null); }}>
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-[10.5px] text-muted-foreground">
+                      {(video.file.size / 1048576).toFixed(1)} MB{video.meta.durationMs ? ` · ${(video.meta.durationMs / 1000).toFixed(1)} giây` : ""}
+                      {video.meta.width && video.meta.height ? ` · ${video.meta.width}×${video.meta.height}` : ""}
+                    </p>
+                    <label className="block space-y-0.5 text-[11px]">
+                      <span className="text-muted-foreground">Ảnh bìa ở giây {khungGiay.toFixed(1)}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={Math.max(0, (video.meta.durationMs ?? 0) / 1000 - 0.1)}
+                        step={0.1}
+                        value={khungGiay}
+                        disabled={dangXuLyAnh || pending}
+                        onChange={(e) => setKhungGiay(Number(e.target.value))}
+                        onPointerUp={() => void layAnhBia(video.url, khungGiay)}
+                        onKeyUp={() => void layAnhBia(video.url, khungGiay)}
+                        className="w-full"
+                      />
+                    </label>
+                    {anh ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={anh.preview} alt="Ảnh bìa" className="aspect-square w-full rounded border object-cover" />
+                    ) : null}
+                    {tien ? (
+                      <p className="text-[11px] font-medium text-primary">
+                        Đang tải video {tien.done}/{tien.total} khúc…
+                      </p>
+                    ) : null}
+                  </div>
+                ) : anh ? (
                   <div className="relative w-44 overflow-hidden rounded-md border">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={anh.preview} alt={anh.ten} className="aspect-square w-full object-cover" />
@@ -128,9 +232,14 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                   </div>
                 ) : (
                   <Button type="button" variant="outline" size="sm" disabled={dangXuLyAnh} onClick={() => inputRef.current?.click()}>
-                    {dangXuLyAnh ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} Chọn ảnh
+                    {dangXuLyAnh ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} Chọn ảnh / video
                   </Button>
                 )}
+                {!anh && !video ? (
+                  <p className="flex items-start gap-1 text-[10.5px] leading-snug text-muted-foreground">
+                    <Clapperboard className="mt-0.5 size-3 shrink-0" /> Video MP4 / MOV ≤ {AD_VIDEO_UPLOAD.maxBytes / 1048576} MB — chọn khung hình làm ảnh bìa.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-3">
@@ -142,7 +251,7 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                 </div>
                 <div className="space-y-1.5 rounded-md border border-primary/30 bg-primary/5 p-2">
                   <label className="flex items-center gap-2 text-[12.5px] font-medium">
-                    <input type="checkbox" checked={aiWrite} onChange={(e) => setAiWrite(e.target.checked)} /> AI viết tiêu đề + content theo ảnh (không ghi giá)
+                    <input type="checkbox" checked={aiWrite} onChange={(e) => setAiWrite(e.target.checked)} /> AI viết tiêu đề + content theo {video ? "ảnh bìa video" : "ảnh"} (không ghi giá)
                   </label>
                   {aiWrite ? (
                     <>
@@ -193,7 +302,7 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                   Huỷ
                 </Button>
                 <Button type="submit" disabled={pending || dangXuLyAnh || Boolean(loiTruoc)}>
-                  {pending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Thêm vào hàng đợi
+                  {pending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} {tien ? `Đang tải ${Math.round((tien.done / Math.max(1, tien.total)) * 100)}%` : "Thêm vào hàng đợi"}
                 </Button>
               </div>
             </DialogFooter>

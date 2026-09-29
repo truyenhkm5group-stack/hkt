@@ -40,6 +40,8 @@ export type ManualGenImageCard = {
   genes: Record<string, string>;
   imageId: string | null;
   imageAvailable: boolean;
+  /** Mẫu VIDEO (migration 0179): video người tải lên; `imageId` lúc ấy là ảnh bìa. `null` = mẫu ảnh. */
+  videoAssetId: string | null;
   costUsd: string;
   /** Tiền thật của ảnh quy ra đồng. `null` = CHƯA BIẾT (chưa vẽ, vẽ hỏng, hoặc máy vẽ không trả giá). */
   costVnd: number | null;
@@ -91,6 +93,7 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
     genes: { ...(i.genes ?? {}) },
     imageId: i.imageId,
     imageAvailable: i.imageId !== null && imageRowId !== null && purgedAt === null,
+    videoAssetId: i.videoAssetId,
     costUsd: i.costUsd,
     costVnd: usdToVndRounded(i.costUsd === "" ? null : Number(i.costUsd), rate),
     error: i.error,

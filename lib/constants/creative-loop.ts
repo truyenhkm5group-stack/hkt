@@ -1475,6 +1475,20 @@ export const AGE_MAX_OPEN = 65;
 export type CreativeMediaKind = "IMAGE" | "VIDEO";
 export const MEDIA_NAME_LABEL: Record<CreativeMediaKind, string> = { IMAGE: "ảnh", VIDEO: "video" };
 
+/**
+ * Tên quảng cáo theo khuôn (`fanpage_ảnh_số_TXT`) cho đúng loại media: đoạn nhãn media của loại KIA đổi thành nhãn của loại
+ * này. Tên không mang nhãn media nào (người đã gõ lại) ⇒ giữ nguyên. Hàm THUẦN — màn hình xem trước và máy chủ cùng dùng.
+ */
+export function adNameForMedia(name: string, media: CreativeMediaKind): string {
+  const want = MEDIA_NAME_LABEL[media];
+  const others = new Set(Object.values(MEDIA_NAME_LABEL).filter((x) => x !== want));
+  const segs = name.split("_");
+  const i = segs.findIndex((s) => others.has(s));
+  if (i < 0) return name;
+  segs[i] = want;
+  return segs.join("_");
+}
+
 /** Trần độ dài MỘT tên (ký tự) — trần của lược đồ đầu vào và của cột. */
 export const CAMPAIGN_NAME_MAX_CHARS = 255;
 

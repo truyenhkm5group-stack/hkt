@@ -97,9 +97,22 @@ export const manualCreativeInputSchema = z
       .min(1, "Chưa chọn ảnh mẫu")
       .max(IDEA_IMAGE_MAX_BASE64, "Ảnh quá lớn — thu nhỏ trước khi tải lên")
       .regex(BASE64, "Dữ liệu ảnh không hợp lệ"),
+    /** Mẫu VIDEO: video đã tải xong theo khúc (`imageBase64` lúc ấy là ảnh bìa). Vắng = mẫu ảnh. */
+    videoAssetId: z.string().trim().min(1).max(100).nullish(),
   })
   .strict()
   .refine((d) => d.aiWrite || d.primaryText.length > 0, "Nhập nội dung chính, hoặc bật “AI viết content”");
+
+/** Xin chỗ tải video mẫu tự làm (bước 1/3) — kiểu + cỡ kiểm lại ở lõi (`checkAdVideo`). */
+export const adVideoStartSchema = z
+  .object({
+    contentType: z.string().trim().min(1, "Không rõ kiểu tệp").max(100),
+    bytes: z.number().int().positive("Tệp rỗng"),
+    durationMs: z.number().int().positive().max(24 * 3_600_000).nullable().default(null),
+    width: z.number().int().positive().max(10_000).nullable().default(null),
+    height: z.number().int().positive().max(10_000).nullable().default(null),
+  })
+  .strict();
 
 /** "AI viết theo công thức" cho một ảnh trong hộp soạn bài — mặc định KHÔNG ghi giá. */
 export const copyOptionsSchema = z
