@@ -296,7 +296,7 @@ chưa có `erp_org_*` nào khác. Không đọc `.env`. Chạy lại trên cùng
 | Lượt | Postgres | Bảng / dòng | Bản dump | Khôi phục (createdb → đổi tên) | RTO tới khi CHẠY ĐƯỢC (đã kiểm) | Kết quả |
 |---|---|---|---|---|---|---|
 | 29/09/2026, máy lập trình (Windows, cụm `initdb` tạm, công cụ trên máy) | 18.4 | 187 bảng · 355 dòng | 735.660 byte · 220 ms | 1.119 ms · `pg_restore` 0 lỗi | 3.973 ms | **ĐẠT** — 187/187 bảng + sequence bằng nhau; mặt phẳng điều khiển bằng nhau; blueprint `6f079aba…` trước = sau; bản ghi / quan hệ / tệp đúng; 2 trang · 9 khối · 0 lỗi khối; chạy luật lại: thực thi 0, lượt 2→2, việc 1→1, bản ghi mới xin duyệt 1; cùng khoá giải đúng, khoá khác bị từ chối (0 lượt gọi ra); đăng nhập được, sai mật khẩu bị từ chối; bản đã phá lệch 4 bảng (phép so không mù) |
-| CI `postgres:16-alpine`, `docker exec -i` | 16 | — | — | — | — | CHƯA CHẠY — phiên tích hợp chạy workflow sau khi gộp rồi điền số vào đây |
+| 29/09/2026, CI `postgres:16-alpine` (run 36545135985, `docker exec -i`, cùng ảnh `erp-db`) | 16.15 | 187 bảng · 356 dòng · 1 sequence | 728.765 byte · 397 ms | 3.556 ms · `pg_restore` thoát 0, 0 dòng lỗi | 6.260 ms (cả lượt 17 giây) | **ĐẠT** — bằng nhau từng bảng + sequence; bí mật: cùng khoá giải đúng, khoá khác bị từ chối (fail closed); bản đã phá lệch 4 bảng trước khi khôi phục |
 
 Con số trên là phần MÁY của RTO trên một tổ chức nhỏ. Nó không gồm: tải bản từ Drive, người vận hành đọc runbook, tạm
 ngừng / mở lại ở `/platform`; và nó tăng theo cỡ CSDL (`pg_restore` tỉ lệ với dữ liệu + chỉ mục).
