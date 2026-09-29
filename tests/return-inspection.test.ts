@@ -348,6 +348,25 @@ export async function testReturnInspection(db: Db) {
   assert.ok(choKho2.includes("ins-ship-dd-out"), "chiều đi đã RETURNED thì chính nó nằm trong hàng chờ");
   assert.ok(!choKho2.includes("ins-ship-dd-back"), "chiều về của CÙNG kiện không được hiện thêm một dòng — đếm hai lần là cộng tồn hai lần");
 
+  /*
+    Mệnh đề 4 viết lại thành truy vấn con KHÔNG tương quan (29/09/2026) — ba nhánh nó dễ làm sai nhất:
+    khớp qua MÃ TRA CỨU của chiều đi, mã gốc gõ thường + khoảng trắng, và chiều về KHÔNG mang mã gốc
+    (NULL không được làm `in` trả NULL rồi loại oan kiện ra khỏi hàng chờ).
+  */
+  await db.insert(schema.orders).values({ id: "ins-order-tc", stage: "SHIPPED", status: 3, insertedAt: new Date("2026-08-04T00:00:00Z") }).onConflictDoNothing();
+  await db
+    .insert(schema.shipments)
+    .values([
+      { id: "ins-ship-tc-out", orderId: "ins-order-tc", vtpOrderNumber: "INSTCVTP01", trackingCode: "INSTCTRACK01", stage: "RETURNED", returnedAt: new Date("2026-08-23T00:00:00Z") },
+      { id: "ins-ship-tc-back", orderId: null, orderReference: "  insTCtrack01 ", vtpOrderNumber: "INSTCTRACK011P1", stage: "RETURNED", returnedAt: new Date("2026-08-23T00:00:00Z") },
+      { id: "ins-ship-noref", orderId: null, orderReference: null, vtpOrderNumber: "INSNOREF1P1", stage: "RETURNED", returnedAt: new Date("2026-08-23T00:00:00Z") },
+    ])
+    .onConflictDoNothing();
+  const choKho3 = await listPendingReturnedIds(1000);
+  assert.ok(choKho3.includes("ins-ship-tc-out"), "chiều đi đã RETURNED nằm trong hàng chờ");
+  assert.ok(!choKho3.includes("ins-ship-tc-back"), "chiều về khớp MÃ TRA CỨU của chiều đi (gõ thường, thừa khoảng trắng) vẫn là cùng một kiện — không hiện dòng thứ hai");
+  assert.ok(choKho3.includes("ins-ship-noref"), "chiều về không mang mã gốc (NULL) vẫn phải vào hàng chờ — không được bị loại vì NULL");
+
   // Kiện KHÔNG lần ra đơn nào: "nhận đủ" hàng loạt bỏ qua kèm lý do; kết luận hỏng vẫn ghi được.
   await db.insert(schema.shipments).values({ id: "ins-ship-unres", orderId: null, orderReference: "KHONG-CO-GOC", vtpOrderNumber: "INSUNRES1", stage: "RETURNED", returnedAt: new Date("2026-08-23T00:00:00Z") }).onConflictDoNothing();
   await markReturnsArrived(["ins-ship-unres"], { id: null, label: "nguoi-nhan-hang" });
