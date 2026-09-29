@@ -1,7 +1,9 @@
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
+import { AiLimitsTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { getPlanUsage } from "@/lib/entitlements/check";
+import { loadOrgAiUsage } from "@/lib/ai-usage/view";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Gói & hạn mức" };
@@ -17,6 +19,8 @@ function fmt(n: number, kind: string): string {
 export default async function PlanPage() {
   const user = await requirePermission("settings:manage");
   const usage = await getPlanUsage(user.organization?.code);
+  // Mã tổ chức lấy từ PHIÊN (không từ URL): tổ chức chỉ thấy sổ AI của chính mình.
+  const ai = await loadOrgAiUsage(usage.orgCode);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -54,6 +58,17 @@ export default async function PlanPage() {
           </table>
         </SectionCard>
       )}
+      <SectionCard
+        title="Dùng AI"
+        description={ai.disabledReason ?? "Lượt · token · tiền ƯỚC TÍNH theo bảng giá model (không phải hoá đơn) — hôm nay và tháng này, theo nguồn trả tiền"}
+        hint="Khoá AI của tổ chức: bạn trả tiền cho nhà cung cấp AI, nền tảng chỉ giới hạn số lượt. Credit AI của nền tảng: nền tảng trả, giới hạn bằng tiền. Vượt ngưỡng cảnh báo ⇒ vẫn chạy và báo một lần mỗi ngày; tới trần cứng ⇒ AI dừng, không gọi model. “—” = chưa biết giá, không phải 0."
+        padded={false}
+      >
+        <div className="space-y-3 pb-3" data-ai-usage-section>
+          <AiUsageTotalsTable today={ai.today} month={ai.month} />
+          {ai.limits && !ai.limits.isHome ? <AiLimitsTable limits={ai.limits.limits} usage={ai.quotaUsage} undeclared={ai.limits.undeclared} /> : <p className="px-5 text-xs text-muted-foreground">{ai.limits ? "Tổ chức nhà — AI không giới hạn theo gói." : "Không đọc được gói — AI Builder sẽ từ chối cho tới khi người vận hành kiểm bảng gói."}</p>}
+        </div>
+      </SectionCard>
     </div>
   );
 }

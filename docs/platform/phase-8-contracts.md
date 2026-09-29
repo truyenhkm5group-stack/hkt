@@ -11,6 +11,9 @@
 3. Không có ⇒ AI Builder hiện "chưa có kết nối AI" + đường tới `/settings/connections`. Mẫu ngành (Phase 7) vẫn dùng được.
 
 Không có khoá AI "của nền tảng" dùng chung: ai dùng người ấy trả, và ngữ cảnh không bao giờ đi qua khoá của tổ chức khác.
+*Cập nhật (0176, `docs/platform/ai-usage.md`):* nền đã có nhánh thứ ba — khoá của NỀN TẢNG (`PLATFORM_AI_API_KEY`, khác
+khoá của nhà) trừ credit theo gói — MẶC ĐỊNH TẮT, bật là quyết định của chủ nền tảng (launch-gates.md mục D). Mọi lượt
+ghi sổ `platform_ai_usage`; hạn mức `checkAiQuota` và công tắc AI chặn TRƯỚC khi gọi model.
 Bài kiểm dùng provider giả tiêm vào (không gọi mạng).
 
 ## 2. Hai chế độ

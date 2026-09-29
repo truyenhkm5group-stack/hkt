@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
+import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { loadOperatorOrgAi } from "@/lib/ai-usage/view";
 import { loadOrgDiagnostics, type Measured } from "@/lib/queries/platform-org-diagnostics";
 import { STALE_RUN_KINDS } from "@/lib/workflow/stale";
 import { cn } from "@/lib/utils";
@@ -42,7 +45,8 @@ const thead = "bg-muted/40 text-left text-[11.5px] font-semibold uppercase track
  * CHẨN ĐOÁN MỘT TỔ CHỨC — chỉ người của TỔ CHỨC NHÀ có `platform:operate` (như `/platform`).
  *
  * Kiểm hai lần: `requirePermission` rồi `platformOperatorDenial` ở trang, VÀ lại ở `loadOrgDiagnostics` (hàm đọc xuyên
- * ranh giới tổ chức). Trang CHỈ ĐỌC: không nút nào ghi vào CSDL tổ chức; sửa module vẫn ở `/platform?org=<mã>`.
+ * ranh giới tổ chức). Trang không ghi vào CSDL tổ chức; sửa module vẫn ở `/platform?org=<mã>`. Khung «Dùng AI» có công tắc AI
+ * + ghi đè hạn mức — chúng ghi vào MẶT PHẲNG ĐIỀU KHIỂN (`platform_organizations.settings.ai`), có lý do và nhật ký nền tảng.
  */
 export default async function PlatformOrgPage({ params }: { params: Promise<{ code: string }> }) {
   const user = await requirePermission("platform:operate");
@@ -55,6 +59,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   }
   const d = result.value;
   const o = d.organization;
+  const ai = await loadOperatorOrgAi(user, o.code);
 
   return (
     <div className="space-y-5">
@@ -130,6 +135,26 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
           ) : null}
         </SectionCard>
       </div>
+
+      {ai.ok ? (
+        <SectionCard
+          id="ai-usage"
+          title="Dùng AI"
+          description={ai.value.disabledReason ?? `Sổ platform_ai_usage · 31 ngày · gói ${ai.value.limits?.planName ?? "—"}`}
+          hint="Chỉ số đếm, model, nguồn trả tiền — không prompt, không khoá. Tiền là ƯỚC TÍNH theo bảng giá model; “chưa rõ” = lượt chưa định giá được (không phải 0). Lượt bị chặn = hạn mức từ chối TRƯỚC khi gọi model."
+          padded={false}
+        >
+          <div className="space-y-4 pb-4">
+            <AiUsageTotalsTable today={ai.value.today} month={ai.value.month} />
+            {ai.value.limits && !ai.value.limits.isHome ? <AiLimitsTable limits={ai.value.limits.limits} usage={ai.value.quotaUsage} undeclared={ai.value.limits.undeclared} /> : null}
+            <AiUsageDailyTable rows={ai.value.daily} />
+            <div className="border-t border-hairline px-5 pt-4">
+              <p className="mb-2 text-sm font-semibold">Công tắc & ghi đè hạn mức AI</p>
+              <OrgAiControlForm orgCode={o.code} orgName={o.name} disabled={ai.value.control.disabled} limits={ai.value.control.limits} cacheSeconds={ai.value.cacheSeconds} />
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Metadata" description="Field · form · danh sách · trang · đối tượng · bản ghi · luật">
         {measured(d.metadata, (m) => (

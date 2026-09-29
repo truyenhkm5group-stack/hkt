@@ -76,4 +76,6 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_plans`);
   // 0172 · cài đặt nền tảng (chế độ đăng ký /start) — chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_settings`);
+  // 0176 · sổ dùng AI — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_ai_usage`);
 }

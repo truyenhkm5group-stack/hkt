@@ -1,0 +1,209 @@
+/**
+ * ═══════════ SỔ DÙNG AI — `recordAiUsage()` LÀ ĐƯỜNG GHI DUY NHẤT (docs/platform/ai-usage.md) — CHỈ MÁY CHỦ ═══════════
+ *
+ * Bảng `platform_ai_usage` ở CSDL NHÀ (`getPlatformDb()`) — mặt phẳng điều khiển: người vận hành nhìn mọi tổ chức từ MỘT
+ * chỗ, và một tổ chức không có đường nào sửa sổ của mình (CSDL của họ không chứa bảng thật).
+ *
+ *  · Một dòng = một lượt AI. Không prompt, không câu trả lời, không khoá — chỉ số đếm, model, nguồn trả tiền.
+ *  · `costUsd` / token `null` ⇒ ghi NULL — CHƯA BIẾT, không bao giờ 0 (luật 42). Tổng tiền chỉ cộng lượt đã định giá;
+ *    số lượt chưa định giá đếm riêng và in cạnh tổng.
+ *  · Mọi câu đọc lọc `org_code` (và `billing_source` khi tính hạn mức): tổ chức A không bao giờ trừ vào B, BYOK không bao
+ *    giờ trừ vào credit nền tảng.
+ */
+import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { getPlatformDb, schema } from "@/db";
+import { dauNgayVN } from "@/lib/ai/budget";
+import {
+  AI_BILLING_SOURCES,
+  AI_USAGE_FEATURES,
+  AI_USAGE_STATUSES,
+  EMPTY_SOURCE_USAGE,
+  monthStartVN,
+  type AiBillingSource,
+  type AiSourceUsage,
+  type AiUsageFeature,
+  type AiUsageStatus,
+} from "@/lib/ai-usage/types";
+
+export type AiUsageEntry = {
+  orgCode: string;
+  feature: AiUsageFeature;
+  source: AiBillingSource;
+  provider: string | null;
+  model: string | null;
+  /** Số lời gọi model của lượt (0 khi bị chặn trước khi gọi). */
+  requests: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** USD ước tính; `null` = CHƯA BIẾT. */
+  costUsd: number | null;
+  status: AiUsageStatus;
+  /** Khoá tài khoản (luật 34); `null` = máy. */
+  actorId: string | null;
+  ref?: string | null;
+  at?: Date;
+};
+
+const intOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
+
+/** Ghi MỘT dòng. Ném khi dữ liệu sai hình hoặc CSDL hỏng — nơi gọi quyết (AI Builder: lỗi hiện ra; Copilot: nuốt). */
+export async function recordAiUsage(e: AiUsageEntry): Promise<void> {
+  if (!(AI_USAGE_FEATURES as readonly string[]).includes(e.feature)) throw new Error(`Tính năng AI lạ: ${e.feature}`);
+  if (!(AI_BILLING_SOURCES as readonly string[]).includes(e.source)) throw new Error(`Nguồn tính tiền AI lạ: ${e.source}`);
+  if (!(AI_USAGE_STATUSES as readonly string[]).includes(e.status)) throw new Error(`Trạng thái lượt AI lạ: ${e.status}`);
+  const pdb = await getPlatformDb();
+  await pdb.insert(schema.platformAiUsage).values({
+    orgCode: e.orgCode,
+    feature: e.feature,
+    billingSource: e.source,
+    provider: e.provider,
+    model: e.model,
+    requests: Math.max(0, Math.round(e.requests)),
+    inputTokens: intOrNull(e.inputTokens),
+    outputTokens: intOrNull(e.outputTokens),
+    costUsd: e.costUsd === null || !Number.isFinite(e.costUsd) ? null : e.costUsd,
+    status: e.status,
+    actorId: e.actorId,
+    ref: e.ref ?? null,
+    ...(e.at ? { at: e.at } : {}),
+  });
+}
+
+const t = schema.platformAiUsage;
+/** Lượt BỊ CHẶN không phải một lượt dùng: không gọi model, không tốn tiền. */
+const used = ne(t.status, "BLOCKED_QUOTA");
+
+/** Mức dùng của ĐÚNG một tổ chức × ĐÚNG một nguồn — đầu vào của `evaluateAiQuota`. Luôn đọc TƯƠI (không đệm). */
+export async function sourceUsage(orgCode: string, source: AiBillingSource, now: Date = new Date()): Promise<AiSourceUsage> {
+  const pdb = await getPlatformDb();
+  const day = dauNgayVN(now);
+  const [r] = await pdb
+    .select({
+      today: sql<number>`count(*) filter (where ${t.at} >= ${day.toISOString()}::timestamptz)`,
+      month: sql<number>`count(*)`,
+      cost: sql<string | null>`sum(${t.costUsd})`,
+      unknown: sql<number>`count(*) filter (where ${t.costUsd} is null)`,
+    })
+    .from(t)
+    .where(and(eq(t.orgCode, orgCode), eq(t.billingSource, source), gte(t.at, monthStartVN(now)), used));
+  if (!r) return EMPTY_SOURCE_USAGE;
+  return { requestsToday: Number(r.today ?? 0), requestsMonth: Number(r.month ?? 0), costUsdMonth: Number(r.cost ?? 0), unknownCostMonth: Number(r.unknown ?? 0) };
+}
+
+export type AiUsageTotals = {
+  source: AiBillingSource;
+  /** Lượt AI (dòng sổ, không kể lượt bị chặn). */
+  turns: number;
+  /** Lời gọi model. */
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Tổng USD của lượt ĐÃ định giá; `null` khi không lượt nào định giá được (CHƯA BIẾT, không phải 0). */
+  costUsd: number | null;
+  unknownCost: number;
+  blocked: number;
+};
+
+async function totalsSince(orgCode: string, since: Date): Promise<AiUsageTotals[]> {
+  const pdb = await getPlatformDb();
+  const rows = await pdb
+    .select({
+      source: t.billingSource,
+      turns: sql<number>`count(*) filter (where ${used})`,
+      requests: sql<number>`coalesce(sum(${t.requests}), 0)`,
+      input: sql<number>`coalesce(sum(${t.inputTokens}), 0)`,
+      output: sql<number>`coalesce(sum(${t.outputTokens}), 0)`,
+      cost: sql<string | null>`sum(${t.costUsd})`,
+      unknown: sql<number>`count(*) filter (where ${used} and ${t.costUsd} is null)`,
+      blocked: sql<number>`count(*) filter (where ${t.status} = 'BLOCKED_QUOTA')`,
+    })
+    .from(t)
+    .where(and(eq(t.orgCode, orgCode), gte(t.at, since)))
+    .groupBy(t.billingSource);
+  return rows.map((r) => ({
+    source: r.source as AiBillingSource,
+    turns: Number(r.turns),
+    requests: Number(r.requests),
+    inputTokens: Number(r.input),
+    outputTokens: Number(r.output),
+    costUsd: r.cost === null ? null : Number(r.cost),
+    unknownCost: Number(r.unknown),
+    blocked: Number(r.blocked),
+  }));
+}
+
+/** Hôm nay + tháng này, theo nguồn, của MỘT tổ chức. */
+export async function aiUsageOverview(orgCode: string, now: Date = new Date()): Promise<{ today: AiUsageTotals[]; month: AiUsageTotals[] }> {
+  const [today, month] = await Promise.all([totalsSince(orgCode, dauNgayVN(now)), totalsSince(orgCode, monthStartVN(now))]);
+  return { today, month };
+}
+
+export type AiUsageDayRow = { day: string; source: AiBillingSource; feature: string; model: string | null; turns: number; requests: number; inputTokens: number; outputTokens: number; costUsd: number | null; unknownCost: number; blocked: number };
+
+/** Theo ngày (giờ VN) × nguồn × tính năng × model, `days` ngày gần nhất — màn người vận hành. */
+export async function aiUsageDaily(orgCode: string, days = 31, now: Date = new Date()): Promise<AiUsageDayRow[]> {
+  const pdb = await getPlatformDb();
+  const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
+  const dayExpr = sql<string>`to_char((${t.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
+  const rows = await pdb
+    .select({
+      day: dayExpr,
+      source: t.billingSource,
+      feature: t.feature,
+      model: t.model,
+      turns: sql<number>`count(*) filter (where ${used})`,
+      requests: sql<number>`coalesce(sum(${t.requests}), 0)`,
+      input: sql<number>`coalesce(sum(${t.inputTokens}), 0)`,
+      output: sql<number>`coalesce(sum(${t.outputTokens}), 0)`,
+      cost: sql<string | null>`sum(${t.costUsd})`,
+      unknown: sql<number>`count(*) filter (where ${used} and ${t.costUsd} is null)`,
+      blocked: sql<number>`count(*) filter (where ${t.status} = 'BLOCKED_QUOTA')`,
+    })
+    .from(t)
+    .where(and(eq(t.orgCode, orgCode), gte(t.at, since)))
+    .groupBy(dayExpr, t.billingSource, t.feature, t.model)
+    .orderBy(desc(dayExpr));
+  return rows.map((r) => ({
+    day: String(r.day),
+    source: r.source as AiBillingSource,
+    feature: r.feature,
+    model: r.model,
+    turns: Number(r.turns),
+    requests: Number(r.requests),
+    inputTokens: Number(r.input),
+    outputTokens: Number(r.output),
+    costUsd: r.cost === null ? null : Number(r.cost),
+    unknownCost: Number(r.unknown),
+    blocked: Number(r.blocked),
+  }));
+}
+
+export type AiTopOrgRow = { orgCode: string; costUsd: number | null; turns: number; unknownCost: number; blocked: number; sources: AiBillingSource[] };
+
+/** Top tổ chức theo chi phí AI THÁNG NÀY (trang `/platform`). Tổ chức chỉ có lượt chưa định giá vẫn hiện, xếp cuối. */
+export async function topOrgsByAiCost(limit = 10, now: Date = new Date()): Promise<AiTopOrgRow[]> {
+  const pdb = await getPlatformDb();
+  const cost = sql<string | null>`sum(${t.costUsd})`;
+  const rows = await pdb
+    .select({
+      orgCode: t.orgCode,
+      cost,
+      turns: sql<number>`count(*) filter (where ${used})`,
+      unknown: sql<number>`count(*) filter (where ${used} and ${t.costUsd} is null)`,
+      blocked: sql<number>`count(*) filter (where ${t.status} = 'BLOCKED_QUOTA')`,
+      sources: sql<string>`string_agg(distinct ${t.billingSource}, ',')`,
+    })
+    .from(t)
+    .where(gte(t.at, monthStartVN(now)))
+    .groupBy(t.orgCode)
+    .orderBy(sql`${cost} desc nulls last`, t.orgCode)
+    .limit(Math.max(1, Math.min(100, limit)));
+  return rows.map((r) => ({
+    orgCode: r.orgCode,
+    costUsd: r.cost === null ? null : Number(r.cost),
+    turns: Number(r.turns),
+    unknownCost: Number(r.unknown),
+    blocked: Number(r.blocked),
+    sources: String(r.sources ?? "").split(",").filter(Boolean) as AiBillingSource[],
+  }));
+}
