@@ -6,6 +6,7 @@ import { schema, type Db } from "@/db";
 import { CREATIVE_CONFIG_KEY, DEFAULT_CREATIVE_CONFIG, normalizeCreativeConfig } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
+import { COPY_DEFAULT_FORMULAS, COPY_FORMULAS, COPY_FORMULA_KEYS, normalizeFormulas } from "@/lib/constants/copy-formulas";
 import { CAPTION_FALLBACK_PREFIX, CAPTION_ROUTE, captionFromImage, finalizeCaption, parseCaptionAnswer, type CaptionInput, type VariantCaptioner } from "@/lib/creative/caption";
 import { copyEditBlocker, priceWarnings, saveVariantCopyCore, suggestVariantCopyCore } from "@/lib/creative/copy-edit";
 import { buildBatch } from "@/lib/creative/generate";
@@ -181,6 +182,32 @@ async function testCaption(db: Db, startedAt: Date) {
   const f3 = (async () => responses(200, { seen: "", options: [opt("Đồng giá 499K", "Đồng giá 499K cả nhà ơi")] })) as typeof fetch;
   const r3 = await captionFromImage(db, { ...input, product: { ...input.product, priceVnd: null } }, { apiKey: "sk-test-FAKE", fetchImpl: f3 });
   assert.ok(r3.ok && findPriceMentions(`${r3.headline} ${r3.primaryText}`).length === 0);
+
+  // CÔNG THỨC + KHÔNG GHI GIÁ (chủ shop 29/09/2026): mỗi phương án một công thức, đúng thứ tự; giá ERP KHÔNG tới mô hình; con số
+  // giá lọt vào ⇒ viết lại một lần ⇒ còn thì bỏ — dù giá ERP có thật.
+  const fBodies: string[] = [];
+  const fAnswers = [
+    { seen: "Đầm xanh", options: [opt("Đi tiệc mặc gì?", "Đi tiệc mặc gì cho nổi? Giá chỉ 299k"), opt("Hết lo quê", "Sợ mặc đi tiệc bị quê?"), opt("Chiều thứ bảy", "Chiều thứ bảy hẹn bạn")] },
+    { seen: "Đầm xanh", options: [opt("Đi tiệc mặc gì?", "Đi tiệc mặc gì cho nổi? Giá chỉ 299k"), opt("Hết lo quê", "Sợ mặc đi tiệc bị quê?"), opt("Chiều thứ bảy", "Chiều thứ bảy hẹn bạn")] },
+  ];
+  const fF = (async (_u: string | URL | Request, init?: RequestInit) => {
+    fBodies.push(String(init?.body ?? ""));
+    return responses(200, fAnswers[Math.min(fBodies.length - 1, 1)]);
+  }) as typeof fetch;
+  const rf = await captionFromImage(db, { ...input, formulas: ["HOOK_QUESTION", "PAS", "STORY"], noPrice: true }, { apiKey: "sk-test-FAKE", fetchImpl: fF });
+  assert.ok(rf.ok, JSON.stringify(rf));
+  assert.match(fBodies[0], /Viết 3 phương án/);
+  assert.ok(fBodies[0].includes(COPY_FORMULAS.PAS.instruction.slice(0, 40)) && fBodies[0].includes(COPY_FORMULAS.STORY.label), "lời dặn công thức tới mô hình");
+  assert.ok(fBodies[0].includes("KHÔNG GHI GIÁ") && !fBodies[0].includes("299.000đ"), "không ghi giá ⇒ giá ERP không tới mô hình");
+  assert.equal(fBodies.length, 2, "con số giá trong chế độ không ghi giá ⇒ viết lại một lần");
+  if (rf.ok) {
+    assert.deepEqual(rf.options.map((o) => o.formula), ["HOOK_QUESTION", "PAS", "STORY"], "phương án gắn đúng công thức theo thứ tự");
+    assert.ok(rf.priceStripped);
+    assert.deepEqual(findPriceMentions(rf.options.map((o) => `${o.headline} ${o.primaryText}`).join(" ")), [], "không còn con số giá nào");
+  }
+  assert.deepEqual(normalizeFormulas(["PAS", "PAS", "LA", "AIDA", "BAB", "FAB", "STORY"]), ["PAS", "AIDA", "BAB", "FAB"], "lạ / trùng bỏ, tối đa 4");
+  assert.deepEqual(normalizeFormulas([]), COPY_DEFAULT_FORMULAS, "rỗng ⇒ mặc định");
+  for (const k of COPY_FORMULA_KEYS) assert.ok(!/\d+\s*(k|đ|nghìn|triệu)(?![\p{L}])/iu.test(COPY_FORMULAS[k].instruction), `${k}: lời dặn không gợi con số giá`);
 
   // Lỗi ⇒ { ok:false }, không ném.
   const throwing = (async () => {

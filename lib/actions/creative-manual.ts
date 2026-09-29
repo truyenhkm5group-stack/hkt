@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { addUploadedDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, writeCopyOptions } from "@/lib/creative/manual-gen";
 import { priceWarnings } from "@/lib/creative/copy-edit";
 import { loadProductBrief } from "@/lib/queries/creative-plan";
 import { manualCreativeInputSchema } from "@/lib/validation/creative";
@@ -22,7 +22,7 @@ import { manualCreativeInputSchema } from "@/lib/validation/creative";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
-export async function addManualCreative(input: unknown): Promise<Result<{ imageId: string; warnings: string[] }>> {
+export async function addManualCreative(input: unknown): Promise<Result<{ imageId: string; warnings: string[]; aiError: string | null }>> {
   const user = await requireUser();
   if (!can(user, "ideas:write")) return { error: "Bạn không có quyền tải mẫu vào vòng mẫu" };
   const parsed = manualCreativeInputSchema.safeParse(input);
@@ -44,6 +44,13 @@ export async function addManualCreative(input: unknown): Promise<Result<{ imageI
   );
   if (!r.ok) return { error: r.error };
 
+  // AI viết content theo ảnh (không ghi giá) — hỏng thì mẫu VẪN vào hàng đợi, người gõ tay trong hộp soạn bài.
+  let aiError: string | null = null;
+  if (d.aiWrite) {
+    const w = await writeCopyOptions(db, r.imageId, { formulas: d.aiFormulas, noPrice: true, persistFirst: true }, new Date());
+    if (!w.ok) aiError = w.error;
+  }
+
   // Giá trong câu chữ khác giá ERP: KHÔNG chặn (người viết có thể đang chạy giá khuyến mãi) nhưng
   // phải nói ra — câu chữ máy viết thì bị ép đúng giá, câu chữ người viết thì người tự chịu.
   const warnings = priceWarnings(`${d.headline}\n${d.primaryText}`, product.priceVnd);
@@ -54,8 +61,8 @@ export async function addManualCreative(input: unknown): Promise<Result<{ imageI
     action: "CREATIVE_MANUAL_ADD",
     entity: "CREATIVE_MANUAL_GEN_IMAGE",
     entityId: r.imageId,
-    after: { genId: r.genId, productId: d.productId, genes: d.genes, queued: true, warnings },
+    after: { genId: r.genId, productId: d.productId, genes: d.genes, queued: true, warnings, aiWrite: d.aiWrite, aiFormulas: d.aiFormulas, aiError },
   });
   revalidatePath("/marketing/creatives");
-  return { ok: true, imageId: r.imageId, warnings };
+  return { ok: true, imageId: r.imageId, warnings, aiError };
 }

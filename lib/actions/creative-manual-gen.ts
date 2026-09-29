@@ -8,11 +8,11 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, publishManualGenImageInstant, republishVariantInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
+import { writeCopyOptions, captionManualGenImage, drawManualGen, publishManualGenImageInstant, republishVariantInstant, startManualEdit, reviewManualGenImage, requeueFailedManualGenImage, saveManualGenDraft, startManualDesignGen, startManualGen, unqueueManualGenDraft, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { searchAdGeoLocations, type GeoSearchHit } from "@/lib/integrations/facebook/ads-write";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { loadManualGenImagePrompt } from "@/lib/queries/creative-manual-gen";
-import { creativeRepublishSchema, manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { copyOptionsSchema, creativeRepublishSchema, manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 import { bindOrganization } from "@/lib/platform/background";
 
 /**
@@ -327,4 +327,15 @@ export async function republishVariantAction(raw: unknown): Promise<{ ok: true; 
   });
   revalidatePath(PATH);
   return { ok: true, outcome: r.outcome, detail: r.detail, names: r.names };
+}
+
+/** "AI viết theo công thức" — N phương án (mỗi phương án một công thức), mặc định không ghi giá. Chỉ trả phương án, không lưu. */
+export async function writeCopyOptionsAction(raw: unknown): Promise<{ ok: true; options: { headline: string; primaryText: string; formula?: string }[]; priceStripped: boolean } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Bạn không có quyền soạn bài" };
+  const parsed = copyOptionsSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const r = await writeCopyOptions(await getDb(), parsed.data.imageId, { formulas: parsed.data.formulas, noPrice: parsed.data.noPrice }, new Date());
+  if (!r.ok) return { error: r.error };
+  return { ok: true, options: r.options, priceStripped: r.priceStripped };
 }
