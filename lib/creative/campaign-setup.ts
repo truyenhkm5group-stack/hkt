@@ -1,4 +1,4 @@
-import type { CampaignSetup } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_BID_STRATEGY, bidNeedsAmount, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import type { TemplateAd } from "@/lib/integrations/facebook/ads-write";
 
 /**
@@ -27,7 +27,8 @@ function clone<T>(v: T): T {
 
 const norm = (id: string | null | undefined) => (id ?? "").replace(/^act_/, "").trim();
 
-export function applyCampaignSetup(t: TemplateAd, s: CampaignSetup): TemplateAd {
+/** `toMinor` quy VND (giới hạn giá thầu) sang đơn vị nhỏ nhất của tiền tài khoản — nơi đăng truyền `vndToFbMinor(·, currency)`; hàm vẫn THUẦN. */
+export function applyCampaignSetup(t: TemplateAd, s: CampaignSetup, toMinor: (vnd: number) => number = (vnd) => vnd): TemplateAd {
   const out = clone(t);
   const targeting: Record<string, unknown> = { ...(out.adset.targeting ?? {}) };
 
@@ -93,6 +94,11 @@ export function applyCampaignSetup(t: TemplateAd, s: CampaignSetup): TemplateAd 
       out.adset.bidStrategy = "LOWEST_COST_WITHOUT_CAP";
       out.adset.bidAmount = null;
     }
+  }
+  // Giá thầu người chọn đứng CUỐI — thắng mọi lần "về giá tự động" ở trên (đó chỉ là mặc định khi người không chọn gì).
+  if (s.bid) {
+    out.adset.bidStrategy = CAMPAIGN_BID_STRATEGY[s.bid];
+    out.adset.bidAmount = bidNeedsAmount(s.bid) && s.bidAmountVnd !== null ? String(toMinor(s.bidAmountVnd)) : null;
   }
   return out;
 }

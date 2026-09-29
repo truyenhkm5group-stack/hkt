@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { loadManualGenPromptAction, publishManualGenImageNowAction, republishVariantAction, recaptionManualGenImage, requeueFailedManualGenImageAction, reviewManualGenImageAction, saveManualGenDraftAction, searchGeoAction, startManualEditRun, unqueueManualGenDraftAction } from "@/lib/actions/creative-manual-gen";
-import { CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_BIDS, CAMPAIGN_BID_LABEL, bidNeedsAmount, type CampaignBid, CAMPAIGN_GENDERS, CAMPAIGN_GENDER_LABEL, CAMPAIGN_OBJECTIVES, CAMPAIGN_OBJECTIVE_LABEL, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, PERFORMANCE_GOAL_LABEL, campaignKindLabel, describeCampaignSetup, pickMarketerOption, rewriteCampaignName, setupBidStrategy, setupOptimizationGoal, type PerformanceGoal, type CampaignNameKnown, type CampaignNameParts, type CampaignSetup, type GeoSearchHit, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import {
   CREATIVE_HARD_LIMITS,
   DESIGN_DNA_KEYS,
@@ -24,7 +24,7 @@ import {
   DESIGN_DNA_VALUE_LABEL,
   MANUAL_GEN_IMAGE_STATUS_LABEL,
   MANUAL_GEN_RUN,
-  adsetNameForGoal,
+  adsetNameFor,
   type ImageEditLayout,
   type ManualGenImageStatus,
 } from "@/lib/constants/creative-loop";
@@ -502,7 +502,7 @@ function autoNamesFor(ctx: ComposeCtx, setup: CampaignSetup, win: ProductWinCode
   const d = ctx.canPublish ? ctx.campDefaults : ctx.defaults;
   const to = namePartsOf(ctx, setup, win);
   const known = nameKnownOf(ctx, win);
-  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameForGoal(d.adset, setupOptimizationGoal(setup)), ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
+  return { campaign: rewriteCampaignName(d.campaign, to, known), adset: adsetNameFor(d.adset, setupOptimizationGoal(setup), setupBidStrategy(setup)), ad: rewriteCampaignName(d.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) };
 }
 
 /** Phần tên mà setup quyết định: tên TKQC · mã MKTer · TEST / mã win · tên fanpage — cùng khuôn máy chủ ghép lúc đăng. */
@@ -563,7 +563,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     // Tên đã lưu đi cùng setup đã lưu: ghép lại một lượt để tên nói đúng MKTer / TKQC / fanpage / loại camp đang chọn.
     const to0 = namePartsOf(ctx, s0, img.winCode);
     const known0 = nameKnownOf(ctx, img.winCode);
-    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName ? adsetNameForGoal(img.adsetName, setupOptimizationGoal(s0)) : "", ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
+    setNames({ campaign: img.campaignName ? rewriteCampaignName(img.campaignName, to0, known0) : "", adset: img.adsetName ? adsetNameFor(img.adsetName, setupOptimizationGoal(s0), setupBidStrategy(s0)) : "", ad: img.adName ? rewriteCampaignName(img.adName, { ...to0, marketerCode: null }, { ...known0, marketerCodes: [] }) : "" });
     setHen(conHen);
     setHenLuc(vnLocalInput(conHen && luuHen ? luuHen : new Date(Date.now() + 60 * 60_000)));
     setDaLuu(null);
@@ -578,7 +578,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
     const known = nameKnownOf(ctx, img.winCode);
     setNames((cur) => ({
       campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
-      adset: cur.adset ? adsetNameForGoal(cur.adset, setupOptimizationGoal(next)) : "",
+      adset: cur.adset ? adsetNameFor(cur.adset, setupOptimizationGoal(next), setupBidStrategy(next)) : "",
       ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
     }));
   };
@@ -926,6 +926,42 @@ function SetupFields({ value, onChange, options, winCode, ranked, children }: { 
             <span className="block text-muted-foreground">Facebook chỉ nhận khi page đã gửi đủ sự kiện mua qua tin nhắn (≥ 5 / 30 ngày) — không đủ thì bước tạo nhóm báo lỗi, camp chưa chạy.</span>
           ) : null}
         </label>
+        <div className="space-y-0.5 text-[11.5px]">
+          <label htmlFor={`bid-${value.adAccountId}-${value.pageId}`}>Giá thầu</label>
+          <div className="flex gap-1.5">
+            <select
+              id={`bid-${value.adAccountId}-${value.pageId}`}
+              className={sel}
+              value={value.bid ?? ""}
+              onChange={(e) => {
+                const bid = (CAMPAIGN_BIDS as readonly string[]).includes(e.target.value) ? (e.target.value as CampaignBid) : null;
+                set({ bid, bidAmountVnd: bidNeedsAmount(bid) ? (value.bidAmountVnd ?? null) : null });
+              }}
+            >
+              <option value="">Như mẫu{tpl?.bid ? ` (${tpl.bid})` : ""}</option>
+              {CAMPAIGN_BIDS.map((k) => (
+                <option key={k} value={k}>
+                  {CAMPAIGN_BID_LABEL[k]}
+                </option>
+              ))}
+            </select>
+            {bidNeedsAmount(value.bid) ? (
+              <Input
+                type="number"
+                min={CAMPAIGN_SETUP_LIMITS.minBidVnd}
+                max={value.budgetVnd}
+                step={1_000}
+                value={value.bidAmountVnd ?? ""}
+                placeholder="VND / kết quả"
+                aria-label="Con số giới hạn giá thầu (VND / kết quả)"
+                onChange={(e) => set({ bidAmountVnd: e.target.value === "" ? null : Math.round(Number(e.target.value) || 0) })}
+                className="h-8 w-32 text-[12.5px]"
+              />
+            ) : null}
+          </div>
+          {value.bid === "BID_CAP" ? <span className="block text-muted-foreground">Trần giá mỗi lượt đấu thầu — đặt thấp thì Facebook phân phối ít, có ngày không tiêu hết ngân sách.</span> : null}
+          {value.bid === "COST_CAP" ? <span className="block text-muted-foreground">Facebook giữ chi phí TRUNG BÌNH mỗi kết quả quanh con số này (vd giá mỗi tin nhắn).</span> : null}
+        </div>
         <label className="space-y-0.5 text-[11.5px]">
           Ngân sách ngày (tối đa {formatVND(cap)}/ngày)
           <Input type="number" min={CAMPAIGN_SETUP_LIMITS.minBudgetVnd} max={cap} step={10_000} value={value.budgetVnd} onChange={(e) => set({ budgetVnd: Math.round(Number(e.target.value) || 0) })} className="h-8 text-[12.5px]" />
@@ -1131,7 +1167,7 @@ export function RepublishButton({ v, ctx, winCode }: { v: RepublishSource; ctx: 
     const known = nameKnownOf(ctx, wc);
     setNames((cur) => ({
       campaign: cur.campaign ? rewriteCampaignName(cur.campaign, to, known) : "",
-      adset: cur.adset ? adsetNameForGoal(cur.adset, setupOptimizationGoal(next)) : "",
+      adset: cur.adset ? adsetNameFor(cur.adset, setupOptimizationGoal(next), setupBidStrategy(next)) : "",
       ad: cur.ad ? rewriteCampaignName(cur.ad, { ...to, marketerCode: null }, { ...known, marketerCodes: [] }) : "",
     }));
   };

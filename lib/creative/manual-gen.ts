@@ -14,7 +14,7 @@ import {
   MANUAL_DESIGN,
   MANUAL_GEN,
   MANUAL_GEN_RUN,
-  adsetNameForGoal,
+  adsetNameFor,
   describeImageEdit,
   designCode,
   hasImageEdit,
@@ -30,7 +30,7 @@ import {
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
 import { PRESERVE_PRODUCT_RECOLOR_CLAUSE, applyStyleGenes, normalizeStudioOptions, planStudioCells, studioDirectives, studioProblem, studioTotal, type StudioCell, type StudioOptions } from "@/lib/constants/creative-studio";
-import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupBidStrategy, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
@@ -931,6 +931,8 @@ export type PromoteInput = {
   marketerCode?: string | null;
   /** Phần giữa tên theo loại camp: "TEST" hoặc mã win (máy chủ tính từ mã hàng của ảnh). Vắng ⇒ "TEST". */
   kindLabel?: string;
+  /** `bid_strategy` nhóm thật sẽ mang (`setupBidStrategy`) — đổi đoạn cuối tên nhóm theo khuôn. Vắng / `null` = như mẫu. */
+  adsetBid?: string | null;
   /** Mục tiêu tối ưu nhóm thật sẽ mang (`setupOptimizationGoal`) — đổi đoạn đầu tên nhóm theo khuôn. Vắng / `null` = như mẫu. */
   adsetGoal?: string | null;
 };
@@ -1053,13 +1055,13 @@ async function insertImageVariant(tx: Tx, x: ReadyImage, input: PromoteInput, cf
  * Ba tên theo khuôn của MỘT bài trong lô `batch` (số thứ tự theo NGÀY với lô `INSTANT`, theo lô với lô hằng ngày) — tên người
  * đã sửa thắng, tên còn nguyên chữ theo khuôn ⇒ máy đặt đúng số thật lúc ghi. Dùng chung cho ảnh gen tay và "Đăng lại camp".
  */
-async function batchNames(db: Db, batch: typeof schema.creativeBatches.$inferSelect, input: Pick<PromoteInput, "names" | "predictedSeq" | "marketerCode" | "kindLabel" | "adsetGoal">) {
+async function batchNames(db: Db, batch: typeof schema.creativeBatches.$inferSelect, input: Pick<PromoteInput, "names" | "predictedSeq" | "marketerCode" | "kindLabel" | "adsetGoal" | "adsetBid">) {
   const seq = batch.kind === "INSTANT" ? await nextNameSeqOnDay(db, batch.batchDay) : await nextNameSeq(db, batch.id);
   const ctx = await loadNamingContext(db, normalizeCreativeConfig(batch.configSnapshot).config);
   const mk = input.marketerCode ?? null;
   const kind = input.kindLabel ?? "TEST";
   const goal = input.adsetGoal ?? null;
-  const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameForGoal(n.adset, goal) });
+  const withGoal = (n: DefaultNames): DefaultNames => ({ ...n, adset: adsetNameFor(n.adset, goal, input.adsetBid ?? null) });
   const d = withGoal(defaultNames(ctx, batch.batchDay, seq, "IMAGE", mk, kind));
   const p = input.predictedSeq !== null && input.predictedSeq !== seq ? withGoal(defaultNames(ctx, batch.batchDay, input.predictedSeq, "IMAGE", mk, kind)) : null;
   const names = { campaign: pickName(input.names.campaign, d.campaign, p?.campaign ?? null), adset: pickName(input.names.adset, d.adset, p?.adset ?? null), ad: pickName(input.names.ad, d.ad, p?.ad ?? null) };
@@ -1253,7 +1255,7 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           ruleVersion: CREATIVE_RULE_VERSION,
         })
         .returning();
-      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setup ? setupOptimizationGoal(setup) : null }, cfg, actor, now, batch);
+      const ins = await insertImageVariant(tx, x, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setup ? setupOptimizationGoal(setup) : null, adsetBid: setup ? setupBidStrategy(setup) : null }, cfg, actor, now, batch);
       if (!ins.ok) throw new InstantAbort(ins.error);
       const winProblem = win ? winNameProblem(ins.names.campaign, win, codeIndex) : null;
       if (winProblem) throw new InstantAbort(winProblem);
@@ -1465,7 +1467,7 @@ export async function republishVariantInstant(db: Db, input: RepublishInput, bas
           extra: { imagePrompt: v.imagePrompt, productPhotoSourceId: v.productPhotoSourceId, inspirationSourceId: v.inspirationSourceId },
           design: v.designConceptId ? async () => ({ designConceptId: v.designConceptId as string, why: `Đăng lại mẫu #${v.slot} (lô ${src.batchDay}) — cùng thiết kế — ${actor.name}` }) : undefined,
           names: async (b) => {
-            const n = await batchNames(t, b, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setupOptimizationGoal(setup) });
+            const n = await batchNames(t, b, { ...input, marketerCode: marketer?.code ?? null, kindLabel: win?.code ?? "TEST", adsetGoal: setupOptimizationGoal(setup), adsetBid: setupBidStrategy(setup) });
             names = n.names;
             return n.row;
           },

@@ -3,7 +3,7 @@ import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup, type Marke
 import { productWinCodes } from "@/lib/creative/win-code";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
-import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
+import { BID_STRATEGY_LABEL, CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
@@ -438,7 +438,7 @@ export type CampaignSetupOptions = {
   configAccountId: string;
   configPageId: string;
   /** Quảng cáo mẫu đang nhắm gì (đọc từ bản đệm cài đặt nhóm mẫu) — để ô "như mẫu" nói ra cụ thể. `null` = chưa đọc được. */
-  template: { geo: string; age: string; gender: string; optimizationGoal: string | null } | null;
+  template: { geo: string; age: string; gender: string; optimizationGoal: string | null; bid: string | null } | null;
 };
 
 /**
@@ -588,8 +588,8 @@ export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccou
     marketers: marketerOptions(employees),
     configAccountId: cfg.adAccountId.replace(/^act_/, ""),
     configPageId: cfg.pageId,
-    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], performanceGoal: null, budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" },
-    template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], performanceGoal: null, budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST", bid: null, bidAmountVnd: null },
+    template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal, bid: tpl.bidStrategy ? (BID_STRATEGY_LABEL[tpl.bidStrategy] ?? tpl.bidStrategy) : null } : null,
   };
 }
 

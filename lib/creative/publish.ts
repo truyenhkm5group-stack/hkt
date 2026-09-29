@@ -413,7 +413,7 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
     }
     // Lô "Đăng camp" mang setup người đã chọn (TKQC · fanpage · mục tiêu · vị trí · tuổi · giới tính) — áp lên mẫu MỘT lần.
     const setup = parseCampaignSetup((b.plan as Record<string, unknown> | null)?.setup);
-    if (setup) template = applyCampaignSetup(template, setup);
+    if (setup) template = applyCampaignSetup(template, setup, (vnd) => vndToFbMinor(vnd, config.currency));
     // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào.
     const shape = templateShapeError(template, config.pageId, pending.some(needsOwnCampaign));
     if (shape) {

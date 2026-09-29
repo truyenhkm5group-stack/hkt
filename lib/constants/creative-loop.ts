@@ -1449,6 +1449,22 @@ export function adsetNameForGoal(name: string, goal: string | null): string {
   return segs.join("_");
 }
 
+/**
+ * TÊN NHÓM THEO MỤC TIÊU + GIÁ THẦU ĐANG CHỌN (chủ shop 29/09/2026: "sync tên chiến dịch, nhóm, quảng cáo theo rules") — hàm
+ * THUẦN. Sau `adsetNameForGoal`, đoạn cuối giá thầu đổi theo chiến lược người chọn (`autobid` · `bidcap` · `costcap`).
+ * `bidStrategy = null` (giá thầu như mẫu) ⇒ chỉ đổi theo mục tiêu. Đoạn cuối không phải nhãn giá thầu (tên người gõ) ⇒ giữ nguyên.
+ */
+export function adsetNameFor(name: string, goal: string | null, bidStrategy: string | null): string {
+  const byGoal = adsetNameForGoal(name, goal);
+  if (!bidStrategy) return byGoal;
+  const segs = byGoal.split("_");
+  const last = segs.length - 1;
+  const label = BID_STRATEGY_LABEL[bidStrategy];
+  if (last <= 0 || !label || !Object.values(BID_STRATEGY_LABEL).includes(segs[last])) return byGoal;
+  segs[last] = label;
+  return segs.join("_");
+}
+
 /** `targeting.genders`: 1 = nam, 2 = nữ; vắng / rỗng / cả hai = mọi giới tính. */
 export const GENDER_LABEL: Readonly<Record<string, string>> = { "1": "Nam", "2": "Nữ", ALL: "All" };
 
