@@ -62,7 +62,7 @@ export async function CreateStep({ canEdit, canPublish = false, preselectProduct
             <Wand2 className="size-4" /> Gen ảnh bằng máy <ManualGenAutoRefresh active={p.drawing} /> <SpendPill p={p} />
           </span>
         }
-        description="Chọn kiểu tạo → nguồn → kiểu ảnh, biến thể màu, khổ, chất lượng → ý tưởng. Cột phải cho biết trước số ảnh và tiền ước tính. Ảnh vẽ xong hiện ngay bên dưới và ở ② Duyệt ảnh."
+description={undefined}
         hint={
           <>
             Giá ước tính mỗi ảnh theo model {pr.model} và ĐÚNG khổ + chất lượng bạn chọn (mặc định của cấu hình: {pr.quality} · {pr.size} ~{formatVND(pr.unitVnd)}; tỷ giá {formatNumber(pr.usdToVnd)} ₫/USD). Tiền từng ảnh là tiền THẬT máy vẽ báo về; ảnh không có giá hiện “—” và

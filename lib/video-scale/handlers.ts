@@ -33,6 +33,7 @@ import {
 } from "@/lib/constants/video-scale";
 import { readCreativeImage } from "@/lib/creative/images";
 import { env } from "@/lib/env";
+import { SHOWCASE, normalizeShowcase, showcaseLabel } from "@/lib/constants/video-scale-colors";
 import { loadProductFacts } from "@/lib/video-scale/facts";
 import { buildRenderArgs, frameArgs, photoMotionArgs, probeFile, qcFrameTimes, resolveFontFile, runTool, type MediaProbe, type RenderTextStyle } from "@/lib/video-scale/ffmpeg";
 import { planAngles } from "@/lib/video-scale/plan";
@@ -477,7 +478,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
   const clipByScene = new Map<number, (typeof inputs)[number]>();
   for (const x of inputs) if (x.kind === "CLIP" && x.assetId) clipByScene.set(x.sceneIndex ?? 0, x);
   const clips = [...clipByScene.values()].sort((a, b) => (a.sceneIndex ?? 0) - (b.sceneIndex ?? 0));
-  const eff = effectiveRender(snap, run.musicId, normalizeRenderOptions(variant.renderOptions));
+  const eff = effectiveRender(snap, run.musicId, normalizeRenderOptions(variant.renderOptions), normalizeShowcase(run.showcase) ?? []);
   if (clips.length !== script.scenes.length) return void (await failOrRetryJob(db, job, now, `Thiếu clip: có ${clips.length}/${script.scenes.length} cảnh.`, "PERMANENT"));
   // Thứ tự cảnh do người sắp (bỏ một cảnh = không có trong danh sách). Chỉ số lạ ⇒ thứ tự gốc, không đoán.
   const order = eff.sceneOrder && eff.sceneOrder.every((i) => i < clips.length) ? eff.sceneOrder : clips.map((_, i) => i);
@@ -497,6 +498,26 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
         await writeFile(f, a.bytes);
         const p = await probeFile(f);
         clipFiles.push({ file: f, durationSec: p.durationSec ?? snap.clipSeconds, hasAudio: p.hasAudio });
+      }
+      // ĐOẠN BẢNG MÀU: mỗi màu một ảnh sản phẩm THẬT (đọc qua `loadSourceImage` — đúng loại, đúng mã), chuyển động nhẹ bằng
+      // ffmpeg, chữ "Màu …" là tên màu ERP. Ảnh đã mất ⇒ bỏ ĐÚNG màu ấy và ghi vào kết quả việc (không làm hỏng cả video).
+      const showScenes: { overlay: string; subtitle: string; voice: null }[] = [];
+      const showSkipped: string[] = [];
+      for (const [k, it] of eff.showcase.entries()) {
+        const img = await loadSourceImage(db, it.sourceId, variant.productId);
+        if (typeof img === "string") {
+          showSkipped.push(`${it.color}: ${img}`);
+          continue;
+        }
+        const ext = img.contentType.includes("png") ? "png" : img.contentType.includes("webp") ? "webp" : "jpg";
+        const src = path.join(dir, `sc${k}.${ext}`);
+        const f = path.join(dir, `sc${k}.mp4`);
+        await writeFile(src, img.bytes);
+        const r = await runTool(env.videoScale.ffmpegPath, photoMotionArgs(src, SHOWCASE.secondsPerColor, size.width, size.height, f, k), { timeoutMs: 120_000 });
+        if (r.code !== 0) throw new ProviderError(`ffmpeg dựng ô bảng màu "${it.color}" hỏng: ${r.stderr.slice(-300)}`, "TRANSIENT");
+        const p = await probeFile(f);
+        clipFiles.push({ file: f, durationSec: p.durationSec ?? SHOWCASE.secondsPerColor, hasAudio: p.hasAudio });
+        showScenes.push({ overlay: showcaseLabel(it.color), subtitle: "", voice: null });
       }
       const voices = new Map<number, { file: string; durationSec: number }>();
       // Giọng tự thu cho cả video THAY giọng đọc AI từng cảnh — trộn cả hai là hai người nói cùng lúc.
@@ -530,7 +551,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       }
       const plan = buildRenderArgs({
         clips: clipFiles,
-        scenes: order.map((i) => ({ overlay: script.scenes[i].overlay, subtitle: script.scenes[i].voiceover, voice: voices.get(i) ?? null })),
+        scenes: [...order.map((i) => ({ overlay: script.scenes[i].overlay, subtitle: script.scenes[i].voiceover, voice: voices.get(i) ?? null })), ...showScenes],
         hook: script.hook,
         cta: script.cta,
         music,
@@ -555,7 +576,9 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       const bytes = await readFile(out);
       const t2 = await runTool(env.videoScale.ffmpegPath, frameArgs(out, Math.min(1.2, (probe.durationSec ?? 2) / 2), path.join(dir, "thumb.jpg")), { timeoutMs: 60_000 });
       const thumb = t2.code === 0 ? await readFile(path.join(dir, "thumb.jpg")) : null;
-      return { bytes, probe, thumb, plannedSec: plan.totalSec };
+      // Mốc bắt đầu đoạn bảng màu = hết đoạn mở đầu: QC hình ảnh chỉ cắt khung TRƯỚC mốc này.
+      const introSec = showScenes.length ? plan.sceneStarts[order.length] : plan.totalSec;
+      return { bytes, probe, thumb, plannedSec: plan.totalSec, introSec, showcase: showScenes.length, showSkipped };
     });
     const finalAsset = await storeAsset(db, {
       kind: "FINAL",
@@ -574,7 +597,7 @@ export async function handleRender(ctx: HandlerCtx, job: VideoJobRow): Promise<v
       .set({ status: "QC", finalAssetId: finalAsset.id, thumbnailAssetId: thumbAsset?.id ?? null, durationMs: result.probe.durationSec ? Math.round(result.probe.durationSec * 1000) : null, error: "" })
       .where(eq(V.id, variant.id));
     await enqueueJob(db, { kind: "QC", key: `qc:${variant.id}:${finalAsset.id}`, runId: run.id, variantId: variant.id, isTest: run.isTest });
-    await succeedJob(db, job, now, { outputAssetId: finalAsset.id, result: { ffmpeg: version, bytes: finalAsset.bytes, durationSec: result.probe.durationSec, plannedSec: result.plannedSec } });
+    await succeedJob(db, job, now, { outputAssetId: finalAsset.id, result: { ffmpeg: version, bytes: finalAsset.bytes, durationSec: result.probe.durationSec, plannedSec: result.plannedSec, introSec: result.introSec, showcase: result.showcase, showSkipped: result.showSkipped } });
   } catch (e) {
     const pe = e instanceof ProviderError ? e : new ProviderError(e instanceof Error ? e.message : String(e), "TRANSIENT");
     await failOrRetryJob(db, job, now, pe.message, pe.kind === "AMBIGUOUS" ? "TRANSIENT" : pe.kind);
@@ -608,12 +631,20 @@ export async function handleQc(ctx: HandlerCtx, job: VideoJobRow): Promise<void>
   try {
     const final = await readAsset(db, variant.finalAssetId);
     if (!final) throw new ProviderError("Bản hoàn chỉnh không còn trong kho.", "PERMANENT");
+    // Đoạn BẢNG MÀU (ảnh thật từng màu) không do máy sinh vẽ và cố ý khác màu ảnh gốc — QC hình ảnh chỉ cắt khung đoạn mở đầu.
+    const [rjIntro] = await db
+      .select({ intro: sql<string | null>`(${J.result}->>'introSec')` })
+      .from(J)
+      .where(and(eq(J.variantId, variant.id), eq(J.kind, "RENDER"), eq(J.outputAssetId, variant.finalAssetId)))
+      .limit(1);
+    const introSec = Number(rjIntro?.intro ?? NaN);
     const { probe, frames } = await withTemp(async (dir) => {
       const f = path.join(dir, "final.mp4");
       await writeFile(f, final.bytes);
       const p = await probeFile(f);
       const out: Uint8Array[] = [];
-      for (const [i, t] of qcFrameTimes(p.durationSec ?? 0).entries()) {
+      const span = Number.isFinite(introSec) && introSec > 0 ? Math.min(introSec, p.durationSec ?? introSec) : (p.durationSec ?? 0);
+      for (const [i, t] of qcFrameTimes(span).entries()) {
         const fr = path.join(dir, `f${i}.jpg`);
         const r = await runTool(env.videoScale.ffmpegPath, frameArgs(f, t, fr, 640), { timeoutMs: 60_000 });
         if (r.code === 0) out.push(new Uint8Array(await readFile(fr)));

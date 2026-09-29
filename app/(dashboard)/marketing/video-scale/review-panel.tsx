@@ -19,66 +19,88 @@ type Qc = {
 
 function QcBlock({ v }: { v: VariantCard }) {
   const qc = v.qc as Qc;
+  const bad = (qc.visual?.checks ?? []).filter((c) => c.result !== "PASS");
   return (
     <div className="space-y-1 text-[12.5px]">
-      {v.qcVerdict ? (
-        <Badge variant={v.qcVerdict === "FAIL" ? "destructive" : v.qcVerdict === "FLAG" ? "secondary" : "outline"}>{VERDICT_LABEL[v.qcVerdict]}</Badge>
-      ) : null}
-      {qc.technical?.problems?.length ? <p className="text-destructive">Kỹ thuật: {qc.technical.problems.join("; ")}</p> : qc.technical ? <p className="text-muted-foreground">Kỹ thuật: đạt (H.264, AAC 48 kHz, 9:16, độ dài đúng)</p> : null}
-      {qc.visual?.ran === false ? <p className="text-muted-foreground">QC hình ảnh chưa chạy: {qc.visual.reason}</p> : null}
-      {qc.visual?.checks?.length ? (
+      <p className="flex flex-wrap items-center gap-1.5">
+        {v.qcVerdict ? <Badge variant={v.qcVerdict === "FAIL" ? "destructive" : v.qcVerdict === "FLAG" ? "secondary" : "outline"}>{VERDICT_LABEL[v.qcVerdict]}</Badge> : null}
+        {qc.technical?.problems?.length ? <span className="text-destructive">Kỹ thuật: {qc.technical.problems.join("; ")}</span> : null}
+        {qc.visual?.ran === false ? <span className="text-muted-foreground">QC hình chưa chạy: {qc.visual.reason}</span> : null}
+      </p>
+      {bad.length ? (
         <ul className="space-y-0.5">
-          {qc.visual.checks.map((c) => (
-            <li key={c.check} className={cn(c.result === "FAIL" && "text-destructive", c.result === "UNSURE" && "text-amber-700 dark:text-amber-400")}>
-              {c.result === "PASS" ? "✓" : c.result === "FAIL" ? "✗" : "?"} {VIDEO_QC_CHECK_LABEL[c.check as VideoQcCheck] ?? c.check}: {c.note}
+          {bad.map((c) => (
+            <li key={c.check} className={cn(c.result === "FAIL" ? "text-destructive" : "text-amber-700 dark:text-amber-400")}>
+              {c.result === "FAIL" ? "✗" : "?"} {VIDEO_QC_CHECK_LABEL[c.check as VideoQcCheck] ?? c.check}: {c.note}
             </li>
           ))}
         </ul>
       ) : null}
-      {qc.visual?.summary ? <p className="text-muted-foreground">{qc.visual.summary}</p> : null}
+      {qc.visual?.checks?.length ? (
+        <details className="text-muted-foreground">
+          <summary className="cursor-pointer">Chi tiết QC ({qc.visual.checks.filter((c) => c.result === "PASS").length}/{qc.visual.checks.length} đạt)</summary>
+          <ul className="mt-1 space-y-0.5">
+            {qc.visual.checks.map((c) => (
+              <li key={c.check}>
+                {c.result === "PASS" ? "✓" : c.result === "FAIL" ? "✗" : "?"} {VIDEO_QC_CHECK_LABEL[c.check as VideoQcCheck] ?? c.check}: {c.note}
+              </li>
+            ))}
+          </ul>
+          {qc.visual.summary ? <p className="mt-1">{qc.visual.summary}</p> : null}
+        </details>
+      ) : null}
     </div>
   );
 }
 
 function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCard; canEdit: boolean; canSpend: boolean; pageLabel: string | null; music: { id: string; title: string; assetId: string }[] }) {
   return (
-    <article className="space-y-3 rounded-lg border p-3">
-      <header className="flex flex-wrap items-center gap-2 text-[13px]">
-        <span className="font-semibold">
-          {v.productName} #{v.seq}
-        </span>
-        <Badge variant="secondary">{isVideoAngle(v.angle) ? VIDEO_ANGLE_LABEL[v.angle] : v.angle}</Badge>
-        <Badge variant="outline">{VIDEO_VARIANT_STATUS_LABEL[v.status as VideoVariantStatus] ?? v.status}</Badge>
-        {v.isTest ? <Badge variant="destructive">DỮ LIỆU THỬ — không đăng</Badge> : null}
-        {v.durationMs ? <span className="text-muted-foreground">{(v.durationMs / 1000).toFixed(1)} giây</span> : null}
-      </header>
-      {/* So video với ảnh gốc: hai cột trên máy tính, chồng dọc trên điện thoại. */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <p className="mb-1 text-[12px] text-muted-foreground">Video</p>
+    <article className="rounded-lg border p-3">
+      {/* Gọn (29/09/2026): video cột trái, mọi thông tin + nút ở cột phải; ảnh gốc thu nhỏ để so nhanh. */}
+      <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+        <div className="space-y-1">
           {v.finalAssetId ? (
-            <video controls playsInline preload="metadata" poster={v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : undefined} className="aspect-[9/16] w-full max-w-xs rounded bg-black">
+            <video controls playsInline preload="metadata" poster={v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : undefined} className="aspect-[9/16] w-full max-w-[220px] rounded bg-black">
               <source src={`/api/video-scale/assets/${v.finalAssetId}`} type="video/mp4" />
             </video>
-          ) : null}
-          {v.finalAssetId ? (
-            <a href={`/api/video-scale/assets/${v.finalAssetId}`} download={`video-${v.seq}.mp4`} className="mt-1 inline-block text-[12px] text-primary underline underline-offset-2">
-              Tải video (mp4)
-            </a>
           ) : (
             <p className="text-[12.5px] text-muted-foreground">Chưa có bản hoàn chỉnh.</p>
           )}
+          {v.finalAssetId ? (
+            <a href={`/api/video-scale/assets/${v.finalAssetId}`} download={`video-${v.seq}.mp4`} className="text-[12px] text-primary underline underline-offset-2">
+              Tải mp4
+            </a>
+          ) : null}
         </div>
-        <div>
-          <p className="mb-1 text-[12px] text-muted-foreground">Ảnh gốc (sản phẩm thật)</p>
-          {v.sourceImageId ? (
-            // eslint-disable-next-line @next/next/no-img-element -- ảnh trong CSDL qua route có kiểm quyền
-            <img src={`/api/creative/images/${v.sourceImageId}`} alt="Ảnh sản phẩm gốc" className="aspect-[9/16] w-full max-w-xs rounded object-cover" loading="lazy" />
-          ) : (
-            <p className="text-[12.5px] text-muted-foreground">Không đọc được ảnh gốc.</p>
-          )}
-        </div>
-      </div>
+        <div className="min-w-0 space-y-2">
+          <header className="flex flex-wrap items-center gap-1.5 text-[13px]">
+            <span className="font-semibold">
+              {v.productName} #{v.seq}
+            </span>
+            <Badge variant="secondary">{isVideoAngle(v.angle) ? VIDEO_ANGLE_LABEL[v.angle] : v.angle}</Badge>
+            <Badge variant="outline">{VIDEO_VARIANT_STATUS_LABEL[v.status as VideoVariantStatus] ?? v.status}</Badge>
+            {v.isTest ? <Badge variant="destructive">DỮ LIỆU THỬ</Badge> : null}
+            {v.durationMs ? <span className="text-[12px] text-muted-foreground">{(v.durationMs / 1000).toFixed(1)} giây</span> : null}
+          </header>
+          <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted-foreground">
+            {v.sourceImageId ? (
+              <span className="flex items-center gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element -- ảnh trong CSDL qua route có kiểm quyền */}
+                <img src={`/api/creative/images/${v.sourceImageId}`} alt="Ảnh sản phẩm gốc" className="h-14 w-11 rounded object-cover" loading="lazy" />
+                ảnh gốc
+              </span>
+            ) : null}
+            {v.render.showcase.length ? (
+              <span className="flex flex-wrap items-center gap-1">
+                Bảng màu:
+                {v.render.showcase.map((x) => (
+                  <span key={x.sourceId} className="rounded bg-muted px-1.5 py-0.5 text-foreground">
+                    {x.color}
+                  </span>
+                ))}
+              </span>
+            ) : null}
+          </div>
       <QcBlock v={v} />
       <details className="text-[12.5px]">
         <summary className="cursor-pointer font-medium">Kịch bản</summary>
@@ -112,7 +134,7 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCa
       ) : null}
       {canEdit && v.status === "REVIEW" ? <ReviewActions variantId={v.id} /> : null}
       {canEdit && !v.isTest && !v.hasAd && (!v.post || ["FAILED", "CANCELLED"].includes(v.post.status)) && ["REVIEW", "APPROVED", "REJECTED", "QC_FAILED"].includes(v.status) ? (
-        <VideoEditor variantId={v.id} productId={v.productId} script={v.script} render={v.render} music={music} approved={v.status === "APPROVED"} sceneClips={v.sceneClips} posterUrl={v.sourceImageId ? `/api/creative/images/${v.sourceImageId}` : v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : null} />
+        <VideoEditor variantId={v.id} productId={v.productId} script={v.script} render={v.render} music={music} approved={v.status === "APPROVED"} sceneClips={v.sceneClips} showcaseOptions={v.showcaseOptions} posterUrl={v.sourceImageId ? `/api/creative/images/${v.sourceImageId}` : v.thumbnailAssetId ? `/api/video-scale/assets/${v.thumbnailAssetId}` : null} />
       ) : null}
       {v.post ? (
         <p className="text-[12.5px]">
@@ -130,6 +152,8 @@ function VariantBlock({ v, canEdit, canSpend, pageLabel, music }: { v: VariantCa
         <ContentEditor variantId={v.id} options={captionOptionsOf(v.captionOptions)} caption={v.caption} captionState={v.captionState} captionBy={v.captionBy} canPost={canEdit && Boolean(pageLabel)} pageLabel={pageLabel} />
       ) : null}
       {canSpend && (v.status === "QC_FAILED" || v.status === "REJECTED") ? <RemakeVariantButton variantId={v.id} /> : null}
+        </div>
+      </div>
     </article>
   );
 }

@@ -14,7 +14,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 };
 
 /** Tab "Mã win": mỗi mã một thẻ — ảnh, trạng thái khai, số ảnh gốc, số video theo bước, nút tạo chiến dịch media. */
-export function WinPanel({ products, runs, music, pages, accounts, canSpend, canEdit, canMode, canMoney, canEngage, canRelease, perVideoUsd = null, costNote = "" }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; accounts: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canMoney: boolean; canEngage: boolean; canRelease: boolean; perVideoUsd?: number | null; costNote?: string }) {
+export function WinPanel({ products, runs, music, pages, accounts, canSpend, canEdit, canMode, canMoney, canEngage, canRelease, perVideoUsd = null, costNote = "", introSeconds = null }: { products: WinProductRow[]; runs: RunRow[]; music: MusicRow[]; pages: { id: string; name: string }[]; accounts: { id: string; name: string }[]; canSpend: boolean; canEdit: boolean; canMode: boolean; canMoney: boolean; canEngage: boolean; canRelease: boolean; perVideoUsd?: number | null; costNote?: string; introSeconds?: number | null }) {
   return (
     <div className="space-y-5">
       {products.length === 0 ? (
@@ -34,6 +34,7 @@ export function WinPanel({ products, runs, music, pages, accounts, canSpend, can
           canRelease={canRelease}
           perVideoUsd={perVideoUsd}
           costNote={costNote}
+          introSeconds={introSeconds}
         />
       )}
 

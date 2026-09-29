@@ -37,6 +37,7 @@ export function WinGrid({
   canRelease,
   perVideoUsd,
   costNote,
+  introSeconds,
 }: {
   products: WinProductRow[];
   music: { id: string; title: string; assetId: string }[];
@@ -49,6 +50,7 @@ export function WinGrid({
   canRelease: boolean;
   perVideoUsd: number | null;
   costNote: string;
+  introSeconds: number | null;
 }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("ALL");
@@ -102,7 +104,7 @@ export function WinGrid({
               {p.photoCount === 0 ? <p className="text-[12px] text-muted-foreground">Chưa có ảnh sản phẩm thật: Thư viện Media → Nguồn ảnh → Nhập ảnh sản phẩm từ Pancake.</p> : null}
               {p.pausedAt ? <p className="text-[12px] text-destructive">Mã đang dừng khẩn cấp{p.pausedReason ? `: ${p.pausedReason}` : ""}.</p> : null}
               <div className="flex flex-wrap items-center gap-2">
-                {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music} perVideoUsd={perVideoUsd} costNote={costNote} /> : null}
+                {canSpend && p.photoCount > 0 ? <CreateRunDialog productId={p.productId} label={`${p.code} ${p.name}`} music={music} perVideoUsd={perVideoUsd} costNote={costNote} introSeconds={introSeconds} /> : null}
                 {p.awaitingReview ? (
                   <Link href="?tab=duyet" className="rounded-md border border-primary/50 bg-primary/5 px-2.5 py-1 text-[12.5px] font-medium text-primary hover:bg-primary/10">
                     Duyệt {p.awaitingReview} video →

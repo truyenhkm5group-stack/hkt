@@ -11,11 +11,13 @@ import { cn } from "@/lib/utils";
  */
 export function IdeaPresets({ idea, onChange, maxChars, design, disabled }: { idea: string; onChange: (v: string) => void; maxChars: number; design: boolean; disabled?: boolean }) {
   const groups = IDEA_PRESET_GROUPS.filter((g) => design || g.scope === "ALL");
-  const [open, setOpen] = useState(groups[0]?.key ?? "");
-  const current = groups.find((g) => g.key === open) ?? groups[0];
+  // Gọn (chủ shop 29/09/2026: "gọn gàng hơn"): mặc định chỉ hàng NHÓM; bấm nhóm mới mở lựa chọn, bấm lại để đóng.
+  const [open, setOpen] = useState("");
+  const current = groups.find((g) => g.key === open) ?? null;
   return (
-    <div className="space-y-1.5 rounded-md border bg-muted/30 p-2">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Nhóm gợi ý">
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Nhóm gợi ý" title={`Bấm nhóm để mở gợi ý, bấm gợi ý để thêm vào ô ý tưởng.${design ? "" : " Ảnh cho mã có sẵn luôn giữ đúng món hàng thật nên không có nhóm chất vải / màu / dáng."}`}>
+        <span className="text-[11px] text-muted-foreground">Gợi ý:</span>
         {groups.map((g) => (
           <button
             key={g.key}
@@ -23,14 +25,14 @@ export function IdeaPresets({ idea, onChange, maxChars, design, disabled }: { id
             role="tab"
             aria-selected={g.key === current?.key}
             className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px]", g.key === current?.key ? "border-brand bg-brand/10 font-semibold text-brand" : "bg-background hover:bg-muted")}
-            onClick={() => setOpen(g.key)}
+            onClick={() => setOpen((cur) => (cur === g.key ? "" : g.key))}
           >
             {g.label}
           </button>
         ))}
       </div>
       {current ? (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 rounded-md border bg-muted/30 p-1.5">
           {current.options.map((o) => {
             const used = idea.includes(`${current.label}: ${o}`);
             return (
@@ -49,7 +51,6 @@ export function IdeaPresets({ idea, onChange, maxChars, design, disabled }: { id
           })}
         </div>
       ) : null}
-      <p className="text-[11px] text-muted-foreground">Bấm để thêm vào ô ý tưởng — sửa lại tuỳ ý trước khi Gen.{design ? "" : " Ảnh cho mã có sẵn luôn giữ đúng món hàng thật nên không có nhóm chất vải / màu / dáng."}</p>
     </div>
   );
 }
