@@ -652,6 +652,133 @@ export function testServerActionKhongChonToChuc() {
   assert.equal(awaitDauTien("{\n  return nguoiGhi(id ? await topicIdOf(await getDb(), id) : null);\n}"), "topicIdOf");
 }
 
+/* ═════════════ S21 · LÕI VẬN HÀNH HỎI NGƯỜI VẬN HÀNH TRƯỚC LƯỢT ĐỌC / GHI ĐẦU TIÊN (pilot readiness) ═════════════ */
+
+/**
+ * Vỏ action của người vận hành (S20, loại VAN_HANH) chỉ là lớp THỨ NHẤT. Hàm lõi nó gọi nhìn XUYÊN ranh giới tổ chức (sổ
+ * tổ chức, CSDL của khách, sổ dùng AI, nhật ký nền tảng) và còn được trang / bài kiểm gọi thẳng, nên lõi phải tự hỏi
+ * `platformOperatorDenial(user)` TRƯỚC lượt `await` đầu tiên không phải đọc phiên. Luật:
+ *  1. Mọi hàm xuất khẩu trong lib/ có gọi `platformOperatorDenial(` gọi nó TRƯỚC `await` đầu tiên (được phép: `await` đọc
+ *     phiên, hoặc `await` một hàm CỤC BỘ tự hỏi trước — `parseCommon` của công tắc khẩn) — và phải khai ở LOI_VAN_HANH.
+ *  2. LOI_VAN_HANH phải còn nguyên và thoả luật 1: xoá hẳn câu hỏi khỏi một lõi thì luật 1 mù, danh sách đóng này thì không.
+ *  3. Mỗi server action qua `platform:operate` gọi một lõi trong LOI_VAN_HANH, hoặc hàm cổng cục bộ `requireOperator`
+ *     (tự hỏi `platformOperatorDenial`).
+ *  4. `loadOrgAiUsage(` đọc sổ AI theo MÃ TỔ CHỨC mà không hỏi người — chỉ được gọi ở chỗ khai; `/settings/plan` không
+ *     nhận `params` / `searchParams` (mã tổ chức lấy từ PHIÊN).
+ *  5. `writeOrgFlag(` (cờ `workflows.paused`) chỉ công tắc khẩn gọi.
+ */
+const LOI_VAN_HANH: Record<string, string> = {
+  "lib/platform/kill-switches.ts::setOrganizationSuspended": "Công tắc khẩn: đình chỉ / bật lại một tổ chức (hỏi qua parseCommon).",
+  "lib/platform/kill-switches.ts::setWorkflowsPaused": "Công tắc khẩn: tạm dừng luật tự động của một tổ chức (hỏi qua parseCommon).",
+  "lib/platform/kill-switches.ts::disableOrgConnection": "Công tắc khẩn: tắt một kết nối trong CSDL của tổ chức đích (hỏi qua parseCommon).",
+  "lib/platform/org-plan.ts::setOrganizationPlan": "Đổi gói của một tổ chức sau lúc tạo — ghi cột plan của mặt phẳng điều khiển + nhật ký nền tảng.",
+  "lib/platform/pilot.ts::setPilotStage": "Đổi giai đoạn pilot của một tổ chức — ghi mặt phẳng điều khiển + đo CSDL của khách.",
+  "lib/platform/pilot.ts::confirmPilotUat": "Xác nhận UAT của một tổ chức — ghi mặt phẳng điều khiển.",
+  "lib/platform/support.ts::loadOrgSupport": "Trang sức khoẻ một tổ chức: ghi SUPPORT_VIEW rồi ĐẾM trong CSDL của khách.",
+  "lib/platform/support.ts::listOrgSupportSummaries": "Tóm tắt mọi tổ chức ở /platform: mở CSDL từng tổ chức để đếm người dùng.",
+  "lib/ai-usage/control.ts::setPlatformAiEnabled": "Công tắc AI toàn nền tảng.",
+  "lib/ai-usage/control.ts::setOrgAiControl": "Công tắc AI + ghi đè hạn mức AI của một tổ chức.",
+  "lib/ai-usage/view.ts::loadOperatorOrgAi": "Sổ AI theo ngày của MỘT tổ chức bất kỳ (màn người vận hành).",
+  "lib/ai-usage/view.ts::loadPlatformAiSummary": "Top tổ chức theo chi phí AI toàn nền tảng.",
+  "lib/platform/secrets-self-test.ts::runSecretsSelfTest": "Tự kiểm khoá bí mật của nền tảng (cổng mở bán A) — ghi nhật ký nền tảng.",
+  "lib/platform-ui/module-toggle.ts::toggleModuleForOrganization": "Bật / tắt module của một tổ chức bất kỳ.",
+  "lib/queries/platform-org-diagnostics.ts::loadOrgDiagnostics": "Chẩn đoán H4 một tổ chức: mở CSDL của tổ chức được chọn để đếm.",
+  "lib/onboarding/signup-mode.ts::setSignupSetting": "Cổng mở bán B: chế độ đăng ký /start của cả nền tảng.",
+};
+
+const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);
+
+/** Vị trí `await` đầu tiên KHÔNG phải đọc phiên trong thân hàm, kèm tên hàm được await (hoặc `null`). */
+function awaitKhongPhaiPhien(than: string): { i: number; ten: string | null } {
+  for (const k of than.matchAll(/\bawait\b\s*(?:\(\s*)?([\w.$]+)?/g)) {
+    const ten = k[1] ?? null;
+    if (ten && DOC_PHIEN.has(ten)) continue;
+    return { i: k.index ?? 0, ten };
+  }
+  return { i: -1, ten: null };
+}
+
+/** Thân `than` hỏi người vận hành trước lượt đọc / ghi đầu tiên (trực tiếp, hoặc qua hàm cục bộ `kb` tự hỏi trước). */
+function hoiVanHanhTruoc(than: string, kb: Map<string, KhaiBao>, sau = 0): boolean {
+  const hoi = than.indexOf("platformOperatorDenial(");
+  const dau = awaitKhongPhaiPhien(than);
+  if (hoi >= 0 && (dau.i < 0 || hoi < dau.i)) return true;
+  const cucBo = dau.ten ? kb.get(dau.ten) : undefined;
+  return Boolean(cucBo && sau < 3 && hoiVanHanhTruoc(cucBo.than, kb, sau + 1));
+}
+
+export function testLoiVanHanhHoiTruoc(): number {
+  const pham: string[] = [];
+  const thay = new Set<string>();
+  for (const tep of tepMa(["lib/"])) {
+    const m = ma(tep);
+    if (!m.includes("platformOperatorDenial(") || /^\s*["']use server["']/.test(readFileSync(path.join(goc, tep), "utf8"))) continue;
+    const kb = khaiBaoCapCao(m);
+    for (const [ten, k] of kb) {
+      if (!k.xuat || !k.laHam) continue;
+      const truc = k.than.includes("platformOperatorDenial(");
+      const quaCucBo = !truc && hoiVanHanhTruoc(k.than, kb);
+      if (!truc && !quaCucBo) continue;
+      const khoa = `${tep}::${ten}`;
+      thay.add(khoa);
+      if (!LOI_VAN_HANH[khoa]) pham.push(`${khoa}: lõi vận hành mới — khai vào LOI_VAN_HANH`);
+      if (!hoiVanHanhTruoc(k.than, kb)) pham.push(`${khoa}: đọc / ghi (await ${awaitKhongPhaiPhien(k.than).ten ?? "?"}) TRƯỚC khi hỏi platformOperatorDenial`);
+    }
+  }
+  const matCau = Object.keys(LOI_VAN_HANH).filter((k) => !thay.has(k));
+  assert.deepEqual(pham, [], "S21: lõi của người vận hành phải hỏi platformOperatorDenial(user) TRƯỚC lượt đọc / ghi đầu tiên — vỏ action chỉ là lớp thứ nhất");
+  assert.deepEqual(matCau, [], "S21: lõi vận hành đã khai mà không còn hỏi platformOperatorDenial (hoặc đã đổi tên) — cửa nhìn xuyên tổ chức không được mất câu hỏi");
+  khongMienTruMoCoi("S21", LOI_VAN_HANH, thay);
+
+  // 3 · Vỏ action qua platform:operate gọi đúng một lõi đã khai (hoặc requireOperator tự hỏi).
+  const tenLoi = Object.keys(LOI_VAN_HANH).map((k) => k.split("::")[1]);
+  const vo: string[] = [];
+  let soVo = 0;
+  for (const tep of tepServerAction()) {
+    const kb = khaiBaoCapCao(ma(tep));
+    const gateCucBo = kb.get("requireOperator");
+    for (const [ten, k] of kb) {
+      if (!k.xuat || !k.laHam) continue;
+      const quaVanHanh = /requirePermission\(\s*["']platform:operate["']\s*\)/.test(k.than);
+      const quaGate = /\brequireOperator\(/.test(k.than);
+      if (!quaVanHanh && !quaGate) continue;
+      soVo += 1;
+      if (quaGate && gateCucBo && gateCucBo.than.includes("platformOperatorDenial(")) continue;
+      if (!tenLoi.some((n) => new RegExp(`\\b${n}\\(`).test(k.than))) vo.push(`${tep}::${ten}`);
+    }
+  }
+  assert.ok(soVo >= 10, `phải thấy các cửa vận hành đã biết (pilot, công tắc, AI, module, mã mời) — mới thấy ${soVo}: bộ dò có thể đã mù`);
+  assert.deepEqual(vo, [], "S21: server action qua platform:operate phải gọi một lõi trong LOI_VAN_HANH (lõi tự hỏi lại người vận hành)");
+
+  // 4 · Sổ AI theo mã tổ chức: chỉ gọi ở chỗ khai; /settings/plan lấy mã từ PHIÊN.
+  const DOC_SO_AI: Record<string, string> = {
+    "app/(dashboard)/settings/plan/page.tsx": "Gói & hạn mức: mã tổ chức = getPlanUsage(user.organization?.code) — PHIÊN, trang không nhận tham số.",
+    "lib/platform/support.ts": "Ô Dùng AI của trang sức khoẻ — sau platformOperatorDenial của loadOrgSupport.",
+    "lib/ai-usage/view.ts": "loadOperatorOrgAi — sau platformOperatorDenial.",
+  };
+  const goiSoAi: string[] = [];
+  const daDungSoAi = new Set<string>();
+  for (const tep of tepMa(["lib/", "app/", "components/"])) {
+    if (!/\bloadOrgAiUsage\(/.test(ma(tep).replace(/export async function loadOrgAiUsage\(/, ""))) continue;
+    if (DOC_SO_AI[tep]) daDungSoAi.add(tep);
+    else goiSoAi.push(tep);
+  }
+  assert.deepEqual(goiSoAi, [], "S21: loadOrgAiUsage(mã) không hỏi người — chỉ gọi ở chỗ khai (mã tổ chức từ PHIÊN hoặc sau cổng người vận hành)");
+  khongMienTruMoCoi("S21 · sổ AI", DOC_SO_AI, daDungSoAi);
+  const plan = ma("app/(dashboard)/settings/plan/page.tsx");
+  assert.ok(!/\b(?:searchParams|params)\b/.test(plan) && /getPlanUsage\(\s*user\.organization\?\.code\s*\)/.test(plan) && /loadOrgAiUsage\(\s*usage\.orgCode\s*\)/.test(plan), "S21: /settings/plan lấy mã tổ chức từ PHIÊN (user.organization) — không từ params / searchParams");
+
+  // 5 · Cờ tạm dừng luật chỉ công tắc khẩn ghi.
+  const ghiCo = tepMa(["lib/", "app/", "scripts/"]).filter((t) => /\bwriteOrgFlag\(/.test(ma(t)) && t !== "lib/platform/org-flags.ts" && t !== "lib/platform/kill-switches.ts");
+  assert.deepEqual(ghiCo, [], "S21: writeOrgFlag chỉ được gọi từ lib/platform/kill-switches.ts (quyền vận hành + lý do + nhật ký nền tảng)");
+
+  // Tự kiểm bộ dò.
+  const kbThu = khaiBaoCapCao("async function parseCommon(user) {\n  const denial = platformOperatorDenial(user);\n  return denial;\n}\nexport async function tat(user) {\n  const p = await parseCommon(user);\n  await ghi();\n}\nexport async function sai(user) {\n  await ghi();\n  const d = platformOperatorDenial(user);\n}\n");
+  assert.equal(hoiVanHanhTruoc(kbThu.get("tat")!.than, kbThu), true, "hỏi qua hàm cục bộ");
+  assert.equal(hoiVanHanhTruoc(kbThu.get("sai")!.than, kbThu), false, "ghi trước khi hỏi");
+  return Object.keys(LOI_VAN_HANH).length;
+}
+
 export function testPlatformIsolationStatic() {
   testKhongKetNoiCsdlThuHai();
   testHolderGlobalDaKhai();
@@ -668,8 +795,9 @@ export function testPlatformIsolationStatic() {
   testRouteApiQuaApiGuard();
   const soAction = testServerActionQuaCongPhien();
   testServerActionKhongChonToChuc();
+  const soLoi = testLoiVanHanhHoiTruoc();
   console.log(
-    `✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID, CSDL chỉ định chỉ ở mã nền tảng, route API qua apiGuard hoặc khai công khai kèm cổng riêng, ${soAction} server action hỏi phiên trước lượt đọc/ghi đầu tiên, không action nào chọn CSDL theo mã tổ chức của client`,
+    `✓ Nền tảng · máy quét cô lập mức tiến trình: kết nối CSDL, holder globalThis, singleton, after(), webhook, credential, bus, tiền tố đệm, migration, mặc định ID, CSDL chỉ định chỉ ở mã nền tảng, route API qua apiGuard hoặc khai công khai kèm cổng riêng, ${soAction} server action hỏi phiên trước lượt đọc/ghi đầu tiên, không action nào chọn CSDL theo mã tổ chức của client, ${soLoi} lõi vận hành hỏi người vận hành trước lượt đọc/ghi đầu tiên (S21), sổ AI theo mã tổ chức chỉ đọc từ phiên / sau cổng vận hành`,
   );
 }
 

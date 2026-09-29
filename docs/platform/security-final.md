@@ -4,7 +4,8 @@ Tệp này ghi lượt rà cuối trước khi bán: bộ tấn công `tests/ten
 `tests/platform-isolation-static.test.ts` chạy lại trên main (`7494ad1c`), rồi mở rộng cho những mặt ra đời SAU Phase 11
 (trang Duyệt lõi `/approvals` — PR #366, sao lưu theo tổ chức — PR #365) và những mặt Phase 11 chưa phủ (AI Copilot,
 thao túng metadata, xuất gói cấu hình, thẻ sao lưu). Không bài thứ hai: mọi mặt mới nằm trong đúng hai bài có sẵn, chạy
-trong `npm test`.
+trong `npm test`. Lượt chạy lại cho pilot readiness (29/09/2026 — sổ dùng AI, vận hành pilot, công tắc khẩn, trang sức
+khoẻ, đơn / sản phẩm tay; 243 mặt + S21) nằm ở mục cuối tệp.
 
 ## Cách đo
 
@@ -136,3 +137,91 @@ khoá môi trường của nhà; mỗi câu hỏi đi tới provider, dừng ở
 6. **Webhook, job, bus, đệm tiến trình** không nằm trong bài này — đã có `platform-process-isolation.test.ts` và bộ quét
    tĩnh S1–S20.
 7. **HUMAN GATE còn treo**: E2E #6 (AI Builder với model thật) cần khoá AI thật của một tổ chức thử.
+
+## Chạy lại cho pilot readiness (29/09/2026)
+
+Base `b4c8a1e8` (origin/main + A3 sổ dùng AI + A4 vòng đời pilot / trang sức khoẻ / công tắc khẩn; main đã có B1 sản
+phẩm tay, B2 đơn tay, A1 tự kiểm khoá bí mật). Không thêm tính năng: chỉ thêm mặt vào ĐÚNG hai bài có sẵn.
+
+### Chạy lại trước khi mở rộng
+
+| Bài | Kết quả |
+|---|---|
+| `testTenantAttack` | ĐẠT — **178 mặt** (bảng trên ghi 176; đếm lại trên base, nhóm «Thương hiệu & tự phục vụ» có 21 mặt chứ không phải 19 — hai mặt mở đăng ký `/start` chưa vào bảng), CSDL B 188 bảng y nguyên, 0 request mạng |
+| `testPlatformIsolationStatic` (S1–S20) | ĐẠT — 482 server action hỏi phiên trước lượt đọc / ghi đầu tiên; mọi action mới nhận mã tổ chức (5 action `platform-ops.ts` + `setOrgAiControlAction`) đã khai ở `ACTION_NHAN_MA_TO_CHUC` loại `VAN_HANH` |
+
+### Mặt mới: 178 → 243 (65 mặt mới, tất cả ĐẠT)
+
+| Nhóm | Mặt | Kết quả |
+|---|---:|---|
+| **Sổ dùng AI** (A3) — `/settings/plan` page component; cùng trang kèm `?org=ta-b` (params + searchParams); `loadOrgAiUsage` theo mã của PHIÊN; `loadOperatorOrgAi(B)`; `loadPlatformAiSummary` | 5 | trang chỉ cộng dòng sổ mang mã A (số lượt + token = đúng tổng của A trong `platform_ai_usage`), không số token hiếm của B; tham số URL không đổi được tổ chức; hai loader của người vận hành «Chỉ người của tổ chức nhà…» |
+| **Vận hành pilot · công tắc · hỗ trợ** (A4 + A1) — với đích **B** và đích **NHÀ**, mỗi cửa hai lớp: vỏ action (phiên thật) VÀ lõi gọi thẳng: lùi giai đoạn pilot (kèm ghi đè + lý do) · xác nhận UAT · đình chỉ · tạm dừng luật · tắt kết nối · tắt AI + hạ hạn mức AI (6 × 2 × 2) + `loadOrgSupport` + page `/platform/org/<mã>` (× 2); công tắc AI toàn nền tảng (action + lõi); tự kiểm khoá bí mật (action + lõi); page `/platform?org=ta-b`; `listOrgSupportSummaries` | 34 | mọi lượt từ chối VÌ «không phải người vận hành» (bài khớp câu `Chỉ người của tổ chức nhà mới vận hành` / `forbidden=1`, không nhận lời từ chối phụ như lý do ngắn, sai giai đoạn); tóm tắt hỗ trợ trả `{}`; `platform_audit_log` không có dòng nào do người của A ghi |
+| **Đơn · sản phẩm · khách tạo tay** (B1 · B2) — sửa / xác nhận (`CONFIRMED`) / huỷ đơn tay của B bằng id; tạo đơn ở A cho khách của B · với mẫu mã của B; `manualOrderFormValues(đơn B)`; page `/orders/<B>/edit` · `/orders/<B>`; sửa sản phẩm tay của B; cài mẫu mã của B vào sản phẩm tay CỦA A; page `/products/<sản phẩm B>` · `/products/<mẫu mã B>` (lối tra ngược); sửa thông tin cơ bản khách B (form profile); page `/customers/<B>`; A tạo sản phẩm trùng mã + SKU của B | 15 | «Không có đơn này» / «Khách hàng · Mẫu mã không tồn tại trong tổ chức này» / «Không tìm thấy sản phẩm · khách trong tổ chức này» / «Mẫu mã không thuộc sản phẩm này» / 404. A (không đồng bộ Pancake) qua được cổng tạo tay — lời từ chối là vì id không có ở CSDL A, không vì cổng. Mã / SKU là duy nhất THEO TỔ CHỨC: A dùng lại đúng mã của B lưu được (không có máy dò danh mục chéo) |
+| **Công tắc của người vận hành** — người vận hành NHÀ tạm dừng luật + tắt AI của A, rồi đình chỉ A; A tự bỏ tạm dừng (action + lõi) · tự bật lại AI (action) · tự bật AI + nâng hạn mức (lõi) · tự đẩy giai đoạn pilot · tự bỏ đình chỉ (action với phiên thật + lõi); đối chứng AI Builder của A khi AI bị tắt | 8 | từ chối; cờ `workflows.paused` vẫn bật, `settings.ai.disabled` vẫn `true`, `status` vẫn `SUSPENDED`; phiên A khi bị đình chỉ ⇒ `/login?reason=org-inactive`; đối chứng: AI Builder dừng «AI đang bị tắt bởi người vận hành» TRƯỚC provider (model giả được tiêm: 0 lượt gọi) |
+| **Phiên giả** (thêm) — huỷ đơn tay của B · sửa sản phẩm tay của B · đổi công tắc / hạn mức AI của B | 3 | về `/login` |
+| **Tổng** | **65** | **243/243 ĐẠT** |
+
+**Người vận hành NHÀ mở trang sức khoẻ của B** (chạy SAU ảnh chụp cuối; không tính vào số mặt vì không phải đòn của A):
+đúng MỘT dòng `SUPPORT_VIEW` mang mã tổ chức nhà + email người vận hành; CSDL B (188 bảng) y nguyên — xem chỉ ĐẾM; kết
+quả (trừ khối `organization` — tên tổ chức là dữ liệu mặt phẳng điều khiển) không chứa `TABIMAT7Q` (tên khách, giá trị
+field, tên sản phẩm, ghi chú đơn), email khách `khach.TABIMAT7Q@ta-b.local`, số tiền đơn tay `7319007`, mã sản phẩm tay,
+email quản trị B, bí mật kết nối, dấu nhà. Đối chứng dương: trang đo THẬT CSDL B (≥ 1 người dùng hoạt động, 2 kết nối
+bật); ô «Dùng AI» = đúng tổng lượt của sổ mang mã B; `loadOperatorOrgAi(B)` thấy số token của B và không thấy của A. Sao
+lưu của B: `lastSuccessAt = null` trong khi cùng thư mục trạng thái có bản sao THÀNH CÔNG của nhà — trang sức khoẻ đọc
+đích sao lưu theo tổ chức, không mượn lời khai nhà.
+
+Ảnh chụp mặt phẳng điều khiển mở rộng từ 5 lên **9 nhóm**: thêm sổ `platform_ai_usage` của B, `platform_settings`
+`platform.ai.enabled`, dòng tổ chức NHÀ và cờ của nhà — TRƯỚC = SAU.
+
+### Bộ quét tĩnh: S21 — lõi vận hành hỏi người vận hành trước lượt đọc / ghi đầu tiên
+
+Vỏ action (`requirePermission("platform:operate")`, S20) chỉ là lớp thứ nhất; lõi nhìn xuyên tổ chức còn được trang và bài
+kiểm gọi thẳng. `testLoiVanHanhHoiTruoc` (trong `testPlatformIsolationStatic`):
+
+1. Mọi hàm xuất khẩu ở `lib/` có gọi `platformOperatorDenial(` gọi nó TRƯỚC `await` đầu tiên không phải đọc phiên (hoặc
+   qua hàm cục bộ tự hỏi trước — `parseCommon`), và phải khai ở `LOI_VAN_HANH` (15 lõi: công tắc khẩn ×3, pilot ×2, hỗ
+   trợ ×2, công tắc AI ×2, màn AI ×2, tự kiểm khoá bí mật, bật / tắt module, chẩn đoán H4, cổng đăng ký).
+2. Lõi đã khai mà mất câu hỏi ⇒ đỏ (luật 1 mù với lõi đã xoá hẳn câu hỏi; danh sách đóng thì không).
+3. Mỗi server action qua `platform:operate` gọi một lõi trong `LOI_VAN_HANH` hoặc `requireOperator` (tự hỏi).
+4. `loadOrgAiUsage(` (đọc sổ AI theo mã, không hỏi người) chỉ ở 3 chỗ khai; `/settings/plan` không nhận `params` /
+   `searchParams`, mã lấy từ `user.organization?.code`.
+5. `writeOrgFlag(` chỉ công tắc khẩn gọi.
+
+Bí mật (A1): `secretsSelfTestAction` / `runSecretsSelfTest` có trong bảng tấn công (từ chối A) và trong `LOI_VAN_HANH`;
+phép thử khoá riêng vẫn ở bài của A1.
+
+### Lỗ tìm thấy
+
+**Không có.** 65 mặt mới đều bị chặn ở máy chủ, đúng lý do. Bằng chứng không «xanh vì rỗng»: `/settings/plan` của A cộng
+đúng dòng sổ của A; A lưu được sản phẩm trùng mã của B; người vận hành nhà đọc được sức khoẻ + sổ AI của B; AI Builder của
+A thật sự dừng khi bị tắt; và 10 đột biến dưới đây đều làm ít nhất một bài ĐỎ.
+
+### Kiểm đột biến (10/10 ĐỎ — tệp sao ra trước khi phá, chép lại sau, không `git checkout`)
+
+| # | Đột biến | Bài đỏ · mặt bắt được |
+|---|---|---|
+| 1 | `parseCommon` (công tắc khẩn) bỏ `platformOperatorDenial` | tấn công: A đình chỉ được B qua lõi · S21: lõi đã khai mất câu hỏi |
+| 2 | `setOrgAiControl` bỏ câu hỏi người vận hành | tấn công: A tắt AI + hạ hạn mức của B · S21 |
+| 3 | `loadOrgSupport` bỏ câu hỏi người vận hành | tấn công: A mở được sức khoẻ của B · S21 |
+| 4 | Sổ AI `totalsSince` bỏ lọc `org_code` | tấn công: `/settings/plan` của A cộng cả sổ của B |
+| 5 | `loadOrgSupport` không ghi `SUPPORT_VIEW` | tấn công: lượt mở của người vận hành không để vết |
+| 6 | Sao lưu ở trang sức khoẻ đọc đích NHÀ | tấn công: B «mượn» bản sao thành công của nhà |
+| 7 | `updateProductCore` bỏ kiểm «mẫu mã thuộc sản phẩm này» | tấn công: A cài mẫu mã của B vào sản phẩm của mình ⇒ «Đã lưu» |
+| 8 | `setPilotStage` hỏi người vận hành SAU `await findOrganization` | S21: đọc trước khi hỏi (bài tấn công vẫn xanh — đúng: lớp này do S21 bắt) |
+| 9 | `/settings/plan` nhận `searchParams.org` | tấn công: `?org=ta-b` đổi được sổ · S21: trang đọc tham số |
+| 10 | `aiKillSwitchDenial` bỏ qua công tắc AI của tổ chức | tấn công: đối chứng AI Builder của A chạy dù người vận hành đã tắt |
+
+### Rủi ro còn lại
+
+1. **Người vận hành dựng tay**: phía NHÀ đo ở mức lõi (`loadOrgSupport`, `loadOperatorOrgAi`, công tắc) với một
+   `SessionUser` của tổ chức nhà dựng trong bài — CSDL thử không có tài khoản nhà thật để ký phiên. Page component
+   `/platform/org/<mã>` chỉ được đo ở phía BỊ TỪ CHỐI.
+2. **Chẩn đoán H4 trên cùng trang** in tên / khoá cấu hình (trang, luật, đối tượng) của khách — CẤU HÌNH, không phải dữ
+   liệu nghiệp vụ, có từ Phase 11 · H4; lượt quét «không dấu B» chỉ áp cho khối sức khoẻ A4.
+3. **Sổ AI nằm ở CSDL nhà**: silo không che; hàng rào là bộ lọc `org_code` của máy chủ + S21 (đột biến #4 và #9 cho thấy
+   thiếu nó thì bài đỏ).
+4. **Đình chỉ ở tiến trình khác trễ ≤ 10 giây** (đệm sổ tổ chức) — đã khai ở A4; bài chạy một tiến trình.
+5. **Sao lưu trên PGlite**: tên CSDL tổ chức không khớp `erp_org_*` nên B luôn «chưa có bản sao» — đúng hướng; đích thật
+   chỉ đo được trên Postgres.
+6. **Tắt AI của tổ chức không chạm Copilot / job AI của nhà** (có chủ đích, A3 — chúng có trần tiền ngày riêng).
+7. **Mức mã, không phải trình duyệt**: E2E bằng trình duyệt chưa phủ các màn pilot / sổ AI / đơn tay.
