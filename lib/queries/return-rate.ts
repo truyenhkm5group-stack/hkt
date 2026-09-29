@@ -10,6 +10,7 @@ import type { Period } from "@/lib/search-params";
 import { memo } from "@/lib/cache";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
+import { MANUAL_ORDER_DELIVERED, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
 const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
@@ -224,6 +225,14 @@ const CARRIER_TOOK_PACKAGE = sql.raw(CARRIER_HANDOFF_KNOWN_SQL);
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
+  -- ĐƠN TẠO TAY KHÔNG QUA ĐVVC + PHIẾU GIAO CÓ KÝ NHẬN còn hiệu lực ⇒ 'DELIVERED' (G-ORDER, chủ nền tảng quyết
+  -- 29/09/2026 — ORDER_OUTCOME.md mục 11). Phiếu là chứng từ logistics ngang mã 501 chiều đi; nó KHÔNG phải chứng từ
+  -- tiền, nên mọi tổng TIỀN dựng trên kết quả này phải đi qua REVENUE_RECOGNIZED_ON_DELIVERY.
+  --
+  -- Đứng ĐẦU vì đơn tay không có dòng vận đơn: mọi nhánh bên dưới đều đọc ĐVVC hoặc tiền, và đơn tay "Đã nhận" sẽ rơi
+  -- vào nhánh 'UNKNOWN' cuối bảng (đúng cho đơn Pancake tự khai "Đã nhận"). Chỉ khớp đơn id "erp-" KHÔNG vận đơn nào —
+  -- đơn Pancake không bao giờ khớp, nên kết quả của tổ chức nhà không đổi một đơn.
+  when ${s.id} is null and ${MANUAL_ORDER_DELIVERED} then 'DELIVERED'
   -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ 'UNKNOWN', KHÔNG PHẢI 'ĐANG GIAO'.
   --
   -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của
@@ -463,6 +472,10 @@ const DELIVERY_SIGNAL = sql`(${s.stage} = 'DELIVERED' or ${o.stage} in ('DELIVER
  */
 export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
+  -- Đơn tay đã giao bằng phiếu ký nhận: giao là SỰ THẬT, tiền thì CHƯA XÁC MINH (G-ORDER, ORDER_OUTCOME.md mục 11).
+  -- Không có nhánh này thì DELIVERY_SIGNAL (stage 'DELIVERED') + trần tiền 0 ⇒ kết luận 'RETURNED' — sai cả hai chiều.
+  -- ERP chưa có chứng từ thanh toán cho đơn tay ⇒ luôn 'UNVERIFIED' tới ngày có.
+  when ${s.id} is null and ${MANUAL_ORDER_DELIVERED} then 'UNVERIFIED'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   -- Tiền KHÔNG BAO GIỜ được suy ra trạng thái giao hàng: vận đơn còn đang đi vẫn là ĐANG GIAO
   -- dù đã thu đủ tiền. Xem docs/business-rules/ORDER_OUTCOME.md.
@@ -481,7 +494,9 @@ export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
 
 /** Pancake báo đã giao/đã thanh toán nhưng không có vận đơn giao thành công và cũng không có tiền thực thu. */
 export const IS_PANCAKE_DECLARED_ONLY = sql`(${o.stage} in ('DELIVERED','PAID')
-  and (${s.stage} is null or ${s.stage} <> 'DELIVERED') and not ${HAS_CASH_PROOF})`;
+  and (${s.stage} is null or ${s.stage} <> 'DELIVERED') and not ${HAS_CASH_PROOF}
+  -- Đơn tay "Đã nhận" có phiếu giao ký nhận không phải "Pancake tự khai" — nó có chứng từ giao (G-ORDER).
+  and not (${s.id} is null and ${MANUAL_ORDER_DELIVERED}))`;
 
 /** Viettel Post ghi "giao thành công" (kể cả chiều hoàn) nhưng tiền thực thu < 50K. */
 export const IS_VTP_LOW_CASH = sql`(${s.stage} = 'DELIVERED' and ${HAS_CASH_PROOF} and ${VERIFIED_CASH} < ${RETURN_COD})`;
@@ -504,6 +519,19 @@ export const IS_STATUS_CONFLICT = sql`(${s.id} is not null and (
  */
 export const SHIPMENT_LEFT_WAREHOUSE = sql`(${s.pickedUpAt} is not null
   or ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED'))`;
+
+/**
+ * HÀNG CỦA ĐƠN ĐÃ RỜI KHO — vế "đã xuất" của phương trình tồn (lib/queries/stock.ts), và là phần bù của "chờ xuất"
+ * (`RESERVED_IN_WAREHOUSE`). MỘT vị ngữ cho cả hai,
+ * để một kiện không bao giờ vừa bị trừ ở tồn thực tế vừa còn bị giữ ở khả dụng (trừ hai lần — nợ P1 của pilot).
+ *
+ *  · Đơn qua ĐVVC: `SHIPMENT_LEFT_WAREHOUSE` (mốc lấy hàng / chặng vận đơn dựng từ sự kiện Viettel Post) — như cũ.
+ *  · Đơn TẠO TAY không qua ĐVVC: phiếu giao có ký nhận còn hiệu lực (`MANUAL_ORDER_DELIVERED`, G-ORDER — ORDER_OUTCOME.md
+ *    mục 11). Đơn tay không lập phiếu XUẤT TAY nữa: làm cả hai là trừ hai lần. Huỷ phiếu ⇒ vị ngữ tắt ⇒ hàng quay lại.
+ *
+ * `coalesce(…, false)`: đơn chưa có vận đơn thì `SHIPMENT_LEFT_WAREHOUSE` là NULL — xem chú thích của `RESERVED_IN_WAREHOUSE` (lib/queries/stock.ts).
+ */
+export const ORDER_LEFT_WAREHOUSE = sql`(coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false) or ${MANUAL_ORDER_DELIVERED})`;
 
 /** Hàng hoàn kho CHƯA xác nhận nhận về — không được cộng lại tồn kho. */
 export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
@@ -787,6 +815,8 @@ async function getReturnRateByVariantUncached(query: ReturnRateQuery): Promise<{
       lineTotal: i.lineTotal,
       shipmentStage: s.stage,
       outcome: outcomeColumn(),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
       /*
         KHOÁ MÃ HÀNG — ĐÚNG biểu thức mà `getProjectedDeliveryMetrics(..., "PRODUCT")` và bảng lợi
         nhuận dùng. Chép lệch một dấu nối thì ba nơi gộp ra ba tập dòng khác nhau.
@@ -823,7 +853,7 @@ async function getReturnRateByVariantUncached(query: ReturnRateQuery): Promise<{
       cancelled: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'CANCELLED')`,
       returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED_ANY}), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED_ANY}), 0)`,
-      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery}), 0)`,
     })
     .from(base)
     .groupBy(base.key));
@@ -865,7 +895,7 @@ async function getReturnRateByVariantUncached(query: ReturnRateQuery): Promise<{
       cancelled: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'CANCELLED')`,
       returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED_ANY}), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED_ANY}), 0)`,
-      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery}), 0)`,
     })
     .from(base)
     .groupBy(base.productKey));
@@ -1382,6 +1412,8 @@ async function getReturnRateBySourceUncached(period: Period, q: string, value: O
       revenue: o.totalPriceAfterDiscount,
       shipmentStage: s.stage,
       outcome: outcomeColumn(),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
@@ -1401,7 +1433,7 @@ async function getReturnRateBySourceUncached(period: Period, q: string, value: O
         inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
         failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
         cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
-        revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+        revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery}), 0)`,
         lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       })
       .from(base)
@@ -1516,6 +1548,8 @@ async function getReturnRateByTierUncached(period: Period, q: string, basis: Tim
       tier: sql<string>`${sql.raw(tierCaseSql())}`.as("tier"),
       value: o.totalPriceAfterDiscount,
       outcome: outcomeColumn(),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("revenue_on_delivery"),
     })
     .from(o)
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
@@ -1532,7 +1566,7 @@ async function getReturnRateByTierUncached(period: Period, q: string, basis: Tim
       returned: sql<number>`count(*) filter (where ${returnedAnyOf(base.outcome)})`,
       inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
       cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
-      revenue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+      revenue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} = 'DELIVERED' and ${base.revenueOnDelivery}), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${base.value}) filter (where ${returnedAnyOf(base.outcome)}), 0)`,
       sumValue: sql<number>`coalesce(sum(${base.value}), 0)`,
     })

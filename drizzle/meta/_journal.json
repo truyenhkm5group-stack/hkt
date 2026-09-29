@@ -1240,6 +1240,13 @@
       "when": 1790662120000,
       "tag": "0177_platform_pilot_stage",
       "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1790662180000,
+      "tag": "0178_order_delivery_notes",
+      "breakpoints": true
     }
   ]
 }

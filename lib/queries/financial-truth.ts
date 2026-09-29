@@ -5,6 +5,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { metricScope } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
@@ -162,6 +163,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),
       // Đọc kết quả ĐÃ VẬT CHẤT HOÁ; thiếu dòng thì tự tính bằng luật chuẩn (xem canonical-outcome.ts).
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
+      /** "Giao" có kéo theo doanh thu không — đơn tay giao bằng phiếu ký nhận thì KHÔNG (G-ORDER, ORDER_OUTCOME.md mục 11). */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("f_revenue_on_delivery"),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG: đơn có nhiều lần gửi không được đếm nhiều lần (xem PRIMARY_ATTEMPT).
@@ -171,6 +174,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .as("truth_facts");
 
   const isDelivered = sql`${facts.outcome} = 'DELIVERED'`;
+  /** Population của mọi tổng TIỀN theo DELIVERED — đơn tay giao bằng phiếu đứng ngoài, vẫn nằm trong số ĐƠN giao. */
+  const isDeliveredRevenue = sql`(${isDelivered} and ${facts.revenueOnDelivery})`;
   const isReturned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const isBooked = sql`${facts.outcome} <> 'CANCELLED'`;
 
@@ -188,16 +193,16 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .select({
       bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isBooked}), 0)`,
       bookedOrders: sql<number>`count(*) filter (where ${isBooked})`,
-      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isDelivered}), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isDeliveredRevenue}), 0)`,
       deliveredOrders: sql<number>`count(*) filter (where ${isDelivered})`,
-      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${isDelivered}), 0)`,
+      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${isDeliveredRevenue}), 0)`,
       returnedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isReturned}), 0)`,
       returnedOrders: sql<number>`count(*) filter (where ${isReturned})`,
       shippingDelivered: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isDelivered}), 0)`,
       shippingReturned: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isReturned}), 0)`,
       returnFee: sql<number>`coalesce(sum(${facts.returnFee}) filter (where ${isReturned}), 0)`,
-      prepaid: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${isDelivered}), 0)`,
-      missingCogsOrders: sql<number>`count(*) filter (where ${isDelivered} and ${facts.cogs} = 0 and ${facts.revenue} > 0)`,
+      prepaid: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${isDeliveredRevenue}), 0)`,
+      missingCogsOrders: sql<number>`count(*) filter (where ${isDeliveredRevenue} and ${facts.cogs} = 0 and ${facts.revenue} > 0)`,
     })
     .from(facts));
 

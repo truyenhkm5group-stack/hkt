@@ -4,7 +4,10 @@
  * Tổ chức THẬT `po-si` (mẫu bán buôn, KHÔNG bật Pancake; tự cấp, tự dọn):
  *  · tạo đơn tay có dòng hàng ⇒ id `erp-`, lời khai gốc ERP_MANUAL, nhật ký, hiện trong truy vấn /orders;
  *  · kết quả đơn theo ORDER_OUTCOME NHƯ LUẬT HIỆN TẠI (không vận đơn ⇒ NOT_SHIPPED, huỷ ⇒ CANCELLED — không bao giờ DELIVERED);
- *  · tồn THỰC TẾ không đổi khi tạo / sửa / huỷ đơn (luật 10) — lối "Lập phiếu xuất kho" điền sẵn đúng số trên đơn;
+ *  · tồn THỰC TẾ không đổi khi tạo / sửa / huỷ đơn (luật 10);
+ *  · G-ORDER: xác nhận giao bằng phiếu có ký nhận ⇒ DELIVERED, tồn thực tế giảm ĐÚNG MỘT lần, khả dụng không trừ hai lần
+ *    (đo lại ca P1: 150 → giao 35 ⇒ thực tế 115, khả dụng 115), tiền KHÔNG đổi (UNVERIFIED, doanh thu giao 0 ₫); huỷ
+ *    phiếu có lý do ⇒ như chưa giao; đơn NEW / huỷ / đồng bộ bị từ chối;
  *  · thiếu `orders:write` ⇒ FORBIDDEN; sửa đơn đồng bộ (id không `erp-`) ⇒ NOT_SUPPORTED; huỷ hai lần không ghi thêm;
  *  · khối KPI chỉ số sổ giữ NHÃN GỐC, tên trang đặt chỉ là tên phụ (P1 #8).
  * Tổ chức NHÀ (bật Pancake): cổng đóng, action từ chối kể cả Quản trị; báo cáo danh nghĩa + hiệu quả QC theo marketer
@@ -14,7 +17,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, isNull, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { buildSystemPrompt } from "@/lib/ai-builder/prompt";
 import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS_ADDED_AFTER_SNAPSHOT } from "@/lib/auth/permissions";
@@ -23,7 +26,7 @@ import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import type { Blueprint } from "@/lib/blueprints/types";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { clearMemo } from "@/lib/cache";
-import { isManualOrderId, manualOrderRaw, manualOrderTotals, MANUAL_ORDER_ID_PREFIX, issueReceiptHref } from "@/lib/constants/manual-orders";
+import { canConfirmManualDelivery, isManualOrderId, manualOrderRaw, manualOrderTotals, MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
 import { objectDef } from "@/lib/constants/object-registry";
 import { moduleOfPermission } from "@/lib/constants/platform-modules";
 import { kpiHeading, METRIC_SOURCES, metricAvailableFor, metricSource } from "@/lib/pages/catalog";
@@ -35,9 +38,12 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listOrders, ORDER_SORTABLE } from "@/lib/queries/orders";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { listVariantsForReceipt } from "@/lib/queries/stock";
-import { cancelManualOrderCore, createManualOrderCore, manualOrderGate, manualOrderIssuePrefill, updateManualOrderCore } from "@/lib/records/order-create";
+import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { availableStockExpr, erpStockExpr, listReservedOrderLines, listVariantsForReceipt, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { orderKpis } from "@/lib/queries/dashboard";
+import { getProfitReport } from "@/lib/queries/reports";
+import { COUNT_DELIVERED, DELIVERED_REVENUE } from "@/lib/queries/metrics";
+import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, manualOrderDeliveryView, manualOrderGate, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
 import { parseListParams, type Period } from "@/lib/search-params";
 import { validateRuleInput } from "@/lib/workflow/rules";
 import { approvalAmountOf } from "@/lib/workflow/subject";
@@ -68,13 +74,33 @@ const clone = <T>(x: T): T => structuredClone(x);
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
 async function outcomeOf(orderId: string): Promise<string | null> {
+  return (await outcomesOf(orderId))?.outcome ?? null;
+}
+
+/** Kết quả đơn + kết quả theo tiền + hai tổng của lớp chỉ số (doanh thu giao / số đơn giao) cho MỘT đơn. */
+async function outcomesOf(orderId: string) {
   const db = await getDb();
   const [r] = await db
-    .select({ outcome: ORDER_OUTCOME })
+    .select({ outcome: ORDER_OUTCOME, verified: ORDER_OUTCOME_VERIFIED, deliveredRevenue: DELIVERED_REVENUE, deliveredCount: COUNT_DELIVERED })
     .from(schema.orders)
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
-    .where(eq(schema.orders.id, orderId));
-  return r?.outcome ?? null;
+    .where(eq(schema.orders.id, orderId))
+    .groupBy(schema.orders.id, schema.shipments.id);
+  return r ? { outcome: r.outcome, verified: r.verified, deliveredRevenue: Number(r.deliveredRevenue), deliveredCount: Number(r.deliveredCount) } : null;
+}
+
+/** Tồn THỰC TẾ và tồn KHẢ DỤNG của một mẫu mã — đúng hai biểu thức của sổ kho (luật 10). */
+async function stockOfVariant(variantId: string): Promise<{ actual: number; available: number }> {
+  const db = await getDb();
+  const sales = variantSalesSubquery(db);
+  const receipts = variantReceiptsSubquery(db);
+  const [r] = await db
+    .select({ actual: erpStockExpr(sales, receipts), available: availableStockExpr(sales, receipts) })
+    .from(schema.productVariants)
+    .leftJoin(sales, eq(sales.variantId, schema.productVariants.id))
+    .leftJoin(receipts, eq(receipts.variantId, schema.productVariants.id))
+    .where(eq(schema.productVariants.id, variantId));
+  return { actual: Number(r?.actual ?? 0), available: Number(r?.available ?? 0) };
 }
 
 // ─────────────────────────── Phần THUẦN ───────────────────────────
@@ -170,20 +196,29 @@ async function testHome() {
   assert.equal(codeOf(await createManualOrderCore(admin, { customerId: "x", stage: "CONFIRMED", lines: [{ variantId: "x", quantity: 1, unitPrice: 1 }] })), "NOT_SUPPORTED");
   assert.equal(codeOf(await updateManualOrderCore(admin, "erp-x", { customerId: "x", stage: "NEW", lines: [] })), "NOT_SUPPORTED");
   assert.equal(codeOf(await cancelManualOrderCore(admin, "erp-x", { reason: "thử" })), "NOT_SUPPORTED");
+  assert.equal(codeOf(await confirmManualDeliveryCore(admin, "erp-x", { signedAt: new Date().toISOString(), receiverName: "Khách" })), "NOT_SUPPORTED", "G-ORDER: nhà đồng bộ đơn từ Pancake ⇒ không xác nhận giao tay, kể cả Quản trị");
+  assert.equal(codeOf(await voidManualDeliveryCore(admin, "erp-x", { reason: "thử huỷ" })), "NOT_SUPPORTED");
   assert.equal(await count(), n0, "bị từ chối ⇒ 0 đơn mới");
   // Nút tạo đơn trên /orders đi qua CÙNG cổng; trang /orders/new 404 khi cổng đóng.
   assert.match(readFileSync("app/(dashboard)/orders/page.tsx", "utf8"), /createGate\.allowed \? \(/);
   assert.match(readFileSync("app/(dashboard)/orders/new/page.tsx", "utf8"), /if \(!gate\.allowed\) notFound\(\)/);
 
-  // Luật 3.9: một đơn `erp-` ĐÃ XÁC NHẬN nằm trong CSDL nhà ⇒ báo cáo danh nghĩa + hiệu quả QC theo marketer KHÔNG đổi.
+  // Luật 3.9: một đơn `erp-` ĐÃ XÁC NHẬN và một đơn `erp-` ĐÃ GIAO (phiếu ký nhận — G-ORDER) nằm trong CSDL nhà ⇒ báo cáo
+  // danh nghĩa + hiệu quả QC theo marketer KHÔNG đổi; doanh thu giao thành công / lợi nhuận KHÔNG đổi một đồng.
   clearMemo();
   const before = await getNominalProfitReport(ALL);
   const perfBefore = await getAdsPerformance(ALL);
+  const profitBefore = (await getProfitReport(ALL, "created")).current;
+  const kpiBefore = await orderKpis(null, null);
   const oid = "erp-po-home-fixture";
   await db.insert(schema.products).values({ id: "po-home-prod", name: "PO mã tay (fixture)" }).onConflictDoNothing();
   await db.insert(schema.productVariants).values({ id: "po-home-var", productId: "po-home-prod", sku: "PO-HOME-1", retailPrice: 300_000 }).onConflictDoNothing();
   await db.insert(schema.orders).values({ id: oid, stage: "CONFIRMED", status: 1, statusName: "Đã xác nhận", billFullName: "Khách tay", totalPrice: 300_000, totalPriceAfterDiscount: 300_000, insertedAt: new Date(), raw: { origin: "ERP_MANUAL", orderDiscount: 0, createdBy: null } });
   await db.insert(schema.orderItems).values({ id: `${oid}-1`, orderId: oid, variantId: "po-home-var", productId: "po-home-prod", productName: "PO mã tay (fixture)", sku: "PO-HOME-1", quantity: 1, unitPrice: 300_000, lineTotal: 300_000 });
+  const oidGiao = "erp-po-home-delivered";
+  await db.insert(schema.orders).values({ id: oidGiao, stage: "DELIVERED", status: 3, statusName: "Đã nhận", billFullName: "Khách tay", totalPrice: 450_000, totalPriceAfterDiscount: 450_000, insertedAt: new Date(), raw: { origin: "ERP_MANUAL", orderDiscount: 0, createdBy: null } });
+  await db.insert(schema.orderItems).values({ id: `${oidGiao}-1`, orderId: oidGiao, variantId: "po-home-var", productId: "po-home-prod", productName: "PO mã tay (fixture)", sku: "PO-HOME-1", quantity: 1, unitPrice: 450_000, lineTotal: 450_000 });
+  await db.insert(schema.orderDeliveryNotes).values({ orderId: oidGiao, signedAt: new Date(), receiverName: "Khách tay" });
   try {
     clearMemo();
     const after = await getNominalProfitReport(ALL);
@@ -195,7 +230,15 @@ async function testHome() {
     const sum = (p: typeof perfAfter) => p.marketers.reduce((t, m) => t + m.orders, 0);
     assert.equal(sum(perfAfter), sum(perfBefore), "Σ đơn marketer + Chưa gán không đổi");
     assert.equal(perfAfter.totals.orders, after.totals.ordersDistinct, "phép so 3.9 vẫn khép: marketer = đơn xác nhận");
+    assert.equal(await outcomeOf(oidGiao), "DELIVERED", "phiếu giao ⇒ DELIVERED (logistics) — kể cả khi dòng lọt vào CSDL nhà");
+    const profitAfter = (await getProfitReport(ALL, "created")).current;
+    const kpiAfter = await orderKpis(null, null);
+    assert.equal(profitAfter.revenue, profitBefore.revenue, "G-ORDER: báo cáo lợi nhuận — doanh thu giao thành công KHÔNG cộng đơn tay giao bằng phiếu");
+    assert.equal(profitAfter.cogs, profitBefore.cogs, "giá vốn đi cùng doanh thu — không ghi cho đơn tay chưa có chứng từ tiền");
+    assert.equal(kpiAfter.successRevenue, kpiBefore.successRevenue, "Tổng quan: doanh thu giao thành công không đổi");
+    assert.equal(kpiAfter.successOrders, kpiBefore.successOrders + 1, "…nhưng SỐ ĐƠN giao thành công có thêm đơn tay (chiều logistics)");
   } finally {
+    await db.delete(schema.orders).where(eq(schema.orders.id, oidGiao));
     await db.delete(schema.orders).where(eq(schema.orders.id, oid));
     await db.delete(schema.productVariants).where(eq(schema.productVariants.id, "po-home-var"));
     await db.delete(schema.products).where(eq(schema.products.id, "po-home-prod"));
@@ -270,11 +313,6 @@ async function testWholesaleOrg() {
       // Tồn THỰC TẾ không đổi (luật 10): tạo đơn không ghi phiếu kho nào.
       assert.equal(await stockOf("erp-po-var-a"), 10, "tạo đơn KHÔNG trừ tồn thực tế");
       assert.equal(Number((await db.select({ n: sql<number>`count(*)` }).from(schema.stockReceipts))[0].n), 1, "không phiếu kho mới");
-      // Lối "Lập phiếu xuất kho": điền sẵn đúng mẫu mã + số lượng của đơn.
-      const pre = await manualOrderIssuePrefill(created.id);
-      assert.deepEqual(pre?.qty, { "erp-po-var-a": 3, "erp-po-var-b": 2 });
-      assert.equal(pre?.customerName, "Đại lý Pilot");
-      assert.ok(issueReceiptHref(created.id).startsWith("/inventory/receipts?xuat-don="));
 
       // Sửa: thay dòng hàng, đổi trạng thái; nhật ký kèm trước / sau.
       const upd = await updateManualOrderCore(admin, created.id, { ...input, stage: "NEW", lines: [{ variantId: "erp-po-var-a", quantity: 4, unitPrice: 120_000, discount: 0 }] });
@@ -288,7 +326,6 @@ async function testWholesaleOrg() {
       await db.insert(schema.orders).values({ id: "88001234", stage: "CONFIRMED", status: 1, billFullName: "Đơn nhập khác", insertedAt: new Date() });
       assert.equal(codeOf(await updateManualOrderCore(admin, "88001234", input)), "NOT_SUPPORTED");
       assert.equal(codeOf(await cancelManualOrderCore(admin, "88001234", { reason: "thử huỷ" })), "NOT_SUPPORTED");
-      assert.equal(await manualOrderIssuePrefill("88001234"), null);
 
       // KPI chỉ số sổ trên trang của tổ chức: nhãn GỐC, tên trang đặt chỉ là tên phụ (P1 #8).
       const kpi = { id: "k1", type: "kpi", span: 4, config: { metric: "booked_revenue", period: "30d", label: "Công nợ phải thu" } } as unknown as PageBlock<"kpi">;
@@ -309,16 +346,121 @@ async function testWholesaleOrg() {
       assert.equal(codeOf(await updateManualOrderCore(admin, created.id, input)), "CONFLICT", "đơn đã huỷ: không sửa");
       assert.equal((await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "ORDER_MANUAL_CANCEL"), eq(schema.auditLogs.entityId, created.id)))).length, 1, "một lượt huỷ ⇒ đúng một dòng nhật ký");
       assert.equal(await stockOf("erp-po-var-a"), 10, "huỷ đơn KHÔNG đổi tồn thực tế");
-      assert.equal(await manualOrderIssuePrefill(created.id), null, "đơn đã huỷ: không mời xuất kho");
+      assert.equal(codeOf(await confirmManualDeliveryCore(admin, created.id, { signedAt: new Date().toISOString(), receiverName: "Đại lý" })), "CONFLICT", "đơn đã huỷ: không xác nhận giao");
+
+      await testDeliveryFlow(db, { admin, sales, customerId: c.id, orderInput: input });
     });
   } finally {
     await cleanupOrg(ORG);
   }
 }
 
+/**
+ * ═══ G-ORDER — XÁC NHẬN GIAO BẰNG PHIẾU CÓ KÝ NHẬN (ORDER_OUTCOME.md mục 11), ĐO LẠI ĐÚNG CA P1 ĐÃ BÁO ═══
+ *
+ * Ca nợ P1 của pilot: tồn thực tế 150, đơn tay đã xác nhận 35 cái, kho lập phiếu XUẤT TAY 35 ⇒ thực tế 115 nhưng khả
+ * dụng 80 (trừ hai lần: phiếu xuất + đơn còn giữ hàng). Nay: xác nhận giao (không phiếu xuất) ⇒ thực tế 115, khả dụng
+ * 115 — hàng rời kho ĐÚNG MỘT lần, và thôi bị giữ. Tiền KHÔNG đổi: doanh thu giao thành công vẫn 0, tiền UNVERIFIED.
+ */
+async function testDeliveryFlow(db: Awaited<ReturnType<typeof getDb>>, ctx: { admin: SessionUser; sales: SessionUser; customerId: string; orderInput: Record<string, unknown> }) {
+  const { admin, sales } = ctx;
+  await db.insert(schema.productVariants).values({ id: "erp-po-var-c", productId: "erp-po-prod", sku: "NS-6", size: "6 chai", retailPrice: 40_000 });
+  const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: "PN-150", totalQuantity: 150, createdBy: "kho@po.local" }).returning({ id: schema.stockReceipts.id });
+  await db.insert(schema.stockReceiptItems).values({ receiptId: rc.id, variantId: "erp-po-var-c", quantity: 150, unitCost: 25_000 });
+  const receiptCount = async () => Number((await db.select({ n: sql<number>`count(*)` }).from(schema.stockReceipts))[0].n);
+  const receipts0 = await receiptCount();
+  assert.deepEqual(await stockOfVariant("erp-po-var-c"), { actual: 150, available: 150 });
+
+  const lines = [{ variantId: "erp-po-var-c", quantity: 35, unitPrice: 40_000, discount: 0 }];
+  const neu = await createManualOrderCore(admin, { ...ctx.orderInput, customerId: ctx.customerId, stage: "NEW", orderDiscount: 0, shippingFee: 0, lines });
+  assert.ok(neu.ok, JSON.stringify(neu));
+  const note = { signedAt: new Date(Date.now() - 3_600_000).toISOString(), receiverName: "Anh Tuấn (thủ kho đại lý)", note: "Phiếu PG-001" };
+  // Đơn NEW / WAITING chưa chốt ⇒ KHÔNG xác nhận giao được, 0 dòng phiếu.
+  assert.equal(codeOf(await confirmManualDeliveryCore(admin, neu.id, note)), "CONFLICT", "đơn «Mới» không xác nhận giao được — chốt đơn trước");
+  assert.equal(canConfirmManualDelivery("WAITING"), false);
+  assert.equal(canConfirmManualDelivery("CANCELLED"), false);
+  assert.equal((await db.select().from(schema.orderDeliveryNotes).where(eq(schema.orderDeliveryNotes.orderId, neu.id))).length, 0);
+
+  const upd = await updateManualOrderCore(admin, neu.id, { ...ctx.orderInput, customerId: ctx.customerId, stage: "CONFIRMED", orderDiscount: 0, shippingFee: 0, lines });
+  assert.ok(upd.ok, JSON.stringify(upd));
+  const id = neu.id;
+  assert.deepEqual(await stockOfVariant("erp-po-var-c"), { actual: 150, available: 115 }, "đã xác nhận: thực tế 150, khả dụng giữ 35");
+
+  // Tiền TRƯỚC khi giao — để so sau.
+  clearMemo();
+  const kpi0 = await orderKpis(null, null);
+
+  // Quyền + đầu vào: thiếu orders:write ⇒ FORBIDDEN; thiếu tên / mốc tương lai ⇒ lỗi đúng ô; 0 ghi.
+  assert.equal(codeOf(await confirmManualDeliveryCore(sales, id, note)), "FORBIDDEN");
+  assert.ok(fieldsOf(await confirmManualDeliveryCore(admin, id, { ...note, receiverName: "  " })).includes("receiverName"));
+  assert.ok(fieldsOf(await confirmManualDeliveryCore(admin, id, { ...note, signedAt: "hôm qua" })).includes("signedAt"));
+  assert.ok(fieldsOf(await confirmManualDeliveryCore(admin, id, { ...note, signedAt: new Date(Date.now() + 86_400_000).toISOString() })).includes("signedAt"), "mốc ký ở tương lai bị từ chối");
+  assert.equal((await db.select().from(schema.orderDeliveryNotes).where(eq(schema.orderDeliveryNotes.orderId, id))).length, 0, "mọi lượt bị từ chối ⇒ 0 phiếu");
+  // Đơn đồng bộ (id số) không nhận phiếu giao tay.
+  assert.equal(codeOf(await confirmManualDeliveryCore(admin, "88001234", note)), "NOT_SUPPORTED");
+
+  // XÁC NHẬN GIAO.
+  const ok = await confirmManualDeliveryCore(admin, id, note);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  const row = await db.query.orders.findFirst({ where: eq(schema.orders.id, id) });
+  assert.deepEqual([row?.stage, row?.status], ["DELIVERED", 3], "stage ⇒ DELIVERED («Đã nhận»)");
+  const o1 = await outcomesOf(id);
+  assert.equal(o1?.outcome, "DELIVERED", "ORDER_OUTCOME: phiếu giao có ký nhận ⇒ GIAO THÀNH CÔNG");
+  assert.equal(o1?.verified, "UNVERIFIED", "tiền: CHƯA XÁC MINH — phiếu giao không phải chứng từ thanh toán");
+  assert.equal(o1?.deliveredCount, 1, "đếm vào số đơn giao thành công (logistics)");
+  assert.equal(o1?.deliveredRevenue, 0, "KHÔNG vào doanh thu giao thành công (tiền)");
+  assert.deepEqual(await stockOfVariant("erp-po-var-c"), { actual: 115, available: 115 }, "CA P1: thực tế 150 → xuất 35 ⇒ 115; khả dụng 115 — KHÔNG trừ hai lần");
+  assert.equal((await listReservedOrderLines({ variantId: "erp-po-var-c" })).lines.length, 0, "đơn đã giao không còn trong danh sách chờ xuất");
+  assert.equal(await receiptCount(), receipts0, "xác nhận giao KHÔNG lập phiếu kho nào (không phiếu XUẤT TAY)");
+  const view = await manualOrderDeliveryView(id);
+  assert.deepEqual([view.active?.receiverName, view.active?.recordedByName, view.voided.length, view.priorIssues.length], ["Anh Tuấn (thủ kho đại lý)", "QT bán buôn", 0, 0]);
+  const [phieu] = await db.select().from(schema.orderDeliveryNotes).where(eq(schema.orderDeliveryNotes.orderId, id));
+  assert.equal(phieu.recordedByUserId, admin.id, "người ghi đi bằng KHOÁ tài khoản (AGENTS 34)");
+  clearMemo();
+  const kpi1 = await orderKpis(null, null);
+  assert.equal(kpi1.successRevenue, kpi0.successRevenue, "Tổng quan: doanh thu giao thành công KHÔNG tăng vì phiếu giao");
+  assert.equal(kpi1.successCogs, kpi0.successCogs, "giá vốn đi cùng doanh thu — không tăng");
+  assert.equal(kpi1.successOrders, kpi0.successOrders + 1, "số đơn giao thành công tăng 1");
+  const profit = (await getProfitReport(ALL, "created")).current;
+  assert.equal(profit.revenue, 0, "báo cáo lợi nhuận: doanh thu 0 ₫ — chưa có chứng từ thanh toán nào");
+
+  // Đơn đã giao: không giao lại, không sửa, không huỷ; bấm hai lần không ghi thêm.
+  assert.equal(codeOf(await confirmManualDeliveryCore(admin, id, note)), "CONFLICT", "bấm hai lần ⇒ không phiếu thứ hai");
+  assert.equal(codeOf(await updateManualOrderCore(admin, id, { ...ctx.orderInput, customerId: ctx.customerId, stage: "CONFIRMED", orderDiscount: 0, shippingFee: 0, lines })), "CONFLICT");
+  assert.equal(codeOf(await cancelManualOrderCore(admin, id, { reason: "thử huỷ đơn đã giao" })), "CONFLICT");
+  assert.equal((await db.select().from(schema.orderDeliveryNotes).where(eq(schema.orderDeliveryNotes.orderId, id))).length, 1);
+  assert.equal((await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "ORDER_MANUAL_DELIVER"), eq(schema.auditLogs.entityId, id)))).length, 1, "một lượt giao ⇒ một dòng nhật ký");
+
+  // HUỶ PHIẾU (ghi nhầm): bắt buộc lý do; phiếu giữ làm vết; đơn về như chưa giao.
+  assert.equal(codeOf(await voidManualDeliveryCore(sales, id, { reason: "ghi nhầm" })), "FORBIDDEN");
+  assert.ok(fieldsOf(await voidManualDeliveryCore(admin, id, { reason: "" })).includes("reason"));
+  assert.ok((await voidManualDeliveryCore(admin, id, { reason: "Ghi nhầm — phiếu của đơn khác" })).ok);
+  const o2 = await outcomesOf(id);
+  assert.equal(o2?.outcome, "NOT_SHIPPED", "huỷ phiếu ⇒ quay về như chưa giao");
+  assert.equal((await db.query.orders.findFirst({ where: eq(schema.orders.id, id) }))?.stage, "CONFIRMED");
+  assert.deepEqual(await stockOfVariant("erp-po-var-c"), { actual: 150, available: 115 }, "huỷ phiếu ⇒ hàng về lại kho, lại bị giữ");
+  assert.equal(codeOf(await voidManualDeliveryCore(admin, id, { reason: "bấm lại" })), "CONFLICT", "huỷ lần hai không ghi gì");
+  const all = await db.select().from(schema.orderDeliveryNotes).where(eq(schema.orderDeliveryNotes.orderId, id));
+  assert.deepEqual([all.length, all[0].voidReason, all[0].voidedByUserId], [1, "Ghi nhầm — phiếu của đơn khác", admin.id], "không xoá cứng: phiếu còn, mang lý do + khoá người huỷ");
+  assert.equal((await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "ORDER_MANUAL_DELIVERY_VOID"), eq(schema.auditLogs.entityId, id)))).length, 1);
+
+  // Phiếu XUẤT TAY cũ (bản trước có lối tắt điền `reference` = id đơn) ⇒ trang đơn nêu ra; ERP KHÔNG tự sửa kho.
+  await db.insert(schema.stockReceipts).values({ kind: "ISSUE", receivedAt: new Date(), reference: id, totalQuantity: -35, createdBy: "kho@po.local" });
+  assert.deepEqual((await manualOrderDeliveryView(id)).priorIssues.map((r) => r.totalQuantity), [35], "phiếu xuất cũ của đơn được nêu để kho lập điều chỉnh");
+  const ok2 = await confirmManualDeliveryCore(admin, id, { ...note, receiverName: "Anh Tuấn" });
+  assert.ok(ok2.ok, "giao lại sau khi huỷ phiếu nhầm: được (một phiếu còn hiệu lực)");
+  assert.equal((await db.select().from(schema.orderDeliveryNotes).where(and(eq(schema.orderDeliveryNotes.orderId, id), isNull(schema.orderDeliveryNotes.voidedAt)))).length, 1);
+  assert.equal(await receiptCount(), receipts0 + 1, "chỉ có phiếu xuất do bài kiểm gieo — xác nhận giao không tự lập hay tự sửa phiếu nào");
+
+  // Lối "Lập phiếu xuất kho" cho đơn tay đã bỏ khỏi trang đơn và trang phiếu kho — không bao giờ trừ hai lần.
+  const trangDon = readFileSync("app/(dashboard)/orders/[id]/page.tsx", "utf8");
+  assert.ok(!trangDon.includes("issueReceiptHref") && !trangDon.includes(">Lập phiếu xuất kho<") && trangDon.includes("ConfirmManualDeliveryButton"), "trang đơn tay: nút xác nhận giao thay cho lối xuất tay");
+  assert.ok(!readFileSync("app/(dashboard)/inventory/receipts/page.tsx", "utf8").includes("manualOrderIssuePrefill"));
+}
+
 export async function testPilotOrders() {
   testPure();
   await testHome();
   await testWholesaleOrg();
-  console.log("  ✓ pilot đơn tay: tạo / sửa / huỷ ở tổ chức không Pancake (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi, nhà từ chối + marketer 3.9 không đổi; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định, COD chỉ khi có kết nối; số tiền duyệt ưu tiên field tuỳ biến; vai trò AI không mang quyền ngoài gói");
+  console.log("  ✓ pilot đơn tay: tạo / sửa / huỷ ở tổ chức không Pancake (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; G-ORDER phiếu giao ký nhận ⇒ DELIVERED + trừ tồn một lần (150→115/115) + tiền UNVERIFIED + huỷ phiếu quay về; nhà từ chối + marketer 3.9 không đổi; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định, COD chỉ khi có kết nối; số tiền duyệt ưu tiên field tuỳ biến; vai trò AI không mang quyền ngoài gói");
 }

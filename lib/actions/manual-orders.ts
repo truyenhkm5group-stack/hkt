@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
-import { cancelManualOrderCore, createManualOrderCore, updateManualOrderCore } from "@/lib/records/order-create";
+import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
 
 /**
  * ═══════════ SERVER ACTION ĐƠN HÀNG TẠO TAY (pilot P0 #3) ═══════════
@@ -44,4 +44,26 @@ export async function cancelManualOrderAction(orderId: string, input: unknown): 
   revalidatePath("/orders");
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ đơn" };
+}
+
+/** Xác nhận ĐÃ GIAO bằng phiếu giao có ký nhận (G-ORDER) — chỉ id đơn trong CSDL của phiên; không nhận mã tổ chức. */
+export async function confirmManualDeliveryAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await confirmManualDeliveryCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  revalidatePath("/products");
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã xác nhận giao — hàng đã trừ khỏi kho; tiền vẫn chờ chứng từ thanh toán" };
+}
+
+/** Huỷ phiếu giao ghi nhầm — bắt buộc lý do; đơn về «Đã xác nhận», hàng quay lại kho. */
+export async function voidManualDeliveryAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await voidManualDeliveryCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  revalidatePath("/products");
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ phiếu giao" };
 }

@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
+import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_ORDER, type IssueEntity, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
@@ -145,7 +146,9 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           'Pancake ghi ' || o.stage::text || ' nhưng ERP không có vận đơn' as evidence,
           o.inserted_at as at, o.id as entity_id
         from orders o left join shipments s on s.order_id = o.id
-        where s.id is null and o.stage in ('SHIPPED','DELIVERED','PAID','RETURNING','PARTIAL_RETURN','RETURNED')`;
+        where s.id is null and o.stage in ('SHIPPED','DELIVERED','PAID','RETURNING','PARTIAL_RETURN','RETURNED')
+          -- Đơn TẠO TAY không qua ĐVVC: "Đã nhận" đến từ phiếu giao ký nhận (G-ORDER), không phải vận đơn bị thiếu.
+          and o.id not like ${`${MANUAL_ORDER_ID_PREFIX}%`}`;
     case "SHIPMENT_WITHOUT_ORDER":
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'người nhận ' || coalesce(nullif(s.receiver_name, ''), '(trống)') || ' · ' || coalesce(nullif(s.receiver_phone, ''), '(không SĐT)') as evidence,

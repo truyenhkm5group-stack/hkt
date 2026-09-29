@@ -16,6 +16,9 @@
 
 **Ba chiều không được suy ra lẫn nhau.** Đây là quy tắc gốc; mọi điều bên dưới chỉ là hệ quả.
 
+Đơn KHÔNG qua ĐVVC (đơn tạo tay ở tổ chức không có connector vận chuyển) lấy chiều logistics từ
+**phiếu giao có ký nhận** thay cho sự kiện Viettel Post — xem mục 11. Hai chiều còn lại không đổi.
+
 ## 2. Thuật ngữ
 
 - **Logistics state** — trạng thái vận đơn đã chuẩn hoá: `PENDING`, `PICKED_UP`, `IN_TRANSIT`,
@@ -90,6 +93,8 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 | `DELIVERED` | chưa đủ chứng từ / UNKNOWN / PARTIAL / DISPUTED | `DELIVERED` ở `ORDER_OUTCOME`, **`UNVERIFIED`** ở `ORDER_OUTCOME_VERIFIED` |
 | chỉ Pancake báo PAID / DELIVERED, không có chứng từ ĐVVC | bất kỳ | **không được kết luận `DELIVERED`** |
 | **không có mã vận đơn, không mã tra cứu, không sự kiện ĐVVC** | bất kỳ, kể cả đã thu > 100K | **`UNKNOWN`** — không phải `IN_TRANSIT`, không phải `DELIVERED` |
+| **đơn tạo tay (`erp-`), không vận đơn, có phiếu giao ký nhận còn hiệu lực** (mục 11) | bất kỳ — phiếu giao KHÔNG phải chứng từ tiền | **`DELIVERED`**; tiền: `UNVERIFIED` cho tới khi có chứng từ thanh toán |
+| đơn tạo tay, chưa có phiếu giao | bất kỳ | như cũ: `NOT_SHIPPED` (huỷ ⇒ `CANCELLED`) — không bao giờ `DELIVERED` |
 
 Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 50.000, `maxCodForFakeDelivery`
 100.000). Không hard-code số ở nơi khác.
@@ -123,7 +128,47 @@ vào tồn bán được. `RETURNING` là hàng đang trên đường về — t
 - Tính lại kết quả đơn ở dashboard / report / module khác thay vì dùng `ORDER_OUTCOME`.
 - Để refund hay đối soát thanh toán ghi đè sự kiện logistics.
 - Coi `501` của chiều hoàn là giao thành công.
+- Suy "đã thu tiền" / doanh thu thực thu / `payment_status` từ phiếu giao có ký nhận của đơn tay (mục 11).
 - Sửa giá trị kỳ vọng của contract test để CI xanh.
 
 Trạng thái vận đơn thô vẫn được dùng cho **màn hình theo dõi hành trình** và **chỉ số thời gian
 giao vận**; nhưng KPI kết quả đơn thì bắt buộc dùng `ORDER_OUTCOME`.
+
+## 11. Đơn không qua ĐVVC — đơn tạo tay ở tổ chức không có connector vận chuyển
+
+> **Quyết định G-ORDER — chủ nền tảng, 29/09/2026 (nguyên văn):** «G-ORDER: Có. Phiếu giao có ký nhận
+> được coi là bằng chứng giao thành công. Fulfillment/delivery tách riêng payment: khi giao thành công
+> thì trừ tồn và đánh Delivered; payment/revenue/payment_status vẫn theo chứng từ thanh toán, không tự
+> coi là đã thu tiền.»
+
+Phạm vi: CHỈ đơn tạo tay trên ERP (id tiền tố `erp-`, `lib/constants/manual-orders.ts`) và KHÔNG có
+dòng vận đơn nào. Đơn tay chỉ tạo được ở tổ chức không đồng bộ đơn (không Pancake). Tổ chức nhà (VNX,
+đơn Pancake + Viettel Post) **không đổi một hành vi nào**: vị ngữ mới không bao giờ khớp một đơn đồng
+bộ, và mọi mục 1–10 giữ nguyên.
+
+Ba chiều vẫn tách bạch (mục 1), chỉ khác NGUỒN của chiều logistics:
+
+| Chiều | Đơn tay: nguồn sự thật | Kết luận |
+|---|---|---|
+| **Logistics** | **Phiếu giao có ký nhận** còn hiệu lực (`order_delivery_notes`, `voided_at IS NULL`): mốc người nhận ký, tên người ký, người ghi (khoá `users.id`) | Có phiếu ⇒ `DELIVERED` — ngang hàng mã cuối `501` chiều đi của ĐVVC. Chưa có phiếu ⇒ CHƯA giao (`NOT_SHIPPED` như trước; huỷ ⇒ `CANCELLED`) — không suy từ gì khác |
+| **Payment / doanh thu** | Chứng từ thanh toán — KHÔNG phải phiếu giao | Phiếu giao **không** chứng minh đã thu tiền. Chưa có chứng từ ⇒ **chưa xác minh** (`UNVERIFIED` ở `ORDER_OUTCOME_VERIFIED`), không phải 0 và không phải "đã thu". Hôm nay ERP chưa có đường ghi chứng từ thanh toán cho đơn tay, nên mọi đơn tay đã giao đều là `UNVERIFIED` |
+| **Inventory** | Phiếu giao có ký nhận | Giao thành công ⇒ hàng ĐÃ rời kho: vào "đã xuất" (tồn thực tế giảm), thôi giữ ở khả dụng. Không lập phiếu XUẤT TAY cho đơn tay nữa — làm cả hai là trừ hai lần |
+
+Hệ quả bắt buộc:
+
+- `ORDER_OUTCOME` có ĐÚNG MỘT nhánh cho việc này, đứng đầu bảng và chỉ khớp đơn `erp-` không có vận
+  đơn mang phiếu còn hiệu lực. Không nhánh nào khác đổi.
+- Mọi con số **tiền** dựng trên `ORDER_OUTCOME = 'DELIVERED'` (doanh thu giao thành công, lợi nhuận,
+  marketer, lương / hoa hồng, landing, COD) **không** được tăng vì một đơn tay đã giao mà chưa có chứng
+  từ thanh toán. Nơi nào cần hiện giá trị hàng đã giao của đơn tay thì gắn nhãn **danh nghĩa**.
+- Phép so marketer (AGENTS 3.9) vẫn loại đơn tay.
+- Phiếu ghi nhầm được **huỷ** (bắt buộc lý do, có nhật ký), không xoá cứng; huỷ phiếu ⇒ đơn quay về
+  như chưa giao (`CONFIRMED`, hàng lại nằm trong khả dụng-giữ, tồn thực tế cộng lại).
+- Một đơn tối đa MỘT phiếu còn hiệu lực; chỉ đơn `CONFIRMED` mới xác nhận giao được (`NEW` / `WAITING`
+  / `CANCELLED` bị từ chối); đơn đã giao không sửa / huỷ được cho tới khi huỷ phiếu.
+
+**Đơn tay đã lỡ lập phiếu XUẤT TAY (`ISSUE`) trước bản này:** tồn thực tế của nó sẽ bị trừ hai lần
+khi xác nhận giao. ERP KHÔNG tự sửa dữ liệu kho. Trang đơn nêu phiếu ISSUE có tham chiếu tới đơn; người
+kho lập MỘT phiếu **Điều chỉnh tăng** (`ADJUSTMENT`, số dương) đúng bằng số lượng của phiếu ISSUE đó,
+tham chiếu ghi `hoàn phiếu xuất <mã phiếu> — đơn <mã đơn> đã xác nhận giao`, rồi mới (hoặc ngay sau khi)
+xác nhận giao. Phiếu ISSUE cũ giữ nguyên làm vết.

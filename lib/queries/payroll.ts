@@ -12,6 +12,7 @@ import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { MKT_LINE_UNIT_COST } from "@/lib/queries/marketer-price";
 import { workshopPenaltyByProduct } from "@/lib/queries/workshop-ledger";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
@@ -241,7 +242,8 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
     const s = schema.shipments;
     const pv = schema.productVariants;
     const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
+    // Doanh thu theo "delivered" chỉ trên đơn mà "giao" mang chứng cứ tiền — đơn tay giao bằng phiếu ký nhận đứng ngoài (G-ORDER).
+    const cond = mode === "delivered" ? sql`(${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY})` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
     /*
       ẢNH CHỤP NGƯỜI PHỤ TRÁCH FANPAGE TẠI MỐC ĐƠN LÊN.
 
@@ -389,14 +391,15 @@ async function productEconomics(period: Period) {
           `deliveredOrders`/`sentOrders` đếm `distinct` theo đơn nên không bị thổi lên; `shipping`
           chia theo `lineTotal` nên dòng tặng (lineTotal = 0) nhận đúng 0 phần cước.
         */
-        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${i.isBonus} = false), 0)`,
-        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        // Tiền (doanh thu + giá vốn đi cùng) chỉ trên đơn mà "giao" mang chứng cứ tiền — REVENUE_RECOGNIZED_ON_DELIVERY (G-ORDER).
+        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY} and ${i.isBonus} = false), 0)`,
+        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)`,
         /*
           GIÁ VỐN PHÍA MKT (chủ shop chốt 25/09/2026): cùng tập dòng, cùng số lượng với `cogsDelivered`,
           chỉ khác đơn giá — dòng có giá báo MKT đang hiệu lực vào ngày lên đơn (từ 01/09/2026) dùng giá
           báo, dòng còn lại dùng đúng giá vốn thật. Mã chưa khai giá báo ⇒ hai cột BẰNG NHAU.
         */
-        cogsDeliveredMkt: sql<number>`coalesce(sum(${i.quantity} * ${MKT_LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        cogsDeliveredMkt: sql<number>`coalesce(sum(${i.quantity} * ${MKT_LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)`,
         shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})), 0)`,
       })
       .from(i)

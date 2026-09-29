@@ -4,6 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { metricScope, openShippingSql, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { AD_MESSAGES, spendPeriod } from "@/lib/queries/ads-roas";
 import { loadAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
@@ -585,6 +586,8 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
       orderId: sql<string>`${o.id}`.as("p_order_id"),
       outcome: ORDER_OUTCOME_FAST.as("p_outcome"),
       leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("p_left_warehouse"),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("p_revenue_on_delivery"),
       /**
        * Ở cấp này mỗi DÒNG đã mang đúng một mã hàng, nên tra thẳng tỷ lệ của mã ấy — đi vòng qua
        * trung bình có trọng số theo đơn là tính lại một thứ đã biết, và cho số khác ở đơn nhiều mã.
@@ -622,9 +625,9 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
         notShippedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${open} and not ${facts.leftWarehouse}), 0)`,
         inTransitRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${open} and ${facts.leftWarehouse}), 0)`,
         bookedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${booked}), 0)`,
-        deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered}), 0)`,
+        deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered} and ${facts.revenueOnDelivery}), 0)`,
         cash: sql<number>`coalesce(sum(${facts.cash} * coalesce(${facts.shipShare}, 0)) filter (where ${delivered}), 0)`,
-        cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
+        cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered} and ${facts.revenueOnDelivery}), 0)`,
         // CÙNG một hàm với cấp chiến dịch, chỉ thêm CĂN CỨ PHÂN BỔ: tỷ trọng doanh thu dòng trong đơn.
         shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome, share: facts.shipShare }),
         // Phần đang treo — xem chú thích ở `aggregateByOrder`. Cước dùng CÙNG căn cứ phân bổ với cước đã phát sinh.

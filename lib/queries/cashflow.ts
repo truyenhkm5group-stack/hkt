@@ -4,6 +4,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { NOT_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
 
 /**
  * ───────────── DÒNG TIỀN & VỐN LƯU ĐỘNG ─────────────
@@ -106,7 +107,8 @@ async function buildCashflow(): Promise<CashflowReport> {
     .from(o)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
-    .where(sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0`));
+    // COD chờ về chỉ có nghĩa với đơn đi qua ĐVVC — đơn tay giao bằng phiếu ký nhận không có COD để chờ (G-ORDER).
+    .where(sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0 and ${NOT_MANUAL_ORDER}`));
 
   // ── Nhịp chi thực tế ──
   const [ads] = await db

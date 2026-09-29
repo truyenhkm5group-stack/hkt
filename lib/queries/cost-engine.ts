@@ -39,6 +39,7 @@ import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond, spreadExpe
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import type { Period } from "@/lib/search-params";
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
@@ -229,7 +230,8 @@ async function build(period: Period): Promise<RecognizedCosts> {
     */
     chayKhongJit(db, async (tx) => {
       const [cogs] = await tx
-        .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)` })
+        // Giá vốn đi CÙNG doanh thu: đơn tay giao bằng phiếu ký nhận chưa ghi nhận doanh thu (G-ORDER) nên chưa ghi giá vốn.
+        .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}), 0)` })
         .from(o)
         .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
         .where(and(...periodConds(o.insertedAt, period.from, period.to)));

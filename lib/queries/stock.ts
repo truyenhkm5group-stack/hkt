@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { ORDER_LEFT_WAREHOUSE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { validateOrdersForShipping } from "@/lib/queries/preship-validation";
@@ -76,7 +76,7 @@ const QTY = sql<number>`${oi.quantity}`;
  * 17 mẫu mã rơi như vậy (100 đơn trong 14 ngày gần nhất) ⇒ khả dụng bị báo DƯ 108 món, "còn thiếu"
  * và đề xuất đặt bị báo THIẾU tương ứng. Chưa có vận đơn nghĩa là CHƯA rời kho, không phải "chưa biết".
  */
-export const RESERVED_IN_WAREHOUSE = sql`(not coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false)
+export const RESERVED_IN_WAREHOUSE = sql`(not ${ORDER_LEFT_WAREHOUSE}
   and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP','SHIPPED'))`;
 
 /** Hàng đã rời kho và đang trên đường (chưa kết thúc) — nằm ngoài kho, chưa biết về hay không. */
@@ -106,8 +106,8 @@ export function variantSalesSubquery(db: Db, onlyVariantIds?: string[]) {
   return db
     .select({
       variantId: oi.variantId,
-      /** ĐÃ XUẤT KHO qua ĐVVC — căn cứ trạng thái vận đơn dựng từ sự kiện Viettel Post. */
-      shipped: sql<number>`coalesce(sum(${QTY}) filter (where ${SHIPMENT_LEFT_WAREHOUSE}), 0)`.as("out_shipped"),
+      /** ĐÃ XUẤT KHO — qua ĐVVC (trạng thái vận đơn dựng từ sự kiện Viettel Post) hoặc phiếu giao ký nhận của đơn tay. */
+      shipped: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_LEFT_WAREHOUSE}), 0)`.as("out_shipped"),
       /** Đã xuất, đang trên đường, chưa kết thúc. */
       inTransit: sql<number>`coalesce(sum(${QTY}) filter (where ${OUT_IN_TRANSIT}), 0)`.as("out_in_transit"),
       /** Đã xuất, phải quay về, kho chưa lập phiếu tái nhập. */

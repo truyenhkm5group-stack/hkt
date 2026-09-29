@@ -19,6 +19,7 @@ import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth"
 import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -228,6 +229,8 @@ function funnelFacts(db: Awaited<ReturnType<typeof getDb>>, where: SQL, dimColum
     .select({
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
       revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
+      /** Đơn tay giao bằng phiếu ký nhận: giao không kéo theo doanh thu (G-ORDER) — xem REVENUE_RECOGNIZED_ON_DELIVERY. */
+      revenueOnDelivery: sql<boolean>`${REVENUE_RECOGNIZED_ON_DELIVERY}`.as("f_revenue_on_delivery"),
       leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("f_left"),
       hasShipment: sql<boolean>`${s.id} is not null`.as("f_has_ship"),
       confirmedStage: sql<boolean>`${ORDER_EVER_CONFIRMED}`.as("f_confirmed"),
@@ -511,7 +514,7 @@ export async function getConversionByDimension(
         delivered: sql<number>`count(*) filter (where ${level} >= 5)`,
         returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         unfinished: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
-        deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED'), 0)`,
+        deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED' and ${facts.revenueOnDelivery}), 0)`,
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,
         preCancel: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
         postCancel: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and ${facts.confirmedStage})`,
