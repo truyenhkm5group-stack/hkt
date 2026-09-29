@@ -11,6 +11,7 @@
  * và chỉ cái thứ hai được phép đổi.
  */
 import { revalidatePath } from "next/cache";
+import { clearMemo } from "@/lib/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -62,6 +63,8 @@ export async function setReasonGroup(raw: unknown): Promise<{ ok: true } | { err
     reason: "Đổi cách xếp nhóm lý do hoàn — KHÔNG sửa một dòng lịch sử nào",
   });
 
+  // Báo cáo lý do hoàn nhớ đệm 90 giây — đổi nhóm phải thấy NGAY trên báo cáo.
+  clearMemo();
   revalidatePath("/reports/returns");
   revalidatePath("/work/settings");
   return { ok: true };

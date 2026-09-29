@@ -53,7 +53,8 @@ import {
 import { rescueRate, type RescueRate } from "@/lib/constants/return-rescue";
 import { timeBasisColumnSql, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { Period } from "@/lib/search-params";
-import { NO_ORDER_VALUE_FILTER, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
+import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
+import { memo } from "@/lib/cache";
 
 const o = schema.orders;
 
@@ -315,7 +316,35 @@ async function baseRows(f: ReasonFilter) {
   };
 }
 
+/**
+ * ═══ ĐỆM 90 GIÂY (AGENTS mục 2), KHOÁ GỒM MỌI TRƯỜNG MÀ HÀM ĐỌC ═══
+ *
+ * /reports/returns gọi hàm này mỗi lượt mở (kỳ này) và tầng quyết định gọi thêm cho kỳ trước; trước
+ * đây không có đệm nên mỗi lượt xem trả lại ~1–1,4 s (ops perf-probe 29/09/2026). Khoá gồm ĐỦ các
+ * trường bộ lọc mà `baseRows` + thân hàm đọc — thiếu một trường là hai bộ lọc khác nhau nhận cùng một
+ * kết quả. Các trường riêng của drilldown (`reason`, `group`, `productCode`, `limit`) chỉ `chonCaHoan`
+ * đọc, không đi qua hàm này.
+ *
+ * Người vừa XÁC NHẬN lý do hoặc SỬA NHÓM lý do phải thấy số mới ngay: hai action ấy gọi `clearMemo()`.
+ * Kết quả trả về là đối tượng DÙNG CHUNG giữa các lượt đọc — nơi nhận không được sửa tại chỗ.
+ */
 export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReasonReport> {
+  const key = [
+    "return-reason-report",
+    f.basis ?? "-",
+    f.period.from?.toISOString() ?? "-",
+    f.period.to?.toISOString() ?? "-",
+    orderValueKey(f.value ?? NO_ORDER_VALUE_FILTER),
+    (f.codes ?? []).join("+"),
+    (f.variantKeys ?? []).join("+"),
+    (f.marketerIds ?? []).join("+"),
+    (f.groups ?? []).join("+"),
+    (f.reasons ?? []).join("+"),
+  ].join(":");
+  return memo(key, 90_000, () => dungBaoCaoLyDo(f));
+}
+
+async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
   const [{ basis, rows: tatCa }, ghiDeNhom] = await Promise.all([baseRows(f), getReasonGroupOverrides()]);
   /*
     BẢNG TRA NHÓM dựng MỘT lần cho cả lượt báo cáo, đã áp phần ghi đè của chủ shop. Mọi chỗ xếp
