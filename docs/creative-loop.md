@@ -737,6 +737,17 @@ Chủ shop: *"các mẫu đang chạy thì thêm nút cho đăng lại camp đ�
   nguồn ghi ở `plan.republishOf` của lô và lý do của mẫu. Thiết kế mới giữ đúng mã TK cũ.
 - Hỏng trước khi có nhóm / mẩu nào trên Facebook ⇒ mẫu mới bị gạt + lô đánh dấu hỏng, không để dòng "đang đăng" treo.
 
+## 5n. Giá thầu trong setup camp — autobid · bid cap · cost cap (chủ shop 29/09/2026)
+
+- `CampaignSetup.bid` ∈ `AUTO` (chi phí thấp nhất) · `BID_CAP` (giới hạn giá thầu mỗi lượt đấu) · `COST_CAP` (giới hạn chi phí
+  trung bình mỗi kết quả) · `null` (như mẫu — mọi setup lưu trước ngày này). Hai kiểu giới hạn bắt buộc `bidAmountVnd` (≥ 1.000đ,
+  ≤ ngân sách ngày); `parseCampaignSetup` gặp kiểu giới hạn thiếu số ⇒ như mẫu, không đoán một con số.
+- `applyCampaignSetup` áp giá thầu người chọn ở CUỐI — thắng mọi lần "về giá tự động" khi đổi mục tiêu; con số quy sang đơn vị
+  nhỏ nhất của tiền tài khoản bằng `vndToFbMinor` do nơi đăng truyền vào (hàm vẫn thuần).
+- Tên nhóm theo luật: `adsetNameFor(tên, mục tiêu, bid_strategy)` đổi đoạn cuối thành `autobid` · `bidcap` · `costcap` — máy chủ
+  (tên tự đặt) và bản xem trước trên màn hình dùng CHUNG một hàm.
+- Có ở mọi hộp setup: Đăng camp, Đăng lại camp. Mã băm phiếu duyệt KHÔNG gồm setup (như trước) nên lô đang đăng dở không đổi.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

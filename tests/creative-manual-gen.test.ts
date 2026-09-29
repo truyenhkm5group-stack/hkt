@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, adsetNameForGoal, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, DESIGN_DNA_KEYS, adsetNameFor, adsetNameForGoal, DESIGN_DNA_VOCAB, IMAGE_EDIT_LAYOUT_PROMPT, describeImageEdit, hasImageEdit, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { campaignSetupSchema } from "@/lib/validation/creative";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import type { VariantCaptioner } from "@/lib/creative/caption";
@@ -202,7 +203,7 @@ export function testCreativeManualGenPure() {
   assert.match(winNameProblem("VNX2 - 1_27/09_TEST_Q005_3", w5, idx) ?? "", /còn chữ TEST/, "chữ TEST thắng mọi mã trong luật quy tiền ads ⇒ chặn");
   assert.match(winNameProblem("VNX2 - 1_27/09_Hải An_3", w5, idx) ?? "", /không mang mã Q005/);
 
-  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", performanceGoal: null, budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
+  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", performanceGoal: null, budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null, marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST", bid: null, bidAmountVnd: null };
   assert.match(describeCampaignSetup({ ...goc, marketerId: "mk-trinh" }, { marketer: "Tuyết Trinh (TRINH)" }), /MKTer Tuyết Trinh \(TRINH\) · .*100\.000đ\/ngày/, "câu mô tả setup nói MKTer và ngân sách NGÀY");
   assert.deepEqual(parseCampaignSetup({ ...goc, marketerId: " mk-trinh ", startAt: "2026-09-28T08:00:00+07:00" }), { ...goc, marketerId: "mk-trinh", startAt: "2026-09-28T08:00:00+07:00" }, "MKTer + giờ bắt đầu lưu cùng bản nháp");
   assert.deepEqual(parseCampaignSetup({ ...goc, startAt: "không phải ngày" }), goc, "giờ hỏng ⇒ chạy ngay, không vỡ bản nháp");
@@ -241,6 +242,29 @@ export function testCreativeManualGenPure() {
   assert.equal(parseCampaignSetup(setupCu)?.performanceGoal, null, "setup lưu trước khi có ô này ⇒ như mẫu");
   assert.equal(parseCampaignSetup({ ...goc, performanceGoal: "LINK_CLICKS" })?.performanceGoal, null, "mã lạ ⇒ như mẫu, không gửi mã chưa khai");
   assert.match(describeCampaignSetup({ ...goc, performanceGoal: "CONVERSATIONS" }), /Tối đa hóa số cuộc trò chuyện/);
+  // GIÁ THẦU (chủ shop 29/09/2026: "manual bidcap hoặc autobid"): lựa chọn người đứng CUỐI, thắng mọi lần "về tự động".
+  const bc = applyCampaignSetup(mau, { ...goc, objective: "MESSAGES", bid: "BID_CAP", bidAmountVnd: 25_000 }, (vnd) => vnd * 100);
+  assert.deepEqual([bc.adset.bidStrategy, bc.adset.bidAmount], ["LOWEST_COST_WITH_BID_CAP", "2500000"], "bid cap + con số quy sang đơn vị nhỏ nhất của tiền tài khoản");
+  const cc = applyCampaignSetup(mau, { ...goc, performanceGoal: "MESSAGING_PURCHASE_CONVERSION", bid: "COST_CAP", bidAmountVnd: 60_000 });
+  assert.deepEqual([cc.adset.bidStrategy, cc.adset.bidAmount], ["COST_CAP", "60000"], "đổi mục tiêu + cost cap ⇒ cost cap thắng lần về tự động");
+  const au = applyCampaignSetup({ ...mau, adset: { ...mau.adset, optimizationGoal: "VALUE" } }, { ...goc, performanceGoal: "VALUE", bid: "AUTO" });
+  assert.deepEqual([au.adset.bidStrategy, au.adset.bidAmount], ["LOWEST_COST_WITHOUT_CAP", null], "autobid bỏ giá thầu của mẫu");
+  assert.deepEqual([applyCampaignSetup(mau, goc).adset.bidStrategy], [mau.adset.bidStrategy], "không chọn giá thầu ⇒ như mẫu");
+  assert.deepEqual(parseCampaignSetup({ ...goc, bid: "BID_CAP", bidAmountVnd: 30_000 }), { ...goc, bid: "BID_CAP", bidAmountVnd: 30_000 });
+  assert.deepEqual([parseCampaignSetup({ ...goc, bid: "BID_CAP", bidAmountVnd: null })?.bid, parseCampaignSetup({ ...goc, bid: "AUTO", bidAmountVnd: 9 })?.bidAmountVnd], [null, null], "cap thiếu số ⇒ như mẫu; autobid không mang số");
+  const { bid: _b, bidAmountVnd: _ba, ...setupTruocGiaThau } = goc;
+  void _b;
+  void _ba;
+  assert.deepEqual(parseCampaignSetup(setupTruocGiaThau), goc, "setup lưu trước khi có ô giá thầu ⇒ như mẫu");
+  assert.match(describeCampaignSetup({ ...goc, bid: "COST_CAP", bidAmountVnd: 40_000 }), /cost cap\) 40\.000đ/);
+  assert.equal(campaignSetupSchema.safeParse({ ...goc, bid: "BID_CAP", bidAmountVnd: null }).success, false, "cap phải có con số");
+  assert.equal(campaignSetupSchema.safeParse({ ...goc, bid: "BID_CAP", bidAmountVnd: 150_000 }).success, false, "giới hạn giá thầu > ngân sách ngày ⇒ từ chối");
+  assert.equal(campaignSetupSchema.safeParse({ ...goc, bid: "COST_CAP", bidAmountVnd: 40_000 }).success, true);
+  // Tên nhóm theo giá thầu (luật tên: đoạn cuối = autobid · bidcap · costcap).
+  assert.equal(adsetNameFor("MESS_VN_18-65+_Nữ_costcap", "CONVERSATIONS", "LOWEST_COST_WITH_BID_CAP"), "MESS_VN_18-65+_Nữ_bidcap");
+  assert.equal(adsetNameFor("MESS_VN_18-65+_Nữ_costcap", "MESSAGING_PURCHASE_CONVERSION", "COST_CAP"), "MESSMUA_VN_18-65+_Nữ_costcap", "đổi mục tiêu rồi chọn cost cap ⇒ đoạn cuối theo lựa chọn");
+  assert.equal(adsetNameFor("MESS_VN_18-65+_Nữ_costcap", "MESSAGING_PURCHASE_CONVERSION", null), "MESSMUA_VN_18-65+_Nữ_autobid", "như mẫu ⇒ luật đổi mục tiêu cũ");
+  assert.equal(adsetNameFor("Nhóm tôi đặt", null, "COST_CAP"), "Nhóm tôi đặt", "tên người gõ ⇒ không sửa");
   // Tên nhóm theo mục tiêu nhóm THẬT sẽ mang.
   assert.equal(setupOptimizationGoal(goc), null);
   assert.equal(setupOptimizationGoal({ objective: "MESSAGES", performanceGoal: null }), "CONVERSATIONS");
@@ -807,7 +831,7 @@ export async function testCreativeManualGenDb(db: Db) {
     await drawManualGen(db, { genId: s6.ok ? s6.genId : "", imageClient });
     const [anh6] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s6.ok ? s6.genId : ""));
     await reviewManualGenImage(db, { imageId: anh6.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
-    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", performanceGoal: null, budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST" };
+    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", performanceGoal: null, budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE", marketerId: null, marketerCode: null, startAt: null, campaignKind: "TEST", bid: null, bidAmountVnd: null };
     // Lưu setup cùng bản nháp ⇒ hàng đợi đọc lại đúng setup.
     assert.ok((await saveManualGenDraft(db, { imageId: anh6.id, headline: "H6", primaryText: "Nội dung 6", names: { campaign: "", adset: "", ad: "" }, setup: setup6 }, actor, new Date())).ok);
     assert.deepEqual((await trongHang(anh6.id))?.img.campaignSetup, setup6, "setup camp lưu cùng bài ở hàng đợi");
@@ -834,7 +858,7 @@ export async function testCreativeManualGenDb(db: Db) {
 
     // (f6c) ĐĂNG LẠI CAMP (chủ shop 29/09/2026: scale mẫu đang chạy sang TKQC / fanpage khác) — camp MỚI từ ảnh + câu chữ của
     //       mẫu LIVE, trên đúng TKQC / fanpage / ngân sách đã chọn, lô INSTANT riêng ghi nguồn; mẫu gốc không bị đụng.
-    const setupScale: CampaignSetup = { ...setup6, adAccountId: "8880077", pageId: "9990077", budgetVnd: 200_000 };
+    const setupScale: CampaignSetup = { ...setup6, adAccountId: "8880077", pageId: "9990077", budgetVnd: 200_000, bid: "BID_CAP", bidAmountVnd: 30_000 };
     const rpIn = (variantId: string, setup: CampaignSetup) => ({ variantId, headline: "Đầm đi biển — bản scale", primaryText: "Nhắn shop để được tư vấn size.", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null, scheduleAt: null, setup });
     campaignsSent.length = 0;
     adsetsSent.length = 0;
@@ -848,6 +872,7 @@ export async function testCreativeManualGenDb(db: Db) {
       assert.deepEqual(campaignsSent, [{ account: "8880077", objective: "OUTCOME_ENGAGEMENT" }], "chiến dịch mới trong TKQC đã chọn");
       assert.equal(specsSent[0]?.page_id, "9990077", "bài đứng tên fanpage đã chọn");
       assert.equal(adsetsSent[0]?.budget, 200_000, "ngân sách ngày theo setup");
+      assert.deepEqual([adsetsSent[0]?.template.bidStrategy, adsetsSent[0]?.template.bidAmount], ["LOWEST_COST_WITH_BID_CAP", "30000"], "bid cap người chọn tới đúng nhóm gửi Facebook");
       const [nv] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, rp.variantId));
       assert.equal(nv.imageId, v6.imageId, "cùng ảnh");
       assert.equal(nv.headline, "Đầm đi biển — bản scale", "câu chữ người sửa");

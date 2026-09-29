@@ -137,6 +137,17 @@ export const CAMPAIGN_GENDER_LABEL: Record<CampaignGender, string> = { ALL: "T�
 /** Một kết quả tìm vị trí địa lý (Graph `search?type=adgeolocation`) — khai ở đây để hộp soạn bài phía trình duyệt đọc được. */
 export type GeoSearchHit = { key: string; name: string; type: "region" | "city"; region: string | null };
 
+/**
+ * CHIẾN LƯỢC GIÁ THẦU của nhóm (chủ shop 29/09/2026: "manual bidcap hoặc autobid"). `AUTO` = chi phí thấp nhất, Facebook tự thầu
+ * · `BID_CAP` = giới hạn giá thầu mỗi lượt đấu (thầu tay) · `COST_CAP` = giới hạn chi phí TRUNG BÌNH mỗi kết quả. Hai kiểu giới hạn
+ * cần một con số (VND / kết quả, quy sang đơn vị nhỏ nhất của tiền tài khoản lúc tạo nhóm). `null` trong setup = như mẫu.
+ */
+export const CAMPAIGN_BIDS = ["AUTO", "BID_CAP", "COST_CAP"] as const;
+export type CampaignBid = (typeof CAMPAIGN_BIDS)[number];
+export const CAMPAIGN_BID_LABEL: Record<CampaignBid, string> = { AUTO: "Tự động (chi phí thấp nhất)", BID_CAP: "Giới hạn giá thầu (bid cap)", COST_CAP: "Giới hạn chi phí / kết quả (cost cap)" };
+/** Giá trị `bid_strategy` của Facebook cho từng lựa chọn. */
+export const CAMPAIGN_BID_STRATEGY: Record<CampaignBid, string> = { AUTO: "LOWEST_COST_WITHOUT_CAP", BID_CAP: "LOWEST_COST_WITH_BID_CAP", COST_CAP: "COST_CAP" };
+
 /** Một vị trí địa lý đã chọn (khoá Facebook trả về từ tìm kiếm `adgeolocation`). */
 export type GeoPick = { key: string; name: string; type: "region" | "city" };
 
@@ -163,6 +174,10 @@ export type CampaignSetup = {
   startAt: string | null;
   /** `TEST` = tên mang chữ TEST · `WIN` = tên mang mã hàng của ảnh (tiền ads quy về mã). */
   campaignKind: CampaignKind;
+  /** Chiến lược giá thầu. `null` = như mẫu (setup lưu trước khi có ô này). */
+  bid: CampaignBid | null;
+  /** Con số giới hạn (VND / kết quả) khi `bid` là `BID_CAP` / `COST_CAP`; `null` với `AUTO` / như mẫu. */
+  bidAmountVnd: number | null;
 };
 
 /** Một lựa chọn (MKTer, mã) trong khối setup — MỘT dòng mỗi mã của mỗi người: `code` = mã vào tên chiến dịch (dẫn xuất từ bí danh, máy chủ tính). */
@@ -206,7 +221,17 @@ export function pickMarketerOption(options: readonly MarketerOption[], marketerI
 }
 
 /** Giới hạn ô nhập — tuổi theo quy định của Facebook (13–65, 65 = "65+"); ngân sách tối thiểu để một ngày có phân phối. */
-export const CAMPAIGN_SETUP_LIMITS = { minBudgetVnd: 20_000, minAge: 18, maxAge: 65, maxGeo: 25 } as const;
+export const CAMPAIGN_SETUP_LIMITS = { minBudgetVnd: 20_000, minAge: 18, maxAge: 65, maxGeo: 25, minBidVnd: 1_000 } as const;
+
+/** `bid_strategy` nhóm thật sẽ mang theo lựa chọn giá thầu; `null` = như mẫu. Hàm THUẦN. */
+export function setupBidStrategy(s: Pick<CampaignSetup, "bid">): string | null {
+  return s.bid ? CAMPAIGN_BID_STRATEGY[s.bid] : null;
+}
+
+/** Setup cần con số giới hạn giá thầu không. Hàm THUẦN. */
+export function bidNeedsAmount(bid: CampaignBid | null): boolean {
+  return bid === "BID_CAP" || bid === "COST_CAP";
+}
 
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) ? v : null;
@@ -234,7 +259,12 @@ export function parseCampaignSetup(raw: unknown): CampaignSetup | null {
   const campaignKind: CampaignKind = r.campaignKind === "WIN" ? "WIN" : "TEST";
   // Setup lưu trước khi có ô này ⇒ không có trường ⇒ `null` (như mẫu). REACH không có mục tiêu tin nhắn.
   const performanceGoal = objective !== "REACH" && (PERFORMANCE_GOALS as readonly string[]).includes(r.performanceGoal as string) ? (r.performanceGoal as PerformanceGoal) : null;
-  return { adAccountId, pageId, objective, performanceGoal, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, marketerCode, startAt, campaignKind };
+  // Giá thầu: setup lưu trước khi có ô này ⇒ `null` (như mẫu). Kiểu giới hạn mà thiếu con số ⇒ như mẫu — không đoán một con số.
+  const bid0 = (CAMPAIGN_BIDS as readonly string[]).includes(r.bid as string) ? (r.bid as CampaignBid) : null;
+  const amount = num(r.bidAmountVnd);
+  const bid = bidNeedsAmount(bid0) && (amount === null || amount <= 0) ? null : bid0;
+  const bidAmountVnd = bidNeedsAmount(bid) ? amount : null;
+  return { adAccountId, pageId, objective, performanceGoal, budgetVnd, geo, ageMin: num(r.ageMin), ageMax: num(r.ageMax), gender, marketerId, marketerCode, startAt, campaignKind, bid, bidAmountVnd };
 }
 
 /** Câu ngắn mô tả một setup — cho sổ ghi / hàng đợi. Hàm THUẦN. */
@@ -243,5 +273,6 @@ export function describeCampaignSetup(s: CampaignSetup, names: { account?: strin
   const tuoi = s.ageMin === null && s.ageMax === null ? "tuổi như mẫu" : `${s.ageMin ?? "?"}–${s.ageMax === 65 ? "65+" : (s.ageMax ?? "?")}`;
   const gioi = s.gender === null ? "giới tính như mẫu" : CAMPAIGN_GENDER_LABEL[s.gender];
   const mkt = s.marketerId ? `MKTer ${names.marketer || s.marketerId}` : "chưa chọn MKTer";
-  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, s.campaignKind === "WIN" ? "camp mã win" : "camp TEST", CAMPAIGN_OBJECTIVE_LABEL[s.objective], ...(s.performanceGoal ? [PERFORMANCE_GOAL_LABEL[s.performanceGoal]] : []), `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, geo, tuoi, gioi].join(" · ");
+  const thau = s.bid === null ? "giá thầu như mẫu" : bidNeedsAmount(s.bid) && s.bidAmountVnd !== null ? `${CAMPAIGN_BID_LABEL[s.bid]} ${s.bidAmountVnd.toLocaleString("vi-VN")}đ` : CAMPAIGN_BID_LABEL[s.bid];
+  return [`TKQC ${names.account || s.adAccountId}`, `page ${names.page || s.pageId}`, mkt, s.campaignKind === "WIN" ? "camp mã win" : "camp TEST", CAMPAIGN_OBJECTIVE_LABEL[s.objective], ...(s.performanceGoal ? [PERFORMANCE_GOAL_LABEL[s.performanceGoal]] : []), `${s.budgetVnd.toLocaleString("vi-VN")}đ/ngày`, thau, geo, tuoi, gioi].join(" · ");
 }

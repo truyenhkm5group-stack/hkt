@@ -2,7 +2,7 @@ import { z } from "zod";
 import { GENE_LABEL, GENE_VOCAB, IMAGE_MODES, IMAGE_QUALITIES, IMAGE_SIZES, CAMPAIGN_NAME_MAX_CHARS, MANUAL_DESIGN, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_UPLOAD_SOURCE_KINDS, normalizeCreativeConfig, type ConfigProblem, type CreativeLoopConfig, IMAGE_EDIT, IMAGE_EDIT_LAYOUTS } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
 import { OUTPUT_STYLE_KEYS, STUDIO_LIMITS } from "@/lib/constants/creative-studio";
-import { CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS } from "@/lib/constants/campaign-setup";
+import { CAMPAIGN_BIDS, CAMPAIGN_GENDERS, CAMPAIGN_KINDS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS, PERFORMANCE_GOALS, bidNeedsAmount } from "@/lib/constants/campaign-setup";
 
 /**
  * ═══════════ VÒNG MẪU — LƯỢC ĐỒ ĐẦU VÀO CỦA HAI MÀN HÌNH (nguồn ảnh · cấu hình) ═══════════
@@ -242,8 +242,12 @@ export const campaignSetupSchema = z
     marketerCode: z.string().trim().min(1).max(40).nullable().default(null),
     startAt: z.string().datetime({ offset: true, message: "Giờ bắt đầu không hợp lệ" }).nullable().default(null),
     campaignKind: z.enum(CAMPAIGN_KINDS).default("TEST"),
+    bid: z.enum(CAMPAIGN_BIDS).nullable().default(null),
+    bidAmountVnd: z.number().int("Giá thầu là số nguyên").min(CAMPAIGN_SETUP_LIMITS.minBidVnd, `Giới hạn giá thầu tối thiểu ${CAMPAIGN_SETUP_LIMITS.minBidVnd.toLocaleString("vi-VN")}đ`).nullable().default(null),
   })
   .strict()
+  .refine((s) => !bidNeedsAmount(s.bid) || s.bidAmountVnd !== null, "Nhập con số giới hạn (VND / kết quả) cho kiểu giá thầu đã chọn")
+  .refine((s) => s.bidAmountVnd === null || s.bidAmountVnd <= s.budgetVnd, "Giới hạn giá thầu không được lớn hơn ngân sách ngày")
   .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến")
   .refine((s) => s.objective !== "REACH" || s.performanceGoal === null, "Mục tiêu Tiếp cận không đi với mục tiêu hiệu quả tin nhắn — chọn lại một trong hai");
 
