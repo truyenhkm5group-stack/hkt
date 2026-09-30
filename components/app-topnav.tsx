@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Suspense, useState } from "react";
 import { ChevronDown, Menu } from "lucide-react";
 import type { Role } from "@/db/schema";
-import { activeHrefOf, bellShowsSharedQueue, iconOf, visibleGroups, type NavZone } from "@/components/app-sidebar";
+import { bellShowsSharedQueue, iconOf, menuActiveHref, visibleGroups, type NavZone } from "@/components/app-sidebar";
 import { AiCopilot } from "@/components/ai-copilot";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { GlobalSearch } from "@/components/global-search";
@@ -75,7 +75,7 @@ export type TopNavBrand = { name: string; logoUrl: string | null } | null;
 
 export function AppTopNav({ user, brand = null }: { user: TopNavUser; brand?: TopNavBrand }) {
   const pathname = usePathname();
-  const activeHref = activeHrefOf(pathname, user.dynamicPages?.map((d) => d.href));
+  const activeHref = menuActiveHref(pathname, user);
   const groups = visibleGroups(user);
   const [sheetOpen, setSheetOpen] = useState(false);
 

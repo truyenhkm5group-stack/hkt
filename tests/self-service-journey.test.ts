@@ -23,7 +23,9 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
+import { allowedNavItems, hubTools } from "@/components/app-sidebar";
 import { FOOD_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/food-commerce";
+import { hubMembers } from "@/lib/constants/department-modules";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
@@ -86,7 +88,14 @@ function testPure() {
   const v = validateBlueprint(FOOD_COMMERCE_BLUEPRINT);
   assert.ok(v.ok, JSON.stringify(v.errors));
   assert.equal(BUSINESS_TYPE_SPEC.food.templateKey, "food-commerce");
-  for (const m of ["customers", "products", "orders", "inventory", "logistics", "customer_care", "ai_sales"] as const) assert.ok(FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm thiếu module ${m}`);
+  for (const m of ["customers", "products", "orders", "inventory", "ai_sales"] as const) assert.ok(FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm thiếu module ${m}`);
+  // Chủ shop 30/09/2026: «Vận chuyển» và «CSKH» dựng trên Viettel Post / Pancake của tổ chức nhà — mẫu không bật, và không
+  // vai trò nào của mẫu cầm quyền của hai module ấy (quyền chết trông như quyền thật trên trang vai trò).
+  for (const m of ["logistics", "customer_care"] as const) assert.ok(!FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm không bật module ${m}`);
+  for (const r of FOOD_COMMERCE_BLUEPRINT.roles ?? []) {
+    const chet = r.permissions.filter((p) => ["shipments:view", "shipments:manage", "cs:view", "cs:manage"].includes(p));
+    assert.deepEqual(chet, [], `vai trò ${r.key} cầm quyền của module mẫu không bật`);
+  }
   const keys = (FOOD_COMMERCE_BLUEPRINT.fields ?? []).filter((f) => f.objectKey === "product").map((f) => f.key);
   for (const k of ["package_size", "net_weight", "selling_unit", "storage_instruction", "usage_instruction", "food_category"]) assert.ok(keys.includes(k), `thiếu field ${k}`);
   const text = JSON.stringify(FOOD_COMMERCE_BLUEPRINT);
@@ -229,9 +238,18 @@ async function testJourney() {
   const org = await findOrganization(ORG);
   assert.ok(org && org.status === "ACTIVE" && org.publishState === "DRAFT", "tổ chức mới qua /start là BẢN NHÁP");
   const enabled = await getEnabledModules(ORG);
-  for (const m of ["ai_sales", "orders", "inventory", "customers", "products", "logistics", "customer_care", "work"]) assert.ok(enabled.has(m as never), `module ${m} phải bật`);
+  for (const m of ["ai_sales", "orders", "inventory", "customers", "products", "work"]) assert.ok(enabled.has(m as never), `module ${m} phải bật`);
+  for (const m of ["logistics", "customer_care"]) assert.equal(enabled.has(m as never), false, `module ${m} KHÔNG bật ở mẫu thực phẩm`);
   assert.equal((await getEnabledModules(home.code)).has("ai_sales"), false, "AI bán hàng TẮT ở tổ chức nhà (0180)");
   const admin = await adminOf(ORG, ADMIN_EMAIL);
+  // Menu THẬT của quản trị tổ chức thực phẩm (module phân giải từ CSDL): một mục «Tuỳ biến nâng cao» thay mười công cụ dựng
+  // cấu hình, không trang nào của connector chỉ-nhà; các mục quản trị còn lại đứng riêng.
+  const menu = allowedNavItems(admin).map((i) => i.href);
+  assert.ok(menu.includes("/settings/advanced"), `menu tổ chức thực phẩm có «Tuỳ biến nâng cao»: ${menu.join(",")}`);
+  for (const h of hubMembers("/settings/advanced")) assert.ok(!menu.includes(h.href), `${h.href} gom vào «Tuỳ biến nâng cao», không đứng riêng`);
+  assert.equal(hubTools("/settings/advanced", admin).length, 10, "quản trị dùng được đủ mười công cụ trong trang gom");
+  for (const h of ["/shipments", "/cs", "/data-quality", "/products/performance", "/inventory/packing"]) assert.ok(!menu.includes(h), `${h} không hiện ở tổ chức thực phẩm`);
+  for (const h of ["/settings/users", "/audit", "/settings/modules", "/settings/connections", "/setup", "/settings/notifications"]) assert.ok(menu.includes(h), `${h} vẫn đứng riêng`);
 
   await withOrganization(ORG, async () => {
     const db = await getDb();

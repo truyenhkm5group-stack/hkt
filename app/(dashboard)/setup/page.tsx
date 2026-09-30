@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Circle, CircleDashed, ExternalLink } from "lucide-react";
+import { visibleGroups } from "@/components/app-sidebar";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { getDb, schema } from "@/db";
-import { can, requirePermission } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { getBranding } from "@/lib/branding/service";
-import { MODULE_GROUPS } from "@/lib/constants/department-modules";
-import { moduleDef, moduleOfPath, type ModuleKey } from "@/lib/constants/platform-modules";
+import { moduleDef, type ModuleKey } from "@/lib/constants/platform-modules";
 import { env } from "@/lib/env";
 import { getGettingStarted } from "@/lib/onboarding/progress";
 import { PUBLISH_PERMISSION, publishChecklist } from "@/lib/platform/publish";
@@ -44,13 +44,9 @@ export default async function SetupPage() {
   ]);
   const pub = list.publication;
   const modules = (user.modules ?? []) as ModuleKey[];
-  const nav = MODULE_GROUPS.map((g) => ({
-    label: g.label,
-    items: g.items.filter((it) => {
-      const m = moduleOfPath(it.href);
-      return (!m || modules.includes(m)) && (!it.permission || can(user, it.permission));
-    }),
-  })).filter((g) => g.items.length > 0);
+  // Xem trước menu = ĐÚNG menu người này thấy (`visibleGroups`): cùng luật module, quyền, nguồn số liệu và trang gom của
+  // tổ chức khách — không lọc lần thứ hai ở đây (AGENTS.md mục 28).
+  const nav = visibleGroups(user);
   const erpUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/login` : null;
   const stateLabel = pub.state === "PUBLISHED" ? "ĐÃ XUẤT BẢN" : pub.state === "DRAFT" ? "BẢN NHÁP" : "Đang chạy";
 
