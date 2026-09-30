@@ -48,6 +48,12 @@ PITR_RPO_DO_GIAY=$((PITR_ARCHIVE_TIMEOUT * 2))  # đoạn gần nhất cũ hơn 
 PITR_GIU_BAN_NEN=2                      # giữ 2 bản nền + mọi WAL từ bản nền CŨ NHẤT còn giữ
 PITR_PHUT_CRON_NEN=27                   # 10 phút sau lượt đêm của nhà (phút 17), cùng khung GIO_BAT_DAU–GIO_KET_THUC
 PITR_PHUT_DAY_WAL="8,23,38,53"          # mỗi 15 phút, lệch khỏi phút 0 và khỏi mọi phút của erp-backup.sh
+# Diễn tập PITR có trần RAM RIÊNG (không dùng hằng số của restore-drill nhà — phần đó khoá bằng BAM_PHAN_NHA). Đo 30/09/2026:
+# VPS 1.963 MB, RAM «available» dao động 690–700 MB giờ thấp điểm ⇒ ngưỡng 700 của restore-drill bỏ qua diễn tập PITR hai lần
+# liền. Khôi phục một cụm ~1 GB với shared_buffers mặc định (128 MB) không cần 512 MB; 384 MB + ngưỡng 512 MB vẫn chừa
+# ≥ 128 MB cho production (còn 1,7 GB swap), và diễn tập chạy được đúng lúc cần.
+BO_NHO_DIEN_TAP_PITR=384m
+RAM_TOI_THIEU_DIEN_TAP_PITR_MB=512
 PITR_TUOI_NEN_VANG_GIO=36               # bản nền mới nhất cũ hơn chừng này ⇒ vàng (bỏ lỡ một đêm)
 PITR_NGOAI_MAY_VANG_PHUT=45             # lượt đẩy WAL thành công gần nhất cũ hơn chừng này ⇒ vàng (lỡ 2 lượt)
 PITR_TOC_DO_NEN="32M"                   # trần đọc của pg_basebackup — máy 2 nhân đang phục vụ người dùng thật
@@ -478,7 +484,7 @@ chay_pha_pitr() { # $1=tên pha $2=mốc epoch
   local pha="$1" moc="$2" i trang_thai nhat_ky
   PHA_CONTAINER="erp-pitr-drill-$(date +%s)-$pha"; PHA_LY_DO=""
   if ! docker run -d --name "$PHA_CONTAINER" --label "$PITR_NHAN_DIEN_TAP" --network none \
-    --memory "$BO_NHO_DIEN_TAP" --memory-swap "$BO_NHO_DIEN_TAP" --cpus 1 --pids-limit 256 \
+    --memory "$BO_NHO_DIEN_TAP_PITR" --memory-swap "$BO_NHO_DIEN_TAP_PITR" --cpus 1 --pids-limit 256 \
     -v "$DRILL_PITR_THU_MUC/data:/var/lib/postgresql/data" -v "$PITR_WAL:/pitr-wal:ro" "$PITR_ANH_DIEN_TAP" \
     postgres -c archive_mode=off -c shared_buffers=32MB -c fsync=off -c hot_standby=on \
     -c "restore_command=gzip -dc /pitr-wal/%f.gz > %p" -c "recovery_target_time=$(moc_pg "$moc")" \
@@ -515,6 +521,9 @@ doc_danh_dau() { # $1=nonce
 dung_pha() { docker stop -t 60 "$PHA_CONTAINER" >/dev/null 2>&1 || true; docker rm -f -v "$PHA_CONTAINER" >/dev/null 2>&1 || true; }
 
 ghi_dien_tap_pitr() { # $1=kết quả $2=lý do
+  # Lý do BỎ QUA / HỎNG ra kênh tóm tắt: kết quả chi tiết bị mã hoá, và "diễn tập hỏng" không kèm lý do thì người trực
+  # phải đoán (30/09/2026: hai lượt SKIPPED vì RAM chỉ đọc ra được qua pitr-status). Lý do chỉ mang con số + tên bản.
+  if [ "$1" != "OK" ]; then tt "PITR diễn tập: $1 — $2"; fi
   ghi_json "$STATUS_DIR/pitr-drill.json" "$(printf '{"schema":1,"kind":"pitr-drill","result":%s,"startedAt":%s,"finishedAt":%s,"reason":%s,"base":%s,"target":%s,"replayedTo":%s,"marker":{"before":%s,"after":%s},"tables":{"orders":%s,"shipments":%s,"settings":%s,"migrations":%s},"seconds":{"extract":%s,"before":%s,"after":%s,"total":%s}}' \
     "$(js "$1")" "$(js "$BAT_DAU")" "$(js "$(bay_gio_utc)")" "$(js "$2")" "$(js "${D_NEN:-}")" "$(js "${D_MOC_ISO:-}")" "$(js "${D_TOI:-}")" \
     "$(js "${D_TRUOC:-}")" "$(js "${D_SAU:-}")" "$(jn "${D_ORDERS:-}")" "$(jn "${D_SHIPMENTS:-}")" "$(jn "${D_SETTINGS:-}")" "$(jn "${D_MIG:-}")" \
@@ -539,9 +548,9 @@ cmd_drill_than() { # $1 = mốc ISO (UTC 'Z' hoặc lệch giờ ±HH:MM) | rỗ
   if [ -z "$nen_ep" ] || [ -z "$cum_bytes" ]; then ghi_dien_tap_pitr FAILED "Bản nền $nen thiếu nen.json đọc được."; loi "PITR diễn tập: $nen thiếu nen.json."; return 1; fi
 
   avail="$(free -m 2>/dev/null | awk '/^Mem:/ {print $7}' || true)"
-  if [ -z "$avail" ] || ! [ "$avail" -ge "$RAM_TOI_THIEU_DIEN_TAP_MB" ] 2>/dev/null; then
-    ghi_dien_tap_pitr SKIPPED "RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_MB} MB — không dựng container tạm lúc máy đang chật."
-    loi "PITR diễn tập: RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_MB} MB — KHÔNG chạy (không phải lỗi của PITR)."; return 1
+  if [ -z "$avail" ] || ! [ "$avail" -ge "$RAM_TOI_THIEU_DIEN_TAP_PITR_MB" ] 2>/dev/null; then
+    ghi_dien_tap_pitr SKIPPED "RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_PITR_MB} MB — không dựng container tạm lúc máy đang chật."
+    loi "PITR diễn tập: RAM dùng được ${avail:-?} MB < ${RAM_TOI_THIEU_DIEN_TAP_PITR_MB} MB — KHÔNG chạy (không phải lỗi của PITR)."; return 1
   fi
   tu_do="$(o_trong_mb "$BACKUP_DIR")"
   can=$(($(mb_cua "$cum_bytes") + DU_TRU_O_DIA_MB))
@@ -657,7 +666,7 @@ cmd_drill_than() { # $1 = mốc ISO (UTC 'Z' hoặc lệch giờ ±HH:MM) | rỗ
   tt "PITR diễn tập: $ket · bản nền $nen · mốc $D_MOC_ISO · phục hồi tới giao dịch lúc ${D_TOI:-?}"
   tt "Dòng đánh dấu: trước mốc ⇒ $D_TRUOC (kỳ vọng VANG) · sau mốc ⇒ $D_SAU (kỳ vọng ${ky_vong_sau:-—})"
   tt "Bảng lõi ở bản khôi phục: orders ${D_ORDERS:-?} · shipments ${D_SHIPMENTS:-?} · settings ${D_SETTINGS:-?} · migration ${D_MIG:-?}"
-  tt "RTO phần máy: giải nén ${D_S_GIAI}s · pha trước ${D_S_TRUOC:-0}s · phục hồi tới mốc ${D_S_SAU}s · tổng ${D_S_TONG}s (container tạm, --network none, trần $BO_NHO_DIEN_TAP)"
+  tt "RTO phần máy: giải nén ${D_S_GIAI}s · pha trước ${D_S_TRUOC:-0}s · phục hồi tới mốc ${D_S_SAU}s · tổng ${D_S_TONG}s (container tạm, --network none, trần $BO_NHO_DIEN_TAP_PITR)"
   [ -z "$ly_do" ] || tt "Lý do: $ly_do"
   [ "$ket" = "OK" ] || return 1
   return 0
