@@ -76,3 +76,19 @@ export const WEBHOOK_EVENT_LABEL: Record<string, string> = {
   unknown: "Không xác định",
   tracking: "Hành trình vận đơn",
 };
+
+/**
+ * Lượt THÀNH CÔNG gần nhất của một khoá job (`facebook-ads`, `pancake-orders`…) — cộng mọi tên con mà khoá ấy ghi vào
+ * `sync_runs` (`JOB_RUN_KEYS`). Hàm THUẦN. `sync_runs.job` giữ TÊN CON (`ads_insights`), không phải khoá job: tra thẳng
+ * bằng khoá job thì không dòng nào khớp và nguồn luôn bị báo "chưa đồng bộ" (đo 30/09/2026, `/ads/daily`).
+ * Khoá không khai trong `JOB_RUN_KEYS` ⇒ `null` (CHƯA BIẾT), không đoán tên con.
+ */
+export function lastSuccessFor(jobKey: string, runs: { source: string; job: string; at: Date | null }[]): Date | null {
+  const keys = new Set(JOB_RUN_KEYS[jobKey] ?? []);
+  let best: Date | null = null;
+  for (const r of runs) {
+    if (!r.at || !keys.has(`${r.source}:${r.job}`)) continue;
+    if (best === null || r.at > best) best = r.at;
+  }
+  return best;
+}

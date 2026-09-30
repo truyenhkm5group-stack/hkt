@@ -142,6 +142,57 @@ export function unknownMetrics(): VariantMetricsRow {
 }
 
 /**
+ * DÒNG CHI của mẩu vòng mẫu — hạt `AD`, bỏ dòng `excluded`, từ đầu ngày chạy (`floor`), trong cửa sổ nếu có. Dùng chung cho
+ * số đo gộp và chuỗi theo ngày.
+ */
+function creativeSpendConds(adIds: string[], floor: Date | null, window: MetricsWindow | null): SQL[] {
+  const ads = schema.adSpends;
+  const conds: SQL[] = [eq(ads.grain, "AD"), eq(ads.excluded, false), inArray(ads.adId, adIds)];
+  if (floor) conds.push(gte(ads.spendDate, floor));
+  if (window?.from) conds.push(gte(ads.spendDate, window.from));
+  if (window?.to) conds.push(lte(ads.spendDate, window.to));
+  return conds;
+}
+
+/**
+ * ĐƠN QUY VỀ MẨU của vòng mẫu — MỘT định nghĩa cho cả số đo gộp (`variantMetrics`) lẫn chuỗi theo ngày
+ * (`variantDailySeries`): đơn đã chốt, mỗi đơn một dòng, kết quả theo `ORDER_OUTCOME`, quy về mẩu bằng
+ * `ORDER_AD_ID`. Hai nơi tự viết hai câu là hai cơ hội để tổng theo ngày không cộng lại ra tổng của camp.
+ */
+function creativeOrderFacts(db: Db, adIds: string[], window: MetricsWindow | null) {
+  const o = schema.orders;
+  const s = schema.shipments;
+  /*
+    ĐƠN ỨNG VIÊN trước, quy kết sau — vì lý do HIỆU NĂNG, không phải lý do nghĩa.
+
+    `ORDER_AD_ID` mang một truy vấn con tương quan (bài viết → mẩu). Tính nó trên MỌI đơn đã chốt của
+    shop để rồi giữ lại vài đơn của vài mẩu là quét cả bảng. Nên thu hẹp trước bằng một điều kiện RỘNG
+    HƠN điều kiện thật: đơn mang `ad_id` của một mẩu đang xét, HOẶC đơn có bài viết là bài của một mẩu
+    đang xét. Mọi đơn mà `ORDER_AD_ID` quy về một mẩu trong danh sách đều nằm trong tập ấy (vế 1 của
+    `ORDER_AD_ID` là `ad_id`, vế 2 chỉ trả mẩu mà bài viết thuộc về) — rồi `ORDER_AD_ID` mới quyết.
+    Siêu tập ấy là `orderAdCandidates` — dùng chung với MOQ thiết kế và bộ lọc mẩu của `/ads/daily`.
+  */
+  const candidate = orderAdCandidates(adIds);
+  // Mỗi đơn tính kết quả ĐÚNG MỘT LẦN (bảng dẫn xuất + rào `OUTCOME_FENCE`), như ads-decision.
+  return db
+    .select({
+      adId: sql<string | null>`${ORDER_AD_ID}`.as("cl_ad_id"),
+      // Đường quy kết: đơn mang `ad_id` luôn là TRỰC TIẾP — `ORDER_AD_ID` không bao giờ hỏi tới bài viết của nó.
+      viaPost: sql<boolean>`(nullif(${o.adId}, '') is null)`.as("cl_via_post"),
+      revenue: sql<number>`coalesce(${o.totalPriceAfterDiscount}, 0)`.as("cl_revenue"),
+      outcome: ORDER_OUTCOME_FAST.as("cl_outcome"),
+      // NGÀY LÊN ĐƠN theo giờ Việt Nam — chỉ chuỗi theo ngày của tab ④ đọc cột này.
+      day: sql<string>`to_char((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date, 'YYYY-MM-DD')`.as("cl_day"),
+    })
+    .from(o)
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(and(CONFIRMED_ORDER, candidate, window?.from ? gte(o.insertedAt, window.from) : undefined, window?.to ? lte(o.insertedAt, window.to) : undefined))
+    .offset(OUTCOME_FENCE)
+    .as("creative_order_facts");
+}
+
+/**
  * Số đo của từng mẫu, khoá theo `variantId`. Mẫu không có `fbAdId` (chưa đăng) ⇒ số đo CHƯA BIẾT.
  *
  * Mốc chi: `spend_date` ≥ đầu NGÀY VIỆT NAM của `startAt` — dòng chi ghi theo ngày VN
@@ -163,10 +214,7 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[], wi
   const earliest = [...byAd.values()].reduce<Date | null>((m, x) => (x.floor === null ? m : m === null || x.floor < m ? x.floor : m), null);
   const allHaveFloor = [...byAd.values()].every((x) => x.floor !== null);
   const ads = schema.adSpends;
-  const spendConds: SQL[] = [eq(ads.grain, "AD"), eq(ads.excluded, false), inArray(ads.adId, adIds)];
-  if (allHaveFloor && earliest) spendConds.push(gte(ads.spendDate, earliest));
-  if (window?.from) spendConds.push(gte(ads.spendDate, window.from));
-  if (window?.to) spendConds.push(lte(ads.spendDate, window.to));
+  const spendConds = creativeSpendConds(adIds, allHaveFloor ? earliest : null, window);
 
   // Gộp theo (mẩu × ngày) rồi lọc mốc từng mẫu ở TypeScript: mỗi mẫu có một mốc riêng.
   const spendRows = await db
@@ -204,34 +252,7 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[], wi
     m.deliveredRevenueVnd = 0;
   }
 
-  const o = schema.orders;
-  const s = schema.shipments;
-  /*
-    ĐƠN ỨNG VIÊN trước, quy kết sau — vì lý do HIỆU NĂNG, không phải lý do nghĩa.
-
-    `ORDER_AD_ID` mang một truy vấn con tương quan (bài viết → mẩu). Tính nó trên MỌI đơn đã chốt của
-    shop để rồi giữ lại vài đơn của vài mẩu là quét cả bảng. Nên thu hẹp trước bằng một điều kiện RỘNG
-    HƠN điều kiện thật: đơn mang `ad_id` của một mẩu đang xét, HOẶC đơn có bài viết là bài của một mẩu
-    đang xét. Mọi đơn mà `ORDER_AD_ID` quy về một mẩu trong danh sách đều nằm trong tập ấy (vế 1 của
-    `ORDER_AD_ID` là `ad_id`, vế 2 chỉ trả mẩu mà bài viết thuộc về) — rồi `ORDER_AD_ID` mới quyết.
-    Siêu tập ấy là `orderAdCandidates` — dùng chung với MOQ thiết kế và bộ lọc mẩu của `/ads/daily`.
-  */
-  const candidate = orderAdCandidates(adIds);
-  // Mỗi đơn tính kết quả ĐÚNG MỘT LẦN (bảng dẫn xuất + rào `OUTCOME_FENCE`), như ads-decision.
-  const facts = db
-    .select({
-      adId: sql<string | null>`${ORDER_AD_ID}`.as("cl_ad_id"),
-      // Đường quy kết: đơn mang `ad_id` luôn là TRỰC TIẾP — `ORDER_AD_ID` không bao giờ hỏi tới bài viết của nó.
-      viaPost: sql<boolean>`(nullif(${o.adId}, '') is null)`.as("cl_via_post"),
-      revenue: sql<number>`coalesce(${o.totalPriceAfterDiscount}, 0)`.as("cl_revenue"),
-      outcome: ORDER_OUTCOME_FAST.as("cl_outcome"),
-    })
-    .from(o)
-    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
-    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(and(CONFIRMED_ORDER, candidate, window?.from ? gte(o.insertedAt, window.from) : undefined, window?.to ? lte(o.insertedAt, window.to) : undefined))
-    .offset(OUTCOME_FENCE)
-    .as("creative_order_facts");
+  const facts = creativeOrderFacts(db, adIds, window);
 
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
@@ -273,6 +294,91 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[], wi
     m.killRuleOrders = KILL_RULE_ORDER_BASIS === "DIRECT_AD_ID" ? direct.booked : m.bookedOrders;
   }
   return out;
+}
+
+/** Một ngày (giờ VN) của một camp. Chi · hiển thị · nhấp · tin nhắn `null` = ngày ấy KHÔNG có dòng chi (CHƯA BIẾT, không phải 0). */
+export type VariantDayPoint = {
+  day: string;
+  spendVnd: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  messages: number | null;
+  bookedOrders: number;
+  deliveredOrders: number;
+  returnedOrders: number;
+  bookedRevenueVnd: number;
+};
+
+/** Trần số ngày của một chuỗi — camp ngân sách ngày chạy liên tục hàng tháng; vẽ quá 90 cột là không đọc được. */
+export const DAILY_SERIES_MAX_DAYS = 90;
+
+/**
+ * CHUỖI THEO NGÀY của MỘT camp (tab ④, nút "Theo ngày") — cùng dòng chi và cùng định nghĩa đơn với `variantMetrics`
+ * (`creativeSpendConds` · `creativeOrderFacts`), nên cộng các ngày lại ra đúng số của dòng camp trong cùng kỳ.
+ * Trục ngày: từ ngày chạy (hoặc đầu kỳ, lấy muộn hơn) tới hôm nay (hoặc cuối kỳ, lấy sớm hơn), đủ mọi ngày kể cả
+ * ngày không có dòng nào — ngày trống là một thông tin, không được biến mất khỏi trục. Dài hơn `DAILY_SERIES_MAX_DAYS`
+ * ⇒ giữ các ngày GẦN NHẤT và `truncated = true`.
+ */
+export async function variantDailySeries(db: Db, v: { fbAdId: string | null; startAt: Date }, window: MetricsWindow | null, now: Date): Promise<{ points: VariantDayPoint[]; truncated: boolean }> {
+  const adId = (v.fbAdId ?? "").trim();
+  const startDay = vnDay(v.startAt);
+  const firstDay = window?.from && vnDay(window.from) > startDay ? vnDay(window.from) : startDay;
+  const today = vnDay(now);
+  const lastDay = window?.to && vnDay(window.to) < today ? vnDay(window.to) : today;
+  const days: string[] = [];
+  for (let d = firstDay; d <= lastDay; d = shiftDay(d, 1)) days.push(d);
+  const truncated = days.length > DAILY_SERIES_MAX_DAYS;
+  const shown = truncated ? days.slice(-DAILY_SERIES_MAX_DAYS) : days;
+  const points = new Map<string, VariantDayPoint>(
+    shown.map((day) => [day, { day, spendVnd: null, impressions: null, clicks: null, messages: null, bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, bookedRevenueVnd: 0 }]),
+  );
+  if (!adId || shown.length === 0) return { points: [...points.values()], truncated };
+
+  const ads = schema.adSpends;
+  const spendRows = await db
+    .select({
+      spendDate: ads.spendDate,
+      spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
+      impressions: sql<number>`coalesce(sum(${ads.impressions}), 0)`,
+      clicks: sql<number>`coalesce(sum(${ads.clicks}), 0)`,
+      messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
+    })
+    .from(ads)
+    .where(and(...creativeSpendConds([adId], vnStartOfDay(startDay), window)))
+    .groupBy(ads.spendDate);
+  for (const r of spendRows) {
+    const p = points.get(vnDay(r.spendDate instanceof Date ? r.spendDate : new Date(r.spendDate)));
+    if (!p) continue;
+    p.spendVnd = (p.spendVnd ?? 0) + Number(r.spend ?? 0);
+    p.impressions = (p.impressions ?? 0) + Number(r.impressions ?? 0);
+    p.clicks = (p.clicks ?? 0) + Number(r.clicks ?? 0);
+    p.messages = (p.messages ?? 0) + Number(r.messages ?? 0);
+  }
+
+  const facts = creativeOrderFacts(db, [adId], window);
+  const booked = sql`${facts.outcome} <> 'CANCELLED'`;
+  const orderRows = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        day: sql<string>`${facts.day}`,
+        booked: sql<number>`count(*) filter (where ${booked})`,
+        delivered: sql<number>`count(*) filter (where ${facts.outcome} = 'DELIVERED')`,
+        returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
+        bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${booked}), 0)`,
+      })
+      .from(facts)
+      .where(sql`${facts.adId} = ${adId}`)
+      .groupBy(facts.day),
+  );
+  for (const r of orderRows) {
+    const p = points.get(String(r.day));
+    if (!p) continue;
+    p.bookedOrders += Number(r.booked ?? 0);
+    p.deliveredOrders += Number(r.delivered ?? 0);
+    p.returnedOrders += Number(r.returned ?? 0);
+    p.bookedRevenueVnd += Number(r.bookedRevenue ?? 0);
+  }
+  return { points: [...points.values()], truncated };
 }
 
 // ───────────────────────────── CẤU HÌNH DÙNG ĐỂ CHẤM ─────────────────────────────
