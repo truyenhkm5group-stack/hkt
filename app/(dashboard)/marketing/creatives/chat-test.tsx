@@ -9,13 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { addAdTestColorAction, chatAdTestAction, loadAdTestAction, removeAdTestColorAction, saveAdTestInfoAction, setAdTestLiveAction } from "@/lib/actions/chatbot-ad-test";
-import type { ReadinessStatus } from "@/lib/constants/chatbot-ad-bots";
-import type { AdTestView } from "@/lib/integrations/chatbot/ad-test";
+import type { AdTestView, ReadinessStatus } from "@/lib/constants/chatbot-ad-bots";
 
 /**
  * NÚT "CHAT TEST" của một camp: ảnh & màu (AI đổi màu ảnh quảng cáo) → giá & chất vải → chat thử với CHÍNH bot thật →
  * bật cho khách thật. Bảng kiểm bên trên nói page của camp đã vào Pancake chưa, bot đã có token chưa, còn thiếu gì.
- * Luật: `lib/integrations/chatbot/ad-test.ts`.
+ * Luật: tệp máy chủ ad-test.ts trong lib/integrations/chatbot.
  */
 
 type Msg = { role: "user" | "model"; text: string; imageIds?: string[]; handoff?: boolean };

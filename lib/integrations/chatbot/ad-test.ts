@@ -12,7 +12,8 @@ import {
   type AdBotConfig,
   type AdTestColor,
   type AdTestProduct,
-  type ReadinessCheck,
+  type AdTestView,
+  type ChatReply,
   type SaveAdTestInfoInput,
 } from "@/lib/constants/chatbot-ad-bots";
 import { estimateImageUsd } from "@/lib/constants/creative-loop";
@@ -35,28 +36,6 @@ import { setSettingJson } from "@/lib/settings";
  * Luật dữ liệu: `lib/constants/chatbot-ad-bots.ts`. Không đụng đơn, tiền, tồn kho: chưa lên đơn POS (chỉ khi mẫu thắng).
  */
 
-export type AdTestView = {
-  variantId: string;
-  adId: string;
-  campaignName: string;
-  productName: string | null;
-  pageId: string | null;
-  pageName: string | null;
-  originalImageId: string | null;
-  test: AdTestProduct | null;
-  live: boolean;
-  estimateUsd: number;
-  spentTodayUsd: number;
-  limits: typeof AD_TEST_IMAGE_LIMITS;
-  canRecolor: boolean;
-  recolorBlocked: string | null;
-  readiness: ReadinessCheck[];
-  canChat: boolean;
-  canGoLive: boolean;
-  /** Page của bot dùng cho khung chat thử (page của camp nếu bot có, không thì page đầu tiên — kèm cảnh báo). */
-  chatPageId: string | null;
-  chatPageNote: string | null;
-};
 
 type Camp = {
   variantId: string;
@@ -298,7 +277,6 @@ export async function setAdTestLive(i: { variantId: string; live: boolean }, act
 }
 
 export type ChatTurn = { role: "user" | "model"; text: string };
-export type ChatReply = { text: string; handoff: boolean; imageIds: string[] };
 
 /** Một lượt chat thử: gửi lịch sử sang bot THẬT (đường test-chat, không đụng Pancake) với đúng bot riêng của camp. */
 export async function chatAdTest(i: { variantId: string; history: ChatTurn[] }): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> {

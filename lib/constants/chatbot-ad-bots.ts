@@ -328,3 +328,29 @@ export function pageIdOfPost(fbPostId: string | null | undefined): string | null
   const m = String(fbPostId ?? "").match(/^(\d{5,25})_\d+$/);
   return m ? m[1] : null;
 }
+
+/** Dữ liệu khung "Chat test" (máy chủ dựng ở `lib/integrations/chatbot/ad-test.ts`, trình duyệt chỉ đọc). */
+export type AdTestView = {
+  variantId: string;
+  adId: string;
+  campaignName: string;
+  productName: string | null;
+  pageId: string | null;
+  pageName: string | null;
+  originalImageId: string | null;
+  test: AdTestProduct | null;
+  live: boolean;
+  estimateUsd: number;
+  spentTodayUsd: number;
+  limits: typeof AD_TEST_IMAGE_LIMITS;
+  canRecolor: boolean;
+  recolorBlocked: string | null;
+  readiness: ReadinessCheck[];
+  canChat: boolean;
+  canGoLive: boolean;
+  /** Page của bot dùng cho khung chat thử (page của camp nếu bot có, không thì page đầu tiên — kèm cảnh báo). */
+  chatPageId: string | null;
+  chatPageNote: string | null;
+};
+
+export type ChatReply = { text: string; handoff: boolean; imageIds: string[] };

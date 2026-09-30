@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
-import { saveAdTestInfoSchema } from "@/lib/constants/chatbot-ad-bots";
+import { saveAdTestInfoSchema, type AdTestView, type ChatReply } from "@/lib/constants/chatbot-ad-bots";
 import type { AdBotPushResult } from "@/lib/integrations/chatbot/ad-bots";
-import { addAdTestColor, chatAdTest, loadAdTestView, removeAdTestColor, saveAdTestInfo, setAdTestLive, type AdTestView, type ChatReply } from "@/lib/integrations/chatbot/ad-test";
+import { addAdTestColor, chatAdTest, loadAdTestView, removeAdTestColor, saveAdTestInfo, setAdTestLive } from "@/lib/integrations/chatbot/ad-test";
 
 /**
  * Nút "Chat test" ở Thư viện Media · tab ④. Người chạy camp (ideas:write) hoặc người giữ kịch bản bot (cs:config) đều dùng
