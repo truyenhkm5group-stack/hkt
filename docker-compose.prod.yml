@@ -10,8 +10,34 @@ services:
       POSTGRES_USER: erp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_secret}
       POSTGRES_DB: erp
+    # ═══ PITR (quyết định của chủ nền tảng 30/09/2026 · docs/platform/backup-recovery.md §9.4) ═══
+    # Cấu hình đi bằng dòng lệnh (`postgres -c …`), KHÔNG sửa tệp nào trong volume erp_pgdata. `-c` thắng CẢ
+    # postgresql.conf LẪN `ALTER SYSTEM` (postgresql.auto.conf) ⇒ phanh `ALTER SYSTEM SET archive_command='/bin/true'` của
+    # bản đề xuất cũ KHÔNG có tác dụng ở đây; phanh không cần khởi động lại là cờ `.tam-dung` (ops pitr-pause) — §9.4.
+    # `archive_mode` chỉ đổi được khi KHỞI ĐỘNG LẠI Postgres: đổi `command`/`volumes` của dịch vụ này ⇒ lần deploy kế tiếp
+    # (`up -d --build db` trong install-vps.sh) TẠO LẠI container erp-db — cùng ảnh, cùng volume, cùng mật khẩu.
+    # archive_timeout=900 ⇒ RPO trên máy ≤ 15 phút (= PITR_ARCHIVE_TIMEOUT của scripts/erp-pitr.sh — bài kiểm đòi bằng nhau).
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=900
+      - -c
+      - archive_command=/bin/sh /erp-pitr-bin/luu-wal.sh %p %f
+    # Dừng nhanh (STOPSIGNAL SIGINT của ảnh postgres) có checkpoint; 10 giây mặc định của Docker có thể SIGKILL giữa
+    # checkpoint ⇒ lần khởi động sau phải crash-recovery (an toàn nhưng lâu hơn). 60 giây là TRẦN — dừng thường vài giây.
+    stop_grace_period: 60s
     volumes:
       - erp_pgdata:/var/lib/postgresql/data
+      # Kho WAL + bản nền (thuộc uid 70; `scripts/erp-pitr.sh chuan-bi` tạo TRƯỚC khi compose dựng container — thiếu nó
+      # Docker tự tạo thư mục của root và mọi lượt lưu WAL hỏng vì sai quyền). CHỈ dịch vụ db gắn thư mục này.
+      - /root/backups/pitr:/pitr
+      # MỘT TỆP, chỉ-đọc: git thay tệp bằng inode mới, container giữ inode cũ tới khi erp-db được tạo lại — Postgres
+      # không bao giờ chạy một kịch bản đang ghi dở (ops pitr-status so băm hai bản).
+      - ./deploy/pitr-luu-wal.sh:/erp-pitr-bin/luu-wal.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
       interval: 5s
