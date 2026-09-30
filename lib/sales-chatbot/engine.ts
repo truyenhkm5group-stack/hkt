@@ -29,7 +29,7 @@ import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -218,6 +218,21 @@ async function webRateProblem(conv: ConvRow): Promise<string | null> {
 }
 
 /**
+ * Khoá AI của shop hỏng kiểu KHÔNG tự khỏi (hết credit · bị từ chối) ⇒ MỘT thông báo cho chủ shop mỗi lớp lỗi mỗi ngày (giờ
+ * VN) — không phải một thông báo cho mỗi khách đâm vào tường. Lỗi tự khỏi (quá tải) không báo: nó chỉ đổ nhiễu.
+ */
+async function notifyProviderFailure(lastError: string | null, now: Date): Promise<void> {
+  const e = salesBotError(lastError);
+  if (!e?.notify) return;
+  const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+  const db = await getDb();
+  await db
+    .insert(schema.notifications)
+    .values({ kind: "SYSTEM", severity: "critical", title: "Chatbot bán hàng ngừng trả lời khách", body: `${e.label}. Trong lúc chưa sửa, mọi khách nhắn trang chat đều nhận câu «em đang gặp trục trặc».`, href: "/ai/sales-chatbot", entityType: "SALES_CHAT", entityId: e.kind, dedupeKey: `sales-chat:provider:${e.kind}:${day}`, occurredAt: now })
+    .onConflictDoNothing({ target: schema.notifications.dedupeKey });
+}
+
+/**
  * MỘT lượt khách gõ. `channel` và `visitorKey` do nơi gọi (máy chủ) quyết — hội thoại phải đúng kênh, và kênh WEB phải
  * đúng khách truy cập đã mở nó (không đọc / gõ tiếp hội thoại của người khác bằng cách đoán id).
  */
@@ -322,6 +337,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
       if (error instanceof SeqConflict) throw error;
       await reply(conv, seq++, "Xin lỗi, em đang gặp trục trặc — anh/chị nhắn lại sau ít phút hoặc để lại SĐT, nhân viên sẽ gọi lại ạ.").catch(() => undefined);
+      await notifyProviderFailure(lastError, now).catch(() => undefined);
     }
     await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     await bump({

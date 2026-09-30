@@ -9,6 +9,7 @@
  * Tệp này KHÔNG import gì chạy được: form cấu hình và máy chủ dùng CHUNG lược đồ, mặc định và nhãn.
  */
 import { z } from "zod";
+import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass } from "@/lib/constants/ai-incidents";
 
 export const SALES_CHATBOT_SETTING_KEY = "ai.salesChatbot";
 
@@ -146,3 +147,22 @@ export type ChatView = {
   messages: { role: "user" | "assistant"; text: string; tools?: { name: string; ok: boolean; summary: string }[] }[];
   order: { id: string | null; stage: string | null; simulated: boolean; total: number | null } | null;
 };
+
+/**
+ * LỖI NHÀ CUNG CẤP AI CỦA CHATBOT ⇒ CÂU CHO CHỦ SHOP. Lớp lỗi lấy từ `classifyAiError` (lib/constants/ai-incidents.ts — cùng
+ * bộ phân loại của sự cố AI nhà), không viết bộ thứ hai. Đo UAT 30/09/2026: khoá AI của tổ chức hết credit ⇒ MỌI khách
+ * nhận «em đang gặp trục trặc», màn hình chỉ in 80 ký tự đầu của phong bì JSON tiếng Anh, và không ai được báo.
+ * `notify` = lớp KHÔNG tự khỏi (hết credit · khoá bị từ chối) — chỉ chúng mới đáng một thông báo cho chủ shop.
+ */
+export const SALES_BOT_ERROR_LABEL: Record<AiErrorClass, string> = {
+  CREDIT: "Tài khoản AI của shop hết tiền (credit) — nạp tiền ở trang của nhà cung cấp AI",
+  AUTH: "Khoá AI bị từ chối (sai, hết hạn hoặc bị thu hồi) — thay khoá ở Cài đặt → Kết nối",
+  RATE_LIMIT: "Nhà cung cấp AI đang quá tải / quá hạn mức — thường tự khỏi sau vài phút",
+  OTHER: "Nhà cung cấp AI trả lỗi",
+};
+
+export function salesBotError(lastError: string | null | undefined): { kind: AiErrorClass; label: string; notify: boolean } | null {
+  if (!lastError || !lastError.trim()) return null;
+  const kind = classifyAiError(lastError);
+  return { kind, label: SALES_BOT_ERROR_LABEL[kind], notify: AI_CLASSES_CAN_NGUOI.includes(kind) };
+}

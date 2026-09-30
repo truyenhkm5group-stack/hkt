@@ -44,7 +44,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { cancelManualOrderCore, createManualOrderCore, materialChanges, updateManualOrderCore } from "@/lib/records/order-create";
 import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
-import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY, withinBusinessHours } from "@/lib/sales-chatbot/config";
+import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
 import { chatTurn, conversationView, historyForModel, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
@@ -413,6 +413,30 @@ async function testJourney() {
         const other = await chatTurn(w.id, "xin chào", { channel: "WEB", visitorKey: vk });
         assert.ok(!other.ok, "id hội thoại của tổ chức A vô nghĩa ở tổ chức B");
       });
+    } finally {
+      setSalesChatProviderForTests(null);
+    }
+
+    // ── Khoá AI của shop hết credit (đo UAT production 30/09/2026) ⇒ khách nhận câu xin lỗi, chủ shop nhận ĐÚNG MỘT
+    // thông báo mỗi ngày, màn hình in lý do đọc được. Quá tải (tự khỏi) KHÔNG báo.
+    assert.equal(salesBotError(null), null);
+    assert.equal(salesBotError("429 rate_limit_error")?.notify, false, "quá tải tự khỏi ⇒ không báo");
+    const creditMsg = '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}';
+    assert.deepEqual(salesBotError(creditMsg), { kind: "CREDIT", label: SALES_BOT_ERROR_LABEL.CREDIT, notify: true });
+    let failWith = creditMsg;
+    setSalesChatProviderForTests(() => ({ ...fakeProvider(() => []), complete: async () => { throw new Error(failWith); } }));
+    try {
+      const vkErr = visitorKeyOf("uat-khoa-het-credit-0000000000");
+      const e1 = await openConversation("WEB", { visitorKey: vkErr });
+      const alerts = async () => (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:provider:%"))).length;
+      for (const text of ["Chả mực bao nhiêu?", "Còn hàng không em?"]) {
+        const r = await chatTurn(e1.id, text, { channel: "WEB", visitorKey: vkErr });
+        assert.ok(r.ok && /trục trặc/.test(r.view.messages[r.view.messages.length - 1].text), "khách nhận câu xin lỗi, không phải trang lỗi");
+      }
+      assert.equal(await alerts(), 1, "hai khách đâm vào tường ⇒ MỘT thông báo cho chủ shop trong ngày");
+      failWith = "429 rate_limit_error: overloaded";
+      await chatTurn(e1.id, "Alo", { channel: "WEB", visitorKey: vkErr });
+      assert.equal(await alerts(), 1, "quá tải ⇒ không thêm thông báo");
     } finally {
       setSalesChatProviderForTests(null);
     }
