@@ -944,17 +944,32 @@ async function renderOrderBot() {
   try { d = await api("/api/orderbot"); } catch (e) { $("#content").innerHTML = `<div class="card">Lỗi: ${esc(e.message)}</div>`; return; }
   const st = d.settings, c = d.counts;
   const f = (it) => [it.facts?.phone ? "SĐT ✓" : "SĐT ✗", it.facts?.address ? "địa chỉ ✓" : "địa chỉ ✗", it.facts?.size ? "size " + esc(it.facts.size) : "size ✗", it.facts?.color ? "màu " + esc(it.facts.color) : "màu ✗"].join(" · ");
-  const review = d.review.map((it) => `<div class="card" style="margin-bottom:10px">
+  const LY_DIA_CHI = /địa chỉ|tỉnh|thành|huyện|quận|xã|phường|số nhà|thôn|khớp gần đúng/i;
+  const review = d.review.map((it) => {
+    const lyDo = it.reasons || [];
+    const veDiaChi = lyDo.some((r) => LY_DIA_CHI.test(r) && !/chưa đủ thông tin/.test(r)) || (!it.facts?.address && !it.draft?.address);
+    const chat = it.pageId && it.conversationId ? `https://pancake.vn/${encodeURIComponent(it.pageId)}?c_id=${encodeURIComponent(it.conversationId)}` : "";
+    const dong = (nhan, gt) => `<div><span class="muted">${nhan}:</span> ${gt ? esc(gt) : '<span class="muted">—</span>'}</div>`;
+    return `<div class="card" style="margin-bottom:10px">
       <div class="row" style="justify-content:space-between"><b>${esc(it.customerName || "(khách)")}</b><span class="muted small">${esc(it.page)} · ${esc(fmtTime(it.lastCheckAt || it.lastCustomerAt))}</span></div>
-      <div class="small" style="margin:6px 0">${(it.reasons || []).map((r) => `<div>⚠ ${esc(r)}</div>`).join("")}</div>
-      <div class="small muted">${f(it)}${it.draft?.items?.length ? " · " + esc(it.draft.items.join(", ")) : ""}${it.draft?.phone ? " · " + esc(it.draft.phone) : ""}</div>
-      ${it.draft?.resolved ? `<div class="small muted">Hệ thống dò được: ${esc(it.draft.resolved)}</div>` : ""}
-      <label style="margin-top:8px">Địa chỉ giao hàng (sửa cho đủ: số nhà/thôn, xã/phường, quận/huyện, tỉnh)</label>
-      <input data-ob-addr="${esc(it.key)}" value="${esc(it.draft?.address || it.facts?.address || "")}">
-      <div class="row" style="margin-top:8px"><button class="primary" data-ob-approve="${esc(it.key)}">Duyệt & lên đơn</button><button data-ob-check="${esc(it.key)}">Kiểm lại từ chat</button><button data-ob-dismiss="${esc(it.key)}">Bỏ qua (không lên đơn)</button></div>
-    </div>`).join("") || '<div class="muted small">Không có đơn nào cần duyệt.</div>';
+      <div class="small" style="margin:6px 0">${lyDo.map((r) => `<div>⚠ ${esc(r)}</div>`).join("")}</div>
+      <div class="small" style="margin:6px 0;display:grid;gap:2px">
+        ${dong("Sản phẩm bot đọc được", (it.draft?.items || []).join(", "))}
+        ${dong("SĐT", it.draft?.phone)}
+        ${dong("Địa chỉ khách ghi", it.draft?.address || it.facts?.address)}
+        ${it.draft?.resolved ? dong("Hệ thống dò được", it.draft.resolved) : ""}
+      </div>
+      <div class="hint" style="margin:6px 0">${veDiaChi
+        ? "<b>Việc cần làm:</b> sửa địa chỉ bên dưới cho đủ số nhà/thôn, xã/phường, quận/huyện, tỉnh rồi bấm <b>Duyệt &amp; lên đơn</b>."
+        : "<b>Việc cần làm:</b> mở hội thoại, hỏi khách phần còn thiếu ở dòng ⚠. Khách trả lời thì bot tự kiểm lại và lên đơn — không cần bấm duyệt."}
+        Nhân viên đã tự lên đơn cho khách này trên Pancake thì bot tự gỡ đơn khỏi mục này trong vòng 5 phút (hoặc bấm <b>Kiểm lại từ chat</b> ngay).</div>
+      ${veDiaChi ? `<label style="margin-top:8px">Địa chỉ giao hàng (sửa cho đủ: số nhà/thôn, xã/phường, quận/huyện, tỉnh)</label>
+      <input data-ob-addr="${esc(it.key)}" value="${esc(it.draft?.address || it.facts?.address || "")}">` : ""}
+      <div class="row" style="margin-top:8px">${chat ? `<button data-ob-open="${esc(chat)}">💬 Mở hội thoại</button>` : ""}${veDiaChi ? `<button class="primary" data-ob-approve="${esc(it.key)}">Duyệt &amp; lên đơn</button>` : ""}<button data-ob-check="${esc(it.key)}">Kiểm lại từ chat</button><button data-ob-dismiss="${esc(it.key)}">Bỏ qua (không lên đơn)</button></div>
+    </div>`;
+  }).join("") || '<div class="muted small">Không có đơn nào cần duyệt.</div>';
   const pending = d.pending.map((it) => `<tr><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td class="small">${f(it)}</td><td class="small">${esc((it.reasons || []).join("; ") || ["SĐT", "địa chỉ"].filter((_, i) => !(i ? it.facts?.address : it.facts?.phone)).map((x) => "chưa có " + x).join(", ") || "chờ bot kiểm")}</td><td class="small">${esc(fmtTime(it.lastCustomerAt))}</td></tr>`).join("");
-  const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}${it.confirmedAt ? ' <span class="pill">✅ đã xác nhận</span>' : ""}</td><td class="small">${esc(it.summary || "")}${it.confirmNote ? `<div class="muted">${esc(it.confirmNote)}</div>` : ""}</td></tr>`).join("");
+  const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}${it.byStaffOrder ? ' <span class="pill">NV lên đơn</span>' : ""}${it.confirmedAt ? ' <span class="pill">✅ đã xác nhận</span>' : ""}</td><td class="small">${esc(it.summary || "")}${it.confirmNote ? `<div class="muted">${esc(it.confirmNote)}</div>` : ""}</td></tr>`).join("");
   const rs = d.rescan;
   const rsText = !rs ? "" : `${rs.running ? "⏳ Đang quét" : "Lần quét gần nhất"} ${rs.hours} giờ: đọc ${rs.scanned} hội thoại, kiểm ${rs.checked}, lên đơn ${rs.done} (tự xác nhận ${rs.confirmed}), cần duyệt ${rs.review}, bỏ qua ${rs.skipped} vì khách đã có đơn${rs.errors ? `, lỗi ${rs.errors}` : ""}${rs.note ? " — " + rs.note : ""}`;
   $("#content").innerHTML = `
@@ -968,7 +983,7 @@ async function renderOrderBot() {
         <div style="width:200px"><label>Chờ khách nhắn nốt (phút)</label><input id="ob_wait" type="number" min="10" max="1440" value="${st.waitMinutes}"></div>
         <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ob_confirm" ${st.autoConfirm ? "checked" : ""} style="width:auto"> Tự xác nhận đơn chắc chắn</label>
         <button class="primary" id="ob_save" style="align-self:flex-end">Lưu</button></div>
-      <div class="hint">Tự xác nhận (mặc định tắt): đơn chuyển từ "Mới" sang "Đã xác nhận" CHỈ khi địa chỉ khớp đủ tỉnh/huyện/xã + số nhà, mọi sản phẩm khớp POS, khách đã chốt tổng tiền (không vượt giá POS, giảm không quá 30%), và khách không có đơn nào khác trong 14 ngày. Bot đọc lại đơn trên POS trước khi xác nhận: nhân viên đã sửa đơn thì bot không động vào. Đơn nhân viên duyệt tay thì nhân viên tự xác nhận. Thiếu một điều kiện thì đơn vẫn là đơn nháp, kèm lý do trong mục "Đã lên đơn gần đây".</div>
+      <div class="hint">Tự xác nhận (mặc định bật): đơn chuyển từ "Mới" sang "Đã xác nhận" CHỈ khi địa chỉ khớp đủ tỉnh/huyện/xã + số nhà, mọi sản phẩm khớp POS, khách đã chốt tổng tiền (không vượt giá POS, giảm không quá 30%), và khách không có đơn nào khác trong 14 ngày. Bot đọc lại đơn trên POS trước khi xác nhận: nhân viên đã sửa đơn thì bot không động vào. Đơn nhân viên duyệt tay thì nhân viên tự xác nhận. Thiếu một điều kiện thì đơn vẫn là đơn nháp, kèm lý do trong mục "Đã lên đơn gần đây". Đơn nháp bot đã lên trong 3 ngày qua cũng được kiểm lại một lần để xác nhận.</div>
       <div class="row" style="margin-top:10px">
         <div style="width:200px"><label>Quét lại hội thoại trong (giờ)</label><input id="ob_hours" type="number" min="1" max="168" value="${rs?.hours || 24}"></div>
         <button id="ob_rescan" style="align-self:flex-end" ${rs?.running ? "disabled" : ""}>🔄 Quét lại hội thoại cũ</button>
@@ -1001,6 +1016,7 @@ async function renderOrderBot() {
   }));
   act("data-ob-approve", "approve", (key) => ({ address: document.querySelector(`[data-ob-addr="${CSS.escape(key)}"]`)?.value || "" }));
   act("data-ob-check", "check");
+  document.querySelectorAll("[data-ob-open]").forEach((b) => (b.onclick = () => window.open(b.getAttribute("data-ob-open"), "_blank", "noopener")));
   act("data-ob-dismiss", "dismiss");
 }
 

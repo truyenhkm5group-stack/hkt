@@ -1184,7 +1184,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   const { config: cfg35 } = await import("../src/config.js");
   cfg35.pos.shopId = "SHOP1"; cfg35.pos.apiKey = "posk"; cfg35.orderSync = true;
   const { orderSync: os35 } = await import("../src/orders.js");
-  assert.equal(settings.orderBot().autoConfirm, false, "tu xac nhan mac dinh TAT");
+  assert.equal(settings.orderBot().autoConfirm, true, "tu xac nhan mac dinh BAT (chu shop 01/10/2026)");
   // (a) confirmOrder: doc lai don, chi doi khi van la don nhap, dung SDT, dung san pham, khach khong co don khac
   const don = { id: 777, status: 0, bill_phone_number: "0912345678", note: "🤖 Bot chốt", items: [{ variation_id: "v1", quantity: 1 }], shipping_address: { province_id: "101", district_id: "10120", commune_id: "1012001", address: "Số 15 ngõ 42" } };
   let donKhac = [];
@@ -1232,6 +1232,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   os35.confirmOrder = async () => (goiXacNhan++, { ok: true });
   ob.history = async () => ({ messages: [], text: "", name: "Hoa" });
   const moi = (k) => (ob.items[k] = { pageId: "PAGE1", conversationId: k, status: "PENDING", firstSeen: Date.now(), reasons: [] });
+  settings.setOrderBot({ autoConfirm: false });
   moi("C35a");
   await ob.check("C35a");
   assert.equal(ob.items.C35a.status, "DONE");
@@ -1285,7 +1286,61 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   ob.history = goc.history;
   for (const k of Object.keys(ob.items)) if (k.startsWith("C35")) (clearTimeout(ob.timers.get(k)), delete ob.items[k]);
   settings.global.orderBot = undefined;
-  console.log("OK 35: tu xac nhan chi don chac chan (mac dinh tat, doc lai POS, khong trung don); quet lai hoi thoai cu bo qua khach da co don");
+  console.log("OK 35: tu xac nhan chi don chac chan (mac dinh bat, doc lai POS, khong trung don); quet lai hoi thoai cu bo qua khach da co don");
+}
+
+// ---- 36: the "Can duyet" phai du de nhan vien biet lam gi (chu shop 01/10/2026: "hien the nay thi biet gi de duyet,
+// sao lai can phai duyet don da xac nhan"): kem san pham / SDT bot doc duoc; nhan vien da tu len don -> tu go khoi hang
+// can duyet; don nhap bot da len chuan truoc khi bat tu xac nhan -> kiem lai mot lan de xac nhan.
+{
+  const { orderSync: os36 } = await import("../src/orders.js");
+  const ob = bot.orderBot;
+  settings.update("PAGE1", { orderSync: true, dryRun: false });
+  const goc = { sync: os36.syncFromConversation, other: os36.otherOrders, confirm: os36.confirmOrder, history: ob.history };
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  ob.history = async () => ({ messages: [khach("sđt 0912345601"), khach("số 165 đường Trần Thái Tông, Thái Bình")], text: "KHÁCH: ...", name: "Thúy" });
+  // (a) thieu mau -> ly do + san pham bot doc duoc
+  let donNV = [];
+  os36.otherOrders = async () => donNV;
+  os36.syncFromConversation = async () => ({ status: "skipped", reason: "chưa đủ thông tin: màu sắc của 2 đầm", draft: { phone: "0912345601", address: "số 165 đường Trần Thái Tông", items: ["Q002 (chưa chọn màu) L x1", "Q002 Đỏ L x1"] } });
+  ob.items.C36 = { pageId: "PAGE1", conversationId: "C36", status: "REVIEW", firstSeen: Date.now() - 3600e3, reasons: [] };
+  await ob.check("C36");
+  assert.deepEqual(ob.items.C36.draft.items, ["Q002 (chưa chọn màu) L x1", "Q002 Đỏ L x1"], "the can duyet hien san pham bot doc duoc");
+  // (b) nhan vien da xac nhan don tren Pancake -> sweep go khoi can duyet, khong ton AI
+  ob.items.C36.status = "REVIEW";
+  let goiAI = 0;
+  os36.syncFromConversation = async () => (goiAI++, { status: "skipped", reason: "x" });
+  donNV = [{ id: 5600, status: 1, bill_phone_number: "0912345601", inserted_at: new Date().toISOString() }];
+  await ob.sweep();
+  assert.equal(ob.items.C36.status, "DONE", "nhan vien da len don -> khong con can duyet");
+  assert.equal(ob.items.C36.orderId, 5600);
+  assert.match(ob.items.C36.summary, /Nhân viên đã lên đơn #5600 \(Đã xác nhận/);
+  assert.equal(goiAI, 0);
+  // khach mua lai: don cu DA GIAO tao truoc khi bot theo doi -> KHONG coi la nhan vien da len don moi
+  donNV = [{ id: 5000, status: 4, bill_phone_number: "0912345601", inserted_at: new Date(Date.now() - 5 * 86400e3).toISOString() }];
+  assert.equal(await os36.staffHandledOrder("C36x", ["0912345601"], Date.now() - 3600e3), null);
+  // (c) don nhap bot len chuan truoc khi bat tu xac nhan -> sweep kiem lai MOT lan va xac nhan
+  donNV = [];
+  let xacNhan = 0;
+  os36.syncFromConversation = async () => ({ status: "updated", orderId: 5559, summary: "Cập nhật đơn nháp #5559: Q002", phone: "0972884909", items: [{ variation_id: "v", quantity: 1 }], confirmBlockers: [] });
+  os36.confirmOrder = async () => (xacNhan++, { ok: true });
+  ob.items.C36c = { pageId: "PAGE1", conversationId: "C36c", status: "DONE", orderId: 5559, doneAt: Date.now() - 3600e3, firstSeen: Date.now() - 7200e3, summary: "Cập nhật đơn nháp #5559", reasons: [] };
+  ob.items.C36d = { pageId: "PAGE1", conversationId: "C36d", status: "DONE", orderId: 5560, doneAt: Date.now() - 3600e3, firstSeen: Date.now() - 7200e3, summary: "x", approvedByStaff: true, reasons: [] };
+  await ob.sweep();
+  await ob.sweep();
+  assert.equal(xacNhan, 1, "chi kiem lai mot lan, khong dong vao don nhan vien duyet tay");
+  assert.ok(ob.items.C36c.confirmedAt);
+  // bot da xac nhan don cua chinh no -> lan kiem sau KHONG ghi nham "nhan vien da len don"
+  donNV = [{ id: 5559, status: 1, bill_phone_number: "0912345601", inserted_at: new Date().toISOString() }];
+  ob.items.C36c.status = "PENDING";
+  await ob.check("C36c");
+  assert.equal(ob.items.C36c.status, "DONE");
+  assert.equal(ob.items.C36c.byStaffOrder, undefined);
+  Object.assign(os36, { syncFromConversation: goc.sync, otherOrders: goc.other, confirmOrder: goc.confirm });
+  ob.history = goc.history;
+  for (const k of Object.keys(ob.items)) if (k.startsWith("C36")) delete ob.items[k];
+  settings.global.orderBot = undefined;
+  console.log("OK 36: can duyet kem san pham bot doc duoc, nhan vien da len don -> tu go, don nhap chuan cu -> tu xac nhan mot lan");
 }
 
 console.log("\nTAT CA TEST PASS");

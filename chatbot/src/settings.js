@@ -165,9 +165,10 @@ class Settings {
    */
   orderBot() {
     const o = this.global.orderBot || {};
-    // autoConfirm: MAC DINH TAT — chu shop tu bat. Bat thi don CHAC CHAN (dia chi khop du cap, san pham khop POS,
-    // khach chot tong tien, khong co don khac) duoc chuyen "Moi" -> "Da xac nhan"; con lai van la don nhap.
-    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120, autoConfirm: o.autoConfirm === true };
+    // autoConfirm: MAC DINH BAT (chu shop 01/10/2026: "neu da len chuan thi cho qua da xac nhan luon"). Don CHAC CHAN
+    // (dia chi khop du cap, san pham khop POS, khach chot tong tien, khong co don khac) chuyen "Moi" -> "Da xac nhan";
+    // con lai van la don nhap. Tat duoc tren trang Bot len don.
+    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120, autoConfirm: o.autoConfirm !== false };
   }
 
   setOrderBot({ enabled, waitMinutes, autoConfirm }) {

@@ -1,4 +1,4 @@
-import { orderSync, phonesInText } from "./orders.js";
+import { orderSync, phonesInText, ORDER_STATUS_VI } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -87,7 +87,9 @@ export class OrderBot {
     this.running.add(key);
     try {
       const { pageId, conversationId } = it;
-      const { text, name } = await this.history(pageId, conversationId);
+      const { messages, text, name } = await this.history(pageId, conversationId);
+      // Nhan vien da tu len / xac nhan don cho khach nay -> xong, khong ton AI, khong bat ai duyet lai
+      if (!byStaff && (await this.resolveIfStaffHandled(key, messages))) return it;
       const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride });
       it.lastCheckAt = Date.now();
       it.checks = (it.checks || 0) + 1;
@@ -124,6 +126,7 @@ export class OrderBot {
       } else {
         // skipped: chua du thong tin / khach da co don dang xu ly / SDT khong co trong hoi thoai...
         it.reasons = [r.reason || "chưa đủ thông tin"];
+        if (r.draft) it.draft = r.draft;
         if (/đã có đơn/.test(r.reason || "")) it.status = "DONE", (it.orderId = r.orderId), (it.summary = r.reason);
         else it.status = byStaff ? "REVIEW" : "PENDING";
       }
@@ -134,6 +137,40 @@ export class OrderBot {
     }
   }
 
+  /** Cac SDT khach tu go trong hoi thoai (khong lay so cua shop) */
+  customerPhones(pageId, messages) {
+    return [...new Set((messages || []).filter((m) => !this.bot.isFromPage(m, pageId)).flatMap((m) => phonesInText(this.bot.messageText(m))))];
+  }
+
+  /**
+   * Khach da co don do NHAN VIEN len / xac nhan (orderSync.staffHandledOrder) -> chuyen sang "da len don", ghi ro don nao.
+   * Tra ve true neu da xu ly. Loi POS thi coi nhu chua biet (false), khong doan.
+   */
+  async resolveIfStaffHandled(key, messages) {
+    const it = this.items[key];
+    if (!it) return false;
+    const phones = this.customerPhones(it.pageId, messages);
+    if (!phones.length) return false;
+    const don = await orderSync.staffHandledOrder(it.conversationId, phones, it.firstSeen).catch(() => null);
+    if (!don) return false;
+    if (String(don.id) === String(it.orderId)) {
+      // Chinh don bot da len (nhan vien / bot da xac nhan) -> van la "da len don", khong ghi nham la nhan vien len
+      it.status = "DONE";
+      it.reasons = [];
+      this._save();
+      return true;
+    }
+    it.status = "DONE";
+    it.orderId = don.id;
+    it.doneAt = Date.now();
+    it.byStaffOrder = true;
+    it.summary = `Nhân viên đã lên đơn #${don.id} (${ORDER_STATUS_VI[Number(don.status)] || don.status_name || don.status}) — bot không làm gì thêm`;
+    it.reasons = [];
+    this._save();
+    log.info(`[orderbot] ${key}: nhan vien da len don #${don.id}`);
+    return true;
+  }
+
   /** Quet dinh ky: don cho qua han (khach im lang) -> kiem lan cuoi, con thieu thi sang can duyet */
   async sweep() {
     if (!settings.orderBot().enabled) return;
@@ -142,6 +179,24 @@ export class OrderBot {
     for (const [key, it] of Object.entries(this.items)) {
       if (now - (it.lastCustomerAt || it.firstSeen || now) > 7 * 86400000 && it.status !== "REVIEW") {
         delete this.items[key]; // don xong / bo qua qua 7 ngay: don khoi so theo doi
+        continue;
+      }
+      // Don CAN DUYET: nhan vien co the da tu len don tren Pancake -> go khoi danh sach (1 lan goi POS, khong ton AI)
+      if (it.status === "REVIEW" && this.enabledFor(it.pageId) && now - (it.staffCheckAt || 0) > SWEEP_MS - 1000) {
+        it.staffCheckAt = now;
+        try {
+          const { messages } = await this.history(it.pageId, it.conversationId);
+          await this.resolveIfStaffHandled(key, messages);
+        } catch (e) {
+          log.warn(`[orderbot] ${key}: kiem don nhan vien loi: ${e.message}`);
+        }
+        continue;
+      }
+      // Don nhap bot da len CHUAN truoc khi bat tu xac nhan (hoac truoc ban nay): kiem lai MOT lan de xac nhan.
+      // Don nhan vien duyet tay / nhan vien tu len don thi khong dong vao.
+      if (it.status === "DONE" && settings.orderBot().autoConfirm && !it.confirmedAt && !it.confirmTried && !it.approvedByStaff && !it.byStaffOrder && it.orderId && now - (it.doneAt || 0) < 3 * 86400000 && !/đã có đơn/.test(it.summary || "") && this.enabledFor(it.pageId)) {
+        it.confirmTried = true;
+        await this.check(key).catch((e) => log.warn(`[orderbot] ${key}: xac nhan don cu loi: ${e.message}`));
         continue;
       }
       if (it.status !== "PENDING" || !it.facts?.phone) continue;
@@ -203,7 +258,7 @@ export class OrderBot {
           const f = this.bot.customerFacts(pid, messages);
           if (!f.phone || !f.address) continue; // chua co dau hieu mua -> khong ton AI
           // Moi SDT khach tung go (toi da 3): khach doi so giua chung van bi nhan ra la da co don
-          const sdt = [...new Set(messages.filter((m) => !this.bot.isFromPage(m, pid)).flatMap((m) => phonesInText(this.bot.messageText(m))))].slice(-3);
+          const sdt = this.customerPhones(pid, messages).slice(-3);
           let khac = [];
           for (const ph of sdt) if (!khac.length) khac = await orderSync.otherOrders(key, ph).catch(() => []);
           if (khac.length) {
