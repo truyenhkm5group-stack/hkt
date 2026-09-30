@@ -954,21 +954,41 @@ async function renderOrderBot() {
       <div class="row" style="margin-top:8px"><button class="primary" data-ob-approve="${esc(it.key)}">Duyệt & lên đơn</button><button data-ob-check="${esc(it.key)}">Kiểm lại từ chat</button><button data-ob-dismiss="${esc(it.key)}">Bỏ qua (không lên đơn)</button></div>
     </div>`).join("") || '<div class="muted small">Không có đơn nào cần duyệt.</div>';
   const pending = d.pending.map((it) => `<tr><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td class="small">${f(it)}</td><td class="small">${esc((it.reasons || []).join("; ") || ["SĐT", "địa chỉ"].filter((_, i) => !(i ? it.facts?.address : it.facts?.phone)).map((x) => "chưa có " + x).join(", ") || "chờ bot kiểm")}</td><td class="small">${esc(fmtTime(it.lastCustomerAt))}</td></tr>`).join("");
-  const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}</td><td class="small">${esc(it.summary || "")}</td></tr>`).join("");
+  const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}${it.confirmedAt ? ' <span class="pill">✅ đã xác nhận</span>' : ""}</td><td class="small">${esc(it.summary || "")}${it.confirmNote ? `<div class="muted">${esc(it.confirmNote)}</div>` : ""}</td></tr>`).join("");
+  const rs = d.rescan;
+  const rsText = !rs ? "" : `${rs.running ? "⏳ Đang quét" : "Lần quét gần nhất"} ${rs.hours} giờ: đọc ${rs.scanned} hội thoại, kiểm ${rs.checked}, lên đơn ${rs.done} (tự xác nhận ${rs.confirmed}), cần duyệt ${rs.review}, bỏ qua ${rs.skipped} vì khách đã có đơn${rs.errors ? `, lỗi ${rs.errors}` : ""}${rs.note ? " — " + rs.note : ""}`;
   $("#content").innerHTML = `
     <div class="card"><div class="stat">
       <div><b>${c.review}</b><span class="muted">cần duyệt</span></div>
       <div><b>${c.pending}</b><span class="muted">đang chờ khách nhắn nốt</span></div>
-      <div><b>${c.doneToday}</b><span class="muted">đã lên đơn hôm nay</span></div></div>
+      <div><b>${c.doneToday}</b><span class="muted">đã lên đơn hôm nay</span></div>
+      <div><b>${st.autoConfirm ? c.confirmedToday : "—"}</b><span class="muted">tự xác nhận hôm nay</span></div></div>
       <div class="row" style="margin-top:10px">
         <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ob_on" ${st.enabled ? "checked" : ""} style="width:auto"> Bật bot lên đơn</label>
         <div style="width:200px"><label>Chờ khách nhắn nốt (phút)</label><input id="ob_wait" type="number" min="10" max="1440" value="${st.waitMinutes}"></div>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ob_confirm" ${st.autoConfirm ? "checked" : ""} style="width:auto"> Tự xác nhận đơn chắc chắn</label>
         <button class="primary" id="ob_save" style="align-self:flex-end">Lưu</button></div>
+      <div class="hint">Tự xác nhận (mặc định tắt): đơn chuyển từ "Mới" sang "Đã xác nhận" CHỈ khi địa chỉ khớp đủ tỉnh/huyện/xã + số nhà, mọi sản phẩm khớp POS, khách đã chốt tổng tiền (không vượt giá POS, giảm không quá 30%), và khách không có đơn nào khác trong 14 ngày. Bot đọc lại đơn trên POS trước khi xác nhận: nhân viên đã sửa đơn thì bot không động vào. Đơn nhân viên duyệt tay thì nhân viên tự xác nhận. Thiếu một điều kiện thì đơn vẫn là đơn nháp, kèm lý do trong mục "Đã lên đơn gần đây".</div>
+      <div class="row" style="margin-top:10px">
+        <div style="width:200px"><label>Quét lại hội thoại trong (giờ)</label><input id="ob_hours" type="number" min="1" max="168" value="${rs?.hours || 24}"></div>
+        <button id="ob_rescan" style="align-self:flex-end" ${rs?.running ? "disabled" : ""}>🔄 Quét lại hội thoại cũ</button>
+        <span id="ob_rs" class="small muted" style="align-self:flex-end">${esc(rsText)}</span></div>
+      <div class="hint">Đọc lại hội thoại khách nhắn trong số giờ trên (tối đa 7 ngày), hội thoại nào khách đã gửi SĐT + địa chỉ thì kiểm như đơn mới. Bỏ qua hội thoại đã bấm "Bỏ qua", đơn đã tự xác nhận, và khách đã có đơn thật trong 14 ngày (tránh lên trùng đơn cũ). Mỗi hội thoại đủ SĐT + địa chỉ tốn 1 lượt AI; tối đa 150 hội thoại mỗi lần quét.</div>
       <div class="hint">Bật: bot tư vấn KHÔNG tự ghi đơn nữa, bot này nhận việc. Chỉ ghi đơn nháp lên POS khi SĐT khách tự gõ, mẫu/màu/size khớp POS và địa chỉ khớp ĐỦ tỉnh / huyện / xã theo tên khách gõ (không dò gần đúng) kèm số nhà / thôn xóm. Còn thiếu thì chờ; khách im lặng quá thời gian chờ, hoặc không chắc chắn, thì vào mục <b>Cần duyệt</b> dưới đây. Page đang "chỉ log" không bị ghi đơn.</div></div>
     <h3 style="margin:14px 0 8px">Cần duyệt</h3>${review}
     <details class="card"><summary class="small" style="cursor:pointer">Đang chờ khách nhắn nốt (${c.pending})</summary><table style="margin-top:8px"><tr><th>Khách</th><th>Page</th><th>Đã có</th><th>Còn thiếu</th><th>Tin cuối</th></tr>${pending}</table></details>
     <details class="card"><summary class="small" style="cursor:pointer">Đã lên đơn gần đây</summary><table style="margin-top:8px"><tr><th>Lúc</th><th>Khách</th><th>Page</th><th>Đơn</th><th>Tóm tắt</th></tr>${done}</table></details>`;
-  $("#ob_save").onclick = async () => { try { await api("/api/orderbot/settings", { method: "POST", body: { enabled: $("#ob_on").checked, waitMinutes: Number($("#ob_wait").value) } }); toast("Đã lưu"); renderOrderBot(); } catch (e) { toast("Lỗi: " + e.message, 6000); } };
+  $("#ob_save").onclick = async () => { try { await api("/api/orderbot/settings", { method: "POST", body: { enabled: $("#ob_on").checked, waitMinutes: Number($("#ob_wait").value), autoConfirm: $("#ob_confirm").checked } }); toast("Đã lưu"); renderOrderBot(); } catch (e) { toast("Lỗi: " + e.message, 6000); } };
+  $("#ob_rescan").onclick = async () => {
+    const h = Number($("#ob_hours").value);
+    if (!confirm(`Quét lại hội thoại khách nhắn trong ${h} giờ gần đây?`)) return;
+    $("#ob_rescan").disabled = true;
+    try { await api("/api/orderbot/rescan", { method: "POST", body: { hours: h } }); toast("Đang quét lại, trang tự cập nhật"); }
+    catch (e) { toast("Lỗi: " + e.message, 6000); $("#ob_rescan").disabled = false; return; }
+    const poll = async () => { if (view.kind !== "orderbot") return; const r = await api("/api/orderbot").catch(() => null); if (r?.rescan?.running) setTimeout(poll, 4000); else renderOrderBot(); };
+    setTimeout(poll, 3000);
+  };
+  if (rs?.running) setTimeout(() => view.kind === "orderbot" && renderOrderBot(), 5000);
   const act = (sel, path, bodyOf) => document.querySelectorAll(`[${sel}]`).forEach((b) => (b.onclick = async () => {
     const key = b.getAttribute(sel);
     b.disabled = true;
