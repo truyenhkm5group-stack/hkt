@@ -1133,6 +1133,11 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(posPosts[1].shipping_address.district_id, "10121");
   assert.match(posPosts[1].note, /nhân viên duyệt/);
 
+  // (d2) AI liet ke CUNG mot bien the hai lan -> mot dong, khong nhan doi so luong
+  const trung = os33.mapItems([{ code: "Q004", color: "Nâu", size: "M", quantity: 1 }, { code: "Q004", color: "nâu", size: "M", quantity: 1 }]);
+  assert.equal(trung.mapped.length, 1, "khong len trung san pham");
+  assert.equal(trung.mapped[0].quantity, 1, "nhac lai khong phai mua them");
+  assert.equal(os33.mapItems([{ code: "Q004", color: "Nâu", size: "M", quantity: 2 }, { code: "Q004", color: "Nâu", size: "M", quantity: 1 }]).mapped[0].quantity, 2);
   // (e) Bot len don: khach nhan rai rac -> CHO; im lang qua han -> CAN DUYET; bo qua duoc
   const ob = bot.orderBot;
   const goc = os33.syncFromConversation;

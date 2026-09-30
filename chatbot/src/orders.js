@@ -364,7 +364,15 @@ export class OrderSync {
         problems.push(`${p.code}: không có biến thể màu "${it.color || "?"}" size "${it.size || "?"}"`);
         continue;
       }
-      mapped.push({ variation_id: v.id, quantity: Math.max(1, Number(it.quantity) || 1), display: `${p.name} ${v.fields["Màu"] || ""} ${v.fields["Size"] || ""}`.replace(/\s+/g, " ").trim(), price: v.price });
+      const qty = Math.max(1, Number(it.quantity) || 1);
+      // CUNG MOT bien the xuat hien 2 lan (AI doc ca cau khach chon lan dau lan cau chot lai) -> MOT dong, lay so
+      // luong LON NHAT chu khong cong don: cong don la bien 1 cai thanh 2 cai khi khach chi nhac lai.
+      const trung = mapped.find((m) => m.variation_id === v.id);
+      if (trung) {
+        trung.quantity = Math.max(trung.quantity, qty);
+        continue;
+      }
+      mapped.push({ variation_id: v.id, quantity: qty, display: `${p.name} ${v.fields["Màu"] || ""} ${v.fields["Size"] || ""}`.replace(/\s+/g, " ").trim(), price: v.price });
     }
     return { mapped, problems };
   }
