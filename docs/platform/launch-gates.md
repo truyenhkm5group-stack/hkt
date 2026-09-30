@@ -95,6 +95,13 @@ lượt ghi hàng loạt vào CSDL của mọi tổ chức — AGENTS.md mục 7
 
 ### A.5 · Checklist xác minh sau khi đặt khoá (phiên tích hợp chạy)
 
+> **Đã chạy 30/09/2026** — chủ nền tảng đặt secret 29/09; kết quả đầy đủ ở `pilot-readiness.md` mục 6. Tóm tắt: V1 ĐẠT
+> (deploy run 36586233151: «có» + «đã ghi vào .env (không in giá trị)»), V2 ĐẠT (`ready`, mã khoá `3c0b04e1`), V3/V4 thay
+> bằng ops `platform-secrets-verify` (cùng phép thử, trên khoá THẬT và CSDL THẬT, không cần phiên người vận hành — nút ở
+> `/platform` vẫn dùng được), V5 ĐẠT (hai lượt deploy sau, mã khoá không đổi; canary niêm trước deploy giải đúng sau
+> deploy), V6 chờ chủ nền tảng xác nhận, V7 có sẵn (`npm run platform:rotate-secrets`, chạy thử chỉ đọc — không chạy vì chủ
+> dặn không xoay khoá).
+
 | # | Kiểm | Đạt khi |
 |---|---|---|
 | V1 | Log run Deploy: bước "Kiểm tra Secrets bắt buộc" | `PLATFORM_SECRETS_KEY: có`; bước SSH in `PLATFORM_SECRETS_KEY: đã ghi vào .env (không in giá trị)` |
