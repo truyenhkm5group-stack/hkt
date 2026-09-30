@@ -159,6 +159,29 @@ class Settings {
     return this.deliveryDays();
   }
 
+  /**
+   * BOT LEN DON (orderbot.js): bat/tat va so phut CHO khach nhan not thong tin truoc khi dua vao hang "can duyet".
+   * Mac dinh BAT, cho 120 phut. Bat thi luong ghi don cu (sau cau tom tat chot don) nhuong han cho bot nay.
+   */
+  orderBot() {
+    const o = this.global.orderBot || {};
+    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120 };
+  }
+
+  setOrderBot({ enabled, waitMinutes }) {
+    const cur = this.orderBot();
+    const next = { ...cur };
+    if (enabled !== undefined) next.enabled = !!enabled;
+    if (waitMinutes !== undefined) {
+      const n = Math.round(Number(waitMinutes));
+      if (!Number.isFinite(n) || n < 10 || n > 24 * 60) throw new Error("Thoi gian cho phai tu 10 den 1440 phut");
+      next.waitMinutes = n;
+    }
+    this.global.orderBot = next;
+    fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));
+    return this.orderBot();
+  }
+
   /** Bat/tat DRY_RUN chung ngay luc chay (null = quay ve gia tri trong .env) */
   setGlobalDryRun(value) {
     this.global.dryRun = value === null || value === undefined ? null : !!value;

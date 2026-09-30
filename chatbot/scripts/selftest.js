@@ -1066,5 +1066,100 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 30: khach nhan them luc bot dang soan -> bo cau cu, tra loi lai theo tin moi nhat");
 }
 
+// ---- 33: BOT LEN DON doc lap (chu shop 30/09/2026): chi len don khi dia chi khop du tinh/huyen/xa + so nha;
+// tu bo sung huyen khi ten xa chi co o DUNG MOT huyen; khong xac dinh duoc -> can duyet (bao nhan vien)
+{
+  const { config: cfg33 } = await import("../src/config.js");
+  cfg33.pos.shopId = "SHOP1"; cfg33.pos.apiKey = "posk"; cfg33.orderSync = true;
+  const { orderSync: os33 } = await import("../src/orders.js");
+  // Test 17 thay tam provinces/districts/communes tren chinh instance -> bo di de dung API geo (gia lap ben duoi)
+  const geoGoc = { provinces: os33.provinces, districts: os33.districts, communes: os33.communes };
+  delete os33.provinces; delete os33.districts; delete os33.communes;
+  os33.geo = { provinces: null, districts: new Map(), communes: new Map() };
+  const prevProducts33 = catalog.products;
+  catalog.setProducts([{ id: "p33", code: "Q004", name: "Đầm Q004", note: "", attributes: { "Màu": ["Nâu"], Size: ["M"] }, price: { min: 499000, max: 499000 }, images: [], variations: [{ id: "v33", sku: "Q004NAUM", fields: { "Màu": "Nâu", Size: "M" }, price: 499000, stock: 5, available: true, images: [] }] }]);
+  let diaChiAI = {}, diaChiKhach = "";
+  const posPosts = [];
+  const prev33 = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const body = init.body && typeof init.body === "string" ? JSON.parse(init.body) : null;
+    const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    if (u.hostname === "pos.pages.fm") {
+      if (u.pathname === "/api/v1/geo/provinces") return json({ data: [{ id: "101", name: "Hà Nội" }] });
+      if (u.pathname === "/api/v1/geo/districts") return json({ data: [{ id: "10120", name: "Huyện Quốc Oai" }, { id: "10121", name: "Huyện Thạch Thất" }] });
+      if (u.pathname === "/api/v1/geo/communes") {
+        const d = u.searchParams.get("district_id");
+        return json({ data: d === "10120" ? [{ id: "1012001", name: "Xã Sài Sơn" }, { id: "1012002", name: "Xã Tân Phú" }] : [{ id: "1012101", name: "Xã Bình Phú" }, { id: "1012102", name: "Xã Tân Phú" }] });
+      }
+      if (u.pathname === "/api/v1/shops/SHOP1/orders" && (init.method || "GET") === "GET") return json({ data: [] });
+      if (u.pathname === "/api/v1/shops/SHOP1/orders" && init.method === "POST") { posPosts.push(body); return json({ data: { id: 900 + posPosts.length } }, 201); }
+    }
+    if (u.hostname === "generativelanguage.googleapis.com" && body?.generationConfig?.responseSchema) {
+      const props = body.generationConfig.responseSchema.properties || {};
+      const txt = props.ready
+        ? JSON.stringify({ ready: true, items: [{ code: "Q004", color: "Nâu", size: "M", quantity: 1 }], customer_name: "Hoa", phone: "0912345678", address: diaChiKhach })
+        : JSON.stringify(diaChiAI);
+      return json({ candidates: [{ content: { parts: [{ text: txt }] }, finishReason: "STOP" }], usageMetadata: {} });
+    }
+    return prev33(url, init);
+  };
+  const chat = (dc) => `KHÁCH: Tư vấn cho chị Q004 nâu size M sđt 0912345678\nKHÁCH: ship về ${dc}`;
+  // (a) Khach KHONG ghi huyen, nhung "Sài Sơn" chi co o Quoc Oai -> tu bo sung huyen, len don
+  diaChiKhach = "Số 15 ngõ 42 thôn Phúc Đức, xã Sài Sơn, Hà Nội";
+  diaChiAI = { province: "Hà Nội", district: "", commune: "Sài Sơn", street: "Số 15 ngõ 42 thôn Phúc Đức" };
+  const a = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33a", customerName: "Hoa", historyText: chat(diaChiKhach), strict: true });
+  assert.equal(a.status, "created", "dia chi xac dinh chac chan -> len don: " + JSON.stringify(a));
+  assert.equal(posPosts[0].shipping_address.district_id, "10120", "tu bo sung dung huyen Quoc Oai");
+  assert.equal(posPosts[0].shipping_address.commune_id, "1012001");
+  assert.match(posPosts[0].note, /tự bổ sung/);
+  // (b) "Tân Phú" co o CA HAI huyen, khach khong ghi huyen -> KHONG len don, can duyet kem ly do
+  diaChiKhach = "thôn 3, xã Tân Phú, Hà Nội";
+  diaChiAI = { province: "Hà Nội", district: "", commune: "Tân Phú", street: "thôn 3" };
+  const b = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33b", customerName: "Hoa", historyText: chat(diaChiKhach), strict: true });
+  assert.equal(b.status, "review");
+  assert.ok(b.reasons.some((r) => /2 quận\/huyện/.test(r)), "noi ro xa trung ten o 2 huyen: " + b.reasons.join("; "));
+  assert.equal(posPosts.length, 1, "don khong chac chan KHONG duoc ghi len POS");
+  // (c) Du 3 cap nhung thieu so nha / thon xom -> can duyet
+  diaChiKhach = "xã Sài Sơn, huyện Quốc Oai, Hà Nội";
+  diaChiAI = { province: "Hà Nội", district: "Quốc Oai", commune: "Sài Sơn", street: "" };
+  const c = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33c", customerName: "Hoa", historyText: chat(diaChiKhach), strict: true });
+  assert.equal(c.status, "review");
+  assert.ok(c.reasons.some((r) => /số nhà/.test(r)));
+  // (d) Nhan vien sua dia chi roi duyet -> len don
+  diaChiAI = { province: "Hà Nội", district: "Thạch Thất", commune: "Tân Phú", street: "thôn 3" };
+  const d = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33b", customerName: "Hoa", historyText: chat("thôn 3, xã Tân Phú, Hà Nội"), strict: true, addressOverride: "thôn 3, xã Tân Phú, huyện Thạch Thất, Hà Nội" });
+  assert.equal(d.status, "created");
+  assert.equal(posPosts[1].shipping_address.district_id, "10121");
+  assert.match(posPosts[1].note, /nhân viên duyệt/);
+
+  // (e) Bot len don: khach nhan rai rac -> CHO; im lang qua han -> CAN DUYET; bo qua duoc
+  const ob = bot.orderBot;
+  const goc = os33.syncFromConversation;
+  settings.update("PAGE1", { orderSync: true, dryRun: false });
+  const khach33 = (t) => ({ from: { id: "KHACH" }, message: t });
+  ob.notify("PAGE1", "C33e", [khach33("sđt chị 0912345678")], "Hoa");
+  assert.equal(ob.items.C33e.status, "PENDING", "moi co SDT -> cho, chua ghi gi");
+  assert.equal(ob.items.C33e.facts.address, null);
+  os33.syncFromConversation = async () => ({ status: "skipped", reason: "chưa đủ thông tin: địa chỉ" });
+  ob.items.C33e.lastCustomerAt = Date.now() - 3 * 3600e3;
+  await ob.sweep();
+  assert.equal(ob.items.C33e.status, "REVIEW", "khach im lang qua han -> bao nhan vien");
+  assert.match(ob.items.C33e.reasons[0], /im lặng hơn 120 phút/);
+  assert.equal(ob.list().counts.review >= 1, true);
+  ob.dismiss("C33e");
+  assert.equal(ob.items.C33e.status, "DISMISSED");
+  // Khach gui them dia chi sau khi da bo qua -> mo lai, theo doi tiep
+  ob.notify("PAGE1", "C33e", [khach33("sđt chị 0912345678"), khach33("thôn 3 xã Sài Sơn huyện Quốc Oai Hà Nội")], "Hoa");
+  assert.equal(ob.items.C33e.status, "PENDING");
+  clearTimeout(ob.timers.get("C33e"));
+  os33.syncFromConversation = goc;
+  settings.global.orderBot = undefined;
+  catalog.setProducts(prevProducts33);
+  Object.assign(os33, geoGoc);
+  globalThis.fetch = prev33;
+  console.log("OK 33: bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS), cho khach nhan not, qua han -> bao nhan vien");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

@@ -250,6 +250,28 @@ export class OrderSync {
       out.note = out.commune ? "" : `Chưa xác định được xã/phường trong ${out.district.name}`;
       return out;
     }
+    // Khach KHONG ghi quan/huyen nhung ten xa/phuong NGUYEN VAN co trong loi khach va ten do chi thuoc DUNG MOT
+    // huyen cua tinh -> xac dinh chac chan, tu bo sung huyen (khong phai do gan dung). Trung ten o >= 2 huyen thi
+    // KHONG chon — de nhan vien quyet.
+    {
+      const trung = [];
+      for (const d of dists) {
+        const c = litFind(await this.communes(d.id), litText);
+        if (c) trung.push({ d, c });
+      }
+      if (trung.length === 1) {
+        out.district = trung[0].d;
+        out.commune = trung[0].c;
+        out.street = (g.street || "").trim() || raw;
+        out.fullAddress = [out.street, out.commune.name, out.district.name, out.province.name].filter(Boolean).join(", ");
+        out.ok = true;
+        out.confidence = "cao (tự bổ sung quận/huyện)";
+        out.note = "";
+        out.autoFixed = `Khách không ghi quận/huyện — "${out.commune.name}" chỉ có ở ${out.district.name}, hệ thống tự bổ sung`;
+        return out;
+      }
+      if (trung.length > 1) out.ambiguous = `"${trung[0].c.name}" có ở ${trung.length} quận/huyện (${trung.map((t) => t.d.name).join(", ")}) — cần hỏi lại khách`;
+    }
     let dv = fuzzyFind(dists, g.district || "");
     let cv = { item: null, score: 0 };
     if (dv.item && dv.score >= 0.6) {
@@ -413,7 +435,26 @@ export class OrderSync {
   /**
    * Chot don tu hoi thoai -> ghi vao POS. Tra ve { status: "created"|"updated"|"skipped"|"error", orderId?, summary, reason? }
    */
-  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText }) {
+  /**
+   * CHE DO CHAT cua Bot len don (orderbot.js): dia chi chi duoc ghi len POS khi da dinh danh DU tinh / huyen / xa
+   * theo danh muc Pancake bang ten NGUYEN VAN khach go (khong do gan dung) VA co phan so nha / thon xom. Thieu mot
+   * cap la POS bao do va shipper khong giao duoc — nen khong ghi, dua vao hang "can duyet" kem ly do.
+   */
+  addressGate(addr) {
+    const ly = [];
+    if (!addr.province) ly.push("Không xác định được tỉnh/thành");
+    else if (!addr.district) ly.push(`Chỉ có tỉnh ${addr.province.name}, chưa rõ quận/huyện`);
+    else if (!addr.commune) ly.push(`Chưa xác định được xã/phường trong ${addr.district.name}`);
+    if (addr.ambiguous) ly.push(addr.ambiguous);
+    if (addr.district && !/^cao/.test(addr.confidence || "")) ly.push(addr.note || `Địa chỉ chỉ khớp gần đúng (${addr.confidence})`);
+    const pho = String(addr.street || "").trim();
+    const coChiTiet = /\d/.test(pho) || /(thôn|xóm|ấp|bản|tổ|khu|ngõ|ngách|hẻm|kiệt|đường|phố|số|chợ|trường|kđt|chung cư|tòa|toà|block|làng|đội)/i.test(pho);
+    const chiLaTenHanhChinh = addr.commune && pho && litKey(pho).includes(litKey(addr.commune.name)) && pho.split(/\s+/).length <= 4;
+    if (!pho || !coChiTiet || chiLaTenHanhChinh) ly.push("Thiếu số nhà / thôn xóm / tên đường");
+    return [...new Set(ly)];
+  }
+
+  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "" }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
     const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "" });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
@@ -427,9 +468,18 @@ export class OrderSync {
       return { status: "skipped", reason: `SĐT ${phone} không có trong hội thoại (AI tự suy ra) — chờ khách gửi lại SĐT` };
     }
     const { mapped, problems } = this.mapItems(ex.items);
-    if (!mapped.length) return { status: "skipped", reason: `không map được sản phẩm: ${problems.join("; ")}` };
+    const diaChiKhach = String(addressOverride || ex.address || "").trim();
+    const nhap = { phone, customerName: ex.customer_name || customerName || "", address: diaChiKhach, items: (ex.items || []).map((i) => `${i.code || "?"} ${i.color || ""} ${i.size || ""} x${i.quantity || 1}`.replace(/\s+/g, " ").trim()) };
+    if (!mapped.length) {
+      if (strict) return { status: "review", reasons: [`Không khớp được mẫu/màu/size trên POS: ${problems.join("; ")}`], draft: nhap };
+      return { status: "skipped", reason: `không map được sản phẩm: ${problems.join("; ")}` };
+    }
 
-    const addr = await this.resolveAddress(ex.address || "", { pageName });
+    const addr = await this.resolveAddress(diaChiKhach, { pageName });
+    if (strict) {
+      const ly = [...this.addressGate(addr), ...(problems.length ? [`Một phần sản phẩm không khớp POS: ${problems.join("; ")}`] : [])];
+      if (ly.length) return { status: "review", reasons: ly, draft: { ...nhap, resolved: addr.fullAddress } };
+    }
     const goods = mapped.reduce((s, m) => s + m.price * m.quantity, 0);
     const agreed = Number(ex.agreed_total) || 0;
     const freeShip = !!ex.free_shipping || mapped.reduce((s, m) => s + m.quantity, 0) >= 2;
@@ -443,8 +493,9 @@ export class OrderSync {
     const noteLines = [
       `🤖 Bot chốt từ chat (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}): ${mapped.map((m) => `${m.display} x${m.quantity}`).join(", ")}`,
       agreed ? `Khách chốt tổng ${agreed.toLocaleString("vi-VN")}đ${freeShip ? " (miễn ship)" : " (gồm ship)"}${discount ? `, đã ghi giảm ${discount.toLocaleString("vi-VN")}đ` : ""}` : "",
-      `Địa chỉ khách ghi: "${ex.address || ""}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
+      `Địa chỉ ${addressOverride ? "nhân viên duyệt" : "khách ghi"}: "${diaChiKhach}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
       addr.note ? `⚠ ${addr.note}, nhân viên kiểm tra lại` : "",
+      addr.autoFixed ? `✓ ${addr.autoFixed}` : "",
       problems.length ? `⚠ ${problems.join("; ")}` : "",
       ex.note ? `Khách dặn: ${ex.note}` : "",
     ].filter(Boolean);

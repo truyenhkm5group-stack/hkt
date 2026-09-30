@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
-import { getChatbotStatus } from "@/lib/integrations/chatbot/client";
+import { getChatbotReviewCount, getChatbotStatus } from "@/lib/integrations/chatbot/client";
 import { ChatbotImportForm } from "@/app/(dashboard)/chatbot/import-form";
 
 export const metadata = { title: "Bot chat bán hàng" };
@@ -13,9 +14,11 @@ export const dynamic = "force-dynamic";
  * gác cửa và nhúng NGUYÊN giao diện quản trị của bot — cài đặt page, prompt, chat thử, hội thoại,
  * nhật ký — để mọi chốt chặn đã chạy thật trên máy Windows giữ nguyên, không viết lại lần hai.
  */
-export default async function ChatbotPage() {
+export default async function ChatbotPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("cs:config");
-  const status = await getChatbotStatus();
+  const [status, sp] = await Promise.all([getChatbotStatus(), searchParams]);
+  const reviewCount = status.state === "RUNNING" ? await getChatbotReviewCount() : null;
+  const openOrderBot = sp.view === "orderbot";
 
   return (
     <div className="space-y-5">
@@ -39,10 +42,16 @@ export default async function ChatbotPage() {
         </SectionCard>
       ) : null}
 
+      {status.state === "RUNNING" && reviewCount ? (
+        <Link href="/chatbot?view=orderbot" className="block rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <b>{reviewCount} đơn bot không tự xác định được</b> (địa chỉ không khớp đủ tỉnh/huyện/xã, màu/size không có trên POS…) — cần nhân viên sửa và duyệt. Bấm để mở danh sách.
+        </Link>
+      ) : null}
+
       {status.state === "RUNNING" ? (
         <>
           <div className="overflow-hidden rounded-xl border bg-card">
-            <iframe src="/api/chatbot/admin" title="Quản lý bot chat" className="block h-[calc(100vh-190px)] min-h-[640px] w-full" />
+            <iframe key={openOrderBot ? "ob" : "home"} src={openOrderBot ? "/api/chatbot/admin#orderbot" : "/api/chatbot/admin"} title="Quản lý bot chat" className="block h-[calc(100vh-190px)] min-h-[640px] w-full" />
           </div>
           <details className="rounded-lg border p-4">
             <summary className="cursor-pointer text-sm font-medium">Nạp lại dữ liệu từ máy Windows · tệp đang có trên VPS</summary>
