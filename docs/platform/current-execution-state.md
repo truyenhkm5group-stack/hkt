@@ -10,6 +10,10 @@
 đặt khoá), diễn tập khôi phục Postgres ĐẠT, sổ dùng AI + hạn mức + công tắc, sản phẩm / đơn tạo tay, vòng đời pilot +
 trang sức khoẻ + công tắc khẩn + đổi gói, chạy lại cô lập 243 mặt. Bài chấp nhận pilot bán buôn 9/9 qua giao diện, 0 P0.
 
+**30/09/2026:** khoá bí mật đã đặt và kiểm 8/8 trên production (`pilot-readiness.md` mục 6); bốn quyết định của chủ
+nền tảng đã lên production — G-ORDER #407, G-SCHED #405, D1 = BYOK, sao lưu tổ chức hằng giờ + diễn tập hằng tuần #410.
+Production `6ea8b524`, 181 migration. Cổng còn lại: V6 (bản sao khoá ngoài VPS) và cửa sổ bảo trì bật PITR cho CSDL nhà.
+
 **DỪNG MỞ RỘNG NỀN TẢNG Ở ĐÂY.** Việc kế tiếp là khách thương mại đầu tiên HSLC SHOP — workstream / phiên RIÊNG, đọc
 `hslc-commercial-pilot-handoff.md` (bảng HSLC SELF-SERVICE GAP + thứ tự gap P0). Chưa triển khai HSLC trong phiên này.
 
