@@ -464,6 +464,27 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: ["lib/messaging/providers.ts::messagingProvider"],
     why: "Bot do CHÍNH tổ chức tạo. Kiểm tra = getMe (chỉ đọc) rồi gửi MỘT tin thử vào chat đã khai, chỉ tới api.telegram.org. Luồng đọc: hành động «Gửi tin nhóm chat» của luật tự động (0180). Cảnh báo vận hành của VNX không đọc bảng này.",
   },
+  {
+    key: "zalo-bot",
+    label: "Zalo — bot của tổ chức",
+    vendor: "Zalo",
+    kind: "MESSAGING",
+    capabilities: ["send_group_message"],
+    auth: "API_KEY",
+    settings: [
+      { key: "botToken", label: "Bot token (từ Zalo Bot Creator)", type: "text", secret: true, required: true, pattern: "^[0-9]{5,25}:[A-Za-z0-9_.-]{10,200}$", maxLength: 230 },
+      { key: "chatId", label: "Chat ID nhận tin (bấm «Tìm chat»)", type: "text", secret: false, required: true, pattern: "^[A-Za-z0-9_-]{6,64}$", maxLength: 64 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testZaloBot",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/messaging/providers.ts"],
+    consumers: ["lib/messaging/providers.ts::messagingProvider"],
+    why: "Bot Zalo do CHÍNH tổ chức tạo ở bot.zaloplatforms.com. Kiểm tra = getMe rồi gửi MỘT tin thử vào chat đã khai, chỉ tới bot-api.zaloplatforms.com; «Tìm chat» đọc getUpdates để lấy mã chat (Zalo không hiện mã cho người dùng). Máy chủ tại Việt Nam gọi được Zalo kể cả khi Telegram bị chặn ở tầng mạng (đo 30/09/2026). Luồng đọc: hành động «Gửi tin nhóm chat» của luật tự động.",
+  },
   /*
     HỘP THỬ (0180): kết nối nhắn tin KHÔNG gọi mạng — cùng giao diện `MessagingProvider` với Lark / Telegram, nhưng tin
     chỉ nằm trong sổ `messaging_deliveries` của chính tổ chức (màn hình «Thông báo nhóm» in lại). Để shop dựng và thử luật

@@ -15,7 +15,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { openActiveConnection } from "@/lib/connectors/service";
-import { LARK_HOOK_PATTERN, scrubSecrets, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN } from "@/lib/connectors/testers";
+import { LARK_HOOK_PATTERN, scrubSecrets, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, ZALO_BOT_API, ZALO_CHAT_PATTERN, ZALO_TEXT_MAX, ZALO_TOKEN_PATTERN } from "@/lib/connectors/testers";
 import type { MessagingConnectorKey } from "@/lib/messaging/types";
 
 export type OutgoingMessage = { title: string | null; text: string; destination: string | null };
@@ -114,6 +114,67 @@ class TelegramProvider implements MessagingProvider {
   }
 }
 
+/**
+ * Tách một tin dài thành các đoạn ≤ `max` ký tự, cắt ở ranh giới DÒNG (dòng dài hơn trần thì cắt cứng). Zalo nhận 1–2000
+ * ký tự một tin; đơn nhiều dòng hàng dễ vượt — gửi thành nhiều tin liên tiếp, đúng thứ tự, thay vì bị từ chối cả tin.
+ */
+export function chunkText(text: string, max: number): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const line of text.split("\n")) {
+    for (let piece = line; ; ) {
+      const add = cur ? `${cur}\n${piece}` : piece;
+      if (add.length <= max) {
+        cur = add;
+        break;
+      }
+      if (cur) {
+        out.push(cur);
+        cur = "";
+        continue;
+      }
+      out.push(piece.slice(0, max));
+      piece = piece.slice(max);
+      if (!piece) break;
+    }
+  }
+  if (cur) out.push(cur);
+  return out.length ? out : [""];
+}
+
+class ZaloProvider implements MessagingProvider {
+  readonly key = "zalo-bot" as const;
+  readonly defaultDestination: string | null;
+  constructor(
+    private readonly secrets: Record<string, string>,
+    settings: Record<string, string>,
+    private readonly deps: MessagingDeps,
+  ) {
+    this.defaultDestination = (settings.chatId ?? "").trim() || null;
+  }
+  async send(msg: OutgoingMessage): Promise<SendResult> {
+    const token = (this.secrets.botToken ?? "").trim();
+    const chatId = (msg.destination ?? "").trim() || this.defaultDestination || "";
+    const hide = [token];
+    if (!ZALO_TOKEN_PATTERN.test(token)) return { ok: false, error: "Bot token Zalo đã lưu không đúng dạng — không gửi." };
+    if (!ZALO_CHAT_PATTERN.test(chatId)) return { ok: false, error: "Chat ID Zalo nơi nhận không hợp lệ — lấy lại bằng «Tìm chat» ở trang Kết nối." };
+    let firstId: string | null = null;
+    try {
+      for (const part of chunkText(joined(msg), ZALO_TEXT_MAX)) {
+        const res = await postJson(this.deps.fetch ?? fetch, `${ZALO_BOT_API}/bot${token}/sendMessage`, { chat_id: chatId, text: part });
+        const body = await readJson(res);
+        // Đoạn sau hỏng khi đoạn đầu đã đi ⇒ vẫn báo hỏng (không gửi lại đoạn đầu — sổ chống trùng giữ «đã thử»).
+        if (body?.ok !== true) return { ok: false, error: scrubSecrets(`Zalo không nhận tin: ${String(body?.description ?? `HTTP ${res.status}`)}`, hide) };
+        const result = body.result as { message_id?: unknown } | undefined;
+        firstId ??= result?.message_id !== undefined ? String(result.message_id) : null;
+      }
+      return { ok: true, providerMessageId: firstId, destination: chatId };
+    } catch (e) {
+      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Zalo: ${describeNetworkFailure(e, "bot-api.zaloplatforms.com")}` : `Không gọi được Zalo: ${e instanceof Error ? e.message : String(e)}`, hide) };
+    }
+  }
+}
+
 /** Hộp thử: không gọi mạng. Tin đã nằm trong sổ `messaging_deliveries` (dòng do `deliverMessage` chèn) — ĐÓ là hộp thư. */
 class SandboxProvider implements MessagingProvider {
   readonly key = "sandbox-messaging" as const;
@@ -148,6 +209,8 @@ export async function messagingProvider(key: MessagingConnectorKey, deps: Messag
       return { ok: true, provider: new LarkProvider(conn.secrets, deps) };
     case "telegram-bot":
       return { ok: true, provider: new TelegramProvider(conn.secrets, conn.settings, deps) };
+    case "zalo-bot":
+      return { ok: true, provider: new ZaloProvider(conn.secrets, conn.settings, deps) };
     case "sandbox-messaging":
       return { ok: true, provider: new SandboxProvider(conn.settings) };
   }

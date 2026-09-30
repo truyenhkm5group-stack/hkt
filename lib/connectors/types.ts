@@ -74,3 +74,9 @@ export type SecretsSelfTestReport = {
   reason: string | null;
   checks: { name: string; ok: boolean }[];
 };
+
+/** Kết nối có nút «Tìm chat» (đọc tin mới của bot để lấy mã chat) — khớp `ORG_CONNECTION_CHAT_DISCOVERY` (testers.ts). */
+export const CHAT_DISCOVERY_CONNECTORS = ["telegram-bot", "zalo-bot"] as const;
+export type DiscoveredChatView = { id: string; type: "PRIVATE" | "GROUP"; name: string; sample: string };
+export type ChatDiscoveryResult = { ok: true; chats: DiscoveredChatView[]; message: string } | { error: string };
+

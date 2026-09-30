@@ -11,7 +11,7 @@
  */
 
 /** Kết nối nhắn tin theo tổ chức — khoá trong sổ connector (`lib/connectors/registry.ts`). */
-export const MESSAGING_CONNECTOR_KEYS = ["lark-webhook", "telegram-bot", "sandbox-messaging"] as const;
+export const MESSAGING_CONNECTOR_KEYS = ["lark-webhook", "telegram-bot", "zalo-bot", "sandbox-messaging"] as const;
 export type MessagingConnectorKey = (typeof MESSAGING_CONNECTOR_KEYS)[number];
 
 export function isMessagingConnector(key: unknown): key is MessagingConnectorKey {
@@ -21,6 +21,7 @@ export function isMessagingConnector(key: unknown): key is MessagingConnectorKey
 export const MESSAGING_CONNECTOR_LABEL: Record<MessagingConnectorKey, string> = {
   "lark-webhook": "Lark — nhóm chat (webhook)",
   "telegram-bot": "Telegram — bot của tổ chức",
+  "zalo-bot": "Zalo — bot của tổ chức",
   "sandbox-messaging": "Hộp thử (không gửi ra ngoài)",
 };
 
@@ -28,6 +29,7 @@ export const MESSAGING_CONNECTOR_LABEL: Record<MessagingConnectorKey, string> = 
 export const MESSAGING_DESTINATION_HINT: Record<MessagingConnectorKey, string> = {
   "lark-webhook": "Một webhook Lark là MỘT nhóm — tin luôn vào nhóm đã tạo bot. Muốn nhóm khác thì khai kết nối khác.",
   "telegram-bot": "Chat ID của nhóm / kênh (số, thường âm, hoặc @tên_kênh). Bỏ trống = chat đã khai ở kết nối.",
+  "zalo-bot": "Chat ID Zalo (người hoặc nhóm) — lấy bằng nút «Tìm chat» ở trang Kết nối. Bỏ trống = chat đã khai ở kết nối.",
   "sandbox-messaging": "Tên kênh thử để phân biệt khi đọc lại (vd «Nhóm vận hành»). Tin KHÔNG rời khỏi ERP.",
 };
 

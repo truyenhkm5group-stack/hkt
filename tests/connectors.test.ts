@@ -32,7 +32,8 @@ import {
 } from "@/lib/connectors/registry";
 import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
 import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
-import { LARK_HOOK_PATTERN, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot } from "@/lib/connectors/testers";
+import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot } from "@/lib/connectors/testers";
+import { chunkText } from "@/lib/messaging/providers";
 import type { ConnectionsView } from "@/lib/connectors/types";
 import { MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { CUSTOMER_CREDENTIAL_ENV } from "@/lib/env";
@@ -409,6 +410,51 @@ export async function testTesters() {
   const larkNet = await testLarkWebhook({ secrets: { webhookUrl: LARK_URL }, orgName: "A" }, { fetch: fakeFetch(() => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })).fetch });
   assert.match(larkNet.message, /open\.larksuite\.com từ chối kết nối/, larkNet.message);
   assert.ok(!larkNet.message.includes("aaaa1111"), "không mang mã hook");
+
+  // ── Zalo Bot (bot.zaloplatforms.com): getMe rồi MỘT tin thử; phong bì {ok, result | error_code, description} ──
+  const ZALO_TOKEN = "3456789012345:zAbC-dEf_ghIJkl.MNOpq";
+  const ZALO_CHAT = "6ede9afa66b88fe6d6a9";
+  const zOk = fakeFetch((url) => (url.endsWith("/getMe") ? { body: { ok: true, result: { account_name: "bot.hslc" } } } : { body: { ok: true, result: { message_id: "m1" } } }));
+  const z = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: zOk.fetch });
+  assert.equal(z.ok, true, z.message);
+  assert.deepEqual(zOk.calls.map((c) => [c.url.replace(ZALO_TOKEN, "<t>"), c.init.method, c.init.redirect]), [["https://bot-api.zaloplatforms.com/bot<t>/getMe", "POST", "manual"], ["https://bot-api.zaloplatforms.com/bot<t>/sendMessage", "POST", "manual"]], "chỉ gọi đúng địa chỉ hằng số, không theo chuyển hướng");
+  assert.equal(JSON.parse(String(zOk.calls[1].init.body)).chat_id, ZALO_CHAT);
+  assert.ok(!z.message.includes(ZALO_TOKEN));
+  const zNone = fakeFetch(() => ({ body: { ok: true } }));
+  assert.equal((await testZaloBot({ secrets: { botToken: "khong-phai" }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: zNone.fetch })).ok, false);
+  const zNoChat = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: "" }, orgName: "A" }, { fetch: zNone.fetch });
+  assert.ok(!zNoChat.ok && /Tìm chat/.test(zNoChat.message), "thiếu chat ⇒ chỉ tới nút Tìm chat");
+  assert.equal(zNone.calls.length, 0, "đầu vào sai dạng ⇒ không gọi mạng");
+  const zBad = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: fakeFetch(() => ({ status: 200, body: { ok: false, error_code: 401, description: `Unauthorized ${ZALO_TOKEN}` } })).fetch });
+  assert.ok(!zBad.ok && /Zalo không nhận token: Unauthorized/.test(zBad.message) && !zBad.message.includes(ZALO_TOKEN), zBad.message);
+  const zNoSend = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: fakeFetch((url) => (url.endsWith("/getMe") ? { body: { ok: true, result: { account_name: "bot.hslc" } } } : { body: { ok: false, error_code: 404, description: "Chat not found" } })).fetch });
+  assert.ok(!zNoSend.ok && /hợp lệ nhưng không gửi được vào chat đã khai: Chat not found/.test(zNoSend.message), "token đúng mà chat sai ⇒ KHÔNG đạt");
+  const zNet = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: fakeFetch(() => netErr("ETIMEDOUT")).fetch });
+  assert.match(zNet.message, /Không gọi được Zalo: Máy chủ ERP không tới được bot-api\.zaloplatforms\.com/, zNet.message);
+
+  // «Tìm chat»: getUpdates trả MỘT tin mỗi lượt ⇒ gom nhiều lượt, dừng khi Zalo báo hết tin (408).
+  let zi = 0;
+  const zUpd = fakeFetch(() => {
+    zi += 1;
+    if (zi === 1) return { body: { ok: true, result: { message: { from: { display_name: "Chủ shop" }, chat: { id: "grp123abc", chat_type: "GROUP" }, text: "@bot đây là nhóm vận hành" }, event_name: "message.text.received" } } };
+    if (zi === 2) return { body: { ok: true, result: { message: { from: { display_name: "Lan" }, chat: { id: ZALO_CHAT, chat_type: "PRIVATE" }, text: "xin chào" }, event_name: "message.text.received" } } };
+    return { body: { ok: false, error_code: 408, description: "Request timeout" } };
+  });
+  const found = await ORG_CONNECTION_CHAT_DISCOVERY["zalo-bot"]({ botToken: ZALO_TOKEN }, { fetch: zUpd.fetch });
+  assert.ok(found.ok);
+  assert.deepEqual(found.ok ? found.chats.map((c) => [c.id, c.type, c.name]) : [], [["grp123abc", "GROUP", "Chủ shop"], [ZALO_CHAT, "PRIVATE", "Lan"]]);
+  assert.ok(zUpd.calls.every((c) => c.url.endsWith("/getUpdates") && c.init.method === "POST"), "chỉ đọc getUpdates");
+  const none = await ORG_CONNECTION_CHAT_DISCOVERY["zalo-bot"]({ botToken: ZALO_TOKEN }, { fetch: fakeFetch(() => ({ body: { ok: false, error_code: 408, description: "Request timeout" } })).fetch });
+  assert.ok(none.ok && none.chats.length === 0 && /Chưa thấy tin mới/.test(none.message), "không tin mới ⇒ hướng dẫn nhắn cho bot, không phải lỗi");
+  const tgFound = await ORG_CONNECTION_CHAT_DISCOVERY["telegram-bot"]({ botToken: TG_TOKEN }, { fetch: fakeFetch(() => ({ body: { ok: true, result: [{ message: { chat: { id: -100123456789, type: "supergroup", title: "Vận hành" }, text: "hi" } }] } })).fetch });
+  assert.deepEqual(tgFound.ok ? tgFound.chats.map((c) => [c.id, c.type, c.name]) : [], [["-100123456789", "GROUP", "Vận hành"]]);
+
+  // Tin dài hơn trần 2000 ký tự của Zalo ⇒ tách theo DÒNG, không mất ký tự nào, không đoạn nào vượt trần.
+  const longLines = Array.from({ length: 120 }, (_, i) => `• Dòng hàng số ${i} × 1 × 120.000 ₫ = 120.000 ₫`).join("\n");
+  const parts = chunkText(longLines, 2000);
+  assert.ok(parts.length > 1 && parts.every((x) => x.length <= 2000), "mỗi đoạn ≤ 2000");
+  assert.equal(parts.join("\n"), longLines, "ghép lại đúng nguyên văn");
+  assert.deepEqual(chunkText("a".repeat(4500), 2000).map((x) => x.length), [2000, 2000, 500], "dòng dài hơn trần ⇒ cắt cứng");
 }
 
 /* ═════════════ 4 · HAI TỔ CHỨC THẬT + TỔ CHỨC NHÀ ═════════════ */
@@ -888,7 +934,9 @@ export function testNoSecretPathsStatic() {
   assert.deepEqual(log, [], "lib/connectors/* không in log (bí mật không bao giờ vào log)");
   const action = src.get("lib/actions/connections.ts") ?? "";
   assert.ok(action.includes('"use server"') || doc("lib/actions/connections.ts").startsWith('"use server"'));
-  assert.ok(/requirePermission\(\s*CONNECTIONS_PERMISSION\s*\)/.test(action) && (action.match(/requirePermission\(/g) ?? []).length === 3, "ba action đều đọc phiên với quyền của màn hình");
+  const exported = (action.match(/export async function /g) ?? []).length;
+  const gated = (action.match(/requirePermission\(\s*CONNECTIONS_PERMISSION\s*\)/g) ?? []).length;
+  assert.ok(exported >= 4 && gated === exported && (action.match(/requirePermission\(/g) ?? []).length === exported, `mọi action (${exported}) đều đọc phiên với quyền của màn hình (${gated})`);
   const page = src.get("app/(dashboard)/settings/connections/page.tsx") ?? "";
   assert.ok(page.includes("requirePermission(CONNECTIONS_PERMISSION)"), "trang gác quyền trước khi đọc");
 }

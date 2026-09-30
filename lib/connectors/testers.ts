@@ -31,6 +31,12 @@ const MAX_BODY_BYTES = 64 * 1024;
 export const LARK_HOOK_PATTERN = /^https:\/\/open\.(larksuite\.com|feishu\.cn)\/open-apis\/bot\/v2\/hook\/[A-Za-z0-9-]{8,80}$/;
 export const TELEGRAM_TOKEN_PATTERN = /^[0-9]{5,16}:[A-Za-z0-9_-]{30,64}$/;
 export const TELEGRAM_CHAT_PATTERN = /^-?[0-9]{3,20}$|^@[A-Za-z0-9_]{5,64}$/;
+/** Zalo Bot Platform (bot.zaloplatforms.com): token «<số>:<chuỗi>», chat id là chuỗi chữ-số của Zalo (người hoặc nhóm). */
+export const ZALO_BOT_API = "https://bot-api.zaloplatforms.com";
+export const ZALO_TOKEN_PATTERN = /^[0-9]{5,25}:[A-Za-z0-9_.-]{10,200}$/;
+export const ZALO_CHAT_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+/** Trần độ dài một tin của Zalo Bot API (1–2000 ký tự). */
+export const ZALO_TEXT_MAX = 2000;
 
 /** Thay mọi lần xuất hiện của từng bí mật (≥ 4 ký tự) bằng `***`. */
 export function scrubSecrets(text: string, secrets: readonly string[]): string {
@@ -114,6 +120,107 @@ export async function testTelegramBot(input: { secrets: Record<string, string>; 
   }
 }
 
+/**
+ * Zalo Bot (bot.zaloplatforms.com — tài liệu bot.zapps.me/docs): `getMe` (token còn sống không) rồi gửi MỘT tin thử vào
+ * chat đã khai. Phong bì `{ ok, result | error_code, description }` giống Telegram; địa chỉ là HẰNG SỐ trong mã. Máy chủ
+ * đặt tại Việt Nam gọi được Zalo kể cả khi Telegram bị chặn ở tầng mạng (đo 30/09/2026).
+ */
+export async function testZaloBot(input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const token = (input.secrets.botToken ?? "").trim();
+  const chatId = (input.settings.chatId ?? "").trim();
+  const hide = [token];
+  if (!ZALO_TOKEN_PATTERN.test(token)) return { ok: false, message: "Bot token không đúng dạng <số>:<chuỗi> của Zalo Bot Creator — không gửi." };
+  if (!ZALO_CHAT_PATTERN.test(chatId)) return { ok: false, message: "Chat ID chưa có hoặc không hợp lệ — nhắn cho bot (hoặc @nhắc bot trong nhóm) rồi bấm «Tìm chat» để lấy đúng mã." };
+  const fetchImpl = deps.fetch ?? fetch;
+  const base = `${ZALO_BOT_API}/bot${token}`;
+  try {
+    const me = await post(fetchImpl, `${base}/getMe`, {});
+    const meBody = (await readCapped(me)) as { ok?: boolean; description?: string; result?: { account_name?: string } } | null;
+    if (!meBody?.ok) return { ok: false, message: scrubSecrets(`Zalo không nhận token: ${meBody?.description || `HTTP ${me.status}`}`, hide) };
+    const name = meBody.result?.account_name ?? "?";
+    const sent = await post(fetchImpl, `${base}/sendMessage`, { chat_id: chatId, text: `Tin thử kết nối từ ERP — tổ chức «${input.orgName}».` });
+    const sentBody = (await readCapped(sent)) as { ok?: boolean; description?: string } | null;
+    if (!sentBody?.ok) return { ok: false, message: scrubSecrets(`Bot ${name} hợp lệ nhưng không gửi được vào chat đã khai: ${sentBody?.description || `HTTP ${sent.status}`}`, hide) };
+    return { ok: true, message: `Bot ${name} đã gửi tin thử — mở Zalo để xác nhận đã nhận.` };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Zalo: ${describeNetworkFailure(e, "bot-api.zaloplatforms.com")}` : `Không gọi được Zalo: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
+/*
+  ═══════════ TÌM CHAT ID — ĐỌC TIN MỚI CỦA BOT (Zalo · Telegram) ═══════════
+
+  Zalo không hiện mã chat cho người dùng; Telegram hiện rất khó tìm. Người cấu hình nhắn cho bot (hoặc @nhắc bot trong
+  nhóm), rồi bấm «Tìm chat»: máy gọi `getUpdates` bằng token ĐÃ LƯU và trả các chat bot vừa thấy — mã, loại, tên người
+  nhắn, đoạn đầu tin. Chỉ đọc. Không đặt webhook nào (getUpdates của cả hai chỉ chạy khi CHƯA có webhook).
+*/
+export type DiscoveredChat = { id: string; type: "PRIVATE" | "GROUP"; name: string; sample: string };
+export type ChatDiscovery = { ok: true; chats: DiscoveredChat[]; message: string } | { ok: false; message: string };
+
+function addChat(out: DiscoveredChat[], c: DiscoveredChat) {
+  if (c.id && !out.some((x) => x.id === c.id)) out.push({ ...c, name: c.name.slice(0, 80), sample: c.sample.slice(0, 80) });
+}
+
+function discoveryFailure(e: unknown, vendor: string, host: string, token: string): ChatDiscovery {
+  return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được ${vendor}: ${describeNetworkFailure(e, host)}` : `Không gọi được ${vendor}: ${e instanceof Error ? e.message : String(e)}`, [token]) };
+}
+
+async function discoverZaloChats(secrets: Record<string, string>, deps: TesterDeps): Promise<ChatDiscovery> {
+  const token = (secrets.botToken ?? "").trim();
+  if (!ZALO_TOKEN_PATTERN.test(token)) return { ok: false, message: "Chưa lưu bot token hợp lệ." };
+  const fetchImpl = deps.fetch ?? fetch;
+  const chats: DiscoveredChat[] = [];
+  try {
+    // Mỗi lượt getUpdates trả tối đa MỘT tin; hỏi vài lượt ngắn để gom các chat vừa nhắn.
+    for (let i = 0; i < 4; i++) {
+      const res = await post(fetchImpl, `${ZALO_BOT_API}/bot${token}/getUpdates`, { timeout: "2" });
+      const body = (await readCapped(res)) as { ok?: boolean; description?: string; error_code?: number; result?: unknown } | null;
+      if (!body?.ok) {
+        if (body?.error_code === 408 || i > 0) break; // hết tin mới
+        return { ok: false, message: scrubSecrets(`Zalo từ chối: ${body?.description || `HTTP ${res.status}`}`, [token]) };
+      }
+      const updates = Array.isArray(body.result) ? body.result : body.result ? [body.result] : [];
+      if (!updates.length) break;
+      for (const u of updates as { message?: { chat?: { id?: unknown; chat_type?: unknown }; from?: { display_name?: unknown }; text?: unknown } }[]) {
+        const m = u.message;
+        if (!m?.chat?.id) continue;
+        addChat(chats, { id: String(m.chat.id), type: m.chat.chat_type === "GROUP" ? "GROUP" : "PRIVATE", name: String(m.from?.display_name ?? ""), sample: String(m.text ?? "") });
+      }
+    }
+  } catch (e) {
+    return discoveryFailure(e, "Zalo", "bot-api.zaloplatforms.com", token);
+  }
+  return { ok: true, chats, message: chats.length ? `Bot vừa thấy ${chats.length} chat — chọn chat nhận tin.` : "Chưa thấy tin mới — nhắn cho bot (hoặc @nhắc bot trong nhóm) rồi bấm lại." };
+}
+
+async function discoverTelegramChats(secrets: Record<string, string>, deps: TesterDeps): Promise<ChatDiscovery> {
+  const token = (secrets.botToken ?? "").trim();
+  if (!TELEGRAM_TOKEN_PATTERN.test(token)) return { ok: false, message: "Chưa lưu bot token hợp lệ." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const res = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?timeout=0&limit=50`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const body = (await readCapped(res)) as { ok?: boolean; description?: string; result?: unknown } | null;
+    if (!body?.ok) return { ok: false, message: scrubSecrets(`Telegram từ chối: ${body?.description || `HTTP ${res.status}`}`, [token]) };
+    type TgChat = { id?: unknown; type?: unknown; title?: unknown; first_name?: unknown };
+    const chats: DiscoveredChat[] = [];
+    for (const u of (Array.isArray(body.result) ? body.result : []) as { message?: { chat?: TgChat; text?: unknown }; my_chat_member?: { chat?: TgChat } }[]) {
+      const chat = u.message?.chat ?? u.my_chat_member?.chat;
+      if (!chat?.id) continue;
+      const group = chat.type === "group" || chat.type === "supergroup" || chat.type === "channel";
+      addChat(chats, { id: String(chat.id), type: group ? "GROUP" : "PRIVATE", name: String(chat.title ?? chat.first_name ?? ""), sample: String(u.message?.text ?? "") });
+    }
+    return { ok: true, chats, message: chats.length ? `Bot vừa thấy ${chats.length} chat — chọn chat nhận tin.` : "Chưa thấy tin mới — thêm bot vào nhóm và nhắn một câu, rồi bấm lại." };
+  } catch (e) {
+    return discoveryFailure(e, "Telegram", "api.telegram.org", token);
+  }
+}
+
+/** Bảng tra: connector → hàm tìm chat. Khoá phải khớp `CHAT_DISCOVERY_CONNECTORS` (lib/connectors/types.ts). */
+export const ORG_CONNECTION_CHAT_DISCOVERY: Readonly<Record<string, (secrets: Record<string, string>, deps?: TesterDeps) => Promise<ChatDiscovery>>> = {
+  "zalo-bot": (secrets, deps = {}) => discoverZaloChats(secrets, deps),
+  "telegram-bot": (secrets, deps = {}) => discoverTelegramChats(secrets, deps),
+};
+
 /*
   ═══════════ KHOÁ AI CỦA TỔ CHỨC (Phase 8) — HỎI "KHOÁ CÒN SỐNG KHÔNG" BẰNG LỜI GỌI RẺ NHẤT ═══════════
 
@@ -167,6 +274,7 @@ export async function testSandboxMessaging(input: { settings: Record<string, str
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
   "telegram-bot": (input, deps) => testTelegramBot(input, deps),
+  "zalo-bot": (input, deps) => testZaloBot(input, deps),
   "anthropic-byok": (input, deps) => testAnthropicKey(input, deps),
   "openai-byok": (input, deps) => testOpenAiKey(input, deps),
   "sandbox-messaging": (input) => testSandboxMessaging(input),
