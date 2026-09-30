@@ -158,3 +158,13 @@ export function orgTabMetadata(brand: { name: string; logoUrl: string | null }):
   // `absolute` cho tiêu đề mặc định: nếu không, mẫu của bố cục GỐC gắn tên tổ chức nhà vào sau.
   return { title: { absolute: brand.name, template: `%s · ${brand.name}` }, description: `ERP của ${brand.name}`, icons: { icon: [{ url: icon }], apple: [] } };
 }
+
+/**
+ * Tiêu đề tab theo HOST (0180 · tên miền con): trang ngoài dashboard trên `<slug>.<miền gốc>` chưa có phiên nào để thay
+ * tiêu đề. Không có host ⇒ `null` (bố cục gốc giữ chữ của nhà); host của tổ chức đã xuất bản ⇒ tên tổ chức đó; host lạ
+ * ⇒ chữ trung tính «ERP» — không bao giờ tên của nhà.
+ */
+export function hostTabMetadata(host: { slug: string | null; org: { name: string } | null }): OrgTabMetadata | null {
+  if (!host.slug) return null;
+  return orgTabMetadata({ name: host.org?.name ?? "ERP", logoUrl: null });
+}
