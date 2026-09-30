@@ -259,6 +259,7 @@ const CLIENT_BAT_BUOC = [
 /** Tệp máy chủ gọi mạng mà KHÔNG dùng credential môi trường — lý do bắt buộc. */
 const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/integrations/http.ts": "Bộ gửi chung `fetchJson` — không giữ khoá nào; mỗi client gọi nó đã tự chặn ở phương thức gửi của mình.",
+  "lib/sales-chatbot/fanpage.ts": "Trả lời tin fanpage qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/landing/sheet.ts": "CSV công khai của Google Sheet, URL đọc từ `settings` của CHÍNH tổ chức đang chạy — không có credential môi trường.",
   "lib/actions/workshop-ledger.ts": "Link Google Sheet công khai do người dùng dán vào form — không có credential môi trường.",
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",

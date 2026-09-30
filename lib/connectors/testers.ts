@@ -221,6 +221,29 @@ export const ORG_CONNECTION_CHAT_DISCOVERY: Readonly<Record<string, (secrets: Re
   "telegram-bot": (secrets, deps = {}) => discoverTelegramChats(secrets, deps),
 };
 
+/** Pancake Pages (fanpage của tổ chức): hỏi danh sách hội thoại của page bằng page access token — CHỈ ĐỌC, không gửi gì. */
+export const PANCAKE_PAGES_API = "https://pages.fm/api/public_api";
+export const PANCAKE_PAGE_ID_PATTERN = /^[A-Za-z0-9_]{5,40}$/;
+export const PANCAKE_PAGE_TOKEN_PATTERN = /^[A-Za-z0-9._-]{20,600}$/;
+
+export async function testPancakeFanpage(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const pageId = (input.settings.pageId ?? "").trim();
+  const token = (input.secrets.pageAccessToken ?? "").trim();
+  const hide = [token];
+  if (!PANCAKE_PAGE_ID_PATTERN.test(pageId)) return { ok: false, message: "Page ID không hợp lệ — không gọi." };
+  if (!PANCAKE_PAGE_TOKEN_PATTERN.test(token)) return { ok: false, message: "Page access token không đúng dạng — không gọi." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const url = `${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?page_access_token=${encodeURIComponent(token)}`;
+    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const body = (await readCapped(res)) as { success?: boolean; message?: string; conversations?: unknown[] } | null;
+    if (!res.ok || body?.success === false || !Array.isArray(body?.conversations)) return { ok: false, message: scrubSecrets(`Pancake không nhận page / token: ${body?.message || `HTTP ${res.status}`}`, hide) };
+    return { ok: true, message: `Pancake nhận page ${pageId} — đọc được ${body.conversations.length} hội thoại gần nhất. Dán URL webhook (trang Chatbot bán hàng) vào Pancake để bot nhận tin.` };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
 /*
   ═══════════ KHOÁ AI CỦA TỔ CHỨC (Phase 8) — HỎI "KHOÁ CÒN SỐNG KHÔNG" BẰNG LỜI GỌI RẺ NHẤT ═══════════
 
@@ -278,4 +301,5 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "anthropic-byok": (input, deps) => testAnthropicKey(input, deps),
   "openai-byok": (input, deps) => testOpenAiKey(input, deps),
   "sandbox-messaging": (input) => testSandboxMessaging(input),
+  "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
 };

@@ -97,7 +97,7 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
@@ -484,6 +484,33 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     code: ["lib/connectors/testers.ts", "lib/messaging/providers.ts"],
     consumers: ["lib/messaging/providers.ts::messagingProvider"],
     why: "Bot Zalo do CHÍNH tổ chức tạo ở bot.zaloplatforms.com. Kiểm tra = getMe rồi gửi MỘT tin thử vào chat đã khai, chỉ tới bot-api.zaloplatforms.com; «Tìm chat» đọc getUpdates để lấy mã chat (Zalo không hiện mã cho người dùng). Máy chủ tại Việt Nam gọi được Zalo kể cả khi Telegram bị chặn ở tầng mạng (đo 30/09/2026). Luồng đọc: hành động «Gửi tin nhóm chat» của luật tự động.",
+  },
+  {
+    key: "pancake-fanpage",
+    label: "Fanpage qua Pancake — bot trả lời tin nhắn",
+    vendor: "Pancake",
+    kind: "MESSAGING",
+    capabilities: ["read_conversations", "send_customer_message"],
+    auth: "API_KEY",
+    settings: [
+      { key: "pageId", label: "Page ID (trong Pancake)", type: "text", secret: false, required: true, pattern: "^[A-Za-z0-9_]{5,40}$", maxLength: 40 },
+      { key: "pageAccessToken", label: "Page access token (Pancake → Cài đặt → Công cụ)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9._-]{20,600}$", maxLength: 600 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/pancake/fanpage/[token]",
+      verify: "token «<mã tổ chức>.<chữ ký HMAC>» trong đường dẫn — chữ ký dẫn xuất từ PLATFORM_SECRETS_KEY, riêng từng tổ chức",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "sales_chat_inbound.message_id (UNIQUE)",
+      binding: "PANCAKE_FANPAGE",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testPancakeFanpage",
+    module: "ai_sales",
+    code: ["lib/connectors/testers.ts", "lib/sales-chatbot/fanpage.ts", "app/api/webhooks/pancake/fanpage/[token]/route.ts"],
+    consumers: ["lib/sales-chatbot/fanpage.ts::processFanpageThread"],
+    why: "Fanpage của CHÍNH tổ chức (page access token của Pancake). Tin khách vào fanpage ⇒ webhook Pancake ⇒ đúng tổ chức theo token trong đường dẫn ⇒ chatbot bán hàng của tổ chức trả lời (giá / tồn đọc từ ERP, khoá AI của shop, đơn ghi vào ERP) ⇒ gửi lại qua pages.fm reply_inbox. Khác «Pancake Pages» của nhà (biến môi trường, container bot riêng).",
   },
   /*
     HỘP THỬ (0180): kết nối nhắn tin KHÔNG gọi mạng — cùng giao diện `MessagingProvider` với Lark / Telegram, nhưng tin

@@ -7,7 +7,8 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
-import { SALES_BOT_CONNECTORS, salesBotError } from "@/lib/sales-chatbot/config";
+import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
+import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
@@ -31,6 +32,7 @@ export default async function SalesChatbotPage() {
     connectionStatusRows(),
     publicationOf(user.organization?.code ?? ""),
   ]);
+  const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
     const row = connections.find((c) => c.connectorKey === k);
     return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row) };
@@ -51,6 +53,32 @@ export default async function SalesChatbotPage() {
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
+          {fanpage ? (
+            <SectionCard title="Fanpage (qua Pancake)" description="Bot trả lời tin nhắn khách gửi vào fanpage của shop — cùng cấu hình, cùng giá / tồn, cùng luật chốt đơn với trang chat web.">
+              <div className="space-y-2 text-sm" data-testid="fanpage-setup">
+                <p>
+                  Trạng thái:{" "}
+                  <b data-testid="fanpage-status">{{ NOT_CONFIGURED: "CHƯA KHAI", DRAFT: "CHƯA BẬT", ACTIVE: "ĐANG BẬT", FAILED: "KIỂM TRA HỎNG" }[fanpage.status]}</b>
+                  {fanpage.pageId ? ` · page ${fanpage.pageId}` : ""} · đã nhận {fanpage.counts.done} tin · chờ {fanpage.counts.pending} · bỏ qua {fanpage.counts.skipped}
+                </p>
+                <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
+                  <li>
+                    <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
+                  </li>
+                  <li>Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây.</li>
+                  <li>Bật bot ở khung Cấu hình bên dưới. Nhân viên trả lời trên fanpage ⇒ bot tự nhường hội thoại đó 30 phút.</li>
+                </ol>
+                {fanpage.webhookUrl ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium">URL webhook của shop (giữ kín — ai có URL này gửi được tin giả vào bot):</p>
+                    <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]" data-testid="fanpage-webhook-url">{fanpage.webhookUrl}</code>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+                )}
+              </div>
+            </SectionCard>
+          ) : null}
           {manage ? (
             <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} />
           ) : (
@@ -81,7 +109,7 @@ export default async function SalesChatbotPage() {
                 {conversations.map((c) => (
                   <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-channel={c.channel} data-status={c.status}>
                     <span>
-                      {c.channel === "WEB" ? "Khách web" : "Khung thử"} · {STATUS_LABEL[c.status] ?? c.status} · {c.turns} lượt
+                      {CHAT_CHANNEL_LABEL[c.channel as ChatChannel] ?? c.channel} · {STATUS_LABEL[c.status] ?? c.status} · {c.turns} lượt
                       {c.handoffReason ? ` · ${c.handoffReason}` : ""}
                     </span>
                     <span className="flex items-center gap-3 text-xs text-muted-foreground">

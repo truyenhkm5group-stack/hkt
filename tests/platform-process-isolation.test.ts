@@ -30,7 +30,7 @@ import { OrgContextError, peekOrganization, withOrganization } from "@/lib/platf
 import { assertHomeCredentials, isConnectorUnavailable, peekIsNonHome } from "@/lib/platform/credentials";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { resolveWebhookOrganization, WEBHOOK_BINDINGS, type WebhookProvider } from "@/lib/platform/webhooks";
+import { resolveWebhookOrganization, WEBHOOK_BINDINGS, type WebhookProvider, WebhookAuthError } from "@/lib/platform/webhooks";
 import { eventVisibleTo, publish, subscribeOrganization, type OrganizationEvent } from "@/lib/realtime/bus";
 import { HOME_CREDENTIAL_EXEMPT, HOME_CREDENTIAL_JOBS, JOB_DEFINITIONS, runJob, type JobSkipped } from "@/lib/sync/jobs";
 import { isJobRunning, jobLockKey, runSyncJob } from "@/lib/sync/runner";
@@ -226,6 +226,12 @@ export async function testPlatformProcessIsolation() {
 
     /* ── 7 · webhook và việc sau phản hồi ── */
     for (const p of Object.keys(WEBHOOK_BINDINGS) as WebhookProvider[]) {
+      if (WEBHOOK_BINDINGS[p].mode === "URL_SECRET") {
+        // 0182 · token theo tổ chức: KHÔNG token ⇒ ném WebhookAuthError, không bao giờ rơi về nhà — ở MỌI ngữ cảnh đang chạy.
+        await assert.rejects(resolveWebhookOrganization(p), WebhookAuthError, `webhook ${p} không token ⇒ từ chối, không về nhà`);
+        await assert.rejects(withOrganization(B, () => resolveWebhookOrganization(p)), WebhookAuthError, `webhook ${p} không lấy ngữ cảnh đang chạy làm tổ chức`);
+        continue;
+      }
       assert.equal(await resolveWebhookOrganization(p), home.code, `Phase 1: webhook ${p} thuộc tổ chức nhà`);
       assert.equal(await withOrganization(B, () => resolveWebhookOrganization(p)), home.code, `webhook ${p} phân giải theo BẢNG KHAI, không theo ngữ cảnh đang chạy`);
     }

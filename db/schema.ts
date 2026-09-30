@@ -9151,7 +9151,7 @@ export const salesChatConversations = pgTable(
     id: id(),
     channel: text("channel").notNull(),
     status: text("status").notNull().default("OPEN"),
-    /** Băm của mã khách truy cập (kênh WEB) — không lưu IP. */
+    /** Băm của mã khách truy cập (kênh WEB) / của (page, hội thoại Pancake) (kênh FANPAGE, 0182 — UNIQUE) — không lưu IP. */
     visitorKey: text("visitor_key"),
     customerId: text("customer_id"),
     draftOrderId: text("draft_order_id"),
@@ -9170,8 +9170,37 @@ export const salesChatConversations = pgTable(
   },
   (t) => [
     index("sales_chat_conversations_created_idx").on(t.createdAt),
-    check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB')`),
+    check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB','FANPAGE')`),
+    uniqueIndex("sales_chat_conversations_fanpage_key").on(t.visitorKey).where(sql`${t.channel} = 'FANPAGE'`),
     check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','HANDOFF','CLOSED')`),
+  ],
+);
+
+/**
+ * Tin khách gửi tới FANPAGE (0182 · lib/sales-chatbot/fanpage.ts): ghi ngay khi webhook Pancake tới, xử lý sau. `message_id`
+ * UNIQUE ⇒ gửi lại / gửi trùng không sinh câu trả lời thứ hai; tin liên tiếp của một hội thoại gom thành một lượt (giành
+ * bằng `claim_id` + `claimed_at`).
+ */
+export const salesChatInbound = pgTable(
+  "sales_chat_inbound",
+  {
+    id: id(),
+    pageId: text("page_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    messageId: text("message_id").notNull(),
+    text: text("text").notNull(),
+    customerName: text("customer_name"),
+    status: text("status").notNull().default("PENDING"),
+    claimId: text("claim_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_chat_inbound_message_key").on(t.messageId),
+    index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),
+    check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED')`),
   ],
 );
 

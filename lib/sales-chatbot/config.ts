@@ -138,7 +138,17 @@ export function withinBusinessHours(cfg: SalesChatbotConfig["businessHours"], no
   return minutes < e && cfg.days.includes((day + 6) % 7);
 }
 
-export type ChatChannel = "TEST" | "WEB";
+export type ChatChannel = "TEST" | "WEB" | "FANPAGE";
+
+/**
+ * Kênh CÔNG KHAI = có khách thật ở đầu kia (trang chat web của tổ chức · tin nhắn fanpage qua Pancake): ghi đơn thật,
+ * áp giờ làm việc, trần tin, chuyển người khi AI hỏng. `TEST` là khung thử của chủ shop — ghi mô phỏng.
+ */
+export function isPublicChannel(channel: ChatChannel): boolean {
+  return channel === "WEB" || channel === "FANPAGE";
+}
+
+export const CHAT_CHANNEL_LABEL: Record<ChatChannel, string> = { TEST: "Khung thử", WEB: "Khách web", FANPAGE: "Fanpage" };
 
 /** Một dòng tin cho màn hình (đã lọc bỏ khối công cụ thô). */
 export type ChatView = {

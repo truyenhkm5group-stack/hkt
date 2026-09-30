@@ -169,7 +169,7 @@ export function testRegistryMatchesCode(): { perKind: Record<string, number>; ho
     if (w.binding) {
       bindingsUsed.add(w.binding);
       assert.equal(WEBHOOK_BINDINGS[w.binding].mode, w.tenantResolution, `${spec.key}: tenantResolution phải khớp WEBHOOK_BINDINGS.${w.binding}`);
-      assert.ok(readFileSync(file, "utf8").includes(`resolveWebhookOrganization("${w.binding}")`), `${spec.key}: route ${w.path} phải phân giải tổ chức bằng binding ${w.binding}`);
+      assert.ok(new RegExp(`resolveWebhookOrganization\\("${w.binding}"(\\)|, \\{ token \\}\\))`).test(readFileSync(file, "utf8")), `${spec.key}: route ${w.path} phải phân giải tổ chức bằng binding ${w.binding}`);
     } else {
       assert.equal(w.tenantResolution, "HOME_ONLY", `${spec.key}: tuyến không qua WEBHOOK_BINDINGS chỉ được là HOME_ONLY`);
       assert.ok(!w.path.startsWith("/api/webhooks/"), `${spec.key}: route dưới /api/webhooks/ phải có binding trong WEBHOOK_BINDINGS`);
