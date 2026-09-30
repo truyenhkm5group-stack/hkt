@@ -30,7 +30,10 @@ import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-deliver
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CancelManualOrderButton, ConfirmManualDeliveryButton, VoidManualDeliveryButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
+import { CancelManualOrderButton, ConfirmManualDeliveryButton, RecordManualPaymentButton, VoidManualDeliveryButton, VoidManualPaymentButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
+import { ManualPaymentStatusText } from "@/app/(dashboard)/orders/payment-status";
+import { canRecordPayment, PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL } from "@/lib/constants/order-payments";
+import { manualOrderPaymentView } from "@/lib/queries/order-payments";
 import { canConfirmManualDelivery, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { manualOrderDeliveryView, manualOrderGate } from "@/lib/records/order-create";
 
@@ -94,10 +97,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     mục 11), KHÔNG bằng phiếu XUẤT TAY: lối "Lập phiếu xuất kho" của bản trước đã bỏ — làm cả hai là trừ tồn hai lần.
   */
   const manual = isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null;
-  const [manualGate, delivery] = manual ? await Promise.all([manualOrderGate(user), manualOrderDeliveryView(order.id)]) : [null, null];
+  const [manualGate, delivery, payment] = manual ? await Promise.all([manualOrderGate(user), manualOrderDeliveryView(order.id), manualOrderPaymentView(order)]) : [null, null, null];
   const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED" && order.stage !== "DELIVERED";
   const canDeliver = manual && manualGate?.allowed === true && canConfirmManualDelivery(order.stage) && !delivery?.active && attempts.length === 0;
   const canVoidDelivery = manual && manualGate?.allowed === true && Boolean(delivery?.active);
+  // Chứng từ thanh toán (ORDER_OUTCOME.md mục 11): cùng cổng; KHÔNG phụ thuộc phiếu giao. Đơn đã huỷ chỉ nhận phiếu hoàn.
+  const canPay = manual && manualGate?.allowed === true;
+  const canReceipt = canPay && canRecordPayment("RECEIPT", order.stage);
+  const canRefund = canPay && canRecordPayment("REFUND", order.stage) && (payment?.state.net ?? 0) > 0;
   const pancakeUrl = manual ? null : (pancakePosOrderUrlFromRaw(order.raw) ?? pancakePosOrderSearchUrl(order.shopId || env.pancake.shopId, order.systemId));
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
@@ -268,7 +275,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       { label: "Người nhận ký", value: formatDateTime(delivery.active.signedAt) },
                       { label: "Người ký nhận", value: delivery.active.receiverName },
                       { label: "Ghi vào ERP", value: `${formatDateTime(delivery.active.recordedAt)}${delivery.active.recordedByName ? ` · ${delivery.active.recordedByName}` : ""}` },
-                      { label: "Tiền", value: "Chưa xác minh — chờ chứng từ thanh toán" },
+                      { label: "Tiền", value: payment?.state.status === "PAID" ? "Đã thu đủ theo chứng từ" : "Chưa xác minh — theo chứng từ thanh toán bên dưới" },
                       ...(delivery.active.note ? [{ label: "Ghi chú", value: delivery.active.note }] : []),
                     ]}
                   />
@@ -299,6 +306,60 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     ))}
                   </ul>
                 ) : null}
+              </div>
+            </SectionCard>
+          ) : null}
+
+          {manual && payment ? (
+            <SectionCard
+              title="Thanh toán · chứng từ thu / hoàn tiền"
+              description="Tiền của đơn tạo tay đi theo CHỨNG TỪ THANH TOÁN, không theo phiếu giao: giao rồi chưa chắc đã thu, thu trước khi giao vẫn hợp lệ. Ghi nhầm thì huỷ chứng từ (có lý do), không xoá."
+            >
+              <div className="space-y-3 text-sm">
+                <DescriptionList
+                  columns={3}
+                  items={[
+                    { label: "Trạng thái thanh toán", value: <ManualPaymentStatusText state={payment.state} className="text-sm" /> },
+                    { label: "Khách phải trả", value: <Money value={payment.state.amountDue} /> },
+                    { label: "Đã thu ròng (thu − hoàn)", value: <Money value={payment.state.net} /> },
+                    payment.state.overpaid > 0 ? { label: "Thu thừa", value: <Money value={payment.state.overpaid} /> } : { label: "Còn phải thu", value: <Money value={payment.state.outstanding} /> },
+                  ]}
+                />
+                {payment.payments.length ? (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table className="min-w-[560px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Chứng từ</TableHead>
+                          <TableHead>Mốc tiền</TableHead>
+                          <TableHead className="text-right">Số tiền</TableHead>
+                          <TableHead>Người ghi</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {payment.payments.map((pm) => (
+                          <TableRow key={pm.id} className={pm.status === "VOIDED" ? "text-muted-foreground" : undefined}>
+                            <TableCell>
+                              <div className={cn("font-medium", pm.status === "VOIDED" && "line-through")}>{PAYMENT_KIND_LABEL[pm.kind]} · {PAYMENT_METHOD_LABEL[pm.method]}</div>
+                              {pm.reference || pm.note ? <div className="text-[11.5px] text-muted-foreground">{[pm.reference, pm.note].filter(Boolean).join(" · ")}</div> : null}
+                              {pm.status === "VOIDED" ? <div className="text-[11.5px]">Đã huỷ {formatDateTime(pm.voidedAt)}{pm.voidedByName ? ` bởi ${pm.voidedByName}` : ""}: {pm.voidReason}</div> : null}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">{formatDateTime(pm.paidAt)}</TableCell>
+                            <TableCell className={cn("text-right font-semibold", pm.status === "VOIDED" && "line-through")}>
+                              <Money value={pm.kind === "REFUND" ? -pm.amount : pm.amount} />
+                            </TableCell>
+                            <TableCell className="text-[12px]">{pm.createdByName || "—"}</TableCell>
+                            <TableCell className="text-right">{canPay && pm.status === "CONFIRMED" ? <VoidManualPaymentButton orderId={order.id} paymentId={pm.id} /> : null}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Chưa có chứng từ thanh toán nào — tiền của đơn đang CHƯA XÁC MINH (không phải 0 ₫, không phải đã thu).</p>
+                )}
+                {canReceipt || canRefund ? <RecordManualPaymentButton orderId={order.id} allowReceipt={canReceipt} allowRefund={canRefund} suggestedAmount={payment.state.outstanding} /> : null}
               </div>
             </SectionCard>
           ) : null}

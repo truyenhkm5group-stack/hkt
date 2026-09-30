@@ -128,6 +128,7 @@ const MOI = [
   "0178_order_delivery_notes",
   "0179_creative_video_upload",
   "0180_self_service_journey",
+  "0181_order_payments",
 ] as const;
 
 /*
@@ -328,6 +329,21 @@ export async function testMigrationUpgradePath() {
     await client.query(`update order_delivery_notes set voided_at = now(), void_reason = 'ghi nhầm đơn' where id = 'up-dn2'`);
     await client.query(`insert into order_delivery_notes (id, order_id, signed_at, receiver_name) values ('up-dn3', 'erp-up-dn1', now(), 'Anh Nam')`);
     assert.equal(await dem("select count(*)::int as n from order_delivery_notes where order_id = 'erp-up-dn1'"), 2, "bước 2: 0178 — huỷ phiếu giữ vết, phiếu mới ghi được sau khi huỷ");
+
+    // 0181 (chứng từ thanh toán của đơn tạo tay — ORDER_OUTCOME.md mục 11.1): bảng mới RỖNG (không đoán đơn nào "đã thu"
+    // — mục 8.8, 35); CHECK chỉ nhận đơn `erp-`, số tiền dương, loại / phương thức trong tập đóng, huỷ phải có lý do.
+    assert.equal(await dem("select count(*)::int as n from order_payments"), 0, "bước 2: 0181 không được gieo chứng từ nào");
+    const phieu = (id: string, order: string, extra = "'RECEIPT', 'CASH', 100000") => client.query(`insert into order_payments (id, order_id, kind, method, amount, paid_at) values ('${id}', '${order}', ${extra}, now())`);
+    await assert.rejects(phieu("up-op0", "88990011"), "bước 2: 0181 — đơn Pancake (id không `erp-`) không nhận chứng từ tay");
+    await assert.rejects(phieu("up-op1", "erp-up-dn1", "'RECEIPT', 'CASH', 0"), "bước 2: 0181 — số tiền 0 bị từ chối");
+    await assert.rejects(phieu("up-op2", "erp-up-dn1", "'RECEIPT', 'CASH', -5"), "bước 2: 0181 — số tiền âm bị từ chối (chiều nằm ở kind)");
+    await assert.rejects(phieu("up-op3", "erp-up-dn1", "'DEPOSIT', 'CASH', 100"), "bước 2: 0181 — loại ngoài RECEIPT/REFUND bị từ chối");
+    await assert.rejects(phieu("up-op4", "erp-up-dn1", "'RECEIPT', 'MOMO', 100"), "bước 2: 0181 — phương thức ngoài tập đóng bị từ chối");
+    await phieu("up-op5", "erp-up-dn1");
+    await assert.rejects(client.query(`update order_payments set status = 'VOIDED', voided_at = now() where id = 'up-op5'`), "bước 2: 0181 — huỷ chứng từ không lý do bị từ chối");
+    await assert.rejects(client.query(`update order_payments set voided_at = now(), void_reason = 'ghi nhầm' where id = 'up-op5'`), "bước 2: 0181 — có mốc huỷ mà trạng thái còn CONFIRMED bị từ chối");
+    await client.query(`update order_payments set status = 'VOIDED', voided_at = now(), void_reason = 'ghi nhầm số' where id = 'up-op5'`);
+    assert.equal(await dem("select count(*)::int as n from order_payments where order_id = 'erp-up-dn1' and status = 'VOIDED'"), 1, "bước 2: 0181 — huỷ giữ vết, không xoá cứng");
 
     // 0176 (sổ dùng AI): bảng mới RỖNG (không dựng lại lượt AI cũ — mục 8.8, 35); ba gói có khoá `ai` và KHÔNG gói nào
     // có credit nền tảng > 0 (AI do nền tảng trả tiền không bật bằng migration); CHECK chặn nguồn / trạng thái lạ.

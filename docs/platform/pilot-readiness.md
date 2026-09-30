@@ -59,9 +59,12 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 |---|---|---|---|
 | P0 | Không tạo được sản phẩm / mẫu mã, không nhập kho (A5 #1 #2) | ĐÃ SỬA #396 | — |
 | P0 | Không tạo được đơn (A5 #3) | ĐÃ SỬA #398 | — |
-| P0 | Đơn không qua ĐVVC không có kết quả / doanh thu (A5 #4) | ĐÃ SỬA phần giao + tồn — **G-ORDER** (chủ nền tảng quyết 29/09/2026) | `ORDER_OUTCOME.md` mục 11: phiếu giao có ký nhận (`order_delivery_notes`, migration 0178) ⇒ `DELIVERED` + trừ tồn; tiền `UNVERIFIED` — đường ghi chứng từ thanh toán cho đơn tay là việc SAU (chưa có) |
+| P0 | Đơn không qua ĐVVC không có kết quả / doanh thu (A5 #4) | ĐÃ SỬA phần giao + tồn — **G-ORDER** (chủ nền tảng quyết 29/09/2026) | `ORDER_OUTCOME.md` mục 11: phiếu giao có ký nhận (`order_delivery_notes`, migration 0178) ⇒ `DELIVERED` + trừ tồn; tiền theo **chứng từ thanh toán** (`order_payments`, migration 0181 — `ORDER_OUTCOME.md` mục 11.1): phiếu thu / hoàn tiền trên trang đơn, trạng thái `UNPAID` · `PARTIALLY_PAID` · `PAID` · `REFUNDED` ở trang đơn + danh sách đơn + trang khách, thu đủ ⇒ tiền đã xác minh, «Thực thu đơn tay» (theo `paid_at`) trong Tiền thực nhận của Chân lý tài chính |
 | P0 | Luật / việc định kỳ không tự chạy ở tổ chức khác nhà (A5 #6) | ĐÃ SỬA #405 — **G-SCHED** (chủ nền tảng quyết 29/09/2026) | Job `workflows` riêng cho tổ chức khách qua tầng fan-out TỰ ĐỘNG HOÁ (`SCHEDULER_AUTOMATION_FANOUT`, mặc định bật), mỗi 10 phút, tuần tự, trần 60 giây; nhịp theo gói (`workflowCadenceMinutes`, 5…1440) đã có chỗ khai, chưa có UI. Production chưa có tổ chức khách nên lượt thật đầu tiên chạy khi có tổ chức pilot đầu tiên |
 | P1 | Tồn khả dụng trừ hai lần sau khi xuất ISSUE cho đơn tay đã xác nhận (chấp nhận #3) | ĐÃ SỬA cùng G-ORDER | Đơn tay rời kho bằng phiếu giao (`ORDER_LEFT_WAREHOUSE` — một vị ngữ cho "đã xuất" và "thôi giữ"); lối "Lập phiếu xuất kho" đã bỏ. Đơn đã lỡ lập ISSUE trước bản này: trang đơn nêu phiếu đó, kho lập MỘT phiếu điều chỉnh tăng đúng số — ERP không tự sửa kho (`ORDER_OUTCOME.md` mục 11) |
+| P1 | Doanh thu / lợi nhuận / marketer / lương theo `ORDER_OUTCOME = 'DELIVERED'` vẫn LOẠI đơn tay kể cả khi đã thu đủ (`REVENUE_RECOGNIZED_ON_DELIVERY`, ~20 truy vấn: `financial-truth` bậc thang, `reports`, `metrics`, `expenses`, `customers`, `crm`, `payroll`, `payroll-reconcile-source`, `cost-engine`, `ads-decision`, `conversion-funnel`, `marketing-daily`, `product-intelligence`, `return-rate` ×4, `sales-funnel`, `staff-performance`, `stock-wait-report`) | MỞ — chứng từ đã có (0181) | Đổi vị ngữ ở ĐÚNG MỘT chỗ thành «không phải đơn tay HOẶC `MANUAL_ORDER_PAID`» (câu con có sẵn ở `manual-order-sql.ts`) — cần đo JIT / thời gian các câu gộp nóng của NHÀ trước, và chốt mốc (kỳ theo ngày giao hay theo `paid_at`) cho từng báo cáo. Tạm thời thực thu đơn tay đọc ở dòng «Thực thu đơn tay» của Chân lý tài chính |
+| P1 | Lợi nhuận THỰC NHẬN (`realizedProfit`) của tổ chức không ĐVVC luôn «chưa đủ chứng từ» vì luật chặn là «kỳ chưa có bảng kê Viettel Post» | MỞ | Mở khoá khi kỳ có chứng từ đơn tay (0181) — cần chủ nền tảng chốt công thức (tiền thực nhận − vận hành − QC, giá vốn theo dòng tiền nhập hàng hay không) |
+| P1 | Phiếu thu `BANK_TRANSFER` chưa nối với sổ ngân hàng (`bank_transactions.linked_type/linked_id` — AGENTS 17: đối chiếu, không ghi nhận) | MỞ | Người ghi dán mã giao dịch vào «Số tham chiếu»; nối tự động là việc sau |
 | P1 | Không đổi gói sau khi tạo (khảo sát bàn giao) | ĐÃ SỬA #399 | — |
 | P1 | Phí ship đơn tay mất ở trang đơn; /orders ghi «Đã thanh toán» cho đơn tay (chấp nhận #1 #2) | ĐÃ SỬA #399 | — |
 | P1 | Luật «khách mới» không bao giờ chạy; nhãn KPI sai nghĩa; giá nhập = giá báo MKT; sửa khách tạo tay; chữ VNX; số đo nội bộ VNX ở `/departments`; câu sai về hàng hoàn (A5 #7–#9 #11–#14) | ĐÃ SỬA #396 #398 | — |
@@ -78,8 +81,8 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 | 2 | **Cửa sổ bảo trì ~15 phút để bật PITR** cho `erp-db` (`backup-recovery.md` §9.4: `archive_mode=on` cần khởi động lại Postgres, gián đoạn ước lượng 10–30 giây) | RPO ≤ 1 giờ cho CSDL NHÀ (VNX); tổ chức khách đã đạt ≤ 1 giờ bằng bản hằng giờ |
 | — | Đã quyết 29/09/2026: G-ORDER (#407) · G-SCHED (#405) · D1 = BYOK · C4/C6/C7 (#410) | — |
 
-Việc còn mở KHÔNG phải cổng: đường ghi chứng từ thanh toán cho đơn tay (doanh thu thực thu của khách không dùng ĐVVC —
-G-ORDER chỉ phủ phần giao + tồn); UI cấu hình nhịp luật theo gói; diễn tập khôi phục CSDL NHÀ tự động (cần số RAM /
+Việc còn mở KHÔNG phải cổng: đưa đơn tay đã thu đủ vào các báo cáo doanh thu theo DELIVERED (nợ P1 mục 4 — đường ghi
+chứng từ thanh toán đã có, 0181); UI cấu hình nhịp luật theo gói; diễn tập khôi phục CSDL NHÀ tự động (cần số RAM /
 thời gian của một lượt chạy tay trước).
 
 ## 6. Kiểm khoá bí mật trên production (30/09/2026)

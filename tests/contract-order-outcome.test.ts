@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { ELIGIBLE_SENT_OUTCOMES, ELIGIBLE_SENT_SQL, OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
 import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES, OPEN_OUTCOMES_SQL, OUTCOME_GROUP, RETURNED_OUTCOMES_SQL, isFinishedOutcome } from "@/lib/constants/truth";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
+import { MANUAL_PAYMENT_STATUS_SQL } from "@/lib/queries/manual-order-sql";
+import { manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 
 /**
  * CONTRACT TEST — khoá các luật nghiệp vụ ở docs/business-rules/ORDER_OUTCOME.md.
@@ -328,6 +330,7 @@ export async function testOrderOutcomeContract(db: Db) {
   assert.deepEqual(viPhamOpen, [], `gõ lại danh sách 'chưa ngã ngũ' — dùng OPEN_OUTCOMES_SQL (lib/constants/truth.ts) thay vì chép: ${viPhamOpen.join(", ")}`);
 
   await testManualOrderDeliveryNote(db);
+  await testManualOrderPayments(db);
 
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
   const spec = readFileSync("docs/business-rules/ORDER_OUTCOME.md", "utf8");
@@ -392,6 +395,99 @@ async function testManualOrderDeliveryNote(db: Db) {
       await db.insert(schema.orderDeliveryNotes).values({ orderId: pancakeId, signedAt: new Date(), receiverName: "Khách" });
     }, "đơn Pancake không nhận phiếu giao tay (CHECK order_id LIKE 'erp-%')");
     assert.equal((await outcome(db, pancakeId))?.v, "UNKNOWN", "đơn Pancake 'Đã nhận' không vận đơn: luật cũ không đổi");
+  } finally {
+    for (const id of ids) await db.delete(schema.orders).where(eq(schema.orders.id, id));
+  }
+}
+
+/**
+ * ───────── ĐƠN KHÔNG QUA ĐVVC: CHỨNG TỪ THANH TOÁN (ORDER_OUTCOME.md mục 11.1, 0181) ─────────
+ *
+ * CHỈ THÊM tình huống, không đổi kỳ vọng nào ở trên. Đơn tay tổng 750.000 ₫ (không phí ship):
+ *  · phiếu giao + KHÔNG chứng từ ⇒ tiền `UNVERIFIED`, trạng thái `UNPAID` — phiếu giao không làm đơn thành PAID;
+ *  · phiếu giao + thu đủ ⇒ tiền `DELIVERED` (đã xác minh), `PAID`; thu thừa vẫn `PAID`;
+ *  · thu một phần ⇒ `PARTIALLY_PAID`, tiền `UNVERIFIED`; phiếu HOÀN luôn TRỪ (thu đủ rồi hoàn một phần ⇒ không còn PAID);
+ *  · thu rồi hoàn hết ⇒ `REFUNDED`; chứng từ đã HUỶ không đổi một đồng;
+ *  · thu đủ mà CHƯA có phiếu giao ⇒ vẫn `NOT_SHIPPED` ở cả hai công thức — tiền không suy ra giao hàng;
+ *  · đơn Pancake: CSDL không nhận chứng từ, trạng thái thanh toán là NULL (không áp dụng).
+ * Bản SQL (`MANUAL_PAYMENT_STATUS_SQL`) và hàm thuần (`manualPaymentStatus`) chạy trên CÙNG dữ liệu và phải trùng nhau.
+ */
+async function testManualOrderPayments(db: Db) {
+  const ids: string[] = [];
+  type Pay = { kind: "RECEIPT" | "REFUND"; amount: number; voided?: boolean };
+  const manual = async (opts: { delivered: boolean; pays: Pay[] }) => {
+    const id = `erp-${next()}`;
+    ids.push(id);
+    await db.insert(schema.orders).values({ id, stage: opts.delivered ? "DELIVERED" : "CONFIRMED", insertedAt: new Date(), totalPriceAfterDiscount: 750_000, shippingFee: 0, raw: { origin: "ERP_MANUAL", orderDiscount: 0, createdBy: null } });
+    if (opts.delivered) await db.insert(schema.orderDeliveryNotes).values({ orderId: id, signedAt: new Date("2026-09-20T03:00:00Z"), receiverName: "Chị Hoa" });
+    for (const p of opts.pays) {
+      await db.insert(schema.orderPayments).values({
+        orderId: id,
+        kind: p.kind,
+        method: "CASH",
+        amount: p.amount,
+        paidAt: new Date("2026-09-21T03:00:00Z"),
+        ...(p.voided ? { status: "VOIDED", voidedAt: new Date("2026-09-21T04:00:00Z"), voidReason: "ghi nhầm số" } : {}),
+      });
+    }
+    return id;
+  };
+  const read = async (id: string) => {
+    const [r] = await db
+      .select({ v: ORDER_OUTCOME, verified: ORDER_OUTCOME_VERIFIED, pay: sql<string | null>`${MANUAL_PAYMENT_STATUS_SQL}` })
+      .from(schema.orders)
+      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+      .where(eq(schema.orders.id, id));
+    const rows = await db.select({ kind: schema.orderPayments.kind, amount: schema.orderPayments.amount, status: schema.orderPayments.status }).from(schema.orderPayments).where(eq(schema.orderPayments.orderId, id));
+    const ts = manualPaymentStatus(sumConfirmedPayments(rows), 750_000).status;
+    assert.equal(r?.pay, ts, `đơn ${id}: trạng thái thanh toán SQL (${r?.pay}) phải trùng hàm thuần (${ts})`);
+    return r;
+  };
+  try {
+    const giaoChuaThu = await read(await manual({ delivered: true, pays: [] }));
+    assert.equal(giaoChuaThu?.v, "DELIVERED");
+    assert.equal(giaoChuaThu?.pay, "UNPAID", "phiếu giao KHÔNG làm đơn thành PAID — chưa có chứng từ thu");
+    assert.equal(giaoChuaThu?.verified, "UNVERIFIED", "giao mà chưa có chứng từ ⇒ tiền CHƯA XÁC MINH");
+
+    const giaoThuDu = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 500_000 }, { kind: "RECEIPT", amount: 250_000 }] }));
+    assert.equal(giaoThuDu?.pay, "PAID", "Σ phiếu thu = tổng đơn ⇒ PAID");
+    assert.equal(giaoThuDu?.verified, "DELIVERED", "giao + thu đủ theo chứng từ ⇒ tiền ĐÃ XÁC MINH");
+    assert.equal(giaoThuDu?.v, "DELIVERED", "chứng từ tiền không đổi chiều logistics");
+
+    const thuThua = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 800_000 }] }));
+    assert.equal(thuThua?.pay, "PAID", "thu thừa vẫn PAID (phần dư hiện riêng)");
+
+    const motPhan = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 300_000 }] }));
+    assert.equal(motPhan?.pay, "PARTIALLY_PAID");
+    assert.equal(motPhan?.verified, "UNVERIFIED", "thu một phần ⇒ tiền chưa xác minh đủ");
+
+    const hoanMotPhan = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 750_000 }, { kind: "REFUND", amount: 100_000 }] }));
+    assert.equal(hoanMotPhan?.pay, "PARTIALLY_PAID", "phiếu HOÀN TRỪ khỏi số đã thu — 750K − 100K < 750K");
+    assert.equal(hoanMotPhan?.verified, "UNVERIFIED");
+
+    const hoanHet = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 750_000 }, { kind: "REFUND", amount: 750_000 }] }));
+    assert.equal(hoanHet?.pay, "REFUNDED", "thu rồi hoàn hết ⇒ REFUNDED");
+    assert.equal(hoanHet?.verified, "UNVERIFIED");
+    assert.equal(hoanHet?.v, "DELIVERED", "hoàn tiền KHÔNG ghi đè sự kiện logistics (mục 10)");
+
+    const daHuy = await read(await manual({ delivered: true, pays: [{ kind: "RECEIPT", amount: 750_000, voided: true }] }));
+    assert.equal(daHuy?.pay, "UNPAID", "chứng từ đã HUỶ không đổi một đồng");
+    assert.equal(daHuy?.verified, "UNVERIFIED");
+
+    const thuChuaGiao = await read(await manual({ delivered: false, pays: [{ kind: "RECEIPT", amount: 750_000 }] }));
+    assert.equal(thuChuaGiao?.pay, "PAID");
+    assert.equal(thuChuaGiao?.v, "NOT_SHIPPED", "thu đủ mà chưa có phiếu giao ⇒ CHƯA GIAO — tiền không suy ra giao hàng");
+    assert.equal(thuChuaGiao?.verified, "NOT_SHIPPED");
+
+    // Đơn Pancake (id số): CSDL không nhận chứng từ tay, trạng thái thanh toán KHÔNG ÁP DỤNG (NULL — không phải UNPAID).
+    const pancakeId = `${Date.now()}${seq}`;
+    ids.push(pancakeId);
+    await db.insert(schema.orders).values({ id: pancakeId, stage: "CONFIRMED", insertedAt: new Date() });
+    await assert.rejects(async () => {
+      await db.insert(schema.orderPayments).values({ orderId: pancakeId, kind: "RECEIPT", method: "CASH", amount: 100_000, paidAt: new Date() });
+    }, "đơn Pancake không nhận chứng từ thanh toán tay (CHECK order_id LIKE 'erp-%')");
+    const [pk] = await db.select({ pay: sql<string | null>`${MANUAL_PAYMENT_STATUS_SQL}` }).from(schema.orders).where(eq(schema.orders.id, pancakeId));
+    assert.equal(pk?.pay, null, "đơn Pancake: trạng thái thanh toán đơn tay là N/A (NULL), không phải UNPAID");
   } finally {
     for (const id of ids) await db.delete(schema.orders).where(eq(schema.orders.id, id));
   }
