@@ -26,6 +26,8 @@ liệu thì không.
     `orgs/<csdl>/hourly/`, giữ 48 bản (`GIU_BAN_GIO`). Không có tổ chức nào ⇒ thoát 0, không ghi gì.
   - phút 37 mỗi giờ, `drill-org-weekly` — chỉ Chủ nhật 06:00–07:59 giờ VN: diễn tập khôi phục luân phiên MỘT CSDL tổ
     chức vào CSDL TẠM trong container TẠM, mỗi tuần một lượt.
+  - PITR (§9.4, quyết định 30/09/2026) ở tệp cron RIÊNG `/etc/cron.d/erp-pitr` do `scripts/erp-pitr.sh install-cron` cài:
+    phút 27 `base-cron` (bản nền mỗi đêm SAU bản đêm) · phút 8/23/38/53 `push-wal` (kho WAL lên `gcrypt:pitr/wal/`).
 - **Giữ:** 7 bản ngày · 4 bản Chủ nhật · 3 bản bấm tay (`GIU_BAN_NGAY` / `GIU_BAN_TUAN` / `GIU_BAN_TAY`).
 - **Ngoài máy:** Google Drive qua remote `gcrypt:` (rclone crypt — Drive chỉ thấy byte mã hoá), cấu hình từ
   Secrets ở `/root/.config/erp-backup/offsite.env`.
@@ -371,9 +373,9 @@ production.»
 | | Mục tiêu | CSDL NHÀ (`erp`, VNX) | CSDL tổ chức khách (`erp_org_*`) |
 |---|---|---|---|
 | Bản đầy đủ | hằng đêm | ✓ `pg_dump -Fc` 02:17 giờ VN (khung 02–05, thử lại mỗi giờ) — **không đổi** | ✓ cùng lượt đêm, sau nhà |
-| Bản gia tăng / PITR mỗi giờ | "nếu hạ tầng hỗ trợ" | ✗ **CHƯA** — `erp-db` chạy `archive_mode=off`; bật cần khởi động lại `erp-db` (§9.4). Bản logic mỗi giờ của cả CSDL nhà thì không: dump CSDL đang gánh VNX mỗi giờ trên máy 2 nhân đang bão hoà là thêm đúng loại tải đã đo gây nghẽn | ✓ bản LOGIC mỗi giờ (`hourly-org`, §9.2) — CSDL tổ chức nhỏ, dump giây; không cần đổi cấu hình Postgres |
-| RPO | ≤ 1 giờ | **≤ 1 ngày** (bản đêm; hỏng cả khung 02–05 ⇒ tới ~2 ngày, thẻ đỏ ở 36 giờ). Đạt ≤ 1 giờ CHỈ khi bật PITR (§9.4) | **≤ 1 giờ** (lượt phút 47); lỡ một lượt ⇒ ~2 giờ, tự lành giờ sau; thẻ vàng khi > 3 giờ |
-| RPO ngoài máy | ≤ 1 giờ | = trên máy khi Drive đã cấu hình (C4) | = trên máy + thời gian đẩy (`gcrypt:orgs/<csdl>/hourly/`), khi Drive đã cấu hình (C4) |
+| Bản gia tăng / PITR mỗi giờ | "nếu hạ tầng hỗ trợ" | ◐ **MÃ SẴN (30/09/2026), CHỜ DEPLOY trong cửa sổ bảo trì** — PITR cấp cụm: `archive_mode=on`, `archive_timeout=900`, bản nền mỗi đêm, WAL ngoài máy mỗi 15 phút, diễn tập `pitr-drill` (§9.4). Deploy đó tạo lại `erp-db` (~10–30 giây, ƯỚC LƯỢNG). Bản logic mỗi giờ của cả CSDL nhà thì không: dump CSDL đang gánh VNX mỗi giờ trên máy 2 nhân đang bão hoà là thêm đúng loại tải đã đo gây nghẽn | ✓ bản LOGIC mỗi giờ (`hourly-org`, §9.2) — CSDL tổ chức nhỏ, dump giây; không cần đổi cấu hình Postgres. Sau khi bật PITR: thêm PITR cấp cụm (≤ 15 phút) |
+| RPO | ≤ 1 giờ | **≤ 1 ngày** tới khi deploy PITR (bản đêm; hỏng cả khung 02–05 ⇒ tới ~2 ngày, thẻ đỏ ở 36 giờ). Sau khi bật: **≤ 15 phút** THIẾT KẾ (`archive_timeout`), số ĐO = `now − last_archived_time` của ops `pitr-status` (§9.4.5) | **≤ 1 giờ** (lượt phút 47); lỡ một lượt ⇒ ~2 giờ, tự lành giờ sau; thẻ vàng khi > 3 giờ |
+| RPO ngoài máy | ≤ 1 giờ | = trên máy khi Drive đã cấu hình (C4). Sau PITR: ≈ 30 phút (WAL lên `gcrypt:pitr/wal/` mỗi 15 phút) | = trên máy + thời gian đẩy (`gcrypt:orgs/<csdl>/hourly/`), khi Drive đã cấu hình (C4) |
 | RTO | ≤ 4 giờ | **CHƯA ĐO** cỡ production — runbook §10.2, ước lượng 1–2 giờ nếu CSDL vài GB | phần máy **ĐO** 6,3 giây (tổ chức nhỏ, CI 36545135985); cả quy trình **ƯỚC LƯỢNG** 1–1,5 giờ trên VPS còn sống, 2–3 giờ khi mất VPS (§10.1) |
 | Diễn tập tự động mỗi tuần, môi trường test | mỗi tuần | ✗ `restore-drill` của nhà vẫn **chạy tay** (tháng một lần). Đưa nó vào cron = dựng một Postgres cỡ CSDL nhà mỗi tuần trên máy 1,9 GB — cần số đo RAM/thời gian của một lượt tay trước (§10.2 bước 2) | ✓ **hai tầng**: (a) CI mỗi tuần — workflow **Diễn tập khôi phục tổ chức (Postgres tạm)**, `cron: "0 20 * * 6"`, dữ liệu tổng hợp, máy GitHub; (b) VPS mỗi Chủ nhật 06–07 giờ VN — `drill-org-weekly` luân phiên một CSDL thật vào CSDL TẠM trong container TẠM (§9.3) |
 | Không restore đè production | tuyệt đối | ✓ diễn tập chỉ vào container tạm | ✓ đích luôn `tam_khoiphuc_<mã>` trong container tạm không mạng; `erp-db` chỉ bị đọc `count(*)` / `pg_database_size` (bài kiểm chạy bash thật khoá) |
@@ -426,17 +428,145 @@ Giới hạn, nói thẳng: một CSDL mỗi tuần. Có N tổ chức thì mỗ
 đạt gần nhất quá 35 ngày (`BACKUP_DRILL_MAX_AGE_DAYS`) ⇒ từ tổ chức thứ 6 trở đi cần tăng nhịp (nhiều CSDL / lượt, hoặc
 thêm ngày) — một quyết định vận hành, không tự đổi.
 
-### 9.4 PITR cho cả cụm `erp-db` — đánh giá và ĐỀ XUẤT (cần cửa sổ bảo trì, KHÔNG làm trong PR này)
+### 9.4 PITR cho cả cụm `erp-db` — ĐÃ TRIỂN KHAI TRONG MÃ (chờ deploy trong cửa sổ bảo trì)
 
-**Hiện trạng, đọc từ kho (không đoán):** `docker-compose.prod.yml` dịch vụ `db` = `postgres:16-alpine`, KHÔNG có
-`command:` ⇒ mọi tham số là mặc định của Postgres 16: `wal_level = replica` (mặc định từ bản 10 — đã đủ cho lưu trữ
-WAL), `archive_mode = off`, `archive_command` rỗng, `archive_timeout = 0`, `max_wal_senders = 10`, `max_wal_size = 1GB`,
-`checkpoint_timeout = 5min`. Dữ liệu ở volume `erp_pgdata`. Không có thư mục lưu trữ WAL, không có `pg_basebackup` ở
-đâu trong kho. Deploy chạy `docker compose up -d --build db` MỖI lần (`scripts/install-vps.sh`) ⇒ đổi cấu hình dịch vụ
-`db` trong compose = compose TẠO LẠI container `erp-db` ở lần deploy kế tiếp — tức cửa sổ bảo trì là lần deploy mang
-thay đổi đó, không phải lúc gộp PR.
+Quyết định của chủ nền tảng (30/09/2026), nguyên văn: «PITR POSTGRESQL: Chuẩn bị và thực hiện PITR theo phương án đã
+audit. Yêu cầu: backup hiện tại phải healthy trước khi thay đổi; downtime tối thiểu; không mất migration/data; verify
+WAL/PITR thực sự hoạt động; thực hiện restore drill ở môi trường an toàn; xác nhận RPO/RTO sau khi bật; VNX smoke đầy đủ
+sau thay đổi. Nếu cần downtime production 10–30 giây, đây là approval của owner…»
 
-Xác nhận trên máy chủ trước khi làm gì (CHỈ ĐỌC, ops `db-query`, mỗi câu một lượt):
+**Trạng thái:** mã + bài kiểm có trong kho (commit của mục này). **Có hiệu lực ở lần deploy KẾ TIẾP** — và lần deploy
+đó TẠO LẠI `erp-db` (§9.4.2). Vì vậy bản này chỉ được gộp vào `main` ngay trước cửa sổ bảo trì, hoặc gộp rồi deploy
+ngay trong cửa sổ: sau khi gộp, BẤT KỲ lượt deploy nào (kể cả của một PR khác) cũng mang theo lần khởi động lại ấy.
+
+#### 9.4.1 Ba mảnh, mỗi mảnh ở đúng một chỗ
+
+| Mảnh | Ở đâu | Làm gì |
+|---|---|---|
+| Cấu hình Postgres | `docker-compose.prod.yml`, dịch vụ `db`, `command:` | `postgres -c wal_level=replica -c archive_mode=on -c archive_timeout=900 -c archive_command=/bin/sh /erp-pitr-bin/luu-wal.sh %p %f` + `stop_grace_period: 60s`. KHÔNG sửa tệp nào trong volume `erp_pgdata`. Ảnh (`postgres:16-alpine`), volume, mật khẩu KHÔNG đổi (`tests/pitr.test.ts` khoá từng dòng) |
+| Lưu từng đoạn WAL | `deploy/pitr-luu-wal.sh` — chạy TRONG `erp-db` (busybox `sh`), mount MỘT TỆP chỉ-đọc | gzip → tệp tạm → fsync → `ln` vào `/pitr/wal/<đoạn>.gz`. Đích đã có + CÙNG nội dung ⇒ 0 (idempotent); KHÁC nội dung ⇒ ≠0, không bao giờ ghi đè. Cờ `.tam-dung` ⇒ bỏ đoạn + ghi sổ lỗ hổng (phanh). Ổ còn < 1.536 MB ⇒ bỏ đoạn + ghi sổ lỗ hổng (thà mất độ phủ PITR còn hơn để `pg_wal` làm đầy ổ và Postgres PANIC). Kho WAL > 8.192 MB ⇒ ≠0 (lỗi NHÌN THẤY ĐƯỢC ở `pg_stat_archiver`, cảnh báo sớm trong lúc ổ còn chỗ) |
+| Mọi thứ còn lại | `scripts/erp-pitr.sh` (máy chủ; `source` erp-backup.sh để DÙNG LẠI khoá/JSON/ngoài máy, không đè hàm nào) | bản nền, xoay vòng, đẩy ngoài máy, trạng thái, dòng đánh dấu, diễn tập, phanh, lịch |
+
+Thư mục trên máy chủ: `/root/backups/pitr/{wal,base}` (chủ uid 70 = `postgres` của ảnh alpine), mount vào `erp-db` tại
+`/pitr`. CHỈ dịch vụ `db` gắn nó (nó đã là CSDL, không mở thêm dữ liệu cho container nào). `install-vps.sh` chạy
+`erp-pitr.sh chuan-bi` TRƯỚC `up -d --build db`; hỏng ⇒ deploy DỪNG trước khi đụng `erp-db` (thiếu thư mục thì Docker tự
+tạo thư mục của root, mọi lượt lưu hỏng vì sai quyền, WAL dồn trong `pg_wal`).
+
+Lịch (tệp RIÊNG `/etc/cron.d/erp-pitr`, `/etc/cron.d/erp-backup` không đổi một byte; `BAM_PHAN_NHA` vẫn khớp):
+- phút 27 mỗi giờ `base-cron` — bản nền `pg_basebackup -Ft -X stream -Z 1 -c spread -r 32M` trong khung 02:00–05:59 giờ VN,
+  SAU bản đêm của nhà (`daily-done` = hôm nay; giờ cuối khung thì chạy dù bản đêm hỏng — PITR không chết theo `pg_dump`),
+  mỗi đêm một bản. Khoá: FD 7 không chờ → FD 8 → FD 9 như lượt đêm. `archive_mode` chưa bật ⇒ im lặng.
+- phút 8/23/38/53 `push-wal` — `rclone copy` kho WAL lên `gcrypt:pitr/wal/` (copy, không sync; khoá riêng FD 6). Lỗi đẩy
+  không đụng bản cục bộ.
+- Giữ **2 bản nền** + mọi WAL từ đoạn bắt đầu của bản nền CŨ NHẤT còn giữ (xoá WAL / `.partial` / `.backup` cũ hơn;
+  `.history` luôn giữ). Ngoài máy dọn theo tuổi > 4 ngày.
+
+Năm thao tác ops (ops-vps.yml, kết quả MÃ HOÁ, con số qua kênh `[ops:tom-tat]`):
+
+| Ops | Làn khoá | Tham số | Làm gì |
+|---|---|---|---|
+| `pitr-status` | DOC_NHE | — | CHỈ ĐỌC: `pg_stat_archiver` (archived/failed count, đoạn + mốc gần nhất), `wal_level`/`archive_mode`/`archive_timeout`, số đoạn chờ lưu, cỡ `pg_wal`; kho WAL trên máy (số tệp, MB, đoạn mới nhất, cờ tạm dừng); bản nền mới nhất + tuổi; sổ lỗ hổng sau bản nền; ngoài máy; băm kịch bản lưu WAL trong `erp-db` so với kho; **RPO hiện tại = now − last_archived_time**; KẾT LUẬN OK / VÀNG / ĐỎ (ĐỎ ⇒ thoát 1) |
+| `pitr-basebackup` | DOC_NANG | — | chụp bản nền NGAY (như lượt cron) — dùng ngay sau khi bật để có mốc khôi phục đầu tiên |
+| `pitr-mark` | GHI | — | GHI đúng MỘT dòng `settings` khoá `platform.pitr.marker` = nonce ngẫu nhiên; lưu nonce + mốc COMMIT vào `status/pitr-marker.json` |
+| `pitr-drill` | DOC_NANG | mốc ISO (`2026-09-30T20:15:00Z` / `+07:00`); rỗng = đoạn WAL mới nhất − 2 phút | diễn tập PITR, không chạm `erp-db` (§9.4.4) |
+| `pitr-pause` | GHI | rỗng = tạm dừng · `resume` = chạy lại | phanh không cần khởi động lại (§9.4.6) |
+
+#### 9.4.2 Deploy có dựng lại `db` không — và gián đoạn bao lâu
+
+**Có, đúng một lần.** `install-vps.sh` chạy `docker compose -f docker-compose.prod.yml up -d --build db` ở MỌI lần deploy.
+Compose so nhãn `com.docker.compose.config-hash` của container đang chạy với cấu hình mới; `command`, `volumes` và
+`stop_grace_period` đều nằm trong phép băm ⇒ khác ⇒ **Recreate**: dừng container cũ (STOPSIGNAL SIGINT của ảnh postgres =
+fast shutdown, có checkpoint; trần 60 giây), xoá container, tạo container mới trên CÙNG volume `erp_pgdata`, CÙNG ảnh đã
+có trên máy (không kéo ảnh mới), CÙNG biến môi trường. Entrypoint thấy `PG_VERSION` ⇒ không initdb, khởi động thẳng với
+các `-c` mới. Dữ liệu không đổi định dạng: `wal_level` vẫn `replica` (mặc định cũ), chỉ thêm việc lưu đoạn WAL. Các lần
+deploy SAU đó: hash không đổi ⇒ compose không đụng `erp-db` (kịch bản lưu WAL đổi nội dung KHÔNG làm tạo lại — mount một
+tệp giữ inode cũ; `pitr-status` báo VÀNG "kịch bản trong erp-db khác kho" cho tới lần tạo lại có chủ đích:
+`docker compose -f docker-compose.prod.yml up -d --force-recreate db` trong một cửa sổ khác).
+
+Kiểm trước (CHỈ ĐỌC, trên máy chủ, không cần cửa sổ): `docker inspect erp-db --format '{{index .Config.Labels "com.docker.compose.config-hash"}}'`
+khác `docker compose -f docker-compose.prod.yml config --hash db` ở commit mới ⇒ lần deploy đó sẽ tạo lại.
+
+**Gián đoạn — ƯỚC LƯỢNG, chưa đo trên máy này:** CSDL không nhận kết nối **khoảng 10–30 giây** (dừng nhanh + khởi động
+không cần phục hồi; `shared_buffers` mặc định 128 MB). `app`/`scheduler` KHÔNG bị `up -d db` khởi động lại — kết nối cũ
+bị cắt, truy vấn kế tiếp mở kết nối mới (như mọi lần `erp-db` khởi động lại); trong khoảng đó yêu cầu đang chạy lỗi, job của scheduler đang dở chạy lại ở nhịp sau, webhook Viettel Post được
+VTP thử lại (idempotent). Cùng lượt deploy vẫn tạo lại `app`/`scheduler` như mọi lần deploy (ảnh mới) — gián đoạn đó
+không mới. **Đo thật:** mốc `Recreate`/`Started` của `erp-db` trong log deploy + dòng `database system is ready to accept
+connections` trong `docker logs erp-db`.
+
+#### 9.4.3 Runbook bật (cửa sổ bảo trì, thấp điểm SAU bản đêm — vd 03:30 giờ VN, không trùng deploy khác)
+
+| # | Bước | Đạt khi | Dừng nếu |
+|---|---|---|---|
+| 0 | Đo (CHỈ ĐỌC, `db-query`, mỗi câu một lượt, trước ngày bảo trì): các câu `pg_settings` / `pg_database_size` / `pg_stat_wal` / `pg_current_wal_lsn()` ở §9.4.7; `docker exec erp-db grep replication /var/lib/postgresql/data/pg_hba.conf` phải có dòng `local replication all trust` (mặc định của ảnh) | có `wal_bytes_24h`, cỡ cụm, ổ trống; dung lượng 2 bản nền + WAL 2–3 ngày < ổ trống − 3.000 MB | ổ không đủ ⇒ KHÔNG bật (hoặc hạ `TRAN_KHO_WAL_MB` / giữ ít ngày hơn — quyết định chủ nền tảng) |
+| 1 | ops `backup-status` | `last-success.json` của nhà mới hơn 24 giờ, `last-run.json` = OK, `daily-done` = hôm nay | bản đêm hỏng ⇒ sửa trước, không bật |
+| 2 | ops `backup` (bản logic mới ngay trước thay đổi) | thoát 0, `KẾT QUẢ: OK`, ngoài máy OK | hỏng ⇒ dừng |
+| 3 | Gộp PR + deploy (workflow **Deploy ERP to VPS**) — `erp-db` được tạo lại (§9.4.2) | deploy xanh; `/api/health` ok; `docker ps` thấy `erp-db` Up (healthy) | `erp-db` không lên ⇒ ROLLBACK §9.4.6 |
+| 4 | ops `pitr-status` | `archive_mode=on`, `wal_level=replica`, `archive_timeout=900s`, `failed_count` không tăng; sau ≤ 15 phút có `last_archived_wal` và đoạn `.gz` trong kho | `failed_count` tăng liên tục ⇒ đọc `docker logs erp-db` dòng `erp-pitr luu-wal`; không tự lành trong 30 phút ⇒ phanh §9.4.6 |
+| 5 | ops `pitr-basebackup` | thoát 0, `PITR bản nền: base-…` | lỗi `replication` ⇒ kiểm pg_hba (bước 0) |
+| 6 | ops `pitr-mark` | `settings.platform.pitr.marker = nonce …` + mốc commit | — |
+| 7 | Chờ ≥ 1 chu kỳ archive (≥ 15 phút + vài phút cho một giao dịch SAU mốc đánh dấu) → ops `pitr-status` thấy đoạn mới hơn mốc đánh dấu | — | — |
+| 8 | ops `pitr-drill` (arg rỗng) | `PITR diễn tập: OK` — pha TRƯỚC mốc đánh dấu ⇒ nonce VẮNG, pha SAU ⇒ nonce CÓ, `orders`/`shipments`/`settings`/migration có dữ liệu; ghi lại dòng `RTO phần máy` | PARTIAL ⇒ chờ thêm một chu kỳ rồi chạy lại; FAILED ⇒ đọc lý do, PITR CHƯA được coi là bật |
+| 9 | ops `verify` + ops `smoke` (VNX smoke đầy đủ) | xanh | đỏ ⇒ so với smoke trước deploy (memory: smoke có thể nhất thời) |
+| 10 | Ghi số vào §9.4.5 (RPO đo = `now − last_archived_time` ở bước 4/7; RTO phần máy của bước 8) và `launch-gates.md` C8 | — | — |
+
+#### 9.4.4 Diễn tập PITR (`pitr-drill`) — ở môi trường an toàn, không bao giờ đè production
+
+- **Không chạm production:** không một lời gọi `docker` nào nhắm vào `erp-db`, volume `erp_pgdata`, cổng hay mạng của nó
+  (`tests/pitr.test.ts` quét mã nguồn VÀ chạy với docker giả rồi đọc lại từng lời gọi). Ảnh là HẰNG SỐ `postgres:16-alpine`
+  (bài kiểm đòi bằng ảnh của `db`); dữ liệu từ bản nền trên đĩa; WAL từ kho WAL gắn CHỈ-ĐỌC; mốc đánh dấu từ
+  `status/pitr-marker.json`.
+- Container tạm `--network none --memory 512m --memory-swap 512m --cpus 1`, kiểm RAM ≥ 700 MB + ổ ≥ cỡ cụm lúc chụp +
+  3.000 MB TRƯỚC khi dựng; thư mục dữ liệu tạm `/root/backups/.pitr-dien-tap.<pid>` và container bị xoá ngay khi xong (đạt
+  hay hỏng), `trap EXIT` là lưới cuối.
+- Giải nén `base.tar.gz` + `pg_wal.tar.gz` (`--numeric-owner`), `recovery.signal`,
+  `restore_command = gzip -dc /pitr-wal/%f.gz > %p`, `recovery_target_action = pause` (hot standby — đọc được mà không
+  promote). **Hai pha trên CÙNG thư mục dữ liệu:** pha TRƯỚC dừng ở (mốc đánh dấu − 1 giây) và đòi nonce VẮNG; dừng
+  container; pha SAU phục hồi TIẾP tới mốc yêu cầu và đòi nonce CÓ + bảng lõi có dữ liệu. Docker giả "luôn có dòng đánh
+  dấu" ⇒ bài kiểm ĐỎ (phép so không mù).
+- Kết quả `status/pitr-drill.json`: OK · PARTIAL (phục hồi được nhưng vế đánh dấu không đo được — thiếu `pitr-mark`, hoặc
+  dòng đánh dấu không nằm gọn giữa bản nền và mốc) · FAILED · SKIPPED (thiếu RAM/ổ). Chỉ OK thoát 0.
+
+#### 9.4.5 RPO / RTO sau khi bật
+
+| | Trên máy | Ngoài máy (`gcrypt:pitr/`) | Nguồn |
+|---|---|---|---|
+| RPO nhà + mọi tổ chức (PITR cấp cụm) | ≤ `archive_timeout` = **15 phút** + vài giây lưu | ≤ 15 + 15 phút (`push-wal`) ≈ **30 phút** + thời gian tải | THIẾT KẾ; số ĐO = `now − last_archived_time` của `pitr-status` — **điền sau bước 4/7** |
+| RPO khi lưu WAL hỏng | tăng tới khi sửa — `pitr-status` ĐỎ khi > 30 phút (2 chu kỳ) | như bên trái | THIẾT KẾ |
+| RTO phần máy (khôi phục tới một mốc) | giải nén + phục hồi — **CHƯA ĐO: điền dòng `RTO phần máy` của bước 8** | + tải bản nền + WAL từ Drive | ĐO ở bước 8 |
+| RTO cả quy trình nhà | runbook §9.4.7 + §10.2 — ƯỚC LƯỢNG 1–2 giờ nếu cụm vài GB | + 30–60 phút khi mất VPS | ƯỚC LƯỢNG |
+
+Bản đêm `pg_dump -Fc` GIỮ NGUYÊN: nó là đường khôi phục CHỌN LỌC (một bảng, một tổ chức) mà PITR cấp cụm không cho, và là
+đường lui khi chuỗi WAL đứt.
+
+#### 9.4.6 Phanh và rollback
+
+- **Phanh KHÔNG cần khởi động lại:** ops `pitr-pause` (tạo `/root/backups/pitr/wal/.tam-dung`). Kịch bản lưu WAL trả 0 mà
+  không lưu, ghi `.lo-hong.log` ⇒ Postgres thôi dồn WAL, chuỗi PITR ĐỨT từ đó. Chạy lại: `pitr-pause` arg `resume`, rồi
+  `pitr-basebackup` (chuỗi mới bắt đầu từ bản nền mới). Tự động cùng cơ chế khi ổ còn < 1.536 MB.
+- **KHÁC bản đề xuất cũ — `ALTER SYSTEM SET archive_command = '/bin/true'; SELECT pg_reload_conf();` KHÔNG CÓ TÁC DỤNG ở
+  cấu hình này:** tham số truyền bằng `postgres -c` thắng cả `postgresql.conf` lẫn `postgresql.auto.conf` (ALTER SYSTEM),
+  nên reload vẫn giữ `archive_command` của dòng lệnh. Đừng dùng nó; dùng cờ ở trên.
+- **Rollback cấu hình** (cửa sổ + chủ nền tảng đồng ý): revert commit compose → deploy ⇒ `erp-db` tạo lại với
+  `archive_mode = off` (thêm 10–30 giây). Dữ liệu không đổi định dạng. `/root/backups/pitr` xoá tay sau khi không còn cần.
+  Lịch `/etc/cron.d/erp-pitr` tự im lặng khi `archive_mode` tắt (bản nền không chạy; `push-wal` chỉ chép tệp đã có).
+- Mount hỏng / kịch bản mất (lỗi lưu liên tục, WAL dồn trong `pg_wal`) mà cờ không với tới được: rollback cấu hình ở trên
+  là đường duy nhất — theo dõi `pitr-status` + cổng ổ đĩa.
+
+#### 9.4.7 Khôi phục PITR THẬT (runbook, KHÔNG tự động, chủ nền tảng quyết)
+
+Không bao giờ phục hồi đè cụm đang chạy. Luôn dựng cụm TẠM từ bản nền + WAL tới mốc, kiểm, rồi mới thay.
+
+1. Chọn mốc T (giờ UTC) và bản nền mới nhất có `finishedAt` < T (`/root/backups/pitr/base/base-*/nen.json`; mất VPS ⇒
+   `rclone copy gcrypt:pitr/base/<bản> …` + `rclone copy gcrypt:pitr/wal …`).
+2. Chạy `pitr-drill` với arg = T: nó chứng minh bản nền + WAL tới T khôi phục được (và in RTO phần máy). Đạt thì làm lại
+   thủ công với thư mục giữ lại: giải nén như §9.4.4 vào `/root/pitr-khoi-phuc/data`, `recovery_target_time = T`,
+   `recovery_target_action = promote`.
+3. Khôi phục MỘT tổ chức / một bảng: từ cụm tạm `pg_dump -d erp_org_<mã>` (hoặc `-t bảng`) rồi đi tiếp §5 / `docs/backup-restore.md`.
+4. Khôi phục CẢ CỤM nhà: dừng `app` `scheduler` `chatbot` → `ops backup` (dump hiện trạng làm đường lui) → dừng `erp-db` →
+   đổi tên volume cũ (không xoá) → chép thư mục dữ liệu đã promote vào volume mới cùng tên → `up -d` → `/api/health` →
+   `ops verify` + `smoke` → kéo lại phần hụt từ Pancake / Viettel Post (idempotent). Chủ nền tảng quyết từng bước.
+
+Câu đo trước khi bật (CHỈ ĐỌC, `db-query`, mỗi câu một lượt):
 
 ```sql
 select name, setting from pg_settings where name in ('wal_level','archive_mode','archive_command','archive_timeout','max_wal_size','checkpoint_timeout','full_page_writes','wal_compression','max_wal_senders');
@@ -446,58 +576,9 @@ select pg_current_wal_lsn();                                      -- chạy lạ
 select pg_wal_lsn_diff('<lsn lần 2>', '<lsn lần 1>') as wal_bytes_24h;
 ```
 
-**Dung lượng WAL mỗi ngày: CHƯA ĐO** — kho không có con số nào. Chỉ nói được cấu trúc: dung lượng lưu trữ = (bản cơ
-sở ≈ cỡ cụm sau nén) × số bản giữ + (WAL/ngày ĐO ở câu trên, sau nén) × số ngày giữ. `archive_timeout = 900` ép tối
-thiểu 96 đoạn 16 MiB/ngày (1,5 GiB thô) ngay cả khi máy rảnh; phần trống của đoạn bị ép sớm là byte 0 nên nén còn rất
-nhỏ. Phần trên sàn tỉ lệ với lượng ghi thật (đơn, vận đơn, webhook VTP, đồng bộ Pancake) — đo rồi mới chốt số ngày giữ,
-vì máy này đã từng đầy ổ 100% (#242).
-
-**Đề xuất cụ thể (một PR riêng, deploy trong cửa sổ bảo trì):**
-
-1. **Bước 0 — đo** (không gián đoạn): chạy các câu ở trên, ghi `wal_bytes_24h`, cỡ cụm, ổ trống. Tính dung lượng cho
-   7 ngày PITR; không đủ ⇒ dừng, không bật.
-2. **Thư mục lưu trữ** trên VPS: `install -d -o 70 -g 70 -m 700 /root/backups/wal` (uid 70 = `postgres` của ảnh alpine).
-3. **Kịch bản lưu trữ** `scripts/pg-archive-wal.sh` (vào kho, có bài kiểm như `tests/backup.test.ts`): ghi
-   `gzip -c %p` ra tệp tạm → `fsync` → `mv` thành `%f.gz`; tệp đích đã có và giải nén ra CÙNG nội dung ⇒ thoát 0 (lượt
-   thử lại sau sự cố), khác nội dung ⇒ thoát 1 (không bao giờ ghi đè).
-4. **Compose**, dịch vụ `db`:
-   ```yaml
-   command: ["postgres", "-c", "archive_mode=on", "-c", "archive_timeout=900",
-             "-c", "archive_command=/wal-archive-bin/pg-archive-wal.sh %p %f"]
-   volumes:
-     - erp_pgdata:/var/lib/postgresql/data
-     - /root/backups/wal:/wal-archive
-     - /root/erp/scripts/pg-archive-wal.sh:/wal-archive-bin/pg-archive-wal.sh:ro
-   ```
-   `archive_mode` chỉ đổi được khi KHỞI ĐỘNG LẠI máy chủ Postgres — đó là toàn bộ lý do cần cửa sổ.
-5. **Bản cơ sở** hằng đêm trong `erp-backup.sh` (đổi đường của nhà ⇒ cập nhật `BAM_PHAN_NHA` cùng commit, có lý do):
-   `docker exec erp-db pg_basebackup -U erp -D - -Ft -X none -z > base-<mốc>.tar.gz` (`-X none`: WAL lấy từ kho lưu
-   trữ). Cần `pg_hba.conf` có dòng `local replication` — KIỂM trước:
-   `docker exec erp-db grep replication /var/lib/postgresql/data/pg_hba.conf`. Giữ `pg_dump -Fc` hằng đêm như cũ: nó là
-   đường khôi phục CHỌN LỌC (một bảng, một tổ chức) mà PITR cấp cụm không cho.
-6. **Ngoài máy:** cron 15 phút `rclone copy /root/backups/wal gcrypt:wal/` (copy, KHÔNG sync) + dọn theo tuổi khớp số
-   bản cơ sở giữ. RPO: ≤ 15 phút trên máy, ≤ ~30 phút ngoài máy — cho CẢ nhà lẫn mọi tổ chức (PITR là cấp cụm).
-7. **Giám sát:** đọc `pg_stat_archiver` (`failed_count`, `last_failed_time` > `last_archived_time`) vào trạng thái sao
-   lưu và thẻ; cùng cổng ổ đĩa.
-
-**Gián đoạn (ƯỚC LƯỢNG, chưa đo trên máy này):** tạo lại `erp-db` = dừng nhanh (checkpoint, `shared_buffers` mặc định
-128 MB) + khởi động không cần phục hồi ⇒ CSDL không nhận kết nối **khoảng 10–30 giây**; healthcheck 5 giây. Trong khoảng
-đó ERP trả lỗi cho yêu cầu đang chạy, job của scheduler đang dở có thể hỏng và chạy lại ở nhịp sau, webhook Viettel Post
-được VTP thử lại (tối đa 5 lần, idempotent). Nếu compose tạo lại cả `app` / `scheduler` thì cộng thời gian khởi động app.
-**Xin cửa sổ 15 phút**, lúc thấp điểm SAU bản đêm (vd 03:30 giờ VN, sau `daily-done`), không trùng deploy khác.
-
-**Rủi ro chính và cách lùi:**
-
-| Rủi ro | Hệ quả | Chặn / lùi |
-|---|---|---|
-| `archive_command` hỏng liên tục (thư mục đầy, sai quyền) | Postgres GIỮ mọi đoạn WAL chưa lưu trong `pg_wal` ⇒ ổ đầy ⇒ Postgres dừng (PANIC) — production sập | Giám sát `pg_stat_archiver` + cổng ổ đĩa. **Phanh khẩn cấp KHÔNG cần khởi động lại:** `ALTER SYSTEM SET archive_command = '/bin/true'; SELECT pg_reload_conf();` (ghi cấu hình production ⇒ cần chủ nền tảng đồng ý) — WAL thôi dồn, chuỗi PITR đứt tới bản cơ sở kế tiếp |
-| Tăng IO / ổ đĩa trên máy đang bão hoà | trang chậm hơn giờ cao điểm | `archive_timeout = 900` (không nhỏ hơn); gzip trong kịch bản lưu trữ; đo lại sau 1 tuần |
-| Cấu hình sai làm Postgres không lên | gián đoạn kéo dài | **Rollback:** revert PR compose → deploy ⇒ `erp-db` tạo lại với `archive_mode = off` (thêm 10–30 giây). Dữ liệu không đổi định dạng (`wal_level` vẫn `replica`); thư mục WAL xoá sau |
-
-**Khôi phục bằng PITR** (ghi sẵn, chưa diễn tập): container Postgres TẠM từ bản cơ sở + `restore_command` giải nén từ
-`/wal-archive` + `recovery_target_time` + `recovery.signal` ⇒ cụm ở đúng mốc. Khôi phục MỘT tổ chức về một mốc = dựng
-cụm tạm như trên rồi `pg_dump -d erp_org_<mã>` từ nó và đi tiếp §5 — không bao giờ phục hồi đè cụm production. Diễn tập
-PITR phải vào lịch tuần cùng §9.3 ngay khi bật.
+**Dung lượng WAL/ngày: CHƯA ĐO.** `TRAN_KHO_WAL_MB = 8192` là ƯỚC LƯỢNG ban đầu; `archive_timeout = 900` ép tối thiểu 96
+đoạn 16 MiB/ngày (1,5 GiB thô, phần trống nén rất nhỏ). Đo `wal_bytes_24h` (bước 0) và cỡ kho WAL sau 1 tuần rồi chỉnh
+trần / số bản nền giữ trong một PR.
 
 ## 10. Runbook RTO ≤ 4 giờ — thời gian từng bước
 

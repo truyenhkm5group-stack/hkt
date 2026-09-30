@@ -124,6 +124,7 @@ server.listen(config.port, () => {
   startSalesAgent(bot);
   // Moi 10 phut tra lai tag "BOT OFF" cho page chua co (chu shop tao tag sau khi bot da chay)
   const tagTimer = setInterval(() => bot.refreshPauseTags().catch(() => {}), 10 * 60 * 1000);
+  bot.orderBot.start(); // Bot len don: quet don cho qua han moi 5 phut
   tagTimer.unref?.();
   startHealthcheck();
 });

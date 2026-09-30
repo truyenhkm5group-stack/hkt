@@ -266,7 +266,10 @@ export async function testConsistency(db: Db) {
   // Không cột nào được ôm trọn khoản thuê: đó chính là hình dạng bug cũ.
   const cotLonNhat = Math.max(0, ...ngayThang.map((r) => r.operating));
   assert.ok(cotLonNhat < 200_000, `không ngày nào được ôm cả khoản thuê (cột lớn nhất ${cotLonNhat}đ)`);
-  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= 7, "mọi ngày trong tuần đều có chi phí, không phải chỉ ngày ghi sổ");
+  // «Tuần» bị kẹp vào đầu tháng (tuanTu = max(đầu tháng, hôm nay − 6)) ⇒ ngày 1 của tháng cửa sổ chỉ có 1 ngày. Đòi cứng
+  // «≥ 7» là bom hẹn giờ (AGENTS mục 50): đỏ đúng mọi ngày 1–6 của tháng — nổ lúc 00:00 ngày 01/10/2026. Mốc lấy từ CHÍNH
+  // cửa sổ đang kiểm: mọi ngày TRONG cửa sổ phải có chi phí.
+  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= soNgayTuan, `mọi ngày trong cửa sổ (${soNgayTuan} ngày) đều có chi phí, không phải chỉ ngày ghi sổ`);
 
   // LỢI NHUẬN THEO MÃ: phần phân bổ xuống từng mã cộng lại = đúng tổng của kỳ (largest remainder).
   assert.equal(nominalTuan.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexTuan, "Σ phân bổ xuống mã (tuần) phải bằng đúng phần phân bổ của kỳ, không lệch vì làm tròn");

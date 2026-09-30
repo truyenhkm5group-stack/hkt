@@ -286,6 +286,40 @@ export function createAdminHandler(bot) {
       let p;
 
       // ---- Tong quan
+      // ---- Bot len don (orderbot.js): hang cho / can duyet / da len don
+      if (m("GET", "/api/orderbot")) {
+        return json(res, 200, bot.orderBot.list()), true;
+      }
+      if (m("POST", "/api/orderbot/settings")) {
+        const body = await readJson(req);
+        try {
+          return json(res, 200, { ok: true, settings: settings.setOrderBot(body) }), true;
+        } catch (e) {
+          return json(res, 400, { error: e.message }), true;
+        }
+      }
+      if (m("POST", "/api/orderbot/rescan")) {
+        const body = await readJson(req).catch(() => ({}));
+        try {
+          return json(res, 200, { ok: true, rescan: bot.orderBot.rescan({ hours: body.hours }) }), true;
+        } catch (e) {
+          return json(res, 400, { error: e.message }), true;
+        }
+      }
+      {
+        const mo = url.pathname.match(/^\/api\/orderbot\/([^/]+)\/(approve|dismiss|check)$/);
+        if (mo && req.method === "POST") {
+          const key = decodeURIComponent(mo[1]);
+          const body = await readJson(req).catch(() => ({}));
+          try {
+            const it = mo[2] === "approve" ? await bot.orderBot.approve(key, { address: body.address }) : mo[2] === "dismiss" ? bot.orderBot.dismiss(key) : await bot.orderBot.check(key);
+            return json(res, 200, { ok: true, item: it }), true;
+          } catch (e) {
+            return json(res, 400, { error: e.message }), true;
+          }
+        }
+      }
+
       if (m("GET", "/api/overview")) {
         return json(res, 200, overview(bot)), true;
       }
@@ -294,6 +328,7 @@ export function createAdminHandler(bot) {
         return json(res, 200, {
           ok: true,
           version: 2,
+          orderBotCounts: bot.orderBot.list().counts,
           global: {
             model: config.ai.model,
             deliveryDays: settings.deliveryDays(),
