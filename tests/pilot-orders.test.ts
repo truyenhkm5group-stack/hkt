@@ -44,6 +44,9 @@ import { orderKpis } from "@/lib/queries/dashboard";
 import { getProfitReport } from "@/lib/queries/reports";
 import { COUNT_DELIVERED, DELIVERED_REVENUE } from "@/lib/queries/metrics";
 import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, manualOrderDeliveryView, manualOrderGate, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
+import { recordManualPaymentCore, voidManualPaymentCore } from "@/lib/records/order-payments";
+import { manualOrderPaymentView } from "@/lib/queries/order-payments";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { parseListParams, type Period } from "@/lib/search-params";
 import { validateRuleInput } from "@/lib/workflow/rules";
 import { approvalAmountOf } from "@/lib/workflow/subject";
@@ -198,6 +201,8 @@ async function testHome() {
   assert.equal(codeOf(await cancelManualOrderCore(admin, "erp-x", { reason: "thử" })), "NOT_SUPPORTED");
   assert.equal(codeOf(await confirmManualDeliveryCore(admin, "erp-x", { signedAt: new Date().toISOString(), receiverName: "Khách" })), "NOT_SUPPORTED", "G-ORDER: nhà đồng bộ đơn từ Pancake ⇒ không xác nhận giao tay, kể cả Quản trị");
   assert.equal(codeOf(await voidManualDeliveryCore(admin, "erp-x", { reason: "thử huỷ" })), "NOT_SUPPORTED");
+  assert.equal(codeOf(await recordManualPaymentCore(admin, "erp-x", { kind: "RECEIPT", method: "CASH", amount: 100_000, paidAt: new Date().toISOString() })), "NOT_SUPPORTED", "0181: nhà đồng bộ đơn từ Pancake ⇒ không ghi chứng từ thanh toán tay, kể cả Quản trị");
+  assert.equal(codeOf(await voidManualPaymentCore(admin, "erp-x", { paymentId: "x", reason: "thử huỷ" })), "NOT_SUPPORTED");
   assert.equal(await count(), n0, "bị từ chối ⇒ 0 đơn mới");
   // Nút tạo đơn trên /orders đi qua CÙNG cổng; trang /orders/new 404 khi cổng đóng.
   assert.match(readFileSync("app/(dashboard)/orders/page.tsx", "utf8"), /createGate\.allowed \? \(/);
@@ -219,6 +224,12 @@ async function testHome() {
   await db.insert(schema.orders).values({ id: oidGiao, stage: "DELIVERED", status: 3, statusName: "Đã nhận", billFullName: "Khách tay", totalPrice: 450_000, totalPriceAfterDiscount: 450_000, insertedAt: new Date(), raw: { origin: "ERP_MANUAL", orderDiscount: 0, createdBy: null } });
   await db.insert(schema.orderItems).values({ id: `${oidGiao}-1`, orderId: oidGiao, variantId: "po-home-var", productId: "po-home-prod", productName: "PO mã tay (fixture)", sku: "PO-HOME-1", quantity: 1, unitPrice: 450_000, lineTotal: 450_000 });
   await db.insert(schema.orderDeliveryNotes).values({ orderId: oidGiao, signedAt: new Date(), receiverName: "Khách tay" });
+  // 0181: đơn tay ĐÃ THU ĐỦ theo chứng từ (lọt vào CSDL nhà — thực tế action từ chối) — các báo cáo theo DELIVERED vẫn không đổi.
+  await db.insert(schema.orderPayments).values({ orderId: oidGiao, kind: "RECEIPT", method: "CASH", amount: 450_000, paidAt: new Date() });
+  // Đơn Pancake không bao giờ mang được chứng từ tay (CHECK ở CSDL) ⇒ số của nhà không thể đổi vì bảng này.
+  await assert.rejects(async () => {
+    await db.insert(schema.orderPayments).values({ orderId: "88990000", kind: "RECEIPT", method: "CASH", amount: 1, paidAt: new Date() });
+  }, "đơn không `erp-` không nhận chứng từ thanh toán tay");
   try {
     clearMemo();
     const after = await getNominalProfitReport(ALL);
@@ -237,6 +248,7 @@ async function testHome() {
     assert.equal(profitAfter.cogs, profitBefore.cogs, "giá vốn đi cùng doanh thu — không ghi cho đơn tay chưa có chứng từ tiền");
     assert.equal(kpiAfter.successRevenue, kpiBefore.successRevenue, "Tổng quan: doanh thu giao thành công không đổi");
     assert.equal(kpiAfter.successOrders, kpiBefore.successOrders + 1, "…nhưng SỐ ĐƠN giao thành công có thêm đơn tay (chiều logistics)");
+    assert.equal((await outcomesOf(oidGiao))?.verified, "DELIVERED", "0181: đơn tay giao + thu đủ theo chứng từ ⇒ tiền đã xác minh");
   } finally {
     await db.delete(schema.orders).where(eq(schema.orders.id, oidGiao));
     await db.delete(schema.orders).where(eq(schema.orders.id, oid));
@@ -348,7 +360,8 @@ async function testWholesaleOrg() {
       assert.equal(await stockOf("erp-po-var-a"), 10, "huỷ đơn KHÔNG đổi tồn thực tế");
       assert.equal(codeOf(await confirmManualDeliveryCore(admin, created.id, { signedAt: new Date().toISOString(), receiverName: "Đại lý" })), "CONFLICT", "đơn đã huỷ: không xác nhận giao");
 
-      await testDeliveryFlow(db, { admin, sales, customerId: c.id, orderInput: input });
+      const deliveredId = await testDeliveryFlow(db, { admin, sales, customerId: c.id, orderInput: input });
+      await testPaymentFlow(db, { admin, sales, customerId: c.id, orderInput: input, deliveredId, cancelledId: created.id });
     });
   } finally {
     await cleanupOrg(ORG);
@@ -362,7 +375,7 @@ async function testWholesaleOrg() {
  * dụng 80 (trừ hai lần: phiếu xuất + đơn còn giữ hàng). Nay: xác nhận giao (không phiếu xuất) ⇒ thực tế 115, khả dụng
  * 115 — hàng rời kho ĐÚNG MỘT lần, và thôi bị giữ. Tiền KHÔNG đổi: doanh thu giao thành công vẫn 0, tiền UNVERIFIED.
  */
-async function testDeliveryFlow(db: Awaited<ReturnType<typeof getDb>>, ctx: { admin: SessionUser; sales: SessionUser; customerId: string; orderInput: Record<string, unknown> }) {
+async function testDeliveryFlow(db: Awaited<ReturnType<typeof getDb>>, ctx: { admin: SessionUser; sales: SessionUser; customerId: string; orderInput: Record<string, unknown> }): Promise<string> {
   const { admin, sales } = ctx;
   await db.insert(schema.productVariants).values({ id: "erp-po-var-c", productId: "erp-po-prod", sku: "NS-6", size: "6 chai", retailPrice: 40_000 });
   const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: "PN-150", totalQuantity: 150, createdBy: "kho@po.local" }).returning({ id: schema.stockReceipts.id });
@@ -456,11 +469,114 @@ async function testDeliveryFlow(db: Awaited<ReturnType<typeof getDb>>, ctx: { ad
   const trangDon = readFileSync("app/(dashboard)/orders/[id]/page.tsx", "utf8");
   assert.ok(!trangDon.includes("issueReceiptHref") && !trangDon.includes(">Lập phiếu xuất kho<") && trangDon.includes("ConfirmManualDeliveryButton"), "trang đơn tay: nút xác nhận giao thay cho lối xuất tay");
   assert.ok(!readFileSync("app/(dashboard)/inventory/receipts/page.tsx", "utf8").includes("manualOrderIssuePrefill"));
+  return id;
+}
+
+/**
+ * ═══ CHỨNG TỪ THANH TOÁN CỦA ĐƠN TAY (0181 — ORDER_OUTCOME.md mục 11.1) ═══
+ *
+ * Đơn `deliveredId` đã giao bằng phiếu ký nhận: 35 × 40.000 = 1.400.000 ₫, không phí ship. Tiền đi theo chứng từ, không
+ * theo phiếu giao: chưa có chứng từ ⇒ UNPAID / UNVERIFIED; thu một phần ⇒ PARTIALLY_PAID; thu đủ ⇒ PAID + tiền đã xác
+ * minh; huỷ chứng từ ⇒ số đổi ngược lại; hoàn tiền trừ và không vượt số đã thu. Thực thu đơn tay vào đúng một chỉ số
+ * (Chân lý tài chính → Tiền thực nhận, theo `paid_at`). Tồn kho và kết quả giao không đổi vì chứng từ tiền.
+ */
+async function testPaymentFlow(db: Awaited<ReturnType<typeof getDb>>, ctx: { admin: SessionUser; sales: SessionUser; customerId: string; orderInput: Record<string, unknown>; deliveredId: string; cancelledId: string }) {
+  const { admin, sales, deliveredId: id } = ctx;
+  const at = (minsAgo: number) => new Date(Date.now() - minsAgo * 60_000).toISOString();
+  const payCount = async () => Number((await db.select({ n: sql<number>`count(*)` }).from(schema.orderPayments))[0].n);
+  const manualCash = async () => {
+    clearMemo();
+    return (await getFinancialTruth(ALL)).cash;
+  };
+  const stock0 = await stockOfVariant("erp-po-var-c");
+  const view0 = await manualOrderPaymentView({ id, totalPriceAfterDiscount: 1_400_000, shippingFee: 0 });
+  assert.deepEqual([view0?.state.status, view0?.state.amountDue, view0?.payments.length], ["UNPAID", 1_400_000, 0], "phiếu giao KHÔNG làm đơn thành PAID");
+  assert.equal((await outcomesOf(id))?.verified, "UNVERIFIED");
+  const cash0 = await manualCash();
+  assert.equal(cash0.manualReceipts, 0);
+  const n0 = await payCount();
+
+  // Quyền, đơn đồng bộ, đầu vào sai ⇒ từ chối, 0 dòng.
+  const receipt = { kind: "RECEIPT", method: "CASH", amount: 500_000, paidAt: at(30), reference: "PT-001", note: "Đại lý trả đợt 1" };
+  assert.equal(codeOf(await recordManualPaymentCore(sales, id, receipt)), "FORBIDDEN", "thiếu orders:write ⇒ từ chối");
+  assert.equal(codeOf(await recordManualPaymentCore(admin, "88001234", receipt)), "NOT_SUPPORTED", "đơn đồng bộ (id số) không nhận chứng từ tay");
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, id, { ...receipt, amount: 0 })).includes("amount"));
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, id, { ...receipt, method: "MOMO" })).includes("method"));
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, id, { ...receipt, paidAt: new Date(Date.now() + 86_400_000).toISOString() })).includes("paidAt"), "mốc thanh toán ở tương lai bị từ chối");
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, id, { ...receipt, kind: "REFUND" })).includes("amount"), "chưa thu đồng nào ⇒ không hoàn được");
+  assert.equal(codeOf(await recordManualPaymentCore(admin, ctx.cancelledId, receipt)), "CONFLICT", "đơn đã huỷ không nhận tiền mới");
+  assert.equal(await payCount(), n0, "mọi lượt bị từ chối ⇒ 0 chứng từ");
+
+  // Thu một phần.
+  const r1 = await recordManualPaymentCore(admin, id, receipt);
+  assert.ok(r1.ok, JSON.stringify(r1));
+  const [pt1] = await db.select().from(schema.orderPayments).where(eq(schema.orderPayments.id, r1.paymentId));
+  assert.deepEqual([pt1.orderId, pt1.kind, pt1.method, pt1.amount, pt1.status, pt1.createdByUserId, pt1.reference], [id, "RECEIPT", "CASH", 500_000, "CONFIRMED", admin.id, "PT-001"], "người ghi đi bằng KHOÁ tài khoản (AGENTS 34)");
+  let v = await manualOrderPaymentView({ id, totalPriceAfterDiscount: 1_400_000, shippingFee: 0 });
+  assert.deepEqual([v?.state.status, v?.state.net, v?.state.outstanding], ["PARTIALLY_PAID", 500_000, 900_000]);
+  assert.equal((await outcomesOf(id))?.verified, "UNVERIFIED", "thu một phần ⇒ tiền chưa xác minh đủ");
+  assert.equal((await manualCash()).manualReceipts, 500_000, "Thực thu đơn tay = Σ chứng từ theo paid_at");
+
+  // Thu đủ (chuyển khoản).
+  const r2 = await recordManualPaymentCore(admin, id, { ...receipt, method: "BANK_TRANSFER", amount: 900_000, reference: "FT26273" });
+  assert.ok(r2.ok, JSON.stringify(r2));
+  v = await manualOrderPaymentView({ id, totalPriceAfterDiscount: 1_400_000, shippingFee: 0 });
+  assert.deepEqual([v?.state.status, v?.state.net, v?.state.outstanding, v?.state.overpaid], ["PAID", 1_400_000, 0, 0]);
+  const o = await outcomesOf(id);
+  assert.deepEqual([o?.outcome, o?.verified], ["DELIVERED", "DELIVERED"], "giao + thu đủ theo chứng từ ⇒ tiền ĐÃ XÁC MINH; logistics không đổi");
+  assert.equal(o?.deliveredRevenue, 0, "nợ P1 (pilot-readiness mục 4): doanh thu theo DELIVERED vẫn loại đơn tay — thực thu đọc ở Chân lý tài chính");
+  const cash2 = await manualCash();
+  assert.deepEqual([cash2.manualReceipts, cash2.manualReceiptDocs, cash2.total - cash0.total], [1_400_000, 2, 1_400_000], "Tiền thực nhận tăng đúng Σ chứng từ");
+  const params = parseListParams({}, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
+  const listed = (await listOrders(params)).rows.find((r) => r.id === id);
+  assert.equal(listed?.payment?.status, "PAID", "danh sách /orders: trạng thái thanh toán đơn tay theo chứng từ");
+  assert.deepEqual(await stockOfVariant("erp-po-var-c"), stock0, "chứng từ tiền KHÔNG chạm tồn kho");
+
+  // Huỷ chứng từ ghi nhầm: bắt buộc lý do; giữ vết; số đổi ngược lại; huỷ lần hai không ghi gì.
+  assert.ok(fieldsOf(await voidManualPaymentCore(admin, id, { paymentId: r2.paymentId, reason: "" })).includes("reason"));
+  assert.equal(codeOf(await voidManualPaymentCore(sales, id, { paymentId: r2.paymentId, reason: "ghi nhầm" })), "FORBIDDEN");
+  assert.equal(codeOf(await voidManualPaymentCore(admin, ctx.cancelledId, { paymentId: r2.paymentId, reason: "sai đơn" })), "NOT_FOUND", "chứng từ của đơn khác ⇒ không tìm thấy");
+  assert.ok((await voidManualPaymentCore(admin, id, { paymentId: r2.paymentId, reason: "Ghi nhầm số tiền" })).ok);
+  assert.equal(codeOf(await voidManualPaymentCore(admin, id, { paymentId: r2.paymentId, reason: "bấm lại" })), "CONFLICT", "huỷ lần hai không ghi gì");
+  const [pt2] = await db.select().from(schema.orderPayments).where(eq(schema.orderPayments.id, r2.paymentId));
+  assert.deepEqual([pt2.status, pt2.voidReason, pt2.voidedByUserId], ["VOIDED", "Ghi nhầm số tiền", admin.id], "không xoá cứng: chứng từ còn, mang lý do + khoá người huỷ");
+  v = await manualOrderPaymentView({ id, totalPriceAfterDiscount: 1_400_000, shippingFee: 0 });
+  assert.deepEqual([v?.state.status, v?.state.net], ["PARTIALLY_PAID", 500_000], "chứng từ đã huỷ không vào phép tính");
+  assert.equal((await outcomesOf(id))?.verified, "UNVERIFIED");
+  assert.equal((await manualCash()).manualReceipts, 500_000);
+
+  // Hoàn tiền: không vượt số đang thu ròng; hoàn hết ⇒ REFUNDED; huỷ phiếu THU khi đã hoàn ⇒ bị chặn.
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, id, { ...receipt, kind: "REFUND", amount: 600_000 })).includes("amount"), "hoàn vượt số đã thu ⇒ từ chối");
+  const r3 = await recordManualPaymentCore(admin, id, { ...receipt, kind: "REFUND", amount: 500_000, reference: "HT-01" });
+  assert.ok(r3.ok, JSON.stringify(r3));
+  v = await manualOrderPaymentView({ id, totalPriceAfterDiscount: 1_400_000, shippingFee: 0 });
+  assert.deepEqual([v?.state.status, v?.state.net], ["REFUNDED", 0]);
+  assert.equal(codeOf(await voidManualPaymentCore(admin, id, { paymentId: r1.paymentId, reason: "thử huỷ phiếu thu" })), "CONFLICT", "huỷ phiếu thu khi đã hoàn ⇒ số hoàn vượt số thu ⇒ chặn");
+  assert.equal((await manualCash()).manualReceipts, 0, "thu 500K − hoàn 500K = 0 trong kỳ (phiếu 900K đã huỷ)");
+  assert.equal((await outcomesOf(id))?.outcome, "DELIVERED", "hoàn tiền không ghi đè sự kiện logistics");
+
+  // Đơn đã huỷ: chỉ nhận phiếu HOÀN (và chỉ khi đã thu).
+  assert.ok(fieldsOf(await recordManualPaymentCore(admin, ctx.cancelledId, { ...receipt, kind: "REFUND" })).includes("amount"), "đơn huỷ chưa thu đồng nào ⇒ không có gì để hoàn");
+
+  // Thu TRƯỚC khi giao là hợp lệ và KHÔNG làm đơn thành đã giao.
+  const truoc = await createManualOrderCore(admin, { ...ctx.orderInput, customerId: ctx.customerId, stage: "CONFIRMED", orderDiscount: 0, shippingFee: 20_000, lines: [{ variantId: "erp-po-var-c", quantity: 1, unitPrice: 40_000, discount: 0 }] });
+  assert.ok(truoc.ok, JSON.stringify(truoc));
+  const r4 = await recordManualPaymentCore(admin, truoc.id, { ...receipt, method: "COD", amount: 60_000 });
+  assert.ok(r4.ok, JSON.stringify(r4));
+  assert.equal((await manualOrderPaymentView({ id: truoc.id, totalPriceAfterDiscount: 40_000, shippingFee: 20_000 }))?.state.status, "PAID", "số phải trả gồm phí ship khách trả (40K + 20K)");
+  const ot = await outcomesOf(truoc.id);
+  assert.deepEqual([ot?.outcome, ot?.verified], ["NOT_SHIPPED", "NOT_SHIPPED"], "thu đủ mà chưa có phiếu giao ⇒ CHƯA GIAO — tiền không suy ra giao hàng");
+
+  const logs = async (action: string) => (await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, action))).length;
+  assert.equal(await logs("ORDER_PAYMENT_RECORD"), 4, "mỗi chứng từ ghi được ⇒ một dòng nhật ký");
+  assert.equal(await logs("ORDER_PAYMENT_VOID"), 1, "một lượt huỷ ⇒ một dòng nhật ký");
+  const trangDon = readFileSync("app/(dashboard)/orders/[id]/page.tsx", "utf8");
+  assert.ok(trangDon.includes("RecordManualPaymentButton") && trangDon.includes("manualOrderPaymentView"), "trang đơn tay có khối Thanh toán");
 }
 
 export async function testPilotOrders() {
   testPure();
   await testHome();
   await testWholesaleOrg();
-  console.log("  ✓ pilot đơn tay: tạo / sửa / huỷ ở tổ chức không Pancake (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; G-ORDER phiếu giao ký nhận ⇒ DELIVERED + trừ tồn một lần (150→115/115) + tiền UNVERIFIED + huỷ phiếu quay về; nhà từ chối + marketer 3.9 không đổi; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định, COD chỉ khi có kết nối; số tiền duyệt ưu tiên field tuỳ biến; vai trò AI không mang quyền ngoài gói");
+  console.log("  ✓ pilot đơn tay: tạo / sửa / huỷ ở tổ chức không Pancake (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; G-ORDER phiếu giao ký nhận ⇒ DELIVERED + trừ tồn một lần (150→115/115) + tiền UNVERIFIED + huỷ phiếu quay về; chứng từ thanh toán (0181) UNPAID→PARTIALLY_PAID→PAID→REFUNDED, huỷ có lý do, hoàn không vượt thu, thực thu theo paid_at; nhà từ chối + marketer 3.9 không đổi; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định, COD chỉ khi có kết nối; số tiền duyệt ưu tiên field tuỳ biến; vai trò AI không mang quyền ngoài gói");
 }

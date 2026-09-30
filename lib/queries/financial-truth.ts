@@ -102,6 +102,14 @@ export type FinancialTruth = {
     received: number;
     /** Khách chuyển trước của đơn giao thành công. */
     prepaid: number;
+    /**
+     * THỰC THU ĐƠN TẠO TAY (đơn không qua ĐVVC): Σ phiếu THU − Σ phiếu HOÀN còn hiệu lực (`order_payments`) có MỐC TIỀN
+     * (`paid_at`) trong kỳ — mốc của chứng từ, không phải ngày lên đơn hay ngày giao (AGENTS 58). Tổ chức nhà luôn 0 (CHECK
+     * `erp-`). Phiếu giao KHÔNG tham gia (ORDER_OUTCOME.md mục 11).
+     */
+    manualReceipts: number;
+    /** Số chứng từ còn hiệu lực trong kỳ (thu + hoàn). */
+    manualReceiptDocs: number;
     total: number;
   };
   /** Bậc thang từ doanh thu giao thành công xuống lợi nhuận. */
@@ -245,13 +253,20 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .from(b)
     .where(between(b.receivedAt, period.from, period.to));
 
+  // ── THỰC THU ĐƠN TẠO TAY: theo MỐC TIỀN của chứng từ thanh toán (paid_at), không theo ngày lên đơn ──
+  const mp = schema.orderPayments;
+  const manualCashP = db
+    .select({ net: sql<number>`coalesce(sum(case when ${mp.kind} = 'RECEIPT' then ${mp.amount} else -${mp.amount} end), 0)`, docs: sql<number>`count(*)` })
+    .from(mp)
+    .where(and(eq(mp.status, "CONFIRMED"), between(mp.paidAt, period.from, period.to)));
+
   const adsRowP = db
     .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)));
   // Một đường duy nhất: Profit Engine. Trang "sự thật tài chính" không được tự cộng theo cách riêng.
   // Bốn phép đọc không phụ thuộc nhau: chạy song song thay vì nối đuôi.
-  const [[codRow], [batchRow], [adsRow], opsRow] = await Promise.all([codRowP, batchRowP, adsRowP, getOperatingCost(period)]);
+  const [[codRow], [batchRow], [adsRow], opsRow, [manualCashRow]] = await Promise.all([codRowP, batchRowP, adsRowP, getOperatingCost(period), manualCashP]);
 
   const deliveredRevenue = Number(orderRow?.deliveredRevenue ?? 0);
   const deliveredCogs = Number(orderRow?.deliveredCogs ?? 0);
@@ -271,6 +286,7 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const statementCount = Number(batchRow?.count ?? 0);
   const cashReceived = Number(batchRow?.net ?? 0);
   const prepaid = Number(orderRow?.prepaid ?? 0);
+  const manualReceipts = Number(manualCashRow?.net ?? 0);
 
   const waterfall: WaterfallLine[] = [
     {
@@ -376,7 +392,7 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       outstanding: Number(codRow?.outstanding ?? 0),
       outstandingCount: Number(codRow?.outstandingCount ?? 0),
     },
-    cash: { received: cashReceived, prepaid, total: cashReceived + prepaid },
+    cash: { received: cashReceived, prepaid, manualReceipts, manualReceiptDocs: Number(manualCashRow?.docs ?? 0), total: cashReceived + prepaid + manualReceipts },
     waterfall,
     contribution,
     estimatedProfit,

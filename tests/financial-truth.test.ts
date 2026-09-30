@@ -95,7 +95,9 @@ export async function testFinancialTruth(db: Db) {
   // ───────── 6. Tiền thực nhận phải khớp báo cáo dòng tiền — một nguồn, hai màn hình ─────────
   const cashReport = await getCashProfitReport(ALL);
   assert.equal(f.cash.received, cashReport.cashIn.codPaidToBank, "tiền về theo bảng kê phải khớp báo cáo dòng tiền");
-  assert.equal(f.cash.total, f.cash.received + f.cash.prepaid);
+  assert.equal(f.cash.total, f.cash.received + f.cash.prepaid + f.cash.manualReceipts, "tiền thực nhận = bảng kê + trả trước + thực thu đơn tay (chứng từ order_payments)");
+  // Tổ chức nhà: đơn Pancake không bao giờ mang chứng từ tay (CHECK `erp-`) ⇒ dòng thực thu đơn tay luôn 0 — số cũ không đổi.
+  assert.equal(f.cash.manualReceipts, 0, "fixture nhà không có chứng từ đơn tay ⇒ tiền thực nhận y như trước 0181");
 
   console.log(
     `✓ Chân lý tài chính: lên đơn ${f.revenue.booked}đ ≠ giao TC ${f.revenue.delivered}đ ≠ thực nhận ${f.cash.total}đ · lợi nhuận góp ${f.contribution}đ · thực nhận ${f.realizedProfit === null ? "CHƯA XÁC MINH" : `${f.realizedProfit}đ`}`,

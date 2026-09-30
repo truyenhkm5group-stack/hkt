@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, PackageCheck, Undo2, XCircle } from "lucide-react";
+import { Banknote, Loader2, PackageCheck, Undo2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cancelManualOrderAction, confirmManualDeliveryAction, voidManualDeliveryAction } from "@/lib/actions/manual-orders";
+import { cancelManualOrderAction, confirmManualDeliveryAction, recordManualPaymentAction, voidManualDeliveryAction, voidManualPaymentAction } from "@/lib/actions/manual-orders";
+import { PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL, PAYMENT_METHODS, type PaymentKind, type PaymentMethod } from "@/lib/constants/order-payments";
 
 /**
  * Huỷ ĐƠN TAY — hỏi lý do (vào nhật ký), gọi `cancelManualOrderAction`. Server action tự `revalidatePath` trang đơn nên
@@ -172,6 +173,141 @@ export function VoidManualDeliveryButton({ orderId }: { orderId: string }) {
         </Button>
         <Button type="button" variant="destructive" size="sm" onClick={submit} disabled={pending}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null} Xác nhận huỷ phiếu
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * GHI CHỨNG TỪ THANH TOÁN (ORDER_OUTCOME.md mục 11) — phiếu THU hoặc phiếu HOÀN TIỀN cho đơn tay. Hỏi đúng những gì trên
+ * chứng từ: loại, phương thức, số tiền, mốc tiền đổi tay, số tham chiếu, ghi chú. Ghi chứng từ KHÔNG đổi trạng thái giao
+ * hàng và không trừ tồn — chỉ đổi chiều tiền.
+ */
+export function RecordManualPaymentButton({ orderId, allowReceipt, allowRefund, suggestedAmount }: { orderId: string; allowReceipt: boolean; allowRefund: boolean; suggestedAmount: number }) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<PaymentKind>(allowReceipt ? "RECEIPT" : "REFUND");
+  const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const [amount, setAmount] = useState(() => (allowReceipt && suggestedAmount > 0 ? String(suggestedAmount) : ""));
+  const [paidAt, setPaidAt] = useState(() => vnLocalInput(new Date()));
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  if (!open)
+    return (
+      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Banknote className="size-4" /> Ghi chứng từ thanh toán
+      </Button>
+    );
+
+  const submit = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const digits = amount.replace(/[^0-9]/g, "");
+      const res = await recordManualPaymentAction(orderId, { kind, method, amount: digits ? Number(digits) : 0, paidAt: vnInputToIso(paidAt), reference, note });
+      if (!("ok" in res)) {
+        setError(res.error);
+        return;
+      }
+      toast.success(res.message);
+      setOpen(false);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const kinds = ([allowReceipt ? "RECEIPT" : null, allowRefund ? "REFUND" : null] as const).filter((k): k is PaymentKind => k !== null);
+  return (
+    <div className="w-full max-w-md space-y-2 rounded-lg border bg-background p-3">
+      <p className="text-[12.5px] text-muted-foreground">Nhập theo chứng từ thật (phiếu thu, giao dịch ngân hàng, biên nhận của shipper). Chứng từ chỉ đổi chiều TIỀN — không đổi trạng thái giao, không trừ tồn.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block space-y-1 text-[12.5px]">
+          <span className="font-medium">Loại</span>
+          <select className="h-9 w-full rounded-md border bg-background px-2" value={kind} onChange={(e) => setKind(e.target.value as PaymentKind)} aria-label="Loại chứng từ">
+            {kinds.map((k) => (
+              <option key={k} value={k}>
+                {PAYMENT_KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block space-y-1 text-[12.5px]">
+          <span className="font-medium">Phương thức</span>
+          <select className="h-9 w-full rounded-md border bg-background px-2" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} aria-label="Phương thức thanh toán">
+            {PAYMENT_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {PAYMENT_METHOD_LABEL[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="block space-y-1 text-[12.5px]">
+        <span className="font-medium">Số tiền (đồng)</span>
+        <Input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Ví dụ 1500000" aria-label="Số tiền" />
+      </label>
+      <label className="block space-y-1 text-[12.5px]">
+        <span className="font-medium">Mốc tiền đổi tay (giờ Việt Nam)</span>
+        <Input type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} aria-label="Mốc thanh toán" />
+      </label>
+      <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Số tham chiếu (mã giao dịch, số phiếu thu…)" aria-label="Số tham chiếu" />
+      <Textarea aria-label="Ghi chú chứng từ" value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Ghi chú (không bắt buộc)" />
+      {error ? <p className="text-[12px] font-medium text-destructive">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
+          Thôi
+        </Button>
+        <Button type="button" size="sm" onClick={submit} disabled={pending}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null} Lưu chứng từ
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** HUỶ CHỨNG TỪ THANH TOÁN ghi nhầm — bắt buộc lý do (vào nhật ký); chứng từ giữ làm vết, thôi vào mọi phép tính. */
+export function VoidManualPaymentButton({ orderId, paymentId }: { orderId: string; paymentId: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  if (!open)
+    return (
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        <Undo2 className="size-4" /> Huỷ
+      </Button>
+    );
+
+  const submit = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await voidManualPaymentAction(orderId, { paymentId, reason });
+      if (!("ok" in res)) {
+        setError(res.error);
+        return;
+      }
+      toast.success(res.message);
+      setOpen(false);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="ml-auto w-64 space-y-2 text-left">
+      <Textarea aria-label="Lý do huỷ chứng từ" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="Vì sao huỷ chứng từ (bắt buộc)" />
+      {error ? <p className="text-[12px] font-medium text-destructive">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
+          Thôi
+        </Button>
+        <Button type="button" variant="destructive" size="sm" onClick={submit} disabled={pending}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null} Huỷ chứng từ
         </Button>
       </div>
     </div>

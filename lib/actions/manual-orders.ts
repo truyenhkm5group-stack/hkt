@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth/session";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
 import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
+import { recordManualPaymentCore, voidManualPaymentCore } from "@/lib/records/order-payments";
 
 /**
  * ═══════════ SERVER ACTION ĐƠN HÀNG TẠO TAY (pilot P0 #3) ═══════════
@@ -66,4 +67,27 @@ export async function voidManualDeliveryAction(orderId: string, input: unknown):
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
   revalidatePath("/products");
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ phiếu giao" };
+}
+
+/**
+ * Ghi CHỨNG TỪ THANH TOÁN (phiếu thu / hoàn tiền) cho đơn tay — chỉ id đơn trong CSDL của phiên; không nhận mã tổ chức.
+ * Tiền đi theo chứng từ, không theo phiếu giao (ORDER_OUTCOME.md mục 11).
+ */
+export async function recordManualPaymentAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await recordManualPaymentCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã ghi chứng từ thanh toán" };
+}
+
+/** Huỷ chứng từ thanh toán ghi nhầm — bắt buộc lý do; chứng từ giữ làm vết, thôi vào mọi phép tính. */
+export async function voidManualPaymentAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await voidManualPaymentCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ chứng từ thanh toán" };
 }

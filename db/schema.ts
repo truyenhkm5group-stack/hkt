@@ -1426,6 +1426,60 @@ export const orderDeliveryNotes = pgTable(
 );
 
 /**
+ * ═══ CHỨNG TỪ THANH TOÁN CỦA ĐƠN TẠO TAY — PHIẾU THU / PHIẾU HOÀN TIỀN (ORDER_OUTCOME.md mục 11, 0181) ═══
+ *
+ * Chiều TIỀN của đơn không qua ĐVVC. Phiếu giao (bảng trên) nói hàng đã tới tay khách; bảng này nói tiền đã vào / ra
+ * bao nhiêu — hai chiều tách bạch (mục 1), không dòng nào suy ra dòng kia. "Tổ chức" của chứng từ là CSDL chứa nó
+ * (đa tổ chức SILO): không có cột mã tổ chức, lượt ghi chỉ chạy trong CSDL của phiên.
+ *
+ *  · CHỈ đơn tạo tay (`order_id LIKE 'erp-%'` — CHECK ở CSDL): đơn Pancake đi theo bảng kê ĐVVC / sao kê.
+ *  · `kind`: `RECEIPT` thu của khách · `REFUND` trả lại khách. Số tiền LUÔN dương; chiều nằm ở `kind`.
+ *  · `method`: `CASH` · `BANK_TRANSFER` · `COD` (shipper CỦA SHOP thu hộ — chỉ tính khi có phiếu thu này) · `OTHER`.
+ *  · Ghi nhầm ⇒ HUỶ (`status = 'VOIDED'` + mốc + người + lý do, CHECK), KHÔNG xoá cứng: phiếu đã huỷ vẫn là vết và
+ *    không vào phép tính nào.
+ *  · Người ghi / người huỷ đi bằng KHOÁ `users.id` (AGENTS 34); cột tên chỉ là ảnh chụp do máy chủ đọc.
+ *  · Trạng thái thanh toán của đơn KHÔNG lưu: tính lúc đọc (`lib/constants/order-payments.ts` + `manual-order-sql.ts`).
+ */
+export const orderPayments = pgTable(
+  "order_payments",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    method: text("method").notNull(),
+    /** Số nguyên VND, > 0. */
+    amount: integer("amount").notNull(),
+    /** Mốc tiền đổi tay (theo chứng từ) — KHÁC `created_at` (lúc nhập vào ERP). Mốc của mọi báo cáo thực thu. */
+    paidAt: ts("paid_at").notNull(),
+    status: text("status").notNull().default("CONFIRMED"),
+    /** Số tham chiếu trên chứng từ: mã giao dịch ngân hàng, số phiếu thu… */
+    reference: text("reference").notNull().default(""),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    voidedAt: ts("voided_at"),
+    voidedByUserId: text("voided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    voidedByName: text("voided_by_name").notNull().default(""),
+    voidReason: text("void_reason"),
+  },
+  (t) => [
+    index("order_payments_order_idx").on(t.orderId),
+    index("order_payments_paid_at_idx").on(t.paidAt),
+    check("order_payments_manual_check", sql`${t.orderId} LIKE 'erp-%'`),
+    check("order_payments_amount_check", sql`${t.amount} > 0`),
+    check("order_payments_kind_check", sql`${t.kind} IN ('RECEIPT', 'REFUND')`),
+    check("order_payments_method_check", sql`${t.method} IN ('CASH', 'BANK_TRANSFER', 'COD', 'OTHER')`),
+    check(
+      "order_payments_void_check",
+      sql`(${t.status} = 'CONFIRMED' AND ${t.voidedAt} IS NULL AND ${t.voidReason} IS NULL) OR (${t.status} = 'VOIDED' AND ${t.voidedAt} IS NOT NULL AND length(btrim(coalesce(${t.voidReason}, ''))) >= 3)`,
+    ),
+  ],
+);
+
+/**
  * ═══ SỔ ĐƠN CHỜ HÀNG (`lib/alerts/stock-wait-log.ts`) ═══
  *
  * Phép phân bổ thiếu hàng (`allocateStock`) chỉ trả lời "BÂY GIỜ đơn nào chờ hàng". Không ghi lại thì

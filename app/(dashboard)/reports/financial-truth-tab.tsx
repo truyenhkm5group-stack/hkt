@@ -41,8 +41,8 @@ export async function FinancialTruthTab({ period }: { period: Period }) {
           value={<Money value={f.cash.total} />}
           icon={Wallet}
           tone="green"
-          note={`Bảng kê ${formatVND(f.cash.received)} + khách chuyển trước ${formatVND(f.cash.prepaid)}`}
-          hint="Đây mới là tiền trong tài khoản."
+          note={`Bảng kê ${formatVND(f.cash.received)} + khách chuyển trước ${formatVND(f.cash.prepaid)}${f.cash.manualReceiptDocs > 0 ? ` + thực thu đơn tay ${formatVND(f.cash.manualReceipts)} (${formatNumber(f.cash.manualReceiptDocs)} chứng từ)` : ""}`}
+          hint="Đây mới là tiền trong tài khoản. Thực thu đơn tay = phiếu thu − phiếu hoàn tiền còn hiệu lực, theo MỐC TIỀN trên chứng từ (không theo ngày lên đơn / ngày giao)."
         />
         <MetricCard
           label="COD Viettel Post đang cầm"

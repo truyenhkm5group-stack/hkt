@@ -10,7 +10,7 @@ import type { Period } from "@/lib/search-params";
 import { memo } from "@/lib/cache";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
-import { MANUAL_ORDER_DELIVERED, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
+import { MANUAL_ORDER_DELIVERED, MANUAL_ORDER_PAID, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
 const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
@@ -474,8 +474,10 @@ export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   -- Đơn tay đã giao bằng phiếu ký nhận: giao là SỰ THẬT, tiền thì CHƯA XÁC MINH (G-ORDER, ORDER_OUTCOME.md mục 11).
   -- Không có nhánh này thì DELIVERY_SIGNAL (stage 'DELIVERED') + trần tiền 0 ⇒ kết luận 'RETURNED' — sai cả hai chiều.
-  -- ERP chưa có chứng từ thanh toán cho đơn tay ⇒ luôn 'UNVERIFIED' tới ngày có.
-  when ${s.id} is null and ${MANUAL_ORDER_DELIVERED} then 'UNVERIFIED'
+  -- Tiền của đơn tay ĐÃ XÁC MINH chỉ khi CHỨNG TỪ THANH TOÁN (order_payments, phiếu còn hiệu lực, thu − hoàn) đủ số khách
+  -- phải trả ⇒ 'DELIVERED'. Thiếu / một phần / đã hoàn ⇒ 'UNVERIFIED'. Không áp ngưỡng 50K/100K: đó là luật của bảng kê
+  -- ĐVVC (bưu tá nhập lại doanh thu), không phải của chứng từ shop tự thu.
+  when ${s.id} is null and ${MANUAL_ORDER_DELIVERED} then (case when ${MANUAL_ORDER_PAID} then 'DELIVERED' else 'UNVERIFIED' end)
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   -- Tiền KHÔNG BAO GIỜ được suy ra trạng thái giao hàng: vận đơn còn đang đi vẫn là ĐANG GIAO
   -- dù đã thu đủ tiền. Xem docs/business-rules/ORDER_OUTCOME.md.

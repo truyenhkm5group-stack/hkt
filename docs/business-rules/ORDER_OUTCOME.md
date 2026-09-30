@@ -93,7 +93,8 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 | `DELIVERED` | chưa đủ chứng từ / UNKNOWN / PARTIAL / DISPUTED | `DELIVERED` ở `ORDER_OUTCOME`, **`UNVERIFIED`** ở `ORDER_OUTCOME_VERIFIED` |
 | chỉ Pancake báo PAID / DELIVERED, không có chứng từ ĐVVC | bất kỳ | **không được kết luận `DELIVERED`** |
 | **không có mã vận đơn, không mã tra cứu, không sự kiện ĐVVC** | bất kỳ, kể cả đã thu > 100K | **`UNKNOWN`** — không phải `IN_TRANSIT`, không phải `DELIVERED` |
-| **đơn tạo tay (`erp-`), không vận đơn, có phiếu giao ký nhận còn hiệu lực** (mục 11) | bất kỳ — phiếu giao KHÔNG phải chứng từ tiền | **`DELIVERED`**; tiền: `UNVERIFIED` cho tới khi có chứng từ thanh toán |
+| **đơn tạo tay (`erp-`), không vận đơn, có phiếu giao ký nhận còn hiệu lực** (mục 11) | bất kỳ — phiếu giao KHÔNG phải chứng từ tiền | **`DELIVERED`**; tiền: `UNVERIFIED` cho tới khi CHỨNG TỪ THANH TOÁN (`order_payments`) thu đủ ⇒ `DELIVERED` ở `ORDER_OUTCOME_VERIFIED` |
+| đơn tạo tay, có chứng từ thu đủ nhưng **chưa có phiếu giao** | đã thu đủ | như cũ: `NOT_SHIPPED` — tiền KHÔNG bao giờ suy ra giao hàng |
 | đơn tạo tay, chưa có phiếu giao | bất kỳ | như cũ: `NOT_SHIPPED` (huỷ ⇒ `CANCELLED`) — không bao giờ `DELIVERED` |
 
 Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 50.000, `maxCodForFakeDelivery`
@@ -129,6 +130,7 @@ vào tồn bán được. `RETURNING` là hàng đang trên đường về — t
 - Để refund hay đối soát thanh toán ghi đè sự kiện logistics.
 - Coi `501` của chiều hoàn là giao thành công.
 - Suy "đã thu tiền" / doanh thu thực thu / `payment_status` từ phiếu giao có ký nhận của đơn tay (mục 11).
+- Suy "đã giao" từ chứng từ thanh toán của đơn tay, hoặc cộng chứng từ đã HUỶ vào bất kỳ con số tiền nào (mục 11).
 - Sửa giá trị kỳ vọng của contract test để CI xanh.
 
 Trạng thái vận đơn thô vẫn được dùng cho **màn hình theo dõi hành trình** và **chỉ số thời gian
@@ -151,7 +153,7 @@ Ba chiều vẫn tách bạch (mục 1), chỉ khác NGUỒN của chiều logis
 | Chiều | Đơn tay: nguồn sự thật | Kết luận |
 |---|---|---|
 | **Logistics** | **Phiếu giao có ký nhận** còn hiệu lực (`order_delivery_notes`, `voided_at IS NULL`): mốc người nhận ký, tên người ký, người ghi (khoá `users.id`) | Có phiếu ⇒ `DELIVERED` — ngang hàng mã cuối `501` chiều đi của ĐVVC. Chưa có phiếu ⇒ CHƯA giao (`NOT_SHIPPED` như trước; huỷ ⇒ `CANCELLED`) — không suy từ gì khác |
-| **Payment / doanh thu** | Chứng từ thanh toán — KHÔNG phải phiếu giao | Phiếu giao **không** chứng minh đã thu tiền. Chưa có chứng từ ⇒ **chưa xác minh** (`UNVERIFIED` ở `ORDER_OUTCOME_VERIFIED`), không phải 0 và không phải "đã thu". Hôm nay ERP chưa có đường ghi chứng từ thanh toán cho đơn tay, nên mọi đơn tay đã giao đều là `UNVERIFIED` |
+| **Payment / doanh thu** | **Chứng từ thanh toán** (`order_payments`, 0181) — KHÔNG phải phiếu giao | Phiếu giao **không** chứng minh đã thu tiền. Chưa có chứng từ ⇒ **chưa xác minh** (`UNVERIFIED` ở `ORDER_OUTCOME_VERIFIED`), không phải 0 và không phải "đã thu". Chứng từ còn hiệu lực thu đủ số khách phải trả ⇒ tiền **đã xác minh** (mục 11.1) |
 | **Inventory** | Phiếu giao có ký nhận | Giao thành công ⇒ hàng ĐÃ rời kho: vào "đã xuất" (tồn thực tế giảm), thôi giữ ở khả dụng. Không lập phiếu XUẤT TAY cho đơn tay nữa — làm cả hai là trừ hai lần |
 
 Hệ quả bắt buộc:
@@ -172,3 +174,34 @@ khi xác nhận giao. ERP KHÔNG tự sửa dữ liệu kho. Trang đơn nêu ph
 kho lập MỘT phiếu **Điều chỉnh tăng** (`ADJUSTMENT`, số dương) đúng bằng số lượng của phiếu ISSUE đó,
 tham chiếu ghi `hoàn phiếu xuất <mã phiếu> — đơn <mã đơn> đã xác nhận giao`, rồi mới (hoặc ngay sau khi)
 xác nhận giao. Phiếu ISSUE cũ giữ nguyên làm vết.
+
+### 11.1. Chứng từ thanh toán của đơn tay (chủ nền tảng yêu cầu 30/09/2026)
+
+> «Actual Revenue phải dựa trên payment evidence phù hợp, không tự coi Delivered = Paid. Không hard-code cho khách nào.»
+
+**Nguồn sự thật của chiều tiền đơn tay** là bảng `order_payments` trong CSDL của tổ chức (SILO — "tổ chức" của một chứng
+từ là CSDL chứa nó). Mỗi dòng là MỘT chứng từ: loại (`RECEIPT` thu của khách · `REFUND` trả lại khách), phương thức
+(`CASH` · `BANK_TRANSFER` · `COD` · `OTHER`), số tiền nguyên dương, **mốc tiền đổi tay** (`paid_at`), số tham chiếu, ghi chú,
+người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ đơn `erp-` nhận chứng từ (CHECK ở CSDL); đơn Pancake
+/ đơn có vận đơn đi theo bảng kê ĐVVC như mục 1–10.
+
+- **TIỀN ĐÃ XÁC MINH của đơn tay = Σ phiếu THU − Σ phiếu HOÀN, chỉ chứng từ `CONFIRMED`.** Phiếu đã huỷ không vào phép
+  tính nào; phiếu hoàn LUÔN trừ.
+- **Trạng thái thanh toán của đơn** tính lúc đọc, không lưu cột (R = Σ thu, F = Σ hoàn, net = R − F, D = số khách phải trả
+  = tiền hàng sau chiết khấu + phí ship): `UNPAID` (R = F = 0 — chưa có chứng từ) · `REFUNDED` (F > 0 và net ≤ 0) · `PAID`
+  (net ≥ max(D, 1); net > D vẫn là `PAID`, phần dư hiện riêng là **thu thừa** để người xử lý) · `PARTIALLY_PAID` (còn lại).
+  Đơn không tạo tay KHÔNG có trạng thái này — hiển thị `N/A`, không bao giờ `UNPAID`.
+- **Delivered KHÔNG BAO GIỜ = Paid, Paid KHÔNG BAO GIỜ = Delivered.** `ORDER_OUTCOME` (logistics) không đọc chứng từ tiền.
+  `ORDER_OUTCOME_VERIFIED` của đơn tay có phiếu giao: `PAID` ⇒ `DELIVERED`; mọi trạng thái khác ⇒ `UNVERIFIED`. Không áp
+  ngưỡng 50K / 100K cho chứng từ đơn tay — đó là luật đọc bảng kê ĐVVC (bưu tá nhập lại doanh thu), không phải của chứng
+  từ shop tự thu.
+- **COD của đơn tay** = tiền shipper CỦA SHOP thu hộ khi giao — chỉ tính khi có phiếu THU phương thức `COD`. Đơn đã có vận
+  đơn không nhận phiếu `COD` tay (COD của ĐVVC đi theo bảng kê; ghi thêm là đếm hai lần).
+- **Luật ghi**: thu trước khi giao hợp lệ (không phụ thuộc phiếu giao); đơn đã HUỶ chỉ nhận phiếu HOÀN; phiếu HOÀN không vượt
+  số đang thu ròng; HUỶ phiếu THU không được làm số hoàn vượt số thu; huỷ bắt buộc lý do, không xoá cứng; có nhật ký.
+- **Doanh thu thực thu** (mốc khai rõ theo AGENTS 58): đơn tay được cộng theo Σ chứng từ còn hiệu lực có **`paid_at`
+  trong kỳ** — mốc của chứng từ, không phải ngày lên đơn hay ngày giao. Hôm nay đúng MỘT chỗ đọc: dòng «Thực thu đơn tay»
+  trong **Tiền thực nhận** của báo cáo Chân lý tài chính (`getFinancialTruth`). Các tổng tiền dựng trên
+  `ORDER_OUTCOME = 'DELIVERED'` (doanh thu giao thành công, lợi nhuận, marketer, lương / hoa hồng…) VẪN loại đơn tay
+  (`REVENUE_RECOGNIZED_ON_DELIVERY`) — nợ P1 ghi ở `docs/platform/pilot-readiness.md` mục 4.
+- Tổ chức nhà (VNX) không đổi một con số: không đơn Pancake nào mang được chứng từ.

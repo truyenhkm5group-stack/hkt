@@ -269,7 +269,7 @@ export async function getCustomerDetail(id: string) {
       where: eq(o.customerId, customer.id),
       orderBy: [desc(o.insertedAt)],
       limit: 100,
-      columns: { id: true, systemId: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true },
+      columns: { id: true, systemId: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, shippingFee: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true },
       with: { attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, carrier: true, vtpStatusName: true, codStatus: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 3 } },
     }),
     db

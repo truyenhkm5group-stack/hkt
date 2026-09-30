@@ -4,6 +4,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import type { ListParams } from "@/lib/search-params";
@@ -96,6 +97,7 @@ export async function listOrders(params: ListParams) {
         shipProvince: true,
         source: true,
         totalPriceAfterDiscount: true,
+        shippingFee: true,
         moneyToCollect: true,
         cogs: true,
         itemsCount: true,
@@ -124,6 +126,11 @@ export async function listOrders(params: ListParams) {
     cảnh báo (`assessCustomerRisk`), chỉ khác là ở đây dùng số Pancake của khách (không tra thêm lịch
     sử ERP theo SĐT cho từng dòng); chi tiết đơn vẫn có bản đầy đủ.
   */
+  /*
+    TRẠNG THÁI THANH TOÁN CỦA ĐƠN TAY — chứng từ `order_payments`, tính lúc đọc (ORDER_OUTCOME.md mục 11). Một câu gộp cho
+    các đơn tay CỦA TRANG; trang không có đơn tay (tổ chức nhà) ⇒ không chạy câu nào. Đơn khác ⇒ `null` (không áp dụng).
+  */
+  const payStates = await manualPaymentStates(rowsRaw);
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
@@ -133,7 +140,7 @@ export async function listOrders(params: ListParams) {
       Cột tiền của trang này đi qua `PRIMARY_ATTEMPT` ở tầng SQL; `vanDonDaiDien` là bản TypeScript
       của đúng luật ấy. Để mỗi cột tự chọn lần gửi là mở đường cho dòng nói hai điều khác nhau.
     */
-    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null };
+    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

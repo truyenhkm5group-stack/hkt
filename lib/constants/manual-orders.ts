@@ -16,9 +16,10 @@
  *    stage `DELIVERED`, `ORDER_OUTCOME` = `DELIVERED` (nhánh đầu bảng, chỉ đơn `erp-` không vận đơn), hàng ra khỏi kho
  *    (`ORDER_LEFT_WAREHOUSE`: tồn thực tế giảm, thôi giữ ở khả dụng). Chưa có phiếu ⇒ như trước: `NOT_SHIPPED`, huỷ ⇒
  *    `CANCELLED`. Trạng thái chọn được ở form tạo / sửa vẫn chỉ là các bước TRƯỚC khi giao — "Đã nhận" chỉ tới bằng phiếu.
- *  · TIỀN KHÔNG ĐI THEO PHIẾU GIAO: phiếu không chứng minh đã thu. Doanh thu / thanh toán theo chứng từ thanh toán —
- *    đơn tay đã giao đứng ngoài mọi tổng TIỀN dựng trên DELIVERED (`REVENUE_RECOGNIZED_ON_DELIVERY`) và là `UNVERIFIED` ở
- *    `ORDER_OUTCOME_VERIFIED`. Không có "Đã thu tiền".
+ *  · TIỀN KHÔNG ĐI THEO PHIẾU GIAO: phiếu không chứng minh đã thu. Tiền theo CHỨNG TỪ THANH TOÁN (`order_payments`, 0181 —
+ *    `lib/constants/order-payments.ts`, ORDER_OUTCOME.md mục 11.1): thu đủ ⇒ `DELIVERED` ở `ORDER_OUTCOME_VERIFIED`, còn lại
+ *    `UNVERIFIED`. Đơn tay đã giao vẫn đứng ngoài mọi tổng TIỀN dựng trên DELIVERED (`REVENUE_RECOGNIZED_ON_DELIVERY`);
+ *    thực thu đơn tay đi theo `paid_at` ở dòng «Thực thu đơn tay» của Chân lý tài chính.
  *  · TỒN KHO: tạo / sửa đơn không ghi phiếu kho nào (luật 10). Đơn "Đã xác nhận" giữ hàng ở cột khả dụng như mọi đơn đã
  *    chốt; XÁC NHẬN GIAO mới đưa hàng ra khỏi kho. KHÔNG lập phiếu XUẤT TAY cho đơn tay — làm cả hai là trừ hai lần
  *    (lối "Lập phiếu xuất kho" của bản trước đã bỏ). Huỷ phiếu giao (ghi nhầm, bắt buộc lý do) ⇒ đơn về "Đã xác nhận".
