@@ -27,6 +27,7 @@ import { AI_PROFILE_SETTING_KEY } from "@/lib/blueprints/types";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
+import { notifySalesChatAiDown, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
@@ -223,13 +224,23 @@ async function webRateProblem(conv: ConvRow): Promise<string | null> {
  */
 async function notifyProviderFailure(lastError: string | null, now: Date): Promise<void> {
   const e = salesBotError(lastError);
-  if (!e?.notify) return;
-  const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
-  const db = await getDb();
-  await db
-    .insert(schema.notifications)
-    .values({ kind: "SYSTEM", severity: "critical", title: "Chatbot bán hàng ngừng trả lời khách", body: `${e.label}. Trong lúc chưa sửa, mọi khách nhắn trang chat đều nhận câu «em đang gặp trục trặc».`, href: "/ai/sales-chatbot", entityType: "SALES_CHAT", entityId: e.kind, dedupeKey: `sales-chat:provider:${e.kind}:${day}`, occurredAt: now })
-    .onConflictDoNothing({ target: schema.notifications.dedupeKey });
+  if (e?.notify) await notifySalesChatAiDown(e.kind, e.label, now);
+}
+
+/**
+ * AI KHÔNG TRẢ LỜI ĐƯỢC ⇒ CHUYỂN NGƯỜI (UAT U29). Khách chỉ nhận câu xin lỗi + câu chuyển người shop đã khai; hội thoại
+ * sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho hội thoại đó (cùng khoá với công cụ `handoff_to_human`).
+ * Khung THỬ không sinh thông báo — nó là của chủ shop, không có khách thật nào chờ.
+ */
+export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
+
+function aiDownReply(cfg: SalesChatbotConfig): string {
+  return `Xin lỗi, em đang gặp trục trặc. ${cfg.handoff.message}`;
+}
+
+async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: ChatChannel, now: Date): Promise<void> {
+  if (channel !== "WEB") return;
+  await notifySalesChatHandoff(conv.id, AI_DOWN_HANDOFF_REASON, state.customer, now);
 }
 
 /**
@@ -276,15 +287,26 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       }
     }
     const org = await currentOrganization();
+    // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
+    // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
+    const blocked = async (key: string, ownerLabel: string, internal: string): Promise<TurnResult> => {
+      if (opts.channel !== "WEB") return { ok: false, error: internal };
+      const st = (conv.state ?? {}) as ChatState;
+      await reply(conv, seq, aiDownReply(cfg));
+      await bump({ turns: conv.turns + 1, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON });
+      await notifyAiDownHandoff(conv, st, opts.channel, now).catch(() => undefined);
+      await notifySalesChatAiDown(key, ownerLabel, now).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    };
     const killed = await aiKillSwitchDenial(org.code);
-    if (killed) return { ok: false, error: `AI đang tắt: ${killed}` };
+    if (killed) return blocked("DISABLED", "AI đang bị người vận hành nền tảng tạm tắt cho tổ chức này — liên hệ người vận hành", `AI đang tắt: ${killed}`);
     const quota = await checkAiQuota(org.code, "BYOK");
     if (!quota.ok) {
       await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
-      return { ok: false, error: quota.error };
+      return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
     }
     const prov = await providerFor(cfg);
-    if (!prov.ok) return { ok: false, error: prov.error };
+    if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
     const orgRow = await findOrganization(org.code);
     const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel);
     const tools = toolDefsFor(cfg);
@@ -336,7 +358,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       status = "ERROR";
       lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
       if (error instanceof SeqConflict) throw error;
-      await reply(conv, seq++, "Xin lỗi, em đang gặp trục trặc — anh/chị nhắn lại sau ít phút hoặc để lại SĐT, nhân viên sẽ gọi lại ạ.").catch(() => undefined);
+      await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
+      state = { ...state, handoff: { reason: AI_DOWN_HANDOFF_REASON, at: now.toISOString() } };
+      await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
       await notifyProviderFailure(lastError, now).catch(() => undefined);
     }
     await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);

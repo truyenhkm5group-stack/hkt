@@ -282,6 +282,16 @@ async function resolveSessionUser(session: PhienDaDoc): Promise<ResolvedUser> {
     Đó chính là lý do luật so với `lgn` chứ không so với `iat`.
   */
   if (sessionRevoked(session.loginAtSec, user.sessionInvalidBefore)) return { denied: "REVOKED" };
+  return { user: await sessionUserOfRow(user, templates, snapshots, platform) };
+}
+
+type UserRowForAccess = { id: string; email: string; name: string; role: Role; permissions: string[] | null; accessRoleId: string | null; positionId: string | null; dataScope: string | null };
+
+/**
+ * Dòng `users` ⇒ người dùng với quyền đã cộng đủ ba chiều. ĐƯỜNG DUY NHẤT: phiên đăng nhập và việc chọn người nhận tin
+ * (`activeUserIdsWhoCan`) cùng đi qua đây, nên "ai được thấy" và "ai được báo" không thể lệch nhau.
+ */
+async function sessionUserOfRow(user: UserRowForAccess, templates: RolePermissionMap, snapshots: Record<string, string[]>, platform: Required<Pick<SessionUser, "organization" | "modules">>): Promise<SessionUser> {
   const scope = normalizeScope(user.dataScope);
   const known = snapshots[user.id] ?? null;
 
@@ -293,17 +303,15 @@ async function resolveSessionUser(session: PhienDaDoc): Promise<ResolvedUser> {
   */
   if (scope === "ALL" && !user.accessRoleId) {
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        permissions: resolvePermissions(user.role, user.permissions, templates, known),
-        scope,
-        departmentCodes: [],
-        positionId: user.positionId ?? null,
-        ...platform,
-      },
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      permissions: resolvePermissions(user.role, user.permissions, templates, known),
+      scope,
+      departmentCodes: [],
+      positionId: user.positionId ?? null,
+      ...platform,
     };
   }
 
@@ -318,18 +326,37 @@ async function resolveSessionUser(session: PhienDaDoc): Promise<ResolvedUser> {
     known,
   });
   return {
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      permissions: access.permissions,
-      scope: access.scope,
-      departmentCodes: access.departmentCodes,
-      positionId: user.positionId ?? null,
-      ...platform,
-    },
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    permissions: access.permissions,
+    scope: access.scope,
+    departmentCodes: access.departmentCodes,
+    positionId: user.positionId ?? null,
+    ...platform,
   };
+}
+
+/**
+ * Tài khoản ĐANG BẬT của tổ chức hiện hành mà `can(người đó, quyền)` đúng — dùng để chọn người nhận tin trong hộp thư cá
+ * nhân (không phụ thuộc module «Cần xử lý»). Hỏi đúng `can()` mà mọi trang dùng, trên người dùng dựng bằng đúng đường của
+ * phiên đăng nhập — không tính quyền lần thứ hai.
+ */
+export async function activeUserIdsWhoCan(permission: Permission): Promise<string[]> {
+  const db = await getDb();
+  const [rows, templates, snapshots, platform] = await Promise.all([
+    db
+      .select({ id: schema.users.id, email: schema.users.email, name: schema.users.name, role: schema.users.role, permissions: schema.users.permissions, accessRoleId: schema.users.accessRoleId, positionId: schema.users.positionId, dataScope: schema.users.dataScope })
+      .from(schema.users)
+      .where(eq(schema.users.active, true)),
+    loadRoleTemplates(),
+    loadPermissionSnapshots(),
+    platformOfSession(),
+  ]);
+  const out: string[] = [];
+  for (const row of rows) if (can(await sessionUserOfRow(row, templates, snapshots, platform), permission)) out.push(row.id);
+  return out;
 }
 
 /** Tổ chức + module bật của phiên hiện hành — cùng ngữ cảnh mà `getDb()` vừa dùng để tra người dùng. */

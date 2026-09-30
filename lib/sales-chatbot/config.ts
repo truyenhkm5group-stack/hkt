@@ -155,7 +155,7 @@ export type ChatView = {
  * `notify` = lớp KHÔNG tự khỏi (hết credit · khoá bị từ chối) — chỉ chúng mới đáng một thông báo cho chủ shop.
  */
 export const SALES_BOT_ERROR_LABEL: Record<AiErrorClass, string> = {
-  CREDIT: "Tài khoản AI của shop hết tiền (credit) — nạp tiền ở trang của nhà cung cấp AI",
+  CREDIT: "Tài khoản AI của shop đã hết tiền — nạp thêm ở trang của nhà cung cấp AI",
   AUTH: "Khoá AI bị từ chối (sai, hết hạn hoặc bị thu hồi) — thay khoá ở Cài đặt → Kết nối",
   RATE_LIMIT: "Nhà cung cấp AI đang quá tải / quá hạn mức — thường tự khỏi sau vài phút",
   OTHER: "Nhà cung cấp AI trả lỗi",
