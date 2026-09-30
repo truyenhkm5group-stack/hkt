@@ -428,7 +428,7 @@ Giới hạn, nói thẳng: một CSDL mỗi tuần. Có N tổ chức thì mỗ
 đạt gần nhất quá 35 ngày (`BACKUP_DRILL_MAX_AGE_DAYS`) ⇒ từ tổ chức thứ 6 trở đi cần tăng nhịp (nhiều CSDL / lượt, hoặc
 thêm ngày) — một quyết định vận hành, không tự đổi.
 
-### 9.4 PITR cho cả cụm `erp-db` — ĐÃ TRIỂN KHAI TRONG MÃ (chờ deploy trong cửa sổ bảo trì)
+### 9.4 PITR cho cả cụm `erp-db` — ĐÃ BẬT TRÊN PRODUCTION (30/09/2026 22:52, #421; diễn tập ĐẠT 01/10/2026)
 
 Quyết định của chủ nền tảng (30/09/2026), nguyên văn: «PITR POSTGRESQL: Chuẩn bị và thực hiện PITR theo phương án đã
 audit. Yêu cầu: backup hiện tại phải healthy trước khi thay đổi; downtime tối thiểu; không mất migration/data; verify
@@ -530,10 +530,19 @@ connections` trong `docker logs erp-db`.
 
 | | Trên máy | Ngoài máy (`gcrypt:pitr/`) | Nguồn |
 |---|---|---|---|
-| RPO nhà + mọi tổ chức (PITR cấp cụm) | ≤ `archive_timeout` = **15 phút** + vài giây lưu | ≤ 15 + 15 phút (`push-wal`) ≈ **30 phút** + thời gian tải | THIẾT KẾ; số ĐO = `now − last_archived_time` của `pitr-status` — **điền sau bước 4/7** |
+| RPO nhà + mọi tổ chức (PITR cấp cụm) | ≤ `archive_timeout` = **15 phút** + vài giây lưu | ≤ 15 + 15 phút (`push-wal`) ≈ **30 phút** + thời gian tải | ĐO 30/09–01/10: `now − last_archived_time` 1–14 phút qua 6 lượt `pitr-status`; 41 đoạn / ~9 giờ, 0 lỗi; đẩy ngoài máy mỗi 15 phút OK |
 | RPO khi lưu WAL hỏng | tăng tới khi sửa — `pitr-status` ĐỎ khi > 30 phút (2 chu kỳ) | như bên trái | THIẾT KẾ |
-| RTO phần máy (khôi phục tới một mốc) | giải nén + phục hồi — **CHƯA ĐO: điền dòng `RTO phần máy` của bước 8** | + tải bản nền + WAL từ Drive | ĐO ở bước 8 |
+| RTO phần máy (khôi phục tới một mốc) | ĐO 01/10 (ops `pitr-drill`, bản nền 259 MB, container tạm 384 MB): giải nén 10 s · pha trước 6 s · phục hồi tới mốc 2 s · **tổng 18 s** | + tải bản nền + WAL từ Drive | ĐO ở bước 8 |
 | RTO cả quy trình nhà | runbook §9.4.7 + §10.2 — ƯỚC LƯỢNG 1–2 giờ nếu cụm vài GB | + 30–60 phút khi mất VPS | ƯỚC LƯỢNG |
+
+**Lượt bật thật (30/09/2026 → 01/10/2026):** `backup-status` xanh (bản đêm 02:17, Drive OK) → `backup` tay 21:35 (148 MB +
+2 CSDL tổ chức, Drive OK) → deploy #421: `erp-db` Recreate 22:52:58 → Started 22:52:59, bộ dò `/api/health` mỗi 2 giây
+thấy **một** lượt lỗi 500 (gián đoạn CSDL ≈ 2–4 giây; `erp-app` dựng lại 22:54–22:55 như mọi deploy, ≈ 8–10 giây) → migration
+182/182 đủ, smoke 120/120 → `pitr-status` archiver chạy, 0 lỗi → `pitr-basebackup` 259 MB, Drive OK → `pitr-mark` →
+`pitr-drill` hai lượt SKIPPED vì RAM (ngưỡng 700 MB dùng chung với restore-drill nhà; VPS còn 690–700 MB) ⇒ #424 trần RAM riêng
+384 MB / ngưỡng 512 MB → `pitr-drill` 01/10 06:54 **OK hai vế** (dòng đánh dấu VẮNG ở mốc trước, CÓ ở mốc sau; orders 4.097 ·
+shipments 3.198 · 183 migration ở bản khôi phục) → `verify` ĐẠT (smoke 121/121). WAL nén ≈ 2,7 MB / đoạn 16 MB ⇒ ≈ 300 MB /
+ngày trên máy (trần kho 8.192 MB dư xa).
 
 Bản đêm `pg_dump -Fc` GIỮ NGUYÊN: nó là đường khôi phục CHỌN LỌC (một bảng, một tổ chức) mà PITR cấp cụm không cho, và là
 đường lui khi chuỗi WAL đứt.
