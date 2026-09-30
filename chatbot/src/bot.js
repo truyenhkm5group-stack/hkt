@@ -9,7 +9,7 @@ import { catalog } from "./catalog.js";
 import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
-import { extractAdIds, adBotPromptBlock } from "./adpersona.js";
+import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
 import { orderSync, describeOrder, phonesInText } from "./orders.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
@@ -736,7 +736,8 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       t.match(/\bQ\d{3}\b/)?.[0] ||
       String(eff.defaultProduct || "").trim() ||
       String(eff.extraPrompt || "").match(/(?:chủ lực|mặc định)[^\n]{0,60}?\b(Q\d{3})\b/i)?.[1];
-    if (!ma || !catalog.products.some((p) => String(p.code || "").toUpperCase() === ma.toUpperCase())) return t;
+    const test = this.scopedTestProduct(pageId);
+    if (!ma || !(catalog.products.some((p) => String(p.code || "").toUpperCase() === ma.toUpperCase()) || (test && test.code === ma.toUpperCase()))) return t;
     log.info(`[${pageId}] Khoi bao gia khong kem anh -> tu them [[IMG:${ma}]]`);
     return `${t}\n[[IMG:${ma}]]`;
   }
@@ -1123,6 +1124,14 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     return { prompt: this.buildSystemPrompt(pageId, { ...ctx, saleActive: false }), nonSaleModels: mentioned };
   }
 
+  /** Mau test moi cua camp dang ap cho luot xu ly (bot rieng theo quang cao), hoac null. */
+  scopedTestProduct(pageId) {
+    const s = aiScope.getStore();
+    if (!s?.adBot?.test) return null;
+    if (pageId !== undefined && String(s.adBotPageId) !== String(pageId)) return null;
+    return s.adBot.test;
+  }
+
   /** Tach marker [[IMG:ma]] khoi cau tra loi -> { text, imageUrls } */
   extractImageRequests(reply) {
     const refs = [];
@@ -1136,7 +1145,9 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       // [[IMG:ALL]] = tong hop TAT CA mau dang co tren POS (1 anh moi mau, KHONG gioi han so anh, chia nhieu tin)
       const isAll = /^(all|tat ca|tất cả|tatca|tổng hợp|tong hop)$/i.test(ref.trim());
       if (isAll) unlimited = true;
-      const list = isAll ? catalog.referenceImages(10000).map((r) => r.url) : catalog.findImages(ref, config.maxProductImages);
+      // Mau test moi (chua co tren POS): anh lay tu bo anh ERP gui sang theo mau, khong tu danh muc
+      const testList = isAll ? null : testImageRefs(this.scopedTestProduct(), ref);
+      const list = testList || (isAll ? catalog.referenceImages(10000).map((r) => r.url) : catalog.findImages(ref, config.maxProductImages));
       for (const u of list) if (!urls.includes(u)) urls.push(u);
       if (!unlimited && urls.length >= config.maxProductImages) break;
     }
@@ -1154,7 +1165,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
         continue;
       }
       try {
-        const img = await fetchImageAsBase64(url, { maxBytes: 15 * 1024 * 1024 });
+        const img = url.startsWith("adimg:") ? adBots.readImageRef(url) : await fetchImageAsBase64(url, { maxBytes: 15 * 1024 * 1024 });
         if (!img) throw new Error("khong tai duoc anh");
         const ext = img.mimeType.split("/")[1] || "jpg";
         const res = await client.uploadContent(Buffer.from(img.data, "base64"), `product.${ext}`, img.mimeType);
@@ -1378,7 +1389,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       if (!eff.dryRun) await this.deliver(pageId, conversationId, { text: mienShip, type });
       store.setLastHandled(conversationId, last.id);
       // Ghi lai don nhap tren POS thanh mien ship (tong = tien dam)
-      if (eff.orderSync && orderSync.enabled && !eff.dryRun) {
+      if (eff.orderSync && orderSync.enabled && !eff.dryRun && !this.scopedTestProduct(pageId)) {
         const historyText = [...messages.slice(-60).map((m) => `${this.isFromPage(m, pageId) ? "SHOP" : "KHÁCH"}: ${this.messageText(m)}`), `SHOP: ${mienShip}`].join("\n");
         orderSync
           .syncFromConversation({ pageId, pageName: this.pageNames.get(pageId), conversationId, customerName: customerName || "", historyText })
@@ -1721,7 +1732,8 @@ ${eff.afterOrderText.trim()}`;
     // khach gui dia chi sau roi bot tom tat lai (lan nay Gemini khong kem handoff) -> van phai ghi lai vao POS,
     // neu khong don tren POS mai o trang thai "Chua cung cap" dia chi. Ghi lai la an toan: syncFromConversation
     // tim dung don nhap cu theo SDT/hoi thoai roi PUT de cap nhat, khong tao don moi.
-    if (isOrderSummaryReply(reply, handoff) && type === "INBOX" && eff.orderSync && orderSync.enabled) {
+    // Mau test moi chua co tren POS: KHONG ghi don nhap (chu shop: chi len don khi mau thang) — nhan vien lo tu ban tom tat
+    if (isOrderSummaryReply(reply, handoff) && type === "INBOX" && eff.orderSync && orderSync.enabled && !this.scopedTestProduct(pageId)) {
       const historyText = fullMessages
         .slice(-40)
         .map((m) => `${this.isFromPage(m, pageId) ? "SHOP" : "KHÁCH"}: ${this.messageText(m)}`)

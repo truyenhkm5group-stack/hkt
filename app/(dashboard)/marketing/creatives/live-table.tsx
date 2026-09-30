@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Copy, ExternalLink, Loader2, PauseCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ExtendButton, PauseNowButton } from "@/app/(dashboard)/marketing/creatives/live-actions";
+import { ChatTestButton } from "@/app/(dashboard)/marketing/creatives/chat-test";
 import { DailyButton } from "@/app/(dashboard)/marketing/creatives/live-daily";
 import { RepublishButton, type ComposeCtx, type RepublishSource } from "@/app/(dashboard)/marketing/creatives/manual-gen";
 import { MODE_LABEL, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
@@ -295,6 +296,7 @@ export function LiveTable({
           return (
             <div className="flex flex-col items-end gap-1">
               {r.fbAdId ? <DailyButton variantId={r.id} name={r.names.campaign} /> : null}
+              {r.fbAdId ? <ChatTestButton variantId={r.id} /> : null}
               {republish && src ? <RepublishButton v={src} ctx={republish.ctx} winCode={src.productId ? (republish.winCodes[src.productId] ?? null) : null} /> : null}
               {canWrite && r.status === "LIVE" ? <PauseNowButton variantId={r.id} slot={r.slot} /> : null}
               {canWrite && r.verdict === "PROMISING" && !r.dailyBudget ? <ExtendButton variantId={r.id} slot={r.slot} /> : null}

@@ -27,6 +27,8 @@ export async function saveAdBotAction(input: unknown): Promise<Result> {
   const { adId, enabled, productCode, instructions } = parsed.data;
   const config = await getAdBotConfig();
   const before = config.overrides[adId] ?? null;
+  // Mẫu test mới chỉ bật / tắt qua nút Chat test (có bảng kiểm page + bot) — không bật vòng qua trang này.
+  if (before?.test) return { error: "Quảng cáo này là mẫu test mới — chỉnh ở nút Chat test của camp trong Thư viện Media." };
   const next: AdBotConfig = {
     ...config,
     overrides: {

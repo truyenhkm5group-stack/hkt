@@ -155,6 +155,15 @@ export async function handleErpRoutes(req, res, url) {
     }
     return true;
   }
+  if (req.method === "POST" && url.pathname === "/api/erp/ad-images") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      send(200, { ok: true, sha: adBots.saveImage(body), missingImages: adBots.missingImages() });
+    } catch (e) {
+      send(400, { error: e.message });
+    }
+    return true;
+  }
   if (req.method === "POST" && url.pathname === "/api/erp/restart") {
     send(200, { ok: true, restarting: true });
     setTimeout(() => process.exit(0), 300).unref?.();

@@ -88,6 +88,38 @@ const clip = (v, n) =>
     .trim()
     .slice(0, n);
 
+const SHA_RE = /^[a-f0-9]{64}$/;
+const money = (v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1000 && n <= 100_000_000 ? n : null;
+};
+
+/**
+ * MAU TEST MOI (chua co tren POS): ten, ma tam, gia, chat vai, size, uu dai, mau + anh (khoa sha256 cua anh ERP gui).
+ * Thieu ten / ma / gia / chat vai / mau nao -> null: bot khong ban mot mau ma no khong biet gia hay chat vai.
+ */
+export function normalizeTestProduct(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const code = String(raw.code ?? "").trim().toUpperCase();
+  const colors = (Array.isArray(raw.colors) ? raw.colors : [])
+    .map((c) => ({ color: clip(c?.color, 40), sha: String(c?.sha ?? "").toLowerCase() }))
+    .filter((c) => c.color && SHA_RE.test(c.sha))
+    .slice(0, 12);
+  const t = {
+    name: clip(raw.name, 120),
+    code: CODE_RE.test(code) ? code : "",
+    price: money(raw.price),
+    shipFee: raw.shipFee === 0 ? 0 : money(raw.shipFee),
+    comboPrice: money(raw.comboPrice),
+    fabric: clip(raw.fabric, 400),
+    sizes: clip(raw.sizes, 200),
+    offer: clip(raw.offer, 300),
+    colors,
+  };
+  if (!t.name || !t.code || !t.price || !t.fabric || !colors.length) return null;
+  return t;
+}
+
 /** Kiem tra + chuan hoa mot bot ERP gui sang. Hong -> null (khong doan). */
 export function normalizeAdBot(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -105,7 +137,10 @@ export function normalizeAdBot(raw) {
     instructions: clip(raw.instructions, 4000),
     source: clip(raw.source, 40),
     status: clip(raw.status, 40),
+    test: normalizeTestProduct(raw.test),
   };
+  // Mau test moi: ma tam cua mau test la ma mau cua camp
+  if (bot.test) bot.productCode = bot.test.code;
   // Khong mau, khong huong dan -> khong co gi de noi rieng: bo, de hoi thoai chay nhu cu.
   if (!bot.productCode && !bot.instructions) return null;
   return bot;
@@ -146,12 +181,31 @@ export function maskMoney(text) {
     .replace(/\d{4,}\s*(?:đ|₫|vnđ|vnd|đồng)/giu, "[giá]");
 }
 
+const vnd = (n) => `${Number(n).toLocaleString("vi-VN")}đ`;
+
+/** Khoi thong tin MAU TEST MOI — chi dung thong tin nay cho mau nay. */
+export function testProductLines(t) {
+  const gia = [`1 chiếc ${vnd(t.price)}${t.shipFee === 0 ? " (miễn phí ship)" : t.shipFee ? ` + ${vnd(t.shipFee)} phí ship` : ""}`];
+  if (t.comboPrice) gia.push(`2 chiếc ${vnd(t.comboPrice)} (miễn phí ship, được chọn mỗi màu 1 chiếc)`);
+  return [
+    `- Khách bắt đầu nhắn tin sau khi bấm quảng cáo của MẪU MỚI **${t.name}** (mã ${t.code}). Mẫu này CHƯA có trong danh mục sản phẩm: khi nói về mẫu này CHỈ dùng thông tin dưới đây — bỏ qua giá, chất liệu, màu, số size ghi trong khối báo giá chung và hướng dẫn riêng của page (các phần đó là của mẫu khác). Khách chưa nói rõ mẫu nào ("mẫu này", "còn không", "giá sao") thì hiểu là hỏi đúng mẫu ${t.code}.`,
+    `- Giá (chỉ được báo đúng các mức này, không giảm thêm): ${gia.join("; ")}.`,
+    `- Chất vải: ${t.fabric}`,
+    `- Màu đang có: ${t.colors.map((c) => c.color).join(", ")}. Gửi ảnh một màu bằng [[IMG:${t.code}:tên màu]], gửi ảnh mọi màu bằng [[IMG:${t.code}]]. Màu khác ngoài danh sách: nói rõ chưa có.`,
+    t.sizes ? `- Size: ${t.sizes}. Tư vấn size theo bảng size chung của page như các mẫu nữ khác.` : `- Tư vấn size theo bảng size chung của page như các mẫu nữ khác.`,
+    t.offer ? `- Ưu đãi của camp: ${t.offer}. Không hứa ưu đãi nào khác.` : `- Không hứa ưu đãi hay quà tặng nào ngoài giá ở trên.`,
+    `- Kịch bản chốt đơn như bình thường; bản tóm tắt chốt đơn ghi đúng mã ${t.code}, tên mẫu, màu, size.`,
+  ];
+}
+
 /** Khoi prompt rieng cho camp. */
 export function adBotPromptBlock(bot) {
   if (!bot) return "";
   const ten = bot.campaignName || bot.adName || `quảng cáo ${bot.adId}`;
   const lines = [`## KHÁCH ĐẾN TỪ QUẢNG CÁO TEST — BOT RIÊNG CỦA CAMP "${ten}"`];
-  if (bot.productCode) {
+  if (bot.test) {
+    lines.push(...testProductLines(bot.test));
+  } else if (bot.productCode) {
     const mau = `${bot.productCode}${bot.productName ? ` — ${bot.productName}` : ""}`;
     lines.push(
       `- Khách bắt đầu nhắn tin sau khi bấm quảng cáo của mẫu **${mau}**. Khi khách chưa nói rõ mẫu nào ("mẫu này", "còn không", "giá sao", gửi ảnh quảng cáo), hiểu là khách đang hỏi ĐÚNG mẫu ${bot.productCode}: tư vấn, báo giá, gửi ảnh và lên đơn theo mẫu ${bot.productCode}.`,
@@ -167,4 +221,16 @@ export function adBotPromptBlock(bot) {
     lines.push(`- Hướng dẫn riêng của camp này (ưu tiên hơn hướng dẫn chung nếu mâu thuẫn):`, bot.instructions);
   }
   return `\n\n${lines.join("\n")}`;
+}
+
+/** Anh cua mau test theo tham chieu [[IMG:...]]: "MA" = moi mau, "MA:mau" / "MA mau" = mot mau. Khong khop -> null. */
+export function testImageRefs(test, ref) {
+  if (!test) return null;
+  const phang = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[\s_-]+/g, "");
+  const raw = String(ref || "").trim();
+  const m = raw.match(/^([^:\s]+)(?:[:\s]+(.+))?$/);
+  if (!m || phang(m[1]) !== phang(test.code)) return null;
+  const mau = m[2] ? phang(m[2]) : "";
+  const list = mau ? test.colors.filter((c) => phang(c.color) === mau || phang(c.color).includes(mau) || mau.includes(phang(c.color))) : test.colors;
+  return list.map((c) => `adimg:${c.sha}`);
 }

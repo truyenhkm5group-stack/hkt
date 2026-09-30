@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildAdBots, DEFAULT_AD_BOT_CONFIG, productCodeOf, saveAdBotSchema, type AdBotSourceRow } from "@/lib/constants/chatbot-ad-bots";
+import { AD_TEST_IMAGE_LIMITS, adTestReadiness, buildAdBots, DEFAULT_AD_BOT_CONFIG, pageIdOfPost, productCodeOf, saveAdBotSchema, testImageGate, testImageSpendToday, testProductMissing, type AdBotSourceRow, type AdTestProduct, type ReadinessInput } from "@/lib/constants/chatbot-ad-bots";
 
 const row = (x: Partial<AdBotSourceRow> & { adId: string }): AdBotSourceRow => ({
   source: "CREATIVE_TEST",
@@ -84,6 +84,51 @@ export async function testChatbotAdBots() {
   // Cửa bot nhận gói: có đường PUT/GET, nằm SAU phép kiểm ADMIN_TOKEN (erp-entry + admin đều kiểm trước khi gọi).
   const routes = readFileSync("chatbot/src/erp-import.js", "utf8");
   assert.ok(routes.includes('url.pathname === "/api/erp/ad-bots"'), "bot phải có cửa /api/erp/ad-bots");
+  // ── Mẫu test mới (nút Chat test) ──
+  const sha = "a".repeat(64);
+  const test: AdTestProduct = { name: "Đầm da báo", code: "test-db01", price: 459000, shipFee: 25000, comboPrice: null, fabric: "Thun lạnh", sizes: "", offer: "", colors: [{ color: "Đỏ", imageId: "img1", sha, source: "AI", createdAt: "2026-10-01T00:00:00Z" }] };
+  assert.deepEqual(testProductMissing(test), []);
+  assert.deepEqual(testProductMissing({ ...test, price: null, fabric: " ", colors: [] }), ["giá 1 chiếc", "chất vải", "ít nhất một màu có ảnh"], "giá CHƯA NHẬP là thiếu, không phải 0đ");
+  const meta = { updatedByUserId: "u1", updatedByName: "A", updatedAt: "2026-10-01T00:00:00Z" };
+  const draft = buildAdBots([row({ adId: "120000000000000009", productId: null, productCode: null, productName: null })], { enabled: true, overrides: { "120000000000000009": { ...meta, enabled: false, test } } });
+  assert.equal(draft.lines[0].state, "TEST_DRAFT");
+  assert.equal(draft.push[0].enabled, false, "chưa bật ⇒ bot giữ để chat thử, KHÔNG dùng cho khách thật");
+  assert.equal(draft.push[0].test?.code, "TEST-DB01");
+  const live = buildAdBots([row({ adId: "120000000000000009" })], { enabled: true, overrides: { "120000000000000009": { ...meta, enabled: true, test } } });
+  assert.equal(live.lines[0].state, "ACTIVE");
+  assert.equal(live.push[0].productCode, "TEST-DB01", "mẫu test thay mã gắn trên quảng cáo");
+  const half = buildAdBots([row({ adId: "120000000000000009", productId: null, productCode: null, productName: null })], { enabled: true, overrides: { "120000000000000009": { ...meta, enabled: true, test: { ...test, price: null } } } });
+  assert.equal(half.push.length, 0, "mẫu test thiếu giá ⇒ không gửi gì sang bot");
+  const botTest = bot.normalizeAdBotPayload({ bots: draft.push }) as unknown as { bots: Record<string, { test: { price: number; colors: unknown[] } | null }> };
+  assert.equal(botTest.bots["120000000000000009"].test?.price, 459000, "gói mẫu test qua được bộ kiểm của bot");
+
+  assert.equal(pageIdOfPost("104512345678901_998877"), "104512345678901");
+  assert.equal(pageIdOfPost(""), null);
+
+  const now = new Date("2026-10-01T10:00:00Z");
+  const spend = [{ adId: "x", at: "2026-10-01T02:00:00Z", usd: 1.5, estimated: false }, { adId: "x", at: "2026-09-30T17:30:00Z", usd: 0.2, estimated: true }, { adId: "x", at: "2026-09-30T16:30:00Z", usd: 9, estimated: false }];
+  assert.equal(Math.round(testImageSpendToday(spend, now) * 100) / 100, 1.7, "ngày theo giờ VN: 17:30Z 30/09 = 00:30 01/10 (tính), 16:30Z 30/09 = 23:30 hôm trước (không tính); lượt ƯỚC TÍNH vẫn vào trần");
+  assert.equal(testImageGate({ colors: 0, spentTodayUsd: 1.7, estimateUsd: 0.4 }).ok, false, "vượt trần ngày ⇒ chặn TRƯỚC khi gọi AI");
+  assert.equal(testImageGate({ colors: AD_TEST_IMAGE_LIMITS.maxColorsPerAd, spentTodayUsd: 0, estimateUsd: 0.1 }).ok, false);
+  assert.equal(testImageGate({ colors: 1, spentTodayUsd: 0.5, estimateUsd: 0.2 }).ok, true);
+
+  const rdy: ReadinessInput = { pageId: "104512345678901", pageName: "Linen", pancakePageIds: ["104512345678901"], pancakeError: null, botState: "RUNNING", botError: null, botPage: { enabled: true, dryRun: false, pauseTagId: "99", minCustomerMessages: 1 }, testMissing: [], imagesMissingOnBot: 0, live: false, seenCount: 0 };
+  const rst = (i: ReadinessInput) => Object.fromEntries(adTestReadiness(i).checks.map((c) => [c.key, c.status]));
+  assert.equal(adTestReadiness(rdy).canGoLive, true);
+  assert.equal(rst({ ...rdy, pancakePageIds: [] }).PANCAKE, "MISSING", "page không có trong Pancake");
+  assert.equal(rst({ ...rdy, pancakePageIds: null }).PANCAKE, "UNKNOWN", "ERP không đọc được Pancake ⇒ CHƯA BIẾT, không phải chưa kết nối");
+  assert.equal(adTestReadiness({ ...rdy, pancakePageIds: null }).canGoLive, true, "CHƯA BIẾT không chặn bật");
+  const noToken = adTestReadiness({ ...rdy, botPage: null });
+  assert.equal(noToken.checks.find((c) => c.key === "TOKEN")?.status, "MISSING");
+  assert.ok(noToken.checks.find((c) => c.key === "TOKEN")?.fix.includes("Thêm page"), "dòng thiếu nói CÁCH bổ sung");
+  assert.equal(noToken.canGoLive, false);
+  assert.equal(rst({ ...rdy, botPage: { ...rdy.botPage!, dryRun: true } }).SEND, "WARN", "chỉ log là cảnh báo, chat thử vẫn chạy");
+  assert.equal(adTestReadiness({ ...rdy, botPage: { ...rdy.botPage!, dryRun: true } }).canChat, true);
+  assert.equal(rst({ ...rdy, botPage: { ...rdy.botPage!, minCustomerMessages: 2 } }).FIRST, "WARN", "tin tự động đầu của Pancake không theo camp");
+  assert.equal(adTestReadiness({ ...rdy, testMissing: ["chất vải"] }).canChat, false);
+  assert.equal(adTestReadiness({ ...rdy, botState: "UNREACHABLE", botError: "x" }).canChat, false);
+
+  console.log("✓ Chat test mẫu mới: thiếu giá / chất vải / ảnh ⇒ không gửi, chưa bật ⇒ bot chỉ chat thử, trần ảnh theo ngày VN chặn trước khi gọi AI, bảng kiểm page tách THIẾU / CHƯA BIẾT / CẢNH BÁO kèm cách bổ sung");
   console.log("✓ Bot riêng theo quảng cáo: gộp ad_id, không đoán mẫu cho QC chưa gắn mã, ghi đè bật/tắt/mã, công tắc chung, gói ERP qua được bộ kiểm của bot");
 }
 

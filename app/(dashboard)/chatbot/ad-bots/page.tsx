@@ -117,7 +117,17 @@ export default async function ChatbotAdBotsPage() {
                 }
               >
                 {l.adCopy ? <p className="mb-3 line-clamp-2 text-xs text-muted-foreground">Nội dung QC: {l.adCopy}</p> : null}
-                <AdBotEditor adId={l.adId} enabled={l.override?.enabled !== false} productCode={l.override?.productCode ?? ""} defaultCode={l.productCode ?? ""} instructions={l.override?.instructions ?? ""} />
+                {l.override?.test ? (
+                  <p className="text-sm">
+                    Mẫu test mới <b>{l.override.test.name || "—"}</b> ({l.override.test.code || "chưa có mã tạm"}) · {l.override.test.colors.length} màu. Sửa ảnh, giá, chất vải và bật / tắt ở nút <b>Chat test</b> của camp trong{" "}
+                    <Link href="/marketing/creatives" className="underline">
+                      Thư viện Media · tab Đang chạy
+                    </Link>
+                    .
+                  </p>
+                ) : (
+                  <AdBotEditor adId={l.adId} enabled={l.override?.enabled !== false} productCode={l.override?.productCode ?? ""} defaultCode={l.productCode ?? ""} instructions={l.override?.instructions ?? ""} />
+                )}
                 {l.override ? <p className="mt-2 text-xs text-muted-foreground">Sửa lần cuối: {l.override.updatedByName} · {formatDateTime(l.override.updatedAt)}</p> : null}
               </SectionCard>
             );
