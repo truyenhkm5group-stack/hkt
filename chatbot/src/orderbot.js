@@ -1,4 +1,4 @@
-import { orderSync } from "./orders.js";
+import { orderSync, phonesInText } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -98,6 +98,20 @@ export class OrderBot {
         it.reasons = [];
         it.doneAt = Date.now();
         it.approvedByStaff = byStaff || undefined;
+        it.confirmNote = undefined;
+        // TU XAC NHAN (chi khi chu shop bat): don nhan vien duyet tay thi nhan vien tu xac nhan tren Pancake
+        if (settings.orderBot().autoConfirm && !byStaff) {
+          const chan = r.confirmBlockers || [];
+          const kq = chan.length ? { ok: false, reason: chan.join("; ") } : await orderSync.confirmOrder(r.orderId, { conversationId, phone: r.phone, items: r.items }).catch((e) => ({ ok: false, reason: e.message }));
+          if (kq.ok) {
+            it.confirmedAt = Date.now();
+            it.summary = r.summary.replace(/^(Tạo|Cập nhật) đơn nháp/, "Đã xác nhận đơn");
+            store.bumpStat(pageId, "orderBotConfirmed");
+            log.info(`[orderbot] ${key}: tu xac nhan #${r.orderId}`);
+          } else {
+            it.confirmNote = `Để đơn nháp, chưa tự xác nhận: ${kq.reason}`;
+          }
+        }
         store.bumpStat(pageId, "orderBotDone");
         store.recordReply(pageId, { conversationId, customerName: it.customerName || name, question: "(bot lên đơn)", reply: r.summary, handoff: false, dryRun: false, order: r.orderId });
         log.info(`[orderbot] ${key}: ${r.status} #${r.orderId}`);
@@ -143,6 +157,78 @@ export class OrderBot {
     this._save();
   }
 
+  /**
+   * QUET LAI hoi thoai cu (nut tren trang Bot len don): doc hoi thoai INBOX cap nhat trong `hours` gio gan day cua cac
+   * page dang bat len don, hoi thoai nao khach da nhan SDT + dia chi thi dua qua dung luong kiem tra chat nhu don moi.
+   * KHONG dong vao: hoi thoai nhan vien da bo qua, don da tu xac nhan, va khach da co don THAT (khong phai nhap) trong
+   * 14 ngay — hoi thoai cu thuong chua don cu, quet lai ma khong chan la tao don trung. Chay nen, tien do o list().
+   */
+  rescan({ hours = 24, max = 150 } = {}) {
+    if (this.rescanState?.running) throw new Error("Đang quét lại, đợi lượt trước xong");
+    const h = Math.round(Number(hours));
+    if (!Number.isFinite(h) || h < 1 || h > 168) throw new Error("Số giờ quét lại phải từ 1 đến 168");
+    const st = (this.rescanState = { running: true, hours: h, startedAt: Date.now(), scanned: 0, candidates: 0, checked: 0, done: 0, confirmed: 0, review: 0, skipped: 0, errors: 0, note: "" });
+    this._rescan(h, Math.min(Number(max) || 150, 300), st)
+      .catch((e) => ((st.note = e.message), log.warn(`[orderbot] quet lai loi: ${e.message}`)))
+      .finally(() => ((st.running = false), (st.finishedAt = Date.now())));
+    return st;
+  }
+
+  async _rescan(hours, max, st) {
+    const cutoff = Date.now() - hours * 3600e3;
+    for (const [pid, client] of this.bot.clients) {
+      if (!this.enabledFor(pid)) continue;
+      let last;
+      for (let trang = 0; trang < 30 && st.candidates < max; trang++) {
+        const data = await client.getConversations({ type: "INBOX", order_by: "updated_at", last_conversation_id: last });
+        const list = data.conversations || [];
+        if (!list.length) break;
+        let het = false;
+        for (const conv of list) {
+          if (parseTs(conv.updated_at) < cutoff) {
+            het = true;
+            break;
+          }
+          st.scanned++;
+          const key = String(conv.id);
+          const cu = this.items[key];
+          if (cu && (cu.status === "DISMISSED" || cu.confirmedAt)) continue;
+          let messages;
+          try {
+            messages = sortChrono((await client.getMessages(conv.id)).messages);
+          } catch {
+            st.errors++;
+            continue;
+          }
+          const f = this.bot.customerFacts(pid, messages);
+          if (!f.phone || !f.address) continue; // chua co dau hieu mua -> khong ton AI
+          // Moi SDT khach tung go (toi da 3): khach doi so giua chung van bi nhan ra la da co don
+          const sdt = [...new Set(messages.filter((m) => !this.bot.isFromPage(m, pid)).flatMap((m) => phonesInText(this.bot.messageText(m))))].slice(-3);
+          let khac = [];
+          for (const ph of sdt) if (!khac.length) khac = await orderSync.otherOrders(key, ph).catch(() => []);
+          if (khac.length) {
+            st.skipped++;
+            continue; // khach da co don that -> hoi thoai nay da duoc xu ly
+          }
+          st.candidates++;
+          this.notify(pid, key, messages, conv.from?.name || "");
+          const it = this.items[key];
+          if (!it) continue;
+          if (it.status !== "PENDING") it.status = "PENDING";
+          clearTimeout(this.timers.get(key));
+          const r = await this.check(key).catch(() => (st.errors++, null));
+          st.checked++;
+          if (r?.status === "DONE") (st.done++, r.confirmedAt && st.confirmed++);
+          else if (r?.status === "REVIEW") st.review++;
+          if (st.candidates >= max) break;
+        }
+        last = list[list.length - 1].id;
+        if (het || list.length < 60) break;
+      }
+    }
+    log.info(`[orderbot] quet lai ${hours}h: doc ${st.scanned}, kiem ${st.checked}, len don ${st.done} (xac nhan ${st.confirmed}), can duyet ${st.review}, bo qua ${st.skipped}`);
+  }
+
   start() {
     this.sweepTimer = setInterval(() => this.sweep().catch((e) => log.warn(`[orderbot] quet loi: ${e.message}`)), SWEEP_MS);
     this.sweepTimer.unref?.();
@@ -170,10 +256,12 @@ export class OrderBot {
     const ngay = (t) => (t ? new Date(t + 7 * 3600e3).toISOString().slice(0, 10) : "");
     return {
       settings: settings.orderBot(),
+      rescan: this.rescanState || null,
       counts: {
         pending: rows.filter((r) => r.status === "PENDING").length,
         review: rows.filter((r) => r.status === "REVIEW").length,
         doneToday: rows.filter((r) => r.status === "DONE" && ngay(r.doneAt) === today).length,
+        confirmedToday: rows.filter((r) => r.confirmedAt && ngay(r.confirmedAt) === today).length,
       },
       review: rows.filter((r) => r.status === "REVIEW").sort((a, b) => (b.lastCheckAt || 0) - (a.lastCheckAt || 0)),
       pending: rows.filter((r) => r.status === "PENDING").sort((a, b) => (b.lastCustomerAt || 0) - (a.lastCustomerAt || 0)).slice(0, 50),

@@ -1042,6 +1042,17 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 32: bot hen giao hang 5–7 ngay, sua cau hen so ngay cu, khong dung cau khong phai giao hang");
 }
 
+// ---- 34: ten nguoi nhan khong chan don (chu shop 30/09/2026: "co ten khach roi ma sao chua du thong tin")
+{
+  const { onlyNameMissing } = await import("../src/orders.js");
+  assert.equal(onlyNameMissing("Tên khách hàng"), true);
+  assert.equal(onlyNameMissing("họ tên người nhận"), true);
+  assert.equal(onlyNameMissing("Tên khách hàng, màu sắc cho cả 2 đầm"), false, "con thieu mau -> van cho");
+  assert.equal(onlyNameMissing("số điện thoại"), false);
+  assert.equal(onlyNameMissing(""), false);
+  console.log("OK 34: thieu moi ten nguoi nhan -> dung ten Facebook, khong treo don; thieu mau/size/SDT/dia chi van cho");
+}
+
 // ---- 30: khach nhan them TRONG LUC bot dang soan -> bo cau tra loi cu, tra loi lai mot lan voi du tin
 {
   calls.length = 0;
@@ -1113,6 +1124,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(posPosts[0].shipping_address.district_id, "10120", "tu bo sung dung huyen Quoc Oai");
   assert.equal(posPosts[0].shipping_address.commune_id, "1012001");
   assert.match(posPosts[0].note, /tự bổ sung/);
+  assert.ok(a.confirmBlockers.some((x) => /chưa chốt tổng tiền/.test(x)), "khach chua chot tong tien -> khong du cua tu xac nhan");
   // (b) "Tân Phú" co o CA HAI huyen, khach khong ghi huyen -> KHONG len don, can duyet kem ly do
   diaChiKhach = "thôn 3, xã Tân Phú, Hà Nội";
   diaChiAI = { province: "Hà Nội", district: "", commune: "Tân Phú", street: "thôn 3" };
@@ -1164,6 +1176,116 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   Object.assign(os33, geoGoc);
   globalThis.fetch = prev33;
   console.log("OK 33: bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS), cho khach nhan not, qua han -> bao nhan vien");
+}
+
+// ---- 35: TU XAC NHAN don chac chan + QUET LAI hoi thoai cu (chu shop 30/09/2026: "quet lai cac don cu ... neu da
+// xac nhan chac chan xac nhan don dung co the chuyen qua trang thai da xac nhan"). Mac dinh TAT; chi don qua du cua.
+{
+  const { config: cfg35 } = await import("../src/config.js");
+  cfg35.pos.shopId = "SHOP1"; cfg35.pos.apiKey = "posk"; cfg35.orderSync = true;
+  const { orderSync: os35 } = await import("../src/orders.js");
+  assert.equal(settings.orderBot().autoConfirm, false, "tu xac nhan mac dinh TAT");
+  // (a) confirmOrder: doc lai don, chi doi khi van la don nhap, dung SDT, dung san pham, khach khong co don khac
+  const don = { id: 777, status: 0, bill_phone_number: "0912345678", note: "🤖 Bot chốt", items: [{ variation_id: "v1", quantity: 1 }], shipping_address: { province_id: "101", district_id: "10120", commune_id: "1012001", address: "Số 15 ngõ 42" } };
+  let donKhac = [];
+  const puts = [];
+  const prev35 = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.hostname === "pos.pages.fm") {
+      if (u.pathname === "/api/v1/shops/SHOP1/orders/777" && (init.method || "GET") === "GET") return json({ data: { ...don } });
+      if (u.pathname === "/api/v1/shops/SHOP1/orders/777" && init.method === "PUT") { const b = JSON.parse(init.body); puts.push(b); if (b.status !== undefined) don.status = b.status; return json({ data: { id: 777 } }); }
+      if (u.pathname === "/api/v1/shops/SHOP1/orders") return json({ data: donKhac });
+    }
+    return prev35(url, init);
+  };
+  const dung = { conversationId: "C35", phone: "0912345678", items: [{ variation_id: "v1", quantity: 1 }] };
+  // nhan vien da sua san pham -> khong dong vao
+  let r = await os35.confirmOrder(777, { ...dung, items: [{ variation_id: "v1", quantity: 2 }] });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /nhân viên đã sửa/);
+  // khach co don THAT khac trong 14 ngay (da giao) -> khong xac nhan, tranh gui hai lan
+  donKhac = [{ id: 700, status: 4, bill_phone_number: "0912345678", inserted_at: new Date(Date.now() - 3 * 86400e3).toISOString() }];
+  r = await os35.confirmOrder(777, dung);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /#700/);
+  // don nhap cu (status 0) va don huy khong chan
+  donKhac = [{ id: 701, status: 0, bill_phone_number: "0912345678", inserted_at: new Date().toISOString() }, { id: 702, status: 6, bill_phone_number: "0912345678", inserted_at: new Date().toISOString() }];
+  assert.equal(puts.length, 0, "chua du cua thi khong goi ghi POS");
+  r = await os35.confirmOrder(777, dung);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(puts[0].status, 1, "chuyen Moi -> Da xac nhan");
+  assert.match(puts[0].note, /Bot chốt[\s\S]*Bot tự xác nhận/, "giu ghi chu cu, them dong xac nhan");
+  // da xac nhan roi -> lan sau khong dong vao nua
+  r = await os35.confirmOrder(777, dung);
+  assert.equal(r.ok, false);
+  assert.equal(puts.length, 1);
+  globalThis.fetch = prev35;
+
+  // (b) OrderBot.check: tat -> chi don nhap; bat + chac chan -> xac nhan; co ly do chan -> van la don nhap kem ly do
+  const ob = bot.orderBot;
+  settings.update("PAGE1", { orderSync: true, dryRun: false });
+  const goc = { sync: os35.syncFromConversation, confirm: os35.confirmOrder, other: os35.otherOrders, history: ob.history };
+  let chan = [], goiXacNhan = 0;
+  os35.syncFromConversation = async () => ({ status: "created", orderId: 778, summary: "Tạo đơn nháp #778: Q004", phone: "0912345678", items: [{ variation_id: "v1", quantity: 1 }], confirmBlockers: chan });
+  os35.confirmOrder = async () => (goiXacNhan++, { ok: true });
+  ob.history = async () => ({ messages: [], text: "", name: "Hoa" });
+  const moi = (k) => (ob.items[k] = { pageId: "PAGE1", conversationId: k, status: "PENDING", firstSeen: Date.now(), reasons: [] });
+  moi("C35a");
+  await ob.check("C35a");
+  assert.equal(ob.items.C35a.status, "DONE");
+  assert.equal(goiXacNhan, 0, "tu xac nhan dang TAT -> khong xac nhan");
+  assert.equal(ob.items.C35a.confirmedAt, undefined);
+  settings.setOrderBot({ autoConfirm: true });
+  moi("C35b");
+  await ob.check("C35b");
+  assert.equal(goiXacNhan, 1);
+  assert.ok(ob.items.C35b.confirmedAt);
+  assert.match(ob.items.C35b.summary, /^Đã xác nhận đơn #778/);
+  chan = ["khách chưa chốt tổng tiền trong hội thoại"];
+  moi("C35c");
+  await ob.check("C35c");
+  assert.equal(goiXacNhan, 1, "co ly do chan -> khong goi xac nhan");
+  assert.match(ob.items.C35c.confirmNote, /chưa chốt tổng tiền/);
+  chan = [];
+  moi("C35d");
+  await ob.check("C35d", { byStaff: true });
+  assert.equal(goiXacNhan, 1, "don nhan vien duyet tay -> nhan vien tu xac nhan");
+
+  // (c) Quet lai hoi thoai cu: chi hoi thoai co SDT + dia chi, bo qua khach da co don that / da bo qua / qua khung gio
+  const now = Date.now();
+  const convs = [
+    { id: "C35r1", updated_at: new Date(now - 3600e3).toISOString(), from: { name: "Lan" } },
+    { id: "C35r2", updated_at: new Date(now - 2 * 3600e3).toISOString(), from: { name: "Mai" } },
+    { id: "C35r3", updated_at: new Date(now - 3 * 3600e3).toISOString(), from: { name: "Cúc" } },
+    { id: "C35r4", updated_at: new Date(now - 4 * 3600e3).toISOString(), from: { name: "Đào" } },
+    { id: "C35r5", updated_at: new Date(now - 30 * 3600e3).toISOString(), from: { name: "Cũ" } },
+  ];
+  const tin = { C35r1: ["sđt 0912000001", "thôn 3 xã Sài Sơn huyện Quốc Oai Hà Nội"], C35r2: ["sđt 0912000002", "thôn 5 xã Sài Sơn huyện Quốc Oai Hà Nội"], C35r3: ["chị hỏi giá thôi"], C35r4: ["sđt 0912000004", "thôn 7 xã Sài Sơn huyện Quốc Oai Hà Nội"], C35r5: ["sđt 0912000005", "thôn 9 xã Sài Sơn huyện Quốc Oai Hà Nội"] };
+  const fake = { getConversations: async () => ({ conversations: convs }), getMessages: async (id) => ({ messages: tin[id].map((t, i) => ({ id: id + i, from: { id: "KHACH" }, message: t, inserted_at: new Date(now - 3600e3 + i).toISOString() })) }) };
+  const clientsGoc = bot.clients;
+  bot.clients = new Map([["PAGE1", fake]]);
+  os35.otherOrders = async (_c, phone) => (phone === "0912000002" ? [{ id: 5, status: 3 }] : []);
+  ob.items.C35r4 = { pageId: "PAGE1", conversationId: "C35r4", status: "DISMISSED", firstSeen: now, reasons: [] };
+  const daKiem = [];
+  os35.syncFromConversation = async ({ conversationId }) => (daKiem.push(conversationId), { status: "created", orderId: 800, summary: "Tạo đơn nháp #800", phone: "0912000001", items: [], confirmBlockers: [] });
+  const st = ob.rescan({ hours: 24 });
+  assert.throws(() => ob.rescan({ hours: 24 }), /Đang quét lại/, "khong chay hai luot quet cung luc");
+  while (st.running) await sleep(20);
+  assert.deepEqual(daKiem, ["C35r1"], "chi kiem hoi thoai co SDT + dia chi, chua co don that, chua bi bo qua, trong khung gio");
+  assert.equal(st.skipped, 1, "khach da co don that -> bo qua");
+  assert.equal(st.confirmed, 1);
+  assert.equal(ob.items.C35r4.status, "DISMISSED");
+  assert.throws(() => ob.rescan({ hours: 500 }), /1 đến 168/);
+  assert.ok(ob.list().rescan && !ob.list().rescan.running);
+
+  bot.clients = clientsGoc;
+  Object.assign(os35, { syncFromConversation: goc.sync, confirmOrder: goc.confirm, otherOrders: goc.other });
+  ob.history = goc.history;
+  for (const k of Object.keys(ob.items)) if (k.startsWith("C35")) (clearTimeout(ob.timers.get(k)), delete ob.items[k]);
+  settings.global.orderBot = undefined;
+  console.log("OK 35: tu xac nhan chi don chac chan (mac dinh tat, doc lai POS, khong trung don); quet lai hoi thoai cu bo qua khach da co don");
 }
 
 console.log("\nTAT CA TEST PASS");

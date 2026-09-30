@@ -298,6 +298,14 @@ export function createAdminHandler(bot) {
           return json(res, 400, { error: e.message }), true;
         }
       }
+      if (m("POST", "/api/orderbot/rescan")) {
+        const body = await readJson(req).catch(() => ({}));
+        try {
+          return json(res, 200, { ok: true, rescan: bot.orderBot.rescan({ hours: body.hours }) }), true;
+        } catch (e) {
+          return json(res, 400, { error: e.message }), true;
+        }
+      }
       {
         const mo = url.pathname.match(/^\/api\/orderbot\/([^/]+)\/(approve|dismiss|check)$/);
         if (mo && req.method === "POST") {

@@ -89,10 +89,17 @@ export function normalizePhone(p) {
   return /^0\d{9}$/.test(d) ? d : "";
 }
 
+/** "missing" cua AI chi noi ve TEN nguoi nhan (khong nhac mau / size / SDT / dia chi / mau ma / so luong) */
+export function onlyNameMissing(missing) {
+  const t = String(missing || "").toLowerCase();
+  if (!/tên|ten |họ tên|name/.test(t)) return false;
+  return !/(màu|mau |size|cỡ|sđt|sdt|số điện thoại|điện thoại|địa chỉ|dia chi|mẫu|mã|số lượng|xã|phường|huyện|tỉnh)/.test(t);
+}
+
 const EXTRACT_SCHEMA = {
   type: "OBJECT",
   properties: {
-    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + họ tên + số điện thoại + địa chỉ giao hàng" },
+    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + số điện thoại + địa chỉ giao hàng (tên người nhận KHÔNG bắt buộc — thiếu thì dùng tên Facebook của khách)" },
     items: {
       type: "ARRAY",
       items: {
@@ -314,9 +321,9 @@ export class OrderSync {
   }
 
   // ---------- Trich xuat don tu hoi thoai ----------
-  async extractOrder(historyText, { pageName = "", defaultCode = "" } = {}) {
+  async extractOrder(historyText, { pageName = "", defaultCode = "", customerName = "" } = {}) {
     const codes = catalog.products.map((p) => `${p.code} (${p.name}; màu: ${Object.entries(p.attributes).filter(([k]) => /m[àa]u|color/i.test(k)).flatMap(([, v]) => v).join("/") || "-"}; size: ${Object.entries(p.attributes).filter(([k]) => /size/i.test(k)).flatMap(([, v]) => v).join("/") || "-"})`).join("\n");
-    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.`;
+    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.\nTÊN NGƯỜI NHẬN: khách có ghi tên người nhận thì lấy tên đó; không ghi thì customer_name = tên Facebook của khách${customerName ? ` ("${customerName}")` : ""}. Thiếu tên KHÔNG phải lý do để ready=false và KHÔNG ghi vào missing (sự cố 30/09/2026: đơn đủ SĐT, địa chỉ, size bị treo vì "chưa đủ tên khách hàng").`;
     const nhacMacDinh = defaultCode
       ? `\n\nMẪU CHỦ LỰC CỦA PAGE NÀY LÀ ${defaultCode}. Hội thoại không nêu rõ mã sản phẩm nào khác thì code = "${defaultCode}". TUYỆT ĐỐI không tự chọn mã khác chỉ vì nó có trong danh mục.`
       : "";
@@ -464,8 +471,10 @@ export class OrderSync {
 
   async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "" }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
-    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "" });
+    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
+    // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
+    if (!ex.ready && onlyNameMissing(ex.missing) && ex.phone && ex.address && (ex.items || []).length) ex.ready = true;
     if (!ex.ready) return { status: "skipped", reason: `chưa đủ thông tin: ${ex.missing || "?"}` };
     const phone = normalizePhone(ex.phone);
     if (!phone) return { status: "skipped", reason: `SĐT không hợp lệ: ${ex.phone}` };
@@ -558,7 +567,60 @@ export class OrderSync {
     store.bumpStat(pageId, "orders");
     store.addPhone(pageId, phone, Date.now());
     store.addBotOrder(pageId, orderId, conversationId);
-    return { status, orderId, summary, address: addr, items: mapped, discount, agreed };
+    // Du dieu kien TU XAC NHAN chua (orderbot.js chi dung khi chu shop bat autoConfirm). Moi ly do chan deu duoc ghi ra.
+    const confirmBlockers = [];
+    if (!strict) confirmBlockers.push("không chạy chế độ kiểm tra chặt");
+    if (problems.length) confirmBlockers.push("có sản phẩm không khớp POS");
+    if (!agreed) confirmBlockers.push("khách chưa chốt tổng tiền trong hội thoại");
+    else if (agreed > goods + shipFee) confirmBlockers.push(`tổng khách chốt ${agreed.toLocaleString("vi-VN")}đ lớn hơn giá POS ${(goods + shipFee).toLocaleString("vi-VN")}đ`);
+    else if (discount > goods * 0.3) confirmBlockers.push(`giảm giá ${discount.toLocaleString("vi-VN")}đ vượt 30% tiền hàng`);
+    return { status, orderId, summary, address: addr, items: mapped, discount, agreed, phone, confirmBlockers };
+  }
+
+  /**
+   * Don KHAC (khong phai don nhap, khong huy/xoa) cua khach trong 14 ngay — cung SDT hoac cung hoi thoai.
+   * Dung truoc khi TU XAC NHAN va khi QUET LAI hoi thoai cu: khach da co don that (ke ca da giao / dang hoan)
+   * thi hoi thoai cu co the chi la don CU, xac nhan them la gui hang hai lan.
+   */
+  async otherOrders(conversationId, phone, excludeId = null) {
+    if (!phone) return [];
+    const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { search: phone, page_size: 30 });
+    return (d.data || []).filter((o) => {
+      if (String(o.id) === String(excludeId)) return false;
+      if ([0, 6, 9].includes(Number(o.status))) return false;
+      const cung = normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone || o.conversation_id === conversationId;
+      return cung && Date.now() - Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) < 14 * 24 * 3600e3;
+    });
+  }
+
+  /**
+   * TU XAC NHAN don nhap bot vua ghi: doc lai don tren POS, chi chuyen "Moi" -> "Da xac nhan" khi don VAN la don nhap,
+   * dung SDT, dung dung cac bien the bot vua ghi va khach khong co don nao khac. Doc lai lan nua de chac POS da doi.
+   * Tra ve { ok: true } hoac { ok: false, reason }.
+   */
+  async confirmOrder(orderId, { conversationId, phone, items }) {
+    const get = async () => (await this._call("GET", `/shops/${config.pos.shopId}/orders/${orderId}`)).data;
+    const o = await get();
+    if (!o) return { ok: false, reason: `không đọc được đơn #${orderId} trên POS` };
+    if (Number(o.status) !== 0) return { ok: false, reason: `đơn #${orderId} không còn là đơn mới (${ORDER_STATUS_VI[Number(o.status)] || o.status}) — không động vào` };
+    if (normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) !== phone) return { ok: false, reason: "SĐT trên POS khác SĐT khách nhắn" };
+    const tren = new Map();
+    for (const it of o.items || []) {
+      const vid = String(it.variation_id || it.variation_info?.id || "");
+      tren.set(vid, (tren.get(vid) || 0) + Number(it.quantity || 0));
+    }
+    const muon = new Map((items || []).map((m) => [String(m.variation_id), Number(m.quantity)]));
+    const khop = tren.size === muon.size && [...muon].every(([k, q]) => tren.get(k) === q);
+    if (!khop) return { ok: false, reason: "sản phẩm trên đơn POS khác sản phẩm bot vừa ghi (có thể nhân viên đã sửa)" };
+    const sa = o.shipping_address || {};
+    if (!sa.province_id || !sa.district_id || !sa.commune_id || !String(sa.address || "").trim()) return { ok: false, reason: "địa chỉ trên POS thiếu tỉnh/huyện/xã hoặc số nhà" };
+    const khac = await this.otherOrders(conversationId, phone, orderId);
+    if (khac.length) return { ok: false, reason: `khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày — nhân viên kiểm tra, tránh gửi hai lần` };
+    const dong = `✅ Bot tự xác nhận (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}): địa chỉ khớp đủ tỉnh/huyện/xã, sản phẩm khớp POS, khách không có đơn khác`;
+    await this._call("PUT", `/shops/${config.pos.shopId}/orders/${orderId}`, { status: 1, note: (o.note ? String(o.note).trim() + "\n" : "") + dong });
+    const sau = await get().catch(() => null);
+    if (!sau || Number(sau.status) !== 1) return { ok: false, reason: `POS chưa đổi trạng thái đơn #${orderId} (đang: ${sau ? ORDER_STATUS_VI[Number(sau.status)] || sau.status : "?"})` };
+    return { ok: true };
   }
 }
 

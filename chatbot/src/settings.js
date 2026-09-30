@@ -165,13 +165,16 @@ class Settings {
    */
   orderBot() {
     const o = this.global.orderBot || {};
-    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120 };
+    // autoConfirm: MAC DINH TAT — chu shop tu bat. Bat thi don CHAC CHAN (dia chi khop du cap, san pham khop POS,
+    // khach chot tong tien, khong co don khac) duoc chuyen "Moi" -> "Da xac nhan"; con lai van la don nhap.
+    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120, autoConfirm: o.autoConfirm === true };
   }
 
-  setOrderBot({ enabled, waitMinutes }) {
+  setOrderBot({ enabled, waitMinutes, autoConfirm }) {
     const cur = this.orderBot();
     const next = { ...cur };
     if (enabled !== undefined) next.enabled = !!enabled;
+    if (autoConfirm !== undefined) next.autoConfirm = autoConfirm === true;
     if (waitMinutes !== undefined) {
       const n = Math.round(Number(waitMinutes));
       if (!Number.isFinite(n) || n < 10 || n > 24 * 60) throw new Error("Thoi gian cho phai tu 10 den 1440 phut");
