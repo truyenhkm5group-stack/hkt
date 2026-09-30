@@ -1042,6 +1042,17 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 32: bot hen giao hang 5–7 ngay, sua cau hen so ngay cu, khong dung cau khong phai giao hang");
 }
 
+// ---- 34: ten nguoi nhan khong chan don (chu shop 30/09/2026: "co ten khach roi ma sao chua du thong tin")
+{
+  const { onlyNameMissing } = await import("../src/orders.js");
+  assert.equal(onlyNameMissing("Tên khách hàng"), true);
+  assert.equal(onlyNameMissing("họ tên người nhận"), true);
+  assert.equal(onlyNameMissing("Tên khách hàng, màu sắc cho cả 2 đầm"), false, "con thieu mau -> van cho");
+  assert.equal(onlyNameMissing("số điện thoại"), false);
+  assert.equal(onlyNameMissing(""), false);
+  console.log("OK 34: thieu moi ten nguoi nhan -> dung ten Facebook, khong treo don; thieu mau/size/SDT/dia chi van cho");
+}
+
 // ---- 30: khach nhan them TRONG LUC bot dang soan -> bo cau tra loi cu, tra loi lai mot lan voi du tin
 {
   calls.length = 0;

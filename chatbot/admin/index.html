@@ -953,7 +953,7 @@ async function renderOrderBot() {
       <input data-ob-addr="${esc(it.key)}" value="${esc(it.draft?.address || it.facts?.address || "")}">
       <div class="row" style="margin-top:8px"><button class="primary" data-ob-approve="${esc(it.key)}">Duyệt & lên đơn</button><button data-ob-check="${esc(it.key)}">Kiểm lại từ chat</button><button data-ob-dismiss="${esc(it.key)}">Bỏ qua (không lên đơn)</button></div>
     </div>`).join("") || '<div class="muted small">Không có đơn nào cần duyệt.</div>';
-  const pending = d.pending.map((it) => `<tr><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td class="small">${f(it)}</td><td class="small">${esc((it.reasons || []).join("; "))}</td><td class="small">${esc(fmtTime(it.lastCustomerAt))}</td></tr>`).join("");
+  const pending = d.pending.map((it) => `<tr><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td class="small">${f(it)}</td><td class="small">${esc((it.reasons || []).join("; ") || ["SĐT", "địa chỉ"].filter((_, i) => !(i ? it.facts?.address : it.facts?.phone)).map((x) => "chưa có " + x).join(", ") || "chờ bot kiểm")}</td><td class="small">${esc(fmtTime(it.lastCustomerAt))}</td></tr>`).join("");
   const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}</td><td class="small">${esc(it.summary || "")}</td></tr>`).join("");
   $("#content").innerHTML = `
     <div class="card"><div class="stat">

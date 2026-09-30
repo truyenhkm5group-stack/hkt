@@ -89,10 +89,17 @@ export function normalizePhone(p) {
   return /^0\d{9}$/.test(d) ? d : "";
 }
 
+/** "missing" cua AI chi noi ve TEN nguoi nhan (khong nhac mau / size / SDT / dia chi / mau ma / so luong) */
+export function onlyNameMissing(missing) {
+  const t = String(missing || "").toLowerCase();
+  if (!/tên|ten |họ tên|name/.test(t)) return false;
+  return !/(màu|mau |size|cỡ|sđt|sdt|số điện thoại|điện thoại|địa chỉ|dia chi|mẫu|mã|số lượng|xã|phường|huyện|tỉnh)/.test(t);
+}
+
 const EXTRACT_SCHEMA = {
   type: "OBJECT",
   properties: {
-    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + họ tên + số điện thoại + địa chỉ giao hàng" },
+    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + số điện thoại + địa chỉ giao hàng (tên người nhận KHÔNG bắt buộc — thiếu thì dùng tên Facebook của khách)" },
     items: {
       type: "ARRAY",
       items: {
@@ -314,9 +321,9 @@ export class OrderSync {
   }
 
   // ---------- Trich xuat don tu hoi thoai ----------
-  async extractOrder(historyText, { pageName = "", defaultCode = "" } = {}) {
+  async extractOrder(historyText, { pageName = "", defaultCode = "", customerName = "" } = {}) {
     const codes = catalog.products.map((p) => `${p.code} (${p.name}; màu: ${Object.entries(p.attributes).filter(([k]) => /m[àa]u|color/i.test(k)).flatMap(([, v]) => v).join("/") || "-"}; size: ${Object.entries(p.attributes).filter(([k]) => /size/i.test(k)).flatMap(([, v]) => v).join("/") || "-"})`).join("\n");
-    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.`;
+    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.\nTÊN NGƯỜI NHẬN: khách có ghi tên người nhận thì lấy tên đó; không ghi thì customer_name = tên Facebook của khách${customerName ? ` ("${customerName}")` : ""}. Thiếu tên KHÔNG phải lý do để ready=false và KHÔNG ghi vào missing (sự cố 30/09/2026: đơn đủ SĐT, địa chỉ, size bị treo vì "chưa đủ tên khách hàng").`;
     const nhacMacDinh = defaultCode
       ? `\n\nMẪU CHỦ LỰC CỦA PAGE NÀY LÀ ${defaultCode}. Hội thoại không nêu rõ mã sản phẩm nào khác thì code = "${defaultCode}". TUYỆT ĐỐI không tự chọn mã khác chỉ vì nó có trong danh mục.`
       : "";
@@ -464,8 +471,10 @@ export class OrderSync {
 
   async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "" }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
-    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "" });
+    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
+    // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
+    if (!ex.ready && onlyNameMissing(ex.missing) && ex.phone && ex.address && (ex.items || []).length) ex.ready = true;
     if (!ex.ready) return { status: "skipped", reason: `chưa đủ thông tin: ${ex.missing || "?"}` };
     const phone = normalizePhone(ex.phone);
     if (!phone) return { status: "skipped", reason: `SĐT không hợp lệ: ${ex.phone}` };
