@@ -433,13 +433,16 @@ export function testPitrDienTapMaNguon() {
     assert.ok(!re.test(code), `diễn tập PITR: ${ly} (${re})`);
   }
   assert.match(code, /--network none/, "container diễn tập không có mạng");
-  assert.match(code, /--memory "\$BO_NHO_DIEN_TAP" --memory-swap "\$BO_NHO_DIEN_TAP"/, "trần RAM như restore-drill");
+  assert.match(code, /--memory "\$BO_NHO_DIEN_TAP_PITR" --memory-swap "\$BO_NHO_DIEN_TAP_PITR"/, "trần RAM riêng của diễn tập PITR");
+  assert.match(readFileSync("scripts/erp-pitr.sh", "utf8"), /^BO_NHO_DIEN_TAP_PITR=384m$/m, "trần 384 MB");
+  assert.match(readFileSync("scripts/erp-pitr.sh", "utf8"), /^RAM_TOI_THIEU_DIEN_TAP_PITR_MB=512$/m, "ngưỡng RAM trống 512 MB");
+  assert.match(code, /if \[ "\$1" != "OK" \]; then tt "PITR diễn tập: \$1/, "lý do bỏ qua / hỏng ra kênh tóm tắt");
   assert.match(code, /-v "\$PITR_WAL:\/pitr-wal:ro"/, "kho WAL gắn CHỈ-ĐỌC");
   assert.match(code, /"\$PITR_ANH_DIEN_TAP"/, "ảnh là hằng số, không đọc từ erp-db");
   assert.match(code, /trap don_dien_tap_pitr EXIT/, "container + thư mục tạm bị dọn cả khi hỏng giữa chừng");
   // Trong thân lệnh: kiểm RAM + ổ TRƯỚC lần dựng container đầu tiên (chay_pha_pitr là chỗ DUY NHẤT gọi docker run).
   const than = code.slice(code.indexOf("cmd_drill_than() {"));
-  const iRam = than.indexOf("RAM_TOI_THIEU_DIEN_TAP_MB");
+  const iRam = than.indexOf("RAM_TOI_THIEU_DIEN_TAP_PITR_MB");
   const iDung = than.indexOf("chay_pha_pitr ");
   assert.ok(iRam > 0 && iDung > iRam && than.indexOf("DU_TRU_O_DIA_MB") < iDung, "kiểm RAM + ổ đĩa TRƯỚC khi dựng container");
   assert.equal((code.match(/docker run /g) ?? []).length, 1, "đúng MỘT chỗ dựng container tạm");
@@ -479,7 +482,7 @@ export function testPitrDienTap() {
   assert.ok(run[1].includes(`recovery_target_time=${mocSau}`), `pha sau dừng ở mốc yêu cầu: ${run[1]}`);
   for (const d of run) {
     assert.match(d, /--network none/, "mỗi container tạm không có mạng");
-    assert.match(d, /--memory 512m --memory-swap 512m/, "mỗi container tạm có trần RAM");
+    assert.match(d, /--memory 384m --memory-swap 384m/, "mỗi container tạm có trần RAM (trần riêng của diễn tập PITR)");
     assert.match(d, /\/pitr\/wal:\/pitr-wal:ro/, "kho WAL gắn chỉ-đọc");
     assert.match(d, /restore_command=gzip -dc \/pitr-wal\/%f\.gz > %p/, "restore_command giải nén từ kho WAL");
     assert.match(d, /postgres:16-alpine/, "cùng ảnh với erp-db");
