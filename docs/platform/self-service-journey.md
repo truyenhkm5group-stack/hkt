@@ -105,3 +105,10 @@ Người vận hành chỉ bật «Cần mã mời» và phát MỘT mã trên `
 | Mời nhân viên kho | liên kết `/join/…` trên tên miền con → tự đặt mật khẩu → vào được `/inventory` `/orders` `/products`; `/settings/users` `/ai/sales-chatbot` bị chặn |
 | Xuyên tổ chức | tài khoản HSLC ở miền chính · tài khoản nhà ở tên miền HSLC: không vào được; phiên HSLC mở đơn VNX và ngược lại: không thấy; tên miền con lạ và `/chat` ở miền chính: «Không tìm thấy ERP» |
 
+### Production (30/09/2026)
+
+Chạy lại đủ 12 bước trên `https://erp.vnxcommerce.com` (commit `c9696b97`) bằng mã mời người vận hành phát, trình duyệt /
+email / tài khoản / tổ chức mới: tổ chức `hslc-vgcnj` → `https://hslc-vgcnj.erp.vnxcommerce.com` (chứng chỉ cấp ngay lần
+mở đầu). 12/12 ĐẠT, cùng số liệu như bảng trên (đơn thật `#E895B553`). Tên miền con CHƯA xuất bản ⇒ Caddy không cấp chứng
+chỉ ⇒ trình duyệt báo lỗi TLS — đúng thiết kế. UAT và go-live: `hslc-uat.md`.
+

@@ -7,7 +7,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
-import { SALES_BOT_CONNECTORS } from "@/lib/sales-chatbot/config";
+import { SALES_BOT_CONNECTORS, salesBotError } from "@/lib/sales-chatbot/config";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
@@ -94,7 +94,11 @@ export default async function SalesChatbotPage() {
                           Đơn nháp
                         </Link>
                       ) : null}
-                      {c.lastError ? <span className="text-destructive">Lỗi: {c.lastError.slice(0, 80)}</span> : null}
+                      {c.lastError ? (
+                        <span className="text-destructive" title={c.lastError}>
+                          Lỗi: {salesBotError(c.lastError)?.label}
+                        </span>
+                      ) : null}
                       {formatDateTime(c.updatedAt)}
                     </span>
                   </li>
