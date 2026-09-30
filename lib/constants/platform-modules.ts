@@ -307,7 +307,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "marketing.profitability", label: "Lợi nhuận theo fanpage / marketer", defaultEnabled: true, why: "`/marketing/fanpages` — quy kết đơn theo ảnh chụp phân công fanpage." },
       { key: "marketing.outreach", label: "Chăm sóc & bán chéo", defaultEnabled: true, why: "`/outreach` — gửi tin hàng loạt, kịch bản chăm sóc." },
     ],
-    routes: ["/ads", "/ideas", "/marketing", "/outreach", "/api/ideas", "/api/creative", "/api/video-scale"],
+    routes: ["/ads", "/ideas", "/marketing", "/outreach", "/api/ideas", "/api/creative", "/api/video-scale", "/api/export/creatives-live"],
     permissions: ["ideas:view", "ideas:write", "ideas:review", "outreach:view", "outreach:send", "outreach:config"],
     why: "Tiền quảng cáo đổi ra đơn — không có đơn thì không đo được hiệu quả. `expenses:*` và `reports:nominal` gác cả trang Marketing lẫn Tài chính nên không thuộc riêng ai.",
   },

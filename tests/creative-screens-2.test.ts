@@ -214,7 +214,7 @@ function testSourceLevel() {
   const studioUi = doc(`${DIR}/studio-form.tsx`);
   assert.ok(studioUi.includes("alt={o.label}") && !/alt=\{o\.label\}[^>]*zoomable/.test(studioUi), "Studio: ô chọn mẫu cảm hứng không bật phóng to (cú bấm là tích chọn)");
   assert.ok(!/alt=\{s\.productLabel\}[^>]*zoomable/.test(studioUi), "Studio: ô chọn ảnh gốc không bật phóng to (cú bấm là chọn)");
-  for (const f of ["live-tab.tsx", "library-tab.tsx", "design-tab.tsx", "manual-gen-panel.tsx"]) assert.ok(doc(`${DIR}/${f}`).includes("zoomable"), `${f} phải bật phóng to ảnh`);
+  for (const f of ["live-table.tsx", "library-tab.tsx", "design-tab.tsx", "manual-gen-panel.tsx"]) assert.ok(doc(`${DIR}/${f}`).includes("zoomable"), `${f} phải bật phóng to ảnh`);
 
   // Nút thật gọi action thật — không nút "đánh dấu xong" nào.
   const batch = doc(`${DIR}/batch-actions.tsx`);
@@ -226,10 +226,10 @@ function testSourceLevel() {
   const wiring = doc("tests/action-wiring.test.ts");
   assert.ok(!/lib\/actions\/creative(-extend)?\.ts::/.test(wiring), "action-wiring còn khai nợ của vòng mẫu — nút đã nối thì gỡ dòng nợ");
 
-  // Mục 44: tab Đang chạy chỉ tô màu phán quyết ĐÃ KẾT LUẬN.
-  const liveTab = doc(`${DIR}/live-tab.tsx`);
+  // Mục 44: tab Đang chạy chỉ tô màu phán quyết ĐÃ KẾT LUẬN (bảng của tab nằm ở live-table.tsx từ 30/09/2026).
+  const liveTab = doc(`${DIR}/live-table.tsx`);
   const tone = liveTab.match(/const VERDICT_TONE[\s\S]*?\};/)?.[0] ?? "";
-  assert.ok(tone, "live-tab.tsx phải khai bảng màu phán quyết");
+  assert.ok(tone, "live-table.tsx phải khai bảng màu phán quyết");
   for (const v of ["RUNNING", "AWAITING_ORDERS", "UNJUDGED", "PENDING"]) assert.ok(!tone.includes(`${v}:`), `${v} là chưa kết luận — không được mang màu`);
 
   // Tab học: giá trị chưa thử in "chưa thử", không in 50%.

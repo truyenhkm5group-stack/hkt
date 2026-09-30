@@ -99,6 +99,15 @@ export type VariantMetricsRow = VariantMetrics & {
 export type VariantMetricsInput = { id: string; fbAdId: string | null; startAt: Date | null };
 
 /**
+ * CỬA SỔ NGÀY của số đo — CHỈ để HIỂN THỊ (bộ lọc kỳ của tab ④ Đang chạy), không bao giờ để CHẤM.
+ * `from`/`to` là mốc đầu / cuối NGÀY VIỆT NAM (`resolvePeriod`); `null` = không chặn phía ấy. Chi lọc
+ * theo `spend_date`, đơn lọc theo `orders.inserted_at` — cùng mốc "ngày lên đơn" mà `/ads` theo ngày dùng.
+ * Luật tắt và phán quyết luôn đọc số đo TOÀN ĐỜI mẫu: chấm trên một lát cắt 7 ngày là để bộ lọc của
+ * người xem quyết thay luật đã duyệt.
+ */
+export type MetricsWindow = { from: Date | null; to: Date | null };
+
+/**
  * LUẬT TẮT ĐẾM ĐƠN THEO ĐƯỜNG NÀO — HUMAN GATE, không phải một chi tiết cài đặt.
  *
  * `DIRECT_AD_ID`: luật tắt (`orders` / `costPerOrder`) chỉ nhìn đơn mang `ad_id` — đúng định nghĩa mà
@@ -139,7 +148,7 @@ export function unknownMetrics(): VariantMetricsRow {
  * (`vnStartOfDay`), nên so với 6:00 sáng sẽ loại mất chính ngày chạy. Mẩu QC do vòng tạo nên không
  * có chi trước ngày ấy; mốc chỉ là hàng rào cho id bị dùng lại.
  */
-export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): Promise<Map<string, VariantMetricsRow>> {
+export async function variantMetrics(db: Db, variants: VariantMetricsInput[], window: MetricsWindow | null = null): Promise<Map<string, VariantMetricsRow>> {
   const out = new Map<string, VariantMetricsRow>();
   for (const v of variants) out.set(v.id, unknownMetrics());
 
@@ -156,6 +165,8 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
   const ads = schema.adSpends;
   const spendConds: SQL[] = [eq(ads.grain, "AD"), eq(ads.excluded, false), inArray(ads.adId, adIds)];
   if (allHaveFloor && earliest) spendConds.push(gte(ads.spendDate, earliest));
+  if (window?.from) spendConds.push(gte(ads.spendDate, window.from));
+  if (window?.to) spendConds.push(lte(ads.spendDate, window.to));
 
   // Gộp theo (mẩu × ngày) rồi lọc mốc từng mẫu ở TypeScript: mỗi mẫu có một mốc riêng.
   const spendRows = await db
@@ -218,7 +229,7 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(and(CONFIRMED_ORDER, candidate))
+    .where(and(CONFIRMED_ORDER, candidate, window?.from ? gte(o.insertedAt, window.from) : undefined, window?.to ? lte(o.insertedAt, window.to) : undefined))
     .offset(OUTCOME_FENCE)
     .as("creative_order_facts");
 
@@ -428,6 +439,8 @@ export type JudgedVariant = VariantCard & {
   endAt: string;
   /** Ngân sách NGÀY, chạy liên tục (`DAILY_BUDGET_MODE`) — `endAt` chỉ là khung chấm, Facebook không tự dừng. */
   dailyBudget: boolean;
+  /** TKQC đăng bài (cấu hình CHỤP của lô, không có tiền tố `act_`). `null` = lô không khai. */
+  adAccountId: string | null;
   metrics: VariantMetricsRow;
   verdict: CreativeVerdict;
   reasons: string[];
@@ -716,6 +729,12 @@ export function judgeLive(card: VariantCard, batch: Pick<BatchRow, "startAt" | "
 
 async function judgeCards(db: Db, rows: { card: VariantCard; batch: BatchRow }[], now: Date): Promise<JudgedVariant[]> {
   if (rows.length === 0) return [];
+  // TKQC đọc từ cấu hình chụp của lô — chuẩn hoá MỘT lần mỗi lô, không mỗi mẫu.
+  const accounts = new Map<string, string | null>();
+  const accountOf = (b: BatchRow) => {
+    if (!accounts.has(b.id)) accounts.set(b.id, normalizeCreativeConfig(b.configSnapshot).config.adAccountId.replace(/^act_/, "").trim() || null);
+    return accounts.get(b.id) ?? null;
+  };
   const { config: current } = await readCurrentCreativeConfig(db);
   const [metrics, extended] = await Promise.all([
     variantMetrics(
@@ -737,6 +756,7 @@ async function judgeCards(db: Db, rows: { card: VariantCard; batch: BatchRow }[]
       startAt: isoReq(batch.startAt),
       endAt: isoReq(batch.endAt),
       dailyBudget: isDailyBudgetPlan(batch.plan),
+      adAccountId: accountOf(b0),
       metrics: m,
       verdict: j.verdict,
       reasons: j.reasons,
@@ -826,25 +846,46 @@ export async function listRecentBatches(db: Db, limit = 14, day: string | null =
   return rows.map((b) => toBatchSummary(b, counts.get(b.id) ?? {}));
 }
 
-/** Cửa sổ của màn "Đang chạy". */
+/** Cửa sổ của màn "Đang chạy" khi không khai kỳ. */
 export const LIVE_WINDOW_DAYS = 14;
 
 /**
- * Mẫu đã đăng (LIVE / PAUSED / ENDED) của các lô chạy trong 14 ngày gần nhất, kèm số đo và phán quyết
- * SỐNG (`judgeVariant`, luật tắt của lô + luật giữ hiện tại — xem `effectiveJudgeConfig`).
+ * Mẫu đã đăng (LIVE / PAUSED / ENDED) kèm số đo TOÀN ĐỜI và phán quyết SỐNG (`judgeVariant`, luật tắt của
+ * lô + luật giữ hiện tại — xem `effectiveJudgeConfig`).
+ *
+ * Không truyền `range` ⇒ các lô chạy trong 14 ngày gần nhất + mọi mẫu còn `LIVE` (hành vi gốc — lượt chấm
+ * và bài kiểm dùng nhánh này). Truyền `range` (bộ lọc kỳ của tab ④) ⇒ mẫu ĐÃ CHẠY TRONG KỲ: bắt đầu trước
+ * cuối kỳ VÀ (còn `LIVE` · dừng / hết khung sau đầu kỳ · có dòng chi trong kỳ). Mẫu còn `LIVE` luôn hiện khi
+ * kỳ chứa hôm nay — kể cả camp hẹn giờ chưa tới giờ (28/09/2026: 7 camp hẹn 07:00 mà tab chỉ hiện 2).
  */
-export async function listLiveVariants(db: Db, now: Date): Promise<JudgedVariant[]> {
-  const from = new Date(now.getTime() - LIVE_WINDOW_DAYS * 86_400_000);
+export async function listLiveVariants(db: Db, now: Date, range?: MetricsWindow): Promise<JudgedVariant[]> {
+  const cv = schema.creativeVariants;
+  const cb = schema.creativeBatches;
+  let scope: SQL | undefined;
+  if (range) {
+    const ranIn: SQL[] = [];
+    if (range.to) ranIn.push(lte(cb.startAt, range.to));
+    if (range.from) {
+      // Tên cột ghi TƯỜNG MINH trong câu con: `${cv.fbAdId}` trần có thể in thành "fb_ad_id" không kèm bảng.
+      const spentInRange = sql`exists (select 1 from ad_spends sp where sp.ad_id = "creative_variants"."fb_ad_id" and sp.grain = 'AD' and sp.spend_date >= ${range.from}${range.to ? sql` and sp.spend_date <= ${range.to}` : sql``})`;
+      ranIn.push(or(eq(cv.status, "LIVE"), gte(sql`coalesce(${cv.pausedAt}, ${cb.endAt})`, range.from), spentInRange) as SQL);
+    }
+    const ran = ranIn.length ? and(...ranIn) : sql`true`;
+    scope = !range.to || range.to >= now ? or(eq(cv.status, "LIVE"), ran) : ran;
+  } else {
+    const from = new Date(now.getTime() - LIVE_WINDOW_DAYS * 86_400_000);
+    // Mẫu còn `LIVE` luôn hiện: dù đăng từ bao lâu (camp ngân sách ngày chạy liên tục — rơi khỏi cửa sổ 14 ngày là biến mất
+    // khỏi "Đang chạy" trong khi vẫn tiêu tiền), VÀ dù chưa tới giờ chạy (camp hẹn giờ đã lên Facebook — 28/09/2026 chủ shop
+    // đăng 7 camp hẹn 07:00 mà tab chỉ hiện 2 camp cũ).
+    scope = or(and(gte(cb.startAt, from), lte(cb.startAt, now)), eq(cv.status, "LIVE"));
+  }
   const rows = await db
     .select({ ...variantSelect, batch: schema.creativeBatches })
     .from(schema.creativeVariants)
     .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, schema.creativeVariants.batchId))
     .leftJoin(schema.products, eq(schema.products.id, schema.creativeVariants.productId))
     .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, schema.creativeVariants.imageId))
-    // Mẫu còn `LIVE` luôn hiện: dù đăng từ bao lâu (camp ngân sách ngày chạy liên tục — rơi khỏi cửa sổ 14 ngày là biến mất
-    // khỏi "Đang chạy" trong khi vẫn tiêu tiền), VÀ dù chưa tới giờ chạy (camp hẹn giờ đã lên Facebook — 28/09/2026 chủ shop
-    // đăng 7 camp hẹn 07:00 mà tab chỉ hiện 2 camp cũ).
-    .where(and(inArray(schema.creativeVariants.status, PUBLISHED_STATUSES), or(and(gte(schema.creativeBatches.startAt, from), lte(schema.creativeBatches.startAt, now)), eq(schema.creativeVariants.status, "LIVE"))))
+    .where(and(inArray(cv.status, PUBLISHED_STATUSES), scope))
     .orderBy(desc(schema.creativeBatches.startAt), schema.creativeVariants.slot);
   return judgeCards(
     db,

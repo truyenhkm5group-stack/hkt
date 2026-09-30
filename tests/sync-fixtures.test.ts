@@ -251,6 +251,7 @@ import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
 import { testCreativeDesignDb, testCreativeDesignPure } from "./creative-design.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
+import { testCreativeLiveBoardDb, testCreativeLiveBoardPure } from "./creative-live-board.test";
 // ═══ Company OS · Agent B · creative ↔ quảng cáo theo mẫu ═══
 import { testCompanyOsCreativeAds } from "./company-os-creative-ads.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
@@ -1842,6 +1843,9 @@ async function main() {
   await testCreativeDesignDb(db);
   await testCreativeGenerate(db);
   await testCreativeEvaluate(db);
+  // Tab ④ Đang chạy (30/09/2026): tên đồng bộ Ads Manager · bộ lọc kỳ · tìm · số đo trong kỳ, phán quyết toàn đời.
+  testCreativeLiveBoardPure();
+  await testCreativeLiveBoardDb(db);
   // Company OS · Agent B — đơn creative qua ORDER_AD_ID, chi nhóm/mẩu theo hạt mẩu, tóm tắt theo mẫu, lọc thư viện.
   await testCompanyOsCreativeAds(db);
   testCreativeWrite();

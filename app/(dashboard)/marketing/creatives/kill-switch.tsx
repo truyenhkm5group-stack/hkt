@@ -12,12 +12,31 @@ import { cn } from "@/lib/utils";
 /**
  * Nút KÉO / NHẢ công tắc khẩn cấp. Luật: `lib/constants/ads-kill-switch.ts`; quyền: `lib/actions/ads-kill-switch.ts`.
  * Kéo có hiệu lực ở lời gọi Facebook KẾ TIẾP — không cần deploy, không cần khởi động lại.
+ *
+ * `compact` (tab ④ Đang chạy): lúc công tắc CHƯA kéo, thẻ chỉ là MỘT DÒNG + nút mở ô lý do — nó là phanh khẩn cấp,
+ * không phải việc hằng ngày, và chiếm nửa màn hình đầu là đẩy bảng camp xuống dưới nếp gấp. Đã kéo thì luôn hiện đủ.
  */
-export function AdsKillSwitchCard({ state, canEngage, canRelease }: { state: AdsKillSwitchState; canEngage: boolean; canRelease: boolean }) {
+export function AdsKillSwitchCard({ state, canEngage, canRelease, compact = false }: { state: AdsKillSwitchState; canEngage: boolean; canRelease: boolean; compact?: boolean }) {
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
+  const [expanded, setExpanded] = useState(false);
   const want = !state.killed;
   const allowed = want ? canEngage : canRelease;
+
+  if (compact && !state.killed && !expanded) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-[12.5px] text-muted-foreground">
+        <PlayCircle className="size-3.5" aria-hidden />
+        <span>Đường ghi quảng cáo đang mở ({ADS_KILL_SOURCE_LABEL[state.source]}). Tạm dừng camp luôn đi được kể cả khi kéo công tắc.</span>
+        {canEngage ? (
+          <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-[12px] text-destructive hover:text-destructive" onClick={() => setExpanded(true)}>
+            <OctagonX className="size-3.5" aria-hidden />
+            Kéo công tắc khẩn cấp…
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
 
   const submit = () =>
     start(async () => {
