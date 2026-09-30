@@ -41,7 +41,12 @@ import { NAV_MODULES } from "@/lib/constants/department-modules";
  */
 type NhomTuyen = "AUTH_ONLY" | "API_ONLY" | "INTENTIONALLY_EXCLUDED";
 
-const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {};
+const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
+  "/ai/sales-chatbot": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/self-service-journey.test.ts và E2E của tổ chức khách.",
+  },
+};
 
 /** Chỉ để bài kiểm đọc: tuyến nào KHÔNG bắt buộc có mặt trong smoke. */
 const MIEN_TRU: Record<string, string> = Object.fromEntries(Object.entries(PHAN_NHOM).map(([k, v]) => [k, `${v.nhom}: ${v.lyDo}`]));

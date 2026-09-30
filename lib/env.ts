@@ -14,6 +14,11 @@ export const env = {
   get appUrl() {
     return read("APP_URL", "http://localhost:3000").replace(/\/$/, "");
   },
+  /** Miền gốc của tên miền con tổ chức (0180). Trống ⇒ không định tuyến theo tên miền con. */
+  get platformBaseDomain(): string | null {
+    const v = read("PLATFORM_BASE_DOMAIN").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    return v || null;
+  },
   /**
    * Khoá ký phiên đăng nhập.
    *

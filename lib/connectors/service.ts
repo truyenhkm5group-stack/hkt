@@ -140,6 +140,23 @@ export async function connectionStatusRows(db?: Db): Promise<ConnectionStatusRow
   return rows.map((r) => ({ ...r, status: r.status as ConnectionStatus }));
 }
 
+/**
+ * Trạng thái + NƠI NHẬN (ô cài đặt THƯỜNG, không bí mật) của các kết nối nhắn tin — cho màn hình Thông báo nhóm (0180).
+ * Chỉ ô `secret: false` của sổ connector đi ra (chat ID Telegram, tên kênh thử); webhook Lark là bí mật nên không bao giờ.
+ */
+export async function messagingConnectionSummaries(keys: readonly string[]): Promise<{ connectorKey: string; status: ConnectionStatus; lastTestOk: boolean | null; lastTestMessage: string | null; plainSettings: Record<string, string> }[]> {
+  const c = schema.orgConnections;
+  const ctx = await currentOrganization();
+  const rows = await (await getDb()).select({ connectorKey: c.connectorKey, orgCode: c.orgCode, status: c.status, lastTestOk: c.lastTestOk, lastTestMessage: c.lastTestMessage, settings: c.settings }).from(c);
+  return rows
+    .filter((r) => keys.includes(r.connectorKey) && r.orgCode === ctx.code)
+    .map((r) => {
+      const spec = findConnector(r.connectorKey);
+      const plain = new Set(spec ? plainFields(spec).map((f) => f.key) : []);
+      const settings = asStringMap(r.settings);
+      return { connectorKey: r.connectorKey, status: r.status as ConnectionStatus, lastTestOk: r.lastTestOk, lastTestMessage: r.lastTestMessage, plainSettings: Object.fromEntries(Object.entries(settings).filter(([k]) => plain.has(k))) };
+    });
+}
 
 export async function loadConnectionsView(user: SessionUser, deps: { keyState?: SecretsKeyState } = {}): Promise<ConnectionsView | { error: string }> {
   if (!can(user, CONNECTIONS_PERMISSION)) return { error: "Không có quyền xem kết nối." };
@@ -210,6 +227,8 @@ export async function openActiveConnection(connectorKey: string, deps: { keyStat
   if (!row) return { ok: false, reason: `Chưa có kết nối «${spec.label}».` };
   if (row.orgCode !== ctx.code) return { ok: false, reason: `Dòng kết nối «${spec.key}» mang mã tổ chức khác ngữ cảnh — không dùng.` };
   if (row.status !== "ACTIVE" || row.lastTestOk !== true) return { ok: false, reason: `Kết nối «${spec.label}» chưa bật (cần Kiểm tra đạt rồi Bật).` };
+  // Connector KHÔNG khai ô bí mật nào (hộp thử nhắn tin, 0180): không có gì để giải — không đòi PLATFORM_SECRETS_KEY.
+  if (secretFields(spec).length === 0) return { ok: true, secrets: {}, settings: asStringMap(row.settings) };
   if (!row.secretsEnc) return { ok: false, reason: `Kết nối «${spec.label}» chưa có bí mật.` };
   try {
     const secrets = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: spec.key, keyId: row.secretsKeyId }, deps.keyState ?? secretsKeyState());
@@ -345,7 +364,11 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
 
   let passed = false;
   let message: string;
-  if (!row.secretsEnc) message = "Chưa có bí mật nào được lưu cho kết nối này.";
+  if (secretFields(spec).length === 0) {
+    const r = await tester({ secrets: {}, settings: asStringMap(row.settings), orgName: org.name }, deps.tester);
+    passed = r.ok;
+    message = r.message;
+  } else if (!row.secretsEnc) message = "Chưa có bí mật nào được lưu cho kết nối này.";
   else {
     let secrets: Record<string, string> | null = null;
     try {

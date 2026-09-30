@@ -1,7 +1,11 @@
 /**
  * Kiểu dùng chung của workflow (Phase 3) — client-safe. Hợp đồng: docs/platform/phase-3-contracts.md mục 2.
- * Tập trigger / điều kiện / hành động là tập ĐÓNG: không eval, không SQL do người khai, không HTTP ra ngoài,
+ * Tập trigger / điều kiện / hành động là tập ĐÓNG: không eval, không SQL do người khai, không HTTP tới địa chỉ tuỳ ý,
  * không đổi trạng thái HỆ THỐNG (đơn, vận đơn, COD, kho).
+ *
+ * NGOẠI LỆ CÓ CHỦ ĐÍCH (0180, chủ nền tảng yêu cầu «báo nhóm vận hành» qua bộ máy luật): `send_message` gửi MỘT tin tới
+ * nhóm chat của CHÍNH tổ chức qua kết nối nhắn tin ĐANG BẬT của nó (Lark / Telegram / hộp thử) — đích là địa chỉ đã
+ * khai + kiểm ở /settings/connections, không phải URL người khai luật gõ (lib/messaging/providers.ts).
  */
 import type { FieldRef, ListFilterOp } from "@/lib/metadata/types";
 
@@ -21,7 +25,9 @@ export type TaskPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 export type WorkflowAction =
   | { kind: "create_task"; title: string; summary?: string; departmentCode?: string; priority?: TaskPriority; dueInHours?: number }
   | { kind: "notify"; message: string }
-  | { kind: "set_custom_value"; field: string; value: unknown };
+  | { kind: "set_custom_value"; field: string; value: unknown }
+  /** Gửi MỘT tin tới nhóm chat qua kết nối nhắn tin của tổ chức. `template` điền `{{khoá}}` từ bản ghi / sự kiện. */
+  | { kind: "send_message"; connectorKey: string; destination?: string; template: string };
 
 export type WorkflowGate = { kind: "approval"; reason: string } | null;
 

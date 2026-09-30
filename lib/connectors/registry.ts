@@ -438,10 +438,10 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     tenancy: "PER_ORG",
     health: "testConnection",
     healthRef: "lib/connectors/testers.ts::testLarkWebhook",
-    module: "alerts",
-    code: ["lib/connectors/testers.ts"],
-    consumers: [],
-    why: "Kênh nhóm chat do CHÍNH tổ chức khai. Kiểm tra = gửi MỘT tin thử vào đúng nhóm đó (chỉ tới máy chủ Lark). Chưa luồng cảnh báo nào đọc bảng này — nối vào loadAlertConfig là bước sau, nói thẳng trên màn hình.",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/messaging/providers.ts"],
+    consumers: ["lib/messaging/providers.ts::messagingProvider"],
+    why: "Kênh nhóm chat do CHÍNH tổ chức khai. Kiểm tra = gửi MỘT tin thử vào đúng nhóm đó (chỉ tới máy chủ Lark). Luồng đọc: hành động «Gửi tin nhóm chat» của luật tự động (0180 — vd luật «Báo nhóm vận hành» khi đơn chốt / sửa / huỷ). Cảnh báo vận hành của VNX (loadAlertConfig) KHÔNG đọc bảng này.",
   },
   {
     key: "telegram-bot",
@@ -459,10 +459,34 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     tenancy: "PER_ORG",
     health: "testConnection",
     healthRef: "lib/connectors/testers.ts::testTelegramBot",
-    module: "alerts",
-    code: ["lib/connectors/testers.ts"],
-    consumers: [],
-    why: "Bot do CHÍNH tổ chức tạo. Kiểm tra = getMe (chỉ đọc) rồi gửi MỘT tin thử vào chat đã khai, chỉ tới api.telegram.org. Chưa luồng cảnh báo nào đọc bảng này.",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/messaging/providers.ts"],
+    consumers: ["lib/messaging/providers.ts::messagingProvider"],
+    why: "Bot do CHÍNH tổ chức tạo. Kiểm tra = getMe (chỉ đọc) rồi gửi MỘT tin thử vào chat đã khai, chỉ tới api.telegram.org. Luồng đọc: hành động «Gửi tin nhóm chat» của luật tự động (0180). Cảnh báo vận hành của VNX không đọc bảng này.",
+  },
+  /*
+    HỘP THỬ (0180): kết nối nhắn tin KHÔNG gọi mạng — cùng giao diện `MessagingProvider` với Lark / Telegram, nhưng tin
+    chỉ nằm trong sổ `messaging_deliveries` của chính tổ chức (màn hình «Thông báo nhóm» in lại). Để shop dựng và thử luật
+    «báo nhóm vận hành» trước khi có (hoặc khi máy chủ chưa lưu được) bí mật Lark / Telegram — không bí mật nào ở đây, nên
+    nó không cần `PLATFORM_SECRETS_KEY`. Trạng thái hiển thị là «CHẾ ĐỘ THỬ», không bao giờ «ĐÃ KẾT NỐI».
+  */
+  {
+    key: "sandbox-messaging",
+    label: "Hộp thử nhắn tin (không gửi ra ngoài)",
+    vendor: "ERP",
+    kind: "MESSAGING",
+    capabilities: ["send_group_message"],
+    auth: "NONE",
+    settings: [{ key: "channelName", label: "Tên kênh thử", type: "text", secret: false, required: true, hint: "Tên để phân biệt khi đọc lại, vd «Nhóm vận hành». Tin KHÔNG rời khỏi ERP.", maxLength: 60 }],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — không có bí mật; tin nằm ở sổ messaging_deliveries của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testSandboxMessaging",
+    module: "core",
+    code: ["lib/connectors/testers.ts", "lib/messaging/providers.ts"],
+    consumers: ["lib/messaging/providers.ts::messagingProvider"],
+    why: "Chế độ thử của thông báo nhóm: cùng đường luật → hành động «Gửi tin nhóm chat» → MessagingProvider, chỉ khác là nhà cung cấp ghi sổ thay vì gọi Lark / Telegram. Không có đường gửi riêng.",
   },
   // ─────────────── AI ───────────────
   {

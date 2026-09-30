@@ -154,6 +154,10 @@ export function testCompanyOsModelsPure() {
     "custom_record.created",
     "custom_record.updated",
     "custom_record.deleted",
+    // 0180: đơn tạo tay / do chatbot lên — nguồn trigger «báo nhóm vận hành»; dòng ở shared-contracts.md mục 2.
+    "order.confirmed",
+    "order.updated",
+    "order.cancelled",
   ];
   assert.deepEqual([...ten].sort(), [...hopDong].sort(), "sổ khai phải đúng bằng bảng tên đã cấp ở shared-contracts.md mục 2");
   const migName = /"domain_events_name_check" CHECK \("name" ~ '([^']+)'\)/.exec(mig);

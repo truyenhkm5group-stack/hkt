@@ -4360,11 +4360,23 @@ export const platformOrganizations = pgTable(
      * dõi (tổ chức nhà / tổ chức có từ trước 0177) — không backfill. Chỉ `lib/platform/pilot.ts` ghi.
      */
     pilotStage: text("pilot_stage"),
+    /**
+     * Tên miền con do KHÁCH chọn (0180): `<domain_slug>.<PLATFORM_BASE_DOMAIN>`. Khác `code` (bất biến, nằm trong JWT
+     * và tên CSDL): slug đổi được tới lúc xuất bản. UNIQUE khi có. Chỉ `lib/platform/publish.ts` ghi.
+     */
+    domainSlug: text("domain_slug"),
+    /** `NULL` = không theo dõi (nhà / tổ chức có từ trước 0180) · `DRAFT` · `PUBLISHED`. Chỉ `lib/platform/publish.ts` ghi. */
+    publishState: text("publish_state"),
+    publishedAt: ts("published_at"),
+    publishedBy: text("published_by"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("platform_organizations_code_key").on(t.code),
+    uniqueIndex("platform_organizations_domain_slug_key").on(t.domainSlug).where(sql`${t.domainSlug} IS NOT NULL`),
+    check("platform_organizations_domain_slug_check", sql`${t.domainSlug} IS NULL OR ${t.domainSlug} ~ '^[a-z][a-z0-9-]{1,30}$'`),
+    check("platform_organizations_publish_state_check", sql`${t.publishState} IS NULL OR ${t.publishState} IN ('DRAFT','PUBLISHED')`),
     uniqueIndex("platform_organizations_one_home").on(t.isHome).where(sql`${t.isHome}`),
     check("platform_organizations_status_check", sql`${t.status} in ('ACTIVE','SUSPENDED','ARCHIVED','SETUP_FAILED')`),
     check("platform_organizations_module_default_check", sql`${t.moduleDefault} in ('ENABLED','DISABLED')`),
@@ -9042,4 +9054,105 @@ export const aiBlueprintDrafts = pgTable(
     // 0176: thêm `PLATFORM` (AI do nền tảng trả tiền) — tập LỚN hơn, mọi dòng cũ vẫn hợp lệ.
     check("ai_blueprint_drafts_source_check", sql`${t.aiSource} is null or ${t.aiSource} in ('ORG_CONNECTION','HOME','PLATFORM')`),
   ],
+);
+
+/**
+ * SỔ GỬI TIN RA NHÓM CHAT CỦA TỔ CHỨC (0180 · lib/messaging/service.ts). Dòng chèn TRƯỚC lượt gửi với `dedupe_key`
+ * UNIQUE: lượt làm lại (luật chạy lại, người bấm hai lần) gặp dòng cũ và KHÔNG gửi lần hai. `PENDING` quá hạn mà không
+ * biết đã tới nhà cung cấp chưa ⇒ `UNKNOWN`, không tự gửi lại (at-most-once — thà thiếu một tin còn hơn hai tin).
+ */
+export const messagingDeliveries = pgTable(
+  "messaging_deliveries",
+  {
+    id: id(),
+    dedupeKey: text("dedupe_key").notNull(),
+    connectorKey: text("connector_key").notNull(),
+    destination: text("destination"),
+    event: text("event"),
+    subjectType: text("subject_type"),
+    subjectId: text("subject_id"),
+    runId: text("run_id"),
+    isTest: boolean("is_test").notNull().default(false),
+    title: text("title"),
+    body: text("body").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    providerMessageId: text("provider_message_id"),
+    error: text("error"),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+    sentAt: ts("sent_at"),
+  },
+  (t) => [
+    uniqueIndex("messaging_deliveries_dedupe_uq").on(t.dedupeKey),
+    index("messaging_deliveries_created_idx").on(t.createdAt),
+    index("messaging_deliveries_subject_idx").on(t.subjectType, t.subjectId),
+    check("messaging_deliveries_status_check", sql`${t.status} IN ('PENDING','SENT','FAILED','UNKNOWN')`),
+  ],
+);
+
+/** Hội thoại của chatbot bán hàng theo tổ chức (0180 · lib/sales-chatbot/*). `TEST` = khung thử trong ERP; `WEB` = trang chat công khai. */
+export const salesChatConversations = pgTable(
+  "sales_chat_conversations",
+  {
+    id: id(),
+    channel: text("channel").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    /** Băm của mã khách truy cập (kênh WEB) — không lưu IP. */
+    visitorKey: text("visitor_key"),
+    customerId: text("customer_id"),
+    draftOrderId: text("draft_order_id"),
+    orderId: text("order_id"),
+    handoffReason: text("handoff_reason"),
+    turns: integer("turns").notNull().default(0),
+    aiCalls: integer("ai_calls").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    lastError: text("last_error"),
+    /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
+    state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("sales_chat_conversations_created_idx").on(t.createdAt),
+    check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB')`),
+    check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','HANDOFF','CLOSED')`),
+  ],
+);
+
+/** Tin nhắn của hội thoại chatbot — append-only, `seq` tăng trong hội thoại. `content` = khối `AiBlock[]` (chữ / gọi công cụ / kết quả). */
+export const salesChatMessages = pgTable(
+  "sales_chat_messages",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    role: text("role").notNull(),
+    content: jsonb("content").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("sales_chat_messages_seq_uq").on(t.conversationId, t.seq), check("sales_chat_messages_role_check", sql`${t.role} IN ('user','assistant')`)],
+);
+
+/** Lời mời người dùng vào tổ chức (0180 · lib/users/invites.ts). Chỉ lưu BĂM của mã; mã thô hiện đúng một lần. */
+export const userInvites = pgTable(
+  "user_invites",
+  {
+    id: id(),
+    tokenHash: text("token_hash").notNull(),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    accessRoleCode: text("access_role_code"),
+    invitedBy: text("invited_by"),
+    invitedByEmail: text("invited_by_email"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: ts("accepted_at"),
+    acceptedUserId: text("accepted_user_id"),
+    revokedAt: ts("revoked_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("user_invites_token_uq").on(t.tokenHash), index("user_invites_email_idx").on(t.email)],
 );

@@ -5,6 +5,7 @@
  *
  * Tự dọn: tổ chức mang tiền tố `pt-`, thư mục của nó xoá trước và sau.
  */
+import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
@@ -162,7 +163,9 @@ export async function testPlatformContext() {
   assert.equal(health.platform.ok, true, "health: mặt phẳng điều khiển + tổ chức nhà + đủ module");
   assert.equal(health.platform.homeResolved, true);
   const [bat, tong] = String(health.platform.homeModules).split("/");
-  assert.ok(Number(tong) > 0 && bat === tong, "tổ chức nhà bật ĐỦ mọi module");
+  // Mọi module trừ module «nhà tự chọn» (`homeOptIn`, 0180 — AI bán hàng cố ý TẮT ở nhà).
+  const optIn = PLATFORM_MODULES.filter((m) => m.homeOptIn).length;
+  assert.ok(Number(tong) > 0 && Number(bat) === Number(tong) - optIn, "tổ chức nhà bật ĐỦ mọi module (trừ module nhà tự chọn)");
   assert.equal(JSON.stringify(health).includes(B), false, "health công khai KHÔNG lộ mã tổ chức khác");
   console.log("✓ Nền tảng · ngữ cảnh tổ chức: hai CSDL cô lập, claim lạ/giả/đình chỉ không rơi về nhà, cấp tổ chức idempotent");
 }

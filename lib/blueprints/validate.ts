@@ -30,6 +30,7 @@ import { ROLE_BUILDER_FORBIDDEN, ROLE_BUILDER_FORBIDDEN_REASON } from "@/lib/con
 import { ZONE_ORDER } from "@/lib/constants/department-modules";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
 import { DOMAIN_EVENT_BY_NAME, METADATA_RECORD_SUBJECT } from "@/lib/constants/domain-events";
+import { isMessagingConnector } from "@/lib/messaging/types";
 import { CUSTOM_OBJECTS_MODULE, customObjectDef } from "@/lib/metadata/custom-object-def";
 import { objectDef, type AnyObjectDef } from "@/lib/constants/object-registry";
 import { moduleDef, moduleOfPermission, PLATFORM_MODULES, type ModuleKey } from "@/lib/constants/platform-modules";
@@ -425,6 +426,7 @@ export function validateBlueprint(input: unknown, opts: ValidateBlueprintOptions
     w.actions.forEach((a, j) => {
       const ap = `${p}.actions.${j}`;
       if (a.kind === "create_task" && a.departmentCode && !(DEPARTMENT_CODES as readonly string[]).includes(a.departmentCode)) errors.push({ path: `${ap}.departmentCode`, message: `Phòng ban «${a.departmentCode}» không có trong sổ phòng ban.` });
+      if (a.kind === "send_message" && !isMessagingConnector(a.connectorKey)) errors.push({ path: `${ap}.connectorKey`, message: `«${a.connectorKey}» không phải kết nối nhắn tin theo tổ chức.` });
       if (a.kind === "set_custom_value") {
         if (!objectKey) errors.push({ path: `${ap}.field`, message: "Luật này không gắn với một bản ghi có field tuỳ biến." });
         else if (w.trigger.kind === "custom_status" && a.field === w.trigger.fieldKey) errors.push({ path: `${ap}.field`, message: "Luật không được ghi chính field nó đang nghe (vòng lặp trực tiếp)." });

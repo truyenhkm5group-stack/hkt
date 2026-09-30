@@ -243,6 +243,8 @@ const ROUTES = [
   "/settings/statuses",
   // Luật tự động (Phase 3): danh sách luật đọc dịch vụ `lib/workflow/*` của tổ chức.
   "/settings/workflows",
+  "/settings/notifications",
+  "/setup",
   // Trang tuỳ biến (Phase 4): danh sách trang đọc dịch vụ `lib/pages/*` của tổ chức.
   "/settings/pages",
   // Kết nối theo tổ chức (Phase 9): sổ connector + trạng thái cấu hình CHỈ ĐỌC của tổ chức nhà (không bí mật nào).

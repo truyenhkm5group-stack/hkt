@@ -56,6 +56,7 @@ import {
   Users,
   Wallet,
   Workflow,
+  Rocket,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission, homeOrgPermissionDenied } from "@/lib/auth/permissions";
@@ -141,6 +142,9 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/export": FileDown,
   "/settings/objects": Boxes,
   "/settings/ai-builder": WandSparkles,
+  "/settings/notifications": BellRing,
+  "/setup": Rocket,
+  "/ai/sales-chatbot": MessagesSquare,
   "/platform": ServerCog,
 };
 

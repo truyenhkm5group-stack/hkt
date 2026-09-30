@@ -57,6 +57,7 @@ export const MODULE_KEYS = [
   "connector_messaging",
   "integrations",
   "apps",
+  "ai_sales",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -75,6 +76,12 @@ export type ModuleDef = {
   routes: string[]; // tiền tố đường dẫn trang + API sở hữu (khớp dài nhất thắng)
   permissions: string[]; // khoá quyền SỞ HỮU DUY NHẤT (một khoá thuộc tối đa một module)
   requiresHomeCredentials?: boolean; // connector dùng biến môi trường — Phase 1 chỉ tổ chức nhà bật được
+  /**
+   * Module mới mà tổ chức NHÀ không tự nhận (0180): sổ module của nhà mặc định BẬT mọi khoá thiếu dòng, nên module thêm
+   * sau được migration ghi một dòng TẮT cho nhà — nhà bật tay ở /settings/modules nếu muốn. `/api/health` không đòi nhà bật
+   * những module này.
+   */
+  homeOptIn?: boolean;
   why: string; // vì sao module này tồn tại / ranh giới của nó
 };
 
@@ -88,9 +95,15 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/login`: chưa có phiên thì chưa có tổ chức để hỏi module.
  *  · `/start`: tạo tổ chức tự phục vụ (Phase 10) — tổ chức CHƯA tồn tại; cổng của nó là cờ `PLATFORM_SIGNUP_MODE`
  *    kiểm ở máy chủ (`lib/onboarding/service.ts`), không phải module.
+ *  · `/join`: nhận lời mời người dùng — người được mời CHƯA có phiên nên chưa có tập module để hỏi; cổng của nó là mã
+ *    mời, tra trong CSDL của tổ chức ghi trong đường dẫn (`lib/users/invites.ts`). Quản lý lời mời thì ở
+ *    `/settings/users` (lõi, `users:manage`).
+ *  · `/chat` (0180): trang chat CÔNG KHAI của chatbot bán hàng trên tên miền con — không phiên; tổ chức lấy từ host (chỉ
+ *    tổ chức đã xuất bản) và trang tự hỏi module «AI bán hàng» TRONG ngữ cảnh tổ chức đó.
+ *  · `/api/platform/domain-allowed` (0180): Caddy on-demand TLS hỏi — không phiên, chỉ trả 200/404.
  *  · `/_next`: tài nguyên tĩnh của Next.
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/_next"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/chat", "/api/platform/domain-allowed", "/_next"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {
@@ -102,7 +115,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     core: true,
     dependsOn: [],
     features: [],
-    routes: ["/", "/cockpit", "/approvals", "/settings", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata", "/api/branding"],
+    routes: ["/", "/cockpit", "/approvals", "/settings", "/setup", "/audit", "/departments", "/data-quality", "/module-disabled", "/platform", "/p", "/api/events", "/api/notifications", "/api/health", "/api/perf", "/api/refresh", "/api/usage", "/api/metadata", "/api/branding"],
     permissions: ["dashboard:view", "audit:view", "users:manage", "settings:manage", "approvals:decide", ...PLATFORM_PERMISSION_KEYS],
     why: "Thứ mọi tổ chức cần để đăng nhập, phân quyền và quản trị chính mình. Không tắt được: tắt nó là khoá người quản trị khỏi chính màn hình bật lại nó. `/cockpit` ở đây: nó là tầng TỔNG HỢP của chủ (gác `dashboard:view`) đọc nhiều miền, không phải một màn hình Tài chính. `/integrations` KHÔNG ở đây — trang ấy in credential của tổ chức nhà (xem module «Kết nối dữ liệu»). `/approvals` ở đây: hàng đợi DUYỆT HAI BƯỚC (khoá `approvals:decide` của lõi) — luật tự động có cửa duyệt chạy ở mọi tổ chức, nên màn duyệt không được phụ thuộc «Cần xử lý» (module ấy cần «Đơn hàng»; tổ chức dịch vụ không có thì lượt chạy treo «chờ duyệt» mãi). `/api/metadata` (tải tệp của field tuỳ biến) ở đây vì một tệp thuộc ĐỐI TƯỢNG của bất kỳ module nào — route tự kiểm module của đối tượng sở hữu tệp và trả 403 MODULE_DISABLED khi nó tắt.",
   },
@@ -460,6 +473,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["records:view", "records:write"],
     why: "Phase 6 (docs/platform/phase-6-contracts.md): tổ chức thêm nghiệp vụ Core không có sẵn mà không cần viết mã — bản ghi ở `custom_records`, giá trị ở `custom_values` (X5), không bảng vật lý cho mỗi đối tượng. Tắt module ⇒ mọi đối tượng tuỳ biến ẩn khỏi menu VÀ bị từ chối ở máy chủ; định nghĩa và dữ liệu giữ nguyên. Không phụ thuộc module nào: tổ chức chỉ quản lý Công trình vẫn dùng được. Cấu hình đối tượng ở `/settings/objects` (lõi, `metadata:manage`).",
   },
+  {
+    key: "ai_sales",
+    label: "AI bán hàng",
+    description: "Chatbot bán hàng của CHÍNH tổ chức: trả lời giá / tồn từ ERP, lên đơn nháp, chốt đơn khi khách xác nhận, chuyển người khi cần. Khoá AI của tổ chức (BYOK).",
+    category: "INTELLIGENCE",
+    version: 1,
+    core: false,
+    dependsOn: ["customers", "products", "orders", "inventory"],
+    features: [{ key: "ai_sales.web_chat", label: "Trang chat công khai", defaultEnabled: true, why: "`/chat` trên tên miền con đã xuất bản — khách của shop chat không cần tài khoản." }],
+    routes: ["/ai", "/api/ai-sales"],
+    permissions: ["ai_sales:view", "ai_sales:manage"],
+    homeOptIn: true,
+    why: "Bot trả lời KHÁCH của shop — khác AI Builder (soạn cấu hình ERP) và khác bot Pancake của tổ chức nhà (`connector_pancake`). Giá và tồn luôn đọc từ ERP qua công cụ, không nằm trong lời nhắc. Mọi lượt ghi (khách, đơn) đi qua ĐÚNG lõi tạo tay của khách / đơn — không đường ghi thứ hai. Tắt cho tổ chức nhà (0180).",
+  },
 ];
 
 /**
@@ -666,3 +693,6 @@ export function resolveFeature(featureKey: string, enabledModules: ReadonlySet<M
 export function permissionsOwnedByDisabledModules(enabled: ReadonlySet<ModuleKey>): string[] {
   return PLATFORM_MODULES.filter((m) => !enabled.has(m.key)).flatMap((m) => m.permissions);
 }
+
+/** Module tổ chức NHÀ phải đang bật cho `/api/health` nói "khoẻ" — mọi module trừ module `homeOptIn` (0180). */
+export const HOME_EXPECTED_MODULES: readonly ModuleKey[] = PLATFORM_MODULES.filter((m) => !m.homeOptIn).map((m) => m.key);

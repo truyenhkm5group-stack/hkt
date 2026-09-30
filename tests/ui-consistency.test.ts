@@ -255,6 +255,8 @@ export function testNavigationCoverage() {
     // Pilot bán buôn: form TẠO sản phẩm tay — vào từ nút 'Tạo sản phẩm' ở đầu /products, chỉ hiện khi tổ chức KHÔNG bật
     // connector_pancake và người xem có products:write (cùng cổng productCreateGate với trang và server action).
     "/products/new": "nút 'Tạo sản phẩm' ở đầu trang /products (chỉ khi không bật Pancake + có products:write)",
+    // Nhập sản phẩm hàng loạt từ tệp — vào từ nút 'Nhập từ tệp' cạnh 'Tạo sản phẩm', cùng cổng productCreateGate.
+    "/products/import": "nút 'Nhập từ tệp' ở đầu trang /products (chỉ khi không bật Pancake + có products:write)",
     // Pilot P0 #3: form TẠO đơn tay — vào từ nút 'Tạo đơn hàng' ở đầu /orders, chỉ hiện khi tổ chức KHÔNG đồng bộ đơn
     // (orgHasSyncedSource) và người xem có orders:write (cùng cổng manualOrderGate với trang và server action).
     "/orders/new": "nút 'Tạo đơn hàng' ở đầu trang /orders (chỉ khi không đồng bộ đơn + có orders:write)",

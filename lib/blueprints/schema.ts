@@ -128,6 +128,7 @@ const actionZ = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("notify"), message: text(500) }),
   z.strictObject({ kind: z.literal("set_custom_value"), field: fieldKeyZ, value: z.unknown() }),
+  z.strictObject({ kind: z.literal("send_message"), connectorKey: text(60), destination: text(120).optional(), template: text(2000) }),
 ]);
 
 const workflowZ = z.strictObject({

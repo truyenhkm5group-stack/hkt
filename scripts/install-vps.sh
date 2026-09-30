@@ -194,6 +194,17 @@ if [ -n "${PLATFORM_SECRETS_KEY_PREVIOUS:-}" ]; then
   esac
 fi
 
+# ═══ TÊN MIỀN CON CỦA TỔ CHỨC — PLATFORM_BASE_DOMAIN (0180 · docs/platform/self-service-journey.md) ═══
+# Rỗng ⇒ GIỮ nguyên (mặc định: không định tuyến theo tên miền con). Chỉ nhận tên miền thuần (chữ, số, chấm, gạch) — ký tự
+# khác ⇒ không ghi. Bật thật cần thêm bản ghi DNS `*.<miền>` trỏ về máy này; khối `*.{$ERP_DOMAIN}` của Caddyfile hỏi
+# /api/platform/domain-allowed trước khi xin chứng chỉ, nên host lạ không bao giờ được cấp.
+if [ -n "${PLATFORM_BASE_DOMAIN:-}" ]; then
+  case "$PLATFORM_BASE_DOMAIN" in
+    *[!A-Za-z0-9.-]*) warn "PLATFORM_BASE_DOMAIN có ký tự lạ — KHÔNG ghi (giữ giá trị cũ)." ;;
+    *) upsert_env PLATFORM_BASE_DOMAIN "${PLATFORM_BASE_DOMAIN}"; say "PLATFORM_BASE_DOMAIN: ${PLATFORM_BASE_DOMAIN}" ;;
+  esac
+fi
+
 # ═══ CÔNG TẮC AN TOÀN — FAIL-CLOSED: VARIABLE BỊ XOÁ / RỖNG ⇒ TẮT ═══
 #
 # LỖI ĐÃ SỬA (24/09/2026): ba công tắc dưới đây từng đi chung luật "rỗng thì giữ nguyên giá trị cũ"

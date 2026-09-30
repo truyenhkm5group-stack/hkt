@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { KeyRound, ShieldCheck, UserCheck, Users } from "lucide-react";
 import { CreateUserDialog } from "@/app/(dashboard)/settings/users/user-dialog";
+import { InvitesPanel, InviteUserDialog, type InviteRow } from "@/app/(dashboard)/settings/users/invites-panel";
 import { UsersTable } from "@/app/(dashboard)/settings/users/users-table";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -16,19 +17,21 @@ import { listUsers } from "@/lib/queries/users";
 import { membershipOf } from "@/lib/org/membership";
 import { listDepartments } from "@/lib/queries/work";
 import { listAccessRoles, listPositions, listUserAccess } from "@/lib/queries/access";
+import { listUserInvites } from "@/lib/users/invites";
 import type { UserDept } from "@/app/(dashboard)/settings/users/department-cell";
 
 export const metadata = { title: "Người dùng" };
 
 export default async function UsersPage() {
   const user = await requirePermission("users:manage");
-  const [{ rows, activeAdmins }, templates, departments, accessRoles, positions, accessByUserRow] = await Promise.all([
+  const [{ rows, activeAdmins }, templates, departments, accessRoles, positions, accessByUserRow, invites] = await Promise.all([
     listUsers(),
     loadRoleTemplates(),
     listDepartments(),
     listAccessRoles(),
     listPositions(),
     listUserAccess(),
+    listUserInvites(),
   ]);
 
   /*
@@ -51,6 +54,20 @@ export default async function UsersPage() {
   const positionOptions = positions.filter((p) => p.active).map((p) => ({ id: p.id, name: p.name, hint: p.departmentName }));
   const chuaCoChucDanh = rows.filter((u) => u.active && !accessByUserRow[u.id]?.positionId).length;
   const active = rows.filter((u) => u.active).length;
+  // Lời mời: vai trò tuỳ chỉnh hiện bằng TÊN hiện tại của nó (mã lưu ở lời mời); vai trò đã bị xoá thì hiện mã.
+  const roleNameByCode = new Map(accessRoles.map((r) => [r.code, r.name]));
+  const inviteRows: InviteRow[] = invites.map((i) => ({
+    id: i.id,
+    email: i.email,
+    roleLabel: i.accessRoleCode ? `Vai trò tuỳ chỉnh: ${roleNameByCode.get(i.accessRoleCode) ?? i.accessRoleCode}` : ROLE_LABEL[i.role],
+    invitedByEmail: i.invitedByEmail,
+    createdAt: i.createdAt.toISOString(),
+    expiresAt: i.expiresAt.toISOString(),
+    acceptedAt: i.acceptedAt ? i.acceptedAt.toISOString() : null,
+    status: i.status,
+  }));
+  const invitesActive = invites.filter((i) => i.status === "ACTIVE").length;
+  const inviteRoleOptions = accessRoles.filter((r) => r.active && r.baseRole !== "ADMIN").map((r) => ({ code: r.code, name: r.name, hint: `${r.permissions.length} quyền · nền ${ROLE_LABEL[r.baseRole]}` }));
   const byRole = ROLE_ORDER.map((role) => ({ role, count: rows.filter((u) => u.role === role && u.active).length })).filter((r) => r.count > 0);
 
   return (
@@ -67,6 +84,7 @@ export default async function UsersPage() {
                 <KeyRound className="size-4" /> Đổi mật khẩu của tôi
               </Link>
             </Button>
+            <InviteUserDialog customRoles={inviteRoleOptions} />
             <CreateUserDialog />
           </>
         }
@@ -99,6 +117,14 @@ export default async function UsersPage() {
           roleOptions={roleOptions}
           positionOptions={positionOptions}
         />
+      </SectionCard>
+
+      <SectionCard
+        title="Lời mời"
+        description={invitesActive ? `${invitesActive} lời mời còn hạn chưa được nhận — mỗi lời mời giữ một chỗ trong hạn mức người dùng của gói.` : "Mời nhân viên bằng liên kết: họ tự đặt mật khẩu, bạn không phải biết mật khẩu của ai."}
+        hint="Liên kết mời dùng một lần, hạn 7 ngày, chỉ hiện một lần lúc tạo — ERP chỉ giữ bản băm. ERP chưa tự gửi thư: bạn gửi liên kết cho nhân viên qua kênh của mình. Thu hồi ở đây là liên kết chết ngay."
+      >
+        <InvitesPanel invites={inviteRows} />
       </SectionCard>
 
       <SectionCard

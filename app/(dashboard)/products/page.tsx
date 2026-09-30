@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, Plus, ShoppingBag, Upload, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -48,11 +48,18 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <>
             {/* Tạo tay: CHỈ tổ chức không đồng bộ sản phẩm (cùng cổng với trang /products/new và action — productCreateGate). */}
             {createGate.allowed ? (
-              <Button asChild size="sm">
-                <Link href="/products/new">
-                  <Plus className="size-4" /> Tạo sản phẩm
-                </Link>
-              </Button>
+              <>
+                <Button asChild size="sm">
+                  <Link href="/products/new">
+                    <Plus className="size-4" /> Tạo sản phẩm
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/products/import">
+                    <Upload className="size-4" /> Nhập từ tệp
+                  </Link>
+                </Button>
+              </>
             ) : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/products?${exportQuery}`}>

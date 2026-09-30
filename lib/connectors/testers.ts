@@ -155,10 +155,18 @@ export async function testOpenAiKey(input: { secrets: Record<string, string> }, 
   return probeModels(deps.fetch ?? fetch, OPENAI_MODELS_URL, { authorization: `Bearer ${key}` }, "OpenAI", [key]);
 }
 
+/** Hộp thử nhắn tin (0180): không gọi mạng — "kiểm tra" chỉ xác nhận tên kênh hợp lệ. Tin thử thật đi qua màn hình Thông báo nhóm. */
+export async function testSandboxMessaging(input: { settings: Record<string, string> }): Promise<TesterResult> {
+  const name = (input.settings.channelName ?? "").trim();
+  if (!name) return { ok: false, message: "Thiếu tên kênh thử." };
+  return { ok: true, message: `Hộp thử «${name}» sẵn sàng — CHẾ ĐỘ THỬ: tin nằm trong ERP (Cài đặt → Thông báo nhóm), không gửi ra ngoài.` };
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
   "telegram-bot": (input, deps) => testTelegramBot(input, deps),
   "anthropic-byok": (input, deps) => testAnthropicKey(input, deps),
   "openai-byok": (input, deps) => testOpenAiKey(input, deps),
+  "sandbox-messaging": (input) => testSandboxMessaging(input),
 };

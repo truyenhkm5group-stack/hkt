@@ -9,7 +9,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getCurrentUser, requireUser } from "@/lib/auth/session";
 import { orgTabMetadata } from "@/lib/branding/copy";
 import { getOrgBrand } from "@/lib/branding/service";
+import Link from "next/link";
 import { loadDynamicNav } from "@/lib/pages/nav-loader";
+import { findOrganization } from "@/lib/platform/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const dynamicPages = await loadDynamicNav(user);
   // Thương hiệu (Phase 10 · §4): chỉ tổ chức KHÔNG phải nhà — nhà nhận `null` và giữ nguyên giao diện.
   const brand = await getOrgBrand(user);
+  // BẢN NHÁP (0180): tổ chức tự tạo chưa bấm Xuất bản — ERP đang dùng chính là bản xem trước. Chỉ đọc sổ tổ chức (đệm).
+  const org = user.organization && !user.organization.isHome ? await findOrganization(user.organization.code) : null;
+  const draft = org?.publishState === "DRAFT";
   return (
     <TooltipProvider delayDuration={200}>
       <NavProgressProvider>
@@ -56,6 +61,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             */}
             <StaleWhileRefreshing asChild>
               <main className="w-full min-w-0 flex-1 space-y-6 px-3 pb-10 pt-3 sm:px-5 lg:px-6 2xl:px-8">
+                {draft ? (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" data-testid="draft-banner">
+                    BẢN NHÁP — ERP này chưa xuất bản: chưa có tên miền riêng, trang chat công khai chưa nhận khách.{" "}
+                    <Link href="/setup" className="font-semibold underline underline-offset-2">
+                      Thiết lập & xuất bản
+                    </Link>
+                  </p>
+                ) : null}
                 <DetailCrumb />
                 {children}
               </main>

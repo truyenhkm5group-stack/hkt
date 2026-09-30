@@ -215,3 +215,9 @@ export const ERP_HEADER_PREFIX = "x-erp-";
  * xạ sạch sang module.
  */
 export const ERP_PATH_HEADER = "x-erp-path";
+
+/**
+ * Tên miền con của host đang mở (0180): `hslc` khi host là `hslc.<PLATFORM_BASE_DOMAIN>`. Middleware đặt (sau khi xoá mọi
+ * `x-erp-*` client gửi); máy chủ tra slug → tổ chức ĐÃ XUẤT BẢN (lib/platform/host-org.ts). Vắng mặt = miền chính.
+ */
+export const ERP_HOST_SLUG_HEADER = "x-erp-host-slug";

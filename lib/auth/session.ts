@@ -11,6 +11,7 @@ import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
+import { hostOrganization } from "@/lib/platform/host-org";
 import { ERP_PATH_HEADER, SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, SESSION_ORG_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
 import { DENY_REASON_PARAM, MODULE_DISABLED_PATH, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
 import { moduleOfPath, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
@@ -239,6 +240,13 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
     throw error;
   }
   if ("denied" in ket) return ket;
+  /*
+    HOST ⇄ PHIÊN (0180). Trên tên miền con `<slug>.<miền gốc>`, phiên phải thuộc ĐÚNG tổ chức đã xuất bản với slug đó.
+    Cookie là host-only nên thường không bao giờ lệch — nhưng slug đổi / tổ chức rút xuất bản / cookie bị chép tay thì
+    lệch, và khi lệch thì không chọn bên nào. Miền chính (không slug) ⇒ không kiểm, y như trước.
+  */
+  const host = await hostOrganization();
+  if (host.slug && (!host.org || host.org.code !== ket.user.organization?.code)) return { denied: "HOST_MISMATCH" };
   /*
     CỔNG MODULE THEO ĐƯỜNG DẪN (target-architecture P8, P9). Đứng SAU mọi kiểm danh tính: người bị
     khoá / bị thu hồi phải nghe đúng câu của họ, không phải "module chưa bật". Đọc cùng tập module mà

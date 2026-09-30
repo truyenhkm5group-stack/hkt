@@ -99,6 +99,7 @@ export const ACTION_KIND_LABEL: Record<WorkflowAction["kind"], string> = {
   create_task: "Tạo việc",
   notify: "Báo trong ERP",
   set_custom_value: "Ghi giá trị",
+  send_message: "Gửi tin nhóm chat",
 };
 
 export const TRIGGER_KIND_LABEL: Record<WorkflowTrigger["kind"], string> = {
@@ -176,7 +177,8 @@ export type ConditionRowDraft = { field: string; op: ListFilterOp; value: string
 export type ActionDraft =
   | { kind: "create_task"; title: string; summary: string; departmentCode: string; priority: TaskPriority; dueInHours: string }
   | { kind: "notify"; message: string }
-  | { kind: "set_custom_value"; field: string; value: string };
+  | { kind: "set_custom_value"; field: string; value: string }
+  | { kind: "send_message"; connectorKey: string; destination: string; template: string };
 
 export type RuleDraft = {
   name: string;
@@ -207,6 +209,7 @@ export function blankRuleDraft(): RuleDraft {
 export function blankAction(kind: ActionDraft["kind"]): ActionDraft {
   if (kind === "create_task") return { kind, title: "", summary: "", departmentCode: "", priority: "NORMAL", dueInHours: "" };
   if (kind === "notify") return { kind, message: "" };
+  if (kind === "send_message") return { kind, connectorKey: "", destination: "", template: "" };
   return { kind, field: "", value: "" };
 }
 
@@ -237,6 +240,7 @@ function actionToDraft(a: WorkflowAction): ActionDraft {
     return { kind: a.kind, title: a.title, summary: a.summary ?? "", departmentCode: a.departmentCode ?? "", priority: a.priority ?? "NORMAL", dueInHours: a.dueInHours === undefined ? "" : String(a.dueInHours) };
   }
   if (a.kind === "notify") return { kind: a.kind, message: a.message };
+  if (a.kind === "send_message") return { kind: a.kind, connectorKey: a.connectorKey, destination: a.destination ?? "", template: a.template };
   return { kind: a.kind, field: a.field, value: valueToText(a.value) };
 }
 
@@ -328,6 +332,7 @@ export function draftToInput(draft: RuleDraft, catalog: readonly CatalogField[])
       };
     }
     if (a.kind === "notify") return { kind: a.kind, message: a.message.trim() };
+    if (a.kind === "send_message") return { kind: a.kind, connectorKey: a.connectorKey, ...(a.destination.trim() ? { destination: a.destination.trim() } : {}), template: a.template.trim() };
     return { kind: a.kind, field: a.field, value: parseValue(a.value, "eq", typeOf(`custom:${a.field}`, catalog)) };
   });
   return {
@@ -392,6 +397,9 @@ export function checkRuleDraft(draft: RuleDraft, opts: { creating: boolean; take
       if (h && !(Number.isInteger(Number(h)) && Number(h) >= 1)) errors.push({ field: `actions.${i}.dueInHours`, message: "Hạn tính bằng giờ nguyên, từ 1 trở lên." });
     } else if (a.kind === "notify") {
       if (!a.message.trim()) errors.push({ field: `actions.${i}.message`, message: "Nội dung báo không được để trống." });
+    } else if (a.kind === "send_message") {
+      if (!a.connectorKey) errors.push({ field: `actions.${i}.connectorKey`, message: "Chọn kết nối nhắn tin." });
+      if (!a.template.trim()) errors.push({ field: `actions.${i}.template`, message: "Mẫu tin không được để trống." });
     } else if (!a.field) errors.push({ field: `actions.${i}.field`, message: "Chọn field tuỳ biến để ghi." });
   });
   if (draft.gateOn && draft.gateReason.trim().length < 3) errors.push({ field: "gate.reason", message: "Nói lý do cần người duyệt — người duyệt đọc câu này trước khi bấm." });
@@ -430,6 +438,7 @@ export function liveConsequences(actions: readonly WorkflowAction[], gate: Workf
   if (kinds.has("create_task")) out.push("TẠO VIỆC THẬT trong hàng đợi của phòng được chọn — người trong phòng sẽ thấy và phải xử lý.");
   if (kinds.has("notify")) out.push("GỬI BÁO THẬT trong ERP tới người của phòng / quản trị.");
   if (kinds.has("set_custom_value")) out.push("GHI GIÁ TRỊ THẬT vào field tuỳ biến của bản ghi — người xem bản ghi thấy giá trị mới.");
+  if (kinds.has("send_message")) out.push("GỬI TIN THẬT ra nhóm chat của tổ chức (Lark / Telegram) — người ngoài ERP đọc được ngay; hộp thử thì tin chỉ nằm trong ERP.");
   if (gate) out.push("Trước mỗi lượt, máy xin DUYỆT và chỉ làm sau khi một người duyệt.");
   return out;
 }

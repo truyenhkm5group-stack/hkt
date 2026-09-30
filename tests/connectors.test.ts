@@ -114,7 +114,8 @@ export function testRegistryMatchesCode(): { perKind: Record<string, number>; ho
     if (isOrgConfigurable(c)) {
       assert.equal(c.health, "testConnection", `${c.key}: kết nối theo tổ chức phải có hàm kiểm tra thật — bật chỉ sau khi kiểm tra đạt`);
       assert.ok(ORG_CONNECTION_TESTERS[c.key], `${c.key}: thiếu hàm trong ORG_CONNECTION_TESTERS`);
-      assert.ok(c.settings.some((f) => f.secret), `${c.key}: kết nối theo tổ chức lưu ở org_connections phải có ít nhất một ô bí mật`);
+      // Ngoại lệ DUY NHẤT: connector khai `auth: "NONE"` (hộp thử nhắn tin, 0180) — không có gì để giữ bí mật.
+      assert.ok(c.settings.some((f) => f.secret) || c.auth === "NONE", `${c.key}: kết nối theo tổ chức lưu ở org_connections phải có ít nhất một ô bí mật`);
     }
     for (const f of c.settings) if (f.pattern) new RegExp(f.pattern); // biểu thức phải biên dịch được
   }
@@ -693,7 +694,10 @@ export async function testConnectionsTwoOrgs() {
       const viewer: SessionUser = { ...adminA, role: "VIEWER", permissions: ["dashboard:view"] };
       assert.ok("error" in (await saveConnection(viewer, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL } })), "thiếu settings:manage ⇒ từ chối");
       assert.ok("error" in (await loadConnectionsView(viewer)), "thiếu settings:manage ⇒ không xem");
-      assert.ok("error" in (await saveConnection({ ...adminA, modules: ["core", "work", "customers", "products", "orders"] }, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL } })), "module của connector tắt ⇒ từ chối");
+      // 0180: kết nối nhắn tin theo tổ chức thuộc LÕI (luật tự động «báo nhóm» là của lõi, không của module «Cần xử lý») —
+      // không tắt được theo module. Cổng module của connector vẫn nằm trong `guard()`; ở đây khoá lại rằng cả ba kết nối nhắn
+      // tin theo tổ chức đều khai module lõi.
+      for (const k of ["lark-webhook", "telegram-bot", "sandbox-messaging"]) assert.equal(findConnector(k)?.module, "core", `${k}: kết nối nhắn tin theo tổ chức thuộc lõi`);
       assert.ok("error" in (await saveConnection({ ...adminA, organization: { code: B, name: "B", isHome: false } }, { connectorKey: "lark-webhook", secrets: { webhookUrl: LARK_URL } })), "phiên nói B mà ngữ cảnh là A ⇒ từ chối");
       assert.ok("error" in (await saveConnection(adminA, { connectorKey: "pancake-pos", secrets: { apiKey: "x".repeat(20) } })), "HOME_ONLY không cấu hình được");
       assert.ok("error" in (await saveConnection(adminA, { connectorKey: "lark-webhook", secrets: { webhookUrl: "https://evil.vn/open-apis/bot/v2/hook/aaaa1111" } })), "URL ngoài máy chủ Lark ⇒ từ chối ngay lúc lưu");

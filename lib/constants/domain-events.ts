@@ -63,6 +63,9 @@ export const METADATA_RECORD_SUBJECT = "custom_record";
 /** Lõi dịch vụ bản ghi tuỳ biến (Phase 6) — nơi DUY NHẤT phát `custom_record.*`. */
 const CUSTOM_RECORD_EMITTER = "lib/objects/records.ts";
 
+/** Lõi đơn tạo tay (0180) — nơi DUY NHẤT phát `order.*`. */
+const ORDER_EMITTER = "lib/records/order-create.ts";
+
 /** Tệp lõi dịch vụ của sổ mẫu — nơi DUY NHẤT phát `model.*`. */
 const MODEL_EMITTER = "lib/models/service.ts";
 
@@ -211,6 +214,19 @@ export const DOMAIN_EVENTS = [
     emitter: CUSTOM_RECORD_EMITTER,
     why: "Bản ghi của đối tượng tuỳ biến bị xoá mềm (đặt deleted_at) — dữ liệu còn nguyên, chỉ thôi hiện và thôi nhận ghi.",
   },
+  /*
+    Hành trình tự phục vụ (0180): LIVE. CHỈ đơn TẠO TAY / do chatbot bán hàng của tổ chức lên (id `erp-`) — tổ chức
+    không đồng bộ đơn từ Pancake không có nguồn trigger nào khác cho "đơn vừa chốt". Đơn Pancake KHÔNG phát ở đây
+    (luật 51: không phát trong giao dịch của webhook / job đồng bộ nóng; nhật ký đơn đồng bộ đã có riêng). Phát trong
+    CÙNG giao dịch với lượt ghi đơn (lib/records/order-create.ts). Khoá chống trùng:
+    `order.confirmed:<id>` (một lần cho một đơn) · `order.updated:<id>:<vân tay phần thay đổi>` (gửi lại đúng lượt sửa
+    ấy không đẻ sự kiện thứ hai) · `order.cancelled:<id>`. Payload `{ orderId, stage, wasConfirmed, changes[] }` —
+    `changes` chỉ nêu TÊN phần đổi (dòng hàng / địa chỉ / tiền thu), không mang giá trị. Nguồn trigger của luật
+    «báo nhóm vận hành» (lib/messaging/presets.ts).
+  */
+  { name: "order.confirmed", subjectType: "order", owner: "PLATFORM", status: "LIVE", emitter: ORDER_EMITTER, why: "Đơn tạo tay / do chatbot lên vừa được CHỐT với khách (chuyển «Đã xác nhận») — giữ hàng ở cột khả dụng, báo nhóm vận hành." },
+  { name: "order.updated", subjectType: "order", owner: "PLATFORM", status: "LIVE", emitter: ORDER_EMITTER, why: "Đơn ĐÃ CHỐT bị sửa ở phần vận hành phải biết (dòng hàng / số lượng, người nhận / địa chỉ, tiền thu) — báo cập nhật cho nhóm." },
+  { name: "order.cancelled", subjectType: "order", owner: "PLATFORM", status: "LIVE", emitter: ORDER_EMITTER, why: "Đơn tạo tay bị huỷ — nhả hàng đang giữ ở cột khả dụng, báo huỷ cho nhóm nếu đơn đã từng chốt." },
 ] as const satisfies readonly DomainEventSpec[];
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[number]["name"];
@@ -246,6 +262,9 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "custom_record.created": "Tạo bản ghi",
   "custom_record.updated": "Sửa bản ghi",
   "custom_record.deleted": "Xoá bản ghi",
+  "order.confirmed": "Đơn đã chốt",
+  "order.updated": "Đơn đã chốt được sửa",
+  "order.cancelled": "Đơn bị huỷ",
 };
 
 export function domainEventLabel(name: string): string {

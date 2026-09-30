@@ -10,6 +10,9 @@
  *                          này (tin do luật gửi không có "điều kiện hết" để máy đóng hộ).
  *  · `set_custom_value` ⇒ `saveCustomValues` với người ghi là MÁY (id null) + `causationId` = id lượt chạy — vẫn
  *                          qua kiểm hợp lệ, chuyển trạng thái, khoá lạc quan.
+ *  · `send_message`     ⇒ `deliverMessage` (lib/messaging/service.ts): MỘT tin tới nhóm chat qua kết nối nhắn tin
+ *                          ĐANG BẬT của tổ chức, khoá chống trùng `workflow:<id lượt chạy>:<vị trí>` trong sổ
+ *                          `messaging_deliveries` (dòng chèn TRƯỚC khi gọi nhà cung cấp — at-most-once).
  *
  * Lỗi ở một hành động ⇒ bước đó `FAILED`, các bước sau `SKIPPED`, lượt chạy `FAILED`. Hàm KHÔNG ném: một luật
  * hỏng không được làm sập job cảnh báo đang chở nó.
@@ -22,7 +25,11 @@
  */
 import { getDb, schema } from "@/db";
 import type { DepartmentCode } from "@/lib/constants/departments";
+import { eq } from "drizzle-orm";
 import { saveCustomValues } from "@/lib/metadata/values";
+import { orderMessageVars } from "@/lib/messaging/order-message";
+import { deliverMessage } from "@/lib/messaging/service";
+import { isMessagingConnector, renderTemplate } from "@/lib/messaging/types";
 import { createWorkflowTask } from "@/lib/work/service";
 import { machineEmailOf } from "@/lib/workflow/rules";
 import type { SubjectRef } from "@/lib/workflow/subject";
@@ -56,6 +63,10 @@ export const ACTION_RETRY_SAFETY: Record<WorkflowAction["kind"], { retrySafe: bo
     retrySafe: true,
     why: "Ghi lại CÙNG giá trị ⇒ saveCustomValues thấy changed = [] ⇒ không tăng phiên bản, không nhật ký, không phát custom_status.changed lần hai.",
   },
+  send_message: {
+    retrySafe: true,
+    why: "messaging_deliveries.dedupe_key UNIQUE = workflow:<id lượt chạy>:<vị trí>, dòng chèn TRƯỚC khi gọi nhà cung cấp: lượt làm lại gặp dòng SENT ⇒ không gửi; gặp PENDING (chết giữa lúc gọi) ⇒ UNKNOWN, KHÔNG gửi lại — thà thiếu một tin còn hơn hai tin.",
+  },
 };
 
 /** Hành động CHƯA XONG (chưa `DONE` trong `previous`) nào không làm lại an toàn — `null` = làm lại được. Hàm THUẦN. */
@@ -85,7 +96,18 @@ export function describeAction(a: WorkflowAction, label: string): string {
       return `Gửi MỘT thông báo trong ERP: "${a.message}" — ${label}`;
     case "set_custom_value":
       return `Ghi "${a.field}" = ${short(a.value)} — ${label}`;
+    case "send_message":
+      return `Gửi MỘT tin tới nhóm chat qua «${a.connectorKey}»${a.destination ? ` (nơi nhận ${a.destination})` : ""} — ${label}`;
   }
+}
+
+/** Sự kiện đã kích hoạt lượt chạy (tên + payload) — đọc theo `trigger_ref` của lượt. `null` khi lượt không do sự kiện. */
+async function triggerEventOf(runId: string): Promise<{ name: string; payload: Record<string, unknown> } | null> {
+  const db = await getDb();
+  const [run] = await db.select({ ref: schema.workflowRuns.triggerRef }).from(schema.workflowRuns).where(eq(schema.workflowRuns.id, runId)).limit(1);
+  if (!run?.ref) return null;
+  const [ev] = await db.select({ name: schema.domainEvents.name, payload: schema.domainEvents.payload }).from(schema.domainEvents).where(eq(schema.domainEvents.id, run.ref)).limit(1);
+  return ev ? { name: ev.name, payload: (ev.payload ?? {}) as Record<string, unknown> } : null;
 }
 
 /** Các bước DỰ KIẾN (PLANNED) của một luật — không ghi gì. */
@@ -136,6 +158,30 @@ async function runOne(ctx: ActionContext, a: WorkflowAction, i: number): Promise
       const r = await saveCustomValues(ctx.subject.objectKey, ctx.subject.recordId, { [a.field]: a.value }, { kind: "MACHINE", id: null, email: machine }, { causationId: ctx.runId });
       if (!r.ok) return { action: a.kind, status: "FAILED", detail: r.errors.map((e) => e.message).join(" · ") || `Không ghi được (${r.code})` };
       return { action: a.kind, status: "DONE", detail: r.changed.length ? `Đã ghi "${a.field}" = ${short(a.value)}` : `"${a.field}" đã mang giá trị đó — không đổi gì`, ref: `${ctx.subject.objectKey}:${ctx.subject.recordId}` };
+    }
+    case "send_message": {
+      if (!isMessagingConnector(a.connectorKey)) return { action: a.kind, status: "FAILED", detail: `«${a.connectorKey}» không phải kết nối nhắn tin theo tổ chức.` };
+      const ev = await triggerEventOf(ctx.runId);
+      const vars: Record<string, string> = { rule_name: ctx.rule.name, subject: ctx.label, event: ev?.name ?? "" };
+      if (ctx.subject?.objectKey === "order") {
+        const orderVars = await orderMessageVars(ctx.subject.recordId, ev);
+        if (!orderVars) return { action: a.kind, status: "FAILED", detail: `Không đọc được đơn ${ctx.subject.recordId} để dựng tin.` };
+        Object.assign(vars, orderVars);
+      }
+      const dedupeKey = `workflow:${ctx.runId}:${i}`;
+      const r = await deliverMessage({
+        connectorKey: a.connectorKey,
+        destination: a.destination?.trim() || null,
+        body: renderTemplate(a.template, vars),
+        dedupeKey,
+        event: ev?.name ?? null,
+        subject: ctx.subject ? { type: ctx.subject.objectKey, id: ctx.subject.recordId } : null,
+        runId: ctx.runId,
+        createdBy: machine,
+      });
+      if (r.status === "FAILED") return { action: a.kind, status: "FAILED", detail: `Không gửi được tin: ${r.error}`, ref: dedupeKey };
+      if (r.status === "UNKNOWN") return { action: a.kind, status: "FAILED", detail: "Lượt trước dừng giữa lúc gửi — không biết tin đã tới chưa, KHÔNG gửi lại để tránh trùng. Xem sổ gửi tin.", ref: dedupeKey };
+      return { action: a.kind, status: "DONE", detail: r.status === "DUPLICATE" ? "Tin đã gửi ở lượt trước — không gửi lại" : `Đã gửi tin${r.destination ? ` tới ${r.destination}` : ""}`, ref: dedupeKey };
     }
   }
 }

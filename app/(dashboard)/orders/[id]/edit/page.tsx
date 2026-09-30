@@ -28,6 +28,8 @@ export default async function EditManualOrderPage({ params }: { params: Promise<
     orderDiscount: values.orderDiscount ? String(values.orderDiscount) : "",
     shippingFee: values.shippingFee ? String(values.shippingFee) : "",
     lines: values.lines.map((l) => ({ variantId: l.variantId, quantity: String(l.quantity), unitPrice: String(l.unitPrice), discount: l.discount ? String(l.discount) : "" })),
+    // Người nhận ĐANG LƯU trên đơn (0180) — sửa địa chỉ ở đây là sửa đơn này, không sửa hồ sơ khách.
+    recipient: values.recipient,
   };
   return (
     <div className="mx-auto max-w-4xl space-y-5">

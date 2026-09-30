@@ -438,7 +438,10 @@ import { testPlatformIsolation } from "./platform-isolation.test";
 import { testPlatformHardening } from "./platform-hardening.test";
 import { testPlatformUi } from "./platform-ui.test";
 import { testPilotProducts } from "./pilot-products.test";
+import { testProductImport } from "./product-import.test";
 import { testPilotOrders } from "./pilot-orders.test";
+import { testSelfServiceJourney } from "./self-service-journey.test";
+import { testUserInvites } from "./user-invites.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
@@ -2580,10 +2583,18 @@ async function main() {
   // phẩm + mẫu mã tay (erp-, SKU duy nhất, products:write) ⇒ phiếu nhập đơn giá khai tay ⇒ sổ kho; nhà: không nút, action từ
   // chối, giá báo MKT, chữ trang lõi nguyên từng ký tự; nút đồng bộ theo nguồn; khách tạo tay sửa được, khách Pancake không.
   await testPilotProducts();
+  // Nhập sản phẩm hàng loạt từ tệp (gap P0 «Import Products»): hai tổ chức THẬT `pi-food` / `pi-other` (không Pancake; tự cấp,
+  // tự dọn) — CSV + XLSX, chạy thử 0 dòng ghi, SKU tự sinh, field tuỳ biến, MỘT phiếu tồn đầu, nhập lại = đã có; nhà từ chối.
+  await testProductImport();
   // Pilot bán buôn · P0 #3 + P1 #7/#8 + P2 #17/#18: tổ chức THẬT `po-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — đơn tay
   // (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; nhà: action từ chối, marketer 3.9 không đổi
   // khi có đơn erp-; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định; số tiền duyệt; vai trò AI.
   await testPilotOrders();
+  await testSelfServiceJourney();
+  // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
+  // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
+  // song song ⇒ một tài khoản; hạn mức gói lúc tạo (tính ghế đã hứa) và lúc nhận; bảng không chứa mã thô; chặn dò theo IP.
+  await testUserInvites();
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();

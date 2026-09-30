@@ -119,9 +119,9 @@ export async function testLoginThrottle() {
   assert.ok(trang.includes("safeNextPath(") && !trang.includes('params.next.startsWith("/")'), "trang /login (đã đăng nhập) cũng phải đi qua safeNextPath");
   assert.ok(auth.includes("redirect(safeNextPath(next))"), "loginAction phải chuyển hướng qua safeNextPath");
   // Trang /login công khai dùng chung mọi tổ chức: có tổ chức thứ hai thì KHÔNG in trạng thái Pancake / Viettel Post của
-  // nhà và không in gợi ý tên biến .env (một tổ chức ⇒ y hệt trước).
+  // nhà và không in gợi ý tên biến .env (một tổ chức ⇒ y hệt trước). Trên tên miền con của tổ chức khách (0180) cũng không.
   const tuyChon = trang.slice(trang.indexOf("{homeOnly ? ("));
-  assert.ok(trang.includes("const homeOnly = !showOrgField;") && tuyChon.indexOf("status.pancake") > 0 && tuyChon.indexOf("status.viettelPost") > 0, "trạng thái tích hợp của nhà chỉ nằm trong nhánh homeOnly");
+  assert.ok(trang.includes("const homeOnly = !showOrgField && !host.org;") && tuyChon.indexOf("status.pancake") > 0 && tuyChon.indexOf("status.viettelPost") > 0, "trạng thái tích hợp của nhà chỉ nằm trong nhánh homeOnly");
   assert.equal(trang.split("status.").length - 1, tuyChon.split("status.").length - 1, "không dòng nào in status.* ngoài nhánh homeOnly");
   assert.ok(trang.includes("showSetupHint={homeOnly}") && readFileSync("app/login/login-form.tsx", "utf8").includes("{showSetupHint ? <p"), "gợi ý ADMIN_EMAIL / .env chỉ hiện khi một tổ chức");
 

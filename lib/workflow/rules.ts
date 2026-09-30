@@ -19,6 +19,7 @@
  */
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { GENERIC_MESSAGE_VAR_KEYS, isMessagingConnector, MESSAGE_TEMPLATE_MAX, ORDER_MESSAGE_VAR_KEYS, unknownTemplateKeys } from "@/lib/messaging/types";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
@@ -110,6 +111,14 @@ const actionZ = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("notify"), message: z.string().trim().min(1, "thông báo không được rỗng").max(500) }).strict(),
   z.object({ kind: z.literal("set_custom_value"), field: z.string().trim().min(1, "chọn field").max(60), value: z.unknown() }).strict(),
+  z
+    .object({
+      kind: z.literal("send_message"),
+      connectorKey: z.string().trim().min(1, "chọn kết nối nhắn tin").max(60),
+      destination: z.string().trim().max(120).optional(),
+      template: z.string().trim().min(1, "mẫu tin không được rỗng").max(MESSAGE_TEMPLATE_MAX),
+    })
+    .strict(),
 ]);
 
 const gateZ = z.object({ kind: z.literal("approval"), reason: z.string().trim().min(3, "nói vì sao cần người duyệt").max(300) }).strict();
@@ -266,6 +275,11 @@ export async function validateRuleInput(raw: unknown): Promise<{ ok: true; rule:
   for (const [i, a] of actions.entries()) {
     const path = `actions.${i}`;
     if (a.kind === "create_task" && a.departmentCode && !(await departmentExists(a.departmentCode))) errors.push({ field: `${path}.departmentCode`, message: `Phòng ban "${a.departmentCode}" không tồn tại.` });
+    if (a.kind === "send_message") {
+      if (!isMessagingConnector(a.connectorKey)) errors.push({ field: `${path}.connectorKey`, message: `"${a.connectorKey}" không phải kết nối nhắn tin theo tổ chức (Lark / Telegram / hộp thử).` });
+      const unknown = unknownTemplateKeys(a.template, objectKey === "order" ? ORDER_MESSAGE_VAR_KEYS : GENERIC_MESSAGE_VAR_KEYS);
+      if (unknown.length) errors.push({ field: `${path}.template`, message: `Mẫu tin có ô không điền được: ${unknown.map((k) => `{{${k}}}`).join(", ")}.` });
+    }
     if (a.kind === "set_custom_value") {
       if (!objectKey) {
         errors.push({ field: `${path}.field`, message: "Luật này không gắn với một bản ghi có field custom — không ghi giá trị được." });

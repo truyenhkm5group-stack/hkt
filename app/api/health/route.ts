@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb, getPlatformDb } from "@/db";
 import { secretsKeyHealth } from "@/lib/connectors/secrets";
-import { MODULE_KEYS } from "@/lib/constants/platform-modules";
+import { HOME_EXPECTED_MODULES, MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { getEnabledModules } from "@/lib/platform/capabilities";
 import { getHomeOrganization, FALLBACK_HOME_CODE } from "@/lib/platform/organizations";
 import { redactedErrorMessage, runningVersion } from "@/lib/version";
@@ -57,7 +57,8 @@ async function platformHealth() {
     const r = await pdb.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`).catch(() => null);
     const rows = (r as unknown as { rows?: { n: number }[] } | null)?.rows;
     return {
-      ok: controlPlane && home.status === "ACTIVE" && enabled.size === MODULE_KEYS.length,
+      // Nhà phải bật mọi module trừ module «nhà tự chọn» (`homeOptIn`, 0180 — vd AI bán hàng, cố ý TẮT ở nhà).
+      ok: controlPlane && home.status === "ACTIVE" && HOME_EXPECTED_MODULES.every((m) => enabled.has(m)),
       controlPlane,
       homeResolved: home.isHome && home.status === "ACTIVE",
       homeModules: `${enabled.size}/${MODULE_KEYS.length}`,

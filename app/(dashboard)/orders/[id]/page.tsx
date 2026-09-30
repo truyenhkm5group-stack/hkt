@@ -61,7 +61,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
     thieuThongTin ? previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : Promise.resolve(null),
-    chuaGui ? getOrderValidation(order.id) : Promise.resolve(null),
+    // Dải soát nói về đơn POS Pancake (ghép tỉnh / xã để POS đẩy sang ĐVVC). Đơn tạo tay / do chatbot lên (`erp-`) không đi
+    // qua POS — soát nó là in chỉ dẫn «mở đơn trên Pancake» cho một tổ chức không có Pancake (0180).
+    chuaGui && !isManualOrderId(order.id) ? getOrderValidation(order.id) : Promise.resolve(null),
     /*
       TÊN NGƯỜI GHI LỜI HẸN đọc từ `users` QUA KHOÁ (AGENTS.md mục 34) — không lấy từ một ô chữ nào.
       Một lượt tra khoá chính, và chỉ khi đơn thật sự có lời hẹn.
