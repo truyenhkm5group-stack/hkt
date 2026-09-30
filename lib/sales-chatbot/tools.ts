@@ -17,12 +17,12 @@
  * không tự chốt thay khách được.
  */
 import { z } from "zod";
-import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
+import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 
@@ -337,13 +337,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
     case "handoff_to_human": {
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.handoff = { reason: reason.success ? reason.data : "Khách cần nhân viên", at: new Date().toISOString() };
-      if (!simulated) {
-        const db = await getDb();
-        await db
-          .insert(schema.notifications)
-          .values({ kind: "SYSTEM", severity: "warning", title: `Chatbot chuyển khách cho nhân viên`, body: `${state.handoff.reason}${state.customer ? ` — ${state.customer.name} · ${state.customer.phone}` : ""}`, href: `/ai/sales-chatbot?conversation=${ctx.conversationId}`, entityType: "SALES_CHAT", entityId: ctx.conversationId, dedupeKey: `sales-chat:handoff:${ctx.conversationId}`, occurredAt: new Date() })
-          .onConflictDoNothing({ target: schema.notifications.dedupeKey });
-      }
+      if (!simulated) await notifySalesChatHandoff(ctx.conversationId, state.handoff.reason, state.customer, new Date());
       return ok(`${simulated ? "(Thử) " : ""}Chuyển nhân viên`, { handed_off: true, simulated, say_to_customer: ctx.config.handoff.message }, state);
     }
   }

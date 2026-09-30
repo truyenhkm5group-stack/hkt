@@ -22,7 +22,7 @@ import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
-import type { SessionUser } from "@/lib/auth/session";
+import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
 import { FOOD_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/food-commerce";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
@@ -46,7 +46,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { chatTurn, conversationView, historyForModel, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { runWorkflows } from "@/lib/workflow/engine";
 
@@ -417,26 +417,56 @@ async function testJourney() {
       setSalesChatProviderForTests(null);
     }
 
-    // ── Khoá AI của shop hết credit (đo UAT production 30/09/2026) ⇒ khách nhận câu xin lỗi, chủ shop nhận ĐÚNG MỘT
-    // thông báo mỗi ngày, màn hình in lý do đọc được. Quá tải (tự khỏi) KHÔNG báo.
+    // ── U29 · AI không trả lời được (đo UAT production 30/09/2026: khoá AI của shop hết credit giữa buổi) ⇒ khách chỉ
+    // nhận câu xin lỗi + câu chuyển người của shop, hội thoại sang HANDOFF, nhân viên nhận MỘT thông báo gọi lại cho mỗi
+    // khách, chủ shop MỘT cảnh báo mỗi ngày. KHÔNG màn hình nào in lỗi gốc của nhà cung cấp. Quá tải (tự khỏi) không
+    // thêm cảnh báo chủ shop — nhưng khách vẫn được chuyển người, không bị bỏ lơ.
     assert.equal(salesBotError(null), null);
-    assert.equal(salesBotError("429 rate_limit_error")?.notify, false, "quá tải tự khỏi ⇒ không báo");
+    assert.equal(salesBotError("429 rate_limit_error")?.notify, false, "quá tải tự khỏi ⇒ không cảnh báo chủ shop");
     const creditMsg = '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}';
     assert.deepEqual(salesBotError(creditMsg), { kind: "CREDIT", label: SALES_BOT_ERROR_LABEL.CREDIT, notify: true });
     let failWith = creditMsg;
     setSalesChatProviderForTests(() => ({ ...fakeProvider(() => []), complete: async () => { throw new Error(failWith); } }));
     try {
-      const vkErr = visitorKeyOf("uat-khoa-het-credit-0000000000");
-      const e1 = await openConversation("WEB", { visitorKey: vkErr });
-      const alerts = async () => (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:provider:%"))).length;
-      for (const text of ["Chả mực bao nhiêu?", "Còn hàng không em?"]) {
-        const r = await chatTurn(e1.id, text, { channel: "WEB", visitorKey: vkErr });
-        assert.ok(r.ok && /trục trặc/.test(r.view.messages[r.view.messages.length - 1].text), "khách nhận câu xin lỗi, không phải trang lỗi");
-      }
-      assert.equal(await alerts(), 1, "hai khách đâm vào tường ⇒ MỘT thông báo cho chủ shop trong ngày");
+      const ownerAlerts = async () => (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:provider:%"))).length;
+      const RAW = /credit|invalid_request|anthropic|\b400\b|\{"type"|stack|Error:/i;
+      const customer = async (seed: string, text: string) => {
+        const vk = visitorKeyOf(`uat-ai-hong-${seed}-00000000000000`);
+        const c = await openConversation("WEB", { visitorKey: vk });
+        const r = await chatTurn(c.id, text, { channel: "WEB", visitorKey: vk });
+        assert.ok(r.ok, "khách không bao giờ nhận trang lỗi");
+        return { c, vk, view: r.ok ? r.view : null };
+      };
+      const a1 = await customer("a", "Chả mực bao nhiêu?");
+      const shown = a1.view!.messages.map((m) => m.text).join(" ");
+      assert.match(shown, /trục trặc/);
+      assert.ok(shown.includes(DEFAULT_SALES_CHATBOT_CONFIG.handoff.message), "khách nhận câu chuyển người của shop");
+      assert.ok(!RAW.test(shown), `khách không thấy lỗi gốc: ${shown}`);
+      assert.equal(a1.view!.status, "HANDOFF", "hội thoại chuyển nhân viên");
+      const again = await chatTurn(a1.c.id, "Alo em ơi", { channel: "WEB", visitorKey: a1.vk });
+      assert.ok(again.ok && /Nhân viên của shop đang tiếp nhận/.test(again.view.messages[again.view.messages.length - 1].text), "khách nhắn tiếp ⇒ đã có người nhận, không gọi lại AI");
+      await customer("b", "Còn hàng không em?");
+      assert.equal(await ownerAlerts(), 1, "hai khách đâm vào tường ⇒ MỘT cảnh báo cho chủ shop trong ngày");
+      const handoffs = (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff:%"))).filter((n) => n.body.startsWith(AI_DOWN_HANDOFF_REASON));
+      assert.equal(handoffs.length, 2, "mỗi khách MỘT thông báo gọi lại cho nhân viên");
+      assert.ok(handoffs.every((n) => !RAW.test(`${n.title} ${n.body}`)), "thông báo cho nhân viên không mang lỗi gốc");
+      // Hộp thư CÁ NHÂN — chuông đọc nó kể cả khi tổ chức KHÔNG bật «Cần xử lý» (mẫu thực phẩm không bật): người đọc được
+      // chatbot nhận tin chuyển người, người cấu hình được chatbot nhận cảnh báo AI. Chọn người nhận bằng đúng can().
+      const viewers = await activeUserIdsWhoCan("ai_sales:view");
+      assert.ok(viewers.length >= 1, "quản trị đọc được chatbot");
+      assert.deepEqual(await activeUserIdsWhoCan("platform:operate"), [], "chọn người nhận đi qua can(): quyền chỉ của nhà ⇒ không ai ở tổ chức khách");
+      const inbox = await db.select().from(schema.userMessages).where(like(schema.userMessages.dedupeKey, "sales-chat:%"));
+      assert.equal(inbox.filter((m) => m.kind === "SALES_CHAT_HANDOFF" && m.body.startsWith(AI_DOWN_HANDOFF_REASON)).length, 2 * viewers.length, "mỗi khách MỘT tin cho MỖI người đọc được chatbot");
+      assert.equal(inbox.filter((m) => m.kind === "SALES_CHAT_AI_DOWN").length, (await activeUserIdsWhoCan("ai_sales:manage")).length, "cảnh báo AI: MỘT tin mỗi người cấu hình được, trong ngày");
+      assert.ok(inbox.every((m) => !RAW.test(`${m.title} ${m.body}`)), "hộp thư không mang lỗi gốc");
       failWith = "429 rate_limit_error: overloaded";
-      await chatTurn(e1.id, "Alo", { channel: "WEB", visitorKey: vkErr });
-      assert.equal(await alerts(), 1, "quá tải ⇒ không thêm thông báo");
+      const c3 = await customer("c", "Alo");
+      assert.equal(c3.view!.status, "HANDOFF", "quá tải ⇒ khách vẫn được chuyển người");
+      assert.equal(await ownerAlerts(), 1, "quá tải ⇒ không thêm cảnh báo chủ shop");
+      const listed = await listConversations(50);
+      assert.ok(listed.some((x) => x.lastError && RAW.test(x.lastError)), "lỗi gốc vẫn nằm trong CSDL cho người vận hành tra");
+      const page = readFileSync("app/(dashboard)/ai/sales-chatbot/page.tsx", "utf8");
+      assert.ok(!/\{c\.lastError(?!\s*\?)|title=\{c\.lastError\}|c\.lastError\.slice/.test(page), "màn hình không in lỗi gốc — chỉ nhãn tiếng Việt");
     } finally {
       setSalesChatProviderForTests(null);
     }

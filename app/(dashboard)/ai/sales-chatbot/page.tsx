@@ -95,7 +95,7 @@ export default async function SalesChatbotPage() {
                         </Link>
                       ) : null}
                       {c.lastError ? (
-                        <span className="text-destructive" title={c.lastError}>
+                        <span className="text-destructive">
                           Lỗi: {salesBotError(c.lastError)?.label}
                         </span>
                       ) : null}
