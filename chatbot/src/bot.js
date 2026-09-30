@@ -486,6 +486,66 @@ export class Bot {
   }
 
   /**
+   * NHUNG GI KHACH DA DUA (doc tu tin cua KHACH, khong tu cau cua shop): SDT, dia chi, size.
+   * Su co 2026-09-29 (Ta Thuy, page Linh Tay): khach da chon "Mau do do" + "Sai XL", gui dia chi + SDT, vay ma bot
+   * van xin dia chi va xin chieu cao/can nang — khach tra loi "O tren" + like roi thoi.
+   *  - size: khach tu chon (size XL / sai XL / sz L / tin chi co "XL") HOAC bang size tra ra tu so do.
+   *  - dia chi: mot tin khach co tu chi dia danh (phuong/xa/quan/huyen/TP/tinh/duong/ngo/thon/so nha...).
+   */
+  customerFacts(pageId, messages) {
+    const loi = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => String(this.messageText(m) || ""));
+    const phone = loi.some((t) => phonesInText(t).length > 0);
+    const DIA_CHI = /(phường|phuong|xã|thị trấn|thị xã|quận|huyện|huyen|tp\.?\s|thành phố|thanh pho|tỉnh|tinh\s|đường|duong\s|ngõ|ngách|hẻm|kiệt|thôn|xóm|ấp|tổ\s*\d|khu phố|số nhà|chung cư|kđt|khu đô thị|tòa|toà|block)/i;
+    let address = null;
+    for (const t of loi) {
+      const bo = t.replace(/(?<![0-9])(?:0|\+?84)[1-9][0-9.\s-]{7,12}(?![0-9])/g, " ").trim();
+      if (bo.length >= 10 && DIA_CHI.test(bo) && bo.split(/\s+/).length >= 3) address = bo.slice(0, 160);
+    }
+    const SIZE = /(?:^|[^a-z0-9])(?:size|sai|sz|sài|siz)\s*(xxs|xs|s|m|l|xl|xxl|xxxl|[2-5]xl|\d{2})(?![a-z0-9])/i;
+    const MOT_SIZE = /^\s*(?:size\s*)?(xs|s|m|l|xl|xxl|xxxl|[2-5]xl)\s*(?:nha|nhé|nhe|ạ|a|em|ha)?\s*[.!]?\s*$/i;
+    let size = null;
+    for (const t of loi) {
+      const m = t.match(SIZE) || t.match(MOT_SIZE);
+      if (m) size = m[1].toUpperCase();
+    }
+    let sizeFrom = size ? "khach" : null;
+    if (!size) {
+      const r = this.sizeLookupFor(pageId, messages);
+      if (r.status === "ok") (size = r.size), (sizeFrom = "bang");
+    }
+    return { phone, address, size, sizeFrom };
+  }
+
+  /**
+   * Bo cac cau trong tra loi dang XIN LAI thu khach da dua (SDT / dia chi / so do-size). Bo theo tung cau (tach theo
+   * dau cau va xuong dong), giu nguyen phan con lai; bo het ma khong con gi thi tra "" de nhanh sau tu them cau di tiep.
+   */
+  dropAlreadyGivenAsks(reply, pageId, messages) {
+    const t = String(reply || "");
+    if (!t.trim()) return t;
+    const f = this.customerFacts(pageId, messages);
+    const XIN = /(xin|cho em|gửi em|gửi giúp|nhắn em|nhắn giúp|cung cấp|để lại|cho shop|báo em)/i;
+    const known = [];
+    if (f.phone) known.push(/(số điện thoại|sđt|sdt|số đt|số phone)/i);
+    if (f.address) known.push(/(địa chỉ|dia chi|đ\/c|đc nhận)/i);
+    if (f.size) known.push(/(chiều cao|cân nặng|số đo|chiều cao cân nặng)/i);
+    if (!known.length) return t;
+    const parts = t.split(/(?<=[.?!\n])/);
+    const bo = [];
+    const giu = parts.filter((c) => {
+      const hoiLai = XIN.test(c) && known.some((re) => re.test(c));
+      // Cau vua xin thu da co vua xin thu CHUA co (vd "xin SDT va dia chi" ma moi co SDT) -> giu, de khach bo sung
+      const conThieu = hoiLai && ((!f.phone && /(số điện thoại|sđt|sdt)/i.test(c)) || (!f.address && /địa chỉ/i.test(c)) || (!f.size && /(chiều cao|cân nặng)/i.test(c)));
+      if (hoiLai && !conThieu) bo.push(c.trim());
+      return !(hoiLai && !conThieu);
+    });
+    if (!bo.length) return t;
+    log.warn(`[${pageId}] Bot xin lai thu khach da dua (${[f.phone && "SĐT", f.address && "địa chỉ", f.size && "size " + f.size].filter(Boolean).join(", ")}) -> bo: ${bo.join(" | ").slice(0, 200)}`);
+    store.bumpStat(pageId, "askAgainGuard");
+    return giu.join("").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /**
    * He thong da tra ra size ma bot van doi hoi lai chieu cao/can nang -> thay bang cau tra loi dung.
    * Model nho hay khong tin ket qua khi khach viet thieu don vi ("cao 165 nang 55").
    */
@@ -684,15 +744,21 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       .map((m) => this.messageText(m))
       .join(" ");
     const b = parseBody(loiKhach);
-    const coSoDo = b.heightCm !== null && b.weightKg !== null;
-    const coSdt = /(?<!\d)0\d{8,10}(?!\d)/.test(loiKhach.replace(/[.\s-]/g, ""));
+    // Da biet size khi khach gui du so do, HOAC khach tu chon size, HOAC bang size tra ra duoc tu so do (bang dam chi can
+    // can nang). Truoc day chi xet "du ca chieu cao lan can nang" -> khach chon "size XL" van bi xin lai (Ta Thuy 29/09).
+    const f = this.customerFacts(pageId, messages);
+    const coSoDo = (b.heightCm !== null && b.weightKg !== null) || !!f.size;
+    const coSdt = f.phone;
 
     // Don da chot xong: khong ep them cau hoi nua, neu khong bot se hoi "can ho tro them gi" mai khong dut
     if (this.orderClosedIn(pageId, messages)) return reply;
+    const Xung = xung[0].toUpperCase() + xung.slice(1);
     let hoi;
-    if (!coSoDo) hoi = `${xung[0].toUpperCase() + xung.slice(1)} cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?`;
-    else if (!coSdt) hoi = `${xung[0].toUpperCase() + xung.slice(1)} cho em xin số điện thoại và địa chỉ để em lên đơn gửi hàng cho mình nhé ạ?`;
-    else hoi = `${xung[0].toUpperCase() + xung.slice(1)} cần em hỗ trợ thêm gì nữa không ạ?`;
+    if (!coSoDo) hoi = `${Xung} cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?`;
+    else if (!coSdt && !f.address) hoi = `${Xung} cho em xin số điện thoại và địa chỉ để em lên đơn gửi hàng cho mình nhé ạ?`;
+    else if (!coSdt) hoi = `${Xung} cho em xin số điện thoại để em lên đơn gửi hàng cho mình nhé ạ?`;
+    else if (!f.address) hoi = `${Xung} cho em xin địa chỉ nhận hàng để em lên đơn cho mình nhé ạ?`;
+    else hoi = `Em lên đơn gửi hàng cho ${xung} luôn nhé ạ?`;
     log.info(`[${pageId}] Cau tra loi chua co cau hoi -> tu them: ${hoi}`);
     return `${text}\n${hoi}`;
   }
@@ -1237,6 +1303,17 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     if (saleActive) log.info(`[${pageId}] ${conversationId}: hoi thoai dang chay khuyen mai -> dung bang gia khuyen mai`);
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
+    {
+      const f = this.customerFacts(pageId, messages);
+      const co = [f.size && `size ${f.size}${f.sizeFrom === "khach" ? " (khách tự chọn)" : " (tra từ số đo khách gửi)"}`, f.phone && "số điện thoại", f.address && `địa chỉ: "${f.address}"`].filter(Boolean);
+      if (co.length) {
+        systemPrompt += `
+
+## THÔNG TIN KHÁCH ĐÃ GỬI TRONG HỘI THOẠI NÀY — KHÔNG ĐƯỢC XIN LẠI
+- Khách đã cho: ${co.join("; ")}.
+- Tuyệt đối không xin lại những thứ trên (kể cả chiều cao/cân nặng khi đã có size). Chỉ hỏi phần CÒN THIẾU; đủ hết thì xác nhận lại đơn để chốt.`;
+      }
+    }
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
 
@@ -1388,6 +1465,11 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
       reply = FALLBACK_REPLY;
       handoff = true;
     }
+    if (reply && !handoff) {
+      const truoc = reply;
+      reply = this.dropAlreadyGivenAsks(reply, pageId, messages);
+      if (!reply.trim() && truoc.trim()) reply = `Dạ em ghi nhận đủ thông tin của ${eff.customerTitle || "chị"} rồi ạ ❤️`;
+    }
     if (reply) reply = this.stopAskingMeasurementsAgain(reply, pageId, messages);
     if (reply) reply = this.fixSizeReply(reply, pageId, messages);
     if (reply) reply = this.stripAskWhenClosed(reply, pageId, messages);
@@ -1411,6 +1493,24 @@ ${eff.afterOrderText.trim()}`;
     log.info(
       `[${pageId}] Bot -> "${name}" (${Date.now() - t0}ms, ${usage.totalTokenCount ?? "?"} tokens${nImages ? `, xem ${nImages} anh` : ""}${imageUrlsToSend.length ? `, gui ${imageUrlsToSend.length} anh SP` : ""})${handoff ? " [HANDOFF]" : ""}: ${reply.slice(0, 300)}`
     );
+
+    // Khach nhan THEM trong luc bot dang soan (vd gui dia chi roi 20 giay sau gui SDT) -> cau tra loi nay da cu, gui ra
+    // se xin lai dung thu khach vua gui (Ta Thuy 29/09: gui SDT xong bot van "cho em xin so dien thoai"). Bo cau nay,
+    // de luot xu ly ke tiep doc ca tin moi roi tra loi mot lan.
+    if (type === "INBOX" && !eff.dryRun) {
+      try {
+        const fresh = sortChrono((await client.getMessages(conversationId)).messages);
+        const cuoiKhach = [...fresh].reverse().find((m) => !this.isFromPage(m, pageId));
+        if (cuoiKhach && cuoiKhach.id !== last.id && parseTs(cuoiKhach.inserted_at) > parseTs(last.inserted_at)) {
+          log.info(`[${pageId}] ${conversationId}: khach vua nhan them trong luc bot soan -> bo cau tra loi cu, xu ly lai voi tin moi`);
+          store.bumpStat(pageId, "staleReplyDropped");
+          this.queue.push(`${pageId}:${conversationId}`, { pageId, conversationId, type, customerName: name });
+          return;
+        }
+      } catch (e) {
+        log.warn(`[${pageId}] Khong kiem tra lai duoc tin moi truoc khi gui (${e.message}) -> gui nhu cu`);
+      }
+    }
 
     store.bumpStat(pageId, "replies");
     if (handoff) store.bumpStat(pageId, "handoffs");

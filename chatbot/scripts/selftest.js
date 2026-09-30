@@ -29,10 +29,14 @@ process.env.COMMENT_MODE = "off";
 process.env.COMMENT_PUBLIC_TEXT = "Dạ em chào chị{name} ❤️ Shop đã gửi báo giá vào tin nhắn, chị kiểm tra Messenger giúp em nhé!";
 process.env.ASSISTANT_MODEL = "";
 
+// Cho du mot luot xu ly: moi request Pancake cach nhau 220ms (gioi han 5 req/giay), va truoc khi gui bot hoi lai
+// Pancake mot lan xem khach co nhan them khong (su co 29/09) -> 700ms cu khong du cho luot co gan tag.
+const WAIT = 1100;
 const calls = [];
 let pancakeMessages = [];
 let geminiText = "Dạ shop còn size M ạ, anh/chị cho em xin SĐT để lên đơn nhé 😊";
 let geminiToolParts = () => [];
+let onGetMessages = null; // test 30: cho khach "nhan them" giua luc bot dang soan
 
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url);
@@ -43,6 +47,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.hostname === "pages.fm") {
     assert.equal(u.searchParams.get("page_access_token"), "tok", "thieu page_access_token");
     if (u.pathname.endsWith("/messages") && (init.method || "GET") === "GET") {
+      if (onGetMessages) onGetMessages();
       // Tra ve thu tu NGAU NHIEN (Pancake that tra cu->moi, tai lieu noi moi->cu) -> bot phai tu sap xep theo inserted_at
       const shuffled = [...pancakeMessages].map((m, i) => ({ ...m, inserted_at: m.inserted_at || new Date(Date.now() - (pancakeMessages.length - i) * 1000).toISOString().replace("Z", "") })).sort(() => Math.random() - 0.5);
       return json({ success: true, messages: shuffled, conv_from: { id: "C1", name: "Lan" }, can_inbox: true });
@@ -92,7 +97,7 @@ pancakeMessages = [
 ];
 bot.handleWebhook(webhook(pancakeMessages[0]));
 bot.handleWebhook(webhook(pancakeMessages[1]));
-await sleep(700);
+await sleep(WAIT);
 let gem = calls.filter((c) => c.path.includes(":generateContent"));
 let sent = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
 assert.equal(gem.length, 1, "phai goi Gemini dung 1 lan (debounce)");
@@ -107,7 +112,7 @@ console.log("OK 1: debounce + lich su + gui reply_inbox");
 // ---- Test 2: webhook gui lai cung message id -> bo qua
 calls.length = 0;
 bot.handleWebhook(webhook(pancakeMessages[1]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.length, 0, "tin trung id phai bi bo qua");
 console.log("OK 2: chong xu ly trung");
 
@@ -116,7 +121,7 @@ calls.length = 0;
 bot.handleWebhook(webhook(msg("m3", "Dạ shop đây", pageFrom)));
 bot.handleWebhook(webhook(msg("m4", "hello", customer), [{ id: 99, text: "Nhan vien xu ly" }]));
 bot.handleWebhook(webhook(msg("m5", "hello", customer), [99]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.length, 0);
 console.log("OK 3: bo qua tin cua page va hoi thoai co tag tat bot");
 
@@ -128,7 +133,7 @@ pancakeMessages = [
   msg("m8", "áo giá bao nhiêu", customer),
 ];
 bot.handleWebhook(webhook(pancakeMessages[2]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.filter((c) => c.path.includes(":generateContent")).length, 0, "nhan vien dang xu ly, khong duoc goi Gemini");
 console.log("OK 4: nhan vien dang xu ly -> bot im lang");
 
@@ -140,7 +145,7 @@ pancakeMessages = [
   msg("m11", "ship bao nhiêu", customer),
 ];
 bot.handleWebhook(webhook(pancakeMessages[2]));
-await sleep(700);
+await sleep(WAIT);
 gem = calls.filter((c) => c.path.includes(":generateContent"));
 assert.equal(gem.length, 1);
 assert.deepEqual(gem[0].body.contents.map((c) => c.role), ["user", "model", "user"]);
@@ -151,9 +156,9 @@ calls.length = 0;
 geminiText = "Dạ em đã ghi nhận, nhân viên sẽ liên hệ ngay ạ. [[HANDOFF]]";
 pancakeMessages = [msg("m12", "tôi muốn gặp nhân viên", customer)];
 bot.handleWebhook(webhook(pancakeMessages[0]));
-await sleep(700);
+await sleep(WAIT);
 sent = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
-const tagged = calls.filter((c) => c.path.endsWith("/tags"));
+const tagged = calls.filter((c) => c.path.endsWith("/tags"))
 assert.equal(sent[0].body.message, "Dạ em đã ghi nhận, nhân viên sẽ liên hệ ngay ạ.");
 assert.deepEqual(tagged[0].body, { action: "add", tag_id: "99" });
 console.log("OK 6: handoff -> bo marker + gan tag");
@@ -163,7 +168,7 @@ calls.length = 0;
 geminiText = "Dạ em chưa xem được ảnh, anh/chị mô tả giúp em nhé";
 pancakeMessages = [msg("m13", "<div></div>", customer, { attachments: [{ type: "photo" }] })];
 bot.handleWebhook(webhook(pancakeMessages[0]));
-await sleep(700);
+await sleep(WAIT);
 gem = calls.filter((c) => c.path.includes(":generateContent"));
 assert.ok(gem[0].body.contents[0].parts[0].text.includes("hình ảnh"));
 console.log("OK 7: tin chi co anh -> mo ta dinh kem cho Gemini");
@@ -176,7 +181,7 @@ pancakeMessages = [
   msg("m15", "mẫu này giá bao nhiêu", customer),
 ];
 bot.handleWebhook(webhook(pancakeMessages[1]));
-await sleep(700);
+await sleep(WAIT);
 gem = calls.filter((c) => c.path.includes(":generateContent"));
 const parts = gem[0].body.contents[0].parts;
 assert.equal(parts.length, 2, "phai co 1 part anh + 1 part text");
@@ -188,7 +193,7 @@ assert.equal(calls.filter((c) => c.path === "/a/b/c.png").length, 1, "phai tai a
 calls.length = 0;
 pancakeMessages.push(msg("m16", "còn size L không", customer));
 bot.handleWebhook(webhook(pancakeMessages[2]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.filter((c) => c.path === "/a/b/c.png").length, 0, "anh phai duoc cache");
 assert.ok(calls.some((c) => c.path.includes(":generateContent")));
 console.log("OK 8: vision -> tai anh, gui inline_data, cache anh");
@@ -246,7 +251,7 @@ assert.ok(out.contents[2].parts[0].functionResponse.response.ok, "functionRespon
 calls.length = 0;
 pancakeMessages = [msg("m18", "alo", customer)];
 bot.handleWebhook(webhook(pancakeMessages[0]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.length, 0, "page tat thi khong duoc goi API");
 settings.update("PAGE1", { enabled: true });
 console.log("OK 10: tro ly AI goi cong cu -> doi cai dat -> bot ton trong cai dat");
@@ -258,7 +263,7 @@ settings.update("PAGE1", { minCustomerMessages: 2 });
 geminiText = "Dạ chị cần size nào ạ?";
 pancakeMessages = [msg("m19", "shop ơi", customer)];
 bot.handleWebhook(webhook(pancakeMessages[0]));
-await sleep(700);
+await sleep(WAIT);
 assert.equal(calls.filter((c) => c.path.includes(":generateContent")).length, 0, "tin dau khong duoc goi Gemini");
 assert.equal(calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages")).length, 0, "tin dau khong duoc gui");
 calls.length = 0;
@@ -268,7 +273,7 @@ pancakeMessages = [
   msg("m21", "còn size L không", customer),
 ];
 bot.handleWebhook(webhook(pancakeMessages[2]));
-await sleep(700);
+await sleep(WAIT);
 gem = calls.filter((c) => c.path.includes(":generateContent"));
 assert.equal(gem.length, 1, "tin thu 2 phai goi Gemini");
 assert.deepEqual(gem[0].body.contents.map((c) => c.role), ["user", "model", "user"], "lich su phai co ca tin tu dong cua Pancake");
@@ -946,6 +951,68 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(store.countOrders([today], "P28"), 1);
   assert.equal(store.recentBotOrders(5)[0].c, "C28", "don nho hoi thoai sinh ra no");
   console.log("OK 28: tien AI / don: ghi theo tung hoi thoai, don dem mot lan, moi don truy duoc ve hoi thoai cua no");
+}
+
+// ---- 29: su co 2026-09-29 (khach Ta Thuy, page Linh Tay): da chon mau + size, gui dia chi + SDT ma bot van xin lai
+{
+  const prevSettings = settings.get("PAGE1");
+  // Bang size co ca chieu cao: khach chi noi can nang (63 can) -> tra bang KHONG ra size, nhung khach da TU CHON size XL
+  settings.update("PAGE1", { sizeChart: '[{"h":[150,159],"w":[[40,50,"M"],[51,60,"L"],[61,70,"XL"]]},{"h":[160,175],"w":[[40,52,"L"],[53,64,"XL"]]}]' });
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoiThoai = [
+    khach("Đồ có sẵn size nào?"), shop("Dạ chị cho em xin chiều cao và cân nặng"),
+    khach("63 cân sai gì"), shop("Dạ 63kg chị mặc size XL ạ. Chị thích màu nào ạ?"),
+    khach("Màu đỏ đô nha"), khach("Sai XL"), shop("Dạ, chị cho em xin tên và số điện thoại"),
+    khach("Pg3-15 vin com phường điện biên thành phố thanh hóa"), khach("0943101365"),
+    khach("Hàng quảng châu à em"), khach("Chị thích QC"),
+  ];
+  const f = bot.customerFacts("PAGE1", hoiThoai);
+  assert.equal(f.size, "XL", "khach go 'Sai XL' = da chon size");
+  assert.equal(f.phone, true);
+  assert.match(f.address || "", /phường điện biên/);
+  assert.doesNotMatch(f.address || "", /0943101365/, "dia chi khong mang theo SDT");
+  // Cau tra loi that cua bot hom do: bo het phan xin lai, giu phan tra loi cau hoi cua khach
+  const cu = "Dạ em không rõ nguồn gốc cụ thể ạ, nhưng chất liệu đầm bên em là Rayon cao cấp mềm mịn chị nha.\nChị đã có tên và số điện thoại rồi, em xin địa chỉ để chốt đơn cho mình nha chị yêu 🥰\nChị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?";
+  const moi = bot.dropAlreadyGivenAsks(cu, "PAGE1", hoiThoai);
+  assert.match(moi, /Rayon/, "giu phan tra loi cau hoi cua khach");
+  assert.doesNotMatch(moi, /xin địa chỉ|chiều cao|cân nặng/, "khong xin lai dia chi / so do");
+  // Cau hoi tu them o cuoi khong duoc xin chieu cao can nang khi khach da chon size
+  const them = bot.ensureEndsWithQuestion("Dạ vâng ạ", "PAGE1", hoiThoai);
+  assert.doesNotMatch(them, /chiều cao|cân nặng|số điện thoại|địa chỉ/);
+  assert.match(them, /lên đơn/);
+  // Con thieu that thi van phai hoi dung thu con thieu
+  const chuaDiaChi = hoiThoai.filter((m) => !/phường/.test(m.message));
+  assert.match(bot.ensureEndsWithQuestion("Dạ vâng ạ", "PAGE1", chuaDiaChi), /xin địa chỉ/);
+  assert.equal(bot.dropAlreadyGivenAsks("Chị cho em xin số điện thoại và địa chỉ nhé", "PAGE1", [khach("0943101365")]), "Chị cho em xin số điện thoại và địa chỉ nhé", "cau xin ca thu con thieu thi giu lai");
+  assert.equal(bot.customerFacts("PAGE1", [khach("chị cao 1m58 nặng 50kg")]).address, null, "so do khong phai dia chi");
+  assert.equal(bot.customerFacts("PAGE1", [khach("mẫu này có size L không em")]).size, "L");
+  settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
+  console.log("OK 29: khach da chon size / gui dia chi / SDT -> bot khong xin lai, chi hoi phan con thieu");
+}
+
+// ---- 30: khach nhan them TRONG LUC bot dang soan -> bo cau tra loi cu, tra loi lai mot lan voi du tin
+{
+  calls.length = 0;
+  const cust = { id: "KHACH30", name: "Thuy" };
+  const t0 = Date.now();
+  pancakeMessages = [{ id: "a30", message: "Pg3-15 vin com phường điện biên thành phố thanh hóa", from: cust, inserted_at: new Date(t0 - 5000).toISOString().replace("Z", "") }];
+  let lan = 0;
+  onGetMessages = () => {
+    lan++;
+    // Lan doc thu 2 (bot kiem lai truoc khi gui): khach vua gui SDT
+    if (lan === 2) pancakeMessages = [...pancakeMessages, { id: "b30", message: "0943101365", from: cust, inserted_at: new Date(t0 + 1000).toISOString().replace("Z", "") }];
+  };
+  geminiText = "Dạ mình cho em xin số điện thoại để em lên đơn gửi hàng cho mình nha";
+  bot.handleWebhook(webhook(pancakeMessages[0]));
+  await sleep(WAIT * 3);
+  onGetMessages = null;
+  const gem30 = calls.filter((c) => c.path.includes(":generateContent"));
+  const gui30 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+  assert.equal(gem30.length, 2, "cau tra loi cu bi bo, bot soan lai mot lan voi tin moi");
+  assert.ok(gui30.length >= 1, "van tra loi khach");
+  assert.ok(gui30.every((c) => !/xin số điện thoại/.test(c.body.message)), "khong gui cau xin SDT khi khach vua gui SDT");
+  console.log("OK 30: khach nhan them luc bot dang soan -> bo cau cu, tra loi lai theo tin moi nhat");
 }
 
 console.log("\nTAT CA TEST PASS");
