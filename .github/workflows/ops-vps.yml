@@ -40,6 +40,7 @@ on:
           - confirm-funnel-audit # "đã xác nhận" cũ vs mới + đơn huỷ khi chưa từng xác nhận, theo nguồn / giờ — số tổng hợp (CHỈ ĐỌC; arg "--days=N", thêm "--gio" = giờ lên đơn bất thường, "--xoa" = Đã xoá vs Đã huỷ)
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - company-os-summary   # Company OS đã được dùng tới đâu: sổ mẫu, topic / giá thành / mẫu xưởng / bản thiết kế, "Cần anh quyết", hàng hoàn, yêu cầu duyệt, phiếu nhập — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
+          - platform-secrets-verify # kiểm PLATFORM_SECRETS_KEY trên production (V1–V7): khoá có, canary niêm/giải qua deploy, cô lập tổ chức, CSDL + log không chứa bản rõ — arg rỗng = CHỈ ĐỌC; "seal --apply" niêm canary; "rotate --apply" cập nhật canary
           - velocity-compare     # hàng chậm theo tốc độ bán CŨ (ròng) vs MỚI (Kế hoạch SX): số mẫu mã mỗi lớp + số đổi lớp theo cặp cũ → mới — CHỈ SỐ ĐẾM (CHỈ ĐỌC; không arg)
           - cod-statement-audit  # vì sao /cod quá hạn nhiều: quá hạn theo ngày giao, tiền VTP đã về vs tệp bảng kê đã nhận (CHỈ ĐỌC; arg "--days=N")
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
@@ -128,7 +129,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary confirm-funnel-audit company-os-summary velocity-compare"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary confirm-funnel-audit company-os-summary velocity-compare"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -480,7 +481,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org"
 
             LOP=GHI
             case "$ARG" in
@@ -869,6 +870,15 @@ jobs:
                 fetch_script stock-wait-summary.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/stock-wait-summary.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/stock-wait-summary.ts ;;
+              platform-secrets-verify)
+                # Kiểm khoá bí mật kết nối trên production (docs/platform/launch-gates.md A.5). Script KHÔNG in bản rõ,
+                # khoá hay bản mã — chỉ ✓/✗, số đếm, 8 ký tự đầu của MÃ khoá (đã công khai ở /api/health) qua kênh tóm
+                # tắt; vẫn MÃ HOÁ phần còn lại như mọi thao tác chạm CSDL. Log 72 giờ của app + scheduler đi vào STDIN của
+                # script (không ra log này) để nó quét: không bản rõ nào, không giá trị khoá gốc nào được xuất hiện.
+                # arg rỗng ⇒ CHỈ ĐỌC; "seal --apply" / "rotate --apply" ghi đúng một dòng settings (canary).
+                fetch_script platform-secrets-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/platform-secrets-verify.ts'
+                kiem_arg
+                { docker logs --since 72h erp-app; docker logs --since 72h erp-scheduler; } 2>&1 | ma_hoa_ket_qua chay_voi_arg docker exec -i erp-app npx tsx --tsconfig tsconfig.json scripts/platform-secrets-verify.ts ;;
               company-os-summary)
                 # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db). Company OS đã được dùng tới
                 # đâu — mỗi con số một câu đọc; mục không đọc được in "—" kèm lý do, không in 0. Mọi dòng là

@@ -177,6 +177,9 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/connectors.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) — và XOÁ nó — để đo cả hai nhánh có khoá / thiếu khoá của đường lưu bí mật; ĐẶT vài credential BỊA của nhà (PANCAKE_*, VIETTELPOST_*, FACEBOOK_ACCESS_TOKEN, CHATBOT_ADMIN_TOKEN, GEMINI_API_KEY) để kiểm màn hình chỉ đọc không lộ giá trị. Mọi khoá trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
 
+  "tests/platform-secrets-verify.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA), đổi sang khoá BỊA khác rồi XOÁ nó, và xoá PLATFORM_SECRETS_KEY_PREVIOUS — để đo đủ ba nhánh của script kiểm khoá (giải được · khoá đổi ⇒ HỎNG · thiếu khoá ⇒ HỎNG). Trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo khoá thật của máy.",
+
   "tests/ai-builder.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá BỊA) để lưu khoá AI BỊA của tổ chức thử; ĐẶT ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL BỊA của «nhà» để chứng minh client BYOK KHÔNG đọc chúng (fetch là bản giả, không gọi mạng). Mọi biến trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
