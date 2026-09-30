@@ -59,7 +59,7 @@
 		format filter {
 			wrap console
 			fields {
-				request>uri regexp "(/api/webhooks/pancake/)[^/?]+|([?&](?i:token|secret|access_token)=)[^&]*" "${1}${2}REDACTED"
+				request>uri regexp "(/api/webhooks/pancake/(?:fanpage/)?)[^/?]+|([?&](?i:token|secret|access_token)=)[^&]*" "${1}${2}REDACTED"
 				request>headers>Token delete
 				request>headers>Secret delete
 				request>headers>X-Token delete

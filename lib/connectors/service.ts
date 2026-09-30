@@ -16,8 +16,8 @@ import {
   type ConnectorSpec,
 } from "@/lib/connectors/registry";
 import { openSecrets, sealSecrets, secretsKeyPublicStatus, secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
-import { ORG_CONNECTION_TESTERS, type TesterDeps } from "@/lib/connectors/testers";
-import type { ConnectionActionResult, ConnectionSnapshot, ConnectionsView, ConnectorView } from "@/lib/connectors/types";
+import { ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, type TesterDeps } from "@/lib/connectors/testers";
+import type { ChatDiscoveryResult, ConnectionActionResult, ConnectionSnapshot, ConnectionsView, ConnectorView } from "@/lib/connectors/types";
 import { PLATFORM_MODULES } from "@/lib/constants/platform-modules";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -400,6 +400,34 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
   });
   if (!passed) return { error: nextStatus !== row.status ? `${message} — kết nối đang bật đã về Nháp.` : message };
   return { ok: true, status: nextStatus, message };
+}
+
+/**
+ * «Tìm chat» (Zalo · Telegram): đọc tin mới của bot bằng token ĐÃ LƯU của tổ chức — cùng cổng quyền, cùng lưới chặn chéo
+ * tổ chức (`tripwire`) và cùng đường giải mã với «Kiểm tra». CHỈ ĐỌC: không đổi trạng thái kết nối, không ghi bí mật; trả
+ * mã chat + tên người nhắn để người cấu hình chọn nơi nhận. Có nhật ký (ai đã đọc tin của bot, lúc nào).
+ */
+export async function discoverOrgConnectionChats(user: SessionUser, connectorKey: string, deps: { keyState?: SecretsKeyState; tester?: TesterDeps } = {}): Promise<ChatDiscoveryResult> {
+  const g = guard(user, connectorKey);
+  if ("error" in g) return g;
+  const { spec } = g;
+  const discover = ORG_CONNECTION_CHAT_DISCOVERY[spec.key];
+  if (!discover) return { error: `«${spec.label}» không có chức năng tìm chat.` };
+  const org = await resolveOrg(user);
+  if ("error" in org) return org;
+  const row = await findRow(spec.key);
+  const trip = tripwire(row, org);
+  if (trip) return { error: trip };
+  if (!row?.secretsEnc) return { error: "Lưu bot token trước, rồi bấm «Tìm chat»." };
+  let secrets: Record<string, string>;
+  try {
+    secrets = openSecrets(row.secretsEnc, { orgCode: org.code, connectorKey: spec.key, keyId: row.secretsKeyId }, deps.keyState ?? secretsKeyState());
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Không giải mã được bí mật." };
+  }
+  const r = await discover(secrets, deps.tester);
+  await audit({ userId: user.id, userEmail: user.email, action: "ORG_CONNECTION_DISCOVER_CHATS", entity: "org_connection", entityId: spec.key, before: null, after: { found: r.ok ? r.chats.length : 0 }, reason: r.message });
+  return r.ok ? { ok: true, chats: r.chats, message: r.message } : { error: r.message };
 }
 
 // ───────────────────────── XOAY KHOÁ (chạy tay, qua scripts/rotate-platform-secrets.ts) ─────────────────────────

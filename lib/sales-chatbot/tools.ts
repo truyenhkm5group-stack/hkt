@@ -187,7 +187,7 @@ function cartView(p: Priced) {
   };
 }
 
-function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig) {
+function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
   const notes = [draft.note, cfg.shippingFee === null ? "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." : ""].filter((x) => x.trim());
   return {
     customerId: state.customer?.id ?? "",
@@ -196,7 +196,7 @@ function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, pr
     orderDiscount: 0,
     shippingFee: cfg.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),
-    channel: "Chatbot web",
+    channel: channel === "FANPAGE" ? "Chatbot fanpage" : "Chatbot web",
     recipient: { name: draft.recipient.name, phone: draft.recipient.phone, address: draft.recipient.address, province: draft.recipient.province },
   };
 }
@@ -286,7 +286,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (priced.unpriced.length) return err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state);
       const draft = { orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
-        const payload = orderInput(state, draft, priced, "NEW", ctx.config);
+        const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
         const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload) : await createOrderAsAgent(ctx.agent, payload);
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state);
         draft.orderId = r.id;
@@ -320,7 +320,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const unknownStock = d.lines.some((l) => !stock.get(l.variantId)?.stockKnown);
       let orderId: string | null = null;
       if (!simulated) {
-        const payload = orderInput(state, { ...d, note: unknownStock ? [d.note, "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao."].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config);
+        const payload = orderInput(state, { ...d, note: unknownStock ? [d.note, "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao."].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
         const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload);
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
         orderId = r.id;

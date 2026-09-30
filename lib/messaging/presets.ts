@@ -47,7 +47,7 @@ async function connectionOptions(): Promise<ConnectionOption[]> {
   return MESSAGING_CONNECTOR_KEYS.map((key) => {
     const row = rows.find((r) => r.connectorKey === key) ?? null;
     const settings = row?.plainSettings ?? {};
-    const destination = key === "telegram-bot" ? settings.chatId || null : key === "sandbox-messaging" ? settings.channelName || null : row ? "Nhóm của webhook" : null;
+    const destination = key === "telegram-bot" || key === "zalo-bot" ? settings.chatId || null : key === "sandbox-messaging" ? settings.channelName || null : row ? "Nhóm của webhook" : null;
     return { key, status: messagingStatusOf(key, row ? { status: row.status, lastTestOk: row.lastTestOk } : null), destination, message: row?.lastTestMessage ?? null };
   });
 }

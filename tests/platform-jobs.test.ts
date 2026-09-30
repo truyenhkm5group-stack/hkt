@@ -43,7 +43,7 @@ import { fanOutOrganizationCodes, getHomeOrganization, invalidateOrganizations }
 import { provisionOrganization } from "@/lib/platform/provision";
 import { peekExplicitNonHomeCode } from "@/lib/platform/peek";
 import type { Organization } from "@/lib/platform/types";
-import { resolveWebhookOrganization, WEBHOOK_BINDINGS, type WebhookProvider } from "@/lib/platform/webhooks";
+import { resolveWebhookOrganization, WEBHOOK_BINDINGS, WebhookAuthError, type WebhookProvider } from "@/lib/platform/webhooks";
 import { HOME_CREDENTIAL_EXEMPT, HOME_CREDENTIAL_JOBS, JOB_DEFINITIONS, jobModules, runJob, type JobSkipped } from "@/lib/sync/jobs";
 import { isJobRunning, jobLockKey, runSyncJob, syncRouteShieldKey } from "@/lib/sync/runner";
 
@@ -307,9 +307,17 @@ async function kiemTuyenToChuc(home: Organization) {
 async function kiemWebhook(home: Organization) {
   const nhaCungCap = Object.keys(WEBHOOK_BINDINGS) as WebhookProvider[];
   assert.ok(nhaCungCap.length >= 4, "đọc hụt WEBHOOK_BINDINGS");
+  // Danh sách ĐÓNG các webhook phân giải theo token trong đường dẫn (0182). Mọi webhook khác vẫn HOME_ONLY — thêm một
+  // webhook theo tổ chức là phải thêm TƯỜNG MINH vào đây, không lặng lẽ đổi chế độ của webhook của nhà.
+  const URL_SECRET_PROVIDERS: readonly WebhookProvider[] = ["PANCAKE_FANPAGE"];
   for (const p of nhaCungCap) {
-    assert.equal(WEBHOOK_BINDINGS[p].mode, "HOME_ONLY", `Phase 1.x: webhook ${p} vẫn HOME_ONLY — bí mật là một giá trị môi trường của nhà`);
     assert.ok(WEBHOOK_BINDINGS[p].reason.length >= 20, `webhook ${p} phải kèm lý do`);
+    if (URL_SECRET_PROVIDERS.includes(p)) {
+      assert.equal(WEBHOOK_BINDINGS[p].mode, "URL_SECRET", `webhook ${p} phân giải theo token của tổ chức`);
+      await assert.rejects(resolveWebhookOrganization(p), WebhookAuthError, `webhook ${p} không token ⇒ NÉM, không rơi về nhà`);
+      continue;
+    }
+    assert.equal(WEBHOOK_BINDINGS[p].mode, "HOME_ONLY", `Phase 1.x: webhook ${p} vẫn HOME_ONLY — bí mật là một giá trị môi trường của nhà`);
     assert.equal(await resolveWebhookOrganization(p), home.code);
   }
   for (const la of ["KHONG_CO", "toString", "constructor", ""]) {
