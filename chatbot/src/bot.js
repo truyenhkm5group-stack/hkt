@@ -378,6 +378,27 @@ export class Bot {
     return { code: ma, color: mauChot, colors: mauPOS };
   }
 
+  /**
+   * Sua moi cau HEN SO NGAY GIAO HANG trong tra loi ve dung thoi gian shop dat (settings.deliveryDays). Chi dung vao
+   * khoang "N–M ngay" nam cung cau voi tu chi giao hang, de khong sua nham "doi tra trong 7 ngay"...
+   */
+  fixDeliveryDays(reply) {
+    const t = String(reply || "");
+    const dung = settings.deliveryDays();
+    const [a, b] = dung.split("–");
+    let doi = 0;
+    const moi = t.replace(/[^.?!\n]*[.?!\n]?/g, (cau) => {
+      if (!/(giao|nhận hàng|nhận được hàng|ship|vận chuyển|gửi hàng|hàng tới|hàng đến)/i.test(cau)) return cau;
+      return cau.replace(/(\d{1,2})\s*(-|–|—|đến|tới)\s*(\d{1,2})(\s*ngày)/gi, (m0, x, _s, y, ngay) => {
+        if (x === a && y === b) return m0;
+        doi++;
+        return `${dung}${ngay}`;
+      });
+    });
+    if (doi) log.info(`Sua thoi gian giao hang trong tra loi ve ${dung} ngay (${doi} cho)`);
+    return moi;
+  }
+
   /** Cau hoi mau mac dinh khi bot van tu chon mau sau khi da bat viet lai */
   askColorReply(pageId, colors) {
     const eff = settings.effective(pageId);
@@ -887,6 +908,11 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
 - Khi khách hỏi giá / hỏi về một mẫu lần đầu trong hội thoại: gửi NGUYÊN VĂN khối báo giá của đúng mẫu đó trong "Hướng dẫn riêng" ở trên (đủ mọi dòng, đúng số tiền, đúng màu ghi trong khối), kèm mã ảnh [[IMG:...]] tương ứng. KHÔNG tự tóm tắt, KHÔNG thêm màu ngoài khối báo giá.
 - Các lượt sau mới trả lời ngắn gọn theo câu hỏi của khách.`;
     }
+    // Thoi gian giao hang: MOT cho duy nhat (settings.deliveryDays), de len moi con so khac trong prompt chung / rieng
+    prompt += `
+
+## THỜI GIAN GIAO HÀNG (shop vừa cập nhật — dùng con số này, bỏ mọi con số khác trong hướng dẫn)
+- Giao hàng toàn quốc ${settings.deliveryDays()} ngày.`;
     return prompt;
   }
 
@@ -1412,13 +1438,13 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     }
 
     // Khach da co don / hoi "gui hang chua, bao gio nhan": dua trang thai don THAT tren POS vao prompt
-    // (truoc day bot chi noi chung chung "gui toan quoc 2-4 ngay" -> khach buc, su co Loan Hoang 2026-09-15)
+    // (truoc day bot chi noi chung chung "gui toan quoc N ngay" -> khach buc, su co Loan Hoang 2026-09-15)
     if (type === "INBOX" && orderSync.enabled && (this.orderClosedIn(pageId, messages) || this.isOrderStatusQuestion(lastText))) {
       const sdtKhach = messages.filter((m) => !this.isFromPage(m, pageId)).map((m) => this.messageText(m)).join(" ").replace(/[.\s-]/g, "");
       const phones = [...(data.conv_phone_numbers || []), ...(data.recent_phone_numbers || []), ...(sdtKhach.match(/(?<!\d)0\d{9}(?!\d)/g) || [])];
       const orders = await this.recentOrdersCached(conversationId, phones);
       if (orders.length) {
-        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc 2–4 ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
+        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays()} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
         log.info(`[${pageId}] ${conversationId}: kem ${orders.length} don POS vao prompt (${orders.map((o) => "#" + o.id + " st" + o.status).join(", ")})`);
       }
     }
@@ -1574,6 +1600,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
 ${eff.afterOrderText.trim()}`;
       daChaoChotDon = true;
     }
+    if (reply) reply = this.fixDeliveryDays(reply);
     // Moi tin phai ket thuc bang mot cau hoi de dan khach di tiep; bot hay quen nen tu them
     if (reply && !handoff && !daChaoChotDon) reply = this.ensureEndsWithQuestion(reply, pageId, messages);
     const nImages = history.reduce((n, h) => n + (h.images?.length || 0), 0);

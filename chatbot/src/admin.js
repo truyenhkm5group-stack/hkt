@@ -296,6 +296,7 @@ export function createAdminHandler(bot) {
           version: 2,
           global: {
             model: config.ai.model,
+            deliveryDays: settings.deliveryDays(),
             dryRun: settings.globalDryRun(),
             dryRunSource: settings.global.dryRun === null ? ".env" : "app",
             poll: config.pollEnabled,
@@ -323,6 +324,13 @@ export function createAdminHandler(bot) {
         if ("aiPrices" in body || "usdVnd" in body) {
           try {
             settings.setAiPricing({ aiPrices: body.aiPrices, usdVnd: body.usdVnd });
+          } catch (e) {
+            return json(res, 400, { error: e.message }), true;
+          }
+        }
+        if ("deliveryDays" in body) {
+          try {
+            settings.setDeliveryDays(body.deliveryDays);
           } catch (e) {
             return json(res, 400, { error: e.message }), true;
           }

@@ -1025,6 +1025,23 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 31: bot nho don dang thieu gi, khong doc lai doan da gui (tru khi khach hoi lai)");
 }
 
+// ---- 32: thoi gian giao hang bot hen khach = 5–7 ngay (chu shop 30/09/2026)
+{
+  const { DEFAULT_DELIVERY_DAYS } = await import("../src/settings.js");
+  assert.equal(DEFAULT_DELIVERY_DAYS, "5–7");
+  assert.equal(settings.deliveryDays(), "5–7");
+  assert.equal(bot.fixDeliveryDays("Dạ bên em giao toàn quốc 2–4 ngày, được kiểm tra hàng ạ"), "Dạ bên em giao toàn quốc 5–7 ngày, được kiểm tra hàng ạ");
+  assert.equal(bot.fixDeliveryDays("Ship 2-4 ngày chị nhé"), "Ship 5–7 ngày chị nhé");
+  assert.equal(bot.fixDeliveryDays("Nhận hàng sau 3 đến 5 ngày ạ"), "Nhận hàng sau 5–7 ngày ạ");
+  assert.equal(bot.fixDeliveryDays("Đổi size trong 1-3 ngày ạ"), "Đổi size trong 1-3 ngày ạ", "khong phai cau giao hang -> khong sua");
+  assert.match(bot.buildSystemPrompt("PAGE1", { customerName: "", type: "INBOX" }), /Giao hàng toàn quốc 5–7 ngày/);
+  assert.throws(() => settings.setDeliveryDays("7-5"), /5-7/);
+  assert.equal(settings.setDeliveryDays("3 - 5"), "3–5");
+  assert.equal(bot.fixDeliveryDays("giao 5–7 ngày"), "giao 3–5 ngày");
+  settings.global.deliveryDays = undefined;
+  console.log("OK 32: bot hen giao hang 5–7 ngay, sua cau hen so ngay cu, khong dung cau khong phai giao hang");
+}
+
 // ---- 30: khach nhan them TRONG LUC bot dang soan -> bo cau tra loi cu, tra loi lai mot lan voi du tin
 {
   calls.length = 0;

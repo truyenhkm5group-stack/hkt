@@ -4,6 +4,8 @@ import { config } from "./config.js";
 import { log } from "./logger.js";
 import { DEFAULT_AI_PRICES, DEFAULT_USD_VND } from "./aicost.js";
 
+export const DEFAULT_DELIVERY_DAYS = "5–7";
+
 /**
  * Cai dat rieng tung page, sua tu app quan ly, luu data/pages.json:
  * {
@@ -139,6 +141,22 @@ class Settings {
     this.global.aiBills = clean;
     fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));
     return clean;
+  }
+
+  /**
+   * THOI GIAN GIAO HANG bot hen khach ("5–7" ngay). Mot cho duy nhat: dua vao prompt va sua lai moi cau hen so ngay
+   * khac trong tra loi (prompt chung / huong dan rieng cu con ghi "2–4 ngay"). Chu shop doi 30/09/2026: 5–7 ngay.
+   */
+  deliveryDays() {
+    return String(this.global.deliveryDays || DEFAULT_DELIVERY_DAYS);
+  }
+
+  setDeliveryDays(v) {
+    const m = String(v || "").trim().match(/^(\d{1,2})\s*[-–]\s*(\d{1,2})$/);
+    if (!m || Number(m[1]) < 1 || Number(m[1]) > Number(m[2]) || Number(m[2]) > 60) throw new Error("Thoi gian giao hang phai dang 5-7 (ngay)");
+    this.global.deliveryDays = `${Number(m[1])}–${Number(m[2])}`;
+    fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));
+    return this.deliveryDays();
   }
 
   /** Bat/tat DRY_RUN chung ngay luc chay (null = quay ve gia tri trong .env) */
