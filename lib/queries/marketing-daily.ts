@@ -34,6 +34,7 @@ import {
 /** Tỷ lệ tính ở tệp hằng số (dùng chung với màn hình) — chuyển tiếp để nơi gọi cũ không phải đổi đường nhập. */
 export { ratioOf };
 import type { Period } from "@/lib/search-params";
+import { lastSuccessFor } from "@/lib/constants/sync";
 
 /**
  * ═══════════ HIỆU QUẢ MARKETING THEO NGÀY — MỘT DÒNG LÀ MỘT NGÀY ═══════════
@@ -649,17 +650,21 @@ async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra
     .orderBy(base.day);
 }
 
-/** Độ tươi của từng nguồn — đọc lượt đồng bộ THÀNH CÔNG gần nhất, không đọc lượt đang chạy. */
+/**
+ * Độ tươi của từng nguồn — đọc lượt đồng bộ THÀNH CÔNG gần nhất, không đọc lượt đang chạy. `sync_runs.job` giữ TÊN CON
+ * (`ads_insights`), nên phải đi qua `lastSuccessFor` (`JOB_RUN_KEYS`); tra bằng khoá job (`facebook-ads`) như bản cũ thì
+ * không dòng nào khớp và cả ba nguồn luôn bị báo "chưa có lượt đồng bộ thành công nào".
+ */
 export async function marketingFreshness(db: Db): Promise<MarketingSourceFreshness[]> {
   const rows = await db
-    .select({ job: schema.syncRuns.job, at: sql<Date | null>`max(${schema.syncRuns.finishedAt})` })
+    .select({ source: schema.syncRuns.source, job: schema.syncRuns.job, at: sql<Date | null>`max(${schema.syncRuns.finishedAt})` })
     .from(schema.syncRuns)
     .where(eq(schema.syncRuns.status, "SUCCESS"))
-    .groupBy(schema.syncRuns.job);
-  const byJob = new Map(rows.map((r) => [r.job, r.at ? new Date(r.at) : null]));
+    .groupBy(schema.syncRuns.source, schema.syncRuns.job);
+  const runs = rows.map((r) => ({ source: r.source, job: r.job, at: r.at ? new Date(r.at) : null }));
   const now = Date.now();
   return MARKETING_SOURCES.map((s) => {
-    const at = byJob.get(s.job) ?? null;
+    const at = lastSuccessFor(s.job, runs);
     const minutesAgo = at ? Math.round((now - at.getTime()) / 60_000) : null;
     return { job: s.job, label: s.label, lastOkAt: at, minutesAgo, stale: minutesAgo === null || minutesAgo > s.staleMinutes, staleMinutes: s.staleMinutes };
   });

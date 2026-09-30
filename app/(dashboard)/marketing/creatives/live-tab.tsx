@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { Download } from "lucide-react";
 import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
+import { LiveProducts } from "@/app/(dashboard)/marketing/creatives/live-products";
 import { LiveTable } from "@/app/(dashboard)/marketing/creatives/live-table";
 import type { RepublishSource } from "@/app/(dashboard)/marketing/creatives/manual-gen";
 import { ScalePanel } from "@/app/(dashboard)/marketing/creatives/scale-panel";
@@ -8,14 +10,15 @@ import { InfoHint } from "@/components/info-hint";
 import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { getDb } from "@/db";
-import { LIVE_BOARD_DEFAULT_PERIOD, LIVE_BOARD_PARAMS, LIVE_STATES, LIVE_STATE_LABEL } from "@/lib/constants/creative-live-board";
+import { LIVE_BOARD_DEFAULT_PERIOD, LIVE_BOARD_PARAMS, LIVE_STATES, LIVE_STATE_LABEL, LIVE_VIEWS, LIVE_VIEW_LABEL, LIVE_VIEW_PARAM, parseLiveView } from "@/lib/constants/creative-live-board";
 import { CREATIVE_VERDICT_LABEL, SLOT_MODE_LABEL, type CreativeVerdict, type SlotMode } from "@/lib/constants/creative-loop";
 import { REPUBLISHABLE_STATUSES } from "@/lib/creative/manual-gen";
 import { formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { loadLiveBoard, parseLiveBoardQuery } from "@/lib/queries/creative-live-board";
 import { loadRepublishCtx } from "@/lib/queries/creative-manual-gen";
-import { hrefWith, searchParamsQuery, type SearchParams } from "@/lib/search-params";
+import { hrefWith, param, searchParamsQuery, type SearchParams } from "@/lib/search-params";
+import { cn } from "@/lib/utils";
 
 /**
  * ═══════════ TAB ④ ĐANG CHẠY — BẢNG ĐIỀU KHIỂN CAMP ═══════════
@@ -52,10 +55,11 @@ export async function LiveTab({
   const db = await getDb();
   const now = new Date();
   const q = parseLiveBoardQuery(raw);
+  const view = parseLiveView(param(raw, LIVE_VIEW_PARAM));
   const [data, kill] = await Promise.all([loadLiveBoard(db, now, q), readAdsKillSwitch()]);
 
   // "Đăng lại camp" (chủ shop 29/09/2026: scale mẫu sang TKQC / fanpage khác) — bộ đồ nghề chỉ đọc khi người xem bấm được, và chỉ cho dòng của TRANG đang xem.
-  const eligible = canRepublish ? data.rows.filter((r) => r.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(r.status)) : [];
+  const eligible = canRepublish && view === "camp" ? data.rows.filter((r) => r.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(r.status)) : [];
   const rp = eligible.length ? await loadRepublishCtx(db, now, eligible.map((r) => r.productId).filter((x): x is string => !!x)) : null;
   const sources: Record<string, RepublishSource> = {};
   if (rp) {
@@ -112,6 +116,17 @@ export async function LiveTab({
           </span>
         }
       >
+        {/* Góc nhìn — giữ nguyên kỳ + bộ lọc, về trang 1. */}
+        <div className="inline-flex h-8 items-center rounded-md border p-0.5 text-[12.5px]" role="tablist" aria-label="Góc nhìn">
+          {LIVE_VIEWS.map((v) => {
+            const href = v === "camp" ? searchParamsQuery({ ...raw, [LIVE_VIEW_PARAM]: undefined, page: undefined }) || "?" : hrefWith({ ...raw, page: undefined }, LIVE_VIEW_PARAM, v);
+            return (
+              <Link key={v} href={href} role="tab" aria-selected={view === v} className={cn("rounded px-2.5 py-1 font-medium", view === v ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
+                {LIVE_VIEW_LABEL[v]}
+              </Link>
+            );
+          })}
+        </div>
         {canSync ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook" /> : null}
         <a href={`/api/export/creatives-live${searchParamsQuery(raw)}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium hover:bg-muted" title="Tải CSV đúng tập đang lọc (mọi trang)">
           <Download className="size-3.5" aria-hidden />
@@ -156,7 +171,11 @@ export async function LiveTab({
         ]}
       />
 
-      <LiveTable rows={data.rows} total={data.total} pageCount={data.pageCount} canWrite={canWrite} republish={rp ? { ctx: { ...rp.ctx, canPublish: true }, sources, winCodes: rp.winCodes } : null} />
+      {view === "sp" ? (
+        <LiveProducts groups={data.productGroups} raw={raw} />
+      ) : (
+        <LiveTable rows={data.rows} total={data.total} pageCount={data.pageCount} canWrite={canWrite} republish={rp ? { ctx: { ...rp.ctx, canPublish: true }, sources, winCodes: rp.winCodes } : null} />
+      )}
 
       <ScalePanel canWrite={canWrite} />
     </div>

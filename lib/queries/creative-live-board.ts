@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import {
   LIVE_BOARD_DEFAULT_PERIOD,
@@ -9,6 +9,7 @@ import {
   LIVE_STATES,
   adsManagerUrl,
   filterLiveRows,
+  groupLiveByProduct,
   liveStateOf,
   resolveLiveNames,
   sortLiveRows,
@@ -17,8 +18,10 @@ import {
   type LiveBoardFilter,
   type LiveBoardRow,
   type LiveBoardSummary,
+  type LiveProductGroup,
   type LiveState,
 } from "@/lib/constants/creative-live-board";
+import { lastSuccessFor } from "@/lib/constants/sync";
 import { CREATIVE_VERDICTS, SLOT_MODES, type CreativeVerdict, type SlotMode } from "@/lib/constants/creative-loop";
 import { costPerOrderOf, describeRule, metricValue } from "@/lib/creative/judge";
 import { listLiveVariants, unknownMetrics, variantMetrics, type JudgedVariant, type MetricsWindow, type VariantMetricsRow } from "@/lib/queries/creative-loop";
@@ -49,6 +52,8 @@ export type LiveBoardData = {
   pageCount: number;
   /** Tổng hợp của TẬP ĐÃ LỌC (mọi trang). */
   summary: LiveBoardSummary;
+  /** Tập đã lọc gộp theo mã sản phẩm (góc nhìn "Theo sản phẩm"). */
+  productGroups: LiveProductGroup[];
   /** Số camp của kỳ trước khi lọc — để nói "N / M camp". */
   periodTotal: number;
   facets: { states: Record<LiveState, number>; verdicts: Partial<Record<CreativeVerdict, number>>; modes: Partial<Record<SlotMode, number>>; products: FacetCount[] };
@@ -88,15 +93,19 @@ async function productLabelsOf(db: Db, ids: string[]): Promise<Map<string, strin
   return new Map(rows.map((r) => [r.id, [r.code, r.name].filter((x) => x && x.trim()).join(" · ") || r.id]));
 }
 
+/** Lượt đồng bộ chi tiêu Facebook thành công gần nhất — qua `lastSuccessFor` (`JOB_RUN_KEYS["facebook-ads"]`), không gõ lại tên con. */
 async function lastFbSync(db: Db): Promise<string | null> {
   const sr = schema.syncRuns;
-  const [row] = await db
-    .select({ at: sr.finishedAt })
+  const rows = await db
+    .select({ source: sr.source, job: sr.job, at: sql<Date | null>`max(${sr.finishedAt})` })
     .from(sr)
-    .where(and(eq(sr.source, "FACEBOOK"), eq(sr.job, "ads_insights"), eq(sr.status, "SUCCESS")))
-    .orderBy(desc(sr.finishedAt))
-    .limit(1);
-  return row?.at ? new Date(row.at).toISOString() : null;
+    .where(and(eq(sr.status, "SUCCESS"), eq(sr.source, "FACEBOOK")))
+    .groupBy(sr.source, sr.job);
+  const at = lastSuccessFor(
+    "facebook-ads",
+    rows.map((r) => ({ source: r.source, job: r.job, at: r.at ? new Date(r.at) : null })),
+  );
+  return at ? at.toISOString() : null;
 }
 
 const round = (v: number | null) => (v === null ? null : Math.round(v));
@@ -207,6 +216,7 @@ export async function loadLiveBoard(db: Db, now: Date, q: LiveBoardQuery): Promi
     total: filtered.length,
     pageCount,
     summary: summarizeLive(filtered),
+    productGroups: groupLiveByProduct(filtered),
     periodTotal: all.length,
     facets: { states, verdicts: orderedVerdicts, modes: orderedModes, products: [...byProduct.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi")) },
     fbSyncedAt,

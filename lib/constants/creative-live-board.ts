@@ -38,6 +38,15 @@ export function liveStateOf(status: VariantStatus, startAt: string, now: Date): 
 /** Tham số URL của bảng — khoá ngắn, không dấu (cùng kiểu `tt` của các trang khác). */
 export const LIVE_BOARD_PARAMS = { state: "tt", verdict: "pq", product: "sp", mode: "kieu" } as const;
 
+/** Góc nhìn: từng camp (mặc định) hay gộp theo mã sản phẩm. Không phải bộ lọc — "Xoá lọc" không đổi nó. */
+export const LIVE_VIEW_PARAM = "xem";
+export const LIVE_VIEWS = ["camp", "sp"] as const;
+export type LiveView = (typeof LIVE_VIEWS)[number];
+export const LIVE_VIEW_LABEL: Record<LiveView, string> = { camp: "Theo camp", sp: "Theo sản phẩm" };
+export function parseLiveView(v: string | undefined | null): LiveView {
+  return v === "sp" ? "sp" : "camp";
+}
+
 export const LIVE_BOARD_DEFAULT_PERIOD: PeriodKey = "7d";
 export const LIVE_BOARD_PAGE_SIZE = 50;
 
@@ -47,7 +56,7 @@ export type LiveSortKey = (typeof LIVE_SORTABLE)[number];
 export const LIVE_DEFAULT_SORT: LiveSortKey = "start";
 
 /** Mọi khoá URL mà bảng đọc — thanh tab xoá hết khi chuyển tab, nút "Xoá lọc" xoá phần lọc. */
-export const LIVE_BOARD_URL_KEYS = ["q", "period", "from", "to", "sort", "dir", "page", "pageSize", ...Object.values(LIVE_BOARD_PARAMS)] as const;
+export const LIVE_BOARD_URL_KEYS = ["q", "period", "from", "to", "sort", "dir", "page", "pageSize", LIVE_VIEW_PARAM, ...Object.values(LIVE_BOARD_PARAMS)] as const;
 
 // ───────────────────────────── TÊN ─────────────────────────────
 
@@ -264,6 +273,38 @@ export function summarizeLive(rows: LiveBoardRow[]): LiveBoardSummary {
     killed: rows.filter((r) => r.verdict === "KILL").length,
     undecided: rows.filter((r) => UNDECIDED_VERDICTS.includes(r.verdict)).length,
   };
+}
+
+// ───────────────────────────── GỘP THEO SẢN PHẨM ─────────────────────────────
+
+export type LiveProductGroup = {
+  /** `null` = các camp không gắn mã — một nhóm riêng, KHÔNG gộp vào mã nào. */
+  productId: string | null;
+  label: string;
+  summary: LiveBoardSummary;
+};
+
+/**
+ * Gộp các camp ĐANG LỌC theo mã sản phẩm — mỗi nhóm là `summarizeLive` của chính nó, nên chi/đơn của một mã là tổng chi ÷
+ * tổng đơn của các camp có cả hai vế (không trung bình các tỷ số). Xếp chi trong kỳ giảm dần, nhóm chưa biết chi xuống
+ * cuối; hoà ⇒ theo tên. Nhóm "không gắn mã" luôn đứng cuối cùng.
+ */
+export function groupLiveByProduct(rows: LiveBoardRow[]): LiveProductGroup[] {
+  const by = new Map<string, LiveBoardRow[]>();
+  for (const r of rows) {
+    const k = r.productId ?? "";
+    by.set(k, [...(by.get(k) ?? []), r]);
+  }
+  const groups = [...by.entries()].map(([k, list]) => ({ productId: k || null, label: k ? (list[0].productLabel ?? k) : "Không gắn mã", summary: summarizeLive(list) }));
+  return groups.sort((a, b) => {
+    if ((a.productId === null) !== (b.productId === null)) return a.productId === null ? 1 : -1;
+    const sa = a.summary.spendVnd;
+    const sb = b.summary.spendVnd;
+    if (sa === null && sb !== null) return 1;
+    if (sb === null && sa !== null) return -1;
+    if (sa !== null && sb !== null && sa !== sb) return sb - sa;
+    return a.label.localeCompare(b.label, "vi");
+  });
 }
 
 // ───────────────────────────── CSV ─────────────────────────────

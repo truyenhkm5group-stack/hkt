@@ -1,22 +1,27 @@
 import assert from "node:assert/strict";
-import { inArray, like } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import {
   adsManagerUrl,
   filterLiveRows,
+  groupLiveByProduct,
   liveRowsToCsv,
   liveStateOf,
   matchesLiveQuery,
+  parseLiveView,
   resolveLiveNames,
   sortLiveRows,
   summarizeLive,
   type LiveBoardRow,
 } from "@/lib/constants/creative-live-board";
 import { CREATIVE_VERDICT_LABEL } from "@/lib/constants/creative-loop";
+import { lastSuccessFor } from "@/lib/constants/sync";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { vnStartOfDay } from "@/lib/format";
 import { loadLiveBoard, parseLiveBoardQuery } from "@/lib/queries/creative-live-board";
+import { variantDailySeries } from "@/lib/queries/creative-loop";
+import { marketingFreshness } from "@/lib/queries/marketing-daily";
 
 /**
  * ═══════════ TAB ④ ĐANG CHẠY — BẢNG ĐIỀU KHIỂN CAMP (30/09/2026) ═══════════
@@ -167,6 +172,39 @@ function testPure() {
   assert.equal(sum.killed, 1);
   assert.equal(sum.undecided, 1, "RUNNING là chưa kết luận");
 
+  // ── Gộp theo sản phẩm ──
+  const groups = groupLiveByProduct([
+    row({ id: "g1", productId: "p1", productLabel: "Q005", spendVnd: 100_000, bookedOrders: 1, state: "RUNNING" }),
+    row({ id: "g2", productId: "p1", productLabel: "Q005", spendVnd: 300_000, bookedOrders: 3, state: "PAUSED" }),
+    row({ id: "g3", productId: "p2", productLabel: "A112", spendVnd: 500_000, bookedOrders: 0 }),
+    row({ id: "g4", productId: "p3", productLabel: "B045", spendVnd: null, bookedOrders: null }),
+    row({ id: "g5", productId: null, productLabel: null, spendVnd: 900_000 }),
+  ]);
+  assert.deepEqual(groups.map((g) => g.productId), ["p2", "p1", "p3", null], "chi giảm dần · chi CHƯA BIẾT xuống cuối · 'không gắn mã' luôn cuối cùng dù chi lớn nhất");
+  const q005 = groups[1].summary;
+  assert.equal(q005.total, 2);
+  assert.equal(q005.running, 1);
+  assert.equal(q005.spendVnd, 400_000);
+  assert.equal(q005.costPerOrder, 100_000, "chi/đơn của MÃ = tổng chi ÷ tổng đơn, không trung bình các tỷ số");
+  assert.equal(groups[0].summary.costPerOrder, null, "0 đơn ⇒ chi/đơn CHƯA BIẾT, không phải chia cho 0");
+  assert.equal(groups[3].label, "Không gắn mã");
+  assert.equal(parseLiveView("sp"), "sp");
+  assert.equal(parseLiveView("la"), "camp", "giá trị lạ ⇒ góc nhìn mặc định");
+
+  // ── Mốc đồng bộ: sync_runs ghi TÊN CON, khoá job phải đi qua JOB_RUN_KEYS ──
+  const t1 = new Date("2031-05-11T01:00:00Z");
+  const t2 = new Date("2031-05-11T02:00:00Z");
+  const runs = [
+    { source: "FACEBOOK", job: "ads_insights", at: t1 },
+    { source: "FACEBOOK", job: "ads_insights", at: t2 },
+    { source: "PANCAKE", job: "orders_incremental", at: t2 },
+    { source: "FACEBOOK", job: "facebook-ads", at: new Date("2031-06-01T00:00:00Z") },
+  ];
+  assert.equal(lastSuccessFor("facebook-ads", runs)?.toISOString(), t2.toISOString(), "khớp theo SOURCE:tên con, lấy lượt muộn nhất; dòng mang khoá job trần không phải tên con");
+  assert.equal(lastSuccessFor("pancake-orders", runs)?.toISOString(), t2.toISOString());
+  assert.equal(lastSuccessFor("vtp-tracking", runs), null, "chưa có lượt nào ⇒ CHƯA BIẾT");
+  assert.equal(lastSuccessFor("khoa-la", runs), null, "khoá không khai ⇒ không đoán tên con");
+
   const csv = liveRowsToCsv([row({ names: fb, spendVnd: null, bookedOrders: null, reasons: ['Có "ngoặc", phẩy'] })], { verdict: CREATIVE_VERDICT_LABEL });
   const [head, line] = csv.split("\r\n");
   assert.ok(head.startsWith("Chiến dịch (Facebook),"), "CSV có tiêu đề tiếng Việt");
@@ -194,6 +232,7 @@ async function cleanup(db: Db) {
   await db.delete(schema.fbAds).where(like(schema.fbAds.id, `${P}%`));
   await db.delete(schema.fbAdsets).where(like(schema.fbAdsets.id, `${P}%`));
   await db.delete(schema.products).where(like(schema.products.id, `${P}%`));
+  await db.delete(schema.syncRuns).where(eq(schema.syncRuns.actor, "lb-test"));
 }
 
 async function testDb(db: Db) {
@@ -307,6 +346,28 @@ async function testDb(db: Db) {
     assert.equal(mm.get("paused")?.bookedOrders, 0, "có mẩu QC mà 0 đơn ⇒ 0 THẬT");
     assert.equal(mm.get("paused")?.spendVnd, null, "không dòng chi trong kỳ ⇒ CHƯA BIẾT");
     assert.equal(mm.has("run"), false, "camp bắt đầu SAU cuối kỳ không hiện");
+
+    // ── Chuỗi theo ngày: cộng các ngày ra ĐÚNG số của dòng camp trong cùng kỳ ──
+    const w7win = { from: q7.period.from, to: q7.period.to };
+    const s7 = await variantDailySeries(db, { fbAdId: `${P}ad-run`, startAt: startRun }, w7win, now);
+    const sum7 = (pick: (p: (typeof s7.points)[number]) => number | null) => s7.points.reduce<number | null>((acc, p) => (pick(p) === null ? acc : (acc ?? 0) + (pick(p) as number)), null);
+    assert.equal(sum7((p) => p.spendVnd), run.spendVnd, "cộng chi theo ngày = chi trong kỳ của dòng camp");
+    assert.equal(sum7((p) => p.bookedOrders), run.bookedOrders, "cộng đơn theo ngày = đơn trong kỳ của dòng camp");
+    assert.equal(s7.points.length, 7, "trục đủ 7 ngày của kỳ, kể cả ngày trống");
+    assert.equal(s7.points.find((p) => p.day === shiftDay(today, -2))?.spendVnd, null, "ngày không có dòng chi ⇒ CHƯA BIẾT, không vẽ 0");
+    const sAll = await variantDailySeries(db, { fbAdId: `${P}ad-run`, startAt: startRun }, null, now);
+    assert.equal(sAll.points[0].day, vnDay(startRun), "toàn đời: trục bắt đầu từ ngày chạy");
+    assert.equal(sAll.points.at(-1)?.day, today);
+    assert.equal(sAll.truncated, false);
+    assert.equal(sAll.points.reduce((a, p) => a + (p.spendVnd ?? 0), 0), run.lifetimeSpendVnd, "toàn đời: cộng ngày = chi toàn đời");
+    assert.equal(sAll.points.reduce((a, p) => a + p.bookedOrders, 0), run.lifetimeOrders);
+
+    // ── Độ tươi nguồn ở /ads/daily: lượt đồng bộ Facebook THÀNH CÔNG phải được thấy ──
+    const doneAt = new Date(now.getTime() - 5 * 60_000);
+    await db.insert(schema.syncRuns).values({ source: "FACEBOOK", job: "ads_insights", status: "SUCCESS", actor: "lb-test", startedAt: new Date(doneAt.getTime() - 60_000), finishedAt: doneAt });
+    const fresh = (await marketingFreshness(db)).find((f) => f.job === "facebook-ads");
+    assert.ok(fresh?.lastOkAt && fresh.lastOkAt >= doneAt, "sync_runs ghi 'ads_insights' ⇒ nguồn 'facebook-ads' KHÔNG được báo chưa đồng bộ");
+    assert.equal(fresh?.stale, false);
 
     // ── Toàn bộ: số đo toàn đời ──
     const all = await loadLiveBoard(db, now, parseLiveBoardQuery({ period: "all", pageSize: "200" }));
