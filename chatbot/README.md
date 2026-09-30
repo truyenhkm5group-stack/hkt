@@ -222,6 +222,17 @@ Nhận diện mẫu và màu bằng ảnh thật: khi khách gửi ảnh, bot đ
 
 Giới hạn: chỉ ảnh của khách được đưa vào (ảnh do page gửi bị bỏ qua), tối đa 4 ảnh gần nhất, mỗi ảnh ≤ 5 MB. Video và sticker chỉ được mô tả bằng chữ.
 
+### 📣 Bot riêng theo quảng cáo test (theo ID quảng cáo)
+
+Khách bấm quảng cáo "INBOX NGAY" của một camp test thì hội thoại Pancake mang **ID quảng cáo** (`ad_ids` / `ads` của hội thoại, hoặc `referral.ad_id` của tin nhắn — `src/adpersona.js::extractAdIds` đọc phòng thủ mọi hình dạng). ERP biết ID đó là camp test nào, đang test mẫu nào (Thư viện Media), và chủ shop dặn gì riêng cho camp; ERP đẩy **cả bộ** sang bot qua `PUT /api/erp/ad-bots` (kiểm `ADMIN_TOKEN`), bot lưu ở `data/ad-bots.json`.
+
+Khi khách đến từ quảng cáo có bot riêng, trong lượt trả lời đó:
+- prompt có thêm khối **"KHÁCH ĐẾN TỪ QUẢNG CÁO TEST — BOT RIÊNG CỦA CAMP …"**: khách hỏi "mẫu này" là hỏi đúng mẫu của camp, cộng hướng dẫn riêng của camp;
+- **mẫu mặc định** (`defaultProduct`) của page được thay bằng mẫu của camp — chặn nhầm mã, tự gửi ảnh, ghi đơn nháp đều theo mẫu này;
+- **giá vẫn chỉ từ bảng giá / danh mục POS**: số tiền trong nội dung quảng cáo bị che trước khi vào prompt (chốt chặn giá coi mọi số trong prompt là giá hợp lệ).
+
+Hội thoại đã gắn với một quảng cáo thì bot nhớ lại (tin sau không mang ID vẫn dùng bot riêng); nhiều quảng cáo thì dùng quảng cáo khách bấm gần nhất. ID quảng cáo bot gặp mà chưa có bot riêng được ghi ở `data/ad-seen.json` và hiện trên trang ERP **Bot chat bán hàng → Bot riêng theo quảng cáo test** (`/chatbot/ad-bots`) — nơi bật/tắt từng camp, gắn mã mẫu cho quảng cáo chưa gắn mã và viết hướng dẫn riêng. Chat thử: tab **Chat thử** của page → ô "Giả lập khách bấm quảng cáo".
+
 ### 🎯 Bám khách chưa chốt (sales agent)
 
 Tab **"🎯 Bám khách"** của từng page. Khác với tab "Chăm sóc khách" (gửi cùng một tin mẫu cho nhiều người), agent này đọc lại **từng hội thoại**, phân loại khách đang dừng ở bước nào, rồi nhờ AI soạn **một tin riêng** cho đúng ngữ cảnh khách đó.

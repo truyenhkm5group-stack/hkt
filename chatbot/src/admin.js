@@ -16,7 +16,8 @@ import { broadcast } from "./broadcast.js";
 import { salesAgent, followupConfig, STAGES } from "./salesagent.js";
 import { orderAudit, STATUS_NAMES } from "./audit.js";
 import { handleErpRoutes } from "./erp-import.js";
-import { summarizeAiCost, meteredUsage, perSdt } from "./aicost.js";
+import { adBots } from "./adbots.js";
+import { summarizeAiCost, meteredUsage, perSdt, aiScope } from "./aicost.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_HTML = path.join(ROOT, "admin", "index.html");
@@ -553,6 +554,12 @@ export function createAdminHandler(bot) {
         if (!bot.clients.has(p.id)) return json(res, 404, { error: "page khong ton tai" }), true;
         const body = await readJson(req);
         const history = Array.isArray(body.history) ? body.history : [];
+        // Chat thu "bot rieng cua camp" (adId): ap dung nhu khach bam dung quang cao do — khoi prompt + mau mac dinh
+        if (body.adId) {
+          const adBot = adBots.get(body.adId);
+          if (!adBot) return json(res, 404, { error: `Chua co bot rieng cho quang cao ${body.adId} (ERP chua day sang)` }), true;
+          aiScope.enterWith({ ...(aiScope.getStore() || {}), adBot, adBotPageId: String(p.id) });
+        }
         const eff = settings.effective(p.id);
         // Chat thu cung phai theo dung luat: chi ap bang gia khuyen mai khi trong hoi thoai da co tin shop nhac toi khuyen mai
         const saleKeys = String(eff.saleTrigger || "").split("|").map((k) => k.trim().toLowerCase()).filter(Boolean);

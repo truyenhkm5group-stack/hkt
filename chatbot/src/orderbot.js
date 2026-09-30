@@ -3,6 +3,8 @@ import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
 import { sortChrono, parseTs } from "./util.js";
+import { adBots } from "./adbots.js";
+import { extractAdIds } from "./adpersona.js";
 
 /**
  * ═══════════ BOT LÊN ĐƠN (độc lập với bot tư vấn) ═══════════
@@ -42,8 +44,10 @@ export class OrderBot {
   }
 
   /** Bot tu van vua xu ly xong mot luot cua hoi thoai: ghi nhan, va hen kiem tra neu thong tin moi du */
-  notify(pageId, conversationId, messages, customerName = "") {
+  notify(pageId, conversationId, messages, customerName = "", adIds = []) {
     if (!this.enabledFor(pageId)) return;
+    // Hoi thoai cua MAU TEST MOI (chua co tren POS): khong len don (chu shop: chi len don khi mau thang)
+    if (adBots.testProductForConversation(conversationId, adIds)) return;
     const f = this.bot.customerFacts(pageId, messages);
     if (!f.phone && !f.address) return; // chua co dau hieu mua -> khong theo doi
     const key = String(conversationId);
@@ -211,7 +215,7 @@ export class OrderBot {
             continue; // khach da co don that -> hoi thoai nay da duoc xu ly
           }
           st.candidates++;
-          this.notify(pid, key, messages, conv.from?.name || "");
+          this.notify(pid, key, messages, conv.from?.name || "", extractAdIds(conv));
           const it = this.items[key];
           if (!it) continue;
           if (it.status !== "PENDING") it.status = "PENDING";

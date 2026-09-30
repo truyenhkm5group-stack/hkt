@@ -57,6 +57,7 @@ import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
+import { pushAdBotsFromJob } from "@/lib/integrations/chatbot/ad-bots";
 import { createVideoRun, readVideoScaleConfig, runVideoScaleTick } from "@/lib/video-scale/pipeline";
 import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize";
 import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
@@ -146,6 +147,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
           r.build?.imageBatch ?? "",
           r.named ? `đặt tên ${r.named} bài` : "",
           r.manualGen && (r.manualGen.drawn || r.manualGen.failed) ? `gen tay: vẽ ${r.manualGen.drawn} · lỗi ${r.manualGen.failed}` : "",
+          // Camp test vừa lên ⇒ bot chat có ngay bot riêng của nó (docs: lib/constants/chatbot-ad-bots.ts)
+          await pushAdBotsFromJob(),
         ].filter(Boolean).join(" · ");
         if (r.warnings.length) ctx.summary.warning = r.warnings.slice(0, 5).join(" | ");
         return r;
@@ -494,7 +497,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         khớp" dù chiến dịch cha của nó đã nằm sẵn trong bảng chi tiêu.
       */
       const adsetIndex = await syncFacebookAdsetIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
-      return { ...r, adIndex, adsetIndex };
+      // Lưới an toàn cho "bot riêng theo quảng cáo" khi vòng mẫu không chạy (camp scale / video, camp tắt tự rơi).
+      const adBots = await pushAdBotsFromJob();
+      return { ...r, adIndex, adsetIndex, adBots };
     },
   },
   "landing-sheet": {
