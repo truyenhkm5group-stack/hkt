@@ -236,6 +236,8 @@ const ROUTES = [
   // Nền tảng đa tổ chức: bảng module đọc qua bộ phân giải năng lực; `/platform` mở CSDL của MỌI
   // tổ chức để đo sức khoẻ — tuyến nặng nhất khi có nhiều tổ chức, nên phải nằm trong lá chắn.
   "/settings/modules",
+  // Trang gom «Tuỳ biến nâng cao» của tổ chức khách (30/09/2026): mục lục thuần — không đọc CSDL ngoài phiên.
+  "/settings/advanced",
   // Metadata (Phase 2): bốn màn hình quản trị đọc sổ đối tượng + dịch vụ `lib/metadata/*` của tổ chức.
   "/settings/data-model",
   "/settings/forms",

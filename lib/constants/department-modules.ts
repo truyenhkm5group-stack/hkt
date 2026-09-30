@@ -38,6 +38,13 @@ export type CrossZone = (typeof CROSS_ZONES)[number];
 
 export type ModuleZone = DepartmentCode | CrossZone;
 
+/**
+ * Các trang GOM có trong sổ — một mục khai `foldInto` phải trỏ vào một trong số này (`tests/platform-ui.test.ts`
+ * đòi mỗi trang gom có dòng `hub: true` cùng vùng với các mục của nó).
+ */
+export const NAV_HUB_HREFS = ["/settings/advanced"] as const;
+export type NavHubHref = (typeof NAV_HUB_HREFS)[number];
+
 export type ModuleSpec = {
   href: string;
   label: string;
@@ -53,6 +60,15 @@ export type ModuleSpec = {
    * là một trang rỗng mang tên nghiệp vụ họ không có.
    */
   requires?: readonly ModuleKey[];
+  /**
+   * Trang GOM mà mục này rút vào ở tổ chức KHÁCH (không phải tổ chức nhà). Ở đó mục KHÔNG đứng riêng trên menu / ⌘K: nó
+   * hiện trong trang gom (`hub: true`), và trang gom thay nó một chỗ trên menu. Trang của mục vẫn mở được đúng URL cũ —
+   * gom chỉ đổi cách XẾP menu, không đổi cổng quyền hay cổng module (`visible()` giữ nguyên, trang gom lọc bằng CHÍNH nó).
+   * Tổ chức nhà giữ mục riêng như cũ và không thấy trang gom.
+   */
+  foldInto?: NavHubHref;
+  /** Mục này là một trang gom: chỉ hiện ở tổ chức khách, và chỉ khi người xem thấy được ít nhất một mục gom vào nó. */
+  hub?: true;
   /** Một dòng: vì sao phòng này sở hữu màn hình này. */
   why: string;
 };
@@ -100,6 +116,10 @@ export const NAV_MODULES = [
     label: "CSKH & tin nhắn",
     zone: "SALES",
     permission: "cs:view",
+    // Case của trang SINH RA từ Pancake: thẻ / ghi chú đơn, phiếu đổi trả và hội thoại Pancake Pages (lib/cs/detect.ts,
+    // lib/cs/chat-detect.ts, nút «Quét từ Pancake»), khối «Đơn vào» đọc hội thoại Pancake, cộng case giao thất bại từ
+    // Viettel Post. Case gõ tay (nguồn MANUAL) vẫn tạo được, nhưng không còn nguồn tự động nào thì bàn này chỉ là một sổ tay.
+    requires: ["connector_pancake"],
     why: "Khách nhắn tin là khâu chốt đơn — người trả lời chính là người bán (cùng lý do với luật sở hữu việc CS_CASE).",
   },
   {
@@ -196,6 +216,9 @@ export const NAV_MODULES = [
     label: "Vận đơn & care",
     zone: "LOGISTICS",
     permission: "shipments:view",
+    // Bảng `shipments` chỉ được ghi bởi đồng bộ Viettel Post (webhook · bảng kê · danh sách vận đơn) và đồng bộ đơn Pancake —
+    // đơn tạo tay không có vận đơn. Không có connector Viettel Post thì trang là một bảng rỗng mang tên nghiệp vụ họ không có.
+    requires: ["connector_viettelpost"],
     why: "Bàn làm việc với Viettel Post: hành trình kiện, ca chăm sóc, yêu cầu phát lại.",
   },
   {
@@ -219,6 +242,10 @@ export const NAV_MODULES = [
     label: "Đóng gói theo lượt",
     zone: "WAREHOUSE",
     permission: "products:view",
+    // Quy trình của trang là quy trình Pancake POS: giai đoạn «Đang đóng hàng» chỉ Pancake đặt, vận đơn tạo trên Pancake,
+    // đơn thiếu tỉnh/xã bị loại vì «Pancake từ chối đẩy sang Viettel Post». Phép gom vẫn chạy được trên đơn tạo tay
+    // «Đã xác nhận», nhưng lời trên trang nói về Pancake — muốn mở cho tổ chức khách thì phải viết lại lời trước.
+    requires: ["connector_pancake"],
     why: "Đóng gói là việc tốn người nhất của kho, và chỉ người đứng ở kệ mới đi lấy hàng — bày đơn đủ hàng theo cách đi kho ít vòng nhất là việc của chính họ.",
   },
   {
@@ -309,7 +336,9 @@ export const NAV_MODULES = [
     label: "Hiệu quả mẫu mã",
     zone: "PRODUCTION",
     permission: "reports:returns",
-    requires: ["orders"],
+    // Thước đo của trang là GIAO THÀNH CÔNG / HOÀN theo `ORDER_OUTCOME` — mã cuối Viettel Post và tiền thực thu trên bảng
+    // kê. Đơn tạo tay chỉ có nhánh «xác nhận đã giao» nên tỷ lệ hoàn luôn 0; tiền quảng cáo theo mã lại là của Meta Ads.
+    requires: ["orders", "connector_viettelpost"],
     why: "Mẫu nào bán được, mẫu nào hoàn nhiều là ĐẦU VÀO của lệnh đặt hàng tiếp theo. Kho đọc để biết xếp hàng ở đâu, nhưng người QUYẾT theo nó là phòng Sản xuất.",
   },
 
@@ -396,6 +425,9 @@ export const NAV_MODULES = [
     label: "Chất lượng dữ liệu",
     zone: "MANAGEMENT",
     permission: "dashboard:view",
+    // Phần lớn luật đối soát của trang (lib/constants/reconciliation.ts) soi vận đơn · sự kiện · bảng kê Viettel Post và
+    // xung đột Pancake ↔ Viettel Post. Tổ chức không có connector ấy mở trang chỉ thấy các ô rỗng; URL vẫn mở được.
+    requires: ["connector_viettelpost"],
     why: "Số liệu sai không thuộc phòng nào cụ thể — nó chặn quyết định của MỌI phòng. Cùng lý do nhóm việc DATA được xếp về Ban điều hành.",
   },
 
@@ -435,12 +467,23 @@ export const NAV_MODULES = [
     permission: "modules:manage",
     why: "Tổ chức dùng những mảng nào của ERP. Bật một module là mở cả màn hình, quyền và job của nó cho mọi người — quyết định của quản trị, không của một phòng làm một khâu.",
   },
+  // Trang GOM của mười công cụ dựng cấu hình bên dưới (chủ shop 30/09/2026): tổ chức khách thấy MỘT mục thay cho mười.
+  // Không khai quyền: trang gom hiện khi người xem thấy được ít nhất một công cụ của nó (`onMenu`), và trang chỉ liệt kê
+  // những công cụ đó — cổng quyền vẫn là của từng công cụ.
+  {
+    href: "/settings/advanced",
+    label: "Tuỳ biến nâng cao",
+    zone: "SYSTEM",
+    hub: true,
+    why: "Mười công cụ dựng cấu hình (mô hình dữ liệu, form, danh sách, trạng thái, luật, trang, mẫu, xuất, đối tượng, AI dựng) là việc của quản trị và hiếm khi mở. Tổ chức khách thấy chúng gom ở một trang để menu Hệ thống còn đọc được; tổ chức nhà giữ mục riêng như cũ.",
+  },
   // Metadata của tổ chức (Phase 2): bốn màn hình cùng khoá `metadata:manage`. Đổi ở đây đổi màn hình
   // của MỌI phòng (field, form, cột, nhãn trạng thái) nên là việc của quản trị, không của phòng nào.
   {
     href: "/settings/data-model",
     label: "Mô hình dữ liệu",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Field tuỳ biến của khách hàng, đơn hàng, sản phẩm… cho CẢ tổ chức. Một field mới hiện ở form và danh sách của mọi phòng — quyết định của quản trị.",
   },
@@ -448,6 +491,7 @@ export const NAV_MODULES = [
     href: "/settings/forms",
     label: "Form nhập liệu",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Bố cục form (nhóm, thứ tự, bắt buộc, chỉ đọc) theo Nháp → Xuất bản. Xuất bản đổi màn hình nhập liệu của mọi người mà không cần deploy.",
   },
@@ -455,6 +499,7 @@ export const NAV_MODULES = [
     href: "/settings/lists",
     label: "Danh sách",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Cột, sắp xếp và bộ lọc mặc định của danh sách chạy theo metadata. Cùng mô hình Nháp → Xuất bản với form.",
   },
@@ -462,6 +507,7 @@ export const NAV_MODULES = [
     href: "/settings/statuses",
     label: "Trạng thái",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Nhãn hiển thị, thứ tự và bộ lọc của trạng thái HỆ THỐNG (vd trạng thái đơn). Giá trị và chuyển trạng thái do Core sở hữu — trang này chỉ đổi phần hiển thị.",
   },
@@ -471,6 +517,7 @@ export const NAV_MODULES = [
     href: "/settings/workflows",
     label: "Luật tự động",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "workflow:manage",
     why: "Khi nào · điều kiện · làm gì (tạo việc, báo, ghi giá trị) · có cần người duyệt. Luật mới luôn ở NHÁP + CHẠY THỬ; chuyển CHẠY THẬT là quyết định của quản trị vì máy sẽ làm thay người trên cả tổ chức.",
   },
@@ -480,6 +527,7 @@ export const NAV_MODULES = [
     href: "/settings/pages",
     label: "Trang tuỳ biến",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Ghép trang từ khối có sẵn (chỉ số, bảng, biểu đồ, Kanban, nhật ký, form, nút) theo Nháp → Xuất bản, không cần deploy. Trang lên menu của mọi người nên là quyết định của quản trị; mỗi khối vẫn tự kiểm quyền của người xem.",
   },
@@ -515,6 +563,7 @@ export const NAV_MODULES = [
     href: "/settings/templates",
     label: "Mẫu cấu hình",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Cài một mẫu ngành (thời trang, TMĐT chung, bán sỉ…) theo Xem trước → Xác nhận: máy chỉ gọi các màn hình cấu hình sẵn có, luật sinh ở NHÁP. Nâng mẫu lên phiên bản mới không đè thứ tổ chức đã sửa.",
   },
@@ -523,6 +572,7 @@ export const NAV_MODULES = [
     href: "/settings/export",
     label: "Xuất cấu hình",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Tải toàn bộ cấu hình của tổ chức (module, vai trò, đối tượng, field, form, danh sách, trang, luật) thành một tệp blueprint để khôi phục hoặc nhân bản sang tổ chức mới — không bản ghi, không người dùng, không bí mật. Việc của quản trị vì nó đọc cấu hình của cả tổ chức.",
   },
@@ -532,6 +582,7 @@ export const NAV_MODULES = [
     href: "/settings/objects",
     label: "Đối tượng tuỳ biến",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Tạo nghiệp vụ mới không có sẵn (Hợp đồng bảo trì, Công trình, Xe…) không cần viết mã: danh sách, form, chi tiết tự sinh; field / form / danh sách soạn ở các màn metadata. Đối tượng lên menu của cả tổ chức nên là quyết định của quản trị.",
   },
@@ -541,6 +592,7 @@ export const NAV_MODULES = [
     href: "/settings/ai-builder",
     label: "AI dựng cấu hình",
     zone: "SYSTEM",
+    foldInto: "/settings/advanced",
     permission: "metadata:manage",
     why: "Mô tả doanh nghiệp hoặc một thay đổi, AI soạn gói cấu hình; người bỏ chọn từng mục, xem trước rồi xác nhận — AI không có đường ghi riêng. Khoá AI là của chính tổ chức (Kết nối theo tổ chức).",
   },
@@ -612,6 +664,11 @@ export const MODULE_GROUPS: { zone: ModuleZone; label: string; hint: string; ite
   hint: ZONE_HINT[zone],
   items: modulesOfZone(zone),
 })).filter((g) => g.items.length > 0);
+
+/** Mọi mục gom vào một trang gom, theo thứ tự khai — CHƯA lọc quyền (lọc là việc của `hubTools` trong app-sidebar). */
+export function hubMembers(hub: NavHubHref): ModuleSpec[] {
+  return (NAV_MODULES as readonly ModuleSpec[]).filter((m) => m.foldInto === hub);
+}
 
 /**
  * PHÒNG KHÔNG SỞ HỮU MÀN HÌNH NÀO — PHẢI KHAI VÌ SAO, VÀ KHAI CHỖ VIỆC CỦA HỌ ĐANG NẰM.

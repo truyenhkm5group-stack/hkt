@@ -31,7 +31,7 @@ import { SERVICE_BUSINESS_BLUEPRINT } from "@/lib/blueprints/templates/service-b
 import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 import { coreText, HOME_BRAND_PATTERN, HOME_COPY_CONTEXT } from "@/lib/branding/copy";
 import { APPROVALS_HREF } from "@/lib/constants/approval";
-import { NAV_MODULES, ZONE_MODULE, type ModuleZone } from "@/lib/constants/department-modules";
+import { NAV_MODULES, ZONE_MODULE, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
 import { OWNER_DECISION_KIND_SPEC } from "@/lib/constants/owner-decisions";
 import { MODULE_KEYS, moduleDef, moduleOfPath, PLATFORM_MODULES, resolveEnabledModules, type ModuleKey } from "@/lib/constants/platform-modules";
 import { WORK_SOURCE_SPEC } from "@/lib/constants/work-sources";
@@ -125,21 +125,26 @@ function testMenuSweep() {
   const bo: [string, ModuleKey[]][] = [["chỉ lõi", resolved([])], ...BLUEPRINT_TEMPLATES.map((b) => [b.key, resolved(b.modules)] as [string, ModuleKey[]])];
   for (const [ten, set] of bo) for (const isHome of [true, false]) assert.deepEqual(menuViolations(set, isHome), [], `mẫu ${ten} (${isHome ? "nhà" : "không-nhà"})`);
 
-  // Tổ chức bật ĐỦ module (tổ chức nhà) ⇒ không nhóm nào dời: menu y như sổ khai (không đổi hành vi của nhà).
+  // Tổ chức bật ĐỦ module (tổ chức nhà) ⇒ không nhóm nào dời: menu y như sổ khai (không đổi hành vi của nhà). Trang gom
+  // (`hub`) chỉ dành cho tổ chức khách nên không nằm trong menu của nhà.
   const nha = visibleGroups(navUser(all, { isHome: true }));
   for (const g of nha) {
-    const khai = NAV_MODULES.filter((m) => m.zone === g.zone).map((m) => m.href as string);
+    const khai = (NAV_MODULES as readonly ModuleSpec[]).filter((m) => m.zone === g.zone && !m.hub).map((m) => m.href);
     assert.deepEqual(g.items.map((i) => i.href), khai, `nhà: nhóm ${g.zone} giữ nguyên thứ tự khai`);
   }
   assert.ok(hrefsOf(navUser(all, { isHome: true })).includes("/platform"), "nhà: ADMIN vẫn thấy «Vận hành nền tảng»");
   assert.ok(hrefsOf(navUser(all, { isHome: true })).includes("/alerts"), "nhà: «Cần xử lý» vẫn ở menu");
 
-  // Bán sỉ (lỗi #5 như báo cáo): không nhóm «Sản xuất»; ba trang mở được của nó DỜI sang «Kho», không mất lối vào.
+  // Bán sỉ (lỗi #5 như báo cáo): không nhóm «Sản xuất»; hai trang mở được của nó DỜI sang «Kho», không mất lối vào.
+  // «Hiệu quả mẫu mã» và «Đóng gói theo lượt» đọc dữ liệu của connector chỉ-nhà (Viettel Post / Pancake) nên không hiện
+  // ở tổ chức khách (chủ shop 30/09/2026) — `requires`, cùng cổng với mọi nguồn số liệu khác.
   const si = visibleGroups(navUser(resolved(WHOLESALE_BLUEPRINT.modules)));
   assert.ok(!si.some((g) => g.zone === "PRODUCTION"), "bán sỉ: không có nhóm «Sản xuất»");
   const kho = si.find((g) => g.zone === "WAREHOUSE")?.items.map((i) => i.href) ?? [];
-  for (const h of ["/inventory/shortage", "/inventory/decisions", "/products/performance"]) assert.ok(kho.includes(h), `bán sỉ: ${h} dời sang «Kho»`);
-  assert.equal(kho[0], "/inventory/packing", "mục dời đứng SAU mục vốn có của «Kho»");
+  for (const h of ["/inventory/shortage", "/inventory/decisions"]) assert.ok(kho.includes(h), `bán sỉ: ${h} dời sang «Kho»`);
+  for (const h of ["/products/performance", "/inventory/packing"]) assert.ok(!kho.includes(h), `bán sỉ: ${h} cần connector chỉ-nhà ⇒ không hiện`);
+  assert.equal(kho[0], "/products", "mục vốn có của «Kho» đứng đầu");
+  assert.ok(kho.indexOf("/inventory/shortage") > kho.indexOf("/inventory"), "mục dời đứng SAU mục vốn có của «Kho»");
 
   // Dịch vụ (lỗi #5 + #2): không «Đối soát COD», không `/platform`, không nhóm module tắt; CÓ «Duyệt».
   const dv = resolved(SERVICE_BUSINESS_BLUEPRINT.modules);

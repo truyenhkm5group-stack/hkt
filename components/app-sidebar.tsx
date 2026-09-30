@@ -46,6 +46,7 @@ import {
   Send,
   ShieldCheck,
   Shirt,
+  SlidersHorizontal,
   Stamp,
   Tags,
   ShoppingBag,
@@ -61,7 +62,7 @@ import {
 import type { Role } from "@/db/schema";
 import { hasPermission, homeOrgPermissionDenied } from "@/lib/auth/permissions";
 import { hrefVisible, moduleOn, modulesOn } from "@/lib/platform-ui/module-visibility";
-import { MODULE_GROUPS, MODULE_TITLES, resolveNavZone, ZONE_HINT, ZONE_LABEL, ZONE_ORDER, type ModuleHref, type ModuleSpec, type ModuleZone } from "@/lib/constants/department-modules";
+import { hubMembers, MODULE_GROUPS, MODULE_TITLES, resolveNavZone, ZONE_HINT, ZONE_LABEL, ZONE_ORDER, type ModuleHref, type ModuleSpec, type ModuleZone, type NavHubHref } from "@/lib/constants/department-modules";
 import { DYNAMIC_PAGE_PREFIX, DYNAMIC_PAGES_HINT, DYNAMIC_PAGES_LABEL, DYNAMIC_PAGES_ZONE, type DynamicNavItem } from "@/lib/pages/nav";
 
 /**
@@ -131,6 +132,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/users": UserCog,
   "/audit": ScrollText,
   "/settings/modules": Blocks,
+  "/settings/advanced": SlidersHorizontal,
   "/settings/data-model": Database,
   "/settings/forms": FormInput,
   "/settings/lists": Columns3,
@@ -228,6 +230,32 @@ export function visible(item: ModuleSpec, user: NavUserLike): boolean {
 }
 
 /**
+ * ═══ TRANG GOM Ở TỔ CHỨC KHÁCH ═══
+ *
+ * Chủ shop chốt 30/09/2026: tổ chức khách (không phải tổ chức nhà) thấy MỘT mục «Tuỳ biến nâng cao» thay cho mười công cụ
+ * dựng cấu hình — menu Hệ thống của họ dài hơn cả phần nghiệp vụ. Tổ chức nhà giữ nguyên mười mục như trước.
+ *
+ * Đây là luật XẾP menu, không phải luật QUYỀN: `visible()` vẫn là máy tính duy nhất cho "người này dùng được mục này
+ * không" (AGENTS.md mục 28). Trang gom hiện ⇔ người xem thấy được ít nhất một mục gom vào nó, và trang gom liệt kê
+ * đúng những mục đó (`hubTools`). Phiên không mang tổ chức ⇒ coi như tổ chức khách, cùng hướng với `homeOrgPermissionDenied`.
+ */
+export function foldsHubs(user: Pick<NavUserLike, "organization">): boolean {
+  return user.organization?.isHome !== true;
+}
+
+/** Công cụ của một trang gom mà người này dùng được — theo đúng `visible()`, giữ thứ tự khai. */
+export function hubTools(hub: NavHubHref, user: NavUserLike): ModuleSpec[] {
+  return hubMembers(hub).filter((item) => visible(item, user));
+}
+
+/** Mục có đứng trên MENU (và ⌘K) của người này không: `visible()` cộng luật gom của tổ chức khách. */
+export function onMenu(item: ModuleSpec, user: NavUserLike): boolean {
+  if (item.hub) return foldsHubs(user) && moduleAllows(item.href, user) && hubTools(item.href as NavHubHref, user).length > 0;
+  if (item.foldInto && foldsHubs(user)) return false;
+  return visible(item, user);
+}
+
+/**
  * Chuông có hỏi HÀNG ĐỢI CHUNG (`/api/notifications`) không. Tuyến ấy thuộc lõi nhưng gác bằng
  * `alerts:view` — khoá của module «Cần xử lý». Tổ chức tắt module đó thì mọi lượt hỏi (30 giây/lần)
  * đều nhận 403: vừa phí, vừa rác nhật ký. Người không có `alerts:view` cũng vậy (403 từ trước nền tảng).
@@ -256,7 +284,7 @@ export function visibleGroups(user: NavUserLike): NavGroup[] {
   const native = new Map<ModuleZone, NavGroupItem[]>();
   const moved = new Map<ModuleZone, NavGroupItem[]>();
   for (const zone of ZONE_ORDER) {
-    const items = (MODULE_GROUPS.find((g) => g.zone === zone)?.items ?? []).filter((item) => visible(item, user)).map((i) => ({ href: i.href, label: i.label }));
+    const items = (MODULE_GROUPS.find((g) => g.zone === zone)?.items ?? []).filter((item) => onMenu(item, user)).map((i) => ({ href: i.href, label: i.label }));
     if (items.length === 0) continue;
     const target = zoneFor(zone, user);
     const into = target === zone ? native : moved;
@@ -278,6 +306,16 @@ export function visibleGroups(user: NavUserLike): NavGroup[] {
 export function activeHrefOf(pathname: string, extraHrefs: readonly string[] = []): string | undefined {
   const matches = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
   return [...MODULE_GROUPS.flatMap((g) => g.items.map((i) => i.href)), ...extraHrefs].filter(matches).sort((a, b) => b.length - a.length)[0];
+}
+
+/**
+ * Mục menu được tô sáng cho trang hiện tại, với ĐÚNG menu người này thấy: ở tổ chức khách, đang mở một công cụ đã gom
+ * (vd `/settings/forms`) thì tô trang gom chứa nó — mục riêng của công cụ không có trên menu của họ.
+ */
+export function menuActiveHref(pathname: string, user: NavUserLike): string | undefined {
+  const href = activeHrefOf(pathname, user.dynamicPages?.map((d) => d.href));
+  const spec = href ? MODULE_GROUPS.flatMap((g) => g.items).find((i) => i.href === href) : undefined;
+  return spec?.foldInto && foldsHubs(user) ? spec.foldInto : href;
 }
 
 /*

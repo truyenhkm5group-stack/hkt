@@ -13,8 +13,9 @@ hành bật ở `/platform` (không deploy) và phát mã; người cầm mã T�
 
 ## 2. Mẫu «Thực phẩm đóng gói» (`lib/blueprints/templates/food-commerce.ts`)
 
-Loại hình mới `food` ở bước Loại hình của `/start` gợi ý mẫu này. Module: khách · sản phẩm · đơn · kho · giao vận · CSKH ·
-AI bán hàng (+ lõi, việc). Field sản phẩm: `package_size`, `net_weight`, `selling_unit`, `food_category`,
+Loại hình mới `food` ở bước Loại hình của `/start` gợi ý mẫu này. Module: khách · sản phẩm · đơn · kho · AI bán hàng (+ lõi,
+việc). Từ 30/09/2026 mẫu KHÔNG bật «Vận chuyển» và «CSKH»: màn hình của hai module ấy dựng trên Viettel Post / Pancake của
+tổ chức nhà; đơn tạo tay xác nhận đã giao ngay trên đơn, khách chatbot chuyển người báo qua hộp thư — tổ chức cần thì tự bật. Field sản phẩm: `package_size`, `net_weight`, `selling_unit`, `food_category`,
 `storage_instruction`, `usage_instruction`. Vai trò: Bán hàng · Kho · CSKH (Quản trị là vai trò hệ thống). Trang: «Tổng
 quan bán hàng», «Báo cáo bán hàng» (Đơn / Sản phẩm / Kho / Khách / AI là trang lõi). Luật dựng sẵn ở NHÁP: đơn chốt ⇒
 báo nhóm vận hành; đơn đã chốt bị huỷ ⇒ báo huỷ. GIỮ HÀNG không phải hành động của luật: đơn «Đã xác nhận» tự trừ vào cột

@@ -1,6 +1,13 @@
 /**
  * MẪU «THỰC PHẨM ĐÓNG GÓI BÁN ONLINE» (0180 · hành trình tự phục vụ) — shop bán thực phẩm / đặc sản / hải sản chế biến ĐÃ
- * ĐÓNG GÓI, giá cố định theo gói: khách · sản phẩm · đơn · kho · giao vận · CSKH · chatbot AI bán hàng.
+ * ĐÓNG GÓI, giá cố định theo gói: khách · sản phẩm · đơn · kho · chatbot AI bán hàng.
+ *
+ * KHÔNG BẬT «Vận chuyển» VÀ «CSKH» (chủ shop chốt 30/09/2026): màn hình của hai module ấy dựng trên dữ liệu của connector
+ * CHỈ-NHÀ — vận đơn chỉ đến từ Viettel Post (webhook · bảng kê) và đồng bộ Pancake, case CSKH tự sinh từ thẻ / phiếu đổi trả
+ * / hội thoại Pancake. Shop thực phẩm tự phục vụ không có nguồn nào trong số đó: đơn tạo tay giao xong thì bấm «Xác nhận đã
+ * giao» ngay trên đơn (module Đơn hàng), khách chatbot chuyển sang người thì báo qua hộp thư của người có `ai_sales:view`
+ * (lib/sales-chatbot/alerts.ts) — không đi qua case CSKH. Không module nào của mẫu phụ thuộc hai module này
+ * (`dependsOn` ở lib/constants/platform-modules.ts); tổ chức cần thì tự bật ở Module của tổ chức.
  *
  * KHÔNG mang sản phẩm, giá, khách hay bí mật của bất kỳ shop nào (mẫu là DỮ LIỆU CẤU HÌNH — backup-recovery.md §1): danh
  * mục của shop đi vào bằng «Nhập từ tệp» ở /products/import. KHÔNG có logic cân ký lẻ / hàng tươi theo khối lượng — hàng
@@ -19,9 +26,9 @@ export const FOOD_COMMERCE_BLUEPRINT: Blueprint = {
   key: "food-commerce",
   version: "1.0.0",
   name: "Thực phẩm đóng gói bán online",
-  description: "Shop bán thực phẩm / đặc sản / hải sản chế biến đã đóng gói, giá cố định theo gói. Khách, sản phẩm có quy cách & hướng dẫn bảo quản, đơn, kho giữ hàng khi chốt, giao vận, CSKH và chatbot AI bán hàng. Không có sản xuất, quảng cáo, lương.",
+  description: "Shop bán thực phẩm / đặc sản / hải sản chế biến đã đóng gói, giá cố định theo gói. Khách, sản phẩm có quy cách & hướng dẫn bảo quản, đơn (tự xác nhận đã giao), kho giữ hàng khi chốt và chatbot AI bán hàng. Không có sản xuất, quảng cáo, lương; không bật Vận chuyển và CSKH — hai module ấy dựa trên kết nối của tổ chức nhà, cần thì bật ở Module của tổ chức.",
   industry: "Thực phẩm đóng gói",
-  modules: ["core", "work", "customers", "customer_care", "products", "orders", "inventory", "logistics", "ai_sales"],
+  modules: ["core", "work", "customers", "products", "orders", "inventory", "ai_sales"],
   roles: [
     {
       key: "ban_hang",
@@ -42,9 +49,9 @@ export const FOOD_COMMERCE_BLUEPRINT: Blueprint = {
     {
       key: "cskh",
       label: "Nhân viên CSKH",
-      description: "Trả lời khách, nhận ca chuyển từ chatbot, cập nhật thông tin khách, xử lý case sau bán.",
+      description: "Trả lời khách, nhận ca chatbot chuyển sang (hộp thư + hội thoại chatbot), cập nhật thông tin khách, theo dõi đơn của khách.",
       base: "CS",
-      permissions: ["dashboard:view", "orders:read", "customers:view", "customers:write", "cs:view", "cs:manage", "ai_sales:view", "work:view", "work:manage"],
+      permissions: ["dashboard:view", "orders:read", "customers:view", "customers:write", "ai_sales:view", "work:view", "work:manage"],
       defaultScope: "ALL",
     },
   ],

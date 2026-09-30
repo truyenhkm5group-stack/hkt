@@ -11,13 +11,14 @@
  * khi xong (nhật ký nền tảng giữ lại — nó chỉ thêm, đúng như production).
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
-import { allowedNavItems, bellShowsSharedQueue, visible, visibleGroups, type NavUserLike } from "@/components/app-sidebar";
+import { allowedNavItems, bellShowsSharedQueue, foldsHubs, hubTools, menuActiveHref, visible, visibleGroups, type NavUserLike } from "@/components/app-sidebar";
 import type { SessionUser } from "@/lib/auth/session";
-import { NAV_MODULES, type ModuleSpec } from "@/lib/constants/department-modules";
-import { MODULE_KEYS, moduleOfPath, validateModuleChange } from "@/lib/constants/platform-modules";
+import { FOOD_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/food-commerce";
+import { hubMembers, NAV_HUB_HREFS, NAV_MODULES, type ModuleSpec } from "@/lib/constants/department-modules";
+import { MODULE_KEYS, moduleOfPath, PLATFORM_MODULES, resolveEnabledModules, validateModuleChange } from "@/lib/constants/platform-modules";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
@@ -80,6 +81,88 @@ function testMenuPure() {
   assert.equal(bellShowsSharedQueue({ role: "CS", permissions: [], modules: [...MODULE_KEYS] }), false, "không có alerts:view ⇒ không hỏi (từng nhận 403 mỗi 30 giây)");
 }
 
+/** Mười công cụ dựng cấu hình gom vào «Tuỳ biến nâng cao» ở tổ chức khách (chủ shop 30/09/2026). */
+const BUILDER_HREFS = ["/settings/data-model", "/settings/forms", "/settings/lists", "/settings/statuses", "/settings/workflows", "/settings/pages", "/settings/templates", "/settings/export", "/settings/objects", "/settings/ai-builder"];
+/** Năm trang chỉ có nghĩa với connector chỉ-nhà (Viettel Post / Pancake) — ẩn khỏi menu tổ chức khách. */
+const HOME_DATA_HREFS = ["/shipments", "/cs", "/data-quality", "/products/performance", "/inventory/packing"];
+/** Mục quản trị vẫn đứng riêng ở tổ chức khách. */
+const SEPARATE_ADMIN_HREFS = ["/settings/users", "/audit", "/settings/modules", "/settings/connections", "/setup", "/settings/notifications"];
+
+/**
+ * MENU TỔ CHỨC KHÁCH: một mục «Tuỳ biến nâng cao» thay mười công cụ, và năm trang của connector chỉ-nhà không hiện —
+ * trong khi menu của tổ chức NHÀ giữ y nguyên. Cả hai luật đi bằng TRƯỜNG của sổ khai (`foldInto` / `hub`, `requires`), không
+ * bằng tên tổ chức; quyền vẫn chỉ do `visible()` tính.
+ */
+function testCustomerOrgMenu() {
+  // ── Sổ khai: trang gom đủ hình dạng ──
+  const specs = NAV_MODULES as readonly ModuleSpec[];
+  for (const hub of NAV_HUB_HREFS) {
+    const rows = specs.filter((m) => m.href === hub);
+    assert.equal(rows.length, 1, `${hub}: đúng một dòng trong sổ`);
+    assert.equal(rows[0].hub, true, `${hub}: khai hub: true`);
+    assert.ok(!rows[0].permission && !rows[0].anyOf, `${hub}: trang gom không khai quyền riêng — hiện theo quyền của công cụ bên trong`);
+    const members = hubMembers(hub);
+    assert.ok(members.length > 0, `${hub}: phải có mục gom vào`);
+    for (const m of members) assert.equal(m.zone, rows[0].zone, `${m.href} gom vào ${hub} phải cùng vùng menu`);
+  }
+  for (const m of specs) if (m.foldInto) assert.ok((NAV_HUB_HREFS as readonly string[]).includes(m.foldInto), `${m.href} gom vào trang gom không có trong sổ`);
+  assert.deepEqual(hubMembers("/settings/advanced").map((m) => m.href), BUILDER_HREFS, "đúng mười công cụ, theo thứ tự khai");
+  // Năm trang của connector chỉ-nhà: nguồn số liệu khai bằng module connector — và mọi connector ấy chỉ nhà bật được.
+  for (const h of HOME_DATA_HREFS) {
+    const connectors = (specs.find((m) => m.href === h)?.requires ?? []).filter((k) => k.startsWith("connector_"));
+    assert.ok(connectors.length > 0, `${h}: phải khai connector nguồn ở requires`);
+    for (const k of connectors) assert.equal(PLATFORM_MODULES.find((d) => d.key === k)?.requiresHomeCredentials, true, `${h}: ${k} phải là connector chỉ-nhà`);
+  }
+
+  // ── Tổ chức thực phẩm (mẫu thật) ──
+  const food = [...resolveEnabledModules({ moduleDefault: "DISABLED" }, FOOD_COMMERCE_BLUEPRINT.modules.map((k) => ({ moduleKey: k, enabled: true, features: {} }) as never))];
+  const khach: NavUserLike = { role: "ADMIN", permissions: [], modules: food, organization: { isHome: false } };
+  const khachMenu = allowedNavItems(khach).map((i) => i.href);
+  assert.ok(khachMenu.includes("/settings/advanced"), "tổ chức khách thấy «Tuỳ biến nâng cao»");
+  for (const h of BUILDER_HREFS) assert.ok(!khachMenu.includes(h), `tổ chức khách: ${h} không đứng riêng trên menu / ⌘K`);
+  for (const h of HOME_DATA_HREFS) assert.ok(!khachMenu.includes(h), `tổ chức khách: ${h} không hiện`);
+  for (const h of SEPARATE_ADMIN_HREFS) assert.ok(khachMenu.includes(h), `tổ chức khách: ${h} vẫn đứng riêng`);
+  const he = visibleGroups(khach).find((g) => g.zone === "SYSTEM")?.items.map((i) => i.href) ?? [];
+  assert.equal(he.indexOf("/settings/advanced"), he.indexOf("/settings/modules") + 1, "trang gom đứng ngay sau «Module của tổ chức»");
+  assert.deepEqual(hubTools("/settings/advanced", khach).map((t) => t.href), BUILDER_HREFS, "quản trị thấy đủ mười công cụ trong trang gom");
+
+  // Tổ chức khách bật MỌI module nó bật được (Vận chuyển, CSKH, Hàng hoàn… đều bật): năm trang VẪN ẩn, vì thứ thiếu là
+  // connector, không phải module.
+  const coTheBat = [...resolveEnabledModules({ moduleDefault: "DISABLED" }, PLATFORM_MODULES.filter((d) => !d.requiresHomeCredentials).map((d) => ({ moduleKey: d.key, enabled: true, features: {} }) as never))];
+  assert.ok(coTheBat.includes("logistics") && coTheBat.includes("customer_care"), "tiền đề: tổ chức khách bật được Vận chuyển và CSKH");
+  const khachDu = allowedNavItems({ ...khach, modules: coTheBat }).map((i) => i.href);
+  for (const h of HOME_DATA_HREFS) assert.ok(!khachDu.includes(h), `tổ chức khách bật đủ module: ${h} vẫn không hiện (thiếu connector)`);
+
+  // Trang gom chỉ liệt kê công cụ người xem được dùng — cùng `visible()` với menu.
+  const chiLuat: NavUserLike = { role: "MANAGER", permissions: ["workflow:manage"], modules: food, organization: { isHome: false } };
+  assert.deepEqual(hubTools("/settings/advanced", chiLuat).map((t) => t.href), ["/settings/workflows"], "chỉ có workflow:manage ⇒ chỉ «Luật tự động»");
+  const chiMeta: NavUserLike = { ...chiLuat, permissions: ["metadata:manage"] };
+  assert.deepEqual(hubTools("/settings/advanced", chiMeta).map((t) => t.href), BUILDER_HREFS.filter((h) => h !== "/settings/workflows"), "chỉ có metadata:manage ⇒ chín công cụ, không «Luật tự động»");
+  for (const t of hubTools("/settings/advanced", chiMeta)) assert.equal(visible(t, chiMeta), true);
+  assert.ok(allowedNavItems(chiLuat).some((i) => i.href === "/settings/advanced"), "có một công cụ ⇒ có mục trang gom");
+  const khongQuyen: NavUserLike = { role: "MANAGER", permissions: ["dashboard:view"], modules: food, organization: { isHome: false } };
+  assert.deepEqual(hubTools("/settings/advanced", khongQuyen), [], "không quyền nào ⇒ trang gom rỗng");
+  assert.ok(!allowedNavItems(khongQuyen).some((i) => i.href === "/settings/advanced"), "không công cụ nào ⇒ không có mục trang gom");
+  // Đang mở một công cụ đã gom ⇒ tô sáng trang gom (mục riêng không có trên menu của họ).
+  assert.equal(menuActiveHref("/settings/forms/order", khach), "/settings/advanced");
+  assert.equal(menuActiveHref("/settings/users", khach), "/settings/users");
+  assert.equal(foldsHubs({}), true, "phiên không mang tổ chức ⇒ coi là tổ chức khách (cùng hướng với homeOrgPermissionDenied)");
+
+  // ── Tổ chức nhà: y như trước ──
+  const nha: NavUserLike = { role: "ADMIN", permissions: [], modules: [...MODULE_KEYS], organization: { isHome: true } };
+  const nhaMenu = allowedNavItems(nha).map((i) => i.href);
+  for (const h of [...BUILDER_HREFS, ...HOME_DATA_HREFS, ...SEPARATE_ADMIN_HREFS]) assert.ok(nhaMenu.includes(h), `nhà: ${h} vẫn trên menu`);
+  assert.ok(!nhaMenu.includes("/settings/advanced"), "nhà: không có trang gom trên menu");
+  assert.equal(menuActiveHref("/settings/forms/order", nha), "/settings/forms", "nhà: tô đúng mục riêng");
+  assert.equal(hubTools("/settings/advanced", nha).length, 10, "nhà mở thẳng /settings/advanced vẫn thấy mục lục đủ");
+
+  // Trang gom không tự tính quyền: danh sách chỉ đi qua `hubTools` (AGENTS.md mục 28).
+  const page = readFileSync("app/(dashboard)/settings/advanced/page.tsx", "utf8");
+  assert.ok(page.includes("hubTools(HUB, user)"), "trang gom lấy danh sách từ hubTools");
+  assert.ok(!/\bcan\(|hasPermission\(|requirePermission\(/.test(page), "trang gom không hỏi quyền lần thứ hai");
+  console.log("✓ Menu tổ chức khách: «Tuỳ biến nâng cao» gom mười công cụ, năm trang connector chỉ-nhà ẩn, menu nhà y nguyên");
+}
+
 function testModuleViewPure() {
   const home = buildModuleView({ moduleDefault: "ENABLED", isHome: true }, []);
   assert.equal(home.enabledCount, home.total, "tổ chức nhà không dòng nào ⇒ mọi module bật");
@@ -114,6 +197,7 @@ async function cleanupOrg(code: string) {
 
 export async function testPlatformUi() {
   testMenuPure();
+  testCustomerOrgMenu();
   testModuleViewPure();
 
   await cleanupOrg(ORG);
