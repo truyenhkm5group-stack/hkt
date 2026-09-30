@@ -8,6 +8,8 @@ import { log } from "./logger.js";
 import { catalog } from "./catalog.js";
 import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
+import { adBots } from "./adbots.js";
+import { extractAdIds, adBotPromptBlock } from "./adpersona.js";
 import { orderSync, describeOrder, phonesInText } from "./orders.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
@@ -879,7 +881,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     return `${text}\n${hoi}`;
   }
 
-  buildSystemPrompt(pageId, { customerName, type, commentMode, saleActive = false }) {
+  buildSystemPrompt(pageId, { customerName, type, commentMode, saleActive = false, adBot }) {
     const shopName = this.pageNames.get(String(pageId)) || config.shopName || "shop";
     // Doc lai file moi lan de app quan ly sua prompt la co hieu luc ngay
     let template;
@@ -908,6 +910,10 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
 - Khi khách hỏi giá / hỏi về một mẫu lần đầu trong hội thoại: gửi NGUYÊN VĂN khối báo giá của đúng mẫu đó trong "Hướng dẫn riêng" ở trên (đủ mọi dòng, đúng số tiền, đúng màu ghi trong khối), kèm mã ảnh [[IMG:...]] tương ứng. KHÔNG tự tóm tắt, KHÔNG thêm màu ngoài khối báo giá.
 - Các lượt sau mới trả lời ngắn gọn theo câu hỏi của khách.`;
     }
+    // Bot rieng cua camp test (khach bam quang cao nao): mac dinh lay tu pham vi luot xu ly, chat thu truyen tuong minh
+    const scoped = aiScope.getStore();
+    const botCamp = adBot !== undefined ? adBot : scoped && String(scoped.adBotPageId) === String(pageId) ? scoped.adBot : null;
+    prompt += adBotPromptBlock(botCamp);
     // Thoi gian giao hang: MOT cho duy nhat (settings.deliveryDays), de len moi con so khac trong prompt chung / rieng
     prompt += `
 
@@ -967,6 +973,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       type,
       customerName,
       tags: conv.tags,
+      adIds: extractAdIds(conv),
     });
   }
 
@@ -1222,7 +1229,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
             out.items.push({ pageId: pid, pageName: name, conversationId: conv.id, customer: conv.from?.name || "", snippet: stripHtml(conv.snippet || "").slice(0, 80), updatedAt: conv.updated_at, force });
             if (!dryScan && !onlyCount) {
               store.setConvUpdatedAt(conv.id, conv.updated_at);
-              this.queue.push(`${pid}:${conv.id}`, { pageId: pid, conversationId: conv.id, type: String(conv.type || type).toUpperCase(), customerName: conv.from?.name, tags: conv.tags, force });
+              this.queue.push(`${pid}:${conv.id}`, { pageId: pid, conversationId: conv.id, type: String(conv.type || type).toUpperCase(), customerName: conv.from?.name, tags: conv.tags, force, adIds: extractAdIds(conv) });
             }
             if (queued >= max) {
               stop = true;
@@ -1248,7 +1255,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     return aiScope.run({ pageId: String(payload.pageId), conversationId: payload.conversationId ? String(payload.conversationId) : null }, () => this._processConversation(payload));
   }
 
-  async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false }) {
+  async _processConversation({ pageId, conversationId, type = "INBOX", customerName, tags, force = false, adIds = [] }) {
     const client = this.getClient(pageId);
     if (!client) return;
     if (this.isPaused(tags, pageId)) return;
@@ -1258,6 +1265,11 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     const data = await client.getMessages(conversationId);
     let messages = sortChrono(data.messages); // luon cu -> moi theo inserted_at (Pancake tra thu tu khong on dinh)
     if (messages.length === 0) return;
+    // Khach den tu quang cao test co bot rieng: dat vao pham vi luot xu ly -> prompt + mau mac dinh theo camp
+    const adBot = adBots.resolve(pageId, conversationId, extractAdIds({ ad_ids: adIds }, data));
+    const scope = aiScope.getStore();
+    if (scope) Object.assign(scope, { adBot, adBotPageId: String(pageId) });
+    if (adBot) log.info(`[${pageId}] ${conversationId}: khach tu quang cao ${adBot.adId} -> bot rieng "${adBot.campaignName || adBot.adName}"${adBot.productCode ? " (mau " + adBot.productCode + ")" : ""}`);
 
     let last = messages[messages.length - 1];
     if (this.isFromPage(last, pageId)) {
@@ -1633,7 +1645,7 @@ ${eff.afterOrderText.trim()}`;
       if (this.isFromPage(m, pageId)) continue;
       for (const ph of phonesInText(this.messageText(m))) store.addPhone(pageId, ph, parseTs(m.inserted_at));
     }
-    store.recordReply(pageId, { conversationId, customerName: name, question: this.messageText(last).slice(0, 200), reply: reply.slice(0, 500), handoff, dryRun: eff.dryRun });
+    store.recordReply(pageId, { conversationId, customerName: name, question: this.messageText(last).slice(0, 200), reply: reply.slice(0, 500), handoff, dryRun: eff.dryRun, adId: adBot?.adId || undefined });
     if (eff.dryRun) {
       log.info(`[${pageId}] DRY_RUN: khong gui tin cho khach`);
       store.setLastHandled(conversationId, last.id);

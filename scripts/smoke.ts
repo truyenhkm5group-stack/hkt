@@ -179,6 +179,7 @@ const ROUTES = [
   "/outreach",
   "/outreach/broadcast",
   "/chatbot",
+  "/chatbot/ad-bots",
   "/landing",
   "/ideas",
   "/marketing/creatives",

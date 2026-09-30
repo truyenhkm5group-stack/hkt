@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -24,6 +25,11 @@ export default async function ChatbotPage() {
         title="Bot chat bán hàng"
         description="Bot tự trả lời khách trên fanpage qua Pancake, tự ghi đơn nháp vào POS — chạy 24/7 trên VPS."
         hint="Mã bot nằm ở thư mục chatbot/ của kho. Khoá (Gemini, token page, POS) chỉ nằm trên VPS, nạp từ trang này — không bao giờ vào kho mã."
+        actions={
+          <Link href="/chatbot/ad-bots" className="text-sm font-medium underline">
+            Bot riêng theo quảng cáo test →
+          </Link>
+        }
       />
 
       {status.state === "UNREACHABLE" ? (

@@ -1066,5 +1066,64 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 30: khach nhan them luc bot dang soan -> bo cau cu, tra loi lai theo tin moi nhat");
 }
 
+// ---- 33: BOT RIENG THEO QUANG CAO (camp test): khach bam quang cao nao -> prompt + mau mac dinh cua camp do
+{
+  const { adBots } = await import("../src/adbots.js");
+  const { extractAdIds, normalizeAdBotPayload, pickAdBot, maskMoney } = await import("../src/adpersona.js");
+  const { aiScope } = await import("../src/aicost.js");
+  const { settings } = await import("../src/settings.js");
+  const AD = "120247872389140225";
+  // Doc ad_id phong thu: mang chuoi, mang doi tuong co moc (xep cu -> moi), tin nhan mang referral; chuoi khong phai so bi bo
+  assert.deepEqual(extractAdIds({ ad_ids: ["111111", "abc", AD] }), ["111111", AD]);
+  assert.deepEqual(extractAdIds({ ads: [{ ad_id: "222222", inserted_at: "2026-09-30T05:00:00" }, { ad_id: "111111", inserted_at: "2026-09-29T05:00:00" }] }), ["111111", "222222"]);
+  assert.deepEqual(extractAdIds(null, { messages: [{ referral: { ad_id: "333333" }, inserted_at: "2026-09-30T01:00:00" }] }), ["333333"]);
+  assert.deepEqual(extractAdIds({ ad_ids: ["111111", "222222", "111111"] }), ["222222", "111111"], "trung thi giu lan moi nhat");
+  assert.deepEqual(extractAdIds({}), []);
+  assert.throws(() => normalizeAdBotPayload({}), /bots/);
+  const chuan = normalizeAdBotPayload({ bots: [{ adId: "x1" , productCode: "Q1" }, { adId: "444444" }, { adId: "555555", productCode: "q004 ; drop" , instructions: "" }] });
+  assert.equal(Object.keys(chuan.bots).length, 0, "ad_id sai / khong mau khong huong dan / ma mau la -> bo, khong doan");
+  assert.equal(chuan.skipped, 3);
+  assert.equal(pickAdBot(["111111", AD], { [AD]: { adId: AD, enabled: false }, 111111: { adId: "111111" } })?.adId, "111111", "bot tat -> lui ve quang cao truoc");
+  assert.equal(maskMoney("Dam 499K, 2 cai 899.000đ, size 36"), "Dam [giá], 2 cai [giá], size 36");
+
+  const r = adBots.replaceAll({
+    bots: [{ adId: AD, productCode: "q004", productName: "Đầm Q004", campaignName: "QUAN_TA_30/09_Q004", adCopy: "Đầm báo đỏ chỉ 499K — INBOX NGAY", instructions: "Nhắc khách mẫu này đang tặng kèm túi." }],
+  });
+  assert.equal(r.count, 1);
+  // Mau mac dinh CHI doi trong pham vi luot xu ly cua dung page
+  assert.equal(settings.effective("PAGE1").defaultProduct, "");
+  assert.equal(aiScope.run({ adBot: adBots.get(AD), adBotPageId: "PAGE1" }, () => settings.effective("PAGE1").defaultProduct), "Q004");
+  assert.equal(aiScope.run({ adBot: adBots.get(AD), adBotPageId: "PAGE1" }, () => settings.effective("PAGE2").defaultProduct), "");
+
+  calls.length = 0;
+  const cust = { id: "KHACH33", name: "Hoa" };
+  pancakeMessages = [{ id: "a33", conversation_id: "CONV33", message: "mẫu này còn không shop", from: cust, inserted_at: new Date(Date.now() - 3000).toISOString().replace("Z", "") }];
+  geminiText = "Dạ mẫu này còn đủ size ạ, chị cho em xin chiều cao cân nặng để em tư vấn size nhé";
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV33", from: cust, tags: [], type: "INBOX", ad_ids: [AD] }, message: pancakeMessages[0], post: null } });
+  await sleep(WAIT);
+  const gem33 = calls.filter((c) => c.path.includes(":generateContent"));
+  assert.ok(gem33.length >= 1, "bot tra loi khach den tu quang cao");
+  const sys33 = gem33[0].body.system_instruction.parts[0].text;
+  assert.ok(sys33.includes("BOT RIÊNG CỦA CAMP \"QUAN_TA_30/09_Q004\""), "prompt co khoi bot rieng cua camp");
+  assert.ok(sys33.includes("mẫu **Q004 — Đầm Q004**"), "prompt neu dung mau cua camp");
+  assert.ok(sys33.includes("tặng kèm túi"), "prompt co huong dan rieng cua camp");
+  assert.ok(!sys33.includes("499K"), "so tien trong noi dung quang cao bi che (gia chi lay tu bang gia)");
+  assert.equal(adBots.status().seen[AD].matched, AD, "so quan sat ghi ad_id da gap");
+
+  // Tin sau cua cung hoi thoai KHONG mang ad_id: bot van nho camp
+  calls.length = 0;
+  pancakeMessages = [...pancakeMessages, { id: "b33", conversation_id: "CONV33", message: "size M nhé", from: cust, inserted_at: new Date(Date.now() - 1000).toISOString().replace("Z", "") }];
+  bot.handleWebhook({ page_id: "PAGE1", event_type: "messaging", data: { conversation: { id: "CONV33", from: cust, tags: [], type: "INBOX" }, message: pancakeMessages[1], post: null } });
+  await sleep(WAIT);
+  const gem33b = calls.filter((c) => c.path.includes(":generateContent"));
+  assert.ok(gem33b.length >= 1 && gem33b[0].body.system_instruction.parts[0].text.includes("BOT RIÊNG CỦA CAMP"), "hoi thoai da gan quang cao thi van dung bot rieng");
+
+  // Khach KHONG den tu quang cao co bot rieng -> prompt nhu cu
+  const sysThuong = bot.buildSystemPrompt("PAGE1", { customerName: "X", type: "INBOX" });
+  assert.ok(!sysThuong.includes("BOT RIÊNG CỦA CAMP"), "khong co quang cao -> khong them khoi nao");
+  adBots.replaceAll({ bots: [] });
+  console.log("OK 33: bot rieng theo quang cao — doc ad_id, prompt + mau mac dinh cua camp, che gia quang cao, nho camp cua hoi thoai");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

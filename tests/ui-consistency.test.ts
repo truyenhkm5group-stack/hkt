@@ -246,6 +246,8 @@ export function testNavigationCoverage() {
     // Gửi tin hàng loạt là công cụ CỦA trang Chăm sóc & bán chéo (cùng quyền outreach:*), không phải một
     // module riêng — vào từ nút 'Gửi tin hàng loạt' ở đầu /outreach.
     "/outreach/broadcast": "nút 'Gửi tin hàng loạt' ở đầu trang /outreach",
+    // Bot riêng theo quảng cáo test là cấu hình CỦA bot chat (cùng quyền cs:config), không phải module riêng.
+    "/chatbot/ad-bots": "liên kết 'Bot riêng theo quảng cáo test' ở đầu trang /chatbot",
     // Chi tiết của MỘT ô số, không phải một module: bấm "chờ xuất N" dưới cột Đã xuất trên /products
     // (theo mẫu mã hoặc theo cả mã hàng). Mở trần không tham số thì trang tự nói phải vào từ đâu.
     "/products/reserved": "số 'chờ xuất N' dưới cột Đã xuất của bảng /products",

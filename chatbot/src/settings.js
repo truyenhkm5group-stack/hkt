@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
 import { log } from "./logger.js";
-import { DEFAULT_AI_PRICES, DEFAULT_USD_VND } from "./aicost.js";
+import { DEFAULT_AI_PRICES, DEFAULT_USD_VND, aiScope } from "./aicost.js";
 
 export const DEFAULT_DELIVERY_DAYS = "5–7";
 
@@ -218,8 +218,17 @@ class Settings {
       saleTrigger: p.saleTrigger || "",
       salePrompt: p.salePrompt || "",
       saleModels: p.saleModels || "",
-      defaultProduct: p.defaultProduct || "",
+      // Hoi thoai den tu quang cao test co bot rieng (bot.js dat vao aiScope): mau cua camp la mau mac dinh
+      // CHO RIENG hoi thoai do — moi cho dung defaultProduct (chan nham ma, ghi don, gui anh) tu theo camp.
+      defaultProduct: this.scopedAdProduct(pageId) || p.defaultProduct || "",
     };
+  }
+
+  /** Mau cua bot quang cao dang ap cho luot xu ly hien tai (cung page), hoac "". */
+  scopedAdProduct(pageId) {
+    const s = aiScope.getStore();
+    if (!s?.adBot?.productCode || String(s.adBotPageId) !== String(pageId)) return "";
+    return s.adBot.productCode;
   }
 
   readGlobalPrompt() {

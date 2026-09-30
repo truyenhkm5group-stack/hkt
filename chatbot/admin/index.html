@@ -412,13 +412,21 @@ function renderSettings(p) {
 function renderChat(p) {
   const h = (testChat[p.id] ||= []);
   $("#content").innerHTML = `<div class="chat"><div class="hint" style="margin-bottom:8px">Chat với bot của page này y như khách (dùng đúng prompt + sản phẩm POS hiện tại). Không đụng tới Pancake.</div>
+    <div class="row" style="margin-bottom:8px"><label class="hint" for="chat_ad">Giả lập khách bấm quảng cáo:</label><select id="chat_ad" style="flex:1"><option value="">(không — khách nhắn thường)</option></select></div>
     <div class="msgs" id="msgs"></div>
     <div class="row" style="margin-top:8px"><input id="chat_in" placeholder="Nhập tin như khách hàng… (Enter để gửi)" style="flex:1"><button class="primary" id="chat_send">Gửi</button><button id="chat_reset">Xoá</button></div></div>`;
   const draw = () => { $("#msgs").innerHTML = h.map((m) => `<div class="m ${m.role === "user" ? "u" : "b"}">${esc(m.text)}${m.images?.length ? m.images.map((u) => `<img src="${esc(u)}">`).join("") : ""}${m.meta ? `<div class="meta">${esc(m.meta)}</div>` : ""}</div>`).join("") || '<div class="muted">Chưa có tin nào.</div>'; $("#msgs").scrollTop = 1e9; };
   draw();
+  // Bot rieng theo quang cao (ERP day sang): chon mot camp de chat thu dung nhu khach bam quang cao do
+  api("/api/erp/ad-bots").then((d) => {
+    const sel = $("#chat_ad"); if (!sel) return;
+    for (const b of d.bots || []) { const o = document.createElement("option"); o.value = b.adId; o.textContent = `${b.campaignName || b.adName || b.adId}${b.productCode ? " · " + b.productCode : ""} (${b.adId})`; sel.appendChild(o); }
+    if (testChat[p.id + ":ad"]) sel.value = testChat[p.id + ":ad"];
+    sel.onchange = () => { testChat[p.id + ":ad"] = sel.value; };
+  }).catch(() => {});
   const send = async () => {
     const t = $("#chat_in").value.trim(); if (!t) return; $("#chat_in").value = ""; h.push({ role: "user", text: t }); draw(); $("#chat_send").disabled = true;
-    try { const d = await api(`/api/pages/${p.id}/test-chat`, { method: "POST", body: { history: h.map(({ role, text }) => ({ role, text })) } });
+    try { const d = await api(`/api/pages/${p.id}/test-chat`, { method: "POST", body: { history: h.map(({ role, text }) => ({ role, text })), adId: $("#chat_ad")?.value || undefined } });
       h.push({ role: "model", text: d.text, images: d.imageUrls, meta: `${d.usage?.totalTokenCount || "?"} tokens${d.handoff ? " · [HANDOFF] chuyển nhân viên" : ""}${d.imageRefs?.length ? " · ảnh: " + d.imageRefs.join(", ") : ""}` });
     } catch (e) { h.push({ role: "model", text: "Lỗi: " + e.message }); } finally { $("#chat_send").disabled = false; draw(); $("#chat_in").focus(); }
   };

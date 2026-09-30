@@ -85,7 +85,7 @@ export type AuditParams = {
   `META_AD_POST_LOOKUP` (tra tay mẩu quảng cáo → bài viết, `/ads/post-resolver`): chỉ ĐỌC Meta, không ghi
   bảng nào. Lượt GHI của cùng màn hình là `META_AD_POST_SYNC` — cố ý ĐỂ NGOÀI danh sách vì nó đổi `fb_ads`.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

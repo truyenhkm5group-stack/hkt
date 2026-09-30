@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
 import { settings } from "./settings.js";
+import { extractAdIds } from "./adpersona.js";
 import { sleep, parseTs } from "./util.js";
 
 /**
@@ -87,6 +88,7 @@ export function startWatchdog(bot) {
               type: String(conv.type || type).toUpperCase(),
               customerName: conv.from?.name,
               tags: conv.tags,
+              adIds: extractAdIds(conv),
             });
           }
           last = list[list.length - 1].id;

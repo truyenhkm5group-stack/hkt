@@ -4,6 +4,7 @@ import { log } from "./logger.js";
 import { sleep, parseTs, stripHtml } from "./util.js";
 import { AUTO_NOTE_RE } from "./bot.js";
 import { settings } from "./settings.js";
+import { extractAdIds } from "./adpersona.js";
 
 /**
  * Che do POLL: dung khi chua duoc Pancake bat webhook.
@@ -82,6 +83,7 @@ export function startPoller(bot) {
                 type: String(conv.type || type).toUpperCase(),
                 customerName: conv.from?.name,
                 tags: conv.tags,
+                adIds: extractAdIds(conv),
                 force,
               });
             }

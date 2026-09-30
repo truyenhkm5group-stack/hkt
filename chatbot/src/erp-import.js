@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
+import { adBots } from "./adbots.js";
 
 /**
  * Chuyen bot tu may Windows len VPS (container erp-chatbot) ma KHONG dua khoa nao vao kho ma nguon.
@@ -115,7 +116,7 @@ export function importFiles(files) {
 }
 
 /**
- * Hai duong /api/erp/*. Nguoi goi da kiem tra ADMIN_TOKEN. Tra ve true neu da xu ly.
+ * Cac duong /api/erp/*. Nguoi goi da kiem tra ADMIN_TOKEN. Tra ve true neu da xu ly.
  * Nhap xong thi thoat tien trinh: Docker (restart: unless-stopped) dung lai bot voi .env moi.
  */
 export async function handleErpRoutes(req, res, url) {
@@ -138,6 +139,20 @@ export async function handleErpRoutes(req, res, url) {
     }
     send(200, { ok: true, written, dryRun: true, restarting: true });
     setTimeout(() => process.exit(0), 300).unref?.();
+    return true;
+  }
+  // Bot rieng theo quang cao (camp test): ERP day CA BO danh sach, doc lai trang thai + ad_id da gap.
+  if (req.method === "GET" && url.pathname === "/api/erp/ad-bots") {
+    send(200, adBots.status());
+    return true;
+  }
+  if (req.method === "PUT" && url.pathname === "/api/erp/ad-bots") {
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      send(200, { ok: true, ...adBots.replaceAll(body) });
+    } catch (e) {
+      send(400, { error: e.message });
+    }
     return true;
   }
   if (req.method === "POST" && url.pathname === "/api/erp/restart") {
