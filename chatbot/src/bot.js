@@ -513,7 +513,102 @@ export class Bot {
       const r = this.sizeLookupFor(pageId, messages);
       if (r.status === "ok") (size = r.size), (sizeFrom = "bang");
     }
-    return { phone, address, size, sizeFrom };
+    return { phone, address, size, sizeFrom, color: this.customerColor(pageId, messages) };
+  }
+
+  /**
+   * Mau KHACH da chon cho mau dang ban (ma nhac gan nhat trong hoi thoai, hoac Mau chu luc cua page): tin khach nhac
+   * ten mau day du, hoac mot tu RIENG cua mau do (cung luat voi unconfirmedColorInSummary). Khong doan: null = chua chon.
+   */
+  customerColor(pageId, messages) {
+    const eff = settings.effective(pageId);
+    const tatCa = (messages || []).map((m) => String(this.messageText(m) || ""));
+    const maNhac = tatCa.flatMap((t) => t.match(/\bQ\d{3}\b/gi) || []).pop();
+    const ma = String(maNhac || eff.defaultProduct || "").toUpperCase();
+    const sp = ma && catalog.products.find((p) => String(p.code || "").toUpperCase() === ma);
+    if (!sp) return null;
+    const mauPOS = [...new Set((sp.variations || []).map((v) => v.fields?.["Màu"]).filter(Boolean))];
+    if (!mauPOS.length) return null;
+    const phang = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, "");
+    const tu = (x) => String(x || "").toLowerCase().normalize("NFC").split(/[^\p{L}]+/u).filter((w) => w.length >= 2);
+    let chon = null;
+    for (const m of messages || []) {
+      if (this.isFromPage(m, pageId)) continue;
+      const t = String(this.messageText(m) || "");
+      const tuKhach = new Set(tu(t));
+      for (const c of [...mauPOS].sort((a, b) => b.length - a.length)) {
+        const tuMauKhac = new Set(mauPOS.filter((x) => x !== c).flatMap(tu));
+        const rieng = tu(c).filter((w) => !tuMauKhac.has(w));
+        if (phang(t).includes(phang(c)) || rieng.some((w) => tuKhach.has(w))) {
+          chon = c;
+          break;
+        }
+      }
+    }
+    return chon;
+  }
+
+  /**
+   * NHU NGUOI BAN THAT: ghi nho don dang chot (mau, size, SDT, dia chi) va chi ra MOT viec tiep theo can lam.
+   * Nguoi ban khong hoi lai thu da biet, khong hoi hai thu mot luc khi khach dang tra loi tung cai.
+   */
+  orderProgressPrompt(pageId, messages) {
+    const f = this.customerFacts(pageId, messages);
+    const dong = [
+      `- Màu: ${f.color || "CHƯA CHỌN"}`,
+      `- Size: ${f.size ? f.size + (f.sizeFrom === "khach" ? " (khách tự chọn)" : " (tra từ số đo khách gửi)") : "CHƯA CÓ"}`,
+      `- Số điện thoại: ${f.phone ? "ĐÃ CÓ" : "CHƯA CÓ"}`,
+      `- Địa chỉ: ${f.address ? `ĐÃ CÓ ("${f.address}")` : "CHƯA CÓ"}`,
+    ];
+    if (!f.color && !f.size && !f.phone && !f.address) return "";
+    let tiep;
+    if (!f.size) tiep = "hỏi chiều cao và cân nặng (hoặc size khách muốn)";
+    else if (!f.color) tiep = "hỏi khách chọn màu nào";
+    else if (!f.phone && !f.address) tiep = "xin số điện thoại và địa chỉ nhận hàng";
+    else if (!f.phone) tiep = "xin số điện thoại";
+    else if (!f.address) tiep = "xin địa chỉ nhận hàng";
+    else tiep = "đủ thông tin rồi: tóm tắt lại đơn (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận";
+    return `
+
+## ĐƠN ĐANG CHỐT VỚI KHÁCH NÀY (hệ thống tự đọc từ tin của khách)
+${dong.join("\n")}
+- VIỆC TIẾP THEO: ${tiep}.
+- Nói chuyện như người bán thật: trả lời ĐÚNG câu khách vừa hỏi trước, rồi mới làm việc tiếp theo. KHÔNG hỏi lại thứ ĐÃ CÓ, KHÔNG nhắc lại nguyên văn câu mình đã gửi (bảng giá, chất liệu, chính sách…) trừ khi khách hỏi lại. Khách nói "ở trên", "gửi rồi", "nói rồi" thì xin lỗi một câu ngắn và dùng thông tin đã có.`;
+  }
+
+  /**
+   * Bo cau bot sap gui ma NOI GAN NHU Y HET mot cau shop da gui trong hoi thoai (bang gia, chat lieu, cau xin thong
+   * tin...). Nguoi ban that khong doc lai nguyen doan quang cao moi luot. Giu cau neu khach vua hoi lai dung chu de do
+   * (tin cuoi cua khach chung >= 2 tu noi dung voi cau), va khong dung vao ban tom tat chot don.
+   */
+  dropRepeatedSentences(reply, pageId, messages) {
+    const t = String(reply || "");
+    if (!t.trim() || isOrderSummaryReply(t, false)) return t;
+    const chuan = (x) => String(x || "").toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 2);
+    const shop = (messages || []).filter((m) => this.isFromPage(m, pageId)).slice(-12);
+    const cauCu = shop.flatMap((m) => String(this.messageText(m) || "").split(/(?<=[.?!\n])/)).map(chuan).filter((w) => w.length >= 5).map((w) => new Set(w));
+    if (!cauCu.length) return t;
+    const khach = (messages || []).filter((m) => !this.isFromPage(m, pageId));
+    const tuKhachCuoi = new Set(chuan(this.messageText(khach[khach.length - 1])).filter((w) => w.length >= 3));
+    const giong = (a, b) => {
+      let chung = 0;
+      for (const w of a) if (b.has(w)) chung++;
+      return chung / Math.max(a.size, b.size);
+    };
+    const bo = [];
+    const giu = t.split(/(?<=[.?!\n])/).filter((c) => {
+      const w = chuan(c);
+      if (w.length < 5) return true;
+      const set = new Set(w);
+      const lap = cauCu.some((cu) => giong(set, cu) >= 0.75);
+      const khachHoiLai = [...set].filter((x) => x.length >= 3 && tuKhachCuoi.has(x)).length >= 2;
+      if (lap && !khachHoiLai) bo.push(c.trim());
+      return !(lap && !khachHoiLai);
+    });
+    if (!bo.length) return t;
+    log.warn(`[${pageId}] Bot lap lai cau da gui -> bo: ${bo.join(" | ").slice(0, 200)}`);
+    store.bumpStat(pageId, "repeatGuard");
+    return giu.join("").replace(/\n{3,}/g, "\n\n").trim();
   }
 
   /**
@@ -1303,17 +1398,8 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     if (saleActive) log.info(`[${pageId}] ${conversationId}: hoi thoai dang chay khuyen mai -> dung bang gia khuyen mai`);
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
-    {
-      const f = this.customerFacts(pageId, messages);
-      const co = [f.size && `size ${f.size}${f.sizeFrom === "khach" ? " (khách tự chọn)" : " (tra từ số đo khách gửi)"}`, f.phone && "số điện thoại", f.address && `địa chỉ: "${f.address}"`].filter(Boolean);
-      if (co.length) {
-        systemPrompt += `
-
-## THÔNG TIN KHÁCH ĐÃ GỬI TRONG HỘI THOẠI NÀY — KHÔNG ĐƯỢC XIN LẠI
-- Khách đã cho: ${co.join("; ")}.
-- Tuyệt đối không xin lại những thứ trên (kể cả chiều cao/cân nặng khi đã có size). Chỉ hỏi phần CÒN THIẾU; đủ hết thì xác nhận lại đơn để chốt.`;
-      }
-    }
+    // Don da chot xong thi khong can bang tien do nua (khoi mau thuan voi khoi "DA CHOT XONG" ben duoi)
+    if (!this.orderClosedIn(pageId, messages)) systemPrompt += this.orderProgressPrompt(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
 
@@ -1468,6 +1554,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
     if (reply && !handoff) {
       const truoc = reply;
       reply = this.dropAlreadyGivenAsks(reply, pageId, messages);
+      reply = this.dropRepeatedSentences(reply, pageId, messages);
       if (!reply.trim() && truoc.trim()) reply = `Dạ em ghi nhận đủ thông tin của ${eff.customerTitle || "chị"} rồi ạ ❤️`;
     }
     if (reply) reply = this.stopAskingMeasurementsAgain(reply, pageId, messages);

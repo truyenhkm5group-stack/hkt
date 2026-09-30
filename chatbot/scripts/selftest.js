@@ -991,6 +991,40 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 29: khach da chon size / gui dia chi / SDT -> bot khong xin lai, chi hoi phan con thieu");
 }
 
+// ---- 31: noi chuyen nhu nguoi ban that: khong doc lai nguyen doan da gui, biet don dang thieu gi (chu shop 30/09/2026)
+{
+  const prevProducts = catalog.products;
+  const prevSettings = settings.get("PAGE1");
+  catalog.setProducts([{
+    id: "p31", code: "Q002", name: "Đầm xếp ly eo", note: "", attributes: {}, price: { min: 499000, max: 499000 }, images: [],
+    variations: ["Đỏ Đô", "Xanh Rêu", "Đen"].map((c, i) => ({ id: "v31" + i, sku: "Q002" + i, fields: { "Màu": c, Size: "XL" }, price: 499000, stock: 5, available: true, images: [] })),
+  }]);
+  settings.update("PAGE1", { defaultProduct: "Q002" });
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const baoGia = "Chất liệu Rayon cao cấp mềm mịn, co giãn 4 chiều thoải mái, không nhăn, không bai xù.";
+  const hoiThoai = [khach("giá đầm đỏ bao nhiêu"), shop(`Dạ 1 đầm 499k ạ. ${baoGia}`), khach("Màu đỏ đô nha"), khach("Sai XL")];
+  assert.equal(bot.customerColor("PAGE1", hoiThoai), "Đỏ Đô", "khach noi 'đỏ đô' = da chon mau");
+  assert.equal(bot.customerColor("PAGE1", [khach("xanh nha em")]), "Xanh Rêu", "tu rieng cua mau van nhan ra");
+  assert.equal(bot.customerColor("PAGE1", [khach("mẫu này đẹp")]), null, "khong nhac mau -> chua chon, khong doan");
+  const tienDo = bot.orderProgressPrompt("PAGE1", hoiThoai);
+  assert.match(tienDo, /Màu: Đỏ Đô/);
+  assert.match(tienDo, /Size: XL/);
+  assert.match(tienDo, /VIỆC TIẾP THEO: xin số điện thoại và địa chỉ/);
+  // Nhac lai nguyen doan chat lieu da gui -> bo; phan con lai giu
+  const lap = bot.dropRepeatedSentences(`${baoGia}\nChị cho em xin số điện thoại và địa chỉ để em lên đơn nha?`, "PAGE1", hoiThoai);
+  assert.doesNotMatch(lap, /Rayon/, "khong doc lai doan chat lieu da gui");
+  assert.match(lap, /số điện thoại và địa chỉ/);
+  // Khach HOI LAI dung chu de do -> duoc tra loi lai
+  const hoiLai = [...hoiThoai, khach("chất liệu co giãn không em")];
+  assert.match(bot.dropRepeatedSentences(baoGia, "PAGE1", hoiLai), /Rayon/, "khach hoi lai chat lieu thi van tra loi");
+  // Cau ngan (Dạ vâng ạ) va ban tom tat chot don khong bi dung toi
+  assert.equal(bot.dropRepeatedSentences("Dạ vâng ạ", "PAGE1", [shop("Dạ vâng ạ")]), "Dạ vâng ạ");
+  settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "" });
+  catalog.setProducts(prevProducts);
+  console.log("OK 31: bot nho don dang thieu gi, khong doc lai doan da gui (tru khi khach hoi lai)");
+}
+
 // ---- 30: khach nhan them TRONG LUC bot dang soan -> bo cau tra loi cu, tra loi lai mot lan voi du tin
 {
   calls.length = 0;
