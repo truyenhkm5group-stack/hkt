@@ -13,8 +13,9 @@ hành bật ở `/platform` (không deploy) và phát mã; người cầm mã T�
 
 ## 2. Mẫu «Thực phẩm đóng gói» (`lib/blueprints/templates/food-commerce.ts`)
 
-Loại hình mới `food` ở bước Loại hình của `/start` gợi ý mẫu này. Module: khách · sản phẩm · đơn · kho · giao vận · CSKH ·
-AI bán hàng (+ lõi, việc). Field sản phẩm: `package_size`, `net_weight`, `selling_unit`, `food_category`,
+Loại hình mới `food` ở bước Loại hình của `/start` gợi ý mẫu này. Module: khách · sản phẩm · đơn · kho · AI bán hàng (+ lõi,
+việc). Từ 30/09/2026 mẫu KHÔNG bật «Vận chuyển» và «CSKH»: màn hình của hai module ấy dựng trên Viettel Post / Pancake của
+tổ chức nhà; đơn tạo tay xác nhận đã giao ngay trên đơn, khách chatbot chuyển người báo qua hộp thư — tổ chức cần thì tự bật. Field sản phẩm: `package_size`, `net_weight`, `selling_unit`, `food_category`,
 `storage_instruction`, `usage_instruction`. Vai trò: Bán hàng · Kho · CSKH (Quản trị là vai trò hệ thống). Trang: «Tổng
 quan bán hàng», «Báo cáo bán hàng» (Đơn / Sản phẩm / Kho / Khách / AI là trang lõi). Luật dựng sẵn ở NHÁP: đơn chốt ⇒
 báo nhóm vận hành; đơn đã chốt bị huỷ ⇒ báo huỷ. GIỮ HÀNG không phải hành động của luật: đơn «Đã xác nhận» tự trừ vào cột
@@ -29,8 +30,15 @@ lẻ / HSD / lô.
   trang) — luật báo nhóm chạy không đợi lịch; không đổi lịch scheduler.
 - Đơn tay có «Người nhận / địa chỉ giao» riêng (trống = theo hồ sơ khách); sửa địa chỉ của đơn không sửa hồ sơ khách.
 - Hành động luật mới `send_message` (ngoại lệ có chủ đích của tập đóng — `lib/workflow/types.ts`): gửi MỘT tin qua kết nối
-  nhắn tin ĐANG BẬT của chính tổ chức. `MessagingProvider` (`lib/messaging/providers.ts`) có ba bản: Lark webhook, Telegram
-  bot, **hộp thử** (`sandbox-messaging` — không gọi mạng, không bí mật, trạng thái «CHẾ ĐỘ THỬ»).
+  nhắn tin ĐANG BẬT của chính tổ chức. `MessagingProvider` (`lib/messaging/providers.ts`) có bốn bản: Lark webhook, Telegram
+  bot, **Zalo bot** (`zalo-bot`, bot.zaloplatforms.com — tin dài hơn 2000 ký tự tách theo dòng), **hộp thử**
+  (`sandbox-messaging` — không gọi mạng, không bí mật, trạng thái «CHẾ ĐỘ THỬ»).
+- Zalo / Telegram: nút «Tìm chat» ở `/settings/connections` đọc `getUpdates` bằng token đã lưu (chỉ đọc, có nhật ký) —
+  nhắn cho bot hoặc @nhắc bot trong nhóm, bấm «Tìm chat», chọn «Dùng», Lưu, Kiểm tra, Bật. Zalo không hiện mã chat cho
+  người dùng nên đây là đường duy nhất lấy mã. Nhóm chat của Zalo Bot đang ở giai đoạn thử nghiệm của Zalo.
+- Lỗi mạng khi gọi dịch vụ ngoài in NGUYÊN NHÂN (không phân giải tên miền · bị ngắt khi mở · hết thời gian chờ · chứng chỉ)
+  thay cho «fetch failed» (`lib/connectors/net-error.ts`). Đo 30/09/2026: máy chủ production KHÔNG mở được kết nối tới
+  api.telegram.org (Anthropic, Lark, Zalo thì được) — Telegram ở production cần một đường ra mạng khác.
 - Sổ `messaging_deliveries`: dòng chèn TRƯỚC khi gọi nhà cung cấp, `dedupe_key` UNIQUE (`workflow:<lượt>:<vị trí>`) ⇒ chạy
   lại / bấm lại không gửi tin thứ hai; dòng `PENDING` bỏ dở ⇒ `UNKNOWN`, không tự gửi lại.
 - `/settings/notifications` («Automation preset: When Order Confirmed → Send Order to Operations Group»): chọn kênh, nơi

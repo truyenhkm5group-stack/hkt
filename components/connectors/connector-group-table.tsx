@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { saveConnectionAction, setConnectionStatusAction, testConnectionAction } from "@/lib/actions/connections";
+import { discoverChatsAction, saveConnectionAction, setConnectionStatusAction, testConnectionAction } from "@/lib/actions/connections";
+import { CHAT_DISCOVERY_CONNECTORS, type DiscoveredChatView } from "@/lib/connectors/types";
 import { CONNECTION_STATUS_LABEL, CONNECTOR_AUTH_LABEL } from "@/lib/connectors/registry";
 import type { ConnectorView } from "@/lib/connectors/types";
 import { formatDateTime } from "@/lib/format";
@@ -64,7 +65,9 @@ function StatusCell({ row }: { row: ConnectorView }) {
 function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: boolean }) {
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...(row.connection?.settings ?? {}) }));
   const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const [found, setFound] = useState<DiscoveredChatView[] | null>(null);
   const [pending, start] = useTransition();
+  const canDiscover = (CHAT_DISCOVERY_CONNECTORS as readonly string[]).includes(row.key);
   const c = row.connection;
   const disabled = pending || !row.moduleEnabled;
 
@@ -105,6 +108,27 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
         <Button size="sm" variant="outline" disabled={disabled || !c} onClick={() => run(() => testConnectionAction(row.key))} title={row.hasHealthCheck ? "Gửi một yêu cầu thật tới nhà cung cấp" : undefined}>
           Kiểm tra
         </Button>
+        {canDiscover ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled || !c}
+            title="Nhắn cho bot (hoặc @nhắc bot trong nhóm) trước, rồi bấm để lấy mã chat"
+            onClick={() =>
+              start(async () => {
+                const r = await discoverChatsAction(row.key);
+                if ("error" in r) {
+                  toast.error(r.error);
+                  return;
+                }
+                setFound(r.chats);
+                toast.message(r.message);
+              })
+            }
+          >
+            Tìm chat
+          </Button>
+        ) : null}
         {c?.status === "ACTIVE" ? (
           <Button size="sm" variant="outline" disabled={disabled} onClick={() => run(() => setConnectionStatusAction({ connectorKey: row.key, status: "DISABLED" }))}>
             Tắt
@@ -115,6 +139,29 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
           </Button>
         )}
       </div>
+      {found && found.length ? (
+        <ul className="space-y-1 rounded-md border p-2 text-[11px]" data-testid="discovered-chats">
+          {found.map((chat) => (
+            <li key={chat.id} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate">
+                <b>{chat.type === "GROUP" ? "Nhóm" : "Cá nhân"}</b> · {chat.name || "—"}
+                {chat.sample ? ` · «${chat.sample}»` : ""}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => {
+                  setValues((v) => ({ ...v, chatId: chat.id }));
+                  toast.message("Đã điền Chat ID — bấm «Lưu» rồi «Kiểm tra».");
+                }}
+              >
+                Dùng
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {row.consumers.length === 0 ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">Chưa luồng nào của ERP dùng kết nối này — bật lên chưa làm cảnh báo đi qua đây.</p> : null}
     </div>
   );

@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth/session";
-import { CONNECTIONS_PERMISSION, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
-import type { ConnectionActionResult } from "@/lib/connectors/types";
+import { CONNECTIONS_PERMISSION, discoverOrgConnectionChats, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import type { ChatDiscoveryResult, ConnectionActionResult } from "@/lib/connectors/types";
 
 /**
- * ═══════════ KẾT NỐI THEO TỔ CHỨC — BA SERVER ACTION ═══════════
+ * ═══════════ KẾT NỐI THEO TỔ CHỨC — BỐN SERVER ACTION ═══════════
  *
  * Vỏ mỏng: đọc phiên (`settings:manage`) → zod → lõi `lib/connectors/service.ts` (kiểm quyền lần hai,
  * kiểm từng ô theo sổ, mã hoá, nhật ký) → `revalidatePath`. Không trả bí mật: kết quả chỉ có trạng
@@ -47,3 +47,12 @@ export async function setConnectionStatusAction(input: unknown): Promise<Connect
   if ("ok" in result) revalidatePath(PATH);
   return result;
 }
+
+/** «Tìm chat»: CHỈ ĐỌC tin mới của bot (Zalo · Telegram) để lấy mã chat — không đổi gì nên không làm mới trang. */
+export async function discoverChatsAction(connectorKey: unknown): Promise<ChatDiscoveryResult> {
+  const user = await requirePermission(CONNECTIONS_PERMISSION);
+  const key = keySchema.safeParse(connectorKey);
+  if (!key.success) return { error: key.error.issues[0]?.message ?? "Khoá connector không hợp lệ" };
+  return discoverOrgConnectionChats(user, key.data);
+}
+

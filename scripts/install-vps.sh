@@ -285,6 +285,12 @@ say "Build và khởi chạy (lần đầu mất 3–6 phút)"
 # (pg_isready vẫn xanh vì không cần đăng nhập, nên nhìn bên ngoài tưởng CSDL vẫn tốt).
 # ALTER USER ở đây không đụng dữ liệu, chạy lại nhiều lần vẫn đúng, và chạy được qua socket
 # nội bộ của container (pg_hba mặc định của image postgres cho phép "local all all trust").
+#
+# PITR (docs/platform/backup-recovery.md §9.4): dịch vụ db gắn /root/backups/pitr (kho WAL + bản nền). Thư mục phải có
+# và thuộc uid 70 (postgres của ảnh alpine) TRƯỚC khi compose dựng container — thiếu thì Docker tự tạo thư mục của root,
+# mọi lượt lưu WAL hỏng vì sai quyền và Postgres giữ WAL trong pg_wal cho tới khi ổ đầy. Hỏng ⇒ DỪNG deploy ở đây:
+# container cũ vẫn chạy nguyên, không có gì bị tạo lại.
+bash scripts/erp-pitr.sh chuan-bi || { echo "::error::Không chuẩn bị được /root/backups/pitr (PITR) — deploy DỪNG trước khi đụng erp-db."; exit 1; }
 $COMPOSE up -d --build db
 for _ in $(seq 1 60); do
   $COMPOSE exec -T db pg_isready -U erp -d erp >/dev/null 2>&1 && break
@@ -475,6 +481,8 @@ say "Cấu hình nơi lưu ngoài máy (Google Drive)"
 bash scripts/erp-backup.sh configure-offsite || warn "KHÔNG dựng được cấu hình Google Drive — xem docs/backup-restore.md mục 5. ERP sẽ báo vàng ở mục Sao lưu dữ liệu."
 say "Cài lịch sao lưu tự động"
 bash scripts/erp-backup.sh install-cron || warn "KHÔNG cài được lịch sao lưu — xem docs/backup-restore.md. ERP sẽ báo đỏ ở mục Sao lưu dữ liệu."
+# PITR: tệp cron RIÊNG (/etc/cron.d/erp-pitr) — bản nền mỗi đêm sau bản đêm của nhà + đẩy kho WAL ngoài máy mỗi 15 phút.
+bash scripts/erp-pitr.sh install-cron || warn "KHÔNG cài được lịch PITR — xem docs/platform/backup-recovery.md §9.4. ops pitr-status sẽ báo bản nền quá cũ."
 
 say "Đối chiếu sổ migration với cơ sở dữ liệu thật"
 # Migration có mốc cũ hơn mốc đã áp bị drizzle bỏ qua VĨNH VIỄN, không lỗi, không cảnh báo.

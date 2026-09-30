@@ -59,3 +59,18 @@ export async function getChatbotStatus(): Promise<ChatbotStatus> {
     return { state: "UNREACHABLE", error: `Không kết nối được tới bot (${msg}). Container erp-chatbot chưa chạy hoặc chưa deploy.` };
   }
 }
+
+/**
+ * Số đơn Bot lên đơn KHÔNG tự xác định được (địa chỉ không khớp đủ cấp, màu/size không có trên POS…) đang chờ nhân
+ * viên duyệt. `null` = không hỏi được bot (CHƯA BIẾT), khác hẳn 0 đơn.
+ */
+export async function getChatbotReviewCount(): Promise<number | null> {
+  try {
+    const res = await chatbotFetch("/api/orderbot", { timeoutMs: 4000 });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { counts?: { review?: number } };
+    return typeof body.counts?.review === "number" ? body.counts.review : null;
+  } catch {
+    return null;
+  }
+}

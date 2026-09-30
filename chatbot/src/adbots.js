@@ -169,6 +169,12 @@ class AdBots {
     return { mimeType, data: fs.readFileSync(f).toString("base64") };
   }
 
+  /** Mau test (dang bat) cua hoi thoai, theo bo nho hoi thoai -> quang cao va (neu co) ad_id doc them. */
+  testProductForConversation(conversationId, adIds = []) {
+    const list = [...(this.convAds.get(String(conversationId || "")) || []), ...(adIds || [])];
+    return pickAdBot(list, this.bots)?.test || null;
+  }
+
   get(adId) {
     return this.bots[String(adId || "")] || null;
   }

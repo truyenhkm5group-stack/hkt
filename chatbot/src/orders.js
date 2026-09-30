@@ -89,10 +89,17 @@ export function normalizePhone(p) {
   return /^0\d{9}$/.test(d) ? d : "";
 }
 
+/** "missing" cua AI chi noi ve TEN nguoi nhan (khong nhac mau / size / SDT / dia chi / mau ma / so luong) */
+export function onlyNameMissing(missing) {
+  const t = String(missing || "").toLowerCase();
+  if (!/tên|ten |họ tên|name/.test(t)) return false;
+  return !/(màu|mau |size|cỡ|sđt|sdt|số điện thoại|điện thoại|địa chỉ|dia chi|mẫu|mã|số lượng|xã|phường|huyện|tỉnh)/.test(t);
+}
+
 const EXTRACT_SCHEMA = {
   type: "OBJECT",
   properties: {
-    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + họ tên + số điện thoại + địa chỉ giao hàng" },
+    ready: { type: "BOOLEAN", description: "true CHỈ KHI khách đã chốt mua và đã có đủ: mẫu + màu + size + số lượng + số điện thoại + địa chỉ giao hàng (tên người nhận KHÔNG bắt buộc — thiếu thì dùng tên Facebook của khách)" },
     items: {
       type: "ARRAY",
       items: {
@@ -250,6 +257,28 @@ export class OrderSync {
       out.note = out.commune ? "" : `Chưa xác định được xã/phường trong ${out.district.name}`;
       return out;
     }
+    // Khach KHONG ghi quan/huyen nhung ten xa/phuong NGUYEN VAN co trong loi khach va ten do chi thuoc DUNG MOT
+    // huyen cua tinh -> xac dinh chac chan, tu bo sung huyen (khong phai do gan dung). Trung ten o >= 2 huyen thi
+    // KHONG chon — de nhan vien quyet.
+    {
+      const trung = [];
+      for (const d of dists) {
+        const c = litFind(await this.communes(d.id), litText);
+        if (c) trung.push({ d, c });
+      }
+      if (trung.length === 1) {
+        out.district = trung[0].d;
+        out.commune = trung[0].c;
+        out.street = (g.street || "").trim() || raw;
+        out.fullAddress = [out.street, out.commune.name, out.district.name, out.province.name].filter(Boolean).join(", ");
+        out.ok = true;
+        out.confidence = "cao (tự bổ sung quận/huyện)";
+        out.note = "";
+        out.autoFixed = `Khách không ghi quận/huyện — "${out.commune.name}" chỉ có ở ${out.district.name}, hệ thống tự bổ sung`;
+        return out;
+      }
+      if (trung.length > 1) out.ambiguous = `"${trung[0].c.name}" có ở ${trung.length} quận/huyện (${trung.map((t) => t.d.name).join(", ")}) — cần hỏi lại khách`;
+    }
     let dv = fuzzyFind(dists, g.district || "");
     let cv = { item: null, score: 0 };
     if (dv.item && dv.score >= 0.6) {
@@ -292,9 +321,9 @@ export class OrderSync {
   }
 
   // ---------- Trich xuat don tu hoi thoai ----------
-  async extractOrder(historyText, { pageName = "", defaultCode = "" } = {}) {
+  async extractOrder(historyText, { pageName = "", defaultCode = "", customerName = "" } = {}) {
     const codes = catalog.products.map((p) => `${p.code} (${p.name}; màu: ${Object.entries(p.attributes).filter(([k]) => /m[àa]u|color/i.test(k)).flatMap(([, v]) => v).join("/") || "-"}; size: ${Object.entries(p.attributes).filter(([k]) => /size/i.test(k)).flatMap(([, v]) => v).join("/") || "-"})`).join("\n");
-    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.`;
+    const sys = `Bạn trích xuất ĐƠN HÀNG ĐÃ CHỐT từ hội thoại bán hàng giữa shop ${pageName} và khách. Chỉ lấy thông tin khách đã xác nhận mua (mẫu, màu, size, số lượng) và thông tin nhận hàng khách cung cấp. Không suy đoán; thiếu gì thì ready=false và ghi vào missing. SỐ ĐIỆN THOẠI phải là dãy số khách ĐÃ GÕ trong hội thoại, chép lại y nguyên; tuyệt đối không bịa, không lấy số của shop, không tự nghĩ ra số — khách chưa gửi số thì để phone rỗng và ready=false. Mã sản phẩm và màu/size phải lấy đúng theo danh mục:\n${codes}\nTổng tiền và miễn ship lấy theo câu chốt đơn của shop nếu có.\nTÊN NGƯỜI NHẬN: khách có ghi tên người nhận thì lấy tên đó; không ghi thì customer_name = tên Facebook của khách${customerName ? ` ("${customerName}")` : ""}. Thiếu tên KHÔNG phải lý do để ready=false và KHÔNG ghi vào missing (sự cố 30/09/2026: đơn đủ SĐT, địa chỉ, size bị treo vì "chưa đủ tên khách hàng").`;
     const nhacMacDinh = defaultCode
       ? `\n\nMẪU CHỦ LỰC CỦA PAGE NÀY LÀ ${defaultCode}. Hội thoại không nêu rõ mã sản phẩm nào khác thì code = "${defaultCode}". TUYỆT ĐỐI không tự chọn mã khác chỉ vì nó có trong danh mục.`
       : "";
@@ -342,7 +371,15 @@ export class OrderSync {
         problems.push(`${p.code}: không có biến thể màu "${it.color || "?"}" size "${it.size || "?"}"`);
         continue;
       }
-      mapped.push({ variation_id: v.id, quantity: Math.max(1, Number(it.quantity) || 1), display: `${p.name} ${v.fields["Màu"] || ""} ${v.fields["Size"] || ""}`.replace(/\s+/g, " ").trim(), price: v.price });
+      const qty = Math.max(1, Number(it.quantity) || 1);
+      // CUNG MOT bien the xuat hien 2 lan (AI doc ca cau khach chon lan dau lan cau chot lai) -> MOT dong, lay so
+      // luong LON NHAT chu khong cong don: cong don la bien 1 cai thanh 2 cai khi khach chi nhac lai.
+      const trung = mapped.find((m) => m.variation_id === v.id);
+      if (trung) {
+        trung.quantity = Math.max(trung.quantity, qty);
+        continue;
+      }
+      mapped.push({ variation_id: v.id, quantity: qty, display: `${p.name} ${v.fields["Màu"] || ""} ${v.fields["Size"] || ""}`.replace(/\s+/g, " ").trim(), price: v.price });
     }
     return { mapped, problems };
   }
@@ -413,10 +450,31 @@ export class OrderSync {
   /**
    * Chot don tu hoi thoai -> ghi vao POS. Tra ve { status: "created"|"updated"|"skipped"|"error", orderId?, summary, reason? }
    */
-  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText }) {
+  /**
+   * CHE DO CHAT cua Bot len don (orderbot.js): dia chi chi duoc ghi len POS khi da dinh danh DU tinh / huyen / xa
+   * theo danh muc Pancake bang ten NGUYEN VAN khach go (khong do gan dung) VA co phan so nha / thon xom. Thieu mot
+   * cap la POS bao do va shipper khong giao duoc — nen khong ghi, dua vao hang "can duyet" kem ly do.
+   */
+  addressGate(addr) {
+    const ly = [];
+    if (!addr.province) ly.push("Không xác định được tỉnh/thành");
+    else if (!addr.district) ly.push(`Chỉ có tỉnh ${addr.province.name}, chưa rõ quận/huyện`);
+    else if (!addr.commune) ly.push(`Chưa xác định được xã/phường trong ${addr.district.name}`);
+    if (addr.ambiguous) ly.push(addr.ambiguous);
+    if (addr.district && !/^cao/.test(addr.confidence || "")) ly.push(addr.note || `Địa chỉ chỉ khớp gần đúng (${addr.confidence})`);
+    const pho = String(addr.street || "").trim();
+    const coChiTiet = /\d/.test(pho) || /(thôn|xóm|ấp|bản|tổ|khu|ngõ|ngách|hẻm|kiệt|đường|phố|số|chợ|trường|kđt|chung cư|tòa|toà|block|làng|đội)/i.test(pho);
+    const chiLaTenHanhChinh = addr.commune && pho && litKey(pho).includes(litKey(addr.commune.name)) && pho.split(/\s+/).length <= 4;
+    if (!pho || !coChiTiet || chiLaTenHanhChinh) ly.push("Thiếu số nhà / thôn xóm / tên đường");
+    return [...new Set(ly)];
+  }
+
+  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "" }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
-    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "" });
+    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
+    // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
+    if (!ex.ready && onlyNameMissing(ex.missing) && ex.phone && ex.address && (ex.items || []).length) ex.ready = true;
     if (!ex.ready) return { status: "skipped", reason: `chưa đủ thông tin: ${ex.missing || "?"}` };
     const phone = normalizePhone(ex.phone);
     if (!phone) return { status: "skipped", reason: `SĐT không hợp lệ: ${ex.phone}` };
@@ -427,9 +485,18 @@ export class OrderSync {
       return { status: "skipped", reason: `SĐT ${phone} không có trong hội thoại (AI tự suy ra) — chờ khách gửi lại SĐT` };
     }
     const { mapped, problems } = this.mapItems(ex.items);
-    if (!mapped.length) return { status: "skipped", reason: `không map được sản phẩm: ${problems.join("; ")}` };
+    const diaChiKhach = String(addressOverride || ex.address || "").trim();
+    const nhap = { phone, customerName: ex.customer_name || customerName || "", address: diaChiKhach, items: (ex.items || []).map((i) => `${i.code || "?"} ${i.color || ""} ${i.size || ""} x${i.quantity || 1}`.replace(/\s+/g, " ").trim()) };
+    if (!mapped.length) {
+      if (strict) return { status: "review", reasons: [`Không khớp được mẫu/màu/size trên POS: ${problems.join("; ")}`], draft: nhap };
+      return { status: "skipped", reason: `không map được sản phẩm: ${problems.join("; ")}` };
+    }
 
-    const addr = await this.resolveAddress(ex.address || "", { pageName });
+    const addr = await this.resolveAddress(diaChiKhach, { pageName });
+    if (strict) {
+      const ly = [...this.addressGate(addr), ...(problems.length ? [`Một phần sản phẩm không khớp POS: ${problems.join("; ")}`] : [])];
+      if (ly.length) return { status: "review", reasons: ly, draft: { ...nhap, resolved: addr.fullAddress } };
+    }
     const goods = mapped.reduce((s, m) => s + m.price * m.quantity, 0);
     const agreed = Number(ex.agreed_total) || 0;
     const freeShip = !!ex.free_shipping || mapped.reduce((s, m) => s + m.quantity, 0) >= 2;
@@ -443,8 +510,9 @@ export class OrderSync {
     const noteLines = [
       `🤖 Bot chốt từ chat (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}): ${mapped.map((m) => `${m.display} x${m.quantity}`).join(", ")}`,
       agreed ? `Khách chốt tổng ${agreed.toLocaleString("vi-VN")}đ${freeShip ? " (miễn ship)" : " (gồm ship)"}${discount ? `, đã ghi giảm ${discount.toLocaleString("vi-VN")}đ` : ""}` : "",
-      `Địa chỉ khách ghi: "${ex.address || ""}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
+      `Địa chỉ ${addressOverride ? "nhân viên duyệt" : "khách ghi"}: "${diaChiKhach}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
       addr.note ? `⚠ ${addr.note}, nhân viên kiểm tra lại` : "",
+      addr.autoFixed ? `✓ ${addr.autoFixed}` : "",
       problems.length ? `⚠ ${problems.join("; ")}` : "",
       ex.note ? `Khách dặn: ${ex.note}` : "",
     ].filter(Boolean);
@@ -499,7 +567,60 @@ export class OrderSync {
     store.bumpStat(pageId, "orders");
     store.addPhone(pageId, phone, Date.now());
     store.addBotOrder(pageId, orderId, conversationId);
-    return { status, orderId, summary, address: addr, items: mapped, discount, agreed };
+    // Du dieu kien TU XAC NHAN chua (orderbot.js chi dung khi chu shop bat autoConfirm). Moi ly do chan deu duoc ghi ra.
+    const confirmBlockers = [];
+    if (!strict) confirmBlockers.push("không chạy chế độ kiểm tra chặt");
+    if (problems.length) confirmBlockers.push("có sản phẩm không khớp POS");
+    if (!agreed) confirmBlockers.push("khách chưa chốt tổng tiền trong hội thoại");
+    else if (agreed > goods + shipFee) confirmBlockers.push(`tổng khách chốt ${agreed.toLocaleString("vi-VN")}đ lớn hơn giá POS ${(goods + shipFee).toLocaleString("vi-VN")}đ`);
+    else if (discount > goods * 0.3) confirmBlockers.push(`giảm giá ${discount.toLocaleString("vi-VN")}đ vượt 30% tiền hàng`);
+    return { status, orderId, summary, address: addr, items: mapped, discount, agreed, phone, confirmBlockers };
+  }
+
+  /**
+   * Don KHAC (khong phai don nhap, khong huy/xoa) cua khach trong 14 ngay — cung SDT hoac cung hoi thoai.
+   * Dung truoc khi TU XAC NHAN va khi QUET LAI hoi thoai cu: khach da co don that (ke ca da giao / dang hoan)
+   * thi hoi thoai cu co the chi la don CU, xac nhan them la gui hang hai lan.
+   */
+  async otherOrders(conversationId, phone, excludeId = null) {
+    if (!phone) return [];
+    const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { search: phone, page_size: 30 });
+    return (d.data || []).filter((o) => {
+      if (String(o.id) === String(excludeId)) return false;
+      if ([0, 6, 9].includes(Number(o.status))) return false;
+      const cung = normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone || o.conversation_id === conversationId;
+      return cung && Date.now() - Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) < 14 * 24 * 3600e3;
+    });
+  }
+
+  /**
+   * TU XAC NHAN don nhap bot vua ghi: doc lai don tren POS, chi chuyen "Moi" -> "Da xac nhan" khi don VAN la don nhap,
+   * dung SDT, dung dung cac bien the bot vua ghi va khach khong co don nao khac. Doc lai lan nua de chac POS da doi.
+   * Tra ve { ok: true } hoac { ok: false, reason }.
+   */
+  async confirmOrder(orderId, { conversationId, phone, items }) {
+    const get = async () => (await this._call("GET", `/shops/${config.pos.shopId}/orders/${orderId}`)).data;
+    const o = await get();
+    if (!o) return { ok: false, reason: `không đọc được đơn #${orderId} trên POS` };
+    if (Number(o.status) !== 0) return { ok: false, reason: `đơn #${orderId} không còn là đơn mới (${ORDER_STATUS_VI[Number(o.status)] || o.status}) — không động vào` };
+    if (normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) !== phone) return { ok: false, reason: "SĐT trên POS khác SĐT khách nhắn" };
+    const tren = new Map();
+    for (const it of o.items || []) {
+      const vid = String(it.variation_id || it.variation_info?.id || "");
+      tren.set(vid, (tren.get(vid) || 0) + Number(it.quantity || 0));
+    }
+    const muon = new Map((items || []).map((m) => [String(m.variation_id), Number(m.quantity)]));
+    const khop = tren.size === muon.size && [...muon].every(([k, q]) => tren.get(k) === q);
+    if (!khop) return { ok: false, reason: "sản phẩm trên đơn POS khác sản phẩm bot vừa ghi (có thể nhân viên đã sửa)" };
+    const sa = o.shipping_address || {};
+    if (!sa.province_id || !sa.district_id || !sa.commune_id || !String(sa.address || "").trim()) return { ok: false, reason: "địa chỉ trên POS thiếu tỉnh/huyện/xã hoặc số nhà" };
+    const khac = await this.otherOrders(conversationId, phone, orderId);
+    if (khac.length) return { ok: false, reason: `khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày — nhân viên kiểm tra, tránh gửi hai lần` };
+    const dong = `✅ Bot tự xác nhận (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}): địa chỉ khớp đủ tỉnh/huyện/xã, sản phẩm khớp POS, khách không có đơn khác`;
+    await this._call("PUT", `/shops/${config.pos.shopId}/orders/${orderId}`, { status: 1, note: (o.note ? String(o.note).trim() + "\n" : "") + dong });
+    const sau = await get().catch(() => null);
+    if (!sau || Number(sau.status) !== 1) return { ok: false, reason: `POS chưa đổi trạng thái đơn #${orderId} (đang: ${sau ? ORDER_STATUS_VI[Number(sau.status)] || sau.status : "?"})` };
+    return { ok: true };
   }
 }
 

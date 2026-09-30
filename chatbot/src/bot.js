@@ -11,6 +11,7 @@ import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
 import { orderSync, describeOrder, phonesInText } from "./orders.js";
+import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
@@ -95,6 +96,7 @@ export class Bot {
     this.queue = new ConversationQueue((_key, payload) => this.processConversation(payload));
     this.uploadCache = new Map(); // `${pageId}|${url}` -> { id, at }
     this.pauseTagIds = new Map(); // pageId -> tag id "tat bot" (tra theo BOT_PAUSE_TAG_NAME)
+    this.orderBot = new OrderBot(this); // Bot len don doc lap: gop thong tin, xac nhan dia chi, len don / can duyet
   }
 
   /**
@@ -1389,7 +1391,13 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       if (!eff.dryRun) await this.deliver(pageId, conversationId, { text: mienShip, type });
       store.setLastHandled(conversationId, last.id);
       // Ghi lai don nhap tren POS thanh mien ship (tong = tien dam)
-      if (eff.orderSync && orderSync.enabled && !eff.dryRun && !this.scopedTestProduct(pageId)) {
+      // Mau test moi chua co tren POS: KHONG len don qua ca hai duong (chu shop: chi len don khi mau thang)
+      if (this.scopedTestProduct(pageId)) {
+        log.info(`[${pageId}] ${conversationId}: mau test moi -> khong ghi don POS`);
+      } else if (this.orderBot.enabledFor(pageId) && !eff.dryRun) {
+        this.orderBot.notify(pageId, conversationId, messages, customerName || "");
+        if (this.orderBot.items[String(conversationId)]) this.orderBot.schedule(String(conversationId), 5000);
+      } else if (eff.orderSync && orderSync.enabled && !eff.dryRun) {
         const historyText = [...messages.slice(-60).map((m) => `${this.isFromPage(m, pageId) ? "SHOP" : "KHÁCH"}: ${this.messageText(m)}`), `SHOP: ${mienShip}`].join("\n");
         orderSync
           .syncFromConversation({ pageId, pageName: this.pageNames.get(pageId), conversationId, customerName: customerName || "", historyText })
@@ -1656,6 +1664,7 @@ ${eff.afterOrderText.trim()}`;
       if (this.isFromPage(m, pageId)) continue;
       for (const ph of phonesInText(this.messageText(m))) store.addPhone(pageId, ph, parseTs(m.inserted_at));
     }
+    if (type === "INBOX" && !this.scopedTestProduct(pageId)) this.orderBot.notify(pageId, conversationId, messages, name);
     store.recordReply(pageId, { conversationId, customerName: name, question: this.messageText(last).slice(0, 200), reply: reply.slice(0, 500), handoff, dryRun: eff.dryRun, adId: adBot?.adId || undefined });
     if (eff.dryRun) {
       log.info(`[${pageId}] DRY_RUN: khong gui tin cho khach`);
@@ -1732,8 +1741,14 @@ ${eff.afterOrderText.trim()}`;
     // khach gui dia chi sau roi bot tom tat lai (lan nay Gemini khong kem handoff) -> van phai ghi lai vao POS,
     // neu khong don tren POS mai o trang thai "Chua cung cap" dia chi. Ghi lai la an toan: syncFromConversation
     // tim dung don nhap cu theo SDT/hoi thoai roi PUT de cap nhat, khong tao don moi.
-    // Mau test moi chua co tren POS: KHONG ghi don nhap (chu shop: chi len don khi mau thang) — nhan vien lo tu ban tom tat
-    if (isOrderSummaryReply(reply, handoff) && type === "INBOX" && eff.orderSync && orderSync.enabled && !this.scopedTestProduct(pageId)) {
+    // Mau test moi chua co tren POS: KHONG ghi don qua ca hai duong (chu shop: chi len don khi mau thang) — nhan vien lo tu ban tom tat
+    if (this.scopedTestProduct(pageId)) {
+      // khong lam gi
+    } else if (isOrderSummaryReply(reply, handoff) && type === "INBOX" && this.orderBot.enabledFor(pageId)) {
+      // Bot len don doc lap nhan viec: kiem ngay (khong doi 1 phut) vi bot tu van vua tom tat chot don
+      this.orderBot.notify(pageId, conversationId, messages, name);
+      if (this.orderBot.items[String(conversationId)]) this.orderBot.schedule(String(conversationId), 5000);
+    } else if (isOrderSummaryReply(reply, handoff) && type === "INBOX" && eff.orderSync && orderSync.enabled) {
       const historyText = fullMessages
         .slice(-40)
         .map((m) => `${this.isFromPage(m, pageId) ? "SHOP" : "KHÁCH"}: ${this.messageText(m)}`)

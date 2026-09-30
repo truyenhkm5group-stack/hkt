@@ -16,7 +16,7 @@
  * "đang trả lời câu trước", không chen tin vào giữa.
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
 import { ByokAnthropicProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
@@ -30,7 +30,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -213,7 +213,7 @@ async function webRateProblem(conv: ConvRow): Promise<string | null> {
       .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
     if (Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min) return "Anh/chị nhắn nhanh quá — đợi vài phút rồi nhắn tiếp giúp em nhé.";
   }
-  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(eq(c.channel, "WEB"), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
+  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(inArray(c.channel, ["WEB", "FANPAGE"]), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
   if (Number(d?.n ?? 0) >= SALES_CHATBOT_LIMITS.webTurnsPerOrgPerDay) return "Shop đang quá tải tin nhắn — nhân viên sẽ liên hệ lại sớm ạ.";
   return null;
 }
@@ -239,7 +239,7 @@ function aiDownReply(cfg: SalesChatbotConfig): string {
 }
 
 async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: ChatChannel, now: Date): Promise<void> {
-  if (channel !== "WEB") return;
+  if (!isPublicChannel(channel)) return;
   await notifySalesChatHandoff(conv.id, AI_DOWN_HANDOFF_REASON, state.customer, now);
 }
 
@@ -252,9 +252,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
   if (!text) return { ok: false, error: "Tin nhắn trống." };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
   const conv = await loadConversation(conversationId);
-  if (!conv || conv.channel !== opts.channel || (opts.channel === "WEB" && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: "Không có hội thoại này." };
+  if (!conv || conv.channel !== opts.channel || (isPublicChannel(opts.channel) && conv.visitorKey !== (opts.visitorKey ?? null))) return { ok: false, error: "Không có hội thoại này." };
   const cfg = await loadSalesChatbotConfig();
-  if (opts.channel === "WEB" && !cfg.enabled) return { ok: false, error: "Shop chưa mở chat." };
+  if (isPublicChannel(opts.channel) && !cfg.enabled) return { ok: false, error: "Shop chưa mở chat." };
   const now = opts.now ?? new Date();
   const msgs = await loadMessages(conv.id);
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
@@ -269,7 +269,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (opts.channel === "WEB" && !withinBusinessHours(cfg.businessHours, now)) {
+    if (isPublicChannel(opts.channel) && !withinBusinessHours(cfg.businessHours, now)) {
       await reply(conv, seq, cfg.businessHours.outsideMessage);
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
@@ -279,7 +279,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       await bump({ status: "HANDOFF", handoffReason: "Hội thoại quá dài", turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (opts.channel === "WEB") {
+    if (isPublicChannel(opts.channel)) {
       const limited = await webRateProblem(conv);
       if (limited) {
         await reply(conv, seq, limited);
@@ -290,7 +290,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
     const blocked = async (key: string, ownerLabel: string, internal: string): Promise<TurnResult> => {
-      if (opts.channel !== "WEB") return { ok: false, error: internal };
+      if (!isPublicChannel(opts.channel)) return { ok: false, error: internal };
       const st = (conv.state ?? {}) as ChatState;
       await reply(conv, seq, aiDownReply(cfg));
       await bump({ turns: conv.turns + 1, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON });

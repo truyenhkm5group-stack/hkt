@@ -124,6 +124,7 @@ import { testAccessModel, testCustomRoleViewImplies, testDisabledRoleFallsBackNa
 import { testApplyGithubEnvBlock, testDeployScript } from "./deploy-script.test";
 import { testOpsConcurrency } from "./ops-concurrency.test";
 import { testSaoLuu } from "./backup.test";
+import { testPitr } from "./pitr.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -2493,6 +2494,7 @@ async function main() {
   testApplyGithubEnvBlock();
   testOpsConcurrency();
   await testSaoLuu();
+  testPitr();
   testMigrationAppendOnly();
   await testMigrationUpgradePath();
   testMigrationNumberUnique();

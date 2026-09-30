@@ -330,9 +330,11 @@ function danhSachMaHoa(src: string): Set<string> {
 /**
  * Dòng CHẠY một lệnh trong container mà đầu ra có thể tới log: `docker exec …` / `$C exec …`, trừ
  * dòng chép script (`sh -c 'cat > /app/scripts/…'` — không in gì) và dòng đổ hết ra /dev/null.
+ * Cộng dòng chạy một script SHELL của máy chủ (`bash "$SB" …` / `bash "$SP" …`, vd scripts/erp-pitr.sh): script ấy tự
+ * `docker exec` vào CSDL, nên trong nhánh mã hoá nó cũng phải đi qua ma_hoa_ket_qua.
  */
 const dongChayLenh = (d: string) =>
-  /(\bdocker exec|\$C exec)\b/.test(d) && !/sh -c 'cat > \/app\/scripts\//.test(d) && !/>\s*\/dev\/null/.test(d);
+  (/(\bdocker exec|\$C exec)\b/.test(d) || /\bbash "\$S[A-Z]*"/.test(d)) && !/sh -c 'cat > \/app\/scripts\//.test(d) && !/>\s*\/dev\/null/.test(d);
 
 export function testPhanLoaiDuThaoTac() {
   const src = doc(OPS);
@@ -443,10 +445,10 @@ const TIEN_TO_TOM_TAT = "[ops:tom-tat] ";
  */
 const TRUONG_CA_NHAN = /\b(name|ten|shortName|phone|sdt|email|title|note|last_note|truoc_note|uploadedBy|billFullName|customerName|owner_name|receiverPhone|seller|aliases|accountIds|percent[A-Za-z]*|employeeName)\b/;
 
-/** Script mà một nhánh ops chạy: `scripts/<x>.ts`, hoặc qua `npm run` (seed:employees, sync). */
+/** Script mà một nhánh ops chạy: `scripts/<x>.ts` / `scripts/<x>.sh`, hoặc qua `npm run` (seed:employees, sync). */
 function scriptCuaNhanh(than: string): string[] {
   const kq = new Set<string>();
-  for (const m of than.matchAll(/scripts\/([a-z0-9-]+\.ts)/g)) kq.add(`scripts/${m[1]}`);
+  for (const m of than.matchAll(/scripts\/([a-z0-9-]+\.(?:ts|sh))/g)) kq.add(`scripts/${m[1]}`);
   if (/npm run --silent seed:employees\b/.test(than)) kq.add("scripts/seed-employees.ts");
   if (/npm run --silent sync\b/.test(than)) kq.add("scripts/sync.ts");
   return [...kq];

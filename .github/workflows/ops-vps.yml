@@ -84,6 +84,11 @@ on:
           - backup              # sao lưu NGAY bằng scripts/erp-backup.sh: CSDL (-Fc) + dữ liệu bot chat, kiểm toàn vẹn, xoay vòng, đẩy ngoài máy nếu đã khai (vào /root/backups/manual)
           - backup-status       # trạng thái sao lưu: lịch cron, lượt gần nhất, bản trên máy, ngoài máy, ổ đĩa — KHÔNG in dữ liệu
           - restore-drill       # DIỄN TẬP khôi phục bản mới nhất vào container Postgres TẠM (không mạng, trần RAM), đếm dòng bảng then chốt so với CSDL sống, rồi xoá container
+          - pitr-status         # PITR của erp-db: pg_stat_archiver (đã lưu / lỗi / đoạn gần nhất), RPO hiện tại, kho WAL + bản nền trên máy, ngoài máy — CHỈ ĐỌC, kết quả MÃ HOÁ, số qua kênh tóm tắt
+          - pitr-basebackup     # PITR: chụp bản nền vật lý NGAY — dùng ngay sau khi bật để có mốc khôi phục đầu tiên; cron tự chụp mỗi đêm sau bản đêm
+          - pitr-mark           # PITR: GHI đúng MỘT dòng settings `platform.pitr.marker` (nonce + mốc) để pitr-drill chứng minh khôi phục ĐÚNG mốc
+          - pitr-drill          # PITR: DIỄN TẬP khôi phục tới một mốc (arg: ISO, ví dụ 2026-09-30T20:15:00Z; rỗng = đoạn WAL mới nhất − 2 phút) trong container TẠM (không mạng, trần RAM) — không chạm erp-db
+          - pitr-pause          # PITR: PHANH — tạm dừng lưu WAL không cần khởi động lại (arg rỗng); arg "resume" = chạy lại (sau đó chụp bản nền mới)
           - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -129,7 +134,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary confirm-funnel-audit company-os-summary velocity-compare"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary confirm-funnel-audit company-os-summary velocity-compare pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -479,9 +484,9 @@ jobs:
             }
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
-            DOC_NHE="status perf disk logs db-query backup-status"
+            DOC_NHE="status perf disk logs db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check backup restore-drill restore-drill-org pitr-basebackup pitr-drill"
 
             LOP=GHI
             case "$ARG" in
@@ -1202,6 +1207,48 @@ jobs:
                 SB=/root/erp/scripts/erp-backup.sh
                 [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
                 ERP_DIR=/root/erp bash "$SB" restore-drill-org "$ARG" ;;
+              pitr-status)
+                # ═══ PITR (docs/platform/backup-recovery.md §9.4) — năm thao tác, MỘT script: scripts/erp-pitr.sh ═══
+                # Chạy ĐÚNG bản đã deploy (/root/erp): nó `source` erp-backup.sh cùng commit và đọc compose cùng commit —
+                # lấy từ main thì script và cấu hình Postgres đang chạy có thể lệch nhau. Chưa deploy ⇒ dừng, nói ra.
+                # Kết quả MÃ HOÁ như mọi thao tác chạm CSDL; người vận hành đọc số qua kênh [ops:tom-tat].
+                # CHỈ ĐỌC: pg_stat_archiver + pg_settings + đếm tệp trên đĩa. Làn DOC_NHE.
+                SP=/root/erp/scripts/erp-pitr.sh
+                [ -f "$SP" ] || { echo "::error::Chưa có $SP — deploy bản mang PITR trước."; exit 1; }
+                ma_hoa_ket_qua env ERP_DIR=/root/erp bash "$SP" status ;;
+              pitr-basebackup)
+                # pg_basebackup KHÔNG ghi CSDL nhưng là phép đọc nặng ⇒ làn DOC_NANG (8 → 9), như `backup`. Script tự cầm
+                # FD 7 (không chờ) để không chồng lượt đêm / diễn tập, và DÙNG LẠI FD 8 + 9 thừa kế từ đây.
+                SP=/root/erp/scripts/erp-pitr.sh
+                [ -f "$SP" ] || { echo "::error::Chưa có $SP — deploy bản mang PITR trước."; exit 1; }
+                ma_hoa_ket_qua env ERP_DIR=/root/erp bash "$SP" base --trigger=ops ;;
+              pitr-mark)
+                # GHI đúng một dòng settings (khoá platform.pitr.marker). Làn GHI (mặc định): khoá vòng đời ĐỘC QUYỀN.
+                SP=/root/erp/scripts/erp-pitr.sh
+                [ -f "$SP" ] || { echo "::error::Chưa có $SP — deploy bản mang PITR trước."; exit 1; }
+                ma_hoa_ket_qua env ERP_DIR=/root/erp bash "$SP" mark ;;
+              pitr-drill)
+                # Khôi phục bản nền mới nhất + kho WAL tới một mốc trong container TẠM (--network none, trần RAM), hai pha
+                # quanh dòng đánh dấu, rồi xoá sạch. KHÔNG một lệnh nào nhắm vào erp-db. Ô arg = mốc ISO hoặc rỗng.
+                case "$ARG" in
+                  *[!0-9TZ:+-]*)
+                    echo "::error::Tham số phải là mốc ISO (ví dụ 2026-09-30T20:15:00Z hoặc 2026-10-01T03:15:00+07:00) — hoặc để trống."
+                    exit 1 ;;
+                esac
+                SP=/root/erp/scripts/erp-pitr.sh
+                [ -f "$SP" ] || { echo "::error::Chưa có $SP — deploy bản mang PITR trước."; exit 1; }
+                ma_hoa_ket_qua env ERP_DIR=/root/erp bash "$SP" drill "$ARG" ;;
+              pitr-pause)
+                # Phanh KHÔNG cần khởi động lại: cờ `.tam-dung` trong kho WAL ⇒ kịch bản lưu WAL bỏ đoạn (ghi lỗ hổng) và
+                # Postgres thôi dồn WAL. `ALTER SYSTEM SET archive_command` KHÔNG dùng được — `-c` trong compose thắng nó.
+                case "$ARG" in
+                  "") LENH_PITR=pause ;;
+                  resume) LENH_PITR=resume ;;
+                  *) echo "::error::Tham số chỉ nhận rỗng (tạm dừng) hoặc resume (chạy lại)."; exit 1 ;;
+                esac
+                SP=/root/erp/scripts/erp-pitr.sh
+                [ -f "$SP" ] || { echo "::error::Chưa có $SP — deploy bản mang PITR trước."; exit 1; }
+                ma_hoa_ket_qua env ERP_DIR=/root/erp bash "$SP" "$LENH_PITR" ;;
               rotate-webhook-secrets)
                 NEW_PK="pk_$(openssl rand -hex 16)"; NEW_VTP="vtp_$(openssl rand -hex 16)"
                 sed -i -E "s|^PANCAKE_WEBHOOK_SECRET=.*|PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"|; s|^VIETTELPOST_WEBHOOK_SECRET=.*|VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"|" .env

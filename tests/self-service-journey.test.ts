@@ -23,7 +23,9 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
+import { allowedNavItems, hubTools } from "@/components/app-sidebar";
 import { FOOD_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/food-commerce";
+import { hubMembers } from "@/lib/constants/department-modules";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
@@ -48,6 +50,8 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
+import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
 import { runWorkflows } from "@/lib/workflow/engine";
 
 const ORG = "ss-food";
@@ -86,7 +90,14 @@ function testPure() {
   const v = validateBlueprint(FOOD_COMMERCE_BLUEPRINT);
   assert.ok(v.ok, JSON.stringify(v.errors));
   assert.equal(BUSINESS_TYPE_SPEC.food.templateKey, "food-commerce");
-  for (const m of ["customers", "products", "orders", "inventory", "logistics", "customer_care", "ai_sales"] as const) assert.ok(FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm thiếu module ${m}`);
+  for (const m of ["customers", "products", "orders", "inventory", "ai_sales"] as const) assert.ok(FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm thiếu module ${m}`);
+  // Chủ shop 30/09/2026: «Vận chuyển» và «CSKH» dựng trên Viettel Post / Pancake của tổ chức nhà — mẫu không bật, và không
+  // vai trò nào của mẫu cầm quyền của hai module ấy (quyền chết trông như quyền thật trên trang vai trò).
+  for (const m of ["logistics", "customer_care"] as const) assert.ok(!FOOD_COMMERCE_BLUEPRINT.modules.includes(m), `mẫu thực phẩm không bật module ${m}`);
+  for (const r of FOOD_COMMERCE_BLUEPRINT.roles ?? []) {
+    const chet = r.permissions.filter((p) => ["shipments:view", "shipments:manage", "cs:view", "cs:manage"].includes(p));
+    assert.deepEqual(chet, [], `vai trò ${r.key} cầm quyền của module mẫu không bật`);
+  }
   const keys = (FOOD_COMMERCE_BLUEPRINT.fields ?? []).filter((f) => f.objectKey === "product").map((f) => f.key);
   for (const k of ["package_size", "net_weight", "selling_unit", "storage_instruction", "usage_instruction", "food_category"]) assert.ok(keys.includes(k), `thiếu field ${k}`);
   const text = JSON.stringify(FOOD_COMMERCE_BLUEPRINT);
@@ -165,6 +176,17 @@ function testPure() {
 
 type Scripted = (req: AiRequest, lastUser: string, lastResults: Record<string, unknown>[]) => AiBlock[];
 
+/** Pancake giả: ghi mọi lời gọi (url + init), trả JSON do `respond` quyết. KHÔNG gọi mạng (luật 65). */
+function fakeFetchCalls(respond: (url: string, init?: RequestInit) => unknown): { fetch: typeof fetch; calls: { url: string; init?: RequestInit }[] } {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, init });
+    return new Response(JSON.stringify(respond(url, init)), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  return { fetch: f, calls };
+}
+
 function fakeProvider(script: Scripted): AiProvider {
   let n = 0;
   return {
@@ -229,9 +251,18 @@ async function testJourney() {
   const org = await findOrganization(ORG);
   assert.ok(org && org.status === "ACTIVE" && org.publishState === "DRAFT", "tổ chức mới qua /start là BẢN NHÁP");
   const enabled = await getEnabledModules(ORG);
-  for (const m of ["ai_sales", "orders", "inventory", "customers", "products", "logistics", "customer_care", "work"]) assert.ok(enabled.has(m as never), `module ${m} phải bật`);
+  for (const m of ["ai_sales", "orders", "inventory", "customers", "products", "work"]) assert.ok(enabled.has(m as never), `module ${m} phải bật`);
+  for (const m of ["logistics", "customer_care"]) assert.equal(enabled.has(m as never), false, `module ${m} KHÔNG bật ở mẫu thực phẩm`);
   assert.equal((await getEnabledModules(home.code)).has("ai_sales"), false, "AI bán hàng TẮT ở tổ chức nhà (0180)");
   const admin = await adminOf(ORG, ADMIN_EMAIL);
+  // Menu THẬT của quản trị tổ chức thực phẩm (module phân giải từ CSDL): một mục «Tuỳ biến nâng cao» thay mười công cụ dựng
+  // cấu hình, không trang nào của connector chỉ-nhà; các mục quản trị còn lại đứng riêng.
+  const menu = allowedNavItems(admin).map((i) => i.href);
+  assert.ok(menu.includes("/settings/advanced"), `menu tổ chức thực phẩm có «Tuỳ biến nâng cao»: ${menu.join(",")}`);
+  for (const h of hubMembers("/settings/advanced")) assert.ok(!menu.includes(h.href), `${h.href} gom vào «Tuỳ biến nâng cao», không đứng riêng`);
+  assert.equal(hubTools("/settings/advanced", admin).length, 10, "quản trị dùng được đủ mười công cụ trong trang gom");
+  for (const h of ["/shipments", "/cs", "/data-quality", "/products/performance", "/inventory/packing"]) assert.ok(!menu.includes(h), `${h} không hiện ở tổ chức thực phẩm`);
+  for (const h of ["/settings/users", "/audit", "/settings/modules", "/settings/connections", "/setup", "/settings/notifications"]) assert.ok(menu.includes(h), `${h} vẫn đứng riêng`);
 
   await withOrganization(ORG, async () => {
     const db = await getDb();
@@ -469,6 +500,86 @@ async function testJourney() {
       assert.ok(!/\{c\.lastError(?!\s*\?)|title=\{c\.lastError\}|c\.lastError\.slice/.test(page), "màn hình không in lỗi gốc — chỉ nhãn tiếng Việt");
     } finally {
       setSalesChatProviderForTests(null);
+    }
+
+    // ═══ BOT FANPAGE (0182): tin Pancake ⇒ ĐÚNG tổ chức theo token ⇒ chatbot bán hàng của tổ chức ⇒ trả lời qua reply_inbox ═══
+    // Bí mật kết nối cần PLATFORM_SECRETS_KEY: đặt một khoá KIỂM THỬ cho khối này rồi trả lại nguyên trạng (luật 65).
+    const savedSecretsKey = process.env.PLATFORM_SECRETS_KEY;
+    process.env.PLATFORM_SECRETS_KEY = "khoa-kiem-thu-fanpage-0123456789abcdefghijklmnopqrstuvwxyz";
+    try {
+    const PAGE = "1122334455";
+    const PAGE_TOKEN = "pancake_page_token_0123456789abcdef";
+    const pancake = fakeFetchCalls((url, init) => (url.includes("/conversations?") ? { success: true, conversations: [{ id: "c1" }] } : init?.method === "POST" ? { success: true, id: `m-bot-${Math.random().toString(36).slice(2, 8)}` } : { success: true }));
+    const savedFp = await saveConnection(admin, { connectorKey: "pancake-fanpage", settings: { pageId: PAGE }, secrets: { pageAccessToken: PAGE_TOKEN } });
+    assert.ok("ok" in savedFp, JSON.stringify(savedFp));
+    const tested = await testOrgConnection(admin, "pancake-fanpage", { tester: { fetch: pancake.fetch } });
+    assert.ok("ok" in tested, JSON.stringify(tested));
+    assert.ok(pancake.calls[0].url.startsWith(`https://pages.fm/api/public_api/v2/pages/${PAGE}/conversations?`) && pancake.calls[0].init?.method === "GET", "kiểm tra = CHỈ ĐỌC danh sách hội thoại");
+    assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "ACTIVE")));
+
+    // Token webhook: đúng tổ chức; sửa một ký tự / đổi mã tổ chức / tổ chức nhà ⇒ không ai.
+    const token = webhookUrlToken("PANCAKE_FANPAGE", ORG)!;
+    assert.ok(token.startsWith(`${ORG}.`));
+    assert.equal(await resolveUrlSecretOrganization("PANCAKE_FANPAGE", token), ORG);
+    assert.equal(await resolveUrlSecretOrganization("PANCAKE_FANPAGE", `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`), null, "chữ ký sai ⇒ không tổ chức nào");
+    assert.equal(await resolveUrlSecretOrganization("PANCAKE_FANPAGE", `${OTHER}.${token.split(".")[1]}`), null, "chữ ký của A không mở được B");
+    const home = await getHomeOrganization();
+    assert.equal(await resolveUrlSecretOrganization("PANCAKE_FANPAGE", webhookUrlToken("PANCAKE_FANPAGE", home.code)!), null, "không bao giờ phân giải về tổ chức nhà");
+    const caddy = readFileSync("deploy/Caddyfile", "utf8");
+    const redact = /request>uri regexp "([^"]+)" "([^"]+)"/.exec(caddy)!;
+    const re = new RegExp(redact[1].replace("(?i:", "(?:"), "gi");
+    assert.equal(`/api/webhooks/pancake/fanpage/${token}`.replace(re, (_m, a: string | undefined, b: string | undefined) => `${a ?? ""}${b ?? ""}REDACTED`), "/api/webhooks/pancake/fanpage/REDACTED", "log Caddy che token fanpage");
+
+    const ev = (id: string, text: string, from: Record<string, unknown> = { id: "cust-1", name: "Chị Lan" }, thread = "t-900", page = PAGE) =>
+      parsePancakeWebhook({ event_type: "messaging", page_id: page, data: { conversation: { id: thread, type: "INBOX" }, message: { id, type: "INBOX", message: text, from } } })!;
+    assert.equal(parsePancakeWebhook({ event_type: "order_updated" }), null, "không phải tin nhắn ⇒ bỏ qua");
+    setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+    try {
+      const inboundCount = async () => Number((await db.select({ n: sql<number>`count(*)` }).from(schema.salesChatInbound))[0].n);
+      assert.deepEqual(await receiveFanpageEvent(ev("m1", "Chả mực bao nhiêu?")), { queued: true, reason: "Đã nhận" });
+      assert.equal((await receiveFanpageEvent(ev("m1", "Chả mực bao nhiêu?"))).queued, false, "Pancake gửi lại ⇒ không nhận lần hai");
+      assert.equal((await receiveFanpageEvent(ev("m-x", "hi", { id: "cust-9" }, "t-1", "9999999999"))).queued, false, "page khác page đã khai ⇒ không nhận");
+      const before = await inboundCount();
+      const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      assert.equal(r1.processed, 1, JSON.stringify(r1));
+      assert.ok(r1.replies >= 1 && !r1.error, JSON.stringify(r1));
+      const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`));
+      assert.ok(sent.length >= 1 && sent.every((c) => c.init?.method === "POST"), "trả lời qua reply_inbox của đúng hội thoại");
+      const body = JSON.parse(String(sent[sent.length - 1].init?.body)) as { action: string; message: string };
+      assert.equal(body.action, "reply_inbox");
+      assert.match(sent.map((c) => String(c.init?.body)).join(" "), /400\.000/, "giá đọc từ ERP");
+      assert.ok(!sent.some((c) => String(c.init?.body).includes(PAGE_TOKEN)), "token không nằm trong body");
+      assert.ok((await inboundCount()) > before, "mã tin bot vừa gửi được ghi lại");
+      const again = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      assert.equal(again.processed, 0, "không còn tin chờ ⇒ không trả lời lại");
+      const convs = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.channel, "FANPAGE"));
+      assert.equal(convs.length, 1, "một hội thoại Pancake = một hội thoại chatbot");
+
+      // Pancake đẩy lại chính tin bot vừa gửi (có uid) ⇒ KHÔNG coi là nhân viên.
+      const botId = (await db.select({ id: schema.salesChatInbound.messageId }).from(schema.salesChatInbound).where(eq(schema.salesChatInbound.note, "BOT_SENT")).limit(1))[0].id;
+      assert.equal((await receiveFanpageEvent(ev(botId, "Dạ...", { id: PAGE, uid: "u-staff" }))).reason, "Tin của chính bot");
+      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "OPEN");
+      // Nhân viên thật trả lời trên fanpage ⇒ bot nhường hội thoại, tin khách kế tiếp không được bot trả lời.
+      assert.match((await receiveFanpageEvent(ev("m-staff-1", "Chị đợi em chút nhé", { id: PAGE, uid: "u-staff", name: "NV" }))).reason, /bot nhường/);
+      await receiveFanpageEvent(ev("m2", "Còn hàng không em?"));
+      const sentBefore = pancake.calls.length;
+      const r2 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      assert.equal(r2.replies, 0, "nhân viên đang trả lời ⇒ bot im lặng");
+      assert.equal(pancake.calls.length, sentBefore, "không gửi gì lên Pancake");
+      // Hết thời gian nhường ⇒ bot nhận lại.
+      await receiveFanpageEvent(ev("m3", "Chả mực bao nhiêu?"));
+      const later = new Date(Date.now() + 31 * 60_000);
+      const r3 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: () => later });
+      assert.ok(r3.replies >= 1, `hết ${30} phút ⇒ bot trả lời lại: ${JSON.stringify(r3)}`);
+      // Kết nối tắt ⇒ tin không được nhận (không có lối vào cửa sau).
+      assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "DISABLED")));
+      assert.equal((await receiveFanpageEvent(ev("m4", "alo"))).reason, "Kết nối fanpage chưa bật");
+    } finally {
+      setSalesChatProviderForTests(null);
+    }
+    } finally {
+      if (savedSecretsKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;
+      else process.env.PLATFORM_SECRETS_KEY = savedSecretsKey;
     }
   });
 
