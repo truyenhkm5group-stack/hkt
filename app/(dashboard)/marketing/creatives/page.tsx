@@ -85,7 +85,14 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       ) : tab === "thiet-ke" ? (
         <DesignTab canEdit={canEdit} canCreateTopic={canOpenTopic(user)} />
       ) : tab === "dang-chay" ? (
-        <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} canRepublish={canPublish} />
+        <LiveTab
+          raw={raw}
+          canWrite={can(user, "expenses:write")}
+          canKill={can(user, "expenses:write") || can(user, "settings:manage")}
+          canRelease={can(user, "settings:manage")}
+          canRepublish={canPublish}
+          canSync={can(user, "sync:run")}
+        />
       ) : tab === "thu-vien" ? (
         <LibraryTab productId={param(raw, "mau") || null} period={resolvePeriod(raw, "all")} />
       ) : tab === "hoc" ? (

@@ -3,6 +3,7 @@
 import { parseAsString, useQueryStates } from "nuqs";
 import { useNavTransition } from "@/components/nav-progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LIVE_BOARD_URL_KEYS } from "@/lib/constants/creative-live-board";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,14 +35,14 @@ export const CREATIVE_TABS = [...CREATIVE_STEPS, ...CREATIVE_SIDE_TABS] as const
 
 export type StepBadges = Partial<Record<(typeof CREATIVE_STEPS)[number]["value"], { n: number; hint: string }>>;
 
+/** Khoá URL của từng tab — đổi tab là xoá HẾT, để bộ lọc của tab này không lặng lẽ lọc tab kia (vd `q`, `period`). */
+const TAB_URL_KEYS = [...new Set(["page", "q", "loai", "bat", "lo", "ngay", "product", "remix", "mau", ...LIVE_BOARD_URL_KEYS])];
+
 export function CreativeTabs({ active, defaultTab, badges = {} }: { active: string; defaultTab: string; badges?: StepBadges }) {
   const [dangChuyen, startTransition] = useNavTransition();
-  const [, setState] = useQueryStates(
-    { tab: parseAsString, page: parseAsString, q: parseAsString, loai: parseAsString, bat: parseAsString, lo: parseAsString, ngay: parseAsString, product: parseAsString, remix: parseAsString },
-    { shallow: false, history: "push", startTransition },
-  );
+  const [, setState] = useQueryStates({ tab: parseAsString, ...Object.fromEntries(TAB_URL_KEYS.map((k) => [k, parseAsString])) }, { shallow: false, history: "push", startTransition });
   return (
-    <Tabs value={active} onValueChange={(value) => void setState({ tab: value === defaultTab ? null : value, page: null, q: null, loai: null, bat: null, lo: null, ngay: null, product: null, remix: null })}>
+    <Tabs value={active} onValueChange={(value) => void setState({ tab: value === defaultTab ? null : value, ...Object.fromEntries(TAB_URL_KEYS.map((k) => [k, null])) })}>
       {/* `TabsList` ghim `h-9` bằng lớp theo nhóm (ưu tiên cao hơn `h-auto`) — xuống dòng trên điện thoại thì tab tràn đè khung dưới.
           Ghi đè ĐÚNG lớp ấy (tailwind-merge giữ lớp sau). */}
       <TabsList className={cn("h-auto flex-wrap justify-start rounded-xl transition-opacity group-data-[orientation=horizontal]/tabs:h-auto", dangChuyen && "pointer-events-none opacity-60")}>

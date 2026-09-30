@@ -1,205 +1,164 @@
-import { Activity } from "lucide-react";
+import { Download } from "lucide-react";
 import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
-import { ExtendButton, PauseNowButton } from "@/app/(dashboard)/marketing/creatives/live-actions";
-import { RepublishButton } from "@/app/(dashboard)/marketing/creatives/manual-gen";
-import { loadRepublishCtx } from "@/lib/queries/creative-manual-gen";
-import { REPUBLISHABLE_STATUSES } from "@/lib/creative/manual-gen";
+import { LiveTable } from "@/app/(dashboard)/marketing/creatives/live-table";
+import type { RepublishSource } from "@/app/(dashboard)/marketing/creatives/manual-gen";
 import { ScalePanel } from "@/app/(dashboard)/marketing/creatives/scale-panel";
-import { MODE_LABEL, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
+import { DataTableToolbar, type FacetDef } from "@/components/data-table/toolbar";
+import { InfoHint } from "@/components/info-hint";
 import { StatStrip } from "@/components/stat-tile";
-import { EmptyState, SectionCard } from "@/components/ui-bits";
+import { SyncButton } from "@/components/sync-button";
 import { getDb } from "@/db";
-import { CREATIVE_VERDICT_LABEL, VARIANT_STATUS_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
-import { costPerOrderOf, describeRule, metricValue } from "@/lib/creative/judge";
-import { formatDate, formatNumber, formatPercent, formatVND, vnShortStamp } from "@/lib/format";
+import { LIVE_BOARD_DEFAULT_PERIOD, LIVE_BOARD_PARAMS, LIVE_STATES, LIVE_STATE_LABEL } from "@/lib/constants/creative-live-board";
+import { CREATIVE_VERDICT_LABEL, SLOT_MODE_LABEL, type CreativeVerdict, type SlotMode } from "@/lib/constants/creative-loop";
+import { REPUBLISHABLE_STATUSES } from "@/lib/creative/manual-gen";
+import { formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
-import { LIVE_WINDOW_DAYS, listLiveVariants, type JudgedVariant } from "@/lib/queries/creative-loop";
-import { cn } from "@/lib/utils";
+import { loadLiveBoard, parseLiveBoardQuery } from "@/lib/queries/creative-live-board";
+import { loadRepublishCtx } from "@/lib/queries/creative-manual-gen";
+import { hrefWith, searchParamsQuery, type SearchParams } from "@/lib/search-params";
 
 /**
- * ═══════════ TAB ĐANG CHẠY ═══════════
+ * ═══════════ TAB ④ ĐANG CHẠY — BẢNG ĐIỀU KHIỂN CAMP ═══════════
  *
- * Mỗi mẫu đã đăng một dòng: số đo (CHƯA BIẾT in `—`, không in 0), phán quyết SỐNG kèm lý do, và luật
- * giữ nào đạt / hụt. Chỉ phán quyết ĐÃ KẾT LUẬN mới mang màu (AGENTS.md mục 44): `RUNNING` ·
- * `AWAITING_ORDERS` · `UNJUDGED` · `PENDING` là "chưa kết luận" — tô chúng xanh hay đỏ là nói trước
- * một điều máy chưa biết.
+ * Thiết kế lại 30/09/2026 (chủ shop: "dễ quản lý hơn, tên campaign sync với trình quản lý quảng cáo, bộ lọc ngày
+ * tháng, tìm kiếm"). Thứ tự trên màn hình = thứ tự người quản lý hỏi:
+ *   1. lọc gì (tìm · kỳ · trạng thái · phán quyết · mã SP · kiểu mẫu) — mọi bộ lọc nằm trên URL, gửi link là gửi đúng góc nhìn;
+ *   2. tổng của tập đang lọc — ô nào bấm được thì bấm là lọc ngay theo nó;
+ *   3. bảng camp (tên như Ads Manager gọi, bấm mở đúng camp; chọn nhiều ⇒ tắt hàng loạt / chép tên + ID);
+ *   4. scale mẫu thắng — việc của camp đã có kết luận, đứng SAU bảng.
+ * Công tắc khẩn cấp thu về một dòng khi chưa kéo.
+ *
+ * Số đo trong bảng là số TRONG KỲ; phán quyết là của TOÀN ĐỜI camp (`lib/constants/creative-live-board.ts`, luật 2).
  */
 
-const VERDICT_TONE: Partial<Record<CreativeVerdict, string>> = {
-  WIN: "bg-success/15 text-success",
-  PROMISING: "bg-success/10 text-success",
-  KILL: "bg-destructive/10 text-destructive",
-  LOSE: "bg-destructive/10 text-destructive",
-};
-
-function Hai({ top, bottom, title }: { top: React.ReactNode; bottom: React.ReactNode; title?: string }) {
-  return (
-    <div className="numeric whitespace-nowrap text-right leading-tight" title={title}>
-      <div className="font-medium">{top}</div>
-      <div className="text-[11px] text-muted-foreground">{bottom}</div>
-    </div>
-  );
-}
-
-function KeepChecks({ v }: { v: JudgedVariant }) {
-  if (!v.keepChecks.length) return <p className="text-[11px] text-muted-foreground">Chưa khai luật giữ</p>;
-  return (
-    <ul className="space-y-0.5 text-[11px]">
-      {v.keepChecks.map((c, i) => (
-        <li key={i} className="flex gap-1" title={`Giá trị hiện tại: ${c.value === null ? "chưa biết" : c.value.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}`}>
-          <span className="w-9 shrink-0 font-semibold">{c.pass === true ? "✓ đạt" : c.pass === false ? "✗ hụt" : "? chưa"}</span>
-          <span className="line-clamp-1 text-muted-foreground">{describeRule(c.rule)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
+const FACET_KEYS: string[] = Object.values(LIVE_BOARD_PARAMS);
 
 /** `canRepublish` = soạn bài VÀ duyệt chi (ideas:write + expenses:write) — "Đăng lại camp" là một lượt chi mới. */
-export async function LiveTab({ canWrite, canKill, canRelease, canRepublish = false }: { canWrite: boolean; canKill: boolean; canRelease: boolean; canRepublish?: boolean }) {
+export async function LiveTab({
+  raw,
+  canWrite,
+  canKill,
+  canRelease,
+  canRepublish = false,
+  canSync = false,
+}: {
+  raw: SearchParams;
+  canWrite: boolean;
+  canKill: boolean;
+  canRelease: boolean;
+  canRepublish?: boolean;
+  canSync?: boolean;
+}) {
   const db = await getDb();
   const now = new Date();
-  const [rows, kill] = await Promise.all([listLiveVariants(db, now), readAdsKillSwitch()]);
-  // "Đăng lại camp" (chủ shop 29/09/2026: scale mẫu sang TKQC / fanpage khác) — bộ đồ nghề của hộp chỉ đọc khi người xem bấm được.
-  const rp = canRepublish && rows.length ? await loadRepublishCtx(db, now, rows.map((r) => r.productId).filter((x): x is string => !!x)) : null;
+  const q = parseLiveBoardQuery(raw);
+  const [data, kill] = await Promise.all([loadLiveBoard(db, now, q), readAdsKillSwitch()]);
 
-  // Camp hẹn giờ đã lên Facebook (LIVE) mà chưa tới giờ chạy — đếm riêng, không gộp vào "đang chạy".
-  const choGio = rows.filter((r) => r.status === "LIVE" && new Date(r.startAt) > now);
-  const chay = rows.filter((r) => r.status === "LIVE" && new Date(r.startAt) <= now);
-  const chi = rows.reduce<number | null>((s, r) => (r.metrics.spendVnd === null ? s : (s ?? 0) + r.metrics.spendVnd), null);
-  const hua = rows.filter((r) => r.verdict === "PROMISING").length;
-  const tat = rows.filter((r) => r.verdict === "KILL").length;
-  const chuaKetLuan = rows.filter((r) => ["RUNNING", "AWAITING_ORDERS", "UNJUDGED", "PENDING"].includes(r.verdict)).length;
+  // "Đăng lại camp" (chủ shop 29/09/2026: scale mẫu sang TKQC / fanpage khác) — bộ đồ nghề chỉ đọc khi người xem bấm được, và chỉ cho dòng của TRANG đang xem.
+  const eligible = canRepublish ? data.rows.filter((r) => r.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(r.status)) : [];
+  const rp = eligible.length ? await loadRepublishCtx(db, now, eligible.map((r) => r.productId).filter((x): x is string => !!x)) : null;
+  const sources: Record<string, RepublishSource> = {};
+  if (rp) {
+    for (const r of eligible) {
+      const v = data.judged.get(r.id);
+      if (!v) continue;
+      sources[r.id] = { id: v.id, slot: v.slot, headline: v.headline, primaryText: v.primaryText, imageId: v.imageId, imageAvailable: v.imageAvailable, videoAssetId: v.videoAssetId, productId: v.productId, productName: v.productName, designDna: v.design?.dna ?? null, campaignName: v.campaignName };
+    }
+  }
+
+  const facets: FacetDef[] = [
+    { key: LIVE_BOARD_PARAMS.state, label: "Trạng thái", options: LIVE_STATES.filter((st) => data.facets.states[st] > 0).map((st) => ({ value: st, label: LIVE_STATE_LABEL[st], count: data.facets.states[st] })) },
+    {
+      key: LIVE_BOARD_PARAMS.verdict,
+      label: "Phán quyết",
+      options: (Object.entries(data.facets.verdicts) as [CreativeVerdict, number][]).map(([v, n]) => ({ value: v, label: CREATIVE_VERDICT_LABEL[v], count: n })),
+    },
+    { key: LIVE_BOARD_PARAMS.product, label: "Sản phẩm", options: data.facets.products },
+    { key: LIVE_BOARD_PARAMS.mode, label: "Kiểu mẫu", options: (Object.entries(data.facets.modes) as [SlotMode, number][]).map(([m, n]) => ({ value: m, label: SLOT_MODE_LABEL[m], count: n })) },
+  ].filter((f) => f.options.length > 0);
+
+  // Ô tổng hợp bấm để lọc: giữ nguyên kỳ + tìm kiếm, THAY bộ lọc cùng khoá, về trang 1.
+  const locTheo = (key: string, value: string) => hrefWith({ ...raw, page: undefined }, key, value);
+  const s = data.summary;
+  const fbAge = data.fbSyncedAt ? Math.round((now.getTime() - new Date(data.fbSyncedAt).getTime()) / 60_000) : null;
 
   return (
-    <div className="space-y-4">
-      <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canRelease} />
-      <ScalePanel canWrite={canWrite} />
+    <div className="space-y-3">
+      <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canRelease} compact />
+
+      <DataTableToolbar
+        searchPlaceholder="Tìm tên chiến dịch, mã SP, ID…"
+        period={{ defaultKey: LIVE_BOARD_DEFAULT_PERIOD }}
+        facets={facets}
+        extraResetKeys={FACET_KEYS.filter((k) => !facets.some((f) => f.key === k))}
+        resultLabel={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+            <span>
+              {formatNumber(data.total)} / {formatNumber(data.periodTotal)} camp · {data.windowed ? `số đo trong kỳ “${q.period.label}”` : "số đo toàn đời camp"} · phán quyết tính trên toàn đời camp
+            </span>
+            <InfoHint>
+              Camp hiện trong kỳ = camp ĐÃ CHẠY trong kỳ: bắt đầu trước cuối kỳ và (còn đang chạy · tắt / hết khung sau đầu kỳ · có chi trong kỳ). Camp đang chạy luôn hiện khi kỳ chứa
+              hôm nay, kể cả camp hẹn giờ chưa tới giờ. Chi · hiển thị · nhấp · tin nhắn đọc từ dòng chi hạt AD theo ngày chi; đơn theo ngày lên đơn, quy về mẩu bằng ad_id Pancake
+              gửi hoặc qua bài viết (có thể đếm THIẾU ~1/4). Phán quyết và luật tắt luôn đọc số đo TOÀN ĐỜI camp — đổi kỳ không đổi phán quyết. Tên chiến dịch đọc từ lượt đồng
+              bộ chi tiêu Facebook gần nhất; đổi tên trên Ads Manager thì ERP thấy ở lượt kế tiếp. Tìm kiếm không phân biệt dấu, khớp cả tên ERP đặt lúc đăng.
+            </InfoHint>
+            <span aria-hidden>·</span>
+            <span
+              title={data.fbSyncedAt ? `Lượt đồng bộ chi tiêu Facebook thành công gần nhất: ${vnShortStamp(data.fbSyncedAt)}` : "Chưa có lượt đồng bộ chi tiêu Facebook thành công nào"}
+              className={fbAge === null || fbAge > 180 ? "font-medium text-destructive" : undefined}
+            >
+              {data.fbSyncedAt ? `Facebook đồng bộ lúc ${vnShortStamp(data.fbSyncedAt)}${fbAge !== null ? ` (${fbAge < 60 ? `${fbAge} phút` : `${Math.round(fbAge / 60)} giờ`} trước)` : ""}` : "Chưa đồng bộ Facebook"}
+            </span>
+          </span>
+        }
+      >
+        {canSync ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook" /> : null}
+        <a href={`/api/export/creatives-live${searchParamsQuery(raw)}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium hover:bg-muted" title="Tải CSV đúng tập đang lọc (mọi trang)">
+          <Download className="size-3.5" aria-hidden />
+          CSV
+        </a>
+      </DataTableToolbar>
+
       <StatStrip
         columns={5}
         items={[
-          { label: "Đang chạy", value: formatNumber(chay.length), note: `${choGio.length ? `+ ${formatNumber(choGio.length)} chờ tới giờ · ` : ""}trên ${formatNumber(rows.length)} mẫu đã đăng · ${LIVE_WINDOW_DAYS} ngày` },
-          { label: "Đã chi", value: formatVND(chi), note: "chi cấp mẩu QC", hint: "Cộng dòng chi hạt AD của các mẫu trong bảng. Mẫu chưa có dòng chi nào không được cộng như 0 — nếu không mẫu nào có số chi thì in “—”." },
-          { label: "Hứa hẹn", value: formatNumber(hua), note: "qua mọi luật giữ — có thể cho tiêu thêm" },
-          { label: "Tắt sớm theo luật", value: formatNumber(tat) },
-          { label: "Chưa kết luận", value: formatNumber(chuaKetLuan), note: "đang test · chờ đơn · thiếu căn cứ", tone: "muted" },
+          {
+            label: "Đang chạy",
+            value: formatNumber(s.running),
+            note: s.scheduled ? `+ ${formatNumber(s.scheduled)} chờ tới giờ` : `trên ${formatNumber(s.total)} camp`,
+            href: locTheo(LIVE_BOARD_PARAMS.state, "RUNNING"),
+          },
+          {
+            label: data.windowed ? "Đã chi trong kỳ" : "Đã chi",
+            value: formatVND(s.spendVnd),
+            note: `${formatNumber(s.messages)} tin · ${formatVND(s.costPerMessage)}/tin`,
+            hint: "Cộng dòng chi hạt AD của các camp đang lọc. Camp chưa có dòng chi nào không được cộng như 0 — không camp nào có số chi thì in “—”. Chi/tin là tổng chi ÷ tổng tin của các camp có cả hai số.",
+          },
+          {
+            label: "Đơn chốt",
+            value: formatNumber(s.bookedOrders),
+            note: `${formatVND(s.costPerOrder)}/đơn · DT ${formatVND(s.bookedRevenueVnd, { compact: true })}`,
+            hint: "Đơn không huỷ quy về mẩu của các camp đang lọc (ad_id hoặc bài viết). Chi/đơn = tổng chi ÷ tổng đơn của các camp có cả hai số — không phải trung bình các tỷ số.",
+          },
+          {
+            label: "Hứa hẹn · thắng",
+            value: `${formatNumber(s.promising)} · ${formatNumber(s.win)}`,
+            note: "đề nghị cho tiêu thêm / scale",
+            href: locTheo(LIVE_BOARD_PARAMS.verdict, "PROMISING,WIN"),
+          },
+          {
+            label: "Tắt sớm · chưa kết luận",
+            value: `${formatNumber(s.killed)} · ${formatNumber(s.undecided)}`,
+            note: "luật tắt · đang test / chờ đơn",
+            tone: "muted",
+            href: locTheo(LIVE_BOARD_PARAMS.verdict, "KILL"),
+          },
         ]}
       />
 
-      <SectionCard
-        title="Mẫu đã đăng"
-        description="Phán quyết tính lại lúc mở trang: luật tắt của lô đã duyệt + luật giữ hiện tại."
-        hint={
-          <>
-            Chi · hiển thị · nhấp · tin nhắn đọc từ dòng chi hạt AD của mẩu QC; đơn đi bằng <code>ad_id</code> Pancake gửi, nên có thể đếm THIẾU (~1/4 đơn thật không
-            mang ad_id). Đơn giao / hoàn theo ORDER_OUTCOME. Tỷ số có mẫu số 0 in “—” và không làm luật nào kích hoạt. Chỉ phán quyết đã kết luận (Thắng · Hứa hẹn ·
-            Tắt sớm · Loại) mang màu.
-          </>
-        }
-        padded={false}
-      >
-        {rows.length === 0 ? (
-          <div className="p-5">
-            <EmptyState icon={Activity} title="Chưa có mẫu nào đã đăng" description={`Không có mẫu nào đăng trong ${LIVE_WINDOW_DAYS} ngày gần nhất. Mẫu xuất hiện ở đây sau khi lô được duyệt và máy đăng lên Facebook.`} />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1040px] text-[12.5px]">
-              <thead className="border-b bg-muted/40 text-left text-[11.5px] text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Mẫu</th>
-                  <th className="px-2 py-2 text-right font-medium">Chi · CPM</th>
-                  <th className="px-2 py-2 text-right font-medium">Hiển thị · nhấp</th>
-                  <th className="px-2 py-2 text-right font-medium">CTR · CPC</th>
-                  <th className="px-2 py-2 text-right font-medium">Tin nhắn · chi/tin</th>
-                  <th className="px-2 py-2 text-right font-medium">Đơn chốt · giao/hoàn</th>
-                  <th className="px-3 py-2 font-medium">Phán quyết · luật giữ</th>
-                  <th className="px-3 py-2 text-right font-medium">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((v) => {
-                  const m = v.metrics;
-                  const cpm = metricValue(m, "cpm");
-                  const ctr = metricValue(m, "ctr");
-                  const cpc = metricValue(m, "cpc");
-                  const cpmsg = metricValue(m, "costPerMessage");
-                  const coMau = v.verdict in VERDICT_TONE;
-                  return (
-                    <tr key={v.id} className="border-b border-hairline align-top last:border-b-0">
-                      <td className="px-3 py-2">
-                        <div className="flex gap-2">
-                          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="size-12 shrink-0 rounded" iconClassName="size-4" zoomable />
-                          <div className="min-w-0 max-w-[230px]">
-                            <p className="truncate font-medium" title={v.headline}>
-                              #{v.slot} {v.headline || <span className="italic text-muted-foreground">không tiêu đề</span>}
-                            </p>
-                            <p className="truncate text-[11px] text-muted-foreground" title={v.dailyBudget ? `${vnShortStamp(v.startAt)} → chạy liên tục (ngân sách ngày; khung chấm tới ${vnShortStamp(v.endAt)})` : `${vnShortStamp(v.startAt)} → ${vnShortStamp(v.endAt)}`}>
-                              Lô {formatDate(v.batchDay)} · {MODE_LABEL[v.mode]} · {VARIANT_STATUS_LABEL[v.status]}
-                            </p>
-                            {v.status === "LIVE" && new Date(v.startAt) > now ? <p className="text-[11px] font-medium text-brand">Chờ tới giờ · chạy lúc {vnShortStamp(v.startAt)}</p> : null}
-                            <p className="truncate text-[11px] text-muted-foreground">{v.productName ?? v.productId ?? "—"}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        <Hai top={formatVND(m.spendVnd)} bottom={formatVND(cpm === null ? null : Math.round(cpm))} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <Hai top={formatNumber(m.impressions)} bottom={formatNumber(m.clicks)} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <Hai top={formatPercent(ctr, 2)} bottom={formatVND(cpc === null ? null : Math.round(cpc))} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <Hai top={formatNumber(m.messages)} bottom={formatVND(cpmsg === null ? null : Math.round(cpmsg))} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <Hai
-                          top={formatNumber(m.bookedOrders)}
-                          bottom={`${formatNumber(m.deliveredOrders)} / ${formatNumber(m.returnedOrders)}`}
-                          title={`Đơn chốt (không huỷ) quy về mẩu bằng ORDER_AD_ID: ${formatNumber(m.attribution.direct.booked)} mang ad_id · ${formatNumber(m.attribution.viaPost.booked)} qua bài viết (bài chỉ thuộc mẩu này). Giao thành công / hoàn theo ORDER_OUTCOME. Luật TẮT chỉ đếm đơn mang ad_id.`}
-                        />
-                      </td>
-                      <td className="max-w-[260px] px-3 py-2">
-                        <span className={cn("inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold", coMau ? VERDICT_TONE[v.verdict] : "bg-muted text-muted-foreground")}>
-                          {CREATIVE_VERDICT_LABEL[v.verdict]}
-                        </span>
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground" title={v.reasons.join(" ")}>
-                          {v.reasons.join(" ")}
-                        </p>
-                        {/* BẰNG CHỨNG cạnh phán quyết — không tô màu, không đổi ngưỡng (mục 38). */}
-                        <p className="mt-0.5 text-[11px] text-muted-foreground" title="Chi / đơn chốt và doanh thu lên đơn của các đơn quy về mẩu. Bằng chứng, không phải luật.">
-                          Chi/đơn <span className="tabular-nums text-foreground">{formatVND(costPerOrderOf(m))}</span> · DT lên đơn{" "}
-                          <span className="tabular-nums text-foreground">{formatVND(m.bookedRevenueVnd)}</span>
-                        </p>
-                        <KeepChecks v={v} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {canWrite || rp ? (
-                          <div className="flex flex-col items-end gap-1">
-                            {rp && v.imageAvailable && (REPUBLISHABLE_STATUSES as readonly string[]).includes(v.status) ? (
-                              <RepublishButton
-                                v={{ id: v.id, slot: v.slot, headline: v.headline, primaryText: v.primaryText, imageId: v.imageId, imageAvailable: v.imageAvailable, videoAssetId: v.videoAssetId, productId: v.productId, productName: v.productName, designDna: v.design?.dna ?? null, campaignName: v.campaignName }}
-                                ctx={{ ...rp.ctx, canPublish: true }}
-                                winCode={v.productId ? (rp.winCodes[v.productId] ?? null) : null}
-                              />
-                            ) : null}
-                            {canWrite && v.status === "LIVE" ? <PauseNowButton variantId={v.id} slot={v.slot} /> : null}
-                            {canWrite && v.verdict === "PROMISING" && !v.dailyBudget ? <ExtendButton variantId={v.id} slot={v.slot} /> : null}
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
+      <LiveTable rows={data.rows} total={data.total} pageCount={data.pageCount} canWrite={canWrite} republish={rp ? { ctx: { ...rp.ctx, canPublish: true }, sources, winCodes: rp.winCodes } : null} />
+
+      <ScalePanel canWrite={canWrite} />
     </div>
   );
 }
