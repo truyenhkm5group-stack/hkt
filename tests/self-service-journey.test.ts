@@ -36,6 +36,8 @@ import { createOrganizationFromSignup } from "@/lib/onboarding/service";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { domainSlugProblem, hostSlug, subdomainOrigin } from "@/lib/platform/host";
+import { HOME_BRAND_PATTERN, hostTabMetadata } from "@/lib/branding/copy";
+import { readFileSync } from "node:fs";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { checkDomainSlug, organizationBaseUrl, organizationForHostSlug, publicationOf, publishChecklist, publishOrganization, setDomainSlug } from "@/lib/platform/publish";
 import { provisionOrganization } from "@/lib/platform/provision";
@@ -102,6 +104,17 @@ function testPure() {
   assert.equal(hostSlug("hslc.erp.vn", null), null, "chưa khai miền gốc ⇒ không định tuyến");
   assert.equal(subdomainOrigin("hslc", "erp.vn"), "https://hslc.erp.vn");
   assert.equal(subdomainOrigin("hslc", "localhost:3399"), "http://hslc.localhost:3399");
+  // Tiêu đề tab của trang ngoài dashboard (/login, /chat, /join) trên tên miền con: tên tổ chức, KHÔNG BAO GIỜ chữ của nhà.
+  assert.equal(hostTabMetadata({ slug: null, org: null }), null, "miền chính ⇒ bố cục gốc giữ chữ của nhà");
+  const tab = hostTabMetadata({ slug: "hslc", org: { name: "HSLC Shop" } });
+  assert.equal(tab?.title.absolute, "HSLC Shop");
+  assert.equal(tab?.title.template, "%s · HSLC Shop");
+  const unknownTab = hostTabMetadata({ slug: "khong-co", org: null });
+  assert.equal(unknownTab?.title.absolute, "ERP", "host lạ ⇒ chữ trung tính");
+  for (const m of [tab, unknownTab]) assert.ok(!HOME_BRAND_PATTERN.test(`${m?.title.absolute} ${m?.title.template} ${m?.description}`), "không lọt tên / mô tả của nhà");
+  const rootLayout = readFileSync("app/layout.tsx", "utf8");
+  assert.ok(/generateMetadata[\s\S]*hostTabMetadata\(await hostOrganization\(\)\)/.test(rootLayout), "bố cục gốc đi qua hostTabMetadata(hostOrganization())");
+  assert.ok(!/export const metadata\b/.test(rootLayout), "bố cục gốc không còn metadata tĩnh của nhà");
   assert.equal(domainSlugProblem("www")?.code, "RESERVED");
   assert.equal(domainSlugProblem("Hslc Shop")?.code, "FORMAT");
   assert.equal(domainSlugProblem("hslc-")?.code, "EDGE_HYPHEN");

@@ -3,6 +3,8 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
+import { hostTabMetadata } from "@/lib/branding/copy";
+import { hostOrganization } from "@/lib/platform/host-org";
 import "./globals.css";
 
 /**
@@ -12,7 +14,7 @@ import "./globals.css";
  */
 const sans = Plus_Jakarta_Sans({ subsets: ["latin", "vietnamese"], variable: "--font-jakarta", display: "swap" });
 
-export const metadata: Metadata = {
+const HOME_METADATA: Metadata = {
   title: { default: "VNXcommerce ERP", template: "%s · VNXcommerce ERP" },
   description: "Hệ thống quản trị nội bộ VNXcommerce cho shop thời trang bán hàng online — đồng bộ Pancake POS & Viettel Post.",
   /*
@@ -23,6 +25,15 @@ export const metadata: Metadata = {
   */
   icons: { icon: [{ url: "/favicon.ico", type: "image/x-icon", sizes: "16x16" }, { url: "/icon.svg" }] },
 };
+
+/**
+ * Trên tên miền con của một tổ chức (`<slug>.<PLATFORM_BASE_DOMAIN>`), trang NGOÀI dashboard (`/login`, `/chat`, `/join`)
+ * không có phiên để bố cục dashboard thay tiêu đề — trước đây chúng mang tên và lời mô tả của tổ chức nhà lên tab trình
+ * duyệt của khách. Có host ⇒ tên của tổ chức đó (chỉ tổ chức đã xuất bản), host lạ ⇒ chữ trung tính; miền chính giữ nguyên.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  return hostTabMetadata(await hostOrganization()) ?? HOME_METADATA;
+}
 
 export const viewport: Viewport = {
   themeColor: [
