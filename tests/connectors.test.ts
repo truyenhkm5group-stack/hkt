@@ -393,6 +393,22 @@ export async function testTesters() {
   assert.equal((await testTelegramBot({ secrets: { botToken: "khong-phai-token" }, settings: { chatId: "-1001234567" }, orgName: "A" }, { fetch: tgBad.fetch })).ok, false);
   assert.equal((await testTelegramBot({ secrets: { botToken: TG_TOKEN }, settings: { chatId: "x; drop" }, orgName: "A" }, { fetch: tgBad.fetch })).ok, false);
   assert.equal(tgBad.calls.length, 0, "đầu vào sai dạng ⇒ không gọi mạng");
+
+  // Lỗi MẠNG ⇒ câu đọc được, không phải «fetch failed» trần (đo UAT 30/09/2026: máy chủ không tới được api.telegram.org
+  // mà màn hình chỉ in «fetch failed» — người dùng tưởng token sai). Lỗi dựng đúng hình của fetch Node: TypeError + cause.code.
+  const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(`${code} https://api.telegram.org/bot${TG_TOKEN}/getMe`), { code }) });
+  const tgReset = await testTelegramBot({ secrets: { botToken: TG_TOKEN }, settings: { chatId: "-1001234567" }, orgName: "A" }, { fetch: fakeFetch(() => netErr("ECONNRESET")).fetch });
+  assert.equal(tgReset.ok, false);
+  assert.match(tgReset.message, /bị ngắt ngay khi mở \(ECONNRESET\)/, tgReset.message);
+  assert.match(tgReset.message, /Lark — webhook nhóm của tổ chức/, "chỉ đường thay thế");
+  assert.ok(!/fetch failed/.test(tgReset.message) && !tgReset.message.includes(TG_TOKEN), "không «fetch failed» trần, không token");
+  const tgDns = await testTelegramBot({ secrets: { botToken: TG_TOKEN }, settings: { chatId: "-1001234567" }, orgName: "A" }, { fetch: fakeFetch(() => netErr("ENOTFOUND")).fetch });
+  assert.match(tgDns.message, /không phân giải được tên miền api\.telegram\.org \(ENOTFOUND\)/, tgDns.message);
+  const tgTimeout = await testTelegramBot({ secrets: { botToken: TG_TOKEN }, settings: { chatId: "-1001234567" }, orgName: "A" }, { fetch: fakeFetch(() => netErr("UND_ERR_CONNECT_TIMEOUT")).fetch });
+  assert.match(tgTimeout.message, /hết thời gian chờ/, tgTimeout.message);
+  const larkNet = await testLarkWebhook({ secrets: { webhookUrl: LARK_URL }, orgName: "A" }, { fetch: fakeFetch(() => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })).fetch });
+  assert.match(larkNet.message, /open\.larksuite\.com từ chối kết nối/, larkNet.message);
+  assert.ok(!larkNet.message.includes("aaaa1111"), "không mang mã hook");
 }
 
 /* ═════════════ 4 · HAI TỔ CHỨC THẬT + TỔ CHỨC NHÀ ═════════════ */

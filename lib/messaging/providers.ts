@@ -13,6 +13,7 @@
  * `deps.fetch` để bài kiểm đưa máy chủ giả vào (luật 65: bộ kiểm thử không gọi mạng thật).
  */
 import { createHmac, randomUUID } from "node:crypto";
+import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, scrubSecrets, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN } from "@/lib/connectors/testers";
 import type { MessagingConnectorKey } from "@/lib/messaging/types";
@@ -80,7 +81,7 @@ class LarkProvider implements MessagingProvider {
       if (code !== 0) return { ok: false, error: scrubSecrets(`Lark từ chối: ${String(data?.msg ?? data?.StatusMessage ?? `HTTP ${res.status}`)} (mã ${code})`, hide) };
       return { ok: true, providerMessageId: null, destination: this.defaultDestination };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(`Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Lark: ${describeNetworkFailure(e, "open.larksuite.com")}` : `Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
     }
   }
 }
@@ -108,7 +109,7 @@ class TelegramProvider implements MessagingProvider {
       const result = body.result as { message_id?: number } | undefined;
       return { ok: true, providerMessageId: result?.message_id !== undefined ? String(result.message_id) : null, destination: chatId };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(`Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")} Nếu máy chủ không tới được Telegram, dùng kết nối «Lark — webhook nhóm của tổ chức» cho nhóm vận hành.` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
     }
   }
 }

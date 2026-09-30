@@ -19,6 +19,7 @@
  *
  * `deps.fetch` để bài kiểm đưa vào một máy chủ giả: bộ kiểm thử không gọi mạng thật (luật 65).
  */
+import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 
 export type TesterResult = { ok: boolean; message: string };
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -87,7 +88,7 @@ export async function testLarkWebhook(input: { secrets: Record<string, string>; 
     if (code !== 0) return { ok: false, message: scrubSecrets(`Lark từ chối: ${data?.msg || data?.StatusMessage || `HTTP ${res.status}`} (mã ${code})`, hide) };
     return { ok: true, message: "Đã gửi tin thử vào nhóm Lark — mở nhóm để xác nhận đã nhận." };
   } catch (e) {
-    return { ok: false, message: scrubSecrets(`Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Lark: ${describeNetworkFailure(e, new URL(url).host)}` : `Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
   }
 }
 
@@ -109,7 +110,7 @@ export async function testTelegramBot(input: { secrets: Record<string, string>; 
     if (!sent.ok || !sentBody?.ok) return { ok: false, message: scrubSecrets(`Bot @${meBody.result?.username ?? "?"} hợp lệ nhưng không gửi được vào chat đã khai: ${sentBody?.description || `HTTP ${sent.status}`}`, hide) };
     return { ok: true, message: `Bot @${meBody.result?.username ?? "?"} đã gửi tin thử — mở chat để xác nhận đã nhận.` };
   } catch (e) {
-    return { ok: false, message: scrubSecrets(`Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")} Nếu máy chủ không tới được Telegram, dùng kết nối «Lark — webhook nhóm của tổ chức» cho nhóm vận hành.` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
   }
 }
 
