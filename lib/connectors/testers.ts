@@ -226,6 +226,33 @@ export const PANCAKE_PAGES_API = "https://pages.fm/api/public_api";
 export const PANCAKE_PAGE_ID_PATTERN = /^[A-Za-z0-9_]{5,40}$/;
 export const PANCAKE_PAGE_TOKEN_PATTERN = /^[A-Za-z0-9._-]{20,600}$/;
 
+/**
+ * Phán quyết của pages.fm cho lời gọi đọc hội thoại. Pancake trả HTTP 200 cho CẢ token sai
+ * (`{"success":false,"message":"Invalid access_token"}`) — đọc phong bì, không tin HTTP status. Danh sách 60 hội thoại
+ * thật thường DÀI hơn trần 64 KB của `readCapped` (đo 01/10/2026: token đúng mà màn hình báo «HTTP 200» vì JSON bị cắt), nên
+ * đọc tới `PANCAKE_TEST_MAX_BYTES`; dài hơn nữa thì chỉ dò dấu từ chối trong phần đầu. HÀM THUẦN.
+ */
+export const PANCAKE_TEST_MAX_BYTES = 4 * 1024 * 1024;
+export function pancakeVerdict(status: number, text: string): { ok: true; count: number | null } | { ok: false; reason: string } {
+  if (status < 200 || status >= 300) return { ok: false, reason: `HTTP ${status}` };
+  const head = text.slice(0, 4096);
+  if (/"success"\s*:\s*false/.test(head)) {
+    const msg = /"message"\s*:\s*"([^"]{1,200})"/.exec(head)?.[1];
+    return { ok: false, reason: msg || "Pancake từ chối" };
+  }
+  if (text.length <= PANCAKE_TEST_MAX_BYTES) {
+    try {
+      const body = JSON.parse(text) as { conversations?: unknown };
+      if (Array.isArray(body?.conversations)) return { ok: true, count: body.conversations.length };
+      return { ok: false, reason: "phản hồi không có danh sách hội thoại" };
+    } catch {
+      return { ok: false, reason: "phản hồi không phải JSON" };
+    }
+  }
+  // Quá dài để đọc hết: không có dấu từ chối + mở đầu đúng dạng danh sách hội thoại ⇒ Pancake đã nhận.
+  return /"conversations"\s*:\s*\[/.test(head) ? { ok: true, count: null } : { ok: false, reason: "phản hồi không đọc được" };
+}
+
 export async function testPancakeFanpage(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
   const pageId = (input.settings.pageId ?? "").trim();
   const token = (input.secrets.pageAccessToken ?? "").trim();
@@ -236,9 +263,9 @@ export async function testPancakeFanpage(input: { secrets: Record<string, string
   try {
     const url = `${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?page_access_token=${encodeURIComponent(token)}`;
     const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
-    const body = (await readCapped(res)) as { success?: boolean; message?: string; conversations?: unknown[] } | null;
-    if (!res.ok || body?.success === false || !Array.isArray(body?.conversations)) return { ok: false, message: scrubSecrets(`Pancake không nhận page / token: ${body?.message || `HTTP ${res.status}`}`, hide) };
-    return { ok: true, message: `Pancake nhận page ${pageId} — đọc được ${body.conversations.length} hội thoại gần nhất. Dán URL webhook (trang Chatbot bán hàng) vào Pancake để bot nhận tin.` };
+    const v = pancakeVerdict(res.status, await res.text().catch(() => ""));
+    if (!v.ok) return { ok: false, message: scrubSecrets(`Pancake không nhận page / token: ${v.reason}`, hide) };
+    return { ok: true, message: `Pancake nhận page ${pageId}${v.count !== null ? ` — đọc được ${v.count} hội thoại gần nhất` : ""}. Dán URL webhook (trang Chatbot bán hàng) vào Pancake để bot nhận tin.` };
   } catch (e) {
     return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, hide) };
   }

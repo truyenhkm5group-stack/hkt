@@ -70,6 +70,10 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
   const canDiscover = (CHAT_DISCOVERY_CONNECTORS as readonly string[]).includes(row.key);
   const c = row.connection;
   const disabled = pending || !row.moduleEnabled;
+  // «Kiểm tra» luôn kiểm cấu hình ĐÃ LƯU: còn thay đổi chưa lưu thì khoá nút và nói ra (01/10/2026: khách chọn nhóm mới bằng
+  // «Tìm chat» rồi bấm Kiểm tra ba lần — lần nào cũng kiểm Chat ID cũ và báo «chat not found»).
+  const saved = c?.settings ?? {};
+  const dirty = Object.keys({ ...saved, ...values }).some((k) => (values[k] ?? "") !== (saved[k] ?? "")) || Object.values(secrets).some((v) => v.trim() !== "");
 
   const run = (fn: () => Promise<{ ok: true; message?: string } | { error: string }>, after?: () => void) =>
     start(async () => {
@@ -105,7 +109,7 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
         <Button size="sm" variant="secondary" disabled={disabled} onClick={() => run(() => saveConnectionAction({ connectorKey: row.key, settings: values, secrets }), () => setSecrets({}))}>
           Lưu
         </Button>
-        <Button size="sm" variant="outline" disabled={disabled || !c} onClick={() => run(() => testConnectionAction(row.key))} title={row.hasHealthCheck ? "Gửi một yêu cầu thật tới nhà cung cấp" : undefined}>
+        <Button size="sm" variant="outline" disabled={disabled || !c || dirty} onClick={() => run(() => testConnectionAction(row.key))} title={dirty ? "Có thay đổi chưa lưu — bấm «Lưu» trước" : row.hasHealthCheck ? "Gửi một yêu cầu thật tới nhà cung cấp" : undefined}>
           Kiểm tra
         </Button>
         {canDiscover ? (
@@ -139,21 +143,28 @@ function ConfigForm({ row, secretsReady }: { row: ConnectorView; secretsReady: b
           </Button>
         )}
       </div>
+      {dirty && c ? <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-400" data-testid="connection-unsaved">Có thay đổi chưa lưu — «Kiểm tra» kiểm cấu hình đã lưu, bấm «Lưu» trước.</p> : null}
       {found && found.length ? (
         <ul className="space-y-1 rounded-md border p-2 text-[11px]" data-testid="discovered-chats">
           {found.map((chat) => (
             <li key={chat.id} className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate">
-                <b>{chat.type === "GROUP" ? "Nhóm" : "Cá nhân"}</b> · {chat.name || "—"}
+                <b>{chat.type === "GROUP" ? "Nhóm" : "Cá nhân"}</b> · {chat.name || "—"} · <code className="text-[10px]">{chat.id}</code>
                 {chat.sample ? ` · «${chat.sample}»` : ""}
               </span>
               <Button
                 size="sm"
                 variant="secondary"
                 className="h-6 px-2 text-[11px]"
+                disabled={disabled}
                 onClick={() => {
-                  setValues((v) => ({ ...v, chatId: chat.id }));
-                  toast.message("Đã điền Chat ID — bấm «Lưu» rồi «Kiểm tra».");
+                  // «Dùng» = chọn VÀ lưu: bước Lưu tách rời là chỗ người dùng bỏ sót.
+                  const next = { ...values, chatId: chat.id };
+                  setValues(next);
+                  run(() => saveConnectionAction({ connectorKey: row.key, settings: next, secrets }), () => {
+                    setSecrets({});
+                    toast.message("Đã lưu Chat ID — bấm «Kiểm tra».");
+                  });
                 }}
               >
                 Dùng
