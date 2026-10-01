@@ -46,7 +46,12 @@ export type AiMessage = { role: "user" | "assistant"; content: AiBlock[] };
 
 export type AiUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
 
-export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number };
+/**
+ * `reasoning` — mức suy luận cho model CÓ suy luận (OpenAI Responses `reasoning.effort`; nhà cung cấp khác bỏ qua). Thiếu ⇒
+ * mặc định của nhà cung cấp. Đo 01/10/2026: suy luận ăn chung ngân sách `max_output_tokens` — đặt ngân sách nhỏ mà suy
+ * luận «medium» thì model tiêu hết vào suy nghĩ và trả về RỖNG.
+ */
+export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "low" | "medium" | "high" };
 
 export type AiResponse = { content: AiBlock[]; stopReason: "end_turn" | "tool_use" | "max_tokens" | "refusal" | "other"; usage: AiUsage; model: string; latencyMs: number };
 

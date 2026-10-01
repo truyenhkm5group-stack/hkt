@@ -36,6 +36,8 @@ import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { setSettingJson } from "@/lib/settings";
 
 const FANPAGE = "pancake-fanpage";
+/** Ngân sách token đầu ra của một lượt AI khi học (gồm cả phần suy luận của model có suy luận). */
+export const PLAYBOOK_AI_TOKENS = 12_000;
 
 export async function loadPlaybook(): Promise<PlaybookState> {
   return parsePlaybookState(await readJsonSetting(PLAYBOOK_SETTING_KEY));
@@ -199,12 +201,22 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
       if (!quota.ok) throw new Error(quota.error);
       let status: "OK" | "ERROR" = "OK";
       try {
-        const res = await prov.provider.complete({ system, messages: [{ role: "user", content: [{ type: "text", text }] }], tools: [], maxTokens: 1800 });
-        const cost = estimateCostUsd(res.model || prov.provider.model, res.usage);
-        stats.aiCalls += 1;
-        stats.costUsd = stats.costUsd === null || cost === null ? null : stats.costUsd + cost;
-        await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
-        return textOf(res.content);
+        // Ngân sách rộng + suy luận «low»: đo 01/10/2026 — ngân sách 1.800 với suy luận «medium» ⇒ model suy nghĩ hết ngân
+        // sách và trả RỖNG, bản nháp lưu trống. Rỗng ⇒ thử lại MỘT lần với ngân sách gấp đôi; vẫn rỗng ⇒ báo lỗi, không lưu.
+        let out = "";
+        let stop = "";
+        for (const budget of [PLAYBOOK_AI_TOKENS, PLAYBOOK_AI_TOKENS * 2]) {
+          const res = await prov.provider.complete({ system, messages: [{ role: "user", content: [{ type: "text", text }] }], tools: [], maxTokens: budget, reasoning: "low" });
+          const cost = estimateCostUsd(res.model || prov.provider.model, res.usage);
+          stats.aiCalls += 1;
+          stats.costUsd = stats.costUsd === null || cost === null ? null : stats.costUsd + cost;
+          await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
+          out = textOf(res.content);
+          stop = res.stopReason;
+          if (out) break;
+        }
+        if (!out) throw new Error(`AI không trả về nội dung (dừng: ${stop}) — chạy lại, hoặc chọn model khác ở khung Cấu hình.`);
+        return out;
       } catch (e) {
         status = "ERROR";
         await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
@@ -222,6 +234,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     const merged = await ask(MERGE_SYSTEM(shop), notes.map((n, i) => `### Ghi chú ${i + 1}\n${n}`).join("\n\n"));
     const clean = stripPrices(merged);
     stats.pricesRemoved = clean.removed;
+    if (!clean.text.trim()) throw new Error("Sổ tay AI soạn ra rỗng sau khi lọc giá — không lưu bản nháp trống; chạy lại.");
     const state = await loadPlaybook();
     await setSettingJson(PLAYBOOK_SETTING_KEY, { ...state, draft: { text: clean.text.slice(0, PLAYBOOK_LIMITS.playbookChars), createdAt: now().toISOString(), createdBy: actor.email, stats } } satisfies PlaybookState);
     const done: PlaybookRun = { state: "DONE", startedAt, finishedAt: now().toISOString(), stats };
