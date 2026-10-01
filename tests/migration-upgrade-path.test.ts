@@ -130,6 +130,7 @@ const MOI = [
   "0180_self_service_journey",
   "0181_order_payments",
   "0182_fanpage_chatbot",
+  "0183_sales_quick_replies",
 ] as const;
 
 /*

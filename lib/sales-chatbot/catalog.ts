@@ -14,6 +14,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadCustomDefs } from "@/lib/metadata/common";
 import { availableStockExpr, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type CatalogItem = {
   variantId: string;
@@ -29,17 +30,7 @@ export type StockInfo = { variantId: string; stockKnown: boolean; onHand: number
 
 const MAX_ITEMS = 2000;
 
-/** Bỏ dấu tiếng Việt + chữ thường + gộp khoảng trắng — so khớp tên khách gõ ("cha muc") với tên sản phẩm ("Chả mực"). */
-export function foldVi(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase()
-    .replace(/[^a-z0-9%]+/g, " ")
-    .trim();
-}
+export { foldVi };
 
 function variantText(v: { detail: string; color: string; size: string }): string {
   return v.detail.trim() || [v.color, v.size].filter((x) => x.trim()).join(" · ");

@@ -1275,6 +1275,13 @@
       "when": 1790680180000,
       "tag": "0182_fanpage_chatbot",
       "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1790680190000,
+      "tag": "0183_sales_quick_replies",
+      "breakpoints": true
     }
   ]
 }

@@ -272,6 +272,8 @@ export function testNavigationCoverage() {
     // hạn) — vào từ thẻ «Bắt đầu» ở trang chủ của tổ chức đó, không thêm mục vào menu của tổ chức nhà.
     "/settings/branding": "bước 'Đặt tên hiển thị, màu và logo' trên thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
     "/settings/plan": "liên kết 'Gói & hạn mức' ở đầu thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
+    // 0183 · câu trả lời mẫu là cấu hình CỦA chatbot bán hàng (cùng quyền ai_sales:*), không phải module riêng.
+    "/ai/sales-chatbot/quick-replies": "nút 'Câu trả lời mẫu (Q&A)' ở đầu trang /ai/sales-chatbot",
   };
 
   const pages = walkPages("app/(dashboard)");

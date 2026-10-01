@@ -21,6 +21,8 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
+import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { fillPlaceholders, looksLikeOrdering, matchQuickReplyByKeyword, parseLearnedQuickReplies, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
@@ -172,6 +174,23 @@ function testPure() {
     2,
   );
   assert.ok(hist.length === 0 || hist[0].content.every((b) => b.type === "text"));
+  // Câu trả lời mẫu (0183) — khớp CHỮ bỏ dấu theo cụm từ; hai câu ngang điểm ⇒ không đoán; câu dài nhiều ý ⇒ không khớp.
+  const qA = { id: "a", title: "Hỏi giá chả mực", triggers: ["chả mực bao nhiêu", "giá chả mực"], answer: "x" };
+  const qB = { id: "b", title: "Bảo quản", triggers: ["bảo quản", "để được bao lâu"], answer: "y" };
+  const qm = (t: string, e = [qA, qB]) => matchQuickReplyByKeyword(t, e);
+  assert.equal((qm("Chả mực bao nhiêu tiền vậy shop") as { entry?: { id: string } }).entry?.id, "a");
+  assert.equal((qm("de duoc bao lau the e") as { entry?: { id: string } }).entry?.id, "b", "không dấu vẫn khớp");
+  assert.equal(qm("xin chào shop").kind, "NONE");
+  assert.equal(qm("chả mực bao nhiêu", [qA, { ...qA, id: "c" }]).kind, "AMBIGUOUS", "hai câu ngang điểm ⇒ không đoán");
+  assert.equal(qm(`chả mực bao nhiêu ${"và còn nhiều ý khác nữa ".repeat(6)}`).kind, "NONE", "tin nhiều ý ⇒ không khớp chữ");
+  assert.ok(looksLikeOrdering("Chị lấy 2 túi, sđt 0912 345 678") && looksLikeOrdering("ok chốt cho chị") && !looksLikeOrdering("Ship đi Hà Nội không em"));
+  assert.equal(fillPlaceholders("Giá {{giá:A}} ạ", new Map([["{{giá:A}}", null]])), null, "thiếu số ⇒ không gửi câu mẫu nửa vời");
+  assert.equal(fillPlaceholders("Giá {{giá:A}}, ship {{ship}}", new Map([["{{giá:A}}", "400.000 ₫"], ["{{ship}}", "30.000 ₫"]])), "Giá 400.000 ₫, ship 30.000 ₫");
+  assert.ok(!validateQuickReply({ title: "x", triggers: "giá", answer: "Dạ 400k ạ" }).ok, "gõ thẳng giá ⇒ từ chối");
+  assert.ok(!validateQuickReply({ title: "x", triggers: "giá", answer: "Dạ {{giá}} ạ" }).ok, "chỗ trống giá thiếu SKU ⇒ từ chối");
+  assert.ok(validateQuickReply({ title: "x", triggers: "giá\ngiá\n", answer: "Dạ {{giá:A}} ạ" }).ok);
+  assert.deepEqual(parseLearnedQuickReplies('```json\n[{"title":"Ship","triggers":["ship không"],"answer":"Dạ có ạ"},{"title":""}]\n```'), [{ title: "Ship", triggers: ["ship không"], answer: "Dạ có ạ" }]);
+  assert.deepEqual(parseLearnedQuickReplies("không phải JSON"), []);
   console.log("✓ Tự phục vụ · thuần: mẫu thực phẩm hợp lệ, tên miền con, mẫu tin, phần đổi của đơn, tìm không dấu, giờ làm việc");
 }
 
@@ -611,6 +630,70 @@ async function testJourney() {
       assert.ok(rr.replies >= 1 && raceReasons.length >= 1 && raceReasons.every((r) => r === "Tin của chính bot"), JSON.stringify({ rr, raceReasons }));
       const raceConv = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-960")));
       assert.equal(raceConv[0]?.status, "OPEN", "tiếng vọng tới giữa lúc gửi không làm bot nhường");
+      // ═══ CÂU TRẢ LỜI MẪU (0183): câu hỏi phổ biến trả lời bằng câu soạn sẵn + ảnh, KHÔNG gọi AI; số đọc ERP lúc gửi ═══
+      const aiCalls: AiRequest[] = [];
+      const baseBot = fakeProvider(hslcScript({ chaMuc, ruocTom }));
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          aiCalls.push(req);
+          if (/câu trả lời mẫu/.test(req.system)) return { content: [{ type: "text", text: "Q1" }], stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          return baseBot.complete(req);
+        },
+      }));
+      assert.ok("error" in (await saveQuickReply(admin, { title: "Giá", triggers: "giá", answer: "Dạ {{giá:KHONG-CO}} ạ", active: true })), "SKU không có ⇒ báo ngay");
+      const savedQr = await saveQuickReply(admin, { title: "Hỏi giá chả mực", triggers: "chả mực bao nhiêu\ngiá chả mực", answer: "Dạ chả mực giã tay bên em {{giá:CHA-MUC-GIA-TAY}}/kg ạ.", active: true });
+      assert.ok("ok" in savedQr, JSON.stringify(savedQr));
+      assert.ok("error" in (await addQuickReplyImages(admin, savedQr.id, [new Uint8Array([1, 2, 3, 4])])), "không phải ảnh ⇒ từ chối");
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+      assert.ok("ok" in (await addQuickReplyImages(admin, savedQr.id, [png])));
+      const qrFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-1" : `m-qr-${Math.random().toString(36).slice(2)}` }));
+      await receiveFanpageEvent(ev("m-qr-1", "Chả mực bao nhiêu vậy shop", { id: "cust-5", name: "Chị Năm" }, "t-970"));
+      const q1 = await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: in31s });
+      assert.ok(q1.replies >= 1 && !q1.error, JSON.stringify(q1));
+      assert.equal(aiCalls.length, 0, "khớp chữ ⇒ KHÔNG gọi AI");
+      const qrBodies = qrFetch.calls.filter((c) => c.url.includes("/conversations/t-970/messages")).map((c) => String(c.init?.body));
+      assert.ok(qrBodies.some((b) => b.includes("400.000")), `giá đọc từ ERP lúc gửi: ${qrBodies.join(" | ")}`);
+      assert.ok(qrBodies.some((b) => b.includes('"content_ids":["content-1"]')), "ảnh gửi sau phần chữ bằng mã nội dung đã tải lên");
+      assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1);
+      assert.ok(!qrFetch.calls.some((c) => c.url.includes("upload_contents") && !c.url.includes(`/pages/${PAGE}/`)), "tải ảnh lên đúng page");
+      // Lần hai: dùng lại mã nội dung (không tải lại) · đếm số lần dùng · đếm lượt câu mẫu của hội thoại.
+      await receiveFanpageEvent(ev("m-qr-2", "giá chả mực sao em", { id: "cust-5", name: "Chị Năm" }, "t-970"));
+      await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1, "mã nội dung dùng lại trong 12 giờ");
+      const qrConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-970"))))[0];
+      assert.ok(qrConv.quickReplies === 2 && qrConv.aiCalls === 0, JSON.stringify({ quick: qrConv.quickReplies, ai: qrConv.aiCalls }));
+      assert.equal((await listQuickReplies()).find((r) => r.id === savedQr.id)?.uses, 2);
+      // Tiếng vọng ẢNH của bot (không chữ, có uid) ⇒ vẫn là tin của bot, không nhường.
+      assert.equal((await receiveFanpageEvent(ev("m-qr-echo-img", "", { id: PAGE, uid: "u-bot" }, "t-970"))).reason, "Tin của chính bot");
+      // Không khớp chữ ⇒ AI ĐỌC HIỂU chọn câu mẫu: MỘT lời gọi nhỏ, không công cụ, không có câu trả lời mẫu trong lời nhắc.
+      await receiveFanpageEvent(ev("m-qr-3", "món mực giã đó tính tiền sao em", { id: "cust-6", name: "Anh Sáu" }, "t-971"));
+      const q3 = await processFanpageThread(PAGE, "t-971", { fetch: qrFetch.fetch, now: in31s });
+      assert.ok(q3.replies >= 1, JSON.stringify(q3));
+      assert.equal(aiCalls.length, 1, "đọc hiểu = đúng một lời gọi");
+      assert.ok(aiCalls[0].tools.length === 0 && !JSON.stringify(aiCalls[0].messages).includes("400.000") && JSON.stringify(aiCalls[0].messages).includes("Hỏi giá chả mực"));
+      assert.ok(qrFetch.calls.some((c) => c.url.includes("/conversations/t-971/messages") && String(c.init?.body).includes("400.000")), "trả lời bằng câu mẫu AI đã chọn");
+      // Khách đang CHỐT ĐƠN ⇒ câu mẫu đứng ngoài, chatbot AI đầy đủ (có công cụ) trả lời.
+      await receiveFanpageEvent(ev("m-qr-4", "ok chốt chả mực bao nhiêu cũng được", { id: "cust-6", name: "Anh Sáu" }, "t-971"));
+      await processFanpageThread(PAGE, "t-971", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.ok(aiCalls.length >= 2 && aiCalls.slice(1).every((r) => r.tools.length > 0), "chốt đơn ⇒ chatbot đầy đủ có công cụ");
+      // Tắt câu mẫu ⇒ không dùng nữa.
+      assert.ok("ok" in (await saveQuickReplySettings(admin, { enabled: false, aiMatch: true })));
+      const callsBefore = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-5", "chả mực bao nhiêu", { id: "cust-7", name: "Cô Bảy" }, "t-972"));
+      await processFanpageThread(PAGE, "t-972", { fetch: qrFetch.fetch, now: in31s });
+      assert.ok(aiCalls.length > callsBefore && aiCalls.slice(callsBefore).every((r) => r.tools.length > 0), "câu mẫu tắt ⇒ chatbot đầy đủ");
+      assert.ok("ok" in (await saveQuickReplySettings(admin, { enabled: true, aiMatch: true })));
+      // Gợi ý AI học từ hội thoại cũ: luôn TẮT; giá bị thay ⇒ không bật được tới khi người sửa.
+      assert.equal(await saveLearnedQuickReplies([{ title: "Hỏi giá ruốc", triggers: ["ruốc bao nhiêu"], answer: "Dạ ruốc 350k ạ" }, { title: "Bảo quản", triggers: ["bảo quản sao"], answer: "Dạ để ngăn đá ạ" }], ADMIN_EMAIL), 2);
+      const learned = (await listQuickReplies()).filter((r) => r.source === "LEARNED");
+      assert.ok(learned.length === 2 && learned.every((r) => !r.active), "gợi ý AI luôn tắt");
+      const ruoc = learned.find((r) => r.title === "Hỏi giá ruốc")!;
+      assert.ok(ruoc.needsEdit && ruoc.answer.includes("[giá lấy từ ERP]") && !ruoc.answer.includes("350"));
+      assert.ok("error" in (await setQuickReplyActive(admin, ruoc.id, true)), "còn [giá lấy từ ERP] ⇒ không bật được");
+      assert.equal(await saveLearnedQuickReplies([], ADMIN_EMAIL), 0);
+      assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0, "lượt học mới thay gợi ý cũ chưa ai bật / chưa dùng");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= 30_000, `lượt sau webhook đợi ≥ 30 giây: ${sleeps.join(",")}`);
@@ -642,7 +725,8 @@ async function testJourney() {
           const input = req.messages.map((m) => m.content.map((b) => (b.type === "text" ? b.text : "")).join(" ")).join(" ");
           aiInputs.push(input);
           const isMerge = /Gộp các ghi chú/.test(req.system);
-          const text = isMerge ? "1. Giọng điệu & xưng hô: dạ / ạ, gọi khách là chị. 2. Khi khách hỏi giá: giá combo 299k — đọc từ hệ thống." : "- Shop luôn dạ ạ; khi khách chê đắt thì nói hàng làm thủ công, giá 400.000đ là hợp lý.";
+          const qaJson = 'Đây: [{"title":"Hỏi cách bảo quản","triggers":["bảo quản sao","để được bao lâu"],"answer":"Dạ để ngăn đá, dùng trong 3 tháng ạ"},{"title":"Hỏi giá combo","triggers":["combo bao nhiêu"],"answer":"Dạ combo 299k ạ"}]';
+          const text = /mảng JSON/.test(req.system) ? qaJson : isMerge ? "1. Giọng điệu & xưng hô: dạ / ạ, gọi khách là chị. 2. Khi khách hỏi giá: giá combo 299k — đọc từ hệ thống." : "- Shop luôn dạ ạ; khi khách chê đắt thì nói hàng làm thủ công, giá 400.000đ là hợp lý.";
           return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 500, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
         },
       };
@@ -669,6 +753,11 @@ async function testJourney() {
       });
       const done = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
       assert.equal(done.state, "DONE", JSON.stringify(done));
+      // Cùng lượt học: AI gợi ý CÂU TRẢ LỜI MẪU (0183) — luôn TẮT, giá bị thay ⇒ phải sửa mới bật được.
+      assert.equal(done.state === "DONE" ? done.stats.quickReplies : -1, 2, JSON.stringify(done));
+      const sug = (await listQuickReplies()).filter((r) => r.source === "LEARNED");
+      assert.ok(sug.length === 2 && sug.every((r) => !r.active), JSON.stringify(sug.map((r) => [r.title, r.active])));
+      assert.ok(sug.find((r) => r.title === "Hỏi giá combo")?.needsEdit && !sug.some((r) => r.answer.includes("299")), "giá trong gợi ý bị thay");
       assert.ok(history.calls.every((c) => c.init?.method === "GET" && c.url.startsWith("https://pages.fm/api/public_api/")), "chỉ ĐỌC Pancake");
       // Đầu vào CHỨA HỘI THOẠI (bước đọc từng lô) — bước gộp chỉ nhận ghi chú do AI viết, có số thứ tự «Ghi chú 1».
       const seen = aiInputs.filter((x) => x.includes("--- HỘI THOẠI ---")).join("\n");
@@ -703,8 +792,12 @@ async function testJourney() {
       assert.ok("ok" in (await publishPlaybook(admin)));
       assert.equal((await loadPlaybook()).published?.version, 1);
       const systems: string[] = [];
+      // Chỉ lượt chatbot ĐẦY ĐỦ (có công cụ) — lời gọi nhỏ chọn câu trả lời mẫu (0183) có ngân sách riêng.
       const chatBudgets: [AiRequest["reasoning"], number | undefined][] = [];
-      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { systems.push(req.system); chatBudgets.push([req.reasoning, req.maxTokens]); return { content: [{ type: "text", text: "Dạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { if (req.tools.length) {
+            systems.push(req.system);
+            chatBudgets.push([req.reasoning, req.maxTokens]);
+          } return { content: [{ type: "text", text: "Dạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
       const tconv = await openConversation("TEST", { createdBy: ADMIN_EMAIL });
       await chatTurn(tconv.id, "Chào shop", { channel: "TEST" });
       // Ghi lại rồi khẳng định NGOÀI provider — chatTurn nuốt lỗi ném từ provider (coi là AI hỏng) nên assert bên trong không bắt được gì.

@@ -24,7 +24,8 @@ export const PLAYBOOK_LIMITS = {
 } as const;
 
 export type PlaybookVersion = { version: number; text: string; publishedAt: string; publishedBy: string | null };
-export type PlaybookStats = { conversations: number; messages: number; aiCalls: number; costUsd: number | null; pricesRemoved: number };
+/** `quickReplies` = số câu trả lời mẫu AI gợi ý ở lượt này (0183; lượt cũ không có trường này). */
+export type PlaybookStats = { conversations: number; messages: number; aiCalls: number; costUsd: number | null; pricesRemoved: number; quickReplies?: number };
 export type PlaybookState = {
   draft: { text: string; createdAt: string; createdBy: string | null; stats: PlaybookStats | null } | null;
   published: PlaybookVersion | null;
