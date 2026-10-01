@@ -43,6 +43,13 @@ const RETRY_MS = 3_000;
 const PAGE_REPLY = "PAGE_REPLY";
 const WAITING = "Chờ đủ 30 giây xem page có trả lời không";
 const PAGE_REPLIED_REASON = "Page đã trả lời trong 30 giây (tự động của Meta / nhân viên) — bot không chen";
+/** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
+const ECHO_WINDOW_MS = 10 * 60_000;
+
+/** Chuẩn hoá để so tiếng vọng: Pancake trả lại đúng câu bot gửi nhưng có thể khác khoảng trắng / xuống dòng. */
+export function normalizeEcho(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
+}
 const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
 const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
@@ -108,8 +115,23 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const t = schema.salesChatInbound;
   if (ev.fromPage) {
     if (!ev.inbox) return { queued: false, reason: "Tin của page trên bình luận" };
-    // Tin bot vừa gửi được ghi sẵn với ĐÚNG mã tin ⇒ gặp lại là tin của bot — không phải nhân viên, không phải «page đã trả lời».
-    const [own] = await db.select({ id: t.id }).from(t).where(eq(t.messageId, ev.messageId)).limit(1);
+    // Tin của chính bot — không phải nhân viên, không phải «page đã trả lời». Hai dấu hiệu, một là đủ: (1) ĐÚNG mã tin Pancake
+    // trả về lúc gửi; (2) trùng NGUYÊN VĂN một đoạn bot ghi sẵn TRƯỚC khi gửi, cùng hội thoại, trong 10 phút — đỡ trường hợp
+    // tiếng vọng tới trước khi mã tin kịp ghi, hoặc mã trong webhook khác mã lời gọi gửi trả về. Nhận nhầm tiếng vọng là
+    // nhân viên ⇒ bot nhường 30 phút ngay sau câu trả lời đầu tiên của nó.
+    const echo = normalizeEcho(ev.text);
+    const [own] = await db
+      .select({ id: t.id })
+      .from(t)
+      .where(
+        or(
+          eq(t.messageId, ev.messageId),
+          echo
+            ? and(eq(t.pageId, ev.pageId), eq(t.threadId, ev.threadId), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - ECHO_WINDOW_MS)))
+            : sql`false`,
+        ),
+      )
+      .limit(1);
     if (own) return { queued: false, reason: "Tin của chính bot" };
     // Mọi tin khác phía page = page ĐÃ trả lời ⇒ tin khách đang chờ trước nó không cần bot nữa.
     await db
@@ -250,6 +272,11 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
     for (const r of replies) {
+      // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
+      await db
+        .insert(t)
+        .values(chunkText(r.text, TEXT_MAX).map((part) => ({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
+        .onConflictDoNothing({ target: t.messageId });
       const sent = await sendInbox(pageId, threadId, token, r.text, deps.fetch ?? fetch);
       if (!sent.ok) {
         sendError = sent.error;
