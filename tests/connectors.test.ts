@@ -32,7 +32,7 @@ import {
 } from "@/lib/connectors/registry";
 import { SELF_TEST_ORG, SecretsDecryptError, SecretsUnavailableError, openSecrets, sealSecrets, secretsKeyHealth, secretsKeyState, selfTestSecrets } from "@/lib/connectors/secrets";
 import { loadConnectionsView, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection, type RekeyVerdict } from "@/lib/connectors/service";
-import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot } from "@/lib/connectors/testers";
+import { LARK_HOOK_PATTERN, ORG_CONNECTION_CHAT_DISCOVERY, ORG_CONNECTION_TESTERS, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, testLarkWebhook, testTelegramBot, testZaloBot, testPancakeFanpage, pancakeVerdict, PANCAKE_TEST_MAX_BYTES } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import type { ConnectionsView } from "@/lib/connectors/types";
 import { MODULE_KEYS } from "@/lib/constants/platform-modules";
@@ -431,6 +431,16 @@ export async function testTesters() {
   assert.ok(!zNoSend.ok && /hợp lệ nhưng không gửi được vào chat đã khai: Chat not found/.test(zNoSend.message), "token đúng mà chat sai ⇒ KHÔNG đạt");
   const zNet = await testZaloBot({ secrets: { botToken: ZALO_TOKEN }, settings: { chatId: ZALO_CHAT }, orgName: "A" }, { fetch: fakeFetch(() => netErr("ETIMEDOUT")).fetch });
   assert.match(zNet.message, /Không gọi được Zalo: Máy chủ ERP không tới được bot-api\.zaloplatforms\.com/, zNet.message);
+
+  // Fanpage (Pancake): token đúng ⇒ danh sách 60 hội thoại DÀI hơn 64 KB vẫn phải ĐẠT (01/10/2026 báo nhầm «HTTP 200»);
+  // token sai ⇒ HTTP 200 + success:false ⇒ in đúng câu của Pancake.
+  const bigConvs = { success: true, conversations: Array.from({ length: 60 }, (_, i) => ({ id: `c${i}`, snippet: "x".repeat(3000), from: { name: `Khách ${i}` } })) };
+  assert.ok(JSON.stringify(bigConvs).length > 64 * 1024, "dữ liệu thử phải vượt trần 64 KB");
+  const fpOk = await testPancakeFanpage({ secrets: { pageAccessToken: "pancake_page_token_0123456789abcdef" }, settings: { pageId: "107401132450005" } }, { fetch: fakeFetch(() => ({ body: bigConvs })).fetch });
+  assert.ok(fpOk.ok && /đọc được 60 hội thoại/.test(fpOk.message), fpOk.message);
+  const fpBad = await testPancakeFanpage({ secrets: { pageAccessToken: "pancake_page_token_0123456789abcdef" }, settings: { pageId: "107401132450005" } }, { fetch: fakeFetch(() => ({ body: { message: "Invalid access_token", success: false, error_code: 102 } })).fetch });
+  assert.ok(!fpBad.ok && /Invalid access_token/.test(fpBad.message), fpBad.message);
+  assert.deepEqual(pancakeVerdict(200, `{"conversations":[${"{},".repeat(10)}`.padEnd(PANCAKE_TEST_MAX_BYTES + 10, " ")), { ok: true, count: null }, "quá dài để đọc hết, không dấu từ chối ⇒ đạt");
 
   // «Tìm chat»: getUpdates trả MỘT tin mỗi lượt ⇒ gom nhiều lượt, dừng khi Zalo báo hết tin (408).
   let zi = 0;
