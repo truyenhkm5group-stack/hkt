@@ -9245,12 +9245,18 @@ export const salesChatInbound = pgTable(
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     note: text("note"),
+    /** `INBOX` · `COMMENT` (0184 — bình luận trả lời bằng tin nhắn riêng, không bao giờ công khai). */
+    kind: text("kind").notNull().default("INBOX"),
+    /** Bình luận: bài viết + người bình luận — Pancake `private_replies` đòi cả hai. */
+    postId: text("post_id"),
+    fromId: text("from_id"),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("sales_chat_inbound_message_key").on(t.messageId),
     index("sales_chat_inbound_thread_idx").on(t.pageId, t.threadId, t.status),
     check("sales_chat_inbound_status_check", sql`${t.status} IN ('PENDING','DONE','SKIPPED')`),
+    check("sales_chat_inbound_kind_check", sql`${t.kind} IN ('INBOX','COMMENT')`),
   ],
 );
 

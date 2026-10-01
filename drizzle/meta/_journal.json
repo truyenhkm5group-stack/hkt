@@ -1282,6 +1282,13 @@
       "when": 1790680190000,
       "tag": "0183_sales_quick_replies",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 1790680200000,
+      "tag": "0184_fanpage_comment_replies",
+      "breakpoints": true
     }
   ]
 }
