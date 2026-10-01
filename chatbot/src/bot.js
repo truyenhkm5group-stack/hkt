@@ -543,11 +543,14 @@ export class Bot {
       const bo = t.replace(/(?<![0-9])(?:0|\+?84)[1-9][0-9.\s-]{7,12}(?![0-9])/g, " ").trim();
       if (bo.length >= 10 && DIA_CHI.test(bo) && bo.split(/\s+/).length >= 3) address = bo.slice(0, 160);
     }
-    const SIZE = /(?:^|[^a-z0-9])(?:size|sai|sz|sài|siz)\s*(xxs|xs|s|m|l|xl|xxl|xxxl|[2-5]xl|\d{2})(?![a-z0-9])/i;
+    // "size XL", "sai xl", va ca dong tu chon size: "Mình đặt xl", "lấy L", "mặc size M", "cỡ XL" (su co 01/10/2026,
+    // Thuy Nguyen Diem, Linh Tay Luxury: khach nhan "Mình đặt xl" hai lan, bot van xin chieu cao can nang 4 lan)
+    const SIZE = /(?:^|[^a-z0-9à-ỹ])(?:size|sai|sz|sài|siz|cỡ)\s*(xxs|xs|s|m|l|xl|xxl|xxxl|[2-5]xl|\d{2})(?![a-z0-9à-ỹ])/i;
+    const DONG_TU_SIZE = /(?:^|[^a-z0-9à-ỹ])(?:đặt|dat|lấy|lay|chọn|chon|mặc|mac|chốt|chot)\s+(?:size\s*|sz\s*|cỡ\s*)?(xs|s|m|l|xl|xxl|xxxl|[2-5]xl)(?![a-z0-9à-ỹ])/i;
     const MOT_SIZE = /^\s*(?:size\s*)?(xs|s|m|l|xl|xxl|xxxl|[2-5]xl)\s*(?:nha|nhé|nhe|ạ|a|em|ha)?\s*[.!]?\s*$/i;
     let size = null;
     for (const t of loi) {
-      const m = t.match(SIZE) || t.match(MOT_SIZE);
+      const m = t.match(SIZE) || t.match(DONG_TU_SIZE) || t.match(MOT_SIZE);
       if (m) size = m[1].toUpperCase();
     }
     let sizeFrom = size ? "khach" : null;
@@ -672,7 +675,7 @@ ${dong.join("\n")}
    */
   dropAnnouncedFacts(reply, pageId) {
     const t = String(reply || "");
-    const KHAI = /(?:^|,\s*)em\s+(?:đã|đã được|vừa)\s+(?:có|nhận|nhận được|ghi nhận|lưu)(?:\s+được)?\s+(?:đủ\s+)?(?:số điện thoại|sđt|sdt|địa chỉ|thông tin|số đo)[^.?!\n]*?(?:rồi|nhé|nha)?\s*(?:ạ|nhé|nha)?\s*[.!]?\s*$/i;
+    const KHAI = /(?:^|,\s*)(?:dạ\s+(?:vâng\s+)?)?em\s+(?:(?:đã|đã được|vừa)\s+)?(?:có|nhận|nhận được|ghi nhận|lưu)(?:\s+được)?\s+(?:đủ\s+)?(?:số điện thoại|sđt|sdt|địa chỉ|thông tin|số đo)[^.?!\n]*?(?:rồi|nhé|nha)?\s*(?:ạ|nhé|nha)?\s*[.!]?\s*$/i;
     const parts = t.split(/(?<=[.!?\n])/);
     let doi = false;
     const out = parts.map((c) => {

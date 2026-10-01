@@ -1489,8 +1489,18 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.dropAnnouncedFacts("Dạ chị cho em xin địa chỉ ạ?", "PAGE1"), "Dạ chị cho em xin địa chỉ ạ?", "khong dong vao cau khac");
   // Chua gui so do thi van duoc hoi
   assert.equal(bot.customerFacts("PAGE1", [khach("mình nặng 49kg")]).measured, false, "thieu chieu cao (bang co chieu cao / chua co bang) -> chua du");
+  // Su co 01/10/2026 (Thuy Nguyen Diem, Linh Tay Luxury): "Mình đặt xl" hai lan ma bot xin chieu cao can nang 4 lan
+  const thuy = [
+    khach("Có cho xem hàng trước không shop"), shop("Chị iu cho em xin chiều cao, cân nặng để em giữ size cho mình kéo hết nhé."),
+    khach("Mình đặt xl"), khach("Ok"), khach("Đc áp long châu xã Long Khánh quyen bên cầu tinh tây Ninh sđt 0967338052"), khach("Màu đen"), khach("Ok"),
+  ];
+  assert.equal(bot.customerFacts("PAGE1", thuy).size, "XL", "'Mình đặt xl' = khach da chon size");
+  assert.equal(bot.dropAlreadyGivenAsks("🥰\nChị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?", "PAGE1", thuy), "🥰");
+  assert.equal(bot.dropAnnouncedFacts("Dạ em nhận được thông tin địa chỉ và số điện thoại của chị rồi ạ. 🥰\nChị lấy mẫu nào ạ?", "PAGE1").includes("nhận được"), false);
+  for (const [cau, size] of [["lấy L nha", "L"], ["chị mặc size M", "M"], ["chốt 2xl", "2XL"], ["cỡ xl", "XL"]]) assert.equal(bot.customerFacts("PAGE1", [khach(cau)]).size, size, cau);
+  for (const cau of ["đặt 20 cái", "lấy mình 1 cái", "chọn mẫu nào đẹp", "đặt sớm được không"]) assert.equal(bot.customerFacts("PAGE1", [khach(cau)]).size, null, cau);
   settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
-  console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'");
+  console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'; 'Minh dat xl' = da chon size");
 }
 
 console.log("\nTAT CA TEST PASS");
