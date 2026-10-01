@@ -31,6 +31,9 @@ import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import { chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
+import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
+import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
+import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -269,7 +272,53 @@ async function conversationFor(pageId: string, threadId: string): Promise<{ id: 
   } catch {
     // Hai lượt cùng mở ⇒ chỉ số UNIQUE giữ đúng một hội thoại; đọc lại hội thoại của lượt thắng.
   }
-  return find();
+  const created = await find();
+  // Địa chỉ gửi lại (0185): khoá visitor_key là băm, job follow-up cần đúng page + hội thoại Pancake.
+  if (created) await db.update(c).set({ pageId, threadId }).where(and(eq(c.id, created.id), isNull(c.threadId)));
+  return created;
+}
+
+/**
+ * Bot vừa trả lời xong ⇒ hội thoại CHỜ KHÁCH (`WAITING`) với lịch follow-up (0185) — trừ khi đã chốt đơn, khách từ chối rõ,
+ * hay đang cần người xử lý (khi đó chỉ ghi mốc tin cuối của bot). `threadId` = hộp thư mới khi trả lời bình luận.
+ */
+async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
+  if (!row) return;
+  const st = (row.state ?? {}) as ChatState;
+  const done = row.status === "HANDOFF" || Boolean(st.confirmed) || Boolean(st.declined) || Boolean(st.handoff);
+  const fs = await loadFollowupSettings();
+  await db
+    .update(c)
+    .set(
+      done
+        ? { lastBotAt: now, ...(threadId ? { threadId } : {}) }
+        : { status: "WAITING", lastBotAt: now, waitingSince: now, followupsSent: 0, nextFollowupAt: fs.enabled ? nextFollowupAt(now, 0, fs.stepsMinutes) : null, ...(threadId ? { threadId } : {}) },
+    )
+    .where(eq(c.id, conversationId));
+}
+
+/**
+ * Gửi MỘT tin chữ của bot vào hội thoại fanpage (follow-up · 0185) — cùng đường gửi + dấu tiếng vọng như câu trả lời
+ * thường. Đọc token của kết nối fanpage ĐANG BẬT của tổ chức ngữ cảnh; không ném.
+ */
+export async function sendFanpageText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối fanpage chưa bật / khác page" };
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
+  const now = deps.now ?? (() => new Date());
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  await db
+    .insert(t)
+    .values(chunkText(text, TEXT_MAX).map((part) => ({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
+    .onConflictDoNothing({ target: t.messageId });
+  const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch);
+  if (!sent.ok) return { ok: false, error: sent.error };
+  if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+  return { ok: true };
 }
 
 type CommentReplyInput = { pageId: string; threadId: string; token: string; commentId: string; postId: string; fromId: string; text: string; imageIds: readonly string[]; conversationId: string };
@@ -391,6 +440,16 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
+    // Khách vừa nhắn ⇒ hết im lặng: dừng lịch follow-up, ghi mốc tin cuối của khách (khung 24 giờ của Facebook tính từ đây).
+    const lastCustomerAt = new Date(Math.max(...claimed.map((r) => r.createdAt.getTime())));
+    {
+      const cv = schema.salesChatConversations;
+      const lastAt = lastCustomerAt;
+      await db
+        .update(cv)
+        .set({ lastCustomerAt: lastAt, waitingSince: null, followupsSent: 0, nextFollowupAt: null, status: sql`case when ${cv.status} = 'WAITING' then 'OPEN' else ${cv.status} end` })
+        .where(and(eq(cv.channel, "FANPAGE"), eq(cv.visitorKey, fanpageVisitorKey(pageId, threadId))));
+    }
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
       db
         .update(t)
@@ -407,6 +466,11 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     if (!conv) {
       await finish("PENDING", "Không mở được hội thoại");
       return { ...out, error: "Không mở được hội thoại" };
+    }
+    // Hội thoại vừa mở ở tin đầu ⇒ ghi mốc tin cuối của khách (khung 24 giờ của Facebook cho follow-up).
+    {
+      const cv = schema.salesChatConversations;
+      await db.update(cv).set({ lastCustomerAt }).where(and(eq(cv.id, conv.id), or(isNull(cv.lastCustomerAt), lt(cv.lastCustomerAt, lastCustomerAt))));
     }
     if (conv.status === "HANDOFF") {
       // Nhân viên trả lời trên page ⇒ nhường 30 phút rồi bot nhận lại. CẦN NGƯỜI XỬ LÝ (AI / công cụ yêu cầu) ⇒ ở nguyên tới
@@ -454,7 +518,10 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         { pageId, threadId, token, commentId: lastComment.messageId, postId: lastComment.postId!, fromId: lastComment.fromId!, text: replies.map((r) => r.text).join("\n\n"), imageIds: turn.media?.imageIds ?? [], conversationId: conv.id },
         deps,
       );
-      if (pr.kind === "SENT") out.replies += 1;
+      if (pr.kind === "SENT") {
+        out.replies += 1;
+        if (pr.inboxId) await markWaitingForCustomer(conv.id, now(), pr.inboxId);
+      }
       await finish(pr.kind === "ALREADY" ? "SKIPPED" : "DONE", pr.kind === "SENT" ? pr.warning : pr.reason);
       out.processed += ids.length;
       if (pr.kind === "FAILED") {
@@ -496,6 +563,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       if (!sendError && up.errors.length) sendError = up.errors[0];
     }
     await finish("DONE", sendError);
+    if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     out.processed += ids.length;
     if (sendError) {
       out.error = sendError;

@@ -9163,6 +9163,14 @@ export const salesChatConversations = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     /** Số lượt trả lời bằng CÂU TRẢ LỜI MẪU (0183) — không tốn lượt AI chính. */
     quickReplies: integer("quick_replies").notNull().default(0),
+    /** Fanpage (0185): địa chỉ gửi lại của hội thoại + mốc tin cuối hai phía + lịch follow-up khi khách im lặng. */
+    pageId: text("page_id"),
+    threadId: text("thread_id"),
+    lastCustomerAt: ts("last_customer_at"),
+    lastBotAt: ts("last_bot_at"),
+    waitingSince: ts("waiting_since"),
+    followupsSent: integer("followups_sent").notNull().default(0),
+    nextFollowupAt: ts("next_followup_at"),
     lastError: text("last_error"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
@@ -9174,7 +9182,8 @@ export const salesChatConversations = pgTable(
     index("sales_chat_conversations_created_idx").on(t.createdAt),
     check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB','FANPAGE')`),
     uniqueIndex("sales_chat_conversations_fanpage_key").on(t.visitorKey).where(sql`${t.channel} = 'FANPAGE'`),
-    check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','HANDOFF','CLOSED')`),
+    check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','WAITING','HANDOFF','CLOSED')`),
+    index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
   ],
 );
 

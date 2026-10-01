@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { can, requireUser } from "@/lib/auth/session";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { audit } from "@/lib/audit";
+import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { chatTurn, conversationView, openConversation, resumeConversationToAi } from "@/lib/sales-chatbot/engine";
 import { bindOrganization } from "@/lib/platform/background";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
@@ -93,4 +94,13 @@ export async function resumeConversationAction(id: string): Promise<{ ok: true; 
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CHAT_CONVERSATION", entityId: String(id), reason: "Người xử lý xong — trả hội thoại lại cho AI" });
   revalidatePath("/ai/sales-chatbot");
   return { ok: true, message: "Đã trả hội thoại lại cho AI" };
+}
+
+/** Follow-up tự động (0185): bật / tắt + lịch (phút). */
+export async function saveFollowupSettingsAction(input: { enabled: boolean; stepsMinutes: number[] }): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  const r = await saveFollowupSettings(user, { enabled: input?.enabled, stepsMinutes: input?.stepsMinutes });
+  if ("error" in r) return r;
+  revalidatePath("/ai/sales-chatbot");
+  return { ok: true, message: "Đã lưu follow-up tự động" };
 }

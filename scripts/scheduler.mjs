@@ -76,6 +76,12 @@ const JOBS = [
   */
   { job: "workflows", every: WORKFLOW_FANOUT_TICK_MINUTES, offset: 2.5 },
   /*
+    FOLLOW-UP CHATBOT FANPAGE (0185 — chủ shop yêu cầu 01/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 5 phút. Không có lượt
+    của nhà (nhà tắt module AI bán hàng). Mốc follow-up tính bằng giờ nên 5 phút là đủ mịn; hội thoại không tới mốc thì
+    lượt chạy chỉ đọc một câu truy vấn.
+  */
+  { job: "sales-followup", every: 5, offset: 4 },
+  /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
     Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có

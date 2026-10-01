@@ -23,6 +23,9 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
+import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
+import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { fillPlaceholders, looksLikeOrdering, matchQuickReplyByKeyword, parseLearnedQuickReplies, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -198,6 +201,17 @@ function testPure() {
   const sp = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [{ code: "Q1", title: "Hỏi giá chả mực", upsell: false }, { code: "Q2", title: "Menu món ngon", upsell: true }]);
   for (const k of ["B1 QUOTE", "B2 CONSULT", "B3 INFO", "B4 UPSELL", "B5 CONFIRM", "lookup_customer", "mark_declined", "CẦN NGƯỜI XỬ LÝ", "Q1: Hỏi giá chả mực", "Q2: Menu món ngon (câu UPSELL)", "câu mẫu Q2", "delivery_note"]) assert.ok(sp.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(sp.indexOf("LUẬT BẮT BUỘC") < sp.indexOf("QUY TRÌNH BÁN"), "quy trình đứng SAU luật bắt buộc");
+  // Follow-up (0185): lịch tăng dần trong khung 24 giờ; mốc kế tiếp; khung nhắn của Facebook; câu nhắc không nêu giá.
+  assert.deepEqual(validateFollowupSteps([60, 360, 1320]), { ok: true, steps: [60, 360, 1320] });
+  assert.ok(!validateFollowupSteps([60, 30]).ok && !validateFollowupSteps([60, 1500]).ok && !validateFollowupSteps([]).ok && !validateFollowupSteps([60, 120, 180, 240]).ok);
+  const ws = new Date("2026-10-01T10:00:00Z");
+  assert.equal(nextFollowupAt(ws, 0, [60, 360, 1320])?.toISOString(), "2026-10-01T11:00:00.000Z");
+  assert.equal(nextFollowupAt(ws, 2, [60, 360, 1320])?.toISOString(), "2026-10-02T08:00:00.000Z");
+  assert.equal(nextFollowupAt(ws, 3, [60, 360, 1320]), null, "hết lịch ⇒ không nhắc nữa");
+  assert.ok(withinMessagingWindow(ws, new Date(ws.getTime() + 23 * 3_600_000)) && !withinMessagingWindow(ws, new Date(ws.getTime() + 24 * 3_600_000)) && !withinMessagingWindow(null, ws));
+  assert.equal(followupStepsLabel([60, 360, 1320]), "1 giờ · 6 giờ · 22 giờ");
+  const fp = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Lấy thông tin · kiểm tra khách cũ", 3, 3, true, "");
+  assert.ok(/không nêu giá/i.test(fp) && /lần nhắc CUỐI/.test(fp) && /đơn nháp/.test(fp), fp);
   console.log("✓ Tự phục vụ · thuần: mẫu thực phẩm hợp lệ, tên miền con, mẫu tin, phần đổi của đơn, tìm không dấu, giờ làm việc");
 }
 
@@ -591,12 +605,12 @@ async function testJourney() {
       // Pancake đẩy lại chính tin bot vừa gửi (có uid) ⇒ KHÔNG coi là nhân viên.
       const botId = (await db.select({ id: schema.salesChatInbound.messageId }).from(schema.salesChatInbound).where(eq(schema.salesChatInbound.note, "BOT_SENT")).limit(1))[0].id;
       assert.equal((await receiveFanpageEvent(ev(botId, "Dạ...", { id: PAGE, uid: "u-staff" }))).reason, "Tin của chính bot");
-      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "OPEN");
+      assert.notEqual((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "HANDOFF");
       // Tiếng vọng mang MÃ KHÁC mã lời gọi gửi trả về (hoặc tới trước khi mã kịp ghi) nhưng đúng NGUYÊN VĂN câu bot vừa gửi
       // (khác khoảng trắng) ⇒ vẫn là tin của bot, KHÔNG nhường. Cùng câu ấy ở hội thoại khác ⇒ không phải tiếng vọng.
       const botText = (JSON.parse(String(sent[0].init?.body)) as { message: string }).message;
       assert.equal((await receiveFanpageEvent(ev("m-echo-khac-ma", `  ${botText.replace(/ /g, "  ")}\n`, { id: PAGE, uid: "u-bot" }))).reason, "Tin của chính bot");
-      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "OPEN", "tiếng vọng không làm bot nhường");
+      assert.notEqual((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "HANDOFF", "tiếng vọng không làm bot nhường");
       assert.match((await receiveFanpageEvent(ev("m-echo-hoi-thoai-khac", botText, { id: PAGE, uid: "u-staff" }, "t-950"))).reason, /bot nhường/, "câu trùng ở hội thoại KHÁC là nhân viên thật");
       // Nhân viên thật trả lời trên fanpage ⇒ bot nhường hội thoại, tin khách kế tiếp không được bot trả lời.
       assert.match((await receiveFanpageEvent(ev("m-staff-1", "Chị đợi em chút nhé", { id: PAGE, uid: "u-staff", name: "NV" }))).reason, /bot nhường/);
@@ -636,7 +650,7 @@ async function testJourney() {
       const rr = await processFanpageThread(PAGE, "t-960", { fetch: racing, now: in31s });
       assert.ok(rr.replies >= 1 && raceReasons.length >= 1 && raceReasons.every((r) => r === "Tin của chính bot"), JSON.stringify({ rr, raceReasons }));
       const raceConv = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-960")));
-      assert.equal(raceConv[0]?.status, "OPEN", "tiếng vọng tới giữa lúc gửi không làm bot nhường");
+      assert.notEqual(raceConv[0]?.status, "HANDOFF", "tiếng vọng tới giữa lúc gửi không làm bot nhường");
       // ═══ CÂU TRẢ LỜI MẪU (0183): câu hỏi phổ biến trả lời bằng câu soạn sẵn + ảnh, KHÔNG gọi AI; số đọc ERP lúc gửi ═══
       const aiCalls: AiRequest[] = [];
       const baseBot = fakeProvider(hslcScript({ chaMuc, ruocTom }));
@@ -790,6 +804,62 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-np-3", "chả mực bao nhiêu em", { id: "cust-np", name: "Anh Nam" }, "t-np"));
       const rBack = await processFanpageThread(PAGE, "t-np", { fetch: npFetch.fetch, now: () => new Date(Date.now() + 13 * 3_600_000) });
       assert.ok(rBack.replies >= 1, `trả lại cho AI ⇒ bot trả lời lại: ${JSON.stringify(rBack)}`);
+      // ═══ FOLLOW-UP TỰ ĐỘNG (0185): khách im lặng ⇒ WAITING ⇒ AI nhắc theo lịch 1 · 6 · 22 giờ, dừng đúng lúc ═══
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      await receiveFanpageEvent(ev("m-fu-1", "Chả mực bao nhiêu vậy em", { id: "cust-fu", name: "Chị Thu" }, "t-fu"));
+      const fuFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-fu" : `m-${Math.random().toString(36).slice(2)}` }));
+      const t0 = Date.now();
+      assert.ok((await processFanpageThread(PAGE, "t-fu", { fetch: fuFetch.fetch, now: in31s })).replies >= 1);
+      const fuConv = async () => (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-fu"))))[0];
+      let fc = await fuConv();
+      assert.ok(fc.status === "WAITING" && fc.pageId === PAGE && fc.threadId === "t-fu" && fc.followupsSent === 0 && fc.lastCustomerAt, JSON.stringify({ s: fc.status, p: fc.pageId, t: fc.threadId }));
+      const firstDue = fc.nextFollowupAt!.getTime() - fc.waitingSince!.getTime();
+      assert.equal(firstDue, 60 * 60_000, "mốc đầu = 1 giờ sau khi bắt đầu im lặng");
+      assert.equal((await runSalesFollowups({ fetch: fuFetch.fetch, now: () => new Date(t0 + 30 * 60_000) })).due, 0, "chưa tới mốc ⇒ không gì");
+      const fuAi: AiRequest[] = [];
+      let fuText = "Dạ chị còn băn khoăn gì về chả mực không ạ, em hỗ trợ chị nhé!";
+      setSalesChatProviderForTests(() => ({ ...baseBot, complete: async (req: AiRequest) => { fuAi.push(req); return { content: [{ type: "text", text: fuText }], stopReason: "end_turn", usage: { inputTokens: 5, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      const at1h = () => new Date(fc.waitingSince!.getTime() + 61 * 60_000);
+      const [fuA, fuB] = await Promise.all([runSalesFollowups({ fetch: fuFetch.fetch, now: at1h }), runSalesFollowups({ fetch: fuFetch.fetch, now: at1h })]);
+      assert.equal(fuA.sent + fuB.sent, fuA.due, `hai lượt job chồng nhau ⇒ mỗi hội thoại tới mốc đúng MỘT tin nhắc: ${JSON.stringify([fuA, fuB])}`);
+      const fuPosts = fuFetch.calls.filter((c) => c.init?.method === "POST" && c.url.includes("/conversations/t-fu/messages")).filter((c) => String(c.init?.body).includes("băn khoăn"));
+      assert.ok(fuPosts.length === 1 && fuPosts[0].url.includes("/conversations/t-fu/messages") && String(fuPosts[0].init?.body).includes("băn khoăn"), JSON.stringify(fuPosts.map((c) => c.init?.body)));
+      assert.ok(fuAi[0].tools.length === 0 && /IM LẶNG/.test(fuAi[0].system) && /Lần nhắc 1\/3/.test(fuAi[0].system) && /KHÁCH: Chả mực bao nhiêu/.test(JSON.stringify(fuAi[0].messages)), "AI đọc hội thoại + bước + lần nhắc");
+      fc = await fuConv();
+      assert.ok(fc.followupsSent === 1 && fc.status === "WAITING" && fc.nextFollowupAt!.getTime() - fc.waitingSince!.getTime() === 360 * 60_000, "mốc kế = 6 giờ");
+      assert.match((await conversationView(fc.id))!.messages.at(-1)!.text, /băn khoăn/, "tin nhắc nằm trong hội thoại");
+      // Tiếng vọng của tin nhắc KHÔNG làm bot nhường.
+      assert.equal((await receiveFanpageEvent(ev("m-fu-echo", fuText, { id: PAGE, uid: "u-bot" }, "t-fu"))).reason, "Tin của chính bot");
+      // AI lỡ nêu giá ⇒ BỎ lần nhắc đó (không gửi), sang mốc sau.
+      fuText = "Chả mực bên em 400k/kg thôi chị ơi";
+      const postsMid = fuFetch.calls.filter((c) => c.init?.method === "POST").length;
+      const r2nd = await runSalesFollowups({ fetch: fuFetch.fetch, now: () => new Date(fc.waitingSince!.getTime() + 361 * 60_000) });
+      assert.ok(r2nd.sent === 0 && fuFetch.calls.filter((c) => c.init?.method === "POST").length === postsMid && /AI nêu giá/.test(r2nd.detail.join(" ")), JSON.stringify(r2nd));
+      assert.ok(!fuFetch.calls.some((c) => String(c.init?.body).includes("400k")), "câu có giá không bao giờ được gửi");
+      fc = await fuConv();
+      assert.ok(fc.followupsSent === 2 && fc.nextFollowupAt!.getTime() - fc.waitingSince!.getTime() === 1320 * 60_000);
+      // Khách nhắn lại ⇒ hết im lặng: dừng lịch, về OPEN (bot trả lời ⇒ lịch mới từ đầu).
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      await receiveFanpageEvent(ev("m-fu-2", "giá chả mực sao em", { id: "cust-fu", name: "Chị Thu" }, "t-fu"));
+      await processFanpageThread(PAGE, "t-fu", { fetch: fuFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      fc = await fuConv();
+      assert.ok(fc.followupsSent === 0 && fc.status === "WAITING" && fc.lastCustomerAt!.getTime() > t0, "khách nhắn lại ⇒ lịch follow-up bắt đầu lại từ lần 1");
+      // Điều kiện DỪNG: chốt đơn · từ chối rõ · ngoài khung 24 giờ · follow-up tắt.
+      const dueNow = () => new Date(fc.nextFollowupAt!.getTime() + 1000);
+      for (const [label, patch] of [
+        ["đã chốt đơn", { state: { ...(fc.state as ChatState), confirmed: { orderId: null, simulated: true, total: 1, at: "x" } } }],
+        ["khách từ chối rõ", { state: { ...(fc.state as ChatState), declined: { reason: "thôi", at: "x" } } }],
+        ["ngoài khung 24 giờ của Facebook", { lastCustomerAt: new Date(Date.now() - 25 * 3_600_000) }],
+      ] as const) {
+        await db.update(schema.salesChatConversations).set({ ...patch, status: "WAITING", nextFollowupAt: fc.nextFollowupAt }).where(eq(schema.salesChatConversations.id, fc.id));
+        const rs = await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow });
+        assert.ok(rs.sent === 0 && rs.stopped === 1 && rs.detail.join(" ").includes(label), `${label}: ${JSON.stringify(rs)}`);
+        await db.update(schema.salesChatConversations).set({ state: fc.state, lastCustomerAt: fc.lastCustomerAt }).where(eq(schema.salesChatConversations.id, fc.id));
+      }
+      assert.ok("ok" in (await saveFollowupSettings(admin, { enabled: false, stepsMinutes: [60, 360, 1320] })));
+      assert.deepEqual((await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow })).detail, ["follow-up đang tắt"]);
+      assert.ok("error" in (await saveFollowupSettings(admin, { enabled: true, stepsMinutes: [60, 1500] })), "mốc quá 23 giờ ⇒ từ chối (khung 24 giờ của Facebook)");
+      assert.ok("ok" in (await saveFollowupSettings(admin, { enabled: true, stepsMinutes: [60, 360, 1320] })));
       // ═══ BÌNH LUẬN (0184): trả lời bằng TIN NHẮN RIÊNG (private reply), không bao giờ công khai ═══
       const evc = (id: string, text: string, from: Record<string, unknown>, thread: string, postId = `${PAGE}_post-1`) =>
         parsePancakeWebhook({ event_type: "messaging", page_id: PAGE, data: { conversation: { id: thread, type: "COMMENT" }, message: { id, type: "COMMENT", message: text, from, post_id: postId } } })!;
@@ -825,7 +895,7 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-pr-next", "Ship về Hải Phòng bao lâu em", { id: "cust-c1", name: "Hạnh" }, "inbox-of-c-1"));
       const rNext = await processFanpageThread(PAGE, "inbox-of-c-1", { fetch: cmtFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
       assert.ok(rNext.replies >= 1, `khách nhắn tiếp trong hộp thư ⇒ trả lời sau ~5 giây: ${JSON.stringify(rNext)}`);
-      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, cConv[0].id)))[0].status, "OPEN");
+      assert.notEqual((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, cConv[0].id)))[0].status, "HANDOFF");
       // ĐUA: tiếng vọng tin riêng tới hộp thư MỚI ngay trong lời gọi gửi (bot chưa biết hộp thư nào) ⇒ vẫn là tin của bot.
       const echoReasons: string[] = [];
       const racingCmt = (async (input: RequestInfo | URL, init?: RequestInit) => {
