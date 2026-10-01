@@ -33,6 +33,18 @@ export function networkFailureKind(code: string | null): NetFailureKind {
   return "OTHER";
 }
 
+/**
+ * Lỗi mạng xảy ra TRƯỚC KHI yêu cầu rời máy (không mở được kết nối: hết giờ chờ kết nối · không có đường · bị từ chối ·
+ * không phân giải được tên) ⇒ nhà cung cấp CHẮC CHẮN chưa nhận gì ⇒ gửi lại an toàn, không thể sinh tin trùng. Kết nối bị
+ * NGẮT (`ECONNRESET`) hay hết giờ chờ PHẢN HỒI thì KHÔNG thuộc nhóm này: yêu cầu có thể đã tới nơi, gửi lại là đánh cược tin
+ * trùng («đơn mới» hai lần ⇒ kho đóng hai lần). Đo 01/10/2026: máy chủ ERP (Việt Nam) chập chờn tới api.telegram.org — cùng
+ * một nhóm chat, 16:42 gửi được, 21:12 `ETIMEDOUT`.
+ */
+export function failedBeforeSending(e: unknown): boolean {
+  const code = networkErrorCode(e);
+  return code !== null && /^(ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EAI_NONAME|EAI_NODATA)$/.test(code);
+}
+
 /** Có phải lỗi MẠNG (không mở được kết nối) chứ không phải lỗi của chính dịch vụ. */
 export function isNetworkFailure(e: unknown): boolean {
   return networkErrorCode(e) !== null || (e instanceof Error && /fetch failed/i.test(e.message));

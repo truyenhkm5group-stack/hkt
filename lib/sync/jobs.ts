@@ -64,6 +64,7 @@ import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-g
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
+import { retryFailedDeliveries } from "@/lib/messaging/service";
 
 export type JobOptions = {
   trigger: SyncTrigger;
@@ -695,6 +696,27 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         ctx.summary.detail = `${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        return r;
+      }),
+  },
+  /*
+    GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — chủ shop yêu cầu sửa 01/10/2026): máy chủ ở Việt Nam chập chờn tới api.telegram.org
+    (16:42 gửi được, 21:12 ETIMEDOUT). Chỉ tin hỏng TRƯỚC KHI yêu cầu rời máy mới được hẹn gửi lại — không thể trùng.
+  */
+  "messaging-retry": {
+    label: "Gửi lại tin nhóm hỏng vì mạng",
+    source: "ALL",
+    module: "core",
+    fanOut: true,
+    description:
+      "Tin báo nhóm (Telegram / Zalo / Lark) hỏng vì máy chủ chưa mở được kết nối (mạng tắc, nhà mạng chặn) ⇒ gửi lại theo lịch 2 · 5 · 15 · 30 · 60 · 120 phút, trong 6 giờ kể từ lúc tạo. " +
+      "Tin bị ngắt giữa chừng hoặc bị nhà cung cấp từ chối KHÔNG gửi lại (có thể đã tới — gửi lại là trùng). Tin thử không gửi lại.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "messaging-retry", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await retryFailedDeliveries();
+        ctx.summary.imported = r.sent;
+        ctx.summary.skipped = r.failed + r.skipped;
+        ctx.summary.detail = r.due ? `${r.due} tin tới mốc · gửi được ${r.sent} · vẫn hỏng ${r.failed}` : "không tin nào chờ gửi lại";
         return r;
       }),
   },
