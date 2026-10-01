@@ -22,6 +22,7 @@ import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { fillPlaceholders, looksLikeOrdering, matchQuickReplyByKeyword, parseLearnedQuickReplies, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -49,9 +50,9 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { cancelManualOrderCore, createManualOrderCore, materialChanges, updateManualOrderCore } from "@/lib/records/order-create";
 import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
-import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours } from "@/lib/sales-chatbot/config";
+import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
@@ -191,6 +192,12 @@ function testPure() {
   assert.ok(validateQuickReply({ title: "x", triggers: "giá\ngiá\n", answer: "Dạ {{giá:A}} ạ" }).ok);
   assert.deepEqual(parseLearnedQuickReplies('```json\n[{"title":"Ship","triggers":["ship không"],"answer":"Dạ có ạ"},{"title":""}]\n```'), [{ title: "Ship", triggers: ["ship không"], answer: "Dạ có ạ" }]);
   assert.deepEqual(parseLearnedQuickReplies("không phải JSON"), []);
+  // Quy trình bán 5 bước + cần người xử lý + câu mẫu trong lời nhắc; địa chỉ khách cũ chỉ lộ hai phần cuối.
+  assert.equal(maskAddress("Xóm 8, thôn Văn Tảo, xã Hà Nam, Thành phố Hải Phòng"), "…, xã Hà Nam, Thành phố Hải Phòng");
+  assert.equal(maskAddress("5 Lý Thường Kiệt"), "…");
+  const sp = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [{ code: "Q1", title: "Hỏi giá chả mực", upsell: false }, { code: "Q2", title: "Menu món ngon", upsell: true }]);
+  for (const k of ["B1 QUOTE", "B2 CONSULT", "B3 INFO", "B4 UPSELL", "B5 CONFIRM", "lookup_customer", "mark_declined", "CẦN NGƯỜI XỬ LÝ", "Q1: Hỏi giá chả mực", "Q2: Menu món ngon (câu UPSELL)", "câu mẫu Q2", "delivery_note"]) assert.ok(sp.includes(k), `lời nhắc thiếu «${k}»`);
+  assert.ok(sp.indexOf("LUẬT BẮT BUỘC") < sp.indexOf("QUY TRÌNH BÁN"), "quy trình đứng SAU luật bắt buộc");
   console.log("✓ Tự phục vụ · thuần: mẫu thực phẩm hợp lệ, tên miền con, mẫu tin, phần đổi của đơn, tìm không dấu, giờ làm việc");
 }
 
@@ -713,6 +720,76 @@ async function testJourney() {
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // ═══ QUY TRÌNH BÁN 5 BƯỚC + CÂU MẪU TRONG LUỒNG AI + CẦN NGƯỜI XỬ LÝ (chủ shop 01/10/2026) ═══
+      const cfgOld = { ...parseSalesChatbotConfig(null), allowedTools: ["search_products" as const] };
+      assert.ok(PROCESS_TOOLS.every((t) => toolDefsFor(cfgOld).some((d) => d.name === t)), "công cụ quy trình tới cả tổ chức có allowedTools lưu từ trước");
+      const qCat = [{ code: "Q1", id: savedQr.id, title: "Hỏi giá chả mực", upsell: true }];
+      const tctx = (st: ChatState) => ({ conversationId: "x", channel: "TEST" as const, config: parseSalesChatbotConfig(null), state: st, lastUserText: "", agent: { name: "t", source: "t" }, quickReplies: qCat });
+      const sq = await executeTool("send_quick_reply", { code: "q1" }, tctx({}));
+      assert.ok(!sq.isError && sq.deliver?.text.includes("400.000") && sq.deliver.imageIds.length === 1 && sq.state.upsellSent === true, JSON.stringify(sq));
+      assert.ok((await executeTool("send_quick_reply", { code: "Q1" }, tctx(sq.state))).isError, "câu upsell chỉ gửi MỘT lần mỗi hội thoại");
+      assert.ok((await executeTool("send_quick_reply", { code: "Q9" }, tctx({}))).isError, "mã không có trong danh sách ⇒ từ chối");
+      assert.equal((await executeTool("set_sales_stage", { stage: "INFO" }, tctx({}))).state.stage, "INFO");
+      const dec = await executeTool("mark_declined", { reason: "Khách nói thôi không lấy" }, tctx({}));
+      assert.ok(dec.state.declined && dec.state.stage === "DECLINED");
+      await db.insert(schema.customers).values({ name: "Nguyễn Thanh Hà", phone: "0975850916", address: "Xóm 8, thôn Văn Tảo, xã Hà Nam, Thành phố Hải Phòng", province: "" });
+      const lk = await executeTool("lookup_customer", { phone: "0975 850 916" }, tctx({}));
+      const lkData = JSON.parse(lk.content) as { returning_customer: boolean; previous_address_hint: string; name_hint: string };
+      assert.ok(lkData.returning_customer && lkData.previous_address_hint === "…, xã Hà Nam, Thành phố Hải Phòng" && !lk.content.includes("Xóm 8") && lkData.name_hint === "Hà", lk.content);
+      assert.equal((JSON.parse((await executeTool("lookup_customer", { phone: "0900000001" }, tctx({}))).content) as { returning_customer: boolean }).returning_customer, false);
+      // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
+      let flowStep = 0;
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          assert.ok(/CÂU MẪU của shop/.test(req.system) && /Q1: Hỏi giá chả mực/.test(req.system), "lời nhắc có danh sách câu mẫu");
+          flowStep += 1;
+          const content: AiBlock[] = flowStep === 1 ? [{ type: "tool_use", id: "s1", name: "set_sales_stage", input: { stage: "QUOTE" } }, { type: "tool_use", id: "q1", name: "send_quick_reply", input: { code: "Q1" } }] : [{ type: "text", text: "Mình lấy 1kg hay 2kg ạ?" }];
+          return { content, stopReason: flowStep === 1 ? "tool_use" : "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-flow-1", "món mực nhà mình có ngon không em", { id: "cust-fl", name: "Chị Mai" }, "t-flow"));
+      const flowFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-flow" : `m-${Math.random().toString(36).slice(2)}` }));
+      const rf = await processFanpageThread(PAGE, "t-flow", { fetch: flowFetch.fetch, now: in31s });
+      const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages")).map((c) => String(c.init?.body));
+      assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("1kg hay 2kg") && flowBodies.some((b) => b.includes("content_ids")), JSON.stringify({ rf, flowBodies }));
+      const flowConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-flow"))))[0];
+      assert.equal((flowConv.state as ChatState).stage, "QUOTE");
+      assert.equal((await listConversations(50)).find((c) => c.id === flowConv.id)?.stage, "QUOTE", "danh sách hội thoại hiện bước bán");
+      // Giá BẤT THƯỜNG (mã chưa có giá) ⇒ CẦN NGƯỜI XỬ LÝ do MÁY quyết, bot im lặng; không tự hết hạn; người «Trả lại cho AI» ⇒ bot trả lời lại.
+      const noPrice = await mk("Mực khô (chưa có giá)", "MUC-KHO", 100_000, "");
+      await db.update(schema.productVariants).set({ retailPrice: 0 }).where(eq(schema.productVariants.id, noPrice));
+      let npStep = 0;
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          npStep += 1;
+          const content: AiBlock[] = npStep === 1 ? [{ type: "tool_use", id: "c1", name: "calculate_cart", input: { items: [{ variant_id: noPrice, quantity: 1 }] } }] : [{ type: "text", text: "Dạ mực khô giá 0đ ạ" }];
+          return { content, stopReason: npStep === 1 ? "tool_use" : "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-np-1", "mực khô bán sao em", { id: "cust-np", name: "Anh Nam" }, "t-np"));
+      const npFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      const rnp = await processFanpageThread(PAGE, "t-np", { fetch: npFetch.fetch, now: in31s });
+      assert.ok(rnp.replies === 0 && !npFetch.calls.some((c) => c.init?.method === "POST"), `giá bất thường ⇒ không nói «0đ», không gửi gì: ${JSON.stringify(rnp)}`);
+      assert.equal(npStep, 1, "máy dừng vòng AI ngay khi cần người");
+      const npConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-np"))))[0];
+      assert.ok(npConv.status === "HANDOFF" && /Cần người xử lý — Giá bất thường/.test(npConv.handoffReason ?? ""), JSON.stringify(npConv.handoffReason));
+      // Nhân viên trả lời trên page KHÔNG đổi lý do thành «nhân viên đang trả lời» (thứ tự hết hạn sau 30 phút).
+      await receiveFanpageEvent(ev("m-np-staff", "Dạ để em kiểm giá", { id: PAGE, uid: "u-staff", name: "NV" }, "t-np"));
+      assert.match((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, npConv.id)))[0].handoffReason ?? "", /Giá bất thường/);
+      await receiveFanpageEvent(ev("m-np-2", "sao rồi em", { id: "cust-np", name: "Anh Nam" }, "t-np"));
+      const rLater = await processFanpageThread(PAGE, "t-np", { fetch: npFetch.fetch, now: () => new Date(Date.now() + 13 * 3_600_000) });
+      assert.ok(rLater.replies === 0, "cần người xử lý KHÔNG tự hết hạn sau 13 giờ");
+      assert.equal(npStep, 1, "đang cần người ⇒ không gọi AI lần nào (không tốn token, không tự trả lời)");
+      assert.equal(await resumeConversationToAi(npConv.id), true);
+      assert.equal(await resumeConversationToAi(npConv.id), false, "chỉ trả lại hội thoại đang cần người");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      await receiveFanpageEvent(ev("m-np-3", "chả mực bao nhiêu em", { id: "cust-np", name: "Anh Nam" }, "t-np"));
+      const rBack = await processFanpageThread(PAGE, "t-np", { fetch: npFetch.fetch, now: () => new Date(Date.now() + 13 * 3_600_000) });
+      assert.ok(rBack.replies >= 1, `trả lại cho AI ⇒ bot trả lời lại: ${JSON.stringify(rBack)}`);
       // ═══ BÌNH LUẬN (0184): trả lời bằng TIN NHẮN RIÊNG (private reply), không bao giờ công khai ═══
       const evc = (id: string, text: string, from: Record<string, unknown>, thread: string, postId = `${PAGE}_post-1`) =>
         parsePancakeWebhook({ event_type: "messaging", page_id: PAGE, data: { conversation: { id: thread, type: "COMMENT" }, message: { id, type: "COMMENT", message: text, from, post_id: postId } } })!;

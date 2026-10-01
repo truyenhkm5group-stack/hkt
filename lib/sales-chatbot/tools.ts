@@ -16,36 +16,57 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
+import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
+import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
-import { createCustomerAsAgent } from "@/lib/records/customer-create";
+import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
+import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 
 export type CartLine = { variantId: string; quantity: number };
 export type Recipient = { name: string; phone: string; address: string; province: string };
+import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
+
+export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-chatbot/stages";
+
 export type ChatState = {
   customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean };
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean };
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string };
   handoff?: { reason: string; at: string };
+  stage?: SalesStage;
+  /** Đã gửi câu upsell (chỉ MỘT lần mỗi hội thoại). */
+  upsellSent?: boolean;
+  declined?: { reason: string; at: string };
 };
+
+/** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
+export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined"] as const;
+export type ProcessTool = (typeof PROCESS_TOOLS)[number];
 
 export type ToolContext = {
   conversationId: string;
   channel: ChatChannel;
   config: SalesChatbotConfig;
   state: ChatState;
+  /** Câu mẫu đang bật, mã ngắn Q1… như trong lời nhắc (`quickReplyCatalog`). */
+  quickReplies?: readonly { code: string; id: string; title: string; upsell: boolean }[];
   /** Câu CUỐI khách gõ (chữ thô) — `confirm_order` đối chiếu lời xác nhận với câu này. */
   lastUserText: string;
   agent: OrderAgent;
 };
 
-export type ToolOutcome = { content: string; isError: boolean; summary: string; state: ChatState };
+/**
+ * `deliver` = câu mẫu máy chủ GỬI NGUYÊN VĂN cho khách (đã điền số ERP) + ảnh; `requireHuman` = công cụ thấy điều bất thường
+ * (giá thiếu, tồn âm) ⇒ engine chuyển hội thoại sang CẦN NGƯỜI XỬ LÝ, không để AI tự quyết.
+ */
+export type ToolOutcome = { content: string; isError: boolean; summary: string; state: ChatState; deliver?: { text: string; imageIds: string[]; quickReplyId: string }; requireHuman?: string };
 
 const itemsZ = z.array(z.object({ variant_id: z.string().min(1).max(200), quantity: z.number().int().min(1).max(10_000) }).strict()).min(1).max(30);
 
@@ -133,8 +154,42 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   },
 };
 
+const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
+  send_quick_reply: {
+    name: "send_quick_reply",
+    description: "Gửi NGUYÊN VĂN một CÂU TRẢ LỜI MẪU của shop (chữ + ảnh, giá đã điền từ ERP) cho khách. code = mã trong danh sách CÂU MẪU (Q1, Q2…). Sau khi gửi, KHÔNG nhắc lại nội dung câu mẫu — chỉ viết thêm câu hỏi ngắn tiếp theo nếu cần.",
+    inputSchema: { type: "object", properties: { code: { type: "string" } }, required: ["code"], additionalProperties: false },
+    kind: "read",
+  },
+  set_sales_stage: {
+    name: "set_sales_stage",
+    description: "Ghi BƯỚC hiện tại của quy trình bán: QUOTE (báo giá + xác định sản phẩm) · CONSULT (tư vấn + xử lý phản đối) · INFO (lấy thông tin khách) · UPSELL · CONFIRM (xác nhận / chốt). Gọi mỗi khi chuyển bước.",
+    inputSchema: { type: "object", properties: { stage: { type: "string", enum: ["QUOTE", "CONSULT", "INFO", "UPSELL", "CONFIRM"] } }, required: ["stage"], additionalProperties: false },
+    kind: "read",
+  },
+  lookup_customer: {
+    name: "lookup_customer",
+    description: "Kiểm tra KHÁCH CŨ theo số điện thoại khách vừa cho: đã mua bao nhiêu đơn, gợi ý địa chỉ cũ (đã che một phần). CHỈ để hỏi lại khách «giao về địa chỉ cũ … phải không ạ?» — không tự điền khi khách chưa xác nhận.",
+    inputSchema: { type: "object", properties: { phone: { type: "string" } }, required: ["phone"], additionalProperties: false },
+    kind: "read",
+  },
+  mark_declined: {
+    name: "mark_declined",
+    description: "Ghi nhận khách TỪ CHỐI RÕ RÀNG không mua (vd «thôi không lấy nữa», «không mua đâu»). Bot sẽ thôi nhắn follow-up. Không dùng khi khách chỉ phân vân / chê đắt.",
+    inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"], additionalProperties: false },
+    kind: "write",
+  },
+};
+
 export function toolDefsFor(cfg: SalesChatbotConfig): AiToolDef[] {
-  return cfg.allowedTools.map((t) => DEFS[t]);
+  return [...cfg.allowedTools.map((t) => DEFS[t]), ...PROCESS_TOOLS.map((t) => PROCESS_DEFS[t])];
+}
+
+/** Địa chỉ cũ ĐÃ CHE cho khách xác nhận: chỉ hai phần cuối (vd «…, Hà Nam, Thành phố Hải Phòng») — người gõ SĐT của người khác không đọc được số nhà. */
+export function maskAddress(address: string): string {
+  const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 1) return parts.length ? "…" : "";
+  return `…, ${parts.slice(-2).join(", ")}`;
 }
 
 const price = (n: number | null) => (n === null ? "chưa có giá" : formatVND(n));
@@ -216,10 +271,10 @@ function failureText(r: { errors: { field: string; message: string }[] }): strin
 
 export async function executeTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const state: ChatState = structuredClone(ctx.state);
-  if (!(ctx.config.allowedTools as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
+  if (!(ctx.config.allowedTools as readonly string[]).includes(name) && !(PROCESS_TOOLS as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
   const input = (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>;
   const simulated = ctx.channel === "TEST";
-  switch (name as SalesTool) {
+  switch (name as SalesTool | ProcessTool) {
     case "search_products": {
       const q = z.string().trim().min(1).max(200).safeParse(input.query);
       if (!q.success) return err("Tìm: thiếu từ khoá", "Thiếu từ khoá tìm.", state);
@@ -246,14 +301,17 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       });
       const short = rows.filter((r) => "enough" in r && r.enough === false).length;
       const unknown = rows.filter((r) => "stock_known" in r && r.stock_known === false).length;
-      return ok(`Kiểm tồn ${rows.length} dòng${short ? ` · ${short} thiếu` : ""}${unknown ? ` · ${unknown} chưa biết tồn` : ""}`, { items: rows }, state);
+      const negative = rows.filter((r) => "available" in r && typeof r.available === "number" && r.available < 0).length;
+      const out = ok(`Kiểm tồn ${rows.length} dòng${short ? ` · ${short} thiếu` : ""}${unknown ? ` · ${unknown} chưa biết tồn` : ""}`, { items: rows }, state);
+      // Tồn ÂM = sổ kho đang sai (xuất nhiều hơn nhập) — không bán tiếp theo con số đó, người kiểm.
+      return negative ? { ...out, requireHuman: `Tồn kho bất thường: ${negative} mã tồn khả dụng âm` } : out;
     }
     case "calculate_cart": {
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Tính giỏ: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
       const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config);
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
-      if (priced.unpriced.length) return err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state);
+      if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
@@ -283,7 +341,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const priced = await priceLines(lines, ctx.config);
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
-      if (priced.unpriced.length) return err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state);
+      if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       const draft = { orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
@@ -326,6 +384,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         orderId = r.id;
       }
       state.confirmed = { orderId, simulated, total: priced.total ?? priced.subtotal, at: new Date().toISOString() };
+      state.stage = "DONE";
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}`, {
         confirmed: true,
         simulated,
@@ -333,6 +392,39 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         ...cartView(priced),
         stock_note: unknownStock ? "Có mã kho chưa xác nhận tồn — nhân viên sẽ kiểm trước khi giao." : null,
       }, state);
+    }
+    case "send_quick_reply": {
+      const code = z.string().trim().min(1).max(20).safeParse(input.code);
+      const entry = code.success ? ctx.quickReplies?.find((q) => q.code.toLowerCase() === code.data.toLowerCase()) : undefined;
+      if (!entry) return err("Câu mẫu: không có mã", "Không có câu mẫu với mã này — chỉ dùng mã trong danh sách CÂU MẪU.", state);
+      if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
+      const pick = await renderQuickReplyForSend(entry.id, ctx.config);
+      if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
+      if (entry.upsell) state.upsellSent = true;
+      return { ...ok(`Gửi câu mẫu «${entry.title}»${pick.imageIds.length ? ` + ${pick.imageIds.length} ảnh` : ""}`, { sent: true, note: "Khách đã nhận nguyên văn câu mẫu (và ảnh). Không nhắc lại nội dung." }, state), deliver: { text: pick.text, imageIds: pick.imageIds, quickReplyId: entry.id } };
+    }
+    case "set_sales_stage": {
+      const st = z.enum(["QUOTE", "CONSULT", "INFO", "UPSELL", "CONFIRM"]).safeParse(input.stage);
+      if (!st.success) return err("Bước: sai mã", "stage phải là QUOTE / CONSULT / INFO / UPSELL / CONFIRM.", state);
+      if (state.confirmed) return ok("Đơn đã chốt — giữ bước Đã chốt", { stage: "DONE" }, state);
+      state.stage = st.data;
+      return ok(`Bước: ${SALES_STAGE_LABEL[st.data]}`, { stage: st.data }, state);
+    }
+    case "lookup_customer": {
+      const phone = normalizeCustomerPhone(String(input.phone ?? ""));
+      if (!phone) return err("Khách cũ: SĐT không hợp lệ", "Số điện thoại chỉ gồm 8–15 chữ số.", state);
+      const db = await getDb();
+      const [c] = await db.select({ id: schema.customers.id, name: schema.customers.name, address: schema.customers.address }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
+      if (!c) return ok("Khách mới (chưa có SĐT trong sổ)", { returning_customer: false }, state);
+      const [n] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.orders).where(and(eq(schema.orders.customerId, c.id), ne(schema.orders.stage, "DELETED")));
+      const nameHint = c.name.trim().split(/\s+/).pop() ?? "";
+      return ok(`Khách cũ · ${Number(n?.n ?? 0)} đơn`, { returning_customer: true, orders: Number(n?.n ?? 0), name_hint: nameHint, previous_address_hint: maskAddress(c.address) || null, note: "Chỉ GỢI Ý — hỏi khách xác nhận địa chỉ, không tự điền." }, state);
+    }
+    case "mark_declined": {
+      const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
+      state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
+      state.stage = "DECLINED";
+      return ok("Khách từ chối — thôi follow-up", { declined: true }, state);
     }
     case "handoff_to_human": {
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);

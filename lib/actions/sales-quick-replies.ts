@@ -68,6 +68,15 @@ export async function saveQuickReplySettingsAction(input: { enabled: boolean; ai
   return { ok: true, message: "Đã lưu cách trả lời" };
 }
 
+/** Chọn (hoặc bỏ) câu mẫu bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán. */
+export async function setUpsellQuickReplyAction(id: string | null): Promise<Result> {
+  const user = await requireUser();
+  const r = await saveQuickReplySettings(user, { upsellReplyId: id ? String(id) : null });
+  if ("error" in r) return r;
+  revalidatePath(PATH);
+  return { ok: true, message: id ? "Đã chọn câu upsell" : "Đã bỏ câu upsell" };
+}
+
 /** Thử khớp CHỮ một câu khách (0 token — không gọi AI): câu mẫu nào sẽ trả lời và câu trả lời sau khi điền số từ ERP. */
 export async function tryQuickReplyAction(text: string): Promise<{ ok: true; result: string } | { error: string }> {
   const user = await requireUser();
