@@ -473,6 +473,27 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
   }
 }
 
+/** Thêm MỘT tin của bot vào cuối hội thoại (follow-up · 0185) — seq kế tiếp; va seq (lượt khác vừa ghi) ⇒ thử lại một lần. */
+export async function appendBotMessage(conversationId: string, text: string): Promise<void> {
+  for (let i = 0; i < 2; i++) {
+    const msgs = await loadMessages(conversationId);
+    try {
+      await appendMessage(conversationId, (msgs[msgs.length - 1]?.seq ?? 0) + 1, "assistant", [{ type: "text", text }]);
+      return;
+    } catch (error) {
+      if (!(error instanceof SeqConflict) || i === 1) throw error;
+    }
+  }
+}
+
+/** Số hội thoại đang CHỜ KHÁCH (follow-up · 0185). */
+export async function countWaitingConversations(): Promise<number> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(eq(c.status, "WAITING"));
+  return Number(r?.n ?? 0);
+}
+
 /** Hội thoại gần đây cho màn hình quản trị. */
 export async function listConversations(limit = 30) {
   const db = await getDb();

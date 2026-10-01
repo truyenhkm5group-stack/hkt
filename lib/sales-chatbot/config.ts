@@ -153,7 +153,7 @@ export const CHAT_CHANNEL_LABEL: Record<ChatChannel, string> = { TEST: "Khung th
 /** Một dòng tin cho màn hình (đã lọc bỏ khối công cụ thô). */
 export type ChatView = {
   conversationId: string;
-  status: "OPEN" | "HANDOFF" | "CLOSED";
+  status: "OPEN" | "WAITING" | "HANDOFF" | "CLOSED";
   messages: { role: "user" | "assistant"; text: string; tools?: { name: string; ok: boolean; summary: string }[] }[];
   order: { id: string | null; stage: string | null; simulated: boolean; total: number | null } | null;
 };

@@ -14,12 +14,15 @@ import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/e
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
 import { PlaybookPanel } from "./playbook-panel";
+import { FollowupPanel } from "./followup-panel";
+import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
+import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
 import { ResumeToAiButton } from "./resume-button";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 
 export const metadata = { title: "Chatbot bán hàng" };
 
-const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", HANDOFF: "Cần người xử lý", CLOSED: "Đã đóng" };
+const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", WAITING: "Chờ khách (follow-up)", HANDOFF: "Cần người xử lý", CLOSED: "Đã đóng" };
 
 /**
  * CHATBOT BÁN HÀNG (0180) — AI → Sales Chatbot. Cấu hình (khoá AI BYOK của chính tổ chức, giọng, giờ làm việc, chuyển
@@ -38,6 +41,7 @@ export default async function SalesChatbotPage() {
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const [playbook, playbookRun] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun()]) : [null, null];
+  const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
     const row = connections.find((c) => c.connectorKey === k);
     return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row) };
@@ -94,6 +98,7 @@ export default async function SalesChatbotPage() {
               </div>
             </SectionCard>
           ) : null}
+          {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
             <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} />

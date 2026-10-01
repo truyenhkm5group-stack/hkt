@@ -117,17 +117,17 @@ function kiemNhip() {
 async function kiemLich(fan: FanOut) {
   assert.equal(fan.WORKFLOW_FANOUT_TICK_MINUTES, WORKFLOW_CADENCE_MIN_MINUTES, "nhịp gõ của bộ lập lịch = nhịp nhỏ nhất được phép — gói nhịp 5 phút cũng được phục vụ");
   assert.ok(fan.FANOUT_JOBS.includes(WORKFLOWS_JOB));
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["work-recurrence", "workflows"], "tầng tự động hoá: đúng luật + việc định kỳ");
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);
   }
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB]);
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup"]);
 
   const lich = doc("scripts/scheduler.mjs");
   const jobsLich = [...new Set([...lich.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]))];
   assert.ok(jobsLich.length > 15, "đọc hụt lịch");
-  for (const j of jobsLich) assert.equal(fan.callsHome(j), j !== WORKFLOWS_JOB, `${j}: ${j === WORKFLOWS_JOB ? "KHÔNG" : ""} có lượt của nhà`);
+  for (const j of jobsLich) assert.equal(fan.callsHome(j), !fan.FANOUT_ONLY_JOBS.includes(j), `${j}: ${fan.FANOUT_ONLY_JOBS.includes(j) ? "KHÔNG" : ""} có lượt của nhà`);
 
   // Ma trận đường fan-out: tắt ⇒ không gì; tự động hoá ⇒ đúng hai job; toàn bộ ⇒ đường cũ cho phần còn lại.
   for (const j of [...jobsLich, ...fan.FANOUT_JOBS]) assert.equal(fan.fanOutPlan({ job: j, all: false, automation: false }), "OFF", `${j}: hai công tắc tắt ⇒ không fan-out`);

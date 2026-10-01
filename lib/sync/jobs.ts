@@ -63,6 +63,7 @@ import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize
 import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
+import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 
 export type JobOptions = {
   trigger: SyncTrigger;
@@ -673,6 +674,29 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Nhịp mặc định 10 phút (gói có thể khai `workflowCadenceMinutes` ≥ 5), trần 60 giây mỗi tổ chức mỗi lượt, trần sự kiện / hành động của bộ máy. " +
       "Bỏ qua (không ghi sổ) khi: tổ chức nhà (luật của nhà chạy ké job cảnh báo) · công tắc khẩn tạm dừng luật đang bật · chưa tới kỳ.",
     run: (o) => runScheduledWorkflows({ trigger: o.trigger, actor: o.actor }),
+  },
+  /*
+    FOLLOW-UP TỰ ĐỘNG CỦA CHATBOT FANPAGE (0185 — chủ shop yêu cầu 01/10/2026): khách im lặng giữa quy trình bán ⇒ AI của
+    CHÍNH shop nhắc theo lịch (mặc định 1 giờ · 6 giờ · 22 giờ), dừng khi khách nhắn lại / chốt / từ chối rõ / cần người,
+    KHÔNG BAO GIỜ ngoài khung 24 giờ của Facebook. Chỉ tổ chức bật module AI bán hàng (nhà TẮT ⇒ bỏ qua `MODULE_DISABLED`).
+  */
+  "sales-followup": {
+    label: "Follow-up khách im lặng (chatbot fanpage)",
+    source: "ALL",
+    module: "ai_sales",
+    fanOut: true,
+    description:
+      "Hội thoại fanpage đang CHỜ KHÁCH tới mốc follow-up ⇒ AI của shop viết MỘT câu nhắc theo bước khách đang dừng (không nêu giá) và gửi qua Pancake. " +
+      "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng).",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await runSalesFollowups();
+        ctx.summary.imported = r.sent;
+        ctx.summary.skipped = r.stopped + r.deferred;
+        if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
+        ctx.summary.detail = `${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        return r;
+      }),
   },
   "work-auto-assign": {
     label: "Phân việc tự động",

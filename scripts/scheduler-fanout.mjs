@@ -40,13 +40,19 @@
  * PARTIAL mỗi 10 phút) · `landing-sheet` (mỗi phút; tổ chức chưa khai sheet thì hỏng mỗi phút) ·
  * mọi job kéo dữ liệu từ nhà cung cấp ngoài.
  */
-export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows"]);
+export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup"]);
 
-/** Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. */
-export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence"]);
+/**
+ * Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. `sales-followup` (follow-up chatbot fanpage — chủ shop yêu cầu
+ * 01/10/2026) là việc của TỪNG tổ chức khách có module AI bán hàng, nên đi cùng tầng này.
+ */
+export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup"]);
 
-/** Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`). */
-export const FANOUT_ONLY_JOBS = Object.freeze(["workflows"]);
+/**
+ * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; nhà TẮT module
+ * AI bán hàng nên không có follow-up nào để chạy).
+ */
+export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup"]);
 
 /**
  * Nhịp GÕ của job `workflows` (phút) — BẰNG `WORKFLOW_CADENCE_MIN_MINUTES` của `lib/constants/workflow-cadence.ts`
