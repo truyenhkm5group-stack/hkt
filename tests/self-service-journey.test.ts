@@ -51,7 +51,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
-import { fanpageInboundCounts, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { fanpageInboundCounts, fanpageVisitorKey, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
@@ -566,6 +566,12 @@ async function testJourney() {
       const botId = (await db.select({ id: schema.salesChatInbound.messageId }).from(schema.salesChatInbound).where(eq(schema.salesChatInbound.note, "BOT_SENT")).limit(1))[0].id;
       assert.equal((await receiveFanpageEvent(ev(botId, "Dạ...", { id: PAGE, uid: "u-staff" }))).reason, "Tin của chính bot");
       assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "OPEN");
+      // Tiếng vọng mang MÃ KHÁC mã lời gọi gửi trả về (hoặc tới trước khi mã kịp ghi) nhưng đúng NGUYÊN VĂN câu bot vừa gửi
+      // (khác khoảng trắng) ⇒ vẫn là tin của bot, KHÔNG nhường. Cùng câu ấy ở hội thoại khác ⇒ không phải tiếng vọng.
+      const botText = (JSON.parse(String(sent[0].init?.body)) as { message: string }).message;
+      assert.equal((await receiveFanpageEvent(ev("m-echo-khac-ma", `  ${botText.replace(/ /g, "  ")}\n`, { id: PAGE, uid: "u-bot" }))).reason, "Tin của chính bot");
+      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, convs[0].id)))[0].status, "OPEN", "tiếng vọng không làm bot nhường");
+      assert.match((await receiveFanpageEvent(ev("m-echo-hoi-thoai-khac", botText, { id: PAGE, uid: "u-staff" }, "t-950"))).reason, /bot nhường/, "câu trùng ở hội thoại KHÁC là nhân viên thật");
       // Nhân viên thật trả lời trên fanpage ⇒ bot nhường hội thoại, tin khách kế tiếp không được bot trả lời.
       assert.match((await receiveFanpageEvent(ev("m-staff-1", "Chị đợi em chút nhé", { id: PAGE, uid: "u-staff", name: "NV" }))).reason, /bot nhường/);
       await receiveFanpageEvent(ev("m2", "Còn hàng không em?"));
@@ -592,6 +598,19 @@ async function testJourney() {
       assert.ok(rb.replies >= 1, `tin sau trả lời tự động, page im 30 giây ⇒ bot trả lời: ${JSON.stringify(rb)}`);
       const autoRows = await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "m-auto-1"));
       assert.ok(autoRows.length === 1 && autoRows[0].status !== "PENDING", "tin phía page không bao giờ thành tin chờ bot");
+      // ĐUA: tiếng vọng tới NGAY TRONG lời gọi gửi (trước khi lời gọi trả về) và Pancake không trả mã tin ⇒ chỉ dòng ghi
+      // TRƯỚC khi gửi nhận ra được; thiếu nó thì bot nhường 30 phút ngay sau câu trả lời đầu tiên của chính nó.
+      const raceReasons: string[] = [];
+      const racing = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
+        if (init?.method === "POST" && body.message) raceReasons.push((await receiveFanpageEvent(ev(`echo-race-${raceReasons.length}`, body.message, { id: PAGE, uid: "u-bot" }, "t-960"))).reason);
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+      }) as typeof fetch;
+      await receiveFanpageEvent(ev("m-race-1", "Chả mực bao nhiêu?", { id: "cust-3", name: "Chị Tư" }, "t-960"));
+      const rr = await processFanpageThread(PAGE, "t-960", { fetch: racing, now: in31s });
+      assert.ok(rr.replies >= 1 && raceReasons.length >= 1 && raceReasons.every((r) => r === "Tin của chính bot"), JSON.stringify({ rr, raceReasons }));
+      const raceConv = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-960")));
+      assert.equal(raceConv[0]?.status, "OPEN", "tiếng vọng tới giữa lúc gửi không làm bot nhường");
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= 30_000, `lượt sau webhook đợi ≥ 30 giây: ${sleeps.join(",")}`);
