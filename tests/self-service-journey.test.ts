@@ -53,7 +53,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
-import { fanpageInboundCounts, fanpageVisitorKey, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
@@ -562,9 +562,9 @@ async function testJourney() {
       assert.equal((await receiveFanpageEvent(ev("m1", "Chả mực bao nhiêu?"))).queued, false, "Pancake gửi lại ⇒ không nhận lần hai");
       assert.equal((await receiveFanpageEvent(ev("m-x", "hi", { id: "cust-9" }, "t-1", "9999999999"))).queued, false, "page khác page đã khai ⇒ không nhận");
       const before = await inboundCount();
-      // Chưa đủ 30 giây ⇒ chưa trả lời (đợi xem page có tự trả lời không).
+      // Tin ĐẦU của hội thoại mới, chưa đủ 10 giây ⇒ chưa trả lời (đợi xem Meta có tự trả lời không).
       const early = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
-      assert.ok(early.processed === 0 && early.replies === 0 && /30 giây/.test(early.skipped ?? ""), JSON.stringify(early));
+      assert.ok(early.processed === 0 && early.replies === 0 && /đợi xem page/.test(early.skipped ?? ""), JSON.stringify(early));
       const in31s = () => new Date(Date.now() + 31_000);
       const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(r1.processed, 1, JSON.stringify(r1));
@@ -604,7 +604,7 @@ async function testJourney() {
       const r3 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: () => later });
       assert.ok(r3.replies >= 1, `hết ${30} phút ⇒ bot trả lời lại: ${JSON.stringify(r3)}`);
       // Trả lời TỰ ĐỘNG của Meta (tin phía page, không uid) tới sau tin khách ⇒ bot không chen; tin khách sau đó mà page im
-      // 30 giây ⇒ bot trả lời. Tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
+      // vài giây ⇒ bot trả lời. Tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
       await receiveFanpageEvent(ev("m-q1", "Shop ơi còn hàng không?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       assert.match((await receiveFanpageEvent(ev("m-auto-1", "Cảm ơn anh đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-901"))).reason, /tự động/);
       const sentAuto = pancake.calls.length;
@@ -614,7 +614,7 @@ async function testJourney() {
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-q2", "Chả mực bao nhiêu?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       const rb = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
-      assert.ok(rb.replies >= 1, `tin sau trả lời tự động, page im 30 giây ⇒ bot trả lời: ${JSON.stringify(rb)}`);
+      assert.ok(rb.replies >= 1, `tin sau trả lời tự động, page im ⇒ bot trả lời: ${JSON.stringify(rb)}`);
       const autoRows = await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "m-auto-1"));
       assert.ok(autoRows.length === 1 && autoRows[0].status !== "PENDING", "tin phía page không bao giờ thành tin chờ bot");
       // ĐUA: tiếng vọng tới NGAY TRONG lời gọi gửi (trước khi lời gọi trả về) và Pancake không trả mã tin ⇒ chỉ dòng ghi
@@ -696,7 +696,22 @@ async function testJourney() {
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
-      assert.ok(sleeps[0] >= 30_000, `lượt sau webhook đợi ≥ 30 giây: ${sleeps.join(",")}`);
+      assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
+      // TRẢ LỜI NHANH (chủ shop 01/10/2026): tin TIẾP THEO chỉ đợi khách gõ xong; tin ĐẦU của hội thoại mới đợi tối đa 10 giây
+      // để nhường trả lời tự động của Meta — tới sớm (kể cả TRƯỚC tin khách vì webhook ngược thứ tự) ⇒ bỏ qua ngay.
+      const inMs = (ms: number) => () => new Date(Date.now() + ms);
+      await receiveFanpageEvent(ev("m-fast-1", "Shop còn ruốc tôm không", { id: "cust-8", name: "Chị Tám" }, "t-980"));
+      assert.equal((await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) })).skipped, "Đang đợi xem page có trả lời không", "tin đầu hội thoại mới: 5 giây chưa đủ");
+      const f1 = await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(f1.replies >= 1, `tin đầu, Meta không trả lời sau 10 giây ⇒ bot trả lời: ${JSON.stringify(f1)}`);
+      await receiveFanpageEvent(ev("m-fast-2", "Ship Hà Nội mấy ngày em", { id: "cust-8", name: "Chị Tám" }, "t-980"));
+      const f2 = await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) });
+      assert.ok(f2.replies >= 1, `tin tiếp theo trả lời sau ~5 giây, không đợi 10: ${JSON.stringify(f2)}`);
+      await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-fast-3", "Shop ơi", { id: "cust-9", name: "Anh Chín" }, "t-981"));
+      const f3 = await processFanpageThread(PAGE, "t-981", { fetch: pancake.fetch });
+      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta trả lời tới TRƯỚC tin đầu (ngược thứ tự) ⇒ bỏ qua NGAY, không đợi: ${JSON.stringify(f3)}`);
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));
