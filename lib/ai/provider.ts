@@ -76,6 +76,10 @@ const PRICE_PER_MTOK: Record<string, { input: number; output: number; cacheRead:
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // Gemini (01/10/2026): CÙNG bảng giá bot fanpage của nhà đang dùng thật (`chatbot/src/aicost.js` · DEFAULT_AI_PRICES) — token
+  // suy nghĩ tính như token ra (provider cộng `thoughtsTokenCount` vào outputTokens). Gemini không tính phí ghi cache.
+  "gemini-2.5-flash-lite": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0 },
 };
 
 /**

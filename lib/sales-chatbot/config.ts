@@ -55,7 +55,7 @@ export const SALES_THINKING_LABEL: Record<SalesThinking, string> = { SMART: "K�
 /** Ngân sách token đầu ra + mức suy luận của MỘT vòng chat theo mức suy nghĩ (suy luận ăn chung ngân sách — xem provider). */
 export const SALES_THINKING_BUDGET: Record<SalesThinking, { maxTokens: number; reasoning: "low" | "medium" }> = { SMART: { maxTokens: 10_000, reasoning: "medium" }, FAST: { maxTokens: 4_000, reasoning: "low" } };
 
-export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok"] as const;
+export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok", "gemini-byok"] as const;
 export type SalesBotConnector = (typeof SALES_BOT_CONNECTORS)[number];
 
 /** Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): chặn vòng lặp công cụ và bão tin trên trang chat công khai. */

@@ -237,6 +237,7 @@ import { testCompanyOsModel360Db, testCompanyOsModel360Pure } from "./company-os
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
+import { testGeminiProvider } from "./gemini-provider.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
@@ -2046,6 +2047,8 @@ async function main() {
   await testCrm(db);
   testScenario();
   testAccessControl();
+  // Gemini cho chatbot bán hàng (01/10/2026): provider REST + kết nối gemini-byok + giá — không gọi mạng thật.
+  await testGeminiProvider();
   testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);
