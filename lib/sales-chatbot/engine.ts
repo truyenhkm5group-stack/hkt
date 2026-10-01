@@ -32,7 +32,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
-import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
+import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -59,7 +59,10 @@ async function businessProfile(): Promise<string> {
 }
 
 /** Lời nhắc hệ thống — dựng từ cấu hình; KHÔNG có giá, tồn hay danh mục (bot phải hỏi công cụ). */
-export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = ""): string {
+export type PromptQuickReply = { code: string; title: string; upsell: boolean };
+
+export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = []): string {
+  const upsell = quick.find((q) => q.upsell);
   const shipping = cfg.shippingFee === null ? "Shop CHƯA khai phí ship cố định: nói với khách «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số." : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.";
   return [
     `Bạn là «${cfg.botName}», nhân viên bán hàng qua chat của shop «${shopName}». Trả lời bằng tiếng Việt, giọng: ${SALES_TONE_LABEL[cfg.tone]}. Câu ngắn, rõ, không dùng markdown phức tạp.`,
@@ -73,6 +76,19 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "6. CHỈ gọi confirm_order khi câu cuối của khách là lời đồng ý rõ ràng; customer_confirmation = nguyên văn lời đồng ý đó. Khách đổi ý / sửa ⇒ update_draft_order rồi đọc lại tóm tắt.",
     `7. Chuyển nhân viên (handoff_to_human) khi: ${[cfg.handoff.onCustomerRequest ? "khách muốn gặp người" : "", cfg.handoff.onComplaint ? "khách khiếu nại / phàn nàn" : "", "câu hỏi ngoài dữ liệu ERP", "bạn không chắc"].filter(Boolean).join(", ")}. Sau đó nói: «${cfg.handoff.message}».`,
     "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu.",
+    "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
+    "  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách (vd 1kg hay 2kg) trước khi báo giá.",
+    "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
+    "  B3 INFO — Lấy HỌ TÊN, SĐT, ĐỊA CHỈ: có SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
+    upsell
+      ? `  B4 UPSELL — Mời thêm ĐÚNG MỘT LẦN bằng câu mẫu ${upsell.code} (send_quick_reply) — gửi kèm ảnh menu; khách từ chối ⇒ không mời lại, đi tiếp B5.`
+      : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products); khách từ chối ⇒ không mời lại, đi tiếp B5.",
+    "  B5 CONFIRM — create_draft_order ⇒ đọc lại tóm tắt ⇒ khách đồng ý ⇒ confirm_order.",
+    "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
+    "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Ngoài chính sách» (đổi trả, giảm giá riêng, giao gấp shop chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không chắc» (độ tin thấp, không đoán).",
+    quick.length
+      ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
+      : "",
     channel === "TEST" ? "(Đây là KHUNG THỬ của chủ shop: công cụ ghi chỉ mô phỏng — vẫn làm đúng quy trình như với khách thật.)" : "",
     cfg.extraInstructions ? `Hướng dẫn thêm của shop (không được trái các luật trên): ${cfg.extraInstructions}` : "",
     playbook ? `SỔ TAY BÁN HÀNG của shop (chủ shop đã duyệt — học giọng điệu và cách xử lý; KHÔNG được trái các luật trên: giá / tồn / phí ship vẫn CHỈ từ công cụ):\n${playbook}` : "",
@@ -138,6 +154,15 @@ function textOf(blocks: readonly AiBlock[]): string {
     .trim();
 }
 
+function deliveredText(content: string): string | null {
+  try {
+    const d = (JSON.parse(content) as { __deliver?: unknown }).__deliver;
+    return typeof d === "string" && d.trim() ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function conversationView(id: string): Promise<ChatView | null> {
   const conv = await loadConversation(id);
   if (!conv) return null;
@@ -159,6 +184,11 @@ export async function conversationView(id: string): Promise<ChatView | null> {
     if (m.role === "user") {
       const t = textOf(m.content);
       if (t) out.push({ role: "user", text: t });
+      // Câu mẫu AI chọn gửi (`send_quick_reply`) — nằm trong kết quả công cụ, hiện ra (và gửi đi) như một tin của bot.
+      for (const b of m.content) if (b.type === "tool_result") {
+        const d = deliveredText(b.content);
+        if (d) out.push({ role: "assistant", text: d });
+      }
       continue;
     }
     const tools = m.content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use").map((b) => ({ name: b.name, ...(results.get(b.id) ?? { ok: true, summary: "" }) }));
@@ -353,7 +383,10 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       }
     }
     const orgRow = await findOrganization(org.code);
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook());
+    const quickCatalog = await quickReplyCatalog();
+    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog);
+    const deliveredImages: string[] = [];
+    let deliveredReplyId: string | null = null;
     const tools = toolDefsFor(cfg);
     const history = historyForModel([...msgs, { role: "user", content: [{ type: "text", text }] }], SALES_CHATBOT_LIMITS.historyMessages);
     let state = (conv.state ?? {}) as ChatState;
@@ -381,11 +414,21 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog });
           state = r.state;
+          if (r.deliver) {
+            deliveredImages.push(...r.deliver.imageIds);
+            deliveredReplyId = r.deliver.quickReplyId;
+            await markQuickReplyUsed(r.deliver.quickReplyId, now).catch(() => undefined);
+          }
+          // Công cụ thấy điều bất thường (giá thiếu, tồn âm) ⇒ CẦN NGƯỜI XỬ LÝ — không để AI tự quyết bán tiếp.
+          if (r.requireHuman && !state.handoff) {
+            state = { ...state, handoff: { reason: `Cần người xử lý — ${r.requireHuman}`, at: now.toISOString() } };
+            if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
+          }
           const payload = (() => {
             try {
-              return JSON.stringify({ ...(JSON.parse(r.content) as Record<string, unknown>), __summary: r.summary });
+              return JSON.stringify({ ...(JSON.parse(r.content) as Record<string, unknown>), __summary: r.summary, ...(r.deliver ? { __deliver: r.deliver.text } : {}) });
             } catch {
               return r.content;
             }
@@ -395,6 +438,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         history.push({ role: "user", content: results });
         await appendMessage(conv.id, seq++, "user", results);
         await bump({ state: state as Record<string, unknown> });
+        if (state.handoff) break;
         if (round === SALES_CHATBOT_LIMITS.toolRounds - 1) {
           await reply(conv, seq++, "Dạ em cần kiểm thêm — anh/chị đợi nhân viên hỗ trợ giúp em nhé.");
           state = { ...state, handoff: { reason: "Quá số vòng công cụ", at: new Date().toISOString() } };
@@ -422,7 +466,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       ...(state.draft?.orderId ? { draftOrderId: state.draft.orderId } : {}),
       ...(state.confirmed?.orderId ? { orderId: state.confirmed.orderId } : {}),
     });
-    return { ok: true, view: (await conversationView(conv.id))! };
+    return { ok: true, view: (await conversationView(conv.id))!, ...(deliveredImages.length && deliveredReplyId ? { media: { quickReplyId: deliveredReplyId, imageIds: deliveredImages } } : {}) };
   } catch (error) {
     if (error instanceof SeqConflict) return { ok: false, error: error.message, view: await conversationView(conv.id) };
     throw error;
@@ -433,5 +477,24 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
 export async function listConversations(limit = 30) {
   const db = await getDb();
   const c = schema.salesChatConversations;
-  return db.select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, customerId: c.customerId, orderId: c.orderId, draftOrderId: c.draftOrderId, handoffReason: c.handoffReason, lastError: c.lastError, updatedAt: c.updatedAt }).from(c).orderBy(desc(c.updatedAt)).limit(limit);
+  return db
+    .select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, customerId: c.customerId, orderId: c.orderId, draftOrderId: c.draftOrderId, handoffReason: c.handoffReason, lastError: c.lastError, updatedAt: c.updatedAt, stage: sql<string | null>`${c.state}->>'stage'` })
+    .from(c)
+    .orderBy(desc(c.updatedAt))
+    .limit(limit);
+}
+
+/**
+ * CẦN NGƯỜI XỬ LÝ ⇒ người xử lý xong TRẢ LẠI CHO AI (chủ shop 01/10/2026): hội thoại về `OPEN`, xoá lý do chuyển — tin khách
+ * kế tiếp bot trả lời lại. Gọi từ server action (đã kiểm `ai_sales:manage`). `false` = không có / không ở trạng thái chuyển.
+ */
+export async function resumeConversationToAi(id: string): Promise<boolean> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [row] = await db
+    .update(c)
+    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, updatedAt: new Date() })
+    .where(and(eq(c.id, id), eq(c.status, "HANDOFF")))
+    .returning({ id: c.id });
+  return Boolean(row);
 }

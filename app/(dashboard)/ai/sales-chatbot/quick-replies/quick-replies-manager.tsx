@@ -16,6 +16,7 @@ import {
   saveQuickReplyAction,
   saveQuickReplySettingsAction,
   setQuickReplyActiveAction,
+  setUpsellQuickReplyAction,
   tryQuickReplyAction,
 } from "@/lib/actions/sales-quick-replies";
 import { formatDateTime } from "@/lib/format";
@@ -160,6 +161,7 @@ export function QuickRepliesManager({ manage, settings, rows }: { manage: boolea
                     <b>{r.title}</b>
                     {r.source === "LEARNED" ? <Badge variant="secondary">AI học</Badge> : null}
                     {r.needsEdit ? <Badge variant="destructive">Sửa giá trước khi bật</Badge> : null}
+                    {settings.upsellReplyId === r.id ? <Badge data-testid="upsell-badge">Câu upsell</Badge> : null}
                     <span className="text-xs text-muted-foreground">
                       dùng {r.uses} lần{r.lastUsedAt ? ` · gần nhất ${formatDateTime(r.lastUsedAt)}` : ""}
                     </span>
@@ -184,6 +186,16 @@ export function QuickRepliesManager({ manage, settings, rows }: { manage: boolea
                 </div>
                 {manage ? (
                   <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs"
+                      title="Bot gửi câu này (kèm ảnh menu) ở bước upsell / cross-sell — đúng một lần mỗi hội thoại"
+                      disabled={pending || (!r.active && settings.upsellReplyId !== r.id)}
+                      onClick={() => act(() => setUpsellQuickReplyAction(settings.upsellReplyId === r.id ? null : r.id))}
+                    >
+                      {settings.upsellReplyId === r.id ? "Bỏ upsell" : "Dùng làm câu upsell"}
+                    </Button>
                     <Switch checked={r.active} disabled={pending || (r.needsEdit && !r.active)} onCheckedChange={(v) => act(() => setQuickReplyActiveAction(r.id, v))} aria-label={`Bật câu mẫu ${r.title}`} />
                     <Button size="icon" variant="ghost" className="size-8" title="Thêm ảnh" disabled={pending || r.images.length >= QUICK_REPLY_LIMITS.images} onClick={() => { setUploadFor(r.id); fileRef.current?.click(); }}>
                       <ImagePlus className="size-4" />

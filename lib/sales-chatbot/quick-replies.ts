@@ -195,6 +195,22 @@ export async function quickReplyByAi(
   return { pick: entry ? await pickOf(entry, "AI", cfg) : null, res };
 }
 
+/**
+ * Câu mẫu ĐANG BẬT cho AI dùng TRONG luồng bán (công cụ `send_quick_reply`): mã ngắn Q1, Q2… (ổn định trong một lượt) +
+ * tên + có phải câu upsell không. Không đưa câu trả lời vào lời nhắc — AI chỉ chọn, máy chủ điền số ERP rồi gửi nguyên văn.
+ */
+export async function quickReplyCatalog(): Promise<{ code: string; id: string; title: string; upsell: boolean }[]> {
+  const settings = await loadQuickReplySettings();
+  if (!settings.enabled) return [];
+  return (await activeEntries()).slice(0, QUICK_REPLY_LIMITS.aiCandidates).map((e, i) => ({ code: `Q${i + 1}`, id: e.id, title: e.title, upsell: e.id === settings.upsellReplyId }));
+}
+
+/** Một câu mẫu ĐANG BẬT, đã điền số ERP, kèm ảnh — để gửi nguyên văn. `null` = không còn / thiếu số. */
+export async function renderQuickReplyForSend(id: string, cfg: Pick<SalesChatbotConfig, "shippingFee">): Promise<QuickReplyPick | null> {
+  const entry = (await activeEntries()).find((e) => e.id === id);
+  return entry ? pickOf(entry, "AI", cfg) : null;
+}
+
 /** Ghi một lần dùng (đếm cho màn hình quản lý). */
 export async function markQuickReplyUsed(id: string, now: Date = new Date()): Promise<void> {
   const db = await getDb();
@@ -310,10 +326,16 @@ export async function removeQuickReplyImage(user: SessionUser, imageId: string):
   return { ok: true };
 }
 
-export async function saveQuickReplySettings(user: SessionUser, input: QuickReplySettings): Promise<{ ok: true } | { error: string }> {
+/** Lưu MỘT PHẦN cài đặt — gộp với bản đang lưu (bật / tắt một công tắc không xoá câu upsell đã chọn). */
+export async function saveQuickReplySettings(user: SessionUser, input: Partial<QuickReplySettings>): Promise<{ ok: true } | { error: string }> {
   const g = await gate(user);
   if (!g.ok) return { error: g.error };
-  const value = parseQuickReplySettings(input);
+  const value = parseQuickReplySettings({ ...(await loadQuickReplySettings()), ...input });
+  if (value.upsellReplyId) {
+    const db = await getDb();
+    const [row] = await db.select({ id: qr.id }).from(qr).where(eq(qr.id, value.upsellReplyId)).limit(1);
+    if (!row) return { error: "Câu mẫu upsell không còn." };
+  }
   await setSettingJson(QUICK_REPLY_SETTING_KEY, value);
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_QUICK_REPLY_SETTINGS", entity: "SETTINGS", entityId: QUICK_REPLY_SETTING_KEY, after: value });
   return { ok: true };

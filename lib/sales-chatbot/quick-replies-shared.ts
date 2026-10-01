@@ -34,14 +34,16 @@ export const QUICK_REPLY_LIMITS = {
   learnedMax: 15,
 } as const;
 
-export type QuickReplySettings = { enabled: boolean; aiMatch: boolean };
-export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true };
+/** `upsellReplyId` = câu mẫu (kèm ảnh menu) bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán — `null` khi chưa chọn. */
+export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null };
+export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null };
 
 export function parseQuickReplySettings(v: unknown): QuickReplySettings {
   const o = (v && typeof v === "object" ? v : {}) as Partial<Record<keyof QuickReplySettings, unknown>>;
   return {
     enabled: typeof o.enabled === "boolean" ? o.enabled : DEFAULT_QUICK_REPLY_SETTINGS.enabled,
     aiMatch: typeof o.aiMatch === "boolean" ? o.aiMatch : DEFAULT_QUICK_REPLY_SETTINGS.aiMatch,
+    upsellReplyId: typeof o.upsellReplyId === "string" && o.upsellReplyId.trim() ? o.upsellReplyId.trim() : null,
   };
 }
 

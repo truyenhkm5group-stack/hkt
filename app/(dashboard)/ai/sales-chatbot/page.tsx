@@ -14,10 +14,12 @@ import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/e
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
 import { PlaybookPanel } from "./playbook-panel";
+import { ResumeToAiButton } from "./resume-button";
+import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 
 export const metadata = { title: "Chatbot bán hàng" };
 
-const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", HANDOFF: "Chuyển nhân viên", CLOSED: "Đã đóng" };
+const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", HANDOFF: "Cần người xử lý", CLOSED: "Đã đóng" };
 
 /**
  * CHATBOT BÁN HÀNG (0180) — AI → Sales Chatbot. Cấu hình (khoá AI BYOK của chính tổ chức, giọng, giờ làm việc, chuyển
@@ -123,10 +125,12 @@ export default async function SalesChatbotPage() {
                 {conversations.map((c) => (
                   <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-channel={c.channel} data-status={c.status}>
                     <span>
-                      {CHAT_CHANNEL_LABEL[c.channel as ChatChannel] ?? c.channel} · {STATUS_LABEL[c.status] ?? c.status} · {c.turns} lượt
+                      {CHAT_CHANNEL_LABEL[c.channel as ChatChannel] ?? c.channel} · <b className={c.status === "HANDOFF" ? "text-destructive" : undefined}>{STATUS_LABEL[c.status] ?? c.status}</b> · {c.turns} lượt
+                      {c.stage && c.stage in SALES_STAGE_LABEL ? ` · ${SALES_STAGE_LABEL[c.stage as SalesStage]}` : ""}
                       {c.handoffReason ? ` · ${c.handoffReason}` : ""}
                     </span>
                     <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                      {manage && c.status === "HANDOFF" ? <ResumeToAiButton id={c.id} /> : null}
                       {c.orderId ? (
                         <Link href={`/orders/${encodeURIComponent(c.orderId)}`} className="underline underline-offset-2">
                           Đơn đã chốt

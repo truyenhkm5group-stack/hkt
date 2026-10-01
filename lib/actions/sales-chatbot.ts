@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { can, requireUser } from "@/lib/auth/session";
 import type { ChatView } from "@/lib/sales-chatbot/config";
-import { chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
+import { audit } from "@/lib/audit";
+import { chatTurn, conversationView, openConversation, resumeConversationToAi } from "@/lib/sales-chatbot/engine";
 import { bindOrganization } from "@/lib/platform/background";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
@@ -82,3 +83,14 @@ export async function unpublishPlaybookAction(): Promise<PlaybookResult> {
   return r;
 }
 
+
+/** «Trả lại cho AI» — người đã xử lý xong hội thoại CẦN NGƯỜI XỬ LÝ; tin khách kế tiếp bot trả lời lại. */
+export async function resumeConversationAction(id: string): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, SALES_CHATBOT_MANAGE)) return { error: "Bạn không có quyền điều khiển chatbot bán hàng (ai_sales:manage)." };
+  const done = await resumeConversationToAi(String(id ?? ""));
+  if (!done) return { error: "Hội thoại không ở trạng thái cần người xử lý." };
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_RESUME_AI", entity: "SALES_CHAT_CONVERSATION", entityId: String(id), reason: "Người xử lý xong — trả hội thoại lại cho AI" });
+  revalidatePath("/ai/sales-chatbot");
+  return { ok: true, message: "Đã trả hội thoại lại cho AI" };
+}

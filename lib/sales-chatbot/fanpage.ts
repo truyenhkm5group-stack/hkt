@@ -35,8 +35,6 @@ import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
 export const HUMAN_TAKEOVER_MINUTES = 30;
-/** Hội thoại đã chuyển nhân viên mà im lặng quá chừng này giờ ⇒ bot nhận lại khi khách nhắn tiếp. */
-export const HANDOFF_EXPIRE_HOURS = 12;
 /**
  * TRẢ LỜI NHANH NHẤT CÓ THỂ mà không chen ngang trả lời tự động của Meta (chủ shop 01/10/2026: bản đầu đợi 30 giây cho mọi
  * tin là quá chậm). Meta chỉ tự trả lời TIN ĐẦU của một hội thoại mới, và tin ấy tới qua Pancake sau vài giây ⇒
@@ -173,9 +171,10 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
+    // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
     await db
       .update(c)
-      .set({ status: "HANDOFF", handoffReason: STAFF_REASON, updatedAt: now })
+      .set({ status: "HANDOFF", handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${STAFF_REASON} then ${c.handoffReason} else ${STAFF_REASON} end`, updatedAt: now })
       .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId))));
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
@@ -410,9 +409,10 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       return { ...out, error: "Không mở được hội thoại" };
     }
     if (conv.status === "HANDOFF") {
+      // Nhân viên trả lời trên page ⇒ nhường 30 phút rồi bot nhận lại. CẦN NGƯỜI XỬ LÝ (AI / công cụ yêu cầu) ⇒ ở nguyên tới
+      // khi người bấm «Trả lại cho AI» — không tự hết hạn (chủ shop 01/10/2026).
       const ageMs = now().getTime() - conv.updatedAt.getTime();
-      const expire = conv.handoffReason === STAFF_REASON ? HUMAN_TAKEOVER_MINUTES * 60_000 : HANDOFF_EXPIRE_HOURS * 3_600_000;
-      if (ageMs < expire) {
+      if (conv.handoffReason !== STAFF_REASON || ageMs < HUMAN_TAKEOVER_MINUTES * 60_000) {
         await finish("SKIPPED", conv.handoffReason ?? "Đã chuyển nhân viên");
         out.processed += ids.length;
         out.skipped = conv.handoffReason ?? "Đã chuyển nhân viên";
