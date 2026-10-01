@@ -30,7 +30,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
@@ -85,6 +85,10 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products); khách từ chối ⇒ không mời lại, đi tiếp B5.",
     "  B5 CONFIRM — create_draft_order ⇒ đọc lại tóm tắt ⇒ khách đồng ý ⇒ confirm_order.",
     "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
+    "HIỂU KHÁCH:",
+    "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
+    "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính.",
+    "  · Khách đã nói món + số lượng ⇒ đi tiếp bước kế (xin họ tên / SĐT / địa chỉ còn thiếu), không hỏi lại điều khách đã nói. Khách gửi địa chỉ ⇒ ghi nhận và chỉ hỏi phần còn thiếu.",
     "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Ngoài chính sách» (đổi trả, giảm giá riêng, giao gấp shop chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không chắc» (độ tin thấp, không đoán).",
     quick.length
       ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
@@ -400,8 +404,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     let lastError: string | null = null;
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
-        // Chat cần trả lời nhanh: suy luận «low» + ngân sách đủ rộng để phần suy luận không ăn hết câu trả lời (01/10/2026).
-        const res = await prov.provider.complete({ system, messages: history, tools, maxTokens: 4000, reasoning: "low" });
+        // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
+        // trả lời (01/10/2026: suy luận ăn chung `max_output_tokens`).
+        const res = await prov.provider.complete({ system, messages: history, tools, ...SALES_THINKING_BUDGET[cfg.thinking] });
         calls += 1;
         inTok += res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         outTok += res.usage.outputTokens;
@@ -494,6 +499,31 @@ export async function countWaitingConversations(): Promise<number> {
   const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(eq(c.status, "WAITING"));
   return Number(r?.n ?? 0);
 }
+
+/**
+ * Đưa những gì PAGE đã nói (trả lời tự động của Meta, nhân viên) và tin khách bot đã bỏ qua vào LỊCH SỬ hội thoại trước lượt
+ * AI — đo 01/10/2026: khách «Ship c 1kí» ngay sau trả lời tự động báo giá chả cá thu, bot không thấy tin ấy nên hỏi lại «chị
+ * lấy món nào». Tin của page mang tiền tố «[Shop đã nhắn]» (để AI phân biệt với câu của chính nó). Chỉ GHI LỊCH SỬ — nơi gọi
+ * phải chèn TRƯỚC khi chụp số tin «trước lượt», nên những dòng này không bao giờ bị gửi lại cho khách.
+ */
+export async function appendContextMessages(conversationId: string, items: readonly { role: "user" | "assistant"; text: string }[]): Promise<void> {
+  for (const it of items) {
+    const text = it.text.trim();
+    if (!text) continue;
+    for (let i = 0; i < 2; i++) {
+      const msgs = await loadMessages(conversationId);
+      try {
+        await appendMessage(conversationId, (msgs[msgs.length - 1]?.seq ?? 0) + 1, it.role, [{ type: "text", text: it.role === "assistant" ? `${SHOP_SAID} ${text}` : text }]);
+        break;
+      } catch (error) {
+        if (!(error instanceof SeqConflict) || i === 1) throw error;
+      }
+    }
+  }
+}
+
+/** Tiền tố tin của page / nhân viên trong lịch sử của bot. */
+export const SHOP_SAID = "[Shop đã nhắn]";
 
 /** Hội thoại gần đây cho màn hình quản trị. */
 export async function listConversations(limit = 30) {

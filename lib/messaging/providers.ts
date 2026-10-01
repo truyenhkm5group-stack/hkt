@@ -13,14 +13,18 @@
  * `deps.fetch` để bài kiểm đưa máy chủ giả vào (luật 65: bộ kiểm thử không gọi mạng thật).
  */
 import { createHmac, randomUUID } from "node:crypto";
-import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
+import { describeNetworkFailure, failedBeforeSending, isNetworkFailure } from "@/lib/connectors/net-error";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { LARK_HOOK_PATTERN, scrubSecrets, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, ZALO_BOT_API, ZALO_CHAT_PATTERN, ZALO_TEXT_MAX, ZALO_TOKEN_PATTERN } from "@/lib/connectors/testers";
 import type { MessagingConnectorKey } from "@/lib/messaging/types";
 
 export type OutgoingMessage = { title: string | null; text: string; destination: string | null };
-export type SendResult = { ok: true; providerMessageId: string | null; destination: string | null } | { ok: false; error: string };
-export type MessagingDeps = { fetch?: typeof fetch; now?: () => Date };
+/** `retryable` = hỏng vì mạng TRƯỚC KHI yêu cầu rời máy (`failedBeforeSending`) ⇒ sổ gửi tin hẹn gửi lại, không thể trùng. */
+export type SendResult = { ok: true; providerMessageId: string | null; destination: string | null } | { ok: false; error: string; retryable?: boolean };
+export type MessagingDeps = { fetch?: typeof fetch; now?: () => Date; sleep?: (ms: number) => Promise<void> };
+
+/** Thử lại NGAY trong lượt gửi khi chưa mở được kết nối — mạng chập chờn thường thông sau vài giây. */
+const QUICK_RETRY_DELAYS_MS = [2_000, 5_000];
 
 export interface MessagingProvider {
   readonly key: MessagingConnectorKey;
@@ -51,8 +55,20 @@ async function readJson(res: Response): Promise<Record<string, unknown> | null> 
   }
 }
 
-function postJson(fetchImpl: typeof fetch, url: string, body: unknown): Promise<Response> {
-  return fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+/**
+ * POST JSON; KHÔNG mở được kết nối (yêu cầu chưa rời máy) ⇒ thử lại tối đa hai lần nữa sau 2 giây · 5 giây. Mọi lỗi khác
+ * (bị ngắt giữa chừng, hết giờ chờ phản hồi, nhà cung cấp từ chối) ném / trả ngay — không đánh cược tin trùng.
+ */
+async function postJson(fetchImpl: typeof fetch, url: string, body: unknown, deps: MessagingDeps = {}): Promise<Response> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch (e) {
+      if (!failedBeforeSending(e) || attempt >= QUICK_RETRY_DELAYS_MS.length) throw e;
+      await sleep(QUICK_RETRY_DELAYS_MS[attempt]);
+    }
+  }
 }
 
 class LarkProvider implements MessagingProvider {
@@ -74,14 +90,14 @@ class LarkProvider implements MessagingProvider {
       payload.sign = createHmac("sha256", `${timestamp}\n${signSecret}`).update("").digest("base64");
     }
     try {
-      const res = await postJson(this.deps.fetch ?? fetch, url, payload);
+      const res = await postJson(this.deps.fetch ?? fetch, url, payload, this.deps);
       if (res.status >= 300 && res.status < 400) return { ok: false, error: `Lark trả chuyển hướng HTTP ${res.status} — không theo.` };
       const data = await readJson(res);
       const code = (data?.code ?? data?.StatusCode ?? (res.ok ? 0 : res.status)) as number;
       if (code !== 0) return { ok: false, error: scrubSecrets(`Lark từ chối: ${String(data?.msg ?? data?.StatusMessage ?? `HTTP ${res.status}`)} (mã ${code})`, hide) };
       return { ok: true, providerMessageId: null, destination: this.defaultDestination };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Lark: ${describeNetworkFailure(e, "open.larksuite.com")}` : `Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      return { ok: false, retryable: failedBeforeSending(e), error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Lark: ${describeNetworkFailure(e, "open.larksuite.com")}` : `Không gọi được Lark: ${e instanceof Error ? e.message : String(e)}`, hide) };
     }
   }
 }
@@ -103,13 +119,23 @@ class TelegramProvider implements MessagingProvider {
     if (!TELEGRAM_TOKEN_PATTERN.test(token)) return { ok: false, error: "Bot token đã lưu không đúng dạng — không gửi." };
     if (!TELEGRAM_CHAT_PATTERN.test(chatId)) return { ok: false, error: "Chat ID nơi nhận không hợp lệ (số, có thể âm, hoặc @tên_kênh) — không gửi." };
     try {
-      const res = await postJson(this.deps.fetch ?? fetch, `https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text: joined(msg), disable_web_page_preview: true });
+      const res = await postJson(this.deps.fetch ?? fetch, `https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text: joined(msg), disable_web_page_preview: true }, this.deps);
       const body = await readJson(res);
       if (!res.ok || body?.ok !== true) return { ok: false, error: scrubSecrets(`Telegram không nhận tin: ${String(body?.description ?? `HTTP ${res.status}`)}`, hide) };
       const result = body.result as { message_id?: number } | undefined;
       return { ok: true, providerMessageId: result?.message_id !== undefined ? String(result.message_id) : null, destination: chatId };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")} Nếu máy chủ không tới được Telegram, dùng kết nối «Lark — webhook nhóm của tổ chức» cho nhóm vận hành.` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      const retryable = failedBeforeSending(e);
+      return {
+        ok: false,
+        retryable,
+        error: scrubSecrets(
+          isNetworkFailure(e)
+            ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")}${retryable ? " ERP sẽ tự gửi lại khi mạng thông (tối đa 6 giờ)." : ""} Nếu lỗi lặp lại nhiều, dùng thêm kết nối Zalo hoặc Lark cho nhóm vận hành.`
+            : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`,
+          hide,
+        ),
+      };
     }
   }
 }
@@ -161,7 +187,7 @@ class ZaloProvider implements MessagingProvider {
     let firstId: string | null = null;
     try {
       for (const part of chunkText(joined(msg), ZALO_TEXT_MAX)) {
-        const res = await postJson(this.deps.fetch ?? fetch, `${ZALO_BOT_API}/bot${token}/sendMessage`, { chat_id: chatId, text: part });
+        const res = await postJson(this.deps.fetch ?? fetch, `${ZALO_BOT_API}/bot${token}/sendMessage`, { chat_id: chatId, text: part }, this.deps);
         const body = await readJson(res);
         // Đoạn sau hỏng khi đoạn đầu đã đi ⇒ vẫn báo hỏng (không gửi lại đoạn đầu — sổ chống trùng giữ «đã thử»).
         if (body?.ok !== true) return { ok: false, error: scrubSecrets(`Zalo không nhận tin: ${String(body?.description ?? `HTTP ${res.status}`)}`, hide) };
@@ -170,7 +196,8 @@ class ZaloProvider implements MessagingProvider {
       }
       return { ok: true, providerMessageId: firstId, destination: chatId };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Zalo: ${describeNetworkFailure(e, "bot-api.zaloplatforms.com")}` : `Không gọi được Zalo: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      // Đoạn đầu đã đi rồi mới hỏng ⇒ KHÔNG hẹn gửi lại (gửi lại là trùng đoạn đầu).
+      return { ok: false, retryable: firstId === null && failedBeforeSending(e), error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Zalo: ${describeNetworkFailure(e, "bot-api.zaloplatforms.com")}` : `Không gọi được Zalo: ${e instanceof Error ? e.message : String(e)}`, hide) };
     }
   }
 }

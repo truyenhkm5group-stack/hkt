@@ -66,6 +66,8 @@ export default async function NotificationsPage() {
                 </p>
                 <pre className="mt-1.5 whitespace-pre-wrap font-sans text-[13px] leading-5">{d.title ? `${d.title}\n` : ""}{d.body}</pre>
                 {d.error ? <p className="mt-1 text-destructive">{d.error}</p> : null}
+                {d.status === "FAILED" && d.nextRetryAt ? <p className="mt-1 font-semibold">ERP sẽ tự gửi lại lúc {formatDateTime(d.nextRetryAt)} (lần thử {d.attempts + 1}).</p> : null}
+                {d.status === "SENT" && d.attempts > 1 ? <p className="mt-1 text-muted-foreground">Gửi được ở lần thử thứ {d.attempts} (mạng chập chờn lúc đầu).</p> : null}
               </li>
             ))}
           </ul>

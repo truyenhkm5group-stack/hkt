@@ -44,6 +44,8 @@ export type ChatState = {
   /** Đã gửi câu upsell (chỉ MỘT lần mỗi hội thoại). */
   upsellSent?: boolean;
   declined?: { reason: string; at: string };
+  /** Mốc tin fanpage (page / khách bị bỏ qua) đã chép vào lịch sử của bot — `appendContextMessages`. */
+  mirroredUntil?: string;
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
