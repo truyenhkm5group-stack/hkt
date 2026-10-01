@@ -1499,8 +1499,17 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.dropAnnouncedFacts("Dạ em nhận được thông tin địa chỉ và số điện thoại của chị rồi ạ. 🥰\nChị lấy mẫu nào ạ?", "PAGE1").includes("nhận được"), false);
   for (const [cau, size] of [["lấy L nha", "L"], ["chị mặc size M", "M"], ["chốt 2xl", "2XL"], ["cỡ xl", "XL"]]) assert.equal(bot.customerFacts("PAGE1", [khach(cau)]).size, size, cau);
   for (const cau of ["đặt 20 cái", "lấy mình 1 cái", "chọn mẫu nào đẹp", "đặt sớm được không"]) assert.equal(bot.customerFacts("PAGE1", [khach(cau)]).size, null, cau);
+  // Su co 30/09/2026 (Son Ngoc Nguyen): ban chot don co cho trong [..] + gan cau xin chieu cao can nang o cuoi
+  const son = [khach("cao 1m52 nặng 56kg"), khach("Thôn 5 xã Hòa Phú huyện Chư Păh tỉnh Gia Lai"), khach("0912 345 678"), khach("chốt giá 299k miễn phí v.c")];
+  const chot = "Em xin phép chốt đơn cho mình nha:\n• Đầm Q002 màu Đỏ size L x 1\n• Tổng: 299.000đ (bao gồm miễn phí ship)\n• Người nhận: Son Ngoc Nguyen – [Số điện thoại khách đã cung cấp]\n• Địa chỉ: [Địa chỉ khách đã cung cấp]\n\nChị kiểm tra lại giúp em thông tin đơn hàng nha ạ ❤️";
+  const dien = bot.fillPlaceholders(chot, "PAGE1", son);
+  assert.doesNotMatch(dien, /\[(?!\[)/, "khong con ngoac vuong cho khach");
+  assert.match(dien, /Son Ngoc Nguyen – 0912345678/);
+  assert.match(dien, /Địa chỉ: Thôn 5 xã Hòa Phú/);
+  assert.match(bot.fillPlaceholders("Người nhận: [Tên khách]\nTổng: 299.000đ [[HANDOFF]]", "PAGE1", son), /^Tổng: 299\.000đ \[\[HANDOFF\]\]$/, "khong dien duoc thi bo dong, giu [[HANDOFF]]");
+  assert.equal(bot.ensureEndsWithQuestion(dien, "PAGE1", son), dien, "ban chot don khong bi gan them cau xin so do");
   settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
-  console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'; 'Minh dat xl' = da chon size");
+  console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'; 'Minh dat xl' = da chon size; ban chot don khong con cho trong [..]");
 }
 
 console.log("\nTAT CA TEST PASS");

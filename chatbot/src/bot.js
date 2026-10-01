@@ -669,6 +669,35 @@ ${dong.join("\n")}
    * dau cau va xuong dong), giu nguyen phan con lai; bo het ma khong con gi thi tra "" de nhanh sau tu them cau di tiep.
    */
   /**
+   * Cho TRONG kieu mau "[Số điện thoại khách đã cung cấp]" / "[Địa chỉ khách đã cung cấp]" ma AI de lai trong ban
+   * chot don: dien bang SDT / dia chi THAT khach da go; khong co thi bo ca dong do. Khong bao gio gui ngoac vuong cho khach.
+   * Su co 30/09/2026 (Son Ngoc Nguyen, Linh Tay Luxury): khach da gui SDT + dia chi, bot gui ban chot co hai cho trong.
+   */
+  fillPlaceholders(reply, pageId, messages) {
+    const t = String(reply || "");
+    if (!/\[(?!\[)[^\]\n]{2,80}\](?!\])/.test(t)) return t;
+    const loi = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => this.messageText(m));
+    const sdt = loi.flatMap((x) => phonesInText(x)).pop() || "";
+    const f = this.customerFacts(pageId, messages);
+    const out = t
+      .split("\n")
+      .map((dong) =>
+        dong.replace(/(?<!\[)\[([^\]\n]{2,80})\](?!\])/g, (all, ben) => {
+          if (/^(IMG|HANDOFF)/i.test(ben)) return all;
+          if (/điện thoại|sđt|sdt|số đt/i.test(ben)) return sdt || "\u0000";
+          if (/địa chỉ/i.test(ben)) return f.address || "\u0000";
+          if (/tên/i.test(ben)) return "\u0000";
+          return "\u0000";
+        }),
+      )
+      .filter((dong) => !dong.includes("\u0000"))
+      .join("\n");
+    log.warn(`[${pageId}] Bot de cho trong [..] trong cau tra loi -> dien bang thong tin that / bo dong`);
+    store.bumpStat(pageId, "placeholderGuard");
+    return out;
+  }
+
+  /**
    * Bo cau KHAI BAO kieu may "em đã có số điện thoại của mình rồi ạ" / "em đã có địa chỉ của mình rồi ạ": nguoi ban
    * that khong doc lai thu khach vua dua, ho lam buoc tiep theo. Chi bo cau dung rieng; loi chao dung truoc ("Dạ chị
    * X ơi,") duoc giu. Bo het thi tra "" de nhanh sau tu them cau di tiep.
@@ -909,8 +938,11 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     const duoi = text.slice(-160).toLowerCase();
     const daCoHoi =
       bare.endsWith("?") ||
-      /(cho em xin|cho em biết|anh cho em|chị cho em|mình cho em|nhắn em chiều cao|chiều cao và cân nặng|chiều cao cân nặng|size phù hợp cho mình|có muốn|muốn lấy|được không|không ạ|chưa ạ|chọn màu nào|lấy màu nào|mấy bộ|mấy chiếc|mình chốt|kiểm tra giúp em)/.test(duoi);
+      /(cho em xin|cho em biết|anh cho em|chị cho em|mình cho em|nhắn em chiều cao|chiều cao và cân nặng|chiều cao cân nặng|size phù hợp cho mình|có muốn|muốn lấy|được không|không ạ|chưa ạ|chọn màu nào|lấy màu nào|mấy bộ|mấy chiếc|mình chốt|kiểm tra giúp em|kiểm tra lại giúp em)/.test(duoi);
     if (daCoHoi) return reply;
+    // Ban chot don da xong (co dong Nguoi nhan / Tong / Dia chi): khong gan them cau xin gi nua — su co 30/09/2026
+    // (Son Ngoc Nguyen): ban chot don size XL ket thuc bang "Chị cho em xin chiều cao và cân nặng..."
+    if (isOrderSummaryReply(text, false)) return reply;
 
     const eff = settings.effective(pageId);
     const xung = eff.customerTitle || "chị";
@@ -1580,7 +1612,13 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
       badPrices = this.findDisallowedPrices(reply, this.priceReferenceFor(pageId, reply, systemPrompt, saleActive, ctxGia).prompt);
       if (badPrices.length) {
         log.warn(`[${pageId}] Van sai gia (${badPrices.join(", ")}) -> dung cau an toan + chuyen nhan vien`);
-        reply = "Dạ giá này là ưu đãi tốt nhất bên em rồi ạ, em không có quyền giảm thêm. Để em chuyển nhân viên hỗ trợ chị ngay nhé ❤️ [[HANDOFF]]";
+        // Chi noi "khong co quyen giam them" khi khach DANG doi giam. Su co 30/09/2026 (Son Ngoc Nguyen): khach chi xac
+        // nhan "chốt giá 299k" / phan nan bot doc khong ky ma nhan cau tu choi giam gia — lac de, khach buc.
+        const xung = eff.customerTitle || "chị";
+        const doiGiam = /(giảm|bớt|bot gia|rẻ hơn|re hon|đắt|dat qua|mắc|bớt cho|fix|thương lượng|giá tốt hơn)/i.test(this.messageText([...messages].reverse().find((m) => !this.isFromPage(m, pageId)) || {}));
+        reply = doiGiam
+          ? `Dạ giá này là ưu đãi tốt nhất bên em rồi ạ, em không có quyền giảm thêm. Để em chuyển nhân viên hỗ trợ ${xung} ngay nhé ❤️ [[HANDOFF]]`
+          : `Dạ em xin phép kiểm tra lại giá chính xác cho ${xung} rồi báo ${xung} ngay nhé ❤️ [[HANDOFF]]`;
       }
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
@@ -1664,6 +1702,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
     }
     if (reply && !handoff) {
       const truoc = reply;
+      reply = this.fillPlaceholders(reply, pageId, messages);
       reply = this.dropAlreadyGivenAsks(reply, pageId, messages);
       reply = this.dropAnnouncedFacts(reply, pageId);
       reply = this.dropRepeatedSentences(reply, pageId, messages);
