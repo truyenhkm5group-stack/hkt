@@ -82,6 +82,11 @@ const JOBS = [
   */
   { job: "sales-followup", every: 5, offset: 4 },
   /*
+    GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — chủ shop yêu cầu sửa 01/10/2026) — mỗi 2 phút (mốc gửi lại đầu tiên là 2 phút);
+    có lượt của nhà và fan-out tự động hoá cho tổ chức khách. Không tin nào chờ ⇒ một câu truy vấn.
+  */
+  { job: "messaging-retry", every: 2, offset: 1 },
+  /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
     Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có

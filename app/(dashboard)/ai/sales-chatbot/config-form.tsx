@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionCard } from "@/components/ui-bits";
 import { saveSalesChatbotConfigAction } from "@/lib/actions/sales-chatbot";
-import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesBotConnector, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
+import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesBotConnector, type SalesChatbotConfig, type SalesTool, SALES_THINKING, SALES_THINKING_LABEL } from "@/lib/sales-chatbot/config";
 
 const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức" };
@@ -87,6 +87,16 @@ export function ChatbotConfigForm({ config, fields, connections }: { config: Sal
             {SALES_TONES.map((t) => (
               <option key={t} value={t}>
                 {SALES_TONE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="cb-thinking">Mức suy nghĩ</Label>
+          <select id="cb-thinking" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.thinking} onChange={(e) => set("thinking", e.target.value as SalesChatbotConfig["thinking"])}>
+            {SALES_THINKING.map((t) => (
+              <option key={t} value={t}>
+                {SALES_THINKING_LABEL[t]}
               </option>
             ))}
           </select>

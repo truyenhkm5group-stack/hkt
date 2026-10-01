@@ -38,7 +38,8 @@ import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/co
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
 import { ORDER_MATERIAL_CHANGE_LABEL } from "@/lib/constants/manual-orders";
 import { loadNotificationSetup, saveOrderNotificationPreset } from "@/lib/messaging/presets";
-import { deliverMessage } from "@/lib/messaging/service";
+import { deliverMessage, nextRetryAt as messagingNextRetryAt, retryFailedDeliveries } from "@/lib/messaging/service";
+import { failedBeforeSending } from "@/lib/connectors/net-error";
 import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
 import { BUSINESS_TYPE_SPEC, CORE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
@@ -52,7 +53,7 @@ import { checkDomainSlug, organizationBaseUrl, organizationForHostSlug, publicat
 import { provisionOrganization } from "@/lib/platform/provision";
 import { cancelManualOrderCore, createManualOrderCore, materialChanges, updateManualOrderCore } from "@/lib/records/order-create";
 import { createProductCore } from "@/lib/records/product-create";
-import { foldVi, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
+import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
@@ -163,6 +164,20 @@ function testPure() {
   assert.equal(foldVi("Chả Mực Giã Tay"), "cha muc gia tay");
   assert.deepEqual(searchCatalog(items, "cha muc").map((i) => i.variantId), ["v1"]);
   assert.deepEqual(searchCatalog(items, "ruốc tôm").map((i) => i.variantId), ["v2"]);
+  // Tìm theo TÊN chính, bỏ số lượng / lời đệm (đo 01/10/2026: «1kí cha ca thu nguyen chat» ra ruốc cá thu, bot nói «chưa thấy»).
+  const hslcItems: CatalogItem[] = [
+    { variantId: "cct1", productId: "pc", name: "Chả cá thu", sku: "CHA-CA-THU", variant: "1kg (2 túi 0,5kg)", price: 280_000, fields: {} },
+    { variantId: "cct2", productId: "pc", name: "Chả cá thu", sku: "CHA-CA-THU-2KG", variant: "2kg (4 túi 0,5kg)", price: 540_000, fields: {} },
+    { variantId: "rct", productId: "pr", name: "Ruốc bông (chà bông) cá thu nguyên chất", sku: "RUOC-BONG-CA-THU-100", variant: "Hộp 250g", price: 250_000, fields: {} },
+    { variantId: "nem", productId: "pn", name: "Nem hải sản tôm bề bề", sku: "NEM", variant: "Hộp 10 cái", price: 120_000, fields: {} },
+  ];
+  assert.deepEqual(queryKeywords("1kí cha ca thu nguyen chat"), ["cha", "ca", "thu", "nguyen", "chat"]);
+  assert.equal(searchCatalog(hslcItems, "1kí cha ca thu nguyen chat")[0].productId, "pc", "chả cá thu đứng đầu, không phải ruốc");
+  assert.equal(searchCatalog(hslcItems, "ship c 1 ký chả cá thu nhé")[0].productId, "pc");
+  assert.equal(searchCatalog(hslcItems, "ruốc cá thu")[0].variantId, "rct");
+  assert.equal(searchCatalog(hslcItems, "chà bông cá thu")[0].variantId, "rct");
+  assert.equal(searchCatalog(hslcItems, "cho c 10 cái nem")[0].variantId, "nem");
+  assert.equal(searchCatalog(hslcItems, "2kg chả cá thu")[0].productId, "pc");
   const night = { ...DEFAULT_SALES_CHATBOT_CONFIG.businessHours, enabled: true, start: "22:00", end: "06:00" };
   assert.equal(withinBusinessHours(night, new Date("2026-09-29T16:30:00Z")), true, "23:30 VN trong khung 22–06");
   assert.equal(withinBusinessHours(night, new Date("2026-09-29T05:00:00Z")), false, "12:00 VN ngoài khung");
@@ -212,6 +227,14 @@ function testPure() {
   assert.equal(followupStepsLabel([60, 360, 1320]), "1 giờ · 6 giờ · 22 giờ");
   const fp = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Lấy thông tin · kiểm tra khách cũ", 3, 3, true, "");
   assert.ok(/không nêu giá/i.test(fp) && /lần nhắc CUỐI/.test(fp) && /đơn nháp/.test(fp), fp);
+  // Gửi lại tin nhóm hỏng vì mạng (0186): chỉ lỗi TRƯỚC KHI yêu cầu rời máy; lịch 2 · 5 · 15 · 30 · 60 · 120 phút trong 6 giờ.
+  const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+  assert.ok(failedBeforeSending(netErr("ETIMEDOUT")) && failedBeforeSending(netErr("UND_ERR_CONNECT_TIMEOUT")) && failedBeforeSending(netErr("ENOTFOUND")));
+  assert.ok(!failedBeforeSending(netErr("ECONNRESET")) && !failedBeforeSending(netErr("UND_ERR_HEADERS_TIMEOUT")) && !failedBeforeSending(new Error("x")), "ngắt giữa chừng / chờ phản hồi ⇒ có thể đã tới ⇒ không gửi lại");
+  const c0 = new Date("2026-10-01T10:00:00Z");
+  assert.equal(messagingNextRetryAt(c0, 1, c0)?.toISOString(), "2026-10-01T10:02:00.000Z");
+  assert.equal(messagingNextRetryAt(c0, 7, c0), null, "hết lịch");
+  assert.equal(messagingNextRetryAt(c0, 6, new Date(c0.getTime() + 5 * 3_600_000)), null, "quá 6 giờ ⇒ không gửi lại");
   console.log("✓ Tự phục vụ · thuần: mẫu thực phẩm hợp lệ, tên miền con, mẫu tin, phần đổi của đơn, tìm không dấu, giờ làm việc");
 }
 
@@ -734,6 +757,53 @@ async function testJourney() {
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // ═══ GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — Telegram chập chờn từ máy chủ ở Việt Nam) ═══
+      const tgToken = `123456789:${"A".repeat(35)}`;
+      const okTg = () => ({ ok: true, result: { message_id: 77, username: "don_hang_bot", first_name: "Đơn hàng", id: 1 } });
+      assert.ok("ok" in (await saveConnection(admin, { connectorKey: "telegram-bot", settings: { chatId: "-1001234567" }, secrets: { botToken: tgToken } })));
+      assert.ok("ok" in (await testOrgConnection(admin, "telegram-bot", { tester: { fetch: fakeFetchCalls(okTg).fetch } })));
+      assert.ok("ok" in (await setConnectionStatus(admin, "telegram-bot", "ACTIVE")));
+      const tgErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+      const flaky = (failures: number, code = "ETIMEDOUT") => {
+        let n = 0;
+        const calls: string[] = [];
+        const f = (async (input: RequestInfo | URL) => {
+          calls.push(String(input));
+          n += 1;
+          if (n <= failures) throw tgErr(code);
+          return new Response(JSON.stringify(okTg()), { status: 200, headers: { "content-type": "application/json" } });
+        }) as typeof fetch;
+        return { fetch: f, calls };
+      };
+      const tSleeps: number[] = [];
+      const tsleep = async (ms: number) => void tSleeps.push(ms);
+      // Mạng tắc 2 lần rồi thông ⇒ gửi được NGAY trong lượt (thử lại sau 2 giây · 5 giây).
+      const q = flaky(2);
+      const d1 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #A", dedupeKey: "retry:test:1" }, { fetch: q.fetch, sleep: tsleep });
+      assert.ok(d1.status === "SENT" && q.calls.length === 3 && tSleeps.join(",") === "2000,5000", JSON.stringify({ d1, n: q.calls.length, tSleeps }));
+      // Tắc mãi ⇒ FAILED + hẹn gửi lại 2 phút; job tới mốc ⇒ gửi được, lần thử thứ 2.
+      const dead = flaky(99);
+      const d2 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #B", dedupeKey: "retry:test:2" }, { fetch: dead.fetch, sleep: tsleep });
+      assert.ok(d2.status === "FAILED" && /ETIMEDOUT/.test(d2.error) && /tự gửi lại/.test(d2.error), JSON.stringify(d2));
+      const mrow = async (k: string) => (await db.select().from(schema.messagingDeliveries).where(eq(schema.messagingDeliveries.dedupeKey, k)))[0];
+      let mr2 = await mrow("retry:test:2");
+      const dueIn = mr2.nextRetryAt!.getTime() - Date.now();
+      assert.ok(mr2.status === "FAILED" && mr2.attempts === 1 && dueIn > 100_000 && dueIn <= 120_000, JSON.stringify({ s: mr2.status, a: mr2.attempts, dueIn }));
+      assert.equal((await retryFailedDeliveries({ fetch: flaky(0).fetch, sleep: tsleep, now: () => new Date() })).due, 0, "chưa tới mốc");
+      const laterR = () => new Date(Date.now() + 3 * 60_000);
+      const good = flaky(0);
+      const [ra1, ra2] = await Promise.all([retryFailedDeliveries({ fetch: good.fetch, sleep: tsleep, now: laterR }), retryFailedDeliveries({ fetch: good.fetch, sleep: tsleep, now: laterR })]);
+      assert.ok(ra1.sent + ra2.sent === 1 && ra1.failed + ra2.failed === 0, `hai lượt job chồng nhau ⇒ gửi lại đúng MỘT lần, lượt thua nhường chứ không đập vào dòng đang gửi: ${JSON.stringify([ra1, ra2])}`);
+      assert.equal(good.calls.filter((u) => u.includes("/sendMessage")).length, 1);
+      mr2 = await mrow("retry:test:2");
+      assert.ok(mr2.status === "SENT" && mr2.attempts === 2 && mr2.nextRetryAt === null);
+      // Bị NGẮT giữa chừng (có thể đã tới) ⇒ không thử lại trong lượt, không hẹn gửi lại — thà thiếu còn hơn trùng.
+      const reset = flaky(99, "ECONNRESET");
+      const d3 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #C", dedupeKey: "retry:test:3" }, { fetch: reset.fetch, sleep: tsleep });
+      assert.ok(d3.status === "FAILED" && reset.calls.length === 1 && (await mrow("retry:test:3")).nextRetryAt === null, JSON.stringify(d3));
+      // Tin THỬ ⇒ không hẹn gửi lại (người bấm đang nhìn kết quả).
+      await deliverMessage({ connectorKey: "telegram-bot", body: "[TIN THỬ]", dedupeKey: "retry:test:4", isTest: true }, { fetch: flaky(99).fetch, sleep: tsleep });
+      assert.equal((await mrow("retry:test:4")).nextRetryAt, null);
       // ═══ QUY TRÌNH BÁN 5 BƯỚC + CÂU MẪU TRONG LUỒNG AI + CẦN NGƯỜI XỬ LÝ (chủ shop 01/10/2026) ═══
       const cfgOld = { ...parseSalesChatbotConfig(null), allowedTools: ["search_products" as const] };
       assert.ok(PROCESS_TOOLS.every((t) => toolDefsFor(cfgOld).some((d) => d.name === t)), "công cụ quy trình tới cả tổ chức có allowedTools lưu từ trước");
@@ -923,6 +993,38 @@ async function testJourney() {
       const rc4 = await processFanpageThread(PAGE, "t-c4", { fetch: cmtFetch.fetch, now: in31s });
       assert.ok(rc4.replies === 0 && /không nhắn riêng được/.test(rc4.error ?? "") && /KHÔNG trả lời công khai/.test(rc4.error ?? ""), JSON.stringify(rc4));
       assert.ok(!cmtFetch.calls.some((c) => String(c.init?.body).includes("reply_comment")), "lỗi tin riêng không lùi về bình luận công khai");
+      // ═══ BOT THẤY NHỮNG GÌ PAGE ĐÃ NÓI (01/10/2026: khách «Ship c 1kí» sau trả lời tự động báo giá, bot hỏi lại «món nào») ═══
+      const ctxSeen: AiRequest[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          ctxSeen.push(req);
+          return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-ctx-1", "Báo giá chả cá thu?", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await receiveFanpageEvent(ev("m-ctx-auto", "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ", { id: PAGE }, "t-ctx"));
+      const ctxFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      assert.match((await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: in31s })).skipped ?? "", /Page đã trả lời/);
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-ctx-2", "Ship c 1kí", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      const hist = JSON.stringify(ctxSeen[0]?.messages ?? []);
+      const iAsk = hist.indexOf("Báo giá chả cá thu?");
+      const iAuto = hist.indexOf("[Shop đã nhắn] Dạ em chào anh/chị! Chả cá thu");
+      const iShip = hist.indexOf("Ship c 1kí");
+      assert.ok(iAsk >= 0 && iAuto > iAsk && iShip > iAuto, `lịch sử AI: câu khách bị bỏ qua → trả lời tự động của page → câu mới, đúng thứ tự: ${hist.slice(0, 400)}`);
+      const ctxPosts = ctxFetch.calls.filter((c) => c.init?.method === "POST").map((c) => String(c.init?.body));
+      assert.ok(ctxPosts.length === 1 && !ctxPosts.some((b) => b.includes("Shop đã nhắn") || b.includes("Báo giá chả cá thu")), `ngữ cảnh chép vào lịch sử KHÔNG gửi lại cho khách: ${ctxPosts.join(" | ")}`);
+      // Lượt sau không chép lại lần hai.
+      await receiveFanpageEvent(ev("m-ctx-3", "Phạm Văn Đồng, Bình Thạnh", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      const hist2 = JSON.stringify(ctxSeen[1]?.messages ?? []);
+      assert.equal(hist2.split("[Shop đã nhắn] Dạ em chào").length - 1, 1, "trả lời tự động chỉ nằm MỘT lần trong lịch sử");
+      // Mức suy nghĩ «Nhanh» ⇒ suy luận low; «Kỹ» (mặc định) ⇒ medium + ngân sách rộng.
+      assert.equal(ctxSeen[0].reasoning, "medium");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
@@ -1045,7 +1147,7 @@ async function testJourney() {
       const tconv = await openConversation("TEST", { createdBy: ADMIN_EMAIL });
       await chatTurn(tconv.id, "Chào shop", { channel: "TEST" });
       // Ghi lại rồi khẳng định NGOÀI provider — chatTurn nuốt lỗi ném từ provider (coi là AI hỏng) nên assert bên trong không bắt được gì.
-      assert.ok(chatBudgets.length > 0 && chatBudgets.every(([r, m]) => r === "low" && (m ?? 0) >= 4000), `chat: suy luận low, ngân sách ≥ 4000: ${JSON.stringify(chatBudgets)}`);
+      assert.ok(chatBudgets.length > 0 && chatBudgets.every(([r, m]) => r === "medium" && (m ?? 0) >= 8000), `chat mặc định «Kỹ»: suy luận medium, ngân sách ≥ 8000: ${JSON.stringify(chatBudgets)}`);
       assert.ok(systems.some((x) => x.includes("SỔ TAY BÁN HÀNG của shop") && x.includes("Giọng điệu")), "bot dùng sổ tay đã xuất bản");
       assert.ok(systems.every((x) => x.indexOf("LUẬT BẮT BUỘC") < x.indexOf("SỔ TAY BÁN HÀNG")), "sổ tay đứng SAU luật bắt buộc");
       await savePlaybookDraft(admin, "Bản hai: luôn hỏi khách cần bảo quản lạnh không.");

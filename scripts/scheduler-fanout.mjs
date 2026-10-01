@@ -40,13 +40,14 @@
  * PARTIAL mỗi 10 phút) · `landing-sheet` (mỗi phút; tổ chức chưa khai sheet thì hỏng mỗi phút) ·
  * mọi job kéo dữ liệu từ nhà cung cấp ngoài.
  */
-export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup"]);
+export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "messaging-retry"]);
 
 /**
  * Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. `sales-followup` (follow-up chatbot fanpage — chủ shop yêu cầu
- * 01/10/2026) là việc của TỪNG tổ chức khách có module AI bán hàng, nên đi cùng tầng này.
+ * 01/10/2026) là việc của TỪNG tổ chức khách có module AI bán hàng, nên đi cùng tầng này. `messaging-retry` (gửi lại tin
+ * nhóm hỏng vì mạng — 01/10/2026) cũng vậy: tin «đơn mới» của tổ chức khách do luật của chính tổ chức đó gửi.
  */
-export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup"]);
+export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "messaging-retry"]);
 
 /**
  * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; nhà TẮT module

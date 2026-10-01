@@ -117,7 +117,7 @@ function kiemNhip() {
 async function kiemLich(fan: FanOut) {
   assert.equal(fan.WORKFLOW_FANOUT_TICK_MINUTES, WORKFLOW_CADENCE_MIN_MINUTES, "nhịp gõ của bộ lập lịch = nhịp nhỏ nhất được phép — gói nhịp 5 phút cũng được phục vụ");
   assert.ok(fan.FANOUT_JOBS.includes(WORKFLOWS_JOB));
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot");
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["messaging-retry", "sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);

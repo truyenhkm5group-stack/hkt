@@ -81,20 +81,53 @@ export async function sellableCatalog(allowedFields: readonly string[]): Promise
 }
 
 /**
- * Tìm theo câu khách gõ: mọi từ của câu (đã bỏ dấu) phải có trong tên / SKU / quy cách. Không khớp đủ ⇒ xếp theo số từ
- * khớp, tối đa `limit`. Hàm THUẦN trên danh mục đã đọc.
+ * Từ KHÔNG phải tên sản phẩm (số lượng, đơn vị, lời đệm khi khách nhắn) — bỏ trước khi so tên. Đo 01/10/2026: «1kí cha ca thu
+ * nguyen chat» xếp «Ruốc bông (chà bông) cá thu nguyên chất» trên «Chả cá thu» vì ruốc chứa đủ mọi chữ của câu, và bot nói
+ * «chưa thấy chả cá thu». Chữ mô tả (nguyên chất, tươi…) vẫn giữ — nó phân biệt được sản phẩm khi tên có chữ ấy.
+ */
+const QUERY_STOPWORDS = new Set(
+  "cho minh em chi anh co cau ban ong ba a ah oi shop sop ship sip lay mua dat voi va nhe nha nhi bao nhieu bn bnt gia tien la loai cai the nao sao vay di duoc dc khong ko k hang con can ki ky kg kgs g gram lang goi tui hop chai lit nua mot hai ba".split(" "),
+);
+
+/** Từ khoá thật của câu khách (đã bỏ dấu, bỏ số lượng / đơn vị / lời đệm). HÀM THUẦN. */
+export function queryKeywords(query: string): string[] {
+  return [...new Set(foldVi(query).split(" ").filter((w) => w && !QUERY_STOPWORDS.has(w) && !/^\d+[a-z]*$/.test(w)))];
+}
+
+/**
+ * Tìm theo câu khách gõ — HÀM THUẦN trên danh mục đã đọc. Điểm: chữ khớp TÊN sản phẩm ×2, khớp quy cách / SKU / field ×1,
+ * +3 khi câu chứa NGUYÊN tên sản phẩm (cụm liền); trừ 0,5 cho mỗi chữ của tên mà khách KHÔNG nói (tên dài khớp lẻ tẻ thua tên
+ * ngắn khớp trọn). Không còn từ khoá nào (chỉ «1kg», «bao nhiêu») ⇒ trả đầu danh mục. Xếp theo điểm, tối đa `limit`.
  */
 export function searchCatalog(items: readonly CatalogItem[], query: string, limit = 8): CatalogItem[] {
-  const words = foldVi(query).split(" ").filter((w) => w.length > 0);
+  const words = queryKeywords(query);
   if (words.length === 0) return items.slice(0, limit);
-  const scored = items.map((it) => {
-    const hay = foldVi([it.name, it.sku, it.variant, ...Object.values(it.fields)].join(" "));
-    const hits = words.filter((w) => hay.includes(w)).length;
-    return { it, hits, all: hits === words.length };
+  const padded = ` ${words.join(" ")} `;
+  const scored = items.map((it, i) => {
+    const name = foldVi(it.name);
+    const nameWords = new Set(name.split(" ").filter((w) => w && !QUERY_STOPWORDS.has(w)));
+    const other = new Set(foldVi([it.sku, it.variant, ...Object.values(it.fields)].join(" ")).split(" "));
+    let score = 0;
+    let hits = 0;
+    for (const w of words) {
+      if (nameWords.has(w)) {
+        score += 2;
+        hits += 1;
+      } else if (other.has(w)) {
+        score += 1;
+        hits += 1;
+      }
+    }
+    const nameCore = [...nameWords].join(" ");
+    if (nameCore && padded.includes(` ${nameCore} `)) score += 3;
+    score -= 0.5 * [...nameWords].filter((w) => !words.includes(w)).length;
+    return { it, i, score, hits };
   });
-  const full = scored.filter((s) => s.all);
-  const pool = full.length ? full : scored.filter((s) => s.hits > 0).sort((a, b) => b.hits - a.hits);
-  return pool.slice(0, limit).map((s) => s.it);
+  return scored
+    .filter((s) => s.hits > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, limit)
+    .map((s) => s.it);
 }
 
 /** Tồn của các mẫu mã — CÙNG công thức với sổ kho. Mẫu mã không có trong kết quả = không tồn tại / đã gỡ. */

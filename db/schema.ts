@@ -9135,9 +9135,14 @@ export const messagingDeliveries = pgTable(
     createdBy: text("created_by"),
     createdAt: createdAt(),
     sentAt: ts("sent_at"),
+    /** Số lần đã thử (0186). */
+    attempts: integer("attempts").notNull().default(1),
+    /** Mốc gửi lại tin hỏng vì mạng TRƯỚC KHI yêu cầu rời máy (0186) — `null` = không gửi lại. */
+    nextRetryAt: ts("next_retry_at"),
   },
   (t) => [
     uniqueIndex("messaging_deliveries_dedupe_uq").on(t.dedupeKey),
+    index("messaging_deliveries_retry_idx").on(t.status, t.nextRetryAt),
     index("messaging_deliveries_created_idx").on(t.createdAt),
     index("messaging_deliveries_subject_idx").on(t.subjectType, t.subjectId),
     check("messaging_deliveries_status_check", sql`${t.status} IN ('PENDING','SENT','FAILED','UNKNOWN')`),
