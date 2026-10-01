@@ -475,7 +475,11 @@ export class OrderSync {
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
     // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
     if (!ex.ready && onlyNameMissing(ex.missing) && ex.phone && ex.address && (ex.items || []).length) ex.ready = true;
-    if (!ex.ready) return { status: "skipped", reason: `chưa đủ thông tin: ${ex.missing || "?"}` };
+    if (!ex.ready) {
+      // Kem nhung gi AI DA doc duoc de nhan vien nhin la biet thieu gi (khong phai mo lai ca hoi thoai)
+      const draft = { phone: normalizePhone(ex.phone) || "", customerName: ex.customer_name || customerName || "", address: String(ex.address || "").trim(), items: (ex.items || []).map((i) => `${i.code || "?"} ${i.color || "(chưa chọn màu)"} ${i.size || "(chưa chọn size)"} x${i.quantity || 1}`.replace(/\s+/g, " ").trim()) };
+      return { status: "skipped", reason: `chưa đủ thông tin: ${ex.missing || "?"}`, draft };
+    }
     const phone = normalizePhone(ex.phone);
     if (!phone) return { status: "skipped", reason: `SĐT không hợp lệ: ${ex.phone}` };
     // CHONG AI BIA SO DIEN THOAI: so phai THAT SU xuat hien trong hoi thoai.
@@ -591,6 +595,21 @@ export class OrderSync {
       const cung = normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone || o.conversation_id === conversationId;
       return cung && Date.now() - Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) < 14 * 24 * 3600e3;
     });
+  }
+
+  /**
+   * NHAN VIEN DA TU LEN DON cho khach nay chua: don (khong nhap / huy / xoa) cua cung SDT hoac cung hoi thoai, TAO SAU
+   * khi bot bat dau theo doi hoi thoai (tru 6 gio lui), hoac dang "Da xac nhan / Cho hang / Dang dong hang" trong 14 ngay.
+   * Khong dung moi don 14 ngay: khach mua lai sau khi don truoc da giao van phai duoc len don moi.
+   */
+  async staffHandledOrder(conversationId, phones, since) {
+    const moc = (since || Date.now()) - 6 * 3600e3;
+    for (const ph of [...new Set((phones || []).map(normalizePhone).filter(Boolean))].slice(-3)) {
+      const list = await this.otherOrders(conversationId, ph);
+      const hit = list.find((o) => [1, 11, 12].includes(Number(o.status)) || Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) >= moc);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   /**
