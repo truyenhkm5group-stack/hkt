@@ -133,6 +133,7 @@ const MOI = [
   "0183_sales_quick_replies",
   "0184_fanpage_comment_replies",
   "0185_sales_followup",
+  "0186_messaging_retry",
 ] as const;
 
 /*

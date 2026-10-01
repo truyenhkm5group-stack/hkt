@@ -38,7 +38,8 @@ import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/co
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
 import { ORDER_MATERIAL_CHANGE_LABEL } from "@/lib/constants/manual-orders";
 import { loadNotificationSetup, saveOrderNotificationPreset } from "@/lib/messaging/presets";
-import { deliverMessage } from "@/lib/messaging/service";
+import { deliverMessage, nextRetryAt as messagingNextRetryAt, retryFailedDeliveries } from "@/lib/messaging/service";
+import { failedBeforeSending } from "@/lib/connectors/net-error";
 import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
 import { BUSINESS_TYPE_SPEC, CORE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
@@ -212,6 +213,14 @@ function testPure() {
   assert.equal(followupStepsLabel([60, 360, 1320]), "1 giờ · 6 giờ · 22 giờ");
   const fp = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Lấy thông tin · kiểm tra khách cũ", 3, 3, true, "");
   assert.ok(/không nêu giá/i.test(fp) && /lần nhắc CUỐI/.test(fp) && /đơn nháp/.test(fp), fp);
+  // Gửi lại tin nhóm hỏng vì mạng (0186): chỉ lỗi TRƯỚC KHI yêu cầu rời máy; lịch 2 · 5 · 15 · 30 · 60 · 120 phút trong 6 giờ.
+  const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+  assert.ok(failedBeforeSending(netErr("ETIMEDOUT")) && failedBeforeSending(netErr("UND_ERR_CONNECT_TIMEOUT")) && failedBeforeSending(netErr("ENOTFOUND")));
+  assert.ok(!failedBeforeSending(netErr("ECONNRESET")) && !failedBeforeSending(netErr("UND_ERR_HEADERS_TIMEOUT")) && !failedBeforeSending(new Error("x")), "ngắt giữa chừng / chờ phản hồi ⇒ có thể đã tới ⇒ không gửi lại");
+  const c0 = new Date("2026-10-01T10:00:00Z");
+  assert.equal(messagingNextRetryAt(c0, 1, c0)?.toISOString(), "2026-10-01T10:02:00.000Z");
+  assert.equal(messagingNextRetryAt(c0, 7, c0), null, "hết lịch");
+  assert.equal(messagingNextRetryAt(c0, 6, new Date(c0.getTime() + 5 * 3_600_000)), null, "quá 6 giờ ⇒ không gửi lại");
   console.log("✓ Tự phục vụ · thuần: mẫu thực phẩm hợp lệ, tên miền con, mẫu tin, phần đổi của đơn, tìm không dấu, giờ làm việc");
 }
 
@@ -734,6 +743,53 @@ async function testJourney() {
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // ═══ GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — Telegram chập chờn từ máy chủ ở Việt Nam) ═══
+      const tgToken = `123456789:${"A".repeat(35)}`;
+      const okTg = () => ({ ok: true, result: { message_id: 77, username: "don_hang_bot", first_name: "Đơn hàng", id: 1 } });
+      assert.ok("ok" in (await saveConnection(admin, { connectorKey: "telegram-bot", settings: { chatId: "-1001234567" }, secrets: { botToken: tgToken } })));
+      assert.ok("ok" in (await testOrgConnection(admin, "telegram-bot", { tester: { fetch: fakeFetchCalls(okTg).fetch } })));
+      assert.ok("ok" in (await setConnectionStatus(admin, "telegram-bot", "ACTIVE")));
+      const tgErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+      const flaky = (failures: number, code = "ETIMEDOUT") => {
+        let n = 0;
+        const calls: string[] = [];
+        const f = (async (input: RequestInfo | URL) => {
+          calls.push(String(input));
+          n += 1;
+          if (n <= failures) throw tgErr(code);
+          return new Response(JSON.stringify(okTg()), { status: 200, headers: { "content-type": "application/json" } });
+        }) as typeof fetch;
+        return { fetch: f, calls };
+      };
+      const tSleeps: number[] = [];
+      const tsleep = async (ms: number) => void tSleeps.push(ms);
+      // Mạng tắc 2 lần rồi thông ⇒ gửi được NGAY trong lượt (thử lại sau 2 giây · 5 giây).
+      const q = flaky(2);
+      const d1 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #A", dedupeKey: "retry:test:1" }, { fetch: q.fetch, sleep: tsleep });
+      assert.ok(d1.status === "SENT" && q.calls.length === 3 && tSleeps.join(",") === "2000,5000", JSON.stringify({ d1, n: q.calls.length, tSleeps }));
+      // Tắc mãi ⇒ FAILED + hẹn gửi lại 2 phút; job tới mốc ⇒ gửi được, lần thử thứ 2.
+      const dead = flaky(99);
+      const d2 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #B", dedupeKey: "retry:test:2" }, { fetch: dead.fetch, sleep: tsleep });
+      assert.ok(d2.status === "FAILED" && /ETIMEDOUT/.test(d2.error) && /tự gửi lại/.test(d2.error), JSON.stringify(d2));
+      const mrow = async (k: string) => (await db.select().from(schema.messagingDeliveries).where(eq(schema.messagingDeliveries.dedupeKey, k)))[0];
+      let mr2 = await mrow("retry:test:2");
+      const dueIn = mr2.nextRetryAt!.getTime() - Date.now();
+      assert.ok(mr2.status === "FAILED" && mr2.attempts === 1 && dueIn > 100_000 && dueIn <= 120_000, JSON.stringify({ s: mr2.status, a: mr2.attempts, dueIn }));
+      assert.equal((await retryFailedDeliveries({ fetch: flaky(0).fetch, sleep: tsleep, now: () => new Date() })).due, 0, "chưa tới mốc");
+      const laterR = () => new Date(Date.now() + 3 * 60_000);
+      const good = flaky(0);
+      const [ra1, ra2] = await Promise.all([retryFailedDeliveries({ fetch: good.fetch, sleep: tsleep, now: laterR }), retryFailedDeliveries({ fetch: good.fetch, sleep: tsleep, now: laterR })]);
+      assert.ok(ra1.sent + ra2.sent === 1 && ra1.failed + ra2.failed === 0, `hai lượt job chồng nhau ⇒ gửi lại đúng MỘT lần, lượt thua nhường chứ không đập vào dòng đang gửi: ${JSON.stringify([ra1, ra2])}`);
+      assert.equal(good.calls.filter((u) => u.includes("/sendMessage")).length, 1);
+      mr2 = await mrow("retry:test:2");
+      assert.ok(mr2.status === "SENT" && mr2.attempts === 2 && mr2.nextRetryAt === null);
+      // Bị NGẮT giữa chừng (có thể đã tới) ⇒ không thử lại trong lượt, không hẹn gửi lại — thà thiếu còn hơn trùng.
+      const reset = flaky(99, "ECONNRESET");
+      const d3 = await deliverMessage({ connectorKey: "telegram-bot", body: "🟢 ĐƠN MỚI #C", dedupeKey: "retry:test:3" }, { fetch: reset.fetch, sleep: tsleep });
+      assert.ok(d3.status === "FAILED" && reset.calls.length === 1 && (await mrow("retry:test:3")).nextRetryAt === null, JSON.stringify(d3));
+      // Tin THỬ ⇒ không hẹn gửi lại (người bấm đang nhìn kết quả).
+      await deliverMessage({ connectorKey: "telegram-bot", body: "[TIN THỬ]", dedupeKey: "retry:test:4", isTest: true }, { fetch: flaky(99).fetch, sleep: tsleep });
+      assert.equal((await mrow("retry:test:4")).nextRetryAt, null);
       // ═══ QUY TRÌNH BÁN 5 BƯỚC + CÂU MẪU TRONG LUỒNG AI + CẦN NGƯỜI XỬ LÝ (chủ shop 01/10/2026) ═══
       const cfgOld = { ...parseSalesChatbotConfig(null), allowedTools: ["search_products" as const] };
       assert.ok(PROCESS_TOOLS.every((t) => toolDefsFor(cfgOld).some((d) => d.name === t)), "công cụ quy trình tới cả tổ chức có allowedTools lưu từ trước");

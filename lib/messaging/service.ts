@@ -13,10 +13,13 @@
  *                               (`UNKNOWN`). Hai tin "đơn mới" cho cùng một đơn làm kho đóng hai lần; thiếu một tin thì
  *                               người trực thấy dòng UNKNOWN trên màn hình và tự quyết.
  *   3. Gọi nhà cung cấp ⇒ ghi `SENT` (+ mã tin) hoặc `FAILED` (+ câu lỗi đã che bí mật).
+ *   4. (0186) `FAILED` vì mạng TRƯỚC KHI yêu cầu rời máy (`SendResult.retryable`) ⇒ hẹn `next_retry_at` theo
+ *      `RETRY_SCHEDULE_MIN`, trong `RETRY_WINDOW_MS` kể từ lúc tạo; job `messaging-retry` gọi lại ĐÚNG hàm này với cùng
+ *      `dedupe_key` (bước 2 giành lại dòng `FAILED`). Tin thử không hẹn gửi lại.
  *
  * Tin của hộp thử (`sandbox-messaging`) đi đúng đường này: dòng sổ CHÍNH LÀ hộp thư.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingProvider, type MessagingDeps } from "@/lib/messaging/providers";
 import type { MessagingConnectorKey } from "@/lib/messaging/types";
@@ -41,6 +44,19 @@ export type DeliverResult =
   | { status: "FAILED"; deliveryId: string | null; error: string };
 
 const MAX_BODY = 4000;
+
+/** Phút chờ trước lần gửi lại thứ 1, 2, 3… (0186). Hết lịch ⇒ dừng, dòng ở `FAILED` cho người trực xem. */
+export const RETRY_SCHEDULE_MIN = [2, 5, 15, 30, 60, 120] as const;
+/** Không gửi lại tin cũ hơn chừng này — «đơn mới» tới trễ nửa ngày là gây rối hơn là giúp. */
+export const RETRY_WINDOW_MS = 6 * 3_600_000;
+
+/** Mốc gửi lại sau lần thử thứ `attempts` (đã hỏng) — `null` khi hết lịch hoặc quá cửa sổ 6 giờ. HÀM THUẦN. */
+export function nextRetryAt(createdAt: Date, attempts: number, now: Date): Date | null {
+  const m = RETRY_SCHEDULE_MIN[attempts - 1];
+  if (m === undefined) return null;
+  const at = new Date(now.getTime() + m * 60_000);
+  return at.getTime() - createdAt.getTime() <= RETRY_WINDOW_MS ? at : null;
+}
 
 export async function deliverMessage(input: DeliverInput, deps: MessagingDeps = {}): Promise<DeliverResult> {
   const db = await getDb();
@@ -75,7 +91,7 @@ export async function deliverMessage(input: DeliverInput, deps: MessagingDeps = 
       await db.update(t).set({ status: "UNKNOWN" }).where(and(eq(t.id, existing.id), eq(t.status, "PENDING")));
       return { status: "UNKNOWN", deliveryId: existing.id };
     }
-    const [reclaimed] = await db.update(t).set({ status: "PENDING", error: null, body }).where(and(eq(t.id, existing.id), eq(t.status, "FAILED"))).returning({ id: t.id });
+    const [reclaimed] = await db.update(t).set({ status: "PENDING", error: null, body, nextRetryAt: null, attempts: sql`${t.attempts} + 1` }).where(and(eq(t.id, existing.id), eq(t.status, "FAILED"))).returning({ id: t.id });
     if (!reclaimed) return { status: "UNKNOWN", deliveryId: existing.id };
     id = reclaimed.id;
   }
@@ -87,7 +103,9 @@ export async function deliverMessage(input: DeliverInput, deps: MessagingDeps = 
   }
   const sent = await provider.provider.send({ title: input.title ?? null, text: body, destination: input.destination ?? null });
   if (!sent.ok) {
-    await db.update(t).set({ status: "FAILED", error: sent.error.slice(0, 500) }).where(eq(t.id, id));
+    const [row] = await db.select({ attempts: t.attempts, createdAt: t.createdAt }).from(t).where(eq(t.id, id)).limit(1);
+    const retryAt = sent.retryable && !input.isTest && row ? nextRetryAt(row.createdAt, row.attempts, (deps.now ?? (() => new Date()))()) : null;
+    await db.update(t).set({ status: "FAILED", error: sent.error.slice(0, 500), nextRetryAt: retryAt }).where(eq(t.id, id));
     return { status: "FAILED", deliveryId: id, error: sent.error };
   }
   await db.update(t).set({ status: "SENT", providerMessageId: sent.providerMessageId, destination: sent.destination, sentAt: new Date(), error: null }).where(eq(t.id, id));
@@ -107,4 +125,48 @@ export async function listDeliveries(opts: { limit?: number; connectorKey?: Mess
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(t.createdAt))
     .limit(Math.min(Math.max(opts.limit ?? 30, 1), 200));
+}
+
+export type RetryRunResult = { due: number; sent: number; failed: number; skipped: number };
+
+/**
+ * Job `messaging-retry` (0186): tin `FAILED` tới mốc gửi lại ⇒ GIÀNH dòng (xoá đúng mốc — hai lượt chồng nhau không gửi hai
+ * lần) ⇒ gọi lại `deliverMessage` với CÙNG khoá chống trùng (giành lại dòng `FAILED` ở bước 2). Hỏng tiếp vì mạng ⇒ hàm ấy
+ * tự hẹn mốc kế; hết lịch ⇒ dừng.
+ */
+export async function retryFailedDeliveries(deps: MessagingDeps = {}): Promise<RetryRunResult> {
+  const now = (deps.now ?? (() => new Date()))();
+  const db = await getDb();
+  const t = schema.messagingDeliveries;
+  const due = await db
+    .select()
+    .from(t)
+    .where(and(eq(t.status, "FAILED"), eq(t.isTest, false), lte(t.nextRetryAt, now)))
+    .orderBy(asc(t.nextRetryAt))
+    .limit(20);
+  const out: RetryRunResult = { due: due.length, sent: 0, failed: 0, skipped: 0 };
+  for (const row of due) {
+    const [mine] = await db.update(t).set({ nextRetryAt: null }).where(and(eq(t.id, row.id), eq(t.status, "FAILED"), eq(t.nextRetryAt, row.nextRetryAt!))).returning({ id: t.id });
+    if (!mine) {
+      out.skipped += 1;
+      continue;
+    }
+    const r = await deliverMessage(
+      {
+        connectorKey: row.connectorKey as MessagingConnectorKey,
+        destination: row.destination,
+        title: row.title,
+        body: row.body,
+        dedupeKey: row.dedupeKey,
+        event: row.event,
+        subject: row.subjectType && row.subjectId ? { type: row.subjectType, id: row.subjectId } : null,
+        runId: row.runId,
+        createdBy: row.createdBy,
+      },
+      deps,
+    );
+    if (r.status === "SENT") out.sent += 1;
+    else out.failed += 1;
+  }
+  return out;
 }
