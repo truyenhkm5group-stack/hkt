@@ -45,7 +45,7 @@ export const SALES_TONES = ["FRIENDLY", "PROFESSIONAL", "CONCISE"] as const;
 export type SalesTone = (typeof SALES_TONES)[number];
 export const SALES_TONE_LABEL: Record<SalesTone, string> = { FRIENDLY: "Thân thiện, xưng hô gần gũi", PROFESSIONAL: "Lịch sự, chuyên nghiệp", CONCISE: "Ngắn gọn, đi thẳng vào việc" };
 
-export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok"] as const;
+export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok", "gemini-byok"] as const;
 export type SalesBotConnector = (typeof SALES_BOT_CONNECTORS)[number];
 
 /** Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): chặn vòng lặp công cụ và bão tin trên trang chat công khai. */

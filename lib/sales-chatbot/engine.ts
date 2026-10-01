@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
-import { ByokAnthropicProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
+import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
@@ -234,7 +234,8 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
   const apiKey = conn.secrets.apiKey ?? "";
   if (!apiKey) return { ok: false, error: "Kết nối AI thiếu khoá." };
   const model = cfg.model || conn.settings.model || null;
-  return { ok: true, provider: cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model }) : new ByokOpenAiProvider({ apiKey, model }) };
+  const provider = cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model }) : cfg.connectorKey === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model }) : new ByokOpenAiProvider({ apiKey, model });
+  return { ok: true, provider };
 }
 
 /** `media` = ảnh của CÂU TRẢ LỜI MẪU vừa gửi (0183) — kênh fanpage gửi tiếp qua Pancake sau phần chữ. */
