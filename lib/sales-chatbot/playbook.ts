@@ -32,6 +32,8 @@ import {
   type PlaybookState,
   type PlaybookStats,
 } from "@/lib/sales-chatbot/playbook-shared";
+import { saveLearnedQuickReplies } from "@/lib/sales-chatbot/quick-replies";
+import { parseLearnedQuickReplies, QUICK_REPLY_LIMITS } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { setSettingJson } from "@/lib/settings";
 
@@ -111,6 +113,13 @@ const MERGE_SYSTEM = (shop: string) =>
     "đúng năm mục: 1. Giọng điệu & xưng hô · 2. Câu hỏi thường gặp & cách trả lời mẫu · 3. Khi khách chê giá / phân vân ·",
     "4. Dẫn tới chốt đơn · 5. Không bao giờ nói. Câu mẫu ngắn, dùng được ngay. TUYỆT ĐỐI không nêu giá, số tiền, khuyến mãi,",
     "thời gian giao cụ thể — trợ lý luôn lấy giá và tồn từ hệ thống lúc chat. Không nhắc tên khách.",
+  ].join("\n");
+
+const QUICK_REPLY_SYSTEM = (shop: string) =>
+  [
+    `Từ các ghi chú phân tích hội thoại bán hàng của shop «${shop}», chọn tối đa ${QUICK_REPLY_LIMITS.learnedMax} câu hỏi khách hỏi NHIỀU NHẤT mà trả lời được bằng MỘT câu soạn sẵn (cách bảo quản, cách dùng, quy cách đóng gói, ship đi đâu, thanh toán, còn hàng không…).`,
+    "Trả về DUY NHẤT một mảng JSON: [{\"title\": \"tên ngắn\", \"triggers\": [\"3–6 cách khách hay gõ, viết như khách gõ\"], \"answer\": \"câu trả lời theo giọng shop, ngắn\"}].",
+    "TUYỆT ĐỐI không ghi giá, số tiền, khuyến mãi, phí ship hay số lượng tồn cụ thể — chỗ cần giá thì viết đúng chữ [giá lấy từ ERP]. Không nhắc tên khách.",
   ].join("\n");
 
 const textOf = (content: AiBlock[]) =>
@@ -235,6 +244,13 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     const clean = stripPrices(merged);
     stats.pricesRemoved = clean.removed;
     if (!clean.text.trim()) throw new Error("Sổ tay AI soạn ra rỗng sau khi lọc giá — không lưu bản nháp trống; chạy lại.");
+    // Gợi ý CÂU TRẢ LỜI MẪU (0183) từ cùng ghi chú: luôn TẮT, chờ người duyệt. Hỏng ở bước này không làm hỏng lượt học.
+    await progress(fetched, "AI đang gợi ý câu trả lời mẫu");
+    try {
+      stats.quickReplies = await saveLearnedQuickReplies(parseLearnedQuickReplies(await ask(QUICK_REPLY_SYSTEM(shop), notes.map((n, i) => `### Ghi chú ${i + 1}\n${n}`).join("\n\n"))), actor.email);
+    } catch {
+      stats.quickReplies = 0;
+    }
     const state = await loadPlaybook();
     await setSettingJson(PLAYBOOK_SETTING_KEY, { ...state, draft: { text: clean.text.slice(0, PLAYBOOK_LIMITS.playbookChars), createdAt: now().toISOString(), createdBy: actor.email, stats } } satisfies PlaybookState);
     const done: PlaybookRun = { state: "DONE", startedAt, finishedAt: now().toISOString(), stats };

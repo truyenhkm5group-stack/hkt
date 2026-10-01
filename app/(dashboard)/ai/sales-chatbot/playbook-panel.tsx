@@ -70,7 +70,7 @@ export function PlaybookPanel({ state, run, fanpageReady }: { state: PlaybookSta
           {run.state === "RUNNING"
             ? `Đang chạy (từ ${formatDateTime(run.startedAt)}): ${run.note} · đã đọc ${run.fetched} hội thoại.`
             : run.state === "DONE"
-              ? `Lượt gần nhất xong ${formatDateTime(run.finishedAt)}: học từ ${run.stats.conversations} hội thoại · ${run.stats.aiCalls} lượt AI${run.stats.costUsd !== null ? ` · ~${run.stats.costUsd.toFixed(3)} USD` : ""}${run.stats.pricesRemoved ? ` · gỡ ${run.stats.pricesRemoved} con số dạng giá` : ""}.`
+              ? `Lượt gần nhất xong ${formatDateTime(run.finishedAt)}: học từ ${run.stats.conversations} hội thoại · ${run.stats.aiCalls} lượt AI${run.stats.costUsd !== null ? ` · ~${run.stats.costUsd.toFixed(3)} USD` : ""}${run.stats.pricesRemoved ? ` · gỡ ${run.stats.pricesRemoved} con số dạng giá` : ""}${run.stats.quickReplies ? ` · gợi ý ${run.stats.quickReplies} câu trả lời mẫu (đang tắt — duyệt ở trang Câu trả lời mẫu)` : ""}.`
               : run.state === "FAILED"
                 ? `Lượt gần nhất hỏng (${formatDateTime(run.finishedAt)}): ${run.error}`
                 : "Chưa chạy lần nào."}

@@ -32,6 +32,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
+import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -206,7 +207,8 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
   return { ok: true, provider: cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model }) : new ByokOpenAiProvider({ apiKey, model }) };
 }
 
-export type TurnResult = { ok: true; view: ChatView } | { ok: false; error: string; view?: ChatView | null };
+/** `media` = ảnh của CÂU TRẢ LỜI MẪU vừa gửi (0183) — kênh fanpage gửi tiếp qua Pancake sau phần chữ. */
+export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: string; imageIds: string[] } } | { ok: false; error: string; view?: ChatView | null };
 
 async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
@@ -298,6 +300,22 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         return { ok: true, view: (await conversationView(conv.id))! };
       }
     }
+    // CÂU TRẢ LỜI MẪU (0183 · lib/sales-chatbot/quick-replies.ts): khớp CHỮ trước — 0 token. Khách đang có đơn nháp chưa
+    // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
+    const qrSettings = await loadQuickReplySettings();
+    const st0 = (conv.state ?? {}) as ChatState;
+    const quick: QuickReplyStep = qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
+    const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
+      await reply(conv, seq, pick.text);
+      await markQuickReplyUsed(pick.entry.id, now).catch(() => undefined);
+      await bump({
+        turns: conv.turns + 1,
+        quickReplies: conv.quickReplies + 1,
+        ...(ai ? { aiCalls: conv.aiCalls + ai.calls, inputTokens: conv.inputTokens + ai.inTok, outputTokens: conv.outputTokens + ai.outTok } : {}),
+      });
+      return { ok: true, view: (await conversationView(conv.id))!, media: { quickReplyId: pick.entry.id, imageIds: pick.imageIds } };
+    };
+    if (quick.kind === "ANSWER") return sendQuick(quick.pick, null);
     const org = await currentOrganization();
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
@@ -319,6 +337,21 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     }
     const prov = await providerFor(cfg);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
+    // AI ĐỌC HIỂU (0183): một lời gọi NHỎ chỉ chọn mã câu mẫu — chọn được ⇒ trả lời bằng câu mẫu, khỏi lượt chatbot đầy đủ.
+    // Lỗi ở bước này không chặn khách: đi tiếp đường chatbot đầy đủ (nó tự xử lý lỗi nhà cung cấp).
+    const pre = { calls: 0, inTok: 0, outTok: 0 };
+    if (quick.kind === "NO_MATCH" && qrSettings.aiMatch) {
+      try {
+        const lastShop = [...msgs].reverse().find((m) => m.role === "assistant" && textOf(m.content));
+        const { pick, res } = await quickReplyByAi(prov.provider, text, lastShop ? textOf(lastShop.content) : "", quick.candidates, cfg);
+        const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
+        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+        Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
+        if (pick) return sendQuick(pick, pre);
+      } catch (error) {
+        if (error instanceof SeqConflict) throw error;
+      }
+    }
     const orgRow = await findOrganization(org.code);
     const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook());
     const tools = toolDefsFor(cfg);
@@ -380,9 +413,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     await bump({
       state: state as Record<string, unknown>,
       turns: conv.turns + 1,
-      aiCalls: conv.aiCalls + calls,
-      inputTokens: conv.inputTokens + inTok,
-      outputTokens: conv.outputTokens + outTok,
+      aiCalls: conv.aiCalls + pre.calls + calls,
+      inputTokens: conv.inputTokens + pre.inTok + inTok,
+      outputTokens: conv.outputTokens + pre.outTok + outTok,
       lastError,
       ...(state.handoff && conv.status !== "HANDOFF" ? { status: "HANDOFF", handoffReason: state.handoff.reason } : {}),
       ...(state.customer?.id ? { customerId: state.customer.id } : {}),

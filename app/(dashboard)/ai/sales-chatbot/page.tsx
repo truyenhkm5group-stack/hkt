@@ -53,6 +53,11 @@ export default async function SalesChatbotPage() {
             <p>Khoá AI là của CHÍNH tổ chức (Cài đặt → Kết nối → Anthropic / OpenAI) — tổ chức trả tiền token. Khung thử bên phải dùng giá / tồn thật nhưng KHÔNG tạo khách, đơn hay tin nhóm thật.</p>
           </div>
         }
+        actions={
+          <Link href="/ai/sales-chatbot/quick-replies" className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="quick-replies-link">
+            Câu trả lời mẫu (Q&amp;A)
+          </Link>
+        }
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">

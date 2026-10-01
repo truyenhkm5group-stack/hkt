@@ -9161,6 +9161,8 @@ export const salesChatConversations = pgTable(
     aiCalls: integer("ai_calls").notNull().default(0),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    /** Số lượt trả lời bằng CÂU TRẢ LỜI MẪU (0183) — không tốn lượt AI chính. */
+    quickReplies: integer("quick_replies").notNull().default(0),
     lastError: text("last_error"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
@@ -9173,6 +9175,54 @@ export const salesChatConversations = pgTable(
     check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB','FANPAGE')`),
     uniqueIndex("sales_chat_conversations_fanpage_key").on(t.visitorKey).where(sql`${t.channel} = 'FANPAGE'`),
     check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','HANDOFF','CLOSED')`),
+  ],
+);
+
+/**
+ * CÂU TRẢ LỜI MẪU (Q&A) của chatbot bán hàng (0183 · lib/sales-chatbot/quick-replies.ts): câu hỏi phổ biến trả lời bằng câu
+ * soạn sẵn — không tốn token AI. Giá / tồn / phí ship trong câu trả lời CHỈ là chỗ trống (`{{giá:SKU}}` · `{{tồn:SKU}}` ·
+ * `{{ship}}`) — máy đọc ERP lúc gửi. `LEARNED` = AI gợi ý từ hội thoại cũ, luôn tạo ở trạng thái tắt.
+ */
+export const salesChatQuickReplies = pgTable(
+  "sales_chat_quick_replies",
+  {
+    id: id(),
+    title: text("title").notNull(),
+    triggers: text("triggers").array().notNull().default(sql`'{}'::text[]`),
+    answer: text("answer").notNull(),
+    active: boolean("active").notNull().default(false),
+    source: text("source").notNull().default("MANUAL"),
+    uses: integer("uses").notNull().default(0),
+    lastUsedAt: ts("last_used_at"),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("sales_chat_quick_replies_active_idx").on(t.active), check("sales_chat_quick_replies_source_check", sql`${t.source} IN ('MANUAL','LEARNED')`)],
+);
+
+/** Ảnh gửi kèm một câu trả lời mẫu (0183). `pancake_*` = mã nội dung đã tải lên một page Pancake (dùng lại 12 giờ). */
+export const salesChatQuickReplyImages = pgTable(
+  "sales_chat_quick_reply_images",
+  {
+    id: id(),
+    quickReplyId: text("quick_reply_id")
+      .notNull()
+      .references(() => salesChatQuickReplies.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    data: bytea("data").notNull(),
+    pancakePageId: text("pancake_page_id"),
+    pancakeContentId: text("pancake_content_id"),
+    pancakeUploadedAt: ts("pancake_uploaded_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_chat_quick_reply_images_reply_idx").on(t.quickReplyId, t.position),
+    check("sales_chat_quick_reply_images_type_check", sql`${t.contentType} IN ('image/jpeg','image/png','image/webp')`),
+    check("sales_chat_quick_reply_images_size_check", sql`${t.bytes} > 0`),
   ],
 );
 
