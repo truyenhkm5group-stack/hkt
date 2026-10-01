@@ -8,7 +8,12 @@
  * LUỒNG: webhook `/api/webhooks/pancake/fanpage/<token>` (token ⇒ tổ chức, `lib/platform/webhooks.ts`) ⇒ `receiveFanpageEvent`
  * ghi tin vào `sales_chat_inbound` (UNIQUE mã tin ⇒ gửi trùng vô hại) và trả 200 ngay ⇒ sau phản hồi `processFanpageThread`
  * đợi vừa đủ (tin ĐẦU của hội thoại mới: `FIRST_CONTACT_WAIT_MS`; tin tiếp theo: `FOLLOWUP_WAIT_MS`), GIÀNH mọi tin chờ của hội thoại (một lượt duy nhất), gọi
- * `chatTurn`, gửi các câu trả lời mới qua Pancake. Chỉ tin nhắn INBOX — bình luận không trả lời tự động.
+ * `chatTurn`, gửi các câu trả lời mới qua Pancake.
+ *
+ * BÌNH LUẬN (0184, chủ shop 01/10/2026): KHÔNG BAO GIỜ trả lời công khai dưới bình luận — bot gửi MỘT tin nhắn RIÊNG cho
+ * người bình luận (Facebook private reply, Pancake `private_replies`; Facebook chỉ cho một tin riêng mỗi bình luận). Cùng
+ * luật với tin nhắn: page / nhân viên đã trả lời bình luận ⇒ bot không chen; bình luận đã được nhắn riêng (Pancake tự động,
+ * nhân viên) ⇒ không nhắn lần hai. Gửi xong, hội thoại chuyển sang hộp thư vừa mở để khách nhắn tiếp vẫn đúng mạch.
  *
  * BOT LÀ LƯỚI ĐỠ, KHÔNG CHEN NGANG (chủ nền tảng 01/10/2026: shop đã cài câu trả lời tự động trên Meta cho câu hỏi đầu
  * tiên): MỌI tin phía page — trả lời tự động của Meta hay của nhân viên — được ghi lại (`PAGE_REPLY`); tin khách nào đã
@@ -60,6 +65,10 @@ const ECHO_MEDIA_WINDOW_MS = 2 * 60_000;
 /** Ảnh mỗi tin (Pancake nhận tới 30, ít ảnh / tin cho khách dễ xem) và hạn dùng lại mã nội dung đã tải lên. */
 const IMAGES_PER_MESSAGE = 6;
 const CONTENT_REUSE_MS = 12 * 3_600_000;
+/** `thread_id` của dấu tin riêng bot ghi TRƯỚC khi gửi — chưa biết hộp thư nào sẽ mở, nên so tiếng vọng trên cả page. */
+const PRIVATE_REPLY_THREAD = "__private_reply__";
+/** Khoảng so tiếng vọng của tin riêng (hộp thư mới mở ngay sau lời gọi). */
+const PRIVATE_ECHO_WINDOW_MS = 5 * 60_000;
 
 /** Chuẩn hoá để so tiếng vọng: Pancake trả lại đúng câu bot gửi nhưng có thể khác khoảng trắng / xuống dòng. */
 export function normalizeEcho(text: string): string {
@@ -79,6 +88,8 @@ export type FanpageEvent = {
   /** Tin của NGƯỜI THẬT bên page (có uid / admin_id) — chưa loại tin bot vừa gửi (việc của `receiveFanpageEvent`). */
   humanStaff: boolean;
   inbox: boolean;
+  /** Bình luận (0184): bài viết + người bình luận (private reply đòi cả hai). `null` với tin nhắn. */
+  comment: { postId: string; fromId: string } | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -111,7 +122,12 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const type = str(msg?.type || conv?.type || "INBOX").toUpperCase();
   const text = stripHtml(str(msg?.original_message) || str(msg?.message)).slice(0, TEXT_MAX);
   const customerName = str(from.name) || str((conv?.from as { name?: unknown } | undefined)?.name);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox: type === "INBOX" };
+  const inbox = type === "INBOX";
+  // Mã bài viết: Pancake ghi ở tin / hội thoại; thiếu thì tách từ mã hội thoại bình luận `{bài}_{bình luận}` (cách bot nhà làm).
+  const post = (conv?.post ?? {}) as { id?: unknown };
+  const postId = str(msg?.post_id) || str(conv?.post_id) || str(post.id) || threadId.split("_")[0];
+  const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox, comment };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -129,7 +145,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (ev.fromPage) {
-    if (!ev.inbox) return { queued: false, reason: "Tin của page trên bình luận" };
+    if (!ev.inbox && !ev.comment) return { queued: false, reason: "Tin của page ngoài tin nhắn / bình luận" };
     // Tin của chính bot — không phải nhân viên, không phải «page đã trả lời». Hai dấu hiệu, một là đủ: (1) ĐÚNG mã tin Pancake
     // trả về lúc gửi; (2) trùng NGUYÊN VĂN một đoạn bot ghi sẵn TRƯỚC khi gửi, cùng hội thoại, trong 10 phút — đỡ trường hợp
     // tiếng vọng tới trước khi mã tin kịp ghi, hoặc mã trong webhook khác mã lời gọi gửi trả về. Nhận nhầm tiếng vọng là
@@ -143,6 +159,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
           eq(t.messageId, ev.messageId),
           // Tin ảnh không chữ: so với dấu ảnh bot ghi trước khi gửi (chữ rỗng), khoảng ngắn hơn.
           and(eq(t.pageId, ev.pageId), eq(t.threadId, ev.threadId), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - (echo ? ECHO_WINDOW_MS : ECHO_MEDIA_WINDOW_MS)))),
+          // Tin RIÊNG trả lời bình luận: hộp thư chưa biết lúc gửi ⇒ so nguyên văn trên cả page, khoảng ngắn.
+          echo ? and(eq(t.pageId, ev.pageId), eq(t.threadId, PRIVATE_REPLY_THREAD), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - PRIVATE_ECHO_WINDOW_MS))) : sql`false`,
         ),
       )
       .limit(1);
@@ -152,6 +170,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .insert(t)
       .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, status: "DONE", processedAt: now, note: PAGE_REPLY })
       .onConflictDoNothing({ target: t.messageId });
+    if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
     await db
@@ -160,11 +179,12 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId))));
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
-  if (!ev.inbox) return { queued: false, reason: "Bình luận — không trả lời tự động" };
+  if (!ev.inbox && !ev.comment) return { queued: false, reason: "Không phải tin nhắn / bình luận" };
+  if (ev.comment && !ev.comment.fromId) return { queued: false, reason: "Bình luận thiếu người gửi — không nhắn riêng được" };
   if (!ev.text) return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
   const rows = await db
     .insert(t)
-    .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null })
+    .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
     .onConflictDoNothing({ target: t.messageId })
     .returning({ id: t.id });
   return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
@@ -253,6 +273,82 @@ async function conversationFor(pageId: string, threadId: string): Promise<{ id: 
   return find();
 }
 
+type CommentReplyInput = { pageId: string; threadId: string; token: string; commentId: string; postId: string; fromId: string; text: string; imageIds: readonly string[]; conversationId: string };
+type CommentReplyResult = { kind: "SENT"; inboxId: string | null; warning: string | null } | { kind: "ALREADY"; reason: string } | { kind: "FAILED"; reason: string };
+
+/** Hộp thư mà tin riêng của MỘT bình luận đã mở (`private_reply_conversation` của Pancake) — `null` khi chưa nhắn riêng / không đọc được. */
+async function privateReplyInbox(pageId: string, threadId: string, commentId: string, token: string, fetchImpl: typeof fetch): Promise<{ read: boolean; inboxId: string | null }> {
+  try {
+    const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
+    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15_000) });
+    const body = (await res.json().catch(() => null)) as { messages?: { id?: unknown; private_reply_conversation?: unknown }[] } | null;
+    if (!res.ok || !Array.isArray(body?.messages)) return { read: false, inboxId: null };
+    const mine = body.messages.find((m) => str(m.id) === commentId);
+    const prc = mine?.private_reply_conversation as unknown;
+    const inboxId = typeof prc === "string" ? prc : prc && typeof prc === "object" ? str((prc as { id?: unknown }).id) || str((prc as { conversation_id?: unknown }).conversation_id) : "";
+    return { read: true, inboxId: inboxId || null };
+  } catch {
+    return { read: false, inboxId: null };
+  }
+}
+
+/**
+ * Trả lời MỘT bình luận bằng tin nhắn RIÊNG (0184). (1) Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) ⇒ không nhắn
+ * lần hai (Facebook chỉ cho một). (2) Ghi dấu tiếng vọng TRƯỚC khi gửi. (3) `private_replies`. Hỏng ⇒ báo lỗi, KHÔNG BAO GIỜ
+ * lùi về trả lời công khai. (4) Gửi xong: tìm hộp thư vừa mở ⇒ ghi dấu ở hộp thư đó (khách nhắn tiếp được trả lời nhanh, tiếng
+ * vọng không bị coi là nhân viên), chuyển hội thoại sang hộp thư ấy (giữ mạch), gửi ảnh của câu mẫu vào đó.
+ */
+async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps): Promise<CommentReplyResult> {
+  const fetchImpl = deps.fetch ?? fetch;
+  const now = deps.now ?? (() => new Date());
+  const { pageId, threadId, token, commentId } = input;
+  const text = input.text.trim().slice(0, TEXT_MAX);
+  if (!text) return { kind: "FAILED", reason: "Bot không soạn được câu trả lời cho bình luận" };
+  const before = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
+  if (before.inboxId) return { kind: "ALREADY", reason: "Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) — bot không nhắn lần hai" };
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  await db.insert(t).values({ pageId, threadId: PRIVATE_REPLY_THREAD, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  try {
+    const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "private_replies", post_id: input.postId, message_id: commentId, from_id: input.fromId, message: text }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
+    if (!res.ok || body?.success === false) return { kind: "FAILED", reason: scrubSecrets(`Pancake không nhắn riêng được cho bình luận: ${str(body?.message) || `HTTP ${res.status}`} — bot KHÔNG trả lời công khai`, [token]) };
+    if (str(body?.id)) await db.insert(t).values({ pageId, threadId: PRIVATE_REPLY_THREAD, messageId: str(body?.id), text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  } catch (e) {
+    return { kind: "FAILED", reason: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]) };
+  }
+  const after = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
+  const inboxId = after.inboxId;
+  if (!inboxId) return { kind: "SENT", inboxId: null, warning: input.imageIds.length ? "Đã nhắn riêng; chưa tìm được hộp thư để gửi ảnh" : null };
+  await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  // Giữ mạch: hội thoại của bình luận đi tiếp ở hộp thư (bỏ qua nếu hộp thư đã có hội thoại riêng — khoá UNIQUE).
+  const c = schema.salesChatConversations;
+  await db
+    .update(c)
+    .set({ visitorKey: fanpageVisitorKey(pageId, inboxId), updatedAt: now() })
+    .where(and(eq(c.id, input.conversationId), sql`not exists (select 1 from ${c} x where x.channel = 'FANPAGE' and x.visitor_key = ${fanpageVisitorKey(pageId, inboxId)})`))
+    .catch(() => undefined);
+  let warning: string | null = null;
+  if (input.imageIds.length) {
+    const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());
+    if (up.ids.length) {
+      await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+      const sentImgs = await sendImages(pageId, inboxId, token, up.ids, fetchImpl);
+      if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId: inboxId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+      if (!sentImgs.ok) warning = sentImgs.error;
+    }
+    warning = warning ?? up.errors[0] ?? null;
+  }
+  return { kind: "SENT", inboxId, warning };
+}
+
 export type ProcessResult = { processed: number; replies: number; skipped: string | null; error: string | null };
 
 /**
@@ -293,7 +389,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore))))
-      .returning({ id: t.id, text: t.text, createdAt: t.createdAt });
+      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
@@ -340,8 +436,33 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       out.skipped = turn.error;
       continue;
     }
+    // CHUYỂN NGƯỜI ⇒ bot IM LẶNG trên fanpage (chủ shop 01/10/2026: không nhắn «Em đã chuyển cho nhân viên…», để nguyên
+    // cho tới khi người vào đọc và trả lời). Áp cho MỌI đường chuyển: AI gọi handoff · AI hỏng · hội thoại quá dài. Nhân
+    // viên vẫn nhận thông báo trong ERP (`notifySalesChatHandoff`).
+    if (turn.view.status === "HANDOFF") {
+      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      out.processed += ids.length;
+      out.skipped = "Chuyển nhân viên — bot im lặng";
+      continue;
+    }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
+    // BÌNH LUẬN: một tin RIÊNG trả lời bình luận MỚI NHẤT của lượt (gộp mọi câu trả lời) — không bao giờ công khai.
+    const lastComment = [...claimed].reverse().find((r) => r.kind === "COMMENT" && r.postId && r.fromId);
+    if (lastComment) {
+      const pr = await deliverCommentReply(
+        { pageId, threadId, token, commentId: lastComment.messageId, postId: lastComment.postId!, fromId: lastComment.fromId!, text: replies.map((r) => r.text).join("\n\n"), imageIds: turn.media?.imageIds ?? [], conversationId: conv.id },
+        deps,
+      );
+      if (pr.kind === "SENT") out.replies += 1;
+      await finish(pr.kind === "ALREADY" ? "SKIPPED" : "DONE", pr.kind === "SENT" ? pr.warning : pr.reason);
+      out.processed += ids.length;
+      if (pr.kind === "FAILED") {
+        out.error = pr.reason;
+        break;
+      }
+      continue;
+    }
     for (const r of replies) {
       // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
       await db

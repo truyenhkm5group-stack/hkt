@@ -694,6 +694,88 @@ async function testJourney() {
       assert.equal(await saveLearnedQuickReplies([], ADMIN_EMAIL), 0);
       assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0, "lượt học mới thay gợi ý cũ chưa ai bật / chưa dùng");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // CHUYỂN NGƯỜI trên fanpage ⇒ bot IM LẶNG (không gửi «Em đã chuyển cho nhân viên…»), hội thoại chờ người.
+      let handoffStep = 0;
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          handoffStep += 1;
+          const content: AiBlock[] = handoffStep === 1 ? [{ type: "tool_use", id: "h1", name: "handoff_to_human", input: { reason: "Khách muốn giao ngày mai" } }] : [{ type: "text", text: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé." }];
+          return { content, stopReason: handoffStep === 1 ? "tool_use" : "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-ho-1", "thế mai cho c 1kg chả với 10 nem c ăn thử nhé", { id: "cust-ho", name: "Chị Hồ" }, "t-ho"));
+      const hoFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      const rho = await processFanpageThread(PAGE, "t-ho", { fetch: hoFetch.fetch, now: in31s });
+      assert.ok(rho.replies === 0 && /im lặng/.test(rho.skipped ?? ""), JSON.stringify(rho));
+      assert.ok(!hoFetch.calls.some((c) => c.init?.method === "POST"), "chuyển người ⇒ không gửi gì cho khách");
+      const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
+      assert.equal(hoConv.status, "HANDOFF");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // ═══ BÌNH LUẬN (0184): trả lời bằng TIN NHẮN RIÊNG (private reply), không bao giờ công khai ═══
+      const evc = (id: string, text: string, from: Record<string, unknown>, thread: string, postId = `${PAGE}_post-1`) =>
+        parsePancakeWebhook({ event_type: "messaging", page_id: PAGE, data: { conversation: { id: thread, type: "COMMENT" }, message: { id, type: "COMMENT", message: text, from, post_id: postId } } })!;
+      const replied = new Map<string, string>(); // mã bình luận ⇒ hộp thư tin riêng đã mở
+      const cmtFetch = fakeFetchCalls((url, init) => {
+        const body = init?.body && typeof init.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        if (init?.method === "POST" && body.action === "private_replies") {
+          if (String(body.message_id) === "c-fail") return { success: false, message: "(#10900) Activity already replied to" };
+          replied.set(String(body.message_id), `inbox-of-${String(body.message_id)}`);
+          return { success: true, id: `pr-${String(body.message_id)}` };
+        }
+        if (url.includes("upload_contents")) return { success: true, id: "content-cmt" };
+        if (init?.method === "POST") return { success: true, id: `m-${Math.random().toString(36).slice(2)}` };
+        const thread = /conversations\/([^/]+)\/messages/.exec(url)?.[1] ?? "";
+        const ids = thread === "t-c1" ? ["c-1"] : thread === "t-c2" ? ["c-2"] : thread === "t-c4" ? ["c-fail"] : [];
+        return { success: true, messages: ids.map((id) => ({ id, private_reply_conversation: replied.get(id) ? { id: replied.get(id) } : null })) };
+      });
+      const c1 = evc("c-1", "Chả mực bao nhiêu ạ", { id: "cust-c1", name: "Hạnh" }, "t-c1");
+      assert.ok(c1.comment && c1.comment.fromId === "cust-c1" && c1.comment.postId === `${PAGE}_post-1`, JSON.stringify(c1));
+      assert.deepEqual(await receiveFanpageEvent(c1), { queued: true, reason: "Đã nhận" });
+      const rc1 = await processFanpageThread(PAGE, "t-c1", { fetch: cmtFetch.fetch, now: in31s });
+      assert.ok(rc1.replies === 1 && !rc1.error, JSON.stringify(rc1));
+      const posts = cmtFetch.calls.filter((c) => c.init?.method === "POST" && !c.url.includes("upload_contents")).map((c) => JSON.parse(String(c.init?.body)) as Record<string, unknown>);
+      const pr = posts.find((b) => b.action === "private_replies");
+      assert.ok(pr && pr.message_id === "c-1" && pr.from_id === "cust-c1" && pr.post_id === `${PAGE}_post-1` && String(pr.message).includes("400.000"), JSON.stringify(posts));
+      assert.ok(!posts.some((b) => b.action === "reply_comment"), "KHÔNG BAO GIỜ trả lời công khai dưới bình luận");
+      assert.ok(!cmtFetch.calls.some((c) => c.init?.method === "POST" && c.url.includes("/conversations/t-c1/") && String(c.init?.body).includes("reply_inbox")), "không gửi tin vào hội thoại bình luận");
+      assert.ok(cmtFetch.calls.some((c) => c.url.includes("/conversations/inbox-of-c-1/messages") && String(c.init?.body).includes("content_ids")), "ảnh của câu mẫu vào hộp thư tin riêng vừa mở");
+      // Hội thoại đi tiếp ở hộp thư; tiếng vọng tin riêng (có uid) KHÔNG làm bot nhường; khách nhắn tiếp ⇒ trả lời nhanh, đúng mạch.
+      const cConv = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "inbox-of-c-1")));
+      assert.equal(cConv.length, 1, "hội thoại chuyển sang hộp thư tin riêng");
+      assert.equal((await receiveFanpageEvent(ev("m-pr-echo", String(pr.message), { id: PAGE, uid: "u-bot" }, "inbox-of-c-1"))).reason, "Tin của chính bot");
+      await receiveFanpageEvent(ev("m-pr-next", "Ship về Hải Phòng bao lâu em", { id: "cust-c1", name: "Hạnh" }, "inbox-of-c-1"));
+      const rNext = await processFanpageThread(PAGE, "inbox-of-c-1", { fetch: cmtFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      assert.ok(rNext.replies >= 1, `khách nhắn tiếp trong hộp thư ⇒ trả lời sau ~5 giây: ${JSON.stringify(rNext)}`);
+      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, cConv[0].id)))[0].status, "OPEN");
+      // ĐUA: tiếng vọng tin riêng tới hộp thư MỚI ngay trong lời gọi gửi (bot chưa biết hộp thư nào) ⇒ vẫn là tin của bot.
+      const echoReasons: string[] = [];
+      const racingCmt = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        if (body.action === "private_replies") echoReasons.push((await receiveFanpageEvent(ev("echo-c5", String(body.message), { id: PAGE, uid: "u-bot" }, "inbox-of-c-5"))).reason);
+        if (String(input).includes("/conversations/t-c5/messages") && init?.method !== "POST") return new Response(JSON.stringify({ success: true, messages: [{ id: "c-5", private_reply_conversation: replied.get("c-5") ? { id: replied.get("c-5") } : null }] }), { status: 200 });
+        return cmtFetch.fetch(input, init);
+      }) as typeof fetch;
+      await receiveFanpageEvent(evc("c-5", "Chả mực bao nhiêu", { id: "cust-c5", name: "Ba" }, "t-c5"));
+      const rc5 = await processFanpageThread(PAGE, "t-c5", { fetch: racingCmt, now: in31s });
+      assert.ok(rc5.replies === 1 && echoReasons.length === 1 && echoReasons[0] === "Tin của chính bot", JSON.stringify({ rc5, echoReasons }));
+      // Bình luận ĐÃ được nhắn riêng (Pancake tự động / nhân viên) ⇒ không nhắn lần hai.
+      replied.set("c-2", "inbox-staff");
+      await receiveFanpageEvent(evc("c-2", "Giá chả mực sao shop", { id: "cust-c2", name: "Tuấn" }, "t-c2"));
+      const prBefore = cmtFetch.calls.filter((c) => String(c.init?.body).includes("private_replies")).length;
+      const rc2 = await processFanpageThread(PAGE, "t-c2", { fetch: cmtFetch.fetch, now: in31s });
+      assert.ok(rc2.replies === 0 && cmtFetch.calls.filter((c) => String(c.init?.body).includes("private_replies")).length === prBefore, JSON.stringify(rc2));
+      // Page / nhân viên đã trả lời bình luận ⇒ bot không chen.
+      await receiveFanpageEvent(evc("c-3", "Còn hàng không", { id: "cust-c3", name: "Minh" }, "t-c3"));
+      assert.match((await receiveFanpageEvent(evc("c-3-page", "Dạ còn ạ, chị check inbox nhé", { id: PAGE, uid: "u-staff" }, "t-c3"))).reason, /Page đã trả lời bình luận/);
+      const rc3 = await processFanpageThread(PAGE, "t-c3", { fetch: cmtFetch.fetch, now: in31s });
+      assert.ok(rc3.replies === 0 && /Page đã trả lời/.test(rc3.skipped ?? ""), JSON.stringify(rc3));
+      // Facebook từ chối tin riêng ⇒ báo lỗi, KHÔNG lùi về trả lời công khai.
+      await receiveFanpageEvent(evc("c-fail", "Chả mực bao nhiêu", { id: "cust-c4", name: "Lan" }, "t-c4"));
+      const rc4 = await processFanpageThread(PAGE, "t-c4", { fetch: cmtFetch.fetch, now: in31s });
+      assert.ok(rc4.replies === 0 && /không nhắn riêng được/.test(rc4.error ?? "") && /KHÔNG trả lời công khai/.test(rc4.error ?? ""), JSON.stringify(rc4));
+      assert.ok(!cmtFetch.calls.some((c) => String(c.init?.body).includes("reply_comment")), "lỗi tin riêng không lùi về bình luận công khai");
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
