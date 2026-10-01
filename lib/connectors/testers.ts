@@ -8,7 +8,7 @@
  * ─── KHÔNG PHẢI MỘT MÁY GỬI REQUEST TUỲ Ý (SSRF) ───
  *
  * Người quản trị của một tổ chức gõ URL; máy chủ gọi URL đó. Nên máy chủ chỉ gọi đúng HAI loại đích:
- * `https://open.larksuite.com|open.feishu.cn/open-apis/bot/v2/hook/<mã>` và `https://api.telegram.org/bot<token>/…`.
+ * `https://open.larksuite.com|open.feishu.cn/open-apis/bot/v2/hook/<mã>` và `<TELEGRAM_API_BASE | https://api.telegram.org>/bot<token>/…`.
  * Không theo chuyển hướng (`redirect: "manual"` — một 302 về 169.254.169.254 là cửa vào metadata máy
  * chủ). Trần thời gian 10 giây. Không đọc phản hồi quá 64 KB.
  *
@@ -19,6 +19,7 @@
  *
  * `deps.fetch` để bài kiểm đưa vào một máy chủ giả: bộ kiểm thử không gọi mạng thật (luật 65).
  */
+import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 
 export type TesterResult = { ok: boolean; message: string };
@@ -106,7 +107,7 @@ export async function testTelegramBot(input: { secrets: Record<string, string>; 
   if (!TELEGRAM_TOKEN_PATTERN.test(token)) return { ok: false, message: "Bot token không đúng dạng <số>:<chuỗi> của @BotFather — không gửi." };
   if (!TELEGRAM_CHAT_PATTERN.test(chatId)) return { ok: false, message: "Chat ID không hợp lệ (số, có thể âm, hoặc @tên_kênh) — không gửi." };
   const fetchImpl = deps.fetch ?? fetch;
-  const base = `https://api.telegram.org/bot${token}`;
+  const base = `${telegramApiBase()}/bot${token}`;
   try {
     const me = await fetchImpl(`${base}/getMe`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
     const meBody = (await readCapped(me)) as { ok?: boolean; description?: string; result?: { username?: string } } | null;
@@ -116,7 +117,7 @@ export async function testTelegramBot(input: { secrets: Record<string, string>; 
     if (!sent.ok || !sentBody?.ok) return { ok: false, message: scrubSecrets(`Bot @${meBody.result?.username ?? "?"} hợp lệ nhưng không gửi được vào chat đã khai: ${sentBody?.description || `HTTP ${sent.status}`}`, hide) };
     return { ok: true, message: `Bot @${meBody.result?.username ?? "?"} đã gửi tin thử — mở chat để xác nhận đã nhận.` };
   } catch (e) {
-    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")} Nếu máy chủ không tới được Telegram, dùng kết nối «Lark — webhook nhóm của tổ chức» cho nhóm vận hành.` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, telegramApiHost())} Cách sửa: relay TELEGRAM_API_BASE, hoặc dùng «Lark — webhook nhóm của tổ chức» / «Zalo — bot của tổ chức».` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
   }
 }
 
@@ -198,7 +199,7 @@ async function discoverTelegramChats(secrets: Record<string, string>, deps: Test
   if (!TELEGRAM_TOKEN_PATTERN.test(token)) return { ok: false, message: "Chưa lưu bot token hợp lệ." };
   const fetchImpl = deps.fetch ?? fetch;
   try {
-    const res = await fetchImpl(`https://api.telegram.org/bot${token}/getUpdates?timeout=0&limit=50`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetchImpl(`${telegramApiBase()}/bot${token}/getUpdates?timeout=0&limit=50`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = (await readCapped(res)) as { ok?: boolean; description?: string; result?: unknown } | null;
     if (!body?.ok) return { ok: false, message: scrubSecrets(`Telegram từ chối: ${body?.description || `HTTP ${res.status}`}`, [token]) };
     type TgChat = { id?: unknown; type?: unknown; title?: unknown; first_name?: unknown };
@@ -211,7 +212,7 @@ async function discoverTelegramChats(secrets: Record<string, string>, deps: Test
     }
     return { ok: true, chats, message: chats.length ? `Bot vừa thấy ${chats.length} chat — chọn chat nhận tin.` : "Chưa thấy tin mới — thêm bot vào nhóm và nhắn một câu, rồi bấm lại." };
   } catch (e) {
-    return discoveryFailure(e, "Telegram", "api.telegram.org", token);
+    return discoveryFailure(e, "Telegram", telegramApiHost(), token);
   }
 }
 

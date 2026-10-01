@@ -237,6 +237,7 @@ import { testCompanyOsModel360Db, testCompanyOsModel360Pure } from "./company-os
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
+import { testTelegramRelay } from "./telegram-relay.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
@@ -2046,6 +2047,8 @@ async function main() {
   await testCrm(db);
   testScenario();
   testAccessControl();
+  // Relay Telegram (01/10/2026): máy chủ ở Việt Nam bị chặn api.telegram.org — TELEGRAM_API_BASE + worker của nền tảng.
+  await testTelegramRelay();
   testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);

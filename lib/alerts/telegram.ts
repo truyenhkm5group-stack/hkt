@@ -1,3 +1,4 @@
+import { telegramApiBase } from "@/lib/connectors/telegram-api";
 import { assertHomeCredentials } from "@/lib/platform/credentials";
 
 /** Gửi tin nhắn Telegram qua Bot API (HTML). Trả về false nếu chưa cấu hình hoặc lỗi. */
@@ -6,7 +7,7 @@ export async function sendTelegram(token: string, chatId: string, html: string):
   try {
     // Connector `requiresHomeCredentials` ở Phase 1 — tổ chức khác nhà không gửi; lỗi đi theo hợp đồng `{ ok: false }`.
     await assertHomeCredentials("telegram");
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await fetch(`${telegramApiBase()}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text: html.slice(0, 4000), parse_mode: "HTML", disable_web_page_preview: true }),

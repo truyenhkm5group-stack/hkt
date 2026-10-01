@@ -6,7 +6,7 @@
  * trường của tổ chức nhà. Kết nối chưa bật / lần kiểm gần nhất hỏng ⇒ không gửi (nói rõ vì sao).
  *
  * KHÔNG PHẢI MÁY GỬI REQUEST TUỲ Ý (cùng hàng rào với `lib/connectors/testers.ts`): chỉ hai loại đích —
- * `https://open.larksuite.com|open.feishu.cn/open-apis/bot/v2/hook/<mã>` và `https://api.telegram.org/bot<token>/sendMessage`;
+ * `https://open.larksuite.com|open.feishu.cn/open-apis/bot/v2/hook/<mã>` và `<TELEGRAM_API_BASE | https://api.telegram.org>/bot<token>/sendMessage`;
  * không theo chuyển hướng; trần 10 giây; câu lỗi đi qua `scrubSecrets`. Hộp thử KHÔNG gọi mạng: tin chỉ nằm trong sổ
  * `messaging_deliveries` — đúng thứ "chế độ thử" hứa với người cấu hình.
  *
@@ -15,6 +15,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { openActiveConnection } from "@/lib/connectors/service";
+import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { LARK_HOOK_PATTERN, scrubSecrets, TELEGRAM_CHAT_PATTERN, TELEGRAM_TOKEN_PATTERN, ZALO_BOT_API, ZALO_CHAT_PATTERN, ZALO_TEXT_MAX, ZALO_TOKEN_PATTERN } from "@/lib/connectors/testers";
 import type { MessagingConnectorKey } from "@/lib/messaging/types";
 
@@ -103,13 +104,13 @@ class TelegramProvider implements MessagingProvider {
     if (!TELEGRAM_TOKEN_PATTERN.test(token)) return { ok: false, error: "Bot token đã lưu không đúng dạng — không gửi." };
     if (!TELEGRAM_CHAT_PATTERN.test(chatId)) return { ok: false, error: "Chat ID nơi nhận không hợp lệ (số, có thể âm, hoặc @tên_kênh) — không gửi." };
     try {
-      const res = await postJson(this.deps.fetch ?? fetch, `https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text: joined(msg), disable_web_page_preview: true });
+      const res = await postJson(this.deps.fetch ?? fetch, `${telegramApiBase()}/bot${token}/sendMessage`, { chat_id: chatId, text: joined(msg), disable_web_page_preview: true });
       const body = await readJson(res);
       if (!res.ok || body?.ok !== true) return { ok: false, error: scrubSecrets(`Telegram không nhận tin: ${String(body?.description ?? `HTTP ${res.status}`)}`, hide) };
       const result = body.result as { message_id?: number } | undefined;
       return { ok: true, providerMessageId: result?.message_id !== undefined ? String(result.message_id) : null, destination: chatId };
     } catch (e) {
-      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, "api.telegram.org")} Nếu máy chủ không tới được Telegram, dùng kết nối «Lark — webhook nhóm của tổ chức» cho nhóm vận hành.` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
+      return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Telegram: ${describeNetworkFailure(e, telegramApiHost())} Cách sửa: relay TELEGRAM_API_BASE, hoặc dùng «Lark — webhook nhóm của tổ chức» / «Zalo — bot của tổ chức».` : `Không gọi được Telegram: ${e instanceof Error ? e.message : String(e)}`, hide) };
     }
   }
 }

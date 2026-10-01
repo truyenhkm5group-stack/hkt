@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/telegram-relay.test.ts":
+    "ĐẶT TELEGRAM_API_BASE = «https://tg.vnxcommerce.com» (giá trị BỊA) để kiểm kiểm tra kết nối / tìm chat đi qua relay — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai relay hay không.",
   "tests/self-service-journey.test.ts":
     "ĐẶT PLATFORM_BASE_DOMAIN = «erp.test» (giá trị BỊA) để kiểm liên kết của tổ chức đã xuất bản đi theo tên miền con — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai miền gốc hay không.",
   "tests/launch-gates.test.ts":
