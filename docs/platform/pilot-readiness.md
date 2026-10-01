@@ -1,4 +1,4 @@
-# Sẵn sàng pilot có kiểm soát — ERP Builder Platform (29–30/09/2026)
+# Sẵn sàng pilot có kiểm soát — ERP Builder Platform (29/09 – 01/10/2026)
 
 > Kết luận của chương trình **Commercial Pilot Readiness**: nền tảng nhận được 3–5 khách pilot đầu tiên do người vận hành
 > tạo hộ, với các giới hạn ở mục 3. Đăng ký công khai `/start` **vẫn TẮT** — không mở trong chương trình này.
@@ -8,21 +8,22 @@
 
 | | |
 |---|---|
-| Commit | `6ea8b524` (30/09/2026 09:40) — đợt pilot readiness + bốn quyết định của chủ nền tảng (#404 → #410) |
-| `/api/health` | `ok` · `181` migration · `platform.secretsKey = ready` (mã khoá `3c0b04e1`, không PREVIOUS) · `homeModules 24/25` — module thứ 25 «AI bán hàng» (#408, phiên HSLC) là `homeOptIn`, tổ chức nhà không phải bật, health vẫn `ok` |
-| Hồi quy VNX | smoke 118/118 ở 7 lượt deploy 29/09, 120/120 ở hai lượt 30/09 (có trang mới của #408); ops `check-integrations` 30/09: Pancake POS, Facebook Ads, Pancake Pages, AI Copilot, Gemini đều ✓ — chỉ còn tra cứu Viettel Post 403 đã biết |
+| Commit | `dd23666a` (01/10/2026) — gồm toàn bộ đợt pilot readiness (#391 → #424) và các PR của phiên HSLC tới #426 |
+| `/api/health` | `ok` · `183` migration · `platform.secretsKey = ready` (mã khoá `3c0b04e1`, không PREVIOUS) · `homeModules 24/25` — module thứ 25 «AI bán hàng» (#408, phiên HSLC) là `homeOptIn`, tổ chức nhà không phải bật |
+| Hồi quy VNX | smoke đạt toàn bộ trang ở mọi lượt deploy của đợt (118/118 → 121/121 khi thêm trang); ops `verify` 01/10 06:37 ĐẠT (smoke 121/121, 0 lỗi ứng dụng, đĩa 63%) sau khi bật PITR |
 | Đăng ký công khai | TẮT (`/start` in «Chưa mở đăng ký») |
 
 PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres · #393 sổ dùng AI + hạn mức + công tắc · #396 sản phẩm tay
 · #398 đơn tay · #399 vòng đời pilot + trang sức khoẻ + công tắc khẩn + đổi gói · #402 chạy lại bảo mật · #404 ops kiểm khoá
-· #405 G-SCHED · #407 G-ORDER · #410 sao lưu RPO ≤ 1 giờ + diễn tập hằng tuần.
+· #405 G-SCHED · #407 G-ORDER · #410 sao lưu RPO ≤ 1 giờ + diễn tập hằng tuần · #416 chứng từ thanh toán đơn tay · #421 PITR ·
+· #424 diễn tập PITR chạy được trên VPS 1,9 GB.
 
 ## 2. Mười hạng mục
 
 | # | Hạng mục | Trạng thái | Bằng chứng |
 |---|---|---|---|
 | 1 | Khoá bí mật `PLATFORM_SECRETS_KEY` | **ĐẠT trên production** (khoá đặt 29/09, kiểm 30/09 — 8/8 mục, mục 6) | Deploy ghi «có» + «đã ghi vào .env (không in giá trị)»; health `ready`; canary niêm bằng khoá thật giải đúng qua deploy; giải chéo tổ chức bị từ chối; CSDL + log không chứa bản rõ / khoá; cập nhật bí mật chạy; credential VNX không đổi. Xoay khoá có kế hoạch (`launch-gates.md` A.4) — chưa chạy theo lời chủ |
-| 2 | Sao lưu + diễn tập khôi phục | **ĐẠT** | CI run 36545135985 trên `postgres:16-alpine` (16.15, cùng ảnh `erp-db`): tổ chức thử 187 bảng · 356 dòng → `pg_dump` 728.765 byte / 397 ms → `DROP DATABASE` → khôi phục 3.556 ms → **RTO tới khi chạy được 6,3 giây**, bằng nhau từng bảng + sequence, bí mật giải đúng với cùng khoá và bị từ chối với khoá khác. Bài chấp nhận: xuất cấu hình → tổ chức trống → cài từ tệp, 22 bước, dấu vân tay bằng nguồn. RPO ≤ 1 ngày (bản đêm 02–05 giờ); giữ 7 ngày · 4 Chủ nhật · 3 tay; ngoài máy `gcrypt:orgs/<csdl>/…`. Quy trình + xử lý lỗi: `backup-recovery.md` §8 |
+| 2 | Sao lưu + diễn tập khôi phục | **ĐẠT — PITR đã bật (30/09 22:52), diễn tập PITR OK hai vế (01/10)** | CI run 36545135985 trên `postgres:16-alpine` (16.15, cùng ảnh `erp-db`): tổ chức thử 187 bảng · 356 dòng → `pg_dump` 728.765 byte / 397 ms → `DROP DATABASE` → khôi phục 3.556 ms → **RTO tới khi chạy được 6,3 giây**, bằng nhau từng bảng + sequence, bí mật giải đúng với cùng khoá và bị từ chối với khoá khác. Bài chấp nhận: xuất cấu hình → tổ chức trống → cài từ tệp, 22 bước, dấu vân tay bằng nguồn. RPO ≤ 1 ngày (bản đêm 02–05 giờ); giữ 7 ngày · 4 Chủ nhật · 3 tay; ngoài máy `gcrypt:orgs/<csdl>/…`. Quy trình + xử lý lỗi: `backup-recovery.md` §8. **PITR** (mục 7): WAL lưu mỗi ≤ 15 phút, bản nền đêm, đẩy Drive mỗi 15 phút; RPO đo 1–14 phút trên máy (≈ 30 phút ngoài máy); RTO phần máy 18 giây; gián đoạn CSDL lúc bật ≈ 2–4 giây |
 | 3 | Dùng AI / chi phí / hạn mức | **ĐẠT — BYOK cho pilot (D1, chủ quyết 29/09)**; credit nền tảng 0 ở mọi gói, AI nền tảng TẮT | Sổ `platform_ai_usage` một dòng/lượt, đúng nguồn (BYOK · PLATFORM · HOME); hạn mức theo gói (`trial` 10/ngày · 100/tháng · cảnh báo 20 / trần 50 USD; `standard` 100/1000 · 100/300; credit nền tảng 0 ở mọi gói); vượt trần ⇒ `BLOCKED_QUOTA` TRƯỚC khi gọi model; A không trừ hạn mức của B; BYOK không trừ credit nền tảng; không bao giờ rơi về khoá VNX. Bài chấp nhận: 1 lượt AI Builder thật ≈ 0,14 USD hiện ở `/platform/org/<mã>`, `/settings/plan`, khung D; công tắc tắt AI của tổ chức chặn trước khi gọi model |
 | 4 | Onboarding có kiểm soát | **ĐẠT** | Người vận hành tạo tổ chức ở `/platform` (đi luồng `/start` hộ khách) · mẫu + module · giai đoạn `CREATED → CONFIGURING → READY_FOR_UAT → ACTIVE` (+ `SUSPENDED`) tính từ dữ liệu thật, không nhảy bậc, ghi đè cần lý do · đổi gói bằng nút (không SQL). Quy trình: `pilot-operations.md` §1 |
 | 5 | Trang sức khoẻ / hỗ trợ | **ĐẠT** | `/platform/org/<mã>`: trạng thái, gói, module, người dùng, dung lượng, dùng AI, luật lỗi/treo, sức khoẻ kết nối, hoạt động cuối, sao lưu cuối, lỗi job/khối — chỉ số đếm + mốc. Mỗi lượt mở ghi `SUPPORT_VIEW` TRƯỚC khi đọc CSDL khách; không ghi được vết thì không mở. Quét DOM: 0/22 chuỗi nghiệp vụ đã gieo |
@@ -40,10 +41,11 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 1. **Tối đa 3 tổ chức cùng lúc** trong 2 tuần đầu (trần 5), mỗi tổ chức do người vận hành tạo; `/start` giữ TẮT.
 2. Gói `trial` khi cấu hình, chuyển `standard` sau UAT bằng nút đổi gói; **≤ 10 người dùng / tổ chức**.
 3. **AI chỉ BYOK** (D1 — chủ nền tảng quyết 29/09/2026): mỗi khách dùng khoá AI riêng; chưa có credit chung của nền tảng.
-4. Khách **không dùng ĐVVC tích hợp**: đơn tạo tay giao bằng **phiếu giao có ký nhận** (G-ORDER, chủ nền tảng quyết
-   29/09/2026 — `docs/business-rules/ORDER_OUTCOME.md` mục 11): có phiếu ⇒ giao thành công + trừ tồn; TIỀN vẫn CHƯA XÁC
-   MINH vì ERP chưa có đường ghi chứng từ thanh toán cho đơn tay — doanh thu thực thu của đơn tay chưa hiện ở báo cáo nào.
-   Khách cần báo cáo doanh thu thực thu ngay từ đầu ⇒ chưa phù hợp đợt này.
+4. Khách **không dùng ĐVVC tích hợp**: đơn tạo tay giao bằng **phiếu giao có ký nhận** (G-ORDER — `ORDER_OUTCOME.md`
+   mục 11) ⇒ giao thành công + trừ tồn; TIỀN theo **chứng từ thanh toán** của đơn (#416 — `ORDER_OUTCOME.md` mục 11.1:
+   phiếu thu / hoàn tiền `CASH · BANK_TRANSFER · COD · OTHER`, trạng thái `UNPAID · PARTIALLY_PAID · PAID · REFUNDED` tính lúc
+   đọc; đã giao KHÔNG BAO GIỜ = đã thu). Thực thu đơn tay hiện ở «Chân lý tài chính» (theo `paid_at`); các báo cáo doanh thu /
+   lợi nhuận / marketer / lương khác CHƯA gộp đơn tay (nợ P1 mục 4).
 5. Luật tự động của tổ chức khách **tự chạy mỗi 10 phút** (G-SCHED, #405), tuần tự từng tổ chức, trần 60 giây / lượt;
    tạm dừng một tổ chức bằng công tắc khẩn, cả nền tảng bằng `SCHEDULER_AUTOMATION_FANOUT=0`. Lịch VNX không đổi.
 6. Danh mục sản phẩm **nhập tay** (không CSV): phù hợp khách ≤ ~200 mã.
@@ -75,15 +77,17 @@ PR của đợt: #391 khoá bí mật · #392 diễn tập khôi phục Postgres
 
 ## 5. HUMAN GATE còn lại
 
-| # | Việc của chủ nền tảng | Chặn gì |
-|---|---|---|
-| 1 | **V6 — xác nhận đã cất bản sao `PLATFORM_SECRETS_KEY` ngoài VPS** (trình quản lý mật khẩu / giấy cất riêng). Không ai kiểm hộ được | Mất VPS ⇒ bí mật kết nối trong mọi bản sao lưu tổ chức không giải được |
-| 2 | **Cửa sổ bảo trì ~15 phút để bật PITR** cho `erp-db` (`backup-recovery.md` §9.4: `archive_mode=on` cần khởi động lại Postgres, gián đoạn ước lượng 10–30 giây) | RPO ≤ 1 giờ cho CSDL NHÀ (VNX); tổ chức khách đã đạt ≤ 1 giờ bằng bản hằng giờ |
-| — | Đã quyết 29/09/2026: G-ORDER (#407) · G-SCHED (#405) · D1 = BYOK · C4/C6/C7 (#410) | — |
+Không còn cổng nào của NỀN TẢNG. Đã xong 30/09 – 01/10/2026: khoá bí mật (chủ nền tảng tự cất bản phục hồi ngoài VPS / GitHub
+trong trình quản lý mật khẩu — không qua chat), PITR (#421, #424), chứng từ thanh toán (#416); đã quyết G-ORDER · G-SCHED ·
+D1 = BYOK · C4/C6/C7.
 
-Việc còn mở KHÔNG phải cổng: đưa đơn tay đã thu đủ vào các báo cáo doanh thu theo DELIVERED (nợ P1 mục 4 — đường ghi
-chứng từ thanh toán đã có, 0181); UI cấu hình nhịp luật theo gói; diễn tập khôi phục CSDL NHÀ tự động (cần số RAM /
-thời gian của một lượt chạy tay trước).
+Quan sát ngoài phạm vi nền tảng, cần chủ shop / phiên VNX (không chặn pilot):
+- **AI Copilot của VNX**: lượt deploy 30/09 22:5x báo tài khoản Anthropic của VNX «credit balance is too low» (sáng 30/09
+  còn ✓) — nạp credit ở console nhà cung cấp.
+- **Job `work-auto-assign` của VNX** ghi `work_items` hỏng khoá ngoại `work_items_created_by_users_id_fk` (log 01/10) — dòng
+  việc tham chiếu một `users.id` không còn; không do đợt này (job không nằm trong fan-out G-SCHED).
+- Sau deploy #421, `/api/health` trả phong bì thiếu commit + khối `platform` khoảng 10 phút (22:55–23:04) rồi tự đúng; bước
+  «Kiểm tra HTTPS» của deploy đỏ vì thế — chưa rõ nguyên nhân, cần xem nếu lặp lại (P2).
 
 ## 6. Kiểm khoá bí mật trên production (30/09/2026)
 
@@ -101,3 +105,24 @@ khoá hay bản mã. Canary = một giá trị ngẫu nhiên niêm bằng đúng
 | 6 | Cập nhật / xoay bí mật của tenant | ĐẠT | Ops run 36660972147 (`rotate --apply`): đời 1 → 2, giá trị mới giải đúng, bản mã cũ không còn. Khoá gốc KHÔNG xoay (theo lời chủ) |
 | 7 | Credential VNX không bị ảnh hưởng | ĐẠT | VNX dùng biến môi trường, không qua bảng bí mật kết nối; ops `check-integrations` run 36661026303: Pancake POS / Facebook Ads / Pancake Pages / AI Copilot / Gemini / GitHub đều ✓ |
 | 8 | Không log bản rõ | ĐẠT | Quét log app + scheduler 72 giờ (265.769 ký tự trước deploy, rồi sau mỗi lượt): khoá gốc + mọi canary xuất hiện 0 lần |
+
+## 7. PITR `erp-db` (30/09 – 01/10/2026)
+
+Làm đúng runbook `backup-recovery.md` §9.4.3 trong cửa sổ bảo trì chủ nền tảng duyệt (gián đoạn 10–30 giây):
+
+| Bước | Kết quả |
+|---|---|
+| Sao lưu trước thay đổi | `backup-status` xanh (bản đêm 02:17, Drive OK); `backup` tay 21:35: nhà 148 MB + 2 CSDL tổ chức, `pg_restore` đọc lại được, Drive OK |
+| Bật (deploy #421) | `erp-db` tạo lại 22:52:58 → chạy 22:52:59, cùng ảnh / volume / mật khẩu; bộ dò `/api/health` 2 giây một lần: **một** lượt 500 ⇒ gián đoạn CSDL ≈ 2–4 giây; migration 182/182 đủ; smoke 120/120 |
+| WAL lưu thật | `archive_mode=on`; 41 đoạn / ~9 giờ, 0 lỗi, 0 đoạn chờ; nén ≈ 2,7 MB / đoạn ⇒ ≈ 300 MB / ngày trên máy; đẩy `gcrypt:pitr/` mỗi 15 phút OK |
+| Bản nền | `pitr-basebackup` 259 MB (Drive OK); cron chụp bản đêm `base-20261001-0327` đúng giờ |
+| Diễn tập (môi trường an toàn) | container tạm `--network none`, trần 384 MB, không chạm `erp-db`; 01/10 06:54 **OK hai vế** — dòng đánh dấu VẮNG ở mốc trước lúc ghi, CÓ ở mốc sau; bản khôi phục orders 4.097 · shipments 3.198 · 183 migration |
+| RPO / RTO sau bật | RPO đo 1–14 phút trên máy (thiết kế ≤ 15), ≈ 30 phút ngoài máy — **đạt mục tiêu ≤ 1 giờ cho cả nhà lẫn tổ chức**; RTO phần máy 18 giây, cả quy trình ước lượng 1–2 giờ (§10) — **trong mục tiêu ≤ 4 giờ** |
+| VNX sau thay đổi | ops `verify` ĐẠT: dịch vụ chạy, health ok, đĩa 63%, smoke 121/121 |
+
+## Trạng thái cuối
+
+**ERP BUILDER PLATFORM — READY FOR CONTROLLED PILOT**
+
+**PLATFORM WORKSTREAM — CLOSED FOR FEATURE DEVELOPMENT** (01/10/2026). Không thêm tính năng nền tảng trừ khi HSLC hoặc một
+khách pilot phát hiện một khoảng trống GENERIC của nền tảng; nợ P1/P2 ở mục 4 chờ đúng điều kiện đó.
