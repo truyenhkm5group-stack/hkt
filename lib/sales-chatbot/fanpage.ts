@@ -436,6 +436,15 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       out.skipped = turn.error;
       continue;
     }
+    // CHUYỂN NGƯỜI ⇒ bot IM LẶNG trên fanpage (chủ shop 01/10/2026: không nhắn «Em đã chuyển cho nhân viên…», để nguyên
+    // cho tới khi người vào đọc và trả lời). Áp cho MỌI đường chuyển: AI gọi handoff · AI hỏng · hội thoại quá dài. Nhân
+    // viên vẫn nhận thông báo trong ERP (`notifySalesChatHandoff`).
+    if (turn.view.status === "HANDOFF") {
+      await finish("DONE", "Chuyển nhân viên — bot không nhắn gì, chờ người trả lời");
+      out.processed += ids.length;
+      out.skipped = "Chuyển nhân viên — bot im lặng";
+      continue;
+    }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
     // BÌNH LUẬN: một tin RIÊNG trả lời bình luận MỚI NHẤT của lượt (gộp mọi câu trả lời) — không bao giờ công khai.

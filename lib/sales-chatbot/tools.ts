@@ -338,6 +338,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.handoff = { reason: reason.success ? reason.data : "Khách cần nhân viên", at: new Date().toISOString() };
       if (!simulated) await notifySalesChatHandoff(ctx.conversationId, state.handoff.reason, state.customer, new Date());
+      // Fanpage: nhân viên trả lời trực tiếp trên page ⇒ bot không nói gì thêm (lượt này cũng không được gửi đi).
+      if (ctx.channel === "FANPAGE") return ok("Chuyển nhân viên", { handed_off: true, simulated, say_to_customer: null, instruction: "KHÔNG viết gì cho khách — nhân viên sẽ trả lời trực tiếp." }, state);
       return ok(`${simulated ? "(Thử) " : ""}Chuyển nhân viên`, { handed_off: true, simulated, say_to_customer: ctx.config.handoff.message }, state);
     }
   }

@@ -694,6 +694,25 @@ async function testJourney() {
       assert.equal(await saveLearnedQuickReplies([], ADMIN_EMAIL), 0);
       assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0, "lượt học mới thay gợi ý cũ chưa ai bật / chưa dùng");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
+      // CHUYỂN NGƯỜI trên fanpage ⇒ bot IM LẶNG (không gửi «Em đã chuyển cho nhân viên…»), hội thoại chờ người.
+      let handoffStep = 0;
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          handoffStep += 1;
+          const content: AiBlock[] = handoffStep === 1 ? [{ type: "tool_use", id: "h1", name: "handoff_to_human", input: { reason: "Khách muốn giao ngày mai" } }] : [{ type: "text", text: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé." }];
+          return { content, stopReason: handoffStep === 1 ? "tool_use" : "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-ho-1", "thế mai cho c 1kg chả với 10 nem c ăn thử nhé", { id: "cust-ho", name: "Chị Hồ" }, "t-ho"));
+      const hoFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      const rho = await processFanpageThread(PAGE, "t-ho", { fetch: hoFetch.fetch, now: in31s });
+      assert.ok(rho.replies === 0 && /im lặng/.test(rho.skipped ?? ""), JSON.stringify(rho));
+      assert.ok(!hoFetch.calls.some((c) => c.init?.method === "POST"), "chuyển người ⇒ không gửi gì cho khách");
+      const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
+      assert.equal(hoConv.status, "HANDOFF");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // ═══ BÌNH LUẬN (0184): trả lời bằng TIN NHẮN RIÊNG (private reply), không bao giờ công khai ═══
       const evc = (id: string, text: string, from: Record<string, unknown>, thread: string, postId = `${PAGE}_post-1`) =>
         parsePancakeWebhook({ event_type: "messaging", page_id: PAGE, data: { conversation: { id: thread, type: "COMMENT" }, message: { id, type: "COMMENT", message: text, from, post_id: postId } } })!;
