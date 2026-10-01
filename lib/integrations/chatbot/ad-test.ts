@@ -5,6 +5,8 @@ import {
   AD_TEST_IMAGE_LIMITS,
   CHATBOT_AD_BOTS_KEY,
   adTestReadiness,
+  manualAdIdOf,
+  manualAdKey,
   pageIdOfPost,
   testImageGate,
   testImageSpendToday,
@@ -20,6 +22,7 @@ import { estimateImageUsd } from "@/lib/constants/creative-loop";
 import { gatherPixels } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { manualEditPrompt, parseManualDesignSpec } from "@/lib/creative/manual-gen";
+import { batchConfig } from "@/lib/creative/publish";
 import { getAdBotConfig, getBotAdStatus, pushAdBots, type AdBotPushResult } from "@/lib/integrations/chatbot/ad-bots";
 import { chatbotFetch, getChatbotStatus } from "@/lib/integrations/chatbot/client";
 import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
@@ -38,7 +41,7 @@ import { setSettingJson } from "@/lib/settings";
 
 
 type Camp = {
-  variantId: string;
+  campKey: string;
   adId: string;
   campaignName: string;
   headline: string;
@@ -50,15 +53,30 @@ type Camp = {
   isDesign: boolean;
 };
 
-async function loadCamp(db: Db, variantId: string): Promise<Camp | null> {
+/**
+ * Khoá camp của khung: id mẩu Thư viện Media, hoặc `ad:<ID quảng cáo>` cho quảng cáo DỰNG TAY trên Facebook (người khai ở
+ * trang /chatbot/ad-bots — `manualAds` của sổ cấu hình). Quảng cáo dựng tay không có ảnh trong ERP và không có ảnh sản
+ * phẩm thật đi kèm ⇒ ảnh màu do người TẢI LÊN, AI không đổi màu (ranh giới điểm ảnh của vòng mẫu).
+ */
+async function loadCamp(db: Db, campKey: string): Promise<Camp | null> {
+  const manual = manualAdIdOf(campKey);
+  if (manual) {
+    const m = (await getAdBotConfig()).manualAds?.[manual];
+    if (!m) return null;
+    return { campKey, adId: manual, campaignName: m.label || `Quảng cáo ${manual}`, headline: "", imageId: null, productId: null, productName: null, pageId: m.pageId || null, photoSourceId: null, isDesign: false };
+  }
   const cv = schema.creativeVariants;
   const [v] = await db
-    .select({ v: cv, productName: schema.products.name })
+    .select({ v: cv, productName: schema.products.name, snapshot: schema.creativeBatches.configSnapshot })
     .from(cv)
+    .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, cv.batchId))
     .leftJoin(schema.products, eq(schema.products.id, cv.productId))
-    .where(eq(cv.id, variantId))
+    .where(eq(cv.id, campKey))
     .limit(1);
   if (!v || !v.v.fbAdId) return null;
+  // Fanpage: bài viết Facebook của quảng cáo (chứng từ) → người chọn trong khung → fanpage lô đã đăng (cấu hình chụp lúc đăng).
+  const chosenPage = (await getAdBotConfig()).overrides[v.v.fbAdId]?.pageId || null;
+  const batchPage = batchConfig(v.snapshot ?? {}).config.pageId || null;
   // Ảnh sản phẩm thật đi kèm (máy vẽ bắt buộc có một — ranh giới 3): của mẩu, không có thì của lượt gen tay đã sinh ra mẩu.
   let photoSourceId = v.v.productPhotoSourceId;
   let isDesign = v.v.mode === "DESIGN";
@@ -74,14 +92,14 @@ async function loadCamp(db: Db, variantId: string): Promise<Camp | null> {
     photoSourceId = g?.runPhoto ?? spec?.photoSourceIds[0] ?? null;
   }
   return {
-    variantId: v.v.id,
+    campKey: v.v.id,
     adId: v.v.fbAdId,
     campaignName: v.v.campaignName || v.v.adName || v.v.fbAdId,
     headline: v.v.headline,
     imageId: v.v.imageId,
     productId: v.v.productId,
     productName: v.productName ?? null,
-    pageId: pageIdOfPost(v.v.fbPostId),
+    pageId: pageIdOfPost(v.v.fbPostId) ?? chosenPage ?? (batchPage && /^\d{5,25}$/.test(batchPage) ? batchPage : null),
     photoSourceId,
     isDesign,
   };
@@ -121,9 +139,9 @@ function emptyTest(c: Camp): AdTestProduct {
   return { name: c.productName ?? "", code: "", price: null, shipFee: null, comboPrice: null, fabric: "", sizes: "", offer: "", colors: [] };
 }
 
-export async function loadAdTestView(variantId: string, now = new Date()): Promise<AdTestView | { error: string }> {
+export async function loadAdTestView(campKey: string, now = new Date()): Promise<AdTestView | { error: string }> {
   const db = await getDb();
-  const camp = await loadCamp(db, variantId);
+  const camp = await loadCamp(db, campKey);
   if (!camp) return { error: "Camp này chưa có ID quảng cáo trên Facebook." };
   const [config, img, status, pancake] = await Promise.all([getAdBotConfig(), imageCfg(db), getChatbotStatus(), readPancakePageIds()]);
   const o = config.overrides[camp.adId];
@@ -153,7 +171,8 @@ export async function loadAdTestView(variantId: string, now = new Date()): Promi
   });
   const chatPage = botPage ?? botPages[0] ?? null;
   return {
-    variantId: camp.variantId,
+    campKey: camp.campKey,
+    manual: manualAdIdOf(camp.campKey) !== null,
     adId: camp.adId,
     campaignName: camp.campaignName,
     productName: camp.productName,
@@ -166,11 +185,12 @@ export async function loadAdTestView(variantId: string, now = new Date()): Promi
     spentTodayUsd,
     limits: AD_TEST_IMAGE_LIMITS,
     canRecolor: gate.ok && !!camp.photoSourceId && !!camp.imageId,
-    recolorBlocked: !camp.imageId ? "Camp không còn ảnh quảng cáo." : !camp.photoSourceId ? "Camp không có ảnh sản phẩm thật đi kèm — AI không đổi màu được; chỉ dùng được màu gốc." : gate.ok ? null : gate.reason,
+    recolorBlocked: manualAdIdOf(camp.campKey) ? "Quảng cáo dựng tay: ERP không có ảnh quảng cáo / ảnh sản phẩm thật để AI đổi màu — tải ảnh từng màu lên." : !camp.imageId ? "Camp không còn ảnh quảng cáo." : !camp.photoSourceId ? "Camp không có ảnh sản phẩm thật đi kèm — AI không đổi màu được; chỉ dùng được màu gốc." : gate.ok ? null : gate.reason,
     readiness: r.checks,
     canChat: r.canChat && !!chatPage,
     canGoLive: r.canGoLive,
     chatPageId: chatPage?.id ?? null,
+    pageOptions: mergePageOptions(botPages, pancake),
     chatPageNote: chatPage && !botPage ? `Bot chưa có page của camp — chat thử tạm dùng page "${chatPage.name || chatPage.id}" (bảng size, xưng hô của page đó).` : null,
   };
 }
@@ -187,7 +207,7 @@ type Actor = { id: string; name: string };
 export type AdTestResult = { ok: true; push: AdBotPushResult } | { ok: false; error: string };
 
 export async function saveAdTestInfo(input: SaveAdTestInfoInput, actor: Actor): Promise<AdTestResult> {
-  const camp = await loadCamp(await getDb(), input.variantId);
+  const camp = await loadCamp(await getDb(), input.campKey);
   if (!camp) return { ok: false, error: "Camp này chưa có ID quảng cáo trên Facebook." };
   const push = await saveOverride(
     camp.adId,
@@ -202,15 +222,15 @@ export async function saveAdTestInfo(input: SaveAdTestInfoInput, actor: Actor): 
   return { ok: true, push };
 }
 
-export async function campByVariant(variantId: string): Promise<Camp | null> {
-  return loadCamp(await getDb(), variantId);
+export async function campByKey(campKey: string): Promise<Camp | null> {
+  return loadCamp(await getDb(), campKey);
 }
 
-export async function addAdTestColor(i: { variantId: string; color: string; mode: "ORIGINAL" | "AI" }, actor: Actor, deps: { imageClient?: ImageEditClient; now?: Date } = {}): Promise<AdTestResult> {
+export async function addAdTestColor(i: { campKey: string; color: string; mode: "ORIGINAL" | "AI" }, actor: Actor, deps: { imageClient?: ImageEditClient; now?: Date } = {}): Promise<AdTestResult> {
   const db = await getDb();
-  const camp = await loadCamp(db, i.variantId);
+  const camp = await loadCamp(db, i.campKey);
   if (!camp) return { ok: false, error: "Camp này chưa có ID quảng cáo trên Facebook." };
-  if (!camp.imageId) return { ok: false, error: "Camp không còn ảnh quảng cáo." };
+  if (!camp.imageId) return { ok: false, error: manualAdIdOf(camp.campKey) ? "Quảng cáo dựng tay không có ảnh trong ERP — dùng nút Tải ảnh lên cho màu này." : "Camp không còn ảnh quảng cáo." };
   const color = i.color.trim().slice(0, 40);
   if (!color) return { ok: false, error: "Nhập tên màu." };
   const config = await getAdBotConfig();
@@ -255,8 +275,8 @@ export async function addAdTestColor(i: { variantId: string; color: string; mode
   return { ok: true, push };
 }
 
-export async function removeAdTestColor(i: { variantId: string; sha: string }, actor: Actor): Promise<AdTestResult> {
-  const camp = await campByVariant(i.variantId);
+export async function removeAdTestColor(i: { campKey: string; sha: string }, actor: Actor): Promise<AdTestResult> {
+  const camp = await campByKey(i.campKey);
   if (!camp) return { ok: false, error: "Không tìm thấy camp." };
   const config = await getAdBotConfig();
   const cur = config.overrides[camp.adId]?.test;
@@ -265,8 +285,8 @@ export async function removeAdTestColor(i: { variantId: string; sha: string }, a
   return { ok: true, push };
 }
 
-export async function setAdTestLive(i: { variantId: string; live: boolean }, actor: Actor): Promise<AdTestResult> {
-  const view = await loadAdTestView(i.variantId);
+export async function setAdTestLive(i: { campKey: string; live: boolean }, actor: Actor): Promise<AdTestResult> {
+  const view = await loadAdTestView(i.campKey);
   if ("error" in view) return { ok: false, error: view.error };
   if (i.live && !view.canGoLive) {
     const miss = view.readiness.filter((c) => c.status === "MISSING").map((c) => c.label);
@@ -279,8 +299,8 @@ export async function setAdTestLive(i: { variantId: string; live: boolean }, act
 export type ChatTurn = { role: "user" | "model"; text: string };
 
 /** Một lượt chat thử: gửi lịch sử sang bot THẬT (đường test-chat, không đụng Pancake) với đúng bot riêng của camp. */
-export async function chatAdTest(i: { variantId: string; history: ChatTurn[] }): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> {
-  const view = await loadAdTestView(i.variantId);
+export async function chatAdTest(i: { campKey: string; history: ChatTurn[] }): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> {
+  const view = await loadAdTestView(i.campKey);
   if ("error" in view) return { ok: false, error: view.error };
   if (!view.canChat || !view.chatPageId) return { ok: false, error: "Chưa chat thử được — xem các dòng THIẾU trong bảng kiểm." };
   const res = await chatbotFetch(`/api/pages/${encodeURIComponent(view.chatPageId)}/test-chat`, {
@@ -294,4 +314,80 @@ export async function chatAdTest(i: { variantId: string; history: ChatTurn[] }):
   const bySha = new Map((view.test?.colors ?? []).map((c) => [c.sha, c.imageId]));
   const imageIds = (b.imageUrls ?? []).map((u) => (u.startsWith("adimg:") ? bySha.get(u.slice(6)) : undefined)).filter((x): x is string => !!x);
   return { ok: true, reply: { text: b.text ?? "", handoff: !!b.handoff, imageIds } };
+}
+
+/**
+ * Người TẢI ẢNH LÊN cho một màu — dùng được cho mọi camp, và là đường DUY NHẤT của quảng cáo dựng tay. Không gọi AI, không
+ * tốn tiền; ảnh lưu như mọi ảnh Thư viện Media (`storeCreativeImage` kiểm loại tệp + trần dung lượng).
+ */
+export async function uploadAdTestColor(i: { campKey: string; color: string; bytes: Uint8Array }, actor: Actor, now = new Date()): Promise<AdTestResult> {
+  const db = await getDb();
+  const camp = await loadCamp(db, i.campKey);
+  if (!camp) return { ok: false, error: "Không tìm thấy camp / quảng cáo." };
+  const color = i.color.trim().slice(0, 40);
+  if (!color) return { ok: false, error: "Nhập tên màu." };
+  const config = await getAdBotConfig();
+  const cur = config.overrides[camp.adId]?.test ?? emptyTest(camp);
+  if (cur.colors.some((c) => c.color.toLowerCase() === color.toLowerCase())) return { ok: false, error: `Đã có màu "${color}".` };
+  if (cur.colors.length >= AD_TEST_IMAGE_LIMITS.maxColorsPerAd) return { ok: false, error: `Mỗi camp tối đa ${AD_TEST_IMAGE_LIMITS.maxColorsPerAd} màu.` };
+  let stored;
+  try {
+    stored = await storeCreativeImage(db, i.bytes);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  const entry: AdTestColor = { color, imageId: stored.id, sha: stored.sha256, source: "UPLOAD", createdAt: now.toISOString() };
+  const push = await saveOverride(camp.adId, (o) => ({ ...(o ?? { updatedByUserId: null, updatedByName: "", updatedAt: "" }), enabled: o?.test ? o.enabled : false, test: { ...cur, colors: [...cur.colors, entry] } }), actor);
+  return { ok: true, push };
+}
+
+/** Khai một quảng cáo DỰNG TAY (ID + fanpage) ⇒ trả khoá camp để mở khung Chat test. Trùng ID camp Thư viện Media ⇒ từ chối. */
+export async function addManualAd(i: { adId: string; pageId: string; label: string }, actor: Actor): Promise<{ ok: true; campKey: string } | { ok: false; error: string }> {
+  const db = await getDb();
+  const [own] = await db.select({ id: schema.creativeVariants.id }).from(schema.creativeVariants).where(eq(schema.creativeVariants.fbAdId, i.adId)).limit(1);
+  if (own) return { ok: false, error: "Quảng cáo này là camp của Thư viện Media — mở nút Chat test ở tab Đang chạy." };
+  const config = await getAdBotConfig();
+  const manualAds = { ...(config.manualAds ?? {}), [i.adId]: { pageId: i.pageId, label: i.label, addedByUserId: actor.id, addedByName: actor.name, addedAt: config.manualAds?.[i.adId]?.addedAt ?? new Date().toISOString() } };
+  await setSettingJson(CHATBOT_AD_BOTS_KEY, { ...config, manualAds });
+  return { ok: true, campKey: manualAdKey(i.adId) };
+}
+
+/** Bỏ một quảng cáo dựng tay: bot thôi dùng bot riêng của nó (ảnh trong ERP giữ nguyên, không xoá dữ liệu). */
+export async function removeManualAd(adId: string): Promise<AdTestResult> {
+  const config = await getAdBotConfig();
+  if (!config.manualAds?.[adId]) return { ok: false, error: "Không có quảng cáo dựng tay này." };
+  const manualAds = { ...config.manualAds };
+  delete manualAds[adId];
+  await setSettingJson(CHATBOT_AD_BOTS_KEY, { ...config, manualAds });
+  return { ok: true, push: await pushAdBots() };
+}
+
+function mergePageOptions(bot: BotPage[], pancake: { ids: string[] | null; names: Map<string, string> }): { id: string; name: string; inBot: boolean }[] {
+  const out = new Map<string, { id: string; name: string; inBot: boolean }>();
+  for (const p of bot) out.set(p.id, { id: p.id, name: p.name || pancake.names.get(p.id) || p.id, inBot: true });
+  for (const id of pancake.ids ?? []) if (!out.has(id)) out.set(id, { id, name: pancake.names.get(id) || id, inBot: false });
+  return [...out.values()];
+}
+
+/** Fanpage chọn được khi khai quảng cáo dựng tay: page bot đang giữ token + page trong tài khoản Pancake. */
+export async function manualAdPageOptions(): Promise<{ id: string; name: string; inBot: boolean }[]> {
+  const [status, pancake] = await Promise.all([getChatbotStatus(), readPancakePageIds()]);
+  const bot = status.state === "RUNNING" ? await readBotPages().catch(() => []) : [];
+  return mergePageOptions(bot, pancake);
+}
+
+/** Người chọn fanpage cho camp khi máy không đọc được từ bài viết của quảng cáo. */
+export async function setAdTestPage(i: { campKey: string; pageId: string }, actor: Actor): Promise<AdTestResult> {
+  const camp = await campByKey(i.campKey);
+  if (!camp) return { ok: false, error: "Không tìm thấy camp." };
+  const adId = manualAdIdOf(i.campKey);
+  if (adId) {
+    const config = await getAdBotConfig();
+    const m = config.manualAds?.[adId];
+    if (!m) return { ok: false, error: "Không có quảng cáo dựng tay này." };
+    await setSettingJson(CHATBOT_AD_BOTS_KEY, { ...config, manualAds: { ...config.manualAds, [adId]: { ...m, pageId: i.pageId } } });
+    return { ok: true, push: await pushAdBots() };
+  }
+  const push = await saveOverride(camp.adId, (o) => ({ ...(o ?? { updatedByUserId: null, updatedByName: "", updatedAt: "" }), pageId: i.pageId }), actor);
+  return { ok: true, push };
 }

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { AD_TEST_IMAGE_LIMITS, adTestReadiness, buildAdBots, DEFAULT_AD_BOT_CONFIG, pageIdOfPost, productCodeOf, saveAdBotSchema, testImageGate, testImageSpendToday, testProductMissing, type AdBotSourceRow, type AdTestProduct, type ReadinessInput } from "@/lib/constants/chatbot-ad-bots";
+import { AD_TEST_IMAGE_LIMITS, addManualAdSchema, adTestReadiness, manualAdIdOf, manualAdKey, manualAdRows, buildAdBots, DEFAULT_AD_BOT_CONFIG, pageIdOfPost, productCodeOf, saveAdBotSchema, testImageGate, testImageSpendToday, testProductMissing, type AdBotSourceRow, type AdTestProduct, type ReadinessInput } from "@/lib/constants/chatbot-ad-bots";
 
 const row = (x: Partial<AdBotSourceRow> & { adId: string }): AdBotSourceRow => ({
   source: "CREATIVE_TEST",
@@ -128,6 +128,24 @@ export async function testChatbotAdBots() {
   assert.equal(adTestReadiness({ ...rdy, testMissing: ["chất vải"] }).canChat, false);
   assert.equal(adTestReadiness({ ...rdy, botState: "UNREACHABLE", botError: "x" }).canChat, false);
 
+  // ── Quảng cáo dựng tay trên Facebook (khai theo ID) ──
+  assert.equal(manualAdIdOf(manualAdKey("120000000000000077")), "120000000000000077");
+  assert.equal(manualAdIdOf("variant-uuid"), null, "id mẩu Thư viện Media không bị đọc nhầm thành quảng cáo dựng tay");
+  assert.equal(manualAdIdOf("ad:abc"), null);
+  assert.equal(addManualAdSchema.safeParse({ adId: "120000000000000077", pageId: "", label: "x" }).success, false, "bắt buộc chọn fanpage");
+  const manualCfg = { enabled: true, overrides: {}, manualAds: { "120000000000000077": { pageId: "104512345678901", label: "TEST_tay", addedByUserId: "u1", addedByName: "A", addedAt: "2026-10-01T01:00:00Z" } } };
+  const mRows = manualAdRows(manualCfg);
+  assert.equal(mRows.length, 1);
+  assert.equal(mRows[0].source, "MANUAL");
+  const mNo = buildAdBots(mRows, manualCfg);
+  assert.equal(mNo.lines[0].state, "NO_PRODUCT", "khai tay mà chưa có thông tin mẫu ⇒ chưa có bot riêng");
+  assert.equal(mNo.push.length, 0);
+  const uploaded = { ...test, colors: [{ ...test.colors[0], source: "UPLOAD" as const }] };
+  const mDraft = buildAdBots(mRows, { ...manualCfg, overrides: { "120000000000000077": { ...meta, enabled: false, test: uploaded } } });
+  assert.equal(mDraft.lines[0].state, "TEST_DRAFT");
+  assert.equal(mDraft.push[0].enabled, false, "quảng cáo dựng tay cũng bắt đầu TẮT, chỉ chat thử");
+
+  console.log("✓ Quảng cáo dựng tay theo ID: khoá ad:<ID> không lẫn id mẩu, bắt buộc fanpage, chưa có mẫu ⇒ không bot riêng, có mẫu (ảnh tải lên) ⇒ chat thử trước, bật sau");
   console.log("✓ Chat test mẫu mới: thiếu giá / chất vải / ảnh ⇒ không gửi, chưa bật ⇒ bot chỉ chat thử, trần ảnh theo ngày VN chặn trước khi gọi AI, bảng kiểm page tách THIẾU / CHƯA BIẾT / CẢNH BÁO kèm cách bổ sung");
   console.log("✓ Bot riêng theo quảng cáo: gộp ad_id, không đoán mẫu cho QC chưa gắn mã, ghi đè bật/tắt/mã, công tắc chung, gói ERP qua được bộ kiểm của bot");
 }

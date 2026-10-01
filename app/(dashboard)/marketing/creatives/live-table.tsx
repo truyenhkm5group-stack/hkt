@@ -296,7 +296,7 @@ export function LiveTable({
           return (
             <div className="flex flex-col items-end gap-1">
               {r.fbAdId ? <DailyButton variantId={r.id} name={r.names.campaign} /> : null}
-              {r.fbAdId ? <ChatTestButton variantId={r.id} /> : null}
+              {r.fbAdId ? <ChatTestButton campKey={r.id} /> : null}
               {republish && src ? <RepublishButton v={src} ctx={republish.ctx} winCode={src.productId ? (republish.winCodes[src.productId] ?? null) : null} /> : null}
               {canWrite && r.status === "LIVE" ? <PauseNowButton variantId={r.id} slot={r.slot} /> : null}
               {canWrite && r.verdict === "PROMISING" && !r.dailyBudget ? <ExtendButton variantId={r.id} slot={r.slot} /> : null}

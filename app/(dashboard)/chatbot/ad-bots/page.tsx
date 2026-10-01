@@ -7,6 +7,10 @@ import { AD_BOT_SOURCE_LABEL, AD_BOT_STATE_LABEL, AD_BOT_WINDOW_DAYS, type AdBot
 import { SCALE_DRAFT_STATUS_LABEL, VARIANT_STATUS_LABEL, type ScaleDraftStatus, type VariantStatus } from "@/lib/constants/creative-loop";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { getBotAdStatus, loadAdBotLines } from "@/lib/integrations/chatbot/ad-bots";
+import { manualAdPageOptions } from "@/lib/integrations/chatbot/ad-test";
+import { ChatTestButton } from "@/app/(dashboard)/marketing/creatives/chat-test";
+import { ManualAdForm, RemoveManualAdButton } from "@/app/(dashboard)/chatbot/ad-bots/manual-ad";
+import { manualAdKey } from "@/lib/constants/chatbot-ad-bots";
 import { AdBotEditor, AdBotsGlobalControls } from "@/app/(dashboard)/chatbot/ad-bots/ad-bot-controls";
 
 export const metadata = { title: "Bot riêng theo quảng cáo" };
@@ -17,6 +21,7 @@ const VIDEO_STATUS_LABEL: Record<string, string> = { ACTIVE: "Đang chạy", PAU
 function statusLabel(l: AdBotLine): string {
   if (l.source === "CREATIVE_TEST") return VARIANT_STATUS_LABEL[l.status as VariantStatus] ?? l.status;
   if (l.source === "CREATIVE_SCALE") return SCALE_DRAFT_STATUS_LABEL[l.status as ScaleDraftStatus] ?? l.status;
+  if (l.source === "MANUAL") return "Khai tay theo ID";
   return VIDEO_STATUS_LABEL[l.status] ?? l.status;
 }
 
@@ -29,7 +34,7 @@ const RUNNING = new Set(["LIVE", "ACTIVE"]);
  */
 export default async function ChatbotAdBotsPage() {
   await requirePermission("cs:config");
-  const [{ lines, config }, bot] = await Promise.all([loadAdBotLines(), getBotAdStatus()]);
+  const [{ lines, config }, bot, pageOptions] = await Promise.all([loadAdBotLines(), getBotAdStatus(), manualAdPageOptions().catch(() => [])]);
   const seen = bot.reachable ? bot.seen : {};
   const known = new Set(lines.map((l) => l.adId));
   const unknownSeen = Object.entries(seen)
@@ -78,6 +83,13 @@ export default async function ChatbotAdBotsPage() {
         </p>
       </SectionCard>
 
+      <SectionCard
+        title="Thêm mẫu test theo ID quảng cáo"
+        description="Cho quảng cáo dựng tay trên Trình quản lý quảng cáo Facebook (không qua Thư viện Media). Dán ID quảng cáo, chọn fanpage, rồi tải ảnh từng màu, nhập giá & chất vải và chat thử ngay trong khung Chat test."
+      >
+        <ManualAdForm pages={pageOptions} />
+      </SectionCard>
+
       {unknownSeen.length ? (
         <SectionCard title="Khách đến từ quảng cáo chưa có trong danh sách" description="Bot đã gặp các ID quảng cáo này nhưng ERP không biết chúng thuộc camp test nào (quảng cáo tạo tay ngoài Thư viện Media, hoặc camp cũ). Bot trả lời như bình thường.">
           <ul className="space-y-1 text-sm">
@@ -91,7 +103,7 @@ export default async function ChatbotAdBotsPage() {
       ) : null}
 
       {lines.length === 0 ? (
-        <EmptyState title="Chưa có quảng cáo test nào" description="Khi Thư viện Media đăng camp test lên Facebook, quảng cáo sẽ hiện ở đây kèm bot riêng." />
+        <EmptyState title="Chưa có quảng cáo test nào" description="Camp Thư viện Media tự hiện ở đây khi đăng lên Facebook; quảng cáo dựng tay thì thêm ở khung bên trên." />
       ) : (
         <div className="space-y-3">
           {lines.map((l) => {
@@ -117,7 +129,15 @@ export default async function ChatbotAdBotsPage() {
                 }
               >
                 {l.adCopy ? <p className="mb-3 line-clamp-2 text-xs text-muted-foreground">Nội dung QC: {l.adCopy}</p> : null}
-                {l.override?.test ? (
+                {l.source === "MANUAL" ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <ChatTestButton campKey={manualAdKey(l.adId)} />
+                    <RemoveManualAdButton adId={l.adId} />
+                    <span className="text-muted-foreground">
+                      {l.override?.test ? `Mẫu ${l.override.test.name || "—"} (${l.override.test.code || "chưa có mã tạm"}) · ${l.override.test.colors.length} màu` : "Chưa có thông tin mẫu test — mở Chat test để điền."}
+                    </span>
+                  </div>
+                ) : l.override?.test ? (
                   <p className="text-sm">
                     Mẫu test mới <b>{l.override.test.name || "—"}</b> ({l.override.test.code || "chưa có mã tạm"}) · {l.override.test.colors.length} màu. Sửa ảnh, giá, chất vải và bật / tắt ở nút <b>Chat test</b> của camp trong{" "}
                     <Link href="/marketing/creatives" className="underline">
