@@ -45,6 +45,16 @@ export const SALES_TONES = ["FRIENDLY", "PROFESSIONAL", "CONCISE"] as const;
 export type SalesTone = (typeof SALES_TONES)[number];
 export const SALES_TONE_LABEL: Record<SalesTone, string> = { FRIENDLY: "Thân thiện, xưng hô gần gũi", PROFESSIONAL: "Lịch sự, chuyên nghiệp", CONCISE: "Ngắn gọn, đi thẳng vào việc" };
 
+/**
+ * Mức SUY NGHĨ của bot (01/10/2026: chủ shop thấy bot ở mức thấp nhất trả lời «ngu»). `SMART` = suy luận vừa, trả lời chậm
+ * hơn vài giây nhưng hiểu ngữ cảnh tốt hơn; `FAST` = suy luận thấp, nhanh nhất. Câu trả lời mẫu không tốn suy nghĩ nào.
+ */
+export const SALES_THINKING = ["SMART", "FAST"] as const;
+export type SalesThinking = (typeof SALES_THINKING)[number];
+export const SALES_THINKING_LABEL: Record<SalesThinking, string> = { SMART: "Kỹ — hiểu ngữ cảnh tốt hơn, chậm hơn vài giây", FAST: "Nhanh — trả lời nhanh nhất" };
+/** Ngân sách token đầu ra + mức suy luận của MỘT vòng chat theo mức suy nghĩ (suy luận ăn chung ngân sách — xem provider). */
+export const SALES_THINKING_BUDGET: Record<SalesThinking, { maxTokens: number; reasoning: "low" | "medium" }> = { SMART: { maxTokens: 10_000, reasoning: "medium" }, FAST: { maxTokens: 4_000, reasoning: "low" } };
+
 export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok"] as const;
 export type SalesBotConnector = (typeof SALES_BOT_CONNECTORS)[number];
 
@@ -66,6 +76,7 @@ export const salesChatbotConfigZ = z
       .regex(/^$|^[a-z][a-z0-9.-]{2,60}$/, "Tên model không hợp lệ")
       .default(""),
     tone: z.enum(SALES_TONES),
+    thinking: z.enum(SALES_THINKING).default("SMART"),
     greeting: z.string().trim().min(2).max(300),
     businessHours: z
       .object({
@@ -103,6 +114,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   connectorKey: "anthropic-byok",
   model: "",
   tone: "FRIENDLY",
+  thinking: "SMART",
   greeting: "Chào anh/chị! Em có thể tư vấn sản phẩm, báo giá và lên đơn giúp mình ạ.",
   businessHours: { enabled: false, start: "08:00", end: "21:00", days: [0, 1, 2, 3, 4, 5, 6], outsideMessage: "Shop đang ngoài giờ làm việc — anh/chị để lại tin nhắn, nhân viên sẽ trả lời sớm nhất ạ." },
   handoff: { onCustomerRequest: true, onComplaint: true, message: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé." },

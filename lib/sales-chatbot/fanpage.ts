@@ -29,7 +29,7 @@ import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
+import { appendContextMessages, chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -397,6 +397,35 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   return { kind: "SENT", inboxId, warning };
 }
 
+/** Tối đa bao nhiêu dòng ngữ cảnh fanpage chép vào lịch sử mỗi lượt (lịch sử gửi AI vẫn cắt ở `historyMessages`). */
+const CONTEXT_MAX = 12;
+
+/**
+ * Chép vào lịch sử của bot những gì đã xảy ra trên fanpage mà bot KHÔNG tham gia, trước tin khách của lượt này: tin phía page
+ * (trả lời tự động của Meta, nhân viên — trừ tin của chính bot) và tin khách bot đã bỏ qua (vì page trả lời / nhân viên đang
+ * xử lý). Theo thứ tự thời gian, chỉ phần mới hơn mốc đã chép (`state.mirroredUntil`). Gọi TRƯỚC khi chụp `before`.
+ */
+async function mirrorFanpageContext(conversationId: string, pageId: string, threadId: string, beforeAt: Date): Promise<void> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const c = schema.salesChatConversations;
+  const [conv] = await db.select({ state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
+  const st = (conv?.state ?? {}) as ChatState;
+  const since = st.mirroredUntil ? new Date(st.mirroredUntil) : new Date(0);
+  const rows = await db
+    .select({ text: t.text, note: t.note, status: t.status, createdAt: t.createdAt })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), sql`${t.createdAt} > ${since}`, lt(t.createdAt, beforeAt), or(eq(t.note, PAGE_REPLY), eq(t.status, "SKIPPED"))))
+    .orderBy(asc(t.createdAt));
+  const items = rows
+    .filter((r) => r.text.trim())
+    .slice(-CONTEXT_MAX)
+    .map((r) => ({ role: r.note === PAGE_REPLY ? ("assistant" as const) : ("user" as const), text: r.text }));
+  if (items.length) await appendContextMessages(conversationId, items);
+  const last = rows[rows.length - 1]?.createdAt;
+  if (last) await db.update(c).set({ state: sql`${c.state} || ${JSON.stringify({ mirroredUntil: last.toISOString() })}::jsonb` }).where(eq(c.id, conversationId));
+}
+
 export type ProcessResult = { processed: number; replies: number; skipped: string | null; error: string | null };
 
 /**
@@ -484,6 +513,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, updatedAt: now() }).where(eq(schema.salesChatConversations.id, conv.id));
     }
+    await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())

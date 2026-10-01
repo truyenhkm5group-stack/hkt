@@ -52,7 +52,7 @@ import { checkDomainSlug, organizationBaseUrl, organizationForHostSlug, publicat
 import { provisionOrganization } from "@/lib/platform/provision";
 import { cancelManualOrderCore, createManualOrderCore, materialChanges, updateManualOrderCore } from "@/lib/records/order-create";
 import { createProductCore } from "@/lib/records/product-create";
-import { foldVi, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
+import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
@@ -163,6 +163,20 @@ function testPure() {
   assert.equal(foldVi("Chả Mực Giã Tay"), "cha muc gia tay");
   assert.deepEqual(searchCatalog(items, "cha muc").map((i) => i.variantId), ["v1"]);
   assert.deepEqual(searchCatalog(items, "ruốc tôm").map((i) => i.variantId), ["v2"]);
+  // Tìm theo TÊN chính, bỏ số lượng / lời đệm (đo 01/10/2026: «1kí cha ca thu nguyen chat» ra ruốc cá thu, bot nói «chưa thấy»).
+  const hslcItems: CatalogItem[] = [
+    { variantId: "cct1", productId: "pc", name: "Chả cá thu", sku: "CHA-CA-THU", variant: "1kg (2 túi 0,5kg)", price: 280_000, fields: {} },
+    { variantId: "cct2", productId: "pc", name: "Chả cá thu", sku: "CHA-CA-THU-2KG", variant: "2kg (4 túi 0,5kg)", price: 540_000, fields: {} },
+    { variantId: "rct", productId: "pr", name: "Ruốc bông (chà bông) cá thu nguyên chất", sku: "RUOC-BONG-CA-THU-100", variant: "Hộp 250g", price: 250_000, fields: {} },
+    { variantId: "nem", productId: "pn", name: "Nem hải sản tôm bề bề", sku: "NEM", variant: "Hộp 10 cái", price: 120_000, fields: {} },
+  ];
+  assert.deepEqual(queryKeywords("1kí cha ca thu nguyen chat"), ["cha", "ca", "thu", "nguyen", "chat"]);
+  assert.equal(searchCatalog(hslcItems, "1kí cha ca thu nguyen chat")[0].productId, "pc", "chả cá thu đứng đầu, không phải ruốc");
+  assert.equal(searchCatalog(hslcItems, "ship c 1 ký chả cá thu nhé")[0].productId, "pc");
+  assert.equal(searchCatalog(hslcItems, "ruốc cá thu")[0].variantId, "rct");
+  assert.equal(searchCatalog(hslcItems, "chà bông cá thu")[0].variantId, "rct");
+  assert.equal(searchCatalog(hslcItems, "cho c 10 cái nem")[0].variantId, "nem");
+  assert.equal(searchCatalog(hslcItems, "2kg chả cá thu")[0].productId, "pc");
   const night = { ...DEFAULT_SALES_CHATBOT_CONFIG.businessHours, enabled: true, start: "22:00", end: "06:00" };
   assert.equal(withinBusinessHours(night, new Date("2026-09-29T16:30:00Z")), true, "23:30 VN trong khung 22–06");
   assert.equal(withinBusinessHours(night, new Date("2026-09-29T05:00:00Z")), false, "12:00 VN ngoài khung");
@@ -923,6 +937,38 @@ async function testJourney() {
       const rc4 = await processFanpageThread(PAGE, "t-c4", { fetch: cmtFetch.fetch, now: in31s });
       assert.ok(rc4.replies === 0 && /không nhắn riêng được/.test(rc4.error ?? "") && /KHÔNG trả lời công khai/.test(rc4.error ?? ""), JSON.stringify(rc4));
       assert.ok(!cmtFetch.calls.some((c) => String(c.init?.body).includes("reply_comment")), "lỗi tin riêng không lùi về bình luận công khai");
+      // ═══ BOT THẤY NHỮNG GÌ PAGE ĐÃ NÓI (01/10/2026: khách «Ship c 1kí» sau trả lời tự động báo giá, bot hỏi lại «món nào») ═══
+      const ctxSeen: AiRequest[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          ctxSeen.push(req);
+          return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      await receiveFanpageEvent(ev("m-ctx-1", "Báo giá chả cá thu?", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await receiveFanpageEvent(ev("m-ctx-auto", "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ", { id: PAGE }, "t-ctx"));
+      const ctxFetch = fakeFetchCalls(() => ({ success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
+      assert.match((await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: in31s })).skipped ?? "", /Page đã trả lời/);
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-ctx-2", "Ship c 1kí", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      const hist = JSON.stringify(ctxSeen[0]?.messages ?? []);
+      const iAsk = hist.indexOf("Báo giá chả cá thu?");
+      const iAuto = hist.indexOf("[Shop đã nhắn] Dạ em chào anh/chị! Chả cá thu");
+      const iShip = hist.indexOf("Ship c 1kí");
+      assert.ok(iAsk >= 0 && iAuto > iAsk && iShip > iAuto, `lịch sử AI: câu khách bị bỏ qua → trả lời tự động của page → câu mới, đúng thứ tự: ${hist.slice(0, 400)}`);
+      const ctxPosts = ctxFetch.calls.filter((c) => c.init?.method === "POST").map((c) => String(c.init?.body));
+      assert.ok(ctxPosts.length === 1 && !ctxPosts.some((b) => b.includes("Shop đã nhắn") || b.includes("Báo giá chả cá thu")), `ngữ cảnh chép vào lịch sử KHÔNG gửi lại cho khách: ${ctxPosts.join(" | ")}`);
+      // Lượt sau không chép lại lần hai.
+      await receiveFanpageEvent(ev("m-ctx-3", "Phạm Văn Đồng, Bình Thạnh", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
+      await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      const hist2 = JSON.stringify(ctxSeen[1]?.messages ?? []);
+      assert.equal(hist2.split("[Shop đã nhắn] Dạ em chào").length - 1, 1, "trả lời tự động chỉ nằm MỘT lần trong lịch sử");
+      // Mức suy nghĩ «Nhanh» ⇒ suy luận low; «Kỹ» (mặc định) ⇒ medium + ngân sách rộng.
+      assert.equal(ctxSeen[0].reasoning, "medium");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       const sleeps: number[] = [];
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
@@ -1045,7 +1091,7 @@ async function testJourney() {
       const tconv = await openConversation("TEST", { createdBy: ADMIN_EMAIL });
       await chatTurn(tconv.id, "Chào shop", { channel: "TEST" });
       // Ghi lại rồi khẳng định NGOÀI provider — chatTurn nuốt lỗi ném từ provider (coi là AI hỏng) nên assert bên trong không bắt được gì.
-      assert.ok(chatBudgets.length > 0 && chatBudgets.every(([r, m]) => r === "low" && (m ?? 0) >= 4000), `chat: suy luận low, ngân sách ≥ 4000: ${JSON.stringify(chatBudgets)}`);
+      assert.ok(chatBudgets.length > 0 && chatBudgets.every(([r, m]) => r === "medium" && (m ?? 0) >= 8000), `chat mặc định «Kỹ»: suy luận medium, ngân sách ≥ 8000: ${JSON.stringify(chatBudgets)}`);
       assert.ok(systems.some((x) => x.includes("SỔ TAY BÁN HÀNG của shop") && x.includes("Giọng điệu")), "bot dùng sổ tay đã xuất bản");
       assert.ok(systems.every((x) => x.indexOf("LUẬT BẮT BUỘC") < x.indexOf("SỔ TAY BÁN HÀNG")), "sổ tay đứng SAU luật bắt buộc");
       await savePlaybookDraft(admin, "Bản hai: luôn hỏi khách cần bảo quản lạnh không.");
