@@ -79,7 +79,7 @@ export default async function SalesChatbotPage() {
                     <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
                   </li>
                   <li>Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây.</li>
-                  <li>Bật bot ở khung Cấu hình bên dưới. Bot chỉ trả lời tin khách đã chờ 30 giây mà page chưa trả lời (trả lời tự động của Meta / nhân viên); nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
+                  <li>Bật bot ở khung Cấu hình bên dưới. Bot trả lời sau khoảng 5 giây (tin đầu của hội thoại mới: tối đa 10 giây để nhường trả lời tự động của Meta); page đã trả lời thì bot không chen; nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
                 </ol>
                 {fanpage.webhookUrl ? (
                   <div className="space-y-1">

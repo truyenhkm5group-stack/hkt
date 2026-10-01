@@ -7,7 +7,7 @@
  *
  * LUỒNG: webhook `/api/webhooks/pancake/fanpage/<token>` (token ⇒ tổ chức, `lib/platform/webhooks.ts`) ⇒ `receiveFanpageEvent`
  * ghi tin vào `sales_chat_inbound` (UNIQUE mã tin ⇒ gửi trùng vô hại) và trả 200 ngay ⇒ sau phản hồi `processFanpageThread`
- * đợi `REPLY_GRACE_MS` (tin MỚI NHẤT của khách đủ 30 giây), GIÀNH mọi tin chờ của hội thoại (một lượt duy nhất), gọi
+ * đợi vừa đủ (tin ĐẦU của hội thoại mới: `FIRST_CONTACT_WAIT_MS`; tin tiếp theo: `FOLLOWUP_WAIT_MS`), GIÀNH mọi tin chờ của hội thoại (một lượt duy nhất), gọi
  * `chatTurn`, gửi các câu trả lời mới qua Pancake. Chỉ tin nhắn INBOX — bình luận không trả lời tự động.
  *
  * BOT LÀ LƯỚI ĐỠ, KHÔNG CHEN NGANG (chủ nền tảng 01/10/2026: shop đã cài câu trả lời tự động trên Meta cho câu hỏi đầu
@@ -33,17 +33,26 @@ export const HUMAN_TAKEOVER_MINUTES = 30;
 /** Hội thoại đã chuyển nhân viên mà im lặng quá chừng này giờ ⇒ bot nhận lại khi khách nhắn tiếp. */
 export const HANDOFF_EXPIRE_HOURS = 12;
 /**
- * Bot chỉ trả lời tin khách đã chờ ĐỦ chừng này mà page chưa trả lời (tự động của Meta / nhân viên). Cũng là khoảng gom
- * tin: khách gõ liên tiếp thì đợi tin MỚI NHẤT đủ 30 giây rồi trả lời một lượt.
+ * TRẢ LỜI NHANH NHẤT CÓ THỂ mà không chen ngang trả lời tự động của Meta (chủ shop 01/10/2026: bản đầu đợi 30 giây cho mọi
+ * tin là quá chậm). Meta chỉ tự trả lời TIN ĐẦU của một hội thoại mới, và tin ấy tới qua Pancake sau vài giây ⇒
+ *  · tin ĐẦU của hội thoại mới: đợi tối đa `FIRST_CONTACT_WAIT_MS` — trả lời tự động tới thì bỏ qua NGAY, không đợi hết;
+ *  · tin TIẾP THEO: chỉ đợi khách gõ xong (`FOLLOWUP_WAIT_MS`, gom các dòng gõ liên tiếp thành một lượt).
+ * Cả hai trường hợp: page đã trả lời (Meta / nhân viên) sau tin khách ⇒ bot không chen.
  */
-export const REPLY_GRACE_MS = 30_000;
+export const FIRST_CONTACT_WAIT_MS = 10_000;
+export const FOLLOWUP_WAIT_MS = 4_000;
+/**
+ * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. Với hội thoại mới, tin phía page tới trước
+ * tin khách tối đa chừng này vẫn tính là trả lời tự động cho chính tin ấy (hai webhook có thể tới ngược thứ tự).
+ */
+const FIRST_CONTACT_LOOKBACK_MS = 60_000;
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
-const GRACE_SLACK_MS = 2_000;
-const RETRY_MS = 3_000;
+const GRACE_SLACK_MS = 1_000;
+const RETRY_MS = 2_000;
 /** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
 const PAGE_REPLY = "PAGE_REPLY";
-const WAITING = "Chờ đủ 30 giây xem page có trả lời không";
-const PAGE_REPLIED_REASON = "Page đã trả lời trong 30 giây (tự động của Meta / nhân viên) — bot không chen";
+const WAITING = "Đang đợi xem page có trả lời không";
+const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
 /** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
 const ECHO_WINDOW_MS = 10 * 60_000;
 /** Tin ẢNH (không chữ) phía page tới trong khoảng này sau khi bot gửi ảnh cùng hội thoại ⇒ tiếng vọng ảnh của bot. */
@@ -259,12 +268,25 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   const db = await getDb();
   const t = schema.salesChatInbound;
   for (let round = 0; round < 3; round++) {
-    // Tin chờ MỚI NHẤT chưa đủ 30 giây ⇒ chưa tới lượt: lượt chờ của chính tin đó sẽ gom cả hội thoại.
-    const [newest] = await db
-      .select({ at: sql<Date | string | null>`max(${t.createdAt})` })
+    const [pend] = await db
+      .select({ newest: sql<Date | string | null>`max(${t.createdAt})`, oldest: sql<Date | string | null>`min(${t.createdAt})` })
       .from(t)
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING")));
-    if (newest?.at && new Date(newest.at).getTime() > now().getTime() - REPLY_GRACE_MS) return { ...out, skipped: WAITING };
+    if (!pend?.newest || !pend.oldest) break;
+    const oldest = new Date(pend.oldest);
+    // Hội thoại mới hay tin tiếp theo — xem `FIRST_CONTACT_WAIT_MS`.
+    const [prior] = await db
+      .select({ id: t.id })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
+      .limit(1);
+    const firstContact = !prior;
+    const repliedSince = firstContact ? new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS) : oldest;
+    const pageRepliedSince = async () =>
+      (await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, repliedSince))).limit(1)).length > 0;
+    // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
+    // lời ⇒ đi tiếp ngay để bỏ qua, không bắt khách đợi hết thời gian chờ.
+    if (new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
     const claimed = await db
@@ -279,14 +301,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .update(t)
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
-    // Page đã trả lời (Meta tự động / nhân viên) SAU tin khách sớm nhất của lượt ⇒ bot không chen.
-    const earliest = new Date(Math.min(...claimed.map((r) => r.createdAt.getTime())));
-    const [pageReplied] = await db
-      .select({ id: t.id })
-      .from(t)
-      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, earliest)))
-      .limit(1);
-    if (pageReplied) {
+    // Page đã trả lời (Meta tự động / nhân viên) sau tin khách sớm nhất của lượt ⇒ bot không chen.
+    if (await pageRepliedSince()) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
       out.processed += ids.length;
       out.skipped = PAGE_REPLIED_REASON;
@@ -368,12 +384,16 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   return out;
 }
 
-/** Sau phản hồi webhook: đợi 30 giây xem page có trả lời không rồi xử lý; hội thoại bận / chưa đủ tuổi thì thử lại vài lần. */
+/**
+ * Sau phản hồi webhook: đợi khách gõ xong rồi xử lý; tin đầu của hội thoại mới chưa đủ tuổi / hội thoại bận thì thử lại mỗi
+ * `RETRY_MS` — tối đa đủ phủ `FIRST_CONTACT_WAIT_MS` (trả lời tự động của Meta tới giữa chừng ⇒ lượt kế tiếp bỏ qua ngay).
+ */
 export async function processFanpageThreadDebounced(pageId: string, threadId: string, deps: FanpageDeps = {}): Promise<ProcessResult> {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  await sleep(REPLY_GRACE_MS + GRACE_SLACK_MS);
+  await sleep(FOLLOWUP_WAIT_MS + GRACE_SLACK_MS);
   let last: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
-  for (let i = 0; i < 4; i++) {
+  const tries = Math.ceil((FIRST_CONTACT_WAIT_MS - FOLLOWUP_WAIT_MS) / RETRY_MS) + 3;
+  for (let i = 0; i < tries; i++) {
     last = await processFanpageThread(pageId, threadId, deps);
     if (last.skipped !== "Hội thoại đang được trả lời" && last.skipped !== WAITING) break;
     await sleep(RETRY_MS);

@@ -75,7 +75,7 @@ export function QuickRepliesManager({ manage, settings, rows }: { manage: boolea
     <div className="space-y-5">
       <SectionCard
         title="Cách trả lời"
-        hint="Thứ tự mỗi tin khách (sau 30 giây page chưa trả lời): ① khớp chữ với câu mẫu — 0 token; ② không khớp ⇒ AI đọc hiểu, chỉ CHỌN câu mẫu — rẻ; ③ không câu nào hợp, hoặc khách đang chốt đơn ⇒ chatbot AI đầy đủ."
+        hint="Thứ tự mỗi tin khách mà page chưa trả lời: ① khớp chữ với câu mẫu — 0 token; ② không khớp ⇒ AI đọc hiểu, chỉ CHỌN câu mẫu — rẻ; ③ không câu nào hợp, hoặc khách đang chốt đơn ⇒ chatbot AI đầy đủ."
       >
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="quick-reply-settings">
           <label className="flex items-center gap-2">
