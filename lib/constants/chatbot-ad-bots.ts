@@ -26,12 +26,13 @@ export const AD_ID_PATTERN = /^\d{6,25}$/;
 export const PRODUCT_CODE_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 export const AD_BOT_INSTRUCTIONS_MAX = 4000;
 
-export const AD_BOT_SOURCES = ["CREATIVE_TEST", "CREATIVE_SCALE", "VIDEO_SCALE"] as const;
+export const AD_BOT_SOURCES = ["CREATIVE_TEST", "CREATIVE_SCALE", "VIDEO_SCALE", "MANUAL"] as const;
 export type AdBotSource = (typeof AD_BOT_SOURCES)[number];
 export const AD_BOT_SOURCE_LABEL: Record<AdBotSource, string> = {
   CREATIVE_TEST: "Camp test (Thư viện Media)",
   CREATIVE_SCALE: "Camp scale mẫu thắng",
   VIDEO_SCALE: "Quảng cáo video",
+  MANUAL: "Quảng cáo dựng tay trên Facebook",
 };
 
 /**
@@ -43,8 +44,8 @@ export type AdTestColor = {
   color: string;
   imageId: string;
   sha: string;
-  /** `ORIGINAL` = chính ảnh quảng cáo (màu gốc) · `AI` = ảnh AI đổi màu. */
-  source: "ORIGINAL" | "AI";
+  /** `ORIGINAL` = chính ảnh quảng cáo (màu gốc) · `AI` = ảnh AI đổi màu · `UPLOAD` = người tải ảnh lên. */
+  source: "ORIGINAL" | "AI" | "UPLOAD";
   createdAt: string;
 };
 
@@ -70,6 +71,8 @@ export const AD_TEST_IMAGE_LIMITS = { maxColorsPerAd: 10, maxUsdPerDay: 2 } as c
 export type AdBotOverride = {
   enabled?: boolean;
   test?: AdTestProduct;
+  /** Fanpage người chọn khi máy không đọc được từ bài viết của quảng cáo. */
+  pageId?: string;
   /** Mã mẫu ghi đè (vd quảng cáo test "không gắn mã"). Rỗng = theo mẫu gắn trên quảng cáo. */
   productCode?: string;
   instructions?: string;
@@ -78,12 +81,38 @@ export type AdBotOverride = {
   updatedAt: string;
 };
 
+/** Quảng cáo DỰNG TAY trên Facebook (không có trong bảng nào của ERP) — người khai ID + fanpage để có bot riêng. */
+export type ManualAd = { pageId: string; label: string; addedByUserId: string | null; addedByName: string; addedAt: string };
+
 export type AdBotConfig = {
   /** Công tắc chung. Tắt ⇒ bot nhận danh sách rỗng, mọi hội thoại chạy như trước. */
   enabled: boolean;
   overrides: Record<string, AdBotOverride>;
   imageSpend?: AdTestImageSpend[];
+  manualAds?: Record<string, ManualAd>;
 };
+
+const MANUAL_PREFIX = "ad:";
+export const manualAdKey = (adId: string) => `${MANUAL_PREFIX}${adId}`;
+/** `ad:<ID>` ⇒ ID quảng cáo dựng tay; khoá khác (id mẩu Thư viện Media) ⇒ `null`. */
+export function manualAdIdOf(campKey: string): string | null {
+  if (!campKey.startsWith(MANUAL_PREFIX)) return null;
+  const id = campKey.slice(MANUAL_PREFIX.length);
+  return AD_ID_PATTERN.test(id) ? id : null;
+}
+
+/** Quảng cáo dựng tay thành dòng nguồn như mọi quảng cáo khác (không mẫu gắn sẵn — mẫu đến từ thông tin mẫu test). */
+export function manualAdRows(config: AdBotConfig): AdBotSourceRow[] {
+  return Object.entries(config.manualAds ?? {})
+    .filter(([adId]) => AD_ID_PATTERN.test(adId))
+    .map(([adId, m]) => ({ adId, source: "MANUAL" as const, status: "MANUAL", campaignName: m.label, adName: "", adCopy: "", productId: null, productCode: null, productName: null, publishedAt: new Date(m.addedAt) }));
+}
+
+export const addManualAdSchema = z.object({
+  adId: z.string().trim().regex(AD_ID_PATTERN, "ID quảng cáo phải toàn chữ số (Trình quản lý quảng cáo → cột ID quảng cáo)"),
+  pageId: z.string().trim().regex(/^\d{5,25}$/, "Chọn fanpage chạy quảng cáo"),
+  label: z.string().trim().min(1, "Đặt tên gọi cho quảng cáo (vd tên camp trên Facebook)").max(200),
+});
 
 export const DEFAULT_AD_BOT_CONFIG: AdBotConfig = { enabled: true, overrides: {}, imageSpend: [] };
 
@@ -237,8 +266,10 @@ export type SaveAdBotInput = z.infer<typeof saveAdBotSchema>;
 
 const vndInt = z.preprocess((v) => (v === "" || v === null || v === undefined ? null : Number(String(v).replace(/[.,\s]/g, ""))), z.number().int().min(1000, "Giá phải từ 1.000đ").max(100_000_000).nullable());
 
+export const setAdTestPageSchema = z.object({ campKey: z.string().trim().min(1).max(64), pageId: z.string().trim().regex(/^\d{5,25}$/, "Chọn fanpage") });
+
 export const saveAdTestInfoSchema = z.object({
-  variantId: z.string().trim().min(1).max(64),
+  campKey: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1, "Nhập tên mẫu").max(120),
   code: z.string().trim().regex(PRODUCT_CODE_PATTERN, "Mã tạm chỉ gồm chữ, số, - và _ (vd TEST-DB01)"),
   price: vndInt,
@@ -283,7 +314,7 @@ export function adTestReadiness(i: ReadinessInput): { checks: ReadinessCheck[]; 
   c.push(
     i.pageId
       ? { key: "PAGE", label: "Fanpage chạy quảng cáo", status: "OK", detail: pageTxt, fix: "" }
-      : { key: "PAGE", label: "Fanpage chạy quảng cáo", status: "UNKNOWN", detail: "Chưa đọc được fanpage từ quảng cáo (Facebook chưa trả bài viết của quảng cáo).", fix: "Bấm Đồng bộ Facebook ở tab Đang chạy rồi mở lại." },
+      : { key: "PAGE", label: "Fanpage chạy quảng cáo", status: "MISSING", detail: "Máy chưa đọc được fanpage của quảng cáo này.", fix: "Chọn fanpage ở ô \"Fanpage của camp\" ngay dưới bảng này." },
   );
   if (!i.pageId) c.push({ key: "PANCAKE", label: "Page đã kết nối Pancake", status: "UNKNOWN", detail: "Chưa biết page nên chưa kiểm được.", fix: "" });
   else if (i.pancakePageIds === null) c.push({ key: "PANCAKE", label: "Page đã kết nối Pancake", status: "UNKNOWN", detail: i.pancakeError ? `ERP không đọc được danh sách page Pancake: ${i.pancakeError}` : "ERP chưa có khoá Pancake để kiểm.", fix: "Tự kiểm trên pancake.vn: page phải nằm trong tài khoản / gói Pancake của shop." });
@@ -331,7 +362,10 @@ export function pageIdOfPost(fbPostId: string | null | undefined): string | null
 
 /** Dữ liệu khung "Chat test" (máy chủ dựng ở `lib/integrations/chatbot/ad-test.ts`, trình duyệt chỉ đọc). */
 export type AdTestView = {
-  variantId: string;
+  /** Id mẩu Thư viện Media, hoặc `ad:<ID quảng cáo>` cho quảng cáo dựng tay (`manualAdKey`). */
+  campKey: string;
+  /** Quảng cáo dựng tay trên Facebook (không qua Thư viện Media). */
+  manual: boolean;
   adId: string;
   campaignName: string;
   productName: string | null;
@@ -351,6 +385,8 @@ export type AdTestView = {
   /** Page của bot dùng cho khung chat thử (page của camp nếu bot có, không thì page đầu tiên — kèm cảnh báo). */
   chatPageId: string | null;
   chatPageNote: string | null;
+  /** Fanpage chọn được (bot đang giữ token + tài khoản Pancake) — cho ô chọn khi máy không đọc được page. */
+  pageOptions: { id: string; name: string; inBot: boolean }[];
 };
 
 export type ChatReply = { text: string; handoff: boolean; imageIds: string[] };

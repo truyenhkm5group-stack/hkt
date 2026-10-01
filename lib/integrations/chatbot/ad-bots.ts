@@ -1,4 +1,4 @@
-import { buildAdBots, CHATBOT_AD_BOTS_KEY, DEFAULT_AD_BOT_CONFIG, type AdBotConfig, type AdBotLine } from "@/lib/constants/chatbot-ad-bots";
+import { buildAdBots, CHATBOT_AD_BOTS_KEY, DEFAULT_AD_BOT_CONFIG, manualAdRows, type AdBotConfig, type AdBotLine } from "@/lib/constants/chatbot-ad-bots";
 import { chatbotConfig, chatbotFetch } from "@/lib/integrations/chatbot/client";
 import { peekIsNonHome } from "@/lib/platform/credentials";
 import { listAdBotSources } from "@/lib/queries/chatbot-ad-bots";
@@ -14,7 +14,12 @@ import { getSettingJson } from "@/lib/settings";
 
 export async function getAdBotConfig(): Promise<AdBotConfig> {
   const c = await getSettingJson<AdBotConfig>(CHATBOT_AD_BOTS_KEY, DEFAULT_AD_BOT_CONFIG);
-  return { enabled: c.enabled !== false, overrides: c.overrides && typeof c.overrides === "object" ? c.overrides : {}, imageSpend: Array.isArray(c.imageSpend) ? c.imageSpend : [] };
+  return {
+    enabled: c.enabled !== false,
+    overrides: c.overrides && typeof c.overrides === "object" ? c.overrides : {},
+    imageSpend: Array.isArray(c.imageSpend) ? c.imageSpend : [],
+    manualAds: c.manualAds && typeof c.manualAds === "object" ? c.manualAds : {},
+  };
 }
 
 export type AdBotPushResult = { ok: true; pushed: number; accepted: number; skippedByBot: number } | { ok: false; pushed: number; error: string };
@@ -48,7 +53,7 @@ async function uploadMissingImages(config: AdBotConfig, missing: string[]): Prom
 
 export async function pushAdBots(): Promise<AdBotPushResult> {
   const [rows, config] = await Promise.all([listAdBotSources(), getAdBotConfig()]);
-  const { push } = buildAdBots(rows, config);
+  const { push } = buildAdBots([...rows, ...manualAdRows(config)], config);
   try {
     const res = await chatbotFetch("/api/erp/ad-bots", {
       method: "PUT",
@@ -92,5 +97,5 @@ export async function getBotAdStatus(): Promise<BotAdStatus> {
 
 export async function loadAdBotLines(): Promise<{ lines: AdBotLine[]; config: AdBotConfig }> {
   const [rows, config] = await Promise.all([listAdBotSources(), getAdBotConfig()]);
-  return { lines: buildAdBots(rows, config).lines, config };
+  return { lines: buildAdBots([...rows, ...manualAdRows(config)], config).lines, config };
 }

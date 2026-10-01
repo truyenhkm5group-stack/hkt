@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertTriangle, CheckCircle2, CircleHelp, Loader2, MessageCircle, Send, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Loader2, MessageCircle, Send, Trash2, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { addAdTestColorAction, chatAdTestAction, loadAdTestAction, removeAdTestColorAction, saveAdTestInfoAction, setAdTestLiveAction } from "@/lib/actions/chatbot-ad-test";
+import { addAdTestColorAction, chatAdTestAction, loadAdTestAction, removeAdTestColorAction, saveAdTestInfoAction, setAdTestLiveAction, setAdTestPageAction, uploadAdTestColorAction } from "@/lib/actions/chatbot-ad-test";
 import type { AdTestView, ReadinessStatus } from "@/lib/constants/chatbot-ad-bots";
 
 /**
@@ -29,26 +29,26 @@ const STATUS_ICON: Record<ReadinessStatus, React.ReactNode> = {
 
 const img = (id: string) => `/api/creative/images/${encodeURIComponent(id)}`;
 
-export function ChatTestButton({ variantId }: { variantId: string }) {
-  const [open, setOpen] = useState(false);
+export function ChatTestButton({ campKey, defaultOpen = false }: { campKey: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <>
       <Button variant="outline" size="sm" className="h-7 px-2 text-[12px]" onClick={() => setOpen(true)}>
         <MessageCircle className="size-3.5" />
         Chat test
       </Button>
-      {open ? <ChatTestDialog variantId={variantId} onClose={() => setOpen(false)} /> : null}
+      {open ? <ChatTestDialog campKey={campKey} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
 
-function ChatTestDialog({ variantId, onClose }: { variantId: string; onClose: () => void }) {
+function ChatTestDialog({ campKey, onClose }: { campKey: string; onClose: () => void }) {
   const [view, setView] = useState<AdTestView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const reload = () =>
-    loadAdTestAction(variantId).then((r) => {
+    loadAdTestAction(campKey).then((r) => {
       if ("error" in r) setLoadError(r.error);
       else {
         setLoadError(null);
@@ -56,9 +56,15 @@ function ChatTestDialog({ variantId, onClose }: { variantId: string; onClose: ()
       }
     });
   useEffect(() => {
+    const onReload = () => void reload();
+    window.addEventListener("chat-test-reload", onReload);
+    return () => window.removeEventListener("chat-test-reload", onReload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campKey]);
+  useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variantId]);
+  }, [campKey]);
 
   const run = (fn: () => Promise<ActionResult>) =>
     start(async () => {
@@ -122,18 +128,52 @@ function Readiness({ view }: { view: AdTestView }) {
           </li>
         ))}
       </ul>
+      <PagePicker view={view} />
     </Section>
+  );
+}
+
+/** Ô chọn fanpage — luôn hiện để sửa được, nổi bật khi máy chưa đọc được page của camp. */
+function PagePicker({ view }: { view: AdTestView }) {
+  const [pending, start] = useTransition();
+  const [pageId, setPageId] = useState(view.pageId ?? "");
+  const save = () =>
+    start(async () => {
+      const r = await setAdTestPageAction({ campKey: view.campKey, pageId });
+      if ("error" in r) toast.error(r.error);
+      else toast.success(r.message);
+      window.dispatchEvent(new CustomEvent("chat-test-reload"));
+    });
+  return (
+    <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-md p-2 text-sm ${view.pageId ? "" : "border border-destructive/50 bg-destructive/5"}`}>
+      <span className="text-xs text-muted-foreground">Fanpage của camp:</span>
+      <select className="h-8 rounded-md border bg-background px-2 text-sm" value={pageId} onChange={(e) => setPageId(e.target.value)}>
+        <option value="">— chọn fanpage —</option>
+        {view.pageOptions.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.inBot ? "" : " (bot chưa có token)"}
+          </option>
+        ))}
+        {view.pageId && !view.pageOptions.some((p) => p.id === view.pageId) ? <option value={view.pageId}>{view.pageName ?? view.pageId}</option> : null}
+      </select>
+      <Button size="sm" variant="outline" disabled={pending || !pageId || pageId === view.pageId} onClick={save}>
+        Lưu fanpage
+      </Button>
+      {!view.pageOptions.length ? <span className="text-xs text-muted-foreground">Không đọc được danh sách page (bot hoặc Pancake chưa kết nối).</span> : null}
+    </div>
   );
 }
 
 function Colors({ view, pending, run }: { view: AdTestView; pending: boolean; run: (fn: () => Promise<ActionResult>) => void }) {
   const [color, setColor] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const colors = view.test?.colors ?? [];
   const add = (mode: "ORIGINAL" | "AI") => {
     const c = color.trim();
     if (!c) return toast.error("Nhập tên màu");
     run(async () => {
-      const r = await addAdTestColorAction({ variantId: view.variantId, color: c, mode });
+      const r = await addAdTestColorAction({ campKey: view.campKey, color: c, mode });
       if (!("error" in r)) setColor("");
       return r;
     });
@@ -153,9 +193,9 @@ function Colors({ view, pending, run }: { view: AdTestView; pending: boolean; ru
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={img(c.imageId)} alt={c.color} className="aspect-square w-28 rounded border object-cover" />
             <figcaption className="text-center text-xs">
-              {c.color} <span className="text-muted-foreground">({c.source === "AI" ? "AI" : "gốc"})</span>
+              {c.color} <span className="text-muted-foreground">({c.source === "AI" ? "AI" : c.source === "UPLOAD" ? "tải lên" : "gốc"})</span>
             </figcaption>
-            <button type="button" disabled={pending} className="absolute top-1 right-1 rounded bg-background/80 p-1" title="Bỏ màu này" onClick={() => run(() => removeAdTestColorAction(view.variantId, c.sha))}>
+            <button type="button" disabled={pending} className="absolute top-1 right-1 rounded bg-background/80 p-1" title="Bỏ màu này" onClick={() => run(() => removeAdTestColorAction(view.campKey, c.sha))}>
               <Trash2 className="size-3.5" />
             </button>
           </figure>
@@ -163,16 +203,42 @@ function Colors({ view, pending, run }: { view: AdTestView; pending: boolean; ru
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input className="h-8 w-44" placeholder="Tên màu, vd Đỏ đô" value={color} maxLength={40} onChange={(e) => setColor(e.target.value)} />
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => add("ORIGINAL")} title="Màu đang có trên ảnh quảng cáo — không tốn tiền">
-          Là màu gốc của ảnh
+        {view.originalImageId ? (
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => add("ORIGINAL")} title="Màu đang có trên ảnh quảng cáo — không tốn tiền">
+            Là màu gốc của ảnh
+          </Button>
+        ) : null}
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => (color.trim() ? fileRef.current?.click() : toast.error("Nhập tên màu trước"))} title="Tải ảnh của màu này lên — không tốn tiền">
+          <Upload className="size-4" />
+          Tải ảnh màu này lên
         </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (!f) return;
+            const fd = new FormData();
+            fd.set("campKey", view.campKey);
+            fd.set("color", color.trim());
+            fd.set("file", f);
+            run(async () => {
+              const r = await uploadAdTestColorAction(fd);
+              if (!("error" in r)) setColor("");
+              return r;
+            });
+          }}
+        />
         <Button size="sm" disabled={pending || !view.canRecolor} onClick={() => add("AI")}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           AI đổi sang màu này (~{view.estimateUsd.toFixed(2)} USD)
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        AI vẽ lại ẢNH QUẢNG CÁO của camp sang màu mới, giữ nguyên kiểu dáng (mất khoảng 30–90 giây/ảnh). Đã chi hôm nay {view.spentTodayUsd.toFixed(2)} / {view.limits.maxUsdPerDay} USD · tối đa {view.limits.maxColorsPerAd} màu/camp.
+        Mỗi màu cần một ảnh: tải ảnh lên (0đ){view.originalImageId ? ", dùng màu gốc của ảnh quảng cáo (0đ), hoặc để AI vẽ lại ảnh quảng cáo sang màu mới" : ""}. AI vẽ lại ẢNH QUẢNG CÁO của camp sang màu mới, giữ nguyên kiểu dáng (mất khoảng 30–90 giây/ảnh). Đã chi hôm nay {view.spentTodayUsd.toFixed(2)} / {view.limits.maxUsdPerDay} USD · tối đa {view.limits.maxColorsPerAd} màu/camp.
         {view.recolorBlocked ? <span className="block text-amber-700 dark:text-amber-400">{view.recolorBlocked}</span> : null}
       </p>
     </Section>
@@ -212,7 +278,7 @@ function InfoForm({ view, pending, run }: { view: AdTestView; pending: boolean; 
       </div>
       <p className="text-xs text-muted-foreground">Giá ở đây là giá DUY NHẤT bot được báo cho mẫu này. Tư vấn size theo bảng size chung của page.</p>
       <div className="flex justify-end">
-        <Button size="sm" disabled={pending} onClick={() => run(() => saveAdTestInfoAction({ variantId: view.variantId, ...f }))}>
+        <Button size="sm" disabled={pending} onClick={() => run(() => saveAdTestInfoAction({ campKey: view.campKey, ...f }))}>
           Lưu giá & chất vải
         </Button>
       </div>
@@ -224,7 +290,7 @@ function GoLive({ view, pending, run }: { view: AdTestView; pending: boolean; ru
   return (
     <Section title="⑤ Bật cho khách thật">
       <label className="flex items-center gap-3 text-sm">
-        <Switch checked={view.live} disabled={pending || (!view.live && !view.canGoLive)} onCheckedChange={(v) => run(() => setAdTestLiveAction(view.variantId, v))} />
+        <Switch checked={view.live} disabled={pending || (!view.live && !view.canGoLive)} onCheckedChange={(v) => run(() => setAdTestLiveAction(view.campKey, v))} />
         {view.live ? (
           <span>
             <Badge>Đang bật</Badge> Khách bấm quảng cáo này chat với bot mẫu test.
@@ -253,7 +319,7 @@ function ChatPanel({ view }: { view: AdTestView }) {
     setMsgs(next);
     setText("");
     setBusy(true);
-    const r = await chatAdTestAction({ variantId: view.variantId, history: next.map(({ role, text }) => ({ role, text })) });
+    const r = await chatAdTestAction({ campKey: view.campKey, history: next.map(({ role, text }) => ({ role, text })) });
     setBusy(false);
     if ("error" in r) setMsgs([...next, { role: "model", text: `Lỗi: ${r.error}` }]);
     else setMsgs([...next, { role: "model", text: r.reply.text, imageIds: r.reply.imageIds, handoff: r.reply.handoff }]);
