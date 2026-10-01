@@ -20,6 +20,7 @@ import { rmSync } from "node:fs";
 import { and, eq, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
+import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
@@ -50,7 +51,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
-import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { fanpageInboundCounts, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
@@ -542,7 +543,11 @@ async function testJourney() {
       assert.equal((await receiveFanpageEvent(ev("m1", "Chả mực bao nhiêu?"))).queued, false, "Pancake gửi lại ⇒ không nhận lần hai");
       assert.equal((await receiveFanpageEvent(ev("m-x", "hi", { id: "cust-9" }, "t-1", "9999999999"))).queued, false, "page khác page đã khai ⇒ không nhận");
       const before = await inboundCount();
-      const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      // Chưa đủ 30 giây ⇒ chưa trả lời (đợi xem page có tự trả lời không).
+      const early = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      assert.ok(early.processed === 0 && early.replies === 0 && /30 giây/.test(early.skipped ?? ""), JSON.stringify(early));
+      const in31s = () => new Date(Date.now() + 31_000);
+      const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(r1.processed, 1, JSON.stringify(r1));
       assert.ok(r1.replies >= 1 && !r1.error, JSON.stringify(r1));
       const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`));
@@ -552,7 +557,7 @@ async function testJourney() {
       assert.match(sent.map((c) => String(c.init?.body)).join(" "), /400\.000/, "giá đọc từ ERP");
       assert.ok(!sent.some((c) => String(c.init?.body).includes(PAGE_TOKEN)), "token không nằm trong body");
       assert.ok((await inboundCount()) > before, "mã tin bot vừa gửi được ghi lại");
-      const again = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      const again = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(again.processed, 0, "không còn tin chờ ⇒ không trả lời lại");
       const convs = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.channel, "FANPAGE"));
       assert.equal(convs.length, 1, "một hội thoại Pancake = một hội thoại chatbot");
@@ -565,7 +570,7 @@ async function testJourney() {
       assert.match((await receiveFanpageEvent(ev("m-staff-1", "Chị đợi em chút nhé", { id: PAGE, uid: "u-staff", name: "NV" }))).reason, /bot nhường/);
       await receiveFanpageEvent(ev("m2", "Còn hàng không em?"));
       const sentBefore = pancake.calls.length;
-      const r2 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch });
+      const r2 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(r2.replies, 0, "nhân viên đang trả lời ⇒ bot im lặng");
       assert.equal(pancake.calls.length, sentBefore, "không gửi gì lên Pancake");
       // Hết thời gian nhường ⇒ bot nhận lại.
@@ -573,6 +578,40 @@ async function testJourney() {
       const later = new Date(Date.now() + 31 * 60_000);
       const r3 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: () => later });
       assert.ok(r3.replies >= 1, `hết ${30} phút ⇒ bot trả lời lại: ${JSON.stringify(r3)}`);
+      // Trả lời TỰ ĐỘNG của Meta (tin phía page, không uid) tới sau tin khách ⇒ bot không chen; tin khách sau đó mà page im
+      // 30 giây ⇒ bot trả lời. Tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
+      await receiveFanpageEvent(ev("m-q1", "Shop ơi còn hàng không?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
+      assert.match((await receiveFanpageEvent(ev("m-auto-1", "Cảm ơn anh đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-901"))).reason, /tự động/);
+      const sentAuto = pancake.calls.length;
+      const ra = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
+      assert.ok(ra.replies === 0 && ra.processed === 1 && /Page đã trả lời/.test(ra.skipped ?? ""), JSON.stringify(ra));
+      assert.equal(pancake.calls.length, sentAuto, "page đã trả lời ⇒ không gửi gì");
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-q2", "Chả mực bao nhiêu?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
+      const rb = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
+      assert.ok(rb.replies >= 1, `tin sau trả lời tự động, page im 30 giây ⇒ bot trả lời: ${JSON.stringify(rb)}`);
+      const autoRows = await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "m-auto-1"));
+      assert.ok(autoRows.length === 1 && autoRows[0].status !== "PENDING", "tin phía page không bao giờ thành tin chờ bot");
+      const sleeps: number[] = [];
+      await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
+      assert.ok(sleeps[0] >= 30_000, `lượt sau webhook đợi ≥ 30 giây: ${sleeps.join(",")}`);
+      // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
+      const counts = await fanpageInboundCounts();
+      assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));
+      assert.ok(!counts.skippedReasons.some((r) => r.reason === "BOT_SENT" || r.reason === "PAGE_REPLY"), "tin bot tự gửi / tin phía page không phải tin bị bỏ qua");
+      assert.ok(counts.skippedReasons.some((r) => /Page đã trả lời/.test(r.reason)), JSON.stringify(counts));
+      // Nhà cung cấp OpenAI (BYOK) phải CHUYỂN mức suy luận + ngân sách của lượt gọi xuống Responses API — đo 01/10/2026: cứng
+      // «medium» với ngân sách nhỏ ⇒ model suy nghĩ hết ngân sách, trả RỖNG. Thiếu `reasoning` ⇒ giữ «medium» như cũ.
+      const oaBodies: Record<string, unknown>[] = [];
+      const oaFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        oaBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return new Response(JSON.stringify({ id: "r1", object: "response", status: "completed", model: "gpt-x", output: [{ type: "message", id: "m1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Dạ", annotations: [] }] }], usage: { input_tokens: 1, output_tokens: 1, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+      const oa = new ByokOpenAiProvider({ apiKey: "sk-test-khong-that", model: "gpt-x", fetch: oaFetch });
+      const oaMsg: AiRequest["messages"] = [{ role: "user", content: [{ type: "text", text: "hi" }] }];
+      await oa.complete({ system: "s", messages: oaMsg, tools: [], maxTokens: 12_000, reasoning: "low" });
+      await oa.complete({ system: "s", messages: oaMsg, tools: [] });
+      assert.deepEqual(oaBodies.map((b) => [b.reasoning, b.max_output_tokens]), [[{ effort: "low" }, 12_000], [{ effort: "medium" }, 4000]], JSON.stringify(oaBodies.map((b) => b.reasoning)));
       // ═══ HỌC TỪ HỘI THOẠI CŨ: lịch sử Pancake ⇒ làm sạch ⇒ AI của shop ⇒ sổ tay NHÁP ⇒ người xuất bản ⇒ bot dùng ═══
       assert.equal(redactForLearning("Chị Lan ơi SĐT 0912345678, giá 400.000đ, xem https://shop.vn/a", ["Chị Lan"]), "[khách] ơi SĐT [số], giá [số]đ, xem [link]");
       assert.deepEqual(stripPrices("Giá 299k, combo 1.150.000đ, ship 30 nghìn, size 2"), { text: "Giá [giá lấy từ ERP], combo [giá lấy từ ERP], ship [giá lấy từ ERP], size 2", removed: 3 });
@@ -623,15 +662,34 @@ async function testJourney() {
       assert.equal(pb.published, null, "học xong chỉ là NHÁP — bot chưa dùng");
       const pbUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.feature, "sales_playbook")));
       assert.equal(pbUsage.length, aiInputs.length, "mỗi lời gọi AI một dòng sổ dùng AI");
+      // AI trả RỖNG (model suy luận tiêu hết ngân sách — đo 01/10/2026) ⇒ thử lại một lần với ngân sách gấp đôi; rỗng mãi ⇒
+      // lượt học HỎNG có câu nói rõ, bản nháp cũ GIỮ NGUYÊN (không bị ghi đè bằng chuỗi rỗng).
+      const draftBefore = (await loadPlaybook()).draft?.text;
+      const budgets: (number | undefined)[] = [];
+      let emptyFirst = true;
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { budgets.push(req.maxTokens); assert.equal(req.reasoning, "low", "học dùng suy luận low"); const text = emptyFirst ? "" : "1. Giọng điệu: dạ ạ."; emptyFirst = !emptyFirst; return { content: text ? [{ type: "text", text }] : [], stopReason: text ? "end_turn" : "max_tokens", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      const retried = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
+      assert.equal(retried.state, "DONE", JSON.stringify(retried));
+      assert.ok(budgets.every((b) => (b ?? 0) >= 12_000) && budgets.includes(24_000), `rỗng ⇒ thử lại với ngân sách gấp đôi: ${budgets.join(",")}`);
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async () => ({ content: [], stopReason: "max_tokens", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }) }));
+      const keptDraft = (await loadPlaybook()).draft?.text;
+      const empty = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
+      assert.ok(empty.state === "FAILED" && /AI không trả về nội dung/.test(empty.error), JSON.stringify(empty));
+      assert.equal((await loadPlaybook()).draft?.text, keptDraft, "AI rỗng ⇒ không ghi đè bản nháp");
+      assert.ok(draftBefore, "đã có bản nháp từ lượt trước");
+      setSalesChatProviderForTests(() => pbProvider);
       // Sửa tay (vẫn lọc giá) ⇒ xuất bản ⇒ bot dùng trong lời nhắc; quay lại / gỡ được.
       const saved = await savePlaybookDraft(admin, `${pb.draft!.text}\n6. Thêm: combo 2 hộp 500k.`);
       assert.ok("ok" in saved && /gỡ 1 con số/.test(saved.message), JSON.stringify(saved));
       assert.ok("ok" in (await publishPlaybook(admin)));
       assert.equal((await loadPlaybook()).published?.version, 1);
       const systems: string[] = [];
-      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { systems.push(req.system); return { content: [{ type: "text", text: "Dạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      const chatBudgets: [AiRequest["reasoning"], number | undefined][] = [];
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { systems.push(req.system); chatBudgets.push([req.reasoning, req.maxTokens]); return { content: [{ type: "text", text: "Dạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
       const tconv = await openConversation("TEST", { createdBy: ADMIN_EMAIL });
       await chatTurn(tconv.id, "Chào shop", { channel: "TEST" });
+      // Ghi lại rồi khẳng định NGOÀI provider — chatTurn nuốt lỗi ném từ provider (coi là AI hỏng) nên assert bên trong không bắt được gì.
+      assert.ok(chatBudgets.length > 0 && chatBudgets.every(([r, m]) => r === "low" && (m ?? 0) >= 4000), `chat: suy luận low, ngân sách ≥ 4000: ${JSON.stringify(chatBudgets)}`);
       assert.ok(systems.some((x) => x.includes("SỔ TAY BÁN HÀNG của shop") && x.includes("Giọng điệu")), "bot dùng sổ tay đã xuất bản");
       assert.ok(systems.every((x) => x.indexOf("LUẬT BẮT BUỘC") < x.indexOf("SỔ TAY BÁN HÀNG")), "sổ tay đứng SAU luật bắt buộc");
       await savePlaybookDraft(admin, "Bản hai: luôn hỏi khách cần bảo quản lạnh không.");

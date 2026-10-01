@@ -333,7 +333,8 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     let lastError: string | null = null;
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
-        const res = await prov.provider.complete({ system, messages: history, tools, maxTokens: 1500 });
+        // Chat cần trả lời nhanh: suy luận «low» + ngân sách đủ rộng để phần suy luận không ăn hết câu trả lời (01/10/2026).
+        const res = await prov.provider.complete({ system, messages: history, tools, maxTokens: 4000, reasoning: "low" });
         calls += 1;
         inTok += res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         outTok += res.usage.outputTokens;

@@ -124,7 +124,7 @@ export class ByokOpenAiProvider implements AiProvider {
       instructions: req.system,
       input,
       max_output_tokens: req.maxTokens ?? 4000,
-      reasoning: { effort: "medium" },
+      reasoning: { effort: req.reasoning ?? "medium" },
       store: false,
       tools: req.tools.map((t) => ({ type: "function" as const, name: t.name, description: t.description, parameters: toDialectSchema(t.inputSchema, this.schemaDialect), strict: false })),
     });

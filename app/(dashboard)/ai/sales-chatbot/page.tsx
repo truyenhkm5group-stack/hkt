@@ -62,14 +62,19 @@ export default async function SalesChatbotPage() {
                 <p>
                   Trạng thái:{" "}
                   <b data-testid="fanpage-status">{{ NOT_CONFIGURED: "CHƯA KHAI", DRAFT: "CHƯA BẬT", ACTIVE: "ĐANG BẬT", FAILED: "KIỂM TRA HỎNG" }[fanpage.status]}</b>
-                  {fanpage.pageId ? ` · page ${fanpage.pageId}` : ""} · đã nhận {fanpage.counts.done} tin · chờ {fanpage.counts.pending} · bỏ qua {fanpage.counts.skipped}
+                  {fanpage.pageId ? ` · page ${fanpage.pageId}` : ""} · bot đã trả lời {fanpage.counts.done} tin · chờ {fanpage.counts.pending} · bỏ qua {fanpage.counts.skipped}
                 </p>
+                {fanpage.counts.skippedReasons.length ? (
+                  <p className="text-xs text-muted-foreground" data-testid="fanpage-skip-reasons">
+                    Lý do bỏ qua: {fanpage.counts.skippedReasons.map((r) => `${r.reason} (${r.count})`).join(" · ")}
+                  </p>
+                ) : null}
                 <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
                   <li>
                     <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Fanpage qua Pancake»: nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ) → Lưu → Kiểm tra → Bật.
                   </li>
                   <li>Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL dưới đây.</li>
-                  <li>Bật bot ở khung Cấu hình bên dưới. Nhân viên trả lời trên fanpage ⇒ bot tự nhường hội thoại đó 30 phút.</li>
+                  <li>Bật bot ở khung Cấu hình bên dưới. Bot chỉ trả lời tin khách đã chờ 30 giây mà page chưa trả lời (trả lời tự động của Meta / nhân viên); nhân viên trả lời trên fanpage ⇒ bot nhường hội thoại đó 30 phút.</li>
                 </ol>
                 {fanpage.webhookUrl ? (
                   <div className="space-y-1">
@@ -82,7 +87,7 @@ export default async function SalesChatbotPage() {
               </div>
             </SectionCard>
           ) : null}
-          {playbook && playbookRun ? <PlaybookPanel state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
+          {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
             <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} />
           ) : (

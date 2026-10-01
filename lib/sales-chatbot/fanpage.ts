@@ -7,12 +7,16 @@
  *
  * LUỒNG: webhook `/api/webhooks/pancake/fanpage/<token>` (token ⇒ tổ chức, `lib/platform/webhooks.ts`) ⇒ `receiveFanpageEvent`
  * ghi tin vào `sales_chat_inbound` (UNIQUE mã tin ⇒ gửi trùng vô hại) và trả 200 ngay ⇒ sau phản hồi `processFanpageThread`
- * đợi vài giây cho khách gõ xong, GIÀNH mọi tin chờ của hội thoại (một lượt duy nhất), gọi `chatTurn`, gửi các câu trả lời
- * mới qua Pancake. Tin do NHÂN VIÊN THẬT gửi trên fanpage (có `uid` / `admin_id`, không phải tin bot vừa gửi) ⇒ bot nhường
- * hội thoại `HUMAN_TAKEOVER_MINUTES` phút. Chỉ tin nhắn INBOX — bình luận không trả lời tự động.
+ * đợi `REPLY_GRACE_MS` (tin MỚI NHẤT của khách đủ 30 giây), GIÀNH mọi tin chờ của hội thoại (một lượt duy nhất), gọi
+ * `chatTurn`, gửi các câu trả lời mới qua Pancake. Chỉ tin nhắn INBOX — bình luận không trả lời tự động.
+ *
+ * BOT LÀ LƯỚI ĐỠ, KHÔNG CHEN NGANG (chủ nền tảng 01/10/2026: shop đã cài câu trả lời tự động trên Meta cho câu hỏi đầu
+ * tiên): MỌI tin phía page — trả lời tự động của Meta hay của nhân viên — được ghi lại (`PAGE_REPLY`); tin khách nào đã
+ * có tin phía page tới SAU nó thì bot bỏ qua. Tin do NHÂN VIÊN THẬT (có `uid` / `admin_id`, không phải tin bot vừa gửi)
+ * còn làm bot nhường cả hội thoại `HUMAN_TAKEOVER_MINUTES` phút.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -27,8 +31,18 @@ export const FANPAGE_CONNECTOR = "pancake-fanpage";
 export const HUMAN_TAKEOVER_MINUTES = 30;
 /** Hội thoại đã chuyển nhân viên mà im lặng quá chừng này giờ ⇒ bot nhận lại khi khách nhắn tiếp. */
 export const HANDOFF_EXPIRE_HOURS = 12;
-/** Đợi khách gõ xong (gom tin liên tiếp thành một lượt). */
-export const DEBOUNCE_MS = 4000;
+/**
+ * Bot chỉ trả lời tin khách đã chờ ĐỦ chừng này mà page chưa trả lời (tự động của Meta / nhân viên). Cũng là khoảng gom
+ * tin: khách gõ liên tiếp thì đợi tin MỚI NHẤT đủ 30 giây rồi trả lời một lượt.
+ */
+export const REPLY_GRACE_MS = 30_000;
+/** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
+const GRACE_SLACK_MS = 2_000;
+const RETRY_MS = 3_000;
+/** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
+const PAGE_REPLY = "PAGE_REPLY";
+const WAITING = "Chờ đủ 30 giây xem page có trả lời không";
+const PAGE_REPLIED_REASON = "Page đã trả lời trong 30 giây (tự động của Meta / nhân viên) — bot không chen";
 const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
 const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
@@ -93,10 +107,16 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (ev.fromPage) {
-    if (!ev.humanStaff || !ev.inbox) return { queued: false, reason: "Tin tự động của page" };
-    // Tin bot vừa gửi được ghi sẵn với ĐÚNG mã tin ⇒ gặp lại là tin của bot, không phải nhân viên.
+    if (!ev.inbox) return { queued: false, reason: "Tin của page trên bình luận" };
+    // Tin bot vừa gửi được ghi sẵn với ĐÚNG mã tin ⇒ gặp lại là tin của bot — không phải nhân viên, không phải «page đã trả lời».
     const [own] = await db.select({ id: t.id }).from(t).where(eq(t.messageId, ev.messageId)).limit(1);
     if (own) return { queued: false, reason: "Tin của chính bot" };
+    // Mọi tin khác phía page = page ĐÃ trả lời ⇒ tin khách đang chờ trước nó không cần bot nữa.
+    await db
+      .insert(t)
+      .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, status: "DONE", processedAt: now, note: PAGE_REPLY })
+      .onConflictDoNothing({ target: t.messageId });
+    if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
     await db
       .update(c)
@@ -162,6 +182,12 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   const db = await getDb();
   const t = schema.salesChatInbound;
   for (let round = 0; round < 3; round++) {
+    // Tin chờ MỚI NHẤT chưa đủ 30 giây ⇒ chưa tới lượt: lượt chờ của chính tin đó sẽ gom cả hội thoại.
+    const [newest] = await db
+      .select({ at: sql<Date | string | null>`max(${t.createdAt})` })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING")));
+    if (newest?.at && new Date(newest.at).getTime() > now().getTime() - REPLY_GRACE_MS) return { ...out, skipped: WAITING };
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
     const claimed = await db
@@ -176,6 +202,19 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .update(t)
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+    // Page đã trả lời (Meta tự động / nhân viên) SAU tin khách sớm nhất của lượt ⇒ bot không chen.
+    const earliest = new Date(Math.min(...claimed.map((r) => r.createdAt.getTime())));
+    const [pageReplied] = await db
+      .select({ id: t.id })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, earliest)))
+      .limit(1);
+    if (pageReplied) {
+      await finish("SKIPPED", PAGE_REPLIED_REASON);
+      out.processed += ids.length;
+      out.skipped = PAGE_REPLIED_REASON;
+      continue;
+    }
     const conv = await conversationFor(pageId, threadId);
     if (!conv) {
       await finish("PENDING", "Không mở được hội thoại");
@@ -235,15 +274,15 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
   return out;
 }
 
-/** Sau phản hồi webhook: đợi khách gõ xong rồi xử lý; hội thoại đang bận thì thử lại vài lần. */
+/** Sau phản hồi webhook: đợi 30 giây xem page có trả lời không rồi xử lý; hội thoại bận / chưa đủ tuổi thì thử lại vài lần. */
 export async function processFanpageThreadDebounced(pageId: string, threadId: string, deps: FanpageDeps = {}): Promise<ProcessResult> {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  await sleep(DEBOUNCE_MS);
+  await sleep(REPLY_GRACE_MS + GRACE_SLACK_MS);
   let last: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
   for (let i = 0; i < 4; i++) {
     last = await processFanpageThread(pageId, threadId, deps);
-    if (last.skipped !== "Hội thoại đang được trả lời") break;
-    await sleep(DEBOUNCE_MS);
+    if (last.skipped !== "Hội thoại đang được trả lời" && last.skipped !== WAITING) break;
+    await sleep(RETRY_MS);
   }
   return last;
 }
@@ -263,13 +302,27 @@ export async function sweepStaleFanpageThreads(deps: FanpageDeps = {}): Promise<
   return stale.length;
 }
 
-/** Số tin fanpage theo trạng thái (màn hình Chatbot bán hàng). */
-export async function fanpageInboundCounts(): Promise<{ pending: number; done: number; skipped: number }> {
+export type FanpageInboundCounts = { pending: number; done: number; skipped: number; skippedReasons: { reason: string; count: number }[] };
+
+/**
+ * Số tin fanpage theo trạng thái + ba LÝ DO bỏ qua nhiều nhất (màn hình Chatbot bán hàng). Chủ shop không đọc được CSDL —
+ * một con số «bỏ qua 100» mà không kèm lý do thì không biết phải bật bot, chờ nhân viên hết nhường, hay sửa kết nối.
+ */
+export async function fanpageInboundCounts(): Promise<FanpageInboundCounts> {
   const db = await getDb();
   const t = schema.salesChatInbound;
-  const rows = await db.select({ status: t.status, n: sql<number>`count(*)::int` }).from(t).where(sql`${t.note} is distinct from 'BOT_SENT'`).groupBy(t.status);
+  // Dòng bot tự gửi và dòng tin phía page không phải tin khách — không đếm.
+  const notBotSent = sql`coalesce(${t.note}, '') not in ('BOT_SENT', ${PAGE_REPLY})`;
+  const rows = await db.select({ status: t.status, n: sql<number>`count(*)::int` }).from(t).where(notBotSent).groupBy(t.status);
   const of = (s: string) => Number(rows.find((r) => r.status === s)?.n ?? 0);
-  return { pending: of("PENDING"), done: of("DONE"), skipped: of("SKIPPED") };
+  const reasons = await db
+    .select({ reason: t.note, n: sql<number>`count(*)::int` })
+    .from(t)
+    .where(and(eq(t.status, "SKIPPED"), notBotSent))
+    .groupBy(t.note)
+    .orderBy(sql`count(*) desc`)
+    .limit(3);
+  return { pending: of("PENDING"), done: of("DONE"), skipped: of("SKIPPED"), skippedReasons: reasons.map((r) => ({ reason: r.reason?.trim() || "Không ghi lý do", count: Number(r.n) })) };
 }
 
 export type FanpageSetupView = {
@@ -277,7 +330,7 @@ export type FanpageSetupView = {
   pageId: string | null;
   /** URL dán vào Pancake — MANG TOKEN của tổ chức; `null` khi máy chủ chưa có khoá bí mật nền tảng. */
   webhookUrl: string | null;
-  counts: { pending: number; done: number; skipped: number };
+  counts: FanpageInboundCounts;
 };
 
 /** Khối «Fanpage (qua Pancake)» của trang Chatbot bán hàng — chỉ gọi cho người cấu hình được bot (URL mang token). */
