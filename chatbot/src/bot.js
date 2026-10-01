@@ -83,6 +83,11 @@ Tư vấn đúng thông tin, chốt đơn: lấy đủ size phù hợp, tên ng�
 
 const FALLBACK_REPLY = "Dạ em đã ghi nhận, nhân viên sẽ liên hệ hỗ trợ anh/chị trong ít phút ạ.";
 
+/** "cao 1m63, nặng 49kg" tu facts (h cm, w kg) */
+function soDoText(f) {
+  return [f.h ? `cao ${(f.h / 100).toFixed(2).replace(".", "m")}` : "", f.w ? `nặng ${f.w}kg` : ""].filter(Boolean).join(", ");
+}
+
 export class Bot {
   constructor() {
     this.clients = new Map(); // pageId -> PancakeClient
@@ -517,6 +522,18 @@ export class Bot {
    *  - size: khach tu chon (size XL / sai XL / sz L / tin chi co "XL") HOAC bang size tra ra tu so do.
    *  - dia chi: mot tin khach co tu chi dia danh (phuong/xa/quan/huyen/TP/tinh/duong/ngo/thon/so nha...).
    */
+  /** So do khach da gui (tin moi nhat truoc): { h, w } — null la chua co. Khong can bang size. */
+  customerMeasurements(pageId, messages) {
+    let h = null, w = null;
+    for (const m of (messages || []).filter((x) => !this.isFromPage(x, pageId)).reverse()) {
+      const b = parseBody(this.messageText(m));
+      if (h === null && b.heightCm !== null) h = b.heightCm;
+      if (w === null && b.weightKg !== null) w = b.weightKg;
+      if (h !== null && w !== null) break;
+    }
+    return { h, w };
+  }
+
   customerFacts(pageId, messages) {
     const loi = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => String(this.messageText(m) || ""));
     const phone = loi.some((t) => phonesInText(t).length > 0);
@@ -538,7 +555,13 @@ export class Bot {
       const r = this.sizeLookupFor(pageId, messages);
       if (r.status === "ok") (size = r.size), (sizeFrom = "bang");
     }
-    return { phone, address, size, sizeFrom, color: this.customerColor(pageId, messages) };
+    // DA GUI SO DO (du chieu cao + can nang, hoac can nang voi bang size chi theo can nang) — KE CA khi chua tra ra size
+    // (page chua co bang size / so do ngoai bang). Su co 01/10/2026 (Ho Thi Lien, Linh Tay Luxury): khach gui "cao 1.63
+    // nang 49 kg" nhung page khong tra ra size -> he thong coi nhu chua co so do va bot xin lai chieu cao can nang.
+    const { h, w } = this.customerMeasurements(pageId, messages);
+    const chart = parseChart(settings.effective(pageId).sizeChart);
+    const measured = w !== null && (h !== null || !!(chart && chart.length === 1));
+    return { phone, address, size, sizeFrom, color: this.customerColor(pageId, messages), measured, h, w };
   }
 
   /**
@@ -581,13 +604,14 @@ export class Bot {
     const f = this.customerFacts(pageId, messages);
     const dong = [
       `- Màu: ${f.color || "CHƯA CHỌN"}`,
-      `- Size: ${f.size ? f.size + (f.sizeFrom === "khach" ? " (khách tự chọn)" : " (tra từ số đo khách gửi)") : "CHƯA CÓ"}`,
+      `- Size: ${f.size ? f.size + (f.sizeFrom === "khach" ? " (khách tự chọn)" : " (tra từ số đo khách gửi)") : f.measured ? `CHƯA CHỐT — nhưng khách ĐÃ GỬI số đo: ${soDoText(f)}` : "CHƯA CÓ"}`,
       `- Số điện thoại: ${f.phone ? "ĐÃ CÓ" : "CHƯA CÓ"}`,
       `- Địa chỉ: ${f.address ? `ĐÃ CÓ ("${f.address}")` : "CHƯA CÓ"}`,
     ];
-    if (!f.color && !f.size && !f.phone && !f.address) return "";
+    if (!f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
     let tiep;
-    if (!f.size) tiep = "hỏi chiều cao và cân nặng (hoặc size khách muốn)";
+    if (!f.size && f.measured) tiep = `báo size hợp với số đo khách đã gửi (${soDoText(f)}) theo bảng size trong hướng dẫn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao / cân nặng`;
+    else if (!f.size) tiep = "hỏi chiều cao và cân nặng (hoặc size khách muốn)";
     else if (!f.color) tiep = "hỏi khách chọn màu nào";
     else if (!f.phone && !f.address) tiep = "xin số điện thoại và địa chỉ nhận hàng";
     else if (!f.phone) tiep = "xin số điện thoại";
@@ -598,7 +622,8 @@ export class Bot {
 ## ĐƠN ĐANG CHỐT VỚI KHÁCH NÀY (hệ thống tự đọc từ tin của khách)
 ${dong.join("\n")}
 - VIỆC TIẾP THEO: ${tiep}.
-- Nói chuyện như người bán thật: trả lời ĐÚNG câu khách vừa hỏi trước, rồi mới làm việc tiếp theo. KHÔNG hỏi lại thứ ĐÃ CÓ, KHÔNG nhắc lại nguyên văn câu mình đã gửi (bảng giá, chất liệu, chính sách…) trừ khi khách hỏi lại. Khách nói "ở trên", "gửi rồi", "nói rồi" thì xin lỗi một câu ngắn và dùng thông tin đã có.`;
+- Nói chuyện như người bán thật: trả lời ĐÚNG câu khách vừa hỏi trước, rồi mới làm việc tiếp theo. KHÔNG hỏi lại thứ ĐÃ CÓ, KHÔNG nhắc lại nguyên văn câu mình đã gửi (bảng giá, chất liệu, chính sách…) trừ khi khách hỏi lại. Khách nói "ở trên", "gửi rồi", "nói rồi" thì xin lỗi một câu ngắn và dùng thông tin đã có.
+- KHÔNG nói kiểu máy "em đã có số điện thoại / địa chỉ của mình rồi ạ": khách vừa gửi gì thì dùng luôn và làm bước tiếp theo.`;
   }
 
   /**
@@ -640,6 +665,32 @@ ${dong.join("\n")}
    * Bo cac cau trong tra loi dang XIN LAI thu khach da dua (SDT / dia chi / so do-size). Bo theo tung cau (tach theo
    * dau cau va xuong dong), giu nguyen phan con lai; bo het ma khong con gi thi tra "" de nhanh sau tu them cau di tiep.
    */
+  /**
+   * Bo cau KHAI BAO kieu may "em đã có số điện thoại của mình rồi ạ" / "em đã có địa chỉ của mình rồi ạ": nguoi ban
+   * that khong doc lai thu khach vua dua, ho lam buoc tiep theo. Chi bo cau dung rieng; loi chao dung truoc ("Dạ chị
+   * X ơi,") duoc giu. Bo het thi tra "" de nhanh sau tu them cau di tiep.
+   */
+  dropAnnouncedFacts(reply, pageId) {
+    const t = String(reply || "");
+    const KHAI = /(?:^|,\s*)em\s+(?:đã|đã được|vừa)\s+(?:có|nhận|nhận được|ghi nhận|lưu)(?:\s+được)?\s+(?:đủ\s+)?(?:số điện thoại|sđt|sdt|địa chỉ|thông tin|số đo)[^.?!\n]*?(?:rồi|nhé|nha)?\s*(?:ạ|nhé|nha)?\s*[.!]?\s*$/i;
+    const parts = t.split(/(?<=[.!?\n])/);
+    let doi = false;
+    const out = parts.map((c) => {
+      const m = c.match(KHAI);
+      if (!m) return c;
+      doi = true;
+      const truoc = c.slice(0, m.index).trim();
+      // "Dạ chị Liên ơi, em đã có địa chỉ ... rồi ạ." -> giu "Dạ chị Liên ơi," noi vao cau sau
+      return truoc ? truoc.replace(/,?$/, ", ") : c.endsWith("\n") ? "\n" : "";
+    });
+    if (!doi) return t;
+    store.bumpStat(pageId, "announceGuard");
+    let r = out.join("").replace(/,\s*\n/g, ", ").replace(/\n{3,}/g, "\n\n").trim();
+    // Loi chao dung mot minh ("Dạ chị Liên ơi,") khong phai cau tra loi
+    if (/^[^.?!\n]{0,40},$/.test(r)) r = "";
+    return r;
+  }
+
   dropAlreadyGivenAsks(reply, pageId, messages) {
     const t = String(reply || "");
     if (!t.trim()) return t;
@@ -648,14 +699,14 @@ ${dong.join("\n")}
     const known = [];
     if (f.phone) known.push(/(số điện thoại|sđt|sdt|số đt|số phone)/i);
     if (f.address) known.push(/(địa chỉ|dia chi|đ\/c|đc nhận)/i);
-    if (f.size) known.push(/(chiều cao|cân nặng|số đo|chiều cao cân nặng)/i);
+    if (f.size || f.measured) known.push(/(chiều cao|cân nặng|số đo|chiều cao cân nặng)/i);
     if (!known.length) return t;
     const parts = t.split(/(?<=[.?!\n])/);
     const bo = [];
     const giu = parts.filter((c) => {
       const hoiLai = XIN.test(c) && known.some((re) => re.test(c));
       // Cau vua xin thu da co vua xin thu CHUA co (vd "xin SDT va dia chi" ma moi co SDT) -> giu, de khach bo sung
-      const conThieu = hoiLai && ((!f.phone && /(số điện thoại|sđt|sdt)/i.test(c)) || (!f.address && /địa chỉ/i.test(c)) || (!f.size && /(chiều cao|cân nặng)/i.test(c)));
+      const conThieu = hoiLai && ((!f.phone && /(số điện thoại|sđt|sdt)/i.test(c)) || (!f.address && /địa chỉ/i.test(c)) || (!f.size && !f.measured && /(chiều cao|cân nặng)/i.test(c)));
       if (hoiLai && !conThieu) bo.push(c.trim());
       return !(hoiLai && !conThieu);
     });
@@ -868,7 +919,7 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     // Da biet size khi khach gui du so do, HOAC khach tu chon size, HOAC bang size tra ra duoc tu so do (bang dam chi can
     // can nang). Truoc day chi xet "du ca chieu cao lan can nang" -> khach chon "size XL" van bi xin lai (Ta Thuy 29/09).
     const f = this.customerFacts(pageId, messages);
-    const coSoDo = (b.heightCm !== null && b.weightKg !== null) || !!f.size;
+    const coSoDo = (b.heightCm !== null && b.weightKg !== null) || !!f.size || f.measured;
     const coSdt = f.phone;
 
     // Don da chot xong: khong ep them cau hoi nua, neu khong bot se hoi "can ho tro them gi" mai khong dut
@@ -1611,8 +1662,16 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
     if (reply && !handoff) {
       const truoc = reply;
       reply = this.dropAlreadyGivenAsks(reply, pageId, messages);
+      reply = this.dropAnnouncedFacts(reply, pageId);
       reply = this.dropRepeatedSentences(reply, pageId, messages);
-      if (!reply.trim() && truoc.trim()) reply = `Dạ em ghi nhận đủ thông tin của ${eff.customerTitle || "chị"} rồi ạ ❤️`;
+      if (!reply.trim() && truoc.trim()) {
+        const f = this.customerFacts(pageId, messages);
+        if (f.measured && !f.size) {
+          // Bot chi biet xin lai so do ma he thong khong tra duoc size -> bao nhan vien chot size, khong de khach cho ngo
+          reply = `Dạ em ghi nhận số đo ${soDoText(f)} của ${eff.customerTitle || "chị"} rồi ạ, em kiểm tra size chuẩn rồi báo ${eff.customerTitle || "chị"} ngay nhé ❤️`;
+          handoff = true;
+        } else reply = `Dạ em ghi nhận đủ thông tin của ${eff.customerTitle || "chị"} rồi ạ ❤️`;
+      }
     }
     if (reply) reply = this.stopAskingMeasurementsAgain(reply, pageId, messages);
     if (reply) reply = this.fixSizeReply(reply, pageId, messages);

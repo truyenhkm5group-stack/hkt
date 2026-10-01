@@ -1454,5 +1454,44 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 36: can duyet kem san pham bot doc duoc, nhan vien da len don -> tu go, don nhap chuan cu -> tu xac nhan mot lan");
 }
 
+// ---- 38: su co 01/10/2026 (Ho Thi Lien, Linh Tay Luxury): khach gui "Mình cao 1.63 năng 49 kg" nhung page khong
+// tra duoc size (chua co bang size) -> bot coi nhu chua co so do, xin lai chieu cao can nang + "em đã có địa chỉ rồi ạ"
+{
+  const prevSettings = settings.get("PAGE1");
+  settings.update("PAGE1", { sizeChart: "" });
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoiThoai = [
+    khach("Giảm giá còn bao nhiêu tiền?"), shop("Dạ chị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nha chị yêu"),
+    khach("Chất liệu vải mát ko"), shop("Dạ chất liệu Rayon cao cấp ạ. Chị cho em xin chiều cao và cân nặng ạ?"),
+    khach("Síp mình chiết màu đỏ đô nhé"), khach("Sdt 0961763574"),
+    shop("Dạ chị chốt màu Đỏ Đô ạ. Chị cho em xin chiều cao và cân nặng nhé ạ?"),
+    khach("Chợ phú bài thị xã hương thủy đường song Hồng"), khach("Mình cao 1.63 năng 49 kg"),
+  ];
+  const f = bot.customerFacts("PAGE1", hoiThoai);
+  assert.equal(f.size, null, "page chua co bang size -> chua tra duoc size");
+  assert.equal(f.measured, true, "nhung khach DA gui so do");
+  assert.equal(f.h, 163);
+  assert.equal(f.w, 49);
+  const p = bot.orderProgressPrompt("PAGE1", hoiThoai);
+  assert.match(p, /ĐÃ GỬI số đo: cao 1m63, nặng 49kg/);
+  assert.match(p, /KHÔNG hỏi lại chiều cao/);
+  assert.doesNotMatch(p, /VIỆC TIẾP THEO: hỏi chiều cao/);
+  // Cau tra loi that hom do -> khong con xin lai so do, khong con cau khai bao "em đã có địa chỉ"
+  const cu = "Dạ chị Hồ Thị Liên ơi, em đã có địa chỉ của mình rồi ạ.\nChị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?";
+  const sau = bot.dropAnnouncedFacts(bot.dropAlreadyGivenAsks(cu, "PAGE1", hoiThoai), "PAGE1");
+  assert.equal(sau, "", "chi con loi chao -> rong, de nhanh sau chuyen nhan vien chot size");
+  assert.doesNotMatch(bot.ensureEndsWithQuestion("Dạ chị mặc size M ạ", "PAGE1", hoiThoai), /chiều cao|cân nặng/);
+  // Cau khai bao dung giua cau tra loi co noi dung -> chi bo cau khai bao
+  const giua = bot.dropAnnouncedFacts("Dạ chị chốt mẫu Q002 màu Đỏ Đô ạ ❤️\nEm đã có số điện thoại của mình rồi ạ.\nChị cao 1m63 nặng 49kg mặc size M là vừa ạ.", "PAGE1");
+  assert.doesNotMatch(giua, /đã có số điện thoại/);
+  assert.match(giua, /Đỏ Đô[\s\S]*size M/);
+  assert.equal(bot.dropAnnouncedFacts("Dạ chị cho em xin địa chỉ ạ?", "PAGE1"), "Dạ chị cho em xin địa chỉ ạ?", "khong dong vao cau khac");
+  // Chua gui so do thi van duoc hoi
+  assert.equal(bot.customerFacts("PAGE1", [khach("mình nặng 49kg")]).measured, false, "thieu chieu cao (bang co chieu cao / chua co bang) -> chua du");
+  settings.update("PAGE1", { sizeChart: prevSettings.sizeChart || "" });
+  console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
