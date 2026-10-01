@@ -314,6 +314,16 @@ export async function testOpenAiKey(input: { secrets: Record<string, string> }, 
   return probeModels(deps.fetch ?? fetch, OPENAI_MODELS_URL, { authorization: `Bearer ${key}` }, "OpenAI", [key]);
 }
 
+export const GEMINI_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{30,60}$/;
+export const GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/** Gemini: `GET …/v1beta/models` với header `x-goog-api-key` của tổ chức (không đặt khoá vào URL — log proxy không thấy). */
+export async function testGeminiKey(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const key = (input.secrets.apiKey ?? "").trim();
+  if (!GEMINI_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá không đúng dạng khoá Gemini (AIza…) — không gửi." };
+  return probeModels(deps.fetch ?? fetch, GEMINI_MODELS_URL, { "x-goog-api-key": key }, "Gemini", [key]);
+}
+
 /** Hộp thử nhắn tin (0180): không gọi mạng — "kiểm tra" chỉ xác nhận tên kênh hợp lệ. Tin thử thật đi qua màn hình Thông báo nhóm. */
 export async function testSandboxMessaging(input: { settings: Record<string, string> }): Promise<TesterResult> {
   const name = (input.settings.channelName ?? "").trim();
@@ -328,6 +338,7 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "zalo-bot": (input, deps) => testZaloBot(input, deps),
   "anthropic-byok": (input, deps) => testAnthropicKey(input, deps),
   "openai-byok": (input, deps) => testOpenAiKey(input, deps),
+  "gemini-byok": (input, deps) => testGeminiKey(input, deps),
   "sandbox-messaging": (input) => testSandboxMessaging(input),
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
 };

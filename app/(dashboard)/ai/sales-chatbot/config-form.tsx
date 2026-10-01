@@ -14,7 +14,7 @@ import { saveSalesChatbotConfigAction } from "@/lib/actions/sales-chatbot";
 import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesBotConnector, type SalesChatbotConfig, type SalesTool, SALES_THINKING, SALES_THINKING_LABEL } from "@/lib/sales-chatbot/config";
 
 const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức" };
+const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức", "gemini-byok": "Google Gemini — khoá của tổ chức (rẻ nhất)" };
 
 /** Form cấu hình chatbot — máy chủ kiểm lại bằng CÙNG lược đồ (`salesChatbotConfigZ`). */
 export function ChatbotConfigForm({ config, fields, connections }: { config: SalesChatbotConfig; fields: { key: string; label: string }[]; connections: { key: SalesBotConnector; ready: boolean; configured: boolean }[] }) {

@@ -157,3 +157,134 @@ export class ByokOpenAiProvider implements AiProvider {
     };
   }
 }
+
+/**
+ * ═══════════ GEMINI (Google AI Studio) — KHOÁ CỦA TỔ CHỨC (01/10/2026) ═══════════
+ *
+ * Chủ nền tảng: bot fanpage của tổ chức nhà chạy `gemini-2.5-flash-lite` (container `chatbot/`) đủ tốt và rẻ (~25 ₫ / tin trả
+ * lời đo trên production), trong khi bot của tổ chức khách trên OpenAI vừa đắt vừa kém. Provider này gọi THẲNG REST
+ * `generateContent` (không SDK — cùng hàng rào: địa chỉ HẰNG, khoá truyền tường minh qua header `x-goog-api-key`, không bao
+ * giờ đọc biến môi trường của nhà, không theo chuyển hướng).
+ *
+ *  · Hội thoại: `assistant` ⇒ `model`; `tool_use` ⇒ `functionCall`; `tool_result` ⇒ `functionResponse` (tên tool tra theo
+ *    `toolUseId`). Lượt liền nhau cùng vai GỘP thành một (Gemini đòi xen kẽ).
+ *  · Gemini 2.5 trả `thoughtSignature` kèm `functionCall` khi có suy luận và đòi GỬI LẠI nguyên văn ở lượt sau — lưu trong
+ *    `id` của khối `tool_use` (sau dấu `|`), vì `AiBlock` không có ô riêng.
+ *  · Mức suy luận: dòng `gemini-2.5-flash*` nhận `thinkingBudget` (low = 0 — tắt, medium = 1024, high = 4096); model khác
+ *    để mặc định của Google.
+ *  · Schema tool: Gemini nhận TẬP CON OpenAPI (không `additionalProperties`…) ⇒ giữ đúng các khoá nó nhận (`toGeminiSchema`).
+ *  · Quá tải (429 / 500 / 503 — log bot nhà đầy «Gemini 503 high demand») ⇒ thử lại sau 2 giây · 4 giây rồi mới báo lỗi.
+ */
+export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_SCHEMA_KEYS = new Set(["type", "description", "enum", "properties", "required", "items", "format", "nullable", "minimum", "maximum"]);
+const GEMINI_RETRY_MS = [2_000, 4_000];
+const GEMINI_TIMEOUT_MS = 120_000;
+
+/** JSON Schema ⇒ tập con Gemini nhận được. HÀM THUẦN. */
+export function toGeminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toGeminiSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (!GEMINI_SCHEMA_KEYS.has(k)) continue;
+    if (k === "properties" && v && typeof v === "object") out[k] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([pk, pv]) => [pk, toGeminiSchema(pv)]));
+    else if (k === "items") out[k] = toGeminiSchema(v);
+    else out[k] = v;
+  }
+  return out;
+}
+
+type GeminiPart = { text?: string; thought?: boolean; thoughtSignature?: string; functionCall?: { name?: string; args?: unknown }; functionResponse?: { name: string; response: Record<string, unknown> } };
+type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
+type GeminiResponse = { candidates?: { content?: { parts?: GeminiPart[] }; finishReason?: string }[]; usageMetadata?: Record<string, number>; modelVersion?: string; error?: { message?: string } };
+
+/** Hội thoại của ERP ⇒ `contents` của Gemini. HÀM THUẦN (bài kiểm gọi thẳng). */
+export function toGeminiContents(messages: AiRequest["messages"]): GeminiContent[] {
+  const names = new Map<string, string>();
+  const out: GeminiContent[] = [];
+  for (const m of messages) {
+    const parts: GeminiPart[] = [];
+    for (const b of m.content) {
+      if (b.type === "text") {
+        if (b.text) parts.push({ text: b.text });
+      } else if (b.type === "tool_use") {
+        names.set(b.id, b.name);
+        const bar = b.id.indexOf("|");
+        parts.push({ functionCall: { name: b.name, args: b.input ?? {} }, ...(bar > 0 ? { thoughtSignature: b.id.slice(bar + 1) } : {}) });
+      } else {
+        let response: unknown;
+        try {
+          response = JSON.parse(b.content);
+        } catch {
+          response = b.content;
+        }
+        parts.push({ functionResponse: { name: names.get(b.toolUseId) ?? "tool", response: response && typeof response === "object" && !Array.isArray(response) ? (response as Record<string, unknown>) : { content: response } } });
+      }
+    }
+    if (!parts.length) continue;
+    const role = m.role === "assistant" ? "model" : "user";
+    const last = out[out.length - 1];
+    if (last && last.role === role) last.parts.push(...parts);
+    else out.push({ role, parts });
+  }
+  return out;
+}
+
+export class ByokGeminiProvider implements AiProvider {
+  readonly name = "gemini-byok";
+  readonly model: string;
+  readonly schemaDialect: AiSchemaDialect = "openai";
+  private readonly apiKey: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
+
+  constructor(opts: ByokOptions & { sleep?: (ms: number) => Promise<void> }) {
+    this.model = opts.model?.trim() || GEMINI_DEFAULT_MODEL;
+    this.apiKey = opts.apiKey;
+    this.fetchImpl = opts.fetch ?? fetch;
+    this.sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  }
+
+  async complete(req: AiRequest): Promise<AiResponse> {
+    const started = Date.now();
+    const thinking = /^gemini-2\.5-flash/.test(this.model) ? { thinkingConfig: { thinkingBudget: req.reasoning === "high" ? 4096 : req.reasoning === "medium" ? 1024 : 0 } } : {};
+    const body = {
+      systemInstruction: { parts: [{ text: req.system }] },
+      contents: toGeminiContents(req.messages),
+      generationConfig: { maxOutputTokens: req.maxTokens ?? 4000, ...thinking },
+      ...(req.tools.length ? { tools: [{ functionDeclarations: req.tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.inputSchema) })) }] } : {}),
+    };
+    const url = `${GEMINI_BASE_URL}/models/${encodeURIComponent(this.model)}:generateContent`;
+    let data = null as GeminiResponse | null;
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.fetchImpl(url, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": this.apiKey }, body: JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS) });
+      data = (await res.json().catch(() => null)) as GeminiResponse | null;
+      if (res.ok) break;
+      if ([429, 500, 503].includes(res.status) && attempt < GEMINI_RETRY_MS.length) {
+        await this.sleep(GEMINI_RETRY_MS[attempt]);
+        continue;
+      }
+      throw new Error(`Gemini trả lỗi HTTP ${res.status}: ${String(data?.error?.message ?? "").slice(0, 300).split(this.apiKey).join("…")}`);
+    }
+    const cand = data?.candidates?.[0];
+    const content: AiBlock[] = [];
+    let calls = 0;
+    for (const [i, p] of (cand?.content?.parts ?? []).entries()) {
+      if (p.functionCall?.name) {
+        calls += 1;
+        const id = `g${i}_${Math.random().toString(36).slice(2, 10)}${p.thoughtSignature ? `|${p.thoughtSignature}` : ""}`;
+        content.push({ type: "tool_use", id, name: p.functionCall.name, input: p.functionCall.args ?? {} });
+      } else if (typeof p.text === "string" && p.text && !p.thought) content.push({ type: "text", text: p.text });
+    }
+    const u = data?.usageMetadata ?? {};
+    const cached = Number(u.cachedContentTokenCount ?? 0);
+    return {
+      content,
+      stopReason: calls ? "tool_use" : cand?.finishReason === "MAX_TOKENS" ? "max_tokens" : cand?.finishReason === "SAFETY" ? "refusal" : "end_turn",
+      usage: { inputTokens: Math.max(0, Number(u.promptTokenCount ?? 0) - cached), outputTokens: Number(u.candidatesTokenCount ?? 0) + Number(u.thoughtsTokenCount ?? 0), cacheReadTokens: cached, cacheWriteTokens: 0 },
+      model: data?.modelVersion || this.model,
+      latencyMs: Date.now() - started,
+    };
+  }
+}
