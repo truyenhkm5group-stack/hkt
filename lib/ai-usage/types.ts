@@ -24,10 +24,10 @@ export const AI_BILLING_SOURCE_LABEL: Record<AiBillingSource, string> = {
   HOME: "AI của tổ chức nhà",
 };
 
-export const AI_USAGE_FEATURES = ["ai_builder", "copilot", "sales_chatbot"] as const;
+export const AI_USAGE_FEATURES = ["ai_builder", "copilot", "sales_chatbot", "sales_playbook"] as const;
 export type AiUsageFeature = (typeof AI_USAGE_FEATURES)[number];
 
-export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng" };
+export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ" };
 
 export const AI_USAGE_STATUSES = ["OK", "ERROR", "BLOCKED_QUOTA"] as const;
 export type AiUsageStatus = (typeof AI_USAGE_STATUSES)[number];

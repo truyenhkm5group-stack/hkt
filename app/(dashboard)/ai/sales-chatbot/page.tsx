@@ -9,9 +9,11 @@ import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
 import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
+import { loadPlaybook, loadPlaybookRun } from "@/lib/sales-chatbot/playbook";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
+import { PlaybookPanel } from "./playbook-panel";
 
 export const metadata = { title: "Chatbot bán hàng" };
 
@@ -33,6 +35,7 @@ export default async function SalesChatbotPage() {
     publicationOf(user.organization?.code ?? ""),
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
+  const [playbook, playbookRun] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun()]) : [null, null];
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
     const row = connections.find((c) => c.connectorKey === k);
     return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row) };
@@ -79,6 +82,7 @@ export default async function SalesChatbotPage() {
               </div>
             </SectionCard>
           ) : null}
+          {playbook && playbookRun ? <PlaybookPanel state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
             <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} />
           ) : (

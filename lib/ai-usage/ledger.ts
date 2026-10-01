@@ -84,7 +84,9 @@ const used = ne(t.status, "BLOCKED_QUOTA");
 export async function sourceUsage(orgCode: string, source: AiBillingSource, now: Date = new Date()): Promise<AiSourceUsage> {
   const pdb = await getPlatformDb();
   const day = dauNgayVN(now);
-  const counted = sql`${t.feature} <> 'sales_chatbot'`;
+  // «Học từ hội thoại cũ» (sales_playbook) cũng không ăn trần lượt / ngày của AI Builder: một lượt học là vài lời gọi
+  // gom nhiều hội thoại — trần CHI PHÍ của gói vẫn chặn như mọi lượt BYOK.
+  const counted = sql`${t.feature} not in ('sales_chatbot', 'sales_playbook')`;
   const [r] = await pdb
     .select({
       today: sql<number>`count(*) filter (where ${t.at} >= ${day.toISOString()}::timestamptz and ${counted})`,

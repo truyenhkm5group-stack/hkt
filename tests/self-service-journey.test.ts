@@ -51,6 +51,8 @@ import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
+import { redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
 import { runWorkflows } from "@/lib/workflow/engine";
 
@@ -571,6 +573,75 @@ async function testJourney() {
       const later = new Date(Date.now() + 31 * 60_000);
       const r3 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: () => later });
       assert.ok(r3.replies >= 1, `hết ${30} phút ⇒ bot trả lời lại: ${JSON.stringify(r3)}`);
+      // ═══ HỌC TỪ HỘI THOẠI CŨ: lịch sử Pancake ⇒ làm sạch ⇒ AI của shop ⇒ sổ tay NHÁP ⇒ người xuất bản ⇒ bot dùng ═══
+      assert.equal(redactForLearning("Chị Lan ơi SĐT 0912345678, giá 400.000đ, xem https://shop.vn/a", ["Chị Lan"]), "[khách] ơi SĐT [số], giá [số]đ, xem [link]");
+      assert.deepEqual(stripPrices("Giá 299k, combo 1.150.000đ, ship 30 nghìn, size 2"), { text: "Giá [giá lấy từ ERP], combo [giá lấy từ ERP], ship [giá lấy từ ERP], size 2", removed: 3 });
+      assert.equal(transcriptFor([{ fromShop: false, text: "a" }, { fromShop: false, text: "b" }, { fromShop: false, text: "c" }], []), null, "không có câu nào của shop ⇒ không học");
+      const aiInputs: string[] = [];
+      const pbProvider: AiProvider = {
+        name: "fake", model: "claude-sonnet-5", schemaDialect: "anthropic",
+        async complete(req: AiRequest): Promise<AiResponse> {
+          const input = req.messages.map((m) => m.content.map((b) => (b.type === "text" ? b.text : "")).join(" ")).join(" ");
+          aiInputs.push(input);
+          const isMerge = /Gộp các ghi chú/.test(req.system);
+          const text = isMerge ? "1. Giọng điệu & xưng hô: dạ / ạ, gọi khách là chị. 2. Khi khách hỏi giá: giá combo 299k — đọc từ hệ thống." : "- Shop luôn dạ ạ; khi khách chê đắt thì nói hàng làm thủ công, giá 400.000đ là hợp lý.";
+          return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 500, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      };
+      setSalesChatProviderForTests(() => pbProvider);
+      const manager = { ...admin, role: "MANAGER" as const, permissions: admin.permissions.filter((x) => x !== "ai_sales:manage") };
+      assert.ok("error" in (await startPlaybookLearning(manager, { conversations: 50, days: 90 })), "thiếu ai_sales:manage ⇒ không chạy");
+      assert.ok("error" in (await startPlaybookLearning(admin, { conversations: 7, days: 90 })), "số hội thoại ngoài danh sách ⇒ từ chối");
+      const started = await startPlaybookLearning(admin, { conversations: 50, days: 90 });
+      assert.ok("ok" in started, JSON.stringify(started));
+      assert.ok("error" in (await startPlaybookLearning(admin, { conversations: 50, days: 90 })), "đang chạy ⇒ không chạy chồng");
+      const recent = new Date().toISOString();
+      const history = fakeFetchCalls((url) => {
+        if (url.includes("/v2/pages/")) return { success: true, conversations: url.includes("last_conversation_id") ? [] : [1, 2, 3, 4].map((i) => ({ id: `h${i}`, updated_at: recent, from: { name: `Chị Lan ${i}` } })) };
+        const conv = /conversations\/(h\d)\/messages/.exec(url)?.[1] ?? "h0";
+        return {
+          success: true,
+          messages: [
+            { id: `${conv}-1`, inserted_at: "2026-09-01T01:00:00", from: { id: "cust", name: `Chị Lan ${conv.slice(1)}` }, message: "Chả mực bao nhiêu em? SĐT chị 0912345678" },
+            { id: `${conv}-2`, inserted_at: "2026-09-01T01:01:00", from: { id: PAGE, uid: "u1" }, message: `Dạ Chị Lan ${conv.slice(1)} ơi, chả mực 400.000đ/kg ạ, chị lấy mấy kg để em lên đơn?` },
+            { id: `${conv}-3`, inserted_at: "2026-09-01T01:02:00", from: { id: "cust", name: `Chị Lan ${conv.slice(1)}` }, message: "Đắt thế em, bớt được không? Giao 12 Hàng Bạc nhé" },
+            { id: `${conv}-4`, inserted_at: "2026-09-01T01:03:00", from: { id: PAGE, admin_id: "a1" }, message: "Dạ hàng giã tay chị ơi, em tặng chị túi giữ lạnh nhé" },
+          ],
+        };
+      });
+      const done = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
+      assert.equal(done.state, "DONE", JSON.stringify(done));
+      assert.ok(history.calls.every((c) => c.init?.method === "GET" && c.url.startsWith("https://pages.fm/api/public_api/")), "chỉ ĐỌC Pancake");
+      // Đầu vào CHỨA HỘI THOẠI (bước đọc từng lô) — bước gộp chỉ nhận ghi chú do AI viết, có số thứ tự «Ghi chú 1».
+      const seen = aiInputs.filter((x) => x.includes("--- HỘI THOẠI ---")).join("\n");
+      assert.ok(seen.length > 0, "có ít nhất một lô hội thoại tới AI");
+      assert.ok(!/\d/.test(seen), `AI không thấy một chữ số nào (giá cũ, SĐT, số nhà): ${seen.slice(0, 200)}`);
+      assert.ok(!/Chị Lan/.test(seen) && /\[khách\]/.test(seen), "tên khách bị che");
+      assert.ok(!seen.includes(PAGE_TOKEN), "token không đi tới AI");
+      const pb = await loadPlaybook();
+      assert.ok(pb.draft && !/299k|400\.000/.test(pb.draft.text) && pb.draft.text.includes("[giá lấy từ ERP]"), `sổ tay nháp không mang giá: ${pb.draft?.text}`);
+      assert.equal(pb.published, null, "học xong chỉ là NHÁP — bot chưa dùng");
+      const pbUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.feature, "sales_playbook")));
+      assert.equal(pbUsage.length, aiInputs.length, "mỗi lời gọi AI một dòng sổ dùng AI");
+      // Sửa tay (vẫn lọc giá) ⇒ xuất bản ⇒ bot dùng trong lời nhắc; quay lại / gỡ được.
+      const saved = await savePlaybookDraft(admin, `${pb.draft!.text}\n6. Thêm: combo 2 hộp 500k.`);
+      assert.ok("ok" in saved && /gỡ 1 con số/.test(saved.message), JSON.stringify(saved));
+      assert.ok("ok" in (await publishPlaybook(admin)));
+      assert.equal((await loadPlaybook()).published?.version, 1);
+      const systems: string[] = [];
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { systems.push(req.system); return { content: [{ type: "text", text: "Dạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      const tconv = await openConversation("TEST", { createdBy: ADMIN_EMAIL });
+      await chatTurn(tconv.id, "Chào shop", { channel: "TEST" });
+      assert.ok(systems.some((x) => x.includes("SỔ TAY BÁN HÀNG của shop") && x.includes("Giọng điệu")), "bot dùng sổ tay đã xuất bản");
+      assert.ok(systems.every((x) => x.indexOf("LUẬT BẮT BUỘC") < x.indexOf("SỔ TAY BÁN HÀNG")), "sổ tay đứng SAU luật bắt buộc");
+      await savePlaybookDraft(admin, "Bản hai: luôn hỏi khách cần bảo quản lạnh không.");
+      await publishPlaybook(admin);
+      assert.equal((await loadPlaybook()).published?.version, 2);
+      assert.ok("ok" in (await rollbackPlaybook(admin, 1)));
+      assert.equal((await loadPlaybook()).published?.version, 1, "quay lại bản 1");
+      assert.ok("ok" in (await unpublishPlaybook(admin)));
+      assert.equal((await loadPlaybook()).published, null, "gỡ khỏi bot");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // Kết nối tắt ⇒ tin không được nhận (không có lối vào cửa sau).
       assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "DISABLED")));
       assert.equal((await receiveFanpageEvent(ev("m4", "alo"))).reason, "Kết nối fanpage chưa bật");
