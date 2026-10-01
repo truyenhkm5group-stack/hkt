@@ -63,6 +63,15 @@ lẻ / HSD / lô.
   Builder + Copilot; trần TIỀN USD tháng đếm mọi tính năng.
 - Đơn / khách do bot ghi mang tác nhân `AGENT` (luật 36): `raw.createdBy = null`, `raw.agent = "Chatbot bán hàng"`.
 
+### Học từ hội thoại cũ (`lib/sales-chatbot/playbook*.ts`)
+
+Trang Chatbot bán hàng → «Học từ hội thoại cũ»: đọc 50 / 100 / 200 hội thoại INBOX gần nhất (30 / 90 / 180 ngày) qua pages.fm
+bằng page access token của kết nối «Fanpage qua Pancake» — CHỈ ĐỌC. Làm sạch trước khi tới AI: mọi chữ số ⇒ «[số]» (giá cũ,
+SĐT, số nhà, mã đơn), tên khách ⇒ «[khách]», link / email bị che. AI của shop (khoá BYOK, sổ dùng AI `sales_playbook`, trần chi
+phí của gói) đọc từng lô rồi soạn «Sổ tay bán hàng» NHÁP năm mục; lưới cuối gỡ mọi con số dạng giá. Chủ shop sửa → xuất bản
+(có phiên bản, quay lại / gỡ được) ⇒ bot dùng trong lời nhắc, ĐỨNG SAU luật «giá / tồn chỉ từ công cụ ERP». Tin nhắn gốc
+không được lưu.
+
 ## 5. Xem trước · tên miền con · xuất bản (`lib/platform/publish.ts`, `/setup`)
 
 - Tổ chức tạo qua `/start` là **BẢN NHÁP** (`publish_state = DRAFT`, thanh vàng ở đầu mọi trang). ERP đang dùng chính là bản
