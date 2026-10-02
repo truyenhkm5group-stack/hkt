@@ -486,6 +486,8 @@ export class OrderBot {
   }
 
   start() {
+    // Dung san danh muc xa/phuong ca nuoc (nen) de bot len don suy ra duoc tinh/huyen khi khach chi ghi ten phuong/xa
+    orderSync.geoIndex().catch(() => null);
     this.resetIfNeeded().catch((e) => log.warn(`[orderbot] reset loi: ${e.message}`));
     this.sweepTimer = setInterval(() => this.sweep().catch((e) => log.warn(`[orderbot] quet loi: ${e.message}`)), SWEEP_MS);
     this.sweepTimer.unref?.();

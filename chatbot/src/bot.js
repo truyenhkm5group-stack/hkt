@@ -612,6 +612,9 @@ export class Bot {
       `- Địa chỉ: ${f.address ? `ĐÃ CÓ ("${f.address}")` : "CHƯA CÓ"}`,
     ];
     if (!f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
+    const daHuaFreeShip = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
+    if (daHuaFreeShip) dong.push("- Phí ship: shop ĐÃ hứa MIỄN PHÍ vận chuyển cho khách này — tổng tiền KHÔNG cộng phí ship");
+    dong.push("- Địa chỉ phải có ĐỦ xã/phường + quận/huyện + tỉnh/thành mới được gửi bản chốt đơn; thiếu cấp nào thì hỏi cấp đó");
     let tiep;
     if (!f.size && f.measured) tiep = `báo size hợp với số đo khách đã gửi (${soDoText(f)}) theo bảng size trong hướng dẫn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao / cân nặng`;
     else if (!f.size) tiep = "hỏi chiều cao và cân nặng (hoặc size khách muốn)";
@@ -668,6 +671,46 @@ ${dong.join("\n")}
    * Bo cac cau trong tra loi dang XIN LAI thu khach da dua (SDT / dia chi / so do-size). Bo theo tung cau (tach theo
    * dau cau va xuong dong), giu nguyen phan con lai; bo het ma khong con gi thi tra "" de nhanh sau tu them cau di tiep.
    */
+  /**
+   * Dia chi trong ban chot don da du tinh / huyen / xa chua (cung bo tach dia chi cua bot len don). Tra ve cau HOI lai
+   * dung cap con thieu, hoac null neu da du / khong doc duoc dong dia chi (khong biet thi khong chan).
+   */
+  async addressQuestionForSummary(reply, pageId) {
+    const m = String(reply || "").match(/(?:địa chỉ|dia chi)\s*[:：][ \t]*([^\r\n]+)/i);
+    const dc = m ? m[1].trim() : "";
+    if (dc.replace(/[^a-zà-ỹ0-9]/gi, "").length < 8) return null;
+    this._addrCache ||= new Map();
+    let addr = this._addrCache.get(dc);
+    if (!addr) {
+      addr = await orderSync.resolveAddress(dc, { pageName: this.pageNames.get(pageId) });
+      this._addrCache.set(dc, addr);
+      if (this._addrCache.size > 500) this._addrCache.delete(this._addrCache.keys().next().value);
+    }
+    let thieu = "";
+    if (!addr.province) thieu = "quận/huyện và tỉnh/thành phố";
+    else if (!addr.district || addr.ambiguous) thieu = "quận/huyện";
+    else if (!addr.commune) thieu = "xã/phường";
+    if (!thieu) return null;
+    const xung = settings.effective(pageId).customerTitle || "chị";
+    return `Dạ ${xung} cho em xin thêm ${thieu} của địa chỉ "${dc}" để shipper giao đúng chỗ, em lên đơn cho ${xung} luôn nhé ạ ❤️`;
+  }
+
+  /**
+   * Shop da HUA mien phi ship trong hoi thoai ("hỗ trợ miễn phí vận chuyển") ma ban chot don van ghi "+ 25.000đ phí vận
+   * chuyển = 524.000đ" -> sua dong tong thanh tien hang + "miễn phí vận chuyển" (su co Thu Thuy 02/10/2026).
+   */
+  keepFreeShipPromise(reply, pageId, messages) {
+    const t = String(reply || "");
+    const daHua = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
+    if (!daHua) return t;
+    const sua = t.replace(/([\d.]{5,})\s*đ\s*\+\s*[\d.]{5,}\s*đ\s*(?:phí\s*)?(?:vận chuyển|ship)[^=\n]*=\s*[\d.]{5,}\s*đ/i, "$1đ (miễn phí vận chuyển)");
+    if (sua !== t) {
+      log.warn(`[${pageId}] Ban chot don cong phi ship du shop da hua mien phi -> bo phi ship`);
+      store.bumpStat(pageId, "freeShipGuard");
+    }
+    return sua;
+  }
+
   /**
    * Cho TRONG kieu mau "[Số điện thoại khách đã cung cấp]" / "[Địa chỉ khách đã cung cấp]" ma AI de lai trong ban
    * chot don: dien bang SDT / dia chi THAT khach da go; khong co thi bo ca dong do. Khong bao gio gui ngoac vuong cho khach.
@@ -1683,6 +1726,19 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
       );
       reply = r4.text && !this.unconfirmedColorInSummary(r4.text, pageId, messages, mauNhanDien) && !isOrderSummaryReply(r4.text, false) ? r4.text : this.askColorReply(pageId, mauChuaChon.colors);
     }
+    // Chan chot don khi DIA CHI chua du tinh / huyen / xa (su co 02/10/2026, Thu Thuy - Linh Tay Luxury CS1: khach ghi
+    // "Số nhà 99 /40 Đường 8 phuong long phước" — "Long Phước" co o nhieu tinh; bot gui ban chot don, bot len don khong
+    // xac dinh duoc tinh -> don nam "thieu thong tin"). Hoi dung cap con thieu thay vi chot.
+    if (isOrderSummaryReply(reply, false) && orderSync.enabled) {
+      const hoi = await this.addressQuestionForSummary(reply, pageId).catch(() => null);
+      if (hoi) {
+        log.warn(`[${pageId}] ${conversationId}: ban chot don co dia chi chua du cap -> hoi lai: ${hoi}`);
+        store.bumpStat(pageId, "addressGuard");
+        reply = hoi;
+      }
+    }
+    // Shop DA hua mien phi ship ma ban chot don van cong phi ship -> bo phi ship trong ban chot (giu loi hua voi khach)
+    if (isOrderSummaryReply(reply, false)) reply = this.keepFreeShipPromise(reply, pageId, messages);
     if (reply.includes(HANDOFF)) {
       handoff = true;
       reply = reply.replaceAll(HANDOFF, "").trim();
