@@ -28,6 +28,7 @@ import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
+import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
 
 export type CartLine = { variantId: string; quantity: number };
@@ -69,6 +70,8 @@ export type ToolContext = {
   agent: OrderAgent;
   /** Khách cũ máy chủ đã nhận ra (`findReturningCustomer`) — nguồn của `create_customer` + `use_saved_address`. */
   returning?: ReturningCustomer | null;
+  /** Câu shop vừa nói (`recentShopTexts`) — câu mẫu trùng một câu trong đó không gửi lại. */
+  recentSaid?: readonly string[];
 };
 
 /**
@@ -435,6 +438,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
+      if (repeatsRecent(pick.text, ctx.recentSaid ?? [])) return err(`Câu mẫu ${entry.code}: vừa gửi`, "Câu mẫu này shop VỪA gửi — khách đang trả lời nó. Đọc câu khách và đi tiếp, không gửi lại.", state);
       if (entry.upsell) state.upsellSent = true;
       return { ...ok(`Gửi câu mẫu «${entry.title}»${pick.imageIds.length ? ` + ${pick.imageIds.length} ảnh` : ""}`, { sent: true, note: "Khách đã nhận nguyên văn câu mẫu (và ảnh). Không nhắc lại nội dung." }, state), deliver: { text: pick.text, imageIds: pick.imageIds, quickReplyId: entry.id } };
     }

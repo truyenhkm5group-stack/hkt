@@ -27,7 +27,7 @@ import { findReturningCustomer, normalizeVnPhone, parsePancakeThreadProfile, ret
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
-import { fillPlaceholders, looksLikeOrdering, matchQuickReplyByKeyword, parseLearnedQuickReplies, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
+import { fillPlaceholders, isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parseLearnedQuickReplies, repeatsRecent, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
@@ -57,7 +57,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
@@ -256,6 +256,23 @@ function testPure() {
   assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
   const spOld = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], fullBlock);
   assert.ok(spOld.includes("có khối KHÁCH CŨ ⇒ KHÔNG xin lại") && spOld.indexOf("QUY TRÌNH BÁN") < spOld.indexOf("KHÁCH CŨ — dữ liệu"), "B3 trỏ tới khối khách cũ; khối đứng sau quy trình");
+  // Ảnh «Nghia Hue» (02/10/2026): khách hỏi SỈ, nhắn nhiều câu liền, bot gửi lại câu vừa hỏi.
+  assert.ok(isMultiPart("Chả cá thu giá sĩ bao nhiêu ạ\nMình ở đâu ạ") && !isMultiPart("Chả cá thu bao nhiêu ạ") && !isMultiPart("chả mực\n\n  "), "nhiều tin = nhiều dòng có chữ");
+  for (const t of ["Chả cá thu giá sĩ bao nhiêu ạ", "lấy sỉ về bán", "Em lấy lần 20-30 kg", "lấy 15kg", "bán buôn không em", "làm đại lý được không"]) assert.ok(looksWholesale(t), `phải nhận là hỏi sỉ: ${t}`);
+  for (const t of ["Cho anh 2 kg chả cá", "chả cá thu bao nhiêu", "bác sĩ bảo ăn cá tốt", "1kg hay 2kg"]) assert.ok(!looksWholesale(t), `không phải hỏi sỉ: ${t}`);
+  const asked = "Anh/chị lấy bao nhiêu kg nhắn em báo giá tốt cho mình làm hàng ạ?";
+  assert.ok(repeatsRecent(asked, ["Dạ chào anh", `[Shop đã nhắn] ${asked}`]) && repeatsRecent(` ${asked.toUpperCase()} `, [asked]) && !repeatsRecent(asked, ["Dạ chào anh"]) && !repeatsRecent("", [""]), "trùng câu vừa nói (kể cả tin page chép vào)");
+  const rs = recentShopTexts(
+    [
+      { role: "assistant", content: [{ type: "text", text: "a" }] },
+      { role: "user", content: [{ type: "text", text: "khách" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "x", name: "send_quick_reply", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", toolUseId: "x", content: JSON.stringify({ __deliver: "câu mẫu đã gửi" }) }] },
+      { role: "assistant", content: [{ type: "text", text: "b" }] },
+    ],
+    2,
+  );
+  assert.deepEqual(rs, ["câu mẫu đã gửi", "b"], "câu shop gần nhất gồm cả câu mẫu đã gửi qua công cụ");
   // Follow-up (0185): lịch tăng dần trong khung 24 giờ; mốc kế tiếp; khung nhắn của Facebook; câu nhắc không nêu giá.
   assert.deepEqual(validateFollowupSteps([60, 360, 1320]), { ok: true, steps: [60, 360, 1320] });
   assert.ok(!validateFollowupSteps([60, 30]).ok && !validateFollowupSteps([60, 1500]).ok && !validateFollowupSteps([]).ok && !validateFollowupSteps([60, 120, 180, 240]).ok);
@@ -749,12 +766,15 @@ async function testJourney() {
       assert.ok(qrBodies.some((b) => b.includes('"content_ids":["content-1"]')), "ảnh gửi sau phần chữ bằng mã nội dung đã tải lên");
       assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1);
       assert.ok(!qrFetch.calls.some((c) => c.url.includes("upload_contents") && !c.url.includes(`/pages/${PAGE}/`)), "tải ảnh lên đúng page");
-      // Lần hai: dùng lại mã nội dung (không tải lại) · đếm số lần dùng · đếm lượt câu mẫu của hội thoại.
-      await receiveFanpageEvent(ev("m-qr-2", "giá chả mực sao em", { id: "cust-5", name: "Chị Năm" }, "t-970"));
-      await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      // Lần hai (khách KHÁC — cùng khách hỏi lại thì không gửi lại nguyên câu, xem dưới): dùng lại mã nội dung (không tải lại) ·
+      // đếm số lần dùng · đếm lượt câu mẫu của hội thoại.
+      await receiveFanpageEvent(ev("m-qr-2", "giá chả mực sao em", { id: "cust-8", name: "Chị Tám" }, "t-973"));
+      await processFanpageThread(PAGE, "t-973", { fetch: qrFetch.fetch, now: in31s });
       assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1, "mã nội dung dùng lại trong 12 giờ");
-      const qrConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-970"))))[0];
-      assert.ok(qrConv.quickReplies === 2 && qrConv.aiCalls === 0, JSON.stringify({ quick: qrConv.quickReplies, ai: qrConv.aiCalls }));
+      const convOf = async (thread: string) => (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, thread))))[0];
+      const qrConv = await convOf("t-970");
+      const qrConv2 = await convOf("t-973");
+      assert.ok(qrConv.quickReplies === 1 && qrConv2.quickReplies === 1 && qrConv.aiCalls + qrConv2.aiCalls === 0, JSON.stringify({ quick: [qrConv.quickReplies, qrConv2.quickReplies], ai: qrConv.aiCalls }));
       assert.equal((await listQuickReplies()).find((r) => r.id === savedQr.id)?.uses, 2);
       // Tiếng vọng ẢNH của bot (không chữ, có uid) ⇒ vẫn là tin của bot, không nhường.
       assert.equal((await receiveFanpageEvent(ev("m-qr-echo-img", "", { id: PAGE, uid: "u-bot" }, "t-970"))).reason, "Tin của chính bot");
@@ -769,6 +789,37 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-qr-4", "ok chốt chả mực bao nhiêu cũng được", { id: "cust-6", name: "Anh Sáu" }, "t-971"));
       await processFanpageThread(PAGE, "t-971", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
       assert.ok(aiCalls.length >= 2 && aiCalls.slice(1).every((r) => r.tools.length > 0), "chốt đơn ⇒ chatbot đầy đủ có công cụ");
+      // (02/10/2026 · ảnh Nghia Hue) KHÔNG GỬI LẠI câu mẫu vừa gửi — khách đang TRẢ LỜI nó. Khớp chữ: cùng khách hỏi lại ⇒
+      // chatbot đầy đủ (đọc hội thoại), câu mẫu không gửi lần hai.
+      let mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-6", "chả mực bao nhiêu vậy em", { id: "cust-5", name: "Chị Năm" }, "t-970"));
+      await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.equal((await convOf("t-970")).quickReplies, 1, "câu mẫu khớp chữ không gửi lần hai liền");
+      assert.ok(aiCalls.length > mark && aiCalls.slice(mark).every((r) => r.tools.length > 0), "câu mẫu vừa gửi ⇒ chatbot đầy đủ");
+      // AI chọn mã: chọn lại ĐÚNG câu vừa gửi ⇒ không gửi, chatbot đầy đủ.
+      await receiveFanpageEvent(ev("m-qr-7", "món mực giã đó tính tiền sao em", { id: "cust-9", name: "Anh Chín" }, "t-976"));
+      await processFanpageThread(PAGE, "t-976", { fetch: qrFetch.fetch, now: in31s });
+      assert.equal((await convOf("t-976")).quickReplies, 1, "AI chọn câu mẫu lần đầu");
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-8", "món đó tính sao em", { id: "cust-9", name: "Anh Chín" }, "t-976"));
+      await processFanpageThread(PAGE, "t-976", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.equal((await convOf("t-976")).quickReplies, 1, "AI chọn lại câu vừa gửi ⇒ không gửi lần hai");
+      assert.ok(aiCalls.slice(mark).some((r) => r.tools.length > 0), "⇒ chatbot đầy đủ trả lời");
+      // Khách nhắn NHIỀU câu liên tiếp ⇒ không trả bằng một câu mẫu (chỉ đúng một ý) — chatbot đầy đủ đọc CẢ HAI câu.
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-9a", "chả mực bao nhiêu", { id: "cust-10", name: "Chị Mười" }, "t-977"));
+      await receiveFanpageEvent(ev("m-qr-9b", "shop ở đâu ạ", { id: "cust-10", name: "Chị Mười" }, "t-977"));
+      await processFanpageThread(PAGE, "t-977", { fetch: qrFetch.fetch, now: in31s });
+      assert.equal((await convOf("t-977")).quickReplies, 0, "nhiều câu ⇒ không câu mẫu");
+      const multi = aiCalls.slice(mark);
+      assert.ok(multi.length > 0 && multi.every((r) => r.tools.length > 0) && JSON.stringify(multi[0].messages).includes(JSON.stringify("chả mực bao nhiêu\nshop ở đâu ạ").slice(1, -1)), "chatbot đầy đủ nhận cả hai câu trong một lượt");
+      assert.ok(/NHIỀU câu liên tiếp/.test(multi[0].system) && /KHÁCH SỈ/.test(multi[0].system), "lời nhắc dặn trả lời đủ từng câu + cách xử lý khách sỉ");
+      // Khách hỏi SỈ: khớp chữ «chả mực … bao nhiêu» KHÔNG được trả giá LẺ ngay — nhường AI đọc hiểu (biết câu giá lẻ không khớp).
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-10", "chả mực giá sỉ bao nhiêu", { id: "cust-11", name: "Anh Mười Một" }, "t-978"));
+      await processFanpageThread(PAGE, "t-978", { fetch: qrFetch.fetch, now: in31s });
+      const ws = aiCalls.slice(mark);
+      assert.ok(ws.length >= 1 && ws[0].tools.length === 0 && /giá SỈ/.test(ws[0].system), "hỏi sỉ ⇒ AI đọc hiểu quyết, không khớp chữ trả giá lẻ");
       // Tắt câu mẫu ⇒ không dùng nữa.
       assert.ok("ok" in (await saveQuickReplySettings(admin, { enabled: false, aiMatch: true })));
       const callsBefore = aiCalls.length;
