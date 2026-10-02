@@ -1684,5 +1684,31 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 40: reset bot len don mot lan: bo danh sach cu, gieo lai hoi thoai 24h co SDT (bo khach da co don), khong goi AI");
 }
 
+// ---- 41: su co 02/10/2026 (Thu Thuy, Linh Tay Luxury CS1): khach ghi "Số nhà 99 /40 Đường 8 phuong long phước" (khong
+// quan, khong tinh — "Long Phước" co o nhieu tinh) ma bot gui ban chot don; bot da hua mien phi ship ma ban chot cong 25K
+{
+  const { orderSync: os41 } = await import("../src/orders.js");
+  const goc = os41.resolveAddress;
+  let goi = 0;
+  os41.resolveAddress = async (dc) => (goi++, /long phước/i.test(dc) && !/hồ chí minh/i.test(dc) ? { province: null, street: dc } : { province: { id: 1 }, district: { id: 2 }, commune: { id: 3 }, street: dc });
+  const chot = "Dạ em chốt đơn cho chị:\n• Đầm xếp ly eo tay lỡ – màu Đỏ đô – size XL x 1\n• Tổng: 499.000đ + 25.000đ phí vận chuyển = 524.000đ\n• Người nhận: Thu Thủy\n• SĐT: 0765114016\n• Địa chỉ: Số nhà 99 /40 Đường 8 phuong long phước\nChị kiểm tra giúp em thông tin đã đúng chưa ạ?";
+  const hoi = await bot.addressQuestionForSummary(chot, "PAGE1");
+  assert.match(hoi, /quận\/huyện và tỉnh\/thành phố của địa chỉ "Số nhà 99 \/40 Đường 8 phuong long phước"/);
+  assert.equal(await bot.addressQuestionForSummary(chot.replace("phuong long phước", "phường Long Phước, TP Thủ Đức, Hồ Chí Minh").replace("Số nhà 99", "Số 99"), "PAGE1"), null, "du cap -> khong chan");
+  await bot.addressQuestionForSummary(chot, "PAGE1");
+  assert.equal(goi, 2, "cung dia chi -> dung lai ket qua, khong goi AI lan nua");
+  assert.equal(await bot.addressQuestionForSummary("Dạ em chốt đơn: Tổng 499.000đ", "PAGE1"), null, "khong co dong dia chi -> khong chan");
+  os41.resolveAddress = goc;
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoiThoai = [khach("M60 60, miễn phí ship"), shop("Dạ em hỗ trợ miễn phí vận chuyển cho mình nha chị yêu"), khach("Màu đỏ đô")];
+  const sua = bot.keepFreeShipPromise(chot, "PAGE1", hoiThoai);
+  assert.match(sua, /Tổng: 499\.000đ \(miễn phí vận chuyển\)/);
+  assert.doesNotMatch(sua, /524\.000/);
+  assert.equal(bot.keepFreeShipPromise(chot, "PAGE1", [khach("Màu đỏ đô")]), chot, "chua hua mien phi -> giu nguyen");
+  assert.match(bot.orderProgressPrompt("PAGE1", [...hoiThoai, khach("sđt 0765114016")]), /ĐÃ hứa MIỄN PHÍ vận chuyển/);
+  console.log("OK 41: ban chot don voi dia chi chua du tinh/huyen/xa -> hoi lai dung cap; da hua mien phi ship thi tong khong cong ship");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
