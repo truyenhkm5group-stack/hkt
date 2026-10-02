@@ -860,6 +860,9 @@ async function testJourney() {
       assert.ok(!hoFetch.calls.some((c) => c.init?.method === "POST"), "chuyển người ⇒ không gửi gì cho khách");
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
+      // (02/10/2026 · ảnh «Lê Quyền») bot im lặng ⇒ nhóm «báo nhóm vận hành» của shop nhận MỘT tin có TÊN khách trên fanpage.
+      const hoGroup = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.event, "sales_chat.handoff"), eq(schema.messagingDeliveries.subjectId, hoConv.id)));
+      assert.ok(hoGroup.length === 1 && hoGroup[0].connectorKey === "sandbox-messaging" && /Khách cần nhân viên trả lời: Chị Hồ/.test(hoGroup[0].body) && /Bot đã dừng/.test(hoGroup[0].body), JSON.stringify(hoGroup.map((d) => [d.connectorKey, d.body])));
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // ═══ GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — Telegram chập chờn từ máy chủ ở Việt Nam) ═══
       const tgToken = `123456789:${"A".repeat(35)}`;
@@ -944,7 +947,17 @@ async function testJourney() {
       assert.ok((await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng" }, rctx({}, "đúng", null))).isError, "không có khách cũ ⇒ không điền");
       const savedC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
       assert.ok(!savedC.isError && savedC.state.customer?.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && savedC.state.customer.phone === "0911222333" && savedC.state.customer.savedAddress === true && !savedC.content.includes("Số 12"), JSON.stringify(savedC));
-      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(savedC.state, "ok em"));
+      // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (02/10/2026 · ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop có câu upsell ⇒ chưa gửi thì
+      // chặn lên đơn; gửi xong ⇒ lên đơn + tóm tắt NGAY trong cùng lượt; câu upsell thiếu số ERP ⇒ không chặn mãi.
+      const draftIn = (st: ChatState) => executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(st, "ok em"));
+      const noUp = await draftIn(savedC.state);
+      assert.ok(noUp.isError && noUp.content.includes("send_quick_reply") && noUp.content.includes("Q1") && !noUp.state.draft, `chưa mời thêm món ⇒ chặn: ${noUp.content}`);
+      const upNow = await executeTool("send_quick_reply", { code: "Q1" }, rctx(savedC.state, "ok em"));
+      assert.ok(!upNow.isError && upNow.state.upsellSent, JSON.stringify(upNow.state));
+      assert.ok(!(await draftIn(upNow.state)).isError, "mời xong ⇒ lên đơn + tóm tắt ngay trong cùng lượt");
+      assert.ok(!(await draftIn({ ...savedC.state, upsellUnavailable: true })).isError, "câu upsell không gửi được ⇒ không chặn mãi");
+      assert.ok(!(await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, { ...rctx(savedC.state, "ok em"), quickReplies: [] })).isError, "shop chưa chọn câu upsell ⇒ không chặn");
+      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({ ...savedC.state, upsellSent: true }, "ok em"));
       assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");
       assert.ok(!savedDraft.content.includes("Số 12") && savedDraft.content.includes("…, phường Hà Đông, Hà Nội"), "tóm tắt bot đọc cho khách chỉ có địa chỉ che: " + savedDraft.content);
       const fbC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "như cũ" }, rctx({}, "như cũ em", byFb));
@@ -965,7 +978,7 @@ async function testJourney() {
       const flowFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-flow" : `m-${Math.random().toString(36).slice(2)}` }));
       const rf = await processFanpageThread(PAGE, "t-flow", { fetch: flowFetch.fetch, now: in31s });
       const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages") && c.init?.method === "POST").map((c) => String(c.init?.body));
-      assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("1kg hay 2kg") && flowBodies.some((b) => b.includes("content_ids")), JSON.stringify({ rf, flowBodies }));
+      assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("content_ids") && flowBodies[2].includes("1kg hay 2kg"), `ảnh của câu mẫu đi NGAY sau chữ của nó, trước câu hỏi tiếp của AI: ${JSON.stringify({ rf, flowBodies })}`);
       const flowConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-flow"))))[0];
       assert.equal((flowConv.state as ChatState).stage, "QUOTE");
       // KHÁCH CŨ trên fanpage: Pancake trả SĐT đã ghi nhận + tin cũ trước khi bot vào ⇒ lời nhắc có khối KHÁCH CŨ đầy đủ (mã

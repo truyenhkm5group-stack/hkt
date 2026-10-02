@@ -594,6 +594,23 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       continue;
     }
+    // Ảnh của câu trả lời mẫu (0183): gửi NGAY SAU chữ của chính câu mẫu đó (02/10/2026: câu upsell kèm ảnh menu đứng TRƯỚC
+    // bản tóm tắt đơn của cùng lượt, không bị đẩy xuống cuối); không khớp được câu nào ⇒ sau toàn bộ phần chữ như cũ. Dấu ảnh
+    // (chữ rỗng) ghi TRƯỚC khi gửi — tiếng vọng ảnh không có chữ.
+    let mediaDone = false;
+    const sendMedia = async () => {
+      mediaDone = true;
+      const media = turn.media?.imageIds ?? [];
+      if (!media.length) return;
+      const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
+      if (up.ids.length) {
+        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch);
+        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+        if (!sentImgs.ok) sendError = sentImgs.error;
+      }
+      if (!sendError && up.errors.length) sendError = up.errors[0];
+    };
     for (const r of replies) {
       // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
       await db
@@ -613,19 +630,12 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
           .values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: r.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
           .onConflictDoNothing({ target: t.messageId });
       }
-    }
-    // Ảnh của câu trả lời mẫu (0183): gửi SAU phần chữ. Dấu ảnh (chữ rỗng) ghi TRƯỚC khi gửi — tiếng vọng ảnh không có chữ.
-    const media = turn.media?.imageIds ?? [];
-    if (!sendError && media.length) {
-      const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
-      if (up.ids.length) {
-        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch);
-        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
-        if (!sentImgs.ok) sendError = sentImgs.error;
+      if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
+        await sendMedia();
+        if (sendError) break;
       }
-      if (!sendError && up.errors.length) sendError = up.errors[0];
     }
+    if (!sendError && !mediaDone) await sendMedia();
     await finish("DONE", sendError);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     out.processed += ids.length;

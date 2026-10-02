@@ -47,6 +47,8 @@ export type ChatState = {
   stage?: SalesStage;
   /** Đã gửi câu upsell (chỉ MỘT lần mỗi hội thoại). */
   upsellSent?: boolean;
+  /** Câu upsell không gửi được (thiếu số ERP) — không chặn lên đơn mãi vì nó. */
+  upsellUnavailable?: boolean;
   declined?: { reason: string; at: string };
   /** Mốc tin fanpage (page / khách bị bỏ qua) đã chép vào lịch sử của bot — `appendContextMessages`. */
   mirroredUntil?: string;
@@ -374,6 +376,13 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const existing = state.draft;
       if (name === "create_draft_order" && !v.data.items) return err("Đơn nháp: thiếu hàng", "Đơn nháp cần items.", state);
       if (name === "update_draft_order" && !existing) return err("Sửa đơn: chưa có đơn nháp", "Chưa có đơn nháp — gọi create_draft_order.", state);
+      // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (chủ shop 02/10/2026, ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop đã chọn câu upsell
+      // (kèm ảnh menu) ⇒ khách vừa gửi thông tin nhận hàng là lúc gửi nó, RỒI tóm tắt chốt đơn trong cùng lượt để khách nắm
+      // thông tin. Máy chủ chặn lên đơn khi chưa mời — lời dặn trong lời nhắc thôi thì AI hay nhảy thẳng sang tóm tắt.
+      const upsellEntry = ctx.quickReplies?.find((q) => q.upsell);
+      if (name === "create_draft_order" && !existing && upsellEntry && !state.upsellSent && !state.upsellUnavailable) {
+        return err("Đơn nháp: chưa mời thêm món", `Trước khi lên đơn phải mời thêm món ĐÚNG MỘT LẦN: gọi send_quick_reply với mã ${upsellEntry.code} (câu upsell kèm ảnh menu), rồi gọi lại create_draft_order và gửi tóm tắt chốt đơn trong cùng lượt.`, state);
+      }
       if (state.confirmed) return err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — muốn đổi thì chuyển nhân viên (handoff_to_human).", state);
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
@@ -437,6 +446,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (!entry) return err("Câu mẫu: không có mã", "Không có câu mẫu với mã này — chỉ dùng mã trong danh sách CÂU MẪU.", state);
       if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
+      if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
       if (repeatsRecent(pick.text, ctx.recentSaid ?? [])) return err(`Câu mẫu ${entry.code}: vừa gửi`, "Câu mẫu này shop VỪA gửi — khách đang trả lời nó. Đọc câu khách và đi tiếp, không gửi lại.", state);
       if (entry.upsell) state.upsellSent = true;

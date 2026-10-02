@@ -83,9 +83,9 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
     "  B3 INFO — Lấy HỌ TÊN, SĐT, ĐỊA CHỈ: có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối (xác nhận ngắn + mời thêm món trong CÙNG một tin) rồi đi thẳng B4 / B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
     upsell
-      ? `  B4 UPSELL — Mời thêm ĐÚNG MỘT LẦN bằng câu mẫu ${upsell.code} (send_quick_reply) — gửi kèm ảnh menu; khách từ chối ⇒ không mời lại, đi tiếp B5.`
-      : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products); khách từ chối ⇒ không mời lại, đi tiếp B5.",
-    "  B5 CONFIRM — create_draft_order ⇒ đọc lại tóm tắt ⇒ khách đồng ý ⇒ confirm_order.",
+      ? `  B4 UPSELL — NGAY khi khách vừa gửi đủ thông tin nhận hàng (create_customer xong): gửi câu mẫu ${upsell.code} (send_quick_reply — kèm ảnh menu, mời thêm món), rồi đi tiếp B5 TRONG CÙNG LƯỢT (máy chủ chặn lên đơn khi chưa mời). Chỉ mời ĐÚNG MỘT LẦN mỗi hội thoại.`
+      : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) ngay trong tin tóm tắt đơn; khách từ chối ⇒ không mời lại.",
+    "  B5 CONFIRM — create_draft_order ⇒ gửi TÓM TẮT CHỐT ĐƠN để khách nắm thông tin (từng món × SL × đơn giá, tiền hàng, phí ship, tổng thu khi giao, người nhận, SĐT, địa chỉ) và kết bằng «Anh/chị lấy thêm món nào báo em thêm vào đơn, không thì anh/chị xác nhận để em giao luôn ạ». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
     "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
     "HIỂU KHÁCH:",
     "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
@@ -267,8 +267,11 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
   return { ok: true, provider };
 }
 
-/** `media` = ảnh của CÂU TRẢ LỜI MẪU vừa gửi (0183) — kênh fanpage gửi tiếp qua Pancake sau phần chữ. */
-export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: string; imageIds: string[] } } | { ok: false; error: string; view?: ChatView | null };
+/**
+ * `media` = ảnh của CÂU TRẢ LỜI MẪU vừa gửi (0183) — kênh fanpage gửi qua Pancake ngay sau tin có chữ `afterText` (chữ của
+ * chính câu mẫu đó); thiếu ⇒ sau toàn bộ phần chữ.
+ */
+export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: string; imageIds: string[]; afterText?: string } } | { ok: false; error: string; view?: ChatView | null };
 
 async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
@@ -422,6 +425,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning));
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
+    let deliveredText: string | null = null;
     const tools = toolDefsFor(cfg);
     const history = historyForModel([...msgs, { role: "user", content: [{ type: "text", text }] }], SALES_CHATBOT_LIMITS.historyMessages);
     let state = (conv.state ?? {}) as ChatState;
@@ -455,6 +459,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);
             deliveredReplyId = r.deliver.quickReplyId;
+            deliveredText = r.deliver.text;
             await markQuickReplyUsed(r.deliver.quickReplyId, now).catch(() => undefined);
           }
           // Công cụ thấy điều bất thường (giá thiếu, tồn âm) ⇒ CẦN NGƯỜI XỬ LÝ — không để AI tự quyết bán tiếp.
@@ -502,7 +507,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       ...(state.draft?.orderId ? { draftOrderId: state.draft.orderId } : {}),
       ...(state.confirmed?.orderId ? { orderId: state.confirmed.orderId } : {}),
     });
-    return { ok: true, view: (await conversationView(conv.id))!, ...(deliveredImages.length && deliveredReplyId ? { media: { quickReplyId: deliveredReplyId, imageIds: deliveredImages } } : {}) };
+    return { ok: true, view: (await conversationView(conv.id))!, ...(deliveredImages.length && deliveredReplyId ? { media: { quickReplyId: deliveredReplyId, imageIds: deliveredImages, ...(deliveredText ? { afterText: deliveredText } : {}) } } : {}) };
   } catch (error) {
     if (error instanceof SeqConflict) return { ok: false, error: error.message, view: await conversationView(conv.id) };
     throw error;
