@@ -15,9 +15,10 @@
  * Tiền là ƯỚC TÍNH (token × bảng giá × tỷ giá `FACEBOOK_USD_VND`) — nhãn «ước tính» luôn đi kèm. Lượt chưa định giá (model
  * lạ) KHÔNG cộng 0: tổng ngày đó là CẬN DƯỚI và số lượt thiếu giá in cạnh (luật 42). Chia cho 0 đơn / 0 SĐT ⇒ `null`.
  */
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import { getDb, getPlatformDb, schema } from "@/db";
+import { gte } from "drizzle-orm";
+import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
+import { aiUsageByRef } from "@/lib/ai-usage/ledger";
 import { vnDayKey } from "@/lib/ai-usage/types";
 import { env } from "@/lib/env";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
@@ -144,23 +145,8 @@ export function lastVnDays(n: number, now: Date = new Date()): string[] {
 export async function loadChatCostReport(orgCode: string, days = 30, now: Date = new Date()): Promise<ChatCostReport> {
   const dayKeys = lastVnDays(days, now);
   const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
-  const t = schema.platformAiUsage;
-  const pdb = await getPlatformDb();
-  const dayExpr = sql<string>`to_char((${t.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
-  const usedCond = sql`${t.status} <> 'BLOCKED_QUOTA'`;
-  const rows = await pdb
-    .select({
-      day: dayExpr,
-      ref: t.ref,
-      feature: t.feature,
-      turns: sql<number>`count(*) filter (where ${usedCond})`,
-      cost: sql<string | null>`sum(${t.costUsd})`,
-      unknown: sql<number>`count(*) filter (where ${usedCond} and ${t.costUsd} is null)`,
-    })
-    .from(t)
-    .where(and(eq(t.orgCode, orgCode), inArray(t.feature, ["sales_chatbot", "sales_playbook"]), gte(t.at, since)))
-    .groupBy(dayExpr, t.ref, t.feature);
-  const usage: UsageCell[] = rows.map((r) => ({ day: String(r.day), ref: r.ref, feature: r.feature, turns: Number(r.turns), costUsd: r.cost === null ? null : Number(r.cost), unknownCost: Number(r.unknown) }));
+  // Sổ AI nằm ở CSDL nhà — đọc qua đường của chính sổ (luôn lọc `org_code`), không mở CSDL nền tảng từ mã nghiệp vụ (S17).
+  const usage: UsageCell[] = await aiUsageByRef(orgCode, ["sales_chatbot", "sales_playbook"], since);
 
   const db = await getDb();
   const c = schema.salesChatConversations;
