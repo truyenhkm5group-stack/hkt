@@ -57,6 +57,28 @@ export function missingOrderFields(reply) {
   return thieu;
 }
 
+/**
+ * SDT nam NGOAI noi dung chu cua tin (chip so dien thoai Messenger / Pancake): quet moi truong cua tin tru nguoi gui /
+ * nguoi nhan / page (khong lay nham so cua shop). Id Facebook 15-17 chu so khong khop mau SDT 10 so.
+ */
+export function messagePhones(msg) {
+  if (!msg || typeof msg !== "object") return [];
+  const out = new Set();
+  // Chi doc truong co ten giong noi chua SDT / chu, bo URL (duong dan anh CDN chua day so dai -> SDT gia)
+  const di = (v, sau, khoa) => {
+    if (sau > 4 || v == null) return;
+    if (typeof v === "string" || typeof v === "number") {
+      const t = String(v);
+      if (/(phone|number|payload|title|text|value|content)/i.test(khoa) && !/^\s*(https?:|www\.)/i.test(t) && t.length <= 200) phonesInText(t).forEach((p) => out.add(p));
+      return;
+    }
+    if (Array.isArray(v)) return void v.forEach((x) => di(x, sau + 1, khoa));
+    if (typeof v === "object") for (const [k, x] of Object.entries(v)) if (!/^(from|to|page|page_id|sender|recipient|message|original_message|url|src|preview_url|image_data)$/i.test(k)) di(x, sau + 1, k);
+  };
+  di(msg, 0, "");
+  return [...out];
+}
+
 export function isOrderSummaryReply(reply, handoff) {
   const text = String(reply || "");
   if (!/chốt đơn|lên đơn|đơn hàng của chị|đơn của chị/i.test(text)) return false;
@@ -484,7 +506,12 @@ export class Bot {
   }
 
   messageText(msg) {
-    return stripHtml(msg.original_message || msg.message) || describeAttachments(msg.attachments);
+    const t = stripHtml(msg.original_message || msg.message) || describeAttachments(msg.attachments);
+    // SDT khach bam nut "chia se so dien thoai" cua Messenger (Pancake hien chip XANH): so khong nam trong noi dung chu
+    // ma o truong khac cua tin (phone_info / quick_reply / attachments). Su co Nhung Le 02/10/2026: khach gui
+    // "0355734749" bang chip, bot van chot "CHƯA CÓ SỐ ĐIỆN THOẠI" va bot len don khong thay SDT.
+    const them = messagePhones(msg).filter((p) => !phonesInText(t).includes(p));
+    return them.length ? `${t ? t + " " : ""}${them.join(" ")}`.trim() : t;
   }
 
   /** System prompt cho 1 page: thay {{SHOP_NAME}}, {{CATALOG}} + huong dan rieng cua page + ngu canh */

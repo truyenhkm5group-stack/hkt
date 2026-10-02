@@ -178,6 +178,13 @@ export class OrderBot {
             log.info(`[orderbot] ${key}: tu xac nhan #${r.orderId}`);
           } else {
             it.confirmNote = `Để đơn nháp, chưa tự xác nhận: ${kq.reason}`;
+            // Khach con DON KHAC dang xu ly: mua them hay doi mau / trung don la viec NGUOI quyet -> can duyet + bao ERP,
+            // khong nam im trong "da len don" (su co Binh Nguyen 02/10/2026)
+            if (/khách đã có đơn #/.test(kq.reason || "")) {
+              it.status = "REVIEW";
+              it.reviewAt = Date.now();
+              it.reasons = [`Đã lên đơn nháp #${r.orderId} nhưng ${kq.reason}: mua thêm thì xác nhận đơn #${r.orderId}, trùng / đổi mẫu thì huỷ một đơn`];
+            }
           }
         }
         store.bumpStat(pageId, "orderBotDone");
@@ -584,7 +591,16 @@ export class OrderBot {
     }
     // Dung san danh muc xa/phuong ca nuoc (nen) de bot len don suy ra duoc tinh/huyen khi khach chi ghi ten phuong/xa
     orderSync.geoIndex().catch(() => null);
-    this.resetIfNeeded().catch((e) => log.warn(`[orderbot] reset loi: ${e.message}`));
+    this.resetIfNeeded()
+      .then(async (daReset) => {
+        // MOT lan sau ban doc SDT dang chip (02/10/2026): hoi thoai 24h khach da gui SDT bang chip ma bot chua thay
+        // -> dua vao theo doi va kiem ngay (khong lam lai neu vua reset — reset da gieo 24h)
+        if (store.state.phoneChipSeed === 1) return;
+        store.state.phoneChipSeed = 1;
+        this._save();
+        if (!daReset) await this.seed(24);
+      })
+      .catch((e) => log.warn(`[orderbot] reset / gieo loi: ${e.message}`));
     this.sweepTimer = setInterval(() => this.sweep().catch((e) => log.warn(`[orderbot] quet loi: ${e.message}`)), SWEEP_MS);
     this.sweepTimer.unref?.();
   }

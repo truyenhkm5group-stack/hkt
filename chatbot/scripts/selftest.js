@@ -1487,6 +1487,28 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   // khach mua lai: don cu DA GIAO tao truoc khi bot theo doi -> KHONG coi la nhan vien da len don moi
   donNV = [{ id: 5000, status: 4, bill_phone_number: "0912345601", inserted_at: new Date(Date.now() - 5 * 86400e3).toISOString() }];
   assert.equal(await os36.staffHandledOrder("C36x", ["0912345601"], Date.now() - 3600e3), null);
+  // Binh Nguyen 02/10/2026: don cu DANG DONG HANG tao 2 ngay truoc (mau khac) -> KHONG phai "nhan vien da len don" cho
+  // lan mua nay; bot len don nhap, tu xac nhan bi chan vi don cu -> CAN DUYET kem ly do (bao ERP), khong nam im
+  donNV = [{ id: 5509, status: 12, bill_phone_number: "0912345601", inserted_at: new Date(Date.now() - 2 * 86400e3).toISOString() }];
+  assert.equal(await os36.staffHandledOrder("C36x", ["0912345601"], Date.now() - 3600e3), null, "don cu dang dong hang khong che lan mua moi");
+  {
+    const gs = os36.syncFromConversation, gc = os36.confirmOrder;
+    os36.syncFromConversation = async () => ({ status: "updated", orderId: 5667, summary: "Cập nhật đơn nháp #5667: Q003", phone: "0912345601", items: [{ variation_id: "v3", quantity: 1 }], confirmBlockers: [] });
+    os36.confirmOrder = async () => ({ ok: false, reason: "khách đã có đơn #5509 (Đang đóng hàng) trong 14 ngày — nhân viên kiểm tra, tránh gửi hai lần" });
+    ob.items.C36n = { pageId: "PAGE1", conversationId: "C36n", status: "PENDING", firstSeen: Date.now() - 3600e3, reasons: [], facts: { phone: "0912345601" } };
+    await ob.check("C36n");
+    assert.equal(ob.items.C36n.status, "REVIEW", "khach con don khac -> can duyet, khong im lang");
+    assert.equal(ob.items.C36n.orderId, 5667);
+    assert.ok(ob.items.C36n.reviewAt);
+    assert.match(ob.items.C36n.reasons[0], /Đã lên đơn nháp #5667 nhưng khách đã có đơn #5509/);
+    // nhan vien xac nhan don nhap #5667 -> go khoi can duyet
+    donNV = [...donNV, { id: 5667, status: 1, bill_phone_number: "0912345601", inserted_at: new Date().toISOString() }];
+    ob.items.C36n.staffCheckAt = 0;
+    await ob.sweep();
+    assert.equal(ob.items.C36n.status, "DONE");
+    delete ob.items.C36n;
+    Object.assign(os36, { syncFromConversation: gs, confirmOrder: gc });
+  }
   // (c) don nhap bot len chuan truoc khi bat tu xac nhan -> sweep kiem lai MOT lan va xac nhan
   donNV = [];
   let xacNhan = 0;
@@ -2043,6 +2065,20 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   ob.history = goc.history;
   delete ob.items.C46;
   console.log("OK 46: khach xin huy -> lan dau hoi ly do + giu don (khong chuyen nhan vien, khong len don), xin lan nua moi ghi nhan");
+}
+
+// ---- 47: SDT khach gui bang chip "chia se so dien thoai" (khong nam trong noi dung chu) — su co Nhung Le 02/10/2026
+{
+  const { messagePhones } = await import("../src/bot.js");
+  const chip = { from: { id: "KHACH" }, message: "", phone_info: [{ phone_number: "0355734749" }] };
+  assert.deepEqual(messagePhones(chip), ["0355734749"]);
+  assert.equal(bot.messageText(chip), "0355734749");
+  assert.equal(bot.customerFacts("PAGE1", [chip]).phone, true, "co SDT -> khong xin lai");
+  assert.deepEqual(messagePhones({ message: "", quick_reply: { payload: "+84355734749" } }), ["0355734749"]);
+  // Duong dan anh / nguoi gui / so trong noi dung chu khong bi lap lai
+  assert.deepEqual(messagePhones({ message: "x", attachments: [{ type: "photo", url: "https://cdn/t39.30808-6/0355734749_n.jpg" }], from: { phone: "0912345678" } }), []);
+  assert.equal(bot.messageText({ message: "sđt 0355734749", phone_info: [{ phone_number: "0355734749" }] }), "sđt 0355734749");
+  console.log("OK 47: SDT khach gui bang chip so dien thoai -> bot doc duoc (khong chot 'CHƯA CÓ SỐ ĐIỆN THOẠI'), khong lay so tu link anh / nguoi gui");
 }
 
 console.log("\nTAT CA TEST PASS");
