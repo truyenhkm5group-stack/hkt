@@ -1512,5 +1512,86 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 38: khach da gui so do ma chua tra duoc size -> khong xin lai, bao size theo bang trong huong dan; bo cau 'em da co SDT/dia chi roi'; 'Minh dat xl' = da chon size; ban chot don khong con cho trong [..]");
 }
 
+// ---- 39: duyet don "Moi" tren POS 7 ngay (chu shop 02/10/2026: "loc lai cac don moi trong 1 tuan qua neu da chuan thi
+// an da xac nhan luon") + quet lai theo page + mau chu luc ("cac don Q005 o page linh tay luxury cs1 ... len don xac nhan")
+{
+  const { config: cfg39 } = await import("../src/config.js");
+  cfg39.pos.shopId = "SHOP1"; cfg39.pos.apiKey = "posk";
+  const { orderSync: os39 } = await import("../src/orders.js");
+  const ob = bot.orderBot;
+  const iso = (ngay) => new Date(Date.now() - ngay * 86400e3).toISOString().replace("Z", "");
+  const dc = { province_id: "1", district_id: "2", commune_id: "3", address: "Số 12 ngõ 5" };
+  const don = [
+    { id: 1, status: 0, inserted_at: iso(1), bill_phone_number: "0911111111", bill_full_name: "Lan", shipping_address: dc, items: [{ variation_id: "v1", quantity: 1 }] },
+    { id: 2, status: 0, inserted_at: iso(2), bill_phone_number: "0922222222", shipping_address: { ...dc, commune_id: null }, items: [{ variation_id: "v1", quantity: 1 }] },
+    { id: 3, status: 0, inserted_at: iso(2), bill_phone_number: "0933333333", shipping_address: dc, items: [{ variation_id: "v1", quantity: 1 }] },
+    { id: 4, status: 0, inserted_at: iso(3), bill_phone_number: "0933333333", shipping_address: dc, items: [{ variation_id: "v1", quantity: 2 }] },
+    { id: 5, status: 0, inserted_at: iso(3), bill_phone_number: "0955555555", shipping_address: dc, items: [{ variation_id: "v1", quantity: 1 }] },
+    { id: 6, status: 1, inserted_at: iso(1), bill_phone_number: "0955555555", shipping_address: dc, items: [] },
+    { id: 7, status: 0, inserted_at: iso(9), bill_phone_number: "0977777777", shipping_address: dc, items: [{ variation_id: "v1", quantity: 1 }] },
+  ];
+  const puts = [];
+  const prev39 = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.hostname === "pos.pages.fm") {
+      const m = u.pathname.match(/\/orders\/(\d+)$/);
+      if (m && (init.method || "GET") === "GET") return json({ data: don.find((o) => String(o.id) === m[1]) });
+      if (m && init.method === "PUT") { const b = JSON.parse(init.body); puts.push([Number(m[1]), b]); don.find((o) => String(o.id) === m[1]).status = b.status; return json({ data: {} }); }
+      if (u.pathname.endsWith("/orders")) {
+        const q = u.searchParams.get("search");
+        return json({ data: q ? don.filter((o) => o.bill_phone_number === q) : don });
+      }
+    }
+    return prev39(url, init);
+  };
+  const xt = await ob.previewDrafts(7);
+  const theo = Object.fromEntries(xt.rows.map((r) => [r.id, r]));
+  assert.equal(theo[7], undefined, "don qua 7 ngay khong vao danh sach");
+  assert.equal(theo[6], undefined, "chi don Moi");
+  assert.equal(theo[1].ok, true, "don du thong tin, khach khong co don khac -> chuan");
+  assert.match(theo[2].reasons.join(), /tỉnh \/ huyện \/ xã/);
+  assert.match(theo[3].reasons.join(), /đơn nháp khác #4/, "hai don nhap cung khach -> khong xac nhan don nao");
+  assert.match(theo[5].reasons.join(), /đã có đơn #6/);
+  assert.equal(puts.length, 0, "xem truoc KHONG ghi gi");
+  // Nhan vien sua don #1 sau luc xem -> khong dong vao
+  don[0].items = [{ variation_id: "v1", quantity: 3 }];
+  let r = await ob.confirmDrafts([1, 2]);
+  assert.deepEqual(r.confirmed, []);
+  assert.match(r.failed[0].reason, /nhân viên đã sửa/);
+  assert.equal(puts.length, 0, "don #2 khong chuan thi bo qua du co tick");
+  don[0].items = [{ variation_id: "v1", quantity: 1 }];
+  await ob.previewDrafts(7);
+  r = await ob.confirmDrafts([1]);
+  assert.deepEqual(r.confirmed, [1]);
+  assert.equal(puts[0][1].status, 1);
+  await assert.rejects(ob.confirmDrafts([1]), /cũ/, "xac nhan xong phai xem lai truoc lan sau");
+  globalThis.fetch = prev39;
+
+  // Quet lai theo page + mau chu luc: page dang chi log -> bao loi ro rang; mau chu luc di toi buoc trich don
+  settings.update("PAGE1", { orderSync: true, dryRun: true });
+  assert.throws(() => ob.rescan({ hours: 24, pageId: "PAGE1", defaultCode: "Q005" }), /chỉ log/);
+  settings.update("PAGE1", { orderSync: true, dryRun: false });
+  assert.throws(() => ob.rescan({ hours: 24, pageId: "KHONGCO" }), /Không tìm thấy page/);
+  const goc = { sync: os39.syncFromConversation, other: os39.otherOrders, history: ob.history, clients: bot.clients };
+  const khach = (t) => ({ id: t, from: { id: "KHACH" }, message: t, inserted_at: new Date().toISOString() });
+  bot.clients = new Map([["PAGE1", { getConversations: async () => ({ conversations: [{ id: "C39", updated_at: new Date().toISOString(), from: { name: "Mai" } }] }), getMessages: async () => ({ messages: [khach("sđt 0988000001"), khach("thôn 2 xã Sài Sơn huyện Quốc Oai Hà Nội")] }) }]]);
+  ob.history = async () => ({ messages: [khach("sđt 0988000001"), khach("thôn 2 xã Sài Sơn huyện Quốc Oai Hà Nội")], text: "KHÁCH: ...", name: "Mai" });
+  os39.otherOrders = async () => [];
+  let maDung = null;
+  os39.syncFromConversation = async (a) => ((maDung = a.defaultCode), { status: "skipped", reason: "chưa đủ thông tin: size" });
+  const st = ob.rescan({ hours: 24, pageId: "PAGE1", defaultCode: "q005" });
+  while (st.running) await sleep(20);
+  assert.equal(maDung, "Q005", "mau chu luc nguoi chon di toi buoc trich don");
+  assert.equal(st.pageName !== undefined, true);
+  Object.assign(os39, { syncFromConversation: goc.sync, otherOrders: goc.other });
+  ob.history = goc.history;
+  bot.clients = goc.clients;
+  delete ob.items.C39;
+  settings.global.orderBot = undefined;
+  console.log("OK 39: duyet don Moi 7 ngay (xem truoc khong ghi, don trung khach / thieu dia chi / da co don khong xac nhan, don bi sua giua chung khong dong); quet lai theo page + mau chu luc");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
