@@ -6,12 +6,15 @@ import { NavProgressProvider, NavProgressReset, StaleWhileRefreshing } from "@/c
 import { PageVisitBeacon } from "@/components/page-visit-beacon";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { getCurrentUser, requireUser } from "@/lib/auth/session";
+import { can, getCurrentUser, requireUser } from "@/lib/auth/session";
 import { orgTabMetadata } from "@/lib/branding/copy";
 import { getOrgBrand } from "@/lib/branding/service";
 import Link from "next/link";
 import { loadDynamicNav } from "@/lib/pages/nav-loader";
 import { findOrganization } from "@/lib/platform/organizations";
+import { orgBillingStanding } from "@/lib/billing/standing";
+import { BILLING_STANDING_LABEL } from "@/lib/billing/rules";
+import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +38,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // BẢN NHÁP (0180): tổ chức tự tạo chưa bấm Xuất bản — ERP đang dùng chính là bản xem trước. Chỉ đọc sổ tổ chức (đệm).
   const org = user.organization && !user.organization.isHome ? await findOrganization(user.organization.code) : null;
   const draft = org?.publishState === "DRAFT";
+  // THU PHÍ (0187): nhắc khi còn ≤ 7 ngày / đang ân hạn / đã chỉ xem. Đọc sổ thuê bao qua đệm 10 giây — tổ chức nhà không hỏi.
+  const billing = org ? await orgBillingStanding(org) : null;
+  const billingNotice = billing && (billing.kind === "DUE_SOON" || billing.kind === "OVERDUE" || billing.kind === "LOCKED") ? billing : null;
+  const canPay = can(user, "settings:manage");
   return (
     <TooltipProvider delayDuration={200}>
       <NavProgressProvider>
@@ -67,6 +74,31 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     <Link href="/setup" className="font-semibold underline underline-offset-2">
                       Thiết lập & xuất bản
                     </Link>
+                  </p>
+                ) : null}
+                {billingNotice ? (
+                  <p
+                    className={
+                      billingNotice.kind === "DUE_SOON"
+                        ? "rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                        : "rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+                    }
+                    data-testid="billing-banner"
+                    data-billing-standing={billingNotice.kind}
+                  >
+                    {BILLING_STANDING_LABEL[billingNotice.kind]} —{" "}
+                    {billingNotice.kind === "LOCKED"
+                      ? `đã hết hạn ${formatDate(billingNotice.paidThrough)}: xem và xuất được, chưa tạo / sửa được cho tới khi gia hạn.`
+                      : billingNotice.kind === "OVERDUE"
+                        ? `đã hết hạn ${formatDate(billingNotice.paidThrough)}, từ ${formatDate(billingNotice.lockOn)} tổ chức chuyển sang chỉ xem.`
+                        : `gói trả tới ${formatDate(billingNotice.paidThrough)}.`}{" "}
+                    {canPay ? (
+                      <Link href="/settings/plan" className="font-semibold underline underline-offset-2">
+                        Gia hạn
+                      </Link>
+                    ) : (
+                      "Báo quản trị của tổ chức gia hạn."
+                    )}
                   </p>
                 ) : null}
                 <DetailCrumb />

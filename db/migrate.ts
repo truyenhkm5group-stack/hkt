@@ -78,4 +78,8 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_settings`);
   // 0176 · sổ dùng AI — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_ai_usage`);
+  // 0187 · thu phí thuê bao — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_billing_payments`);
+  await db.execute(sql`delete from platform_invoices`);
+  await db.execute(sql`delete from platform_subscriptions`);
 }

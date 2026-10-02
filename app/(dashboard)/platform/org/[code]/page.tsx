@@ -5,6 +5,8 @@ import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/componen
 import { PageHeader } from "@/components/page-header";
 import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
 import { OrgPlanControl } from "@/components/platform/pilot-ops";
+import { OrgBillingSection } from "@/components/billing/org-billing-section";
+import { loadOrgBilling } from "@/lib/billing/service";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
@@ -81,6 +83,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const d = result.value;
   const o = d.organization;
   const ai = await loadOperatorOrgAi(user, o.code);
+  const billing = o.isHome ? null : await loadOrgBilling(user, o.code);
   const plans = o.isHome ? [] : (await listPlans()).filter((x) => x.key !== HOME_PLAN_KEY).map((x) => ({ key: x.key, name: x.name }));
   const stage = s.pilot?.record.stage ?? null;
 
@@ -117,6 +120,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
       <KillSwitchPanel s={s} connections={d.connections.value ? d.connections.value.map((c) => ({ connectorKey: c.connectorKey, label: c.label, status: c.status })) : null} />
       <PilotPanel s={s} />
       <SupportHealthPanel s={s} />
+      {billing && !("error" in billing) ? <OrgBillingSection orgCode={o.code} orgName={o.name} data={billing} /> : null}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <SectionCard title="Tổ chức & gói" description={`Mẫu ${o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : "—"} · dòng module thiếu = ${o.moduleDefault === "ENABLED" ? "BẬT" : "TẮT"}`} padded={false}>

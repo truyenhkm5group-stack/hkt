@@ -16,9 +16,9 @@ import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_S
  * hệ quả → server action (kiểm lại người vận hành, lý do, ghi nhật ký nền tảng). Không có nút nào ghi mà không qua hộp.
  */
 
-type Outcome = { ok: true; message?: string } | { error: string };
+export type Outcome = { ok: true; message?: string } | { error: string };
 
-function ConfirmWithReason(props: {
+export function ConfirmWithReason(props: {
   id: string;
   label: string;
   title: string;

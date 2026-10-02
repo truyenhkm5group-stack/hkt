@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PlatformAiSwitchControl } from "@/components/ai-usage/ai-controls";
 import { PageHeader } from "@/components/page-header";
+import { PlatformBillingSection } from "@/components/billing/platform-billing-section";
+import { loadPlatformBilling } from "@/lib/billing/service";
 import { InvitePanel, RetrySetupButton, RevokeInviteButton, SignupModeControl } from "@/components/onboarding/platform-signup";
 import { ModuleConfigTable } from "@/components/platform/module-config-table";
 import { SecretsSelfTestButton } from "@/components/platform/secrets-self-test";
@@ -77,7 +79,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const selected = selectedCode ? health.organizations.find((o) => o.code === selectedCode) : undefined;
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
-  const [onboarding, invites, plans, registry, signup, aiSummary] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState(), loadPlatformAiSummary(user)]);
+  const [onboarding, invites, plans, registry, signup, aiSummary, billing] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState(), loadPlatformAiSummary(user), loadPlatformBilling(user)]);
   // Tóm tắt vận hành khách (giai đoạn pilot, luật tạm dừng, người dùng, đăng nhập cuối) — chỉ số đếm + mốc, không ghi vết
   // (vết SUPPORT_VIEW ghi khi mở trang của MỘT tổ chức).
   const support = await listOrgSupportSummaries(user);
@@ -305,6 +307,8 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           </div>
         </div>
       </SectionCard>
+
+      {"error" in billing ? null : <PlatformBillingSection data={billing} />}
 
       {aiSummary.ok ? (
         <SectionCard

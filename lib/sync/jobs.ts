@@ -47,6 +47,7 @@ import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/st
 import { getDb } from "@/db";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
+import { orgBillingStanding } from "@/lib/billing/standing";
 import { canUseModule } from "@/lib/platform/capabilities";
 import type { ModuleKey } from "@/lib/constants/platform-modules";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
@@ -973,7 +974,8 @@ export const HOME_CREDENTIAL_EXEMPT: Readonly<Record<string, string>> = {
 export type JobSkipped =
   | { skipped: "CONNECTOR_NOT_CONFIGURED"; job: string; org: string; connector: string; detail: string }
   | { skipped: "MODULE_DISABLED"; job: string; org: string; module: ModuleKey; detail: string }
-  | { skipped: "ORG_INACTIVE"; job: string; org: string; status: string; detail: string };
+  | { skipped: "ORG_INACTIVE"; job: string; org: string; status: string; detail: string }
+  | { skipped: "BILLING_LOCKED"; job: string; org: string; detail: string };
 
 /** Mọi module mà job cần bật: module chính trước, rồi các module nghiệp vụ đi kèm. */
 export function jobModules(definition: Pick<JobDefinition, "module" | "alsoRequires">): ModuleKey[] {
@@ -998,6 +1000,14 @@ export async function runJob(job: string, options: JobOptions) {
   const target = await findOrganization(orgCode);
   if (target && target.status !== "ACTIVE") {
     const skipped: JobSkipped = { skipped: "ORG_INACTIVE", job, org: orgCode, status: target.status, detail: `Bỏ qua: tổ chức "${orgCode}" đang ${target.status} — không chạy job cho tới khi người vận hành bật lại.` };
+    return skipped;
+  }
+  /*
+    QUÁ HẠN THANH TOÁN, HẾT ÂN HẠN (0187) ⇒ CHỈ XEM: job nền của tổ chức khách BỎ QUA có lý do — job là lượt GHI thay người
+    dùng. Webhook vẫn được nhận (tin khách nhắn tới không được mất); tổ chức nhà không bao giờ bị chặn.
+  */
+  if (target && !target.isHome && (await orgBillingStanding(target)).kind === "LOCKED") {
+    const skipped: JobSkipped = { skipped: "BILLING_LOCKED", job, org: orgCode, detail: `Bỏ qua: tổ chức "${orgCode}" đang chỉ xem vì quá hạn thanh toán — job chạy lại ngay khi gia hạn.` };
     return skipped;
   }
   return withOrganization(orgCode, async () => {

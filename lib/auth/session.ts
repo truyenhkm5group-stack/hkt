@@ -12,12 +12,14 @@ import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
 import { hostOrganization } from "@/lib/platform/host-org";
-import { ERP_PATH_HEADER, SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, SESSION_ORG_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
-import { DENY_REASON_PARAM, MODULE_DISABLED_PATH, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
+import { ERP_METHOD_HEADER, ERP_PATH_HEADER, SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, SESSION_ORG_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
+import { BILLING_LOCKED_PATH, DENY_REASON_PARAM, MODULE_DISABLED_PATH, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
 import { moduleOfPath, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
 import { getEnabledModules } from "@/lib/platform/capabilities";
 import { currentOrganization, OrgContextError, readSessionTokenRaw } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
+import { billingWriteDenied } from "@/lib/billing/rules";
+import { orgBillingStanding } from "@/lib/billing/standing";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -167,6 +169,21 @@ export function setRequestPathSourceForTests(source: (() => string | null | unde
   requestPathOverride = source;
 }
 
+/** MÓC KIỂM THỬ cho `x-erp-method` (cổng chỉ xem của thu phí) — cùng ý với móc đường dẫn ở trên. */
+let requestMethodOverride: (() => string | null | undefined) | null = null;
+export function setRequestMethodSourceForTests(source: (() => string | null | undefined) | null) {
+  requestMethodOverride = source;
+}
+
+async function requestMethod(): Promise<string | null> {
+  if (requestMethodOverride) return requestMethodOverride() ?? null;
+  try {
+    return (await headers()).get(ERP_METHOD_HEADER);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Đường dẫn của request hiện hành, do middleware đặt (`x-erp-path`, client không giả được — xem
  * `middleware.ts`). `null` = không có request (script, job) ⇒ không có cổng module theo đường dẫn;
@@ -255,6 +272,19 @@ export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
   const path = await requestPath();
   const pathModule = path ? moduleOfPath(path) : null;
   if (pathModule && !(ket.user.modules ?? []).includes(pathModule)) return { denied: "MODULE_DISABLED", module: pathModule };
+  /*
+    CỔNG CHỈ XEM CỦA THU PHÍ (0187). Đứng SAU mọi cổng khác vì nó hẹp nhất: chỉ chặn lượt GHI (server action, API không
+    phải GET) của tổ chức khách đã quá hạn thanh toán và hết ân hạn. Lượt đọc không chạm sổ thuê bao — chỉ lượt ghi của tổ
+    chức khách mới hỏi (đệm 10 giây). Trang gia hạn và đường đăng xuất được miễn (`BILLING_WRITE_EXEMPT_PATHS`).
+  */
+  const org = ket.user.organization;
+  if (org && !org.isHome) {
+    const method = await requestMethod();
+    if (method && method !== "GET" && method !== "HEAD") {
+      const standing = await orgBillingStanding(org);
+      if (billingWriteDenied({ isHome: org.isHome, standing: standing.kind, method, path })) return { denied: "BILLING_LOCKED" };
+    }
+  }
   return ket;
 });
 
@@ -389,6 +419,8 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
     // Module chưa bật KHÔNG phải lỗi phiên: người dùng vẫn đăng nhập hợp lệ, chỉ trang này không dùng
     // được. Đưa họ về `/login` là bắt đăng nhập lại để rồi bị chặn đúng chỗ cũ.
     if (ket.denied === "MODULE_DISABLED" && ket.module) redirect(`${MODULE_DISABLED_PATH}?m=${encodeURIComponent(ket.module)}`);
+    // Quá hạn thanh toán: phiên hợp lệ, chỉ lượt GHI bị chặn ⇒ trang giải thích, không phải `/login`.
+    if (ket.denied === "BILLING_LOCKED") redirect(BILLING_LOCKED_PATH);
     redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
   }
   const user = ket.user;

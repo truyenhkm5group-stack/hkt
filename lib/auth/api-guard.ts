@@ -14,12 +14,13 @@ import { can, permissionModuleDisabled, resolveCurrentUser, type SessionUser } f
  *  · 403 `MODULE_DISABLED` — đường dẫn, hoặc khoá quyền được đòi, thuộc module tổ chức chưa bật.
  *  · 403 `ORG_INACTIVE` — tổ chức của phiên đang tạm ngừng / không còn.
  *  · 403 `FORBIDDEN` — thiếu khoá quyền được đòi.
+ *  · 402 `BILLING_LOCKED` — lượt GHI của tổ chức đang chỉ xem vì quá hạn thanh toán (0187); lượt đọc vẫn đi.
  *
  * Route cũ trả chữ trần (tệp xuất, ảnh, SSE) dùng `format: "text"` để thân phản hồi giữ nguyên dạng;
  * mã trạng thái là thứ trình duyệt và `fetch` đọc, và nó giống hệt nhau ở hai dạng.
  */
 
-export type ApiDenyCode = "UNAUTHENTICATED" | "MODULE_DISABLED" | "ORG_INACTIVE" | "FORBIDDEN";
+export type ApiDenyCode = "UNAUTHENTICATED" | "MODULE_DISABLED" | "ORG_INACTIVE" | "FORBIDDEN" | "BILLING_LOCKED";
 
 export type ApiGuardOptions = {
   /** `json` (mặc định): `{ ok: false, error, code }`. `text`: chỉ câu lỗi, cho route trước đây trả chữ trần. */
@@ -33,9 +34,10 @@ export const API_DENY_MESSAGE: Record<ApiDenyCode, string> = {
   MODULE_DISABLED: "Chức năng này chưa được bật cho tổ chức của bạn",
   ORG_INACTIVE: "Tổ chức của phiên đăng nhập đang tạm ngừng hoặc không còn tồn tại",
   FORBIDDEN: "Không có quyền",
+  BILLING_LOCKED: "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán — gia hạn ở Hệ thống → Gói & thanh toán",
 };
 
-function deny(status: 401 | 403, code: ApiDenyCode, opts: ApiGuardOptions, extra: { module?: string; message?: string } = {}): NextResponse {
+function deny(status: 401 | 402 | 403, code: ApiDenyCode, opts: ApiGuardOptions, extra: { module?: string; message?: string } = {}): NextResponse {
   const error = extra.message ?? API_DENY_MESSAGE[code];
   if (opts.format === "text") return new NextResponse(error, { status, headers: { "x-erp-deny": code } });
   return NextResponse.json({ ok: false, error, code, ...(extra.module ? { module: extra.module } : {}) }, { status });
@@ -58,6 +60,7 @@ export async function apiGuard(permission?: Permission | null, opts: ApiGuardOpt
   if ("denied" in ket) {
     if (ket.denied === "MODULE_DISABLED") return deny(403, "MODULE_DISABLED", opts, { module: ket.module });
     if (ket.denied === "ORG_INACTIVE") return deny(403, "ORG_INACTIVE", opts);
+    if (ket.denied === "BILLING_LOCKED") return deny(402, "BILLING_LOCKED", opts);
     return deny(401, "UNAUTHENTICATED", opts);
   }
   const user = ket.user;
