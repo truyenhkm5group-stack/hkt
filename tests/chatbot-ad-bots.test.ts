@@ -120,7 +120,7 @@ export async function testChatbotAdBots() {
   assert.equal(adTestReadiness({ ...rdy, pancakePageIds: null }).canGoLive, true, "CHƯA BIẾT không chặn bật");
   const noToken = adTestReadiness({ ...rdy, botPage: null });
   assert.equal(noToken.checks.find((c) => c.key === "TOKEN")?.status, "MISSING");
-  assert.ok(noToken.checks.find((c) => c.key === "TOKEN")?.fix.includes("Thêm page"), "dòng thiếu nói CÁCH bổ sung");
+  assert.ok(noToken.checks.find((c) => c.key === "TOKEN")?.fix.includes("Tự lấy token"), "dòng thiếu nói CÁCH bổ sung — và trỏ tới nút ngay trong khung");
   assert.equal(noToken.canGoLive, false);
   assert.equal(rst({ ...rdy, botPage: { ...rdy.botPage!, dryRun: true } }).SEND, "WARN", "chỉ log là cảnh báo, chat thử vẫn chạy");
   assert.equal(adTestReadiness({ ...rdy, botPage: { ...rdy.botPage!, dryRun: true } }).canChat, true);
@@ -145,6 +145,24 @@ export async function testChatbotAdBots() {
   assert.equal(mDraft.lines[0].state, "TEST_DRAFT");
   assert.equal(mDraft.push[0].enabled, false, "quảng cáo dựng tay cũng bắt đầu TẮT, chỉ chat thử");
 
+  // ── Nạp page vào bot từ khung Chat test: vào ở trạng thái TẮT, token không về trình duyệt / nhật ký ──
+  const admin = readFileSync("chatbot/src/admin.js", "utf8");
+  const addAt = admin.indexOf('m("POST", "/api/pages")');
+  const offAt = admin.indexOf("body.enabled === false && !bot.clients.has(pageId)) settings.update(pageId, { enabled: false })", addAt);
+  const attachAt = admin.indexOf("bot.addPage(pageId, token", addAt);
+  assert.ok(addAt > 0 && offAt > addAt && offAt < attachAt, "bot ghi TẮT cho page TRƯỚC khi gắn client — không có khoảnh khắc nào bot trả lời khách thật của page mới");
+  const svc = readFileSync("lib/integrations/chatbot/ad-test.ts", "utf8");
+  const connect = svc.slice(svc.indexOf("export async function connectPageToBot"), svc.indexOf("export async function setBotPageEnabled"));
+  assert.ok(connect.includes("enabled: false"), "page nạp từ Chat test luôn vào bot ở trạng thái TẮT");
+  assert.ok(connect.includes('t.key !== "page_access_token"'), "không sinh được token của PAGE thì không gửi khoá người dùng sang bot");
+  assert.ok(!/return \{[^}]*[{,]\s*token\s*[:,}]/.test(connect), "hàm nạp không trả token về người gọi");
+  const act = readFileSync("lib/actions/chatbot-ad-test.ts", "utf8");
+  const connectAct = act.slice(act.indexOf("export async function connectPageToBotAction"), act.indexOf("export async function setBotPageEnabledAction"));
+  const auditCall = connectAct.slice(connectAct.indexOf("await audit("), connectAct.indexOf(");", connectAct.indexOf("await audit(")));
+  assert.ok(!/\btoken\s*[:,}]|p\.data\b(?!\.campKey)/.test(auditCall.replace("tokenSource", "")), "nhật ký không ghi token (chỉ ghi nguồn: tự sinh / dán tay)");
+  assert.ok(connectAct.includes('can(user, "cs:config")'), "nạp page vào bot cần quyền quản trị bot (cs:config)");
+
+  console.log("✓ Nạp page từ Chat test: page vào bot ở trạng thái TẮT (ghi trước khi gắn), không gửi nhầm khoá người dùng, token không về trình duyệt / nhật ký, cần cs:config");
   console.log("✓ Quảng cáo dựng tay theo ID: khoá ad:<ID> không lẫn id mẩu, bắt buộc fanpage, chưa có mẫu ⇒ không bot riêng, có mẫu (ảnh tải lên) ⇒ chat thử trước, bật sau");
   console.log("✓ Chat test mẫu mới: thiếu giá / chất vải / ảnh ⇒ không gửi, chưa bật ⇒ bot chỉ chat thử, trần ảnh theo ngày VN chặn trước khi gọi AI, bảng kiểm page tách THIẾU / CHƯA BIẾT / CẢNH BÁO kèm cách bổ sung");
   console.log("✓ Bot riêng theo quảng cáo: gộp ad_id, không đoán mẫu cho QC chưa gắn mã, ghi đè bật/tắt/mã, công tắc chung, gói ERP qua được bộ kiểm của bot");

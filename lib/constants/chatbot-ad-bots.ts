@@ -330,10 +330,10 @@ export function adTestReadiness(i: ReadinessInput): { checks: ReadinessCheck[]; 
       ? { key: "TOKEN", label: "Bot có token Pancake của page", status: "UNKNOWN", detail: "Chưa kiểm được.", fix: "" }
       : hasToken
         ? { key: "TOKEN", label: "Bot có token Pancake của page", status: "OK", detail: "", fix: "" }
-        : { key: "TOKEN", label: "Bot có token Pancake của page", status: "MISSING", detail: "Bot chưa có page này nên không đọc / trả lời được tin.", fix: "Trang Bot chat bán hàng → ＋ Thêm page → dán Page Access Token (Pancake → page → Cài đặt → Công cụ → Page Access Token, dạng eyJ…)." },
+        : { key: "TOKEN", label: "Bot có token Pancake của page", status: "MISSING", detail: "Bot chưa có page này nên không đọc / trả lời được tin.", fix: "Bấm \"Tự lấy token & nạp vào bot\" ngay bên dưới, hoặc dán Page Access Token (Pancake → page → Cài đặt → Công cụ → Page Access Token, dạng eyJ…)." },
   );
   if (hasToken && i.botPage) {
-    c.push(i.botPage.enabled ? { key: "ENABLED", label: "Bot đang bật cho page", status: "OK", detail: "", fix: "" } : { key: "ENABLED", label: "Bot đang bật cho page", status: "MISSING", detail: "Bot đang TẮT cho page này.", fix: "Trang Bot chat → chọn page → tab Cài đặt → bật bot." });
+    c.push(i.botPage.enabled ? { key: "ENABLED", label: "Bot đang bật cho page", status: "OK", detail: "", fix: "" } : { key: "ENABLED", label: "Bot đang bật cho page", status: "MISSING", detail: "Bot đang TẮT cho page này (chat thử vẫn chạy).", fix: "Bấm \"Bật bot cho page này\" ngay bên dưới khi muốn bot trả lời khách thật — bot sẽ trả lời MỌI tin nhắn vào page." });
     c.push(!i.botPage.dryRun ? { key: "SEND", label: "Bot được gửi tin thật", status: "OK", detail: "", fix: "" } : { key: "SEND", label: "Bot được gửi tin thật", status: "WARN", detail: "Đang ở chế độ \"chỉ log\": bot soạn trả lời nhưng KHÔNG gửi cho khách (chat thử vẫn chạy).", fix: "Trang Bot chat → tắt \"Chỉ log\" (chung hoặc của page) khi muốn bot trả lời khách thật." });
     c.push(i.botPage.pauseTagId ? { key: "TAG", label: "Tag chuyển nhân viên (BOT OFF)", status: "OK", detail: "", fix: "" } : { key: "TAG", label: "Tag chuyển nhân viên (BOT OFF)", status: "WARN", detail: "Page chưa có tag tắt bot: bot chốt xong không chuyển được cho nhân viên.", fix: "Trên Pancake tạo tag \"BOT OFF\" cho page rồi bấm Làm mới ở trang Bot chat." });
     c.push(

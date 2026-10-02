@@ -391,3 +391,65 @@ export async function setAdTestPage(i: { campKey: string; pageId: string }, acto
   const push = await saveOverride(camp.adId, (o) => ({ ...(o ?? { updatedByUserId: null, updatedByName: "", updatedAt: "" }), pageId: i.pageId }), actor);
   return { ok: true, push };
 }
+
+/**
+ * Nạp page của camp vào bot ngay từ khung Chat test. Token lấy theo thứ tự: người DÁN tay → ERP tự sinh Page Access Token
+ * bằng khoá Pancake của shop (`pageToken`, cùng đường đồng bộ hội thoại đang dùng). Token đi thẳng máy chủ ERP → bot,
+ * KHÔNG về trình duyệt, KHÔNG vào nhật ký. Page vào bot ở trạng thái TẮT (`enabled: false` ghi trước khi gắn) —
+ * thêm page là bot đọc MỌI tin của page, nên bật là một bước riêng có xác nhận.
+ */
+export async function connectPageToBot(i: { campKey: string; token?: string }): Promise<{ ok: true; generated: boolean } | { ok: false; error: string }> {
+  const camp = await campByKey(i.campKey);
+  if (!camp) return { ok: false, error: "Không tìm thấy camp." };
+  if (!camp.pageId) return { ok: false, error: "Chưa biết fanpage của camp — chọn fanpage ở ô \"Fanpage của camp\" trước." };
+  let token = (i.token ?? "").trim();
+  let generated = false;
+  if (!token) {
+    try {
+      const t = await getPancakePagesClient().pageToken(camp.pageId);
+      // Không sinh được thì client lùi về khoá NGƯỜI DÙNG — khoá đó không phải token của page, không gửi sang bot.
+      if (t.key !== "page_access_token" || !t.value) return { ok: false, error: "ERP không tự lấy được token cho page này (tài khoản Pancake của ERP không quản lý page, hoặc page chưa vào gói Pancake). Dán Page Access Token tay: Pancake → page → Cài đặt → Công cụ → Page Access Token." };
+      token = t.value;
+      generated = true;
+    } catch (e) {
+      return { ok: false, error: `ERP không tự lấy được token (${e instanceof Error ? e.message : String(e)}). Dán Page Access Token tay.` };
+    }
+  }
+  const pancake = await readPancakePageIds();
+  try {
+    const res = await chatbotFetch("/api/pages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pageId: camp.pageId, token, name: pancake.names.get(camp.pageId) ?? "", enabled: false }),
+      timeoutMs: 30_000,
+    });
+    if (!res.ok) {
+      const b = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: b.error || `Bot trả HTTP ${res.status}` };
+    }
+  } catch (e) {
+    return { ok: false, error: `Không gửi được sang bot: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return { ok: true, generated };
+}
+
+/** Bật / tắt bot cho page của camp (bật = bot trả lời MỌI tin nhắn vào page, không riêng khách của quảng cáo). */
+export async function setBotPageEnabled(i: { campKey: string; enabled: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const camp = await campByKey(i.campKey);
+  if (!camp?.pageId) return { ok: false, error: "Chưa biết fanpage của camp." };
+  try {
+    const res = await chatbotFetch(`/api/pages/${encodeURIComponent(camp.pageId)}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: i.enabled }),
+      timeoutMs: 8000,
+    });
+    if (!res.ok) {
+      const b = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: res.status === 404 ? "Bot chưa có page này — nạp token trước." : b.error || `Bot trả HTTP ${res.status}` };
+    }
+  } catch (e) {
+    return { ok: false, error: `Không gửi được sang bot: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return { ok: true };
+}

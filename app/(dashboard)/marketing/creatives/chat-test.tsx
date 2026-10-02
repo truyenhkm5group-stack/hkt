@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { addAdTestColorAction, chatAdTestAction, loadAdTestAction, removeAdTestColorAction, saveAdTestInfoAction, setAdTestLiveAction, setAdTestPageAction, uploadAdTestColorAction } from "@/lib/actions/chatbot-ad-test";
+import { addAdTestColorAction, chatAdTestAction, loadAdTestAction, removeAdTestColorAction, saveAdTestInfoAction, setAdTestLiveAction, setAdTestPageAction, uploadAdTestColorAction, connectPageToBotAction, setBotPageEnabledAction } from "@/lib/actions/chatbot-ad-test";
 import type { AdTestView, ReadinessStatus } from "@/lib/constants/chatbot-ad-bots";
 
 /**
@@ -129,7 +129,77 @@ function Readiness({ view }: { view: AdTestView }) {
         ))}
       </ul>
       <PagePicker view={view} />
+      <BotPageControls view={view} />
     </Section>
+  );
+}
+
+/**
+ * Nạp page vào bot NGAY TẠI ĐÂY: "Tự lấy token" (ERP sinh Page Access Token bằng khoá Pancake của shop) hoặc dán tay.
+ * Token không bao giờ về trình duyệt; page vào bot ở trạng thái TẮT, bật là nút riêng có xác nhận.
+ */
+function BotPageControls({ view }: { view: AdTestView }) {
+  const [pending, start] = useTransition();
+  const [token, setToken] = useState("");
+  const st = (k: string) => view.readiness.find((c) => c.key === k)?.status;
+  const needToken = st("TOKEN") === "MISSING";
+  const needEnable = st("ENABLED") === "MISSING";
+  if (!needToken && !needEnable) return null;
+  const act = (fn: () => Promise<{ ok: true; message: string; warning: string | null } | { error: string }>) =>
+    start(async () => {
+      const r = await fn();
+      if ("error" in r) toast.error(r.error);
+      else toast.success(r.message);
+      window.dispatchEvent(new CustomEvent("chat-test-reload"));
+    });
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">
+      {needToken ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={pending} onClick={() => act(() => connectPageToBotAction({ campKey: view.campKey }))}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+              Tự lấy token &amp; nạp page vào bot
+            </Button>
+            <span className="text-xs text-muted-foreground">ERP dùng khoá Pancake của shop để sinh token cho page — không cần copy.</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input className="h-8 w-72 font-mono" type="password" autoComplete="off" placeholder="hoặc dán Page Access Token (eyJ…)" value={token} onChange={(e) => setToken(e.target.value)} />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || !token.trim()}
+              onClick={() =>
+                act(async () => {
+                  const r = await connectPageToBotAction({ campKey: view.campKey, token: token.trim() });
+                  if (!("error" in r)) setToken("");
+                  return r;
+                })
+              }
+            >
+              Nạp token
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Page vào bot ở trạng thái TẮT: chat thử được ngay, bot chưa trả lời khách thật nào của page.</p>
+        </>
+      ) : null}
+      {needEnable ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              if (!window.confirm(`Bật bot cho page "${view.pageName ?? view.pageId}"? Bot sẽ trả lời MỌI tin nhắn vào page này, không riêng khách bấm quảng cáo.`)) return;
+              act(() => setBotPageEnabledAction(view.campKey, true));
+            }}
+          >
+            Bật bot cho page này
+          </Button>
+          <span className="text-xs text-muted-foreground">Chỉ cần khi muốn bot trả lời khách thật. Chat thử không cần bật.</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
