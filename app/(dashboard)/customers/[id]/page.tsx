@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { cn } from "@/lib/utils";
-import { requirePermission, type SessionUser } from "@/lib/auth/session";
+import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { CustomerProfileForm } from "@/app/(dashboard)/customers/[id]/customer-profile-form";
 import { objectDef } from "@/lib/constants/object-registry";
 import { isManualOrderId } from "@/lib/constants/manual-orders";
@@ -30,6 +30,7 @@ import { customerBasicsGate } from "@/lib/records/customer-create";
 import { manualOrderOrgGate } from "@/lib/records/order-create";
 import { CustomerTradeSection } from "@/components/trade/customer-trade-section";
 import { CustomerReorderSection } from "@/components/reorder/customer-reorder-section";
+import { CustomerAppointmentsSection } from "@/components/appointments/customer-appointments-section";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -133,6 +134,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
       {showTrade ? <CustomerTradeSection user={user} customerId={customer.id} /> : null}
       {showTrade ? <CustomerReorderSection user={user} customerId={customer.id} /> : null}
+      {moduleOn(user, "appointments") && can(user, "appointments:view") ? <CustomerAppointmentsSection user={user} customerId={customer.id} /> : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">

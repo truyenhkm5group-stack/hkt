@@ -243,6 +243,17 @@ export const PERMISSION_GROUPS = [
       { key: "ai_sales:manage", label: "AI bán hàng: cấu hình & xuất bản chatbot", hint: "Chọn khoá AI, giọng điệu, giờ làm việc, chính sách chuyển người / chốt đơn, công cụ bot được dùng; chạy khung thử; bật trang chat công khai." },
     ],
   },
+  /*
+    LỊCH HẸN & LIỆU TRÌNH (0190, module `appointments`): xem lịch theo ngày / theo khách; ghi = đặt / đổi giờ / đổi kỹ thuật
+    viên / chuyển trạng thái / huỷ (có lý do) và mở liệu trình cho khách.
+  */
+  {
+    module: "Lịch hẹn",
+    items: [
+      { key: "appointments:view", label: "Lịch hẹn: xem lịch & liệu trình", hint: "Xem lịch hẹn theo ngày, theo kỹ thuật viên, theo khách; xem số buổi còn của liệu trình." },
+      { key: "appointments:write", label: "Lịch hẹn: đặt / đổi / huỷ & mở liệu trình", hint: "Đặt lịch, đổi giờ / kỹ thuật viên, ghi khách tới / làm xong / không tới, huỷ có lý do; mở liệu trình N buổi cho khách." },
+    ],
+  },
 ] as const;
 
 /**
@@ -345,7 +356,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     phải rơi về phía HẸP HƠN.
   */
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
+  // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

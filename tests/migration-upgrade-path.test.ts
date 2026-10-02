@@ -137,6 +137,7 @@ const MOI = [
   "0187_platform_billing",
   "0188_price_lists_receivables",
   "0189_customer_touchpoints",
+  "0190_appointments",
 ] as const;
 
 /*

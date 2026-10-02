@@ -58,6 +58,7 @@ export const MODULE_KEYS = [
   "integrations",
   "apps",
   "ai_sales",
+  "appointments",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -486,6 +487,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["ai_sales:view", "ai_sales:manage"],
     homeOptIn: true,
     why: "Bot trả lời KHÁCH của shop — khác AI Builder (soạn cấu hình ERP) và khác bot Pancake của tổ chức nhà (`connector_pancake`). Giá và tồn luôn đọc từ ERP qua công cụ, không nằm trong lời nhắc. Mọi lượt ghi (khách, đơn) đi qua ĐÚNG lõi tạo tay của khách / đơn — không đường ghi thứ hai. Tắt cho tổ chức nhà (0180).",
+  },
+  {
+    key: "appointments",
+    label: "Lịch hẹn & liệu trình",
+    description: "Ngành dịch vụ có lịch (spa, salon, phòng khám, gym): đặt lịch theo kỹ thuật viên, chặn trùng giờ, khách tới / làm xong / không tới, liệu trình N buổi trả trước tự trừ buổi.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["customers", "products"],
+    features: [],
+    routes: ["/appointments"],
+    permissions: ["appointments:view", "appointments:write"],
+    homeOptIn: true,
+    why: "Lịch là trục của ngành dịch vụ — khác hẳn đơn hàng giao đi. Dịch vụ là mẫu mã của module Sản phẩm (giá, tên), khách là khách của module Khách hàng; số buổi liệu trình KHÔNG lưu thành cột mà đếm từ lịch đã làm. Tắt cho tổ chức nhà (0190).",
   },
 ];
 

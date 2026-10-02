@@ -450,6 +450,7 @@ import { testPilotOrders } from "./pilot-orders.test";
 import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testSeafoodOs } from "./seafood-os.test";
+import { testAppointments } from "./appointments.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPilotOps } from "./pilot-ops.test";
@@ -2622,6 +2623,8 @@ async function main() {
   await testReorderReminders();
   // Seafood OS · mẫu hải sản + chatbot báo giá sỉ: tổ chức THẬT `sf-si` (không Pancake; tự cấp, tự dọn).
   await testSeafoodOs();
+  // Lịch hẹn & liệu trình (0190) + mẫu spa: tổ chức THẬT `ap-spa` (tự cấp, tự dọn).
+  await testAppointments();
   await testSelfServiceJourney();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
