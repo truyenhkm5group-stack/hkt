@@ -5,6 +5,7 @@ import { log } from "./logger.js";
 import { sortChrono, parseTs } from "./util.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds } from "./adpersona.js";
+import { isOrderSummaryReply } from "./bot.js";
 
 /**
  * ═══════════ BOT LÊN ĐƠN (độc lập với bot tư vấn) ═══════════
@@ -50,6 +51,24 @@ export class OrderBot {
    * phut (`dueNow`: kiem ngay o luot quet toi — dung khi gieo lai danh sach sau reset). Khach nhan them thong tin moi sau
    * khi da sang "can duyet" / "bo qua" thi mo lai voi bo dem moi.
    */
+  /**
+   * Moc tin khach DONG Y ban chot don cua shop: tin DAU TIEN cua khach sau ban chot moi nhat la mot cau dong y ngan
+   * ("Ok", "đúng rồi", "chốt"). Tin dau tien la sua thong tin / hoi them -> null (de nhip 30 phut lo).
+   */
+  confirmedSummaryAt(pageId, messages) {
+    const ds = sortChrono(messages);
+    let k = -1;
+    for (let i = ds.length - 1; i >= 0; i--) {
+      if (this.bot.isFromPage(ds[i], pageId) && isOrderSummaryReply(this.bot.messageText(ds[i]), false)) { k = i; break; }
+    }
+    if (k < 0) return null;
+    const dau = ds.slice(k + 1).find((m) => !this.bot.isFromPage(m, pageId));
+    if (!dau) return null;
+    const t = String(this.bot.messageText(dau) || "").trim();
+    if (t.length > 40 || !/^(ok|oke|okie|okay|ô kê|ừ|uh|uk|ukm|vâng|đúng|chuẩn|chốt|yes|ok em|được rồi)(?![a-zà-ỹ])/i.test(t)) return null;
+    return parseTs(dau.inserted_at) || Date.now();
+  }
+
   notify(pageId, conversationId, messages, customerName = "", adIds = [], { dueNow = false } = {}) {
     if (!this.enabledFor(pageId)) return;
     // Hoi thoai cua MAU TEST MOI (chua co tren POS): khong len don (chu shop: chi len don khi mau thang)
@@ -68,6 +87,13 @@ export class OrderBot {
     cur.facts = { phone: f.phone, address: f.address, size: f.size, color: f.color };
     const doi = !moi && cur.fingerprint !== dauVet;
     cur.fingerprint = dauVet;
+    // Khach vua DONG Y ban chot don cua bot ("Ok", "đúng rồi", "chốt") -> kiem ngay o luot quet toi, khong doi du 30 phut
+    // (chu shop 02/10/2026, don Ha Dang: khach "Ok" ma don van "Mới, chưa có sản phẩm"). Moi tin dong y chi kich MOT lan.
+    const dongY = this.confirmedSummaryAt(pageId, messages);
+    if (dongY && cur.status === "PENDING" && dongY > (cur.agreedAt || 0)) {
+      cur.agreedAt = dongY;
+      cur.nextCheckAt = Math.min(cur.nextCheckAt || now, now);
+    }
     if (doi && cur.status !== "PENDING") {
       // Da len don / can duyet / bo qua ma khach gui thong tin moi -> theo doi lai tu dau
       cur.status = "PENDING";

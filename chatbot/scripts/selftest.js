@@ -1298,6 +1298,26 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   await ob.sweep();
   assert.equal(soLanAI, 3, "da can duyet thi thoi kiem");
   assert.equal(ob.list().counts.review >= 1, true);
+  // (e2) Khach DONG Y ban chot don ("Ok") -> kiem ngay o luot quet toi, khong doi 30 phut; moi tin dong y kich mot lan
+  // (don Ha Dang 02/10/2026: khach "Ok" roi "Thanks!" ma don van "Mới, chưa có sản phẩm")
+  {
+    const tinL = (from, t, giay) => ({ from: { id: from }, message: t, inserted_at: new Date(Date.UTC(2026, 9, 2, 13, 0, giay)).toISOString() });
+    const chot = "Dạ em chốt đơn cho chị:\n• Đầm Q005 Đen XL x 1\n• Tổng: 849.000đ\n• SĐT: 0903367786\n• Địa chỉ: 25/13 Bà Lê Chân, Tân Định, Q1 HCM";
+    const hoi = [tinL("KHACH", "Cho2 đầm 1 đen 1 đỏ. 25/13 Bà Lê Chân, Tân Định, Q1 HCM 0903367786", 1), tinL("PAGE1", chot, 2)];
+    ob.notify("PAGE1", "C33ok", hoi, "Ha");
+    assert.ok(ob.items.C33ok.nextCheckAt > Date.now() + 29 * 60e3, "chua dong y -> doi 30 phut");
+    const daOk = [...hoi, tinL("KHACH", "Ok", 3), tinL("PAGE1", "Dạ em cảm ơn chị nhiều ạ", 4), tinL("KHACH", "Thanks !", 5)];
+    ob.notify("PAGE1", "C33ok", daOk, "Ha");
+    assert.ok(ob.items.C33ok.nextCheckAt <= Date.now(), "khach Ok ban chot -> kiem ngay");
+    ob.items.C33ok.nextCheckAt = Date.now() + 30 * 60e3;
+    ob.notify("PAGE1", "C33ok", daOk, "Ha");
+    assert.ok(ob.items.C33ok.nextCheckAt > Date.now(), "cung tin Ok khong kich lai lan nua");
+    // Tin dau tien sau ban chot la SUA thong tin -> khong phai dong y
+    assert.equal(ob.confirmedSummaryAt("PAGE1", [...hoi, tinL("KHACH", "sửa giúp chị địa chỉ số 25/15 nhé", 3), tinL("KHACH", "ok", 4)]), null);
+    assert.equal(ob.confirmedSummaryAt("PAGE1", [...hoi, tinL("KHACH", "okhông được, đổi size L", 3)]), null);
+    assert.equal(ob.confirmedSummaryAt("PAGE1", [tinL("PAGE1", "Chị lấy màu nào ạ?", 1), tinL("KHACH", "ok", 2)]), null, "khong co ban chot -> khong kich");
+    delete ob.items.C33ok;
+  }
   ob.dismiss("C33e");
   assert.equal(ob.items.C33e.status, "DISMISSED");
   // Khach gui them dia chi sau khi da bo qua -> mo lai, bo dem moi
@@ -1323,7 +1343,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   catalog.setProducts(prevProducts33);
   Object.assign(os33, geoGoc);
   globalThis.fetch = prev33;
-  console.log("OK 33: bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS); co SDT -> kiem 30 phut/lan, du thi len don va thoi, 3 lan chua du -> can duyet + bao ERP");
+  console.log("OK 33 (+ khach Ok ban chot -> kiem ngay): bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS); co SDT -> kiem 30 phut/lan, du thi len don va thoi, 3 lan chua du -> can duyet + bao ERP");
 }
 
 // ---- 35: TU XAC NHAN don chac chan + QUET LAI hoi thoai cu (chu shop 30/09/2026: "quet lai cac don cu ... neu da
