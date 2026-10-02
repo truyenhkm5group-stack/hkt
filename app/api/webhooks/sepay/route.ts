@@ -28,6 +28,8 @@ import { withOrganization } from "@/lib/platform/context";
 import { resolveWebhookOrganization } from "@/lib/platform/webhooks";
 import { after } from "next/server";
 import { getDb } from "@/db";
+import { extractTransferCodes } from "@/lib/billing/rules";
+import { reconcileBillingPayments } from "@/lib/billing/service";
 import { staleMemo } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { applyBankRules } from "@/lib/integrations/bank/apply-rules";
@@ -154,6 +156,16 @@ async function handlePost(request: NextRequest) {
         staleMemo();
       } catch (error) {
         console.error(`[sepay-webhook] gán nhãn hỏng cho ${transactionId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // TIỀN THUÊ BAO NỀN TẢNG (0187): chỉ khi nội dung mang mã `ERPHD…` — mọi giao dịch khác không tốn thêm câu nào.
+      // Hỏng ở đây không mất tiền: khoản vẫn nằm trong sổ ngân hàng, nút «Đối chiếu lại» ở /platform quét lại được.
+      if (parsed.txn.direction === "in" && extractTransferCodes(parsed.txn.content).length > 0) {
+        try {
+          const r = await reconcileBillingPayments({ lookbackDays: 3 });
+          if (r.errors.length) console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${r.errors.join(" · ")}`);
+        } catch (error) {
+          console.error(`[sepay-webhook] đối chiếu thuê bao hỏng: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }));
   }

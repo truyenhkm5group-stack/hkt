@@ -4,7 +4,7 @@ import { hostSlug } from "@/lib/platform/host";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
-  ERP_PATH_HEADER,
+  ERP_METHOD_HEADER, ERP_PATH_HEADER,
   SESSION_COOKIE,
   claimsFrom,
   cookieMaxAgeSec,
@@ -99,6 +99,7 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
   const clientSent = [...headers.keys()].filter((name) => name.toLowerCase().startsWith(ERP_HEADER_PREFIX));
   for (const name of clientSent) headers.delete(name);
   headers.set(ERP_PATH_HEADER, pathname);
+  headers.set(ERP_METHOD_HEADER, request.method);
   // Tên miền con (0180): đặt SAU khi xoá header client — trình duyệt không tự khai được mình đang ở ERP nào.
   const slug = hostSlug(request.headers.get("host"), process.env.PLATFORM_BASE_DOMAIN);
   if (slug) headers.set(ERP_HOST_SLUG_HEADER, slug);

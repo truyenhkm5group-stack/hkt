@@ -187,6 +187,7 @@ export function testNavigationCoverage() {
   const INTENTIONALLY_UNLINKED: Record<string, string> = {
     "/settings/profile": "vào từ menu người dùng ở góc dưới, không phải điều hướng chính",
     "/module-disabled": "ĐÍCH chuyển hướng khi mở trang của module đang tắt (`?m=<khoá>`) — không phải một màn hình để chọn từ menu",
+    "/billing-locked": "ĐÍCH chuyển hướng khi một lượt ghi bị chặn vì quá hạn thanh toán (0187) — lối vào gia hạn là dải nhắc ở bố cục + /settings/plan",
     "/inventory/planning/orders": "danh sách con của Kế hoạch SX, vào từ chính trang đó",
     "/inventory/planning/orders/new": "hành động tạo mới, không phải một mục menu",
     "/customers/retention": "vào từ nút 'Giữ chân khách' ngay trên trang Khách hàng, và từ ô lệnh ⌘K",

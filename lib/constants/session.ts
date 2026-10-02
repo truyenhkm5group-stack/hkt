@@ -221,3 +221,9 @@ export const ERP_PATH_HEADER = "x-erp-path";
  * `x-erp-*` client gửi); máy chủ tra slug → tổ chức ĐÃ XUẤT BẢN (lib/platform/host-org.ts). Vắng mặt = miền chính.
  */
 export const ERP_HOST_SLUG_HEADER = "x-erp-host-slug";
+
+/**
+ * Phương thức HTTP của request (0187), do middleware gắn. Cổng CHỈ XEM của thu phí (`lib/billing/rules.ts`) cho mọi lượt
+ * ĐỌC đi qua và chặn lượt GHI — server action là POST tới đường dẫn của trang. Client không giả được (tiền tố `x-erp-`).
+ */
+export const ERP_METHOD_HEADER = "x-erp-method";

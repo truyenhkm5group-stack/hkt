@@ -450,6 +450,7 @@ import { testPilotOrders } from "./pilot-orders.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPilotOps } from "./pilot-ops.test";
+import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
@@ -2624,6 +2625,7 @@ async function main() {
   // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
   // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
   await testPilotOps();
+  await testPlatformBilling();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.

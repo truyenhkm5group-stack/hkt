@@ -21,7 +21,15 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "ORG_PLAN_SET"
   // Hành trình tự phục vụ (0180, `lib/platform/publish.ts`): khách chọn tên miền con, khách bấm Xuất bản.
   | "ORG_DOMAIN_SET"
-  | "ORG_PUBLISH";
+  | "ORG_PUBLISH"
+  // Thu phí thuê bao (0187, `lib/billing/service.ts`): bật / tắt / sửa hạn thu phí của một tổ chức, sửa giá gói, khai tài
+  // khoản nhận tiền, hoá đơn được trả (tự khớp ngân hàng hoặc xác nhận tay), huỷ hoá đơn, xử lý một khoản tiền không khớp.
+  | "BILLING_SET"
+  | "PLAN_PRICE_SET"
+  | "BILLING_RECEIVER_SET"
+  | "INVOICE_PAID"
+  | "INVOICE_VOID"
+  | "BILLING_PAYMENT_RESOLVE";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

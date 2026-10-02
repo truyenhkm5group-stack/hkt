@@ -1,7 +1,7 @@
 // VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, customType, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -4452,10 +4452,12 @@ export const platformPlans = pgTable(
     /** Ô số (`null` = không giới hạn) + khoá `ai` (0176) là một đối tượng — `lib/ai-usage/types.ts::parseAiLimits`. */
     limits: jsonb("limits").$type<Record<string, unknown>>().notNull().default({}),
     position: integer("position").notNull().default(0),
+    /** Giá MỘT THÁNG, nguyên VND (0187). `NULL` = gói KHÔNG BÁN — không phải giá 0; khách chỉ tự chọn được gói có giá. */
+    priceVnd: integer("price_vnd"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("platform_plans_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,30}$'`)],
+  (t) => [check("platform_plans_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,30}$'`), check("platform_plans_price_check", sql`${t.priceVnd} IS NULL OR ${t.priceVnd} > 0`)],
 );
 
 /** Mã mời tự đăng ký (Phase 10 · §1). Chỉ lưu BĂM sha256 — mã thô hiện đúng một lần lúc tạo. Dùng một lần, có hạn. */
@@ -4597,6 +4599,102 @@ export const platformAiUsage = pgTable(
     check("platform_ai_usage_feature_check", sql`${t.feature} ~ '^[a-z][a-z0-9_]{1,40}$'`),
     check("platform_ai_usage_requests_check", sql`${t.requests} >= 0`),
   ],
+);
+
+/**
+ * THU PHÍ THUÊ BAO (0187 · docs/platform/billing.md) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ *
+ * MỘT dòng cho mỗi tổ chức ĐÃ BẬT thu phí. Tình trạng (còn hạn · sắp hết · quá hạn · chỉ xem) KHÔNG lưu: nó là hàm thuần
+ * của `paid_through` + `grace_days` + hôm nay (`lib/billing/rules.ts::billingStanding`), nên đúng tới từng ngày mà không
+ * cần job nào chạy đúng giờ (cùng tinh thần luật 26). Thiếu dòng / `billing_enabled = false` ⇒ KHÔNG thu phí, không bao
+ * giờ khoá — tổ chức có từ trước 0187 (khách pilot) không đổi gì sau lần deploy này.
+ */
+export const platformSubscriptions = pgTable(
+  "platform_subscriptions",
+  {
+    orgCode: text("org_code").primaryKey(),
+    billingEnabled: boolean("billing_enabled").notNull().default(false),
+    /** Ngày CUỐI CÙNG đã trả (giờ Việt Nam, tính cả ngày đó). Bật thu phí bắt buộc khai — đó cũng là hạn dùng thử. */
+    paidThrough: date("paid_through", { mode: "string" }),
+    graceDays: integer("grace_days").notNull().default(7),
+    note: text("note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("platform_subscriptions_grace_check", sql`${t.graceDays} BETWEEN 0 AND 60`),
+    check("platform_subscriptions_enabled_check", sql`${t.billingEnabled} = false OR ${t.paidThrough} IS NOT NULL`),
+  ],
+);
+
+/**
+ * HOÁ ĐƠN GIA HẠN (0187). Một yêu cầu trả tiền cho `months` tháng của gói `plan_key`, kỳ `period_start` → `period_end`.
+ * Trả đủ ⇒ `paid_through = period_end` và gói của tổ chức đổi sang `plan_key` NGAY. `credit_vnd` = phần chưa dùng của gói
+ * cũ khi NÂNG gói giữa kỳ. Tối đa MỘT hoá đơn `OPEN` mỗi tổ chức — tạo cái mới thì cái cũ thành `VOID` (kèm lý do).
+ */
+export const platformInvoices = pgTable(
+  "platform_invoices",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    planKey: text("plan_key").notNull(),
+    months: integer("months").notNull(),
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    periodEnd: date("period_end", { mode: "string" }).notNull(),
+    listAmountVnd: integer("list_amount_vnd").notNull(),
+    creditVnd: integer("credit_vnd").notNull().default(0),
+    amountVnd: integer("amount_vnd").notNull(),
+    /** Nội dung chuyển khoản `ERPHD` + 6 ký tự — khoá để khớp tiền về với hoá đơn. */
+    transferCode: text("transfer_code").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    createdByEmail: text("created_by_email"),
+    paidAt: ts("paid_at"),
+    paidAmountVnd: integer("paid_amount_vnd"),
+    /** `BANK` = khớp tự động từ sổ ngân hàng của nhà · `MANUAL` = người vận hành xác nhận tay (bắt buộc lý do). */
+    paidSource: text("paid_source"),
+    paidRef: text("paid_ref"),
+    paidByEmail: text("paid_by_email"),
+    voidReason: text("void_reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_invoices_transfer_code_key").on(t.transferCode),
+    uniqueIndex("platform_invoices_one_open").on(t.orgCode).where(sql`${t.status} = 'OPEN'`),
+    index("platform_invoices_org_idx").on(t.orgCode, t.createdAt),
+    check("platform_invoices_status_check", sql`${t.status} IN ('OPEN','PAID','VOID')`),
+    check("platform_invoices_months_check", sql`${t.months} BETWEEN 1 AND 12`),
+    check("platform_invoices_amount_check", sql`${t.amountVnd} > 0 AND ${t.listAmountVnd} > 0 AND ${t.creditVnd} >= 0 AND ${t.amountVnd} = ${t.listAmountVnd} - ${t.creditVnd}`),
+    check("platform_invoices_period_check", sql`${t.periodEnd} >= ${t.periodStart}`),
+    check("platform_invoices_paid_check", sql`(${t.status} = 'PAID') = (${t.paidAt} IS NOT NULL)`),
+    check("platform_invoices_source_check", sql`${t.paidSource} IS NULL OR ${t.paidSource} IN ('BANK','MANUAL')`),
+    check("platform_invoices_code_check", sql`${t.transferCode} ~ '^ERPHD[0-9A-Z]{6}$'`),
+  ],
+);
+
+/**
+ * TIỀN VÀO MANG MÃ THANH TOÁN (0187). Mọi giao dịch có mã `ERPHD…` trong sổ ngân hàng của nhà được ghi ĐÚNG MỘT dòng ở
+ * đây (khoá `bank_ref`), khớp được hay không: `MATCHED` · `UNDERPAID` (thiếu tiền — chưa gia hạn) · `INVOICE_NOT_OPEN`
+ * (hoá đơn đã trả / đã huỷ) · `NO_INVOICE`. Ba loại sau là việc của người vận hành — tiền không khớp không được biến mất.
+ */
+export const platformBillingPayments = pgTable(
+  "platform_billing_payments",
+  {
+    id: id(),
+    bankRef: text("bank_ref").notNull(),
+    txnAt: ts("txn_at").notNull(),
+    amountVnd: integer("amount_vnd").notNull(),
+    description: text("description").notNull().default(""),
+    transferCode: text("transfer_code").notNull(),
+    invoiceId: text("invoice_id"),
+    orgCode: text("org_code"),
+    outcome: text("outcome").notNull(),
+    resolvedAt: ts("resolved_at"),
+    resolvedByEmail: text("resolved_by_email"),
+    resolvedNote: text("resolved_note"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("platform_billing_payments_bank_ref_key").on(t.bankRef), check("platform_billing_payments_outcome_check", sql`${t.outcome} IN ('MATCHED','UNDERPAID','INVOICE_NOT_OPEN','NO_INVOICE')`)],
 );
 
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */

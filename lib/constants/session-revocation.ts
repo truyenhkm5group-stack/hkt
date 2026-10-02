@@ -109,7 +109,12 @@ export type SessionDenyReason =
    * Host đang mở là tên miền con của MỘT tổ chức (0180) mà phiên thuộc tổ chức KHÁC — hoặc tên miền con không trỏ tới ERP
    * đã xuất bản nào. Không chọn bên nào: đăng nhập lại bằng tài khoản của ERP ở địa chỉ này.
    */
-  | "HOST_MISMATCH";
+  | "HOST_MISMATCH"
+  /**
+   * Tổ chức quá hạn thanh toán và hết ân hạn (0187, `lib/billing/rules.ts`) — CHỈ XEM: mọi lượt ĐỌC vẫn đi, lượt GHI bị
+   * từ chối. Không đưa về `/login` (phiên hợp lệ) mà về `/billing-locked`, nơi nói ai trả được và trả ở đâu.
+   */
+  | "BILLING_LOCKED";
 
 /** Tham số `?reason=` trên `/login` cho từng nguyên nhân. */
 export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
@@ -119,10 +124,14 @@ export const DENY_REASON_PARAM: Record<SessionDenyReason, string> = {
   ORG_INACTIVE: "org-inactive",
   MODULE_DISABLED: "module-disabled",
   HOST_MISMATCH: "host-mismatch",
+  BILLING_LOCKED: "billing-locked",
 };
 
 /** Trang giải thích "module chưa bật" — `requireUser()` chuyển tới đây kèm `?m=<khoá module>`. */
 export const MODULE_DISABLED_PATH = "/module-disabled";
+
+/** Trang giải thích "tổ chức đang chỉ xem vì quá hạn thanh toán" — `requireUser()` chuyển tới đây (0187). */
+export const BILLING_LOCKED_PATH = "/billing-locked";
 
 /** Lý do KHÔNG phải một lượt từ chối: người dùng vừa tự đổi mật khẩu và được đưa về đây. */
 export const REASON_PASSWORD_CHANGED = "password-changed";
@@ -134,6 +143,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
   "org-inactive": "Tổ chức của phiên đăng nhập này đang tạm ngừng hoặc không còn tồn tại. Liên hệ quản trị viên của tổ chức.",
   "module-disabled": "Chức năng này chưa được bật cho tổ chức của bạn. Liên hệ quản trị viên của tổ chức.",
   "host-mismatch": "Phiên đăng nhập này thuộc một ERP khác địa chỉ đang mở. Đăng nhập bằng tài khoản của ERP ở địa chỉ này.",
+  "billing-locked": "Tổ chức đang ở chế độ chỉ xem vì quá hạn thanh toán. Quản trị của tổ chức gia hạn ở Hệ thống → Gói & thanh toán.",
   // KHÔNG dùng chung câu "đã bị thu hồi": người vừa tự bấm đổi mật khẩu mà đọc câu ấy sẽ tưởng
   // mình bị quản trị đá ra. Cùng một cơ chế, hai tình huống, hai câu.
   [REASON_PASSWORD_CHANGED]: "Đã đổi mật khẩu. Hãy đăng nhập lại bằng mật khẩu mới.",
@@ -148,7 +158,7 @@ export const DENY_REASON_MESSAGE: Record<string, string> = {
  * trang trong, trang đó gọi `requireUser()` → bị từ chối → đẩy ngược ra `/login` → **vòng lặp vô
  * tận**. Mọi nguyên nhân từ chối phải nằm trong danh sách này.
  */
-export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", "host-mismatch", REASON_PASSWORD_CHANGED];
+export const LOGIN_REASONS_STAY: readonly string[] = ["invalid", "inactive", "revoked", "org-inactive", "module-disabled", "host-mismatch", "billing-locked", REASON_PASSWORD_CHANGED];
 
 export function loginShouldStay(reason: string | undefined): boolean {
   return !!reason && LOGIN_REASONS_STAY.includes(reason);

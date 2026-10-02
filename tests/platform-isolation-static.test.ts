@@ -125,6 +125,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "lib/platform/context.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "Chính ngữ cảnh tổ chức (AsyncLocalStorage)." },
   "lib/platform/peek.ts::__erpOrgCtx": { loai: "NEN_TANG", lyDo: "CHỈ ĐỌC đúng holder ngữ cảnh của context.ts (không dựng holder mới) — cho getter đồng bộ ở tầng thấp như lib/env.ts." },
   "lib/platform/organizations.ts::__erpOrgs": { loai: "NEN_TANG", lyDo: "Sổ tổ chức của mặt phẳng điều khiển (CSDL nhà), đệm 10 giây." },
+  "lib/billing/standing.ts::__erpSubscriptions": { loai: "NEN_TANG", lyDo: "Sổ thuê bao của mặt phẳng điều khiển (CSDL nhà), khoá theo MÃ tổ chức, đệm 10 giây — chỉ ngày trả tới + ân hạn, không dữ liệu nghiệp vụ." },
   "lib/ai-usage/control.ts::__erpAiControl": { loai: "THEO_TO_CHUC", lyDo: "Đệm ≤ 10 giây của công tắc AI toàn nền tảng (một giá trị) + công tắc / ghi đè hạn mức AI của TỪNG tổ chức (Map khoá theo mã tổ chức, CSDL nhà) — không chứa prompt, khoá hay dữ liệu nghiệp vụ; lượt ghi xoá đệm ngay." },
   "lib/onboarding/signup-mode.ts::__erpSignupSetting": { loai: "NEN_TANG", lyDo: "Đệm ≤ 10 giây của MỘT cài đặt nền tảng (chế độ đăng ký /start, CSDL nhà) — không thuộc tổ chức nào, không chứa dữ liệu nghiệp vụ; lượt ghi xoá đệm ngay." },
   "lib/platform/org-flags.ts::__erpOrgFlags": { loai: "THEO_TO_CHUC", lyDo: "Đệm 5 giây của cờ nền tảng theo tổ chức (công tắc khẩn `workflows.paused`), KHOÁ theo mã tổ chức + khoá cờ; lượt ghi xoá đệm." },
@@ -397,6 +398,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "scripts/platform-secrets-verify.ts": "Script KIỂM KHOÁ BÍ MẬT của người vận hành (ops platform-secrets-verify, launch-gates A.5), chạy tay trong container: đọc/ghi đúng một dòng settings canary ở CSDL nhà qua getPlatformDb; không mở CSDL tổ chức nào, không chạm org_connections; không nằm trong đường chạy của ứng dụng, không in bản rõ.",
   "scripts/restore-drill-org-config.ts": "Script DIỄN TẬP KHÔI PHỤC tầng cấu hình chạy tay / trong bài kiểm (sẵn sàng thương mại C), không nằm trong đường chạy của ứng dụng: trên PGlite RIÊNG của chính nó (không đọc .env), cấp một tổ chức thử, xoá rồi cấp lại dòng sổ ở mặt phẳng điều khiển; dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
+  "lib/billing/": "Thu phí thuê bao (0187): platform_subscriptions / platform_invoices / platform_billing_payments / platform_plans ở mặt phẳng điều khiển, và sổ ngân hàng CỦA TỔ CHỨC NHÀ (nơi tiền thuê bao về) — đọc bằng getPlatformDb() vì tiền về tài khoản của nền tảng, không phải của tổ chức ngữ cảnh; không đọc dữ liệu nghiệp vụ của tổ chức khách nào.",
   "lib/ai-usage/": "Sổ dùng AI + hạn mức AI + công tắc AI (pilot readiness 3): bảng platform_ai_usage / platform_plans / platform_settings / platform_organizations ở mặt phẳng điều khiển (CSDL nhà); mọi dòng khoá theo org_code do MÁY CHỦ lấy từ ngữ cảnh — không đọc dữ liệu nghiệp vụ của tổ chức nào.",
 };
 
@@ -607,6 +609,7 @@ export function testServerActionQuaCongPhien(): number {
  *    CSDL được mở hộ họ.
  */
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
+  "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
   "lib/actions/ai-usage.ts::setOrgAiControlAction": { loai: "VAN_HANH", lyDo: "Người vận hành tắt AI / ghi đè hạn mức AI của MỘT tổ chức từ /platform/org/<mã> — requirePermission(platform:operate), lõi setOrgAiControl kiểm lại người vận hành + tổ chức nhà, bắt buộc lý do, ghi platform_audit_log." },
   "lib/actions/platform-ops.ts::setPilotStageAction": { loai: "VAN_HANH", lyDo: "Người vận hành đổi giai đoạn pilot của một tổ chức (/platform/org/<mã>) — requirePermission(platform:operate) + platformOperatorDenial ở lõi, lý do, nhật ký nền tảng." },
@@ -697,6 +700,16 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform-ui/module-toggle.ts::toggleModuleForOrganization": "Bật / tắt module của một tổ chức bất kỳ.",
   "lib/queries/platform-org-diagnostics.ts::loadOrgDiagnostics": "Chẩn đoán H4 một tổ chức: mở CSDL của tổ chức được chọn để đếm.",
   "lib/onboarding/signup-mode.ts::setSignupSetting": "Cổng mở bán B: chế độ đăng ký /start của cả nền tảng.",
+  // Thu phí thuê bao (0187) — mặt phẳng điều khiển của CSDL nhà; không mở CSDL của khách.
+  "lib/billing/service.ts::setBillingReceiver": "Tài khoản nhận tiền thuê bao của nền tảng.",
+  "lib/billing/service.ts::reconcileBillingAsOperator": "Nút đối chiếu lại tiền thuê bao từ sổ ngân hàng của nhà.",
+  "lib/billing/service.ts::setOrgBilling": "Bật / tắt / sửa ngày trả tới + ân hạn của một tổ chức.",
+  "lib/billing/service.ts::markInvoicePaidManually": "Xác nhận tay một hoá đơn (qua operatorInvoice).",
+  "lib/billing/service.ts::voidInvoice": "Huỷ một hoá đơn đang mở (qua operatorInvoice).",
+  "lib/billing/service.ts::setPlanPrice": "Sửa giá tháng của một gói.",
+  "lib/billing/service.ts::resolveBillingPayment": "Đánh dấu đã xử lý một khoản tiền không khớp.",
+  "lib/billing/service.ts::loadPlatformBilling": "Bảng thu phí mọi tổ chức ở /platform (MRR, hoá đơn mở, tiền chưa khớp).",
+  "lib/billing/service.ts::loadOrgBilling": "Khung thu phí của MỘT tổ chức bất kỳ ở /platform/org/<mã>.",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

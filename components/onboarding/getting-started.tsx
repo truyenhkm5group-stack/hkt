@@ -23,7 +23,7 @@ export async function GettingStartedHome({ user }: { user: SessionUser }) {
         description={`${gs.done}/${gs.measurable} bước đã xong${gs.planName ? ` · gói ${gs.planName}` : ""}`}
         actions={
           <Link href="/settings/plan" className="text-xs font-medium text-primary hover:underline">
-            Gói & hạn mức
+            Gói & thanh toán
           </Link>
         }
       />

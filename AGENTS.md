@@ -607,6 +607,15 @@ deploy dừng, không phải cảnh báo.
     nhận KHOÁ của bảng hằng — chuỗi bộ lọc ffmpeg không bao giờ đến từ người; ảnh đổi cảnh phải là ảnh sản phẩm
     của đúng mã, giọng tự thu phải thuộc cùng lượt; QC so độ dài với `plannedSec` của bộ dựng (mục 20).
 
+73. **THU PHÍ THUÊ BAO LÀ "TRẢ TỚI NGÀY", TÌNH TRẠNG TÍNH LÚC ĐỌC** (`lib/billing/*`, `docs/platform/billing.md`):
+    tổ chức khách có ĐÚNG MỘT con số `platform_subscriptions.paid_through`; còn hạn · sắp hết · ân hạn · CHỈ XEM là hàm
+    thuần của nó + ân hạn + hôm nay — không job nào khoá / mở khoá, không cột tình trạng. Quá hạn KHÔNG BAO GIỜ xoá dữ
+    liệu và KHÔNG tự đình chỉ: chỉ chặn lượt GHI (`BILLING_LOCKED`), lượt đọc · trang gia hạn · đăng xuất luôn đi; lỗi
+    đọc sổ thuê bao ⇒ KHÔNG khoá. Tiền về chỉ đọc từ sổ ngân hàng của tổ chức nhà (không bảng tiền thứ hai), mỗi khoản
+    ĐÚNG MỘT dòng khoá `bank_ref`; tiền thiếu / mã huỷ / mã lạ GHI LẠI và chờ người, không biến mất, không tự gia hạn.
+    Trả đủ = MỘT giao dịch (PAID · trả tới · đổi gói · nhật ký). Tổ chức chưa bật thu phí không bao giờ bị nhắc hay
+    khoá. Giá gói `NULL` = không bán, không phải 0; không chiết khấu nào ngoài một cột tường minh.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

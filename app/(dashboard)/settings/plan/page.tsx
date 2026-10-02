@@ -5,8 +5,12 @@ import { AiLimitsTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usag
 import { getPlanUsage } from "@/lib/entitlements/check";
 import { loadOrgAiUsage } from "@/lib/ai-usage/view";
 import { cn } from "@/lib/utils";
+import { loadTenantBilling, type TenantBilling } from "@/lib/billing/service";
+import { BILLING_STANDING_LABEL, type BillingStandingKind } from "@/lib/billing/rules";
+import { OpenInvoiceCard, RenewalPicker } from "@/components/billing/tenant-billing";
+import { formatDate, formatDateTime, formatVND } from "@/lib/format";
 
-export const metadata = { title: "Gói & hạn mức" };
+export const metadata = { title: "Gói & thanh toán" };
 
 function fmt(n: number, kind: string): string {
   return kind === "storageMb" ? n.toLocaleString("vi-VN", { maximumFractionDigits: 1 }) : n.toLocaleString("vi-VN");
@@ -21,14 +25,16 @@ export default async function PlanPage() {
   const usage = await getPlanUsage(user.organization?.code);
   // Mã tổ chức lấy từ PHIÊN (không từ URL): tổ chức chỉ thấy sổ AI của chính mình.
   const ai = await loadOrgAiUsage(usage.orgCode);
+  const billing = usage.isHome ? null : await loadTenantBilling(usage.orgCode);
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Hệ thống"
-        title="Gói & hạn mức"
+        title="Gói & thanh toán"
         description={usage.plan ? `Gói «${usage.plan.name}»${usage.isHome ? " — tổ chức nhà, không giới hạn" : ""}` : "Không đọc được gói"}
-        hint="Hạn mức kiểm ở đúng chỗ tạo: người dùng, trang tuỳ biến, luật tự động, tải tệp. Vượt thì thao tác đó báo lỗi rõ ràng, không có gì bị xoá. Nâng gói là việc của người vận hành nền tảng."
+        hint="Hạn mức kiểm ở đúng chỗ tạo: người dùng, trang tuỳ biến, luật tự động, tải tệp. Vượt thì thao tác đó báo lỗi rõ ràng, không có gì bị xoá. Nâng gói: chọn gói ở khung Thanh toán, chuyển khoản theo mã QR — tiền về là gói mới có hiệu lực."
       />
+      {billing ? <BillingSection billing={billing} /> : null}
       {!usage.plan ? (
         <EmptyState title="Không đọc được gói dịch vụ" description="Bảng gói của nền tảng chưa có hoặc gói của tổ chức không tồn tại — báo người vận hành nền tảng." />
       ) : (
@@ -70,5 +76,81 @@ export default async function PlanPage() {
         </div>
       </SectionCard>
     </div>
+  );
+}
+
+const STANDING_TONE: Record<BillingStandingKind, string> = {
+  NOT_BILLED: "text-muted-foreground",
+  ACTIVE: "text-emerald-700 dark:text-emerald-400",
+  DUE_SOON: "text-amber-700 dark:text-amber-400",
+  OVERDUE: "text-rose-700 dark:text-rose-400",
+  LOCKED: "text-rose-700 dark:text-rose-400",
+};
+
+function standingLine(b: TenantBilling): string {
+  const s = b.standing;
+  if (s.kind === "NOT_BILLED") return b.terms?.paidThrough ? `Chưa bật thu phí — dùng tới ${formatDate(b.terms.paidThrough)}.` : "Tổ chức chưa bật thu phí — không nhắc, không khoá.";
+  if (s.kind === "LOCKED") return `Hết hạn ${formatDate(s.paidThrough)} — tổ chức đang CHỈ XEM (xem và xuất được; không tạo / sửa được). Thanh toán xong là mở lại ngay.`;
+  if (s.kind === "OVERDUE") return `Hết hạn ${formatDate(s.paidThrough)} — vẫn dùng đủ tới hết ${formatDate(s.lockOn ? s.lockOn : null)} (ân hạn); sau đó chỉ xem.`;
+  return `Đã trả tới ${formatDate(s.paidThrough)} (còn ${s.daysLeft} ngày).`;
+}
+
+/** Khung THANH TOÁN — chỉ tổ chức khách; nhà không trả phí cho chính nó. */
+function BillingSection({ billing }: { billing: TenantBilling }) {
+  const s = billing.standing;
+  return (
+    <SectionCard
+      title="Thanh toán"
+      description={
+        <span className={cn("font-medium", STANDING_TONE[s.kind])} data-billing-standing={s.kind}>
+          {BILLING_STANDING_LABEL[s.kind]} · {standingLine(billing)}
+        </span>
+      }
+      hint="Gia hạn bằng chuyển khoản theo mã QR: mỗi lần tạo mã là một hoá đơn với nội dung chuyển khoản riêng; tiền về tài khoản của nền tảng thì hệ thống tự khớp theo nội dung và gia hạn. Không có dữ liệu nào bị xoá khi quá hạn — chỉ chuyển sang chế độ chỉ xem."
+    >
+      <div className="space-y-6">
+        {billing.openInvoice ? (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Mã thanh toán đang chờ</h3>
+            <OpenInvoiceCard invoice={billing.openInvoice} receiver={billing.receiver} />
+          </div>
+        ) : null}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">{billing.openInvoice ? "Đổi gói / số tháng" : "Gia hạn hoặc đổi gói"}</h3>
+          {billing.receiver ? (
+            <RenewalPicker offers={billing.offers} currentPlanKey={billing.currentPlan?.key ?? null} hasOpenInvoice={!!billing.openInvoice} />
+          ) : (
+            <EmptyState title="Chưa tạo được mã thanh toán" description="Nền tảng chưa khai tài khoản nhận tiền. Báo người vận hành nền tảng — tổ chức của bạn vẫn dùng bình thường." />
+          )}
+        </div>
+        {billing.invoices.length > 0 ? (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Lịch sử</h3>
+            <table className="w-full text-sm" data-invoice-history>
+              <thead className="text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="py-1.5 pr-3">Mã</th>
+                  <th className="py-1.5 pr-3">Gói · kỳ</th>
+                  <th className="py-1.5 pr-3 text-right">Số tiền</th>
+                  <th className="py-1.5">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {billing.invoices.map((i) => (
+                  <tr key={i.id} className="border-t border-hairline">
+                    <td className="py-1.5 pr-3 font-mono text-xs">{i.transferCode}</td>
+                    <td className="py-1.5 pr-3">
+                      {i.planName} · {formatDate(i.periodStart)} → {formatDate(i.periodEnd)}
+                    </td>
+                    <td className="numeric py-1.5 pr-3 text-right">{formatVND(i.status === "PAID" ? i.paidAmountVnd : i.amountVnd)}</td>
+                    <td className="py-1.5 text-xs">{i.status === "PAID" ? `Đã trả ${formatDateTime(i.paidAt)}` : `Đã huỷ — ${i.voidReason ?? "không ghi lý do"}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+    </SectionCard>
   );
 }
