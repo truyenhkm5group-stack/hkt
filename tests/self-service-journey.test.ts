@@ -1223,7 +1223,7 @@ async function testJourney() {
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
       // TRẢ LỜI NHANH (chủ shop 01/10/2026): tin TIẾP THEO chỉ đợi khách gõ xong; tin ĐẦU của hội thoại mới đợi tối đa 10 giây
-      // để nhường trả lời tự động của Meta — tới sớm (kể cả TRƯỚC tin khách vì webhook ngược thứ tự) ⇒ bỏ qua ngay.
+      // để nhường trả lời tự động của Meta — tới SAU tin khách ⇒ bỏ qua ngay.
       const inMs = (ms: number) => () => new Date(Date.now() + ms);
       await receiveFanpageEvent(ev("m-fast-1", "Shop còn ruốc tôm không", { id: "cust-8", name: "Chị Tám" }, "t-980"));
       assert.equal((await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) })).skipped, "Đang đợi xem page có trả lời không", "tin đầu hội thoại mới: 5 giây chưa đủ");
@@ -1232,11 +1232,19 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-fast-2", "Ship Hà Nội mấy ngày em", { id: "cust-8", name: "Chị Tám" }, "t-980"));
       const f2 = await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) });
       assert.ok(f2.replies >= 1, `tin tiếp theo trả lời sau ~5 giây, không đợi 10: ${JSON.stringify(f2)}`);
-      await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
-      await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-fast-3", "Shop ơi", { id: "cust-9", name: "Anh Chín" }, "t-981"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
       const f3 = await processFanpageThread(PAGE, "t-981", { fetch: pancake.fetch });
-      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta trả lời tới TRƯỚC tin đầu (ngược thứ tự) ⇒ bỏ qua NGAY, không đợi: ${JSON.stringify(f3)}`);
+      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta tự trả lời tin đầu ⇒ bỏ qua NGAY, không đợi: ${JSON.stringify(f3)}`);
+      // (02/10/2026 · ảnh «Nguyễn Oanh») LỜI CHÀO QUẢNG CÁO tới NGAY TRƯỚC tin đầu của khách (hội thoại cũ quay lại qua quảng
+      // cáo — Meta không tự trả lời) ⇒ KHÔNG phải «page đã trả lời»: đủ 10 giây không ai trả lời thì bot trả lời.
+      await receiveFanpageEvent(ev("m-ad-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!! KHÔNG ĂN LÀ THIỆT", { id: PAGE }, "t-982"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-ad-q", "Báo giá chả cá thu?", { id: "cust-oanh", name: "Nguyễn Oanh" }, "t-982"));
+      assert.equal((await processFanpageThread(PAGE, "t-982", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) })).skipped, "Đang đợi xem page có trả lời không", "lời chào quảng cáo không làm bot bỏ qua — vẫn đợi Meta như tin đầu");
+      const fAd = await processFanpageThread(PAGE, "t-982", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fAd.replies >= 1 && fAd.processed === 1, `lời chào quảng cáo trước tin khách ⇒ bot vẫn trả lời: ${JSON.stringify(fAd)}`);
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));

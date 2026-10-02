@@ -48,11 +48,14 @@ export const HUMAN_TAKEOVER_MINUTES = 30;
  */
 export const FIRST_CONTACT_WAIT_MS = 10_000;
 export const FOLLOWUP_WAIT_MS = 4_000;
-/**
- * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. Với hội thoại mới, tin phía page tới trước
- * tin khách tối đa chừng này vẫn tính là trả lời tự động cho chính tin ấy (hai webhook có thể tới ngược thứ tự).
+/*
+ * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. «Page đã trả lời» CHỈ tính tin phía page tới
+ * TỪ tin khách sớm nhất trở đi — KHÔNG nhìn lùi. Bản cũ coi tin page tới trong 60 giây TRƯỚC tin đầu là trả lời tự động
+ * (phòng hai webhook tới ngược thứ tự), nhưng LỜI CHÀO của quảng cáo click-to-message luôn tới ngay trước tin đầu của khách:
+ * đo 02/10/2026 (Hải Sản Làng Chài, «Nguyễn Oanh» — hội thoại cũ từ 12/2025 quay lại qua quảng cáo, Meta KHÔNG tự trả lời
+ * hội thoại cũ) bot coi lời chào là «page đã trả lời» và không ai trả lời khách. Im lặng với khách tệ hơn nhiều so với
+ * một câu trùng hiếm hoi khi trả lời tự động của Meta tới ngược thứ tự.
  */
-const FIRST_CONTACT_LOOKBACK_MS = 60_000;
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 const GRACE_SLACK_MS = 1_000;
 const RETRY_MS = 2_000;
@@ -481,7 +484,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
       .limit(1);
     const firstContact = !prior;
-    const repliedSince = firstContact ? new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS) : oldest;
+    const repliedSince = oldest;
     const pageRepliedSince = async () =>
       (await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, repliedSince))).limit(1)).length > 0;
     // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
