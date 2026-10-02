@@ -2081,5 +2081,42 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 47: SDT khach gui bang chip so dien thoai -> bot doc duoc (khong chot 'CHƯA CÓ SỐ ĐIỆN THOẠI'), khong lay so tu link anh / nguoi gui");
 }
 
+// ---- 48: khach da co don dang xu ly — cung san pham thi khong dien vao nhap Pancake moi (su co Mai Hoang 02/10/2026)
+{
+  const { orderSync: os48 } = await import("../src/orders.js");
+  const prevProducts = catalog.products;
+  catalog.setProducts([{ id: "p2", code: "Q002", name: "Đầm Q002", note: "", attributes: { "Màu": ["Đỏ Đô", "Đen"] }, price: { min: 299000, max: 299000 }, images: [], variations: [
+    { id: "q2do", sku: "q2do", fields: { "Màu": "Đỏ Đô", Size: "L" }, price: 299000, stock: 5, available: true, images: [] },
+    { id: "q2den", sku: "q2den", fields: { "Màu": "Đen", Size: "L" }, price: 299000, stock: 5, available: true, images: [] }] }]);
+  const goc = { extract: os48.extractOrder, resolve: os48.resolveAddress, draft: os48.findDraft, active: os48.findActiveOrder, call: os48._call };
+  let mau = "Đỏ Đô";
+  os48.extractOrder = async () => ({ ready: true, items: [{ code: "Q002", color: mau, size: "L", quantity: 1 }], customer_name: "Mai", phone: "0904118955", address: "9/160 Tôn Đức Thắng, Lam Sơn, Lê Chân, Hải Phòng", agreed_total: 299000, free_shipping: true });
+  os48.resolveAddress = async () => ({ ok: true, confidence: "cao", province: { id: "p" , name: "Hải Phòng" }, district: { id: "d", name: "Lê Chân" }, commune: { id: "c", name: "Lam Sơn" }, street: "9/160 Tôn Đức Thắng", fullAddress: "9/160 Tôn Đức Thắng, Lam Sơn, Lê Chân, Hải Phòng" });
+  os48.findDraft = async () => ({ id: 5666, status: 0, inserted_at: new Date().toISOString() });
+  os48.findActiveOrder = async () => ({ id: 5633, status: 2, items: [{ variation_id: "q2do", quantity: 1 }] });
+  const ghi = [];
+  os48._call = async (method, url, body) => (ghi.push([method, url]), { data: { id: 5666 } });
+  const hoi = "KHÁCH: lấy Q002 đỏ đô size L, sđt 0904118955, 9/160 Tôn Đức Thắng Lam Sơn Lê Chân Hải Phòng";
+  let r = await os48.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C48", customerName: "Mai", historyText: hoi, strict: true });
+  assert.equal(r.status, "review", JSON.stringify(r));
+  assert.match(r.reasons[0], /Trùng đơn #5633 .*cùng sản phẩm — đơn nháp #5666 là đơn thừa, nhân viên huỷ/);
+  assert.equal(ghi.filter(([m]) => m !== "GET").length, 0, "khong ghi vao don nhap thua");
+  // Khong co don nhap -> nhu cu: khong tao them
+  os48.findDraft = async () => null;
+  r = await os48.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C48", customerName: "Mai", historyText: hoi, strict: true });
+  assert.equal(r.status, "skipped");
+  assert.match(r.reason, /khách đã có đơn #5633 .*cùng sản phẩm - không tạo thêm/);
+  // Khac san pham (mua them / doi mau) -> van dien don nhap; tu xac nhan se bi chan boi don cu -> can duyet
+  mau = "Đen";
+  os48.findDraft = async () => ({ id: 5667, status: 0, inserted_at: new Date().toISOString() });
+  os48._call = async (method, url, body) => (ghi.push([method, url]), { data: { id: 5667 } });
+  r = await os48.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C48", customerName: "Mai", historyText: hoi.replace("đỏ đô", "đen"), strict: true });
+  assert.equal(r.status, "updated", JSON.stringify(r));
+  assert.ok(ghi.some(([m, u]) => m === "PUT" && /orders\/5667$/.test(u)));
+  Object.assign(os48, { extractOrder: goc.extract, resolveAddress: goc.resolve, findDraft: goc.draft, findActiveOrder: goc.active, _call: goc.call });
+  catalog.setProducts(prevProducts);
+  console.log("OK 48: khach con don dang xu ly cung san pham -> khong dien nhap Pancake thua, can duyet de huy; khac san pham -> van len nhap, cho duyet");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
