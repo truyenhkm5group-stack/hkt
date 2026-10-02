@@ -445,6 +445,9 @@ export function createAdminHandler(bot) {
         const token = checkPageToken(body.token);
         const pageId = String(body.pageId || body.page_id || "").trim();
         if (!/^\d{5,}$/.test(pageId)) throw new Error("Page ID phai la day so (lay o dia chi page trong Pancake, vi du 1115433011652980)");
+        // Them tu khung Chat test cua ERP: page vao bot o trang thai TAT (ghi TRUOC khi gan client) -> khong co khoanh
+        // khac nao bot tra loi khach that cua page; nguoi bat rieng, co xac nhan. Page da co trong bot thi giu nguyen.
+        if (body.enabled === false && !bot.clients.has(pageId)) settings.update(pageId, { enabled: false });
         let r;
         try {
           r = await bot.addPage(pageId, token, body.name || ""); // nem loi neu token sai -> khong luu

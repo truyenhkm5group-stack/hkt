@@ -6,7 +6,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
 import { addManualAdSchema, saveAdTestInfoSchema, setAdTestPageSchema, type AdTestView, type ChatReply } from "@/lib/constants/chatbot-ad-bots";
 import type { AdBotPushResult } from "@/lib/integrations/chatbot/ad-bots";
-import { addAdTestColor, addManualAd, chatAdTest, loadAdTestView, removeAdTestColor, removeManualAd, saveAdTestInfo, setAdTestLive, setAdTestPage, uploadAdTestColor } from "@/lib/integrations/chatbot/ad-test";
+import { addAdTestColor, addManualAd, chatAdTest, connectPageToBot, setBotPageEnabled, loadAdTestView, removeAdTestColor, removeManualAd, saveAdTestInfo, setAdTestLive, setAdTestPage, uploadAdTestColor } from "@/lib/integrations/chatbot/ad-test";
 
 /**
  * Nút "Chat test" ở Thư viện Media · tab ④. Người chạy camp (ideas:write) hoặc người giữ kịch bản bot (cs:config) đều dùng
@@ -135,4 +135,33 @@ export async function removeManualAdAction(adId: string) {
   if (!r.ok) return { error: r.error } satisfies Fail;
   await audit({ userId: user.id, userEmail: user.email, action: "CHATBOT_AD_BOT_SWITCH", entity: "CHATBOT_AD_TEST", entityId: adId, after: { removedManualAd: true } });
   return done(r.push, "Đã bỏ quảng cáo dựng tay — bot thôi dùng bot riêng của nó.");
+}
+
+const connectSchema = z.object({ campKey: z.string().min(1).max(64), token: z.string().trim().max(4000).optional() });
+
+/**
+ * Nạp page của camp vào bot (cần quyền cs:config — đây là quản trị bot, không phải soạn camp). Token KHÔNG trả về trình
+ * duyệt và KHÔNG vào nhật ký: nhật ký chỉ ghi "tự sinh" hay "dán tay".
+ */
+export async function connectPageToBotAction(raw: unknown) {
+  const user = await requireUser();
+  if (!can(user, "cs:config")) return { error: "Nạp page vào bot cần quyền quản trị bot chat (cs:config)." } satisfies Fail;
+  const p = connectSchema.safeParse(raw);
+  if (!p.success) return { error: "Dữ liệu không hợp lệ" } satisfies Fail;
+  if (p.data.token && /^EAA/i.test(p.data.token)) return { error: "Đây là token Facebook (EAA…), không phải Page Access Token của Pancake (dạng eyJ…)." } satisfies Fail;
+  const r = await connectPageToBot({ campKey: p.data.campKey, token: p.data.token || undefined });
+  if (!r.ok) return { error: r.error } satisfies Fail;
+  await audit({ userId: user.id, userEmail: user.email, action: "CHATBOT_AD_BOT_SAVE", entity: "CHATBOT_PAGE", entityId: p.data.campKey, after: { connected: true, tokenSource: r.generated ? "ERP tự sinh" : "dán tay", enabled: false } });
+  for (const path of PATHS) revalidatePath(path);
+  return { ok: true as const, message: `Đã nạp page vào bot (${r.generated ? "ERP tự lấy token" : "token dán tay"}). Bot đang TẮT cho page này — chat thử được ngay; bật khi muốn bot trả lời khách thật.`, warning: null };
+}
+
+export async function setBotPageEnabledAction(campKey: string, enabled: boolean) {
+  const user = await requireUser();
+  if (!can(user, "cs:config")) return { error: "Bật / tắt bot cho page cần quyền quản trị bot chat (cs:config)." } satisfies Fail;
+  const r = await setBotPageEnabled({ campKey: String(campKey ?? ""), enabled: enabled === true });
+  if (!r.ok) return { error: r.error } satisfies Fail;
+  await audit({ userId: user.id, userEmail: user.email, action: "CHATBOT_AD_BOT_SWITCH", entity: "CHATBOT_PAGE", entityId: campKey, after: { enabled: enabled === true } });
+  for (const path of PATHS) revalidatePath(path);
+  return { ok: true as const, message: enabled ? "Đã BẬT bot cho page — bot trả lời mọi tin nhắn vào page này." : "Đã TẮT bot cho page.", warning: null };
 }
