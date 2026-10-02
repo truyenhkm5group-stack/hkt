@@ -469,9 +469,10 @@ export class OrderSync {
     return [...new Set(ly)];
   }
 
-  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "" }) {
+  async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "" }) {
     if (!this.enabled) return { status: "skipped", reason: "POS chưa cấu hình" };
-    const ex = await this.extractOrder(historyText, { pageName, defaultCode: settings.effective(pageId).defaultProduct || "", customerName });
+    // defaultCode: mau chu luc nguoi chon cho LUOT QUET LAI (vd page chua khai mau chu luc) — de len cai dat cua page
+    const ex = await this.extractOrder(historyText, { pageName, defaultCode: defaultCode || settings.effective(pageId).defaultProduct || "", customerName });
     if (!ex) return { status: "skipped", reason: "AI không trích xuất được đơn" };
     // Thieu DUY NHAT ten nguoi nhan (AI van hay doi) -> khong chan don: dung ten Facebook. Con thieu thu khac thi van cho.
     if (!ex.ready && onlyNameMissing(ex.missing) && ex.phone && ex.address && (ex.items || []).length) ex.ready = true;
@@ -613,11 +614,63 @@ export class OrderSync {
   }
 
   /**
+   * DON MOI (status 0) tao trong `days` ngay gan day tren POS — ca don nhan vien / Pancake tu tao, khong chi don bot.
+   * Doc theo trang (moi nhat truoc) toi khi gap don cu hon moc, toi da 10 trang x 100 don.
+   */
+  async recentDrafts(days = 7) {
+    const moc = Date.now() - days * 86400e3;
+    const out = [];
+    for (let trang = 1; trang <= 10; trang++) {
+      const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { page_size: 100, page_number: trang });
+      const list = d.data || [];
+      let cu = 0;
+      for (const o of list) {
+        const t = Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z"));
+        if (Number.isFinite(t) && t < moc) {
+          cu++;
+          continue;
+        }
+        if (Number(o.status) === 0) out.push(o);
+      }
+      if (list.length < 100 || cu === list.length) break;
+    }
+    return out;
+  }
+
+  /**
+   * DON MOI NAY DA CHUAN DE XAC NHAN CHUA — chi doc don tren POS (khong goi AI). Tra ve danh sach ly do; rong = chuan.
+   * Chuan = SDT hop le, du tinh/huyen/xa + so nha/thon xom, co san pham (bien the + so luong), khach KHONG co don nao
+   * khac trong 14 ngay (ke ca don nhap thu hai: xac nhan ca hai la gui hang hai lan).
+   */
+  async draftProblems(o, drafts = []) {
+    const ly = [];
+    const phone = normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number);
+    if (!/^0\d{9}$/.test(phone || "")) ly.push("SĐT không hợp lệ");
+    const sa = o.shipping_address || {};
+    const duCap = (sa.province_id && sa.district_id && sa.commune_id) || (sa.new_province_id && sa.new_commune_id);
+    if (!duCap) ly.push("địa chỉ thiếu tỉnh / huyện / xã");
+    const pho = String(sa.address || "").trim();
+    const coChiTiet = /\d/.test(pho) || /(thôn|xóm|ấp|bản|tổ|khu|ngõ|ngách|hẻm|kiệt|đường|phố|số|chợ|trường|kđt|chung cư|tòa|toà|block|làng|đội)/i.test(pho);
+    if (!pho || !coChiTiet) ly.push("thiếu số nhà / thôn xóm / tên đường");
+    const items = o.items || [];
+    if (!items.length) ly.push("đơn chưa có sản phẩm");
+    else if (items.some((it) => !(it.variation_id || it.variation_info?.id) || !(Number(it.quantity) > 0))) ly.push("có dòng sản phẩm thiếu mẫu/màu/size hoặc số lượng");
+    if (phone && /^0\d{9}$/.test(phone)) {
+      const nhapKhac = drafts.filter((d) => String(d.id) !== String(o.id) && normalizePhone(d.bill_phone_number || d.shipping_address?.phone_number) === phone);
+      if (nhapKhac.length) ly.push(`khách còn đơn nháp khác #${nhapKhac.map((d) => d.id).join(", #")} — nhân viên gộp/huỷ trước, tránh gửi hai lần`);
+      const khac = await this.otherOrders(o.conversation_id, phone, o.id).catch(() => null);
+      if (khac === null) ly.push("không kiểm tra được đơn khác của khách (lỗi POS) — chưa kết luận");
+      else if (khac.length) ly.push(`khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày`);
+    }
+    return ly;
+  }
+
+  /**
    * TU XAC NHAN don nhap bot vua ghi: doc lai don tren POS, chi chuyen "Moi" -> "Da xac nhan" khi don VAN la don nhap,
    * dung SDT, dung dung cac bien the bot vua ghi va khach khong co don nao khac. Doc lai lan nua de chac POS da doi.
    * Tra ve { ok: true } hoac { ok: false, reason }.
    */
-  async confirmOrder(orderId, { conversationId, phone, items }) {
+  async confirmOrder(orderId, { conversationId, phone, items, note = "" }) {
     const get = async () => (await this._call("GET", `/shops/${config.pos.shopId}/orders/${orderId}`)).data;
     const o = await get();
     if (!o) return { ok: false, reason: `không đọc được đơn #${orderId} trên POS` };
@@ -632,10 +685,11 @@ export class OrderSync {
     const khop = tren.size === muon.size && [...muon].every(([k, q]) => tren.get(k) === q);
     if (!khop) return { ok: false, reason: "sản phẩm trên đơn POS khác sản phẩm bot vừa ghi (có thể nhân viên đã sửa)" };
     const sa = o.shipping_address || {};
-    if (!sa.province_id || !sa.district_id || !sa.commune_id || !String(sa.address || "").trim()) return { ok: false, reason: "địa chỉ trên POS thiếu tỉnh/huyện/xã hoặc số nhà" };
+    const duCap = (sa.province_id && sa.district_id && sa.commune_id) || (sa.new_province_id && sa.new_commune_id);
+    if (!duCap || !String(sa.address || "").trim()) return { ok: false, reason: "địa chỉ trên POS thiếu tỉnh/huyện/xã hoặc số nhà" };
     const khac = await this.otherOrders(conversationId, phone, orderId);
     if (khac.length) return { ok: false, reason: `khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày — nhân viên kiểm tra, tránh gửi hai lần` };
-    const dong = `✅ Bot tự xác nhận (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}): địa chỉ khớp đủ tỉnh/huyện/xã, sản phẩm khớp POS, khách không có đơn khác`;
+    const dong = `✅ Bot tự xác nhận (${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}${note ? ", " + note : ""}): địa chỉ đủ tỉnh/huyện/xã, sản phẩm khớp POS, khách không có đơn khác`;
     await this._call("PUT", `/shops/${config.pos.shopId}/orders/${orderId}`, { status: 1, note: (o.note ? String(o.note).trim() + "\n" : "") + dong });
     const sau = await get().catch(() => null);
     if (!sau || Number(sau.status) !== 1) return { ok: false, reason: `POS chưa đổi trạng thái đơn #${orderId} (đang: ${sau ? ORDER_STATUS_VI[Number(sau.status)] || sau.status : "?"})` };

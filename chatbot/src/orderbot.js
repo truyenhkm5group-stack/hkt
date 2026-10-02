@@ -1,4 +1,4 @@
-import { orderSync, phonesInText, ORDER_STATUS_VI } from "./orders.js";
+import { orderSync, phonesInText, normalizePhone, ORDER_STATUS_VI } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -85,7 +85,7 @@ export class OrderBot {
   }
 
   /** Doc lai TOAN BO hoi thoai, gop thong tin, quyet dinh: len don / cho / can duyet */
-  async check(key, { addressOverride = "", byStaff = false } = {}) {
+  async check(key, { addressOverride = "", byStaff = false, defaultCode = "" } = {}) {
     const it = this.items[key];
     if (!it || this.running.has(key)) return it;
     this.running.add(key);
@@ -94,7 +94,8 @@ export class OrderBot {
       const { messages, text, name } = await this.history(pageId, conversationId);
       // Nhan vien da tu len / xac nhan don cho khach nay -> xong, khong ton AI, khong bat ai duyet lai
       if (!byStaff && (await this.resolveIfStaffHandled(key, messages))) return it;
-      const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride });
+      if (defaultCode) it.defaultCode = defaultCode;
+      const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride, defaultCode: it.defaultCode || "" });
       it.lastCheckAt = Date.now();
       it.checks = (it.checks || 0) + 1;
       if (r.status === "created" || r.status === "updated") {
@@ -222,11 +223,17 @@ export class OrderBot {
    * KHONG dong vao: hoi thoai nhan vien da bo qua, don da tu xac nhan, va khach da co don THAT (khong phai nhap) trong
    * 14 ngay — hoi thoai cu thuong chua don cu, quet lai ma khong chan la tao don trung. Chay nen, tien do o list().
    */
-  rescan({ hours = 24, max = 150 } = {}) {
+  rescan({ hours = 24, max = 150, pageId = "", defaultCode = "" } = {}) {
     if (this.rescanState?.running) throw new Error("Đang quét lại, đợi lượt trước xong");
     const h = Math.round(Number(hours));
     if (!Number.isFinite(h) || h < 1 || h > 168) throw new Error("Số giờ quét lại phải từ 1 đến 168");
-    const st = (this.rescanState = { running: true, hours: h, startedAt: Date.now(), scanned: 0, candidates: 0, checked: 0, done: 0, confirmed: 0, review: 0, skipped: 0, errors: 0, note: "" });
+    const pid = String(pageId || "");
+    if (pid && !this.bot.clients.has(pid)) throw new Error("Không tìm thấy page " + pid);
+    // Chon mot page ma page do khong duoc ghi don (dang "chi log" / tat ghi don) -> noi ro, khong quet im lang ra 0
+    if (pid && !this.enabledFor(pid)) throw new Error(`Page ${this.bot.pageNames.get(pid) || pid} đang tắt ghi đơn hoặc đang "chỉ log" — bật trong cài đặt page trước khi quét`);
+    const ma = String(defaultCode || "").trim().toUpperCase();
+    if (ma && !/^[A-Z0-9_-]{2,20}$/.test(ma)) throw new Error("Mã mẫu không hợp lệ");
+    const st = (this.rescanState = { running: true, hours: h, pageId: pid, pageName: pid ? this.bot.pageNames.get(pid) || pid : "", defaultCode: ma, startedAt: Date.now(), scanned: 0, candidates: 0, checked: 0, done: 0, confirmed: 0, review: 0, skipped: 0, errors: 0, note: "" });
     this._rescan(h, Math.min(Number(max) || 150, 300), st)
       .catch((e) => ((st.note = e.message), log.warn(`[orderbot] quet lai loi: ${e.message}`)))
       .finally(() => ((st.running = false), (st.finishedAt = Date.now())));
@@ -236,6 +243,7 @@ export class OrderBot {
   async _rescan(hours, max, st) {
     const cutoff = Date.now() - hours * 3600e3;
     for (const [pid, client] of this.bot.clients) {
+      if (st.pageId && pid !== st.pageId) continue;
       if (!this.enabledFor(pid)) continue;
       let last;
       for (let trang = 0; trang < 30 && st.candidates < max; trang++) {
@@ -275,7 +283,7 @@ export class OrderBot {
           if (!it) continue;
           if (it.status !== "PENDING") it.status = "PENDING";
           clearTimeout(this.timers.get(key));
-          const r = await this.check(key).catch(() => (st.errors++, null));
+          const r = await this.check(key, { defaultCode: st.defaultCode }).catch(() => (st.errors++, null));
           st.checked++;
           if (r?.status === "DONE") (st.done++, r.confirmedAt && st.confirmed++);
           else if (r?.status === "REVIEW") st.review++;
@@ -286,6 +294,55 @@ export class OrderBot {
       }
     }
     log.info(`[orderbot] quet lai ${hours}h: doc ${st.scanned}, kiem ${st.checked}, len don ${st.done} (xac nhan ${st.confirmed}), can duyet ${st.review}, bo qua ${st.skipped}`);
+  }
+
+  /**
+   * DUYET DON MOI TREN POS (nut tren trang Bot len don): liet ke don "Moi" `days` ngay qua — ca don nhan vien tu tao —
+   * va ly do tung don chua chuan. CHI DOC, khong ghi gi. Nguoi xem roi bam xac nhan (confirmDrafts) moi ghi.
+   */
+  async previewDrafts(days = 7) {
+    const d = Math.round(Number(days));
+    if (!Number.isFinite(d) || d < 1 || d > 14) throw new Error("Số ngày phải từ 1 đến 14");
+    if (!orderSync.enabled) throw new Error("POS chưa cấu hình");
+    const drafts = await orderSync.recentDrafts(d);
+    const rows = [];
+    for (const o of drafts) {
+      const reasons = await orderSync.draftProblems(o, drafts);
+      const sa = o.shipping_address || {};
+      rows.push({
+        id: o.id,
+        insertedAt: o.inserted_at,
+        customer: o.bill_full_name || sa.full_name || "",
+        phone: normalizePhone(o.bill_phone_number || sa.phone_number) || "",
+        address: [sa.address, sa.commune_name, sa.district_name, sa.province_name].filter(Boolean).join(", ") || sa.full_address || "",
+        items: (o.items || []).map((it) => `${it.variation_info?.display_id || it.variation_info?.name || it.product_name || "?"} x${it.quantity || 1}`),
+        page: o.page?.name || this.bot.pageNames.get(String(o.page_id)) || "",
+        ok: !reasons.length,
+        reasons,
+        // Anh chup luc xem truoc: luc xac nhan, don phai CON Y NHU VAY (nhan vien sua giua chung thi khong dong vao)
+        snap: { phone: String(o.bill_phone_number || sa.phone_number || ""), conversationId: o.conversation_id || "", items: (o.items || []).map((it) => ({ variation_id: String(it.variation_id || it.variation_info?.id || ""), quantity: Number(it.quantity) })) },
+      });
+    }
+    rows.sort((a, b) => String(b.insertedAt).localeCompare(String(a.insertedAt)));
+    this.draftPreview = { days: d, at: Date.now(), rows };
+    return { days: d, total: rows.length, ok: rows.filter((r) => r.ok).length, rows };
+  }
+
+  /** Xac nhan cac don CHUAN trong lan xem truoc gan nhat (ids nguoi chon). Moi don duoc doc lai va kiem lai truoc khi ghi. */
+  async confirmDrafts(ids = []) {
+    const xt = this.draftPreview;
+    if (!xt || Date.now() - xt.at > 30 * 60e3) throw new Error("Bản xem trước đã cũ (quá 30 phút) — bấm Kiểm tra lại trước khi xác nhận");
+    const chon = new Set((ids || []).map(String));
+    const out = { confirmed: [], failed: [] };
+    for (const r of xt.rows) {
+      if (!r.ok || !chon.has(String(r.id))) continue;
+      const kq = await orderSync.confirmOrder(r.id, { conversationId: r.snap.conversationId, phone: normalizePhone(r.snap.phone), items: r.snap.items, note: "duyệt đơn Mới trên trang Bot lên đơn" }).catch((e) => ({ ok: false, reason: e.message }));
+      if (kq.ok) out.confirmed.push(r.id);
+      else out.failed.push({ id: r.id, reason: kq.reason });
+    }
+    log.info(`[orderbot] xac nhan don Moi: ${out.confirmed.length} don, khong xac nhan ${out.failed.length}`);
+    this.draftPreview = null;
+    return out;
   }
 
   start() {
