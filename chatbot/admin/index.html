@@ -384,6 +384,7 @@ function renderSettings(p) {
   </div>
   <div class="card"><h3>Nâng cao</h3><div class="grid2">
     <div><label>Model AI (trống = ${esc(g.model)})</label><select id="f_model"><option value="">(mặc định ${esc(g.model)})</option>${models.map((m) => `<option ${s.model === m ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+    <div><label>Mẫu chủ lực của page (vd Q005; trống = không có)</label><input id="f_defaultProduct" placeholder="Q005" value="${esc(s.defaultProduct || "")}"><div class="hint">Hội thoại không nêu mã nào thì bot chốt và lên đơn theo mã này; bản chốt đơn ghi "Đầm &lt;mã&gt;". Đổi mã thì đơn 24 giờ qua chưa lên được sẽ được kiểm lại ngay.</div></div>
     <div><label>Temperature (0 = chắc chắn, 1 = sáng tạo; trống = mặc định)</label><input id="f_temperature" type="number" step="0.1" min="0" max="1" value="${s.temperature ?? ""}"></div>
     <div><label>Im lặng bao nhiêu phút sau khi nhân viên thật trả lời (trống = ${g.humanTakeoverMinutes}; 0 = bot luôn trả lời, chỉ bỏ qua khi nhân viên đã trả lời tin đó rồi)</label><input id="f_humanTakeoverMinutes" type="number" min="0" value="${s.humanTakeoverMinutes ?? ""}"></div>
     <div><label>Bot bắt đầu trả lời từ tin thứ mấy của khách (trống = ${g.minCustomerMessages})</label><input id="f_minCustomerMessages" type="number" min="1" max="10" value="${s.minCustomerMessages ?? ""}"><div class="hint">Đặt 2 nếu Pancake đã tự động trả lời tin đầu (gửi ảnh, báo giá): bot sẽ im ở tin đầu và vào từ tin thứ 2, không đè lên nhau.</div></div>
@@ -403,7 +404,7 @@ function renderSettings(p) {
   if (!models.length) api("/api/models").then((d) => { models = d.models; if (view.tab === "settings") renderSettings(pageOf(view.id)); }).catch(() => {});
   $("#save").onclick = async () => {
     const body = { displayName: $("#f_displayName").value, enabled: $("#f_enabled").checked, dryRun: $("#f_dryRun").checked, commentMode: $("#f_commentMode").value, orderSync: $("#f_orderSync").checked, sendProductImages: $("#f_sendProductImages").checked,
-      extraPrompt: $("#f_extraPrompt").value, model: $("#f_model").value, temperature: $("#f_temperature").value === "" ? null : Number($("#f_temperature").value), humanTakeoverMinutes: $("#f_humanTakeoverMinutes").value === "" ? null : Number($("#f_humanTakeoverMinutes").value), minCustomerMessages: $("#f_minCustomerMessages").value === "" ? null : Number($("#f_minCustomerMessages").value) };
+      extraPrompt: $("#f_extraPrompt").value, defaultProduct: $("#f_defaultProduct").value.trim().toUpperCase(), model: $("#f_model").value, temperature: $("#f_temperature").value === "" ? null : Number($("#f_temperature").value), humanTakeoverMinutes: $("#f_humanTakeoverMinutes").value === "" ? null : Number($("#f_humanTakeoverMinutes").value), minCustomerMessages: $("#f_minCustomerMessages").value === "" ? null : Number($("#f_minCustomerMessages").value) };
     try { await api(`/api/pages/${p.id}/settings`, { method: "PUT", body }); toast("Đã lưu cài đặt cho " + (p.name || p.id)); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
   };
   bindAiPrices();

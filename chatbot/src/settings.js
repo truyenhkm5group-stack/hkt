@@ -214,6 +214,7 @@ class Settings {
       if (!(k in DEFAULTS)) continue;
       next[k] = v === "" && (k === "temperature" || k === "humanTakeoverMinutes" || k === "minCustomerMessages") ? null : v;
       if (k === "displayName") next[k] = String(v || "").trim();
+      if (k === "defaultProduct") next[k] = String(v || "").trim().toUpperCase();
     }
     next.updatedAt = Date.now();
     this.pages[id] = next;
