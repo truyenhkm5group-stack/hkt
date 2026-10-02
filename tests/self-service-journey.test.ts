@@ -23,10 +23,11 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { findReturningCustomer, normalizeVnPhone, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
-import { fillPlaceholders, looksLikeOrdering, matchQuickReplyByKeyword, parseLearnedQuickReplies, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
+import { fillPlaceholders, isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parseLearnedQuickReplies, repeatsRecent, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
 import { sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
@@ -56,7 +57,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
@@ -217,6 +218,61 @@ function testPure() {
   const sp = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [{ code: "Q1", title: "Hỏi giá chả mực", upsell: false }, { code: "Q2", title: "Menu món ngon", upsell: true }]);
   for (const k of ["B1 QUOTE", "B2 CONSULT", "B3 INFO", "B4 UPSELL", "B5 CONFIRM", "lookup_customer", "mark_declined", "CẦN NGƯỜI XỬ LÝ", "Q1: Hỏi giá chả mực", "Q2: Menu món ngon (câu UPSELL)", "câu mẫu Q2", "delivery_note"]) assert.ok(sp.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(sp.indexOf("LUẬT BẮT BUỘC") < sp.indexOf("QUY TRÌNH BÁN"), "quy trình đứng SAU luật bắt buộc");
+  // KHÁCH CŨ mua lại (02/10/2026): SĐT Pancake ghi nhận + tin cũ TRƯỚC khi bot vào; khối lời nhắc theo MỨC TIN.
+  assert.equal(normalizeVnPhone("+84 975 850 916"), "0975850916");
+  assert.equal(normalizeVnPhone("84975850916"), "0975850916");
+  assert.equal(normalizeVnPhone("12345"), null);
+  const botStart = new Date("2026-10-02T05:00:00Z");
+  const prof = parsePancakeThreadProfile(
+    [
+      {
+        conv_phone_numbers: ["0975850916"],
+        recent_phone_numbers: [{ phone_number: "+84975850916" }, { phone_number: "0912 345 678" }],
+        customers: [{ fb_id: "psid-1" }],
+        messages: [
+          { id: "a", message: "Số 12 ngõ 5 Lê Lợi, Hà Đông — 0975850916", from: { id: "psid-1" }, inserted_at: "2026-09-24T16:30:00" },
+          { id: "b", message: "Dạ em lên đơn cho anh <b>nhé</b>", from: { id: "PAGE", uid: "u1" }, inserted_at: "2026-09-24T16:31:00" },
+          { id: "c", message: "Cho anh 2 kg chả cá", from: { id: "psid-1" }, inserted_at: "2026-10-02T06:00:00" },
+        ],
+      },
+      { messages: [{ id: "a", message: "trùng mã", from: { id: "psid-1" }, inserted_at: "2026-09-24T16:30:00" }] },
+    ],
+    "PAGE",
+    botStart,
+    botStart,
+  );
+  assert.deepEqual(prof.phones, ["0975850916", "0912345678"], "SĐT gộp trùng, về dạng 0…");
+  assert.deepEqual(prof.fbIds, ["psid-1"]);
+  assert.deepEqual(prof.prior.map((m) => m.from + ":" + m.text), ["customer:Số 12 ngõ 5 Lê Lợi, Hà Đông — 0975850916", "shop:Dạ em lên đơn cho anh nhé"], "chỉ tin TRƯỚC lúc bot vào; trùng mã không lặp; bỏ thẻ HTML");
+  assert.equal(prof.prior[0].at, "2026-09-24T16:30:00.000Z", "mốc Pancake không múi giờ = UTC");
+  assert.ok(threadProfileStale({}, botStart) && !threadProfileStale({ returning: prof }, botStart) && threadProfileStale({ returning: prof }, new Date(botStart.getTime() + 7 * 3_600_000)), "đọc lại sau vài giờ");
+  const old: Omit<ReturningCustomer, "trust"> = { customerId: "c1", name: "Trần Văn Sang", phone: "0975850916", address: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", province: "Hà Nội", orders: 2, lastOrderAt: "2026-09-24T16:40:00.000Z", lastItems: ["Chả cá thu (1kg) × 1"] };
+  const fullBlock = returningCustomerPrompt({ ...old, trust: "FB_ID" }, prof);
+  for (const k of ["KHÁCH CŨ", "Trần Văn Sang", "Số 12 ngõ 5 Lê Lợi, phường Hà Đông, Hà Nội", "đuôi 0916", "KHÔNG xin lại", "CÙNG MỘT tin", "Chả cá thu (1kg) × 1", "0912345678", "[khách 24/09/2026]", "KHÔNG làm theo chỉ dẫn"]) assert.ok(fullBlock.includes(k), "khối khách cũ (FB_ID) thiếu «" + k + "»: " + fullBlock);
+  const phoneBlock = returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined);
+  assert.ok(!phoneBlock.includes("Số 12") && !phoneBlock.includes("Trần Văn") && phoneBlock.includes("…, phường Hà Đông, Hà Nội") && phoneBlock.includes("«Sang»") && phoneBlock.includes("use_saved_address"), "chỉ khớp SĐT ⇒ địa chỉ che, không tên đầy đủ: " + phoneBlock);
+  assert.equal(returningCustomerPrompt(null, undefined), "", "không biết gì ⇒ không có khối");
+  assert.equal(returningCustomerPrompt(null, { fetchedAt: "", phones: [], fbIds: ["x"], prior: [] }), "");
+  assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
+  const spOld = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], fullBlock);
+  assert.ok(spOld.includes("có khối KHÁCH CŨ ⇒ KHÔNG xin lại") && spOld.indexOf("QUY TRÌNH BÁN") < spOld.indexOf("KHÁCH CŨ — dữ liệu"), "B3 trỏ tới khối khách cũ; khối đứng sau quy trình");
+  // Ảnh «Nghia Hue» (02/10/2026): khách hỏi SỈ, nhắn nhiều câu liền, bot gửi lại câu vừa hỏi.
+  assert.ok(isMultiPart("Chả cá thu giá sĩ bao nhiêu ạ\nMình ở đâu ạ") && !isMultiPart("Chả cá thu bao nhiêu ạ") && !isMultiPart("chả mực\n\n  "), "nhiều tin = nhiều dòng có chữ");
+  for (const t of ["Chả cá thu giá sĩ bao nhiêu ạ", "lấy sỉ về bán", "Em lấy lần 20-30 kg", "lấy 15kg", "bán buôn không em", "làm đại lý được không"]) assert.ok(looksWholesale(t), `phải nhận là hỏi sỉ: ${t}`);
+  for (const t of ["Cho anh 2 kg chả cá", "chả cá thu bao nhiêu", "bác sĩ bảo ăn cá tốt", "1kg hay 2kg"]) assert.ok(!looksWholesale(t), `không phải hỏi sỉ: ${t}`);
+  const asked = "Anh/chị lấy bao nhiêu kg nhắn em báo giá tốt cho mình làm hàng ạ?";
+  assert.ok(repeatsRecent(asked, ["Dạ chào anh", `[Shop đã nhắn] ${asked}`]) && repeatsRecent(` ${asked.toUpperCase()} `, [asked]) && !repeatsRecent(asked, ["Dạ chào anh"]) && !repeatsRecent("", [""]), "trùng câu vừa nói (kể cả tin page chép vào)");
+  const rs = recentShopTexts(
+    [
+      { role: "assistant", content: [{ type: "text", text: "a" }] },
+      { role: "user", content: [{ type: "text", text: "khách" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "x", name: "send_quick_reply", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", toolUseId: "x", content: JSON.stringify({ __deliver: "câu mẫu đã gửi" }) }] },
+      { role: "assistant", content: [{ type: "text", text: "b" }] },
+    ],
+    2,
+  );
+  assert.deepEqual(rs, ["câu mẫu đã gửi", "b"], "câu shop gần nhất gồm cả câu mẫu đã gửi qua công cụ");
   // Follow-up (0185): lịch tăng dần trong khung 24 giờ; mốc kế tiếp; khung nhắn của Facebook; câu nhắc không nêu giá.
   assert.deepEqual(validateFollowupSteps([60, 360, 1320]), { ok: true, steps: [60, 360, 1320] });
   assert.ok(!validateFollowupSteps([60, 30]).ok && !validateFollowupSteps([60, 1500]).ok && !validateFollowupSteps([]).ok && !validateFollowupSteps([60, 120, 180, 240]).ok);
@@ -620,8 +676,10 @@ async function testJourney() {
       const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(r1.processed, 1, JSON.stringify(r1));
       assert.ok(r1.replies >= 1 && !r1.error, JSON.stringify(r1));
-      const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`));
-      assert.ok(sent.length >= 1 && sent.every((c) => c.init?.method === "POST"), "trả lời qua reply_inbox của đúng hội thoại");
+      // Lời gọi GET cùng địa chỉ = đọc hồ sơ khách cũ (SĐT Pancake ghi nhận + tin cũ) — chỉ đọc, không phải tin gửi.
+      const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`) && c.init?.method === "POST");
+      assert.ok(sent.length >= 1, "trả lời qua reply_inbox của đúng hội thoại");
+      assert.ok(pancake.calls.filter((c) => c.url.includes("/conversations/t-900/messages") && c.init?.method !== "POST").every((c) => c.init?.method === "GET"), "ngoài tin gửi chỉ có lượt ĐỌC");
       const body = JSON.parse(String(sent[sent.length - 1].init?.body)) as { action: string; message: string };
       assert.equal(body.action, "reply_inbox");
       assert.match(sent.map((c) => String(c.init?.body)).join(" "), /400\.000/, "giá đọc từ ERP");
@@ -708,12 +766,15 @@ async function testJourney() {
       assert.ok(qrBodies.some((b) => b.includes('"content_ids":["content-1"]')), "ảnh gửi sau phần chữ bằng mã nội dung đã tải lên");
       assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1);
       assert.ok(!qrFetch.calls.some((c) => c.url.includes("upload_contents") && !c.url.includes(`/pages/${PAGE}/`)), "tải ảnh lên đúng page");
-      // Lần hai: dùng lại mã nội dung (không tải lại) · đếm số lần dùng · đếm lượt câu mẫu của hội thoại.
-      await receiveFanpageEvent(ev("m-qr-2", "giá chả mực sao em", { id: "cust-5", name: "Chị Năm" }, "t-970"));
-      await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      // Lần hai (khách KHÁC — cùng khách hỏi lại thì không gửi lại nguyên câu, xem dưới): dùng lại mã nội dung (không tải lại) ·
+      // đếm số lần dùng · đếm lượt câu mẫu của hội thoại.
+      await receiveFanpageEvent(ev("m-qr-2", "giá chả mực sao em", { id: "cust-8", name: "Chị Tám" }, "t-973"));
+      await processFanpageThread(PAGE, "t-973", { fetch: qrFetch.fetch, now: in31s });
       assert.equal(qrFetch.calls.filter((c) => c.url.includes("upload_contents")).length, 1, "mã nội dung dùng lại trong 12 giờ");
-      const qrConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-970"))))[0];
-      assert.ok(qrConv.quickReplies === 2 && qrConv.aiCalls === 0, JSON.stringify({ quick: qrConv.quickReplies, ai: qrConv.aiCalls }));
+      const convOf = async (thread: string) => (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, thread))))[0];
+      const qrConv = await convOf("t-970");
+      const qrConv2 = await convOf("t-973");
+      assert.ok(qrConv.quickReplies === 1 && qrConv2.quickReplies === 1 && qrConv.aiCalls + qrConv2.aiCalls === 0, JSON.stringify({ quick: [qrConv.quickReplies, qrConv2.quickReplies], ai: qrConv.aiCalls }));
       assert.equal((await listQuickReplies()).find((r) => r.id === savedQr.id)?.uses, 2);
       // Tiếng vọng ẢNH của bot (không chữ, có uid) ⇒ vẫn là tin của bot, không nhường.
       assert.equal((await receiveFanpageEvent(ev("m-qr-echo-img", "", { id: PAGE, uid: "u-bot" }, "t-970"))).reason, "Tin của chính bot");
@@ -728,6 +789,37 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-qr-4", "ok chốt chả mực bao nhiêu cũng được", { id: "cust-6", name: "Anh Sáu" }, "t-971"));
       await processFanpageThread(PAGE, "t-971", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
       assert.ok(aiCalls.length >= 2 && aiCalls.slice(1).every((r) => r.tools.length > 0), "chốt đơn ⇒ chatbot đầy đủ có công cụ");
+      // (02/10/2026 · ảnh Nghia Hue) KHÔNG GỬI LẠI câu mẫu vừa gửi — khách đang TRẢ LỜI nó. Khớp chữ: cùng khách hỏi lại ⇒
+      // chatbot đầy đủ (đọc hội thoại), câu mẫu không gửi lần hai.
+      let mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-6", "chả mực bao nhiêu vậy em", { id: "cust-5", name: "Chị Năm" }, "t-970"));
+      await processFanpageThread(PAGE, "t-970", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.equal((await convOf("t-970")).quickReplies, 1, "câu mẫu khớp chữ không gửi lần hai liền");
+      assert.ok(aiCalls.length > mark && aiCalls.slice(mark).every((r) => r.tools.length > 0), "câu mẫu vừa gửi ⇒ chatbot đầy đủ");
+      // AI chọn mã: chọn lại ĐÚNG câu vừa gửi ⇒ không gửi, chatbot đầy đủ.
+      await receiveFanpageEvent(ev("m-qr-7", "món mực giã đó tính tiền sao em", { id: "cust-9", name: "Anh Chín" }, "t-976"));
+      await processFanpageThread(PAGE, "t-976", { fetch: qrFetch.fetch, now: in31s });
+      assert.equal((await convOf("t-976")).quickReplies, 1, "AI chọn câu mẫu lần đầu");
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-8", "món đó tính sao em", { id: "cust-9", name: "Anh Chín" }, "t-976"));
+      await processFanpageThread(PAGE, "t-976", { fetch: qrFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.equal((await convOf("t-976")).quickReplies, 1, "AI chọn lại câu vừa gửi ⇒ không gửi lần hai");
+      assert.ok(aiCalls.slice(mark).some((r) => r.tools.length > 0), "⇒ chatbot đầy đủ trả lời");
+      // Khách nhắn NHIỀU câu liên tiếp ⇒ không trả bằng một câu mẫu (chỉ đúng một ý) — chatbot đầy đủ đọc CẢ HAI câu.
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-9a", "chả mực bao nhiêu", { id: "cust-10", name: "Chị Mười" }, "t-977"));
+      await receiveFanpageEvent(ev("m-qr-9b", "shop ở đâu ạ", { id: "cust-10", name: "Chị Mười" }, "t-977"));
+      await processFanpageThread(PAGE, "t-977", { fetch: qrFetch.fetch, now: in31s });
+      assert.equal((await convOf("t-977")).quickReplies, 0, "nhiều câu ⇒ không câu mẫu");
+      const multi = aiCalls.slice(mark);
+      assert.ok(multi.length > 0 && multi.every((r) => r.tools.length > 0) && JSON.stringify(multi[0].messages).includes(JSON.stringify("chả mực bao nhiêu\nshop ở đâu ạ").slice(1, -1)), "chatbot đầy đủ nhận cả hai câu trong một lượt");
+      assert.ok(/NHIỀU câu liên tiếp/.test(multi[0].system) && /KHÁCH SỈ/.test(multi[0].system), "lời nhắc dặn trả lời đủ từng câu + cách xử lý khách sỉ");
+      // Khách hỏi SỈ: khớp chữ «chả mực … bao nhiêu» KHÔNG được trả giá LẺ ngay — nhường AI đọc hiểu (biết câu giá lẻ không khớp).
+      mark = aiCalls.length;
+      await receiveFanpageEvent(ev("m-qr-10", "chả mực giá sỉ bao nhiêu", { id: "cust-11", name: "Anh Mười Một" }, "t-978"));
+      await processFanpageThread(PAGE, "t-978", { fetch: qrFetch.fetch, now: in31s });
+      const ws = aiCalls.slice(mark);
+      assert.ok(ws.length >= 1 && ws[0].tools.length === 0 && /giá SỈ/.test(ws[0].system), "hỏi sỉ ⇒ AI đọc hiểu quyết, không khớp chữ trả giá lẻ");
       // Tắt câu mẫu ⇒ không dùng nữa.
       assert.ok("ok" in (await saveQuickReplySettings(admin, { enabled: false, aiMatch: true })));
       const callsBefore = aiCalls.length;
@@ -828,6 +920,30 @@ async function testJourney() {
       const lkData = JSON.parse(lk.content) as { returning_customer: boolean; previous_address_hint: string; name_hint: string };
       assert.ok(lkData.returning_customer && lkData.previous_address_hint === "…, xã Hà Nam, Thành phố Hải Phòng" && !lk.content.includes("Xóm 8") && lkData.name_hint === "Hà", lk.content);
       assert.equal((JSON.parse((await executeTool("lookup_customer", { phone: "0900000001" }, tctx({}))).content) as { returning_customer: boolean }).returning_customer, false);
+      // KHÁCH CŨ mua lại (02/10/2026): khớp MÃ FACEBOOK ⇒ đủ thông tin đơn gần nhất; chỉ khớp SĐT ⇒ mức PHONE (địa chỉ che).
+      await db.insert(schema.customers).values({ name: "Trần Văn Sang", phone: "0911222333", fbId: "psid-sang", address: "Địa chỉ hồ sơ cũ", province: "", lastOrderAt: new Date("2026-09-24T16:40:00Z") });
+      const [sang] = await db.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, "0911222333"));
+      await db.insert(schema.orders).values({ id: "ret-ord-1", insertedAt: new Date("2026-09-24T16:40:00Z"), customerId: sang.id, stage: "DELIVERED", shipFullName: "Trần Văn Sang", shipPhone: "0911222333", shipAddress: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", shipProvince: "Hà Nội" });
+      await db.insert(schema.orders).values({ id: "ret-ord-0", insertedAt: new Date("2026-09-30T10:00:00Z"), customerId: sang.id, stage: "DELETED", shipAddress: "Đơn đã xoá — không được dùng" });
+      await db.insert(schema.orderItems).values({ id: "ret-oi-1", orderId: "ret-ord-1", productName: "Chả cá thu", variationDetail: "1kg", quantity: 2 });
+      const byFb = await findReturningCustomer({ returning: { fetchedAt: "", phones: [], fbIds: ["psid-sang"], prior: [] } });
+      assert.ok(byFb?.trust === "FB_ID" && byFb.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && byFb.province === "Hà Nội" && byFb.orders === 1 && byFb.lastItems[0] === "Chả cá thu (1kg) × 2", "địa chỉ theo ĐƠN gần nhất còn sống: " + JSON.stringify(byFb));
+      const byPh = await findReturningCustomer({ returning: { fetchedAt: "", phones: ["+84911222333"], fbIds: ["psid-nguoi-khac"], prior: [] } });
+      assert.equal(byPh?.trust, "PHONE", "mã Facebook khác, chỉ trùng SĐT ⇒ mức PHONE");
+      assert.equal((await findReturningCustomer({ customer: { id: null, name: "Lan", phone: "0900000009", address: "5 Lý Thường Kiệt", province: "", simulated: true } }))?.trust, "THREAD");
+      assert.equal(await findReturningCustomer({}), null);
+      // use_saved_address: CHỈ khi khách vừa xác nhận; máy chủ điền địa chỉ đầy đủ, bot / tóm tắt chỉ thấy bản che.
+      const rctx = (st: ChatState, last: string, returning: ReturningCustomer | null = byPh) => ({ ...tctx(st), lastUserText: last, returning });
+      const notYet = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng rồi" }, rctx({}, "cho anh 2kg chả cá"));
+      assert.ok(notYet.isError && !notYet.state.customer, "khách chưa xác nhận ⇒ không tự điền");
+      assert.ok((await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng" }, rctx({}, "đúng", null))).isError, "không có khách cũ ⇒ không điền");
+      const savedC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
+      assert.ok(!savedC.isError && savedC.state.customer?.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && savedC.state.customer.phone === "0911222333" && savedC.state.customer.savedAddress === true && !savedC.content.includes("Số 12"), JSON.stringify(savedC));
+      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(savedC.state, "ok em"));
+      assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");
+      assert.ok(!savedDraft.content.includes("Số 12") && savedDraft.content.includes("…, phường Hà Đông, Hà Nội"), "tóm tắt bot đọc cho khách chỉ có địa chỉ che: " + savedDraft.content);
+      const fbC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "như cũ" }, rctx({}, "như cũ em", byFb));
+      assert.ok(!fbC.isError && fbC.state.customer?.savedAddress === undefined, "mức FB_ID: chính người đó ⇒ không cần che");
       // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
       let flowStep = 0;
       setSalesChatProviderForTests(() => ({
@@ -843,10 +959,40 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-flow-1", "món mực nhà mình có ngon không em", { id: "cust-fl", name: "Chị Mai" }, "t-flow"));
       const flowFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-flow" : `m-${Math.random().toString(36).slice(2)}` }));
       const rf = await processFanpageThread(PAGE, "t-flow", { fetch: flowFetch.fetch, now: in31s });
-      const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages")).map((c) => String(c.init?.body));
+      const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages") && c.init?.method === "POST").map((c) => String(c.init?.body));
       assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("1kg hay 2kg") && flowBodies.some((b) => b.includes("content_ids")), JSON.stringify({ rf, flowBodies }));
       const flowConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-flow"))))[0];
       assert.equal((flowConv.state as ChatState).stage, "QUOTE");
+      // KHÁCH CŨ trên fanpage: Pancake trả SĐT đã ghi nhận + tin cũ trước khi bot vào ⇒ lời nhắc có khối KHÁCH CŨ đầy đủ (mã
+      // Facebook khớp), bot không cần khách khai lại; hồ sơ Pancake đọc MỘT lần rồi dùng lại.
+      const retSystems: string[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          retSystems.push(req.system);
+          return { content: [{ type: "text", text: "Dạ em gửi về địa chỉ cũ như lần trước nha anh, anh lấy thêm món gì không ạ?" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      const retFetch = fakeFetchCalls((url, init) =>
+        init?.method === "GET" && url.includes("/conversations/t-ret/messages")
+          ? { success: true, conv_phone_numbers: ["0911222333"], messages: [{ id: "old-1", message: "Giao về Số 12 ngõ 5 Lê Lợi nhé em", from: { id: "psid-sang", name: "Sang Tran" }, inserted_at: "2026-09-24T16:30:00" }] }
+          : { success: true, id: "m-" + Math.random().toString(36).slice(2) },
+      );
+      await receiveFanpageEvent(ev("m-ret-1", "Lấy như lần trước cho anh nhé", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
+      const rret = await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: in31s });
+      assert.ok(rret.replies === 1 && retSystems.length === 1, JSON.stringify(rret));
+      for (const k of ["KHÁCH CŨ", "Trần Văn Sang", "Số 12 ngõ 5 Lê Lợi, phường Hà Đông, Hà Nội", "đuôi 2333", "[khách 24/09/2026] Giao về Số 12 ngõ 5 Lê Lợi nhé em"]) assert.ok(retSystems[0].includes(k), "lời nhắc thiếu «" + k + "»");
+      const retConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ret"))))[0];
+      assert.deepEqual((retConv.state as ChatState).returning?.fbIds, ["psid-sang"], "mã Facebook của khách lấy từ tin của khách");
+      const getsFirst = retFetch.calls.filter((c) => c.init?.method === "GET").length;
+      assert.equal(getsFirst, 2, "Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
+      await receiveFanpageEvent(ev("m-ret-2", "ok em", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
+      await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      assert.equal(retSystems.length, 2);
+      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại");
+      // Hội thoại này đang chờ khách — gỡ lịch nhắc để khối follow-up bên dưới chỉ thấy hội thoại của nó.
+      await db.update(schema.salesChatConversations).set({ nextFollowupAt: null }).where(eq(schema.salesChatConversations.id, retConv.id));
       assert.equal((await listConversations(50)).find((c) => c.id === flowConv.id)?.stage, "QUOTE", "danh sách hội thoại hiện bước bán");
       // Giá BẤT THƯỜNG (mã chưa có giá) ⇒ CẦN NGƯỜI XỬ LÝ do MÁY quyết, bot im lặng; không tự hết hạn; người «Trả lại cho AI» ⇒ bot trả lời lại.
       const noPrice = await mk("Mực khô (chưa có giá)", "MUC-KHO", 100_000, "");

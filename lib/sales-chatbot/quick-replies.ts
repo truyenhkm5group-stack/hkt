@@ -19,12 +19,15 @@ import type { SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import {
   fillPlaceholders,
+  isMultiPart,
   looksLikeOrdering,
+  looksWholesale,
   matchQuickReplyByKeyword,
   parsePlaceholders,
   parseQuickReplySettings,
   QUICK_REPLY_LIMITS,
   QUICK_REPLY_SETTING_KEY,
+  repeatsRecent,
   validateQuickReply,
   type QuickReplyDraft,
   type QuickReplyEntry,
@@ -152,14 +155,18 @@ async function pickOf(entry: QuickReplyEntry, method: QuickReplyPick["method"], 
  * BƯỚC 1 (0 token): đang đặt hàng ⇒ `SKIP`; khớp chữ thắng rõ ⇒ `ANSWER`; còn lại ⇒ `NO_MATCH` kèm ứng viên cho bước AI
  * đọc hiểu (hai câu ngang điểm ⇒ chỉ hai câu đó; không khớp ⇒ mọi câu đang bật).
  */
-export async function quickReplyByKeyword(text: string, opts: { ordering: boolean; cfg: Pick<SalesChatbotConfig, "shippingFee"> }): Promise<QuickReplyStep> {
+export async function quickReplyByKeyword(text: string, opts: { ordering: boolean; cfg: Pick<SalesChatbotConfig, "shippingFee">; recent?: readonly string[] }): Promise<QuickReplyStep> {
   if (opts.ordering) return { kind: "SKIP", reason: "Khách đang đặt hàng" };
   if (looksLikeOrdering(text)) return { kind: "SKIP", reason: "Câu khách có dấu hiệu chốt đơn" };
+  // Nhiều tin liên tiếp ⇒ một câu mẫu chỉ trả lời được một ý — chatbot đầy đủ trả lời ĐỦ từng câu (vẫn dùng câu mẫu được).
+  if (isMultiPart(text)) return { kind: "SKIP", reason: "Khách nhắn nhiều câu liên tiếp" };
   const entries = await activeEntries();
   if (entries.length === 0) return { kind: "SKIP", reason: "Chưa có câu mẫu nào đang bật" };
   const m = matchQuickReplyByKeyword(text, entries);
-  if (m.kind === "MATCH") {
+  // Khách hỏi SỈ ⇒ khớp chữ «chả cá thu giá» sẽ trả giá LẺ — nhường AI đọc hiểu (nó biết câu báo giá lẻ không khớp).
+  if (m.kind === "MATCH" && !looksWholesale(text)) {
     const pick = await pickOf(m.entry, "KEYWORD", opts.cfg);
+    if (pick && repeatsRecent(pick.text, opts.recent ?? [])) return { kind: "SKIP", reason: "Câu mẫu vừa gửi — khách đang trả lời nó" };
     if (pick) return { kind: "ANSWER", pick };
     return { kind: "SKIP", reason: "Câu mẫu khớp nhưng thiếu số từ ERP" };
   }
@@ -170,6 +177,8 @@ export async function quickReplyByKeyword(text: string, opts: { ordering: boolea
 const PICK_SYSTEM = [
   "Bạn đọc tin nhắn của khách gửi một shop bán hàng và chọn MỘT câu trả lời mẫu phù hợp.",
   "Chỉ chọn khi câu mẫu trả lời ĐẦY ĐỦ và ĐÚNG ý chính của tin khách. Tin có nhiều câu hỏi khác nhau, khách đang đặt hàng / gửi thông tin giao hàng, khiếu nại, hoặc không câu mẫu nào khớp ⇒ trả lời NONE.",
+  "Khách đang TRẢ LỜI câu shop vừa hỏi (vd shop hỏi «lấy bao nhiêu kg», khách đáp «20-30 kg») ⇒ NONE — không chọn lại câu mẫu cùng ý với câu shop vừa nói.",
+  "Khách hỏi giá SỈ / lấy về bán / số lượng lớn ⇒ câu mẫu báo giá LẺ KHÔNG khớp.",
   "Chỉ trả lời đúng MỘT mã dạng Q1, Q2… hoặc NONE. Không giải thích.",
 ].join("\n");
 

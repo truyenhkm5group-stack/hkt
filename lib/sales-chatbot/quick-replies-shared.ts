@@ -102,6 +102,43 @@ export function looksLikeOrdering(text: string): boolean {
   return [" chot ", " dat hang ", " len don ", " dia chi ", " sdt ", " so dien thoai ", " dong y ", " xac nhan ", " gui ve ", " giao ve ", " lay cho ", " lay em ", " lay 1 ", " lay 2 ", " lay 3 "].some((k) => m.includes(k));
 }
 
+/**
+ * Khách nhắn NHIỀU tin liên tiếp (fanpage gom các tin của một lượt, mỗi tin một dòng) ⇒ một câu mẫu chỉ trả lời được một ý.
+ * Đo 02/10/2026 (Hải Sản Làng Chài): «Chả cá thu giá sĩ bao nhiêu ạ» + «Mình ở đâu ạ» ⇒ câu mẫu báo giá LẺ, bỏ cả «sỉ» lẫn
+ * câu hỏi địa chỉ. HÀM THUẦN.
+ */
+export function isMultiPart(text: string): boolean {
+  return text.split(/\r?\n/).filter((l) => foldVi(l)).length >= 2;
+}
+
+/**
+ * Khách hỏi SỈ / lấy về bán / đại lý / số lượng từ 10 kg trở lên — ERP chỉ có giá LẺ nên câu mẫu báo giá lẻ KHÔNG trả lời
+ * được câu này (bước khớp chữ nhường cho AI đọc hiểu / chatbot đầy đủ). HÀM THUẦN.
+ */
+export function looksWholesale(text: string): boolean {
+  const m = ` ${foldVi(text)} `;
+  if (m.includes(" si ") && !m.includes(" bac si ")) return true;
+  if ([" ban buon ", " gia buon ", " dai ly ", " ctv ", " cong tac vien ", " ve ban ", " ban lai ", " lam hang "].some((k) => m.includes(k))) return true;
+  // «20-30 kg» bỏ dấu thành «20 30 kg»; «20kg» giữ liền.
+  const q = /(?:^| )(\d+)(?: \d+)? ?(?:kg|ky|ki|can)(?= |$)/.exec(foldVi(text));
+  return Boolean(q) && Number(q![1]) >= 10;
+}
+
+/** Chữ để so «câu này bot / shop vừa nói rồi»: bỏ tiền tố tin của page, bỏ dấu, gộp khoảng trắng. */
+function sayKey(s: string): string {
+  return foldVi(s.replace(/^\[Shop đã nhắn\]\s*/, ""));
+}
+
+/**
+ * Câu sắp gửi TRÙNG một câu bot / page vừa nói ⇒ khách đang TRẢ LỜI câu đó, gửi lại là không đọc tin khách. Đo 02/10/2026:
+ * «Anh/chị lấy bao nhiêu kg nhắn em báo giá tốt…» gửi HAI lần liền, lần hai ngay sau khi khách đáp «Em lấy lần 20-30 kg».
+ * HÀM THUẦN.
+ */
+export function repeatsRecent(text: string, recent: readonly string[]): boolean {
+  const k = sayKey(text);
+  return Boolean(k) && recent.some((r) => sayKey(r) === k);
+}
+
 export type Placeholder = { raw: string; kind: "price" | "stock" | "ship"; sku: string };
 
 const PLACEHOLDER_RE = /\{\{\s*(giá|gia|tồn|ton|ship|phí ship|phi ship)\s*(?::\s*([^}]+?))?\s*\}\}/gi;
