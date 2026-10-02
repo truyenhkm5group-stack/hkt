@@ -41,6 +41,9 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { checkCredit } from "@/lib/constants/price-lists";
+import { manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
+import { customerExposure } from "@/lib/queries/receivables";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
@@ -329,6 +332,29 @@ async function kickWorkflows() {
 
 export type ManualOrderResult = { ok: true; id: string } | MetaFailure;
 
+/**
+ * HẠN MỨC NỢ (0188, docs/verticals/price-lists-receivables.md). Chỉ chấm khi đơn được CHỐT (`CONFIRMED`) và khách đã
+ * khai hạn mức: dư nợ của mọi đơn tay khác đang chốt / đã giao + phần CHƯA THU của đơn này không được vượt hạn mức. Đơn
+ * Mới / Chờ hàng không chấm — chưa ai cam kết giao. Hạn mức trống = chưa khai ⇒ không chặn; hạn mức 0 là khai THẬT.
+ */
+async function creditGate(p: Prepared, existingOrderId?: string): Promise<MetaFailure | null> {
+  if (p.stage !== "CONFIRMED") return null;
+  const db = await getDb();
+  const [terms] = await db.select({ creditLimit: schema.customerTradeTerms.creditLimit }).from(schema.customerTradeTerms).where(eq(schema.customerTradeTerms.customerId, p.customer.id)).limit(1);
+  const limit = terms?.creditLimit ?? null;
+  if (limit === null) return null;
+  const other = await customerExposure(p.customer.id, { excludeOrderId: existingOrderId });
+  let thisDue = p.totals.totalPriceAfterDiscount + p.totals.shippingFee;
+  if (existingOrderId) {
+    const pays = await db.select({ kind: schema.orderPayments.kind, amount: schema.orderPayments.amount, status: schema.orderPayments.status }).from(schema.orderPayments).where(eq(schema.orderPayments.orderId, existingOrderId));
+    thisDue = manualPaymentStatus(sumConfirmedPayments(pays), thisDue).outstanding;
+  }
+  const c = checkCredit(limit, other, thisDue);
+  if (c.ok) return null;
+  const vnd = (n: number) => `${n.toLocaleString("vi-VN")} ₫`;
+  return fail("INVALID", [{ field: "customerId", message: `Vượt hạn mức nợ của ${p.customer.name}: dư nợ sau đơn ${vnd(c.exposureAfter)} > hạn mức ${vnd(c.limit)} (vượt ${vnd(c.overBy)}). Thu nợ trước, nâng hạn mức ở hồ sơ khách, hoặc lưu đơn ở trạng thái Mới.` }]);
+}
+
 export async function createManualOrderCore(user: SessionUser, rawInput: unknown): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
@@ -346,6 +372,8 @@ async function createOrder(w: Writer, rawInput: unknown): Promise<ManualOrderRes
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
   const p = prep.p;
+  const credit = await creditGate(p);
+  if (credit) return credit;
   const id = newManualOrderId();
   const now = new Date();
   const db = await getDb();
@@ -404,6 +432,8 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
   if (!prep.ok) return prep;
   const p = prep.p;
   const row = existing.row;
+  const credit = await creditGate(p, row.id);
+  if (credit) return credit;
   const beforeItems = await itemsSnapshot(row.id);
   const now = new Date();
   const db = await getDb();

@@ -1310,6 +1310,13 @@
       "when": 1790680230000,
       "tag": "0187_platform_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1790680240000,
+      "tag": "0188_price_lists_receivables",
+      "breakpoints": true
     }
   ]
 }
