@@ -1262,32 +1262,67 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(trung.mapped.length, 1, "khong len trung san pham");
   assert.equal(trung.mapped[0].quantity, 1, "nhac lai khong phai mua them");
   assert.equal(os33.mapItems([{ code: "Q004", color: "Nâu", size: "M", quantity: 2 }, { code: "Q004", color: "Nâu", size: "M", quantity: 1 }]).mapped[0].quantity, 2);
-  // (e) Bot len don: khach nhan rai rac -> CHO; im lang qua han -> CAN DUYET; bo qua duoc
+  // (e) Bot len don (chu shop 02/10/2026): khach go SDT -> theo doi, kiem 30 phut/lan; du thi len don va thoi kiem;
+  // qua 3 lan van chua du -> CAN DUYET + bao ERP; khach gui them thong tin sau do -> theo doi lai tu dau
   const ob = bot.orderBot;
   const goc = os33.syncFromConversation;
+  const gocHistory = ob.history;
   settings.update("PAGE1", { orderSync: true, dryRun: false });
   const khach33 = (t) => ({ from: { id: "KHACH" }, message: t });
+  ob.history = async () => ({ messages: [khach33("sđt chị 0912345678")], text: "KHÁCH: sđt chị 0912345678", name: "Hoa" });
+  ob.notify("PAGE1", "C33x", [khach33("thôn 3 xã Sài Sơn huyện Quốc Oai Hà Nội")], "Hoa");
+  assert.equal(ob.items.C33x, undefined, "chua co SDT -> chua theo doi");
   ob.notify("PAGE1", "C33e", [khach33("sđt chị 0912345678")], "Hoa");
-  assert.equal(ob.items.C33e.status, "PENDING", "moi co SDT -> cho, chua ghi gi");
-  assert.equal(ob.items.C33e.facts.address, null);
-  os33.syncFromConversation = async () => ({ status: "skipped", reason: "chưa đủ thông tin: địa chỉ" });
-  ob.items.C33e.lastCustomerAt = Date.now() - 3 * 3600e3;
+  const e = ob.items.C33e;
+  assert.equal(e.status, "PENDING", "co SDT -> theo doi, chua ghi gi");
+  assert.equal(e.rounds, 0);
+  assert.ok(e.nextCheckAt - Date.now() > 29 * 60e3 && e.nextCheckAt - Date.now() <= 30 * 60e3, "lan kiem dau sau 30 phut");
+  let soLanAI = 0;
+  os33.syncFromConversation = async () => (soLanAI++, { status: "skipped", reason: "chưa đủ thông tin: địa chỉ" });
   await ob.sweep();
-  assert.equal(ob.items.C33e.status, "REVIEW", "khach im lang qua han -> bao nhan vien");
-  assert.match(ob.items.C33e.reasons[0], /im lặng hơn 120 phút/);
+  assert.equal(soLanAI, 0, "chua toi gio thi khong kiem (khong ton AI)");
+  for (let lan = 1; lan <= 3; lan++) {
+    e.nextCheckAt = Date.now() - 1;
+    await ob.sweep();
+    assert.equal(e.rounds, lan);
+    if (lan < 3) {
+      assert.equal(e.status, "PENDING");
+      assert.ok(e.nextCheckAt > Date.now() + 29 * 60e3, "hen lan sau 30 phut");
+    }
+  }
+  assert.equal(soLanAI, 3);
+  assert.equal(e.status, "REVIEW", "3 lan chua du -> can duyet");
+  assert.ok(e.reviewAt, "co moc de ERP bao");
+  assert.match(e.reasons[0], /Đã kiểm 3 lần \(30 phút\/lần\) vẫn chưa đủ thông tin: chưa đủ thông tin: địa chỉ/);
+  await ob.sweep();
+  assert.equal(soLanAI, 3, "da can duyet thi thoi kiem");
   assert.equal(ob.list().counts.review >= 1, true);
   ob.dismiss("C33e");
   assert.equal(ob.items.C33e.status, "DISMISSED");
-  // Khach gui them dia chi sau khi da bo qua -> mo lai, theo doi tiep
+  // Khach gui them dia chi sau khi da bo qua -> mo lai, bo dem moi
   ob.notify("PAGE1", "C33e", [khach33("sđt chị 0912345678"), khach33("thôn 3 xã Sài Sơn huyện Quốc Oai Hà Nội")], "Hoa");
   assert.equal(ob.items.C33e.status, "PENDING");
-  clearTimeout(ob.timers.get("C33e"));
+  assert.equal(ob.items.C33e.rounds, 0);
+  // Du thong tin o lan kiem -> len don, thoi kiem
+  os33.syncFromConversation = async () => (soLanAI++, { status: "created", orderId: 777, summary: "Tạo đơn nháp #777", phone: "0912345678", items: [], confirmBlockers: ["x"] });
+  ob.items.C33e.nextCheckAt = Date.now() - 1;
+  await ob.sweep();
+  assert.equal(ob.items.C33e.status, "DONE");
+  ob.items.C33e.nextCheckAt = Date.now() - 1;
+  const truoc = soLanAI;
+  await ob.sweep();
+  assert.equal(soLanAI, truoc, "da len don thi thoi kiem");
+  // Cai dat: nhip 10–240 phut, 1–10 lan
+  assert.throws(() => settings.setOrderBot({ checkEveryMinutes: 5 }), /10 đến 240/);
+  assert.throws(() => settings.setOrderBot({ maxChecks: 0 }), /1 đến 10/);
+  ob.history = gocHistory;
+  delete ob.items.C33e;
   os33.syncFromConversation = goc;
   settings.global.orderBot = undefined;
   catalog.setProducts(prevProducts33);
   Object.assign(os33, geoGoc);
   globalThis.fetch = prev33;
-  console.log("OK 33: bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS), cho khach nhan not, qua han -> bao nhan vien");
+  console.log("OK 33: bot len don: tu bo sung huyen khi chac chan, khong chac -> can duyet (khong ghi POS); co SDT -> kiem 30 phut/lan, du thi len don va thoi, 3 lan chua du -> can duyet + bao ERP");
 }
 
 // ---- 35: TU XAC NHAN don chac chan + QUET LAI hoi thoai cu (chu shop 30/09/2026: "quet lai cac don cu ... neu da
@@ -1618,6 +1653,35 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   delete ob.items.C39;
   settings.global.orderBot = undefined;
   console.log("OK 39: duyet don Moi 7 ngay (xem truoc khong ghi, don trung khach / thieu dia chi / da co don khong xac nhan, don bi sua giua chung khong dong); quet lai theo page + mau chu luc");
+}
+
+// ---- 40: RESET bot len don (chu shop 02/10/2026): bo danh sach cu MOT lan, gieo lai tu hoi thoai 24h co SDT, khong goi AI
+{
+  const { orderSync: os40 } = await import("../src/orders.js");
+  const { store: st40 } = await import("../src/store.js");
+  const ob = bot.orderBot;
+  settings.update("PAGE1", { orderSync: true, dryRun: false });
+  st40.state.orderBotVersion = 1;
+  ob.items.CU = { pageId: "PAGE1", conversationId: "CU", status: "REVIEW", reasons: ["Thiếu số nhà"] };
+  const khach = (t) => ({ id: t, from: { id: "KHACH" }, message: t, inserted_at: new Date().toISOString() });
+  const tin = { S1: [khach("sđt 0911000001")], S2: [khach("chị hỏi giá")], S3: [khach("0911000003 nha em")] };
+  const goc = { clients: bot.clients, other: os40.otherOrders, sync: os40.syncFromConversation };
+  bot.clients = new Map([["PAGE1", { getConversations: async () => ({ conversations: Object.keys(tin).map((id) => ({ id, updated_at: new Date().toISOString(), from: { name: id } })) }), getMessages: async (id) => ({ messages: tin[id] }) }]]);
+  os40.otherOrders = async (_c, ph) => (ph === "0911000003" ? [{ id: 1, status: 2 }] : []);
+  let ai = 0;
+  os40.syncFromConversation = async () => (ai++, { status: "skipped", reason: "x" });
+  assert.equal(await ob.resetIfNeeded(), true);
+  assert.equal(ob.items.CU, undefined, "danh sach cu bi bo");
+  assert.ok(ob.items.S1, "hoi thoai co SDT duoc theo doi lai");
+  assert.ok(ob.items.S1.nextCheckAt <= Date.now(), "kiem ngay o luot quet toi");
+  assert.equal(ob.items.S2, undefined, "chua co SDT -> khong theo doi");
+  assert.equal(ob.items.S3, undefined, "khach da co don that -> khong theo doi");
+  assert.equal(ai, 0, "gieo lai khong goi AI");
+  assert.equal(await ob.resetIfNeeded(), false, "chi reset mot lan");
+  bot.clients = goc.clients;
+  Object.assign(os40, { otherOrders: goc.other, syncFromConversation: goc.sync });
+  for (const k of ["S1", "S2", "S3"]) delete ob.items[k];
+  console.log("OK 40: reset bot len don mot lan: bo danh sach cu, gieo lai hoi thoai 24h co SDT (bo khach da co don), khong goi AI");
 }
 
 console.log("\nTAT CA TEST PASS");

@@ -61,15 +61,19 @@ export async function getChatbotStatus(): Promise<ChatbotStatus> {
 }
 
 /**
- * Số đơn Bot lên đơn KHÔNG tự xác định được (địa chỉ không khớp đủ cấp, màu/size không có trên POS…) đang chờ nhân
- * viên duyệt. `null` = không hỏi được bot (CHƯA BIẾT), khác hẳn 0 đơn.
+ * Báo cáo trong ngày của Bot lên đơn (chủ shop 02/10/2026: "chỉ cần báo bao nhiêu đơn trong ngày đã xác nhận và bao nhiêu
+ * đơn thiếu thông tin"). `null` = không hỏi được bot (CHƯA BIẾT), khác hẳn 0 đơn. Số nào bot không trả thì là `null`
+ * riêng số đó — không điền 0.
  */
-export async function getChatbotReviewCount(): Promise<number | null> {
+export type ChatbotOrderSummary = { confirmedToday: number | null; reviewToday: number | null; review: number | null };
+
+export async function getChatbotOrderSummary(): Promise<ChatbotOrderSummary | null> {
   try {
     const res = await chatbotFetch("/api/orderbot", { timeoutMs: 4000 });
     if (!res.ok) return null;
-    const body = (await res.json()) as { counts?: { review?: number } };
-    return typeof body.counts?.review === "number" ? body.counts.review : null;
+    const body = (await res.json()) as { counts?: { review?: unknown; reviewToday?: unknown; confirmedToday?: unknown } };
+    const so = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    return { confirmedToday: so(body.counts?.confirmedToday), reviewToday: so(body.counts?.reviewToday), review: so(body.counts?.review) };
   } catch {
     return null;
   }

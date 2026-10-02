@@ -14,13 +14,15 @@ import { extractAdIds } from "./adpersona.js";
  *  - SĐT khách tự gõ trong hội thoại, mẫu / màu / size khớp đúng biến thể POS,
  *  - địa chỉ khớp ĐỦ tỉnh / huyện / xã của Pancake bằng tên khách gõ (không dò gần đúng); thiếu số nhà chỉ ghi chú.
  * Ba trạng thái, không trạng thái nào bị bỏ quên:
- *  PENDING — còn thiếu thông tin, chờ khách nhắn nốt; im lặng quá `waitMinutes` ⇒ sang REVIEW.
+ *  PENDING — khách đã gõ SĐT: kiểm MỖI `checkEveryMinutes` phút (mặc định 30); đủ thông tin thì lên đơn + xác nhận và thôi
+ *            kiểm; quá `maxChecks` lần (mặc định 3) vẫn chưa đủ ⇒ REVIEW và báo ERP (chủ shop 02/10/2026).
  *  REVIEW  — đủ ý mua nhưng không chắc (địa chỉ không khớp đủ cấp, màu/size không có trên POS...) ⇒ nhân viên sửa & duyệt.
  *  DONE    — đã ghi đơn nháp lên POS (cập nhật lại nếu khách nhắn thêm).
  * Tiết kiệm AI: chỉ gọi AI trích đơn khi bộ đọc miễn phí (customerFacts) thấy đủ SĐT + địa chỉ, hoặc thông tin vừa đổi.
  */
 const SWEEP_MS = 5 * 60 * 1000;
-const DEBOUNCE_MS = 60 * 1000;
+// Doi phien ban -> danh sach theo doi cu bi bo mot lan khi khoi dong (resetIfNeeded)
+const ORDERBOT_VERSION = 2;
 
 export class OrderBot {
   constructor(bot) {
@@ -43,28 +45,38 @@ export class OrderBot {
     return settings.orderBot().enabled && orderSync.enabled && !!eff.orderSync && !eff.dryRun;
   }
 
-  /** Bot tu van vua xu ly xong mot luot cua hoi thoai: ghi nhan, va hen kiem tra neu thong tin moi du */
-  notify(pageId, conversationId, messages, customerName = "", adIds = []) {
+  /**
+   * Bot tu van vua xu ly xong mot luot cua hoi thoai: khach DA GO SDT thi theo doi, hen lan kiem dau sau `checkEveryMinutes`
+   * phut (`dueNow`: kiem ngay o luot quet toi — dung khi gieo lai danh sach sau reset). Khach nhan them thong tin moi sau
+   * khi da sang "can duyet" / "bo qua" thi mo lai voi bo dem moi.
+   */
+  notify(pageId, conversationId, messages, customerName = "", adIds = [], { dueNow = false } = {}) {
     if (!this.enabledFor(pageId)) return;
     // Hoi thoai cua MAU TEST MOI (chua co tren POS): khong len don (chu shop: chi len don khi mau thang)
     if (adBots.testProductForConversation(conversationId, adIds)) return;
     const f = this.bot.customerFacts(pageId, messages);
-    if (!f.phone && !f.address) return; // chua co dau hieu mua -> khong theo doi
+    if (!f.phone) return; // chua co SDT -> chua theo doi
     const key = String(conversationId);
-    const cur = this.items[key] || { pageId: String(pageId), conversationId: key, status: "PENDING", firstSeen: Date.now(), reasons: [] };
+    const now = Date.now();
+    const every = settings.orderBot().checkEveryMinutes * 60e3;
+    const moi = !this.items[key];
+    const cur = this.items[key] || { pageId: String(pageId), conversationId: key, status: "PENDING", firstSeen: now, reasons: [], rounds: 0, nextCheckAt: dueNow ? now : now + every };
     const dauVet = JSON.stringify([f.phone, f.address, f.size, f.color]);
     const khachCuoi = [...(messages || [])].reverse().find((m) => !this.bot.isFromPage(m, pageId));
     cur.customerName = customerName || cur.customerName || "";
-    cur.lastCustomerAt = khachCuoi ? parseTs(khachCuoi.inserted_at) : Date.now();
+    cur.lastCustomerAt = khachCuoi ? parseTs(khachCuoi.inserted_at) : now;
     cur.facts = { phone: f.phone, address: f.address, size: f.size, color: f.color };
-    const doi = cur.fingerprint !== dauVet;
+    const doi = !moi && cur.fingerprint !== dauVet;
     cur.fingerprint = dauVet;
-    // Da len don / dang cho duyet ma khach nhan them thong tin moi -> kiem lai (cap nhat don / co the het loi)
-    if (cur.status === "DISMISSED" && !doi) return;
-    if (doi && cur.status !== "PENDING") cur.status = "PENDING";
+    if (doi && cur.status !== "PENDING") {
+      // Da len don / can duyet / bo qua ma khach gui thong tin moi -> theo doi lai tu dau
+      cur.status = "PENDING";
+      cur.rounds = 0;
+      cur.nextCheckAt = now + every;
+      cur.reviewAt = undefined;
+    }
     this.items[key] = cur;
     this._save();
-    if (doi && f.phone && f.address) this.schedule(key, DEBOUNCE_MS);
   }
 
   schedule(key, ms) {
@@ -108,6 +120,7 @@ export class OrderBot {
         it.confirmNote = undefined;
         // TU XAC NHAN (chi khi chu shop bat): don nhan vien duyet tay thi nhan vien tu xac nhan tren Pancake
         if (settings.orderBot().autoConfirm && !byStaff) {
+          it.confirmTried = true; // da thu xac nhan o lan nay -> luot quet khong kiem lai them mot lan (ton AI vo ich)
           const chan = r.confirmBlockers || [];
           const kq = chan.length ? { ok: false, reason: chan.join("; ") } : await orderSync.confirmOrder(r.orderId, { conversationId, phone: r.phone, items: r.items }).catch((e) => ({ ok: false, reason: e.message }));
           if (kq.ok) {
@@ -123,6 +136,7 @@ export class OrderBot {
         store.recordReply(pageId, { conversationId, customerName: it.customerName || name, question: "(bot lên đơn)", reply: r.summary, handoff: false, dryRun: false, order: r.orderId });
         log.info(`[orderbot] ${key}: ${r.status} #${r.orderId}`);
       } else if (r.status === "review") {
+        if (it.status !== "REVIEW") it.reviewAt = Date.now();
         it.status = "REVIEW";
         it.reasons = r.reasons;
         it.draft = r.draft;
@@ -176,10 +190,46 @@ export class OrderBot {
     return true;
   }
 
+  /**
+   * MOT LAN KIEM THEO NHIP: dem lan kiem; du thi xong (check da len don + xac nhan); chua du thi hen lan sau, toi
+   * `maxChecks` lan thi chuyen "can duyet" + danh dau bao ERP (ERP doc /api/orderbot moi lan job canh bao chay).
+   */
+  async periodicCheck(key) {
+    const it = this.items[key];
+    if (!it) return null;
+    const { checkEveryMinutes, maxChecks } = settings.orderBot();
+    const r = await this.check(key).catch((e) => (log.warn(`[orderbot] ${key}: ${e.message}`), null));
+    if (!r) {
+      it.nextCheckAt = Date.now() + checkEveryMinutes * 60e3; // loi mang / POS: khong tinh la mot lan kiem
+      this._save();
+      return it;
+    }
+    if (r.status !== "PENDING") return r;
+    // Dem rieng cac lan kiem THEO NHIP (rounds): lan kiem nhanh sau cau chot don / nhan vien bam kiem khong tinh
+    r.rounds = (r.rounds || 0) + 1;
+    if (r.rounds >= maxChecks) {
+      r.status = "REVIEW";
+      r.reviewAt = Date.now();
+      r.reasons = [`Đã kiểm ${r.rounds} lần (${checkEveryMinutes} phút/lần) vẫn chưa đủ thông tin: ${(r.reasons || []).join("; ") || "chưa rõ"}`];
+      store.bumpStat(it.pageId, "orderBotReview");
+      log.warn(`[orderbot] ${key}: ${r.rounds} lan kiem chua du -> can duyet, bao ERP`);
+    } else r.nextCheckAt = Date.now() + checkEveryMinutes * 60e3;
+    this._save();
+    return r;
+  }
+
   /** Quet dinh ky: don cho qua han (khach im lang) -> kiem lan cuoi, con thieu thi sang can duyet */
   async sweep() {
-    if (!settings.orderBot().enabled) return;
-    const han = settings.orderBot().waitMinutes * 60 * 1000;
+    if (!settings.orderBot().enabled || this.sweeping) return;
+    this.sweeping = true;
+    try {
+      await this._sweep();
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  async _sweep() {
     const now = Date.now();
     for (const [key, it] of Object.entries(this.items)) {
       if (now - (it.lastCustomerAt || it.firstSeen || now) > 7 * 86400000 && it.status !== "REVIEW") {
@@ -214,14 +264,9 @@ export class OrderBot {
         continue;
       }
       if (it.status !== "PENDING" || !it.facts?.phone) continue;
-      if (now - (it.lastCustomerAt || it.firstSeen) < han) continue;
+      if ((it.nextCheckAt || 0) > now) continue;
       if (!this.enabledFor(it.pageId)) continue;
-      const r = await this.check(key).catch((e) => (log.warn(`[orderbot] ${key}: ${e.message}`), null));
-      if (r && r.status === "PENDING") {
-        r.status = "REVIEW";
-        r.reasons = [`Khách im lặng hơn ${settings.orderBot().waitMinutes} phút, đơn còn thiếu: ${r.reasons.join("; ")}`];
-        store.bumpStat(it.pageId, "orderBotReview");
-      }
+      await this.periodicCheck(key);
     }
     this._save();
   }
@@ -386,7 +431,62 @@ export class OrderBot {
     return out;
   }
 
+  /**
+   * RESET (chu shop 02/10/2026: "reset lai bot len don"): danh sach theo doi cu (luat cu: cho 120 phut, chan thieu so nha)
+   * bo di MOT lan khi ban nay chay lan dau, roi gieo lai tu hoi thoai 24 gio gan day: hoi thoai khach DA GO SDT va chua co
+   * don that -> theo doi theo nhip moi, kiem ngay o luot quet toi. Khong goi AI o buoc gieo.
+   */
+  async resetIfNeeded() {
+    if (store.state.orderBotVersion === ORDERBOT_VERSION) return false;
+    const cu = Object.keys(this.items).length;
+    store.state.orderBot = {};
+    store.state.orderBotVersion = ORDERBOT_VERSION;
+    this._save();
+    log.info(`[orderbot] reset: bo ${cu} muc theo doi cu, gieo lai tu hoi thoai 24 gio`);
+    await this.seed(24).catch((e) => log.warn(`[orderbot] gieo lai loi: ${e.message}`));
+    return true;
+  }
+
+  async seed(hours = 24, max = 300) {
+    const cutoff = Date.now() - hours * 3600e3;
+    let n = 0;
+    for (const [pid, client] of this.bot.clients) {
+      if (!this.enabledFor(pid)) continue;
+      let last;
+      for (let trang = 0; trang < 20 && n < max; trang++) {
+        const data = await client.getConversations({ type: "INBOX", order_by: "updated_at", last_conversation_id: last });
+        const list = data.conversations || [];
+        if (!list.length) break;
+        let het = false;
+        for (const conv of list) {
+          if (parseTs(conv.updated_at) < cutoff) {
+            het = true;
+            break;
+          }
+          let messages;
+          try {
+            messages = sortChrono((await client.getMessages(conv.id)).messages);
+          } catch {
+            continue;
+          }
+          const sdt = this.customerPhones(pid, messages).slice(-3);
+          if (!sdt.length) continue;
+          let khac = [];
+          for (const ph of sdt) if (!khac.length) khac = await orderSync.otherOrders(String(conv.id), ph).catch(() => []);
+          if (khac.length) continue; // khach da co don that
+          this.notify(pid, String(conv.id), messages, conv.from?.name || "", extractAdIds(conv), { dueNow: true });
+          if (++n >= max) break;
+        }
+        last = list[list.length - 1].id;
+        if (het || list.length < 60) break;
+      }
+    }
+    log.info(`[orderbot] gieo lai ${n} hoi thoai co SDT`);
+    return n;
+  }
+
   start() {
+    this.resetIfNeeded().catch((e) => log.warn(`[orderbot] reset loi: ${e.message}`));
     this.sweepTimer = setInterval(() => this.sweep().catch((e) => log.warn(`[orderbot] quet loi: ${e.message}`)), SWEEP_MS);
     this.sweepTimer.unref?.();
   }
@@ -419,10 +519,12 @@ export class OrderBot {
         review: rows.filter((r) => r.status === "REVIEW").length,
         doneToday: rows.filter((r) => r.status === "DONE" && ngay(r.doneAt) === today).length,
         confirmedToday: rows.filter((r) => r.confirmedAt && ngay(r.confirmedAt) === today).length,
+        reviewToday: rows.filter((r) => r.status === "REVIEW" && ngay(r.reviewAt || r.lastCheckAt) === today).length,
       },
       review: rows.filter((r) => r.status === "REVIEW").sort((a, b) => (b.lastCheckAt || 0) - (a.lastCheckAt || 0)),
       pending: rows.filter((r) => r.status === "PENDING").sort((a, b) => (b.lastCustomerAt || 0) - (a.lastCustomerAt || 0)).slice(0, 50),
       done: rows.filter((r) => r.status === "DONE").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 30),
+      confirmedTodayList: rows.filter((r) => r.confirmedAt && ngay(r.confirmedAt) === today).sort((a, b) => b.confirmedAt - a.confirmedAt),
     };
   }
 }

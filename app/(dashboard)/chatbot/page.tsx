@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
-import { getChatbotReviewCount, getChatbotStatus } from "@/lib/integrations/chatbot/client";
+import { getChatbotOrderSummary, getChatbotStatus } from "@/lib/integrations/chatbot/client";
 import { ChatbotImportForm } from "@/app/(dashboard)/chatbot/import-form";
 
 export const metadata = { title: "Bot chat bán hàng" };
@@ -17,7 +17,8 @@ export const dynamic = "force-dynamic";
 export default async function ChatbotPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("cs:config");
   const [status, sp] = await Promise.all([getChatbotStatus(), searchParams]);
-  const reviewCount = status.state === "RUNNING" ? await getChatbotReviewCount() : null;
+  const donBot = status.state === "RUNNING" ? await getChatbotOrderSummary() : null;
+  const so = (n: number | null) => (n === null ? "—" : n.toLocaleString("vi-VN"));
   const openOrderBot = sp.view === "orderbot";
 
   return (
@@ -47,9 +48,10 @@ export default async function ChatbotPage({ searchParams }: { searchParams: Prom
         </SectionCard>
       ) : null}
 
-      {status.state === "RUNNING" && reviewCount ? (
-        <Link href="/chatbot?view=orderbot" className="block rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-          <b>{reviewCount} đơn bot không tự xác định được</b> (địa chỉ không khớp đủ tỉnh/huyện/xã, màu/size không có trên POS…) — cần nhân viên sửa và duyệt. Bấm để mở danh sách.
+      {status.state === "RUNNING" && donBot ? (
+        <Link href="/chatbot?view=orderbot" className={`block rounded-lg border px-4 py-3 text-sm ${donBot.review ? "border-amber-500/40 bg-amber-500/10" : ""}`}>
+          <b>Bot lên đơn hôm nay:</b> {so(donBot.confirmedToday)} đơn đã xác nhận · {so(donBot.reviewToday)} đơn thiếu thông tin
+          {donBot.review ? ` (đang chờ kiểm tra: ${so(donBot.review)})` : ""} — bấm để xem danh sách và mở hội thoại Pancake.
         </Link>
       ) : null}
 
