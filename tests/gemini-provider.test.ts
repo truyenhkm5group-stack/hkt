@@ -78,8 +78,21 @@ export async function testGeminiProvider() {
   const ft = fakeGemini([{ body: { models: [] } }]);
   assert.ok((await testGeminiKey({ secrets: { apiKey: KEY } }, { fetch: ft.fetch })).ok);
   assert.ok(ft.seen[0].url === GEMINI_MODELS_URL && ft.seen[0].init?.method === "GET" && (ft.seen[0].init?.headers as Record<string, string>)["x-goog-api-key"] === KEY);
+  const sentValid = ft.seen.length;
   assert.ok(!(await testGeminiKey({ secrets: { apiKey: "sk-sai-dang" } }, { fetch: ft.fetch })).ok, "sai dạng ⇒ không gửi");
-  assert.equal(ft.seen.length, 1);
+  assert.match((await testGeminiKey({ secrets: { apiKey: `sk-proj-${"a".repeat(40)}` } }, { fetch: ft.fetch })).message, /khoá OpenAI/);
+  for (const bad of [`GEMINI_API_KEY=${KEY}`, `"${KEY}"`, `${KEY} ${KEY}`, "AIza-ngan"]) assert.ok(!(await testGeminiKey({ secrets: { apiKey: bad } }, { fetch: ft.fetch })).ok, `chặn «${bad.slice(0, 20)}…»`);
+  // Khoá dạng mới của Google (02/10/2026: chủ shop dán khoá dài hơn «AIza» + 35 bị chặn ngay ô nhập) ⇒ được gửi đi kiểm tra.
+  assert.equal(ft.seen.length, sentValid, "khoá sai dạng không rời máy");
+  const sentBefore = ft.seen.length;
+  assert.ok((await testGeminiKey({ secrets: { apiKey: `AQ.Ab8RN6${"k".repeat(45)}` } }, { fetch: ft.fetch })).ok);
+  assert.ok(ft.seen.length > sentBefore && ft.seen.every((x) => x.url === GEMINI_MODELS_URL), "khoá dạng mới tới được Google");
+  assert.equal(ft.seen.length, sentValid + 1, "chỉ hai khoá hợp dạng rời máy");
+  // Ô nhập (lưu kết nối) dùng mẫu của sổ kết nối — phải nhận / chặn đúng như bộ kiểm tra, nếu không khoá thật bị chặn ngay lúc Lưu.
+  const keyField = c?.settings.find((st) => st.key === "apiKey");
+  const savePattern = new RegExp(keyField?.pattern ?? "^$");
+  assert.ok(savePattern.test(KEY) && savePattern.test(`AQ.Ab8RN6${"k".repeat(45)}`) && (keyField?.maxLength ?? 0) >= 200, "ô nhập nhận khoá dạng cũ lẫn mới");
+  assert.ok(!savePattern.test(`GEMINI_API_KEY=${KEY}`) && !savePattern.test(`"${KEY}"`) && !savePattern.test(`${KEY} x`), "ô nhập chặn ký tự lạ");
 
   console.log("✓ Gemini cho chatbot: hội thoại / tool / chữ ký suy nghĩ đúng định dạng · khoá ở header · suy nghĩ theo mức · 503 thử lại · lỗi không lộ khoá · giá theo bảng bot nhà · kết nối gemini-byok kiểm chỉ đọc");
 }
