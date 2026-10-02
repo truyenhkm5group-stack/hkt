@@ -519,10 +519,12 @@ export class OrderBot {
         review: rows.filter((r) => r.status === "REVIEW").length,
         doneToday: rows.filter((r) => r.status === "DONE" && ngay(r.doneAt) === today).length,
         confirmedToday: rows.filter((r) => r.confirmedAt && ngay(r.confirmedAt) === today).length,
+        reviewToday: rows.filter((r) => r.status === "REVIEW" && ngay(r.reviewAt || r.lastCheckAt) === today).length,
       },
       review: rows.filter((r) => r.status === "REVIEW").sort((a, b) => (b.lastCheckAt || 0) - (a.lastCheckAt || 0)),
       pending: rows.filter((r) => r.status === "PENDING").sort((a, b) => (b.lastCustomerAt || 0) - (a.lastCustomerAt || 0)).slice(0, 50),
       done: rows.filter((r) => r.status === "DONE").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 30),
+      confirmedTodayList: rows.filter((r) => r.confirmedAt && ngay(r.confirmedAt) === today).sort((a, b) => b.confirmedAt - a.confirmedAt),
     };
   }
 }

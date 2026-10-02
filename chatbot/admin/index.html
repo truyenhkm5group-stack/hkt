@@ -122,7 +122,7 @@
   <div id="pages"></div>
   <div id="globalnav">
     <div class="pg" data-view="home" id="nav_home">📊 <span class="n"><b>Tổng quan</b><div class="c">Tin trả lời · chi phí AI theo ngày, theo giờ</div></span></div>
-    <div class="pg" data-view="orderbot" id="nav_orderbot">📦 <span class="n"><b>Bot lên đơn</b><span id="ob_badge" class="pill warn" style="display:none;margin-left:6px"></span><div class="c">Xác nhận địa chỉ · đơn cần duyệt</div></span></div>
+    <div class="pg" data-view="orderbot" id="nav_orderbot">📦 <span class="n"><b>Bot lên đơn</b><span id="ob_badge" class="pill warn" style="display:none;margin-left:6px"></span><div class="c">Đơn đã xác nhận · đơn thiếu thông tin</div></span></div>
     <div class="pg" data-view="assistant" id="nav_assistant">🤖 <span class="n"><b>Trợ lý AI</b><div class="c">Ra lệnh cho bot bằng tiếng Việt</div></span></div>
     <div class="pg" data-view="prompt">📝 <span class="n">Prompt chung</span></div>
     <div class="pg" data-view="catalog">🛍️ <span class="n">Sản phẩm (POS)</span></div>
@@ -189,7 +189,7 @@ async function refreshAll() {
 async function refreshState() {
   STATE = await api("/api/state");
   const obn = STATE.orderBotCounts?.review || 0, ob = $("#ob_badge");
-  if (ob) { ob.textContent = obn ? `${obn} cần duyệt` : ""; ob.style.display = obn ? "" : "none"; }
+  if (ob) { ob.textContent = obn ? `${obn} thiếu thông tin` : ""; ob.style.display = obn ? "" : "none"; }
   const g = STATE.global;
   $("#gstatus").innerHTML = `${STATE.pages.length} page · ${esc(g.model)} · ${g.poll ? "poll " + g.pollIntervalSec + "s" : "webhook"}<br><button id="g_dry" class="${g.dryRun ? "" : "primary"}" style="margin-top:6px;padding:4px 10px;font-size:12px" title="${g.dryRun ? "Bot đang CHỈ LOG, không gửi tin cho khách. Bấm để bắt đầu gửi thật." : "Bot ĐANG GỬI THẬT cho khách. Bấm để chuyển về chỉ log."}">${g.dryRun ? "⏸ Chỉ log (không gửi)" : "🟢 Đang gửi thật"}</button>`;
   $("#g_dry").onclick = async () => {
@@ -946,46 +946,31 @@ async function loadHome() {
 
 /* ---------- Bot lên đơn: chỉ ghi POS khi địa chỉ khớp đủ tỉnh/huyện/xã + số nhà; còn lại chờ hoặc cần duyệt ---------- */
 async function renderOrderBot() {
-  $("#title").textContent = "Bot lên đơn (xác nhận địa chỉ)";
-  $("#topinfo").textContent = "Độc lập với bot tư vấn: gộp thông tin khách nhắn rải rác, chỉ lên đơn POS khi địa chỉ khớp đủ 3 cấp Pancake";
+  $("#title").textContent = "Bot lên đơn";
+  $("#topinfo").textContent = "Mỗi SĐT khách gõ được kiểm 30 phút/lần: đủ thì lên đơn + xác nhận, quá 3 lần chưa đủ thì vào danh sách thiếu thông tin";
   let d;
   try { d = await api("/api/orderbot"); } catch (e) { $("#content").innerHTML = `<div class="card">Lỗi: ${esc(e.message)}</div>`; return; }
   const st = d.settings, c = d.counts;
   const f = (it) => [it.facts?.phone ? "SĐT ✓" : "SĐT ✗", it.facts?.address ? "địa chỉ ✓" : "địa chỉ ✗", it.facts?.size ? "size " + esc(it.facts.size) : "size ✗", it.facts?.color ? "màu " + esc(it.facts.color) : "màu ✗"].join(" · ");
-  const LY_DIA_CHI = /địa chỉ|tỉnh|thành|huyện|quận|xã|phường|số nhà|thôn|khớp gần đúng/i;
-  const review = d.review.map((it) => {
-    const lyDo = it.reasons || [];
-    const veDiaChi = lyDo.some((r) => LY_DIA_CHI.test(r) && !/chưa đủ thông tin/.test(r)) || (!it.facts?.address && !it.draft?.address);
-    const chat = it.pageId && it.conversationId ? `https://pancake.vn/${encodeURIComponent(it.pageId)}?c_id=${encodeURIComponent(it.conversationId)}` : "";
-    const dong = (nhan, gt) => `<div><span class="muted">${nhan}:</span> ${gt ? esc(gt) : '<span class="muted">—</span>'}</div>`;
-    return `<div class="card" style="margin-bottom:10px">
-      <div class="row" style="justify-content:space-between"><b>${esc(it.customerName || "(khách)")}</b><span class="muted small">${esc(it.page)} · ${esc(fmtTime(it.lastCheckAt || it.lastCustomerAt))}</span></div>
-      <div class="small" style="margin:6px 0">${lyDo.map((r) => `<div>⚠ ${esc(r)}</div>`).join("")}</div>
-      <div class="small" style="margin:6px 0;display:grid;gap:2px">
-        ${dong("Sản phẩm bot đọc được", (it.draft?.items || []).join(", "))}
-        ${dong("SĐT", it.draft?.phone)}
-        ${dong("Địa chỉ khách ghi", it.draft?.address || it.facts?.address)}
-        ${it.draft?.resolved ? dong("Hệ thống dò được", it.draft.resolved) : ""}
-      </div>
-      <div class="hint" style="margin:6px 0">${veDiaChi
-        ? "<b>Việc cần làm:</b> sửa địa chỉ bên dưới cho đủ số nhà/thôn, xã/phường, quận/huyện, tỉnh rồi bấm <b>Duyệt &amp; lên đơn</b>."
-        : "<b>Việc cần làm:</b> mở hội thoại, hỏi khách phần còn thiếu ở dòng ⚠. Khách trả lời thì bot tự kiểm lại và lên đơn — không cần bấm duyệt."}
-        Nhân viên đã tự lên đơn cho khách này trên Pancake thì bot tự gỡ đơn khỏi mục này trong vòng 5 phút (hoặc bấm <b>Kiểm lại từ chat</b> ngay).</div>
-      ${veDiaChi ? `<label style="margin-top:8px">Địa chỉ giao hàng (sửa cho đủ: số nhà/thôn, xã/phường, quận/huyện, tỉnh)</label>
-      <input data-ob-addr="${esc(it.key)}" value="${esc(it.draft?.address || it.facts?.address || "")}">` : ""}
-      <div class="row" style="margin-top:8px">${chat ? `<button data-ob-open="${esc(chat)}">💬 Mở hội thoại</button>` : ""}${veDiaChi ? `<button class="primary" data-ob-approve="${esc(it.key)}">Duyệt &amp; lên đơn</button>` : ""}<button data-ob-check="${esc(it.key)}">Kiểm lại từ chat</button><button data-ob-dismiss="${esc(it.key)}">Bỏ qua (không lên đơn)</button></div>
-    </div>`;
-  }).join("") || '<div class="muted small">Không có đơn nào cần duyệt.</div>';
   const pending = d.pending.map((it) => `<tr><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td class="small">${f(it)}</td><td class="small">${esc((it.reasons || []).join("; ") || ["SĐT", "địa chỉ"].filter((_, i) => !(i ? it.facts?.address : it.facts?.phone)).map((x) => "chưa có " + x).join(", ") || "chờ bot kiểm")}</td><td class="small">${esc(fmtTime(it.lastCustomerAt))}</td><td class="small">${it.rounds || 0}/${st.maxChecks}${it.nextCheckAt ? " · lần tới " + esc(fmtTime(it.nextCheckAt)) : ""}</td></tr>`).join("");
   const done = d.done.map((it) => `<tr><td>${esc(fmtTime(it.doneAt))}</td><td>${esc(it.customerName || "")}</td><td>${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}${it.approvedByStaff ? ' <span class="pill">NV duyệt</span>' : ""}${it.byStaffOrder ? ' <span class="pill">NV lên đơn</span>' : ""}${it.confirmedAt ? ' <span class="pill">✅ đã xác nhận</span>' : ""}</td><td class="small">${esc(it.summary || "")}${it.confirmNote ? `<div class="muted">${esc(it.confirmNote)}</div>` : ""}</td></tr>`).join("");
   const rs = d.rescan;
   const rsText = !rs ? "" : `${rs.running ? "⏳ Đang quét" : "Lần quét gần nhất"} ${rs.hours} giờ${rs.pageName ? " · " + rs.pageName : ""}${rs.defaultCode ? " · mẫu " + rs.defaultCode : ""}: đọc ${rs.scanned} hội thoại, kiểm ${rs.checked}, lên đơn ${rs.done} (tự xác nhận ${rs.confirmed}), cần duyệt ${rs.review}, bỏ qua ${rs.skipped} vì khách đã có đơn${rs.errors ? `, lỗi ${rs.errors}` : ""}${rs.note ? " — " + rs.note : ""}`;
+  // Chu shop 02/10/2026: "khong can ban sua don tren ERP, chi can bao bao nhieu don trong ngay da xac nhan va bao nhieu
+  // don thieu thong tin, don nao co nut mo hoi thoai Pancake de check". Trang chinh = bao cao; cai dat / cong cu thu gon.
+  const moChat = (it) => (it.pageId && it.conversationId ? `<button data-ob-open="https://pancake.vn/${encodeURIComponent(it.pageId)}?c_id=${encodeURIComponent(it.conversationId)}">💬 Mở hội thoại</button>` : "");
+  const thieu = d.review.map((it) => `<tr><td>${esc(fmtTime(it.reviewAt || it.lastCheckAt || it.lastCustomerAt))}</td><td><b>${esc(it.customerName || "(khách)")}</b></td><td class="small">${esc(it.page)}</td><td class="small">${esc((it.reasons || []).join("; ") || "chưa đủ thông tin")}</td><td>${moChat(it)}</td></tr>`).join("");
+  const daXN = (d.confirmedTodayList || []).map((it) => `<tr><td>${esc(fmtTime(it.confirmedAt))}</td><td><b>${esc(it.customerName || "(khách)")}</b></td><td class="small">${esc(it.page)}</td><td>${it.orderId ? "#" + esc(it.orderId) : "—"}</td><td>${moChat(it)}</td></tr>`).join("");
   $("#content").innerHTML = `
     <div class="card"><div class="stat">
-      <div><b>${c.review}</b><span class="muted">cần duyệt</span></div>
-      <div><b>${c.pending}</b><span class="muted">đang theo dõi (có SĐT, chưa đủ)</span></div>
-      <div><b>${c.doneToday}</b><span class="muted">đã lên đơn hôm nay</span></div>
-      <div><b>${st.autoConfirm ? c.confirmedToday : "—"}</b><span class="muted">tự xác nhận hôm nay</span></div></div>
+      <div><b>${st.autoConfirm ? c.confirmedToday : "—"}</b><span class="muted">✅ đơn đã xác nhận hôm nay</span></div>
+      <div><b>${c.reviewToday}</b><span class="muted">⚠ đơn thiếu thông tin hôm nay</span></div>
+      <div><b>${c.pending}</b><span class="muted">đang theo dõi (có SĐT, chưa đủ)</span></div></div></div>
+    <h3 style="margin:14px 0 8px">⚠ Đơn thiếu thông tin (${c.review})</h3>
+    <div class="card">${thieu ? `<table><tr><th>Lúc</th><th>Khách</th><th>Page</th><th>Còn thiếu</th><th></th></tr>${thieu}</table>` : '<div class="muted small">Không có đơn nào thiếu thông tin.</div>'}</div>
+    <h3 style="margin:14px 0 8px">✅ Đã xác nhận hôm nay (${(d.confirmedTodayList || []).length})</h3>
+    <div class="card">${daXN ? `<table><tr><th>Lúc</th><th>Khách</th><th>Page</th><th>Đơn</th><th></th></tr>${daXN}</table>` : '<div class="muted small">Hôm nay chưa có đơn nào được bot xác nhận.</div>'}</div>
+    <details class="card" style="margin-top:12px"><summary class="small" style="cursor:pointer">⚙ Cài đặt &amp; công cụ</summary>
       <div class="row" style="margin-top:10px">
         <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ob_on" ${st.enabled ? "checked" : ""} style="width:auto"> Bật bot lên đơn</label>
         <div style="width:150px"><label>Kiểm mỗi (phút)</label><input id="ob_every" type="number" min="10" max="240" value="${st.checkEveryMinutes}"></div>
@@ -1007,9 +992,9 @@ async function renderOrderBot() {
         <button id="ob_dr_check" style="align-self:flex-end">🔍 Kiểm tra đơn Mới</button></div>
       <div class="hint">Đọc mọi đơn đang ở trạng thái "Mới" trên POS (cả đơn nhân viên tự tạo), chỉ XEM, chưa ghi gì. Đơn chuẩn = SĐT hợp lệ, địa chỉ đủ tỉnh/huyện/xã (thiếu số nhà chỉ nhắc, không chặn), có sản phẩm, khách không có đơn nào khác trong 14 ngày (kể cả đơn nháp thứ hai). Bạn tick đơn muốn xác nhận rồi bấm xác nhận; bot đọc lại từng đơn, đơn đã bị sửa từ lúc xem thì không động vào.</div>
       <div id="ob_dr"></div></div>
-    <h3 style="margin:14px 0 8px">Cần duyệt</h3>${review}
     <details class="card"><summary class="small" style="cursor:pointer">Đang theo dõi (${c.pending})</summary><table style="margin-top:8px"><tr><th>Khách</th><th>Page</th><th>Đã có</th><th>Còn thiếu</th><th>Tin cuối</th><th>Đã kiểm</th></tr>${pending}</table></details>
-    <details class="card"><summary class="small" style="cursor:pointer">Đã lên đơn gần đây</summary><table style="margin-top:8px"><tr><th>Lúc</th><th>Khách</th><th>Page</th><th>Đơn</th><th>Tóm tắt</th></tr>${done}</table></details>`;
+    <details class="card"><summary class="small" style="cursor:pointer">Đã lên đơn gần đây</summary><table style="margin-top:8px"><tr><th>Lúc</th><th>Khách</th><th>Page</th><th>Đơn</th><th>Tóm tắt</th></tr>${done}</table></details>
+    </details>`;
   $("#ob_save").onclick = async () => { try { await api("/api/orderbot/settings", { method: "POST", body: { enabled: $("#ob_on").checked, checkEveryMinutes: Number($("#ob_every").value), maxChecks: Number($("#ob_max").value), autoConfirm: $("#ob_confirm").checked } }); toast("Đã lưu"); renderOrderBot(); } catch (e) { toast("Lỗi: " + e.message, 6000); } };
   $("#ob_rescan").onclick = async () => {
     const h = Number($("#ob_hours").value);
@@ -1066,20 +1051,7 @@ async function renderOrderBot() {
       veDon(j.result);
     });
   };
-  const act = (sel, path, bodyOf) => document.querySelectorAll(`[${sel}]`).forEach((b) => (b.onclick = async () => {
-    const key = b.getAttribute(sel);
-    b.disabled = true;
-    try {
-      const r = await api(`/api/orderbot/${encodeURIComponent(key)}/${path}`, { method: "POST", body: bodyOf ? bodyOf(key) : {} });
-      const it = r.item || {};
-      toast(it.status === "DONE" ? `Đã lên đơn ${it.orderId ? "#" + it.orderId : ""}` : it.status === "DISMISSED" ? "Đã bỏ qua" : `Chưa lên được: ${(it.reasons || []).join("; ")}`, 7000);
-      renderOrderBot();
-    } catch (e) { toast("Lỗi: " + e.message, 7000); b.disabled = false; }
-  }));
-  act("data-ob-approve", "approve", (key) => ({ address: document.querySelector(`[data-ob-addr="${CSS.escape(key)}"]`)?.value || "" }));
-  act("data-ob-check", "check");
   document.querySelectorAll("[data-ob-open]").forEach((b) => (b.onclick = () => window.open(b.getAttribute("data-ob-open"), "_blank", "noopener")));
-  act("data-ob-dismiss", "dismiss");
 }
 
 let choTimer = null;
