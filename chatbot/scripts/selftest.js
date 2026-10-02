@@ -1985,5 +1985,65 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 44: mau chu luc cua page — dat Q005 cho CS1 mot lan + kiem lai don treo; ban chot ghi ma mau; ma rong khong khop bua san pham dau");
 }
 
+// ---- 46: khach XIN HUY DON (chu shop 02/10/2026, Thu Thuy - Linh Tay CS1: bot hua mien ship roi ban chot van cong
+// 25.000d, khach "Dạ cho e hủy nha c" -> bot ghi nhan huy luon). Luat: lan dau hoi ly do, sua loi cua shop, dua uu dai
+// giu don; khach xin huy LAN NUA moi ghi nhan + chuyen nhan vien; khach dong y giu thi het che do huy.
+{
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const chot = [
+    shop("Dạ em hỗ trợ miễn phí vận chuyển cho mình nha chị yêu."), khach("Cao 160 nặng 60k"), khach("Màu đỏ đô"),
+    shop("Dạ em chốt đơn cho chị:\n• Đầm xếp ly eo tay lỡ – màu Đỏ đô – size XL x 1\n• Tổng: 499.000đ + 25.000đ phí vận chuyển = 524.000đ\nChị kiểm tra giúp em thông tin đã đúng chưa ạ?"),
+  ];
+  assert.equal(bot.cancelStage("PAGE1", chot), null);
+  const huy1 = [...chot, khach("Dạ cho e hủy nha c")];
+  assert.equal(bot.cancelStage("PAGE1", huy1), "retain", "lan dau xin huy -> giu don");
+  const huy2 = [...huy1, shop("Dạ em xin lỗi chị ạ, chị cho em hỏi mình đổi ý vì lý do gì ạ?"), khach("thôi hủy đi em")];
+  assert.equal(bot.cancelStage("PAGE1", huy2), "accept", "xin huy lan nua -> ghi nhan");
+  assert.equal(bot.cancelStage("PAGE1", [...huy1, shop("Dạ em miễn ship cho chị ạ"), khach("ok giữ đơn nha")]), null, "dong y giu don");
+  assert.equal(bot.cancelStage("PAGE1", [...chot, khach("nhận hàng không vừa thì hủy được không em?")]), null, "hoi chinh sach huy khong phai xin huy");
+  for (const t of ["không lấy nữa", "Huỷ đơn giúp chị", "thôi ko mua nữa"]) assert.equal(bot.cancelStage("PAGE1", [khach(t)]), "retain", t);
+  // Luot giu don: cau moi giu don / gui hang KHONG bi cat du don da chot
+  assert.match(bot.stripAskWhenClosed("Dạ em xin lỗi chị ạ.\nEm giữ đơn và gửi hàng cho chị luôn nhé ạ?", "PAGE1", huy1), /gửi hàng cho chị luôn nhé ạ\?/);
+  assert.doesNotMatch(bot.stripAskWhenClosed("Dạ vâng ạ.\nEm gửi hàng cho chị luôn nhé ạ?", "PAGE1", [...chot, khach("Màu đỏ đô nha")]), /\?/, "ngoai luot giu don van cat");
+
+  // Tron luong: khach xin huy lan dau -> AI duoc dan giu don, KHONG gan the chuyen nhan vien (bot van noi chuyen tiep)
+  delete (store.state.orderInfo || {})["CONV1"];
+  calls.length = 0;
+  const cu = Date.now() - 2 * 3600e3;
+  pancakeMessages = huy1.map((m, i) => ({ ...m, id: "m46_" + i, from: m.from.id === "PAGE1" ? m.from : customer, inserted_at: new Date(cu + i * 1000).toISOString().replace("Z", "") }));
+  pancakeMessages[pancakeMessages.length - 1].inserted_at = new Date().toISOString().replace("Z", "");
+  geminiText = "Dạ em xin lỗi chị vì bản chốt cộng nhầm phí ship ạ.\nChị cho em hỏi mình đổi ý vì lý do gì ạ? Em giữ đơn và gửi hàng cho chị luôn nhé ạ?";
+  bot.handleWebhook(webhook(pancakeMessages[pancakeMessages.length - 1]));
+  await sleep(WAIT * 2);
+  const gem46 = calls.filter((c) => c.path.includes(":generateContent"));
+  const gui46 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+  assert.equal(gem46.length, 1);
+  assert.match(JSON.stringify(gem46[0].body), /KHÁCH XIN HỦY ĐƠN \(lần đầu\)/);
+  assert.ok(gui46.some((c) => /lý do gì/.test(c.body.message || "")), JSON.stringify(gui46.map((c) => c.body.message)));
+  assert.ok(gui46.some((c) => /giữ đơn và gửi hàng cho chị luôn nhé/.test(c.body.message || "")), "cau moi giu don khong bi cat");
+  assert.equal(calls.filter((c) => c.path.endsWith("/tags")).length, 0, "chua chuyen nhan vien o luot giu don");
+
+  // Bot len don: khach dang xin huy -> khong len / tu xac nhan don; khach dong y giu -> kiem lai ngay
+  const { orderSync: os46 } = await import("../src/orders.js");
+  const ob = bot.orderBot;
+  const goc = { sync: os46.syncFromConversation, other: os46.otherOrders, history: ob.history };
+  let goiAI = 0;
+  os46.syncFromConversation = async () => (goiAI++, { status: "skipped", reason: "x" });
+  os46.otherOrders = async () => [];
+  ob.history = async () => ({ messages: huy1, text: "", name: "Thủy" });
+  ob.items.C46 = { pageId: "PAGE1", conversationId: "C46", status: "PENDING", firstSeen: Date.now() - 3600e3, reasons: [] };
+  await ob.check("C46");
+  assert.equal(ob.items.C46.status, "REVIEW");
+  assert.match(ob.items.C46.reasons[0], /khách xin hủy đơn/);
+  assert.equal(goiAI, 0, "khong goi AI len don khi khach dang xin huy");
+  ob.notify("PAGE1", "C46", [...huy1, shop("Dạ em miễn ship cho chị ạ"), khach("ok giữ đơn nha"), khach("0765114016")], "Thủy");
+  assert.equal(ob.items.C46.status, "PENDING", "khach dong y giu don -> theo doi lai");
+  Object.assign(os46, { syncFromConversation: goc.sync, otherOrders: goc.other });
+  ob.history = goc.history;
+  delete ob.items.C46;
+  console.log("OK 46: khach xin huy -> lan dau hoi ly do + giu don (khong chuyen nhan vien, khong len don), xin lan nua moi ghi nhan");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

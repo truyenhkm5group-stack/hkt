@@ -266,6 +266,28 @@ export class Bot {
   }
 
   /**
+   * Khach XIN HUY DON: "retain" = lan dau -> hoi ly do, sua loi cua shop, dua uu dai giu don (KHONG xac nhan huy);
+   * "accept" = khach xin huy LAN NUA sau khi shop da hoi -> ghi nhan huy + chuyen nhan vien; null = khong xin huy, hoac
+   * sau tin huy khach da dong y giu don. Chu shop 02/10/2026 (Thu Thuy, Linh Tay CS1: "Dạ cho e hủy nha c" -> bot ghi
+   * nhan huy luon): "phải hỏi lại tại sao, thuyết phục khách mua, có thể giảm giá thêm, sao hủy luôn vậy".
+   */
+  cancelStage(pageId, messages) {
+    const HUY = /(hủy|huỷ|hũy|cancel|bỏ đơn|(?:^|\s)(không|ko|k|hông) (lấy|mua|nhận|đặt) (nữa|đâu)|thôi (không|ko|k) (lấy|mua|đặt))/i;
+    const HOI = /\?|được (không|ko|k)\b|đc (không|ko|k)\b|có được|có (hủy|huỷ) được/i; // hoi "huy duoc khong" la hoi, chua phai xin huy
+    const GIU = /^(ok|oke|okie|ừ|uh|vâng|dạ vâng|được|đc|đồng ý)(?![\p{L}])|giữ (đơn|lại)|vẫn (lấy|mua|nhận)|(lấy|nhận) (nhé|nha|nhe)|chốt|gửi (đi|hàng đi)/iu;
+    const khach = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => String(this.messageText(m) || "").normalize("NFC").trim());
+    const laHuy = (t) => HUY.test(t) && !HOI.test(t);
+    let cuoi = -1;
+    let soLan = 0;
+    khach.forEach((t, i) => {
+      if (laHuy(t)) (cuoi = i), soLan++;
+    });
+    if (cuoi < 0) return null;
+    if (khach.slice(cuoi + 1).some((t) => GIU.test(t) && !laHuy(t))) return null;
+    return soLan >= 2 ? "accept" : "retain";
+  }
+
+  /**
    * Khach che PHI SHIP sau khi bot da gui ban chot don ("van co ship a", "ai tinh ship vao dau", "co ship thi khong lay")
    * -> ap dung ngay Buoc 1 cua quy trinh giam gia: MIEN SHIP, neu lai tong moi. Tra ve cau tra loi chuan hoac null.
    * Su co 2026-09-16 (Hang Phan, CS2): bot bam khoi "don da chot" nen chi hoi "giu don hay len combo", roi de nghi huy don.
@@ -1081,7 +1103,9 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     // Cau moi chot / moi mua them ma model hoc lai tu lich su ("Em lên đơn gửi hàng cho chị luôn nhé ạ?") cung bo:
     // don da chot roi thi hoi lai la lam phien (Bui Phuong Vy 02/10/2026: cau nay lap 6 lan)
     const HOI_CHOT = /(lên đơn|chốt đơn|gửi hàng)[^.?!\r\n]{0,40}(luôn|nhé|nha|không|chưa)[^.?!\r\n]*\?|cần em (tư vấn|hỗ trợ)[^.?!\r\n]{0,30}(gì|không)[^.?!\r\n]*\?/i;
-    const bo = (c) => XIN.test(c) || HOI_CHOT.test(c);
+    // Luot GIU DON (khach vua xin huy lan dau): cau moi giu don / gui hang la cau can thiet, khong cat
+    const giuDon = this.cancelStage(pageId, messages) === "retain";
+    const bo = (c) => XIN.test(c) || (!giuDon && HOI_CHOT.test(c));
     if (!bo(text)) return reply;
     const cau = text.split(/(?<=[.?!\r\n])\s*/).filter((c) => c.trim() && !bo(c));
     const xung = settings.effective(pageId).customerTitle || "chị";
@@ -1708,7 +1732,6 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     if (saleActive) log.info(`[${pageId}] ${conversationId}: hoi thoai dang chay khuyen mai -> dung bang gia khuyen mai`);
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
-    // Don da chot xong thi khong can bang tien do nua (khoi mau thuan voi khoi "DA CHOT XONG" ben duoi)
     // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
     // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
     systemPrompt += this.orderProgressPrompt(pageId, messages);
@@ -1719,8 +1742,30 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
 - Hội thoại này đã có bản chốt đơn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao, cân nặng, size, số điện thoại hay địa chỉ nữa.
 - Khách nhắn thêm thì chỉ xác nhận ngắn gọn, ghi nhận yêu cầu và cảm ơn.
 - Khách chê PHÍ SHIP hoặc đòi bớt SAU khi chốt ("vẫn có ship à", "ai tính ship", "có ship thì không lấy"): áp dụng ngay quy trình giảm giá của page (miễn phí ship trước), nêu lại tổng mới, mời chốt. TUYỆT ĐỐI KHÔNG hỏi "giữ đơn hay lên combo", KHÔNG đề nghị hủy đơn.
-- Nếu khách yêu cầu đổi ngày giao, đổi địa chỉ, đổi size, hủy đơn hay bất cứ thay đổi nào về đơn: xác nhận đã ghi nhận rồi thêm [[HANDOFF]] để nhân viên xử lý.
+- Nếu khách yêu cầu đổi ngày giao, đổi địa chỉ, đổi size hay thay đổi khác về đơn: xác nhận đã ghi nhận rồi thêm [[HANDOFF]] để nhân viên xử lý. (Khách xin HỦY đơn: làm theo mục "KHÁCH XIN HỦY ĐƠN" nếu có.)
 - Khách chỉ cảm ơn, nói ok, chào xã giao: đáp lại ĐÚNG MỘT câu ngắn rồi dừng. TUYỆT ĐỐI KHÔNG hỏi \"cần em hỗ trợ thêm gì không\" nữa, không mời chào thêm, không kéo dài hội thoại.`;
+    }
+
+    // Khach xin huy don: lan dau hoi ly do + giu don, xin lan nua moi ghi nhan huy (chu shop 02/10/2026)
+    const huyDon = type === "INBOX" ? this.cancelStage(pageId, messages) : null;
+    if (huyDon === "retain") {
+      log.info(`[${pageId}] ${conversationId}: khach xin huy don lan dau -> hoi ly do, giu don`);
+      store.bumpStat(pageId, "cancelRetain");
+      systemPrompt += `
+
+## KHÁCH XIN HỦY ĐƠN (lần đầu) — GIỮ ĐƠN, CHƯA ĐƯỢC XÁC NHẬN HỦY
+- Lượt này TUYỆT ĐỐI KHÔNG nói "em ghi nhận hủy đơn", KHÔNG thêm [[HANDOFF]]. Người bán thật sẽ hỏi lý do và cố giữ khách.
+- Đọc lại hội thoại: nếu SHOP đã làm sai (hứa miễn ship mà bản chốt vẫn cộng ship, báo giá lệch nhau, hỏi lại thông tin khách đã cho, gửi sai size/màu) thì mở đầu bằng lời xin lỗi ĐÚNG lỗi đó và SỬA NGAY (vd nêu lại tổng tiền đã miễn ship).
+- Hỏi nhẹ nhàng MỘT câu lý do (giá / phí ship, lo size không vừa, đổi ý màu/mẫu, hay lý do khác).
+- Lý do (hoặc ngữ cảnh cho thấy) là GIÁ / PHÍ SHIP: đưa ngay nấc ưu đãi KẾ TIẾP trong quy trình giảm giá của page (chưa miễn ship thì miễn ship trước; đã miễn ship thì nấc sau), nêu tổng mới. Không nhảy cóc, không xuống dưới giá sàn, chỉ dùng mức có trong hướng dẫn; page không có quy trình giảm giá thì KHÔNG tự giảm.
+- Lo size / chất lượng: nhắc được kiểm hàng trước khi nhận, không ưng không lấy, hỗ trợ đổi size.
+- Chính tin hủy đã nêu lý do cá nhân KHÔNG đổi được (đặt nhầm, đã mua chỗ khác, không có ai nhận, người nhà không cho): không thuyết phục, xác nhận đã ghi nhận hủy, cảm ơn và thêm [[HANDOFF]].
+- 2–3 câu, giọng chân thành, không trách khách, kết thúc bằng câu mời giữ đơn.`;
+    } else if (huyDon === "accept") {
+      systemPrompt += `
+
+## KHÁCH VẪN XIN HỦY ĐƠN (đã hỏi lý do / đưa ưu đãi rồi)
+- Tôn trọng quyết định, KHÔNG thuyết phục thêm, KHÔNG đưa thêm ưu đãi. Xác nhận ngắn đã ghi nhận hủy đơn, cảm ơn khách, chúc khách một ngày vui vẻ, rồi thêm [[HANDOFF]] để nhân viên hủy đơn trên hệ thống.`;
     }
 
     // Khach da co don / hoi "gui hang chua, bao gio nhan": dua trang thai don THAT tren POS vao prompt

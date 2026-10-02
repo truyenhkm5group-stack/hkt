@@ -99,6 +99,13 @@ export class OrderBot {
       cur.agreedAt = dongY;
       cur.nextCheckAt = Math.min(cur.nextCheckAt || now, now);
     }
+    // Truoc do bi giu lai vi khach xin huy, nay khach da dong y giu don -> kiem lai ngay o luot quet toi
+    if (cur.status === "REVIEW" && /^khách xin hủy đơn/.test((cur.reasons || [])[0] || "") && !this.bot.cancelStage(pageId, messages)) {
+      cur.status = "PENDING";
+      cur.reasons = [];
+      cur.reviewAt = undefined;
+      cur.nextCheckAt = now;
+    }
     if (doi && cur.status !== "PENDING") {
       // Da len don / can duyet / bo qua ma khach gui thong tin moi -> theo doi lai tu dau
       cur.status = "PENDING";
@@ -137,6 +144,16 @@ export class OrderBot {
       const { messages, text, name } = await this.history(pageId, conversationId);
       // Nhan vien da tu len / xac nhan don cho khach nay -> xong, khong ton AI, khong bat ai duyet lai
       if (!byStaff && (await this.resolveIfStaffHandled(key, messages))) return it;
+      // Khach dang XIN HUY (bot dang hoi ly do / giu don, hoac khach van huy): khong len / tu xac nhan don, de nhan vien
+      // quyet (chu shop 02/10/2026). Khach dong y giu don o tin sau thi luot quet ke tiep len don binh thuong.
+      if (!byStaff && this.bot.cancelStage(pageId, messages)) {
+        if (it.status !== "REVIEW") it.reviewAt = Date.now();
+        it.status = "REVIEW";
+        it.reasons = ["khách xin hủy đơn — bot đang hỏi lý do / giữ đơn, chưa lên hay xác nhận đơn"];
+        it.lastCheckAt = Date.now();
+        this._save();
+        return it;
+      }
       if (defaultCode) it.defaultCode = defaultCode;
       const r = await orderSync.syncFromConversation({ pageId, pageName: this.bot.pageNames.get(pageId), conversationId, customerName: it.customerName || name, historyText: text, strict: true, addressOverride, defaultCode: it.defaultCode || "" });
       it.lastCheckAt = Date.now();
