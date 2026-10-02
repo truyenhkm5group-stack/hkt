@@ -1567,6 +1567,21 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.deepEqual(r.confirmed, [1]);
   assert.equal(puts[0][1].status, 1);
   await assert.rejects(ob.confirmDrafts([1]), /cũ/, "xac nhan xong phai xem lai truoc lan sau");
+  // Chay nen: bam -> tra ve ngay, ket qua o draftJob (su co 02/10/2026: doc lau, proxy cat, trang hien "Lỗi:" trong)
+  const job = ob.startDraftPreview(7);
+  assert.equal(job.running, true);
+  while (job.running) await sleep(10);
+  assert.ok(job.result && job.result.total >= 1, JSON.stringify(job));
+  const cj = ob.startConfirmDrafts([]);
+  while (cj.running) await sleep(10);
+  assert.deepEqual(cj.result.confirmed, []);
+  // Dia chi chi tiet: ten lang / moc dia danh van la chi tiet; chi ten hanh chinh thi khong
+  const { hasStreetDetail } = await import("../src/orders.js");
+  assert.equal(hasStreetDetail("Kon Rôn", ["Xã Ngok Réo", "Huyện Đăk Hà", "Kon Tum"]), true, "ten lang");
+  assert.equal(hasStreetDetail("Cổng chào Tân Phú", ["Xã Tân Phú", "Huyện Tân Sơn", "Phú Thọ"]), true, "moc dia danh");
+  assert.equal(hasStreetDetail("xã Sài Sơn", ["Xã Sài Sơn", "Huyện Quốc Oai", "Hà Nội"]), false);
+  assert.equal(hasStreetDetail("Tân Phú, Tân Sơn, Phú Thọ", ["Xã Tân Phú", "Huyện Tân Sơn", "Phú Thọ"]), false);
+  assert.equal(hasStreetDetail("", []), false);
   globalThis.fetch = prev39;
 
   // Quet lai theo page + mau chu luc: page dang chi log -> bao loi ro rang; mau chu luc di toi buoc trich don

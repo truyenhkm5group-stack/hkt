@@ -300,10 +300,13 @@ export function createAdminHandler(bot) {
         }
       }
       // Duyet don "Moi" tren POS: xem truoc (chi doc) -> nguoi chon -> xac nhan (doc lai + kiem lai tung don)
+      if (m("GET", "/api/orderbot/drafts")) {
+        return json(res, 200, bot.orderBot.draftJob || null), true;
+      }
       if (m("POST", "/api/orderbot/drafts")) {
         const body = await readJson(req).catch(() => ({}));
         try {
-          return json(res, 200, await bot.orderBot.previewDrafts(body.days || 7)), true;
+          return json(res, 200, bot.orderBot.startDraftPreview(body.days || 7)), true;
         } catch (e) {
           return json(res, 400, { error: e.message }), true;
         }
@@ -311,7 +314,7 @@ export function createAdminHandler(bot) {
       if (m("POST", "/api/orderbot/drafts/confirm")) {
         const body = await readJson(req).catch(() => ({}));
         try {
-          return json(res, 200, { ok: true, ...(await bot.orderBot.confirmDrafts(body.ids)) }), true;
+          return json(res, 200, bot.orderBot.startConfirmDrafts(body.ids)), true;
         } catch (e) {
           return json(res, 400, { error: e.message }), true;
         }
