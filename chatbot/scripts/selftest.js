@@ -1825,7 +1825,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 43: mot dong ghi nhieu mau -> tach tung mau chia deu so luong; mau / size mo ho hoac chua noi -> khong lay bua bien the dau tien");
 }
 
-// ---- 44: su co 02/10/2026 (Bui Phuong Vy, Linh Tay Luxury): khach da cho du so do + mau + dia chi + SDT tu 30/09,
+// ---- 45: su co 02/10/2026 (Bui Phuong Vy, Linh Tay Luxury): khach da cho du so do + mau + dia chi + SDT tu 30/09,
 // hom sau bot chi con doc ~30 tin gan nhat -> hoi "Em lên đơn gửi hàng cho chị luôn nhé ạ?" 6 lan, xin lai chieu cao
 // can nang 3 lan. Chu shop: "nếu đơn đã có sđt thì check 30 tin trước thời điểm cho sđt, nếu đã đủ thông tin thì
 // không hỏi lại nữa, kết thúc hội thoại sớm".
@@ -1932,7 +1932,57 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
 
   settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "", sizeChart: prevSettings.sizeChart || "" });
   catalog.setProducts(prevProducts);
-  console.log("OK 44: khach da gui SDT + 30 tin truoc do du thong tin -> ghi ho so don, thoi hoi them; tin ngan de AI doc ngu canh, cam on thi chao");
+  console.log("OK 45: khach da gui SDT + 30 tin truoc do du thong tin -> ghi ho so don, thoi hoi them; tin ngan de AI doc ngu canh, cam on thi chao");
+}
+
+// ---- 44: mau chu luc cua page (chu shop 02/10/2026: Linh Tay Luxury CS1 mac dinh Q005)
+{
+  const { orderSync: os44 } = await import("../src/orders.js");
+  const prevProducts = catalog.products;
+  catalog.setProducts([
+    { id: "pA", code: "A001", name: "Áo A001", note: "", attributes: {}, price: { min: 1, max: 1 }, images: [], variations: [{ id: "a1", sku: "a1", fields: {}, price: 1, stock: 1, available: true, images: [] }] },
+    { id: "p5", code: "Q005", name: "Đầm Q005", note: "", attributes: { "Màu": ["Đen"] }, price: { min: 499000, max: 499000 }, images: [], variations: [{ id: "q5", sku: "q5", fields: { "Màu": "Đen", Size: "XL" }, price: 499000, stock: 1, available: true, images: [] }] },
+  ]);
+  // (1) Ma rong khong duoc khop san pham dau danh muc
+  const r = os44.mapItems([{ code: "", color: "Đen", size: "XL", quantity: 1 }]);
+  assert.equal(r.mapped.length, 0, "khong ro ma -> khong len nham A001");
+  assert.match(r.problems[0], /chưa rõ mẫu/);
+  // (2) Page ten "Linh Tây Luxury CS1" chua khai mau chu luc -> dat Q005 MOT lan, don treo 24h cua page duoc kiem lai ngay
+  const ob = bot.orderBot;
+  const tenCu = bot.pageNames.get("PAGE1");
+  const macDinhCu = settings.get("PAGE1").defaultProduct;
+  settings.update("PAGE1", { defaultProduct: "" });
+  bot.pageNames.set("PAGE1", "Linh Tây Luxury CS1");
+  delete store.state.defaultProductSeeds;
+  ob.items.C44a = { pageId: "PAGE1", conversationId: "C44a", status: "REVIEW", rounds: 3, firstSeen: Date.now() - 3600e3, nextCheckAt: 0, reviewAt: Date.now(), reasons: ["x"] };
+  ob.items.C44b = { pageId: "PAGE1", conversationId: "C44b", status: "DONE", rounds: 1, firstSeen: Date.now() - 3600e3, orderId: "9" };
+  ob.items.C44c = { pageId: "PAGE1", conversationId: "C44c", status: "REVIEW", rounds: 3, firstSeen: Date.now() - 48 * 3600e3, reviewAt: 1 };
+  assert.deepEqual(ob.seedDefaultProducts(), ["PAGE1"]);
+  assert.equal(settings.get("PAGE1").defaultProduct, "Q005");
+  assert.equal(ob.items.C44a.status, "PENDING", "don can duyet trong 24h -> kiem lai");
+  assert.equal(ob.items.C44a.rounds, 0);
+  assert.ok(ob.items.C44a.nextCheckAt <= Date.now(), "kiem ngay");
+  assert.equal(ob.items.C44b.status, "DONE", "don da len khong dung vao");
+  assert.equal(ob.items.C44c.status, "REVIEW", "qua 24h khong dung vao");
+  // Chu shop doi sang ma khac -> khong bi dat lai Q005
+  settings.update("PAGE1", { defaultProduct: "q004 " });
+  assert.equal(settings.get("PAGE1").defaultProduct, "Q004", "chuan hoa ma");
+  assert.deepEqual(ob.seedDefaultProducts(), [], "chi ap mot lan");
+  assert.equal(settings.get("PAGE1").defaultProduct, "Q004");
+  settings.update("PAGE1", { defaultProduct: "Q005" });
+  // (3) Ban chot ghi ten mo ta -> thay bang ten danh muc cua ma chu luc
+  const chot = "Dạ em chốt đơn cho chị:\n• Đầm xếp ly eo tay lỡ – màu Đen, Đỏ size XL x 2\n• Tổng: 849.000đ (miễn phí ship)\n• SĐT: 0903367786\n• Địa chỉ: 25/13 Bà Lê Chân";
+  assert.match(bot.productCodeInSummary(chot, "PAGE1"), /\n• Đầm Q005 – màu Đen, Đỏ size XL x 2\n/);
+  assert.match(bot.productCodeInSummary(chot.replace(" – ", " "), "PAGE1"), /• Đầm Q005 màu Đen/);
+  const tachDong = "Dạ em chốt đơn cho chị:\n• 1 Đen XL\n• 1 Đỏ Đô XL\n• Tổng: 849.000đ";
+  assert.match(bot.productCodeInSummary(tachDong, "PAGE1"), /chị:\n• Mẫu: Đầm Q005\n• 1 Đen XL/);
+  const coMa = chot.replace("Đầm xếp ly eo tay lỡ", "Đầm Q005");
+  assert.equal(bot.productCodeInSummary(coMa, "PAGE1"), coMa, "da co ma thi giu nguyen");
+  for (const k of ["C44a", "C44b", "C44c"]) delete ob.items[k];
+  settings.update("PAGE1", { defaultProduct: macDinhCu || "" });
+  bot.pageNames.set("PAGE1", tenCu);
+  catalog.setProducts(prevProducts);
+  console.log("OK 44: mau chu luc cua page — dat Q005 cho CS1 mot lan + kiem lai don treo; ban chot ghi ma mau; ma rong khong khop bua san pham dau");
 }
 
 console.log("\nTAT CA TEST PASS");

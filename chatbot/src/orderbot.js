@@ -22,6 +22,11 @@ import { isOrderSummaryReply } from "./bot.js";
  * Tiết kiệm AI: chỉ gọi AI trích đơn khi bộ đọc miễn phí (customerFacts) thấy đủ SĐT + địa chỉ, hoặc thông tin vừa đổi.
  */
 const SWEEP_MS = 5 * 60 * 1000;
+// Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
+// duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
+const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
+const khongDau = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+
 // Doi phien ban -> danh sach theo doi cu bi bo mot lan khi khoi dong (resetIfNeeded)
 const ORDERBOT_VERSION = 2;
 
@@ -246,6 +251,11 @@ export class OrderBot {
 
   /** Quet dinh ky: don cho qua han (khach im lang) -> kiem lan cuoi, con thieu thi sang can duyet */
   async sweep() {
+    try {
+      this.seedDefaultProducts();
+    } catch (e) {
+      log.warn(`[orderbot] dat mau chu luc loi: ${e.message}`);
+    }
     if (!settings.orderBot().enabled || this.sweeping) return;
     this.sweeping = true;
     try {
@@ -511,7 +521,50 @@ export class OrderBot {
     return n;
   }
 
+  /** Ap mau chu luc da chot cho page chua khai (moi muc mot lan), roi kiem lai ngay don dang treo cua page do. */
+  seedDefaultProducts() {
+    const daAp = (store.state.defaultProductSeeds ||= {});
+    const out = [];
+    for (const [pid, ten] of this.bot.pageNames) {
+      // Ten Pancake tai sau khi khoi dong -> xet ca hai ten; sweep goi lai nen page doi ten muon van duoc ap
+      const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
+      for (const s of PAGE_DEFAULT_PRODUCT_SEED) {
+        const k = `${pid}:${s.code}`;
+        if (daAp[k] || !cacTen.includes(s.page)) continue;
+        daAp[k] = Date.now();
+        if (String(settings.get(pid).defaultProduct || "").trim()) continue;
+        settings.update(pid, { defaultProduct: s.code });
+        log.info(`[orderbot] page ${ten}: dat mau chu luc ${s.code}`);
+        out.push(pid);
+        this.requeuePage(pid);
+      }
+    }
+    if (out.length) this._save();
+    return out;
+  }
+
+  /**
+   * Doi mau chu luc cua page -> cac hoi thoai 24 gio qua dang cho / can duyet (chua len don) duoc kiem lai NGAY voi bo
+   * dem moi: ly do treo thuong chinh la "khong ro mau".
+   */
+  requeuePage(pageId, hours = 24) {
+    const moc = Date.now() - hours * 3600e3;
+    let n = 0;
+    for (const it of Object.values(this.items)) {
+      if (it.pageId !== String(pageId) || !["PENDING", "REVIEW"].includes(it.status) || it.orderId || (it.firstSeen || 0) < moc) continue;
+      Object.assign(it, { status: "PENDING", rounds: 0, nextCheckAt: Date.now(), reviewAt: undefined });
+      n++;
+    }
+    if (n) this._save();
+    return n;
+  }
+
   start() {
+    try {
+      this.seedDefaultProducts();
+    } catch (e) {
+      log.warn(`[orderbot] dat mau chu luc loi: ${e.message}`);
+    }
     // Dung san danh muc xa/phuong ca nuoc (nen) de bot len don suy ra duoc tinh/huyen khi khach chi ghi ten phuong/xa
     orderSync.geoIndex().catch(() => null);
     this.resetIfNeeded().catch((e) => log.warn(`[orderbot] reset loi: ${e.message}`));

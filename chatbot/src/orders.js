@@ -489,6 +489,11 @@ export class OrderSync {
     const problems = [];
     for (const it of items || []) {
       const code = norm(it.code);
+      // Ma rong: "".includes -> khop san pham DAU danh muc = len nham mau. Khong ro mau thi khong doan.
+      if (!code) {
+        problems.push("chưa rõ mẫu (mã sản phẩm)");
+        continue;
+      }
       const p = catalog.products.find((x) => norm(x.code) === code || norm(x.name) === code) || catalog.products.find((x) => norm(x.code).includes(code) || code.includes(norm(x.code)));
       if (!p) {
         problems.push(`không có mã ${it.code}`);

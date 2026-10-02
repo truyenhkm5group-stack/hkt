@@ -696,6 +696,8 @@ export class Bot {
     if (!daChot && !f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
     const daHuaFreeShip = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
     if (daHuaFreeShip) dong.push("- Phí ship: shop ĐÃ hứa MIỄN PHÍ vận chuyển cho khách này — tổng tiền KHÔNG cộng phí ship");
+    const maChuLuc = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
+    if (maChuLuc) dong.push(`- Mẫu: ${maChuLuc} (mẫu chủ lực của page) — bản chốt đơn ghi tên sản phẩm là "Đầm ${maChuLuc}", không dùng tên mô tả`);
     dong.push("- Địa chỉ phải có ĐỦ xã/phường + quận/huyện + tỉnh/thành mới được gửi bản chốt đơn; thiếu cấp nào thì hỏi cấp đó");
     let tiep;
     if (!f.size && f.measured) tiep = `báo size hợp với số đo khách đã gửi (${soDoText(f)}) theo bảng size trong hướng dẫn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao / cân nặng`;
@@ -789,6 +791,28 @@ ${dong.join("\n")}
    * Shop da HUA mien phi ship trong hoi thoai ("hỗ trợ miễn phí vận chuyển") ma ban chot don van ghi "+ 25.000đ phí vận
    * chuyển = 524.000đ" -> sua dong tong thanh tien hang + "miễn phí vận chuyển" (su co Thu Thuy 02/10/2026).
    */
+  /**
+   * Ban chot don phai ghi MA mau ("Đầm Q005"), khong phai ten mo ta trong kich ban page ("Đầm xếp ly eo tay lỡ") —
+   * chu shop 02/10/2026: nhan vien / bot len don doi chieu theo ma. Ban chot chua co ma nao ma page co mau chu luc
+   * -> thay ten o dong san pham dau tien bang ten danh muc cua ma do (khong co dau phan cach thi them dong "Mẫu:").
+   */
+  productCodeInSummary(reply, pageId) {
+    const t = String(reply || "");
+    if (/\b[A-Z]{1,3}\d{3}\b/.test(t)) return t;
+    const ma = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
+    if (!ma) return t;
+    const p = catalog.products.find((x) => String(x.code || "").toUpperCase() === ma);
+    const ten = p && String(p.name || "").toUpperCase().includes(ma) ? p.name : `Đầm ${ma}`;
+    const dong = t.split("\n");
+    const i = dong.findIndex((d) => /^\s*[•\-*]/.test(d) && !/^\s*[•\-*]\s*(tổng|người nhận|tên|sđt|số điện thoại|địa chỉ|phí|ship|thanh toán)/i.test(d));
+    if (i < 0) return t;
+    const m = dong[i].match(/^(\s*[•\-*]\s*)(.+?)(\s+[–—-]\s+|\s+(?=màu\s)|\s+(?=size\s))(.*)$/i);
+    if (m && !/^\d/.test(m[2])) dong[i] = `${m[1]}${ten}${m[3]}${m[4]}`;
+    else dong.splice(i, 0, `• Mẫu: ${ten}`);
+    log.info(`[${pageId}] Ban chot don khong ghi ma mau -> dung ${ma}`);
+    return dong.join("\n");
+  }
+
   keepFreeShipPromise(reply, pageId, messages) {
     const t = String(reply || "");
     const daHua = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
@@ -1841,6 +1865,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
     }
     // Shop DA hua mien phi ship ma ban chot don van cong phi ship -> bo phi ship trong ban chot (giu loi hua voi khach)
     if (isOrderSummaryReply(reply, false)) reply = this.keepFreeShipPromise(reply, pageId, messages);
+    if (isOrderSummaryReply(reply, false)) reply = this.productCodeInSummary(reply, pageId);
     if (reply.includes(HANDOFF)) {
       handoff = true;
       reply = reply.replaceAll(HANDOFF, "").trim();
