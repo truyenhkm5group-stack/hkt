@@ -1766,5 +1766,44 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 42: suy ra dia chi chi khi co can cu (ten duy nhat ca nuoc / don cu cung SDT / khach ghi ten huyen), trung ten thi hoi khach, khong nhay tinh");
 }
 
+// ---- 43: mot dong ghi nhieu mau ("Đen, Đỏ" x2) -> tach tung mau, khong len 2 cai cung mot mau
+{
+  // Su co Ha Dang 02/10/2026 (Linh Tay Luxury CS1, Q005 ba mau Do Do / Xanh Reu / Den): khach "Cho 2 đầm 1 đen 1 đỏ",
+  // ban chot ghi "màu Đen, Đỏ size XL x 2" -> loc cu chon mau dau tien = 2 cai Den, tong 849K van khop nen tu xac nhan.
+  const { orderSync: os43 } = await import("../src/orders.js");
+  const prevProducts = catalog.products;
+  const bt = (id, mau, size) => ({ id, sku: id, fields: { "Màu": mau, Size: size }, price: 499000, stock: 5, available: true, images: [] });
+  catalog.setProducts([{
+    id: "p5", code: "Q005", name: "Đầm Q005", note: "", attributes: { "Màu": ["Đỏ Đô", "Xanh Rêu", "Đen"], Size: ["L", "XL"] }, price: { min: 499000, max: 499000 },
+    images: [], variations: [bt("dd-l", "Đỏ Đô", "L"), bt("dd-xl", "Đỏ Đô", "XL"), bt("xr-xl", "Xanh Rêu", "XL"), bt("den-xl", "Đen", "XL")],
+  }, {
+    id: "p6", code: "X006", name: "Áo X006", note: "", attributes: { "Màu": ["Xanh Rêu", "Xanh Ngọc"], Size: ["M"] }, price: { min: 299000, max: 299000 },
+    images: [], variations: [bt("x-xr", "Xanh Rêu", "M"), bt("x-xn", "Xanh Ngọc", "M")],
+  }]);
+  const ids = (r) => r.mapped.map((m) => `${m.variation_id}:${m.quantity}`).sort().join(",");
+  // (1) "Đen, Đỏ" x2 -> 1 Den XL + 1 Do Do XL
+  let r = os43.mapItems([{ code: "Q005", color: "Đen, Đỏ", size: "XL", quantity: 2 }]);
+  assert.equal(ids(r), "dd-xl:1,den-xl:1", JSON.stringify(r));
+  assert.equal(r.problems.length, 0);
+  // (2) AI tach dung tu dau -> giu nguyen
+  r = os43.mapItems([{ code: "Q005", color: "Đen", size: "XL", quantity: 1 }, { code: "Q005", color: "Đỏ", size: "XL", quantity: 1 }]);
+  assert.equal(ids(r), "dd-xl:1,den-xl:1");
+  // (3) hai mau ma so luong le -> khong doan
+  r = os43.mapItems([{ code: "Q005", color: "đen và xanh rêu", size: "XL", quantity: 3 }]);
+  assert.equal(r.mapped.length, 0);
+  assert.match(r.problems[0], /không chia đều/);
+  // (4) "đỏ" chi thuoc Do Do -> mot mau, khong bi coi la nhieu mau
+  assert.equal(ids(os43.mapItems([{ code: "Q005", color: "đỏ", size: "XL", quantity: 1 }])), "dd-xl:1");
+  // (5) "xanh" khi ma co Xanh Reu + Xanh Ngoc -> mo ho, khong lay bua bien the dau tien
+  r = os43.mapItems([{ code: "X006", color: "xanh", size: "M", quantity: 1 }]);
+  assert.equal(r.mapped.length, 0);
+  assert.match(r.problems[0], /khớp 2 màu/);
+  // (6) chua noi mau -> khong lay bua; chua noi size ma ma co 2 size cho mau do -> khong lay bua
+  assert.equal(os43.mapItems([{ code: "Q005", color: "", size: "XL", quantity: 1 }]).mapped.length, 0);
+  assert.equal(os43.mapItems([{ code: "Q005", color: "Đỏ Đô", size: "", quantity: 1 }]).mapped.length, 0);
+  catalog.setProducts(prevProducts);
+  console.log("OK 43: mot dong ghi nhieu mau -> tach tung mau chia deu so luong; mau / size mo ho hoac chua noi -> khong lay bua bien the dau tien");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
