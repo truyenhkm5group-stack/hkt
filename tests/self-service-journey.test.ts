@@ -256,6 +256,11 @@ function testPure() {
   assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
   const spOld = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], fullBlock);
   assert.ok(spOld.includes("có khối KHÁCH CŨ ⇒ KHÔNG xin lại") && spOld.indexOf("QUY TRÌNH BÁN") < spOld.indexOf("KHÁCH CŨ — dữ liệu"), "B3 trỏ tới khối khách cũ; khối đứng sau quy trình");
+  // Chủ shop 02/10/2026 (ảnh «Lê Quyền»): cố đọc hiểu, chưa hiểu thì HỎI LẠI, chính sách shop đã khai thì TRẢ LỜI — chỉ chuyển
+  // người (bot im lặng trên fanpage) khi thật sự không trả lời được.
+  const spPolicy = systemPrompt({ ...parseSalesChatbotConfig(null), extraInstructions: "Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán." }, "Shop", "", "FANPAGE");
+  for (const k of ["lối CUỐI", "HỎI LẠI khách cho rõ", "ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC", "«khg» / «ko» = không", "Câu hỏi về CHÍNH SÁCH", "«Không hiểu ý khách» (ĐÃ hỏi lại 2 lần", "kiểm tra thoải mái, ưng ý mới nhận hàng"]) assert.ok(spPolicy.includes(k), `lời nhắc thiếu «${k}»`);
+  assert.ok(!/bạn không chắc|«Không chắc»/.test(spPolicy), "«không chắc» không còn là lý do chuyển người");
   // Ảnh «Nghia Hue» (02/10/2026): khách hỏi SỈ, nhắn nhiều câu liền, bot gửi lại câu vừa hỏi.
   assert.ok(isMultiPart("Chả cá thu giá sĩ bao nhiêu ạ\nMình ở đâu ạ") && !isMultiPart("Chả cá thu bao nhiêu ạ") && !isMultiPart("chả mực\n\n  "), "nhiều tin = nhiều dòng có chữ");
   for (const t of ["Chả cá thu giá sĩ bao nhiêu ạ", "lấy sỉ về bán", "Em lấy lần 20-30 kg", "lấy 15kg", "bán buôn không em", "làm đại lý được không"]) assert.ok(looksWholesale(t), `phải nhận là hỏi sỉ: ${t}`);

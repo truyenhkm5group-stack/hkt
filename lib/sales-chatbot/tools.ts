@@ -166,7 +166,7 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   },
   handoff_to_human: {
     name: "handoff_to_human",
-    description: "Chuyển hội thoại cho nhân viên: khách yêu cầu gặp người, khiếu nại, hỏi điều ERP không có dữ liệu, hoặc bot không chắc.",
+    description: "Chuyển hội thoại cho nhân viên: khách yêu cầu gặp người, khiếu nại, hỏi điều mà ERP, thông tin shop và hướng dẫn thêm đều không trả lời được. Chưa hiểu ý khách thì hỏi lại khách, KHÔNG chuyển.",
     inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"], additionalProperties: false },
     kind: "write",
   },
