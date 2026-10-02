@@ -530,8 +530,11 @@ export function createAdminHandler(bot) {
       if ((p = m("PUT", "/api/pages/:id/settings"))) {
         if (!bot.clients.has(p.id)) return json(res, 404, { error: "page khong ton tai" }), true;
         const body = await readJson(req);
+        const maCu = String(settings.get(p.id).defaultProduct || "");
         const saved = settings.update(p.id, body);
         if ("displayName" in body) bot.applyPageName(p.id);
+        // Doi mau chu luc -> don 24 gio qua chua len duoc (thuong vi "khong ro mau") duoc kiem lai ngay
+        if ("defaultProduct" in body && String(saved.defaultProduct || "") !== maCu && saved.defaultProduct) bot.orderBot.requeuePage(p.id);
         return json(res, 200, { ok: true, settings: saved, effective: settings.effective(p.id), name: bot.pageNames.get(p.id) }), true;
       }
       if ((p = m("GET", "/api/pages/:id/prompt"))) {
