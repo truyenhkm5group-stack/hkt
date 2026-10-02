@@ -256,6 +256,11 @@ function testPure() {
   assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
   const spOld = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], fullBlock);
   assert.ok(spOld.includes("có khối KHÁCH CŨ ⇒ KHÔNG xin lại") && spOld.indexOf("QUY TRÌNH BÁN") < spOld.indexOf("KHÁCH CŨ — dữ liệu"), "B3 trỏ tới khối khách cũ; khối đứng sau quy trình");
+  // Chủ shop 02/10/2026 (ảnh «Lê Quyền»): cố đọc hiểu, chưa hiểu thì HỎI LẠI, chính sách shop đã khai thì TRẢ LỜI — chỉ chuyển
+  // người (bot im lặng trên fanpage) khi thật sự không trả lời được.
+  const spPolicy = systemPrompt({ ...parseSalesChatbotConfig(null), extraInstructions: "Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán." }, "Shop", "", "FANPAGE");
+  for (const k of ["lối CUỐI", "HỎI LẠI khách cho rõ", "ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC", "«khg» / «ko» = không", "Câu hỏi về CHÍNH SÁCH", "«Không hiểu ý khách» (ĐÃ hỏi lại 2 lần", "kiểm tra thoải mái, ưng ý mới nhận hàng"]) assert.ok(spPolicy.includes(k), `lời nhắc thiếu «${k}»`);
+  assert.ok(!/bạn không chắc|«Không chắc»/.test(spPolicy), "«không chắc» không còn là lý do chuyển người");
   // Ảnh «Nghia Hue» (02/10/2026): khách hỏi SỈ, nhắn nhiều câu liền, bot gửi lại câu vừa hỏi.
   assert.ok(isMultiPart("Chả cá thu giá sĩ bao nhiêu ạ\nMình ở đâu ạ") && !isMultiPart("Chả cá thu bao nhiêu ạ") && !isMultiPart("chả mực\n\n  "), "nhiều tin = nhiều dòng có chữ");
   for (const t of ["Chả cá thu giá sĩ bao nhiêu ạ", "lấy sỉ về bán", "Em lấy lần 20-30 kg", "lấy 15kg", "bán buôn không em", "làm đại lý được không"]) assert.ok(looksWholesale(t), `phải nhận là hỏi sỉ: ${t}`);
@@ -855,6 +860,9 @@ async function testJourney() {
       assert.ok(!hoFetch.calls.some((c) => c.init?.method === "POST"), "chuyển người ⇒ không gửi gì cho khách");
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
+      // (02/10/2026 · ảnh «Lê Quyền») bot im lặng ⇒ nhóm «báo nhóm vận hành» của shop nhận MỘT tin có TÊN khách trên fanpage.
+      const hoGroup = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.event, "sales_chat.handoff"), eq(schema.messagingDeliveries.subjectId, hoConv.id)));
+      assert.ok(hoGroup.length === 1 && hoGroup[0].connectorKey === "sandbox-messaging" && /Khách cần nhân viên trả lời: Chị Hồ/.test(hoGroup[0].body) && /Bot đã dừng/.test(hoGroup[0].body), JSON.stringify(hoGroup.map((d) => [d.connectorKey, d.body])));
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // ═══ GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — Telegram chập chờn từ máy chủ ở Việt Nam) ═══
       const tgToken = `123456789:${"A".repeat(35)}`;
@@ -939,7 +947,17 @@ async function testJourney() {
       assert.ok((await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng" }, rctx({}, "đúng", null))).isError, "không có khách cũ ⇒ không điền");
       const savedC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
       assert.ok(!savedC.isError && savedC.state.customer?.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && savedC.state.customer.phone === "0911222333" && savedC.state.customer.savedAddress === true && !savedC.content.includes("Số 12"), JSON.stringify(savedC));
-      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(savedC.state, "ok em"));
+      // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (02/10/2026 · ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop có câu upsell ⇒ chưa gửi thì
+      // chặn lên đơn; gửi xong ⇒ lên đơn + tóm tắt NGAY trong cùng lượt; câu upsell thiếu số ERP ⇒ không chặn mãi.
+      const draftIn = (st: ChatState) => executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(st, "ok em"));
+      const noUp = await draftIn(savedC.state);
+      assert.ok(noUp.isError && noUp.content.includes("send_quick_reply") && noUp.content.includes("Q1") && !noUp.state.draft, `chưa mời thêm món ⇒ chặn: ${noUp.content}`);
+      const upNow = await executeTool("send_quick_reply", { code: "Q1" }, rctx(savedC.state, "ok em"));
+      assert.ok(!upNow.isError && upNow.state.upsellSent, JSON.stringify(upNow.state));
+      assert.ok(!(await draftIn(upNow.state)).isError, "mời xong ⇒ lên đơn + tóm tắt ngay trong cùng lượt");
+      assert.ok(!(await draftIn({ ...savedC.state, upsellUnavailable: true })).isError, "câu upsell không gửi được ⇒ không chặn mãi");
+      assert.ok(!(await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, { ...rctx(savedC.state, "ok em"), quickReplies: [] })).isError, "shop chưa chọn câu upsell ⇒ không chặn");
+      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({ ...savedC.state, upsellSent: true }, "ok em"));
       assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");
       assert.ok(!savedDraft.content.includes("Số 12") && savedDraft.content.includes("…, phường Hà Đông, Hà Nội"), "tóm tắt bot đọc cho khách chỉ có địa chỉ che: " + savedDraft.content);
       const fbC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "như cũ" }, rctx({}, "như cũ em", byFb));
@@ -960,7 +978,7 @@ async function testJourney() {
       const flowFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-flow" : `m-${Math.random().toString(36).slice(2)}` }));
       const rf = await processFanpageThread(PAGE, "t-flow", { fetch: flowFetch.fetch, now: in31s });
       const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages") && c.init?.method === "POST").map((c) => String(c.init?.body));
-      assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("1kg hay 2kg") && flowBodies.some((b) => b.includes("content_ids")), JSON.stringify({ rf, flowBodies }));
+      assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("content_ids") && flowBodies[2].includes("1kg hay 2kg"), `ảnh của câu mẫu đi NGAY sau chữ của nó, trước câu hỏi tiếp của AI: ${JSON.stringify({ rf, flowBodies })}`);
       const flowConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-flow"))))[0];
       assert.equal((flowConv.state as ChatState).stage, "QUOTE");
       // KHÁCH CŨ trên fanpage: Pancake trả SĐT đã ghi nhận + tin cũ trước khi bot vào ⇒ lời nhắc có khối KHÁCH CŨ đầy đủ (mã
@@ -1079,6 +1097,29 @@ async function testJourney() {
         assert.ok(rs.sent === 0 && rs.stopped === 1 && rs.detail.join(" ").includes(label), `${label}: ${JSON.stringify(rs)}`);
         await db.update(schema.salesChatConversations).set({ state: fc.state, lastCustomerAt: fc.lastCustomerAt }).where(eq(schema.salesChatConversations.id, fc.id));
       }
+      // (02/10/2026 · ảnh «Sang Tran») NGƯỜI KHÁC LÊN TIẾNG ⇒ bot thôi nhắc. Nhân viên chốt đơn trên Pancake mà Pancake KHÔNG
+      // gắn uid (trông như tin tự động) ⇒ lịch nhắc xoá ngay lúc nhận.
+      const rearm = (extra: Partial<typeof schema.salesChatConversations.$inferInsert> = {}) =>
+        db.update(schema.salesChatConversations).set({ status: "WAITING", nextFollowupAt: fc.nextFollowupAt, waitingSince: fc.waitingSince, lastBotAt: fc.lastBotAt, lastCustomerAt: fc.lastCustomerAt, ...extra }).where(eq(schema.salesChatConversations.id, fc.id));
+      await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
+      assert.match((await receiveFanpageEvent(ev("m-fu-staff", "Vâng ah, nay e giao tiếp ạ", { id: PAGE }, "t-fu"))).reason, /tự động/);
+      let fs2 = await fuConv();
+      assert.ok(fs2.status === "OPEN" && fs2.nextFollowupAt === null && fs2.waitingSince === null, `tin phía page sau bot ⇒ hết lịch nhắc: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
+      // Hội thoại đã XẾP LỊCH trước khi có chặn lúc nhận (dòng phía page nằm sau tin cuối của bot) ⇒ job dừng, không nhắn.
+      await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
+      const postsBeforeStaff = fuFetch.calls.filter((c) => c.init?.method === "POST").length;
+      const rStaff = await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow });
+      assert.ok(rStaff.sent === 0 && rStaff.stopped === 1 && rStaff.detail.join(" ").includes("nhân viên / page đã nhắn sau bot") && fuFetch.calls.filter((c) => c.init?.method === "POST").length === postsBeforeStaff, JSON.stringify(rStaff));
+      // Tin phía page TRƯỚC tin cuối của bot không chặn (bot đã nhắn sau đó, khách im lặng với chính câu ấy).
+      await rearm({ lastBotAt: new Date(Date.now() + 60_000) });
+      assert.ok(!(await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow })).detail.join(" ").includes("nhân viên / page"), "tin page cũ hơn tin bot ⇒ không chặn");
+      // Khách thả 👍 / ảnh (không chữ — bot không trả lời) ⇒ khách KHÔNG im lặng nữa: hết lịch nhắc, mốc tin khách cập nhật.
+      await rearm();
+      const likeAt = new Date();
+      assert.match((await receiveFanpageEvent(ev("m-fu-like", "", { id: "cust-fu", name: "Chị Thu" }, "t-fu"), likeAt)).reason, /không có chữ/);
+      fs2 = await fuConv();
+      assert.ok(fs2.status === "OPEN" && fs2.nextFollowupAt === null && fs2.lastCustomerAt!.getTime() >= likeAt.getTime() - 1000, `khách thả 👍 ⇒ hết lịch nhắc: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
+      await rearm();
       assert.ok("ok" in (await saveFollowupSettings(admin, { enabled: false, stepsMinutes: [60, 360, 1320] })));
       assert.deepEqual((await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow })).detail, ["follow-up đang tắt"]);
       assert.ok("error" in (await saveFollowupSettings(admin, { enabled: true, stepsMinutes: [60, 1500] })), "mốc quá 23 giờ ⇒ từ chối (khung 24 giờ của Facebook)");
@@ -1182,7 +1223,7 @@ async function testJourney() {
       await processFanpageThreadDebounced(PAGE, "t-901", { fetch: pancake.fetch, sleep: async (ms) => void sleeps.push(ms) });
       assert.ok(sleeps[0] >= FOLLOWUP_WAIT_MS && sleeps[0] <= FOLLOWUP_WAIT_MS + 2000, `lượt sau webhook chỉ đợi khách gõ xong: ${sleeps.join(",")}`);
       // TRẢ LỜI NHANH (chủ shop 01/10/2026): tin TIẾP THEO chỉ đợi khách gõ xong; tin ĐẦU của hội thoại mới đợi tối đa 10 giây
-      // để nhường trả lời tự động của Meta — tới sớm (kể cả TRƯỚC tin khách vì webhook ngược thứ tự) ⇒ bỏ qua ngay.
+      // để nhường trả lời tự động của Meta — tới SAU tin khách ⇒ bỏ qua ngay.
       const inMs = (ms: number) => () => new Date(Date.now() + ms);
       await receiveFanpageEvent(ev("m-fast-1", "Shop còn ruốc tôm không", { id: "cust-8", name: "Chị Tám" }, "t-980"));
       assert.equal((await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) })).skipped, "Đang đợi xem page có trả lời không", "tin đầu hội thoại mới: 5 giây chưa đủ");
@@ -1191,11 +1232,19 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-fast-2", "Ship Hà Nội mấy ngày em", { id: "cust-8", name: "Chị Tám" }, "t-980"));
       const f2 = await processFanpageThread(PAGE, "t-980", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) });
       assert.ok(f2.replies >= 1, `tin tiếp theo trả lời sau ~5 giây, không đợi 10: ${JSON.stringify(f2)}`);
-      await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
-      await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-fast-3", "Shop ơi", { id: "cust-9", name: "Anh Chín" }, "t-981"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-fast-auto", "Cảm ơn chị đã nhắn tin ạ", { id: PAGE }, "t-981"));
       const f3 = await processFanpageThread(PAGE, "t-981", { fetch: pancake.fetch });
-      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta trả lời tới TRƯỚC tin đầu (ngược thứ tự) ⇒ bỏ qua NGAY, không đợi: ${JSON.stringify(f3)}`);
+      assert.ok(f3.replies === 0 && /Page đã trả lời/.test(f3.skipped ?? ""), `Meta tự trả lời tin đầu ⇒ bỏ qua NGAY, không đợi: ${JSON.stringify(f3)}`);
+      // (02/10/2026 · ảnh «Nguyễn Oanh») LỜI CHÀO QUẢNG CÁO tới NGAY TRƯỚC tin đầu của khách (hội thoại cũ quay lại qua quảng
+      // cáo — Meta không tự trả lời) ⇒ KHÔNG phải «page đã trả lời»: đủ 10 giây không ai trả lời thì bot trả lời.
+      await receiveFanpageEvent(ev("m-ad-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!! KHÔNG ĂN LÀ THIỆT", { id: PAGE }, "t-982"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-ad-q", "Báo giá chả cá thu?", { id: "cust-oanh", name: "Nguyễn Oanh" }, "t-982"));
+      assert.equal((await processFanpageThread(PAGE, "t-982", { fetch: pancake.fetch, now: inMs(FOLLOWUP_WAIT_MS + 1000) })).skipped, "Đang đợi xem page có trả lời không", "lời chào quảng cáo không làm bot bỏ qua — vẫn đợi Meta như tin đầu");
+      const fAd = await processFanpageThread(PAGE, "t-982", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fAd.replies >= 1 && fAd.processed === 1, `lời chào quảng cáo trước tin khách ⇒ bot vẫn trả lời: ${JSON.stringify(fAd)}`);
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));

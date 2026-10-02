@@ -48,16 +48,19 @@ export const HUMAN_TAKEOVER_MINUTES = 30;
  */
 export const FIRST_CONTACT_WAIT_MS = 10_000;
 export const FOLLOWUP_WAIT_MS = 4_000;
-/**
- * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. Với hội thoại mới, tin phía page tới trước
- * tin khách tối đa chừng này vẫn tính là trả lời tự động cho chính tin ấy (hai webhook có thể tới ngược thứ tự).
+/*
+ * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. «Page đã trả lời» CHỈ tính tin phía page tới
+ * TỪ tin khách sớm nhất trở đi — KHÔNG nhìn lùi. Bản cũ coi tin page tới trong 60 giây TRƯỚC tin đầu là trả lời tự động
+ * (phòng hai webhook tới ngược thứ tự), nhưng LỜI CHÀO của quảng cáo click-to-message luôn tới ngay trước tin đầu của khách:
+ * đo 02/10/2026 (Hải Sản Làng Chài, «Nguyễn Oanh» — hội thoại cũ từ 12/2025 quay lại qua quảng cáo, Meta KHÔNG tự trả lời
+ * hội thoại cũ) bot coi lời chào là «page đã trả lời» và không ai trả lời khách. Im lặng với khách tệ hơn nhiều so với
+ * một câu trùng hiếm hoi khi trả lời tự động của Meta tới ngược thứ tự.
  */
-const FIRST_CONTACT_LOOKBACK_MS = 60_000;
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 const GRACE_SLACK_MS = 1_000;
 const RETRY_MS = 2_000;
 /** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
-const PAGE_REPLY = "PAGE_REPLY";
+export const PAGE_REPLY = "PAGE_REPLY";
 const WAITING = "Đang đợi xem page có trả lời không";
 const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
 /** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
@@ -139,6 +142,27 @@ export function fanpageVisitorKey(pageId: string, threadId: string): string {
 
 export type ReceiveResult = { queued: boolean; reason: string };
 
+/**
+ * NGƯỜI KHÁC VỪA LÊN TIẾNG ⇒ bot thôi chờ để nhắc (follow-up · 0185). Đo 02/10/2026 (Hải Sản Làng Chài, «Sang Tran»): nhân
+ * viên vào chốt đơn trên Pancake («Vâng ah», «Nay e giao tiếp ạ», «Miễn ship ạ»), khách thả 👍 — một giờ sau bot vẫn nhắn
+ * «mình còn băn khoăn gì không ạ». Lịch nhắc chỉ đúng khi tin CUỐI của hội thoại là của BOT; tin phía page không phải của bot
+ * (nhân viên — kể cả khi Pancake không gắn uid — hay tự động của Pancake / Meta) hoặc bất kỳ phản hồi nào của khách (nhãn
+ * dán, ảnh) đều chấm dứt nó. Không đụng hội thoại đang CẦN NGƯỜI XỬ LÝ.
+ */
+async function stopFollowups(pageId: string, threadId: string, now: Date, customerReplied: boolean): Promise<void> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  await db
+    .update(c)
+    .set({
+      status: sql`case when ${c.status} = 'WAITING' then 'OPEN' else ${c.status} end`,
+      nextFollowupAt: null,
+      waitingSince: null,
+      ...(customerReplied ? { lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${now}), ${now})` } : {}),
+    })
+    .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, threadId)), or(eq(c.status, "WAITING"), sql`${c.nextFollowupAt} is not null`)));
+}
+
 /** Ghi MỘT sự kiện fanpage của tổ chức ngữ cảnh. Không gọi AI, không gọi Pancake — webhook trả 200 ngay sau đây. */
 export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date()): Promise<ReceiveResult> {
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
@@ -172,6 +196,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .insert(t)
       .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, status: "DONE", processedAt: now, note: PAGE_REPLY })
       .onConflictDoNothing({ target: t.messageId });
+    if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
@@ -184,7 +209,11 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   }
   if (!ev.inbox && !ev.comment) return { queued: false, reason: "Không phải tin nhắn / bình luận" };
   if (ev.comment && !ev.comment.fromId) return { queued: false, reason: "Bình luận thiếu người gửi — không nhắn riêng được" };
-  if (!ev.text) return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
+  if (!ev.text) {
+    // 👍 / ảnh / nhãn dán: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
+    if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, true);
+    return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
+  }
   const rows = await db
     .insert(t)
     .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
@@ -455,7 +484,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
       .limit(1);
     const firstContact = !prior;
-    const repliedSince = firstContact ? new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS) : oldest;
+    const repliedSince = oldest;
     const pageRepliedSince = async () =>
       (await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, repliedSince))).limit(1)).length > 0;
     // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
@@ -568,6 +597,23 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       continue;
     }
+    // Ảnh của câu trả lời mẫu (0183): gửi NGAY SAU chữ của chính câu mẫu đó (02/10/2026: câu upsell kèm ảnh menu đứng TRƯỚC
+    // bản tóm tắt đơn của cùng lượt, không bị đẩy xuống cuối); không khớp được câu nào ⇒ sau toàn bộ phần chữ như cũ. Dấu ảnh
+    // (chữ rỗng) ghi TRƯỚC khi gửi — tiếng vọng ảnh không có chữ.
+    let mediaDone = false;
+    const sendMedia = async () => {
+      mediaDone = true;
+      const media = turn.media?.imageIds ?? [];
+      if (!media.length) return;
+      const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
+      if (up.ids.length) {
+        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch);
+        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+        if (!sentImgs.ok) sendError = sentImgs.error;
+      }
+      if (!sendError && up.errors.length) sendError = up.errors[0];
+    };
     for (const r of replies) {
       // Ghi TRƯỚC khi gửi từng đoạn (đúng cách chia của sendInbox): tiếng vọng có thể tới trước khi lời gọi gửi trả mã tin.
       await db
@@ -587,19 +633,12 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
           .values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: r.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
           .onConflictDoNothing({ target: t.messageId });
       }
-    }
-    // Ảnh của câu trả lời mẫu (0183): gửi SAU phần chữ. Dấu ảnh (chữ rỗng) ghi TRƯỚC khi gửi — tiếng vọng ảnh không có chữ.
-    const media = turn.media?.imageIds ?? [];
-    if (!sendError && media.length) {
-      const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
-      if (up.ids.length) {
-        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch);
-        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
-        if (!sentImgs.ok) sendError = sentImgs.error;
+      if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
+        await sendMedia();
+        if (sendError) break;
       }
-      if (!sendError && up.errors.length) sendError = up.errors[0];
     }
+    if (!sendError && !mediaDone) await sendMedia();
     await finish("DONE", sendError);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     out.processed += ids.length;

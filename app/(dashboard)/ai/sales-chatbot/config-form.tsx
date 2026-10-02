@@ -173,8 +173,8 @@ export function ChatbotConfigForm({ config, fields, connections }: { config: Sal
         </fieldset>
       </div>
       <div className="mt-5 space-y-1.5">
-        <Label htmlFor="cb-extra">Hướng dẫn thêm (tuỳ chọn)</Label>
-        <Textarea id="cb-extra" rows={3} maxLength={1500} value={c.extraInstructions} placeholder="vd «Xưng em, gọi khách là anh/chị. Hàng giao trong nội thành Hà Nội.»" onChange={(e) => set("extraInstructions", e.target.value)} />
+        <Label htmlFor="cb-extra">Hướng dẫn thêm · chính sách shop (tuỳ chọn)</Label>
+        <Textarea id="cb-extra" rows={3} maxLength={1500} value={c.extraInstructions} placeholder="vd «Xưng em, gọi khách là anh/chị. Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán.» — bot trả lời câu hỏi chính sách theo đúng nội dung ở đây thay vì chuyển nhân viên." onChange={(e) => set("extraInstructions", e.target.value)} />
         <p className="text-xs text-muted-foreground">Không ghi giá hay tồn ở đây — bot luôn đọc giá / tồn từ ERP.</p>
       </div>
     </SectionCard>
