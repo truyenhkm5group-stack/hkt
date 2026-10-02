@@ -124,7 +124,7 @@ const EXTRACT_SCHEMA = {
         type: "OBJECT",
         properties: {
           code: { type: "STRING", description: "Mã sản phẩm trong danh mục (ví dụ Q004, X001)" },
-          color: { type: "STRING", description: "Màu đúng như trong danh mục (ví dụ Đỏ, Nâu, Đen)" },
+          color: { type: "STRING", description: "MỘT màu đúng như trong danh mục (ví dụ Đỏ Đô, Nâu, Đen). Khách lấy nhiều màu thì MỖI MÀU LÀ MỘT DÒNG RIÊNG: \"1 đen 1 đỏ\" = hai dòng, mỗi dòng quantity 1 — KHÔNG gộp \"Đen, Đỏ\" vào một dòng" },
           size: { type: "STRING", description: "Size (M, L, XL, 2XL)" },
           quantity: { type: "INTEGER" },
         },
@@ -473,6 +473,16 @@ export class OrderSync {
     return ex;
   }
 
+  /**
+   * Cac mau CUA MA xuat hien trong mot chuoi mau (da norm). Khop ca ten day du ("do do") lan tu dau neu tu dau chi
+   * thuoc DUY NHAT mot mau ("do" -> "do do"; "xanh" khi co ca Xanh Reu lan Xanh Ngoc thi KHONG khop).
+   */
+  colorsInText(text, colors) {
+    const t = ` ${text} `;
+    const dau = (c) => c.split(" ")[0];
+    return colors.filter((c) => t.includes(` ${c} `) || (colors.filter((x) => dau(x) === dau(c)).length === 1 && t.includes(` ${dau(c)} `)));
+  }
+
   /** Map mau/mau sac/size -> bien the POS */
   mapItems(items) {
     const mapped = [];
@@ -487,15 +497,43 @@ export class OrderSync {
       const color = norm(it.color), size = norm(it.size);
       const vColor = (v) => norm(v.fields["Màu"] || v.fields["Color"] || v.fields["Mau"] || "");
       const vSize = (v) => norm(v.fields["Size"] || v.fields["Kích cỡ"] || "");
+      const qty0 = Math.max(1, Number(it.quantity) || 1);
+      // MOT dong ghi NHIEU mau ("Đen, Đỏ" x2 — su co Ha Dang 02/10/2026, Q005 ba mau): loc "includes" cu chon mau
+      // dau tien -> 2 cai Den. Tach thanh tung mau, chia deu so luong; chia khong deu thi KHONG doan, de nguoi duyet.
+      const mauCuaMa = [...new Set(p.variations.map(vColor).filter(Boolean))];
+      const nhieuMau = color ? this.colorsInText(color, mauCuaMa) : [];
+      if (nhieuMau.length >= 2) {
+        if (qty0 % nhieuMau.length) {
+          problems.push(`${p.code}: một dòng ghi ${nhieuMau.length} màu (${it.color}) mà số lượng ${qty0} không chia đều được`);
+          continue;
+        }
+        const tach = nhieuMau.map((c) => ({ ...it, color: c, quantity: qty0 / nhieuMau.length }));
+        const con = this.mapItems(tach);
+        problems.push(...con.problems);
+        for (const m of con.mapped) {
+          const trung = mapped.find((x) => x.variation_id === m.variation_id);
+          if (trung) trung.quantity = Math.max(trung.quantity, m.quantity);
+          else mapped.push(m);
+        }
+        continue;
+      }
       let cands = p.variations;
       if (color) cands = cands.filter((v) => !vColor(v) || vColor(v) === color || vColor(v).includes(color) || color.includes(vColor(v)));
       if (size) cands = cands.filter((v) => !vSize(v) || vSize(v) === size);
+      // Con hon mot mau / mot size khop (khach noi "xanh" ma ma co Xanh Reu + Xanh Ngoc, hoac chua noi mau) -> KHONG
+      // lay bien the dau tien: lay bua la sai hang ma van duoc xac nhan.
+      const mauCon = new Set(cands.map(vColor).filter(Boolean));
+      const sizeCon = new Set(cands.map(vSize).filter(Boolean));
+      if (mauCon.size > 1 || sizeCon.size > 1) {
+        problems.push(`${p.code}: ${mauCon.size > 1 ? `màu "${it.color || "?"}" khớp ${mauCon.size} màu` : `size "${it.size || "?"}" khớp ${sizeCon.size} size`} — cần chọn rõ`);
+        continue;
+      }
       const v = cands[0];
       if (!v) {
         problems.push(`${p.code}: không có biến thể màu "${it.color || "?"}" size "${it.size || "?"}"`);
         continue;
       }
-      const qty = Math.max(1, Number(it.quantity) || 1);
+      const qty = qty0;
       // CUNG MOT bien the xuat hien 2 lan (AI doc ca cau khach chon lan dau lan cau chot lai) -> MOT dong, lay so
       // luong LON NHAT chu khong cong don: cong don la bien 1 cai thanh 2 cai khi khach chi nhac lai.
       const trung = mapped.find((m) => m.variation_id === v.id);

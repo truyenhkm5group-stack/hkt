@@ -622,7 +622,7 @@ export class Bot {
     else if (!f.phone && !f.address) tiep = "xin số điện thoại và địa chỉ nhận hàng";
     else if (!f.phone) tiep = "xin số điện thoại";
     else if (!f.address) tiep = "xin địa chỉ nhận hàng";
-    else tiep = "đủ thông tin rồi: tóm tắt lại đơn (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận";
+    else tiep = "đủ thông tin rồi: tóm tắt lại đơn (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận. Khách lấy NHIỀU MÀU thì MỖI MÀU MỘT DÒNG kèm số lượng và size, dùng đúng tên màu trong danh mục (vd \"• 1 Đen XL\" và \"• 1 Đỏ Đô XL\"), KHÔNG gộp \"màu Đen, Đỏ x 2\"";
     return `
 
 ## ĐƠN ĐANG CHỐT VỚI KHÁCH NÀY (hệ thống tự đọc từ tin của khách)
