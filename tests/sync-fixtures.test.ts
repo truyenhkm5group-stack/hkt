@@ -239,6 +239,7 @@ import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
 import { testTelegramRelay } from "./telegram-relay.test";
 import { testGeminiProvider } from "./gemini-provider.test";
+import { testChatCostReport } from "./chat-cost-report.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
@@ -2052,6 +2053,8 @@ async function main() {
   await testTelegramRelay();
   // Gemini cho chatbot bán hàng (01/10/2026): provider REST + kết nối gemini-byok + giá — không gọi mạng thật.
   await testGeminiProvider();
+  // Chi phí AI của chatbot theo ngày (02/10/2026): tiền / đơn chốt / SĐT theo ngày VN, chưa định giá ≠ 0.
+  testChatCostReport();
   testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);

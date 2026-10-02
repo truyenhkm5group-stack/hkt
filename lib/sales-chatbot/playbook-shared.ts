@@ -13,7 +13,7 @@ export const PLAYBOOK_RUN_SETTING_KEY = "ai.salesChatbot.playbookRun";
 
 /** Trần kỹ thuật (không phải ngưỡng nghiệp vụ): chặn một lượt đọc quá lâu / quá tốn và một sổ tay quá dài cho lời nhắc. */
 export const PLAYBOOK_LIMITS = {
-  conversationChoices: [50, 100, 200] as const,
+  conversationChoices: [50, 100, 200, 500] as const,
   dayChoices: [30, 90, 180] as const,
   messageChars: 400,
   conversationChars: 3000,
@@ -25,7 +25,8 @@ export const PLAYBOOK_LIMITS = {
 
 export type PlaybookVersion = { version: number; text: string; publishedAt: string; publishedBy: string | null };
 /** `quickReplies` = số câu trả lời mẫu AI gợi ý ở lượt này (0183; lượt cũ không có trường này). */
-export type PlaybookStats = { conversations: number; messages: number; aiCalls: number; costUsd: number | null; pricesRemoved: number; quickReplies?: number };
+/** `closed` = hội thoại khách đã để lại SĐT; `skipped` = hội thoại Pancake không trả được sau khi thử lại (02/10/2026; lượt cũ không có). */
+export type PlaybookStats = { conversations: number; messages: number; aiCalls: number; costUsd: number | null; pricesRemoved: number; quickReplies?: number; closed?: number; skipped?: number };
 export type PlaybookState = {
   draft: { text: string; createdAt: string; createdBy: string | null; stats: PlaybookStats | null } | null;
   published: PlaybookVersion | null;
@@ -76,8 +77,25 @@ export function redactForLearning(text: string, names: readonly string[] = []): 
   return t.replace(/\s+/g, " ").trim().slice(0, PLAYBOOK_LIMITS.messageChars);
 }
 
-/** Một hội thoại ⇒ bản chép «Khách: … / Shop: …» đã làm sạch, hoặc `null` khi không đáng học (thiếu một trong hai bên). */
-export function transcriptFor(messages: readonly { fromShop: boolean; text: string }[], names: readonly string[]): string | null {
+/** SĐT Việt Nam trong tin GỐC (trước khi che số) — dấu hiệu khách đã chịu để lại thông tin, tức hội thoại đi tới chốt. */
+const PHONE_IN_TEXT = /(?:\+?84|0)(?:[\s.-]?\d){9}(?!\d)/;
+
+/**
+ * Khách đã để lại SĐT trong hội thoại chưa (đọc trên tin GỐC, chỉ tin của KHÁCH). HÀM THUẦN. Đây là nhãn KẾT QUẢ để AI so
+ * sánh cách shop nói ở hội thoại chốt được với hội thoại khách bỏ đi (02/10/2026: chủ shop muốn bot học «khôn hơn»).
+ */
+export function customerLeftPhone(messages: readonly { fromShop: boolean; text: string }[]): boolean {
+  return messages.some((m) => !m.fromShop && PHONE_IN_TEXT.test(stripHtml(String(m.text ?? ""))));
+}
+
+export const CLOSED_TAG = "[KẾT QUẢ: khách ĐÃ để lại SĐT — chốt được]";
+export const OPEN_TAG = "[KẾT QUẢ: khách CHƯA để lại SĐT]";
+
+/**
+ * Một hội thoại ⇒ bản chép «Khách: … / Shop: …» đã làm sạch, hoặc `null` khi không đáng học (thiếu một trong hai bên).
+ * `closed` có giá trị ⇒ dòng đầu là nhãn kết quả (khách ĐÃ / CHƯA để lại SĐT).
+ */
+export function transcriptFor(messages: readonly { fromShop: boolean; text: string }[], names: readonly string[], opts: { closed?: boolean } = {}): string | null {
   const lines: string[] = [];
   let shop = 0;
   let customer = 0;
@@ -89,6 +107,7 @@ export function transcriptFor(messages: readonly { fromShop: boolean; text: stri
     lines.push(`${m.fromShop ? "Shop" : "Khách"}: ${t}`);
   }
   if (!shop || !customer || lines.length < 3) return null;
+  if (opts.closed !== undefined) lines.unshift(opts.closed ? CLOSED_TAG : OPEN_TAG);
   return lines.join("\n").slice(0, PLAYBOOK_LIMITS.conversationChars);
 }
 

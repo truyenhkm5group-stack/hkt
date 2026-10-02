@@ -21,6 +21,9 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import {
   batchTranscripts,
+  CLOSED_TAG,
+  customerLeftPhone,
+  OPEN_TAG,
   parsePlaybookRun,
   parsePlaybookState,
   PLAYBOOK_LIMITS,
@@ -40,6 +43,8 @@ import { setSettingJson } from "@/lib/settings";
 const FANPAGE = "pancake-fanpage";
 /** Ngân sách token đầu ra của một lượt AI khi học (gồm cả phần suy luận của model có suy luận). */
 export const PLAYBOOK_AI_TOKENS = 12_000;
+/** Hỏng liền chừng này hội thoại ⇒ lỗi hệ thống (token / mạng), không phải một hội thoại lẻ ⇒ dừng lượt học. */
+export const PLAYBOOK_MAX_CONSECUTIVE_SKIPS = 5;
 
 export async function loadPlaybook(): Promise<PlaybookState> {
   return parsePlaybookState(await readJsonSetting(PLAYBOOK_SETTING_KEY));
@@ -88,11 +93,34 @@ export async function startPlaybookLearning(user: SessionUser, raw: { conversati
   return { ok: true, target, days };
 }
 
-async function pancakeJson(fetchImpl: typeof fetch, url: string, token: string): Promise<Record<string, unknown>> {
-  const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(30_000) });
-  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!res.ok || !body || body.success === false) throw new Error(scrubSecrets(`Pancake từ chối: ${String(body?.message ?? `HTTP ${res.status}`)}`, [token]));
-  return body;
+/** Lỗi Pancake đáng thử lại: mạng / hết giờ chờ, 429, 5xx. Lỗi khác (token sai, 4xx) thử lại cũng vô ích. */
+class PancakeTransient extends Error {}
+
+/** Lịch chờ giữa các lần thử lại một lời gọi Pancake (ms). */
+export const PANCAKE_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+
+/**
+ * GET Pancake có THỬ LẠI (02/10/2026: một lời gọi hết 30 giây chờ trong ~150 lời gọi liên tiếp làm HỎNG CẢ lượt học, dù
+ * Pancake vẫn chạy). Hết giờ chờ / mạng / 429 / 5xx ⇒ chờ 2 giây, 5 giây rồi thử lại; vẫn hỏng ⇒ ném.
+ */
+async function pancakeJson(fetchImpl: typeof fetch, url: string, token: string, sleep: (ms: number) => Promise<void>): Promise<Record<string, unknown>> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      let res: Response;
+      try {
+        res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(30_000) });
+      } catch (e) {
+        throw new PancakeTransient(isNetworkFailure(e) ? describeNetworkFailure(e, "pages.fm") : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (res.status === 429 || res.status >= 500) throw new PancakeTransient(scrubSecrets(`Pancake bận (HTTP ${res.status})`, [token]));
+      if (!res.ok || !body || body.success === false) throw new Error(scrubSecrets(`Pancake từ chối: ${String(body?.message ?? `HTTP ${res.status}`)}`, [token]));
+      return body;
+    } catch (e) {
+      if (!(e instanceof PancakeTransient) || attempt >= PANCAKE_RETRY_DELAYS_MS.length) throw e;
+      await sleep(PANCAKE_RETRY_DELAYS_MS[attempt]);
+    }
+  }
 }
 
 type PancakeMsg = { id?: unknown; from?: { id?: unknown; name?: unknown; uid?: unknown; admin_id?: unknown }; message?: unknown; original_message?: unknown; inserted_at?: unknown };
@@ -101,18 +129,25 @@ type PancakeConv = { id?: unknown; updated_at?: unknown; from?: { name?: unknown
 const EXTRACT_SYSTEM = (shop: string) =>
   [
     `Bạn phân tích hội thoại bán hàng THẬT trên fanpage của shop «${shop}». Mọi con số đã bị che thành [số], tên khách thành [khách].`,
+    `Dòng đầu mỗi hội thoại là KẾT QUẢ: «${CLOSED_TAG}» hoặc «${OPEN_TAG}». Học từ KẾT QUẢ, không chỉ từ lời lẽ:`,
+    "so sánh shop đã nói / hỏi / gửi gì ở hội thoại CHỐT ĐƯỢC mà không có ở hội thoại khách bỏ đi, và khách bỏ đi ngay sau câu nào.",
     "Viết tiếng Việt, gạch đầu dòng, tối đa 2500 ký tự, rút ra:",
-    "1) giọng điệu và cách xưng hô của shop; 2) câu khách hay hỏi + cách shop trả lời TỐT (trích câu mẫu ngắn);",
-    "3) cách xử lý khi khách chê giá / phân vân / so sánh; 4) cách dẫn tới chốt đơn; 5) câu trả lời KÉM cần tránh.",
+    "1) giọng điệu và cách xưng hô của shop; 2) câu khách hay hỏi + cách shop trả lời TỐT — ưu tiên câu ở hội thoại chốt được (trích câu mẫu ngắn);",
+    "3) cách xử lý khi khách chê giá / phân vân / so sánh; 4) cách dẫn tới chốt đơn (xin SĐT / địa chỉ lúc nào, bằng câu nào);",
+    "5) câu trả lời KÉM cần tránh — câu khiến khách im lặng / bỏ đi; 6) câu hỏi khách hỏi mà shop trả lời chậm hoặc không trả lời.",
     "TUYỆT ĐỐI không nêu giá, số tiền, mức giảm, khuyến mãi cụ thể, thời gian giao cụ thể hay thông tin của khách nào.",
   ].join("\n");
 
-const MERGE_SYSTEM = (shop: string) =>
+const MERGE_SYSTEM = (shop: string, hasCurrent: boolean) =>
   [
     `Gộp các ghi chú phân tích dưới đây thành «SỔ TAY BÁN HÀNG» cho trợ lý chat của shop «${shop}». Tiếng Việt, tối đa 5000 ký tự,`,
     "đúng năm mục: 1. Giọng điệu & xưng hô · 2. Câu hỏi thường gặp & cách trả lời mẫu · 3. Khi khách chê giá / phân vân ·",
     "4. Dẫn tới chốt đơn · 5. Không bao giờ nói. Câu mẫu ngắn, dùng được ngay. TUYỆT ĐỐI không nêu giá, số tiền, khuyến mãi,",
     "thời gian giao cụ thể — trợ lý luôn lấy giá và tồn từ hệ thống lúc chat. Không nhắc tên khách.",
+    "Ưu tiên điều đã được chứng minh ở hội thoại CHỐT ĐƯỢC; điều chỉ thấy ở hội thoại khách bỏ đi thì đưa vào mục 5.",
+    ...(hasCurrent
+      ? ["Có «SỔ TAY ĐANG DÙNG» ở cuối: GIỮ điều còn đúng, SỬA điều ghi chú mới cho thấy là sai, THÊM điều mới — không viết lại từ đầu, không bỏ mất câu mẫu tốt đang có."]
+      : []),
   ].join("\n");
 
 const QUICK_REPLY_SYSTEM = (shop: string) =>
@@ -138,8 +173,10 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const fetchImpl = deps.fetch ?? fetch;
   const startedAt = now().toISOString();
-  const stats: PlaybookStats = { conversations: 0, messages: 0, aiCalls: 0, costUsd: 0, pricesRemoved: 0 };
+  const stats: PlaybookStats = { conversations: 0, messages: 0, aiCalls: 0, costUsd: 0, pricesRemoved: 0, closed: 0, skipped: 0 };
   let token = "";
+  // Câu lỗi mạng phải nêu ĐÚNG máy đang gọi: lượt hỏng lúc AI đang đọc không phải lỗi Pancake.
+  let phase: "PANCAKE" | "AI" = "PANCAKE";
   const progress = (fetched: number, note: string) =>
     setSettingJson(PLAYBOOK_RUN_SETTING_KEY, { state: "RUNNING", startedAt, startedBy: actor.email, target: opts.target, days: opts.days, fetched, note } satisfies PlaybookRun);
   try {
@@ -154,7 +191,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     const convs: PancakeConv[] = [];
     let last = "";
     for (let page = 0; page < 20 && convs.length < opts.target * 2; page++) {
-      const body = await pancakeJson(fetchImpl, `${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?${q}&type=INBOX&order_by=updated_at${last ? `&last_conversation_id=${encodeURIComponent(last)}` : ""}`, token);
+      const body = await pancakeJson(fetchImpl, `${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?${q}&type=INBOX&order_by=updated_at${last ? `&last_conversation_id=${encodeURIComponent(last)}` : ""}`, token, sleep);
       const list = (Array.isArray(body.conversations) ? body.conversations : []) as PancakeConv[];
       if (!list.length) break;
       let tooOld = false;
@@ -171,15 +208,29 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
       await sleep(250);
     }
 
-    // 2. Tin của từng hội thoại ⇒ bản chép đã làm sạch (giữ hội thoại có CẢ khách lẫn shop).
+    // 2. Tin của từng hội thoại ⇒ bản chép đã làm sạch (giữ hội thoại có CẢ khách lẫn shop). Một hội thoại Pancake không trả
+    //    được sau khi thử lại ⇒ BỎ QUA hội thoại đó, đếm vào `skipped`, học tiếp; hỏng liền `PLAYBOOK_MAX_CONSECUTIVE_SKIPS`
+    //    hội thoại ⇒ lỗi hệ thống (token, mạng) ⇒ dừng với câu lỗi thật.
     const transcripts: string[] = [];
     let fetched = 0;
+    let consecutiveSkips = 0;
+    let lastSkipError: unknown = null;
     for (const c of convs) {
       if (transcripts.length >= opts.target) break;
       const id = String(c.id ?? "");
       if (!id) continue;
       await sleep(250);
-      const body = await pancakeJson(fetchImpl, `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(id)}/messages?${q}`, token);
+      let body: Record<string, unknown>;
+      try {
+        body = await pancakeJson(fetchImpl, `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(id)}/messages?${q}`, token, sleep);
+        consecutiveSkips = 0;
+      } catch (e) {
+        stats.skipped = (stats.skipped ?? 0) + 1;
+        consecutiveSkips += 1;
+        lastSkipError = e;
+        if (consecutiveSkips >= PLAYBOOK_MAX_CONSECUTIVE_SKIPS) throw e;
+        continue;
+      }
       fetched += 1;
       const msgs = ((Array.isArray(body.messages) ? body.messages : []) as PancakeMsg[])
         .slice()
@@ -190,22 +241,27 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
         if (!fromShop && m.from?.name) names.push(String(m.from.name));
         return { fromShop, text: String(m.original_message ?? m.message ?? "") };
       });
-      const tr = transcriptFor(lines, names);
+      const closed = customerLeftPhone(lines);
+      const tr = transcriptFor(lines, names, { closed });
       if (tr) {
         transcripts.push(tr);
         stats.messages += lines.length;
+        if (closed) stats.closed = (stats.closed ?? 0) + 1;
       }
       if (fetched % 10 === 0) await progress(fetched, `Đã đọc ${fetched} hội thoại — ${transcripts.length} đủ để học`);
     }
+    // Không đọc được hội thoại NÀO ⇒ lỗi thật là lỗi Pancake, không phải «chưa đủ hội thoại để học».
+    if (fetched === 0 && lastSkipError) throw lastSkipError;
     stats.conversations = transcripts.length;
     if (transcripts.length < 3) throw new Error(`Chỉ có ${transcripts.length} hội thoại có cả khách lẫn shop trả lời trong ${opts.days} ngày — chưa đủ để học (cần ≥ 3).`);
 
     // 3. AI của shop đọc từng lô ⇒ ghi chú; gộp ⇒ sổ tay.
+    phase = "AI";
     const org = await currentOrganization();
     const shop = (await findOrganization(org.code))?.name ?? org.code;
     const prov = await salesChatProvider();
     if (!prov.ok) throw new Error(prov.error);
-    const ask = async (system: string, text: string): Promise<string> => {
+    const ask = async (system: string, text: string, reasoning: "low" | "medium" = "low"): Promise<string> => {
       const quota = await checkAiQuota(org.code, "BYOK");
       if (!quota.ok) throw new Error(quota.error);
       let status: "OK" | "ERROR" = "OK";
@@ -215,7 +271,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
         let out = "";
         let stop = "";
         for (const budget of [PLAYBOOK_AI_TOKENS, PLAYBOOK_AI_TOKENS * 2]) {
-          const res = await prov.provider.complete({ system, messages: [{ role: "user", content: [{ type: "text", text }] }], tools: [], maxTokens: budget, reasoning: "low" });
+          const res = await prov.provider.complete({ system, messages: [{ role: "user", content: [{ type: "text", text }] }], tools: [], maxTokens: budget, reasoning });
           const cost = estimateCostUsd(res.model || prov.provider.model, res.usage);
           stats.aiCalls += 1;
           stats.costUsd = stats.costUsd === null || cost === null ? null : stats.costUsd + cost;
@@ -240,7 +296,11 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     }
     await progress(fetched, "AI đang soạn sổ tay");
     // LUÔN soạn qua bước gộp — kể cả một lô — để sổ tay luôn đủ năm mục, không phải ghi chú thô.
-    const merged = await ask(MERGE_SYSTEM(shop), notes.map((n, i) => `### Ghi chú ${i + 1}\n${n}`).join("\n\n"));
+    // Bước gộp suy luận «medium» (một lời gọi, quyết định chất lượng cả sổ tay) và HỌC TIẾP trên sổ tay đang dùng thay vì
+    // viết lại từ đầu — câu mẫu tốt của lượt trước không mất đi chỉ vì lượt này đọc tập hội thoại khác.
+    const current = (await loadPlaybook()).published?.text?.trim() ?? "";
+    const mergeInput = `${notes.map((n, i) => `### Ghi chú ${i + 1}\n${n}`).join("\n\n")}${current ? `\n\n### SỔ TAY ĐANG DÙNG\n${current}` : ""}`;
+    const merged = await ask(MERGE_SYSTEM(shop, Boolean(current)), mergeInput, "medium");
     const clean = stripPrices(merged);
     stats.pricesRemoved = clean.removed;
     if (!clean.text.trim()) throw new Error("Sổ tay AI soạn ra rỗng sau khi lọc giá — không lưu bản nháp trống; chạy lại.");
@@ -257,7 +317,15 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     await setSettingJson(PLAYBOOK_RUN_SETTING_KEY, done);
     return done;
   } catch (e) {
-    const raw = isNetworkFailure(e) ? `Không gọi được Pancake / AI: ${describeNetworkFailure(e, "pages.fm")}` : e instanceof Error ? e.message : String(e);
+    const raw = isNetworkFailure(e)
+      ? phase === "PANCAKE"
+        ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}`
+        : `Không gọi được AI: ${describeNetworkFailure(e, "nhà cung cấp AI")}`
+      : e instanceof PancakeTransient
+        ? `Không gọi được Pancake sau ${PANCAKE_RETRY_DELAYS_MS.length + 1} lần thử: ${e.message}`
+        : e instanceof Error
+          ? e.message
+          : String(e);
     const failed: PlaybookRun = { state: "FAILED", startedAt, finishedAt: now().toISOString(), error: scrubSecrets(raw, [token]).slice(0, 300) };
     await setSettingJson(PLAYBOOK_RUN_SETTING_KEY, failed).catch(() => undefined);
     return failed;

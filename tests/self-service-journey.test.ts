@@ -59,8 +59,9 @@ import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
-import { redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
+import { CLOSED_TAG, customerLeftPhone, OPEN_TAG, redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
 import { runWorkflows } from "@/lib/workflow/engine";
 
@@ -490,6 +491,12 @@ async function testJourney() {
       assert.ok(d[4].body.includes("Nguyễn Thị Lan") && d[4].body.includes("0912345678") && d[4].body.includes("Nguồn: Chatbot web"), d[4].body);
       const ev = await db.query.domainEvents.findFirst({ where: and(eq(schema.domainEvents.name, "order.confirmed"), eq(schema.domainEvents.subjectId, order.id)) });
       assert.equal(ev?.actorKind, "AGENT");
+      // Chi phí AI theo ngày (02/10/2026): đơn web vừa chốt + SĐT khách là kết quả HÔM NAY; tiền khung thử in riêng, không chia
+      // vào đơn; đọc sổ AI ở CSDL nhà theo đúng mã tổ chức.
+      const costToday = (await loadChatCostReport(ORG)).days[0];
+      assert.ok(costToday.orders === 1 && costToday.phones === 1 && costToday.turns > 0 && costToday.costVnd !== null && costToday.costPerOrder === costToday.costVnd, JSON.stringify(costToday));
+      assert.ok(costToday.testCostVnd !== null, `khung thử in riêng: ${JSON.stringify(costToday)}`);
+      assert.equal((await loadChatCostReport("to-chuc-khac")).days[0].turns, 0, "tổ chức khác không thấy sổ AI của ORG");
 
       // Hội thoại khoá theo khách truy cập.
       const stranger = await chatTurn(w.id, "xin chào", { channel: "WEB", visitorKey: visitorKeyOf("nguoi-khac-xxxxxxxxxxxxxxxx") });
@@ -1064,6 +1071,12 @@ async function testJourney() {
       assert.equal(redactForLearning("Chị Lan ơi SĐT 0912345678, giá 400.000đ, xem https://shop.vn/a", ["Chị Lan"]), "[khách] ơi SĐT [số], giá [số]đ, xem [link]");
       assert.deepEqual(stripPrices("Giá 299k, combo 1.150.000đ, ship 30 nghìn, size 2"), { text: "Giá [giá lấy từ ERP], combo [giá lấy từ ERP], ship [giá lấy từ ERP], size 2", removed: 3 });
       assert.equal(transcriptFor([{ fromShop: false, text: "a" }, { fromShop: false, text: "b" }, { fromShop: false, text: "c" }], []), null, "không có câu nào của shop ⇒ không học");
+      // Nhãn KẾT QUẢ (02/10/2026 — học từ hội thoại chốt được): khách để lại SĐT ⇒ chốt được; SĐT của SHOP không tính.
+      const conv3 = (cust: string, shop = "Dạ chị") => [{ fromShop: false, text: "Chả cá còn không" }, { fromShop: true, text: shop }, { fromShop: false, text: cust }];
+      assert.ok(customerLeftPhone(conv3("SĐT chị 0912 345 678 nhé")) && customerLeftPhone(conv3("+84912345678")) && customerLeftPhone(conv3("0912.345.678")));
+      assert.ok(!customerLeftPhone(conv3("lấy 2 hộp", "Hotline shop 0912345678")) && !customerLeftPhone(conv3("12 Hàng Bạc")), "SĐT của shop / số nhà ⇒ chưa chốt");
+      assert.ok(transcriptFor(conv3("ok"), [], { closed: true })?.startsWith(CLOSED_TAG) && transcriptFor(conv3("ok"), [], { closed: false })?.startsWith(OPEN_TAG));
+      assert.ok(!/\d/.test(CLOSED_TAG + OPEN_TAG), "nhãn không mang chữ số (AI không thấy một chữ số nào)");
       const aiInputs: string[] = [];
       const pbProvider: AiProvider = {
         name: "fake", model: "claude-sonnet-5", schemaDialect: "anthropic",
@@ -1099,6 +1112,8 @@ async function testJourney() {
       });
       const done = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
       assert.equal(done.state, "DONE", JSON.stringify(done));
+      assert.ok(done.state === "DONE" && done.stats.closed === 4 && done.stats.skipped === 0, `4 hội thoại khách để lại SĐT: ${JSON.stringify(done)}`);
+      assert.ok(aiInputs.some((x) => x.includes(CLOSED_TAG)), "AI thấy nhãn kết quả của từng hội thoại");
       // Cùng lượt học: AI gợi ý CÂU TRẢ LỜI MẪU (0183) — luôn TẮT, giá bị thay ⇒ phải sửa mới bật được.
       assert.equal(done.state === "DONE" ? done.stats.quickReplies : -1, 2, JSON.stringify(done));
       const sug = (await listQuickReplies()).filter((r) => r.source === "LEARNED");
@@ -1116,15 +1131,33 @@ async function testJourney() {
       assert.equal(pb.published, null, "học xong chỉ là NHÁP — bot chưa dùng");
       const pbUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.feature, "sales_playbook")));
       assert.equal(pbUsage.length, aiInputs.length, "mỗi lời gọi AI một dòng sổ dùng AI");
+      // Pancake CHẬM (02/10/2026: một lời gọi hết 30 giây chờ làm hỏng cả lượt học): lỗi nhất thời ⇒ thử lại sau 2 · 5 giây;
+      // một hội thoại hỏng mãi ⇒ BỎ QUA, học tiếp; hỏng liền 5 hội thoại ⇒ dừng với câu lỗi nói đúng là Pancake.
+      const timeoutErr = () => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("timeout"), { code: "UND_ERR_CONNECT_TIMEOUT" }) });
+      let h2Fails = 1;
+      const pbSleeps: number[] = [];
+      const flakyHistory = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const u = String(input);
+        if (u.includes("/conversations/h2/messages") && h2Fails-- > 0) throw timeoutErr();
+        if (u.includes("/conversations/h3/messages")) return new Response(JSON.stringify({ success: false, message: "busy" }), { status: 503 });
+        return history.fetch(input, init);
+      }) as typeof fetch;
+      const flakyRun = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: flakyHistory, sleep: async (ms) => void pbSleeps.push(ms) });
+      assert.ok(flakyRun.state === "DONE" && flakyRun.stats.skipped === 1 && flakyRun.stats.conversations === 3, JSON.stringify(flakyRun));
+      assert.ok(pbSleeps.includes(2_000) && pbSleeps.includes(5_000), `thử lại sau 2 giây rồi 5 giây: ${pbSleeps.filter((x) => x > 250).join(",")}`);
+      const deadRun = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: (async (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes("/messages") ? Promise.reject(timeoutErr()) : history.fetch(input, init))) as typeof fetch, sleep: async () => undefined });
+      assert.ok(deadRun.state === "FAILED" && /Không gọi được Pancake sau 3 lần thử/.test(deadRun.error) && !deadRun.error.includes(PAGE_TOKEN), JSON.stringify(deadRun));
       // AI trả RỖNG (model suy luận tiêu hết ngân sách — đo 01/10/2026) ⇒ thử lại một lần với ngân sách gấp đôi; rỗng mãi ⇒
       // lượt học HỎNG có câu nói rõ, bản nháp cũ GIỮ NGUYÊN (không bị ghi đè bằng chuỗi rỗng).
       const draftBefore = (await loadPlaybook()).draft?.text;
       const budgets: (number | undefined)[] = [];
       let emptyFirst = true;
-      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { budgets.push(req.maxTokens); assert.equal(req.reasoning, "low", "học dùng suy luận low"); const text = emptyFirst ? "" : "1. Giọng điệu: dạ ạ."; emptyFirst = !emptyFirst; return { content: text ? [{ type: "text", text }] : [], stopReason: text ? "end_turn" : "max_tokens", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
+      const reasonings: string[] = [];
+      setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async (req: AiRequest) => { budgets.push(req.maxTokens); reasonings.push(`${/Gộp các ghi chú/.test(req.system) ? "gộp" : "đọc"}:${req.reasoning}`); const text = emptyFirst ? "" : "1. Giọng điệu: dạ ạ."; emptyFirst = !emptyFirst; return { content: text ? [{ type: "text", text }] : [], stopReason: text ? "end_turn" : "max_tokens", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }; } }));
       const retried = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
       assert.equal(retried.state, "DONE", JSON.stringify(retried));
       assert.ok(budgets.every((b) => (b ?? 0) >= 12_000) && budgets.includes(24_000), `rỗng ⇒ thử lại với ngân sách gấp đôi: ${budgets.join(",")}`);
+      assert.ok(reasonings.includes("gộp:medium") && reasonings.filter((x) => x.startsWith("đọc")).every((x) => x === "đọc:low"), `đọc lô: low · gộp sổ tay: medium — ${reasonings.join(",")}`);
       setSalesChatProviderForTests(() => ({ ...pbProvider, complete: async () => ({ content: [], stopReason: "max_tokens", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 }) }));
       const keptDraft = (await loadPlaybook()).draft?.text;
       const empty = await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined });
@@ -1153,6 +1186,12 @@ async function testJourney() {
       await savePlaybookDraft(admin, "Bản hai: luôn hỏi khách cần bảo quản lạnh không.");
       await publishPlaybook(admin);
       assert.equal((await loadPlaybook()).published?.version, 2);
+      // Học lại khi đã có sổ tay đang dùng ⇒ bước gộp nhận sổ tay đó để HỌC TIẾP (giữ câu mẫu tốt), không viết lại từ đầu.
+      setSalesChatProviderForTests(() => pbProvider);
+      aiInputs.length = 0;
+      assert.equal((await runPlaybookLearning({ target: 50, days: 90 }, { id: null, email: ADMIN_EMAIL }, { fetch: history.fetch, sleep: async () => undefined })).state, "DONE");
+      assert.ok(aiInputs.some((x) => x.includes("SỔ TAY ĐANG DÙNG") && x.includes("Bản hai: luôn hỏi khách cần bảo quản lạnh")), "bước gộp thấy sổ tay đang dùng");
+      assert.equal((await loadPlaybook()).published?.version, 2, "học lại chỉ tạo NHÁP — sổ tay đang dùng giữ nguyên");
       assert.ok("ok" in (await rollbackPlaybook(admin, 1)));
       assert.equal((await loadPlaybook()).published?.version, 1, "quay lại bản 1");
       assert.ok("ok" in (await unpublishPlaybook(admin)));
