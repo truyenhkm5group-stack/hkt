@@ -1198,6 +1198,7 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   const geoGoc = { provinces: os33.provinces, districts: os33.districts, communes: os33.communes };
   delete os33.provinces; delete os33.districts; delete os33.communes;
   os33.geo = { provinces: null, districts: new Map(), communes: new Map() };
+  os33._geoIndex = []; // khong suy ra tu danh muc ca nuoc trong bai nay (xem bai 42)
   const prevProducts33 = catalog.products;
   catalog.setProducts([{ id: "p33", code: "Q004", name: "Đầm Q004", note: "", attributes: { "Màu": ["Nâu"], Size: ["M"] }, price: { min: 499000, max: 499000 }, images: [], variations: [{ id: "v33", sku: "Q004NAUM", fields: { "Màu": "Nâu", Size: "M" }, price: 499000, stock: 5, available: true, images: [] }] }]);
   let diaChiAI = {}, diaChiKhach = "";
@@ -1708,6 +1709,61 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.keepFreeShipPromise(chot, "PAGE1", [khach("Màu đỏ đô")]), chot, "chua hua mien phi -> giu nguyen");
   assert.match(bot.orderProgressPrompt("PAGE1", [...hoiThoai, khach("sđt 0765114016")]), /ĐÃ hứa MIỄN PHÍ vận chuyển/);
   console.log("OK 41: ban chot don voi dia chi chua du tinh/huyen/xa -> hoi lai dung cap; da hua mien phi ship thi tong khong cong ship");
+}
+
+// ---- 42: SUY RA dia chi co can cu (chu shop 02/10/2026: "cai them suy luan ra dia chi chinh xac neu co can cu chinh xac")
+{
+  const { orderSync: os42 } = await import("../src/orders.js");
+  const goc = { idx: os42._geoIndex, resolve: os42._resolveAddress, call: os42._call, provinces: os42.provinces, districts: os42.districts, communes: os42.communes };
+  const E = (c, cn, d, dn, p, pn) => ({ c, cn, d, dn, p, pn });
+  os42._geoIndex = [
+    E("c1", "Phường Long Phước", "d1", "Thành phố Thủ Đức", "p1", "Hồ Chí Minh"),
+    E("c2", "Xã Long Phước", "d2", "Huyện Long Thành", "p2", "Đồng Nai"),
+    E("c3", "Xã Long Phước", "d3", "Huyện Long Hồ", "p3", "Vĩnh Long"),
+    E("c4", "Xã Sài Sơn", "d4", "Huyện Quốc Oai", "p4", "Hà Nội"),
+  ];
+  const byId = (list) => list.map(([id, name]) => ({ id, name }));
+  os42.provinces = async () => byId([["p1", "Hồ Chí Minh"], ["p2", "Đồng Nai"], ["p3", "Vĩnh Long"], ["p4", "Hà Nội"]]);
+  os42.districts = async (p) => byId([[{ p1: "d1", p2: "d2", p3: "d3", p4: "d4" }[p], os42._geoIndex.find((e) => e.p === p).dn]]);
+  os42.communes = async (d) => byId([[os42._geoIndex.find((e) => e.d === d).c, os42._geoIndex.find((e) => e.d === d).cn]]);
+  os42._resolveAddress = async (raw) => ({ ok: false, street: raw, fullAddress: raw, note: "Không xác định được tỉnh", confidence: "thấp", parsed: { street: "Số nhà 99 /40 Đường 8" } });
+  // (1) Thu Thuy: "phuong long phước" -> chi MOT "Phường Long Phước" ca nuoc -> Thu Duc, HCM
+  let a = await os42.resolveAddress("Số nhà 99 /40 Đường 8 phuong long phước", { phone: "0765114016" });
+  assert.equal(a.commune?.id, "c1", JSON.stringify(a));
+  assert.equal(a.province?.name, "Hồ Chí Minh");
+  assert.match(a.confidence, /^cao/);
+  assert.match(a.autoFixed, /duy nhất cả nước/);
+  assert.deepEqual(os42.addressGate(a), [], "suy ra co can cu -> qua cong chat");
+  // (2) "xã long phước" -> 2 noi -> KHONG doan, neu ro de hoi khach
+  os42._call = async () => ({ data: [] });
+  a = await os42.resolveAddress("ấp 3 xã long phước", { phone: "0900000001" });
+  assert.equal(a.commune, undefined);
+  assert.match(a.ambiguous, /có ở 2 nơi \(Huyện Long Thành, Đồng Nai; Huyện Long Hồ, Vĩnh Long\)/);
+  // (3) ...nhung don cu cua chinh SDT do giao toi Long Thanh -> lay Long Thanh
+  os42._call = async () => ({ data: [{ id: 9, status: 4, bill_phone_number: "0900000001", shipping_address: { commune_id: "c2" } }] });
+  a = await os42.resolveAddress("ấp 3 xã long phước", { phone: "0900000001" });
+  assert.equal(a.commune?.id, "c2");
+  assert.match(a.autoFixed, /đơn cũ của khách/);
+  // (4) khach co ghi ten huyen -> lay dung noi do
+  os42._call = async () => ({ data: [] });
+  a = await os42.resolveAddress("ấp 3 xã long phước long hồ", { phone: "" });
+  assert.equal(a.commune?.id, "c3");
+  // (5) Da xac dinh duoc tinh tu loi khach -> khong bao gio nhay sang tinh khac
+  os42._resolveAddress = async (raw) => ({ ok: false, province: { id: "p2", name: "Đồng Nai" }, street: raw, fullAddress: raw, parsed: {} });
+  a = await os42.resolveAddress("phường long phước đồng nai", {});
+  assert.notEqual(a.commune?.id, "c1", "khong nhay sang HCM khi khach ghi Dong Nai");
+  // (6) Danh muc chua dung xong -> khong suy ra (khong doan)
+  os42._geoIndex = null;
+  os42._geoBuilding = Promise.resolve();
+  os42._resolveAddress = async (raw) => ({ ok: false, street: raw, fullAddress: raw, parsed: {} });
+  const fsMod = await import("node:fs");
+  const docGoc = fsMod.default.readFileSync;
+  fsMod.default.readFileSync = () => { throw new Error("khong co tep"); };
+  a = await os42.resolveAddress("phuong long phước", {});
+  fsMod.default.readFileSync = docGoc;
+  assert.equal(a.commune, undefined);
+  Object.assign(os42, { _geoIndex: goc.idx, _resolveAddress: goc.resolve, _call: goc.call, provinces: goc.provinces, districts: goc.districts, communes: goc.communes, _geoBuilding: null });
+  console.log("OK 42: suy ra dia chi chi khi co can cu (ten duy nhat ca nuoc / don cu cung SDT / khach ghi ten huyen), trung ten thi hoi khach, khong nhay tinh");
 }
 
 console.log("\nTAT CA TEST PASS");

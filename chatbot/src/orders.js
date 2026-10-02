@@ -5,6 +5,8 @@ import { generateReply } from "./ai.js";
 import { store } from "./store.js";
 import { sleep } from "./util.js";
 import { settings } from "./settings.js";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Ghi don hang bot da chot vao Pancake POS:
@@ -225,10 +227,116 @@ export class OrderSync {
   }
 
   /**
+   * DANH MUC XA/PHUONG CA NUOC (doc tu chinh API dia ly cua Pancake, luu o data/geo-index.json, lam moi sau 30 ngay).
+   * Dung de SUY RA tinh/huyen khi khach chi ghi ten phuong/xa: dung MOT noi ca nuoc mang ten do (ke ca loai phuong/xa/thi
+   * tran khach ghi) moi suy ra. Dung lan dau mat vai phut (moi huyen 1 lan goi), chay nen; chua xong thi tra null.
+   */
+  async geoIndex() {
+    if (this._geoIndex) return this._geoIndex;
+    const file = path.join(config.dataDir, "geo-index.json");
+    try {
+      const j = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (Array.isArray(j.entries) && j.entries.length && Date.now() - j.builtAt < 30 * 86400e3) return (this._geoIndex = j.entries);
+    } catch {}
+    if (!this._geoBuilding && this.enabled) {
+      this._geoBuilding = (async () => {
+        const entries = [];
+        for (const pv of await this.provinces()) {
+          for (const d of await this.districts(pv.id)) {
+            for (const c of await this.communes(d.id)) entries.push({ c: c.id, cn: c.name, d: d.id, dn: d.name, p: pv.id, pn: pv.name });
+            await sleep(120);
+          }
+        }
+        if (entries.length) {
+          fs.mkdirSync(config.dataDir, { recursive: true });
+          fs.writeFileSync(file, JSON.stringify({ builtAt: Date.now(), entries }));
+          this._geoIndex = entries;
+          log.info(`Danh muc xa/phuong ca nuoc: ${entries.length} muc`);
+        }
+      })()
+        .catch((e) => log.warn(`Dung danh muc xa/phuong loi: ${e.message}`))
+        .finally(() => (this._geoBuilding = null));
+    }
+    return null;
+  }
+
+  /**
+   * SUY RA dia chi khi khach KHONG ghi tinh (hoac huyen) — chi khi co CAN CU CHAC CHAN:
+   *  1. Ten xa/phuong khach ghi (kem loai "phường"/"xã"/"thị trấn" neu khach ghi) chi co DUNG MOT noi ca nuoc;
+   *  2. Trung o nhieu noi nhung DON CU cua chinh SDT do giao toi dung mot trong cac noi ay -> lay noi do;
+   *  3. Trung nhieu noi nhung ten huyen / tinh cua dung mot noi xuat hien trong loi khach -> lay noi do.
+   * Khong du can cu -> tra { ambiguous } (liet ke cac noi trung ten de nhan vien hoi khach), khong bao gio doan.
+   */
+  async inferAddress(raw, { phone = "", provinceId = null, districtId = null } = {}) {
+    const idx = await this.geoIndex();
+    if (!idx) return null;
+    const txt = ` ${norm(raw)} `;
+    const k = litKey(raw);
+    // Da xac dinh duoc tinh / huyen tu loi khach thi chi suy trong pham vi do — khong bao gio nhay sang tinh khac
+    let khop = idx.filter((e) => (provinceId == null || String(e.p) === String(provinceId)) && (districtId == null || String(e.d) === String(districtId))).filter((e) => {
+      const ten = stripAdmin(e.cn);
+      return ten.replace(/[^a-z0-9]/g, "").length >= 5 && k.includes(ten.replace(/[^a-z0-9]/g, ""));
+    });
+    if (!khop.length) return null;
+    // Giu ten dai nhat (vd "Long Phước" thay vi "Phước")
+    const dai = Math.max(...khop.map((e) => stripAdmin(e.cn).length));
+    khop = khop.filter((e) => stripAdmin(e.cn).length === dai);
+    // Khach ghi loai (phường / xã / thị trấn) -> chi giu dung loai do
+    const loai = (e) => (/^phuong /.test(norm(e.cn)) ? "phuong" : /^thi tran /.test(norm(e.cn)) ? "thi tran" : /^xa /.test(norm(e.cn)) ? "xa" : "");
+    const loaiKhach = ["thi tran", "phuong", "xa"].find((l) => khop.some((e) => txt.includes(` ${l} ${stripAdmin(e.cn)} `)));
+    if (loaiKhach) khop = khop.filter((e) => loai(e) === loaiKhach);
+    const chon = (e, canCu) => ({ entry: e, canCu });
+    if (khop.length === 1) return chon(khop[0], `"${khop[0].cn}" chỉ có ở ${khop[0].dn}, ${khop[0].pn} (duy nhất cả nước)`);
+    // Ten huyen / tinh cua dung mot noi co trong loi khach
+    const coHuyen = khop.filter((e) => k.includes(stripAdmin(e.dn).replace(/[^a-z0-9]/g, "")) || k.includes(stripAdmin(e.pn).replace(/[^a-z0-9]/g, "")));
+    if (coHuyen.length === 1) return chon(coHuyen[0], `khách có ghi ${coHuyen[0].dn} / ${coHuyen[0].pn}`);
+    // Don cu cua chinh SDT nay giao toi dung mot trong cac noi trung ten
+    if (phone) {
+      const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { search: phone, page_size: 30 }).catch(() => null);
+      const daGiao = new Set((d?.data || []).filter((o) => ![6, 9].includes(Number(o.status)) && normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone).map((o) => String(o.shipping_address?.commune_id || "")));
+      const theoDonCu = khop.filter((e) => daGiao.has(String(e.c)));
+      if (theoDonCu.length === 1) return chon(theoDonCu[0], `đơn cũ của khách (SĐT ${phone}) đã giao tới ${theoDonCu[0].cn}, ${theoDonCu[0].dn}`);
+    }
+    return { ambiguous: `"${khop[0].cn.replace(/^(Phường|Xã|Thị trấn)\s+/i, "")}" có ở ${khop.length} nơi (${khop.slice(0, 4).map((e) => `${e.dn}, ${e.pn}`).join("; ")}${khop.length > 4 ? "…" : ""}) — cần hỏi khách quận/huyện, tỉnh` };
+  }
+
+  /**
    * Chuan hoa dia chi khach ghi -> tinh/huyen/xa theo danh muc Pancake + phan duong/so nha.
    * @returns {{ok:boolean, province?:object, district?:object, commune?:object, street:string, fullAddress:string, note:string, confidence:string}}
    */
-  async resolveAddress(raw, { pageName = "" } = {}) {
+  async resolveAddress(raw, opts = {}) {
+    const out = await this._resolveAddress(raw, opts);
+    if (out.province && out.district && out.commune) return out;
+    // Thieu tinh / huyen / xa: thu SUY RA tu danh muc ca nuoc + don cu (chi khi co can cu chac chan)
+    const suy = await this.inferAddress(raw, { phone: opts.phone, provinceId: out.province?.id ?? null, districtId: out.district?.id ?? null }).catch(() => null);
+    if (!suy) return out;
+    if (suy.ambiguous) {
+      out.ambiguous = out.ambiguous || suy.ambiguous;
+      return out;
+    }
+    const e = suy.entry;
+    const pvs = await this.provinces();
+    const province = pvs.find((x) => String(x.id) === String(e.p));
+    const district = (await this.districts(e.p)).find((x) => String(x.id) === String(e.d));
+    const commune = (await this.communes(e.d)).find((x) => String(x.id) === String(e.c));
+    if (!province || !district || !commune) return out;
+    const street = String(out.parsed?.street || "").trim() || raw;
+    return {
+      ...out,
+      ok: true,
+      province,
+      district,
+      commune,
+      street,
+      fullAddress: [street, commune.name, district.name, province.name].join(", "),
+      confidence: "cao (suy ra có căn cứ)",
+      note: "",
+      ambiguous: undefined,
+      autoFixed: `Khách không ghi đủ địa chỉ — hệ thống suy ra ${commune.name}, ${district.name}, ${province.name} vì ${suy.canCu}`,
+    };
+  }
+
+  async _resolveAddress(raw, { pageName = "" } = {}) {
     const provinces = await this.provinces();
     const sys = `Bạn là người tách địa chỉ giao hàng Việt Nam. Từ địa chỉ khách ghi (có thể viết tắt, sai chính tả, thiếu dấu, thiếu cấp), hãy xác định tỉnh/thành, quận/huyện, xã/phường/thị trấn và phần số nhà/đường/thôn. Sửa chính tả theo tên hành chính chuẩn. Danh sách tỉnh/thành hợp lệ: ${provinces.map((p) => p.name).join(", ")}. Nếu không chắc cấp nào thì để rỗng cấp đó, KHÔNG bịa.`;
     const r = await generateReply(sys, [{ role: "user", text: `Địa chỉ khách ghi: "${raw}"` }], { temperature: 0, maxOutputTokens: 300, jsonSchema: ADDRESS_SCHEMA });
@@ -534,7 +642,7 @@ export class OrderSync {
       return { status: "skipped", reason: `không map được sản phẩm: ${problems.join("; ")}` };
     }
 
-    const addr = await this.resolveAddress(diaChiKhach, { pageName });
+    const addr = await this.resolveAddress(diaChiKhach, { pageName, phone });
     // "địa chỉ cũ / như cũ / như lần trước": dung so nha / thon cua don cu CUNG xa (su co Vo Lieu 01/10/2026)
     if (addr.commune && this.streetNote(addr) && /(địa chỉ cũ|dia chi cu|như cũ|nhu cu|như lần trước|nhu lan truoc|như đơn trước|chỗ cũ|cho cu)/i.test(historyText)) {
       const cu = await this.previousStreet(phone, addr);
