@@ -119,6 +119,7 @@ const ROUTES = [
   "/cockpit",
   "/inventory/purchasing",
   "/customers",
+  "/products/price-lists",
   "/customers/retention",
   "/ads",
   "/ads/daily",

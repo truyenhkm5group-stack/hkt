@@ -92,6 +92,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/orders": ShoppingBag,
   "/landing": FileSpreadsheet,
   "/customers": Users,
+  "/customers/receivables": HandCoins,
   "/outreach": HeartHandshake,
   "/chatbot": Bot,
   "/ads": Megaphone,
@@ -104,6 +105,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/returns": RotateCcw,
   "/reports/returns": Undo2,
   "/products": Shirt,
+  "/products/price-lists": Tags,
   "/inventory/packing": PackageOpen,
   "/inventory/receipts": PackagePlus,
   "/inventory/returns": ClipboardCheck,
@@ -252,6 +254,7 @@ export function hubTools(hub: NavHubHref, user: NavUserLike): ModuleSpec[] {
 export function onMenu(item: ModuleSpec, user: NavUserLike): boolean {
   if (item.hub) return foldsHubs(user) && moduleAllows(item.href, user) && hubTools(item.href as NavHubHref, user).length > 0;
   if (item.foldInto && foldsHubs(user)) return false;
+  if (item.tenantOnly && !foldsHubs(user)) return false;
   return visible(item, user);
 }
 

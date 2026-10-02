@@ -1,3 +1,4 @@
+import { manualOrderPricing } from "@/lib/records/trade";
 import { notFound } from "next/navigation";
 import { ManualOrderForm } from "@/app/(dashboard)/orders/manual-order-form";
 import { PageHeader } from "@/components/page-header";
@@ -18,7 +19,7 @@ export default async function EditManualOrderPage({ params }: { params: Promise<
   if (!gate.allowed) notFound();
   const { id: rawId } = await params;
   const id = decodeURIComponent(rawId);
-  const [values, options] = await Promise.all([manualOrderFormValues(id), manualOrderFormOptions()]);
+  const [values, options, pricing] = await Promise.all([manualOrderFormValues(id), manualOrderFormOptions(), manualOrderPricing()]);
   if (!values) notFound();
   const initial = {
     customerId: values.customerId,
@@ -35,7 +36,7 @@ export default async function EditManualOrderPage({ params }: { params: Promise<
     <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader eyebrow="Đơn hàng" title={`Sửa đơn ${manualOrderShortCode(id)}`} description="Đơn tạo tay trên ERP. Dòng hàng được thay nguyên bộ khi lưu; mọi lượt lưu vào nhật ký kèm bản trước / sau." />
       <SectionCard>
-        <ManualOrderForm mode="edit" orderId={id} initial={initial} customers={options.customers} variants={options.variants} />
+        <ManualOrderForm mode="edit" orderId={id} initial={initial} customers={options.customers} variants={options.variants} pricing={pricing} />
       </SectionCard>
     </div>
   );

@@ -27,6 +27,8 @@ import { userPickOptions } from "@/lib/queries/users";
 import { getBrandCopy } from "@/lib/branding/service";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { customerBasicsGate } from "@/lib/records/customer-create";
+import { manualOrderOrgGate } from "@/lib/records/order-create";
+import { CustomerTradeSection } from "@/components/trade/customer-trade-section";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -86,6 +88,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const [profile, payStates] = await Promise.all([loadProfileBlock(user, customer, basics.allowed), manualPaymentStates(customer.orders)]);
   // Số đo "Hoàn / tỷ lệ hoàn" thuộc module Hàng hoàn — tổ chức không bật module ấy không thấy một ô 0% vô nghĩa.
   const showReturns = moduleOn(user, "returns");
+  // Điều khoản bán & công nợ (0188) chỉ có nghĩa ở tổ chức TẠO ĐƠN TAY — tổ chức đồng bộ đơn Pancake đi theo bảng kê ĐVVC.
+  const showTrade = (await manualOrderOrgGate()).allowed;
   const { stats } = customer;
   const addresses = parseAddresses(customer.addresses);
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
@@ -125,6 +129,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         <MetricCard label="Tổng mua" value={formatVND(stats.amount, { compact: true })} note="Tiền hàng lên đơn, không tính đơn huỷ" icon={CircleDollarSign} tone="primary" />
         <MetricCard label="Trung bình mỗi đơn" value={formatVND(stats.aov, { compact: true })} note={stats.firstOrderAt ? `Mua lần đầu ${formatDate(stats.firstOrderAt)}` : "Chưa có đơn"} icon={Boxes} tone="amber" />
       </section>
+
+      {showTrade ? <CustomerTradeSection user={user} customerId={customer.id} /> : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">

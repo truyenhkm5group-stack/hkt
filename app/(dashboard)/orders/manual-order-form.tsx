@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createManualOrderAction, updateManualOrderAction } from "@/lib/actions/manual-orders";
 import { manualOrderStageLabel, manualOrderTotals, MANUAL_ORDER_STAGE_HINT, MANUAL_ORDER_STAGES, type ManualOrderCustomerOption, type ManualOrderStage, type ManualOrderVariantOption } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
+import { PRICE_SOURCE_LABEL, quoteUnitPrice, type PriceListBook, type PriceQuote } from "@/lib/constants/price-lists";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,6 +28,12 @@ export type ManualOrderFormValues = { customerId: string; stage: ManualOrderStag
 const EMPTY_RECIPIENT: RecipientDraft = { name: "", phone: "", address: "", province: "" };
 
 const EMPTY_LINE: Line = { variantId: "", quantity: "1", unitPrice: "", discount: "" };
+
+/**
+ * Bảng giá + điều khoản bán (0188) — máy chủ dựng ở `manualOrderPricing`. Form chỉ GỢI Ý giá bằng CÙNG hàm thuần
+ * `quoteUnitPrice`; đơn giá vẫn là ô người bán sửa được, và máy chủ chấm hạn mức nợ lúc lưu đơn «Đã xác nhận».
+ */
+export type ManualOrderPricing = { books: PriceListBook[]; terms: Record<string, { priceListId: string | null; creditLimit: number | null; exposure: number }> };
 const SELECT = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 
 /** "150.000" / "150000đ" ⇒ 150000; trống ⇒ `fallback` (NaN ⇒ máy chủ báo lỗi đúng ô). */
@@ -41,12 +48,14 @@ export function ManualOrderForm({
   initial,
   customers,
   variants,
+  pricing,
 }: {
   mode: "create" | "edit";
   orderId?: string;
   initial?: ManualOrderFormValues;
   customers: ManualOrderCustomerOption[];
   variants: ManualOrderVariantOption[];
+  pricing?: ManualOrderPricing;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<ManualOrderFormValues>(initial ?? { customerId: "", stage: "CONFIRMED", channel: "", note: "", orderDiscount: "", shippingFee: "", lines: [{ ...EMPTY_LINE }] });
@@ -72,9 +81,14 @@ export function ManualOrderForm({
 
   const set = <K extends keyof Omit<ManualOrderFormValues, "lines">>(key: K, v: ManualOrderFormValues[K]) => setValues((prev) => ({ ...prev, [key]: v }));
   const setLine = (i: number, patch: Partial<Line>) => setValues((prev) => ({ ...prev, lines: prev.lines.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+  const books = pricing?.books ?? [];
+  const defaultBook = books.find((b) => b.isDefault) ?? null;
+  const customerTerms = pricing?.terms[values.customerId];
+  const customerBook = customerTerms?.priceListId ? (books.find((b) => b.id === customerTerms.priceListId) ?? null) : null;
+  const quoteFor = (variantId: string, quantity: string): PriceQuote =>
+    variantId ? quoteUnitPrice({ variantId, quantity: toInt(quantity, 1), retailPrice: variantById.get(variantId)?.price ?? null, customerList: customerBook, defaultList: defaultBook }) : null;
   const pickVariant = (i: number, id: string) => {
-    const price = variantById.get(id)?.price;
-    setValues((prev) => ({ ...prev, lines: prev.lines.map((x, j) => (j === i ? { ...x, variantId: id, unitPrice: x.unitPrice || (price ? String(price) : "") } : x)) }));
+    setValues((prev) => ({ ...prev, lines: prev.lines.map((x, j) => (j === i ? { ...x, variantId: id, unitPrice: x.unitPrice || String(quoteFor(id, x.quantity)?.unitPrice ?? "") } : x)) }));
   };
   const addLine = () => setValues((prev) => ({ ...prev, lines: [...prev.lines, { ...EMPTY_LINE }] }));
   const removeLine = (i: number) => setValues((prev) => ({ ...prev, lines: prev.lines.filter((_, j) => j !== i) }));
@@ -117,6 +131,11 @@ export function ManualOrderForm({
             ))}
           </select>
           {err("customerId")}
+          {customerTerms && customerTerms.creditLimit !== null ? (
+            <p className={cn("text-[11px]", customerTerms.exposure > customerTerms.creditLimit ? "font-medium text-destructive" : "text-muted-foreground")} data-credit-hint>
+              Dư nợ hiện tại {formatVND(customerTerms.exposure)} / hạn mức {formatVND(customerTerms.creditLimit)} — đơn «Đã xác nhận» làm vượt hạn mức sẽ bị chặn.
+            </p>
+          ) : null}
           <p className="text-[11px] text-muted-foreground">Tên, SĐT và địa chỉ giao lấy từ hồ sơ khách lúc lưu. Khách mới thì tạo ở trang Khách hàng trước.</p>
         </div>
         <div className="space-y-1">
@@ -175,6 +194,15 @@ export function ManualOrderForm({
                   <td className="px-3 py-1.5">
                     <Input aria-label={`Đơn giá dòng ${i + 1}`} inputMode="numeric" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} className="numeric h-8 text-right" />
                     {err(`lines.${i}.unitPrice`)}
+                    {(() => {
+                      const q = quoteFor(l.variantId, l.quantity);
+                      if (!q || q.source === "RETAIL" || toInt(l.unitPrice) === q.unitPrice) return null;
+                      return (
+                        <button type="button" className="mt-0.5 block text-left text-[11px] text-primary hover:underline" onClick={() => setLine(i, { unitPrice: String(q.unitPrice) })} data-price-quote={q.source}>
+                          Áp {PRICE_SOURCE_LABEL[q.source]} «{q.listName}»{q.minQuantity && q.minQuantity > 1 ? ` (từ ${q.minQuantity})` : ""}: {formatVND(q.unitPrice)}
+                        </button>
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-1.5">
                     <Input aria-label={`Chiết khấu dòng ${i + 1}`} inputMode="numeric" value={l.discount} onChange={(e) => setLine(i, { discount: e.target.value })} placeholder="0" className="numeric h-8 text-right" />

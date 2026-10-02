@@ -126,10 +126,14 @@ function testMenuSweep() {
   for (const [ten, set] of bo) for (const isHome of [true, false]) assert.deepEqual(menuViolations(set, isHome), [], `mẫu ${ten} (${isHome ? "nhà" : "không-nhà"})`);
 
   // Tổ chức bật ĐỦ module (tổ chức nhà) ⇒ không nhóm nào dời: menu y như sổ khai (không đổi hành vi của nhà). Trang gom
-  // (`hub`) chỉ dành cho tổ chức khách nên không nằm trong menu của nhà.
+  // (`hub`) và mục `tenantOnly` (0188: bảng giá sỉ, công nợ — dựng trên đơn tạo tay) chỉ dành cho tổ chức khách nên không
+  // nằm trong menu của nhà.
   const nha = visibleGroups(navUser(all, { isHome: true }));
+  const chiKhach = (NAV_MODULES as readonly ModuleSpec[]).filter((m) => m.tenantOnly).map((m) => m.href);
+  assert.ok(chiKhach.length > 0 && chiKhach.every((h) => !hrefsOf(navUser(all, { isHome: true })).includes(h)), "nhà: không thấy mục tenantOnly");
+  assert.ok(chiKhach.every((h) => hrefsOf(navUser(all, { isHome: false })).includes(h)), "tổ chức khách bật đủ module: thấy mục tenantOnly");
   for (const g of nha) {
-    const khai = (NAV_MODULES as readonly ModuleSpec[]).filter((m) => m.zone === g.zone && !m.hub).map((m) => m.href);
+    const khai = (NAV_MODULES as readonly ModuleSpec[]).filter((m) => m.zone === g.zone && !m.hub && !m.tenantOnly).map((m) => m.href);
     assert.deepEqual(g.items.map((i) => i.href), khai, `nhà: nhóm ${g.zone} giữ nguyên thứ tự khai`);
   }
   assert.ok(hrefsOf(navUser(all, { isHome: true })).includes("/platform"), "nhà: ADMIN vẫn thấy «Vận hành nền tảng»");

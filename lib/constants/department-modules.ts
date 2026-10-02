@@ -69,6 +69,11 @@ export type ModuleSpec = {
   foldInto?: NavHubHref;
   /** Mục này là một trang gom: chỉ hiện ở tổ chức khách, và chỉ khi người xem thấy được ít nhất một mục gom vào nó. */
   hub?: true;
+  /**
+   * Chỉ hiện ở tổ chức KHÁCH (0188): nghiệp vụ dựng trên đơn TẠO TAY (bảng giá sỉ, công nợ theo phiếu thu) — tổ chức nhà
+   * đồng bộ đơn Pancake + bảng kê ĐVVC nên trang ấy ở nhà chỉ là một trang rỗng. Luật XẾP menu, không phải luật quyền.
+   */
+  tenantOnly?: true;
   /** Một dòng: vì sao phòng này sở hữu màn hình này. */
   why: string;
 };
@@ -150,6 +155,22 @@ export const NAV_MODULES = [
     zone: "SALES",
     permission: "customers:view",
     why: "Hồ sơ khách và lịch sử mua là công cụ của người bán, không phải báo cáo của ban điều hành.",
+  },
+  {
+    href: "/customers/receivables",
+    label: "Công nợ khách hàng",
+    zone: "SALES",
+    permission: "customers:view",
+    tenantOnly: true,
+    why: "Khách sỉ mua chịu: người bán là người gọi nhắc trả và quyết có chốt đơn tiếp không — công nợ đứng cạnh hồ sơ khách.",
+  },
+  {
+    href: "/products/price-lists",
+    label: "Bảng giá sỉ",
+    zone: "SALES",
+    permission: "products:view",
+    tenantOnly: true,
+    why: "Giá cho đại lý / khách sỉ là quyết định bán hàng; đơn tạo tay và chatbot đọc cùng một bảng.",
   },
   {
     href: "/outreach",

@@ -1478,6 +1478,70 @@ export const orderPayments = pgTable(
     ),
   ],
 );
+/**
+ * BẢNG GIÁ (0188) — giá theo NHÓM KHÁCH + BẬC SỐ LƯỢNG. Khách gán bảng ở `customer_trade_terms`; khách chưa gán ⇒ bảng
+ * `is_default` (tối đa một bảng đang bật); không bảng nào có dòng cho mẫu mã ⇒ giá lẻ của mẫu mã. Luật chọn giá là hàm
+ * thuần `quoteUnitPrice` (`lib/constants/price-lists.ts`) — form đơn tay, máy chủ và chatbot dùng chung.
+ */
+export const priceLists = pgTable(
+  "price_lists",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    note: text("note").notNull().default(""),
+    isDefault: boolean("is_default").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("price_lists_one_default").on(t.isDefault).where(sql`${t.isDefault} AND ${t.active}`), check("price_lists_name_check", sql`length(trim(${t.name})) BETWEEN 1 AND 80`)],
+);
+
+/** Một bậc giá: mua từ `min_quantity` trở lên thì đơn giá là `unit_price`. Bậc cao nhất ≤ số lượng thắng. */
+export const priceListItems = pgTable(
+  "price_list_items",
+  {
+    id: id(),
+    priceListId: text("price_list_id")
+      .notNull()
+      .references(() => priceLists.id, { onDelete: "cascade" }),
+    variantId: text("variant_id").notNull(),
+    minQuantity: integer("min_quantity").notNull().default(1),
+    unitPrice: integer("unit_price").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("price_list_items_tier_key").on(t.priceListId, t.variantId, t.minQuantity),
+    index("price_list_items_variant_idx").on(t.variantId),
+    check("price_list_items_min_quantity_check", sql`${t.minQuantity} BETWEEN 1 AND 100000`),
+    check("price_list_items_unit_price_check", sql`${t.unitPrice} > 0`),
+  ],
+);
+
+/**
+ * ĐIỀU KHOẢN BÁN CỦA MỘT KHÁCH (0188): bảng giá · hạn mức nợ · số ngày được nợ. Bảng RIÊNG — `customers` là bảng đồng bộ
+ * từ Pancake ở tổ chức nhà. `credit_limit` / `payment_terms_days` NULL = CHƯA KHAI (không chặn, không tính quá hạn),
+ * không phải 0. Công nợ không lưu ở đây: nó tính lúc đọc từ chứng từ thanh toán (`lib/queries/receivables.ts`).
+ */
+export const customerTradeTerms = pgTable(
+  "customer_trade_terms",
+  {
+    customerId: text("customer_id")
+      .primaryKey()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    priceListId: text("price_list_id").references(() => priceLists.id, { onDelete: "set null" }),
+    creditLimit: integer("credit_limit"),
+    paymentTermsDays: integer("payment_terms_days"),
+    updatedByUserId: text("updated_by_user_id"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("customer_trade_terms_price_list_idx").on(t.priceListId),
+    check("customer_trade_terms_credit_check", sql`${t.creditLimit} IS NULL OR ${t.creditLimit} >= 0`),
+    check("customer_trade_terms_terms_check", sql`${t.paymentTermsDays} IS NULL OR ${t.paymentTermsDays} BETWEEN 0 AND 365`),
+  ],
+);
 
 /**
  * ═══ SỔ ĐƠN CHỜ HÀNG (`lib/alerts/stock-wait-log.ts`) ═══

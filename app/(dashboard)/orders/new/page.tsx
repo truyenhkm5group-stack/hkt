@@ -1,3 +1,4 @@
+import { manualOrderPricing } from "@/lib/records/trade";
 import { notFound } from "next/navigation";
 import { ManualOrderForm } from "@/app/(dashboard)/orders/manual-order-form";
 import { PageHeader } from "@/components/page-header";
@@ -15,12 +16,12 @@ export default async function NewManualOrderPage() {
   const user = await requirePermission("orders:read");
   const gate = await manualOrderGate(user);
   if (!gate.allowed) notFound();
-  const options = await manualOrderFormOptions();
+  const [options, pricing] = await Promise.all([manualOrderFormOptions(), manualOrderPricing()]);
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader eyebrow="Đơn hàng" title="Tạo đơn hàng" description="Đơn tạo tay trên ERP — tổ chức này không đồng bộ đơn từ nguồn bán hàng nào." />
       <SectionCard>
-        <ManualOrderForm mode="create" customers={options.customers} variants={options.variants} />
+        <ManualOrderForm mode="create" customers={options.customers} variants={options.variants} pricing={pricing} />
       </SectionCard>
     </div>
   );

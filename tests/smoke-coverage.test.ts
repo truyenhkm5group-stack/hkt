@@ -42,6 +42,10 @@ import { NAV_MODULES } from "@/lib/constants/department-modules";
 type NhomTuyen = "AUTH_ONLY" | "API_ONLY" | "INTENTIONALLY_EXCLUDED";
 
 const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
+  "/customers/receivables": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Công nợ đọc từ phiếu thu của ĐƠN TẠO TAY (0188) — tổ chức nhà đồng bộ đơn Pancake nên trang cố ý trả 404 ở nhà (mục menu tenantOnly); smoke chạy bằng quản trị của NHÀ. Trang được kiểm bằng tests/price-lists-receivables.test.ts trên tổ chức khách thật.",
+  },
   "/ai/sales-chatbot": {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/self-service-journey.test.ts và E2E của tổ chức khách.",
