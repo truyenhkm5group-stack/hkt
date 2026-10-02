@@ -57,9 +57,6 @@ export function missingOrderFields(reply) {
   return thieu;
 }
 
-// Tu xa giao: tin khach chi gom cac tu nay = loi ket / dong y, khong hoi gi them
-const LOI_KET_TU = new Set(["ok", "oke", "okie", "oki", "okla", "okay", "ừ", "u", "uh", "uk", "ừm", "vâng", "dạ", "rồi", "thôi", "được", "đc", "yes", "không", "ko", "k", "hông", "cần", "đâu", "nữa", "gì", "em", "ạ", "a", "e", "nha", "nhé", "nhe", "nhá", "shop", "luôn", "đủ", "chị", "anh", "cảm", "cám", "ơn", "cam", "on", "thank", "thanks", "tks", "ty", "nhiều"]);
-
 export function isOrderSummaryReply(reply, handoff) {
   const text = String(reply || "");
   if (!/chốt đơn|lên đơn|đơn hàng của chị|đơn của chị/i.test(text)) return false;
@@ -695,7 +692,8 @@ export class Bot {
       `- Số điện thoại: ${f.phone ? "ĐÃ CÓ" : "CHƯA CÓ"}`,
       `- Địa chỉ: ${f.address ? `ĐÃ CÓ ("${f.address}")` : "CHƯA CÓ"}`,
     ];
-    if (!f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
+    const daChot = this.orderClosedIn(pageId, messages);
+    if (!daChot && !f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
     const daHuaFreeShip = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
     if (daHuaFreeShip) dong.push("- Phí ship: shop ĐÃ hứa MIỄN PHÍ vận chuyển cho khách này — tổng tiền KHÔNG cộng phí ship");
     dong.push("- Địa chỉ phải có ĐỦ xã/phường + quận/huyện + tỉnh/thành mới được gửi bản chốt đơn; thiếu cấp nào thì hỏi cấp đó");
@@ -708,9 +706,12 @@ export class Bot {
     else if (!f.address) tiep = "xin địa chỉ nhận hàng";
     else tiep = "đủ thông tin rồi: tóm tắt lại đơn (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận. Khách lấy NHIỀU MÀU thì MỖI MÀU MỘT DÒNG kèm số lượng và size, dùng đúng tên màu trong danh mục (vd \"• 1 Đen XL\" và \"• 1 Đỏ Đô XL\"), KHÔNG gộp \"màu Đen, Đỏ x 2\"";
     // Don da chot / khach da cho du thong tin quanh luc gui SDT: thoi dan khach di tiep, tra loi dung cau hoi roi dung
-    if (this.orderClosedIn(pageId, messages)) {
+    if (daChot) {
+      // Don chot roi: dong "CHƯA CÓ" (tin cu troi khoi cua so) chi lam AI tuong con thieu ma hoi lai -> bo
+      for (let i = dong.length - 1; i >= 0; i--) if (/CHƯA (CÓ|CHỌN)/.test(dong[i])) dong.splice(i, 1);
       const daGuiTomTat = (messages || []).some((m) => this.isFromPage(m, pageId) && isOrderSummaryReply(this.messageText(m), false));
-      tiep = `ĐƠN ĐÃ ĐỦ THÔNG TIN. TUYỆT ĐỐI KHÔNG hỏi thêm bất cứ thông tin nào (số đo, size, màu, SĐT, địa chỉ), KHÔNG hỏi "em lên đơn nhé?" / "chị cần hỗ trợ gì thêm không?", KHÔNG mời mua thêm. ${daGuiTomTat ? "Shop ĐÃ gửi bản chốt đơn rồi: KHÔNG gửi lại; chỉ trả lời đúng câu khách vừa hỏi trong 1–2 câu rồi dừng" : "Gửi bản tóm tắt chốt đơn MỘT lần (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận, không kèm câu hỏi nào khác"}`;
+      tiep = `ĐƠN ĐÃ ĐỦ THÔNG TIN. TUYỆT ĐỐI KHÔNG hỏi thêm bất cứ thông tin nào (số đo, size, màu, SĐT, địa chỉ), KHÔNG hỏi "em lên đơn nhé?" / "chị cần hỗ trợ gì thêm không?", KHÔNG mời mua thêm. ${daGuiTomTat ? "Shop ĐÃ gửi bản chốt đơn rồi: KHÔNG gửi lại; chỉ trả lời đúng câu khách vừa hỏi trong 1–2 câu rồi dừng" : "Gửi bản tóm tắt chốt đơn MỘT lần (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận, không kèm câu hỏi nào khác"}.
+- Tin ngắn của khách ("Ok", "Ừ em", "Không em", "Được", tim/like…): ĐỌC CÂU SHOP VỪA GỬI NGAY TRƯỚC để hiểu khách đang trả lời điều gì rồi đáp đúng ý đó — đồng ý lên đơn/gửi hàng thì xác nhận ngắn là đơn sẽ được gửi; trả lời "không" cho câu hỏi "cần hỗ trợ thêm gì" thì chào ngắn rồi thôi; khách xác nhận một thông tin thì ghi nhận ngắn. Không đáp mẫu, không hỏi lại`;
     }
     return `
 
@@ -1010,16 +1011,12 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
    */
   /** Khach chi dang cam on / noi loi ket, khong hoi gi them */
   isLoiKet(text) {
-    const t = String(text || "").normalize("NFC").trim().toLowerCase();
+    const t = String(text || "").trim().toLowerCase();
     if (!t || t.length > 60) return false;
     if (/\?/.test(t)) return false;
     // Co dau hieu hoi han / yeu cau thi khong phai loi ket, phai tra loi tu te
     if (/(hỏi|bao giờ|khi nào|mấy|bao nhiêu|thế nào|sao|đổi|hủy|thay đổi|giao hàng|ship|size|màu|địa chỉ|số điện thoại)/.test(t)) return false;
-    // Loi ket = MOI TU deu la tu xa giao ("Ok", "Ừ em", "Không em", "Ok nha shop"). Ban cu dung /^(ừ|dạ…)\b/ ma \b cua
-    // JS chi hieu chu ASCII -> "Ừ em" khong khop, con "uống…" lai khop (Bui Phuong Vy 02/10/2026).
-    const tu = t.replace(/[^\p{L}\p{N}\s]/gu, " ").trim().split(/\s+/).filter(Boolean);
-    if (tu.length && tu.length <= 6 && tu.every((w) => LOI_KET_TU.has(w))) return true;
-    return /(cảm ơn|cám ơn|thank|đủ rồi|không cần gì|ko cần gì)/.test(t);
+    return /^(ok|oke|okie|okla|ừ|u|uh|uk|vâng|dạ|ừm|rồi|đủ rồi|thôi|không cần|ko cần|k cần|kg|cảm ơn|cám ơn|thank|tks|thanks|cam on|ty)\b/.test(t) || /(cảm ơn|cám ơn|thank|đủ rồi|không cần gì|ko cần gì)/.test(t);
   }
 
   /** Hoi thoai nay da chot don xong chua (shop da gui ban tom tat / tin cam on sau chot don) */
@@ -1578,7 +1575,9 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     if (type === "INBOX") await this.refreshOrderInfo(client, pageId, conversationId, messages, data);
 
     // Don da chot ma khach chi cam on / noi loi ket: dap 1 cau ngan roi dung, khong hoi lai, khong ton tien Gemini
-    if (type === "INBOX" && this.isLoiKet(lastText) && this.orderClosedIn(pageId, messages)) {
+    // CHI loi CAM ON moi dap mau. "Ok", "Ừ em", "Không em"… nghia tuy cau shop vua hoi (dong y len don, tu choi tu van
+    // them, hay chi xa giao) -> de AI doc ngu canh ma tra loi (chu shop 02/10/2026: "tùy thuộc vào hoàn cảnh để suy luận").
+    if (type === "INBOX" && this.isLoiKet(lastText) && /(cảm ơn|cám ơn|thank|tks|cam on)/i.test(lastText) && this.orderClosedIn(pageId, messages)) {
       const xung = eff.customerTitle || "chị";
       const tinShop = messages.slice(-6).filter((m) => this.isFromPage(m, pageId)).map((m) => this.messageText(m));
       const daChaoRoi = tinShop.some((t) => /cảm ơn .{0,12}(đã )?(tin tưởng|ủng hộ|xác nhận)|chúc (anh|chị|mình).*(vui vẻ|tốt lành)/i.test(t));
@@ -1686,7 +1685,9 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
     // Don da chot xong thi khong can bang tien do nua (khoi mau thuan voi khoi "DA CHOT XONG" ben duoi)
-    if (!this.orderClosedIn(pageId, messages)) systemPrompt += this.orderProgressPrompt(pageId, messages);
+    // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
+    // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
+    systemPrompt += this.orderProgressPrompt(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
 

@@ -1903,25 +1903,36 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   // (4) Nhan ra chot don du bot viet "em chốt đơn đầm Q002 … cho chị" (truoc chi bat "em chốt đơn cho")
   assert.equal(bot.orderClosedIn("PAGE1", [shop("Dạ, em chốt đơn đầm Q002 màu Đỏ size M cho chị yêu nha.")]), true);
 
-  // (5) Loi ket co dau: "Ừ em", "Không em" — ban cu dung \b ASCII nen bo lot
-  for (const t of ["OK", "Ừ em", "Không em", "ok nha shop", "Dạ vâng ạ", "Cảm ơn em"]) assert.equal(bot.isLoiKet(t), true, t);
-  for (const t of ["Dạ cho mình xem ảnh", "Ừ gửi đi", "uống thuốc chưa", "Em gửi hàng cho chị chưa", "Không lấy nữa đổi size L"]) assert.equal(bot.isLoiKet(t), false, t);
-
-  // (6) Tron luong: hoi thoai da du thong tin, khach nhan "Ừ em" -> khong goi AI, khong hoi them cau nao
+  // (5) Tron luong: hoi thoai da du thong tin, khach nhan "Ừ em" -> KHONG dap mau: AI doc ngu canh (chu shop 02/10/2026:
+  // "tùy thuộc vào hoàn cảnh để suy luận"), prompt noi ro don da du, va cau tra loi khong con cau hoi nao
   delete (store.state.orderInfo || {})["CONV1"];
   calls.length = 0;
-  pancakeMessages = [...dau, { id: "k44_last", from: customer, message: "Ừ em", inserted_at: new Date().toISOString().replace("Z", "") }];
+  geminiText = "Dạ vâng ạ, đơn của chị em gửi đi ngay ạ ❤️\nEm lên đơn gửi hàng cho chị luôn nhé ạ?";
+  pancakeMessages = [...dau, { id: "k44_ue", from: customer, message: "Ừ em", inserted_at: new Date().toISOString().replace("Z", "") }];
   bot.handleWebhook(webhook(pancakeMessages[pancakeMessages.length - 1]));
   await sleep(WAIT * 2);
-  const gem44 = calls.filter((c) => c.path.includes(":generateContent"));
-  const gui44 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
-  assert.equal(gem44.length, 0, "loi ket sau khi don da du -> khong ton tien AI");
-  assert.ok(gui44.every((c) => !/lên đơn|chiều cao|cân nặng|\?/.test(c.body.message || "")), JSON.stringify(gui44.map((c) => c.body.message)));
+  let gem44 = calls.filter((c) => c.path.includes(":generateContent"));
+  let gui44 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+  assert.equal(gem44.length, 1, "'Ừ em' de AI suy luan theo ngu canh, khong dap mau");
+  const prompt44 = JSON.stringify(gem44[0].body);
+  assert.match(prompt44, /ĐƠN ĐÃ ĐỦ THÔNG TIN/);
+  assert.match(prompt44, /ĐỌC CÂU SHOP VỪA GỬI NGAY TRƯỚC/);
+  assert.ok(gui44.length >= 1, "van tra loi khach");
+  assert.ok(gui44.every((c) => !/lên đơn gửi hàng|chiều cao|cân nặng|\?/.test(c.body.message || "")), JSON.stringify(gui44.map((c) => c.body.message)));
+  // Loi CAM ON sau khi don da du -> chao mot cau, khong ton tien AI
+  calls.length = 0;
+  pancakeMessages = [...dau, { id: "k44_cam_on", from: customer, message: "Cảm ơn em", inserted_at: new Date().toISOString().replace("Z", "") }];
+  bot.handleWebhook(webhook(pancakeMessages[pancakeMessages.length - 1]));
+  await sleep(WAIT * 2);
+  gem44 = calls.filter((c) => c.path.includes(":generateContent"));
+  gui44 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+  assert.equal(gem44.length, 0, "cam on sau khi don da du -> khong ton tien AI");
+  assert.ok(gui44.every((c) => !/\?/.test(c.body.message || "")), JSON.stringify(gui44.map((c) => c.body.message)));
   delete (store.state.orderInfo || {})["CONV1"];
 
   settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "", sizeChart: prevSettings.sizeChart || "" });
   catalog.setProducts(prevProducts);
-  console.log("OK 44: khach da gui SDT + 30 tin truoc do du thong tin -> ghi ho so don, thoi hoi them, loi ket thi dung");
+  console.log("OK 44: khach da gui SDT + 30 tin truoc do du thong tin -> ghi ho so don, thoi hoi them; tin ngan de AI doc ngu canh, cam on thi chao");
 }
 
 console.log("\nTAT CA TEST PASS");
