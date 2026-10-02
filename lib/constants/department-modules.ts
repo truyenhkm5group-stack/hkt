@@ -165,6 +165,13 @@ export const NAV_MODULES = [
     why: "Khách sỉ mua chịu: người bán là người gọi nhắc trả và quyết có chốt đơn tiếp không — công nợ đứng cạnh hồ sơ khách.",
   },
   {
+    href: "/appointments",
+    label: "Lịch hẹn",
+    zone: "SALES",
+    permission: "appointments:view",
+    why: "Ngành dịch vụ bán bằng LỊCH: lễ tân đặt, kỹ thuật viên làm, khách tới hay không — một màn hình theo ngày cho người đứng quầy.",
+  },
+  {
     href: "/customers/reorder",
     label: "Nhắc mua lại",
     zone: "SALES",

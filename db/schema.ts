@@ -1551,6 +1551,73 @@ export const customerTouchpoints = pgTable(
   ],
 );
 
+/**
+ * LIỆU TRÌNH (0190) — gói N buổi khách trả trước. Số buổi đã dùng / đang giữ chỗ KHÔNG lưu: đếm lúc đọc từ `appointments`
+ * gắn gói (lib/constants/appointments.ts::packageBalance).
+ */
+export const customerPackages = pgTable(
+  "customer_packages",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    variantId: text("variant_id"),
+    name: text("name").notNull(),
+    totalSessions: integer("total_sessions").notNull(),
+    orderId: text("order_id"),
+    expiresOn: date("expires_on", { mode: "string" }),
+    status: text("status").notNull().default("ACTIVE"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("customer_packages_customer_idx").on(t.customerId),
+    check("customer_packages_sessions_check", sql`${t.totalSessions} BETWEEN 1 AND 500`),
+    check("customer_packages_status_check", sql`${t.status} IN ('ACTIVE','CLOSED')`),
+    check("customer_packages_name_check", sql`length(trim(${t.name})) BETWEEN 1 AND 120`),
+  ],
+);
+
+/**
+ * LỊCH HẸN (0190). Kỹ thuật viên đi bằng khoá tài khoản (luật 34). Một kỹ thuật viên không có hai lịch ĐANG HIỆU LỰC
+ * chồng giờ — chặn ở lib/records/appointments.ts trong giao dịch có khoá tư vấn theo người. Huỷ bắt buộc lý do.
+ */
+export const appointments = pgTable(
+  "appointments",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    variantId: text("variant_id"),
+    serviceName: text("service_name").notNull(),
+    staffUserId: text("staff_user_id").references(() => users.id, { onDelete: "set null" }),
+    startsAt: ts("starts_at").notNull(),
+    endsAt: ts("ends_at").notNull(),
+    status: text("status").notNull().default("BOOKED"),
+    packageId: text("package_id").references(() => customerPackages.id, { onDelete: "set null" }),
+    note: text("note").notNull().default(""),
+    cancelReason: text("cancel_reason"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    statusChangedAt: ts("status_changed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("appointments_starts_idx").on(t.startsAt),
+    index("appointments_staff_starts_idx").on(t.staffUserId, t.startsAt),
+    index("appointments_customer_idx").on(t.customerId, t.startsAt),
+    index("appointments_package_idx").on(t.packageId),
+    check("appointments_time_check", sql`${t.endsAt} > ${t.startsAt}`),
+    check("appointments_status_check", sql`${t.status} IN ('BOOKED','CONFIRMED','CHECKED_IN','DONE','NO_SHOW','CANCELLED')`),
+    check("appointments_cancel_check", sql`${t.status} <> 'CANCELLED' OR length(btrim(coalesce(${t.cancelReason}, ''))) >= 3`),
+  ],
+);
+
 export const customerTradeTerms = pgTable(
   "customer_trade_terms",
   {
