@@ -80,6 +80,10 @@ const PRICE_PER_MTOK: Record<string, { input: number; output: number; cacheRead:
   // suy nghĩ tính như token ra (provider cộng `thoughtsTokenCount` vào outputTokens). Gemini không tính phí ghi cache.
   "gemini-2.5-flash-lite": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0 },
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0 },
+  // Dòng Gemini 3 — bảng giá Standard chính thức ai.google.dev/gemini-api/docs/pricing (đọc 02/10/2026), giá ra GỒM token suy nghĩ.
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0 },
+  "gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 },
 };
 
 /**

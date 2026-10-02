@@ -614,7 +614,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     auth: "API_KEY",
     settings: [
       { key: "apiKey", label: "Gemini API key", type: "text", secret: true, required: true, hint: "aistudio.google.com → Get API key → dán NGUYÊN khoá (không kèm «GEMINI_API_KEY=», dấu ngoặc hay khoảng trắng). Khoá của tổ chức — tổ chức trả tiền token.", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{29,199}$", maxLength: 200 },
-      { key: "model", label: "Model (để trống = gemini-2.5-flash-lite)", type: "text", secret: false, required: false, hint: "Rẻ nhất: gemini-2.5-flash-lite · khôn hơn: gemini-2.5-flash.", pattern: "^[a-z][a-z0-9.-]{2,60}$", maxLength: 60 },
+      { key: "model", label: "Model (để trống = gemini-3.5-flash-lite)", type: "text", secret: false, required: false, hint: "Mặc định gemini-3.5-flash-lite · rẻ hơn: gemini-3.1-flash-lite · khôn hơn: gemini-3.5-flash. Khoá mới KHÔNG dùng được dòng 2.5.", pattern: "^[a-z][a-z0-9.-]{2,60}$", maxLength: 60 },
     ],
     config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
     webhook: null,

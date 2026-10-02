@@ -10,7 +10,7 @@
  *  · Mọi câu đọc lọc `org_code` (và `billing_source` khi tính hạn mức): tổ chức A không bao giờ trừ vào B, BYOK không bao
  *    giờ trừ vào credit nền tảng.
  */
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
@@ -186,6 +186,30 @@ export async function aiUsageDaily(orgCode: string, days = 31, now: Date = new D
     unknownCost: Number(r.unknown),
     blocked: Number(r.blocked),
   }));
+}
+
+export type AiUsageRefRow = { day: string; ref: string | null; feature: string; turns: number; costUsd: number | null; unknownCost: number };
+
+/**
+ * Theo ngày (giờ VN) × `ref` × tính năng, cho MỘT tổ chức và một tập tính năng — báo cáo chi phí của chính tổ chức đó
+ * (vd chatbot bán hàng chia tiền cho đơn / SĐT, lib/sales-chatbot/cost-report.ts). Tiền `null` = mọi lượt chưa định giá.
+ */
+export async function aiUsageByRef(orgCode: string, features: readonly AiUsageFeature[], since: Date): Promise<AiUsageRefRow[]> {
+  const pdb = await getPlatformDb();
+  const dayExpr = sql<string>`to_char((${t.at} at time zone 'UTC') + interval '7 hours', 'YYYY-MM-DD')`;
+  const rows = await pdb
+    .select({
+      day: dayExpr,
+      ref: t.ref,
+      feature: t.feature,
+      turns: sql<number>`count(*) filter (where ${used})`,
+      cost: sql<string | null>`sum(${t.costUsd})`,
+      unknown: sql<number>`count(*) filter (where ${used} and ${t.costUsd} is null)`,
+    })
+    .from(t)
+    .where(and(eq(t.orgCode, orgCode), inArray(t.feature, [...features]), gte(t.at, since)))
+    .groupBy(dayExpr, t.ref, t.feature);
+  return rows.map((r) => ({ day: String(r.day), ref: r.ref, feature: r.feature, turns: Number(r.turns), costUsd: r.cost === null ? null : Number(r.cost), unknownCost: Number(r.unknown) }));
 }
 
 export type AiTopOrgRow = { orgCode: string; costUsd: number | null; turns: number; unknownCost: number; blocked: number; sources: AiBillingSource[] };

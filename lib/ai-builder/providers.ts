@@ -170,13 +170,23 @@ export class ByokOpenAiProvider implements AiProvider {
  *    `toolUseId`). Lượt liền nhau cùng vai GỘP thành một (Gemini đòi xen kẽ).
  *  · Gemini 2.5 trả `thoughtSignature` kèm `functionCall` khi có suy luận và đòi GỬI LẠI nguyên văn ở lượt sau — lưu trong
  *    `id` của khối `tool_use` (sau dấu `|`), vì `AiBlock` không có ô riêng.
- *  · Mức suy luận: dòng `gemini-2.5-flash*` nhận `thinkingBudget` (low = 0 — tắt, medium = 1024, high = 4096); model khác
- *    để mặc định của Google.
+ *  · Mức suy luận: dòng `gemini-2.5-flash*` nhận `thinkingBudget` (low = 0 — tắt, medium = 1024, high = 4096); dòng
+ *    `gemini-3*` nhận `thinkingLevel` (low · medium · high — không tắt hẳn được). Google trả 400 vì cấu hình suy nghĩ ⇒ gửi
+ *    lại MỘT lần KHÔNG kèm cấu hình đó (mặc định của Google) thay vì làm hỏng lượt chat. Model khác để mặc định.
+ *  · Model mặc định `gemini-3.5-flash-lite` (02/10/2026: khoá Gemini MỚI gọi `gemini-2.5-flash-lite` nhận 404 «no longer
+ *    available to new users», Google chỉ sang 3.5-flash-lite).
  *  · Schema tool: Gemini nhận TẬP CON OpenAPI (không `additionalProperties`…) ⇒ giữ đúng các khoá nó nhận (`toGeminiSchema`).
  *  · Quá tải (429 / 500 / 503 — log bot nhà đầy «Gemini 503 high demand») ⇒ thử lại sau 2 giây · 4 giây rồi mới báo lỗi.
  */
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-lite";
+export const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
+
+/** Cấu hình suy nghĩ theo dòng model. HÀM THUẦN. */
+export function geminiThinkingConfig(model: string, reasoning: AiRequest["reasoning"]): Record<string, unknown> | null {
+  if (/^gemini-2\.5-flash/.test(model)) return { thinkingBudget: reasoning === "high" ? 4096 : reasoning === "medium" ? 1024 : 0 };
+  if (/^gemini-3/.test(model) && reasoning) return { thinkingLevel: reasoning };
+  return null;
+}
 const GEMINI_SCHEMA_KEYS = new Set(["type", "description", "enum", "properties", "required", "items", "format", "nullable", "minimum", "maximum"]);
 const GEMINI_RETRY_MS = [2_000, 4_000];
 const GEMINI_TIMEOUT_MS = 120_000;
@@ -248,11 +258,12 @@ export class ByokGeminiProvider implements AiProvider {
 
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
-    const thinking = /^gemini-2\.5-flash/.test(this.model) ? { thinkingConfig: { thinkingBudget: req.reasoning === "high" ? 4096 : req.reasoning === "medium" ? 1024 : 0 } } : {};
+    const thinkingConfig = geminiThinkingConfig(this.model, req.reasoning);
+    const generationConfig: Record<string, unknown> = { maxOutputTokens: req.maxTokens ?? 4000, ...(thinkingConfig ? { thinkingConfig } : {}) };
     const body = {
       systemInstruction: { parts: [{ text: req.system }] },
       contents: toGeminiContents(req.messages),
-      generationConfig: { maxOutputTokens: req.maxTokens ?? 4000, ...thinking },
+      generationConfig,
       ...(req.tools.length ? { tools: [{ functionDeclarations: req.tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.inputSchema) })) }] } : {}),
     };
     const url = `${GEMINI_BASE_URL}/models/${encodeURIComponent(this.model)}:generateContent`;
@@ -263,6 +274,10 @@ export class ByokGeminiProvider implements AiProvider {
       if (res.ok) break;
       if ([429, 500, 503].includes(res.status) && attempt < GEMINI_RETRY_MS.length) {
         await this.sleep(GEMINI_RETRY_MS[attempt]);
+        continue;
+      }
+      if (res.status === 400 && "thinkingConfig" in generationConfig && /thinking/i.test(String(data?.error?.message ?? ""))) {
+        delete generationConfig.thinkingConfig;
         continue;
       }
       throw new Error(`Gemini trả lỗi HTTP ${res.status}: ${String(data?.error?.message ?? "").slice(0, 300).split(this.apiKey).join("…")}`);

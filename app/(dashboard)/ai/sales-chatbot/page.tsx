@@ -18,6 +18,8 @@ import { FollowupPanel } from "./followup-panel";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
 import { ResumeToAiButton } from "./resume-button";
+import { ChatCostPanel } from "./cost-panel";
+import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 
 export const metadata = { title: "Chatbot bán hàng" };
@@ -41,6 +43,8 @@ export default async function SalesChatbotPage() {
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const [playbook, playbookRun] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun()]) : [null, null];
+  // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
+  const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
     const row = connections.find((c) => c.connectorKey === k);
@@ -98,6 +102,7 @@ export default async function SalesChatbotPage() {
               </div>
             </SectionCard>
           ) : null}
+          {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (

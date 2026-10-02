@@ -3,7 +3,7 @@
  * Không gọi mạng thật (luật 65): `fetch` giả ghi lại mọi yêu cầu.
  */
 import assert from "node:assert/strict";
-import { ByokGeminiProvider, GEMINI_DEFAULT_MODEL, toGeminiContents, toGeminiSchema } from "@/lib/ai-builder/providers";
+import { ByokGeminiProvider, GEMINI_DEFAULT_MODEL, geminiThinkingConfig, toGeminiContents, toGeminiSchema } from "@/lib/ai-builder/providers";
 import { estimateCostUsd, type AiRequest } from "@/lib/ai/provider";
 import { CONNECTORS } from "@/lib/connectors/registry";
 import { GEMINI_MODELS_URL, ORG_CONNECTION_TESTERS, testGeminiKey } from "@/lib/connectors/testers";
@@ -46,10 +46,13 @@ export async function testGeminiProvider() {
   const req: AiRequest = { system: "Bạn là trợ lý", messages: [{ role: "user", content: [{ type: "text", text: "giá chả cá thu" }] }], tools: [{ name: "search_products", description: "Tìm", inputSchema: schema }], maxTokens: 4000, reasoning: "low" };
   const r = await p.complete(req);
   const s0 = fc.seen[0];
-  assert.ok(s0.url.endsWith("/models/gemini-2.5-flash-lite:generateContent") && !s0.url.includes(KEY), s0.url);
+  assert.ok(s0.url.endsWith("/models/gemini-3.5-flash-lite:generateContent") && !s0.url.includes(KEY), s0.url);
   assert.equal((s0.init?.headers as Record<string, string>)["x-goog-api-key"], KEY);
   assert.equal(s0.init?.redirect, "manual");
-  assert.deepEqual((s0.body.generationConfig as Record<string, unknown>).thinkingConfig, { thinkingBudget: 0 }, "low ⇒ tắt suy nghĩ");
+  assert.deepEqual((s0.body.generationConfig as Record<string, unknown>).thinkingConfig, { thinkingLevel: "low" }, "Gemini 3: low ⇒ thinkingLevel low");
+  assert.deepEqual(geminiThinkingConfig("gemini-2.5-flash-lite", "low"), { thinkingBudget: 0 }, "dòng 2.5: low ⇒ tắt suy nghĩ");
+  assert.equal(geminiThinkingConfig("gemini-3.5-flash-lite", undefined), null, "không khai mức ⇒ mặc định của Google");
+  assert.equal(geminiThinkingConfig("gemma-3", "low"), null);
   assert.ok(!JSON.stringify(s0.body.tools).includes("additionalProperties"));
   assert.ok(r.stopReason === "tool_use" && r.content[0].type === "tool_use" && r.content[0].name === "search_products" && r.content[0].id.endsWith("|SIG9"), JSON.stringify(r));
   assert.deepEqual(r.usage, { inputTokens: 1000, outputTokens: 40, cacheReadTokens: 200, cacheWriteTokens: 0 }, "token suy nghĩ tính vào token ra");
@@ -63,6 +66,11 @@ export async function testGeminiProvider() {
   const fr = fakeGemini([{ status: 503, body: { error: { message: "high demand" } } }, { body: { candidates: [{ content: { parts: [{ text: "ok" }] } }], usageMetadata: {} } }]);
   const rr = await new ByokGeminiProvider({ apiKey: KEY, fetch: fr.fetch, sleep: async (ms) => void sleeps.push(ms) }).complete({ ...req, tools: [] });
   assert.ok(rr.content[0].type === "text" && fr.seen.length === 2 && sleeps.join(",") === "2000", JSON.stringify({ n: fr.seen.length, sleeps }));
+  // 400 vì CẤU HÌNH SUY NGHĨ ⇒ gửi lại một lần không kèm cấu hình đó (không làm hỏng lượt chat).
+  const ft4 = fakeGemini([{ status: 400, body: { error: { message: "Invalid value at 'generation_config.thinking_config.thinking_level'" } } }, { body: { candidates: [{ content: { parts: [{ text: "ok" }] } }], usageMetadata: {} } }]);
+  const r4 = await new ByokGeminiProvider({ apiKey: KEY, fetch: ft4.fetch }).complete({ ...req, reasoning: "medium", tools: [] });
+  assert.ok(r4.content[0].type === "text" && ft4.seen.length === 2, `thử lại: ${ft4.seen.length}`);
+  assert.ok("thinkingConfig" in (ft4.seen[0].body.generationConfig as Record<string, unknown>) && !("thinkingConfig" in (ft4.seen[1].body.generationConfig as Record<string, unknown>)), "lần hai bỏ cấu hình suy nghĩ");
   // 400 ⇒ ném lỗi đọc được, KHÔNG lộ khoá.
   const fe = fakeGemini([{ status: 400, body: { error: { message: `API key ${KEY} not valid` } } }]);
   await assert.rejects(new ByokGeminiProvider({ apiKey: KEY, fetch: fe.fetch }).complete({ ...req, tools: [] }), (e: Error) => /HTTP 400/.test(e.message) && !e.message.includes(KEY));
@@ -70,6 +78,9 @@ export async function testGeminiProvider() {
   // ── Giá: cùng bảng bot nhà; tiền tố dài nhất (flash-lite không bị tính giá flash) ──
   assert.equal(estimateCostUsd("gemini-2.5-flash-lite", { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0 }), 0.5);
   assert.equal(estimateCostUsd("gemini-2.5-flash-001", { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }), 0.3);
+  // Model mặc định PHẢI có giá — không thì bảng chi phí AI theo ngày của mọi tổ chức dùng Gemini chỉ in «—».
+  assert.equal(estimateCostUsd(GEMINI_DEFAULT_MODEL, { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0 }), 2.8);
+  assert.equal(estimateCostUsd("gemini-3.1-flash-lite-preview", { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }), 0.25);
 
   // ── Kết nối: sổ + kiểm tra (chỉ đọc, khoá ở header, không ở URL) + chatbot chọn được ──
   const c = CONNECTORS.find((x) => x.key === "gemini-byok");
