@@ -194,6 +194,19 @@ if [ -n "${PLATFORM_SECRETS_KEY_PREVIOUS:-}" ]; then
   esac
 fi
 
+# ═══ RELAY TELEGRAM — TELEGRAM_API_BASE (01/10/2026 · deploy/telegram-relay-worker.js) ═══
+# Máy chủ ở Việt Nam bị chặn api.telegram.org từng lúc ⇒ đi qua relay của nền tảng. Trống ⇒ giữ giá trị cũ / đi thẳng.
+# Chỉ nhận https://<tên miền>[/đường] (lib/connectors/telegram-api.ts kiểm lại lần nữa lúc dùng).
+if [ -n "${TELEGRAM_API_BASE:-}" ]; then
+  case "$TELEGRAM_API_BASE" in
+    https://*) case "${TELEGRAM_API_BASE#https://}" in
+        *[!A-Za-z0-9./_~-]*) warn "TELEGRAM_API_BASE có ký tự lạ — KHÔNG ghi (giữ giá trị cũ)." ;;
+        *) upsert_env TELEGRAM_API_BASE "${TELEGRAM_API_BASE}"; say "TELEGRAM_API_BASE: ${TELEGRAM_API_BASE}" ;;
+      esac ;;
+    *) warn "TELEGRAM_API_BASE phải bắt đầu bằng https:// — KHÔNG ghi." ;;
+  esac
+fi
+
 # ═══ TÊN MIỀN CON CỦA TỔ CHỨC — PLATFORM_BASE_DOMAIN (0180 · docs/platform/self-service-journey.md) ═══
 # Rỗng ⇒ GIỮ nguyên (mặc định: không định tuyến theo tên miền con). Chỉ nhận tên miền thuần (chữ, số, chấm, gạch) — ký tự
 # khác ⇒ không ghi. Bật thật cần thêm bản ghi DNS `*.<miền>` trỏ về máy này; khối `*.{$ERP_DOMAIN}` của Caddyfile hỏi
