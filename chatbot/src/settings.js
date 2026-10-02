@@ -160,26 +160,30 @@ class Settings {
   }
 
   /**
-   * BOT LEN DON (orderbot.js): bat/tat va so phut CHO khach nhan not thong tin truoc khi dua vao hang "can duyet".
-   * Mac dinh BAT, cho 120 phut. Bat thi luong ghi don cu (sau cau tom tat chot don) nhuong han cho bot nay.
+   * BOT LEN DON (orderbot.js). Chu shop 02/10/2026: moi SDT khach go tren page bot dang chat -> kiem MOI `checkEveryMinutes`
+   * phut (mac dinh 30) mot lan; du thong tin thi len don + xac nhan va thoi kiem; qua `maxChecks` lan (mac dinh 3) van chua
+   * du thi bao ERP. Tat duoc tren trang Bot len don.
    */
   orderBot() {
     const o = this.global.orderBot || {};
-    // autoConfirm: MAC DINH BAT (chu shop 01/10/2026: "neu da len chuan thi cho qua da xac nhan luon"). Don CHAC CHAN
-    // (dia chi khop du cap, san pham khop POS, khach chot tong tien, khong co don khac) chuyen "Moi" -> "Da xac nhan";
-    // con lai van la don nhap. Tat duoc tren trang Bot len don.
-    return { enabled: o.enabled !== false, waitMinutes: Number(o.waitMinutes) > 0 ? Number(o.waitMinutes) : 120, autoConfirm: o.autoConfirm !== false };
+    const so = (v, lo, hi, md) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Math.round(Number(v)) : md);
+    // autoConfirm: MAC DINH BAT (chu shop 01/10/2026: "neu da len chuan thi cho qua da xac nhan luon").
+    return { enabled: o.enabled !== false, checkEveryMinutes: so(o.checkEveryMinutes, 10, 240, 30), maxChecks: so(o.maxChecks, 1, 10, 3), autoConfirm: o.autoConfirm !== false };
   }
 
-  setOrderBot({ enabled, waitMinutes, autoConfirm }) {
-    const cur = this.orderBot();
-    const next = { ...cur };
+  setOrderBot({ enabled, checkEveryMinutes, maxChecks, autoConfirm }) {
+    const next = { ...this.orderBot() };
     if (enabled !== undefined) next.enabled = !!enabled;
     if (autoConfirm !== undefined) next.autoConfirm = autoConfirm === true;
-    if (waitMinutes !== undefined) {
-      const n = Math.round(Number(waitMinutes));
-      if (!Number.isFinite(n) || n < 10 || n > 24 * 60) throw new Error("Thoi gian cho phai tu 10 den 1440 phut");
-      next.waitMinutes = n;
+    if (checkEveryMinutes !== undefined) {
+      const n = Math.round(Number(checkEveryMinutes));
+      if (!Number.isFinite(n) || n < 10 || n > 240) throw new Error("Nhịp kiểm phải từ 10 đến 240 phút");
+      next.checkEveryMinutes = n;
+    }
+    if (maxChecks !== undefined) {
+      const n = Math.round(Number(maxChecks));
+      if (!Number.isFinite(n) || n < 1 || n > 10) throw new Error("Số lần kiểm phải từ 1 đến 10");
+      next.maxChecks = n;
     }
     this.global.orderBot = next;
     fs.writeFileSync(this.globalFile, JSON.stringify(this.global, null, 2));

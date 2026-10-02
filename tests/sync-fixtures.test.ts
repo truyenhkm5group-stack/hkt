@@ -169,6 +169,7 @@ import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
 import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
+import { testChatbotOrderBotAlerts } from "./chatbot-orderbot-alerts.test";
 import { testDuplicateMetrics } from "./duplicate-metrics.test";
 import { testLogisticsStatusBoundary } from "./logistics-status-boundary.test";
 import { testSchedulerCoverage } from "./scheduler-coverage.test";
@@ -2499,6 +2500,7 @@ async function main() {
   testChatbotDeployShape();
   await testChatbotImportGuards();
   await testChatbotAdBots();
+  testChatbotOrderBotAlerts();
   testDeployScript();
   testApplyGithubEnvBlock();
   testOpsConcurrency();
