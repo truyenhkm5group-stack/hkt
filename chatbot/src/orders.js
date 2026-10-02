@@ -798,14 +798,16 @@ export class OrderSync {
 
   /**
    * NHAN VIEN DA TU LEN DON cho khach nay chua: don (khong nhap / huy / xoa) cua cung SDT hoac cung hoi thoai, TAO SAU
-   * khi bot bat dau theo doi hoi thoai (tru 6 gio lui), hoac dang "Da xac nhan / Cho hang / Dang dong hang" trong 14 ngay.
-   * Khong dung moi don 14 ngay: khach mua lai sau khi don truoc da giao van phai duoc len don moi.
+   * khi bot bat dau theo doi hoi thoai (tru 6 gio lui).
+   * KHONG tinh don cu hon moc du dang "Da xac nhan / Dang dong hang": su co Binh Nguyen 02/10/2026 — don #5509 (Q005,
+   * tao 30/09, dang dong hang) bi coi la "nhan vien da len don" cho lan mua Q003 hom nay, bot im lang bo qua, khong ai
+   * biet. Don cu van chan TU XAC NHAN (confirmOrder -> otherOrders) va dua don moi vao "can duyet" kem ly do.
    */
   async staffHandledOrder(conversationId, phones, since) {
     const moc = (since || Date.now()) - 6 * 3600e3;
     for (const ph of [...new Set((phones || []).map(normalizePhone).filter(Boolean))].slice(-3)) {
       const list = await this.otherOrders(conversationId, ph);
-      const hit = list.find((o) => [1, 11, 12].includes(Number(o.status)) || Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) >= moc);
+      const hit = list.find((o) => Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) >= moc);
       if (hit) return hit;
     }
     return null;
