@@ -1524,6 +1524,33 @@ export const priceListItems = pgTable(
  * từ Pancake ở tổ chức nhà. `credit_limit` / `payment_terms_days` NULL = CHƯA KHAI (không chặn, không tính quá hạn),
  * không phải 0. Công nợ không lưu ở đây: nó tính lúc đọc từ chứng từ thanh toán (`lib/queries/receivables.ts`).
  */
+/**
+ * SỔ LIÊN HỆ KHÁCH (0189) — mỗi lần gọi / nhắn / gặp khách một dòng, chỉ thêm. Người làm đi bằng khoá `users.id`, tên là
+ * ảnh chụp do máy chủ đọc (luật 34). "Đến hạn mua lại" KHÔNG lưu ở đâu: tính lúc đọc từ lịch sử đơn (lib/constants/reorder.ts).
+ */
+export const customerTouchpoints = pgTable(
+  "customer_touchpoints",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    outcome: text("outcome").notNull(),
+    note: text("note").notNull().default(""),
+    nextContactOn: date("next_contact_on", { mode: "string" }),
+    at: ts("at").notNull().defaultNow(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    userName: text("user_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("customer_touchpoints_customer_at_idx").on(t.customerId, t.at),
+    check("customer_touchpoints_kind_check", sql`${t.kind} IN ('CALL','MESSAGE','VISIT','OTHER')`),
+    check("customer_touchpoints_outcome_check", sql`${t.outcome} IN ('WILL_ORDER','NOT_NOW','NO_ANSWER','DECLINED','OTHER')`),
+  ],
+);
+
 export const customerTradeTerms = pgTable(
   "customer_trade_terms",
   {

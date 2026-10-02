@@ -42,6 +42,10 @@ import { NAV_MODULES } from "@/lib/constants/department-modules";
 type NhomTuyen = "AUTH_ONLY" | "API_ONLY" | "INTENTIONALLY_EXCLUDED";
 
 const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
+  "/customers/reorder": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Nhắc mua lại đọc lịch sử ĐƠN TẠO TAY (0189) — tổ chức nhà đồng bộ đơn Pancake nên trang cố ý trả 404 ở nhà (mục menu tenantOnly); smoke chạy bằng quản trị của NHÀ. Trang được kiểm bằng tests/reorder-reminders.test.ts trên tổ chức khách thật.",
+  },
   "/customers/receivables": {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Công nợ đọc từ phiếu thu của ĐƠN TẠO TAY (0188) — tổ chức nhà đồng bộ đơn Pancake nên trang cố ý trả 404 ở nhà (mục menu tenantOnly); smoke chạy bằng quản trị của NHÀ. Trang được kiểm bằng tests/price-lists-receivables.test.ts trên tổ chức khách thật.",

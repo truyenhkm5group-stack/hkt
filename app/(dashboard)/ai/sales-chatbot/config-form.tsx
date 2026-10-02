@@ -147,6 +147,16 @@ export function ChatbotConfigForm({ config, fields, connections }: { config: Sal
           </label>
           <Textarea rows={2} value={c.handoff.message} maxLength={300} aria-label="Câu khi chuyển nhân viên" onChange={(e) => set("handoff", { ...c.handoff, message: e.target.value })} />
         </fieldset>
+        <fieldset className="space-y-2 rounded-lg border p-3" data-wholesale-pricing>
+          <legend className="px-1 text-sm font-medium">Khách sỉ</legend>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={c.wholesalePricing} onChange={(e) => set("wholesalePricing", e.target.checked)} />
+            <span>
+              Báo giá theo <span className="font-medium">Bảng giá sỉ</span> (Sản phẩm → Bảng giá sỉ)
+              <span className="block text-xs text-muted-foreground">Tắt: bot chỉ có giá lẻ và chuyển nhân viên với mọi câu hỏi sỉ. Bật: bot báo đúng giá theo bậc số lượng của bảng gán cho khách (hoặc bảng mặc định), không tự giảm thêm; khách đòi giá thấp hơn bảng thì chuyển nhân viên.</span>
+            </span>
+          </label>
+        </fieldset>
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">

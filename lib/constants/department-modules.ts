@@ -165,6 +165,14 @@ export const NAV_MODULES = [
     why: "Khách sỉ mua chịu: người bán là người gọi nhắc trả và quyết có chốt đơn tiếp không — công nợ đứng cạnh hồ sơ khách.",
   },
   {
+    href: "/customers/reorder",
+    label: "Nhắc mua lại",
+    zone: "SALES",
+    permission: "customers:view",
+    tenantOnly: true,
+    why: "Gọi khách TRƯỚC khi họ mua chỗ khác là việc của người bán — danh sách đến hạn tính từ nhịp mua thật của từng khách.",
+  },
+  {
     href: "/products/price-lists",
     label: "Bảng giá sỉ",
     zone: "SALES",
