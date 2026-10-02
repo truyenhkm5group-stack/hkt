@@ -218,6 +218,22 @@ class Store {
     this._save();
     return true;
   }
+  /**
+   * HO SO DON THEO HOI THOAI: lan dau thay khach da cho DU thong tin (SDT + dia chi + so do/size + mau) thi ghi lai,
+   * de cac luot sau khong phai doc lai tu cua so ~30 tin gan nhat (tin cu troi mat -> bot hoi lai thu da biet).
+   * Su co 02/10/2026 (Bui Phuong Vy, Linh Tay Luxury). Giu 35 ngay.
+   */
+  getOrderInfo(conversationId) {
+    return (this.state.orderInfo || {})[String(conversationId)] || null;
+  }
+  setOrderInfo(conversationId, info) {
+    if (!conversationId) return;
+    const all = (this.state.orderInfo ||= {});
+    all[String(conversationId)] = { ...info, t: Date.now() };
+    const cutoff = Date.now() - 35 * 86400000;
+    for (const [k, v] of Object.entries(all)) if ((v.t || 0) < cutoff) delete all[k];
+    this._save();
+  }
   countOrders(days, pageId) {
     const set = new Set(days);
     let n = 0;

@@ -266,6 +266,28 @@ export class Bot {
   }
 
   /**
+   * Khach XIN HUY DON: "retain" = lan dau -> hoi ly do, sua loi cua shop, dua uu dai giu don (KHONG xac nhan huy);
+   * "accept" = khach xin huy LAN NUA sau khi shop da hoi -> ghi nhan huy + chuyen nhan vien; null = khong xin huy, hoac
+   * sau tin huy khach da dong y giu don. Chu shop 02/10/2026 (Thu Thuy, Linh Tay CS1: "Dạ cho e hủy nha c" -> bot ghi
+   * nhan huy luon): "phải hỏi lại tại sao, thuyết phục khách mua, có thể giảm giá thêm, sao hủy luôn vậy".
+   */
+  cancelStage(pageId, messages) {
+    const HUY = /(hủy|huỷ|hũy|cancel|bỏ đơn|(?:^|\s)(không|ko|k|hông) (lấy|mua|nhận|đặt) (nữa|đâu)|thôi (không|ko|k) (lấy|mua|đặt))/i;
+    const HOI = /\?|được (không|ko|k)\b|đc (không|ko|k)\b|có được|có (hủy|huỷ) được/i; // hoi "huy duoc khong" la hoi, chua phai xin huy
+    const GIU = /^(ok|oke|okie|ừ|uh|vâng|dạ vâng|được|đc|đồng ý)(?![\p{L}])|giữ (đơn|lại)|vẫn (lấy|mua|nhận)|(lấy|nhận) (nhé|nha|nhe)|chốt|gửi (đi|hàng đi)/iu;
+    const khach = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => String(this.messageText(m) || "").normalize("NFC").trim());
+    const laHuy = (t) => HUY.test(t) && !HOI.test(t);
+    let cuoi = -1;
+    let soLan = 0;
+    khach.forEach((t, i) => {
+      if (laHuy(t)) (cuoi = i), soLan++;
+    });
+    if (cuoi < 0) return null;
+    if (khach.slice(cuoi + 1).some((t) => GIU.test(t) && !laHuy(t))) return null;
+    return soLan >= 2 ? "accept" : "retain";
+  }
+
+  /**
    * Khach che PHI SHIP sau khi bot da gui ban chot don ("van co ship a", "ai tinh ship vao dau", "co ship thi khong lay")
    * -> ap dung ngay Buoc 1 cua quy trinh giam gia: MIEN SHIP, neu lai tong moi. Tra ve cau tra loi chuan hoac null.
    * Su co 2026-09-16 (Hang Phan, CS2): bot bam khoi "don da chot" nen chi hoi "giu don hay len combo", roi de nghi huy don.
@@ -534,7 +556,7 @@ export class Bot {
     return { h, w };
   }
 
-  customerFacts(pageId, messages) {
+  customerFacts(pageId, messages, { noStored = false } = {}) {
     const loi = (messages || []).filter((m) => !this.isFromPage(m, pageId)).map((m) => String(this.messageText(m) || ""));
     const phone = loi.some((t) => phonesInText(t).length > 0);
     const DIA_CHI = /(phường|phuong|xã|thị trấn|thị xã|quận|huyện|huyen|tp\.?\s|thành phố|thanh pho|tỉnh|tinh\s|đường|duong\s|ngõ|ngách|hẻm|kiệt|thôn|xóm|ấp|tổ\s*\d|khu phố|số nhà|chung cư|kđt|khu đô thị|tòa|toà|block)/i;
@@ -564,7 +586,94 @@ export class Bot {
     const { h, w } = this.customerMeasurements(pageId, messages);
     const chart = parseChart(settings.effective(pageId).sizeChart);
     const measured = w !== null && (h !== null || !!(chart && chart.length === 1));
-    return { phone, address, size, sizeFrom, color: this.customerColor(pageId, messages), measured, h, w };
+    const facts = { phone, address, size, sizeFrom, color: this.customerColor(pageId, messages), measured, h, w };
+    // Ho so don da ghi (khach da cho du thong tin quanh luc gui SDT): tin cu troi khoi cua so ~30 tin thi van nho
+    const luu = noStored ? null : this.scopedOrderInfo(pageId);
+    if (luu) {
+      const s = luu.facts || {};
+      facts.phone = true;
+      facts.address ||= s.address || null;
+      if (!facts.size && s.size) (facts.size = s.size), (facts.sizeFrom = s.sizeFrom || "khach");
+      facts.color ||= s.color || null;
+      if (!facts.measured && s.measured) (facts.measured = true), (facts.h = s.h ?? null), (facts.w = s.w ?? null);
+    }
+    return facts;
+  }
+
+  /**
+   * Ho so don cua HOI THOAI DANG XU LY (doc tu pham vi luot xu ly), chi khi da du thong tin. Ngoai luot xu ly -> null.
+   */
+  scopedOrderInfo(pageId) {
+    const conv = aiScope.getStore()?.conversationId;
+    if (!conv) return null;
+    const info = store.getOrderInfo(conv);
+    return info?.complete && info.p === String(pageId) ? info : null;
+  }
+
+  /**
+   * Khach DA GUI SDT: xet 30 tin truoc tin chua SDT (va moi tin sau no) xem da DU thong tin len don chua —
+   * SDT + dia chi + so do/size + mau (mau chi bat buoc khi mau dang ban co tu 2 mau). Ham thuan, khong doc/ghi store.
+   * Chu shop 02/10/2026: "nếu đơn đã có sđt thì check 30 tin trước thời điểm cho sđt, đủ thông tin thì không hỏi lại
+   * nữa, kết thúc hội thoại sớm" (su co Bui Phuong Vy: bot hoi "Em lên đơn…" 6 lan va xin lai so do 3 lan).
+   */
+  orderInfoFromPhone(pageId, messages) {
+    const list = messages || [];
+    let idx = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (!this.isFromPage(list[i], pageId) && phonesInText(this.messageText(list[i])).length) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return null;
+    const vung = list.slice(Math.max(0, idx - 30));
+    const f = this.customerFacts(pageId, vung, { noStored: true });
+    const canMau = this.productColors(pageId, vung).length > 1;
+    const complete = !!f.phone && !!f.address && (!!f.size || f.measured) && (!!f.color || !canMau);
+    return {
+      complete,
+      phoneMsgId: list[idx].id || null,
+      before: idx,
+      facts: { address: f.address, size: f.size, sizeFrom: f.sizeFrom, color: f.color, measured: f.measured, h: f.h, w: f.w },
+    };
+  }
+
+  /**
+   * Cap nhat ho so don cua hoi thoai truoc khi tra loi. Cua so Pancake chi ~30 tin: SDT nam sat dau cua so (chua du
+   * 30 tin truoc no) hoac da troi ra ngoai (Pancake van giu SDT cua hoi thoai) -> doc them lich su, toi da 1 lan / 10 phut
+   * khi chua du. Da du thi ghi lai, cac luot sau khong doc lai nua.
+   */
+  async refreshOrderInfo(client, pageId, conversationId, messages, data) {
+    const cu = store.getOrderInfo(conversationId);
+    if (cu?.complete && cu.p === String(pageId)) return cu;
+    let info = this.orderInfoFromPhone(pageId, messages);
+    const cuaSoDay = (messages || []).length >= 20;
+    const sdtNgoai = !info && cuaSoDay && [...(data?.conv_phone_numbers || []), ...(data?.recent_phone_numbers || [])].length > 0;
+    const thieuTruoc = !!info && !info.complete && info.before < 30 && cuaSoDay;
+    if ((sdtNgoai || thieuTruoc) && !(cu && Date.now() - (cu.t || 0) < 10 * 60e3)) {
+      try {
+        const dai = await this.fetchMoreHistory(client, conversationId, messages, 120);
+        info = this.orderInfoFromPhone(pageId, dai) || info;
+      } catch (e) {
+        log.warn(`[${pageId}] ${conversationId}: khong doc them duoc lich su de xet ho so don (${e.message})`);
+      }
+      if (!info) store.setOrderInfo(conversationId, { p: String(pageId), complete: false });
+    }
+    if (!info) return null;
+    store.setOrderInfo(conversationId, { p: String(pageId), complete: info.complete, phoneMsgId: info.phoneMsgId, facts: info.facts });
+    if (info.complete) log.info(`[${pageId}] ${conversationId}: khach da cho DU thong tin quanh luc gui SDT -> coi nhu don da chot, thoi hoi them`);
+    return info.complete ? info : null;
+  }
+
+  /** Cac mau tren POS cua mau dang ban (ma nhac gan nhat trong hoi thoai, hoac Mau chu luc cua page). Khong ro -> []. */
+  productColors(pageId, messages) {
+    const eff = settings.effective(pageId);
+    const tatCa = (messages || []).map((m) => String(this.messageText(m) || ""));
+    const maNhac = tatCa.flatMap((t) => t.match(/\bQ\d{3}\b/gi) || []).pop();
+    const ma = String(maNhac || eff.defaultProduct || "").toUpperCase();
+    const sp = ma && catalog.products.find((p) => String(p.code || "").toUpperCase() === ma);
+    if (!sp) return [];
+    return [...new Set((sp.variations || []).map((v) => v.fields?.["Màu"]).filter(Boolean))];
   }
 
   /**
@@ -572,13 +681,7 @@ export class Bot {
    * ten mau day du, hoac mot tu RIENG cua mau do (cung luat voi unconfirmedColorInSummary). Khong doan: null = chua chon.
    */
   customerColor(pageId, messages) {
-    const eff = settings.effective(pageId);
-    const tatCa = (messages || []).map((m) => String(this.messageText(m) || ""));
-    const maNhac = tatCa.flatMap((t) => t.match(/\bQ\d{3}\b/gi) || []).pop();
-    const ma = String(maNhac || eff.defaultProduct || "").toUpperCase();
-    const sp = ma && catalog.products.find((p) => String(p.code || "").toUpperCase() === ma);
-    if (!sp) return null;
-    const mauPOS = [...new Set((sp.variations || []).map((v) => v.fields?.["Màu"]).filter(Boolean))];
+    const mauPOS = this.productColors(pageId, messages);
     if (!mauPOS.length) return null;
     const phang = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, "");
     const tu = (x) => String(x || "").toLowerCase().normalize("NFC").split(/[^\p{L}]+/u).filter((w) => w.length >= 2);
@@ -611,7 +714,8 @@ export class Bot {
       `- Số điện thoại: ${f.phone ? "ĐÃ CÓ" : "CHƯA CÓ"}`,
       `- Địa chỉ: ${f.address ? `ĐÃ CÓ ("${f.address}")` : "CHƯA CÓ"}`,
     ];
-    if (!f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
+    const daChot = this.orderClosedIn(pageId, messages);
+    if (!daChot && !f.color && !f.size && !f.measured && !f.phone && !f.address) return "";
     const daHuaFreeShip = (messages || []).some((m) => this.isFromPage(m, pageId) && /(hỗ trợ|tặng|được|free|em)\s*(miễn phí|free)\s*(vận chuyển|ship|phí ship)/i.test(this.messageText(m)));
     if (daHuaFreeShip) dong.push("- Phí ship: shop ĐÃ hứa MIỄN PHÍ vận chuyển cho khách này — tổng tiền KHÔNG cộng phí ship");
     const maChuLuc = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
@@ -625,6 +729,14 @@ export class Bot {
     else if (!f.phone) tiep = "xin số điện thoại";
     else if (!f.address) tiep = "xin địa chỉ nhận hàng";
     else tiep = "đủ thông tin rồi: tóm tắt lại đơn (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận. Khách lấy NHIỀU MÀU thì MỖI MÀU MỘT DÒNG kèm số lượng và size, dùng đúng tên màu trong danh mục (vd \"• 1 Đen XL\" và \"• 1 Đỏ Đô XL\"), KHÔNG gộp \"màu Đen, Đỏ x 2\"";
+    // Don da chot / khach da cho du thong tin quanh luc gui SDT: thoi dan khach di tiep, tra loi dung cau hoi roi dung
+    if (daChot) {
+      // Don chot roi: dong "CHƯA CÓ" (tin cu troi khoi cua so) chi lam AI tuong con thieu ma hoi lai -> bo
+      for (let i = dong.length - 1; i >= 0; i--) if (/CHƯA (CÓ|CHỌN)/.test(dong[i])) dong.splice(i, 1);
+      const daGuiTomTat = (messages || []).some((m) => this.isFromPage(m, pageId) && isOrderSummaryReply(this.messageText(m), false));
+      tiep = `ĐƠN ĐÃ ĐỦ THÔNG TIN. TUYỆT ĐỐI KHÔNG hỏi thêm bất cứ thông tin nào (số đo, size, màu, SĐT, địa chỉ), KHÔNG hỏi "em lên đơn nhé?" / "chị cần hỗ trợ gì thêm không?", KHÔNG mời mua thêm. ${daGuiTomTat ? "Shop ĐÃ gửi bản chốt đơn rồi: KHÔNG gửi lại; chỉ trả lời đúng câu khách vừa hỏi trong 1–2 câu rồi dừng" : "Gửi bản tóm tắt chốt đơn MỘT lần (mẫu, màu, size, giá, SĐT, địa chỉ) để khách xác nhận, không kèm câu hỏi nào khác"}.
+- Tin ngắn của khách ("Ok", "Ừ em", "Không em", "Được", tim/like…): ĐỌC CÂU SHOP VỪA GỬI NGAY TRƯỚC để hiểu khách đang trả lời điều gì rồi đáp đúng ý đó — đồng ý lên đơn/gửi hàng thì xác nhận ngắn là đơn sẽ được gửi; trả lời "không" cho câu hỏi "cần hỗ trợ thêm gì" thì chào ngắn rồi thôi; khách xác nhận một thông tin thì ghi nhận ngắn. Không đáp mẫu, không hỏi lại`;
+    }
     return `
 
 ## ĐƠN ĐANG CHỐT VỚI KHÁCH NÀY (hệ thống tự đọc từ tin của khách)
@@ -955,13 +1067,16 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
 
   /** Hoi thoai nay da chot don xong chua (shop da gui ban tom tat / tin cam on sau chot don) */
   orderClosedIn(pageId, messages) {
+    // Khach da cho du thong tin quanh luc gui SDT (ho so don cua hoi thoai dang xu ly) = don da chot
+    if (this.scopedOrderInfo(pageId)) return true;
     const eff = settings.effective(pageId);
     const dau = String(eff.afterOrderText || "").trim().slice(0, 25);
     return (messages || [])
       .filter((m) => this.isFromPage(m, pageId))
       .some((m) => {
         const t = this.messageText(m);
-        if (/em chốt đơn cho|đơn của (anh|chị) (đã|em)|kiểm tra giúp em thông tin/i.test(t)) return true;
+        // "em chốt đơn đầm Q002 màu Đỏ size M cho chị" cung la chot don (truoc chi bat "em chốt đơn cho" -> Bui Phuong Vy 02/10)
+        if (/em (đã )?chốt đơn\b[^.?!\n]{0,80}\bcho\b|đơn của (anh|chị) (đã|em)|kiểm tra giúp em thông tin/i.test(t)) return true;
         return !!dau && t.includes(dau);
       });
   }
@@ -985,15 +1100,19 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     const text = String(reply || "").trim();
     if (!text || !this.orderClosedIn(pageId, messages)) return reply;
     const XIN = /(cho em xin|cho em biết|gửi em|xin lại)[^.?!\r\n]{0,80}(tên|số điện thoại|sđt|địa chỉ|chiều cao|cân nặng|số đo|size)/i;
-    if (!XIN.test(text)) return reply;
-    const cau = text.split(/(?<=[.?!\r\n])\s*/).filter((c) => c.trim() && !XIN.test(c));
-    const eff = settings.effective(pageId);
-    const xung = eff.customerTitle || "chị";
-    const Xung = xung[0].toUpperCase() + xung.slice(1);
+    // Cau moi chot / moi mua them ma model hoc lai tu lich su ("Em lên đơn gửi hàng cho chị luôn nhé ạ?") cung bo:
+    // don da chot roi thi hoi lai la lam phien (Bui Phuong Vy 02/10/2026: cau nay lap 6 lan)
+    const HOI_CHOT = /(lên đơn|chốt đơn|gửi hàng)[^.?!\r\n]{0,40}(luôn|nhé|nha|không|chưa)[^.?!\r\n]*\?|cần em (tư vấn|hỗ trợ)[^.?!\r\n]{0,30}(gì|không)[^.?!\r\n]*\?/i;
+    // Luot GIU DON (khach vua xin huy lan dau): cau moi giu don / gui hang la cau can thiet, khong cat
+    const giuDon = this.cancelStage(pageId, messages) === "retain";
+    const bo = (c) => XIN.test(c) || (!giuDon && HOI_CHOT.test(c));
+    if (!bo(text)) return reply;
+    const cau = text.split(/(?<=[.?!\r\n])\s*/).filter((c) => c.trim() && !bo(c));
+    const xung = settings.effective(pageId).customerTitle || "chị";
     const con = cau.join(" ").trim();
-    log.warn(`[${pageId}] Don da chot ma bot con doi xin thong tin -> da cat cau do`);
-    return `${con || `Dạ vâng ạ, em đã ghi nhận yêu cầu của ${xung} rồi ạ.`}
-${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
+    log.warn(`[${pageId}] Don da chot ma bot con doi xin thong tin / hoi chot lai -> da cat cau do`);
+    // Don da chot: khong gan them cau hoi nao (chu shop 02/10/2026: du thong tin thi ket thuc hoi thoai som)
+    return con || `Dạ vâng ạ, em đã ghi nhận đủ thông tin của ${xung} rồi ạ ❤️`;
   }
 
   ensureEndsWithQuestion(reply, pageId, messages) {
@@ -1500,8 +1619,13 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     // Tin chi la sticker / like / emoji (khong chu, khong anh): tra loi mau, khong ton tien Gemini
     const lastText = this.messageText(last);
 
+    // Ho so don: khach da gui SDT ma 30 tin truoc do da du thong tin -> coi nhu don da chot (thoi hoi them)
+    if (type === "INBOX") await this.refreshOrderInfo(client, pageId, conversationId, messages, data);
+
     // Don da chot ma khach chi cam on / noi loi ket: dap 1 cau ngan roi dung, khong hoi lai, khong ton tien Gemini
-    if (type === "INBOX" && this.isLoiKet(lastText) && this.orderClosedIn(pageId, messages)) {
+    // CHI loi CAM ON moi dap mau. "Ok", "Ừ em", "Không em"… nghia tuy cau shop vua hoi (dong y len don, tu choi tu van
+    // them, hay chi xa giao) -> de AI doc ngu canh ma tra loi (chu shop 02/10/2026: "tùy thuộc vào hoàn cảnh để suy luận").
+    if (type === "INBOX" && this.isLoiKet(lastText) && /(cảm ơn|cám ơn|thank|tks|cam on)/i.test(lastText) && this.orderClosedIn(pageId, messages)) {
       const xung = eff.customerTitle || "chị";
       const tinShop = messages.slice(-6).filter((m) => this.isFromPage(m, pageId)).map((m) => this.messageText(m));
       const daChaoRoi = tinShop.some((t) => /cảm ơn .{0,12}(đã )?(tin tưởng|ủng hộ|xác nhận)|chúc (anh|chị|mình).*(vui vẻ|tốt lành)/i.test(t));
@@ -1608,8 +1732,9 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
     if (saleActive) log.info(`[${pageId}] ${conversationId}: hoi thoai dang chay khuyen mai -> dung bang gia khuyen mai`);
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
-    // Don da chot xong thi khong can bang tien do nua (khoi mau thuan voi khoi "DA CHOT XONG" ben duoi)
-    if (!this.orderClosedIn(pageId, messages)) systemPrompt += this.orderProgressPrompt(pageId, messages);
+    // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
+    // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
+    systemPrompt += this.orderProgressPrompt(pageId, messages);
     if (this.orderClosedIn(pageId, messages)) {
       systemPrompt += `
 
@@ -1617,8 +1742,30 @@ ${Xung} cần em hỗ trợ thêm gì nữa không ạ?`;
 - Hội thoại này đã có bản chốt đơn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao, cân nặng, size, số điện thoại hay địa chỉ nữa.
 - Khách nhắn thêm thì chỉ xác nhận ngắn gọn, ghi nhận yêu cầu và cảm ơn.
 - Khách chê PHÍ SHIP hoặc đòi bớt SAU khi chốt ("vẫn có ship à", "ai tính ship", "có ship thì không lấy"): áp dụng ngay quy trình giảm giá của page (miễn phí ship trước), nêu lại tổng mới, mời chốt. TUYỆT ĐỐI KHÔNG hỏi "giữ đơn hay lên combo", KHÔNG đề nghị hủy đơn.
-- Nếu khách yêu cầu đổi ngày giao, đổi địa chỉ, đổi size, hủy đơn hay bất cứ thay đổi nào về đơn: xác nhận đã ghi nhận rồi thêm [[HANDOFF]] để nhân viên xử lý.
+- Nếu khách yêu cầu đổi ngày giao, đổi địa chỉ, đổi size hay thay đổi khác về đơn: xác nhận đã ghi nhận rồi thêm [[HANDOFF]] để nhân viên xử lý. (Khách xin HỦY đơn: làm theo mục "KHÁCH XIN HỦY ĐƠN" nếu có.)
 - Khách chỉ cảm ơn, nói ok, chào xã giao: đáp lại ĐÚNG MỘT câu ngắn rồi dừng. TUYỆT ĐỐI KHÔNG hỏi \"cần em hỗ trợ thêm gì không\" nữa, không mời chào thêm, không kéo dài hội thoại.`;
+    }
+
+    // Khach xin huy don: lan dau hoi ly do + giu don, xin lan nua moi ghi nhan huy (chu shop 02/10/2026)
+    const huyDon = type === "INBOX" ? this.cancelStage(pageId, messages) : null;
+    if (huyDon === "retain") {
+      log.info(`[${pageId}] ${conversationId}: khach xin huy don lan dau -> hoi ly do, giu don`);
+      store.bumpStat(pageId, "cancelRetain");
+      systemPrompt += `
+
+## KHÁCH XIN HỦY ĐƠN (lần đầu) — GIỮ ĐƠN, CHƯA ĐƯỢC XÁC NHẬN HỦY
+- Lượt này TUYỆT ĐỐI KHÔNG nói "em ghi nhận hủy đơn", KHÔNG thêm [[HANDOFF]]. Người bán thật sẽ hỏi lý do và cố giữ khách.
+- Đọc lại hội thoại: nếu SHOP đã làm sai (hứa miễn ship mà bản chốt vẫn cộng ship, báo giá lệch nhau, hỏi lại thông tin khách đã cho, gửi sai size/màu) thì mở đầu bằng lời xin lỗi ĐÚNG lỗi đó và SỬA NGAY (vd nêu lại tổng tiền đã miễn ship).
+- Hỏi nhẹ nhàng MỘT câu lý do (giá / phí ship, lo size không vừa, đổi ý màu/mẫu, hay lý do khác).
+- Lý do (hoặc ngữ cảnh cho thấy) là GIÁ / PHÍ SHIP: đưa ngay nấc ưu đãi KẾ TIẾP trong quy trình giảm giá của page (chưa miễn ship thì miễn ship trước; đã miễn ship thì nấc sau), nêu tổng mới. Không nhảy cóc, không xuống dưới giá sàn, chỉ dùng mức có trong hướng dẫn; page không có quy trình giảm giá thì KHÔNG tự giảm.
+- Lo size / chất lượng: nhắc được kiểm hàng trước khi nhận, không ưng không lấy, hỗ trợ đổi size.
+- Chính tin hủy đã nêu lý do cá nhân KHÔNG đổi được (đặt nhầm, đã mua chỗ khác, không có ai nhận, người nhà không cho): không thuyết phục, xác nhận đã ghi nhận hủy, cảm ơn và thêm [[HANDOFF]].
+- 2–3 câu, giọng chân thành, không trách khách, kết thúc bằng câu mời giữ đơn.`;
+    } else if (huyDon === "accept") {
+      systemPrompt += `
+
+## KHÁCH VẪN XIN HỦY ĐƠN (đã hỏi lý do / đưa ưu đãi rồi)
+- Tôn trọng quyết định, KHÔNG thuyết phục thêm, KHÔNG đưa thêm ưu đãi. Xác nhận ngắn đã ghi nhận hủy đơn, cảm ơn khách, chúc khách một ngày vui vẻ, rồi thêm [[HANDOFF]] để nhân viên hủy đơn trên hệ thống.`;
     }
 
     // Khach da co don / hoi "gui hang chua, bao gio nhan": dua trang thai don THAT tren POS vao prompt
