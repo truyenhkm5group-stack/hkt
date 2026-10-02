@@ -478,9 +478,32 @@ export class OrderSync {
     else if (!addr.commune) ly.push(`Chưa xác định được xã/phường trong ${addr.district.name}`);
     if (addr.ambiguous) ly.push(addr.ambiguous);
     if (addr.district && !/^cao/.test(addr.confidence || "")) ly.push(addr.note || `Địa chỉ chỉ khớp gần đúng (${addr.confidence})`);
-    const pho = String(addr.street || "").trim();
-    if (!hasStreetDetail(pho, [addr.commune?.name, addr.district?.name, addr.province?.name])) ly.push("Thiếu số nhà / thôn xóm / tên đường");
+    // Thieu so nha / thon KHONG con chan don (chu shop 02/10/2026, don Vo Lieu "xã Phước Thiền, Nhơn Trạch, Đồng Nai"):
+    // du tinh/huyen/xa thi shipper goi khach khi toi xa. Don ghi chu ro de nhan vien biet (streetNote).
     return [...new Set(ly)];
+  }
+
+  /** Dia chi da du tinh/huyen/xa nhung khach khong ghi so nha / thon / ten lang / moc -> mot dong ghi chu cho don */
+  streetNote(addr) {
+    return hasStreetDetail(addr.street, [addr.commune?.name, addr.district?.name, addr.province?.name]) ? "" : "⚠ Khách chưa ghi số nhà / thôn xóm — shipper gọi khách khi tới xã";
+  }
+
+  /**
+   * Khach noi "địa chỉ cũ" / "như cũ" ma tin nhan chi co ten xa: lay so nha / thon tu DON GAN NHAT cua chinh SDT do (khong
+   * huy / xoa) neu don do CUNG xa vua xac dinh. Khac xa hoac khong co don cu -> khong doan, tra null.
+   */
+  async previousStreet(phone, addr) {
+    if (!phone || !addr?.commune) return null;
+    const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { search: phone, page_size: 30 }).catch(() => null);
+    const list = (d?.data || [])
+      .filter((o) => ![6, 9].includes(Number(o.status)) && normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone)
+      .sort((a, b) => String(b.inserted_at).localeCompare(String(a.inserted_at)));
+    for (const o of list) {
+      const sa = o.shipping_address || {};
+      if (String(sa.commune_id || "") !== String(addr.commune.id)) continue;
+      if (hasStreetDetail(sa.address, [addr.commune.name, addr.district?.name, addr.province?.name])) return { street: String(sa.address).trim(), orderId: o.id };
+    }
+    return null;
   }
 
   async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "" }) {
@@ -512,6 +535,15 @@ export class OrderSync {
     }
 
     const addr = await this.resolveAddress(diaChiKhach, { pageName });
+    // "địa chỉ cũ / như cũ / như lần trước": dung so nha / thon cua don cu CUNG xa (su co Vo Lieu 01/10/2026)
+    if (addr.commune && this.streetNote(addr) && /(địa chỉ cũ|dia chi cu|như cũ|nhu cu|như lần trước|nhu lan truoc|như đơn trước|chỗ cũ|cho cu)/i.test(historyText)) {
+      const cu = await this.previousStreet(phone, addr);
+      if (cu) {
+        addr.street = cu.street;
+        addr.fullAddress = [cu.street, addr.commune?.name, addr.district?.name, addr.province?.name].filter(Boolean).join(", ");
+        addr.autoFixed = [addr.autoFixed, `số nhà / thôn lấy từ đơn cũ #${cu.orderId} của khách (khách nói "địa chỉ cũ")`].filter(Boolean).join("; ");
+      }
+    }
     if (strict) {
       const ly = [...this.addressGate(addr), ...(problems.length ? [`Một phần sản phẩm không khớp POS: ${problems.join("; ")}`] : [])];
       if (ly.length) return { status: "review", reasons: ly, draft: { ...nhap, resolved: addr.fullAddress } };
@@ -531,6 +563,7 @@ export class OrderSync {
       agreed ? `Khách chốt tổng ${agreed.toLocaleString("vi-VN")}đ${freeShip ? " (miễn ship)" : " (gồm ship)"}${discount ? `, đã ghi giảm ${discount.toLocaleString("vi-VN")}đ` : ""}` : "",
       `Địa chỉ ${addressOverride ? "nhân viên duyệt" : "khách ghi"}: "${diaChiKhach}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
       addr.note ? `⚠ ${addr.note}, nhân viên kiểm tra lại` : "",
+      this.streetNote(addr),
       addr.autoFixed ? `✓ ${addr.autoFixed}` : "",
       problems.length ? `⚠ ${problems.join("; ")}` : "",
       ex.note ? `Khách dặn: ${ex.note}` : "",
@@ -662,7 +695,7 @@ export class OrderSync {
     const sa = o.shipping_address || {};
     const duCap = (sa.province_id && sa.district_id && sa.commune_id) || (sa.new_province_id && sa.new_commune_id);
     if (!duCap) ly.push("địa chỉ thiếu tỉnh / huyện / xã");
-    if (!hasStreetDetail(sa.address, [sa.commune_name, sa.district_name, sa.province_name, sa.new_commune_name, sa.new_province_name])) ly.push("thiếu số nhà / thôn xóm / tên đường");
+    // Thieu so nha / thon: khong chan (xem addressGate) — trang xem truoc van hien dong nhac
     const items = o.items || [];
     if (!items.length) ly.push("đơn chưa có sản phẩm");
     else if (items.some((it) => !(it.variation_id || it.variation_info?.id) || !(Number(it.quantity) > 0))) ly.push("có dòng sản phẩm thiếu mẫu/màu/size hoặc số lượng");

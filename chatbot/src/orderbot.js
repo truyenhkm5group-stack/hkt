@@ -1,4 +1,4 @@
-import { orderSync, phonesInText, normalizePhone, ORDER_STATUS_VI } from "./orders.js";
+import { orderSync, phonesInText, normalizePhone, hasStreetDetail, ORDER_STATUS_VI } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -12,7 +12,7 @@ import { extractAdIds } from "./adpersona.js";
  * Bot tư vấn chỉ nói chuyện với khách. Bot này theo dõi các hội thoại bot đã trả lời, GỘP thông tin khách nhắn rải
  * rác nhiều lần (SĐT tin trước, địa chỉ tin sau, size tin giữa) và chỉ ghi đơn lên POS khi mọi thứ đã XÁC ĐỊNH:
  *  - SĐT khách tự gõ trong hội thoại, mẫu / màu / size khớp đúng biến thể POS,
- *  - địa chỉ khớp ĐỦ tỉnh / huyện / xã của Pancake bằng tên khách gõ (không dò gần đúng) + có số nhà / thôn xóm.
+ *  - địa chỉ khớp ĐỦ tỉnh / huyện / xã của Pancake bằng tên khách gõ (không dò gần đúng); thiếu số nhà chỉ ghi chú.
  * Ba trạng thái, không trạng thái nào bị bỏ quên:
  *  PENDING — còn thiếu thông tin, chờ khách nhắn nốt; im lặng quá `waitMinutes` ⇒ sang REVIEW.
  *  REVIEW  — đủ ý mua nhưng không chắc (địa chỉ không khớp đủ cấp, màu/size không có trên POS...) ⇒ nhân viên sửa & duyệt.
@@ -345,6 +345,7 @@ export class OrderBot {
         page: o.page?.name || this.bot.pageNames.get(String(o.page_id)) || "",
         ok: !reasons.length,
         reasons,
+        warnings: hasStreetDetail(sa.address, [sa.commune_name, sa.district_name, sa.province_name, sa.new_commune_name, sa.new_province_name]) ? [] : ["chưa có số nhà / thôn xóm — shipper gọi khách"],
         // Anh chup luc xem truoc: luc xac nhan, don phai CON Y NHU VAY (nhan vien sua giua chung thi khong dong vao)
         snap: { phone: String(o.bill_phone_number || sa.phone_number || ""), conversationId: o.conversation_id || "", items: (o.items || []).map((it) => ({ variation_id: String(it.variation_id || it.variation_info?.id || ""), quantity: Number(it.quantity) })) },
       });

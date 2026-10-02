@@ -1243,12 +1243,13 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(b.status, "review");
   assert.ok(b.reasons.some((r) => /2 quận\/huyện/.test(r)), "noi ro xa trung ten o 2 huyen: " + b.reasons.join("; "));
   assert.equal(posPosts.length, 1, "don khong chac chan KHONG duoc ghi len POS");
-  // (c) Du 3 cap nhung thieu so nha / thon xom -> can duyet
+  // (c) Du 3 cap nhung thieu so nha / thon xom -> VAN len don (chu shop 02/10/2026), ghi chu cho shipper goi khach
   diaChiKhach = "xã Sài Sơn, huyện Quốc Oai, Hà Nội";
   diaChiAI = { province: "Hà Nội", district: "Quốc Oai", commune: "Sài Sơn", street: "" };
   const c = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33c", customerName: "Hoa", historyText: chat(diaChiKhach), strict: true });
-  assert.equal(c.status, "review");
-  assert.ok(c.reasons.some((r) => /số nhà/.test(r)));
+  assert.equal(c.status, "created", JSON.stringify(c));
+  assert.match(posPosts[posPosts.length - 1].note, /chưa ghi số nhà/);
+  posPosts.pop();
   // (d) Nhan vien sua dia chi roi duyet -> len don
   diaChiAI = { province: "Hà Nội", district: "Thạch Thất", commune: "Tân Phú", street: "thôn 3" };
   const d = await os33.syncFromConversation({ pageId: "PAGE1", pageName: "Shop", conversationId: "C33b", customerName: "Hoa", historyText: chat("thôn 3, xã Tân Phú, Hà Nội"), strict: true, addressOverride: "thôn 3, xã Tân Phú, huyện Thạch Thất, Hà Nội" });
@@ -1582,6 +1583,17 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(hasStreetDetail("xã Sài Sơn", ["Xã Sài Sơn", "Huyện Quốc Oai", "Hà Nội"]), false);
   assert.equal(hasStreetDetail("Tân Phú, Tân Sơn, Phú Thọ", ["Xã Tân Phú", "Huyện Tân Sơn", "Phú Thọ"]), false);
   assert.equal(hasStreetDetail("", []), false);
+  // Khach noi "địa chỉ cũ": lay so nha tu don cu CUNG xa cua chinh SDT do; khac xa thi khong doan
+  const goiGoc = os39._call;
+  os39._call = async () => ({ data: [
+    { id: 90, status: 6, inserted_at: "2026-09-20T00:00:00", bill_phone_number: "0906933810", shipping_address: { commune_id: "C1", address: "ấp 3 đường số 7" } },
+    { id: 91, status: 4, inserted_at: "2026-09-10T00:00:00", bill_phone_number: "0906933810", shipping_address: { commune_id: "C1", address: "tổ 5 ấp Bến Sắn" } },
+    { id: 92, status: 4, inserted_at: "2026-09-25T00:00:00", bill_phone_number: "0906933810", shipping_address: { commune_id: "C2", address: "số 9 Lê Lợi" } },
+  ] });
+  const xaPT = { commune: { id: "C1", name: "Xã Phước Thiền" }, district: { name: "Huyện Nhơn Trạch" }, province: { name: "Đồng Nai" } };
+  assert.deepEqual(await os39.previousStreet("0906933810", xaPT), { street: "tổ 5 ấp Bến Sắn", orderId: 91 }, "bo qua don huy, bo qua don khac xa");
+  assert.equal(await os39.previousStreet("0906933810", { ...xaPT, commune: { id: "C9", name: "Xã Khác" } }), null);
+  os39._call = goiGoc;
   globalThis.fetch = prev39;
 
   // Quet lai theo page + mau chu luc: page dang chi log -> bao loi ro rang; mau chu luc di toi buoc trich don
