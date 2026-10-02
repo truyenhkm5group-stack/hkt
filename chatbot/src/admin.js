@@ -299,10 +299,27 @@ export function createAdminHandler(bot) {
           return json(res, 400, { error: e.message }), true;
         }
       }
+      // Duyet don "Moi" tren POS: xem truoc (chi doc) -> nguoi chon -> xac nhan (doc lai + kiem lai tung don)
+      if (m("POST", "/api/orderbot/drafts")) {
+        const body = await readJson(req).catch(() => ({}));
+        try {
+          return json(res, 200, await bot.orderBot.previewDrafts(body.days || 7)), true;
+        } catch (e) {
+          return json(res, 400, { error: e.message }), true;
+        }
+      }
+      if (m("POST", "/api/orderbot/drafts/confirm")) {
+        const body = await readJson(req).catch(() => ({}));
+        try {
+          return json(res, 200, { ok: true, ...(await bot.orderBot.confirmDrafts(body.ids)) }), true;
+        } catch (e) {
+          return json(res, 400, { error: e.message }), true;
+        }
+      }
       if (m("POST", "/api/orderbot/rescan")) {
         const body = await readJson(req).catch(() => ({}));
         try {
-          return json(res, 200, { ok: true, rescan: bot.orderBot.rescan({ hours: body.hours }) }), true;
+          return json(res, 200, { ok: true, rescan: bot.orderBot.rescan({ hours: body.hours, pageId: body.pageId, defaultCode: body.defaultCode }) }), true;
         } catch (e) {
           return json(res, 400, { error: e.message }), true;
         }
