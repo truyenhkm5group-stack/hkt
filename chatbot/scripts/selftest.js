@@ -1825,5 +1825,104 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 43: mot dong ghi nhieu mau -> tach tung mau chia deu so luong; mau / size mo ho hoac chua noi -> khong lay bua bien the dau tien");
 }
 
+// ---- 44: su co 02/10/2026 (Bui Phuong Vy, Linh Tay Luxury): khach da cho du so do + mau + dia chi + SDT tu 30/09,
+// hom sau bot chi con doc ~30 tin gan nhat -> hoi "Em lên đơn gửi hàng cho chị luôn nhé ạ?" 6 lan, xin lai chieu cao
+// can nang 3 lan. Chu shop: "nếu đơn đã có sđt thì check 30 tin trước thời điểm cho sđt, nếu đã đủ thông tin thì
+// không hỏi lại nữa, kết thúc hội thoại sớm".
+{
+  const { aiScope } = await import("../src/aicost.js");
+  const prevProducts = catalog.products;
+  const prevSettings = settings.get("PAGE1");
+  catalog.setProducts([{
+    id: "p44", code: "Q002", name: "Đầm cổ V xếp rủ", note: "", attributes: {}, price: { min: 499000, max: 499000 }, images: [],
+    variations: ["Đỏ", "Đen"].map((c, i) => ({ id: "v44" + i, sku: "Q002" + i, fields: { "Màu": c, Size: "M" }, price: 499000, stock: 5, available: true, images: [] })),
+  }]);
+  settings.update("PAGE1", { defaultProduct: "Q002", sizeChart: '[{"h":[0,999],"w":[[30,49,"M"],[50,55,"L"],[56,63,"XL"],[64,79,"2XL"]]}]' });
+  const cu = Date.now() - 2 * 86400e3; // tin 30/09: cu hon cua so nhuong nhan vien
+  let n = 0;
+  const shop = (t) => ({ id: "s44_" + ++n, from: { id: "PAGE1" }, message: t, inserted_at: new Date(cu + n * 1000).toISOString().replace("Z", "") });
+  const khach = (t) => ({ id: "k44_" + ++n, from: customer, message: t, inserted_at: new Date(cu + n * 1000).toISOString().replace("Z", "") });
+  const dau = [
+    shop("DEAL siêu hời hôm nay dành riêng cho chị iu đây ạ. Chị iu cho em xin chiều cao, cân nặng để em giữ size cho mình kéo hết nhé."),
+    khach("Miễn phí sip không shop"), shop("Dạ em chào chị yêu! Chị cần em tư vấn mẫu nào hay size nào ạ?"),
+    khach("Mình 48kg"), shop("Dạ 48kg chị yêu mặc size M là vừa đẹp ạ. Chị đang quan tâm mẫu nào để em tư vấn kỹ hơn cho mình ạ?"),
+    khach("Chiều dài của váy bao nhiêu shop nhỉ"), khach("Vì mình cao 1m55 thôi"),
+    shop("Dạ mẫu Q002 bên em có chiều dài khoảng 128-132cm ạ. Chị có muốn xem ảnh mẫu Q002 không ạ?"),
+    khach("Mà nhìn trong hình nhìn vay dài lắm"), shop("Dạ váy sẽ dài tới mắt cá chân ạ."),
+    khach("Cho mình xem ảnh"), shop("Dạ đây ạ, em gửi chị ảnh các màu của mẫu Q002 ạ. Chị yêu thích màu Đỏ hay màu Đen ạ?"),
+    khach("Nếu chất lượng không đẹp mình sẽ không nhận hàng đâu nhé"), shop("Dạ chị yên tâm ạ, mình được kiểm tra hàng trước khi thanh toán. Chị có muốn chốt đơn màu Đỏ hay màu Đen ạ?"),
+    khach("Đỏ nhé"), shop("Dạ, em chốt đơn đầm Q002 màu Đỏ size M cho chị yêu nha. Chị cho em xin tên và số điện thoại người nhận để em lên đơn ạ."),
+    khach("Đc khu dân cư vũ xá phường ái quốc tp Hải Phòng ( Hải Dương cũ)"), khach("Sđt 035845.9128"),
+    shop("Dạ giao hàng toàn quốc nhà mình dự kiến 5–7 ngày chị nhận được hàng ạ."), khach("Không em"),
+    shop("Dạ vâng ạ. Nếu chị cần hỗ trợ gì thêm cứ nhắn em nha. Chúc chị một ngày tốt lành ạ!"),
+  ];
+  // (1) 30 tin truoc luc gui SDT du mau + size (tu can nang) + dia chi -> du thong tin
+  const info = bot.orderInfoFromPhone("PAGE1", dau);
+  assert.equal(info.complete, true, JSON.stringify(info));
+  assert.equal(info.facts.size, "M");
+  assert.equal(info.facts.color, "Đỏ");
+  // Thieu mau -> chua du; so do nam NGOAI 30 tin truoc SDT -> khong tinh
+  assert.equal(bot.orderInfoFromPhone("PAGE1", dau.filter((m) => m.message !== "Đỏ nhé")).complete, false, "chua chon mau -> chua du");
+  const xa = [khach("Mình 48kg"), ...Array.from({ length: 31 }, (_, i) => shop("Dạ vâng ạ " + i)), khach("Đỏ nhé"), khach("Đc khu dân cư vũ xá phường ái quốc tp Hải Phòng"), khach("0358459128")];
+  assert.equal(bot.orderInfoFromPhone("PAGE1", xa).complete, false, "so do cach SDT hon 30 tin -> khong tinh");
+  assert.equal(bot.orderInfoFromPhone("PAGE1", dau.slice(0, 16)), null, "chua gui SDT -> chua xet");
+
+  // (2) Hom nay: cua so chi con tin moi (khong con so do / SDT) -> doc them lich su roi ghi ho so don
+  delete (store.state.orderInfo || {})["CV44"];
+  const homNay = [khach("Em gửi hàng cho chị chưa"), shop("Dạ, đơn hàng của mình đã được xác nhận ạ."), khach("OK")];
+  const tatCa = [...dau, ...homNay];
+  const fakeClient = { getMessages: async () => ({ messages: tatCa }) };
+  const cuaSo = [...dau.slice(-17), ...homNay]; // 20 tin cuoi: khong con "Mình 48kg"
+  assert.equal(bot.customerFacts("PAGE1", cuaSo).measured, false, "dung la cua so ngan mat so do");
+  const r = await aiScope.run({ pageId: "PAGE1", conversationId: "CV44" }, () => bot.refreshOrderInfo(fakeClient, "PAGE1", "CV44", cuaSo, { conv_phone_numbers: ["0358459128"] }));
+  assert.equal(r?.complete, true, "doc them lich su -> thay du thong tin");
+  assert.equal(store.getOrderInfo("CV44").complete, true);
+
+  // (3) Trong luot xu ly cua hoi thoai do: coi nhu don da chot, khong hoi them gi
+  aiScope.run({ pageId: "PAGE1", conversationId: "CV44" }, () => {
+    const ngan = homNay;
+    assert.equal(bot.orderClosedIn("PAGE1", ngan), true);
+    const f = bot.customerFacts("PAGE1", ngan);
+    assert.ok(f.phone && f.address && f.size === "M" && f.color === "Đỏ" && f.measured, JSON.stringify(f));
+    for (const cau of ["Dạ em ghi nhận đủ thông tin của chị rồi ạ ❤️", "Dạ vâng ạ. Chúc chị một ngày tốt lành ạ!", "Dạ, đơn hàng của mình đã được xác nhận ạ."]) {
+      assert.equal(bot.ensureEndsWithQuestion(cau, "PAGE1", ngan), cau, "khong gan cau hoi vao: " + cau);
+    }
+    const s1 = bot.stripAskWhenClosed("Dạ em xin lỗi chị yêu ạ.\nChị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn cho mình nhé ạ?", "PAGE1", ngan);
+    assert.doesNotMatch(s1, /chiều cao|cân nặng|\?/);
+    const s2 = bot.stripAskWhenClosed("Dạ đơn của mình đã được xác nhận ạ.\nEm lên đơn gửi hàng cho chị luôn nhé ạ?", "PAGE1", ngan);
+    assert.equal(s2, "Dạ đơn của mình đã được xác nhận ạ.");
+    assert.doesNotMatch(bot.stripAskWhenClosed("Dạ chị cần em hỗ trợ thêm gì không ạ?", "PAGE1", ngan), /\?/);
+    const p = bot.orderProgressPrompt("PAGE1", ngan);
+    assert.match(p, /ĐƠN ĐÃ ĐỦ THÔNG TIN/);
+    assert.match(p, /Địa chỉ: ĐÃ CÓ/);
+  });
+  // Ngoai luot xu ly cua hoi thoai do -> ho so khong ro ri sang hoi thoai khac
+  assert.equal(bot.orderClosedIn("PAGE1", homNay), false);
+  assert.equal(aiScope.run({ pageId: "PAGE1", conversationId: "CV_KHAC" }, () => bot.orderClosedIn("PAGE1", homNay)), false);
+
+  // (4) Nhan ra chot don du bot viet "em chốt đơn đầm Q002 … cho chị" (truoc chi bat "em chốt đơn cho")
+  assert.equal(bot.orderClosedIn("PAGE1", [shop("Dạ, em chốt đơn đầm Q002 màu Đỏ size M cho chị yêu nha.")]), true);
+
+  // (5) Loi ket co dau: "Ừ em", "Không em" — ban cu dung \b ASCII nen bo lot
+  for (const t of ["OK", "Ừ em", "Không em", "ok nha shop", "Dạ vâng ạ", "Cảm ơn em"]) assert.equal(bot.isLoiKet(t), true, t);
+  for (const t of ["Dạ cho mình xem ảnh", "Ừ gửi đi", "uống thuốc chưa", "Em gửi hàng cho chị chưa", "Không lấy nữa đổi size L"]) assert.equal(bot.isLoiKet(t), false, t);
+
+  // (6) Tron luong: hoi thoai da du thong tin, khach nhan "Ừ em" -> khong goi AI, khong hoi them cau nao
+  delete (store.state.orderInfo || {})["CONV1"];
+  calls.length = 0;
+  pancakeMessages = [...dau, { id: "k44_last", from: customer, message: "Ừ em", inserted_at: new Date().toISOString().replace("Z", "") }];
+  bot.handleWebhook(webhook(pancakeMessages[pancakeMessages.length - 1]));
+  await sleep(WAIT * 2);
+  const gem44 = calls.filter((c) => c.path.includes(":generateContent"));
+  const gui44 = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+  assert.equal(gem44.length, 0, "loi ket sau khi don da du -> khong ton tien AI");
+  assert.ok(gui44.every((c) => !/lên đơn|chiều cao|cân nặng|\?/.test(c.body.message || "")), JSON.stringify(gui44.map((c) => c.body.message)));
+  delete (store.state.orderInfo || {})["CONV1"];
+
+  settings.update("PAGE1", { defaultProduct: prevSettings.defaultProduct || "", sizeChart: prevSettings.sizeChart || "" });
+  catalog.setProducts(prevProducts);
+  console.log("OK 44: khach da gui SDT + 30 tin truoc do du thong tin -> ghi ho so don, thoi hoi them, loi ket thi dung");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
