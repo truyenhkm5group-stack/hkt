@@ -747,20 +747,37 @@ export class OrderSync {
       log.warn("Tim don nhap loi:", e.message);
       return null;
     });
+    // Khach DA CO DON dang xu ly (da xac nhan / dang dong / da gui...) trong 14 ngay:
+    // - CUNG san pham -> day la lan mua do, khong ghi gi: khong tao don moi, va KHONG dien vao don nhap Pancake tu tao
+    //   khi khach bam quang cao moi (su co Mai Hoang 02/10/2026: #5633 da gui hang, bot dien Q002 vao nhap #5666 -> don
+    //   trung nam "Moi"). Co don nhap thua -> can duyet de nhan vien huy.
+    // - KHAC san pham -> co the mua them / doi mau: van ghi don nhap, tu xac nhan bi chan (confirmOrder) -> can duyet.
+    const daCo = await this.findActiveOrder(conversationId, phone).catch(() => null);
+    if (daCo) {
+      const coSan = new Set((daCo.items || []).map((it) => String(it.variation_id || it.variation_info?.id || "")).filter(Boolean));
+      const trung = coSan.size > 0 && mapped.every((m) => coSan.has(String(m.variation_id)));
+      const ten = `#${daCo.id} (${ORDER_STATUS_VI[Number(daCo.status)] || daCo.status_name || daCo.status})`;
+      if (trung && draft && String(draft.id) !== String(daCo.id)) {
+        const lyDo = `Trùng đơn ${ten} cùng sản phẩm — đơn nháp #${draft.id} là đơn thừa, nhân viên huỷ (bot không điền vào)`;
+        log.info(`[${pageId}] ${conversationId}: ${lyDo}`);
+        if (strict) return { status: "review", reasons: [lyDo], draft: { ...nhap, resolved: addr.fullAddress } };
+        return { status: "skipped", reason: `khách đã có đơn ${ten} cùng sản phẩm — đơn nháp #${draft.id} thừa`, orderId: daCo.id };
+      }
+      if (trung || !draft) {
+        // Khong co don nhap: giu luat cu (su co 2026-09-16: #4452 da xac nhan, bot tao them #4511)
+        if (trung || !strict) {
+          const lyDo = `khách đã có đơn ${ten}${trung ? " cùng sản phẩm" : ""} - không tạo thêm, nhân viên sửa trên đơn đó nếu cần`;
+          log.info(`[${pageId}] ${conversationId}: ${lyDo}`);
+          return { status: "skipped", reason: lyDo, orderId: daCo.id };
+        }
+      }
+    }
     let res, status;
     if (draft) {
       const oldNote = draft.note ? String(draft.note).trim() + "\n" : "";
       res = await this._call("PUT", `/shops/${config.pos.shopId}/orders/${draft.id}`, { ...body, note: oldNote + body.note });
       status = "updated";
     } else {
-      // KHONG tao don moi neu khach nay (cung SDT / cung hoi thoai) da co don DA XAC NHAN trong 14 ngay:
-      // nhan vien da xu ly roi, tao them = don trung (su co 2026-09-16: #4452 da xac nhan, bot tao them #4511)
-      const daCo = await this.findActiveOrder(conversationId, phone).catch(() => null);
-      if (daCo) {
-        const lyDo = `khách đã có đơn #${daCo.id} (${ORDER_STATUS_VI[Number(daCo.status)] || daCo.status_name}) - không tạo thêm, nhân viên sửa trên đơn đó nếu cần`;
-        log.info(`[${pageId}] ${conversationId}: ${lyDo}`);
-        return { status: "skipped", reason: lyDo, orderId: daCo.id };
-      }
       res = await this._call("POST", `/shops/${config.pos.shopId}/orders`, body);
       status = "created";
     }
