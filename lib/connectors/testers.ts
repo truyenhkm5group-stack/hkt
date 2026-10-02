@@ -314,13 +314,19 @@ export async function testOpenAiKey(input: { secrets: Record<string, string> }, 
   return probeModels(deps.fetch ?? fetch, OPENAI_MODELS_URL, { authorization: `Bearer ${key}` }, "OpenAI", [key]);
 }
 
-export const GEMINI_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{30,60}$/;
+/**
+ * Chỉ chặn thứ CHẮC CHẮN không phải khoá (khoảng trắng, ngoặc, «=»…) — đúng hay sai do Google trả lời ở lượt kiểm tra.
+ * 02/10/2026: khoá Google cấp không còn chỉ dạng «AIza» + 35 ký tự, mẫu cũ chặn khoá thật của chủ shop ngay ô nhập.
+ * Bộ ký tự vẫn đóng (chữ, số, «.», «_», «-») nên khoá không chèn được gì vào header.
+ */
+export const GEMINI_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{29,199}$/;
 export const GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** Gemini: `GET …/v1beta/models` với header `x-goog-api-key` của tổ chức (không đặt khoá vào URL — log proxy không thấy). */
 export async function testGeminiKey(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
   const key = (input.secrets.apiKey ?? "").trim();
-  if (!GEMINI_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá không đúng dạng khoá Gemini (AIza…) — không gửi." };
+  if (/^sk-/.test(key)) return { ok: false, message: "Đây là khoá OpenAI (sk-…), không phải khoá Gemini — lấy khoá ở aistudio.google.com → Get API key." };
+  if (!GEMINI_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá có ký tự lạ (khoảng trắng, dấu ngoặc, «=»…) hoặc quá ngắn — dán NGUYÊN khoá từ aistudio.google.com, không gửi." };
   return probeModels(deps.fetch ?? fetch, GEMINI_MODELS_URL, { "x-goog-api-key": key }, "Gemini", [key]);
 }
 
