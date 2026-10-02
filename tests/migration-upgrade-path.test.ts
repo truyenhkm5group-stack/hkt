@@ -136,6 +136,7 @@ const MOI = [
   "0186_messaging_retry",
   "0187_platform_billing",
   "0188_price_lists_receivables",
+  "0189_customer_touchpoints",
 ] as const;
 
 /*

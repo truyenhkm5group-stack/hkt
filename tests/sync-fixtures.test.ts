@@ -448,6 +448,8 @@ import { testPilotProducts } from "./pilot-products.test";
 import { testProductImport } from "./product-import.test";
 import { testPilotOrders } from "./pilot-orders.test";
 import { testPriceListsReceivables } from "./price-lists-receivables.test";
+import { testReorderReminders } from "./reorder-reminders.test";
+import { testSeafoodOs } from "./seafood-os.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPilotOps } from "./pilot-ops.test";
@@ -2616,6 +2618,10 @@ async function main() {
   await testPilotOrders();
   // Bảng giá sỉ + hạn mức nợ + công nợ + thu nợ gộp (0188): tổ chức THẬT `pl-si` (không Pancake; tự cấp, tự dọn).
   await testPriceListsReceivables();
+  // Nhắc mua lại + sổ liên hệ khách (0189): tổ chức THẬT `ro-si` (không Pancake; tự cấp, tự dọn).
+  await testReorderReminders();
+  // Seafood OS · mẫu hải sản + chatbot báo giá sỉ: tổ chức THẬT `sf-si` (không Pancake; tự cấp, tự dọn).
+  await testSeafoodOs();
   await testSelfServiceJourney();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;

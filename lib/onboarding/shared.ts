@@ -73,7 +73,7 @@ export const SIGNUP_MODE_CONSEQUENCE: Record<SignupMode, string> = {
 
 // ═══ LOẠI HÌNH → MẪU GỢI Ý ═══
 
-export const BUSINESS_TYPES = ["fashion", "ecommerce", "food", "wholesale", "manufacturing", "service", "blank"] as const;
+export const BUSINESS_TYPES = ["fashion", "ecommerce", "food", "seafood", "wholesale", "manufacturing", "service", "blank"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
 /**
@@ -84,6 +84,7 @@ export const BUSINESS_TYPE_SPEC: Record<BusinessType, { label: string; hint: str
   fashion: { label: "Thời trang", hint: "Bán quần áo, phụ kiện online: mẫu mã theo size / màu, hàng hoàn, sản xuất đặt xưởng.", templateKey: "fashion-commerce", modules: [] },
   ecommerce: { label: "TMĐT chung", hint: "Bán lẻ online nhiều ngành hàng: đơn, khách, kho, vận chuyển.", templateKey: "general-ecommerce", modules: [] },
   food: { label: "Thực phẩm đóng gói", hint: "Thực phẩm / đặc sản / hải sản chế biến đã đóng gói, giá cố định theo gói: quy cách, bảo quản, giữ hàng khi chốt, chatbot bán hàng.", templateKey: "food-commerce", modules: [] },
+  seafood: { label: "Hải sản (lẻ + sỉ)", hint: "Hải sản tươi / đông lạnh / khô cho khách lẻ và quán ăn, đại lý: bảng giá sỉ theo bậc, hạn mức và công nợ, nhắc khách mua lại, nhập hàng, chatbot bán hàng.", templateKey: "seafood-commerce", modules: [] },
   wholesale: { label: "Bán sỉ / phân phối", hint: "Đại lý mua số lượng lớn, trả sau theo hạn mức công nợ.", templateKey: "wholesale", modules: [] },
   manufacturing: { label: "Sản xuất", hint: "Chưa có mẫu ngành sản xuất — bắt đầu trắng với bộ module gợi ý.", templateKey: null, modules: ["customers", "products", "orders", "inventory", "purchasing", "production", "finance"] },
   service: { label: "Dịch vụ", hint: "Chưa có mẫu ngành dịch vụ — bắt đầu trắng với bộ module gợi ý.", templateKey: null, modules: ["customers", "customer_care", "finance"] },

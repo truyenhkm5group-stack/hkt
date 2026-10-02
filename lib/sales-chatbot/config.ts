@@ -103,6 +103,12 @@ export const salesChatbotConfigZ = z
     /** Khoá field tuỳ biến của SẢN PHẨM mà bot được đọc (quy cách, bảo quản…). Field không có ở đây bot không biết tới. */
     productFields: z.array(z.string().regex(/^[a-z][a-z0-9_]{1,40}$/)).max(30).default([]),
     extraInstructions: z.string().trim().max(1500).default(""),
+    /**
+     * BÁO GIÁ THEO BẢNG GIÁ SỈ (0188, docs/verticals/seafood-os.md). TẮT ⇒ bot chỉ có giá LẺ và chuyển người với mọi
+     * câu hỏi sỉ (như trước). BẬT ⇒ đơn giá của bot = `quoteUnitPrice` (bảng của khách → bảng mặc định → giá lẻ) — CÙNG
+     * hàm với form đơn tay; bot nói được bậc «mua từ N». Mặc định TẮT: cho bot tự báo giá sỉ là quyết định của chủ shop.
+     */
+    wholesalePricing: z.boolean().default(false),
   })
   .strict();
 
@@ -123,6 +129,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   allowedTools: [...SALES_TOOLS],
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",
+  wholesalePricing: false,
 };
 
 /** Cấu hình đã lưu ⇒ cấu hình dùng được. Sai hình / thiếu ⇒ mặc định (TẮT) — hỏng về phía đóng. */

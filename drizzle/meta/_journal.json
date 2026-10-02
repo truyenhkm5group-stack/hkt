@@ -1317,6 +1317,13 @@
       "when": 1790680240000,
       "tag": "0188_price_lists_receivables",
       "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1790680250000,
+      "tag": "0189_customer_touchpoints",
+      "breakpoints": true
     }
   ]
 }

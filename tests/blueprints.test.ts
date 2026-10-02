@@ -63,9 +63,9 @@ function actionOf(plan: BlueprintPlan, kind: string, key: string): PlanAction | 
 // ═══════════ 1 · THUẦN ═══════════
 
 function testTemplatesPure() {
-  assert.equal(BLUEPRINT_TEMPLATES.length, 6, "sáu mẫu tham chiếu (§4 + thực phẩm đóng gói 0180)");
+  assert.equal(BLUEPRINT_TEMPLATES.length, 7, "bảy mẫu tham chiếu (§4 + thực phẩm đóng gói 0180 + hải sản Seafood OS)");
   const keys = BLUEPRINT_TEMPLATES.map((t) => t.key);
-  assert.deepEqual([...keys].sort(), ["fashion-commerce", "food-commerce", "general-ecommerce", "manufacturing", "service-business", "wholesale"]);
+  assert.deepEqual([...keys].sort(), ["fashion-commerce", "food-commerce", "general-ecommerce", "manufacturing", "seafood-commerce", "service-business", "wholesale"]);
   // Hai mẫu (b) dùng đối tượng tuỳ biến; mẫu dịch vụ có quan hệ tới khách từ HAI đối tượng.
   const svc = templateBlueprint("service-business")!;
   assert.deepEqual(svc.objects?.map((o) => o.key), ["x_contract", "x_project"]);
@@ -267,7 +267,7 @@ async function testOrgA() {
     let admin = await adminOf(ORG_A);
     assert.deepEqual([...(await getEnabledModules(ORG_A))].sort(), ["core", "work"], "tổ chức mới chỉ có lõi — mẫu không tự cài (luật 23)");
     const catalog = await loadTemplateCatalog(admin);
-    assert.ok(catalog.ok && catalog.value.templates.length === 6 && catalog.value.history.length === 0);
+    assert.ok(catalog.ok && catalog.value.templates.length === 7 && catalog.value.history.length === 0);
     assert.ok(catalog.value.templates.every((t) => t.installedVersion === null && !t.updateAvailable));
 
     // ── Xem trước = kế hoạch, không ghi ──

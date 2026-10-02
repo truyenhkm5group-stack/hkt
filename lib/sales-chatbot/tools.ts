@@ -22,6 +22,8 @@ import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
+import { quoteUnitPrice, type PriceListBook } from "@/lib/constants/price-lists";
+import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
@@ -99,8 +101,8 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   },
   get_current_price: {
     name: "get_current_price",
-    description: "Giá bán HIỆN TẠI của một mẫu mã, đọc từ ERP ngay lúc gọi. price = null nghĩa là mã chưa có giá — không được báo giá.",
-    inputSchema: { type: "object", properties: { variant_id: { type: "string" } }, required: ["variant_id"], additionalProperties: false },
+    description: "Giá bán HIỆN TẠI của một mẫu mã, đọc từ ERP ngay lúc gọi. price = null nghĩa là mã chưa có giá — không được báo giá. Có quantity ⇒ giá cho đúng số lượng đó (bảng giá sỉ theo bậc, nếu shop bật); `tiers` = các bậc «mua từ» của mẫu mã.",
+    inputSchema: { type: "object", properties: { variant_id: { type: "string" }, quantity: { type: "integer", minimum: 1 } }, required: ["variant_id"], additionalProperties: false },
     kind: "read",
   },
   check_inventory: {
@@ -227,17 +229,33 @@ function err(summary: string, message: string, state: ChatState): ToolOutcome {
 
 type Priced = { lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
 
-async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig): Promise<Priced> {
+/**
+ * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
+ * chưa nhận ra là ai (chưa tạo / chưa tra được) ⇒ chỉ bảng mặc định.
+ */
+async function booksForChat(cfg: SalesChatbotConfig, customerId: string | null): Promise<{ customerList: PriceListBook | null; defaultList: PriceListBook | null } | null> {
+  return cfg.wholesalePricing ? priceBooksFor(customerId) : null;
+}
+
+/** Đơn giá của MỘT dòng: giá lẻ khi chưa bật bảng giá; bật ⇒ `quoteUnitPrice` — CÙNG hàm với form đơn tay. */
+function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnType<typeof booksForChat>>): number | null {
+  if (!books) return it.price;
+  return quoteUnitPrice({ variantId: it.variantId, quantity, retailPrice: it.price, customerList: books.customerList, defaultList: books.defaultList })?.unitPrice ?? null;
+}
+
+async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null): Promise<Priced> {
   const catalog = await sellableCatalog([]);
+  const books = await booksForChat(cfg, customerId);
   const byId = new Map(catalog.map((c) => [c.variantId, c]));
   const out: Priced["lines"] = [];
   const unpriced: string[] = [];
   const missing: string[] = [];
   for (const l of lines) {
     const it = byId.get(l.variantId);
+    const unit = it ? unitPriceFor(it, l.quantity, books) : null;
     if (!it) missing.push(l.variantId);
-    else if (it.price === null) unpriced.push(it.name);
-    else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: it.price, lineTotal: it.price * l.quantity });
+    else if (unit === null) unpriced.push(it.name);
+    else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity });
   }
   const subtotal = out.reduce((s, l) => s + l.lineTotal, 0);
   const shippingFee = cfg.shippingFee;
@@ -313,7 +331,17 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (!id.success) return err(`${name}: thiếu mã`, "Thiếu variant_id.", state);
       const it = (await sellableCatalog(ctx.config.productFields)).find((c) => c.variantId === id.data);
       if (!it) return err(`${name}: không có mã`, "Không có mẫu mã này (hoặc đã thôi bán).", state);
-      if (name === "get_current_price") return ok(`Giá ${it.name}: ${price(it.price)}`, { variant_id: it.variantId, name: it.name, price: it.price, price_text: price(it.price), as_of: new Date().toISOString() }, state);
+      if (name === "get_current_price") {
+        const qty = z.number().int().min(1).max(100_000).safeParse(input.quantity);
+        const books = await booksForChat(ctx.config, state.customer?.id ?? null);
+        if (!books) return ok(`Giá ${it.name}: ${price(it.price)}`, { variant_id: it.variantId, name: it.name, price: it.price, price_text: price(it.price), as_of: new Date().toISOString() }, state);
+        const quantity = qty.success ? qty.data : 1;
+        const unit = unitPriceFor(it, quantity, books);
+        // Bậc của bảng đang áp cho mẫu mã này: bảng của khách nếu bảng ấy có mẫu mã, không thì bảng mặc định.
+        const list = [books.customerList, books.defaultList].find((b) => b?.tiers.some((t) => t.variantId === it.variantId)) ?? null;
+        const tiers = (list?.tiers ?? []).filter((t) => t.variantId === it.variantId).sort((a, b) => a.minQuantity - b.minQuantity).map((t) => ({ min_quantity: t.minQuantity, unit_price: t.unitPrice, text: `từ ${t.minQuantity}: ${formatVND(t.unitPrice)}` }));
+        return ok(`Giá ${it.name} × ${quantity}: ${price(unit)}`, { variant_id: it.variantId, name: it.name, quantity, price: unit, price_text: price(unit), retail_price: it.price, tiers, as_of: new Date().toISOString() }, state);
+      }
       return ok(`Chi tiết ${it.name}`, itemView(it), state);
     }
     case "check_inventory": {
@@ -335,7 +363,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
     case "calculate_cart": {
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Tính giỏ: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
-      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config);
+      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, state.customer?.id ?? null);
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
@@ -386,7 +414,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (state.confirmed) return err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — muốn đổi thì chuyển nhân viên (handoff_to_human).", state);
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
-      const priced = await priceLines(lines, ctx.config);
+      const priced = await priceLines(lines, ctx.config, state.customer?.id ?? null);
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       const draft = { orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
@@ -409,7 +437,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       }
       const d = state.draft;
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state);
-      const priced = await priceLines(d.lines, ctx.config);
+      const priced = await priceLines(d.lines, ctx.config, state.customer?.id ?? null);
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state);
       const changed = priced.lines.filter((l) => d.unitPrices[l.variantId] !== l.unitPrice);
       if (changed.length) {
