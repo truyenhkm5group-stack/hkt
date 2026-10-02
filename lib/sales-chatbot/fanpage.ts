@@ -32,6 +32,7 @@ import { chunkText } from "@/lib/messaging/providers";
 import { appendContextMessages, chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
+import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -260,11 +261,11 @@ async function sendInbox(pageId: string, threadId: string, token: string, text: 
   }
 }
 
-async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date } | null> {
+async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; createdAt: Date; state: Record<string, unknown> } | null> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const key = fanpageVisitorKey(pageId, threadId);
-  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
+  const find = async () => (await db.select({ id: c.id, status: c.status, handoffReason: c.handoffReason, updatedAt: c.updatedAt, createdAt: c.createdAt, state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key))).limit(1))[0] ?? null;
   const existing = await find();
   if (existing) return existing;
   try {
@@ -514,6 +515,13 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, updatedAt: now() }).where(eq(schema.salesChatConversations.id, conv.id));
     }
     await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
+    // KHÁCH CŨ (02/10/2026): SĐT Pancake đã ghi nhận + tin cũ trước khi bot vào hội thoại ⇒ bot không hỏi lại SĐT / địa chỉ.
+    // Một lời gọi ĐỌC, làm mới sau vài giờ; hỏng ⇒ bot trả lời như khách mới, không chặn lượt. Bình luận: không có hộp thư để đọc.
+    if (!claimed.some((r) => r.kind === "COMMENT") && threadProfileStale((conv.state ?? {}) as ChatState, now())) {
+      const prof = await fetchPancakeThreadProfile(pageId, threadId, token, conv.createdAt, deps.fetch ?? fetch, now());
+      const cv = schema.salesChatConversations;
+      if (prof) await db.update(cv).set({ state: sql`${cv.state} || ${JSON.stringify({ returning: prof })}::jsonb` }).where(eq(cv.id, conv.id));
+    }
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())

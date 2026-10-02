@@ -28,6 +28,7 @@ import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
+import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
 
 export type CartLine = { variantId: string; quantity: number };
 export type Recipient = { name: string; phone: string; address: string; province: string };
@@ -37,7 +38,8 @@ export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-ch
 
 export type ChatState = {
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
-  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string };
+  /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
+  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean };
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean };
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string };
   handoff?: { reason: string; at: string };
@@ -47,6 +49,8 @@ export type ChatState = {
   declined?: { reason: string; at: string };
   /** Mốc tin fanpage (page / khách bị bỏ qua) đã chép vào lịch sử của bot — `appendContextMessages`. */
   mirroredUntil?: string;
+  /** Hồ sơ hội thoại đọc từ Pancake (SĐT đã ghi nhận, mã Facebook, tin cũ trước khi bot vào) — `lib/sales-chatbot/returning.ts`. */
+  returning?: PancakeThreadProfile;
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
@@ -63,6 +67,8 @@ export type ToolContext = {
   /** Câu CUỐI khách gõ (chữ thô) — `confirm_order` đối chiếu lời xác nhận với câu này. */
   lastUserText: string;
   agent: OrderAgent;
+  /** Khách cũ máy chủ đã nhận ra (`findReturningCustomer`) — nguồn của `create_customer` + `use_saved_address`. */
+  returning?: ReturningCustomer | null;
 };
 
 /**
@@ -106,8 +112,14 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   },
   create_customer: {
     name: "create_customer",
-    description: "Lưu thông tin người mua sau khi khách đã cho: họ tên, số điện thoại, địa chỉ giao. SĐT đã có trong sổ ⇒ dùng lại đúng khách đó.",
-    inputSchema: { type: "object", properties: { name: { type: "string" }, phone: { type: "string" }, address: { type: "string" }, province: { type: "string" } }, required: ["name", "phone", "address"], additionalProperties: false },
+    description:
+      "Lưu thông tin người mua sau khi khách đã cho: họ tên, số điện thoại, địa chỉ giao. SĐT đã có trong sổ ⇒ dùng lại đúng khách đó. KHÁCH CŨ có địa chỉ ĐÃ CHE và khách vừa xác nhận giao như lần trước ⇒ use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận (bỏ trống phone / address — máy chủ tự điền).",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, phone: { type: "string" }, address: { type: "string" }, province: { type: "string" }, use_saved_address: { type: "boolean" }, customer_confirmation: { type: "string" } },
+      required: ["name"],
+      additionalProperties: false,
+    },
     kind: "write",
   },
   create_draft_order: {
@@ -268,6 +280,12 @@ function recipientFrom(input: { recipient_name?: string; recipient_phone?: strin
   };
 }
 
+/** Người nhận bot được đọc cho khách: địa chỉ máy chủ điền từ đơn cũ (khớp qua SĐT) chỉ hiện bản ĐÃ CHE. */
+function recipientView(r: Recipient, state: ChatState): Recipient & { address_note?: string } {
+  if (!state.customer?.savedAddress || r.address !== state.customer.address) return r;
+  return { ...r, address: maskAddress([r.address, r.province].filter((x) => x.trim()).join(", ")), province: "", address_note: "Địa chỉ cũ của khách (đã che) — đọc đúng như vậy, không đoán số nhà." };
+}
+
 function failureText(r: { errors: { field: string; message: string }[] }): string {
   return r.errors.map((e) => e.message).join(" · ") || "Không ghi được.";
 }
@@ -318,17 +336,29 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
     }
     case "create_customer": {
-      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse(input);
+      // KHÁCH CŨ: máy chủ điền SĐT + địa chỉ của lần mua trước — chỉ khi khách VỪA xác nhận (luật 3.12: gợi ý, không tự điền).
+      let saved = false;
+      let fields: Record<string, unknown> = input;
+      if (input.use_saved_address === true) {
+        const r = ctx.returning;
+        if (!r) return err("Lưu khách: không có địa chỉ cũ", "Shop không có địa chỉ cũ của khách này — hỏi khách SĐT và địa chỉ.", state);
+        const quote = z.string().trim().min(2).max(300).safeParse(input.customer_confirmation);
+        if (!quote.success || !foldVi(ctx.lastUserText).includes(foldVi(quote.data))) return err("Lưu khách: khách chưa xác nhận địa chỉ cũ", "customer_confirmation phải là nguyên văn lời khách xác nhận giao về địa chỉ cũ, trong câu CUỐI của khách. Khách chưa xác nhận ⇒ hỏi lại.", state);
+        const typed = typeof input.name === "string" ? input.name.trim() : "";
+        fields = { name: typed.length >= 2 ? typed : r.name, phone: r.phone, address: r.address, province: r.province };
+        saved = r.trust === "PHONE";
+      }
+      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: fields.name, phone: fields.phone, address: fields.address, province: fields.province || undefined });
       if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state);
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
-        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt };
+        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}) };
         return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật." }, state);
       }
       const r = await createCustomerAsAgent(ctx.agent, { name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province });
       if (!r.ok) return err("Lưu khách: lỗi", failureText(r), state);
-      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt };
+      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(saved ? { savedAddress: true } : {}) };
       return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing }, state);
     }
     case "create_draft_order":
@@ -355,7 +385,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         draft.orderId = r.id;
       }
       state.draft = draft;
-      const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: draft.recipient, delivery_note: draft.note || null };
+      const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null };
       return ok(`${simulated ? "(Thử) " : ""}${existing ? "Sửa" : "Lên"} đơn nháp · ${formatVND(priced.subtotal)}`, view, state);
     }
     case "confirm_order": {

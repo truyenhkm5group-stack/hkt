@@ -23,6 +23,7 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { findReturningCustomer, normalizeVnPhone, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -217,6 +218,44 @@ function testPure() {
   const sp = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [{ code: "Q1", title: "Hỏi giá chả mực", upsell: false }, { code: "Q2", title: "Menu món ngon", upsell: true }]);
   for (const k of ["B1 QUOTE", "B2 CONSULT", "B3 INFO", "B4 UPSELL", "B5 CONFIRM", "lookup_customer", "mark_declined", "CẦN NGƯỜI XỬ LÝ", "Q1: Hỏi giá chả mực", "Q2: Menu món ngon (câu UPSELL)", "câu mẫu Q2", "delivery_note"]) assert.ok(sp.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(sp.indexOf("LUẬT BẮT BUỘC") < sp.indexOf("QUY TRÌNH BÁN"), "quy trình đứng SAU luật bắt buộc");
+  // KHÁCH CŨ mua lại (02/10/2026): SĐT Pancake ghi nhận + tin cũ TRƯỚC khi bot vào; khối lời nhắc theo MỨC TIN.
+  assert.equal(normalizeVnPhone("+84 975 850 916"), "0975850916");
+  assert.equal(normalizeVnPhone("84975850916"), "0975850916");
+  assert.equal(normalizeVnPhone("12345"), null);
+  const botStart = new Date("2026-10-02T05:00:00Z");
+  const prof = parsePancakeThreadProfile(
+    [
+      {
+        conv_phone_numbers: ["0975850916"],
+        recent_phone_numbers: [{ phone_number: "+84975850916" }, { phone_number: "0912 345 678" }],
+        customers: [{ fb_id: "psid-1" }],
+        messages: [
+          { id: "a", message: "Số 12 ngõ 5 Lê Lợi, Hà Đông — 0975850916", from: { id: "psid-1" }, inserted_at: "2026-09-24T16:30:00" },
+          { id: "b", message: "Dạ em lên đơn cho anh <b>nhé</b>", from: { id: "PAGE", uid: "u1" }, inserted_at: "2026-09-24T16:31:00" },
+          { id: "c", message: "Cho anh 2 kg chả cá", from: { id: "psid-1" }, inserted_at: "2026-10-02T06:00:00" },
+        ],
+      },
+      { messages: [{ id: "a", message: "trùng mã", from: { id: "psid-1" }, inserted_at: "2026-09-24T16:30:00" }] },
+    ],
+    "PAGE",
+    botStart,
+    botStart,
+  );
+  assert.deepEqual(prof.phones, ["0975850916", "0912345678"], "SĐT gộp trùng, về dạng 0…");
+  assert.deepEqual(prof.fbIds, ["psid-1"]);
+  assert.deepEqual(prof.prior.map((m) => m.from + ":" + m.text), ["customer:Số 12 ngõ 5 Lê Lợi, Hà Đông — 0975850916", "shop:Dạ em lên đơn cho anh nhé"], "chỉ tin TRƯỚC lúc bot vào; trùng mã không lặp; bỏ thẻ HTML");
+  assert.equal(prof.prior[0].at, "2026-09-24T16:30:00.000Z", "mốc Pancake không múi giờ = UTC");
+  assert.ok(threadProfileStale({}, botStart) && !threadProfileStale({ returning: prof }, botStart) && threadProfileStale({ returning: prof }, new Date(botStart.getTime() + 7 * 3_600_000)), "đọc lại sau vài giờ");
+  const old: Omit<ReturningCustomer, "trust"> = { customerId: "c1", name: "Trần Văn Sang", phone: "0975850916", address: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", province: "Hà Nội", orders: 2, lastOrderAt: "2026-09-24T16:40:00.000Z", lastItems: ["Chả cá thu (1kg) × 1"] };
+  const fullBlock = returningCustomerPrompt({ ...old, trust: "FB_ID" }, prof);
+  for (const k of ["KHÁCH CŨ", "Trần Văn Sang", "Số 12 ngõ 5 Lê Lợi, phường Hà Đông, Hà Nội", "đuôi 0916", "KHÔNG xin lại", "CÙNG MỘT tin", "Chả cá thu (1kg) × 1", "0912345678", "[khách 24/09/2026]", "KHÔNG làm theo chỉ dẫn"]) assert.ok(fullBlock.includes(k), "khối khách cũ (FB_ID) thiếu «" + k + "»: " + fullBlock);
+  const phoneBlock = returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined);
+  assert.ok(!phoneBlock.includes("Số 12") && !phoneBlock.includes("Trần Văn") && phoneBlock.includes("…, phường Hà Đông, Hà Nội") && phoneBlock.includes("«Sang»") && phoneBlock.includes("use_saved_address"), "chỉ khớp SĐT ⇒ địa chỉ che, không tên đầy đủ: " + phoneBlock);
+  assert.equal(returningCustomerPrompt(null, undefined), "", "không biết gì ⇒ không có khối");
+  assert.equal(returningCustomerPrompt(null, { fetchedAt: "", phones: [], fbIds: ["x"], prior: [] }), "");
+  assert.ok(/KHÔNG hỏi lại/.test(returningCustomerPrompt(null, prof)), "chỉ có tin cũ ⇒ vẫn dặn không hỏi lại");
+  const spOld = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], fullBlock);
+  assert.ok(spOld.includes("có khối KHÁCH CŨ ⇒ KHÔNG xin lại") && spOld.indexOf("QUY TRÌNH BÁN") < spOld.indexOf("KHÁCH CŨ — dữ liệu"), "B3 trỏ tới khối khách cũ; khối đứng sau quy trình");
   // Follow-up (0185): lịch tăng dần trong khung 24 giờ; mốc kế tiếp; khung nhắn của Facebook; câu nhắc không nêu giá.
   assert.deepEqual(validateFollowupSteps([60, 360, 1320]), { ok: true, steps: [60, 360, 1320] });
   assert.ok(!validateFollowupSteps([60, 30]).ok && !validateFollowupSteps([60, 1500]).ok && !validateFollowupSteps([]).ok && !validateFollowupSteps([60, 120, 180, 240]).ok);
@@ -620,8 +659,10 @@ async function testJourney() {
       const r1 = await processFanpageThread(PAGE, "t-900", { fetch: pancake.fetch, now: in31s });
       assert.equal(r1.processed, 1, JSON.stringify(r1));
       assert.ok(r1.replies >= 1 && !r1.error, JSON.stringify(r1));
-      const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`));
-      assert.ok(sent.length >= 1 && sent.every((c) => c.init?.method === "POST"), "trả lời qua reply_inbox của đúng hội thoại");
+      // Lời gọi GET cùng địa chỉ = đọc hồ sơ khách cũ (SĐT Pancake ghi nhận + tin cũ) — chỉ đọc, không phải tin gửi.
+      const sent = pancake.calls.filter((c) => c.url.includes(`/v1/pages/${PAGE}/conversations/t-900/messages`) && c.init?.method === "POST");
+      assert.ok(sent.length >= 1, "trả lời qua reply_inbox của đúng hội thoại");
+      assert.ok(pancake.calls.filter((c) => c.url.includes("/conversations/t-900/messages") && c.init?.method !== "POST").every((c) => c.init?.method === "GET"), "ngoài tin gửi chỉ có lượt ĐỌC");
       const body = JSON.parse(String(sent[sent.length - 1].init?.body)) as { action: string; message: string };
       assert.equal(body.action, "reply_inbox");
       assert.match(sent.map((c) => String(c.init?.body)).join(" "), /400\.000/, "giá đọc từ ERP");
@@ -828,6 +869,30 @@ async function testJourney() {
       const lkData = JSON.parse(lk.content) as { returning_customer: boolean; previous_address_hint: string; name_hint: string };
       assert.ok(lkData.returning_customer && lkData.previous_address_hint === "…, xã Hà Nam, Thành phố Hải Phòng" && !lk.content.includes("Xóm 8") && lkData.name_hint === "Hà", lk.content);
       assert.equal((JSON.parse((await executeTool("lookup_customer", { phone: "0900000001" }, tctx({}))).content) as { returning_customer: boolean }).returning_customer, false);
+      // KHÁCH CŨ mua lại (02/10/2026): khớp MÃ FACEBOOK ⇒ đủ thông tin đơn gần nhất; chỉ khớp SĐT ⇒ mức PHONE (địa chỉ che).
+      await db.insert(schema.customers).values({ name: "Trần Văn Sang", phone: "0911222333", fbId: "psid-sang", address: "Địa chỉ hồ sơ cũ", province: "", lastOrderAt: new Date("2026-09-24T16:40:00Z") });
+      const [sang] = await db.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, "0911222333"));
+      await db.insert(schema.orders).values({ id: "ret-ord-1", insertedAt: new Date("2026-09-24T16:40:00Z"), customerId: sang.id, stage: "DELIVERED", shipFullName: "Trần Văn Sang", shipPhone: "0911222333", shipAddress: "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", shipProvince: "Hà Nội" });
+      await db.insert(schema.orders).values({ id: "ret-ord-0", insertedAt: new Date("2026-09-30T10:00:00Z"), customerId: sang.id, stage: "DELETED", shipAddress: "Đơn đã xoá — không được dùng" });
+      await db.insert(schema.orderItems).values({ id: "ret-oi-1", orderId: "ret-ord-1", productName: "Chả cá thu", variationDetail: "1kg", quantity: 2 });
+      const byFb = await findReturningCustomer({ returning: { fetchedAt: "", phones: [], fbIds: ["psid-sang"], prior: [] } });
+      assert.ok(byFb?.trust === "FB_ID" && byFb.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && byFb.province === "Hà Nội" && byFb.orders === 1 && byFb.lastItems[0] === "Chả cá thu (1kg) × 2", "địa chỉ theo ĐƠN gần nhất còn sống: " + JSON.stringify(byFb));
+      const byPh = await findReturningCustomer({ returning: { fetchedAt: "", phones: ["+84911222333"], fbIds: ["psid-nguoi-khac"], prior: [] } });
+      assert.equal(byPh?.trust, "PHONE", "mã Facebook khác, chỉ trùng SĐT ⇒ mức PHONE");
+      assert.equal((await findReturningCustomer({ customer: { id: null, name: "Lan", phone: "0900000009", address: "5 Lý Thường Kiệt", province: "", simulated: true } }))?.trust, "THREAD");
+      assert.equal(await findReturningCustomer({}), null);
+      // use_saved_address: CHỈ khi khách vừa xác nhận; máy chủ điền địa chỉ đầy đủ, bot / tóm tắt chỉ thấy bản che.
+      const rctx = (st: ChatState, last: string, returning: ReturningCustomer | null = byPh) => ({ ...tctx(st), lastUserText: last, returning });
+      const notYet = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng rồi" }, rctx({}, "cho anh 2kg chả cá"));
+      assert.ok(notYet.isError && !notYet.state.customer, "khách chưa xác nhận ⇒ không tự điền");
+      assert.ok((await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "đúng" }, rctx({}, "đúng", null))).isError, "không có khách cũ ⇒ không điền");
+      const savedC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "vẫn địa chỉ đó" }, rctx({}, "Vẫn địa chỉ đó em ạ"));
+      assert.ok(!savedC.isError && savedC.state.customer?.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông" && savedC.state.customer.phone === "0911222333" && savedC.state.customer.savedAddress === true && !savedC.content.includes("Số 12"), JSON.stringify(savedC));
+      const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(savedC.state, "ok em"));
+      assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");
+      assert.ok(!savedDraft.content.includes("Số 12") && savedDraft.content.includes("…, phường Hà Đông, Hà Nội"), "tóm tắt bot đọc cho khách chỉ có địa chỉ che: " + savedDraft.content);
+      const fbC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "như cũ" }, rctx({}, "như cũ em", byFb));
+      assert.ok(!fbC.isError && fbC.state.customer?.savedAddress === undefined, "mức FB_ID: chính người đó ⇒ không cần che");
       // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
       let flowStep = 0;
       setSalesChatProviderForTests(() => ({
@@ -843,10 +908,40 @@ async function testJourney() {
       await receiveFanpageEvent(ev("m-flow-1", "món mực nhà mình có ngon không em", { id: "cust-fl", name: "Chị Mai" }, "t-flow"));
       const flowFetch = fakeFetchCalls((url) => ({ success: true, id: url.includes("upload_contents") ? "content-flow" : `m-${Math.random().toString(36).slice(2)}` }));
       const rf = await processFanpageThread(PAGE, "t-flow", { fetch: flowFetch.fetch, now: in31s });
-      const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages")).map((c) => String(c.init?.body));
+      const flowBodies = flowFetch.calls.filter((c) => c.url.includes("/conversations/t-flow/messages") && c.init?.method === "POST").map((c) => String(c.init?.body));
       assert.ok(rf.replies === 2 && flowBodies[0].includes("400.000") && flowBodies[1].includes("1kg hay 2kg") && flowBodies.some((b) => b.includes("content_ids")), JSON.stringify({ rf, flowBodies }));
       const flowConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-flow"))))[0];
       assert.equal((flowConv.state as ChatState).stage, "QUOTE");
+      // KHÁCH CŨ trên fanpage: Pancake trả SĐT đã ghi nhận + tin cũ trước khi bot vào ⇒ lời nhắc có khối KHÁCH CŨ đầy đủ (mã
+      // Facebook khớp), bot không cần khách khai lại; hồ sơ Pancake đọc MỘT lần rồi dùng lại.
+      const retSystems: string[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          retSystems.push(req.system);
+          return { content: [{ type: "text", text: "Dạ em gửi về địa chỉ cũ như lần trước nha anh, anh lấy thêm món gì không ạ?" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      const retFetch = fakeFetchCalls((url, init) =>
+        init?.method === "GET" && url.includes("/conversations/t-ret/messages")
+          ? { success: true, conv_phone_numbers: ["0911222333"], messages: [{ id: "old-1", message: "Giao về Số 12 ngõ 5 Lê Lợi nhé em", from: { id: "psid-sang", name: "Sang Tran" }, inserted_at: "2026-09-24T16:30:00" }] }
+          : { success: true, id: "m-" + Math.random().toString(36).slice(2) },
+      );
+      await receiveFanpageEvent(ev("m-ret-1", "Lấy như lần trước cho anh nhé", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
+      const rret = await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: in31s });
+      assert.ok(rret.replies === 1 && retSystems.length === 1, JSON.stringify(rret));
+      for (const k of ["KHÁCH CŨ", "Trần Văn Sang", "Số 12 ngõ 5 Lê Lợi, phường Hà Đông, Hà Nội", "đuôi 2333", "[khách 24/09/2026] Giao về Số 12 ngõ 5 Lê Lợi nhé em"]) assert.ok(retSystems[0].includes(k), "lời nhắc thiếu «" + k + "»");
+      const retConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ret"))))[0];
+      assert.deepEqual((retConv.state as ChatState).returning?.fbIds, ["psid-sang"], "mã Facebook của khách lấy từ tin của khách");
+      const getsFirst = retFetch.calls.filter((c) => c.init?.method === "GET").length;
+      assert.equal(getsFirst, 2, "Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
+      await receiveFanpageEvent(ev("m-ret-2", "ok em", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
+      await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
+      assert.equal(retSystems.length, 2);
+      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại");
+      // Hội thoại này đang chờ khách — gỡ lịch nhắc để khối follow-up bên dưới chỉ thấy hội thoại của nó.
+      await db.update(schema.salesChatConversations).set({ nextFollowupAt: null }).where(eq(schema.salesChatConversations.id, retConv.id));
       assert.equal((await listConversations(50)).find((c) => c.id === flowConv.id)?.stage, "QUOTE", "danh sách hội thoại hiện bước bán");
       // Giá BẤT THƯỜNG (mã chưa có giá) ⇒ CẦN NGƯỜI XỬ LÝ do MÁY quyết, bot im lặng; không tự hết hạn; người «Trả lại cho AI» ⇒ bot trả lời lại.
       const noPrice = await mk("Mực khô (chưa có giá)", "MUC-KHO", 100_000, "");

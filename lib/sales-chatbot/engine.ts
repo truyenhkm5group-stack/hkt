@@ -33,6 +33,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
+import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -61,7 +62,7 @@ async function businessProfile(): Promise<string> {
 /** Lời nhắc hệ thống — dựng từ cấu hình; KHÔNG có giá, tồn hay danh mục (bot phải hỏi công cụ). */
 export type PromptQuickReply = { code: string; title: string; upsell: boolean };
 
-export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = []): string {
+export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = ""): string {
   const upsell = quick.find((q) => q.upsell);
   const shipping = cfg.shippingFee === null ? "Shop CHƯA khai phí ship cố định: nói với khách «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số." : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.";
   return [
@@ -72,14 +73,14 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "2. Tiền luôn dùng calculate_cart (hoặc kết quả đơn nháp) — không tự cộng nhẩm. Tiền đơn = đơn giá × số lượng − chiết khấu + phí ship.",
     `3. ${shipping}`,
     "4. check_inventory trả stock_known = false ⇒ nói «kho sẽ kiểm và báo lại», KHÔNG nói còn / hết hàng. enough = false ⇒ báo không đủ hàng, gợi ý số lượng khác.",
-    "5. Lên đơn: hỏi đủ HỌ TÊN, SỐ ĐIỆN THOẠI, ĐỊA CHỈ GIAO, ghi chú giao hàng (nếu có) → create_customer → create_draft_order → ĐỌC LẠI TÓM TẮT gồm từng dòng (tên × SL × đơn giá = thành tiền), tiền hàng, phí ship, TỔNG THU KHI GIAO (COD), người nhận, SĐT, địa chỉ, ghi chú → hỏi khách «anh/chị xác nhận chốt đơn không ạ?».",
+    "5. Lên đơn: cần đủ HỌ TÊN, SỐ ĐIỆN THOẠI, ĐỊA CHỈ GIAO (khách cũ: dùng khối KHÁCH CŨ, không hỏi lại phần đã có), ghi chú giao hàng (nếu có) → create_customer → create_draft_order → ĐỌC LẠI TÓM TẮT gồm từng dòng (tên × SL × đơn giá = thành tiền), tiền hàng, phí ship, TỔNG THU KHI GIAO (COD), người nhận, SĐT, địa chỉ, ghi chú → hỏi khách «anh/chị xác nhận chốt đơn không ạ?».",
     "6. CHỈ gọi confirm_order khi câu cuối của khách là lời đồng ý rõ ràng; customer_confirmation = nguyên văn lời đồng ý đó. Khách đổi ý / sửa ⇒ update_draft_order rồi đọc lại tóm tắt.",
     `7. Chuyển nhân viên (handoff_to_human) khi: ${[cfg.handoff.onCustomerRequest ? "khách muốn gặp người" : "", cfg.handoff.onComplaint ? "khách khiếu nại / phàn nàn" : "", "câu hỏi ngoài dữ liệu ERP", "bạn không chắc"].filter(Boolean).join(", ")}. Sau đó nói: «${cfg.handoff.message}».`,
     "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu.",
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
     "  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách (vd 1kg hay 2kg) trước khi báo giá.",
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
-    "  B3 INFO — Lấy HỌ TÊN, SĐT, ĐỊA CHỈ: có SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
+    "  B3 INFO — Lấy HỌ TÊN, SĐT, ĐỊA CHỈ: có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối (xác nhận ngắn + mời thêm món trong CÙNG một tin) rồi đi thẳng B4 / B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
     upsell
       ? `  B4 UPSELL — Mời thêm ĐÚNG MỘT LẦN bằng câu mẫu ${upsell.code} (send_quick_reply) — gửi kèm ảnh menu; khách từ chối ⇒ không mời lại, đi tiếp B5.`
       : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products); khách từ chối ⇒ không mời lại, đi tiếp B5.",
@@ -90,6 +91,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "  · «nguyên chất», «tươi», «loại ngon», «thật»… là MÔ TẢ, không phải tên sản phẩm khác; «1kí», «1 ký», «1 cân», «1kg» đều là 1kg; «nửa ký» = 0,5kg. Chọn sản phẩm có TÊN khớp món khách nói (vd «chả cá thu») trong kết quả search_products — không kết luận «không có» khi kết quả có sản phẩm cùng tên chính.",
     "  · Khách đã nói món + số lượng ⇒ đi tiếp bước kế (xin họ tên / SĐT / địa chỉ còn thiếu), không hỏi lại điều khách đã nói. Khách gửi địa chỉ ⇒ ghi nhận và chỉ hỏi phần còn thiếu.",
     "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Ngoài chính sách» (đổi trả, giảm giá riêng, giao gấp shop chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không chắc» (độ tin thấp, không đoán).",
+    returning,
     quick.length
       ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
       : "",
@@ -389,7 +391,10 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     }
     const orgRow = await findOrganization(org.code);
     const quickCatalog = await quickReplyCatalog();
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog);
+    // KHÁCH CŨ (02/10/2026): những gì shop đã biết về khách — không bắt khách khai lại SĐT / địa chỉ. Lỗi đọc ⇒ như khách mới.
+    const known = (conv.state ?? {}) as ChatState;
+    const returning = await findReturningCustomer(known).catch(() => null);
+    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning));
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     const tools = toolDefsFor(cfg);
@@ -420,7 +425,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning });
           state = r.state;
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);
