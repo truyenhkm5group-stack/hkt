@@ -1079,6 +1079,29 @@ async function testJourney() {
         assert.ok(rs.sent === 0 && rs.stopped === 1 && rs.detail.join(" ").includes(label), `${label}: ${JSON.stringify(rs)}`);
         await db.update(schema.salesChatConversations).set({ state: fc.state, lastCustomerAt: fc.lastCustomerAt }).where(eq(schema.salesChatConversations.id, fc.id));
       }
+      // (02/10/2026 · ảnh «Sang Tran») NGƯỜI KHÁC LÊN TIẾNG ⇒ bot thôi nhắc. Nhân viên chốt đơn trên Pancake mà Pancake KHÔNG
+      // gắn uid (trông như tin tự động) ⇒ lịch nhắc xoá ngay lúc nhận.
+      const rearm = (extra: Partial<typeof schema.salesChatConversations.$inferInsert> = {}) =>
+        db.update(schema.salesChatConversations).set({ status: "WAITING", nextFollowupAt: fc.nextFollowupAt, waitingSince: fc.waitingSince, lastBotAt: fc.lastBotAt, lastCustomerAt: fc.lastCustomerAt, ...extra }).where(eq(schema.salesChatConversations.id, fc.id));
+      await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
+      assert.match((await receiveFanpageEvent(ev("m-fu-staff", "Vâng ah, nay e giao tiếp ạ", { id: PAGE }, "t-fu"))).reason, /tự động/);
+      let fs2 = await fuConv();
+      assert.ok(fs2.status === "OPEN" && fs2.nextFollowupAt === null && fs2.waitingSince === null, `tin phía page sau bot ⇒ hết lịch nhắc: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
+      // Hội thoại đã XẾP LỊCH trước khi có chặn lúc nhận (dòng phía page nằm sau tin cuối của bot) ⇒ job dừng, không nhắn.
+      await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
+      const postsBeforeStaff = fuFetch.calls.filter((c) => c.init?.method === "POST").length;
+      const rStaff = await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow });
+      assert.ok(rStaff.sent === 0 && rStaff.stopped === 1 && rStaff.detail.join(" ").includes("nhân viên / page đã nhắn sau bot") && fuFetch.calls.filter((c) => c.init?.method === "POST").length === postsBeforeStaff, JSON.stringify(rStaff));
+      // Tin phía page TRƯỚC tin cuối của bot không chặn (bot đã nhắn sau đó, khách im lặng với chính câu ấy).
+      await rearm({ lastBotAt: new Date(Date.now() + 60_000) });
+      assert.ok(!(await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow })).detail.join(" ").includes("nhân viên / page"), "tin page cũ hơn tin bot ⇒ không chặn");
+      // Khách thả 👍 / ảnh (không chữ — bot không trả lời) ⇒ khách KHÔNG im lặng nữa: hết lịch nhắc, mốc tin khách cập nhật.
+      await rearm();
+      const likeAt = new Date();
+      assert.match((await receiveFanpageEvent(ev("m-fu-like", "", { id: "cust-fu", name: "Chị Thu" }, "t-fu"), likeAt)).reason, /không có chữ/);
+      fs2 = await fuConv();
+      assert.ok(fs2.status === "OPEN" && fs2.nextFollowupAt === null && fs2.lastCustomerAt!.getTime() >= likeAt.getTime() - 1000, `khách thả 👍 ⇒ hết lịch nhắc: ${JSON.stringify({ s: fs2.status, n: fs2.nextFollowupAt })}`);
+      await rearm();
       assert.ok("ok" in (await saveFollowupSettings(admin, { enabled: false, stepsMinutes: [60, 360, 1320] })));
       assert.deepEqual((await runSalesFollowups({ fetch: fuFetch.fetch, now: dueNow })).detail, ["follow-up đang tắt"]);
       assert.ok("error" in (await saveFollowupSettings(admin, { enabled: true, stepsMinutes: [60, 1500] })), "mốc quá 23 giờ ⇒ từ chối (khung 24 giờ của Facebook)");

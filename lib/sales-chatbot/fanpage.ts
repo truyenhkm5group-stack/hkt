@@ -57,7 +57,7 @@ const FIRST_CONTACT_LOOKBACK_MS = 60_000;
 const GRACE_SLACK_MS = 1_000;
 const RETRY_MS = 2_000;
 /** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
-const PAGE_REPLY = "PAGE_REPLY";
+export const PAGE_REPLY = "PAGE_REPLY";
 const WAITING = "Đang đợi xem page có trả lời không";
 const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
 /** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
@@ -139,6 +139,27 @@ export function fanpageVisitorKey(pageId: string, threadId: string): string {
 
 export type ReceiveResult = { queued: boolean; reason: string };
 
+/**
+ * NGƯỜI KHÁC VỪA LÊN TIẾNG ⇒ bot thôi chờ để nhắc (follow-up · 0185). Đo 02/10/2026 (Hải Sản Làng Chài, «Sang Tran»): nhân
+ * viên vào chốt đơn trên Pancake («Vâng ah», «Nay e giao tiếp ạ», «Miễn ship ạ»), khách thả 👍 — một giờ sau bot vẫn nhắn
+ * «mình còn băn khoăn gì không ạ». Lịch nhắc chỉ đúng khi tin CUỐI của hội thoại là của BOT; tin phía page không phải của bot
+ * (nhân viên — kể cả khi Pancake không gắn uid — hay tự động của Pancake / Meta) hoặc bất kỳ phản hồi nào của khách (nhãn
+ * dán, ảnh) đều chấm dứt nó. Không đụng hội thoại đang CẦN NGƯỜI XỬ LÝ.
+ */
+async function stopFollowups(pageId: string, threadId: string, now: Date, customerReplied: boolean): Promise<void> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  await db
+    .update(c)
+    .set({
+      status: sql`case when ${c.status} = 'WAITING' then 'OPEN' else ${c.status} end`,
+      nextFollowupAt: null,
+      waitingSince: null,
+      ...(customerReplied ? { lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${now}), ${now})` } : {}),
+    })
+    .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, threadId)), or(eq(c.status, "WAITING"), sql`${c.nextFollowupAt} is not null`)));
+}
+
 /** Ghi MỘT sự kiện fanpage của tổ chức ngữ cảnh. Không gọi AI, không gọi Pancake — webhook trả 200 ngay sau đây. */
 export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date()): Promise<ReceiveResult> {
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
@@ -172,6 +193,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .insert(t)
       .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, status: "DONE", processedAt: now, note: PAGE_REPLY })
       .onConflictDoNothing({ target: t.messageId });
+    if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
@@ -184,7 +206,11 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   }
   if (!ev.inbox && !ev.comment) return { queued: false, reason: "Không phải tin nhắn / bình luận" };
   if (ev.comment && !ev.comment.fromId) return { queued: false, reason: "Bình luận thiếu người gửi — không nhắn riêng được" };
-  if (!ev.text) return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
+  if (!ev.text) {
+    // 👍 / ảnh / nhãn dán: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
+    if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, true);
+    return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
+  }
   const rows = await db
     .insert(t)
     .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })

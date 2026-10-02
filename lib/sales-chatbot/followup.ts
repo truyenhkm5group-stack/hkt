@@ -6,7 +6,7 @@
  * Facebook) ⇒ AI của CHÍNH shop viết MỘT câu nhắc theo bước khách đang dừng (giọng sổ tay, KHÔNG nêu giá) ⇒ gửi qua
  * Pancake ⇒ ghi vào hội thoại ⇒ đặt mốc kế tiếp. Lỗi một hội thoại không chặn hội thoại khác.
  */
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, gt, lte } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd } from "@/lib/ai/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
@@ -17,7 +17,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { SALES_TONE_LABEL, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
-import { sendFanpageText, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
+import { PAGE_REPLY, sendFanpageText, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
@@ -93,6 +93,21 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
     if (!row.pageId || !row.threadId) {
       stop("thiếu địa chỉ fanpage");
       continue;
+    }
+    // Nhân viên / tự động của page đã nhắn SAU tin cuối của bot (vd nhân viên vào chốt đơn trên Pancake) ⇒ khách không còn
+    // «im lặng với bot» — bot nhắc chen vào là làm phiền khách đã mua. Phủ cả hội thoại đã xếp lịch trước khi có chặn lúc nhận.
+    const since = row.lastBotAt ?? row.waitingSince;
+    if (since) {
+      const t = schema.salesChatInbound;
+      const [other] = await db
+        .select({ id: t.id })
+        .from(t)
+        .where(and(eq(t.pageId, row.pageId), eq(t.threadId, row.threadId), eq(t.note, PAGE_REPLY), gt(t.createdAt, since)))
+        .limit(1);
+      if (other) {
+        stop("nhân viên / page đã nhắn sau bot");
+        continue;
+      }
     }
     if (!withinMessagingWindow(row.lastCustomerAt, now)) {
       stop("ngoài khung 24 giờ của Facebook");
