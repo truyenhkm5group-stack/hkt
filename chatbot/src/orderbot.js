@@ -1,4 +1,4 @@
-import { orderSync, phonesInText, normalizePhone, ORDER_STATUS_VI } from "./orders.js";
+import { orderSync, phonesInText, normalizePhone, hasStreetDetail, ORDER_STATUS_VI } from "./orders.js";
 import { settings } from "./settings.js";
 import { store } from "./store.js";
 import { log } from "./logger.js";
@@ -12,7 +12,7 @@ import { extractAdIds } from "./adpersona.js";
  * Bot tư vấn chỉ nói chuyện với khách. Bot này theo dõi các hội thoại bot đã trả lời, GỘP thông tin khách nhắn rải
  * rác nhiều lần (SĐT tin trước, địa chỉ tin sau, size tin giữa) và chỉ ghi đơn lên POS khi mọi thứ đã XÁC ĐỊNH:
  *  - SĐT khách tự gõ trong hội thoại, mẫu / màu / size khớp đúng biến thể POS,
- *  - địa chỉ khớp ĐỦ tỉnh / huyện / xã của Pancake bằng tên khách gõ (không dò gần đúng) + có số nhà / thôn xóm.
+ *  - địa chỉ khớp ĐỦ tỉnh / huyện / xã của Pancake bằng tên khách gõ (không dò gần đúng); thiếu số nhà chỉ ghi chú.
  * Ba trạng thái, không trạng thái nào bị bỏ quên:
  *  PENDING — còn thiếu thông tin, chờ khách nhắn nốt; im lặng quá `waitMinutes` ⇒ sang REVIEW.
  *  REVIEW  — đủ ý mua nhưng không chắc (địa chỉ không khớp đủ cấp, màu/size không có trên POS...) ⇒ nhân viên sửa & duyệt.
@@ -186,6 +186,15 @@ export class OrderBot {
         delete this.items[key]; // don xong / bo qua qua 7 ngay: don khoi so theo doi
         continue;
       }
+      // Don CAN DUYET CHI vi "thieu so nha" theo luat cu (ten lang / moc dia danh bi chan, 02/10/2026): kiem lai MOT lan
+      // theo luat moi — dung thi len don (va tu xac nhan neu du cua), khong thi van nam o can duyet.
+      if (it.status === "REVIEW" && !it.detailRecheck && (it.reasons || []).length && it.reasons.every((r) => /Thiếu số nhà/.test(r)) && this.enabledFor(it.pageId)) {
+        it.detailRecheck = true;
+        it.status = "PENDING";
+        const r = await this.check(key).catch((e) => (log.warn(`[orderbot] ${key}: kiem lai dia chi loi: ${e.message}`), null));
+        if (r && r.status === "PENDING") r.status = "REVIEW";
+        continue;
+      }
       // Don CAN DUYET: nhan vien co the da tu len don tren Pancake -> go khoi danh sach (1 lan goi POS, khong ton AI)
       if (it.status === "REVIEW" && this.enabledFor(it.pageId) && now - (it.staffCheckAt || 0) > SWEEP_MS - 1000) {
         it.staffCheckAt = now;
@@ -299,15 +308,32 @@ export class OrderBot {
   /**
    * DUYET DON MOI TREN POS (nut tren trang Bot len don): liet ke don "Moi" `days` ngay qua — ca don nhan vien tu tao —
    * va ly do tung don chua chuan. CHI DOC, khong ghi gi. Nguoi xem roi bam xac nhan (confirmDrafts) moi ghi.
+   * Chay NEN (startDraftPreview + draftJob): doc vai tram don mat hon mot phut, giu ket noi trinh duyet lau vay thi proxy
+   * cat ngang va trang chi hien "Lỗi:" trong (su co 02/10/2026).
    */
+  startDraftPreview(days = 7) {
+    const d = Math.round(Number(days));
+    if (!Number.isFinite(d) || d < 1 || d > 14) throw new Error("Số ngày phải từ 1 đến 14");
+    if (!orderSync.enabled) throw new Error("POS chưa cấu hình");
+    if (this.draftJob?.running) return this.draftJob;
+    const job = (this.draftJob = { running: true, kind: "preview", days: d, startedAt: Date.now(), error: "", result: null });
+    this.previewDrafts(d)
+      .then((r) => (job.result = r))
+      .catch((e) => ((job.error = e.message || String(e)), log.warn(`[orderbot] duyet don Moi loi: ${job.error}`)))
+      .finally(() => (job.running = false));
+    return job;
+  }
+
   async previewDrafts(days = 7) {
     const d = Math.round(Number(days));
     if (!Number.isFinite(d) || d < 1 || d > 14) throw new Error("Số ngày phải từ 1 đến 14");
     if (!orderSync.enabled) throw new Error("POS chưa cấu hình");
-    const drafts = await orderSync.recentDrafts(d);
+    const all = await orderSync.recentOrders(Math.max(14, d));
+    const moc = Date.now() - d * 86400e3;
+    const drafts = all.filter((o) => Number(o.status) === 0 && Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z")) >= moc);
     const rows = [];
     for (const o of drafts) {
-      const reasons = await orderSync.draftProblems(o, drafts);
+      const reasons = orderSync.draftProblems(o, all);
       const sa = o.shipping_address || {};
       rows.push({
         id: o.id,
@@ -319,6 +345,7 @@ export class OrderBot {
         page: o.page?.name || this.bot.pageNames.get(String(o.page_id)) || "",
         ok: !reasons.length,
         reasons,
+        warnings: hasStreetDetail(sa.address, [sa.commune_name, sa.district_name, sa.province_name, sa.new_commune_name, sa.new_province_name]) ? [] : ["chưa có số nhà / thôn xóm — shipper gọi khách"],
         // Anh chup luc xem truoc: luc xac nhan, don phai CON Y NHU VAY (nhan vien sua giua chung thi khong dong vao)
         snap: { phone: String(o.bill_phone_number || sa.phone_number || ""), conversationId: o.conversation_id || "", items: (o.items || []).map((it) => ({ variation_id: String(it.variation_id || it.variation_info?.id || ""), quantity: Number(it.quantity) })) },
       });
@@ -328,8 +355,21 @@ export class OrderBot {
     return { days: d, total: rows.length, ok: rows.filter((r) => r.ok).length, rows };
   }
 
+  /** Xac nhan chay NEN (moi don 4–5 lan goi POS, vai chuc don la qua thoi gian proxy cho phep) — tien do o draftJob */
+  startConfirmDrafts(ids = []) {
+    if (this.draftJob?.running) throw new Error("Đang chạy lượt trước, đợi xong");
+    const xt = this.draftPreview;
+    if (!xt || Date.now() - xt.at > 30 * 60e3) throw new Error("Bản xem trước đã cũ (quá 30 phút) — bấm Kiểm tra lại trước khi xác nhận");
+    const job = (this.draftJob = { running: true, kind: "confirm", startedAt: Date.now(), error: "", result: null, total: (ids || []).length, doneCount: 0 });
+    this.confirmDrafts(ids, job)
+      .then((r) => (job.result = r))
+      .catch((e) => (job.error = e.message || String(e)))
+      .finally(() => (job.running = false));
+    return job;
+  }
+
   /** Xac nhan cac don CHUAN trong lan xem truoc gan nhat (ids nguoi chon). Moi don duoc doc lai va kiem lai truoc khi ghi. */
-  async confirmDrafts(ids = []) {
+  async confirmDrafts(ids = [], job = null) {
     const xt = this.draftPreview;
     if (!xt || Date.now() - xt.at > 30 * 60e3) throw new Error("Bản xem trước đã cũ (quá 30 phút) — bấm Kiểm tra lại trước khi xác nhận");
     const chon = new Set((ids || []).map(String));
@@ -339,6 +379,7 @@ export class OrderBot {
       const kq = await orderSync.confirmOrder(r.id, { conversationId: r.snap.conversationId, phone: normalizePhone(r.snap.phone), items: r.snap.items, note: "duyệt đơn Mới trên trang Bot lên đơn" }).catch((e) => ({ ok: false, reason: e.message }));
       if (kq.ok) out.confirmed.push(r.id);
       else out.failed.push({ id: r.id, reason: kq.reason });
+      if (job) job.doneCount++;
     }
     log.info(`[orderbot] xac nhan don Moi: ${out.confirmed.length} don, khong xac nhan ${out.failed.length}`);
     this.draftPreview = null;

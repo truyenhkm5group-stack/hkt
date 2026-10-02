@@ -999,12 +999,12 @@ async function renderOrderBot() {
         <button id="ob_rescan" style="align-self:flex-end" ${rs?.running ? "disabled" : ""}>🔄 Quét lại hội thoại cũ</button>
         <span id="ob_rs" class="small muted" style="align-self:flex-end">${esc(rsText)}</span></div>
       <div class="hint">Đọc lại hội thoại khách nhắn trong số giờ trên (tối đa 7 ngày), hội thoại nào khách đã gửi SĐT + địa chỉ thì kiểm như đơn mới. Bỏ qua hội thoại đã bấm "Bỏ qua", đơn đã tự xác nhận, và khách đã có đơn thật trong 14 ngày (tránh lên trùng đơn cũ). Mỗi hội thoại đủ SĐT + địa chỉ tốn 1 lượt AI; tối đa 150 hội thoại mỗi lần quét.</div>
-      <div class="hint">Bật: bot tư vấn KHÔNG tự ghi đơn nữa, bot này nhận việc. Chỉ ghi đơn nháp lên POS khi SĐT khách tự gõ, mẫu/màu/size khớp POS và địa chỉ khớp ĐỦ tỉnh / huyện / xã theo tên khách gõ (không dò gần đúng) kèm số nhà / thôn xóm. Còn thiếu thì chờ; khách im lặng quá thời gian chờ, hoặc không chắc chắn, thì vào mục <b>Cần duyệt</b> dưới đây. Page đang "chỉ log" không bị ghi đơn.</div></div>
+      <div class="hint">Bật: bot tư vấn KHÔNG tự ghi đơn nữa, bot này nhận việc. Chỉ ghi đơn nháp lên POS khi SĐT khách tự gõ, mẫu/màu/size khớp POS và địa chỉ khớp ĐỦ tỉnh / huyện / xã theo tên khách gõ (không dò gần đúng); thiếu số nhà / thôn thì vẫn lên đơn và ghi chú cho shipper gọi khách. Còn thiếu thì chờ; khách im lặng quá thời gian chờ, hoặc không chắc chắn, thì vào mục <b>Cần duyệt</b> dưới đây. Page đang "chỉ log" không bị ghi đơn.</div></div>
     <div class="card" style="margin-top:12px">
       <div class="row"><b>Duyệt đơn "Mới" trên POS</b>
         <div style="width:120px"><label>Trong (ngày)</label><input id="ob_dr_days" type="number" min="1" max="14" value="7"></div>
         <button id="ob_dr_check" style="align-self:flex-end">🔍 Kiểm tra đơn Mới</button></div>
-      <div class="hint">Đọc mọi đơn đang ở trạng thái "Mới" trên POS (cả đơn nhân viên tự tạo), chỉ XEM, chưa ghi gì. Đơn chuẩn = SĐT hợp lệ, địa chỉ đủ tỉnh/huyện/xã + số nhà/thôn xóm, có sản phẩm, khách không có đơn nào khác trong 14 ngày (kể cả đơn nháp thứ hai). Bạn tick đơn muốn xác nhận rồi bấm xác nhận; bot đọc lại từng đơn, đơn đã bị sửa từ lúc xem thì không động vào.</div>
+      <div class="hint">Đọc mọi đơn đang ở trạng thái "Mới" trên POS (cả đơn nhân viên tự tạo), chỉ XEM, chưa ghi gì. Đơn chuẩn = SĐT hợp lệ, địa chỉ đủ tỉnh/huyện/xã (thiếu số nhà chỉ nhắc, không chặn), có sản phẩm, khách không có đơn nào khác trong 14 ngày (kể cả đơn nháp thứ hai). Bạn tick đơn muốn xác nhận rồi bấm xác nhận; bot đọc lại từng đơn, đơn đã bị sửa từ lúc xem thì không động vào.</div>
       <div id="ob_dr"></div></div>
     <h3 style="margin:14px 0 8px">Cần duyệt</h3>${review}
     <details class="card"><summary class="small" style="cursor:pointer">Đang chờ khách nhắn nốt (${c.pending})</summary><table style="margin-top:8px"><tr><th>Khách</th><th>Page</th><th>Đã có</th><th>Còn thiếu</th><th>Tin cuối</th></tr>${pending}</table></details>
@@ -1020,18 +1020,22 @@ async function renderOrderBot() {
     setTimeout(poll, 3000);
   };
   if (rs?.running) setTimeout(() => view.kind === "orderbot" && renderOrderBot(), 5000);
-  $("#ob_dr_check").onclick = async () => {
+  // Duyet don Moi chay NEN tren bot: bam -> bat dau, trang hoi tien do moi 2 giay toi khi xong
+  const choJob = async (onDone, onWait) => {
+    for (;;) {
+      if (view.kind !== "orderbot") return;
+      const j = await api("/api/orderbot/drafts").catch((e) => ({ running: false, error: e.message }));
+      if (j && !j.running) return onDone(j);
+      onWait?.(j);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  };
+  const veDon = (d) => {
     const box = $("#ob_dr");
-    $("#ob_dr_check").disabled = true;
-    box.innerHTML = '<div class="muted small">Đang đọc đơn trên POS…</div>';
-    let d;
-    try { d = await api("/api/orderbot/drafts", { method: "POST", body: { days: Number($("#ob_dr_days").value) } }); }
-    catch (e) { box.innerHTML = `<div class="small">Lỗi: ${esc(e.message)}</div>`; $("#ob_dr_check").disabled = false; return; }
-    $("#ob_dr_check").disabled = false;
     if (!d.rows.length) return (box.innerHTML = `<div class="muted small">Không có đơn "Mới" nào trong ${d.days} ngày.</div>`);
     box.innerHTML = `<div class="small" style="margin:8px 0"><b>${d.total}</b> đơn Mới · <b>${d.ok}</b> đơn chuẩn · ${d.total - d.ok} đơn còn lỗi</div>
       <table><tr><th><input type="checkbox" id="ob_dr_all" checked style="width:auto"></th><th>Đơn</th><th>Lúc tạo</th><th>Khách</th><th>Sản phẩm</th><th>Địa chỉ</th><th>Kết quả</th></tr>
-      ${d.rows.map((r) => `<tr><td>${r.ok ? `<input type="checkbox" data-dr="${esc(r.id)}" checked style="width:auto">` : ""}</td><td>#${esc(r.id)}<div class="muted small">${esc(r.page)}</div></td><td class="small">${esc(fmtTime(Date.parse(/[zZ]$/.test(r.insertedAt) ? r.insertedAt : r.insertedAt + "Z")))}</td><td>${esc(r.customer)}<div class="muted small">${esc(r.phone)}</div></td><td class="small">${esc(r.items.join(", "))}</td><td class="small">${esc(r.address)}</td><td class="small">${r.ok ? "✅ chuẩn" : r.reasons.map((x) => `⚠ ${esc(x)}`).join("<br>")}</td></tr>`).join("")}</table>
+      ${d.rows.map((r) => `<tr><td>${r.ok ? `<input type="checkbox" data-dr="${esc(r.id)}" checked style="width:auto">` : ""}</td><td>#${esc(r.id)}<div class="muted small">${esc(r.page)}</div></td><td class="small">${esc(fmtTime(Date.parse(/[zZ]$/.test(r.insertedAt) ? r.insertedAt : r.insertedAt + "Z")))}</td><td>${esc(r.customer)}<div class="muted small">${esc(r.phone)}</div></td><td class="small">${esc(r.items.join(", "))}</td><td class="small">${esc(r.address)}</td><td class="small">${r.ok ? "✅ chuẩn" : r.reasons.map((x) => `⚠ ${esc(x)}`).join("<br>")}${(r.warnings || []).map((x) => `<div class="muted">ℹ ${esc(x)}</div>`).join("")}</td></tr>`).join("")}</table>
       ${d.ok ? `<button class="primary" id="ob_dr_go" style="margin-top:8px">Xác nhận các đơn đã tick</button>` : ""}`;
     $("#ob_dr_all").onchange = () => document.querySelectorAll("[data-dr]").forEach((c) => (c.checked = $("#ob_dr_all").checked));
     if (!d.ok) return;
@@ -1040,11 +1044,26 @@ async function renderOrderBot() {
       if (!ids.length) return toast("Chưa tick đơn nào");
       if (!confirm(`Chuyển ${ids.length} đơn sang "Đã xác nhận" trên POS?`)) return;
       $("#ob_dr_go").disabled = true;
-      try {
-        const r = await api("/api/orderbot/drafts/confirm", { method: "POST", body: { ids } });
+      try { await api("/api/orderbot/drafts/confirm", { method: "POST", body: { ids } }); }
+      catch (e) { toast("Lỗi: " + e.message, 7000); $("#ob_dr_go").disabled = false; return; }
+      choJob((j) => {
+        if (j.error) return (box.innerHTML = `<div class="small">Lỗi: ${esc(j.error)}</div>`);
+        const r = j.result || { confirmed: [], failed: [] };
         box.innerHTML = `<div class="small" style="margin:8px 0">✅ Đã xác nhận ${r.confirmed.length} đơn${r.confirmed.length ? ": #" + r.confirmed.map(esc).join(", #") : ""}.${r.failed.length ? `<br>Không xác nhận ${r.failed.length} đơn:<br>${r.failed.map((f) => `#${esc(f.id)}: ${esc(f.reason)}`).join("<br>")}` : ""}</div>`;
-      } catch (e) { toast("Lỗi: " + e.message, 7000); $("#ob_dr_go").disabled = false; }
+      }, (j) => { if (j) box.querySelector("#ob_dr_go") && ($("#ob_dr_go").textContent = `Đang xác nhận… ${j.doneCount || 0}/${j.total || ids.length}`); });
     };
+  };
+  $("#ob_dr_check").onclick = async () => {
+    const box = $("#ob_dr");
+    $("#ob_dr_check").disabled = true;
+    box.innerHTML = '<div class="muted small">Đang đọc đơn trên POS… (vài trăm đơn mất khoảng 1 phút)</div>';
+    try { await api("/api/orderbot/drafts", { method: "POST", body: { days: Number($("#ob_dr_days").value) } }); }
+    catch (e) { box.innerHTML = `<div class="small">Lỗi: ${esc(e.message || "không kết nối được bot")}</div>`; $("#ob_dr_check").disabled = false; return; }
+    choJob((j) => {
+      $("#ob_dr_check").disabled = false;
+      if (j.error || !j.result) return (box.innerHTML = `<div class="small">Lỗi: ${esc(j.error || "không đọc được kết quả")}</div>`);
+      veDon(j.result);
+    });
   };
   const act = (sel, path, bodyOf) => document.querySelectorAll(`[${sel}]`).forEach((b) => (b.onclick = async () => {
     const key = b.getAttribute(sel);

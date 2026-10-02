@@ -37,6 +37,22 @@ export const stripAdmin = (s) => {
 /** Ten rut gon de do "co xuat hien nguyen van trong cau khong": "Huyện Lý Sơn" -> "lyson" */
 export const litKey = (s) => stripAdmin(s).replace(/[^a-z0-9]/g, "");
 
+/**
+ * Phan dia chi CHI TIET (so nha / thon / xom / ten lang / moc dia danh) co that khong: bo ten tinh/huyen/xa va cac tu
+ * hanh chinh di, con lai it nhat 3 chu cai la co. Su co 02/10/2026: "Kon Rôn" (ten lang, khong co chu "thôn") va "Cổng
+ * chào Tân Phú" (moc dia danh) bi chan vi luat cu chi nhan chu so hoac tu khoa "thôn / xóm / đường..." — shipper nong
+ * thon giao theo ten lang / moc dia danh hang ngay.
+ */
+export function hasStreetDetail(street, adminNames = []) {
+  let t = ` ${norm(street)} `;
+  for (const ten of adminNames.filter(Boolean)) {
+    const k = stripAdmin(ten);
+    if (k) t = t.split(` ${k} `).join("  ");
+  }
+  t = t.replace(/\b(tinh|thanh pho|tp|huyen|quan|thi xa|tx|thi tran|tt|xa|phuong|viet nam|vn)\b/g, " ");
+  return t.replace(/[^a-z0-9]/g, "").length >= 3;
+}
+
 /** Tim phan tu khop nhat theo ten. Tra ve { item, score } (score 0..1) */
 export function fuzzyFind(list, query, nameKey = "name") {
   const q = stripAdmin(query);
@@ -462,11 +478,32 @@ export class OrderSync {
     else if (!addr.commune) ly.push(`Chưa xác định được xã/phường trong ${addr.district.name}`);
     if (addr.ambiguous) ly.push(addr.ambiguous);
     if (addr.district && !/^cao/.test(addr.confidence || "")) ly.push(addr.note || `Địa chỉ chỉ khớp gần đúng (${addr.confidence})`);
-    const pho = String(addr.street || "").trim();
-    const coChiTiet = /\d/.test(pho) || /(thôn|xóm|ấp|bản|tổ|khu|ngõ|ngách|hẻm|kiệt|đường|phố|số|chợ|trường|kđt|chung cư|tòa|toà|block|làng|đội)/i.test(pho);
-    const chiLaTenHanhChinh = addr.commune && pho && litKey(pho).includes(litKey(addr.commune.name)) && pho.split(/\s+/).length <= 4;
-    if (!pho || !coChiTiet || chiLaTenHanhChinh) ly.push("Thiếu số nhà / thôn xóm / tên đường");
+    // Thieu so nha / thon KHONG con chan don (chu shop 02/10/2026, don Vo Lieu "xã Phước Thiền, Nhơn Trạch, Đồng Nai"):
+    // du tinh/huyen/xa thi shipper goi khach khi toi xa. Don ghi chu ro de nhan vien biet (streetNote).
     return [...new Set(ly)];
+  }
+
+  /** Dia chi da du tinh/huyen/xa nhung khach khong ghi so nha / thon / ten lang / moc -> mot dong ghi chu cho don */
+  streetNote(addr) {
+    return hasStreetDetail(addr.street, [addr.commune?.name, addr.district?.name, addr.province?.name]) ? "" : "⚠ Khách chưa ghi số nhà / thôn xóm — shipper gọi khách khi tới xã";
+  }
+
+  /**
+   * Khach noi "địa chỉ cũ" / "như cũ" ma tin nhan chi co ten xa: lay so nha / thon tu DON GAN NHAT cua chinh SDT do (khong
+   * huy / xoa) neu don do CUNG xa vua xac dinh. Khac xa hoac khong co don cu -> khong doan, tra null.
+   */
+  async previousStreet(phone, addr) {
+    if (!phone || !addr?.commune) return null;
+    const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { search: phone, page_size: 30 }).catch(() => null);
+    const list = (d?.data || [])
+      .filter((o) => ![6, 9].includes(Number(o.status)) && normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number) === phone)
+      .sort((a, b) => String(b.inserted_at).localeCompare(String(a.inserted_at)));
+    for (const o of list) {
+      const sa = o.shipping_address || {};
+      if (String(sa.commune_id || "") !== String(addr.commune.id)) continue;
+      if (hasStreetDetail(sa.address, [addr.commune.name, addr.district?.name, addr.province?.name])) return { street: String(sa.address).trim(), orderId: o.id };
+    }
+    return null;
   }
 
   async syncFromConversation({ pageId, pageName, conversationId, customerName, historyText, strict = false, addressOverride = "", defaultCode = "" }) {
@@ -498,6 +535,15 @@ export class OrderSync {
     }
 
     const addr = await this.resolveAddress(diaChiKhach, { pageName });
+    // "địa chỉ cũ / như cũ / như lần trước": dung so nha / thon cua don cu CUNG xa (su co Vo Lieu 01/10/2026)
+    if (addr.commune && this.streetNote(addr) && /(địa chỉ cũ|dia chi cu|như cũ|nhu cu|như lần trước|nhu lan truoc|như đơn trước|chỗ cũ|cho cu)/i.test(historyText)) {
+      const cu = await this.previousStreet(phone, addr);
+      if (cu) {
+        addr.street = cu.street;
+        addr.fullAddress = [cu.street, addr.commune?.name, addr.district?.name, addr.province?.name].filter(Boolean).join(", ");
+        addr.autoFixed = [addr.autoFixed, `số nhà / thôn lấy từ đơn cũ #${cu.orderId} của khách (khách nói "địa chỉ cũ")`].filter(Boolean).join("; ");
+      }
+    }
     if (strict) {
       const ly = [...this.addressGate(addr), ...(problems.length ? [`Một phần sản phẩm không khớp POS: ${problems.join("; ")}`] : [])];
       if (ly.length) return { status: "review", reasons: ly, draft: { ...nhap, resolved: addr.fullAddress } };
@@ -517,6 +563,7 @@ export class OrderSync {
       agreed ? `Khách chốt tổng ${agreed.toLocaleString("vi-VN")}đ${freeShip ? " (miễn ship)" : " (gồm ship)"}${discount ? `, đã ghi giảm ${discount.toLocaleString("vi-VN")}đ` : ""}` : "",
       `Địa chỉ ${addressOverride ? "nhân viên duyệt" : "khách ghi"}: "${diaChiKhach}" → chuẩn hoá: ${addr.fullAddress} (độ khớp: ${addr.confidence})`,
       addr.note ? `⚠ ${addr.note}, nhân viên kiểm tra lại` : "",
+      this.streetNote(addr),
       addr.autoFixed ? `✓ ${addr.autoFixed}` : "",
       problems.length ? `⚠ ${problems.join("; ")}` : "",
       ex.note ? `Khách dặn: ${ex.note}` : "",
@@ -614,23 +661,21 @@ export class OrderSync {
   }
 
   /**
-   * DON MOI (status 0) tao trong `days` ngay gan day tren POS — ca don nhan vien / Pancake tu tao, khong chi don bot.
-   * Doc theo trang (moi nhat truoc) toi khi gap don cu hon moc, toi da 10 trang x 100 don.
+   * MOI don tao trong `days` ngay gan day tren POS (moi trang thai) — doc theo trang (moi nhat truoc) toi khi ca trang
+   * cu hon moc, toi da 20 trang x 100 don. Mot lan doc dung cho ca loc don "Moi" lan kiem "khach co don khac khong",
+   * khong goi POS mot lan cho moi don (lan dau goi tung don lam trang qua 1 phut va proxy cat ket noi).
    */
-  async recentDrafts(days = 7) {
+  async recentOrders(days = 14) {
     const moc = Date.now() - days * 86400e3;
     const out = [];
-    for (let trang = 1; trang <= 10; trang++) {
+    for (let trang = 1; trang <= 20; trang++) {
       const d = await this._call("GET", `/shops/${config.pos.shopId}/orders`, null, { page_size: 100, page_number: trang });
       const list = d.data || [];
       let cu = 0;
       for (const o of list) {
         const t = Date.parse(String(o.inserted_at).replace(/(\.\d+)?Z?$/, "Z"));
-        if (Number.isFinite(t) && t < moc) {
-          cu++;
-          continue;
-        }
-        if (Number(o.status) === 0) out.push(o);
+        if (Number.isFinite(t) && t < moc) cu++;
+        else out.push(o);
       }
       if (list.length < 100 || cu === list.length) break;
     }
@@ -638,29 +683,28 @@ export class OrderSync {
   }
 
   /**
-   * DON MOI NAY DA CHUAN DE XAC NHAN CHUA — chi doc don tren POS (khong goi AI). Tra ve danh sach ly do; rong = chuan.
-   * Chuan = SDT hop le, du tinh/huyen/xa + so nha/thon xom, co san pham (bien the + so luong), khach KHONG co don nao
-   * khac trong 14 ngay (ke ca don nhap thu hai: xac nhan ca hai la gui hang hai lan).
+   * DON MOI NAY DA CHUAN DE XAC NHAN CHUA — chi doc (khong goi AI, khong goi POS: `all` la don 14 ngay da doc san).
+   * Tra ve danh sach ly do; rong = chuan. Chuan = SDT hop le, du tinh/huyen/xa + phan chi tiet (so nha / thon / ten lang
+   * / moc), co san pham, khach KHONG co don nao khac trong 14 ngay (ke ca don nhap thu hai: xac nhan ca hai la gui hai lan).
    */
-  async draftProblems(o, drafts = []) {
+  draftProblems(o, all = []) {
     const ly = [];
     const phone = normalizePhone(o.bill_phone_number || o.shipping_address?.phone_number);
-    if (!/^0\d{9}$/.test(phone || "")) ly.push("SĐT không hợp lệ");
+    const sdtOk = /^0\d{9}$/.test(phone || "");
+    if (!sdtOk) ly.push("SĐT không hợp lệ");
     const sa = o.shipping_address || {};
     const duCap = (sa.province_id && sa.district_id && sa.commune_id) || (sa.new_province_id && sa.new_commune_id);
     if (!duCap) ly.push("địa chỉ thiếu tỉnh / huyện / xã");
-    const pho = String(sa.address || "").trim();
-    const coChiTiet = /\d/.test(pho) || /(thôn|xóm|ấp|bản|tổ|khu|ngõ|ngách|hẻm|kiệt|đường|phố|số|chợ|trường|kđt|chung cư|tòa|toà|block|làng|đội)/i.test(pho);
-    if (!pho || !coChiTiet) ly.push("thiếu số nhà / thôn xóm / tên đường");
+    // Thieu so nha / thon: khong chan (xem addressGate) — trang xem truoc van hien dong nhac
     const items = o.items || [];
     if (!items.length) ly.push("đơn chưa có sản phẩm");
     else if (items.some((it) => !(it.variation_id || it.variation_info?.id) || !(Number(it.quantity) > 0))) ly.push("có dòng sản phẩm thiếu mẫu/màu/size hoặc số lượng");
-    if (phone && /^0\d{9}$/.test(phone)) {
-      const nhapKhac = drafts.filter((d) => String(d.id) !== String(o.id) && normalizePhone(d.bill_phone_number || d.shipping_address?.phone_number) === phone);
+    if (sdtOk) {
+      const cungKhach = all.filter((d) => String(d.id) !== String(o.id) && ![6, 9].includes(Number(d.status)) && (normalizePhone(d.bill_phone_number || d.shipping_address?.phone_number) === phone || (o.conversation_id && d.conversation_id === o.conversation_id)));
+      const nhapKhac = cungKhach.filter((d) => Number(d.status) === 0);
+      const khac = cungKhach.filter((d) => Number(d.status) !== 0);
       if (nhapKhac.length) ly.push(`khách còn đơn nháp khác #${nhapKhac.map((d) => d.id).join(", #")} — nhân viên gộp/huỷ trước, tránh gửi hai lần`);
-      const khac = await this.otherOrders(o.conversation_id, phone, o.id).catch(() => null);
-      if (khac === null) ly.push("không kiểm tra được đơn khác của khách (lỗi POS) — chưa kết luận");
-      else if (khac.length) ly.push(`khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày`);
+      if (khac.length) ly.push(`khách đã có đơn #${khac[0].id} (${ORDER_STATUS_VI[Number(khac[0].status)] || khac[0].status}) trong 14 ngày`);
     }
     return ly;
   }
