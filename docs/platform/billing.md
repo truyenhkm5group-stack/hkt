@@ -103,7 +103,77 @@ MRR trên `/platform` = tổng giá THÁNG của gói ở các tổ chức đang
 
 ## 6. Còn ngoài phạm vi (bước sau)
 
-- Hoá đơn điện tử (VAT) theo pháp luật Việt Nam. Hiện chỉ có chứng từ nội bộ.
+- Phát hành hoá đơn điện tử (VAT) **từ trong ERP**. Đó là dịch vụ ngoài (nhà cung cấp hoá đơn điện tử), cần hỏi chủ nền
+  tảng. Hiện ERP chỉ thu thông tin xuất hoá đơn và nhắc người vận hành (mục 8).
 - Nhắc gia hạn qua tin nhắn / email. Hiện chỉ có dải nhắc trong ERP.
 - Tự động đẩy khách từ `/start` vào gói có giá kèm số ngày dùng thử. Hiện người vận hành bật tay.
 - Cổng thẻ (VNPay / PayOS): là dịch vụ ngoài mới, cần hỏi chủ nền tảng (AGENTS.md §7).
+
+## 7. Mua thêm hạn mức giữa kỳ (0192)
+
+> Mã: `lib/billing/addons.ts` (luật thuần) · `lib/billing/service.ts` (`previewAddon`, `createAddonInvoice`,
+> `setPlanAddonPrices`, `setOrgAddons`). Học từ cách các nền tảng chatbot bán hàng trong nước bán "mua thêm trang /
+> nhân viên": khách thiếu đúng một hạng mục thì không phải nhảy cả gói.
+
+**Bước bán nằm trong mã, giá do người vận hành khai.**
+
+| Hạng mục | Một bước | Ghi chú |
+|---|---|---|
+| Người dùng | 1 tài khoản | |
+| Trang tuỳ biến | 5 trang | |
+| Đối tượng tuỳ biến | 1 đối tượng | |
+| Bản ghi tuỳ biến | 1.000 bản ghi | |
+| Luật tự động | 5 luật | |
+| Dung lượng tệp | 1 GB (1.024 MB) | |
+| Bản nháp AI mỗi ngày | — | **không bán**: trần mỗi ngày, không tích luỹ cả kỳ |
+
+- Đơn giá một bước / tháng khai **theo từng gói** ở `/platform` → «Đơn giá mua thêm…». Ô để trống nghĩa là gói đó không
+  bán hạng mục ấy.
+- Migration **không gieo giá nào** (luật 38). Trước khi chủ nền tảng khai, khung «Mua thêm hạn mức» của khách chỉ nói
+  "gói hiện tại chưa bán thêm hạng mục nào".
+
+**Báo giá một lần mua (`quoteAddon`).**
+- Chỉ mua được khi đang trả phí và còn hạn (`ACTIVE` · `DUE_SOON`).
+  - Dùng thử chưa bật thu phí: chưa có kỳ để chia.
+  - Quá hạn: gia hạn trước.
+- Tiền = đơn giá × số phần × số ngày còn lại tới `paid_through` (tính cả hôm nay) ÷ 30, **làm tròn xuống**. Đây là cùng
+  phép quy đổi với phần trừ khi nâng gói.
+- Mỗi lần mua tối đa 100 phần.
+
+**Tiền về.** Hoá đơn `kind = 'ADDON'` (`months = 0`) dùng chung mã `ERPHD…`, chung bộ khớp và chung luật "tối đa một hoá đơn
+đang mở". Trả đủ thì:
+- cộng đơn vị vào `platform_subscriptions.addons`;
+- hạn mức tăng **ngay**: `resolvePlan` cộng phần mua thêm vào hạn mức gói, đệm 10 giây như tình trạng thu phí;
+- **không** đổi `paid_through`, **không** đổi gói.
+
+**Gia hạn sau đó (`quoteRenewal`).**
+- Giá tháng = giá gói + phần mua thêm theo **bảng giá của gói đích**.
+- Phép so nâng / hạ và phần trừ đều dùng tổng tiền tháng, vì đó là số khách thật sự trả.
+- Nếu gói đích không bán một hạng mục khách đang có, hệ thống báo lỗi. Nó không lặng lẽ bỏ phần đã mua và cũng không mượn
+  giá của gói khác. Người vận hành khai giá cho gói đó hoặc giảm phần mua thêm.
+
+**Người vận hành sửa phần đã mua** ở `/platform/org/<mã>` → «Sửa phần mua thêm…»:
+- dùng khi tặng hoặc khi khách xin bớt từ kỳ sau;
+- bắt buộc lý do, vào nhật ký `ORG_ADDONS_SET`;
+- không tạo hoá đơn và không hoàn tiền.
+
+**MRR** cộng phần mua thêm của tổ chức đang chạy. Phần mà gói không còn khai giá thì **không** được cộng; mô tả khung in số
+tổ chức bị như vậy.
+
+## 8. Thông tin xuất hoá đơn VAT (0192)
+
+ERP **không phát hành** hoá đơn điện tử, vì đó là dịch vụ ngoài (AGENTS.md §7). ERP làm ba việc để người vận hành không quên
+xuất và không xuất sai:
+
+1. **Khách khai** ở `/settings/plan` → «Thông tin xuất hoá đơn»: tên công ty / hộ kinh doanh, mã số thuế, địa chỉ, email
+   nhận hoá đơn.
+   - Mã số thuế nhận ba dạng: 10 số · 10 số + «-» + 3 số (đơn vị phụ thuộc) · 12 số (số định danh cá nhân).
+   - Lưu ở `platform_subscriptions.invoice_info`, ghi nhật ký `INVOICE_INFO_SET`.
+2. **Mỗi lần tạo mã** (gia hạn hoặc mua thêm), khách tích «Xuất hoá đơn VAT» thì thông tin **được chụp vào chính hoá đơn**
+   (`platform_invoices.invoice_info`).
+   - Sửa thông tin về sau không đổi hoá đơn đã tạo.
+   - Chưa khai thông tin thì ô này bị khoá.
+3. **Người vận hành** thấy khung «Cần xuất hoá đơn VAT» trên `/platform`. Khung liệt kê các khoản ĐÃ THU có yêu cầu VAT
+   mà chưa ghi số hoá đơn.
+   - Xuất xong bên ngoài thì nhập số hoá đơn rồi bấm «Đã xuất».
+   - Ghi đúng một lần (`INVOICE_VAT_ISSUED`); lần bấm thứ hai không đè số đã ghi.

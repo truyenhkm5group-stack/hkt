@@ -1338,6 +1338,13 @@
       "when": 1790680270000,
       "tag": "0191_password_reset_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1790680280000,
+      "tag": "0192_billing_addons_vat",
+      "breakpoints": true
     }
   ]
 }

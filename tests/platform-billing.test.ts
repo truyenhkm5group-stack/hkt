@@ -10,6 +10,10 @@
  *  3. CỔNG CHỈ XEM: quá hạn + hết ân hạn ⇒ lượt GHI của phiên bị từ chối `BILLING_LOCKED`, lượt ĐỌC và trang gia hạn
  *     vẫn đi; job nền SKIPPED; xác nhận tay ⇒ mở ngay.
  *  4. Người ngoài (người xem của nhà, quản trị tổ chức khác) bị từ chối mọi thao tác vận hành, không đổi một dòng.
+ *  5. MUA THÊM + HOÁ ĐƠN VAT (0192): bảng chân lý báo giá theo ngày còn lại (chưa vào kỳ · quá hạn · bước · làm tròn
+ *     xuống), giá gia hạn cộng phần mua thêm và nâng / hạ so bằng TỔNG, mã số thuế ba dạng; vòng tiền thật: gói chưa khai
+ *     giá ⇒ không bán, tiền đủ ⇒ cộng hạn mức NGAY mà không đổi ngày trả tới / gói, gói đích không bán phần đang có ⇒ báo
+ *     lỗi chứ không đoán giá, thông tin VAT chụp vào hoá đơn, người vận hành ghi số hoá đơn đã xuất đúng một lần.
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -44,7 +48,9 @@ import {
   voidInvoice,
 } from "@/lib/billing/service";
 import { invalidateSubscriptions, orgBillingStanding } from "@/lib/billing/standing";
-import { listPlans } from "@/lib/entitlements/check";
+import { addonMonthlyVnd, applyAddons, parseAddonPrices, parseInvoiceInfo, quoteAddon, type AddonQuote } from "@/lib/billing/addons";
+import { createAddonInvoice, markVatIssued, previewAddon, setInvoiceInfo, setOrgAddons, setPlanAddonPrices } from "@/lib/billing/service";
+import { getPlanUsage, listPlans } from "@/lib/entitlements/check";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
@@ -62,6 +68,75 @@ function sessionUser(over: Partial<SessionUser>): SessionUser {
 
 function isQuote(q: RenewalQuote | { error: string }): q is RenewalQuote {
   return !("error" in q);
+}
+
+function isAddonQuote(q: AddonQuote | { error: string }): q is AddonQuote {
+  return !("error" in q);
+}
+
+/** Đơn giá mua thêm của các gói lúc bắt đầu — trả lại nguyên trạng khi dọn. */
+let savedAddonPrices = new Map<string, unknown>();
+
+// ═══════════ 5 · MUA THÊM + VAT — THUẦN ═══════════
+
+function testAddonsPure() {
+  const limits = { users: 5, pages: 10, objects: 5, records: 5000, workflows: null, aiDraftsPerDay: 20, storageMb: 1024 };
+  const eff = applyAddons(limits, { users: 2, workflows: 5, storageMb: 1024 });
+  assert.equal(eff.users, 7);
+  assert.equal(eff.workflows, null, "gói không giới hạn vẫn là không giới hạn");
+  assert.equal(eff.storageMb, 2048);
+  assert.equal(eff.records, 5000, "không mua thì giữ nguyên");
+
+  const prices = parseAddonPrices({ users: 30_000, storageMb: 20_000, pages: 5, records: "x", aiDraftsPerDay: 10_000 });
+  assert.deepEqual(prices, { users: 30_000, storageMb: 20_000 }, "giá ngoài khoảng / sai kiểu / hạng mục không bán ⇒ không bán");
+  assert.deepEqual(addonMonthlyVnd({ users: 2, storageMb: 2048 }, prices), { ok: true, vnd: 100_000 });
+  assert.deepEqual(addonMonthlyVnd({ users: 2, objects: 1 }, prices), { ok: false, missing: ["objects"] }, "phần đang có mà gói không bán ⇒ nói ra, không đoán");
+
+  // Báo giá: trả tới 2026-10-20, hôm nay 2026-10-11 ⇒ 10 ngày (tính cả hôm nay).
+  const active = { billingEnabled: true, paidThrough: "2026-10-20", graceDays: 7 };
+  const q = quoteAddon({ terms: active, planName: "Khởi đầu", kind: "users", blocks: 2, prices, today: "2026-10-11" });
+  assert.ok(isAddonQuote(q), JSON.stringify(q));
+  assert.equal(q.days, 10);
+  assert.equal(q.units, 2);
+  assert.equal(q.monthlyVnd, 60_000);
+  assert.equal(q.amountVnd, 20_000);
+  assert.equal(q.periodStart, "2026-10-11");
+  assert.equal(q.periodEnd, "2026-10-20");
+  const odd = quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 1, prices: { users: 10_000 }, today: "2026-10-20" });
+  assert.ok(isAddonQuote(odd) && odd.amountVnd === 333, "làm tròn XUỐNG (10.000 / 30 = 333,3)");
+  const gb = quoteAddon({ terms: active, planName: "x", kind: "storageMb", blocks: 3, prices, today: "2026-10-11" });
+  assert.ok(isAddonQuote(gb) && gb.units === 3 * 1024, "bước dung lượng = 1 GB");
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "objects", blocks: 1, prices, today: "2026-10-11" }), "gói không khai giá ⇒ không bán");
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "aiDraftsPerDay", blocks: 1, prices, today: "2026-10-11" }), "trần mỗi ngày không bán thêm");
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 0, prices, today: "2026-10-11" }));
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 101, prices, today: "2026-10-11" }));
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 1.5, prices, today: "2026-10-11" }));
+  assert.ok("error" in quoteAddon({ terms: null, planName: "x", kind: "users", blocks: 1, prices, today: "2026-10-11" }), "chưa vào kỳ trả phí");
+  assert.ok("error" in quoteAddon({ terms: { ...active, billingEnabled: false }, planName: "x", kind: "users", blocks: 1, prices, today: "2026-10-11" }), "dùng thử chưa bật thu phí");
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 1, prices, today: "2026-10-22" }), "quá hạn ⇒ gia hạn trước");
+  assert.ok("error" in quoteAddon({ terms: active, planName: "x", kind: "users", blocks: 1, prices, today: "2026-11-30" }), "đã khoá");
+
+  // Gia hạn cộng phần mua thêm; nâng / hạ so bằng TỔNG tiền tháng.
+  const starter = { key: "starter", name: "Khởi đầu", priceVnd: 499_000 };
+  const growth = { key: "growth", name: "Tăng trưởng", priceVnd: 999_000 };
+  const r1 = quoteRenewal({ terms: active, currentPlan: starter, target: starter, months: 3, today: "2026-10-11", targetAddonMonthlyVnd: 60_000, currentAddonMonthlyVnd: 60_000 });
+  assert.ok(isQuote(r1) && r1.listAmountVnd === 1_677_000 && r1.addonMonthlyVnd === 60_000 && r1.kind === "RENEW", JSON.stringify(r1));
+  const r2 = quoteRenewal({ terms: active, currentPlan: starter, target: growth, months: 1, today: "2026-10-11", targetAddonMonthlyVnd: 0, currentAddonMonthlyVnd: 600_000 });
+  assert.ok(isQuote(r2) && r2.kind === "DOWNGRADE", "gói + mua thêm 1.099.000 > gói cao hơn 999.000 ⇒ là HẠ, không trừ tiền");
+  const r3 = quoteRenewal({ terms: active, currentPlan: starter, target: growth, months: 3, today: "2026-10-11", currentAddonMonthlyVnd: 60_000 });
+  assert.ok(isQuote(r3) && r3.kind === "UPGRADE" && r3.creditVnd === Math.floor((559_000 * 10) / 30), "phần trừ tính cả phần mua thêm đang trả");
+
+  // Thông tin xuất hoá đơn: ba dạng mã số thuế.
+  const base = { companyName: "Công ty TNHH Hải Sản Làng Chài", address: "Số 1, phường Hồng Hải, Quảng Ninh", email: "KeToan@HSLC.vn" };
+  for (const taxCode of ["0101234567", "0101234567-001", "001099012345", " 0101 234 567 "]) {
+    const r = parseInvoiceInfo({ ...base, taxCode });
+    assert.ok("ok" in r, `${taxCode}: ${JSON.stringify(r)}`);
+  }
+  const ok = parseInvoiceInfo({ ...base, taxCode: "0101234567" });
+  assert.ok("ok" in ok && ok.info.email === "ketoan@hslc.vn", "email viết thường");
+  for (const bad of [{ ...base, taxCode: "010123456" }, { ...base, taxCode: "0101234567-1" }, { ...base, taxCode: "0101234567", email: "ketoan" }, { ...base, taxCode: "0101234567", companyName: "" }, { ...base, taxCode: "0101234567", address: "HN" }]) {
+    assert.ok("error" in parseInvoiceInfo(bad), JSON.stringify(bad));
+  }
 }
 
 // ═══════════ 1 · THUẦN ═══════════
@@ -152,8 +227,9 @@ async function cleanup(savedReceiver: unknown, savedPrices: Map<string, number |
   if (savedReceiver === undefined) await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
   else await pdb.update(schema.platformSettings).set({ value: savedReceiver }).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
   for (const [key, price] of savedPrices) await pdb.update(schema.platformPlans).set({ priceVnd: price }).where(eq(schema.platformPlans.key, key));
+  for (const [key, prices] of savedAddonPrices) await pdb.update(schema.platformPlans).set({ addonPrices: (prices ?? {}) as Record<string, unknown> }).where(eq(schema.platformPlans.key, key));
   const home = await getHomeOrganization();
-  await pdb.delete(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, home.code), inArray(schema.platformAuditLog.action, ["BILLING_RECEIVER_SET", "PLAN_PRICE_SET", "BILLING_PAYMENT_RESOLVE"])));
+  await pdb.delete(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, home.code), inArray(schema.platformAuditLog.action, ["BILLING_RECEIVER_SET", "PLAN_PRICE_SET", "BILLING_PAYMENT_RESOLVE", "ADDON_PRICE_SET"])));
   for (const code of ORGS) {
     const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
     if (org) {
@@ -210,7 +286,9 @@ async function asRequest(token: string, method: string, reqPath: string) {
 
 export async function testPlatformBilling() {
   testPure();
+  testAddonsPure();
   const pdb = await getPlatformDb();
+  savedAddonPrices = new Map((await pdb.select({ key: schema.platformPlans.key, addonPrices: schema.platformPlans.addonPrices }).from(schema.platformPlans)).map((r) => [r.key, r.addonPrices]));
   const savedRow = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
   const savedReceiver = savedRow ? savedRow.value : undefined;
   const savedPrices = new Map((await listPlans()).map((p) => [p.key, p.priceVnd]));
@@ -315,6 +393,80 @@ export async function testPlatformBilling() {
     const up = await previewRenewal(A, "growth", 3);
     assert.ok(isQuote(up) && up.kind === "UPGRADE" && up.creditVnd > 0 && up.amountVnd === up.listAmountVnd - up.creditVnd, JSON.stringify(up));
 
+    // ── 5 · MUA THÊM giữa kỳ (A đang trả gói Khởi đầu, còn hạn ~3 tháng).
+    assert.ok("error" in (await previewAddon(A, { kind: "users", blocks: 2 })), "gói chưa khai giá mua thêm ⇒ không bán");
+    for (const u of outsiders) assert.ok("error" in (await setPlanAddonPrices(u, { planKey: "starter", prices: { users: 30_000 }, reason: "mở bán thêm" })));
+    assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 500 }, reason: "giá vô lý" })));
+    assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { aiDraftsPerDay: 10_000 }, reason: "hạng mục không bán" })));
+    assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "internal", prices: { users: 30_000 }, reason: "bán gói nội bộ" })));
+    assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 30_000, storageMb: 20_000, pages: null }, reason: "Mở bán thêm cho gói Khởi đầu" })));
+    assert.deepEqual(parseAddonPrices((await listPlans()).find((p) => p.key === "starter")?.addonPrices), { users: 30_000, storageMb: 20_000 });
+
+    const subBefore = await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, A) });
+    const aq = await previewAddon(A, { kind: "users", blocks: 2 });
+    assert.ok(isAddonQuote(aq), JSON.stringify(aq));
+    assert.equal(aq.periodEnd, subBefore?.paidThrough, "tính tới đúng ngày đã trả tới");
+    assert.equal(aq.amountVnd, Math.floor((60_000 * aq.days) / 30));
+    const usersLimitBefore = (await getPlanUsage(A)).rows.find((r) => r.kind === "users")?.limit;
+    assert.equal(usersLimitBefore, 5);
+
+    // Thông tin xuất hoá đơn: chưa khai mà đòi VAT ⇒ từ chối; MST sai ⇒ từ chối.
+    assert.ok("error" in (await createAddonInvoice(tenant, { kind: "users", blocks: 2, vat: true })), "chưa khai thông tin xuất hoá đơn");
+    assert.ok("error" in (await setInvoiceInfo(tenant, { info: { companyName: "Công ty A", taxCode: "123", address: "Số 1 Hà Nội", email: "a@a.vn" } })));
+    assert.ok("error" in (await setInvoiceInfo(op, { info: { companyName: "Công ty A", taxCode: "0101234567", address: "Số 1 Hà Nội", email: "a@a.vn" } })), "nhà không có hoá đơn thuê bao");
+    assert.ok("ok" in (await setInvoiceInfo(tenant, { info: { companyName: "Công ty A", taxCode: "0101234567", address: "Số 1 Hà Nội", email: "ketoan@a.vn" } })));
+
+    const ad1 = await createAddonInvoice(tenant, { kind: "users", blocks: 2, vat: true });
+    assert.ok("ok" in ad1, JSON.stringify(ad1));
+    const ad1b = await createAddonInvoice(tenant, { kind: "users", blocks: 2, vat: true });
+    assert.ok("ok" in ad1b && ad1b.invoiceId === ad1.invoiceId, "bấm lại ⇒ cùng hoá đơn");
+    const adInv = await invoiceById(ad1.invoiceId);
+    assert.ok(adInv.kind === "ADDON" && adInv.months === 0 && adInv.addonKind === "users" && adInv.addonUnits === 2 && adInv.amountVnd === aq.amountVnd, JSON.stringify(adInv));
+    assert.equal((adInv.invoiceInfo as { taxCode?: string } | null)?.taxCode, "0101234567", "thông tin VAT CHỤP vào hoá đơn");
+    await bankIn(adInv.amountVnd, `IBFT ${adInv.transferCode}`);
+    const rAdd = await reconcileBillingPayments();
+    assert.equal(rAdd.matched, 1, JSON.stringify(rAdd));
+    const subAfter = await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, A) });
+    assert.deepEqual(subAfter?.addons, { users: 2 });
+    assert.equal(subAfter?.paidThrough, subBefore?.paidThrough, "mua thêm KHÔNG đổi ngày trả tới");
+    invalidateOrganizations();
+    assert.equal((await findOrganization(A))?.plan, "starter", "mua thêm KHÔNG đổi gói");
+    const usage = await getPlanUsage(A);
+    assert.equal(usage.rows.find((r) => r.kind === "users")?.limit, 7, "hạn mức tăng NGAY: 5 + 2");
+    assert.deepEqual(usage.plan?.addons, { users: 2 });
+
+    // Gia hạn cộng phần mua thêm theo giá của gói ĐÍCH; gói đích không bán ⇒ báo lỗi, không đoán.
+    const ren = await previewRenewal(A, "starter", 1);
+    assert.ok(isQuote(ren) && ren.listAmountVnd === 499_000 + 60_000 && ren.addonMonthlyVnd === 60_000, JSON.stringify(ren));
+    const toGrowth = await previewRenewal(A, "growth", 3);
+    assert.ok("error" in toGrowth && toGrowth.error.includes("người dùng"), JSON.stringify(toGrowth));
+    const tb = await loadTenantBilling(A);
+    assert.ok(tb && tb.addonMonthlyVnd === 60_000 && tb.addons[0]?.units === 2 && tb.addonBlockedReason === null && tb.addonOffers.length === 2 && tb.invoiceInfo?.taxCode === "0101234567", JSON.stringify(tb?.addons));
+
+    // VAT: người vận hành thấy khoản chờ xuất, ghi số hoá đơn đúng một lần.
+    const vb = await loadPlatformBilling(op);
+    assert.ok(!("error" in vb) && vb.vatPending.some((i) => i.id === adInv.id), "khoản đã thu có yêu cầu VAT nằm ở «Cần xuất hoá đơn VAT»");
+    assert.ok(!("error" in vb) && vb.orgs.find((o) => o.code === A)?.addonMonthlyVnd === 60_000);
+    for (const u of outsiders) assert.ok("error" in (await markVatIssued(u, { invoiceId: adInv.id, vatRef: "1C26TAA-1" })));
+    assert.ok("error" in (await markVatIssued(op, { invoiceId: adInv.id, vatRef: "" })));
+    assert.ok("error" in (await markVatIssued(op, { invoiceId: inv.id, vatRef: "1C26TAA-9" })), "khoản không yêu cầu VAT");
+    assert.ok("ok" in (await markVatIssued(op, { invoiceId: adInv.id, vatRef: "1C26TAA-0000123" })));
+    const again = await markVatIssued(op, { invoiceId: adInv.id, vatRef: "1C26TAA-0000999" });
+    assert.ok("ok" in again && (await invoiceById(adInv.id)).vatRef === "1C26TAA-0000123", "ghi lần hai không đè số đã ghi");
+    const vb2 = await loadPlatformBilling(op);
+    assert.ok(!("error" in vb2) && !vb2.vatPending.some((i) => i.id === adInv.id));
+
+    // Người vận hành sửa phần đã mua (tặng / bớt) — hiệu lực ngay; về 0 thì gia hạn sang gói khác lại được.
+    for (const u of outsiders) assert.ok("error" in (await setOrgAddons(u, { orgCode: A, blocks: { users: 5 }, reason: "tặng thêm" })));
+    assert.ok("error" in (await setOrgAddons(op, { orgCode: A, blocks: { users: -1 }, reason: "số âm" })));
+    assert.ok("ok" in (await setOrgAddons(op, { orgCode: A, blocks: { users: 3 }, reason: "Tặng thêm 1 người dùng tháng đầu" })));
+    assert.equal((await getPlanUsage(A)).rows.find((r) => r.kind === "users")?.limit, 8);
+    assert.ok("ok" in (await setOrgAddons(op, { orgCode: A, blocks: { users: 0 }, reason: "Khách xin bớt từ kỳ sau" })));
+    assert.equal((await getPlanUsage(A)).rows.find((r) => r.kind === "users")?.limit, 5);
+    assert.ok(isQuote(await previewRenewal(A, "growth", 3)), "hết phần mua thêm ⇒ đổi gói lại được");
+    const addonAudit = await pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, A), inArray(schema.platformAuditLog.action, ["ORG_ADDONS_SET", "INVOICE_INFO_SET", "INVOICE_VAT_ISSUED"])));
+    assert.equal(addonAudit.length, 4, "hai lượt sửa phần mua thêm + khai thông tin hoá đơn + ghi hoá đơn VAT đều vào nhật ký");
+
     // ── CỔNG CHỈ XEM: lùi trả tới về 30 ngày trước, ân hạn 7 ⇒ LOCKED.
     const today = vnDate(new Date());
     const past = new Date(Date.now() - 30 * 86_400_000);
@@ -383,6 +535,6 @@ export async function testPlatformBilling() {
     await cleanup(savedReceiver, savedPrices);
   }
   console.log(
-    "✓ Thu phí thuê bao: bảng chân lý tình trạng (7 ngày · ân hạn · khoá) + báo giá (bắt đầu · gia hạn · nối ân hạn · dùng thử · nâng có trừ · hạ) + mã chuyển khoản chịu được ngân hàng đổi chữ; vòng tiền thật: chưa khai tài khoản nhận ⇒ không tạo mã, bấm lại không đẻ mã thứ hai, đổi lựa chọn ⇒ mã cũ huỷ, tiền thiếu ghi mà không gia hạn, tiền đủ ⇒ trả tới + đổi gói + nhật ký trong một giao dịch, đối chiếu lại không đếm đôi, mã huỷ / mã lạ / tiền ra đúng phán quyết; quá hạn ⇒ ghi bị chặn, đọc + trang gia hạn vẫn đi, job dừng, xác nhận tay mở ngay; người ngoài bị từ chối mọi thao tác",
+    "✓ Thu phí thuê bao: mua thêm giữa kỳ (theo ngày còn lại, làm tròn xuống, cộng hạn mức ngay mà không đổi ngày trả tới / gói, gia hạn tính phần mua thêm theo giá gói đích, gói đích không bán ⇒ báo lỗi) + thông tin VAT chụp vào hoá đơn và ghi số hoá đơn đã xuất đúng một lần; bảng chân lý tình trạng (7 ngày · ân hạn · khoá) + báo giá (bắt đầu · gia hạn · nối ân hạn · dùng thử · nâng có trừ · hạ) + mã chuyển khoản chịu được ngân hàng đổi chữ; vòng tiền thật: chưa khai tài khoản nhận ⇒ không tạo mã, bấm lại không đẻ mã thứ hai, đổi lựa chọn ⇒ mã cũ huỷ, tiền thiếu ghi mà không gia hạn, tiền đủ ⇒ trả tới + đổi gói + nhật ký trong một giao dịch, đối chiếu lại không đếm đôi, mã huỷ / mã lạ / tiền ra đúng phán quyết; quá hạn ⇒ ghi bị chặn, đọc + trang gia hạn vẫn đi, job dừng, xác nhận tay mở ngay; người ngoài bị từ chối mọi thao tác",
   );
 }

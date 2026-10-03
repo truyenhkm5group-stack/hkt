@@ -30,6 +30,12 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "INVOICE_PAID"
   | "INVOICE_VOID"
   | "BILLING_PAYMENT_RESOLVE"
+  // Mua thêm hạn mức + hoá đơn VAT (0192): đơn giá mua thêm của gói, sửa phần đã mua của một tổ chức, khách khai thông tin
+  // xuất hoá đơn, người vận hành ghi số hoá đơn VAT đã xuất.
+  | "ADDON_PRICE_SET"
+  | "ORG_ADDONS_SET"
+  | "INVOICE_INFO_SET"
+  | "INVOICE_VAT_ISSUED"
   // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
   | "PASSWORD_RESET_LINK";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";

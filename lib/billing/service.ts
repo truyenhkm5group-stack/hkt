@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import {
@@ -19,7 +19,29 @@ import {
   type RenewalQuote,
   type SubscriptionTerms,
 } from "@/lib/billing/rules";
-import { invalidateSubscriptions, readSubscriptionTerms } from "@/lib/billing/standing";
+import {
+  ADDON_KINDS,
+  ADDON_MAX_BLOCKS,
+  ADDON_PRICE_MAX_VND,
+  ADDON_PRICE_MIN_VND,
+  addonMonthlyVnd,
+  addonUnitsLabel,
+  isAddonKind,
+  missingAddonMessage,
+  parseAddonPrices,
+  parseAddonUnits,
+  parseInvoiceInfo,
+  quoteAddon,
+  readInvoiceInfo,
+  ADDON_STEP,
+  type AddonKind,
+  type AddonPrices,
+  type AddonQuote,
+  type AddonUnits,
+  type InvoiceInfo,
+} from "@/lib/billing/addons";
+import { invalidateSubscriptions, readSubscriptionAddons, readSubscriptionTerms } from "@/lib/billing/standing";
+import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { VN_BANK_BY_BIN, bankNameOf } from "@/lib/constants/vn-banks";
 import { HOME_PLAN_KEY, listPlans, planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { buildVietQrPayload, toTransferText } from "@/lib/payroll/vietqr";
@@ -150,16 +172,30 @@ export type InvoiceView = {
   paidRef: string | null;
   paidByEmail: string | null;
   voidReason: string | null;
+  /** 0192: `RENEWAL` · `ADDON` (mua thêm giữa kỳ — `months = 0`). */
+  kind: "RENEWAL" | "ADDON";
+  addonKind: AddonKind | null;
+  addonUnits: number | null;
+  /** Câu ngắn cho người đọc: «Gói Khởi đầu · 3 tháng» hoặc «Mua thêm 2 tài khoản». */
+  label: string;
+  /** Ảnh chụp phần mua thêm đã tính vào giá của hoá đơn gia hạn. */
+  addons: AddonUnits;
+  invoiceInfo: InvoiceInfo | null;
+  vatIssuedAt: string | null;
+  vatRef: string | null;
+  vatIssuedByEmail: string | null;
 };
 
 type InvoiceRow = typeof schema.platformInvoices.$inferSelect;
 
 function invoiceView(r: InvoiceRow, plans: readonly PlanRow[]): InvoiceView {
+  const planName = plans.find((p) => p.key === r.planKey)?.name ?? r.planKey;
+  const addonKind = r.kind === "ADDON" && isAddonKind(r.addonKind) ? r.addonKind : null;
   return {
     id: r.id,
     orgCode: r.orgCode,
     planKey: r.planKey,
-    planName: plans.find((p) => p.key === r.planKey)?.name ?? r.planKey,
+    planName,
     months: r.months,
     periodStart: r.periodStart,
     periodEnd: r.periodEnd,
@@ -176,6 +212,15 @@ function invoiceView(r: InvoiceRow, plans: readonly PlanRow[]): InvoiceView {
     paidRef: r.paidRef,
     paidByEmail: r.paidByEmail,
     voidReason: r.voidReason,
+    kind: r.kind === "ADDON" ? "ADDON" : "RENEWAL",
+    addonKind,
+    addonUnits: r.addonUnits,
+    label: addonKind ? `Mua thêm ${addonUnitsLabel(addonKind, r.addonUnits ?? 0)}` : `Gói ${planName} · ${r.months} tháng`,
+    addons: parseAddonUnits(r.addons),
+    invoiceInfo: readInvoiceInfo(r.invoiceInfo),
+    vatIssuedAt: r.vatIssuedAt?.toISOString() ?? null,
+    vatRef: r.vatRef,
+    vatIssuedByEmail: r.vatIssuedByEmail,
   };
 }
 
@@ -196,15 +241,29 @@ export async function previewRenewal(orgCode: string, planKey: string, months: n
   const plans = await listPlans();
   const target = plans.find((p) => p.key === planKey && p.key !== HOME_PLAN_KEY);
   if (!target) return { error: "Không có gói này." };
-  const terms = await readSubscriptionTerms(org.code, { fresh: true });
-  return quoteRenewal({ terms, currentPlan: pricedOf(plans.find((p) => p.key === planKeyOf(org))), target: pricedOf(target)!, months, today: vnDate(now) });
+  const [terms, units] = await Promise.all([readSubscriptionTerms(org.code, { fresh: true }), readSubscriptionAddons(org.code, { fresh: true })]);
+  const current = plans.find((p) => p.key === planKeyOf(org));
+  // Phần mua thêm đi theo GIÁ CỦA GÓI ĐÍCH; gói đích không bán một hạng mục đang có ⇒ nói rõ, không đoán giá.
+  const targetAddon = addonMonthlyVnd(units, parseAddonPrices(target.addonPrices));
+  if (!targetAddon.ok) return { error: missingAddonMessage(target.name, targetAddon.missing) };
+  const currentAddon = current ? addonMonthlyVnd(units, parseAddonPrices(current.addonPrices)) : null;
+  return quoteRenewal({
+    terms,
+    currentPlan: pricedOf(current),
+    target: pricedOf(target)!,
+    months,
+    today: vnDate(now),
+    targetAddonMonthlyVnd: targetAddon.vnd,
+    // Gói hiện tại vừa bị gỡ giá của phần đang có ⇒ phần trừ chỉ tính giá gói — không đoán giá.
+    currentAddonMonthlyVnd: currentAddon?.ok ? currentAddon.vnd : 0,
+  });
 }
 
 /**
  * KHÁCH tạo mã thanh toán cho lần gia hạn. Bấm lại với đúng lựa chọn cũ ⇒ trả lại hoá đơn đang mở (không đẻ mã thứ hai
  * — người ta hay bấm hai lần). Lựa chọn khác ⇒ hoá đơn cũ VOID, mã cũ không còn gia hạn được nữa.
  */
-export async function createRenewalInvoice(user: SessionUser, raw: { planKey?: unknown; months?: unknown }, now: Date = new Date()): Promise<{ ok: true; invoiceId: string; message: string } | { error: string }> {
+export async function createRenewalInvoice(user: SessionUser, raw: { planKey?: unknown; months?: unknown; vat?: unknown }, now: Date = new Date()): Promise<{ ok: true; invoiceId: string; message: string } | { error: string }> {
   const org = user.organization;
   if (!org) return { error: "Không xác định được tổ chức của phiên." };
   if (org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
@@ -212,12 +271,73 @@ export async function createRenewalInvoice(user: SessionUser, raw: { planKey?: u
   const months = typeof raw.months === "number" ? raw.months : Number(raw.months);
   const q = await previewRenewal(org.code, planKey, months, now);
   if ("error" in q) return q;
-  if (!(await getBillingReceiver())) return { error: "Nền tảng chưa khai tài khoản nhận tiền — báo người vận hành nền tảng, chưa tạo được mã thanh toán." };
+  const units = await readSubscriptionAddons(org.code, { fresh: true });
+  return openInvoice(
+    user,
+    org.code,
+    {
+      kind: "RENEWAL",
+      planKey: q.planKey,
+      months: q.months,
+      periodStart: q.periodStart,
+      periodEnd: q.periodEnd,
+      listAmountVnd: q.listAmountVnd,
+      creditVnd: q.creditVnd,
+      amountVnd: q.amountVnd,
+      addonKind: null,
+      addonUnits: null,
+      addons: q.addonMonthlyVnd > 0 ? units : {},
+      vat: raw.vat === true,
+      voidNote: `${q.months} tháng gói ${q.planKey}`,
+    },
+    now,
+  );
+}
 
+type InvoiceDraft = {
+  kind: "RENEWAL" | "ADDON";
+  planKey: string;
+  months: number;
+  periodStart: string;
+  periodEnd: string;
+  listAmountVnd: number;
+  creditVnd: number;
+  amountVnd: number;
+  addonKind: AddonKind | null;
+  addonUnits: number | null;
+  addons: AddonUnits;
+  vat: boolean;
+  /** Vế sau của lý do huỷ hoá đơn đang mở: «Khách tạo mã mới (<vế này>)». */
+  voidNote: string;
+};
+
+/**
+ * MỘT đường mở hoá đơn cho cả gia hạn lẫn mua thêm — cả hai chung luật «tối đa một hoá đơn đang mở» và chung bộ khớp mã
+ * chuyển khoản. Bấm lại đúng lựa chọn cũ ⇒ trả lại hoá đơn đang mở (người ta hay bấm hai lần). Lựa chọn khác ⇒ hoá đơn cũ
+ * VOID, mã cũ không còn khớp được nữa. `vat` ⇒ chụp thông tin xuất hoá đơn ĐÃ KHAI vào hoá đơn (chưa khai thì từ chối).
+ */
+async function openInvoice(user: SessionUser, orgCode: string, d: InvoiceDraft, now: Date): Promise<{ ok: true; invoiceId: string; message: string } | { error: string }> {
+  if (!(await getBillingReceiver())) return { error: "Nền tảng chưa khai tài khoản nhận tiền — báo người vận hành nền tảng, chưa tạo được mã thanh toán." };
   const pdb = await getPlatformDb();
+  let info: InvoiceInfo | null = null;
+  if (d.vat) {
+    const [sub] = await pdb.select({ invoiceInfo: schema.platformSubscriptions.invoiceInfo }).from(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, orgCode)).limit(1);
+    info = readInvoiceInfo(sub?.invoiceInfo);
+    if (!info) return { error: "Khai «Thông tin xuất hoá đơn» trước (tên công ty, mã số thuế, địa chỉ, email) rồi mới chọn xuất hoá đơn VAT." };
+  }
   const inv = schema.platformInvoices;
-  const [open] = await pdb.select().from(inv).where(and(eq(inv.orgCode, org.code), eq(inv.status, "OPEN"))).limit(1);
-  if (open && open.planKey === q.planKey && open.months === q.months && open.periodStart === q.periodStart && open.amountVnd === q.amountVnd) {
+  const [open] = await pdb.select().from(inv).where(and(eq(inv.orgCode, orgCode), eq(inv.status, "OPEN"))).limit(1);
+  if (
+    open &&
+    open.kind === d.kind &&
+    open.planKey === d.planKey &&
+    open.months === d.months &&
+    open.periodStart === d.periodStart &&
+    open.amountVnd === d.amountVnd &&
+    (open.addonKind ?? null) === d.addonKind &&
+    (open.addonUnits ?? null) === d.addonUnits &&
+    JSON.stringify(readInvoiceInfo(open.invoiceInfo)) === JSON.stringify(info)
+  ) {
     return { ok: true, invoiceId: open.id, message: "Mã thanh toán đang mở vẫn dùng được." };
   }
   let code = newTransferCode();
@@ -228,23 +348,97 @@ export async function createRenewalInvoice(user: SessionUser, raw: { planKey?: u
   }
   const id = crypto.randomUUID();
   await pdb.transaction(async (tx) => {
-    if (open) await tx.update(inv).set({ status: "VOID", voidReason: `Khách tạo mã mới (${q.months} tháng gói ${q.planKey})`, updatedAt: now }).where(and(eq(inv.id, open.id), eq(inv.status, "OPEN")));
+    if (open) await tx.update(inv).set({ status: "VOID", voidReason: `Khách tạo mã mới (${d.voidNote})`, updatedAt: now }).where(and(eq(inv.id, open.id), eq(inv.status, "OPEN")));
     await tx.insert(inv).values({
       id,
-      orgCode: org.code,
-      planKey: q.planKey,
-      months: q.months,
-      periodStart: q.periodStart,
-      periodEnd: q.periodEnd,
-      listAmountVnd: q.listAmountVnd,
-      creditVnd: q.creditVnd,
-      amountVnd: q.amountVnd,
+      orgCode,
+      kind: d.kind,
+      planKey: d.planKey,
+      months: d.months,
+      periodStart: d.periodStart,
+      periodEnd: d.periodEnd,
+      listAmountVnd: d.listAmountVnd,
+      creditVnd: d.creditVnd,
+      amountVnd: d.amountVnd,
+      addonKind: d.addonKind,
+      addonUnits: d.addonUnits,
+      addons: d.addons,
+      invoiceInfo: info,
       transferCode: code,
       status: "OPEN",
       createdByEmail: user.email,
     });
   });
-  return { ok: true, invoiceId: id, message: `Đã tạo mã thanh toán ${code} — ${vnd(q.amountVnd)}.` };
+  return { ok: true, invoiceId: id, message: `Đã tạo mã thanh toán ${code} — ${vnd(d.amountVnd)}.` };
+}
+
+// ─────────────────────────── Mua thêm hạn mức giữa kỳ ───────────────────────────
+
+/** Báo giá mua thêm (không ghi gì). Cùng hàm thuần với lượt tạo mã — hai bước không lệch nhau. */
+export async function previewAddon(orgCode: string, raw: { kind?: unknown; blocks?: unknown }, now: Date = new Date()): Promise<AddonQuote | { error: string }> {
+  const org = await findOrganization(orgCode);
+  if (!org || org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
+  const plans = await listPlans();
+  const plan = plans.find((p) => p.key === planKeyOf(org));
+  if (!plan) return { error: "Không đọc được gói hiện tại của tổ chức." };
+  const terms = await readSubscriptionTerms(org.code, { fresh: true });
+  return quoteAddon({ terms, planName: plan.name, kind: raw.kind, blocks: raw.blocks, prices: parseAddonPrices(plan.addonPrices), today: vnDate(now) });
+}
+
+/** KHÁCH tạo mã thanh toán cho một lần mua thêm. Trả xong ⇒ hạn mức tăng NGAY; ngày trả tới và gói không đổi. */
+export async function createAddonInvoice(user: SessionUser, raw: { kind?: unknown; blocks?: unknown; vat?: unknown }, now: Date = new Date()): Promise<{ ok: true; invoiceId: string; message: string } | { error: string }> {
+  const org = user.organization;
+  if (!org) return { error: "Không xác định được tổ chức của phiên." };
+  if (org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
+  const q = await previewAddon(org.code, raw, now);
+  if ("error" in q) return q;
+  const current = await findOrganization(org.code);
+  if (!current) return { error: "Không đọc được tổ chức." };
+  return openInvoice(
+    user,
+    org.code,
+    {
+      kind: "ADDON",
+      planKey: planKeyOf(current),
+      months: 0,
+      periodStart: q.periodStart,
+      periodEnd: q.periodEnd,
+      listAmountVnd: q.amountVnd,
+      creditVnd: 0,
+      amountVnd: q.amountVnd,
+      addonKind: q.kind,
+      addonUnits: q.units,
+      addons: {},
+      vat: raw.vat === true,
+      voidNote: `mua thêm ${addonUnitsLabel(q.kind, q.units)}`,
+    },
+    now,
+  );
+}
+
+/** KHÁCH khai / sửa thông tin xuất hoá đơn VAT. `clear` ⇒ xoá (hoá đơn đã tạo giữ ảnh chụp của chúng). */
+export async function setInvoiceInfo(user: SessionUser, raw: { info?: unknown; clear?: unknown }): Promise<BillingResult> {
+  const org = user.organization;
+  if (!org) return { error: "Không xác định được tổ chức của phiên." };
+  if (org.isHome) return { error: "Tổ chức nhà không trả phí thuê bao." };
+  let next: InvoiceInfo | null = null;
+  if (raw.clear !== true) {
+    const parsed = parseInvoiceInfo(raw.info);
+    if ("error" in parsed) return parsed;
+    next = parsed.info;
+  }
+  const pdb = await getPlatformDb();
+  const subs = schema.platformSubscriptions;
+  const [before] = await pdb.select({ invoiceInfo: subs.invoiceInfo }).from(subs).where(eq(subs.orgCode, org.code)).limit(1);
+  const prev = readInvoiceInfo(before?.invoiceInfo);
+  if (JSON.stringify(prev) === JSON.stringify(next)) return { ok: true, message: "Không có gì thay đổi." };
+  const now = new Date();
+  await pdb.transaction(async (tx) => {
+    // Chưa có dòng thuê bao (đang dùng thử, chưa bật thu phí) ⇒ tạo dòng TẮT thu phí: không nhắc, không khoá.
+    await tx.insert(subs).values({ orgCode: org.code, invoiceInfo: next }).onConflictDoUpdate({ target: subs.orgCode, set: { invoiceInfo: next, updatedAt: now } });
+    await auditTx(tx, { action: "INVOICE_INFO_SET", targetOrgCode: org.code, subject: "invoice-info", before: prev, after: next, reason: null, actor: actorOf(user) });
+  });
+  return { ok: true, message: next ? `Đã lưu thông tin xuất hoá đơn: ${next.companyName} · MST ${next.taxCode}.` : "Đã xoá thông tin xuất hoá đơn." };
 }
 
 /**
@@ -261,6 +455,29 @@ async function applyInvoicePaid(tx: Tx, invoice: InvoiceRow, paid: { amountVnd: 
   if (won.length === 0) return false;
   const subs = schema.platformSubscriptions;
   const [beforeSub] = await tx.select().from(subs).where(eq(subs.orgCode, invoice.orgCode)).limit(1);
+  if (invoice.kind === "ADDON") {
+    // MUA THÊM: cộng đơn vị vào phần đã mua; KHÔNG đổi ngày trả tới, KHÔNG đổi gói. Lượt cập nhật có điều kiện ở trên đã
+    // bảo đảm hoá đơn chỉ được áp MỘT lần, nên phép cộng này không bao giờ chạy đôi.
+    const kind = invoice.addonKind;
+    const units = invoice.addonUnits ?? 0;
+    if (!isAddonKind(kind) || units <= 0) throw new Error(`Hoá đơn mua thêm ${invoice.transferCode} thiếu hạng mục / số lượng.`);
+    const beforeUnits = parseAddonUnits(beforeSub?.addons);
+    const afterUnits: AddonUnits = { ...beforeUnits, [kind]: (beforeUnits[kind] ?? 0) + units };
+    await tx
+      .insert(subs)
+      .values({ orgCode: invoice.orgCode, addons: afterUnits })
+      .onConflictDoUpdate({ target: subs.orgCode, set: { addons: afterUnits, updatedAt: now } });
+    await auditTx(tx, {
+      action: "INVOICE_PAID",
+      targetOrgCode: invoice.orgCode,
+      subject: `invoice:${invoice.transferCode}`,
+      before: { addons: beforeUnits },
+      after: { addons: afterUnits, amountVnd: paid.amountVnd, source: paid.source, ref: paid.ref },
+      reason: paid.reason,
+      actor: paid.actor,
+    });
+    return true;
+  }
   await tx
     .insert(subs)
     .values({ orgCode: invoice.orgCode, billingEnabled: true, paidThrough: invoice.periodEnd, graceDays: BILLING_DEFAULT_GRACE_DAYS })
@@ -414,6 +631,7 @@ export async function markInvoicePaidManually(user: SessionUser, raw: { invoiceI
   const applied = await pdb.transaction((tx) => applyInvoicePaid(tx, p.invoice, { amountVnd: amount, source: "MANUAL", ref, byEmail: user.email, actor: actorOf(user), reason: p.reason }, now));
   if (!applied) return { error: "Hoá đơn vừa được trả bằng đường khác — tải lại trang." };
   afterPaidWrite(p.invoice.orgCode);
+  if (p.invoice.kind === "ADDON" && isAddonKind(p.invoice.addonKind)) return { ok: true, message: `Đã xác nhận ${p.invoice.transferCode}: cộng ${addonUnitsLabel(p.invoice.addonKind, p.invoice.addonUnits ?? 0)} vào hạn mức.` };
   return { ok: true, message: `Đã xác nhận ${p.invoice.transferCode}: trả tới ${p.invoice.periodEnd}, gói ${p.invoice.planKey}.` };
 }
 
@@ -454,6 +672,100 @@ export async function setPlanPrice(user: SessionUser, raw: { planKey?: unknown; 
   return { ok: true, message: price === null ? `Gói «${plan.name}» thôi bán. Hoá đơn đang mở giữ giá cũ.` : `Gói «${plan.name}»: ${vnd(price)}/tháng cho hoá đơn tạo từ bây giờ. Hoá đơn đang mở giữ giá cũ.` };
 }
 
+/**
+ * Đơn giá MUA THÊM của một gói: `{ <hạng mục>: VND / bước / tháng | null }` — `null` / bỏ trống = gói thôi bán hạng mục đó.
+ * Không có giá mặc định (luật 38). Áp cho hoá đơn TẠO TỪ BÂY GIỜ — hoá đơn đang mở giữ giá cũ, phần khách đã mua giữ nguyên.
+ */
+export async function setPlanAddonPrices(user: SessionUser, raw: { planKey?: unknown; prices?: unknown; reason?: unknown }): Promise<BillingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = operatorReason(raw.reason);
+  if (typeof reason !== "string") return reason;
+  const planKey = typeof raw.planKey === "string" ? raw.planKey : "";
+  if (planKey === HOME_PLAN_KEY) return { error: "Gói nội bộ không bán." };
+  const input = raw.prices && typeof raw.prices === "object" && !Array.isArray(raw.prices) ? (raw.prices as Record<string, unknown>) : null;
+  if (!input) return { error: "Thiếu bảng đơn giá." };
+  const next: AddonPrices = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!isAddonKind(k)) return { error: `Hạng mục «${k}» không bán thêm được.` };
+    if (v === null || v === "" || v === undefined) continue;
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isInteger(n) || n < ADDON_PRICE_MIN_VND || n > ADDON_PRICE_MAX_VND) return { error: `${ENTITLEMENT_SPEC[k].label}: đơn giá là số nguyên ${vnd(ADDON_PRICE_MIN_VND)} – ${vnd(ADDON_PRICE_MAX_VND)} cho mỗi bước / tháng, hoặc để trống = không bán.` };
+    next[k] = n;
+  }
+  const pdb = await getPlatformDb();
+  const t = schema.platformPlans;
+  const [plan] = await pdb.select().from(t).where(eq(t.key, planKey)).limit(1);
+  if (!plan) return { error: `Không có gói «${planKey}».` };
+  const before = parseAddonPrices(plan.addonPrices);
+  if (JSON.stringify(before) === JSON.stringify(next)) return { ok: true, message: "Đơn giá không đổi." };
+  const home = await getHomeOrganization();
+  await pdb.transaction(async (tx) => {
+    await tx.update(t).set({ addonPrices: next, updatedAt: new Date() }).where(eq(t.key, planKey));
+    await auditTx(tx, { action: "ADDON_PRICE_SET", targetOrgCode: home.code, subject: `plan:${planKey}`, before, after: next, reason, actor: actorOf(user) });
+  });
+  const sold = ADDON_KINDS.filter((k) => next[k] !== undefined);
+  return { ok: true, message: sold.length ? `Gói «${plan.name}» bán thêm: ${sold.map((k) => `${ENTITLEMENT_SPEC[k].label.toLowerCase()} ${vnd(next[k]!)}`).join(" · ")} (mỗi bước / tháng).` : `Gói «${plan.name}» thôi bán thêm mọi hạng mục.` };
+}
+
+/**
+ * Người vận hành SỬA phần đã mua thêm của một tổ chức (`{ <hạng mục>: số BƯỚC }`) — tặng khi chăm sóc khách, giảm khi khách
+ * xin bớt từ kỳ sau. Không tạo hoá đơn, không hoàn tiền: tiền là việc ngoài hệ thống, lý do vào nhật ký.
+ */
+export async function setOrgAddons(user: SessionUser, raw: { orgCode?: unknown; blocks?: unknown; reason?: unknown }): Promise<BillingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const p = await parseOperatorTarget(user, raw);
+  if ("error" in p) return p;
+  if (p.org.isHome) return { error: "Tổ chức nhà không giới hạn — không có gì để mua thêm." };
+  const input = raw.blocks && typeof raw.blocks === "object" && !Array.isArray(raw.blocks) ? (raw.blocks as Record<string, unknown>) : null;
+  if (!input) return { error: "Thiếu số lượng." };
+  const next: AddonUnits = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!isAddonKind(k)) return { error: `Hạng mục «${k}» không bán thêm được.` };
+    const n = v === "" || v === null || v === undefined ? 0 : typeof v === "number" ? v : Number(v);
+    if (!Number.isInteger(n) || n < 0 || n > ADDON_MAX_BLOCKS * 10) return { error: `${ENTITLEMENT_SPEC[k].label}: số phần là số nguyên 0–${ADDON_MAX_BLOCKS * 10}.` };
+    if (n > 0) next[k] = n * ADDON_STEP[k];
+  }
+  const pdb = await getPlatformDb();
+  const subs = schema.platformSubscriptions;
+  const [row] = await pdb.select({ addons: subs.addons }).from(subs).where(eq(subs.orgCode, p.org.code)).limit(1);
+  const before = parseAddonUnits(row?.addons);
+  if (JSON.stringify(before) === JSON.stringify(next)) return { ok: true, message: "Không có gì thay đổi." };
+  const now = new Date();
+  await pdb.transaction(async (tx) => {
+    await tx.insert(subs).values({ orgCode: p.org.code, addons: next }).onConflictDoUpdate({ target: subs.orgCode, set: { addons: next, updatedAt: now } });
+    await auditTx(tx, { action: "ORG_ADDONS_SET", targetOrgCode: p.org.code, subject: "addons", before, after: next, reason: p.reason, actor: p.actor });
+  });
+  invalidateSubscriptions(p.org.code);
+  const parts = ADDON_KINDS.filter((k) => (next[k] ?? 0) > 0).map((k) => addonUnitsLabel(k, next[k]!));
+  return { ok: true, message: `«${p.org.name}»: ${parts.length ? `mua thêm ${parts.join(" · ")}` : "không còn phần mua thêm nào"}. Có hiệu lực ngay; giá tháng từ lần gia hạn sau tính theo phần này.` };
+}
+
+/** Người vận hành ghi số hoá đơn VAT đã xuất (ngoài ERP) cho một hoá đơn ĐÃ TRẢ mà khách yêu cầu xuất. */
+export async function markVatIssued(user: SessionUser, raw: { invoiceId?: unknown; vatRef?: unknown }): Promise<BillingResult> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const id = typeof raw.invoiceId === "string" ? raw.invoiceId : "";
+  const vatRef = typeof raw.vatRef === "string" ? raw.vatRef.trim().slice(0, 60) : "";
+  if (vatRef.length < 3) return { error: "Nhập số / ký hiệu hoá đơn VAT đã xuất." };
+  const pdb = await getPlatformDb();
+  const inv = schema.platformInvoices;
+  const [row] = await pdb.select().from(inv).where(eq(inv.id, id)).limit(1);
+  if (!row) return { error: "Không có hoá đơn này." };
+  if (row.status !== "PAID") return { error: "Chỉ xuất hoá đơn VAT cho khoản ĐÃ THU." };
+  if (!row.invoiceInfo) return { error: "Khách không yêu cầu hoá đơn VAT cho lần trả này." };
+  if (row.vatIssuedAt) return { ok: true, message: `Đã ghi trước đó: ${row.vatRef ?? ""}.` };
+  const now = new Date();
+  const done = await pdb.transaction(async (tx) => {
+    const won = await tx.update(inv).set({ vatIssuedAt: now, vatRef, vatIssuedByEmail: user.email, updatedAt: now }).where(and(eq(inv.id, id), isNull(inv.vatIssuedAt))).returning({ id: inv.id });
+    if (won.length === 0) return false;
+    await auditTx(tx, { action: "INVOICE_VAT_ISSUED", targetOrgCode: row.orgCode, subject: `invoice:${row.transferCode}`, before: { vatIssuedAt: null }, after: { vatRef }, reason: null, actor: actorOf(user) });
+    return true;
+  });
+  return done ? { ok: true, message: `Đã ghi hoá đơn VAT ${vatRef} cho ${row.transferCode}.` } : { error: "Hoá đơn vừa được ghi bằng đường khác — tải lại trang." };
+}
+
 /** Khoản tiền không khớp đã được xử lý ngoài hệ thống (hoàn tiền, xác nhận tay hoá đơn khác…) — đánh dấu, không xoá. */
 export async function resolveBillingPayment(user: SessionUser, raw: { paymentId?: unknown; reason?: unknown }): Promise<BillingResult> {
   const denial = platformOperatorDenial(user);
@@ -480,6 +792,9 @@ export async function resolveBillingPayment(user: SessionUser, raw: { paymentId?
 
 export type PlanOffer = { key: string; name: string; description: string | null; priceVnd: number; limits: unknown };
 
+export type AddonOffer = { kind: AddonKind; label: string; unit: string; step: number; unitPriceVnd: number; ownedUnits: number };
+export type OwnedAddon = { kind: AddonKind; label: string; units: number; unitsLabel: string };
+
 export type TenantBilling = {
   today: string;
   standing: BillingStanding;
@@ -489,7 +804,20 @@ export type TenantBilling = {
   receiver: BillingReceiverView | null;
   openInvoice: (InvoiceView & { qrPayload: string | null; qrError: string | null }) | null;
   invoices: InvoiceView[];
+  /** Hạng mục gói hiện tại bán thêm (đã khai giá). Rỗng = gói chưa bán thêm gì. */
+  addonOffers: AddonOffer[];
+  /** Phần đã mua thêm. */
+  addons: OwnedAddon[];
+  /** Tiền một tháng của phần đã mua theo giá gói hiện tại; `null` = gói không còn khai giá cho một phần đang có. */
+  addonMonthlyVnd: number | null;
+  /** Vì sao chưa mua thêm được lúc này (chưa vào kỳ trả phí · quá hạn) — `null` = mua được. */
+  addonBlockedReason: string | null;
+  invoiceInfo: InvoiceInfo | null;
 };
+
+function ownedAddons(units: AddonUnits): OwnedAddon[] {
+  return ADDON_KINDS.filter((k) => (units[k] ?? 0) > 0).map((k) => ({ kind: k, label: ENTITLEMENT_SPEC[k].label, units: units[k]!, unitsLabel: addonUnitsLabel(k, units[k]!) }));
+}
 
 export async function loadTenantBilling(orgCode: string, now: Date = new Date()): Promise<TenantBilling | null> {
   const org = await findOrganization(orgCode);
@@ -498,7 +826,11 @@ export async function loadTenantBilling(orgCode: string, now: Date = new Date())
   const today = vnDate(now);
   const pdb = await getPlatformDb();
   const inv = schema.platformInvoices;
-  const rows = await pdb.select().from(inv).where(eq(inv.orgCode, org.code)).orderBy(desc(inv.createdAt)).limit(24);
+  const [rows, [sub]] = await Promise.all([
+    pdb.select().from(inv).where(eq(inv.orgCode, org.code)).orderBy(desc(inv.createdAt)).limit(24),
+    pdb.select({ addons: schema.platformSubscriptions.addons, invoiceInfo: schema.platformSubscriptions.invoiceInfo }).from(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, org.code)).limit(1),
+  ]);
+  const units = parseAddonUnits(sub?.addons);
   const views = rows.map((r) => invoiceView(r, plans));
   const open = views.find((v) => v.status === "OPEN") ?? null;
   let openInvoice: TenantBilling["openInvoice"] = null;
@@ -507,15 +839,26 @@ export async function loadTenantBilling(orgCode: string, now: Date = new Date())
     openInvoice = { ...open, qrPayload: qr?.ok ? qr.payload : null, qrError: !receiver ? "Nền tảng chưa khai tài khoản nhận tiền." : qr && !qr.ok ? qr.error : null };
   }
   const current = plans.find((p) => p.key === planKeyOf(org));
+  const prices = parseAddonPrices(current?.addonPrices);
+  const monthly = addonMonthlyVnd(units, prices);
+  const standing = billingStanding(terms, today);
+  const firstPriced = ADDON_KINDS.find((k) => prices[k] !== undefined);
+  // Lý do chặn lấy từ CHÍNH hàm báo giá (một lần thử với 1 phần) — màn hình không tự dựng luật thứ hai.
+  const probe = firstPriced ? quoteAddon({ terms, planName: current?.name ?? "", kind: firstPriced, blocks: 1, prices, today }) : null;
   return {
     today,
-    standing: billingStanding(terms, today),
+    standing,
     terms,
     currentPlan: current ? { key: current.key, name: current.name, priceVnd: current.priceVnd } : null,
     offers: plans.filter((p) => p.priceVnd !== null && p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, description: p.description, priceVnd: p.priceVnd!, limits: p.limits })),
     receiver,
     openInvoice,
     invoices: views.filter((v) => v.status !== "OPEN"),
+    addonOffers: ADDON_KINDS.filter((k) => prices[k] !== undefined).map((k) => ({ kind: k, label: ENTITLEMENT_SPEC[k].label, unit: ENTITLEMENT_SPEC[k].unit, step: ADDON_STEP[k], unitPriceVnd: prices[k]!, ownedUnits: units[k] ?? 0 })),
+    addons: ownedAddons(units),
+    addonMonthlyVnd: monthly.ok ? monthly.vnd : null,
+    addonBlockedReason: probe && "error" in probe ? probe.error : null,
+    invoiceInfo: readInvoiceInfo(sub?.invoiceInfo),
   };
 }
 
@@ -525,15 +868,22 @@ function paymentView(r: typeof schema.platformBillingPayments.$inferSelect): Pay
   return { id: r.id, bankRef: r.bankRef, txnAt: r.txnAt.toISOString(), amountVnd: r.amountVnd, description: r.description, transferCode: r.transferCode, orgCode: r.orgCode, outcome: r.outcome as PaymentOutcome, resolvedAt: r.resolvedAt?.toISOString() ?? null, resolvedByEmail: r.resolvedByEmail, resolvedNote: r.resolvedNote };
 }
 
-export type OrgBillingRow = { code: string; name: string; status: string; planKey: string; planName: string; priceVnd: number | null; standing: BillingStanding };
+/** `addonMonthlyVnd`: tiền tháng của phần mua thêm theo giá gói hiện tại — `null` = gói không còn khai giá cho phần đang có. */
+export type OrgBillingRow = { code: string; name: string; status: string; planKey: string; planName: string; priceVnd: number | null; addonMonthlyVnd: number | null; addonsLabel: string | null; standing: BillingStanding };
 
 export type PlatformBilling = {
   today: string;
   receiver: BillingReceiverView | null;
-  plans: { key: string; name: string; priceVnd: number | null; position: number }[];
+  plans: { key: string; name: string; priceVnd: number | null; position: number; addonPrices: AddonPrices }[];
   orgs: OrgBillingRow[];
-  /** Doanh thu định kỳ hằng tháng: tổng giá THÁNG của gói ở các tổ chức đang thu phí và chưa bị khoá. Tổ chức ACTIVE thôi. */
+  /**
+   * Doanh thu định kỳ hằng tháng: tổng giá THÁNG (gói + phần mua thêm) ở các tổ chức đang thu phí và chưa bị khoá. Tổ chức
+   * ACTIVE thôi. Phần mua thêm mà gói không còn khai giá KHÔNG được cộng (không đoán giá) — `addonUnpriced` đếm số tổ chức đó.
+   */
   mrrVnd: number;
+  addonUnpriced: number;
+  /** Hoá đơn ĐÃ THU mà khách yêu cầu hoá đơn VAT và chưa ghi số hoá đơn đã xuất. */
+  vatPending: InvoiceView[];
   countByStanding: Record<BillingStandingKind, number>;
   openInvoices: InvoiceView[];
   unresolvedPayments: PaymentView[];
@@ -548,30 +898,51 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   const pdb = await getPlatformDb();
   const subRows = await pdb.select().from(schema.platformSubscriptions);
   const subs = new Map(subRows.map((s) => [s.orgCode, { billingEnabled: s.billingEnabled, paidThrough: s.paidThrough ?? null, graceDays: s.graceDays } satisfies SubscriptionTerms]));
+  const addonsByOrg = new Map(subRows.map((s) => [s.orgCode, parseAddonUnits(s.addons)]));
   const countByStanding: Record<BillingStandingKind, number> = { NOT_BILLED: 0, ACTIVE: 0, DUE_SOON: 0, OVERDUE: 0, LOCKED: 0 };
   let mrr = 0;
+  let addonUnpriced = 0;
   const rows: OrgBillingRow[] = [];
   for (const o of orgs) {
     if (o.isHome || o.status === "SETUP_FAILED" || o.status === "ARCHIVED") continue;
     const plan = plans.find((p) => p.key === planKeyOf(o));
     const standing = billingStanding(subs.get(o.code) ?? null, today);
+    const units = addonsByOrg.get(o.code) ?? {};
+    const owned = ownedAddons(units);
+    const monthly = addonMonthlyVnd(units, parseAddonPrices(plan?.addonPrices));
     countByStanding[standing.kind]++;
-    if (o.status === "ACTIVE" && countsTowardMrr(standing.kind) && plan?.priceVnd) mrr += plan.priceVnd;
-    rows.push({ code: o.code, name: o.name, status: o.status, planKey: planKeyOf(o), planName: plan?.name ?? planKeyOf(o), priceVnd: plan?.priceVnd ?? null, standing });
+    if (o.status === "ACTIVE" && countsTowardMrr(standing.kind) && plan?.priceVnd) {
+      mrr += plan.priceVnd + (monthly.ok ? monthly.vnd : 0);
+      if (!monthly.ok) addonUnpriced++;
+    }
+    rows.push({
+      code: o.code,
+      name: o.name,
+      status: o.status,
+      planKey: planKeyOf(o),
+      planName: plan?.name ?? planKeyOf(o),
+      priceVnd: plan?.priceVnd ?? null,
+      addonMonthlyVnd: owned.length === 0 ? 0 : monthly.ok ? monthly.vnd : null,
+      addonsLabel: owned.length ? owned.map((a) => `+${a.unitsLabel}`).join(" · ") : null,
+      standing,
+    });
   }
   const inv = schema.platformInvoices;
   const pay = schema.platformBillingPayments;
-  const [openRows, paidRows, payRows] = await Promise.all([
+  const [openRows, paidRows, payRows, vatRows] = await Promise.all([
     pdb.select().from(inv).where(eq(inv.status, "OPEN")).orderBy(desc(inv.createdAt)).limit(50),
     pdb.select().from(inv).where(eq(inv.status, "PAID")).orderBy(desc(inv.paidAt)).limit(15),
     pdb.select().from(pay).where(and(ne(pay.outcome, "MATCHED"), isNull(pay.resolvedAt))).orderBy(desc(pay.txnAt)).limit(50),
+    pdb.select().from(inv).where(and(eq(inv.status, "PAID"), isNotNull(inv.invoiceInfo), isNull(inv.vatIssuedAt))).orderBy(inv.paidAt).limit(50),
   ]);
   return {
     today,
     receiver,
-    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd, position: p.position })),
+    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd, position: p.position, addonPrices: parseAddonPrices(p.addonPrices) })),
     orgs: rows,
     mrrVnd: mrr,
+    addonUnpriced,
+    vatPending: vatRows.map((r) => invoiceView(r, plans)),
     countByStanding,
     openInvoices: openRows.map((r) => invoiceView(r, plans)),
     unresolvedPayments: payRows.map(paymentView),
@@ -579,7 +950,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   };
 }
 
-export type OrgBilling = { today: string; terms: SubscriptionTerms | null; standing: BillingStanding; invoices: InvoiceView[]; payments: PaymentView[] };
+export type OrgBilling = { today: string; terms: SubscriptionTerms | null; standing: BillingStanding; invoices: InvoiceView[]; payments: PaymentView[]; addons: OwnedAddon[]; invoiceInfo: InvoiceInfo | null };
 
 export async function loadOrgBilling(user: SessionUser, orgCode: string, now: Date = new Date()): Promise<OrgBilling | { error: string }> {
   const denial = platformOperatorDenial(user);
@@ -589,9 +960,18 @@ export async function loadOrgBilling(user: SessionUser, orgCode: string, now: Da
   const pdb = await getPlatformDb();
   const inv = schema.platformInvoices;
   const pay = schema.platformBillingPayments;
-  const [rows, payRows] = await Promise.all([
+  const [rows, payRows, [sub]] = await Promise.all([
     pdb.select().from(inv).where(eq(inv.orgCode, orgCode)).orderBy(desc(inv.createdAt)).limit(24),
     pdb.select().from(pay).where(eq(pay.orgCode, orgCode)).orderBy(desc(pay.txnAt)).limit(24),
+    pdb.select({ addons: schema.platformSubscriptions.addons, invoiceInfo: schema.platformSubscriptions.invoiceInfo }).from(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, orgCode)).limit(1),
   ]);
-  return { today, terms, standing: billingStanding(terms, today), invoices: rows.map((r) => invoiceView(r, plans)), payments: payRows.map(paymentView) };
+  return {
+    today,
+    terms,
+    standing: billingStanding(terms, today),
+    invoices: rows.map((r) => invoiceView(r, plans)),
+    payments: payRows.map(paymentView),
+    addons: ownedAddons(parseAddonUnits(sub?.addons)),
+    invoiceInfo: readInvoiceInfo(sub?.invoiceInfo),
+  };
 }

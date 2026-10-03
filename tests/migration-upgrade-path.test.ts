@@ -139,6 +139,7 @@ const MOI = [
   "0189_customer_touchpoints",
   "0190_appointments",
   "0191_password_reset_tokens",
+  "0192_billing_addons_vat",
 ] as const;
 
 /*

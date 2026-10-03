@@ -4612,6 +4612,11 @@ export const platformPlans = pgTable(
     position: integer("position").notNull().default(0),
     /** Giá MỘT THÁNG, nguyên VND (0187). `NULL` = gói KHÔNG BÁN — không phải giá 0; khách chỉ tự chọn được gói có giá. */
     priceVnd: integer("price_vnd"),
+    /**
+     * Đơn giá MUA THÊM (0192): `{ <hạng mục>: VND cho MỘT bước / tháng }` — bước nằm ở `lib/billing/addons.ts::ADDON_STEP`.
+     * Thiếu khoá = gói này KHÔNG bán thêm hạng mục đó. Không gieo giá nào: giá là quyết định của chủ nền tảng (luật 38).
+     */
+    addonPrices: jsonb("addon_prices").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -4776,6 +4781,13 @@ export const platformSubscriptions = pgTable(
     paidThrough: date("paid_through", { mode: "string" }),
     graceDays: integer("grace_days").notNull().default(7),
     note: text("note"),
+    /**
+     * Hạn mức ĐÃ MUA THÊM (0192): `{ <hạng mục>: số đơn vị }` theo đơn vị của hạn mức (người dùng, MB…). Cộng vào hạn
+     * mức gói ở `lib/entitlements/check.ts::resolvePlan`; giữ qua các lần gia hạn / đổi gói. Chỉ `lib/billing/service.ts` ghi.
+     */
+    addons: jsonb("addons").$type<Record<string, unknown>>().notNull().default({}),
+    /** Thông tin xuất hoá đơn VAT khách khai (0192, `lib/billing/addons.ts::InvoiceInfo`). `NULL` = chưa khai. */
+    invoiceInfo: jsonb("invoice_info").$type<Record<string, unknown>>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -4813,6 +4825,22 @@ export const platformInvoices = pgTable(
     paidRef: text("paid_ref"),
     paidByEmail: text("paid_by_email"),
     voidReason: text("void_reason"),
+    /**
+     * Loại hoá đơn (0192): `RENEWAL` = gia hạn / đổi gói (như 0187) · `ADDON` = mua thêm hạn mức giữa kỳ — `months = 0`,
+     * kỳ = hôm nay → `paid_through`, trả xong CỘNG `addon_units` vào `platform_subscriptions.addons`, KHÔNG đổi ngày trả tới
+     * hay gói.
+     */
+    kind: text("kind").notNull().default("RENEWAL"),
+    addonKind: text("addon_kind"),
+    addonUnits: integer("addon_units"),
+    /** Ảnh chụp phần mua thêm đã tính vào giá của hoá đơn GIA HẠN (để đọc lại vì sao số tiền là vậy). */
+    addons: jsonb("addons").$type<Record<string, unknown>>().notNull().default({}),
+    /** Ảnh chụp thông tin xuất hoá đơn VAT lúc tạo — `NULL` = khách không yêu cầu hoá đơn VAT cho lần trả này. */
+    invoiceInfo: jsonb("invoice_info").$type<Record<string, unknown>>(),
+    /** Người vận hành đã xuất hoá đơn VAT bên ngoài ERP: lúc nào, số hoá đơn, ai ghi. */
+    vatIssuedAt: ts("vat_issued_at"),
+    vatRef: text("vat_ref"),
+    vatIssuedByEmail: text("vat_issued_by_email"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -4821,7 +4849,12 @@ export const platformInvoices = pgTable(
     uniqueIndex("platform_invoices_one_open").on(t.orgCode).where(sql`${t.status} = 'OPEN'`),
     index("platform_invoices_org_idx").on(t.orgCode, t.createdAt),
     check("platform_invoices_status_check", sql`${t.status} IN ('OPEN','PAID','VOID')`),
-    check("platform_invoices_months_check", sql`${t.months} BETWEEN 1 AND 12`),
+    check("platform_invoices_kind_check", sql`${t.kind} IN ('RENEWAL','ADDON')`),
+    check(
+      "platform_invoices_months_check",
+      sql`(${t.kind} = 'RENEWAL' AND ${t.months} BETWEEN 1 AND 12 AND ${t.addonKind} IS NULL) OR (${t.kind} = 'ADDON' AND ${t.months} = 0 AND ${t.addonKind} IS NOT NULL AND ${t.addonUnits} > 0)`,
+    ),
+    check("platform_invoices_vat_check", sql`${t.vatIssuedAt} IS NULL OR (${t.invoiceInfo} IS NOT NULL AND ${t.status} = 'PAID' AND ${t.vatRef} IS NOT NULL)`),
     check("platform_invoices_amount_check", sql`${t.amountVnd} > 0 AND ${t.listAmountVnd} > 0 AND ${t.creditVnd} >= 0 AND ${t.amountVnd} = ${t.listAmountVnd} - ${t.creditVnd}`),
     check("platform_invoices_period_check", sql`${t.periodEnd} >= ${t.periodStart}`),
     check("platform_invoices_paid_check", sql`(${t.status} = 'PAID') = (${t.paidAt} IS NOT NULL)`),

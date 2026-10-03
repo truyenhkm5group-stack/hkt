@@ -612,6 +612,7 @@ export function testServerActionQuaCongPhien(): number {
  */
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
   "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
+  "lib/actions/billing.ts::setOrgAddonsAction": { loai: "VAN_HANH", lyDo: "Người vận hành sửa phần MUA THÊM hạn mức của MỘT tổ chức (/platform/org/<mã>, 0192) — requirePermission(platform:operate), lõi setOrgAddons hỏi platformOperatorDenial + parseOperatorTarget trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_ADDONS_SET." },
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
   "lib/actions/ai-usage.ts::setOrgAiControlAction": { loai: "VAN_HANH", lyDo: "Người vận hành tắt AI / ghi đè hạn mức AI của MỘT tổ chức từ /platform/org/<mã> — requirePermission(platform:operate), lõi setOrgAiControl kiểm lại người vận hành + tổ chức nhà, bắt buộc lý do, ghi platform_audit_log." },
   "lib/actions/platform-ops.ts::setPilotStageAction": { loai: "VAN_HANH", lyDo: "Người vận hành đổi giai đoạn pilot của một tổ chức (/platform/org/<mã>) — requirePermission(platform:operate) + platformOperatorDenial ở lõi, lý do, nhật ký nền tảng." },
@@ -712,6 +713,9 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/billing/service.ts::markInvoicePaidManually": "Xác nhận tay một hoá đơn (qua operatorInvoice).",
   "lib/billing/service.ts::voidInvoice": "Huỷ một hoá đơn đang mở (qua operatorInvoice).",
   "lib/billing/service.ts::setPlanPrice": "Sửa giá tháng của một gói.",
+  "lib/billing/service.ts::setPlanAddonPrices": "Sửa đơn giá mua thêm hạn mức của một gói (0192).",
+  "lib/billing/service.ts::setOrgAddons": "Sửa phần mua thêm hạn mức của một tổ chức (0192).",
+  "lib/billing/service.ts::markVatIssued": "Ghi số hoá đơn VAT đã xuất cho một khoản đã thu (0192).",
   "lib/billing/service.ts::resolveBillingPayment": "Đánh dấu đã xử lý một khoản tiền không khớp.",
   "lib/billing/service.ts::loadPlatformBilling": "Bảng thu phí mọi tổ chức ở /platform (MRR, hoá đơn mở, tiền chưa khớp).",
   "lib/billing/service.ts::loadOrgBilling": "Khung thu phí của MỘT tổ chức bất kỳ ở /platform/org/<mã>.",
