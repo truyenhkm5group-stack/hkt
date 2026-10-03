@@ -358,6 +358,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
   const msgs = await loadMessages(conv.id);
   let seq = (msgs[msgs.length - 1]?.seq ?? 0) + 1;
   try {
+    const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
     const db = await getDb();
     const bump = async (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => {
@@ -478,7 +479,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning, recentSaid, bookingOn, now });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now });
           state = r.state;
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);
