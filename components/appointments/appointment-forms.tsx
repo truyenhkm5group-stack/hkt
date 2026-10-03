@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Loader2 } from "lucide-react";
+import { Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -275,5 +275,25 @@ export function AppointmentReschedule({ row, staff }: { row: { id: string; custo
         Lưu
       </Button>
     </span>
+  );
+}
+
+/** Sao chép câu nhắc lịch soạn sẵn (khung «Nhắc lịch ngày mai»). */
+export function CopyReminderButton({ text }: { text: string }) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-7 px-2 text-xs"
+      onClick={() =>
+        void navigator.clipboard?.writeText(text).then(
+          () => toast.success("Đã sao chép câu nhắc"),
+          () => toast.error("Trình duyệt không cho sao chép — bôi đen câu nhắc để chép tay"),
+        )
+      }
+    >
+      <Copy className="size-3.5" /> Sao chép câu nhắc
+    </Button>
   );
 }

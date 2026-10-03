@@ -2,8 +2,8 @@ import Link from "next/link";
 import { AppointmentStatusButtons, ClosePackageButton, PackageCreateForm } from "@/components/appointments/appointment-forms";
 import { SectionCard } from "@/components/ui-bits";
 import { can, type SessionUser } from "@/lib/auth/session";
-import { APPOINTMENT_STATUS_LABEL } from "@/lib/constants/appointments";
-import { formatDate, vnClock, vnDateKey } from "@/lib/format";
+import { apptClock, APPOINTMENT_STATUS_LABEL } from "@/lib/constants/appointments";
+import { formatDate, vnDateKey } from "@/lib/format";
 import { appointmentFormOptions, customerAppointments, packagesOf } from "@/lib/queries/appointments";
 
 /** Khung LỊCH HẸN & LIỆU TRÌNH trên trang một khách (module `appointments`, 0190). */
@@ -54,7 +54,7 @@ export async function CustomerAppointmentsSection({ user, customerId }: { user: 
               {appts.upcoming.map((a) => (
                 <li key={a.id} className="flex flex-wrap items-center gap-2">
                   <Link href={`/appointments?day=${vnDateKey(a.startsAt)}`} className="font-medium hover:underline">
-                    {formatDate(a.startsAt)} {vnClock(a.startsAt)}
+                    {formatDate(a.startsAt)} {apptClock(a.startsAt)}
                   </Link>
                   <span>
                     {a.serviceName}
@@ -72,7 +72,7 @@ export async function CustomerAppointmentsSection({ user, customerId }: { user: 
             <ul className="space-y-0.5 text-xs text-muted-foreground">
               {appts.past.map((a) => (
                 <li key={a.id}>
-                  {formatDate(a.startsAt)} {vnClock(a.startsAt)} · {a.serviceName}
+                  {formatDate(a.startsAt)} {apptClock(a.startsAt)} · {a.serviceName}
                   {a.staffName ? ` · ${a.staffName}` : ""} · {APPOINTMENT_STATUS_LABEL[a.status]}
                 </li>
               ))}

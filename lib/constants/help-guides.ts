@@ -193,6 +193,7 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
       { text: "Điền khách, dịch vụ, kỹ thuật viên, giờ bắt đầu rồi bấm «Đặt lịch». Đã xếp kỹ thuật viên thì ERP chặn đặt trùng giờ của người đó." },
       { text: "Cập nhật ngay trên dòng lịch: «Khách đã tới», «Đã làm xong», «Khách không tới»; huỷ thì phải ghi lý do." },
       { text: "Khách mua liệu trình: chọn «Liệu trình» khi đặt lịch — số buổi còn lại tính từ các buổi đã làm xong." },
+      { text: "Mỗi ngày: khung «Nhắc lịch ngày mai» (khi xem lịch hôm nay) liệt kê khách chưa xác nhận — bấm «Sao chép câu nhắc», gửi qua Zalo; khách đồng ý thì bấm «Khách đã xác nhận»." },
     ],
   },
 

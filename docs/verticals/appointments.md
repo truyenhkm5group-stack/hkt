@@ -58,9 +58,16 @@ Bật ở Chatbot bán hàng → khung «Đặt lịch qua chat» (chỉ hiện 
 - **Một hội thoại một lịch.** Đổi / huỷ / chọn người / đặt cho nhiều người ⇒ bot chuyển nhân viên.
 - Khung thử chỉ mô phỏng: không khách, không lịch, không tin báo.
 
+## Nhắc lịch ngày mai
+
+Khi xem lịch HÔM NAY, người có `appointments:write` thấy khung «Nhắc lịch ngày mai»: các lịch ngày mai còn ở «Đã đặt»
+(khách chưa xác nhận), mỗi lịch một câu nhắc soạn sẵn (`reminderText` — giờ Việt Nam, không giá), nút «Sao chép câu
+nhắc» và «Mở Zalo» (chỉ dựng từ số điện thoại hợp lệ). Khách đồng ý ⇒ bấm «Khách đã xác nhận» ngay trên dòng; lịch rời
+khung. Lễ tân GỬI TAY — gửi tự động theo giờ cần lịch chạy mới và kênh gửi (Zalo OA), phải chủ nền tảng duyệt.
+
 ## Bước sau
 
 - Bot đọc giờ trống theo từng kỹ thuật viên (cần lịch làm việc của người — chưa có).
-- Nhắc lịch trước giờ hẹn qua Zalo OA / tin nhắn. Hiện bộ máy luật chưa có trigger theo thời gian.
+- Gửi nhắc lịch TỰ ĐỘNG qua Zalo OA / tin nhắn. Hiện bộ máy luật chưa có trigger theo thời gian; lễ tân gửi tay từ khung «Nhắc lịch ngày mai».
 - Lịch dạng lưới theo giờ × kỹ thuật viên. Hiện là danh sách theo người.
 - Hoa hồng kỹ thuật viên theo buổi đã làm. Phải đi theo luật 16 (lương ≠ hoa hồng).

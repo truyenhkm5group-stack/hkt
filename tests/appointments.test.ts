@@ -15,7 +15,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { installBlueprint, planForOrg } from "@/lib/blueprints/install";
 import { SPA_BEAUTY_BLUEPRINT } from "@/lib/blueprints/templates/spa-beauty";
 import { validateBlueprint } from "@/lib/blueprints/validate";
-import { canTransitionAppointment, overlaps, packageBalance, packageUsable } from "@/lib/constants/appointments";
+import { canTransitionAppointment, needsReminder, overlaps, packageBalance, packageUsable, reminderText, zaloLinkOf } from "@/lib/constants/appointments";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { BUSINESS_TYPE_SPEC } from "@/lib/onboarding/shared";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -59,6 +59,18 @@ function testPure() {
   assert.ok(v.ok, JSON.stringify(v.errors));
   assert.equal(BUSINESS_TYPE_SPEC.spa.templateKey, "spa-beauty");
   assert.equal(moduleDef("appointments")?.homeOptIn, true, "module lịch hẹn TẮT ở tổ chức nhà");
+
+  // Nhắc lịch ngày mai: chỉ lịch khách CHƯA xác nhận; câu nhắc theo giờ VN; liên kết Zalo chỉ dựng từ số hợp lệ.
+  assert.ok(needsReminder("BOOKED") && !needsReminder("CONFIRMED") && !needsReminder("CANCELLED"));
+  assert.equal(
+    reminderText({ shopName: "Spa Hoa", customerName: "Lan", service: "Gội đầu", startsAt: new Date("2026-11-05T02:30:00Z") }),
+    "Dạ Spa Hoa xin nhắc anh/chị Lan: lịch «Gội đầu» lúc 09:30 Thứ năm 05/11. Anh/chị xác nhận giúp shop nhé — cần đổi giờ cứ nhắn lại ạ.",
+  );
+  assert.equal(reminderText({ shopName: "Spa", customerName: " ", service: "X", startsAt: new Date("2026-11-04T17:15:00Z") }).includes("anh/chị: lịch «X» lúc 00:15 Thứ năm 05/11"), true, "qua nửa đêm UTC vẫn đúng ngày VN");
+  assert.equal(zaloLinkOf("0903 111 222"), "https://zalo.me/0903111222");
+  assert.equal(zaloLinkOf("+84903111222"), "https://zalo.me/0903111222");
+  assert.equal(zaloLinkOf("12345"), null);
+  assert.equal(zaloLinkOf(null), null);
 }
 
 export async function testAppointments() {
