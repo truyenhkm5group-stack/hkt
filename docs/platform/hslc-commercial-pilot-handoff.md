@@ -94,6 +94,8 @@ Telegram cho tới khi chủ nền tảng đặt khoá (HUMAN GATE #1).
   quyết» (`docs/platform/pilot-operations.md` dòng 8; `scripts/platform-provision-org.ts` phần HUMAN GATE).
 - Không có email xác nhận / quên mật khẩu tự phục vụ: không tìm thấy thư viện gửi mail trong `lib/` (grep
   `sendMail|nodemailer|resend|smtp` chỉ ra tệp nghiệp vụ VNX, không có bộ gửi thư) — **chưa xác minh** toàn bộ.
+  Từ 0191 có lối thay thế: liên kết đặt lại mật khẩu dùng một lần do quản trị tổ chức / người vận hành tạo rồi gửi tay
+  (`docs/platform/password-reset.md`).
 - `/login`, `/start` còn chữ gốc VNX (nợ đã biết, `current-execution-state.md` mục «Nợ đã biết»).
 
 ---

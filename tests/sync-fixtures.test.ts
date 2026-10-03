@@ -453,6 +453,8 @@ import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testUserInvites } from "./user-invites.test";
+import { testPasswordReset } from "./password-reset.test";
+import { testTestOrgCodes } from "./test-org-codes.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
@@ -2630,6 +2632,8 @@ async function main() {
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
   // song song ⇒ một tài khoản; hạn mức gói lúc tạo (tính ghế đã hứa) và lúc nhận; bảng không chứa mã thô; chặn dò theo IP.
   await testUserInvites();
+  testTestOrgCodes();
+  await testPasswordReset();
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();

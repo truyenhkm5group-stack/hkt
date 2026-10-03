@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { KeyRound, Loader2, Lock, LockOpen, LogOut, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
+import { KeyRound, Link2, Loader2, Lock, LockOpen, LogOut, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { PermissionsDialog } from "@/app/(dashboard)/settings/users/permissions-dialog";
 import { RevokeSessionsDialog } from "@/app/(dashboard)/settings/users/revoke-sessions-dialog";
 import { EditUserDialog, ResetPasswordDialog } from "@/app/(dashboard)/settings/users/user-dialog";
+import { ResetLinkDialog } from "@/app/(dashboard)/settings/users/reset-link-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
   const [editOpen, setEditOpen] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -61,6 +63,9 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
           <DropdownMenuItem onSelect={() => setResetOpen(true)}>
             <KeyRound className="size-4" /> Đặt lại mật khẩu
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setLinkOpen(true)} disabled={!user.active}>
+            <Link2 className="size-4" /> Gửi liên kết đặt lại
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           {/*
             THU HỒI PHIÊN ĐỨNG RIÊNG KHỎI KHOÁ TÀI KHOẢN. Hai việc khác hẳn nhau: thu hồi là "máy
@@ -79,6 +84,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
       <EditUserDialog user={user} open={editOpen} onOpenChange={setEditOpen} isSelf={isSelf} />
       <PermissionsDialog user={user} templates={templates} open={permOpen} onOpenChange={setPermOpen} />
       <ResetPasswordDialog user={user} open={resetOpen} onOpenChange={setResetOpen} />
+      <ResetLinkDialog user={user} open={linkOpen} onOpenChange={setLinkOpen} />
       <RevokeSessionsDialog user={user} open={revokeOpen} onOpenChange={setRevokeOpen} />
       <AlertDialog open={lockOpen} onOpenChange={setLockOpen}>
         <AlertDialogContent>

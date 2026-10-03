@@ -29,7 +29,9 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "BILLING_RECEIVER_SET"
   | "INVOICE_PAID"
   | "INVOICE_VOID"
-  | "BILLING_PAYMENT_RESOLVE";
+  | "BILLING_PAYMENT_RESOLVE"
+  // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
+  | "PASSWORD_RESET_LINK";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

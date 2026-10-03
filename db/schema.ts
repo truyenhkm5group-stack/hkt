@@ -9547,6 +9547,29 @@ export const salesChatMessages = pgTable(
 );
 
 /** Lời mời người dùng vào tổ chức (0180 · lib/users/invites.ts). Chỉ lưu BĂM của mã; mã thô hiện đúng một lần. */
+/**
+ * LIÊN KẾT ĐẶT LẠI MẬT KHẨU (0191) — dùng MỘT lần, hết hạn 24 giờ, chỉ lưu `sha256` của mã. Người tạo: quản trị tổ chức
+ * (`ORG_ADMIN`) hoặc người vận hành nền tảng (`PLATFORM`). Đường ghi duy nhất: lib/users/password-reset.ts.
+ */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdVia: text("created_via").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    createdByEmail: text("created_by_email"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: ts("used_at"),
+    revokedAt: ts("revoked_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("password_reset_tokens_token_uq").on(t.tokenHash), index("password_reset_tokens_user_idx").on(t.userId), check("password_reset_tokens_via_check", sql`${t.createdVia} IN ('ORG_ADMIN','PLATFORM')`)],
+);
+
 export const userInvites = pgTable(
   "user_invites",
   {

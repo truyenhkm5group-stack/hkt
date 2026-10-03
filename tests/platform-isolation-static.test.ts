@@ -523,6 +523,7 @@ const ACTION_CONG_KHAI: Record<string, string> = {
   "lib/actions/onboarding.ts::previewSignupAction": "Xem trước của /start: lập kế hoạch cài trên một tổ chức TRẮNG tưởng tượng (freshOrgState) — không đọc dữ liệu của tổ chức nào có thật.",
   "lib/actions/onboarding.ts::createOrganizationAction": "Tạo tổ chức từ /start: cổng là cờ + mã mời + trần IP trong lõi; mã đã có chủ ⇒ «đã có người dùng», chỉ đúng chủ (cùng mã mời / người vận hành) mới chạy lại.",
   "lib/actions/user-invites.ts::acceptUserInviteAction": "Nhận lời mời người dùng ở /join/<tổ chức>/<mã> — người được mời CHƯA có tài khoản. Lõi (lib/users/invites.ts) kiểm mã mời 256 bit (băm sha256, dùng một lần, điều kiện trong cùng giao dịch tạo tài khoản) trong withOrganization(mã trong đường dẫn) tường minh, chặn dò theo IP, mọi lý do sai ra một câu chung.",
+  "lib/actions/password-reset.ts::completePasswordResetAction": "Đặt mật khẩu mới ở /reset/<tổ chức>/<mã> — người quên mật khẩu KHÔNG đăng nhập được. Lõi (lib/users/password-reset.ts) kiểm mã 256 bit (băm sha256, dùng một lần, tiêu mã + ghi mật khẩu trong cùng giao dịch) trong withOrganization(mã trong đường dẫn) tường minh, chặn dò theo IP, mọi lý do sai ra một câu chung; xong thì thu hồi mọi phiên của người đó.",
   "lib/actions/public-chat.ts::startPublicChatAction": "Trang chat CÔNG KHAI của chatbot bán hàng (0180) — khách của shop không có tài khoản. Tổ chức lấy từ HOST (header máy chủ x-erp-host-slug → CHỈ tổ chức đã xuất bản), mọi lượt đọc / ghi trong withOrganization(mã đó) tường minh; module «AI bán hàng» + bot đang bật mới mở; không nhận mã tổ chức nào từ client.",
   "lib/actions/public-chat.ts::sendPublicChatAction": "Như startPublicChatAction; hội thoại khoá theo băm của cookie khách truy cập (httpOnly) — đoán được id hội thoại cũng không gõ tiếp hội thoại của người khác; trần tin theo khách / ngày / hội thoại ở lib/sales-chatbot/engine.ts.",
   "lib/actions/refresh.ts::refreshReportData": "Chỉ xoá đệm của tiến trình (clearMemo) khi có phiên — không đọc / ghi dòng nào; không phiên ⇒ trả lỗi, không làm gì.",
@@ -622,6 +623,8 @@ const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | 
   "lib/actions/onboarding.ts::retrySetupAction": { loai: "VAN_HANH", lyDo: "Người vận hành chạy lại việc dựng một tổ chức SETUP_FAILED — requireOperator (platform:operate + tổ chức nhà)." },
   "lib/actions/onboarding.ts::checkOrgAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức ĐỀ XUẤT cho tổ chức sắp tạo — chỉ kiểm trùng ở sổ tổ chức, không mở CSDL nào." },
   "lib/actions/onboarding.ts::previewSignupAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức đi cùng mã mời để tra mã mời đã gắn đúng tổ chức — xem trước chạy trên tổ chức TRẮNG tưởng tượng." },
+  "lib/actions/password-reset.ts::completePasswordResetAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức trong liên kết đặt lại: mật khẩu được ghi TRONG tổ chức đó, và chỉ khi mã (băm) khớp một liên kết còn hạn trong CSDL của chính nó — mã của tổ chức A đem sang đường dẫn B không khớp gì." },
+  "lib/actions/password-reset.ts::createResetLinkAsOperatorAction": { loai: "VAN_HANH", lyDo: "Người vận hành tạo liên kết đặt lại mật khẩu cho một tài khoản của tổ chức khách (/platform/org/<mã>) — requirePermission(platform:operate), lõi createResetLinkAsOperator hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/user-invites.ts::acceptUserInviteAction": { loai: "CONG_KHAI", lyDo: "Mã tổ chức trong liên kết mời: tài khoản được tạo TRONG tổ chức đó, và chỉ khi mã mời (băm) khớp một lời mời còn hạn trong CSDL của chính nó — mã của tổ chức A đem sang đường dẫn B không khớp gì." },
   "lib/actions/auth.ts::loginAction": { loai: "CONG_KHAI", lyDo: "Ô «Mã tổ chức» của màn đăng nhập: người dùng chọn tổ chức để đăng nhập VÀO — mật khẩu kiểm trong CSDL của chính tổ chức đó." },
 };
@@ -700,6 +703,7 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform/secrets-self-test.ts::runSecretsSelfTest": "Tự kiểm khoá bí mật của nền tảng (cổng mở bán A) — ghi nhật ký nền tảng.",
   "lib/platform-ui/module-toggle.ts::toggleModuleForOrganization": "Bật / tắt module của một tổ chức bất kỳ.",
   "lib/queries/platform-org-diagnostics.ts::loadOrgDiagnostics": "Chẩn đoán H4 một tổ chức: mở CSDL của tổ chức được chọn để đếm.",
+  "lib/users/password-reset.ts::createResetLinkAsOperator": "Liên kết đặt lại mật khẩu cho tài khoản của một tổ chức khách (lối ra khi quản trị của khách quên mật khẩu).",
   "lib/onboarding/signup-mode.ts::setSignupSetting": "Cổng mở bán B: chế độ đăng ký /start của cả nền tảng.",
   // Thu phí thuê bao (0187) — mặt phẳng điều khiển của CSDL nhà; không mở CSDL của khách.
   "lib/billing/service.ts::setBillingReceiver": "Tài khoản nhận tiền thuê bao của nền tảng.",
