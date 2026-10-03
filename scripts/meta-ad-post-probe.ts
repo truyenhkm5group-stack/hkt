@@ -21,6 +21,60 @@ import { parseAdIdList } from "@/lib/constants/meta-ad-post";
 
 const che = (v: string | null | undefined) => (v ? `…${v.slice(-4)}` : "—");
 
+/** fb.me/<mã> → đích chuyển hướng (CHỈ đọc header Location, không đọc thân trang, không đăng nhập). */
+async function redirectTarget(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0" } });
+    const loc = res.headers.get("location") ?? "";
+    const enc = /[?&]encrypted_experience_id=([^&]+)/.exec(loc)?.[1];
+    return enc ? `E:${enc}` : `HTTP${res.status}:${loc.slice(0, 40)}`;
+  } catch (e) {
+    return `LOI:${e instanceof Error ? e.name : "?"}`;
+  }
+}
+
+/**
+ * ĐO GIẢ THUYẾT (cờ `--redirect`, tuỳ chọn `--account=<id>`): mã của hộp "Chia sẻ" khác mã API trả cho
+ * cùng mẩu (lượt dò 03/10/2026 không khớp 0/2.878). Hai mã có cùng chuyển về MỘT `encrypted_experience_id`
+ * không? Đo ba điều: API trả mã ỔN ĐỊNH qua hai lần đọc không · đích chuyển hướng có ỔN ĐỊNH không · đích
+ * của link người dán có trùng đích của link API của mẩu nào không. Chỉ in CÓ/KHÔNG và mã đã che.
+ */
+async function redirectExperiment(graph: ReturnType<typeof getFacebookAdsClient>, links: { url: string; code: string }[], accountArg: string | undefined) {
+  const accounts = await graph.listAdAccounts();
+  const ids = accounts.map((a) => a.accountId);
+  console.log(`[ops:tom-tat] tài khoản ERP đọc được: ${ids.map(che).join(" ")} · tài khoản yêu cầu ${che(accountArg)} có trong đó: ${accountArg ? (ids.includes(accountArg) ? "có" : "KHÔNG") : "—"}`);
+  const userTargets = new Map<string, string>();
+  for (const l of links) {
+    const a = await redirectTarget(l.url);
+    const b = await redirectTarget(l.url);
+    userTargets.set(a, l.code);
+    console.log(`[ops:tom-tat] link người dán …${l.code.slice(-4)} → đích ${a.slice(0, 2)} · hai lần như nhau: ${a === b ? "có" : "KHÔNG"}`);
+  }
+  const order = accountArg && ids.includes(accountArg) ? [accountArg] : ids;
+  let checked = 0;
+  let sampled = 0;
+  for (const accountId of order) {
+    for await (const page of graph.adPreviewLinkPages(accountId)) {
+      for (const ad of page) {
+        if (!ad.link || checked >= 1500) continue;
+        checked += 1;
+        const target = await redirectTarget(ad.link);
+        if (sampled < 3) {
+          sampled += 1;
+          const again = await graph.readNode(ad.adId, "preview_shareable_link");
+          const link2 = again.kind === "node" ? String(again.node.preview_shareable_link ?? "") : "";
+          const target2 = await redirectTarget(ad.link);
+          console.log(`[ops:tom-tat] mẫu ad ${che(ad.adId)}: link API hai lần đọc như nhau: ${link2 === ad.link ? "có" : "KHÔNG"} · đích ${target.slice(0, 2)} hai lần như nhau: ${target === target2 ? "có" : "KHÔNG"}`);
+        }
+        const hit = userTargets.get(target);
+        if (hit) console.log(`[ops:tom-tat] KHỚP ĐÍCH: link người dán …${hit.slice(-4)} = link API của ad ${che(ad.adId)} (tài khoản ${che(accountId)}) · mã hai link như nhau: ${ad.link.endsWith(hit) ? "có" : "KHÔNG"}`);
+      }
+      if (checked >= 1500) break;
+    }
+  }
+  console.log(`[ops:tom-tat] đã so đích chuyển hướng của ${checked} link API.`);
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const apply = args.includes("--apply");
@@ -31,6 +85,10 @@ async function main() {
   }
   const graph = getFacebookAdsClient();
   const adIds = [...list.adIds];
+  if (args.includes("--redirect")) {
+    await redirectExperiment(graph, list.previewLinks, args.find((a) => a.startsWith("--account="))?.slice("--account=".length));
+    process.exit(0);
+  }
   if (list.previewLinks.length) {
     // Cùng đường của màn hình: tài khoản đang hoạt động dò trước, so theo (loại link, mã).
     const accounts = await graph.listAdAccounts();
