@@ -86,7 +86,7 @@ function pageSummary(bot, pageId) {
     source: config.pages[pageId]?.source || "env", // "app" = them bang cach dan token trong app; "env" = khai bao trong .env
     stats: {
       today: st[today] || {},
-      last7: { replies: sum("replies"), handoffs: sum("handoffs"), skippedStaff: sum("skippedStaff"), skippedFirst: sum("skippedFirst"), orders: sum("orders") },
+      last7: { replies: sum("replies"), handoffs: sum("handoffs"), skippedStaff: sum("skippedStaff"), skippedFirst: sum("skippedFirst"), orders: sum("orders"), voice: sum("voice"), voiceFailed: sum("voiceFailed") },
       followupToday: store.countFollowupToday(pageId),
       lastActivity: st.lastActivity || null,
     },

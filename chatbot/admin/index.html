@@ -351,6 +351,7 @@ function renderSettings(p) {
     <div><b>${st.last7.handoffs}</b><span class="muted">chuyển nhân viên</span></div>
     <div><b>${st.last7.skippedStaff}</b><span class="muted">nhường nhân viên</span></div>
     <div><b>${st.last7.orders || 0}</b><span class="muted">đơn ghi vào POS</span></div>
+    <div title="Ghi âm của khách bot đã chép thành chữ trong 7 ngày; số sau dấu / là ghi âm chép không được (bot nhờ khách nhắn chữ)"><b>${st.last7.voice || 0}${st.last7.voiceFailed ? " / " + st.last7.voiceFailed : ""}</b><span class="muted">ghi âm đã nghe</span></div>
     <div title="${esc(aiNote(p.ai?.last7))}"><b>${fmtVnd(p.ai?.last7)}</b><span class="muted">chi phí AI (ước tính)</span></div>
     <div title="SĐT mới khách gõ trong hội thoại bot phụ trách, từ ${esc(meterLabel())}"><b>${p.ai?.last7?.sdt ?? 0}</b><span class="muted">SĐT khách để lại</span></div>
     <div title="${esc(aiNote(p.ai?.last7))}"><b>${vndOr(p.ai?.last7?.perUniqueOrderVnd, p.ai?.last7?.partial)}</b><span class="muted">AI / 1 đơn (${p.ai?.last7?.uniqueOrders ?? 0} đơn)</span></div>

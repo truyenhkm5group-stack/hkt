@@ -25,11 +25,11 @@ function defaultModel() {
 }
 
 /** Ghi token cua MOI lan goi AI (xem aicost.js). Loi ghi so khong duoc lam hong cau tra loi. */
-function tally(opts, res) {
+function tally(opts, res, provider = config.ai.provider) {
   try {
     if (res && res.usage) {
-      const model = (opts && opts.model) || defaultModel();
-      const t = usageTokens(config.ai.provider, res.usage);
+      const model = (opts && opts.model) || (provider === "gemini" ? config.gemini.model : defaultModel());
+      const t = usageTokens(provider, res.usage);
       store.addAiUsage(currentAiPage(), model, t);
       store.addConvAiUsage(currentAiPage(), currentAiConversation(), model, t);
     }
@@ -39,6 +39,14 @@ function tally(opts, res) {
 
 export function generateReply(systemPrompt, history, opts) {
   return impl().generateReply(systemPrompt, history, opts).then((r) => tally(opts, r));
+}
+
+/**
+ * Goi THANG Gemini, bat ke AI_PROVIDER — cho viec chi Gemini lam duoc (nghe ghi am). Token van vao so chi phi AI
+ * cua page/hoi thoai nhu moi lan goi khac.
+ */
+export function generateReplyGemini(systemPrompt, history, opts) {
+  return gemini.generateReply(systemPrompt, history, opts).then((r) => tally(opts, r, "gemini"));
 }
 
 export function generateWithTools(systemPrompt, contents, functionDeclarations, opts) {
