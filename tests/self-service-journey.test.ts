@@ -350,6 +350,14 @@ function testPure() {
   assert.equal(followupStepsLabel([60, 360, 1320]), "1 giờ · 6 giờ · 22 giờ");
   const fp = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Lấy thông tin · kiểm tra khách cũ", 3, 3, true, "");
   assert.ok(/không nêu giá/i.test(fp) && /lần nhắc CUỐI/.test(fp) && /đơn nháp/.test(fp), fp);
+  // CHỐT KHÁCH CŨ (03/10/2026 · «Linh Nguyễn» mua 05/2024, hỏi giá rồi «Thanks 😍» là đi).
+  const wbBlock = returningCustomerPrompt({ ...old, trust: "FB_ID" }, undefined);
+  assert.ok(/CHỐT KHÁCH CŨ/.test(wbBlock) && /KHÔNG chào tạm biệt/.test(wbBlock) && /MỘT câu có \/ không/.test(wbBlock) && /SĐT đuôi/.test(wbBlock), wbBlock);
+  assert.ok(!/SĐT đuôi …/.test(returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined)), "mức PHONE: không gợi ý nêu SĐT / khu vực");
+  assert.ok(/không phải tạm biệt/.test(systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE")), "cảm ơn sau báo giá = lưng chừng, không tạm biệt");
+  const fpOld = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Báo giá", 1, 3, false, "", wbBlock);
+  assert.ok(/KHÁCH CŨ/.test(fpOld) && /ĐẶT LẠI cụ thể như lần trước/.test(fpOld) && /KHÔNG nêu giá/.test(fpOld), "follow-up khách cũ đề xuất đặt lại");
+  assert.ok(!/KHÁCH CŨ/.test(fp), "khách mới ⇒ follow-up như cũ");
   // Gửi lại tin nhóm hỏng vì mạng (0186): chỉ lỗi TRƯỚC KHI yêu cầu rời máy; lịch 2 · 5 · 15 · 30 · 60 · 120 phút trong 6 giờ.
   const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
   assert.ok(failedBeforeSending(netErr("ETIMEDOUT")) && failedBeforeSending(netErr("UND_ERR_CONNECT_TIMEOUT")) && failedBeforeSending(netErr("ENOTFOUND")));
