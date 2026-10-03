@@ -18,6 +18,8 @@ import { ChatbotConfigForm } from "./config-form";
 import { PlaybookPanel } from "./playbook-panel";
 import { LessonsPanel } from "./lessons-panel";
 import { FollowupPanel } from "./followup-panel";
+import { OrderSyncPanel } from "./order-sync-panel";
+import { orderSyncView } from "@/lib/sales-chatbot/order-sync";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
 import { ResumeToAiButton } from "./resume-button";
@@ -49,6 +51,7 @@ export default async function SalesChatbotPage() {
   // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
   const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
+  const orderSync = fanpage ? await orderSyncView() : null;
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
     const row = connections.find((c) => c.connectorKey === k);
     return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row) };
@@ -74,6 +77,7 @@ export default async function SalesChatbotPage() {
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
+          {orderSync ? <OrderSyncPanel view={orderSync} manage={manage} /> : null}
           {fanpage ? (
             <SectionCard title="Fanpage (qua Pancake)" description="Bot trả lời tin nhắn khách gửi vào fanpage của shop — cùng cấu hình, cùng giá / tồn, cùng luật chốt đơn với trang chat web.">
               <div className="space-y-2 text-sm" data-testid="fanpage-setup">

@@ -472,8 +472,13 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
     const db = await getDb();
+    const cv = schema.salesChatConversations;
     const bump = async (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => {
-      await db.update(schema.salesChatConversations).set({ ...patch, updatedAt: new Date() }).where(eq(schema.salesChatConversations.id, conv.id));
+      // `state.orderSync` thuộc job GHI ĐƠN TỪ HỘI THOẠI (order-sync.ts), không thuộc lượt này: lấy bản đang nằm trong CSDL,
+      // không ghi đè bằng bản chụp lúc lượt bắt đầu (mất nhật ký ⇒ job đọc lại hội thoại và có thể ghi trùng đơn).
+      const { state, ...rest } = patch;
+      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync'))` : undefined;
+      await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
     };
     if (conv.status === "HANDOFF") {
       await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
@@ -485,7 +490,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (conv.turns >= SALES_CHATBOT_LIMITS.turnsPerConversation) {
+    // Trần lượt đếm theo LƯỢT MUA (khách quen mua lại nhiều lần trong cùng hội thoại Messenger): lượt sắp mở lượt mua mới
+    // (đơn chốt quá POST_ORDER_HANDOFF_MS — khối bên dưới) đếm lại từ 0.
+    if (conv.turns - cycleStartTurns((conv.state ?? {}) as ChatState, conv.turns, now) >= SALES_CHATBOT_LIMITS.turnsPerConversation) {
       await reply(conv, seq, cfg.handoff.message);
       await bump({ status: "HANDOFF", handoffReason: "Hội thoại quá dài", turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
@@ -514,7 +521,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now).catch(() => undefined);
         return { ok: true, view: (await conversationView(conv.id))! };
       }
-      const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed] };
+      const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns };
       for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff"] as const) delete fresh[k];
       await bump({ state: fresh as Record<string, unknown> });
       conv.state = fresh as Record<string, unknown>;
@@ -574,7 +581,9 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const quickCatalog = await quickReplyCatalog();
     // KHÁCH CŨ (02/10/2026): những gì shop đã biết về khách — không bắt khách khai lại SĐT / địa chỉ. Lỗi đọc ⇒ như khách mới.
     const known = (conv.state ?? {}) as ChatState;
-    const returning = await findReturningCustomer(known).catch(() => null);
+    // Khách của đơn NHÂN VIÊN chốt trong hội thoại này (ghi đơn từ hội thoại) cũng là khách đã biết — mức tin `THREAD`.
+    const syncCustomer = known.orderSync?.customer;
+    const returning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), await learnedLessons(), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
@@ -730,6 +739,13 @@ export async function appendContextMessages(conversationId: string, items: reado
 
 /** Khách nhắn trong chừng này sau khi bot chốt đơn ⇒ nhân viên xử lý; lâu hơn ⇒ lượt mua mới. */
 export const POST_ORDER_HANDOFF_MS = 3 * 24 * 3_600_000;
+
+/** Số lượt của hội thoại lúc lượt mua hiện tại bắt đầu — lượt sắp mở lượt mua mới tính từ bây giờ. HÀM THUẦN. */
+export function cycleStartTurns(st: ChatState, turns: number, now: Date): number {
+  const at = st.confirmed ? Date.parse(st.confirmed.at) : NaN;
+  if (Number.isFinite(at) && now.getTime() - at >= POST_ORDER_HANDOFF_MS) return turns;
+  return st.cycleStartTurns ?? 0;
+}
 
 /** Tiền tố tin của page / nhân viên trong lịch sử của bot. */
 export const SHOP_SAID = "[Shop đã nhắn]";

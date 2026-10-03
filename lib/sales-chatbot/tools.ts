@@ -34,6 +34,7 @@ import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } fr
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
+import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
 
 export type CartLine = { variantId: string; quantity: number };
@@ -66,6 +67,10 @@ export type ChatState = {
   returning?: PancakeThreadProfile;
   /** Nội dung bài viết khách bình luận dưới (`null` = đã hỏi Pancake, không đọc được) — đọc một lần mỗi bài. */
   postContext?: { postId: string; text: string | null };
+  /** Số lượt của hội thoại lúc lượt mua hiện tại bắt đầu — trần lượt (`turnsPerConversation`) đếm theo LƯỢT MUA, không theo đời hội thoại. */
+  cycleStartTurns?: number;
+  /** Nhật ký GHI ĐƠN TỪ HỘI THOẠI (`order-sync.ts`) — bot không bao giờ ghi khoá này; engine giữ bản trong CSDL khi lưu. */
+  orderSync?: OrderSyncThreadState;
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
@@ -277,7 +282,7 @@ function err(summary: string, message: string, state: ChatState): ToolOutcome {
   return { content: JSON.stringify({ error: message }), isError: true, summary, state };
 }
 
-type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
+export type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -294,7 +299,7 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
 }
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
-async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null): Promise<Priced> {
+export async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null): Promise<Priced> {
   // Hai field quy cách của mẫu thực phẩm — nguồn khối lượng cho luật miễn ship khi cột weight chưa nhập.
   const catalog = await sellableCatalog(cfg.freeShipping.enabled ? ["net_weight", "package_size"] : []);
   const books = await booksForChat(cfg, customerId);
@@ -322,7 +327,7 @@ async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, c
   return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing };
 }
 
-function mergeLines(lines: readonly CartLine[]): CartLine[] {
+export function mergeLines(lines: readonly CartLine[]): CartLine[] {
   const m = new Map<string, number>();
   for (const l of lines) m.set(l.variantId, (m.get(l.variantId) ?? 0) + l.quantity);
   return [...m.entries()].map(([variantId, quantity]) => ({ variantId, quantity }));

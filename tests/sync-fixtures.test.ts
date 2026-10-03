@@ -456,6 +456,7 @@ import { testReorderReminders } from "./reorder-reminders.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
+import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2648,6 +2649,8 @@ async function main() {
   // Lịch hẹn & liệu trình (0190) + mẫu spa: tổ chức THẬT `ap-spa` (tự cấp, tự dọn).
   await testAppointments();
   await testAppointmentBookingBot();
+  // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
+  await testSalesOrderSync();
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
