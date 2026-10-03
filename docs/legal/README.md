@@ -9,6 +9,19 @@
 | `terms-of-service.md` | Điều khoản sử dụng dịch vụ (khách thuê ↔ nền tảng) |
 | `privacy-policy.md` | Chính sách bảo vệ dữ liệu cá nhân (dữ liệu của khách thuê VÀ của khách hàng cuối mà khách thuê nhập vào) |
 
+## Đã công bố
+
+- **Chính sách quyền riêng tư — phiên bản 1.0, hiệu lực 03/10/2026**: `https://vnxcommerce.com/chinh-sach-bao-mat`
+  (`app/chinh-sach-bao-mat/page.tsx`). Google / Facebook đòi link này để mở đăng nhập bằng tài khoản của họ.
+  - Thông tin pháp nhân do chủ nền tảng cung cấp, khai ở `lib/constants/company.ts`.
+  - Các chỗ trống `[…]` của bản nháp được điền bằng điều hệ thống ĐANG làm: máy chủ VNPT tại Việt Nam, sao lưu Google
+    Drive đã mã hoá, xoay vòng 7 ngày / 4 tuần, không tự xoá khi ngừng thuê.
+  - Mốc «xoá trong 30 ngày kể từ khi xác minh yêu cầu» là đề xuất của kỹ thuật, chủ nền tảng đổi được.
+  - Thời hạn trả lời yêu cầu và báo sự cố ghi «theo thời hạn pháp luật quy định» — chờ luật sư điền số cụ thể.
+- **Điều khoản sử dụng**: vẫn là NHÁP, chưa công bố.
+
+Còn phải nhờ luật sư rà bản 1.0; sửa thì tăng `PRIVACY_POLICY.version` trong `lib/constants/company.ts`.
+
 ## Việc chủ nền tảng phải làm trước khi dùng
 
 1. Điền mọi chỗ `[…]`: tên pháp nhân, mã số thuế, địa chỉ, người đại diện, email / số điện thoại hỗ trợ.

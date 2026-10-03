@@ -20,6 +20,12 @@ export const DEFAULT_SITE_DOMAIN = "vnxcommerce.com";
 /** Đường dẫn THẬT của trang giới thiệu. Ở tên miền gốc nó được phục vụ tại `/`; ở host ERP mở được để xem trước. */
 export const SITE_PAGE_PATH = "/gioi-thieu";
 
+/**
+ * Văn bản pháp lý CÔNG KHAI — phục vụ NGAY tại tên miền gốc (không chuyển sang ERP): Google / Facebook đòi link chính sách
+ * quyền riêng tư nằm trên tên miền đã khai của ứng dụng đăng nhập (`vnxcommerce.com`).
+ */
+export const SITE_LEGAL_PATHS = ["/chinh-sach-bao-mat"] as const;
+
 /** Bí danh tiếng Việt in trên tài liệu / danh thiếp → tuyến thật của ERP. */
 export const SITE_AUTH_ALIASES: Readonly<Record<string, string>> = { "/dang-ky": "/start", "/dang-nhap": "/login" };
 
@@ -97,6 +103,7 @@ export function siteRoute(input: { host: SiteHostKind; pathname: string; search:
   if (pathname === "/") return { kind: "REWRITE", path: SITE_PAGE_PATH };
   if (pathname === SITE_PAGE_PATH || pathname === `${SITE_PAGE_PATH}/`) return { kind: "REDIRECT", url: `${self}/${search}`, status: 308 };
   if (SITE_STATIC_PREFIXES.some((p) => pathname.startsWith(p))) return { kind: "PASS" };
+  if ((SITE_LEGAL_PATHS as readonly string[]).includes(pathname.replace(/\/+$/, "") || "/")) return { kind: "PASS" };
   if (pathname === "/api" || pathname.startsWith("/api/")) return { kind: "NOT_FOUND" };
   const alias = SITE_AUTH_ALIASES[pathname.replace(/\/+$/, "")] ?? null;
   if (appOrigin) return { kind: "REDIRECT", url: `${appOrigin}${alias ?? pathname}${search}`, status: 302 };

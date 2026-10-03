@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { BrandGlyph, BrandLockup } from "@/components/brand";
+import { COMPANY, PRIVACY_POLICY } from "@/lib/constants/company";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { BUSINESS_TYPES, BUSINESS_TYPE_SPEC, type BusinessType } from "@/lib/onboarding/shared";
@@ -672,6 +673,9 @@ export default async function SitePage() {
           <div className="space-y-2">
             <BrandLockup wordmarkClassName="text-base" />
             <p className="text-xs text-muted-foreground">© {year} VNXcommerce · Phần mềm quản lý cho shop bán hàng online</p>
+            <p className="text-xs text-muted-foreground">
+              {COMPANY.name} · MST {COMPANY.taxCode} · {COMPANY.email}
+            </p>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground" aria-label="Liên kết chân trang">
             {NAV.map((n) => (
@@ -684,6 +688,9 @@ export default async function SitePage() {
             </a>
             <a href={data.signupUrl} className="font-semibold text-brand hover:text-foreground">
               {signup.short}
+            </a>
+            <a href={PRIVACY_POLICY.path} className="hover:text-foreground">
+              Chính sách quyền riêng tư
             </a>
           </nav>
         </div>

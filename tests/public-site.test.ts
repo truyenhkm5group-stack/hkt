@@ -45,6 +45,8 @@ export function testPublicSiteHost() {
   const r = (pathname: string, search = "", host: "APEX" | "WWW" = "APEX", appOrigin: string | null = app) => siteRoute({ host, pathname, search, siteDomain: d, protocol: "https:", appOrigin });
 
   assert.deepEqual(r("/"), { kind: "REWRITE", path: SITE_PAGE_PATH }, "/ ⇒ trang giới thiệu");
+  assert.deepEqual(r("/chinh-sach-bao-mat"), { kind: "PASS" }, "chính sách quyền riêng tư phục vụ NGAY ở tên miền gốc — Google / Facebook đòi link trên tên miền đã khai");
+  assert.deepEqual(r("/chinh-sach-bao-mat/"), { kind: "PASS" });
   assert.deepEqual(r(SITE_PAGE_PATH, "?utm=a"), { kind: "REDIRECT", url: "https://vnxcommerce.com/?utm=a", status: 308 }, "một địa chỉ cho một trang");
   assert.deepEqual(r("/blog", "?x=1", "WWW"), { kind: "REDIRECT", url: "https://vnxcommerce.com/blog?x=1", status: 301 }, "www ⇒ tên miền gốc, giữ đường dẫn");
   assert.deepEqual(r("/dang-ky", "?invite=AB-CD"), { kind: "REDIRECT", url: `${app}/start?invite=AB-CD`, status: 302 }, "đăng ký ⇒ /start của ERP, giữ mã mời");
