@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cancelManualOrderAction, confirmManualDeliveryAction, recordManualPaymentAction, voidManualDeliveryAction, voidManualPaymentAction } from "@/lib/actions/manual-orders";
+import { cancelManualOrderAction, confirmManualDeliveryAction, markManualDeliveryFailedAction, recordManualPaymentAction, undoManualDeliveryFailedAction, voidManualDeliveryAction, voidManualPaymentAction } from "@/lib/actions/manual-orders";
 import { PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL, PAYMENT_METHODS, type PaymentKind, type PaymentMethod } from "@/lib/constants/order-payments";
 
 /**
@@ -110,7 +110,7 @@ export function ConfirmManualDeliveryButton({ orderId }: { orderId: string }) {
 
   return (
     <div className="w-full max-w-md space-y-2 rounded-lg border bg-background p-3">
-      <p className="text-[12.5px] text-muted-foreground">Nhập theo tờ phiếu giao đã có chữ ký người nhận. Xác nhận giao KHÔNG ghi nhận tiền — doanh thu chờ chứng từ thanh toán.</p>
+      <p className="text-[12.5px] text-muted-foreground">Nhập theo tờ phiếu giao đã có chữ ký người nhận. Đơn tính là GIAO THÀNH CÔNG (doanh thu danh nghĩa); tiền thật vẫn chờ phiếu thu.</p>
       <label className="block space-y-1 text-[12.5px]">
         <span className="font-medium">Mốc người nhận ký (giờ Việt Nam)</span>
         <Input type="datetime-local" value={signedAt} onChange={(e) => setSignedAt(e.target.value)} aria-label="Mốc người nhận ký" />
@@ -308,6 +308,59 @@ export function VoidManualPaymentButton({ orderId, paymentId }: { orderId: strin
         </Button>
         <Button type="button" variant="destructive" size="sm" onClick={submit} disabled={pending}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null} Huỷ chứng từ
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * GIAO KHÔNG THÀNH CÔNG (ORDER_OUTCOME.md mục 11.2) và HOÀN TÁC — một nút, bắt buộc lý do (vào nhật ký). Giao hỏng ⇒ đơn
+ * «Đã hoàn», tính là HOÀN trong tỷ lệ giao thành công, hàng quay lại tồn ngay; hoàn tác ⇒ về «Đã xác nhận».
+ */
+export function ManualDeliveryFailedButton({ orderId, mode }: { orderId: string; mode: "FAIL" | "UNDO" }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const fail = mode === "FAIL";
+
+  if (!open)
+    return (
+      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Undo2 className="size-4" /> {fail ? "Giao không thành công" : "Hoàn tác giao không thành công"}
+      </Button>
+    );
+
+  const submit = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const res = fail ? await markManualDeliveryFailedAction(orderId, { reason }) : await undoManualDeliveryFailedAction(orderId, { reason });
+      if (!("ok" in res)) {
+        setError(res.error);
+        return;
+      }
+      toast.success(res.message);
+      setOpen(false);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-md space-y-2 rounded-lg border bg-background p-3">
+      <p className="text-[12.5px] text-muted-foreground">
+        {fail ? "Đơn chuyển «Đã hoàn» — tính là HOÀN trong tỷ lệ giao thành công, hàng quay lại tồn ngay, không tính phí giao." : "Đơn về «Đã xác nhận» và giữ hàng lại."}
+      </p>
+      <Textarea aria-label={fail ? "Lý do giao không thành công" : "Lý do hoàn tác"} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder={fail ? "Vì sao (khách không nhận, sai địa chỉ, khách huỷ…) — bắt buộc" : "Vì sao hoàn tác (ghi nhầm…) — bắt buộc"} />
+      {error ? <p className="text-[12px] font-medium text-destructive">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
+          Thôi
+        </Button>
+        <Button type="button" variant={fail ? "destructive" : "default"} size="sm" onClick={submit} disabled={pending}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null} {fail ? "Xác nhận giao không thành công" : "Xác nhận hoàn tác"}
         </Button>
       </div>
     </div>

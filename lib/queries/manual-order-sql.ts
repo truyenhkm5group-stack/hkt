@@ -71,20 +71,26 @@ export const MANUAL_PAYMENT_STATUS_SQL: SQL = sql`(case when ${IS_MANUAL_ORDER} 
 export const MANUAL_ORDER_PAID: SQL = sql`(${IS_MANUAL_ORDER} and ${MANUAL_PAYMENT_NET_SQL} >= greatest(${MANUAL_ORDER_AMOUNT_DUE_SQL}, 1))`;
 
 /**
- * ═══ "GIAO THÀNH CÔNG" CÓ KÉO THEO DOANH THU KHÔNG — cửa của MỌI tổng TIỀN dựng trên ORDER_OUTCOME = 'DELIVERED' ═══
+ * ═══ ĐƠN TAY CÓ NẰM TRONG BÁO CÁO TIỀN / BÁO CÁO DANH NGHĨA KHÔNG — theo TỔ CHỨC ═══
  *
- * Ở tổ chức nhà, `ORDER_OUTCOME = 'DELIVERED'` đã mang sẵn chứng cứ tiền (luật 3.2b: COD thực thu / khai báo > 100K,
- * hoặc mã 501 của một kiện COD), nên các báo cáo cộng giá trị đơn DELIVERED làm "doanh thu giao thành công". Đơn tay
- * giao bằng phiếu ký nhận thì KHÔNG: G-ORDER tách hẳn giao hàng khỏi thanh toán — "không tự coi là đã thu tiền". Hôm nay
- * ERP chưa có đường ghi chứng từ thanh toán cho đơn tay, nên đơn tay đứng NGOÀI mọi tổng doanh thu / giá vốn / lợi
- * nhuận / hoa hồng tính theo DELIVERED — giá vốn đi cùng doanh thu, nếu không lợi nhuận kỳ gánh giá vốn của một khoản
- * thu chưa ghi nhận. Nó vẫn nằm trong mọi phép ĐẾM giao thành công (chiều logistics).
+ * Chủ shop HSLC chốt 03/10/2026 (ORDER_OUTCOME.md mục 11.3): «doanh thu + giá vốn đơn tay tính KHI ĐÃ GIAO; lợi nhuận
+ * tiền thật chỉ phần đã có phiếu thu». Trước đó đơn tay đứng ngoài mọi tổng doanh thu / giá vốn / lợi nhuận (G-ORDER
+ * 29/09) ⇒ tổ chức chỉ có đơn tay thấy báo cáo lợi nhuận toàn chi phí, lỗ giả — "nợ P1" của pilot-readiness mục 4.
  *
- * Từ 0181 ERP ĐÃ có chứng từ thanh toán cho đơn tay (`order_payments`), nhưng vị ngữ này CỐ Ý CHƯA đổi: đổi nó là đổi
- * ~20 báo cáo tiền cùng lúc (lợi nhuận, marketer, lương / hoa hồng, sản phẩm, CRM…) — mỗi báo cáo cộng GIÁ TRỊ ĐƠN theo
- * mốc của nó, trong khi thực thu đơn tay phải cộng Σ CHỨNG TỪ theo `paid_at`; và câu con tương quan chen vào các câu gộp
- * nóng nhất của tổ chức nhà cần đo JIT trước. Thực thu đơn tay hôm nay đi ĐÚNG MỘT đường: dòng «Thực thu đơn tay» của
- * `getFinancialTruth` (theo `paid_at`). Nợ P1: docs/platform/pilot-readiness.md mục 4.
- * Tổ chức nhà: luôn đúng với mọi dòng (id Pancake là chuỗi số), không đổi một đồng nào.
+ * NHƯNG chỉ ở tổ chức KHÔNG đồng bộ đơn. Tổ chức đồng bộ Pancake (nhà) giữ nguyên luật 3.9 (tổng báo cáo = số đơn XÁC NHẬN
+ * PANCAKE): một đơn `erp-` lọt vào CSDL ấy vẫn đứng ngoài, không đổi một đồng (`tests/pilot-orders.test.ts`). Câu hỏi "tổ
+ * chức này có đồng bộ đơn không" trả lời bằng CHÍNH DỮ LIỆU của CSDL tổ chức: có đơn nào không phải `erp-` không. Câu con
+ * KHÔNG tương quan ⇒ Postgres tính MỘT lần mỗi câu (InitPlan), dừng ở dòng đầu tiên — không tốn gì ở câu gộp nóng của nhà.
  */
-export const REVENUE_RECOGNIZED_ON_DELIVERY: SQL = sql`(${schema.orders.id} not like ${PATTERN})`;
+const ORG_HAS_SYNCED_ORDERS: SQL = sql`exists (select 1 from orders so_sync where so_sync.id not like ${PATTERN})`;
+
+/** Đơn nằm trong báo cáo danh nghĩa / phép so marketer: đơn đồng bộ, hoặc MỌI đơn ở tổ chức không đồng bộ đơn. */
+export const IN_SALES_REPORTS: SQL = sql`(${schema.orders.id} not like ${PATTERN} or not ${ORG_HAS_SYNCED_ORDERS})`;
+
+/**
+ * "GIAO THÀNH CÔNG" CÓ KÉO THEO DOANH THU KHÔNG — cửa của MỌI tổng TIỀN dựng trên ORDER_OUTCOME = 'DELIVERED'. Cùng phạm
+ * vi với `IN_SALES_REPORTS`. Doanh thu ở đây là DANH NGHĨA (giá trị đơn đã giao); chiều TIỀN THẬT của đơn tay vẫn chỉ đi
+ * theo chứng từ `order_payments` (`MANUAL_ORDER_PAID`, `ORDER_OUTCOME_VERIFIED`, «Thực thu đơn tay» theo `paid_at`) —
+ * phiếu giao không bao giờ là chứng từ thu tiền (ORDER_OUTCOME.md mục 10).
+ */
+export const REVENUE_RECOGNIZED_ON_DELIVERY: SQL = IN_SALES_REPORTS;

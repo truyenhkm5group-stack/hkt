@@ -19,7 +19,7 @@ import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquer
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ESTIMATED_COST_KEY, estimatedCostsWithMarketerPrice, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
 import { marketerPriceEntriesByProduct } from "@/lib/queries/marketer-price";
-import { NOT_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
+import { IN_SALES_REPORTS, NOT_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -812,11 +812,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       // chỉ tính đơn đã xác nhận trên Pancake (bỏ đơn mới / chờ xác nhận / huỷ)
-      // ĐƠN TẠO TAY (`erp-…`, tổ chức không đồng bộ đơn) nằm NGOÀI báo cáo danh nghĩa và phép so marketer của nó (AGENTS 3.9 —
-      // tổng = số đơn XÁC NHẬN PANCAKE): không quảng cáo / fanpage nào để quy kết, và cách kết luận đơn không qua ĐVVC còn
-      // chờ chủ nền tảng (G-ORDER). Ở tổ chức nhà vị ngữ đúng với mọi dòng — không đổi một đơn nào.
+      // ĐƠN TẠO TAY (`erp-…`) nằm TRONG báo cáo danh nghĩa ở tổ chức KHÔNG đồng bộ đơn (chủ shop HSLC 03/10/2026 —
+      // ORDER_OUTCOME.md mục 11.3; loại ra thì báo cáo chỉ còn quảng cáo + chi phí, lỗ giả); tổ chức đồng bộ Pancake vẫn
+      // loại (luật 3.9 — tổng = số đơn XÁC NHẬN PANCAKE). Một vị ngữ: `IN_SALES_REPORTS`.
       // Bộ lọc GIÁ TRỊ ĐƠN đọc tổng tiền của CẢ ĐƠN: một đơn vào trọn vẹn hoặc ra trọn vẹn.
-      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_MANUAL_ORDER, ...(locGiaTri ? [sql.raw(locGiaTri)] : []), ...periodCond(period.from, period.to, basis)))
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), IN_SALES_REPORTS, ...(locGiaTri ? [sql.raw(locGiaTri)] : []), ...periodCond(period.from, period.to, basis)))
       .groupBy(sql`1`),
     ),
     db
@@ -841,7 +841,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // chỉ báo khi người dùng ĐỔI mốc, tức không lần deploy nào bắt được.
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
-      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_MANUAL_ORDER, NOT_CANCELLED, ...periodCond(period.from, period.to, basis)))
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), IN_SALES_REPORTS, NOT_CANCELLED, ...periodCond(period.from, period.to, basis)))
       .groupBy(o.id, PID),
     // CHI PHÍ VẬN HÀNH đi qua Profit Engine — nơi duy nhất quyết định nguồn nào có thẩm quyền,
     // nguồn chính đã phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn.

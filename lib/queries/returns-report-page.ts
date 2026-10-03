@@ -23,7 +23,11 @@ import { listAttributedMarketers } from "@/lib/queries/order-marketer";
 import { listProductCodes } from "@/lib/queries/product-code";
 
 /** Tham số của trang, dựng từ URL. `{}` = trang mặc định (kỳ 90 ngày, mốc gửi hàng, không lọc). */
-export function returnsPageParams(raw: SearchParams) {
+/**
+ * `defaultBasis`: mốc khi URL không chọn. Tổ chức KHÔNG có module vận chuyển (đơn tay, giao bằng phiếu ký nhận — không
+ * vận đơn nào) thì mốc «ngày gửi ĐVVC» luôn rỗng ⇒ trang đó truyền `ORDERED`.
+ */
+export function returnsPageParams(raw: SearchParams, defaultBasis: TimeBasis = "SHIPPED") {
   const params = parseListParams(raw, {
     defaultSort: "successRate",
     defaultDir: "asc",
@@ -48,7 +52,7 @@ export function returnsPageParams(raw: SearchParams) {
     tới đâu rồi". Người muốn hỏi câu khác ("đơn chốt tuần này ra sao") đổi sang `ORDERED`, và màn
     hình nói rõ đang ở mốc nào.
   */
-  const basis: TimeBasis = TIME_BASES.includes((params.filters.basis?.[0] ?? "") as TimeBasis) ? (params.filters.basis![0] as TimeBasis) : "SHIPPED";
+  const basis: TimeBasis = TIME_BASES.includes((params.filters.basis?.[0] ?? "") as TimeBasis) ? (params.filters.basis![0] as TimeBasis) : defaultBasis;
   const codes = params.filters.product?.length ? params.filters.product : undefined;
   const marketerIds = params.filters.marketer?.length ? params.filters.marketer : undefined;
   const trendGrain: TrendGrain = TREND_GRAINS.includes((params.filters.trend?.[0] ?? "") as TrendGrain) ? (params.filters.trend![0] as TrendGrain) : "DAY";

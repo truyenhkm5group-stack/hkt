@@ -30,11 +30,11 @@ import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-deliver
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CancelManualOrderButton, ConfirmManualDeliveryButton, RecordManualPaymentButton, VoidManualDeliveryButton, VoidManualPaymentButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
+import { CancelManualOrderButton, ConfirmManualDeliveryButton, ManualDeliveryFailedButton, RecordManualPaymentButton, VoidManualDeliveryButton, VoidManualPaymentButton } from "@/app/(dashboard)/orders/[id]/manual-order-actions";
 import { ManualPaymentStatusText } from "@/app/(dashboard)/orders/payment-status";
 import { canRecordPayment, PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL } from "@/lib/constants/order-payments";
 import { manualOrderPaymentView } from "@/lib/queries/order-payments";
-import { canConfirmManualDelivery, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { canConfirmManualDelivery, canMarkManualDeliveryFailed, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { manualOrderDeliveryView, manualOrderGate } from "@/lib/records/order-create";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -101,6 +101,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED" && order.stage !== "DELIVERED";
   const canDeliver = manual && manualGate?.allowed === true && canConfirmManualDelivery(order.stage) && !delivery?.active && attempts.length === 0;
   const canVoidDelivery = manual && manualGate?.allowed === true && Boolean(delivery?.active);
+  // Giao không thành công (ORDER_OUTCOME.md mục 11.2): cùng điều kiện với xác nhận giao; đã ghi ⇒ cho hoàn tác.
+  const canFail = canDeliver && canMarkManualDeliveryFailed(order.stage);
+  const canUndoFail = manual && manualGate?.allowed === true && order.stage === "RETURNED";
   // Chứng từ thanh toán (ORDER_OUTCOME.md mục 11): cùng cổng; KHÔNG phụ thuộc phiếu giao. Đơn đã huỷ chỉ nhận phiếu hoàn.
   const canPay = manual && manualGate?.allowed === true;
   const canReceipt = canPay && canRecordPayment("RECEIPT", order.stage);
@@ -281,7 +284,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   />
                 ) : (
                   <p className="text-muted-foreground">
-                    {order.stage === "CONFIRMED" ? "Chưa có phiếu giao — hàng còn giữ trong kho (khả dụng đã trừ phần này)." : "Chỉ đơn «Đã xác nhận» mới xác nhận giao được."}
+                    {order.stage === "CONFIRMED"
+                      ? "Chưa có phiếu giao — hàng còn giữ trong kho (khả dụng đã trừ phần này)."
+                      : order.stage === "RETURNED"
+                        ? "Giao KHÔNG thành công — đơn tính là hoàn, hàng đã quay lại tồn."
+                        : "Chỉ đơn «Đã xác nhận» mới xác nhận giao được."}
                   </p>
                 )}
                 {delivery.priorIssues.length ? (
@@ -290,9 +297,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     điều chỉnh tăng đúng bằng số đó (tham chiếu «hoàn phiếu xuất — đơn {manualOrderShortCode(order.id)} đã xác nhận giao»). ERP không tự sửa dữ liệu kho.
                   </p>
                 ) : null}
-                {canDeliver || canVoidDelivery ? (
+                {canDeliver || canVoidDelivery || canFail || canUndoFail ? (
                   <div className="flex flex-wrap gap-2">
                     {canDeliver ? <ConfirmManualDeliveryButton orderId={order.id} /> : null}
+                    {canFail ? <ManualDeliveryFailedButton orderId={order.id} mode="FAIL" /> : null}
+                    {canUndoFail ? <ManualDeliveryFailedButton orderId={order.id} mode="UNDO" /> : null}
                     {canVoidDelivery ? <VoidManualDeliveryButton orderId={order.id} /> : null}
                   </div>
                 ) : null}

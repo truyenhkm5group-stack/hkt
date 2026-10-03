@@ -96,6 +96,7 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 | **đơn tạo tay (`erp-`), không vận đơn, có phiếu giao ký nhận còn hiệu lực** (mục 11) | bất kỳ — phiếu giao KHÔNG phải chứng từ tiền | **`DELIVERED`**; tiền: `UNVERIFIED` cho tới khi CHỨNG TỪ THANH TOÁN (`order_payments`) thu đủ ⇒ `DELIVERED` ở `ORDER_OUTCOME_VERIFIED` |
 | đơn tạo tay, có chứng từ thu đủ nhưng **chưa có phiếu giao** | đã thu đủ | như cũ: `NOT_SHIPPED` — tiền KHÔNG bao giờ suy ra giao hàng |
 | đơn tạo tay, chưa có phiếu giao | bất kỳ | như cũ: `NOT_SHIPPED` (huỷ ⇒ `CANCELLED`) — không bao giờ `DELIVERED` |
+| đơn tạo tay, **giao không thành công** (người bấm, có lý do — mục 11.2) | bất kỳ | **`RETURNED`** (stage `RETURNED`, không vận đơn) — hàng quay lại tồn ngay |
 
 Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 50.000, `maxCodForFakeDelivery`
 100.000). Không hard-code số ở nơi khác.
@@ -160,10 +161,10 @@ Hệ quả bắt buộc:
 
 - `ORDER_OUTCOME` có ĐÚNG MỘT nhánh cho việc này, đứng đầu bảng và chỉ khớp đơn `erp-` không có vận
   đơn mang phiếu còn hiệu lực. Không nhánh nào khác đổi.
-- Mọi con số **tiền** dựng trên `ORDER_OUTCOME = 'DELIVERED'` (doanh thu giao thành công, lợi nhuận,
-  marketer, lương / hoa hồng, landing, COD) **không** được tăng vì một đơn tay đã giao mà chưa có chứng
-  từ thanh toán. Nơi nào cần hiện giá trị hàng đã giao của đơn tay thì gắn nhãn **danh nghĩa**.
-- Phép so marketer (AGENTS 3.9) vẫn loại đơn tay.
+- ~~Mọi con số tiền dựng trên `ORDER_OUTCOME = 'DELIVERED'` không được tăng vì một đơn tay đã giao mà chưa
+  có chứng từ thanh toán.~~ **Thay bằng mục 11.3 (chủ shop HSLC 03/10/2026):** ở tổ chức KHÔNG đồng bộ đơn,
+  doanh thu + giá vốn DANH NGHĨA của đơn tay tính khi đã giao; tiền THẬT vẫn chỉ theo chứng từ thanh toán.
+- Phép so marketer (AGENTS 3.9) vẫn loại đơn tay ở tổ chức đồng bộ Pancake (mục 11.3).
 - Phiếu ghi nhầm được **huỷ** (bắt buộc lý do, có nhật ký), không xoá cứng; huỷ phiếu ⇒ đơn quay về
   như chưa giao (`CONFIRMED`, hàng lại nằm trong khả dụng-giữ, tồn thực tế cộng lại).
 - Một đơn tối đa MỘT phiếu còn hiệu lực; chỉ đơn `CONFIRMED` mới xác nhận giao được (`NEW` / `WAITING`
@@ -202,6 +203,41 @@ người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ 
 - **Doanh thu thực thu** (mốc khai rõ theo AGENTS 58): đơn tay được cộng theo Σ chứng từ còn hiệu lực có **`paid_at`
   trong kỳ** — mốc của chứng từ, không phải ngày lên đơn hay ngày giao. Hôm nay đúng MỘT chỗ đọc: dòng «Thực thu đơn tay»
   trong **Tiền thực nhận** của báo cáo Chân lý tài chính (`getFinancialTruth`). Các tổng tiền dựng trên
-  `ORDER_OUTCOME = 'DELIVERED'` (doanh thu giao thành công, lợi nhuận, marketer, lương / hoa hồng…) VẪN loại đơn tay
-  (`REVENUE_RECOGNIZED_ON_DELIVERY`) — nợ P1 ghi ở `docs/platform/pilot-readiness.md` mục 4.
+  `ORDER_OUTCOME = 'DELIVERED'` (doanh thu giao thành công, lợi nhuận, marketer, lương / hoa hồng…) là doanh thu
+  DANH NGHĨA — từ 03/10/2026 có đơn tay ở tổ chức không đồng bộ đơn (mục 11.3); chúng không bao giờ thay cho thực thu.
 - Tổ chức nhà (VNX) không đổi một con số: không đơn Pancake nào mang được chứng từ.
+
+### 11.2. Giao KHÔNG thành công của đơn tay (chủ shop HSLC quyết 03/10/2026)
+
+> Câu hỏi: «Đơn tay bị giao không thành công (khách không nhận / hoàn): hàng về kho thế nào?» — chủ shop chọn
+> **«Tự cộng lại tồn ngay»** (không đợi kho xác nhận).
+
+- Chỉ từ `CONFIRMED`, không vận đơn, cùng cổng với phiếu giao (`manualOrderGate` — tổ chức không đồng bộ đơn +
+  `orders:write`), **bắt buộc lý do** (vào nhật ký `ORDER_MANUAL_DELIVERY_FAILED`). Đơn có phiếu giao còn hiệu lực phải huỷ
+  phiếu trước.
+- Đơn ⇒ stage `RETURNED` (mã Pancake 5 «Đã hoàn»). `ORDER_OUTCOME` dùng nhánh có sẵn `o.stage = 'RETURNED'` ⇒ **`RETURNED`**:
+  tính là HOÀN trong tỷ lệ giao thành công; không doanh thu, không giá vốn, không phí giao.
+- **Tồn kho — khác luật 4 / mục 9 của đơn qua ĐVVC, theo quyết định trên:** đơn không còn «giữ hàng» và chưa từng «rời kho»
+  (không phiếu giao) ⇒ khả dụng cộng lại NGAY, không phiếu kho nào được tạo. Hàng hỏng / thất lạc trên đường về thì kho lập
+  phiếu Điều chỉnh giảm như mọi chênh lệch kiểm kê.
+- Ghi nhầm ⇒ **hoàn tác** (bắt buộc lý do, `ORDER_MANUAL_DELIVERY_FAILED_UNDO`) ⇒ `CONFIRMED`, giữ hàng lại. Đơn `RETURNED`
+  không sửa / huỷ / xác nhận giao được cho tới khi hoàn tác. Bấm hai lần không ghi thêm.
+
+### 11.3. Doanh thu đơn tay tính KHI ĐÃ GIAO + phí giao đồng giá (chủ shop HSLC quyết 03/10/2026)
+
+> «Báo cáo lợi nhuận: doanh thu + giá vốn đơn tay tính **khi đã giao** (danh nghĩa); lợi nhuận tiền thật chỉ phần đã có
+> phiếu thu.» · «Phí vận chuyển đồng giá **40K / 1 đơn giao thành công**.»
+
+- Phạm vi: **tổ chức KHÔNG đồng bộ đơn**, nhận ra bằng chính CSDL của tổ chức — không có đơn nào ngoài `erp-`
+  (`IN_SALES_REPORTS` trong `lib/queries/manual-order-sql.ts`). Tổ chức đồng bộ Pancake (nhà) giữ nguyên: đơn `erp-` lọt vào
+  vẫn đứng ngoài, luật 3.9 không đổi một đơn (`tests/pilot-orders.test.ts`).
+- `REVENUE_RECOGNIZED_ON_DELIVERY = IN_SALES_REPORTS`: mọi tổng tiền dựng trên `DELIVERED` (báo cáo lợi nhuận, Tổng quan,
+  marketer, lương / hoa hồng, sản phẩm, CRM…) cộng đơn tay đã giao — là doanh thu **danh nghĩa**. Báo cáo danh nghĩa (đơn đã
+  xác nhận × tỷ lệ giao) cũng có đơn tay. Chiều **tiền thật** không đổi: `ORDER_OUTCOME_VERIFIED`, «Thực thu đơn tay» theo
+  `paid_at`, trạng thái thanh toán — chỉ chứng từ `order_payments`. Phiếu giao vẫn KHÔNG BAO GIỜ là chứng từ tiền.
+- **Phí giao đồng giá** (`settings['orders.manualDeliveryFee']`, số nguyên ₫, khai ở trang Đơn hàng — quyền cấu hình): khi
+  xác nhận đã giao, số đó ghi vào `orders.partner_fee` của đơn (đường cước mà Profit Engine đã đọc cho đơn đã kết thúc); huỷ
+  phiếu giao ⇒ 0; giao không thành công ⇒ 0. Chưa khai ⇒ không ghi gì (không đoán). Đổi mức phí không sửa đơn đã giao.
+- Trang tỷ lệ giao thành công: tổ chức không bật module vận chuyển ⇒ mốc mặc định là **ngày lên đơn** (mốc «ngày gửi ĐVVC»
+  không có vận đơn nào để đọc).
+

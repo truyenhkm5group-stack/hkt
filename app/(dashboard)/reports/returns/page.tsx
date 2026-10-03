@@ -24,6 +24,7 @@ import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-se
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
 import { type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION } from "@/lib/constants/report-time-basis";
+import { canUseModule } from "@/lib/platform/capabilities";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
@@ -61,7 +62,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const raw = await searchParams;
   // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
-  const thamSo = returnsPageParams(raw);
+  // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
+  const thamSo = returnsPageParams(raw, (await canUseModule("logistics")) ? "SHIPPED" : "ORDERED");
   const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
   const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia } = await loadReturnsPage(thamSo);
 
