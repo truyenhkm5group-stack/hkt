@@ -10,7 +10,7 @@ import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
-import { orderSync, describeOrder, phonesInText } from "./orders.js";
+import { orderSync, describeOrder, phonesInText, norm } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
@@ -77,6 +77,19 @@ export function messagePhones(msg) {
   };
   di(msg, 0, "");
   return [...out];
+}
+
+// Ten tinh / thanh (khong dau) + viet tat thong dung: khach hay ghi dia chi khong co chu "xa / huyen / tinh"
+// ("Dung, khánh thịnh an hồng an dương hp" — su co Nguyen Thi Quyen 03/10/2026: bot coi la chua co dia chi, xin lai).
+const TINH_THANH = ["an giang", "ba ria vung tau", "vung tau", "bac giang", "bac kan", "bac lieu", "bac ninh", "ben tre", "binh dinh", "binh duong", "binh phuoc", "binh thuan", "ca mau", "can tho", "cao bang", "da nang", "dak lak", "dac lac", "dak nong", "dien bien", "dong nai", "dong thap", "gia lai", "ha giang", "ha nam", "ha noi", "ha tinh", "hai duong", "hai phong", "hau giang", "hoa binh", "hung yen", "khanh hoa", "kien giang", "kon tum", "lai chau", "lam dong", "lang son", "lao cai", "long an", "nam dinh", "nghe an", "ninh binh", "ninh thuan", "phu tho", "phu yen", "quang binh", "quang nam", "quang ngai", "quang ninh", "quang tri", "soc trang", "son la", "tay ninh", "thai binh", "thai nguyen", "thanh hoa", "thua thien hue", "hue", "tien giang", "tra vinh", "tuyen quang", "vinh long", "vinh phuc", "yen bai", "ho chi minh", "sai gon", "hn", "hp", "hcm", "tphcm", "sg", "brvt", "dak lak"];
+
+/** Mot tin cua khach CO PHAI dia chi khong chu hanh chinh: co ten tinh / thanh (hoac viet tat), >= 4 tu, khong phai cau hoi. */
+export function looksLikeBareAddress(text) {
+  const t = String(text || "").trim();
+  if (/[?？]/.test(t) || /(bao lâu|mấy ngày|có ship|ship không|ship ko|có giao|giao không|phí ship)/i.test(t)) return false;
+  const n = ` ${norm(t)} `;
+  if (n.trim().split(" ").length < 4) return false;
+  return TINH_THANH.some((x) => n.includes(` ${x} `));
 }
 
 export function isOrderSummaryReply(reply, handoff) {
@@ -590,7 +603,7 @@ export class Bot {
     let address = null;
     for (const t of loi) {
       const bo = t.replace(/(?<![0-9])(?:0|\+?84)[1-9][0-9.\s-]{7,12}(?![0-9])/g, " ").trim();
-      if (bo.length >= 10 && DIA_CHI.test(bo) && bo.split(/\s+/).length >= 3) address = bo.slice(0, 160);
+      if (bo.length >= 10 && (DIA_CHI.test(bo) || looksLikeBareAddress(bo)) && bo.split(/\s+/).length >= 3) address = bo.slice(0, 160);
     }
     // "size XL", "sai xl", va ca dong tu chon size: "Mình đặt xl", "lấy L", "mặc size M", "cỡ XL" (su co 01/10/2026,
     // Thuy Nguyen Diem, Linh Tay Luxury: khach nhan "Mình đặt xl" hai lan, bot van xin chieu cao can nang 4 lan)
@@ -748,6 +761,9 @@ export class Bot {
     const maChuLuc = String(settings.effective(pageId).defaultProduct || "").trim().toUpperCase();
     if (maChuLuc) dong.push(`- Mẫu: ${maChuLuc} (mẫu chủ lực của page) — bản chốt đơn ghi tên sản phẩm là "Đầm ${maChuLuc}", không dùng tên mô tả`);
     dong.push("- Địa chỉ phải có ĐỦ xã/phường + quận/huyện + tỉnh/thành mới được gửi bản chốt đơn; thiếu cấp nào thì hỏi cấp đó");
+    // Khach nho nguoi khac nhan ("gửi con gái nhận hộ") roi gui ten + dia chi + SDT: SDT do LA SDT nhan hang (su co
+    // Nguyen Thi Quyen 03/10/2026: bot xin them "số điện thoại của con gái chị")
+    if (f.phone) dong.push("- SĐT khách đã gửi là SĐT nhận hàng, kể cả khi người nhận là người khác (nhận hộ) — KHÔNG xin thêm SĐT người nhận");
     let tiep;
     if (!f.size && f.measured) tiep = `báo size hợp với số đo khách đã gửi (${soDoText(f)}) theo bảng size trong hướng dẫn. TUYỆT ĐỐI KHÔNG hỏi lại chiều cao / cân nặng`;
     else if (!f.size) tiep = "hỏi chiều cao và cân nặng (hoặc size khách muốn)";
