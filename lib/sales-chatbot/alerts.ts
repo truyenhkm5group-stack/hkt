@@ -17,6 +17,18 @@ import { sendInboxMessages } from "@/lib/inbox/send";
 import { deliverMessage } from "@/lib/messaging/service";
 import { isMessagingConnector, ORDER_NOTIFY_RULE_KEYS, type MessagingConnectorKey } from "@/lib/messaging/types";
 import { listRules } from "@/lib/workflow/rules";
+import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+
+/** Cấu hình bot — đọc thẳng settings (engine import tệp này, không import ngược). */
+async function handoffNotifiesGroup(): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, SALES_CHATBOT_SETTING_KEY)).limit(1);
+  try {
+    return parseSalesChatbotConfig(row?.value ? (JSON.parse(row.value) as unknown) : null).handoff.notifyGroup;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Nhóm chat «báo nhóm vận hành» shop ĐÃ cấu hình (Cài đặt → Thông báo: luật đơn chốt / sửa / huỷ đang chạy THẬT có hành động
@@ -60,6 +72,9 @@ export async function notifySalesChatHandoff(conversationId: string, reason: str
   // đang làm trên Pancake không thấy ⇒ khách chờ hơn 5 phút. Gửi MỘT tin vào đúng nhóm «báo nhóm vận hành» của shop; mỗi lần
   // chuyển một tin (khoá theo 10 phút — gọi lặp trong cùng lượt không nhân đôi). Lỗi gửi không chặn lượt chat.
   try {
+    // Chủ shop Hải Sản Làng Chài 03/10/2026: «Không cần thông báo chatbot chuyển khách cho nhân viên, chỉ cần thông báo khi
+    // có đơn mới» ⇒ nhóm chỉ nhận khi shop BẬT ở cấu hình bot (mặc định tắt).
+    if (!(await handoffNotifiesGroup())) return;
     const group = await operationsGroupChannel();
     if (!group) return;
     const who = (await fanpageCustomerName(conversationId)) ?? customer?.name ?? null;
@@ -88,6 +103,24 @@ export async function notifySalesChatBooking(appointmentId: string, conversation
 }
 
 /** Chatbot ngừng trả lời vì AI của shop: MỘT tin mỗi lý do mỗi ngày (giờ VN) cho người CẤU HÌNH được chatbot. */
+/**
+ * Model shop khai (cấu hình bot / kết nối AI) KHÔNG gọi được ⇒ bot đã tự chạy bằng model mặc định. Chủ shop được báo MỘT lần
+ * mỗi ngày mỗi model để sửa ô model — bot vẫn trả lời khách bình thường.
+ */
+export async function notifySalesChatModelFallback(model: string, fallbackModel: string, now: Date): Promise<void> {
+  const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+  const title = "Model AI của chatbot không dùng được";
+  const body = `Model «${model}» bị nhà cung cấp AI từ chối — bot đang tự chạy bằng «${fallbackModel}». Sửa ô Model ở trang Chatbot bán hàng (hoặc Cài đặt → Kết nối) — để trống là dùng mặc định.`;
+  const dedupe = `sales-chat:model-fallback:${model}:${day}`;
+  const db = await getDb();
+  await db
+    .insert(schema.notifications)
+    .values({ kind: "SYSTEM", severity: "warning", title, body, href: "/ai/sales-chatbot", entityType: "SALES_CHAT", entityId: model, dedupeKey: dedupe, occurredAt: now })
+    .onConflictDoNothing({ target: schema.notifications.dedupeKey });
+  const users = await activeUserIdsWhoCan("ai_sales:manage");
+  await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_AI_DOWN", title, body, href: "/ai/sales-chatbot", dedupeKey: `${dedupe}:${userId}` })), db);
+}
+
 export async function notifySalesChatAiDown(key: string, label: string, now: Date): Promise<void> {
   const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
   const title = "Chatbot bán hàng ngừng trả lời khách";
