@@ -48,7 +48,11 @@ import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
   canConfirmManualDelivery,
+  canMarkManualDeliveryFailed,
   DELIVERY_NOTE_LIMITS,
+  MANUAL_DELIVERY_FEE_SETTING_KEY,
+  MANUAL_FAILED_FROM_STAGES,
+  parseManualDeliveryFee,
   isManualOrderId,
   MANUAL_DELIVERY_FROM_STAGES,
   manualOrderRaw,
@@ -71,6 +75,7 @@ import type { FieldError } from "@/lib/metadata/types";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { runWorkflows } from "@/lib/workflow/engine";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -399,6 +404,7 @@ async function loadEditable(orderId: unknown): Promise<ExistingManual> {
   if (row.stage === "CANCELLED") return fail("CONFLICT", "Đơn đã huỷ — không sửa được.");
   // Đơn đã giao (phiếu ký nhận) là chứng từ đã khép: sửa dòng hàng / huỷ đơn lúc này là viết lại thứ khách đã ký nhận.
   if (row.stage === "DELIVERED") return fail("CONFLICT", "Đơn đã giao (có phiếu ký nhận) — không sửa / huỷ được. Ghi nhầm thì huỷ phiếu giao trước.");
+  if (row.stage === "RETURNED") return fail("CONFLICT", "Đơn đã ghi giao không thành công — không sửa / huỷ được. Ghi nhầm thì hoàn tác trước.");
   return { ok: true, row };
 }
 
@@ -596,10 +602,12 @@ export async function confirmManualDeliveryCore(user: SessionUser, orderId: unkn
   const now = new Date();
   if (signedAt.getTime() > now.getTime() + DELIVERY_NOTE_LIMITS.futureSkewMs) return fail("INVALID", [{ field: "signedAt", message: "Mốc ký nhận ở tương lai — nhập đúng ngày giờ trên phiếu." }]);
   const note = { orderId: row.id, signedAt, receiverName: parsed.data.receiverName, note: parsed.data.note.trim(), recordedByUserId: user.id, recordedByName: user.name, recordedAt: now };
+  // Phí giao đồng giá của tổ chức (đã khai) ⇒ cước shop trả cho đơn này; chưa khai ⇒ giữ nguyên số đang có.
+  const fee = await loadManualDeliveryFee();
   const noteId = await db.transaction(async (tx) => {
     const moved = await tx
       .update(schema.orders)
-      .set({ stage: "DELIVERED", status: MANUAL_ORDER_STATUS_CODE.DELIVERED, statusName: manualOrderStageLabel("DELIVERED"), lastUpdateStatusAt: now, updatedAt: now })
+      .set({ stage: "DELIVERED", status: MANUAL_ORDER_STATUS_CODE.DELIVERED, statusName: manualOrderStageLabel("DELIVERED"), ...(fee !== null ? { partnerFee: fee } : {}), lastUpdateStatusAt: now, updatedAt: now })
       .where(and(eq(schema.orders.id, row.id), inArray(schema.orders.stage, [...MANUAL_DELIVERY_FROM_STAGES])))
       .returning({ id: schema.orders.id });
     if (!moved.length) return null;
@@ -615,7 +623,7 @@ export async function confirmManualDeliveryCore(user: SessionUser, orderId: unkn
     entity: "ORDER",
     entityId: row.id,
     before: { stage: row.stage },
-    after: { stage: "DELIVERED", deliveryNoteId: noteId, signedAt: signedAt.toISOString(), receiverName: note.receiverName, note: note.note || null },
+    after: { stage: "DELIVERED", deliveryNoteId: noteId, signedAt: signedAt.toISOString(), receiverName: note.receiverName, note: note.note || null, ...(fee !== null ? { partnerFee: fee } : {}) },
     reason: "Xác nhận đã giao bằng phiếu giao có ký nhận (G-ORDER) — không ghi nhận tiền",
   });
   return { ok: true, id: row.id };
@@ -645,7 +653,7 @@ export async function voidManualDeliveryCore(user: SessionUser, orderId: unknown
     if (!n) return null;
     await tx
       .update(schema.orders)
-      .set({ stage: "CONFIRMED", status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, statusName: manualOrderStageLabel("CONFIRMED"), lastUpdateStatusAt: now, updatedAt: now })
+      .set({ stage: "CONFIRMED", status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, statusName: manualOrderStageLabel("CONFIRMED"), partnerFee: 0, lastUpdateStatusAt: now, updatedAt: now })
       .where(and(eq(schema.orders.id, row.id), eq(schema.orders.stage, "DELIVERED")));
     await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, oldStatus: row.status, editorName: user.name, updatedAt: now });
     return n;
@@ -661,6 +669,95 @@ export async function voidManualDeliveryCore(user: SessionUser, orderId: unknown
     after: { stage: "CONFIRMED", deliveryNoteId: voided.id, voided: true },
     reason: parsed.data.reason,
   });
+  return { ok: true, id: row.id };
+}
+
+/** Phí giao đồng giá đã khai của tổ chức ngữ cảnh — `null` khi chưa khai. */
+export async function loadManualDeliveryFee(): Promise<number | null> {
+  return parseManualDeliveryFee(await getSettingJson<unknown>(MANUAL_DELIVERY_FEE_SETTING_KEY, null));
+}
+
+/** Khai / sửa / xoá (`null`) phí giao mỗi đơn giao thành công. Cùng cổng đơn tay + quyền cấu hình. Đơn đã giao giữ phí cũ. */
+export async function saveManualDeliveryFeeCore(user: SessionUser, raw: unknown): Promise<{ ok: true; fee: number | null } | MetaFailure> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  if (!can(user, "settings:manage")) return fail("FORBIDDEN", "Cần quyền cấu hình (settings:manage) để khai phí giao.");
+  const empty = raw === null || raw === undefined || raw === "";
+  const fee = empty ? null : parseManualDeliveryFee(raw);
+  if (!empty && fee === null) return fail("INVALID", [{ field: "fee", message: "Phí giao là số tiền nguyên từ 0 tới 10.000.000 ₫." }]);
+  const before = await loadManualDeliveryFee();
+  await setSettingJson(MANUAL_DELIVERY_FEE_SETTING_KEY, fee);
+  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FEE", entity: "SETTINGS", entityId: MANUAL_DELIVERY_FEE_SETTING_KEY, before: { fee: before }, after: { fee }, reason: fee === null ? "Xoá phí giao đồng giá" : "Khai phí giao đồng giá mỗi đơn giao thành công" });
+  return { ok: true, fee };
+}
+
+const failedZ = z.object({ reason: z.string().trim().min(DELIVERY_NOTE_LIMITS.reasonMin, "nói vì sao giao không thành công (khách không nhận, sai địa chỉ…)").max(DELIVERY_NOTE_LIMITS.reasonMax) }).strict();
+
+/**
+ * GIAO KHÔNG THÀNH CÔNG (ORDER_OUTCOME.md mục 11.2): «Đã xác nhận» ⇒ «Đã hoàn» (`RETURNED`). Cùng cổng với phiếu giao,
+ * bắt buộc lý do, không vận đơn nào. MỘT giao dịch: stage (chỉ khi còn CONFIRMED — bấm hai lần không ghi gì thêm) + lịch
+ * sử trạng thái. Hàng quay lại khả dụng ngay vì đơn thôi «giữ hàng» và chưa từng rời kho. Nhật ký `ORDER_MANUAL_DELIVERY_FAILED`.
+ */
+export async function markManualDeliveryFailedCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const existing = await loadManual(orderId);
+  if (!existing.ok) return existing;
+  const row = existing.row;
+  if (!canMarkManualDeliveryFailed(row.stage)) {
+    return fail(
+      "CONFLICT",
+      row.stage === "DELIVERED"
+        ? "Đơn đang có phiếu giao — huỷ phiếu giao (ghi nhầm) trước rồi mới báo giao không thành công."
+        : row.stage === "RETURNED"
+          ? "Đơn đã được ghi giao không thành công."
+          : `Chỉ đơn «${manualOrderStageLabel("CONFIRMED")}» mới báo giao không thành công được.`,
+    );
+  }
+  const parsed = failedZ.safeParse(rawInput);
+  if (!parsed.success) return fail("INVALID", zodErrors(parsed.error));
+  const db = await getDb();
+  const [ship] = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id)).limit(1);
+  if (ship) return fail("NOT_SUPPORTED", "Đơn đã có vận đơn — kết quả giao theo chứng từ đơn vị vận chuyển.");
+  const now = new Date();
+  const moved = await db.transaction(async (tx) => {
+    const r = await tx
+      .update(schema.orders)
+      .set({ stage: "RETURNED", status: MANUAL_ORDER_STATUS_CODE.RETURNED, statusName: manualOrderStageLabel("RETURNED"), partnerFee: 0, lastUpdateStatusAt: now, updatedAt: now })
+      .where(and(eq(schema.orders.id, row.id), inArray(schema.orders.stage, [...MANUAL_FAILED_FROM_STAGES])))
+      .returning({ id: schema.orders.id });
+    if (!r.length) return false;
+    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.RETURNED, oldStatus: row.status, editorName: user.name, updatedAt: now });
+    return true;
+  });
+  if (!moved) return fail("CONFLICT", "Đơn vừa đổi trạng thái — tải lại trang rồi thử lại.");
+  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FAILED", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "RETURNED" }, reason: parsed.data.reason });
+  return { ok: true, id: row.id };
+}
+
+/** Hoàn tác «giao không thành công» (ghi nhầm): «Đã hoàn» ⇒ «Đã xác nhận», hàng vào lại phần giữ. Bắt buộc lý do. */
+export async function undoManualDeliveryFailedCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const existing = await loadManual(orderId);
+  if (!existing.ok) return existing;
+  const parsed = failedZ.safeParse(rawInput);
+  if (!parsed.success) return fail("INVALID", zodErrors(parsed.error));
+  const row = existing.row;
+  const now = new Date();
+  const db = await getDb();
+  const moved = await db.transaction(async (tx) => {
+    const r = await tx
+      .update(schema.orders)
+      .set({ stage: "CONFIRMED", status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, statusName: manualOrderStageLabel("CONFIRMED"), lastUpdateStatusAt: now, updatedAt: now })
+      .where(and(eq(schema.orders.id, row.id), eq(schema.orders.stage, "RETURNED")))
+      .returning({ id: schema.orders.id });
+    if (!r.length) return false;
+    await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE.CONFIRMED, oldStatus: row.status, editorName: user.name, updatedAt: now });
+    return true;
+  });
+  if (!moved) return fail("CONFLICT", "Đơn không ở trạng thái giao không thành công.");
+  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FAILED_UNDO", entity: "ORDER", entityId: row.id, before: { stage: "RETURNED" }, after: { stage: "CONFIRMED" }, reason: parsed.data.reason });
   return { ok: true, id: row.id };
 }
 

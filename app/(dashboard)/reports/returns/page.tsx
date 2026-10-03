@@ -24,10 +24,11 @@ import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-se
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
 import { type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION } from "@/lib/constants/report-time-basis";
+import { canUseModule } from "@/lib/platform/capabilities";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
-import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
+import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
@@ -58,7 +59,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const { decision } = await requireResource("REPORTS", "reports:returns");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
-  const raw = await searchParams;
+  // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
+  const raw = withDefaultReturnsBasis(await searchParams, await canUseModule("logistics"));
   // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
   const thamSo = returnsPageParams(raw);

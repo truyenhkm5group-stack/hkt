@@ -451,6 +451,7 @@ import { testPlatformUi } from "./platform-ui.test";
 import { testPilotProducts } from "./pilot-products.test";
 import { testProductImport } from "./product-import.test";
 import { testPilotOrders } from "./pilot-orders.test";
+import { testManualOrderOutcome } from "./manual-order-outcome.test";
 import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testSeafoodOs } from "./seafood-os.test";
@@ -2641,6 +2642,8 @@ async function main() {
   // (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; nhà: action từ chối, marketer 3.9 không đổi
   // khi có đơn erp-; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định; số tiền duyệt; vai trò AI.
   await testPilotOrders();
+  // Đơn tay: giao không thành công · phí giao đồng giá · doanh thu khi đã giao (ORDER_OUTCOME.md 11.2/11.3): tổ chức THẬT `mo-hslc`.
+  await testManualOrderOutcome();
   // Bảng giá sỉ + hạn mức nợ + công nợ + thu nợ gộp (0188): tổ chức THẬT `pl-si` (không Pancake; tự cấp, tự dọn).
   await testPriceListsReceivables();
   // Nhắc mua lại + sổ liên hệ khách (0189): tổ chức THẬT `ro-si` (không Pancake; tự cấp, tự dọn).

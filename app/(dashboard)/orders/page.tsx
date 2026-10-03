@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Download, Plus, ShieldAlert } from "lucide-react";
-import { manualOrderGate } from "@/lib/records/order-create";
+import { loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
+import { DeliveryFeeButton } from "@/app/(dashboard)/orders/delivery-fee-button";
+import { can } from "@/lib/auth/session";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
@@ -32,6 +34,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     đơn KHÔNG nhận bộ lọc custom mặc định ở Phase 2.
   */
   const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user)]);
+  // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
+  const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee() } : null;
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -52,6 +56,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </Link>
               </Button>
             ) : null}
+            {deliveryFee ? <DeliveryFeeButton fee={deliveryFee.fee} /> : null}
             {/*
               LỐI VÀO DANH SÁCH SOÁT TRƯỚC KHI GỬI.
 

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
-import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
+import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, markManualDeliveryFailedCore, saveManualDeliveryFeeCore, undoManualDeliveryFailedCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
 import { recordManualPaymentCore, voidManualPaymentCore } from "@/lib/records/order-payments";
 
 /**
@@ -55,7 +55,7 @@ export async function confirmManualDeliveryAction(orderId: string, input: unknow
   revalidatePath("/orders");
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
   revalidatePath("/products");
-  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã xác nhận giao — hàng đã trừ khỏi kho; tiền vẫn chờ chứng từ thanh toán" };
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã xác nhận giao thành công — hàng đã trừ khỏi kho; tiền thật vẫn chờ phiếu thu" };
 }
 
 /** Huỷ phiếu giao ghi nhầm — bắt buộc lý do; đơn về «Đã xác nhận», hàng quay lại kho. */
@@ -67,6 +67,37 @@ export async function voidManualDeliveryAction(orderId: string, input: unknown):
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
   revalidatePath("/products");
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ phiếu giao" };
+}
+
+/** Giao KHÔNG thành công (khách không nhận / hoàn) — bắt buộc lý do; đơn «Đã hoàn», hàng quay lại khả dụng ngay. */
+export async function markManualDeliveryFailedAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await markManualDeliveryFailedCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  revalidatePath("/products");
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã ghi giao không thành công — đơn tính là hoàn, hàng quay lại tồn" };
+}
+
+/** Hoàn tác «giao không thành công» ghi nhầm — đơn về «Đã xác nhận». */
+export async function undoManualDeliveryFailedAction(orderId: string, input: unknown): Promise<Success | Failure> {
+  const user = await requireUser();
+  const r = await undoManualDeliveryFailedCore(user, orderId, input);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
+  revalidatePath("/products");
+  return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã hoàn tác — đơn về «Đã xác nhận»" };
+}
+
+/** Phí giao đồng giá mỗi đơn giao thành công (₫) — `null` / rỗng = xoá. */
+export async function saveManualDeliveryFeeAction(fee: number | null): Promise<{ ok: true; message: string } | Failure> {
+  const user = await requireUser();
+  const r = await saveManualDeliveryFeeCore(user, fee);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  return { ok: true, message: r.fee === null ? "Đã xoá phí giao đồng giá" : "Đã lưu phí giao — áp cho đơn xác nhận đã giao từ bây giờ" };
 }
 
 /**

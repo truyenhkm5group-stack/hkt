@@ -17,7 +17,8 @@ Bốn điều tối thiểu phải nhớ (chi tiết và bảng chân lý nằm 
    dashboard / báo cáo / lương / marketing / tồn kho / kế hoạch phải dùng lại nó, không tự tính.
 3. **`NULL` là CHƯA BIẾT, không phải 0.** Chưa có chứng từ tiền thì là *chưa xác minh*, không phải
    *thu được 0đ*.
-4. **Hàng hoàn không tự vào tồn** cho tới khi kho xác nhận thực nhận.
+4. **Hàng hoàn không tự vào tồn** cho tới khi kho xác nhận thực nhận. Ngoại lệ DUY NHẤT do chủ shop chốt 03/10/2026:
+   đơn TẠO TAY (không vận đơn) báo «giao không thành công» thì hàng về khả dụng ngay (`ORDER_OUTCOME.md` mục 11.2).
 
 Contract test khoá các luật này ở `tests/contract-order-outcome.test.ts`, chạy trong `npm test`.
 **Không được sửa giá trị kỳ vọng của chúng để CI xanh** — nếu chúng đỏ thì code sai, không phải test sai.

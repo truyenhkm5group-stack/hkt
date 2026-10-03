@@ -18,13 +18,14 @@
  *    `CANCELLED`. Trạng thái chọn được ở form tạo / sửa vẫn chỉ là các bước TRƯỚC khi giao — "Đã nhận" chỉ tới bằng phiếu.
  *  · TIỀN KHÔNG ĐI THEO PHIẾU GIAO: phiếu không chứng minh đã thu. Tiền theo CHỨNG TỪ THANH TOÁN (`order_payments`, 0181 —
  *    `lib/constants/order-payments.ts`, ORDER_OUTCOME.md mục 11.1): thu đủ ⇒ `DELIVERED` ở `ORDER_OUTCOME_VERIFIED`, còn lại
- *    `UNVERIFIED`. Đơn tay đã giao vẫn đứng ngoài mọi tổng TIỀN dựng trên DELIVERED (`REVENUE_RECOGNIZED_ON_DELIVERY`);
- *    thực thu đơn tay đi theo `paid_at` ở dòng «Thực thu đơn tay» của Chân lý tài chính.
+ *    `UNVERIFIED`. Doanh thu + giá vốn DANH NGHĨA của đơn tay đã giao vào mọi tổng dựng trên DELIVERED ở tổ chức không
+ *    đồng bộ đơn (`REVENUE_RECOGNIZED_ON_DELIVERY`, mục 11.3 — chủ shop HSLC 03/10/2026); thực thu vẫn theo `paid_at`.
+ *  · GIAO KHÔNG THÀNH CÔNG (mục 11.2): «Đã xác nhận» ⇒ «Đã hoàn», `ORDER_OUTCOME` = RETURNED, hàng quay lại tồn ngay.
  *  · TỒN KHO: tạo / sửa đơn không ghi phiếu kho nào (luật 10). Đơn "Đã xác nhận" giữ hàng ở cột khả dụng như mọi đơn đã
  *    chốt; XÁC NHẬN GIAO mới đưa hàng ra khỏi kho. KHÔNG lập phiếu XUẤT TAY cho đơn tay — làm cả hai là trừ hai lần
  *    (lối "Lập phiếu xuất kho" của bản trước đã bỏ). Huỷ phiếu giao (ghi nhầm, bắt buộc lý do) ⇒ đơn về "Đã xác nhận".
- *  · BÁO CÁO MARKETER (luật 3.9 — tổng = số đơn XÁC NHẬN PANCAKE): đơn tay nằm NGOÀI phép so ấy (`NOT_MANUAL_ORDER` ở
- *    `lib/queries/manual-order-sql.ts`).
+ *  · BÁO CÁO MARKETER (luật 3.9 — tổng = số đơn XÁC NHẬN PANCAKE): ở tổ chức đồng bộ Pancake đơn tay nằm NGOÀI phép so ấy
+ *    (`IN_SALES_REPORTS` ở `lib/queries/manual-order-sql.ts`); tổ chức chỉ có đơn tay thì báo cáo danh nghĩa có chúng.
  */
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
@@ -54,7 +55,7 @@ export function manualOrderShortCode(id: string): string {
 export const MANUAL_ORDER_STAGES = ["NEW", "WAITING", "CONFIRMED"] as const satisfies readonly OrderStage[];
 export type ManualOrderStage = (typeof MANUAL_ORDER_STAGES)[number];
 
-export const MANUAL_ORDER_STATUS_CODE: Record<ManualOrderStage | "CANCELLED" | "DELIVERED", number> = { NEW: 0, WAITING: 11, CONFIRMED: 1, CANCELLED: 6, DELIVERED: 3 };
+export const MANUAL_ORDER_STATUS_CODE: Record<ManualOrderStage | "CANCELLED" | "DELIVERED" | "RETURNED", number> = { NEW: 0, WAITING: 11, CONFIRMED: 1, CANCELLED: 6, DELIVERED: 3, RETURNED: 5 };
 
 export const MANUAL_ORDER_STAGE_HINT: Record<ManualOrderStage, string> = {
   NEW: "Mới ghi nhận, chưa chốt — chưa giữ hàng, chưa vào số đơn xác nhận.",
@@ -62,7 +63,7 @@ export const MANUAL_ORDER_STAGE_HINT: Record<ManualOrderStage, string> = {
   CONFIRMED: "Đã chốt với khách — giữ hàng ở cột khả dụng cho tới khi xác nhận đã giao (phiếu giao có ký nhận).",
 };
 
-export function manualOrderStageLabel(stage: ManualOrderStage | "CANCELLED" | "DELIVERED"): string {
+export function manualOrderStageLabel(stage: ManualOrderStage | "CANCELLED" | "DELIVERED" | "RETURNED"): string {
   return ORDER_STAGE_LABEL[stage];
 }
 
@@ -157,6 +158,32 @@ export const MANUAL_DELIVERY_FROM_STAGES = ["CONFIRMED"] as const satisfies read
 /** Cùng tập với điều kiện SQL của giao dịch ghi phiếu (`confirmManualDeliveryCore`) — một danh sách, hai chỗ đọc. */
 export function canConfirmManualDelivery(stage: string): boolean {
   return (MANUAL_DELIVERY_FROM_STAGES as readonly string[]).includes(stage);
+}
+
+/**
+ * ═══ GIAO KHÔNG THÀNH CÔNG (chủ shop HSLC 03/10/2026 — ORDER_OUTCOME.md mục 11.2) ═══
+ *
+ * Đơn tay «Đã xác nhận» mà khách không nhận / hoàn ⇒ stage `RETURNED` (mã Pancake 5 «Đã hoàn»). `ORDER_OUTCOME` có sẵn
+ * nhánh `o.stage = 'RETURNED'` cho đơn không vận đơn ⇒ đơn tính là HOÀN trong tỷ lệ giao thành công. Hàng QUAY LẠI TỒN
+ * NGAY (chủ shop chọn, khác luật 4 của đơn qua ĐVVC): đơn không còn ở «giữ hàng» và chưa từng «rời kho» (không có phiếu
+ * giao), nên khả dụng tự cộng lại — không phiếu kho nào được tạo. Chỉ từ «Đã xác nhận»; đơn đã có phiếu giao phải huỷ
+ * phiếu trước. Ghi nhầm ⇒ hoàn tác về «Đã xác nhận» (giữ hàng lại).
+ */
+export const MANUAL_FAILED_FROM_STAGES = ["CONFIRMED"] as const satisfies readonly OrderStage[];
+export function canMarkManualDeliveryFailed(stage: string): boolean {
+  return (MANUAL_FAILED_FROM_STAGES as readonly string[]).includes(stage);
+}
+
+/**
+ * PHÍ GIAO MỖI ĐƠN GIAO THÀNH CÔNG của tổ chức tạo đơn tay (chủ shop HSLC 03/10/2026: «đồng giá 40K/1 đơn giao thành
+ * công») — khoá `settings['orders.manualDeliveryFee']`, số nguyên ₫; chưa khai ⇒ `null` (không ghi gì, không đoán). Ghi
+ * vào `orders.partner_fee` lúc xác nhận đã giao (phí ĐVVC shop trả — đường cước mà mọi báo cáo lợi nhuận đã đọc), về 0
+ * khi huỷ phiếu giao; đơn giao không thành công không mang phí.
+ */
+export const MANUAL_DELIVERY_FEE_SETTING_KEY = "orders.manualDeliveryFee";
+export function parseManualDeliveryFee(raw: unknown): number | null {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000 ? n : null;
 }
 
 /**

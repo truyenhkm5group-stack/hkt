@@ -23,6 +23,15 @@ import { listAttributedMarketers } from "@/lib/queries/order-marketer";
 import { listProductCodes } from "@/lib/queries/product-code";
 
 /** Tham số của trang, dựng từ URL. `{}` = trang mặc định (kỳ 90 ngày, mốc gửi hàng, không lọc). */
+/**
+ * Tổ chức KHÔNG có module vận chuyển (đơn tay, giao bằng phiếu ký nhận — không vận đơn nào) thì mốc «ngày gửi ĐVVC» luôn
+ * rỗng ⇒ URL chưa chọn mốc thì dùng NGÀY LÊN ĐƠN. Điền vào URL trước `returnsPageParams(raw)` — trang và job làm ấm vẫn
+ * đi CÙNG một đường dựng tham số. HÀM THUẦN.
+ */
+export function withDefaultReturnsBasis(raw: SearchParams, hasLogistics: boolean): SearchParams {
+  return hasLogistics || raw.basis ? raw : { ...raw, basis: "ORDERED" };
+}
+
 export function returnsPageParams(raw: SearchParams) {
   const params = parseListParams(raw, {
     defaultSort: "successRate",
