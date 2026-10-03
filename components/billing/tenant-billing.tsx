@@ -14,7 +14,7 @@ import { ENTITLEMENT_SPEC, parseLimits, type EntitlementKind } from "@/lib/entit
 import { formatDate, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-type Offer = { key: string; name: string; description: string | null; priceVnd: number; limits: unknown };
+type Offer = { key: string; name: string; description: string | null; priceVnd: number; limits: unknown; yearlyFreeMonths: number };
 
 export type OpenInvoiceProps = {
   kind: "RENEWAL" | "ADDON";
@@ -108,6 +108,7 @@ export function RenewalPicker({ offers, currentPlanKey, hasOpenInvoice, canVat }
               {formatVND(o.priceVnd)}
               <span className="text-xs font-normal text-muted-foreground">/tháng</span>
             </div>
+            {o.yearlyFreeMonths > 0 ? <p className="mt-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">Trả 12 tháng tặng {o.yearlyFreeMonths} tháng</p> : null}
             {o.description ? <p className="mt-1 text-xs text-muted-foreground">{o.description}</p> : null}
             <ul className="mt-2 space-y-0.5 text-xs">
               {SHOWN_LIMITS.map((k) => (
@@ -124,11 +125,14 @@ export function RenewalPicker({ offers, currentPlanKey, hasOpenInvoice, canVat }
         <div className="space-y-1">
           <Label htmlFor="billing-months">Số tháng</Label>
           <select id="billing-months" value={months} onChange={(e) => setMonths(Number(e.target.value))} className="h-9 rounded-md border bg-background px-2 text-sm">
-            {BILLING_MONTH_OPTIONS.map((m) => (
-              <option key={m} value={m}>
-                {m} tháng
-              </option>
-            ))}
+            {BILLING_MONTH_OPTIONS.map((m) => {
+              const free = m === 12 ? (offers.find((o) => o.key === planKey)?.yearlyFreeMonths ?? 0) : 0;
+              return (
+                <option key={m} value={m}>
+                  {m} tháng{free > 0 ? ` — tặng ${free} tháng` : ""}
+                </option>
+              );
+            })}
           </select>
         </div>
         <div className="min-w-[16rem] flex-1 text-sm" data-renewal-quote>

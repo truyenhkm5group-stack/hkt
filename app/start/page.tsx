@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Building2 } from "lucide-react";
+import { QuickStart } from "@/components/onboarding/quick-start";
 import { StartWizard, type WizardBusinessType, type WizardModule, type WizardTemplate } from "@/components/onboarding/start-wizard";
+import { enabledProviders, readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { getCurrentUser } from "@/lib/auth/session";
 import { BLUEPRINT_TEMPLATES } from "@/lib/blueprints/templates";
 import { moduleDef } from "@/lib/constants/platform-modules";
@@ -11,7 +14,7 @@ import { BUSINESS_TYPE_SPEC, BUSINESS_TYPES, CORE_MODULES, SELECTABLE_MODULES } 
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: { absolute: "Tạo tổ chức mới" }, description: "Tạo tổ chức mới trên nền tảng ERP.", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: { absolute: "Tạo cửa hàng" }, description: "Tạo cửa hàng mới trên nền tảng ERP — khoảng 1 phút.", robots: { index: false, follow: false } };
 
 /**
  * `/start` — TẠO TỔ CHỨC TỰ PHỤC VỤ (Phase 10 · §1–§2). Ngoài nhóm dashboard, không cần phiên.
@@ -21,7 +24,7 @@ export const metadata: Metadata = { title: { absolute: "Tạo tổ chức mới"
  * hay tổ chức nào. Người vận hành nền tảng (phiên tổ chức nhà + `platform:operate`) luôn dùng được trang này để tạo hộ
  * khách — cùng luồng, không cần cờ. Trang không in gì của tổ chức nhà (tên, thương hiệu, số liệu).
  */
-export default async function StartPage({ searchParams }: { searchParams: Promise<{ invite?: string }> }) {
+export default async function StartPage({ searchParams }: { searchParams: Promise<{ invite?: string; "day-du"?: string }> }) {
   const mode = await signupMode();
   const user = await getCurrentUser();
   const operator = Boolean(user && !platformOperatorDenial(user));
@@ -45,6 +48,24 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
   }
 
   const params = await searchParams;
+  /*
+    ĐĂNG KÝ NHANH (docs/platform/quick-start.md) là cửa MẶC ĐỊNH của khách: một màn hình, máy tự chọn mã / mẫu / module.
+    Trình hướng dẫn đầy đủ (chọn mẫu, module, xem trước từng thao tác) còn nguyên ở `?day-du=1` và luôn là cửa của người
+    vận hành nền tảng (tạo hộ khách, chọn gói).
+  */
+  if (flow !== "operator" && params["day-du"] !== "1") {
+    const social = await readOAuthToken<SocialProfile>("erp-social-signup", (await cookies()).get(SOCIAL_SIGNUP_COOKIE)?.value);
+    return (
+      <main className="flex min-h-screen items-start justify-center p-4 pt-10 sm:pt-16">
+        <QuickStart
+          needInvite={flow === "invite"}
+          initialInvite={typeof params.invite === "string" ? params.invite.slice(0, 80) : ""}
+          providers={enabledProviders()}
+          social={social ? { provider: social.provider, email: social.email, name: social.name } : null}
+        />
+      </main>
+    );
+  }
   const businessTypes: WizardBusinessType[] = BUSINESS_TYPES.map((k) => ({ key: k, ...BUSINESS_TYPE_SPEC[k] }));
   const templates: WizardTemplate[] = BLUEPRINT_TEMPLATES.map((t) => ({ key: t.key, name: t.name, description: t.description, industry: t.industry, modules: t.modules.filter((m) => SELECTABLE_MODULES.includes(m)) }));
   const modules: WizardModule[] = SELECTABLE_MODULES.map((k) => {

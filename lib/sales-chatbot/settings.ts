@@ -8,6 +8,8 @@
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { openActiveConnection } from "@/lib/connectors/service";
+import { platformChatAi } from "@/lib/ai-builder/provider";
+import { currentOrganization } from "@/lib/platform/context";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { salesChatbotConfigZ, SALES_CHATBOT_SETTING_KEY, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
@@ -23,8 +25,13 @@ export async function saveSalesChatbotConfig(user: SessionUser, raw: unknown): P
   const cfg = parsed.data;
   if (cfg.allowedTools.length === 0) return { ok: false, error: "Bot cần ít nhất một công cụ — tối thiểu «Tìm sản phẩm»." };
   if (cfg.enabled) {
-    const conn = await openActiveConnection(cfg.connectorKey);
-    if (!conn.ok) return { ok: false, error: `Chưa bật được bot: ${conn.reason}` };
+    if (cfg.connectorKey === "platform") {
+      const plat = await platformChatAi((await currentOrganization()).code);
+      if (!plat.ok) return { ok: false, error: `Chưa bật được bot: ${plat.reason}` };
+    } else {
+      const conn = await openActiveConnection(cfg.connectorKey);
+      if (!conn.ok) return { ok: false, error: `Chưa bật được bot: ${conn.reason}` };
+    }
   }
   const before = await loadSalesChatbotConfig();
   await setSettingJson(SALES_CHATBOT_SETTING_KEY, cfg);

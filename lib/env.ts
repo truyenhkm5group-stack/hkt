@@ -52,6 +52,25 @@ export const env = {
   get agentIngestSecret() {
     return read("AGENT_INGEST_SECRET");
   },
+  /**
+   * ĐĂNG NHẬP / ĐĂNG KÝ BẰNG GOOGLE · FACEBOOK (0193, docs/platform/quick-start.md). Thiếu một trong hai biến của một nhà
+   * cung cấp ⇒ nút của nhà cung cấp đó KHÔNG hiện và đường dẫn của nó trả về màn đăng nhập — không bao giờ nửa vời.
+   * Ứng dụng Facebook ở đây là ứng dụng ĐĂNG NHẬP (chỉ `email`, `public_profile`), tách khỏi token System User của Meta Ads.
+   */
+  oauth: {
+    get googleClientId() {
+      return read("GOOGLE_OAUTH_CLIENT_ID");
+    },
+    get googleClientSecret() {
+      return read("GOOGLE_OAUTH_CLIENT_SECRET");
+    },
+    get facebookAppId() {
+      return read("FACEBOOK_LOGIN_APP_ID");
+    },
+    get facebookAppSecret() {
+      return read("FACEBOOK_LOGIN_APP_SECRET");
+    },
+  },
   pancake: {
     get apiKey() {
       return read("PANCAKE_API_KEY");

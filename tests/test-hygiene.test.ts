@@ -124,6 +124,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/launch-gates.test.ts":
     "CHÉP process.env (để tiến trình bash con còn PATH) rồi ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA sinh lúc chạy cho khối ghi .env được trích từ install-vps.sh — đầu vào của tình huống; không đọc giá trị sẵn có nào của máy, kết luận không rẽ nhánh theo môi trường.",
+  "tests/quick-start.test.ts":
+    "ĐẶT PLATFORM_SIGNUP_MODE = open để đăng ký nhanh chạy được — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Biến AI dùng chung (PLATFORM_AI_*) đi qua bộ đọc giả `envOf`, không đọc môi trường của máy.",
   "tests/onboarding.test.ts":
     "ĐẶT PLATFORM_SIGNUP_MODE (off / invite / open) để dựng từng cửa vào của /start — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy đang chạy khai cờ gì.",
   "tests/pilot-ops.test.ts":

@@ -402,18 +402,19 @@ async function syncThread(a: {
   const org = await currentOrganization();
   const killed = await aiKillSwitchDenial(org.code);
   if (killed) return { retry: true, result: `AI đang tắt: ${killed}` };
-  const quota = await checkAiQuota(org.code, "BYOK");
-  if (!quota.ok) return { retry: true, result: quota.error };
+  // Nguồn trả tiền theo ĐÚNG lựa chọn khoá của bot (AI dùng chung ⇒ PLATFORM, khoá riêng ⇒ BYOK) — sổ AI và hạn mức kiểm đúng chỗ.
   const prov = await salesChatProvider();
   if (!prov.ok) return { retry: true, result: prov.error };
+  const quota = await checkAiQuota(org.code, prov.source);
+  if (!quota.ok) return { retry: true, result: quota.error };
   const prompt = orderSyncPrompt({ shop: a.shop, catalog: a.catalog, messages, cutoffMs, returning, lastRecorded });
   let reply: OrderSyncReply | null = null;
   try {
     const res = await prov.provider.complete({ system: prompt.system, messages: [{ role: "user", content: [{ type: "text", text: prompt.user }] }], tools: [], maxTokens: 4_000, reasoning: "low" });
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
     reply = parseOrderSyncReply(textOf(res.content));
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `order-sync:${conv.id}` }).catch(() => undefined);
     return { retry: true, result: `AI lỗi: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}` };
   }
   if (!reply) return { outcome: "ERROR", result: "AI trả lời sai định dạng — chưa ghi đơn (lượt sau đọc lại khi có tin mới)" };

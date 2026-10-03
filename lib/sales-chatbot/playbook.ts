@@ -85,7 +85,7 @@ export async function startPlaybookLearning(user: SessionUser, raw: { conversati
   const prov = await salesChatProvider();
   if (!prov.ok) return { error: prov.error };
   const org = await currentOrganization();
-  const quota = await checkAiQuota(org.code, "BYOK");
+  const quota = await checkAiQuota(org.code, prov.source);
   if (!quota.ok) return { error: quota.error };
   const run = await loadPlaybookRun();
   if (run.state === "RUNNING" && now.getTime() - new Date(run.startedAt).getTime() < PLAYBOOK_LIMITS.runStaleMinutes * 60_000) return { error: "Đang có một lượt học chạy — đợi xong rồi chạy lại." };
@@ -262,7 +262,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
     const prov = await salesChatProvider();
     if (!prov.ok) throw new Error(prov.error);
     const ask = async (system: string, text: string, reasoning: "low" | "medium" = "low"): Promise<string> => {
-      const quota = await checkAiQuota(org.code, "BYOK");
+      const quota = await checkAiQuota(org.code, prov.source);
       if (!quota.ok) throw new Error(quota.error);
       let status: "OK" | "ERROR" = "OK";
       try {
@@ -275,7 +275,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
           const cost = estimateCostUsd(res.model || prov.provider.model, res.usage);
           stats.aiCalls += 1;
           stats.costUsd = stats.costUsd === null || cost === null ? null : stats.costUsd + cost;
-          await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
+          await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
           out = textOf(res.content);
           stop = res.stopReason;
           if (out) break;
@@ -284,7 +284,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
         return out;
       } catch (e) {
         status = "ERROR";
-        await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
+        await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
         throw e;
       }
     };

@@ -82,4 +82,6 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_billing_payments`);
   await db.execute(sql`delete from platform_invoices`);
   await db.execute(sql`delete from platform_subscriptions`);
+  // 0193 · chỉ mục danh tính (email / SĐT / Google / Facebook ⇒ tổ chức) — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_identities`);
 }

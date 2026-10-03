@@ -3,9 +3,9 @@ import { aiDisabledReason } from "@/lib/ai/router";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
-import { defaultEnvReader, platformAiConfig, type EnvReader } from "@/lib/ai-usage/platform-ai";
+import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { checkAiQuota, resolveAiLimits } from "@/lib/ai-usage/quota";
-import { ByokAnthropicProvider, ByokOpenAiProvider, BUILDER_TIMEOUT_MS } from "@/lib/ai-builder/providers";
+import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider, BUILDER_TIMEOUT_MS } from "@/lib/ai-builder/providers";
 import type { AiSourceKind } from "@/lib/ai-builder/types";
 
 /**
@@ -92,6 +92,25 @@ async function platformAi(orgCode: string, deps: { fetch?: typeof fetch; env?: E
   if (!limits || !(limits.limits.platformCreditUsdPerMonth > 0)) return { ok: false, reason: null };
   const quota = await checkAiQuota(orgCode, "PLATFORM", { notify: false });
   if (!quota.ok) return { ok: false, reason: quota.error };
-  const provider = new ByokAnthropicProvider({ apiKey: cfg.apiKey, model: cfg.model, fetch: deps.fetch, name: "anthropic-platform" });
-  return { ok: true, ai: { provider, source: "PLATFORM", connectorKey: null } };
+  return { ok: true, ai: { provider: platformProvider(cfg, deps.fetch), source: "PLATFORM", connectorKey: null } };
+}
+
+/** Provider của khoá NỀN TẢNG (đã kiểm sẵn sàng) — nhãn `<nhà cung cấp>-platform` trên sổ AI. */
+export function platformProvider(cfg: Extract<PlatformAiConfig, { ready: true }>, fetchImpl?: typeof fetch): AiProvider {
+  const opts = { apiKey: cfg.apiKey, model: cfg.model, fetch: fetchImpl, name: `${cfg.provider}-platform` };
+  return cfg.provider === "gemini" ? new ByokGeminiProvider(opts) : new ByokAnthropicProvider(opts);
+}
+
+/**
+ * Chatbot bán hàng của tổ chức `orgCode` dùng được AI của NỀN TẢNG không (cùng ba điều kiện của nhánh 3): nền tảng đã bật
+ * khoá · gói có credit > 0 · còn credit tháng này. `reason` là câu cho chủ shop.
+ */
+export async function platformChatAi(orgCode: string, deps: { fetch?: typeof fetch; env?: EnvReader } = {}): Promise<{ ok: true; provider: AiProvider } | { ok: false; reason: string }> {
+  const cfg = platformAiConfig(deps.env ?? defaultEnvReader);
+  if (!cfg.ready) return { ok: false, reason: "Nền tảng chưa bật AI dùng chung — chọn khoá AI riêng của shop, hoặc báo người vận hành." };
+  const limits = await resolveAiLimits(orgCode);
+  if (!limits || !(limits.limits.platformCreditUsdPerMonth > 0)) return { ok: false, reason: "Gói hiện tại chưa có AI dùng chung — nâng gói, hoặc chọn khoá AI riêng của shop." };
+  const quota = await checkAiQuota(orgCode, "PLATFORM", { notify: false });
+  if (!quota.ok) return { ok: false, reason: quota.error };
+  return { ok: true, provider: platformProvider(cfg, deps.fetch) };
 }

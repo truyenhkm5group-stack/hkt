@@ -596,8 +596,11 @@ async function testJourney() {
     const noModule = await saveSalesChatbotConfig({ ...admin, role: "MANAGER", permissions: admin.permissions.filter((p) => p !== "ai_sales:manage") }, DEFAULT_SALES_CHATBOT_CONFIG);
     assert.ok(!noModule.ok, "thiếu ai_sales:manage ⇒ từ chối");
     const noKey = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true });
-    assert.ok(!noKey.ok && /Chưa bật được bot/.test(noKey.error), "bật bot khi chưa có khoá AI ⇒ từ chối");
-    const cfgOk = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, shippingFee: null });
+    assert.ok(!noKey.ok && /Chưa bật được bot/.test(noKey.error), "bật bot khi AI dùng chung chưa dùng được (gói Dùng thử credit 0) ⇒ từ chối");
+    const noByok = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true });
+    assert.ok(!noByok.ok && /Chưa bật được bot/.test(noByok.error), "bật bot khi chưa có khoá AI riêng ⇒ từ chối");
+    // Hành trình này kiểm đường KHOÁ RIÊNG của shop (BYOK) — đường AI dùng chung có bài riêng ở tests/quick-start.test.ts.
+    const cfgOk = await saveSalesChatbotConfig(admin, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", shippingFee: null });
     assert.ok(cfgOk.ok);
 
     setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
@@ -621,7 +624,7 @@ async function testJourney() {
 
       // ── Kênh WEB: ghi thật ⇒ đơn chốt ⇒ order.confirmed ⇒ tin nhóm ──
       // Bật bot đòi khoá AI ĐANG BẬT (đã kiểm ở trên: không khoá ⇒ từ chối); bài kiểm dùng model giả nên đặt cờ bật thẳng.
-      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true, shippingFee: null });
+      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: null });
       const vk = visitorKeyOf("khach-web-1-abcdefghijklmnop");
       const w = await openConversation("WEB", { visitorKey: vk });
       await say(w.id, "Chả mực bao nhiêu?", "WEB", vk);

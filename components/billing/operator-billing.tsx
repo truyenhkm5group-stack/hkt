@@ -73,9 +73,11 @@ export function BillingReceiverForm({ current }: { current: { bin: string; accou
   );
 }
 
-export function PlanPriceForm({ plan }: { plan: { key: string; name: string; priceVnd: number | null } }) {
+export function PlanPriceForm({ plan }: { plan: { key: string; name: string; priceVnd: number | null; yearlyFreeMonths?: number } }) {
   const [price, setPrice] = useState(plan.priceVnd === null ? "" : String(plan.priceVnd));
+  const [free, setFree] = useState(String(plan.yearlyFreeMonths ?? 0));
   const parsed = price.trim() === "" ? null : Number(price.replace(/[^\d]/g, ""));
+  const freeN = Number(free || 0);
   return (
     <ConfirmWithReason
       id={`price-${plan.key}`}
@@ -84,12 +86,15 @@ export function PlanPriceForm({ plan }: { plan: { key: string; name: string; pri
       consequence="Áp cho hoá đơn TẠO TỪ BÂY GIỜ. Hoá đơn đang mở giữ giá cũ; khách đang dùng gói này không bị đổi gì cho tới lần gia hạn kế tiếp."
       minReason={PILOT_REASON_MIN}
       placeholder="Chốt bảng giá quý IV"
-      disabled={parsed === plan.priceVnd}
-      run={(reason) => setPlanPriceAction({ planKey: plan.key, priceVnd: parsed, reason })}
+      disabled={parsed === plan.priceVnd && freeN === (plan.yearlyFreeMonths ?? 0)}
+      run={(reason) => setPlanPriceAction({ planKey: plan.key, priceVnd: parsed, yearlyFreeMonths: freeN, reason })}
     >
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <Label htmlFor={`price-input-${plan.key}`}>Giá tháng (để trống = không bán)</Label>
         <Input id={`price-input-${plan.key}`} value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" className="w-40" />
+        <Label htmlFor={`free-input-${plan.key}`}>Trả 12 tháng tặng</Label>
+        <Input id={`free-input-${plan.key}`} type="number" min={0} max={3} value={free} onChange={(e) => setFree(e.target.value)} className="w-16" />
+        <span>tháng</span>
       </div>
     </ConfirmWithReason>
   );

@@ -95,7 +95,7 @@ export async function voidInvoiceAction(input: { invoiceId: string; reason: stri
   return r;
 }
 
-export async function setPlanPriceAction(input: { planKey: string; priceVnd: number | null; reason: string }): Promise<BillingResult> {
+export async function setPlanPriceAction(input: { planKey: string; priceVnd: number | null; yearlyFreeMonths?: number; reason: string }): Promise<BillingResult> {
   const user = await requirePermission("platform:operate");
   const r = await setPlanPrice(user, input ?? {});
   if ("ok" in r) refreshOperator();

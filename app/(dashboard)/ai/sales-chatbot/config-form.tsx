@@ -14,7 +14,7 @@ import { saveSalesChatbotConfigAction } from "@/lib/actions/sales-chatbot";
 import { SALES_TONE_LABEL, SALES_TONES, SALES_TOOL_LABEL, SALES_TOOLS, type SalesBotConnector, type SalesChatbotConfig, type SalesTool, SALES_THINKING, SALES_THINKING_LABEL } from "@/lib/sales-chatbot/config";
 
 const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức", "gemini-byok": "Google Gemini — khoá của tổ chức (rẻ nhất)" };
+const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { platform: "AI dùng chung của nền tảng — tính vào gói, không cần khoá riêng", "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức", "gemini-byok": "Google Gemini — khoá của tổ chức (rẻ nhất)" };
 
 /** Form cấu hình chatbot — máy chủ kiểm lại bằng CÙNG lược đồ (`salesChatbotConfigZ`). */
 export function ChatbotConfigForm({
@@ -25,7 +25,7 @@ export function ChatbotConfigForm({
 }: {
   config: SalesChatbotConfig;
   fields: { key: string; label: string }[];
-  connections: { key: SalesBotConnector; ready: boolean; configured: boolean }[];
+  connections: { key: SalesBotConnector; ready: boolean; configured: boolean; reason?: string | null }[];
   /** Module Lịch hẹn đang bật — chỉ khi đó mới có khung «Đặt lịch qua chat». */
   appointmentsOn?: boolean;
 }) {
@@ -92,13 +92,19 @@ export function ChatbotConfigForm({
           <select id="cb-conn" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={c.connectorKey} onChange={(e) => set("connectorKey", e.target.value as SalesBotConnector)}>
             {connections.map((x) => (
               <option key={x.key} value={x.key}>
-                {CONNECTOR_LABEL[x.key]} — {x.ready ? "đã bật" : x.configured ? "chưa bật" : "chưa khai"}
+                {CONNECTOR_LABEL[x.key]} — {x.ready ? (x.key === "platform" ? "dùng được" : "đã bật") : x.key === "platform" ? "chưa dùng được" : x.configured ? "chưa bật" : "chưa khai"}
               </option>
             ))}
           </select>
           {!conn?.ready ? (
             <p className="text-xs text-destructive">
-              Khoá này chưa sẵn sàng — khai, Kiểm tra, Bật ở <Link href="/settings/connections" className="underline">Cài đặt → Kết nối</Link>.
+              {c.connectorKey === "platform" ? (
+                conn?.reason ?? "AI dùng chung chưa dùng được."
+              ) : (
+                <>
+                  Khoá này chưa sẵn sàng — khai, Kiểm tra, Bật ở <Link href="/settings/connections" className="underline">Cài đặt → Kết nối</Link>.
+                </>
+              )}
             </p>
           ) : null}
         </div>

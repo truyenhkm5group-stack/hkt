@@ -15,7 +15,7 @@ import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { SALES_TONE_LABEL, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { SALES_TONE_LABEL, type SalesChatbotConfig, salesBotBillingSource } from "@/lib/sales-chatbot/config";
 import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { PAGE_REPLY, sendFanpageText, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
@@ -125,7 +125,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       await putBack("AI đang bị tạm tắt");
       continue;
     }
-    if (!(await checkAiQuota(org.code, "BYOK")).ok) {
+    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) {
       await putBack("hết hạn mức AI");
       continue;
     }
@@ -157,7 +157,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         reasoning: "low",
       });
       const inTok = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: row.id }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: null, ref: row.id }).catch(() => undefined);
       await db.update(c).set({ aiCalls: row.aiCalls + 1, inputTokens: row.inputTokens + inTok, outputTokens: row.outputTokens + res.usage.outputTokens }).where(eq(c.id, row.id));
       const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("\n").trim().slice(0, 1000);
       // Câu rỗng, hay lỡ nêu giá (giá chỉ được đọc từ ERP lúc chat) ⇒ BỎ lần nhắc này, sang mốc sau — không gửi câu sai.

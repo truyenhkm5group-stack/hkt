@@ -140,9 +140,14 @@ export const users = pgTable("users", {
    */
   sessionInvalidBefore: ts("session_invalid_before"),
   lastLoginAt: ts("last_login_at"),
+  /**
+   * Số điện thoại DI ĐỘNG Việt Nam đã chuẩn hoá `84xxxxxxxxx` (0193, `lib/auth/identity-shared.ts::normalizePhone`) —
+   * đăng nhập được bằng SĐT thay email. `NULL` = chưa khai. Duy nhất TRONG tổ chức.
+   */
+  phone: text("phone"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}, (t) => [uniqueIndex("users_phone_key").on(t.phone).where(sql`${t.phone} IS NOT NULL`)]);
 
 /** Case chăm sóc khách hàng: đổi size / đổi màu / sai địa chỉ / sai SĐT / trả hàng / khiếu nại… */
 export const csCases = pgTable(
@@ -4617,10 +4622,19 @@ export const platformPlans = pgTable(
      * Thiếu khoá = gói này KHÔNG bán thêm hạng mục đó. Không gieo giá nào: giá là quyết định của chủ nền tảng (luật 38).
      */
     addonPrices: jsonb("addon_prices").$type<Record<string, unknown>>().notNull().default({}),
+    /**
+     * Trả 12 tháng thì TẶNG bấy nhiêu tháng (0194): tiền của lần gia hạn 12 tháng = giá tháng × (12 − số này). 0 = không
+     * giảm. Giảm giá là quyết định kinh doanh nên nó là MỘT CỘT đọc được, không phải một phép nhân giấu trong mã (luật 38).
+     */
+    yearlyFreeMonths: integer("yearly_free_months").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("platform_plans_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,30}$'`), check("platform_plans_price_check", sql`${t.priceVnd} IS NULL OR ${t.priceVnd} > 0`)],
+  (t) => [
+    check("platform_plans_key_check", sql`${t.key} ~ '^[a-z][a-z0-9-]{1,30}$'`),
+    check("platform_plans_price_check", sql`${t.priceVnd} IS NULL OR ${t.priceVnd} > 0`),
+    check("platform_plans_yearly_free_check", sql`${t.yearlyFreeMonths} BETWEEN 0 AND 3`),
+  ],
 );
 
 /** Mã mời tự đăng ký (Phase 10 · §1). Chỉ lưu BĂM sha256 — mã thô hiện đúng một lần lúc tạo. Dùng một lần, có hạn. */
@@ -4772,6 +4786,33 @@ export const platformAiUsage = pgTable(
  * cần job nào chạy đúng giờ (cùng tinh thần luật 26). Thiếu dòng / `billing_enabled = false` ⇒ KHÔNG thu phí, không bao
  * giờ khoá — tổ chức có từ trước 0187 (khách pilot) không đổi gì sau lần deploy này.
  */
+/**
+ * CHỈ MỤC DANH TÍNH TOÀN NỀN TẢNG (0193, docs/platform/quick-start.md). Tài khoản sống trong CSDL của TỪNG tổ chức
+ * (SILO), nên trước bảng này muốn đăng nhập phải biết mã tổ chức hoặc vào đúng tên miền con. Một dòng = «danh tính này
+ * là tài khoản `user_id` của tổ chức `org_code`»:
+ *  · `EMAIL` / `PHONE` — ghi khi đăng nhập thành công (mọi đường đi qua `verifyLogin`) và khi đăng ký nhanh;
+ *  · `GOOGLE` / `FACEBOOK` — `value` = mã người dùng của nhà cung cấp (`sub` / `id`), ghi khi đăng nhập bằng nút đó.
+ * Chỉ là CHỈ MỤC: mật khẩu, quyền, trạng thái khoá vẫn đọc ở CSDL tổ chức mỗi lượt. Dòng trỏ tới tài khoản đã xoá / tổ
+ * chức đã đình chỉ thì bị bỏ qua lúc đọc, không bao giờ mở được phiên.
+ */
+export const platformIdentities = pgTable(
+  "platform_identities",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    value: text("value").notNull(),
+    orgCode: text("org_code").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: createdAt(),
+    lastUsedAt: ts("last_used_at"),
+  },
+  (t) => [
+    uniqueIndex("platform_identities_kind_value_org_key").on(t.kind, t.value, t.orgCode),
+    index("platform_identities_org_user_idx").on(t.orgCode, t.userId),
+    check("platform_identities_kind_check", sql`${t.kind} IN ('EMAIL','PHONE','GOOGLE','FACEBOOK')`),
+  ],
+);
+
 export const platformSubscriptions = pgTable(
   "platform_subscriptions",
   {

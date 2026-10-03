@@ -16,8 +16,18 @@
  * chức chưa bật thu phí ⇒ NOT_BILLED: không nhắc, không khoá — khách pilot có từ trước không đổi gì.
  */
 
-/** Số tháng một lần gia hạn được chọn. KHÔNG có chiết khấu theo kỳ dài — giảm giá là quyết định kinh doanh (luật 38). */
+/**
+ * Số tháng một lần gia hạn được chọn. Kỳ dài KHÔNG tự có chiết khấu — giảm giá là quyết định kinh doanh (luật 38), nên nó
+ * là cột tường minh `platform_plans.yearly_free_months`: trả 12 tháng thì tặng N tháng (0194). 1 · 3 · 6 tháng: không giảm.
+ */
 export const BILLING_MONTH_OPTIONS = [1, 3, 6, 12] as const;
+export const YEARLY_FREE_MONTHS_MAX = 3;
+
+/** Số tháng PHẢI TRẢ cho một lần gia hạn `months` tháng (chỉ kỳ 12 tháng được tặng). */
+export function billedMonths(months: number, yearlyFreeMonths: number | null | undefined): number {
+  const free = Math.max(0, Math.min(YEARLY_FREE_MONTHS_MAX, Math.trunc(yearlyFreeMonths ?? 0)));
+  return months === 12 ? 12 - free : months;
+}
 export type BillingMonths = (typeof BILLING_MONTH_OPTIONS)[number];
 
 /** Ân hạn mặc định khi người vận hành bật thu phí. Sửa theo từng tổ chức ở /platform/org/<mã> (0–60). */
@@ -152,7 +162,7 @@ export function billingWriteDenied(input: { isHome: boolean; standing: BillingSt
 
 // ─────────────────────────── Báo giá gia hạn ───────────────────────────
 
-export type PricedPlan = { key: string; name: string; priceVnd: number | null };
+export type PricedPlan = { key: string; name: string; priceVnd: number | null; yearlyFreeMonths?: number };
 
 export type RenewalKind = "START" | "RENEW" | "UPGRADE" | "DOWNGRADE";
 
@@ -199,7 +209,8 @@ export function quoteRenewal(input: { terms: SubscriptionTerms | null; currentPl
   if (target.priceVnd === null || !Number.isInteger(target.priceVnd) || target.priceVnd <= 0) return { error: `Gói «${target.name}» không bán — chọn một gói có giá.` };
   if (!(BILLING_MONTH_OPTIONS as readonly number[]).includes(months)) return { error: `Số tháng phải là một trong ${BILLING_MONTH_OPTIONS.join(" · ")}.` };
   const addonMonthly = Math.max(0, Math.trunc(input.targetAddonMonthlyVnd ?? 0));
-  const list = (target.priceVnd + addonMonthly) * months;
+  // Kỳ 12 tháng của gói có «tặng tháng»: vẫn dùng ĐỦ 12 tháng, trả (12 − tặng) tháng.
+  const list = (target.priceVnd + addonMonthly) * billedMonths(months, target.yearlyFreeMonths);
   const standing = billingStanding(input.terms, today);
   const pt = input.terms?.paidThrough ?? null;
   const base = { planKey: target.key, months, listAmountVnd: list, addonMonthlyVnd: addonMonthly };

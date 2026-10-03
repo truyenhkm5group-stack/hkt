@@ -1345,6 +1345,20 @@
       "when": 1790680280000,
       "tag": "0192_billing_addons_vat",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1790680290000,
+      "tag": "0193_quick_start_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1790680300000,
+      "tag": "0194_pricing_2026_10",
+      "breakpoints": true
     }
   ]
 }

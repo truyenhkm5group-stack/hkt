@@ -44,14 +44,14 @@ export function planKeyOf(org: Pick<Organization, "isHome" | "plan">): string {
 }
 
 /** `priceVnd` = giá MỘT THÁNG (0187); `null` = gói không bán (không phải giá 0). `addonPrices` = đơn giá mua thêm (0192, thô). */
-export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown };
+export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown; yearlyFreeMonths: number };
 
 /** Mọi gói (cho màn vận hành). Bảng chưa có ⇒ rỗng. */
 export async function listPlans(): Promise<PlanRow[]> {
   const pdb = await getPlatformDb();
   try {
     const rows = await pdb.select().from(schema.platformPlans).orderBy(schema.platformPlans.position);
-    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices }));
+    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices, yearlyFreeMonths: r.yearlyFreeMonths ?? 0 }));
   } catch {
     return [];
   }
