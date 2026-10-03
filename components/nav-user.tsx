@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LogOut, Moon, ReceiptText, Sun, Monitor } from "lucide-react";
+import { LifeBuoy, LogOut, Moon, ReceiptText, Sun, Monitor, UserRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Role } from "@/db/schema";
 import { logoutAction } from "@/lib/actions/auth";
@@ -43,10 +43,22 @@ export function NavUser({ user }: { user: { name: string; email: string; role: R
           <p className="text-xs text-muted-foreground">{ROLE_LABEL[user.role]} · {user.email}</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/* Mọi tài khoản đều thấy: trang tự phục vụ (đổi mật khẩu) chỉ cần đăng nhập — trước đây chỉ người có
+            users:manage mới tới được nó (nút trên trang Người dùng). */}
+        <DropdownMenuItem asChild>
+          <Link href="/settings/profile">
+            <UserRound className="size-4" /> Tài khoản của tôi
+          </Link>
+        </DropdownMenuItem>
         {/* Mọi tài khoản đều thấy: phiếu lương gửi riêng từng người, cổng là quyền sở hữu phiếu. */}
         <DropdownMenuItem asChild>
           <Link href="/my-payslip">
             <ReceiptText className="size-4" /> Phiếu lương của tôi
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/help">
+            <LifeBuoy className="size-4" /> Hướng dẫn sử dụng
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

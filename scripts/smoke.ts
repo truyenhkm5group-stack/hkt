@@ -120,6 +120,7 @@ const ROUTES = [
   "/inventory/purchasing",
   "/customers",
   "/products/price-lists",
+  "/help",
   "/customers/retention",
   "/ads",
   "/ads/daily",
