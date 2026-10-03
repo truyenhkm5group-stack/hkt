@@ -21,6 +21,7 @@ import { PAGE_REPLY, sendFanpageText, type FanpageDeps } from "@/lib/sales-chatb
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
+import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import { SALES_STAGE_LABEL } from "@/lib/sales-chatbot/stages";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -31,7 +32,7 @@ const RETRY_LATER_MS = 15 * 60_000;
 
 export type FollowupRunResult = { due: number; sent: number; stopped: number; deferred: number; errors: number; detail: string[] };
 
-export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "tone">, shop: string, stage: string, attempt: number, total: number, hasDraft: boolean, playbook: string): string {
+export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "tone">, shop: string, stage: string, attempt: number, total: number, hasDraft: boolean, playbook: string, returning: string = ""): string {
   const step =
     attempt >= total
       ? "Đây là lần nhắc CUỐI: hỏi lịch sự khách có muốn tiếp tục không / cần tư vấn thêm gì; không nài, không gây áp lực."
@@ -44,6 +45,8 @@ export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "
     `Khách đang dừng ở bước: ${stage}.${hasDraft ? " Khách ĐÃ CÓ đơn nháp chưa xác nhận — nhắc khách xác nhận đơn." : ""}`,
     `Lần nhắc ${attempt}/${total}. ${step}`,
     "TUYỆT ĐỐI không nêu giá, số tiền, khuyến mãi, thời gian giao; không bịa thông tin; không nhắc rằng mình là AI hay tin tự động.",
+    // Khách cũ (03/10/2026): nhắc ĐẶT LẠI cụ thể như lần trước thay vì «còn băn khoăn gì không».
+    returning ? `${returning}\nTin nhắc cho KHÁCH CŨ: đề xuất ĐẶT LẠI cụ thể như lần trước (món, giao về địa chỉ cũ), MỘT câu hỏi có / không; vẫn KHÔNG nêu giá.` : "",
     playbook ? `Sổ tay giọng điệu của shop:\n${playbook.slice(0, 1500)}` : "",
     "Chỉ trả về nội dung tin nhắn.",
   ]
@@ -147,7 +150,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         .join("\n");
       const stage = st.stage && st.stage in SALES_STAGE_LABEL ? SALES_STAGE_LABEL[st.stage] : "Đang tư vấn";
       const res = await prov.provider.complete({
-        system: followupSystemPrompt(cfg, shop, stage, attempt, fs.stepsMinutes.length, Boolean(st.draft), playbook),
+        system: followupSystemPrompt(cfg, shop, stage, attempt, fs.stepsMinutes.length, Boolean(st.draft), playbook, returningCustomerPrompt(await findReturningCustomer(st).catch(() => null), st.returning)),
         messages: [{ role: "user", content: [{ type: "text", text: `HỘI THOẠI:\n${transcript}` }] }],
         tools: [],
         maxTokens: 1500,

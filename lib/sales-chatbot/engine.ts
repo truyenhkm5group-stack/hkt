@@ -129,7 +129,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "5. Lên đơn: cần đủ HỌ TÊN, SỐ ĐIỆN THOẠI, ĐỊA CHỈ GIAO (khách cũ: dùng khối KHÁCH CŨ, không hỏi lại phần đã có), ghi chú giao hàng (nếu có) → create_customer → create_draft_order → ĐỌC LẠI TÓM TẮT gồm từng dòng (tên × SL × đơn giá = thành tiền), tiền hàng, phí ship, TỔNG THU KHI GIAO (COD), người nhận, SĐT, địa chỉ, ghi chú → hỏi khách «anh/chị xác nhận chốt đơn không ạ?».",
     "6. CHỈ gọi confirm_order khi câu cuối của khách là lời đồng ý rõ ràng; customer_confirmation = nguyên văn lời đồng ý đó. Khách đổi ý / sửa ⇒ update_draft_order rồi đọc lại tóm tắt.",
     `7. Chuyển nhân viên (handoff_to_human) là lối CUỐI, chỉ khi: ${[cfg.handoff.onCustomerRequest ? "khách muốn gặp người" : "", cfg.handoff.onComplaint ? "khách khiếu nại / phàn nàn" : "", "câu hỏi mà dữ liệu ERP, «Về shop», «Hướng dẫn thêm của shop» và sổ tay đều KHÔNG trả lời được"].filter(Boolean).join(", ")}. Chưa hiểu ý khách thì HỎI LẠI khách cho rõ, KHÔNG chuyển người. Sau đó nói: «${cfg.handoff.message}».`,
-    "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu.",
+    "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu. Chữ bạn viết ra được GỬI NGUYÊN VĂN cho khách: chỉ viết câu nói với khách — KHÔNG viết suy luận, phân tích, kế hoạch, không nói về «khách» ở ngôi thứ ba.",
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
     "  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách (vd 1kg hay 2kg) trước khi báo giá.",
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
@@ -146,6 +146,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "  · KHÔNG hỏi lại câu bạn / shop VỪA hỏi: khách vừa trả lời (vd shop hỏi «lấy bao nhiêu kg», khách đáp «lấy lần 20-30 kg») ⇒ dùng câu trả lời đó và đi tiếp.",
     "  · ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC (chủ shop 02/10/2026): khách hay gõ không dấu, viết tắt («khg» / «ko» = không, «dc» = được, «sp» = sản phẩm, «ship cod» = giao nhận tiền) — đọc theo nghĩa. Hiểu được thì trả lời; CHƯA chắc ý khách ⇒ hỏi lại MỘT câu ngắn cho rõ (vd «Dạ ý mình là … phải không ạ?»), tối đa 2 lần.",
     "  · Câu hỏi về CHÍNH SÁCH (kiểm hàng khi nhận, ăn thử, đổi trả, thanh toán, giao hàng): «Về shop» / «Hướng dẫn thêm của shop» / sổ tay có nói ⇒ trả lời ĐÚNG theo đó, không thêm điều shop chưa hứa. Không có ở đâu cả ⇒ mới chuyển người («Ngoài chính sách»).",
+    "  · «Cảm ơn», «thanks», «ok», thả emoji NGAY SAU báo giá mà CHƯA có đơn = khách đang LƯNG CHỪNG, không phải tạm biệt: KHÔNG trả lời «khi nào cần cứ nhắn em»; hỏi MỘT câu chốt dễ trả lời (vd «Dạ mình lấy 1kg ăn thử trước nhé, em lên đơn luôn ạ?»). Chỉ khi đơn ĐÃ chốt mới cảm ơn ngắn rồi thôi.",
     "  · Khách đã nói món + số lượng ⇒ đi tiếp bước kế (xin họ tên / SĐT / địa chỉ còn thiếu), không hỏi lại điều khách đã nói. Khách gửi địa chỉ ⇒ ghi nhận và chỉ hỏi phần còn thiếu.",
     cfg.wholesalePricing
       ? "KHÁCH SỈ — shop ĐÃ BẬT báo giá theo bảng giá: hỏi số lượng nếu chưa biết (ĐÚNG MỘT lần), rồi get_current_price với variant_id + quantity ⇒ báo ĐÚNG đơn giá công cụ trả về; có `tiers` thì nói rõ bậc («từ 10 trở lên giá …»). Đơn giá trong đơn do máy chủ tính theo cùng bảng. KHÔNG tự giảm ngoài bảng; khách đòi giá thấp hơn bảng, hay số lượng vượt bậc cao nhất mà muốn giá riêng ⇒ handoff_to_human với reason «Khách sỉ — <số lượng / ý khách>»."
@@ -214,6 +215,34 @@ async function appendMessage(conversationId: string, seq: number, role: "user" |
  * Mốc dựng TẤT ĐỊNH từ `at` đã lưu, nên cùng lịch sử luôn ra cùng chữ và đệm (cache) tin nhắn ở nhà cung cấp không vỡ.
  * Tin không có `at` (bài kiểm cũ) ⇒ không gắn gì.
  */
+/**
+ * Dấu hiệu chữ của model là SUY LUẬN NỘI BỘ chứ không phải câu nói với khách: định danh dạng snake_case (tên công cụ,
+ * variant_id — khách không bao giờ gõ), «prompt» / «lời nhắc hệ thống», và dòng nói về khách ở ngôi thứ ba / tự dặn mình.
+ */
+const LEAK_ANY = [/\b[a-z]{2,}_[a-z0-9_]{2,}\b/, /\bprompt\b/i, /lời nhắc (hệ thống|này)/i];
+const LEAK_LINE = /^\s*(?:khách(?: hàng)? (?:vừa|đang|đã|hỏi|nói|muốn|nhắn|là|không)|ta (?:đáp|trả lời|cần|sẽ|nên)|gọi (?:công cụ|tool|hàm)|theo (?:tay|giọng)|hãy (?:kiểm tra|xem)|thực ra đây|vì khách|đây là (?:một )?đoạn)/i;
+const SPEAKS_TO_CUSTOMER = /^\s*(?:dạ|vâng|chào|xin chào|em |cảm ơn|cám ơn|ok\b|okay)/i;
+
+/**
+ * Chữ của model ⇒ chữ được gửi khách. Không có dấu hiệu suy luận ⇒ nguyên văn. Có ⇒ chỉ giữ từ dòng CUỐI cùng nói với khách
+ * («Dạ…», «Vâng…») trở xuống, bỏ mọi dòng mang dấu hiệu; không có dòng nào như vậy ⇒ `""` (KHÔNG gửi gì — im còn hơn lộ).
+ * HÀM THUẦN.
+ */
+export function customerFacingText(text: string): { text: string; leaked: boolean } {
+  const lines = text.split(/\r?\n/);
+  const bad = (l: string) => LEAK_LINE.test(l) || LEAK_ANY.some((r) => r.test(l));
+  if (!lines.some(bad)) return { text, leaked: false };
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (SPEAKS_TO_CUSTOMER.test(lines[i]) && !bad(lines[i])) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return { text: "", leaked: true };
+  return { text: lines.slice(start).filter((l) => !bad(l)).join("\n").trim(), leaked: true };
+}
+
 export function historyForModel(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at?: Date }[], limit: number): AiMessage[] {
   const tagged = msgs.map((m, i) => {
     const prev = i > 0 ? msgs[i - 1].at : undefined;
@@ -394,7 +423,11 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
  * MỘT lượt khách gõ. `channel` và `visitorKey` do nơi gọi (máy chủ) quyết — hội thoại phải đúng kênh, và kênh WEB phải
  * đúng khách truy cập đã mở nó (không đọc / gõ tiếp hội thoại của người khác bằng cách đoán id).
  */
-export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date }): Promise<TurnResult> {
+/**
+ * `context` = ngữ cảnh máy chủ đọc được cho lượt này (vd nội dung bài viết khách vừa bình luận dưới — `postContextPrompt`).
+ * Có ngữ cảnh ⇒ bỏ qua câu mẫu khớp chữ / AI chọn mã: câu khách («cho giá») chỉ hiểu đúng khi đọc cùng ngữ cảnh.
+ */
+export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
   if (!text) return { ok: false, error: "Tin nhắn trống." };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
@@ -440,7 +473,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const st0 = (conv.state ?? {}) as ChatState;
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
-    const quick: QuickReplyStep = qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
+    const quick: QuickReplyStep = opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
       await reply(conv, seq, pick.text);
       await markQuickReplyUsed(pick.entry.id, now).catch(() => undefined);
@@ -495,7 +528,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const returning = await findReturningCustomer(known).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now);
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -509,6 +542,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     let model = prov.provider.model;
     let status: "OK" | "ERROR" = "OK";
     let lastError: string | null = null;
+    let leaks = 0;
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -520,7 +554,19 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         model = res.model || model;
         const c = estimateCostUsd(res.model || prov.provider.model, res.usage);
         cost = cost === null || c === null ? null : cost + c;
-        const content = res.content.length ? res.content : [{ type: "text" as const, text: "Dạ, anh/chị nói rõ hơn giúp em nhé." }];
+        const raw = res.content.length ? res.content : [{ type: "text" as const, text: "Dạ, anh/chị nói rõ hơn giúp em nhé." }];
+        // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
+        // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
+        const content: AiBlock[] = [];
+        for (const b of raw) {
+          if (b.type !== "text") {
+            content.push(b);
+            continue;
+          }
+          const g = customerFacingText(b.text);
+          if (g.leaked) leaks += 1;
+          if (g.text) content.push({ ...b, text: g.text });
+        }
         history.push({ role: "assistant", content });
         await appendMessage(conv.id, seq++, "assistant", content);
         const uses = content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use");
@@ -567,6 +613,8 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
       await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
       await notifyProviderFailure(lastError, now).catch(() => undefined);
     }
+    // Câu bị lọc suy luận ⇒ ghi cho người vận hành (màn hình chỉ in nhãn, không in câu gốc).
+    if (leaks && !lastError) lastError = `AI viết suy luận nội bộ vào câu trả lời (${leaks} đoạn) — đã lọc trước khi gửi khách`;
     await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     await bump({
       state: state as Record<string, unknown>,

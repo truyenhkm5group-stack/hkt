@@ -58,10 +58,10 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
-import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { CLOSED_TAG, customerLeftPhone, OPEN_TAG, redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
@@ -288,6 +288,20 @@ function testPure() {
   const spPolicy = systemPrompt({ ...parseSalesChatbotConfig(null), extraInstructions: "Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán." }, "Shop", "", "FANPAGE");
   for (const k of ["lối CUỐI", "HỎI LẠI khách cho rõ", "ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC", "«khg» / «ko» = không", "Câu hỏi về CHÍNH SÁCH", "«Không hiểu ý khách» (ĐÃ hỏi lại 2 lần", "kiểm tra thoải mái, ưng ý mới nhận hàng"]) assert.ok(spPolicy.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(!/bạn không chắc|«Không chắc»/.test(spPolicy), "«không chắc» không còn là lý do chuyển người");
+  // LỌC SUY LUẬN (03/10/2026 · «Phuoc Ha»: model viết lẩm bẩm vào câu trả lời và cả đoạn tới khách).
+  const leaked = [
+    'Khách vừa nhắn "Cám ơn" sau khi đơn hàng trước đã hoàn tất. Tuy nhiên, ta cần xem lại lịch sử. Đây là một đoạn hội thoại cũ đã được ghi trong prompt.',
+    "Vì khách không có yêu cầu mua hàng mới hay hỏi thêm gì, ta lịch sự đáp lại.",
+    "Hãy kiểm tra xem có cần chuyển bước gì không. Không có sản phẩm mới.",
+    'Ta đáp: "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em nhé."',
+    "Gọi set_sales_stage nếu cần, hoặc cứ trả lời ngắn gọn.",
+    "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em hỗ trợ nhé.",
+  ].join("\n");
+  assert.deepEqual(customerFacingText(leaked), { text: "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em hỗ trợ nhé.", leaked: true }, "chỉ giữ câu nói với khách");
+  assert.deepEqual(customerFacingText("Khách đang hỏi giá. Gọi search_products."), { text: "", leaked: true }, "không tách được câu sạch ⇒ không gửi gì");
+  const clean = "Dạ chả cá thu 1kg giá 280.000 ₫ ạ.\nMình lấy 1kg hay 2kg ạ?";
+  assert.deepEqual(customerFacingText(clean), { text: clean, leaked: false }, "câu bình thường giữ nguyên văn");
+  assert.equal(customerFacingText("Dạ khách hàng bên em đều khen ngon ạ").leaked, false, "«khách hàng» giữa câu nói với khách không phải suy luận");
   // MIỄN SHIP (03/10/2026 · «Miễn phí ship từ 1kg hoặc giá trị đơn hàng từ 300K trong nội thành Hà Nội, TP HCM»).
   assert.equal(variantWeightGrams(0, "Size 1kg"), 1000);
   assert.equal(variantWeightGrams(0, "Gói", "Ruốc bông cá thu 250g"), 250);
@@ -337,6 +351,14 @@ function testPure() {
   assert.equal(followupStepsLabel([60, 360, 1320]), "1 giờ · 6 giờ · 22 giờ");
   const fp = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Lấy thông tin · kiểm tra khách cũ", 3, 3, true, "");
   assert.ok(/không nêu giá/i.test(fp) && /lần nhắc CUỐI/.test(fp) && /đơn nháp/.test(fp), fp);
+  // CHỐT KHÁCH CŨ (03/10/2026 · «Linh Nguyễn» mua 05/2024, hỏi giá rồi «Thanks 😍» là đi).
+  const wbBlock = returningCustomerPrompt({ ...old, trust: "FB_ID" }, undefined);
+  assert.ok(/CHỐT KHÁCH CŨ/.test(wbBlock) && /KHÔNG chào tạm biệt/.test(wbBlock) && /MỘT câu có \/ không/.test(wbBlock) && /SĐT đuôi/.test(wbBlock), wbBlock);
+  assert.ok(!/SĐT đuôi …/.test(returningCustomerPrompt({ ...old, trust: "PHONE" }, undefined)), "mức PHONE: không gợi ý nêu SĐT / khu vực");
+  assert.ok(/không phải tạm biệt/.test(systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE")), "cảm ơn sau báo giá = lưng chừng, không tạm biệt");
+  const fpOld = followupSystemPrompt({ botName: "Bé Mực", tone: "FRIENDLY" }, "Shop", "Báo giá", 1, 3, false, "", wbBlock);
+  assert.ok(/KHÁCH CŨ/.test(fpOld) && /ĐẶT LẠI cụ thể như lần trước/.test(fpOld) && /KHÔNG nêu giá/.test(fpOld), "follow-up khách cũ đề xuất đặt lại");
+  assert.ok(!/KHÁCH CŨ/.test(fp), "khách mới ⇒ follow-up như cũ");
   // Gửi lại tin nhóm hỏng vì mạng (0186): chỉ lỗi TRƯỚC KHI yêu cầu rời máy; lịch 2 · 5 · 15 · 30 · 60 · 120 phút trong 6 giờ.
   const netErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
   assert.ok(failedBeforeSending(netErr("ETIMEDOUT")) && failedBeforeSending(netErr("UND_ERR_CONNECT_TIMEOUT")) && failedBeforeSending(netErr("ENOTFOUND")));
@@ -581,7 +603,10 @@ async function testJourney() {
       await say(w.id, "Cho chị 2 gói, thêm 1 ruốc tôm.", "WEB", vk);
       await say(w.id, "Nguyễn Thị Lan, 0912345678, 12 Hàng Bạc Hà Nội, giao giờ hành chính", "WEB", vk);
       // Chốt khi lời "đồng ý" KHÔNG có trong câu cuối của khách ⇒ từ chối.
-      assert.match(await say(w.id, "để chị tự chốt sau nhé", "WEB", vk), /Lỗi: customer_confirmation/);
+      // (Model giả nhại lỗi công cụ «Lỗi: customer_confirmation…» — bộ lọc suy luận chặn tên trường nội bộ, khách không thấy.)
+      const notYet = await say(w.id, "để chị tự chốt sau nhé", "WEB", vk);
+      assert.ok(!/customer_confirmation/.test(notYet), `tên trường nội bộ không tới khách: ${notYet}`);
+      assert.notEqual((await conversationView(w.id))?.order?.stage, "CONFIRMED", "máy chủ từ chối chốt");
       const conv0 = await db.query.salesChatConversations.findFirst({ where: eq(schema.salesChatConversations.id, w.id) });
       const draft = conv0?.draftOrderId ? await db.query.orders.findFirst({ where: eq(schema.orders.id, conv0.draftOrderId) }) : null;
       assert.ok(draft && draft.stage === "NEW", "đơn NHÁP (chưa giữ hàng) trước khi khách đồng ý");
@@ -1257,6 +1282,41 @@ async function testJourney() {
       const rc4 = await processFanpageThread(PAGE, "t-c4", { fetch: cmtFetch.fetch, now: in31s });
       assert.ok(rc4.replies === 0 && /không nhắn riêng được/.test(rc4.error ?? "") && /KHÔNG trả lời công khai/.test(rc4.error ?? ""), JSON.stringify(rc4));
       assert.ok(!cmtFetch.calls.some((c) => String(c.init?.body).includes("reply_comment")), "lỗi tin riêng không lùi về bình luận công khai");
+      // (03/10/2026 · «Mai Dinh») BÌNH LUẬN DƯỚI BÀI QUẢNG CÁO: «Cho giá ạ. Ib» ⇒ bot đọc bài (chả cá thu) và báo giá đúng món, không
+      // hỏi «muốn tham khảo món nào», không trả bằng câu mẫu khớp chữ. Bài đọc MỘT lần mỗi bài.
+      assert.equal(postTextFromPancake({ post: { message: "<b>CHẢ CÁ THU</b> nguyên chất" } }, "p_1"), "CHẢ CÁ THU nguyên chất");
+      assert.equal(postTextFromPancake({ conversation: { post: { content: "Chả mực giã tay" } } }, "p_1"), "Chả mực giã tay");
+      assert.equal(postTextFromPancake({ posts: [{ id: "123_999", message: "Nem hải sản" }] }, "999"), "Nem hải sản", "danh sách bài: khớp theo đuôi mã");
+      assert.equal(postTextFromPancake({ messages: [] }, "p_1"), null);
+      assert.equal(postContextPrompt(null), "");
+      assert.ok(/ĐÚNG sản phẩm trong bài/.test(postContextPrompt("Chả cá thu")) && /KHÔNG hỏi lại «muốn tham khảo món nào»/.test(postContextPrompt("Chả cá thu")));
+      const postSystems: AiRequest[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          postSystems.push(req);
+          return { content: [{ type: "text", text: "Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ, mình lấy 1kg hay 2kg ạ?" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+        },
+      }));
+      const postFetch = fakeFetchCalls((url, init) => {
+        const body = init?.body && typeof init.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        if (init?.method === "POST" && body.action === "private_replies") return { success: true, id: `pr-${String(body.message_id)}` };
+        if (init?.method === "POST") return { success: true, id: `m-${Math.random().toString(36).slice(2)}` };
+        if (url.includes("/conversations/t-post/messages")) return { success: true, post: { message: "CHẢ CÁ THU NGUYÊN CHẤT 100% — dai tự nhiên, ngọt thịt, không hàn the" }, messages: [] };
+        return { success: true, messages: [] };
+      });
+      await receiveFanpageEvent(evc("cp-1", "Cho giá ạ . Ib", { id: "cust-mai", name: "Mai Dinh" }, "t-post", `${PAGE}_post-chaca`));
+      const rPost = await processFanpageThread(PAGE, "t-post", { fetch: postFetch.fetch, now: in31s });
+      assert.ok(rPost.replies === 1 && postSystems.length >= 1, JSON.stringify(rPost));
+      assert.ok(postSystems.every((r) => r.tools.length > 0), "có ngữ cảnh bài ⇒ không dùng câu mẫu khớp chữ / AI chọn mã");
+      assert.ok(postSystems[0].system.includes("BÌNH LUẬN DƯỚI BÀI VIẾT") && postSystems[0].system.includes("CHẢ CÁ THU NGUYÊN CHẤT 100%"), "lời nhắc mang nội dung bài");
+      const getsPost = postFetch.calls.filter((c) => c.init?.method !== "POST" && c.url.includes("/conversations/t-post/messages")).length;
+      await receiveFanpageEvent(evc("cp-2", "Ship HCM bao lâu", { id: "cust-mai", name: "Mai Dinh" }, "t-post", `${PAGE}_post-chaca`));
+      await processFanpageThread(PAGE, "t-post", { fetch: postFetch.fetch, now: () => new Date(Date.now() + 62_000) });
+      assert.ok(postSystems.at(-1)!.system.includes("CHẢ CÁ THU NGUYÊN CHẤT 100%"), "lượt sau vẫn có ngữ cảnh bài");
+      assert.equal(getsPost, 3, "lượt đầu: 1 lần đọc bài + 2 lần tìm hộp thư tin riêng (trước / sau khi gửi)");
+      assert.equal(postFetch.calls.filter((c) => c.init?.method !== "POST" && c.url.includes("/conversations/t-post/messages")).length - getsPost, 2, "lượt sau KHÔNG đọc bài lại — chỉ 2 lần tìm hộp thư");
+      setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // ═══ BOT THẤY NHỮNG GÌ PAGE ĐÃ NÓI (01/10/2026: khách «Ship c 1kí» sau trả lời tự động báo giá, bot hỏi lại «món nào») ═══
       const ctxSeen: AiRequest[] = [];
       setSalesChatProviderForTests(() => ({

@@ -62,6 +62,8 @@ export type ChatState = {
   mirroredUntil?: string;
   /** Hồ sơ hội thoại đọc từ Pancake (SĐT đã ghi nhận, mã Facebook, tin cũ trước khi bot vào) — `lib/sales-chatbot/returning.ts`. */
   returning?: PancakeThreadProfile;
+  /** Nội dung bài viết khách bình luận dưới (`null` = đã hỏi Pancake, không đọc được) — đọc một lần mỗi bài. */
+  postContext?: { postId: string; text: string | null };
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
