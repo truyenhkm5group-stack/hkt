@@ -69,6 +69,30 @@ export async function assertHomeCredentials(provider: HomeCredentialProvider): P
 }
 
 /**
+ * Client dựng từ KẾT NỐI CỦA MỘT TỔ CHỨC (`org_connections`, bí mật giải mã trong ngữ cảnh của chính tổ chức đó) chỉ
+ * được gửi request khi ngữ cảnh hiện hành VẪN là tổ chức sở hữu kết nối. Đây là lời chặn thay cho
+ * `assertHomeCredentials()` ở ĐÚNG nhánh không dùng biến môi trường: khoá ở đây không phải của nhà, nên câu hỏi không
+ * phải "có phải nhà không" mà là "có phải chủ của khoá không" — client của tổ chức A lọt sang lượt chạy của B thì NÉM
+ * trước khi một byte rời máy, không gửi bằng khoá của A rồi ghi vào CSDL của B.
+ */
+export class CredentialOwnerMismatchError extends Error {
+  readonly code = "CREDENTIAL_OWNER_MISMATCH" as const;
+  constructor(
+    readonly provider: string,
+    readonly owner: string,
+    readonly organization: string,
+  ) {
+    super(`Kết nối "${provider}" thuộc tổ chức "${owner}" — không dùng được trong ngữ cảnh tổ chức "${organization}".`);
+    this.name = "CredentialOwnerMismatchError";
+  }
+}
+
+export async function assertConnectionOwner(provider: string, owner: string): Promise<void> {
+  const org = await currentOrganization();
+  if (org.code !== owner) throw new CredentialOwnerMismatchError(provider, owner, org.code);
+}
+
+/**
  * Bản ĐỒNG BỘ, chỉ nhìn ngữ cảnh TƯỜNG MINH (`withOrganization`). Dùng ở getter đồng bộ kiểu
  * `configured` để job của tổ chức khác tự bỏ qua sớm. `false` KHÔNG có nghĩa là "chắc chắn nhà" —
  * request mang phiên tổ chức khác không có ngữ cảnh tường minh; lối gọi mạng vẫn chặn bằng

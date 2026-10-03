@@ -271,7 +271,7 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/messaging/providers.ts":
     "Gửi tin nhóm (0180) bằng bí mật của CHÍNH tổ chức ngữ cảnh qua `openActiveConnection` (AAD gắn tổ chức) — không đọc biến môi trường nào; chỉ hai loại đích cố định (webhook Custom Bot của Lark · api.telegram.org), không theo chuyển hướng; hộp thử không gọi mạng.",
   "lib/connectors/testers.ts":
-    "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường nào; đích chỉ là máy chủ Lark / api.telegram.org, không theo chuyển hướng.",
+    "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường chứa khoá nào (riêng «meta-ads-org» đọc phiên bản Graph API công khai của nền tảng); đích là các máy chủ cố định trong mã (Lark · api.telegram.org · Zalo · pages.fm · Anthropic/OpenAI/Gemini · graph.facebook.com), không theo chuyển hướng.",
 };
 
 const GOI_MANG = [/(^|[^.\w$])fetch\(/, /\bfetchJson\(/, /new\s+(?:Anthropic|OpenAI)\s*\(/, /\?\?\s*fetch\b/];

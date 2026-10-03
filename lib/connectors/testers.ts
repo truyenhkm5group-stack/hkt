@@ -3,7 +3,8 @@
  *
  * Hợp đồng: docs/platform/phase-9-contracts.md §2. Hàm ở đây nhận bí mật ĐÃ GIẢI MÃ từ
  * `lib/connectors/service.ts` (bí mật của tổ chức đang đăng nhập, trong CSDL của chính nó) — KHÔNG
- * BAO GIỜ đọc biến môi trường, nên không có credential nào của tổ chức nhà đi qua đây.
+ * BAO GIỜ đọc biến môi trường chứa khoá, nên không có credential nào của tổ chức nhà đi qua đây. (Ngoại lệ duy nhất là
+ * cấu hình CÔNG KHAI của nền tảng: phiên bản Graph API mà client Facebook cũng dùng — không phải bí mật.)
  *
  * ─── KHÔNG PHẢI MỘT MÁY GỬI REQUEST TUỲ Ý (SSRF) ───
  *
@@ -21,6 +22,8 @@
  */
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
+import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
+import { env } from "@/lib/env";
 
 export type TesterResult = { ok: boolean; message: string };
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -337,6 +340,71 @@ export async function testSandboxMessaging(input: { settings: Record<string, str
   return { ok: true, message: `Hộp thử «${name}» sẵn sàng — CHẾ ĐỘ THỬ: tin nằm trong ERP (Cài đặt → Thông báo nhóm), không gửi ra ngoài.` };
 }
 
+/*
+  ═══════════ QUẢNG CÁO FACEBOOK CỦA TỔ CHỨC (meta-ads-org) — HỎI TỪNG TÀI KHOẢN ĐÃ KHAI ═══════════
+
+  `GET https://graph.facebook.com/<phiên bản>/act_<id>?fields=name,currency,account_status` cho TỪNG tài khoản: chỉ đọc,
+  không tốn tiền, trả đúng ba thứ job đồng bộ cần (tên để in, tiền tệ để quy đổi, trạng thái để người cấu hình biết).
+  Token đi trong tiêu đề `Authorization` (không nằm trong URL), không theo chuyển hướng, trần 10 giây, che token trong
+  mọi câu lỗi. ĐẠT chỉ khi MỌI tài khoản đọc được — một tài khoản hỏng nghĩa là lượt đồng bộ sẽ thiếu tiền của nó.
+*/
+export const META_GRAPH_HOST = "https://graph.facebook.com";
+
+/** Một câu trả lời của Graph cho `act_<id>` ⇒ phán quyết. Hàm THUẦN. */
+export function metaAccountVerdict(status: number, body: unknown): { ok: true; name: string; currency: string; status: number } | { ok: false; reason: string } {
+  const rec = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  const err = rec && rec.error && typeof rec.error === "object" ? (rec.error as Record<string, unknown>) : null;
+  if (err || status < 200 || status >= 300) {
+    const code = err && typeof err.code === "number" ? err.code : null;
+    const msg = err && typeof err.message === "string" ? err.message.slice(0, 160) : `HTTP ${status}`;
+    if (code === 190) return { ok: false, reason: `token không hợp lệ hoặc đã hết hạn (mã 190)` };
+    if (code === 200 || code === 10 || code === 100 || status === 403) return { ok: false, reason: `token không có quyền ads_read trên tài khoản này, hoặc sai mã tài khoản — ${msg}` };
+    return { ok: false, reason: msg };
+  }
+  if (!rec || typeof rec.id !== "string") return { ok: false, reason: "phản hồi không có mã tài khoản" };
+  return {
+    ok: true,
+    name: typeof rec.name === "string" && rec.name ? rec.name : rec.id,
+    currency: typeof rec.currency === "string" ? rec.currency.toUpperCase() : "",
+    status: typeof rec.account_status === "number" ? rec.account_status : 0,
+  };
+}
+
+export async function testMetaAdsOrg(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const token = (input.secrets.accessToken ?? "").trim();
+  const hide = [token];
+  if (!META_SYSTEM_USER_TOKEN_PATTERN.test(token)) return { ok: false, message: "Token không đúng dạng token System User của Meta (EAA…) — không gọi." };
+  const { ids, invalid } = parseAdAccountIds(input.settings.adAccountIds);
+  if (invalid.length) return { ok: false, message: `Mã tài khoản quảng cáo không hợp lệ: ${invalid.slice(0, 3).join(", ")} — không gọi.` };
+  if (!ids.length) return { ok: false, message: "Chưa khai tài khoản quảng cáo nào — không gọi." };
+  if (ids.length > META_ADS_ORG_MAX_ACCOUNTS) return { ok: false, message: `Khai quá ${META_ADS_ORG_MAX_ACCOUNTS} tài khoản — không gọi.` };
+  const fetchImpl = deps.fetch ?? fetch;
+  const lines: string[] = [];
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      const url = `${META_GRAPH_HOST}/${encodeURIComponent(env.facebook.apiVersion)}/act_${id}?fields=name,currency,account_status`;
+      const res = await fetchImpl(url, { method: "GET", headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (res.status >= 300 && res.status < 400) {
+        failed += 1;
+        lines.push(`act_${id}: Facebook trả chuyển hướng HTTP ${res.status} — không theo`);
+        continue;
+      }
+      const v = metaAccountVerdict(res.status, await readCapped(res));
+      if (!v.ok) {
+        failed += 1;
+        lines.push(`act_${id}: ${v.reason}`);
+      } else lines.push(`act_${id} «${v.name}» (${v.currency || "chưa rõ tiền tệ"}, ${adAccountStatusLabel(v.status)})`);
+    } catch (e) {
+      failed += 1;
+      lines.push(`act_${id}: ${isNetworkFailure(e) ? `không gọi được Facebook — ${describeNetworkFailure(e, "graph.facebook.com")}` : e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const body = lines.join(" · ");
+  if (failed) return { ok: false, message: scrubSecrets(`${failed}/${ids.length} tài khoản không đọc được: ${body}`, hide) };
+  return { ok: true, message: scrubSecrets(`Đọc được ${ids.length}/${ids.length} tài khoản: ${body}. Bật để job «ads-spend-org» kéo chi tiêu mỗi 60 phút.`, hide) };
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -347,4 +415,5 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "gemini-byok": (input, deps) => testGeminiKey(input, deps),
   "sandbox-messaging": (input) => testSandboxMessaging(input),
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
+  "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
 };

@@ -41,6 +41,7 @@ import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landi
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { applyStaleReconciliation } from "@/lib/cs/stale";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
+import { syncOrgMetaAds } from "@/lib/marketing/meta-ads-org";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
@@ -540,6 +541,22 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     description:
       "Form landing ghi `utm_source` bằng adset_id. `fb_ads` chỉ tra ad_id có trong đơn Pancake (đơn landing không có), còn `ad_spends` chỉ giữ số liệu ở mức chiến dịch — nên adset_id không khớp được ở đâu cả. Job này tra THẲNG từng mã đang cần về `fb_adsets` (kể cả nhóm đã tắt), để chuỗi adset → chiến dịch → TKQC → marketer khép kín. Không đụng chi tiêu hay thanh toán.",
     run: (o) => syncFacebookAdsetIndex({ dryRun: o.params?.dryRun === "1" }),
+  },
+  /*
+    CHI TIÊU QUẢNG CÁO FACEBOOK CỦA TỔ CHỨC KHÁCH (chủ nền tảng chốt 03/10/2026 — Hải Sản Làng Chài). Credential là kết nối
+    «meta-ads-org» CỦA CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh của nó), KHÔNG phải biến môi trường — nên job
+    không nằm trong HOME_CREDENTIAL_JOBS, nguồn khai `ALL` và được fan-out như `sales-followup`. Tổ chức nhà và tổ chức
+    chưa bật kết nối bỏ qua có lý do, không ghi sync_runs. Chỉ ĐỌC Facebook; ghi `ad_spends` qua đúng bộ đồng bộ của nhà.
+  */
+  "ads-spend-org": {
+    label: "Chi tiêu quảng cáo Facebook (kết nối của tổ chức)",
+    source: "ALL",
+    module: "marketing",
+    fanOut: true,
+    description:
+      "Tổ chức khách đã bật kết nối «Quảng cáo Facebook (Meta) của tổ chức» ⇒ kéo chi tiêu theo ngày của các tài khoản quảng cáo đã khai vào bảng chi tiêu quảng cáo (cùng bộ đồng bộ, cùng khoá chống trùng với tổ chức nhà; dòng gõ tay không bị đụng). " +
+      "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Tổ chức nhà dùng «facebook-ads».",
+    run: (o) => syncOrgMetaAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   // Company OS · Agent A — sổ mẫu. Không có lịch RIÊNG: chạy lồng sau mỗi lượt `pancake-products` (P1), và chạy tay từ /models hoặc trang Kết nối dữ liệu.
   "model-registry": {

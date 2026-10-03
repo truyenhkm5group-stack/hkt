@@ -2,7 +2,7 @@ import { and, eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
 import { env } from "@/lib/env";
-import { getFacebookAdsClient, type FbAdInsight, type FbCampaignInsight } from "@/lib/integrations/facebook/client";
+import { getFacebookAdsClient, type FacebookAdsClient, type FbAdAccount, type FbAdInsight, type FbCampaignInsight } from "@/lib/integrations/facebook/client";
 import { decideGrain, type AdSpendGrain } from "@/lib/constants/ads-grain";
 import { buildProductCodeIndex, type ProductCodeEntry } from "@/lib/integrations/facebook/match";
 import { loadAdsMapping, reapplyAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
@@ -251,10 +251,40 @@ function chiaLo<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: string; days?: number } = {}) {
+/**
+ * ───────────── TỶ GIÁ CỦA NHÁNH KẾT NỐI TỔ CHỨC — CHẶT HƠN NHÁNH NHÀ, CÓ CHỦ Ý ─────────────
+ *
+ * Nhánh nhà giữ nguyên luật cũ (USD × FACEBOOK_USD_VND, tiền tệ khác × 1 — không đổi hành vi của nhà). Tổ chức khách
+ * thì không được thừa hưởng cái "× 1" ấy: một tài khoản tính bằng THB mà ghi nguyên số vào cột VND là sai tiền im lặng
+ * trên mọi báo cáo lợi nhuận của họ. Nên: VND giữ nguyên · USD theo tỷ giá cấu hình của máy chủ (`FACEBOOK_USD_VND` —
+ * tỷ giá nền tảng, KHÔNG phải tỷ giá ngân hàng; lượt chạy nói ra điều đó) · còn lại ⇒ `null` = KHÔNG GHI, báo lỗi đúng
+ * tên tài khoản. Hàm THUẦN.
+ */
+export function orgSpendRate(currency: string, usdToVnd: number): number | null {
+  const c = currency.trim().toUpperCase();
+  if (c === "VND") return 1;
+  if (c === "USD") return Number.isFinite(usdToVnd) && usdToVnd > 0 ? usdToVnd : null;
+  return null;
+}
+
+function orgAccountRate(account: FbAdAccount): number {
+  if (account.lookupError) throw new Error(`không đọc được tài khoản quảng cáo — ${account.lookupError}`);
+  if (!account.currency) throw new Error("Facebook không cho biết tiền tệ của tài khoản — không ghi để khỏi quy đổi sai");
+  const rate = orgSpendRate(account.currency, env.facebook.usdToVnd);
+  if (rate === null) throw new Error(`tài khoản tính bằng ${account.currency} — ERP chưa có tỷ giá ${account.currency}→VND, không ghi để khỏi sai tiền`);
+  return rate;
+}
+
+/**
+ * `client` — CHỈ nhánh kết nối tổ chức (`lib/marketing/meta-ads-org.ts`) truyền vào: client dựng từ kết nối
+ * «meta-ads-org» của chính tổ chức đang chạy. Không truyền ⇒ client của nhà qua getter, đúng như trước.
+ */
+export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: string; days?: number; client?: FacebookAdsClient } = {}) {
   return runSyncJob({ source: "FACEBOOK", job: "ads_insights", trigger: options.trigger, actor: options.actor }, async (ctx) => {
     const db = await getDb();
-    const client = getFacebookAdsClient();
+    const client = options.client ?? getFacebookAdsClient();
+    const orgMode = client.credentialSource === "ORG_CONNECTION";
+    const usdAccounts: string[] = [];
     const days = Math.min(Math.max(options.days ?? 3, 1), 1100);
     const until = dayKey(new Date());
     const since = dayKey(new Date(Date.now() - (days - 1) * 86_400_000));
@@ -311,7 +341,8 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
     */
     for (const account of accounts) {
       try {
-        const rate = account.currency && account.currency !== "VND" ? (account.currency === "USD" ? env.facebook.usdToVnd : 1) : 1;
+        const rate = orgMode ? orgAccountRate(account) : account.currency && account.currency !== "VND" ? (account.currency === "USD" ? env.facebook.usdToVnd : 1) : 1;
+        if (orgMode && account.currency === "USD") usdAccounts.push(account.name);
         const campaignRows = await fetchCampaignInsights(client, account.accountId, since, until, ctx.log);
         /*
           CẤP MẨU HỎNG KHÔNG ĐƯỢC KÉO THEO CẢ LƯỢT ĐỒNG BỘ.
@@ -501,7 +532,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       ctx.summary.warning = [ctx.summary.warning, `Không áp lại được bảng ghép mã hàng: ${message.slice(0, 200)}. Số liệu quảng cáo của lượt này VẪN ĐÃ GHI XONG.`].filter(Boolean).join(" · ");
       ctx.log(`áp lại ghép mã hàng hỏng: ${message}`);
     }
-    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng (${since} → ${until}) · ${tongNgay} (tài khoản × ngày): ${ngayHatMau} ở hạt MẨU, ${ngayHatChienDich} ở hạt CHIẾN DỊCH · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}`;
+    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng (${since} → ${until}) · ${tongNgay} (tài khoản × ngày): ${ngayHatMau} ở hạt MẨU, ${ngayHatChienDich} ở hạt CHIẾN DỊCH · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}${usdAccounts.length ? ` · ${usdAccounts.length} tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ ${env.facebook.usdToVnd} ₫/USD (không phải tỷ giá ngân hàng)` : ""}`;
     publish({ type: "ads" });
     return { accounts: accounts.length, rows, matched };
   });

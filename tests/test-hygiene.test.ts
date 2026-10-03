@@ -120,6 +120,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT TELEGRAM_API_BASE = «https://tg.vnxcommerce.com» (giá trị BỊA) để kiểm kiểm tra kết nối / tìm chat đi qua relay — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai relay hay không.",
   "tests/self-service-journey.test.ts":
     "ĐẶT PLATFORM_BASE_DOMAIN = «erp.test» (giá trị BỊA) để kiểm liên kết của tổ chức đã xuất bản đi theo tên miền con — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai miền gốc hay không.",
+  "tests/meta-ads-org.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «Quảng cáo Facebook (Meta) của tổ chức» trong tổ chức thử và để job đọc lại nó (cùng cách sales-order-sync); fetch là bản giả đóng vai Graph API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-order-sync.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/launch-gates.test.ts":
