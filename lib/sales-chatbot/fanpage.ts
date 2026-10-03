@@ -126,6 +126,8 @@ export function normalizeEcho(text: string): string {
 const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
 const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
+/** Bot nhắn trong chừng này mà có tin phía page lạ tới ⇒ nhân viên đang vào hội thoại (Pancake không gắn uid). */
+const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
 
 export type FanpageEvent = {
   pageId: string;
@@ -294,8 +296,18 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .onConflictDoNothing({ target: t.messageId });
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
-    if (!ev.humanStaff) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     const c = schema.salesChatConversations;
+    if (!ev.humanStaff) {
+      // Pancake KHÔNG gắn uid cho tin nhân viên gõ (03/10/2026, «Đỗ Là»: nhân viên vào xin địa chỉ, bot vẫn chen hai tin xin lỗi
+      // dài). Trả lời tự động của Meta / lời chào quảng cáo chỉ tới ở ĐẦU hội thoại; tin phía page (không phải bot, không phải
+      // ghi chú Pancake) tới GIỮA lúc bot đang trò chuyện ⇒ là người ⇒ nhường như nhân viên.
+      const [active] = await db
+        .select({ id: c.id })
+        .from(c)
+        .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
+        .limit(1);
+      if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
+    }
     // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
     await db
       .update(c)
@@ -610,7 +622,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore))))
-      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId });
+      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId, customerName: t.customerName });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
     // Khách vừa nhắn ⇒ hết im lặng: dừng lịch follow-up, ghi mốc tin cuối của khách (khung 24 giờ của Facebook tính từ đây).
@@ -685,7 +697,8 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       context = postContextPrompt(postText);
     }
-    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), ...(context ? { context } : {}) });
+    const customerName = [...claimed].reverse().find((r) => r.customerName?.trim())?.customerName ?? null;
+    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), customerName, ...(context ? { context } : {}) });
     if (!turn.ok) {
       // Lượt khác đang trả lời cùng hội thoại ⇒ nhả tin để lượt sau gom; lý do khác (bot tắt…) ⇒ bỏ qua có ghi chú.
       const busy = /Đang trả lời câu trước/.test(turn.error);

@@ -67,10 +67,13 @@ export function testChatCostReport() {
     { id: "b", state: st({ confirmed: { orderId: null, simulated: true, total: 1, at: "2026-10-02T01:00:00Z" }, customer: { id: null, name: "T", phone: "0900000000", address: "x", province: "", simulated: true, at: "2026-10-02T01:00:00Z" } }) },
     { id: "c", state: st({ customer: { id: "c2", name: "B", phone: "0987654321", address: "x", province: "", simulated: false } }) },
     { id: "d", state: st({ customer: { id: "c3", name: "C", phone: "khong-phai-so", address: "x", province: "", simulated: false, at: "2026-10-02T01:00:00Z" } }) },
+    // Khách mua lại trong cùng hội thoại: đơn cũ chuyển sang pastOrders — vẫn đếm.
+    { id: "e", state: st({ pastOrders: [{ orderId: "o0", simulated: false, total: 1, at: "2026-09-20T03:00:00Z" }] }) },
   ]);
   assert.deepEqual(ev.events, [
     { day: "2026-10-02", kind: "ORDER", key: "o1" },
     { day: "2026-10-01", kind: "PHONE", key: "0912345678" },
+    { day: "2026-09-20", kind: "ORDER", key: "o0" },
   ]);
   assert.equal(ev.phonesWithoutDate, 1, "SĐT trước khi có mốc ⇒ đếm riêng");
 

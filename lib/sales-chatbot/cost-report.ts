@@ -124,8 +124,9 @@ export function outcomeEventsOf(conversations: readonly { id: string; state: Cha
   const events: OutcomeEvent[] = [];
   const undated = new Set<string>();
   for (const c of conversations) {
-    const conf = c.state.confirmed;
-    if (conf && !conf.simulated && conf.orderId && conf.at) events.push({ day: vnDayKey(new Date(conf.at)), kind: "ORDER", key: conf.orderId });
+    for (const conf of [...(c.state.pastOrders ?? []), ...(c.state.confirmed ? [c.state.confirmed] : [])]) {
+      if (!conf.simulated && conf.orderId && conf.at) events.push({ day: vnDayKey(new Date(conf.at)), kind: "ORDER", key: conf.orderId });
+    }
     const cust = c.state.customer;
     const phone = cust && !cust.simulated ? normalizeCustomerPhone(cust.phone) : null;
     if (!phone) continue;

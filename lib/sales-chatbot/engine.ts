@@ -126,18 +126,19 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "2. Tiền luôn dùng calculate_cart (hoặc kết quả đơn nháp) — không tự cộng nhẩm. Tiền đơn = đơn giá × số lượng − chiết khấu + phí ship.",
     `3. ${shipping}`,
     "4. check_inventory trả stock_known = false ⇒ nói «kho sẽ kiểm và báo lại», KHÔNG nói còn / hết hàng. enough = false ⇒ báo không đủ hàng, gợi ý số lượng khác.",
-    "5. Lên đơn: cần đủ HỌ TÊN, SỐ ĐIỆN THOẠI, ĐỊA CHỈ GIAO (khách cũ: dùng khối KHÁCH CŨ, không hỏi lại phần đã có), ghi chú giao hàng (nếu có) → create_customer → create_draft_order → ĐỌC LẠI TÓM TẮT gồm từng dòng (tên × SL × đơn giá = thành tiền), tiền hàng, phí ship, TỔNG THU KHI GIAO (COD), người nhận, SĐT, địa chỉ, ghi chú → hỏi khách «anh/chị xác nhận chốt đơn không ạ?».",
-    "6. CHỈ gọi confirm_order khi câu cuối của khách là lời đồng ý rõ ràng; customer_confirmation = nguyên văn lời đồng ý đó. Khách đổi ý / sửa ⇒ update_draft_order rồi đọc lại tóm tắt.",
+    "5. Lên đơn: cần SỐ ĐIỆN THOẠI + ĐỊA CHỈ GIAO, và HỌ TÊN — có «TÊN KHÁCH (Facebook)» thì dùng tên đó, KHÔNG xin họ tên (khách cũ: dùng khối KHÁCH CŨ, không hỏi lại phần đã có) → create_customer → create_draft_order → TÓM TẮT NGẮN (xem B5).",
+    "6. CHỈ gọi confirm_order khi câu cuối của khách là lời đồng ý rõ ràng; customer_confirmation = nguyên văn lời đồng ý đó. Sau tóm tắt, khách đáp «ok», «chốt», «được», «đúng rồi», «không lấy thêm», «giao đi»… ⇒ gọi confirm_order NGAY, KHÔNG hỏi xác nhận lần nữa (hỏi lại dễ làm khách đổi ý). Khách đổi ý / sửa ⇒ update_draft_order rồi gửi lại tóm tắt. Chốt xong ⇒ MỘT câu ngắn (vd «Dạ em lên đơn cho mình rồi ạ, shop giao sớm cho mình nha ❤️») — KHÔNG đọc mã đơn, KHÔNG nhắc lại địa chỉ / tiền.",
     `7. Chuyển nhân viên (handoff_to_human) là lối CUỐI, chỉ khi: ${[cfg.handoff.onCustomerRequest ? "khách muốn gặp người" : "", cfg.handoff.onComplaint ? "khách khiếu nại / phàn nàn" : "", "câu hỏi mà dữ liệu ERP, «Về shop», «Hướng dẫn thêm của shop» và sổ tay đều KHÔNG trả lời được"].filter(Boolean).join(", ")}. Chưa hiểu ý khách thì HỎI LẠI khách cho rõ, KHÔNG chuyển người. Sau đó nói: «${cfg.handoff.message}».`,
-    "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu. Chữ bạn viết ra được GỬI NGUYÊN VĂN cho khách: chỉ viết câu nói với khách — KHÔNG viết suy luận, phân tích, kế hoạch, không nói về «khách» ở ngôi thứ ba.",
+    "NÓI ÍT — mỗi tin tối đa 2 câu ngắn (trừ tóm tắt đơn và câu mẫu). KHÔNG chúc tụng, KHÔNG xin lỗi dài, KHÔNG lặp lại điều khách vừa nói, KHÔNG hỏi «cần hỗ trợ thêm gì không», KHÔNG nhắc lại báo giá / quảng cáo đã gửi. Nhắn dài dễ làm khách khó chịu và đổi ý.",
+    "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. KHÔNG BAO GIỜ chép lại tin trong lịch sử (kể cả dòng mở đầu bằng «[Shop đã nhắn]»). KHÔNG hứa điều bạn không làm bằng công cụ (đổi lịch giao, đổi địa chỉ đơn đã chốt, giao ngày Chủ nhật…) — việc đó là của nhân viên. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu. Chữ bạn viết ra được GỬI NGUYÊN VĂN cho khách: chỉ viết câu nói với khách — KHÔNG viết suy luận, phân tích, kế hoạch, không nói về «khách» ở ngôi thứ ba.",
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
     "  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách (vd 1kg hay 2kg) trước khi báo giá.",
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
-    "  B3 INFO — Lấy HỌ TÊN, SĐT, ĐỊA CHỈ: có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối (xác nhận ngắn + mời thêm món trong CÙNG một tin) rồi đi thẳng B4 / B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
+    "  B3 INFO — Lấy SĐT, ĐỊA CHỈ (họ tên: tên Facebook nếu có — KHÔNG xin): có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối (xác nhận ngắn + mời thêm món trong CÙNG một tin) rồi đi thẳng B4 / B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
     upsell
       ? `  B4 UPSELL — NGAY khi khách vừa gửi đủ thông tin nhận hàng (create_customer xong): gửi câu mẫu ${upsell.code} (send_quick_reply — kèm ảnh menu, mời thêm món), rồi đi tiếp B5 TRONG CÙNG LƯỢT (máy chủ chặn lên đơn khi chưa mời). Chỉ mời ĐÚNG MỘT LẦN mỗi hội thoại.`
       : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) ngay trong tin tóm tắt đơn; khách từ chối ⇒ không mời lại.",
-    "  B5 CONFIRM — create_draft_order ⇒ gửi TÓM TẮT CHỐT ĐƠN để khách nắm thông tin (từng món × SL × đơn giá, tiền hàng, phí ship, tổng thu khi giao, người nhận, SĐT, địa chỉ) và kết bằng «Anh/chị lấy thêm món nào báo em thêm vào đơn, không thì anh/chị xác nhận để em giao luôn ạ». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
+    "  B5 CONFIRM — create_draft_order ⇒ TÓM TẮT NGẮN, tối đa 3 dòng: món × SL + tổng tiền hàng · ship (theo shipping_text) · giao tới địa chỉ + SĐT; KHÔNG ghi «Người nhận», mã đơn, đơn giá từng dòng khi chỉ 1–2 món; kết bằng «Mình lấy thêm gì không, không thì em giao luôn ạ?». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
     "  Khách hẹn ngày / giờ giao ⇒ ghi vào delivery_note, KHÔNG cần chuyển người. Khách TỪ CHỐI RÕ RÀNG ⇒ mark_declined, chào lịch sự, không nài.",
     "HIỂU KHÁCH:",
     "  · Tin bắt đầu bằng «[Shop đã nhắn]» là của nhân viên / trả lời tự động của page — khách đang nói tiếp về đúng món, đúng giá trong đó. KHÔNG hỏi lại khách muốn món gì nếu lịch sử đã rõ.",
@@ -229,6 +230,12 @@ const SPEAKS_TO_CUSTOMER = /^\s*(?:dạ|vâng|chào|xin chào|em |cảm ơn|cám
  * HÀM THUẦN.
  */
 export function customerFacingText(text: string): { text: string; leaked: boolean } {
+  // Model chép lại tin page trong lịch sử («…nhé.[Shop đã nhắn] Dạ em chào…» — 03/10/2026, «Đỗ Là») ⇒ cắt từ nhãn trở đi.
+  const marker = text.indexOf("[Shop đã nhắn]");
+  if (marker >= 0) {
+    const head = customerFacingText(text.slice(0, marker).trim());
+    return { text: head.text, leaked: true };
+  }
   const lines = text.split(/\r?\n/);
   const bad = (l: string) => LEAK_LINE.test(l) || LEAK_ANY.some((r) => r.test(l));
   if (!lines.some(bad)) return { text, leaked: false };
@@ -241,6 +248,15 @@ export function customerFacingText(text: string): { text: string; leaked: boolea
   }
   if (start < 0) return { text: "", leaked: true };
   return { text: lines.slice(start).filter((l) => !bad(l)).join("\n").trim(), leaked: true };
+}
+
+/**
+ * Tên Facebook của khách (kênh fanpage) — chủ shop 03/10/2026, «Đỗ Là»: khách gửi SĐT + địa chỉ rồi mà bot xin «Họ tên người
+ * nhận» tới HAI lần. Có tên ⇒ dùng làm người nhận, không xin. `""` khi không có tên. HÀM THUẦN.
+ */
+export function customerNamePrompt(name: string | null | undefined): string {
+  const n = (name ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+  return n ? `TÊN KHÁCH (Facebook): «${n}» — dùng làm họ tên người nhận; KHÔNG xin họ tên (khách tự nêu tên người nhận khác thì dùng tên đó).` : "";
 }
 
 export function historyForModel(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at?: Date }[], limit: number): AiMessage[] {
@@ -427,7 +443,7 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
  * `context` = ngữ cảnh máy chủ đọc được cho lượt này (vd nội dung bài viết khách vừa bình luận dưới — `postContextPrompt`).
  * Có ngữ cảnh ⇒ bỏ qua câu mẫu khớp chữ / AI chọn mã: câu khách («cho giá») chỉ hiểu đúng khi đọc cùng ngữ cảnh.
  */
-export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string }): Promise<TurnResult> {
+export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
   if (!text) return { ok: false, error: "Tin nhắn trống." };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
@@ -470,7 +486,26 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     // CÂU TRẢ LỜI MẪU (0183 · lib/sales-chatbot/quick-replies.ts): khớp CHỮ trước — 0 token. Khách đang có đơn nháp chưa
     // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
     const qrSettings = await loadQuickReplySettings();
-    const st0 = (conv.state ?? {}) as ChatState;
+    let st0 = (conv.state ?? {}) as ChatState;
+    // SAU KHI CHỐT ĐƠN (03/10/2026, «Đỗ Là»: đơn đã chốt, khách hỏi đổi địa chỉ / giao Chủ nhật ⇒ bot hứa «em đã cập nhật ghi
+    // chú…» — việc nó KHÔNG làm được — rồi chép cả báo giá cũ). Khách nhắn trong POST_ORDER_HANDOFF_MS sau khi chốt ⇒ nhân viên
+    // xử lý (fanpage: bot im, nhóm được báo). Lâu hơn ⇒ lượt mua MỚI: đơn cũ sang `pastOrders`, bán lại từ đầu.
+    if (st0.confirmed) {
+      const at = Date.parse(st0.confirmed.at);
+      if (Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS) {
+        const reason = "Khách nhắn sau khi đã chốt đơn — nhân viên xử lý (đổi địa chỉ / lịch giao / hỏi thêm)";
+        const st = { ...st0, handoff: { reason, at: now.toISOString() } };
+        if (opts.channel !== "FANPAGE") await reply(conv, seq, cfg.handoff.message);
+        await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+      const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed] };
+      for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff"] as const) delete fresh[k];
+      await bump({ state: fresh as Record<string, unknown> });
+      conv.state = fresh as Record<string, unknown>;
+      st0 = fresh;
+    }
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
     const quick: QuickReplyStep = opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
@@ -528,7 +563,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const returning = await findReturningCustomer(known).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -573,7 +608,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, recentSaid, turn: turnSeq, bookingOn, now });
           state = r.state;
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);
@@ -677,6 +712,9 @@ export async function appendContextMessages(conversationId: string, items: reado
     }
   }
 }
+
+/** Khách nhắn trong chừng này sau khi bot chốt đơn ⇒ nhân viên xử lý; lâu hơn ⇒ lượt mua mới. */
+export const POST_ORDER_HANDOFF_MS = 3 * 24 * 3_600_000;
 
 /** Tiền tố tin của page / nhân viên trong lịch sử của bot. */
 export const SHOP_SAID = "[Shop đã nhắn]";
