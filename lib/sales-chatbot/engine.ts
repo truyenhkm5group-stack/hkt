@@ -35,6 +35,8 @@ import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
+import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
+import { formatVND } from "@/lib/format";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
@@ -84,7 +86,13 @@ export function bookingPrompt(cfg: SalesChatbotConfig, now: Date): string {
 
 export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = ""): string {
   const upsell = quick.find((q) => q.upsell);
-  const shipping = cfg.shippingFee === null ? "Shop CHƯA khai phí ship cố định: nói với khách «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số." : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.";
+  const freeShip = freeShipPolicyText(cfg.freeShipping, formatVND);
+  const shipping = [
+    freeShip ? `CHÍNH SÁCH MIỄN SHIP của shop (nói được khi khách hỏi ship / giao hàng): ${freeShip}. Miễn ship của MỘT đơn: đọc ĐÚNG shipping_text của calculate_cart / đơn nháp — không tự hứa khi công cụ chưa nói.` : "",
+    cfg.shippingFee === null ? `Shop CHƯA khai phí ship cố định: đơn không được miễn ship ⇒ nói «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số.${freeShip ? " KHÔNG nói câu này với đơn đủ điều kiện miễn ship." : ""}` : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return [
     `Bạn là «${cfg.botName}», nhân viên bán hàng qua chat của shop «${shopName}». Trả lời bằng tiếng Việt, giọng: ${SALES_TONE_LABEL[cfg.tone]}. Câu ngắn, rõ, không dùng markdown phức tạp.`,
     profile ? `Về shop: ${profile}` : "",

@@ -24,6 +24,8 @@ export type CatalogItem = {
   variant: string;
   price: number | null;
   fields: Record<string, string>;
+  /** Khối lượng mẫu mã (gram, cột `weight`) — `null` khi chưa nhập (luật miễn ship đọc quy cách trong tên thay thế). */
+  weightGrams?: number | null;
 };
 
 export type StockInfo = { variantId: string; stockKnown: boolean; onHand: number | null; available: number | null };
@@ -62,7 +64,7 @@ export async function sellableCatalog(allowedFields: readonly string[]): Promise
   const pv = schema.productVariants;
   const p = schema.products;
   const rows = await db
-    .select({ variantId: pv.id, productId: pv.productId, name: p.name, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice })
+    .select({ variantId: pv.id, productId: pv.productId, name: p.name, sku: pv.sku, detail: pv.detail, color: pv.color, size: pv.size, price: pv.retailPrice, weight: pv.weight })
     .from(pv)
     .innerJoin(p, eq(p.id, pv.productId))
     .where(and(eq(pv.isRemoved, false), eq(pv.isHidden, false), eq(p.isRemoved, false)))
@@ -77,6 +79,7 @@ export async function sellableCatalog(allowedFields: readonly string[]): Promise
     variant: variantText(r),
     price: r.price > 0 ? r.price : null,
     fields: fields.get(r.productId) ?? {},
+    weightGrams: r.weight > 0 ? r.weight : null,
   }));
 }
 

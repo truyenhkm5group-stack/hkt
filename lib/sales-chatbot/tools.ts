@@ -29,6 +29,7 @@ import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/cus
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
 import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
+import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
@@ -270,7 +271,7 @@ function err(summary: string, message: string, state: ChatState): ToolOutcome {
   return { content: JSON.stringify({ error: message }), isError: true, summary, state };
 }
 
-type Priced = { lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
+type Priced = { ship: ShipVerdict; lines: { variantId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }[]; subtotal: number; shippingFee: number | null; total: number | null; unpriced: string[]; missing: string[] };
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -286,8 +287,10 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
   return quoteUnitPrice({ variantId: it.variantId, quantity, retailPrice: it.price, customerList: books.customerList, defaultList: books.defaultList })?.unitPrice ?? null;
 }
 
-async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null): Promise<Priced> {
-  const catalog = await sellableCatalog([]);
+/** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
+async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, customerId: string | null = null, address: string | null = null): Promise<Priced> {
+  // Hai field quy cách của mẫu thực phẩm — nguồn khối lượng cho luật miễn ship khi cột weight chưa nhập.
+  const catalog = await sellableCatalog(cfg.freeShipping.enabled ? ["net_weight", "package_size"] : []);
   const books = await booksForChat(cfg, customerId);
   const byId = new Map(catalog.map((c) => [c.variantId, c]));
   const out: Priced["lines"] = [];
@@ -301,8 +304,16 @@ async function priceLines(lines: readonly CartLine[], cfg: SalesChatbotConfig, c
     else out.push({ variantId: l.variantId, name: `${it.name}${it.variant ? ` (${it.variant})` : ""}`, quantity: l.quantity, unitPrice: unit, lineTotal: unit * l.quantity });
   }
   const subtotal = out.reduce((s, l) => s + l.lineTotal, 0);
-  const shippingFee = cfg.shippingFee;
-  return { lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing };
+  // Khối lượng đơn: một dòng không biết khối lượng ⇒ cả đơn KHÔNG xét ngưỡng khối lượng (không đoán).
+  let weight: number | null = 0;
+  for (const l of out) {
+    const it = byId.get(l.variantId);
+    const w = it ? variantWeightGrams(it.weightGrams, it.variant, it.name, it.fields.net_weight ?? "", it.fields.package_size ?? "") : null;
+    weight = weight === null || w === null ? null : weight + w * l.quantity;
+  }
+  const ship = freeShipVerdict(cfg.freeShipping, subtotal, weight, address, formatVND);
+  const shippingFee = ship.kind === "FREE" ? 0 : cfg.shippingFee;
+  return { ship, lines: out, subtotal, shippingFee, total: shippingFee === null ? null : subtotal + shippingFee, unpriced, missing };
 }
 
 function mergeLines(lines: readonly CartLine[]): CartLine[] {
@@ -317,20 +328,28 @@ function cartView(p: Priced) {
     subtotal: p.subtotal,
     subtotal_text: formatVND(p.subtotal),
     shipping_fee: p.shippingFee,
-    shipping_text: p.shippingFee === null ? "Phí ship: nhân viên sẽ báo sau (shop chưa khai phí ship cố định)" : formatVND(p.shippingFee),
+    shipping_text:
+      p.ship.kind === "FREE"
+        ? "Miễn phí ship"
+        : p.ship.kind === "FREE_IF_AREA"
+          ? p.ship.text
+          : `${p.shippingFee === null ? "Phí ship: nhân viên sẽ báo sau (shop chưa khai phí ship cố định)" : formatVND(p.shippingFee)}${p.ship.kind === "BELOW" ? ` · ${p.ship.text}` : ""}`,
     cod_total: p.total,
-    cod_total_text: p.total === null ? `${formatVND(p.subtotal)} + phí ship (báo sau)` : formatVND(p.total),
+    cod_total_text: p.total !== null ? formatVND(p.total) : p.ship.kind === "FREE_IF_AREA" ? `${formatVND(p.subtotal)} (miễn ship nếu giao trong khu vực miễn ship; ngoài khu vực + phí ship báo sau)` : `${formatVND(p.subtotal)} + phí ship (báo sau)`,
   };
 }
 
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
-  const notes = [draft.note, cfg.shippingFee === null ? "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." : ""].filter((x) => x.trim());
+  const notes = [
+    draft.note,
+    priced.ship.kind === "FREE_IF_AREA" ? "Miễn ship NẾU địa chỉ thuộc khu vực miễn ship — nhân viên kiểm địa chỉ trước khi giao." : priced.shippingFee === null ? "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." : "",
+  ].filter((x) => x.trim());
   return {
     customerId: state.customer?.id ?? "",
     stage,
     lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice, discount: 0 })),
     orderDiscount: 0,
-    shippingFee: cfg.shippingFee ?? 0,
+    shippingFee: priced.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),
     channel: channel === "FANPAGE" ? "Chatbot fanpage" : "Chatbot web",
     recipient: { name: draft.recipient.name, phone: draft.recipient.phone, address: draft.recipient.address, province: draft.recipient.province },
@@ -455,7 +474,8 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
     case "calculate_cart": {
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Tính giỏ: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
-      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, state.customer?.id ?? null);
+      const knownAddress = state.draft ? [state.draft.recipient.address, state.draft.recipient.province].join(", ") : state.customer ? [state.customer.address, state.customer.province].join(", ") : null;
+      const priced = await priceLines(mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx.config, state.customer?.id ?? null, knownAddress);
       if (priced.missing.length) return err("Tính giỏ: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Tính giỏ: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")} — không báo giá, chuyển nhân viên.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       return ok(`Giỏ: ${formatVND(priced.subtotal)}${priced.total !== null ? ` · COD ${formatVND(priced.total)}` : ""}`, cartView(priced), state);
@@ -506,10 +526,11 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       if (state.confirmed) return err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — muốn đổi thì chuyển nhân viên (handoff_to_human).", state);
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
-      const priced = await priceLines(lines, ctx.config, state.customer?.id ?? null);
+      const recipient = recipientFrom(v.data, base);
+      const priced = await priceLines(lines, ctx.config, state.customer?.id ?? null, [recipient.address, recipient.province].join(", "));
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
-      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
+      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
         const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload) : await createOrderAsAgent(ctx.agent, payload);
@@ -534,7 +555,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       }
       const d = state.draft;
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state);
-      const priced = await priceLines(d.lines, ctx.config, state.customer?.id ?? null);
+      const priced = await priceLines(d.lines, ctx.config, state.customer?.id ?? null, [d.recipient.address, d.recipient.province].join(", "));
       if (priced.missing.length || priced.unpriced.length) return err("Chốt: mã không bán được", "Có mẫu mã không còn bán hoặc chưa có giá — chuyển nhân viên.", state);
       const changed = priced.lines.filter((l) => d.unitPrices[l.variantId] !== l.unitPrice);
       if (changed.length) {
