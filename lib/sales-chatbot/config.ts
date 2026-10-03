@@ -104,6 +104,11 @@ export const salesChatbotConfigZ = z
         onCustomerRequest: z.boolean(),
         onComplaint: z.boolean(),
         message: z.string().trim().min(2).max(300),
+        /**
+         * Gửi tin «Chatbot chuyển khách cho nhân viên» vào nhóm chat vận hành (cùng nhóm báo đơn). Mặc định TẮT — chủ shop
+         * Hải Sản Làng Chài 03/10/2026: nhóm chỉ cần tin ĐƠN MỚI. Chuông / hộp thư trong ERP vẫn luôn có.
+         */
+        notifyGroup: z.boolean().default(false),
       })
       .strict(),
     /** Chính sách chốt: LUÔN đọc lại tóm tắt (hàng, SL, đơn giá, tiền, người nhận, địa chỉ) và chờ khách xác nhận. */
@@ -152,7 +157,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   thinking: "SMART",
   greeting: "Chào anh/chị! Em có thể tư vấn sản phẩm, báo giá và lên đơn giúp mình ạ.",
   businessHours: { enabled: false, start: "08:00", end: "21:00", days: [0, 1, 2, 3, 4, 5, 6], outsideMessage: "Shop đang ngoài giờ làm việc — anh/chị để lại tin nhắn, nhân viên sẽ trả lời sớm nhất ạ." },
-  handoff: { onCustomerRequest: true, onComplaint: true, message: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé." },
+  handoff: { onCustomerRequest: true, onComplaint: true, message: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé.", notifyGroup: false },
   confirmation: "RECAP_AND_WAIT",
   shippingFee: null,
   freeShipping: DEFAULT_FREE_SHIPPING,

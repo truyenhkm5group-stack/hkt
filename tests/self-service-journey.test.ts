@@ -58,7 +58,8 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
+import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig, withModelFallback, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
@@ -309,6 +310,11 @@ function testPure() {
   assert.deepEqual(customerFacingText("[Shop đã nhắn] Dạ em chào anh/chị"), { text: "", leaked: true });
   assert.equal(customerNamePrompt("  Đỗ   Là "), "TÊN KHÁCH (Facebook): «Đỗ Là» — dùng làm họ tên người nhận; KHÔNG xin họ tên (khách tự nêu tên người nhận khác thì dùng tên đó).");
   assert.equal(customerNamePrompt(null), "");
+  // ═══ MODEL KHAI KHÔNG DÙNG ĐƯỢC ⇒ TỰ LÙI MODEL MẶC ĐỊNH (03/10/2026 — «gemini-2.5-flash-lite», 108 lượt lỗi liền) ═══
+  assert.ok(isModelUnavailableError("Gemini trả lỗi HTTP 404: models/gemini-2.5-flash-lite is no longer available to new users."));
+  assert.ok(isModelUnavailableError("404 The model `gpt-9` does not exist or you do not have access to it."));
+  assert.ok(isModelUnavailableError("model_not_found"));
+  for (const other of ["Gemini trả lỗi HTTP 429: Resource has been exhausted", "Gemini trả lỗi HTTP 400: API key not valid", "credit balance is too low", "fetch failed"]) assert.equal(isModelUnavailableError(other), false, other);
   // ═══ BOT TỰ HỌC (03/10/2026) — phần thuần ═══
   assert.deepEqual(normalizeLessons(["- Khi khách đã cho SĐT ⇒ không hỏi lại", "1. Khi khách hỏi giá 1kg ⇒ báo 280k ạ", "khi khách đã cho sđt ⇒ không hỏi lại", "ngắn", ""]), ["Khi khách đã cho SĐT ⇒ không hỏi lại", "Khi khách hỏi giá 1kg ⇒ báo [giá lấy từ ERP] ạ"], "bỏ đầu dòng, bỏ giá, bỏ trùng không dấu, bỏ dòng quá ngắn");
   assert.equal(normalizeLessons(Array.from({ length: 40 }, (_, i) => `Khi tình huống số ${"x".repeat(i + 1)} ⇒ làm việc`)).length, 25, "tối đa 25 bài");
@@ -961,9 +967,17 @@ async function testJourney() {
       assert.ok(!hoFetch.calls.some((c) => c.init?.method === "POST"), "chuyển người ⇒ không gửi gì cho khách");
       const hoConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ho"))))[0];
       assert.equal(hoConv.status, "HANDOFF");
-      // (02/10/2026 · ảnh «Lê Quyền») bot im lặng ⇒ nhóm «báo nhóm vận hành» của shop nhận MỘT tin có TÊN khách trên fanpage.
+      // (03/10/2026) Chủ shop: «chỉ cần thông báo khi có đơn mới» ⇒ mặc định nhóm KHÔNG nhận tin chuyển người (chuông ERP vẫn có).
+      const hoGroupOff = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.event, "sales_chat.handoff"), eq(schema.messagingDeliveries.subjectId, hoConv.id)));
+      assert.equal(hoGroupOff.length, 0, "mặc định không báo nhóm khi chuyển người");
+      assert.ok((await db.select().from(schema.notifications).where(eq(schema.notifications.dedupeKey, `sales-chat:handoff:${hoConv.id}`))).length === 1, "chuông ERP vẫn có");
+      // (02/10/2026 · ảnh «Lê Quyền») shop BẬT công tắc ⇒ nhóm «báo nhóm vận hành» nhận MỘT tin có TÊN khách trên fanpage.
+      const cfgHo = await loadSalesChatbotConfig();
+      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...cfgHo, handoff: { ...cfgHo.handoff, notifyGroup: true } });
+      await notifySalesChatHandoff(hoConv.id, "Khách muốn giao ngày mai", null, new Date());
       const hoGroup = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.event, "sales_chat.handoff"), eq(schema.messagingDeliveries.subjectId, hoConv.id)));
       assert.ok(hoGroup.length === 1 && hoGroup[0].connectorKey === "sandbox-messaging" && /Khách cần nhân viên trả lời: Chị Hồ/.test(hoGroup[0].body) && /Bot đã dừng/.test(hoGroup[0].body), JSON.stringify(hoGroup.map((d) => [d.connectorKey, d.body])));
+      await setSettingJson(SALES_CHATBOT_SETTING_KEY, cfgHo);
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // ═══ GỬI LẠI TIN NHÓM HỎNG VÌ MẠNG (0186 — Telegram chập chờn từ máy chủ ở Việt Nam) ═══
       const tgToken = `123456789:${"A".repeat(35)}`;
@@ -1444,6 +1458,20 @@ async function testJourney() {
       const autoFetch = timed([{ id: "m-new2-q", at: "2026-10-03T12:47:00.000000" }, { id: "m-new2-auto", at: "2026-10-03T12:47:01.000000" }]);
       const fAuto = await processFanpageThread(PAGE, "t-987", { fetch: autoFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fAuto.replies === 0 && /Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động tạo sau tin khách ⇒ nhường: ${JSON.stringify(fAuto)}`);
+      // (03/10/2026) Hội thoại chuyển người vì AI HỎNG (ô model sai) ⇒ khách nhắn lại sau thời gian nhường thì bot thử lại, không
+      // bắt ai bấm «Trả lại cho AI» cho từng hội thoại. Chưa hết thời gian nhường ⇒ vẫn nhường.
+      await receiveFanpageEvent(ev("m-down-1", "Shop ơi", { id: "cust-down", name: "Cham Duong" }, "t-988"));
+      await processFanpageThread(PAGE, "t-988", { fetch: newFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      const downKey = fanpageVisitorKey(PAGE, "t-988");
+      const cvD = schema.salesChatConversations;
+      await db.update(cvD).set({ status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON, state: sql`${cvD.state} || ${JSON.stringify({ handoff: { reason: AI_DOWN_HANDOFF_REASON, at: new Date().toISOString() } })}::jsonb`, updatedAt: new Date() }).where(eq(cvD.visitorKey, downKey));
+      await receiveFanpageEvent(ev("m-down-2", "Chả cá thu bao nhiêu 1kg", { id: "cust-down", name: "Cham Duong" }, "t-988"));
+      const dNow = await processFanpageThread(PAGE, "t-988", { fetch: newFetch.fetch, now: in31s });
+      assert.ok(dNow.replies === 0 && dNow.skipped === AI_DOWN_HANDOFF_REASON, `vừa chuyển người vì AI hỏng ⇒ chưa thử lại: ${JSON.stringify(dNow)}`);
+      await receiveFanpageEvent(ev("m-down-3", "Shop ơi còn hàng không", { id: "cust-down", name: "Cham Duong" }, "t-988"));
+      const dLater = await processFanpageThread(PAGE, "t-988", { fetch: newFetch.fetch, now: () => new Date(Date.now() + 31 * 60_000) });
+      const downConv = (await db.select().from(cvD).where(eq(cvD.visitorKey, downKey)))[0];
+      assert.ok(dLater.replies >= 1 && downConv.status !== "HANDOFF" && !(downConv.state as ChatState).handoff, `hết thời gian nhường ⇒ bot thử lại: ${JSON.stringify(dLater)} ${downConv.status}`);
       assert.equal(pancakeCreatedAfterVerdict([{ id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), true, "hội thoại mới: Meta trả lời sau ⇒ page đã trả lời");
       assert.equal(pancakeCreatedAfterVerdict([{ id: "o", inserted_at: "2026-07-17T09:00:00" }, { id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), false, "hội thoại cũ ⇒ không");
       // Không đọc được mốc (Pancake lỗi) ⇒ coi là CHƯA trả lời — khách nhận một câu trùng còn hơn không ai trả lời.
@@ -1689,6 +1717,26 @@ async function testJourney() {
       assert.equal((await loadPlaybook()).published?.version, 1, "quay lại bản 1");
       assert.ok("ok" in (await unpublishPlaybook(admin)));
       assert.equal((await loadPlaybook()).published, null, "gỡ khỏi bot");
+      {
+        const okRes = (model: string) => ({ content: [{ type: "text" as const, text: "Dạ" }], stopReason: "end_turn" as const, usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model, latencyMs: 1 });
+        let primaryCalls = 0;
+        let primaryErr = "Gemini trả lỗi HTTP 404: models/gemini-2.5-flash-lite is no longer available to new users.";
+        const primary: AiProvider = { name: "gemini-mf", model: "gemini-2.5-flash-lite", schemaDialect: "openai", complete: async () => { primaryCalls += 1; throw new Error(primaryErr); } };
+        let fallbackCalls = 0;
+        const fb: AiProvider = { name: "gemini-mf", model: "gemini-3.5-flash-lite", schemaDialect: "openai", complete: async () => { fallbackCalls += 1; return okRes("gemini-3.5-flash-lite"); } };
+        const told: string[] = [];
+        let clock = 1_000_000;
+        const wrapped = withModelFallback(primary, fb, (m) => told.push(m), () => clock);
+        const req: AiRequest = { system: "s", messages: [{ role: "user", content: [{ type: "text", text: "giá?" }] }], tools: [] };
+        assert.equal((await wrapped.complete(req)).model, "gemini-3.5-flash-lite", "model khai hỏng ⇒ khách vẫn được trả lời bằng model mặc định");
+        assert.deepEqual(told, ["gemini-2.5-flash-lite"], "báo chủ shop");
+        await wrapped.complete(req);
+        assert.ok(primaryCalls === 1 && fallbackCalls === 2, `trong 1 giờ đi thẳng model mặc định, không tốn lời gọi hỏng: ${primaryCalls}/${fallbackCalls}`);
+        clock += 3_600_001;
+        primaryErr = "Gemini trả lỗi HTTP 429: Resource has been exhausted";
+        await assert.rejects(wrapped.complete(req), /429/, "lỗi khác (quá tải / khoá) vẫn ném như cũ — không lùi model");
+        assert.equal(primaryCalls, 2, "hết 1 giờ ⇒ thử lại model khai");
+      }
       // ═══ BOT TỰ HỌC (03/10/2026 — «cho chat bot tự học hội thoại liên tục…») ═══
       // Một hội thoại có đủ ba giọng: khách cho SĐT, bot hỏi thừa, nhân viên phải vào; dòng mã tin Pancake của bot là bản trùng,
       // ghi chú tự động của Pancake không phải lời của ai.

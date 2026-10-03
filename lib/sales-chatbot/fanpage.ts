@@ -29,7 +29,7 @@ import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { appendContextMessages, chatTurn, conversationView, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
@@ -674,14 +674,18 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     if (conv.status === "HANDOFF") {
       // Nhân viên trả lời trên page ⇒ nhường 30 phút rồi bot nhận lại. CẦN NGƯỜI XỬ LÝ (AI / công cụ yêu cầu) ⇒ ở nguyên tới
       // khi người bấm «Trả lại cho AI» — không tự hết hạn (chủ shop 01/10/2026).
+      // AI HỎNG (03/10/2026: ô model sai làm hơn trăm hội thoại sang «AI tạm không trả lời được») không phải việc của người —
+      // hết nhường thì bot thử lại như sau khi nhân viên trả lời, không bắt ai bấm «Trả lại cho AI» từng hội thoại.
       const ageMs = now().getTime() - conv.updatedAt.getTime();
-      if (conv.handoffReason !== STAFF_REASON || ageMs < HUMAN_TAKEOVER_MINUTES * 60_000) {
+      const retryable = conv.handoffReason === STAFF_REASON || conv.handoffReason === AI_DOWN_HANDOFF_REASON;
+      if (!retryable || ageMs < HUMAN_TAKEOVER_MINUTES * 60_000) {
         await finish("SKIPPED", conv.handoffReason ?? "Đã chuyển nhân viên");
         out.processed += ids.length;
         out.skipped = conv.handoffReason ?? "Đã chuyển nhân viên";
         continue;
       }
-      await db.update(schema.salesChatConversations).set({ status: "OPEN", handoffReason: null, updatedAt: now() }).where(eq(schema.salesChatConversations.id, conv.id));
+      const cv = schema.salesChatConversations;
+      await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
     }
     await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // KHÁCH CŨ (02/10/2026): SĐT Pancake đã ghi nhận + tin cũ trước khi bot vào hội thoại ⇒ bot không hỏi lại SĐT / địa chỉ.

@@ -28,7 +28,7 @@ import { AI_PROFILE_SETTING_KEY } from "@/lib/blueprints/types";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { canUseModule } from "@/lib/platform/capabilities";
-import { notifySalesChatAiDown, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
+import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
@@ -402,8 +402,53 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
   const apiKey = conn.secrets.apiKey ?? "";
   if (!apiKey) return { ok: false, error: "Kết nối AI thiếu khoá." };
   const model = cfg.model || conn.settings.model || null;
-  const provider = cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model }) : cfg.connectorKey === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model }) : new ByokOpenAiProvider({ apiKey, model });
-  return { ok: true, provider, source };
+  const make = (m: string | null): AiProvider => (cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model: m }) : cfg.connectorKey === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model: m }) : new ByokOpenAiProvider({ apiKey, model: m }));
+  const provider = make(model);
+  if (!model) return { ok: true, provider, source };
+  const fallback = make(null);
+  if (fallback.model === provider.model) return { ok: true, provider, source };
+  return { ok: true, provider: withModelFallback(provider, fallback, (bad) => void notifySalesChatModelFallback(bad, fallback.model, new Date()).catch(() => undefined)), source };
+}
+
+/**
+ * Lỗi «model không có / không còn cho khoá này» (HTTP 404, `model_not_found`, «no longer available»…) — KHÔNG phải lỗi
+ * tạm thời: gọi lại bằng đúng model đó vẫn hỏng. HÀM THUẦN.
+ */
+export function isModelUnavailableError(message: string): boolean {
+  return /HTTP 404\b|model[_ ]not[_ ]found|no longer available|is not found for api version|models\/[a-z0-9.-]+ is not found|(?:model|models)\b[^\n]{0,80}\b(?:does not exist|not found|not supported|unknown)/i.test(message);
+}
+
+/** Model bị nhà cung cấp từ chối gần đây ⇒ đi thẳng model mặc định, khỏi tốn một lời gọi hỏng mỗi tin (tối đa 1 giờ). */
+const unavailableModels = new Map<string, number>();
+const MODEL_RETRY_MS = 3_600_000;
+
+/**
+ * MODEL KHAI KHÔNG DÙNG ĐƯỢC ⇒ TỰ LÙI VỀ MODEL MẶC ĐỊNH (03/10/2026, Hải Sản Làng Chài: 21:02 ô model đổi sang
+ * «gemini-2.5-flash-lite» — khoá Gemini mới không gọi được dòng 2.5 — và MỌI tin khách từ đó tới nửa đêm thành «AI tạm không
+ * trả lời được», 108 lượt lỗi, 0 lượt thành công). Chỉ lỗi «không có model» mới lùi; lỗi khoá / hết tiền / quá tải vẫn ném
+ * như cũ. Chủ shop được báo để sửa ô model (`onFallback`).
+ */
+export function withModelFallback(primary: AiProvider, fallback: AiProvider, onFallback: (badModel: string) => void, nowMs: () => number = Date.now): AiProvider {
+  const key = `${primary.name}:${primary.model}`;
+  return {
+    name: primary.name,
+    model: primary.model,
+    schemaDialect: primary.schemaDialect,
+    async complete(req) {
+      const badAt = unavailableModels.get(key);
+      if (badAt !== undefined && nowMs() - badAt < MODEL_RETRY_MS) return fallback.complete(req);
+      try {
+        const res = await primary.complete(req);
+        unavailableModels.delete(key);
+        return res;
+      } catch (error) {
+        if (!isModelUnavailableError(error instanceof Error ? error.message : String(error))) throw error;
+        unavailableModels.set(key, nowMs());
+        onFallback(primary.model);
+        return fallback.complete(req);
+      }
+    },
+  };
 }
 
 /**

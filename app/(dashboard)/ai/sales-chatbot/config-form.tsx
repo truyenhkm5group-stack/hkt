@@ -198,6 +198,9 @@ export function ChatbotConfigForm({
             <input type="checkbox" checked={c.handoff.onComplaint} onChange={(e) => set("handoff", { ...c.handoff, onComplaint: e.target.checked })} /> Khi khách khiếu nại
           </label>
           <Textarea rows={2} value={c.handoff.message} maxLength={300} aria-label="Câu khi chuyển nhân viên" onChange={(e) => set("handoff", { ...c.handoff, message: e.target.value })} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={c.handoff.notifyGroup} onChange={(e) => set("handoff", { ...c.handoff, notifyGroup: e.target.checked })} /> Báo vào nhóm chat (nhóm báo đơn) mỗi lần bot chuyển khách cho nhân viên
+          </label>
         </fieldset>
         <fieldset className="space-y-2 rounded-lg border p-3" data-wholesale-pricing>
           <legend className="px-1 text-sm font-medium">Khách sỉ</legend>
