@@ -172,6 +172,8 @@ export type RenewalQuote = {
   listAmountVnd: number;
   creditVnd: number;
   amountVnd: number;
+  /** Phần MUA THÊM cộng vào giá một tháng của gói đích (`lib/billing/addons.ts`). 0 = không mua thêm gì. */
+  addonMonthlyVnd: number;
   /** Câu giải thích cho người bấm — vì sao kỳ bắt đầu từ ngày này, vì sao có / không có phần trừ. */
   explain: string;
 };
@@ -187,15 +189,20 @@ export type RenewalQuote = {
  *    hôm nay, làm tròn xuống). Phần trừ phải NHỎ HƠN tiền gói mới — nếu không, chọn nhiều tháng hơn.
  *
  * Gói đang dùng không có giá (Dùng thử, gói cũ) ⇒ không có gì để trừ: những ngày còn lại là ngày dùng thử, kỳ nối tiếp.
+ *
+ * MUA THÊM (`lib/billing/addons.ts`): giá một tháng = giá gói + phần mua thêm theo bảng giá của CHÍNH gói đó — nơi gọi
+ * tính sẵn `targetAddonMonthlyVnd` / `currentAddonMonthlyVnd` (thiếu = 0). Phép so nâng / hạ và phần trừ đều dùng TỔNG,
+ * vì đó là số tiền khách thật sự trả mỗi tháng.
  */
-export function quoteRenewal(input: { terms: SubscriptionTerms | null; currentPlan: PricedPlan | null; target: PricedPlan; months: number; today: string }): RenewalQuote | { error: string } {
+export function quoteRenewal(input: { terms: SubscriptionTerms | null; currentPlan: PricedPlan | null; target: PricedPlan; months: number; today: string; targetAddonMonthlyVnd?: number; currentAddonMonthlyVnd?: number }): RenewalQuote | { error: string } {
   const { target, months, today } = input;
   if (target.priceVnd === null || !Number.isInteger(target.priceVnd) || target.priceVnd <= 0) return { error: `Gói «${target.name}» không bán — chọn một gói có giá.` };
   if (!(BILLING_MONTH_OPTIONS as readonly number[]).includes(months)) return { error: `Số tháng phải là một trong ${BILLING_MONTH_OPTIONS.join(" · ")}.` };
-  const list = target.priceVnd * months;
+  const addonMonthly = Math.max(0, Math.trunc(input.targetAddonMonthlyVnd ?? 0));
+  const list = (target.priceVnd + addonMonthly) * months;
   const standing = billingStanding(input.terms, today);
   const pt = input.terms?.paidThrough ?? null;
-  const base = { planKey: target.key, months, listAmountVnd: list };
+  const base = { planKey: target.key, months, listAmountVnd: list, addonMonthlyVnd: addonMonthly };
 
   const fromToday = (kind: RenewalKind, explain: string, credit = 0): RenewalQuote => ({ ...base, kind, periodStart: today, periodEnd: periodEndFor(today, months), creditVnd: credit, amountVnd: list - credit, explain });
   const afterPaid = (kind: RenewalKind, explain: string): RenewalQuote => {
@@ -210,12 +217,12 @@ export function quoteRenewal(input: { terms: SubscriptionTerms | null; currentPl
 
   // Còn hạn (hoặc chưa bật thu phí nhưng đã có ngày dùng thử còn lại).
   const current = input.currentPlan;
-  const currentPrice = current?.priceVnd ?? null;
+  const currentPrice = current?.priceVnd == null ? null : current.priceVnd + Math.max(0, Math.trunc(input.currentAddonMonthlyVnd ?? 0));
   if (!current || currentPrice === null || current.key === target.key) {
     const sameKind: RenewalKind = current?.key === target.key ? "RENEW" : "START";
     return afterPaid(sameKind, currentPrice === null ? "Những ngày dùng thử còn lại giữ nguyên; kỳ trả tiền bắt đầu sau đó." : "Kỳ nối tiếp sau ngày đã trả — không mất ngày nào.");
   }
-  if (target.priceVnd <= currentPrice) {
+  if (target.priceVnd + addonMonthly <= currentPrice) {
     return afterPaid("DOWNGRADE", "Kỳ nối tiếp sau ngày đã trả. Gói mới có hiệu lực ngay khi tiền về; những ngày còn lại của gói cũ không được quy đổi ra tiền.");
   }
   const remaining = diffDays(pt, today) + 1;

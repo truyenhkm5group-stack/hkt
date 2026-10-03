@@ -7,7 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmWithReason } from "@/components/platform/pilot-ops";
-import { markInvoicePaidAction, reconcileBillingAction, resolveBillingPaymentAction, setBillingReceiverAction, setOrgBillingAction, setPlanPriceAction, voidInvoiceAction } from "@/lib/actions/billing";
+import {
+  markInvoicePaidAction,
+  markVatIssuedAction,
+  reconcileBillingAction,
+  resolveBillingPaymentAction,
+  setBillingReceiverAction,
+  setOrgAddonsAction,
+  setOrgBillingAction,
+  setPlanAddonPricesAction,
+  setPlanPriceAction,
+  voidInvoiceAction,
+} from "@/lib/actions/billing";
+import { ADDON_KINDS, ADDON_STEP, addonStepLabel, blocksOf, type AddonKind, type AddonPrices } from "@/lib/billing/addons";
+import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { BILLING_DEFAULT_GRACE_DAYS, BILLING_GRACE_MAX } from "@/lib/billing/rules";
 import { VN_BANKS } from "@/lib/constants/vn-banks";
 import { PILOT_REASON_MIN } from "@/lib/constants/pilot";
@@ -154,7 +167,7 @@ export function OrgBillingForm({ orgCode, orgName, current }: { orgCode: string;
   );
 }
 
-export function InvoiceOperatorActions({ invoice }: { invoice: { id: string; transferCode: string; amountVnd: number; periodEnd: string; planName: string } }) {
+export function InvoiceOperatorActions({ invoice }: { invoice: { id: string; transferCode: string; amountVnd: number; periodEnd: string; planName: string; kind?: "RENEWAL" | "ADDON"; label?: string } }) {
   const [amount, setAmount] = useState(String(invoice.amountVnd));
   const [ref, setRef] = useState("");
   const parsed = Number(amount.replace(/[^\d]/g, ""));
@@ -164,7 +177,7 @@ export function InvoiceOperatorActions({ invoice }: { invoice: { id: string; tra
         id={`paid-${invoice.id}`}
         label="Xác nhận đã thu…"
         title={`Xác nhận đã thu ${formatVND(parsed)} cho ${invoice.transferCode}?`}
-        consequence={`Tổ chức được gia hạn tới ${invoice.periodEnd} và chuyển sang gói «${invoice.planName}» NGAY. Chỉ dùng khi tiền đã về mà sổ ngân hàng không thấy (ngân hàng khác, tiền mặt).`}
+        consequence={`${invoice.kind === "ADDON" ? `Tổ chức được cộng «${invoice.label ?? "phần mua thêm"}» vào hạn mức NGAY (ngày trả tới và gói không đổi).` : `Tổ chức được gia hạn tới ${invoice.periodEnd} và chuyển sang gói «${invoice.planName}» NGAY.`} Chỉ dùng khi tiền đã về mà sổ ngân hàng không thấy (ngân hàng khác, tiền mặt).`}
         minReason={PILOT_REASON_MIN}
         placeholder="Khách chuyển nhầm sang tài khoản ACB, đã kiểm sao kê"
         disabled={!Number.isInteger(parsed) || parsed <= 0}
@@ -191,6 +204,97 @@ export function InvoiceOperatorActions({ invoice }: { invoice: { id: string; tra
         placeholder="Khách đổi ý, chưa chuyển tiền"
         run={(reason) => voidInvoiceAction({ invoiceId: invoice.id, reason })}
       />
+    </div>
+  );
+}
+
+/**
+ * ĐƠN GIÁ MUA THÊM của một gói — mỗi hạng mục một ô (VND cho MỘT bước / tháng). Để trống = gói không bán thêm hạng mục đó.
+ * Không có giá gợi ý sẵn: giá là quyết định của chủ nền tảng.
+ */
+export function PlanAddonPricesForm({ plan }: { plan: { key: string; name: string; addonPrices: AddonPrices } }) {
+  const [vals, setVals] = useState<Record<AddonKind, string>>(() => Object.fromEntries(ADDON_KINDS.map((k) => [k, plan.addonPrices[k] === undefined ? "" : String(plan.addonPrices[k])])) as Record<AddonKind, string>);
+  const parsed = Object.fromEntries(ADDON_KINDS.map((k) => [k, vals[k].trim() === "" ? null : Number(vals[k].replace(/[^\d]/g, ""))])) as Record<AddonKind, number | null>;
+  const same = ADDON_KINDS.every((k) => (plan.addonPrices[k] ?? null) === parsed[k]);
+  const sold = ADDON_KINDS.filter((k) => parsed[k] !== null);
+  return (
+    <ConfirmWithReason
+      id={`addon-price-${plan.key}`}
+      label="Đơn giá mua thêm…"
+      title={sold.length ? `Gói «${plan.name}» bán thêm ${sold.length} hạng mục?` : `Gói «${plan.name}» thôi bán thêm?`}
+      consequence="Áp cho báo giá và hoá đơn TẠO TỪ BÂY GIỜ — hoá đơn đang mở giữ giá cũ. Phần khách đã mua giữ nguyên; lần gia hạn sau tính theo đơn giá mới. Khách đang có một hạng mục mà gói thôi bán thì họ không đổi sang / gia hạn gói này được cho tới khi bạn khai lại giá hoặc giảm phần đã mua."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Mở bán thêm người dùng cho gói Khởi đầu"
+      disabled={same}
+      run={(reason) => setPlanAddonPricesAction({ planKey: plan.key, prices: parsed, reason })}
+    >
+      <div className="grid gap-2 text-xs sm:grid-cols-3">
+        {ADDON_KINDS.map((k) => (
+          <div key={k} className="space-y-1">
+            <Label htmlFor={`ap-${plan.key}-${k}`}>
+              {ENTITLEMENT_SPEC[k].label} · mỗi {addonStepLabel(k)}
+            </Label>
+            <Input id={`ap-${plan.key}-${k}`} value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} inputMode="numeric" placeholder="không bán" />
+          </div>
+        ))}
+      </div>
+    </ConfirmWithReason>
+  );
+}
+
+/** SỬA PHẦN ĐÃ MUA THÊM của một tổ chức (số PHẦN mỗi hạng mục) — tặng / giảm theo thoả thuận, bắt buộc lý do. */
+export function OrgAddonsForm({ orgCode, orgName, current }: { orgCode: string; orgName: string; current: { kind: AddonKind; units: number }[] }) {
+  const [vals, setVals] = useState<Record<AddonKind, string>>(() => Object.fromEntries(ADDON_KINDS.map((k) => [k, String(blocksOf(k, current.find((c) => c.kind === k)?.units ?? 0))])) as Record<AddonKind, string>);
+  const blocks = Object.fromEntries(ADDON_KINDS.map((k) => [k, Number(vals[k] || 0)])) as Record<AddonKind, number>;
+  const same = ADDON_KINDS.every((k) => blocks[k] * ADDON_STEP[k] === (current.find((c) => c.kind === k)?.units ?? 0));
+  return (
+    <ConfirmWithReason
+      id={`org-addons-${orgCode}`}
+      label="Sửa phần mua thêm…"
+      title={`Sửa phần mua thêm của «${orgName}»?`}
+      consequence="Hạn mức của tổ chức đổi NGAY. Không tạo hoá đơn, không hoàn tiền — tiền (nếu có) xử lý ngoài hệ thống. Lần gia hạn sau tính giá theo phần này."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Tặng 2 người dùng trong tháng đầu / khách xin bớt từ kỳ sau"
+      disabled={same}
+      run={(reason) => setOrgAddonsAction({ orgCode, blocks, reason })}
+    >
+      <div className="grid gap-2 text-xs sm:grid-cols-3">
+        {ADDON_KINDS.map((k) => (
+          <div key={k} className="space-y-1">
+            <Label htmlFor={`oa-${orgCode}-${k}`}>
+              {ENTITLEMENT_SPEC[k].label} · số phần ({addonStepLabel(k)})
+            </Label>
+            <Input id={`oa-${orgCode}-${k}`} type="number" min={0} value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} />
+          </div>
+        ))}
+      </div>
+    </ConfirmWithReason>
+  );
+}
+
+/** Ghi SỐ HOÁ ĐƠN VAT đã xuất (ngoài ERP) cho một khoản đã thu. Không cần lý do: đó là chứng từ, không phải một quyết định. */
+export function VatIssuedForm({ invoiceId }: { invoiceId: string }) {
+  const [ref, setRef] = useState("");
+  const [pending, start] = useTransition();
+  return (
+    <div className="flex items-center gap-2">
+      <Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Số hoá đơn VAT, vd 1C26TAA-0000123" maxLength={60} className="h-8 w-64 text-xs" aria-label="Số hoá đơn VAT" />
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={pending || ref.trim().length < 3}
+        onClick={() =>
+          start(async () => {
+            const r = await markVatIssuedAction({ invoiceId, vatRef: ref });
+            if ("error" in r) toast.error(r.error);
+            else toast.success(r.message);
+          })
+        }
+      >
+        {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+        Đã xuất
+      </Button>
     </div>
   );
 }

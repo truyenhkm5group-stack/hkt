@@ -1,4 +1,4 @@
-import { InvoiceOperatorActions, OrgBillingForm } from "@/components/billing/operator-billing";
+import { InvoiceOperatorActions, OrgAddonsForm, OrgBillingForm } from "@/components/billing/operator-billing";
 import { SectionCard } from "@/components/ui-bits";
 import { BILLING_STANDING_LABEL, PAYMENT_OUTCOME_LABEL } from "@/lib/billing/rules";
 import type { OrgBilling } from "@/lib/billing/service";
@@ -17,13 +17,25 @@ export function OrgBillingSection({ orgCode, orgName, data }: { orgCode: string;
     >
       <div className="space-y-5 text-sm" data-org-billing={s.kind}>
         <OrgBillingForm orgCode={orgCode} orgName={orgName} current={data.terms} />
+        <div className="space-y-2 border-t border-hairline pt-3" data-org-addons={data.addons.length}>
+          <p>
+            <span className="font-semibold">Mua thêm:</span> {data.addons.length ? data.addons.map((a) => `${a.label.toLowerCase()} +${a.unitsLabel}`).join(" · ") : "chưa có"}
+            {data.invoiceInfo ? (
+              <span className="text-muted-foreground">
+                {" "}
+                · Xuất hoá đơn cho {data.invoiceInfo.companyName} · MST {data.invoiceInfo.taxCode}
+              </span>
+            ) : null}
+          </p>
+          <OrgAddonsForm orgCode={orgCode} orgName={orgName} current={data.addons} />
+        </div>
         {open ? (
           <div className="space-y-2 border-t border-hairline pt-3">
             <p>
-              Hoá đơn đang mở <span className="font-mono">{open.transferCode}</span> · {open.planName} {open.months} tháng · kỳ {formatDate(open.periodStart)} → {formatDate(open.periodEnd)} · <span className="numeric font-medium">{formatVND(open.amountVnd)}</span>
+              Hoá đơn đang mở <span className="font-mono">{open.transferCode}</span> · {open.label} · kỳ {formatDate(open.periodStart)} → {formatDate(open.periodEnd)} · <span className="numeric font-medium">{formatVND(open.amountVnd)}</span>
               {open.creditVnd > 0 ? <span className="text-muted-foreground"> (trừ {formatVND(open.creditVnd)})</span> : null} · tạo bởi {open.createdByEmail ?? "?"} lúc {formatDateTime(open.createdAt)}
             </p>
-            <InvoiceOperatorActions invoice={{ id: open.id, transferCode: open.transferCode, amountVnd: open.amountVnd, periodEnd: open.periodEnd, planName: open.planName }} />
+            <InvoiceOperatorActions invoice={{ id: open.id, transferCode: open.transferCode, amountVnd: open.amountVnd, periodEnd: open.periodEnd, planName: open.planName, kind: open.kind, label: open.label }} />
           </div>
         ) : null}
         <div className="grid gap-4 border-t border-hairline pt-3 lg:grid-cols-2">
@@ -37,7 +49,7 @@ export function OrgBillingSection({ orgCode, orgName, data }: { orgCode: string;
                   .filter((i) => i.status !== "OPEN")
                   .map((i) => (
                     <li key={i.id}>
-                      <span className="font-mono">{i.transferCode}</span> · {i.planName} · {formatDate(i.periodStart)} → {formatDate(i.periodEnd)} ·{" "}
+                      <span className="font-mono">{i.transferCode}</span> · {i.label} · {formatDate(i.periodStart)} → {formatDate(i.periodEnd)} ·{" "}
                       {i.status === "PAID" ? (
                         <>
                           đã thu <span className="numeric">{formatVND(i.paidAmountVnd)}</span> ({i.paidSource === "MANUAL" ? `tay — ${i.paidByEmail ?? "?"}` : "ngân hàng"}) {formatDateTime(i.paidAt)}

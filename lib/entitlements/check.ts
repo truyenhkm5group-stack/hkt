@@ -19,6 +19,8 @@ import { forgetMemo, memo } from "@/lib/cache";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { dauNgayVN } from "@/lib/ai/budget";
+import { applyAddons, hasAddons, type AddonUnits } from "@/lib/billing/addons";
+import { readSubscriptionAddons } from "@/lib/billing/standing";
 import type { Organization } from "@/lib/platform/types";
 import { ENTITLEMENT_KINDS, ENTITLEMENT_SPEC, overLimitMessage, parseLimits, type EntitlementKind, type PlanLimits } from "@/lib/entitlements/kinds";
 
@@ -28,7 +30,8 @@ const CACHE_MS = 60_000;
 const FRESH_AT = 0.8;
 const MB = 1024 * 1024;
 
-export type ResolvedPlan = { key: string; name: string; description: string | null; limits: PlanLimits; undeclared: EntitlementKind[]; fellBack: boolean };
+/** `limits` = hạn mức HIỆU LỰC (gói + phần mua thêm); `planLimits` = của riêng gói; `addons` = phần đã mua thêm (0192). */
+export type ResolvedPlan = { key: string; name: string; description: string | null; limits: PlanLimits; planLimits: PlanLimits; addons: AddonUnits; undeclared: EntitlementKind[]; fellBack: boolean };
 
 export type EntitlementVerdict =
   | { ok: true; kind: EntitlementKind; planKey: string; used: number | null; limit: number | null }
@@ -40,33 +43,36 @@ export function planKeyOf(org: Pick<Organization, "isHome" | "plan">): string {
   return org.plan?.trim() || DEFAULT_PLAN_KEY;
 }
 
-/** `priceVnd` = giá MỘT THÁNG (0187); `null` = gói không bán (không phải giá 0). */
-export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null };
+/** `priceVnd` = giá MỘT THÁNG (0187); `null` = gói không bán (không phải giá 0). `addonPrices` = đơn giá mua thêm (0192, thô). */
+export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown };
 
 /** Mọi gói (cho màn vận hành). Bảng chưa có ⇒ rỗng. */
 export async function listPlans(): Promise<PlanRow[]> {
   const pdb = await getPlatformDb();
   try {
     const rows = await pdb.select().from(schema.platformPlans).orderBy(schema.platformPlans.position);
-    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null }));
+    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices }));
   } catch {
     return [];
   }
 }
 
-export async function resolvePlan(org: Pick<Organization, "isHome" | "plan">): Promise<ResolvedPlan | null> {
+export async function resolvePlan(org: Pick<Organization, "isHome" | "plan"> & { code?: string }): Promise<ResolvedPlan | null> {
   const key = planKeyOf(org);
   const plans = await listPlans();
   const hit = plans.find((p) => p.key === key);
   if (org.isHome) {
     // Nhà không bao giờ bị giới hạn, kể cả khi dòng `internal` bị sửa tay.
     const all = Object.fromEntries(ENTITLEMENT_KINDS.map((k) => [k, null])) as PlanLimits;
-    return { key: HOME_PLAN_KEY, name: hit?.name ?? "Nội bộ", description: hit?.description ?? null, limits: all, undeclared: [], fellBack: false };
+    return { key: HOME_PLAN_KEY, name: hit?.name ?? "Nội bộ", description: hit?.description ?? null, limits: all, planLimits: all, addons: {}, undeclared: [], fellBack: false };
   }
   const row = hit ?? plans.find((p) => p.key === DEFAULT_PLAN_KEY);
   if (!row) return null;
   const parsed = parseLimits(row.limits);
-  return { key: row.key, name: row.name, description: row.description, limits: parsed.limits, undeclared: parsed.undeclared, fellBack: !hit };
+  // Phần MUA THÊM cộng vào hạn mức gói (0192). Tổ chức không có `code` (gọi từ bước xem trước của onboarding) ⇒ chỉ gói.
+  const addons: AddonUnits = org.code ? await readSubscriptionAddons(org.code) : {};
+  const limits = hasAddons(addons) ? applyAddons(parsed.limits, addons) : parsed.limits;
+  return { key: row.key, name: row.name, description: row.description, limits, planLimits: parsed.limits, addons, undeclared: parsed.undeclared, fellBack: !hit };
 }
 
 // ─── Bộ đếm: ĐẾM THẬT trong CSDL của tổ chức NGỮ CẢNH ───

@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { BillingReceiverForm, PlanPriceForm, ReconcileBillingButton, ResolvePaymentForm } from "@/components/billing/operator-billing";
+import { BillingReceiverForm, PlanAddonPricesForm, PlanPriceForm, ReconcileBillingButton, ResolvePaymentForm, VatIssuedForm } from "@/components/billing/operator-billing";
 import { SectionCard } from "@/components/ui-bits";
+import { addonStepLabel, isAddonKind } from "@/lib/billing/addons";
+import { ENTITLEMENT_SPEC } from "@/lib/entitlements/kinds";
 import { BILLING_STANDING_LABEL, PAYMENT_OUTCOME_LABEL, type BillingStandingKind } from "@/lib/billing/rules";
 import type { PlatformBilling } from "@/lib/billing/service";
 import { formatDate, formatDateTime, formatVND } from "@/lib/format";
@@ -21,8 +23,8 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
     <SectionCard
       id="billing"
       title="Thu phí thuê bao"
-      description={`MRR ${formatVND(data.mrrVnd)} · ${ORDER.map((k) => `${BILLING_STANDING_LABEL[k]} ${data.countByStanding[k]}`).join(" · ")}`}
-      hint="MRR = tổng giá THÁNG của gói ở các tổ chức đang chạy, đã bật thu phí và chưa bị khoá (còn hạn · sắp hết · đang ân hạn). Tình trạng tính lúc đọc từ «đã trả tới» + ân hạn — không job nào khoá hay mở khoá. Tiền về: SePay ghi vào sổ ngân hàng của tổ chức nhà, hệ thống khớp theo nội dung ERPHD…; khoản không khớp nằm ở «Tiền chưa khớp», không biến mất."
+      description={`MRR ${formatVND(data.mrrVnd)}${data.addonUnpriced > 0 ? ` (chưa tính phần mua thêm của ${data.addonUnpriced} tổ chức — gói không còn khai giá)` : ""} · ${ORDER.map((k) => `${BILLING_STANDING_LABEL[k]} ${data.countByStanding[k]}`).join(" · ")}`}
+      hint="MRR = tổng giá THÁNG (gói + phần mua thêm) ở các tổ chức đang chạy, đã bật thu phí và chưa bị khoá (còn hạn · sắp hết · đang ân hạn). Tình trạng tính lúc đọc từ «đã trả tới» + ân hạn — không job nào khoá hay mở khoá. Tiền về: SePay ghi vào sổ ngân hàng của tổ chức nhà, hệ thống khớp theo nội dung ERPHD…; khoản không khớp nằm ở «Tiền chưa khớp», không biến mất."
       actions={<ReconcileBillingButton />}
     >
       <div className="space-y-6 text-sm">
@@ -43,7 +45,18 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                   <div className="font-medium">{p.name}</div>
                   <div className="numeric text-xs text-muted-foreground">{p.priceVnd === null ? "Không bán" : `${formatVND(p.priceVnd)}/tháng`}</div>
                 </div>
-                <PlanPriceForm plan={p} />
+                <div className="space-y-2">
+                  <PlanPriceForm plan={p} />
+                  <p className="text-xs text-muted-foreground">
+                    Mua thêm:{" "}
+                    {Object.keys(p.addonPrices).length === 0
+                      ? "chưa bán"
+                      : Object.entries(p.addonPrices)
+                          .map(([k, v]) => `${isAddonKind(k) ? `${ENTITLEMENT_SPEC[k].label.toLowerCase()} ${formatVND(v ?? 0)}/${addonStepLabel(k)}` : k}`)
+                          .join(" · ")}
+                  </p>
+                  <PlanAddonPricesForm plan={p} />
+                </div>
               </div>
             ))}
           </div>
@@ -60,6 +73,7 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                   <th className="py-1.5 pr-3">Tổ chức</th>
                   <th className="py-1.5 pr-3">Gói</th>
                   <th className="py-1.5 pr-3 text-right">Giá tháng</th>
+                  <th className="py-1.5 pr-3">Mua thêm</th>
                   <th className="py-1.5 pr-3">Tình trạng</th>
                   <th className="py-1.5">Trả tới</th>
                 </tr>
@@ -75,6 +89,7 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                     </td>
                     <td className="py-1.5 pr-3">{o.planName}</td>
                     <td className="numeric py-1.5 pr-3 text-right">{o.priceVnd === null ? "—" : formatVND(o.priceVnd)}</td>
+                    <td className="py-1.5 pr-3 text-xs">{o.addonsLabel ? `${o.addonsLabel} · ${o.addonMonthlyVnd === null ? "chưa có giá" : `${formatVND(o.addonMonthlyVnd)}/tháng`}` : "—"}</td>
                     <td className={cn("py-1.5 pr-3", TONE[o.standing.kind])}>{BILLING_STANDING_LABEL[o.standing.kind]}</td>
                     <td className="py-1.5">{o.standing.paidThrough ? formatDate(o.standing.paidThrough) : "—"}</td>
                   </tr>
@@ -109,6 +124,33 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
           )}
         </div>
 
+        <div className="space-y-2" data-vat-pending={data.vatPending.length}>
+          <h3 className="font-semibold">Cần xuất hoá đơn VAT ({data.vatPending.length})</h3>
+          {data.vatPending.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Không có khoản nào đang chờ.</p>
+          ) : (
+            <div className="space-y-3">
+              {data.vatPending.map((i) => (
+                <div key={i.id} className="space-y-1 border-t border-hairline pt-3 text-xs">
+                  <div className="flex flex-wrap gap-x-3">
+                    <span className="font-mono">{i.transferCode}</span>
+                    <span>{i.orgCode}</span>
+                    <span>{i.label}</span>
+                    <span className="numeric font-medium">{formatVND(i.paidAmountVnd)}</span>
+                    <span>thu {formatDateTime(i.paidAt)}</span>
+                  </div>
+                  {i.invoiceInfo ? (
+                    <p className="text-muted-foreground">
+                      {i.invoiceInfo.companyName} · MST {i.invoiceInfo.taxCode} · {i.invoiceInfo.address} · {i.invoiceInfo.email}
+                    </p>
+                  ) : null}
+                  <VatIssuedForm invoiceId={i.id} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-1">
             <h3 className="font-semibold">Hoá đơn đang mở ({data.openInvoices.length})</h3>
@@ -121,7 +163,7 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
                     <Link href={`/platform/org/${encodeURIComponent(i.orgCode)}#billing`} className="font-mono hover:underline">
                       {i.transferCode}
                     </Link>{" "}
-                    · {i.orgCode} · {i.planName} {i.months} tháng · <span className="numeric">{formatVND(i.amountVnd)}</span> · tạo {formatDateTime(i.createdAt)}
+                    · {i.orgCode} · {i.label} · <span className="numeric">{formatVND(i.amountVnd)}</span> · tạo {formatDateTime(i.createdAt)}
                   </li>
                 ))}
               </ul>
@@ -135,7 +177,7 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
               <ul className="space-y-1 text-xs">
                 {data.recentPaid.map((i) => (
                   <li key={i.id}>
-                    <span className="font-mono">{i.transferCode}</span> · {i.orgCode} · <span className="numeric">{formatVND(i.paidAmountVnd)}</span> · {i.paidSource === "MANUAL" ? `tay (${i.paidByEmail ?? "?"})` : "ngân hàng"} · {formatDateTime(i.paidAt)}
+                    <span className="font-mono">{i.transferCode}</span> · {i.orgCode} · {i.label} · <span className="numeric">{formatVND(i.paidAmountVnd)}</span> · {i.paidSource === "MANUAL" ? `tay (${i.paidByEmail ?? "?"})` : "ngân hàng"} · {formatDateTime(i.paidAt)}
                   </li>
                 ))}
               </ul>

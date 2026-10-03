@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
+import { parseAddonUnits, type AddonUnits } from "@/lib/billing/addons";
 import { billingStanding, vnDate, type BillingStanding, type SubscriptionTerms } from "@/lib/billing/rules";
 
 /**
@@ -13,7 +14,7 @@ import { billingStanding, vnDate, type BillingStanding, type SubscriptionTerms }
  */
 
 const TTL_MS = 10_000;
-type Entry = { at: number; terms: SubscriptionTerms | null };
+type Entry = { at: number; terms: SubscriptionTerms | null; addons: AddonUnits };
 const holder = globalThis as unknown as { __erpSubscriptions?: Map<string, Entry> };
 if (!holder.__erpSubscriptions) holder.__erpSubscriptions = new Map();
 const cache = holder.__erpSubscriptions;
@@ -23,20 +24,34 @@ export function invalidateSubscriptions(orgCode?: string) {
   else cache.clear();
 }
 
-export async function readSubscriptionTerms(orgCode: string, opts: { fresh?: boolean } = {}): Promise<SubscriptionTerms | null> {
+async function readEntry(orgCode: string, fresh: boolean): Promise<Entry> {
   const hit = cache.get(orgCode);
-  if (!opts.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.terms;
+  if (!fresh && hit && Date.now() - hit.at < TTL_MS) return hit;
   let terms: SubscriptionTerms | null = null;
+  let addons: AddonUnits = {};
   try {
     const pdb = await getPlatformDb();
     const row = await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, orgCode) });
     terms = row ? { billingEnabled: row.billingEnabled, paidThrough: row.paidThrough ?? null, graceDays: row.graceDays } : null;
+    addons = parseAddonUnits(row?.addons);
   } catch {
     // Phía an toàn của MỘT LỖI ĐỌC là không khoá: khoá nhầm một khách đã trả tiền tệ hơn để lọt vài phút.
+    // Phần mua thêm đọc hỏng ⇒ chỉ còn hạn mức gói (phía hẹp) — lượt tạo bị chặn nói rõ hạn mức, không mất dữ liệu nào.
     terms = null;
+    addons = {};
   }
-  cache.set(orgCode, { at: Date.now(), terms });
-  return terms;
+  const entry = { at: Date.now(), terms, addons };
+  cache.set(orgCode, entry);
+  return entry;
+}
+
+export async function readSubscriptionTerms(orgCode: string, opts: { fresh?: boolean } = {}): Promise<SubscriptionTerms | null> {
+  return (await readEntry(orgCode, !!opts.fresh)).terms;
+}
+
+/** Hạn mức đã MUA THÊM của tổ chức (`platform_subscriptions.addons`) — cùng đệm 10 giây với tình trạng thu phí. */
+export async function readSubscriptionAddons(orgCode: string, opts: { fresh?: boolean } = {}): Promise<AddonUnits> {
+  return (await readEntry(orgCode, !!opts.fresh)).addons;
 }
 
 /** Tình trạng thu phí. Tổ chức nhà luôn `NOT_BILLED`. */
