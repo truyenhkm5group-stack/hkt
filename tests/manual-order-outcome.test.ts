@@ -27,7 +27,7 @@ import { COUNT_DELIVERED, DELIVERED_REVENUE } from "@/lib/queries/metrics";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { getProfitReport } from "@/lib/queries/reports";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { returnsPageParams } from "@/lib/queries/returns-report-page";
+import { returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { availableStockExpr, erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import {
   cancelManualOrderCore,
@@ -87,9 +87,9 @@ function testPure() {
   assert.deepEqual([parseManualDeliveryFee(40_000), parseManualDeliveryFee("40000"), parseManualDeliveryFee(0)], [40_000, 40_000, 0]);
   assert.deepEqual([parseManualDeliveryFee(-1), parseManualDeliveryFee(1.5), parseManualDeliveryFee("abc"), parseManualDeliveryFee(null), parseManualDeliveryFee(""), parseManualDeliveryFee(20_000_000)], [null, null, null, null, null, null]);
   assert.deepEqual(["CONFIRMED", "NEW", "WAITING", "DELIVERED", "RETURNED", "CANCELLED"].map(canMarkManualDeliveryFailed), [true, false, false, false, false, false], "chỉ «Đã xác nhận» mới báo giao không thành công");
-  assert.equal(returnsPageParams({}).basis, "SHIPPED", "mặc định cũ không đổi (tổ chức nhà, job giữ ấm)");
-  assert.equal(returnsPageParams({}, "ORDERED").basis, "ORDERED", "không module vận chuyển ⇒ trang truyền ngày lên đơn");
-  assert.equal(returnsPageParams({ basis: "SHIPPED" }, "ORDERED").basis, "SHIPPED", "người dùng chọn mốc thì mốc đó thắng");
+  assert.equal(returnsPageParams(withDefaultReturnsBasis({}, true)).basis, "SHIPPED", "có vận chuyển: mặc định cũ không đổi (tổ chức nhà, job giữ ấm)");
+  assert.equal(returnsPageParams(withDefaultReturnsBasis({}, false)).basis, "ORDERED", "không module vận chuyển ⇒ ngày lên đơn");
+  assert.equal(returnsPageParams(withDefaultReturnsBasis({ basis: "SHIPPED" }, false)).basis, "SHIPPED", "người dùng chọn mốc thì mốc đó thắng");
 }
 
 export async function testManualOrderOutcome() {

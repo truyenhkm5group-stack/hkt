@@ -28,7 +28,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
-import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
+import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
@@ -59,11 +59,11 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const { decision } = await requireResource("REPORTS", "reports:returns");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
-  const raw = await searchParams;
+  // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
+  const raw = withDefaultReturnsBasis(await searchParams, await canUseModule("logistics"));
   // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
-  // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
-  const thamSo = returnsPageParams(raw, (await canUseModule("logistics")) ? "SHIPPED" : "ORDERED");
+  const thamSo = returnsPageParams(raw);
   const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
   const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia } = await loadReturnsPage(thamSo);
 
