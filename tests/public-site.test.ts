@@ -93,6 +93,23 @@ export function testPublicSiteSource() {
   assert.ok(block.length > 20 && /tls\s*\{\s*on_demand\s*\}/.test(block), "khối tên miền gốc phải dùng on_demand TLS");
   const route = readFileSync("app/api/platform/domain-allowed/route.ts", "utf8");
   assert.ok(route.includes("siteHostKind("), "cửa hỏi chứng chỉ phải nhận đúng host của trang giới thiệu");
+
+  /*
+    TRẦN ĐĂNG KÝ ĐI TỪ GITHUB VARIABLE TỚI .env. Trước 03/10/2026 deploy không ghi `PLATFORM_SIGNUP_MODE`, nên trần luôn
+    là mặc định `invite` và nút «Mở» ở /platform báo «vượt trần» mà không có đường nào nâng. Biến phải có mặt ở CẢ BA chỗ
+    của bước SSH (env · envs · export) — thiếu một chỗ là biến không tới máy chủ, im lặng. Và Variable bị xoá thì dòng
+    trong .env phải bị xoá theo, nếu không thì hạ trần bằng cách xoá Variable không hạ được gì.
+  */
+  const wf = readFileSync(".github/workflows/deploy-vps.yml", "utf8");
+  assert.ok(wf.includes("PLATFORM_SIGNUP_MODE: ${{ vars.PLATFORM_SIGNUP_MODE }}"), "workflow đọc Variable PLATFORM_SIGNUP_MODE");
+  assert.ok(/envs: [^\n]*\bPLATFORM_SIGNUP_MODE\b/.test(wf), "PLATFORM_SIGNUP_MODE có trong danh sách envs gửi qua SSH");
+  assert.ok(/export [^\n]*\bPLATFORM_SIGNUP_MODE\b/.test(wf), "PLATFORM_SIGNUP_MODE được export cho bootstrap");
+  const install = readFileSync("scripts/install-vps.sh", "utf8");
+  const khoi = install.slice(install.indexOf('case "${PLATFORM_SIGNUP_MODE:-}" in'), install.indexOf("esac", install.indexOf('case "${PLATFORM_SIGNUP_MODE:-}" in')));
+  assert.ok(khoi.length > 0, "install-vps.sh phải xử lý PLATFORM_SIGNUP_MODE");
+  assert.ok(khoi.includes("off|invite|open) upsert_env PLATFORM_SIGNUP_MODE"), "ba giá trị hợp lệ được ghi nguyên");
+  assert.ok(khoi.includes("\"\") sed -i -E '/^PLATFORM_SIGNUP_MODE=/d' .env"), "Variable rỗng ⇒ xoá dòng, trần về mặc định");
+  assert.ok(khoi.includes("*) upsert_env PLATFORM_SIGNUP_MODE off"), "giá trị lạ ⇒ đóng đăng ký, không đoán");
 }
 
 export async function testPublicSiteData() {

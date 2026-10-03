@@ -218,6 +218,19 @@ if [ -n "${PLATFORM_BASE_DOMAIN:-}" ]; then
   esac
 fi
 
+# ═══ TRẦN ĐĂNG KÝ TỔ CHỨC MỚI — PLATFORM_SIGNUP_MODE (lib/onboarding/signup-mode.ts · docs/platform/launch-gates.md) ═══
+# Chế độ hiệu lực = min(trần này, cài đặt người vận hành bấm ở /platform). Trước đây deploy KHÔNG ghi biến này, nên trần
+# luôn là mặc định `invite` và nút «Mở» ở /platform báo «vượt trần» mà không có đường nào nâng trần ngoài SSH sửa tay.
+#   · `off` | `invite` | `open` ⇒ ghi đúng giá trị đó;
+#   · Variable rỗng / bị xoá ⇒ XOÁ dòng khỏi .env ⇒ trần về mặc định `invite` (cùng bài học của công tắc an toàn bên dưới:
+#     xoá Variable mà .env vẫn giữ giá trị cũ thì nút hạ trần không hạ);
+#   · giá trị lạ ⇒ ghi `off` — hỏng về phía ĐÓNG, đúng như `signupCeiling()` đọc một chuỗi lạ.
+case "${PLATFORM_SIGNUP_MODE:-}" in
+  off|invite|open) upsert_env PLATFORM_SIGNUP_MODE "$PLATFORM_SIGNUP_MODE"; say "PLATFORM_SIGNUP_MODE (trần đăng ký): $PLATFORM_SIGNUP_MODE" ;;
+  "") sed -i -E '/^PLATFORM_SIGNUP_MODE=/d' .env; say "PLATFORM_SIGNUP_MODE: không khai — trần đăng ký mặc định (invite)" ;;
+  *) upsert_env PLATFORM_SIGNUP_MODE off; warn "PLATFORM_SIGNUP_MODE «$PLATFORM_SIGNUP_MODE» không hợp lệ — ghi off (đóng đăng ký)." ;;
+esac
+
 # ═══ CÔNG TẮC AN TOÀN — FAIL-CLOSED: VARIABLE BỊ XOÁ / RỖNG ⇒ TẮT ═══
 #
 # LỖI ĐÃ SỬA (24/09/2026): ba công tắc dưới đây từng đi chung luật "rỗng thì giữ nguyên giá trị cũ"
