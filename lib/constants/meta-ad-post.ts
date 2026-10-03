@@ -13,8 +13,8 @@
  *  1. KHÔNG ĐOÁN POST ID. Bài viết chỉ đến từ `effective_object_story_id` → `object_story_id` của
  *     creative do CHÍNH Meta trả. Không có hai trường đó ⇒ `POST_NOT_RESOLVED`, không dựng số.
  *  2. `feed_demo_ad` là ỨNG VIÊN AD ID, không phải Post ID. Nó chỉ đi vào bước tra như mọi Ad ID
- *     khác; bước tra nói nó là gì. Link chia sẻ `fb.me/adspreview/…` còn xa hơn: nó không mang mã
- *     nào, và Ad ID chỉ có khi Meta tự nói mẩu nào sở hữu đúng link đó (`preview_shareable_link`).
+ *     khác; bước tra nói nó là gì. Link chia sẻ `fb.me/adspreview/…` không mang mã nào và KHÔNG
+ *     tra ngược được (xem `AD_PREVIEW_LINK_REASON`) — ERP nói thẳng điều đó, không dò.
  *  3. KHÔNG LÀM MẤT PAGE ID. Chuỗi gốc `<page_id>_<post_id>` luôn được giữ nguyên cạnh hai phần đã
  *     tách: một Post ID trần không mở được bài và không nói bài thuộc fanpage nào.
  */
@@ -58,7 +58,7 @@ export function normalizeAdIdInput(raw: string): AdIdInput {
       if (!AD_ID_RE.test(ids[0])) return { ok: false, raw: text, reason: `Tham số ${param} không phải một mã số hợp lệ.` };
       return { ok: true, adId: ids[0], from: "URL_PARAM", param };
     }
-    return { ok: false, raw: text, reason: "Link không có feed_demo_ad / ad_id — không bóc số từ đường dẫn vì dễ lấy nhầm mã bài viết." };
+    return { ok: false, raw: text, reason: "Link không có feed_demo_ad / ad_id / chiến dịch đang chọn — không bóc số từ đường dẫn vì dễ lấy nhầm mã bài viết." };
   }
 
   // Số dán từ bảng tính hay mang khoảng trắng / dấu chấm / dấu phẩy ngăn nghìn.
@@ -71,54 +71,72 @@ export function normalizeAdIdInput(raw: string): AdIdInput {
 // ─────────────────────────── LINK CHIA SẺ "XEM TRƯỚC QUẢNG CÁO" ───────────────────────────
 
 /**
- * Hai loại link của hộp "Chia sẻ quảng cáo này" trong Trình quản lý quảng cáo: dòng "đăng nhập bằng
- * Facebook" và dòng "tài khoản Meta được quản lý". Mã rút gọn của HAI dòng thuộc hai không gian riêng
- * (đo 03/10/2026: mã của dòng Facebook ghép sau `/managedaccount/` không mở ra quảng cáo nào), nên
- * khoá so khớp phải mang cả LOẠI lẫn MÃ.
+ * Link của hộp "Chia sẻ quảng cáo này" (`https://fb.me/adspreview/facebook/<mã>` hoặc
+ * `/managedaccount/<mã>`) KHÔNG đi ngược được về Ad ID — đo trên production 03/10/2026:
+ *  · link chuyển hướng tới một `encrypted_experience_id` đã mã hoá; không đăng nhập thì Facebook trả 400;
+ *  · Meta tạo một link MỚI mỗi lần được hỏi `preview_shareable_link` (hai lần đọc cùng mẩu ⇒ hai link);
+ *  · hai link khác nhau của CÙNG một mẩu chuyển về HAI đích khác nhau (3/3 mẫu), và 0/2.878 link API
+ *    mang mã của link người dán.
+ * Mã đó là vé dùng một lần, không phải định danh. Bản #471 dò ngược bằng `preview_shareable_link` đã
+ * bị gỡ: nó không bao giờ khớp được, và mỗi lượt bấm bắt Meta đúc hàng nghìn link mới.
  */
-export const AD_PREVIEW_AUDIENCES = ["FACEBOOK", "MANAGED_ACCOUNT"] as const;
-export type AdPreviewAudience = (typeof AD_PREVIEW_AUDIENCES)[number];
+export const AD_PREVIEW_LINK_REASON =
+  "Link chia sẻ fb.me/adspreview không chứa Ad ID và không tra ngược được (Meta tạo mã mới mỗi lần chia sẻ). Dán link trên thanh địa chỉ của Trình quản lý quảng cáo khi đang chọn quảng cáo / nhóm / chiến dịch, hoặc dán Ad ID.";
 
-export type AdPreviewLink = { url: string; audience: AdPreviewAudience; code: string; key: string };
+/** `fb.me/adspreview/<loại>/<mã>` — chỉ để NHẬN RA và trả lời đúng lý do, không để tra. */
+export function isAdPreviewShareLink(raw: string | null | undefined): boolean {
+  const text = (raw ?? "").trim();
+  if (!text) return false;
+  try {
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+    return /^(www\.)?fb\.me$/i.test(url.hostname) && /^\/adspreview\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
 
-const PREVIEW_CODE_RE = /^[A-Za-z0-9]{6,40}$/;
+// ─────────────────────────── LINK TRÌNH QUẢN LÝ: CHIẾN DỊCH / NHÓM ĐANG CHỌN ───────────────────────────
+
+/** Trần số chiến dịch / nhóm trong một link — người tích chọn vài dòng, không phải cả tài khoản. */
+export const ADS_MANAGER_PARENT_MAX = 10;
+
+export type AdParentKind = "ADSET" | "CAMPAIGN";
+export type AdParent = { kind: AdParentKind; id: string };
+
+/** Tham số Trình quản lý quảng cáo ghi khi người tích chọn dòng. Nhóm (hẹp hơn) được đọc trước chiến dịch. */
+const PARENT_URL_PARAMS: { param: string; kind: AdParentKind }[] = [
+  { param: "selected_adset_ids", kind: "ADSET" },
+  { param: "selected_campaign_ids", kind: "CAMPAIGN" },
+];
+
+export const AD_PARENT_LABEL: Record<AdParentKind, string> = { ADSET: "Nhóm quảng cáo", CAMPAIGN: "Chiến dịch" };
 
 /**
- * `https://fb.me/adspreview/facebook/<mã>` (hoặc `/managedaccount/<mã>`) → loại + mã.
- *
- * Link này KHÔNG mang Ad ID: nó chuyển hướng tới một `encrypted_experience_id` đã mã hoá, và không
- * đăng nhập thì Facebook trả 400. ERP KHÔNG mở link, KHÔNG giải mã, KHÔNG cào trang — nó hỏi Meta
- * trường `preview_shareable_link` của từng mẩu rồi so khớp (`findAdsByPreviewLinks`).
- *
- * `allowBare`: dạng cũ `https://fb.me/<mã>` — chính mã đó, cùng đích với dạng `/adspreview/facebook/`
- * (đo 03/10/2026). Chỉ bật cho giá trị Meta trả về; người dán `fb.me/<chữ>` có thể là link rút gọn
- * của một fanpage, nên ô nhập chỉ nhận dạng có `/adspreview/`.
+ * Link thanh địa chỉ của Trình quản lý (`…/adsmanager/manage/ads?act=…&selected_campaign_ids=…`) khi
+ * KHÔNG có `selected_ad_ids` → các chiến dịch / nhóm đang chọn. Máy chủ hỏi Meta mẩu nào thuộc chúng
+ * (`/<id>/ads`) — đó là quan hệ Meta khai, không phải đoán. Chỉ đọc MỘT tham số (hẹp nhất có mặt): đọc
+ * cả hai là tra trùng mẩu của nhóm nằm trong chiến dịch. Không phải link Facebook / không có tham số ⇒ `null`.
  */
-export function parseAdPreviewLink(raw: string | null | undefined, opts: { allowBare?: boolean } = {}): AdPreviewLink | null {
+export function parseAdsManagerParents(raw: string | null | undefined): { parents: AdParent[] } | { error: string } | null {
   const text = (raw ?? "").trim();
-  if (!text) return null;
+  if (!/^https?:\/\//i.test(text) && !/^(www\.|business\.|adsmanager\.)?facebook\.com\//i.test(text)) return null;
   let url: URL;
   try {
     url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
   } catch {
     return null;
   }
-  if (!/^(www\.)?fb\.me$/i.test(url.hostname)) return null;
-  const parts = url.pathname.split("/").filter(Boolean);
-  let audience: AdPreviewAudience;
-  let code: string;
-  if (parts.length === 3 && parts[0].toLowerCase() === "adspreview") {
-    const kind = parts[1].toLowerCase();
-    if (kind === "facebook") audience = "FACEBOOK";
-    else if (kind === "managedaccount") audience = "MANAGED_ACCOUNT";
-    else return null;
-    code = parts[2];
-  } else if (opts.allowBare && parts.length === 1) {
-    audience = "FACEBOOK";
-    code = parts[0];
-  } else return null;
-  if (!PREVIEW_CODE_RE.test(code)) return null;
-  return { url: text, audience, code, key: `${audience}:${code}` };
+  if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return null;
+  for (const { param, kind } of PARENT_URL_PARAMS) {
+    const value = url.searchParams.get(param);
+    if (value === null) continue;
+    const ids = [...new Set(value.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean))];
+    if (!ids.length) continue;
+    if (ids.some((id) => !AD_ID_RE.test(id))) return { error: `Tham số ${param} có giá trị không phải mã số.` };
+    if (ids.length > ADS_MANAGER_PARENT_MAX) return { error: `Link chọn ${ids.length} ${AD_PARENT_LABEL[kind].toLowerCase()} — tối đa ${ADS_MANAGER_PARENT_MAX} mỗi lượt, bỏ bớt dấu tích rồi chép lại link.` };
+    return { parents: ids.map((id) => ({ kind, id })) };
+  }
+  return null;
 }
 
 export type AdIdList = {
@@ -126,37 +144,42 @@ export type AdIdList = {
   invalid: { raw: string; reason: string }[];
   duplicates: number;
   overflow: number;
-  /** Link chia sẻ xem trước — chưa phải Ad ID; máy chủ dò Ad ID qua `preview_shareable_link`. */
-  previewLinks: AdPreviewLink[];
+  /** Chiến dịch / nhóm đang chọn trong link Trình quản lý — máy chủ liệt kê mẩu của chúng. */
+  parents: AdParent[];
 };
 
 /**
  * Ô "dán nhiều mã": mỗi dòng (hoặc cách nhau dấu phẩy / chấm phẩy / khoảng trắng) một mã. URL
  * không bị cắt theo khoảng trắng bên trong vì URL không chứa khoảng trắng. Trùng thì gộp; quá
- * `META_AD_POST_BATCH_MAX` thì phần thừa được ĐẾM và báo, không cắt im lặng. Link chia sẻ
- * `fb.me/adspreview/…` đi riêng vào `previewLinks` (cũng gộp trùng theo khoá).
+ * `META_AD_POST_BATCH_MAX` thì phần thừa được ĐẾM và báo, không cắt im lặng. Link Trình quản lý có
+ * `selected_ad_ids` là Ad ID như cũ; chỉ có chiến dịch / nhóm đang chọn thì đi vào `parents`.
  */
 export function parseAdIdList(text: string, max = META_AD_POST_BATCH_MAX): AdIdList {
   const tokens = (text ?? "").split(/[\n\r,;\t ]+/).map((s) => s.trim()).filter(Boolean);
   const seen = new Set<string>();
   const adIds: string[] = [];
   const invalid: { raw: string; reason: string }[] = [];
-  const previewLinks: AdPreviewLink[] = [];
+  const parents: AdParent[] = [];
   let duplicates = 0;
   let overflow = 0;
   for (const token of tokens) {
-    const link = parseAdPreviewLink(token);
-    if (link) {
-      if (seen.has(link.key)) duplicates += 1;
-      else {
-        seen.add(link.key);
-        previewLinks.push(link);
-      }
+    if (isAdPreviewShareLink(token)) {
+      invalid.push({ raw: token, reason: AD_PREVIEW_LINK_REASON });
       continue;
     }
     const r = normalizeAdIdInput(token);
     if (!r.ok) {
-      invalid.push({ raw: r.raw, reason: r.reason });
+      const p = parseAdsManagerParents(token);
+      if (p && "parents" in p) {
+        for (const parent of p.parents) {
+          const key = `${parent.kind}:${parent.id}`;
+          if (seen.has(key)) duplicates += 1;
+          else {
+            seen.add(key);
+            parents.push(parent);
+          }
+        }
+      } else invalid.push({ raw: r.raw, reason: p && "error" in p ? p.error : r.reason });
       continue;
     }
     if (seen.has(r.adId)) {
@@ -167,7 +190,7 @@ export function parseAdIdList(text: string, max = META_AD_POST_BATCH_MAX): AdIdL
     if (adIds.length >= max) overflow += 1;
     else adIds.push(r.adId);
   }
-  return { adIds, invalid, duplicates, overflow, previewLinks };
+  return { adIds, invalid, duplicates, overflow, parents };
 }
 
 export type ParsedStory = { objectStoryId: string; pageId: string; postId: string };

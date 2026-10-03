@@ -15,15 +15,19 @@
  * Mỗi mã có kết quả RIÊNG: một mẩu hết quyền không kéo cả lô xuống (mục 10 của yêu cầu).
  * Tệp này không đọc/ghi CSDL — tên fanpage của ERP được truyền vào qua `erpPageNames`.
  */
-import type { GraphNodeResult } from "@/lib/integrations/facebook/client";
+import { graphErrorInfo, type GraphNodeResult } from "@/lib/integrations/facebook/client";
+import { ConnectorUnavailableError } from "@/lib/platform/credentials";
 import { asRecord, str } from "@/lib/integrations/http";
 import { isUsableAdId } from "@/lib/constants/ads-identity";
 import {
+  AD_PARENT_LABEL,
   classifyMetaError,
   emptyResolution,
+  META_AD_POST_BATCH_MAX,
   META_AD_POST_ERROR_LABEL,
   pickStoryFromCreative,
   postOpenUrl,
+  type AdParent,
   type AdPostResolution,
   type MetaAdPostError,
   type MetaGraphErrorInfo,
@@ -165,4 +169,40 @@ export async function resolveAdPosts(adIds: string[], deps: ResolveAdPostsDeps):
       pageNameSource: metaName ? "META" : erpName ? "ERP_FANPAGE" : null,
     };
   });
+}
+
+// ─────────────────────────── CHIẾN DỊCH / NHÓM ĐANG CHỌN → CÁC MẨU ───────────────────────────
+
+/** Cổng Graph cho bước liệt kê mẩu — `FacebookAdsClient.listAdIdsUnder` thoả sẵn; kiểm thử truyền bản giả. */
+export type AdParentGraph = {
+  listAdIdsUnder(parentId: string, max: number): Promise<{ adIds: string[]; more: boolean }>;
+};
+
+export type AdParentOutcome = AdParent & { adIds: string[]; more: boolean; error: MetaAdPostError | null; message: string };
+
+/**
+ * Link Trình quản lý chỉ mang chiến dịch / nhóm đang chọn ⇒ hỏi Meta mẩu nào thuộc chúng. Mỗi mã cha
+ * một kết quả RIÊNG (một chiến dịch hết quyền không kéo cái kia xuống); lỗi của cả kết nối thì dừng,
+ * không gọi tiếp cho có. Không có mẩu nào ⇒ nói ra, không im lặng trả bảng rỗng.
+ */
+export async function expandAdParents(parents: AdParent[], graph: AdParentGraph, max = META_AD_POST_BATCH_MAX): Promise<AdParentOutcome[]> {
+  const out: AdParentOutcome[] = [];
+  let fatal: MetaAdPostError | null = null;
+  for (const parent of parents) {
+    if (fatal) {
+      out.push({ ...parent, adIds: [], more: false, error: fatal, message: META_AD_POST_ERROR_LABEL[fatal] });
+      continue;
+    }
+    try {
+      const r = await graph.listAdIdsUnder(parent.id, max);
+      const message = r.adIds.length ? "" : `${AD_PARENT_LABEL[parent.kind]} này không có mẩu quảng cáo nào Meta trả (bản nháp, mẩu đã xoá hoặc đã lưu trữ thì Meta không trả).`;
+      out.push({ ...parent, adIds: r.adIds, more: r.more, error: null, message });
+    } catch (error) {
+      if (error instanceof ConnectorUnavailableError) throw error;
+      const code = classifyMetaError(graphErrorInfo(error));
+      if (CONNECTION_ERRORS.has(code) || code === "MISSING_PERMISSION") fatal = code;
+      out.push({ ...parent, adIds: [], more: false, error: code, message: META_AD_POST_ERROR_LABEL[code] });
+    }
+  }
+  return out;
 }

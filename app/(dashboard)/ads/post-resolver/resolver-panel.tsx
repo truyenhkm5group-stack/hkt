@@ -5,7 +5,7 @@ import { Check, Copy, ExternalLink, Loader2, RefreshCw, Search } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveMetaAdPosts, syncMetaAdPosts, type AdPostRow } from "@/lib/actions/meta-ad-post";
-import { META_AD_POST_BATCH_MAX, POST_RESOLUTION_SOURCE_LABEL } from "@/lib/constants/meta-ad-post";
+import { AD_PARENT_LABEL, META_AD_POST_BATCH_MAX, POST_RESOLUTION_SOURCE_LABEL } from "@/lib/constants/meta-ad-post";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -200,9 +200,10 @@ export function PostResolverPanel({ canSync }: { canSync: boolean }) {
       setRows(r.rows);
       setAllowSync(r.canSync);
       const n: Notice[] = [];
-      for (const p of r.previewLinks) {
-        const scanned = r.previewScan ? ` (dò ${r.previewScan.scannedAds.toLocaleString("vi-VN")} mẩu ở ${r.previewScan.scannedAccounts}/${r.previewScan.totalAccounts} tài khoản)` : "";
-        n.push(p.adId ? { tone: "ok", text: `Link chia sẻ → Ad ID ${p.adId}: Meta khai mẩu này mang đúng link đó${scanned}.` } : { tone: "err", text: `Link chia sẻ "${p.url.slice(0, 60)}" chưa ra Ad ID — ${p.reason}` });
+      for (const p of r.parents) {
+        const label = `${AD_PARENT_LABEL[p.kind]} ${p.id}`;
+        if (p.adCount) n.push({ tone: p.more ? "err" : "info", text: `${label}: ${p.adCount} mẩu quảng cáo${p.more ? ` — còn nữa, chỉ tra ${META_AD_POST_BATCH_MAX} mẩu đầu; chọn nhóm hẹp hơn để tra phần còn lại` : ""}.` });
+        else n.push({ tone: "err", text: `${label}: ${p.reason ?? "không có mẩu quảng cáo nào."}` });
       }
       if (r.invalid.length) n.push({ tone: "info", text: `Bỏ qua ${r.invalid.length} dòng không phải Ad ID: ${r.invalid.slice(0, 3).map((i) => `"${i.raw.slice(0, 40)}" — ${i.reason}`).join(" · ")}${r.invalid.length > 3 ? " …" : ""}` });
       if (r.duplicates) n.push({ tone: "info", text: `Gộp ${r.duplicates} mã trùng.` });
@@ -248,7 +249,7 @@ export function PostResolverPanel({ canSync }: { canSync: boolean }) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={input.includes("\n") ? 5 : 1}
-            placeholder="Ad ID, ví dụ 120248409213230618 — link feed_demo_ad=… — hoặc link chia sẻ https://fb.me/adspreview/facebook/…  (Shift+Enter để dán nhiều mã)"
+            placeholder="Ad ID, ví dụ 120248409213230618 — hoặc link trên thanh địa chỉ của Trình quản lý quảng cáo khi đang chọn quảng cáo / chiến dịch  (Shift+Enter để dán nhiều mã)"
             aria-label="Facebook Ad ID"
             className="min-h-9 flex-1 resize-y font-mono text-sm"
             autoFocus
@@ -258,7 +259,7 @@ export function PostResolverPanel({ canSync }: { canSync: boolean }) {
             <span className="ml-1">{resolving ? "Đang hỏi Meta…" : "Lấy Post ID"}</span>
           </Button>
         </form>
-        <p className="mt-1.5 text-xs text-muted-foreground">Mỗi dòng một mã, tối đa {META_AD_POST_BATCH_MAX} mã. feed_demo_ad chỉ là Ad ID để tra — không phải Post ID. Link chia sẻ (nút Chia sẻ trong Xem trước quảng cáo, dòng &quot;đăng nhập bằng Facebook&quot;) không chứa Ad ID: ERP dò mẩu nào Meta khai mang đúng link đó, nên mất vài giây.</p>
+        <p className="mt-1.5 text-xs text-muted-foreground">Mỗi dòng một mã, tối đa {META_AD_POST_BATCH_MAX} mã. feed_demo_ad chỉ là Ad ID để tra — không phải Post ID. Link Trình quản lý chỉ chọn chiến dịch / nhóm thì ERP tra mọi mẩu trong đó. Link chia sẻ fb.me/adspreview không dùng được: nó không chứa Ad ID và Meta tạo mã mới mỗi lần chia sẻ.</p>
       </div>
 
       {notices.map((n, i) => (
