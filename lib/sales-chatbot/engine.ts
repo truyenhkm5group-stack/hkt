@@ -82,7 +82,32 @@ export function bookingPrompt(cfg: SalesChatbotConfig, now: Date): string {
   ].join("\n");
 }
 
-export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = ""): string {
+/**
+ * BOT BIẾT BÂY GIỜ LÀ LÚC NÀO (03/10/2026). Trước đây chỉ khi bật đặt lịch bot mới biết «hôm nay» — khách nói «mai giao»,
+ * «tối nay em qua lấy», «hôm qua chị đặt» thì bot không biết đó là ngày nào. Độ mịn là GIỜ, không phải phút: lời nhắc hệ
+ * thống được đệm (cache) ở nhà cung cấp AI, ghi tới phút là mất đệm ở MỌI lượt; tới giờ thì mỗi giờ mất một lần.
+ */
+export function nowPromptLine(now: Date): string {
+  const vn = new Date(now.getTime() + 7 * 3_600_000);
+  const dd = String(vn.getUTCDate()).padStart(2, "0");
+  const mm = String(vn.getUTCMonth() + 1).padStart(2, "0");
+  return `${WEEKDAY_LABEL[vn.getUTCDay()]} ${dd}/${mm}/${vn.getUTCFullYear()}, khoảng ${vn.getUTCHours()} giờ`;
+}
+
+/** Hai tin cách nhau từ chừng này trở lên thì tin của khách mang mốc giờ khi gửi model — ngắn hơn là cùng một mạch chat. */
+export const MESSAGE_TIME_GAP_MS = 3 * 3_600_000;
+
+/** «[Gửi lúc 20:15 Thứ sáu 02/10]» — mốc của CHÍNH tin đó (giờ Việt Nam). */
+export function messageTimeTag(at: Date): string {
+  const vn = new Date(at.getTime() + 7 * 3_600_000);
+  const hh = String(vn.getUTCHours()).padStart(2, "0");
+  const mi = String(vn.getUTCMinutes()).padStart(2, "0");
+  const dd = String(vn.getUTCDate()).padStart(2, "0");
+  const mm = String(vn.getUTCMonth() + 1).padStart(2, "0");
+  return `[Gửi lúc ${hh}:${mi} ${WEEKDAY_LABEL[vn.getUTCDay()]} ${dd}/${mm}]`;
+}
+
+export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = "", now: Date | null = null): string {
   const upsell = quick.find((q) => q.upsell);
   const shipping = cfg.shippingFee === null ? "Shop CHƯA khai phí ship cố định: nói với khách «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số." : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.";
   return [
@@ -120,6 +145,9 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Khách sỉ» (như trên) · «Ngoài chính sách» (điều shop CHƯA khai ở «Về shop» / «Hướng dẫn thêm» / sổ tay: giảm giá riêng, giao gấp chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không hiểu ý khách» (ĐÃ hỏi lại 2 lần vẫn không rõ — không đoán). Chuyển người trên fanpage là bot IM LẶNG, khách phải chờ nhân viên: chỉ chuyển khi thật sự không trả lời được.",
     returning,
     booking,
+    now
+      ? `THỜI GIAN: bây giờ là ${nowPromptLine(now)} (giờ Việt Nam). «hôm nay», «mai», «tối nay», «cuối tuần» tính theo mốc này. Tin có dấu «[Gửi lúc …]» được gửi từ trước — những chữ đó trong tin ấy tính theo ngày của CHÍNH tin ấy (khách nhắn «mai giao» hôm qua nghĩa là giao HÔM NAY). Không nhắc lại dấu giờ này với khách.`
+      : "",
     quick.length
       ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
       : "",
@@ -155,10 +183,10 @@ async function loadConversation(id: string): Promise<ConvRow | null> {
   return row ?? null;
 }
 
-async function loadMessages(conversationId: string): Promise<{ seq: number; role: "user" | "assistant"; content: AiBlock[] }[]> {
+async function loadMessages(conversationId: string): Promise<{ seq: number; role: "user" | "assistant"; content: AiBlock[]; at: Date }[]> {
   const db = await getDb();
   const rows = await db.select().from(schema.salesChatMessages).where(eq(schema.salesChatMessages.conversationId, conversationId)).orderBy(asc(schema.salesChatMessages.seq));
-  return rows.map((r) => ({ seq: r.seq, role: r.role === "assistant" ? "assistant" : "user", content: (Array.isArray(r.content) ? r.content : []) as AiBlock[] }));
+  return rows.map((r) => ({ seq: r.seq, role: r.role === "assistant" ? "assistant" : "user", content: (Array.isArray(r.content) ? r.content : []) as AiBlock[], at: r.createdAt }));
 }
 
 class SeqConflict extends Error {}
@@ -172,9 +200,21 @@ async function appendMessage(conversationId: string, seq: number, role: "user" |
 /**
  * Lịch sử gửi model: tin CUỐI `historyMessages`, cắt ở ranh giới câu của KHÁCH (tin `user` chỉ có chữ) để không bao giờ
  * mở đầu bằng một `tool_result` mồ côi. Lời chào của bot (tin đầu, `assistant`) bỏ đi — Anthropic đòi tin đầu là `user`.
+ *
+ * MỐC GIỜ (03/10/2026): tin chữ của khách cách tin trước đó từ `MESSAGE_TIME_GAP_MS` trở lên được gắn `messageTimeTag` ở
+ * BẢN GỬI MODEL (không ghi vào CSDL, khách không thấy) — để «mai giao» nhắn hôm qua không bị hiểu là ngày mai của hôm nay.
+ * Mốc dựng TẤT ĐỊNH từ `at` đã lưu, nên cùng lịch sử luôn ra cùng chữ và đệm (cache) tin nhắn ở nhà cung cấp không vỡ.
+ * Tin không có `at` (bài kiểm cũ) ⇒ không gắn gì.
  */
-export function historyForModel(msgs: readonly { role: "user" | "assistant"; content: AiBlock[] }[], limit: number): AiMessage[] {
-  const tail = msgs.slice(-limit);
+export function historyForModel(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at?: Date }[], limit: number): AiMessage[] {
+  const tagged = msgs.map((m, i) => {
+    const prev = i > 0 ? msgs[i - 1].at : undefined;
+    const isCustomerText = m.role === "user" && m.content.length > 0 && m.content.every((b) => b.type === "text");
+    if (!isCustomerText || !m.at || !prev || m.at.getTime() - prev.getTime() < MESSAGE_TIME_GAP_MS) return { role: m.role, content: m.content };
+    const [first, ...rest] = m.content as Extract<AiBlock, { type: "text" }>[];
+    return { role: m.role, content: [{ ...first, text: `${messageTimeTag(m.at)}\n${first.text}` }, ...rest] as AiBlock[] };
+  });
+  const tail = tagged.slice(-limit);
   let start = tail.findIndex((m) => m.role === "user" && m.content.every((b) => b.type === "text"));
   if (start < 0) start = tail.length;
   return tail.slice(start).map((m) => ({ role: m.role, content: m.content }));
@@ -446,12 +486,12 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const returning = await findReturningCustomer(known).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "");
+    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
     const tools = toolDefsFor(cfg, { bookingOn });
-    const history = historyForModel([...msgs, { role: "user", content: [{ type: "text", text }] }], SALES_CHATBOT_LIMITS.historyMessages);
+    const history = historyForModel([...msgs, { role: "user", content: [{ type: "text", text }], at: now }], SALES_CHATBOT_LIMITS.historyMessages);
     let state = (conv.state ?? {}) as ChatState;
     let calls = 0;
     let inTok = 0;
