@@ -132,6 +132,12 @@ export function QuickStart({ needInvite, initialInvite, providers, social }: { n
           Tự chọn mẫu và module
         </Link>
       </div>
+      <p className="text-center text-xs text-muted-foreground">
+        Xem cách chúng tôi bảo vệ dữ liệu:{" "}
+        <a href="/chinh-sach-bao-mat" target="_blank" rel="noopener" className="underline hover:text-foreground">
+          Chính sách quyền riêng tư
+        </a>
+      </p>
     </div>
   );
 }
