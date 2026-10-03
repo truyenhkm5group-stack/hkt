@@ -423,7 +423,11 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
  * MỘT lượt khách gõ. `channel` và `visitorKey` do nơi gọi (máy chủ) quyết — hội thoại phải đúng kênh, và kênh WEB phải
  * đúng khách truy cập đã mở nó (không đọc / gõ tiếp hội thoại của người khác bằng cách đoán id).
  */
-export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date }): Promise<TurnResult> {
+/**
+ * `context` = ngữ cảnh máy chủ đọc được cho lượt này (vd nội dung bài viết khách vừa bình luận dưới — `postContextPrompt`).
+ * Có ngữ cảnh ⇒ bỏ qua câu mẫu khớp chữ / AI chọn mã: câu khách («cho giá») chỉ hiểu đúng khi đọc cùng ngữ cảnh.
+ */
+export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
   if (!text) return { ok: false, error: "Tin nhắn trống." };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };
@@ -469,7 +473,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const st0 = (conv.state ?? {}) as ChatState;
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
-    const quick: QuickReplyStep = qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
+    const quick: QuickReplyStep = opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
       await reply(conv, seq, pick.text);
       await markQuickReplyUsed(pick.entry.id, now).catch(() => undefined);
@@ -524,7 +528,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const returning = await findReturningCustomer(known).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now);
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
