@@ -29,7 +29,7 @@ import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessag
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { fillPlaceholders, isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parseLearnedQuickReplies, repeatsRecent, validateQuickReply } from "@/lib/sales-chatbot/quick-replies-shared";
-import { sourceUsage } from "@/lib/ai-usage/ledger";
+import { aiUsageByRef, sourceUsage } from "@/lib/ai-usage/ledger";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { activeUserIdsWhoCan, type SessionUser } from "@/lib/auth/session";
 import { allowedNavItems, hubTools } from "@/components/app-sidebar";
@@ -63,6 +63,8 @@ import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
+import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
+import { lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { CLOSED_TAG, customerLeftPhone, OPEN_TAG, redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
@@ -307,6 +309,19 @@ function testPure() {
   assert.deepEqual(customerFacingText("[Shop đã nhắn] Dạ em chào anh/chị"), { text: "", leaked: true });
   assert.equal(customerNamePrompt("  Đỗ   Là "), "TÊN KHÁCH (Facebook): «Đỗ Là» — dùng làm họ tên người nhận; KHÔNG xin họ tên (khách tự nêu tên người nhận khác thì dùng tên đó).");
   assert.equal(customerNamePrompt(null), "");
+  // ═══ BOT TỰ HỌC (03/10/2026) — phần thuần ═══
+  assert.deepEqual(normalizeLessons(["- Khi khách đã cho SĐT ⇒ không hỏi lại", "1. Khi khách hỏi giá 1kg ⇒ báo 280k ạ", "khi khách đã cho sđt ⇒ không hỏi lại", "ngắn", ""]), ["Khi khách đã cho SĐT ⇒ không hỏi lại", "Khi khách hỏi giá 1kg ⇒ báo [giá lấy từ ERP] ạ"], "bỏ đầu dòng, bỏ giá, bỏ trùng không dấu, bỏ dòng quá ngắn");
+  assert.equal(normalizeLessons(Array.from({ length: 40 }, (_, i) => `Khi tình huống số ${"x".repeat(i + 1)} ⇒ làm việc`)).length, 25, "tối đa 25 bài");
+  assert.deepEqual(parseLessonsFromAi('Đây:\n```json\n["Khi khách hỏi ship ⇒ báo miễn ship nội thành", {"lesson": "Khi khách im ⇒ hỏi một câu ngắn"}]\n```'), ["Khi khách hỏi ship ⇒ báo miễn ship nội thành", "Khi khách im ⇒ hỏi một câu ngắn"]);
+  assert.equal(parseLessonsFromAi("không có mảng nào"), null);
+  assert.equal(parseLessonsFromAi("[không phải json"), null);
+  assert.equal(lessonsPrompt({ enabled: false, lessons: ["Khi a ⇒ làm b nhé"] }), "", "tắt ⇒ không vào lời nhắc");
+  assert.equal(lessonsPrompt({ enabled: true, lessons: [] }), "");
+  assert.ok(lessonsPrompt({ enabled: true, lessons: ["Khi a ⇒ làm b nhé"] }).includes("- Khi a ⇒ làm b nhé"));
+  assert.equal(lessonTranscript([{ who: "KHÁCH", text: "alo" }], "[KẾT QUẢ: x]"), null, "chỉ một phía ⇒ không học được gì");
+  assert.equal(lessonTranscript([{ who: "KHÁCH", text: "Chị Hoa đây, 0912 345 678" }, { who: "BOT", text: "Dạ" }, { who: "BOT", text: "Dạ" }], "[KẾT QUẢ: x]", ["Chị Hoa"]), "[KẾT QUẢ: x]\nKHÁCH: [khách] đây, [số]\nBOT: Dạ", "che tên + số, bỏ dòng trùng liền nhau");
+  const lsParsed = parseLessonsState({ enabled: "có", lessons: ["Khi a ⇒ làm b nhé", 3], version: 2.5, history: [{ version: 1, lessons: ["x"], at: "t", by: "u" }, null], lastRun: { at: "t", status: "LẠ" } });
+  assert.ok(lsParsed.enabled && lsParsed.lessons.length === 1 && lsParsed.version === 0 && lsParsed.history.length === 1 && lsParsed.lastRun?.status === "ERROR" && lsParsed.learnedUntil === null, JSON.stringify(lsParsed));
   assert.equal(plainForMessenger("Anh/chị cho em xin *Họ tên, SĐT và địa chỉ cụ thể* để em lên đơn ạ!"), "Anh/chị cho em xin Họ tên, SĐT và địa chỉ cụ thể để em lên đơn ạ!");
   assert.equal(plainForMessenger("**Chả cá thu** 1kg\n* Miễn ship"), "Chả cá thu 1kg\n- Miễn ship");
   assert.equal(plainForMessenger("Giá 2*140k ạ"), "Giá 2*140k ạ", "dấu sao giữa chữ số không phải định dạng");
@@ -1656,6 +1671,78 @@ async function testJourney() {
       assert.equal((await loadPlaybook()).published?.version, 1, "quay lại bản 1");
       assert.ok("ok" in (await unpublishPlaybook(admin)));
       assert.equal((await loadPlaybook()).published, null, "gỡ khỏi bot");
+      // ═══ BOT TỰ HỌC (03/10/2026 — «cho chat bot tự học hội thoại liên tục…») ═══
+      // Một hội thoại có đủ ba giọng: khách cho SĐT, bot hỏi thừa, nhân viên phải vào; dòng mã tin Pancake của bot là bản trùng,
+      // ghi chú tự động của Pancake không phải lời của ai.
+      const lsAt = (min: number) => new Date(Date.now() - 60 * 60_000 + min * 60_000);
+      await db.insert(schema.salesChatInbound).values([
+        { pageId: PAGE, threadId: "t-learn", messageId: "ls-1", text: "Cho chị 1kg chả mực, sđt 0912345678, Chị Hoa nhé", customerName: "Chị Hoa", status: "DONE", createdAt: lsAt(0) },
+        { pageId: PAGE, threadId: "t-learn", messageId: "bot-out:ls-2", text: "Dạ anh/chị cho em xin họ tên và SĐT ạ", status: "DONE", note: "BOT_SENT", createdAt: lsAt(1) },
+        { pageId: PAGE, threadId: "t-learn", messageId: "pc-ls-2", text: "Dạ anh/chị cho em xin họ tên và SĐT ạ", status: "DONE", note: "BOT_SENT", createdAt: lsAt(1) },
+        { pageId: PAGE, threadId: "t-learn", messageId: "ls-3", text: "Đã thêm nhãn tự động: Khách mới", status: "DONE", note: "PAGE_REPLY", createdAt: lsAt(2) },
+        { pageId: PAGE, threadId: "t-learn", messageId: "ls-4", text: "Dạ chị gửi em địa chỉ, em giao tận nơi ạ", status: "DONE", note: "PAGE_REPLY", createdAt: lsAt(3) },
+      ]);
+      const lsInputs: string[] = [];
+      let lsReply = '```json\n["Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn", "- Khi khách hỏi giá 1kg ⇒ báo 280k", "Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn"]\n```';
+      const lsSystems: string[] = [];
+      const lsBot = fakeProvider(hslcScript({ chaMuc, ruocTom }));
+      setSalesChatProviderForTests(() => ({
+        ...lsBot,
+        complete: async (req: AiRequest) => {
+          if (req.system.includes("BẢN BÀI HỌC")) {
+            lsInputs.push(req.messages.map((m) => m.content.map((x) => (x.type === "text" ? x.text : "")).join(" ")).join(" "));
+            return { content: [{ type: "text", text: lsReply }], stopReason: "end_turn", usage: { inputTokens: 900, outputTokens: 60, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          }
+          lsSystems.push(req.system);
+          return lsBot.complete(req);
+        },
+      }));
+      const lsLater = new Date(Date.now() + 2 * 3_600_000);
+      const manager2 = { ...admin, role: "MANAGER" as const, permissions: admin.permissions.filter((x) => x !== "ai_sales:manage") };
+      assert.ok("error" in (await saveLessons(manager2, "Khi a ⇒ làm b nhé")), "thiếu ai_sales:manage ⇒ không sửa được bài học");
+      const ls1 = await learnLessons({ now: lsLater, force: true, actor: { id: null, name: ADMIN_EMAIL } });
+      assert.equal(ls1.status, "OK", JSON.stringify(ls1));
+      assert.ok(ls1.threads >= 1 && ls1.lessons === 2, JSON.stringify(ls1));
+      const lsIn = lsInputs.join("\n");
+      assert.ok(lsIn.includes("KHÁCH: Cho chị [số]kg chả mực, sđt [số], [khách] nhé") && !lsIn.includes("0912345678") && !lsIn.includes("Chị Hoa"), `che SĐT + tên khách trước khi gửi AI: ${lsIn.slice(0, 400)}`);
+      assert.ok(lsIn.includes("SHOP: Dạ chị gửi em địa chỉ, em giao tận nơi ạ") && !lsIn.includes("nhãn tự động"), "lời nhân viên là mẫu; ghi chú Pancake bị bỏ");
+      assert.equal(lsIn.split("BOT: Dạ anh/chị cho em xin họ tên và SĐT ạ").length - 1, 1, "tin bot không lặp vì dòng mã tin Pancake");
+      assert.ok(lsIn.includes("[NHÂN VIÊN PHẢI VÀO SAU BOT]"), "đánh dấu chỗ bot hỏng");
+      const lsState1 = await loadLessons();
+      assert.ok(lsState1.version === 1 && lsState1.lessons.length === 2 && !lsState1.lessons.some((l) => /280/.test(l)) && lsState1.learnedUntil !== null && lsState1.lastRun?.status === "OK", JSON.stringify(lsState1));
+      assert.ok((await aiUsageByRef(ORG, ["sales_playbook"], new Date(Date.now() - 86_400_000))).some((r) => r.ref === "lessons" && r.turns >= 1), "lượt học ghi sổ dùng AI (chi phí học)");
+      // Bot dùng bài học NGAY ở lượt kế tiếp.
+      const lsConv = await openConversation("TEST");
+      await chatTurn(lsConv.id, "shop ơi", { channel: "TEST" });
+      assert.ok(lsSystems.some((x) => x.includes("BÀI HỌC TỪ HỘI THOẠI THẬT") && x.includes("- Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn")), "bài học vào lời nhắc của bot");
+      // Nhịp: chưa đủ 6 giờ ⇒ không học; «Học ngay» khi không có hội thoại mới ⇒ bỏ qua, không gọi AI.
+      const lsCalls = lsInputs.length;
+      assert.equal((await learnLessons({ now: new Date(lsLater.getTime() + 3_600_000) })).status, "NOT_DUE");
+      const lsNone = await learnLessons({ now: new Date(lsLater.getTime() + 3_600_000), force: true });
+      assert.ok(lsNone.status === "SKIPPED" && lsInputs.length === lsCalls, JSON.stringify(lsNone));
+      // AI trả rác ⇒ LỖI, bài học cũ giữ nguyên.
+      await db.insert(schema.salesChatInbound).values([
+        { pageId: PAGE, threadId: "t-learn2", messageId: "ls2-1", text: "ship bao lâu", status: "DONE", createdAt: new Date(lsLater.getTime() + 10 * 60_000) },
+        { pageId: PAGE, threadId: "t-learn2", messageId: "bot-out:ls2-2", text: "Dạ 2 ngày ạ", status: "DONE", note: "BOT_SENT", createdAt: new Date(lsLater.getTime() + 11 * 60_000) },
+      ]);
+      lsReply = "xin lỗi, tôi không biết";
+      const lsBad = await learnLessons({ now: new Date(lsLater.getTime() + 3 * 3_600_000), force: true });
+      assert.ok(lsBad.status === "ERROR" && (await loadLessons()).lessons.length === 2, JSON.stringify(lsBad));
+      // Chủ shop sửa ⇒ bản cũ vào lịch sử; quay lại được.
+      assert.ok("ok" in (await saveLessons(admin, "Khi khách hỏi ship ⇒ báo miễn ship nội thành từ 300k\n\nKhi khách im lặng ⇒ hỏi lại một câu ngắn")));
+      const lsState2 = await loadLessons();
+      assert.ok(lsState2.version === 2 && lsState2.lessons.length === 2 && lsState2.lessons[0] === "Khi khách hỏi ship ⇒ báo miễn ship nội thành từ [giá lấy từ ERP]" && lsState2.history.length === 1, JSON.stringify(lsState2));
+      assert.ok("ok" in (await rollbackLessons(admin)));
+      const lsState3 = await loadLessons();
+      assert.ok(lsState3.lessons[0] === "Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn" && lsState3.history.length === 0, JSON.stringify(lsState3));
+      assert.ok("error" in (await rollbackLessons(admin)), "hết bản trước");
+      // Tắt ⇒ bot không đọc bài học, không học.
+      assert.ok("ok" in (await setLessonsEnabled(admin, false)));
+      lsSystems.length = 0;
+      await chatTurn(lsConv.id, "còn hàng không", { channel: "TEST" });
+      assert.ok(lsSystems.length > 0 && !lsSystems.some((x) => x.includes("BÀI HỌC TỪ HỘI THOẠI THẬT")), "tắt ⇒ không vào lời nhắc");
+      assert.equal((await learnLessons({ force: true })).status, "NOT_DUE");
+      assert.ok("ok" in (await setLessonsEnabled(admin, true)));
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // Kết nối tắt ⇒ tin không được nhận (không có lối vào cửa sau).
       assert.ok("ok" in (await setConnectionStatus(admin, "pancake-fanpage", "DISABLED")));

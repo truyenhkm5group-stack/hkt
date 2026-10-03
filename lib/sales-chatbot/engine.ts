@@ -32,6 +32,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
+import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
@@ -372,6 +373,10 @@ export async function salesChatProvider(): Promise<{ ok: true; provider: AiProvi
 async function publishedPlaybook(): Promise<string> {
   return (parsePlaybookState(await readJsonSetting(PLAYBOOK_SETTING_KEY)).published?.text ?? "").slice(0, PLAYBOOK_LIMITS.playbookChars);
 }
+/** Bài học bot TỰ HỌC từ hội thoại thật (`lib/sales-chatbot/lessons.ts`) — '' khi tắt / chưa có. Đọc thẳng settings, không import vòng. */
+async function learnedLessons(): Promise<string> {
+  return lessonsPrompt(parseLessonsState(await readJsonSetting(LESSONS_SETTING_KEY)));
+}
 /** Chỉ bài kiểm: provider giả (luật 65 — không gọi mạng thật). `null` để gỡ. */
 export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => AiProvider | null) | null) {
   providerOverride = fn;
@@ -572,7 +577,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     const returning = await findReturningCustomer(known).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now), await learnedLessons(), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;

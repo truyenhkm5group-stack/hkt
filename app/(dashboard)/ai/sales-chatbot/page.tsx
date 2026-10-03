@@ -11,10 +11,12 @@ import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
 import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, loadPlaybookRun } from "@/lib/sales-chatbot/playbook";
+import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
 import { PlaybookPanel } from "./playbook-panel";
+import { LessonsPanel } from "./lessons-panel";
 import { FollowupPanel } from "./followup-panel";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
@@ -43,7 +45,7 @@ export default async function SalesChatbotPage() {
     publicationOf(user.organization?.code ?? ""),
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
-  const [playbook, playbookRun] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun()]) : [null, null];
+  const [playbook, playbookRun, lessons] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun(), loadLessons()]) : [null, null, null];
   // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
   const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
@@ -105,6 +107,7 @@ export default async function SalesChatbotPage() {
           ) : null}
           {costReport ? <ChatCostPanel report={costReport} /> : null}
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
+          {lessons ? <LessonsPanel key={`${lessons.version}-${lessons.updatedAt ?? ""}`} state={lessons} /> : null}
           {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
             <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} appointmentsOn={moduleOn(user, "appointments")} />
