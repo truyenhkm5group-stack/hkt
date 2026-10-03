@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { requirePermission } from "@/lib/auth/session";
 import { CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { DECISION_ACTION, DECISION_LABEL, DECISION_TONE, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
+import { SIZE_BREAK_LABEL, SIZE_BREAK_TONE, type SizeBreakReport } from "@/lib/constants/size-break";
 import { formatNumber, formatVND } from "@/lib/format";
 import { backtestInventoryDecisions, getInventoryDecisionReport } from "@/lib/queries/inventory-decision";
 import { cn } from "@/lib/utils";
@@ -124,6 +125,8 @@ export default async function InventoryDecisionsPage() {
         </InfoHint>
       </div>
 
+      <SizeBreakSection report={report.sizeBreaks} />
+
       {GROUP_ORDER.map((kind) => {
         const rows = report.rows.filter((r) => r.decision === kind);
         if (!rows.length) return null;
@@ -235,5 +238,72 @@ export default async function InventoryDecisionsPage() {
       </SectionCard>
 
     </div>
+  );
+}
+
+/**
+ * ĐỨT SIZE — nhìn ở cấp (mã hàng, màu), luật ở `lib/constants/size-break.ts`. Bảng từng mẫu mã bên dưới
+ * nói "size M nguy cơ hết hàng" và "size XL giữ nguyên"; khối này nói câu mà hai dòng ấy không nói được:
+ * màu này vẫn "còn hàng" nhưng phần lớn khách muốn đúng size đã hết.
+ */
+function SizeBreakSection({ report }: { report: SizeBreakReport }) {
+  const { groups, rule } = report;
+  const note = `Đã xét ${formatNumber(report.evaluated)} nhóm màu đủ đơn${report.insufficient ? ` · ${formatNumber(report.insufficient)} nhóm bán dưới ${rule.minGroupSold30} cái/30 ngày chưa phán` : ""}${report.unknown ? ` · ${formatNumber(report.unknown)} nhóm có size đang bán mà CHƯA CÓ PHIẾU NHẬP nên không kết luận` : ""}`;
+  return (
+    <SectionCard
+      title={groups.length ? `Đứt size — ${formatNumber(groups.length)} nhóm màu còn hàng mà thiếu size khách mua` : "Đứt size — không có nhóm màu nào"}
+      description={note}
+      hint={`Gom mẫu mã theo mã hàng × màu. Khi các size đã hết chiếm từ ${rule.brokenSharePct}% lượng bán 30 ngày của màu đó mà màu vẫn còn hàng ở size khác ⇒ "Đã đứt size"; cộng thêm size sẽ hết trước khi lô mới về mới tới mức đó ⇒ "Sắp đứt size". Lượng bán là của Kế hoạch SX (không huỷ, không hoàn, không tặng; gồm cả đơn đã chốt đang chờ hàng). Size hết lâu thì bán ít đi vì không có hàng, nên tỷ trọng ở đây là CẬN DƯỚI. Màu hết sạch mọi size không nằm ở đây — đó là hết hàng, xem nhóm Nguy cơ hết hàng.`}
+      padded={false}
+    >
+      {groups.length ? (
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1100px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã hàng · màu</TableHead>
+                <TableHead className="text-right">Bán 30 ngày</TableHead>
+                <TableHead>Size hết (tỷ trọng bán)</TableHead>
+                <TableHead>Còn hàng ở size</TableHead>
+                <TableHead className="text-right">Vốn ở size còn</TableHead>
+                <TableHead>Việc nên làm</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groups.map((g) => (
+                <TableRow key={g.key} className={cn(g.level === "BROKEN" && "bg-rose-50/40 dark:bg-rose-950/10")}>
+                  <TableCell className="max-w-[220px]">
+                    <Link href={`/products/${g.productId}`} className="block truncate font-medium hover:underline" title={g.productName}>
+                      {g.productCode ? `${g.productCode} · ` : ""}{g.productName}
+                    </Link>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", SIZE_BREAK_TONE[g.level])}>{SIZE_BREAK_LABEL[g.level]}</span>
+                      {g.color.trim() || "(không màu)"}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatNumber(g.totalSold30)}</TableCell>
+                  <TableCell className="text-xs">
+                    <b className="text-rose-700 dark:text-rose-300">{g.brokenSharePct}%</b>
+                    <span className="block text-muted-foreground">
+                      {g.brokenSizes.map((l) => `${l.size || "(không size)"} ${l.sharePct}% · khả dụng ${formatNumber(l.available)}`).join(" · ")}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <b className="tabular-nums">{formatNumber(g.remainingUnits)} cái</b>
+                    <span className="block text-muted-foreground">{g.remainingSizes.map((l) => `${l.size || "(không size)"} ${formatNumber(l.available)}`).join(" · ")}</span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {g.remainingCapital === null ? <span className="text-xs italic text-muted-foreground">chưa có giá nhập</span> : <Money value={g.remainingCapital} />}
+                  </TableCell>
+                  <TableCell className="max-w-[360px] text-xs text-muted-foreground" title={g.reason}>{g.action ?? g.reason}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        <p className="px-4 py-4 text-sm text-muted-foreground">Không nhóm màu nào đang còn hàng mà thiếu đúng size khách mua.</p>
+      )}
+    </SectionCard>
   );
 }

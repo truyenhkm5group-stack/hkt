@@ -9,6 +9,7 @@ import {
   type InventoryDecisionResult,
 } from "@/lib/constants/inventory-decision";
 import { computePlan, paceOfPlanRow, roundCoverDays } from "@/lib/constants/planning";
+import { findSizeBreaks, type SizeBreakReport, type SizeBreakVariant } from "@/lib/constants/size-break";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { linkedReceiptQty, openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
 import { openQtyAfterReceived } from "@/lib/constants/workshop-ledger";
@@ -125,6 +126,11 @@ export type InventoryDecisionReport = {
    * được nhưng chưa có lịch sử để tin — trang chỉ tham khảo, KHÔNG làm căn cứ tự động.
    */
   dataGate: { state: "BETA" | "DATA_INSUFFICIENT"; reasons: string[] };
+  /**
+   * ĐỨT SIZE theo (mã hàng, màu) — `findSizeBreaks` trên ĐÚNG các dòng kế hoạch và đề xuất đặt ở trên,
+   * kể cả dòng giữ nguyên (size còn hàng thường là dòng "giữ nguyên"; bỏ nó đi là mất vế "còn hàng").
+   */
+  sizeBreaks: SizeBreakReport;
   used: { coverDays: number; leadTimeDays: number; shopReturnRate: number; minHistoryDays: number };
 };
 
@@ -267,6 +273,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
   let returnOwnCount = 0;
   let leadOverrideCount = 0;
   let historyKnownCount = 0;
+  const sizeInputs: SizeBreakVariant[] = [];
 
   for (const r of plan.rows) {
     const unitCost = r.unitCost > 0 ? r.unitCost : null;
@@ -309,6 +316,22 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       ageDays,
       slowRules: slow.rules,
       returnedOut: returnedOut.has(r.variantId),
+    });
+
+    sizeInputs.push({
+      variantId: r.variantId,
+      productId: r.productId,
+      productName: r.productName,
+      productCode: r.productCode,
+      color: r.color,
+      size: r.size,
+      stockKnown: r.stockKnown,
+      available: r.available,
+      status: r.status,
+      sold30: r.sold30,
+      unitCost,
+      suggestedQty: decision.suggestedQty,
+      openPoQty: openPo.qtyByVariant.get(r.variantId) ?? 0,
     });
 
     byDecision[decision.decision] += 1;
@@ -401,6 +424,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       historyKnownPct: pct(historyKnownCount),
     },
     dataGate: dataGateOf({ stockKnownPct: pct(stockKnownCount), costKnownPct: pct(costKnownCount), historyKnownPct: pct(historyKnownCount), total }),
+    sizeBreaks: findSizeBreaks(sizeInputs),
     used: { coverDays: plan.used.coverDays, leadTimeDays: a.leadTimeDays, shopReturnRate, minHistoryDays: DECISION_RULE.minHistoryDays },
   };
 }
