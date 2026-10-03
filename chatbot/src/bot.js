@@ -13,6 +13,8 @@ import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
 import { orderSync, describeOrder, phonesInText, norm } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
+import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoice, VOICE_PROMPT_HINT } from "./voice.js";
+import { voiceDeps } from "./voice-runtime.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
 
@@ -519,7 +521,11 @@ export class Bot {
   }
 
   messageText(msg) {
-    const t = stripHtml(msg.original_message || msg.message) || describeAttachments(msg.attachments);
+    const goc = stripHtml(msg.original_message || msg.message);
+    // Ghi am da chep thanh chu (voice.js) thay cho dong "[Khách gửi 1 ghi âm]"; chua chep / chep loi thi giu nhu cu
+    const nghe = msg?.id && (msg.attachments || []).some(isAudioAttachment) ? store.getVoiceText(msg.id) : null;
+    const khac = nghe === null ? msg.attachments : (msg.attachments || []).filter((a) => !isAudioAttachment(a));
+    const t = [goc || describeAttachments(khac), voiceLabel(nghe)].filter(Boolean).join(" ");
     // SDT khach bam nut "chia se so dien thoai" cua Messenger (Pancake hien chip XANH): so khong nam trong noi dung chu
     // ma o truong khac cua tin (phone_info / quick_reply / attachments). Su co Nhung Le 02/10/2026: khach gui
     // "0355734749" bang chip, bot van chot "CHƯA CÓ SỐ ĐIỆN THOẠI" va bot len don khong thay SDT.
@@ -1314,6 +1320,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     try {
       messages = await this.fetchMoreHistory(client, conversationId, messages, config.historyLimitRecheck);
     } catch {}
+    await transcribeVoiceMessages(messages.slice(-60), { pageId, isCustomer: (m) => !this.isFromPage(m, pageId), deps: voiceDeps() }).catch(() => {});
     const historyText = messages.slice(-60).map((m) => `${this.isFromPage(m, pageId) ? "SHOP" : "KHÁCH"}: ${this.messageText(m)}`).join("\n");
     const name = data.conv_from?.name || "";
     const r = await orderSync.syncFromConversation({ pageId, pageName: this.pageNames.get(pageId), conversationId, customerName: name, historyText });
@@ -1659,6 +1666,11 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       return;
     }
 
+    // Ghi am cua khach -> chep thanh chu TRUOC moi buoc doc noi dung (tra loi, ho so don, ghi POS). Loi thi bo qua.
+    await transcribeVoiceMessages(messages, { pageId, isCustomer: (m) => !this.isFromPage(m, pageId), deps: voiceDeps() }).catch((e) =>
+      log.warn(`[${pageId}] ${conversationId}: chep ghi am loi: ${e.message}`)
+    );
+
     // Tin chi la sticker / like / emoji (khong chu, khong anh): tra loi mau, khong ton tien Gemini
     const lastText = this.messageText(last);
 
@@ -1775,6 +1787,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     if (saleActive) log.info(`[${pageId}] ${conversationId}: hoi thoai dang chay khuyen mai -> dung bang gia khuyen mai`);
     let systemPrompt = this.buildSystemPrompt(pageId, { customerName: name, type, commentMode: eff.commentMode, saleActive });
     systemPrompt += this.sizeHintFor(pageId, messages);
+    if (hasCustomerVoice(messages, (m) => !this.isFromPage(m, pageId))) systemPrompt += VOICE_PROMPT_HINT;
     // Don da chot cung kem muc nay: no noi "đơn đã đủ, đừng hỏi thêm, đọc ngữ cảnh tin ngắn" (truoc day bo qua -> AI
     // khong biet don da du, hoc theo lich su ma hoi "Em lên đơn…?" mai — Bui Phuong Vy 02/10/2026)
     systemPrompt += this.orderProgressPrompt(pageId, messages);

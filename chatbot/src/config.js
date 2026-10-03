@@ -204,6 +204,17 @@ export const config = {
     maxBytes: num("VISION_MAX_IMAGE_MB", 5) * 1024 * 1024,
   },
 
+  // Nghe tin nhan thoai cua khach: chep thanh chu bang Gemini (ke ca khi AI_PROVIDER=openai, mien la co GEMINI_API_KEY)
+  // de bot tra loi, lay SDT/dia chi va ghi don doc duoc. Xem voice.js.
+  voice: {
+    enabled: bool("VOICE_ENABLED", true),
+    // Rong = dung GEMINI_MODEL
+    model: env("VOICE_MODEL"),
+    // So ghi am CHUA chep toi da moi luot tra loi (moi nhat truoc); ghi am da chep thi doc lai tu so, khong ton them
+    maxClips: Math.max(0, num("VOICE_MAX_CLIPS", 3)),
+    maxBytes: num("VOICE_MAX_MB", 10) * 1024 * 1024,
+  },
+
   pollEnabled: bool("POLL_ENABLED", false),
   pollIntervalSec: num("POLL_INTERVAL_SEC", 15),
   // Che do poll: chi tra loi hoi thoai co tin moi trong vong N phut (tranh tra loi hang loat tin cu khi vua bat bot / bat binh luan)

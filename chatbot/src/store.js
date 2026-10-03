@@ -223,6 +223,22 @@ class Store {
    * de cac luot sau khong phai doc lai tu cua so ~30 tin gan nhat (tin cu troi mat -> bot hoi lai thu da biet).
    * Su co 02/10/2026 (Bui Phuong Vy, Linh Tay Luxury). Giu 35 ngay.
    */
+  /**
+   * BAN CHEP GHI AM theo id tin: chep mot lan, moi luot sau (va sau khi khoi dong lai) doc lai tu day — chep lai la
+   * ton tien va co the ra chu khac, lam khach "doi loi" giua hai luot. Giu 35 ngay.
+   */
+  getVoiceText(messageId) {
+    const v = (this.state.voiceText || {})[String(messageId)];
+    return v ? v.text : null;
+  }
+  setVoiceText(messageId, text) {
+    if (!messageId) return;
+    const all = (this.state.voiceText ||= {});
+    all[String(messageId)] = { text: String(text || ""), t: Date.now() };
+    const cutoff = Date.now() - 35 * 86400000;
+    for (const [k, v] of Object.entries(all)) if ((v.t || 0) < cutoff) delete all[k];
+    this._save();
+  }
   getOrderInfo(conversationId) {
     return (this.state.orderInfo || {})[String(conversationId)] || null;
   }
