@@ -45,7 +45,8 @@ export type ChatState = {
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
   customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean };
-  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean };
+  /** `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt — chốt chỉ ở lượt SAU (khách đã thấy tóm tắt). */
+  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number };
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string };
   handoff?: { reason: string; at: string };
   stage?: SalesStage;
@@ -88,6 +89,8 @@ export type ToolContext = {
   bookingOn?: boolean;
   /** Đồng hồ của lượt (kiểm thử truyền vào; mặc định bây giờ). */
   now?: Date;
+  /** Mã lượt = seq tin khách của lượt này (engine). Thiếu (bài kiểm gọi lẻ công cụ) ⇒ không xét «cùng lượt». */
+  turn?: number;
 };
 
 /**
@@ -506,7 +509,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const priced = await priceLines(lines, ctx.config, state.customer?.id ?? null);
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state);
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
-      const draft = { orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
+      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient: recipientFrom(v.data, base), note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
         const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload) : await createOrderAsAgent(ctx.agent, payload);
@@ -519,6 +522,11 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
     }
     case "confirm_order": {
       const quote = z.string().trim().min(2).max(300).safeParse(input.customer_confirmation);
+      // KHÁCH PHẢI THẤY TÓM TẮT RỒI MỚI ĐỒNG Ý (03/10/2026, «Trần Nguyễn»): bot lên đơn + đọc tóm tắt + CHỐT trong cùng lượt,
+      // lấy «Phải ngon nhé» — câu khách gõ TRƯỚC khi thấy tóm tắt — làm lời đồng ý. Đơn nháp / sửa đơn ở lượt này ⇒ chưa chốt.
+      if (state.draft && !state.confirmed && ctx.turn !== undefined && state.draft.shownTurn === ctx.turn) {
+        return err("Chốt: khách chưa thấy tóm tắt", "Đơn vừa lên / vừa sửa trong lượt này — khách CHƯA đọc tóm tắt. Gửi tóm tắt đơn rồi DỪNG, đợi khách trả lời đồng ý ở tin SAU mới gọi confirm_order.", state);
+      }
       if (!state.draft) return err("Chốt: chưa có đơn nháp", "Chưa có đơn nháp để chốt.", state);
       if (state.confirmed) return ok("Đơn đã chốt từ trước", { already_confirmed: true, order_code: state.confirmed.orderId ? `#${manualOrderShortCode(state.confirmed.orderId)}` : "(thử)" }, state);
       if (!quote.success || !foldVi(ctx.lastUserText).includes(foldVi(quote.data))) {

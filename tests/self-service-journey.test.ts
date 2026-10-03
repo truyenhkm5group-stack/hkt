@@ -962,6 +962,16 @@ async function testJourney() {
       assert.ok(!savedDraft.content.includes("Số 12") && savedDraft.content.includes("…, phường Hà Đông, Hà Nội"), "tóm tắt bot đọc cho khách chỉ có địa chỉ che: " + savedDraft.content);
       const fbC = await executeTool("create_customer", { name: "Sang", use_saved_address: true, customer_confirmation: "như cũ" }, rctx({}, "như cũ em", byFb));
       assert.ok(!fbC.isError && fbC.state.customer?.savedAddress === undefined, "mức FB_ID: chính người đó ⇒ không cần che");
+      // KHÁCH PHẢI THẤY TÓM TẮT RỒI MỚI ĐỒNG Ý (03/10/2026 · «Trần Nguyễn»: bot lên đơn + tóm tắt + chốt trong CÙNG lượt, lấy
+      // «Phải ngon nhé» gõ TRƯỚC tóm tắt làm lời đồng ý). Đơn nháp ở lượt 12 ⇒ chốt ở lượt 12 bị chặn; lượt 13 khách «ok» ⇒ chốt.
+      const shown = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, { ...rctx({ ...savedC.state, upsellSent: true }, "Phải ngon nhé"), turn: 12 });
+      assert.equal(shown.state.draft?.shownTurn, 12);
+      const tooSoon = await executeTool("confirm_order", { customer_confirmation: "ngon nhé" }, { ...rctx(shown.state, "Phải ngon nhé"), turn: 12 });
+      assert.ok(tooSoon.isError && /chưa thấy tóm tắt/.test(tooSoon.summary) && !tooSoon.state.confirmed, `chốt cùng lượt với tóm tắt ⇒ chặn: ${tooSoon.content}`);
+      const okLater = await executeTool("confirm_order", { customer_confirmation: "ok em" }, { ...rctx(shown.state, "ok em chốt nhé"), turn: 13 });
+      assert.ok(!okLater.isError && okLater.state.confirmed, `khách đồng ý ở tin SAU tóm tắt ⇒ chốt: ${okLater.content}`);
+      const edited = await executeTool("update_draft_order", { items: [{ variant_id: chaMuc, quantity: 2 }] }, { ...rctx(shown.state, "lấy 2kg nhé, chốt luôn"), turn: 14 });
+      assert.ok((await executeTool("confirm_order", { customer_confirmation: "chốt luôn" }, { ...rctx(edited.state, "lấy 2kg nhé, chốt luôn"), turn: 14 })).isError, "sửa đơn ở lượt này ⇒ khách chưa thấy tóm tắt MỚI ⇒ chưa chốt");
       // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
       let flowStep = 0;
       setSalesChatProviderForTests(() => ({
