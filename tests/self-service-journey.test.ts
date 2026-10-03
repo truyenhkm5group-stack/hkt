@@ -23,6 +23,7 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, listQuickReplies, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { freeShipPolicyText, freeShipVerdict, inFreeShipArea, variantWeightGrams } from "@/lib/sales-chatbot/shipping";
 import { findReturningCustomer, normalizeVnPhone, parsePancakeThreadProfile, returningCustomerPrompt, threadProfileStale, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { followupStepsLabel, nextFollowupAt, validateFollowupSteps, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { followupSystemPrompt, runSalesFollowups } from "@/lib/sales-chatbot/followup";
@@ -261,6 +262,27 @@ function testPure() {
   const spPolicy = systemPrompt({ ...parseSalesChatbotConfig(null), extraInstructions: "Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán." }, "Shop", "", "FANPAGE");
   for (const k of ["lối CUỐI", "HỎI LẠI khách cho rõ", "ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC", "«khg» / «ko» = không", "Câu hỏi về CHÍNH SÁCH", "«Không hiểu ý khách» (ĐÃ hỏi lại 2 lần", "kiểm tra thoải mái, ưng ý mới nhận hàng"]) assert.ok(spPolicy.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(!/bạn không chắc|«Không chắc»/.test(spPolicy), "«không chắc» không còn là lý do chuyển người");
+  // MIỄN SHIP (03/10/2026 · «Miễn phí ship từ 1kg hoặc giá trị đơn hàng từ 300K trong nội thành Hà Nội, TP HCM»).
+  assert.equal(variantWeightGrams(0, "Size 1kg"), 1000);
+  assert.equal(variantWeightGrams(0, "Gói", "Ruốc bông cá thu 250g"), 250);
+  assert.equal(variantWeightGrams(null, "0,5 kg"), 500);
+  assert.equal(variantWeightGrams(1200, "Size 1kg"), 1200, "cột weight thắng chữ");
+  assert.equal(variantWeightGrams(0, "10 cái", "Nem hải sản"), null, "không có quy cách ⇒ không đoán");
+  assert.ok(inFreeShipArea("Phường 2, Q. Bình Thạnh, TP Hồ Chí Minh", ["Hà Nội", "Hồ Chí Minh"]) && !inFreeShipArea("Quận 12, TP Thủ Đức", ["Quận 1"]) && !inFreeShipArea("TP Bắc Ninh", ["Hà Nội"]), "so theo TỪ, bỏ dấu");
+  const fsRule = { enabled: true, minSubtotal: 300_000, minWeightGrams: 1000, areas: ["Hà Nội", "Hồ Chí Minh"] };
+  const vnd = (n: number) => `${n}đ`;
+  assert.equal(freeShipVerdict(fsRule, 280_000, 1000, "Số 5 Lê Lợi, Hà Nội", vnd).kind, "FREE", "1kg chả cá 280k — đạt ngưỡng KHỐI LƯỢNG");
+  assert.equal(freeShipVerdict(fsRule, 400_000, null, "Q. Bình Thạnh, Hồ Chí Minh", vnd).kind, "FREE", "400k — đạt ngưỡng TIỀN dù không biết khối lượng");
+  assert.equal(freeShipVerdict(fsRule, 280_000, 1000, null, vnd).kind, "FREE_IF_AREA", "chưa có địa chỉ ⇒ miễn ship có điều kiện");
+  assert.equal(freeShipVerdict(fsRule, 280_000, 1000, "TP Bắc Ninh", vnd).kind, "FREE_IF_AREA", "địa chỉ ngoài danh sách ⇒ không khẳng định");
+  const below = freeShipVerdict(fsRule, 250_000, 500, "Hà Nội", vnd);
+  assert.ok(below.kind === "BELOW" && below.text.includes("thêm 50000đ tiền hàng") && below.text.includes("thêm 0,5kg"), JSON.stringify(below));
+  assert.equal(freeShipVerdict(fsRule, 280_000, null, "Hà Nội", vnd).kind, "BELOW", "không biết khối lượng ⇒ chỉ còn ngưỡng tiền");
+  assert.equal(freeShipVerdict({ ...fsRule, enabled: false }, 999_999, 5000, "Hà Nội", vnd).kind, "OFF");
+  assert.equal(freeShipPolicyText(fsRule, vnd), "Miễn phí ship cho đơn từ 1kg hoặc tiền hàng từ 300000đ, giao trong Hà Nội / Hồ Chí Minh");
+  const spShip = systemPrompt({ ...parseSalesChatbotConfig(null), freeShipping: fsRule }, "Shop", "", "FANPAGE");
+  assert.ok(spShip.includes("CHÍNH SÁCH MIỄN SHIP") && spShip.includes("từ 1kg hoặc tiền hàng từ") && spShip.includes("KHÔNG nói câu này với đơn đủ điều kiện miễn ship"), "lời nhắc mang chính sách miễn ship");
+  assert.ok(!systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE").includes("CHÍNH SÁCH MIỄN SHIP"), "luật tắt ⇒ không nhắc");
   // Ảnh «Nghia Hue» (02/10/2026): khách hỏi SỈ, nhắn nhiều câu liền, bot gửi lại câu vừa hỏi.
   assert.ok(isMultiPart("Chả cá thu giá sĩ bao nhiêu ạ\nMình ở đâu ạ") && !isMultiPart("Chả cá thu bao nhiêu ạ") && !isMultiPart("chả mực\n\n  "), "nhiều tin = nhiều dòng có chữ");
   for (const t of ["Chả cá thu giá sĩ bao nhiêu ạ", "lấy sỉ về bán", "Em lấy lần 20-30 kg", "lấy 15kg", "bán buôn không em", "làm đại lý được không"]) assert.ok(looksWholesale(t), `phải nhận là hỏi sỉ: ${t}`);
@@ -956,6 +978,18 @@ async function testJourney() {
       assert.ok(!upNow.isError && upNow.state.upsellSent, JSON.stringify(upNow.state));
       assert.ok(!(await draftIn(upNow.state)).isError, "mời xong ⇒ lên đơn + tóm tắt ngay trong cùng lượt");
       assert.ok(!(await draftIn({ ...savedC.state, upsellUnavailable: true })).isError, "câu upsell không gửi được ⇒ không chặn mãi");
+      // MIỄN SHIP tính bằng MÁY trong giỏ / đơn (chả mực giã tay 400k, quy cách 1kg ở field package_size).
+      const shipCfg = { ...parseSalesChatbotConfig(null), freeShipping: { enabled: true, minSubtotal: 300_000, minWeightGrams: 1000, areas: ["Hà Nội", "Hồ Chí Minh"] } };
+      const shipCtx = (st: ChatState) => ({ ...rctx(st, "ok em"), config: shipCfg });
+      const cartNoAddr = JSON.parse((await executeTool("calculate_cart", { items: [{ variant_id: chaMuc, quantity: 1 }] }, shipCtx({}))).content) as { shipping_text: string; cod_total: number | null };
+      assert.ok(/nếu giao trong Hà Nội \/ Hồ Chí Minh/.test(cartNoAddr.shipping_text) && cartNoAddr.cod_total === null, `chưa có địa chỉ ⇒ miễn ship có điều kiện: ${JSON.stringify(cartNoAddr)}`);
+      const hn = { id: null, name: "Lan", phone: "0900000010", address: "Số 5 Lê Lợi, Hà Đông, Hà Nội", province: "", simulated: true };
+      const hnDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, shipCtx({ customer: hn, upsellSent: true }));
+      const hnView = JSON.parse(hnDraft.content) as { shipping_fee: number; shipping_text: string; cod_total: number; subtotal: number };
+      assert.ok(!hnDraft.isError && hnView.shipping_fee === 0 && hnView.shipping_text === "Miễn phí ship" && hnView.cod_total === hnView.subtotal, `địa chỉ Hà Nội ⇒ miễn ship, COD = tiền hàng: ${hnDraft.content}`);
+      const bnDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, shipCtx({ customer: { ...hn, address: "Số 31 Phố Thị Chung, TP Bắc Ninh" }, upsellSent: true }));
+      assert.ok(/nếu giao trong/.test(bnDraft.content) && (JSON.parse(bnDraft.content) as { cod_total: number | null }).cod_total === null, `địa chỉ ngoài danh sách ⇒ không khẳng định miễn ship: ${bnDraft.content}`);
+      assert.ok(/nhân viên sẽ báo sau/.test(JSON.parse((await executeTool("calculate_cart", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({}, "ok"))).content).shipping_text), "luật tắt ⇒ như cũ");
       assert.ok(!(await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, { ...rctx(savedC.state, "ok em"), quickReplies: [] })).isError, "shop chưa chọn câu upsell ⇒ không chặn");
       const savedDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx({ ...savedC.state, upsellSent: true }, "ok em"));
       assert.ok(!savedDraft.isError && savedDraft.state.draft?.recipient.address === "Số 12 ngõ 5 Lê Lợi, phường Hà Đông", "đơn mang địa chỉ ĐẦY ĐỦ");

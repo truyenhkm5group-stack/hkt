@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass } from "@/lib/constants/ai-incidents";
 import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
+import { DEFAULT_FREE_SHIPPING } from "@/lib/sales-chatbot/shipping";
 
 export const SALES_CHATBOT_SETTING_KEY = "ai.salesChatbot";
 
@@ -100,6 +101,19 @@ export const salesChatbotConfigZ = z
     confirmation: z.enum(["RECAP_AND_WAIT"]),
     /** Phí ship cố định đưa vào đơn (đồng). `null` = CHƯA KHAI ⇒ bot nói "nhân viên báo phí ship sau", không bịa số. */
     shippingFee: z.number().int().min(0).max(10_000_000).nullable(),
+    /**
+     * MIỄN PHÍ SHIP (03/10/2026, lib/sales-chatbot/shipping.ts): đạt MỘT trong hai ngưỡng (tiền hàng / khối lượng) VÀ giao
+     * trong `areas` ⇒ phí ship 0 trong tóm tắt và đơn. Mặc định TẮT — chính sách giá là quyết định của chủ shop.
+     */
+    freeShipping: z
+      .object({
+        enabled: z.boolean(),
+        minSubtotal: z.number().int().min(0).max(1_000_000_000).nullable(),
+        minWeightGrams: z.number().int().min(1).max(1_000_000).nullable(),
+        areas: z.array(z.string().trim().min(1).max(60)).max(80),
+      })
+      .strict()
+      .default(DEFAULT_FREE_SHIPPING),
     allowedTools: z.array(z.enum(SALES_TOOLS)).max(SALES_TOOLS.length),
     /** Khoá field tuỳ biến của SẢN PHẨM mà bot được đọc (quy cách, bảo quản…). Field không có ở đây bot không biết tới. */
     productFields: z.array(z.string().regex(/^[a-z][a-z0-9_]{1,40}$/)).max(30).default([]),
@@ -132,6 +146,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   handoff: { onCustomerRequest: true, onComplaint: true, message: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé." },
   confirmation: "RECAP_AND_WAIT",
   shippingFee: null,
+  freeShipping: DEFAULT_FREE_SHIPPING,
   allowedTools: [...SALES_TOOLS],
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",

@@ -32,6 +32,10 @@ export function ChatbotConfigForm({
   const router = useRouter();
   const [c, setC] = useState<SalesChatbotConfig>(config);
   const [shipping, setShipping] = useState(config.shippingFee === null ? "" : String(config.shippingFee));
+  // Miễn ship: nhập dạng chữ (để trống = không xét ngưỡng đó), đổi sang số lúc lưu.
+  const [freeMin, setFreeMin] = useState(config.freeShipping.minSubtotal === null ? "" : String(config.freeShipping.minSubtotal));
+  const [freeKg, setFreeKg] = useState(config.freeShipping.minWeightGrams === null ? "" : String(config.freeShipping.minWeightGrams / 1000).replace(".", ","));
+  const [freeAreas, setFreeAreas] = useState(config.freeShipping.areas.join("\n"));
   const [pending, start] = useTransition();
   const set = <K extends keyof SalesChatbotConfig>(k: K, v: SalesChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
   const setBooking = (patch: Partial<SalesChatbotConfig["booking"]>) => set("booking", { ...c.booking, ...patch });
@@ -45,7 +49,15 @@ export function ChatbotConfigForm({
         toast.error("Phí ship là số tiền nguyên (đồng), không âm — hoặc để trống.");
         return;
       }
-      const r = await saveSalesChatbotConfigAction({ ...c, shippingFee: ship, enabled: enabled ?? c.enabled });
+      const minSubtotal = freeMin.trim() === "" ? null : Number(freeMin.replace(/[.,\s]/g, ""));
+      const kg = freeKg.trim() === "" ? null : Number(freeKg.trim().replace(",", "."));
+      if ((minSubtotal !== null && !(Number.isSafeInteger(minSubtotal) && minSubtotal >= 0)) || (kg !== null && !(Number.isFinite(kg) && kg > 0))) {
+        toast.error("Miễn ship: tiền hàng là số đồng nguyên, khối lượng là số kg lớn hơn 0 — hoặc để trống.");
+        return;
+      }
+      const areas = [...new Set(freeAreas.split(/[\n,;]/).map((x) => x.trim()).filter(Boolean))];
+      const freeShipping = { ...c.freeShipping, minSubtotal, minWeightGrams: kg === null ? null : Math.round(kg * 1000), areas };
+      const r = await saveSalesChatbotConfigAction({ ...c, shippingFee: ship, freeShipping, enabled: enabled ?? c.enabled });
       if ("error" in r) toast.error(r.error);
       else {
         if (enabled !== undefined) set("enabled", enabled);
@@ -123,6 +135,27 @@ export function ChatbotConfigForm({
           <Input id="cb-ship" inputMode="numeric" value={shipping} placeholder="Để trống = nhân viên báo sau" onChange={(e) => setShipping(e.target.value)} />
           <p className="text-xs text-muted-foreground">Bot KHÔNG tự đặt phí ship. Để trống ⇒ bot nói «phí ship nhân viên báo sau», đơn ghi chú chưa báo ship.</p>
         </div>
+        <fieldset className="space-y-2 rounded-md border p-3 sm:col-span-2">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={c.freeShipping.enabled} onChange={(e) => set("freeShipping", { ...c.freeShipping, enabled: e.target.checked })} />
+            Miễn phí ship
+          </label>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="space-y-1">
+              <Label htmlFor="cb-free-min" className="text-xs">Tiền hàng từ (đồng)</Label>
+              <Input id="cb-free-min" inputMode="numeric" value={freeMin} placeholder="vd 300000" onChange={(e) => setFreeMin(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cb-free-kg" className="text-xs">HOẶC khối lượng từ (kg)</Label>
+              <Input id="cb-free-kg" inputMode="decimal" value={freeKg} placeholder="vd 1" onChange={(e) => setFreeKg(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cb-free-areas" className="text-xs">Giao trong khu vực (mỗi dòng một tên)</Label>
+              <Textarea id="cb-free-areas" rows={2} value={freeAreas} placeholder={"Hà Nội\nHồ Chí Minh\nHCM"} onChange={(e) => setFreeAreas(e.target.value)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Đạt MỘT trong hai ngưỡng VÀ địa chỉ có một tên trong danh sách ⇒ tóm tắt và đơn ghi «Miễn phí ship» (0 ₫). Chưa có / chưa khớp địa chỉ ⇒ bot nói «miễn ship nếu giao trong …». Khối lượng lấy từ khối lượng mẫu mã, chưa nhập thì đọc quy cách trong tên («Size 1kg», «500g»). Để trống khu vực = mọi nơi.</p>
+        </fieldset>
         <div className="space-y-1.5">
           <Label>Chốt đơn</Label>
           <p className="rounded-md border bg-muted/40 p-2 text-xs leading-5">Luôn đọc lại tóm tắt (hàng, SL, đơn giá, thành tiền, ship, COD, người nhận, địa chỉ) và CHỈ chốt khi khách trả lời đồng ý — máy chủ đối chiếu lời đồng ý với câu cuối của khách.</p>
