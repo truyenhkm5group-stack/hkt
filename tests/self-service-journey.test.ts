@@ -1560,10 +1560,12 @@ async function testJourney() {
         assert.ok(o.ok, JSON.stringify(o));
         await db.update(schema.orders).set({ insertedAt: new Date(Date.now() - ago * 86_400_000) }).where(eq(schema.orders.id, o.id));
       }
+      // 09:00 giờ VN của NGÀY VN hôm nay (luật 50). Bản cũ `setUTCHours(2)` trên NGÀY UTC: từ 00:00 tới 07:00 giờ VN (ngày UTC
+      // còn là hôm qua) mốc rơi về 09:00 HÔM QUA trong khi đơn gieo theo đồng hồ thật ⇒ «còn 1 ngày» thay vì «đến hạn hôm nay».
+      // Đỏ thật lúc 00:3x giờ VN 04/10/2026.
       const vnNine = (() => {
-        const d = new Date();
-        d.setUTCHours(2, 0, 0, 0); // 09:00 giờ VN hôm nay
-        return d;
+        const vn = new Date(Date.now() + 7 * 3_600_000);
+        return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate(), 2, 0, 0, 0));
       })();
       assert.equal((await sendReorderDigest(new Date(vnNine.getTime() - 2 * 3_600_000))).reason, "trước 8 giờ sáng");
       const rd1 = await sendReorderDigest(vnNine);
