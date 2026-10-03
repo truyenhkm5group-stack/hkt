@@ -124,6 +124,8 @@ services:
     restart: unless-stopped
     environment:
       ERP_DOMAIN: ${ERP_DOMAIN:-erp.vnxcommerce.com}
+      # Tên miền gốc của trang giới thiệu (deploy/Caddyfile khối cuối). App đọc cùng biến qua .env; thiếu ⇒ vnxcommerce.com.
+      SITE_DOMAIN: ${SITE_DOMAIN:-vnxcommerce.com}
     ports:
       - "80:80"
       - "443:443"

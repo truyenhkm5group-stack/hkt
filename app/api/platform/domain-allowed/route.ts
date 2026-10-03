@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { hostSlug } from "@/lib/platform/host";
 import { organizationForHostSlug } from "@/lib/platform/publish";
+import { siteDomainFrom, siteHostKind } from "@/lib/platform/site-host";
 
 /**
  * CADDY ON-DEMAND TLS HỎI "CÓ CẤP CHỨNG CHỈ CHO HOST NÀY KHÔNG" (0180 · deploy/Caddyfile).
@@ -11,8 +12,15 @@ import { organizationForHostSlug } from "@/lib/platform/publish";
  * đình chỉ. Không có đường này thì on-demand TLS cấp chứng chỉ cho BẤT KỲ tên nào trỏ về máy chủ — một cửa đốt hạn mức
  * Let's Encrypt của nền tảng.
  */
+/*
+ * Thêm ĐÚNG hai host của trang giới thiệu: tên miền gốc `SITE_DOMAIN` và `www.` của nó (lib/platform/site-host.ts). Khối
+ * Caddy của chúng cũng xin chứng chỉ THEO YÊU CẦU, nên trước ngày DNS trỏ về máy này Caddy không gọi Let's Encrypt lần nào.
+ */
 export async function GET(request: NextRequest) {
   const domain = request.nextUrl.searchParams.get("domain") ?? "";
+  if (siteHostKind(domain, siteDomainFrom(process.env.SITE_DOMAIN))) {
+    return new NextResponse("ok", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  }
   const slug = hostSlug(domain, env.platformBaseDomain);
   const org = slug ? await organizationForHostSlug(slug) : null;
   return new NextResponse(org ? "ok" : "no", { status: org ? 200 : 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
