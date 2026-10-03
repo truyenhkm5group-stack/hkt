@@ -58,7 +58,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
@@ -196,6 +196,31 @@ function testPure() {
     2,
   );
   assert.ok(hist.length === 0 || hist[0].content.every((b) => b.type === "text"));
+  // Bot biết bây giờ là lúc nào (độ mịn GIỜ — lời nhắc hệ thống được đệm), và tin cách quãng mang mốc giờ của CHÍNH nó.
+  const sat = new Date("2026-10-03T07:30:00Z"); // 14:30 thứ Bảy, giờ VN
+  assert.equal(nowPromptLine(sat), "Thứ bảy 03/10/2026, khoảng 14 giờ");
+  assert.equal(nowPromptLine(new Date("2026-10-03T07:59:59Z")), nowPromptLine(sat), "cùng giờ ⇒ cùng chữ (đệm lời nhắc không vỡ mỗi phút)");
+  assert.equal(nowPromptLine(new Date("2026-10-03T16:59:59Z")), "Thứ bảy 03/10/2026, khoảng 23 giờ");
+  assert.equal(nowPromptLine(new Date("2026-10-03T17:00:00Z")), "Chủ nhật 04/10/2026, khoảng 0 giờ", "qua nửa đêm giờ VN");
+  assert.ok(systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE", "", [], "", "", sat).includes("bây giờ là Thứ bảy 03/10/2026, khoảng 14 giờ"));
+  assert.ok(!systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE").includes("THỜI GIAN:"), "không truyền giờ ⇒ không bịa giờ");
+  const fri = new Date("2026-10-02T13:15:00Z"); // 20:15 thứ Sáu
+  const timed = historyForModel(
+    [
+      { role: "assistant", content: [{ type: "text", text: "chào" }], at: new Date(fri.getTime() - 60_000) },
+      { role: "user", content: [{ type: "text", text: "mai giao cho chị nhé" }], at: fri },
+      { role: "assistant", content: [{ type: "text", text: "dạ vâng" }], at: new Date(fri.getTime() + 30_000) },
+      { role: "user", content: [{ type: "text", text: "em ơi giao chưa" }], at: sat },
+      { role: "user", content: [{ type: "text", text: "chị ở nhà nhé" }], at: new Date(sat.getTime() + 60_000) },
+    ],
+    40,
+  );
+  const textAt = (i: number) => (timed[i].content[0] as { text: string }).text;
+  assert.equal(textAt(0), "mai giao cho chị nhé", "tin liền mạch ⇒ không gắn mốc");
+  assert.equal(textAt(2), `${messageTimeTag(sat)}\nem ơi giao chưa`, "quay lại sau 18 giờ ⇒ mang mốc giờ của chính tin");
+  assert.equal(messageTimeTag(sat), "[Gửi lúc 14:30 Thứ bảy 03/10]");
+  assert.equal(textAt(3), "chị ở nhà nhé", "tin tiếp ngay sau ⇒ không gắn lại");
+  assert.deepEqual(historyForModel([{ role: "user", content: [{ type: "text", text: "x" }], at: sat }, { role: "user", content: [{ type: "text", text: "y" }], at: new Date(sat.getTime() + 4 * 3_600_000) }], 40), historyForModel([{ role: "user", content: [{ type: "text", text: "x" }], at: sat }, { role: "user", content: [{ type: "text", text: "y" }], at: new Date(sat.getTime() + 4 * 3_600_000) }], 40), "tất định — đệm tin nhắn không vỡ");
   // Câu trả lời mẫu (0183) — khớp CHỮ bỏ dấu theo cụm từ; hai câu ngang điểm ⇒ không đoán; câu dài nhiều ý ⇒ không khớp.
   const qA = { id: "a", title: "Hỏi giá chả mực", triggers: ["chả mực bao nhiêu", "giá chả mực"], answer: "x" };
   const qB = { id: "b", title: "Bảo quản", triggers: ["bảo quản", "để được bao lâu"], answer: "y" };
