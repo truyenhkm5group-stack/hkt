@@ -17,6 +17,7 @@ import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
 import { buildStockSizeMatrix } from "@/lib/inventory/size-matrix";
+import { findSizeBreaks, SIZE_BREAK_LABEL, SIZE_BREAK_TONE } from "@/lib/constants/size-break";
 import { explainPlan, fmtDateKey, type PlanExplanation } from "@/lib/constants/plan-explain";
 import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
 import { pancakePosProductsUrl } from "@/lib/constants/pancake";
@@ -148,6 +149,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Bán ra theo ngày" description="Số lượng bán trong 30 ngày qua (không tính đơn huỷ/xoá)">
             <ProductSalesChart data={product.daily} />
           </SectionCard>
+
+          <SizeBreakNotice variants={product.variants} />
 
           <StockSizeMatrix variants={product.variants} />
 
@@ -439,6 +442,39 @@ function StockSizeMatrix({ variants }: { variants: VariantRow[] }) {
         </table>
       </div>
     </SectionCard>
+  );
+}
+
+/**
+ * ĐỨT SIZE CỦA MÃ HÀNG NÀY — cùng luật `findSizeBreaks` với trang Quyết định vốn tồn kho, trên đúng
+ * dòng Kế hoạch SX của từng mẫu mã (`ledger`). Trang này KHÔNG đọc lệnh sản xuất đang mở, nên chỉ in SỰ
+ * VIỆC (`openPoQty: null` ⇒ hàm không dựng câu hành động) và trỏ sang trang kia cho việc nên làm — để
+ * hai trang không thể đề xuất hai số đặt khác nhau cho cùng một size.
+ */
+function SizeBreakNotice({ variants }: { variants: VariantRow[] }) {
+  const inputs = variants.flatMap((v) =>
+    !v.isRemoved && v.ledger
+      ? [{ variantId: v.id, productId: v.ledger.productId, productName: v.ledger.productName, productCode: v.ledger.productCode, color: v.color, size: v.size, stockKnown: v.ledger.stockKnown, available: v.ledger.available, status: v.ledger.status, sold30: v.ledger.sold30, unitCost: v.ledger.unitCost > 0 ? v.ledger.unitCost : null, suggestedQty: null, openPoQty: null }]
+      : [],
+  );
+  const { groups } = findSizeBreaks(inputs);
+  if (!groups.length) return null;
+  return (
+    <div className="rounded-xl border border-rose-300/70 bg-rose-50/60 px-4 py-3 text-[13px] dark:border-rose-900/60 dark:bg-rose-950/20">
+      <div className="flex flex-wrap items-center gap-2 font-semibold">
+        <AlertTriangle className="size-4 shrink-0 text-rose-600" />
+        Còn hàng nhưng thiếu đúng size khách mua
+        <Link href="/inventory/decisions" className="ml-auto text-xs font-medium text-primary hover:underline">Việc nên làm ở Quyết định vốn tồn kho →</Link>
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {groups.map((g) => (
+          <li key={g.key} className="text-muted-foreground">
+            <span className={cn("mr-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", SIZE_BREAK_TONE[g.level])}>{SIZE_BREAK_LABEL[g.level]}</span>
+            {g.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
