@@ -48,14 +48,58 @@ export const HUMAN_TAKEOVER_MINUTES = 30;
  */
 export const FIRST_CONTACT_WAIT_MS = 10_000;
 export const FOLLOWUP_WAIT_MS = 4_000;
-/*
- * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. «Page đã trả lời» CHỈ tính tin phía page tới
- * TỪ tin khách sớm nhất trở đi — KHÔNG nhìn lùi. Bản cũ coi tin page tới trong 60 giây TRƯỚC tin đầu là trả lời tự động
- * (phòng hai webhook tới ngược thứ tự), nhưng LỜI CHÀO của quảng cáo click-to-message luôn tới ngay trước tin đầu của khách:
- * đo 02/10/2026 (Hải Sản Làng Chài, «Nguyễn Oanh» — hội thoại cũ từ 12/2025 quay lại qua quảng cáo, Meta KHÔNG tự trả lời
- * hội thoại cũ) bot coi lời chào là «page đã trả lời» và không ai trả lời khách. Im lặng với khách tệ hơn nhiều so với
- * một câu trùng hiếm hoi khi trả lời tự động của Meta tới ngược thứ tự.
+/**
+ * Hội thoại MỚI = không có dòng nào (trừ tin phía page) trước tin chờ sớm nhất. Với hội thoại mới, tin phía page tới TRƯỚC tin
+ * khách tối đa chừng này là MƠ HỒ: trả lời tự động của Meta tới ngược thứ tự (Meta trả lời gần như tức thì — 03/10/2026,
+ * «Thủy Nguyễn» nhận HAI câu báo giá khi bản 02/10 bỏ hẳn khoảng nhìn lùi), HAY lời chào của quảng cáo click-to-message tạo
+ * trước tin khách (02/10/2026, «Nguyễn Oanh» — hội thoại cũ quay lại qua quảng cáo, Meta không tự trả lời, khoảng nhìn lùi
+ * coi lời chào là «page đã trả lời» và không ai trả lời khách). Thứ tự TỚI không phân biệt được hai ca; mốc TẠO tin của Pancake
+ * thì được ⇒ `pancakeCreatedAfter` hỏi Pancake một lần cho đúng ca mơ hồ.
  */
+const FIRST_CONTACT_LOOKBACK_MS = 60_000;
+
+/**
+ * Dòng Pancake TỰ CHÈN vào hội thoại — nhãn tự động, giai đoạn khách hàng tiềm năng, «X đã trả lời một quảng cáo». Hiện như tin
+ * phía page nhưng KHÔNG phải ai trả lời khách. Bot nhà gặp từ 07/09/2026 (`AUTO_NOTE_RE`, chatbot/src/bot.js); bot của tổ chức
+ * gặp lại 03/10/2026 (Hải Sản Làng Chài, «Thủy Nguyễn»): khách gửi SĐT ⇒ Pancake chèn «Đã đặt giai đoạn … Đủ tiêu chuẩn» ⇒ bot
+ * coi là «page đã trả lời», im đúng lúc khách sắp chốt đơn.
+ */
+export const PANCAKE_AUTO_NOTE_RE = /nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng|đã trả lời một quảng cáo/i;
+
+function pancakeMs(v: unknown): number | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return null;
+  const ms = Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? s : `${s}Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Theo mốc TẠO tin của Pancake: có tin phía page (`pageIds`) tạo SAU tin khách sớm nhất (`customerIds`) không. `null` = không
+ * đọc được mốc của một trong hai phía. HÀM THUẦN.
+ */
+export function pancakeCreatedAfterVerdict(messages: readonly Record<string, unknown>[], customerIds: readonly string[], pageIds: readonly string[]): boolean | null {
+  const at = new Map<string, number>();
+  for (const m of messages) {
+    const ms = pancakeMs(m.inserted_at ?? m.created_at);
+    if (typeof m.id === "string" && ms !== null) at.set(m.id, ms);
+  }
+  const cust = customerIds.map((id) => at.get(id)).filter((x): x is number => x !== undefined);
+  const page = pageIds.map((id) => at.get(id)).filter((x): x is number => x !== undefined);
+  if (!cust.length || !page.length) return null;
+  return Math.max(...page) > Math.min(...cust);
+}
+
+async function pancakeCreatedAfter(pageId: string, threadId: string, token: string, customerIds: readonly string[], pageIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean | null> {
+  try {
+    const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
+    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10_000) });
+    const body = (await res.json().catch(() => null)) as { messages?: unknown } | null;
+    if (!res.ok || !Array.isArray(body?.messages)) return null;
+    return pancakeCreatedAfterVerdict(body.messages as Record<string, unknown>[], customerIds, pageIds);
+  } catch {
+    return null;
+  }
+}
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 const GRACE_SLACK_MS = 1_000;
 const RETRY_MS = 2_000;
@@ -170,6 +214,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   if ((conn.settings.pageId ?? "").trim() !== ev.pageId) return { queued: false, reason: "Tin của page khác page đã khai" };
   const db = await getDb();
   const t = schema.salesChatInbound;
+  if (PANCAKE_AUTO_NOTE_RE.test(ev.text)) return { queued: false, reason: "Ghi chú tự động của Pancake — không phải ai trả lời" };
   if (ev.fromPage) {
     if (!ev.inbox && !ev.comment) return { queued: false, reason: "Tin của page ngoài tin nhắn / bình luận" };
     // Tin của chính bot — không phải nhân viên, không phải «page đã trả lời». Hai dấu hiệu, một là đủ: (1) ĐÚNG mã tin Pancake
@@ -484,9 +529,26 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
       .limit(1);
     const firstContact = !prior;
-    const repliedSince = oldest;
-    const pageRepliedSince = async () =>
-      (await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, repliedSince))).limit(1)).length > 0;
+    // Tin page tới TỪ tin khách sớm nhất trở đi = page đã trả lời. Hội thoại mới: tin page tới TRƯỚC (tối đa
+    // FIRST_CONTACT_LOOKBACK_MS) là mơ hồ ⇒ hỏi mốc tạo của Pancake MỘT lần mỗi vòng; không đọc được ⇒ coi là CHƯA trả lời
+    // (khách nhận một câu trùng còn hơn không ai trả lời).
+    let earlyVerdict: boolean | null | undefined;
+    const pageRepliedSince = async (): Promise<boolean> => {
+      const after = await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, oldest))).limit(1);
+      if (after.length) return true;
+      if (!firstContact) return false;
+      const early = await db
+        .select({ messageId: t.messageId })
+        .from(t)
+        .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS)), lt(t.createdAt, oldest)))
+        .limit(10);
+      if (!early.length) return false;
+      if (earlyVerdict === undefined) {
+        const pendingIds = (await db.select({ messageId: t.messageId }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"))).limit(20)).map((r) => r.messageId);
+        earlyVerdict = await pancakeCreatedAfter(pageId, threadId, token, pendingIds, early.map((e) => e.messageId), deps.fetch ?? fetch);
+      }
+      return earlyVerdict === true;
+    };
     // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
     // lời ⇒ đi tiếp ngay để bỏ qua, không bắt khách đợi hết thời gian chờ.
     if (new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
