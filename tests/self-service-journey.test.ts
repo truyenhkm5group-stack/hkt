@@ -819,10 +819,10 @@ async function testJourney() {
       // vài giây ⇒ bot trả lời. Tin bot vừa gửi KHÔNG bị coi là «page đã trả lời».
       await receiveFanpageEvent(ev("m-q1", "Shop ơi còn hàng không?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       assert.match((await receiveFanpageEvent(ev("m-auto-1", "Cảm ơn anh đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-901"))).reason, /tự động/);
-      const sentAuto = pancake.calls.length;
+      const sentAuto = pancake.calls.filter((c) => c.init?.method !== "GET").length;
       const ra = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
       assert.ok(ra.replies === 0 && ra.processed === 1 && /Page đã trả lời/.test(ra.skipped ?? ""), JSON.stringify(ra));
-      assert.equal(pancake.calls.length, sentAuto, "page đã trả lời ⇒ không gửi gì");
+      assert.equal(pancake.calls.filter((c) => c.init?.method !== "GET").length, sentAuto, "page đã trả lời ⇒ không gửi gì (chỉ đọc mốc tạo tin)");
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-q2", "Chả mực bao nhiêu?", { id: "cust-2", name: "Anh Ba" }, "t-901"));
       const rb = await processFanpageThread(PAGE, "t-901", { fetch: pancake.fetch, now: in31s });
@@ -1426,6 +1426,21 @@ async function testJourney() {
       const oldFetch = timed([{ id: "m-old-0", at: "2026-07-17T09:00:00.000000" }, { id: "m-old-q", at: "2026-10-03T09:48:00.100000" }, { id: "m-old-greet", at: "2026-10-03T09:48:00.900000" }]);
       const fOld = await processFanpageThread(PAGE, "t-985", { fetch: oldFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fOld.replies >= 1 && fOld.processed === 1, `hội thoại cũ ⇒ lời chào quảng cáo không chặn bot: ${JSON.stringify(fOld)}`);
+      // (03/10/2026 · «Moscow Hoàng Hải») HỘI THOẠI MỚI qua quảng cáo: lời chào quảng cáo TẠO TRƯỚC tin khách nhưng webhook của
+      // nó TỚI SAU ⇒ không phải «page đã trả lời» ⇒ bot trả lời; lượt quét lại cũng không vấp nữa.
+      await receiveFanpageEvent(ev("m-new-q", "Xin giá chả cá", { id: "cust-moscow", name: "Moscow Hoàng Hải" }, "t-986"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-new-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!! KHÔNG ĂN LÀ THIỆT", { id: PAGE }, "t-986"));
+      const newFetch = timed([{ id: "m-new-greet", at: "2026-10-03T12:47:00.000000" }, { id: "m-new-q", at: "2026-10-03T12:47:03.000000" }]);
+      const fNew = await processFanpageThread(PAGE, "t-986", { fetch: newFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fNew.replies >= 1 && fNew.processed === 1, `lời chào quảng cáo tới SAU nhưng tạo TRƯỚC tin khách ⇒ bot trả lời: ${JSON.stringify(fNew)}`);
+      // Cùng ca nhưng là trả lời tự động THẬT (tạo SAU tin khách) ⇒ vẫn nhường.
+      await receiveFanpageEvent(ev("m-new2-q", "Xin giá chả cá", { id: "cust-moscow2", name: "Khách Mới" }, "t-987"));
+      await new Promise((r) => setTimeout(r, 5));
+      await receiveFanpageEvent(ev("m-new2-auto", "Cảm ơn bạn đã nhắn tin, shop sẽ trả lời ngay ạ", { id: PAGE }, "t-987"));
+      const autoFetch = timed([{ id: "m-new2-q", at: "2026-10-03T12:47:00.000000" }, { id: "m-new2-auto", at: "2026-10-03T12:47:01.000000" }]);
+      const fAuto = await processFanpageThread(PAGE, "t-987", { fetch: autoFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fAuto.replies === 0 && /Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động tạo sau tin khách ⇒ nhường: ${JSON.stringify(fAuto)}`);
       assert.equal(pancakeCreatedAfterVerdict([{ id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), true, "hội thoại mới: Meta trả lời sau ⇒ page đã trả lời");
       assert.equal(pancakeCreatedAfterVerdict([{ id: "o", inserted_at: "2026-07-17T09:00:00" }, { id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), false, "hội thoại cũ ⇒ không");
       // Không đọc được mốc (Pancake lỗi) ⇒ coi là CHƯA trả lời — khách nhận một câu trùng còn hơn không ai trả lời.

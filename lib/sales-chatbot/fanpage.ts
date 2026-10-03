@@ -21,7 +21,7 @@
  * còn làm bot nhường cả hội thoại `HUMAN_TAKEOVER_MINUTES` phút.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -605,25 +605,27 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), lt(t.createdAt, oldest), sql`coalesce(${t.note}, '') <> ${PAGE_REPLY}`))
       .limit(1);
     const firstContact = !prior;
-    // Tin page tới TỪ tin khách sớm nhất trở đi = page đã trả lời. Hội thoại mới: tin page tới TRƯỚC (tối đa
-    // FIRST_CONTACT_LOOKBACK_MS) là mơ hồ ⇒ hỏi mốc tạo của Pancake MỘT lần mỗi vòng; không đọc được ⇒ coi là CHƯA trả lời
-    // (khách nhận một câu trùng còn hơn không ai trả lời).
-    let earlyVerdict: boolean | null | undefined;
+    // Page đã trả lời chưa. Tin page tới SAU tin khách sớm nhất quá FIRST_CONTACT_LOOKBACK_MS = chắc chắn đã trả lời. Tin page
+    // tới QUANH tin khách (trong khoảng đó, trước — chỉ hội thoại mới — hoặc sau) là MƠ HỒ: thứ tự webhook TỚI không nói tin nào
+    // TẠO trước. 03/10/2026, «Moscow Hoàng Hải»: khách mới bấm quảng cáo, lời chào quảng cáo («CHẢ CÁ THU NGUYÊN CHẤT 100%…»)
+    // tạo TRƯỚC «Xin giá chả cá» nhưng webhook của nó tới SAU ⇒ bot coi là «page đã trả lời» và im; lượt quét lại mở tin ra
+    // rồi vấp đúng chỗ đó. Ca mơ hồ ⇒ hỏi mốc tạo của Pancake MỘT lần mỗi vòng. Không đọc được ⇒ tin page tới SAU vẫn tính là
+    // đã trả lời (trả lời tự động của Meta), chỉ tới TRƯỚC thì chưa (khách nhận một câu trùng còn hơn không ai trả lời).
+    let pageVerdict: boolean | null | undefined;
     const pageRepliedSince = async (): Promise<boolean> => {
-      const after = await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, oldest))).limit(1);
-      if (after.length) return true;
-      if (!firstContact) return false;
-      const early = await db
-        .select({ messageId: t.messageId })
+      const near = await db
+        .select({ messageId: t.messageId, createdAt: t.createdAt })
         .from(t)
-        .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS)), lt(t.createdAt, oldest)))
+        .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, firstContact ? new Date(oldest.getTime() - FIRST_CONTACT_LOOKBACK_MS) : oldest)))
+        .orderBy(desc(t.createdAt))
         .limit(10);
-      if (!early.length) return false;
-      if (earlyVerdict === undefined) {
+      if (!near.length) return false;
+      if (near[0].createdAt.getTime() >= oldest.getTime() + FIRST_CONTACT_LOOKBACK_MS) return true;
+      if (pageVerdict === undefined) {
         const pendingIds = (await db.select({ messageId: t.messageId }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"))).limit(20)).map((r) => r.messageId);
-        earlyVerdict = await pancakeCreatedAfter(pageId, threadId, token, pendingIds, early.map((e) => e.messageId), deps.fetch ?? fetch);
+        pageVerdict = await pancakeCreatedAfter(pageId, threadId, token, pendingIds, near.map((e) => e.messageId), deps.fetch ?? fetch);
       }
-      return earlyVerdict === true;
+      return pageVerdict ?? near.some((e) => e.createdAt.getTime() >= oldest.getTime());
     };
     // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
     // lời ⇒ đi tiếp ngay để bỏ qua, không bắt khách đợi hết thời gian chờ.
