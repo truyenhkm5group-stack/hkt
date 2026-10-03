@@ -33,6 +33,7 @@ import { ORDER_SYNC_CHANNEL, ORDER_SYNC_SETTING_KEY, parseOrderSyncConfig, type 
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
+import { orderChatThreads } from "@/lib/queries/orders";
 
 const ORG = "os-hslc";
 const PAGE = "5566778899";
@@ -237,6 +238,9 @@ export async function testSalesOrderSync() {
         const [conv] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-1"));
         const log = (conv.state as ChatState).orderSync as OrderSyncThreadState;
         assert.deepEqual([log.orders.length, log.lastOutcome, log.customer?.phone], [2, "CREATED", "0912345678"]);
+        // Nút «Chat» trên danh sách đơn: cả hai đơn tra ngược ra đúng hội thoại Pancake; đơn lạ không ra gì.
+        const threadsOf = await orderChatThreads([o1.id, o2.id, "erp-khong-co"]);
+        assert.deepEqual([threadsOf.get(o1.id), threadsOf.get(o2.id), threadsOf.has("erp-khong-co")], [{ pageId: PAGE, threadId: "t-1" }, { pageId: PAGE, threadId: "t-1" }, false]);
 
         // ── Bot BẬT và đang trả lời ⇒ đơn là việc của bot, job không ghi ──
         await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });

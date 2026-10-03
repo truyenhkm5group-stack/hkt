@@ -6,7 +6,8 @@ import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
 import type { OrderStage } from "@/db/schema";
-import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
+import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER, pancakeConversationUrl } from "@/lib/constants/pancake";
+import { isManualOrderId } from "@/lib/constants/manual-orders";
 import type { ListParams } from "@/lib/search-params";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
@@ -107,6 +108,8 @@ export async function listOrders(params: ListParams) {
         insertedAt: true,
         updatedAtExternal: true,
         lastUpdateStatusAt: true,
+        pageId: true,
+        conversationId: true,
       },
       with: {
         // MỌI lần gửi rồi CHỌN lần đại diện — cùng luật với `PRIMARY_ATTEMPT` mà cột tiền dùng.
@@ -131,6 +134,7 @@ export async function listOrders(params: ListParams) {
     các đơn tay CỦA TRANG; trang không có đơn tay (tổ chức nhà) ⇒ không chạy câu nào. Đơn khác ⇒ `null` (không áp dụng).
   */
   const payStates = await manualPaymentStates(rowsRaw);
+  const chats = await orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id));
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
@@ -140,13 +144,46 @@ export async function listOrders(params: ListParams) {
       Cột tiền của trang này đi qua `PRIMARY_ATTEMPT` ở tầng SQL; `vanDonDaiDien` là bản TypeScript
       của đúng luật ấy. Để mỗi cột tự chọn lần gửi là mở đường cho dòng nói hai điều khác nhau.
     */
-    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null };
+    const chat = chats.get(r.id);
+    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, chatUrl: chat ? pancakeConversationUrl(chat.pageId, chat.threadId) : pancakeConversationUrl(r.pageId, r.conversationId) };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 
 export type OrderListRow = Awaited<ReturnType<typeof listOrders>>["rows"][number];
+
+/**
+ * HỘI THOẠI FANPAGE CỦA ĐƠN TAY (đơn bot chốt · đơn ghi từ hội thoại nhân viên chốt — lib/sales-chatbot/*). Đơn `erp-…` không
+ * mang `page_id` / `conversation_id` (chỉ đơn đồng bộ Pancake mới có) nên tra NGƯỢC trong `sales_chat_conversations`: đơn
+ * nháp / đã chốt hiện tại, đơn của các lượt mua trước (`state.pastOrders`) và đơn ghi từ hội thoại (`state.orderSync.orders`).
+ * Một câu cho cả trang; không đơn tay ⇒ không chạy câu nào.
+ */
+export async function orderChatThreads(orderIds: readonly string[]): Promise<Map<string, { pageId: string; threadId: string }>> {
+  const out = new Map<string, { pageId: string; threadId: string }>();
+  if (!orderIds.length) return out;
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const ids = sql`array[${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)}]::text[]`;
+  const has = (path: string) => sql`exists (select 1 from jsonb_array_elements(coalesce(${c.state}->${sql.raw(path)}, '[]'::jsonb)) e where e->>'orderId' = any(${ids}))`;
+  const rows = await db
+    .select({ pageId: c.pageId, threadId: c.threadId, orderId: c.orderId, draftOrderId: c.draftOrderId, state: c.state })
+    .from(c)
+    .where(
+      and(
+        eq(c.channel, "FANPAGE"),
+        sql`${c.pageId} is not null and ${c.threadId} is not null`,
+        sql`(${c.orderId} = any(${ids}) or ${c.draftOrderId} = any(${ids}) or ${c.state}->'confirmed'->>'orderId' = any(${ids}) or ${has("'pastOrders'")} or ${has("'orderSync'->'orders'")})`,
+      ),
+    );
+  const wanted = new Set(orderIds);
+  for (const r of rows) {
+    const st = (r.state ?? {}) as { confirmed?: { orderId?: string | null }; pastOrders?: { orderId?: string | null }[]; orderSync?: { orders?: { orderId?: string }[] } };
+    const linked = [r.orderId, r.draftOrderId, st.confirmed?.orderId, ...(st.pastOrders ?? []).map((p) => p.orderId), ...(st.orderSync?.orders ?? []).map((o) => o.orderId)];
+    for (const id of linked) if (id && wanted.has(id) && !out.has(id)) out.set(id, { pageId: r.pageId!, threadId: r.threadId! });
+  }
+  return out;
+}
 
 /** Số đơn theo giai đoạn / nguồn / ĐVVC trong kỳ (cho bộ lọc) */
 export async function orderFacets(params: ListParams) {
