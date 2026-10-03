@@ -605,6 +605,13 @@ export const NAV_MODULES = [
   },
   // Xuất cấu hình (Phase 11 · H3): trang còn đòi thêm `settings:manage` (xuất là đọc CẢ cấu hình) và tự nói ra khi thiếu.
   {
+    href: "/settings/data-export",
+    label: "Xuất dữ liệu",
+    zone: "SYSTEM",
+    permission: "settings:manage",
+    why: "Tải toàn bộ khách hàng, đơn, sản phẩm, phiếu thu, lịch hẹn, liệu trình của tổ chức ra CSV — dữ liệu là của khách thuê và họ lấy ra được lúc nào cũng được, kể cả khi gói quá hạn. Việc của quản trị vì tệp mang tên / SĐT / địa chỉ khách. Đứng riêng trên menu, không gom vào «Tuỳ biến nâng cao»: đó là công cụ dựng cấu hình, còn đây là lối ra của dữ liệu.",
+  },
+  {
     href: "/settings/export",
     label: "Xuất cấu hình",
     zone: "SYSTEM",

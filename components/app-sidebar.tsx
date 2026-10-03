@@ -148,6 +148,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/connections": Plug,
   "/settings/templates": LibraryBig,
   "/settings/export": FileDown,
+  "/settings/data-export": FileDown,
   "/settings/objects": Boxes,
   "/settings/ai-builder": WandSparkles,
   "/settings/notifications": BellRing,
