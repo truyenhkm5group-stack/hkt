@@ -99,3 +99,29 @@
 		}
 	}
 }
+
+# TRANG GIỚI THIỆU ở tên miền gốc: `{$SITE_DOMAIN}` + `www.` → cùng app; middleware nhận ra host và chỉ phục vụ trang giới
+# thiệu, mọi đường dẫn khác chuyển sang {$ERP_DOMAIN} (lib/platform/site-host.ts). Chứng chỉ xin THEO YÊU CẦU (hỏi
+# /api/platform/domain-allowed như khối trên): trước khi bản ghi DNS A của tên miền gốc trỏ về máy này, khối này không nhận
+# request nào và Caddy không gọi Let's Encrypt lần nào — thêm khối không có rủi ro đốt hạn mức.
+{$SITE_DOMAIN:vnxcommerce.com}, www.{$SITE_DOMAIN:vnxcommerce.com} {
+	tls {
+		on_demand
+	}
+	encode gzip zstd
+	reverse_proxy app:3000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+	}
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "([?&](?i:token|secret|access_token|invite)=)[^&]*" "${1}REDACTED"
+			}
+		}
+	}
+}

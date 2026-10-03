@@ -457,6 +457,7 @@ import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
+import { testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
@@ -2432,6 +2433,9 @@ async function main() {
   testPrPureMappers();
   testSyncIncidentPure();
   testAgentIngestPure();
+  // Trang giới thiệu ở tên miền gốc: định tuyến host thuần + gác mã nguồn (middleware, Caddy, đường đọc công khai).
+  testPublicSiteHost();
+  testPublicSiteSource();
   testAgentIngestSourceGuards();
   testTestHygiene();
   testAiHealthSourceGuards();
@@ -2640,6 +2644,8 @@ async function main() {
   testTestOrgCodes();
   await testPasswordReset();
   testHelpGuides();
+  // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
+  await testPublicSiteData();
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();

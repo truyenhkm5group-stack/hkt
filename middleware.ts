@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
+import { SITE_PAGE_PATH, siteAppOrigin, siteDomainFrom, siteHostKind, siteRoute } from "@/lib/platform/site-host";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -42,11 +43,14 @@ import {
  * `/start` (Phase 10 · tạo tổ chức tự phục vụ): trang KHÔNG cần phiên; cổng của nó là cờ `PLATFORM_SIGNUP_MODE` đọc ở
  * máy chủ — `off` (mặc định) thì trang chỉ in "chưa mở đăng ký" và mọi server action của nó từ chối.
  *
+ * `/gioi-thieu` (`SITE_PAGE_PATH`): trang giới thiệu công khai — chỉ đọc gói cước và chế độ đăng ký, không dữ liệu khách nào.
+ * Ở tên miền gốc nó được phục vụ tại `/` (khối tên miền gốc trong `middleware()`); ở host ERP mở được để xem trước.
+ *
  * `/join/` (mời người dùng qua liên kết): người được mời CHƯA có tài khoản. Trang chỉ đọc; cổng của nó là mã mời
  * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
  * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
  */
-const PUBLIC_PREFIXES = ["/login", "/start", "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
 
 /**
  * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot
@@ -109,6 +113,33 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const next = () => NextResponse.next({ request: { headers: serverHeaders(request, pathname) } });
+
+  /*
+    TÊN MIỀN GỐC (`vnxcommerce.com`, `www.`) là trang giới thiệu, KHÔNG phải ERP — quyết định trước mọi phép kiểm phiên,
+    vì ở host này không có đường nào cần phiên. Luật nằm trong hàm thuần `siteRoute()` (lib/platform/site-host.ts).
+  */
+  const siteDomain = siteDomainFrom(process.env.SITE_DOMAIN);
+  const siteHost = siteHostKind(request.headers.get("host"), siteDomain);
+  if (siteHost && siteDomain) {
+    const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const route = siteRoute({
+      host: siteHost,
+      pathname,
+      search: request.nextUrl.search,
+      siteDomain,
+      protocol: forwarded ? `${forwarded}:` : request.nextUrl.protocol,
+      appOrigin: siteAppOrigin(process.env.APP_URL, siteDomain),
+    });
+    if (route.kind === "REWRITE") {
+      // `clone()` giữ nguyên gốc của chính lượt gọi ⇒ rewrite NỘI BỘ; một URL khác gốc biến rewrite thành proxy ra ngoài.
+      const url = request.nextUrl.clone();
+      url.pathname = route.path;
+      return NextResponse.rewrite(url, { request: { headers: serverHeaders(request, route.path) } });
+    }
+    if (route.kind === "REDIRECT") return NextResponse.redirect(route.url, route.status);
+    if (route.kind === "NOT_FOUND") return NextResponse.json({ error: "Không có ở tên miền này" }, { status: 404 });
+    return next();
+  }
   if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || PUBLIC_EXACT.includes(pathname)) return next();
 
   const token = request.cookies.get(COOKIE)?.value;
