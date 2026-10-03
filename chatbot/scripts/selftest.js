@@ -2118,5 +2118,25 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 48: khach con don dang xu ly cung san pham -> khong dien nhap Pancake thua, can duyet de huy; khac san pham -> van len nhap, cho duyet");
 }
 
+// ---- 49: dia chi khong co chu "xa / huyen / tinh" van la dia chi (su co Nguyen Thi Quyen 03/10/2026)
+{
+  const { looksLikeBareAddress } = await import("../src/bot.js");
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const hoi = [khach("Giá bao nhiêu"), khach("1m57 46kg"), khach("Gửi con gái c nhận hộ"), khach("Dung , khánh thịnh an hồng an dương hp"), khach("0362518828")];
+  const f = bot.customerFacts("PAGE1", hoi);
+  assert.ok(f.phone, "co SDT");
+  assert.match(String(f.address), /an dương hp/, "nhan ra dia chi viet tat tinh");
+  assert.equal(looksLikeBareAddress("số 5 trần phú ba đình hà nội"), true);
+  assert.equal(looksLikeBareAddress("ship về hà nội mất mấy ngày"), false, "cau hoi khong phai dia chi");
+  assert.equal(looksLikeBareAddress("hà nội"), false, "qua ngan");
+  assert.equal(looksLikeBareAddress("mình ở hp có ship không"), false);
+  assert.equal(looksLikeBareAddress("chị lấy màu đỏ đô size m nhé"), false);
+  // Da co SDT + dia chi -> cau "xin SDT cua con gai / xin dia chi" bi bo
+  const r = bot.dropAlreadyGivenAsks("Dạ, em đã có tên người nhận là Dung và địa chỉ Khánh Thịnh, An Hồng, An Dương, Hải Phòng rồi ạ.\nĐể hoàn tất đơn hàng, chị vui lòng cung cấp thêm số điện thoại của con gái chị giúp em nha.\nChị cho em xin số điện thoại và địa chỉ để em lên đơn gửi hàng cho mình nhé ạ?", "PAGE1", hoi);
+  assert.doesNotMatch(r, /số điện thoại/);
+  assert.match(bot.orderProgressPrompt("PAGE1", hoi), /KHÔNG xin thêm SĐT người nhận/);
+  console.log("OK 49: dia chi viet tat khong co chu xa/huyen (\"an dương hp\") van duoc nhan; khong xin them SDT nguoi nhan ho");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
