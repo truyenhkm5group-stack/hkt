@@ -30,7 +30,10 @@ export const RETURNING_LIMITS = { priorMessages: 20, priorChars: 300, pages: 3, 
 /** Hồ sơ hội thoại Pancake cũ hơn chừng này ⇒ đọc lại (SĐT khách mới gửi được Pancake ghi nhận thêm). */
 export const PROFILE_TTL_MS = 6 * 3_600_000;
 
-export type PriorMessage = { from: "customer" | "shop"; text: string; at: string };
+/** `id` = mã tin Pancake (ghi đơn từ hội thoại dùng làm khoá chống ghi trùng — `order-sync.ts`). */
+export type PriorMessage = { from: "customer" | "shop"; text: string; at: string; id?: string };
+/** Số tin cũ và độ dài mỗi tin đọc từ Pancake — bot dùng `RETURNING_LIMITS`, ghi đơn từ hội thoại đọc nhiều hơn. */
+export type ThreadReadLimits = { priorMessages: number; priorChars: number; pages: number };
 export type PancakeThreadProfile = { fetchedAt: string; phones: string[]; fbIds: string[]; prior: PriorMessage[] };
 
 export type ReturningTrust = "THREAD" | "FB_ID" | "PHONE";
@@ -79,7 +82,7 @@ function plainText(s: string): string {
  * Các trang phản hồi API tin nhắn của MỘT hội thoại ⇒ hồ sơ. `before` = lúc bot bắt đầu hội thoại: chỉ tin TRƯỚC mốc đó là
  * «tin cũ» (tin sau mốc bot đã có trong lịch sử của nó). HÀM THUẦN.
  */
-export function parsePancakeThreadProfile(bodies: readonly Record<string, unknown>[], pageId: string, before: Date, now: Date): PancakeThreadProfile {
+export function parsePancakeThreadProfile(bodies: readonly Record<string, unknown>[], pageId: string, before: Date, now: Date, limits: ThreadReadLimits = RETURNING_LIMITS): PancakeThreadProfile {
   const phones = new Set<string>();
   const fbIds = new Set<string>();
   const seen = new Set<string>();
@@ -104,9 +107,9 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
       const fromPage = str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id);
       if (!fromPage && str(from.id)) fbIds.add(str(from.id));
       const at = pancakeTime(m.inserted_at ?? m.created_at);
-      const text = plainText(str(m.original_message) || str(m.message)).slice(0, RETURNING_LIMITS.priorChars);
+      const text = plainText(str(m.original_message) || str(m.message)).slice(0, limits.priorChars);
       if (!at || !text || at.getTime() >= before.getTime()) continue;
-      prior.push({ from: fromPage ? "shop" : "customer", text, at: at.toISOString(), t: at.getTime() });
+      prior.push({ from: fromPage ? "shop" : "customer", text, at: at.toISOString(), t: at.getTime(), ...(id ? { id } : {}) });
     }
   }
   prior.sort((a, b) => a.t - b.t);
@@ -114,7 +117,7 @@ export function parsePancakeThreadProfile(bodies: readonly Record<string, unknow
     fetchedAt: now.toISOString(),
     phones: [...phones].slice(0, RETURNING_LIMITS.phones),
     fbIds: [...fbIds].slice(0, 5),
-    prior: prior.slice(-RETURNING_LIMITS.priorMessages).map(({ from, text, at }) => ({ from, text, at })),
+    prior: prior.slice(-limits.priorMessages).map(({ from, text, at, id }) => ({ from, text, at, ...(id ? { id } : {}) })),
   };
 }
 
@@ -128,16 +131,16 @@ export function threadProfileStale(state: ChatState, now: Date): boolean {
  * Đọc hồ sơ hội thoại từ Pancake (GET tin nhắn, tối đa `RETURNING_LIMITS.pages` trang). Lỗi mạng / Pancake từ chối ⇒ `null`
  * (lượt sau đọc lại) — không bao giờ chặn câu trả lời của bot.
  */
-export async function fetchPancakeThreadProfile(pageId: string, threadId: string, token: string, before: Date, fetchImpl: typeof fetch, now: Date): Promise<PancakeThreadProfile | null> {
+export async function fetchPancakeThreadProfile(pageId: string, threadId: string, token: string, before: Date, fetchImpl: typeof fetch, now: Date, limits: ThreadReadLimits = RETURNING_LIMITS): Promise<PancakeThreadProfile | null> {
   const bodies: Record<string, unknown>[] = [];
   const seenIds = new Set<string>();
   let count = 0;
   try {
-    for (let i = 0; i < RETURNING_LIMITS.pages; i++) {
+    for (let i = 0; i < limits.pages; i++) {
       const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}${count ? `&current_count=${count}` : ""}`;
       const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15_000) });
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-      if (!res.ok || !body || body.success === false) return bodies.length ? parsePancakeThreadProfile(bodies, pageId, before, now) : null;
+      if (!res.ok || !body || body.success === false) return bodies.length ? parsePancakeThreadProfile(bodies, pageId, before, now, limits) : null;
       bodies.push(body);
       const msgs = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
       // Trang rỗng, hoặc Pancake trả lại đúng những tin đã có (bỏ qua current_count) ⇒ hết tin cũ.
@@ -146,13 +149,13 @@ export async function fetchPancakeThreadProfile(pageId: string, threadId: string
       if (!fresh.length) break;
       count += msgs.length;
       // Trang này đã chạm tới trước lúc bot vào, và đã đủ tin cũ ⇒ thôi đọc tiếp.
-      const parsed = parsePancakeThreadProfile(bodies, pageId, before, now);
-      if (parsed.prior.length >= RETURNING_LIMITS.priorMessages) break;
+      const parsed = parsePancakeThreadProfile(bodies, pageId, before, now, limits);
+      if (parsed.prior.length >= limits.priorMessages) break;
     }
   } catch {
-    return bodies.length ? parsePancakeThreadProfile(bodies, pageId, before, now) : null;
+    return bodies.length ? parsePancakeThreadProfile(bodies, pageId, before, now, limits) : null;
   }
-  return parsePancakeThreadProfile(bodies, pageId, before, now);
+  return parsePancakeThreadProfile(bodies, pageId, before, now, limits);
 }
 
 type LastOrder = { at: Date; name: string; phone: string; address: string; province: string; items: string[] };

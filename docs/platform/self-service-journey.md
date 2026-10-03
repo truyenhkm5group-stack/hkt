@@ -72,6 +72,19 @@ phí của gói) đọc từng lô rồi soạn «Sổ tay bán hàng» NHÁP n�
 (có phiên bản, quay lại / gỡ được) ⇒ bot dùng trong lời nhắc, ĐỨNG SAU luật «giá / tồn chỉ từ công cụ ERP». Tin nhắn gốc
 không được lưu.
 
+### Đồng bộ đơn từ fanpage — công tắc riêng (`lib/sales-chatbot/order-sync*.ts`, 03/10/2026)
+
+Bật / tắt bot KHÔNG bật / tắt việc ghi đơn. Khoá `settings['ai.salesOrderSync']` (không nằm trong cấu hình bot), khung riêng
+đầu trang Chatbot bán hàng. Bật ⇒ job `sales-followup` (5 phút) đọc hội thoại do NGƯỜI phụ trách — bot tắt, hoặc hội thoại
+«Cần người xử lý» — đã yên 10 phút, AI của shop chỉ ra lời chốt, máy chủ kiểm (mã mẫu mã có thật · lời chốt sau đơn gần nhất
+· SĐT / địa chỉ có trong hội thoại) rồi lên đơn «Mới», kênh «Fanpage (nhân viên chốt)», để nhân viên kiểm và chốt. Khách cũ
+không gửi lại SĐT / địa chỉ ⇒ lấy theo đơn trước của chính khách, ghi rõ trong ghi chú đơn. Bot đang bật và đang trả lời ⇒
+không ghi (đơn của bot). Tin trước lúc bật không thành đơn.
+
+Bot: khách nhắn trong `POST_ORDER_HANDOFF_MS` (3 ngày) sau khi bot chốt ⇒ chuyển nhân viên — chính những hội thoại này được
+ghi đơn khi công tắc bật; quá 3 ngày ⇒ lượt mua MỚI, giữ khách đã xác nhận. Trần lượt hội thoại đếm theo lượt mua
+(`cycleStartTurns`) — khách quen mua lại nhiều lần không bị «Hội thoại quá dài».
+
 ## 5. Xem trước · tên miền con · xuất bản (`lib/platform/publish.ts`, `/setup`)
 
 - Tổ chức tạo qua `/start` là **BẢN NHÁP** (`publish_state = DRAFT`, thanh vàng ở đầu mọi trang). ERP đang dùng chính là bản

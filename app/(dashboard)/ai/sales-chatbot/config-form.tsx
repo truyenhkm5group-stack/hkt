@@ -69,7 +69,7 @@ export function ChatbotConfigForm({
   return (
     <SectionCard
       title="Cấu hình bot"
-      description={c.enabled ? "Bot ĐANG BẬT." : "Bot đang TẮT — khung thử vẫn dùng được."}
+      description={`${c.enabled ? "Bot ĐANG BẬT." : "Bot đang TẮT — khung thử vẫn dùng được."} Bật / tắt bot không ảnh hưởng «Đồng bộ đơn từ fanpage» (khung riêng ở trên).`}
       actions={
         <span className="flex gap-2">
           <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => save()}>

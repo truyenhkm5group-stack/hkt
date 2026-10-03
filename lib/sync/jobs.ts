@@ -70,6 +70,7 @@ import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
+import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 
 export type JobOptions = {
@@ -694,11 +695,14 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     fanOut: true,
     description:
       "Hội thoại fanpage đang CHỜ KHÁCH tới mốc follow-up ⇒ AI của shop viết MỘT câu nhắc theo bước khách đang dừng (không nêu giá) và gửi qua Pancake. " +
-      "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng).",
+      "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng). " +
+      "Cùng lượt: GHI ĐƠN TỪ HỘI THOẠI (công tắc riêng, không phụ thuộc bot bật / tắt) — hội thoại nhân viên phụ trách đã yên 10 phút ⇒ AI đọc lời chốt ⇒ lên đơn «Mới» cho nhân viên kiểm.",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
         const cu = await catchUpFanpage();
+        // Ghi đơn từ hội thoại do người chốt — công tắc RIÊNG, chạy cả khi bot tắt. Không ném.
+        const os = await runFanpageOrderSync();
         const r = await runSalesFollowups();
         // Tin sáng «khách đến hạn mua lại» vào nhóm vận hành — một lần mỗi ngày, sau 8 giờ (lib/reorder/digest.ts). Không ném.
         const rd = await sendReorderDigest();
@@ -709,7 +713,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         const cuText = cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "";
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `);
-        ctx.summary.detail = `${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
+        ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;
       }),
   },

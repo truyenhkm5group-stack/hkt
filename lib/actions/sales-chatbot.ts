@@ -11,6 +11,7 @@ import { bindOrganization } from "@/lib/platform/background";
 import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
+import { saveOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 
 /**
  * Server action của trang «Chatbot bán hàng» (0180): lưu cấu hình và KHUNG THỬ. Khung thử chạy trong tổ chức của PHIÊN
@@ -135,4 +136,13 @@ export async function saveFollowupSettingsAction(input: { enabled: boolean; step
   if ("error" in r) return r;
   revalidatePath("/ai/sales-chatbot");
   return { ok: true, message: "Đã lưu follow-up tự động" };
+}
+
+/** Ghi đơn từ hội thoại fanpage — công tắc RIÊNG, độc lập với bật / tắt bot. */
+export async function saveOrderSyncAction(enabled: boolean): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  const r = await saveOrderSyncConfig(user, enabled === true);
+  if ("error" in r) return r;
+  revalidatePath("/ai/sales-chatbot");
+  return r;
 }

@@ -411,7 +411,7 @@ async function sendInbox(pageId: string, threadId: string, token: string, text: 
   }
 }
 
-async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; createdAt: Date; state: Record<string, unknown> } | null> {
+export async function conversationFor(pageId: string, threadId: string): Promise<{ id: string; status: string; handoffReason: string | null; updatedAt: Date; createdAt: Date; state: Record<string, unknown> } | null> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const key = fanpageVisitorKey(pageId, threadId);
