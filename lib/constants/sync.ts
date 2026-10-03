@@ -36,6 +36,8 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
   "vtp-tracking": ["VIETTELPOST:tracking_poll", "VIETTELPOST:tracking_selected"],
   "vtp-import": ["VIETTELPOST:orders_import"],
   "facebook-ads": ["FACEBOOK:ads_insights"],
+  // Cùng bộ đồng bộ (`syncFacebookAds`) ⇒ cùng tên con trong sync_runs, nhưng ghi vào CSDL của tổ chức khách.
+  "ads-spend-org": ["FACEBOOK:ads_insights"],
   "github-deployments": ["GITHUB:deploy_runs"],
 };
 

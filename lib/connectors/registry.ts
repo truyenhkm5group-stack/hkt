@@ -328,6 +328,51 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: [],
     why: `Chỉ qua System User token (AGENTS mục 5). Nhánh GHI tiêu tiền thật. ${HOME_WHY}`,
   },
+  /*
+    QUẢNG CÁO FACEBOOK CỦA CHÍNH TỔ CHỨC KHÁCH (chủ nền tảng chốt 03/10/2026 — Hải Sản Làng Chài): token System User của
+    Business Manager CỦA HỌ + danh sách tài khoản quảng cáo họ khai. CHỈ ĐỌC chi tiêu (`ad_spends`); mọi đường GHI
+    (đổi ngân sách, đăng quảng cáo — `ADS_WRITE_ENABLED`) vẫn chỉ của nhà. Thuộc module Marketing (không phải
+    `connector_meta` — module đó là credential môi trường của nhà).
+  */
+  {
+    key: "meta-ads-org",
+    label: "Quảng cáo Facebook (Meta) của tổ chức",
+    vendor: "Meta",
+    kind: "ADS",
+    capabilities: ["read_spend"],
+    auth: "OAUTH_TOKEN",
+    settings: [
+      {
+        key: "accessToken",
+        label: "Token System User (Business Manager của tổ chức)",
+        type: "text",
+        secret: true,
+        required: true,
+        hint: "business.facebook.com → Cài đặt doanh nghiệp → Người dùng hệ thống → Tạo mã token, chọn quyền ads_read. Gán người dùng hệ thống vào từng tài khoản quảng cáo (quyền xem). Không dùng token tài khoản Facebook cá nhân.",
+        pattern: "^EAA[A-Za-z0-9]{30,1000}$",
+        maxLength: 1010,
+      },
+      {
+        key: "adAccountIds",
+        label: "Mã tài khoản quảng cáo (cách nhau bằng dấu phẩy)",
+        type: "text",
+        secret: false,
+        required: true,
+        hint: "Ví dụ act_1234567890, act_9876543210 — xem trong Trình quản lý quảng cáo. Tối đa 20 tài khoản.",
+        pattern: "^\\s*(act_)?[0-9]{5,20}(\\s*[,;\\s]\\s*(act_)?[0-9]{5,20}){0,19}\\s*$",
+        maxLength: 500,
+      },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testMetaAdsOrg",
+    module: "marketing",
+    code: ["lib/connectors/testers.ts", "lib/marketing/meta-ads-org.ts"],
+    consumers: ["lib/marketing/meta-ads-org.ts::syncOrgMetaAds"],
+    why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức. Khác «Meta Ads (Facebook)» của nhà (biến môi trường, có nhánh ghi).",
+  },
   // ─────────────── GỬI TIN ───────────────
   {
     key: "pancake-pages",

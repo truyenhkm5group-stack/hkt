@@ -117,12 +117,15 @@ function kiemNhip() {
 async function kiemLich(fan: FanOut) {
   assert.equal(fan.WORKFLOW_FANOUT_TICK_MINUTES, WORKFLOW_CADENCE_MIN_MINUTES, "nhịp gõ của bộ lập lịch = nhịp nhỏ nhất được phép — gói nhịp 5 phút cũng được phục vụ");
   assert.ok(fan.FANOUT_JOBS.includes(WORKFLOWS_JOB));
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["messaging-retry", "sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm");
+  // `ads-spend-org` thêm 03/10/2026: chủ nền tảng yêu cầu chi tiêu quảng cáo Facebook của tổ chức khách ĐỒNG BỘ TỰ ĐỘNG,
+  // bằng kết nối «meta-ads-org» của chính tổ chức (không cần credential của nhà — khẳng định ngay dưới vẫn kiểm điều đó).
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "messaging-retry", "sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);
   }
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup"]);
+  // `ads-spend-org` CHỈ fan-out: chi tiêu quảng cáo của nhà đi qua `facebook-ads` (biến môi trường), không qua job này.
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "ads-spend-org"]);
 
   const lich = doc("scripts/scheduler.mjs");
   const jobsLich = [...new Set([...lich.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]))];

@@ -87,6 +87,12 @@ const JOBS = [
   */
   { job: "messaging-retry", every: 2, offset: 1 },
   /*
+    CHI TIÊU QUẢNG CÁO FACEBOOK CỦA TỔ CHỨC KHÁCH (chủ nền tảng chốt 03/10/2026: «đồng bộ tự động») — CHỈ FAN-OUT tự động
+    hoá, mỗi 60 phút như `facebook-ads` của nhà nhưng lệch pha khác (nhà ở phút 10, đây ở phút 40) để hai lượt đọc Graph
+    API không chồng nhau trên máy 2 nhân. Không có lượt của nhà; tổ chức chưa bật kết nối «meta-ads-org» bỏ qua ngay.
+  */
+  { job: "ads-spend-org", every: 60, offset: 40 },
+  /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
     Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có

@@ -1,10 +1,25 @@
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, num, sleep, str } from "@/lib/integrations/http";
-import { assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
+import { assertConnectionOwner, assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
 import { maskFbSecrets } from "@/lib/constants/fb-token-scopes";
 import { classifyMetaError, pickStoryFromCreative, type MetaAdPostError, type MetaGraphErrorInfo, type PostResolutionSource } from "@/lib/constants/meta-ad-post";
 
-export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" };
+/**
+ * `configured` = tài khoản do TỔ CHỨC KHÁCH tự khai ở kết nối «meta-ads-org» (không đi qua cạnh Business Manager).
+ * `lookupError` — CHỈ nhánh kết nối của tổ chức: Graph không trả lời được về tài khoản này (token thiếu quyền, sai mã).
+ * Tài khoản vẫn nằm trong danh sách để lượt đồng bộ báo lỗi ĐÚNG TÊN nó, thay vì lặng lẽ bỏ qua.
+ */
+export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" | "configured"; lookupError?: string };
+
+/**
+ * Credential của client đến từ ĐÂU — hai nguồn, hai lời chặn khác nhau ở lối gọi mạng:
+ *  · không khai (mặc định) = biến môi trường của TỔ CHỨC NHÀ ⇒ `assertHomeCredentials("facebook")` như trước;
+ *  · `ORG_CONNECTION` = kết nối «meta-ads-org» của MỘT tổ chức khách, bí mật giải mã trong ngữ cảnh của chính nó
+ *    (`openActiveConnection`) ⇒ `assertConnectionOwner` — chỉ gửi khi ngữ cảnh VẪN là tổ chức sở hữu kết nối.
+ * Chỉ `FacebookAdsClient.fromOrgConnection` dựng được nhánh thứ hai, và nó KHÔNG BAO GIỜ đọc biến môi trường nào chứa
+ * khoá (token và mã tài khoản đều truyền tường minh; mã Business Manager để trống — nhánh này không dùng cạnh BM).
+ */
+export type FbOrgConnectionSource = { kind: "ORG_CONNECTION"; organization: string; adAccountIds: readonly string[] };
 
 export type FbAdAccountBilling = FbAdAccount & {
   disableReason: number;
@@ -123,9 +138,29 @@ export class FacebookAdsClient {
     private readonly accessToken = env.facebook.accessToken,
     private readonly businessId = env.facebook.businessId,
     private readonly version = env.facebook.apiVersion,
+    private readonly orgSource: FbOrgConnectionSource | null = null,
   ) {
+    if (orgSource) {
+      if (!this.accessToken) throw new IntegrationError("Facebook: kết nối của tổ chức chưa có token System User", 400);
+      if (!orgSource.adAccountIds.length) throw new IntegrationError("Facebook: kết nối của tổ chức chưa khai tài khoản quảng cáo nào", 400);
+      return;
+    }
     if (!this.accessToken) throw new IntegrationError("Facebook: chưa cấu hình FACEBOOK_ACCESS_TOKEN", 400);
     if (!this.businessId) throw new IntegrationError("Facebook: chưa cấu hình FACEBOOK_BUSINESS_ID", 400);
+  }
+
+  /**
+   * Client CHỈ ĐỌC cho một tổ chức khách, từ kết nối «meta-ads-org» của chính nó. Mọi tham số tường minh — không tham
+   * số mặc định nào chứa khoá được tính, nên không biến môi trường credential nào của nhà bị đọc. Phiên bản Graph API là
+   * cấu hình NỀN TẢNG (không phải bí mật), dùng chung với client của nhà để hai đường đọc cùng một hình dạng dữ liệu.
+   */
+  static fromOrgConnection(input: { organization: string; accessToken: string; adAccountIds: readonly string[] }, version: string = env.facebook.apiVersion): FacebookAdsClient {
+    return new FacebookAdsClient(input.accessToken, "", version, { kind: "ORG_CONNECTION", organization: input.organization, adAccountIds: [...input.adAccountIds] });
+  }
+
+  /** `ORG_CONNECTION` khi dựng từ kết nối của tổ chức khách; `HOME_ENV` khi dùng biến môi trường của nhà. */
+  get credentialSource(): "HOME_ENV" | "ORG_CONNECTION" {
+    return this.orgSource ? "ORG_CONNECTION" : "HOME_ENV";
   }
 
   get business() {
@@ -133,6 +168,7 @@ export class FacebookAdsClient {
   }
 
   private async get(pathOrUrl: string, params: Record<string, unknown> = {}) {
+    if (this.orgSource) return this.getWithOrgConnection(this.orgSource, pathOrUrl, params);
     // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
     await assertHomeCredentials("facebook");
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
@@ -163,6 +199,51 @@ export class FacebookAdsClient {
     if (record.error) {
       const fbError = asRecord(record.error);
       throw new IntegrationError(`Facebook: ${str(fbError.message) || "lỗi không xác định"}${fbError.code ? ` (mã ${fbError.code})` : ""}`, num(fbError.code) === 190 ? 401 : status, false, body);
+    }
+    return record;
+  }
+
+  /**
+   * ───────────── LỐI GỌI MẠNG CỦA NHÁNH KẾT NỐI TỔ CHỨC ─────────────
+   *
+   * Khác nhánh nhà ở ba điểm, cả ba đều để khoá của khách không đi đâu ngoài Graph API:
+   *  ① chặn bằng `assertConnectionOwner` (chủ của khoá), không bằng `assertHomeCredentials` (khoá này không phải của nhà);
+   *  ② token đi trong tiêu đề `Authorization`, KHÔNG trong URL — URL hay bị chép vào câu lỗi và nhật ký;
+   *  ③ URL tuyệt đối (trang kế `paging.next`) chỉ được theo khi máy chủ là graph.facebook.com.
+   * Câu lỗi ném ra luôn đã che token.
+   */
+  private async getWithOrgConnection(source: FbOrgConnectionSource, pathOrUrl: string, params: Record<string, unknown>) {
+    await assertConnectionOwner("meta-ads-org", source.organization);
+    const url = pathOrUrl.startsWith("http") ? new URL(pathOrUrl) : new URL(`https://graph.facebook.com/${this.version}/${pathOrUrl.replace(/^\//, "")}`);
+    if (url.protocol !== "https:" || url.hostname !== "graph.facebook.com") throw new IntegrationError("Facebook: trang kế tiếp không trỏ về graph.facebook.com — không theo", 400);
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+    url.searchParams.delete("access_token");
+    const wait = THROTTLE_MS - (Date.now() - lastCallAt);
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+    const che = (text: string) => maskFbSecrets(this.accessToken.length >= 8 ? text.split(this.accessToken).join("***") : text);
+    let response: { body: unknown; status: number };
+    try {
+      response = await fetchJson(url, {
+        serviceName: "Facebook",
+        headers: { authorization: `Bearer ${this.accessToken}` },
+        timeoutMs: 90_000,
+        retries: 3,
+        isRetryableBody: (b) => [1, 2, 4, 17, 32, 613].includes(num(asRecord(asRecord(b).error).code)),
+      });
+    } catch (error) {
+      if (error instanceof IntegrationError && error.body) {
+        const fbError = asRecord(asRecord(error.body).error);
+        const message = str(fbError.message);
+        const code = num(fbError.code);
+        if (message) throw new IntegrationError(che(`Facebook: ${message}${code ? ` (mã ${code})` : ""}`), code === 190 ? 401 : error.status, false, error.body);
+      }
+      throw new IntegrationError(che(error instanceof Error ? error.message : String(error)), error instanceof IntegrationError ? error.status : 502, error instanceof IntegrationError ? error.retryable : true);
+    }
+    const record = asRecord(response.body);
+    if (record.error) {
+      const fbError = asRecord(record.error);
+      throw new IntegrationError(che(`Facebook: ${str(fbError.message) || "lỗi không xác định"}${fbError.code ? ` (mã ${fbError.code})` : ""}`), num(fbError.code) === 190 ? 401 : response.status, false, response.body);
     }
     return record;
   }
@@ -212,6 +293,7 @@ export class FacebookAdsClient {
   /** Tất cả tài khoản quảng cáo của BM: sở hữu (owned) + được cấp quyền (client) */
   async listAdAccounts(): Promise<FbAdAccount[]> {
     const fields = "id,account_id,name,currency,account_status";
+    if (this.orgSource) return this.listConfiguredAdAccounts(this.orgSource, fields);
     const out = new Map<string, FbAdAccount>();
     for (const relation of ["owned", "client"] as const) {
       const edge = relation === "owned" ? "owned_ad_accounts" : "client_ad_accounts";
@@ -228,6 +310,28 @@ export class FacebookAdsClient {
       }
     }
     return [...out.values()];
+  }
+
+  /**
+   * Nhánh kết nối tổ chức: ĐÚNG những tài khoản tổ chức đã khai, hỏi từng cái `GET /act_<id>`. Không đi cạnh Business
+   * Manager — token System User của khách chỉ cần quyền `ads_read` trên các tài khoản được gán. Tài khoản hỏi hỏng vẫn
+   * nằm trong kết quả (mang `lookupError`, tiền tệ RỖNG = chưa biết) để lượt đồng bộ báo lỗi đúng tên nó; lỗi thuộc về
+   * cả kết nối (token hết hạn / sai, mã 190 ⇒ 401) thì ném luôn — hỏi tiếp tài khoản sau cũng hỏng y như thế.
+   */
+  private async listConfiguredAdAccounts(source: FbOrgConnectionSource, fields: string): Promise<FbAdAccount[]> {
+    const out: FbAdAccount[] = [];
+    for (const accountId of source.adAccountIds) {
+      try {
+        const item = await this.get(`act_${accountId}`, { fields });
+        out.push({ id: str(item.id) || `act_${accountId}`, accountId: str(item.account_id) || accountId, name: str(item.name) || `act_${accountId}`, currency: str(item.currency).toUpperCase(), status: num(item.account_status), relation: "configured" });
+      } catch (error) {
+        // Chỉ lời từ chối của GRAPH cho riêng tài khoản này mới được giữ lại thành `lookupError`. Lời chặn chủ khoá
+        // (sai ngữ cảnh tổ chức) và token hỏng (401) là lỗi của CẢ lượt — nuốt chúng là để lượt chạy tiếp bằng khoá sai.
+        if (!(error instanceof IntegrationError) || error.status === 401) throw error;
+        out.push({ id: `act_${accountId}`, accountId, name: `act_${accountId}`, currency: "", status: 0, relation: "configured", lookupError: error.message.slice(0, 200) });
+      }
+    }
+    return out;
   }
 
   /**
