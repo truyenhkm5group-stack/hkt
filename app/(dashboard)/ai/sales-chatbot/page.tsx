@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { PageHeader } from "@/components/page-header";
 import { SalesChatPanel } from "@/components/sales-chat/chat-panel";
 import { SectionCard } from "@/components/ui-bits";
@@ -106,7 +107,7 @@ export default async function SalesChatbotPage() {
           {followup ? <FollowupPanel settings={followup} waiting={waitingCount} manage={manage} /> : null}
           {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
-            <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} />
+            <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} appointmentsOn={moduleOn(user, "appointments")} />
           ) : (
             <SectionCard title="Cấu hình">
               <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>

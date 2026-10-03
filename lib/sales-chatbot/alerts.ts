@@ -70,6 +70,23 @@ export async function notifySalesChatHandoff(conversationId: string, reason: str
   }
 }
 
+/**
+ * Bot vừa giữ một chỗ trong lịch của shop: người XEM được lịch hẹn được báo (chuông + hàng đợi chung) — lễ tân xếp kỹ thuật
+ * viên và gọi xác nhận. Một tin mỗi lịch.
+ */
+export async function notifySalesChatBooking(appointmentId: string, conversationId: string, text: string, now: Date): Promise<void> {
+  const title = "Chatbot vừa đặt lịch hẹn";
+  const href = "/appointments";
+  const key = `sales-chat:booking:${appointmentId}`;
+  const db = await getDb();
+  await db
+    .insert(schema.notifications)
+    .values({ kind: "SYSTEM", severity: "info", title, body: text, href, entityType: "SALES_CHAT", entityId: conversationId, dedupeKey: key, occurredAt: now })
+    .onConflictDoNothing({ target: schema.notifications.dedupeKey });
+  const users = await activeUserIdsWhoCan("appointments:view");
+  await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_BOOKING", title, body: text, href, dedupeKey: `${key}:${userId}` })), db);
+}
+
 /** Chatbot ngừng trả lời vì AI của shop: MỘT tin mỗi lý do mỗi ngày (giờ VN) cho người CẤU HÌNH được chatbot. */
 export async function notifySalesChatAiDown(key: string, label: string, now: Date): Promise<void> {
   const day = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);

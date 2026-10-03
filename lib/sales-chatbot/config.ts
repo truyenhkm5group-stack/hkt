@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass } from "@/lib/constants/ai-incidents";
+import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
 
 export const SALES_CHATBOT_SETTING_KEY = "ai.salesChatbot";
 
@@ -109,6 +110,11 @@ export const salesChatbotConfigZ = z
      * hàm với form đơn tay; bot nói được bậc «mua từ N». Mặc định TẮT: cho bot tự báo giá sỉ là quyết định của chủ shop.
      */
     wholesalePricing: z.boolean().default(false),
+    /**
+     * NHẬN ĐẶT LỊCH QUA CHAT (module «Lịch hẹn», lib/constants/booking.ts). Chỉ có hiệu lực khi tổ chức BẬT module đó.
+     * Mặc định TẮT: cho bot tự giữ chỗ trong lịch của shop là quyết định của chủ shop.
+     */
+    booking: bookingConfigZ.default(DEFAULT_BOOKING_CONFIG),
   })
   .strict();
 
@@ -130,6 +136,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",
   wholesalePricing: false,
+  booking: DEFAULT_BOOKING_CONFIG,
 };
 
 /** Cấu hình đã lưu ⇒ cấu hình dùng được. Sai hình / thiếu ⇒ mặc định (TẮT) — hỏng về phía đóng. */

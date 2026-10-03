@@ -179,7 +179,12 @@ export function normalizeCustomerPhone(raw: string): string | null {
  * ĐÚNG khách đó (một người, một bản ghi) nhưng KHÔNG đổi tên / địa chỉ đang lưu (AGENTS.md mục 3.12: không tự điền đè).
  * Địa chỉ giao của lần mua này đi vào ĐƠN (người nhận), không vào hồ sơ khách. Máy không giả làm người (luật 36).
  */
-export async function createCustomerAsAgent(agent: { name: string; source: string }, input: { name: string; phone: string; address: string; province?: string }): Promise<{ ok: true; id: string; existing: boolean } | MetaFailure> {
+export async function createCustomerAsAgent(
+  agent: { name: string; source: string },
+  input: { name: string; phone: string; address: string; province?: string },
+  /** Đặt lịch hẹn không giao hàng nên không cần địa chỉ — mọi đường lên ĐƠN vẫn bắt buộc. */
+  opts: { addressOptional?: boolean } = {},
+): Promise<{ ok: true; id: string; existing: boolean } | MetaFailure> {
   const gate = await customerOrgGate();
   if (!gate.allowed) return fail(gate.code, gate.reason);
   const name = input.name.trim().slice(0, 200);
@@ -189,7 +194,7 @@ export async function createCustomerAsAgent(agent: { name: string; source: strin
   const errors: FieldError[] = [];
   if (name.length < 2) errors.push({ field: "system:name", message: "Tên khách ít nhất 2 ký tự." });
   if (!phone) errors.push({ field: "system:phone", message: "Số điện thoại chỉ gồm 8–15 chữ số (có thể có dấu + ở đầu)." });
-  if (address.length < 5) errors.push({ field: "system:address", message: "Địa chỉ quá ngắn." });
+  if (address.length < 5 && !(opts.addressOptional && address.length === 0)) errors.push({ field: "system:address", message: "Địa chỉ quá ngắn." });
   if (errors.length || !phone) return fail("INVALID", errors);
   const db = await getDb();
   const [found] = await db.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
