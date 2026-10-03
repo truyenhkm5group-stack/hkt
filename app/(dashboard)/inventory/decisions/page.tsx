@@ -12,6 +12,7 @@ import { decideScope } from "@/lib/auth/scope-guard";
 import { CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { DECISION_ACTION, DECISION_LABEL, DECISION_TONE, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { SIZE_BREAK_LABEL, SIZE_BREAK_TONE, type SizeBreakReport } from "@/lib/constants/size-break";
+import type { ClearanceFloor } from "@/lib/constants/clearance-floor";
 import { BUDGET_LINE_LABEL, BUDGET_LINE_TONE, BUDGET_VERDICT_LABEL, type OrderBudget } from "@/lib/constants/order-budget";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getOrderBudget } from "@/lib/queries/order-budget";
@@ -211,6 +212,7 @@ export default async function InventoryDecisionsPage() {
                       <TableCell className="max-w-[330px] text-xs text-muted-foreground">
                         {r.reason}
                         {r.grossImpactEstimate ? <span className="block font-medium text-rose-700 dark:text-rose-300">Ước mất ~{formatVND(r.grossImpactEstimate, { compact: true })} lãi gộp (ước tính)</span> : null}
+                        {r.clearanceFloor ? <ClearanceFloorNote floor={r.clearanceFloor} retailPrice={r.retailPrice} /> : null}
                       </TableCell>
                       <TableCell className="text-xs">
                         <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", DECISION_TONE[r.decision])} title={r.notes.join(" · ") || undefined}>
@@ -415,5 +417,28 @@ function OrderBudgetSection({ budget: b }: { budget: OrderBudget }) {
         </div>
       ) : null}
     </SectionCard>
+  );
+}
+
+/**
+ * GIÁ SÀN XẢ của một dòng đang chôn vốn / nên xả — luật ở `lib/constants/clearance-floor.ts`. Hai mức, vì với
+ * hàng đã nằm trong kho thì tiền vốn ĐÃ CHI: dưới giá hoà vốn là lỗ trên sổ nhưng vẫn thu về tiền mặt; dưới
+ * giá sàn tiền mặt thì mỗi đơn gửi đi đốt thêm tiền thật.
+ */
+function ClearanceFloorNote({ floor: f, retailPrice }: { floor: ClearanceFloor; retailPrice: number | null }) {
+  if (f.cashFloor === null) {
+    return <span className="mt-1 block text-[11px] italic text-muted-foreground">Giá sàn xả: chưa tính được — {f.notes.join(" · ")}</span>;
+  }
+  return (
+    <span
+      className="mt-1 block rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-1 text-[11px] text-violet-900 dark:border-violet-900/60 dark:bg-violet-950/20 dark:text-violet-200"
+      title={`Chi phí kỳ vọng của MỘT đơn gửi đi (đóng gói + nhân công + cước giao/hoàn theo tỷ lệ giao thành công ${f.deliveryRatePct ?? "?"}%) = ${formatVND(f.expectedCostPerSent)}, chia cho phần doanh thu thật sự về sau thuế. Chưa gồm tiền quảng cáo để bán được đơn đó. Một đơn = một món.`}
+    >
+      <b>Xả không dưới {formatVND(f.cashFloor)}</b>/đơn (sàn tiền mặt)
+      {f.bookFloor !== null ? ` · hoà vốn sổ sách ${formatVND(f.bookFloor)}` : ""}
+      {retailPrice && f.maxDiscountPct !== null ? ` · giảm tối đa ${f.maxDiscountPct}% so với ${formatVND(retailPrice)}` : ""}
+      {f.retailBelowCashFloor ? <b className="block text-rose-700 dark:text-rose-300">Giá bán hiện tại đã dưới sàn tiền mặt — mỗi đơn đang mất tiền.</b> : null}
+      {f.notes.length ? <span className="block opacity-80">{f.notes.join(" · ")}</span> : null}
+    </span>
   );
 }
