@@ -73,6 +73,9 @@ function pancakeMs(v: unknown): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** Lịch sử có tin cũ hơn chừng này trước tin đầu của lượt ⇒ hội thoại CŨ ⇒ Meta không tự trả lời. */
+const OLD_THREAD_MS = 24 * 3_600_000;
+
 /**
  * Theo mốc TẠO tin của Pancake: có tin phía page (`pageIds`) tạo SAU tin khách sớm nhất (`customerIds`) không. `null` = không
  * đọc được mốc của một trong hai phía. HÀM THUẦN.
@@ -84,6 +87,11 @@ export function pancakeCreatedAfterVerdict(messages: readonly Record<string, unk
     if (typeof m.id === "string" && ms !== null) at.set(m.id, ms);
   }
   const cust = customerIds.map((id) => at.get(id)).filter((x): x is number => x !== undefined);
+  // HỘI THOẠI CŨ (03/10/2026, «Tuyet Nguyen» — nhắn từ 17/07, hôm nay bấm quảng cáo hỏi giá, bot im): Meta chỉ tự trả lời
+  // hội thoại MỚI, nên lịch sử có tin cũ hơn 1 ngày trước tin khách ⇒ tin page tới quanh tin đầu là lời chào quảng cáo, không
+  // phải trả lời — kể cả khi Pancake ghi mốc của nó sau tin khách.
+  const firstCust = cust.length ? Math.min(...cust) : null;
+  if (firstCust !== null && [...at.values()].some((ms) => ms < firstCust - OLD_THREAD_MS)) return false;
   const page = pageIds.map((id) => at.get(id)).filter((x): x is number => x !== undefined);
   if (!cust.length || !page.length) return null;
   return Math.max(...page) > Math.min(...cust);
@@ -289,6 +297,10 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       )
       .limit(1);
     if (own) return { queued: false, reason: "Tin của chính bot" };
+    // Tin phía page KHÔNG CÓ CHỮ (dòng hệ thống của Pancake tới qua webhook không kèm chữ, thẻ quảng cáo…) KHÔNG phải ai trả lời
+    // khách (03/10/2026, «Nguyễn Loan»: gửi SĐT + địa chỉ, ngay sau đó Pancake chèn «Đã thêm nhãn tự động…», bot im). Nhân viên
+    // chỉ gửi ảnh cũng rơi vào đây — bot có thể trả lời thêm một câu, vẫn tốt hơn để khách chờ.
+    if (!ev.text.trim()) return { queued: false, reason: "Tin phía page không có chữ — không tính là trả lời" };
     // Mọi tin khác phía page = page ĐÃ trả lời ⇒ tin khách đang chờ trước nó không cần bot nữa.
     await db
       .insert(t)
@@ -852,7 +864,9 @@ export function normalizeThreadMessages(raw: readonly Record<string, unknown>[],
     if (!id || at === null || m.is_removed === true) continue;
     const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown };
     const text = stripHtml(str(m.original_message) || str(m.message)).slice(0, TEXT_MAX);
-    out.push({ id, text, at, fromPage: str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id), autoNote: PANCAKE_AUTO_NOTE_RE.test(text) });
+    const fromPage = str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id);
+    // Tin phía page không chữ (dòng hệ thống / thẻ quảng cáo) đếm như ghi chú tự động — không phải trả lời.
+    out.push({ id, text, at, fromPage, autoNote: PANCAKE_AUTO_NOTE_RE.test(text) || (fromPage && !text.trim()) });
   }
   return out.sort((a, b) => a.at - b.at);
 }
