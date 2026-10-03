@@ -376,21 +376,19 @@ export class FacebookAdsClient {
   }
 
   /**
-   * Mẩu của MỘT tài khoản kèm `preview_shareable_link`, từng trang 100 — cho bộ dò link chia sẻ
-   * (`ad-preview-link.ts`). Generator để người gọi dừng ngay khi đã thấy, không kéo hết tài khoản.
-   * Lỗi NÉM lên: người gọi phân loại và quyết định dò tiếp tài khoản sau hay dừng.
+   * Mã các mẩu thuộc MỘT chiến dịch hoặc nhóm quảng cáo (`/<id>/ads`) — cho link Trình quản lý có
+   * `selected_campaign_ids` / `selected_adset_ids`. Dừng ở `max` + 1 để người gọi biết là còn nữa mà
+   * không kéo hết. Lỗi NÉM lên: người gọi phân loại theo từng chiến dịch / nhóm.
    */
-  async *adPreviewLinkPages(accountId: string): AsyncGenerator<{ adId: string; link: string }[]> {
-    let record = await this.get(`act_${accountId.replace(/^act_/, "")}/ads`, { fields: "id,preview_shareable_link", limit: 100 });
-    for (;;) {
-      yield asArray(record.data)
-        .map((x) => asRecord(x))
-        .map((x) => ({ adId: str(x.id), link: str(x.preview_shareable_link) }))
-        .filter((x) => x.adId);
-      const next = str(asRecord(record.paging).next);
-      if (!next) return;
-      record = await this.get(next);
+  async listAdIdsUnder(parentId: string, max: number): Promise<{ adIds: string[]; more: boolean }> {
+    const adIds: string[] = [];
+    for await (const item of this.paginate(`${parentId}/ads`, { fields: "id", limit: 100 })) {
+      const id = str(item.id);
+      if (!id) continue;
+      if (adIds.length >= max) return { adIds, more: true };
+      adIds.push(id);
     }
+    return { adIds, more: false };
   }
 
   /**
