@@ -616,6 +616,13 @@ deploy dừng, không phải cảnh báo.
     Trả đủ = MỘT giao dịch (PAID · trả tới · đổi gói · nhật ký). Tổ chức chưa bật thu phí không bao giờ bị nhắc hay
     khoá. Giá gói `NULL` = không bán, không phải 0; không chiết khấu nào ngoài một cột tường minh.
 
+74. **LIÊN KẾT ĐẶT LẠI MẬT KHẨU: MỞ TRANG KHÔNG TIÊU MÃ, ĐẶT XONG THU HỒI MỌI PHIÊN** (`lib/users/password-reset.ts`,
+    `docs/platform/password-reset.md`): mã chỉ lưu băm, dùng một lần, hết hạn 24 giờ, liên kết mới thay liên kết cũ.
+    Trang `/reset/…` chỉ TRA — bot xem trước của Zalo / Messenger không được làm hỏng liên kết; mã bị tiêu trong CÙNG
+    giao dịch với lượt ghi mật khẩu. Mọi lý do không dùng được ra MỘT câu và đếm vào bộ chặn dò theo IP. Người vận hành
+    chỉ tạo cho tài khoản của tổ chức KHÁCH, bắt buộc lý do, nhật ký nền tảng ghi TRƯỚC khi liên kết hiện ra. Không tự
+    đăng nhập sau khi đặt.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

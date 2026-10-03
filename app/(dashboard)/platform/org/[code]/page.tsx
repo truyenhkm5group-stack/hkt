@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
 import { OrgPlanControl } from "@/components/platform/pilot-ops";
 import { OrgBillingSection } from "@/components/billing/org-billing-section";
+import { OperatorResetLinkPanel } from "@/components/platform/operator-reset-link";
 import { loadOrgBilling } from "@/lib/billing/service";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -121,6 +122,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
       <PilotPanel s={s} />
       <SupportHealthPanel s={s} />
       {billing && !("error" in billing) ? <OrgBillingSection orgCode={o.code} orgName={o.name} data={billing} /> : null}
+      {o.isHome || o.status !== "ACTIVE" ? null : <OperatorResetLinkPanel orgCode={o.code} orgName={o.name} />}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <SectionCard title="Tổ chức & gói" description={`Mẫu ${o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : "—"} · dòng module thiếu = ${o.moduleDefault === "ENABLED" ? "BẬT" : "TẮT"}`} padded={false}>

@@ -1331,6 +1331,13 @@
       "when": 1790680260000,
       "tag": "0190_appointments",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1790680270000,
+      "tag": "0191_password_reset_tokens",
+      "breakpoints": true
     }
   ]
 }

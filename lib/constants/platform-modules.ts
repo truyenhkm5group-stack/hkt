@@ -104,7 +104,7 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/api/platform/domain-allowed` (0180): Caddy on-demand TLS hỏi — không phiên, chỉ trả 200/404.
  *  · `/_next`: tài nguyên tĩnh của Next.
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/chat", "/api/platform/domain-allowed", "/_next"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/chat", "/api/platform/domain-allowed", "/_next"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {

@@ -257,7 +257,7 @@ export function ResetPasswordDialog({ user, open, onOpenChange }: { user: UserRo
         <DialogHeader>
           <DialogTitle>Đặt lại mật khẩu</DialogTitle>
           <DialogDescription>
-            Mật khẩu mới cho <strong>{user.name}</strong> ({user.email}). Phiên đăng nhập hiện tại của người này vẫn còn hiệu lực tới khi hết hạn.
+            Mật khẩu mới cho <strong>{user.name}</strong> ({user.email}). Mọi phiên đăng nhập hiện tại của người này bị đăng xuất. Muốn người này tự chọn mật khẩu thì dùng «Gửi liên kết đặt lại».
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

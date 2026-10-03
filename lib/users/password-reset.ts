@@ -1,0 +1,208 @@
+/**
+ * ═══════════ LIÊN KẾT ĐẶT LẠI MẬT KHẨU — CHỈ MÁY CHỦ (docs/platform/password-reset.md) ═══════════
+ *
+ * Khách quên mật khẩu là việc hỗ trợ đầu tiên của mọi phần mềm bán theo tháng. Chưa có bộ gửi thư (dịch vụ ngoài mới cần
+ * chủ nền tảng duyệt), nên liên kết được TẠO trong ERP rồi gửi qua kênh của người dùng (Zalo, Messenger):
+ *  · Quản trị tổ chức (`users:manage`) tạo cho một tài khoản trong CHÍNH tổ chức mình (/settings/users).
+ *  · Người vận hành nền tảng tạo cho một tài khoản của tổ chức khách (/platform/org/<mã>) — lối ra khi chính quản trị
+ *    của khách quên mật khẩu. Bắt buộc lý do, ghi nhật ký nền tảng.
+ * Người được đặt lại TỰ chọn mật khẩu mới: không ai khác biết nó (khác lối «Đặt lại mật khẩu» cũ, nơi quản trị gõ hộ).
+ *
+ * ─── MÃ ─── 32 byte ngẫu nhiên base64url; CSDL chỉ giữ `sha256`. Dùng MỘT lần (câu `UPDATE … WHERE used_at IS NULL AND
+ * revoked_at IS NULL AND expires_at > now()` trong cùng giao dịch với lượt ghi mật khẩu), hết hạn sau 24 giờ. Tạo liên kết
+ * mới cho cùng người ⇒ liên kết cũ chưa dùng bị thu hồi. Đặt xong ⇒ thu hồi MỌI phiên của người đó (`PASSWORD_RESET`).
+ *
+ * ─── TRANG CÔNG KHAI ─── `/reset/<mã tổ chức>/<mã>` không có phiên: mọi lượt tra chạy trong `withOrganization(mã trong
+ * đường dẫn)` TƯỜNG MINH. Mọi lý do không hợp lệ ra CÙNG một câu, và mỗi lượt sai đếm vào bộ chặn dò theo IP (cùng bộ đếm
+ * với màn đăng nhập) — không ai dò được tổ chức nào / mã nào tồn tại.
+ */
+import { createHash, randomBytes } from "node:crypto";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { audit } from "@/lib/audit";
+import { hashPassword } from "@/lib/auth/password";
+import { loginAllowed, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { applySessionRevocation } from "@/lib/auth/session-revoke";
+import { can, type SessionUser } from "@/lib/auth/session";
+import { env } from "@/lib/env";
+import { platformAudit } from "@/lib/platform/audit";
+import { OrgContextError, withOrganization } from "@/lib/platform/context";
+import { findOrganization } from "@/lib/platform/organizations";
+import { organizationBaseUrl } from "@/lib/platform/publish";
+import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
+import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { completeResetSchema, PASSWORD_RESET_INVALID, PASSWORD_RESET_PATH, PASSWORD_RESET_THROTTLED, PASSWORD_RESET_TTL_HOURS } from "@/lib/users/password-reset-shared";
+
+const OPERATOR_REASON_MIN = 5;
+
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+export function generateResetToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashResetToken(token: string): string {
+  return createHash("sha256").update(`erp-password-reset:${token}`).digest("hex");
+}
+
+export function resetLinkFor(orgCode: string, token: string, baseUrl: string = env.appUrl): string {
+  return `${baseUrl.replace(/\/+$/, "")}${PASSWORD_RESET_PATH}/${encodeURIComponent(orgCode)}/${encodeURIComponent(token)}`;
+}
+
+// ═══ CHẶN DÒ ═══
+
+function ipKeys(ip: string): string[] {
+  const h = createHash("sha256").update(`${env.authSecret}:reset-ip:${ip || "unknown"}`).digest("hex").slice(0, 32);
+  return [`ip:reset:${h}`];
+}
+
+type Gate = { ok: true; keys: string[] } | { ok: false; error: string };
+function throttleGate(ip: string): Gate {
+  const keys = ipKeys(ip);
+  return loginAllowed(keys).ok ? { ok: true, keys } : { ok: false, error: PASSWORD_RESET_THROTTLED };
+}
+
+async function activeOrg(orgCode: string) {
+  const code = String(orgCode ?? "").trim().toLowerCase();
+  if (!ORGANIZATION_CODE_PATTERN.test(code)) return null;
+  const org = await findOrganization(code);
+  return org && org.status === "ACTIVE" ? org : null;
+}
+
+// ═══ TẠO LIÊN KẾT ═══
+
+export type CreatedResetLink = { ok: true; link: string; expiresAt: Date; email: string };
+
+/** Trong ngữ cảnh tổ chức đích: thu hồi liên kết cũ chưa dùng của người đó rồi phát một liên kết mới. */
+async function issueInContext(target: { id: string; email: string }, via: "ORG_ADMIN" | "PLATFORM", by: { id: string | null; email: string }) {
+  const db = await getDb();
+  const t = schema.passwordResetTokens;
+  const token = generateResetToken();
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_HOURS * 3_600_000);
+  await db.transaction(async (tx) => {
+    await tx.update(t).set({ revokedAt: new Date() }).where(and(eq(t.userId, target.id), isNull(t.usedAt), isNull(t.revokedAt)));
+    await tx.insert(t).values({ userId: target.id, tokenHash: hashResetToken(token), createdVia: via, createdByUserId: by.id, createdByEmail: by.email, expiresAt });
+  });
+  await audit({ userId: by.id, userEmail: by.email, action: "PASSWORD_RESET_LINK", entity: "USER", entityId: target.id, after: { email: target.email, via, expiresAt: expiresAt.toISOString() }, reason: "Tạo liên kết đặt lại mật khẩu dùng một lần" });
+  return { token, expiresAt };
+}
+
+/** Quản trị tổ chức tạo liên kết cho một tài khoản ĐANG HOẠT ĐỘNG trong chính tổ chức của phiên. */
+export async function createResetLinkCore(user: SessionUser, targetUserId: string): Promise<CreatedResetLink | { error: string }> {
+  if (!can(user, "users:manage")) return { error: "Bạn không có quyền quản lý người dùng (users:manage)." };
+  const org = user.organization;
+  if (!org) return { error: "Không xác định được tổ chức của phiên." };
+  const db = await getDb();
+  const [target] = await db.select({ id: schema.users.id, email: schema.users.email, active: schema.users.active }).from(schema.users).where(eq(schema.users.id, targetUserId)).limit(1);
+  if (!target) return { error: "Không có tài khoản này." };
+  if (!target.active) return { error: "Tài khoản đang khoá — mở khoá trước rồi mới đặt lại mật khẩu." };
+  const { token, expiresAt } = await issueInContext(target, "ORG_ADMIN", { id: user.id, email: user.email });
+  return { ok: true, link: resetLinkFor(org.code, token, await organizationBaseUrl(org.code)), expiresAt, email: target.email };
+}
+
+/**
+ * Người vận hành nền tảng tạo liên kết cho một tài khoản (theo email) của tổ chức khách — lối ra khi chính quản trị của
+ * khách quên mật khẩu. Hỏi người vận hành TRƯỚC mọi lượt đọc; bắt buộc lý do; nhật ký nền tảng ghi trước khi trả liên kết.
+ */
+export async function createResetLinkAsOperator(user: SessionUser, raw: { orgCode?: unknown; email?: unknown; reason?: unknown }): Promise<CreatedResetLink | { error: string }> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 500) : "";
+  if (reason.length < OPERATOR_REASON_MIN) return { error: `Ghi lý do (ít nhất ${OPERATOR_REASON_MIN} ký tự) — nó vào nhật ký nền tảng.` };
+  const email = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
+  if (!email) return { error: "Nhập email tài khoản cần đặt lại." };
+  const org = await activeOrg(typeof raw.orgCode === "string" ? raw.orgCode : "");
+  if (!org || org.isHome) return { error: "Chỉ đặt lại cho tài khoản của tổ chức khách đang hoạt động — tài khoản nhà dùng trang Người dùng." };
+  const target = await withOrganization(org.code, async () => {
+    const db = await getDb();
+    const [row] = await db.select({ id: schema.users.id, email: schema.users.email, active: schema.users.active }).from(schema.users).where(sql`lower(${schema.users.email}) = ${email}`).limit(1);
+    return row ?? null;
+  });
+  if (!target) return { error: `Tổ chức «${org.name}» không có tài khoản ${email}.` };
+  if (!target.active) return { error: "Tài khoản đang khoá — quản trị tổ chức mở khoá trước." };
+  await platformAudit({ action: "PASSWORD_RESET_LINK", targetOrgCode: org.code, subject: `user:${target.email}`, after: { expiresInHours: PASSWORD_RESET_TTL_HOURS }, reason, source: "UI", actor: { orgCode: user.organization!.code, userId: user.id, email: user.email } });
+  const { token, expiresAt } = await withOrganization(org.code, () => issueInContext(target, "PLATFORM", { id: null, email: `platform:${user.email}` }));
+  return { ok: true, link: resetLinkFor(org.code, token, await organizationBaseUrl(org.code)), expiresAt, email: target.email };
+}
+
+// ═══ TRANG CÔNG KHAI ═══
+
+async function activeTokenRow(token: string) {
+  const db = await getDb();
+  const t = schema.passwordResetTokens;
+  const [row] = await db
+    .select({ id: t.id, userId: t.userId, expiresAt: t.expiresAt, email: schema.users.email, active: schema.users.active })
+    .from(t)
+    .innerJoin(schema.users, eq(schema.users.id, t.userId))
+    .where(and(eq(t.tokenHash, hashResetToken(token)), isNull(t.usedAt), isNull(t.revokedAt), gt(t.expiresAt, sql`now()`)))
+    .limit(1);
+  return row && row.active ? row : null;
+}
+
+export type ResetLookup = { ok: true; orgCode: string; orgName: string; email: string; expiresAt: Date } | { ok: false; error: string };
+
+/** Mở trang: CHỈ ĐỌC, không tiêu mã (bot xem trước liên kết của Zalo / Messenger không làm hỏng liên kết). */
+export async function lookupResetToken(orgCode: string, token: string, opts: { ip: string }): Promise<ResetLookup> {
+  const gate = throttleGate(opts.ip);
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const fail = (): ResetLookup => {
+    recordLoginFailure(gate.keys);
+    return { ok: false, error: PASSWORD_RESET_INVALID };
+  };
+  if (!TOKEN_PATTERN.test(String(token ?? ""))) return fail();
+  const org = await activeOrg(orgCode);
+  if (!org) return fail();
+  try {
+    const row = await withOrganization(org.code, () => activeTokenRow(token));
+    if (!row) return fail();
+    return { ok: true, orgCode: org.code, orgName: org.name, email: row.email, expiresAt: row.expiresAt };
+  } catch (error) {
+    if (error instanceof OrgContextError) return fail();
+    throw error;
+  }
+}
+
+/** Đặt mật khẩu mới: tiêu mã + ghi mật khẩu trong MỘT giao dịch, rồi thu hồi mọi phiên của người đó. Không tự đăng nhập. */
+export async function completePasswordResetCore(orgCode: string, token: string, input: unknown, opts: { ip: string }): Promise<{ ok: true; orgCode: string; email: string } | { error: string }> {
+  const gate = throttleGate(opts.ip);
+  if (!gate.ok) return { error: gate.error };
+  const parsed = completeResetSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const invalid = () => {
+    recordLoginFailure(gate.keys);
+    return { error: PASSWORD_RESET_INVALID };
+  };
+  if (!TOKEN_PATTERN.test(String(token ?? ""))) return invalid();
+  const org = await activeOrg(orgCode);
+  if (!org) return invalid();
+  const passwordHash = await hashPassword(parsed.data.password);
+  let done: { userId: string; email: string } | null;
+  try {
+    done = await withOrganization(org.code, async () => {
+      const row = await activeTokenRow(token);
+      if (!row) return null;
+      const db = await getDb();
+      const t = schema.passwordResetTokens;
+      const ok = await db.transaction(async (tx) => {
+        const [won] = await tx
+          .update(t)
+          .set({ usedAt: new Date() })
+          .where(and(eq(t.id, row.id), isNull(t.usedAt), isNull(t.revokedAt), gt(t.expiresAt, sql`now()`)))
+          .returning({ id: t.id });
+        if (!won) return false;
+        await tx.update(schema.users).set({ passwordHash, updatedAt: new Date() }).where(eq(schema.users.id, row.userId));
+        return true;
+      });
+      if (!ok) return null;
+      // Đặt lại mà phiên cũ vẫn sống thì việc đặt lại vô nghĩa — thu hồi bắt buộc, không cờ tắt.
+      await applySessionRevocation({ targetUserId: row.userId, targetEmail: row.email, trigger: "PASSWORD_RESET", actor: { id: null, label: "liên kết đặt lại mật khẩu" } });
+      await audit({ userId: row.userId, userEmail: row.email, action: "PASSWORD_RESET_COMPLETE", entity: "USER", entityId: row.userId, after: { via: "LINK" }, reason: "Người dùng tự đặt mật khẩu mới qua liên kết dùng một lần" });
+      return { userId: row.userId, email: row.email };
+    });
+  } catch (error) {
+    if (error instanceof OrgContextError) return invalid();
+    throw error;
+  }
+  if (!done) return invalid();
+  return { ok: true, orgCode: org.code, email: done.email };
+}
