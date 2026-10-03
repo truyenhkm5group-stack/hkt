@@ -49,6 +49,8 @@ export type ChatState = {
   /** `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt — chốt chỉ ở lượt SAU (khách đã thấy tóm tắt). */
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number };
   confirmed?: { orderId: string | null; simulated: boolean; total: number; at: string };
+  /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
+  pastOrders?: { orderId: string | null; simulated: boolean; total: number; at: string }[];
   handoff?: { reason: string; at: string };
   stage?: SalesStage;
   /** Đã gửi câu upsell (chỉ MỘT lần mỗi hội thoại). */
@@ -94,6 +96,8 @@ export type ToolContext = {
   now?: Date;
   /** Mã lượt = seq tin khách của lượt này (engine). Thiếu (bài kiểm gọi lẻ công cụ) ⇒ không xét «cùng lượt». */
   turn?: number;
+  /** Tên Facebook của khách (kênh fanpage) — `create_customer` dùng khi AI không ghi tên. */
+  customerName?: string | null;
 };
 
 /**
@@ -138,11 +142,11 @@ const DEFS: Record<SalesTool, AiToolDef> = {
   create_customer: {
     name: "create_customer",
     description:
-      "Lưu thông tin người mua sau khi khách đã cho: họ tên, số điện thoại, địa chỉ giao. SĐT đã có trong sổ ⇒ dùng lại đúng khách đó. KHÁCH CŨ có địa chỉ ĐÃ CHE và khách vừa xác nhận giao như lần trước ⇒ use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận (bỏ trống phone / address — máy chủ tự điền).",
+      "Lưu thông tin người mua sau khi khách đã cho số điện thoại + địa chỉ giao (họ tên: bỏ trống ⇒ máy chủ dùng tên Facebook của khách). SĐT đã có trong sổ ⇒ dùng lại đúng khách đó. KHÁCH CŨ có địa chỉ ĐÃ CHE và khách vừa xác nhận giao như lần trước ⇒ use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận (bỏ trống phone / address — máy chủ tự điền).",
     inputSchema: {
       type: "object",
       properties: { name: { type: "string" }, phone: { type: "string" }, address: { type: "string" }, province: { type: "string" }, use_saved_address: { type: "boolean" }, customer_confirmation: { type: "string" } },
-      required: ["name"],
+      required: [],
       additionalProperties: false,
     },
     kind: "write",
@@ -495,7 +499,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         fields = { name: typed.length >= 2 ? typed : r.name, phone: r.phone, address: r.address, province: r.province };
         saved = r.trust === "PHONE";
       }
-      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: fields.name, phone: fields.phone, address: fields.address, province: fields.province || undefined });
+      // Họ tên: AI ghi ⇒ dùng; trống / quá ngắn ⇒ tên Facebook của khách (kênh fanpage) — không bắt khách khai lại tên.
+      const typedName = typeof fields.name === "string" && fields.name.trim().length >= 2 ? fields.name : "";
+      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: fields.phone, address: fields.address, province: fields.province || undefined });
       if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state);
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
