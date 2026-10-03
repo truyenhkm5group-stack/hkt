@@ -60,6 +60,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
+import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
@@ -1430,6 +1431,35 @@ async function testJourney() {
       assert.ok(postsTo("t-cu2") === 0 && postsTo("t-cu3") === 0 && postsTo("t-cu4") === 0, "đã có người trả lời / quá mới / quá cũ ⇒ không đụng");
       const cuAgain = await catchUpFanpage({ fetch: cuFetch.fetch });
       assert.ok(cuAgain.queued === 0 && cuAgain.reopened === 0 && cuAgain.threads === 0, `quét lần hai không trả lời lại: ${JSON.stringify(cuAgain)}`);
+      // ═══ TIN SÁNG «KHÁCH ĐẾN HẠN MUA LẠI» (03/10/2026 — khách cũ ngoài khung 24 giờ: người gọi / Zalo, không để bot tự nhắn) ═══
+      const dueRows: DigestRow[] = [
+        { name: "Chị Linh", phone: "0912502287", status: "DUE", daysUntil: -2, lastOrderOn: "2026-09-15", items: ["Chả mực giã tay 1kg × 1"] },
+        { name: "Anh Ba", phone: null, status: "DUE_SOON", daysUntil: 2, lastOrderOn: "2026-09-25", items: [] },
+        { name: "Cô Tư", phone: "0900000004", status: "NOT_DUE", daysUntil: 20, lastOrderOn: "2026-09-30", items: [] },
+      ];
+      const dg = reorderDigestText(dueRows, "2026-10-03", "https://hslc.erp.vnxcommerce.com");
+      assert.ok(dg && dg.startsWith("🔁 Khách đến hạn mua lại (03/10): 2 khách"), String(dg));
+      assert.ok(dg!.includes("Chị Linh · 0912502287 · quá hạn 2 ngày · lần trước 15/09: Chả mực giã tay 1kg × 1 · https://zalo.me/0912502287"), dg!);
+      assert.ok(dg!.includes("Anh Ba · chưa có SĐT · còn 2 ngày") && !dg!.includes("Cô Tư") && dg!.includes("https://hslc.erp.vnxcommerce.com/customers/reorder"), dg!);
+      assert.equal(reorderDigestText([dueRows[2]], "2026-10-03", null), null, "không ai đến hạn ⇒ không có tin");
+      // Tổ chức thật: khách mua 2 lần cách 10 ngày, lần cuối 10 ngày trước ⇒ đến hạn hôm nay ⇒ nhóm vận hành nhận MỘT tin.
+      const [rc] = await db.insert(schema.customers).values({ name: "Chị Mua Lại", phone: "0977000222", address: "12 Hàng Bạc", province: "Hà Nội" }).returning({ id: schema.customers.id });
+      for (const ago of [20, 10]) {
+        const o = await createManualOrderCore(admin, { customerId: rc.id, stage: "CONFIRMED", channel: "Zalo", note: "", orderDiscount: 0, shippingFee: 0, lines: [{ variantId: chaMuc, quantity: 1, unitPrice: 400_000, discount: 0 }] });
+        assert.ok(o.ok, JSON.stringify(o));
+        await db.update(schema.orders).set({ insertedAt: new Date(Date.now() - ago * 86_400_000) }).where(eq(schema.orders.id, o.id));
+      }
+      const vnNine = (() => {
+        const d = new Date();
+        d.setUTCHours(2, 0, 0, 0); // 09:00 giờ VN hôm nay
+        return d;
+      })();
+      assert.equal((await sendReorderDigest(new Date(vnNine.getTime() - 2 * 3_600_000))).reason, "trước 8 giờ sáng");
+      const rd1 = await sendReorderDigest(vnNine);
+      assert.ok(rd1.sent && rd1.due >= 1, JSON.stringify(rd1));
+      const rdRows = await db.select().from(schema.messagingDeliveries).where(like(schema.messagingDeliveries.dedupeKey, "reorder-digest:%"));
+      assert.ok(rdRows.length === 1 && rdRows[0].connectorKey === "sandbox-messaging" && /Chị Mua Lại · 0977000222 · đến hạn hôm nay/.test(rdRows[0].body) && /zalo\.me\/0977000222/.test(rdRows[0].body) && /\/customers\/reorder/.test(rdRows[0].body), JSON.stringify(rdRows.map((x) => x.body)));
+      assert.equal((await sendReorderDigest(new Date(vnNine.getTime() + 3_600_000))).reason, "hôm nay đã gửi", "mỗi ngày MỘT tin");
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));
