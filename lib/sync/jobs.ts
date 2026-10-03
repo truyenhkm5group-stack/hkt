@@ -66,6 +66,7 @@ import { DEFAULT_OPTIMIZE_DEPS, maybeOptimize } from "@/lib/video-scale/optimize
 import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-gen";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
+import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 
@@ -694,11 +695,14 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng).",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
+        const cu = await catchUpFanpage();
         const r = await runSalesFollowups();
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
-        ctx.summary.detail = `${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        const cuText = cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "";
+        ctx.summary.detail = `${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;
       }),
   },

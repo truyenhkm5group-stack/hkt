@@ -29,7 +29,7 @@ import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { appendContextMessages, chatTurn, conversationView, openConversation } from "@/lib/sales-chatbot/engine";
+import { appendContextMessages, chatTurn, conversationView, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
@@ -267,7 +267,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 
-export type FanpageDeps = { fetch?: typeof fetch; now?: () => Date; sleep?: (ms: number) => Promise<void> };
+/** `catchUp` = lượt QUÉT LẠI (`catchUpFanpage`): tin đã cũ cả phút ⇒ không đợi khách gõ tiếp / đợi Meta nữa. */
+export type FanpageDeps = { fetch?: typeof fetch; now?: () => Date; sleep?: (ms: number) => Promise<void>; catchUp?: boolean };
 
 /**
  * Tải ảnh câu mẫu lên page (Pancake `upload_contents`, multipart — Pancake không cần URL công khai) ⇒ mã nội dung. Mã đã tải
@@ -551,7 +552,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     };
     // Chưa đủ tuổi VÀ page chưa trả lời ⇒ chưa tới lượt (lượt chờ của chính tin mới nhất sẽ gom cả hội thoại). Page đã trả
     // lời ⇒ đi tiếp ngay để bỏ qua, không bắt khách đợi hết thời gian chờ.
-    if (new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
+    if (!deps.catchUp && new Date(pend.newest).getTime() > now().getTime() - (firstContact ? FIRST_CONTACT_WAIT_MS : FOLLOWUP_WAIT_MS) && !(await pageRepliedSince())) return { ...out, skipped: WAITING };
     const claim = randomUUID();
     const staleBefore = new Date(now().getTime() - CLAIM_STALE_MS);
     const claimed = await db
@@ -742,6 +743,128 @@ export async function sweepStaleFanpageThreads(deps: FanpageDeps = {}): Promise<
     .limit(5);
   for (const s of stale) await processFanpageThread(s.pageId, s.threadId, deps);
   return stale.length;
+}
+
+/**
+ * ═══ QUÉT LẠI TIN KHÁCH BỊ RƠI (03/10/2026) ═══
+ *
+ * Webhook là đường DUY NHẤT tin khách tới bot, và mỗi lần deploy container ứng dụng dừng vài phút: đo 03/10/2026 (Hải Sản
+ * Làng Chài) bước khởi động lại chạy 13:33–13:37 giờ VN và bốn khách nhắn đúng khoảng đó (Thủy Nguyễn 13:34, Phí Thắng 13:35,
+ * Nguyen Hiền 13:36, Nguyễn Thường 13:38) không ai trả lời — gói webhook tới lúc máy dừng thì mất hẳn, lượt xử lý sau phản hồi
+ * bị giết giữa chừng thì nằm PENDING cho tới khi có webhook KHÁC (`sweepStaleFanpageThreads`). Bot nhà có `poller.js` cho
+ * đúng việc này; đây là bản của bot tổ chức, chạy trong job `sales-followup` (5 phút — không thêm lịch scheduler).
+ *
+ * Mỗi lượt: 60 hội thoại INBOX mới nhất của page ⇒ hội thoại đổi trong `maxAgeMinutes` mà tin cuối KHÔNG phải của page (hoặc
+ * là ghi chú tự động của Pancake) ⇒ đọc tin của hội thoại ⇒ tin khách tạo SAU tin trả lời thật cuối cùng của page = chưa ai
+ * trả lời. Tin chưa có trong ERP ⇒ nhận như webhook (`receiveFanpageEvent`); tin bị bỏ qua vì «page đã trả lời» mà Pancake
+ * cho thấy KHÔNG ai trả lời thật (ghi chú tự động của Pancake, bản trước #481) ⇒ mở lại. Rồi xử lý ngay (không đợi thêm).
+ * Tin quá `maxAgeMinutes` KHÔNG trả lời bù — nhắn vào một hội thoại đã nguội là làm phiền; tin chưa đủ `minAgeSeconds` để
+ * đường webhook tự lo.
+ */
+export const CATCH_UP_LIMITS = { maxAgeMinutes: 30, minAgeSeconds: 60, conversations: 60, threadsPerRun: 5 } as const;
+
+export type PancakeThreadMessage = { id: string; text: string; at: number; fromPage: boolean; autoNote: boolean };
+
+/** Tin của MỘT hội thoại Pancake ⇒ dạng chuẩn, theo thứ tự tạo. HÀM THUẦN. */
+export function normalizeThreadMessages(raw: readonly Record<string, unknown>[], pageId: string): PancakeThreadMessage[] {
+  const out: PancakeThreadMessage[] = [];
+  for (const m of raw) {
+    const at = pancakeMs(m.inserted_at ?? m.created_at);
+    const id = str(m.id);
+    if (!id || at === null || m.is_removed === true) continue;
+    const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown };
+    const text = stripHtml(str(m.original_message) || str(m.message)).slice(0, TEXT_MAX);
+    out.push({ id, text, at, fromPage: str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id), autoNote: PANCAKE_AUTO_NOTE_RE.test(text) });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * Tin khách CHƯA AI TRẢ LỜI: có chữ, tạo sau tin trả lời THẬT cuối cùng của page (ghi chú tự động không tính). Tin mới nhất
+ * chưa đủ `minAgeMs` ⇒ `[]` (để webhook lo); tin quá `maxAgeMs` bị bỏ. HÀM THUẦN.
+ */
+export function unansweredCustomerMessages(msgs: readonly PancakeThreadMessage[], nowMs: number, minAgeMs: number, maxAgeMs: number): PancakeThreadMessage[] {
+  let lastReply = -1;
+  msgs.forEach((m, i) => {
+    if (m.fromPage && !m.autoNote) lastReply = i;
+  });
+  const pending = msgs.slice(lastReply + 1).filter((m) => !m.fromPage && !m.autoNote && m.text.trim());
+  if (!pending.length || nowMs - pending[pending.length - 1].at < minAgeMs) return [];
+  return pending.filter((m) => nowMs - m.at <= maxAgeMs);
+}
+
+export type CatchUpResult = { scanned: number; threads: number; queued: number; reopened: number; replies: number; detail: string[] };
+
+/** Một lượt quét lại cho tổ chức NGỮ CẢNH. Không ném. */
+export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpResult> {
+  const out: CatchUpResult = { scanned: 0, threads: 0, queued: 0, reopened: 0, replies: 0, detail: [] };
+  const now = deps.now ?? (() => new Date());
+  const fetchImpl = deps.fetch ?? fetch;
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  if (!conn.ok) return { ...out, detail: ["kết nối fanpage chưa bật"] };
+  if (!(await loadSalesChatbotConfig()).enabled) return { ...out, detail: ["bot đang tắt"] };
+  const pageId = (conn.settings.pageId ?? "").trim();
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
+  if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+  const q = `page_access_token=${encodeURIComponent(token)}`;
+  const get = async (url: string): Promise<Record<string, unknown> | null> => {
+    try {
+      const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15_000) });
+      const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      return res.ok && body && body.success !== false ? body : null;
+    } catch {
+      return null;
+    }
+  };
+  const list = await get(`${PANCAKE_PAGES_API}/v2/pages/${encodeURIComponent(pageId)}/conversations?${q}&type=INBOX&order_by=updated_at`);
+  const convs = (Array.isArray(list?.conversations) ? list.conversations : []) as Record<string, unknown>[];
+  if (!list) return { ...out, detail: [scrubSecrets("Pancake không trả danh sách hội thoại", [token])] };
+  const nowMs = now().getTime();
+  const maxAgeMs = CATCH_UP_LIMITS.maxAgeMinutes * 60_000;
+  const candidates = convs.slice(0, CATCH_UP_LIMITS.conversations).filter((c) => {
+    const at = pancakeMs(c.updated_at);
+    if (at === null || nowMs - at > maxAgeMs) return false;
+    const lastBy = str((c.last_sent_by as { id?: unknown } | undefined)?.id);
+    return lastBy !== pageId || PANCAKE_AUTO_NOTE_RE.test(stripHtml(str(c.snippet)));
+  });
+  out.scanned = convs.length;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  for (const c of candidates.slice(0, CATCH_UP_LIMITS.threadsPerRun)) {
+    const threadId = str(c.id);
+    if (!threadId) continue;
+    const body = await get(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?${q}`);
+    const msgs = normalizeThreadMessages((Array.isArray(body?.messages) ? body.messages : []) as Record<string, unknown>[], pageId);
+    const waiting = unansweredCustomerMessages(msgs, nowMs, CATCH_UP_LIMITS.minAgeSeconds * 1000, maxAgeMs);
+    if (!waiting.length) continue;
+    const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
+    let touched = 0;
+    for (const m of waiting) {
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null }, now());
+      if (r.queued) {
+        out.queued += 1;
+        touched += 1;
+        continue;
+      }
+      // Bị bỏ qua vì «page đã trả lời» nhưng Pancake cho thấy không ai trả lời thật ⇒ mở lại cho bot.
+      const reopened = await db
+        .update(t)
+        .set({ status: "PENDING", note: null, claimId: null, claimedAt: null, processedAt: null })
+        .where(and(eq(t.messageId, m.id), eq(t.status, "SKIPPED"), eq(t.note, PAGE_REPLIED_REASON)))
+        .returning({ id: t.id });
+      if (reopened.length) {
+        out.reopened += 1;
+        touched += 1;
+      }
+    }
+    const [stale] = await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"))).limit(1);
+    if (!touched && !stale) continue;
+    out.threads += 1;
+    const r = await processFanpageThread(pageId, threadId, { ...deps, catchUp: true });
+    out.replies += r.replies;
+    out.detail.push(`${threadId.slice(-6)}: ${waiting.length} tin chờ · trả lời ${r.replies}${r.skipped ? ` · ${r.skipped}` : ""}${r.error ? ` · lỗi ${r.error.slice(0, 80)}` : ""}`);
+  }
+  return out;
 }
 
 export type FanpageInboundCounts = { pending: number; done: number; skipped: number; skippedReasons: { reason: string; count: number }[] };
