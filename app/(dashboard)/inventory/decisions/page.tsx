@@ -7,11 +7,14 @@ import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
+import { decideScope } from "@/lib/auth/scope-guard";
 import { CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { DECISION_ACTION, DECISION_LABEL, DECISION_TONE, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { SIZE_BREAK_LABEL, SIZE_BREAK_TONE, type SizeBreakReport } from "@/lib/constants/size-break";
-import { formatNumber, formatVND } from "@/lib/format";
+import { BUDGET_LINE_LABEL, BUDGET_LINE_TONE, BUDGET_VERDICT_LABEL, type OrderBudget } from "@/lib/constants/order-budget";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { getOrderBudget } from "@/lib/queries/order-budget";
 import { backtestInventoryDecisions, getInventoryDecisionReport } from "@/lib/queries/inventory-decision";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +30,12 @@ function fmtDate(key: string | null) {
 }
 
 export default async function InventoryDecisionsPage() {
-  await requirePermission("planning:view");
+  const user = await requirePermission("planning:view");
   const [report, backtest] = await Promise.all([getInventoryDecisionReport(), backtestInventoryDecisions(30)]);
+  // Số dư ngân hàng thuộc vùng TÀI CHÍNH: cùng cổng với trang Dòng tiền (`reports:cash` + phạm vi FINANCE
+  // toàn bộ). Người chỉ có quyền kế hoạch vẫn thấy đề xuất đặt, KHÔNG thấy tiền trong tài khoản.
+  const financeOk = can(user, "reports:cash") && (await decideScope("FINANCE", user, "reports:cash")).allow === "ALL";
+  const budget = financeOk ? await getOrderBudget(report) : null;
   const sm = report.summary;
   const cov = report.coverage;
 
@@ -124,6 +131,14 @@ export default async function InventoryDecisionsPage() {
           Độ phủ dữ liệu: tồn tính được {cov.stockKnownPct}% mẫu mã · sổ kho đủ {report.used.minHistoryDays} ngày ở {cov.historyKnownPct}% · giá nhập có ở {cov.costKnownPct}% · tỷ lệ hoàn đủ mẫu riêng ở {cov.returnRateOwnPct}% (còn lại dùng số toàn shop {Math.round(report.used.shopReturnRate * 100)}%) · thời gian sản xuất khai riêng ở {cov.leadTimeOverridePct}% (còn lại dùng giả định chung {report.used.leadTimeDays} ngày). {formatNumber(report.holdCount)} mẫu mã đang ổn định (giữ nguyên) không hiện trong bảng.
         </InfoHint>
       </div>
+
+      {budget ? (
+        <OrderBudgetSection budget={budget} />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Ngân sách đặt hàng (so đề xuất đặt với số dư ngân hàng và dòng tiền 30 ngày) chỉ hiện với người có quyền xem Dòng tiền.
+        </p>
+      )}
 
       <SizeBreakSection report={report.sizeBreaks} />
 
@@ -304,6 +319,101 @@ function SizeBreakSection({ report }: { report: SizeBreakReport }) {
       ) : (
         <p className="px-4 py-4 text-sm text-muted-foreground">Không nhóm màu nào đang còn hàng mà thiếu đúng size khách mua.</p>
       )}
+    </SectionCard>
+  );
+}
+
+/**
+ * NGÂN SÁCH ĐẶT HÀNG 30 NGÀY — luật ở `lib/constants/order-budget.ts`. Khối này chỉ IN: dư địa = tiền đang
+ * có + dòng tiền ròng 30 ngày; đề xuất xếp theo ưu tiên, dừng ở dòng đầu tiên không vừa.
+ */
+function OrderBudgetSection({ budget: b }: { budget: OrderBudget }) {
+  const tone =
+    b.verdict === "FITS"
+      ? "border-emerald-300/70 bg-emerald-50/50 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+      : b.verdict === "OVER" || b.verdict === "NO_HEADROOM"
+        ? "border-rose-300/70 bg-rose-50/50 dark:border-rose-900/60 dark:bg-rose-950/20"
+        : "border-border bg-muted/30";
+  const lower = b.headroomIsLowerBound ? " (cận dưới)" : "";
+  return (
+    <SectionCard
+      title={`Ngân sách đặt hàng ${b.horizonDays} ngày tới — ${BUDGET_VERDICT_LABEL[b.verdict]}`}
+      description={<DataWarnings items={b.caveats} label={`${b.caveats.length} điều cần biết trước khi tin`} />}
+      hint={`Dư địa = số dư ngân hàng hiện có + dòng tiền ròng ${b.horizonDays} ngày tới (COD đơn đã giao sắp về − quảng cáo − vận hành − tiền xưởng của lệnh đã gửi, đúng số tab Dự phóng của trang Dòng tiền). Đề xuất đặt xếp theo ưu tiên: nguy cơ hết hàng trước nên đặt thêm; cùng nhóm thì ước lãi gộp mất lớn hơn trước. Dừng ở dòng ĐẦU TIÊN không vừa — không nhảy cóc. ERP không đặt quỹ dự phòng nào: muốn giữ lại bao nhiêu tiền là quyết định của chủ shop, hãy đọc ô "còn lại sau khi đặt hết".`}
+      padded={false}
+    >
+      <div className={cn("m-3 grid gap-3 rounded-xl border p-3 text-sm sm:grid-cols-2 xl:grid-cols-4", tone)}>
+        <div>
+          <div className="text-xs text-muted-foreground">Số dư ngân hàng{b.cash.complete ? "" : ` · thiếu ${b.cash.unknownAccounts} tài khoản`}</div>
+          <div className="font-semibold">{b.cash.total === null ? <span className="italic text-muted-foreground">Chưa biết</span> : <Money value={b.cash.total} />}</div>
+          {b.cash.stalestAt ? <div className="text-[11px] text-muted-foreground">đúng tới {formatDateTime(b.cash.stalestAt)}</div> : null}
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Dòng tiền ròng {b.horizonDays} ngày</div>
+          <div className={cn("font-semibold", b.flow.net < 0 && "text-rose-600 dark:text-rose-400")}>
+            <Money value={b.flow.net} />
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            COD về {formatVND(b.flow.codExpected, { compact: true })} · chi {formatVND(b.flow.adsPlanned + b.flow.opexPlanned + b.flow.productionDue, { compact: true })}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Dư địa{lower}</div>
+          <div className="font-semibold">{b.headroom === null ? <span className="italic text-muted-foreground">Chưa biết</span> : <Money value={b.headroom} />}</div>
+          <div className="text-[11px] text-muted-foreground">
+            Đề xuất cần {formatVND(b.requiredKnown, { compact: true })}
+            {b.requiredUnknownCount ? ` + ${b.requiredUnknownCount} dòng chưa có giá` : ""}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Còn lại sau khi đặt hết</div>
+          <div className={cn("font-semibold", (b.afterAll ?? 0) < 0 && "text-rose-600 dark:text-rose-400")}>
+            {b.afterAll === null ? <span className="italic text-muted-foreground">Chưa biết</span> : <Money value={b.afterAll} />}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {b.headroom === null
+              ? "cần số dư ngân hàng"
+              : `${formatNumber(b.fundedCount)} dòng vừa dư địa · ${formatNumber(b.unfundedCount)} dòng vượt (${formatVND(b.unfundedCapital, { compact: true })})`}
+          </div>
+        </div>
+      </div>
+      {b.lines.length ? (
+        <div className="overflow-x-auto">
+          <Table className="min-w-[900px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10 text-right">#</TableHead>
+                <TableHead>Mẫu mã</TableHead>
+                <TableHead>Loại</TableHead>
+                <TableHead className="text-right">Số đặt</TableHead>
+                <TableHead className="text-right">Vốn</TableHead>
+                <TableHead className="text-right">Cộng dồn</TableHead>
+                <TableHead>Dư địa</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {b.lines.map((l, i) => (
+                <TableRow key={l.variantId} className={cn(l.state === "UNFUNDED" && "opacity-75")}>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell className="max-w-[320px] truncate font-medium" title={l.label}>
+                    {l.label}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {DECISION_LABEL[l.decision]}
+                    {l.grossImpactEstimate ? <span className="block text-[10.5px] text-muted-foreground">ước mất ~{formatVND(l.grossImpactEstimate, { compact: true })} lãi gộp</span> : null}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatNumber(l.qty)}</TableCell>
+                  <TableCell className="text-right">{l.capital === null ? <span className="text-xs italic text-muted-foreground">chưa có giá nhập</span> : <Money value={l.capital} />}</TableCell>
+                  <TableCell className="text-right">{l.cumulative === null ? "—" : <Money value={l.cumulative} />}</TableCell>
+                  <TableCell>
+                    <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", BUDGET_LINE_TONE[l.state])}>{BUDGET_LINE_LABEL[l.state]}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
     </SectionCard>
   );
 }

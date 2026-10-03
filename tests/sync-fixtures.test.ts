@@ -148,6 +148,7 @@ import { testInventoryForecast } from "./inventory-forecast.test";
 import { testPlanExplain } from "./plan-explain.test";
 import { testInventoryDecision } from "./inventory-decision.test";
 import { testSizeBreakPure, testSizeBreakReport } from "./size-break.test";
+import { testOrderBudgetPure, testOrderBudgetReport } from "./order-budget.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnUnidentified } from "./return-unidentified.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
@@ -2078,6 +2079,8 @@ async function main() {
   await testInventoryDecision(db);
   testSizeBreakPure();
   await testSizeBreakReport();
+  testOrderBudgetPure();
+  await testOrderBudgetReport();
   // Company OS · Agent D: tự dọn dữ liệu mã `cosd-` (kể cả khoá settings inventory.slowMoving).
   testCompanyOsInventoryPure();
   await testCompanyOsInventoryDb(db);
