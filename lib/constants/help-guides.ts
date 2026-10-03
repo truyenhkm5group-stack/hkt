@@ -223,6 +223,19 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     steps: [{ text: "Bấm ảnh đại diện góc trên → «Tài khoản của tôi» → «Đổi mật khẩu của tôi».", href: "/settings/profile" }],
   },
   {
+    key: "data-export",
+    topic: "ACCOUNT",
+    title: "Tải dữ liệu của cửa hàng ra Excel",
+    summary: "Khách hàng, đơn, sản phẩm, phiếu thu, lịch hẹn — tải ra CSV bất cứ lúc nào, kể cả khi gói đã quá hạn.",
+    href: "/settings/data-export",
+    permission: "settings:manage",
+    steps: [
+      { text: "Mở Hệ thống → Xuất dữ liệu.", href: "/settings/data-export" },
+      { text: "Bấm «Tải CSV» ở loại cần lấy; mở tệp bằng Excel hoặc Google Sheets. Mỗi tệp là TOÀN BỘ dữ liệu loại đó." },
+      { text: "Tệp có tên, số điện thoại, địa chỉ khách — giữ cẩn thận. Mỗi lượt tải được ghi vào nhật ký." },
+    ],
+  },
+  {
     key: "plan-billing",
     topic: "ACCOUNT",
     title: "Gói dịch vụ và gia hạn",

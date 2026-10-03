@@ -79,13 +79,16 @@ export type AuditParams = {
   `OUTREACH_BROADCAST_*` (gửi tin hàng loạt): chỉ ghi hai bảng `outreach_broadcast*`, không báo cáo nào đọc
   chúng qua đệm — trang gửi tin đọc thẳng.
 
+  `DATA_EXPORT` (/settings/data-export — tải CSV dữ liệu của tổ chức): chỉ ĐỌC; ghi nhật ký để biết ai đã mang tên / SĐT
+  khách ra ngoài, không phải vì nó đổi số.
+
   `CUSTOM_FILE_DOWNLOAD` (tải tệp của field tuỳ biến — Phase 3.1): chỉ ĐỌC một tệp; không có nó ở đây thì mỗi
   lượt bấm «Tải xuống» xoá sạch đệm báo cáo của cả tổ chức.
 
   `META_AD_POST_LOOKUP` (tra tay mẩu quảng cáo → bài viết, `/ads/post-resolver`): chỉ ĐỌC Meta, không ghi
   bảng nào. Lượt GHI của cùng màn hình là `META_AD_POST_SYNC` — cố ý ĐỂ NGOÀI danh sách vì nó đổi `fb_ads`.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

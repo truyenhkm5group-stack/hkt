@@ -461,6 +461,7 @@ import { testPasswordReset } from "./password-reset.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
 import { testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
+import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
@@ -2653,6 +2654,7 @@ async function main() {
   testHelpGuides();
   // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
   await testPublicSiteData();
+  await testDataExport();
   // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
   // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
   await testAiUsage();
