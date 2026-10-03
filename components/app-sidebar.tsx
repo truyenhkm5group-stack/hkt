@@ -335,6 +335,7 @@ export function menuActiveHref(pathname: string, user: NavUserLike): string | un
 export const NAV_TITLES: Record<string, string> = {
   ...MODULE_TITLES,
   "/settings/profile": "Tài khoản của tôi",
+  "/help": "Hướng dẫn sử dụng",
   "/module-disabled": "Module chưa bật",
   "/customers/retention": "Giữ chân khách",
   "/inventory/purchasing": "Mua hàng & xưởng",
