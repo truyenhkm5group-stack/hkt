@@ -7,6 +7,7 @@
  *  · LIỆU TRÌNH — gói N buổi khách trả trước. Số buổi ĐÃ DÙNG và ĐANG GIỮ không lưu thành cột: đếm lúc đọc từ lịch hẹn gắn
  *    gói (đã xong = dùng; đang hiệu lực = giữ chỗ). Không có bộ đếm nào lệch được với lịch thật.
  */
+import { vnClock } from "@/lib/format";
 
 export const APPOINTMENT_STATUSES = ["BOOKED", "CONFIRMED", "CHECKED_IN", "DONE", "NO_SHOW", "CANCELLED"] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
@@ -71,4 +72,39 @@ export function packageUsable(pkg: { status: string; expiresOn: string | null },
   if (pkg.expiresOn && onDay > pkg.expiresOn) return { ok: false, reason: `Liệu trình hết hạn ngày ${pkg.expiresOn}.` };
   if (balance.available <= 0) return { ok: false, reason: `Liệu trình đã hết buổi (${balance.used} đã làm, ${balance.reserved} đang giữ chỗ / ${balance.total}).` };
   return { ok: true };
+}
+
+// ═══ NHẮC LỊCH (lễ tân gửi tay qua Zalo / tin nhắn — chưa có lịch chạy tự động) ═══
+
+const REMIND_WEEKDAY = ["Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"] as const;
+
+/** Lịch cần nhắc: còn ở «Đã đặt» (khách chưa xác nhận). Đã xác nhận / đã tới / đã xong / huỷ thì không nhắc. */
+export function needsReminder(status: string): boolean {
+  return status === "BOOKED";
+}
+
+/**
+ * Câu nhắc soạn sẵn — giờ Việt Nam, không có giá hay thông tin nào ngoài lịch. Lễ tân sao chép rồi gửi; khách trả lời
+ * đồng ý thì bấm «Khách đã xác nhận».
+ */
+export function reminderText(input: { shopName: string; customerName: string; service: string; startsAt: Date }): string {
+  const vn = new Date(input.startsAt.getTime() + 7 * 3_600_000);
+  const hh = String(vn.getUTCHours()).padStart(2, "0");
+  const mm = String(vn.getUTCMinutes()).padStart(2, "0");
+  const dd = String(vn.getUTCDate()).padStart(2, "0");
+  const mo = String(vn.getUTCMonth() + 1).padStart(2, "0");
+  const name = input.customerName.trim();
+  return `Dạ ${input.shopName.trim()} xin nhắc ${name ? `anh/chị ${name}` : "anh/chị"}: lịch «${input.service.trim()}» lúc ${hh}:${mm} ${REMIND_WEEKDAY[vn.getUTCDay()]} ${dd}/${mo}. Anh/chị xác nhận giúp shop nhé — cần đổi giờ cứ nhắn lại ạ.`;
+}
+
+/** Liên kết mở hội thoại Zalo theo số điện thoại; số sai dạng ⇒ `null` (không dựng liên kết đoán). */
+export function zaloLinkOf(phone: string | null | undefined): string | null {
+  const v = (phone ?? "").replace(/[\s.-]/g, "");
+  const local = v.startsWith("+84") ? `0${v.slice(3)}` : v;
+  return /^0\d{9,10}$/.test(local) ? `https://zalo.me/${local}` : null;
+}
+
+/** Giờ của một lịch theo giờ Việt Nam, dạng HH:MM — lịch hẹn không cần giây (`vnClock` in cả giây cho nhật ký). */
+export function apptClock(value: string | Date): string {
+  return vnClock(value).slice(0, 5);
 }

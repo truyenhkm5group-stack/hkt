@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { AppointmentCreateForm, AppointmentReschedule, AppointmentStatusButtons } from "@/components/appointments/appointment-forms";
+import { AppointmentCreateForm, AppointmentReschedule, AppointmentStatusButtons, CopyReminderButton } from "@/components/appointments/appointment-forms";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { APPOINTMENT_STATUS_LABEL, isActiveAppointment, type AppointmentStatus } from "@/lib/constants/appointments";
-import { addDays, formatDate, todayVN, vnClock } from "@/lib/format";
+import { apptClock, APPOINTMENT_STATUS_LABEL, isActiveAppointment, needsReminder, reminderText, zaloLinkOf, type AppointmentStatus } from "@/lib/constants/appointments";
+import { addDays, formatDate, todayVN } from "@/lib/format";
 import { appointmentFormOptions, appointmentsOfDay, type AppointmentRow } from "@/lib/queries/appointments";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +32,12 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const day = typeof sp.day === "string" && DAY_RE.test(sp.day) ? sp.day : today;
   const presetCustomer = typeof sp.customer === "string" ? sp.customer : undefined;
   const canWrite = can(user, "appointments:write");
-  const [rows, options] = await Promise.all([appointmentsOfDay(day), canWrite ? appointmentFormOptions() : Promise.resolve(null)]);
+  const tomorrow = addDays(today, 1);
+  // Nhắc lịch ngày mai: chỉ khi đang xem HÔM NAY và có quyền ghi (người nhắc là người bấm «Khách đã xác nhận»).
+  const showReminders = canWrite && day === today;
+  const [rows, options, tomorrowRows] = await Promise.all([appointmentsOfDay(day), canWrite ? appointmentFormOptions() : Promise.resolve(null), showReminders ? appointmentsOfDay(tomorrow) : Promise.resolve([])]);
+  const toRemind = tomorrowRows.filter((r) => needsReminder(r.status));
+  const shopName = user.organization?.name ?? "shop";
   const groups = new Map<string, { name: string; rows: AppointmentRow[] }>();
   for (const r of rows) {
     const key = r.staffUserId ?? "";
@@ -63,6 +68,36 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           </nav>
         }
       />
+      {showReminders && toRemind.length ? (
+        <SectionCard title="Nhắc lịch ngày mai" description={`${toRemind.length} lịch ngày ${formatDate(tomorrow)} khách chưa xác nhận — sao chép câu nhắc, gửi qua Zalo; khách đồng ý thì bấm «Khách đã xác nhận».`}>
+          <ul className="divide-y" data-reminders={toRemind.length}>
+            {toRemind.map((r) => {
+              const text = reminderText({ shopName, customerName: r.customerName, service: r.serviceName, startsAt: new Date(r.startsAt) });
+              const zalo = zaloLinkOf(r.customerPhone);
+              return (
+                <li key={r.id} className="space-y-1.5 py-2 text-sm">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-medium">
+                      {apptClock(r.startsAt)} · {r.customerName} · {r.serviceName}
+                    </span>
+                    {r.customerPhone ? <span className="text-xs text-muted-foreground">{r.customerPhone}</span> : <span className="text-xs text-amber-700 dark:text-amber-300">Khách chưa có SĐT</span>}
+                  </div>
+                  <p className="rounded-md bg-muted/50 px-2 py-1 text-xs">{text}</p>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <CopyReminderButton text={text} />
+                    {zalo ? (
+                      <a href={zalo} target="_blank" rel="noopener noreferrer" className="inline-flex h-7 items-center rounded-md border px-2 text-xs hover:bg-muted">
+                        Mở Zalo
+                      </a>
+                    ) : null}
+                    <AppointmentStatusButtons id={r.id} status={r.status} customerId={r.customerId} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </SectionCard>
+      ) : null}
       {canWrite && options ? (
         <SectionCard title="Đặt lịch">
           <AppointmentCreateForm options={options} day={day} presetCustomerId={presetCustomer} />
@@ -79,7 +114,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
                   <li key={r.id} className={cn("rounded-md border px-3 py-2 text-sm", TONE[r.status])} data-appointment={r.status}>
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className="font-semibold">
-                        {vnClock(r.startsAt)}–{vnClock(r.endsAt)} · {r.serviceName}
+                        {apptClock(r.startsAt)}–{apptClock(r.endsAt)} · {r.serviceName}
                       </span>
                       <span className="text-xs">{APPOINTMENT_STATUS_LABEL[r.status]}</span>
                     </div>

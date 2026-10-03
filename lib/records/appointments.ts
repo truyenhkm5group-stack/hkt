@@ -3,17 +3,8 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
-import {
-  ACTIVE_APPOINTMENT_STATUSES,
-  APPOINTMENT_LIMITS,
-  APPOINTMENT_STATUSES,
-  APPOINTMENT_STATUS_LABEL,
-  canTransitionAppointment,
-  packageBalance,
-  packageUsable,
-  type AppointmentStatus,
-} from "@/lib/constants/appointments";
-import { vnClock, vnDateKey } from "@/lib/format";
+import { apptClock, ACTIVE_APPOINTMENT_STATUSES, APPOINTMENT_LIMITS, APPOINTMENT_STATUSES, APPOINTMENT_STATUS_LABEL, canTransitionAppointment, packageBalance, packageUsable, type AppointmentStatus } from "@/lib/constants/appointments";
+import { vnDateKey } from "@/lib/format";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
@@ -121,7 +112,7 @@ async function packageState(tx: Tx, packageId: string, exceptId: string | null) 
 }
 
 function clash(hit: { serviceName: string; startsAt: Date; endsAt: Date }): MetaFailure {
-  return fail("CONFLICT", [{ field: "staffUserId", message: `Kỹ thuật viên đã có lịch «${hit.serviceName}» ${vnClock(hit.startsAt)}–${vnClock(hit.endsAt)} ngày ${vnDateKey(hit.startsAt)} — chọn giờ hoặc người khác.` }]);
+  return fail("CONFLICT", [{ field: "staffUserId", message: `Kỹ thuật viên đã có lịch «${hit.serviceName}» ${apptClock(hit.startsAt)}–${apptClock(hit.endsAt)} ngày ${vnDateKey(hit.startsAt)} — chọn giờ hoặc người khác.` }]);
 }
 
 export async function createAppointmentCore(user: SessionUser, raw: unknown): Promise<AppointmentResult> {
@@ -147,7 +138,7 @@ export async function createAppointmentCore(user: SessionUser, raw: unknown): Pr
   });
   if (out) return out;
   await audit({ userId: user.id, userEmail: user.email, action: "APPOINTMENT_CREATE", entity: "APPOINTMENT", entityId: id, before: null, after: { customerId: v.customerId, service: v.serviceName, staffUserId: v.staffUserId, startsAt: v.start.toISOString(), endsAt: v.end.toISOString(), packageId: v.packageId }, reason: "Đặt lịch hẹn" });
-  return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${vnClock(v.start)} ngày ${vnDateKey(v.start)}.` };
+  return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${apptClock(v.start)} ngày ${vnDateKey(v.start)}.` };
 }
 
 /**
@@ -177,9 +168,9 @@ export async function createAppointmentAsAgent(
     await tx.insert(schema.appointments).values({ id, customerId: v.customerId, variantId: v.variantId, serviceName: v.serviceName, staffUserId: null, startsAt: v.start, endsAt: v.end, packageId: null, note: v.note, status: "BOOKED", createdByUserId: null, createdByName: agent.name });
     return false;
   });
-  if (full) return fail("CONFLICT", [{ field: "startsAt", message: `Khung ${vnClock(v.start)} ngày ${vnDateKey(v.start)} vừa kín — chọn giờ khác.` }]);
+  if (full) return fail("CONFLICT", [{ field: "startsAt", message: `Khung ${apptClock(v.start)} ngày ${vnDateKey(v.start)} vừa kín — chọn giờ khác.` }]);
   await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "APPOINTMENT_CREATE", entity: "APPOINTMENT", entityId: id, before: null, after: { customerId: v.customerId, service: v.serviceName, staffUserId: null, startsAt: v.start.toISOString(), endsAt: v.end.toISOString(), via: agent.name }, reason: `Đặt bởi ${agent.name}` });
-  return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${vnClock(v.start)} ngày ${vnDateKey(v.start)}.` };
+  return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${apptClock(v.start)} ngày ${vnDateKey(v.start)}.` };
 }
 
 /** Lịch ĐANG HIỆU LỰC chồng lên một khoảng (mọi kỹ thuật viên) — nguồn của giờ trống bot đọc cho khách. */
@@ -224,7 +215,7 @@ export async function updateAppointmentCore(user: SessionUser, id: string, raw: 
   });
   if (out) return out;
   await audit({ userId: user.id, userEmail: user.email, action: "APPOINTMENT_UPDATE", entity: "APPOINTMENT", entityId: id, before: { staffUserId: row.staffUserId, startsAt: row.startsAt.toISOString(), endsAt: row.endsAt.toISOString(), packageId: row.packageId }, after: { staffUserId: v.staffUserId, startsAt: v.start.toISOString(), endsAt: v.end.toISOString(), packageId: v.packageId }, reason: "Đổi lịch hẹn" });
-  return { ok: true, id, message: `Đã đổi lịch sang ${vnClock(v.start)} ngày ${vnDateKey(v.start)}.` };
+  return { ok: true, id, message: `Đã đổi lịch sang ${apptClock(v.start)} ngày ${vnDateKey(v.start)}.` };
 }
 
 const statusZ = z.object({ status: z.enum(APPOINTMENT_STATUSES), reason: z.string().trim().max(500).default("") }).strict();
