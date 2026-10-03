@@ -1555,16 +1555,18 @@ async function testJourney() {
       assert.equal(reorderDigestText([dueRows[2]], "2026-10-03", null), null, "không ai đến hạn ⇒ không có tin");
       // Tổ chức thật: khách mua 2 lần cách 10 ngày, lần cuối 10 ngày trước ⇒ đến hạn hôm nay ⇒ nhóm vận hành nhận MỘT tin.
       const [rc] = await db.insert(schema.customers).values({ name: "Chị Mua Lại", phone: "0977000222", address: "12 Hàng Bạc", province: "Hà Nội" }).returning({ id: schema.customers.id });
+      // Mốc «9 giờ sáng hôm nay» theo NGÀY GIỜ VN, và đơn dựng TỪ CHÍNH mốc đó (luật 50): bản cũ lấy ngày UTC cho mốc nhưng
+      // gieo đơn theo đồng hồ thật ⇒ từ 00:00 tới 07:00 giờ VN hai ngày lệch nhau, «đến hạn hôm nay» thành «còn 1 ngày» —
+      // CI đỏ 04/10/2026 00:09 và chặn mọi lượt deploy.
+      const vnNine = (() => {
+        const vn = new Date(Date.now() + 7 * 3_600_000);
+        return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate(), 2)); // 09:00 giờ VN hôm nay
+      })();
       for (const ago of [20, 10]) {
         const o = await createManualOrderCore(admin, { customerId: rc.id, stage: "CONFIRMED", channel: "Zalo", note: "", orderDiscount: 0, shippingFee: 0, lines: [{ variantId: chaMuc, quantity: 1, unitPrice: 400_000, discount: 0 }] });
         assert.ok(o.ok, JSON.stringify(o));
-        await db.update(schema.orders).set({ insertedAt: new Date(Date.now() - ago * 86_400_000) }).where(eq(schema.orders.id, o.id));
+        await db.update(schema.orders).set({ insertedAt: new Date(vnNine.getTime() - ago * 86_400_000) }).where(eq(schema.orders.id, o.id));
       }
-      const vnNine = (() => {
-        const d = new Date();
-        d.setUTCHours(2, 0, 0, 0); // 09:00 giờ VN hôm nay
-        return d;
-      })();
       assert.equal((await sendReorderDigest(new Date(vnNine.getTime() - 2 * 3_600_000))).reason, "trước 8 giờ sáng");
       const rd1 = await sendReorderDigest(vnNine);
       assert.ok(rd1.sent && rd1.due >= 1, JSON.stringify(rd1));
