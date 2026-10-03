@@ -58,7 +58,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
@@ -287,6 +287,20 @@ function testPure() {
   const spPolicy = systemPrompt({ ...parseSalesChatbotConfig(null), extraInstructions: "Khách được kiểm tra thoải mái, ưng ý mới nhận hàng và thanh toán." }, "Shop", "", "FANPAGE");
   for (const k of ["lối CUỐI", "HỎI LẠI khách cho rõ", "ĐỌC HIỂU TRƯỚC KHI BỎ CUỘC", "«khg» / «ko» = không", "Câu hỏi về CHÍNH SÁCH", "«Không hiểu ý khách» (ĐÃ hỏi lại 2 lần", "kiểm tra thoải mái, ưng ý mới nhận hàng"]) assert.ok(spPolicy.includes(k), `lời nhắc thiếu «${k}»`);
   assert.ok(!/bạn không chắc|«Không chắc»/.test(spPolicy), "«không chắc» không còn là lý do chuyển người");
+  // LỌC SUY LUẬN (03/10/2026 · «Phuoc Ha»: model viết lẩm bẩm vào câu trả lời và cả đoạn tới khách).
+  const leaked = [
+    'Khách vừa nhắn "Cám ơn" sau khi đơn hàng trước đã hoàn tất. Tuy nhiên, ta cần xem lại lịch sử. Đây là một đoạn hội thoại cũ đã được ghi trong prompt.',
+    "Vì khách không có yêu cầu mua hàng mới hay hỏi thêm gì, ta lịch sự đáp lại.",
+    "Hãy kiểm tra xem có cần chuyển bước gì không. Không có sản phẩm mới.",
+    'Ta đáp: "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em nhé."',
+    "Gọi set_sales_stage nếu cần, hoặc cứ trả lời ngắn gọn.",
+    "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em hỗ trợ nhé.",
+  ].join("\n");
+  assert.deepEqual(customerFacingText(leaked), { text: "Dạ em cảm ơn anh/chị ạ! Khi nào cần dùng thêm, anh/chị cứ nhắn em hỗ trợ nhé.", leaked: true }, "chỉ giữ câu nói với khách");
+  assert.deepEqual(customerFacingText("Khách đang hỏi giá. Gọi search_products."), { text: "", leaked: true }, "không tách được câu sạch ⇒ không gửi gì");
+  const clean = "Dạ chả cá thu 1kg giá 280.000 ₫ ạ.\nMình lấy 1kg hay 2kg ạ?";
+  assert.deepEqual(customerFacingText(clean), { text: clean, leaked: false }, "câu bình thường giữ nguyên văn");
+  assert.equal(customerFacingText("Dạ khách hàng bên em đều khen ngon ạ").leaked, false, "«khách hàng» giữa câu nói với khách không phải suy luận");
   // MIỄN SHIP (03/10/2026 · «Miễn phí ship từ 1kg hoặc giá trị đơn hàng từ 300K trong nội thành Hà Nội, TP HCM»).
   assert.equal(variantWeightGrams(0, "Size 1kg"), 1000);
   assert.equal(variantWeightGrams(0, "Gói", "Ruốc bông cá thu 250g"), 250);
@@ -580,7 +594,10 @@ async function testJourney() {
       await say(w.id, "Cho chị 2 gói, thêm 1 ruốc tôm.", "WEB", vk);
       await say(w.id, "Nguyễn Thị Lan, 0912345678, 12 Hàng Bạc Hà Nội, giao giờ hành chính", "WEB", vk);
       // Chốt khi lời "đồng ý" KHÔNG có trong câu cuối của khách ⇒ từ chối.
-      assert.match(await say(w.id, "để chị tự chốt sau nhé", "WEB", vk), /Lỗi: customer_confirmation/);
+      // (Model giả nhại lỗi công cụ «Lỗi: customer_confirmation…» — bộ lọc suy luận chặn tên trường nội bộ, khách không thấy.)
+      const notYet = await say(w.id, "để chị tự chốt sau nhé", "WEB", vk);
+      assert.ok(!/customer_confirmation/.test(notYet), `tên trường nội bộ không tới khách: ${notYet}`);
+      assert.notEqual((await conversationView(w.id))?.order?.stage, "CONFIRMED", "máy chủ từ chối chốt");
       const conv0 = await db.query.salesChatConversations.findFirst({ where: eq(schema.salesChatConversations.id, w.id) });
       const draft = conv0?.draftOrderId ? await db.query.orders.findFirst({ where: eq(schema.orders.id, conv0.draftOrderId) }) : null;
       assert.ok(draft && draft.stage === "NEW", "đơn NHÁP (chưa giữ hàng) trước khi khách đồng ý");
