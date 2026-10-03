@@ -99,7 +99,19 @@ SĐT / mã người dùng Google · Facebook ⇒ (tổ chức, tài khoản).
 - **Khai:** Secret `PLATFORM_AI_API_KEY`; Variables `PLATFORM_AI_ENABLED=1`, `PLATFORM_AI_PROVIDER`, `PLATFORM_AI_MODEL`.
 - **Tắt:** xoá Variable `PLATFORM_AI_ENABLED` rồi deploy (launch-gates mục D).
 
-## 6. Fanpage
+## 6. «Vào việc ngay» trên trang Bắt đầu
+
+`lib/onboarding/go-live.ts` · `components/onboarding/go-live-card.tsx`. Ô chỉ hiện khi tổ chức có module «AI bán hàng»
+và người xem có quyền. Ba bước, mỗi bước một nút, tự đánh dấu xong theo dữ liệu thật:
+
+1. **Kết nối fanpage.** Dán Page ID + page access token của Pancake → một nút làm cả Lưu → Kiểm tra → Bật (đúng lõi
+   `saveConnection` / `testOrgConnection` / `setConnectionStatus`). Kiểm tra hỏng thì dừng, kết nối không bật.
+2. **Dán URL webhook vào Pancake.** Có nút chép URL. Bước này xong khi ERP nhận được tin đầu tiên từ fanpage.
+3. **Bật chatbot.** Đi qua `saveSalesChatbotConfig`. AI dùng chung chưa sẵn sàng thì nói rõ lý do.
+
+Trước đây cùng việc đó phải qua trang Kết nối (4 thao tác) rồi sang trang Chatbot.
+
+## 7. Fanpage
 
 Kênh Fanpage vẫn đi qua **Pancake**: dán page token, rồi dán URL webhook của ERP vào Pancake.
 
