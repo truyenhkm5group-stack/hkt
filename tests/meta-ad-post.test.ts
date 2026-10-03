@@ -6,6 +6,7 @@ import {
   classifyMetaError,
   normalizeAdIdInput,
   parseAdIdList,
+  parseAdPreviewLink,
   parseObjectStoryId,
   pickStoryFromCreative,
   postOpenUrl,
@@ -17,6 +18,7 @@ import { graphErrorInfo, type FbAdInfo, type GraphNodeResult } from "@/lib/integ
 import { AD_POST_FIELDS, AD_POST_FIELDS_FLAT, CREATIVE_STORY_FIELDS, resolveAdPosts, type MetaAdPostGraph } from "@/lib/integrations/facebook/ad-post-resolver";
 import { loadAdPostErpContext, saveAdPostResolutions } from "@/lib/integrations/facebook/ad-post-store";
 import { fbAdRowFromInfo } from "@/lib/integrations/facebook/ads-index";
+import { findAdsByPreviewLinks, type AdPreviewLinkPage, type PreviewLinkGraph } from "@/lib/integrations/facebook/ad-preview-link";
 import { IntegrationError } from "@/lib/integrations/http";
 
 /**
@@ -60,6 +62,7 @@ function fakeGraph(batch: Record<string, GraphNodeResult>, single: Record<string
 }
 
 const NOW = () => new Date("2026-09-29T03:00:00Z");
+const SHARE_CODE = "1Wr9bkydwWe8kt3";
 
 export function testMetaAdPostPure() {
   // 1 · Ad ID số trần — khoảng trắng, dấu ngăn nghìn do copy từ bảng tính.
@@ -126,8 +129,25 @@ export function testMetaAdPostPure() {
   assert.equal(info.fbtraceId, "Abc");
   assert.ok(!info.message.includes("EAABsecret"), `token lọt ra câu lỗi: ${info.message}`);
 
+  // Link chia sẻ "Xem trước quảng cáo": không mang Ad ID — chỉ nhận diện LOẠI + MÃ để so với Meta.
+  const share = parseAdPreviewLink(`https://fb.me/adspreview/facebook/${SHARE_CODE}`);
+  assert.deepEqual(share, { url: `https://fb.me/adspreview/facebook/${SHARE_CODE}`, audience: "FACEBOOK", code: SHARE_CODE, key: `FACEBOOK:${SHARE_CODE}` });
+  assert.equal(parseAdPreviewLink(`fb.me/adspreview/managedaccount/${SHARE_CODE}`)?.key, `MANAGED_ACCOUNT:${SHARE_CODE}`, "hai dòng của hộp chia sẻ là hai không gian mã riêng");
+  assert.equal(parseAdPreviewLink(`https://fb.me/${SHARE_CODE}`), null, "ô nhập không nhận fb.me/<chữ> trần — có thể là link rút gọn của một fanpage");
+  assert.equal(parseAdPreviewLink(`https://fb.me/${SHARE_CODE}`, { allowBare: true })?.key, `FACEBOOK:${SHARE_CODE}`, "dạng cũ Meta trả = cùng mã của dòng Facebook");
+  assert.equal(parseAdPreviewLink(`https://evil.example/adspreview/facebook/${SHARE_CODE}`), null, "chỉ fb.me");
+  assert.equal(parseAdPreviewLink(`https://fb.me/adspreview/instagram/${SHARE_CODE}`), null, "loại lạ không đoán");
+  assert.equal(parseAdPreviewLink(`https://fb.me/adspreview/facebook/ab`), null);
+  // Link chia sẻ đi riêng, không bị đếm là "không phải Ad ID", và trùng thì gộp.
+  const mixed = parseAdIdList([AD1, `https://fb.me/adspreview/facebook/${SHARE_CODE}`, `https://fb.me/adspreview/facebook/${SHARE_CODE}`].join("\n"));
+  assert.deepEqual(mixed.adIds, [AD1]);
+  assert.equal(mixed.previewLinks.length, 1);
+  assert.equal(mixed.invalid.length, 0);
+  assert.equal(mixed.duplicates, 1);
+  assert.equal(normalizeAdIdInput(`https://fb.me/adspreview/facebook/${SHARE_CODE}`).ok, false, "link chia sẻ không bao giờ tự thành một Ad ID");
+
   // Mã nguồn: bộ tra / kho ghi / action không tự gọi graph.facebook.com và không chạm access_token.
-  for (const f of ["lib/integrations/facebook/ad-post-resolver.ts", "lib/integrations/facebook/ad-post-store.ts", "lib/actions/meta-ad-post.ts", "app/(dashboard)/ads/post-resolver/resolver-panel.tsx", "lib/constants/meta-ad-post.ts"]) {
+  for (const f of ["lib/integrations/facebook/ad-post-resolver.ts", "lib/integrations/facebook/ad-preview-link.ts", "lib/integrations/facebook/ad-post-store.ts", "lib/actions/meta-ad-post.ts", "app/(dashboard)/ads/post-resolver/resolver-panel.tsx", "lib/constants/meta-ad-post.ts"]) {
     const src = readFileSync(f, "utf8");
     assert.ok(!src.includes("graph.facebook.com"), `${f} không được gọi Graph trực tiếp — đi qua FacebookAdsClient`);
     assert.ok(!/access_token|accessToken/.test(src), `${f} không được chạm tới token`);
@@ -342,5 +362,84 @@ export async function testMetaAdPostStoreDb() {
     assert.equal((await db.select().from(schema.fbAds).where(inArray(schema.fbAds.id, [AD3]))).length, 1);
   } finally {
     await db.delete(schema.fbAds).where(inArray(schema.fbAds.id, ids));
+  }
+}
+
+/**
+ * LINK CHIA SẺ → AD ID. Graph giả trả từng trang `act_<id>/ads` kèm `preview_shareable_link`; bộ dò
+ * phải so theo (loại, mã), dừng ngay khi thấy, và nói ĐÚNG vì sao chưa thấy.
+ */
+export async function testMetaAdPreviewLinkFinder() {
+  const link = (code: string, kind = "facebook") => `https://fb.me/adspreview/${kind}/${code}`;
+  const want = parseAdPreviewLink(link(SHARE_CODE));
+  assert.ok(want);
+  function fake(accounts: Record<string, AdPreviewLinkPage[] | Error>) {
+    const pagesRead: string[] = [];
+    const graph: PreviewLinkGraph = {
+      async *adPreviewLinkPages(accountId) {
+        const v = accounts[accountId];
+        if (v instanceof Error) throw v;
+        for (const [i, page] of (v ?? []).entries()) {
+          pagesRead.push(`${accountId}#${i}`);
+          yield page;
+        }
+      },
+    };
+    return { graph, pagesRead };
+  }
+
+  // Thấy ở trang 2 của tài khoản 1 ⇒ dừng, KHÔNG đọc trang 3 lẫn tài khoản 2. Meta trả dạng cũ fb.me/<mã> vẫn khớp.
+  {
+    const { graph, pagesRead } = fake({
+      A: [[{ adId: AD2, link: link("xxxxxxxxxx") }], [{ adId: AD1, link: `https://fb.me/${SHARE_CODE}` }], [{ adId: AD3, link: "" }]],
+      B: [[{ adId: AD4, link: link(SHARE_CODE) }]],
+    });
+    const scan = await findAdsByPreviewLinks([want], { graph, accountIds: ["A", "B"] });
+    assert.equal(scan.matches[0].adId, AD1);
+    assert.equal(scan.matches[0].accountId, "A");
+    assert.deepEqual(pagesRead, ["A#0", "A#1"], "thấy rồi thì dừng — không kéo thêm trang");
+    assert.equal(scan.scannedAds, 2);
+  }
+
+  // Cùng mã nhưng KHÁC loại link không được khớp — hai dòng của hộp chia sẻ là hai không gian mã.
+  {
+    const { graph } = fake({ A: [[{ adId: AD1, link: link(SHARE_CODE, "managedaccount") }]] });
+    const scan = await findAdsByPreviewLinks([want], { graph, accountIds: ["A"] });
+    assert.equal(scan.matches[0].adId, null);
+    assert.match(scan.matches[0].reason ?? "", /dò hết 1 mẩu ở 1\/1 tài khoản/);
+  }
+
+  // Meta trả rỗng cho MỌI mẩu ⇒ câu trả lời nói về token, không đổ cho link.
+  {
+    const { graph } = fake({ A: [[{ adId: AD1, link: "" }, { adId: AD2, link: "" }]] });
+    const scan = await findAdsByPreviewLinks([want], { graph, accountIds: ["A"] });
+    assert.equal(scan.linkForms.empty, 2);
+    assert.match(scan.matches[0].reason ?? "", /không trả preview_shareable_link/);
+  }
+
+  // Chạm trần ⇒ nói "chưa dò hết", KHÔNG nói "không có".
+  {
+    const { graph, pagesRead } = fake({ A: [[{ adId: AD1, link: link("aaaaaaaaaa") }, { adId: AD2, link: link("bbbbbbbbbb") }], [{ adId: AD3, link: link(SHARE_CODE) }]] });
+    const scan = await findAdsByPreviewLinks([want], { graph, accountIds: ["A"], maxAds: 2 });
+    assert.equal(scan.capped, true);
+    assert.equal(scan.matches[0].adId, null);
+    assert.match(scan.matches[0].reason ?? "", /chưa dò hết/);
+    assert.deepEqual(pagesRead, ["A#0"]);
+  }
+
+  // Một tài khoản hết quyền không kéo cả lượt xuống; token hết hạn thì DỪNG, không dò tiếp cho có.
+  {
+    const noAccess = new IntegrationError("Facebook: x", 400, false, { error: { code: 100, error_subcode: 33, message: "does not exist" } });
+    const { graph } = fake({ A: noAccess, B: [[{ adId: AD2, link: link(SHARE_CODE) }]] });
+    const scan = await findAdsByPreviewLinks([want], { graph, accountIds: ["A", "B"] });
+    assert.equal(scan.matches[0].adId, AD2);
+    assert.deepEqual(scan.accountErrors, [{ accountId: "A", error: "NO_ACCESS" }]);
+
+    const expired = new IntegrationError("Facebook: x", 401, false, { error: { code: 190, message: "expired" } });
+    const { graph: g2, pagesRead } = fake({ A: expired, B: [[{ adId: AD2, link: link(SHARE_CODE) }]] });
+    const s2 = await findAdsByPreviewLinks([want], { graph: g2, accountIds: ["A", "B"] });
+    assert.equal(s2.fatal, "TOKEN_EXPIRED");
+    assert.deepEqual(pagesRead, [], "token hết hạn ở tài khoản đầu ⇒ không gọi tài khoản sau");
+    assert.match(s2.matches[0].reason ?? "", /dừng giữa chừng/);
   }
 }
