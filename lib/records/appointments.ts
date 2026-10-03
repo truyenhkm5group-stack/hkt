@@ -14,6 +14,7 @@ import {
   type AppointmentStatus,
 } from "@/lib/constants/appointments";
 import { vnClock, vnDateKey } from "@/lib/format";
+import { canUseModule } from "@/lib/platform/capabilities";
 import { fail, type MetaFailure } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
 
@@ -147,6 +148,49 @@ export async function createAppointmentCore(user: SessionUser, raw: unknown): Pr
   if (out) return out;
   await audit({ userId: user.id, userEmail: user.email, action: "APPOINTMENT_CREATE", entity: "APPOINTMENT", entityId: id, before: null, after: { customerId: v.customerId, service: v.serviceName, staffUserId: v.staffUserId, startsAt: v.start.toISOString(), endsAt: v.end.toISOString(), packageId: v.packageId }, reason: "Đặt lịch hẹn" });
   return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${vnClock(v.start)} ngày ${vnDateKey(v.start)}.` };
+}
+
+/**
+ * BOT ĐẶT LỊCH (chatbot bán hàng, lib/constants/booking.ts): KHÔNG gán kỹ thuật viên, KHÔNG gắn liệu trình — lễ tân xếp
+ * sau. Cổng là MODULE (bot không có phiên người); sức chứa kiểm LẠI trong giao dịch sau khoá tư vấn chung của tổ chức —
+ * hai khách chat cùng lúc thì lượt sau thấy lượt trước và không lấy được chỗ cuối cùng. Tác nhân là MÁY (luật 36).
+ */
+export async function createAppointmentAsAgent(
+  agent: { name: string; source: string },
+  input: { customerId: string; variantId: string; startsAt: Date; durationMin: number; note: string },
+  capacity: number,
+): Promise<AppointmentResult> {
+  if (!(await canUseModule("appointments"))) return fail("MODULE_DISABLED", "Module Lịch hẹn chưa bật cho tổ chức này.");
+  const r = await resolveSlot({ customerId: input.customerId, variantId: input.variantId, startsAt: input.startsAt.toISOString(), durationMin: input.durationMin, note: input.note });
+  if (!r.ok) return r;
+  const v = r.v;
+  const db = await getDb();
+  const id = crypto.randomUUID();
+  const full = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('appt-capacity'))`);
+    const a = schema.appointments;
+    const [c] = await tx
+      .select({ n: sql<number>`count(*)`.mapWith(Number) })
+      .from(a)
+      .where(and(inArray(a.status, [...ACTIVE_APPOINTMENT_STATUSES]), sql`${a.startsAt} < ${v.end}`, sql`${a.endsAt} > ${v.start}`));
+    if ((c?.n ?? 0) >= capacity) return true;
+    await tx.insert(schema.appointments).values({ id, customerId: v.customerId, variantId: v.variantId, serviceName: v.serviceName, staffUserId: null, startsAt: v.start, endsAt: v.end, packageId: null, note: v.note, status: "BOOKED", createdByUserId: null, createdByName: agent.name });
+    return false;
+  });
+  if (full) return fail("CONFLICT", [{ field: "startsAt", message: `Khung ${vnClock(v.start)} ngày ${vnDateKey(v.start)} vừa kín — chọn giờ khác.` }]);
+  await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "APPOINTMENT_CREATE", entity: "APPOINTMENT", entityId: id, before: null, after: { customerId: v.customerId, service: v.serviceName, staffUserId: null, startsAt: v.start.toISOString(), endsAt: v.end.toISOString(), via: agent.name }, reason: `Đặt bởi ${agent.name}` });
+  return { ok: true, id, message: `Đã đặt «${v.serviceName}» ${vnClock(v.start)} ngày ${vnDateKey(v.start)}.` };
+}
+
+/** Lịch ĐANG HIỆU LỰC chồng lên một khoảng (mọi kỹ thuật viên) — nguồn của giờ trống bot đọc cho khách. */
+export async function activeAppointmentRanges(from: Date, to: Date): Promise<{ start: Date; end: Date }[]> {
+  const db = await getDb();
+  const a = schema.appointments;
+  const rows = await db
+    .select({ start: a.startsAt, end: a.endsAt })
+    .from(a)
+    .where(and(inArray(a.status, [...ACTIVE_APPOINTMENT_STATUSES]), sql`${a.startsAt} < ${to}`, sql`${a.endsAt} > ${from}`));
+  return rows;
 }
 
 /** Đổi giờ / kỹ thuật viên / dịch vụ / liệu trình của một lịch ĐANG HIỆU LỰC. Lịch đã xong / không tới / huỷ không sửa. */

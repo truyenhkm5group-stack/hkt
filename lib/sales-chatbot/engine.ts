@@ -36,6 +36,7 @@ import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyB
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
 
@@ -63,7 +64,25 @@ async function businessProfile(): Promise<string> {
 /** Lời nhắc hệ thống — dựng từ cấu hình; KHÔNG có giá, tồn hay danh mục (bot phải hỏi công cụ). */
 export type PromptQuickReply = { code: string; title: string; upsell: boolean };
 
-export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = ""): string {
+/**
+ * Đoạn lời nhắc ĐẶT LỊCH — chỉ khi `bookingOn` (shop bật + module Lịch hẹn bật). Có NGÀY HÔM NAY để bot hiểu «mai», «thứ 7».
+ * Bot không hứa kỹ thuật viên; đổi / huỷ lịch đã đặt là việc của người.
+ */
+export function bookingPrompt(cfg: SalesChatbotConfig, now: Date): string {
+  const b = cfg.booking;
+  const today = vnDayOffset(now);
+  const days = b.days.length === 7 ? "mọi ngày trong tuần" : [...b.days].sort((x, y) => x - y).map((d) => WEEKDAY_LABEL[d]).join(", ");
+  return [
+    `ĐẶT LỊCH HẸN — shop nhận đặt lịch qua chat: ${b.open}–${b.close}, ${days}; mỗi lịch ${b.slotMinutes} phút; nhận trước tối đa ${b.horizonDays} ngày. Hôm nay là ${WEEKDAY_LABEL[new Date(`${today}T00:00:00Z`).getUTCDay()]} ${today} (giờ Việt Nam).`,
+    "  · Dịch vụ là sản phẩm của shop: search_products để biết đúng tên + giá. Hỏi DỊCH VỤ và NGÀY / GIỜ khách muốn (một câu).",
+    "  · find_booking_slots(date) ⇒ giờ khách muốn có trong `times` thì giữ giờ đó; không có ⇒ đề xuất tối đa 3 giờ gần nhất trong `times` (hoặc `next_available`). KHÔNG hứa giờ chưa kiểm.",
+    "  · Cần HỌ TÊN + SỐ ĐIỆN THOẠI (không cần địa chỉ). Rồi đọc lại TÓM TẮT: dịch vụ, ngày, giờ, họ tên, SĐT — hỏi «anh/chị xác nhận đặt lịch không ạ?».",
+    "  · Khách đồng ý rõ ràng ⇒ book_appointment với customer_confirmation = nguyên văn lời đồng ý. Báo lỗi «vừa kín» ⇒ find_booking_slots lại và mời giờ khác.",
+    "  · Không hứa kỹ thuật viên cụ thể. Khách muốn chọn người, đổi / huỷ lịch đã đặt, hay đặt cho nhiều người ⇒ handoff_to_human với reason «Lịch hẹn — <ý khách>».",
+  ].join("\n");
+}
+
+export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = ""): string {
   const upsell = quick.find((q) => q.upsell);
   const shipping = cfg.shippingFee === null ? "Shop CHƯA khai phí ship cố định: nói với khách «phí ship nhân viên sẽ báo sau», KHÔNG tự đặt số." : "Phí ship theo chính sách shop — lấy đúng số trong kết quả calculate_cart / đơn nháp, không tự đặt.";
   return [
@@ -100,6 +119,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       : "KHÁCH SỈ — khách hỏi giá sỉ / lấy về bán / đại lý / số lượng lớn (từ 10kg): ERP chỉ có giá LẺ — KHÔNG đưa giá lẻ ra như giá sỉ, KHÔNG tự giảm, KHÔNG chê khách. Chưa biết số lượng ⇒ hỏi số lượng ĐÚNG MỘT lần (dùng câu mẫu của shop nếu có). Khách đã nói số lượng, hoặc chê giá cao ⇒ handoff_to_human với reason «Khách sỉ — <số lượng / ý khách>» (nhân viên báo giá sỉ).",
     "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Khách sỉ» (như trên) · «Ngoài chính sách» (điều shop CHƯA khai ở «Về shop» / «Hướng dẫn thêm» / sổ tay: giảm giá riêng, giao gấp chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không hiểu ý khách» (ĐÃ hỏi lại 2 lần vẫn không rõ — không đoán). Chuyển người trên fanpage là bot IM LẶNG, khách phải chờ nhân viên: chỉ chuyển khi thật sự không trả lời được.",
     returning,
+    booking,
     quick.length
       ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
       : "",
@@ -424,11 +444,13 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     // KHÁCH CŨ (02/10/2026): những gì shop đã biết về khách — không bắt khách khai lại SĐT / địa chỉ. Lỗi đọc ⇒ như khách mới.
     const known = (conv.state ?? {}) as ChatState;
     const returning = await findReturningCustomer(known).catch(() => null);
-    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning));
+    // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
+    const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
+    const system = systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
-    const tools = toolDefsFor(cfg);
+    const tools = toolDefsFor(cfg, { bookingOn });
     const history = historyForModel([...msgs, { role: "user", content: [{ type: "text", text }] }], SALES_CHATBOT_LIMITS.historyMessages);
     let state = (conv.state ?? {}) as ChatState;
     let calls = 0;
@@ -456,7 +478,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         if (uses.length === 0) break;
         const results: AiBlock[] = [];
         for (const u of uses) {
-          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning, recentSaid });
+          const r = await executeTool(u.name, u.input, { conversationId: conv.id, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, quickReplies: quickCatalog, returning, recentSaid, bookingOn, now });
           state = r.state;
           if (r.deliver) {
             deliveredImages.push(...r.deliver.imageIds);

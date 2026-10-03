@@ -20,13 +20,15 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import type { AiToolDef } from "@/lib/ai/provider";
+import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
 import { manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { quoteUnitPrice, type PriceListBook } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
+import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
 import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
-import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
+import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
@@ -52,6 +54,8 @@ export type ChatState = {
   /** Câu upsell không gửi được (thiếu số ERP) — không chặn lên đơn mãi vì nó. */
   upsellUnavailable?: boolean;
   declined?: { reason: string; at: string };
+  /** Lịch hẹn bot đã đặt trong hội thoại này (một hội thoại một lịch — đổi / huỷ là việc của người). */
+  appointment?: { id: string | null; service: string; startsAt: string; name: string; phone: string; simulated: boolean; at: string };
   /** Mốc tin fanpage (page / khách bị bỏ qua) đã chép vào lịch sử của bot — `appendContextMessages`. */
   mirroredUntil?: string;
   /** Hồ sơ hội thoại đọc từ Pancake (SĐT đã ghi nhận, mã Facebook, tin cũ trước khi bot vào) — `lib/sales-chatbot/returning.ts`. */
@@ -61,6 +65,10 @@ export type ChatState = {
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
 export const PROCESS_TOOLS = ["send_quick_reply", "set_sales_stage", "lookup_customer", "mark_declined"] as const;
 export type ProcessTool = (typeof PROCESS_TOOLS)[number];
+
+/** Công cụ ĐẶT LỊCH — chỉ khi shop bật «Nhận đặt lịch qua chat» VÀ tổ chức bật module Lịch hẹn (`ToolContext.bookingOn`). */
+export const BOOKING_TOOLS = ["find_booking_slots", "book_appointment"] as const;
+export type BookingTool = (typeof BOOKING_TOOLS)[number];
 
 export type ToolContext = {
   conversationId: string;
@@ -76,6 +84,10 @@ export type ToolContext = {
   returning?: ReturningCustomer | null;
   /** Câu shop vừa nói (`recentShopTexts`) — câu mẫu trùng một câu trong đó không gửi lại. */
   recentSaid?: readonly string[];
+  /** Shop bật đặt lịch qua chat VÀ module Lịch hẹn đang bật — engine tính, công cụ đặt lịch chỉ chạy khi `true`. */
+  bookingOn?: boolean;
+  /** Đồng hồ của lượt (kiểm thử truyền vào; mặc định bây giờ). */
+  now?: Date;
 };
 
 /**
@@ -203,8 +215,36 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   },
 };
 
-export function toolDefsFor(cfg: SalesChatbotConfig): AiToolDef[] {
-  return [...cfg.allowedTools.map((t) => DEFS[t]), ...PROCESS_TOOLS.map((t) => PROCESS_DEFS[t])];
+const BOOKING_DEFS: Record<BookingTool, AiToolDef> = {
+  find_booking_slots: {
+    name: "find_booking_slots",
+    description: "Giờ còn nhận đặt lịch của MỘT ngày (giờ Việt Nam). date = YYYY-MM-DD. Trả `times` (HH:MM còn chỗ), `closed_reason` nếu cả ngày không nhận, và `next_available` = ngày gần nhất còn chỗ. Luôn dùng trước khi hứa giờ với khách.",
+    inputSchema: { type: "object", properties: { date: { type: "string", description: "YYYY-MM-DD" } }, required: ["date"], additionalProperties: false },
+    kind: "read",
+  },
+  book_appointment: {
+    name: "book_appointment",
+    description:
+      "ĐẶT LỊCH sau khi đã đọc lại tóm tắt (dịch vụ, ngày, giờ, họ tên, SĐT) và khách ĐỒNG Ý. variant_id = dịch vụ (từ search_products), date = YYYY-MM-DD, time = HH:MM nằm trong `times` của find_booking_slots. customer_confirmation = NGUYÊN VĂN lời đồng ý trong câu cuối của khách.",
+    inputSchema: {
+      type: "object",
+      properties: { variant_id: { type: "string" }, date: { type: "string" }, time: { type: "string" }, name: { type: "string" }, phone: { type: "string" }, note: { type: "string" }, customer_confirmation: { type: "string" } },
+      required: ["variant_id", "date", "time", "name", "phone", "customer_confirmation"],
+      additionalProperties: false,
+    },
+    kind: "write",
+  },
+};
+
+export function toolDefsFor(cfg: SalesChatbotConfig, opts: { bookingOn?: boolean } = {}): AiToolDef[] {
+  return [...cfg.allowedTools.map((t) => DEFS[t]), ...PROCESS_TOOLS.map((t) => PROCESS_DEFS[t]), ...(opts.bookingOn ? BOOKING_TOOLS.map((t) => BOOKING_DEFS[t]) : [])];
+}
+
+/** Lịch ĐANG HIỆU LỰC của một ngày VN (đệm hai đầu một ngày — lịch dài vắt qua nửa đêm vẫn được đếm). */
+async function busyOfDay(day: string) {
+  const start = vnInstant(day, "00:00");
+  if (!start) return [];
+  return activeAppointmentRanges(new Date(start.getTime() - 86_400_000), new Date(start.getTime() + 2 * 86_400_000));
 }
 
 /** Địa chỉ cũ ĐÃ CHE cho khách xác nhận: chỉ hai phần cuối (vd «…, Hà Nam, Thành phố Hải Phòng») — người gõ SĐT của người khác không đọc được số nhà. */
@@ -315,10 +355,59 @@ function failureText(r: { errors: { field: string; message: string }[] }): strin
 
 export async function executeTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const state: ChatState = structuredClone(ctx.state);
-  if (!(ctx.config.allowedTools as readonly string[]).includes(name) && !(PROCESS_TOOLS as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
+  const isBooking = (BOOKING_TOOLS as readonly string[]).includes(name);
+  if (isBooking ? !ctx.bookingOn : !(ctx.config.allowedTools as readonly string[]).includes(name) && !(PROCESS_TOOLS as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
   const input = (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>;
   const simulated = ctx.channel === "TEST";
-  switch (name as SalesTool | ProcessTool) {
+  const now = ctx.now ?? new Date();
+  switch (name as SalesTool | ProcessTool | BookingTool) {
+    case "find_booking_slots": {
+      const day = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(input.date);
+      if (!day.success) return err("Giờ trống: sai ngày", "date phải dạng YYYY-MM-DD (giờ Việt Nam).", state);
+      const cfg = ctx.config.booking;
+      const slots = freeSlots(cfg, day.data, now, await busyOfDay(day.data));
+      let next: { date: string; weekday: string; times: string[] } | null = null;
+      if (!slots.times.length) {
+        for (let i = 0; i <= cfg.horizonDays && !next; i++) {
+          const d = vnDayOffset(now, i);
+          if (d <= day.data) continue;
+          const s = freeSlots(cfg, d, now, await busyOfDay(d));
+          if (s.times.length) next = { date: d, weekday: s.weekday, times: s.times.slice(0, 6) };
+        }
+      }
+      return ok(`Giờ trống ${day.data}: ${slots.times.length}`, { date: day.data, weekday: slots.weekday, times: slots.times, closed_reason: slots.closedReason, next_available: next, today: vnDayOffset(now), duration_minutes: cfg.slotMinutes }, state);
+    }
+    case "book_appointment": {
+      if (state.appointment) return err("Đặt lịch: đã đặt", `Hội thoại này đã đặt lịch «${state.appointment.service}» lúc ${state.appointment.startsAt} — muốn đổi / huỷ thì chuyển nhân viên (handoff_to_human «Lịch hẹn — …»).`, state);
+      const v = z
+        .object({ variant_id: z.string().trim().min(1).max(200), date: z.string().trim(), time: z.string().trim(), name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), note: z.string().trim().max(500).optional(), customer_confirmation: z.string().trim().min(2).max(300) })
+        .safeParse(input);
+      if (!v.success) return err("Đặt lịch: thiếu thông tin", "Cần dịch vụ, ngày, giờ, họ tên, số điện thoại và lời đồng ý của khách.", state);
+      if (!foldVi(ctx.lastUserText).includes(foldVi(v.data.customer_confirmation))) return err("Đặt lịch: khách chưa xác nhận", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt lịch và hỏi.", state);
+      const phone = normalizeCustomerPhone(v.data.phone);
+      if (!phone) return err("Đặt lịch: SĐT không hợp lệ", "Số điện thoại chỉ gồm 8–15 chữ số.", state);
+      const service = (await sellableCatalog([])).find((c) => c.variantId === v.data.variant_id);
+      if (!service) return err("Đặt lịch: không có dịch vụ", "Không có dịch vụ này (hoặc đã thôi bán) — search_products lại.", state);
+      const start = vnInstant(v.data.date, v.data.time);
+      if (!start) return err("Đặt lịch: sai ngày giờ", "date = YYYY-MM-DD, time = HH:MM.", state);
+      const cfg = ctx.config.booking;
+      const okSlot = slotBookable(cfg, v.data.date, v.data.time, now, await busyOfDay(v.data.date));
+      if (!okSlot.ok) return err("Đặt lịch: giờ không nhận", `${okSlot.reason} Gọi find_booking_slots và đề xuất giờ khác.`, state);
+      const label = `${service.name}${service.variant ? ` (${service.variant})` : ""}`;
+      const when = `${v.data.time} ${WEEKDAY_LABEL[new Date(`${v.data.date}T00:00:00Z`).getUTCDay()]} ${v.data.date}`;
+      let appointmentId: string | null = null;
+      if (!simulated) {
+        const c = await createCustomerAsAgent(ctx.agent, { name: v.data.name, phone, address: state.customer?.phone === phone ? state.customer.address : "", province: state.customer?.phone === phone ? state.customer.province : "" }, { addressOptional: true });
+        if (!c.ok) return err("Đặt lịch: lỗi lưu khách", failureText(c), state);
+        const r = await createAppointmentAsAgent(ctx.agent, { customerId: c.id, variantId: service.variantId, startsAt: start, durationMin: cfg.slotMinutes, note: ["Đặt qua chatbot.", v.data.note ?? ""].filter(Boolean).join(" ") }, cfg.capacity);
+        if (!r.ok) return err("Đặt lịch: không giữ được chỗ", `${failureText(r)} Gọi find_booking_slots và đề xuất giờ khác.`, state);
+        appointmentId = r.id;
+        await notifySalesChatBooking(r.id, ctx.conversationId, `${label} · ${when} · ${v.data.name} · ${phone}`, now).catch(() => undefined);
+      }
+      state.appointment = { id: appointmentId, service: label, startsAt: when, name: v.data.name, phone, simulated, at: now.toISOString() };
+      state.stage = "DONE";
+      return ok(`${simulated ? "(Thử) " : ""}Đã đặt lịch · ${label} · ${when}`, { booked: true, simulated, service: label, when, name: v.data.name, phone, duration_minutes: cfg.slotMinutes, note: simulated ? "Khung thử: KHÔNG ghi lịch thật." : "Lễ tân sẽ xếp kỹ thuật viên; nói với khách shop sẽ liên hệ xác nhận nếu cần." }, state);
+    }
     case "search_products": {
       const q = z.string().trim().min(1).max(200).safeParse(input.query);
       if (!q.success) return err("Tìm: thiếu từ khoá", "Thiếu từ khoá tìm.", state);

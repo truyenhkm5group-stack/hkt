@@ -17,12 +17,25 @@ const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 const CONNECTOR_LABEL: Record<SalesBotConnector, string> = { "anthropic-byok": "Anthropic (Claude) — khoá của tổ chức", "openai-byok": "OpenAI — khoá của tổ chức", "gemini-byok": "Google Gemini — khoá của tổ chức (rẻ nhất)" };
 
 /** Form cấu hình chatbot — máy chủ kiểm lại bằng CÙNG lược đồ (`salesChatbotConfigZ`). */
-export function ChatbotConfigForm({ config, fields, connections }: { config: SalesChatbotConfig; fields: { key: string; label: string }[]; connections: { key: SalesBotConnector; ready: boolean; configured: boolean }[] }) {
+export function ChatbotConfigForm({
+  config,
+  fields,
+  connections,
+  appointmentsOn = false,
+}: {
+  config: SalesChatbotConfig;
+  fields: { key: string; label: string }[];
+  connections: { key: SalesBotConnector; ready: boolean; configured: boolean }[];
+  /** Module Lịch hẹn đang bật — chỉ khi đó mới có khung «Đặt lịch qua chat». */
+  appointmentsOn?: boolean;
+}) {
   const router = useRouter();
   const [c, setC] = useState<SalesChatbotConfig>(config);
   const [shipping, setShipping] = useState(config.shippingFee === null ? "" : String(config.shippingFee));
   const [pending, start] = useTransition();
   const set = <K extends keyof SalesChatbotConfig>(k: K, v: SalesChatbotConfig[K]) => setC((s) => ({ ...s, [k]: v }));
+  const setBooking = (patch: Partial<SalesChatbotConfig["booking"]>) => set("booking", { ...c.booking, ...patch });
+  const num = (raw: string, fallback: number) => (/^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback);
   const conn = connections.find((x) => x.key === c.connectorKey);
 
   const save = (enabled?: boolean) =>
@@ -157,6 +170,51 @@ export function ChatbotConfigForm({ config, fields, connections }: { config: Sal
             </span>
           </label>
         </fieldset>
+        {appointmentsOn ? (
+          <fieldset className="space-y-2 rounded-lg border p-3" data-booking>
+            <legend className="px-1 text-sm font-medium">Đặt lịch qua chat</legend>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-1" checked={c.booking.enabled} onChange={(e) => setBooking({ enabled: e.target.checked })} />
+              <span>
+                Nhận đặt lịch qua chat
+                <span className="block text-xs text-muted-foreground">Bot hỏi dịch vụ + giờ, chỉ mời giờ còn chỗ, xin tên + SĐT, đọc lại và chờ khách xác nhận rồi mới giữ chỗ. Bot KHÔNG chọn kỹ thuật viên — lịch vào trang Lịch hẹn, lễ tân xếp người.</span>
+              </span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span>Mở cửa</span>
+              <Input className="h-8 w-20" value={c.booking.open} onChange={(e) => setBooking({ open: e.target.value })} aria-label="Giờ mở cửa" />
+              <span>–</span>
+              <Input className="h-8 w-20" value={c.booking.close} onChange={(e) => setBooking({ close: e.target.value })} aria-label="Giờ đóng cửa" />
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {DAY_LABEL.map((d, i) => (
+                <label key={d} className="flex items-center gap-1">
+                  <input type="checkbox" checked={c.booking.days.includes(i)} onChange={(e) => setBooking({ days: e.target.checked ? [...c.booking.days, i].sort() : c.booking.days.filter((x) => x !== i) })} />
+                  {d}
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <label className="space-y-1">
+                <span className="block text-muted-foreground">Mỗi lịch (phút)</span>
+                <Input className="h-8" inputMode="numeric" value={String(c.booking.slotMinutes)} onChange={(e) => setBooking({ slotMinutes: num(e.target.value, c.booking.slotMinutes) })} />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-muted-foreground">Số khách phục vụ cùng lúc</span>
+                <Input className="h-8" inputMode="numeric" value={String(c.booking.capacity)} onChange={(e) => setBooking({ capacity: num(e.target.value, c.booking.capacity) })} />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-muted-foreground">Đặt trước tối thiểu (phút)</span>
+                <Input className="h-8" inputMode="numeric" value={String(c.booking.leadMinutes)} onChange={(e) => setBooking({ leadMinutes: num(e.target.value, c.booking.leadMinutes) })} />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-muted-foreground">Nhận lịch xa nhất (ngày)</span>
+                <Input className="h-8" inputMode="numeric" value={String(c.booking.horizonDays)} onChange={(e) => setBooking({ horizonDays: num(e.target.value, c.booking.horizonDays) })} />
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">«Số khách phục vụ cùng lúc» = số giường / ghế. Mọi lịch đang hiệu lực đều chiếm chỗ, kể cả lịch lễ tân đặt tay.</p>
+          </fieldset>
+        ) : null}
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">

@@ -208,6 +208,7 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
       { text: "Mở Chatbot bán hàng → phần «Cấu hình bot»: chọn «Giọng điệu», phí ship, và ghi chính sách của shop vào ô hướng dẫn thêm.", href: "/ai/sales-chatbot" },
       { text: "Thử trong «Khung thử (TEST)» trước khi cho bot trả lời khách thật." },
       { text: "Đọc «Hội thoại gần đây»: ca bot chuyển cho người hiện ngay trong danh sách đó, kèm nút để bot tiếp tục." },
+      { text: "Spa / dịch vụ (cần module Lịch hẹn): bật «Nhận đặt lịch qua chat», khai giờ mở cửa và «Số khách phục vụ cùng lúc». Bot chỉ mời giờ còn chỗ, chờ khách xác nhận rồi mới giữ chỗ; lịch vào trang Lịch hẹn để lễ tân xếp người." },
     ],
   },
 

@@ -40,9 +40,27 @@ theo tổ chức như mọi module khác.
   - Vai trò lưu sẵn trên production không tự nhận khoá mới: quản trị tổ chức cấp ở trang Người dùng.
 - **Tổ chức nhà:** module TẮT (`homeOptIn` + dòng TẮT trong 0190). VNX không thấy menu và không có trang này.
 
+## Chatbot đặt lịch
+
+Bật ở Chatbot bán hàng → khung «Đặt lịch qua chat» (chỉ hiện khi tổ chức bật module Lịch hẹn). Mặc định TẮT.
+
+- **Theo sức chứa, không theo người.** Shop khai giờ mở cửa, ngày nhận lịch, độ dài một lịch (cũng là bước chia giờ), «số
+  khách phục vụ cùng lúc» (giường / ghế), đặt trước tối thiểu và nhận xa nhất bao nhiêu ngày (`lib/constants/booking.ts`).
+  Một giờ còn nhận khi số lịch ĐANG HIỆU LỰC chồng lên nó — mọi lịch, kể cả lịch lễ tân đặt tay — còn dưới sức chứa.
+- **Bot không chọn kỹ thuật viên.** Máy không biết hôm nay ai nghỉ; lịch bot đặt vào trang Lịch hẹn ở «— Chưa xếp —», lễ
+  tân xếp người, và người xem được lịch hẹn nhận tin «Chatbot vừa đặt lịch hẹn» trong chuông.
+- **Hai công cụ, chỉ khi bật + module bật:** `find_booking_slots` (giờ trống của một ngày, kèm ngày gần nhất còn chỗ) và
+  `book_appointment`. Ghi khi và chỉ khi lời đồng ý của khách nằm NGUYÊN VĂN trong câu cuối của khách (như chốt đơn).
+- **Sức chứa kiểm hai lần:** một lần ở lưới giờ bot đọc cho khách, một lần trong giao dịch sau khoá tư vấn chung của tổ
+  chức (`createAppointmentAsAgent`) — hai khách chat cùng lúc không lấy được chỗ cuối cùng.
+- **Khách đặt lịch không cần địa chỉ** (`createCustomerAsAgent(…, { addressOptional: true })`); SĐT đã có trong sổ ⇒ dùng
+  lại khách đó. Mọi đường lên ĐƠN vẫn bắt buộc địa chỉ.
+- **Một hội thoại một lịch.** Đổi / huỷ / chọn người / đặt cho nhiều người ⇒ bot chuyển nhân viên.
+- Khung thử chỉ mô phỏng: không khách, không lịch, không tin báo.
+
 ## Bước sau
 
-- Chatbot đặt lịch (công cụ `book_appointment`, dùng chung lõi ghi), có giờ trống theo kỹ thuật viên.
+- Bot đọc giờ trống theo từng kỹ thuật viên (cần lịch làm việc của người — chưa có).
 - Nhắc lịch trước giờ hẹn qua Zalo OA / tin nhắn. Hiện bộ máy luật chưa có trigger theo thời gian.
 - Lịch dạng lưới theo giờ × kỹ thuật viên. Hiện là danh sách theo người.
 - Hoa hồng kỹ thuật viên theo buổi đã làm. Phải đi theo luật 16 (lương ≠ hoa hồng).
