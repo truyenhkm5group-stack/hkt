@@ -10,6 +10,8 @@ import {
 } from "@/lib/constants/inventory-decision";
 import { computePlan, paceOfPlanRow, roundCoverDays } from "@/lib/constants/planning";
 import { findSizeBreaks, type SizeBreakReport, type SizeBreakVariant } from "@/lib/constants/size-break";
+import { clearanceFloor, type ClearanceFloor } from "@/lib/constants/clearance-floor";
+import { resolveAssumptions } from "@/lib/queries/profit-nominal";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { linkedReceiptQty, openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
 import { openQtyAfterReceived } from "@/lib/constants/workshop-ledger";
@@ -85,6 +87,11 @@ export type InventoryDecisionRow = InventoryDecisionResult & {
   sold7: number;
   sold30: number;
   soldInWindow: number;
+  /**
+   * GIÁ SÀN XẢ (`lib/constants/clearance-floor.ts`) — chỉ với dòng ĐANG CHÔN VỐN / NÊN XẢ, nơi câu hỏi "xả giá
+   * bao nhiêu" có nghĩa. `null` với các dòng khác.
+   */
+  clearanceFloor: ClearanceFloor | null;
 };
 
 export type InventoryDecisionReport = {
@@ -238,11 +245,13 @@ async function firstReceiptByVariant() {
 }
 
 async function decisionReportUncached(): Promise<InventoryDecisionReport> {
-  const [plan, slow, openPo, firstReceipt] = await Promise.all([
+  const [plan, slow, openPo, firstReceipt, profitA] = await Promise.all([
     getReplenishmentPlan(),
     getSlowMoving(),
     openPoQtyByVariant(),
     firstReceiptByVariant(),
+    // Cước giao / cước hoàn / đóng gói / nhân công / thuế — ĐÚNG bộ giả định đã quy đổi của báo cáo lợi nhuận danh nghĩa.
+    resolveAssumptions(),
   ]);
   const a = plan.assumptions;
   const shopReturnRate = plan.used.shopReturnRate;
@@ -387,6 +396,19 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       sold7: r.sold7,
       sold30: r.sold30,
       soldInWindow: r.soldInWindow,
+      clearanceFloor:
+        decision.decision === "OVERSTOCK" || decision.decision === "CLEARANCE_CANDIDATE"
+          ? clearanceFloor({
+              unitCost,
+              deliveryRatePct: r.deliveryRate,
+              deliverySource: r.deliverySource,
+              returnRecoveryRate: plan.used.returnRecoveryRate,
+              shipFeeDelivered: profitA.shipFeeDeliveredUsed,
+              shipFeeReturned: profitA.shipFeeReturnedUsed,
+              assumptions: profitA,
+              retailPrice,
+            })
+          : null,
     });
   }
 
