@@ -59,7 +59,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETT
 import { setSettingJson } from "@/lib/settings";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, historyForModel, listConversations, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
-import { fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { CLOSED_TAG, customerLeftPhone, OPEN_TAG, redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
@@ -1269,6 +1269,38 @@ async function testJourney() {
       const fNote = await processFanpageThread(PAGE, "t-984", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fNote.replies >= 1 && fNote.processed === 1 && !/Page đã trả lời/.test(fNote.skipped ?? ""), `ghi chú tự động ⇒ bot vẫn trả lời khách: ${JSON.stringify(fNote)}`);
       assert.notEqual((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-984"))))[0]?.status, "HANDOFF", "ghi chú có uid cũng không làm bot nhường");
+      // ═══ QUÉT LẠI TIN KHÁCH BỊ RƠI (03/10/2026 — bốn khách nhắn đúng lúc deploy khởi động lại app, không ai trả lời) ═══
+      const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace("Z", "");
+      const cuMsgs: Record<string, Record<string, unknown>[]> = {
+        // webhook mất: lời chào quảng cáo + câu hỏi 4 phút trước, ERP chưa có dòng nào ⇒ nhận + trả lời
+        "t-cu1": [{ id: "cu1-greet", message: "CHẢ CÁ THU NGUYÊN CHẤT 100%", from: { id: PAGE }, inserted_at: iso(5 * 60_000) }, { id: "cu1-q", message: "Giá bao nhiêu vậy?", from: { id: "cust-cu1", name: "Nguyen Hiền" }, inserted_at: iso(4 * 60_000) }],
+        // nhân viên đã trả lời ⇒ không đụng
+        "t-cu2": [{ id: "cu2-q", message: "Bn 1 kg B?", from: { id: "cust-cu2" }, inserted_at: iso(6 * 60_000) }, { id: "cu2-a", message: "Dạ 280k ạ", from: { id: PAGE, uid: "u-staff" }, inserted_at: iso(5 * 60_000) }],
+        // mới 20 giây ⇒ để webhook lo
+        "t-cu3": [{ id: "cu3-q", message: "Bao nhiêu 1 kg.", from: { id: "cust-cu3" }, inserted_at: iso(20_000) }],
+        // 50 phút ⇒ quá cũ, không nhắn bù
+        "t-cu4": [{ id: "cu4-q", message: "Còn không shop", from: { id: "cust-cu4" }, inserted_at: iso(50 * 60_000) }],
+        // bị bỏ qua OAN vì ghi chú tự động (bản trước #481) ⇒ Pancake cho thấy không ai trả lời thật ⇒ mở lại + trả lời
+        "t-cu5": [{ id: "cu5-q", message: "sdt. 0378697439", from: { id: "cust-cu5" }, inserted_at: iso(3 * 60_000) }, { id: "cu5-note", message: "Đã đặt giai đoạn của khách hàng tiềm năng thành Đủ tiêu chuẩn", from: { id: PAGE }, inserted_at: iso(170_000) }],
+      };
+      const cuList = Object.entries(cuMsgs).map(([id, ms]) => {
+        const last = ms[ms.length - 1];
+        return { id, updated_at: last.inserted_at, snippet: last.message, last_sent_by: { id: (last.from as { id: string }).id }, from: { name: `Khách ${id}` } };
+      });
+      const cuFetch = fakeFetchCalls((url, init) => {
+        if (init?.method !== "POST" && url.includes("/v2/pages/") && url.includes("/conversations?")) return { success: true, conversations: cuList };
+        const m = /\/conversations\/([^/]+)\/messages/.exec(url);
+        if (init?.method !== "POST" && m) return { success: true, messages: cuMsgs[decodeURIComponent(m[1])] ?? [] };
+        return { success: true, id: `m-${Math.random().toString(36).slice(2)}` };
+      });
+      await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: "t-cu5", messageId: "cu5-q", text: "sdt. 0378697439", status: "SKIPPED", note: "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen", processedAt: new Date() });
+      const cu = await catchUpFanpage({ fetch: cuFetch.fetch });
+      const postsTo = (thread: string) => cuFetch.calls.filter((c) => c.init?.method === "POST" && c.url.includes(`/conversations/${thread}/messages`)).length;
+      assert.ok(cu.queued === 1 && cu.reopened === 1 && cu.threads === 2 && cu.replies >= 2, JSON.stringify(cu));
+      assert.ok(postsTo("t-cu1") >= 1 && postsTo("t-cu5") >= 1, "tin rơi lúc deploy + tin bị bỏ qua oan ⇒ bot trả lời bù");
+      assert.ok(postsTo("t-cu2") === 0 && postsTo("t-cu3") === 0 && postsTo("t-cu4") === 0, "đã có người trả lời / quá mới / quá cũ ⇒ không đụng");
+      const cuAgain = await catchUpFanpage({ fetch: cuFetch.fetch });
+      assert.ok(cuAgain.queued === 0 && cuAgain.reopened === 0 && cuAgain.threads === 0, `quét lần hai không trả lời lại: ${JSON.stringify(cuAgain)}`);
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));
