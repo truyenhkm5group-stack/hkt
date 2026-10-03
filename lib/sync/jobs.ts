@@ -68,6 +68,7 @@ import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
+import { sendReorderDigest } from "@/lib/reorder/digest";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 
 export type JobOptions = {
@@ -698,11 +699,14 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
         const cu = await catchUpFanpage();
         const r = await runSalesFollowups();
+        // Tin sáng «khách đến hạn mua lại» vào nhóm vận hành — một lần mỗi ngày, sau 8 giờ (lib/reorder/digest.ts). Không ném.
+        const rd = await sendReorderDigest();
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         const cuText = cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "";
-        ctx.summary.detail = `${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        const rdText = rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "";
+        ctx.summary.detail = `${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;
       }),
   },
