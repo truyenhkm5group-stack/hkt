@@ -56,8 +56,9 @@ Gói mới luôn có hiệu lực **ngay khi tiền về**. Các trường hợp
 
 Nếu phần trừ ≥ tiền gói mới thì khách phải chọn nhiều tháng hơn. Số tháng chọn được: 1 · 3 · 6 · 12.
 
-**Không có chiết khấu theo kỳ dài.** Giảm giá là quyết định kinh doanh (luật 38). Nếu chủ nền tảng muốn giảm giá, việc đó
-phải thành một cột tường minh, không phép nhân nào được tự thêm vào.
+**Chiết khấu kỳ dài là một cột tường minh** (`platform_plans.yearly_free_months`, 0194): trả 12 tháng thì tặng N tháng
+(0–3), tức tiền = giá tháng × (12 − N). Kỳ 1 · 3 · 6 tháng không giảm. Giảm giá là quyết định kinh doanh (luật 38) nên
+không có phép nhân nào khác được tự thêm vào. Bảng giá và phép tính giá vốn: `docs/platform/pricing.md`.
 
 ## 4. Tiền về
 

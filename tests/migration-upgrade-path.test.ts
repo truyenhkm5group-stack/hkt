@@ -140,6 +140,8 @@ const MOI = [
   "0190_appointments",
   "0191_password_reset_tokens",
   "0192_billing_addons_vat",
+  "0193_quick_start_identities",
+  "0194_pricing_2026_10",
 ] as const;
 
 /*
@@ -366,7 +368,21 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from platform_plans where key in ('trial','standard','internal') and price_vnd is null"), 3, "bước 2: 0187 — gói cũ không có giá");
     for (const bang of ["platform_subscriptions", "platform_invoices", "platform_billing_payments"]) assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0187 không được gieo dòng nào vào ${bang}`);
     await assert.rejects(client.query(`insert into platform_subscriptions (org_code, billing_enabled) values ('up-bill', true)`), "bước 2: 0187 — bật thu phí mà không có ngày trả tới bị từ chối");
-    assert.equal(await dem("select count(*)::int as n from platform_plans where coalesce((limits->'ai'->>'platformCreditUsdPerMonth')::numeric, 0) > 0"), 0, "bước 2: 0176 — không gói nào có credit AI của nền tảng");
+    // 0176 gieo credit 0 ở mọi gói; 0194 (bảng giá 10/2026 — chủ nền tảng quyết D1/D4) gieo credit theo gói. Credit KHÔNG tự
+    // bật AI dùng chung: nhánh đó còn cần `PLATFORM_AI_ENABLED=1` + khoá riêng ở môi trường (launch-gates mục D3).
+    assert.equal(
+      await dem("select count(*)::int as n from platform_plans where coalesce((limits->'ai'->>'platformCreditUsdPerMonth')::numeric, 0) > 0 and key not in ('trial','basic','starter','growth','pro')"),
+      0,
+      "bước 2: chỉ năm gói của bảng giá 0194 có credit AI dùng chung",
+    );
+    assert.equal(
+      await dem("select count(*)::int as n from platform_plans where (key, (limits->'ai'->>'platformCreditUsdPerMonth')::numeric) in (('trial',1),('basic',1.5),('starter',3),('growth',8),('pro',15))"),
+      5,
+      "bước 2: 0194 — credit AI dùng chung đúng bảng giá",
+    );
+    assert.equal(await dem("select count(*)::int as n from platform_plans where key in ('basic','starter','growth','pro') and yearly_free_months = 2"), 4, "bước 2: 0194 — trả năm tặng 2 tháng ở bốn gói bán");
+    assert.equal(await dem("select count(*)::int as n from platform_plans where key = 'basic' and price_vnd = 249000"), 1, "bước 2: 0194 — gói Cơ bản 249.000");
+    assert.equal(await dem("select count(*)::int as n from platform_plans where key in ('starter','growth','pro') and price_vnd in (499000, 999000, 1990000)"), 3, "bước 2: 0194 KHÔNG đổi giá ba gói đang bán");
     assert.equal(await dem("select count(*)::int as n from platform_plans where key = 'trial' and (limits->'ai'->>'requestsPerDay')::int = 10 and (limits->'ai'->'costUsdPerMonth'->>'hard')::numeric = 50"), 1, "bước 2: 0176 — hạn mức AI của trial đúng số đề xuất");
     await assert.rejects(client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, status) values ('up-ai1', 'x', 'ai_builder', 'VNX', 'OK')`), "bước 2: 0176 — nguồn tính tiền ngoài BYOK/PLATFORM/HOME bị từ chối");
     await assert.rejects(client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, status) values ('up-ai2', 'x', 'ai_builder', 'BYOK', 'FREE')`), "bước 2: 0176 — trạng thái lạ bị từ chối");

@@ -155,7 +155,8 @@ export async function testSalesOrderSync() {
       const admin: SessionUser = { id: u.id, email: u.email, name: "QT hải sản", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: ORG, name: "Hải sản thử", isHome: false }, modules: [...(await getEnabledModules(ORG))] };
       await db.insert(schema.products).values({ id: "erp-os-p", name: "Chả mực giã tay", raw: { origin: "ERP_MANUAL" } });
       await db.insert(schema.productVariants).values({ id: "erp-os-v", productId: "erp-os-p", sku: "CHA-MUC", size: "1kg", retailPrice: 400_000 });
-      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: false, shippingFee: 30_000 });
+      // Bài này kiểm đường KHOÁ RIÊNG của shop (BYOK, nhà cung cấp giả) — đường AI dùng chung có bài ở tests/quick-start.test.ts.
+      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: false, shippingFee: 30_000 });
 
       const probe = fakePancake(new Map());
       assert.ok("ok" in (await saveConnection(admin, { connectorKey: "pancake-fanpage", settings: { pageId: PAGE }, secrets: { pageAccessToken: "pancake_page_token_os_0123456789" } })));
@@ -238,7 +239,7 @@ export async function testSalesOrderSync() {
         assert.deepEqual([log.orders.length, log.lastOutcome, log.customer?.phone], [2, "CREATED", "0912345678"]);
 
         // ── Bot BẬT và đang trả lời ⇒ đơn là việc của bot, job không ghi ──
-        await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true, shippingFee: 30_000 });
+        await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });
         threads.set("t-2", [{ id: "b1", fromPage: false, text: "ok chốt 1kg, 0987654321, 5 Lê Lợi, Huế", at: min(-25) }]);
         await inbound("t-2", "b1", "ok chốt 1kg, 0987654321, 5 Lê Lợi, Huế", min(-25));
         const callsBefore = calls;

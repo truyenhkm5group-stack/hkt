@@ -242,7 +242,7 @@ export function toGeminiContents(messages: AiRequest["messages"]): GeminiContent
 }
 
 export class ByokGeminiProvider implements AiProvider {
-  readonly name = "gemini-byok";
+  readonly name: string;
   readonly model: string;
   readonly schemaDialect: AiSchemaDialect = "openai";
   private readonly apiKey: string;
@@ -250,6 +250,7 @@ export class ByokGeminiProvider implements AiProvider {
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(opts: ByokOptions & { sleep?: (ms: number) => Promise<void> }) {
+    this.name = opts.name ?? "gemini-byok";
     this.model = opts.model?.trim() || GEMINI_DEFAULT_MODEL;
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetch ?? fetch;

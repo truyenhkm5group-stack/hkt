@@ -81,7 +81,7 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
   // Hành trình tự phục vụ (0180): chatbot bán hàng · thông báo nhóm · xuất bản — đo từ cấu hình / luật / sổ tổ chức thật.
   if (on("ai_sales")) {
     const bot = await loadSalesChatbotConfig();
-    steps.push({ key: "chatbot", label: "Cấu hình chatbot bán hàng", detail: bot.enabled ? `Bot «${bot.botName}» đang bật` : "Chưa bật — khai khoá AI, cấu hình, chạy khung thử rồi bật.", href: "/ai/sales-chatbot", cta: "Mở chatbot", done: bot.enabled });
+    steps.push({ key: "chatbot", label: "Cấu hình chatbot bán hàng", detail: bot.enabled ? `Bot «${bot.botName}» đang bật` : "Chưa bật — dùng AI có sẵn trong gói (hoặc khoá AI riêng), chạy khung thử rồi bật.", href: "/ai/sales-chatbot", cta: "Mở chatbot", done: bot.enabled });
   }
   const liveNotify = (await listRules()).filter((r) => r.status === "ACTIVE" && r.mode === "LIVE" && r.actions.some((a) => a.kind === "send_message")).length;
   steps.push({ key: "notifications", label: "Báo đơn cho nhóm vận hành", detail: liveNotify > 0 ? `${liveNotify} luật gửi tin nhóm đang chạy` : "Chưa có — đơn chốt chỉ báo trong ERP.", href: "/settings/notifications", cta: "Cấu hình thông báo", done: liveNotify > 0 });

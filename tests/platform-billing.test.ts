@@ -340,7 +340,7 @@ export async function testPlatformBilling() {
     assert.match(inv.transferCode, TRANSFER_CODE_PATTERN);
     const view = await loadTenantBilling(A);
     assert.ok(view?.openInvoice?.qrPayload?.includes("0123456789") && view.openInvoice.qrPayload.includes(inv.transferCode), "mã VietQR mang số tài khoản + nội dung");
-    assert.equal(view?.offers.length, 3);
+    assert.equal(view?.offers.length, 4, "bốn gói bán: Cơ bản (0194) + ba gói của 0187");
 
     // ── Tiền THIẾU ⇒ ghi, không gia hạn.
     const under = await bankIn(inv.amountVnd - 1_000, `CK ${inv.transferCode.toLowerCase()} thanh toan`);
@@ -393,7 +393,9 @@ export async function testPlatformBilling() {
     const up = await previewRenewal(A, "growth", 3);
     assert.ok(isQuote(up) && up.kind === "UPGRADE" && up.creditVnd > 0 && up.amountVnd === up.listAmountVnd - up.creditVnd, JSON.stringify(up));
 
-    // ── 5 · MUA THÊM giữa kỳ (A đang trả gói Khởi đầu, còn hạn ~3 tháng).
+    // ── 5 · MUA THÊM giữa kỳ (A đang trả gói Khởi đầu, còn hạn ~3 tháng). 0194 gieo đơn giá — gỡ hết trước để kiểm nhánh
+    // «chưa khai giá ⇒ không bán».
+    assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "starter", prices: {}, reason: "Gỡ đơn giá để kiểm thử" })));
     assert.ok("error" in (await previewAddon(A, { kind: "users", blocks: 2 })), "gói chưa khai giá mua thêm ⇒ không bán");
     for (const u of outsiders) assert.ok("error" in (await setPlanAddonPrices(u, { planKey: "starter", prices: { users: 30_000 }, reason: "mở bán thêm" })));
     assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 500 }, reason: "giá vô lý" })));
@@ -438,6 +440,9 @@ export async function testPlatformBilling() {
     // Gia hạn cộng phần mua thêm theo giá của gói ĐÍCH; gói đích không bán ⇒ báo lỗi, không đoán.
     const ren = await previewRenewal(A, "starter", 1);
     assert.ok(isQuote(ren) && ren.listAmountVnd === 499_000 + 60_000 && ren.addonMonthlyVnd === 60_000, JSON.stringify(ren));
+    const toGrowthPriced = await previewRenewal(A, "growth", 3);
+    assert.ok(isQuote(toGrowthPriced) && toGrowthPriced.addonMonthlyVnd === 2 * 69_000, "gói đích CÓ bán ⇒ tính theo đơn giá của gói đích (0194: 69.000 / người)");
+    assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "growth", prices: {}, reason: "Gỡ đơn giá để kiểm thử" })));
     const toGrowth = await previewRenewal(A, "growth", 3);
     assert.ok("error" in toGrowth && toGrowth.error.includes("người dùng"), JSON.stringify(toGrowth));
     const tb = await loadTenantBilling(A);

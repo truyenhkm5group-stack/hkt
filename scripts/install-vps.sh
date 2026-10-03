@@ -73,6 +73,11 @@ if [ -f .env ]; then
   # Khoá RIÊNG của cửa chép sổ lượt chạy agent. Rỗng = giữ nguyên giá trị cũ trên máy — không
   # xoá một khoá đang chạy chỉ vì lần deploy này không truyền nó xuống.
   [ -n "${AGENT_INGEST_SECRET:-}" ] && upsert_env AGENT_INGEST_SECRET "${AGENT_INGEST_SECRET}"
+  # Đăng nhập / đăng ký bằng Google · Facebook (docs/platform/quick-start.md). CHỈ ghi khi có giá trị — thiếu ⇒ nút ẩn.
+  [ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" ] && upsert_env GOOGLE_OAUTH_CLIENT_ID "${GOOGLE_OAUTH_CLIENT_ID}"
+  [ -n "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ] && upsert_env GOOGLE_OAUTH_CLIENT_SECRET "${GOOGLE_OAUTH_CLIENT_SECRET}"
+  [ -n "${FACEBOOK_LOGIN_APP_ID:-}" ] && upsert_env FACEBOOK_LOGIN_APP_ID "${FACEBOOK_LOGIN_APP_ID}"
+  [ -n "${FACEBOOK_LOGIN_APP_SECRET:-}" ] && upsert_env FACEBOOK_LOGIN_APP_SECRET "${FACEBOOK_LOGIN_APP_SECRET}"
   [ -n "${ERP_GITHUB_TOKEN:-}" ] && upsert_env ERP_GITHUB_TOKEN "${ERP_GITHUB_TOKEN}"
   [ -n "${ERP_GITHUB_REPO:-}" ] && upsert_env ERP_GITHUB_REPO "${ERP_GITHUB_REPO}"
   [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "${ERP_GITHUB_DEPLOY_WORKFLOW}"
@@ -153,6 +158,11 @@ ERP_GITHUB_TOKEN="${ERP_GITHUB_TOKEN:-}"
 # CRON_SECRET vì CRON_SECRET mở được cả bộ lập lịch — bán kính thiệt hại khác hẳn nhau.
 # Rỗng = cửa ĐÓNG và `/tech/agents` nói "0 lượt chạy"; đó là câu ĐÚNG, không phải lỗi.
 AGENT_INGEST_SECRET="${AGENT_INGEST_SECRET:-}"
+# Đăng nhập / đăng ký bằng Google · Facebook (docs/platform/quick-start.md). Rỗng = nút của nhà cung cấp đó không hiện.
+GOOGLE_OAUTH_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}"
+GOOGLE_OAUTH_CLIENT_SECRET="${GOOGLE_OAUTH_CLIENT_SECRET:-}"
+FACEBOOK_LOGIN_APP_ID="${FACEBOOK_LOGIN_APP_ID:-}"
+FACEBOOK_LOGIN_APP_SECRET="${FACEBOOK_LOGIN_APP_SECRET:-}"
 ERP_GITHUB_REPO="${ERP_GITHUB_REPO:-truyenhkm5group-stack/hkt}"
 ERP_GITHUB_DEPLOY_WORKFLOW="${ERP_GITHUB_DEPLOY_WORKFLOW:-deploy-vps.yml}"
 
@@ -217,6 +227,23 @@ if [ -n "${PLATFORM_BASE_DOMAIN:-}" ]; then
     *) upsert_env PLATFORM_BASE_DOMAIN "${PLATFORM_BASE_DOMAIN}"; say "PLATFORM_BASE_DOMAIN: ${PLATFORM_BASE_DOMAIN}" ;;
   esac
 fi
+
+# ═══ AI DÙNG CHUNG CỦA NỀN TẢNG — PLATFORM_AI_* (lib/ai-usage/platform-ai.ts · launch-gates.md mục D3) ═══
+# Khoá: CHỈ ghi khi Secret có giá trị (Secret trống không xoá khoá đang chạy), KHÔNG BAO GIỜ in giá trị.
+# Bật / nhà cung cấp / model: Variable có giá trị ⇒ ghi; Variable bị xoá ⇒ gỡ dòng khỏi .env (đó là cách TẮT, không cần sửa tay).
+if [ -n "${PLATFORM_AI_API_KEY:-}" ]; then
+  upsert_env PLATFORM_AI_API_KEY "$PLATFORM_AI_API_KEY"
+  say "Khoá AI dùng chung của nền tảng: đã ghi (không in giá trị)"
+fi
+case "${PLATFORM_AI_ENABLED:-}" in
+  1) upsert_env PLATFORM_AI_ENABLED 1; say "PLATFORM_AI_ENABLED=1 — AI dùng chung của nền tảng BẬT" ;;
+  "") sed -i -E '/^PLATFORM_AI_ENABLED=/d' .env ;;
+  *) sed -i -E '/^PLATFORM_AI_ENABLED=/d' .env; warn "PLATFORM_AI_ENABLED «$PLATFORM_AI_ENABLED» không phải 1 — AI dùng chung TẮT." ;;
+esac
+for v in PLATFORM_AI_PROVIDER PLATFORM_AI_MODEL; do
+  val="${!v:-}"
+  if [ -n "$val" ]; then upsert_env "$v" "$val"; else sed -i -E "/^$v=/d" .env; fi
+done
 
 # ═══ TRẦN ĐĂNG KÝ TỔ CHỨC MỚI — PLATFORM_SIGNUP_MODE (lib/onboarding/signup-mode.ts · docs/platform/launch-gates.md) ═══
 # Chế độ hiệu lực = min(trần này, cài đặt người vận hành bấm ở /platform). Trước đây deploy KHÔNG ghi biến này, nên trần

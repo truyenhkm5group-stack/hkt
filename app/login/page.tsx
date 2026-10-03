@@ -7,10 +7,12 @@ import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
 import { HOST_NOT_FOUND_MESSAGE, hostOrganization } from "@/lib/platform/host-org";
 import { listOrganizations } from "@/lib/platform/organizations";
+import { enabledProviders } from "@/lib/auth/oauth";
+import { signupMode } from "@/lib/onboarding/service";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reason?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reason?: string; oauth?: string }> }) {
   const session = await getSession();
   const params = await searchParams;
   /*
@@ -91,7 +93,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : `© ${new Date().getFullYear()} VNXcommerce · Nội bộ`}</p>
       </div>
       <div className="flex items-center justify-center p-6">
-        <LoginForm next={params.next} reason={params.reason} showOrgField={showOrgField} showSetupHint={homeOnly} orgName={host.org?.name ?? null} />
+        <LoginForm
+          next={params.next}
+          reason={params.reason}
+          oauth={params.oauth}
+          showOrgField={showOrgField}
+          showSetupHint={homeOnly}
+          orgName={host.org?.name ?? null}
+          providers={host.org ? { google: false, facebook: false } : enabledProviders()}
+          signupOpen={!host.org && (await signupMode()) !== "off"}
+        />
       </div>
     </div>
   );

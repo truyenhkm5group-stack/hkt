@@ -57,8 +57,17 @@ export const SALES_THINKING_LABEL: Record<SalesThinking, string> = { SMART: "K�
 /** Ngân sách token đầu ra + mức suy luận của MỘT vòng chat theo mức suy nghĩ (suy luận ăn chung ngân sách — xem provider). */
 export const SALES_THINKING_BUDGET: Record<SalesThinking, { maxTokens: number; reasoning: "low" | "medium" }> = { SMART: { maxTokens: 10_000, reasoning: "medium" }, FAST: { maxTokens: 4_000, reasoning: "low" } };
 
-export const SALES_BOT_CONNECTORS = ["anthropic-byok", "openai-byok", "gemini-byok"] as const;
+/**
+ * Khoá AI của bot. `platform` (0193) = AI DÙNG CHUNG của nền tảng, trừ vào credit AI của gói — shop mới vào việc ngay mà
+ * không phải tự đi mua khoá AI. Ba lựa chọn còn lại = khoá RIÊNG của shop (BYOK), không trừ credit của gói.
+ */
+export const SALES_BOT_CONNECTORS = ["platform", "anthropic-byok", "openai-byok", "gemini-byok"] as const;
 export type SalesBotConnector = (typeof SALES_BOT_CONNECTORS)[number];
+
+/** Nguồn trả tiền trên sổ AI theo lựa chọn khoá — MỘT chỗ quyết, mọi lượt ghi sổ / kiểm hạn mức hỏi ở đây. */
+export function salesBotBillingSource(key: SalesBotConnector): "PLATFORM" | "BYOK" {
+  return key === "platform" ? "PLATFORM" : "BYOK";
+}
 
 /** Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): chặn vòng lặp công cụ và bão tin trên trang chat công khai. */
 export const SALES_CHATBOT_LIMITS = { toolRounds: 10, historyMessages: 40, turnsPerConversation: 60, webMessagesPerVisitorPer10Min: 20, webTurnsPerOrgPerDay: 500, messageMax: 1000 } as const;
@@ -137,7 +146,7 @@ export type SalesChatbotConfig = z.infer<typeof salesChatbotConfigZ>;
 export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   enabled: false,
   botName: "Trợ lý bán hàng",
-  connectorKey: "anthropic-byok",
+  connectorKey: "platform",
   model: "",
   tone: "FRIENDLY",
   thinking: "SMART",

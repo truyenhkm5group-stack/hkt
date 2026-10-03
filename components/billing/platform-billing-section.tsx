@@ -43,7 +43,10 @@ export function PlatformBillingSection({ data }: { data: PlatformBilling }) {
               <div key={p.key} className="grid gap-2 border-t border-hairline pt-3 md:grid-cols-[14rem_1fr]" data-plan-price={p.key}>
                 <div>
                   <div className="font-medium">{p.name}</div>
-                  <div className="numeric text-xs text-muted-foreground">{p.priceVnd === null ? "Không bán" : `${formatVND(p.priceVnd)}/tháng`}</div>
+                  <div className="numeric text-xs text-muted-foreground">
+                    {p.priceVnd === null ? "Không bán" : `${formatVND(p.priceVnd)}/tháng`}
+                    {p.yearlyFreeMonths > 0 ? ` · năm tặng ${p.yearlyFreeMonths} tháng` : ""}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <PlanPriceForm plan={p} />

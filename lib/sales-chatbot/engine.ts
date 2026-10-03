@@ -20,6 +20,7 @@ import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
+import { platformChatAi } from "@/lib/ai-builder/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
 import { recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
@@ -30,7 +31,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
@@ -364,8 +365,11 @@ export async function conversationView(id: string): Promise<ChatView | null> {
 
 let providerOverride: ((cfg: SalesChatbotConfig) => AiProvider | null) | null = null;
 
-/** Nhà cung cấp AI của chatbot (khoá BYOK của tổ chức; bài kiểm thay được) — dùng chung cho «Học từ hội thoại cũ». */
-export async function salesChatProvider(): Promise<{ ok: true; provider: AiProvider } | { ok: false; error: string }> {
+/**
+ * Nhà cung cấp AI của chatbot (AI dùng chung của nền tảng HOẶC khoá BYOK của tổ chức; bài kiểm thay được) — dùng chung cho
+ * «Học từ hội thoại cũ» và nhắc khách. `source` = nguồn trả tiền để ghi sổ AI / kiểm hạn mức đúng chỗ.
+ */
+export async function salesChatProvider(): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
   return providerFor(await loadSalesChatbotConfig());
 }
 
@@ -382,10 +386,16 @@ export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => A
   providerOverride = fn;
 }
 
-async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provider: AiProvider } | { ok: false; error: string }> {
+async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provider: AiProvider; source: "PLATFORM" | "BYOK" } | { ok: false; error: string }> {
+  const source = salesBotBillingSource(cfg.connectorKey);
   if (providerOverride) {
     const p = providerOverride(cfg);
-    return p ? { ok: true, provider: p } : { ok: false, error: "Không có AI (kiểm thử)." };
+    return p ? { ok: true, provider: p, source } : { ok: false, error: "Không có AI (kiểm thử)." };
+  }
+  if (cfg.connectorKey === "platform") {
+    const org = await currentOrganization();
+    const plat = await platformChatAi(org.code);
+    return plat.ok ? { ok: true, provider: plat.provider, source } : { ok: false, error: plat.reason };
   }
   const conn = await openActiveConnection(cfg.connectorKey);
   if (!conn.ok) return { ok: false, error: `Chưa dùng được khoá AI «${cfg.connectorKey}»: ${conn.reason}` };
@@ -393,7 +403,7 @@ async function providerFor(cfg: SalesChatbotConfig): Promise<{ ok: true; provide
   if (!apiKey) return { ok: false, error: "Kết nối AI thiếu khoá." };
   const model = cfg.model || conn.settings.model || null;
   const provider = cfg.connectorKey === "anthropic-byok" ? new ByokAnthropicProvider({ apiKey, model }) : cfg.connectorKey === "gemini-byok" ? new ByokGeminiProvider({ apiKey, model }) : new ByokOpenAiProvider({ apiKey, model });
-  return { ok: true, provider };
+  return { ok: true, provider, source };
 }
 
 /**
@@ -555,9 +565,10 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     };
     const killed = await aiKillSwitchDenial(org.code);
     if (killed) return blocked("DISABLED", "AI đang bị người vận hành nền tảng tạm tắt cho tổ chức này — liên hệ người vận hành", `AI đang tắt: ${killed}`);
-    const quota = await checkAiQuota(org.code, "BYOK");
+    const billing = salesBotBillingSource(cfg.connectorKey);
+    const quota = await checkAiQuota(org.code, billing);
     if (!quota.ok) {
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
       return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
     }
     const prov = await providerFor(cfg);
@@ -570,7 +581,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         const lastShop = [...msgs].reverse().find((m) => m.role === "assistant" && textOf(m.content));
         const { pick, res } = await quickReplyByAi(prov.provider, text, lastShop ? textOf(lastShop.content) : "", quick.candidates, cfg);
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
         if (pick && !repeatsRecent(pick.text, recentSaid)) return sendQuick(pick, pre);
       } catch (error) {
@@ -674,7 +685,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
     }
     // Câu bị lọc suy luận ⇒ ghi cho người vận hành (màn hình chỉ in nhãn, không in câu gốc).
     if (leaks && !lastError) lastError = `AI viết suy luận nội bộ vào câu trả lời (${leaks} đoạn) — đã lọc trước khi gửi khách`;
-    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: "BYOK", provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     await bump({
       state: state as Record<string, unknown>,
       turns: conv.turns + 1,

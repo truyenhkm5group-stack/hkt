@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { clientIpFrom } from "@/lib/auth/client-ip";
@@ -9,6 +9,8 @@ import { createInvite, revokeInvite } from "@/lib/onboarding/invites";
 import { checkAdminStep, checkInviteStep, checkOrgStep, createOrganizationFromSignup, previewSignup, retryOrganizationSetup, type SignupActor } from "@/lib/onboarding/service";
 import type { SignupPreview, SignupStepResult } from "@/lib/onboarding/shared";
 import { setSignupSetting } from "@/lib/onboarding/signup-mode";
+import { quickSignup } from "@/lib/onboarding/quick";
+import { readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
 /**
@@ -67,6 +69,22 @@ export async function createOrganizationAction(draft: unknown): Promise<{ ok: tr
     return { ok: true, orgCode: result.orgCode, operator: true };
   }
   redirect(result.loggedIn ? "/" : "/login");
+}
+
+/**
+ * ĐĂNG KÝ NHANH một màn hình (docs/platform/quick-start.md). Hồ sơ Google / Facebook (nếu có) đọc từ cookie KÝ ở MÁY CHỦ
+ * — không bao giờ từ trình duyệt. Thành công ⇒ phiên của quản trị mới rồi vào `/` (trang «Bắt đầu»).
+ */
+export async function quickSignupAction(input: unknown): Promise<{ error: string } | void> {
+  const who = await whoAmI();
+  if (who.kind === "operator") return { error: "Người vận hành tạo hộ khách bằng trình hướng dẫn đầy đủ (/start?day-du=1)." };
+  const store = await cookies();
+  const social = await readOAuthToken<SocialProfile>("erp-social-signup", store.get(SOCIAL_SIGNUP_COOKIE)?.value);
+  const r = await quickSignup(input, who, { issue: createSession, social });
+  if ("error" in r) return r;
+  // Hồ sơ Google / Facebook đã dùng xong — cho cookie hết hạn (không phải dữ liệu nghiệp vụ).
+  store.set(SOCIAL_SIGNUP_COOKIE, "", { path: "/", maxAge: 0 });
+  redirect(r.loggedIn ? "/" : "/login");
 }
 
 // ─── Người vận hành nền tảng (`/platform`) ───

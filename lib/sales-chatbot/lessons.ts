@@ -179,7 +179,7 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
     const org = await currentOrganization();
     const prov = await salesChatProvider();
     if (!prov.ok) throw new Error(prov.error);
-    const quota = await checkAiQuota(org.code, "BYOK");
+    const quota = await checkAiQuota(org.code, prov.source);
     if (!quota.ok) throw new Error(quota.error);
     const prompt = [
       `BÀI HỌC ĐANG DÙNG (${state.lessons.length}):`,
@@ -195,10 +195,10 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
     try {
       const res = await prov.provider.complete({ system: LESSONS_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: prompt }] }], tools: [], maxTokens: LESSONS_AI_TOKENS, reasoning: "low" });
       out = textOf(res.content);
-      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status, actorId: actor.id, ref: "lessons" }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status, actorId: actor.id, ref: "lessons" }).catch(() => undefined);
     } catch (e) {
       status = "ERROR";
-      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: "BYOK", provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "lessons" }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "lessons" }).catch(() => undefined);
       throw e;
     }
     const lessons = parseLessonsFromAi(out);

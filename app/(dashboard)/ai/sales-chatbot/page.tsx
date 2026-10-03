@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/format";
 import { publicationOf } from "@/lib/platform/publish";
 import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
 import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
+import { platformChatAi } from "@/lib/ai-builder/provider";
 import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { loadPlaybook, loadPlaybookRun } from "@/lib/sales-chatbot/playbook";
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
@@ -52,9 +53,12 @@ export default async function SalesChatbotPage() {
   const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
   const orderSync = fanpage ? await orderSyncView() : null;
+  // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
+  const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
+    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason };
     const row = connections.find((c) => c.connectorKey === k);
-    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row) };
+    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null };
   });
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
   return (

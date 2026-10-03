@@ -11,6 +11,7 @@ import {
   judgePayment,
   quoteRenewal,
   transferCodeFrom,
+  YEARLY_FREE_MONTHS_MAX,
   vnDate,
   type BillingStanding,
   type BillingStandingKind,
@@ -225,7 +226,7 @@ function invoiceView(r: InvoiceRow, plans: readonly PlanRow[]): InvoiceView {
 }
 
 function pricedOf(p: PlanRow | undefined | null): PricedPlan | null {
-  return p ? { key: p.key, name: p.name, priceVnd: p.priceVnd } : null;
+  return p ? { key: p.key, name: p.name, priceVnd: p.priceVnd, yearlyFreeMonths: p.yearlyFreeMonths } : null;
 }
 
 function newTransferCode(): string {
@@ -650,7 +651,7 @@ export async function voidInvoice(user: SessionUser, raw: { invoiceId?: unknown;
   return done ? { ok: true, message: `Đã huỷ ${p.invoice.transferCode}. Tiền chuyển tới mã này về sau sẽ nằm ở «Tiền chưa khớp».` } : { error: "Hoá đơn vừa đổi trạng thái — tải lại trang." };
 }
 
-export async function setPlanPrice(user: SessionUser, raw: { planKey?: unknown; priceVnd?: unknown; reason?: unknown }): Promise<BillingResult> {
+export async function setPlanPrice(user: SessionUser, raw: { planKey?: unknown; priceVnd?: unknown; yearlyFreeMonths?: unknown; reason?: unknown }): Promise<BillingResult> {
   const denial = platformOperatorDenial(user);
   if (denial) return { error: denial };
   const reason = operatorReason(raw.reason);
@@ -663,13 +664,16 @@ export async function setPlanPrice(user: SessionUser, raw: { planKey?: unknown; 
   const t = schema.platformPlans;
   const [plan] = await pdb.select().from(t).where(eq(t.key, planKey)).limit(1);
   if (!plan) return { error: `Không có gói «${planKey}».` };
-  if ((plan.priceVnd ?? null) === price) return { ok: true, message: "Giá không đổi." };
+  const free = raw.yearlyFreeMonths === undefined || raw.yearlyFreeMonths === "" ? plan.yearlyFreeMonths : Number(raw.yearlyFreeMonths);
+  if (!Number.isInteger(free) || free < 0 || free > YEARLY_FREE_MONTHS_MAX) return { error: `Số tháng tặng khi trả 12 tháng là số nguyên 0–${YEARLY_FREE_MONTHS_MAX}.` };
+  if ((plan.priceVnd ?? null) === price && plan.yearlyFreeMonths === free) return { ok: true, message: "Giá không đổi." };
   const home = await getHomeOrganization();
   await pdb.transaction(async (tx) => {
-    await tx.update(t).set({ priceVnd: price, updatedAt: new Date() }).where(eq(t.key, planKey));
-    await auditTx(tx, { action: "PLAN_PRICE_SET", targetOrgCode: home.code, subject: `plan:${planKey}`, before: { priceVnd: plan.priceVnd }, after: { priceVnd: price }, reason, actor: actorOf(user) });
+    await tx.update(t).set({ priceVnd: price, yearlyFreeMonths: free, updatedAt: new Date() }).where(eq(t.key, planKey));
+    await auditTx(tx, { action: "PLAN_PRICE_SET", targetOrgCode: home.code, subject: `plan:${planKey}`, before: { priceVnd: plan.priceVnd, yearlyFreeMonths: plan.yearlyFreeMonths }, after: { priceVnd: price, yearlyFreeMonths: free }, reason, actor: actorOf(user) });
   });
-  return { ok: true, message: price === null ? `Gói «${plan.name}» thôi bán. Hoá đơn đang mở giữ giá cũ.` : `Gói «${plan.name}»: ${vnd(price)}/tháng cho hoá đơn tạo từ bây giờ. Hoá đơn đang mở giữ giá cũ.` };
+  const freeText = free > 0 ? ` Trả 12 tháng tặng ${free} tháng.` : "";
+  return { ok: true, message: price === null ? `Gói «${plan.name}» thôi bán. Hoá đơn đang mở giữ giá cũ.` : `Gói «${plan.name}»: ${vnd(price)}/tháng cho hoá đơn tạo từ bây giờ.${freeText} Hoá đơn đang mở giữ giá cũ.` };
 }
 
 /**
@@ -790,7 +794,7 @@ export async function resolveBillingPayment(user: SessionUser, raw: { paymentId?
 
 // ─────────────────────────── Màn hình ───────────────────────────
 
-export type PlanOffer = { key: string; name: string; description: string | null; priceVnd: number; limits: unknown };
+export type PlanOffer = { key: string; name: string; description: string | null; priceVnd: number; limits: unknown; yearlyFreeMonths: number };
 
 export type AddonOffer = { kind: AddonKind; label: string; unit: string; step: number; unitPriceVnd: number; ownedUnits: number };
 export type OwnedAddon = { kind: AddonKind; label: string; units: number; unitsLabel: string };
@@ -850,7 +854,7 @@ export async function loadTenantBilling(orgCode: string, now: Date = new Date())
     standing,
     terms,
     currentPlan: current ? { key: current.key, name: current.name, priceVnd: current.priceVnd } : null,
-    offers: plans.filter((p) => p.priceVnd !== null && p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, description: p.description, priceVnd: p.priceVnd!, limits: p.limits })),
+    offers: plans.filter((p) => p.priceVnd !== null && p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, description: p.description, priceVnd: p.priceVnd!, limits: p.limits, yearlyFreeMonths: p.yearlyFreeMonths })),
     receiver,
     openInvoice,
     invoices: views.filter((v) => v.status !== "OPEN"),
@@ -874,7 +878,7 @@ export type OrgBillingRow = { code: string; name: string; status: string; planKe
 export type PlatformBilling = {
   today: string;
   receiver: BillingReceiverView | null;
-  plans: { key: string; name: string; priceVnd: number | null; position: number; addonPrices: AddonPrices }[];
+  plans: { key: string; name: string; priceVnd: number | null; position: number; addonPrices: AddonPrices; yearlyFreeMonths: number }[];
   orgs: OrgBillingRow[];
   /**
    * Doanh thu định kỳ hằng tháng: tổng giá THÁNG (gói + phần mua thêm) ở các tổ chức đang thu phí và chưa bị khoá. Tổ chức
@@ -938,7 +942,7 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
   return {
     today,
     receiver,
-    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd, position: p.position, addonPrices: parseAddonPrices(p.addonPrices) })),
+    plans: plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name, priceVnd: p.priceVnd, position: p.position, addonPrices: parseAddonPrices(p.addonPrices), yearlyFreeMonths: p.yearlyFreeMonths })),
     orgs: rows,
     mrrVnd: mrr,
     addonUnpriced,
