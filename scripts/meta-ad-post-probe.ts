@@ -64,7 +64,13 @@ async function redirectExperiment(graph: ReturnType<typeof getFacebookAdsClient>
           const again = await graph.readNode(ad.adId, "preview_shareable_link");
           const link2 = again.kind === "node" ? String(again.node.preview_shareable_link ?? "") : "";
           const target2 = await redirectTarget(ad.link);
-          console.log(`[ops:tom-tat] mẫu ad ${che(ad.adId)}: link API hai lần đọc như nhau: ${link2 === ad.link ? "có" : "KHÔNG"} · đích ${target.slice(0, 2)} hai lần như nhau: ${target === target2 ? "có" : "KHÔNG"}`);
+          // Câu quyết định: hai link KHÁC NHAU của CÙNG một mẩu có chung đích không.
+          const targetOfLink2 = link2 ? await redirectTarget(link2) : "";
+          console.log(
+            `[ops:tom-tat] mẫu #${sampled} ad ${che(ad.adId)}: link API hai lần đọc như nhau: ${link2 === ad.link ? "có" : "KHÔNG"}` +
+              ` · đích của cùng một link hai lần như nhau: ${target === target2 ? "có" : "KHÔNG"}` +
+              ` · đích của HAI link khác nhau như nhau: ${targetOfLink2 ? (targetOfLink2 === target ? "có" : "KHÔNG") : "—"}`,
+          );
         }
         const hit = userTargets.get(target);
         if (hit) console.log(`[ops:tom-tat] KHỚP ĐÍCH: link người dán …${hit.slice(-4)} = link API của ad ${che(ad.adId)} (tài khoản ${che(accountId)}) · mã hai link như nhau: ${ad.link.endsWith(hit) ? "có" : "KHÔNG"}`);
