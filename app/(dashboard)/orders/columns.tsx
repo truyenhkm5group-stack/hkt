@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Truck } from "lucide-react";
+import { ExternalLink, Truck } from "lucide-react";
 import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { RowLink } from "@/components/data-table/data-table";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
@@ -75,7 +75,28 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
       );
     },
   },
-  { id: "source", header: "Kênh", enableSorting: false, cell: ({ row }) => <SourceBadge source={row.original.source} /> },
+  {
+    id: "source",
+    header: "Kênh",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SourceBadge source={row.original.source} />
+        {/* Hội thoại Pancake của đơn — đơn đồng bộ mang sẵn mã hội thoại; đơn bot / ghi từ hội thoại tra ngược (orderChatThreads). */}
+        {row.original.chatUrl ? (
+          <a
+            href={row.original.chatUrl}
+            target="_blank"
+            rel="noreferrer"
+            title="Mở hội thoại của khách trên Pancake"
+            className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground hover:bg-muted hover:text-primary"
+          >
+            Chat <ExternalLink className="size-2.5" />
+          </a>
+        ) : null}
+      </div>
+    ),
+  },
   {
     id: "status",
     accessorKey: "status",
