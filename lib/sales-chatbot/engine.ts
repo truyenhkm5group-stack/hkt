@@ -259,6 +259,15 @@ export function customerNamePrompt(name: string | null | undefined): string {
   return n ? `TÊN KHÁCH (Facebook): «${n}» — dùng làm họ tên người nhận; KHÔNG xin họ tên (khách tự nêu tên người nhận khác thì dùng tên đó).` : "";
 }
 
+/** Bỏ dấu định dạng markdown (`**đậm**`, `*nghiêng*`, `__x__`) — Messenger in nguyên dấu. Gạch đầu dòng «* » ⇒ «- ». HÀM THUẦN. */
+export function plainForMessenger(text: string): string {
+  return text
+    .replace(/^(\s*)\*\s+/gm, "$1- ")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/__([^_\n]+)__/g, "$1")
+    .replace(/(^|[\s(«"'])\*([^*\n]+?)\*(?=$|[\s).,!?:;»"'])/gm, "$1$2");
+}
+
 export function historyForModel(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at?: Date }[], limit: number): AiMessage[] {
   const tagged = msgs.map((m, i) => {
     const prev = i > 0 ? msgs[i - 1].at : undefined;
@@ -590,6 +599,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
         const c = estimateCostUsd(res.model || prov.provider.model, res.usage);
         cost = cost === null || c === null ? null : cost + c;
         const raw = res.content.length ? res.content : [{ type: "text" as const, text: "Dạ, anh/chị nói rõ hơn giúp em nhé." }];
+        // Messenger không hiển thị markdown — «*Họ tên, SĐT…*» tới khách nguyên dấu sao (03/10/2026, «Dương Bích Phượng»).
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
         // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
         const content: AiBlock[] = [];
@@ -600,7 +610,7 @@ export async function chatTurn(conversationId: string, rawText: string, opts: { 
           }
           const g = customerFacingText(b.text);
           if (g.leaked) leaks += 1;
-          if (g.text) content.push({ ...b, text: g.text });
+          if (g.text) content.push({ ...b, text: plainForMessenger(g.text) });
         }
         history.push({ role: "assistant", content });
         await appendMessage(conv.id, seq++, "assistant", content);

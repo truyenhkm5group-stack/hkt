@@ -58,7 +58,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { foldVi, queryKeywords, searchCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_BOT_ERROR_LABEL, SALES_CHATBOT_SETTING_KEY, salesBotError, withinBusinessHours, parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { setSettingJson } from "@/lib/settings";
-import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, customerNamePrompt, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
@@ -306,6 +306,9 @@ function testPure() {
   assert.deepEqual(customerFacingText("[Shop đã nhắn] Dạ em chào anh/chị"), { text: "", leaked: true });
   assert.equal(customerNamePrompt("  Đỗ   Là "), "TÊN KHÁCH (Facebook): «Đỗ Là» — dùng làm họ tên người nhận; KHÔNG xin họ tên (khách tự nêu tên người nhận khác thì dùng tên đó).");
   assert.equal(customerNamePrompt(null), "");
+  assert.equal(plainForMessenger("Anh/chị cho em xin *Họ tên, SĐT và địa chỉ cụ thể* để em lên đơn ạ!"), "Anh/chị cho em xin Họ tên, SĐT và địa chỉ cụ thể để em lên đơn ạ!");
+  assert.equal(plainForMessenger("**Chả cá thu** 1kg\n* Miễn ship"), "Chả cá thu 1kg\n- Miễn ship");
+  assert.equal(plainForMessenger("Giá 2*140k ạ"), "Giá 2*140k ạ", "dấu sao giữa chữ số không phải định dạng");
   const spShort = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE");
   for (const k of ["NÓI ÍT", "KHÔNG hỏi xác nhận lần nữa", "KHÔNG đọc mã đơn", "TÓM TẮT NGẮN, tối đa 3 dòng", "KHÔNG xin họ tên", "KHÔNG BAO GIỜ chép lại tin trong lịch sử", "KHÔNG hứa điều bạn không làm bằng công cụ"]) assert.ok(spShort.includes(k), `lời nhắc thiếu «${k}»`);
   // MIỄN SHIP (03/10/2026 · «Miễn phí ship từ 1kg hoặc giá trị đơn hàng từ 300K trong nội thành Hà Nội, TP HCM»).
