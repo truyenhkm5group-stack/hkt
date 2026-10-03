@@ -13,7 +13,8 @@
  *  1. KHÔNG ĐOÁN POST ID. Bài viết chỉ đến từ `effective_object_story_id` → `object_story_id` của
  *     creative do CHÍNH Meta trả. Không có hai trường đó ⇒ `POST_NOT_RESOLVED`, không dựng số.
  *  2. `feed_demo_ad` là ỨNG VIÊN AD ID, không phải Post ID. Nó chỉ đi vào bước tra như mọi Ad ID
- *     khác; bước tra nói nó là gì.
+ *     khác; bước tra nói nó là gì. Link chia sẻ `fb.me/adspreview/…` còn xa hơn: nó không mang mã
+ *     nào, và Ad ID chỉ có khi Meta tự nói mẩu nào sở hữu đúng link đó (`preview_shareable_link`).
  *  3. KHÔNG LÀM MẤT PAGE ID. Chuỗi gốc `<page_id>_<post_id>` luôn được giữ nguyên cạnh hai phần đã
  *     tách: một Post ID trần không mở được bài và không nói bài thuộc fanpage nào.
  */
@@ -67,21 +68,92 @@ export function normalizeAdIdInput(raw: string): AdIdInput {
   return { ok: false, raw: text, reason: "Không phải một mã quảng cáo (cần toàn chữ số)." };
 }
 
-export type AdIdList = { adIds: string[]; invalid: { raw: string; reason: string }[]; duplicates: number; overflow: number };
+// ─────────────────────────── LINK CHIA SẺ "XEM TRƯỚC QUẢNG CÁO" ───────────────────────────
+
+/**
+ * Hai loại link của hộp "Chia sẻ quảng cáo này" trong Trình quản lý quảng cáo: dòng "đăng nhập bằng
+ * Facebook" và dòng "tài khoản Meta được quản lý". Mã rút gọn của HAI dòng thuộc hai không gian riêng
+ * (đo 03/10/2026: mã của dòng Facebook ghép sau `/managedaccount/` không mở ra quảng cáo nào), nên
+ * khoá so khớp phải mang cả LOẠI lẫn MÃ.
+ */
+export const AD_PREVIEW_AUDIENCES = ["FACEBOOK", "MANAGED_ACCOUNT"] as const;
+export type AdPreviewAudience = (typeof AD_PREVIEW_AUDIENCES)[number];
+
+export type AdPreviewLink = { url: string; audience: AdPreviewAudience; code: string; key: string };
+
+const PREVIEW_CODE_RE = /^[A-Za-z0-9]{6,40}$/;
+
+/**
+ * `https://fb.me/adspreview/facebook/<mã>` (hoặc `/managedaccount/<mã>`) → loại + mã.
+ *
+ * Link này KHÔNG mang Ad ID: nó chuyển hướng tới một `encrypted_experience_id` đã mã hoá, và không
+ * đăng nhập thì Facebook trả 400. ERP KHÔNG mở link, KHÔNG giải mã, KHÔNG cào trang — nó hỏi Meta
+ * trường `preview_shareable_link` của từng mẩu rồi so khớp (`findAdsByPreviewLinks`).
+ *
+ * `allowBare`: dạng cũ `https://fb.me/<mã>` — chính mã đó, cùng đích với dạng `/adspreview/facebook/`
+ * (đo 03/10/2026). Chỉ bật cho giá trị Meta trả về; người dán `fb.me/<chữ>` có thể là link rút gọn
+ * của một fanpage, nên ô nhập chỉ nhận dạng có `/adspreview/`.
+ */
+export function parseAdPreviewLink(raw: string | null | undefined, opts: { allowBare?: boolean } = {}): AdPreviewLink | null {
+  const text = (raw ?? "").trim();
+  if (!text) return null;
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+  } catch {
+    return null;
+  }
+  if (!/^(www\.)?fb\.me$/i.test(url.hostname)) return null;
+  const parts = url.pathname.split("/").filter(Boolean);
+  let audience: AdPreviewAudience;
+  let code: string;
+  if (parts.length === 3 && parts[0].toLowerCase() === "adspreview") {
+    const kind = parts[1].toLowerCase();
+    if (kind === "facebook") audience = "FACEBOOK";
+    else if (kind === "managedaccount") audience = "MANAGED_ACCOUNT";
+    else return null;
+    code = parts[2];
+  } else if (opts.allowBare && parts.length === 1) {
+    audience = "FACEBOOK";
+    code = parts[0];
+  } else return null;
+  if (!PREVIEW_CODE_RE.test(code)) return null;
+  return { url: text, audience, code, key: `${audience}:${code}` };
+}
+
+export type AdIdList = {
+  adIds: string[];
+  invalid: { raw: string; reason: string }[];
+  duplicates: number;
+  overflow: number;
+  /** Link chia sẻ xem trước — chưa phải Ad ID; máy chủ dò Ad ID qua `preview_shareable_link`. */
+  previewLinks: AdPreviewLink[];
+};
 
 /**
  * Ô "dán nhiều mã": mỗi dòng (hoặc cách nhau dấu phẩy / chấm phẩy / khoảng trắng) một mã. URL
  * không bị cắt theo khoảng trắng bên trong vì URL không chứa khoảng trắng. Trùng thì gộp; quá
- * `META_AD_POST_BATCH_MAX` thì phần thừa được ĐẾM và báo, không cắt im lặng.
+ * `META_AD_POST_BATCH_MAX` thì phần thừa được ĐẾM và báo, không cắt im lặng. Link chia sẻ
+ * `fb.me/adspreview/…` đi riêng vào `previewLinks` (cũng gộp trùng theo khoá).
  */
 export function parseAdIdList(text: string, max = META_AD_POST_BATCH_MAX): AdIdList {
   const tokens = (text ?? "").split(/[\n\r,;\t ]+/).map((s) => s.trim()).filter(Boolean);
   const seen = new Set<string>();
   const adIds: string[] = [];
   const invalid: { raw: string; reason: string }[] = [];
+  const previewLinks: AdPreviewLink[] = [];
   let duplicates = 0;
   let overflow = 0;
   for (const token of tokens) {
+    const link = parseAdPreviewLink(token);
+    if (link) {
+      if (seen.has(link.key)) duplicates += 1;
+      else {
+        seen.add(link.key);
+        previewLinks.push(link);
+      }
+      continue;
+    }
     const r = normalizeAdIdInput(token);
     if (!r.ok) {
       invalid.push({ raw: r.raw, reason: r.reason });
@@ -95,7 +167,7 @@ export function parseAdIdList(text: string, max = META_AD_POST_BATCH_MAX): AdIdL
     if (adIds.length >= max) overflow += 1;
     else adIds.push(r.adId);
   }
-  return { adIds, invalid, duplicates, overflow };
+  return { adIds, invalid, duplicates, overflow, previewLinks };
 }
 
 export type ParsedStory = { objectStoryId: string; pageId: string; postId: string };

@@ -10,7 +10,8 @@ import { ConnectorUnavailableError } from "@/lib/platform/credentials";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { resolveAdPosts } from "@/lib/integrations/facebook/ad-post-resolver";
 import { erpFanpageNames, loadAdPostErpContext, saveAdPostResolutions, type AdPostErpContext, type AdPostSaveResult } from "@/lib/integrations/facebook/ad-post-store";
-import { emptyResolution, META_AD_POST_BATCH_MAX, META_AD_POST_ERROR_LABEL, parseAdIdList, postOpenUrl, type AdPostResolution } from "@/lib/constants/meta-ad-post";
+import { findAdsByPreviewLinks, type PreviewLinkScan } from "@/lib/integrations/facebook/ad-preview-link";
+import { emptyResolution, META_AD_POST_BATCH_MAX, META_AD_POST_ERROR_LABEL, parseAdIdList, postOpenUrl, type AdPostResolution, type AdPreviewLink } from "@/lib/constants/meta-ad-post";
 import type { SessionUser } from "@/lib/auth/session";
 
 /**
@@ -31,9 +32,21 @@ export type AdPostRow = AdPostResolution & {
   erp: AdPostErpContext | null;
 };
 
+/** Link chia sẻ `fb.me/adspreview/…` → Ad ID mà Meta khai mang đúng link đó (hoặc lý do chưa thấy). */
+export type PreviewLinkOutcome = { url: string; adId: string | null; reason: string | null };
+
 export type ResolveAdPostsResult =
   | { error: string }
-  | { ok: true; rows: AdPostRow[]; invalid: { raw: string; reason: string }[]; duplicates: number; overflow: number; canSync: boolean };
+  | {
+      ok: true;
+      rows: AdPostRow[];
+      invalid: { raw: string; reason: string }[];
+      duplicates: number;
+      overflow: number;
+      canSync: boolean;
+      previewLinks: PreviewLinkOutcome[];
+      previewScan: { scannedAds: number; scannedAccounts: number; totalAccounts: number; capped: boolean } | null;
+    };
 
 export type SyncAdPostsResult = { error: string } | { ok: true; rows: AdPostRow[]; saved: AdPostSaveResult };
 
@@ -103,27 +116,66 @@ function summary(rows: AdPostRow[]) {
 
 const resolveInput = z.string().max(20_000, "Dán tối đa khoảng 50 mã mỗi lượt.");
 
-/** TRA: một hoặc nhiều Ad ID (hoặc link `feed_demo_ad=`). Chỉ đọc Meta; không ghi CSDL. */
+/**
+ * Link chia sẻ → Ad ID: hỏi Meta `preview_shareable_link` theo từng tài khoản quảng cáo (tài khoản đang
+ * hoạt động dò trước). Kết nối Meta không dùng được ⇒ mỗi link một lý do, không ném lên trang.
+ */
+async function runPreviewScan(links: AdPreviewLink[]): Promise<PreviewLinkScan | { notConfigured: true }> {
+  try {
+    const graph = getFacebookAdsClient();
+    const accounts = await graph.listAdAccounts();
+    const accountIds = [...accounts].sort((a, b) => Number(b.status === 1) - Number(a.status === 1)).map((a) => a.accountId);
+    return await findAdsByPreviewLinks(links, { graph, accountIds });
+  } catch (error) {
+    if (!isNotConfigured(error)) throw error;
+    return { notConfigured: true };
+  }
+}
+
+/** TRA: một hoặc nhiều Ad ID (link `feed_demo_ad=`, hoặc link chia sẻ `fb.me/adspreview/…`). Chỉ đọc Meta; không ghi CSDL. */
 export async function resolveMetaAdPosts(input: string): Promise<ResolveAdPostsResult> {
   const parsed = resolveInput.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Đầu vào không hợp lệ." };
   const list = parseAdIdList(parsed.data);
-  if (!list.adIds.length) {
-    return list.invalid.length ? { error: `Không có mã quảng cáo hợp lệ: ${list.invalid[0].reason}` } : { error: "Dán một Ad ID hoặc link xem trước quảng cáo (feed_demo_ad=…)." };
+  if (!list.adIds.length && !list.previewLinks.length) {
+    return list.invalid.length ? { error: `Không có mã quảng cáo hợp lệ: ${list.invalid[0].reason}` } : { error: "Dán một Ad ID, link xem trước (feed_demo_ad=…) hoặc link chia sẻ fb.me/adspreview/…" };
   }
   const guard = await guardRead();
   if ("error" in guard) return guard;
 
-  const rows = await runResolve(list.adIds);
+  const adIds = [...list.adIds];
+  const invalid = list.invalid;
+  let duplicates = list.duplicates;
+  let overflow = list.overflow;
+  const previewLinks: PreviewLinkOutcome[] = [];
+  let previewScan: Extract<ResolveAdPostsResult, { ok: true }>["previewScan"] = null;
+  if (list.previewLinks.length) {
+    const scan = await runPreviewScan(list.previewLinks);
+    if ("notConfigured" in scan) {
+      for (const l of list.previewLinks) previewLinks.push({ url: l.url, adId: null, reason: META_AD_POST_ERROR_LABEL.NOT_CONFIGURED });
+    } else {
+      previewScan = { scannedAds: scan.scannedAds, scannedAccounts: scan.scannedAccounts, totalAccounts: scan.totalAccounts, capped: scan.capped };
+      for (const m of scan.matches) {
+        previewLinks.push({ url: m.link.url, adId: m.adId, reason: m.reason });
+        if (!m.adId) continue;
+        if (adIds.includes(m.adId)) duplicates += 1;
+        else if (adIds.length >= META_AD_POST_BATCH_MAX) overflow += 1;
+        else adIds.push(m.adId);
+      }
+    }
+  }
+
+  const rows = adIds.length ? await runResolve(adIds) : [];
   await audit({
     userId: guard.user.id,
     userEmail: guard.user.email,
     action: "META_AD_POST_LOOKUP",
     entity: "fb_ads",
-    after: summary(rows),
+    after: { ...summary(rows), previewLinks: previewLinks.map((p) => ({ adId: p.adId, found: Boolean(p.adId) })), previewScan },
     reason: "Tra tay mẩu quảng cáo → bài viết (chỉ đọc Meta)",
   });
-  return { ok: true, rows: forClient(rows), invalid: list.invalid, duplicates: list.duplicates, overflow: list.overflow, canSync: can(guard.user, "expenses:write") };
+  if (!rows.length) return { error: previewLinks.find((p) => p.reason)?.reason ?? invalid[0]?.reason ?? "Không có mã quảng cáo hợp lệ." };
+  return { ok: true, rows: forClient(rows), invalid, duplicates, overflow, canSync: can(guard.user, "expenses:write"), previewLinks, previewScan };
 }
 
 const syncInput = z.array(z.string().regex(/^\d{5,25}$/, "Mã quảng cáo phải toàn chữ số.")).min(1).max(META_AD_POST_BATCH_MAX);

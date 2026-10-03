@@ -376,6 +376,24 @@ export class FacebookAdsClient {
   }
 
   /**
+   * Mẩu của MỘT tài khoản kèm `preview_shareable_link`, từng trang 100 — cho bộ dò link chia sẻ
+   * (`ad-preview-link.ts`). Generator để người gọi dừng ngay khi đã thấy, không kéo hết tài khoản.
+   * Lỗi NÉM lên: người gọi phân loại và quyết định dò tiếp tài khoản sau hay dừng.
+   */
+  async *adPreviewLinkPages(accountId: string): AsyncGenerator<{ adId: string; link: string }[]> {
+    let record = await this.get(`act_${accountId.replace(/^act_/, "")}/ads`, { fields: "id,preview_shareable_link", limit: 100 });
+    for (;;) {
+      yield asArray(record.data)
+        .map((x) => asRecord(x))
+        .map((x) => ({ adId: str(x.id), link: str(x.preview_shareable_link) }))
+        .filter((x) => x.adId);
+      const next = str(asRecord(record.paging).next);
+      if (!next) return;
+      record = await this.get(next);
+    }
+  }
+
+  /**
    * TRA NHÓM QUẢNG CÁO THEO MÃ. Trả về chiến dịch cha và tài khoản — hai thứ cần để quy kết.
    *
    * Tách khỏi `getAdsByIds` vì nút adset KHÔNG có trường `adset_id`/`creative`: xin bộ trường của
