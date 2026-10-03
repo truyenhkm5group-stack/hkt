@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { saveFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { chatTurn, conversationView, openConversation, resumeConversationToAi } from "@/lib/sales-chatbot/engine";
 import { bindOrganization } from "@/lib/platform/background";
+import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 
@@ -84,6 +85,37 @@ export async function unpublishPlaybookAction(): Promise<PlaybookResult> {
   return r;
 }
 
+// ─── «Bot tự học» (lib/sales-chatbot/lessons.ts) ───
+
+export async function setLessonsEnabledAction(enabled: boolean): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await setLessonsEnabled(user, Boolean(enabled));
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+export async function saveLessonsAction(lessons: unknown): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await saveLessons(user, lessons);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+export async function rollbackLessonsAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await rollbackLessons(user);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+/** «Học ngay»: kiểm quyền rồi học SAU phản hồi, trong đúng ngữ cảnh tổ chức. */
+export async function learnLessonsNowAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await checkLearnNow(user);
+  if ("error" in r) return r;
+  after(await bindOrganization(async () => void (await learnLessons({ force: true, actor: { id: user.id, name: user.email } }))));
+  return r;
+}
 
 /** «Trả lại cho AI» — người đã xử lý xong hội thoại CẦN NGƯỜI XỬ LÝ; tin khách kế tiếp bot trả lời lại. */
 export async function resumeConversationAction(id: string): Promise<{ ok: true; message: string } | { error: string }> {
