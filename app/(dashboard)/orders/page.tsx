@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download, Plus, ShieldAlert } from "lucide-react";
-import { loadAutoConfirmComplete, loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
+import { erpNativeView, loadAutoConfirmComplete, loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
+import { ErpNativeButton } from "@/app/(dashboard)/orders/erp-native-button";
 import { AutoConfirmButton } from "@/app/(dashboard)/orders/auto-confirm-button";
 import { DeliveryFeeButton } from "@/app/(dashboard)/orders/delivery-fee-button";
 import { can } from "@/lib/auth/session";
@@ -40,6 +41,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
   // Tạo / in vận đơn hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + hãng có kết nối đang bật.
   const carrierBulk = createGate.allowed ? await bulkCarriers(user) : [];
+  // Shop đến từ Pancake (CSDL có đơn Pancake đã nhập): khung tuyên bố «Chuyển hẳn sang ERP» — ORDER_OUTCOME.md 11.3.
+  const erpNative = can(user, "settings:manage") ? await erpNativeView(user) : null;
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -60,6 +63,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </Link>
               </Button>
             ) : null}
+            {erpNative?.hasSyncedOrders ? <ErpNativeButton view={erpNative} /> : null}
             {deliveryFee ? <AutoConfirmButton enabled={deliveryFee.autoConfirm} /> : null}
             {deliveryFee ? <DeliveryFeeButton fee={deliveryFee.fee} /> : null}
             {/*

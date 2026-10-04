@@ -125,6 +125,7 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 | đơn tạo tay, có chứng từ thu đủ nhưng **chưa có phiếu giao** | đã thu đủ | như cũ: `NOT_SHIPPED` — tiền KHÔNG bao giờ suy ra giao hàng |
 | đơn tạo tay, chưa có phiếu giao | bất kỳ | như cũ: `NOT_SHIPPED` (huỷ ⇒ `CANCELLED`) — không bao giờ `DELIVERED` |
 | đơn tạo tay, **giao không thành công** (người bấm, có lý do — mục 11.2) | bất kỳ | **`RETURNED`** (stage `RETURNED`, không vận đơn) — hàng quay lại tồn ngay |
+| đơn tạo tay còn sống, lần gửi mới nhất **bị hãng huỷ**, chưa gửi lại (mục 11.5) | bất kỳ | **`NOT_SHIPPED`** — huỷ vận đơn không phải huỷ đơn |
 
 Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 50.000, `maxCodForFakeDelivery`
 100.000). Không hard-code số ở nơi khác.
@@ -256,9 +257,14 @@ người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ 
 > «Báo cáo lợi nhuận: doanh thu + giá vốn đơn tay tính **khi đã giao** (danh nghĩa); lợi nhuận tiền thật chỉ phần đã có
 > phiếu thu.» · «Phí vận chuyển đồng giá **40K / 1 đơn giao thành công**.»
 
-- Phạm vi: **tổ chức KHÔNG đồng bộ đơn**, nhận ra bằng chính CSDL của tổ chức — không có đơn nào ngoài `erp-`
-  (`IN_SALES_REPORTS` trong `lib/queries/manual-order-sql.ts`). Tổ chức đồng bộ Pancake (nhà) giữ nguyên: đơn `erp-` lọt vào
-  vẫn đứng ngoài, luật 3.9 không đổi một đơn (`tests/pilot-orders.test.ts`).
+- Phạm vi: **tổ chức KHÔNG đồng bộ đơn**, nhận ra bằng chính CSDL của tổ chức — không có đơn nào ngoài `erp-` — **hoặc
+  tổ chức ĐÃ TUYÊN BỐ chuyển hẳn sang ERP** (`IN_SALES_REPORTS` trong `lib/queries/manual-order-sql.ts`). Tổ chức đồng bộ
+  Pancake (nhà) giữ nguyên: đơn `erp-` lọt vào vẫn đứng ngoài, luật 3.9 không đổi một đơn (`tests/pilot-orders.test.ts`).
+- **Chuyển hẳn sang ERP** (chủ shop chốt 04/10/2026, nguyên văn lựa chọn: «Nút "Chuyển hẳn sang ERP"»): shop đến từ Pancake
+  nhập lịch sử đơn Pancake rồi tắt kết nối thì CSDL có đơn không `erp-`, và phép nhận diện theo dữ liệu đẩy MỌI đơn ERP mới
+  ra khỏi báo cáo. Quản trị shop bấm MỘT lần (`settings['orders.erpNative']` = `{ since, by }`, có nhật ký): từ đó đơn ERP
+  vào mọi báo cáo; đơn Pancake đã nhập giữ nguyên làm lịch sử. Chỉ bấm được khi tổ chức đã thôi đồng bộ đơn (kết nối Pancake
+  POS tắt) và KHÔNG BAO GIỜ ở tổ chức nhà.
 - `REVENUE_RECOGNIZED_ON_DELIVERY = IN_SALES_REPORTS`: mọi tổng tiền dựng trên `DELIVERED` (báo cáo lợi nhuận, Tổng quan,
   marketer, lương / hoa hồng, sản phẩm, CRM…) cộng đơn tay đã giao — là doanh thu **danh nghĩa**. Báo cáo danh nghĩa (đơn đã
   xác nhận × tỷ lệ giao) cũng có đơn tay. Chiều **tiền thật** không đổi: `ORDER_OUTCOME_VERIFIED`, «Thực thu đơn tay» theo
@@ -281,4 +287,15 @@ người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ 
 - KHÔNG đổi `ORDER_OUTCOME` — đơn vẫn chỉ `DELIVERED` bằng phiếu giao (mục 11). «Gần như không hoàn» đi qua Giả định của
   báo cáo (`profit.assumptions.defaultReturnRate`), một con số dùng chung cho báo cáo lợi nhuận danh nghĩa và `/ads`.
 - `WAITING` (chờ hàng) là lựa chọn của người ⇒ không tự đổi. Vượt hạn mức nợ của khách ⇒ giữ `NEW`.
+
+### 11.5. Huỷ vận đơn ≠ huỷ đơn — đơn ERP (chủ shop chốt 04/10/2026)
+
+> Câu hỏi: «Đơn ERP còn "Đã xác nhận" mà vận đơn bị hãng huỷ (VTP 107 / GHN cancel) và chưa gửi lại: báo cáo nên xếp đơn
+> vào đâu?» — chủ shop chọn: **«Chưa gửi»**.
+
+- Đơn `erp-` còn sống (`orders.stage` không phải huỷ / xoá) mà lần gửi mới nhất mang chứng từ huỷ của ĐVVC (mã huỷ mục 4 /
+  4.1, hoặc chặng `CANCELLED` dựng từ chứng từ ĐVVC) ⇒ **`NOT_SHIPPED`**: hàng còn trong kho, đơn chờ lần gửi mới hoặc chờ
+  người huỷ đơn. Nhánh đứng NGAY TRƯỚC nhánh huỷ theo chứng từ; mã hoàn / tiêu huỷ vẫn thắng nó.
+- Tạo lần gửi mới ⇒ kết quả theo lần gửi mới (`PRIMARY_ATTEMPT`). Người huỷ đơn ⇒ `CANCELLED` như cũ.
+- Đơn Pancake (nhà) không đổi: hãng huỷ thì Pancake huỷ đơn, kết quả `CANCELLED` như mục 4.
 

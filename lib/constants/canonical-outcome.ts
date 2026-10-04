@@ -38,4 +38,11 @@
  * đó thành cũ theo điều kiện tươi mới và `ORDER_OUTCOME_FAST` tự tính lại. Tăng số ở đây chỉ làm mọi dòng của nhà
  * thành cũ cùng lúc mà không một con số nào đổi.
  */
+/*
+ * ─── 04/10/2026: mã cuối GHN / GHTK (mục 4.1) + «huỷ vận đơn ≠ huỷ đơn» của đơn ERP (mục 11.5) — CỐ Ý KHÔNG tăng số ───
+ *
+ * Cùng lý do với G-ORDER: lúc deploy production CHƯA có sự kiện `GHN_WEBHOOK` / `GHTK_WEBHOOK` nào và chưa có đơn `erp-` nào
+ * mang vận đơn ERP tạo (POS tự chủ vừa lên) ⇒ không dòng vật chất hoá nào đổi kết luận. Sự kiện hãng mới về làm vận đơn và
+ * đơn của ĐÚNG kiện đó thành cũ theo điều kiện tươi mới. Tăng số chỉ làm mọi dòng của nhà thành cũ cùng lúc vô ích.
+ */
 export const CANONICAL_OUTCOME_VERSION = 3;
