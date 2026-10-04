@@ -19,7 +19,8 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
-DB_PATH = os.environ.get("APP_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pancake_ai.db"))
+# Biến để trống trong .env (APP_DB_PATH=) cũng coi như chưa đặt
+DB_PATH = os.environ.get("APP_DB_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pancake_ai.db")
 
 _local = threading.local()
 _init_lock = threading.Lock()
