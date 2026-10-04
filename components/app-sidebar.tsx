@@ -97,6 +97,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/customers/receivables": HandCoins,
   "/customers/reorder": RefreshCw,
   "/appointments": CalendarClock,
+  "/warranty": ShieldCheck,
   "/outreach": HeartHandshake,
   "/chatbot": Bot,
   "/ads": Megaphone,

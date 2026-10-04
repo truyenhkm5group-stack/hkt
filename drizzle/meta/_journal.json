@@ -1366,6 +1366,13 @@
       "when": 1790766700000,
       "tag": "0195_sales_chat_inbound_images",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1790766760000,
+      "tag": "0196_warranty",
+      "breakpoints": true
     }
   ]
 }
