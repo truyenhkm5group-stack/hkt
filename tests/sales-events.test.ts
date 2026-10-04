@@ -1,5 +1,5 @@
 /**
- * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0200 · lib/sales-chatbot/events*.ts · docs/productization/MIGRATION_PLAN.md M2).
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0201 · lib/sales-chatbot/events*.ts · docs/productization/MIGRATION_PLAN.md M2).
  *
  * Phần THUẦN: so ảnh chụp trước / sau lượt ⇒ đúng sự kiện, đúng khoá chống trùng; mã lý do chuyển người; upsell nhận / từ chối.
  * Phần TỔ CHỨC THẬT `se-events`: khách web hỏi giá → để lại SĐT → đơn nháp → chốt — mỗi bước một sự kiện có mốc, đơn của AI
@@ -52,7 +52,7 @@ const draft = (lines: [string, number, number][], orderId: string | null = "erp-
 function testPure() {
   // Danh sách loại trong mã = danh sách trong CHECK của CSDL (hai bản khai, phải khớp từng chữ).
   const schemaSrc = readFileSync("db/schema.ts", "utf8");
-  const migration = readFileSync("drizzle/0200_sales_conversation_events.sql", "utf8");
+  const migration = readFileSync("drizzle/0201_sales_conversation_events.sql", "utf8");
   const list = SALES_EVENT_TYPES.map((t) => `'${t}'`).join(",");
   assert.ok(schemaSrc.includes(list), "CHECK loại sự kiện trong db/schema.ts phải khớp SALES_EVENT_TYPES");
   assert.ok(migration.includes(list), "CHECK loại sự kiện trong migration phải khớp SALES_EVENT_TYPES");

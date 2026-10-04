@@ -1324,11 +1324,11 @@ export const orders = pgTable(
     timeSendPartner: ts("time_send_partner"),
     estimateDeliveryDate: ts("estimate_delivery_date"),
     /**
-     * NGUỒN TẠO ĐƠN (0200 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
+     * NGUỒN TẠO ĐƠN (0201 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
      * ghi đơn hộ nhân viên chốt. `NULL` = trước khi có cột, hoặc đường tạo chưa khai — KHÔNG đoán ngược cho dòng cũ (luật 35).
      */
     origin: text("origin"),
-    /** Hội thoại chatbot sinh ra đơn (0200) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
+    /** Hội thoại chatbot sinh ra đơn (0201) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
     salesConversationId: text("sales_conversation_id"),
     raw: jsonb("raw"),
     syncedAt: ts("synced_at").notNull().defaultNow(),
@@ -9855,7 +9855,7 @@ export const salesChatMessages = pgTable(
 );
 
 /**
- * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0200 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0201 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
  * dòng có mốc: khách nhắn, AI trả lời, chuyển bước, báo giá, khách để lại SĐT, mời / nhận upsell, đơn nháp / chốt, chuyển
  * người, nhân viên nhận, trả lại AI, nhắc khách. Trước sổ này phễu chỉ sống trong `state` jsonb và bị xoá khi sang lượt mua
  * mới — không đo được «AI tự chốt bao nhiêu», «upsell mang thêm bao nhiêu». Không có dòng = chưa đo (trước ngày bật), KHÔNG
@@ -10310,4 +10310,128 @@ export const wholesaleApiUsage = pgTable(
     error: text("error"),
   },
   (t) => [index("wholesale_api_usage_at_idx").on(t.at), index("wholesale_api_usage_campaign_idx").on(t.campaignId, t.at)],
+);
+
+// ═══════════ PHIẾU CÔNG VIỆC HIỆN TRƯỜNG (0200, module `field_jobs` — docs/verticals/home-service.md) ═══════════
+
+/**
+ * Một việc tại nhà khách. Tổng / đã thu / còn nợ / hạn bảo hành dịch vụ KHÔNG lưu cột — tính lúc đọc
+ * (`lib/constants/field-jobs.ts`). Người thao tác đi bằng khoá tài khoản (luật 34); người ký nghiệm thu là TÊN gõ lại từ biên bản.
+ */
+export const fieldJobs = pgTable(
+  "field_jobs",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    parentJobId: text("parent_job_id").references((): AnyPgColumn => fieldJobs.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    address: text("address").notNull().default(""),
+    description: text("description").notNull().default(""),
+    status: text("status").notNull().default("QUOTED"),
+    acceptedAt: ts("accepted_at"),
+    acceptedNote: text("accepted_note").notNull().default(""),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    scheduledStart: ts("scheduled_start"),
+    scheduledEnd: ts("scheduled_end"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    signedByName: text("signed_by_name"),
+    completionNote: text("completion_note").notNull().default(""),
+    warrantyMonths: integer("warranty_months"),
+    cancelReason: text("cancel_reason"),
+    cancelledAt: ts("cancelled_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("field_jobs_code_uq").on(t.code),
+    index("field_jobs_customer_idx").on(t.customerId),
+    index("field_jobs_assignee_slot_idx").on(t.assigneeUserId, t.scheduledStart),
+    index("field_jobs_status_idx").on(t.status, t.updatedAt),
+    check("field_jobs_status_check", sql`${t.status} IN ('QUOTED','ACCEPTED','SCHEDULED','IN_PROGRESS','DONE','CANCELLED')`),
+    check("field_jobs_title_check", sql`length(btrim(${t.title})) BETWEEN 1 AND 200`),
+    check("field_jobs_slot_check", sql`(${t.scheduledStart} IS NULL) = (${t.scheduledEnd} IS NULL) AND (${t.scheduledEnd} IS NULL OR ${t.scheduledEnd} > ${t.scheduledStart})`),
+    check("field_jobs_scheduled_check", sql`${t.status} NOT IN ('SCHEDULED','IN_PROGRESS') OR (${t.assigneeUserId} IS NOT NULL AND ${t.scheduledStart} IS NOT NULL)`),
+    check("field_jobs_done_check", sql`${t.status} <> 'DONE' OR (${t.completedAt} IS NOT NULL AND length(btrim(coalesce(${t.signedByName}, ''))) >= 1)`),
+    check("field_jobs_cancel_check", sql`${t.status} <> 'CANCELLED' OR length(btrim(coalesce(${t.cancelReason}, ''))) >= 3`),
+    check("field_jobs_warranty_check", sql`${t.warrantyMonths} IS NULL OR ${t.warrantyMonths} BETWEEN 1 AND 120`),
+  ],
+);
+
+/** Dòng báo giá của phiếu (0200): chữ tự do · số lượng nguyên · đơn giá VND. */
+export const fieldJobLines = pgTable(
+  "field_job_lines",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitPrice: integer("unit_price").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("field_job_lines_job_idx").on(t.jobId, t.position),
+    check("field_job_lines_qty_check", sql`${t.quantity} BETWEEN 1 AND 10000`),
+    check("field_job_lines_price_check", sql`${t.unitPrice} >= 0`),
+    check("field_job_lines_text_check", sql`length(btrim(${t.description})) BETWEEN 1 AND 300`),
+  ],
+);
+
+/** Phiếu thu theo đợt của phiếu công việc (0200). Huỷ phiếu thu bắt buộc lý do, không xoá. */
+export const fieldJobReceipts = pgTable(
+  "field_job_receipts",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    amount: integer("amount").notNull(),
+    method: text("method").notNull(),
+    paidAt: ts("paid_at").notNull(),
+    note: text("note").notNull().default(""),
+    status: text("status").notNull().default("CONFIRMED"),
+    voidReason: text("void_reason"),
+    voidedAt: ts("voided_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("field_job_receipts_job_idx").on(t.jobId),
+    check("field_job_receipts_amount_check", sql`${t.amount} > 0`),
+    check("field_job_receipts_method_check", sql`${t.method} IN ('CASH','BANK','OTHER')`),
+    check("field_job_receipts_status_check", sql`${t.status} IN ('CONFIRMED','VOIDED')`),
+    check("field_job_receipts_void_check", sql`${t.status} <> 'VOIDED' OR length(btrim(coalesce(${t.voidReason}, ''))) >= 3`),
+  ],
+);
+
+/** Ảnh trước / sau của phiếu công việc (0200) — đã thu nhỏ ở trình duyệt, ≤ 2 MB. */
+export const fieldJobPhotos = pgTable(
+  "field_job_photos",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    phase: text("phase").notNull(),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    data: bytea("data").notNull(),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    uploadedByName: text("uploaded_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("field_job_photos_job_idx").on(t.jobId, t.phase),
+    check("field_job_photos_phase_check", sql`${t.phase} IN ('BEFORE','AFTER')`),
+    check("field_job_photos_type_check", sql`${t.contentType} IN ('image/jpeg','image/png','image/webp')`),
+    check("field_job_photos_bytes_check", sql`${t.bytes} BETWEEN 1 AND 2000000`),
+  ],
 );

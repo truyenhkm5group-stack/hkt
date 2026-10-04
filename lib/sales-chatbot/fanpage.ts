@@ -326,7 +326,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
         .limit(1);
       if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     }
-    // Sổ sự kiện (0200): ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — không ghi lại mỗi tin của nhân viên.
+    // Sổ sự kiện (0201): ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — không ghi lại mỗi tin của nhân viên.
     const [took] = await db.select({ id: c.id, status: c.status }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)))).limit(1);
     if (took && took.status !== "HANDOFF") await recordConversationEvent(took.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${ev.messageId}` });
     // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
