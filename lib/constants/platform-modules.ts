@@ -64,6 +64,7 @@ export const MODULE_KEYS = [
   "stays",
   "lots",
   "field_jobs",
+  "real_estate",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -581,6 +582,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["field_jobs:view", "field_jobs:write"],
     homeOptIn: true,
     why: "Dịch vụ tại nhà bán một VIỆC chứ không bán hàng: không kho, không vận chuyển; giá là báo giá chữ tự do, phát sinh ngay tại nhà khách, tiền thu theo đợt. Khách là khách của module Khách hàng; tổng / đã thu / còn nợ và hạn bảo hành KHÔNG lưu cột mà tính từ dòng báo giá, phiếu thu và ngày nghiệm thu. Tắt cho tổ chức nhà (0200)."
+  },
+  {
+    key: "real_estate",
+    label: "Bảng hàng bất động sản",
+    description: "Sàn / đại lý phân phối dự án: bảng hàng theo căn, giữ chỗ có hạn không cho hai sale giữ trùng một căn, cọc, ký bán, chủ đầu tư khoá căn — mọi sale cùng nhìn một bảng.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: [],
+    features: [],
+    routes: ["/real-estate"],
+    permissions: ["real_estate:view", "real_estate:hold", "real_estate:manage"],
+    homeOptIn: true,
+    why: "Bất động sản bán CĂN, mỗi căn bán đúng một lần, cho nhiều sale cùng lúc — không có kho số lượng, không vận chuyển. Một căn hai sale giữ là mất khách và mất uy tín sàn, nên «nhiều nhất một giữ chỗ / một cọc còn hiệu lực mỗi căn» chặn ở CSDL; trạng thái căn tính lúc đọc. Tắt cho tổ chức nhà (0201)."
   },
 ];
 
