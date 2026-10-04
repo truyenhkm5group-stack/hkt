@@ -11,7 +11,23 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DEFAULT_PLAN_KEY } from "@/lib/entitlements/check";
-import { DEFAULT_SITE_DOMAIN, SITE_PAGE_PATH, siteAppOrigin, siteDomainFrom, siteHostKind, siteRoute } from "@/lib/platform/site-host";
+import { appOriginForHost, redirectUri } from "@/lib/auth/oauth";
+import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
+import {
+  brandAppOrigin,
+  brandFromHeader,
+  brandOfHost,
+  chotdonDomainFrom,
+  DEFAULT_CHOTDON_DOMAIN,
+  DEFAULT_SITE_DOMAIN,
+  ERP_SITE_BRAND_HEADER,
+  matchSite,
+  SITE_PAGE_PATH,
+  siteAppOrigin,
+  siteDomainFrom,
+  siteHostKind,
+  siteRoute,
+} from "@/lib/platform/site-host";
 import { getPublicSiteData } from "@/lib/queries/public-site";
 
 export function testPublicSiteHost() {
@@ -95,7 +111,7 @@ export function testPublicSiteSource() {
   const block = caddy.slice(caddy.indexOf("{$SITE_DOMAIN"));
   assert.ok(block.length > 20 && /tls\s*\{\s*on_demand\s*\}/.test(block), "khối tên miền gốc phải dùng on_demand TLS");
   const route = readFileSync("app/api/platform/domain-allowed/route.ts", "utf8");
-  assert.ok(route.includes("siteHostKind("), "cửa hỏi chứng chỉ phải nhận đúng host của trang giới thiệu");
+  assert.ok(route.includes("matchSite("), "cửa hỏi chứng chỉ phải nhận đúng host của trang giới thiệu");
 
   /*
     TRẦN ĐĂNG KÝ ĐI TỪ GITHUB VARIABLE TỚI .env. Trước 03/10/2026 deploy không ghi `PLATFORM_SIGNUP_MODE`, nên trần luôn
@@ -113,6 +129,89 @@ export function testPublicSiteSource() {
   assert.ok(khoi.includes("off|invite|open) upsert_env PLATFORM_SIGNUP_MODE"), "ba giá trị hợp lệ được ghi nguyên");
   assert.ok(khoi.includes("\"\") sed -i -E '/^PLATFORM_SIGNUP_MODE=/d' .env"), "Variable rỗng ⇒ xoá dòng, trần về mặc định");
   assert.ok(khoi.includes("*) upsert_env PLATFORM_SIGNUP_MODE off"), "giá trị lạ ⇒ đóng đăng ký, không đoán");
+}
+
+/**
+ * CHỐT ĐƠN TỰ ĐỘNG (chủ nền tảng chốt 04/10/2026): `chotdontudong.com` + `www.` là mặt tiền bản Chốt Đơn, `app.` là phần
+ * mềm — cùng app, cùng CSDL. Những điều phải đúng mãi:
+ *  · thương hiệu chỉ MÁY CHỦ quyết (header đặt sau khi xoá `x-erp-*` của trình duyệt); giá trị lạ ⇒ `vnx`;
+ *  · `app.<miền>` KHÔNG phải mặt tiền (không bị chuyển hướng như tên miền gốc) — nó là phần mềm;
+ *  · OAuth chỉ nhận đúng hai gốc phần mềm, KHÔNG dựng `redirect_uri` từ header Host thô;
+ *  · đăng ký trên host Chốt Đơn chọn sẵn «Chỉ cần AI bán hàng».
+ */
+export function testChotDonBrand() {
+  const env = { SITE_DOMAIN: undefined, CHOTDON_DOMAIN: undefined, APP_URL: "https://erp.vnxcommerce.com", CHOTDON_APP_URL: undefined };
+  assert.equal(chotdonDomainFrom(undefined), DEFAULT_CHOTDON_DOMAIN);
+  assert.equal(chotdonDomainFrom("off"), null);
+  assert.deepEqual(matchSite("chotdontudong.com", env), { brand: "chotdon", kind: "APEX", domain: "chotdontudong.com" });
+  assert.deepEqual(matchSite("WWW.chotdontudong.com:443", env), { brand: "chotdon", kind: "WWW", domain: "chotdontudong.com" });
+  assert.deepEqual(matchSite("vnxcommerce.com", env), { brand: "vnx", kind: "APEX", domain: "vnxcommerce.com" });
+  assert.equal(matchSite("app.chotdontudong.com", env), null, "host phần mềm KHÔNG phải mặt tiền");
+  assert.equal(matchSite("erp.vnxcommerce.com", env), null);
+  assert.equal(matchSite("chotdontudong.com", { ...env, CHOTDON_DOMAIN: "off" }), null, "tắt ⇒ không khớp");
+  assert.deepEqual(matchSite("vnxcommerce.com", { ...env, CHOTDON_DOMAIN: "vnxcommerce.com" })?.brand, "vnx", "khai trùng tên miền ⇒ mặt tiền cũ không đổi chủ");
+
+  assert.equal(brandOfHost("app.chotdontudong.com", env), "chotdon");
+  assert.equal(brandOfHost("chotdontudong.com", env), "chotdon");
+  assert.equal(brandOfHost("erp.vnxcommerce.com", env), "vnx");
+  assert.equal(brandOfHost("app.chotdontudong.com.evil.com", env), "vnx", "đuôi giả mạo không thành thương hiệu");
+  assert.equal(brandOfHost(null, env), "vnx");
+  assert.equal(brandOfHost("app.chotdontudong.com", { ...env, CHOTDON_DOMAIN: "off" }), "vnx");
+  assert.equal(brandFromHeader("chotdon"), "chotdon");
+  assert.equal(brandFromHeader("CHOTDON"), "vnx", "giá trị lạ ⇒ vnx, không đoán");
+  assert.equal(brandFromHeader(null), "vnx");
+
+  assert.equal(brandAppOrigin("chotdon", env), "https://app.chotdontudong.com");
+  assert.equal(brandAppOrigin("chotdon", { ...env, CHOTDON_APP_URL: "https://ban.chotdontudong.com/" }), "https://ban.chotdontudong.com");
+  assert.equal(brandAppOrigin("chotdon", { ...env, CHOTDON_APP_URL: "https://chotdontudong.com" }), null, "gốc phần mềm trỏ về chính mặt tiền ⇒ không chuyển vòng tròn");
+  assert.equal(brandAppOrigin("vnx", env), "https://erp.vnxcommerce.com");
+
+  // Mặt tiền Chốt Đơn dẫn vào phần mềm của chính nó, giữ query.
+  const r = siteRoute({ host: "APEX", pathname: "/dang-ky", search: "?nganh=ai_sales", siteDomain: "chotdontudong.com", protocol: "https:", appOrigin: brandAppOrigin("chotdon", env) });
+  assert.deepEqual(r, { kind: "REDIRECT", url: "https://app.chotdontudong.com/start?nganh=ai_sales", status: 302 });
+  assert.deepEqual(siteRoute({ host: "APEX", pathname: "/", search: "", siteDomain: "chotdontudong.com", protocol: "https:", appOrigin: null }), { kind: "REWRITE", path: SITE_PAGE_PATH });
+
+  // OAuth: đường quay về theo gốc phần mềm của host — chỉ hai gốc trong danh sách.
+  assert.equal(redirectUri("google", "https://app.chotdontudong.com/"), "https://app.chotdontudong.com/login/oauth/google/callback");
+  const keys = ["SITE_DOMAIN", "CHOTDON_DOMAIN", "CHOTDON_APP_URL"] as const;
+  const saved = keys.map((k) => process.env[k]);
+  try {
+    for (const k of keys) delete process.env[k];
+    assert.equal(appOriginForHost("app.chotdontudong.com"), "https://app.chotdontudong.com");
+    assert.equal(appOriginForHost("evil.example"), env_appUrl(), "host lạ ⇒ APP_URL, không dựng từ Host thô");
+    assert.equal(appOriginForHost(null), env_appUrl());
+  } finally {
+    keys.forEach((k, i) => {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    });
+  }
+
+  // Đăng ký nhanh: ?nganh= hợp lệ thắng, host Chốt Đơn chọn sẵn AI bán hàng, giá trị lạ ⇒ mặc định.
+  assert.equal(initialQuickBusinessType(undefined, "chotdon"), "ai_sales");
+  assert.equal(initialQuickBusinessType(undefined, "vnx"), "food");
+  assert.equal(initialQuickBusinessType("spa", "chotdon"), "spa");
+  assert.equal(initialQuickBusinessType("manufacturing", "vnx"), "food", "ngành không có ở form nhanh ⇒ mặc định");
+
+  // Gác mã nguồn.
+  const mw = readFileSync("middleware.ts", "utf8");
+  const iStrip = mw.indexOf("for (const name of clientSent) headers.delete(name);");
+  const iBrand = mw.indexOf("headers.set(ERP_SITE_BRAND_HEADER");
+  assert.ok(iStrip > 0 && iBrand > iStrip, "header thương hiệu đặt SAU khi xoá x-erp-* của trình duyệt");
+  assert.ok(ERP_SITE_BRAND_HEADER.startsWith("x-erp-"), "header thương hiệu phải nằm trong vùng x-erp-* bị xoá");
+  const caddy = readFileSync("deploy/Caddyfile", "utf8");
+  const block = caddy.slice(caddy.indexOf("{$CHOTDON_DOMAIN"));
+  assert.ok(block.includes("app.{$CHOTDON_DOMAIN") && /tls\s*\{\s*on_demand\s*\}/.test(block), "khối Chốt Đơn: mặt tiền + app, chứng chỉ theo yêu cầu");
+  const allowed = readFileSync("app/api/platform/domain-allowed/route.ts", "utf8");
+  assert.ok(allowed.includes("matchSite(") && allowed.includes("chotdonAppHost("), "cửa hỏi chứng chỉ nhận đúng mặt tiền + host phần mềm Chốt Đơn");
+  const cb = readFileSync("app/login/oauth/[provider]/callback/route.ts", "utf8");
+  assert.ok(cb.includes("appOriginForHost(") && cb.includes("st.o !== origin"), "callback OAuth ở đúng host đã bắt đầu");
+  assert.ok(!cb.includes("env.appUrl"), "callback OAuth không còn cố định APP_URL");
+  console.log("✓ Chốt Đơn Tự Động: mặt tiền + app theo host, thương hiệu chỉ máy chủ đặt, OAuth hai gốc trong danh sách, đăng ký chọn sẵn AI bán hàng");
+}
+
+function env_appUrl(): string {
+  return (process.env.APP_URL?.trim() || "http://localhost:3000").replace(/\/$/, "");
 }
 
 export async function testPublicSiteData() {

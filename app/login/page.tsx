@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
-import { Bot, TrendingUp, Zap } from "lucide-react";
+import { Bot, Hand, ShieldCheck, TrendingUp, Zap } from "lucide-react";
 import { LoginForm } from "@/app/login/login-form";
-import { BrandGlyph, BrandWordmark } from "@/components/brand";
+import { BrandGlyph, BrandWordmark, ChotDonGlyph, ChotDonWordmark } from "@/components/brand";
+import { hostBrand } from "@/lib/platform/host-brand";
 import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { getSession } from "@/lib/auth/session";
 import { loginShouldStay } from "@/lib/constants/session-revocation";
@@ -21,6 +22,16 @@ const USP = [
   { icon: Bot, title: "Chatbot AI chốt đơn thay bạn", text: "Trả lời khách, báo giá, lên đơn ngay trên fanpage — cả lúc bạn ngủ." },
   { icon: Zap, title: "Tự động từ đơn tới kho", text: "Đơn, tồn kho, khách hàng tự cập nhật — bớt việc tay, bớt người trực." },
   { icon: TrendingUp, title: "Thấy lãi thật, cắt chỗ đốt tiền", text: "Lợi nhuận từng đơn, từng chiến dịch quảng cáo — biết ngay khoản nào đang lỗ." },
+] as const;
+
+/**
+ * Host «Chốt Đơn Tự Động»: khách của gói AI bán hàng — chỉ hứa điều trợ lý làm được ở tổ chức khách (lib/sales-chatbot),
+ * không hứa lãi lỗ theo chiến dịch quảng cáo (cần ERP đầy đủ + đồng bộ quảng cáo).
+ */
+const CHOTDON_USP = [
+  { icon: Bot, title: "Chatbot AI chốt đơn thay bạn", text: "Trả lời khách, báo giá, chốt đơn ngay trên fanpage — cả lúc bạn ngủ." },
+  { icon: ShieldCheck, title: "Đúng giá, đúng hàng còn", text: "Giá, size, màu, tồn kho đọc từ sổ của shop — không báo bừa, không tự giảm giá." },
+  { icon: Hand, title: "Biết lúc cần người", text: "Khiếu nại, đòi gặp người chuyển ngay cho nhân viên; nhân viên vào là trợ lý tự lùi." },
 ] as const;
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reason?: string; oauth?: string }> }) {
@@ -65,7 +76,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     Viettel Post là thông tin vận hành của RIÊNG tổ chức nhà (người lạ đọc được nhà đang nối gì), và gợi ý tên biến `.env`
     là chỉ dẫn cho người cài máy chủ, không phải cho khách. Một tổ chức (hôm nay) ⇒ trang y hệt trước.
   */
-  const homeOnly = !showOrgField && !host.org;
+  // Host «Chốt Đơn Tự Động» (app.chotdontudong.com): KHÔNG BAO GIỜ in trạng thái kết nối của tổ chức nhà — người vào đây là
+  // khách của sản phẩm AI bán hàng, không phải người cài máy chủ.
+  const brand = host.org ? "vnx" : await hostBrand();
+  const chotdon = brand === "chotdon";
+  const homeOnly = !showOrgField && !host.org && !chotdon;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
@@ -74,11 +89,17 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="absolute -bottom-40 -left-20 size-[28rem] rounded-full bg-chart-2/20 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <span className="flex size-11 items-center justify-center rounded-2xl bg-brand text-white shadow-[0_16px_40px_-16px_var(--brand)]">
-            <BrandGlyph className="h-4" />
+            {chotdon ? <ChotDonGlyph className="h-5" /> : <BrandGlyph className="h-4" />}
           </span>
           <div>
-            {host.org ? <span className="block text-xl font-bold text-brand-bright">{host.org.name}</span> : <BrandWordmark className="block text-xl text-brand-bright" />}
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/55">Hệ thống quản trị bán hàng</p>
+            {host.org ? (
+              <span className="block text-xl font-bold text-brand-bright">{host.org.name}</span>
+            ) : chotdon ? (
+              <ChotDonWordmark className="block text-xl text-brand-bright" />
+            ) : (
+              <BrandWordmark className="block text-xl text-brand-bright" />
+            )}
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/55">{chotdon ? "Nhân viên bán hàng AI" : "Hệ thống quản trị bán hàng"}</p>
           </div>
         </div>
         <div className="relative max-w-md space-y-6">
@@ -87,7 +108,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </h1>
           {homeOnly ? null : (
             <ul className="space-y-4 text-sm leading-6 text-sidebar-foreground/80" data-login-usp>
-              {USP.map(({ icon: Icon, title, text }) => (
+              {(chotdon ? CHOTDON_USP : USP).map(({ icon: Icon, title, text }) => (
                 <li key={title} className="flex gap-3">
                   <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/20 text-brand-bright">
                     <Icon className="size-4" aria-hidden />
@@ -118,7 +139,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </>
           ) : null}
         </div>
-        <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : `© ${new Date().getFullYear()} VNXcommerce · Bán hàng tự động bằng AI`}</p>
+        <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : chotdon ? `© ${new Date().getFullYear()} Chốt Đơn Tự Động · một sản phẩm của VNXcommerce` : `© ${new Date().getFullYear()} VNXcommerce · Bán hàng tự động bằng AI`}</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <LoginForm
@@ -128,6 +149,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           showOrgField={showOrgField}
           showSetupHint={homeOnly}
           orgName={host.org?.name ?? null}
+          brand={brand}
           providers={host.org ? { google: false, facebook: false } : enabledProviders()}
           signupOpen={!host.org && (await signupMode()) !== "off"}
         />

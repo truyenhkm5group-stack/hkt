@@ -34,6 +34,28 @@ const SITE_STATIC_PREFIXES = ["/_next", "/favicon", "/icon", "/apple-icon", "/ma
 
 export type SiteHostKind = "APEX" | "WWW";
 
+// ═══════════ THƯƠNG HIỆU THEO TÊN MIỀN ═══════════
+//
+// Một app, hai mặt tiền (chủ nền tảng chốt 04/10/2026):
+//  · `vnx`     — `vnxcommerce.com`: nền tảng đầy đủ, phần mềm ở `APP_URL` (`erp.vnxcommerce.com`);
+//  · `chotdon` — `chotdontudong.com`: sản phẩm «Chốt Đơn Tự Động» (AI bán hàng), phần mềm ở `app.chotdontudong.com`.
+// Cùng một CSDL, cùng một bộ tổ chức — thương hiệu chỉ đổi CHỮ và LỐI VÀO, không đổi dữ liệu hay quyền.
+
+export type SiteBrand = "vnx" | "chotdon";
+
+/** Tên miền gốc mặc định của Chốt Đơn Tự Động khi máy chủ không khai `CHOTDON_DOMAIN`; `off` để tắt. */
+export const DEFAULT_CHOTDON_DOMAIN = "chotdontudong.com";
+
+/**
+ * Header MÁY CHỦ mang thương hiệu của host đang gọi. Đặt SAU khi middleware xoá mọi `x-erp-*` trình duyệt gửi lên — trình
+ * duyệt không tự khai được mình đang ở thương hiệu nào. Vắng header ⇒ `vnx`.
+ */
+export const ERP_SITE_BRAND_HEADER = "x-erp-site-brand";
+
+export type SiteEnv = { SITE_DOMAIN?: string; CHOTDON_DOMAIN?: string; APP_URL?: string; CHOTDON_APP_URL?: string };
+
+export type SiteMatch = { brand: SiteBrand; kind: SiteHostKind; domain: string };
+
 function bareHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, "").replace(/:\d+$/, "");
 }
@@ -42,10 +64,10 @@ function bareHost(host: string): string {
  * Đọc biến `SITE_DOMAIN`: chưa khai ⇒ mặc định; `off` / `none` / `false` ⇒ `null` (tắt); còn lại phải là tên miền thuần
  * (chữ, số, chấm, gạch) — ký tự lạ ⇒ `null`, vì một tên miền sai dạng mà vẫn được so khớp là đoán.
  */
-export function siteDomainFrom(raw: string | null | undefined): string | null {
-  if (raw === undefined || raw === null) return DEFAULT_SITE_DOMAIN;
+export function siteDomainFrom(raw: string | null | undefined, fallback: string = DEFAULT_SITE_DOMAIN): string | null {
+  if (raw === undefined || raw === null) return fallback;
   const v = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  if (!v) return DEFAULT_SITE_DOMAIN;
+  if (!v) return fallback;
   if (v === "off" || v === "none" || v === "false") return null;
   return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(v) ? v : null;
 }
@@ -75,6 +97,61 @@ export function siteAppOrigin(appUrl: string | null | undefined, siteDomain: str
   } catch {
     return null;
   }
+}
+
+/** Tên miền gốc của Chốt Đơn Tự Động (`CHOTDON_DOMAIN`, mặc định `chotdontudong.com`). */
+export function chotdonDomainFrom(raw: string | null | undefined): string | null {
+  return siteDomainFrom(raw, DEFAULT_CHOTDON_DOMAIN);
+}
+
+/**
+ * Host đang gọi là mặt tiền của thương hiệu nào. Hai tên miền trùng nhau (khai sai) ⇒ `vnx` thắng — mặt tiền cũ không
+ * được lặng lẽ đổi chủ vì một biến môi trường gõ nhầm.
+ */
+export function matchSite(host: string | null | undefined, env: SiteEnv): SiteMatch | null {
+  const vnx = siteDomainFrom(env.SITE_DOMAIN);
+  const vk = siteHostKind(host, vnx);
+  if (vk && vnx) return { brand: "vnx", kind: vk, domain: vnx };
+  const cd = chotdonDomainFrom(env.CHOTDON_DOMAIN);
+  const ck = siteHostKind(host, cd);
+  if (ck && cd) return { brand: "chotdon", kind: ck, domain: cd };
+  return null;
+}
+
+/** Host PHẦN MỀM của Chốt Đơn Tự Động: `app.<CHOTDON_DOMAIN>`. */
+export function chotdonAppHost(env: SiteEnv): string | null {
+  const cd = chotdonDomainFrom(env.CHOTDON_DOMAIN);
+  return cd ? `app.${cd}` : null;
+}
+
+/**
+ * Thương hiệu của MỌI host (mặt tiền lẫn phần mềm): `chotdontudong.com` · `www.` · `app.` ⇒ `chotdon`; còn lại ⇒ `vnx`.
+ * Middleware đặt kết quả vào `ERP_SITE_BRAND_HEADER` cho mọi lượt gọi.
+ */
+export function brandOfHost(host: string | null | undefined, env: SiteEnv): SiteBrand {
+  const site = matchSite(host, env);
+  if (site) return site.brand;
+  const appHost = chotdonAppHost(env);
+  return appHost && bareHost(String(host ?? "")) === appHost ? "chotdon" : "vnx";
+}
+
+/** Đọc lại header thương hiệu — giá trị lạ / vắng ⇒ `vnx`, không bao giờ đoán sang thương hiệu khác. */
+export function brandFromHeader(raw: string | null | undefined): SiteBrand {
+  return raw === "chotdon" ? "chotdon" : "vnx";
+}
+
+/**
+ * Gốc PHẦN MỀM của một thương hiệu: `vnx` ⇒ `APP_URL`; `chotdon` ⇒ `CHOTDON_APP_URL` hoặc `https://app.<CHOTDON_DOMAIN>`.
+ * Cùng luật chống vòng tròn của `siteAppOrigin`.
+ */
+export function brandAppOrigin(brand: SiteBrand, env: SiteEnv): string | null {
+  if (brand === "vnx") {
+    const d = siteDomainFrom(env.SITE_DOMAIN);
+    return d ? siteAppOrigin(env.APP_URL, d) : null;
+  }
+  const cd = chotdonDomainFrom(env.CHOTDON_DOMAIN);
+  if (!cd) return null;
+  return siteAppOrigin(env.CHOTDON_APP_URL?.trim() || `https://app.${cd}`, cd);
 }
 
 export type SiteRoute =

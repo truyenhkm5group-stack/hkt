@@ -11,12 +11,12 @@ import {
   SOCIAL_PICK_COOKIE,
   SOCIAL_SIGNUP_COOKIE,
   SOCIAL_SIGNUP_TTL_SEC,
+  appOriginForHost,
   type OAuthState,
 } from "@/lib/auth/oauth";
 import { createSession } from "@/lib/auth/session";
 import { resolveSocial } from "@/lib/auth/social";
 import { sessionCookieSecure } from "@/lib/constants/session";
-import { env } from "@/lib/env";
 
 /**
  * Nhà cung cấp gửi người dùng về đây (docs/platform/quick-start.md). Thứ tự là luật:
@@ -25,8 +25,10 @@ import { env } from "@/lib/env";
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
-  const to = (path: string) => NextResponse.redirect(new URL(path, env.appUrl));
-  const secure = sessionCookieSecure(process.env.NODE_ENV, env.appUrl);
+  // Nhà cung cấp trả về ĐÚNG host đã bắt đầu ⇒ phiên, cookie và chuyển hướng cuối đều ở host đó.
+  const origin = appOriginForHost(req.headers.get("host"));
+  const to = (path: string) => NextResponse.redirect(new URL(path, origin));
+  const secure = sessionCookieSecure(process.env.NODE_ENV, origin);
   const cfg = isOAuthProvider(provider) ? providerConfig(provider) : null;
   if (!isOAuthProvider(provider) || !cfg) return to("/login?oauth=off");
 
@@ -39,8 +41,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   };
   // Người dùng bấm «Huỷ» ở nhà cung cấp, hoặc `state` không khớp (hết hạn / giả mạo) ⇒ về màn đăng nhập, không làm gì.
   if (!st || st.p !== provider || !state || st.state !== state || !code) return clear(to("/login?oauth=failed"));
+  // Lượt bắt đầu ở host khác (state mang gốc khác) ⇒ redirect_uri sẽ lệch, nhà cung cấp từ chối ⇒ dừng sớm, nói thẳng.
+  if (st.o && st.o !== origin) return clear(to("/login?oauth=failed"));
 
-  const profile = await exchangeCode(provider, code, st.verifier, cfg);
+  const profile = await exchangeCode(provider, code, st.verifier, { ...cfg, origin });
   if ("error" in profile) return clear(to("/login?oauth=failed"));
 
   const found = await resolveSocial(profile);

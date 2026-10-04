@@ -4,6 +4,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { hostTabMetadata } from "@/lib/branding/copy";
+import { hostBrand } from "@/lib/platform/host-brand";
 import { hostOrganization } from "@/lib/platform/host-org";
 import "./globals.css";
 
@@ -31,8 +32,15 @@ const HOME_METADATA: Metadata = {
  * không có phiên để bố cục dashboard thay tiêu đề — trước đây chúng mang tên và lời mô tả của tổ chức nhà lên tab trình
  * duyệt của khách. Có host ⇒ tên của tổ chức đó (chỉ tổ chức đã xuất bản), host lạ ⇒ chữ trung tính; miền chính giữ nguyên.
  */
+/** Host của «Chốt Đơn Tự Động» (`chotdontudong.com`, `app.chotdontudong.com`) — tên và biểu tượng của sản phẩm AI bán hàng. */
+const CHOTDON_METADATA: Metadata = {
+  title: { default: "Chốt Đơn Tự Động", template: "%s · Chốt Đơn Tự Động" },
+  description: "Nhân viên bán hàng AI trực fanpage 24/7: tư vấn đúng giá, đúng hàng còn và chốt đơn cho shop. Một sản phẩm của VNXcommerce.",
+  icons: { icon: [{ url: "/chotdon-icon.svg", type: "image/svg+xml" }] },
+};
+
 export async function generateMetadata(): Promise<Metadata> {
-  return hostTabMetadata(await hostOrganization()) ?? HOME_METADATA;
+  return hostTabMetadata(await hostOrganization()) ?? ((await hostBrand()) === "chotdon" ? CHOTDON_METADATA : HOME_METADATA);
 }
 
 export const viewport: Viewport = {
