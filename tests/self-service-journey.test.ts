@@ -1151,6 +1151,17 @@ async function testJourney() {
       assert.ok(tooSoon.isError && /chưa thấy tóm tắt/.test(tooSoon.summary) && !tooSoon.state.confirmed, `chốt cùng lượt với tóm tắt ⇒ chặn: ${tooSoon.content}`);
       const okLater = await executeTool("confirm_order", { customer_confirmation: "ok em" }, { ...rctx(shown.state, "ok em chốt nhé"), turn: 13 });
       assert.ok(!okLater.isError && okLater.state.confirmed, `khách đồng ý ở tin SAU tóm tắt ⇒ chốt: ${okLater.content}`);
+      // (04/10/2026 · «Bống Bống Bang Bang») chủ shop: «Hàng sẽ được fill-in liên tục nên cứ chốt đơn mà không cần check tồn kho».
+      // Mặc định: sổ kho thiếu ⇒ không chốt; BẬT «chốt không cần kiểm tồn» ⇒ chốt, check_inventory không đưa con số tồn.
+      const bigDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 999 }] }, { ...rctx({ ...savedC.state, upsellSent: true }, "lấy 999kg"), turn: 20 });
+      const blockedShort = await executeTool("confirm_order", { customer_confirmation: "ok" }, { ...rctx(bigDraft.state, "ok"), turn: 21 });
+      assert.ok(blockedShort.isError && /không đủ hàng/.test(blockedShort.summary), `mặc định vẫn chặn khi thiếu hàng: ${blockedShort.summary}`);
+      const noCheckCfg = { ...parseSalesChatbotConfig(null), sellWithoutStockCheck: true };
+      const sellAnyway = await executeTool("confirm_order", { customer_confirmation: "ok" }, { ...rctx(bigDraft.state, "ok"), turn: 21, config: noCheckCfg });
+      assert.ok(!sellAnyway.isError && sellAnyway.state.confirmed, `bật «chốt không cần kiểm tồn» ⇒ chốt: ${sellAnyway.content}`);
+      const invNoCheck = await executeTool("check_inventory", { items: [{ variant_id: chaMuc, quantity: 999 }] }, { ...tctx({}), config: noCheckCfg });
+      assert.ok(!invNoCheck.isError && /can_sell/.test(invNoCheck.content) && !/available|enough/.test(invNoCheck.content), `không đưa con số tồn cho AI: ${invNoCheck.content}`);
+      assert.ok(systemPrompt(noCheckCfg, "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng") && !systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng"));
       const edited = await executeTool("update_draft_order", { items: [{ variant_id: chaMuc, quantity: 2 }] }, { ...rctx(shown.state, "lấy 2kg nhé, chốt luôn"), turn: 14 });
       assert.ok((await executeTool("confirm_order", { customer_confirmation: "chốt luôn" }, { ...rctx(edited.state, "lấy 2kg nhé, chốt luôn"), turn: 14 })).isError, "sửa đơn ở lượt này ⇒ khách chưa thấy tóm tắt MỚI ⇒ chưa chốt");
       // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
