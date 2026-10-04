@@ -9,6 +9,7 @@ import type { Blueprint } from "@/lib/blueprints/types";
 import { FASHION_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/fashion-commerce";
 import { FOOD_COMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/food-commerce";
 import { GENERAL_ECOMMERCE_BLUEPRINT } from "@/lib/blueprints/templates/general-ecommerce";
+import { HOME_SERVICE_BLUEPRINT } from "@/lib/blueprints/templates/home-service";
 import { HOMESTAY_BLUEPRINT } from "@/lib/blueprints/templates/homestay";
 import { HOUSEHOLD_BLUEPRINT } from "@/lib/blueprints/templates/household";
 import { MANUFACTURING_BLUEPRINT } from "@/lib/blueprints/templates/manufacturing";
@@ -18,7 +19,7 @@ import { SPA_BEAUTY_BLUEPRINT } from "@/lib/blueprints/templates/spa-beauty";
 import { SERVICE_BUSINESS_BLUEPRINT } from "@/lib/blueprints/templates/service-business";
 import { WHOLESALE_BLUEPRINT } from "@/lib/blueprints/templates/wholesale";
 
-export const BLUEPRINT_TEMPLATES: readonly Blueprint[] = [FASHION_COMMERCE_BLUEPRINT, GENERAL_ECOMMERCE_BLUEPRINT, FOOD_COMMERCE_BLUEPRINT, SEAFOOD_COMMERCE_BLUEPRINT, SPA_BEAUTY_BLUEPRINT, RESTAURANT_BLUEPRINT, HOUSEHOLD_BLUEPRINT, HOMESTAY_BLUEPRINT, WHOLESALE_BLUEPRINT, MANUFACTURING_BLUEPRINT, SERVICE_BUSINESS_BLUEPRINT];
+export const BLUEPRINT_TEMPLATES: readonly Blueprint[] = [FASHION_COMMERCE_BLUEPRINT, GENERAL_ECOMMERCE_BLUEPRINT, FOOD_COMMERCE_BLUEPRINT, SEAFOOD_COMMERCE_BLUEPRINT, SPA_BEAUTY_BLUEPRINT, RESTAURANT_BLUEPRINT, HOUSEHOLD_BLUEPRINT, HOMESTAY_BLUEPRINT, HOME_SERVICE_BLUEPRINT, WHOLESALE_BLUEPRINT, MANUFACTURING_BLUEPRINT, SERVICE_BUSINESS_BLUEPRINT];
 
 export function templateBlueprint(key: string): Blueprint | null {
   return BLUEPRINT_TEMPLATES.find((t) => t.key === key) ?? null;

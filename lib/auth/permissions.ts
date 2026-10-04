@@ -303,6 +303,17 @@ export const PERMISSION_GROUPS = [
       { key: "lots:write", label: "Lô & hạn dùng: gắn / gỡ lô", hint: "Gắn mã lô + hạn dùng lên dòng phiếu nhập; gỡ lô gắn nhầm (có lý do). Không đổi số tồn." },
     ],
   },
+  /*
+    PHIẾU CÔNG VIỆC HIỆN TRƯỜNG (0200, module `field_jobs`): xem phiếu, lịch thợ, tiền đã thu / còn nợ; ghi = lập / sửa báo giá,
+    chuyển trạng thái, hẹn thợ, tải ảnh, nghiệm thu, thu tiền / huỷ phiếu thu (có lý do), mở lượt bảo hành.
+  */
+  {
+    module: "Phiếu công việc",
+    items: [
+      { key: "field_jobs:view", label: "Phiếu công việc: xem", hint: "Xem phiếu, báo giá, lịch thợ, ảnh trước / sau, tiền đã thu / còn nợ, hạn bảo hành dịch vụ." },
+      { key: "field_jobs:write", label: "Phiếu công việc: lập & xử lý", hint: "Lập / sửa báo giá, khách đồng ý, hẹn thợ, bắt đầu / nghiệm thu / huỷ (có lý do), tải ảnh, thu tiền theo đợt, huỷ phiếu thu (có lý do), mở lượt bảo hành." },
+    ],
+  },
 ] as const;
 
 /**
@@ -409,8 +420,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
   // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
   // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.
-  // Lễ tân lưu trú (0198) là người giữ lịch phòng — module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write"],
+  // Lễ tân lưu trú (0198) là người giữ lịch phòng; điều phối phiếu công việc (0200) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write", "field_jobs:view", "field_jobs:write"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own", "wholesale:view", "wholesale:work"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

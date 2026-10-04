@@ -218,6 +218,13 @@ export const NAV_MODULES = [
     why: "Lưu trú bán đêm của phòng trên nhiều kênh: lễ tân cần MỘT lịch gộp Airbnb / Booking / khách trực tiếp, biết ngay trùng phòng, ai nhận / trả hôm nay, phòng nào phải dọn trước giờ nhận.",
   },
   {
+    href: "/field-jobs",
+    label: "Phiếu công việc",
+    zone: "SALES",
+    permission: "field_jobs:view",
+    why: "Dịch vụ tại nhà bán một việc: người điều phối báo giá, hẹn thợ, theo tới lúc khách ký nghiệm thu và thu đủ tiền — một bảng cho cả đội.",
+  },
+  {
     href: "/customers/reorder",
     label: "Nhắc mua lại",
     zone: "SALES",
