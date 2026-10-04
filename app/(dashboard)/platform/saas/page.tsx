@@ -71,7 +71,7 @@ function MovementBlock({ label, m }: { label: string; m: PeriodMovement }) {
 function TenantTable({ rows }: { rows: TenantRow[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1080px] text-sm">
+      <table className="w-full min-w-[1180px] text-sm">
         <thead className="bg-muted/40 text-left text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-3 py-2">Tổ chức</th>
@@ -79,6 +79,7 @@ function TenantTable({ rows }: { rows: TenantRow[] }) {
             <th className="px-3 py-2 text-right">MRR</th>
             <th className="px-3 py-2 text-right" title="Chi phí AI do NỀN TẢNG trả trong 30 ngày (BYOK là tiền của khách, không phải giá vốn của nền tảng).">AI nền tảng trả</th>
             <th className="px-3 py-2 text-right" title="MRR − chi phí AI nền tảng trả. Hạ tầng / hỗ trợ chưa phân bổ về từng tổ chức (chưa có căn cứ).">Đóng góp</th>
+            <th className="px-3 py-2 text-right" title="Sổ dùng 30 ngày: hội thoại khách mới · hội thoại bot có trả lời · đơn do AI chốt (kênh thử không tính). «—» = chưa có ngày nào trong sổ.">Hội thoại · bot · đơn AI</th>
             <th className="px-3 py-2 text-right">Lượt AI 30 ngày</th>
             <th className="px-3 py-2" title="7 ngày gần nhất so với 7 ngày trước đó; dưới 10 lượt thì không gọi là xu hướng.">Xu hướng</th>
             <th className="px-3 py-2 text-right">Lỗi AI</th>
@@ -114,6 +115,9 @@ function TenantTable({ rows }: { rows: TenantRow[] }) {
               <td className={cn("numeric px-3 py-2 text-right", (t.economics.contributionVnd ?? 0) < 0 && "font-semibold text-destructive")}>
                 {t.isHome ? "—" : formatVND(t.economics.contributionVnd)}
                 {t.economics.contributionMargin !== null ? <div className="text-xs text-muted-foreground">{pct(t.economics.contributionMargin, 0)}</div> : null}
+              </td>
+              <td className="numeric px-3 py-2 text-right" title={t.usage30d ? `${t.usage30d.days} ngày trong sổ · ${formatNumber(t.usage30d.customerMessages)} tin khách · ${formatNumber(t.usage30d.botMessages)} tin bot` : "Chưa có ngày nào trong sổ dùng"}>
+                {t.usage30d ? `${formatNumber(t.usage30d.conversationsStarted)} · ${formatNumber(t.usage30d.aiActiveConversations)} · ${formatNumber(t.usage30d.aiOrders)}` : "—"}
               </td>
               <td className="numeric px-3 py-2 text-right">{formatNumber(t.aiRequests30d)}</td>
               <td className="px-3 py-2">{TREND_LABEL[t.aiTrend]}</td>
@@ -177,7 +181,7 @@ export default async function OwnerCockpitPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7" data-cockpit="headline">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8" data-cockpit="headline">
         <Tile label="MRR" value={formatVND(h.mrrVnd)} sub={`ARR ${formatVND(h.arrVnd, { compact: true })}`} />
         <Tile label="Khách trả tiền" value={formatNumber(h.payingTenants)} sub={`/ ${h.tenants} tổ chức · ARPA ${formatVND(h.arpaVnd, { compact: true })}`} />
         <Tile label="Net New MRR tháng" value={formatVND(c.thisMonth.movement.netNewMrrVnd, { sign: true })} sub={`Mới ${formatVND(c.thisMonth.movement.newMrrVnd, { compact: true })}`} />
@@ -190,6 +194,12 @@ export default async function OwnerCockpitPage() {
           hint={c.margin.missing.length ? `Chưa khai: ${c.margin.missing.join(", ")}` : undefined}
         />
         <Tile label={`Chi phí AI ${c.margin.windowDays} ngày`} value={formatVND(c.ai.platformCostVnd)} sub={`nền tảng trả · ${formatNumber(c.ai.requests)} lượt`} />
+        <Tile
+          label="Hội thoại · đơn AI 30 ngày"
+          value={c.ai.conversations === null ? "—" : `${formatNumber(c.ai.conversations)} · ${formatNumber(c.ai.aiOrders)}`}
+          sub={c.ai.conversations === null ? "sổ dùng chưa có ngày nào" : `bot trả lời ${formatNumber(c.ai.aiActiveConversations)} hội thoại · ${c.ai.usageDays} ngày trong sổ`}
+          hint="Tổ chức khách, kênh thật (không tính khung thử / phát lại / copilot). Đơn AI = đơn gắn với hội thoại bot đã chốt."
+        />
       </div>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-cockpit="lifecycle">

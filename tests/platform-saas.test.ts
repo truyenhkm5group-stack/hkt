@@ -10,7 +10,9 @@
  *     · ngày đã qua ĐÓNG BĂNG: đổi gói rồi chụp ngày sau không sửa dòng ngày trước ⇒ biến động Mở rộng đọc ra đúng;
  *     · mốc kích hoạt đọc từ chứng từ của CHÍNH tổ chức đó — hội thoại của A không thành mốc của B (cô lập);
  *     · mốc ghi MỘT lần: chứng từ sớm hơn xuất hiện sau không đổi mốc đã ghi;
- *     · người ngoài (người xem của nhà, quản trị tổ chức khách) không đọc được cockpit, không khai được chi phí.
+ *     · người ngoài (người xem của nhà, quản trị tổ chức khách) không đọc được cockpit, không khai được chi phí;
+ *     · sổ dùng theo ngày (0204): đếm tin khách (không tính kết quả công cụ), tin bot (không tính tin page chép vào lịch sử),
+ *       hội thoại bot trả lời, đơn AI — kênh THỬ không bao giờ tính, chứng từ của A không vào sổ của B.
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -199,6 +201,7 @@ async function cleanup() {
   const pdb = await getPlatformDb();
   await pdb.delete(schema.platformSaasDaily).where(lt(schema.platformSaasDaily.day, "2021-01-01"));
   await pdb.delete(schema.platformSaasDaily).where(inArray(schema.platformSaasDaily.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformTenantUsageDaily).where(inArray(schema.platformTenantUsageDaily.orgCode, [...ORGS]));
   await pdb.delete(schema.platformOrgMilestones).where(inArray(schema.platformOrgMilestones.orgCode, [...ORGS]));
   await pdb.delete(schema.platformSubscriptions).where(inArray(schema.platformSubscriptions.orgCode, [...ORGS]));
   for (const code of ORGS) {
@@ -309,9 +312,38 @@ export async function testPlatformSaas() {
     assert.equal(mv.byOrg.find((o) => o.orgCode === A)?.movement, "EXPANSION");
     assert.equal(mv.byOrg.find((o) => o.orgCode === B)?.movement, "NONE");
 
-    // ── Một công thức MRR: ảnh chụp hôm nay = MRR của bảng thu phí.
+    // ── Sổ dùng theo ngày (0204): gieo HÔM NAY ở A — đúng thứ được đếm, đúng thứ bị bỏ.
     const now = new Date();
+    await withOrganization(A, async () => {
+      const db = await getDb();
+      const c = schema.salesChatConversations;
+      const [live1] = await db.insert(c).values({ channel: "FANPAGE", visitorKey: "saas-live", aiCalls: 1, createdAt: now }).returning({ id: c.id });
+      const txt = (t: string) => [{ type: "text", text: t }];
+      await db.insert(schema.salesChatMessages).values([
+        { conversationId: live1.id, seq: 1, role: "user", content: txt("Chả mực bao nhiêu?") },
+        { conversationId: live1.id, seq: 2, role: "assistant", content: [{ type: "tool_use", id: "t1", name: "get_current_price", input: {} }] },
+        { conversationId: live1.id, seq: 3, role: "user", content: [{ type: "tool_result", toolUseId: "t1", content: "{}" }] },
+        { conversationId: live1.id, seq: 4, role: "assistant", content: txt("Dạ 250.000đ ạ") },
+        { conversationId: live1.id, seq: 5, role: "assistant", content: txt("[Shop đã nhắn] Chị cần gì thêm không ạ") },
+      ]);
+      const [test] = await db.insert(c).values({ channel: "TEST", aiCalls: 1, createdAt: now }).returning({ id: c.id });
+      await db.insert(schema.salesChatMessages).values([{ conversationId: test.id, seq: 1, role: "user", content: txt("khung thử") }, { conversationId: test.id, seq: 2, role: "assistant", content: txt("thử") }]);
+      await db.insert(schema.customers).values({ id: "saas-cus", name: "Khách" });
+      await db.insert(schema.orders).values({ id: "saas-ord", customerId: "saas-cus", billFullName: "Khách", insertedAt: now });
+      await db.update(c).set({ orderId: "saas-ord" }).where(eq(c.id, live1.id));
+    });
+
+    // ── Một công thức MRR: ảnh chụp hôm nay = MRR của bảng thu phí.
     const live = await captureSaasSnapshot(now);
+    assert.ok(live.usageRows >= 4, "hôm qua + hôm nay cho mỗi tổ chức ACTIVE");
+    const [usageA] = await pdb.select().from(schema.platformTenantUsageDaily).where(and(eq(schema.platformTenantUsageDaily.orgCode, A), eq(schema.platformTenantUsageDaily.day, live.day)));
+    assert.deepEqual(
+      [usageA.conversationsStarted, usageA.customerMessages, usageA.botMessages, usageA.aiActiveConversations, usageA.aiOrders],
+      [1, 1, 1, 1, 1],
+      "1 hội thoại khách · 1 tin khách (không tính kết quả công cụ) · 1 tin bot (không tính tin page chép vào, không tính kênh THỬ) · 1 đơn AI",
+    );
+    const [usageB] = await pdb.select().from(schema.platformTenantUsageDaily).where(and(eq(schema.platformTenantUsageDaily.orgCode, B), eq(schema.platformTenantUsageDaily.day, live.day)));
+    assert.deepEqual([usageB.conversationsStarted, usageB.aiOrders], [0, 0], "chứng từ của A không vào sổ của B");
     const billing = await loadPlatformBilling(op, now);
     assert.ok(!("error" in billing));
     assert.equal(live.mrrVnd, billing.mrrVnd, "sổ SaaS và bảng thu phí dùng cùng một công thức MRR");
@@ -328,6 +360,8 @@ export async function testPlatformSaas() {
     assert.equal(ra.lifecycle, "PAID");
     assert.equal(ra.economics.mrrVnd, 999_000);
     assert.equal(ra.activated, true);
+    assert.equal(ra.usage30d?.aiOrders, 1, "cột dùng AI của cockpit đọc sổ dùng");
+    assert.ok(ck.value.ai.conversations !== null && ck.value.ai.conversations >= 1);
     assert.equal(rb.lifecycle, "TRIAL");
     assert.equal(rb.activated, false);
     assert.ok(ck.value.headline.payingTenants >= 1);
