@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Playfair_Display } from "next/font/google";
+import localFont from "next/font/local";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowDown,
@@ -62,8 +62,8 @@ import { getPublicSiteData, type PublicPlan, type PublicSiteData } from "@/lib/q
 
 export const dynamic = "force-dynamic";
 
-/** Phông tiêu đề — `next/font` tải LÚC BUILD và phục vụ từ chính máy chủ, trình duyệt không gọi Google Fonts. */
-const display = Playfair_Display({ subsets: ["latin", "vietnamese"], weight: ["600", "700"], variable: "--font-display", display: "swap" });
+/** Phông tiêu đề — tự host (app/fonts/, OFL), bản variable đủ chữ tiếng Việt: build không phụ thuộc Google Fonts. */
+const display = localFont({ src: "../fonts/PlayfairDisplay-Variable.woff2", weight: "400 900", variable: "--font-display", display: "swap" });
 const SERIF = "[font-family:var(--font-display),Georgia,serif]";
 
 /** Khung nội dung — MỘT chỗ khai, tính bằng rem để giãn cùng tỷ lệ với `SITE_SCALE_CSS`. */

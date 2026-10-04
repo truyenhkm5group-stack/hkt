@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
@@ -9,11 +9,12 @@ import { hostOrganization } from "@/lib/platform/host-org";
 import "./globals.css";
 
 /**
- * Phông chữ của giao diện Bento. `next/font` tải tệp phông LÚC BUILD và phục vụ từ chính máy chủ
- * ERP — trình duyệt của nhân viên không gọi tới Google Fonts, nên không thêm dịch vụ ngoài nào lúc
- * chạy. Bộ chữ `vietnamese` bắt buộc: thiếu nó thì dấu tiếng Việt rơi về phông hệ thống giữa chữ.
+ * Phông chữ của giao diện Bento — TỰ HOST (app/fonts/, giấy phép OFL nằm cạnh tệp): trình duyệt không gọi Google Fonts, và
+ * từ 04/10/2026 cả lúc BUILD cũng không — `next/font/google` hai lần trong một ngày nhận URL lạ từ Google và `next build`
+ * chết «next/font … reading '1'», chặn deploy. Bản variable một tệp, trục wght 200–800, đủ mọi chữ có dấu tiếng Việt (kiểm
+ * từng ký tự bằng fontTools) — thiếu thì dấu rơi về phông hệ thống giữa chữ.
  */
-const sans = Plus_Jakarta_Sans({ subsets: ["latin", "vietnamese"], variable: "--font-jakarta", display: "swap" });
+const sans = localFont({ src: "./fonts/PlusJakartaSans-Variable.woff2", weight: "200 800", variable: "--font-jakarta", display: "swap" });
 
 const HOME_METADATA: Metadata = {
   title: { default: "VNXcommerce ERP", template: "%s · VNXcommerce ERP" },
