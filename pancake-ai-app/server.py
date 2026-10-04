@@ -43,6 +43,7 @@ except ImportError:  # python-dotenv là tuỳ chọn
 import canned_matcher as cm  # noqa: E402
 import database as db  # noqa: E402 — phải nạp .env trước (APP_DB_PATH)
 import knowledge_miner as km  # noqa: E402
+import legacy_import  # noqa: E402
 import sentiment_analyzer as sa  # noqa: E402
 import token_tracker as tt  # noqa: E402
 from canned_matcher import matcher, record_hit  # noqa: E402
@@ -62,6 +63,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     km.recover_interrupted_jobs()
     if not db.get_setting("webhook_secret"):
         db.set_settings({"webhook_secret": secrets.token_urlsafe(18)})
+    got = legacy_import.auto_import_on_startup()
+    if got:
+        log.info("Đã tự lấy cấu hình từ bot cũ: %s", got)
     log.info("Pancake AI Sales Manager sẵn sàng — DB: %s", db.DB_PATH)
     yield
 
@@ -517,6 +521,29 @@ def save_settings(body: SettingsIn) -> dict[str, Any]:
 def webhook_info(request: Request) -> dict[str, Any]:
     base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or "https://<tên-miền-công-khai>"
     return {"url": f"{base}/webhook/pancake?secret={db.get_setting('webhook_secret')}", "local": str(request.base_url)}
+
+
+class LegacyIn(BaseModel):
+    dir: str | None = None
+    page_id: str | None = None
+    import_prompt: bool = True
+
+
+@app.get("/api/legacy/preview", dependencies=admin)
+def legacy_preview(dir: str | None = None) -> dict[str, Any]:  # noqa: A002
+    """Đọc cấu hình bot cũ (thư mục chatbot/) — token đã CHE, không trả token thật."""
+    return legacy_import.preview(dir or None)
+
+
+@app.post("/api/legacy/import", dependencies=admin)
+def legacy_apply(body: LegacyIn) -> dict[str, Any]:
+    try:
+        res = legacy_import.apply(body.dir or None, body.page_id, body.import_prompt)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    _client_cache.update(key=None, client=None)
+    _catalog_cache.update(items=None, at=0)
+    return res
 
 
 @app.post("/api/pancake/test", dependencies=admin)

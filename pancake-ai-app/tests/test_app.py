@@ -142,5 +142,54 @@ class GuardrailAndWebhookTest(Base):
         self.assertEqual(db.insert_messages([p["message"]]), 0)
 
 
+class LegacyImportTest(Base):
+    def make_old_bot(self, pages_json=None, tokens_file=None):
+        import json as _json
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "data"))
+        os.makedirs(os.path.join(d, "prompts"))
+        lines = ["# bot cũ", 'GEMINI_API_KEY="AIzaSECRETKEY1234"', "GEMINI_MODEL=gemini-2.5-flash-lite",
+                 "POS_SHOP_ID=999", "POS_API_KEY=posSECRET5678", "SHOP_NAME=Shop Cũ"]
+        if pages_json is not None:
+            lines.append("PANCAKE_PAGES_JSON=" + _json.dumps(pages_json))
+        else:
+            lines += ["PANCAKE_PAGE_ID=111", "PANCAKE_PAGE_ACCESS_TOKEN=eyJTOKEN_ENV_AAAA"]
+        with open(os.path.join(d, ".env"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        if tokens_file:
+            with open(os.path.join(d, "data", "pages_tokens.json"), "w", encoding="utf-8") as f:
+                _json.dump(tokens_file, f)
+        with open(os.path.join(d, "prompts", "system.md"), "w", encoding="utf-8") as f:
+            f.write("Nhân viên của {{SHOP_NAME}}.\nBảng size: 40-49kg M.\n{{CATALOG}}\n")
+        return d
+
+    def test_preview_masks_tokens(self):
+        import legacy_import as li
+        r = li.preview(self.make_old_bot())
+        dumped = str(r)
+        self.assertEqual(r["pages"][0]["id"], "111")
+        for secret in ("eyJTOKEN_ENV_AAAA", "AIzaSECRETKEY1234", "posSECRET5678"):
+            self.assertNotIn(secret, dumped)
+
+    def test_single_page_import_with_prompt(self):
+        import legacy_import as li
+        li.apply(self.make_old_bot(), None, True)
+        self.assertEqual(db.get_setting("pancake_page_access_token"), "eyJTOKEN_ENV_AAAA")
+        self.assertEqual(db.get_setting("gemini_api_key"), "AIzaSECRETKEY1234")
+        self.assertEqual(db.get_setting("pancake_shop_id"), "999")
+        prof = db.get_setting("shop_profile")
+        self.assertIn("Shop Cũ", prof)
+        self.assertNotIn("{{", prof)
+
+    def test_multi_page_requires_choice_and_app_file_wins(self):
+        import legacy_import as li
+        d = self.make_old_bot(pages_json={"222": {"token": "eyJOLD_222_XXXX", "name": "Page A"}, "333": "eyJ_333_YYYY"},
+                              tokens_file={"222": {"token": "eyJNEW_222_ZZZZ", "name": "Page A mới"}})
+        self.assertRaises(ValueError, li.apply, d, None, False)
+        li.apply(d, "222", False)
+        self.assertEqual(db.get_setting("pancake_page_access_token"), "eyJNEW_222_ZZZZ")
+        self.assertEqual(db.get_setting("shop_name"), "Page A mới")
+
+
 if __name__ == "__main__":
     unittest.main()

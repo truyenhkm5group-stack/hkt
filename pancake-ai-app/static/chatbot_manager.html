@@ -44,6 +44,15 @@
 
 <!-- ============================ KẾT NỐI ============================ -->
 <section data-panel="connect" class="space-y-4">
+  <div class="card space-y-2 border-blue-300">
+    <h2 class="font-bold">📥 Lấy cấu hình từ bot cũ (thư mục <code>chatbot</code>)</h2>
+    <p class="muted">Đọc Page ID, Page Access Token, Gemini key, Shop ID/POS key và kịch bản tư vấn từ <code>chatbot/.env</code>, <code>chatbot/data/pages_tokens.json</code>, <code>chatbot/prompts/system.md</code> trên máy này. Bot cũ không bị sửa gì.</p>
+    <div class="flex flex-wrap gap-2 items-end">
+      <div class="grow min-w-60"><label class="muted">Thư mục bot cũ (để trống = tự tìm cạnh thư mục app)</label><input id="legacyDir" class="inp" placeholder="vd C:\pancake-gemini-bot"></div>
+      <button class="btn btn-ghost" onclick="legacyPreview()">🔍 Tìm</button>
+    </div>
+    <div id="legacyBox" class="text-sm"></div>
+  </div>
   <div class="grid md:grid-cols-2 gap-4">
     <div class="card space-y-2">
       <h2 class="font-bold">Pancake</h2>
@@ -290,6 +299,7 @@ async function loadSettings() {
     else el.value = v ?? "";
   });
   try { $("#webhookUrl").textContent = (await api("/api/webhook-info")).url; } catch (e) {}
+  if (!SETTINGS.pancake_page_id && !$("#legacyBox").innerHTML) legacyPreview();  // chưa cấu hình ⇒ tự dò bot cũ
   updateBotState();
 }
 function updateBotState() {
@@ -314,6 +324,29 @@ async function saveSettings() {
 }
 async function testPancake() { $("#pancakeTest").textContent = "Đang kiểm tra…"; try { $("#pancakeTest").textContent = JSON.stringify(await api("/api/pancake/test", { method: "POST" }), null, 1); } catch (e) { $("#pancakeTest").textContent = e.message; } }
 async function testGemini() { $("#geminiTest").textContent = "Đang gọi…"; try { const r = await api("/api/gemini/test", { method: "POST" }); $("#geminiTest").textContent = r.ok ? `OK · ${r.model} · ${r.prompt_tokens}+${r.output_tokens} token · ${usd(r.cost_usd)} · ${r.latency_ms} ms` : r.error; } catch (e) { $("#geminiTest").textContent = e.message; } }
+
+// ------------------------------------------------------------ nhập từ bot cũ
+async function legacyPreview() {
+  const box = $("#legacyBox"); box.textContent = "Đang tìm…";
+  try {
+    const dir = $("#legacyDir").value.trim();
+    const r = await api("/api/legacy/preview" + (dir ? "?dir=" + encodeURIComponent(dir) : ""));
+    if (!r.found) { box.innerHTML = `<div class="text-amber-700">${esc(r.hint || "Không thấy cấu hình bot cũ")}</div>`; return; }
+    box.innerHTML = `<div class="muted">Thư mục: ${esc(r.dir)}</div>
+      ${r.pages.length ? `<div class="mt-1">Chọn page:</div>` + r.pages.map((p, i) => `<label class="flex items-center gap-2"><input type="radio" name="legacyPage" value="${esc(p.id)}" ${i === 0 ? "checked" : ""}> <b>${esc(p.name || "(không tên)")}</b> · ${esc(p.id)} · token ${esc(p.token)} <span class="muted">(${esc(p.source)})</span></label>`).join("") : '<div class="text-amber-700">Không thấy token page nào.</div>'}
+      <div>Gemini key: ${r.gemini_api_key ? esc(r.gemini_api_key) + (r.gemini_model ? " · " + esc(r.gemini_model) : "") : "—"} · POS: ${r.pos_shop_id ? esc(r.pos_shop_id) + " / " + esc(r.pos_api_key || "—") : "—"}</div>
+      ${r.prompt_path ? `<label class="flex items-center gap-2"><input type="checkbox" id="legacyPrompt" checked> Nhập kịch bản tư vấn làm "Thông tin shop" <span class="muted">(${esc(r.prompt_path)})</span></label>` : ""}
+      ${r.hint ? `<div class="text-amber-700">${esc(r.hint)}</div>` : ""}
+      <button class="btn btn-primary mt-2" onclick="legacyApply()">📥 Nhập vào app mới</button>`;
+  } catch (e) { box.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+}
+async function legacyApply() {
+  const page = document.querySelector('input[name="legacyPage"]:checked');
+  try {
+    const r = await api("/api/legacy/import", { method: "POST", body: { dir: $("#legacyDir").value.trim() || null, page_id: page ? page.value : null, import_prompt: !!$("#legacyPrompt")?.checked } });
+    toast("Đã nhập: " + r.imported.join(", ")); await loadSettings(); testPancake();
+  } catch (e) { toast(e.message, true); }
+}
 
 // ------------------------------------------------------------ hội thoại
 const selected = new Set();

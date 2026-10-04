@@ -26,6 +26,25 @@ macOS / Linux: `./run.sh`.
 
 ## 2. Kết nối (tab ⚙️ Kết nối)
 
+### Cách nhanh: lấy từ bot cũ
+Đặt thư mục `pancake-ai-app` **cạnh** thư mục `chatbot` của bot cũ (đúng như trong kho mã), hoặc ghi
+`OLD_BOT_DIR=C:\đường\dẫn\tới\chatbot` vào `.env`. Lần chạy đầu, app tự đọc:
+
+| Từ bot cũ | Vào ô |
+|---|---|
+| `chatbot/.env` → `PANCAKE_PAGE_ID` + `PANCAKE_PAGE_ACCESS_TOKEN` hoặc `PANCAKE_PAGES_JSON` | Page ID, Page Access Token |
+| `chatbot/data/pages_tokens.json` (page thêm trong app bot cũ — ưu tiên hơn .env) | Page ID, Page Access Token |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini |
+| `POS_SHOP_ID`, `POS_API_KEY` | Shop ID, POS API key |
+| `prompts/system.md` (hoặc `SYSTEM_PROMPT_FILE`) | Thông tin shop (bảng size, bảng giá, giọng điệu) |
+
+Bot cũ có **một** page ⇒ tự nhập khi khởi động. Có **nhiều** page ⇒ vào khung **📥 Lấy cấu hình từ bot cũ**,
+chọn page, bấm **Nhập**. Token luôn hiện ở dạng che (`••••••abcd`). App không sửa gì của bot cũ.
+Bot cũ chạy trên **VPS** thì khoá nằm ở VPS (`/data/bot.env`), không có trên PC — chép file đó về thành
+`chatbot/.env` hoặc nhập tay.
+
+### Hoặc nhập tay
+
 | Ô | Lấy ở đâu |
 |---|---|
 | Page ID | Pancake → chọn Page → Cài đặt (số ID của page) |
@@ -108,6 +127,7 @@ pancake-ai-app/
 ├── database.py            SQLite (WAL) + CRUD
 ├── pancake_client.py      Pancake Pages API + POS (Shop ID) + chuẩn hoá webhook
 ├── knowledge_miner.py     Nạp tri thức từ hội thoại bằng Gemini + dựng ngữ cảnh trả lời
+├── legacy_import.py       Lấy cấu hình từ bot cũ (chatbot/.env, pages_tokens.json, system.md)
 ├── canned_matcher.py      Fast-Path FAQ (TF-IDF + n-gram, bỏ dấu, teencode) + nhận diện ý định huỷ đơn
 ├── sentiment_analyzer.py  Chấm điểm bức xúc
 ├── token_tracker.py       Gọi Gemini, ghi token, tính tiền, hạn ngạch
