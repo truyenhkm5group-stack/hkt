@@ -160,6 +160,12 @@ async function testRealOrg() {
     const grow = await updateOrderAsAgent(AGENT, draft.id, order([{ variantId: plenty, quantity: 21, unitPrice: 100_000 }], "CONFIRMED"), RETAIL);
     assert.ok(!grow.ok && /cần thêm 1/.test(grow.errors[0].message), "tăng 1 khi khả dụng 0 ⇒ thiếu đúng 1");
 
+    // ── Shop tự bật «chốt không cần kiểm tồn» (hàng nhập liên tục, 04/10/2026) ⇒ lõi cho máy chốt cả khi khả dụng = 0 ──
+    const shortDraft = await createOrderAsAgent(AGENT, order([{ variantId: plenty, quantity: 5, unitPrice: 100_000 }], "NEW"), RETAIL);
+    assert.ok(shortDraft.ok);
+    const sellShort = await updateOrderAsAgent(AGENT, shortDraft.id, order([{ variantId: plenty, quantity: 5, unitPrice: 100_000 }], "CONFIRMED"), { ...RETAIL, allowShortStock: true });
+    assert.ok(sellShort.ok, `allowShortStock ⇒ chốt dù thiếu: ${JSON.stringify(sellShort)}`);
+
     // ── Đường NGƯỜI không bị hàng rào của máy chặn (chốt vượt tồn, giá tay) ──
     const human = await createManualOrderCore(admin, order([{ variantId: last, quantity: 3, unitPrice: 150_000, discount: 10_000 }], "CONFIRMED"));
     assert.ok(human.ok, `người vẫn chốt được đơn đặt trước / giá tay: ${JSON.stringify(human)}`);

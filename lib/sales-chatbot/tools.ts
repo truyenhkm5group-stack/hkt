@@ -307,7 +307,7 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
  * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
  */
 function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean): AgentOrderOptions {
-  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null };
+  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null, allowShortStock: ctx.config.sellWithoutStockCheck };
 }
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
