@@ -282,10 +282,44 @@ export function organizationDatabaseName(code: string): string {
   return `${base}_org_${code.replace(/-/g, "_")}`;
 }
 
+/**
+ * ═══════════ TRẦN SỐ CSDL PGLITE CỦA TỔ CHỨC MỞ CÙNG LÚC (chỉ máy cá nhân / kiểm thử) ═══════════
+ *
+ * Mỗi CSDL PGlite là một Postgres WASM chạy TRONG tiến trình, giữ vài chục tới vài trăm MB và vài chục tệp mở. Handle cũ
+ * chưa bao giờ được đóng, nên bộ kiểm thử (đã dựng hơn 130 tổ chức thử trong MỘT tiến trình) tích bộ nhớ tới khi máy CI hết
+ * RAM: 04/10/2026 ba lượt gates liền nhau chết với «runner has received a shutdown signal», lần nào cũng đúng ở khối bài
+ * kiểm nền tảng — bỏ MỘT tổ chức thử khỏi một bài làm điểm chết lùi đúng một bài. Trên Windows cùng nguyên nhân hiện ra
+ * dưới dạng EMFILE (hết lượt mở tệp) dây chuyền ở nửa sau bộ kiểm.
+ *
+ * Đã đủ trần thì ĐÓNG handle lâu không dùng nhất (LRU) — mở lại khi cần, cùng thư mục, dữ liệu còn nguyên (migrate idempotent).
+ * PostgreSQL thật (production, VPS) KHÔNG đi qua nhánh này: bể kết nối của nó đã có trần riêng (`PGPOOL_MAX_ORG`).
+ */
+export const PGLITE_ORG_OPEN_MAX = 16;
+
+async function evictIdlePgliteOrgs(orgs: Map<string, OrgHandle>, keep: string): Promise<void> {
+  const open = [...orgs.entries()].filter(([, h]) => h.pglite && h.db);
+  for (const [code, h] of open.slice(0, Math.max(0, open.length - PGLITE_ORG_OPEN_MAX))) {
+    if (code === keep) continue;
+    orgs.delete(code);
+    try {
+      await (h.pglite as { close(): Promise<void> }).close();
+    } catch {
+      // Đóng hỏng (đã đóng / đang dở) ⇒ bỏ qua: handle đã ra khỏi sổ, lần sau mở lại handle mới.
+    }
+  }
+}
+
 async function getOrgDb(code: string): Promise<Db> {
   const orgs = (holder.__erpDb!.orgs ??= new Map());
   let h = orgs.get(code);
-  if (h?.db) return h.db;
+  if (h?.db) {
+    // Dùng gần đây nhất ⇒ cuối hàng (Map giữ thứ tự chèn) — LRU của `evictIdlePgliteOrgs`.
+    if (h.pglite) {
+      orgs.delete(code);
+      orgs.set(code, h);
+    }
+    return h.db;
+  }
   if (!h) {
     h = {};
     orgs.set(code, h);
@@ -305,6 +339,7 @@ async function getOrgDb(code: string): Promise<Db> {
       const { migrateOrganizationDb } = await import("./migrate");
       await migrateOrganizationDb(db, { pool: handle.pool });
       handle.db = db;
+      if (handle.pglite) await evictIdlePgliteOrgs(orgs, code);
       return db;
     })().catch((error) => {
       handle.pending = undefined;
