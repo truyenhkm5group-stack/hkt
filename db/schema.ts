@@ -1666,6 +1666,121 @@ export const warrantyClaims = pgTable(
   ],
 );
 
+/**
+ * PHÒNG / CĂN CHO THUÊ NGẮN NGÀY (0198, module `stays`). `ical_token` là phần bí mật của đường dẫn lịch .ics ERP phát cho kênh
+ * (`/api/ical/<mã tổ chức>.<token>`) — đổi được khi lộ.
+ */
+export const stayUnits = pgTable(
+  "stay_units",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    capacity: integer("capacity"),
+    address: text("address").notNull().default(""),
+    ownerName: text("owner_name").notNull().default(""),
+    icalToken: text("ical_token").notNull(),
+    active: boolean("active").notNull().default(true),
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("stay_units_code_uq").on(sql`lower(${t.code})`),
+    uniqueIndex("stay_units_ical_token_uq").on(t.icalToken),
+    check("stay_units_name_check", sql`length(btrim(${t.name})) BETWEEN 1 AND 120`),
+    check("stay_units_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 20`),
+    check("stay_units_capacity_check", sql`${t.capacity} IS NULL OR ${t.capacity} BETWEEN 1 AND 100`),
+    check("stay_units_token_check", sql`length(${t.icalToken}) >= 24`),
+  ],
+);
+
+/**
+ * ĐẶT PHÒNG (0198): khoảng NỬA MỞ [check_in, check_out). `source = 'ICAL'` ⇒ khoá tự nhiên (phòng, kênh, UID của kênh).
+ * Trùng phòng KHÔNG chặn ở CSDL — hai kênh bán trùng là chuyện thật, phải hiện ra; đường ghi tay tự chặn. Tiền `NULL` = chưa
+ * biết (luật 42).
+ */
+export const stayBookings = pgTable(
+  "stay_bookings",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    checkIn: date("check_in", { mode: "string" }).notNull(),
+    checkOut: date("check_out", { mode: "string" }).notNull(),
+    channel: text("channel").notNull(),
+    status: text("status").notNull().default("CONFIRMED"),
+    source: text("source").notNull().default("MANUAL"),
+    externalUid: text("external_uid"),
+    summary: text("summary").notNull().default(""),
+    guestName: text("guest_name").notNull().default(""),
+    guestPhone: text("guest_phone").notNull().default(""),
+    guests: integer("guests"),
+    amountVnd: integer("amount_vnd"),
+    note: text("note").notNull().default(""),
+    cancelReason: text("cancel_reason"),
+    cancelledAt: ts("cancelled_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("stay_bookings_uid_uq").on(t.unitId, t.channel, t.externalUid).where(sql`${t.externalUid} IS NOT NULL`),
+    index("stay_bookings_unit_dates_idx").on(t.unitId, t.checkIn, t.checkOut),
+    index("stay_bookings_checkout_idx").on(t.checkOut),
+    check("stay_bookings_dates_check", sql`${t.checkOut} > ${t.checkIn} AND ${t.checkOut} - ${t.checkIn} <= 365`),
+    check("stay_bookings_channel_check", sql`${t.channel} IN ('AIRBNB','BOOKING','AGODA','TRAVELOKA','DIRECT','OTHER')`),
+    check("stay_bookings_status_check", sql`${t.status} IN ('CONFIRMED','BLOCKED','CANCELLED')`),
+    check("stay_bookings_source_check", sql`${t.source} IN ('MANUAL','ICAL')`),
+    check("stay_bookings_uid_check", sql`(${t.source} = 'ICAL') = (${t.externalUid} IS NOT NULL)`),
+    check("stay_bookings_cancel_check", sql`${t.status} <> 'CANCELLED' OR length(btrim(coalesce(${t.cancelReason}, ''))) >= 3`),
+    check("stay_bookings_money_check", sql`${t.amountVnd} IS NULL OR ${t.amountVnd} >= 0`),
+    check("stay_bookings_guests_check", sql`${t.guests} IS NULL OR ${t.guests} BETWEEN 1 AND 100`),
+  ],
+);
+
+/** DỌN PHÒNG xong cho (phòng, ngày) (0198). Người dọn đi bằng khoá tài khoản (luật 34). */
+export const stayTurnovers = pgTable(
+  "stay_turnovers",
+  {
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    day: date("day", { mode: "string" }).notNull(),
+    doneAt: ts("done_at").notNull().defaultNow(),
+    doneByUserId: text("done_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    doneByName: text("done_by_name").notNull().default(""),
+    note: text("note").notNull().default(""),
+  },
+  (t) => [primaryKey({ name: "stay_turnovers_pk", columns: [t.unitId, t.day] })],
+);
+
+/** Sổ mỗi lượt nhập lịch .ics (0198), kể cả CHẠY THỬ — «ai đã nhập tệp nào, nó đổi gì». */
+export const stayIcalImports = pgTable(
+  "stay_ical_imports",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    applied: boolean("applied").notNull(),
+    checksum: text("checksum").notNull(),
+    events: integer("events").notNull(),
+    skipped: integer("skipped").notNull(),
+    created: integer("created").notNull(),
+    updated: integer("updated").notNull(),
+    cancelled: integer("cancelled").notNull(),
+    unchanged: integer("unchanged").notNull(),
+    byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
+    byName: text("by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("stay_ical_imports_unit_idx").on(t.unitId, t.createdAt)],
+);
+
 export const appointments = pgTable(
   "appointments",
   {

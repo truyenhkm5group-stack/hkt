@@ -241,6 +241,21 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  {
+    key: "stays",
+    topic: "SERVICE",
+    title: "Lịch phòng Airbnb / homestay",
+    summary: "Gộp lịch Airbnb / Booking / Agoda về một chỗ, biết ngay trùng phòng, ai nhận / trả và phòng nào phải dọn hôm nay.",
+    href: "/stays",
+    permission: "stays:view",
+    steps: [
+      { text: "Mở Lịch phòng, thẻ «Phòng & kênh», thêm từng phòng (mã, tên, chủ nhà nếu vận hành hộ).", href: "/stays?tab=phong" },
+      { text: "Chép đường dẫn lịch của phòng dán vào mục nhập lịch của Airbnb / Booking / Agoda — kênh sẽ tự khoá ngày đã bán ở nơi khác." },
+      { text: "Tải tệp lịch .ics từ kênh, ở khung «Nhập lịch của kênh» bấm «Chạy thử» để xem lượt mới / đổi / huỷ, rồi «Nhập thật»." },
+      { text: "Thẻ «Lịch»: trùng phòng hiện đỏ đầu trang; dọn xong thì bấm «Dọn xong»; khách đặt trực tiếp thì «Đặt phòng»." },
+    ],
+  },
+
   // ───────────────── CHATBOT ─────────────────
   {
     key: "sales-chatbot",

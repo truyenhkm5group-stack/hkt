@@ -71,9 +71,11 @@ phần lõi dùng lại ngay; cột «Module riêng» là thứ làm nên lý do
 
 ### Thứ tự đề xuất sau Fashion COD
 
-1. **Gia dụng** — dùng lại gần trọn chuỗi COD; chỉ thêm bảo hành theo serial.
+1. **Gia dụng** — dùng lại gần trọn chuỗi COD; chỉ thêm bảo hành theo serial. **ĐÃ CÓ** (#519, module `warranty`, mẫu
+   `household` — `docs/verticals/household.md`).
 2. **Airbnb / homestay** — nỗi đau rõ (trùng phòng = mất tiền ngay), iCal không cần đối tác, cạnh tranh ít ở thị trường
-   Việt.
+   Việt. **ĐÃ CÓ bản đầu** (module `stays`, mẫu `homestay` — `docs/verticals/homestay.md`): nhập lịch kênh bằng tệp, ERP phát
+   lịch cho kênh tự tải; tự tải lịch kênh định kỳ chờ chủ shop duyệt (gọi ra ngoài + lịch chạy).
 3. **Thực phẩm: lô & hạn dùng** — đã có khách thử HSLC.
 4. **Dịch vụ tại nhà**, rồi **Bất động sản**.
 5. **Spa / nhà hàng** — đào sâu khi có khách thử thật.

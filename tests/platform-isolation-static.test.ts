@@ -466,6 +466,7 @@ const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
   "app/api/tech/agent-run/route.ts": { lyDo: "Máy chạy agent nộp kết quả — khoá riêng AGENT_INGEST_SECRET hoặc CRON_SECRET, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
   "app/api/tech/agent-task/route.ts": { lyDo: "Máy chạy agent đọc việc được giao — cùng khoá với cửa ghi, có trần lượt gọi.", cong: /\bsecretEquals\(/ },
   "app/api/video-scale/public/[id]/route.ts": { lyDo: "URL tệp video Meta tải về để đăng Reel — không có phiên; mỗi URL mang chữ ký HMAC có hạn, sai / hết hạn ⇒ 404.", cong: /\bverifyAssetSignature\(/ },
+  "app/api/ical/[token]/route.ts": { lyDo: "Lịch .ics của một phòng (module stays) cho kênh lưu trú tự tải — không phiên; serveStayFeed tách mã tổ chức khỏi token, chạy trong withOrganization, kiểm module + token phòng ngẫu nhiên; sai ⇒ 404.", cong: /\bserveStayFeed\(/ },
 };
 
 export function testRouteApiQuaApiGuard() {

@@ -61,6 +61,7 @@ export const MODULE_KEYS = [
   "appointments",
   "warranty",
   "wholesale_leads",
+  "stays",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -536,6 +537,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["wholesale:view", "wholesale:work", "wholesale:assign", "wholesale:scan", "wholesale:config"],
     homeOptIn: true,
     why: "Bán sỉ B2B cần KHÁCH MỚI mà chưa ai nhắn tin tới — khác AI bán hàng (trả lời khách đã tới) và khác Khách hàng (người đã mua). Lead chỉ thành dòng `customers` khi chốt được (WON) và đi qua đúng lõi tạo khách có sẵn, nên không có CRM thứ hai. Phụ thuộc Khách hàng vì chuyển đổi ghi vào đó. Khoá Google Places là của CHÍNH tổ chức (kết nối `google-places`). Tắt cho tổ chức nhà (0197).",
+  },
+  {
+    key: "stays",
+    label: "Lưu trú ngắn ngày (Airbnb / homestay)",
+    description: "Homestay, căn hộ dịch vụ, villa cho thuê qua Airbnb / Booking / Agoda: lịch phòng gộp mọi kênh bằng lịch iCal, cảnh báo trùng phòng, khách nhận / trả hôm nay, dọn phòng giữa hai lượt, báo cáo chủ nhà theo phòng.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: [],
+    features: [],
+    routes: ["/stays", "/api/ical"],
+    permissions: ["stays:view", "stays:write"],
+    homeOptIn: true,
+    why: "Lưu trú bán ĐÊM của một PHÒNG trên nhiều kênh cùng lúc — không có đơn hàng, không có kho. Kênh chỉ chia sẻ lịch dạng iCal (không API), nên ERP gộp lịch, phát lịch của chính nó cho kênh, và báo trùng phòng thay vì để khách đến nơi mới biết. Tắt cho tổ chức nhà (0198).",
   },
 ];
 

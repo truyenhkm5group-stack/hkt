@@ -281,6 +281,17 @@ export const PERMISSION_GROUPS = [
       { key: "wholesale:config", label: "Khách sỉ: cấu hình, trần ngân sách & danh sách không liên hệ", hint: "Sửa trần chi tiêu ngày / tháng, đơn giá API, vùng phục vụ, ngưỡng hạng, mẫu lời chào; gỡ số khỏi danh sách không liên hệ." },
     ],
   },
+  /*
+    LƯU TRÚ NGẮN NGÀY (0198, module `stays`): xem lịch phòng, khách nhận / trả, dọn phòng, báo cáo chủ nhà; ghi = thêm / sửa
+    phòng, đặt / khoá / huỷ (có lý do), nhập lịch .ics của kênh, đánh dấu dọn xong, đổi đường dẫn lịch.
+  */
+  {
+    module: "Lưu trú",
+    items: [
+      { key: "stays:view", label: "Lưu trú: xem lịch phòng", hint: "Lịch phòng gộp các kênh, trùng phòng, khách nhận / trả hôm nay, dọn phòng, báo cáo chủ nhà." },
+      { key: "stays:write", label: "Lưu trú: đặt phòng & nhập lịch kênh", hint: "Thêm / sửa phòng, đặt / khoá / huỷ (có lý do), nhập lịch .ics từ Airbnb / Booking / Agoda, đánh dấu dọn xong, đổi đường dẫn lịch." },
+    ],
+  },
 ] as const;
 
 /**
@@ -386,7 +397,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
   // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
   // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work"],
+  // Lễ tân lưu trú (0198) là người giữ lịch phòng — module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own", "wholesale:view", "wholesale:work"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };
