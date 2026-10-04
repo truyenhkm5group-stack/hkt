@@ -408,6 +408,13 @@ async function testPlacesClient() {
   assert.ok(t.ok, t.message);
   assert.equal(seen.at(-1)!.mask, "places.id,nextPageToken", "kiểm tra kết nối dùng SKU chỉ-Place-ID (miễn phí)");
   assert.ok(!(await testGooglePlaces({ secrets: { apiKey: "khoá có khoảng trắng" } }, { fetch: f })).ok);
+  // 403 chung «The caller does not have permission» ⇒ in lý do máy đọc được (details[].reason) + đúng một chỗ phải sửa.
+  const denied = (reason: string) => (async () =>
+    new Response(JSON.stringify({ error: { code: 403, status: "PERMISSION_DENIED", message: "The caller does not have permission", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason, domain: "googleapis.com" }] } }), { status: 403, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const ip = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: denied("API_KEY_IP_ADDRESS_BLOCKED") });
+  assert.ok(!ip.ok && ip.message.includes("IP máy chủ ERP") && ip.message.includes("reason: API_KEY_IP_ADDRESS_BLOCKED"), ip.message);
+  const odd = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: denied("SOMETHING_NEW") });
+  assert.ok(!odd.ok && odd.message.includes("reason: SOMETHING_NEW"), "lý do lạ vẫn được in nguyên, không bị nuốt");
 }
 
 function testOpenerAndConfig() {

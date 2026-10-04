@@ -446,13 +446,31 @@ export async function testPancakePosOrg(input: { secrets: Record<string, string>
   chưa, và giới hạn khoá (IP / API) có cho máy chủ ERP gọi không — cả ba đều là HTTP 403 với câu chữ khác nhau, nên câu
   của Google được in nguyên (đã che khoá).
 */
+/**
+ * `error.details[].reason` của Google ⇒ đúng MỘT chỗ phải sửa. Câu chung «khoá sai / chưa bật / chưa thanh toán / IP» đẩy
+ * người cấu hình đi thử cả bốn (04/10/2026: khoá chạy trong Cloud Shell mà ERP báo 403 không nói vì sao).
+ */
+const PLACES_REASON_HINT: Record<string, string> = {
+  API_KEY_INVALID: "khoá không hợp lệ (dán thiếu ký tự, hoặc khoá đã bị xoá)",
+  API_KEY_SERVICE_BLOCKED: "giới hạn của khoá không cho «Places API (New)»: mở khoá ở Credentials → API restrictions, tích «Places API (New)»",
+  API_KEY_IP_ADDRESS_BLOCKED: "khoá giới hạn theo IP và IP máy chủ ERP không có trong danh sách: đặt Application restrictions = None hoặc thêm IP máy chủ",
+  API_KEY_HTTP_REFERRER_BLOCKED: "khoá giới hạn theo website (HTTP referrer), máy chủ ERP không gửi referrer: đặt Application restrictions = None",
+  API_KEY_ANDROID_APP_BLOCKED: "khoá giới hạn cho ứng dụng Android: đặt Application restrictions = None",
+  API_KEY_IOS_APP_BLOCKED: "khoá giới hạn cho ứng dụng iOS: đặt Application restrictions = None",
+  SERVICE_DISABLED: "«Places API (New)» chưa bật trong dự án của khoá (APIs & Services → Library → Enable)",
+  BILLING_DISABLED: "dự án của khoá chưa gắn tài khoản thanh toán đang hoạt động (Billing → Account management)",
+  CONSUMER_SUSPENDED: "Google đã tạm khoá dự án — xem thông báo trong Google Cloud Console",
+};
+
 export async function testGooglePlaces(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
   const key = (input.secrets.apiKey ?? "").trim();
   if (!GOOGLE_API_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá có ký tự lạ hoặc quá ngắn — dán NGUYÊN khoá API từ Google Cloud Console, không gửi." };
   const r = await textSearch({ apiKey: key, timeoutMs: TIMEOUT_MS, maxRetries: 0 }, { textQuery: "nhà hàng hải sản Hà Nội", tier: "IDS_ONLY" }, { fetch: deps.fetch });
   if (!r.ok) {
-    const why =
-      r.kind === "AUTH"
+    const reason = /\(reason: ([A-Z0-9_]+)\)/.exec(r.message)?.[1];
+    const why = reason && PLACES_REASON_HINT[reason]
+      ? `Google từ chối — ${PLACES_REASON_HINT[reason]}`
+      : r.kind === "AUTH"
         ? "Google từ chối khoá — khoá sai, «Places API (New)» chưa bật trong dự án, dự án chưa bật thanh toán, hoặc giới hạn khoá không cho IP máy chủ ERP"
         : r.kind === "QUOTA"
           ? "Google báo hết hạn mức (429) — kiểm tra Quotas trong Google Cloud"
