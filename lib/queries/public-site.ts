@@ -28,6 +28,8 @@ export type PublicPlan = {
   storageMb: number | null | undefined;
   /** Trả 12 tháng được tặng thêm bao nhiêu tháng (`platform_plans.yearly_free_months`); 0 = không có ưu đãi. */
   yearlyFreeMonths: number;
+  /** Gói có hạn mức AI dùng chung cho trợ lý chat (`limits.ai.platformCreditUsdPerMonth > 0`, 0194). Đọc từ dữ liệu gói. */
+  aiIncluded: boolean;
 };
 
 export type PublicSiteData = {
@@ -40,10 +42,19 @@ export type PublicSiteData = {
   plans: PublicPlan[];
 };
 
+/** Gói có kèm credit AI dùng chung không — đọc `limits.ai.platformCreditUsdPerMonth`, thiếu / sai kiểu ⇒ không. */
+function planIncludesAi(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const ai = (raw as Record<string, unknown>).ai;
+  if (!ai || typeof ai !== "object") return false;
+  const credit = (ai as Record<string, unknown>).platformCreditUsdPerMonth;
+  return typeof credit === "number" && credit > 0;
+}
+
 function toPublicPlan(row: Awaited<ReturnType<typeof listPlans>>[number]): PublicPlan {
   const { limits, undeclared } = parseLimits(row.limits);
   const pick = (k: "users" | "records" | "storageMb") => (undeclared.includes(k) ? undefined : limits[k]);
-  return { key: row.key, name: row.name, description: row.description, priceVnd: row.priceVnd, users: pick("users"), records: pick("records"), storageMb: pick("storageMb"), yearlyFreeMonths: row.yearlyFreeMonths };
+  return { key: row.key, name: row.name, description: row.description, priceVnd: row.priceVnd, users: pick("users"), records: pick("records"), storageMb: pick("storageMb"), yearlyFreeMonths: row.yearlyFreeMonths, aiIncluded: planIncludesAi(row.limits) };
 }
 
 export async function getPublicSiteData(): Promise<PublicSiteData> {
