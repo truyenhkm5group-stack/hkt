@@ -50,6 +50,8 @@ export type SyncedOrderSummary = {
   shipText: string | null;
   /** Ghi chú cần kiểm (SĐT / địa chỉ lấy từ đơn trước…). */
   warnings: readonly string[];
+  /** Đơn đã ghi thẳng «Đã xác nhận» (tổ chức bật «đơn đủ thông tin = đã xác nhận») — tin không bảo «chốt đơn» nữa. */
+  confirmed?: boolean;
 };
 
 /**
@@ -61,14 +63,14 @@ export function syncedOrderGroupText(o: SyncedOrderSummary): string {
   const address = o.province && !o.address.toLowerCase().includes(o.province.toLowerCase()) ? [o.address, o.province].filter(Boolean).join(", ") : o.address;
   const ship = o.shipText ?? (o.shippingFee === null ? "chưa báo" : formatVND(o.shippingFee));
   return [
-    `🧾 ĐƠN MỚI TỪ FANPAGE ${o.code} — nhân viên chốt, chờ kiểm`,
+    `🧾 ĐƠN MỚI TỪ FANPAGE ${o.code} — nhân viên chốt, ${o.confirmed ? "ĐÃ TÍNH ĐƠN (đủ thông tin)" : "chờ kiểm"}`,
     `Khách: ${o.name} · ${o.phone}`,
     `Địa chỉ: ${address || "—"}`,
     ...o.lines.map((l) => `• ${l.name} × ${l.quantity} × ${formatVND(l.unitPrice)} = ${formatVND(l.lineTotal)}`),
     `Tiền hàng: ${formatVND(o.subtotal)} · Ship: ${ship}`,
     `THU: ${formatVND(o.subtotal + (o.shippingFee ?? 0))}${o.shippingFee === null ? " + ship" : ""}`,
     ...o.warnings,
-    "Kiểm thông tin rồi chốt đơn trên ERP.",
+    o.confirmed ? "Đơn đã tính — sai thì sửa / huỷ trên ERP." : "Kiểm thông tin rồi chốt đơn trên ERP.",
   ].join("\n");
 }
 

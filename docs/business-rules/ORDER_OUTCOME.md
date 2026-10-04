@@ -241,3 +241,16 @@ người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ 
 - Trang tỷ lệ giao thành công: tổ chức không bật module vận chuyển ⇒ mốc mặc định là **ngày lên đơn** (mốc «ngày gửi ĐVVC»
   không có vận đơn nào để đọc).
 
+### 11.4. Đơn đủ thông tin = đã xác nhận (chủ shop HSLC quyết 04/10/2026)
+
+> «Với HSLC thì đơn có đầy đủ thông tin đơn hàng: SĐT, địa chỉ, SKU được tính là đơn hàng luôn (không cần xác nhận), chỉ
+> trừ đi những đơn có trạng thái huỷ thôi. Và với HSLC thì gần như không có hàng hoàn.»
+
+- Công tắc THEO TỔ CHỨC `settings['orders.autoConfirmComplete']` (mặc định TẮT, nút trên trang Đơn hàng). Bật ⇒ đơn tay
+  `NEW` có SĐT 8–15 số, địa chỉ ≥ 5 ký tự và ≥ 1 dòng hàng được ghi thẳng `CONFIRMED` ở lõi ghi đơn (chatbot, ghi đơn từ
+  hội thoại, form tạo / sửa) — giữ hàng, phát `order.confirmed`, vào mọi báo cáo đếm đơn đã xác nhận. Lúc bật, đơn `NEW` đủ
+  thông tin đang có được xác nhận qua đúng đường sửa đơn (có nhật ký từng đơn) và số đơn chuyển được báo lại người bấm.
+- KHÔNG đổi `ORDER_OUTCOME` — đơn vẫn chỉ `DELIVERED` bằng phiếu giao (mục 11). «Gần như không hoàn» đi qua Giả định của
+  báo cáo (`profit.assumptions.defaultReturnRate`), một con số dùng chung cho báo cáo lợi nhuận danh nghĩa và `/ads`.
+- `WAITING` (chờ hàng) là lựa chọn của người ⇒ không tự đổi. Vượt hạn mức nợ của khách ⇒ giữ `NEW`.
+

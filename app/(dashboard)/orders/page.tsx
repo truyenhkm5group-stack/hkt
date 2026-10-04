@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download, Plus, ShieldAlert } from "lucide-react";
-import { loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
+import { loadAutoConfirmComplete, loadManualDeliveryFee, manualOrderGate } from "@/lib/records/order-create";
+import { AutoConfirmButton } from "@/app/(dashboard)/orders/auto-confirm-button";
 import { DeliveryFeeButton } from "@/app/(dashboard)/orders/delivery-fee-button";
 import { can } from "@/lib/auth/session";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
@@ -35,7 +36,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   */
   const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user)]);
   // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
-  const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee() } : null;
+  const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -56,6 +57,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </Link>
               </Button>
             ) : null}
+            {deliveryFee ? <AutoConfirmButton enabled={deliveryFee.autoConfirm} /> : null}
             {deliveryFee ? <DeliveryFeeButton fee={deliveryFee.fee} /> : null}
             {/*
               LỐI VÀO DANH SÁCH SOÁT TRƯỚC KHI GỬI.

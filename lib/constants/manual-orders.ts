@@ -181,6 +181,24 @@ export function canMarkManualDeliveryFailed(stage: string): boolean {
  * khi huỷ phiếu giao; đơn giao không thành công không mang phí.
  */
 export const MANUAL_DELIVERY_FEE_SETTING_KEY = "orders.manualDeliveryFee";
+
+/**
+ * ═══ ĐƠN ĐỦ THÔNG TIN = ĐÃ XÁC NHẬN (chủ shop HSLC 04/10/2026) ═══
+ *
+ * «Đơn có đầy đủ thông tin: SĐT, địa chỉ, SKU được tính là đơn hàng luôn (không cần xác nhận), chỉ trừ những đơn huỷ.»
+ * Công tắc THEO TỔ CHỨC (`settings['orders.autoConfirmComplete']` = `{ enabled }`, mặc định TẮT): bật thì đơn tay «Mới» đủ ba thứ ⇒ ghi
+ * thẳng «Đã xác nhận» ở lõi ghi đơn (`lib/records/order-create.ts`) — một chỗ cho chatbot, ghi đơn từ hội thoại và form
+ * tạo tay, nên MỌI báo cáo đang đếm đơn đã xác nhận (hiệu quả quảng cáo, lợi nhuận danh nghĩa, marketer) tự đếm đúng mà
+ * không báo cáo nào phải đổi định nghĩa «đơn». Giữ hàng ở kho như mọi đơn đã chốt. «Chờ hàng» là lựa chọn tường minh của
+ * người ⇒ không tự đổi. Vượt hạn mức nợ của khách ⇒ giữ «Mới» (không báo lỗi, không lặng lẽ xác nhận).
+ */
+export const AUTO_CONFIRM_COMPLETE_SETTING_KEY = "orders.autoConfirmComplete";
+
+/** Đơn ĐỦ THÔNG TIN: SĐT 8–15 chữ số · địa chỉ ≥ 5 ký tự · ít nhất một dòng hàng. HÀM THUẦN. */
+export function manualOrderComplete(recipient: { phone: string; address: string }, lineCount: number): boolean {
+  const digits = recipient.phone.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15 && recipient.address.trim().length >= 5 && lineCount >= 1;
+}
 export function parseManualDeliveryFee(raw: unknown): number | null {
   const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
   return Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000 ? n : null;
