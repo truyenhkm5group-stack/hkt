@@ -165,6 +165,8 @@ function testPure() {
     else assert.ok(m.source !== "—" && !m.missingWhat, `${m.key}: đo được thì phải có nguồn thật`);
   }
   assert.ok(AI_SALES_METRICS.some((m) => m.key === "ai_sales.per_staff_conversion" && m.availability === "UNAVAILABLE"), "so AI với TỪNG nhân viên chưa đo được — phải khai, không giấu");
+  const delivered = AI_SALES_METRICS.find((m) => m.key === "ai_sales.cross_sell_value_delivered");
+  assert.ok(delivered?.availability === "MEASURED" && delivered.source.includes("ORDER_OUTCOME"), "bán chéo đã giao đi qua ORDER_OUTCOME");
   const ct = cohortTable([
     { quoted: true, identified: true, drafted: true, confirmed: true, human: false, upsellOffered: false, upsellAccepted: false },
     { quoted: true, identified: false, drafted: false, confirmed: false, human: true, upsellOffered: false, upsellAccepted: false },
