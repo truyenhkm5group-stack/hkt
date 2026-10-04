@@ -39,6 +39,21 @@ export async function getSettingJson<T>(key: string, fallback: T): Promise<T> {
   return mergeSettingJson(row.value, fallback);
 }
 
+/**
+ * Tổ chức đã TỰ KHAI khoá này chưa (có dòng trong `settings`). `false` ⇒ mọi lượt đọc đang đi bằng giá trị MẶC ĐỊNH trong mã —
+ * với tổ chức khách, mặc định ấy là số của tổ chức nhà, nên màn hình phải nói ra (F3 Fashion COD). Lỗi CSDL ⇒ `null`
+ * (chưa biết — không khẳng định gì).
+ */
+export async function settingDeclared(key: string): Promise<boolean | null> {
+  const db = await getDb();
+  try {
+    const row = await db.query.settings.findFirst({ where: eq(schema.settings.key, key), columns: { key: true } });
+    return !!row;
+  } catch {
+    return null;
+  }
+}
+
 export async function setSettingJson(key: string, value: unknown) {
   const db = await getDb();
   const text = JSON.stringify(value);

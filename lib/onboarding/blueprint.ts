@@ -12,6 +12,7 @@
  * `freshOrgState` là ảnh chụp của MỘT TỔ CHỨC CHƯA TỒN TẠI (chỉ có module lõi) — đủ cho bước Xem trước, vì lúc đó
  * chưa có CSDL nào để đọc. Lúc cài, `installBlueprint` lập LẠI kế hoạch trên tổ chức thật.
  */
+import { integrationApplies } from "@/lib/blueprints/integrations";
 import { moduleDef, moduleOfPermission, type ModuleKey } from "@/lib/constants/platform-modules";
 import { objectDef } from "@/lib/constants/object-registry";
 import type { OrgState } from "@/lib/blueprints/plan";
@@ -78,7 +79,7 @@ export function tailorBlueprint(source: Blueprint, modules: readonly ModuleKey[]
       dropped.push({ kind: "role", key: r.key, label: r.label, reason: "Mọi quyền của vai trò thuộc module không được chọn" });
       return false;
     });
-  const integrations = source.integrations?.filter((i) => (moduleDef(i.connectorKey)?.dependsOn ?? []).every((d) => on.has(d)));
+  const integrations = source.integrations?.filter((i) => integrationApplies(i.connectorKey, on));
 
   const bp: Blueprint = {
     ...source,

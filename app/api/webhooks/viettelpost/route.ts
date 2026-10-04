@@ -2,11 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { after } from "next/server";
 import { env } from "@/lib/env";
 import { asRecord, parseJsonSafeInts, str } from "@/lib/integrations/http";
-import { markWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
-import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
-import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
-import { staleMemo } from "@/lib/cache";
-import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { acceptVtpWebhook, applyAcceptedVtpWebhook, vtpOrderNumberOf } from "@/lib/integrations/viettelpost/webhook-core";
 import { anySecretMatches } from "@/lib/auth/secret-compare";
 import { VTP_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
 import { readBodyCapped } from "@/lib/http/body-limit";
@@ -34,25 +30,6 @@ function outerSecrets(request: NextRequest) {
 
 function bodySecrets(body: Record<string, unknown>) {
   return [str(body.TOKEN, body.token, body.secret, body.SECRET)].filter(Boolean);
-}
-
-/** Tìm bản ghi hành trình Viettel Post trong body: trực tiếp {DATA}, hoặc bọc trong gói chuyển tiếp của Pancake / bên thứ ba (tối đa 4 tầng) */
-function findVtpData(body: Record<string, unknown>): Record<string, unknown> {
-  const isTracking = (r: Record<string, unknown>) => ["ORDER_NUMBER", "order_number", "ORDER_STATUS", "order_status"].some((k) => k in r);
-  const queue: { rec: Record<string, unknown>; depth: number }[] = [{ rec: body, depth: 0 }];
-  while (queue.length) {
-    const { rec, depth } = queue.shift() as { rec: Record<string, unknown>; depth: number };
-    if (isTracking(rec)) return rec;
-    if (depth >= 4) continue;
-    for (const value of Object.values(rec)) {
-      if (Array.isArray(value)) {
-        for (const v of value.slice(0, 20)) if (v && typeof v === "object") queue.push({ rec: v as Record<string, unknown>, depth: depth + 1 });
-      } else if (value && typeof value === "object") {
-        queue.push({ rec: value as Record<string, unknown>, depth: depth + 1 });
-      }
-    }
-  }
-  return asRecord(body.DATA ?? body.data ?? body);
 }
 
 /**
@@ -94,54 +71,12 @@ async function handlePost(request: NextRequest) {
     // Gói tin bị chặn KHÔNG được ghi vào webhook_events (ai cũng POST được thì bảng sẽ phình vô
     // hạn). Nhưng im lặng hoàn toàn thì cấu hình sai secret sẽ làm mất sạch dữ liệu mà không ai
     // biết — nên để lại một dòng log tra được bằng `docker logs`.
-    console.warn(`[vtp-webhook] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"} · vận đơn=${str(asRecord(body.DATA ?? body).ORDER_NUMBER) || "?"}`);
+    console.warn(`[vtp-webhook] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"} · vận đơn=${vtpOrderNumberOf(body)}`);
     return NextResponse.json({ status: 401, error: true, message: "Sai tham số bí mật" }, { status: 401 });
   }
 
-  const data = findVtpData(body);
-  const record = normalizeTracking(data);
-  // lưu cả body gốc để soi định dạng khi gói tin đi qua trung gian (Pancake chuyển tiếp)
-  // Viettel Post thử lại tối đa 5 lần cho CÙNG một sự việc. Danh tính của sự việc là
-  // mã vận đơn + trạng thái + MỐC CỦA ĐVVC — không phải thời điểm ERP nhận được gói tin.
-  // Lần gửi lại chỉ tăng delivery_count trên dòng cũ rồi vẫn được xử lý lại (xử lý idempotent),
-  // nên nếu lần đầu hỏng thì lần gửi lại còn cơ hội chữa.
-  const occurredAt = record.statusDate ?? null;
-  const stored = await storeWebhook(
-    "VIETTELPOST",
-    "tracking",
-    record.orderNumber || null,
-    data === body ? { DATA: data } : { DATA: data, RAW: body },
-    { "user-agent": request.headers.get("user-agent") ?? "", "content-type": request.headers.get("content-type") ?? "" },
-    {
-      dedupeKey: webhookDedupeKey("VIETTELPOST", [record.orderNumber, record.status ?? record.statusName, occurredAt?.toISOString()]),
-      occurredAt,
-    },
-  );
-  const eventId = stored.id;
-
-  after(await bindOrganization(async () => {
-    try {
-      const result = await applyVtpTracking(record, "VTP_WEBHOOK", { allowCreate: true });
-      // PROCESSED phải có nghĩa là ĐÃ ÁP DỤNG. Gói tin lặp hay gói tin đến muộn vẫn được lưu và
-      // vẫn vào lịch sử hành trình, nhưng không được đếm như đã cập nhật trạng thái — nếu không
-      // thì con số "đã xử lý" trên trang Kết nối dữ liệu che mất webhook không đổi được gì.
-      const note =
-        !result ? "Không tìm thấy vận đơn tương ứng"
-        : result.reason === "duplicate" ? "Gói tin lặp — trạng thái đã đúng, không cần cập nhật"
-        : result.reason === "stale" ? "Sự kiện của Viettel Post cũ hơn trạng thái đang lưu — giữ trạng thái mới hơn, đã ghi vào lịch sử"
-        : null;
-      const retryNote = stored.duplicate ? `Viettel Post gửi lại lần ${stored.deliveryCount}` : null;
-      await markWebhook(eventId, result?.changed ? "PROCESSED" : "IGNORED", [note, retryNote].filter(Boolean).join(" · ") || null);
-      if (result?.changed) {
-        // Không ai ngồi chờ webhook: đánh dấu đệm cũ để người đang mở trang nhận số ngay và được
-        // kéo lên số mới khi lượt tính lại xong — thay vì bắt họ trả giá lượt tính nguội.
-        staleMemo();
-        scheduleAlertEvaluation();
-      }
-    } catch (error) {
-      await markWebhook(eventId, "FAILED", error instanceof Error ? error.message : String(error));
-    }
-  }));
+  const accepted = await acceptVtpWebhook(body, { userAgent: request.headers.get("user-agent") ?? "", contentType: request.headers.get("content-type") ?? "" });
+  after(await bindOrganization(() => applyAcceptedVtpWebhook(accepted)));
 
   // Viettel Post yêu cầu trả HTTP 200 trong < 1 giây
   return NextResponse.json({ status: 200, error: false, message: "OK" });

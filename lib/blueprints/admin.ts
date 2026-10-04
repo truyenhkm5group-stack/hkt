@@ -7,6 +7,7 @@
  * quyền của từng BƯỚC (bật module cần `modules:manage`, vai trò cần `users:manage`, luật cần `workflow:manage`…) do
  * kế hoạch đánh dấu BỊ CHẶN, nên người thiếu quyền thấy trước bước nào không làm được thay vì hỏng giữa chừng.
  */
+import { integrationTarget } from "@/lib/blueprints/integrations";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { installHistory, installedVersion } from "@/lib/blueprints/ledger";
@@ -66,7 +67,7 @@ export function summarize(bp: Blueprint, installed: string | null): TemplateSumm
     objects: (bp.objects ?? []).map((o) => ({ key: o.key, label: o.label })),
     pages: (bp.pages ?? []).map((p) => ({ slug: p.slug, name: p.name })),
     workflows: (bp.workflows ?? []).map((w) => ({ key: w.key, name: w.name })),
-    integrations: (bp.integrations ?? []).map((i) => ({ connectorKey: i.connectorKey, label: moduleDef(i.connectorKey)?.label ?? i.connectorKey, reason: i.reason })),
+    integrations: (bp.integrations ?? []).map((i) => ({ connectorKey: i.connectorKey, label: integrationTarget(i.connectorKey)?.label ?? i.connectorKey, reason: i.reason })),
     installedVersion: installed,
     updateAvailable: installed !== null && compareVersions(bp.version, installed) > 0,
   };
