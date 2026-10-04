@@ -9,6 +9,7 @@ import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { HumanCostForm } from "./human-cost-form";
 import { ExperimentBlock } from "./experiment-block";
 import { loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
+import { loadBasketStats } from "@/lib/sales-chatbot/basket";
 import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
@@ -57,6 +58,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const days = PERIODS.find((d) => String(d) === sp.days) ?? 30;
   const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage });
   const experiment = await loadExperimentReport();
+  const basket = await loadBasketStats({ days });
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -191,6 +193,11 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   <Stat label="lời mời mua thêm" value={r.upsell.offered ? formatNumber(r.upsell.offered) : "chưa đo"} sub={r.upsell.offered ? undefined : "cần câu mẫu UPSELL"} />
                   <Stat label="khách nhận" value={formatPercent(pctOf(r.upsell.attachRate), 0)} sub={`${formatNumber(r.upsell.accepted)} nhận · ${formatNumber(r.upsell.declined)} không`} />
                   <Stat label="tiền mua thêm" value={formatVND(r.upsell.offered ? r.upsell.revenueVnd : null)} />
+                </div>
+                <div className="grid grid-cols-3 gap-2" data-testid="ai-perf-basket" title="Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đơn chốt — danh nghĩa, chưa phải doanh thu: doanh thu chỉ ghi khi đơn đã giao.">
+                  <Stat label="món / đơn bot chốt" value={basket.itemsPerOrder === null ? "—" : basket.itemsPerOrder.toFixed(1)} sub={`${formatNumber(basket.orders)} đơn`} />
+                  <Stat label="đơn có ≥ 2 sản phẩm (bán chéo)" value={formatPercent(pctOf(basket.multiProductRate), 0)} sub={`${formatNumber(basket.multiProductOrders)} đơn`} />
+                  <Stat label="giá trị bán chéo (đơn chốt)" value={formatVND(basket.orders ? basket.crossSellValueVnd : null)} sub="danh nghĩa, chưa phải doanh thu" />
                 </div>
               </div>
             </SectionCard>
