@@ -9971,6 +9971,87 @@ export const salesConversationEvents = pgTable(
   ],
 );
 
+/**
+ * PHÁT LẠI HỘI THOẠI CŨ (migration sales_replay · lib/sales-chatbot/replay.ts): một lượt do người bấm + từng điểm (tin khách thật · câu AI sẽ
+ * nói ở kênh THỬ · câu thật đã nói · cờ chấm tất định). Tóm tắt là ảnh chụp lúc xong — đổi cấu hình bot sau đó không đổi số cũ.
+ */
+export const salesReplayRuns = pgTable(
+  "sales_replay_runs",
+  {
+    id: id(),
+    status: text("status").notNull().default("RUNNING"),
+    targetPoints: integer("target_points").notNull(),
+    days: integer("days").notNull(),
+    summary: jsonb("summary").$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdByUserId: text("created_by_user_id"),
+    createdByEmail: text("created_by_email"),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    finishedAt: ts("finished_at"),
+  },
+  (t) => [
+    index("sales_replay_runs_started_idx").on(t.startedAt),
+    check("sales_replay_runs_status_check", sql`${t.status} IN ('RUNNING','DONE','FAILED')`),
+    check("sales_replay_runs_points_check", sql`${t.targetPoints} BETWEEN 1 AND 50`),
+  ],
+);
+
+export const salesReplayPoints = pgTable(
+  "sales_replay_points",
+  {
+    id: id(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => salesReplayRuns.id, { onDelete: "cascade" }),
+    sourceConversationId: text("source_conversation_id").notNull(),
+    sourceChannel: text("source_channel").notNull(),
+    sourceSeq: integer("source_seq").notNull(),
+    customerText: text("customer_text").notNull(),
+    historyMessages: integer("history_messages").notNull().default(0),
+    historicalReply: text("historical_reply"),
+    historicalSpeaker: text("historical_speaker").notNull(),
+    aiReply: text("ai_reply"),
+    aiStatus: text("ai_status"),
+    tools: jsonb("tools").$type<{ name: string; ok: boolean; summary: string }[]>().notNull().default([]),
+    flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
+    ungroundedAmounts: integer("ungrounded_amounts").array().notNull().default(sql`'{}'::integer[]`),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("sales_replay_points_run_idx").on(t.runId), check("sales_replay_points_speaker_check", sql`${t.historicalSpeaker} IN ('BOT','SHOP','NONE')`)],
+);
+
+/**
+ * GỢI Ý COPILOT (migration sales_copilot · lib/sales-chatbot/operating-mode.ts): câu bot soạn ở hội thoại bóng, KHÔNG gửi, ở
+ * chế độ COPILOT; câu thật của page tới sau thì máy ghi kèm độ giống + phán quyết. Đo "người dùng lại gợi ý tới đâu".
+ */
+export const salesCopilotSuggestions = pgTable(
+  "sales_copilot_suggestions",
+  {
+    id: id(),
+    conversationId: text("conversation_id").notNull(),
+    pageId: text("page_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    customerText: text("customer_text").notNull(),
+    suggestion: text("suggestion"),
+    aiStatus: text("ai_status"),
+    tools: jsonb("tools").$type<{ name: string; ok: boolean; summary: string }[]>().notNull().default([]),
+    error: text("error"),
+    humanReply: text("human_reply"),
+    humanReplyAt: ts("human_reply_at"),
+    similarity: doublePrecision("similarity"),
+    verdict: text("verdict"),
+    scoredAt: ts("scored_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_copilot_suggestions_thread_idx").on(t.pageId, t.threadId, t.createdAt),
+    index("sales_copilot_suggestions_unscored_idx").on(t.createdAt).where(sql`${t.scoredAt} IS NULL`),
+    check("sales_copilot_suggestions_verdict_check", sql`${t.verdict} IS NULL OR ${t.verdict} IN ('SAME','EDITED','DIFFERENT','NO_REPLY')`),
+    check("sales_copilot_suggestions_similarity_check", sql`${t.similarity} IS NULL OR (${t.similarity} >= 0 AND ${t.similarity} <= 1)`),
+  ],
+);
+
 /** Lời mời người dùng vào tổ chức (0180 · lib/users/invites.ts). Chỉ lưu BĂM của mã; mã thô hiện đúng một lần. */
 /**
  * LIÊN KẾT ĐẶT LẠI MẬT KHẨU (0191) — dùng MỘT lần, hết hạn 24 giờ, chỉ lưu `sha256` của mã. Người tạo: quản trị tổ chức

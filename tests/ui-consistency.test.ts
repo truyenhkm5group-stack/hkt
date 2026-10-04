@@ -192,6 +192,8 @@ export function testNavigationCoverage() {
     "/inventory/planning/orders": "danh sách con của Kế hoạch SX, vào từ chính trang đó",
     "/inventory/planning/orders/new": "hành động tạo mới, không phải một mục menu",
     "/customers/retention": "vào từ nút 'Giữ chân khách' ngay trên trang Khách hàng, và từ ô lệnh ⌘K",
+    "/ai/sales-chatbot/copilot": "vào từ thẻ «Chế độ vận hành» trên trang Chatbot bán hàng — số đo của Copilot và thử nghiệm AI vs Người, chỉ có nghĩa khi đang chạy một trong hai chế độ ấy",
+    "/ai/sales-chatbot/replay": "vào từ nút «Phát lại hội thoại cũ» ngay trên trang Chatbot bán hàng — báo cáo sẵn sàng trước khi bật tự động, không phải việc hằng ngày",
     "/wholesale/settings": "tab «Cấu hình & chi phí API» trên thanh tab của Săn khách sỉ (chỉ người có wholesale:config) — không phải việc hằng ngày nên không chiếm một mục menu",
     "/inventory/purchasing": "vào từ nút 'Mua hàng & xưởng' ngay trên trang Kế hoạch SX, và từ ô lệnh ⌘K",
     "/import-vtp": "vào từ nút 'Bổ sung danh sách vận đơn' ngay trên trang Đối soát COD, và từ ô lệnh ⌘K",
