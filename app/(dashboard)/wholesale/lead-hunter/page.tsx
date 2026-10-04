@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { formatDate, formatNumber } from "@/lib/format";
 import { apiUsageSummary, campaignProgressList, coverageByProvince } from "@/lib/queries/wholesale";
-import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
+import { provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
 import { ensureTemplateCampaign, hslcTemplateValues } from "@/lib/wholesale/campaigns";
 import { DEFAULT_KEYWORD_GROUPS, microsToVnd } from "@/lib/wholesale/config";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
@@ -63,7 +63,7 @@ export default async function LeadHunterPage() {
         ]}
       />
 
-      <SectionCard title="Chiến dịch" description="Mẫu «HSLC – Wholesale F&B Prospects» KHÔNG tự chạy — bấm «Dùng mẫu» để tạo bản nháp, xem trước rồi mới «Bắt đầu quét».">
+      <SectionCard title="Chiến dịch" description="Ba mẫu «HSLC – Wholesale F&B Prospects» theo thứ tự quét: ① Hà Nội + TP.HCM → ② vùng không có biển → ③ ven biển. Mẫu KHÔNG tự chạy — bấm «Dùng mẫu» để tạo bản nháp, xem trước rồi mới «Bắt đầu quét».">
         <div className="grid gap-3 lg:grid-cols-2">
           {campaigns.map((c) => (
             <CampaignCard key={c.id} c={c} usdToVnd={cfg.usdToVnd} />
@@ -73,7 +73,7 @@ export default async function LeadHunterPage() {
 
       <SectionCard title="Tạo chiến dịch mới" description="Bấm «Xem trước truy vấn» để thấy số truy vấn, truy vấn mẫu và chi phí ước tính trước khi lưu.">
         <CampaignForm
-          provinces={SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label, areas: p.areas.map((a) => ({ code: a.code, name: a.name })) }))}
+          provinces={SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label, tier: provinceScanTier(p, cfg.scanPriority), areas: p.areas.map((a) => ({ code: a.code, name: a.name, tier: scanTier(p.key, a, cfg.scanPriority) })) }))}
           keywordGroups={DEFAULT_KEYWORD_GROUPS.map((g) => ({ key: g.key, label: g.label, keywords: [...g.keywords], enabled: g.enabled }))}
           defaults={{ name: `${template.name} · ${formatDate(new Date())}`, productFocus: template.productFocus, excludeKeywords: template.excludeKeywords.join(", "), targetSegments: [...template.targetSegments], maxLeads: template.maxLeads, discoveryTier: cfg.discoveryTier }}
         />

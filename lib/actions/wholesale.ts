@@ -7,6 +7,7 @@ import { bindOrganization } from "@/lib/platform/background";
 import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, previewCampaignCore, startCampaignCore, type CoreResult, type CampaignPreview } from "@/lib/wholesale/campaigns";
 import { saveLeadHunterConfigCore } from "@/lib/wholesale/config-core";
 import type { OutreachChannel } from "@/lib/wholesale/constants";
+import { sendLeadsToFieldCore, type HandoffReport } from "@/lib/wholesale/field-handoff";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
 import {
   addLeadNoteCore,
@@ -128,6 +129,14 @@ export async function logCallAction(leadId: string, input: unknown): Promise<Cor
   const user = await requireUser();
   const r = await logCallCore(user, leadId, input);
   if ("ok" in r) refreshLead(leadId);
+  return r;
+}
+
+/** Gửi khách tiềm năng cho nhân viên thị trường (Telegram / Zalo / Lark theo cấu hình Săn khách sỉ). */
+export async function sendLeadsToFieldAction(input: { leadIds: string[]; destination: number | null; note: string }): Promise<CoreResult<{ report: HandoffReport }>> {
+  const user = await requireUser();
+  const r = await sendLeadsToFieldCore(user, input);
+  if ("ok" in r) refreshLead(input.leadIds.length === 1 ? input.leadIds[0] : undefined);
   return r;
 }
 

@@ -12,6 +12,8 @@ import { formatDate, formatNumber, formatTimeAgo } from "@/lib/format";
 import type { LeadListRow } from "@/lib/queries/wholesale";
 import { FILTER_REASON_LABEL, LEAD_STATUS_TONE, OUTREACH_CHANNEL_LABEL, OUTREACH_CHANNELS, type OutreachChannel } from "@/lib/wholesale/constants";
 import { cn } from "@/lib/utils";
+import type { FieldHandoffOptions } from "@/lib/wholesale/field-handoff";
+import { HandoffPanel } from "@/app/(dashboard)/wholesale/leads/handoff-panel";
 
 const GRADE_TONE: Record<string, string> = {
   A: "bg-emerald-600 text-white",
@@ -130,7 +132,7 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
 
 const SORTABLE = ["leadScore", "status", "lastContactAt", "rating"];
 
-export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; total: number; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean }) {
+export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; total: number; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions }) {
   return (
     <DataTable
       columns={columns}
@@ -151,9 +153,10 @@ export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; tota
   );
 }
 
-function BulkBar({ ids, clear, users, campaigns, canAssign, canWork }: { ids: string[]; clear: () => void; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean }) {
+function BulkBar({ ids, clear, users, campaigns, canAssign, canWork, handoff }: { ids: string[]; clear: () => void; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [showHandoff, setShowHandoff] = useState(false);
   const [assignee, setAssignee] = useState("");
   const [campaign, setCampaign] = useState("");
   const [channel, setChannel] = useState<OutreachChannel>("PHONE_CALL");
@@ -215,6 +218,21 @@ function BulkBar({ ids, clear, users, campaigns, canAssign, canWork }: { ids: st
           <Button size="sm" disabled={pending} onClick={() => run(() => queueOutreachAction(ids, channel), (r) => `Đã soạn ${r.queued} lời chào chờ duyệt${Number(r.skipped) ? ` · bỏ qua ${r.skipped} (không liên hệ / thiếu kênh / đã có lời chào chờ)` : ""}`)}>
             Xếp hàng liên hệ
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowHandoff((v) => !v)}>
+            Gửi NV thị trường
+          </Button>
+          {showHandoff ? (
+            <div className="w-full max-w-md rounded-md border bg-background p-2">
+              <HandoffPanel
+                leadIds={ids}
+                options={handoff}
+                onDone={() => {
+                  setShowHandoff(false);
+                  clear();
+                }}
+              />
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>

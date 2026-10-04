@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { DEFAULT_GRADE_THRESHOLDS, DEFAULT_LEARNING, type ServiceAreaLevel } from "@/lib/wholesale/scoring";
 import type { LeadSegment } from "@/lib/wholesale/segments";
+import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
+import { MESSAGING_CONNECTOR_KEYS } from "@/lib/messaging/types";
 
 /**
  * ═══════════ CẤU HÌNH SĂN KHÁCH SỈ — HẰNG SỐ, MẶC ĐỊNH, LƯỢC ĐỒ ═══════════
@@ -108,14 +110,13 @@ export const DEFAULT_TARGET_SEGMENTS: readonly LeadSegment[] = [
   "FROZEN_FOOD_STORE",
 ];
 
-export const DEFAULT_SERVICE_AREAS: Record<string, ServiceAreaLevel> = {
-  "ho chi minh": "PRIORITY",
-  "ha noi": "PRIORITY",
-  "da nang": "PRIORITY",
-  "thanh hoa": "PRIORITY",
-  "hai phong": "PRIORITY",
-  "quang ninh": "PRIORITY",
-};
+/** Tỉnh quét trước (chủ shop chốt 04/10/2026): Hà Nội + TP.HCM; sau đó vùng không có biển, rồi ven biển (`scanTier`). */
+export const DEFAULT_FIRST_PROVINCES: readonly string[] = ["ha noi", "ho chi minh"];
+
+/** Tỉnh quét trước là vùng ưu tiên phục vụ; mọi tỉnh khác trong danh sách quét là vùng giao được. */
+export const DEFAULT_SERVICE_AREAS: Record<string, ServiceAreaLevel> = Object.fromEntries(
+  SEARCH_PROVINCES.map((p) => [p.key, DEFAULT_FIRST_PROVINCES.includes(p.key) ? "PRIORITY" : "SERVED"]),
+);
 
 export const DEFAULT_OPENER_TEMPLATE =
   "Em chào {{ten_doanh_nghiep}}, bên em là {{ten_shop}}, chuyên cung cấp {{san_pham}} cho {{nhom_khach}}. Em thấy bên mình kinh doanh {{loai_hinh}}{{khu_vuc}} nên muốn gửi anh/chị bảng giá sỉ để tham khảo ạ.";
@@ -142,6 +143,18 @@ export const leadHunterConfigSchema = z.object({
   /** Số ngày giữ trường dữ liệu nguồn Google trước khi phải làm mới hoặc xoá (xem docs mục tuân thủ). */
   googleRetentionDays: z.number().int().min(1).max(30),
   serviceAreas: z.record(z.string().min(1).max(60), z.enum(["PRIORITY", "SERVED"])),
+  /** Thứ tự quét khi bấm Bắt đầu: tỉnh quét trước ⇒ (tuỳ chọn) không có biển ⇒ ven biển. Xem `scanTier`. */
+  scanPriority: z.object({
+    firstProvinces: z.array(z.string().min(1).max(60)).max(40),
+    inlandBeforeCoastal: z.boolean(),
+  }),
+  /** Gửi khách tiềm năng cho nhân viên thị trường qua một kết nối nhắn tin của tổ chức (Telegram mặc định). */
+  fieldSales: z.object({
+    connectorKey: z.enum(MESSAGING_CONNECTOR_KEYS),
+    destinations: z
+      .array(z.object({ label: z.string().trim().min(1).max(60), chatId: z.string().trim().max(120) }))
+      .max(20),
+  }),
   gradeThresholds: z.object({ A: z.number().int().min(1).max(100), B: z.number().int().min(1).max(100), C: z.number().int().min(1).max(100) }).refine((t) => t.A > t.B && t.B > t.C, "Ngưỡng hạng phải giảm dần A > B > C"),
   learning: z.object({ minSample: z.number().int().min(5).max(10_000), prior: z.number().int().min(0).max(1000), maxAdjust: z.number().int().min(0).max(10) }),
   /** Điểm tối thiểu để lead tự lên «Đủ điều kiện» (QUALIFIED). */
@@ -179,6 +192,9 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
   cellFreshDays: 30,
   googleRetentionDays: 30,
   serviceAreas: { ...DEFAULT_SERVICE_AREAS },
+  scanPriority: { firstProvinces: [...DEFAULT_FIRST_PROVINCES], inlandBeforeCoastal: true },
+  // Nơi nhận rỗng = chat đã khai ở kết nối Telegram (ô «Chat ID» của trang Kết nối).
+  fieldSales: { connectorKey: "telegram-bot", destinations: [] },
   gradeThresholds: { ...DEFAULT_GRADE_THRESHOLDS },
   learning: { ...DEFAULT_LEARNING },
   qualifyMinScore: 65,
@@ -212,6 +228,8 @@ export function mergeLeadHunterConfig(raw: unknown): LeadHunterConfig {
     budget: obj(r.budget, base.budget),
     skuPriceUsdPer1000: obj(r.skuPriceUsdPer1000, base.skuPriceUsdPer1000),
     serviceAreas: r.serviceAreas && typeof r.serviceAreas === "object" ? (r.serviceAreas as Record<string, ServiceAreaLevel>) : base.serviceAreas,
+    scanPriority: obj(r.scanPriority, base.scanPriority),
+    fieldSales: obj(r.fieldSales, base.fieldSales),
     gradeThresholds: obj(r.gradeThresholds, base.gradeThresholds),
     learning: obj(r.learning, base.learning),
     websiteEnrichment: obj(r.websiteEnrichment, base.websiteEnrichment),

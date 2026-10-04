@@ -11,7 +11,8 @@ import type { CoreResult } from "@/lib/wholesale/campaigns";
 import { ACTIVE_PIPELINE_STATUSES, CALL_OUTCOMES, CONTACTED_STATUSES, isLeadStatus, LEAD_STATUSES, LEAD_STATUS_LABEL, RESPONDED_STATUSES, type LeadStatus, canTransitionLead } from "@/lib/wholesale/constants";
 import { nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { finalizeLead, findMasterLead, leadView, rescoreLead } from "@/lib/wholesale/engine";
-import { normalizeVnPhone } from "@/lib/wholesale/phone";
+import { verifiedCallPatch } from "@/lib/wholesale/field-handoff";
+import { formatVnPhone, normalizeVnPhone } from "@/lib/wholesale/phone";
 import { manualImportProvider } from "@/lib/wholesale/providers";
 import { classifySegment } from "@/lib/wholesale/segments";
 import { getLeadHunterConfig, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
@@ -152,6 +153,8 @@ const callSchema = z.object({
   outcome: z.enum(CALL_OUTCOMES),
   note: z.string().trim().max(2000).default(""),
   nextFollowupAt: z.coerce.date().nullable().default(null),
+  /** Người gọi tích «khách xác nhận đúng địa chỉ» ⇒ địa chỉ trên bản đồ thành địa chỉ của shop (xem `verifiedCallPatch`). */
+  addressConfirmed: z.boolean().default(false),
 });
 
 /** Ghi một cuộc gọi (đã gọi thật — nút «Gọi» chỉ mở ứng dụng điện thoại). Kết quả kéo theo trạng thái hợp lý. */
@@ -160,7 +163,7 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
   if ("error" in g) return g;
   const parsed = callSchema.safeParse(raw);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { outcome, note, nextFollowupAt } = parsed.data;
+  const { outcome, note, nextFollowupAt, addressConfirmed } = parsed.data;
   const from = isLeadStatus(g.lead.contactStatus) ? g.lead.contactStatus : "NEW";
   if (from === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ — không ghi cuộc gọi mới." };
   if (outcome === "DO_NOT_CONTACT") {
@@ -172,9 +175,16 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
   const early: readonly LeadStatus[] = ["NEW", "QUALIFIED", "READY_TO_CONTACT", "NO_ANSWER", "CONTACTED"];
   const to: LeadStatus = !early.includes(from) ? from : outcome === "ANSWERED" || outcome === "CALLBACK" ? "CONTACTED" : outcome === "NO_ANSWER" || outcome === "BUSY" ? "NO_ANSWER" : from;
   const db = await getDb();
+  const snap = g.lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, g.lead.placeId) }) : null;
+  const verified = verifiedCallPatch(g.lead, snap && !snap.purgedAt ? snap : null, outcome, addressConfirmed);
+  const verifiedPhone = verified.normalizedPhone ? normalizeVnPhone(verified.normalizedPhone) : null;
   await db
     .update(schema.wholesaleLeads)
     .set({
+      ...(verified.businessName ? { businessName: verified.businessName } : {}),
+      ...(verified.address ? { address: verified.address } : {}),
+      ...(verified.businessName || verified.address ? { nameKey: nameAddressKey(verified.businessName ?? g.lead.businessName, verified.address ?? g.lead.address) } : {}),
+      ...(verifiedPhone?.normalized ? { phoneRaw: formatVnPhone(verifiedPhone.normalized), normalizedPhone: verifiedPhone.normalized, phoneKind: verifiedPhone.kind, phoneCountryCode: verifiedPhone.countryCode, phoneSource: "VERIFIED_CALL" } : {}),
       contactStatus: to,
       ...statusStamps(g.lead, to, now),
       firstContactAt: g.lead.firstContactAt ?? now,
@@ -186,8 +196,8 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
       updatedAt: now,
     })
     .where(eq(schema.wholesaleLeads.id, leadId));
-  await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, fromStatus: from, toStatus: to !== from ? to : null, note });
-  await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_CONTACT", entity: "WHOLESALE_LEAD", entityId: leadId, before: { status: from }, after: { status: to, outcome }, reason: "Ghi cuộc gọi" });
+  await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, fromStatus: from, toStatus: to !== from ? to : null, note, meta: Object.keys(verified).length ? { verified: Object.keys(verified) } : null });
+  await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_CONTACT", entity: "WHOLESALE_LEAD", entityId: leadId, before: { status: from }, after: { status: to, outcome, verified: Object.keys(verified) }, reason: "Ghi cuộc gọi" });
   return { ok: true, status: to };
 }
 

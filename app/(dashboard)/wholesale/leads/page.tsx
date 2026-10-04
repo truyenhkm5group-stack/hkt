@@ -9,6 +9,7 @@ import { LEAD_SOURCE_LABEL, LEAD_SOURCES } from "@/lib/wholesale/constants";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { GoogleAttribution, WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { LeadsTable } from "@/app/(dashboard)/wholesale/leads/leads-table";
+import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 
 export const metadata = { title: "Khách sỉ tiềm năng" };
 
@@ -18,7 +19,7 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "leadScore", filterKeys: WHOLESALE_LEAD_FILTERS, sortable: WHOLESALE_LEAD_SORTABLE, defaultPeriod: "all", defaultPageSize: 50 });
   const canAssign = can(user, "wholesale:assign");
-  const [{ rows, total, pageCount }, facets, users] = await Promise.all([listWholesaleLeads(params, decision, user.id), wholesaleLeadFacets(decision), canAssign ? assignableUsers() : Promise.resolve([])]);
+  const [{ rows, total, pageCount }, facets, users, handoff] = await Promise.all([listWholesaleLeads(params, decision, user.id), wholesaleLeadFacets(decision), canAssign ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions()]);
   return (
     <div className="space-y-4">
       <PageHeader
@@ -65,7 +66,7 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
       >
         <GoogleAttribution />
       </DataTableToolbar>
-      <LeadsTable rows={rows} pageCount={pageCount} total={total} users={users} campaigns={facets.campaign} canAssign={canAssign} canWork={can(user, "wholesale:work")} />
+      <LeadsTable rows={rows} pageCount={pageCount} total={total} users={users} campaigns={facets.campaign} canAssign={canAssign} canWork={can(user, "wholesale:work")} handoff={handoff} />
     </div>
   );
 }

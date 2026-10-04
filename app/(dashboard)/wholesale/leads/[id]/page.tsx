@@ -9,6 +9,7 @@ import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { assignableUsers, getWholesaleLead } from "@/lib/queries/wholesale";
 import { ACTIVITY_KIND_LABEL, CALL_OUTCOME_LABEL, ENRICHMENT_STATUS_LABEL, FILTER_REASON_LABEL, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, OUTREACH_CHANNEL_LABEL, OUTREACH_RESULT_LABEL, OUTREACH_STATUS_LABEL, isLeadStatus, type CallOutcome, type LeadSourceKey, type OutreachChannel, type OutreachResult } from "@/lib/wholesale/constants";
 import { leadView } from "@/lib/wholesale/engine";
+import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, PHONE_KIND_LABEL } from "@/lib/wholesale/phone";
 import type { ScoreComponent } from "@/lib/wholesale/scoring";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey } from "@/lib/wholesale/segments";
@@ -32,7 +33,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
   const reasons = (lead.scoreReasons ?? null) as { summary?: string; components?: ScoreComponent[] } | null;
   const googleExpired = Boolean(lead.placeId && (!snap || snap.purgedAt));
   const canWork = can(user, "wholesale:work");
-  const users = can(user, "wholesale:assign") ? await assignableUsers() : [];
+  const [users, handoff] = await Promise.all([can(user, "wholesale:assign") ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions()]);
   const phoneNational = v.phone?.startsWith("+84") ? `0${v.phone.slice(3)}` : v.phone;
   return (
     <div className="space-y-4">
@@ -56,7 +57,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
               items={[
                 { label: "Tên", value: v.name ?? "—" },
                 { label: "Trạng thái", value: <LeadStatusBadge status={status} label={LEAD_STATUS_LABEL[status]} /> },
-                { label: "SĐT", value: v.phone ? <span className="font-medium tabular-nums">{formatVnPhone(v.phone)} <span className="text-xs text-muted-foreground">({PHONE_KIND_LABEL[v.phoneKind ?? "UNKNOWN"]}{lead.normalizedPhone ? ` · ${lead.phoneSource === "WEBSITE" ? "từ website" : lead.phoneSource === "IMPORT" ? "từ tệp" : "nhân viên xác nhận"}` : " · Google"})</span></span> : "Chưa có" },
+                { label: "SĐT", value: v.phone ? <span className="font-medium tabular-nums">{formatVnPhone(v.phone)} <span className="text-xs text-muted-foreground">({PHONE_KIND_LABEL[v.phoneKind ?? "UNKNOWN"]}{lead.normalizedPhone ? ` · ${lead.phoneSource === "WEBSITE" ? "từ website" : lead.phoneSource === "IMPORT" ? "từ tệp" : lead.phoneSource === "VERIFIED_CALL" ? "đã gọi xác nhận" : "nhân viên nhập"}` : " · Google"})</span></span> : "Chưa có" },
                 { label: "Website", value: v.website && /^https?:\/\//i.test(v.website) ? <a className="text-primary hover:underline" href={v.website} target="_blank" rel="noopener noreferrer nofollow">{v.website}</a> : "—" },
                 { label: "Địa chỉ", value: v.address ?? "—", span: true },
                 { label: "Email", value: lead.email ?? "—" },
@@ -174,6 +175,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
               }}
               canWork={canWork}
               users={users}
+              handoff={handoff}
             />
           </SectionCard>
 
