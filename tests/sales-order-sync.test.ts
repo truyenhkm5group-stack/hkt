@@ -29,7 +29,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, cycleStartTurns, loadSalesChatbotConfig, openConversation, POST_ORDER_HANDOFF_MS, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
-import { ORDER_SYNC_CHANNEL, ORDER_SYNC_SETTING_KEY, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
+import { ORDER_SYNC_CHANNEL, ORDER_SYNC_SETTING_KEY, parseOrderSyncConfig, syncedOrderGroupText, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
@@ -82,6 +82,11 @@ function testPure() {
   ];
   const ids = new Set(["v1", "v2"]);
   const base = { messages: msgs, cutoffMs: t0 - 1, catalogIds: ids, returning: null, knownPhones: [], fallbackName: "Khách FB" };
+  // (04/10/2026 · «Đỗ Thị Hoa») tin nhóm của đơn ghi từ hội thoại phải ĐỦ: tên, SĐT, địa chỉ, món × SL × giá, tiền hàng, ship, thu.
+  const gt = syncedOrderGroupText({ code: "#0F4EE6F9", name: "Đỗ Thị Hoa", phone: "0985664363", address: "27 Trương Mỹ, phường Lê Thanh Nghị", province: "Hải Dương", lines: [{ name: "Chả cá thu (Size: 1kg (2 túi 0,5kg))", quantity: 1, unitPrice: 280_000, lineTotal: 280_000 }], subtotal: 280_000, shippingFee: null, shipText: null, warnings: [] });
+  for (const k of ["#0F4EE6F9", "Khách: Đỗ Thị Hoa · 0985664363", "Địa chỉ: 27 Trương Mỹ, phường Lê Thanh Nghị, Hải Dương", "• Chả cá thu (Size: 1kg (2 túi 0,5kg)) × 1 × 280.000", "Tiền hàng: 280.000", "Ship: chưa báo", "THU: 280.000", "+ ship", "chốt đơn trên ERP"]) assert.ok(gt.includes(k), `tin nhóm thiếu «${k}»: ${gt}`);
+  const gt2 = syncedOrderGroupText({ code: "#A", name: "Lan", phone: "0912345678", address: "12 Hàng Bạc, Hà Nội", province: "Hà Nội", lines: [{ name: "Chả mực", quantity: 2, unitPrice: 400_000, lineTotal: 800_000 }], subtotal: 800_000, shippingFee: 0, shipText: "Miễn phí", warnings: ["Địa chỉ theo đơn trước — xác nhận với khách"] });
+  assert.ok(gt2.includes("Địa chỉ: 12 Hàng Bạc, Hà Nội\n") && gt2.includes("Ship: Miễn phí") && !gt2.includes("+ ship") && gt2.includes("Địa chỉ theo đơn trước"), gt2);
   const good = decideOrderSync({ ...base, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }, { variant_id: "v1", quantity: 1 }], recipient_name: "Lan", recipient_phone: "0912.345.678", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội", agreement_index: 4 }) });
   assert.ok(good.kind === "CREATE", JSON.stringify(good));
   assert.deepEqual(good.lines, [{ variantId: "v1", quantity: 2 }], "hai dòng cùng mã ⇒ gộp");
