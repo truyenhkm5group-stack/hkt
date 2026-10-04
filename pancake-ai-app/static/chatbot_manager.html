@@ -127,8 +127,10 @@
 <!-- ============================ HỘI THOẠI ============================ -->
 <section data-panel="convs" class="space-y-3 hidden">
   <div class="card flex flex-wrap items-end gap-2">
-    <div><label class="muted">Tải tối đa</label><input id="syncMax" class="inp w-28" type="number" value="1000"></div>
-    <div><label class="muted">Trong (ngày)</label><input id="syncDays" class="inp w-24" type="number" value="90"></div>
+    <div class="w-full text-sm">Page đang dùng: <b id="curPage">…</b> <button class="btn btn-ghost ml-2" onclick="switchPage()">🔁 Đổi page</button></div>
+    <div><label class="muted">Tải tối đa</label><input id="syncMax" class="inp w-28" type="number" value="10000"></div>
+    <div><label class="muted">Dừng khi đủ … hội thoại có SĐT</label><input id="syncPhone" class="inp w-28" type="number" value="1000" placeholder="(bỏ trống = không)"></div>
+    <div><label class="muted">Trong (ngày)</label><input id="syncDays" class="inp w-24" type="number" value="180"></div>
     <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="syncMsgs"> Tải luôn lịch sử tin</label>
     <button class="btn btn-primary" onclick="startSync()">⬇️ Đồng bộ từ Pancake</button>
     <button class="btn btn-ghost" onclick="api('/api/sync/stop',{method:'POST'})">Dừng</button>
@@ -140,7 +142,8 @@
     <div><label class="muted">Nhân viên sale</label><select id="fStaff" class="inp"><option value="">— tất cả —</option></select></div>
     <div><label class="muted">Từ ngày</label><input id="fFrom" class="inp" type="date"></div>
     <div><label class="muted">Đến ngày</label><input id="fTo" class="inp" type="date"></div>
-    <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="fClosed" checked> Chỉ "Đã chốt đơn"</label>
+    <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="fClosed"> Chỉ "Đã chốt đơn"</label>
+    <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="fPhone" checked> Chỉ hội thoại có SĐT</label>
     <button class="btn btn-ghost" onclick="loadConvs(1)">Lọc</button>
   </div>
   <div class="card flex flex-wrap items-center gap-2">
@@ -304,7 +307,7 @@ async function loadSettings() {
 }
 function updateBotState() {
   const s = SETTINGS, el = $("#botState");
-  el.textContent = !s.bot_enabled ? "Bot TẮT" : s.auto_send ? "Bot ĐANG TỰ TRẢ LỜI" : "Bot chế độ GỢI Ý";
+  el.textContent = (s.shop_name ? s.shop_name + " · " : "") + (!s.bot_enabled ? "Bot TẮT" : s.auto_send ? "Bot ĐANG TỰ TRẢ LỜI" : "Bot chế độ GỢI Ý");
   el.className = "badge " + (!s.bot_enabled ? "bg-gray-200" : s.auto_send ? "bg-green-600 text-white" : "bg-amber-400");
 }
 async function saveSettings() {
@@ -344,14 +347,14 @@ async function legacyApply() {
   const page = document.querySelector('input[name="legacyPage"]:checked');
   try {
     const r = await api("/api/legacy/import", { method: "POST", body: { dir: $("#legacyDir").value.trim() || null, page_id: page ? page.value : null, import_prompt: !!$("#legacyPrompt")?.checked } });
-    toast("Đã nhập: " + r.imported.join(", ")); await loadSettings(); testPancake();
+    toast("Đã nhập: " + r.imported.join(", ")); selected.clear(); await loadSettings(); testPancake();
   } catch (e) { toast(e.message, true); }
 }
 
 // ------------------------------------------------------------ hội thoại
 const selected = new Set();
 let convPage = 1, convData = { items: [], total: 0 };
-function filterBody() { return { q: $("#fQ").value, tag: $("#fTag").value, staff: $("#fStaff").value, date_from: $("#fFrom").value || null, date_to: $("#fTo").value || null, only_closed: $("#fClosed").checked }; }
+function filterBody() { return { q: $("#fQ").value, tag: $("#fTag").value, staff: $("#fStaff").value, date_from: $("#fFrom").value || null, date_to: $("#fTo").value || null, only_closed: $("#fClosed").checked, only_phone: $("#fPhone").checked }; }
 async function loadFilters() {
   const f = await api("/api/filters");
   const tagSel = $("#fTag"), cur = tagSel.value;
@@ -374,7 +377,7 @@ function renderConvs() {
   $("#convRows").innerHTML = convData.items.map((c) => `
     <tr class="hover:bg-slate-50 cursor-pointer" onclick="openConv('${esc(c.id)}')">
       <td onclick="event.stopPropagation()"><input type="checkbox" ${selected.has(c.id) ? "checked" : ""} onchange="toggleSel('${esc(c.id)}', this.checked)"></td>
-      <td><div class="font-medium">${esc(c.customer_name || "(không tên)")} ${c.bot_paused ? '<span class="badge bg-red-100 text-red-700">AI tắt</span>' : ""}</div><div class="muted truncate max-w-xs">${esc(c.snippet)}</div></td>
+      <td><div class="font-medium">${esc(c.customer_name || "(không tên)")} ${c.has_phone ? '<span class="badge bg-green-100 text-green-800">📞 SĐT</span>' : ""} ${c.bot_paused ? '<span class="badge bg-red-100 text-red-700">AI tắt</span>' : ""}</div><div class="muted truncate max-w-xs">${esc(c.snippet)}</div></td>
       <td>${c.tags.map((t) => `<span class="badge ${c.is_closed_order ? "bg-green-100 text-green-800" : "bg-slate-100"}">${esc(t.text)}</span>`).join(" ")}</td>
       <td class="muted">${esc(c.staff_names.join(", "))}</td>
       <td class="muted whitespace-nowrap">${fmtTime(c.updated_at)}</td>
@@ -397,13 +400,16 @@ function renderHistory(r, box, meta) {
   box.innerHTML = r.messages.map((m) => `<div class="${m.from_page ? "text-right" : ""}"><div class="inline-block px-3 py-1.5 rounded-lg max-w-[90%] text-left ${m.source === "bot" ? "bubble-bot" : m.from_page ? "bubble-shop" : "bubble-cus"}">${esc(m.text)}<div class="muted text-[10px]">${m.source === "bot" ? "🤖 Bot · " : m.from_page ? esc(m.from_name || "Shop") + " · " : ""}${fmtTime(m.created_at)}</div></div></div>`).join("") || '<div class="muted">Không có tin.</div>';
   box.scrollTop = box.scrollHeight;
 }
-async function startSync() { try { await api("/api/sync/conversations", { method: "POST", body: { max_conversations: +$("#syncMax").value, days: +$("#syncDays").value, fetch_messages: $("#syncMsgs").checked } }); pollSync(); } catch (e) { toast(e.message, true); } }
+async function startSync() { try { await api("/api/sync/conversations", { method: "POST", body: { max_conversations: +$("#syncMax").value, stop_at_phone: $("#syncPhone").value ? +$("#syncPhone").value : null, days: +$("#syncDays").value, fetch_messages: $("#syncMsgs").checked } }); pollSync(); } catch (e) { toast(e.message, true); } }
 async function pollSync() {
   const s = await api("/api/sync/status");
-  $("#syncStatus").textContent = `${s.running ? "⏳ Đang đồng bộ: " : "Kho local: "}${s.running ? s.fetched + " hội thoại" + (s.messages_fetched ? ` · ${s.messages_fetched} lịch sử` : "") : `${s.local_conversations} hội thoại · ${s.local_with_history} có lịch sử · ${s.local_messages} tin`}${s.error ? " · Lỗi: " + s.error : ""}`;
+  $("#curPage").textContent = `${s.shop_name || "(chưa đặt tên)"} · ${s.page_id || "chưa kết nối"}`;
+  $("#syncStatus").textContent = `${s.running ? "⏳ Đang đồng bộ: " : "Trong máy: "}${s.running ? `${s.fetched} hội thoại · ${s.with_phone || 0} có SĐT` + (s.messages_fetched ? ` · ${s.messages_fetched} lịch sử` : "") : `${s.local_conversations} hội thoại · ${s.local_with_phone} có SĐT · ${s.local_with_history} có lịch sử`}${!s.running && s.stop_reason ? " · " + s.stop_reason : ""}${s.error ? " · Lỗi: " + s.error : ""}`;
   if (s.running) setTimeout(pollSync, 1500); else if (currentTab === "convs") { loadFilters(); loadConvs(convPage); }
 }
 function goMining() { if (!selected.size) return toast("Chưa chọn hội thoại nào", true); showTab("mining"); }
+
+function switchPage() { showTab("connect"); legacyPreview(); window.scrollTo(0, 0); toast("Chọn page trong khung 📥 rồi bấm Nhập"); }
 
 // ------------------------------------------------------------ nạp tri thức
 async function loadJobs() {

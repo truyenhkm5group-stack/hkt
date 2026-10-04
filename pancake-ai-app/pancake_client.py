@@ -173,9 +173,13 @@ class PancakeClient:
         frm = c.get("from") or {}
         assignees = c.get("assignee_ids") or c.get("current_assign_users") or []
         assignee_ids = [str(a.get("id") if isinstance(a, dict) else a) for a in assignees if a]
+        customer = (c.get("customers") or [{}])[0] if isinstance(c.get("customers"), list) and c.get("customers") else {}
+        phones = [p for p in [*(c.get("recent_phone_numbers") or []), *(c.get("conv_phone_numbers") or []),
+                              *((customer or {}).get("phone_numbers") or [])] if p]
         return {
             "id": str(c.get("id")),
             "page_id": str(c.get("page_id") or self.page_id),
+            "has_phone": bool(c.get("has_phone")) or bool(phones),
             "customer_id": str(frm.get("id") or c.get("customer_id") or "") or None,
             "customer_name": frm.get("name") or "",
             "snippet": clean_text(c.get("snippet"))[:300],

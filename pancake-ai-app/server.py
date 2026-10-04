@@ -400,8 +400,9 @@ engine = ReplyEngine()
 sync_state: dict[str, Any] = {"running": False, "fetched": 0, "pages": 0, "error": None, "started_at": None, "finished_at": None, "target": 0}
 
 
-def _sync_worker(max_conversations: int, days: int, fetch_messages: bool) -> None:
-    sync_state.update(running=True, fetched=0, pages=0, error=None, started_at=db.now(), finished_at=None, target=max_conversations, messages_fetched=0)
+def _sync_worker(max_conversations: int, days: int, fetch_messages: bool, stop_at_phone: int | None = None) -> None:
+    sync_state.update(running=True, fetched=0, pages=0, error=None, started_at=db.now(), finished_at=None, target=max_conversations,
+                      messages_fetched=0, with_phone=0, stop_at_phone=stop_at_phone, stop_reason=None)
     try:
         client = PancakeClient(db.get_setting("pancake_page_id"), db.get_setting("pancake_page_access_token"))
         try:
@@ -425,18 +426,27 @@ def _sync_worker(max_conversations: int, days: int, fetch_messages: bool) -> Non
         while sync_state["fetched"] < max_conversations and sync_state["running"]:
             convs = client.list_conversations(last_conversation_id=last_id)
             if not convs:
+                sync_state["stop_reason"] = "Đã tải hết hội thoại của page"
                 break
             for conv in convs:
                 db.upsert_conversation(conv)
             sync_state["fetched"] += len(convs)
             sync_state["pages"] += 1
+            sync_state["with_phone"] = db.scalar("SELECT COUNT(*) FROM conversations WHERE page_id = ? AND has_phone = 1", (client.page_id,))
+            if stop_at_phone and sync_state["with_phone"] >= stop_at_phone:
+                sync_state["stop_reason"] = f"Đã đủ {stop_at_phone} hội thoại có SĐT"
+                break
             if last_id == convs[-1]["id"]:
                 break
             last_id = convs[-1]["id"]
             if since and (convs[-1]["updated_at"] or 0) < since:
+                sync_state["stop_reason"] = "Hết hội thoại trong khoảng ngày đã chọn"
                 break
+        else:
+            sync_state["stop_reason"] = sync_state["stop_reason"] or "Đủ số hội thoại tối đa / hết hội thoại"
         if fetch_messages:
-            ids = [r["id"] for r in db.rows("SELECT id FROM conversations WHERE messages_synced_at IS NULL ORDER BY updated_at DESC LIMIT ?", (max_conversations,))]
+            ids = [r["id"] for r in db.rows("SELECT id FROM conversations WHERE page_id = ? AND messages_synced_at IS NULL "
+                                            "ORDER BY updated_at DESC LIMIT ?", (client.page_id, max_conversations))]
             for cid in ids:
                 if not sync_state["running"]:
                     break
@@ -458,7 +468,8 @@ class SettingsIn(BaseModel):
 
 
 class SyncIn(BaseModel):
-    max_conversations: int = Field(1000, ge=1, le=20000)
+    max_conversations: int = Field(1000, ge=1, le=50000)
+    stop_at_phone: int | None = Field(None, ge=1, le=50000)  # dừng khi page đã có đủ N hội thoại có SĐT trong máy
     days: int = Field(90, ge=0, le=3650)
     fetch_messages: bool = False
 
@@ -470,6 +481,7 @@ class FilterIn(BaseModel):
     date_from: str | None = None   # YYYY-MM-DD (giờ VN)
     date_to: str | None = None
     only_closed: bool = False
+    only_phone: bool = False
     limit: int = Field(100, ge=1, le=5000)
 
 
@@ -578,7 +590,7 @@ def start_sync(body: SyncIn) -> dict[str, Any]:
     pancake()  # kiểm cấu hình
     if sync_state["running"]:
         raise HTTPException(409, "Đang đồng bộ")
-    threading.Thread(target=_sync_worker, args=(body.max_conversations, body.days, body.fetch_messages), daemon=True).start()
+    threading.Thread(target=_sync_worker, args=(body.max_conversations, body.days, body.fetch_messages, body.stop_at_phone), daemon=True).start()
     return {"ok": True}
 
 
@@ -590,20 +602,26 @@ def stop_sync() -> dict[str, Any]:
 
 @app.get("/api/sync/status", dependencies=admin)
 def sync_status() -> dict[str, Any]:
-    return {**sync_state, "local_conversations": db.scalar("SELECT COUNT(*) FROM conversations"),
-            "local_messages": db.scalar("SELECT COUNT(*) FROM messages"),
-            "local_with_history": db.scalar("SELECT COUNT(*) FROM conversations WHERE messages_synced_at IS NOT NULL")}
+    pid = db.get_setting("pancake_page_id")
+    return {**sync_state, "page_id": pid, "shop_name": db.get_setting("shop_name"),
+            "local_conversations": db.scalar("SELECT COUNT(*) FROM conversations WHERE page_id = ?", (pid,)),
+            "local_with_phone": db.scalar("SELECT COUNT(*) FROM conversations WHERE page_id = ? AND has_phone = 1", (pid,)),
+            "local_messages": db.scalar("SELECT COUNT(*) FROM messages WHERE page_id = ?", (pid,)),
+            "local_with_history": db.scalar("SELECT COUNT(*) FROM conversations WHERE page_id = ? AND messages_synced_at IS NOT NULL", (pid,))}
 
 
 @app.get("/api/filters", dependencies=admin)
 def filters() -> dict[str, Any]:
-    return {"tags": db.rows("SELECT id, text, color FROM tags ORDER BY text"), "staff": db.rows("SELECT id, name FROM staff ORDER BY name")}
+    pid = db.get_setting("pancake_page_id")
+    return {"tags": db.rows("SELECT id, text, color FROM tags WHERE page_id = ? ORDER BY text", (pid,)),
+            "staff": db.rows("SELECT id, name FROM staff WHERE page_id = ? ORDER BY name", (pid,))}
 
 
 @app.get("/api/conversations", dependencies=admin)
 def conversations(q: str = "", tag: str = "", staff: str = "", date_from: str | None = None, date_to: str | None = None,
-                  only_closed: bool = False, page: int = 1, page_size: int = Query(50, le=500)) -> dict[str, Any]:
-    data = db.list_conversations(q, tag, staff, _vn_date(date_from), _vn_date(date_to, end=True), only_closed, page=page, page_size=page_size)
+                  only_closed: bool = False, only_phone: bool = False, page: int = 1, page_size: int = Query(50, le=500)) -> dict[str, Any]:
+    data = db.list_conversations(q, tag, staff, _vn_date(date_from), _vn_date(date_to, end=True), only_closed, page=page, page_size=page_size,
+                                 only_phone=only_phone, page_id=db.get_setting("pancake_page_id"))
     staff_names = {r["id"]: r["name"] for r in db.rows("SELECT id, name FROM staff")}
     tag_txt = tag_text_lookup()
     for it in data["items"]:
@@ -616,7 +634,8 @@ def conversations(q: str = "", tag: str = "", staff: str = "", date_from: str | 
 def select_conversations(body: FilterIn) -> dict[str, Any]:
     """Tích chọn hàng loạt: trả về tối đa `limit` (100 / 500 / 1.000…) id hội thoại khớp bộ lọc, mới nhất trước."""
     return db.list_conversations(body.q, body.tag, body.staff, _vn_date(body.date_from), _vn_date(body.date_to, end=True),
-                                 body.only_closed, ids_only_limit=body.limit)
+                                 body.only_closed, ids_only_limit=body.limit, only_phone=body.only_phone,
+                                 page_id=db.get_setting("pancake_page_id"))
 
 
 @app.get("/api/conversations/{conversation_id}/messages", dependencies=admin)

@@ -142,6 +142,33 @@ class GuardrailAndWebhookTest(Base):
         self.assertEqual(db.insert_messages([p["message"]]), 0)
 
 
+class PhoneFilterTest(Base):
+    def test_old_db_gets_has_phone_column(self):
+        import sqlite3
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        c = sqlite3.connect(path)
+        c.execute("CREATE TABLE conversations (id TEXT PRIMARY KEY, page_id TEXT NOT NULL, customer_name TEXT, updated_at INTEGER)")
+        c.execute("INSERT INTO conversations VALUES ('x', 'P1', 'Cũ', 1)")
+        c.commit()
+        db._migrate(c)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(conversations)")}
+        self.assertIn("has_phone", cols)
+        self.assertEqual(c.execute("SELECT customer_name FROM conversations").fetchone()[0], "Cũ")
+
+    def test_phone_from_pancake_fields_and_messages_and_page_scope(self):
+        from pancake_client import PancakeClient
+        cl = PancakeClient("P1", "t")
+        db.upsert_conversation(cl.normalize_conversation({"id": "a", "from": {"id": "1"}, "recent_phone_numbers": [{"phone_number": "0912345678"}]}))
+        db.upsert_conversation(cl.normalize_conversation({"id": "b", "from": {"id": "2"}, "has_phone": True}))
+        db.upsert_conversation(cl.normalize_conversation({"id": "c", "from": {"id": "3"}}))
+        db.upsert_conversation({"id": "z", "page_id": "OTHER", "has_phone": True, "tags": []})
+        db.insert_messages([{"id": "mc", "conversation_id": "c", "from_page": False, "text": "sđt em 0987.654.321 nhé"}])
+        # cập nhật lại từ Pancake không có SĐT ⇒ không hạ cờ
+        db.upsert_conversation(cl.normalize_conversation({"id": "a", "from": {"id": "1"}}))
+        r = db.list_conversations(only_phone=True, page_id="P1", ids_only_limit=1000)
+        self.assertEqual(sorted(r["ids"]), ["a", "b", "c"])
+
+
 class LegacyImportTest(Base):
     def make_old_bot(self, pages_json=None, tokens_file=None):
         import json as _json

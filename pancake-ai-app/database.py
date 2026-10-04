@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -23,6 +24,7 @@ from typing import Any, Iterable, Iterator
 DB_PATH = os.environ.get("APP_DB_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pancake_ai.db")
 
 _local = threading.local()
+PHONE_IN_TEXT = re.compile(r"(?<!\d)(?:\+?84|0)[35789]\d{8}(?!\d)")
 _init_lock = threading.Lock()
 _initialized = False
 
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     assignee_ids_json  TEXT DEFAULT '[]',
     updated_at         INTEGER,               -- epoch giây (UTC)
     is_closed_order    INTEGER DEFAULT 0,     -- có nhãn "Đã chốt đơn" (theo cấu hình closed_tag_names)
+    has_phone          INTEGER DEFAULT 0,     -- khách đã để lại SĐT (Pancake báo, hoặc thấy trong tin của khách)
     message_count      INTEGER DEFAULT 0,
     messages_synced_at INTEGER,               -- NULL = chưa tải lịch sử về máy
     bot_paused         INTEGER DEFAULT 0,
@@ -291,9 +294,23 @@ def init_db() -> None:
             return
         conn = _connect()
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
         conn.close()
         _initialized = True
+
+
+# Cột thêm sau bản đầu — DB đã tạo trên máy người dùng không tự có (CREATE TABLE IF NOT EXISTS không thêm cột).
+_ADDED_COLUMNS = {"conversations": {"has_phone": "INTEGER DEFAULT 0"}}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, cols in _ADDED_COLUMNS.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for col, decl in cols.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_page ON conversations(page_id, updated_at DESC)")
 
 
 @contextmanager
@@ -391,8 +408,8 @@ def upsert_conversation(conv: dict[str, Any]) -> None:
         c.execute(
             """
             INSERT INTO conversations(id, page_id, customer_id, customer_name, snippet, tags_json, assignee_ids_json,
-                                      updated_at, is_closed_order, created_local_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+                                      updated_at, is_closed_order, created_local_at, has_phone)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 customer_id = COALESCE(excluded.customer_id, conversations.customer_id),
                 customer_name = COALESCE(NULLIF(excluded.customer_name, ''), conversations.customer_name),
@@ -401,13 +418,14 @@ def upsert_conversation(conv: dict[str, Any]) -> None:
                 assignee_ids_json = CASE WHEN excluded.assignee_ids_json = '[]' THEN conversations.assignee_ids_json
                                          ELSE excluded.assignee_ids_json END,
                 updated_at = MAX(COALESCE(conversations.updated_at, 0), COALESCE(excluded.updated_at, 0)),
+                has_phone = MAX(COALESCE(conversations.has_phone, 0), excluded.has_phone),  -- chỉ nâng, không hạ
                 is_closed_order = CASE WHEN excluded.tags_json = '[]' AND ? = 0 THEN conversations.is_closed_order
                                        ELSE excluded.is_closed_order END
             """,
             (
                 str(conv["id"]), str(conv.get("page_id") or ""), conv.get("customer_id"), conv.get("customer_name") or "",
                 conv.get("snippet"), json.dumps(tags, ensure_ascii=False), json.dumps(conv.get("assignee_ids") or []),
-                conv.get("updated_at"), is_closed, now(),
+                conv.get("updated_at"), is_closed, now(), int(bool(conv.get("has_phone"))),
                 # tags_authoritative: 1 khi nguồn (danh sách hội thoại) chắc chắn trả đủ nhãn — kể cả rỗng
                 int(bool(conv.get("tags_authoritative"))), int(bool(conv.get("tags_authoritative"))),
             ),
@@ -443,6 +461,8 @@ def insert_messages(msgs: list[dict[str, Any]]) -> int:
                 ),
             )
             added += cur.rowcount
+            if not m.get("from_page") and PHONE_IN_TEXT.search(re.sub(r"[.\s-]", "", m.get("text") or "")):
+                c.execute("UPDATE conversations SET has_phone = 1 WHERE id = ?", (str(m["conversation_id"]),))
         conv_ids = {str(m["conversation_id"]) for m in msgs}
         for cid in conv_ids:
             c.execute(
@@ -494,8 +514,14 @@ def pending_customer_messages(conversation_id: str) -> list[dict[str, Any]]:
 def list_conversations(
     q: str = "", tag: str = "", staff: str = "", date_from: int | None = None, date_to: int | None = None,
     only_closed: bool = False, only_synced: bool = False, page: int = 1, page_size: int = 50, ids_only_limit: int | None = None,
+    only_phone: bool = False, page_id: str | None = None,
 ) -> dict[str, Any]:
     where, params = ["1=1"], []
+    if page_id:  # chỉ hội thoại của page đang kết nối — token page khác không đọc được chúng
+        where.append("page_id = ?")
+        params.append(str(page_id))
+    if only_phone:
+        where.append("has_phone = 1")
     if q:
         where.append("(customer_name LIKE ? OR snippet LIKE ? OR id LIKE ?)")
         params += [f"%{q}%"] * 3
