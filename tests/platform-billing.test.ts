@@ -33,6 +33,7 @@ import {
   vnDate,
   billingNotice,
   TRIAL_DAYS,
+  TRIAL_WARN_DAYS_LEFT,
   TRIAL_GRACE_DAYS,
   trialPaidThrough,
   type RenewalQuote,
@@ -169,18 +170,21 @@ function testPure() {
   assert.equal(billingStanding(null, "2027-01-01").kind, "NOT_BILLED");
   assert.equal(billingStanding({ ...t, graceDays: 0 }, "2026-10-21").kind, "LOCKED", "ân hạn 0 ⇒ khoá ngay hôm sau");
 
-  // Dùng thử 14 ngày (đăng ký 2026-10-04): ngày cuối 17/10, ân hạn 3 ⇒ chỉ xem từ 21/10. Dải nhắc luôn hiện khi dùng thử.
-  assert.equal(TRIAL_DAYS, 14);
-  assert.equal(trialPaidThrough("2026-10-04"), "2026-10-17", "tính cả ngày đăng ký");
+  // Dùng thử 7 ngày (chủ nền tảng chốt 04/10/2026; đăng ký 2026-10-04): ngày cuối 10/10, ân hạn 3 ⇒ chỉ xem từ 14/10.
+  // Dải nhắc luôn hiện khi dùng thử; chỉ vàng khi còn ≤ TRIAL_WARN_DAYS_LEFT ngày.
+  assert.equal(TRIAL_DAYS, 7);
+  assert.equal(trialPaidThrough("2026-10-04"), "2026-10-10", "tính cả ngày đăng ký");
   const tr = { billingEnabled: true, paidThrough: trialPaidThrough("2026-10-04"), graceDays: TRIAL_GRACE_DAYS };
   const nt = (today: string) => billingNotice(billingStanding(tr, today), true);
-  assert.deepEqual([nt("2026-10-04")?.tone, nt("2026-10-04")?.text.includes("còn 14 ngày")], ["info", true], "ngày đầu: còn 14 ngày");
-  assert.equal(nt("2026-10-11")?.tone, "warn", "còn 7 ngày ⇒ vàng");
-  assert.ok(nt("2026-10-17")?.text.includes("còn 1 ngày"), "ngày cuối");
-  assert.ok(nt("2026-10-18")?.tone === "danger" && nt("2026-10-18")?.text.includes("21/10/2026"), "ân hạn: nói ngày chuyển chỉ xem");
-  assert.equal(billingStanding(tr, "2026-10-20").kind, "OVERDUE");
-  assert.equal(billingStanding(tr, "2026-10-21").kind, "LOCKED");
-  assert.ok(nt("2026-10-21")?.text.includes("Dữ liệu vẫn giữ nguyên") && nt("2026-10-21")?.cta === "Chọn gói");
+  assert.deepEqual([nt("2026-10-04")?.tone, nt("2026-10-04")?.text.includes(`còn ${TRIAL_DAYS} ngày`)], ["info", true], "ngày đầu: còn đủ số ngày dùng thử, chưa vàng");
+  assert.equal(TRIAL_WARN_DAYS_LEFT, 3);
+  assert.equal(nt("2026-10-07")?.tone, "info", "còn 4 ngày ⇒ chưa vàng");
+  assert.equal(nt("2026-10-08")?.tone, "warn", "còn 3 ngày ⇒ vàng");
+  assert.ok(nt("2026-10-10")?.text.includes("còn 1 ngày"), "ngày cuối");
+  assert.ok(nt("2026-10-11")?.tone === "danger" && nt("2026-10-11")?.text.includes("14/10/2026"), "ân hạn: nói ngày chuyển chỉ xem");
+  assert.equal(billingStanding(tr, "2026-10-13").kind, "OVERDUE");
+  assert.equal(billingStanding(tr, "2026-10-14").kind, "LOCKED");
+  assert.ok(nt("2026-10-14")?.text.includes("Dữ liệu vẫn giữ nguyên") && nt("2026-10-14")?.cta === "Chọn gói");
   // Thuê bao trả tiền: chỉ nhắc khi còn ≤ 7 ngày; không thu phí ⇒ không bao giờ có dải.
   assert.equal(billingNotice(billingStanding(t, "2026-10-01"), false), null, "còn hạn dài ⇒ im lặng");
   assert.equal(billingNotice(billingStanding(t, "2026-10-15"), false)?.cta, "Gia hạn");

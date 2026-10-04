@@ -9,6 +9,9 @@ export const COMPANY = {
   email: "support@vnxcommerce.com",
   phone: "0886 833 448",
   phoneHref: "+84886833448",
+  /** Zalo hỗ trợ — chủ nền tảng 04/10/2026: khách nhắn Zalo thẳng tới chủ nền tảng, cùng số điện thoại công ty. */
+  zalo: "0886 833 448",
+  zaloHref: "https://zalo.me/0886833448",
 } as const;
 
 /** Phiên bản + ngày hiệu lực của Chính sách quyền riêng tư đang công bố. Sửa nội dung trang ⇒ tăng phiên bản. */
@@ -18,7 +21,7 @@ export const PRIVACY_POLICY = { version: "1.1", effective: "04/10/2026", path: "
  * Điều khoản sử dụng đang công bố (`/dieu-khoan-su-dung`). Sửa nội dung trang ⇒ tăng phiên bản. Phiên bản người đăng ký
  * đã đồng ý được ghi vào nhật ký `ORG_ONBOARDED` của tổ chức (lib/onboarding/service.ts).
  */
-export const TERMS_OF_SERVICE = { version: "1.0", effective: "04/10/2026", path: "/dieu-khoan-su-dung" } as const;
+export const TERMS_OF_SERVICE = { version: "1.1", effective: "04/10/2026", path: "/dieu-khoan-su-dung" } as const;
 
 /** Con số kinh doanh mà Điều khoản cam kết — MỘT chỗ khai, trang công khai đọc từ đây. */
 export const SERVICE_COMMITMENTS = {

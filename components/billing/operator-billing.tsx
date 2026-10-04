@@ -150,7 +150,7 @@ export function OrgBillingForm({ orgCode, orgName, current }: { orgCode: string;
           : "Tổ chức không bị nhắc, không bị khoá, dù ngày trả tới đã qua. Hoá đơn và lịch sử giữ nguyên."
       }
       minReason={PILOT_REASON_MIN}
-      placeholder="Khách ký hợp đồng, dùng thử 14 ngày"
+      placeholder="Khách ký hợp đồng, dùng thử 7 ngày"
       disabled={enabled && !paidThrough}
       run={(reason) => setOrgBillingAction({ orgCode, enabled, paidThrough, graceDays: grace, reason })}
     >

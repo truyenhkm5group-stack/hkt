@@ -10,7 +10,7 @@
  *     không đẻ cửa hàng thứ hai; đăng nhập bằng SĐT ở trang chung không cần mã tổ chức; đăng ký bằng Google ⇒ mật khẩu
  *     ngẫu nhiên + danh tính GOOGLE, lần sau Google vào thẳng; email ở hai tổ chức ⇒ phải chọn.
  *  4. DÙNG THỬ 14 NGÀY: nền tảng chưa khai tài khoản nhận tiền ⇒ KHÔNG bật thu phí (không khoá oan); đã khai ⇒ cửa hàng
- *     tự đăng ký có `paid_through` = hôm nay + 13, ân hạn 3 ngày, dải nhắc «Dùng thử»; tổ chức không qua cửa mở ⇒ không đụng.
+ *     tự đăng ký có `paid_through` = hôm nay + TRIAL_DAYS − 1, ân hạn 3 ngày, dải nhắc «Dùng thử»; tổ chức không qua cửa mở ⇒ không đụng.
  */
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
@@ -24,7 +24,7 @@ import { beginOAuth, exchangeCode, readOAuthToken, signOAuthToken } from "@/lib/
 import type { SessionSubject } from "@/lib/auth/session";
 import { resolveSocial } from "@/lib/auth/social";
 import { platformChatAi } from "@/lib/ai-builder/provider";
-import { billingNotice, billingStanding, TRIAL_GRACE_DAYS, trialPaidThrough, vnDate } from "@/lib/billing/rules";
+import { billingNotice, billingStanding, TRIAL_DAYS, TRIAL_GRACE_DAYS, trialPaidThrough, vnDate } from "@/lib/billing/rules";
 import { BILLING_RECEIVER_KEY } from "@/lib/billing/service";
 import { invalidateSubscriptions, readSubscriptionTerms } from "@/lib/billing/standing";
 import { invalidateAiControl } from "@/lib/ai-usage/control";
@@ -248,13 +248,13 @@ async function testQuickSignupFlow() {
   assert.ok("ok" in b && b.orgCode === QS_B && b.loggedIn, JSON.stringify(b));
   const adminB = await withOrganization(QS_B, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "chu@qs-b.vn") }));
   assert.equal(adminB?.name, "Chủ Hải Sản", "tên lấy từ hồ sơ Google");
-  // Đã khai tài khoản nhận tiền ⇒ dùng thử 14 ngày (tính cả hôm nay), ân hạn 3 ngày, rồi chỉ xem.
+  // Đã khai tài khoản nhận tiền ⇒ dùng thử TRIAL_DAYS ngày (tính cả hôm nay), ân hạn 3 ngày, rồi chỉ xem.
   const trial = await readSubscriptionTerms(QS_B, { fresh: true });
   const dayAfter = vnDate(new Date());
   assert.ok(trial?.billingEnabled && [trialPaidThrough(dayBefore), trialPaidThrough(dayAfter)].includes(trial.paidThrough ?? ""), JSON.stringify(trial));
   assert.equal(trial?.graceDays, TRIAL_GRACE_DAYS);
   const notice = billingNotice(billingStanding(trial, dayAfter), true);
-  assert.ok(notice?.tone === "info" && notice.text.includes("còn 14 ngày") && notice.cta === "Chọn gói", JSON.stringify(notice));
+  assert.ok(notice?.tone === "info" && notice.text.includes(`còn ${TRIAL_DAYS} ngày`) && notice.cta === "Chọn gói", JSON.stringify(notice));
   const found = await resolveSocial(profile);
   assert.ok(found.kind === "LOGIN" && found.hit.orgCode === QS_B && found.hit.userId === adminB?.id, JSON.stringify(found));
   const viaGoogle = await completeProviderLogin({ orgCode: QS_B, userId: adminB!.id, provider: "GOOGLE", subject: profile.subject }, issue);
@@ -308,5 +308,5 @@ export async function testQuickStart() {
     await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
     if (receiver) await pdb.insert(schema.platformSettings).values({ key: receiver.key, value: receiver.value, updatedByEmail: receiver.updatedByEmail });
   }
-  console.log("✓ Gia nhập nhanh: SĐT VN mọi cách gõ, mã tổ chức từ tên cửa hàng, ngành nào cũng có AI bán hàng; OAuth state + PKCE, cookie ký không dùng chéo, Google sai aud/iss/hạn ⇒ từ chối, email chưa xác minh không dùng, Facebook có appsecret_proof; đăng ký một màn hình qua đúng lõi tạo tổ chức rồi vào thẳng, bấm lại không đẻ cửa hàng thứ hai, đăng nhập bằng SĐT ở trang chung không cần mã, đăng ký bằng Google rồi vào lại bằng Google, email ở hai tổ chức ⇒ phải chọn, tài khoản khoá ⇒ không vào; dùng thử 14 ngày chỉ bật khi nền tảng đã khai tài khoản nhận tiền, chỉ cho cửa đăng ký mở");
+  console.log("✓ Gia nhập nhanh: SĐT VN mọi cách gõ, mã tổ chức từ tên cửa hàng, ngành nào cũng có AI bán hàng; OAuth state + PKCE, cookie ký không dùng chéo, Google sai aud/iss/hạn ⇒ từ chối, email chưa xác minh không dùng, Facebook có appsecret_proof; đăng ký một màn hình qua đúng lõi tạo tổ chức rồi vào thẳng, bấm lại không đẻ cửa hàng thứ hai, đăng nhập bằng SĐT ở trang chung không cần mã, đăng ký bằng Google rồi vào lại bằng Google, email ở hai tổ chức ⇒ phải chọn, tài khoản khoá ⇒ không vào; dùng thử chỉ bật khi nền tảng đã khai tài khoản nhận tiền, chỉ cho cửa đăng ký mở");
 }

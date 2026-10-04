@@ -96,7 +96,7 @@ không có phép nhân nào khác được tự thêm vào. Bảng giá và phé
 3. **Bật thu phí cho từng tổ chức** ở `/platform/org/<mã>` → «Thu phí», nhập «Đã trả tới ngày» = hạn dùng thử.
    - Tổ chức có từ trước 0187 (khách pilot) mặc định **không** thu phí, nên lần deploy này không đổi gì với họ.
    - Khách tự trả mà chưa được bật thì lượt trả đầu tiên tự bật thu phí.
-   - Cửa hàng TỰ ĐĂNG KÝ (cửa mở) được bật sẵn lúc tạo: dùng thử 14 ngày + ân hạn 3 ngày (`startSelfServiceTrial`), chỉ
+   - Cửa hàng TỰ ĐĂNG KÝ (cửa mở) được bật sẵn lúc tạo: dùng thử 7 ngày + ân hạn 3 ngày (`startSelfServiceTrial`, `TRIAL_DAYS`), chỉ
      khi đã khai tài khoản nhận tiền ở bước 1.
 4. **Xác nhận tay** khi tiền về ngoài sổ (ngân hàng khác, tiền mặt). **Huỷ hoá đơn.** Cả hai bắt buộc ghi lý do và đều
    vào nhật ký nền tảng.
