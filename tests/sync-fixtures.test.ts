@@ -344,6 +344,7 @@ import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./comp
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
+import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -2132,6 +2133,9 @@ async function main() {
   await testCompanyOsWarmDb();
   testCompanyOsSummaryPure();
   await testCompanyOsSummaryDb(db);
+  // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
+  testOrgSummaryPure();
+  await testOrgSummaryDb();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
