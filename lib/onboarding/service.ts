@@ -24,8 +24,10 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { verifyLogin } from "@/lib/auth/login";
+import { startSelfServiceTrial } from "@/lib/billing/service";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionSubject, SessionUser } from "@/lib/auth/session";
+import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { installBlueprint } from "@/lib/blueprints/install";
 import { planBlueprint } from "@/lib/blueprints/plan";
@@ -339,6 +341,16 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   // Hành trình tự phục vụ (0180): tổ chức mới là NHÁP tới khi chủ tổ chức tự bấm Xuất bản ở /setup — ERP của họ chính là
   // bản xem trước. Không đè trạng thái đã có (chạy lại sau hỏng).
   await markOrganizationDraft(input.code);
+  // DÙNG THỬ 14 NGÀY (lib/billing/service.ts::startSelfServiceTrial): chỉ cửa hàng TỰ ĐĂNG KÝ qua cửa mở; khách mời và
+  // tổ chức người vận hành tạo giữ điều khoản do người vận hành đặt. Lỗi ghi sổ thuê bao KHÔNG làm hỏng lượt dựng — tổ
+  // chức chỉ ở «Chưa thu phí» như trước, người vận hành thấy ở /platform.
+  if (input.isNew && input.source === "OPEN") {
+    try {
+      await startSelfServiceTrial(input.code);
+    } catch (error) {
+      console.warn(`[onboarding] chưa bật được dùng thử cho ${input.code}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const prev = await readOnboarding(input.code);
   await claimRunning(input.code, {
     ...prev,
@@ -383,7 +395,8 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
       action: "ORG_ONBOARDED",
       entity: "ORGANIZATION",
       entityId: input.code,
-      after: { blueprint: input.built.bp.key, template: input.built.fromTemplate, modules: input.built.modules, plan: input.planKey, installId: result.installId },
+      // Phiên bản văn bản người đăng ký đã đồng ý (dòng «Bằng việc tạo cửa hàng, bạn đồng ý…» ngay trên nút tạo).
+      after: { blueprint: input.built.bp.key, template: input.built.fromTemplate, modules: input.built.modules, plan: input.planKey, installId: result.installId, acceptedTerms: input.who.kind === "public" ? { terms: TERMS_OF_SERVICE.version, privacy: PRIVACY_POLICY.version } : null },
     }),
   );
   faultHook?.("FINISH");

@@ -24,7 +24,7 @@ export const SITE_PAGE_PATH = "/gioi-thieu";
  * Văn bản pháp lý CÔNG KHAI — phục vụ NGAY tại tên miền gốc (không chuyển sang ERP): Google / Facebook đòi link chính sách
  * quyền riêng tư nằm trên tên miền đã khai của ứng dụng đăng nhập (`vnxcommerce.com`).
  */
-export const SITE_LEGAL_PATHS = ["/chinh-sach-bao-mat"] as const;
+export const SITE_LEGAL_PATHS = ["/chinh-sach-bao-mat", "/dieu-khoan-su-dung"] as const;
 
 /** Bí danh tiếng Việt in trên tài liệu / danh thiếp → tuyến thật của ERP. */
 export const SITE_AUTH_ALIASES: Readonly<Record<string, string>> = { "/dang-ky": "/start", "/dang-nhap": "/login" };
