@@ -7,6 +7,9 @@ import { loadAiSalesPerformance, type AiSalesPerformance } from "@/lib/sales-cha
 import { AI_SALES_METRICS, AI_SALES_MIN_SAMPLE, type FunnelRow } from "@/lib/sales-chatbot/performance-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { HumanCostForm } from "./human-cost-form";
+import { ExperimentBlock } from "./experiment-block";
+import { loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
+import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
 
@@ -53,6 +56,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const sp = await searchParams;
   const days = PERIODS.find((d) => String(d) === sp.days) ?? 30;
   const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage });
+  const experiment = await loadExperimentReport();
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -116,21 +120,35 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                 </thead>
                 <tbody>
                   <tr className="border-b">
-                    <td className="py-1.5 pr-3">AI tự xử lý</td>
+                    <td className="py-1.5 pr-3">
+                      <Link href={drillHref({ days, cohort: "AI_ONLY" })} className="underline-offset-2 hover:underline">
+                        AI tự xử lý
+                      </Link>
+                    </td>
                     <FunnelCells row={r.cohorts.aiOnly} />
                   </tr>
                   <tr className="border-b">
-                    <td className="py-1.5 pr-3">AI rồi chuyển người</td>
+                    <td className="py-1.5 pr-3">
+                      <Link href={drillHref({ days, cohort: "AI_THEN_HUMAN" })} className="underline-offset-2 hover:underline">
+                        AI rồi chuyển người
+                      </Link>
+                    </td>
                     <FunnelCells row={r.cohorts.aiThenHuman} />
                   </tr>
                   <tr className="font-semibold">
-                    <td className="py-1.5 pr-3">Tổng</td>
+                    <td className="py-1.5 pr-3">
+                      <Link href={drillHref({ days })} className="underline-offset-2 hover:underline">
+                        Tổng
+                      </Link>
+                    </td>
                     <FunnelCells row={t} />
                   </tr>
                 </tbody>
               </table>
             </div>
           </SectionCard>
+
+          {experiment ? <ExperimentBlock report={experiment} days={days} /> : null}
 
           <div className="grid gap-5 lg:grid-cols-2">
             <SectionCard title="Đơn bot chốt — kết cục giao thật" hint={<p className="text-xs leading-5">Kết cục theo ORDER_OUTCOME của ERP (phiếu giao ký nhận / chứng từ hãng vận chuyển). «Giao thành công» chỉ tính trên đơn ĐÃ ngã ngũ.</p>}>
@@ -158,7 +176,11 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                     ) : (
                       r.handoffReasons.map((h) => (
                         <tr key={h.code} className="border-b last:border-0">
-                          <td className="py-1 pr-3">{h.label}</td>
+                          <td className="py-1 pr-3">
+                            <Link href={drillHref({ days, reason: h.code })} className="underline-offset-2 hover:underline">
+                              {h.label}
+                            </Link>
+                          </td>
                           <td className="py-1 text-right tabular-nums">{formatNumber(h.count)}</td>
                         </tr>
                       ))
