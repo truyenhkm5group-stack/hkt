@@ -43,6 +43,7 @@ import { gradeOf, learnedAdjustment, scoreLead, type ScoreInput } from "@/lib/wh
 import { classifySegment } from "@/lib/wholesale/segments";
 import { saveLeadHunterConfig } from "@/lib/wholesale/store";
 import { isPrivateAddress } from "@/lib/net/public-url";
+import { allowed as relayAllowed, handle as relayHandle } from "../deploy/places-relay/relay.js";
 import { enrichFromWebsite } from "@/lib/wholesale/website";
 import { contactPageCandidates, extractFindings, robotsAllows } from "@/lib/wholesale/website-parse";
 import type { PlaceRecord } from "@/lib/integrations/google-places/client";
@@ -415,6 +416,51 @@ async function testPlacesClient() {
   assert.ok(!ip.ok && ip.message.includes("IP máy chủ ERP") && ip.message.includes("reason: API_KEY_IP_ADDRESS_BLOCKED"), ip.message);
   const odd = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: denied("SOMETHING_NEW") });
   assert.ok(!odd.ok && odd.message.includes("reason: SOMETHING_NEW"), "lý do lạ vẫn được in nguyên, không bị nuốt");
+
+  // ── Trạm chuyển tiếp Cloud Run (Google chặn Places khi gọi từ IP Việt Nam, đo 04/10/2026) ──
+  const RELAY = "https://places-relay-abc123-as.a.run.app";
+  const RELAY_SECRET = "mat-khau-tram-0123456789abcdef";
+  const viaRelay: { url: string; secret: string | null; key: string | null }[] = [];
+  const relayFetch = (async (input: string, init: RequestInit) => {
+    const h = new Headers(init.headers);
+    viaRelay.push({ url: input, secret: h.get("x-relay-secret"), key: h.get("x-goog-api-key") });
+    return f(input.replace(RELAY, "https://places.googleapis.com"), init);
+  }) as typeof fetch;
+  const viaT = await testGooglePlaces({ secrets: { apiKey: API_KEY, relaySecret: RELAY_SECRET }, settings: { relayUrl: RELAY } }, { fetch: relayFetch });
+  assert.ok(viaT.ok && viaT.message.includes("qua trạm"), viaT.message);
+  assert.equal(viaRelay.at(-1)!.url, `${RELAY}/v1/places:searchText`, "đi tới trạm, giữ nguyên đường dẫn của Google");
+  assert.equal(viaRelay.at(-1)!.secret, RELAY_SECRET);
+  assert.equal(viaRelay.at(-1)!.key, API_KEY, "khoá Google vẫn đi trong tiêu đề — trạm không giữ khoá");
+  const dRelay = await placeDetails({ apiKey: API_KEY, timeoutMs: 5000, maxRetries: 0, relay: { url: `${RELAY}/`, secret: RELAY_SECRET } }, { placeId: "ChIJplace0000001", full: false }, { fetch: relayFetch });
+  assert.ok(dRelay.ok);
+  assert.ok(viaRelay.at(-1)!.url.startsWith(`${RELAY}/v1/places/ChIJplace0000001?`), viaRelay.at(-1)!.url);
+  // Ô địa chỉ trạm do người quản trị tổ chức gõ ⇒ chỉ nhận *.run.app; thiếu mật khẩu ⇒ không gửi gì.
+  const n2 = viaRelay.length;
+  for (const bad of ["http://places-relay.a.run.app", "https://evil.example.com", "https://169.254.169.254", "https://x.run.app.evil.com"]) {
+    const r = await textSearch({ apiKey: API_KEY, timeoutMs: 5000, maxRetries: 0, relay: { url: bad, secret: RELAY_SECRET } }, { textQuery: "x", tier: "IDS_ONLY" }, { fetch: relayFetch });
+    assert.ok(!r.ok && r.kind === "INVALID", bad);
+  }
+  assert.ok(!(await testGooglePlaces({ secrets: { apiKey: API_KEY }, settings: { relayUrl: RELAY } }, { fetch: relayFetch })).ok, "khai trạm mà thiếu mật khẩu ⇒ từ chối");
+  assert.equal(viaRelay.length, n2, "địa chỉ / mật khẩu trạm sai ⇒ không một request nào rời máy");
+  // Phía trạm: sai mật khẩu ⇒ 401; chỉ ba đường dẫn; chỉ chuyển tiếp tới places.googleapis.com, chỉ hai tiêu đề của Google.
+  const upstream: { url: string; headers: Headers }[] = [];
+  const upFetch = (async (input: string, init: RequestInit) => {
+    upstream.push({ url: input, headers: new Headers(init.headers) });
+    return new Response(JSON.stringify({ places: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const req = (o: Partial<{ method: string; url: string; headers: Record<string, string>; body: string }>) => ({ method: "POST", url: "/v1/places:searchText", headers: { "x-relay-secret": RELAY_SECRET, "x-goog-api-key": API_KEY, "x-goog-fieldmask": "places.id", cookie: "a=b" }, body: "{}", ...o });
+  assert.equal((await relayHandle(req({ headers: { "x-relay-secret": "sai" } }), { secret: RELAY_SECRET, fetchImpl: upFetch })).status, 401);
+  assert.equal((await relayHandle(req({}), { secret: "ngan", fetchImpl: upFetch })).status, 401, "mật khẩu cấu hình < 16 ký tự ⇒ trạm đóng");
+  assert.equal((await relayHandle(req({ url: "/v1/places:autocomplete" }), { secret: RELAY_SECRET, fetchImpl: upFetch })).status, 404);
+  assert.equal((await relayHandle(req({ method: "GET", url: "/http://169.254.169.254/" }), { secret: RELAY_SECRET, fetchImpl: upFetch })).status, 404);
+  assert.equal(upstream.length, 0, "yêu cầu bị từ chối không chạm Google");
+  const ok = await relayHandle(req({}), { secret: RELAY_SECRET, fetchImpl: upFetch });
+  assert.equal(ok.status, 200);
+  assert.equal(upstream[0]!.url, "https://places.googleapis.com/v1/places:searchText");
+  assert.equal(upstream[0]!.headers.get("x-goog-api-key"), API_KEY);
+  assert.equal(upstream[0]!.headers.get("cookie"), null, "không chuyển tiếp tiêu đề lạ");
+  assert.equal(upstream[0]!.headers.get("x-relay-secret"), null, "mật khẩu trạm không đi tiếp tới Google");
+  assert.ok(relayAllowed("GET", "/v1/places/ChIJplace0000001") && !relayAllowed("DELETE", "/v1/places/ChIJplace0000001"));
 }
 
 function testOpenerAndConfig() {
