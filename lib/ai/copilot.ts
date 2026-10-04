@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { CopilotConfirmResult, CopilotExecutedAction, CopilotPendingAction, CopilotRequest, CopilotResult, CopilotToolCall } from "@/lib/ai/contracts";
 import { actionToken, COPILOT_LIMITS, verifyActionToken } from "@/lib/ai/policy";
-import { COPILOT_SYSTEM_PROMPT, contextPreamble } from "@/lib/ai/prompt";
+import { contextPreamble, copilotSystemPrompt } from "@/lib/ai/prompt";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
@@ -143,7 +143,7 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
     const maxRounds = COPILOT_LIMITS.maxRounds();
     for (;;) {
       rounds += 1;
-      const res = await provider.complete({ system: COPILOT_SYSTEM_PROMPT, messages, tools: toProviderTools(tools) });
+      const res = await provider.complete({ system: copilotSystemPrompt(input.user.organization), messages, tools: toProviderTools(tools) });
       usage = addUsage(usage, res.usage);
       model = res.model || model;
       const text = res.content.filter((b): b is Extract<AiBlock, { type: "text" }> => b.type === "text").map((b) => b.text).join("\n").trim();

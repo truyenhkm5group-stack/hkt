@@ -1,3 +1,4 @@
+import { integrationApplies, integrationTarget } from "@/lib/blueprints/integrations";
 import { and, count, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, schema, type Db } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
@@ -151,7 +152,7 @@ export async function measurePilot(org: Organization, record: PilotRecord | null
   const suggested = keys
     ? [
         ...new Set(
-          keys.flatMap((k) => (templateBlueprint(k)?.integrations ?? []).filter((i) => (moduleDef(i.connectorKey)?.dependsOn ?? []).every((dep) => !enabled || enabled.has(dep))).map((i) => i.connectorKey)),
+          keys.flatMap((k) => (templateBlueprint(k)?.integrations ?? []).filter((i) => integrationApplies(i.connectorKey, enabled ?? null)).map((i) => i.connectorKey)),
         ),
       ]
     : [];
@@ -193,7 +194,7 @@ export async function loadPilotView(org: Organization): Promise<PilotView | null
   return {
     record,
     checks,
-    suggested: m.suggested.map((k) => ({ key: k, label: moduleDef(k)?.label ?? k })),
+    suggested: m.suggested.map((k) => ({ key: k, label: integrationTarget(k)?.label ?? k })),
     connectNote: m.connectNote,
     next,
     missingNext: next && record.stage !== null ? missingForStage(next, checks) : [],

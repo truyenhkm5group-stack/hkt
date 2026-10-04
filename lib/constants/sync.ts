@@ -38,6 +38,8 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
   "facebook-ads": ["FACEBOOK:ads_insights"],
   // Cùng bộ đồng bộ (`syncFacebookAds`) ⇒ cùng tên con trong sync_runs, nhưng ghi vào CSDL của tổ chức khách.
   "ads-spend-org": ["FACEBOOK:ads_insights"],
+  // Cùng bộ đồng bộ Pancake (`syncPancakeAll`) ⇒ cùng tên con trong sync_runs, ghi vào CSDL của tổ chức khách.
+  "pancake-org": ["PANCAKE:warehouses", "PANCAKE:products", "PANCAKE:orders_backfill", "PANCAKE:orders_incremental", "PANCAKE:customers", "PANCAKE:order_returns", "PANCAKE:inventory_histories"],
   "github-deployments": ["GITHUB:deploy_runs"],
 };
 

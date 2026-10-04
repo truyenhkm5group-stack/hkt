@@ -218,6 +218,16 @@ export type ActiveConnection = { ok: true; secrets: Record<string, string>; sett
  * Không kiểm quyền người: đây là đường MÁY dùng khoá thay tổ chức; nơi gọi đã gác quyền màn hình của nó. Bí mật trả
  * về chỉ được đưa thẳng vào client của nhà cung cấp — không log, không trả về trình duyệt.
  */
+/**
+ * Kết nối `connectorKey` của tổ chức ngữ cảnh có ĐANG BẬT (Kiểm tra đạt + Bật) không. Chỉ đọc trạng thái dòng — KHÔNG giải mã
+ * bí mật. Dùng cho cổng «tổ chức có nguồn đồng bộ» (lib/platform/capabilities.ts::orgPancakePosActive).
+ */
+export async function connectionIsActive(connectorKey: string): Promise<boolean> {
+  const ctx = await currentOrganization();
+  const row = await findRow(connectorKey);
+  return !!row && row.orgCode === ctx.code && row.status === "ACTIVE" && row.lastTestOk === true;
+}
+
 export async function openActiveConnection(connectorKey: string, deps: { keyState?: SecretsKeyState } = {}): Promise<ActiveConnection> {
   const spec = findConnector(connectorKey);
   if (!spec || !isOrgConfigurable(spec)) return { ok: false, reason: `«${connectorKey}» không phải kết nối theo tổ chức.` };

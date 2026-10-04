@@ -20,6 +20,7 @@
  *
  * `deps.fetch` để bài kiểm đưa vào một máy chủ giả: bộ kiểm thử không gọi mạng thật (luật 65).
  */
+import { PANCAKE_POS_API, PANCAKE_POS_API_KEY_PATTERN, PANCAKE_POS_SHOP_ID_PATTERN } from "@/lib/constants/pancake-pos-org";
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
@@ -405,6 +406,34 @@ export async function testMetaAdsOrg(input: { secrets: Record<string, string>; s
   return { ok: true, message: scrubSecrets(`Đọc được ${ids.length}/${ids.length} tài khoản: ${body}. Bật để job «ads-spend-org» kéo chi tiêu mỗi 60 phút.`, hide) };
 }
 
+/**
+ * PANCAKE POS CỦA TỔ CHỨC (F1): `GET /shops?api_key=…` — chỉ đọc, địa chỉ hằng số (`PANCAKE_POS_API`), không theo chuyển
+ * hướng, khoá bị che trong mọi câu. Đạt ⇔ khoá được nhận VÀ mã shop đã khai nằm trong danh sách shop của khoá — khoá đúng
+ * mà sai shop thì mọi lượt đồng bộ sau đều rỗng, nên phải nói ra ngay ở bước kiểm tra. HÀM THUẦN với `fetch` tiêm vào.
+ */
+export async function testPancakePosOrg(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const apiKey = (input.secrets.apiKey ?? "").trim();
+  const shopId = (input.settings.shopId ?? "").trim();
+  const hide = [apiKey];
+  if (!PANCAKE_POS_API_KEY_PATTERN.test(apiKey)) return { ok: false, message: "API key Pancake POS không đúng dạng — không gọi." };
+  if (!PANCAKE_POS_SHOP_ID_PATTERN.test(shopId)) return { ok: false, message: "Mã shop Pancake POS phải là số — không gọi." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const res = await fetchImpl(`${PANCAKE_POS_API}/shops?api_key=${encodeURIComponent(apiKey)}`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status >= 300 && res.status < 400) return { ok: false, message: `Pancake trả chuyển hướng HTTP ${res.status} — không theo.` };
+    const body = (await readCapped(res)) as { success?: boolean; message?: string; shops?: { id?: unknown; name?: unknown }[] } | null;
+    if (res.status === 401 || res.status === 403 || body?.success === false) return { ok: false, message: scrubSecrets(`Pancake không nhận khoá: ${body?.message ?? `HTTP ${res.status}`}`, hide) };
+    if (!res.ok) return { ok: false, message: `Pancake trả lỗi HTTP ${res.status}.` };
+    const shops = Array.isArray(body?.shops) ? body.shops : null;
+    if (!shops) return { ok: false, message: "Phản hồi của Pancake không có danh sách shop." };
+    const shop = shops.find((s) => String(s?.id ?? "") === shopId);
+    if (!shop) return { ok: false, message: scrubSecrets(`Khoá đúng nhưng không có shop ${shopId} — khoá này thấy ${shops.length} shop: ${shops.slice(0, 5).map((s) => `${String(s?.id ?? "?")} «${String(s?.name ?? "")}»`).join(", ")}.`, hide) };
+    return { ok: true, message: scrubSecrets(`Pancake nhận khoá — shop ${shopId} «${String(shop.name ?? "")}». Bật rồi bấm «Đồng bộ ngay» để kéo đơn, khách, sản phẩm; dán URL webhook vào Pancake để đơn về tức thời.`, hide) };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pos.pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -416,4 +445,5 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "sandbox-messaging": (input) => testSandboxMessaging(input),
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
+  "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
 };

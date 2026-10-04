@@ -1,5 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { ConnectorGroupTable } from "@/components/connectors/connector-group-table";
+import { OrgCarrierPanel } from "@/components/connectors/org-carrier-panel";
+import { OrgPosPanel } from "@/components/connectors/org-pos-panel";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, loadConnectionsView } from "@/lib/connectors/service";
@@ -56,6 +58,8 @@ export default async function ConnectionsPage() {
           Khoá mã hoá bí mật kết nối của máy chủ: sẵn sàng · mã khoá <span className="font-mono">{view.secretsReady.keyIdShort}</span> (không phải khoá — chỉ để biết khoá có đổi hay không).
         </p>
       )}
+      {!view.organization.isHome ? <OrgPosPanel orgCode={view.organization.code} /> : null}
+      {!view.organization.isHome ? <OrgCarrierPanel orgCode={view.organization.code} /> : null}
       {view.groups.length === 0 ? (
         <EmptyState title="Chưa có connector nào trong sổ" description="Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật." />
       ) : (

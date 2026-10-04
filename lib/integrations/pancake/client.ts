@@ -1,6 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { maskPancakeKey, PANCAKE_POS_API, PANCAKE_POS_ORG_CONNECTOR } from "@/lib/constants/pancake-pos-org";
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, int, IntegrationError, sleep, str } from "@/lib/integrations/http";
-import { assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
+import { assertConnectionOwner, assertHomeCredentials, ConnectorUnavailableError, perOrganizationClients } from "@/lib/platform/credentials";
 
 export type PancakeListResponse<T = Record<string, unknown>> = {
   data: T[];
@@ -34,9 +36,36 @@ export class PancakeClient {
     private readonly apiKey = env.pancake.apiKey,
     private readonly shopId = env.pancake.shopId,
     private readonly baseUrl = env.pancake.baseUrl,
+    /** Tổ chức sở hữu khoá khi client dựng từ kết nối «pancake-pos-org»; `null` = biến môi trường của tổ chức nhà. */
+    private readonly orgOwner: string | null = null,
   ) {
     if (!this.apiKey) throw new IntegrationError("Pancake: chưa cấu hình PANCAKE_API_KEY", 400);
     if (!this.shopId) throw new IntegrationError("Pancake: chưa cấu hình PANCAKE_SHOP_ID", 400);
+  }
+
+  /**
+   * Client từ KẾT NỐI CỦA MỘT TỔ CHỨC KHÁCH (F1 · lib/integrations/pancake/org.ts). Khác nhánh nhà ở ba điểm:
+   *  ① chặn bằng `assertConnectionOwner` (chủ của khoá) thay vì `assertHomeCredentials` — client của A lọt sang lượt chạy của
+   *    B thì NÉM trước khi một byte rời máy;
+   *  ② địa chỉ API là HẰNG SỐ (`PANCAKE_POS_API`), không lấy từ cấu hình của nhà hay từ người dùng;
+   *  ③ mọi câu lỗi ném ra đã che khoá (API Pancake POS nhận khoá trong query, nên khoá nằm trong URL của request).
+   */
+  static fromOrgConnection(source: { organization: string; apiKey: string; shopId: string }) {
+    return new PancakeClient(source.apiKey, source.shopId, PANCAKE_POS_API, source.organization);
+  }
+
+  /** Lời chặn TRƯỚC điều tiết nhịp và trước khi gửi: nhà ⇒ phải đang ở nhà; kết nối tổ chức ⇒ phải đúng chủ của khoá. */
+  private async guard() {
+    if (this.orgOwner) await assertConnectionOwner(PANCAKE_POS_ORG_CONNECTOR, this.orgOwner);
+    else await assertHomeCredentials("pancake");
+  }
+
+  /** Nhánh tổ chức: câu lỗi không bao giờ mang khoá. Nhánh nhà giữ nguyên lỗi như cũ. */
+  private scrub(error: unknown): unknown {
+    if (!this.orgOwner || !(error instanceof Error)) return error;
+    const message = maskPancakeKey(error.message, this.apiKey);
+    if (message === error.message) return error;
+    return error instanceof IntegrationError ? new IntegrationError(message, error.status, error.retryable) : new Error(message);
   }
 
   get shop() {
@@ -58,12 +87,14 @@ export class PancakeClient {
   }
 
   async get(path: string, params: Record<string, unknown> = {}) {
-    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
-    await assertHomeCredentials("pancake");
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12). Kết nối tổ chức: chủ khoá.
+    await this.guard();
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();
-    const { body } = await fetchJson(this.buildUrl(path, params), { serviceName: "Pancake", timeoutMs: 90_000 });
+    const { body } = await fetchJson(this.buildUrl(path, params), { serviceName: "Pancake", timeoutMs: 90_000 }).catch((error: unknown) => {
+      throw this.scrub(error);
+    });
     const record = asRecord(body);
     if (record.success === false) {
       const message = str(record.message) || "API từ chối yêu cầu";
@@ -75,12 +106,14 @@ export class PancakeClient {
 
   /** Gọi POST (tạo / sửa dữ liệu trên Pancake POS) */
   async post(path: string, body: unknown, params: Record<string, unknown> = {}) {
-    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12).
-    await assertHomeCredentials("pancake");
+    // Credential môi trường là của tổ chức nhà — chặn TRƯỚC điều tiết nhịp và trước khi gửi (P12). Kết nối tổ chức: chủ khoá.
+    await this.guard();
     const wait = THROTTLE_MS - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();
-    const { body: res } = await fetchJson(this.buildUrl(path, params), { serviceName: "Pancake", timeoutMs: 90_000, method: "POST", body: JSON.stringify(body), retries: 0 });
+    const { body: res } = await fetchJson(this.buildUrl(path, params), { serviceName: "Pancake", timeoutMs: 90_000, method: "POST", body: JSON.stringify(body), retries: 0 }).catch((error: unknown) => {
+      throw this.scrub(error);
+    });
     const record = asRecord(res);
     if (record.success === false) {
       const message = str(record.message) || "API từ chối yêu cầu";
@@ -288,6 +321,19 @@ const clients = perOrganizationClients<PancakeClient>({
     throw new ConnectorUnavailableError("pancake", organization);
   },
 });
+
+/**
+ * CLIENT GHI ĐÈ THEO NGỮ CẢNH (F1 — Pancake POS của tổ chức khách). Lượt đồng bộ / webhook của một tổ chức khách mở kết nối
+ * «pancake-pos-org» CỦA CHÍNH tổ chức đó rồi chạy ĐÚNG bộ đồng bộ của nhà (`lib/integrations/pancake/sync.ts`) bên trong
+ * `withPancakeClient` — không có bộ đồng bộ thứ hai (AGENTS.md mục 8.12). Ghi đè chỉ sống trong lượt gọi đó; client ghi đè
+ * tự hỏi chủ của khoá ở mỗi request, nên dù lọt sang ngữ cảnh tổ chức khác cũng NÉM trước khi gửi.
+ */
+const overrideClient = new AsyncLocalStorage<PancakeClient>();
+
+export function withPancakeClient<T>(client: PancakeClient, fn: () => Promise<T>): Promise<T> {
+  return overrideClient.run(client, fn);
+}
+
 export function getPancakeClient() {
-  return clients.get();
+  return overrideClient.getStore() ?? clients.get();
 }

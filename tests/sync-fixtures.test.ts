@@ -460,6 +460,9 @@ import { testAppointments } from "./appointments.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
+import { testPancakePosOrgSync } from "./pancake-pos-org.test";
+import { testViettelPostOrg } from "./viettelpost-org.test";
+import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testQuickStart } from "./quick-start.test";
@@ -2665,6 +2668,9 @@ async function main() {
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
   await testMetaAdsOrgSync();
+  await testPancakePosOrgSync();
+  await testViettelPostOrg();
+  await testFashionCodF3();
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   await testQuickStart();
