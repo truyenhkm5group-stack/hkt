@@ -16,6 +16,8 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      OPEN_BROWSER: "0"
     defaults:
       run:
         working-directory: pancake-ai-app

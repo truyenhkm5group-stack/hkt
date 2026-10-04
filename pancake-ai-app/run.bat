@@ -25,10 +25,7 @@ echo Dang kiem tra thu vien...
 .venv\Scripts\python.exe -m pip install -q --disable-pip-version-check -r requirements.txt || (echo [LOI] Cai thu vien that bai - kiem tra mang Internet & pause & exit /b 1)
 if not exist .env copy .env.example .env >nul
 
-echo.
-echo  Bot dang chay tai http://127.0.0.1:8800  (giu cua so nay mo; dong cua so = tat bot)
-echo.
-start "" http://127.0.0.1:8800
+echo Dang khoi dong bot... trinh duyet se tu mo khi bot san sang.
 .venv\Scripts\python.exe server.py
 echo.
 echo Bot da dung. Neu co loi o tren, chup man hinh gui lai.

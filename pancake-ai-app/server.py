@@ -897,4 +897,29 @@ async def _ingest_webhook(payload: dict[str, Any]) -> None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("server:app", host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8800")), reload=False)
+    import socket
+    import webbrowser
+
+    host, port = os.environ.get("HOST", "127.0.0.1"), int(os.environ.get("PORT", "8800"))
+    with socket.socket() as sock:
+        if sock.connect_ex(("127.0.0.1", port)) == 0:
+            print(f"\n[LOI] Cong {port} dang bi chuong trinh khac dung (co the bot da chay o cua so khac).")
+            print(f"      Mo thu http://127.0.0.1:{port} hoac doi PORT trong file .env\n")
+            raise SystemExit(1)
+
+    def _open_browser_when_ready() -> None:
+        """Chỉ mở trình duyệt khi bot ĐÃ trả lời — mở sớm thì trình duyệt báo ERR_CONNECTION_REFUSED."""
+        import urllib.request
+
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1)
+                webbrowser.open(f"http://127.0.0.1:{port}")
+                return
+            except OSError:
+                time.sleep(0.5)
+
+    if os.environ.get("OPEN_BROWSER", "1") != "0":
+        threading.Thread(target=_open_browser_when_ready, daemon=True).start()
+    print(f"\n  Bot dang chay tai http://127.0.0.1:{port}  (giu cua so nay mo; dong cua so = tat bot)\n")
+    uvicorn.run(app, host=host, port=port, reload=False)
