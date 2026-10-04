@@ -42,6 +42,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { checkCredit } from "@/lib/constants/price-lists";
+import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { customerExposure } from "@/lib/queries/receivables";
 import { audit } from "@/lib/audit";
@@ -502,6 +503,10 @@ async function loadEditable(orderId: unknown): Promise<ExistingManual> {
   // Đơn đã giao (phiếu ký nhận) là chứng từ đã khép: sửa dòng hàng / huỷ đơn lúc này là viết lại thứ khách đã ký nhận.
   if (row.stage === "DELIVERED") return fail("CONFLICT", "Đơn đã giao (có phiếu ký nhận) — không sửa / huỷ được. Ghi nhầm thì huỷ phiếu giao trước.");
   if (row.stage === "RETURNED") return fail("CONFLICT", "Đơn đã ghi giao không thành công — không sửa / huỷ được. Ghi nhầm thì hoàn tác trước.");
+  // Đơn đã có lần gửi CÒN GIỮ ĐƠN ở hãng vận chuyển (lib/carriers/vtp-shipments.ts): sửa dòng hàng / người nhận / tiền ở ERP
+  // không đổi được vận đơn bên hãng — hai bản sẽ lệch nhau mà không ai thấy. Huỷ vận đơn trước rồi mới sửa / huỷ đơn.
+  const attempts = await db.select({ stage: schema.shipments.stage, raw: schema.shipments.raw }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id));
+  if (attempts.some((a) => attemptHoldsOrder(a))) return fail("CONFLICT", "Đơn đã có vận đơn đang chạy ở đơn vị vận chuyển — huỷ vận đơn trước rồi mới sửa / huỷ đơn.");
   return { ok: true, row };
 }
 

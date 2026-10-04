@@ -21,6 +21,7 @@
  * `deps.fetch` để bài kiểm đưa vào một máy chủ giả: bộ kiểm thử không gọi mạng thật (luật 65).
  */
 import { PANCAKE_POS_API, PANCAKE_POS_API_KEY_PATTERN, PANCAKE_POS_SHOP_ID_PATTERN } from "@/lib/constants/pancake-pos-org";
+import { isVtpPhone, normalizeVtpPhone, VTP_PARTNER_API } from "@/lib/constants/carrier-vtp";
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
@@ -461,6 +462,51 @@ export async function testGooglePlaces(input: { secrets: Record<string, string> 
   return { ok: true, message: `Google nhận khoá: lượt tìm thử trả ${r.places.length} địa điểm (lượt chỉ-Place-ID, không tính phí). Bật để job «wholesale-leads» chạy chiến dịch quét.` };
 }
 
+/*
+  ═══════════ VIETTEL POST CỦA TỔ CHỨC — TẠO VẬN ĐƠN (viettelpost-carrier) ═══════════
+
+  Đúng hai bước «Lấy token tài khoản» của tài liệu (Login → ownerconnect) rồi `GET user/listInventory` — CHỈ ĐỌC, không tạo
+  đơn nào. Địa chỉ hằng số (`VTP_PARTNER_API`), không theo chuyển hướng, mật khẩu / token bị che trong mọi câu. Viettel Post
+  từ chối bằng HTTP 200 + `error: true` ⇒ đọc phong bì, không tin mã HTTP (AGENTS.md mục 5). Đạt ⇔ đăng nhập được VÀ khai đủ
+  người gửi — thiếu người gửi thì lượt tạo đơn đầu tiên mới vỡ, nên nói ngay ở bước kiểm tra.
+*/
+export async function testViettelPostCarrier(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const username = (input.settings.username ?? "").trim();
+  const password = input.secrets.password ?? "";
+  if (!/^\S{3,100}$/.test(username) || !password) return { ok: false, message: "Chưa khai tài khoản / mật khẩu Viettel Post — không gọi." };
+  const missing = [!(input.settings.senderName ?? "").trim() && "tên người gửi", !isVtpPhone(normalizeVtpPhone(input.settings.senderPhone ?? "")) && "SĐT người gửi hợp lệ", (input.settings.senderAddress ?? "").trim().length < 10 && "địa chỉ lấy hàng đủ xã / tỉnh"].filter(Boolean);
+  if (missing.length) return { ok: false, message: `Thiếu ${missing.join(", ")} — vận đơn cần người gửi.` };
+  const fetchImpl = deps.fetch ?? fetch;
+  const hide = [password];
+  const envelope = async (res: Response) => {
+    const body = (await readCapped(res)) as { status?: unknown; error?: unknown; message?: unknown; data?: unknown } | null;
+    return { error: body?.error === true, message: typeof body?.message === "string" ? body.message : "", data: body?.data ?? null, parsed: Boolean(body) };
+  };
+  try {
+    const creds = JSON.stringify({ USERNAME: username, PASSWORD: password });
+    const headers = { "content-type": "application/json", accept: "application/json" };
+    const login = await fetchImpl(`${VTP_PARTNER_API}/user/Login`, { method: "POST", headers, body: creds, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (login.status >= 300 && login.status < 400) return { ok: false, message: `Viettel Post trả chuyển hướng HTTP ${login.status} — không theo.` };
+    const l = await envelope(login);
+    const shortToken = l.data && typeof l.data === "object" && typeof (l.data as { token?: unknown }).token === "string" ? String((l.data as { token: string }).token) : "";
+    if (l.error || !shortToken) return { ok: false, message: scrubSecrets(`Viettel Post không nhận tài khoản: ${l.message || (l.parsed ? "phản hồi không có token" : `HTTP ${login.status}`)}`, hide) };
+    hide.push(shortToken);
+    const owner = await fetchImpl(`${VTP_PARTNER_API}/user/ownerconnect`, { method: "POST", headers: { ...headers, Token: shortToken }, body: creds, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const o = await envelope(owner);
+    const longToken = !o.error && o.data && typeof o.data === "object" && typeof (o.data as { token?: unknown }).token === "string" ? String((o.data as { token: string }).token) : "";
+    const token = longToken || shortToken;
+    hide.push(token);
+    const inv = await fetchImpl(`${VTP_PARTNER_API}/user/listInventory`, { method: "GET", headers: { accept: "application/json", Token: token }, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const i = await envelope(inv);
+    const stores = Array.isArray(i.data) ? (i.data as Record<string, unknown>[]) : [];
+    const names = stores.slice(0, 3).map((s) => String(s.name ?? s.NAME ?? s.address ?? s.ADDRESS ?? "")).filter(Boolean);
+    const storeLine = i.error ? "chưa đọc được danh sách kho" : stores.length ? `${stores.length} kho lấy hàng (${names.join("; ")})` : "tài khoản chưa có kho lấy hàng nào trên viettelpost.vn";
+    return { ok: true, message: scrubSecrets(`Viettel Post nhận tài khoản ${username}${longToken ? "" : " (token ngắn hạn)"} — ${storeLine}. Bật để tạo vận đơn từ trang đơn hàng; dán URL webhook «Viettel Post của tổ chức» vào tài khoản để hành trình tự về.`, hide) };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Viettel Post: ${describeNetworkFailure(e, "partner.viettelpost.vn")}` : `Không gọi được Viettel Post: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -473,5 +519,6 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
+  "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),
   "google-places": (input, deps) => testGooglePlaces(input, deps),
 };
