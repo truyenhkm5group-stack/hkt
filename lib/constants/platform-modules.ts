@@ -62,6 +62,7 @@ export const MODULE_KEYS = [
   "warranty",
   "wholesale_leads",
   "stays",
+  "lots",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -551,6 +552,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["stays:view", "stays:write"],
     homeOptIn: true,
     why: "Lưu trú bán ĐÊM của một PHÒNG trên nhiều kênh cùng lúc — không có đơn hàng, không có kho. Kênh chỉ chia sẻ lịch dạng iCal (không API), nên ERP gộp lịch, phát lịch của chính nó cho kênh, và báo trùng phòng thay vì để khách đến nơi mới biết. Tắt cho tổ chức nhà (0198).",
+  },
+  {
+    key: "lots",
+    label: "Lô & hạn dùng",
+    description: "Ngành thực phẩm / hải sản / mỹ phẩm: gắn mã lô và hạn dùng lên phiếu nhập, biết lô nào cận hạn hay đã hết hạn mà còn hàng, lấy hàng theo hạn gần nhất trước (FEFO).",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["inventory"],
+    features: [],
+    routes: ["/inventory/lots"],
+    permissions: ["lots:view", "lots:write"],
+    homeOptIn: true,
+    why: "Hàng có HẠN DÙNG mất giá theo ngày — khác hàng thời trang. Lô là lớp gắn thêm lên phiếu kho, KHÔNG tham gia phép tính tồn (luật 10); «lô còn bao nhiêu» là ước tính lúc đọc, dán nhãn ước tính. Tắt cho tổ chức nhà (0199)."
   },
 ];
 

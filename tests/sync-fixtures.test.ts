@@ -459,6 +459,7 @@ import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
 import { testStays } from "./stays.test";
+import { testStockLots } from "./stock-lots.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
@@ -2669,6 +2670,7 @@ async function main() {
   await testAppointments();
   await testWarranty();
   await testStays();
+  await testStockLots();
   await testAppointmentBookingBot();
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
