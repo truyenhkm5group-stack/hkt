@@ -1392,7 +1392,14 @@
       "idx": 199,
       "version": "7",
       "when": 1790766940000,
-      "tag": "0199_sales_conversation_events",
+      "tag": "0199_stock_lots",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1790767000000,
+      "tag": "0200_sales_conversation_events",
       "breakpoints": true
     }
   ]

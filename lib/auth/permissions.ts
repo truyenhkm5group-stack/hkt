@@ -292,6 +292,17 @@ export const PERMISSION_GROUPS = [
       { key: "stays:write", label: "Lưu trú: đặt phòng & nhập lịch kênh", hint: "Thêm / sửa phòng, đặt / khoá / huỷ (có lý do), nhập lịch .ics từ Airbnb / Booking / Agoda, đánh dấu dọn xong, đổi đường dẫn lịch." },
     ],
   },
+  /*
+    LÔ & HẠN DÙNG (0199, module `lots`): xem lô, cận hạn / hết hạn, thứ tự lấy hàng; ghi = gắn lô lên dòng phiếu nhập, gỡ lô
+    gắn nhầm (có lý do). Không quyền nào ở đây đổi được số tồn — tồn vẫn chỉ đi qua phiếu kho.
+  */
+  {
+    module: "Lô & hạn dùng",
+    items: [
+      { key: "lots:view", label: "Lô & hạn dùng: xem", hint: "Xem lô theo mẫu mã, lô cận hạn / đã hết hạn còn hàng (ước tính), thứ tự lấy hàng hạn gần trước." },
+      { key: "lots:write", label: "Lô & hạn dùng: gắn / gỡ lô", hint: "Gắn mã lô + hạn dùng lên dòng phiếu nhập; gỡ lô gắn nhầm (có lý do). Không đổi số tồn." },
+    ],
+  },
 ] as const;
 
 /**
@@ -393,7 +404,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     danh sách quyền lưu từ trước sẽ KHÔNG tự nhận nó. Mọi nhánh mặc định của một quyền leo thang
     phải rơi về phía HẸP HƠN.
   */
-  WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
+  // Lô & hạn dùng (0199) là việc của người giữ kho — module chỉ bật ở tổ chức khách.
+  WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write", "lots:view", "lots:write"],
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
   // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
   // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.

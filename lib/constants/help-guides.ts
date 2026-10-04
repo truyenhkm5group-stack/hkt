@@ -256,6 +256,20 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  {
+    key: "lots",
+    topic: "SELL",
+    title: "Lô & hạn dùng",
+    summary: "Gắn mã lô và hạn dùng lên phiếu nhập, biết lô nào cận hạn để bán trước và lô nào hết hạn mà còn hàng.",
+    href: "/inventory/lots",
+    permission: "lots:view",
+    steps: [
+      { text: "Lập phiếu nhập hàng như mọi lần ở Nhập hàng & kiểm kê.", href: "/inventory/receipts" },
+      { text: "Mở Lô & hạn dùng, ở khung «Gắn lô cho phiếu nhập» chọn dòng phiếu, gõ mã lô, hạn dùng, số lượng rồi bấm «Gắn lô». Một dòng chia được nhiều lô.", href: "/inventory/lots" },
+      { text: "Khung «Cận hạn trong» N ngày liệt kê lô sắp hết hạn còn hàng; cột «Lấy» là thứ tự lấy hàng hạn gần trước. Lô hết hạn còn hàng hiện đỏ — huỷ bằng phiếu xuất kho." },
+    ],
+  },
+
   // ───────────────── CHATBOT ─────────────────
   {
     key: "sales-chatbot",

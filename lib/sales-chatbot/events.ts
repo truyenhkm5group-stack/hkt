@@ -1,5 +1,5 @@
 /**
- * ═══════════ SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG — PHẦN MÁY CHỦ (0199) ═══════════
+ * ═══════════ SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG — PHẦN MÁY CHỦ (0200) ═══════════
  *
  * Ghi `sales_conversation_events` trong CSDL của tổ chức NGỮ CẢNH (`getDb()`). Ba đường vào, không đường nào đổi hành vi bot:
  *

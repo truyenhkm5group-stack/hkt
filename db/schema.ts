@@ -1324,11 +1324,11 @@ export const orders = pgTable(
     timeSendPartner: ts("time_send_partner"),
     estimateDeliveryDate: ts("estimate_delivery_date"),
     /**
-     * NGUỒN TẠO ĐƠN (0199 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
+     * NGUỒN TẠO ĐƠN (0200 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
      * ghi đơn hộ nhân viên chốt. `NULL` = trước khi có cột, hoặc đường tạo chưa khai — KHÔNG đoán ngược cho dòng cũ (luật 35).
      */
     origin: text("origin"),
-    /** Hội thoại chatbot sinh ra đơn (0199) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
+    /** Hội thoại chatbot sinh ra đơn (0200) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
     salesConversationId: text("sales_conversation_id"),
     raw: jsonb("raw"),
     syncedAt: ts("synced_at").notNull().defaultNow(),
@@ -2621,6 +2621,38 @@ export const stockReceiptItems = pgTable(
     index("stock_receipt_items_receipt_idx").on(t.receiptId),
     index("stock_receipt_items_variant_idx").on(t.variantId),
     index("stock_receipt_items_shipment_idx").on(t.shipmentId),
+  ],
+);
+
+/**
+ * LÔ & HẠN DÙNG (0199, module `lots`): lớp gắn thêm lên MỘT dòng phiếu kho dương. KHÔNG tham gia phép tính tồn nào (luật 10) —
+ * «lô còn bao nhiêu» là ước tính lúc đọc (`lib/constants/lots.ts::estimateLotRemaining`).
+ */
+export const stockLots = pgTable(
+  "stock_lots",
+  {
+    id: id(),
+    receiptItemId: text("receipt_item_id")
+      .notNull()
+      .references(() => stockReceiptItems.id, { onDelete: "cascade" }),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "cascade" }),
+    lotCode: text("lot_code").notNull(),
+    expiresOn: date("expires_on", { mode: "string" }).notNull(),
+    producedOn: date("produced_on", { mode: "string" }),
+    quantity: integer("quantity").notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("stock_lots_item_code_uq").on(t.receiptItemId, sql`lower(${t.lotCode})`),
+    index("stock_lots_variant_idx").on(t.variantId, t.expiresOn),
+    check("stock_lots_qty_check", sql`${t.quantity} > 0`),
+    check("stock_lots_code_check", sql`length(btrim(${t.lotCode})) BETWEEN 1 AND 60`),
+    check("stock_lots_dates_check", sql`${t.producedOn} IS NULL OR ${t.producedOn} <= ${t.expiresOn}`),
   ],
 );
 
@@ -9823,7 +9855,7 @@ export const salesChatMessages = pgTable(
 );
 
 /**
- * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0199 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0200 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
  * dòng có mốc: khách nhắn, AI trả lời, chuyển bước, báo giá, khách để lại SĐT, mời / nhận upsell, đơn nháp / chốt, chuyển
  * người, nhân viên nhận, trả lại AI, nhắc khách. Trước sổ này phễu chỉ sống trong `state` jsonb và bị xoá khi sang lượt mua
  * mới — không đo được «AI tự chốt bao nhiêu», «upsell mang thêm bao nhiêu». Không có dòng = chưa đo (trước ngày bật), KHÔNG

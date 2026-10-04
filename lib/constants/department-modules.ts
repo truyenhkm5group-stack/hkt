@@ -360,6 +360,13 @@ export const NAV_MODULES = [
     why: "Hàng hoàn CHỈ vào tồn khi kho mở kiện và đếm thật — ĐVVC báo 'đã hoàn' không phải là một phiếu nhập.",
   },
   {
+    href: "/inventory/lots",
+    label: "Lô & hạn dùng",
+    zone: "WAREHOUSE",
+    permission: "lots:view",
+    why: "Hàng có hạn dùng mất giá theo ngày: người giữ kho gắn lô lúc nhập và là người phải biết lô nào cận hạn để lấy trước, lô nào hết hạn để huỷ.",
+  },
+  {
     href: "/inventory",
     label: "Nhật ký kho",
     zone: "WAREHOUSE",
