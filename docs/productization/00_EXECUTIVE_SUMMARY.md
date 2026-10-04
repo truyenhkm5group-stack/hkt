@@ -36,7 +36,7 @@ Messenger trực tiếp (#517), gói «Chỉ cần AI bán hàng» (#530). Đang
 | 8 | AI Sales Dashboard | ĐẠT | #522 `/ai/sales-chatbot/performance` | — |
 | 9 | Human vs AI Benchmark | ĐẠT | #522 nhóm AI_ONLY / AI_THEN_HUMAN / HUMAN_ONLY; #547 khối «AI vs Người — theo nhánh thử nghiệm» (chia ngẫu nhiên #538, ý định điều trị, ORDER_OUTCOME, độ phủ nhánh người, mẫu < 10 ⇒ «—») | Theo TỪNG NGƯỜI: chờ M8 |
 | 10 | Sales Leaderboard | CHƯA | — | Cần `users.id` cho câu trả lời người (M8); không xếp hạng người bằng chỉ số họ không quyết (AGENTS §24) |
-| 11 | Upsell / cross-sell analytics | ĐẠT (upsell) | #522 sự kiện upsell mời / nhận / từ chối | Cross-sell tách riêng: chưa có nguồn phân biệt |
+| 11 | Upsell / cross-sell analytics | ĐẠT | #522 upsell (mời / nhận / từ chối, tiền mua thêm); #559 bán chéo: món / đơn bot chốt, tỷ lệ đơn có ≥ 2 sản phẩm, giá trị bán chéo (đơn chốt, danh nghĩa — chưa phải doanh thu) | Bán chéo GIAO THÀNH CÔNG (lọc theo kết cục): chưa tách cột |
 | 12 | Delivered Revenue | ĐẠT | #522 qua `ORDER_OUTCOME` + độ phủ kết cục | — |
 | 13 | Cost / Order, Cost / Delivered Order | ĐẠT | #522 chi phí AI / đơn giao | Chi phí người: chủ shop khai (ROI v1) |
 | 14 | Customer ROI Engine | ĐẠT (v1) | #522 tiết kiệm ước tính (nhãn ước tính, người khai) | Lương / hoa hồng thật theo người (M8 + payroll) |
