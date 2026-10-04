@@ -31,6 +31,7 @@ import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
 import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
+import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -325,6 +326,9 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
         .limit(1);
       if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
     }
+    // Sổ sự kiện (0202): ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — không ghi lại mỗi tin của nhân viên.
+    const [took] = await db.select({ id: c.id, status: c.status }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(ev.pageId, ev.threadId)))).limit(1);
+    if (took && took.status !== "HANDOFF") await recordConversationEvent(took.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${ev.messageId}` });
     // Đang CẦN NGƯỜI XỬ LÝ vì lý do khác ⇒ giữ lý do đó (không biến thành «nhân viên đang trả lời» tự hết hạn sau 30 phút).
     await db
       .update(c)

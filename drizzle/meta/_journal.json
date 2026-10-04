@@ -1408,6 +1408,13 @@
       "when": 1790767060000,
       "tag": "0201_real_estate",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1790767120000,
+      "tag": "0202_sales_conversation_events",
+      "breakpoints": true
     }
   ]
 }

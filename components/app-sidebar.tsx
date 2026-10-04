@@ -170,6 +170,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/settings/notifications": BellRing,
   "/setup": Rocket,
   "/ai/sales-chatbot": MessagesSquare,
+  "/ai/sales-chatbot/performance": BarChart3,
   "/platform": ServerCog,
 };
 

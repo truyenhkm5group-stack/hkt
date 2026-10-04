@@ -94,6 +94,10 @@ const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/self-service-journey.test.ts và E2E của tổ chức khách.",
   },
+  "/ai/sales-chatbot/performance": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Cùng module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke của NHÀ luôn bị chuyển về /module-disabled. Số của trang được kiểm bằng tests/sales-events.test.ts (loadAiSalesPerformance trên tổ chức khách thật).",
+  },
 };
 
 /** Chỉ để bài kiểm đọc: tuyến nào KHÔNG bắt buộc có mặt trong smoke. */
