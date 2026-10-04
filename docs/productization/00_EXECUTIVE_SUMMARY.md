@@ -58,7 +58,7 @@ Messenger trực tiếp (#517), gói «Chỉ cần AI bán hàng» (#530). Đang
 | 31 | Smoke production sau release | ĐẠT | Workflow deploy chạy `scripts/smoke.ts`; trang mới phải có trong danh sách (`smoke-coverage`) | — |
 | 32 | Chiến lược migration / backfill / lùi | ĐẠT | `MIGRATION_PLAN.md`; mỗi PR ghi cách lùi; `migration:renumber` | — |
 | 33 | Không dữ liệu giả trong phân tích | ĐẠT | Chưa biết ⇒ `—` (AGENTS §42); bài kiểm khoá null ≠ 0 ở #533 / replay / copilot | — |
-| 34 | Chỉ số có định nghĩa | ĐẠT (phần đã có) | `METRIC_CATALOG`, `11_…`, `22_…`, `19_…` | Thêm vào sổ khi #522 gộp |
+| 34 | Chỉ số có định nghĩa | ĐẠT | `METRIC_CATALOG` (người / phòng ban) · `AI_SALES_METRICS` (sản phẩm AI Sales: phễu, upsell, bán chéo đơn chốt / đã giao, chênh lệch thử nghiệm, copilot, phát lại) · `11_…`, `22_…`, `19_…` | Chỉ số chưa có nguồn khai `UNAVAILABLE` kèm thiếu gì (so từng nhân viên, phản đối, CSAT) |
 | 35 | Không lỗ hổng chéo tổ chức P0 | ĐẠT (đã biết) | Bài tấn công + quét tĩnh S17–S21 | Chạy lại khi thêm kênh mới |
 | 36 | Không lỗi toàn vẹn dữ liệu P0 | ĐẠT (đã biết) | TD-01/02/03 (giá do người gọi, tồn ngoài transaction, trùng đơn) đóng ở #525 | — |
 
