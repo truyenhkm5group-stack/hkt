@@ -2,6 +2,20 @@ import { memo } from "@/lib/cache";
 import { assessFbScopes, type FbScopeAssessment } from "@/lib/constants/fb-token-scopes";
 import { env } from "@/lib/env";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
+import { openOrgGraphCredential } from "@/lib/marketing/meta-ads-org-write";
+import { currentOrganization } from "@/lib/platform/context";
+
+/**
+ * Client để HỎI token đang chạy: nhà ⇒ biến môi trường như cũ; tổ chức khách ⇒ token System User của CHÍNH tổ chức
+ * (kết nối «meta-ads-org», chỉ đọc). `null` = tổ chức chưa có token nào để hỏi (lý do ở `reason`).
+ */
+async function tokenClient(): Promise<{ client: FacebookAdsClient | null; reason: string | null }> {
+  const org = await currentOrganization();
+  if (org.isHome) return env.facebook.accessToken ? { client: new FacebookAdsClient(), reason: null } : { client: null, reason: "Máy chủ chưa có FACEBOOK_ACCESS_TOKEN." };
+  const c = await openOrgGraphCredential("READ");
+  if (!c.ok) return { client: null, reason: `Chưa có token của tổ chức: ${c.reason}` };
+  return { client: FacebookAdsClient.fromOrgConnection({ organization: c.org, accessToken: c.token, adAccountIds: c.adAccountIds }), reason: null };
+}
 
 /**
  * Trần chờ câu trả lời quyền. Client Facebook cho mỗi lượt gọi tới 90 giây kèm thử lại — đúng cho job
@@ -19,12 +33,13 @@ export const FB_SCOPE_TIMEOUT_MS = 5_000;
  */
 export async function getFbTokenScopes(): Promise<FbScopeAssessment> {
   return memo("fb-token-scopes", 600_000, async () => {
-    const hasToken = Boolean(env.facebook.accessToken);
-    if (!hasToken) return assessFbScopes({ hasToken, permissions: null });
+    const { client } = await tokenClient();
+    const hasToken = client !== null;
+    if (!client) return assessFbScopes({ hasToken, permissions: null });
     let hetGio: NodeJS.Timeout | undefined;
     try {
       const permissions = await Promise.race([
-        new FacebookAdsClient().getPermissions(),
+        client.getPermissions(),
         new Promise<never>((_, reject) => {
           hetGio = setTimeout(() => reject(new Error(`quá ${FB_SCOPE_TIMEOUT_MS / 1000} giây chưa trả lời`)), FB_SCOPE_TIMEOUT_MS);
         }),
@@ -49,11 +64,12 @@ export type FbTokenIdentity =
  */
 export async function getFbTokenIdentity(): Promise<FbTokenIdentity> {
   return memo("fb-token-identity", 600_000, async (): Promise<FbTokenIdentity> => {
-    if (!env.facebook.accessToken) return { state: "UNKNOWN", error: "Máy chủ chưa có FACEBOOK_ACCESS_TOKEN." };
+    const { client, reason } = await tokenClient();
+    if (!client) return { state: "UNKNOWN", error: reason ?? "Chưa có token." };
     let hetGio: NodeJS.Timeout | undefined;
     try {
       const id = await Promise.race([
-        new FacebookAdsClient().tokenIdentity(),
+        client.tokenIdentity(),
         new Promise<never>((_, reject) => {
           hetGio = setTimeout(() => reject(new Error(`quá ${FB_SCOPE_TIMEOUT_MS / 1000} giây chưa trả lời`)), FB_SCOPE_TIMEOUT_MS);
         }),

@@ -472,6 +472,7 @@ import { testCommerceAgent } from "./commerce-agent.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
+import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
 import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
 import { testCarrierVtp } from "./carrier-vtp.test";
@@ -2705,6 +2706,7 @@ async function main() {
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();
+  await testMetaAdsOrgPublish();
   await testPancakePosOrgSync();
   await testViettelPostOrg();
   await testCarrierVtp();

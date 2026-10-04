@@ -55,3 +55,37 @@ export function adAccountStatusLabel(status: number): string {
   };
   return labels[status] ?? `trạng thái ${status}`;
 }
+
+/**
+ * ═══════════ ĐĂNG QUẢNG CÁO BẰNG TOKEN CỦA TỔ CHỨC (chủ nền tảng chốt 04/10/2026 — Hải Sản Làng Chài) ═══════════
+ *
+ * Đường GHI Graph của tổ chức khách mở khi ĐỦ cả bốn: chốt máy chủ `ADS_WRITE_ENABLED` (chung) · kết nối «meta-ads-org»
+ * đang bật · công tắc RIÊNG của tổ chức dưới đây do quản trị của chính tổ chức bật · công tắc khẩn cấp không kéo. Công tắc
+ * nằm trong CSDL của tổ chức (`settings`), giá trị phải ĐÚNG `{ enabled: true }` — chuỗi "true", số 1, JSON hỏng hay lỗi
+ * đọc đều là TẮT: ở đây "không biết" phải thành ĐÓNG, vì mở nhầm là tiêu tiền thật của khách.
+ */
+export const META_ADS_ORG_WRITE_KEY = "ads.write.org";
+
+export function parseOrgAdsWrite(raw: unknown): { enabled: boolean } {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return { enabled: false };
+    }
+  }
+  return { enabled: !!v && typeof v === "object" && (v as Record<string, unknown>).enabled === true };
+}
+
+/**
+ * Lời gọi Graph của tổ chức nhắm vào một TÀI KHOẢN QUẢNG CÁO (`act_<id>/…`) thì tài khoản đó phải nằm trong danh sách
+ * tổ chức đã khai ở kết nối — token System User có thể được giao nhiều tài khoản hơn thứ shop muốn ERP chạm vào. `null`
+ * = được; chuỗi = lý do chặn. Đường dẫn không bắt đầu bằng `act_` (id nhóm / chiến dịch / page) đi qua: Graph tự từ
+ * chối id ngoài quyền của token. Hàm THUẦN.
+ */
+export function orgAccountPathProblem(path: string, adAccountIds: readonly string[]): string | null {
+  const m = /^\/?act_([0-9]+)(?:\/|$)/.exec(path);
+  if (!m) return null;
+  return adAccountIds.includes(m[1]) ? null : `tài khoản quảng cáo act_${m[1]} không nằm trong danh sách tổ chức đã khai ở kết nối «Quảng cáo Facebook (Meta) của tổ chức» — ERP không chạm vào tài khoản ấy.`;
+}
