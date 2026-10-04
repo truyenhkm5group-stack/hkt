@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
-import { SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteAppOrigin, siteDomainFrom, siteHostKind, siteRoute } from "@/lib/platform/site-host";
+import { brandAppOrigin, brandOfHost, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import {
   ERP_HEADER_PREFIX,
@@ -110,7 +110,14 @@ function serverHeaders(request: NextRequest, pathname: string): Headers {
   // Tên miền con (0180): đặt SAU khi xoá header client — trình duyệt không tự khai được mình đang ở ERP nào.
   const slug = hostSlug(request.headers.get("host"), process.env.PLATFORM_BASE_DOMAIN);
   if (slug) headers.set(ERP_HOST_SLUG_HEADER, slug);
+  // Thương hiệu của host (vnxcommerce.com ⇒ vnx, chotdontudong.com · www · app ⇒ chotdon) — cùng luật "chỉ máy chủ đặt".
+  headers.set(ERP_SITE_BRAND_HEADER, brandOfHost(request.headers.get("host"), siteEnv()));
   return headers;
+}
+
+/** Biến môi trường của lớp mặt tiền — đọc ở mỗi lượt gọi (Edge không có `lib/env`). */
+function siteEnv(): SiteEnv {
+  return { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL };
 }
 
 export async function middleware(request: NextRequest) {
@@ -121,17 +128,16 @@ export async function middleware(request: NextRequest) {
     TÊN MIỀN GỐC (`vnxcommerce.com`, `www.`) là trang giới thiệu, KHÔNG phải ERP — quyết định trước mọi phép kiểm phiên,
     vì ở host này không có đường nào cần phiên. Luật nằm trong hàm thuần `siteRoute()` (lib/platform/site-host.ts).
   */
-  const siteDomain = siteDomainFrom(process.env.SITE_DOMAIN);
-  const siteHost = siteHostKind(request.headers.get("host"), siteDomain);
-  if (siteHost && siteDomain) {
+  const site = matchSite(request.headers.get("host"), siteEnv());
+  if (site) {
     const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
     const route = siteRoute({
-      host: siteHost,
+      host: site.kind,
       pathname,
       search: request.nextUrl.search,
-      siteDomain,
+      siteDomain: site.domain,
       protocol: forwarded ? `${forwarded}:` : request.nextUrl.protocol,
-      appOrigin: siteAppOrigin(process.env.APP_URL, siteDomain),
+      appOrigin: brandAppOrigin(site.brand, siteEnv()),
     });
     if (route.kind === "REWRITE") {
       // `clone()` giữ nguyên gốc của chính lượt gọi ⇒ rewrite NỘI BỘ; một URL khác gốc biến rewrite thành proxy ra ngoài.

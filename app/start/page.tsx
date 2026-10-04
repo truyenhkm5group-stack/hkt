@@ -7,6 +7,8 @@ import { StartWizard, type WizardBusinessType, type WizardModule, type WizardTem
 import { enabledProviders, readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { getCurrentUser } from "@/lib/auth/session";
 import { BLUEPRINT_TEMPLATES } from "@/lib/blueprints/templates";
+import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
+import { hostBrand } from "@/lib/platform/host-brand";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { listPlans } from "@/lib/entitlements/check";
 import { signupMode } from "@/lib/onboarding/service";
@@ -24,7 +26,7 @@ export const metadata: Metadata = { title: { absolute: "Tạo cửa hàng" }, de
  * hay tổ chức nào. Người vận hành nền tảng (phiên tổ chức nhà + `platform:operate`) luôn dùng được trang này để tạo hộ
  * khách — cùng luồng, không cần cờ. Trang không in gì của tổ chức nhà (tên, thương hiệu, số liệu).
  */
-export default async function StartPage({ searchParams }: { searchParams: Promise<{ invite?: string; "day-du"?: string }> }) {
+export default async function StartPage({ searchParams }: { searchParams: Promise<{ invite?: string; "day-du"?: string; nganh?: string }> }) {
   const mode = await signupMode();
   const user = await getCurrentUser();
   const operator = Boolean(user && !platformOperatorDenial(user));
@@ -62,6 +64,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
           initialInvite={typeof params.invite === "string" ? params.invite.slice(0, 80) : ""}
           providers={enabledProviders()}
           social={social ? { provider: social.provider, email: social.email, name: social.name } : null}
+          initialBusinessType={initialQuickBusinessType(params.nganh, await hostBrand())}
         />
       </main>
     );

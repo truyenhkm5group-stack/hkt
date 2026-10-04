@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
 import { env } from "@/lib/env";
+import { brandAppOrigin, brandOfHost, type SiteEnv } from "@/lib/platform/site-host";
 
 /**
  * ═══════════ ĐĂNG NHẬP / ĐĂNG KÝ BẰNG GOOGLE · FACEBOOK (0193, docs/platform/quick-start.md) — CHỈ MÁY CHỦ ═══════════
@@ -29,7 +30,8 @@ export function isOAuthProvider(v: unknown): v is OAuthProvider {
   return typeof v === "string" && (OAUTH_PROVIDERS as readonly string[]).includes(v);
 }
 
-type ProviderConfig = { clientId: string; clientSecret: string };
+/** `origin` = gốc phần mềm của lượt này (mặc định `APP_URL`) — quyết định `redirect_uri`. */
+type ProviderConfig = { clientId: string; clientSecret: string; origin?: string };
 
 export function providerConfig(p: OAuthProvider): ProviderConfig | null {
   const id = p === "google" ? env.oauth.googleClientId : env.oauth.facebookAppId;
@@ -42,8 +44,23 @@ export function enabledProviders(): Record<OAuthProvider, boolean> {
   return { google: providerConfig("google") !== null, facebook: providerConfig("facebook") !== null };
 }
 
-export function redirectUri(p: OAuthProvider): string {
-  return `${env.appUrl}/login/oauth/${p}/callback`;
+/**
+ * GỐC PHẦN MỀM của host đang gọi — chỉ nhận đúng các host trong danh sách (`APP_URL` và `app.<CHOTDON_DOMAIN>`), KHÔNG
+ * bao giờ dựng từ header Host thô: một host lạ ⇒ `APP_URL`. Cả lượt OAuth (URL nhà cung cấp, đổi mã, cookie, chuyển hướng
+ * cuối) đi theo gốc này, nên người bắt đầu ở `app.chotdontudong.com` kết thúc ở đó với phiên của chính host đó.
+ */
+export function appOriginForHost(host: string | null | undefined): string {
+  const e: SiteEnv = { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL };
+  if (brandOfHost(host, e) === "chotdon") {
+    const o = brandAppOrigin("chotdon", e);
+    if (o) return o;
+  }
+  return env.appUrl;
+}
+
+/** Đường quay về của nhà cung cấp — PHẢI khai đủ ở Google Console / Facebook cho MỖI gốc phần mềm. */
+export function redirectUri(p: OAuthProvider, origin: string = env.appUrl): string {
+  return `${origin.replace(/\/$/, "")}/login/oauth/${p}/callback`;
 }
 
 // ─────────────────────────── Cookie ký ───────────────────────────
@@ -74,7 +91,8 @@ export async function readOAuthToken<T>(aud: string, token: string | undefined |
   }
 }
 
-export type OAuthState = { p: OAuthProvider; state: string; verifier: string; intent: OAuthIntent; next: string };
+/** `o` = gốc phần mềm lúc bắt đầu — lượt đổi mã phải gửi ĐÚNG `redirect_uri` đã gửi lúc bắt đầu. */
+export type OAuthState = { p: OAuthProvider; state: string; verifier: string; intent: OAuthIntent; next: string; o?: string };
 export type SocialProfile = { provider: OAuthProvider; subject: string; email: string | null; name: string | null };
 export type SocialPick = { provider: OAuthProvider; subject: string; choices: { orgCode: string; userId: string }[] };
 
@@ -87,7 +105,7 @@ export function beginOAuth(p: OAuthProvider, cfg: ProviderConfig): { state: stri
   const state = b64url(randomBytes(24));
   const verifier = b64url(randomBytes(32));
   const challenge = b64url(createHash("sha256").update(verifier).digest());
-  const ru = redirectUri(p);
+  const ru = redirectUri(p, cfg.origin);
   if (p === "google") {
     const q = new URLSearchParams({ client_id: cfg.clientId, redirect_uri: ru, response_type: "code", scope: "openid email profile", state, code_challenge: challenge, code_challenge_method: "S256", prompt: "select_account" });
     return { state, verifier, url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` };
@@ -122,7 +140,7 @@ export async function exchangeCode(p: OAuthProvider, code: string, verifier: str
       const res = await fetchImpl("https://oauth2.googleapis.com/token", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ code, client_id: cfg.clientId, client_secret: cfg.clientSecret, redirect_uri: redirectUri(p), grant_type: "authorization_code", code_verifier: verifier }),
+        body: new URLSearchParams({ code, client_id: cfg.clientId, client_secret: cfg.clientSecret, redirect_uri: redirectUri(p, cfg.origin), grant_type: "authorization_code", code_verifier: verifier }),
         signal: AbortSignal.timeout(15_000),
       });
       const body = (await res.json().catch(() => null)) as { id_token?: unknown } | null;
@@ -138,7 +156,7 @@ export async function exchangeCode(p: OAuthProvider, code: string, verifier: str
       const email = typeof c.email === "string" && c.email_verified === true ? c.email.toLowerCase() : null;
       return { provider: p, subject: c.sub, email, name: typeof c.name === "string" ? c.name : null };
     }
-    const q = new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, redirect_uri: redirectUri(p), code });
+    const q = new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, redirect_uri: redirectUri(p, cfg.origin), code });
     const res = await fetchImpl(`${FB_GRAPH}/oauth/access_token?${q}`, { signal: AbortSignal.timeout(15_000) });
     const body = (await res.json().catch(() => null)) as { access_token?: unknown } | null;
     if (!res.ok || typeof body?.access_token !== "string") return fail(`đổi code lỗi HTTP ${res.status}`);

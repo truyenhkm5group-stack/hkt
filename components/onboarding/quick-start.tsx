@@ -20,9 +20,22 @@ type Social = { provider: "google" | "facebook"; email: string | null; name: str
  * ĐĂNG KÝ NHANH MỘT MÀN HÌNH (docs/platform/quick-start.md): tên cửa hàng · ngành hàng · SĐT · email · mật khẩu — hoặc
  * một nút Google / Facebook thay hai ô cuối. Máy tự chọn mã, mẫu, module; dựng xong vào thẳng ERP.
  */
-export function QuickStart({ needInvite, initialInvite, providers, social }: { needInvite: boolean; initialInvite: string; providers: { google: boolean; facebook: boolean }; social: Social }) {
+export function QuickStart({
+  needInvite,
+  initialInvite,
+  providers,
+  social,
+  initialBusinessType = "food",
+}: {
+  needInvite: boolean;
+  initialInvite: string;
+  providers: { google: boolean; facebook: boolean };
+  social: Social;
+  /** Ngành chọn sẵn — `ai_sales` trên host «Chốt Đơn Tự Động», hoặc `?nganh=` hợp lệ. */
+  initialBusinessType?: QuickBusinessType;
+}) {
   const [storeName, setStoreName] = useState("");
-  const [businessType, setBusinessType] = useState<QuickBusinessType>("food");
+  const [businessType, setBusinessType] = useState<QuickBusinessType>(initialBusinessType);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
