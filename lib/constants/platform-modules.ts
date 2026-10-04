@@ -62,6 +62,9 @@ export const MODULE_KEYS = [
   "warranty",
   "wholesale_leads",
   "stays",
+  "lots",
+  "field_jobs",
+  "real_estate",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -551,6 +554,48 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["stays:view", "stays:write"],
     homeOptIn: true,
     why: "Lưu trú bán ĐÊM của một PHÒNG trên nhiều kênh cùng lúc — không có đơn hàng, không có kho. Kênh chỉ chia sẻ lịch dạng iCal (không API), nên ERP gộp lịch, phát lịch của chính nó cho kênh, và báo trùng phòng thay vì để khách đến nơi mới biết. Tắt cho tổ chức nhà (0198).",
+  },
+  {
+    key: "lots",
+    label: "Lô & hạn dùng",
+    description: "Ngành thực phẩm / hải sản / mỹ phẩm: gắn mã lô và hạn dùng lên phiếu nhập, biết lô nào cận hạn hay đã hết hạn mà còn hàng, lấy hàng theo hạn gần nhất trước (FEFO).",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["inventory"],
+    features: [],
+    routes: ["/inventory/lots"],
+    permissions: ["lots:view", "lots:write"],
+    homeOptIn: true,
+    why: "Hàng có HẠN DÙNG mất giá theo ngày — khác hàng thời trang. Lô là lớp gắn thêm lên phiếu kho, KHÔNG tham gia phép tính tồn (luật 10); «lô còn bao nhiêu» là ước tính lúc đọc, dán nhãn ước tính. Tắt cho tổ chức nhà (0199)."
+  },
+  {
+    key: "field_jobs",
+    label: "Phiếu công việc hiện trường",
+    description: "Dịch vụ tại nhà (sửa chữa, vệ sinh, lắp đặt, bảo trì): báo giá theo dòng, khách đồng ý, hẹn thợ không chồng giờ, ảnh trước / sau, khách ký nghiệm thu, thu tiền theo đợt, bảo hành dịch vụ và lượt quay lại bảo hành.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["customers"],
+    features: [],
+    routes: ["/field-jobs", "/api/field-jobs"],
+    permissions: ["field_jobs:view", "field_jobs:write"],
+    homeOptIn: true,
+    why: "Dịch vụ tại nhà bán một VIỆC chứ không bán hàng: không kho, không vận chuyển; giá là báo giá chữ tự do, phát sinh ngay tại nhà khách, tiền thu theo đợt. Khách là khách của module Khách hàng; tổng / đã thu / còn nợ và hạn bảo hành KHÔNG lưu cột mà tính từ dòng báo giá, phiếu thu và ngày nghiệm thu. Tắt cho tổ chức nhà (0200)."
+  },
+  {
+    key: "real_estate",
+    label: "Bảng hàng bất động sản",
+    description: "Sàn / đại lý phân phối dự án: bảng hàng theo căn, giữ chỗ có hạn không cho hai sale giữ trùng một căn, cọc, ký bán, chủ đầu tư khoá căn — mọi sale cùng nhìn một bảng.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: [],
+    features: [],
+    routes: ["/real-estate"],
+    permissions: ["real_estate:view", "real_estate:hold", "real_estate:manage"],
+    homeOptIn: true,
+    why: "Bất động sản bán CĂN, mỗi căn bán đúng một lần, cho nhiều sale cùng lúc — không có kho số lượng, không vận chuyển. Một căn hai sale giữ là mất khách và mất uy tín sàn, nên «nhiều nhất một giữ chỗ / một cọc còn hiệu lực mỗi căn» chặn ở CSDL; trạng thái căn tính lúc đọc. Tắt cho tổ chức nhà (0201)."
   },
 ];
 

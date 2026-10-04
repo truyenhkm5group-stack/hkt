@@ -18,7 +18,7 @@ import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { clearMemo } from "@/lib/cache";
 import { canMarkManualDeliveryFailed, manualOrderComplete, parseManualDeliveryFee } from "@/lib/constants/manual-orders";
-import { syncedOrderGroupText } from "@/lib/sales-chatbot/order-sync-shared";
+import { orderGroupText } from "@/lib/sales-chatbot/order-sync-shared";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
@@ -93,9 +93,9 @@ function testPure() {
   // Đơn đủ thông tin (chủ shop HSLC 04/10/2026): SĐT 8–15 số · địa chỉ ≥ 5 ký tự · ≥ 1 dòng hàng.
   assert.equal(manualOrderComplete({ phone: "0912 345 678", address: "12 Hàng Bạc" }, 1), true);
   assert.deepEqual([manualOrderComplete({ phone: "", address: "12 Hàng Bạc" }, 1), manualOrderComplete({ phone: "0912345678", address: "HN" }, 1), manualOrderComplete({ phone: "0912345678", address: "12 Hàng Bạc" }, 0), manualOrderComplete({ phone: "1234", address: "12 Hàng Bạc" }, 1)], [false, false, false, false]);
-  const gt = { code: "#A", name: "Lan", phone: "0912345678", address: "12 Hàng Bạc", province: "Hà Nội", lines: [{ name: "Chả cá", quantity: 1, unitPrice: 280_000, lineTotal: 280_000 }], subtotal: 280_000, shippingFee: 0, shipText: null, warnings: [] };
-  assert.match(syncedOrderGroupText({ ...gt, confirmed: true }), /ĐÃ TÍNH ĐƠN[\s\S]*Đơn đã tính — sai thì sửa \/ huỷ trên ERP\.$/, "đơn tự xác nhận: tin nhóm không bảo «chốt đơn» nữa");
-  assert.match(syncedOrderGroupText(gt), /chờ kiểm[\s\S]*Kiểm thông tin rồi chốt đơn trên ERP\.$/);
+  const gt = { header: "🧾 ĐƠN MỚI", name: "Lan", phone: "0912345678", address: "12 Hàng Bạc", province: "Hà Nội", lines: [{ name: "Chả cá", quantity: 1, unitPrice: 280_000, lineTotal: 280_000 }], subtotal: 280_000, shippingFee: 0, shipText: null, warnings: [] };
+  // (04/10/2026) chủ shop: tin nhóm không mã đơn, không nguồn, không câu «… trên ERP» — loại đơn nằm ở dòng đầu do nơi gọi đặt.
+  assert.ok(!/ERP|#A/.test(orderGroupText({ ...gt, confirmed: true })) && orderGroupText(gt).startsWith("🧾 ĐƠN MỚI\nTHU TIỀN: 280.000"), orderGroupText(gt));
   assert.equal(returnsPageParams(withDefaultReturnsBasis({}, true)).basis, "SHIPPED", "có vận chuyển: mặc định cũ không đổi (tổ chức nhà, job giữ ấm)");
   assert.equal(returnsPageParams(withDefaultReturnsBasis({}, false)).basis, "ORDERED", "không module vận chuyển ⇒ ngày lên đơn");
   assert.equal(returnsPageParams(withDefaultReturnsBasis({ basis: "SHIPPED" }, false)).basis, "SHIPPED", "người dùng chọn mốc thì mốc đó thắng");

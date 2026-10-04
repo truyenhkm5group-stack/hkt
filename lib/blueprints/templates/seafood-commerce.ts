@@ -8,6 +8,7 @@
  *  · Hạn mức nợ chặn lượt chốt đơn, công nợ đọc từ phiếu thu, thu nợ gộp (Khách hàng → Công nợ, 0188).
  *  · Nhắc mua lại theo nhịp mua thật của từng khách + sổ liên hệ (Khách hàng → Nhắc mua lại, 0189).
  *  · Nhập hàng từ ghe / nhà cung cấp (module Mua hàng), giữ hàng khi chốt, chatbot bán hàng.
+ *  · Lô & hạn dùng gắn lên phiếu nhập — hàng đông lạnh / khô có HSD, lấy hạn gần trước (module `lots`, 0199, bản 1.2.0).
  *
  * KHÔNG bật «Vận chuyển» và «CSKH» — cùng lý do với mẫu thực phẩm: hai module ấy dựng trên connector chỉ-nhà. KHÔNG khai
  * chu kỳ mua lại hay hạn mức mặc định nào: đó là quyết định kinh doanh của từng shop (luật 38).
@@ -18,12 +19,13 @@ export const SEAFOOD_COMMERCE_BLUEPRINT: Blueprint = {
   format: "erp-blueprint",
   formatVersion: 1,
   key: "seafood-commerce",
-  version: "1.1.0",
+  version: "1.2.0",
   name: "Hải sản — bán lẻ + bán sỉ",
   description: "Shop hải sản tươi, đông lạnh, khô bán cho khách lẻ qua chat và cho quán ăn / nhà hàng / đại lý mua sỉ trả chậm. Bảng giá sỉ theo nhóm khách, hạn mức và công nợ, nhắc khách mua lại theo nhịp, nhập hàng từ nhà cung cấp, chatbot bán hàng.",
   industry: "Hải sản",
   // 1.1.0: thêm «Săn khách sỉ» (0197) — tìm nhà hàng / quán / khách sạn làm khách sỉ mới; module TẮT được ở /settings/modules.
-  modules: ["core", "work", "customers", "products", "orders", "inventory", "purchasing", "ai_sales", "wholesale_leads"],
+  // 1.2.0: thêm «Lô & hạn dùng» (0199) — HSD theo phiếu nhập, lấy hạn gần trước.
+  modules: ["core", "work", "customers", "products", "orders", "inventory", "lots", "purchasing", "ai_sales", "wholesale_leads"],
   roles: [
     {
       key: "ban_hang",

@@ -292,6 +292,40 @@ export const PERMISSION_GROUPS = [
       { key: "stays:write", label: "Lưu trú: đặt phòng & nhập lịch kênh", hint: "Thêm / sửa phòng, đặt / khoá / huỷ (có lý do), nhập lịch .ics từ Airbnb / Booking / Agoda, đánh dấu dọn xong, đổi đường dẫn lịch." },
     ],
   },
+  /*
+    LÔ & HẠN DÙNG (0199, module `lots`): xem lô, cận hạn / hết hạn, thứ tự lấy hàng; ghi = gắn lô lên dòng phiếu nhập, gỡ lô
+    gắn nhầm (có lý do). Không quyền nào ở đây đổi được số tồn — tồn vẫn chỉ đi qua phiếu kho.
+  */
+  {
+    module: "Lô & hạn dùng",
+    items: [
+      { key: "lots:view", label: "Lô & hạn dùng: xem", hint: "Xem lô theo mẫu mã, lô cận hạn / đã hết hạn còn hàng (ước tính), thứ tự lấy hàng hạn gần trước." },
+      { key: "lots:write", label: "Lô & hạn dùng: gắn / gỡ lô", hint: "Gắn mã lô + hạn dùng lên dòng phiếu nhập; gỡ lô gắn nhầm (có lý do). Không đổi số tồn." },
+    ],
+  },
+  /*
+    PHIẾU CÔNG VIỆC HIỆN TRƯỜNG (0200, module `field_jobs`): xem phiếu, lịch thợ, tiền đã thu / còn nợ; ghi = lập / sửa báo giá,
+    chuyển trạng thái, hẹn thợ, tải ảnh, nghiệm thu, thu tiền / huỷ phiếu thu (có lý do), mở lượt bảo hành.
+  */
+  {
+    module: "Phiếu công việc",
+    items: [
+      { key: "field_jobs:view", label: "Phiếu công việc: xem", hint: "Xem phiếu, báo giá, lịch thợ, ảnh trước / sau, tiền đã thu / còn nợ, hạn bảo hành dịch vụ." },
+      { key: "field_jobs:write", label: "Phiếu công việc: lập & xử lý", hint: "Lập / sửa báo giá, khách đồng ý, hẹn thợ, bắt đầu / nghiệm thu / huỷ (có lý do), tải ảnh, thu tiền theo đợt, huỷ phiếu thu (có lý do), mở lượt bảo hành." },
+    ],
+  },
+  /*
+    BẢNG HÀNG BẤT ĐỘNG SẢN (0201, module `real_estate`): XEM bảng hàng · GIỮ CHỖ / ĐẶT CỌC cho khách của mình (sale) · QUẢN LÝ
+    (dự án, căn, khoá căn, nhả giữ chỗ của người khác, hoàn / khách bỏ cọc, ký bán) — mức cuối là của quản lý sàn.
+  */
+  {
+    module: "Bảng hàng BĐS",
+    items: [
+      { key: "real_estate:view", label: "BĐS: xem bảng hàng", hint: "Xem dự án, căn và trạng thái (còn trống / đang giữ / đã cọc / đã bán / khoá), ai đang giữ tới bao giờ." },
+      { key: "real_estate:hold", label: "BĐS: giữ chỗ & đặt cọc", hint: "Giữ chỗ một căn còn trống cho khách (có hạn theo dự án), nhả giữ chỗ của mình, chuyển giữ chỗ của mình thành cọc." },
+      { key: "real_estate:manage", label: "BĐS: quản lý dự án & căn", hint: "Tạo dự án (khai số giờ giữ chỗ), thêm căn, khoá / mở căn, nhả giữ chỗ của sale khác, hoàn cọc / khách bỏ cọc (có lý do), ký bán." },
+    ],
+  },
 ] as const;
 
 /**
@@ -393,12 +427,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     danh sách quyền lưu từ trước sẽ KHÔNG tự nhận nó. Mọi nhánh mặc định của một quyền leo thang
     phải rơi về phía HẸP HƠN.
   */
-  WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
+  // Lô & hạn dùng (0199) là việc của người giữ kho — module chỉ bật ở tổ chức khách.
+  WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write", "lots:view", "lots:write"],
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
-  // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
+  // Bảo hành (0196) cũng là việc của CSKH; sale bất động sản (0201) giữ chỗ / cọc — các module chỉ bật ở tổ chức khách.
   // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.
-  // Lễ tân lưu trú (0198) là người giữ lịch phòng — module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write"],
+  // Lễ tân lưu trú (0198) là người giữ lịch phòng; điều phối phiếu công việc (0200) cũng là việc của CSKH; sale bất động sản (0201) giữ chỗ / cọc — các module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write", "field_jobs:view", "field_jobs:write", "real_estate:view", "real_estate:hold"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own", "wholesale:view", "wholesale:work"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

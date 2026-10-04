@@ -146,6 +146,10 @@ const MOI = [
   "0196_warranty",
   "0197_wholesale_lead_hunter",
   "0198_stays",
+  "0199_stock_lots",
+  "0200_field_jobs",
+  "0201_real_estate",
+  "0202_sales_conversation_events",
 ] as const;
 
 /*

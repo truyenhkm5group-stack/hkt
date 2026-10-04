@@ -307,7 +307,7 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
  * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
  */
 function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean): AgentOrderOptions {
-  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null };
+  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null, allowShortStock: ctx.config.sellWithoutStockCheck };
 }
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
@@ -482,6 +482,11 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const items = itemsZ.safeParse(input.items);
       if (!items.success) return err("Kiểm tồn: sai đầu vào", "items phải là danh sách { variant_id, quantity ≥ 1 }.", state);
       const stock = await stockFor(items.data.map((i) => i.variant_id));
+      if (ctx.config.sellWithoutStockCheck) {
+        // Shop nhập hàng liên tục ⇒ không đưa con số tồn cho AI (nó sẽ nói «hết hàng»); chỉ báo mã có thật hay không.
+        const sell = mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))).map((l) => (stock.get(l.variantId) ? { variant_id: l.variantId, quantity: l.quantity, can_sell: true } : { variant_id: l.variantId, exists: false }));
+        return ok(`Kiểm tồn ${sell.length} dòng · shop nhập hàng liên tục`, { items: sell, note: "Shop nhập hàng liên tục — cứ lên đơn, KHÔNG nói còn / hết hàng." }, state);
+      }
       const rows = mergeLines(items.data.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))).map((l) => {
         const s = stock.get(l.variantId);
         if (!s) return { variant_id: l.variantId, exists: false };
@@ -595,11 +600,13 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const s = stock.get(l.variantId);
         return s?.stockKnown && (s.available ?? 0) < l.quantity;
       });
-      if (short.length) return err("Chốt: không đủ hàng", `Không đủ hàng khả dụng cho: ${short.map((l) => priced.lines.find((p) => p.variantId === l.variantId)?.name ?? l.variantId).join(", ")}.`, state);
+      const shortNames = short.map((l) => priced.lines.find((p) => p.variantId === l.variantId)?.name ?? l.variantId).join(", ");
+      if (short.length && !ctx.config.sellWithoutStockCheck) return err("Chốt: không đủ hàng", `Không đủ hàng khả dụng cho: ${shortNames}.`, state);
       const unknownStock = d.lines.some((l) => !stock.get(l.variantId)?.stockKnown);
+      const stockNotes = [unknownStock ? "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao." : "", short.length ? `Sổ kho đang thiếu lúc chốt (${shortNames}) — shop bật «chốt không cần kiểm tồn», kho chuẩn bị hàng trước khi giao.` : ""].filter(Boolean);
       let orderId: string | null = null;
       if (!simulated) {
-        const payload = orderInput(state, { ...d, note: unknownStock ? [d.note, "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao."].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
+        const payload = orderInput(state, { ...d, note: stockNotes.length ? [d.note, ...stockNotes].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
         const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload, agentOrderOpts(ctx, state, false));
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
         orderId = r.id;

@@ -62,6 +62,7 @@ import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig, withModelFallback, chatTurn, conversationView, customerFacingText, customerNamePrompt, plainForMessenger, historyForModel, listConversations, messageTimeTag, nowPromptLine, openConversation, recentShopTexts, resumeConversationToAi, setSalesChatProviderForTests, systemPrompt, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
+import { newOrderAlertText, sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
@@ -1151,6 +1152,17 @@ async function testJourney() {
       assert.ok(tooSoon.isError && /chưa thấy tóm tắt/.test(tooSoon.summary) && !tooSoon.state.confirmed, `chốt cùng lượt với tóm tắt ⇒ chặn: ${tooSoon.content}`);
       const okLater = await executeTool("confirm_order", { customer_confirmation: "ok em" }, { ...rctx(shown.state, "ok em chốt nhé"), turn: 13 });
       assert.ok(!okLater.isError && okLater.state.confirmed, `khách đồng ý ở tin SAU tóm tắt ⇒ chốt: ${okLater.content}`);
+      // (04/10/2026 · «Bống Bống Bang Bang») chủ shop: «Hàng sẽ được fill-in liên tục nên cứ chốt đơn mà không cần check tồn kho».
+      // Mặc định: sổ kho thiếu ⇒ không chốt; BẬT «chốt không cần kiểm tồn» ⇒ chốt, check_inventory không đưa con số tồn.
+      const bigDraft = await executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 999 }] }, { ...rctx({ ...savedC.state, upsellSent: true }, "lấy 999kg"), turn: 20 });
+      const blockedShort = await executeTool("confirm_order", { customer_confirmation: "ok" }, { ...rctx(bigDraft.state, "ok"), turn: 21 });
+      assert.ok(blockedShort.isError && /không đủ hàng/.test(blockedShort.summary), `mặc định vẫn chặn khi thiếu hàng: ${blockedShort.summary}`);
+      const noCheckCfg = { ...parseSalesChatbotConfig(null), sellWithoutStockCheck: true };
+      const sellAnyway = await executeTool("confirm_order", { customer_confirmation: "ok" }, { ...rctx(bigDraft.state, "ok"), turn: 21, config: noCheckCfg });
+      assert.ok(!sellAnyway.isError && sellAnyway.state.confirmed, `bật «chốt không cần kiểm tồn» ⇒ chốt: ${sellAnyway.content}`);
+      const invNoCheck = await executeTool("check_inventory", { items: [{ variant_id: chaMuc, quantity: 999 }] }, { ...tctx({}), config: noCheckCfg });
+      assert.ok(!invNoCheck.isError && /can_sell/.test(invNoCheck.content) && !/available|enough/.test(invNoCheck.content), `không đưa con số tồn cho AI: ${invNoCheck.content}`);
+      assert.ok(systemPrompt(noCheckCfg, "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng") && !systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng"));
       // (04/10/2026 · «Nguyễn Lộc») khách ĐÃ thấy tóm tắt ở lượt 12, lượt 14 «ok» món mời thêm ⇒ sửa và chốt luôn — không hỏi
       // «Em gửi đơn luôn nhé?» thêm lần nữa (khách dặn dò thay vì «ok» ⇒ đơn không chốt, nhóm không có tin «ĐƠN MỚI»).
       const edited = await executeTool("update_draft_order", { items: [{ variant_id: chaMuc, quantity: 2 }] }, { ...rctx(shown.state, "ok lấy thêm 1kg nữa"), turn: 14 });
@@ -1635,6 +1647,30 @@ async function testJourney() {
       const rdRows = await db.select().from(schema.messagingDeliveries).where(like(schema.messagingDeliveries.dedupeKey, "reorder-digest:%"));
       assert.ok(rdRows.length === 1 && rdRows[0].connectorKey === "sandbox-messaging" && /Chị Mua Lại · 0977000222 · đến hạn hôm nay/.test(rdRows[0].body) && /zalo\.me\/0977000222/.test(rdRows[0].body) && /\/customers\/reorder/.test(rdRows[0].body), JSON.stringify(rdRows.map((x) => x.body)));
       assert.equal((await sendReorderDigest(new Date(vnNine.getTime() + 3_600_000))).reason, "hôm nay đã gửi", "mỗi ngày MỘT tin");
+      // ═══ BÁO NHÓM ĐƠN «MỚI» CHƯA XÁC NHẬN (04/10/2026 — «cứ có đủ SĐT, địa chỉ, SKU là thông báo telegram») ═══
+      const newOrd = await createManualOrderCore(admin, { customerId: rc.id, stage: "NEW", channel: "Chatbot fanpage", note: "", orderDiscount: 0, shippingFee: 0, lines: [{ variantId: chaMuc, quantity: 2, unitPrice: 400_000, discount: 0 }] });
+      assert.ok(newOrd.ok, JSON.stringify(newOrd));
+      const tooFresh = await sendNewOrderAlerts(new Date());
+      assert.equal((await db.select().from(schema.messagingDeliveries).where(eq(schema.messagingDeliveries.dedupeKey, `order-new:${newOrd.id}`))).length, 0, `đơn vừa lên (khách có thể chốt ngay) ⇒ chưa báo: ${JSON.stringify(tooFresh)}`);
+      const later10 = new Date(Date.now() + 10 * 60_000);
+      const na1 = await sendNewOrderAlerts(later10);
+      const newRows = await db.select().from(schema.messagingDeliveries).where(eq(schema.messagingDeliveries.dedupeKey, `order-new:${newOrd.id}`));
+      assert.ok(na1.sent >= 1 && newRows.length === 1, JSON.stringify(na1));
+      for (const k of ["🆕 ĐƠN MỚI (chưa xác nhận)", "THU TIỀN: 800.000", "Chị Mua Lại · 0977000222", "Địa chỉ: 12 Hàng Bạc", "× 2 × 400.000", "Ship: chưa báo"]) assert.ok(newRows[0].body.includes(k), `tin đơn mới thiếu «${k}»: ${newRows[0].body}`);
+      for (const k of ["Nguồn", "/orders/", "http", `#${newOrd.id.slice(0, 4)}`]) assert.ok(!newRows[0].body.includes(k), `tin đơn mới không được có «${k}»: ${newRows[0].body}`);
+      // Miễn ship theo cấu hình của shop (04/10/2026: «COD > 280K ở Hà Nội, Đà Nẵng, TP HCM» ⇒ ngưỡng 280.001 + ba khu vực).
+      const fs280 = { enabled: true, minSubtotal: 280_001, minWeightGrams: null, areas: ["Hà Nội", "Đà Nẵng", "Hồ Chí Minh"] };
+      const ln = (total: number) => [{ name: "Chả cá thu (1kg)", quantity: 1, unitPrice: total, lineTotal: total, weight: 1000 }];
+      const freeHcm = newOrderAlertText({ shippingFee: 0, name: "A", phone: "0912345678", address: "12 Lê Lợi, Quận 1, Hồ Chí Minh", note: "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." }, ln(400_000), fs280);
+      assert.ok(freeHcm.includes("Ship: Miễn phí") && freeHcm.includes("THU TIỀN: 400.000 ₫\n") && !freeHcm.includes("+ ship") && !freeHcm.includes("CHƯA BÁO"), freeHcm);
+      assert.ok(newOrderAlertText({ shippingFee: 0, name: "A", phone: "0912345678", address: "27 Trương Mỹ, Hải Dương", note: null }, ln(400_000), fs280).includes("Ship: chưa báo"), "ngoài khu vực ⇒ chưa báo");
+      assert.ok(newOrderAlertText({ shippingFee: 0, name: "A", phone: "0912345678", address: "Hải Châu, Đà Nẵng", note: null }, ln(280_000), fs280).includes("+ ship"), "đúng 280K không «> 280K» ⇒ chưa miễn");
+      assert.ok(newOrderAlertText({ shippingFee: 30_000, name: "A", phone: "0912345678", address: "Hải Dương", note: "Giao sau 5h chiều" }, ln(280_000), fs280).includes("THU TIỀN: 310.000"), "có phí ship ⇒ cộng vào tiền thu");
+      assert.equal((await sendNewOrderAlerts(later10)).sent, 0, "mỗi đơn MỘT tin");
+      const confOrd = await createManualOrderCore(admin, { customerId: rc.id, stage: "CONFIRMED", channel: "Zalo", note: "", orderDiscount: 0, shippingFee: 0, lines: [{ variantId: chaMuc, quantity: 1, unitPrice: 400_000, discount: 0 }] });
+      assert.ok(confOrd.ok);
+      await sendNewOrderAlerts(later10);
+      assert.equal((await db.select().from(schema.messagingDeliveries).where(eq(schema.messagingDeliveries.dedupeKey, `order-new:${confOrd.id}`))).length, 0, "đơn đã xác nhận có tin của luật xác nhận — không báo thêm");
       // «Bỏ qua N» phải kèm LÝ DO đọc được — chủ shop không có cách nào khác để biết vì sao bot im.
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));

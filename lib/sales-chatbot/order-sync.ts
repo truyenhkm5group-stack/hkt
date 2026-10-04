@@ -48,7 +48,7 @@ import {
   ORDER_SYNC_OUTCOME_LABEL,
   ORDER_SYNC_SETTING_KEY,
   parseOrderSyncConfig,
-  syncedOrderGroupText,
+  orderGroupText,
   type OrderSyncConfig,
   type OrderSyncOutcome,
   type OrderSyncThreadState,
@@ -56,6 +56,7 @@ import {
 import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, type PriorMessage, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
+import { linkAgentOrder, recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { mergeLines, priceLines, type CartLine, type ChatState, type Recipient } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 
@@ -469,8 +470,8 @@ async function syncThread(a: {
   const who = `${decision.recipient.name} · ${decision.recipient.phone}`;
   const items = priced.lines.map((l) => `${l.name} × ${l.quantity}`).join("; ");
   const fromPrevious = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS" ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — xác nhận với khách` : "";
-  const groupText = syncedOrderGroupText({
-    code,
+  const groupText = orderGroupText({
+    header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",
     name: decision.recipient.name,
     phone: decision.recipient.phone,
     address: decision.recipient.address,
@@ -478,10 +479,13 @@ async function syncThread(a: {
     lines: priced.lines,
     subtotal: priced.subtotal,
     shippingFee: priced.shippingFee,
-    shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn ship NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
+    shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn phí NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
     warnings: [fromPrevious].filter(Boolean),
     confirmed,
   });
+  // Sổ sự kiện (0202): đơn do NGƯỜI chốt, AI chỉ ghi hộ ⇒ actor HUMAN, nguồn AI_ORDER_SYNC — tách khỏi đơn AI tự chốt.
+  await recordConversationEvent(conv.id, { type: "order.drafted", actorKind: "HUMAN", occurredAt: now, orderId: created.id, amountVnd: priced.subtotal, payload: { via: "ORDER_SYNC" }, key: `draft:${created.id}` });
+  await linkAgentOrder(created.id, conv.id, "AI_ORDER_SYNC");
   await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now, confirmed);
   return {
     outcome: "CREATED",

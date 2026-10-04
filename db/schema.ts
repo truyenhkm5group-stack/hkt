@@ -1323,12 +1323,21 @@ export const orders = pgTable(
     lastUpdateStatusAt: ts("last_update_status_at"),
     timeSendPartner: ts("time_send_partner"),
     estimateDeliveryDate: ts("estimate_delivery_date"),
+    /**
+     * NGUỒN TẠO ĐƠN (0202 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
+     * ghi đơn hộ nhân viên chốt. `NULL` = trước khi có cột, hoặc đường tạo chưa khai — KHÔNG đoán ngược cho dòng cũ (luật 35).
+     */
+    origin: text("origin"),
+    /** Hội thoại chatbot sinh ra đơn (0202) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
+    salesConversationId: text("sales_conversation_id"),
     raw: jsonb("raw"),
     syncedAt: ts("synced_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check("orders_origin_check", sql`${t.origin} IS NULL OR ${t.origin} IN ('PANCAKE_POS','ERP_FORM','AI_AGENT','AI_ORDER_SYNC','IMPORT')`),
+    index("orders_sales_conversation_idx").on(t.salesConversationId).where(sql`${t.salesConversationId} is not null`),
     index("orders_status_idx").on(t.status),
     index("orders_stage_inserted_idx").on(t.stage, t.insertedAt),
     index("orders_inserted_idx").on(t.insertedAt),
@@ -2612,6 +2621,38 @@ export const stockReceiptItems = pgTable(
     index("stock_receipt_items_receipt_idx").on(t.receiptId),
     index("stock_receipt_items_variant_idx").on(t.variantId),
     index("stock_receipt_items_shipment_idx").on(t.shipmentId),
+  ],
+);
+
+/**
+ * LÔ & HẠN DÙNG (0199, module `lots`): lớp gắn thêm lên MỘT dòng phiếu kho dương. KHÔNG tham gia phép tính tồn nào (luật 10) —
+ * «lô còn bao nhiêu» là ước tính lúc đọc (`lib/constants/lots.ts::estimateLotRemaining`).
+ */
+export const stockLots = pgTable(
+  "stock_lots",
+  {
+    id: id(),
+    receiptItemId: text("receipt_item_id")
+      .notNull()
+      .references(() => stockReceiptItems.id, { onDelete: "cascade" }),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "cascade" }),
+    lotCode: text("lot_code").notNull(),
+    expiresOn: date("expires_on", { mode: "string" }).notNull(),
+    producedOn: date("produced_on", { mode: "string" }),
+    quantity: integer("quantity").notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("stock_lots_item_code_uq").on(t.receiptItemId, sql`lower(${t.lotCode})`),
+    index("stock_lots_variant_idx").on(t.variantId, t.expiresOn),
+    check("stock_lots_qty_check", sql`${t.quantity} > 0`),
+    check("stock_lots_code_check", sql`length(btrim(${t.lotCode})) BETWEEN 1 AND 60`),
+    check("stock_lots_dates_check", sql`${t.producedOn} IS NULL OR ${t.producedOn} <= ${t.expiresOn}`),
   ],
 );
 
@@ -9813,6 +9854,52 @@ export const salesChatMessages = pgTable(
   (t) => [uniqueIndex("sales_chat_messages_seq_uq").on(t.conversationId, t.seq), check("sales_chat_messages_role_check", sql`${t.role} IN ('user','assistant')`)],
 );
 
+/**
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0202 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
+ * dòng có mốc: khách nhắn, AI trả lời, chuyển bước, báo giá, khách để lại SĐT, mời / nhận upsell, đơn nháp / chốt, chuyển
+ * người, nhân viên nhận, trả lại AI, nhắc khách. Trước sổ này phễu chỉ sống trong `state` jsonb và bị xoá khi sang lượt mua
+ * mới — không đo được «AI tự chốt bao nhiêu», «upsell mang thêm bao nhiêu». Không có dòng = chưa đo (trước ngày bật), KHÔNG
+ * phải 0. `dedupe_key` UNIQUE: chạy lại không đẻ dòng thứ hai. `payload` là bối cảnh cho người đọc, không vào phép tính tiền.
+ */
+export const salesConversationEvents = pgTable(
+  "sales_conversation_events",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    /** Lượt mua trong hội thoại (0 = lượt đầu; khách quay lại mua sau khi chốt ⇒ +1). */
+    cycle: integer("cycle").notNull().default(0),
+    type: text("type").notNull(),
+    actorKind: text("actor_kind").notNull(),
+    /** `users.id` khi người làm được biết THẬT (luật 34); Pancake không cho biết nhân viên nào gõ ⇒ `NULL`. */
+    actorUserId: text("actor_user_id"),
+    channel: text("channel").notNull(),
+    /** Mốc của chính sự việc (giờ tin được ghi), không phải lúc dòng sự kiện được ghi. */
+    occurredAt: ts("occurred_at").notNull(),
+    orderId: text("order_id"),
+    /** Số nguyên VND. `NULL` = không áp dụng / chưa biết. */
+    amountVnd: bigint("amount_vnd", { mode: "number" }),
+    reasonCode: text("reason_code"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    dedupeKey: text("dedupe_key").notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_conversation_events_dedupe_uq").on(t.dedupeKey),
+    index("sales_conversation_events_conv_idx").on(t.conversationId, t.occurredAt),
+    index("sales_conversation_events_type_idx").on(t.type, t.occurredAt),
+    check(
+      "sales_conversation_events_type_check",
+      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined')`,
+    ),
+    check("sales_conversation_events_actor_check", sql`${t.actorKind} IN ('CUSTOMER','AI','HUMAN','SYSTEM')`),
+    check("sales_conversation_events_channel_check", sql`${t.channel} ~ '^[A-Z_]{2,20}$'`),
+    check("sales_conversation_events_amount_check", sql`${t.amountVnd} IS NULL OR ${t.amountVnd} >= 0`),
+  ],
+);
+
 /** Lời mời người dùng vào tổ chức (0180 · lib/users/invites.ts). Chỉ lưu BĂM của mã; mã thô hiện đúng một lần. */
 /**
  * LIÊN KẾT ĐẶT LẠI MẬT KHẨU (0191) — dùng MỘT lần, hết hạn 24 giờ, chỉ lưu `sha256` của mã. Người tạo: quản trị tổ chức
@@ -10223,4 +10310,238 @@ export const wholesaleApiUsage = pgTable(
     error: text("error"),
   },
   (t) => [index("wholesale_api_usage_at_idx").on(t.at), index("wholesale_api_usage_campaign_idx").on(t.campaignId, t.at)],
+);
+
+// ═══════════ PHIẾU CÔNG VIỆC HIỆN TRƯỜNG (0200, module `field_jobs` — docs/verticals/home-service.md) ═══════════
+
+/**
+ * Một việc tại nhà khách. Tổng / đã thu / còn nợ / hạn bảo hành dịch vụ KHÔNG lưu cột — tính lúc đọc
+ * (`lib/constants/field-jobs.ts`). Người thao tác đi bằng khoá tài khoản (luật 34); người ký nghiệm thu là TÊN gõ lại từ biên bản.
+ */
+export const fieldJobs = pgTable(
+  "field_jobs",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    parentJobId: text("parent_job_id").references((): AnyPgColumn => fieldJobs.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    address: text("address").notNull().default(""),
+    description: text("description").notNull().default(""),
+    status: text("status").notNull().default("QUOTED"),
+    acceptedAt: ts("accepted_at"),
+    acceptedNote: text("accepted_note").notNull().default(""),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    scheduledStart: ts("scheduled_start"),
+    scheduledEnd: ts("scheduled_end"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    signedByName: text("signed_by_name"),
+    completionNote: text("completion_note").notNull().default(""),
+    warrantyMonths: integer("warranty_months"),
+    cancelReason: text("cancel_reason"),
+    cancelledAt: ts("cancelled_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("field_jobs_code_uq").on(t.code),
+    index("field_jobs_customer_idx").on(t.customerId),
+    index("field_jobs_assignee_slot_idx").on(t.assigneeUserId, t.scheduledStart),
+    index("field_jobs_status_idx").on(t.status, t.updatedAt),
+    check("field_jobs_status_check", sql`${t.status} IN ('QUOTED','ACCEPTED','SCHEDULED','IN_PROGRESS','DONE','CANCELLED')`),
+    check("field_jobs_title_check", sql`length(btrim(${t.title})) BETWEEN 1 AND 200`),
+    check("field_jobs_slot_check", sql`(${t.scheduledStart} IS NULL) = (${t.scheduledEnd} IS NULL) AND (${t.scheduledEnd} IS NULL OR ${t.scheduledEnd} > ${t.scheduledStart})`),
+    check("field_jobs_scheduled_check", sql`${t.status} NOT IN ('SCHEDULED','IN_PROGRESS') OR (${t.assigneeUserId} IS NOT NULL AND ${t.scheduledStart} IS NOT NULL)`),
+    check("field_jobs_done_check", sql`${t.status} <> 'DONE' OR (${t.completedAt} IS NOT NULL AND length(btrim(coalesce(${t.signedByName}, ''))) >= 1)`),
+    check("field_jobs_cancel_check", sql`${t.status} <> 'CANCELLED' OR length(btrim(coalesce(${t.cancelReason}, ''))) >= 3`),
+    check("field_jobs_warranty_check", sql`${t.warrantyMonths} IS NULL OR ${t.warrantyMonths} BETWEEN 1 AND 120`),
+  ],
+);
+
+/** Dòng báo giá của phiếu (0200): chữ tự do · số lượng nguyên · đơn giá VND. */
+export const fieldJobLines = pgTable(
+  "field_job_lines",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitPrice: integer("unit_price").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("field_job_lines_job_idx").on(t.jobId, t.position),
+    check("field_job_lines_qty_check", sql`${t.quantity} BETWEEN 1 AND 10000`),
+    check("field_job_lines_price_check", sql`${t.unitPrice} >= 0`),
+    check("field_job_lines_text_check", sql`length(btrim(${t.description})) BETWEEN 1 AND 300`),
+  ],
+);
+
+/** Phiếu thu theo đợt của phiếu công việc (0200). Huỷ phiếu thu bắt buộc lý do, không xoá. */
+export const fieldJobReceipts = pgTable(
+  "field_job_receipts",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    amount: integer("amount").notNull(),
+    method: text("method").notNull(),
+    paidAt: ts("paid_at").notNull(),
+    note: text("note").notNull().default(""),
+    status: text("status").notNull().default("CONFIRMED"),
+    voidReason: text("void_reason"),
+    voidedAt: ts("voided_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("field_job_receipts_job_idx").on(t.jobId),
+    check("field_job_receipts_amount_check", sql`${t.amount} > 0`),
+    check("field_job_receipts_method_check", sql`${t.method} IN ('CASH','BANK','OTHER')`),
+    check("field_job_receipts_status_check", sql`${t.status} IN ('CONFIRMED','VOIDED')`),
+    check("field_job_receipts_void_check", sql`${t.status} <> 'VOIDED' OR length(btrim(coalesce(${t.voidReason}, ''))) >= 3`),
+  ],
+);
+
+/** Ảnh trước / sau của phiếu công việc (0200) — đã thu nhỏ ở trình duyệt, ≤ 2 MB. */
+export const fieldJobPhotos = pgTable(
+  "field_job_photos",
+  {
+    id: id(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => fieldJobs.id, { onDelete: "cascade" }),
+    phase: text("phase").notNull(),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    data: bytea("data").notNull(),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    uploadedByName: text("uploaded_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("field_job_photos_job_idx").on(t.jobId, t.phase),
+    check("field_job_photos_phase_check", sql`${t.phase} IN ('BEFORE','AFTER')`),
+    check("field_job_photos_type_check", sql`${t.contentType} IN ('image/jpeg','image/png','image/webp')`),
+    check("field_job_photos_bytes_check", sql`${t.bytes} BETWEEN 1 AND 2000000`),
+  ],
+);
+
+// ═══════════ BẢNG HÀNG BẤT ĐỘNG SẢN (0201, module `real_estate` — docs/verticals/real-estate.md) ═══════════
+
+/** Dự án. `hold_hours` BẮT BUỘC khai — số giờ một lượt giữ chỗ còn hiệu lực (quyết định kinh doanh, không mặc định). */
+export const reProjects = pgTable(
+  "re_projects",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    holdHours: integer("hold_hours").notNull(),
+    note: text("note").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("re_projects_code_uq").on(sql`lower(${t.code})`),
+    check("re_projects_hold_check", sql`${t.holdHours} BETWEEN 1 AND 720`),
+    check("re_projects_name_check", sql`length(btrim(${t.name})) BETWEEN 1 AND 160`),
+    check("re_projects_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 40`),
+  ],
+);
+
+/** Căn của dự án. Giá / diện tích NULL = chưa công bố. Trạng thái căn KHÔNG lưu cột — `lib/constants/real-estate.ts::unitState`. */
+export const reUnits = pgTable(
+  "re_units",
+  {
+    id: id(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => reProjects.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    block: text("block").notNull().default(""),
+    floor: text("floor").notNull().default(""),
+    areaM2: doublePrecision("area_m2"),
+    listPrice: bigint("list_price", { mode: "number" }),
+    note: text("note").notNull().default(""),
+    lockedAt: ts("locked_at"),
+    lockedReason: text("locked_reason"),
+    soldAt: ts("sold_at"),
+    soldContract: text("sold_contract"),
+    soldByUserId: text("sold_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("re_units_project_code_uq").on(t.projectId, sql`lower(${t.code})`),
+    check("re_units_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 40`),
+    check("re_units_area_check", sql`${t.areaM2} IS NULL OR ${t.areaM2} > 0`),
+    check("re_units_price_check", sql`${t.listPrice} IS NULL OR ${t.listPrice} >= 0`),
+    check("re_units_lock_check", sql`${t.lockedAt} IS NULL OR length(btrim(coalesce(${t.lockedReason}, ''))) >= 3`),
+    check("re_units_sold_check", sql`${t.soldAt} IS NULL OR length(btrim(coalesce(${t.soldContract}, ''))) >= 1`),
+  ],
+);
+
+/** Lượt giữ chỗ có hạn — mỗi căn nhiều nhất MỘT dòng ACTIVE (chỉ mục duy nhất có điều kiện). */
+export const reHolds = pgTable(
+  "re_holds",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => reUnits.id, { onDelete: "cascade" }),
+    saleUserId: text("sale_user_id").references(() => users.id, { onDelete: "set null" }),
+    saleName: text("sale_name").notNull().default(""),
+    customerName: text("customer_name").notNull(),
+    customerPhone: text("customer_phone").notNull().default(""),
+    heldAt: ts("held_at").notNull().defaultNow(),
+    expiresAt: ts("expires_at").notNull(),
+    status: text("status").notNull().default("ACTIVE"),
+    closedAt: ts("closed_at"),
+    closeReason: text("close_reason"),
+  },
+  (t) => [
+    uniqueIndex("re_holds_one_active_uq").on(t.unitId).where(sql`${t.status} = 'ACTIVE'`),
+    index("re_holds_sale_idx").on(t.saleUserId, t.status),
+    check("re_holds_status_check", sql`${t.status} IN ('ACTIVE','RELEASED','EXPIRED','CONVERTED')`),
+    check("re_holds_window_check", sql`${t.expiresAt} > ${t.heldAt}`),
+    check("re_holds_customer_check", sql`length(btrim(${t.customerName})) BETWEEN 1 AND 160`),
+  ],
+);
+
+/** Cọc — mỗi căn nhiều nhất MỘT khoản ACTIVE. Hoàn / khách bỏ cọc cần lý do. */
+export const reDeposits = pgTable(
+  "re_deposits",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => reUnits.id, { onDelete: "cascade" }),
+    holdId: text("hold_id").references(() => reHolds.id, { onDelete: "set null" }),
+    saleUserId: text("sale_user_id").references(() => users.id, { onDelete: "set null" }),
+    saleName: text("sale_name").notNull().default(""),
+    customerName: text("customer_name").notNull(),
+    customerPhone: text("customer_phone").notNull().default(""),
+    amount: bigint("amount", { mode: "number" }).notNull(),
+    depositedAt: ts("deposited_at").notNull().defaultNow(),
+    status: text("status").notNull().default("ACTIVE"),
+    closedAt: ts("closed_at"),
+    closeReason: text("close_reason"),
+  },
+  (t) => [
+    uniqueIndex("re_deposits_one_active_uq").on(t.unitId).where(sql`${t.status} = 'ACTIVE'`),
+    check("re_deposits_amount_check", sql`${t.amount} > 0`),
+    check("re_deposits_status_check", sql`${t.status} IN ('ACTIVE','REFUNDED','FORFEITED','CONVERTED')`),
+    check("re_deposits_close_check", sql`${t.status} NOT IN ('REFUNDED','FORFEITED') OR length(btrim(coalesce(${t.closeReason}, ''))) >= 3`),
+    check("re_deposits_customer_check", sql`length(btrim(${t.customerName})) BETWEEN 1 AND 160`),
+  ],
 );

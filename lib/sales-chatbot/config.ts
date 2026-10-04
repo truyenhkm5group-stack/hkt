@@ -139,6 +139,12 @@ export const salesChatbotConfigZ = z
      */
     wholesalePricing: z.boolean().default(false),
     /**
+     * CHỐT KHÔNG CẦN KIỂM TỒN (chủ shop Hải Sản Làng Chài 04/10/2026: «Hàng sẽ được fill-in liên tục nên cứ chốt đơn mà không
+     * cần check tồn kho»). BẬT ⇒ bot không nói còn / hết hàng và chốt cả khi sổ kho đang thiếu — đơn mang ghi chú để kho chuẩn
+     * bị hàng trước khi giao. Mặc định TẮT: bán vượt tồn là quyết định của chủ shop.
+     */
+    sellWithoutStockCheck: z.boolean().default(false),
+    /**
      * NHẬN ĐẶT LỊCH QUA CHAT (module «Lịch hẹn», lib/constants/booking.ts). Chỉ có hiệu lực khi tổ chức BẬT module đó.
      * Mặc định TẮT: cho bot tự giữ chỗ trong lịch của shop là quyết định của chủ shop.
      */
@@ -165,6 +171,7 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   productFields: ["package_size", "net_weight", "selling_unit", "food_category", "storage_instruction", "usage_instruction"],
   extraInstructions: "",
   wholesalePricing: false,
+  sellWithoutStockCheck: false,
   booking: DEFAULT_BOOKING_CONFIG,
 };
 

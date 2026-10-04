@@ -168,6 +168,7 @@ export function testLoadingUxContract() {
     ["components/platform/pages/page-meta-form.tsx", "transition bọc thao tác TẠO / LƯU thông tin trang tuỳ biến; router.push chỉ chạy SAU khi tạo xong để mở trình soạn của trang vừa tạo"],
     ["components/platform/pages/template-picker.tsx", "transition bọc thao tác TẠO trang từ mẫu; router.push chỉ chạy SAU khi tạo xong để mở trình soạn của trang vừa tạo"],
     ["app/(dashboard)/products/product-form.tsx", "transition bọc thao tác TẠO / LƯU sản phẩm tạo tay; router.push chỉ chạy SAU khi tạo xong để mở trang của sản phẩm vừa tạo"],
+    ["components/field-jobs/field-job-forms.tsx", "transition bọc thao tác LẬP PHIẾU / MỞ LƯỢT BẢO HÀNH (0200); router.push chỉ chạy SAU khi máy chủ tạo xong để mở trang của phiếu vừa tạo — cùng mẫu với form sản phẩm"],
   ]);
   const clientFiles = [...walk("app/(dashboard)", ".tsx"), ...walk("components", ".tsx")];
   const viPham: string[] = [];

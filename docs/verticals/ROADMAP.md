@@ -76,8 +76,11 @@ phần lõi dùng lại ngay; cột «Module riêng» là thứ làm nên lý do
 2. **Airbnb / homestay** — nỗi đau rõ (trùng phòng = mất tiền ngay), iCal không cần đối tác, cạnh tranh ít ở thị trường
    Việt. **ĐÃ CÓ bản đầu** (module `stays`, mẫu `homestay` — `docs/verticals/homestay.md`): nhập lịch kênh bằng tệp, ERP phát
    lịch cho kênh tự tải; tự tải lịch kênh định kỳ chờ chủ shop duyệt (gọi ra ngoài + lịch chạy).
-3. **Thực phẩm: lô & hạn dùng** — đã có khách thử HSLC.
-4. **Dịch vụ tại nhà**, rồi **Bất động sản**.
+3. **Thực phẩm: lô & hạn dùng** — đã có khách thử HSLC. **ĐÃ CÓ bản đầu** (module `lots`, 0199, mẫu thực phẩm / hải sản
+   1.1.0 — `docs/verticals/food-lots.md`): lô gắn lên phiếu nhập, «còn» là ước tính, không đổi sổ kho.
+4. **Dịch vụ tại nhà** — **ĐÃ CÓ bản đầu** (module `field_jobs`, mẫu `home-service` — `docs/verticals/home-service.md`): báo
+   giá, hẹn thợ không chồng giờ, ảnh trước / sau, nghiệm thu, thu theo đợt, bảo hành dịch vụ. Rồi **Bất động sản** — **ĐÃ CÓ bản đầu** (module `real_estate`, mẫu `real-estate-agency` —
+   `docs/verticals/real-estate.md`): bảng hàng, giữ chỗ có hạn không trùng, cọc, ký bán; hoa hồng nhiều tầng chờ chốt cơ sở.
 5. **Spa / nhà hàng** — đào sâu khi có khách thử thật.
 
 Mỗi ngành mới: một mẫu (`lib/blueprints/templates/*`) + module riêng (bật / tắt theo tổ chức như mọi module) + tài liệu

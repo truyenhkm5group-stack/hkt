@@ -202,6 +202,13 @@ export function ChatbotConfigForm({
             <input type="checkbox" checked={c.handoff.notifyGroup} onChange={(e) => set("handoff", { ...c.handoff, notifyGroup: e.target.checked })} /> Báo vào nhóm chat (nhóm báo đơn) mỗi lần bot chuyển khách cho nhân viên
           </label>
         </fieldset>
+        <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+          <input type="checkbox" className="mt-1" checked={c.sellWithoutStockCheck} onChange={(e) => set("sellWithoutStockCheck", e.target.checked)} />
+          <span>
+            Chốt đơn không cần kiểm tồn kho <span className="font-medium">(hàng nhập liên tục)</span>
+            <span className="block text-xs text-muted-foreground">Bật: bot không nói còn / hết hàng, khách muốn mua là chốt; đơn chốt khi sổ kho đang thiếu có ghi chú để kho chuẩn bị hàng. Tắt: bot báo không đủ hàng theo sổ kho.</span>
+          </span>
+        </label>
         <fieldset className="space-y-2 rounded-lg border p-3" data-wholesale-pricing>
           <legend className="px-1 text-sm font-medium">Khách sỉ</legend>
           <label className="flex items-start gap-2 text-sm">

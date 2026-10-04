@@ -256,6 +256,49 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  {
+    key: "field-jobs",
+    topic: "SERVICE",
+    title: "Phiếu công việc tại nhà",
+    summary: "Báo giá, hẹn thợ, ảnh trước / sau, khách ký nghiệm thu và thu tiền theo đợt — một phiếu cho mỗi việc tại nhà khách.",
+    href: "/field-jobs",
+    permission: "field_jobs:view",
+    steps: [
+      { text: "Mở Phiếu công việc, ở khung «Lập phiếu báo giá» chọn khách, ghi tên việc và từng dòng báo giá rồi bấm «Lập phiếu».", href: "/field-jobs" },
+      { text: "Khách đồng ý thì bấm «Khách đồng ý báo giá», rồi «Hẹn thợ» chọn thợ, giờ hẹn, thời lượng — ERP chặn nếu thợ đã có hẹn chồng giờ." },
+      { text: "Tới nơi bấm «Bắt đầu làm», tải ảnh trước / sau, phát sinh thì thêm dòng báo giá; xong việc bấm «Nghiệm thu» và ghi tên khách ký." },
+      { text: "Thu tiền ở khung «Tiền» bằng nút «Thu tiền» — cọc, đợt giữa, nghiệm thu; không thu vượt báo giá. Khách báo lại sự cố thì «Mở lượt bảo hành»." },
+    ],
+  },
+
+  {
+    key: "real-estate",
+    topic: "SELL",
+    title: "Bảng hàng bất động sản",
+    summary: "Một bảng hàng chung cho cả đội sale: căn nào còn trống, ai đang giữ tới bao giờ — không ai giữ trùng một căn.",
+    href: "/real-estate",
+    permission: "real_estate:view",
+    steps: [
+      { text: "Quản lý sàn: ở khung «Tạo dự án» khai mã, tên và số giờ giữ chỗ tối đa; rồi dán danh sách căn ở khung «Thêm căn».", href: "/real-estate" },
+      { text: "Sale: căn còn trống bấm «Giữ chỗ», ghi tên khách — hết giờ mà chưa cọc thì căn tự trở về còn trống." },
+      { text: "Khách cọc: bấm «Đặt cọc» trên căn mình đang giữ. Quản lý xác nhận «Ký bán» bằng số hợp đồng, hoặc «Hoàn / bỏ cọc…» có lý do." },
+    ],
+  },
+
+  {
+    key: "lots",
+    topic: "SELL",
+    title: "Lô & hạn dùng",
+    summary: "Gắn mã lô và hạn dùng lên phiếu nhập, biết lô nào cận hạn để bán trước và lô nào hết hạn mà còn hàng.",
+    href: "/inventory/lots",
+    permission: "lots:view",
+    steps: [
+      { text: "Lập phiếu nhập hàng như mọi lần ở Nhập hàng & kiểm kê.", href: "/inventory/receipts" },
+      { text: "Mở Lô & hạn dùng, ở khung «Gắn lô cho phiếu nhập» chọn dòng phiếu, gõ mã lô, hạn dùng, số lượng rồi bấm «Gắn lô». Một dòng chia được nhiều lô.", href: "/inventory/lots" },
+      { text: "Khung «Cận hạn trong» N ngày liệt kê lô sắp hết hạn còn hàng; cột «Lấy» là thứ tự lấy hàng hạn gần trước. Lô hết hạn còn hàng hiện đỏ — huỷ bằng phiếu xuất kho." },
+    ],
+  },
+
   // ───────────────── CHATBOT ─────────────────
   {
     key: "sales-chatbot",

@@ -112,7 +112,15 @@ export type OrderAgent = { name: string; source: string };
  * gọi lại cùng khoá ⇒ trả lại ĐÚNG đơn đã tạo, không đơn thứ hai (TD-03). Chốt đơn của máy kiểm tồn khả dụng TRONG giao
  * dịch ghi, có khoá theo mẫu mã (TD-02) — người tạo đơn tay vẫn được chốt khi thiếu hàng (đặt trước, chờ hàng).
  */
-export type AgentOrderOptions = { pricing: AgentPricingMode; idempotencyKey?: string | null };
+export type AgentOrderOptions = {
+  pricing: AgentPricingMode;
+  idempotencyKey?: string | null;
+  /**
+   * Chốt cả khi sổ kho đang thiếu — CHỈ khi tổ chức tự bật «Chốt đơn không cần kiểm tồn» ở cấu hình bot (chủ shop Hải Sản Làng
+   * Chài 04/10/2026: «Hàng sẽ được fill-in liên tục nên cứ chốt đơn mà không cần check tồn kho»). Mặc định kiểm như TD-02.
+   */
+  allowShortStock?: boolean;
+};
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
 type Writer = { userId: string | null; email: string; name: string; actorKind: "USER" | "AGENT"; source: string; agent: string | null };
@@ -447,7 +455,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   let p = await autoConfirmComplete(prep.p);
   // Máy chỉ LƯU NHÁP mà công tắc tự nâng lên «Đã xác nhận»: thiếu hàng ⇒ giữ «Mới» (cùng tinh thần hạn mức nợ ở trên) —
   // chỉ lượt máy CHỦ ĐỘNG chốt mới bị từ chối vì thiếu hàng.
-  if (agentOpts && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
+  if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p);
   if (credit) return credit;
   const id = newManualOrderId();
@@ -466,7 +474,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
           return;
         }
       }
-      if (agentOpts && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
+      if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
       await tx.insert(schema.orders).values({ id, ...orderColumns(p, w, key ? { agentKey: key } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
     await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
@@ -532,7 +540,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   const row = existing.row;
   let p = await autoConfirmComplete(prep.p, row.id);
   // Như lượt tạo: công tắc tự nâng đơn NHÁP của máy mà thiếu hàng ⇒ giữ «Mới» (đơn tự nâng chỉ đi từ «Mới» ⇒ chưa giữ hàng).
-  if (agentOpts && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
+  if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);
   if (credit) return credit;
   const beforeItems = await itemsSnapshot(row.id);
@@ -561,7 +569,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   try {
     await db.transaction(async (tx) => {
       // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).
-      if (agentOpts && p.stage === "CONFIRMED") await assertAgentStock(tx, p, wasConfirmed ? beforeItems.flatMap((i) => (i.variantId ? [{ variantId: i.variantId, quantity: i.quantity }] : [])) : []);
+      if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, wasConfirmed ? beforeItems.flatMap((i) => (i.variantId ? [{ variantId: i.variantId, quantity: i.quantity }] : [])) : []);
       await tx
       .update(schema.orders)
       .set({ ...orderColumns(p, w), creatorName: row.creatorName, raw: { ...(row.raw as Record<string, unknown>), ...(manualOrderRaw(row.raw) as ManualOrderRaw), orderDiscount: p.orderDiscount }, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })

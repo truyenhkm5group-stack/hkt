@@ -459,9 +459,13 @@ import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
 import { testStays } from "./stays.test";
+import { testStockLots } from "./stock-lots.test";
+import { testFieldJobs } from "./field-jobs.test";
+import { testRealEstate } from "./real-estate.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testCommerceAgent } from "./commerce-agent.test";
+import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
@@ -470,6 +474,7 @@ import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testQuickStart } from "./quick-start.test";
+import { testSalesPacks } from "./sales-packs.test";
 import { testGoLive } from "./go-live.test";
 import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
@@ -483,6 +488,7 @@ import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
+import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
@@ -2629,6 +2635,8 @@ async function main() {
   // server action / route / page component / dịch vụ bằng id, khoá, slug, tệp, mã mời của B; CSDL B + dòng mặt phẳng điều khiển
   // của B không đổi một dòng, 0 kết quả mang dữ liệu của B, 0 request mạng.
   await testTenantAttack();
+  // AI bán hàng (0180+) — hội thoại, câu mẫu, ảnh, sổ AI: hai tổ chức THẬT `asi-a` / `asi-b` tấn công nhau bằng id.
+  await testAiSalesIsolation();
   // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
   // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
   await testPageQueryBudget();
@@ -2670,10 +2678,14 @@ async function main() {
   await testAppointments();
   await testWarranty();
   await testStays();
+  await testStockLots();
+  await testFieldJobs();
+  await testRealEstate();
   await testAppointmentBookingBot();
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
   await testCommerceAgent();
+  await testSalesEvents();
   await testMetaAdsOrgSync();
   await testPancakePosOrgSync();
   await testViettelPostOrg();
@@ -2682,6 +2694,7 @@ async function main() {
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   await testQuickStart();
+  await testSalesPacks();
   await testGoLive();
   await testSalesVision();
   testChatWidget();
