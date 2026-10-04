@@ -274,7 +274,9 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/integrations/google-places/client.ts":
     "Google Places API (New) cho Săn khách sỉ (0197): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy (kết nối «google-places») — client không đọc biến môi trường nào; đích cố định places.googleapis.com, khoá đi trong tiêu đề, không theo chuyển hướng.",
   "lib/connectors/testers.ts":
-    "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường chứa khoá nào (riêng «meta-ads-org» đọc phiên bản Graph API công khai của nền tảng); đích là các máy chủ cố định trong mã (Lark · api.telegram.org · Zalo · pages.fm · Anthropic/OpenAI/Gemini · graph.facebook.com), không theo chuyển hướng.",
+    "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường chứa khoá nào (riêng «meta-ads-org» đọc phiên bản Graph API công khai của nền tảng); đích là các máy chủ cố định trong mã (Lark · api.telegram.org · Zalo · pages.fm · Anthropic/OpenAI/Gemini · graph.facebook.com · partner.viettelpost.vn), không theo chuyển hướng.",
+  "lib/integrations/viettelpost/carrier-org.ts":
+    "Tạo / huỷ / in vận đơn Viettel Post bằng tài khoản của CHÍNH tổ chức (kết nối «viettelpost-carrier», mật khẩu do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số partner.viettelpost.vn, không theo chuyển hướng, không giữ token.",
 };
 
 const GOI_MANG = [/(^|[^.\w$])fetch\(/, /\bfetchJson\(/, /new\s+(?:Anthropic|OpenAI)\s*\(/, /\?\?\s*fetch\b/];

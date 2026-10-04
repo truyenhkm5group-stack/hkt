@@ -261,6 +261,41 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: ["app/api/webhooks/viettelpost-org/[token]/route.ts"],
     why: "Hành trình vận đơn Viettel Post của CHÍNH tổ chức khách, đẩy qua webhook vào URL mang token riêng của tổ chức (VTP không cấp API tra cứu). Cùng lõi với webhook của nhà: chống trùng theo (vận đơn, trạng thái, mốc ĐVVC), mốc ĐVVC mới hơn thì thắng. Không có hàm kiểm tra: không có API để hỏi — gói tin đầu tiên về là bằng chứng. Khác «Viettel Post» của nhà (biến môi trường).",
   },
+  /*
+    POS TỰ CHỦ (docs/verticals/pos-tu-chu.md): shop khách KHÔNG dùng Pancake POS vẫn đẩy đơn ERP sang Viettel Post. Tài khoản
+    + mật khẩu Viettel Post CỦA HỌ; ERP tính cước, tạo vận đơn, lấy link in, huỷ khi hãng chưa lấy hàng. Hành trình vẫn về qua
+    webhook «viettelpost-org» ở trên — hai kết nối bổ sung nhau, không thay nhau. Chủ shop duyệt nối mọi hãng (04/10/2026).
+  */
+  {
+    key: "viettelpost-carrier",
+    label: "Viettel Post của tổ chức (tạo vận đơn)",
+    vendor: "Viettel Post",
+    kind: "SHIPPING",
+    capabilities: ["create_label", "update_order"],
+    auth: "USERNAME_PASSWORD",
+    settings: [
+      { key: "username", label: "Tài khoản Viettel Post", type: "text", secret: false, required: true, hint: "Số điện thoại / email đăng nhập viettelpost.vn của shop", pattern: "^\\S{3,100}$", maxLength: 100 },
+      { key: "password", label: "Mật khẩu Viettel Post", type: "text", secret: true, required: true, hint: "Chỉ dùng để đăng nhập API tạo / huỷ / in vận đơn — mã hoá trong CSDL của tổ chức.", maxLength: 200 },
+      { key: "senderName", label: "Tên người gửi", type: "text", secret: false, required: true, hint: "In trên nhãn — thường là tên shop", maxLength: 100 },
+      { key: "senderPhone", label: "SĐT người gửi", type: "text", secret: false, required: true, hint: "Bưu tá gọi số này khi tới lấy hàng", pattern: "^\\+?[0-9 .]{9,16}$", maxLength: 16 },
+      { key: "senderAddress", label: "Địa chỉ lấy hàng", type: "text", secret: false, required: true, hint: "Số nhà, đường, xã / phường, tỉnh / thành — Viettel Post tự đọc địa chỉ dạng chữ", maxLength: 200 },
+      { key: "defaultNote", label: "Ghi chú mặc định trên vận đơn", type: "text", secret: false, required: false, hint: "Ví dụ: Cho xem hàng, không cho thử", maxLength: 150 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — mật khẩu mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testViettelPostCarrier",
+    module: "logistics",
+    code: ["lib/constants/carrier-vtp.ts", "lib/integrations/viettelpost/carrier-org.ts", "lib/carriers/vtp-shipments.ts"],
+    consumers: [
+      "lib/carriers/vtp-shipments.ts::quoteVtpShipmentCore",
+      "lib/carriers/vtp-shipments.ts::createVtpShipmentCore",
+      "lib/carriers/vtp-shipments.ts::cancelVtpShipmentCore",
+      "lib/carriers/vtp-shipments.ts::vtpPrintLinkCore",
+    ],
+    why: "Tạo vận đơn Viettel Post từ đơn tạo trong ERP bằng tài khoản của CHÍNH tổ chức — shop không cần Pancake POS. Kiểm tra = đăng nhập (Login → ownerconnect) rồi đọc danh sách kho lấy hàng — chỉ đọc, chỉ tới partner.viettelpost.vn. Tạo đơn giữ chỗ trước khi gọi hãng + mã ERP gửi kèm CHECK_UNIQUE + không tự gửi lại ⇒ một lần gửi không thành hai vận đơn. Hành trình về qua webhook «viettelpost-org».",
+  },
   {
     key: "viettelpost",
     label: "Viettel Post",
