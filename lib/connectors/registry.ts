@@ -440,16 +440,17 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
   },
   /*
     QUẢNG CÁO FACEBOOK CỦA CHÍNH TỔ CHỨC KHÁCH (chủ nền tảng chốt 03/10/2026 — Hải Sản Làng Chài): token System User của
-    Business Manager CỦA HỌ + danh sách tài khoản quảng cáo họ khai. CHỈ ĐỌC chi tiêu (`ad_spends`); mọi đường GHI
-    (đổi ngân sách, đăng quảng cáo — `ADS_WRITE_ENABLED`) vẫn chỉ của nhà. Thuộc module Marketing (không phải
-    `connector_meta` — module đó là credential môi trường của nhà).
+    Business Manager CỦA HỌ + danh sách tài khoản quảng cáo họ khai. Đọc chi tiêu (`ad_spends`); từ 04/10/2026 còn ĐĂNG
+    quảng cáo («Đăng camp») qua cửa ghi duy nhất `ads-write.ts` khi tổ chức tự bật công tắc `ads.write.org` — vẫn sau
+    chốt máy chủ `ADS_WRITE_ENABLED`, trần cứng và công tắc khẩn cấp như nhà, và chỉ trên tài khoản đã khai ở đây.
+    Thuộc module Marketing (không phải `connector_meta` — module đó là credential môi trường của nhà).
   */
   {
     key: "meta-ads-org",
     label: "Quảng cáo Facebook (Meta) của tổ chức",
     vendor: "Meta",
     kind: "ADS",
-    capabilities: ["read_spend"],
+    capabilities: ["read_spend", "publish_ads"],
     auth: "OAUTH_TOKEN",
     settings: [
       {
@@ -458,7 +459,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
         type: "text",
         secret: true,
         required: true,
-        hint: "business.facebook.com → Cài đặt doanh nghiệp → Người dùng hệ thống → Tạo mã token, chọn quyền ads_read. Gán người dùng hệ thống vào từng tài khoản quảng cáo (quyền xem). Không dùng token tài khoản Facebook cá nhân.",
+        hint: "business.facebook.com → Cài đặt doanh nghiệp → Người dùng hệ thống → Tạo mã token, chọn quyền ads_read (chỉ xem chi tiêu). Muốn ERP ĐĂNG quảng cáo: thêm ads_management, pages_read_engagement, pages_show_list, giao tài khoản quảng cáo quyền Quản lý chiến dịch và fanpage quyền Tạo quảng cáo, rồi bật ở Marketing → Creative → Cấu hình & luật. Không dùng token tài khoản Facebook cá nhân.",
         pattern: "^EAA[A-Za-z0-9]{30,1000}$",
         maxLength: 1010,
       },
@@ -479,9 +480,14 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     health: "testConnection",
     healthRef: "lib/connectors/testers.ts::testMetaAdsOrg",
     module: "marketing",
-    code: ["lib/connectors/testers.ts", "lib/marketing/meta-ads-org.ts"],
-    consumers: ["lib/marketing/meta-ads-org.ts::syncOrgMetaAds", "lib/marketing/meta-ads-org.ts::openOrgMetaAdsClient", "lib/actions/creative-import.ts::importOwnAdsAction"],
-    why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức, rồi tra sổ mẩu fb_ads (trạng thái · bài viết · creative) bằng cùng client chỉ đọc; nút «Nhập mẫu thắng / mẫu tốt» ở Nguồn ảnh đọc ảnh + câu chữ của mẩu do chính tài khoản đã khai chạy. Khác «Meta Ads (Facebook)» của nhà (biến môi trường, có nhánh ghi).",
+    code: ["lib/connectors/testers.ts", "lib/marketing/meta-ads-org.ts", "lib/marketing/meta-ads-org-write.ts"],
+    consumers: [
+      "lib/marketing/meta-ads-org.ts::syncOrgMetaAds",
+      "lib/marketing/meta-ads-org.ts::openOrgMetaAdsClient",
+      "lib/actions/creative-import.ts::importOwnAdsAction",
+      "lib/marketing/meta-ads-org-write.ts::openOrgGraphCredential",
+    ],
+    why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức, rồi tra sổ mẩu fb_ads (trạng thái · bài viết · creative) bằng cùng client chỉ đọc; nút «Nhập mẫu thắng / mẫu tốt» ở Nguồn ảnh đọc ảnh + câu chữ của mẩu do chính tài khoản đã khai chạy. Bật công tắc «Đăng quảng cáo bằng token của tổ chức» thì «Đăng camp» ở Thư viện Media tạo chiến dịch / nhóm / mẩu bằng token này qua cửa ghi `ads-write.ts` (token trong tiêu đề, chỉ tài khoản đã khai) và job «creative-publish-org» đăng tiếp camp còn dở. Khác «Meta Ads (Facebook)» của nhà (biến môi trường).",
   },
   // ─────────────── NGUỒN KHÁCH TIỀM NĂNG ───────────────
   /*

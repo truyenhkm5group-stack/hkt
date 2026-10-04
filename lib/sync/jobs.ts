@@ -44,6 +44,7 @@ import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { applyStaleReconciliation } from "@/lib/cs/stale";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { syncOrgMetaAds } from "@/lib/marketing/meta-ads-org";
+import { runOrgCreativePublish } from "@/lib/creative/org-publish";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
@@ -576,6 +577,22 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Tổ chức khách đã bật kết nối «Quảng cáo Facebook (Meta) của tổ chức» ⇒ kéo chi tiêu theo ngày của các tài khoản quảng cáo đã khai vào bảng chi tiêu quảng cáo (cùng bộ đồng bộ, cùng khoá chống trùng với tổ chức nhà; dòng gõ tay không bị đụng). " +
       "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Ngay sau đó tra sổ mẩu (trạng thái · bài viết · creative · fanpage) cho các mẩu chưa có bài viết, chỉ đọc, ghi nhật ký đồng bộ riêng. Tổ chức nhà dùng «facebook-ads» và «facebook-ad-index».",
     run: (o) => syncOrgMetaAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
+  /*
+    ĐĂNG TIẾP CAMP CỦA TỔ CHỨC KHÁCH (chủ nền tảng chốt 04/10/2026 — Hải Sản Làng Chài «tự động 100% như nhà»). «Đăng camp»
+    đăng ngay trong lượt bấm; lượt hỏng giữa chừng / chưa tới giờ chạy thì job này đi tiếp mỗi 10 phút như `creative-loop`
+    của nhà, bằng token «meta-ads-org» CỦA CHÍNH tổ chức (công tắc `ads.write.org`) — không phải biến môi trường, nên
+    không nằm trong HOME_CREDENTIAL_JOBS. Chưa bật công tắc / không có lô nào mở ⇒ bỏ qua sau một câu đọc, không ghi sync_runs.
+  */
+  "creative-publish-org": {
+    label: "Đăng tiếp camp quảng cáo (token của tổ chức)",
+    source: "ALL",
+    module: "marketing",
+    fanOut: true,
+    description:
+      "Tổ chức khách đã bật «Đăng quảng cáo bằng token của tổ chức» ⇒ lô «Đăng camp» đăng dở được đăng tiếp (đúng các bước, cổng và sổ ghi của tổ chức nhà), lô quá hạn duyệt hết hạn, mẫu đang chạy được chấm và tắt theo luật tắt nếu tổ chức có khai. " +
+      "Không dựng lô, không vẽ ảnh. Tổ chức nhà dùng «creative-loop».",
+    run: (o) => runOrgCreativePublish({ trigger: o.trigger, actor: o.actor }),
   },
   /*
     SĂN KHÁCH SỈ (0197): một LƯỢT quét ≤ 50 giây cho tổ chức có chiến dịch đang chạy / lead chờ bổ sung — lấy chi tiết,

@@ -93,6 +93,11 @@ const JOBS = [
   */
   { job: "ads-spend-org", every: 60, offset: 40 },
   /*
+    ĐĂNG TIẾP CAMP CỦA TỔ CHỨC KHÁCH (chủ nền tảng chốt 04/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 10 phút như lời hứa
+    «lượt vòng mẫu (10 phút / lần) đi tiếp» của «Đăng camp». Tổ chức chưa bật công tắc đăng / không lô nào mở bỏ qua ngay.
+  */
+  { job: "creative-publish-org", every: 10, offset: 7 },
+  /*
     SĂN KHÁCH SỈ (0197) — CHỈ FAN-OUT tự động hoá, mỗi 3 phút (lệch pha 2). Một lượt ≤ 50 giây cho tổ chức có chiến dịch
     đang chạy; tổ chức không có việc trả ngay sau một câu đọc. Nhà TẮT module này.
   */

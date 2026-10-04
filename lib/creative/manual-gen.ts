@@ -53,6 +53,8 @@ import { ensureAdVideo, type AdVideoApi } from "@/lib/creative/ad-video";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, mediaOf, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
 import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
 import { adsWriteHardEnabled, adsWriteMode, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
+import { orgAdsWriteBlocker } from "@/lib/marketing/meta-ads-org-write";
+import { currentOrganization } from "@/lib/platform/context";
 import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/openai/images";
 import { gateCreativeWritePrefix } from "@/lib/marketing/creative-write-gate";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
@@ -1235,6 +1237,8 @@ export type InstantPublishDeps = CreativeDeps & {
   adVideo?: AdVideoApi;
   /** Câu "token thuộc ứng dụng …" khi Facebook báo ứng dụng ở chế độ phát triển (1885183). Kiểm thử tiêm bản giả. */
   tokenApp?: () => Promise<string>;
+  /** Tổ chức khách: lý do đường ghi bằng token của tổ chức còn đóng (`orgAdsWriteBlocker`). Kiểm thử tiêm bản giả. */
+  orgWrite?: () => Promise<string | null>;
 };
 
 /**
@@ -1253,13 +1257,18 @@ export async function instantPublishBlockers(db: Db, cfg: CreativeLoopConfig, ba
   if (bc.budgetPerVariantVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) out.push(CREATIVE_WRITE_DENIAL_REASON.OVER_VARIANT_BUDGET);
   // Camp "Đăng camp" chạy ngân sách NGÀY, không giờ kết thúc (`DAILY_BUDGET_MODE`): luật tắt là thứ DUY NHẤT tự dừng nó.
   // Không có luật nào ⇒ camp tiêu mỗi ngày mãi mãi cho tới khi có người nhớ ra — không đăng.
-  if (bc.config.killRules.length === 0) out.push("Chưa khai luật TẮT nào ở Cấu hình & luật — camp chạy ngân sách ngày liên tục, không có luật tắt thì không bao giờ tự dừng. Khai ít nhất một luật tắt rồi đăng.");
+  // NHÀ: bắt buộc (quyết định 27/09/2026). TỔ CHỨC KHÁCH: chủ nền tảng chốt 04/10/2026 (Hải Sản Làng Chài) KHÔNG bắt —
+  // trần cứng một camp / cam kết ngày và công tắc khẩn cấp vẫn chặn như nhà; màn hình Cấu hình nói rõ camp chạy tới khi tắt tay.
+  const org = await currentOrganization();
+  if (org.isHome && bc.config.killRules.length === 0) out.push("Chưa khai luật TẮT nào ở Cấu hình & luật — camp chạy ngân sách ngày liên tục, không có luật tắt thì không bao giờ tự dừng. Khai ít nhất một luật tắt rồi đăng.");
   const committed = await committedTestSpendForDay(db, batchDay);
   if (committed + bc.budgetPerVariantVnd > CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd) {
     out.push(`${CREATIVE_WRITE_DENIAL_REASON.OVER_DAILY_CAP} (Sổ đã ghi ${committed.toLocaleString("vi-VN")}đ cho ngày ${batchDay}.)`);
   }
   const kill = await (deps.killSwitch ?? readAdsKillSwitch)();
   if (kill.killed) out.push(`${CREATIVE_WRITE_DENIAL_REASON.KILL_SWITCH} ${kill.reason ?? ""}`.trim());
+  const orgBlock = await (deps.orgWrite ?? orgAdsWriteBlocker)();
+  if (orgBlock) out.push(orgBlock);
   return out;
 }
 
