@@ -5209,6 +5209,29 @@ export const platformOrgMilestones = pgTable(
   (t) => [primaryKey({ name: "platform_org_milestones_pkey", columns: [t.orgCode, t.milestone] }), check("platform_org_milestones_key_check", sql`${t.milestone} ~ '^[A-Z][A-Z0-9_]{1,40}$'`)],
 );
 
+/**
+ * SỔ DÙNG THEO NGÀY (0204 · lib/platform/saas-ledger.ts) — mặt phẳng điều khiển. Đếm từ chứng từ có mốc thời gian trong CSDL
+ * tổ chức (kênh THỬ không bao giờ tính). Lượt chụp tính lại hôm nay + hôm qua; ngày cũ hơn đóng băng.
+ */
+export const platformTenantUsageDaily = pgTable(
+  "platform_tenant_usage_daily",
+  {
+    day: date("day", { mode: "string" }).notNull(),
+    orgCode: text("org_code").notNull(),
+    conversationsStarted: integer("conversations_started").notNull().default(0),
+    customerMessages: integer("customer_messages").notNull().default(0),
+    botMessages: integer("bot_messages").notNull().default(0),
+    aiActiveConversations: integer("ai_active_conversations").notNull().default(0),
+    aiOrders: integer("ai_orders").notNull().default(0),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_tenant_usage_daily_pkey", columns: [t.day, t.orgCode] }),
+    index("platform_tenant_usage_daily_org_day_idx").on(t.orgCode, t.day),
+    check("platform_tenant_usage_daily_nonneg_check", sql`${t.conversationsStarted} >= 0 AND ${t.customerMessages} >= 0 AND ${t.botMessages} >= 0 AND ${t.aiActiveConversations} >= 0 AND ${t.aiOrders} >= 0`),
+  ],
+);
+
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
 export const platformAuditLog = pgTable(
   "platform_audit_log",

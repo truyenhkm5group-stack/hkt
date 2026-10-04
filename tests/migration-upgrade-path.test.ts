@@ -151,6 +151,7 @@ const MOI = [
   "0201_real_estate",
   "0202_sales_conversation_events",
   "0203_platform_saas_ledger",
+  "0204_platform_tenant_usage",
 ] as const;
 
 /*

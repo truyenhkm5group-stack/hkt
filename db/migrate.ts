@@ -87,4 +87,6 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   // 0199 · sổ kinh tế SaaS (ảnh chụp MRR theo ngày + mốc kích hoạt) — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_saas_daily`);
   await db.execute(sql`delete from platform_org_milestones`);
+  // 0204 · sổ dùng theo ngày của từng tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_tenant_usage_daily`);
 }

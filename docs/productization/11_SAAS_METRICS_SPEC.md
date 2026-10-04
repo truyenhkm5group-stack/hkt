@@ -123,3 +123,20 @@ chứng trọng số (yêu cầu §18 "không hardcode scoring formula"). Khi c�
 ## 9. Lùi
 
 Revert PR: hai bảng ở lại, không ai đọc; bảng thu phí quay về vòng lặp cũ (cùng kết quả). Không dữ liệu nào bị xoá.
+
+## 10. Sổ dùng theo ngày (0204 — `platform_tenant_usage_daily`)
+
+Đơn vị đo "tổ chức dùng AI bán hàng tới đâu" — và là đơn vị cho hạn mức / tính phí theo hội thoại về sau (chưa bật: giá và
+hạn mức là quyết định kinh doanh).
+
+| Cột | Đếm | Không đếm |
+|---|---|---|
+| `conversations_started` | hội thoại khách mới (kênh ≠ THỬ) mở trong ngày | khung thử, phát lại, copilot (đều kênh THỬ) |
+| `customer_messages` | tin chữ của khách | kết quả công cụ (vai `user` nhưng không phải khách) |
+| `bot_messages` | tin chữ của bot | tin page chép vào lịch sử («[Shop đã nhắn] …») |
+| `ai_active_conversations` | hội thoại có ít nhất một tin bot trong ngày | — |
+| `ai_orders` | đơn tạo trong ngày gắn với hội thoại bot đã chốt | — |
+
+Mỗi lượt chụp tính lại **hôm qua và hôm nay** (tin tới muộn của hôm qua vẫn vào); ngày cũ hơn đóng băng. Ngày chưa có dòng
+là CHƯA ĐO (cockpit in «—» và số ngày đã có trong sổ), không phải 0. Đơn AI **giao thành công** cần kết cục đơn chung
+(#522) — thêm cột khi hàm ấy vào main.

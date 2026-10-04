@@ -15,7 +15,9 @@ import {
   readLastLoginByOrg,
   readMilestones,
   readSaasDaily,
+  readUsageTotals,
   type AiUsageByOrg,
+  type UsageTotals,
 } from "@/lib/platform/saas-ledger";
 import {
   ACTIVATED_AT,
@@ -101,6 +103,8 @@ export type TenantRow = {
   /** Số ngày từ lúc tạo tới mốc «đã kích hoạt» — `null` khi chưa tới / chưa có mốc tạo. */
   daysToActivation: number | null;
   daysToFirstAiOrder: number | null;
+  /** Sổ dùng 30 ngày (0204). `null` = chưa có ngày nào trong sổ — khác 0. */
+  usage30d: UsageTotals | null;
 };
 
 export type OwnerCockpit = {
@@ -120,7 +124,7 @@ export type OwnerCockpit = {
   thisMonth: { label: string; movement: PeriodMovement };
   lastMonth: { label: string; movement: PeriodMovement };
   margin: PlatformMargin & { aiComplete: boolean; windowDays: number };
-  ai: { requests: number; platformCostVnd: number; byokCostUsd: number; homeCostVnd: number; unpricedRequests: number; errorRate: number | null; tenantsUsingAi: number };
+  ai: { requests: number; platformCostVnd: number; byokCostUsd: number; homeCostVnd: number; unpricedRequests: number; errorRate: number | null; tenantsUsingAi: number; conversations: number | null; aiActiveConversations: number | null; aiOrders: number | null; usageDays: number };
   activation: FunnelStep[];
   activationOrgs: number;
   tenants: TenantRow[];
@@ -158,6 +162,18 @@ function sumAi(rows: Iterable<AiUsageByOrg>) {
   return { requests, errors, platform, byok, home, unpriced };
 }
 
+/** Cộng sổ dùng của tổ chức KHÁCH (bỏ nhà). Chưa có dòng nào ⇒ `null`, không phải 0. */
+function usageHeadline(usage: Map<string, UsageTotals>, home: Set<string>) {
+  const rows = [...usage.entries()].filter(([code]) => !home.has(code)).map(([, v]) => v);
+  if (!rows.length) return { conversations: null, aiActiveConversations: null, aiOrders: null, usageDays: 0 };
+  return {
+    conversations: rows.reduce((s, r) => s + r.conversationsStarted, 0),
+    aiActiveConversations: rows.reduce((s, r) => s + r.aiActiveConversations, 0),
+    aiOrders: rows.reduce((s, r) => s + r.aiOrders, 0),
+    usageDays: Math.max(...rows.map((r) => r.days)),
+  };
+}
+
 export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()): Promise<{ ok: true; value: OwnerCockpit } | { ok: false; error: string }> {
   const denial = platformOperatorDenial(user);
   if (denial) return { ok: false, error: denial };
@@ -180,6 +196,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
     readLastLoginByOrg(),
     readCostDeclaration(),
   ]);
+  const usageByOrg = await readUsageTotals(vnDate(windowFrom));
 
   const latest = new Map<string, SaasDailyRow>();
   for (const r of daily) if (r.day <= today && (!latest.has(r.orgCode) || latest.get(r.orgCode)!.day < r.day)) latest.set(r.orgCode, r);
@@ -228,6 +245,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
       activated: Boolean(reached[ACTIVATED_AT]),
       daysToActivation: daysBetween(reached.SIGNED_UP, reached[ACTIVATED_AT]),
       daysToFirstAiOrder: daysBetween(reached.SIGNED_UP, reached.FIRST_AI_ORDER),
+      usage30d: usageByOrg.get(o.code) ?? null,
     });
   }
   tenants.sort((a, b) => Number(a.isHome) - Number(b.isHome) || (b.economics.mrrVnd ?? -1) - (a.economics.mrrVnd ?? -1) || b.aiRequests30d - a.aiRequests30d || a.code.localeCompare(b.code));
@@ -258,6 +276,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
         unpricedRequests: allAi.unpriced,
         errorRate: allAi.requests > 0 ? allAi.errors / allAi.requests : null,
         tenantsUsingAi: [...ai30.entries()].filter(([code, v]) => v.requests > 0 && !orgs.find((o) => o.code === code)?.isHome).length,
+        ...usageHeadline(usageByOrg, new Set(orgs.filter((o) => o.isHome).map((o) => o.code))),
       },
       activation: activationFunnel(activationOrgs),
       activationOrgs: activationOrgs.length,

@@ -48,7 +48,7 @@ function snapshotRow(org: Organization, plans: PlanRow[], sub: { billingEnabled:
   return { day, orgCode: org.code, orgStatus: org.status, isHome: org.isHome, planKey, billingEnabled: sub?.billingEnabled ?? false, standing, paying: c.paying, mrrVnd: c.mrrVnd, mrrNote: c.note };
 }
 
-export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milestonesAdded: number; errors: string[] };
+export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milestonesAdded: number; usageRows: number; errors: string[] };
 
 export async function captureSaasSnapshot(now: Date = new Date()): Promise<SnapshotResult> {
   const day = vnDate(now);
@@ -64,7 +64,91 @@ export async function captureSaasSnapshot(now: Date = new Date()): Promise<Snaps
   }
   const errors: string[] = [];
   const milestonesAdded = await scanMilestones(orgs, errors);
-  return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, errors };
+  const usageRows = await captureUsage(orgs, now, errors);
+  return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, usageRows, errors };
+}
+
+// ─────────────────────────── Sổ dùng theo ngày (0204) ───────────────────────────
+
+export type OrgUsage = { conversationsStarted: number; customerMessages: number; botMessages: number; aiActiveConversations: number; aiOrders: number };
+
+/**
+ * Số dùng của MỘT tổ chức trong [from, to) — đọc CSDL của tổ chức đó. Kênh THỬ (khung thử · phát lại · copilot) không bao giờ
+ * tính. Tin khách = khối chữ của khách (không tính kết quả công cụ); tin bot = tin của bot, không tính tin page chép vào lịch
+ * sử («[Shop đã nhắn] …»). Câu SQL là hằng — không nhận tên bảng từ đầu vào.
+ */
+export async function readOrgUsage(db: Db, from: Date, to: Date): Promise<OrgUsage> {
+  const [r] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      with conv as (select id from sales_chat_conversations where channel <> 'TEST'),
+      msg as (
+        select m.conversation_id, m.role, m.content
+        from sales_chat_messages m join conv on conv.id = m.conversation_id
+        where m.created_at >= ${from} and m.created_at < ${to} and m.content->0->>'type' = 'text'
+      )
+      select
+        (select count(*) from sales_chat_conversations where channel <> 'TEST' and created_at >= ${from} and created_at < ${to})::int as started,
+        (select count(*) from msg where role = 'user')::int as customer,
+        (select count(*) from msg where role = 'assistant' and coalesce(content->0->>'text', '') not like '[Shop đã nhắn]%')::int as bot,
+        (select count(distinct conversation_id) from msg where role = 'assistant' and coalesce(content->0->>'text', '') not like '[Shop đã nhắn]%')::int as active,
+        (select count(*) from orders o join sales_chat_conversations c on c.order_id = o.id where c.channel <> 'TEST' and o.created_at >= ${from} and o.created_at < ${to})::int as ai_orders
+    `),
+  );
+  const n = (k: string) => Number(r?.[k] ?? 0);
+  return { conversationsStarted: n("started"), customerMessages: n("customer"), botMessages: n("bot"), aiActiveConversations: n("active"), aiOrders: n("ai_orders") };
+}
+
+/** [đầu ngày, đầu ngày hôm sau) của ngày `YYYY-MM-DD` giờ Việt Nam, ở UTC. */
+function vnDayRange(day: string): { from: Date; to: Date } {
+  const from = new Date(`${day}T00:00:00+07:00`);
+  return { from, to: new Date(from.getTime() + 86_400_000) };
+}
+
+async function captureUsage(orgs: Organization[], now: Date, errors: string[]): Promise<number> {
+  const pdb = await getPlatformDb();
+  const u = schema.platformTenantUsageDaily;
+  const today = vnDate(now);
+  const yesterday = vnDate(new Date(now.getTime() - 86_400_000));
+  let written = 0;
+  for (const org of orgs) {
+    if (org.status !== "ACTIVE") continue;
+    try {
+      const db = await getDbFor(org);
+      // Hôm qua + hôm nay — tin tới muộn của hôm qua vẫn vào; ngày cũ hơn không bao giờ được tính lại.
+      for (const day of [yesterday, today]) {
+        const { from, to } = vnDayRange(day);
+        const usage = await readOrgUsage(db, from, to);
+        const values = { day, orgCode: org.code, ...usage, capturedAt: now };
+        await pdb.insert(u).values(values).onConflictDoUpdate({ target: [u.day, u.orgCode], set: { ...values } });
+        written += 1;
+      }
+    } catch (e) {
+      errors.push(`[${org.code}] sổ dùng: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+    }
+  }
+  return written;
+}
+
+export type UsageTotals = OrgUsage & { days: number };
+
+/** Tổng sổ dùng theo tổ chức từ ngày `fromDay` (tính cả hai đầu). Ngày chưa có dòng KHÔNG được coi là 0 — `days` nói đã có bao nhiêu ngày. */
+export async function readUsageTotals(fromDay: string): Promise<Map<string, UsageTotals>> {
+  const pdb = await getPlatformDb();
+  const u = schema.platformTenantUsageDaily;
+  const rows = await pdb
+    .select({
+      orgCode: u.orgCode,
+      days: sql<number>`count(*)::int`,
+      conversationsStarted: sql<number>`coalesce(sum(${u.conversationsStarted}), 0)::int`,
+      customerMessages: sql<number>`coalesce(sum(${u.customerMessages}), 0)::int`,
+      botMessages: sql<number>`coalesce(sum(${u.botMessages}), 0)::int`,
+      aiActiveConversations: sql<number>`coalesce(sum(${u.aiActiveConversations}), 0)::int`,
+      aiOrders: sql<number>`coalesce(sum(${u.aiOrders}), 0)::int`,
+    })
+    .from(u)
+    .where(gte(u.day, fromDay))
+    .groupBy(u.orgCode);
+  return new Map(rows.map((r) => [r.orgCode, { days: Number(r.days), conversationsStarted: Number(r.conversationsStarted), customerMessages: Number(r.customerMessages), botMessages: Number(r.botMessages), aiActiveConversations: Number(r.aiActiveConversations), aiOrders: Number(r.aiOrders) }]));
 }
 
 /** Min thời điểm, bỏ qua giá trị không đọc được. */
