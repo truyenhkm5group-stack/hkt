@@ -1,7 +1,7 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
 import { integrationStatus } from "@/lib/env";
 import { STATEMENT_MAIL_SILENCE_HOURS, readStatementMailHeartbeat } from "@/lib/integrations/viettelpost/statement-mail";
 
@@ -114,7 +114,6 @@ const SILENCE_HOURS: Record<ConnectorKey, number> = {
   BANK: 24 * 10,
 };
 
-const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
 
 async function webhookStats(source: string) {
   const db = await getDb();
@@ -202,7 +201,7 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
   const [{ n: unknownVtp }] = await db
     .select({ n: sql<number>`count(distinct ${schema.shipmentEvents.status})` })
     .from(schema.shipmentEvents)
-    .where(sql`${schema.shipmentEvents.source} in (${sql.raw(DOC_SOURCES)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`);
+    .where(sql`${schema.shipmentEvents.source} in (${sql.raw(VTP_DOCUMENT_SOURCES_SQL)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`);
 
   // Facebook: không có webhook, "sự kiện" là dòng chi tiêu kéo về.
   const since24 = new Date(Date.now() - 24 * 3600_000);

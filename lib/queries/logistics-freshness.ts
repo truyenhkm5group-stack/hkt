@@ -37,7 +37,7 @@ import { rowsOf } from "@/lib/sql-rows";
  */
 
 /** Sự kiện MANG TIN MỚI về kiện hàng. `VTP_POLL` không nằm ở đây vì nó chưa từng sinh ra sự kiện nào. */
-const NGUON_CHUYEN_PHAT = sql`e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION')`;
+const NGUON_CHUYEN_PHAT = sql`e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','GHN_WEBHOOK','GHTK_WEBHOOK')`;
 
 export type StageFreshness = {
   stage: string;

@@ -17,13 +17,14 @@ import { rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { bulkCreateVtpShipmentsCore, bulkQuoteVtpCore, bulkVtpPrintLinkCore, cancelVtpShipmentCore, createVtpShipmentCore, discardVtpCreateCore, quoteVtpShipmentCore, vtpCarrierPanel, vtpPrintLinkCore, VTP_BULK_MAX } from "@/lib/carriers/vtp-shipments";
+import { BULK_MAX, bulkCreateCore, bulkPrintLinkCore, bulkQuoteCore, cancelShipmentCore, carrierPanel, createShipmentCore, discardCreateCore, printLinkCore, quoteShipmentCore } from "@/lib/carriers/engine";
+import { VTP_ADAPTER } from "@/lib/carriers/adapters/vtp";
+import { GHN_ADAPTER } from "@/lib/carriers/adapters/ghn";
 import { findConnector } from "@/lib/connectors/registry";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import { testViettelPostCarrier } from "@/lib/connectors/testers";
 import {
   attemptHoldsOrder,
-  canCancelAtCarrier,
   carrierCreateOf,
   clipBytes,
   draftProblems,
@@ -120,9 +121,10 @@ function testPure() {
   assert.equal(attemptHoldsOrder({ stage: "PENDING", raw: raw("UNKNOWN") }), true, "lượt không rõ kết quả vẫn GIỮ đơn");
   assert.equal(attemptHoldsOrder({ stage: "CANCELLED", raw: raw("CREATED") }), false);
   assert.equal(attemptHoldsOrder({ stage: "PENDING", raw: { ...raw("CREATED"), carrierCancel: { state: "ACCEPTED", at: "x", reason: "r", message: "" } } }), false, "hãng đã nhận lệnh huỷ ⇒ thôi giữ");
-  assert.equal(canCancelAtCarrier({ vtpOrderNumber: "1", vtpStatus: 200, stage: "PICKED_UP", raw: raw("CREATED") }), false, "hãng đã nhận hàng (≥ 200) ⇒ không huỷ");
-  assert.equal(canCancelAtCarrier({ vtpOrderNumber: "1", vtpStatus: null, stage: "PENDING", raw: raw("CREATED") }), true);
-  assert.equal(canCancelAtCarrier({ vtpOrderNumber: "1", vtpStatus: null, stage: "PENDING", raw: {} }), false, "vận đơn không do ERP tạo ⇒ không huỷ từ đây");
+  assert.equal(VTP_ADAPTER.cancellable({ stage: "PICKED_UP", vtpStatus: 200 }), false, "Viettel Post đã nhận hàng (≥ 200) ⇒ không huỷ");
+  assert.equal(VTP_ADAPTER.cancellable({ stage: "PENDING", vtpStatus: null }), true);
+  assert.equal(GHN_ADAPTER.cancellable({ stage: "PICKED_UP", vtpStatus: null }), false, "GHN đã lấy hàng ⇒ không huỷ");
+  assert.equal(GHN_ADAPTER.cancellable({ stage: "PENDING", vtpStatus: null }), true);
 
   const spec = findConnector("viettelpost-carrier");
   assert.ok(spec && spec.tenancy === "PER_ORG" && spec.module === "logistics" && spec.kind === "SHIPPING" && spec.capabilities.includes("create_label"));
@@ -201,47 +203,47 @@ async function testFlow() {
       const orderId = made.id;
 
       // Chưa khai kết nối ⇒ khung hiện lời dẫn, không có nút tạo.
-      const before = await vtpCarrierPanel(admin, orderId);
-      assert.ok(before && !before.connectionReady && before.connectionNote);
-      assert.equal(await vtpCarrierPanel(viewer, orderId), null, "thiếu shipments:manage ⇒ không có khung");
+      const before = await carrierPanel(admin, orderId);
+      assert.ok(before && !before.carriers.some((c) => c.ready) && before.connectionNote, JSON.stringify(before));
+      assert.equal(await carrierPanel(viewer, orderId), null, "thiếu shipments:manage ⇒ không có khung");
 
       // Khai + kiểm tra (máy chủ giả) + bật — đúng đường của màn Kết nối.
       const vtp = fakeVtp({ create: "ok", nextNumber: 900000001 });
-      const deps = { client: { fetch: vtp.fetch } };
+      const deps = { fetch: vtp.fetch };
       const saved = await saveConnection(admin, { connectorKey: "viettelpost-carrier", settings: { username: "0912345678", senderName: "Shop Thử", senderPhone: "0912345678", senderAddress: "34 Cửa Nam, Hoàn Kiếm, Hà Nội" }, secrets: { password: VTP_PASSWORD } });
       assert.ok("ok" in saved, JSON.stringify(saved));
       assert.ok("ok" in (await testOrgConnection(admin, "viettelpost-carrier", { tester: { fetch: vtp.fetch } })));
       assert.ok("ok" in (await setConnectionStatus(admin, "viettelpost-carrier", "ACTIVE")));
-      const panel = await vtpCarrierPanel(admin, orderId);
-      assert.ok(panel && panel.connectionReady && panel.blockedReason === null, JSON.stringify(panel));
+      const panel = await carrierPanel(admin, orderId);
+      assert.ok(panel && panel.carriers.find((c) => c.key === "VTP")?.ready && !panel.carriers.find((c) => c.key === "GHN")?.ready && panel.connectionNote === null && panel.blockedReason === null, JSON.stringify(panel));
       assert.equal(panel.defaults.weightGrams, 600, "cân lấy từ mẫu mã × số lượng");
       assert.equal(panel.defaults.cod, 530_000, "thu hộ mặc định = khách còn phải trả (hàng + ship)");
 
       // Thiếu quyền ⇒ từ chối, không gọi hãng.
       const callsBefore = vtp.calls.length;
-      assert.equal((await quoteVtpShipmentCore(viewer, orderId, { weightGrams: 600, cod: 530_000 }, deps)).ok, false);
+      assert.equal((await quoteShipmentCore(viewer, "VTP", orderId, { weightGrams: 600, cod: 530_000 }, deps)).ok, false);
       assert.equal(vtp.calls.length, callsBefore);
 
-      const q = await quoteVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000 }, deps);
+      const q = await quoteShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000 }, deps);
       assert.ok(q.ok && q.quote.services[0].code === "PHS", JSON.stringify(q));
 
       // ── Tạo ⇒ đúng MỘT dòng shipments, chặng mặc định (lõi không ghi stage), mã ERP «-1» ──
-      const c1 = await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps);
-      assert.ok(c1.ok && c1.vtpOrderNumber === "900000001", JSON.stringify(c1));
+      const c1 = await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps);
+      assert.ok(c1.ok && c1.trackingCode === "900000001", JSON.stringify(c1));
       const sent = vtp.calls.filter((x) => x.path === "order/createOrderNlp").at(-1)?.body;
       assert.ok(sent && sent.ORDER_PAYMENT === 3 && sent.CHECK_UNIQUE === true && sent.MONEY_COLLECTION === 530_000 && sent.ORDER_SERVICE === "PHS");
       assert.ok(!JSON.stringify(vtp.calls.map((x) => x.path)).includes(VTP_PASSWORD), "mật khẩu không bao giờ nằm trong URL");
       const rows1 = await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, orderId));
       assert.equal(rows1.length, 1);
       const s1 = rows1[0];
-      assert.ok(s1.vtpOrderNumber === "900000001" && s1.attemptNo === 1 && s1.direction === "OUTBOUND" && s1.stage === "PENDING" && s1.shippingFee === 16_500 && s1.codAmount === 530_000);
+      assert.ok(s1.trackingCode === "900000001" && s1.attemptNo === 1 && s1.direction === "OUTBOUND" && s1.stage === "PENDING" && s1.shippingFee === 16_500 && s1.codAmount === 530_000);
       assert.equal(s1.orderReference, sent.ORDER_NUMBER);
       assert.ok(String(s1.orderReference).endsWith("-1"));
       assert.equal(carrierCreateOf(s1.raw)?.state, "CREATED");
 
       // ── Bấm lần hai ⇒ bị chặn, KHÔNG gọi hãng ──
       const createCalls = vtp.count("order/createOrderNlp");
-      const dup = await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps);
+      const dup = await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps);
       assert.ok(!dup.ok && dup.error.includes("lần gửi còn hiệu lực"), JSON.stringify(dup));
       assert.equal(vtp.count("order/createOrderNlp"), createCalls, "bị chặn trước khi gọi hãng");
 
@@ -250,41 +252,41 @@ async function testFlow() {
       assert.ok(!upd.ok && upd.code === "CONFLICT", JSON.stringify(upd));
 
       // ── In nhãn: link của chính hãng ──
-      const pr = await vtpPrintLinkCore(admin, s1.id, deps);
+      const pr = await printLinkCore(admin, s1.id, deps);
       assert.ok(pr.ok && pr.url === vtpPrintUrl("MA-IN-123="), JSON.stringify(pr));
 
       // ── Huỷ ở hãng ⇒ ghi lời nhận lệnh, KHÔNG tự đặt «Đã huỷ»; lần gửi mới mang mã «-2» ──
-      const cx = await cancelVtpShipmentCore(admin, s1.id, { reason: "Khách đổi địa chỉ" }, deps);
+      const cx = await cancelShipmentCore(admin, s1.id, { reason: "Khách đổi địa chỉ" }, deps);
       assert.ok(cx.ok, JSON.stringify(cx));
       const [s1b] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, s1.id));
       assert.equal(s1b.stage, "PENDING", "chặng chỉ đổi theo webhook 107");
       assert.equal(vtp.calls.filter((x) => x.path === "order/UpdateOrder").at(-1)?.body?.TYPE, 4);
-      const c2 = await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "VCN", note: "Gọi trước khi giao" }, deps);
+      const c2 = await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "VCN", note: "Gọi trước khi giao" }, deps);
       assert.ok(c2.ok, JSON.stringify(c2));
       const [s2] = await db.select().from(schema.shipments).where(and(eq(schema.shipments.orderId, orderId), eq(schema.shipments.attemptNo, 2)));
       assert.ok(s2 && String(s2.orderReference).endsWith("-2"), "mỗi lần gửi một mã ERP");
-      assert.ok("ok" in (await cancelVtpShipmentCore(admin, s2.id, { reason: "Thử nhánh từ chối" }, deps)));
+      assert.ok("ok" in (await cancelShipmentCore(admin, s2.id, { reason: "Thử nhánh từ chối" }, deps)));
 
       // ── Hãng TỪ CHỐI ⇒ chắc chắn không có vận đơn ⇒ không còn chỗ giữ ──
       vtp.calls.length = 0;
       const rejectMode = fakeVtp({ create: "reject", nextNumber: 0 });
-      const rj = await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, { client: { fetch: rejectMode.fetch } });
+      const rj = await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, { fetch: rejectMode.fetch });
       assert.ok(!rj.ok && rj.error.includes("Địa chỉ người nhận không hợp lệ"), JSON.stringify(rj));
       assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, orderId))).length, 2, "lượt bị từ chối không để lại dòng");
 
       // ── ĐỨT MẠNG giữa chừng ⇒ GIỮ chỗ (UNKNOWN), chặn tạo mới, không tự gửi lại ──
       const net = fakeVtp({ create: "network", nextNumber: 0 });
-      const nw = await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, { client: { fetch: net.fetch } });
+      const nw = await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, { fetch: net.fetch });
       assert.ok(!nw.ok && nw.error.includes("Không rõ"), JSON.stringify(nw));
       assert.equal(net.count("order/createOrderNlp"), 1, "client không tự gửi lại lệnh tạo");
       const held = (await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, orderId))).find((r) => carrierCreateOf(r.raw)?.state === "UNKNOWN");
       assert.ok(held && held.vtpOrderNumber === null);
-      assert.equal((await createVtpShipmentCore(admin, orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps)).ok, false, "chỗ giữ không rõ kết quả chặn tạo mới");
-      const panelHeld = await vtpCarrierPanel(admin, orderId);
+      assert.equal((await createShipmentCore(admin, "VTP", orderId, { weightGrams: 600, cod: 530_000, serviceCode: "PHS", note: "" }, deps)).ok, false, "chỗ giữ không rõ kết quả chặn tạo mới");
+      const panelHeld = await carrierPanel(admin, orderId);
       assert.ok(panelHeld?.attempts.find((a) => a.id === held.id)?.canDiscard);
-      assert.ok((await discardVtpCreateCore(admin, held.id)).ok);
+      assert.ok((await discardCreateCore(admin, held.id)).ok);
       assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.id, held.id))).length, 0);
-      assert.equal((await discardVtpCreateCore(admin, s1.id)).ok, false, "vận đơn có mã thì không «bỏ» được");
+      assert.equal((await discardCreateCore(admin, s1.id)).ok, false, "vận đơn có mã thì không «bỏ» được");
 
       // ── Client của tổ chức khác lọt vào ngữ cảnh này ⇒ ném TRƯỚC khi gọi mạng ──
       const stray = fakeVtp({ create: "ok", nextNumber: 1 });
@@ -303,30 +305,30 @@ async function testFlow() {
       const noWeightId = await mk("erp-vtp-var-0g", "CONFIRMED");
       const newId = await mk("erp-vtp-var", "NEW");
       const bulk = fakeVtp({ create: "ok", nextNumber: 700000001 });
-      const bdeps = { client: { fetch: bulk.fetch } };
-      assert.equal((await bulkQuoteVtpCore(admin, [noWeightId, newId], bdeps)).ok, false, "không đơn nào tạo được ⇒ không tra cước");
-      const bq = await bulkQuoteVtpCore(admin, [noWeightId, newId, okId], bdeps);
+      const bdeps = { fetch: bulk.fetch };
+      assert.equal((await bulkQuoteCore(admin, "VTP", [noWeightId, newId], bdeps)).ok, false, "không đơn nào tạo được ⇒ không tra cước");
+      const bq = await bulkQuoteCore(admin, "VTP", [noWeightId, newId, okId], bdeps);
       assert.ok(bq.ok && bq.sampleOrderId === okId, JSON.stringify(bq));
-      const bc = await bulkCreateVtpShipmentsCore(admin, [okId, noWeightId, newId, orderId], { serviceCode: "PHS" }, bdeps);
+      const bc = await bulkCreateCore(admin, "VTP", [okId, noWeightId, newId, orderId], { serviceCode: "PHS" }, bdeps);
       assert.ok(bc.ok, JSON.stringify(bc));
       const byId = new Map(bc.rows.map((r) => [r.orderId, r]));
-      assert.ok(byId.get(okId)?.ok && byId.get(okId)?.vtpOrderNumber === "700000001", JSON.stringify(bc.rows));
+      assert.ok(byId.get(okId)?.ok && byId.get(okId)?.trackingCode === "700000001", JSON.stringify(bc.rows));
       assert.ok(!byId.get(noWeightId)?.ok && byId.get(noWeightId)?.message.includes("cân nặng"), "thiếu cân ⇒ bỏ qua, KHÔNG đoán");
       assert.ok(!byId.get(newId)?.ok && byId.get(newId)?.message.includes("Đã xác nhận"));
       // Đơn đầu bài: hai lần gửi đều đã được hãng nhận lệnh huỷ ⇒ không còn giữ đơn ⇒ lần gửi thứ BA, mã «-3».
-      assert.ok(byId.get(orderId)?.ok && byId.get(orderId)?.vtpOrderNumber === "700000002", JSON.stringify(bc.rows));
+      assert.ok(byId.get(orderId)?.ok && byId.get(orderId)?.trackingCode === "700000002", JSON.stringify(bc.rows));
       const [s3] = await db.select().from(schema.shipments).where(and(eq(schema.shipments.orderId, orderId), eq(schema.shipments.attemptNo, 3)));
       assert.ok(s3 && String(s3.orderReference).endsWith("-3"));
       assert.equal(bulk.count("order/createOrderNlp"), 2, "chỉ đơn đủ điều kiện mới gọi hãng");
-      const again = await bulkCreateVtpShipmentsCore(admin, [okId], { serviceCode: "PHS" }, bdeps);
+      const again = await bulkCreateCore(admin, "VTP", [okId], { serviceCode: "PHS" }, bdeps);
       assert.ok(again.ok && !again.rows[0].ok && again.rows[0].message.includes("lần gửi còn hiệu lực"), "chạy lại lượt hàng loạt không đẻ vận đơn thứ hai");
       assert.equal(bulk.count("order/createOrderNlp"), 2);
-      assert.equal((await bulkCreateVtpShipmentsCore(admin, Array.from({ length: VTP_BULK_MAX + 1 }, (_, k) => `erp-x-${k}`), { serviceCode: "PHS" }, bdeps)).ok, false, "quá trần một lượt ⇒ từ chối cả lượt");
+      assert.equal((await bulkCreateCore(admin, "VTP", Array.from({ length: BULK_MAX + 1 }, (_, k) => `erp-x-${k}`), { serviceCode: "PHS" }, bdeps)).ok, false, "quá trần một lượt ⇒ từ chối cả lượt");
       // In: MỘT mã in cho mọi vận đơn ERP tạo còn in được — hai lần gửi đã có lệnh huỷ của đơn đầu bài KHÔNG in.
-      const bp = await bulkVtpPrintLinkCore(admin, [okId, orderId, noWeightId], bdeps);
+      const bp = await bulkPrintLinkCore(admin, "VTP", [okId, orderId, noWeightId], bdeps);
       assert.ok(bp.ok && bp.count === 2, JSON.stringify(bp));
       assert.deepEqual([...((bulk.calls.filter((x) => x.path === "order/printing-code").at(-1)?.body?.ORDER_ARRAY as string[]) ?? [])].sort(), ["700000001", "700000002"]);
-      assert.equal((await bulkVtpPrintLinkCore(viewer, [okId], bdeps)).ok, false, "thiếu shipments:manage ⇒ từ chối");
+      assert.equal((await bulkPrintLinkCore(viewer, "VTP", [okId], bdeps)).ok, false, "thiếu shipments:manage ⇒ từ chối");
     });
   } finally {
     if (savedKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;

@@ -28,7 +28,7 @@ import {
 import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { OrderOutcome } from "@/lib/constants/returns";
-import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { sqlSourceList, VTP_EVENT_SOURCES } from "@/lib/constants/truth";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
@@ -43,7 +43,12 @@ import { rowsOf } from "@/lib/sql-rows";
  *  · dự báo bằng một trạng thái cuối (xem `MODELLED_SUBSTATES`).
  */
 
-const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
+/**
+ * Trạng thái con (chờ phát lại · …) dịch bằng từ điển Viettel Post và mô hình hiệu chỉnh trên kiện Viettel Post ⇒ CHỈ đọc sự
+ * kiện Viettel Post. Mã GHN / GHTK đọc bằng từ điển VTP là sai nghĩa (ORDER_OUTCOME.md 4.1) — kiện hãng khác đứng ở bậc không
+ * có trạng thái con cho tới khi có bảng trạng thái con của chính hãng đó.
+ */
+const EVENT_SOURCES = sqlSourceList(VTP_EVENT_SOURCES);
 const NGAY_MS = 86_400_000;
 
 /**

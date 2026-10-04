@@ -80,10 +80,69 @@ Danh sách đơn có ô chọn khi tổ chức tạo đơn tay, người xem có
 - **«In nhãn Viettel Post».** Một mã in (`printing-code`) cho mọi lần gửi do ERP tạo còn in được của các đơn đã chọn,
   tối đa 100 vận đơn. Lần gửi đã có lệnh huỷ không in.
 
+## Lõi chung cho mọi hãng (`lib/carriers/engine.ts`)
+
+Từ P3, mọi luật ở P1 và P2 nằm ở **một lõi**. Mỗi hãng chỉ là một adapter (`lib/carriers/adapters/*`) khai bốn việc nói
+chuyện với hãng: tính cước, tạo, huỷ, in. Mỗi việc trả đúng ba khả năng:
+
+- **OK** — hãng nhận.
+- **REJECTED** — hãng trả lời và từ chối ⇒ bỏ chỗ giữ.
+- **UNKNOWN** — không có câu trả lời đọc được ⇒ giữ chỗ, người quyết.
+
+Thêm hãng = thêm một adapter vào `lib/carriers/registry.ts`, lõi không đổi.
+
+`shipments.raw.carrierCreate` ghi kèm **hãng** (dòng của P1 không có ⇒ Viettel Post) và **bản nháp đã gửi**. Nhờ vậy:
+
+- **«Thử lại»** chỉ có ở hãng mà gửi lại cùng mã là an toàn (GHN: `client_order_code` trả lại đúng đơn đã tạo).
+- **Viettel Post** chặn mã trùng nhưng không trả mã cũ, nên lượt không rõ kết quả vẫn phải tra rồi «Bỏ lượt tạo».
+
+## P3 — GHN của tổ chức (kết nối `ghn-carrier`)
+
+### Cách bật
+
+1. Cài đặt → Kết nối → nhóm «Vận chuyển» → «GHN của tổ chức (tạo vận đơn)».
+   - Nhập Token API (developer.ghn.vn → Quản lý token → bấm con mắt, nhập OTP) và ShopId.
+   - Tuỳ chọn: chế độ cho xem hàng (`CHOXEMHANGKHONGTHU` mặc định), ghi chú mặc định.
+   - Lưu → Kiểm tra → Bật. «Kiểm tra» chỉ đọc danh sách shop của token và đòi ShopId đã khai nằm trong đó.
+2. Khung «GHN của tổ chức — webhook trạng thái»: chép URL, dán vào developer.ghn.vn → Cấu hình webhook → tab Đơn hàng.
+   Thay đổi có hiệu lực sau khoảng 15 phút.
+3. Trên đơn «Đã xác nhận»: «Tạo vận đơn GHN».
+   - Có thêm hai ô **Tỉnh / thành** và **Xã / phường** theo địa giới mới. Ô xã gợi ý từ danh mục chính thức của GHN.
+
+### Luật riêng của GHN
+
+- **Địa giới mới (tỉnh + xã, `is_new_to_address: true`).** Tên phải là tên chuẩn của danh mục GHN.
+  - ERP so khớp tên trên đơn với `name` + `extension_names`: bỏ dấu, bỏ tiền tố «Phường / Xã / TP.».
+  - Ô đã gõ thì **chỉ** dùng đúng tên đó. Ô trống mới đọc từ địa chỉ.
+  - Không khớp **duy nhất** ⇒ báo để người chọn, không đoán. Tên phường cũ (trước sáp nhập) sẽ không khớp, và đó là đúng.
+- **Thu hộ và phí.**
+  - Cước do shop trả (`payment_type_id = 1`). Thu hộ = số khách còn phải trả.
+  - Không tự mua bảo hiểm (`insurance_value = 0`). Gói quy ước 20×15×10 cm; GHN cân / đo lại khi lấy hàng.
+- **Người gửi** = hồ sơ shop trên GHN theo ShopId. ERP không khai lại.
+- **Huỷ** chỉ khi GHN chưa lấy hàng. Chặng «Đã huỷ» về theo webhook `cancel`.
+- **Webhook theo tổ chức** (token HMAC trong đường dẫn).
+  - Chống trùng theo `OrderCode + Type + Time`.
+  - Khớp vận đơn theo mã GHN hoặc mã ERP của lần gửi (gói `create` có thể tới trước khi lõi kịp ghi mã).
+  - Đơn GHN tạo ngoài ERP: chỉ lưu gói, không dựng vận đơn mồ côi.
+  - `CODAmount` là số GHN **định** thu, không phải số thực thu (ORDER_OUTCOME mục 8). Không ghi vào `cod_collected`.
+- **Kết quả đơn.** Mã cuối của GHN là chứng từ — chủ shop chốt 04/10/2026, `docs/business-rules/ORDER_OUTCOME.md` mục
+  4.1.
+  - Bảng mã: `lib/constants/carrier-status.ts`.
+  - `exception` không kết luận.
+  - `lost / damage / scrap` = hoàn, hàng không về kho.
+
+### Những chỗ hệ thống chưa nối cho GHN (nói thẳng)
+
+- **Chăm sóc vận đơn** (ca care, hàng đợi đối chiếu ĐVVC) vẫn chỉ chạy cho Viettel Post. Kiện GHN có trong cảnh báo
+  «im lặng» và độ tươi giao vận, nhưng chưa tự mở ca chăm sóc.
+- **Đối soát COD của GHN** (gói `cod` / `CODTransferDate`) chưa thành chứng từ tiền. Tiền thật vẫn theo chứng từ thanh toán.
+
 ## Kế tiếp
 
-- **P3.** GHN, GHTK, J&T: mỗi hãng một kết nối PER_ORG cùng hình dạng (kiểm tra · tính cước · tạo · huỷ · in), kèm
-  webhook trạng thái theo tổ chức.
+- **P3b.** GHTK: cùng lõi, cùng bảng mã đã khai trong đặc tả (mục 4.1).
+  - Tài liệu chưa xác nhận GHTK nhận địa giới mới. Phải thử trên staging trước khi bật cho shop.
+- **J&T.** Cần shop đăng ký đối tác trên open.jtexpress.vn (xét duyệt 1–3 ngày, xin chạy thật từng API, mã khách hàng
+  lấy ở bưu cục). Đây là HUMAN GATE.
 - **P4.** Nhập dữ liệu từ Pancake (khách, sản phẩm, đơn cũ) để shop chuyển sang trong một buổi.
 - **P5.** Nhân viên tạo đơn ngay trong khung chat. Đi đường người (`createManualOrderCore`, `origin = ERP_FORM`) và gắn
   `sales_conversation_id`. Gắn vào màn hộp thư M8 khi phiên giữ M8 để sẵn khe.

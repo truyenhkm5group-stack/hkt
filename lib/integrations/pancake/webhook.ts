@@ -52,7 +52,7 @@ export type StoredWebhook = {
  * Không có khoá thì vẫn lưu bình thường: không nhận dạng được KHÔNG phải lý do để mất dữ liệu.
  */
 export async function storeWebhook(
-  source: "PANCAKE" | "VIETTELPOST" | "SEPAY",
+  source: "PANCAKE" | "VIETTELPOST" | "SEPAY" | "GHN",
   eventType: string,
   externalId: string | null,
   payload: unknown,

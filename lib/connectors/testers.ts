@@ -23,6 +23,7 @@
 import { PANCAKE_POS_API, PANCAKE_POS_API_KEY_PATTERN, PANCAKE_POS_SHOP_ID_PATTERN } from "@/lib/constants/pancake-pos-org";
 import { isVtpPhone, normalizeVtpPhone, VTP_PARTNER_API } from "@/lib/constants/carrier-vtp";
 import { checkPage, messengerApp } from "@/lib/integrations/messenger/graph";
+import { GHN_API, GHN_SHOP_ID_PATTERN, GHN_TOKEN_PATTERN } from "@/lib/constants/carrier-ghn";
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
@@ -523,6 +524,34 @@ export async function testFacebookMessenger(input: { secrets: Record<string, str
   return r.ok ? { ok: true, message: `Facebook nhận page «${r.name}» (${pageId}) — bot nhận tin qua webhook Messenger.` } : { ok: false, message: scrubSecrets(r.error, [token, app.appSecret]) };
 }
 
+/*
+  ═══════════ GHN CỦA TỔ CHỨC — TẠO VẬN ĐƠN (ghn-carrier) ═══════════
+
+  `GET v2/shop/all` (Get Shop) bằng token — CHỈ ĐỌC, không tạo đơn nào. Đạt ⇔ GHN nhận token VÀ ShopId đã khai nằm trong danh
+  sách shop của token — token đúng mà sai shop thì mọi lượt tạo đơn sau đều hỏng ở `CLIENT_NOT_OWNER_OF_SHOP`, nên phải nói
+  ngay ở bước kiểm tra. Địa chỉ hằng số, không theo chuyển hướng, token bị che trong mọi câu.
+*/
+export async function testGhnCarrier(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const token = (input.secrets.token ?? "").trim();
+  const shopId = (input.settings.shopId ?? "").trim();
+  const hide = [token];
+  if (!GHN_TOKEN_PATTERN.test(token)) return { ok: false, message: "Token GHN không đúng dạng — không gọi." };
+  if (!GHN_SHOP_ID_PATTERN.test(shopId)) return { ok: false, message: "ShopId GHN phải là số — không gọi." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const res = await fetchImpl(`${GHN_API}/v2/shop/all?offset=0&limit=200`, { method: "GET", headers: { accept: "application/json", Token: token }, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status >= 300 && res.status < 400) return { ok: false, message: `GHN trả chuyển hướng HTTP ${res.status} — không theo.` };
+    const body = (await readCapped(res)) as { code?: unknown; message?: unknown; data?: { shops?: { _id?: unknown; name?: unknown; address?: unknown }[] } } | null;
+    if (!body || Number(body.code) !== 200) return { ok: false, message: scrubSecrets(`GHN không nhận token: ${typeof body?.message === "string" ? body.message : `HTTP ${res.status}`}`, hide) };
+    const shops = Array.isArray(body.data?.shops) ? body.data.shops : [];
+    const shop = shops.find((s) => String(s?._id ?? "") === shopId);
+    if (!shop) return { ok: false, message: scrubSecrets(`Token đúng nhưng không có shop ${shopId} — token này thấy ${shops.length} shop: ${shops.slice(0, 5).map((s) => `${String(s?._id ?? "?")} «${String(s?.name ?? "")}»`).join(", ")}.`, hide) };
+    return { ok: true, message: scrubSecrets(`GHN nhận token — shop ${shopId} «${String(shop.name ?? "")}» (lấy hàng tại: ${String(shop.address ?? "—")}). Bật để tạo vận đơn GHN từ trang đơn; dán URL webhook GHN của tổ chức vào developer.ghn.vn → Cấu hình webhook để hành trình tự về.`, hide) };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được GHN: ${describeNetworkFailure(e, "online-gateway.ghn.vn")}` : `Không gọi được GHN: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -536,6 +565,7 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
   "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),
+  "ghn-carrier": (input, deps) => testGhnCarrier(input, deps),
   "google-places": (input, deps) => testGooglePlaces(input, deps),
   "facebook-messenger": (input, deps) => testFacebookMessenger(input, deps),
 };
