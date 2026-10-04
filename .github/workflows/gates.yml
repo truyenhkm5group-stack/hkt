@@ -32,7 +32,10 @@ permissions:
 jobs:
   gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 phút (04/10/2026): bộ kiểm thử chạy HAI lần (~11–12 phút mỗi lần) + typecheck + lint + build đã chạm 30 phút — đo
+    # lượt 37173602589: mọi bước XANH, bước cuối xong ở 30:00 ⇒ cả lượt bị HUỶ; lượt deploy 2bbab7ea / 772deb67 huỷ y hệt.
+    # Trần 30 làm KHÔNG bản nào lên được production dù không có bài kiểm nào đỏ.
+    timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
     steps:
