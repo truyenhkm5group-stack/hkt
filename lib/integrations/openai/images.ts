@@ -57,7 +57,8 @@ export type ImageEditUsage = {
 
 export type ImageEditResult = {
   bytes: Uint8Array;
-  contentType: "image/jpeg";
+  /** gpt-image luôn trả JPEG (ta xin `output_format=jpeg`); máy vẽ Gemini của tổ chức khách (lib/creative/byok-image.ts) trả PNG / WEBP. */
+  contentType: "image/jpeg" | "image/png" | "image/webp";
   usage: ImageEditUsage | null;
   /** Ước tính theo bảng giá token bên dưới. `null` = CHƯA BIẾT (không có `usage` hoặc model lạ). */
   costUsd: number | null;
@@ -133,7 +134,8 @@ function isJpeg(bytes: Uint8Array): boolean {
   return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 }
 
-function buildForm(input: ImageEditInput): FormData {
+/** Thân multipart của `/v1/images/edits` — dùng chung cho khoá của nhà (`editImage`) và khoá của tổ chức (lib/creative/byok-image.ts). */
+export function buildImageEditForm(input: ImageEditInput): FormData {
   const form = new FormData();
   form.append("model", input.model);
   input.images.forEach((img, i) => {
@@ -185,7 +187,7 @@ export async function editImage(input: ImageEditInput, deps: ImageEditDeps = {})
       res = await doFetch(OPENAI_IMAGES_EDIT_URL, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
-        body: buildForm({ ...input, prompt }),
+        body: buildImageEditForm({ ...input, prompt }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {

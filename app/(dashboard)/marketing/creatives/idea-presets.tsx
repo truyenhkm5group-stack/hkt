@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FOOD_IDEA_PRESET_GROUPS, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { IDEA_PRESET_GROUPS, appendIdeaPreset } from "@/lib/constants/idea-presets";
 import { cn } from "@/lib/utils";
 
@@ -9,14 +10,15 @@ import { cn } from "@/lib/utils";
  * ô ý tưởng, người vẫn đọc và sửa trước khi bấm Gen. `design = false` (ảnh cho mã có sẵn) ẩn các nhóm đổi chính sản phẩm (chất
  * vải, màu, dáng, thiết kế, chi tiết) — máy luôn giữ đúng món hàng thật.
  */
-export function IdeaPresets({ idea, onChange, maxChars, design, disabled }: { idea: string; onChange: (v: string) => void; maxChars: number; design: boolean; disabled?: boolean }) {
-  const groups = IDEA_PRESET_GROUPS.filter((g) => design || g.scope === "ALL");
+export function IdeaPresets({ idea, onChange, maxChars, design, disabled, industry }: { idea: string; onChange: (v: string) => void; maxChars: number; design: boolean; disabled?: boolean; industry?: CreativeIndustry }) {
+  // Thực phẩm: bộ gợi ý riêng (bối cảnh bữa ăn, cách bày, ánh sáng, dịp) — không người mẫu, không chất vải / dáng.
+  const groups = industry === "FOOD" ? FOOD_IDEA_PRESET_GROUPS : IDEA_PRESET_GROUPS.filter((g) => design || g.scope === "ALL");
   // Gọn (chủ shop 29/09/2026: "gọn gàng hơn"): mặc định chỉ hàng NHÓM; bấm nhóm mới mở lựa chọn, bấm lại để đóng.
   const [open, setOpen] = useState("");
   const current = groups.find((g) => g.key === open) ?? null;
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Nhóm gợi ý" title={`Bấm nhóm để mở gợi ý, bấm gợi ý để thêm vào ô ý tưởng.${design ? "" : " Ảnh cho mã có sẵn luôn giữ đúng món hàng thật nên không có nhóm chất vải / màu / dáng."}`}>
+      <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Nhóm gợi ý" title={`Bấm nhóm để mở gợi ý, bấm gợi ý để thêm vào ô ý tưởng.${design || industry === "FOOD" ? "" : " Ảnh cho mã có sẵn luôn giữ đúng món hàng thật nên không có nhóm chất vải / màu / dáng."}`}>
         <span className="text-[11px] text-muted-foreground">Gợi ý:</span>
         {groups.map((g) => (
           <button

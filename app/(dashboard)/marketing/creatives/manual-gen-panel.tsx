@@ -2,17 +2,20 @@ import Link from "next/link";
 import { ImagePlus, Repeat2, Rocket, ScanEye, Wand2 } from "lucide-react";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
 import { ManualGenAutoRefresh, ManualGenImageTile, PublishQueue, type ComposeCtx } from "@/app/(dashboard)/marketing/creatives/manual-gen";
-import { StudioGenForm } from "@/app/(dashboard)/marketing/creatives/studio-form";
-import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, type OutputStyle } from "@/lib/constants/creative-studio";
+import { IndustryPicker } from "@/app/(dashboard)/marketing/creatives/industry-picker";
+import { StudioGenForm, type StudioAiInfo } from "@/app/(dashboard)/marketing/creatives/studio-form";
+import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, outputStylesFor, type OutputStyle } from "@/lib/constants/creative-studio";
 import { ReviewDayFilter } from "@/app/(dashboard)/marketing/creatives/review-day-filter";
 import { VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
-import { IMAGE_QUALITY_LABEL, MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL, MANUAL_GEN_KIND_LABEL, REVIEW_DAY, type ImageQuality } from "@/lib/constants/creative-loop";
+import { IMAGE_QUALITY_LABEL, MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL, MANUAL_GEN_KIND_LABEL, REVIEW_DAY, imagePriceKeyOf, type ImageQuality } from "@/lib/constants/creative-loop";
 import { manualGenPreselect } from "@/lib/constants/stock-feedback";
 import { formatDate, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { listReviewDays, loadManualGenPanel, loadManualGenRemix, type ManualGenPanel, type ManualGenRunCard } from "@/lib/queries/creative-manual-gen";
 import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
+import { CREATIVE_INDUSTRY_LABEL, type CreativeIndustry } from "@/lib/constants/creative-industry";
+import { creativeAiStatus, readCreativeIndustry, type CreativeAiStatus } from "@/lib/creative/org-ai";
 
 /**
  * ═══════════ THƯ VIỆN MEDIA — LUỒNG TAY BA BƯỚC (chủ shop 26/09/2026: "thiết kế lại flow cho khoa học hơn, dễ quản lý và
@@ -28,8 +31,36 @@ import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
  */
 
 /** Bộ đồ nghề chung của hộp soạn bài — dựng một lần từ dữ liệu khu gen tay. */
-function composeCtxOf(p: ManualGenPanel, canPublish: boolean): ComposeCtx {
-  return { canPublish, pricing: { unitVnd: p.pricing.unitVnd, unitUsd: p.pricing.unitUsd }, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup, fanpageEvidence: p.fanpageEvidence };
+function composeCtxOf(p: ManualGenPanel, canPublish: boolean, industry: CreativeIndustry): ComposeCtx {
+  return { canPublish, pricing: { unitVnd: p.pricing.unitVnd, unitUsd: p.pricing.unitUsd }, instant: p.instant, pageName: p.pageName, defaults: p.defaults, campDefaults: p.campDefaults, setup: p.setup, fanpageEvidence: p.fanpageEvidence, industry };
+}
+
+/** AI của tổ chức như form cần biết (không mang khoá). Nhà ⇒ `null` — form như trước. */
+function studioAiOf(ai: CreativeAiStatus): StudioAiInfo | null {
+  if (ai.mode === "HOME") return null;
+  if (ai.mode === "NONE") return { mode: "NONE", label: "", imageModel: null, imageReady: false, reason: ai.reason, priced: false };
+  return { mode: "BYOK", label: ai.label, imageModel: ai.imageModel, imageReady: ai.imageReady, reason: ai.imageReason, priced: ai.imageModel !== null && imagePriceKeyOf(ai.imageModel) !== null };
+}
+
+/** Dải thông tin ngành + máy vẽ của tổ chức khách (nhà không hiện gì — giữ nguyên màn hình cũ). */
+function OrgAiBanner({ ai, industry, basis, canManage }: { ai: CreativeAiStatus; industry: CreativeIndustry; basis: string; canManage: boolean }) {
+  if (ai.mode === "HOME") return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-2.5 py-1.5 text-[12px]">
+      {canManage ? <IndustryPicker value={industry} basis={basis} /> : <span title={basis}>Ngành: <b>{CREATIVE_INDUSTRY_LABEL[industry]}</b></span>}
+      {ai.mode === "BYOK" ? (
+        <span>
+          Vẽ ảnh: <b>{ai.imageReady ? `${ai.label} · ${ai.imageModel}` : "chưa vẽ được"}</b> · Câu chữ: <b>{ai.chatModel}</b> — tiền token trên khoá AI của tổ chức, ghi vào sổ dùng AI.
+          {!ai.imageReady && ai.imageReason ? <span className="text-warning"> {ai.imageReason}</span> : null}
+        </span>
+      ) : (
+        <span className="text-warning">
+          {ai.reason} <Link href="/settings/connections" className="underline">Mở Kết nối dữ liệu</Link>
+        </span>
+      )}
+      <span className="text-muted-foreground">Vòng mẫu tự động (lô hằng ngày, đọc gen nguồn) chỉ chạy ở tổ chức nhà — ở đây bạn gen bằng tay.</span>
+    </div>
+  );
 }
 
 function SpendPill({ p }: { p: ManualGenPanel }) {
@@ -46,16 +77,18 @@ function SpendPill({ p }: { p: ManualGenPanel }) {
 const LATEST_RUNS = 2;
 
 /** ① TẠO ẢNH — studio gen tay + kết quả mới nhất + mẫu tự làm. `remixId` = "Tạo lại tương tự" (chỉ điền sẵn form). */
-export async function CreateStep({ canEdit, canPublish = false, preselectProductId = null, remixId = null }: { canEdit: boolean; canPublish?: boolean; preselectProductId?: string | null; remixId?: string | null }) {
+export async function CreateStep({ canEdit, canPublish = false, preselectProductId = null, remixId = null, canManage = false }: { canEdit: boolean; canPublish?: boolean; preselectProductId?: string | null; remixId?: string | null; canManage?: boolean }) {
   const db = await getDb();
-  const [p, products, remix] = await Promise.all([loadManualGenPanel(db, new Date()), canEdit ? listCreativeProductOptions() : Promise.resolve([]), remixId ? loadManualGenRemix(db, remixId) : Promise.resolve(null)]);
+  const [p, products, remix, ind] = await Promise.all([loadManualGenPanel(db, new Date()), canEdit ? listCreativeProductOptions() : Promise.resolve([]), remixId ? loadManualGenRemix(db, remixId) : Promise.resolve(null), readCreativeIndustry(db)]);
+  const ai = await creativeAiStatus(p.pricing.model);
   // `?product=` chỉ CHỌN SẴN ô ảnh gốc — không vẽ gì cho tới khi người bấm Gen (vẽ ảnh tốn tiền).
   const chon = manualGenPreselect(p.sources, preselectProductId);
   const pr = p.pricing;
   const latest = p.runs.filter((r) => r.kind !== "UPLOAD").slice(0, LATEST_RUNS);
-  const ctx = composeCtxOf(p, canPublish);
+  const ctx = composeCtxOf(p, canPublish, ind.industry);
   return (
     <div className="space-y-4">
+      <OrgAiBanner ai={ai} industry={ind.industry} basis={ind.detail} canManage={canManage} />
       <SectionCard
         title={
           <span className="flex flex-wrap items-center gap-2">
@@ -82,6 +115,8 @@ description={undefined}
               recentIdeas={p.recentIdeas}
               remix={remix}
               initialPhotoId={remix?.productPhotoSourceId ?? chon.photoId}
+              industry={ind.industry}
+              ai={studioAiOf(ai)}
             />
           ) : (
             <EmptyState title="Bạn chỉ có quyền xem" description="Gen ảnh cần quyền soạn nội dung (ideas:write)." />
@@ -113,7 +148,7 @@ description={undefined}
             </span>
           }
           description="Ảnh bạn tự vẽ (ChatGPT, Grok…) hoặc tự chụp: tải lên kèm câu chữ ⇒ vào THẲNG ③ Hàng đợi & Đăng."
-          actions={<ManualForm products={products} />}
+          actions={<ManualForm products={products} industry={ind.industry} />}
           padded={false}
         >
           <span className="sr-only">Tải mẫu tự làm vào hàng đợi đăng camp</span>
@@ -126,8 +161,8 @@ description={undefined}
 /** ② DUYỆT ẢNH — kết quả gen tay theo ngày. */
 export async function ReviewStep({ canEdit, canPublish, day, today }: { canEdit: boolean; canPublish: boolean; day: string; today: string }) {
   const db = await getDb();
-  const [p, days] = await Promise.all([loadManualGenPanel(db, new Date(), day), listReviewDays(db, today, REVIEW_DAY.stripDays)]);
-  const ctx = composeCtxOf(p, canPublish);
+  const [p, days, ind] = await Promise.all([loadManualGenPanel(db, new Date(), day), listReviewDays(db, today, REVIEW_DAY.stripDays), readCreativeIndustry(db)]);
+  const ctx = composeCtxOf(p, canPublish, ind.industry);
   return (
     <div className="space-y-4">
       <ReviewDayFilter day={day} today={today} days={days} />
@@ -159,8 +194,8 @@ export async function ReviewStep({ canEdit, canPublish, day, today }: { canEdit:
 /** ③ HÀNG ĐỢI & ĐĂNG — bài đã soạn, chờ đăng. */
 export async function PublishStep({ canEdit, canPublish }: { canEdit: boolean; canPublish: boolean }) {
   const db = await getDb();
-  const p = await loadManualGenPanel(db, new Date());
-  const ctx = composeCtxOf(p, canPublish);
+  const [p, ind] = await Promise.all([loadManualGenPanel(db, new Date()), readCreativeIndustry(db)]);
+  const ctx = composeCtxOf(p, canPublish, ind.industry);
   return (
     <SectionCard
       title={
@@ -210,7 +245,7 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
           </p>
         )}
         <p className="flex flex-wrap items-center gap-1">
-          <StudioSummary run={run} />
+          <StudioSummary run={run} industry={ctx.industry} />
           {canEdit && (run.kind === "MOCKUP" || run.kind === "DESIGN") ? (
             <Link href={`/marketing/creatives?tab=tao&remix=${encodeURIComponent(run.id)}`} className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] hover:bg-muted" title="Mở ① Tạo ảnh với đúng thiết lập của lượt này — chưa vẽ gì cho tới khi bấm Gen">
               <Repeat2 className="size-3" /> Tạo lại tương tự
@@ -248,14 +283,15 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
 }
 
 /** "2 mẫu × 3 màu × 1 kiểu · Dọc 4:5 · Vừa" — chỉ lượt có studio (từ 29/09/2026). */
-function StudioSummary({ run }: { run: ManualGenRunCard }) {
+function StudioSummary({ run, industry }: { run: ManualGenRunCard; industry: CreativeIndustry }) {
+  const table = outputStylesFor(industry);
   const o = run.options;
   if (typeof o.units !== "number") return null;
   const colors = Array.isArray(o.colors) ? o.colors.filter((x): x is string => typeof x === "string") : [];
   const styles = (Array.isArray(o.styles) ? o.styles : []).filter((x): x is OutputStyle => typeof x === "string" && (OUTPUT_STYLE_KEYS as readonly string[]).includes(x));
   const q = run.quality as ImageQuality;
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px]" title={[styles.length ? `Kiểu: ${styles.map((s) => OUTPUT_STYLES[s].label).join(", ")}` : "Kiểu: tự động", colors.length ? `Màu: ${colors.join(", ")}` : "Giữ màu"].join(" · ")}>
+    <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px]" title={[styles.length ? `Kiểu: ${styles.map((s) => (table[s] ?? OUTPUT_STYLES[s]).label).join(", ")}` : "Kiểu: tự động", colors.length ? `Màu: ${colors.join(", ")}` : "Giữ màu"].join(" · ")}>
       <span className="numeric">{o.units}</span> mẫu × <span className="numeric">{Math.max(1, colors.length)}</span> màu × <span className="numeric">{Math.max(1, styles.length)}</span> kiểu · {run.size} · {IMAGE_QUALITY_LABEL[q] ?? run.quality}
     </span>
   );

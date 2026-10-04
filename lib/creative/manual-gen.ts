@@ -5,6 +5,7 @@ import {
   CREATIVE_RULE_VERSION,
   CREATIVE_WRITE_DENIAL_REASON,
   DAILY_BUDGET_MODE,
+  DEFAULT_CREATIVE_CONFIG,
   DESIGN_DNA_VERSION,
   DESIGN_NOVELTY,
   GENE_VOCAB,
@@ -30,12 +31,14 @@ import {
   type ImageSize,
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
+import { FOOD_EDIT_LAYOUT, FOOD_FASHION_ONLY_MESSAGE, FOOD_GENE_EXCLUDE, FOOD_IDEA_OVERRIDES, FOOD_OWN_AD_LINE, FOOD_PRESERVE_PRODUCT_CLAUSE, foodAdHead, foodEditPrompt, foodGeneDirectives, foodUploadsLine, type CreativeIndustry } from "@/lib/constants/creative-industry";
+import { creativeCaptioner, creativeImageClient, loadFoodFacts, readCreativeIndustry } from "@/lib/creative/org-ai";
 import { PRESERVE_PRODUCT_RECOLOR_CLAUSE, applyStyleGenes, normalizeStudioOptions, planStudioCells, studioDirectives, studioProblem, studioTotal, type StudioCell, type StudioOptions } from "@/lib/constants/creative-studio";
 import { CAMPAIGN_SETUP_LIMITS, pickMarketerOption, setupBidStrategy, setupOptimizationGoal, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
-import { captionFromImage, type CaptionInput, type CaptionOption, type VariantCaptioner } from "@/lib/creative/caption";
+import type { CaptionInput, CaptionOption, VariantCaptioner } from "@/lib/creative/caption";
 import { normalizeFormulas, type CopyFormula } from "@/lib/constants/copy-formulas";
 import { describeDnaVi, designPromptEn, planDesigns, type DesignParent, type DesignPlanInput } from "@/lib/creative/design";
 import { gatherPixels } from "@/lib/creative/generate";
@@ -50,7 +53,7 @@ import { ensureAdVideo, type AdVideoApi } from "@/lib/creative/ad-video";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, mediaOf, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
 import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
 import { adsWriteHardEnabled, adsWriteMode, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
-import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
+import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/openai/images";
 import { gateCreativeWritePrefix } from "@/lib/marketing/creative-write-gate";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-plan";
@@ -172,10 +175,20 @@ function hashSeed(seed: string): number {
  * ĐỦ sáu gen trong từ vựng đóng — vào lô rồi thì máy học được từ nó như mọi mẫu. Chữ trên ảnh luôn `NONE`:
  * ảnh gen tay chưa biết giá sẽ chạy, và chữ in sai trên ảnh không sửa được bằng câu chữ.
  */
-export function manualGenGenes(seed: string, count: number = MANUAL_GEN.imagesPerRun, opts: { design?: boolean } = {}): Genes[] {
+export function manualGenGenes(seed: string, count: number = MANUAL_GEN.imagesPerRun, opts: { design?: boolean; industry?: CreativeIndustry } = {}): Genes[] {
   const h = hashSeed(seed);
   const V = GENE_VOCAB;
   const out: Genes[] = [];
+  if (opts.industry === "FOOD") {
+    // Thực phẩm: chỉ các giá trị gen mang nghĩa món ăn (`FOOD_GENE_EXCLUDE`) — không người, không phố, không chụp gương / lưới
+    // màu. Cùng bước nhảy như thời trang để 10 ảnh đầu là 10 tổ hợp bối cảnh × bố cục khác nhau.
+    const scenes = V.scene.filter((x) => !(FOOD_GENE_EXCLUDE.scene ?? []).includes(x));
+    const comps = V.composition.filter((x) => !(FOOD_GENE_EXCLUDE.composition ?? []).includes(x));
+    for (let i = 0; i < count; i += 1) {
+      out.push({ angle: V.angle[(h + i) % V.angle.length], scene: scenes[(h + 3 * i) % scenes.length], model: "NONE", composition: comps[(h + 2 * i) % comps.length], textOverlay: "NONE", palette: V.palette[(h + 2 * i + 1) % V.palette.length] });
+    }
+    return out;
+  }
   // Ảnh THIẾT KẾ MỚI: có người mẫu mặc, không trải phẳng (cùng luật gen của ô thiết kế trong lô). Bước 1 trên
   // 6 bối cảnh × bước 2 trên 5 bố cục ⇒ 10 ảnh đầu là 10 tổ hợp khác nhau (bước 3 trên 6 chỉ ra 2 bối cảnh).
   const excluded: readonly string[] = DESIGN_GENE_EXCLUDE.scene ?? [];
@@ -212,8 +225,25 @@ function uploadsLine(n: number): string {
 }
 
 /** Câu lệnh cho MỘT ảnh mockup — hàm THUẦN: ý tưởng người (ưu tiên cao nhất) + sáu chỉ thị gen mặc định + giữ nguyên sản phẩm. */
-export function manualGenPrompt(i: { idea: string; genes: Genes; productName: string; hasOwnAd: boolean; uploadCount?: number; cell?: Pick<StudioCell, "style" | "color"> }): string {
+export function manualGenPrompt(i: { idea: string; genes: Genes; productName: string; hasOwnAd: boolean; uploadCount?: number; cell?: Pick<StudioCell, "style" | "color">; industry?: CreativeIndustry }): string {
   const idea = i.idea.trim();
+  if (i.industry === "FOOD") {
+    // Thực phẩm: cùng thứ tự ưu tiên (ý tưởng người đứng đầu + nhắc lại ở cuối), câu lệnh theo gói ngành — giữ đúng món + bao bì
+    // thật, không người mẫu, không chữ / logo / tem chứng nhận do máy vẽ bịa. Không có đổi màu.
+    return [
+      idea ? ownerIdeaHead(idea, FOOD_IDEA_OVERRIDES) : "",
+      foodAdHead(i.productName),
+      i.hasOwnAd ? FOOD_OWN_AD_LINE : "",
+      foodUploadsLine(i.uploadCount ?? 0),
+      ...(i.cell ? studioDirectives(i.cell, "MOCKUP", "FOOD") : []),
+      idea ? "Default directions (apply only where the owner's direction above says nothing):" : "",
+      ...foodGeneDirectives(i.genes),
+      FOOD_PRESERVE_PRODUCT_CLAUSE,
+      idea ? `Reminder — the owner's direction has priority over the defaults: ${idea}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   const recolor = Boolean(i.cell?.color.trim());
   return [
     idea ? ownerIdeaHead(idea, "every default direction below (scene, pose, composition, model, colour palette, lighting, styling) — but never the product itself") : "",
@@ -352,7 +382,8 @@ export type StartManualGenResult = { ok: true; genId: string; requested: number;
  * Ghi MỘT lượt gen + đúng số ảnh người chọn. Không gọi OpenAI. Trả `{ ok: false }` cho lỗi nghiệp vụ (nguồn
  * không an toàn điểm ảnh, ảnh tải lên hỏng) — không ném. Không còn trần ảnh / ngày (chủ shop 26/09/2026).
  */
-export async function startManualGen(db: Db, input: StartManualGenInput, cfg: CreativeLoopConfig, actor: ManualActor): Promise<StartManualGenResult> {
+export async function startManualGen(db: Db, input: StartManualGenInput, cfg: CreativeLoopConfig, actor: ManualActor, ctx: { industry?: CreativeIndustry } = {}): Promise<StartManualGenResult> {
+  const industry = ctx.industry ?? "FASHION";
   const s = schema.creativeSources;
   const [photo] = await db.select().from(s).where(eq(s.id, input.productPhotoSourceId)).limit(1);
   // Ranh giới 2 + 3: gốc PHẢI là ảnh sản phẩm THẬT đang bật, có mã hàng và có điểm ảnh.
@@ -372,7 +403,7 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
   if (!up.ok) return up;
 
   const units = manualGenRunCount(input.count);
-  const st = normalizeStudioOptions(input.studio ?? {}, "MOCKUP");
+  const st = normalizeStudioOptions(input.studio ?? {}, "MOCKUP", industry);
   const problem = studioProblem(units, st);
   if (problem) return { ok: false, error: problem };
   const cells = planStudioCells(units, st);
@@ -399,15 +430,15 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
       })
       .returning({ id: schema.creativeManualGens.id });
     // Bộ gen theo MẪU (không theo ô): các biến thể màu của cùng một mẫu giữ cùng bố cục — khác nhau đúng ở màu, so được.
-    const genes = manualGenGenes(g.id, units);
+    const genes = manualGenGenes(g.id, units, industry === "FOOD" ? { industry } : {});
     await tx.insert(schema.creativeManualGenImages).values(
       cells.map((cell, i) => {
-        const gg = applyStyleGenes(genes[cell.unit], cell.style);
+        const gg = applyStyleGenes(genes[cell.unit], cell.style, industry);
         return {
           genId: g.id,
           seq: i + 1,
           genes: gg as Record<string, string>,
-          prompt: manualGenPrompt({ idea, genes: gg, productName: product.name, hasOwnAd: ownAdId !== null, uploadCount: up.ids.length, cell }),
+          prompt: manualGenPrompt({ idea, genes: gg, productName: product.name, hasOwnAd: ownAdId !== null, uploadCount: up.ids.length, cell, ...(industry === "FOOD" ? { industry } : {}) }),
           color: cell.color,
           outputStyle: cell.style,
           status: "PLANNED",
@@ -439,7 +470,9 @@ async function recentManualDesignDna(db: Db, now: Date): Promise<DesignDna[]> {
  * màn hình có thể đã cũ. Lập được ít thiết kế đủ mới lạ hơn số người chọn ⇒ ghi bấy nhiêu và NÓI RA vì sao
  * (không nhồi thiết kế trùng). Trả `{ ok: false }` cho lỗi nghiệp vụ — không ném.
  */
-export async function startManualDesignGen(db: Db, input: StartManualDesignInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: { seed?: string } = {}): Promise<StartManualGenResult> {
+export async function startManualDesignGen(db: Db, input: StartManualDesignInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: { seed?: string; industry?: CreativeIndustry } = {}): Promise<StartManualGenResult> {
+  // Thiết kế mới = lai DNA váy áo + MOQ màu × size: vô nghĩa với thực phẩm — chặn ở ĐƯỜNG GHI, không chỉ ẩn nút.
+  if (deps.industry === "FOOD") return { ok: false, error: FOOD_FASHION_ONLY_MESSAGE };
   const ids = [...new Set(input.inspirationProductIds.map((x) => x.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "Chọn ít nhất một mẫu bán tốt làm cảm hứng." };
   if (ids.length > MANUAL_DESIGN.maxInspirations) return { ok: false, error: `Chọn tối đa ${MANUAL_DESIGN.maxInspirations} mẫu cảm hứng mỗi lượt.` };
@@ -520,7 +553,8 @@ export async function startManualDesignGen(db: Db, input: StartManualDesignInput
  * Câu lệnh SỬA một ảnh đã tạo — hàm THUẦN. Ảnh cần sửa là ảnh ĐẦU TIÊN gửi kèm; chỉ đổi đúng thứ người xin, mọi thứ
  * khác giữ như ảnh ấy. Ảnh mockup của mã hàng THẬT còn gửi kèm ảnh sản phẩm thật (ảnh thứ hai) để kiểu dáng không trôi.
  */
-export function manualEditPrompt(i: { request: ImageEditRequest; productName: string | null; isDesign: boolean }): string {
+export function manualEditPrompt(i: { request: ImageEditRequest; productName: string | null; isDesign: boolean; industry?: CreativeIndustry }): string {
+  if (i.industry === "FOOD") return foodEditPrompt({ layout: i.request.layout, detail: i.request.detail, productName: i.productName });
   const r = i.request;
   const color = r.color.trim();
   const detail = r.detail.trim();
@@ -552,13 +586,16 @@ const EDITABLE_STATUSES = ["GENERATED", "APPROVED", "REJECTED", "PROMOTED"];
  * và (nếu là thiết kế mới) bản mô tả thiết kế của ảnh gốc — `ownerIdea` ghi yêu cầu sửa, vì nhãn DNA có thể lệch đúng ở
  * thuộc tính người đã đổi (màu). Trả `{ ok: false }` cho lỗi nghiệp vụ — không ném.
  */
-export async function startManualEdit(db: Db, input: StartManualEditInput, cfg: CreativeLoopConfig, actor: ManualActor): Promise<StartManualGenResult> {
+export async function startManualEdit(db: Db, input: StartManualEditInput, cfg: CreativeLoopConfig, actor: ManualActor, ctx: { industry?: CreativeIndustry } = {}): Promise<StartManualGenResult> {
+  const industry = ctx.industry ?? "FASHION";
   const request: ImageEditRequest = {
     color: input.request.color.trim().slice(0, IMAGE_EDIT.colorMaxChars),
     layout: input.request.layout,
     detail: input.request.detail.trim().slice(0, IMAGE_EDIT.detailMaxChars),
   };
   if (!hasImageEdit(request)) return { ok: false, error: "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết cần sửa." };
+  // Thực phẩm: không đổi màu (một món ăn đổi màu là món shop không có), chỉ các kiểu trình bày có nghĩa với món ăn.
+  if (industry === "FOOD" && (request.color || (request.layout && !FOOD_EDIT_LAYOUT[request.layout]))) return { ok: false, error: FOOD_FASHION_ONLY_MESSAGE };
   const src = await loadImage(db, input.sourceImageId);
   if (!src) return { ok: false, error: "Không tìm thấy ảnh cần sửa." };
   if (!EDITABLE_STATUSES.includes(src.img.status) || !src.img.imageId) return { ok: false, error: "Ảnh này chưa có điểm ảnh (đang chờ vẽ hoặc vẽ hỏng) — không sửa được." };
@@ -574,7 +611,7 @@ export async function startManualEdit(db: Db, input: StartManualEditInput, cfg: 
 
   const want = Math.max(IMAGE_EDIT.minImages, Math.min(IMAGE_EDIT.maxImages, Math.round(input.count ?? IMAGE_EDIT.defaultImages) || IMAGE_EDIT.defaultImages));
   const idea = describeImageEdit(request);
-  const prompt = manualEditPrompt({ request, productName: product?.name ?? null, isDesign: spec !== null });
+  const prompt = manualEditPrompt({ request, productName: product?.name ?? null, isDesign: spec !== null, ...(industry === "FOOD" ? { industry } : {}) });
   const genId = await db.transaction(async (tx) => {
     const [g] = await tx
       .insert(schema.creativeManualGens)
@@ -697,7 +734,8 @@ async function pixelsFor(db: Db, run: GenRow, img: ImageRow): Promise<ImageEditI
  */
 export async function drawManualGen(db: Db, deps: DrawManualGenDeps = {}): Promise<DrawManualGenSummary> {
   const clock = () => deps.now ?? new Date();
-  const imageClient = deps.imageClient ?? editImage;
+  // Nhà ⇒ `editImage` (khoá môi trường, đúng như trước); tổ chức khách ⇒ máy vẽ bằng khoá AI của CHÍNH tổ chức (lib/creative/org-ai.ts).
+  const imageClient = deps.imageClient ?? (await creativeImageClient(DEFAULT_CREATIVE_CONFIG.imageModel));
   const limit = Math.max(1, Math.min(deps.limit ?? MANUAL_GEN_RUN.maxImagesPerRun, MANUAL_GEN_RUN.maxImagesPerRun));
   const out: DrawManualGenSummary = { drawn: 0, failed: 0, stale: await failStaleDraws(db, clock()) };
   const g = schema.creativeManualGenImages;
@@ -774,9 +812,14 @@ async function captionContext(db: Db, r: { img: ImageRow; run: GenRow }): Promis
   if (r.img.design && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ." };
   if (!product) return { ok: false, error: "Không tìm thấy mã hàng — không biết giá để viết câu chữ." };
   if (!pixels) return { ok: false, error: "Ảnh đã mất điểm ảnh." };
+  // Thực phẩm: lời dặn + công thức + luật khẳng định của gói ngành, và DỮ KIỆN SẢN PHẨM (field quy cách / bảo quản…) — thời
+  // trang (và mọi lượt của nhà) giữ nguyên bản giao việc cũ, không thêm ô nào.
+  const industry = (await readCreativeIndustry(db)).industry;
+  const food = industry === "FOOD" ? { industry, facts: await loadFoodFacts(db, r.run.productId) } : {};
   return {
     ok: true,
     input: {
+      ...food,
       image: { bytes: new Uint8Array(pixels.bytes), contentType: pixels.contentType },
       product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
       genes: genes ?? {},
@@ -798,7 +841,7 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
   };
   const ctx = await captionContext(db, r);
   if (!ctx.ok) return fail(ctx.error);
-  const caption = deps.caption ?? captionFromImage;
+  const caption = deps.caption ?? (await creativeCaptioner());
   const res = await caption(db, ctx.input, { now, entityId: id }).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
   if (!res.ok) return fail(res.error);
   await db
@@ -829,7 +872,7 @@ export async function writeCopyOptions(
   const ctx = await captionContext(db, r);
   if (!ctx.ok) return ctx;
   const formulas = normalizeFormulas(opts.formulas);
-  const caption = deps.caption ?? captionFromImage;
+  const caption = deps.caption ?? (await creativeCaptioner());
   const res = await caption(db, { ...ctx.input, formulas, noPrice: opts.noPrice }, { now, entityId: imageId }).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
   if (!res.ok) return res;
   if (opts.persistFirst) {

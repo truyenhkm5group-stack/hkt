@@ -26,7 +26,8 @@ import {
   type ImageSize,
   type ManualGenKind,
 } from "@/lib/constants/creative-loop";
-import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, STUDIO_COLOR_CHIPS, STUDIO_LIMITS, normalizeColors, studioProblem, studioTotal, type OutputStyle } from "@/lib/constants/creative-studio";
+import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, STUDIO_COLOR_CHIPS, STUDIO_LIMITS, normalizeColors, outputStyleKeysFor, outputStylesFor, studioProblem, studioTotal, type OutputStyle } from "@/lib/constants/creative-studio";
+import { FOOD_FASHION_ONLY_MESSAGE, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { formatVND } from "@/lib/format";
 import type { DesignInspirationOption, ManualGenRemix, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
@@ -93,6 +94,9 @@ function isStyle(x: string): x is OutputStyle {
   return (OUTPUT_STYLE_KEYS as readonly string[]).includes(x);
 }
 
+/** AI vẽ ảnh của tổ chức như màn hình cần biết — không mang khoá (lib/creative/org-ai.ts::creativeAiStatus). */
+export type StudioAiInfo = { mode: "HOME" | "BYOK" | "NONE"; label: string; imageModel: string | null; imageReady: boolean; reason: string | null; priced: boolean };
+
 export function StudioGenForm({
   initialKind,
   inspirations,
@@ -101,6 +105,8 @@ export function StudioGenForm({
   recentIdeas,
   remix,
   initialPhotoId,
+  industry = "FASHION",
+  ai = null,
 }: {
   initialKind: ManualGenKind;
   inspirations: DesignInspirationOption[];
@@ -111,9 +117,15 @@ export function StudioGenForm({
   remix: ManualGenRemix | null;
   /** Ảnh chọn sẵn (`?product=` từ đề xuất đẩy tồn, hoặc ảnh gốc của lượt "Tạo lại tương tự"). Chỉ là giá trị khởi đầu. */
   initialPhotoId?: string;
+  /** Gói ngành — thực phẩm chỉ có ảnh cho sản phẩm thật, không màu, kiểu ảnh món ăn. */
+  industry?: CreativeIndustry;
+  /** AI vẽ của tổ chức khách (khoá của chính tổ chức). `null` = tổ chức nhà, như trước. */
+  ai?: StudioAiInfo | null;
 }) {
+  const food = industry === "FOOD";
+  const styleTable = outputStylesFor(industry);
   const photos = sources.filter((s) => s.kind === "PRODUCT_PHOTO");
-  const [kind, setKind] = useState<ManualGenKind>(remix?.kind ?? initialKind);
+  const [kind, setKind] = useState<ManualGenKind>(food ? "MOCKUP" : (remix?.kind ?? initialKind));
   const [picked, setPicked] = useState<string[]>(() =>
     remix?.kind === "DESIGN" && remix.inspirationProductIds.length
       ? remix.inspirationProductIds.filter((id) => inspirations.some((o) => o.productId === id))
@@ -135,13 +147,17 @@ export function StudioGenForm({
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [pending, start] = useTransition();
 
-  const design = kind === "DESIGN";
-  const usableStyles = OUTPUT_STYLE_KEYS.filter((k) => k !== "AUTO" && (!design || OUTPUT_STYLES[k].designOk));
-  const activeStyles = styles.filter((s) => !design || OUTPUT_STYLES[s].designOk);
-  const total = studioTotal(units, { styles: activeStyles, colors });
-  const problem = studioProblem(units, { styles: activeStyles, colors });
-  const unitUsd = estimateImageUsd(pricing.model, quality, size);
-  const unitVnd = usdToVndRounded(unitUsd, pricing.usdToVnd);
+  const design = !food && kind === "DESIGN";
+  const allowed = outputStyleKeysFor(industry);
+  const usableStyles = OUTPUT_STYLE_KEYS.filter((k) => k !== "AUTO" && allowed.includes(k) && (!design || OUTPUT_STYLES[k].designOk));
+  const activeStyles = styles.filter((s) => allowed.includes(s) && (!design || OUTPUT_STYLES[s].designOk));
+  const activeColors = food ? [] : colors;
+  const total = studioTotal(units, { styles: activeStyles, colors: activeColors });
+  const problem = studioProblem(units, { styles: activeStyles, colors: activeColors });
+  // Giá ước tính chỉ có cho model có bảng giá (gpt-image); máy vẽ Gemini của tổ chức ⇒ "—" (CHƯA BIẾT), không đoán.
+  const priceModel = ai?.imageModel ?? pricing.model;
+  const unitUsd = estimateImageUsd(priceModel, quality, size);
+  const unitVnd = ai && !ai.priced ? null : usdToVndRounded(unitUsd, pricing.usdToVnd);
   const totalVnd = unitVnd === null ? null : unitVnd * total;
   const minutes = Math.max(1, Math.round((total * SECONDS_PER_IMAGE) / 60));
 
@@ -178,11 +194,12 @@ export function StudioGenForm({
       : !photoId
         ? "Chọn một ảnh sản phẩm thật."
         : null;
-  const blocker = sourceBlock ?? problem;
+  const aiBlock = ai && (ai.mode === "NONE" || !ai.imageReady) ? (ai.reason ?? "Tổ chức chưa có khoá AI vẽ ảnh.") : null;
+  const blocker = aiBlock ?? sourceBlock ?? problem;
 
   const gen = () =>
     start(async () => {
-      const studio = { styles: activeStyles, colors, size, quality };
+      const studio = { styles: activeStyles, colors: activeColors, size, quality };
       const uploadsB64 = uploads.map((u) => u.base64);
       const r = design
         ? await startManualDesignRun({ inspirationProductIds: picked, idea, count: units, uploads: uploadsB64, studio })
@@ -203,6 +220,14 @@ export function StudioGenForm({
         ) : null}
 
         <Step n={1} title="Kiểu tạo">
+          {food ? (
+            <div className="space-y-1.5">
+              <p className="flex items-center gap-1.5 rounded-md border border-primary bg-primary/5 px-2.5 py-1.5 text-[13px] font-semibold ring-1 ring-primary">
+                <Wand2 className="size-4" /> Ảnh quảng cáo cho sản phẩm thật
+              </p>
+              <p className="text-[11.5px] text-muted-foreground">{FOOD_FASHION_ONLY_MESSAGE}</p>
+            </div>
+          ) : (
           <div className="grid gap-2 sm:grid-cols-2">
             {(["DESIGN", "MOCKUP"] as const).map((k) => (
               <button
@@ -221,12 +246,19 @@ export function StudioGenForm({
               </button>
             ))}
           </div>
+          )}
         </Step>
 
         <Step
           n={2}
           title={design ? "Mẫu cảm hứng" : "Ảnh sản phẩm thật làm gốc"}
-          hint={design ? `Máy lai DNA của các mẫu đã chọn (tối đa ${MANUAL_DESIGN.maxInspirations}) + đột biến; thiết kế bắt buộc khác mọi mẫu đang có.` : "Máy luôn giữ đúng món hàng trong ảnh thật — chỉ đổi bối cảnh, người mẫu, cách trình bày (và màu nếu bạn chọn ở bước 3)."}
+          hint={
+            design
+              ? `Máy lai DNA của các mẫu đã chọn (tối đa ${MANUAL_DESIGN.maxInspirations}) + đột biến; thiết kế bắt buộc khác mọi mẫu đang có.`
+              : food
+                ? "Máy luôn giữ đúng món hàng + bao bì trong ảnh thật — chỉ đổi cách bày, bối cảnh, ánh sáng. Chưa có ảnh: tab Nguồn ảnh → Thêm ảnh nguồn → «Ảnh sản phẩm thật» + chọn mã hàng."
+                : "Máy luôn giữ đúng món hàng trong ảnh thật — chỉ đổi bối cảnh, người mẫu, cách trình bày (và màu nếu bạn chọn ở bước 3)."
+          }
           right={
             <span className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -330,18 +362,18 @@ export function StudioGenForm({
                 <Images className="size-3.5" /> Kiểu ảnh <span className="font-normal text-muted-foreground">(chọn tối đa {STUDIO_LIMITS.maxStyles}; không chọn = Tự động)</span>
               </p>
               <div className="flex flex-wrap gap-1.5">
-                <Chip on={activeStyles.length === 0} onClick={() => setStyles([])} title={OUTPUT_STYLES.AUTO.hint}>
-                  {OUTPUT_STYLES.AUTO.label}
+                <Chip on={activeStyles.length === 0} onClick={() => setStyles([])} title={(styleTable.AUTO ?? OUTPUT_STYLES.AUTO).hint}>
+                  {(styleTable.AUTO ?? OUTPUT_STYLES.AUTO).label}
                 </Chip>
                 {usableStyles.map((k) => (
-                  <Chip key={k} on={activeStyles.includes(k)} onClick={() => toggleStyle(k)} title={OUTPUT_STYLES[k].hint} disabled={pending}>
-                    {OUTPUT_STYLES[k].label}
+                  <Chip key={k} on={activeStyles.includes(k)} onClick={() => toggleStyle(k)} title={(styleTable[k] ?? OUTPUT_STYLES[k]).hint} disabled={pending}>
+                    {(styleTable[k] ?? OUTPUT_STYLES[k]).label}
                   </Chip>
                 ))}
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className={cn("space-y-1.5", food && "hidden")}>
               <p className="flex items-center gap-1.5 text-[12px] font-medium">
                 <Palette className="size-3.5" /> Biến thể màu <span className="font-normal text-muted-foreground">(tối đa {STUDIO_LIMITS.maxColors}; không chọn = {design ? "màu theo DNA thiết kế" : "giữ màu gốc của sản phẩm"})</span>
               </p>
@@ -424,7 +456,7 @@ export function StudioGenForm({
                 <p className="text-[12px] font-medium">Chất lượng</p>
                 <div className="flex gap-1.5">
                   {IMAGE_QUALITIES.map((q) => {
-                    const v = usdToVndRounded(estimateImageUsd(pricing.model, q, size), pricing.usdToVnd);
+                    const v = ai && !ai.priced ? null : usdToVndRounded(estimateImageUsd(priceModel, q, size), pricing.usdToVnd);
                     return (
                       <button
                         key={q}
@@ -453,7 +485,7 @@ export function StudioGenForm({
               <Button type="button" size="icon" variant="outline" className="size-7" disabled={pending || units >= MANUAL_GEN_RUN.maxImagesPerRun} onClick={() => setUnits((n) => n + 1)} aria-label="Thêm">
                 +
               </Button>
-              <span className="text-[11px] text-muted-foreground">{design ? "mỗi thiết kế là một chiếc áo / váy mới khác nhau" : "mỗi bố cục là một cách chụp khác (bối cảnh, dáng, góc máy)"}</span>
+              <span className="text-[11px] text-muted-foreground">{design ? "mỗi thiết kế là một chiếc áo / váy mới khác nhau" : food ? "mỗi bố cục là một cách bày / bối cảnh / góc máy khác" : "mỗi bố cục là một cách chụp khác (bối cảnh, dáng, góc máy)"}</span>
             </div>
           </div>
         </Step>
@@ -461,7 +493,7 @@ export function StudioGenForm({
         <Step
           n={4}
           title="Ý tưởng / câu lệnh (tuỳ chọn)"
-          hint="Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, người mẫu, ánh sáng, cách phối…). Bấm gợi ý để ghép nhanh."
+          hint={food ? "Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, cách bày, ánh sáng, dịp…). Bấm gợi ý để ghép nhanh." : "Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, người mẫu, ánh sáng, cách phối…). Bấm gợi ý để ghép nhanh."}
           right={
             <span className="numeric text-[11px] text-muted-foreground">
               {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
@@ -480,8 +512,8 @@ export function StudioGenForm({
               ))}
             </div>
           ) : null}
-          <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design={design} disabled={pending} />
-          <Textarea rows={3} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder={design ? "Ví dụ: chất thun rayon, đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" : "Ví dụ: mặc đi biển Đà Nẵng buổi chiều, ánh nắng vàng, dáng đi tự nhiên…"} />
+          <IdeaPresets idea={idea} onChange={setIdea} maxChars={MANUAL_GEN.ideaMaxChars} design={design} disabled={pending} industry={industry} />
+          <Textarea rows={3} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder={design ? "Ví dụ: chất thun rayon, đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" : food ? "Ví dụ: chả chiên vàng cắt lát trên mâm cơm gia đình, có chén nước mắm ớt, ánh sáng ấm buổi tối…" : "Ví dụ: mặc đi biển Đà Nẵng buổi chiều, ánh nắng vàng, dáng đi tự nhiên…"} />
         </Step>
       </div>
 
@@ -489,16 +521,22 @@ export function StudioGenForm({
         <div className="space-y-2.5 rounded-lg border bg-card p-3 text-[12.5px] shadow-sm">
           <p className="text-[13px] font-semibold">Sẽ tạo</p>
           <p className="numeric text-[12px] text-muted-foreground">
-            {units} {design ? "thiết kế" : "bố cục"} × {Math.max(1, colors.length)} màu × {Math.max(1, activeStyles.length)} kiểu
+            {units} {design ? "thiết kế" : "bố cục"} × {Math.max(1, activeColors.length)} màu × {Math.max(1, activeStyles.length)} kiểu
           </p>
           <p className="numeric text-2xl font-bold">
             {total} <span className="text-[13px] font-medium text-muted-foreground">ảnh</span>
           </p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11.5px]">
             <dt className="text-muted-foreground">Kiểu</dt>
-            <dd>{activeStyles.length ? activeStyles.map((k) => OUTPUT_STYLES[k].label).join(", ") : "Tự động"}</dd>
+            <dd>{activeStyles.length ? activeStyles.map((k) => (styleTable[k] ?? OUTPUT_STYLES[k]).label).join(", ") : "Tự động"}</dd>
             <dt className="text-muted-foreground">Màu</dt>
-            <dd>{colors.length ? colors.join(", ") : design ? "Theo thiết kế" : "Giữ màu gốc"}</dd>
+            <dd>{activeColors.length ? activeColors.join(", ") : design ? "Theo thiết kế" : "Giữ màu gốc"}</dd>
+            {ai && ai.mode !== "HOME" ? (
+              <>
+                <dt className="text-muted-foreground">Máy vẽ</dt>
+                <dd>{ai.imageReady ? `${ai.label} · ${ai.imageModel ?? "—"}` : "Chưa có khoá AI vẽ ảnh"}</dd>
+              </>
+            ) : null}
             <dt className="text-muted-foreground">Khổ</dt>
             <dd>{SIZE_SHORT[size]}</dd>
             <dt className="text-muted-foreground">Chất lượng</dt>
@@ -509,7 +547,7 @@ export function StudioGenForm({
               Ước tính ~<b className="numeric">{formatVND(totalVnd)}</b>
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {formatVND(unitVnd)}/ảnh · vẽ lần lượt, khoảng {minutes} phút. Tiền thật hiện trên từng ảnh sau khi vẽ.
+              {formatVND(unitVnd)}/ảnh · vẽ lần lượt, khoảng {minutes} phút. {ai && ai.mode !== "HOME" ? "Tiền token tính trên khoá AI của tổ chức; ghi vào sổ dùng AI." : "Tiền thật hiện trên từng ảnh sau khi vẽ."}
             </p>
           </div>
           {blocker ? <p className="text-[12px] text-destructive">{blocker}</p> : null}

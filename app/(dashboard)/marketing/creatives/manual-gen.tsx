@@ -35,8 +35,9 @@ import { formatVND, vnShortStamp } from "@/lib/format";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { CampaignSetupOptions, DesignInspirationOption, FanpageOption, ManualGenImageCard, ManualGenPanel, PublishQueueItem } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
-import { OUTPUT_STYLES, OUTPUT_STYLE_KEYS, studioCellLabel } from "@/lib/constants/creative-studio";
+import { OUTPUT_STYLE_KEYS, studioCellLabel } from "@/lib/constants/creative-studio";
 import { CopyAiPanel } from "./copy-ai";
+import { FOOD_EDIT_LAYOUT, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { VARIANT_COPY_LIMITS, creativeRepublishSchema, manualGenDraftSchema, manualGenInstantSchema } from "@/lib/validation/creative";
 
 /**
@@ -160,6 +161,8 @@ export type ComposeCtx = {
   setup: CampaignSetupOptions;
   /** Bằng chứng xếp fanpage theo camp của từng ảnh (đơn của mã · mẫu tương tự đã chạy). */
   fanpageEvidence: FanpageEvidence;
+  /** Gói ngành của Thư viện Media (lib/constants/creative-industry.ts) — thực phẩm ẩn đổi màu / kiểu trình bày thời trang. */
+  industry: CreativeIndustry;
 };
 
 /** Camp của một ảnh để xếp fanpage: camp mã win khi đang chọn WIN và ảnh có mã win; còn lại là camp TEST. */
@@ -224,13 +227,13 @@ export function ManualGenImageTile({ img, canEdit, ctx }: { img: ManualGenImageC
         ) : null}
         {studioCellLabel(img.outputStyle, img.color) ? (
           <p className="flex flex-wrap gap-1 text-[10.5px]">
-            {(OUTPUT_STYLE_KEYS as readonly string[]).includes(img.outputStyle) && img.outputStyle !== "AUTO" ? <span className="rounded bg-muted px-1.5 py-0.5">{OUTPUT_STYLES[img.outputStyle as keyof typeof OUTPUT_STYLES].label}</span> : null}
+            {(OUTPUT_STYLE_KEYS as readonly string[]).includes(img.outputStyle) && img.outputStyle !== "AUTO" ? <span className="rounded bg-muted px-1.5 py-0.5">{studioCellLabel(img.outputStyle, "", ctx.industry)}</span> : null}
             {img.color ? <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">Màu: {img.color}</span> : null}
           </p>
         ) : null}
         <details className="text-[10.5px] text-muted-foreground">
           <summary className="cursor-pointer select-none">Gen máy học</summary>
-          <GeneChips genes={img.genes} className="mt-1 gap-0.5" />
+          <GeneChips genes={img.genes} className="mt-1 gap-0.5" industry={ctx.industry} />
         </details>
         {img.error ? (
           <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>
@@ -382,6 +385,10 @@ function PromptButton({ img, canEdit }: { img: ManualGenImageCard; canEdit: bool
  * ảnh MỚI giữ nguyên kiểu dáng. Ảnh mới vào một lượt "Sửa ảnh" chờ duyệt như mọi ảnh gen tay; ảnh gốc không đổi.
  */
 function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCtx }) {
+  // Thực phẩm: không đổi màu (một món đổi màu là món shop không có), chỉ kiểu trình bày có nghĩa với món ăn.
+  const food = ctx.industry === "FOOD";
+  const layouts = food ? IMAGE_EDIT_LAYOUTS.filter((l) => FOOD_EDIT_LAYOUT[l]) : IMAGE_EDIT_LAYOUTS;
+  const layoutLabel = (l: ImageEditLayout) => (food ? (FOOD_EDIT_LAYOUT[l]?.label ?? IMAGE_EDIT_LAYOUT_LABEL[l]) : IMAGE_EDIT_LAYOUT_LABEL[l]);
   const [open, setOpen] = useState(false);
   const [color, setColor] = useState("");
   const [layout, setLayout] = useState<ImageEditLayout | null>(null);
@@ -408,7 +415,7 @@ function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCt
     });
   return (
     <>
-      <Button size="sm" variant="ghost" className="h-7 flex-1 text-[12px]" onClick={mo} title="Tạo ảnh mới từ ảnh này: đổi màu · đổi kiểu trình bày · sửa chi tiết">
+      <Button size="sm" variant="ghost" className="h-7 flex-1 text-[12px]" onClick={mo} title={food ? "Tạo ảnh mới từ ảnh này: đổi cách trình bày · sửa chi tiết" : "Tạo ảnh mới từ ảnh này: đổi màu · đổi kiểu trình bày · sửa chi tiết"}>
         <Brush className="size-3.5" /> Sửa ảnh
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -420,7 +427,7 @@ function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCt
           <div className="grid gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
             <VariantImage imageId={img.imageId} available={img.imageAvailable} alt={`Ảnh gốc #${img.seq}`} className="aspect-[4/5] w-full rounded-md" zoomable />
             <div className="space-y-3">
-              <div className="space-y-1">
+              <div className={cn("space-y-1", food && "hidden")}>
                 <Label htmlFor={`sua-mau-${img.id}`}>Đổi màu</Label>
                 <Input id={`sua-mau-${img.id}`} value={color} maxLength={IMAGE_EDIT.colorMaxChars} onChange={(e) => setColor(e.target.value)} placeholder="Để trống = giữ màu. Gõ màu, vd: xanh navy, đỏ đô…" />
                 <div className="flex flex-wrap gap-1">
@@ -432,12 +439,12 @@ function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCt
                 </div>
               </div>
               <label className="block space-y-1 text-[13px]">
-                <span className="font-medium">Kiểu trình bày mockup</span>
+                <span className="font-medium">{food ? "Cách trình bày" : "Kiểu trình bày mockup"}</span>
                 <select className="h-9 w-full rounded-md border bg-background px-2 text-[13px]" value={layout ?? ""} onChange={(e) => setLayout(e.target.value ? (e.target.value as ImageEditLayout) : null)}>
                   <option value="">Giữ như ảnh gốc</option>
-                  {IMAGE_EDIT_LAYOUTS.map((l) => (
+                  {layouts.map((l) => (
                     <option key={l} value={l}>
-                      {IMAGE_EDIT_LAYOUT_LABEL[l]}
+                      {layoutLabel(l)}
                     </option>
                   ))}
                 </select>
@@ -449,7 +456,7 @@ function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCt
                     {detail.trim().length}/{IMAGE_EDIT.detailMaxChars}
                   </span>
                 </div>
-                <Textarea id={`sua-ct-${img.id}`} rows={3} value={detail} maxLength={IMAGE_EDIT.detailMaxChars} onChange={(e) => setDetail(e.target.value)} placeholder="Vd: đổi tay bồng thành tay lỡ, thêm thắt lưng mảnh, người mẫu cười, nền sáng hơn…" />
+                <Textarea id={`sua-ct-${img.id}`} rows={3} value={detail} maxLength={IMAGE_EDIT.detailMaxChars} onChange={(e) => setDetail(e.target.value)} placeholder={food ? "Vd: bày thêm rau thơm và chén tương ớt, nền gỗ ấm hơn, cắt lát mỏng hơn…" : "Vd: đổi tay bồng thành tay lỡ, thêm thắt lưng mảnh, người mẫu cười, nền sáng hơn…"} />
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 <span className="font-medium">Số ảnh</span>
@@ -464,7 +471,7 @@ function EditImageButton({ img, ctx }: { img: ManualGenImageCard; ctx: ComposeCt
             </div>
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">
-            <p className="text-[11.5px] text-muted-foreground">{coGi ? "" : "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết."}</p>
+            <p className="text-[11.5px] text-muted-foreground">{coGi ? "" : food ? "Chọn ít nhất một thay đổi: cách trình bày hoặc chi tiết." : "Chọn ít nhất một thay đổi: màu, kiểu trình bày hoặc chi tiết."}</p>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
                 Đóng
@@ -686,6 +693,7 @@ function ComposeButton({ img, ctx, triggerLabel, triggerClassName }: { img: Manu
                   {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại nhanh
                 </Button>
                 <CopyAiPanel
+                  industry={ctx.industry}
                   imageId={img.id}
                   onUse={(o) => {
                     setH(o.headline);
