@@ -129,6 +129,28 @@ export function countsTowardMrr(kind: BillingStandingKind): boolean {
   return kind === "ACTIVE" || kind === "DUE_SOON" || kind === "OVERDUE";
 }
 
+export type MrrContribution = {
+  /** Tính vào MRR: tổ chức đang chạy, đang thu phí, chưa khoá, gói có giá. */
+  paying: boolean;
+  /** Tiền tháng nguyên VND. 0 = KHÔNG thu (đúng nghĩa 0, không phải chưa biết). */
+  mrrVnd: number;
+  /** Phần bị bỏ ra vì không có giá (phần mua thêm mà gói không còn khai giá) — đọc được vì sao số nhỏ hơn hoá đơn. */
+  note: string | null;
+};
+
+/**
+ * MRR CỦA MỘT TỔ CHỨC — CÔNG THỨC DUY NHẤT. `/platform` (bảng thu phí) và sổ kinh tế SaaS (`platform_saas_daily`) cùng
+ * gọi hàm này, để "MRR hôm nay" và "MRR trong ảnh chụp hôm nay" không bao giờ là hai con số.
+ *  · Tổ chức nhà / không ACTIVE / tình trạng không tính MRR (chưa thu phí · đã khoá) ⇒ 0.
+ *  · Gói không có giá (`trial`, `internal`) ⇒ 0 — gói không bán, không phải giá chưa biết.
+ *  · Phần mua thêm mà gói không còn khai giá KHÔNG được cộng (không đoán giá) và được nói ra ở `note`.
+ */
+export function mrrContribution(input: { isHome: boolean; orgStatus: string; standing: BillingStandingKind; planPriceVnd: number | null; addonMonthly: { ok: true; vnd: number } | { ok: false } }): MrrContribution {
+  if (input.isHome || input.orgStatus !== "ACTIVE" || !countsTowardMrr(input.standing) || !input.planPriceVnd) return { paying: false, mrrVnd: 0, note: null };
+  const addon = input.addonMonthly.ok ? input.addonMonthly.vnd : 0;
+  return { paying: true, mrrVnd: input.planPriceVnd + addon, note: input.addonMonthly.ok ? null : "phần mua thêm không còn giá ở gói — không cộng" };
+}
+
 // ─────────────────────────── Dùng thử của cửa hàng TỰ ĐĂNG KÝ ───────────────────────────
 
 /**

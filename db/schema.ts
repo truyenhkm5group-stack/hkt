@@ -5161,6 +5161,54 @@ export const platformBillingPayments = pgTable(
   (t) => [uniqueIndex("platform_billing_payments_bank_ref_key").on(t.bankRef), check("platform_billing_payments_outcome_check", sql`${t.outcome} IN ('MATCHED','UNDERPAID','INVOICE_NOT_OPEN','NO_INVOICE')`)],
 );
 
+/**
+ * SỔ KINH TẾ SAAS (0203 · docs/productization/11_SAAS_METRICS_SPEC.md) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ * MỘT ảnh chụp mỗi (ngày giờ VN, tổ chức). Dòng hôm nay còn ghi lại được trong ngày; ngày đã qua ĐÓNG BĂNG — chỉ
+ * `lib/platform/saas-ledger.ts` ghi, và nó không bao giờ ghi ngày cũ. `mrr_vnd` NULL = CHƯA BIẾT, khác 0.
+ */
+export const platformSaasDaily = pgTable(
+  "platform_saas_daily",
+  {
+    day: date("day", { mode: "string" }).notNull(),
+    orgCode: text("org_code").notNull(),
+    orgStatus: text("org_status").notNull(),
+    isHome: boolean("is_home").notNull().default(false),
+    planKey: text("plan_key").notNull(),
+    billingEnabled: boolean("billing_enabled").notNull().default(false),
+    /** `lib/billing/rules.ts::BillingStandingKind` của ngày chụp. */
+    standing: text("standing").notNull(),
+    /** Tính vào MRR (tổ chức chạy · đang thu phí · chưa khoá · gói có giá). */
+    paying: boolean("paying").notNull().default(false),
+    mrrVnd: integer("mrr_vnd"),
+    /** Vì sao MRR chưa biết / thiếu một phần (phần mua thêm không còn giá…). */
+    mrrNote: text("mrr_note"),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_saas_daily_pkey", columns: [t.day, t.orgCode] }),
+    index("platform_saas_daily_org_day_idx").on(t.orgCode, t.day),
+    check("platform_saas_daily_mrr_check", sql`${t.mrrVnd} IS NULL OR ${t.mrrVnd} >= 0`),
+    check("platform_saas_daily_paying_check", sql`${t.paying} = false OR ${t.mrrVnd} IS NULL OR ${t.mrrVnd} > 0`),
+    check("platform_saas_daily_standing_check", sql`${t.standing} IN ('NOT_BILLED','ACTIVE','DUE_SOON','OVERDUE','LOCKED')`),
+  ],
+);
+
+/**
+ * MỐC KÍCH HOẠT (0203): GHI MỘT LẦN. `reached_at` = thời điểm của chứng từ có thật trong CSDL tổ chức (min created_at),
+ * không phải lúc máy quét thấy — `observed_at` mới là lúc thấy. Định nghĩa từng mốc: `lib/platform/saas-metrics.ts`.
+ */
+export const platformOrgMilestones = pgTable(
+  "platform_org_milestones",
+  {
+    orgCode: text("org_code").notNull(),
+    milestone: text("milestone").notNull(),
+    reachedAt: ts("reached_at").notNull(),
+    observedAt: ts("observed_at").notNull().defaultNow(),
+    source: text("source").notNull(),
+  },
+  (t) => [primaryKey({ name: "platform_org_milestones_pkey", columns: [t.orgCode, t.milestone] }), check("platform_org_milestones_key_check", sql`${t.milestone} ~ '^[A-Z][A-Z0-9_]{1,40}$'`)],
+);
+
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
 export const platformAuditLog = pgTable(
   "platform_audit_log",

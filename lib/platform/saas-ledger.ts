@@ -1,0 +1,271 @@
+import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { getDbFor, getPlatformDb, schema, type Db } from "@/db";
+import { addonMonthlyVnd, parseAddonPrices, parseAddonUnits } from "@/lib/billing/addons";
+import { billingStanding, mrrContribution, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
+import type { SessionUser } from "@/lib/auth/session";
+import { connectionStatusRows } from "@/lib/connectors/service";
+import { listPlans, planKeyOf } from "@/lib/entitlements/check";
+import { platformAudit } from "@/lib/platform/audit";
+import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
+import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
+import type { Organization } from "@/lib/platform/types";
+import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { rowsOf } from "@/lib/sql-rows";
+import {
+  ACTIVATION_MILESTONES,
+  CHANNEL_CONNECTOR_KEYS,
+  MILESTONE_SPECS,
+  parseCostDeclaration,
+  type ActivationMilestone,
+  type AiCost,
+  type PlatformCostDeclaration,
+  type SaasDailyRow,
+} from "@/lib/platform/saas-metrics";
+
+/**
+ * ═══════════ SỔ KINH TẾ SAAS — ĐƯỜNG ĐỌC / GHI DUY NHẤT (0203 · docs/productization/11_SAAS_METRICS_SPEC.md) ═══════════
+ *
+ * Mặt phẳng điều khiển (CSDL NHÀ). Ba việc:
+ *  1. `captureSaasSnapshot` — ảnh chụp MRR của HÔM NAY (giờ VN) cho mọi tổ chức, cùng công thức với bảng thu phí
+ *     (`mrrContribution`). Chỉ ghi ngày hôm nay — ngày đã qua là đóng băng, mã này không có đường nào ghi ngày cũ.
+ *  2. Quét mốc kích hoạt còn thiếu của tổ chức khách ACTIVE: mở CSDL tổ chức (`getDbFor`) để lấy min thời điểm của
+ *     chứng từ có thật. CHỈ đọc số đếm / mốc — không đọc nội dung hội thoại, tên, SĐT. Ghi một lần (`DO NOTHING`).
+ *  3. Khai chi phí nền tảng (hạ tầng / hỗ trợ) — người vận hành, bắt buộc lý do, nhật ký nền tảng.
+ * Lỗi của MỘT tổ chức không làm hỏng ảnh chụp của tổ chức khác — được trả về trong `errors`.
+ */
+
+export const PLATFORM_COSTS_KEY = "platform.economics.costs";
+
+type PlanRow = Awaited<ReturnType<typeof listPlans>>[number];
+
+function snapshotRow(org: Organization, plans: PlanRow[], sub: { billingEnabled: boolean; paidThrough: string | null; graceDays: number; addons: unknown } | undefined, day: string): SaasDailyRow & { mrrNote: string | null } {
+  const planKey = planKeyOf(org);
+  const plan = plans.find((p) => p.key === planKey);
+  const terms = sub ? { billingEnabled: sub.billingEnabled, paidThrough: sub.paidThrough, graceDays: sub.graceDays } : null;
+  const standing = billingStanding(terms, day).kind;
+  const monthly = addonMonthlyVnd(parseAddonUnits(sub?.addons), parseAddonPrices(plan?.addonPrices));
+  const c = mrrContribution({ isHome: org.isHome, orgStatus: org.status, standing, planPriceVnd: plan?.priceVnd ?? null, addonMonthly: monthly });
+  return { day, orgCode: org.code, orgStatus: org.status, isHome: org.isHome, planKey, billingEnabled: sub?.billingEnabled ?? false, standing, paying: c.paying, mrrVnd: c.mrrVnd, mrrNote: c.note };
+}
+
+export type SnapshotResult = { day: string; orgs: number; mrrVnd: number; milestonesAdded: number; errors: string[] };
+
+export async function captureSaasSnapshot(now: Date = new Date()): Promise<SnapshotResult> {
+  const day = vnDate(now);
+  const [orgs, plans] = await Promise.all([listOrganizations(), listPlans()]);
+  const pdb = await getPlatformDb();
+  const subs = new Map((await pdb.select().from(schema.platformSubscriptions)).map((s) => [s.orgCode, { billingEnabled: s.billingEnabled, paidThrough: s.paidThrough ?? null, graceDays: s.graceDays, addons: s.addons }]));
+  const rows = orgs.filter((o) => o.status !== "SETUP_FAILED").map((o) => snapshotRow(o, plans, subs.get(o.code), day));
+  const t = schema.platformSaasDaily;
+  for (const r of rows) {
+    const values = { day: r.day, orgCode: r.orgCode, orgStatus: r.orgStatus, isHome: r.isHome, planKey: r.planKey, billingEnabled: r.billingEnabled, standing: r.standing, paying: r.paying, mrrVnd: r.mrrVnd, mrrNote: r.mrrNote, capturedAt: now };
+    // Khoá (day, org): chỉ có thể trùng với dòng CỦA HÔM NAY — ảnh chụp cuối ngày thắng. Ngày cũ không bao giờ được ghi.
+    await pdb.insert(t).values(values).onConflictDoUpdate({ target: [t.day, t.orgCode], set: { ...values } });
+  }
+  const errors: string[] = [];
+  const milestonesAdded = await scanMilestones(orgs, errors);
+  return { day, orgs: rows.length, mrrVnd: rows.reduce((s, r) => s + (r.mrrVnd ?? 0), 0), milestonesAdded, errors };
+}
+
+/** Min thời điểm, bỏ qua giá trị không đọc được. */
+function minDate(values: readonly (Date | string | null | undefined)[]): Date | null {
+  let best: Date | null = null;
+  for (const v of values) {
+    if (!v) continue;
+    const d = v instanceof Date ? v : new Date(v);
+    if (Number.isNaN(d.getTime())) continue;
+    if (!best || d < best) best = d;
+  }
+  return best;
+}
+
+async function firstAt(db: Db, query: ReturnType<typeof sql>): Promise<Date | null> {
+  const [row] = rowsOf<{ at: Date | string | null }>(await db.execute(query));
+  return minDate([row?.at ?? null]);
+}
+
+/**
+ * Mốc của MỘT tổ chức trong CSDL của nó. Chỉ những mốc được hỏi (`want`). Câu SQL là hằng — tên bảng / cột không đến từ
+ * đầu vào. Bảng chưa có (tổ chức chưa migrate tới) ⇒ ném, người gọi ghi lỗi cho tổ chức đó.
+ */
+export async function readOrgMilestones(db: Db, want: ReadonlySet<ActivationMilestone>): Promise<Partial<Record<ActivationMilestone, Date>>> {
+  const out: Partial<Record<ActivationMilestone, Date>> = {};
+  if (want.has("CHANNEL_CONNECTED")) {
+    const keys = new Set<string>(CHANNEL_CONNECTOR_KEYS);
+    const at = minDate((await connectionStatusRows(db)).filter((c) => keys.has(c.connectorKey) && c.status === "ACTIVE").map((c) => c.activatedAt ?? c.updatedAt));
+    if (at) out.CHANNEL_CONNECTED = at;
+  }
+  const q: Partial<Record<ActivationMilestone, ReturnType<typeof sql>>> = {
+    CATALOG_IMPORTED: sql`select min(created_at) as at from products`,
+    FIRST_CONVERSATION: sql`select min(created_at) as at from sales_chat_conversations where channel <> 'TEST'`,
+    FIRST_AI_REPLY: sql`select min(created_at) as at from sales_chat_conversations where channel <> 'TEST' and ai_calls > 0`,
+    FIRST_AI_ORDER: sql`select min(o.created_at) as at from orders o join sales_chat_conversations c on c.order_id = o.id where c.channel <> 'TEST'`,
+  };
+  for (const [m, query] of Object.entries(q) as [ActivationMilestone, ReturnType<typeof sql>][]) {
+    if (!want.has(m)) continue;
+    const at = await firstAt(db, query);
+    if (at) out[m] = at;
+  }
+  return out;
+}
+
+async function scanMilestones(orgs: Organization[], errors: string[]): Promise<number> {
+  const pdb = await getPlatformDb();
+  const m = schema.platformOrgMilestones;
+  const have = new Map<string, Set<string>>();
+  for (const r of await pdb.select({ orgCode: m.orgCode, milestone: m.milestone }).from(m)) {
+    if (!have.has(r.orgCode)) have.set(r.orgCode, new Set());
+    have.get(r.orgCode)!.add(r.milestone);
+  }
+  // Ngày tạo tổ chức đọc thẳng sổ tổ chức (kiểu `Organization` đệm trong bộ nhớ không mang nó).
+  const createdAt = new Map((await pdb.select({ code: schema.platformOrganizations.code, at: schema.platformOrganizations.createdAt }).from(schema.platformOrganizations)).map((r) => [r.code, r.at]));
+  let added = 0;
+  for (const org of orgs) {
+    if (org.isHome || org.status !== "ACTIVE") continue;
+    const got = have.get(org.code) ?? new Set<string>();
+    const rows: { orgCode: string; milestone: string; reachedAt: Date; source: string }[] = [];
+    const signedUp = createdAt.get(org.code);
+    if (!got.has("SIGNED_UP") && signedUp) rows.push({ orgCode: org.code, milestone: "SIGNED_UP", reachedAt: signedUp, source: MILESTONE_SPECS.SIGNED_UP.source });
+    const want = new Set(ACTIVATION_MILESTONES.filter((k) => k !== "SIGNED_UP" && MILESTONE_SPECS[k].availability === "MEASURED" && !got.has(k)));
+    if (want.size) {
+      try {
+        const found = await readOrgMilestones(await getDbFor(org), want);
+        for (const [k, at] of Object.entries(found) as [ActivationMilestone, Date][]) rows.push({ orgCode: org.code, milestone: k, reachedAt: at, source: MILESTONE_SPECS[k].source });
+      } catch (e) {
+        errors.push(`[${org.code}] mốc kích hoạt: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+      }
+    }
+    if (rows.length) {
+      const r = await pdb.insert(m).values(rows).onConflictDoNothing().returning({ k: m.milestone });
+      added += r.length;
+    }
+  }
+  return added;
+}
+
+// ─────────────────────────── Đọc ───────────────────────────
+
+export async function readSaasDaily(fromDay: string): Promise<SaasDailyRow[]> {
+  const pdb = await getPlatformDb();
+  const t = schema.platformSaasDaily;
+  const rows = await pdb.select().from(t).where(gte(t.day, fromDay)).orderBy(t.day);
+  return rows.map((r) => ({ day: r.day, orgCode: r.orgCode, orgStatus: r.orgStatus, isHome: r.isHome, planKey: r.planKey, billingEnabled: r.billingEnabled, standing: r.standing as BillingStandingKind, paying: r.paying, mrrVnd: r.mrrVnd }));
+}
+
+export async function readFirstSnapshotDay(): Promise<string | null> {
+  const pdb = await getPlatformDb();
+  const [r] = await pdb.select({ d: sql<string | null>`min(${schema.platformSaasDaily.day})::text` }).from(schema.platformSaasDaily);
+  return r?.d ?? null;
+}
+
+export async function readMilestones(): Promise<Map<string, Partial<Record<ActivationMilestone, Date>>>> {
+  const pdb = await getPlatformDb();
+  const out = new Map<string, Partial<Record<ActivationMilestone, Date>>>();
+  for (const r of await pdb.select().from(schema.platformOrgMilestones)) {
+    if (!(ACTIVATION_MILESTONES as readonly string[]).includes(r.milestone)) continue;
+    if (!out.has(r.orgCode)) out.set(r.orgCode, {});
+    out.get(r.orgCode)![r.milestone as ActivationMilestone] = r.reachedAt;
+  }
+  return out;
+}
+
+/** Tổ chức có ít nhất một hoá đơn ĐÃ THU — sự thật bất biến, phân biệt dùng thử với đã rời. */
+export async function readEverPaidOrgs(): Promise<Set<string>> {
+  const pdb = await getPlatformDb();
+  const i = schema.platformInvoices;
+  const rows = await pdb.selectDistinct({ orgCode: i.orgCode }).from(i).where(eq(i.status, "PAID"));
+  return new Set(rows.map((r) => r.orgCode));
+}
+
+export type AiUsageByOrg = { platform: AiCost; byok: AiCost; home: AiCost; errors: number; requests: number };
+
+const zeroCost = (): AiCost => ({ costUsd: 0, requests: 0, unpricedRequests: 0 });
+
+/** Sổ AI theo tổ chức trong [from, to) — tiền chưa định giá đếm riêng, không bao giờ coi là 0 đồng. */
+export async function readAiUsageByOrg(from: Date, to: Date): Promise<Map<string, AiUsageByOrg>> {
+  const pdb = await getPlatformDb();
+  const a = schema.platformAiUsage;
+  const rows = await pdb
+    .select({
+      orgCode: a.orgCode,
+      source: a.billingSource,
+      requests: sql<number>`coalesce(sum(${a.requests}), 0)::int`,
+      costUsd: sql<number>`coalesce(sum(${a.costUsd}), 0)::float8`,
+      unpriced: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.costUsd} is null and ${a.status} = 'OK'), 0)::int`,
+      errors: sql<number>`coalesce(sum(${a.requests}) filter (where ${a.status} = 'ERROR'), 0)::int`,
+    })
+    .from(a)
+    .where(and(gte(a.at, from), lt(a.at, to)))
+    .groupBy(a.orgCode, a.billingSource);
+  const out = new Map<string, AiUsageByOrg>();
+  for (const r of rows) {
+    if (!out.has(r.orgCode)) out.set(r.orgCode, { platform: zeroCost(), byok: zeroCost(), home: zeroCost(), errors: 0, requests: 0 });
+    const o = out.get(r.orgCode)!;
+    const bucket = r.source === "PLATFORM" ? o.platform : r.source === "BYOK" ? o.byok : o.home;
+    bucket.costUsd += Number(r.costUsd);
+    bucket.requests += Number(r.requests);
+    bucket.unpricedRequests += Number(r.unpriced);
+    o.errors += Number(r.errors);
+    o.requests += Number(r.requests);
+  }
+  return out;
+}
+
+/** Lần đăng nhập gần nhất theo tổ chức (chỉ mục danh tính — chỉ mốc, không ai). */
+export async function readLastLoginByOrg(): Promise<Map<string, Date>> {
+  const pdb = await getPlatformDb();
+  const p = schema.platformIdentities;
+  const rows = await pdb.select({ orgCode: p.orgCode, at: sql<Date | string | null>`max(${p.lastUsedAt})` }).from(p).where(isNotNull(p.lastUsedAt)).groupBy(p.orgCode);
+  const out = new Map<string, Date>();
+  for (const r of rows) {
+    const d = minDate([r.at]);
+    if (d) out.set(r.orgCode, d);
+  }
+  return out;
+}
+
+// ─────────────────────────── Chi phí nền tảng chủ shop khai ───────────────────────────
+
+export async function readCostDeclaration(): Promise<PlatformCostDeclaration> {
+  const pdb = await getPlatformDb();
+  const row = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, PLATFORM_COSTS_KEY) });
+  return parseCostDeclaration(row?.value);
+}
+
+/** Trần một khoản khai / tháng — chặn gõ thừa số 0, không phải luật kinh doanh. */
+export const PLATFORM_COST_MAX_VND = 2_000_000_000;
+
+function moneyInput(raw: unknown): number | null | { error: string } {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(typeof raw === "string" ? raw.replace(/[.\s,₫]/g, "") : raw);
+  if (!Number.isInteger(n) || n < 0 || n > PLATFORM_COST_MAX_VND) return { error: `Số tiền phải là số nguyên VND từ 0 tới ${PLATFORM_COST_MAX_VND.toLocaleString("vi-VN")}.` };
+  return n;
+}
+
+export async function setPlatformCostDeclaration(user: SessionUser, raw: { infraMonthlyVnd?: unknown; supportMonthlyVnd?: unknown; reason?: unknown }): Promise<{ ok: true; message: string } | { error: string }> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { error: denial };
+  const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 500) : "";
+  if (reason.length < KILL_SWITCH_REASON_MIN) return { error: `Ghi căn cứ của con số (ít nhất ${KILL_SWITCH_REASON_MIN} ký tự) — nó vào nhật ký nền tảng.` };
+  const infra = moneyInput(raw.infraMonthlyVnd);
+  if (infra !== null && typeof infra === "object") return infra;
+  const support = moneyInput(raw.supportMonthlyVnd);
+  if (support !== null && typeof support === "object") return support;
+  const before = await readCostDeclaration();
+  const next = { infraMonthlyVnd: infra, supportMonthlyVnd: support, reason, updatedAt: new Date().toISOString(), updatedByEmail: user.email };
+  const pdb = await getPlatformDb();
+  const set = { value: next, updatedAt: new Date(), updatedBy: `${user.organization?.code ?? ""}:${user.id}`, updatedByEmail: user.email };
+  await pdb.insert(schema.platformSettings).values({ key: PLATFORM_COSTS_KEY, ...set }).onConflictDoUpdate({ target: schema.platformSettings.key, set });
+  const home = await getHomeOrganization();
+  await platformAudit({
+    action: "PLATFORM_COSTS_SET",
+    targetOrgCode: home.code,
+    subject: PLATFORM_COSTS_KEY,
+    before: { infraMonthlyVnd: before.infraMonthlyVnd, supportMonthlyVnd: before.supportMonthlyVnd },
+    after: { infraMonthlyVnd: infra, supportMonthlyVnd: support },
+    reason,
+    source: "UI",
+    actor: user.organization ? { orgCode: user.organization.code, userId: user.id, email: user.email } : null,
+  });
+  return { ok: true, message: "Đã lưu chi phí nền tảng — biên lợi nhuận tính lại ngay." };
+}

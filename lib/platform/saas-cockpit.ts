@@ -1,0 +1,269 @@
+import { desc, eq } from "drizzle-orm";
+import { getPlatformDb, schema } from "@/db";
+import type { SessionUser } from "@/lib/auth/session";
+import { BILLING_STANDING_LABEL, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
+import { listPlans } from "@/lib/entitlements/check";
+import { env } from "@/lib/env";
+import { listOrganizations } from "@/lib/platform/organizations";
+import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import {
+  captureSaasSnapshot,
+  readAiUsageByOrg,
+  readCostDeclaration,
+  readEverPaidOrgs,
+  readFirstSnapshotDay,
+  readLastLoginByOrg,
+  readMilestones,
+  readSaasDaily,
+  type AiUsageByOrg,
+} from "@/lib/platform/saas-ledger";
+import {
+  ACTIVATED_AT,
+  activationFunnel,
+  aiCostVnd,
+  monthRange,
+  periodMovement,
+  platformMargin,
+  SAAS_METRICS_VERSION,
+  tenantEconomics,
+  tenantLifecycle,
+  trendOf,
+  TENANT_LIFECYCLES,
+  type ActivationMilestone,
+  type FunnelStep,
+  type PeriodMovement,
+  type PlatformCostDeclaration,
+  type PlatformMargin,
+  type SaasDailyRow,
+  type TenantEconomics,
+  type TenantLifecycle,
+  type Trend,
+} from "@/lib/platform/saas-metrics";
+
+/**
+ * ═══════════ OWNER COCKPIT — DỮ LIỆU MÀN `/platform/saas` (docs/productization/12_OWNER_COCKPIT_SPEC.md) ═══════════
+ *
+ * Chỉ máy chủ, chỉ người vận hành nền tảng (`platformOperatorDenial` hỏi TRƯỚC mọi lượt đọc — S21). Không trả nội dung
+ * hội thoại, tên khách, khoá, email người dùng của khách: chỉ số tiền, số đếm, mốc thời gian theo MÃ tổ chức.
+ */
+
+/** Ảnh chụp hôm nay cũ hơn ngần này thì lượt mở trang / job `alerts` chụp lại (kèm quét mốc kích hoạt). */
+export const SNAPSHOT_REFRESH_MS = 30 * 60_000;
+/** Job `alerts` của nhà chạy 10 phút/lần — chỉ cần chụp vài lần mỗi ngày để có ảnh chụp cuối ngày gần đúng giờ. */
+export const SAAS_SNAPSHOT_JOB_EVERY_MS = 6 * 60 * 60_000;
+/** Cửa sổ đọc sổ AI / xu hướng. */
+export const AI_WINDOW_DAYS = 30;
+
+/**
+ * Chụp ảnh hôm nay nếu chưa có hoặc đã cũ — idempotent, an toàn khi gọi dồn (job `alerts` 10 phút/lần, lượt mở trang).
+ * Trả `null` khi ảnh chụp còn mới.
+ */
+export async function ensureSaasSnapshot(now: Date = new Date(), maxAgeMs: number = SNAPSHOT_REFRESH_MS) {
+  const pdb = await getPlatformDb();
+  const t = schema.platformSaasDaily;
+  const [last] = await pdb.select({ at: t.capturedAt }).from(t).where(eq(t.day, vnDate(now))).orderBy(desc(t.capturedAt)).limit(1);
+  if (last && now.getTime() - last.at.getTime() < maxAgeMs) return null;
+  return captureSaasSnapshot(now);
+}
+
+/** Lượt ké job `alerts` của nhà: một câu cho chi tiết lượt chạy, `null` khi ảnh chụp còn mới. Không bao giờ ném. */
+export async function saasSnapshotForJob(now: Date = new Date()): Promise<string | null> {
+  try {
+    const r = await ensureSaasSnapshot(now, SAAS_SNAPSHOT_JOB_EVERY_MS);
+    if (!r) return null;
+    return `sổ SaaS ${r.day}: ${r.orgs} tổ chức, MRR ${r.mrrVnd.toLocaleString("vi-VN")} ₫, +${r.milestonesAdded} mốc${r.errors.length ? ` (lỗi: ${r.errors.slice(0, 2).join(" | ")})` : ""}`;
+  } catch (e) {
+    return `sổ SaaS hỏng: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`;
+  }
+}
+
+export type TenantRow = {
+  code: string;
+  name: string;
+  status: string;
+  isHome: boolean;
+  templateKey: string | null;
+  planKey: string;
+  planName: string;
+  standing: BillingStandingKind;
+  standingLabel: string;
+  lifecycle: TenantLifecycle;
+  economics: TenantEconomics;
+  byokAiCostUsd: number;
+  homeAiCostVnd: number;
+  aiRequests30d: number;
+  aiTrend: Trend;
+  /** Lỗi / tổng lượt AI 30 ngày; `null` khi chưa có lượt nào. */
+  aiErrorRate: number | null;
+  lastLoginAt: string | null;
+  milestonesReached: number;
+  activated: boolean;
+  /** Số ngày từ lúc tạo tới mốc «đã kích hoạt» — `null` khi chưa tới / chưa có mốc tạo. */
+  daysToActivation: number | null;
+  daysToFirstAiOrder: number | null;
+};
+
+export type OwnerCockpit = {
+  generatedAt: string;
+  today: string;
+  version: string;
+  ledgerSince: string | null;
+  usdToVnd: number;
+  headline: {
+    mrrVnd: number;
+    arrVnd: number;
+    tenants: number;
+    payingTenants: number;
+    arpaVnd: number | null;
+    byLifecycle: Record<TenantLifecycle, number>;
+  };
+  thisMonth: { label: string; movement: PeriodMovement };
+  lastMonth: { label: string; movement: PeriodMovement };
+  margin: PlatformMargin & { aiComplete: boolean; windowDays: number };
+  ai: { requests: number; platformCostVnd: number; byokCostUsd: number; homeCostVnd: number; unpricedRequests: number; errorRate: number | null; tenantsUsingAi: number };
+  activation: FunnelStep[];
+  activationOrgs: number;
+  tenants: TenantRow[];
+  costs: PlatformCostDeclaration;
+  captureErrors: string[];
+};
+
+const DAY = 86_400_000;
+
+function prevMonthOf(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+const daysBetween = (a: Date | undefined, b: Date | undefined) => (a && b ? Math.max(0, (b.getTime() - a.getTime()) / DAY) : null);
+
+function sumAi(rows: Iterable<AiUsageByOrg>) {
+  let requests = 0;
+  let errors = 0;
+  const platform = { costUsd: 0, requests: 0, unpricedRequests: 0 };
+  let byok = 0;
+  let home = 0;
+  let unpriced = 0;
+  for (const r of rows) {
+    requests += r.requests;
+    errors += r.errors;
+    platform.costUsd += r.platform.costUsd;
+    platform.requests += r.platform.requests;
+    platform.unpricedRequests += r.platform.unpricedRequests;
+    byok += r.byok.costUsd;
+    home += r.home.costUsd;
+    unpriced += r.platform.unpricedRequests + r.byok.unpricedRequests + r.home.unpricedRequests;
+  }
+  return { requests, errors, platform, byok, home, unpriced };
+}
+
+export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()): Promise<{ ok: true; value: OwnerCockpit } | { ok: false; error: string }> {
+  const denial = platformOperatorDenial(user);
+  if (denial) return { ok: false, error: denial };
+  const captured = await ensureSaasSnapshot(now).catch((e: unknown) => ({ errors: [`Chụp ảnh hôm nay hỏng: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`] }));
+  const today = vnDate(now);
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = prevMonthOf(thisMonth);
+  const usdToVnd = env.facebook.usdToVnd;
+  const windowFrom = new Date(now.getTime() - AI_WINDOW_DAYS * DAY);
+  const [orgs, plans, ledgerSince, daily, milestones, everPaid, ai30, aiRecent, aiPrev, lastLogin, costs] = await Promise.all([
+    listOrganizations(),
+    listPlans(),
+    readFirstSnapshotDay(),
+    readSaasDaily(`${prevMonthOf(lastMonth)}-01`),
+    readMilestones(),
+    readEverPaidOrgs(),
+    readAiUsageByOrg(windowFrom, now),
+    readAiUsageByOrg(new Date(now.getTime() - 7 * DAY), now),
+    readAiUsageByOrg(new Date(now.getTime() - 14 * DAY), new Date(now.getTime() - 7 * DAY)),
+    readLastLoginByOrg(),
+    readCostDeclaration(),
+  ]);
+
+  const latest = new Map<string, SaasDailyRow>();
+  for (const r of daily) if (r.day <= today && (!latest.has(r.orgCode) || latest.get(r.orgCode)!.day < r.day)) latest.set(r.orgCode, r);
+
+  const byLifecycle = Object.fromEntries(TENANT_LIFECYCLES.map((k) => [k, 0])) as Record<TenantLifecycle, number>;
+  const tenants: TenantRow[] = [];
+  let mrr = 0;
+  let paying = 0;
+  const activationOrgs: { orgCode: string; reached: Partial<Record<ActivationMilestone, Date>> }[] = [];
+  for (const o of orgs) {
+    if (o.status === "SETUP_FAILED") continue;
+    const snap = latest.get(o.code);
+    const planKey = snap?.planKey ?? (o.isHome ? "internal" : (o.plan ?? "trial"));
+    const standing: BillingStandingKind = snap?.standing ?? "NOT_BILLED";
+    const lifecycle = snap ? tenantLifecycle(snap, everPaid.has(o.code)) : o.isHome ? "INTERNAL" : "FREE";
+    if (o.status !== "ARCHIVED") byLifecycle[lifecycle] += 1;
+    const mrrVnd = snap ? snap.mrrVnd : null;
+    if (!o.isHome && snap?.paying) {
+      mrr += snap.mrrVnd ?? 0;
+      paying += 1;
+    }
+    const usage = ai30.get(o.code);
+    const recent = aiRecent.get(o.code)?.requests ?? 0;
+    const previous = aiPrev.get(o.code)?.requests ?? 0;
+    const reached = milestones.get(o.code) ?? {};
+    if (!o.isHome && o.status !== "ARCHIVED") activationOrgs.push({ orgCode: o.code, reached });
+    tenants.push({
+      code: o.code,
+      name: o.name,
+      status: o.status,
+      isHome: o.isHome,
+      templateKey: o.templateKey,
+      planKey,
+      planName: plans.find((p) => p.key === planKey)?.name ?? planKey,
+      standing,
+      standingLabel: BILLING_STANDING_LABEL[standing],
+      lifecycle,
+      economics: tenantEconomics(o.isHome ? null : mrrVnd, usage?.platform ?? { costUsd: 0, requests: 0, unpricedRequests: 0 }, usdToVnd),
+      byokAiCostUsd: usage?.byok.costUsd ?? 0,
+      homeAiCostVnd: aiCostVnd(usage?.home ?? { costUsd: 0, requests: 0, unpricedRequests: 0 }, usdToVnd).vnd,
+      aiRequests30d: usage?.requests ?? 0,
+      aiTrend: trendOf(recent, previous),
+      aiErrorRate: usage && usage.requests > 0 ? usage.errors / usage.requests : null,
+      lastLoginAt: lastLogin.get(o.code)?.toISOString() ?? null,
+      milestonesReached: Object.keys(reached).length,
+      activated: Boolean(reached[ACTIVATED_AT]),
+      daysToActivation: daysBetween(reached.SIGNED_UP, reached[ACTIVATED_AT]),
+      daysToFirstAiOrder: daysBetween(reached.SIGNED_UP, reached.FIRST_AI_ORDER),
+    });
+  }
+  tenants.sort((a, b) => Number(a.isHome) - Number(b.isHome) || (b.economics.mrrVnd ?? -1) - (a.economics.mrrVnd ?? -1) || b.aiRequests30d - a.aiRequests30d || a.code.localeCompare(b.code));
+
+  const tenantAi = sumAi([...ai30.entries()].filter(([code]) => !orgs.find((o) => o.code === code)?.isHome).map(([, v]) => v));
+  const allAi = sumAi(ai30.values());
+  const platformAi = aiCostVnd(tenantAi.platform, usdToVnd);
+  const tenantCount = orgs.filter((o) => !o.isHome && o.status !== "ARCHIVED" && o.status !== "SETUP_FAILED").length;
+  const tm = monthRange(thisMonth);
+  const lm = monthRange(lastMonth);
+  return {
+    ok: true,
+    value: {
+      generatedAt: now.toISOString(),
+      today,
+      version: SAAS_METRICS_VERSION,
+      ledgerSince,
+      usdToVnd,
+      headline: { mrrVnd: mrr, arrVnd: mrr * 12, tenants: tenantCount, payingTenants: paying, arpaVnd: paying > 0 ? Math.round(mrr / paying) : null, byLifecycle },
+      thisMonth: { label: thisMonth, movement: periodMovement(daily, tm.from, today < tm.to ? today : tm.to) },
+      lastMonth: { label: lastMonth, movement: periodMovement(daily, lm.from, lm.to) },
+      margin: { ...platformMargin(mrr, platformAi.vnd, costs), aiComplete: platformAi.complete, windowDays: AI_WINDOW_DAYS },
+      ai: {
+        requests: allAi.requests,
+        platformCostVnd: platformAi.vnd,
+        byokCostUsd: allAi.byok,
+        homeCostVnd: Math.round(allAi.home * usdToVnd),
+        unpricedRequests: allAi.unpriced,
+        errorRate: allAi.requests > 0 ? allAi.errors / allAi.requests : null,
+        tenantsUsingAi: [...ai30.entries()].filter(([code, v]) => v.requests > 0 && !orgs.find((o) => o.code === code)?.isHome).length,
+      },
+      activation: activationFunnel(activationOrgs),
+      activationOrgs: activationOrgs.length,
+      tenants,
+      costs,
+      captureErrors: captured && "errors" in captured ? captured.errors : [],
+    },
+  };
+}

@@ -721,6 +721,13 @@ export const NAV_MODULES = [
     permission: "platform:operate",
     why: "Mọi tổ chức trên nền tảng: sức khoẻ CSDL, lỗi cấu hình module. Chỉ người của tổ chức nhà — nó nhìn xuyên qua ranh giới giữa các tổ chức.",
   },
+  {
+    href: "/platform/saas",
+    label: "Kinh tế nền tảng",
+    zone: "SYSTEM",
+    permission: "platform:operate",
+    why: "MRR / ARR, biến động Mới · Mở rộng · Thu hẹp · Rời bỏ, GRR / NRR, biên lợi nhuận, chi phí AI và thời gian kích hoạt của từng cửa hàng — kinh tế của chính nền tảng. Chỉ người của tổ chức nhà.",
+  },
 ] as const satisfies readonly ModuleSpec[];
 
 /**

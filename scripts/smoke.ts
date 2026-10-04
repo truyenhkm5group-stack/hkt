@@ -264,6 +264,8 @@ const ROUTES = [
   // AI dựng cấu hình (Phase 8): lịch sử bản nháp đọc `ai_blueprint_drafts`; KHÔNG gọi AI khi mở trang.
   "/settings/ai-builder",
   "/platform",
+  // Owner Cockpit (0203): đọc sổ platform_saas_daily + mốc kích hoạt; mở trang có thể chụp ảnh hôm nay (≤ 1 lần / 30 phút).
+  "/platform/saas",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
 

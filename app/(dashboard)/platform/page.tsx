@@ -94,6 +94,11 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Hệ thống"
         title="Vận hành nền tảng"
+        actions={
+          <Link href="/platform/saas" className="text-sm font-medium text-primary hover:underline">
+            Kinh tế nền tảng (MRR · biên · kích hoạt) →
+          </Link>
+        }
         description={`${health.organizations.length} tổ chức · ${withProblems.length ? `${withProblems.length} tổ chức có vấn đề` : "không phát hiện vấn đề"} · đo lúc ${formatDateTime(new Date(health.checkedAt))}`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">

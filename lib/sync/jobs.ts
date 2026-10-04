@@ -1,3 +1,4 @@
+import { saasSnapshotForJob } from "@/lib/platform/saas-cockpit";
 import { phoneRiskOrderRows } from "@/lib/alerts/risk";
 import { syncOrgPancake } from "@/lib/integrations/pancake/org";
 import { loadAlertConfig } from "@/lib/alerts/config";
@@ -846,13 +847,16 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     run: (o) =>
       runSyncJob({ source: "ERP", job: "alerts", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await evaluateAlerts();
+        // Sổ kinh tế SaaS (0199): ké lượt `alerts` của TỔ CHỨC NHÀ để chụp ảnh MRR hôm nay + quét mốc kích hoạt — không thêm
+        // lịch chạy nào. Idempotent, tối đa một lượt mỗi 6 giờ; hỏng thì nói trong chi tiết, không chặn cảnh báo.
+        const saas = (await currentOrganization()).isHome ? await saasSnapshotForJob() : null;
         // Bot lên đơn (container chatbot): đơn kiểm đủ số lần mà vẫn thiếu thông tin → chuông ERP. Máy chưa nối bot
         // (thiếu CHATBOT_ADMIN_TOKEN) thì bỏ qua; hỏi bot hỏng thì nêu trong chi tiết lượt chạy, không chặn cảnh báo khác.
         const botLenDon = chatbotConfig().token ? await syncOrderBotReviewAlerts().catch((e: unknown) => ({ created: 0, resolved: 0, error: e instanceof Error ? e.message : String(e) })) : null;
         ctx.summary.imported = r.created;
         ctx.summary.updated = r.resolved;
         if (r.lark.error || r.telegram.error) ctx.summary.warning = `gửi cảnh báo hỏng: ${[r.lark.error && `Lark ${r.lark.error}`, r.telegram.error && `Telegram ${r.telegram.error}`].filter(Boolean).join(" · ")}`.slice(0, 500);
-        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""}${r.workflows.runs || r.workflows.executed ? ` · luật tự động ${r.workflows.runs} lượt / chạy thật ${r.workflows.executed} / chờ duyệt ${r.workflows.waiting}${r.workflows.failed ? ` / hỏng ${r.workflows.failed}` : ""}` : ""}${r.workflows.error ? ` · luật tự động lỗi: ${r.workflows.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}${botLenDon ? ` · bot lên đơn: báo ${botLenDon.created} / đóng ${botLenDon.resolved}${botLenDon.error ? ` (lỗi: ${botLenDon.error})` : ""}` : ""}`.slice(0, 900);
+        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""}${r.workflows.runs || r.workflows.executed ? ` · luật tự động ${r.workflows.runs} lượt / chạy thật ${r.workflows.executed} / chờ duyệt ${r.workflows.waiting}${r.workflows.failed ? ` / hỏng ${r.workflows.failed}` : ""}` : ""}${r.workflows.error ? ` · luật tự động lỗi: ${r.workflows.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}${botLenDon ? ` · bot lên đơn: báo ${botLenDon.created} / đóng ${botLenDon.resolved}${botLenDon.error ? ` (lỗi: ${botLenDon.error})` : ""}` : ""}${saas ? ` · ${saas}` : ""}`.slice(0, 900);
         return { ...r, orderBot: botLenDon };
       }),
   },
