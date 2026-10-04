@@ -256,7 +256,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
       { key: "logistics.carrier_import", label: "Nhập tệp ĐVVC", defaultEnabled: true, why: "`/import-vtp` — chạy thử được và mọi lượt đều có vết (luật 49)." },
       { key: "logistics.operations", label: "Bàn vận hành", defaultEnabled: true, why: "`/operations` — tuổi chặng, trước khi giao, hoàn tất đơn." },
     ],
-    routes: ["/shipments", "/operations", "/import-vtp", "/reports/stock-wait", "/api/shipments"],
+    routes: ["/shipments", "/operations", "/import-vtp", "/reports/stock-wait", "/api/shipments", "/api/carriers"],
     permissions: ["shipments:view", "shipments:manage"],
     why: "Đơn rời kho tới tay khách. `/reports/stock-wait` chỉ chuyển hướng sang `/shipments/stock-wait` nên thuộc về đây, không thuộc Tài chính.",
   },

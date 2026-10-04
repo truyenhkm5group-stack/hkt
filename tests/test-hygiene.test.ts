@@ -134,6 +134,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá BỊA của kết nối «Pancake POS của tổ chức» trong tổ chức thử và để job / webhook đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Pancake POS. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/carrier-ghn.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «GHN của tổ chức (tạo vận đơn)» trong tổ chức thử, để lõi tạo vận đơn đọc lại nó và để máy chủ cấp token webhook theo tổ chức (cùng cách carrier-vtp); fetch là bản giả đóng vai online-gateway.ghn.vn. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/carrier-ghtk.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «GHTK của tổ chức (tạo vận đơn)» trong tổ chức thử, để lõi tạo vận đơn đọc lại nó và để máy chủ cấp token webhook theo tổ chức (cùng cách carrier-ghn); fetch là bản giả đóng vai services.giaohangtietkiem.vn. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/carrier-vtp.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu mật khẩu BỊA của kết nối «Viettel Post của tổ chức (tạo vận đơn)» trong tổ chức thử và để lõi tạo vận đơn đọc lại nó (cùng cách pancake-pos-org); fetch là bản giả đóng vai partner.viettelpost.vn. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/viettelpost-org.test.ts":

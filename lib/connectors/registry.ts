@@ -99,7 +99,7 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG" | "ZALO_OA";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG" | "ZALO_OA" | "GHTK_ORG";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
@@ -325,6 +325,44 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     code: ["lib/constants/carrier-ghn.ts", "lib/integrations/ghn/client.ts", "lib/integrations/ghn/webhook.ts", "lib/carriers/adapters/ghn.ts", "app/api/webhooks/ghn-org/[token]/route.ts", "components/connectors/org-ghn-panel.tsx"],
     consumers: ["lib/carriers/adapters/ghn.ts::GHN_ADAPTER.open"],
     why: "Tạo vận đơn GHN từ đơn tạo trong ERP bằng token của CHÍNH tổ chức — shop không cần Pancake POS. Địa giới mới (tỉnh + xã): ERP so khớp tên trên đơn với danh mục chính thức của GHN, không khớp duy nhất thì người chọn. Kiểm tra = GET danh sách shop của token, đòi ShopId đã khai nằm trong đó — chỉ đọc, chỉ tới online-gateway.ghn.vn. client_order_code ⇒ gửi lại cùng mã không đẻ đơn thứ hai. Webhook trạng thái theo tổ chức; mã cuối là chứng từ (ORDER_OUTCOME 4.1).",
+  },
+  /*
+    GIAO HÀNG TIẾT KIỆM CỦA TỔ CHỨC (POS tự chủ · docs/verticals/pos-tu-chu.md): token API + mã shop của CHÍNH shop
+    (khachhang.giaohangtietkiem.vn → Thông tin shop → Cấu hình API). Tính cước · tạo · huỷ · in (PDF chuyển tiếp qua ERP);
+    hành trình về qua webhook theo tổ chức. Chủ shop duyệt nối mọi hãng và chốt mã cuối GHTK là chứng từ (04/10/2026 — 4.1).
+  */
+  {
+    key: "ghtk-carrier",
+    label: "GHTK của tổ chức (tạo vận đơn)",
+    vendor: "GHTK",
+    kind: "SHIPPING",
+    capabilities: ["create_label", "update_order", "webhook_status"],
+    auth: "API_KEY",
+    settings: [
+      { key: "token", label: "Token API GHTK", type: "text", secret: true, required: true, hint: "khachhang.giaohangtietkiem.vn → Thông tin shop → Cấu hình API → tạo token (cấp quyền đăng đơn, tính phí, huỷ, in nhãn) → chép.", pattern: "^[A-Za-z0-9._-]{20,120}$", maxLength: 120 },
+      { key: "clientSource", label: "Mã shop GHTK (X-Client-Source)", type: "text", secret: false, required: true, hint: "Mã shop hiện ở góc trên web khách hàng GHTK (vd S123456)", pattern: "^[A-Za-z0-9._-]{1,40}$", maxLength: 40 },
+      { key: "pickName", label: "Tên nơi lấy hàng", type: "text", secret: false, required: true, hint: "Tên shop / kho in trên nhãn", maxLength: 100 },
+      { key: "pickTel", label: "SĐT nơi lấy hàng", type: "text", secret: false, required: true, hint: "10–11 số, bắt đầu bằng 0", pattern: "^0[0-9]{9,10}$", maxLength: 11 },
+      { key: "pickAddress", label: "Địa chỉ lấy hàng", type: "text", secret: false, required: true, hint: "Số nhà, đường (không cần ghi tỉnh / xã — khai ở hai ô dưới)", maxLength: 200 },
+      { key: "pickProvince", label: "Tỉnh / thành lấy hàng", type: "text", secret: false, required: true, hint: "Tên theo địa giới mới, vd Hà Nội", maxLength: 80 },
+      { key: "pickWard", label: "Xã / phường lấy hàng", type: "text", secret: false, required: true, hint: "Tên theo địa giới mới, vd Phường Hoàn Kiếm", maxLength: 80 },
+      { key: "defaultNote", label: "Ghi chú mặc định cho bưu tá", type: "text", secret: false, required: false, hint: "Tối đa 120 ký tự — vd Cho xem hàng, gọi trước khi giao", maxLength: 120 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — token mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/ghtk-org/[token]",
+      verify: "Token «<mã tổ chức>.<chữ ký HMAC>» trong ĐƯỜNG DẪN (khoá con dẫn xuất từ PLATFORM_SECRETS_KEY), so hằng thời gian trước khi đọc body; tổ chức phải ACTIVE và bật module Giao vận",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "webhookDedupeKey(GHTK, [label_id, status_id, action_time])",
+      binding: "GHTK_ORG",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testGhtkCarrier",
+    module: "logistics",
+    code: ["lib/constants/carrier-ghtk.ts", "lib/integrations/ghtk/client.ts", "lib/integrations/ghtk/webhook.ts", "lib/carriers/adapters/ghtk.ts", "app/api/webhooks/ghtk-org/[token]/route.ts", "app/api/carriers/label/route.ts", "components/connectors/org-ghtk-panel.tsx"],
+    consumers: ["lib/carriers/adapters/ghtk.ts::GHTK_ADAPTER.open"],
+    why: "Tạo vận đơn GHTK từ đơn tạo trong ERP bằng token của CHÍNH tổ chức — shop không cần Pancake POS. Địa giới mới (tỉnh + xã, không huyện — tài liệu Đăng đơn ver 1.5). Kiểm tra = GET danh sách kho lấy hàng — chỉ đọc, chỉ tới services.giaohangtietkiem.vn. order.id = mã ERP của lần gửi ⇒ gửi lại cùng mã nhận ORDER_ID_EXIST kèm mã đơn đã có, không đẻ đơn thứ hai. Nhãn PDF chuyển tiếp qua ERP, token không ra trình duyệt. Webhook theo tổ chức; mã cuối là chứng từ (ORDER_OUTCOME 4.1).",
   },
   {
     key: "viettelpost",

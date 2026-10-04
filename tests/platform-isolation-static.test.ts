@@ -283,6 +283,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
     "Kiểm tra kết nối THEO TỔ CHỨC (Phase 9): bí mật do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy — không đọc biến môi trường chứa khoá nào (riêng «meta-ads-org» đọc phiên bản Graph API công khai của nền tảng); đích là các máy chủ cố định trong mã (Lark · api.telegram.org · Zalo · pages.fm · Anthropic/OpenAI/Gemini · graph.facebook.com · partner.viettelpost.vn · online-gateway.ghn.vn), không theo chuyển hướng.",
   "lib/integrations/ghn/client.ts":
     "Tạo / huỷ / in vận đơn GHN + đọc danh mục tỉnh / xã bằng token của CHÍNH tổ chức (kết nối «ghn-carrier», token do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số online-gateway.ghn.vn, không theo chuyển hướng, không giữ token.",
+  "lib/integrations/ghtk/client.ts":
+    "Tạo / tính phí / huỷ / tải nhãn PDF vận đơn GHTK bằng token của CHÍNH tổ chức (kết nối «ghtk-carrier», token do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số services.giaohangtietkiem.vn, không theo chuyển hướng, không giữ token.",
   "lib/integrations/viettelpost/carrier-org.ts":
     "Tạo / huỷ / in vận đơn Viettel Post bằng tài khoản của CHÍNH tổ chức (kết nối «viettelpost-carrier», mật khẩu do lib/connectors/service.ts giải mã từ org_connections trong ngữ cảnh tổ chức) — không đọc biến môi trường nào của nhà; chặn bằng assertConnectionOwner TRƯỚC mỗi lượt gửi, đích hằng số partner.viettelpost.vn, không theo chuyển hướng, không giữ token.",
 };

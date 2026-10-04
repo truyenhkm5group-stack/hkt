@@ -137,6 +137,44 @@ Thêm hãng = thêm một adapter vào `lib/carriers/registry.ts`, lõi không �
   «im lặng» và độ tươi giao vận, nhưng chưa tự mở ca chăm sóc.
 - **Đối soát COD của GHN** (gói `cod` / `CODTransferDate`) chưa thành chứng từ tiền. Tiền thật vẫn theo chứng từ thanh toán.
 
+## P3b — GHTK của tổ chức (kết nối `ghtk-carrier`)
+
+### Cách bật
+
+1. Cài đặt → Kết nối → nhóm «Vận chuyển» → «GHTK của tổ chức (tạo vận đơn)».
+   - Nhập Token API (khachhang.giaohangtietkiem.vn → Thông tin shop → Cấu hình API) và mã shop (`X-Client-Source`).
+   - Khai nơi lấy hàng: tên, SĐT, địa chỉ, tỉnh, xã (địa giới mới).
+   - Lưu → Kiểm tra → Bật. «Kiểm tra» chỉ đọc danh sách kho lấy hàng của shop trên GHTK.
+2. Khung «GHTK của tổ chức — webhook trạng thái»: chép URL, dán vào web khách hàng GHTK. Không thấy ô webhook thì gửi URL
+   cho hỗ trợ GHTK khai giúp.
+3. Trên đơn «Đã xác nhận»: «Tạo vận đơn GHTK». Hai ô **Tỉnh / thành** và **Xã / phường** là bắt buộc.
+
+### Luật riêng của GHTK
+
+- **Địa giới mới.** Tài liệu Đăng đơn ver 1.5 (đọc 04/10/2026) khai `province` + `ward` bắt buộc, `district` không bắt
+  buộc. ERP không gửi huyện.
+  - GHTK không công bố danh mục tỉnh / xã qua API. ERP gửi đúng tên người xác nhận, không tự sửa; tên sai thì GHTK từ chối.
+  - Tài liệu đòi `street` hoặc `hamlet`. ERP không tách tên đường nên gửi `hamlet = «Khác»`, địa chỉ chi tiết ở `address`.
+- **Chống trùng.** `order.id` = mã ERP của lần gửi. Gửi lại cùng mã ⇒ GHTK trả `ORDER_ID_EXIST` kèm mã đơn đã có.
+  - Lõi coi đó là đơn của chính lần gửi này, nên «Thử lại» an toàn như GHN.
+- **Cân và cước.** Cân tính bằng gam (`weight_option = gram`). Cước shop trả (`is_freeship = 1`). Thu hộ = số khách còn
+  phải trả. Bảng cước hỏi hai cách chở (đường bộ / bay), cách nào GHTK nói không phục vụ thì không hiện.
+- **Nhãn in là tệp PDF sau token.** ERP chuyển tiếp qua `/api/carriers/label` (cần đăng nhập + quyền vận đơn). Mã phải
+  là của một lần gửi ERP tạo bằng GHTK. Token không bao giờ ra trình duyệt.
+  - GHTK in một đơn mỗi lượt. In hàng loạt mở trang `/orders/carrier-labels` liệt kê từng nhãn.
+- **Huỷ** theo mã GHTK, chỉ khi GHTK chưa lấy hàng (tài liệu: trạng thái 1 · 2 · 12). Chặng «Đã huỷ» về theo webhook `-1`.
+- **Webhook theo tổ chức** (token HMAC trong đường dẫn). Thân form-urlencoded.
+  - Chống trùng theo `label_id + status_id + action_time`.
+  - Mốc `action_time` giữ dấu «+» của múi giờ (mẫu tài liệu gửi «+» trần).
+  - Mã «shipper báo» (45 · 49 · 123 · 127 · 128 · 410) chưa khai trong bảng ⇒ lưu, không kết luận.
+  - `pick_money` là số GHTK định thu, không phải số thực thu. `return_part_package = 1` vào ghi chú sự kiện.
+
+### Chưa kiểm trên tài khoản thật
+
+- Lượt tạo đơn thật đầu tiên là HUMAN GATE: đơn vị cân của từng dòng hàng khi `weight_option = gram`, và việc GHTK có cần
+  `X-Client-Source` cho shop tự tích hợp hay không, chỉ trả lời được trên tài khoản thật.
+- Chăm sóc vận đơn và đối soát COD chưa nối cho GHTK (giống GHN).
+
 ## P4 — Shop đến từ Pancake: «Chuyển hẳn sang ERP» và «huỷ vận đơn ≠ huỷ đơn»
 
 Hai quyết định của chủ shop ngày 04/10/2026, đặc tả ở `docs/business-rules/ORDER_OUTCOME.md` mục 11.3 và 11.5.
@@ -167,7 +205,5 @@ Người bán đang chat với khách thì tạo đơn tại chỗ, không chép
 
 ## Kế tiếp
 
-- **P3b.** GHTK: cùng lõi, cùng bảng mã đã khai trong đặc tả (mục 4.1).
-  - Tài liệu chưa xác nhận GHTK nhận địa giới mới. Phải thử trên staging trước khi bật cho shop.
 - **J&T.** Cần shop đăng ký đối tác trên open.jtexpress.vn (xét duyệt 1–3 ngày, xin chạy thật từng API, mã khách hàng
   lấy ở bưu cục). Đây là HUMAN GATE.

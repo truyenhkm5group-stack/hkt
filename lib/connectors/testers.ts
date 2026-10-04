@@ -24,6 +24,7 @@ import { PANCAKE_POS_API, PANCAKE_POS_API_KEY_PATTERN, PANCAKE_POS_SHOP_ID_PATTE
 import { isVtpPhone, normalizeVtpPhone, VTP_PARTNER_API } from "@/lib/constants/carrier-vtp";
 import { checkPage, messengerApp } from "@/lib/integrations/messenger/graph";
 import { GHN_API, GHN_SHOP_ID_PATTERN, GHN_TOKEN_PATTERN } from "@/lib/constants/carrier-ghn";
+import { GHTK_API, GHTK_CLIENT_SOURCE_PATTERN, GHTK_TOKEN_PATTERN } from "@/lib/constants/carrier-ghtk";
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
@@ -609,6 +610,33 @@ export async function testGhnCarrier(input: { secrets: Record<string, string>; s
   }
 }
 
+/*
+  ═══════════ GHTK CỦA TỔ CHỨC — TẠO VẬN ĐƠN (ghtk-carrier) ═══════════
+
+  `GET /services/shipment/list_pick_add` (Danh sách kho hàng) bằng token — CHỈ ĐỌC, không tạo đơn nào. Đạt ⇔ GHTK nhận token
+  (`success: true`). In số kho lấy hàng shop đã khai ở GHTK để người bấm đối chiếu với nơi lấy hàng khai ở ERP. Địa chỉ hằng
+  số, không theo chuyển hướng, token bị che trong mọi câu.
+*/
+export async function testGhtkCarrier(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const token = (input.secrets.token ?? "").trim();
+  const clientSource = (input.settings.clientSource ?? "").trim();
+  const hide = [token];
+  if (!GHTK_TOKEN_PATTERN.test(token)) return { ok: false, message: "Token GHTK không đúng dạng — không gọi." };
+  if (!GHTK_CLIENT_SOURCE_PATTERN.test(clientSource)) return { ok: false, message: "Mã shop GHTK (X-Client-Source) không đúng dạng — không gọi." };
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const res = await fetchImpl(`${GHTK_API}/services/shipment/list_pick_add`, { method: "GET", headers: { accept: "application/json", Token: token, "X-Client-Source": clientSource }, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status >= 300 && res.status < 400) return { ok: false, message: `GHTK trả chuyển hướng HTTP ${res.status} — không theo.` };
+    const body = (await readCapped(res)) as { success?: unknown; message?: unknown; data?: { pick_address_id?: unknown; address?: unknown; pick_name?: unknown }[] } | null;
+    if (!body || body.success !== true) return { ok: false, message: scrubSecrets(`GHTK không nhận token: ${typeof body?.message === "string" && body.message ? body.message : `HTTP ${res.status}`}`, hide) };
+    const picks = Array.isArray(body.data) ? body.data : [];
+    const list = picks.slice(0, 3).map((p) => `«${String(p?.pick_name ?? "")}» ${String(p?.address ?? "")}`).join(" · ");
+    return { ok: true, message: scrubSecrets(`GHTK nhận token — shop có ${picks.length} kho lấy hàng${list ? `: ${list}` : ""}. Bật để tạo vận đơn GHTK từ trang đơn; dán URL webhook GHTK của tổ chức vào web khách hàng GHTK để hành trình tự về.`, hide) };
+  } catch (e) {
+    return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được GHTK: ${describeNetworkFailure(e, "services.giaohangtietkiem.vn")}` : `Không gọi được GHTK: ${e instanceof Error ? e.message : String(e)}`, hide) };
+  }
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string; rotate?: RotateSecrets }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -624,6 +652,7 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
   "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),
   "ghn-carrier": (input, deps) => testGhnCarrier(input, deps),
+  "ghtk-carrier": (input, deps) => testGhtkCarrier(input, deps),
   "google-places": (input, deps) => testGooglePlaces(input, deps),
   "facebook-messenger": (input, deps) => testFacebookMessenger(input, deps),
 };

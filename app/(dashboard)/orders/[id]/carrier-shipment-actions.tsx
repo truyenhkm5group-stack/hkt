@@ -110,7 +110,7 @@ export function CreateShipmentButton({ orderId, carrier, defaults }: { orderId: 
               ))}
             </datalist>
           </label>
-          <span className="text-[11.5px] text-muted-foreground sm:col-span-2">Tên theo danh mục chính thức của {carrier.label} (sau sáp nhập 2025). Để trống thì ERP tự đọc từ địa chỉ; đọc không ra thì báo để bạn chọn.</span>
+          <span className="text-[11.5px] text-muted-foreground sm:col-span-2">Tên theo địa giới mới của {carrier.label} (sau sáp nhập 2025). Mặc định lấy từ đơn; tên không khớp thì {carrier.label} hoặc ERP báo để bạn sửa — không tự đoán.</span>
         </div>
       ) : null}
       <div className="grid gap-2 sm:grid-cols-2">
@@ -201,8 +201,10 @@ export function AttemptActions({ orderId, attempt }: { orderId: string; attempt:
         setError(res.error);
         return;
       }
-      if (win) win.location.href = res.url;
-      else window.location.href = res.url;
+      // Link có thể là đường dẫn TRONG ERP (nhãn GHTK chuyển tiếp) — đổi sang tuyệt đối trước khi giao cho cửa sổ about:blank.
+      const href = new URL(res.url, window.location.href).toString();
+      if (win) win.location.href = href;
+      else window.location.href = href;
     } finally {
       setPending(null);
     }

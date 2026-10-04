@@ -258,7 +258,7 @@ export function vtpPrintUrl(printCode: string): string {
 export const CARRIER_CREATE_STATES = ["REQUESTED", "CREATED", "UNKNOWN"] as const;
 export type CarrierCreateState = (typeof CARRIER_CREATE_STATES)[number];
 
-const CREATE_CARRIERS = ["VTP", "GHN"] as const;
+const CREATE_CARRIERS = ["VTP", "GHN", "GHTK"] as const;
 export type CarrierCreateDraft = { weightGrams: number; cod: number; serviceCode: string; note: string; province: string; ward: string };
 export type CarrierCreateRaw = {
   state: CarrierCreateState;

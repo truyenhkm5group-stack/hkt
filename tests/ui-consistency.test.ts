@@ -269,6 +269,7 @@ export function testNavigationCoverage() {
     // Pilot P0 #3: form TẠO đơn tay — vào từ nút 'Tạo đơn hàng' ở đầu /orders, chỉ hiện khi tổ chức KHÔNG đồng bộ đơn
     // (orgHasSyncedSource) và người xem có orders:write (cùng cổng manualOrderGate với trang và server action).
     "/orders/new": "nút 'Tạo đơn hàng' ở đầu trang /orders (chỉ khi không đồng bộ đơn + có orders:write)",
+    "/orders/carrier-labels": "đích của nút «In nhãn» hàng loạt trên danh sách đơn khi hãng là GHTK (GHTK in MỘT nhãn mỗi lượt — trang liệt kê từng nhãn); không có nội dung khi mở trần",
     // Phase 3 · luật tự động: form TẠO luật — vào từ nút 'Luật mới' ở đầu /settings/workflows. Trang của MỘT luật
     // (`/settings/workflows/[id]`) là route động nên tự đứng ngoài bài này: vào từ tên luật trong bảng danh sách.
     "/settings/workflows/new": "nút 'Luật mới' ở đầu /settings/workflows; trang một luật /settings/workflows/[id] vào từ tên luật trong bảng",
