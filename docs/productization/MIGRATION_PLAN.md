@@ -74,7 +74,8 @@ flowchart LR
   ⇒ chuyển người, khách từ chối, mã mẫu không có, rò chữ nội bộ, khung THỬ không ghi, gói ngành thời trang) phát lại qua ĐÚNG
   `chatTurn` với model giả; ảnh chụp lời nhắc + chuỗi công cụ + kết quả máy chủ + trạng thái cuối ở `snapshots/`. Đỏ ⇒ in
   đường dẫn khác đầu tiên; đổi cố ý ⇒ `npx tsx tests/sales-agent-golden/update.ts`. Chạy trong `npm test`.
-- **Bộ vàng lộ ra ba chỗ khách bị IM LẶNG (chụp nguyên hành vi hiện tại — sửa là việc riêng, ảnh chụp sẽ đổi theo):**
+- **Bộ vàng lộ ra ba chỗ khách bị IM LẶNG — ĐÃ SỬA (PR «bot không im»): kênh web / thử nhận câu chuyển người hoặc câu dự phòng;
+  kênh fanpage chuyển người thì bot vẫn IM theo luật chủ shop 01/10/2026 (hội thoại `fanpage-chuyen-nguoi-im-lang` khoá luật đó):**
   1. Model chỉ gọi `handoff_to_human` (không kèm chữ) ⇒ vòng lặp dừng, khách KHÔNG nhận câu chuyển người đã cấu hình
      (`khach-si-chuyen-nguoi`).
   2. Mọi chữ của model bị bộ lọc suy luận chặn và không gọi công cụ ⇒ lượt kết thúc không một câu (`ro-ri-chu-noi-bo`).
