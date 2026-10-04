@@ -41,8 +41,10 @@ ngay trong Pancake (chỉ thấy ở ERP) — hộp thư người trong ERP (M8,
 1. **Quan sát 1–2 tuần** — đo đường nền người; chạy «Phát lại hội thoại cũ» (`22_HISTORICAL_REPLAY.md`) trên chính các
    hội thoại đó để đọc AI sẽ nói gì.
 2. **Copilot 1 tuần** — nhân viên xem gợi ý; theo dõi tỷ lệ "gần như nguyên văn + sửa".
-3. **Thử nghiệm** — tỷ lệ AI do chủ shop chọn; so hai nhánh trên màn «Hiệu quả» khi đủ mẫu (sổ sự kiện #522 + kết cục đơn
-   theo `ORDER_OUTCOME`).
+3. **Thử nghiệm** — tỷ lệ AI do chủ shop chọn; so hai nhánh ở khối «AI vs Người — theo nhánh thử nghiệm» trên màn
+   «Hiệu quả» (`lib/sales-chatbot/experiment-report.ts`): ý định điều trị, kết cục `ORDER_OUTCOME`, mẫu < 10 ⇒ «—», nhánh
+   người chỉ có đơn khi «AI ghi đơn hộ nhân viên» BẬT (tắt ⇒ «chưa đo», không phải 0 — nếu không, AI thắng giả). Bấm tên
+   nhánh để xem đúng các hội thoại của nhánh đó.
 4. **Tự động** — khi chủ shop đọc số và quyết. Không có ngưỡng tự chuyển chế độ trong mã.
 
 ## 5. Nối các kênh khác

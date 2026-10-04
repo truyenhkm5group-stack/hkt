@@ -468,6 +468,7 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
+import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
@@ -2700,6 +2701,8 @@ async function main() {
   await testSalesOperatingMode();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
+  // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
+  await testSalesExperimentReport();
   await testCommerceAgent();
   await testSalesEvents();
   await testMetaAdsOrgSync();
