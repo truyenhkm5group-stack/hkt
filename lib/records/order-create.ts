@@ -78,6 +78,8 @@ import type { FieldError } from "@/lib/metadata/types";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { runWorkflows } from "@/lib/workflow/engine";
+import { agentPriceProblems, agentUnitPrices, type AgentPricingMode } from "@/lib/commerce/pricing";
+import { additionalNeed, lockVariants, shortfalls, type StockTx } from "@/lib/commerce/stock";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
@@ -103,6 +105,14 @@ export async function manualOrderGate(user: SessionUser): Promise<OrderGate> {
 
 /** Máy ghi đơn thay người — chatbot bán hàng của tổ chức. `source` đi vào nhật ký / sự kiện. */
 export type OrderAgent = { name: string; source: string };
+
+/**
+ * Lượt ghi của MÁY phải khai chế độ giá (`lib/commerce/pricing.ts`): lõi tính lại đơn giá và từ chối khi lệch — không công
+ * cụ / kênh / agent nào truyền được giá tuỳ ý (TD-01). `idempotencyKey` = khoá LẦN MUA phía gọi (vd hội thoại + lượt mua):
+ * gọi lại cùng khoá ⇒ trả lại ĐÚNG đơn đã tạo, không đơn thứ hai (TD-03). Chốt đơn của máy kiểm tồn khả dụng TRONG giao
+ * dịch ghi, có khoá theo mẫu mã (TD-02) — người tạo đơn tay vẫn được chốt khi thiếu hàng (đặt trước, chờ hàng).
+ */
+export type AgentOrderOptions = { pricing: AgentPricingMode; idempotencyKey?: string | null };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
 type Writer = { userId: string | null; email: string; name: string; actorKind: "USER" | "AGENT"; source: string; agent: string | null };
@@ -221,9 +231,9 @@ function variationText(v: { detail: string; color: string; size: string }): stri
   return v.detail.trim() || [v.color, v.size].filter((x) => x.trim()).join(" · ");
 }
 
-function orderColumns(p: Prepared, w: Writer) {
+function orderColumns(p: Prepared, w: Writer, extraRaw: { agentKey?: string } = {}) {
   const t = p.totals;
-  const raw: ManualOrderRaw & { agent?: string } = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: w.userId, ...(w.agent ? { agent: w.agent } : {}) };
+  const raw: ManualOrderRaw & { agent?: string; agentKey?: string } = { origin: MANUAL_ORDER_ORIGIN, orderDiscount: p.orderDiscount, createdBy: w.userId, ...(w.agent ? { agent: w.agent } : {}), ...extraRaw };
   return {
     status: MANUAL_ORDER_STATUS_CODE[p.stage],
     statusName: manualOrderStageLabel(p.stage),
@@ -340,6 +350,42 @@ async function kickWorkflows() {
 
 export type ManualOrderResult = { ok: true; id: string } | MetaFailure;
 
+/** Đơn giá máy gửi phải đúng giá máy chủ tính theo chế độ đã khai; máy không chiết khấu. */
+async function agentPriceGate(p: Prepared, mode: AgentPricingMode): Promise<MetaFailure | null> {
+  const lines = p.totals.lines;
+  const problems = agentPriceProblems(lines, await agentUnitPrices(lines, p.customer.id, mode), p.orderDiscount);
+  return problems.length ? fail("CONFLICT", problems) : null;
+}
+
+/** Thiếu hàng giữa chừng giao dịch ⇒ ném để huỷ giao dịch, rồi trả lỗi đọc được ở ngoài. */
+class StockShortError extends Error {
+  constructor(readonly failure: MetaFailure) {
+    super("Không đủ hàng khả dụng");
+  }
+}
+
+/**
+ * Phần CẦN THÊM (dòng mới − phần đơn này đang giữ) có đủ hàng khả dụng không — `null` = đủ. `lock` ⇒ khoá mẫu mã trước khi
+ * đọc (gọi TRONG giao dịch ghi); không khoá = phép xem trước ngoài giao dịch (quyết định giữ nháp của đơn tự nâng).
+ */
+async function agentStockFailure(db: StockTx, p: Prepared, held: readonly { variantId: string; quantity: number }[], lock: boolean): Promise<MetaFailure | null> {
+  const need = additionalNeed(p.totals.lines, held);
+  if (lock) await lockVariants(db, [...need.keys()]);
+  const short = await shortfalls(db, need);
+  if (!short.length) return null;
+  const label = (id: string) => {
+    const v = p.variants.get(id);
+    return v ? `${v.productName}${v.sku ? ` (${v.sku})` : ""}` : id;
+  };
+  return fail("CONFLICT", short.map((s) => ({ field: "lines", message: `Không đủ hàng: ${label(s.variantId)} còn ${Math.max(0, s.available)}, cần thêm ${s.need}.` })));
+}
+
+/** Kiểm CHẶT trong giao dịch ghi: thiếu ⇒ ném để huỷ giao dịch. */
+async function assertAgentStock(tx: StockTx, p: Prepared, held: readonly { variantId: string; quantity: number }[]): Promise<void> {
+  const failure = await agentStockFailure(tx, p, held, true);
+  if (failure) throw new StockShortError(failure);
+}
+
 /**
  * HẠN MỨC NỢ (0188, docs/verticals/price-lists-receivables.md). Chỉ chấm khi đơn được CHỐT (`CONFIRMED`) và khách đã
  * khai hạn mức: dư nợ của mọi đơn tay khác đang chốt / đã giao + phần CHƯA THU của đơn này không được vượt hạn mức. Đơn
@@ -369,11 +415,11 @@ export async function createManualOrderCore(user: SessionUser, rawInput: unknown
   return createOrder(userWriter(user), rawInput);
 }
 
-/** Máy (chatbot bán hàng) tạo đơn — cổng tổ chức y hệt, quyền do lớp gọi quyết. */
-export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown): Promise<ManualOrderResult> {
+/** Máy (chatbot bán hàng) tạo đơn — cổng tổ chức y hệt, quyền do lớp gọi quyết; giá / tồn / khoá lần mua theo `opts`. */
+export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown, opts: AgentOrderOptions): Promise<ManualOrderResult> {
   const gate = await manualOrderOrgGate();
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return createOrder(agentWriter(agent), rawInput);
+  return createOrder(agentWriter(agent), rawInput, opts);
 }
 
 /** Công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức ngữ cảnh (mặc định TẮT). */
@@ -391,21 +437,46 @@ async function autoConfirmComplete(p: Prepared, existingOrderId?: string): Promi
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
 
-async function createOrder(w: Writer, rawInput: unknown): Promise<ManualOrderResult> {
+async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
-  const p = await autoConfirmComplete(prep.p);
+  if (agentOpts) {
+    const priceBad = await agentPriceGate(prep.p, agentOpts.pricing);
+    if (priceBad) return priceBad;
+  }
+  let p = await autoConfirmComplete(prep.p);
+  // Máy chỉ LƯU NHÁP mà công tắc tự nâng lên «Đã xác nhận»: thiếu hàng ⇒ giữ «Mới» (cùng tinh thần hạn mức nợ ở trên) —
+  // chỉ lượt máy CHỦ ĐỘNG chốt mới bị từ chối vì thiếu hàng.
+  if (agentOpts && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p);
   if (credit) return credit;
   const id = newManualOrderId();
   const now = new Date();
   const db = await getDb();
-  await db.transaction(async (tx) => {
-    await tx.insert(schema.orders).values({ id, ...orderColumns(p, w), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
+  const key = agentOpts?.idempotencyKey?.trim().slice(0, 200) || null;
+  let reused = null as string | null;
+  try {
+    await db.transaction(async (tx) => {
+      if (key) {
+        // Cùng khoá lần mua ⇒ cùng đơn: khoá theo khoá rồi mới tìm, để hai lượt gọi đồng thời không cùng thấy «chưa có».
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`agent-order:${key}`}, 0))`);
+        const [dup] = await tx.select({ id: schema.orders.id }).from(schema.orders).where(sql`${schema.orders.raw}->>'agentKey' = ${key}`).limit(1);
+        if (dup) {
+          reused = dup.id;
+          return;
+        }
+      }
+      if (agentOpts && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
+      await tx.insert(schema.orders).values({ id, ...orderColumns(p, w, key ? { agentKey: key } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
     await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
-    if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });
-  });
+      if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });
+    });
+  } catch (error) {
+    if (error instanceof StockShortError) return error.failure;
+    throw error;
+  }
+  if (reused) return { ok: true, id: reused };
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: w.agent ? `Tạo đơn bởi ${w.agent}` : "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
   if (p.stage === "CONFIRMED") await kickWorkflows();
   return { ok: true, id };
@@ -438,10 +509,10 @@ export async function updateManualOrderCore(user: SessionUser, orderId: unknown,
   return updateOrder(userWriter(user), orderId, rawInput);
 }
 
-export async function updateOrderAsAgent(agent: OrderAgent, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+export async function updateOrderAsAgent(agent: OrderAgent, orderId: unknown, rawInput: unknown, opts: AgentOrderOptions): Promise<ManualOrderResult> {
   const gate = await manualOrderOrgGate();
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return updateOrder(agentWriter(agent), orderId, rawInput);
+  return updateOrder(agentWriter(agent), orderId, rawInput, opts);
 }
 
 /** Người nhận đang lưu trên dòng đơn — để so với bản mới. */
@@ -449,13 +520,19 @@ function storedRecipient(row: typeof schema.orders.$inferSelect): Recipient {
   return { name: row.shipFullName ?? "", phone: row.shipPhone ?? "", address: row.shipAddress ?? "", province: row.shipProvince ?? "" };
 }
 
-async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions): Promise<ManualOrderResult> {
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
+  if (agentOpts) {
+    const priceBad = await agentPriceGate(prep.p, agentOpts.pricing);
+    if (priceBad) return priceBad;
+  }
   const row = existing.row;
-  const p = await autoConfirmComplete(prep.p, row.id);
+  let p = await autoConfirmComplete(prep.p, row.id);
+  // Như lượt tạo: công tắc tự nâng đơn NHÁP của máy mà thiếu hàng ⇒ giữ «Mới» (đơn tự nâng chỉ đi từ «Mới» ⇒ chưa giữ hàng).
+  if (agentOpts && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);
   if (credit) return credit;
   const beforeItems = await itemsSnapshot(row.id);
@@ -481,16 +558,23 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
       : wasConfirmed && changes.length > 0
         ? { name: "order.updated", key: `order.updated:${row.id}:${createHash("sha256").update(`${row.updatedAt.toISOString()}|${JSON.stringify(after)}`).digest("hex").slice(0, 24)}` }
         : null;
-  await db.transaction(async (tx) => {
-    await tx
+  try {
+    await db.transaction(async (tx) => {
+      // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).
+      if (agentOpts && p.stage === "CONFIRMED") await assertAgentStock(tx, p, wasConfirmed ? beforeItems.flatMap((i) => (i.variantId ? [{ variantId: i.variantId, quantity: i.quantity }] : [])) : []);
+      await tx
       .update(schema.orders)
       .set({ ...orderColumns(p, w), creatorName: row.creatorName, raw: { ...(row.raw as Record<string, unknown>), ...(manualOrderRaw(row.raw) as ManualOrderRaw), orderDiscount: p.orderDiscount }, ...(stageChanged ? { lastUpdateStatusAt: now } : {}), updatedAt: now })
       .where(and(eq(schema.orders.id, row.id)));
     await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, row.id));
     await tx.insert(schema.orderItems).values(itemRows(row.id, p));
     if (stageChanged) await tx.insert(schema.orderStatusHistory).values({ orderId: row.id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: row.status, editorName: w.name, updatedAt: now });
-    if (event) await emitOrderEvent(tx, w, event.name, row.id, event.key, { stage: p.stage, wasConfirmed, changes });
-  });
+      if (event) await emitOrderEvent(tx, w, event.name, row.id, event.key, { stage: p.stage, wasConfirmed, changes });
+    });
+  } catch (error) {
+    if (error instanceof StockShortError) return error.failure;
+    throw error;
+  }
   await audit({
     userId: w.userId,
     userEmail: w.email,

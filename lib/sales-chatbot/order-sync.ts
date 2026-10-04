@@ -460,7 +460,7 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  });
+  }, { pricing: a.botCfg.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}` });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».
