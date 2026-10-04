@@ -462,6 +462,7 @@ import { testStays } from "./stays.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testCommerceAgent } from "./commerce-agent.test";
+import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
@@ -2674,6 +2675,7 @@ async function main() {
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
   await testCommerceAgent();
+  await testSalesEvents();
   await testMetaAdsOrgSync();
   await testPancakePosOrgSync();
   await testViettelPostOrg();

@@ -76,9 +76,14 @@ export default async function SalesChatbotPage() {
           </div>
         }
         actions={
-          <Link href="/ai/sales-chatbot/quick-replies" className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="quick-replies-link">
-            Câu trả lời mẫu (Q&amp;A)
-          </Link>
+          <>
+            <Link href="/ai/sales-chatbot/performance" className="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="ai-perf-link">
+              Hiệu quả
+            </Link>
+            <Link href="/ai/sales-chatbot/quick-replies" className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="quick-replies-link">
+              Câu trả lời mẫu (Q&amp;A)
+            </Link>
+          </>
         }
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">

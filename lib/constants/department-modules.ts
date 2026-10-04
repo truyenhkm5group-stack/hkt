@@ -142,6 +142,14 @@ export const NAV_MODULES = [
     permission: "ai_sales:view",
     why: "Bot bán hàng là một người bán: người của phòng Kinh doanh đọc hội thoại bot đã chat, nhận ca bot chuyển sang và xem đơn bot đã lên.",
   },
+  // Hiệu quả AI bán hàng (sổ sự kiện 0199): phễu, chuyển người, đơn bot chốt theo kết cục giao thật, chi phí AI / đơn.
+  {
+    href: "/ai/sales-chatbot/performance",
+    label: "Hiệu quả AI bán hàng",
+    zone: "SALES",
+    permission: "ai_sales:view",
+    why: "Người phụ trách kinh doanh cần biết bot chốt được bao nhiêu, chuyển người vì sao và đơn bot chốt có giao được không — để sửa cách bot bán, không phải để chấm người.",
+  },
   {
     href: "/landing",
     label: "Đơn landing page",

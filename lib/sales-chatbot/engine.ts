@@ -40,6 +40,7 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { formatVND } from "@/lib/format";
+import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
@@ -550,7 +551,8 @@ async function notifyAiDownHandoff(conv: ConvRow, state: ChatState, channel: Cha
  * `context` = ngữ cảnh máy chủ đọc được cho lượt này (vd nội dung bài viết khách vừa bình luận dưới — `postContextPrompt`).
  * Có ngữ cảnh ⇒ bỏ qua câu mẫu khớp chữ / AI chọn mã: câu khách («cho giá») chỉ hiểu đúng khi đọc cùng ngữ cảnh.
  */
-export async function chatTurn(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
+export const chatTurn = withTurnEvents(chatTurnCore);
+async function chatTurnCore(conversationId: string, rawText: string, opts: { channel: ChatChannel; visitorKey?: string | null; actorId?: string | null; now?: Date; context?: string; customerName?: string | null }): Promise<TurnResult> {
   const text = rawText.trim().slice(0, SALES_CHATBOT_LIMITS.messageMax);
   if (!text) return { ok: false, error: "Tin nhắn trống." };
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật cho tổ chức này." };

@@ -1323,12 +1323,21 @@ export const orders = pgTable(
     lastUpdateStatusAt: ts("last_update_status_at"),
     timeSendPartner: ts("time_send_partner"),
     estimateDeliveryDate: ts("estimate_delivery_date"),
+    /**
+     * NGUỒN TẠO ĐƠN (0199 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
+     * ghi đơn hộ nhân viên chốt. `NULL` = trước khi có cột, hoặc đường tạo chưa khai — KHÔNG đoán ngược cho dòng cũ (luật 35).
+     */
+    origin: text("origin"),
+    /** Hội thoại chatbot sinh ra đơn (0199) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
+    salesConversationId: text("sales_conversation_id"),
     raw: jsonb("raw"),
     syncedAt: ts("synced_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check("orders_origin_check", sql`${t.origin} IS NULL OR ${t.origin} IN ('PANCAKE_POS','ERP_FORM','AI_AGENT','AI_ORDER_SYNC','IMPORT')`),
+    index("orders_sales_conversation_idx").on(t.salesConversationId).where(sql`${t.salesConversationId} is not null`),
     index("orders_status_idx").on(t.status),
     index("orders_stage_inserted_idx").on(t.stage, t.insertedAt),
     index("orders_inserted_idx").on(t.insertedAt),
@@ -9811,6 +9820,52 @@ export const salesChatMessages = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("sales_chat_messages_seq_uq").on(t.conversationId, t.seq), check("sales_chat_messages_role_check", sql`${t.role} IN ('user','assistant')`)],
+);
+
+/**
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0199 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
+ * dòng có mốc: khách nhắn, AI trả lời, chuyển bước, báo giá, khách để lại SĐT, mời / nhận upsell, đơn nháp / chốt, chuyển
+ * người, nhân viên nhận, trả lại AI, nhắc khách. Trước sổ này phễu chỉ sống trong `state` jsonb và bị xoá khi sang lượt mua
+ * mới — không đo được «AI tự chốt bao nhiêu», «upsell mang thêm bao nhiêu». Không có dòng = chưa đo (trước ngày bật), KHÔNG
+ * phải 0. `dedupe_key` UNIQUE: chạy lại không đẻ dòng thứ hai. `payload` là bối cảnh cho người đọc, không vào phép tính tiền.
+ */
+export const salesConversationEvents = pgTable(
+  "sales_conversation_events",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    /** Lượt mua trong hội thoại (0 = lượt đầu; khách quay lại mua sau khi chốt ⇒ +1). */
+    cycle: integer("cycle").notNull().default(0),
+    type: text("type").notNull(),
+    actorKind: text("actor_kind").notNull(),
+    /** `users.id` khi người làm được biết THẬT (luật 34); Pancake không cho biết nhân viên nào gõ ⇒ `NULL`. */
+    actorUserId: text("actor_user_id"),
+    channel: text("channel").notNull(),
+    /** Mốc của chính sự việc (giờ tin được ghi), không phải lúc dòng sự kiện được ghi. */
+    occurredAt: ts("occurred_at").notNull(),
+    orderId: text("order_id"),
+    /** Số nguyên VND. `NULL` = không áp dụng / chưa biết. */
+    amountVnd: bigint("amount_vnd", { mode: "number" }),
+    reasonCode: text("reason_code"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    dedupeKey: text("dedupe_key").notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_conversation_events_dedupe_uq").on(t.dedupeKey),
+    index("sales_conversation_events_conv_idx").on(t.conversationId, t.occurredAt),
+    index("sales_conversation_events_type_idx").on(t.type, t.occurredAt),
+    check(
+      "sales_conversation_events_type_check",
+      sql`${t.type} IN ('conversation.opened','message.received','ai.replied','stage.changed','quote.given','customer.identified','upsell.offered','upsell.accepted','upsell.declined','order.drafted','order.confirmed','appointment.booked','handoff.requested','human.took_over','human.replied','ai.resumed','followup.sent','conversation.declined')`,
+    ),
+    check("sales_conversation_events_actor_check", sql`${t.actorKind} IN ('CUSTOMER','AI','HUMAN','SYSTEM')`),
+    check("sales_conversation_events_channel_check", sql`${t.channel} ~ '^[A-Z_]{2,20}$'`),
+    check("sales_conversation_events_amount_check", sql`${t.amountVnd} IS NULL OR ${t.amountVnd} >= 0`),
+  ],
 );
 
 /** Lời mời người dùng vào tổ chức (0180 · lib/users/invites.ts). Chỉ lưu BĂM của mã; mã thô hiện đúng một lần. */

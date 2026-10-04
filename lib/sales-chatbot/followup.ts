@@ -17,6 +17,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { SALES_TONE_LABEL, type SalesChatbotConfig, salesBotBillingSource } from "@/lib/sales-chatbot/config";
 import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
+import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { PAGE_REPLY, sendFanpageText, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
@@ -174,6 +175,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         continue;
       }
       await appendBotMessage(row.id, text);
+      await recordConversationEvent(row.id, { type: "followup.sent", actorKind: "AI", occurredAt: now, payload: { attempt }, key: `followup:${row.waitingSince?.toISOString() ?? "?"}:${attempt}` });
       await scheduleNext(true);
       out.sent += 1;
     } catch (e) {

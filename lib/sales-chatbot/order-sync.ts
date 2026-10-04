@@ -56,6 +56,7 @@ import {
 import { fetchPancakeThreadProfile, findReturningCustomer, normalizeVnPhone, type PriorMessage, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
+import { linkAgentOrder, recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { mergeLines, priceLines, type CartLine, type ChatState, type Recipient } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 
@@ -482,6 +483,9 @@ async function syncThread(a: {
     warnings: [fromPrevious].filter(Boolean),
     confirmed,
   });
+  // Sổ sự kiện (0199): đơn do NGƯỜI chốt, AI chỉ ghi hộ ⇒ actor HUMAN, nguồn AI_ORDER_SYNC — tách khỏi đơn AI tự chốt.
+  await recordConversationEvent(conv.id, { type: "order.drafted", actorKind: "HUMAN", occurredAt: now, orderId: created.id, amountVnd: priced.subtotal, payload: { via: "ORDER_SYNC" }, key: `draft:${created.id}` });
+  await linkAgentOrder(created.id, conv.id, "AI_ORDER_SYNC");
   await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now, confirmed);
   return {
     outcome: "CREATED",
