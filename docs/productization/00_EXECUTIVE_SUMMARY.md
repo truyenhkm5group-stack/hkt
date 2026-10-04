@@ -1,6 +1,6 @@
 # 00 · Tóm tắt điều hành — AI Sales Agent for Social Commerce
 
-> Trạng thái đo ngày **04/10/2026** (cập nhật tối 04/10 sau khi #522 #533 #537 #538 #539 vào main). Bảng dưới là **Definition of
+> Trạng thái đo ngày **04/10/2026** (cập nhật tối 04/10 sau khi #522 #533 #537 #538 #539 #546 #547 #549 vào main). Bảng dưới là **Definition of
 > Done** của lệnh chủ shop, từng mục kèm bằng chứng (PR / tệp / bài kiểm) và việc còn thiếu. Một mục chỉ ghi **ĐẠT** khi
 > mã đã vào `main`; nhánh / PR đang mở ghi **ĐANG GỘP**. Cập nhật tệp này mỗi khi một PR của chương trình gộp.
 
@@ -11,8 +11,8 @@ ký, gói, thu phí, sổ dùng AI, mẫu ngành. Chương trình AI Sales biế
 thành sản phẩm chính, đo được tới **đơn giao thành công** theo `ORDER_OUTCOME`. Phần đã có: lõi đơn an toàn cho máy
 (#525), lời nhắc theo ngành (#527), cô lập tổ chức có bài tấn công riêng cho AI bán hàng (#532), sổ sự kiện + màn
 Hiệu quả (#522), kinh tế SaaS + Owner Cockpit (#533), sổ dùng theo ngày (#537), phát lại hội thoại cũ + bốn chế độ vận hành
-pilot (#538), bài E2E trọn vòng (#539). Đang gộp: Messenger trực tiếp (#517), gói «Chỉ cần AI bán hàng» (#530), bộ hội
-thoại vàng M1 (#540).
+pilot (#538), bài E2E trọn vòng (#539). Tối 04/10 thêm: so AI vs Người theo nhánh + drill-down về hội thoại (#547), xu hướng 4 tuần trong Cockpit (#549),
+Messenger trực tiếp (#517), gói «Chỉ cần AI bán hàng» (#530). Đang gộp: bộ hội thoại vàng M1 (#540), Zalo OA (#555).
 
 ## 2. Kiến trúc đã chốt khác bản lệnh ở đâu (và vì sao)
 
@@ -34,13 +34,13 @@ thoại vàng M1 (#540).
 | 6 | Sales Event Ledger | ĐẠT | #522 append-only, `dedupe_key` UNIQUE | — |
 | 7 | Phễu từ sự kiện tin cậy | ĐẠT | #522 màn «Hiệu quả» | — |
 | 8 | AI Sales Dashboard | ĐẠT | #522 `/ai/sales-chatbot/performance` | — |
-| 9 | Human vs AI Benchmark | ĐẠT | #522 nhóm AI_ONLY / AI_THEN_HUMAN / HUMAN_ONLY; nhánh thử nghiệm ngẫu nhiên (#538) | Theo TỪNG NGƯỜI: chờ M8 |
+| 9 | Human vs AI Benchmark | ĐẠT | #522 nhóm AI_ONLY / AI_THEN_HUMAN / HUMAN_ONLY; #547 khối «AI vs Người — theo nhánh thử nghiệm» (chia ngẫu nhiên #538, ý định điều trị, ORDER_OUTCOME, độ phủ nhánh người, mẫu < 10 ⇒ «—») | Theo TỪNG NGƯỜI: chờ M8 |
 | 10 | Sales Leaderboard | CHƯA | — | Cần `users.id` cho câu trả lời người (M8); không xếp hạng người bằng chỉ số họ không quyết (AGENTS §24) |
 | 11 | Upsell / cross-sell analytics | ĐẠT (upsell) | #522 sự kiện upsell mời / nhận / từ chối | Cross-sell tách riêng: chưa có nguồn phân biệt |
 | 12 | Delivered Revenue | ĐẠT | #522 qua `ORDER_OUTCOME` + độ phủ kết cục | — |
 | 13 | Cost / Order, Cost / Delivered Order | ĐẠT | #522 chi phí AI / đơn giao | Chi phí người: chủ shop khai (ROI v1) |
 | 14 | Customer ROI Engine | ĐẠT (v1) | #522 tiết kiệm ước tính (nhãn ước tính, người khai) | Lương / hoa hồng thật theo người (M8 + payroll) |
-| 15 | Drill-down KPI → hội thoại | MỘT PHẦN | Danh sách hội thoại + replay / copilot hiện từng hội thoại | Liên kết từ từng ô KPI của #522 |
+| 15 | Drill-down KPI → hội thoại | ĐẠT | #547: ô nhóm · lý do chuyển người · nhánh trên màn Hiệu quả → `/ai/sales-chatbot/conversations`; xem lại một hội thoại `/ai/sales-chatbot/conversations/<id>` (chữ + công cụ + sổ sự kiện, che SĐT) | — |
 | 16 | Fashion là mẫu ngành | ĐẠT | #518 Fashion COD, #527 gói lời nhắc `fashion` | — |
 | 17 | HSLC là mẫu ngành | ĐẠT | `seafood-commerce` (#457), gói `food` (#527), bảng giá sỉ + công nợ (#455) | — |
 | 18 | HSLC chạy Observe / Copilot / AI-vs-Human / Autopilot | ĐẠT | #538 + `19_HSLC_PILOT.md` | Messenger / Zalo nối cổng sau khi gộp |
