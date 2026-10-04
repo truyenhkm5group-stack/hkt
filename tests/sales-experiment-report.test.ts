@@ -169,7 +169,20 @@ export async function testSalesExperimentReport() {
       // Bán chéo: đơn bán thật có chả mực + ruốc ⇒ 1 đơn ≥ 2 sản phẩm, giá trị bán chéo 350.000 ₫. Đơn ghi hộ người (origin
       // AI_ORDER_SYNC) không phải đơn bot chốt ⇒ không vào giỏ.
       const basket = await loadBasketStats({ days: 30 });
-      assert.deepEqual([basket.orders, basket.multiProductOrders, basket.crossSellValueVnd, basket.itemsPerOrder], [1, 1, 350_000, 3]);
+      assert.deepEqual([basket.booked.orders, basket.booked.multiProductOrders, basket.booked.crossSellValueVnd, basket.booked.itemsPerOrder], [1, 1, 350_000, 3]);
+      assert.deepEqual([basket.delivered.orders, basket.delivered.crossSellValueVnd], [1, 350_000], "đơn đã giao bằng phiếu ⇒ vào giỏ đã giao");
+      // Đơn bot chốt thứ hai, CHƯA giao (không vận đơn, không phiếu): vào giỏ đơn chốt, KHÔNG vào giỏ đã giao.
+      const db = await getDb();
+      await db.insert(schema.orders).values({ id: "xr-ord-ai-2", customerId: "xr-cus", billFullName: "Khách 2", insertedAt: new Date(), totalPriceAfterDiscount: 750_000, origin: "AI_AGENT", salesConversationId: ids.sold });
+      await db.insert(schema.orderItems).values([
+        { id: "xr-oi-2a", orderId: "xr-ord-ai-2", productId: "cha", quantity: 1, unitPrice: 400_000 },
+        { id: "xr-oi-2b", orderId: "xr-ord-ai-2", productId: "ruoc", quantity: 1, unitPrice: 350_000 },
+        { id: "xr-oi-2c", orderId: "xr-ord-ai-2", productId: "qua", quantity: 1, unitPrice: 90_000, isBonus: true },
+      ]);
+      await db.insert(schema.salesConversationEvents).values({ conversationId: ids.sold, cycle: 1, type: "order.confirmed", actorKind: "AI", channel: "WEB", occurredAt: new Date(), orderId: "xr-ord-ai-2", dedupeKey: "xr-ord-ai-2:confirmed" });
+      const basket2 = await loadBasketStats({ days: 30 });
+      assert.deepEqual([basket2.booked.orders, basket2.booked.multiProductOrders, basket2.booked.crossSellValueVnd], [2, 2, 700_000], "hàng tặng không phải bán chéo");
+      assert.deepEqual([basket2.delivered.orders, basket2.delivered.crossSellValueVnd], [1, 350_000], "đơn chưa ngã ngũ không vào giỏ đã giao");
       // Drill-down: hội thoại bán thật có sổ sự kiện ⇒ vào nhóm AI tự xử lý, nhánh AI; không vào nhánh người / lý do sỉ.
       const viewer: SessionUser = { ...ids.admin, id: "xr-viewer", role: "VIEWER", permissions: ["ai_sales:view"] };
       const all = await listDrillConversations(viewer, parseDrillFilter({}));

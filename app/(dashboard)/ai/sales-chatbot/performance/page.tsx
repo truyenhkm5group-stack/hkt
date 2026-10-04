@@ -194,10 +194,10 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   <Stat label="khách nhận" value={formatPercent(pctOf(r.upsell.attachRate), 0)} sub={`${formatNumber(r.upsell.accepted)} nhận · ${formatNumber(r.upsell.declined)} không`} />
                   <Stat label="tiền mua thêm" value={formatVND(r.upsell.offered ? r.upsell.revenueVnd : null)} />
                 </div>
-                <div className="grid grid-cols-3 gap-2" data-testid="ai-perf-basket" title="Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đơn chốt — danh nghĩa, chưa phải doanh thu: doanh thu chỉ ghi khi đơn đã giao.">
-                  <Stat label="món / đơn bot chốt" value={basket.itemsPerOrder === null ? "—" : basket.itemsPerOrder.toFixed(1)} sub={`${formatNumber(basket.orders)} đơn`} />
-                  <Stat label="đơn có ≥ 2 sản phẩm (bán chéo)" value={formatPercent(pctOf(basket.multiProductRate), 0)} sub={`${formatNumber(basket.multiProductOrders)} đơn`} />
-                  <Stat label="giá trị bán chéo (đơn chốt)" value={formatVND(basket.orders ? basket.crossSellValueVnd : null)} sub="danh nghĩa, chưa phải doanh thu" />
+                <div className="grid grid-cols-3 gap-2" data-testid="ai-perf-basket" title="Đơn bot chốt trong kỳ (trừ đơn huỷ, trừ hàng tặng). Giá trị đọc từ dòng hàng, không phải tiền thực thu. «Đã giao» = ORDER_OUTCOME giao thành công; đơn chưa ngã ngũ không tính vào đó.">
+                  <Stat label="món / đơn bot chốt" value={basket.booked.itemsPerOrder === null ? "—" : basket.booked.itemsPerOrder.toFixed(1)} sub={`${formatNumber(basket.booked.orders)} đơn`} />
+                  <Stat label="đơn có ≥ 2 sản phẩm (bán chéo)" value={formatPercent(pctOf(basket.booked.multiProductRate), 0)} sub={`${formatNumber(basket.booked.multiProductOrders)} đơn · ${formatNumber(basket.delivered.multiProductOrders)} đã giao`} />
+                  <Stat label="giá trị bán chéo đã giao" value={formatVND(basket.delivered.orders ? basket.delivered.crossSellValueVnd : null)} sub={`đơn chốt: ${formatVND(basket.booked.orders ? basket.booked.crossSellValueVnd : null)}`} />
                 </div>
               </div>
             </SectionCard>
