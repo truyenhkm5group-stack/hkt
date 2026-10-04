@@ -9,6 +9,7 @@ import { OrderStageBadge } from "@/components/status-badge";
 import { ORDER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns";
 import { formatTimeAgo } from "@/lib/format";
 import type { OrderListRow } from "@/lib/queries/orders";
+import { VtpBulkActions } from "@/app/(dashboard)/orders/vtp-bulk-actions";
 
 /**
  * `meta` / `stageLabels` vắng mặt ⇒ y hệt trước Phase 2. `stageLabels`: nhãn tổ chức đặt cho trạng
@@ -17,7 +18,7 @@ import type { OrderListRow } from "@/lib/queries/orders";
  * mang nhãn mặc định của sổ): khai rồi thì nhãn tổ chức thắng nhãn Pancake gửi về — lựa chọn tường
  * minh cho đúng giá trị ấy; chưa khai thì hiển thị y như cũ (nhãn Pancake, rồi nhãn mặc định).
  */
-export function OrdersTable({ rows, pageCount, total, meta, stageLabels }: { rows: OrderListRow[]; pageCount: number; total: number; meta?: ListMetadataProps; stageLabels?: Record<string, string> }) {
+export function OrdersTable({ rows, pageCount, total, meta, stageLabels, vtpBulk = false }: { rows: OrderListRow[]; pageCount: number; total: number; meta?: ListMetadataProps; stageLabels?: Record<string, string>; vtpBulk?: boolean }) {
   const columns = React.useMemo(() => {
     const base: ColumnDef<OrderListRow, unknown>[] =
       stageLabels && Object.keys(stageLabels).length
@@ -46,6 +47,8 @@ export function OrdersTable({ rows, pageCount, total, meta, stageLabels }: { row
       total={total}
       rowHref={(row) => `/orders/${row.id}`}
       getRowId={(row) => row.id}
+      selectable={vtpBulk}
+      bulkActions={vtpBulk ? (selected, clear) => <VtpBulkActions orderIds={selected.map((r) => r.id)} clear={clear} /> : undefined}
       emptyTitle="Không có đơn hàng"
       emptyDescription="Thử đổi khoảng thời gian hoặc bộ lọc. Nếu chưa đồng bộ, bấm “Đồng bộ đơn”."
     />

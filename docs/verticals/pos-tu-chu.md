@@ -63,9 +63,25 @@ không phải sửa khi địa giới đổi.
 - Tài liệu liệt kê thêm các mẫu in `type=2`, `a6_1`, `100`, `1001` và ba khổ A5 / A6 / A7, nhưng không ghép rõ mẫu nào là
   khổ nào. ERP chỉ dùng `type=1` (mẫu tài liệu dùng làm ví dụ). Khổ khác chờ kiểm trên máy in thật.
 
+## P2 — Tạo và in vận đơn hàng loạt từ danh sách đơn
+
+Danh sách đơn có ô chọn khi tổ chức tạo đơn tay, người xem có quyền `shipments:manage`, và kết nối
+«viettelpost-carrier» đang bật. Chọn đơn rồi dùng một trong hai nút:
+
+- **«Tạo vận đơn Viettel Post (n)».**
+  1. ERP tra bảng cước bằng đơn **đầu tiên tạo được**. Người bấm chọn **một** dịch vụ dùng chung.
+  2. Máy chủ tạo **tuần tự**, đi qua đúng `createVtpShipmentCore`. Giữ chỗ, `CHECK_UNIQUE` và không tự gửi lại: mọi
+     luật P1 giữ nguyên.
+  3. Mỗi đơn dùng mặc định của chính nó: cân = cân mẫu mã × số lượng, thu hộ = số khách còn phải trả, ghi chú mặc định
+     của tổ chức.
+  4. Đơn thiếu cân, chưa «Đã xác nhận», đang có lần gửi giữ đơn, hoặc bị hãng từ chối thì **bỏ qua riêng đơn đó, có
+     lý do**. Không đoán cân, không dừng cả lượt.
+  - Trần 50 đơn một lượt.
+- **«In nhãn Viettel Post».** Một mã in (`printing-code`) cho mọi lần gửi do ERP tạo còn in được của các đơn đã chọn,
+  tối đa 100 vận đơn. Lần gửi đã có lệnh huỷ không in.
+
 ## Kế tiếp
 
-- **P2.** Tạo hàng loạt từ danh sách đơn, và in nhiều nhãn một lần (`printing-code` nhận tối đa 100 vận đơn).
 - **P3.** GHN, GHTK, J&T: mỗi hãng một kết nối PER_ORG cùng hình dạng (kiểm tra · tính cước · tạo · huỷ · in), kèm
   webhook trạng thái theo tổ chức.
 - **P4.** Nhập dữ liệu từ Pancake (khách, sản phẩm, đơn cũ) để shop chuyển sang trong một buổi.
