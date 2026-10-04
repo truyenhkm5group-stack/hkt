@@ -28,7 +28,7 @@ import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api"
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
 import { env } from "@/lib/env";
-import { GOOGLE_API_KEY_PATTERN, textSearch } from "@/lib/integrations/google-places/client";
+import { GOOGLE_API_KEY_PATTERN, placesRelayOf, textSearch } from "@/lib/integrations/google-places/client";
 import { ZALO_ID_PATTERN, zaloGetOa } from "@/lib/integrations/zalo/oa";
 import { ensureZaloAccessToken } from "@/lib/integrations/zalo/token";
 
@@ -498,10 +498,13 @@ const PLACES_REASON_HINT: Record<string, string> = {
   CONSUMER_SUSPENDED: "Google đã tạm khoá dự án — xem thông báo trong Google Cloud Console",
 };
 
-export async function testGooglePlaces(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+export async function testGooglePlaces(input: { secrets: Record<string, string>; settings?: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
   const key = (input.secrets.apiKey ?? "").trim();
   if (!GOOGLE_API_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá có ký tự lạ hoặc quá ngắn — dán NGUYÊN khoá API từ Google Cloud Console, không gửi." };
-  const r = await textSearch({ apiKey: key, timeoutMs: TIMEOUT_MS, maxRetries: 0 }, { textQuery: "nhà hàng hải sản Hà Nội", tier: "IDS_ONLY" }, { fetch: deps.fetch });
+  const relayUrl = (input.settings?.relayUrl ?? "").trim();
+  if (relayUrl && (input.secrets.relaySecret ?? "").trim().length < 16) return { ok: false, message: "Đã khai «Địa chỉ trạm» nhưng thiếu «Mật khẩu trạm» (≥ 16 ký tự) — không gửi." };
+  const relay = placesRelayOf(input.settings ?? {}, input.secrets);
+  const r = await textSearch({ apiKey: key, timeoutMs: TIMEOUT_MS, maxRetries: 0, relay }, { textQuery: "nhà hàng hải sản Hà Nội", tier: "IDS_ONLY" }, { fetch: deps.fetch });
   if (!r.ok) {
     const reason = /\(reason: ([A-Z0-9_]+)\)/.exec(r.message)?.[1];
     const why = reason && PLACES_REASON_HINT[reason]
@@ -515,7 +518,7 @@ export async function testGooglePlaces(input: { secrets: Record<string, string> 
             : "Google trả lỗi";
     return { ok: false, message: scrubSecrets(`${why}: ${r.message}`, [key]) };
   }
-  return { ok: true, message: `Google nhận khoá: lượt tìm thử trả ${r.places.length} địa điểm (lượt chỉ-Place-ID, không tính phí). Bật để job «wholesale-leads» chạy chiến dịch quét.` };
+  return { ok: true, message: `Google nhận khoá${relay ? " (qua trạm chuyển tiếp)" : ""}: lượt tìm thử trả ${r.places.length} địa điểm (lượt chỉ-Place-ID, không tính phí). Bật để job «wholesale-leads» chạy chiến dịch quét.` };
 }
 
 /*

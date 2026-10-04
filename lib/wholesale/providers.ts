@@ -1,4 +1,4 @@
-import { nearbySearch, placeDetails, textSearch, type PlaceRecord, type PlacesCallMeta, type PlacesClientDeps, type PlacesErrorKind } from "@/lib/integrations/google-places/client";
+import { nearbySearch, placeDetails, textSearch, type PlaceRecord, type PlacesCallMeta, type PlacesClientDeps, type PlacesClientOptions, type PlacesErrorKind } from "@/lib/integrations/google-places/client";
 import { parseCsv } from "@/lib/constants/landing";
 import type { DiscoveryTier } from "@/lib/wholesale/config";
 import type { LeadSourceKey } from "@/lib/wholesale/constants";
@@ -68,7 +68,7 @@ export type ImportProvider = LeadSourceProvider & {
 };
 
 /** Google Places API (New) — khoá của tổ chức truyền vào lúc dựng, không đọc ở đây. */
-export function googlePlacesProvider(opts: { apiKey: string; timeoutMs: number; maxRetries: number }, deps: PlacesClientDeps = {}): DiscoveryProvider {
+export function googlePlacesProvider(opts: PlacesClientOptions, deps: PlacesClientDeps = {}): DiscoveryProvider {
   return {
     key: "GOOGLE_PLACES",
     label: "Google Places",

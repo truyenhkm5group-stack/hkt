@@ -253,10 +253,51 @@ Nhật ký ghi các hành động: `WHOLESALE_CAMPAIGN_CREATE`, `WHOLESALE_SCAN_
 3. Mở APIs & Services → Credentials → Create credentials → **API key**.
 4. Giới hạn khoá:
    - API restrictions: chỉ **Places API (New)**;
-   - Application restrictions: **IP addresses**, điền IP máy chủ ERP.
+   - Application restrictions: **None**. Máy chủ ERP gọi qua trạm Cloud Run (mục 13a), nên IP gửi đi không cố định.
 5. (Nên làm) Mở APIs & Services → Places API (New) → Quotas, đặt trần số lượt mỗi ngày.
 6. Trong ERP, mở Cài đặt → Kết nối → «Google Places (tìm doanh nghiệp)», dán khoá, bấm **Kiểm tra** rồi **Bật**. Lượt
    kiểm tra là một Text Search chỉ xin Place ID, nên Google không tính phí.
+
+### 13a. Trạm chuyển tiếp — Google chặn Places khi gọi từ IP Việt Nam
+
+Đo ngày 04/10/2026, cùng một khoá và cùng một yêu cầu:
+
+| Nơi gọi | Kết quả |
+|---|---|
+| Cloud Shell | trả 20 Place ID |
+| Máy chủ ERP (VNPT TP.HCM) | **403 «The caller does not have permission», không có `reason`** |
+| Máy văn phòng (VNPT) | **403 «The caller does not have permission», không có `reason`** |
+| Máy văn phòng, khoá sai cố ý | 400 `API_KEY_INVALID` |
+
+Như vậy Google **nhận ra khoá rồi mới từ chối nơi gửi**. Không cấu hình nào của khoá sửa được lỗi này.
+
+Cách xử lý: trạm `deploy/places-relay` (Node thuần, không phụ thuộc gói nào), chạy trên **Cloud Run vùng Singapore** trong
+chính dự án Google Cloud của tổ chức.
+
+- Trạm chỉ chuyển tiếp ba lời gọi: `searchText`, `searchNearby` và chi tiết một địa điểm.
+- Trạm không giữ khoá Google: khoá vẫn đi theo từng yêu cầu trong tiêu đề `X-Goog-Api-Key`.
+- Trạm đòi **mật khẩu trạm** (`X-Relay-Secret`), thiếu hoặc sai thì trả 401.
+- ERP chỉ nhận địa chỉ trạm dạng `https://….run.app` (`PLACES_RELAY_URL_PATTERN`): người quản trị tổ chức gõ ô này, nên
+  một URL tuỳ ý là cửa SSRF.
+
+Dựng trạm trong Cloud Shell của dự án:
+
+```
+git clone --depth 1 https://github.com/truyenhkm5group-stack/hkt.git && cd hkt/deploy/places-relay
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+SECRET=$(openssl rand -hex 24)
+gcloud run deploy places-relay --source . --region asia-southeast1 --allow-unauthenticated \
+  --set-env-vars RELAY_SECRET=$SECRET --max-instances 2 --memory 256Mi
+echo "MAT KHAU TRAM: $SECRET"
+```
+
+Rồi trong ERP, ở kết nối «Google Places»:
+
+- «Địa chỉ trạm» = `Service URL` mà lệnh deploy in ra;
+- «Mật khẩu trạm» = chuỗi `MAT KHAU TRAM`.
+
+Bấm **Kiểm tra**. Câu báo đạt có chữ «qua trạm chuyển tiếp». Muốn gỡ trạm, để trống «Địa chỉ trạm»: ERP sẽ gọi thẳng
+Google như cũ.
 
 Khoá được mã hoá AES-256-GCM trong CSDL của tổ chức (biến `PLATFORM_SECRETS_KEY` của máy chủ đã có). Khoá không bao giờ
 xuống trình duyệt và luôn đi trong tiêu đề `X-Goog-Api-Key`, không bao giờ nằm trong URL.

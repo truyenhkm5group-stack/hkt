@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
-import type { PlaceRecord, PlacesClientDeps } from "@/lib/integrations/google-places/client";
+import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
 import { type LeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
@@ -847,7 +847,7 @@ export async function runLeadHunterTick(opts: TickOptions = {}, deps: TickDeps =
   if (needsGoogle && !ctx.provider) {
     const conn = await openActiveConnection("google-places");
     if (conn.ok && (conn.secrets.apiKey ?? "").trim()) {
-      ctx.provider = googlePlacesProvider({ apiKey: conn.secrets.apiKey!.trim(), timeoutMs: cfg.timeoutMs, maxRetries: cfg.maxRetries }, deps.places);
+      ctx.provider = googlePlacesProvider({ apiKey: conn.secrets.apiKey!.trim(), timeoutMs: cfg.timeoutMs, maxRetries: cfg.maxRetries, relay: placesRelayOf(conn.settings, conn.secrets) }, deps.places);
     } else if (runningCount > 0) {
       await pauseRunning(ctx, "NO_CONNECTION", conn.ok ? "Kết nối thiếu khoá API." : conn.reason);
     }
