@@ -428,9 +428,11 @@ export function testDanhSachMaHoa() {
     assert.ok(!/PRIVATE KEY/.test(pem), `${CHUNG_CHI} CHỨA KHOÁ RIÊNG — thu hồi ngay, kho này PUBLIC`);
     assert.match(pem, /-----BEGIN CERTIFICATE-----/, `${CHUNG_CHI} phải là chứng chỉ X.509 (PEM)`);
   }
-  for (const t of readdirSync("deploy")) {
-    const noi = readFileSync(path.join("deploy", t), "utf8");
-    assert.ok(!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(noi), `deploy/${t} chứa khoá riêng — kho này PUBLIC`);
+  // Cả thư mục con (deploy/places-relay/ — trạm Cloud Run): khoá riêng lọt vào đâu dưới deploy/ cũng là lộ.
+  for (const t of readdirSync("deploy", { recursive: true, withFileTypes: true }).filter((e) => e.isFile())) {
+    const tep = path.join(t.parentPath, t.name);
+    const noi = readFileSync(tep, "utf8");
+    assert.ok(!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(noi), `${tep.split(path.sep).join("/")} chứa khoá riêng — kho này PUBLIC`);
   }
   console.log(`✓ Mã hoá: ${khai.size} thao tác khớp hai chiều · mọi lệnh chạy trong nhánh mã hoá qua ma_hoa_ket_qua · 2 chế độ --explain tách thành thao tác mã hoá · fail-closed ở cả máy Actions lẫn máy chủ · không in bản rõ · hiện vật 1 ngày`);
 }

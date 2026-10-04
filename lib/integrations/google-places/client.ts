@@ -11,7 +11,8 @@ import type { DiscoveryTier, PlacesSku } from "@/lib/wholesale/config";
  * Luật:
  *  · Khoá đi trong HEADER `X-Goog-Api-Key`, không bao giờ trong URL (URL lọt vào log máy chủ / proxy);
  *    mọi thông báo lỗi đi qua `scrub()` trước khi trả ra.
- *  · CHỈ gọi `places.googleapis.com`, `redirect: "manual"`.
+ *  · CHỈ gọi `places.googleapis.com` (hoặc trạm chuyển tiếp `https://….run.app` của chính tổ chức — xem
+ *    `PLACES_RELAY_URL_PATTERN`), `redirect: "manual"`.
  *  · Field mask theo MỨC (`DiscoveryTier`) — chỉ xin đúng trường dùng tới, vì Google tính tiền theo
  *    trường đắt nhất trong mask (SKU). Mỗi kết quả trả kèm `sku` để người gọi ghi chi phí.
  *  · Thử lại có lùi dần (lũy thừa 2 + nhiễu) cho lỗi mạng, hết giờ, 429, 5xx. KHÔNG thử lại 4xx khác
@@ -33,7 +34,21 @@ export type PlacesClientDeps = {
   now?: () => number;
 };
 
-export type PlacesClientOptions = { apiKey: string; timeoutMs: number; maxRetries: number };
+/**
+ * Trạm chuyển tiếp (deploy/places-relay, Cloud Run) — Google từ chối Places API (New) khi lời gọi đi ra từ IP Việt Nam (đo
+ * 04/10/2026: 403 không kèm `reason`, cùng khoá chạy được từ Cloud Shell). Chỉ nhận địa chỉ `https://….run.app`: người
+ * quản trị tổ chức gõ ô này, nên một URL tuỳ ý là cửa để máy chủ gửi khoá Google + mật khẩu trạm tới nơi khác (SSRF).
+ */
+export const PLACES_RELAY_URL_PATTERN = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app\/?$/;
+export type PlacesRelay = { url: string; secret: string };
+
+/** Trạm từ cấu hình kết nối: ô «Địa chỉ trạm» trống ⇒ `null` (gọi thẳng Google). Địa chỉ sai dạng vẫn trả về để lượt gọi báo INVALID. */
+export function placesRelayOf(settings: Record<string, string | undefined>, secrets: Record<string, string | undefined>): PlacesRelay | null {
+  const url = (settings.relayUrl ?? "").trim();
+  return url ? { url, secret: (secrets.relaySecret ?? "").trim() } : null;
+}
+
+export type PlacesClientOptions = { apiKey: string; timeoutMs: number; maxRetries: number; relay?: PlacesRelay | null };
 
 /** Một địa điểm đã đọc từ phản hồi — mọi trường ngoài `placeId` có thể thiếu tuỳ field mask. */
 export type PlaceRecord = {
@@ -82,9 +97,10 @@ export function searchSku(mode: "TEXT" | "NEARBY", tier: DiscoveryTier): PlacesS
   return tier === "IDS_ONLY" ? "TEXT_SEARCH_IDS" : tier === "PRO" ? "TEXT_SEARCH_PRO" : "TEXT_SEARCH_ENTERPRISE";
 }
 
-function scrub(text: string, apiKey: string): string {
+function scrub(text: string, apiKey: string, extra?: string | null): string {
   let out = text;
   if (apiKey && apiKey.length >= 8) out = out.split(apiKey).join("••••");
+  if (extra && extra.length >= 8) out = out.split(extra).join("••••");
   return out.replace(/AIza[0-9A-Za-z_-]{20,}/g, "••••").slice(0, 300);
 }
 
@@ -179,15 +195,21 @@ async function call(
   if (!request.url.startsWith(`${PLACES_HOST}/`)) {
     return { ok: false, kind: "INVALID", message: "Chỉ gọi places.googleapis.com", meta: { sku, httpStatus: null, durationMs: 0, attempts: 0, billable: false } };
   }
+  const relay = opts.relay ?? null;
+  if (relay && (!PLACES_RELAY_URL_PATTERN.test(relay.url) || relay.secret.length < 16)) {
+    return { ok: false, kind: "INVALID", message: "Địa chỉ trạm phải là https://….run.app và mật khẩu trạm ≥ 16 ký tự", meta: { sku, httpStatus: null, durationMs: 0, attempts: 0, billable: false } };
+  }
+  const target = relay ? `${relay.url.replace(/\/$/, "")}${request.url.slice(PLACES_HOST.length)}` : request.url;
   for (let i = 0; i <= opts.maxRetries; i++) {
     attempts++;
     try {
-      const res = await fetchImpl(request.url, {
+      const res = await fetchImpl(target, {
         method: request.method,
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": opts.apiKey,
           "X-Goog-FieldMask": request.fieldMask,
+          ...(relay ? { "X-Relay-Secret": relay.secret } : {}),
         },
         body: request.body === undefined ? undefined : JSON.stringify(request.body),
         redirect: "manual",
@@ -205,12 +227,12 @@ async function call(
         return { ok: true, json, meta: { sku, httpStatus: res.status, durationMs: now() - started, attempts, billable: true } };
       }
       const kind = classify(res.status, text);
-      last = { kind, message: scrub(`HTTP ${res.status} — ${googleMessage(text)}`, opts.apiKey) };
+      last = { kind, message: scrub(`HTTP ${res.status} — ${relay && res.status === 401 ? "trạm từ chối mật khẩu" : googleMessage(text)}`, opts.apiKey, relay?.secret) };
       if (kind !== "QUOTA" && kind !== "SERVER") break; // 4xx khác: thử lại vô ích
     } catch (e) {
       lastStatus = null;
       const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-      last = { kind: "NETWORK", message: scrub(msg, opts.apiKey) };
+      last = { kind: "NETWORK", message: scrub(msg, opts.apiKey, relay?.secret) };
     }
     if (i < opts.maxRetries) {
       const backoff = Math.min(30_000, 1000 * 2 ** i) + Math.floor(random() * 250);

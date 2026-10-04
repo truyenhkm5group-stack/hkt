@@ -1,0 +1,14 @@
+{
+  "name": "erp-places-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Trạm chuyển tiếp Google Places API (New) cho ERP — Cloud Run, không phụ thuộc gói nào.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

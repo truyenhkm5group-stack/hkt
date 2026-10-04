@@ -123,12 +123,20 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 const SHORT_CODE_RE = /#[0-9A-F]{8}\b/g;
 
-/** Thay id / mốc giờ / mã đơn ngắn / dòng «bây giờ» bằng nhãn ổn định — cùng một id luôn ra cùng một nhãn trong một hội thoại. */
-function normalizer(nowLines: Set<string>, skuOfId: Map<string, string>) {
+/** Ngày theo giờ Việt Nam đúng dạng lời nhắc in («05/10/2026»). */
+const vnDate = (d: Date) => new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+
+/**
+ * Thay id / mốc giờ / mã đơn ngắn / dòng «bây giờ» / NGÀY CHẠY bằng nhãn ổn định — cùng một id luôn ra cùng một nhãn trong
+ * một hội thoại. Ngày chạy (giờ VN, của chính lượt chạy) phải thành nhãn: khối KHÁCH CŨ in «gần nhất <ngày đơn vừa gieo>», nên
+ * ảnh chụp ghi ngày thật thì bài kiểm đỏ lúc 0 giờ hôm sau (05/10/2026 — chặn mọi PR và mọi deploy; AGENTS.md mục 50).
+ */
+function normalizer(nowLines: Set<string>, skuOfId: Map<string, string>, runDates: Set<string>) {
   const ids = new Map<string, string>();
   const str = (s: string): string => {
     let out = s;
     for (const line of nowLines) out = out.split(line).join("<BÂY GIỜ>");
+    for (const d of runDates) out = out.split(d).join("<NGÀY CHẠY>");
     // Mã mẫu mã có thể mang tiền tố trước phần UUID — thay NGUYÊN mã trước, rồi mới tới UUID trần.
     for (const [id, sku] of skuOfId) out = out.split(id).join(`<mẫu ${sku}>`);
     out = out.replace(UUID_RE, (m) => {
@@ -177,6 +185,8 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
   const spec = GOLDEN_SHOPS[c.shop];
   const skuOfId = new Map([...ids.entries()].map(([sku, id]) => [id.toLowerCase(), sku]));
   const nowLines = new Set<string>();
+  // Ngày VN từ lúc gieo dữ liệu tới lượt cuối — chạy vắt qua nửa đêm thì cả hai ngày đều là «ngày chạy».
+  const runDates = new Set<string>([vnDate(new Date())]);
   const promptsRaw: string[] = [];
   let steps: Step[] = [];
   let stepIdx = 0;
@@ -214,6 +224,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
         rounds = [];
         const now = new Date();
         nowLines.add(nowPromptLine(now));
+        runDates.add(vnDate(now));
         const res = await chatTurn(conv.id, t.say, { channel: c.channel, visitorKey, now });
         if (!res.ok) throw new Error(`[${c.key}] lượt «${t.say}» lỗi: ${res.error}`);
         const msgs = res.view.messages;
@@ -249,7 +260,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
           order,
         },
       };
-      return normalizer(nowLines, skuOfId)(transcript) as GoldenTranscript;
+      return normalizer(nowLines, skuOfId, runDates)(transcript) as GoldenTranscript;
     } finally {
       setSalesChatProviderForTests(null);
     }
