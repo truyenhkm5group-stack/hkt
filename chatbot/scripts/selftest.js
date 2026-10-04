@@ -2138,5 +2138,29 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 49: dia chi viet tat khong co chu xa/huyen (\"an dương hp\") van duoc nhan; khong xin them SDT nguoi nhan ho");
 }
 
+// ---- 50: mau xa kho (gia POS 749K, gia xa 299K) — "giam > 30%" khong chan khi tong la gia trong bang gia cua page
+{
+  const prevProducts = catalog.products;
+  catalog.setProducts([{ id: "p2", code: "Q002", name: "Đầm Q002", note: "", attributes: { "Màu": ["Đen"] }, price: { min: 749000, max: 749000 }, images: [], variations: [{ id: "q2den2xl", sku: "x", fields: { "Màu": "Đen", Size: "2XL" }, price: 749000, stock: 5, available: true, images: [] }] }]);
+  const cu = settings.get("PAGE1").extraPrompt;
+  settings.update("PAGE1", { extraPrompt: "Q002 GIÁ XẢ CHỈ 299.000đ/đầm, giá cũ 749. 2 đầm 598.000đ miễn ship." });
+  const ob = bot.orderBot;
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const chot = shop("Dạ em chốt đơn cho chị:\n• Đầm Q002 màu Đen size 2XL x 1\n• Tổng: 299.000đ + 25.000đ ship = 324.000đ");
+  const chan = ["giảm giá 450.000đ vượt 30% tiền hàng"];
+  assert.deepEqual(ob.dropSanctionedDiscount(chan, { agreed: 324000 }, "PAGE1", [chot, khach("ok")]), [], "gia xa 299K + ship nam trong bang gia -> khong chan");
+  // Tong shop CHUA tung noi -> van chan
+  assert.deepEqual(ob.dropSanctionedDiscount(chan, { agreed: 324000 }, "PAGE1", [khach("324k nhé")]), chan);
+  // Tong khong co trong bang gia (bot tu giam 250K) -> van chan
+  const chan2 = ["giảm giá 499.000đ vượt 30% tiền hàng"];
+  assert.deepEqual(ob.dropSanctionedDiscount(chan2, { agreed: 275000 }, "PAGE1", [shop("Tổng: 275.000đ")]), chan2);
+  // Chan khac giu nguyen
+  assert.deepEqual(ob.dropSanctionedDiscount(["khách chưa chốt tổng tiền trong hội thoại"], { agreed: 0 }, "PAGE1", [chot]), ["khách chưa chốt tổng tiền trong hội thoại"]);
+  settings.update("PAGE1", { extraPrompt: cu || "" });
+  catalog.setProducts(prevProducts);
+  console.log("OK 50: don xa kho (gia POS 749K, ban 299K) tu xac nhan khi tong la gia shop da bao va co trong bang gia page; tong la thi van chan");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
