@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { checkAdminAction, checkInviteAction, checkOrgAction, createOrganizationAction, previewSignupAction } from "@/lib/actions/onboarding";
 import { PLAN_ACTION_LABEL, type PlanAction } from "@/lib/blueprints/types";
+import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { ADMIN_PASSWORD_MIN, closeUnderDependencies, toggleModule, type BusinessType, type SignupPreview } from "@/lib/onboarding/shared";
 import { cn } from "@/lib/utils";
 
@@ -337,6 +338,17 @@ export function StartWizard({ mode, initialInvite, businessTypes, templates, mod
                     {org.name} <span className="font-mono text-xs text-muted-foreground">({org.code})</span> · {preview.blueprint.fromTemplate ? `mẫu «${preview.blueprint.name}»` : "bắt đầu trắng"} · gói «{preview.plan.name}»
                   </p>
                   <p className="text-xs text-muted-foreground">Quản trị đầu tiên: {admin.email}. Máy chưa ghi gì — dưới đây là đúng những thao tác sẽ chạy khi bạn bấm Tạo.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Bằng việc bấm Tạo, bạn đồng ý với{" "}
+                    <a href={TERMS_OF_SERVICE.path} target="_blank" rel="noopener" className="underline">
+                      Điều khoản sử dụng
+                    </a>{" "}
+                    và{" "}
+                    <a href={PRIVACY_POLICY.path} target="_blank" rel="noopener" className="underline">
+                      Chính sách quyền riêng tư
+                    </a>
+                    .
+                  </p>
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Module sẽ bật</p>

@@ -1590,6 +1590,82 @@ export const customerPackages = pgTable(
  * LỊCH HẸN (0190). Kỹ thuật viên đi bằng khoá tài khoản (luật 34). Một kỹ thuật viên không có hai lịch ĐANG HIỆU LỰC
  * chồng giờ — chặn ở lib/records/appointments.ts trong giao dịch có khoá tư vấn theo người. Huỷ bắt buộc lý do.
  */
+/**
+ * PHIẾU BẢO HÀNH (0196, module `warranty`). Một serial chỉ thuộc MỘT phiếu đang hiệu lực (chỉ mục duy nhất có điều kiện, không
+ * phân biệt hoa thường). Hạn = ngày mua + số tháng, tính lúc GHI (lib/constants/warranty.ts::warrantyExpiry). Huỷ cần lý do.
+ */
+export const warrantyCards = pgTable(
+  "warranty_cards",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    variantId: text("variant_id"),
+    productName: text("product_name").notNull(),
+    serial: text("serial"),
+    orderId: text("order_id"),
+    purchasedOn: date("purchased_on", { mode: "string" }).notNull(),
+    months: integer("months").notNull(),
+    expiresOn: date("expires_on", { mode: "string" }).notNull(),
+    status: text("status").notNull().default("ACTIVE"),
+    voidReason: text("void_reason"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("warranty_cards_customer_idx").on(t.customerId),
+    uniqueIndex("warranty_cards_serial_active_uq").on(sql`lower(${t.serial})`).where(sql`${t.serial} IS NOT NULL AND ${t.status} = 'ACTIVE'`),
+    check("warranty_cards_months_check", sql`${t.months} BETWEEN 1 AND 120`),
+    check("warranty_cards_expiry_check", sql`${t.expiresOn} > ${t.purchasedOn}`),
+    check("warranty_cards_status_check", sql`${t.status} IN ('ACTIVE','VOID')`),
+    check("warranty_cards_void_check", sql`${t.status} <> 'VOID' OR length(btrim(coalesce(${t.voidReason}, ''))) >= 3`),
+    check("warranty_cards_serial_check", sql`${t.serial} IS NULL OR length(btrim(${t.serial})) BETWEEN 1 AND 80`),
+    check("warranty_cards_name_check", sql`length(trim(${t.productName})) BETWEEN 1 AND 200`),
+  ],
+);
+
+/**
+ * CA BẢO HÀNH (0196). «Còn bảo hành» KHÔNG lưu — tính lúc đọc từ `opened_at` so với hạn của phiếu. Người nhận / người mở đi bằng
+ * khoá tài khoản (luật 34); tên là ảnh chụp do máy chủ đọc. Chi phí / tiền thu khách `NULL` = chưa biết (luật 42).
+ */
+export const warrantyClaims = pgTable(
+  "warranty_claims",
+  {
+    id: id(),
+    cardId: text("card_id")
+      .notNull()
+      .references(() => warrantyCards.id, { onDelete: "cascade" }),
+    openedAt: ts("opened_at").notNull().defaultNow(),
+    issue: text("issue").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    resolution: text("resolution"),
+    rejectReason: text("reject_reason"),
+    costVnd: integer("cost_vnd"),
+    chargedVnd: integer("charged_vnd"),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    closedAt: ts("closed_at"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("warranty_claims_card_idx").on(t.cardId),
+    index("warranty_claims_status_idx").on(t.status, t.openedAt),
+    check("warranty_claims_issue_check", sql`length(btrim(${t.issue})) BETWEEN 5 AND 1000`),
+    check("warranty_claims_status_check", sql`${t.status} IN ('OPEN','IN_PROGRESS','DONE','REJECTED')`),
+    check("warranty_claims_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('REPAIRED','REPLACED','REFUNDED','RETURNED_TO_SUPPLIER','NO_FAULT')`),
+    check("warranty_claims_done_check", sql`${t.status} <> 'DONE' OR ${t.resolution} IS NOT NULL`),
+    check("warranty_claims_reject_check", sql`${t.status} <> 'REJECTED' OR length(btrim(coalesce(${t.rejectReason}, ''))) >= 3`),
+    check("warranty_claims_money_check", sql`(${t.costVnd} IS NULL OR ${t.costVnd} >= 0) AND (${t.chargedVnd} IS NULL OR ${t.chargedVnd} >= 0)`),
+  ],
+);
+
 export const appointments = pgTable(
   "appointments",
   {
@@ -9594,6 +9670,8 @@ export const salesChatInbound = pgTable(
     /** Bình luận: bài viết + người bình luận — Pancake `private_replies` đòi cả hai. */
     postId: text("post_id"),
     fromId: text("from_id"),
+    /** Ảnh khách gửi trong tin (0195) — chờ bot đọc. Đọc xong ⇒ mô tả ghép vào `text`, cột về `NULL`. */
+    imageUrls: jsonb("image_urls").$type<string[]>(),
     createdAt: createdAt(),
   },
   (t) => [

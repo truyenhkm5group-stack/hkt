@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
 import { ByokAnthropicProvider, ByokGeminiProvider, ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { platformChatAi } from "@/lib/ai-builder/provider";
@@ -40,6 +41,7 @@ import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chat
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { formatVND } from "@/lib/format";
 import { executeTool, orderTotalsOf, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
+import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
@@ -133,6 +135,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     `7. Chuyển nhân viên (handoff_to_human) là lối CUỐI, chỉ khi: ${[cfg.handoff.onCustomerRequest ? "khách muốn gặp người" : "", cfg.handoff.onComplaint ? "khách khiếu nại / phàn nàn" : "", "câu hỏi mà dữ liệu ERP, «Về shop», «Hướng dẫn thêm của shop» và sổ tay đều KHÔNG trả lời được"].filter(Boolean).join(", ")}. Chưa hiểu ý khách thì HỎI LẠI khách cho rõ, KHÔNG chuyển người. Sau đó nói: «${cfg.handoff.message}».`,
     "NÓI ÍT — mỗi tin tối đa 2 câu ngắn (trừ tóm tắt đơn và câu mẫu). KHÔNG chúc tụng, KHÔNG xin lỗi dài, KHÔNG lặp lại điều khách vừa nói, KHÔNG hỏi «cần hỗ trợ thêm gì không», KHÔNG nhắc lại báo giá / quảng cáo đã gửi. Nhắn dài dễ làm khách khó chịu và đổi ý.",
     "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. KHÔNG BAO GIỜ chép lại tin trong lịch sử (kể cả dòng mở đầu bằng «[Shop đã nhắn]»). KHÔNG hứa điều bạn không làm bằng công cụ (đổi lịch giao, đổi địa chỉ đơn đã chốt, giao ngày Chủ nhật…) — việc đó là của nhân viên. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu. Chữ bạn viết ra được GỬI NGUYÊN VĂN cho khách: chỉ viết câu nói với khách — KHÔNG viết suy luận, phân tích, kế hoạch, không nói về «khách» ở ngôi thứ ba.",
+    IMAGE_PROMPT_RULE,
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
     "  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách (vd 1kg hay 2kg) trước khi báo giá.",
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
@@ -382,6 +385,40 @@ async function publishedPlaybook(): Promise<string> {
 async function learnedLessons(): Promise<string> {
   return lessonsPrompt(parseLessonsState(await readJsonSetting(LESSONS_SETTING_KEY)));
 }
+/**
+ * ẢNH KHÁCH GỬI ⇒ MỘT dòng chữ cho lượt của khách (`lib/sales-chatbot/vision.ts`). Đi qua ĐÚNG cổng của lượt trả lời — bot
+ * bật, công tắc AI của người vận hành, hạn mức gói, khoá AI của shop — và ghi MỘT dòng sổ chi phí `sales_chatbot` (đọc ảnh là
+ * tiền của cùng con bot). Mọi nhánh hỏng ⇒ dòng «bot chưa xem được ảnh», KHÔNG ném: khách vẫn được trả lời.
+ */
+export async function describeCustomerImages(urls: readonly string[], opts: { conversationId?: string | null; actorId?: string | null; fetch?: typeof fetch } = {}): Promise<string> {
+  const fallback = imageLine(urls.length, null);
+  const list = urls.filter(allowedImageUrl).slice(0, VISION_LIMITS.imagesPerTurn);
+  if (!list.length) return fallback;
+  try {
+    const cfg = await loadSalesChatbotConfig();
+    if (!cfg.enabled) return fallback;
+    const org = await currentOrganization();
+    if (await aiKillSwitchDenial(org.code)) return fallback;
+    if (!(await checkAiQuota(org.code, salesBotBillingSource(cfg.connectorKey))).ok) return fallback;
+    const prov = await providerFor(cfg);
+    if (!prov.ok) return fallback;
+    const images = (await Promise.all(list.map((u) => fetchCustomerImage(u, opts.fetch)))).filter((x): x is AiImage => x !== null);
+    if (!images.length) return fallback;
+    const base = { orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null };
+    try {
+      const { text, res } = await describeImages(prov.provider, images);
+      const model = res.model || prov.provider.model;
+      await recordAiUsage({ ...base, model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK" }).catch(() => undefined);
+      return imageLine(urls.length, text || null);
+    } catch {
+      await recordAiUsage({ ...base, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR" }).catch(() => undefined);
+      return fallback;
+    }
+  } catch {
+    return fallback;
+  }
+}
+
 /** Chỉ bài kiểm: provider giả (luật 65 — không gọi mạng thật). `null` để gỡ. */
 export function setSalesChatProviderForTests(fn: ((cfg: SalesChatbotConfig) => AiProvider | null) | null) {
   providerOverride = fn;

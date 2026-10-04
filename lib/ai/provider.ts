@@ -1,6 +1,7 @@
 import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiTier } from "@/lib/ai/router";
 import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
+import { anthropicImageBlocks, lastUserIndex, type AiImage } from "@/lib/ai/images";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
 import { assertHomeCredentials, peekIsNonHome } from "@/lib/platform/credentials";
@@ -51,7 +52,9 @@ export type AiUsage = { inputTokens: number; outputTokens: number; cacheReadToke
  * mặc định của nhà cung cấp. Đo 01/10/2026: suy luận ăn chung ngân sách `max_output_tokens` — đặt ngân sách nhỏ mà suy
  * luận «medium» thì model tiêu hết vào suy nghĩ và trả về RỖNG.
  */
-export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "low" | "medium" | "high" };
+export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "low" | "medium" | "high"; images?: AiImage[] };
+export type { AiImage } from "@/lib/ai/images";
+
 
 export type AiResponse = { content: AiBlock[]; stopReason: "end_turn" | "tool_use" | "max_tokens" | "refusal" | "other"; usage: AiUsage; model: string; latencyMs: number };
 
@@ -233,15 +236,18 @@ export class AnthropicProvider implements AiProvider {
       */
       messages: req.messages.map((m, iTin) => ({
         role: m.role,
-        content: m.content.map((b, iKhoi) => {
-          const cuoiCung = iTin === req.messages.length - 1 && iKhoi === m.content.length - 1;
-          const dem = cuoiCung ? { cache_control: { type: "ephemeral" as const } } : {};
-          return b.type === "text"
-            ? ({ type: "text", text: b.text, ...dem } as const)
-            : b.type === "tool_use"
-              ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input, ...dem } as const)
-              : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false, ...dem } as const);
-        }),
+        content: [
+          ...(iTin === lastUserIndex(req.messages) ? anthropicImageBlocks(req.images) : []),
+          ...m.content.map((b, iKhoi) => {
+            const cuoiCung = iTin === req.messages.length - 1 && iKhoi === m.content.length - 1;
+            const dem = cuoiCung ? { cache_control: { type: "ephemeral" as const } } : {};
+            return b.type === "text"
+              ? ({ type: "text", text: b.text, ...dem } as const)
+              : b.type === "tool_use"
+                ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input, ...dem } as const)
+                : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false, ...dem } as const);
+          }),
+        ],
       })),
     };
     // Lượt dài đi bằng streaming — xem `NGUONG_KHONG_STREAM`. Phong bì trả về giống hệt nhau, nên

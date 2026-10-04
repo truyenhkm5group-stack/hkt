@@ -13,8 +13,8 @@ import Link from "next/link";
 import { loadDynamicNav } from "@/lib/pages/nav-loader";
 import { findOrganization } from "@/lib/platform/organizations";
 import { orgBillingStanding } from "@/lib/billing/standing";
-import { BILLING_STANDING_LABEL } from "@/lib/billing/rules";
-import { formatDate } from "@/lib/format";
+import { billingNotice as billingNoticeOf } from "@/lib/billing/rules";
+import { planKeyOf } from "@/lib/entitlements/check";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const draft = org?.publishState === "DRAFT";
   // THU PHÍ (0187): nhắc khi còn ≤ 7 ngày / đang ân hạn / đã chỉ xem. Đọc sổ thuê bao qua đệm 10 giây — tổ chức nhà không hỏi.
   const billing = org ? await orgBillingStanding(org) : null;
-  const billingNotice = billing && (billing.kind === "DUE_SOON" || billing.kind === "OVERDUE" || billing.kind === "LOCKED") ? billing : null;
+  // Gói `trial` (cửa hàng tự đăng ký, 14 ngày) ⇒ luôn hiện số ngày dùng thử còn lại; gói trả tiền chỉ nhắc khi gần / quá hạn.
+  const billingNotice = billing && org ? billingNoticeOf(billing, planKeyOf(org) === "trial") : null;
   const canPay = can(user, "settings:manage");
   return (
     <TooltipProvider delayDuration={200}>
@@ -79,25 +80,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 {billingNotice ? (
                   <p
                     className={
-                      billingNotice.kind === "DUE_SOON"
-                        ? "rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-                        : "rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+                      billingNotice.tone === "info"
+                        ? "rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+                        : billingNotice.tone === "warn"
+                          ? "rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                          : "rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
                     }
                     data-testid="billing-banner"
-                    data-billing-standing={billingNotice.kind}
+                    data-billing-standing={billing?.kind}
                   >
-                    {BILLING_STANDING_LABEL[billingNotice.kind]} —{" "}
-                    {billingNotice.kind === "LOCKED"
-                      ? `đã hết hạn ${formatDate(billingNotice.paidThrough)}: xem và xuất được, chưa tạo / sửa được cho tới khi gia hạn.`
-                      : billingNotice.kind === "OVERDUE"
-                        ? `đã hết hạn ${formatDate(billingNotice.paidThrough)}, từ ${formatDate(billingNotice.lockOn)} tổ chức chuyển sang chỉ xem.`
-                        : `gói trả tới ${formatDate(billingNotice.paidThrough)}.`}{" "}
+                    {billingNotice.text}{" "}
                     {canPay ? (
                       <Link href="/settings/plan" className="font-semibold underline underline-offset-2">
-                        Gia hạn
+                        {billingNotice.cta}
                       </Link>
                     ) : (
-                      "Báo quản trị của tổ chức gia hạn."
+                      "Báo quản trị của tổ chức."
                     )}
                   </p>
                 ) : null}

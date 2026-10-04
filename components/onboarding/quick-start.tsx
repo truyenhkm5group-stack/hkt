@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { forgetSocialSignupAction } from "@/lib/actions/oauth";
+import { TRIAL_DAYS } from "@/lib/billing/rules";
+import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { quickSignupAction } from "@/lib/actions/onboarding";
 import { ADMIN_PASSWORD_MIN, QUICK_BUSINESS_LABEL, QUICK_BUSINESS_TYPES, type QuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { cn } from "@/lib/utils";
@@ -132,11 +134,16 @@ export function QuickStart({ needInvite, initialInvite, providers, social }: { n
           Tự chọn mẫu và module
         </Link>
       </div>
-      <p className="text-center text-xs text-muted-foreground">
-        Xem cách chúng tôi bảo vệ dữ liệu:{" "}
-        <a href="/chinh-sach-bao-mat" target="_blank" rel="noopener" className="underline hover:text-foreground">
+      <p className="text-center text-xs text-muted-foreground" data-quick-consent>
+        Dùng thử {TRIAL_DAYS} ngày miễn phí, không cần thẻ. Bằng việc tạo cửa hàng, bạn đồng ý với{" "}
+        <a href={TERMS_OF_SERVICE.path} target="_blank" rel="noopener" className="underline hover:text-foreground">
+          Điều khoản sử dụng
+        </a>{" "}
+        và{" "}
+        <a href={PRIVACY_POLICY.path} target="_blank" rel="noopener" className="underline hover:text-foreground">
           Chính sách quyền riêng tư
         </a>
+        .
       </p>
     </div>
   );

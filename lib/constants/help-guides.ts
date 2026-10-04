@@ -197,6 +197,20 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  {
+    key: "warranty",
+    topic: "SERVICE",
+    title: "Bảo hành theo serial",
+    summary: "Khách gọi báo lỗi: tra theo SĐT hoặc serial là biết khách mua gì, ngày nào, còn bảo hành hay không.",
+    href: "/warranty",
+    permission: "warranty:view",
+    steps: [
+      { text: "Mở Bảo hành, gõ SĐT / serial / tên khách vào ô tra.", href: "/warranty" },
+      { text: "Bán máy mới: điền khách, sản phẩm, serial, ngày mua, số tháng rồi bấm «Lập phiếu bảo hành» — hạn do ERP tính." },
+      { text: "Khách báo lỗi: trên phiếu bấm «Mở ca bảo hành», ghi lỗi; xử lý xong bấm «Đóng ca…» và chọn cách xử lý. Ca mở sau hạn được ghi «ngoài hạn»." },
+    ],
+  },
+
   // ───────────────── CHATBOT ─────────────────
   {
     key: "sales-chatbot",

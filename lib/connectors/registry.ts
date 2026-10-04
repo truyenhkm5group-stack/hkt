@@ -97,7 +97,7 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
@@ -168,6 +168,48 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: [],
     why: `Đơn, khách, sản phẩm, tồn và đổi trả của VNX; landing gửi đơn nháp lên POS. ${HOME_WHY}`,
   },
+  /*
+    PANCAKE POS CỦA CHÍNH TỔ CHỨC KHÁCH (F1 · docs/verticals/fashion-cod.md — chủ nền tảng chốt 04/10/2026: đóng gói ERP gốc
+    thành sản phẩm cho shop thời trang COD). API key + mã shop CỦA HỌ; đồng bộ chạy ĐÚNG bộ đồng bộ của nhà bên trong
+    `withPancakeClient`. Thuộc module Đơn hàng (không phải `connector_pancake` — module đó là credential môi trường của nhà).
+    Bật ⇒ Pancake là NGUỒN đơn / khách / sản phẩm (`orgHasSyncedSource`): ERP thôi tạo tay, chatbot ERP thôi lên đơn.
+  */
+  {
+    key: "pancake-pos-org",
+    label: "Pancake POS của tổ chức",
+    vendor: "Pancake",
+    kind: "ORDER_SOURCE",
+    capabilities: ["pull_orders", "pull_products", "pull_customers", "pull_inventory", "webhook_orders"],
+    auth: "API_KEY",
+    settings: [
+      {
+        key: "apiKey",
+        label: "API key Pancake POS",
+        type: "text",
+        secret: true,
+        required: true,
+        hint: "Pancake POS → Cấu hình → Ứng dụng → API: tạo / chép API key của shop. Khoá chỉ dùng để ĐỌC đơn, khách, sản phẩm, tồn.",
+        pattern: "^[A-Za-z0-9_-]{16,200}$",
+        maxLength: 200,
+      },
+      { key: "shopId", label: "Mã shop Pancake POS", type: "text", secret: false, required: true, hint: "Số ngay sau «/shop/» trên thanh địa chỉ khi mở Pancake POS", pattern: "^[0-9]{1,20}$", maxLength: 20 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/pancake-org/[token]/[[...event]]",
+      verify: "Token «<mã tổ chức>.<chữ ký HMAC>» trong ĐƯỜNG DẪN (khoá con dẫn xuất từ PLATFORM_SECRETS_KEY), so hằng thời gian trước khi đọc body; tổ chức phải ACTIVE và kết nối phải đang bật",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "webhookDedupeKey(PANCAKE, [loại, id, updated_at])",
+      binding: "PANCAKE_POS_ORG",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testPancakePosOrg",
+    module: "orders",
+    code: ["lib/constants/pancake-pos-org.ts", "lib/integrations/pancake/org.ts", "app/api/webhooks/pancake-org/[token]/[[...event]]/route.ts", "components/connectors/org-pos-panel.tsx"],
+    consumers: ["lib/integrations/pancake/org.ts::syncOrgPancake", "app/api/webhooks/pancake-org/[token]/[[...event]]/route.ts"],
+    why: "Đơn, khách, sản phẩm, tồn kho và đổi trả từ Pancake POS của CHÍNH tổ chức khách (API key + mã shop của họ). Kiểm tra = GET danh sách shop của khoá, đòi mã shop đã khai nằm trong đó — chỉ đọc, chỉ tới pos.pages.fm. Webhook theo tổ chức đẩy đơn / khách / sản phẩm / tồn tức thời; nút «Đồng bộ ngay» (job «pancake-org») kéo đủ — lượt đầu 30 ngày đơn. Bật ⇒ Pancake là NGUỒN đơn / khách / sản phẩm: ERP thôi tạo tay. Khác «Pancake POS» của nhà (biến môi trường).",
+  },
   {
     key: "google-sheet-landing",
     label: "Google Sheet đơn landing",
@@ -187,6 +229,36 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     why: "CSV export công khai, không khoá (AGENTS mục 5); URL đọc từ settings của CHÍNH tổ chức đang chạy — đã là theo tổ chức từ trước nền tảng.",
   },
   // ─────────────── VẬN CHUYỂN ───────────────
+  /*
+    VIETTEL POST CỦA CHÍNH TỔ CHỨC KHÁCH (F2 · docs/verticals/fashion-cod.md). Viettel Post KHÔNG cấp API tra cứu cho shop
+    (chủ shop chốt 24/09/2026) — nguồn tin là WEBHOOK + tệp «Danh sách vận đơn» / bảng kê COD. Không khoá nào để khai: máy
+    chủ cấp URL webhook mang token HMAC riêng của tổ chức; shop dán URL đó vào tài khoản Viettel Post của họ. Tệp nhập ở
+    /import-vtp (đã chạy theo tổ chức). Thuộc module Giao vận.
+  */
+  {
+    key: "viettelpost-org",
+    label: "Viettel Post của tổ chức (webhook)",
+    vendor: "Viettel Post",
+    kind: "SHIPPING",
+    capabilities: ["webhook_status", "import_file"],
+    auth: "NONE",
+    settings: [],
+    config: { store: "NONE", where: "Không cần khai: URL webhook do máy chủ cấp ở khung «Viettel Post của tổ chức» (/settings/connections); tệp nhập ở /import-vtp" },
+    webhook: {
+      path: "/api/webhooks/viettelpost-org/[token]",
+      verify: "Token «<mã tổ chức>.<chữ ký HMAC>» trong ĐƯỜNG DẪN (khoá con dẫn xuất từ PLATFORM_SECRETS_KEY), so hằng thời gian trước khi đọc body; tổ chức phải ACTIVE và bật module Giao vận",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "webhookDedupeKey(VIETTELPOST, [ORDER_NUMBER, trạng thái, mốc ĐVVC]) — cùng lõi với route của nhà",
+      binding: "VIETTELPOST_ORG",
+    },
+    tenancy: "PER_ORG",
+    health: null,
+    healthRef: null,
+    module: "logistics",
+    code: ["lib/integrations/viettelpost/webhook-core.ts", "app/api/webhooks/viettelpost-org/[token]/route.ts", "components/connectors/org-carrier-panel.tsx"],
+    consumers: ["app/api/webhooks/viettelpost-org/[token]/route.ts"],
+    why: "Hành trình vận đơn Viettel Post của CHÍNH tổ chức khách, đẩy qua webhook vào URL mang token riêng của tổ chức (VTP không cấp API tra cứu). Cùng lõi với webhook của nhà: chống trùng theo (vận đơn, trạng thái, mốc ĐVVC), mốc ĐVVC mới hơn thì thắng. Không có hàm kiểm tra: không có API để hỏi — gói tin đầu tiên về là bằng chứng. Khác «Viettel Post» của nhà (biến môi trường).",
+  },
   {
     key: "viettelpost",
     label: "Viettel Post",

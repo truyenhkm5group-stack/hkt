@@ -1,4 +1,5 @@
 import { phoneRiskOrderRows } from "@/lib/alerts/risk";
+import { syncOrgPancake } from "@/lib/integrations/pancake/org";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { warmPhoneReputations } from "@/lib/queries/phone-reputation";
 import {
@@ -467,6 +468,20 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     module: "connector_pancake",
     description: "Kho → sản phẩm → đơn hàng → khách hàng → đổi trả → nhật ký kho.",
     run: (o) => syncPancakeAll({ trigger: o.trigger, actor: o.actor, backfill: o.params?.backfill === "1", days: num(o.params?.days), productsFollowUp: modelRegistryFollowUp(o.trigger) }),
+  },
+  /*
+    PANCAKE POS CỦA TỔ CHỨC KHÁCH (F1 · docs/verticals/fashion-cod.md). Credential là kết nối «pancake-pos-org» CỦA CHÍNH tổ
+    chức (org_connections), KHÔNG phải biến môi trường — nên không nằm trong HOME_CREDENTIAL_JOBS, nguồn khai `ALL`. CHƯA có
+    lịch: chạy bằng nút «Đồng bộ ngay» / webhook theo tổ chức đẩy dữ liệu tức thời. Lịch định kỳ cho tổ chức khách là quyết
+    định hạ tầng của chủ nền tảng (máy 2 nhân — docs/platform/scale-plan.md). Tổ chức nhà / chưa bật kết nối ⇒ bỏ qua có lý do.
+  */
+  "pancake-org": {
+    label: "Đồng bộ Pancake POS (kết nối của tổ chức)",
+    source: "ALL",
+    module: "orders",
+    description:
+      "Tổ chức khách đã bật kết nối «Pancake POS của tổ chức» ⇒ kéo kho → sản phẩm → đơn → khách → đổi trả → nhật ký kho bằng ĐÚNG bộ đồng bộ của tổ chức nhà, với khoá của chính tổ chức. Lượt đầu kéo 30 ngày đơn; days=N để kéo lùi N ngày (tối đa 365). Tổ chức nhà dùng «pancake-all».",
+    run: (o) => syncOrgPancake({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   "vtp-tracking": {
     label: "Trạng thái vận đơn Viettel Post",

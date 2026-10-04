@@ -7,6 +7,7 @@ import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
 import { PRODUCT_IMPORT_MAX_BYTES, type ImportCheckResult, type ImportFileSummary, type ImportRunResult } from "@/lib/products/import-shared";
 import { checkProductImport, describeProductImport, runProductImport, type ProductImportFile } from "@/lib/products/import";
+import { productsFromWebsite, type WebImportResult } from "@/lib/products/web-import";
 
 /**
  * ═══════════ NHẬP SẢN PHẨM TỪ TỆP — CỬA SERVER ACTION ═══════════
@@ -70,4 +71,12 @@ export async function runProductImportAction(input: unknown, options: unknown, e
     for (const path of ["/products", "/inventory/receipts", "/inventory"]) revalidatePath(path);
   }
   return r;
+}
+
+/** Bước 0 (tuỳ chọn): đọc sản phẩm từ LINK WEBSITE ⇒ tệp CSV đúng khuôn tệp mẫu cho các bước trên. Không ghi gì. */
+export async function productsFromWebsiteAction(url: unknown): Promise<WebImportResult> {
+  const user = await requireUser();
+  const parsed = z.string().trim().min(1, "Nhập địa chỉ website.").max(500, "Địa chỉ quá dài.").safeParse(url);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Địa chỉ không hợp lệ." };
+  return productsFromWebsite(user, parsed.data);
 }

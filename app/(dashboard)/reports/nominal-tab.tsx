@@ -34,7 +34,9 @@ import {
 } from "@/lib/queries/profit-nominal";
 import { getNominalDaily, NO_DAY, type NominalCell, type NominalDaily } from "@/lib/queries/marketer-daily-nominal";
 import type { Period } from "@/lib/search-params";
-import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
+import { DEFAULT_PROFIT_ASSUMPTIONS, PROFIT_ASSUMPTIONS_KEY } from "@/lib/constants/profit";
+import { currentOrganization } from "@/lib/platform/context";
+import { settingDeclared } from "@/lib/settings";
 import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
 import { AdsCeilingTable } from "@/app/(dashboard)/reports/ads-ceiling-table";
 import { adsCeiling } from "@/lib/constants/estimated-cost";
@@ -323,6 +325,13 @@ export async function NominalTab({
     đứng trên cùng trang nên bật theo, để hai bảng nói cùng một lợi nhuận cho cùng một mã; bảng
     lương và trang Quảng cáo gọi hai hàm này không tham số nên không bao giờ thấy giá đoán.
   */
+  /*
+    SỐ MẪU KHÔNG ĐƯỢC TRÔNG NHƯ SỐ CỦA SHOP (F3 · docs/verticals/fashion-cod.md). Giả định mặc định trong mã (45% hoàn, ship
+    17.000 ₫, cố định 5 triệu…) là MỤC TIÊU chủ shop VNX chốt cho VNX. Tổ chức khách chưa khai giả định thì lợi nhuận ước tính
+    đang chạy bằng số của shop khác — nói ra ngay đầu tab, không đổi con số (đổi mặc định là quyết định kinh doanh).
+  */
+  const [org, assumptionsDeclared] = await Promise.all([currentOrganization(), settingDeclared(PROFIT_ASSUMPTIONS_KEY)]);
+  const sampleAssumptions = !org.isHome && assumptionsDeclared === false;
   const [report, byMarketer, daily] = await Promise.all([
     getNominalProfitReport(period, basis, value, includeAds, true),
     getNominalMarketerBreakdown(period, value, includeAds, true),
@@ -343,6 +352,11 @@ export async function NominalTab({
 
   return (
     <div className="space-y-5">
+      {sampleAssumptions ? (
+        <div role="status" data-sample-assumptions className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          ⚠ Giả định lợi nhuận đang là <b>SỐ MẪU</b> của nền tảng (tỷ lệ hoàn {DEFAULT_PROFIT_ASSUMPTIONS.defaultReturnRate}%, phí ship {DEFAULT_PROFIT_ASSUMPTIONS.shipFeeDelivered.toLocaleString("vi-VN")} ₫ / đơn, chi phí cố định {DEFAULT_PROFIT_ASSUMPTIONS.fixedCostMonthly.toLocaleString("vi-VN")} ₫ / tháng…), chưa phải số của shop. Lợi nhuận ước tính bên dưới chỉ đúng khi shop khai số thật ở khung «Giả định» cuối tab này.
+        </div>
+      ) : null}
       {/*
         ═══ MỐC COHORT ĐỨNG NGAY ĐẦU TAB, VÌ NÓ QUYẾT ĐỊNH MỌI CON SỐ BÊN DƯỚI ═══
 

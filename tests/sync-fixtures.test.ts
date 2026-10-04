@@ -344,6 +344,7 @@ import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./comp
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
+import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -456,13 +457,20 @@ import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
+import { testWarranty } from "./warranty.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
+import { testPancakePosOrgSync } from "./pancake-pos-org.test";
+import { testViettelPostOrg } from "./viettelpost-org.test";
+import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testQuickStart } from "./quick-start.test";
 import { testGoLive } from "./go-live.test";
+import { testSalesVision } from "./sales-vision.test";
+import { testChatWidget } from "./chat-widget.test";
+import { testWebProductImport } from "./web-product-import.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
@@ -2132,6 +2140,9 @@ async function main() {
   await testCompanyOsWarmDb();
   testCompanyOsSummaryPure();
   await testCompanyOsSummaryDb(db);
+  // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
+  testOrgSummaryPure();
+  await testOrgSummaryDb();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2654,14 +2665,21 @@ async function main() {
   await testSeafoodOs();
   // Lịch hẹn & liệu trình (0190) + mẫu spa: tổ chức THẬT `ap-spa` (tự cấp, tự dọn).
   await testAppointments();
+  await testWarranty();
   await testAppointmentBookingBot();
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
   await testMetaAdsOrgSync();
+  await testPancakePosOrgSync();
+  await testViettelPostOrg();
+  await testFashionCodF3();
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   await testQuickStart();
   await testGoLive();
+  await testSalesVision();
+  testChatWidget();
+  await testWebProductImport();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
   // song song ⇒ một tài khoản; hạn mức gói lúc tạo (tính ghế đã hứa) và lúc nhận; bảng không chứa mã thô; chặn dò theo IP.

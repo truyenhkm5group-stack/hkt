@@ -37,6 +37,8 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   "app/api/webhooks/viettelpost/route.ts": "webhook Viettel Post, phải trả HTTP 200 trong 1 giây",
   "app/api/webhooks/vtp-statement/route.ts": "webhook bảng kê Viettel Post",
   "app/api/video-scale/public/[id]/route.ts": "link KÝ TÊN cho Facebook tải video quảng cáo (advideos file_url): HMAC AUTH_SECRET trên (tệp, hạn), hạn ≤ 2 giờ, chỉ bản hoàn chỉnh / ảnh bìa của video ĐÃ DUYỆT không phải dữ liệu thử — sai điều nào cũng 404",
+  "app/api/webhooks/viettelpost-org/[token]/route.ts": "webhook Viettel Post của MỘT tổ chức khách (F2): token «<mã tổ chức>.<chữ ký HMAC>» trong đường dẫn phân giải qua WEBHOOK_BINDINGS.VIETTELPOST_ORG (URL_SECRET) — sai ⇒ 401, chưa bật Giao vận ⇒ 409, không rơi về nhà, không phiên đăng nhập",
+  "app/api/webhooks/pancake-org/[token]/[[...event]]/route.ts": "webhook Pancake POS của MỘT tổ chức khách (F1): token «<mã tổ chức>.<chữ ký HMAC>» trong đường dẫn phân giải qua WEBHOOK_BINDINGS.PANCAKE_POS_ORG (URL_SECRET) — sai ⇒ 401, kết nối chưa bật ⇒ 409, không rơi về nhà, không phiên đăng nhập",
   "app/api/webhooks/pancake/fanpage/[token]/route.ts": "webhook tin nhắn fanpage của MỘT tổ chức khách: token «<mã tổ chức>.<chữ ký HMAC>» trong đường dẫn phân giải qua WEBHOOK_BINDINGS.PANCAKE_FANPAGE (URL_SECRET) — sai ⇒ 401, không rơi về nhà, không phiên đăng nhập",
   "app/api/webhooks/sepay/route.ts": "webhook SePay, xác thực bằng HMAC-SHA256 trên byte gốc + chống phát lại 5 phút — không có phiên đăng nhập",
   "app/api/sync/[job]/route.ts": "gọi bằng x-cron-secret (bộ lập lịch) hoặc phiên có quyền sync:run",

@@ -309,7 +309,7 @@ async function kiemWebhook(home: Organization) {
   assert.ok(nhaCungCap.length >= 4, "đọc hụt WEBHOOK_BINDINGS");
   // Danh sách ĐÓNG các webhook phân giải theo token trong đường dẫn (0182). Mọi webhook khác vẫn HOME_ONLY — thêm một
   // webhook theo tổ chức là phải thêm TƯỜNG MINH vào đây, không lặng lẽ đổi chế độ của webhook của nhà.
-  const URL_SECRET_PROVIDERS: readonly WebhookProvider[] = ["PANCAKE_FANPAGE"];
+  const URL_SECRET_PROVIDERS: readonly WebhookProvider[] = ["PANCAKE_FANPAGE", "PANCAKE_POS_ORG", "VIETTELPOST_ORG"];
   for (const p of nhaCungCap) {
     assert.ok(WEBHOOK_BINDINGS[p].reason.length >= 20, `webhook ${p} phải kèm lý do`);
     if (URL_SECRET_PROVIDERS.includes(p)) {

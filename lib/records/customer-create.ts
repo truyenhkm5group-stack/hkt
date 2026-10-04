@@ -29,7 +29,7 @@ import { getPublishedForm } from "@/lib/metadata/forms";
 import type { FieldError, FormSchema } from "@/lib/metadata/types";
 import { validateCustomValues } from "@/lib/metadata/validate";
 import { canEditField, saveCustomValues } from "@/lib/metadata/values";
-import { canUseModule } from "@/lib/platform/capabilities";
+import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
 
 export const CUSTOMER_CREATE_FORM = "create";
 
@@ -51,7 +51,7 @@ export async function customerCreateGate(user: SessionUser): Promise<CreateGate>
   const create = def?.capabilities.create;
   if (!def || !create) return { allowed: false, code: "NOT_SUPPORTED", reason: "Khách hàng không có form tạo." };
   if (!(await canUseModule(def.module))) return { allowed: false, code: "MODULE_DISABLED", reason: "Module Khách hàng chưa bật cho tổ chức này." };
-  if (create.requiresModuleOff && (await canUseModule(create.requiresModuleOff))) {
+  if (create.requiresModuleOff && (await orgHasSyncedSource("customers"))) {
     return { allowed: false, code: "NOT_SUPPORTED", reason: "Tổ chức đang dùng kết nối Pancake: khách do đồng bộ tạo, không tạo tay (tránh hai bản ghi cho cùng một người)." };
   }
   if (!can(user, "customers:write")) return { allowed: false, code: "FORBIDDEN", reason: "Bạn không có quyền tạo khách hàng (customers:write)." };
@@ -164,7 +164,7 @@ export async function customerOrgGate(): Promise<CreateGate> {
   const create = def?.capabilities.create;
   if (!def || !create) return { allowed: false, code: "NOT_SUPPORTED", reason: "Khách hàng không có form tạo." };
   if (!(await canUseModule(def.module))) return { allowed: false, code: "MODULE_DISABLED", reason: "Module Khách hàng chưa bật cho tổ chức này." };
-  if (create.requiresModuleOff && (await canUseModule(create.requiresModuleOff))) return { allowed: false, code: "NOT_SUPPORTED", reason: "Tổ chức đang dùng kết nối Pancake: khách do đồng bộ tạo." };
+  if (create.requiresModuleOff && (await orgHasSyncedSource("customers"))) return { allowed: false, code: "NOT_SUPPORTED", reason: "Tổ chức đang dùng kết nối Pancake: khách do đồng bộ tạo." };
   return { allowed: true };
 }
 

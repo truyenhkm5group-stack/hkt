@@ -142,6 +142,8 @@ const MOI = [
   "0192_billing_addons_vat",
   "0193_quick_start_identities",
   "0194_pricing_2026_10",
+  "0195_sales_chat_inbound_images",
+  "0196_warranty",
 ] as const;
 
 /*

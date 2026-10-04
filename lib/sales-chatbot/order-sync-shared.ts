@@ -12,6 +12,7 @@
  * Logic chạy: `lib/sales-chatbot/order-sync.ts`.
  */
 import { z } from "zod";
+import { formatVND } from "@/lib/format";
 
 export const ORDER_SYNC_SETTING_KEY = "ai.salesOrderSync";
 
@@ -34,6 +35,42 @@ export const ORDER_SYNC_LIMITS = { quietMinutes: 10, lookbackHours: 24, threadsP
 
 /** Nhãn kênh của đơn ghi từ hội thoại do người chốt — tách khỏi «Chatbot fanpage» (đơn bot tự chốt). */
 export const ORDER_SYNC_CHANNEL = "Fanpage (nhân viên chốt)";
+
+export type SyncedOrderSummary = {
+  code: string;
+  name: string;
+  phone: string;
+  address: string;
+  province: string;
+  lines: readonly { name: string; quantity: number; unitPrice: number; lineTotal: number }[];
+  subtotal: number;
+  /** `null` = chưa báo phí ship. */
+  shippingFee: number | null;
+  /** Câu ship hiện cho nhân viên (miễn ship / miễn ship nếu đúng khu vực) — `null` = theo số `shippingFee`. */
+  shipText: string | null;
+  /** Ghi chú cần kiểm (SĐT / địa chỉ lấy từ đơn trước…). */
+  warnings: readonly string[];
+};
+
+/**
+ * Tin nhóm vận hành cho đơn ghi từ hội thoại nhân viên — ĐỦ như tin «ĐƠN MỚI» của bot: tên, SĐT, địa chỉ, từng món × SL × đơn
+ * giá, tiền hàng, ship, tiền thu. Chủ shop Hải Sản Làng Chài 04/10/2026: tin cũ chỉ có tên · SĐT · tên món · tổng — thiếu địa
+ * chỉ và giá, kho không đóng gói được. HÀM THUẦN.
+ */
+export function syncedOrderGroupText(o: SyncedOrderSummary): string {
+  const address = o.province && !o.address.toLowerCase().includes(o.province.toLowerCase()) ? [o.address, o.province].filter(Boolean).join(", ") : o.address;
+  const ship = o.shipText ?? (o.shippingFee === null ? "chưa báo" : formatVND(o.shippingFee));
+  return [
+    `🧾 ĐƠN MỚI TỪ FANPAGE ${o.code} — nhân viên chốt, chờ kiểm`,
+    `Khách: ${o.name} · ${o.phone}`,
+    `Địa chỉ: ${address || "—"}`,
+    ...o.lines.map((l) => `• ${l.name} × ${l.quantity} × ${formatVND(l.unitPrice)} = ${formatVND(l.lineTotal)}`),
+    `Tiền hàng: ${formatVND(o.subtotal)} · Ship: ${ship}`,
+    `THU: ${formatVND(o.subtotal + (o.shippingFee ?? 0))}${o.shippingFee === null ? " + ship" : ""}`,
+    ...o.warnings,
+    "Kiểm thông tin rồi chốt đơn trên ERP.",
+  ].join("\n");
+}
 
 export type OrderSyncOutcome = "CREATED" | "CHANGE" | "NONE" | "SKIPPED" | "BOT" | "ERROR";
 export const ORDER_SYNC_OUTCOME_LABEL: Record<OrderSyncOutcome, string> = {

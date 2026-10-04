@@ -2,14 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2, PackageCheck, SearchCheck, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileUp, Globe, Loader2, PackageCheck, SearchCheck, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SectionCard } from "@/components/ui-bits";
-import { checkProductImportAction, describeProductImportAction, runProductImportAction } from "@/lib/actions/product-import";
+import { checkProductImportAction, describeProductImportAction, productsFromWebsiteAction, runProductImportAction } from "@/lib/actions/product-import";
 import { PRODUCT_UNIT_SUGGESTIONS } from "@/lib/constants/manual-products";
 import { formatNumber, formatVND } from "@/lib/format";
 import {
@@ -75,6 +75,8 @@ export function ImportWizard({ canWriteStock }: { canWriteStock: boolean }) {
   const [result, setResult] = useState<ImportRunResult | null>(null);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [siteUrl, setSiteUrl] = useState("");
+  const [siteNote, setSiteNote] = useState<string | null>(null);
 
   const customKeys = useMemo(() => new Set(summary?.customFields.map((f) => f.key) ?? []), [summary]);
   const options = useMemo(() => {
@@ -104,7 +106,12 @@ export function ImportWizard({ canWriteStock }: { canWriteStock: boolean }) {
       setError(`Tệp ${(f.size / 1024 / 1024).toFixed(1)} MB — tối đa 2 MB mỗi lượt. Chia tệp rồi nhập từng phần.`);
       return;
     }
-    const state = { fileName: f.name, base64: await toBase64(f) };
+    setSiteNote(null);
+    load({ fileName: f.name, base64: await toBase64(f) });
+  };
+
+  /** Tệp (chọn từ máy hoặc dựng từ website) ⇒ bước 1 của trình nhập. */
+  const load = (state: FileState) => {
     setFile(state);
     start(async () => {
       const r = await describeProductImportAction(state);
@@ -114,6 +121,21 @@ export function ImportWizard({ canWriteStock }: { canWriteStock: boolean }) {
       }
       setSummary(r);
       setMapping(r.suggested);
+    });
+  };
+
+  /** Link website ⇒ máy chủ đọc sản phẩm ⇒ tệp CSV đúng khuôn mẫu ⇒ đi tiếp đúng các bước như tệp thường. */
+  const fromWebsite = () => {
+    reset();
+    setSiteNote(null);
+    start(async () => {
+      const r = await productsFromWebsiteAction(siteUrl);
+      if ("error" in r) {
+        setError(r.error);
+        return;
+      }
+      setSiteNote(r.message);
+      load({ fileName: r.fileName, base64: r.base64 });
     });
   };
 
@@ -184,6 +206,22 @@ export function ImportWizard({ canWriteStock }: { canWriteStock: boolean }) {
               {summary.delimiter ? ` · phân cách "${summary.delimiter === "\t" ? "tab" : summary.delimiter}"` : ""} · {formatNumber(summary.totalRows)} dòng · SHA-256 {summary.checksum.slice(0, 12)}…
             </span>
           ) : null}
+        </div>
+        <div className="mt-4 space-y-1.5 border-t pt-4" data-testid="product-import-website">
+          <Label htmlFor="pi-site" className="flex items-center gap-1.5 text-sm">
+            <Globe className="size-4" /> Hoặc lấy từ website của shop
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Dán link website (Shopify, Haravan, WooCommerce) hoặc một trang sản phẩm — máy đọc tên, SKU, giá, danh mục rồi đưa vào các bước bên dưới để bạn
+            kiểm trước khi nhập.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input id="pi-site" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} placeholder="shopcuaban.vn" maxLength={500} className="max-w-md" disabled={pending} />
+            <Button type="button" variant="outline" onClick={fromWebsite} disabled={pending || !siteUrl.trim()}>
+              {pending && !summary ? <Loader2 className="size-4 animate-spin" /> : <Globe className="size-4" />} Đọc từ website
+            </Button>
+          </div>
+          {siteNote ? <p className="text-xs text-emerald-700 dark:text-emerald-400">{siteNote}</p> : null}
         </div>
         {error ? (
           <p className="mt-3 flex items-start gap-1.5 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">

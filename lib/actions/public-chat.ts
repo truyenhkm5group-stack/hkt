@@ -22,7 +22,11 @@ async function visitorKey(create: boolean): Promise<string | null> {
   if (!/^[A-Za-z0-9_-]{24,64}$/.test(raw)) {
     if (!create) return null;
     raw = randomBytes(24).toString("base64url");
-    jar.set(VISITOR_COOKIE, raw, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 30 * 24 * 3600 });
+    // Ô chat NHÚNG website của shop (`/chat/embed` trong iframe) là bối cảnh BÊN THỨ BA: cookie `lax` không được gửi ⇒ mỗi
+    // tin là một khách mới. `none` + `partitioned` (CHIPS): trình duyệt gửi cookie trong khung nhưng KHOÁ theo website đang
+    // nhúng — không theo dấu được khách giữa hai website. Server action vẫn được Next kiểm Origin = host của ERP.
+    const prod = process.env.NODE_ENV === "production";
+    jar.set(VISITOR_COOKIE, raw, { httpOnly: true, sameSite: prod ? "none" : "lax", secure: prod, partitioned: prod, path: "/", maxAge: 30 * 24 * 3600 });
   }
   return visitorKeyOf(raw);
 }

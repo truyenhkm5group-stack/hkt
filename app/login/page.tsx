@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Bot, TrendingUp, Zap } from "lucide-react";
 import { LoginForm } from "@/app/login/login-form";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { safeNextPath } from "@/lib/auth/safe-redirect";
@@ -11,6 +12,16 @@ import { enabledProviders } from "@/lib/auth/oauth";
 import { signupMode } from "@/lib/onboarding/service";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Ba lý do chọn — mỗi câu là thứ một cửa hàng MỚI tự đăng ký dùng được ngay (cùng tinh thần trang giới thiệu): chatbot AI
+ * trả lời fanpage bằng giá / tồn của ERP, tự động hoá đơn — kho — khách, lãi thật theo đơn và chiến dịch.
+ */
+const USP = [
+  { icon: Bot, title: "Chatbot AI chốt đơn thay bạn", text: "Trả lời khách, báo giá, lên đơn ngay trên fanpage — cả lúc bạn ngủ." },
+  { icon: Zap, title: "Tự động từ đơn tới kho", text: "Đơn, tồn kho, khách hàng tự cập nhật — bớt việc tay, bớt người trực." },
+  { icon: TrendingUp, title: "Thấy lãi thật, cắt chỗ đốt tiền", text: "Lợi nhuận từng đơn, từng chiến dịch quảng cáo — biết ngay khoản nào đang lỗ." },
+] as const;
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reason?: string; oauth?: string }> }) {
   const session = await getSession();
@@ -71,7 +82,24 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
         <div className="relative max-w-md space-y-6">
-          <h1 className="text-3xl font-bold leading-tight">{host.org ? "Đơn hàng, khách, kho và chatbot bán hàng — trong một màn hình." : "Đơn hàng, vận đơn, COD và lợi nhuận — trong một màn hình."}</h1>
+          <h1 className="text-3xl font-bold leading-tight">
+            AI bán hàng 24/7 — <span className="text-brand-bright">chi phí giảm, lợi nhuận tăng.</span>
+          </h1>
+          {homeOnly ? null : (
+            <ul className="space-y-4 text-sm leading-6 text-sidebar-foreground/80" data-login-usp>
+              {USP.map(({ icon: Icon, title, text }) => (
+                <li key={title} className="flex gap-3">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/20 text-brand-bright">
+                    <Icon className="size-4" aria-hidden />
+                  </span>
+                  <span>
+                    <span className="block font-semibold text-sidebar-foreground">{title}</span>
+                    {text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {homeOnly ? (
             <>
               <p className="text-sm leading-6 text-sidebar-foreground/70">
@@ -90,7 +118,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </>
           ) : null}
         </div>
-        <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : `© ${new Date().getFullYear()} VNXcommerce · Nội bộ`}</p>
+        <p className="relative text-xs text-sidebar-foreground/50">{host.org ? `© ${new Date().getFullYear()} ${host.org.name}` : `© ${new Date().getFullYear()} VNXcommerce · Bán hàng tự động bằng AI`}</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <LoginForm

@@ -25,6 +25,7 @@
  * thống, form, danh sách như lúc đã tạo. Field quan hệ (`relation` / `relation_many`) trỏ đối tượng hệ thống có trong
  * sổ hoặc đối tượng của gói; `unique` chỉ cho `relation`. Module `apps` tự vào tập module khi gói có đối tượng.
  */
+import { integrationTarget } from "@/lib/blueprints/integrations";
 import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
 import { ROLE_BUILDER_FORBIDDEN, ROLE_BUILDER_FORBIDDEN_REASON } from "@/lib/constants/access-scope";
 import { ZONE_ORDER } from "@/lib/constants/department-modules";
@@ -455,9 +456,9 @@ export function validateBlueprint(input: unknown, opts: ValidateBlueprintOptions
     if (!v.success) errors.push({ path: `${p}.value`, message: v.error.issues[0]?.message ?? "Giá trị cài đặt sai hình." });
   });
 
-  // ── Gợi ý tích hợp: chỉ connector, không bao giờ cấu hình ──
+  // ── Gợi ý tích hợp: chỉ connector (module connector của nhà HOẶC kết nối theo tổ chức), không bao giờ cấu hình ──
   (bp.integrations ?? []).forEach((it, i) => {
-    if (moduleDef(it.connectorKey)?.category !== "CONNECTOR") errors.push({ path: `integrations.${i}.connectorKey`, message: `«${it.connectorKey}» không phải một connector.` });
+    if (!integrationTarget(it.connectorKey)) errors.push({ path: `integrations.${i}.connectorKey`, message: `«${it.connectorKey}» không phải một connector.` });
   });
 
   return { ok: errors.length === 0, errors, warnings };

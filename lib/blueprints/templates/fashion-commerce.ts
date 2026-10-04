@@ -153,9 +153,13 @@ export const FASHION_COMMERCE_BLUEPRINT: Blueprint = {
       },
     },
   ],
+  // Gợi ý kết nối THEO TỔ CHỨC (F3) — thứ shop khách tự khai được ở /settings/connections. Module connector của nhà
+  // (`connector_meta`, `connector_messaging`) là credential môi trường của VNX: gợi ý chúng là gợi ý thứ shop không bật được.
+  // Nguồn đơn / vận chuyển cụ thể (POS, ĐVVC) KHÔNG nêu tên ở mẫu (tests/blueprints: mẫu không mang tên nhà cung cấp của VNX) —
+  // màn Kết nối liệt kê chúng cho shop tự chọn.
   integrations: [
-    { connectorKey: "connector_meta", reason: "Đọc chi tiêu quảng cáo để tính hiệu quả theo mã hàng. Chỉ là gợi ý — kết nối bằng tài khoản hệ thống của chính tổ chức." },
-    { connectorKey: "connector_messaging", reason: "Gửi cảnh báo vận hành ra nhóm chat của đội. Mẫu không cấu hình URL hay token nào." },
+    { connectorKey: "meta-ads-org", reason: "Chi tiêu quảng cáo Facebook bằng token System User của shop — hiệu quả quảng cáo theo mã hàng." },
+    { connectorKey: "lark-webhook", reason: "Gửi cảnh báo vận hành ra nhóm chat của đội. Mẫu không cấu hình URL hay token nào." },
   ],
   ai: {
     businessProfile: "Shop thời trang bán online: tự thiết kế và đặt xưởng may, bán qua quảng cáo mạng xã hội và tin nhắn, giao qua đơn vị vận chuyển. Sản phẩm có biến thể size / màu; hàng hoàn được kho kiểm trước khi nhập lại. Kết quả giao hàng và tiền thu được đối chiếu theo chứng từ của đơn vị vận chuyển, không theo trạng thái trên sàn.",

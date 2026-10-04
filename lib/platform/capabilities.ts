@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
+import { PANCAKE_POS_ORG_CONNECTOR } from "@/lib/constants/pancake-pos-org";
 import { moduleOfPath, resolveEnabledModules, resolveFeature, type ModuleKey } from "@/lib/constants/platform-modules";
-import { currentOrganization, OrgContextError } from "@/lib/platform/context";
+import { currentOrganization, OrgContextError, withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import type { ModuleRow, Organization } from "@/lib/platform/types";
 
@@ -128,5 +129,27 @@ export const SYNCED_SOURCE_MODULE: Readonly<Record<SyncedSourceKind, ModuleKey>>
  * tạo: KHÔNG tạo / sửa tay (hai bản cho cùng một thứ), nút «Đồng bộ …» có nghĩa. `false` ⇒ ngược lại.
  */
 export async function orgHasSyncedSource(kind: SyncedSourceKind, orgCode?: string): Promise<boolean> {
-  return canUseModule(SYNCED_SOURCE_MODULE[kind], orgCode);
+  if (await canUseModule(SYNCED_SOURCE_MODULE[kind], orgCode)) return true;
+  // F1: tổ chức khách bật kết nối «pancake-pos-org» ⇒ Pancake là NGUỒN đơn / khách / sản phẩm của họ — cùng luật với nhà.
+  return orgPancakePosActive(orgCode);
+}
+
+/**
+ * Tổ chức (ngữ cảnh hiện hành, hoặc `orgCode`) có kết nối «pancake-pos-org» ĐANG BẬT (Kiểm tra đạt + Bật) không. Chỉ đọc
+ * trạng thái dòng kết nối — không giải mã bí mật. Lỗi đọc ⇒ `false` (cổng tạo tay giữ như trước, không khoá người dùng).
+ */
+export async function orgPancakePosActive(orgCode?: string): Promise<boolean> {
+  const read = async () => {
+    const org = await currentOrganization();
+    if (org.isHome) return false;
+    // Import ĐỘNG: service.ts → auth/session → tệp này; bảng org_connections chỉ đọc qua service.ts (tests/connectors).
+    const { connectionIsActive } = await import("@/lib/connectors/service");
+    return connectionIsActive(PANCAKE_POS_ORG_CONNECTOR);
+  };
+  try {
+    if (orgCode && orgCode !== (await currentOrganization()).code) return await withOrganization(orgCode, read);
+    return await read();
+  } catch {
+    return false;
+  }
 }

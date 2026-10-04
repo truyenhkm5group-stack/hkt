@@ -260,6 +260,7 @@ const CLIENT_BAT_BUOC = [
 /** Tệp máy chủ gọi mạng mà KHÔNG dùng credential môi trường — lý do bắt buộc. */
 const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/integrations/http.ts": "Bộ gửi chung `fetchJson` — không giữ khoá nào; mỗi client gọi nó đã tự chặn ở phương thức gửi của mình.",
+  "lib/net/public-url.ts": "Tải MỘT trang công khai do quản trị tổ chức gõ (nhập sản phẩm từ website) — không gửi khoá / token / cookie nào, chỉ GET địa chỉ đã kiểm không phải mạng nội bộ.",
   "lib/sales-chatbot/playbook.ts": "«Học từ hội thoại cũ»: ĐỌC lịch sử tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/fanpage.ts": "Trả lời tin fanpage qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/order-sync.ts": "Ghi đơn từ hội thoại fanpage: ĐỌC tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà; AI đi qua provider BYOK của tổ chức.",
@@ -396,6 +397,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/queries/platform-org-diagnostics.ts": "Chẩn đoán MỘT tổ chức cho người vận hành nền tảng (/platform/org/<mã>, Phase 11 · H4): mở CSDL của tổ chức được chọn để ĐẾM (chỉ SELECT), kiểm platformOperatorDenial trước mọi truy vấn.",
   "app/api/health/route.ts": "Tuyến sức khoẻ công khai của lượt deploy: đọc mặt phẳng điều khiển (cờ + số đếm, không mã tổ chức nào) — không có phiên để đi qua ngữ cảnh.",
   "lib/onboarding/": "Tự phục vụ (Phase 10): mã mời, lượt đăng ký, trạng thái dựng tổ chức — mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức mới chỉ chạm qua provisionOrganization + withOrganization.",
+  "scripts/org-summary.ts": "Ops `org-summary` (người vận hành nền tảng chạy qua ops-vps): mở CSDL của MỘT tổ chức được chọn bằng getDbForInspection (máy chủ ép chỉ đọc, không migrate) để ĐẾM — không đọc cột mang dữ liệu người hay bí mật kết nối (tests/org-summary.test.ts).",
   "scripts/verify-migrations.ts": "Bước KIỂM của lượt deploy (install-vps.sh, chạy trong container app): mở CSDL nhà + CSDL của MỌI tổ chức khách ACTIVE theo sổ tổ chức để migrate và đối chiếu sổ migration (scale-plan.md việc B) — việc của nền tảng, chỉ đọc bảng __drizzle_migrations, không đọc dữ liệu nghiệp vụ nào.",
   "scripts/platform-load-probe.ts": "Script ĐO TẢI chạy tay (Phase 11 · H2), không nằm trong đường chạy của ứng dụng: cấp rồi GỠ năm tổ chức thử `lprobe-*` của chính nó ở mặt phẳng điều khiển (CSDL nhà); dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
   "scripts/platform-secrets-verify.ts": "Script KIỂM KHOÁ BÍ MẬT của người vận hành (ops platform-secrets-verify, launch-gates A.5), chạy tay trong container: đọc/ghi đúng một dòng settings canary ở CSDL nhà qua getPlatformDb; không mở CSDL tổ chức nào, không chạm org_connections; không nằm trong đường chạy của ứng dụng, không in bản rõ.",
