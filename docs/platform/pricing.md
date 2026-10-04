@@ -71,10 +71,17 @@ thì nâng lên Tăng trưởng rẻ hơn mua thêm.
 **Mua thêm không làm lỗ.** Giá vốn biên của một người dùng / 1 GB / 1.000 bản ghi chỉ vài nghìn đồng, nên mỗi phần mua
 thêm gần như toàn bộ là lãi.
 
-## 5. Chưa làm, cần chủ nền tảng quyết
+## 5. Dùng thử 14 ngày (từ 04/10/2026)
 
-- **Tự bật thu phí sau 14 ngày dùng thử** cho cửa hàng tự đăng ký. Hôm nay người vận hành bật tay ở `/platform/org/<mã>`.
-  - Nếu làm: `paid_through` = ngày đăng ký + 14 ngày; quá hạn + ân hạn thì chuyển CHỈ XEM.
+- Cửa hàng tự đăng ký qua `/start` (cửa mở) được bật thu phí NGAY lúc tạo: `paid_through` = ngày đăng ký + 13 (tính cả
+  ngày đăng ký = 14 ngày), ân hạn 3 ngày, rồi CHỈ XEM. Không xoá dữ liệu.
+- Nền tảng chưa khai tài khoản nhận tiền ⇒ KHÔNG bật (khách không có đường trả tiền thì không được khoá).
+- Khách mời và tổ chức người vận hành tạo: không đụng, người vận hành tự đặt điều khoản.
+- Đầu ERP luôn hiện «Dùng thử miễn phí — còn N ngày» kèm nút «Chọn gói».
+- Mã: `lib/billing/rules.ts` (`TRIAL_DAYS`, `TRIAL_GRACE_DAYS`, `billingNotice`) · `lib/billing/service.ts::startSelfServiceTrial`.
+
+## 6. Chưa làm, cần chủ nền tảng quyết
+
 - **Giảm 40% cho lần kích hoạt đầu** (Retion làm vậy): chưa làm, vì giảm giá phải là một cột tường minh (luật 38).
 - **Mua thêm credit AI lẻ:** hôm nay chỉ nâng gói, hoặc người vận hành ghi đè credit cho từng tổ chức.
 

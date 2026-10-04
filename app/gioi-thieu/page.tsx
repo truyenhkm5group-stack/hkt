@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { BrandGlyph, BrandLockup } from "@/components/brand";
-import { COMPANY, PRIVACY_POLICY } from "@/lib/constants/company";
+import { COMPANY, PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { BUSINESS_TYPES, BUSINESS_TYPE_SPEC, type BusinessType } from "@/lib/onboarding/shared";
@@ -733,6 +733,9 @@ export default async function SitePage() {
             </a>
             <a href={data.signupUrl} className="font-semibold text-brand hover:text-foreground">
               {signup.short}
+            </a>
+            <a href={TERMS_OF_SERVICE.path} className="hover:text-foreground">
+              Điều khoản sử dụng
             </a>
             <a href={PRIVACY_POLICY.path} className="hover:text-foreground">
               Chính sách quyền riêng tư

@@ -129,6 +129,55 @@ export function countsTowardMrr(kind: BillingStandingKind): boolean {
   return kind === "ACTIVE" || kind === "DUE_SOON" || kind === "OVERDUE";
 }
 
+// ─────────────────────────── Dùng thử của cửa hàng TỰ ĐĂNG KÝ ───────────────────────────
+
+/**
+ * Cửa hàng tự đăng ký qua `/start` (nguồn OPEN) được bật thu phí NGAY lúc tạo với `paid_through` = hôm nay + 13 (tính cả
+ * hôm nay = 14 ngày dùng thử) và ân hạn 3 ngày. Không có máy trạng thái thứ hai: hết hạn đi đúng đường «quá hạn → chỉ
+ * xem» của thuê bao trả tiền, KHÔNG xoá dữ liệu. Khách trả tiền sớm thì kỳ trả tiền nối SAU ngày cuối dùng thử
+ * (`quoteRenewal` · START) — không mất ngày dùng thử nào.
+ */
+export const TRIAL_DAYS = 14;
+export const TRIAL_GRACE_DAYS = 3;
+
+/** Ngày cuối dùng thử (tính cả ngày đăng ký). */
+export function trialPaidThrough(today: string): string {
+  return addDays(today, TRIAL_DAYS - 1);
+}
+
+function viDate(d: string | null): string {
+  if (!d || !isIsoDate(d)) return "—";
+  const [y, m, day] = d.split("-");
+  return `${day}/${m}/${y}`;
+}
+
+export type BillingNotice = { tone: "info" | "warn" | "danger"; text: string; cta: string };
+
+/**
+ * Dải nhắc trên đầu ERP. Đang dùng thử thì LUÔN hiện số ngày còn lại (khách cần biết mình đang dùng thử — im lặng tới
+ * ngày khoá là cách tệ nhất để mời trả tiền); thuê bao trả tiền chỉ nhắc khi còn ≤ 7 ngày / quá hạn / chỉ xem.
+ */
+export function billingNotice(standing: BillingStanding, onTrial: boolean): BillingNotice | null {
+  const { kind, paidThrough, daysLeft, lockOn } = standing;
+  if (kind === "NOT_BILLED") return null;
+  if (kind === "LOCKED") {
+    return onTrial
+      ? { tone: "danger", text: `Hết hạn dùng thử từ ${viDate(paidThrough)} — tổ chức đang chỉ xem: xem và xuất được, chưa tạo / sửa được. Dữ liệu vẫn giữ nguyên.`, cta: "Chọn gói" }
+      : { tone: "danger", text: `${BILLING_STANDING_LABEL.LOCKED} — đã hết hạn ${viDate(paidThrough)}: xem và xuất được, chưa tạo / sửa được cho tới khi gia hạn.`, cta: "Gia hạn" };
+  }
+  if (kind === "OVERDUE") {
+    return onTrial
+      ? { tone: "danger", text: `Hết hạn dùng thử ${viDate(paidThrough)} — từ ${viDate(lockOn)} tổ chức chuyển sang chỉ xem nếu chưa chọn gói.`, cta: "Chọn gói" }
+      : { tone: "danger", text: `${BILLING_STANDING_LABEL.OVERDUE} — đã hết hạn ${viDate(paidThrough)}, từ ${viDate(lockOn)} tổ chức chuyển sang chỉ xem.`, cta: "Gia hạn" };
+  }
+  if (onTrial) {
+    const left = (daysLeft ?? 0) + 1;
+    return { tone: kind === "DUE_SOON" ? "warn" : "info", text: `Dùng thử miễn phí — còn ${left} ngày (tới hết ${viDate(paidThrough)}).`, cta: "Chọn gói" };
+  }
+  if (kind === "DUE_SOON") return { tone: "warn", text: `${BILLING_STANDING_LABEL.DUE_SOON} — gói trả tới ${viDate(paidThrough)}.`, cta: "Gia hạn" };
+  return null;
+}
+
 // ─────────────────────────── Cổng CHỈ XEM ───────────────────────────
 
 /**

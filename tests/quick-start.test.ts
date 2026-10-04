@@ -9,6 +9,8 @@
  *  3. CSDL THẬT: đăng ký nhanh tạo tổ chức qua ĐÚNG lõi tạo tổ chức, đăng nhập ngay, ghi SĐT + chỉ mục danh tính; bấm lại ⇒
  *     không đẻ cửa hàng thứ hai; đăng nhập bằng SĐT ở trang chung không cần mã tổ chức; đăng ký bằng Google ⇒ mật khẩu
  *     ngẫu nhiên + danh tính GOOGLE, lần sau Google vào thẳng; email ở hai tổ chức ⇒ phải chọn.
+ *  4. DÙNG THỬ 14 NGÀY: nền tảng chưa khai tài khoản nhận tiền ⇒ KHÔNG bật thu phí (không khoá oan); đã khai ⇒ cửa hàng
+ *     tự đăng ký có `paid_through` = hôm nay + 13, ân hạn 3 ngày, dải nhắc «Dùng thử»; tổ chức không qua cửa mở ⇒ không đụng.
  */
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
@@ -22,6 +24,9 @@ import { beginOAuth, exchangeCode, readOAuthToken, signOAuthToken } from "@/lib/
 import type { SessionSubject } from "@/lib/auth/session";
 import { resolveSocial } from "@/lib/auth/social";
 import { platformChatAi } from "@/lib/ai-builder/provider";
+import { billingNotice, billingStanding, TRIAL_GRACE_DAYS, trialPaidThrough, vnDate } from "@/lib/billing/rules";
+import { BILLING_RECEIVER_KEY } from "@/lib/billing/service";
+import { invalidateSubscriptions, readSubscriptionTerms } from "@/lib/billing/standing";
 import { invalidateAiControl } from "@/lib/ai-usage/control";
 import { PLATFORM_GEMINI_DEFAULT_MODEL, platformAiConfig } from "@/lib/ai-usage/platform-ai";
 import { DEFAULT_SALES_CHATBOT_CONFIG, salesBotBillingSource } from "@/lib/sales-chatbot/config";
@@ -169,8 +174,10 @@ async function cleanup() {
   await pdb.delete(schema.platformIdentities).where(inArray(schema.platformIdentities.orgCode, [...ORGS]));
   await pdb.delete(schema.platformSignupAttempts).where(or(inArray(schema.platformSignupAttempts.organizationCode, [...ORGS]), eq(schema.platformSignupAttempts.ipHash, hashIp(IP))));
   await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, [...ORGS]));
+  await pdb.delete(schema.platformSubscriptions).where(inArray(schema.platformSubscriptions.orgCode, [...ORGS]));
   invalidateOrganizations();
   invalidateCapabilities();
+  invalidateSubscriptions();
 }
 
 async function withOpenSignup<T>(fn: () => Promise<T>): Promise<T> {
@@ -202,6 +209,9 @@ async function testQuickSignupFlow() {
   assert.ok("error" in (await quickSignup({ storeName: "QS Bánh Mì Một", businessType: "food", phone: "0912345601", email: "a@qs.vn", password: "ngan" }, who, { issue })), "mật khẩu quá ngắn");
   assert.ok("error" in (await quickSignup({ storeName: "QS Bánh Mì Một", businessType: "xe-may", phone: "0912345601", email: "a@qs.vn", password: PW }, who, { issue })), "ngành lạ");
 
+  // Chưa khai tài khoản nhận tiền ⇒ cửa hàng A KHÔNG bị bật thu phí (không có đường trả tiền thì không được khoá).
+  const pdb0 = await getPlatformDb();
+  await pdb0.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
   const t0 = Date.now();
   const a = await quickSignup({ storeName: "QS Bánh Mì Một", businessType: "food", phone: "0912 345 601", email: "Chu@QS-A.vn", password: PW }, who, { issue });
   const ms = Date.now() - t0;
@@ -214,6 +224,7 @@ async function testQuickSignupFlow() {
   assert.equal(admin?.role, "ADMIN");
   assert.deepEqual((await findIdentity("PHONE", "84912345601")).map((h) => h.orgCode), [QS_A]);
   assert.deepEqual((await findIdentity("EMAIL", "chu@qs-a.vn")).map((h) => h.orgCode), [QS_A]);
+  assert.equal(await readSubscriptionTerms(QS_A, { fresh: true }), null, "chưa khai tài khoản nhận tiền ⇒ không bật dùng thử có hạn");
 
   // Bấm lại / trình duyệt gửi lại ⇒ không đẻ cửa hàng thứ hai với mã khác.
   const again = await quickSignup({ storeName: "QS Bánh Mì Một", businessType: "food", phone: "0912 345 601", email: "chu@qs-a.vn", password: PW }, who, { issue });
@@ -231,10 +242,19 @@ async function testQuickSignupFlow() {
   // Đăng ký bằng Google: không mật khẩu, danh tính GOOGLE; lần sau Google vào thẳng.
   const profile = { provider: "google" as const, subject: "g-qs-777", email: "chu@qs-b.vn", name: "Chủ Hải Sản" };
   assert.deepEqual(await resolveSocial(profile), { kind: "SIGNUP" }, "người mới ⇒ sang đăng ký");
+  await pdb0.insert(schema.platformSettings).values({ key: BILLING_RECEIVER_KEY, value: { bin: "970422", accountNumber: "0123456789", accountName: "VNXCOMMERCE" }, updatedByEmail: "qs-test@local" });
+  const dayBefore = vnDate(new Date());
   const b = await quickSignup({ storeName: "QS Hải Sản Hai", businessType: "seafood", phone: "0987 654 302" }, who, { issue, social: profile });
   assert.ok("ok" in b && b.orgCode === QS_B && b.loggedIn, JSON.stringify(b));
   const adminB = await withOrganization(QS_B, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "chu@qs-b.vn") }));
   assert.equal(adminB?.name, "Chủ Hải Sản", "tên lấy từ hồ sơ Google");
+  // Đã khai tài khoản nhận tiền ⇒ dùng thử 14 ngày (tính cả hôm nay), ân hạn 3 ngày, rồi chỉ xem.
+  const trial = await readSubscriptionTerms(QS_B, { fresh: true });
+  const dayAfter = vnDate(new Date());
+  assert.ok(trial?.billingEnabled && [trialPaidThrough(dayBefore), trialPaidThrough(dayAfter)].includes(trial.paidThrough ?? ""), JSON.stringify(trial));
+  assert.equal(trial?.graceDays, TRIAL_GRACE_DAYS);
+  const notice = billingNotice(billingStanding(trial, dayAfter), true);
+  assert.ok(notice?.tone === "info" && notice.text.includes("còn 14 ngày") && notice.cta === "Chọn gói", JSON.stringify(notice));
   const found = await resolveSocial(profile);
   assert.ok(found.kind === "LOGIN" && found.hit.orgCode === QS_B && found.hit.userId === adminB?.id, JSON.stringify(found));
   const viaGoogle = await completeProviderLogin({ orgCode: QS_B, userId: adminB!.id, provider: "GOOGLE", subject: profile.subject }, issue);
@@ -247,6 +267,7 @@ async function testQuickSignupFlow() {
   // Cùng email ở HAI tổ chức ⇒ phải chọn; khoá tài khoản ⇒ không mở phiên.
   await provisionOrganization({ code: QS_C, name: "QS Ba", modules: ["customers"], admin: { email: "chu@qs-b.vn", name: "Chủ C", password: PW }, source: "TEST", actor: null });
   assert.ok((await verifyLogin({ email: "chu@qs-b.vn", password: PW, orgCode: QS_C }, issue)).ok);
+  assert.equal(await readSubscriptionTerms(QS_C, { fresh: true }), null, "tổ chức không qua cửa đăng ký mở ⇒ dùng thử không đụng tới");
   const pick = await resolveSocial({ provider: "facebook", subject: "fb-qs-1", email: "chu@qs-b.vn", name: null });
   assert.ok(pick.kind === "PICK" && pick.hits.map((h) => h.orgCode).sort().join() === [QS_B, QS_C].sort().join(), JSON.stringify(pick));
   await withOrganization(QS_C, async () => (await getDb()).update(schema.users).set({ active: false }).where(eq(schema.users.email, "chu@qs-b.vn")));
@@ -278,10 +299,14 @@ export async function testQuickStart() {
   await testOAuth();
   await cleanup();
   for (const code of ORGS) rmSync(organizationDatabaseUrl({ code, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
+  const pdb = await getPlatformDb();
+  const receiver = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, BILLING_RECEIVER_KEY) });
   try {
     await withOpenSignup(testQuickSignupFlow);
   } finally {
     await cleanup();
+    await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
+    if (receiver) await pdb.insert(schema.platformSettings).values({ key: receiver.key, value: receiver.value, updatedByEmail: receiver.updatedByEmail });
   }
-  console.log("✓ Gia nhập nhanh: SĐT VN mọi cách gõ, mã tổ chức từ tên cửa hàng, ngành nào cũng có AI bán hàng; OAuth state + PKCE, cookie ký không dùng chéo, Google sai aud/iss/hạn ⇒ từ chối, email chưa xác minh không dùng, Facebook có appsecret_proof; đăng ký một màn hình qua đúng lõi tạo tổ chức rồi vào thẳng, bấm lại không đẻ cửa hàng thứ hai, đăng nhập bằng SĐT ở trang chung không cần mã, đăng ký bằng Google rồi vào lại bằng Google, email ở hai tổ chức ⇒ phải chọn, tài khoản khoá ⇒ không vào");
+  console.log("✓ Gia nhập nhanh: SĐT VN mọi cách gõ, mã tổ chức từ tên cửa hàng, ngành nào cũng có AI bán hàng; OAuth state + PKCE, cookie ký không dùng chéo, Google sai aud/iss/hạn ⇒ từ chối, email chưa xác minh không dùng, Facebook có appsecret_proof; đăng ký một màn hình qua đúng lõi tạo tổ chức rồi vào thẳng, bấm lại không đẻ cửa hàng thứ hai, đăng nhập bằng SĐT ở trang chung không cần mã, đăng ký bằng Google rồi vào lại bằng Google, email ở hai tổ chức ⇒ phải chọn, tài khoản khoá ⇒ không vào; dùng thử 14 ngày chỉ bật khi nền tảng đã khai tài khoản nhận tiền, chỉ cho cửa đăng ký mở");
 }

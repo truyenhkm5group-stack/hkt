@@ -96,6 +96,8 @@ không có phép nhân nào khác được tự thêm vào. Bảng giá và phé
 3. **Bật thu phí cho từng tổ chức** ở `/platform/org/<mã>` → «Thu phí», nhập «Đã trả tới ngày» = hạn dùng thử.
    - Tổ chức có từ trước 0187 (khách pilot) mặc định **không** thu phí, nên lần deploy này không đổi gì với họ.
    - Khách tự trả mà chưa được bật thì lượt trả đầu tiên tự bật thu phí.
+   - Cửa hàng TỰ ĐĂNG KÝ (cửa mở) được bật sẵn lúc tạo: dùng thử 14 ngày + ân hạn 3 ngày (`startSelfServiceTrial`), chỉ
+     khi đã khai tài khoản nhận tiền ở bước 1.
 4. **Xác nhận tay** khi tiền về ngoài sổ (ngân hàng khác, tiền mặt). **Huỷ hoá đơn.** Cả hai bắt buộc ghi lý do và đều
    vào nhật ký nền tảng.
 
@@ -107,7 +109,6 @@ MRR trên `/platform` = tổng giá THÁNG của gói ở các tổ chức đang
 - Phát hành hoá đơn điện tử (VAT) **từ trong ERP**. Đó là dịch vụ ngoài (nhà cung cấp hoá đơn điện tử), cần hỏi chủ nền
   tảng. Hiện ERP chỉ thu thông tin xuất hoá đơn và nhắc người vận hành (mục 8).
 - Nhắc gia hạn qua tin nhắn / email. Hiện chỉ có dải nhắc trong ERP.
-- Tự động đẩy khách từ `/start` vào gói có giá kèm số ngày dùng thử. Hiện người vận hành bật tay.
 - Cổng thẻ (VNPay / PayOS): là dịch vụ ngoài mới, cần hỏi chủ nền tảng (AGENTS.md §7).
 
 ## 7. Mua thêm hạn mức giữa kỳ (0192)

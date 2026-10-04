@@ -10,7 +10,10 @@ import {
   isIsoDate,
   judgePayment,
   quoteRenewal,
+  TRIAL_DAYS,
+  TRIAL_GRACE_DAYS,
   transferCodeFrom,
+  trialPaidThrough,
   YEARLY_FREE_MONTHS_MAX,
   vnDate,
   type BillingStanding,
@@ -605,6 +608,39 @@ export async function setOrgBilling(user: SessionUser, raw: { orgCode?: unknown;
   invalidateSubscriptions(p.org.code);
   const st = billingStanding(next, vnDate(now));
   return { ok: true, message: enabled ? `«${p.org.name}»: thu phí BẬT, trả tới ${paidThrough}, ân hạn ${graceRaw} ngày — hiện «${st.kind}».` : `«${p.org.name}»: thu phí TẮT — không nhắc, không khoá.` };
+}
+
+/**
+ * DÙNG THỬ 14 NGÀY cho cửa hàng TỰ ĐĂNG KÝ (nguồn OPEN của `/start`) — gọi MỘT lần lúc dựng tổ chức mới.
+ *
+ *  · Chỉ CHÈN khi tổ chức chưa có dòng thuê bao: chạy lại lượt dựng, hoặc người vận hành đã đặt điều khoản riêng ⇒ không
+ *    đụng (`onConflictDoNothing`).
+ *  · Nền tảng CHƯA khai tài khoản nhận tiền ⇒ KHÔNG bật: khoá một khách không có đường nào để trả tiền là khoá oan. Tổ
+ *    chức giữ «Chưa thu phí» như trước bản này; người vận hành bật tay ở /platform/org/<mã> khi đã khai tài khoản.
+ *  · Hết hạn đi đúng đường quá hạn → chỉ xem của thuê bao trả tiền; không xoá dữ liệu.
+ */
+export type TrialStart = { started: true; paidThrough: string } | { started: false; reason: "NOT_TENANT" | "NO_RECEIVER" | "EXISTS" };
+
+export async function startSelfServiceTrial(orgCode: string, now: Date = new Date()): Promise<TrialStart> {
+  const org = await findOrganization(orgCode);
+  if (!org || org.isHome) return { started: false, reason: "NOT_TENANT" };
+  if (!(await getBillingReceiver())) return { started: false, reason: "NO_RECEIVER" };
+  const paidThrough = trialPaidThrough(vnDate(now));
+  const next = { billingEnabled: true, paidThrough, graceDays: TRIAL_GRACE_DAYS };
+  const pdb = await getPlatformDb();
+  const subs = schema.platformSubscriptions;
+  const started = await pdb.transaction(async (tx) => {
+    const rows = await tx
+      .insert(subs)
+      .values({ orgCode, ...next, note: `Dùng thử ${TRIAL_DAYS} ngày — cửa hàng tự đăng ký` })
+      .onConflictDoNothing({ target: subs.orgCode })
+      .returning({ orgCode: subs.orgCode });
+    if (rows.length === 0) return false;
+    await auditTx(tx, { action: "BILLING_SET", targetOrgCode: orgCode, subject: "subscription", before: null, after: next, reason: `Dùng thử ${TRIAL_DAYS} ngày cho cửa hàng tự đăng ký`, actor: null });
+    return true;
+  });
+  invalidateSubscriptions(orgCode);
+  return started ? { started: true, paidThrough } : { started: false, reason: "EXISTS" };
 }
 
 async function operatorInvoice(user: SessionUser, raw: { invoiceId?: unknown; reason?: unknown }): Promise<{ invoice: InvoiceRow; reason: string } | { error: string }> {

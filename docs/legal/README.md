@@ -18,9 +18,20 @@
     Drive đã mã hoá, xoay vòng 7 ngày / 4 tuần, không tự xoá khi ngừng thuê.
   - Mốc «xoá trong 30 ngày kể từ khi xác minh yêu cầu» là đề xuất của kỹ thuật, chủ nền tảng đổi được.
   - Thời hạn trả lời yêu cầu và báo sự cố ghi «theo thời hạn pháp luật quy định» — chờ luật sư điền số cụ thể.
-- **Điều khoản sử dụng**: vẫn là NHÁP, chưa công bố.
+- **Điều khoản sử dụng — phiên bản 1.0, hiệu lực 04/10/2026**: `https://vnxcommerce.com/dieu-khoan-su-dung`
+  (`app/dieu-khoan-su-dung/page.tsx`). Chủ nền tảng giao kỹ thuật chọn phương án (04/10/2026):
+  - dùng thử 14 ngày, ân hạn 3 ngày, rồi chỉ xem;
+  - hoàn 100% lần thanh toán ĐẦU TIÊN nếu yêu cầu trong 7 ngày; các lần sau không hoàn phần đã dùng;
+  - giữ dữ liệu ít nhất 90 ngày sau khi hết hạn, xoá chỉ sau khi báo trước 15 ngày;
+  - báo trước 30 ngày khi đổi giá, 15 ngày khi sửa điều khoản; toà án có thẩm quyền tại Hà Nội.
+  - Mọi con số khai ở `lib/constants/company.ts::SERVICE_COMMITMENTS` (+ `TRIAL_DAYS` trong `lib/billing/rules.ts`) —
+    trang đọc từ đó.
+- **Đồng ý khi đăng ký**: dòng «Bằng việc tạo cửa hàng, bạn đồng ý với Điều khoản sử dụng và Chính sách quyền riêng tư»
+  ngay trên nút tạo (đăng ký nhanh và trình đầy đủ). Phiên bản hai văn bản ghi vào nhật ký `ORG_ONBOARDED` của tổ chức
+  (`after.acceptedTerms`).
+- Chính sách quyền riêng tư lên 1.1 (04/10/2026): thêm mốc giữ dữ liệu 90 ngày cho khớp Điều khoản.
 
-Còn phải nhờ luật sư rà bản 1.0; sửa thì tăng `PRIVACY_POLICY.version` trong `lib/constants/company.ts`.
+Còn phải nhờ luật sư rà cả hai văn bản; sửa thì tăng `PRIVACY_POLICY.version` trong `lib/constants/company.ts`.
 
 ## Việc chủ nền tảng phải làm trước khi dùng
 

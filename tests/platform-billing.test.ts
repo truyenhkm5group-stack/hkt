@@ -31,6 +31,10 @@ import {
   transferCodeFrom,
   TRANSFER_CODE_PATTERN,
   vnDate,
+  billingNotice,
+  TRIAL_DAYS,
+  TRIAL_GRACE_DAYS,
+  trialPaidThrough,
   type RenewalQuote,
 } from "@/lib/billing/rules";
 import {
@@ -164,6 +168,23 @@ function testPure() {
   assert.equal(billingStanding({ ...t, billingEnabled: false }, "2027-01-01").kind, "NOT_BILLED", "chưa bật thu phí ⇒ không bao giờ khoá");
   assert.equal(billingStanding(null, "2027-01-01").kind, "NOT_BILLED");
   assert.equal(billingStanding({ ...t, graceDays: 0 }, "2026-10-21").kind, "LOCKED", "ân hạn 0 ⇒ khoá ngay hôm sau");
+
+  // Dùng thử 14 ngày (đăng ký 2026-10-04): ngày cuối 17/10, ân hạn 3 ⇒ chỉ xem từ 21/10. Dải nhắc luôn hiện khi dùng thử.
+  assert.equal(TRIAL_DAYS, 14);
+  assert.equal(trialPaidThrough("2026-10-04"), "2026-10-17", "tính cả ngày đăng ký");
+  const tr = { billingEnabled: true, paidThrough: trialPaidThrough("2026-10-04"), graceDays: TRIAL_GRACE_DAYS };
+  const nt = (today: string) => billingNotice(billingStanding(tr, today), true);
+  assert.deepEqual([nt("2026-10-04")?.tone, nt("2026-10-04")?.text.includes("còn 14 ngày")], ["info", true], "ngày đầu: còn 14 ngày");
+  assert.equal(nt("2026-10-11")?.tone, "warn", "còn 7 ngày ⇒ vàng");
+  assert.ok(nt("2026-10-17")?.text.includes("còn 1 ngày"), "ngày cuối");
+  assert.ok(nt("2026-10-18")?.tone === "danger" && nt("2026-10-18")?.text.includes("21/10/2026"), "ân hạn: nói ngày chuyển chỉ xem");
+  assert.equal(billingStanding(tr, "2026-10-20").kind, "OVERDUE");
+  assert.equal(billingStanding(tr, "2026-10-21").kind, "LOCKED");
+  assert.ok(nt("2026-10-21")?.text.includes("Dữ liệu vẫn giữ nguyên") && nt("2026-10-21")?.cta === "Chọn gói");
+  // Thuê bao trả tiền: chỉ nhắc khi còn ≤ 7 ngày; không thu phí ⇒ không bao giờ có dải.
+  assert.equal(billingNotice(billingStanding(t, "2026-10-01"), false), null, "còn hạn dài ⇒ im lặng");
+  assert.equal(billingNotice(billingStanding(t, "2026-10-15"), false)?.cta, "Gia hạn");
+  assert.equal(billingNotice(billingStanding(null, "2026-10-15"), true), null, "chưa bật thu phí ⇒ không dải, kể cả gói trial");
 
   // Cổng chỉ xem.
   const base = { isHome: false, standing: "LOCKED" as const, method: "POST", path: "/orders" };
