@@ -1,4 +1,5 @@
 import { IMAGE_EDIT, IMAGE_EDIT_LAYOUT_PROMPT, IMAGE_QUALITIES, IMAGE_SIZES, MANUAL_GEN_RUN, type Genes, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
+import type { CreativeIndustry } from "@/lib/constants/creative-industry";
 
 /**
  * ═══════════ STUDIO TẠO ẢNH — KIỂU ẢNH ĐẦU RA · BIẾN THỂ MÀU · KHỔ · CHẤT LƯỢNG (chủ shop 29/09/2026) ═══════════
@@ -57,6 +58,62 @@ export const OUTPUT_STYLES: Record<OutputStyle, StyleDef> = {
   MANNEQUIN: { label: "Ma-nơ-canh", hint: "Trên ma-nơ-canh trong cửa hàng sáng, không người mẫu", designOk: true, genes: { scene: "STUDIO_PLAIN", model: "NONE", composition: "SINGLE_HERO" }, prompt: IMAGE_EDIT_LAYOUT_PROMPT.MANNEQUIN },
 };
 
+/**
+ * KIỂU ẢNH CỦA SHOP THỰC PHẨM (chủ shop 04/10/2026) — cùng KHOÁ với bảng thời trang (cột `output_style` đã lưu dùng chung),
+ * nghĩa thực phẩm: không người mẫu, không selfie gương, không ma-nơ-canh, không lưới nhiều màu. Kiểu vắng mặt ở đây là kiểu
+ * KHÔNG dùng được cho thực phẩm — `normalizeStudioOptions` bỏ nó, màn hình không hiện nó.
+ */
+export const FOOD_OUTPUT_STYLES: Partial<Record<OutputStyle, StyleDef>> = {
+  AUTO: { label: "Tự động", hint: "Máy tự chọn cách bày / bối cảnh khác nhau cho từng ảnh", designOk: false, genes: {}, prompt: "" },
+  STUDIO: {
+    label: "Đĩa trình bày nền trơn",
+    hint: "Món đã nấu bày trên đĩa, nền trơn sạch, ánh sáng đều — ảnh sản phẩm / catalogue",
+    designOk: false,
+    genes: { scene: "STUDIO_PLAIN", composition: "SINGLE_HERO", model: "NONE" },
+    prompt: "Clean food product shot: the cooked product plated on a simple dish on a plain seamless backdrop, soft even lighting, minimal props, the food is the clear hero.",
+  },
+  HERO: { label: "Một món lớn nổi bật", hint: "Một đĩa món ăn lớn, không ghép khung", designOk: false, genes: { composition: "SINGLE_HERO", model: "NONE" }, prompt: "ONE single large hero photo of the dish — no collage, no split panels." },
+  LIFESTYLE: {
+    label: "Mâm cơm gia đình",
+    hint: "Món trên mâm cơm / bàn ăn gia đình cùng cơm và món phụ",
+    designOk: false,
+    genes: { scene: "HOME", model: "NONE" },
+    prompt: "A natural Vietnamese family meal: the dish on a wooden dinner table (mâm cơm) with steamed rice and simple side dishes, warm homely atmosphere, no person in focus.",
+  },
+  COLLAGE_4: {
+    label: "Ghép 4 khung",
+    hint: "Gói hàng thật + món đã nấu + cận cảnh thớ + gợi ý ăn kèm",
+    designOk: false,
+    genes: { composition: "COLLAGE", model: "NONE" },
+    prompt: "A 4-panel collage of the SAME product: the real package, the cooked dish, a close-up of its texture and a serving suggestion.",
+  },
+  DETAIL_CLOSEUPS: {
+    label: "Cận cảnh thớ / miếng chả",
+    hint: "Cận mặt cắt, độ dai, màu vàng của món",
+    designOk: false,
+    genes: { composition: "DETAIL_CLOSEUP", model: "NONE" },
+    prompt: "Close-up shots of the cut surface and texture of the product (slices, cross-section), shallow depth of field, appetizing.",
+  },
+  FLATLAY: {
+    label: "Gói hàng + món (nhìn từ trên)",
+    hint: "Hộp / túi hút chân không thật cạnh đĩa món đã nấu, chụp từ trên xuống",
+    designOk: false,
+    genes: { scene: "FLATLAY", model: "NONE", composition: "SINGLE_HERO" },
+    prompt: "A clean top-down flat lay: the REAL package (box / vacuum-sealed bag, exactly as photographed) next to the cooked, sliced product on a table, with a few fresh ingredients.",
+  },
+};
+
+/** Bảng kiểu ảnh của MỘT ngành. Hàm THUẦN. */
+export function outputStylesFor(industry: CreativeIndustry = "FASHION"): Partial<Record<OutputStyle, StyleDef>> {
+  return industry === "FOOD" ? FOOD_OUTPUT_STYLES : OUTPUT_STYLES;
+}
+
+/** Kiểu ảnh dùng được cho ngành (theo thứ tự `OUTPUT_STYLE_KEYS`). Hàm THUẦN. */
+export function outputStyleKeysFor(industry: CreativeIndustry = "FASHION"): OutputStyle[] {
+  const t = outputStylesFor(industry);
+  return OUTPUT_STYLE_KEYS.filter((k) => t[k] !== undefined);
+}
+
 export const STUDIO_LIMITS = { maxStyles: 4, maxColors: 6 } as const;
 
 /** Màu gợi ý — chỉ là giá trị điền sẵn, người gõ màu khác được. */
@@ -111,15 +168,18 @@ export function normalizeColors(raw: unknown): string[] {
  * Tuỳ chọn studio từ nguồn không tin được — khoá lạ bị BỎ (không đoán), `AUTO` đi cùng kiểu khác thì bỏ `AUTO` (chọn kiểu
  * cụ thể nghĩa là không muốn máy tự chọn), kiểu không hợp `DESIGN` bị bỏ ở lượt thiết kế. Hàm THUẦN.
  */
-export function normalizeStudioOptions(raw: unknown, kind: "MOCKUP" | "DESIGN" = "MOCKUP"): StudioOptions {
+export function normalizeStudioOptions(raw: unknown, kind: "MOCKUP" | "DESIGN" = "MOCKUP", industry: CreativeIndustry = "FASHION"): StudioOptions {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   let styles = [...new Set((Array.isArray(r.styles) ? r.styles : []).filter(isStyle))];
   if (kind === "DESIGN") styles = styles.filter((s) => OUTPUT_STYLES[s].designOk);
+  // Thực phẩm: kiểu thời trang (selfie gương, ma-nơ-canh, lưới màu) bị BỎ; không có biến thể màu (đổi màu một món ăn là
+  // quảng cáo một món shop không có).
+  if (industry === "FOOD") styles = styles.filter((s) => FOOD_OUTPUT_STYLES[s] !== undefined);
   if (styles.length > 1) styles = styles.filter((s) => s !== "AUTO");
   styles = styles.slice(0, STUDIO_LIMITS.maxStyles);
   const size = IMAGE_SIZES.find((x) => x === r.size) ?? null;
   const quality = IMAGE_QUALITIES.find((x) => x === r.quality) ?? null;
-  return { styles, colors: normalizeColors(r.colors), size, quality };
+  return { styles, colors: industry === "FOOD" ? [] : normalizeColors(r.colors), size, quality };
 }
 
 /** Một ô của lưới: mẫu thứ `unit` (0…) ở kiểu `style`, màu `color` ("" = giữ màu). */
@@ -154,7 +214,14 @@ export function studioProblem(units: number, o: Pick<StudioOptions, "styles" | "
  * Gen của một ảnh sau khi áp kiểu — kiểu cụ thể GHI ĐÈ bối cảnh / bố cục / người mẫu tương ứng (xem đầu tệp). Giữ bộ gen
  * hợp lệ: không người mẫu thì không "selfie gương". Hàm THUẦN.
  */
-export function applyStyleGenes(genes: Genes, style: OutputStyle): Genes {
+export function applyStyleGenes(genes: Genes, style: OutputStyle, industry: CreativeIndustry = "FASHION"): Genes {
+  if (industry === "FOOD") {
+    // Thực phẩm: không người, không chụp gương / lưới màu, không chữ — gen luôn ở tập con thực phẩm (`FOOD_GENE_EXCLUDE`).
+    const f: Genes = { ...genes, ...(FOOD_OUTPUT_STYLES[style]?.genes ?? {}), model: "NONE", textOverlay: "NONE" };
+    if (f.composition === "MIRROR_SELFIE" || f.composition === "COLOR_GRID") f.composition = "SINGLE_HERO";
+    if (f.scene === "STREET") f.scene = "STUDIO_PLAIN";
+    return f;
+  }
   const g: Genes = { ...genes, ...OUTPUT_STYLES[style].genes };
   // Selfie gương cần người cầm máy: gốc không người mẫu (trải phẳng) ⇒ thêm người TRƯỚC khi kiểm cặp gen.
   if (style === "UGC_SELFIE" && g.model === "NONE") g.model = "FEMALE_YOUNG";
@@ -171,8 +238,14 @@ export const PRESERVE_PRODUCT_RECOLOR_CLAUSE =
   "Do not redesign or add details to the product. Do not add any logo, brand name or watermark. Photorealistic advertising photo.";
 
 /** Các dòng câu lệnh của MỘT ô lưới (kiểu + màu). Rỗng khi `AUTO` và giữ màu. Hàm THUẦN. */
-export function studioDirectives(cell: Pick<StudioCell, "style" | "color">, kind: "MOCKUP" | "DESIGN"): string[] {
+export function studioDirectives(cell: Pick<StudioCell, "style" | "color">, kind: "MOCKUP" | "DESIGN", industry: CreativeIndustry = "FASHION"): string[] {
   const out: string[] = [];
+  if (industry === "FOOD") {
+    // Không có câu biến thể màu: `normalizeStudioOptions` đã bỏ màu của shop thực phẩm.
+    const fp = FOOD_OUTPUT_STYLES[cell.style]?.prompt ?? "";
+    if (fp) out.push(`OUTPUT STYLE (chosen by the shop owner — follow it; it overrides the default scene / composition directions below): ${fp}`);
+    return out;
+  }
   const p = OUTPUT_STYLES[cell.style].prompt;
   if (p) out.push(`OUTPUT STYLE (chosen by the shop owner — follow it; it overrides the default scene / composition / model directions below): ${p}`);
   const c = cell.color.trim();
@@ -187,7 +260,7 @@ export function studioDirectives(cell: Pick<StudioCell, "style" | "color">, kind
 }
 
 /** Nhãn ngắn của một ô cho thẻ ảnh: "Studio nền trơn · Đỏ đô". Hàm THUẦN. */
-export function studioCellLabel(style: string, color: string): string {
-  const s = isStyle(style) && style !== "AUTO" ? OUTPUT_STYLES[style].label : "";
+export function studioCellLabel(style: string, color: string, industry: CreativeIndustry = "FASHION"): string {
+  const s = isStyle(style) && style !== "AUTO" ? (outputStylesFor(industry)[style]?.label ?? OUTPUT_STYLES[style].label) : "";
   return [s, color.trim()].filter(Boolean).join(" · ");
 }

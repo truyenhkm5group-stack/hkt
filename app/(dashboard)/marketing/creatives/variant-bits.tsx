@@ -3,6 +3,7 @@ import { Globe, ImageOff, MessageCircle } from "lucide-react";
 import { ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
 import { ZoomableImg } from "@/app/(dashboard)/marketing/creatives/image-zoom";
 import { DESIGN_DNA_KEYS, DESIGN_DNA_LABEL, DESIGN_DNA_VALUE_LABEL, GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, SLOT_MODE_LABEL, type DesignDnaKey, type GeneKey, type SlotMode } from "@/lib/constants/creative-loop";
+import { FOOD_GENE_VALUE_LABEL, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,14 +37,16 @@ export function VariantImage({ imageId, available, alt, className, iconClassName
 }
 
 /** Sáu gen bằng nhãn tiếng Việt. `mutated` = gen mà ô KHAI THÁC đã đổi so với mẫu cha — tô đậm. */
-export function GeneChips({ genes, mutated, className }: { genes: Record<string, string>; mutated?: string; className?: string }) {
+export function GeneChips({ genes, mutated, className, industry }: { genes: Record<string, string>; mutated?: string; className?: string; industry?: CreativeIndustry }) {
+  // Thực phẩm: cùng khoá gen, nhãn theo nghĩa món ăn (lib/constants/creative-industry.ts) — "Trong nhà" là "Mâm cơm gia đình".
+  const label = (v: string) => (industry === "FOOD" ? (FOOD_GENE_VALUE_LABEL[v] ?? GENE_VALUE_LABEL[v]) : GENE_VALUE_LABEL[v]) ?? v;
   const keys = GENE_KEYS.filter((k) => genes[k]);
   if (!keys.length) return <p className="text-[11.5px] italic text-muted-foreground">Không có gen</p>;
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>
       {keys.map((k) => (
         <span key={k} className={cn("rounded bg-muted px-1.5 py-0.5 text-[10.5px]", k === mutated && "bg-primary/10 font-semibold text-primary")} title={k === mutated ? "Gen được ĐỔI so với mẫu cha" : undefined}>
-          <span className="text-muted-foreground">{GENE_LABEL[k as GeneKey]}:</span> {GENE_VALUE_LABEL[genes[k]] ?? genes[k]}
+          <span className="text-muted-foreground">{GENE_LABEL[k as GeneKey]}:</span> {label(genes[k])}
         </span>
       ))}
     </div>

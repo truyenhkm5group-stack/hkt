@@ -38,7 +38,8 @@ export type StepBadges = Partial<Record<(typeof CREATIVE_STEPS)[number]["value"]
 /** Khoá URL của từng tab — đổi tab là xoá HẾT, để bộ lọc của tab này không lặng lẽ lọc tab kia (vd `q`, `period`). */
 const TAB_URL_KEYS = [...new Set(["page", "q", "loai", "bat", "lo", "ngay", "product", "remix", "mau", ...LIVE_BOARD_URL_KEYS])];
 
-export function CreativeTabs({ active, defaultTab, badges = {} }: { active: string; defaultTab: string; badges?: StepBadges }) {
+/** `hidden` — tab phụ ẨN theo ngành (thực phẩm: "Thiết kế" = DNA váy áo + MOQ màu × size). Link cũ vẫn mở được và nói vì sao. */
+export function CreativeTabs({ active, defaultTab, badges = {}, hidden = [] }: { active: string; defaultTab: string; badges?: StepBadges; hidden?: readonly string[] }) {
   const [dangChuyen, startTransition] = useNavTransition();
   const [, setState] = useQueryStates({ tab: parseAsString, ...Object.fromEntries(TAB_URL_KEYS.map((k) => [k, parseAsString])) }, { shallow: false, history: "push", startTransition });
   return (
@@ -56,7 +57,7 @@ export function CreativeTabs({ active, defaultTab, badges = {} }: { active: stri
           );
         })}
         <span className="mx-1 h-5 w-px self-center bg-border" aria-hidden />
-        {CREATIVE_SIDE_TABS.map((t) => (
+        {CREATIVE_SIDE_TABS.filter((t) => !hidden.includes(t.value)).map((t) => (
           <TabsTrigger key={t.value} value={t.value} className="flex-none px-3 text-muted-foreground">
             {t.label}
           </TabsTrigger>

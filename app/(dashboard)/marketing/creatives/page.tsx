@@ -17,6 +17,9 @@ import { getPendingBatch } from "@/lib/queries/creative-loop";
 import { loadMediaCounts } from "@/lib/queries/creative-manual-gen";
 import { param, parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { canOpenTopic } from "@/lib/production/topic-access";
+import { FOOD_FASHION_ONLY_MESSAGE } from "@/lib/constants/creative-industry";
+import { readCreativeIndustry } from "@/lib/creative/org-ai";
+import { EmptyState } from "@/components/ui-bits";
 
 export const metadata = { title: "Thư viện Media" };
 
@@ -35,7 +38,8 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
   const user = await requirePermission("ideas:view");
   const raw = await searchParams;
   const db = await getDb();
-  const [counts, pending] = await Promise.all([loadMediaCounts(db), getPendingBatch(db)]);
+  const [counts, pending, ind] = await Promise.all([loadMediaCounts(db), getPendingBatch(db), readCreativeIndustry(db)]);
+  const food = ind.industry === "FOOD";
   const product = param(raw, "product") || null;
   // "Tạo lại tương tự" (`?remix=<lượt>`) luôn mở ① Tạo ảnh với thiết lập điền sẵn.
   const remix = param(raw, "remix") || null;
@@ -71,10 +75,11 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
           dang: { n: counts.queue, hint: `${counts.queue} bài chờ đăng` },
           "dang-chay": { n: counts.live, hint: `${counts.live} mẫu đang chạy` },
         }}
+        hidden={food ? ["thiet-ke"] : []}
       />
 
       {tab === "tao" ? (
-        <CreateStep canEdit={canEdit} canPublish={canPublish} preselectProductId={param(raw, "product") || null} remixId={remix} />
+        <CreateStep canEdit={canEdit} canPublish={canPublish} preselectProductId={param(raw, "product") || null} remixId={remix} canManage={can(user, "settings:manage")} />
       ) : tab === "duyet" ? (
         <ReviewStep canEdit={canEdit} canPublish={canPublish} day={reviewDay} today={today} />
       ) : tab === "dang" ? (
@@ -83,7 +88,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
           <PostedCampsBlock pending={pending?.batch.status === "PENDING_APPROVAL" ? pending : null} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={canEdit} />
         </div>
       ) : tab === "thiet-ke" ? (
-        <DesignTab canEdit={canEdit} canCreateTopic={canOpenTopic(user)} />
+        food ? <EmptyState title="Thiết kế mới không dùng cho shop thực phẩm" description={FOOD_FASHION_ONLY_MESSAGE} /> : <DesignTab canEdit={canEdit} canCreateTopic={canOpenTopic(user)} />
       ) : tab === "dang-chay" ? (
         <LiveTab
           raw={raw}

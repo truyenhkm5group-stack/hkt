@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { COPY_CONVERSION_RULES, COPY_FORMULAS, COPY_MAX_FORMULAS, NO_PRICE_RULE, type CopyFormula } from "@/lib/constants/copy-formulas";
 import { schema, type Db } from "@/db";
-import { estimateCostUsd, type AiUsage } from "@/lib/ai/provider";
+import { estimateCostUsd, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
+import { FOOD_CAPTION_INSTRUCTIONS, FOOD_COPY_CONVERSION_RULES, FOOD_COPY_FORMULAS, FOOD_COPY_STRUCTURE, FOOD_GENE_VALUE_LABEL, foodClaimProblems, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
 import { xetTranNgay } from "@/lib/constants/ai-budget";
@@ -70,6 +71,13 @@ export type CaptionInput = {
   formulas?: CopyFormula[];
   /** KHÔNG ghi giá (chủ shop: "không để giá bán trên content") — mọi con số giá là lỗi, viết lại rồi bỏ. */
   noPrice?: boolean;
+  /** Gói ngành (lib/constants/creative-industry.ts). Vắng = thời trang — câu lệnh của tổ chức nhà giữ nguyên từng chữ. */
+  industry?: CreativeIndustry;
+  /**
+   * DỮ KIỆN SẢN PHẨM (thực phẩm): dòng "Nhãn: giá trị" từ field sản phẩm (quy cách, khối lượng tịnh, bảo quản…) + tên shop —
+   * thứ DUY NHẤT câu chữ được dựa vào khi nói khối lượng / xuất xứ / chứng nhận (`foodClaimProblems`).
+   */
+  facts?: string[];
 };
 
 export type CaptionOption = { headline: string; primaryText: string; formula?: CopyFormula };
@@ -124,6 +132,23 @@ const CAPTION_INSTRUCTIONS = [
   `seen: một câu tiếng Việt (tối đa ${SEEN_MAX_CHARS} ký tự) tả lại sản phẩm và bối cảnh bạn thấy trong ảnh.`,
 ].join("\n");
 
+/** Lời dặn hệ thống theo ngành — thời trang là `CAPTION_INSTRUCTIONS` NGUYÊN VĂN. Hàm THUẦN. */
+export function captionInstructionsFor(industry: CreativeIndustry | undefined): string {
+  if (industry !== "FOOD") return CAPTION_INSTRUCTIONS;
+  return [
+    FOOD_CAPTION_INSTRUCTIONS,
+    `- headline: tiếng Việt, tối đa ${WRITER_LIMITS.headlineMaxChars} ký tự. primaryText: tiếng Việt, tối đa ${WRITER_LIMITS.primaryTextMaxChars} ký tự.`,
+    "- Các phương án phải khác nhau thật (cách mở đầu, điểm nhấn), không chỉ đổi vài chữ.",
+    `seen: một câu tiếng Việt (tối đa ${SEEN_MAX_CHARS} ký tự) tả lại món ăn và bối cảnh bạn thấy trong ảnh.`,
+  ].join("\n");
+}
+
+/** Chuỗi dữ kiện để soi khẳng định (tên + dòng dữ kiện + ghi chú). `null` = ngành không có luật khẳng định riêng. Hàm THUẦN. */
+export function claimFactsOf(input: Pick<CaptionInput, "industry" | "facts" | "product" | "productNote">): string | null {
+  if (input.industry !== "FOOD") return null;
+  return [input.product.name, ...(input.facts ?? []), input.productNote ?? ""].join("\n");
+}
+
 export function captionJsonSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -161,10 +186,11 @@ export function parseCaptionAnswer(text: string): CaptionJson | null {
 }
 
 /** Những điều các phương án đang vi phạm — rỗng là đạt. */
-export function captionProblems(options: CaptionOption[], priceVnd: number | null): string[] {
+export function captionProblems(options: CaptionOption[], priceVnd: number | null, claimFacts: string | null = null): string[] {
   const out: string[] = [];
   options.forEach((o, i) => {
     const n = `Phương án ${i + 1}`;
+    if (claimFacts !== null) for (const c of foodClaimProblems(`${o.headline}\n${o.primaryText}`, claimFacts)) out.push(`${n}: ${c} — bỏ khẳng định ấy.`);
     if (o.headline.length > WRITER_LIMITS.headlineMaxChars) out.push(`${n}: headline dài ${o.headline.length} ký tự, tối đa ${WRITER_LIMITS.headlineMaxChars}.`);
     if (o.primaryText.length > WRITER_LIMITS.primaryTextMaxChars) out.push(`${n}: primaryText dài ${o.primaryText.length} ký tự, tối đa ${WRITER_LIMITS.primaryTextMaxChars}.`);
     for (const [field, text] of [["headline", o.headline], ["primaryText", o.primaryText]] as const) {
@@ -190,10 +216,40 @@ export function finalizeCaption(o: CaptionOption, priceVnd: number | null): Capt
   return { headline: clipWords(fix(o.headline), WRITER_LIMITS.headlineMaxChars), primaryText: clipWords(fix(o.primaryText), WRITER_LIMITS.primaryTextMaxChars), priceStripped };
 }
 
-function briefOf(input: CaptionInput, priceVnd: number | null, n: number): string {
+/**
+ * Chốt danh sách phương án từ câu trả lời đã đọc — hàm THUẦN, dùng chung cho đường khoá của nhà và đường khoá của tổ chức.
+ * Lượt viết lại vẫn sai giá ⇒ BỎ con số giá; vẫn dài ⇒ cắt ở ranh giới từ; trùng ⇒ bỏ bản sau. Thực phẩm: phương án còn
+ * khẳng định BỊA (khối lượng, xuất xứ, sức khoẻ, chứng nhận…) sau lượt viết lại ⇒ BỎ CẢ PHƯƠNG ÁN — cắt một cụm khẳng định
+ * ra giữa câu thì câu còn lại có thể nói ngược nghĩa, không vá hộ được như con số giá.
+ */
+export function pickCaptionOptions(parsed: CaptionJson, input: CaptionInput, n: number, priceVnd: number | null): { options: CaptionOption[]; priceStripped: boolean; claimDropped: number } {
+  let priceStripped = false;
+  let claimDropped = 0;
+  const facts = claimFactsOf(input);
+  const options: CaptionOption[] = [];
+  for (const [i, o] of parsed.options.slice(0, n).entries()) {
+    const f = finalizeCaption(o, priceVnd);
+    priceStripped = priceStripped || f.priceStripped;
+    if (!f.primaryText) continue;
+    if (facts !== null && foodClaimProblems(`${f.headline}\n${f.primaryText}`, facts).length) {
+      claimDropped += 1;
+      continue;
+    }
+    if (options.some((x) => x.headline === f.headline && x.primaryText === f.primaryText)) continue;
+    const formula = input.formulas?.[i];
+    options.push({ headline: f.headline, primaryText: f.primaryText, ...(formula ? { formula } : {}) });
+  }
+  return { options, priceStripped, claimDropped };
+}
+
+export function briefOf(input: CaptionInput, priceVnd: number | null, n: number): string {
   const formulas = input.formulas?.length ? input.formulas.slice(0, n) : null;
-  const genes = GENE_KEYS.filter((k) => input.genes[k])
-    .map((k) => `- ${GENE_LABEL[k]}: ${GENE_VALUE_LABEL[input.genes[k] as string] ?? input.genes[k]}`)
+  const food = input.industry === "FOOD";
+  const formulaDefs = food ? FOOD_COPY_FORMULAS : COPY_FORMULAS;
+  const geneLabel = (v: string) => (food ? (FOOD_GENE_VALUE_LABEL[v] ?? GENE_VALUE_LABEL[v]) : GENE_VALUE_LABEL[v]) ?? v;
+  // Thực phẩm: gen "người mẫu" / "chữ trên ảnh" luôn là "không" — nhắc ra chỉ làm nhiễu người viết.
+  const genes = GENE_KEYS.filter((k) => input.genes[k] && !(food && (k === "model" || k === "textOverlay")))
+    .map((k) => `- ${GENE_LABEL[k]}: ${geneLabel(input.genes[k] as string)}`)
     .join("\n");
   const examples = input.winningExamples
     .slice(0, 3)
@@ -201,9 +257,13 @@ function briefOf(input: CaptionInput, priceVnd: number | null, n: number): strin
     .join("\n");
   return [
     `Viết ${n} phương án câu chữ cho ảnh quảng cáo đính kèm.`,
-    formulas ? `MỖI phương án theo ĐÚNG một công thức, theo thứ tự:\n${formulas.map((f, i) => `${i + 1}. ${COPY_FORMULAS[f].label}: ${COPY_FORMULAS[f].instruction}`).join("\n")}` : "",
-    formulas ? `Để tăng tỷ lệ nhấp và tỷ lệ nhắn tin:\n${COPY_CONVERSION_RULES}` : "",
+    formulas ? `MỖI phương án theo ĐÚNG một công thức, theo thứ tự:\n${formulas.map((f, i) => `${i + 1}. ${formulaDefs[f].label}: ${formulaDefs[f].instruction}`).join("\n")}` : "",
+    formulas ? `Để tăng tỷ lệ nhấp và tỷ lệ nhắn tin:\n${food ? FOOD_COPY_CONVERSION_RULES : COPY_CONVERSION_RULES}` : "",
+    food ? FOOD_COPY_STRUCTURE : "",
     `Sản phẩm: ${input.product.name} (mã ${input.product.code || "không rõ"})`,
+    food
+      ? `DỮ KIỆN SẢN PHẨM (shop tự khai — thứ DUY NHẤT được dùng cho khối lượng, quy cách, xuất xứ, bảo quản):\n${input.facts?.length ? input.facts.map((f) => `- ${f}`).join("\n") : "- (không có dữ kiện nào — KHÔNG viết khối lượng, quy cách, xuất xứ, chứng nhận)"}`
+      : "",
     input.noPrice ? `Giá bán: KHÔNG GHI GIÁ.\n${NO_PRICE_RULE}` : `Giá bán ERP: ${priceVnd !== null ? formatVnd(priceVnd) : "KHÔNG RÕ — không được viết con số giá nào"}`,
     input.productNote ? input.productNote : "",
     genes ? `Ý đồ của mẫu (tham khảo — ảnh thật mới là căn cứ, ảnh khác ý đồ thì theo ảnh):\n${genes}` : "",
@@ -299,7 +359,7 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
-            instructions: CAPTION_INSTRUCTIONS,
+            instructions: captionInstructionsFor(input.industry),
             input: conversation,
             text: { format: { type: "json_schema", name: "creative_caption", strict: true, schema: captionJsonSchema() } },
             reasoning: { effort: "low" },
@@ -330,7 +390,7 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
         return { ok: false, error };
       }
       const got = parseCaptionAnswer(lastAnswer);
-      problems = got ? captionProblems(got.options.slice(0, n), priceVnd) : ["Câu trả lời không phải JSON đúng dạng {seen, options: [{headline, primaryText}]}."];
+      problems = got ? captionProblems(got.options.slice(0, n), priceVnd, claimFactsOf(input)) : ["Câu trả lời không phải JSON đúng dạng {seen, options: [{headline, primaryText}]}."];
       if (got) parsed = got;
       if (problems.length === 0 || attempts === 2) break;
       conversation.push({ role: "assistant", content: [{ type: "output_text", text: lastAnswer || "(trống)" }] });
@@ -344,17 +404,7 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
       return { ok: false, error: "Mô hình không trả về câu chữ đúng dạng sau hai lượt." };
     }
 
-    // Lượt viết lại vẫn sai giá ⇒ BỎ con số giá; vẫn dài ⇒ cắt ở ranh giới từ. Trùng nhau ⇒ bỏ bản sau.
-    let priceStripped = false;
-    const options: CaptionOption[] = [];
-    for (const [i, o] of parsed.options.slice(0, n).entries()) {
-      const f = finalizeCaption(o, priceVnd);
-      priceStripped = priceStripped || f.priceStripped;
-      if (!f.primaryText) continue;
-      if (options.some((x) => x.headline === f.headline && x.primaryText === f.primaryText)) continue;
-      const formula = input.formulas?.[i];
-      options.push({ headline: f.headline, primaryText: f.primaryText, ...(formula ? { formula } : {}) });
-    }
+    const { options, priceStripped } = pickCaptionOptions(parsed, input, n, priceVnd);
     if (!options.length) {
       await logCaption(db, { model: usedModel, entityId, prompt: brief, answer: lastAnswer, usage, costUsd, latencyMs: Date.now() - started, rounds: attempts, status: "ERROR", error: "Không còn phương án nào sau khi bỏ giá sai" });
       return { ok: false, error: "Mọi phương án đều rỗng sau khi bỏ con số giá sai." };
@@ -365,4 +415,59 @@ export async function captionFromImage(db: Db, input: CaptionInput, deps: Captio
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+// ───────────────────────────── KHOÁ CỦA TỔ CHỨC (BYOK) ─────────────────────────────
+
+export type ProviderCaptionOutcome = { result: CaptionResult; usage: AiUsage; requests: number; model: string };
+
+const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+
+/**
+ * Viết câu chữ theo ảnh bằng một `AiProvider` của TỔ CHỨC (ByokOpenAiProvider / ByokGeminiProvider — lib/ai-builder/providers.ts,
+ * ảnh đi qua `AiRequest.images`). CÙNG bản giao việc (`briefOf`), CÙNG lời dặn theo ngành, CÙNG luật giá + luật khẳng định và
+ * CÙNG phép chốt phương án (`pickCaptionOptions`) với đường của nhà — chỉ khác ĐƯỜNG GỬI. `guard` chạy trước MỖI lời gọi model
+ * (chủ khoá + công tắc + hạn mức — lib/creative/org-ai.ts). Không ném: lỗi là `{ ok: false }`; số token / lời gọi trả kèm để nơi
+ * gọi ghi sổ dùng AI của tổ chức.
+ */
+export async function captionFromImageWithProvider(input: CaptionInput, deps: { provider: AiProvider; guard: () => Promise<void> }): Promise<ProviderCaptionOutcome> {
+  const n = input.formulas?.length ? Math.min(COPY_MAX_FORMULAS, input.formulas.length) : Math.max(1, Math.min(CAPTION_MAX_OPTIONS, Math.floor(input.options ?? 1)));
+  const priceVnd = !input.noPrice && input.product.priceVnd !== null && input.product.priceVnd > 0 ? Math.round(input.product.priceVnd) : null;
+  let usage = ZERO_USAGE;
+  let model = deps.provider.model;
+  let requests = 0;
+  const done = (result: CaptionResult): ProviderCaptionOutcome => ({ result, usage, requests, model });
+  if (!input.image.bytes.length) return done({ ok: false, error: "Mẫu không có điểm ảnh để đọc." });
+  const mime = (IMAGE_MIMES as readonly string[]).includes(input.image.contentType) ? (input.image.contentType as (typeof IMAGE_MIMES)[number]) : "image/jpeg";
+  const images = [{ mimeType: mime, data: Buffer.from(input.image.bytes).toString("base64") }];
+  const system = `${captionInstructionsFor(input.industry)}\n\nTrả về DUY NHẤT một đối tượng JSON đúng dạng {"seen": "...", "options": [{"headline": "...", "primaryText": "..."}]} — không kèm chữ nào khác.`;
+  const messages: AiMessage[] = [{ role: "user", content: [{ type: "text", text: briefOf(input, priceVnd, n) }] }];
+  let parsed: CaptionJson | null = null;
+  let attempts = 0;
+  try {
+    for (attempts = 1; attempts <= 2; attempts += 1) {
+      await deps.guard();
+      const res = await deps.provider.complete({ system, messages, tools: [], maxTokens: 2500, reasoning: "low", images });
+      requests += 1;
+      usage = addUsage(usage, res.usage);
+      if (res.model) model = res.model;
+      const text = res.content
+        .filter((b): b is Extract<AiMessage["content"][number], { type: "text" }> => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      const got = parseCaptionAnswer(text);
+      const problems = got ? captionProblems(got.options.slice(0, n), priceVnd, claimFactsOf(input)) : ["Câu trả lời không phải JSON đúng dạng {seen, options: [{headline, primaryText}]}."];
+      if (got) parsed = got;
+      if (problems.length === 0 || attempts === 2) break;
+      messages.push({ role: "assistant", content: [{ type: "text", text: text || "(trống)" }] });
+      messages.push({ role: "user", content: [{ type: "text", text: `Viết lại, sửa đúng các lỗi sau và giữ nguyên mọi luật:\n- ${problems.join("\n- ")}` }] });
+    }
+  } catch (e) {
+    return done({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+  attempts = Math.min(attempts, 2);
+  if (!parsed) return done({ ok: false, error: "Mô hình không trả về câu chữ đúng dạng sau hai lượt." });
+  const { options, priceStripped, claimDropped } = pickCaptionOptions(parsed, input, n, priceVnd);
+  if (!options.length) return done({ ok: false, error: claimDropped ? "Mọi phương án đều còn khẳng định bịa (khối lượng / xuất xứ / sức khoẻ / chứng nhận) sau lượt viết lại — bấm viết lại hoặc bổ sung dữ kiện sản phẩm." : "Mọi phương án đều rỗng sau khi bỏ con số giá sai." });
+  return done({ ok: true, headline: options[0].headline, primaryText: options[0].primaryText, options, seen: parsed.seen.slice(0, SEEN_MAX_CHARS), model, costUsd: estimateCostUsd(model, usage), attempts, priceStripped });
 }

@@ -14,6 +14,10 @@ import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { loadManualGenImagePrompt } from "@/lib/queries/creative-manual-gen";
 import { copyOptionsSchema, creativeRepublishSchema, manualDesignStartSchema, manualEditStartSchema, manualGenDraftSchema, manualGenInstantSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 import { bindOrganization } from "@/lib/platform/background";
+import { CREATIVE_INDUSTRIES, type CreativeIndustry } from "@/lib/constants/creative-industry";
+import type { CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { creativeAiStatus, readCreativeIndustry, writeCreativeIndustry } from "@/lib/creative/org-ai";
+import type { Db } from "@/db";
 
 /**
  * ═══════════ VÒNG MẪU — GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ═══════════
@@ -35,6 +39,20 @@ const PATH = "/marketing/creatives";
 
 type Fail = { error: string };
 
+/**
+ * Ngành + AI của tổ chức cho một lượt gen tay. Nhà ⇒ cấu hình như cũ. Tổ chức khách ⇒ PHẢI có khoá AI của chính tổ chức vẽ được
+ * (không thì trả câu lỗi chỉ đúng việc phải làm — không ghi một lượt chắc chắn vẽ hỏng), và lượt ghi model vẽ của KẾT NỐI ấy.
+ */
+async function genContext(db: Db, config: CreativeLoopConfig): Promise<{ industry: CreativeIndustry; config: CreativeLoopConfig } | Fail> {
+  const [ind, ai] = await Promise.all([readCreativeIndustry(db), creativeAiStatus(config.imageModel)]);
+  if (ai.mode === "NONE") return { error: ai.reason };
+  if (ai.mode === "BYOK") {
+    if (!ai.imageReady || !ai.imageModel) return { error: ai.imageReason ?? "Khoá AI của tổ chức chưa vẽ được ảnh." };
+    return { industry: ind.industry, config: { ...config, imageModel: ai.imageModel } };
+  }
+  return { industry: ind.industry, config };
+}
+
 async function actorOf(userId: string, fallback: string) {
   const db = await getDb();
   const who = await db.query.users.findFirst({ where: eq(schema.users.id, userId), columns: { name: true, email: true } });
@@ -49,8 +67,10 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
   const d = parsed.data;
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
-  const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, config, actor);
+  const { config: cfg0 } = await readCurrentCreativeConfig(db);
+  const gc = await genContext(db, cfg0);
+  if ("error" in gc) return gc;
+  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, gc.config, actor, { industry: gc.industry });
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -78,8 +98,10 @@ export async function startManualEditRun(raw: unknown): Promise<{ ok: true; genI
   const d = parsed.data;
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
-  const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualEdit(db, { sourceImageId: d.sourceImageId, request: { color: d.color, layout: d.layout, detail: d.detail }, count: d.count }, config, actor);
+  const { config: cfg0 } = await readCurrentCreativeConfig(db);
+  const gc = await genContext(db, cfg0);
+  if ("error" in gc) return gc;
+  const r = await startManualEdit(db, { sourceImageId: d.sourceImageId, request: { color: d.color, layout: d.layout, detail: d.detail }, count: d.count }, gc.config, actor, { industry: gc.industry });
   if (!r.ok) return { error: r.error };
   await audit({
     userId: user.id,
@@ -123,8 +145,10 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
   const d = parsed.data;
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
-  const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, config, actor, new Date());
+  const { config: cfg0 } = await readCurrentCreativeConfig(db);
+  const gc = await genContext(db, cfg0);
+  if ("error" in gc) return gc;
+  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads), studio: d.studio }, gc.config, actor, new Date(), { industry: gc.industry });
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -338,4 +362,24 @@ export async function writeCopyOptionsAction(raw: unknown): Promise<{ ok: true; 
   const r = await writeCopyOptions(await getDb(), parsed.data.imageId, { formulas: parsed.data.formulas, noPrice: parsed.data.noPrice }, new Date());
   if (!r.ok) return { error: r.error };
   return { ok: true, options: r.options, priceStripped: r.priceStripped };
+}
+
+const industrySchema = z.object({ industry: z.enum(CREATIVE_INDUSTRIES).nullable() }).strict();
+
+/**
+ * Chọn NGÀNH cho Thư viện Media (thời trang / thực phẩm) — ghi đè mẫu ngành của tổ chức, trong `settings` của CHÍNH tổ chức.
+ * `null` ⇒ bỏ ghi đè. Quyền `settings:manage` (đổi cách máy vẽ + viết cho cả tổ chức). Tổ chức nhà luôn là thời trang.
+ */
+export async function setCreativeIndustryAction(raw: unknown): Promise<{ ok: true } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "settings:manage")) return { error: "Đổi ngành của Thư viện Media cần quyền quản trị cấu hình (settings:manage)." };
+  const parsed = industrySchema.safeParse(raw);
+  if (!parsed.success) return { error: "Ngành không hợp lệ." };
+  const db = await getDb();
+  const before = await readCreativeIndustry(db);
+  const r = await writeCreativeIndustry(db, parsed.data.industry);
+  if ("error" in r) return r;
+  await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_INDUSTRY_SET", entity: "SETTING", entityId: "creative.industry", before: { industry: before.industry, basis: before.basis }, after: { industry: parsed.data.industry } });
+  revalidatePath(PATH);
+  return { ok: true };
 }

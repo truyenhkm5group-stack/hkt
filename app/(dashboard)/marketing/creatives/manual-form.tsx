@@ -17,6 +17,7 @@ import { manualCreativeInputSchema } from "@/lib/validation/creative";
 import type { CopyFormula } from "@/lib/constants/copy-formulas";
 import { AD_MEDIA_ACCEPT, AD_VIDEO_UPLOAD, checkAdVideo } from "@/lib/constants/ad-video";
 import { FormulaPicker } from "./copy-ai";
+import { FOOD_GENE_EXCLUDE, FOOD_GENE_VALUE_LABEL, type CreativeIndustry } from "@/lib/constants/creative-industry";
 import { grabFrame, readVideoMeta, uploadAdVideo, type VideoMeta } from "./video-upload";
 
 type ChosenVideo = { file: File; url: string; meta: VideoMeta };
@@ -27,7 +28,11 @@ type ChosenVideo = { file: File; url: string; meta: VideoMeta };
  * hình người chọn — AI viết content nhìn ảnh ấy; video tải theo khúc lúc bấm "Thêm vào hàng đợi".
  * Mẫu đi qua đúng cổng duyệt · đăng · chấm · học như mẫu máy làm — xem `lib/creative/manual.ts`.
  */
-export function ManualForm({ products }: { products: ProductOption[] }) {
+export function ManualForm({ products, industry = "FASHION" }: { products: ProductOption[]; industry?: CreativeIndustry }) {
+  // Thực phẩm: chỉ các giá trị gen mang nghĩa món ăn, nhãn theo nghĩa món ăn (lib/constants/creative-industry.ts).
+  const food = industry === "FOOD";
+  const geneValues = (k: GeneKey) => (GENE_VOCAB[k] as readonly string[]).filter((v) => !food || !(FOOD_GENE_EXCLUDE[k] ?? []).includes(v));
+  const geneLabel = (v: string) => (food ? (FOOD_GENE_VALUE_LABEL[v] ?? GENE_VALUE_LABEL[v]) : GENE_VALUE_LABEL[v]) ?? v;
   const [open, setOpen] = useState(false);
   const [productId, setProductId] = useState("");
   const [primaryText, setPrimaryText] = useState("");
@@ -255,7 +260,7 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                   </label>
                   {aiWrite ? (
                     <>
-                      <FormulaPicker value={aiFormulas} onChange={(v) => setAiFormulas(v.slice(-1))} max={1} />
+                      <FormulaPicker value={aiFormulas} onChange={(v) => setAiFormulas(v.slice(-1))} max={1} industry={industry} />
                       <p className="text-[11px] text-muted-foreground">Chọn một công thức cho bản đầu — trong hộp soạn bài bấm “AI viết theo công thức” để ra thêm phương án khác. Để trống hai ô dưới để AI viết.</p>
                     </>
                   ) : null}
@@ -279,9 +284,9 @@ export function ManualForm({ products }: { products: ProductOption[] }) {
                     <span className="text-muted-foreground">{GENE_LABEL[k]}</span>
                     <select className="h-8 w-full rounded-md border bg-background px-2 text-[12.5px]" value={genes[k] ?? ""} onChange={(e) => setGenes((g) => ({ ...g, [k]: e.target.value || undefined }))}>
                       <option value="">— chọn —</option>
-                      {(GENE_VOCAB[k] as readonly string[]).map((val) => (
+                      {geneValues(k).map((val) => (
                         <option key={val} value={val}>
-                          {GENE_VALUE_LABEL[val] ?? val}
+                          {geneLabel(val)}
                         </option>
                       ))}
                     </select>

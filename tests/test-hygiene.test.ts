@@ -128,6 +128,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá BỊA của kết nối «Pancake POS của tổ chức» trong tổ chức thử và để job / webhook đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Pancake POS. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/viettelpost-org.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để máy chủ cấp được token webhook theo tổ chức (HMAC dẫn xuất từ khoá) cho tổ chức thử — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/creative-food-industry.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá AI BỊA của kết nối «openai-byok» / «gemini-byok» trong hai tổ chức thử và để Thư viện Media đọc lại nó (cùng cách wholesale-lead-hunter); fetch là bản giả đóng vai OpenAI / Gemini. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/wholesale-lead-hunter.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá Google Places BỊA của kết nối «google-places» trong tổ chức thử và để job «wholesale-leads» đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Places API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-order-sync.test.ts":

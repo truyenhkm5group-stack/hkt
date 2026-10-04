@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { readCreativeIndustry } from "@/lib/creative/org-ai";
 import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup, type MarketerOption, type ProductWinCode } from "@/lib/constants/campaign-setup";
 import { productWinCodes } from "@/lib/creative/win-code";
 import { schema, type Db } from "@/db";
@@ -757,7 +758,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
 export async function loadRepublishCtx(db: Db, now: Date, productIds: readonly string[]) {
   const { config } = await readCurrentCreativeConfig(db);
   const ids = [...new Set(productIds.filter(Boolean))];
-  const [setup, blockers, ctx, seq, pageName, fanpageEvidence, wins] = await Promise.all([
+  const [setup, blockers, ctx, seq, pageName, fanpageEvidence, wins, ind] = await Promise.all([
     loadCampaignSetupOptions(db, now, config),
     instantPublishBlockers(db, config, vnDay(now)),
     loadNamingContext(db, config),
@@ -765,6 +766,7 @@ export async function loadRepublishCtx(db: Db, now: Date, productIds: readonly s
     fanpageDisplayName(db, config.pageId),
     loadFanpageEvidence(db, ids),
     productWinCodes(db, ids),
+    readCreativeIndustry(db),
   ]);
   const names = defaultNames(ctx, vnDay(now), seq);
   return {
@@ -783,6 +785,7 @@ export async function loadRepublishCtx(db: Db, now: Date, productIds: readonly s
       campDefaults: names,
       setup,
       fanpageEvidence,
+      industry: ind.industry,
     },
     winCodes: Object.fromEntries(wins) as Record<string, ProductWinCode>,
   };

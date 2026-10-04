@@ -288,6 +288,7 @@ import { testCreativeStudioDb, testCreativeStudioPure } from "./creative-studio.
 import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
+import { testCreativeFoodIndustryOrg, testCreativeFoodIndustryPure } from "./creative-food-industry.test";
 import { testCreativeImageBatch } from "./creative-image-batch.test";
 import { testCreativeScreens } from "./creative-screens.test";
 import { testCreativeScreens2 } from "./creative-screens-2.test";
@@ -1947,6 +1948,9 @@ async function main() {
   await testCreativeImportDb(db);
   testCreativeCopyPure();
   await testCreativeCopyDb(db);
+  // Thư viện Media cho shop thực phẩm + khoá AI của tổ chức (04/10/2026) — hai tổ chức thử tự cấp, tự dọn.
+  testCreativeFoodIndustryPure();
+  await testCreativeFoodIndustryOrg();
   await testCreativeImageBatch(db);
   testCreativeScreens();
   testCreativeScreens2();
