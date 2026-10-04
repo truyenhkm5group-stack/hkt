@@ -498,7 +498,7 @@ import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
-import { testChotDonBrand, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
+import { testChotDonBrand, testMissedOrdersCalculator, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
 import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
@@ -2491,6 +2491,7 @@ async function main() {
   testPublicSiteHost();
   testPublicSiteSource();
   testChotDonBrand();
+  testMissedOrdersCalculator();
   testAgentIngestSourceGuards();
   testTestHygiene();
   testAiHealthSourceGuards();

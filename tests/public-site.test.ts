@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { DEFAULT_PLAN_KEY } from "@/lib/entitlements/check";
 import { appOriginForHost, redirectUri } from "@/lib/auth/oauth";
 import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
+import { DAYS_PER_MONTH, estimateMissedOrders, MISSED_ORDERS_DEFAULTS, MISSED_ORDERS_LIMITS, normalizeMissedOrdersInput } from "@/lib/site/missed-orders";
 import {
   brandAppOrigin,
   brandFromHeader,
@@ -212,6 +213,37 @@ export function testChotDonBrand() {
 
 function env_appUrl(): string {
   return (process.env.APP_URL?.trim() || "http://localhost:3000").replace(/\/$/, "");
+}
+
+/**
+ * MÁY TÍNH «SHOP BẠN ĐANG ĐỂ LỌT BAO NHIÊU ĐƠN?» (bản Chốt Đơn). Số ra từ số KHÁCH NHẬP — không một số liệu khách hàng nào
+ * của nền tảng; đơn làm tròn XUỐNG (không thổi phồng); không có giá để so thì KHÔNG đoán một giá; trang luôn kèm nhãn
+ * "ước tính … không phải cam kết doanh thu".
+ */
+export function testMissedOrdersCalculator() {
+  const d = MISSED_ORDERS_DEFAULTS;
+  const r = estimateMissedOrders(d, 249_000);
+  assert.equal(r.unattendedChatsPerMonth, Math.round(d.chatsPerDay * (d.unattendedPct / 100) * DAYS_PER_MONTH));
+  assert.equal(r.ordersPerMonth, Math.floor(r.unattendedChatsPerMonth * (d.closeRatePct / 100)), "đơn làm tròn xuống");
+  assert.equal(r.revenuePerMonthVnd, r.ordersPerMonth * d.avgOrderVnd);
+  assert.equal(r.timesPlanPrice, Math.floor((r.revenuePerMonthVnd / 249_000) * 10) / 10);
+  // 60 khách/ngày · 30% không ai trả lời kịp · 8% chốt · 350.000 ₫ ⇒ 540 khách · 43 đơn · 15.050.000 ₫
+  assert.deepEqual([r.unattendedChatsPerMonth, r.ordersPerMonth, r.revenuePerMonthVnd], [540, 43, 15_050_000]);
+  assert.equal(estimateMissedOrders(d, null).timesPlanPrice, null, "không có giá ⇒ không so");
+  assert.equal(estimateMissedOrders(d, 0).timesPlanPrice, null);
+  assert.equal(estimateMissedOrders({ ...d, unattendedPct: 0 }).ordersPerMonth, 0, "ai cũng được trả lời kịp ⇒ không lọt đơn nào");
+  const kep = normalizeMissedOrdersInput({ chatsPerDay: -5, unattendedPct: 250, closeRatePct: Number.NaN, avgOrderVnd: 1e12 });
+  assert.deepEqual(kep, {
+    chatsPerDay: MISSED_ORDERS_LIMITS.chatsPerDay.min,
+    unattendedPct: MISSED_ORDERS_LIMITS.unattendedPct.max,
+    closeRatePct: MISSED_ORDERS_LIMITS.closeRatePct.min,
+    avgOrderVnd: MISSED_ORDERS_LIMITS.avgOrderVnd.max,
+  }, "giá trị ngoài khoảng bị kẹp, NaN về mức thấp nhất");
+  const ui = readFileSync("components/site/missed-orders-calculator.tsx", "utf8");
+  assert.ok(ui.includes("không phải cam kết doanh thu"), "máy tính luôn nói rõ đây là ước tính");
+  const page = readFileSync("app/gioi-thieu/page.tsx", "utf8");
+  assert.ok(page.includes("SERVICE_COMMITMENTS.firstPaymentRefundDays") && page.includes("SERVICE_COMMITMENTS.retainAfterExpiryDays"), "cam kết trên trang đọc từ hằng số Điều khoản, không gõ lại số");
+  console.log("✓ Máy tính đơn lọt: số từ số khách nhập, đơn làm tròn xuống, không giá thì không so, ngoài khoảng bị kẹp; cam kết đọc từ hằng số");
 }
 
 export async function testPublicSiteData() {
