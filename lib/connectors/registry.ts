@@ -293,6 +293,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
       "lib/carriers/vtp-shipments.ts::createVtpShipmentCore",
       "lib/carriers/vtp-shipments.ts::cancelVtpShipmentCore",
       "lib/carriers/vtp-shipments.ts::vtpPrintLinkCore",
+      "lib/carriers/vtp-shipments.ts::bulkVtpPrintLinkCore",
     ],
     why: "Tạo vận đơn Viettel Post từ đơn tạo trong ERP bằng tài khoản của CHÍNH tổ chức — shop không cần Pancake POS. Kiểm tra = đăng nhập (Login → ownerconnect) rồi đọc danh sách kho lấy hàng — chỉ đọc, chỉ tới partner.viettelpost.vn. Tạo đơn giữ chỗ trước khi gọi hãng + mã ERP gửi kèm CHECK_UNIQUE + không tự gửi lại ⇒ một lần gửi không thành hai vận đơn. Hành trình về qua webhook «viettelpost-org».",
   },

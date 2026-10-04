@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -363,4 +363,94 @@ export async function vtpPrintLinkCore(user: SessionUser, shipmentId: unknown, d
   const res = await opened.client.printingCode([loaded.row.vtpOrderNumber]);
   if (res.kind !== "OK" || !res.envelope.message) return { ok: false, error: `Không lấy được mã in: ${res.kind === "OK" ? "phản hồi trống" : res.message}` };
   return { ok: true, message: "Mở nhãn in", url: vtpPrintUrl(res.envelope.message) };
+}
+
+// ───────────────────────────── HÀNG LOẠT (danh sách đơn) ─────────────────────────────
+
+/** Trần một lượt chọn: tạo tuần tự, mỗi đơn hai-ba lượt gọi hãng — 50 đơn là chừng một phút chờ. */
+export const VTP_BULK_MAX = 50;
+/** Trần tài liệu `printing-code`: tối đa 100 vận đơn một mã in. */
+export const VTP_PRINT_MAX = 100;
+
+const idsZ = z.array(z.string().min(1).max(200)).min(1, "Chọn ít nhất một đơn.").max(VTP_BULK_MAX, `Tối đa ${VTP_BULK_MAX} đơn một lượt.`);
+
+export type BulkCreateRow = { orderId: string; ok: boolean; message: string; vtpOrderNumber?: string | null };
+
+/**
+ * Bảng cước cho lượt tạo hàng loạt: tra bằng đơn ĐẦU TIÊN tạo được (đủ điều kiện + có cân nặng). Người bấm chọn MỘT dịch vụ
+ * dùng chung; đơn nào hãng không phục vụ dịch vụ đó trên tuyến của nó thì hãng từ chối RIÊNG đơn ấy — báo trong kết quả.
+ */
+export async function bulkQuoteVtpCore(user: SessionUser, rawIds: unknown, deps: { keyState?: SecretsKeyState; client?: VtpCarrierDeps } = {}): Promise<CarrierResult<{ quote: VtpQuote; sampleOrderId: string }>> {
+  if (!can(user, PERMISSION)) return { ok: false, error: "Bạn không có quyền thao tác vận đơn (shipments:manage)." };
+  const ids = idsZ.safeParse(rawIds);
+  if (!ids.success) return { ok: false, error: ids.error.issues.map((i) => i.message).join(" · ") };
+  for (const id of ids.data) {
+    const loaded = await loadOrder(id);
+    if (!loaded.ok || eligibility(loaded.order, loaded.attempts)) continue;
+    const weight = linesWeight(loaded.lines);
+    if (weight === null) continue;
+    const q = await quoteVtpShipmentCore(user, id, { weightGrams: weight, cod: await outstandingOf(loaded.order) }, deps);
+    return q.ok ? { ...q, sampleOrderId: id } : q;
+  }
+  return { ok: false, error: "Không đơn nào trong lựa chọn tạo được vận đơn: cần đơn tạo trong ERP, «Đã xác nhận», chưa có vận đơn, mẫu mã đã khai cân nặng." };
+}
+
+/**
+ * TẠO HÀNG LOẠT — đi qua ĐÚNG `createVtpShipmentCore` cho từng đơn (giữ chỗ, CHECK_UNIQUE, không tự gửi lại: mọi luật của tạo
+ * một đơn giữ nguyên), TUẦN TỰ (không dội hãng). Mỗi đơn dùng mặc định của chính nó: cân = cân mẫu mã × số lượng (thiếu ⇒ bỏ
+ * qua, KHÔNG đoán), thu hộ = số khách còn phải trả, ghi chú mặc định của tổ chức. Một đơn hỏng không dừng cả lượt.
+ */
+export async function bulkCreateVtpShipmentsCore(user: SessionUser, rawIds: unknown, rawInput: unknown, deps: { keyState?: SecretsKeyState; client?: VtpCarrierDeps } = {}): Promise<CarrierResult<{ rows: BulkCreateRow[] }>> {
+  if (!can(user, PERMISSION)) return { ok: false, error: "Bạn không có quyền thao tác vận đơn (shipments:manage)." };
+  const ids = idsZ.safeParse(rawIds);
+  if (!ids.success) return { ok: false, error: ids.error.issues.map((i) => i.message).join(" · ") };
+  const svc = z.object({ serviceCode: z.string().trim().regex(/^[A-Z0-9]{2,10}$/, "Chọn một dịch vụ từ bảng cước.") }).strict().safeParse(rawInput);
+  if (!svc.success) return { ok: false, error: svc.error.issues.map((i) => i.message).join(" · ") };
+  const rows: BulkCreateRow[] = [];
+  for (const id of [...new Set(ids.data)]) {
+    const loaded = await loadOrder(id);
+    if (!loaded.ok) {
+      rows.push({ orderId: id, ok: false, message: loaded.error });
+      continue;
+    }
+    const blocked = eligibility(loaded.order, loaded.attempts);
+    if (blocked) {
+      rows.push({ orderId: id, ok: false, message: blocked });
+      continue;
+    }
+    const weight = linesWeight(loaded.lines);
+    if (weight === null) {
+      rows.push({ orderId: id, ok: false, message: "Mẫu mã chưa khai cân nặng — tạo riêng đơn này ở trang đơn (nhập cân tay)." });
+      continue;
+    }
+    const r = await createVtpShipmentCore(user, id, { weightGrams: weight, cod: await outstandingOf(loaded.order), serviceCode: svc.data.serviceCode, note: "" }, deps);
+    rows.push(r.ok ? { orderId: id, ok: true, message: r.message, vtpOrderNumber: r.vtpOrderNumber } : { orderId: id, ok: false, message: r.error });
+  }
+  const made = rows.filter((r) => r.ok).length;
+  return { ok: true, message: `Tạo được ${made}/${rows.length} vận đơn.`, rows };
+}
+
+/**
+ * IN HÀNG LOẠT — MỘT mã in cho mọi lần gửi do ERP tạo còn in được của các đơn đã chọn (tối đa 100 vận đơn — trần tài liệu).
+ * Chỉ đọc ở hãng, không ghi gì vào ERP.
+ */
+export async function bulkVtpPrintLinkCore(user: SessionUser, rawIds: unknown, deps: { keyState?: SecretsKeyState; client?: VtpCarrierDeps } = {}): Promise<CarrierResult<{ url: string; count: number }>> {
+  if (!can(user, PERMISSION)) return { ok: false, error: "Bạn không có quyền thao tác vận đơn (shipments:manage)." };
+  const ids = z.array(z.string().min(1).max(200)).min(1).max(VTP_PRINT_MAX).safeParse(rawIds);
+  if (!ids.success) return { ok: false, error: `Chọn từ 1 tới ${VTP_PRINT_MAX} đơn.` };
+  const db = await getDb();
+  const rows = await db.select({ orderId: schema.shipments.orderId, vtpOrderNumber: schema.shipments.vtpOrderNumber, stage: schema.shipments.stage, raw: schema.shipments.raw }).from(schema.shipments).where(inArray(schema.shipments.orderId, ids.data));
+  const numbers = rows.filter((r) => r.vtpOrderNumber && r.orderId && isManualOrderId(r.orderId) && carrierCreateOf(r.raw)?.state === "CREATED" && r.stage !== "CANCELLED" && !carrierCancelOf(r.raw)).map((r) => r.vtpOrderNumber!);
+  if (!numbers.length) return { ok: false, error: "Không đơn nào đã chọn có vận đơn Viettel Post do ERP tạo còn in được." };
+  const opened = await openCarrier(deps);
+  if (!opened.ok) return opened;
+  const unique = [...new Set(numbers)].slice(0, VTP_PRINT_MAX);
+  const res = await opened.client.printingCode(unique);
+  if (res.kind !== "OK" || !res.envelope.message) return { ok: false, error: `Không lấy được mã in: ${res.kind === "OK" ? "phản hồi trống" : res.message}` };
+  return { ok: true, message: `Mở ${unique.length} nhãn in`, url: vtpPrintUrl(res.envelope.message), count: unique.length };
+}
+
+/** Danh sách đơn có bật lối «hàng loạt Viettel Post» không: quyền + kết nối đang bật. Không giải mã gì. */
+export async function vtpBulkEnabled(user: SessionUser): Promise<boolean> {
+  return can(user, PERMISSION) && (await connectionIsActive(VTP_CARRIER_CONNECTOR));
 }

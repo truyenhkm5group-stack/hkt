@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
-import { cancelVtpShipmentCore, createVtpShipmentCore, discardVtpCreateCore, quoteVtpShipmentCore, vtpPrintLinkCore } from "@/lib/carriers/vtp-shipments";
+import { bulkCreateVtpShipmentsCore, bulkQuoteVtpCore, bulkVtpPrintLinkCore, cancelVtpShipmentCore, createVtpShipmentCore, discardVtpCreateCore, quoteVtpShipmentCore, vtpPrintLinkCore } from "@/lib/carriers/vtp-shipments";
 
 /**
  * ═══════════ SERVER ACTION — VẬN ĐƠN VIETTEL POST CỦA ĐƠN ERP (POS tự chủ) ═══════════
@@ -48,4 +48,25 @@ export async function discardVtpCreateAction(orderId: string, shipmentId: string
 export async function vtpPrintLinkAction(shipmentId: string) {
   const user = await requireUser();
   return vtpPrintLinkCore(user, shipmentId);
+}
+
+/** Hàng loạt (danh sách đơn): bảng cước tra bằng đơn đầu tiên tạo được. */
+export async function bulkQuoteVtpAction(orderIds: string[]) {
+  const user = await requireUser();
+  return bulkQuoteVtpCore(user, orderIds);
+}
+
+/** Hàng loạt: tạo tuần tự qua đúng lõi tạo một đơn; kết quả từng đơn. */
+export async function bulkCreateVtpShipmentsAction(orderIds: string[], input: unknown) {
+  const user = await requireUser();
+  const r = await bulkCreateVtpShipmentsCore(user, orderIds, input);
+  revalidatePath("/orders");
+  revalidatePath("/shipments");
+  return r;
+}
+
+/** Hàng loạt: một link in cho mọi vận đơn ERP tạo của các đơn đã chọn. */
+export async function bulkVtpPrintLinkAction(orderIds: string[]) {
+  const user = await requireUser();
+  return bulkVtpPrintLinkCore(user, orderIds);
 }
