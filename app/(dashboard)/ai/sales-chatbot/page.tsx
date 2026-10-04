@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { EmbedSnippet } from "@/components/sales-chat/embed-snippet";
+import { widgetSnippet } from "@/lib/sales-chatbot/widget";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
 import { PageHeader } from "@/components/page-header";
 import { SalesChatPanel } from "@/components/sales-chat/chat-panel";
@@ -133,7 +135,9 @@ export default async function SalesChatbotPage() {
                 </a>
                 {cfg.enabled ? "" : " — bot đang TẮT: trang báo «chưa mở chat»."}
               </p>
-            ) : (
+            ) : null}
+            {publicUrl && pub.url ? <EmbedSnippet snippet={widgetSnippet(pub.url)} /> : null}
+            {publicUrl ? null : (
               <p className="text-sm text-muted-foreground">
                 Trang chat công khai có sau khi ERP được xuất bản với tên miền con — <Link href="/setup" className="underline underline-offset-2">Thiết lập & xuất bản</Link>.
               </p>

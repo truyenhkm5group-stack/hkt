@@ -137,3 +137,38 @@ Sau:
 - Chi phí: Gemini 3.5 Flash-Lite đọc một ảnh khoảng 500 token vào + 100 token ra, cỡ 10 đồng mỗi ảnh.
 
 Mã: `lib/sales-chatbot/vision.ts` · `lib/ai/images.ts` · `describeCustomerImages` trong `lib/sales-chatbot/engine.ts`.
+## 9. Ô chat nhúng website của shop
+
+Shop có website riêng (Haravan, Sapo Web, WordPress, tự làm…) dán MỘT dòng — lấy ở trang Chatbot bán hàng, mục «Gắn ô chat
+vào website của shop»:
+
+```html
+<script src="https://<slug>.<miền ERP>/chat/widget.js" async></script>
+```
+
+- Góc màn hình hiện nút chat; bấm là mở khung `/chat/embed` (cùng lõi với trang `/chat`): giá / tồn đọc từ ERP, lên đơn,
+  chuyển nhân viên như mọi kênh.
+- Tuỳ chọn trên thẻ script: `data-color` (mã hex), `data-position="left"`, `data-label` (chữ cạnh nút).
+- Chỉ tổ chức ĐÃ XUẤT BẢN có bot đang bật mới hiện nút; còn lại script rỗng, không lỗi trên website.
+- An toàn:
+  - Caddy chỉ cho đúng `/chat/embed` nằm trong khung trang khác (`frame-ancestors *`); mọi đường khác giữ SAMEORIGIN.
+  - Script không đặt cookie, không gọi API trên website của shop; màu / chữ tuỳ chọn không chèn được mã.
+  - Cookie khách chat là `SameSite=None; Partitioned` (CHIPS): dùng được trong khung, nhưng khoá theo website đang nhúng.
+
+Mã: `lib/sales-chatbot/widget.ts` · `app/chat/widget.js/route.ts` · `app/chat/embed/page.tsx`.
+
+## 10. Nhập sản phẩm từ link website
+
+Ở `/products/import`, ngoài chọn tệp còn ô «Hoặc lấy từ website của shop»: dán link ⇒ máy chủ đọc sản phẩm ⇒ dựng tệp CSV đúng
+khuôn tệp mẫu ⇒ đi tiếp ĐÚNG các bước của trình nhập tệp (xem trước, ghép cột tự động, kiểm, nhập). Không có đường ghi thứ hai.
+
+Ba nguồn, thử theo thứ tự, KHÔNG gọi AI:
+1. `/products.json` — chuẩn Shopify (Haravan và nhiều nền tảng học theo): mỗi biến thể một dòng.
+2. WooCommerce Store API `/wp-json/wc/store/v1/products`.
+3. JSON-LD `schema.org/Product` trong chính trang được dán.
+
+Giá không đọc rõ ⇒ ô trống (chưa khai), không phải 0 đ. Không nguồn nào có ⇒ nói thẳng và gợi ý dùng tệp mẫu.
+
+An toàn (`lib/net/public-url.ts`): chỉ http / https cổng mặc định; tên miền phân giải ra địa chỉ riêng / nội bộ / siêu dữ liệu
+đám mây ⇒ từ chối TRƯỚC khi gửi request; chuyển hướng kiểm lại từng đích; trần 12 giây, 3 MB. Cùng cổng quyền với trình nhập
+tệp (`productCreateGate`).
