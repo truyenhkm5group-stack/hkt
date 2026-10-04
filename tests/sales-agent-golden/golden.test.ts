@@ -39,8 +39,15 @@ function invariants(t: Map<string, GoldenTranscript>) {
   assert.equal(handoff.final.status, "HANDOFF");
   assert.equal(handoff.turns[1].rounds.length, 0, "đã chuyển người ⇒ lượt sau KHÔNG gọi model");
 
+  assert.ok(handoff.turns[0].shown.length > 0, "web: chuyển người ⇒ khách nhận câu chuyển người, không im");
+  const fb = get("fanpage-chuyen-nguoi-im-lang");
+  assert.equal(fb.final.status, "HANDOFF");
+  assert.deepEqual(fb.turns[0].shown, [], "fanpage: chuyển người ⇒ bot IM, nhân viên trả lời trực tiếp (chủ shop chốt 01/10/2026)");
+
   const leak = get("ro-ri-chu-noi-bo");
   assert.ok(!leak.turns[0].shown.some((s) => /customer_confirmation|variant_id/.test(s)), "tên trường nội bộ không tới khách");
+  assert.ok(leak.turns[0].shown.length > 0, "chữ bị lọc hết ⇒ khách vẫn nhận câu dự phòng, không im");
+  assert.ok(early.turns[1].shown.length > 0, "máy chủ từ chối chốt ⇒ khách vẫn nhận một câu, không im");
 
   const test = get("khung-thu-khong-ghi");
   assert.equal(test.final.order, null, "khung THỬ không tạo đơn");
@@ -78,5 +85,5 @@ export async function testSalesAgentGolden() {
     );
   }
   assert.deepEqual(missing, [], "thiếu ảnh chụp — chạy npx tsx tests/sales-agent-golden/update.ts rồi đọc kỹ trước khi đưa vào kho");
-  console.log(`  ✓ hội thoại vàng: ${GOLDEN_CASES.length} hội thoại phát lại qua chatTurn khớp ảnh chụp (lời nhắc · chuỗi công cụ · kết quả máy chủ · trạng thái cuối); giá từ ERP, chặn chốt khi chưa đồng ý, chuyển người im model, khung thử không ghi, lọc chữ nội bộ, gói ngành đúng`);
+  console.log(`  ✓ hội thoại vàng: ${GOLDEN_CASES.length} hội thoại phát lại qua chatTurn khớp ảnh chụp (lời nhắc · chuỗi công cụ · kết quả máy chủ · trạng thái cuối); giá từ ERP, chặn chốt khi chưa đồng ý, chuyển người im model, web không im khách / fanpage chuyển người thì im, khung thử không ghi, lọc chữ nội bộ, gói ngành đúng`);
 }

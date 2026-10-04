@@ -41,7 +41,8 @@ export type StepCtx = {
 export type Step = (ctx: StepCtx) => AiBlock[];
 export type GoldenTurn = { say: string; ai: Step[] };
 export type GoldenShop = "food" | "fashion";
-export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: "WEB" | "TEST"; turns: GoldenTurn[] };
+export type GoldenChannel = "WEB" | "TEST" | "FANPAGE";
+export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: GoldenChannel; turns: GoldenTurn[] };
 
 let toolSeq = 0;
 export const say = (text: string): AiBlock => ({ type: "text", text });
@@ -151,7 +152,7 @@ export type GoldenTranscript = {
   key: string;
   title: string;
   shop: GoldenShop;
-  channel: "WEB" | "TEST";
+  channel: GoldenChannel;
   /** Lời nhắc hệ thống KHÁC NHAU theo thứ tự xuất hiện; mỗi vòng model trỏ vào một chỉ số. */
   prompts: string[];
   turns: {
@@ -201,8 +202,10 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
     const db = await getDb();
     setSalesChatProviderForTests(() => provider);
     try {
-      const visitorKey = c.channel === "WEB" ? visitorKeyOf(`hoi-thoai-vang-${c.key}-0123456789abcdef`) : null;
-      const conv = await openConversation(c.channel, c.channel === "WEB" ? { visitorKey } : { createdBy: ADMIN(spec.code) });
+      // Web / fanpage là kênh công khai: hội thoại khoá theo mã khách. Fanpage ở đây KHÔNG qua Pancake — chỉ chạy lượt của engine
+      // trên kênh FANPAGE để khoá các luật riêng của kênh nhắn tin (vd chuyển người thì bot im).
+      const visitorKey = c.channel === "TEST" ? null : visitorKeyOf(`hoi-thoai-vang-${c.key}-0123456789abcdef`);
+      const conv = await openConversation(c.channel, c.channel === "TEST" ? { createdBy: ADMIN(spec.code) } : { visitorKey });
       const turns: GoldenTranscript["turns"] = [];
       let seen = 0;
       for (const t of c.turns) {
