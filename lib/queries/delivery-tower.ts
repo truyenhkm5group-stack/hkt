@@ -288,7 +288,7 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
           from shipments s
           left join orders o on o.id = s.order_id
           left join lateral (
-            select max(e.occurred_at) filter (where e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION')) as moc,
+            select max(e.occurred_at) filter (where e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','GHN_WEBHOOK','GHTK_WEBHOOK')) as moc,
                    count(*) filter (where e.normalized_stage = 'DELIVERY_FAILED')::int as lan_hut,
                    (array_agg(e.note order by e.occurred_at desc) filter (where e.note <> ''))[1] as ghi_chu,
                    bool_or(e.normalized_stage in ${LEFT_WAREHOUSE_EVENT_STAGES}) as co_chang_sau_lay

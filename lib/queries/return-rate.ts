@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
-import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_EVENT_SOURCES, FINISHED_OUTCOMES_SQL, OTHER_CARRIER_DOCUMENT_SOURCES, RETURNED_OUTCOMES_SQL, sqlSourceList, VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
+import { finalStatuses, type FinalKind } from "@/lib/constants/carrier-status";
 import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
@@ -13,7 +14,6 @@ import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 import { MANUAL_ORDER_DELIVERED, MANUAL_ORDER_PAID, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
-const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
 const o = schema.orders;
@@ -56,25 +56,44 @@ const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)
 const VTP_FINAL_EVENT = (codes: string, leg?: "OUTBOUND" | "RETURN") => sql`exists (
   select 1 from shipment_events fe
   where fe.shipment_id = ${s.id}
-    and fe.source in (${sql.raw(DOC_SOURCES)})
+    and fe.source in (${sql.raw(VTP_DOCUMENT_SOURCES_SQL)})
     and fe.status in (${sql.raw(codes)})
     ${leg ? sql`and fe.leg_type = ${leg}` : sql``}
 )`;
 
-/** Vận đơn đã có kết luận từ ĐVVC (một trong 6 mã cuối) — dùng để biết có được phép bỏ qua suy luận tiền không. */
-export const HAS_VTP_FINAL = sql`(${VTP_FINAL_EVENT("'501','503','504','101','107','201'")})`;
-/** Giao tới tay khách theo chứng từ ĐVVC: mã 501 của CHIỀU ĐI. */
-const VTP_DELIVERED = sql`(${VTP_FINAL_EVENT("'501'", "OUTBOUND")})`;
-/** Hoàn theo chứng từ ĐVVC: 504, hoặc 501 của chiều hoàn (phát thành công về shop), hoặc 503 tiêu huỷ. */
-const VTP_RETURNED = sql`(${VTP_FINAL_EVENT("'504','503'")} or ${VTP_FINAL_EVENT("'501'", "RETURN")})`;
+/**
+ * MÃ CUỐI CỦA HÃNG KHÁC (GHN · GHTK — chủ shop chốt 04/10/2026, ORDER_OUTCOME.md mục 4.1). Danh sách mã dựng từ ĐÚNG bảng
+ * `lib/constants/carrier-status.ts` (hằng số trong mã, không phải dữ liệu người gõ) — không chép mã sang SQL bằng tay. Mỗi
+ * mã chỉ đọc trên sự kiện của CHÍNH hãng đó: số `5` của GHTK không phải mã nào của Viettel Post.
+ */
+const otherFinalSql = (kind: FinalKind) =>
+  OTHER_CARRIER_DOCUMENT_SOURCES.map((src) => {
+    const codes = finalStatuses(src, kind);
+    return codes.length ? `(fe.source = '${src}' and fe.status in (${codes.map((c) => `'${c.replace(/'/g, "''")}'`).join(",")}))` : null;
+  })
+    .filter((x): x is string => x !== null)
+    .join(" or ") || "false";
+const OTHER_FINAL_EVENT = (kind: FinalKind) => sql`exists (
+  select 1 from shipment_events fe
+  where fe.shipment_id = ${s.id}
+    and (${sql.raw(otherFinalSql(kind))})
+)`;
+
+/** Vận đơn đã có kết luận từ ĐVVC (một trong 6 mã cuối của VTP, hoặc mã cuối của hãng khác) — dùng để biết có được phép bỏ qua suy luận tiền không. */
+export const HAS_VTP_FINAL = sql`(${VTP_FINAL_EVENT("'501','503','504','101','107','201'")} or ${OTHER_FINAL_EVENT("DELIVERED")} or ${OTHER_FINAL_EVENT("RETURNED")} or ${OTHER_FINAL_EVENT("CANCELLED")})`;
+/** Giao tới tay khách theo chứng từ ĐVVC: mã 501 của CHIỀU ĐI, hoặc mã «đã giao» của hãng khác. */
+const VTP_DELIVERED = sql`(${VTP_FINAL_EVENT("'501'", "OUTBOUND")} or ${OTHER_FINAL_EVENT("DELIVERED")})`;
+/** Hoàn theo chứng từ ĐVVC: 504, hoặc 501 của chiều hoàn (phát thành công về shop), hoặc 503 tiêu huỷ — hoặc mã hoàn / mất / huỷ hàng của hãng khác. */
+const VTP_RETURNED = sql`(${VTP_FINAL_EVENT("'504','503'")} or ${VTP_FINAL_EVENT("'501'", "RETURN")} or ${OTHER_FINAL_EVENT("RETURNED")})`;
 /**
  * Mã 503 = TIÊU HUỶ theo yêu cầu khách hàng. Hàng bị tiêu huỷ nên KHÔNG BAO GIỜ quay về kho —
  * sổ kho phải loại khỏi "hoàn chờ nhận", nếu không con số này treo vĩnh viễn và tồn kho thiếu.
+ * Hãng khác: mất / hư hỏng / tiêu huỷ / bồi hoàn — cùng hệ quả.
  */
-export const VTP_DESTROYED = sql`(${VTP_FINAL_EVENT("'503'")})`;
+export const VTP_DESTROYED = sql`(${VTP_FINAL_EVENT("'503'")} or ${OTHER_FINAL_EVENT("DESTROYED")})`;
 
 /** Huỷ theo chứng từ ĐVVC. */
-const VTP_CANCELLED = sql`(${VTP_FINAL_EVENT("'101','107','201'")})`;
+const VTP_CANCELLED = sql`(${VTP_FINAL_EVENT("'101','107','201'")} or ${OTHER_FINAL_EVENT("CANCELLED")})`;
 
 /**
  * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ giao thành công, lương, COD).

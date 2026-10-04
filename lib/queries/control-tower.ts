@@ -5,7 +5,7 @@ import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_ORDER, type IssueEntity, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
-import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_DOCUMENT_SOURCES, sqlSourceList, VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
 import { SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 
 /**
@@ -176,7 +176,7 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           count(*)::text || ' sự kiện mang mã này' as evidence,
           max(e.occurred_at) as at, min(e.shipment_id) as entity_id
         from shipment_events e
-        where e.source in (${sql.raw(DOC_SOURCES)}) and (e.normalized_stage is null or e.normalized_stage = 'UNKNOWN')
+        where e.source in (${sql.raw(VTP_DOCUMENT_SOURCES_SQL)}) and (e.normalized_stage is null or e.normalized_stage = 'UNKNOWN')
         group by e.status`;
     case "INVALID_EVENT_ORDER":
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,

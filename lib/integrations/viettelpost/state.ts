@@ -4,6 +4,7 @@ import type { ShipmentStage } from "@/db/schema";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { VTP_FINAL_STATUSES } from "@/lib/constants/viettelpost";
 import { eventStatusCode, resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
+import { carrierStatusMeta, isOtherCarrierSource } from "@/lib/constants/carrier-status";
 
 const s = schema.shipments;
 const e = schema.shipmentEvents;
@@ -59,7 +60,7 @@ export { CARRIER_EVENT_SOURCES };
 /** Nguồn nào đáng tin hơn khi hai sự kiện cùng mốc thời gian. Cao hơn = thắng. */
 // Cùng một mốc thời gian thì chứng từ MÁY thắng bản chép tay: người chép có thể nhầm, hệ thống thì
 // không. Khác mốc thì luôn xét theo thời gian trước — bản chép tay không đóng băng vòng đời.
-const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15, VTP_UI_MANUAL_VERIFICATION: 12 };
+const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, GHN_WEBHOOK: 40, GHTK_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15, VTP_UI_MANUAL_VERIFICATION: 12 };
 
 /** Các mốc "lần đầu đạt tới" — giữ nguyên kể cả khi sau đó vận đơn chuyển sang trạng thái khác. */
 const REACHED_PICKUP: ShipmentStage[] = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];
@@ -98,8 +99,14 @@ export async function deriveShipmentState(db: Db, shipmentId: string): Promise<D
   // luồng nhập liệu cho ra cùng một kết luận cho cùng một trạng thái của ĐVVC.
   const usable = rows
     .map((r) => {
-      const resolved = resolveVtpStatus({ code: eventStatusCode(r.status), text: r.statusName || r.status });
-      const stage = onReturnLeg(r.legType, (r.normalizedStage ?? resolved.stage) as ShipmentStage);
+      // Hãng khác Viettel Post (GHN · GHTK): chặng tra theo bảng của CHÍNH hãng đó — KHÔNG dịch bằng bộ dịch Viettel Post
+      // (số `5` của GHTK không phải mã nào của VTP). Mã lạ ⇒ UNKNOWN ⇒ không dựng chặng.
+      const otherCarrier = isOtherCarrierSource(r.source);
+      const meta = otherCarrier ? carrierStatusMeta(r.source, r.status) : null;
+      const resolved = otherCarrier
+        ? { stage: (meta?.stage ?? "UNKNOWN") as ShipmentStage, final: meta?.final ?? false, name: meta?.name ?? r.statusName }
+        : resolveVtpStatus({ code: eventStatusCode(r.status), text: r.statusName || r.status });
+      const stage = onReturnLeg(r.legType, (otherCarrier ? resolved.stage : (r.normalizedStage ?? resolved.stage)) as ShipmentStage);
       return { ...r, stage, resolved };
     })
     .filter((r) => CARRIER_SOURCES.has(r.source) && r.stage !== "UNKNOWN" && r.occurredAt instanceof Date && Number.isFinite(r.occurredAt.getTime()));
@@ -114,15 +121,20 @@ export async function deriveShipmentState(db: Db, shipmentId: string): Promise<D
     return b.createdAt.getTime() - a.createdAt.getTime();
   })[0];
 
-  const code = eventStatusCode(winner.status);
+  const otherCarrier = isOtherCarrierSource(winner.source);
+  // Cột `vtp_status` là MÃ SỐ của Viettel Post — sự kiện hãng khác để trống (cả `vtp_status_name`, xem dưới).
+  const code = otherCarrier ? null : eventStatusCode(winner.status);
   // Mã kết thúc của chiều đi không có nghĩa là chiều hoàn đã xong: 501 trên chiều hoàn nghĩa là
   // hàng đã về tới shop (kết thúc), nhưng 500/506 trên chiều hoàn thì vẫn đang trên đường về.
-  const finalByCode = code !== null ? VTP_FINAL_STATUSES.has(code) : winner.resolved.final;
+  const finalByCode = otherCarrier ? winner.resolved.final : code !== null ? VTP_FINAL_STATUSES.has(code) : winner.resolved.final;
   return {
     stage: winner.stage,
-    isFinal: winner.legType === "RETURN" ? winner.stage === "RETURNED" : finalByCode,
+    // Hãng khác: bảng mã của hãng đã nói rõ mã nào là cuối, kể cả trên chiều hoàn (`returned` = về tới shop).
+    isFinal: otherCarrier ? finalByCode : winner.legType === "RETURN" ? winner.stage === "RETURNED" : finalByCode,
     vtpStatus: code,
-    vtpStatusName: winner.statusName || winner.resolved.name,
+    // `vtp_status_name` là lời khai CỦA VIETTEL POST — bộ phân loại trạng thái con đọc nó bằng luật chữ của VTP. Hãng khác để
+    // trống (chữ của hãng vẫn nằm nguyên ở `shipment_events`) ⇒ trạng thái con rơi về theo chặng, không đọc nhầm bảng.
+    vtpStatusName: otherCarrier ? "" : winner.statusName || winner.resolved.name,
     vtpStatusDate: winner.occurredAt,
     vtpLocation: winner.location,
     vtpNote: winner.note,

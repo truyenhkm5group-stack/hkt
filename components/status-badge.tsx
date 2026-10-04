@@ -92,7 +92,8 @@ export function OrderStageBadge({ stage, label, className, showDimension = true 
 }
 
 export function ShipmentStageBadge({ stage, label, className, showDimension = true }: { stage: ShipmentStage; label?: string; className?: string; showDimension?: boolean }) {
-  const text = label ?? SHIPMENT_STAGE_LABEL[stage];
+  // Nhãn RỖNG không bao giờ có nghĩa (vận đơn hãng khác để trống tên trạng thái Viettel Post) ⇒ rơi về tên chặng chuẩn.
+  const text = label || SHIPMENT_STAGE_LABEL[stage];
   return (
     <span className={cn(base, shipmentTone[stage] ?? shipmentTone.UNKNOWN, className)} title={dimensionTitle("shipment_status", text)}>
       {showDimension ? <DimensionMark dimension="shipment_status" /> : <span className="size-1.5 rounded-full bg-current opacity-70" />}

@@ -35,6 +35,11 @@ type Setup = {
   returnLeg?: boolean;
   /** Mốc lấy hàng đã lưu trên vận đơn — một trong ba bậc chứng cứ bàn giao. */
   pickedUpAt?: Date | null;
+  /**
+   * Sự kiện của HÃNG KHÁC (mục 4.1): vận đơn GHN / GHTK không có mã Viettel Post — chỉ mã tra cứu của hãng. `stage` là
+   * chặng chuẩn hoá ghi lúc nhận (null ⇒ mã lạ, không dựng chặng).
+   */
+  carrierEvents?: { source: "GHN_WEBHOOK" | "GHTK_WEBHOOK"; status: string; stage: string | null; leg?: "OUTBOUND" | "RETURN" | "UNKNOWN" }[];
 };
 
 async function build(db: Db, s: Setup) {
@@ -51,8 +56,9 @@ async function build(db: Db, s: Setup) {
     .insert(schema.shipments)
     .values({
       orderId: id,
-      vtpOrderNumber: code,
+      vtpOrderNumber: s.carrierEvents ? null : code,
       trackingCode: code,
+      carrier: s.carrierEvents ? (s.carrierEvents[0]?.source === "GHTK_WEBHOOK" ? "GHTK" : "GHN") : "Viettel Post",
       stage: (s.shipmentStage ?? "IN_TRANSIT") as never,
       codAmount: s.codAmount ?? 0,
       codCollected: s.codCollected ?? 0,
@@ -64,6 +70,21 @@ async function build(db: Db, s: Setup) {
     })
     .returning({ id: schema.shipments.id });
 
+  for (const [i, e] of (s.carrierEvents ?? []).entries()) {
+    await db.insert(schema.shipmentEvents).values({
+      shipmentId: ship.id,
+      source: e.source,
+      status: e.status,
+      statusName: e.status,
+      // Sự kiện ĐẦU (chờ lấy / đã lấy ⇒ mốc bàn giao) năm 2025: NGOÀI cửa sổ nhìn lại của mô hình giao dự phóng — kiện kết
+      // thúc sau vài giờ nằm TRONG cửa sổ kéo «độ chín» đo được xuống (tests/projected-delivery.test.ts). Sự kiện SAU (kết cục)
+      // tháng 9/2026: mốc hoàn dựng lại từ đó không được cũ hơn dữ liệu mẫu của hàng đợi nhận hàng hoàn
+      // (tests/return-receive-selector.test.ts). Thứ tự giữa các sự kiện giữ nguyên ⇒ kết quả đơn không đổi.
+      occurredAt: i === 0 ? new Date(2025, 8, 1, 10, 0, 0) : new Date(2026, 8, 1, 10 + i, 0, 0),
+      normalizedStage: (e.stage ?? null) as never,
+      legType: e.leg ?? "OUTBOUND",
+    });
+  }
   for (const [i, e] of (s.vtpEvents ?? []).entries()) {
     await db.insert(schema.shipmentEvents).values({
       shipmentId: ship.id,
@@ -154,6 +175,31 @@ export async function testOrderOutcomeContract(db: Db) {
     { shipmentStage: "DELIVERED", codAmount: 499_000, returnLeg: true, vtpEvents: [{ status: "501", stage: "DELIVERED", leg: "OUTBOUND" }] },
     "RETURNED",
   );
+
+  // ───────── Hãng khác Viettel Post — mục 4.1 (chủ shop chốt 04/10/2026) ─────────
+  const ghn = (status: string, stage: string | null, leg: "OUTBOUND" | "RETURN" | "UNKNOWN" = "OUTBOUND") => ({ source: "GHN_WEBHOOK" as const, status, stage, leg });
+  const ghtk = (status: string, stage: string | null, leg: "OUTBOUND" | "RETURN" | "UNKNOWN" = "OUTBOUND") => ({ source: "GHTK_WEBHOOK" as const, status, stage, leg });
+  await check("GHN delivered ⇒ GIAO THÀNH CÔNG", { shipmentStage: "DELIVERED", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("delivered", "DELIVERED")] }, "DELIVERED");
+  await check("GHN returned ⇒ HOÀN", { shipmentStage: "RETURNED", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("returned", "RETURNED", "RETURN")] }, "RETURNED");
+  await check("GHN lost ⇒ HOÀN (hàng không về kho)", { shipmentStage: "RETURNED", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("lost", "RETURNED", "UNKNOWN")] }, "RETURNED");
+  // Như ca huỷ Viettel Post sẵn có: đơn bị hãng huỷ thì đơn cũng huỷ — đơn còn hiệu lực mà vận đơn bị huỷ nằm ngoài
+  // cả hai nhóm «đã kết thúc / đang chạy» của mọi báo cáo (xem docs/verticals/pos-tu-chu.md «chưa nối»).
+  await check("GHN cancel ⇒ HUỶ", { orderStage: "CANCELLED", shipmentStage: "CANCELLED", carrierEvents: [ghn("ready_to_pick", "PENDING"), ghn("cancel", "CANCELLED")] }, "CANCELLED");
+  await check("GHN chưa lấy hàng ⇒ CHỜ LẤY, không phải đang giao", { shipmentStage: "PENDING", carrierEvents: [ghn("ready_to_pick", "PENDING")] }, "AWAITING_PICKUP");
+  await check("GHN đang giao + đã thu 499K vẫn là ĐANG GIAO (tiền không suy ra giao)", { shipmentStage: "OUT_FOR_DELIVERY", codCollected: 499_000, codStatus: "PAID_TO_BANK", statementRef: "BK-G1", carrierEvents: [ghn("picked", "PICKED_UP"), ghn("delivering", "OUT_FOR_DELIVERY")] }, "IN_TRANSIT");
+  await check("GHN delivered + xác minh 49.999 ⇒ HOÀN (ngưỡng tiền giữ nguyên)", { shipmentStage: "DELIVERED", codAmount: 499_000, codCollected: 49_999, statementRef: "BK-G2", carrierEvents: [ghn("picked", "PICKED_UP"), ghn("delivered", "DELIVERED")] }, "RETURNED");
+  await check("GHN exception KHÔNG kết luận (không dựng chặng)", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("exception", null, "UNKNOWN")] }, "IN_TRANSIT");
+  await check("GHTK 5 ⇒ GIAO THÀNH CÔNG", { shipmentStage: "DELIVERED", codAmount: 499_000, carrierEvents: [ghtk("3", "PICKED_UP"), ghtk("5", "DELIVERED")] }, "DELIVERED");
+  await check("GHTK 21 ⇒ HOÀN", { shipmentStage: "RETURNED", codAmount: 499_000, carrierEvents: [ghtk("3", "PICKED_UP"), ghtk("21", "RETURNED", "RETURN")] }, "RETURNED");
+  await check("GHTK -1 ⇒ HUỶ", { orderStage: "CANCELLED", shipmentStage: "CANCELLED", carrierEvents: [ghtk("1", "PENDING"), ghtk("-1", "CANCELLED")] }, "CANCELLED");
+  // MÃ CUỐI THẮNG ẢNH CHỤP CŨ — như 501 / 504 / 107 của Viettel Post: ảnh chụp `shipments.stage` còn «đang giao» (chưa dựng
+  // lại) nhưng chứng từ cuối của hãng đã có ⇒ kết luận theo chứng từ, không theo ảnh chụp.
+  await check("ảnh chụp cũ + GHN delivered ⇒ GIAO THÀNH CÔNG theo chứng từ", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("delivered", "DELIVERED")] }, "DELIVERED");
+  await check("ảnh chụp cũ + GHN returned ⇒ HOÀN theo chứng từ", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("returned", "RETURNED", "RETURN")] }, "RETURNED");
+  await check("ảnh chụp cũ + GHTK -1 ⇒ HUỶ theo chứng từ", { orderStage: "CANCELLED", shipmentStage: "PENDING", carrierEvents: [ghtk("1", "PENDING"), ghtk("-1", "CANCELLED")] }, "CANCELLED");
+  await check("ảnh chụp cũ + GHTK 6 ⇒ GIAO THÀNH CÔNG theo chứng từ", { shipmentStage: "OUT_FOR_DELIVERY", codAmount: 499_000, carrierEvents: [ghtk("3", "PICKED_UP"), ghtk("6", "DELIVERED")] }, "DELIVERED");
+  // Mã của hãng này KHÔNG BAO GIỜ đọc bằng bảng của hãng kia: chuỗi «501» trên sự kiện GHN không phải mã Viettel Post.
+  await check("sự kiện GHN mang chuỗi 501 KHÔNG phải mã giao thành công của Viettel Post", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("501", null, "OUTBOUND")] }, "IN_TRANSIT");
 
   // ───────── HAI CA THẬT chủ shop đã chỉ ra hai lần — không được ghi nhận giống nhau ─────────
   // PKE1508909064: VTP ghi giao thành công, thu hộ 849.000, KHÔNG sửa doanh thu, KHÔNG có vận đơn

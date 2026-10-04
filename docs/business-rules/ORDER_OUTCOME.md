@@ -10,7 +10,7 @@
 
 | Chiều | Câu hỏi | Nguồn sự thật | KHÔNG được suy từ |
 |---|---|---|---|
-| **Logistics** | Hàng đang ở đâu, đã tới tay khách chưa? | Sự kiện Viettel Post (`shipment_events`, nguồn `VTP_*`) | tiền, COD, `cod_status`, trạng thái Pancake |
+| **Logistics** | Hàng đang ở đâu, đã tới tay khách chưa? | Sự kiện ĐVVC (`shipment_events`): Viettel Post (nguồn `VTP_*`); GHN / GHTK (nguồn `GHN_WEBHOOK` / `GHTK_WEBHOOK`, mục 4.1) | tiền, COD, `cod_status`, trạng thái Pancake |
 | **Payment / COD** | Tiền đã thu bao nhiêu, đã về tài khoản chưa? | Bảng kê COD, sao kê ngân hàng | trạng thái giao hàng |
 | **Inventory** | Hàng có nằm trong kho bán được không? | Kho xác nhận nhận hàng hoàn (`return_received_at`) | trạng thái `RETURNED` của ĐVVC |
 
@@ -46,17 +46,18 @@
 
 ## 3. Thứ tự nguồn tin (cao xuống thấp)
 
-1. **Mã trạng thái cuối của Viettel Post** kèm cờ chiều — xem bảng ở mục 5.
+1. **Mã trạng thái cuối của ĐVVC** — Viettel Post kèm cờ chiều (mục 4, 5); GHN / GHTK theo bảng mục 4.1.
 2. **Trạng thái vận đơn dựng từ hành trình** (`lib/integrations/viettelpost/state.ts`): sự kiện mới
-   nhất theo **mốc thời gian của ĐVVC**, chỉ tính nguồn `VTP_WEBHOOK / VTP_IMPORT / VTP_POLL / MANUAL`.
-3. **Quy tắc tiền** — CHỈ khi vận đơn không có bất kỳ chứng từ nào từ Viettel Post.
+   nhất theo **mốc thời gian của ĐVVC**, chỉ tính nguồn `VTP_WEBHOOK / VTP_IMPORT / VTP_POLL / MANUAL`
+   và `GHN_WEBHOOK / GHTK_WEBHOOK`.
+3. **Quy tắc tiền** — CHỈ khi vận đơn không có bất kỳ chứng từ nào từ ĐVVC.
 
 Bản sao hành trình từ Pancake **không** được quyền kết luận: mốc thời gian của nó là giờ Pancake
 ghi nhận, không phải giờ sự kiện của ĐVVC.
 
 ## 4. Mã trạng thái cuối theo tài liệu webhook chính thức
 
-Chỉ sáu mã là trạng thái cuối: `101 · 107 · 201 · 501 · 503 · 504`.
+Viettel Post: chỉ sáu mã là trạng thái cuối: `101 · 107 · 201 · 501 · 503 · 504`. Hãng khác: mục 4.1.
 
 | Mã + cờ | Nghĩa thật | Kết quả đơn |
 |---|---|---|
@@ -65,6 +66,33 @@ Chỉ sáu mã là trạng thái cuối: `101 · 107 · 201 · 501 · 503 · 504
 | `504` | chuyển trả người gửi | RETURNED |
 | `503` | **tiêu huỷ** theo yêu cầu khách | RETURNED (hàng KHÔNG về kho) |
 | `101 / 107 / 201` | huỷ | CANCELLED |
+
+### 4.1. Hãng khác Viettel Post — GHN, GHTK (chủ shop chốt 04/10/2026)
+
+> **Quyết định của chủ shop, 04/10/2026** (hỏi trực tiếp khi nối GHN / GHTK cho «POS tự chủ»): «Có, như Viettel Post» —
+> trạng thái cuối của GHN / GHTK được tính là chứng từ để kết luận kết quả đơn (giao thành công / hoàn / huỷ), như mã cuối
+> của Viettel Post. Ngưỡng tiền 50K / 100K, «tiền không suy ra giao hàng» và «hàng hoàn chờ kho xác nhận» giữ nguyên.
+
+Phạm vi: vận đơn ERP tạo bằng tài khoản GHN / GHTK của chính tổ chức (`docs/verticals/pos-tu-chu.md`), sự kiện đến THẲNG
+từ webhook của hãng (nguồn `GHN_WEBHOOK` / `GHTK_WEBHOOK`). Mã của mỗi hãng chỉ đọc trên sự kiện của CHÍNH hãng đó, và
+KHÔNG BAO GIỜ dịch bằng bộ dịch Viettel Post. Bảng duy nhất trong mã: `lib/constants/carrier-status.ts`.
+
+| Hãng | Mã cuối | Nghĩa (tài liệu chính thức của hãng) | Kết quả đơn |
+|---|---|---|---|
+| GHN | `delivered` | giao hàng thành công | **DELIVERED** |
+| GHN | `returned` | đã trả hàng về người gửi | RETURNED |
+| GHN | `lost` · `damage` · `scrap` | mất · hư hỏng · tiêu huỷ | RETURNED (hàng KHÔNG về kho — như `503`) |
+| GHN | `cancel` | huỷ | CANCELLED |
+| GHN | `exception` | đơn ngoại lệ, cần xử lý tay | **không kết luận** — sự kiện được lưu, không dựng chặng |
+| GHTK | `5` · `6` | đã giao (chưa / đã đối soát) | **DELIVERED** |
+| GHTK | `21` · `11` | đã trả hàng · đã đối soát công nợ trả hàng | RETURNED |
+| GHTK | `13` | bồi hoàn (hàng mất) | RETURNED (hàng KHÔNG về kho — như `503`) |
+| GHTK | `-1` | huỷ | CANCELLED |
+
+Mã không có trong bảng ⇒ chặng `UNKNOWN`: lưu nguyên văn, không kết luận. Mã chưa cuối dựng chặng hành trình theo cùng
+bảng (chờ lấy / đã lấy / đang giao / giao thất bại / đang hoàn). «Lấy hàng thất bại / hoãn lấy» là `PENDING` — KHÔNG phải
+mốc bàn giao (AGENTS mục 41). Tiền thu hộ của GHN / GHTK đi theo chứng từ tiền như mọi hãng — trạng thái «đã đối soát»
+(`6` của GHTK) KHÔNG phải số thực thu.
 
 ## 5. Hàng đã quay về dù ĐVVC ghi "phát thành công"
 

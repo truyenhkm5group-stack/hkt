@@ -20,7 +20,7 @@ import { applyStatusFacet, statusLabelOverrides } from "@/components/metadata/ru
 import { objectDef } from "@/lib/constants/object-registry";
 import { getListMetadata, getSystemStatusOptions, listCustomValuesFor } from "@/lib/queries/metadata-lists";
 import { getBrandCopy } from "@/lib/branding/service";
-import { vtpBulkEnabled } from "@/lib/carriers/vtp-shipments";
+import { bulkCarriers } from "@/lib/carriers/engine";
 
 export const metadata = { title: "Đơn hàng" };
 
@@ -38,8 +38,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const [{ rows, total, pageCount }, facets, summary, meta, stageOptions, copy, createGate] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params), getListMetadata("order", "default", user), getSystemStatusOptions("order", "stage"), getBrandCopy(user), manualOrderGate(user)]);
   // Phí giao đồng giá: chỉ tổ chức tạo đơn tay + người cấu hình được.
   const deliveryFee = createGate.allowed && can(user, "settings:manage") ? { fee: await loadManualDeliveryFee(), autoConfirm: await loadAutoConfirmComplete() } : null;
-  // Tạo / in vận đơn Viettel Post hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + kết nối đang bật.
-  const vtpBulk = createGate.allowed && (await vtpBulkEnabled(user));
+  // Tạo / in vận đơn hàng loạt (POS tự chủ): chỉ tổ chức tạo đơn tay + quyền vận đơn + hãng có kết nối đang bật.
+  const carrierBulk = createGate.allowed ? await bulkCarriers(user) : [];
   const { customValues, userNames } = await listCustomValuesFor("order", meta, rows.map((r) => r.id), user);
   const stageLabels = statusLabelOverrides(objectDef("order")?.fields.find((f) => f.key === "stage")?.options ?? [], stageOptions);
   const stageFacet = applyStatusFacet(facets.stages, stageOptions, params.filters.stage ?? []);
@@ -118,7 +118,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         ]}
         resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
-      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} vtpBulk={vtpBulk} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
+      <OrdersTable rows={rows} pageCount={pageCount} total={total} stageLabels={stageLabels} carrierBulk={carrierBulk} meta={meta ? { listView: meta.schema, customFields: meta.customFields, customValues, userNames } : undefined} />
     </div>
   );
 }
