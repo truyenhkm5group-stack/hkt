@@ -166,8 +166,8 @@ function testPure() {
   assert.equal(step("CATALOG_IMPORTED").medianDaysFromSignup, 3);
   assert.equal(step("FIRST_AI_REPLY").reached, 2);
   assert.equal(step("FIRST_AI_REPLY").medianDaysFromSignup, null, "2 tổ chức < ngưỡng 3 ⇒ trung vị null");
-  assert.equal(step("FIRST_DELIVERED_AI_ORDER").reached, null, "mốc chưa đo được ⇒ null, không phải 0/3");
-  assert.ok(step("FIRST_DELIVERED_AI_ORDER").missingWhat);
+  assert.equal(step("FIRST_DELIVERED_AI_ORDER").reached, 0, "mốc đo được (ORDER_OUTCOME) mà chưa tổ chức nào tới ⇒ 0/3 thật");
+  assert.equal(step("FIRST_DELIVERED_AI_ORDER").availability, "MEASURED");
   assert.equal(median([5, 1, 3]), 3);
   assert.equal(median([1, 2, 3, 4]), 2.5);
 

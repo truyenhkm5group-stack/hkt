@@ -47,12 +47,12 @@ Phát lại hội thoại cũ và bốn chế độ vận hành pilot (nhánh `c
 | 20 | Owner Cockpit | ĐANG GỘP | #533 `/platform/saas` | — |
 | 21 | Kinh tế từng tenant | ĐANG GỘP | #533 cột MRR · AI nền tảng trả · đóng góp | Hạ tầng / hỗ trợ chưa phân bổ (chưa có căn cứ) |
 | 22 | AI usage / cost được đo | ĐẠT | `platform_ai_usage` (0176) theo tổ chức × tính năng × nguồn | — |
-| 23 | Time-to-Value | ĐANG GỘP | #533 mốc kích hoạt | Mốc «đơn AI giao thành công đầu tiên»: chờ #522 |
+| 23 | Time-to-Value | ĐANG GỘP | #533 mốc kích hoạt; mốc «đơn AI giao thành công đầu tiên» qua `ORDER_OUTCOME` (nhánh `claude/ai-sales-e2e`) | — |
 | 24 | Historical Replay / Evaluation | ĐANG GỘP | nhánh `claude/ai-sales-replay` + `22_HISTORICAL_REPLAY.md` | Nguồn lịch sử Pancake (v2); nối kết cục đơn |
 | 25 | Billing-ready | ĐẠT | #454 thu phí, #485 mua thêm, gói + hạn mức (`lib/entitlements`) | Tài khoản nhận tiền: HUMAN GATE |
 | 26–27 | Khách #3 / #4 không fork mã | ĐẠT | `/start` tự đăng ký (#497, #504), mẫu ngành, module theo tổ chức | — |
 | 28 | Onboarding chuẩn không cần thao tác CSDL tay | ĐẠT | `/start` tạo tổ chức + CSDL qua `provisionOrganization` | — |
-| 29 | E2E then chốt pass | MỘT PHẦN | `self-service-journey` (khách → bot → đơn), `sales-events` (#522) | Một bài đi trọn khách → AI → đơn → giao → phân tích → ROI sau khi #522 gộp |
+| 29 | E2E then chốt pass | ĐANG GỘP | `tests/e2e-ai-sales-platform.test.ts`: tin khách → AI → đơn thật → giao (`ORDER_OUTCOME`) → Hiệu quả + ROI → mốc kích hoạt → sổ dùng → Owner Cockpit | Đường người tương đương để so (cần M8) |
 | 30 | CI gates pass | ĐẠT | Mọi PR gộp qua `gates` (typecheck · lint · test hai lượt · build) | — |
 | 31 | Smoke production sau release | ĐẠT | Workflow deploy chạy `scripts/smoke.ts`; trang mới phải có trong danh sách (`smoke-coverage`) | — |
 | 32 | Chiến lược migration / backfill / lùi | ĐẠT | `MIGRATION_PLAN.md`; mỗi PR ghi cách lùi; `migration:renumber` | — |

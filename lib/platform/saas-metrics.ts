@@ -286,10 +286,8 @@ export const MILESTONE_SPECS: Record<ActivationMilestone, MilestoneSpec> = {
   FIRST_DELIVERED_AI_ORDER: {
     key: "FIRST_DELIVERED_AI_ORDER",
     label: "Đơn AI giao thành công đầu tiên",
-    source: "—",
-    availability: "UNAVAILABLE",
-    missingWhat:
-      "Kết cục giao hàng của tổ chức khách chưa có MỘT định nghĩa chung đọc được từ mặt phẳng điều khiển: ORDER_OUTCOME cần shipments (Viettel Post), đơn tay của khách đi luồng trạng thái riêng. Mở khi màn «Hiệu quả» của AI bán hàng (#522) xuất hàm kết cục theo đơn dùng chung.",
+    source: "orders.created_at của đơn AI (gắn sales_chat_conversations.order_id, kênh thật) đầu tiên có ORDER_OUTCOME = DELIVERED — mốc ĐẶT của đơn ấy, không phải mốc giao",
+    availability: "MEASURED",
   },
 };
 
