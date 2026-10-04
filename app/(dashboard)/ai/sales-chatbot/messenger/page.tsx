@@ -36,7 +36,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const connected = view.status === "ACTIVE" && view.page;
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage — không cần Pancake" />
+      <PageHeader eyebrow="AI · Chatbot bán hàng" title="Messenger trực tiếp" description="Bot trả lời tin nhắn fanpage và Instagram — không cần Pancake" />
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
       {one("ok") ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">Đã nối page — nhắn thử một tin vào page để thấy bot trả lời.</p> : null}
 
@@ -47,6 +47,13 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
           <div className="flex flex-wrap items-center justify-between gap-3" data-testid="messenger-connected">
             <p className="text-sm">
               <span className="font-semibold">{view.page!.name}</span> <span className="text-xs text-muted-foreground">(Page ID {view.page!.id})</span> — bot nhận và trả lời tin nhắn qua Messenger.
+              {view.instagram ? (
+                <span className="mt-1 block" data-testid="messenger-instagram">
+                  Instagram <span className="font-semibold">@{view.instagram.username || view.instagram.id}</span> — bot trả lời cả tin nhắn Instagram (DM).
+                </span>
+              ) : (
+                <span className="mt-1 block text-xs text-muted-foreground">Page chưa gắn tài khoản Instagram doanh nghiệp — gắn trong Meta Business Suite rồi bấm «Đổi page» để nối cả Instagram.</span>
+              )}
             </p>
             {manage ? (
               <div className="flex items-center gap-2">
@@ -96,7 +103,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
               </code>
             </dd>
             <dt className="text-muted-foreground">Trường đăng ký</dt>
-            <dd className="text-xs">messages · messaging_postbacks · message_echoes</dd>
+            <dd className="text-xs">Page: messages · messaging_postbacks · message_echoes — Instagram: messages · messaging_postbacks</dd>
             <dt className="text-muted-foreground">OAuth redirect</dt>
             <dd>
               <code className="break-all text-xs">{`${env.appUrl}/api/connect/messenger/callback`}</code>

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { messagingConnectionSummaries, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { messengerApp, sendMessengerText, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, sendMessengerText, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -54,6 +54,14 @@ export const MESSENGER_CONNECTOR = "facebook-messenger";
 
 const TEXT_MAX = 2000;
 
+/**
+ * Mã mà kết nối đang bật «sở hữu»: page (Messenger) và — nếu page gắn tài khoản Instagram doanh nghiệp — mã Instagram (DM).
+ * Hai kênh dùng CÙNG page token và CÙNG Send API; hội thoại tách theo (mã, người gửi).
+ */
+function ownedIds(settings: Record<string, string>): string[] {
+  return [settings.pageId, settings.igAccountId].map((x) => (x ?? "").trim()).filter(Boolean);
+}
+
 // ─────────────────────────── Nối / gỡ page ───────────────────────────
 
 export type MessengerConnectResult = { ok: true; message: string } | { error: string };
@@ -74,7 +82,15 @@ export async function connectMessengerPage(user: SessionUser, page: ConnectableP
   const pages = schema.platformMessengerPages;
   const [owner] = await pdb.select({ orgCode: pages.orgCode }).from(pages).where(eq(pages.pageId, page.id)).limit(1);
   if (owner && owner.orgCode !== orgCode) return { error: `Page «${page.name || page.id}» đang nối với một cửa hàng khác trên nền tảng. Gỡ ở cửa hàng đó trước, hoặc liên hệ hỗ trợ.` };
-  const saved = await saveConnection(user, { connectorKey: MESSENGER_CONNECTOR, settings: { pageId: page.id, pageName: page.name.slice(0, 120) }, secrets: { pageAccessToken: page.token } });
+  // Instagram doanh nghiệp gắn với page (nếu có và chưa thuộc tổ chức khác) — nối cùng lượt, cùng token.
+  const ig = await instagramAccountOf(app, page.id, page.token, deps.fetch ?? fetch);
+  const [igOwner] = ig ? await pdb.select({ orgCode: pages.orgCode }).from(pages).where(eq(pages.pageId, ig.id)).limit(1) : [];
+  const igOk = ig && (!igOwner || igOwner.orgCode === orgCode) ? ig : null;
+  const saved = await saveConnection(user, {
+    connectorKey: MESSENGER_CONNECTOR,
+    settings: { pageId: page.id, pageName: page.name.slice(0, 120), igAccountId: igOk?.id ?? "", igUsername: igOk?.username ?? "" },
+    secrets: { pageAccessToken: page.token },
+  });
   if ("error" in saved) return { error: saved.error };
   const sub = await subscribePage(app, page.id, page.token, deps.fetch ?? fetch);
   if (!sub.ok) return { error: `Đã lưu nhưng chưa đăng ký nhận tin cho page: ${sub.error}` };
@@ -86,8 +102,16 @@ export async function connectMessengerPage(user: SessionUser, page: ConnectableP
     .insert(pages)
     .values({ pageId: page.id, orgCode, pageName: page.name.slice(0, 120), connectedByEmail: user.email })
     .onConflictDoUpdate({ target: pages.pageId, set: { pageName: page.name.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(pages.orgCode, orgCode) });
-  await pdb.delete(pages).where(and(eq(pages.orgCode, orgCode), ne(pages.pageId, page.id)));
-  return { ok: true, message: `Đã nối Messenger của page «${page.name || page.id}». Nhắn thử một tin vào page để thấy bot trả lời.` };
+  if (igOk) {
+    await pdb
+      .insert(pages)
+      .values({ pageId: igOk.id, orgCode, pageName: `Instagram @${igOk.username}`.slice(0, 120), connectedByEmail: user.email })
+      .onConflictDoUpdate({ target: pages.pageId, set: { pageName: `Instagram @${igOk.username}`.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(pages.orgCode, orgCode) });
+  }
+  const keep = igOk ? [page.id, igOk.id] : [page.id];
+  await pdb.delete(pages).where(and(eq(pages.orgCode, orgCode), notInArray(pages.pageId, keep)));
+  const igNote = igOk ? ` và Instagram @${igOk.username}` : ig ? ` (Instagram @${ig.username} đang nối với cửa hàng khác — chưa nối)` : "";
+  return { ok: true, message: `Đã nối Messenger của page «${page.name || page.id}»${igNote}. Nhắn thử một tin để thấy bot trả lời.` };
 }
 
 /** Gỡ: tắt kết nối + gỡ chỉ mục page ⇒ webhook của page không còn tới tổ chức này. Token đã lưu giữ nguyên (mã hoá). */
@@ -107,12 +131,14 @@ export async function disconnectMessengerPage(user: SessionUser): Promise<Messen
 export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new Date()): Promise<ReceiveResult> {
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
   if (!conn.ok) return { queued: false, reason: "Kết nối Messenger chưa bật" };
-  if ((conn.settings.pageId ?? "").trim() !== ev.pageId) return { queued: false, reason: "Tin của page khác page đã nối" };
+  if (!ownedIds(conn.settings).includes(ev.pageId)) return { queued: false, reason: "Tin của page khác page đã nối" };
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (ev.isEcho) {
     const app = messengerApp();
-    if (app && ev.appId === app.appId) {
+    // Tin của chính bot: mã app của nền tảng, HOẶC đúng mã tin bot đã ghi lúc gửi (tiếng vọng Instagram không mang mã app).
+    const [sentByBot] = await db.select({ id: t.id }).from(t).where(and(eq(t.messageId, ev.mid), eq(t.note, "BOT_SENT"))).limit(1);
+    if ((app && ev.appId === app.appId) || sentByBot) {
       await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now, note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       return { queued: false, reason: "Tin của chính bot" };
     }
@@ -154,7 +180,7 @@ const fanpageKey = (pageId: string, psid: string) => fanpageVisitorKey(pageId, p
 /** Gửi MỘT tin chữ của bot qua Send API (chia ≤ 2.000 ký tự). Ghi mã tin đã gửi — tiếng vọng tới sau là «tin của chính bot». */
 export async function sendMessengerPageText(pageId: string, psid: string, text: string, deps: FanpageDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
-  if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối Messenger chưa bật / khác page" };
+  if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ok: false, error: "Kết nối Messenger chưa bật / khác page" };
   const app = messengerApp();
   if (!app) return { ok: false, error: "Nền tảng chưa cấu hình app Facebook" };
   const token = (conn.secrets.pageAccessToken ?? "").trim();
@@ -186,7 +212,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
   const now = deps.now ?? (() => new Date());
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
-  if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ...out, skipped: "Kết nối Messenger chưa bật / khác page" };
+  if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ...out, skipped: "Kết nối Messenger chưa bật / khác page" };
   const db = await getDb();
   const t = schema.salesChatInbound;
   for (let round = 0; round < 3; round++) {
@@ -348,16 +374,16 @@ export async function processMessengerThreadDebounced(pageId: string, psid: stri
 export async function sweepStaleMessengerThreads(deps: FanpageDeps = {}): Promise<number> {
   const now = deps.now ?? (() => new Date());
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
-  const pageId = conn.ok ? (conn.settings.pageId ?? "").trim() : "";
-  if (!pageId) return 0;
+  const ids = conn.ok ? ownedIds(conn.settings) : [];
+  if (!ids.length) return 0;
   const db = await getDb();
   const t = schema.salesChatInbound;
   const stale = await db
-    .selectDistinct({ threadId: t.threadId })
+    .selectDistinct({ pageId: t.pageId, threadId: t.threadId })
     .from(t)
     .where(
       and(
-        eq(t.pageId, pageId),
+        inArray(t.pageId, ids),
         eq(t.status, "PENDING"),
         lt(t.createdAt, new Date(now().getTime() - 60_000)),
         gte(t.createdAt, new Date(now().getTime() - 30 * 60_000)),
@@ -365,19 +391,20 @@ export async function sweepStaleMessengerThreads(deps: FanpageDeps = {}): Promis
       ),
     )
     .limit(5);
-  for (const r of stale) await processMessengerThread(pageId, r.threadId, { ...deps, catchUp: true });
+  for (const r of stale) await processMessengerThread(r.pageId, r.threadId, { ...deps, catchUp: true });
   return stale.length;
 }
 
 // ─────────────────────────── Màn hình ───────────────────────────
 
-export type MessengerView = { appReady: boolean; page: { id: string; name: string } | null; status: string | null; lastTestOk: boolean | null };
+export type MessengerView = { appReady: boolean; page: { id: string; name: string } | null; instagram: { id: string; username: string } | null; status: string | null; lastTestOk: boolean | null };
 
 /** Trạng thái kết nối Messenger của tổ chức ngữ cảnh (không bí mật nào). */
 export async function messengerView(): Promise<MessengerView> {
   const appReady = messengerApp() !== null;
   const [row] = await messagingConnectionSummaries([MESSENGER_CONNECTOR]);
-  if (!row) return { appReady, page: null, status: null, lastTestOk: null };
+  if (!row) return { appReady, page: null, instagram: null, status: null, lastTestOk: null };
   const id = row.plainSettings.pageId ?? "";
-  return { appReady, page: id ? { id, name: row.plainSettings.pageName || id } : null, status: row.status, lastTestOk: row.lastTestOk };
+  const igId = row.plainSettings.igAccountId ?? "";
+  return { appReady, page: id ? { id, name: row.plainSettings.pageName || id } : null, instagram: igId ? { id: igId, username: row.plainSettings.igUsername ?? "" } : null, status: row.status, lastTestOk: row.lastTestOk };
 }

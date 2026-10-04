@@ -36,6 +36,8 @@ const APP_SECRET = "app-secret-messenger-test-0123456789";
 const PAGE = "1029384756";
 const PSID = "5566778899001";
 const PAGE_TOKEN = "EAAGpagetoken_messenger_0123456789abcdef";
+const IG = "17841400000000001";
+const IGSID = "6677889900112";
 const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
 
 const sign = (body: string, secret = APP_SECRET) => `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
@@ -73,6 +75,9 @@ function testPure() {
     "chữ · ảnh · tiếng vọng (PSID = người nhận) · nút bấm; bỏ nhãn dán / đã nhận / đã xem / tin xoá / page lạ",
   );
   assert.deepEqual(parseMessengerWebhook({ object: "instagram", entry: [] }), []);
+  const ig = parseMessengerWebhook({ object: "instagram", entry: [{ id: IG, messaging: [{ sender: { id: IGSID }, recipient: { id: IG }, timestamp: 2, message: { mid: "ig.m.1", text: "Áo này giá bao nhiêu?" } }, { sender: { id: IG }, recipient: { id: IGSID }, timestamp: 3, message: { mid: "ig.m.2", is_echo: true, text: "Dạ 359k ạ" } }] }] });
+  assert.deepEqual(ig.map((e) => [e.platform, e.pageId, e.psid, e.isEcho, e.appId]), [["INSTAGRAM", IG, IGSID, false, null], ["INSTAGRAM", IG, IGSID, true, null]], "Instagram DM cùng khuôn; tiếng vọng Instagram không mang mã app");
+  assert.deepEqual(parseMessengerWebhook({ object: "whatsapp_business_account", entry: [{ id: IG, messaging: [{ sender: { id: IGSID }, message: { mid: "w", text: "x" } }] }] }), [], "object lạ ⇒ không");
   const body = JSON.stringify(payload);
   assert.ok(verifyMessengerSignature(body, sign(body), APP_SECRET));
   assert.ok(verifyMessengerSignature(new TextEncoder().encode(body), sign(body).toUpperCase().replace("SHA256=", "sha256="), APP_SECRET), "hex hoa / byte đều nhận");
@@ -106,6 +111,7 @@ function fakeGraph(): { fetch: typeof fetch; calls: Call[] } {
     if (u.pathname.endsWith("/me/accounts"))
       return json({ data: [{ id: PAGE, name: "Shop Áo A", access_token: PAGE_TOKEN, tasks: ["MESSAGING", "ANALYZE"] }, { id: "1111111111", name: "Page chỉ xem", access_token: "EAAGviewonly0000000000", tasks: ["ANALYZE"] }] });
     if (u.pathname.endsWith(`/${PAGE}/subscribed_apps`)) return json({ success: true });
+    if (u.pathname.endsWith(`/${PAGE}`) && (u.searchParams.get("fields") ?? "").includes("instagram_business_account")) return json({ instagram_business_account: { id: IG, username: "shopaoa" }, id: PAGE });
     if (u.pathname.endsWith("/me") && u.searchParams.get("access_token") === PAGE_TOKEN) return json({ id: PAGE, name: "Shop Áo A" });
     if (u.pathname.endsWith("/me/messages")) return json({ recipient_id: PSID, message_id: `m.bot.${calls.length}` });
     return json({ error: { message: `không có ${u.pathname} — token ${u.searchParams.get("access_token") ?? ""}`, code: 100 } }, 400);
@@ -201,7 +207,7 @@ async function testFlow() {
     await withOrganization(ORG, async () => {
       const db = await getDb();
       await db.insert(schema.settings).values({ key: SALES_CHATBOT_SETTING_KEY, value: JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }) }).onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }) } });
-      const ev = (mid: string, text: string, extra: Partial<Parameters<typeof receiveMessengerEvent>[0]> = {}) => ({ pageId: PAGE, psid: PSID, mid, text, imageUrls: [], isEcho: false, appId: null, at: null, ...extra });
+      const ev = (mid: string, text: string, extra: Partial<Parameters<typeof receiveMessengerEvent>[0]> = {}) => ({ platform: "MESSENGER" as const, pageId: PAGE, psid: PSID, mid, text, imageUrls: [], isEcho: false, appId: null, at: null, ...extra });
       assert.deepEqual(await receiveMessengerEvent(ev("m.1", "Áo này còn size M không?")), { queued: true, reason: "Đã nhận" });
       assert.equal((await receiveMessengerEvent(ev("m.1", "Áo này còn size M không?"))).queued, false, "Meta gửi lại ⇒ không nhận lần hai");
       const in31s = () => new Date(Date.now() + 31_000);
@@ -220,6 +226,18 @@ async function testFlow() {
       await receiveMessengerEvent(ev("m.6", "ok em"));
       const p2 = await processMessengerThread(PAGE, PSID, { fetch: g.fetch, now: () => new Date(Date.now() + 62_000) });
       assert.ok(p2.replies === 0, `nhân viên đang trả lời ⇒ bot im: ${JSON.stringify(p2)}`);
+      // INSTAGRAM DM: tài khoản Instagram doanh nghiệp gắn với page được nối cùng lượt; tin vào ⇒ bot trả lời qua Send API.
+      assert.equal(await resolveWebhookOrganization("MESSENGER", { pageId: IG }), ORG, "mã Instagram cũng tra ra tổ chức");
+      const igEv = (mid: string, text: string, extra: Partial<Parameters<typeof receiveMessengerEvent>[0]> = {}) => ({ platform: "INSTAGRAM" as const, pageId: IG, psid: IGSID, mid, text, imageUrls: [], isEcho: false, appId: null, at: null, ...extra });
+      assert.deepEqual(await receiveMessengerEvent(igEv("ig.m.1", "Áo này giá bao nhiêu?")), { queued: true, reason: "Đã nhận" });
+      const igBefore = g.calls.length;
+      const pIg = await processMessengerThread(IG, IGSID, { fetch: g.fetch, now: in31s });
+      assert.ok(pIg.replies >= 1 && !pIg.error, JSON.stringify(pIg));
+      const igSend = g.calls.slice(igBefore).find((c) => c.url.includes("/me/messages"))!;
+      assert.equal((JSON.parse(String(igSend.init?.body)) as { recipient: { id: string } }).recipient.id, IGSID, "trả lời đúng người gửi Instagram");
+      const igBotMid = (await db.select().from(schema.salesChatInbound).where(and(eq(schema.salesChatInbound.threadId, IGSID), eq(schema.salesChatInbound.note, "BOT_SENT"))))[0]?.messageId;
+      assert.ok(igBotMid, "mã tin bot gửi được ghi lại");
+      assert.equal((await receiveMessengerEvent(igEv(igBotMid!, "Dạ size M còn hàng ạ", { isEcho: true }))).reason, "Tin của chính bot", "tiếng vọng Instagram (không mã app) nhận ra bằng mã tin");
       // Tin của page KHÁC page đã nối ⇒ không nhận.
       assert.equal((await receiveMessengerEvent({ ...ev("m.7", "hi"), pageId: "5555555555" })).queued, false);
       // Gỡ ⇒ chỉ mục mất ⇒ webhook của page không còn tới tổ chức.
@@ -229,6 +247,7 @@ async function testFlow() {
     setSalesChatProviderForTests(null);
   }
   await assert.rejects(resolveWebhookOrganization("MESSENGER", { pageId: PAGE }), WebhookAuthError, "đã gỡ ⇒ page không còn thuộc tổ chức nào");
+  await assert.rejects(resolveWebhookOrganization("MESSENGER", { pageId: IG }), WebhookAuthError, "đã gỡ ⇒ Instagram cũng hết");
 }
 
 export async function testMessenger() {
@@ -249,5 +268,5 @@ export async function testMessenger() {
     }
     await cleanup();
   }
-  console.log("✓ Messenger trực tiếp: gói webhook ⇒ sự kiện, chữ ký app, cookie page mã hoá theo tổ chức + người; Graph giả: token dài hạn, appsecret_proof, Send API; nối page (mã hoá, đăng ký webhook, bật), tổ chức khác không cướp được page, webhook theo mã page không rơi về nhà, bot trả lời qua Send API, tiếng vọng của bot bỏ qua, người trong Hộp thư Meta ⇒ bot nhường, gỡ ⇒ hết nhận");
+  console.log("✓ Messenger trực tiếp: gói webhook ⇒ sự kiện, chữ ký app, cookie page mã hoá theo tổ chức + người; Graph giả: token dài hạn, appsecret_proof, Send API; nối page (mã hoá, đăng ký webhook, bật), tổ chức khác không cướp được page, webhook theo mã page không rơi về nhà, bot trả lời qua Send API (Messenger lẫn Instagram DM), tiếng vọng của bot bỏ qua (theo mã app hoặc mã tin), người trong Hộp thư Meta ⇒ bot nhường, gỡ ⇒ hết nhận");
 }
