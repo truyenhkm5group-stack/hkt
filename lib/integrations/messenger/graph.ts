@@ -16,7 +16,11 @@ import { env } from "@/lib/env";
  * Mọi hàm nhận `fetch` tiêm vào: bài kiểm không gọi mạng thật (luật 65).
  */
 
-export const MESSENGER_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement", "business_management"] as const;
+/**
+ * Quyền xin chủ page. Hai quyền `instagram_*` để nối LUÔN tài khoản Instagram doanh nghiệp gắn với page (Instagram DM đi qua
+ * CÙNG app, CÙNG page token, CÙNG Send API) — người chỉ dùng Messenger bỏ chọn được, phần Messenger vẫn chạy.
+ */
+export const MESSENGER_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement", "business_management", "instagram_basic", "instagram_manage_messages"] as const;
 /** Sự kiện trang mà app đăng ký nhận. `message_echoes`: tin page gửi đi (của bot, của nhân viên trong Hộp thư Meta). */
 export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_echoes"] as const;
 const TIMEOUT_MS = 15_000;
@@ -126,6 +130,20 @@ export async function checkPage(app: MessengerApp, pageId: string, pageToken: st
   return { ok: true, name: typeof r.body.name === "string" ? r.body.name : pageId };
 }
 
+/** Tài khoản Instagram doanh nghiệp gắn với page (`instagram_business_account`) — không có / không đọc được ⇒ `null`. */
+export async function instagramAccountOf(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch): Promise<{ id: string; username: string } | null> {
+  const r = await graph(
+    fetchImpl,
+    `${graphBase()}/${encodeURIComponent(pageId)}?${new URLSearchParams({ fields: "instagram_business_account{id,username}", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
+    { method: "GET" },
+    [pageToken, app.appSecret],
+  );
+  if (!r.ok) return null;
+  const ig = r.body.instagram_business_account as { id?: unknown; username?: unknown } | undefined;
+  const id = typeof ig?.id === "string" ? ig.id : "";
+  return /^\d{5,30}$/.test(id) ? { id, username: typeof ig?.username === "string" ? ig.username.slice(0, 60) : "" } : null;
+}
+
 /**
  * Gửi MỘT tin chữ cho khách (Send API, `messaging_type: RESPONSE` — trả lời trong khung 24 giờ kể từ tin cuối của khách).
  * Chữ dài hơn 2.000 ký tự ⇒ nơi gọi chia trước (`chunkText`).
@@ -158,6 +176,9 @@ export function messengerVerifyToken(): string {
 }
 
 export type MessengerEvent = {
+  /** Kênh của gói: Messenger (object «page») hay Instagram DM (object «instagram»). */
+  platform: "MESSENGER" | "INSTAGRAM";
+  /** Mã page (Messenger) hoặc mã tài khoản Instagram doanh nghiệp (Instagram) — đều tra ở `platform_messenger_pages`. */
   pageId: string;
   /** Mã khách trong phạm vi page (PSID) — là «hội thoại». */
   psid: string;
@@ -173,12 +194,13 @@ export type MessengerEvent = {
 const s = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
 /**
- * Gói webhook (object = "page") ⇒ các sự kiện TIN NHẮN. Bỏ: đã nhận / đã xem, tin bị xoá, phản ứng; nhãn dán (👍) không có chữ
+ * Gói webhook (object = "page" — Messenger, hoặc "instagram" — Instagram DM; cùng khuôn `messaging`) ⇒ các sự kiện TIN NHẮN. Bỏ: đã nhận / đã xem, tin bị xoá, phản ứng; nhãn dán (👍) không có chữ
  * ⇒ không thành sự kiện. Nút bấm (postback) ⇒ dùng tiêu đề nút như chữ khách gõ. HÀM THUẦN.
  */
 export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
   const p = (payload && typeof payload === "object" ? payload : {}) as { object?: unknown; entry?: unknown };
-  if (p.object !== "page" || !Array.isArray(p.entry)) return [];
+  if ((p.object !== "page" && p.object !== "instagram") || !Array.isArray(p.entry)) return [];
+  const platform = p.object === "instagram" ? ("INSTAGRAM" as const) : ("MESSENGER" as const);
   const out: MessengerEvent[] = [];
   for (const entry of p.entry as Record<string, unknown>[]) {
     const pageId = s(entry?.id);
@@ -204,11 +226,11 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
               .slice(0, 3);
         const text = s(msg.text).slice(0, 2000);
         if (!text && !imageUrls.length && !isEcho) continue;
-        out.push({ pageId, psid: isEcho ? recipient : sender, mid, text, imageUrls, isEcho, appId: msg.app_id === undefined || msg.app_id === null ? null : s(msg.app_id), at });
+        out.push({ platform, pageId, psid: isEcho ? recipient : sender, mid, text, imageUrls, isEcho, appId: msg.app_id === undefined || msg.app_id === null ? null : s(msg.app_id), at });
       } else if (postback) {
         const title = s(postback.title) || s(postback.payload);
         const mid = s(postback.mid) || `postback:${sender}:${s(m.timestamp)}`;
-        if (title) out.push({ pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at });
+        if (title) out.push({ platform, pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at });
       }
     }
   }

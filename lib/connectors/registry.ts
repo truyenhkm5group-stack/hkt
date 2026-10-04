@@ -703,7 +703,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
   },
   {
     key: "facebook-messenger",
-    label: "Messenger trực tiếp — bot trả lời tin nhắn (không cần Pancake)",
+    label: "Messenger + Instagram trực tiếp — bot trả lời tin nhắn (không cần Pancake)",
     vendor: "Meta",
     kind: "MESSAGING",
     capabilities: ["read_conversations", "send_customer_message"],
@@ -711,6 +711,8 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     settings: [
       { key: "pageId", label: "Page ID", type: "text", secret: false, required: true, pattern: "^[0-9]{5,30}$", maxLength: 30 },
       { key: "pageName", label: "Tên page", type: "text", secret: false, required: false, maxLength: 120 },
+      { key: "igAccountId", label: "Instagram doanh nghiệp gắn với page (tự đọc khi kết nối)", type: "text", secret: false, required: false, pattern: "^([0-9]{5,30})?$", maxLength: 30 },
+      { key: "igUsername", label: "Tên Instagram", type: "text", secret: false, required: false, maxLength: 60 },
       { key: "pageAccessToken", label: "Page access token (cấp qua nút «Kết nối Facebook Page»)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9._-]{20,1000}$", maxLength: 1000 },
     ],
     config: { store: "ORG_CONNECTIONS", where: "/ai/sales-chatbot/messenger — chủ page bấm «Kết nối Facebook Page»; token mã hoá AES-256-GCM trong CSDL của tổ chức" },
