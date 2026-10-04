@@ -63,6 +63,7 @@ export const MODULE_KEYS = [
   "wholesale_leads",
   "stays",
   "lots",
+  "field_jobs",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -566,6 +567,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["lots:view", "lots:write"],
     homeOptIn: true,
     why: "Hàng có HẠN DÙNG mất giá theo ngày — khác hàng thời trang. Lô là lớp gắn thêm lên phiếu kho, KHÔNG tham gia phép tính tồn (luật 10); «lô còn bao nhiêu» là ước tính lúc đọc, dán nhãn ước tính. Tắt cho tổ chức nhà (0199)."
+  },
+  {
+    key: "field_jobs",
+    label: "Phiếu công việc hiện trường",
+    description: "Dịch vụ tại nhà (sửa chữa, vệ sinh, lắp đặt, bảo trì): báo giá theo dòng, khách đồng ý, hẹn thợ không chồng giờ, ảnh trước / sau, khách ký nghiệm thu, thu tiền theo đợt, bảo hành dịch vụ và lượt quay lại bảo hành.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["customers"],
+    features: [],
+    routes: ["/field-jobs", "/api/field-jobs"],
+    permissions: ["field_jobs:view", "field_jobs:write"],
+    homeOptIn: true,
+    why: "Dịch vụ tại nhà bán một VIỆC chứ không bán hàng: không kho, không vận chuyển; giá là báo giá chữ tự do, phát sinh ngay tại nhà khách, tiền thu theo đợt. Khách là khách của module Khách hàng; tổng / đã thu / còn nợ và hạn bảo hành KHÔNG lưu cột mà tính từ dòng báo giá, phiếu thu và ngày nghiệm thu. Tắt cho tổ chức nhà (0200)."
   },
 ];
 

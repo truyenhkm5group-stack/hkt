@@ -147,6 +147,7 @@ const MOI = [
   "0197_wholesale_lead_hunter",
   "0198_stays",
   "0199_stock_lots",
+  "0200_field_jobs",
 ] as const;
 
 /*

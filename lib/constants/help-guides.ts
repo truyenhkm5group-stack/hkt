@@ -257,6 +257,21 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
   },
 
   {
+    key: "field-jobs",
+    topic: "SERVICE",
+    title: "Phiếu công việc tại nhà",
+    summary: "Báo giá, hẹn thợ, ảnh trước / sau, khách ký nghiệm thu và thu tiền theo đợt — một phiếu cho mỗi việc tại nhà khách.",
+    href: "/field-jobs",
+    permission: "field_jobs:view",
+    steps: [
+      { text: "Mở Phiếu công việc, ở khung «Lập phiếu báo giá» chọn khách, ghi tên việc và từng dòng báo giá rồi bấm «Lập phiếu».", href: "/field-jobs" },
+      { text: "Khách đồng ý thì bấm «Khách đồng ý báo giá», rồi «Hẹn thợ» chọn thợ, giờ hẹn, thời lượng — ERP chặn nếu thợ đã có hẹn chồng giờ." },
+      { text: "Tới nơi bấm «Bắt đầu làm», tải ảnh trước / sau, phát sinh thì thêm dòng báo giá; xong việc bấm «Nghiệm thu» và ghi tên khách ký." },
+      { text: "Thu tiền ở khung «Tiền» bằng nút «Thu tiền» — cọc, đợt giữa, nghiệm thu; không thu vượt báo giá. Khách báo lại sự cố thì «Mở lượt bảo hành»." },
+    ],
+  },
+
+  {
     key: "lots",
     topic: "SELL",
     title: "Lô & hạn dùng",
