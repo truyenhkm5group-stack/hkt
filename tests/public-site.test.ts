@@ -119,6 +119,8 @@ export async function testPublicSiteData() {
   assert.ok(data.signupUrl.endsWith("/start") && data.loginUrl.endsWith("/login"), "lối vào trỏ về tuyến thật của ERP");
   assert.ok(data.plans.length > 0, "CSDL thử có gói bán gieo sẵn (0187)");
   for (const p of data.plans) assert.ok(typeof p.priceVnd === "number" && p.priceVnd > 0, `gói ${p.key} đang bán phải có giá dương`);
+  // Ưu đãi trả năm in trên thẻ giá đọc từ `platform_plans.yearly_free_months` (0194), không gõ lại ở trang.
+  for (const p of data.plans) assert.ok(Number.isInteger(p.yearlyFreeMonths) && p.yearlyFreeMonths >= 0 && p.yearlyFreeMonths <= 3, `gói ${p.key}: số tháng tặng khi trả năm phải là số nguyên 0–3`);
   assert.ok(!data.plans.some((p) => p.key === DEFAULT_PLAN_KEY), "gói khởi điểm không bán, không lẫn vào bảng giá");
   assert.ok(data.starterPlan && data.starterPlan.key === DEFAULT_PLAN_KEY && data.starterPlan.priceVnd === null, "gói khởi điểm giữ giá NULL — không phải 0 ₫");
   const positions = data.plans.map((p) => p.key);

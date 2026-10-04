@@ -26,6 +26,8 @@ export type PublicPlan = {
   users: number | null | undefined;
   records: number | null | undefined;
   storageMb: number | null | undefined;
+  /** Trả 12 tháng được tặng thêm bao nhiêu tháng (`platform_plans.yearly_free_months`); 0 = không có ưu đãi. */
+  yearlyFreeMonths: number;
 };
 
 export type PublicSiteData = {
@@ -41,7 +43,7 @@ export type PublicSiteData = {
 function toPublicPlan(row: Awaited<ReturnType<typeof listPlans>>[number]): PublicPlan {
   const { limits, undeclared } = parseLimits(row.limits);
   const pick = (k: "users" | "records" | "storageMb") => (undeclared.includes(k) ? undefined : limits[k]);
-  return { key: row.key, name: row.name, description: row.description, priceVnd: row.priceVnd, users: pick("users"), records: pick("records"), storageMb: pick("storageMb") };
+  return { key: row.key, name: row.name, description: row.description, priceVnd: row.priceVnd, users: pick("users"), records: pick("records"), storageMb: pick("storageMb"), yearlyFreeMonths: row.yearlyFreeMonths };
 }
 
 export async function getPublicSiteData(): Promise<PublicSiteData> {
