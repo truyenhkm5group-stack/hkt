@@ -38,6 +38,7 @@ import {
   tenantEconomics,
   tenantLifecycle,
   trendOf,
+  weeklyBuckets,
   EMPTY_COST_DECLARATION,
   type SaasDailyRow,
 } from "@/lib/platform/saas-metrics";
@@ -192,6 +193,24 @@ function testPure() {
   assert.equal(trendOf(5, 20), "DOWN");
   assert.equal(trendOf(11, 10), "FLAT");
   assert.equal(trendOf(12, 0), "NEW");
+  // Xu hướng tuần: tuần cuối kết thúc HÔM NAY; tuần không có ngày nào trong sổ ⇒ null (chưa đo), không phải 0.
+  const wk = weeklyBuckets(
+    [
+      { day: "2026-10-04", conversationsStarted: 5, aiOrders: 1 },
+      { day: "2026-09-29", conversationsStarted: 3, aiOrders: 0 },
+      { day: "2026-09-27", conversationsStarted: 2, aiOrders: 1 },
+    ],
+    "2026-10-04",
+  );
+  assert.deepEqual(
+    wk.map((w) => [w.from, w.to, w.days, w.conversations, w.aiOrders]),
+    [
+      ["2026-09-07", "2026-09-13", 0, null, null],
+      ["2026-09-14", "2026-09-20", 0, null, null],
+      ["2026-09-21", "2026-09-27", 1, 2, 1],
+      ["2026-09-28", "2026-10-04", 2, 8, 1],
+    ],
+  );
   console.log("  ✓ kinh tế SaaS (thuần): biến động MRR, GRR/NRR, vòng đời, phễu kích hoạt, biên, xu hướng");
 }
 
@@ -361,6 +380,9 @@ export async function testPlatformSaas() {
     assert.equal(ra.economics.mrrVnd, 999_000);
     assert.equal(ra.activated, true);
     assert.equal(ra.usage30d?.aiOrders, 1, "cột dùng AI của cockpit đọc sổ dùng");
+    assert.equal(ra.usageWeeks.length, 4);
+    assert.equal(ra.usageWeeks[3].aiOrders, 1, "tuần hiện tại đọc sổ dùng");
+    assert.equal(ra.usageWeeks[0].conversations, null, "tuần chưa có ngày nào trong sổ ⇒ chưa đo");
     assert.ok(ck.value.ai.conversations !== null && ck.value.ai.conversations >= 1);
     assert.equal(rb.lifecycle, "TRIAL");
     assert.equal(rb.activated, false);

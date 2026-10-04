@@ -15,6 +15,7 @@ import {
   readLastLoginByOrg,
   readMilestones,
   readSaasDaily,
+  readUsageDaily,
   readUsageTotals,
   type AiUsageByOrg,
   type UsageTotals,
@@ -40,6 +41,8 @@ import {
   type TenantEconomics,
   type TenantLifecycle,
   type Trend,
+  type WeekBucket,
+  weeklyBuckets,
 } from "@/lib/platform/saas-metrics";
 
 /**
@@ -105,6 +108,10 @@ export type TenantRow = {
   daysToFirstAiOrder: number | null;
   /** Sổ dùng 30 ngày (0204). `null` = chưa có ngày nào trong sổ — khác 0. */
   usage30d: UsageTotals | null;
+  /** Hội thoại / đơn AI theo 4 tuần gần nhất (cũ trước) — tuần chưa có ngày nào trong sổ là `null`. */
+  usageWeeks: WeekBucket[];
+  /** Xu hướng hội thoại tuần này so tuần trước (cùng luật `trendOf`: dưới 10 hội thoại ⇒ «—»). */
+  usageTrend: Trend;
 };
 
 export type OwnerCockpit = {
@@ -162,6 +169,12 @@ function sumAi(rows: Iterable<AiUsageByOrg>) {
   return { requests, errors, platform, byok, home, unpriced };
 }
 
+function usageTrendOf(rows: Parameters<typeof weeklyBuckets>[0], today: string): { usageWeeks: WeekBucket[]; usageTrend: Trend } {
+  const usageWeeks = weeklyBuckets(rows, today);
+  const [prev, last] = usageWeeks.slice(-2);
+  return { usageWeeks, usageTrend: last?.conversations === null || prev?.conversations === null ? "NONE" : trendOf(last.conversations ?? 0, prev.conversations ?? 0) };
+}
+
 /** Cộng sổ dùng của tổ chức KHÁCH (bỏ nhà). Chưa có dòng nào ⇒ `null`, không phải 0. */
 function usageHeadline(usage: Map<string, UsageTotals>, home: Set<string>) {
   const rows = [...usage.entries()].filter(([code]) => !home.has(code)).map(([, v]) => v);
@@ -197,6 +210,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
     readCostDeclaration(),
   ]);
   const usageByOrg = await readUsageTotals(vnDate(windowFrom));
+  const usageDaily = await readUsageDaily(vnDate(new Date(now.getTime() - 28 * DAY)));
 
   const latest = new Map<string, SaasDailyRow>();
   for (const r of daily) if (r.day <= today && (!latest.has(r.orgCode) || latest.get(r.orgCode)!.day < r.day)) latest.set(r.orgCode, r);
@@ -246,6 +260,7 @@ export async function loadOwnerCockpit(user: SessionUser, now: Date = new Date()
       daysToActivation: daysBetween(reached.SIGNED_UP, reached[ACTIVATED_AT]),
       daysToFirstAiOrder: daysBetween(reached.SIGNED_UP, reached.FIRST_AI_ORDER),
       usage30d: usageByOrg.get(o.code) ?? null,
+      ...usageTrendOf(usageDaily.get(o.code) ?? [], today),
     });
   }
   tenants.sort((a, b) => Number(a.isHome) - Number(b.isHome) || (b.economics.mrrVnd ?? -1) - (a.economics.mrrVnd ?? -1) || b.aiRequests30d - a.aiRequests30d || a.code.localeCompare(b.code));
