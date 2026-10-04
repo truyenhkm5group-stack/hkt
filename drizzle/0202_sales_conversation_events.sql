@@ -1,4 +1,4 @@
--- 0201 · SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (lib/sales-chatbot/events.ts · docs/productization/MIGRATION_PLAN.md M2).
+-- 0202 · SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (lib/sales-chatbot/events.ts · docs/productization/MIGRATION_PLAN.md M2).
 --
 --  · `sales_conversation_events`: APPEND-ONLY, mỗi bước bán hàng có mốc (khách nhắn, AI trả lời, chuyển bước, báo giá, khách để
 --    lại SĐT, upsell, đơn nháp / chốt, chuyển người, nhân viên nhận, trả lại AI, nhắc khách). `dedupe_key` UNIQUE.

@@ -1324,11 +1324,11 @@ export const orders = pgTable(
     timeSendPartner: ts("time_send_partner"),
     estimateDeliveryDate: ts("estimate_delivery_date"),
     /**
-     * NGUỒN TẠO ĐƠN (0201 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
+     * NGUỒN TẠO ĐƠN (0202 · docs/productization/TARGET_ARCHITECTURE.md ⑤) — `AI_AGENT` chatbot lên đơn · `AI_ORDER_SYNC` AI
      * ghi đơn hộ nhân viên chốt. `NULL` = trước khi có cột, hoặc đường tạo chưa khai — KHÔNG đoán ngược cho dòng cũ (luật 35).
      */
     origin: text("origin"),
-    /** Hội thoại chatbot sinh ra đơn (0201) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
+    /** Hội thoại chatbot sinh ra đơn (0202) — khoá thay cho chuỗi `source`. Không FK: hội thoại có thể bị dọn, đơn thì không. */
     salesConversationId: text("sales_conversation_id"),
     raw: jsonb("raw"),
     syncedAt: ts("synced_at").notNull().defaultNow(),
@@ -9855,7 +9855,7 @@ export const salesChatMessages = pgTable(
 );
 
 /**
- * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0201 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
+ * SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG (0202 · lib/sales-chatbot/events.ts) — APPEND-ONLY. Mỗi bước có ý nghĩa bán hàng để lại MỘT
  * dòng có mốc: khách nhắn, AI trả lời, chuyển bước, báo giá, khách để lại SĐT, mời / nhận upsell, đơn nháp / chốt, chuyển
  * người, nhân viên nhận, trả lại AI, nhắc khách. Trước sổ này phễu chỉ sống trong `state` jsonb và bị xoá khi sang lượt mua
  * mới — không đo được «AI tự chốt bao nhiêu», «upsell mang thêm bao nhiêu». Không có dòng = chưa đo (trước ngày bật), KHÔNG
@@ -10433,5 +10433,115 @@ export const fieldJobPhotos = pgTable(
     check("field_job_photos_phase_check", sql`${t.phase} IN ('BEFORE','AFTER')`),
     check("field_job_photos_type_check", sql`${t.contentType} IN ('image/jpeg','image/png','image/webp')`),
     check("field_job_photos_bytes_check", sql`${t.bytes} BETWEEN 1 AND 2000000`),
+  ],
+);
+
+// ═══════════ BẢNG HÀNG BẤT ĐỘNG SẢN (0201, module `real_estate` — docs/verticals/real-estate.md) ═══════════
+
+/** Dự án. `hold_hours` BẮT BUỘC khai — số giờ một lượt giữ chỗ còn hiệu lực (quyết định kinh doanh, không mặc định). */
+export const reProjects = pgTable(
+  "re_projects",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    holdHours: integer("hold_hours").notNull(),
+    note: text("note").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("re_projects_code_uq").on(sql`lower(${t.code})`),
+    check("re_projects_hold_check", sql`${t.holdHours} BETWEEN 1 AND 720`),
+    check("re_projects_name_check", sql`length(btrim(${t.name})) BETWEEN 1 AND 160`),
+    check("re_projects_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 40`),
+  ],
+);
+
+/** Căn của dự án. Giá / diện tích NULL = chưa công bố. Trạng thái căn KHÔNG lưu cột — `lib/constants/real-estate.ts::unitState`. */
+export const reUnits = pgTable(
+  "re_units",
+  {
+    id: id(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => reProjects.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    block: text("block").notNull().default(""),
+    floor: text("floor").notNull().default(""),
+    areaM2: doublePrecision("area_m2"),
+    listPrice: bigint("list_price", { mode: "number" }),
+    note: text("note").notNull().default(""),
+    lockedAt: ts("locked_at"),
+    lockedReason: text("locked_reason"),
+    soldAt: ts("sold_at"),
+    soldContract: text("sold_contract"),
+    soldByUserId: text("sold_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("re_units_project_code_uq").on(t.projectId, sql`lower(${t.code})`),
+    check("re_units_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 40`),
+    check("re_units_area_check", sql`${t.areaM2} IS NULL OR ${t.areaM2} > 0`),
+    check("re_units_price_check", sql`${t.listPrice} IS NULL OR ${t.listPrice} >= 0`),
+    check("re_units_lock_check", sql`${t.lockedAt} IS NULL OR length(btrim(coalesce(${t.lockedReason}, ''))) >= 3`),
+    check("re_units_sold_check", sql`${t.soldAt} IS NULL OR length(btrim(coalesce(${t.soldContract}, ''))) >= 1`),
+  ],
+);
+
+/** Lượt giữ chỗ có hạn — mỗi căn nhiều nhất MỘT dòng ACTIVE (chỉ mục duy nhất có điều kiện). */
+export const reHolds = pgTable(
+  "re_holds",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => reUnits.id, { onDelete: "cascade" }),
+    saleUserId: text("sale_user_id").references(() => users.id, { onDelete: "set null" }),
+    saleName: text("sale_name").notNull().default(""),
+    customerName: text("customer_name").notNull(),
+    customerPhone: text("customer_phone").notNull().default(""),
+    heldAt: ts("held_at").notNull().defaultNow(),
+    expiresAt: ts("expires_at").notNull(),
+    status: text("status").notNull().default("ACTIVE"),
+    closedAt: ts("closed_at"),
+    closeReason: text("close_reason"),
+  },
+  (t) => [
+    uniqueIndex("re_holds_one_active_uq").on(t.unitId).where(sql`${t.status} = 'ACTIVE'`),
+    index("re_holds_sale_idx").on(t.saleUserId, t.status),
+    check("re_holds_status_check", sql`${t.status} IN ('ACTIVE','RELEASED','EXPIRED','CONVERTED')`),
+    check("re_holds_window_check", sql`${t.expiresAt} > ${t.heldAt}`),
+    check("re_holds_customer_check", sql`length(btrim(${t.customerName})) BETWEEN 1 AND 160`),
+  ],
+);
+
+/** Cọc — mỗi căn nhiều nhất MỘT khoản ACTIVE. Hoàn / khách bỏ cọc cần lý do. */
+export const reDeposits = pgTable(
+  "re_deposits",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => reUnits.id, { onDelete: "cascade" }),
+    holdId: text("hold_id").references(() => reHolds.id, { onDelete: "set null" }),
+    saleUserId: text("sale_user_id").references(() => users.id, { onDelete: "set null" }),
+    saleName: text("sale_name").notNull().default(""),
+    customerName: text("customer_name").notNull(),
+    customerPhone: text("customer_phone").notNull().default(""),
+    amount: bigint("amount", { mode: "number" }).notNull(),
+    depositedAt: ts("deposited_at").notNull().defaultNow(),
+    status: text("status").notNull().default("ACTIVE"),
+    closedAt: ts("closed_at"),
+    closeReason: text("close_reason"),
+  },
+  (t) => [
+    uniqueIndex("re_deposits_one_active_uq").on(t.unitId).where(sql`${t.status} = 'ACTIVE'`),
+    check("re_deposits_amount_check", sql`${t.amount} > 0`),
+    check("re_deposits_status_check", sql`${t.status} IN ('ACTIVE','REFUNDED','FORFEITED','CONVERTED')`),
+    check("re_deposits_close_check", sql`${t.status} NOT IN ('REFUNDED','FORFEITED') OR length(btrim(coalesce(${t.closeReason}, ''))) >= 3`),
+    check("re_deposits_customer_check", sql`length(btrim(${t.customerName})) BETWEEN 1 AND 160`),
   ],
 );

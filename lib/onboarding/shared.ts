@@ -73,7 +73,7 @@ export const SIGNUP_MODE_CONSEQUENCE: Record<SignupMode, string> = {
 
 // ═══ LOẠI HÌNH → MẪU GỢI Ý ═══
 
-export const BUSINESS_TYPES = ["fashion", "ecommerce", "food", "seafood", "spa", "restaurant", "household", "homestay", "homeservice", "wholesale", "manufacturing", "service", "blank"] as const;
+export const BUSINESS_TYPES = ["fashion", "ecommerce", "food", "seafood", "spa", "restaurant", "household", "homestay", "homeservice", "realestate", "wholesale", "manufacturing", "service", "blank"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
 /**
@@ -90,6 +90,7 @@ export const BUSINESS_TYPE_SPEC: Record<BusinessType, { label: string; hint: str
   household: { label: "Gia dụng / điện máy nhỏ", hint: "Bán online gia dụng, điện máy nhỏ, đồ công nghệ: đơn và vận chuyển, hàng cồng kềnh / dễ vỡ, hoàn hàng, bảo hành theo serial — tra theo SĐT / serial.", templateKey: "household", modules: [] },
   homestay: { label: "Homestay / Airbnb", hint: "Homestay, căn hộ dịch vụ, villa bán phòng trên Airbnb / Booking / Agoda: một lịch phòng gộp mọi kênh, báo trùng phòng, khách nhận / trả / dọn phòng hôm nay, báo cáo theo chủ nhà.", templateKey: "homestay", modules: [] },
   homeservice: { label: "Dịch vụ tại nhà", hint: "Sửa chữa, vệ sinh, lắp đặt, bảo trì tại nhà khách: báo giá, hẹn thợ không chồng giờ, ảnh trước / sau, khách ký nghiệm thu, thu tiền theo đợt, bảo hành dịch vụ.", templateKey: "home-service", modules: [] },
+  realestate: { label: "Sàn / đại lý bất động sản", hint: "Phân phối căn hộ / đất nền cho đội sale: bảng hàng chung, giữ chỗ có hạn không cho hai sale giữ trùng, cọc, ký bán, khách tiềm năng theo giai đoạn.", templateKey: "real-estate-agency", modules: [] },
   wholesale: { label: "Bán sỉ / phân phối", hint: "Đại lý mua số lượng lớn, trả sau theo hạn mức công nợ.", templateKey: "wholesale", modules: [] },
   manufacturing: { label: "Sản xuất", hint: "Chưa có mẫu ngành sản xuất — bắt đầu trắng với bộ module gợi ý.", templateKey: null, modules: ["customers", "products", "orders", "inventory", "purchasing", "production", "finance"] },
   service: { label: "Dịch vụ", hint: "Chưa có mẫu ngành dịch vụ — bắt đầu trắng với bộ module gợi ý.", templateKey: null, modules: ["customers", "customer_care", "finance"] },

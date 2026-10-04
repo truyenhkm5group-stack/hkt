@@ -233,6 +233,13 @@ export const NAV_MODULES = [
     why: "Dịch vụ tại nhà bán một việc: người điều phối báo giá, hẹn thợ, theo tới lúc khách ký nghiệm thu và thu đủ tiền — một bảng cho cả đội.",
   },
   {
+    href: "/real-estate",
+    label: "Bảng hàng BĐS",
+    zone: "SALES",
+    permission: "real_estate:view",
+    why: "Sàn bất động sản bán căn cho nhiều sale cùng lúc: một bảng hàng chung cho biết căn nào còn trống, ai đang giữ tới bao giờ — để không ai hứa với khách một căn đã có người.",
+  },
+  {
     href: "/customers/reorder",
     label: "Nhắc mua lại",
     zone: "SALES",

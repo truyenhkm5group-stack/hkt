@@ -1,5 +1,5 @@
 /**
- * ═══════════ SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG — PHẦN THUẦN (0201 · docs/productization/TARGET_ARCHITECTURE.md §5.1) ═══════════
+ * ═══════════ SỔ SỰ KIỆN HỘI THOẠI BÁN HÀNG — PHẦN THUẦN (0202 · docs/productization/TARGET_ARCHITECTURE.md §5.1) ═══════════
  *
  * Một lượt của bot được đọc thành sự kiện bằng cách SO ẢNH CHỤP TRƯỚC / SAU lượt (trạng thái hội thoại + các tin vừa ghi),
  * không bằng móc rải trong vòng công cụ: lõi hội thoại (`engine.ts`) đổi hằng ngày, và một móc sót là một sự kiện mất im
