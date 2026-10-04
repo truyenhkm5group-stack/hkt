@@ -470,6 +470,7 @@ import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
+import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
@@ -2709,6 +2710,7 @@ async function main() {
   // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
   await testSalesExperimentReport();
   await testCommerceAgent();
+  await testZaloOa();
   await testSalesEvents();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).

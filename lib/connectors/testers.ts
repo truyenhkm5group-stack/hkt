@@ -29,6 +29,8 @@ import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-e
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
 import { env } from "@/lib/env";
 import { GOOGLE_API_KEY_PATTERN, textSearch } from "@/lib/integrations/google-places/client";
+import { ZALO_ID_PATTERN, zaloGetOa } from "@/lib/integrations/zalo/oa";
+import { ensureZaloAccessToken } from "@/lib/integrations/zalo/token";
 
 export type TesterResult = { ok: boolean; message: string };
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -278,6 +280,40 @@ export async function testPancakeFanpage(input: { secrets: Record<string, string
   } catch (e) {
     return { ok: false, message: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, hide) };
   }
+}
+
+/**
+ * Đường LƯU bí mật mà nhà cung cấp vừa xoay vòng (`lib/connectors/service.ts::rotateOrgConnectionSecrets`, truyền vào từ
+ * `testOrgConnection` — tệp này không import service). Chỉ kết nối trong `ROTATING_CONNECTORS` nhận được nó.
+ */
+export type RotateSecrets = <T>(
+  fn: (current: { secrets: Record<string, string>; settings: Record<string, string> }) => Promise<{ patch: Record<string, string> | null; result: T }>,
+) => Promise<{ ok: true; result: T; rotated: boolean } | { ok: false; reason: string }>;
+
+/**
+ * Zalo OA (kênh chat của chatbot bán hàng): lấy access token (làm mới bằng refresh token nếu cần — cặp mới LƯU NGAY qua
+ * `rotate`, vì refresh token cũ đã bị Zalo huỷ) rồi đọc thông tin OA. CHỈ ĐỌC phía Zalo: không gửi tin cho ai. Token thuộc
+ * OA khác OA đã khai ⇒ hỏng (bot sẽ trả lời nhầm OA).
+ */
+export async function testZaloOa(input: { secrets: Record<string, string>; settings: Record<string, string>; rotate?: RotateSecrets }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const appId = (input.settings.appId ?? "").trim();
+  const oaId = (input.settings.oaId ?? "").trim();
+  if (!ZALO_ID_PATTERN.test(appId)) return { ok: false, message: "App ID không đúng dạng (chỉ chữ số) — không gọi." };
+  if (!ZALO_ID_PATTERN.test(oaId)) return { ok: false, message: "OA ID không đúng dạng (chỉ chữ số) — không gọi." };
+  for (const [k, label] of [["appSecret", "App Secret"], ["oaSecretKey", "OA Secret Key"], ["refreshToken", "Refresh token"]] as const) {
+    if (!(input.secrets[k] ?? "").trim()) return { ok: false, message: `Thiếu «${label}» — không gọi.` };
+  }
+  if (!input.rotate) return { ok: false, message: "Kiểm tra Zalo OA cần đường lưu token mới — gọi qua «Kiểm tra» của trang Kết nối." };
+  const got = await input.rotate(async (cur) => {
+    const t = await ensureZaloAccessToken(cur, deps);
+    return { patch: t.ok ? t.patch : null, result: t };
+  });
+  if (!got.ok) return { ok: false, message: got.reason };
+  if (!got.result.ok) return { ok: false, message: got.result.error };
+  const oa = await zaloGetOa(got.result.accessToken, deps);
+  if (!oa.ok) return { ok: false, message: oa.error };
+  if (oa.oaId && oa.oaId !== oaId) return { ok: false, message: `Token thuộc OA ${oa.oaId}${oa.name ? ` «${oa.name}»` : ""}, khác OA ID đã khai (${oaId}) — bot sẽ trả lời nhầm OA.` };
+  return { ok: true, message: `Zalo nhận token của OA${oa.name ? ` «${oa.name}»` : ""} (${oaId})${got.rotated ? " — đã làm mới và lưu cặp token mới" : ""}. Dán URL webhook (trang Chatbot bán hàng) vào Zalo Developers để bot nhận tin.` };
 }
 
 /*
@@ -571,7 +607,7 @@ export async function testGhnCarrier(input: { secrets: Record<string, string>; s
 }
 
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
-export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
+export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string; rotate?: RotateSecrets }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
   "telegram-bot": (input, deps) => testTelegramBot(input, deps),
   "zalo-bot": (input, deps) => testZaloBot(input, deps),
@@ -580,6 +616,7 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "gemini-byok": (input, deps) => testGeminiKey(input, deps),
   "sandbox-messaging": (input) => testSandboxMessaging(input),
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
+  "zalo-oa": (input, deps) => testZaloOa(input, deps),
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
   "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),

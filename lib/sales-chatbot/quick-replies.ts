@@ -15,7 +15,7 @@ import { sha256Hex, sniffImageType } from "@/lib/creative/images";
 import { formatVND } from "@/lib/format";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { stockFor } from "@/lib/sales-chatbot/catalog";
-import type { SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { PUBLIC_CHAT_CHANNELS, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import {
   fillPlaceholders,
@@ -357,7 +357,7 @@ export async function quickReplyStats(now: Date = new Date()): Promise<{ quickTu
   const [r] = await db
     .select({ quick: sql<number>`coalesce(sum(${c.quickReplies}), 0)::int`, total: sql<number>`coalesce(sum(${c.turns}), 0)::int` })
     .from(c)
-    .where(and(inArray(c.channel, ["WEB", "FANPAGE"]), sql`${c.updatedAt} >= ${new Date(now.getTime() - 30 * 86_400_000)}`));
+    .where(and(inArray(c.channel, [...PUBLIC_CHAT_CHANNELS]), sql`${c.updatedAt} >= ${new Date(now.getTime() - 30 * 86_400_000)}`));
   return { quickTurns: Number(r?.quick ?? 0), totalTurns: Number(r?.total ?? 0) };
 }
 

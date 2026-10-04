@@ -41,7 +41,7 @@ export type StepCtx = {
 export type Step = (ctx: StepCtx) => AiBlock[];
 export type GoldenTurn = { say: string; ai: Step[] };
 export type GoldenShop = "food" | "fashion";
-export type GoldenChannel = "WEB" | "TEST" | "FANPAGE";
+export type GoldenChannel = "WEB" | "TEST" | "FANPAGE" | "ZALO";
 export type GoldenCase = { key: string; title: string; shop: GoldenShop; channel: GoldenChannel; turns: GoldenTurn[] };
 
 let toolSeq = 0;
@@ -203,7 +203,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
     setSalesChatProviderForTests(() => provider);
     try {
       // Web / fanpage là kênh công khai: hội thoại khoá theo mã khách. Fanpage ở đây KHÔNG qua Pancake — chỉ chạy lượt của engine
-      // trên kênh FANPAGE để khoá các luật riêng của kênh nhắn tin (vd chuyển người thì bot im).
+      // trên kênh FANPAGE / ZALO để khoá các luật riêng của kênh nhắn tin (vd chuyển người thì bot im).
       const visitorKey = c.channel === "TEST" ? null : visitorKeyOf(`hoi-thoai-vang-${c.key}-0123456789abcdef`);
       const conv = await openConversation(c.channel, c.channel === "TEST" ? { createdBy: ADMIN(spec.code) } : { visitorKey });
       const turns: GoldenTranscript["turns"] = [];

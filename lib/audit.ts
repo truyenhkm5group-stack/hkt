@@ -87,8 +87,11 @@ export type AuditParams = {
 
   `META_AD_POST_LOOKUP` (tra tay mẩu quảng cáo → bài viết, `/ads/post-resolver`): chỉ ĐỌC Meta, không ghi
   bảng nào. Lượt GHI của cùng màn hình là `META_AD_POST_SYNC` — cố ý ĐỂ NGOÀI danh sách vì nó đổi `fb_ads`.
+
+  `ORG_CONNECTION_TOKEN_ROTATE` (máy lưu cặp token Zalo OA vừa làm mới — lib/connectors/service.ts): chỉ đổi bí mật đã mã
+  hoá của một kết nối, chừng mỗi giờ một lần mỗi tổ chức; không có nó ở đây thì mỗi lần làm mới xoá đệm báo cáo.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

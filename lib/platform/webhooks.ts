@@ -17,7 +17,7 @@ import { findOrganization, getHomeOrganization } from "@/lib/platform/organizati
  * đường dẫn (`secret_hash → tổ chức`); bí mật không khớp tổ chức nào thì 401, KHÔNG rơi về nhà.
  */
 
-export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG";
+export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG" | "ZALO_OA";
 
 /**
  * `HOME_ONLY` — bí mật là một biến môi trường của tổ chức nhà.
@@ -36,6 +36,7 @@ export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>>
   SEPAY: { mode: "HOME_ONLY", reason: "Chữ ký HMAC bằng SEPAY_WEBHOOK_SECRET — một giá trị môi trường, của tổ chức nhà." },
   PANCAKE_FANPAGE: { mode: "URL_SECRET", reason: "Tin fanpage của MỘT tổ chức khách: token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó (dẫn xuất từ PLATFORM_SECRETS_KEY)." },
   VIETTELPOST_ORG: { mode: "URL_SECRET", reason: "Hành trình vận đơn Viettel Post của MỘT tổ chức khách: gói VTP không mang mã khách, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
+  ZALO_OA: { mode: "URL_SECRET", reason: "Tin Zalo OA của MỘT tổ chức khách (app Zalo của chính shop): token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó; gói tin còn được kiểm chữ ký X-ZEvent-Signature bằng OA Secret Key của shop." },
   PANCAKE_POS_ORG: { mode: "URL_SECRET", reason: "Đơn / khách / sản phẩm / tồn từ Pancake POS của MỘT tổ chức khách (kết nối «pancake-pos-org»): token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
   MESSENGER: { mode: "PAGE_INDEX", reason: "Messenger trực tiếp (0207): Meta gửi mọi page về MỘT URL, ký X-Hub-Signature-256 bằng app secret của nền tảng; mã page trong gói tra ở platform_messenger_pages — page chưa nối / tổ chức không hoạt động ⇒ từ chối." },
   GHN_ORG: { mode: "URL_SECRET", reason: "Trạng thái vận đơn GHN của MỘT tổ chức khách (kết nối «ghn-carrier»): gói GHN chỉ mang ShopID của hãng, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },

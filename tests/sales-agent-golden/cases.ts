@@ -93,6 +93,13 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     turns: [{ say: "cho minh gap nhan vien", ai: [() => [tool("handoff_to_human", { reason: "Khách muốn gặp nhân viên" })]] }],
   },
   {
+    key: "zalo-chuyen-nguoi-im-lang",
+    title: "Zalo OA: chuyển người thì bot IM như fanpage — nhân viên trả lời trực tiếp trong OA",
+    shop: "food",
+    channel: "ZALO",
+    turns: [{ say: "cho minh gap nhan vien", ai: [() => [tool("handoff_to_human", { reason: "Khách muốn gặp nhân viên" })]] }],
+  },
+  {
     key: "khach-tu-choi",
     title: "Khách từ chối mua ⇒ ghi lý do, giai đoạn hội thoại đổi",
     shop: "food",

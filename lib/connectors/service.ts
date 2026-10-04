@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -38,7 +38,8 @@ import { findOrganization } from "@/lib/platform/organizations";
  * ─── BÍ MẬT KHÔNG RỜI KHỎI TỆP NÀY Ở DẠNG RÕ ───
  *
  * `openSecrets` chỉ được gọi ở `testOrgConnection` (đưa cho hàm kiểm tra), `saveConnection` (gộp với giá trị
- * mới), `openActiveConnection` (consumer đã khai) và `rekeyOrgConnections` (xoay khoá — mã hoá lại ngay tại chỗ).
+ * mới), `openActiveConnection` (consumer đã khai), `rekeyOrgConnections` (xoay khoá — mã hoá lại ngay tại chỗ) và
+ * `rotateOrgConnectionSecrets` (nhà cung cấp xoay vòng token — chỉ kết nối trong `ROTATING_CONNECTORS`).
  * Không hàm nào trả chúng ra cho người; nhật ký ghi `secretHints` (`••••` + 4 ký tự), không
  * ghi giá trị; không `console.*` nào ở đây. Công cụ AI không import tệp này (bài kiểm quét).
  *
@@ -248,6 +249,75 @@ export async function openActiveConnection(connectorKey: string, deps: { keyStat
   }
 }
 
+/**
+ * Kết nối mà MÁY được ghi lại bí mật (nhà cung cấp xoay vòng token theo từng lần làm mới). Zalo OA: refresh token DÙNG MỘT
+ * LẦN — làm mới xong mà không lưu cặp mới thì kết nối chết hẳn, phải lấy token lại bằng tay.
+ */
+export const ROTATING_CONNECTORS: ReadonlySet<string> = new Set(["zalo-oa"]);
+
+export type SecretRotation<T> = (current: { secrets: Record<string, string>; settings: Record<string, string> }) => Promise<{ patch: Record<string, string> | null; result: T }>;
+
+/**
+ * Đọc bí mật MỚI NHẤT của một kết nối xoay vòng dưới khoá tư vấn của (tổ chức, connector), gọi `fn`, và nếu `fn` trả bản vá
+ * thì mã hoá + lưu NGAY trong cùng giao dịch. Hai luồng cùng thấy token hết hạn ⇒ luồng sau chờ khoá, đọc lại, thấy token mới
+ * còn hạn và không làm mới lần hai (làm mới lần hai bằng refresh token đã bị huỷ = kết nối chết).
+ *
+ * Đường MÁY: không kiểm quyền người (nơi gọi đã gác); không đổi trạng thái / kết quả kiểm tra; ô người dán khác ngoài bản vá
+ * giữ nguyên. Bí mật chỉ đi vào `fn` — không trả ra, không log. `requireActive` = luồng chạy (webhook, gửi tin); `false` cho
+ * «Kiểm tra» (kết nối còn ở Nháp).
+ */
+export async function rotateOrgConnectionSecrets<T>(
+  connectorKey: string,
+  fn: SecretRotation<T>,
+  opts: { requireActive: boolean; actorLabel: string; userId?: string; keyState?: SecretsKeyState },
+): Promise<{ ok: true; result: T; rotated: boolean } | { ok: false; reason: string }> {
+  const spec = findConnector(connectorKey);
+  if (!spec || !isOrgConfigurable(spec) || !ROTATING_CONNECTORS.has(spec.key)) return { ok: false, reason: `«${connectorKey}» không phải kết nối được máy xoay vòng bí mật.` };
+  const keyState = opts.keyState ?? secretsKeyState();
+  if (!keyState.ok) return { ok: false, reason: keyState.reason };
+  const ctx = await currentOrganization();
+  const db = await getDb();
+  let before: Record<string, string> = {};
+  let after: Record<string, string> = {};
+  const out = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`conn-rotate:${ctx.code}:${spec.key}`}, 0))`);
+    const [row] = await tx.select().from(schema.orgConnections).where(eq(schema.orgConnections.connectorKey, spec.key)).limit(1);
+    if (!row) return { ok: false as const, reason: `Chưa có kết nối «${spec.label}».` };
+    if (row.orgCode !== ctx.code) return { ok: false as const, reason: `Dòng kết nối «${spec.key}» mang mã tổ chức khác ngữ cảnh — không dùng.` };
+    if (opts.requireActive && (row.status !== "ACTIVE" || row.lastTestOk !== true)) return { ok: false as const, reason: `Kết nối «${spec.label}» chưa bật (cần Kiểm tra đạt rồi Bật).` };
+    if (!row.secretsEnc) return { ok: false as const, reason: `Kết nối «${spec.label}» chưa có bí mật.` };
+    let secrets: Record<string, string>;
+    try {
+      secrets = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: spec.key, keyId: row.secretsKeyId }, keyState);
+    } catch (e) {
+      return { ok: false as const, reason: e instanceof Error ? e.message : "Không giải mã được bí mật." };
+    }
+    const r = await fn({ secrets, settings: asStringMap(row.settings) });
+    if (!r.patch) return { ok: true as const, result: r.result, rotated: false };
+    const merged = { ...secrets, ...r.patch };
+    const sealed = sealSecrets(merged, { orgCode: ctx.code, connectorKey: spec.key }, keyState);
+    const declared = new Set(secretFields(spec).map((f) => f.key));
+    const hints = Object.fromEntries(Object.entries(merged).filter(([k]) => declared.has(k)).map(([k, v]) => [k, maskSecret(v)]));
+    await tx.update(schema.orgConnections).set({ secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId, secretHints: hints, updatedAt: new Date() }).where(eq(schema.orgConnections.id, row.id));
+    before = asStringMap(row.secretHints);
+    after = hints;
+    return { ok: true as const, result: r.result, rotated: true };
+  });
+  if (out.ok && out.rotated) {
+    await audit({
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      userEmail: opts.actorLabel,
+      action: "ORG_CONNECTION_TOKEN_ROTATE",
+      entity: "org_connection",
+      entityId: spec.key,
+      before: { secretHints: before },
+      after: { secretHints: after },
+      reason: "Nhà cung cấp cấp cặp token mới (token cũ bị huỷ) — máy lưu ngay; trạng thái kết nối không đổi",
+    });
+  }
+  return out;
+}
+
 // ───────────────────────────── GHI ─────────────────────────────
 
 export type SaveConnectionInput = { connectorKey: string; settings?: Record<string, unknown>; secrets?: Record<string, unknown> };
@@ -387,7 +457,9 @@ export async function testOrgConnection(user: SessionUser, connectorKey: string,
       message = e instanceof Error ? e.message : "Không giải mã được bí mật.";
     }
     if (secrets) {
-      const r = await tester({ secrets, settings: asStringMap(row.settings), orgName: org.name }, deps.tester);
+      // Kết nối xoay vòng token (Zalo OA): hàm kiểm tra có thể làm mới token — cặp mới phải được lưu ngay, nên nó nhận đường lưu.
+      const rotate = ROTATING_CONNECTORS.has(spec.key) ? { rotate: <T,>(fn: SecretRotation<T>) => rotateOrgConnectionSecrets(spec.key, fn, { requireActive: false, actorLabel: user.email, userId: user.id, keyState: deps.keyState }) } : {};
+      const r = await tester({ secrets, settings: asStringMap(row.settings), orgName: org.name, ...rotate }, deps.tester);
       passed = r.ok;
       message = r.message;
     } else message ??= "Không giải mã được bí mật.";

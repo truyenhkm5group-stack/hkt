@@ -99,7 +99,7 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG" | "ZALO_OA";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
@@ -766,6 +766,41 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     code: ["lib/integrations/messenger/", "lib/sales-chatbot/messenger.ts", "app/api/webhooks/messenger/route.ts", "app/api/connect/messenger/start/route.ts", "app/api/connect/messenger/callback/route.ts"],
     consumers: ["lib/sales-chatbot/messenger.ts::processMessengerThread"],
     why: "Fanpage của CHÍNH tổ chức nối THẲNG với Meta qua app của nền tảng — shop không dùng Pancake vẫn có bot. Chủ page cấp quyền nhắn tin bằng Facebook Login; ERP lưu page token (mã hoá), đăng ký webhook cho page; tin khách ⇒ webhook chung ⇒ đúng tổ chức theo mã page ⇒ chatbot bán hàng của tổ chức ⇒ Send API. Cần app ở chế độ Live + quyền pages_messaging (Meta App Review) cho page của người ngoài app.",
+  },
+  /*
+    ZALO OA (chủ shop 04/10/2026: khách KHÔNG dùng Pancake vẫn dùng được bot): app Zalo CỦA CHÍNH SHOP (developers.zalo.me),
+    không có app chung của nền tảng nào phải duyệt. Refresh token dùng MỘT LẦN ⇒ máy lưu cặp mới mỗi lần làm mới
+    (`rotateOrgConnectionSecrets`); ba ô `accessToken` · `accessTokenExpiresAt` · `tokenPairOf` do MÁY ghi, không có trên form.
+  */
+  {
+    key: "zalo-oa",
+    label: "Zalo OA — bot trả lời tin nhắn",
+    vendor: "Zalo",
+    kind: "MESSAGING",
+    capabilities: ["read_conversations", "send_customer_message"],
+    auth: "OAUTH_TOKEN",
+    settings: [
+      { key: "appId", label: "App ID (Zalo for Developers)", type: "text", secret: false, required: true, pattern: "^[0-9]{5,30}$", maxLength: 30 },
+      { key: "oaId", label: "OA ID", type: "text", secret: false, required: true, pattern: "^[0-9]{5,30}$", maxLength: 30 },
+      { key: "appSecret", label: "App Secret (Thông tin ứng dụng)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9_-]{8,200}$", maxLength: 200 },
+      { key: "oaSecretKey", label: "OA Secret Key (Webhook — ký gói tin)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9_-]{8,200}$", maxLength: 200, hint: "Khác App Secret: lấy ở mục Webhook của app, dùng để kiểm chữ ký từng gói tin Zalo gửi tới." },
+      { key: "refreshToken", label: "Refresh token (API Explorer)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9._-]{20,2000}$", maxLength: 2000, hint: "Dùng một lần: máy tự làm mới và lưu cặp mới. Kết nối báo «không cấp token mới» ⇒ lấy token mới ở API Explorer rồi dán lại." },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/zalo-oa/[token]",
+      verify: "token «<mã tổ chức>.<chữ ký HMAC>» trong đường dẫn + chữ ký X-ZEvent-Signature = SHA256(app_id + body thô + timestamp + OA Secret Key)",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "sales_chat_inbound.message_id (UNIQUE, «zalo:<msg_id>»)",
+      binding: "ZALO_OA",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testZaloOa",
+    module: "ai_sales",
+    code: ["lib/integrations/zalo/", "lib/connectors/testers.ts", "lib/sales-chatbot/zalo.ts", "app/api/webhooks/zalo-oa/[token]/route.ts"],
+    consumers: ["lib/sales-chatbot/zalo.ts::processZaloThread"],
+    why: "Zalo OA của CHÍNH tổ chức. Tin khách nhắn OA ⇒ webhook Zalo ⇒ đúng tổ chức theo token trong đường dẫn, kiểm chữ ký bằng OA Secret Key ⇒ chatbot bán hàng của tổ chức trả lời (giá / tồn đọc từ ERP, khoá AI của shop, đơn ghi vào ERP) ⇒ gửi lại bằng tin tư vấn (/v3.0/oa/message/cs). Chỉ trả lời trong 48 giờ từ tin cuối của khách — ngoài đó Zalo tính phí, bot không gửi. Khác «Zalo Bot» báo nhóm (zalo-bot).",
   },
   /*
     HỘP THỬ (0180): kết nối nhắn tin KHÔNG gọi mạng — cùng giao diện `MessagingProvider` với Lark / Telegram, nhưng tin

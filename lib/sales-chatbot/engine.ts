@@ -32,7 +32,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isMessagingChannel, isPublicChannel, PUBLIC_CHAT_CHANNELS, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
@@ -516,7 +516,7 @@ async function webRateProblem(conv: ConvRow): Promise<string | null> {
       .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
     if (Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min) return "Anh/chị nhắn nhanh quá — đợi vài phút rồi nhắn tiếp giúp em nhé.";
   }
-  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(inArray(c.channel, ["WEB", "FANPAGE"]), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
+  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(inArray(c.channel, [...PUBLIC_CHAT_CHANNELS]), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
   if (Number(d?.n ?? 0) >= SALES_CHATBOT_LIMITS.webTurnsPerOrgPerDay) return "Shop đang quá tải tin nhắn — nhân viên sẽ liên hệ lại sớm ạ.";
   return null;
 }
@@ -617,7 +617,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       if (Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS) {
         const reason = "Khách nhắn sau khi đã chốt đơn — nhân viên xử lý (đổi địa chỉ / lịch giao / hỏi thêm)";
         const st = { ...st0, handoff: { reason, at: now.toISOString() } };
-        if (opts.channel !== "FANPAGE") await reply(conv, seq, cfg.handoff.message);
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
         await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
         if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now).catch(() => undefined);
         return { ok: true, view: (await conversationView(conv.id))! };
@@ -789,7 +789,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     if (!spoke && status === "OK") {
       const handedOffNow = Boolean(state.handoff) && conv.status !== "HANDOFF";
       if (handedOffNow) {
-        if (opts.channel !== "FANPAGE") await reply(conv, seq++, cfg.handoff.message);
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);
       } else {
         await reply(conv, seq++, EMPTY_REPLY_TEXT);
         lastError = lastError ?? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng";

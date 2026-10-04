@@ -273,6 +273,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
     "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials). Nhánh AI do NỀN TẢNG trả tiền (mặc định tắt) cũng dựng provider này với khoá TƯỜNG MINH `PLATFORM_AI_API_KEY` (lib/ai-usage/platform-ai.ts — từ chối khi trùng khoá của nhà), không bao giờ `ANTHROPIC_API_KEY`.",
   "lib/messaging/providers.ts":
     "Gửi tin nhóm (0180) bằng bí mật của CHÍNH tổ chức ngữ cảnh qua `openActiveConnection` (AAD gắn tổ chức) — không đọc biến môi trường nào; chỉ hai loại đích cố định (webhook Custom Bot của Lark · api.telegram.org), không theo chuyển hướng; hộp thử không gọi mạng.",
+  "lib/integrations/zalo/oa.ts":
+    "Zalo OA (kênh chat của chatbot bán hàng · kênh ZALO): App Secret / refresh token / access token là tham số TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy (kết nối «zalo-oa», app Zalo của shop) — client không đọc biến môi trường nào, nhà không có khoá Zalo OA.",
   "lib/integrations/google-places/client.ts":
     "Google Places API (New) cho Săn khách sỉ (0197): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy (kết nối «google-places») — client không đọc biến môi trường nào; đích cố định places.googleapis.com, khoá đi trong tiêu đề, không theo chuyển hướng.",
   "lib/creative/byok-image.ts":

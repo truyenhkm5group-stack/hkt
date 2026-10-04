@@ -116,6 +116,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/zalo-oa.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Zalo OA» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá hay không.",
   "tests/public-site.test.ts":
     "XOÁ SITE_DOMAIN / CHOTDON_DOMAIN / CHOTDON_APP_URL để kiểm `appOriginForHost` đọc ĐÚNG giá trị mặc định trong mã (app.chotdontudong.com) và host lạ rơi về APP_URL — đó là ĐẦU VÀO của phép kiểm; kỳ vọng APP_URL dựng lại từ cùng biến mà mã đọc, trả nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến ấy hay không.",
   "tests/telegram-relay.test.ts":
