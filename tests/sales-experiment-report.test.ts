@@ -24,6 +24,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/s
 import { chatTurn, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
 import { listDrillConversations, loadConversationReview, loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
 import { armStats, drillHref, liftOrNull, maskPhones, parseDrillFilter } from "@/lib/sales-chatbot/experiment-shared";
+import { basketStats, loadBasketStats } from "@/lib/sales-chatbot/basket";
 import { saveModeConfig, loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { saveOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 import { setSettingJson } from "@/lib/settings";
@@ -51,6 +52,16 @@ function testPure() {
   assert.equal(maskPhones("SĐT em 0912345678 nhé"), "SĐT em ••••678 nhé");
   assert.equal(maskPhones("+84 912 345 678"), "••••678");
   assert.equal(maskPhones("lấy 2 hộp 500g giá 250.000đ"), "lấy 2 hộp 500g giá 250.000đ", "không che số tiền / số lượng");
+  // Bán chéo: sản phẩm chính = giá trị dòng lớn nhất; phần còn lại là giá trị bán chéo (đơn chốt, danh nghĩa).
+  const b = basketStats([
+    [{ productId: "cha", quantity: 2, valueVnd: 800_000 }, { productId: "ruoc", quantity: 1, valueVnd: 350_000 }],
+    [{ productId: "cha", quantity: 1, valueVnd: 400_000 }, { productId: "cha", quantity: 1, valueVnd: 400_000 }],
+    [],
+  ]);
+  assert.deepEqual([b.orders, b.multiProductOrders, b.crossSellValueVnd, b.itemsPerOrder], [2, 1, 350_000, 2.5], "đơn không dòng nào bị bỏ; hai dòng cùng sản phẩm không phải bán chéo");
+  assert.equal(b.multiProductRate, null, "2 đơn < 10 ⇒ tỷ lệ null");
+  const many = basketStats(Array.from({ length: 10 }, (_, i) => (i < 3 ? [{ productId: "a", quantity: 1, valueVnd: 1 }, { productId: "b", quantity: 1, valueVnd: 1 }] : [{ productId: "a", quantity: 1, valueVnd: 1 }])));
+  assert.equal(many.multiProductRate, 0.3);
   console.log("  ✓ AI vs người (thuần): chưa đo ≠ 0, mẫu < 10 ⇒ null, chênh lệch chỉ khi hai bên đo được, lọc drill-down, che SĐT");
 }
 
@@ -155,6 +166,10 @@ export async function testSalesExperimentReport() {
       assert.equal(on.arms.HUMAN.delivered, 0);
       assert.equal(on.arms.HUMAN.measurableConversations, 12);
 
+      // Bán chéo: đơn bán thật có chả mực + ruốc ⇒ 1 đơn ≥ 2 sản phẩm, giá trị bán chéo 350.000 ₫. Đơn ghi hộ người (origin
+      // AI_ORDER_SYNC) không phải đơn bot chốt ⇒ không vào giỏ.
+      const basket = await loadBasketStats({ days: 30 });
+      assert.deepEqual([basket.orders, basket.multiProductOrders, basket.crossSellValueVnd, basket.itemsPerOrder], [1, 1, 350_000, 3]);
       // Drill-down: hội thoại bán thật có sổ sự kiện ⇒ vào nhóm AI tự xử lý, nhánh AI; không vào nhánh người / lý do sỉ.
       const viewer: SessionUser = { ...ids.admin, id: "xr-viewer", role: "VIEWER", permissions: ["ai_sales:view"] };
       const all = await listDrillConversations(viewer, parseDrillFilter({}));
