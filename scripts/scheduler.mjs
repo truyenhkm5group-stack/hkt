@@ -93,6 +93,11 @@ const JOBS = [
   */
   { job: "ads-spend-org", every: 60, offset: 40 },
   /*
+    SĂN KHÁCH SỈ (0197) — CHỈ FAN-OUT tự động hoá, mỗi 3 phút (lệch pha 2). Một lượt ≤ 50 giây cho tổ chức có chiến dịch
+    đang chạy; tổ chức không có việc trả ngay sau một câu đọc. Nhà TẮT module này.
+  */
+  { job: "wholesale-leads", every: 3, offset: 2 },
+  /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
     Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có

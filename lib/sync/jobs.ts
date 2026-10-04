@@ -74,6 +74,7 @@ import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
+import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
 
 export type JobOptions = {
   trigger: SyncTrigger;
@@ -572,6 +573,21 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Tổ chức khách đã bật kết nối «Quảng cáo Facebook (Meta) của tổ chức» ⇒ kéo chi tiêu theo ngày của các tài khoản quảng cáo đã khai vào bảng chi tiêu quảng cáo (cùng bộ đồng bộ, cùng khoá chống trùng với tổ chức nhà; dòng gõ tay không bị đụng). " +
       "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Tổ chức nhà dùng «facebook-ads».",
     run: (o) => syncOrgMetaAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
+  /*
+    SĂN KHÁCH SỈ (0197): một LƯỢT quét ≤ 50 giây cho tổ chức có chiến dịch đang chạy / lead chờ bổ sung — lấy chi tiết,
+    mỗi chiến dịch một trang Google Places, đọc website công khai, làm mới lead đang chăm sắp hết hạn lưu, xoá dữ liệu
+    Google hết hạn. Khoá API là kết nối «google-places» CỦA CHÍNH tổ chức; trần ngân sách ngày / tháng tự tạm dừng.
+    Không có việc ⇒ một câu đọc, không ghi sync_runs.
+  */
+  "wholesale-leads": {
+    label: "Săn khách sỉ (Google Places)",
+    source: "ALL",
+    module: "wholesale_leads",
+    fanOut: true,
+    description:
+      "Chạy chiến dịch săn khách sỉ đang bật: tìm địa điểm theo ô từ khoá × khu vực, lọc, khử trùng, lấy SĐT / website, chấm điểm, đọc trang liên hệ công khai. Dùng khoá Google Places của tổ chức (Cài đặt → Kết nối), dừng tự động khi chạm trần chi tiêu ngày / tháng. budgetMs=N để đổi trần thời gian một lượt.",
+    run: (o) => runWholesaleLeadsJob({ trigger: o.trigger, actor: o.actor, budgetMs: Math.min(240_000, num(o.params?.budgetMs) ?? 50_000) }),
   },
   // Company OS · Agent A — sổ mẫu. Không có lịch RIÊNG: chạy lồng sau mỗi lượt `pancake-products` (P1), và chạy tay từ /models hoặc trang Kết nối dữ liệu.
   "model-registry": {

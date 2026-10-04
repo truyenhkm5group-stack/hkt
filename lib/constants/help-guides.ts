@@ -180,6 +180,36 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  // ───────────────── SĂN KHÁCH SỈ ─────────────────
+  {
+    key: "wholesale-lead-hunter",
+    topic: "CUSTOMERS",
+    title: "Tìm khách sỉ mới (nhà hàng, quán, khách sạn)",
+    summary: "Quét Google Places theo từ khoá × khu vực, ERP tự lọc, khử trùng, chấm điểm; người bán chỉ gọi lead hạng cao.",
+    href: "/wholesale/lead-hunter",
+    permission: "wholesale:scan",
+    steps: [
+      { text: "Lần đầu: vào Cài đặt → Kết nối, mục «Google Places (tìm doanh nghiệp)», dán khoá API, kiểm tra rồi bật.", href: "/settings/connections" },
+      { text: "Ở Săn khách sỉ, bấm «Dùng mẫu» trên mẫu HSLC (hoặc điền form), bấm «Xem trước truy vấn» để thấy số truy vấn và chi phí ước tính." },
+      { text: "Bấm «Bắt đầu quét». Quét chạy nền, trang tự làm mới; «Tạm dừng» / «Tiếp tục» không mất tiến độ. Chạm trần chi phí ngày / tháng thì tự dừng và báo." },
+      { text: "Lead đủ điểm có SĐT tự lên «Đủ điều kiện». Ở danh sách, chọn lead rồi «Xếp hàng liên hệ» — ERP KHÔNG tự gửi tin." },
+    ],
+  },
+  {
+    key: "wholesale-leads-work",
+    topic: "CUSTOMERS",
+    title: "Gọi và chăm khách sỉ tiềm năng",
+    summary: "Mỗi ngày: mở lead được giao, gọi, ghi kết quả, gửi lời chào, chuyển thành khách khi chốt.",
+    href: "/wholesale/leads",
+    permission: "wholesale:view",
+    steps: [
+      { text: "Mở Khách sỉ tiềm năng, lọc Phụ trách = Của tôi, hoặc Liên hệ = «Đến hạn gọi lại».", href: "/wholesale/leads" },
+      { text: "Trong lead: bấm «Gọi», sau cuộc gọi bấm «Ghi cuộc gọi» và chọn kết quả; hẹn ngày gọi lại nếu cần." },
+      { text: "Muốn nhắn Zalo / SMS: «Soạn lời chào», duyệt ở Hàng đợi liên hệ, gửi bằng app rồi bấm «Đã gửi» và ghi kết quả." },
+      { text: "Khách đồng ý mua: «Chuyển thành khách hàng» — tên, SĐT, địa chỉ lấy từ lead, không nhập lại. Khách từ chối: «Không liên hệ nữa»." },
+    ],
+  },
+
   // ───────────────── DỊCH VỤ & LỊCH HẸN ─────────────────
   {
     key: "appointments",

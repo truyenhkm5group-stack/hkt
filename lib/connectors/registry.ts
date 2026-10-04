@@ -29,7 +29,7 @@ import type { ModuleKey } from "@/lib/constants/platform-modules";
  * Tệp THUẦN và client-safe: chỉ `import type`.
  */
 
-export const CONNECTOR_KINDS = ["ORDER_SOURCE", "SHIPPING", "PAYMENT", "ADS", "MESSAGING", "ACCOUNTING", "AI", "STORAGE", "PLATFORM"] as const;
+export const CONNECTOR_KINDS = ["ORDER_SOURCE", "SHIPPING", "PAYMENT", "ADS", "MESSAGING", "ACCOUNTING", "AI", "STORAGE", "PLATFORM", "LEAD_SOURCE"] as const;
 export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 
 export const CONNECTOR_KIND_LABEL: Record<ConnectorKind, string> = {
@@ -42,6 +42,7 @@ export const CONNECTOR_KIND_LABEL: Record<ConnectorKind, string> = {
   AI: "Trí tuệ nhân tạo",
   STORAGE: "Lưu trữ & sao lưu",
   PLATFORM: "Vận hành nền tảng",
+  LEAD_SOURCE: "Nguồn khách hàng tiềm năng",
 };
 
 /**
@@ -58,6 +59,7 @@ export const CAPABILITIES_BY_KIND = {
   AI: ["chat", "vision", "image_generate", "video_generate", "speech"],
   STORAGE: ["offsite_backup"],
   PLATFORM: ["read_deployments", "read_pull_requests", "dispatch_workflow", "agent_ingest"],
+  LEAD_SOURCE: ["search_places", "place_details"],
 } as const satisfies Record<ConnectorKind, readonly string[]>;
 export type ConnectorCapability = (typeof CAPABILITIES_BY_KIND)[ConnectorKind][number];
 
@@ -444,6 +446,41 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     code: ["lib/connectors/testers.ts", "lib/marketing/meta-ads-org.ts"],
     consumers: ["lib/marketing/meta-ads-org.ts::syncOrgMetaAds"],
     why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức. Khác «Meta Ads (Facebook)» của nhà (biến môi trường, có nhánh ghi).",
+  },
+  // ─────────────── NGUỒN KHÁCH TIỀM NĂNG ───────────────
+  /*
+    GOOGLE PLACES API (NEW) CỦA CHÍNH TỔ CHỨC (0197, Săn khách sỉ): khoá API Google Cloud của TỔ CHỨC (dự án Google
+    Cloud của họ, hoá đơn Google của họ). Chỉ tìm doanh nghiệp công khai (Text / Nearby Search) và đọc chi tiết liên hệ
+    (Place Details) — không có đường ghi nào. Khoá không bao giờ xuống trình duyệt.
+  */
+  {
+    key: "google-places",
+    label: "Google Places (tìm doanh nghiệp)",
+    vendor: "Google",
+    kind: "LEAD_SOURCE",
+    capabilities: ["search_places", "place_details"],
+    auth: "API_KEY",
+    settings: [
+      {
+        key: "apiKey",
+        label: "Khoá API Google Maps Platform (đã bật Places API (New))",
+        type: "text",
+        secret: true,
+        required: true,
+        hint: "console.cloud.google.com → chọn dự án có bật thanh toán → APIs & Services → Library → bật «Places API (New)» → Credentials → Create credentials → API key. Giới hạn khoá: API restrictions = chỉ Places API (New); Application restrictions = IP của máy chủ ERP. Đặt hạn mức (Quotas) theo ngày trong Google Cloud để chặn thêm một lớp.",
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{29,199}$",
+        maxLength: 200,
+      },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — bí mật mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testGooglePlaces",
+    module: "wholesale_leads",
+    code: ["lib/connectors/testers.ts", "lib/integrations/google-places/", "lib/wholesale/engine.ts"],
+    consumers: ["lib/wholesale/engine.ts::runLeadHunterTick"],
+    why: "Săn khách sỉ (0197): tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm bằng Places API (New) với khoá của CHÍNH tổ chức. Kiểm tra = một lượt Text Search chỉ xin Place ID (SKU miễn phí), khoá đi trong tiêu đề X-Goog-Api-Key, chỉ tới places.googleapis.com, không theo chuyển hướng. Job «wholesale-leads» mỗi 3 phút chạy chiến dịch đang bật, có trần ngân sách ngày / tháng tự dừng.",
   },
   // ─────────────── GỬI TIN ───────────────
   {
