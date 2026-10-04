@@ -68,7 +68,20 @@ flowchart LR
   bài), phần còn lại CI Linux phủ và CI của 7e2edfce xanh (`CURRENT_STATE.md` §7).
 - **Cổng người:** chủ shop duyệt hướng đi (đặc biệt bảng quyết định trong `AI_SALES_PRODUCT_SPEC.md` §9).
 
-## M1 · Lưới an toàn: bộ hội thoại vàng
+## M1 · Lưới an toàn: bộ hội thoại vàng — *đã làm (bản đầu), `tests/sales-agent-golden/`*
+
+- **Đã có:** 10 hội thoại kịch bản (báo giá, trọn vòng lên đơn → chốt ghi thật, chốt khi khách chưa đồng ý, quá tồn, khách sỉ
+  ⇒ chuyển người, khách từ chối, mã mẫu không có, rò chữ nội bộ, khung THỬ không ghi, gói ngành thời trang) phát lại qua ĐÚNG
+  `chatTurn` với model giả; ảnh chụp lời nhắc + chuỗi công cụ + kết quả máy chủ + trạng thái cuối ở `snapshots/`. Đỏ ⇒ in
+  đường dẫn khác đầu tiên; đổi cố ý ⇒ `npx tsx tests/sales-agent-golden/update.ts`. Chạy trong `npm test`.
+- **Bộ vàng lộ ra ba chỗ khách bị IM LẶNG (chụp nguyên hành vi hiện tại — sửa là việc riêng, ảnh chụp sẽ đổi theo):**
+  1. Model chỉ gọi `handoff_to_human` (không kèm chữ) ⇒ vòng lặp dừng, khách KHÔNG nhận câu chuyển người đã cấu hình
+     (`khach-si-chuyen-nguoi`).
+  2. Mọi chữ của model bị bộ lọc suy luận chặn và không gọi công cụ ⇒ lượt kết thúc không một câu (`ro-ri-chu-noi-bo`).
+  3. Máy chủ từ chối chốt, model nhại lỗi công cụ ⇒ chữ bị lọc ⇒ khách không nhận gì (`chot-khi-chua-dong-y`, lượt 2).
+- **Còn lại của M1:** hội thoại thật của HSLC (đã che) — cần thao tác ops chỉ-đọc; bộ kiểm phân loại giọng fanpage.
+
+### Kế hoạch ban đầu
 
 - **Mục tiêu:** mọi thay đổi về engine/kênh sau này phải chứng minh "không đổi hành vi" bằng máy, không bằng mắt.
 - **Phạm vi:**
