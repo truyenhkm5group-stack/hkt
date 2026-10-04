@@ -194,6 +194,14 @@ export const MANUAL_DELIVERY_FEE_SETTING_KEY = "orders.manualDeliveryFee";
  */
 export const AUTO_CONFIRM_COMPLETE_SETTING_KEY = "orders.autoConfirmComplete";
 
+/**
+ * TỔ CHỨC ĐÃ CHUYỂN HẲN SANG ERP (chủ shop chốt 04/10/2026 — ORDER_OUTCOME.md mục 11.3). Shop đến từ Pancake nhập lịch sử đơn
+ * Pancake rồi tắt kết nối: CSDL có đơn không `erp-` nên phép nhận diện «tổ chức đồng bộ đơn» theo dữ liệu đẩy MỌI đơn ERP
+ * mới ra khỏi báo cáo. Dòng này là lời TUYÊN BỐ của quản trị shop (bấm một lần): từ đó đơn ERP vào mọi báo cáo. Giá trị
+ * `{ since, by }` — ai, khi nào. Tổ chức nhà không bao giờ có dòng này (lõi chặn).
+ */
+export const ERP_NATIVE_SETTING_KEY = "orders.erpNative";
+
 /** Đơn ĐỦ THÔNG TIN: SĐT 8–15 chữ số · địa chỉ ≥ 5 ký tự · ít nhất một dòng hàng. HÀM THUẦN. */
 export function manualOrderComplete(recipient: { phone: string; address: string }, lineCount: number): boolean {
   const digits = recipient.phone.replace(/\D/g, "");

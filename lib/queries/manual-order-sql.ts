@@ -6,7 +6,7 @@
  */
 import { sql, type SQL } from "drizzle-orm";
 import { schema } from "@/db";
-import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
+import { ERP_NATIVE_SETTING_KEY, MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
 
 const PATTERN = `${MANUAL_ORDER_ID_PREFIX}%`;
 
@@ -84,8 +84,14 @@ export const MANUAL_ORDER_PAID: SQL = sql`(${IS_MANUAL_ORDER} and ${MANUAL_PAYME
  */
 const ORG_HAS_SYNCED_ORDERS: SQL = sql`exists (select 1 from orders so_sync where so_sync.id not like ${PATTERN})`;
 
-/** Đơn nằm trong báo cáo danh nghĩa / phép so marketer: đơn đồng bộ, hoặc MỌI đơn ở tổ chức không đồng bộ đơn. */
-export const IN_SALES_REPORTS: SQL = sql`(${schema.orders.id} not like ${PATTERN} or not ${ORG_HAS_SYNCED_ORDERS})`;
+/**
+ * Quản trị shop đã TUYÊN BỐ chuyển hẳn sang ERP (`ERP_NATIVE_SETTING_KEY` — ORDER_OUTCOME.md mục 11.3): đơn Pancake trong CSDL
+ * chỉ còn là LỊCH SỬ đã nhập, không phải dấu hiệu đang đồng bộ. Câu con KHÔNG tương quan ⇒ InitPlan, tính một lần mỗi câu.
+ */
+const ORG_DECLARED_ERP_NATIVE: SQL = sql`exists (select 1 from settings st_native where st_native.key = ${ERP_NATIVE_SETTING_KEY})`;
+
+/** Đơn nằm trong báo cáo danh nghĩa / phép so marketer: đơn đồng bộ, hoặc MỌI đơn ở tổ chức không đồng bộ đơn / đã chuyển hẳn sang ERP. */
+export const IN_SALES_REPORTS: SQL = sql`(${schema.orders.id} not like ${PATTERN} or not ${ORG_HAS_SYNCED_ORDERS} or ${ORG_DECLARED_ERP_NATIVE})`;
 
 /**
  * "GIAO THÀNH CÔNG" CÓ KÉO THEO DOANH THU KHÔNG — cửa của MỌI tổng TIỀN dựng trên ORDER_OUTCOME = 'DELIVERED'. Cùng phạm

@@ -137,6 +137,18 @@ Thêm hãng = thêm một adapter vào `lib/carriers/registry.ts`, lõi không �
   «im lặng» và độ tươi giao vận, nhưng chưa tự mở ca chăm sóc.
 - **Đối soát COD của GHN** (gói `cod` / `CODTransferDate`) chưa thành chứng từ tiền. Tiền thật vẫn theo chứng từ thanh toán.
 
+## P4 — Shop đến từ Pancake: «Chuyển hẳn sang ERP» và «huỷ vận đơn ≠ huỷ đơn»
+
+Hai quyết định của chủ shop ngày 04/10/2026, đặc tả ở `docs/business-rules/ORDER_OUTCOME.md` mục 11.3 và 11.5.
+
+- **Chuyển hẳn sang ERP.** Đường chuyển: nối «Pancake POS của tổ chức» → đồng bộ một lần (khách, sản phẩm, đơn cũ) → tắt
+  kết nối → trang Đơn hàng → «Chuyển hẳn sang ERP».
+  - Trước nút này, CSDL có đơn Pancake đã nhập khiến **mọi đơn tạo trong ERP đứng ngoài** doanh thu, lợi nhuận và marketer.
+  - Bấm một lần (quyền cấu hình, có nhật ký): đơn ERP vào mọi báo cáo, đơn Pancake giữ nguyên làm lịch sử.
+  - Chỉ bấm được khi đã tắt đồng bộ đơn. Tổ chức nhà không bao giờ bấm được.
+- **Huỷ vận đơn ≠ huỷ đơn.** Đơn ERP còn sống mà lần gửi mới nhất bị hãng huỷ, chưa gửi lại ⇒ kết quả **«Chưa gửi»**, không
+  phải «Đã huỷ». Tạo lần gửi mới ⇒ theo lần gửi mới; người huỷ đơn ⇒ «Đã huỷ».
+
 ## Kế tiếp
 
 - **P3b.** GHTK: cùng lõi, cùng bảng mã đã khai trong đặc tả (mục 4.1).

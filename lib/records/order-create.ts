@@ -53,6 +53,7 @@ import {
   DELIVERY_NOTE_LIMITS,
   MANUAL_DELIVERY_FEE_SETTING_KEY,
   AUTO_CONFIRM_COMPLETE_SETTING_KEY,
+  ERP_NATIVE_SETTING_KEY,
   manualOrderComplete,
   MANUAL_FAILED_FROM_STAGES,
   parseManualDeliveryFee,
@@ -79,6 +80,7 @@ import type { FieldError } from "@/lib/metadata/types";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { canUseModule, orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { runWorkflows } from "@/lib/workflow/engine";
+import { currentOrganization } from "@/lib/platform/context";
 import { agentPriceProblems, agentUnitPrices, type AgentPricingMode } from "@/lib/commerce/pricing";
 import { additionalNeed, lockVariants, shortfalls, type StockTx } from "@/lib/commerce/stock";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -836,6 +838,44 @@ export async function saveAutoConfirmCompleteCore(user: SessionUser, enabled: bo
     }
   }
   return { ok: true, enabled: enabled === true, promoted, kept };
+}
+
+// ─────────────────────────── Chuyển hẳn sang ERP (shop đến từ Pancake) ───────────────────────────
+
+export type ErpNativeView = { declared: boolean; since: string | null; hasSyncedOrders: boolean; canDeclare: boolean; reason: string | null };
+
+/**
+ * Khung «Chuyển hẳn sang ERP» trên trang Đơn hàng (ORDER_OUTCOME.md mục 11.3). CHỈ ĐỌC. Hiện khi CSDL có đơn không `erp-`
+ * (lịch sử nhập từ Pancake) — tổ chức chỉ có đơn ERP thì không cần tuyên bố gì, báo cáo đã đếm đơn ERP.
+ */
+export async function erpNativeView(user: SessionUser): Promise<ErpNativeView | null> {
+  const org = await currentOrganization();
+  if (org.isHome) return null;
+  const native = await getSettingJson<{ since?: unknown } | null>(ERP_NATIVE_SETTING_KEY, null);
+  const db = await getDb();
+  const [synced] = await db.select({ id: schema.orders.id }).from(schema.orders).where(sql`${schema.orders.id} not like ${`${MANUAL_ORDER_ID_PREFIX}%`}`).limit(1);
+  const gate = await manualOrderOrgGate();
+  const reason = !gate.allowed ? gate.reason : !can(user, "settings:manage") ? "Cần quyền cấu hình (settings:manage)." : null;
+  return { declared: native !== null, since: native && typeof native.since === "string" ? native.since : null, hasSyncedOrders: Boolean(synced), canDeclare: native === null && reason === null, reason };
+}
+
+/**
+ * TUYÊN BỐ chuyển hẳn sang ERP — một lần. Cổng: không phải tổ chức nhà (luật 3.9 của nhà không đổi một đơn) · tổ chức ĐÃ
+ * thôi đồng bộ đơn (`manualOrderOrgGate` — kết nối Pancake POS còn bật thì đơn vẫn từ Pancake, tuyên bố là sai) ·
+ * `settings:manage`. Ghi `{ since, by }` + nhật ký. Không sửa đơn nào: chỉ đổi PHẠM VI đơn ERP trong báo cáo.
+ */
+export async function declareErpNativeCore(user: SessionUser): Promise<{ ok: true; since: string } | MetaFailure> {
+  const org = await currentOrganization();
+  if (org.isHome) return fail("NOT_SUPPORTED", "Tổ chức nhà đồng bộ đơn Pancake — không chuyển hẳn sang ERP.");
+  const gate = await manualOrderOrgGate();
+  if (!gate.allowed) return fail(gate.code, `${gate.reason} Tắt kết nối Pancake POS trước rồi mới chuyển hẳn sang ERP.`);
+  if (!can(user, "settings:manage")) return fail("FORBIDDEN", "Cần quyền cấu hình (settings:manage) để chuyển hẳn sang ERP.");
+  const existing = await getSettingJson<{ since?: unknown } | null>(ERP_NATIVE_SETTING_KEY, null);
+  if (existing !== null) return fail("CONFLICT", "Tổ chức đã chuyển hẳn sang ERP từ trước.");
+  const since = new Date().toISOString();
+  await setSettingJson(ERP_NATIVE_SETTING_KEY, { since, by: user.id });
+  await audit({ userId: user.id, userEmail: user.email, action: "ORDERS_ERP_NATIVE", entity: "SETTINGS", entityId: ERP_NATIVE_SETTING_KEY, before: null, after: { since, by: user.id }, reason: "Chuyển hẳn sang ERP: đơn Pancake trong CSDL là lịch sử đã nhập; đơn tạo trong ERP vào mọi báo cáo (ORDER_OUTCOME.md 11.3)" });
+  return { ok: true, since };
 }
 
 const failedZ = z.object({ reason: z.string().trim().min(DELIVERY_NOTE_LIMITS.reasonMin, "nói vì sao giao không thành công (khách không nhận, sai địa chỉ…)").max(DELIVERY_NOTE_LIMITS.reasonMax) }).strict();

@@ -11,7 +11,7 @@ import type { Period } from "@/lib/search-params";
 import { memo } from "@/lib/cache";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
-import { MANUAL_ORDER_DELIVERED, MANUAL_ORDER_PAID, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
+import { IS_MANUAL_ORDER, MANUAL_ORDER_DELIVERED, MANUAL_ORDER_PAID, REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
@@ -263,6 +263,10 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   -- Đơn KHÔNG có dòng vận đơn nào thì không rơi vào đây: s.stage là NULL nên xuống 'NOT_SHIPPED'.
   when ${s.stage} is not null and not ${HAS_CARRIER_LINK} and ${o.stage} not in ('CANCELLED','DELETED') then 'UNKNOWN'
   when ${VTP_RETURNED} then 'RETURNED'
+  -- HUỶ VẬN ĐƠN ≠ HUỶ ĐƠN (chủ shop chốt 04/10/2026 — ORDER_OUTCOME.md mục 11.5). Đơn tạo trong ERP còn sống mà lần gửi
+  -- mới nhất bị hãng huỷ (chứng từ huỷ của ĐVVC) và chưa gửi lại ⇒ CHƯA GỬI, không phải ĐÃ HUỶ: hàng còn trong kho, đơn
+  -- chờ một lần gửi mới hoặc chờ người huỷ đơn. Chỉ đơn erp-: đơn Pancake bị hãng huỷ thì Pancake huỷ đơn — nhà không đổi.
+  when ${IS_MANUAL_ORDER} and ${o.stage} not in ('CANCELLED','DELETED') and (${VTP_CANCELLED} or (${HAS_VTP_EVIDENCE} and ${s.stage} = 'CANCELLED')) then 'NOT_SHIPPED'
   when ${VTP_CANCELLED} then 'CANCELLED'
   when ${s.stage} = 'DELIVERED' and ${GOODS_CAME_BACK} then 'RETURNED'
   -- ĐÃ GIAO và BIẾT CHẮC SỐ TIỀN thì áp ngưỡng: dưới 50K là hoàn, 50K–100K là không thành công.

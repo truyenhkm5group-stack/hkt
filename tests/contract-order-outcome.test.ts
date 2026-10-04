@@ -40,10 +40,12 @@ type Setup = {
    * chặng chuẩn hoá ghi lúc nhận (null ⇒ mã lạ, không dựng chặng).
    */
   carrierEvents?: { source: "GHN_WEBHOOK" | "GHTK_WEBHOOK"; status: string; stage: string | null; leg?: "OUTBOUND" | "RETURN" | "UNKNOWN" }[];
+  /** Đơn tạo trong ERP (id `erp-…`) — mục 11.5. */
+  manual?: boolean;
 };
 
 async function build(db: Db, s: Setup) {
-  const id = next();
+  const id = s.manual ? `erp-${next()}` : next();
   const code = `PKE-${id}`;
   await db.insert(schema.orders).values({
     id,
@@ -198,6 +200,12 @@ export async function testOrderOutcomeContract(db: Db) {
   await check("ảnh chụp cũ + GHN returned ⇒ HOÀN theo chứng từ", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("returned", "RETURNED", "RETURN")] }, "RETURNED");
   await check("ảnh chụp cũ + GHTK -1 ⇒ HUỶ theo chứng từ", { orderStage: "CANCELLED", shipmentStage: "PENDING", carrierEvents: [ghtk("1", "PENDING"), ghtk("-1", "CANCELLED")] }, "CANCELLED");
   await check("ảnh chụp cũ + GHTK 6 ⇒ GIAO THÀNH CÔNG theo chứng từ", { shipmentStage: "OUT_FOR_DELIVERY", codAmount: 499_000, carrierEvents: [ghtk("3", "PICKED_UP"), ghtk("6", "DELIVERED")] }, "DELIVERED");
+  // ───────── Huỷ vận đơn ≠ huỷ đơn — đơn ERP (mục 11.5, chủ shop chốt 04/10/2026) ─────────
+  await check("đơn ERP còn sống + Viettel Post 107 ⇒ CHƯA GỬI", { manual: true, orderStage: "CONFIRMED", shipmentStage: "CANCELLED", vtpEvents: [{ status: "100", stage: "PENDING" }, { status: "107", stage: "CANCELLED" }] }, "NOT_SHIPPED");
+  await check("đơn ERP còn sống + GHN cancel ⇒ CHƯA GỬI", { manual: true, orderStage: "CONFIRMED", shipmentStage: "CANCELLED", carrierEvents: [ghn("ready_to_pick", "PENDING"), ghn("cancel", "CANCELLED")] }, "NOT_SHIPPED");
+  await check("đơn ERP đã huỷ + GHN cancel ⇒ ĐÃ HUỶ", { manual: true, orderStage: "CANCELLED", shipmentStage: "CANCELLED", carrierEvents: [ghn("ready_to_pick", "PENDING"), ghn("cancel", "CANCELLED")] }, "CANCELLED");
+  await check("đơn ERP còn sống + GHN returned ⇒ HOÀN (hoàn thắng nhánh chưa gửi)", { manual: true, orderStage: "CONFIRMED", shipmentStage: "RETURNED", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("returned", "RETURNED", "RETURN")] }, "RETURNED");
+  await check("đơn Pancake còn sống + Viettel Post 107 ⇒ vẫn ĐÃ HUỶ (nhà không đổi)", { orderStage: "CANCELLED", shipmentStage: "CANCELLED", vtpEvents: [{ status: "100", stage: "PENDING" }, { status: "107", stage: "CANCELLED" }] }, "CANCELLED");
   // Mã của hãng này KHÔNG BAO GIỜ đọc bằng bảng của hãng kia: chuỗi «501» trên sự kiện GHN không phải mã Viettel Post.
   await check("sự kiện GHN mang chuỗi 501 KHÔNG phải mã giao thành công của Viettel Post", { shipmentStage: "IN_TRANSIT", codAmount: 499_000, carrierEvents: [ghn("picked", "PICKED_UP"), ghn("501", null, "OUTBOUND")] }, "IN_TRANSIT");
 
