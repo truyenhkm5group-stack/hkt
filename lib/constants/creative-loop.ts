@@ -266,8 +266,21 @@ export type OwnAdMetrics = {
   periodFrom: string | null;
   periodTo: string | null;
   measuredAt: string | null;
-  /** Mã hàng suy từ đâu: dòng đơn mang `ad_id` · `ad_spends.product_id` · không suy được. */
-  productBasis: "ORDERS" | "AD_SPENDS" | "NONE";
+  /** Mã hàng suy từ đâu: dòng đơn mang `ad_id` · `ad_spends.product_id` · NGƯỜI NHẬP CHỌN · không suy được. */
+  productBasis: "ORDERS" | "AD_SPENDS" | "MANUAL" | "NONE";
+  /**
+   * Cách chọn mẫu lúc nhập (`lib/constants/own-ad-ranking.ts`): `CLASSIFY` = luật cũ của nhà · `RANK` = xếp hạng
+   * tương đối trong các mẩu của chính tổ chức. `null` = nguồn nhập trước khi có trường này.
+   */
+  selectionMode: "CLASSIFY" | "RANK" | null;
+  /** Lượt mua và chi / lượt mua THEO META (cột `ad_spends.orders` của dòng đồng bộ) — không phải đơn ERP. */
+  metaPurchases: number | null;
+  costPerMetaPurchaseVnd: number | null;
+  /** Ảnh chụp thứ hạng lúc nhập (chỉ nhánh `RANK`): điểm 0–100, hạng, trên bao nhiêu mẩu đã xếp hạng. */
+  rankScore: number | null;
+  rankPosition: number | null;
+  rankedOf: number | null;
+  rankStatus: "RANKED" | "INSUFFICIENT_DATA" | null;
 };
 
 /** Đọc `metrics` (JSON không tin được). Số hỏng ⇒ `null`, không điền 0. */
@@ -290,7 +303,14 @@ export function parseOwnAdMetrics(raw: unknown): OwnAdMetrics {
     periodFrom: s(r.periodFrom),
     periodTo: s(r.periodTo),
     measuredAt: s(r.measuredAt),
-    productBasis: r.productBasis === "ORDERS" || r.productBasis === "AD_SPENDS" ? r.productBasis : "NONE",
+    productBasis: r.productBasis === "ORDERS" || r.productBasis === "AD_SPENDS" || r.productBasis === "MANUAL" ? r.productBasis : "NONE",
+    selectionMode: r.selectionMode === "CLASSIFY" || r.selectionMode === "RANK" ? r.selectionMode : null,
+    metaPurchases: n(r.metaPurchases),
+    costPerMetaPurchaseVnd: n(r.costPerMetaPurchaseVnd),
+    rankScore: n(r.rankScore),
+    rankPosition: n(r.rankPosition),
+    rankedOf: n(r.rankedOf),
+    rankStatus: r.rankStatus === "RANKED" || r.rankStatus === "INSUFFICIENT_DATA" ? r.rankStatus : null,
   };
 }
 

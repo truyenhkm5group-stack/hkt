@@ -7,9 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { importOwnAdsAction, importPancakeProductPhotosAction, previewOwnAdCandidatesAction } from "@/lib/actions/creative-import";
+import { ProductSearch } from "@/app/(dashboard)/marketing/creatives/product-search";
 import { OWN_AD_IMPORT, OWN_AD_REASON_LABEL } from "@/lib/constants/creative-loop";
+import { OWN_AD_RANK_METRICS, OWN_AD_RANK_METRIC_LABEL, OWN_AD_RANK_STATUS_LABEL, type OwnAdMode } from "@/lib/constants/own-ad-ranking";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
-import type { OwnAdCandidateList } from "@/lib/queries/creative-own-ads";
+import type { OwnAdCandidate, OwnAdCandidateList } from "@/lib/queries/creative-own-ads";
+import type { ProductOption } from "@/lib/queries/creative-sources";
 import { cn } from "@/lib/utils";
 
 /** Kiểu tóm tắt lấy từ CHÍNH action — client không nhập tệp chỉ-máy-chủ `lib/creative/import`, kể cả chỉ để lấy kiểu. */
@@ -59,11 +62,36 @@ function HaiTang({ tren, duoi }: { tren: ReactNode; duoi?: ReactNode }) {
   );
 }
 
-export function OwnAdImportDialog() {
+/** Ô điểm: hạng + điểm (nhánh xếp hạng) hoặc nhãn luật cũ kèm điểm để đọc; chưa đủ dữ liệu thì nói ra, không chấm. */
+function DiemCell({ c, mode, rankedOf }: { c: OwnAdCandidate; mode: OwnAdMode; rankedOf: number }) {
+  const r = c.rank;
+  const chiTiet = OWN_AD_RANK_METRICS.map((m) => `${OWN_AD_RANK_METRIC_LABEL[m]}: ${r.percentiles[m] === null ? "—" : `hơn ${Math.round((r.percentiles[m] as number) * 100)}% nhóm`}`).join("\n");
+  const diem =
+    r.status === "RANKED" ? (
+      <span title={`Điểm = trung bình thứ hạng phần trăm trong các mẩu của shop (không ngưỡng tiền)\n${chiTiet}`}>
+        #{formatNumber(r.rank)}/{formatNumber(rankedOf)} · <b>{formatNumber(r.score)}</b>
+      </span>
+    ) : (
+      <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-semibold text-warning" title={r.insufficientReason ?? undefined}>
+        {OWN_AD_RANK_STATUS_LABEL[r.status]}
+      </span>
+    );
+  if (mode === "RANK") return <HaiTang tren={diem} duoi={r.status === "RANKED" ? "điểm / 100" : (r.insufficientReason ?? "")} />;
+  return (
+    <HaiTang
+      tren={c.reason ? <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold", c.reason === "WIN" ? "bg-success/15 text-success" : "bg-primary/10 text-primary")}>{OWN_AD_REASON_LABEL[c.reason]}</span> : "—"}
+      duoi={diem}
+    />
+  );
+}
+
+export function OwnAdImportDialog({ products }: { products: ProductOption[] }) {
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<OwnAdCandidateList | null>(null);
   const [winAbove, setWinAbove] = useState<number | null>(null);
   const [chon, setChon] = useState<Set<string>>(new Set());
+  /** Mã hàng người nhập chọn cho từng mẩu (mẩu → products.id) — máy không đoán khi không suy được. */
+  const [maChon, setMaChon] = useState<Record<string, string>>({});
   const [ketQua, setKetQua] = useState<OwnAdImportSummary | null>(null);
   const [loading, startLoad] = useTransition();
   const [importing, startImport] = useTransition();
@@ -80,7 +108,9 @@ export function OwnAdImportDialog() {
       }
       setList(r.list);
       setWinAbove(r.winOrdersAbove);
-      setChon(new Set(r.list.rows.filter((x) => !x.importedSourceId).slice(0, OWN_AD_IMPORT.maxPerImport).map((x) => x.adId)));
+      setMaChon({});
+      // Nhánh luật cũ: mọi mẩu đã ĐẠT ngưỡng nên chọn sẵn. Nhánh xếp hạng: không mẩu nào "đạt" — người chọn từ đầu bảng.
+      setChon(r.list.mode === "CLASSIFY" ? new Set(r.list.rows.filter((x) => !x.importedSourceId).slice(0, OWN_AD_IMPORT.maxPerImport).map((x) => x.adId)) : new Set());
     });
   };
 
@@ -92,10 +122,12 @@ export function OwnAdImportDialog() {
       else moi.delete(adId);
       return moi;
     });
+  const chonDauBang = () => setChon(new Set(chuaNhap.filter((x) => x.rank.status === "RANKED").slice(0, OWN_AD_IMPORT.maxPerImport).map((x) => x.adId)));
 
   const nhap = () =>
     startImport(async () => {
-      const r = await importOwnAdsAction({ adIds: [...chon] });
+      const productIds = Object.fromEntries(Object.entries(maChon).filter(([adId, pid]) => chon.has(adId) && pid));
+      const r = await importOwnAdsAction({ adIds: [...chon], productIds });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -108,22 +140,42 @@ export function OwnAdImportDialog() {
       toast.success(`Đã nhập ${formatNumber(r.summary.imported.length)} quảng cáo cũ của shop`);
     });
 
+  const mode: OwnAdMode = list?.mode ?? "CLASSIFY";
+  const chiSoDung = list ? list.ranking.metricsUsed.map((m) => OWN_AD_RANK_METRIC_LABEL[m]).join(" · ") : "";
+
   return (
     <>
       <Button size="sm" variant="outline" onClick={mo} title="Xem trước mẫu thắng / mẫu có chỉ số tốt của chính shop rồi chọn mẩu để nhập làm nguồn ảnh.">
         <Megaphone className="size-4" /> Nhập mẫu thắng / mẫu tốt từ Facebook
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
           <DialogHeader>
             <DialogTitle>Nhập mẫu thắng / mẫu tốt của shop từ Facebook</DialogTitle>
-            <DialogDescription>
-              Mẩu QC có chi trong {OWN_AD_IMPORT.lookbackDays} ngày gần nhất, ít nhất {OWN_AD_IMPORT.minMessages} tin nhắn, và: <b>THẮNG</b> (đơn chốt vượt{" "}
-              {winAbove === null ? "ngưỡng thắng" : formatNumber(winAbove)}) hoặc <b>TỐT</b> (chi / tin nhắn cả đời dưới {formatVND(OWN_AD_IMPORT.goodCostPerMessageBelowVnd)}, đã chi từ{" "}
-              {formatVND(OWN_AD_IMPORT.goodMinSpendVnd)}). Số đo đọc từ dữ liệu ERP đã đồng bộ; bấm nhập thì máy mới đọc ảnh + câu chữ của mẩu trên Facebook. Chỉ nhận quảng
-              cáo MỘT ảnh — video, băng chuyền, quảng cáo động bị bỏ kèm lý do.
-            </DialogDescription>
+            {mode === "CLASSIFY" ? (
+              <DialogDescription>
+                Mẩu QC có chi trong {OWN_AD_IMPORT.lookbackDays} ngày gần nhất, ít nhất {OWN_AD_IMPORT.minMessages} tin nhắn, và: <b>THẮNG</b> (đơn chốt vượt{" "}
+                {winAbove === null ? "ngưỡng thắng" : formatNumber(winAbove)}) hoặc <b>TỐT</b> (chi / tin nhắn cả đời dưới {formatVND(OWN_AD_IMPORT.goodCostPerMessageBelowVnd)}, đã chi từ{" "}
+                {formatVND(OWN_AD_IMPORT.goodMinSpendVnd)}). Số đo đọc từ dữ liệu ERP đã đồng bộ; bấm nhập thì máy mới đọc ảnh + câu chữ của mẩu trên Facebook. Chỉ nhận quảng
+                cáo MỘT ảnh — video, băng chuyền, quảng cáo động bị bỏ kèm lý do.
+              </DialogDescription>
+            ) : (
+              <DialogDescription>
+                Shop chưa có đơn quy về mẩu quảng cáo, nên máy <b>xếp hạng tương đối</b> mọi mẩu có chi trong {OWN_AD_IMPORT.lookbackDays} ngày gần nhất, so với CHÍNH các mẩu
+                của shop: chi nhiều · chi / tin nhắn rẻ · nhiều lượt mua · chi / lượt mua rẻ (lượt mua theo Meta). Điểm 0–100 = trung bình thứ hạng phần trăm — không có ngưỡng
+                tiền nào. Mẩu dưới {formatNumber(list?.ranking.minEvents ?? OWN_AD_IMPORT.minMessages)} sự kiện (tin nhắn + lượt mua) là <b>chưa đủ dữ liệu</b>, không phải kém. Bấm
+                nhập thì máy mới đọc ảnh + câu chữ của mẩu trên Facebook; chỉ nhận quảng cáo MỘT ảnh của chính tài khoản shop. Mẩu không suy được mã hàng: chọn mã ở cột «Mã hàng»
+                để ảnh làm tham chiếu bố cục / phong cách cho mã đó.
+              </DialogDescription>
+            )}
           </DialogHeader>
+
+          {list && list.rows.length > 0 ? (
+            <p className="text-[11.5px] text-muted-foreground">
+              Điểm tính trên {formatNumber(list.ranking.ranked)} mẩu đủ dữ liệu (chưa đủ: {formatNumber(list.ranking.insufficient)}) · chỉ số dùng: {chiSoDung || "—"}
+              {list.ranking.metricsSkipped.length ? ` · bỏ: ${list.ranking.metricsSkipped.map((x) => `${OWN_AD_RANK_METRIC_LABEL[x.metric]} (${x.reason})`).join(" · ")}` : ""}
+            </p>
+          ) : null}
 
           {loading || !list ? (
             <div className="flex items-center gap-2 py-8 text-[13px] text-muted-foreground">
@@ -131,7 +183,10 @@ export function OwnAdImportDialog() {
             </div>
           ) : list.rows.length === 0 ? (
             <p className="py-6 text-[13px] text-muted-foreground">
-              Không mẩu nào đạt ngưỡng (đã xét {formatNumber(list.scanned)} mẩu có chi từ {list.since} và đủ tin nhắn). Số đo cấp mẩu chỉ có từ khi bật đồng bộ hạt quảng cáo.
+              {mode === "CLASSIFY"
+                ? `Không mẩu nào đạt ngưỡng (đã xét ${formatNumber(list.scanned)} mẩu có chi từ ${list.since} và đủ tin nhắn).`
+                : `Chưa có mẩu nào có chi từ ${list.since}.`}{" "}
+              Số đo cấp mẩu chỉ có từ khi bật đồng bộ hạt quảng cáo.
             </p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -140,13 +195,18 @@ export function OwnAdImportDialog() {
                   <tr>
                     <th className="w-8 px-2 py-1.5" />
                     <th className="px-2 py-1.5">Quảng cáo</th>
-                    <th className="px-2 py-1.5">Vì sao</th>
+                    <th className="px-2 py-1.5" title="Hạng / số mẩu đã xếp hạng · điểm 0–100. Rê chuột để xem thứ hạng từng chỉ số.">
+                      {mode === "RANK" ? "Hạng · điểm" : "Vì sao · điểm"}
+                    </th>
                     <th className="px-2 py-1.5 text-right">Chi · tin nhắn</th>
-                    <th className="px-2 py-1.5 text-right">Chi / tin</th>
+                    <th className="px-2 py-1.5 text-right" title="Lượt mua và chi / lượt mua THEO META (đồng bộ chi tiêu) — không phải đơn ERP">
+                      Mua (Meta)
+                    </th>
                     <th className="px-2 py-1.5 text-right">CTR · CPC</th>
                     <th className="px-2 py-1.5 text-right" title="Đơn chốt quy về ad_id (không huỷ) · giao / hoàn theo kết quả đơn">
-                      Đơn
+                      Đơn ERP
                     </th>
+                    <th className="px-2 py-1.5">Mã hàng</th>
                     <th className="px-2 py-1.5">Kỳ đo</th>
                   </tr>
                 </thead>
@@ -160,21 +220,42 @@ export function OwnAdImportDialog() {
                           <Checkbox checked={chon.has(c.adId)} onCheckedChange={(v) => doiChon(c.adId, v === true)} aria-label={`Chọn ${c.adName || c.adId}`} />
                         )}
                       </td>
-                      <td className="max-w-[320px] px-2 py-1.5 align-top">
+                      <td className="max-w-[260px] px-2 py-1.5 align-top">
                         <HaiTang tren={<span className="line-clamp-1 font-medium">{c.adName || c.adId}</span>} duoi={<span className="line-clamp-1">{c.importedSourceId ? "Đã nhập · " : ""}{c.campaignName || "—"} · {c.adId}</span>} />
                       </td>
                       <td className="px-2 py-1.5 align-top">
-                        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold", c.reason === "WIN" ? "bg-success/15 text-success" : "bg-primary/10 text-primary")}>{OWN_AD_REASON_LABEL[c.reason]}</span>
+                        <DiemCell c={c} mode={mode} rankedOf={list.ranking.ranked} />
                       </td>
                       <td className="px-2 py-1.5 text-right align-top">
-                        <HaiTang tren={formatVND(c.spendVnd)} duoi={`${formatNumber(c.messages)} tin`} />
+                        <HaiTang tren={formatVND(c.spendVnd)} duoi={`${formatNumber(c.messages)} tin · ${formatVND(c.costPerMessageVnd)}/tin`} />
                       </td>
-                      <td className="px-2 py-1.5 text-right align-top tabular-nums">{formatVND(c.costPerMessageVnd)}</td>
+                      <td className="px-2 py-1.5 text-right align-top">
+                        <HaiTang tren={formatNumber(c.metaPurchases)} duoi={c.costPerMetaPurchaseVnd === null ? "—" : `${formatVND(c.costPerMetaPurchaseVnd)}/lượt`} />
+                      </td>
                       <td className="px-2 py-1.5 text-right align-top">
                         <HaiTang tren={formatPercent(c.ctrPct, 2)} duoi={formatVND(c.cpcVnd)} />
                       </td>
                       <td className="px-2 py-1.5 text-right align-top">
                         <HaiTang tren={formatNumber(c.bookedOrders)} duoi={`giao ${formatNumber(c.deliveredOrders)} · hoàn ${formatNumber(c.returnedOrders)}`} />
+                      </td>
+                      <td className="w-[200px] px-2 py-1.5 align-top">
+                        {chon.has(c.adId) && !c.importedSourceId ? (
+                          <div className="space-y-0.5">
+                            <ProductSearch
+                              products={products}
+                              value={maChon[c.adId] ?? ""}
+                              onChange={(pid) => setMaChon((cu) => ({ ...cu, [c.adId]: pid }))}
+                              placeholder={c.inferredProduct ? "Đổi mã…" : "Chọn mã hàng…"}
+                            />
+                            {!maChon[c.adId] ? (
+                              <p className={cn("text-[11px]", c.inferredProduct ? "text-muted-foreground" : "text-warning")}>
+                                {c.inferredProduct ? `Suy được: ${c.inferredProduct.name}` : "Chưa suy được mã — chọn để làm mẫu cha"}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className={cn("line-clamp-2 text-[11.5px]", c.inferredProduct ? "" : "text-muted-foreground")}>{c.inferredProduct?.name ?? "Chưa suy được"}</span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 align-top text-[11.5px] text-muted-foreground">
                         {c.periodFrom ?? "—"}
@@ -194,8 +275,7 @@ export function OwnAdImportDialog() {
               </p>
               {ketQua.noProduct.length ? (
                 <p className="text-warning">
-                  {formatNumber(ketQua.noProduct.length)} mẩu chưa suy được mã hàng (không có đơn mang mã quảng cáo này, tên chiến dịch không ghép được mã) — chúng chỉ làm nguồn
-                  cảm hứng, chưa làm mẫu cha được.
+                  {formatNumber(ketQua.noProduct.length)} mẩu chưa có mã hàng (không suy được, người nhập chưa chọn) — chúng chỉ làm nguồn cảm hứng, chưa làm mẫu cha được.
                 </p>
               ) : null}
               {ketQua.skipped.length ? (
@@ -216,6 +296,11 @@ export function OwnAdImportDialog() {
               {list ? `Chọn ${formatNumber(chon.size)} / ${formatNumber(chuaNhap.length)} mẩu chưa nhập · tối đa ${OWN_AD_IMPORT.maxPerImport} mỗi lượt` : ""}
             </p>
             <div className="flex gap-2">
+              {mode === "RANK" && list ? (
+                <Button type="button" variant="outline" onClick={chonDauBang} disabled={importing || loading}>
+                  Chọn {formatNumber(Math.min(OWN_AD_IMPORT.maxPerImport, chuaNhap.filter((x) => x.rank.status === "RANKED").length))} mẩu đầu bảng
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={importing}>
                 Đóng
               </Button>

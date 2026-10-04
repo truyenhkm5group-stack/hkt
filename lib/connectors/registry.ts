@@ -444,8 +444,8 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     healthRef: "lib/connectors/testers.ts::testMetaAdsOrg",
     module: "marketing",
     code: ["lib/connectors/testers.ts", "lib/marketing/meta-ads-org.ts"],
-    consumers: ["lib/marketing/meta-ads-org.ts::syncOrgMetaAds"],
-    why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức. Khác «Meta Ads (Facebook)» của nhà (biến môi trường, có nhánh ghi).",
+    consumers: ["lib/marketing/meta-ads-org.ts::syncOrgMetaAds", "lib/marketing/meta-ads-org.ts::openOrgMetaAdsClient", "lib/actions/creative-import.ts::importOwnAdsAction"],
+    why: "Chi tiêu quảng cáo Facebook của CHÍNH tổ chức khách (token System User của BM họ + tài khoản họ khai). Kiểm tra = GET từng act_<id> (tên · tiền tệ · trạng thái) — chỉ đọc, chỉ tới graph.facebook.com, token đi trong tiêu đề, không theo chuyển hướng. Job «ads-spend-org» mỗi 60 phút kéo chi tiêu theo ngày vào ad_spends của tổ chức, rồi tra sổ mẩu fb_ads (trạng thái · bài viết · creative) bằng cùng client chỉ đọc; nút «Nhập mẫu thắng / mẫu tốt» ở Nguồn ảnh đọc ảnh + câu chữ của mẩu do chính tài khoản đã khai chạy. Khác «Meta Ads (Facebook)» của nhà (biến môi trường, có nhánh ghi).",
   },
   // ─────────────── NGUỒN KHÁCH TIỀM NĂNG ───────────────
   /*

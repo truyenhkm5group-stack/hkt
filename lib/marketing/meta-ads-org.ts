@@ -4,9 +4,10 @@ import { openActiveConnection } from "@/lib/connectors/service";
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
 import { META_ADS_ORG_CONNECTOR, META_ADS_ORG_DEFAULT_DAYS, META_ADS_ORG_FIRST_RUN_DAYS, META_ADS_ORG_MAX_ACCOUNTS, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
+import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { currentOrganization } from "@/lib/platform/context";
-import type { SyncTrigger } from "@/lib/sync/runner";
+import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
 /**
  * ═══════════ CHI TIÊU QUẢNG CÁO FACEBOOK CỦA TỔ CHỨC KHÁCH — JOB `ads-spend-org` ═══════════
@@ -49,7 +50,16 @@ async function hasAutoFacebookRows(): Promise<boolean> {
   return !!row;
 }
 
-export async function syncOrgMetaAds(options: { trigger?: SyncTrigger; actor?: string; days?: number } = {}, deps: { keyState?: SecretsKeyState } = {}) {
+/**
+ * Client Graph CHỈ ĐỌC của tổ chức ngữ cảnh, dựng từ kết nối «meta-ads-org» ĐANG BẬT của chính nó — MỘT chỗ dựng cho
+ * mọi đường đọc của tổ chức khách (job chi tiêu + sổ mẩu, nút nhập quảng cáo cũ làm nguồn ảnh). Tổ chức nhà KHÔNG đi
+ * đường này (`HOME_USES_ENV`): nhà dùng `getFacebookAdsClient()` như cũ.
+ *
+ * Cố ý KHÔNG thêm nhánh `other:` cho `getFacebookAdsClient()`: getter đó còn được các đường GHI của nhà gọi (đổi ngân
+ * sách, đăng quảng cáo, tra bài viết bằng tay) — cho nó trả client của khách là mở các đường ấy cho khoá của khách.
+ * Client ở đây được TRUYỀN TƯỜNG MINH tới đúng những hàm chỉ đọc cần nó.
+ */
+export async function openOrgMetaAdsClient(deps: { keyState?: SecretsKeyState } = {}): Promise<{ ok: true; org: string; client: FacebookAdsClient; adAccountIds: string[] } | OrgMetaAdsSkipped> {
   const org = await currentOrganization();
   if (org.isHome) {
     const r: OrgMetaAdsSkipped = { skipped: "HOME_USES_ENV", org: org.code, detail: "Tổ chức nhà đồng bộ chi tiêu bằng job «facebook-ads» (biến môi trường) — job này chỉ dành cho tổ chức khách." };
@@ -65,7 +75,39 @@ export async function syncOrgMetaAds(options: { trigger?: SyncTrigger; actor?: s
     const r: OrgMetaAdsSkipped = { skipped: "NO_AD_ACCOUNTS", org: org.code, detail: "Bỏ qua: kết nối chưa khai tài khoản quảng cáo hợp lệ nào." };
     return r;
   }
-  const client = FacebookAdsClient.fromOrgConnection({ organization: org.code, accessToken: (conn.secrets.accessToken ?? "").trim(), adAccountIds: ids.slice(0, META_ADS_ORG_MAX_ACCOUNTS) });
+  const adAccountIds = ids.slice(0, META_ADS_ORG_MAX_ACCOUNTS);
+  const client = FacebookAdsClient.fromOrgConnection({ organization: org.code, accessToken: (conn.secrets.accessToken ?? "").trim(), adAccountIds });
+  return { ok: true, org: org.code, client, adAccountIds };
+}
+
+/**
+ * ─── SỔ MẨU CỦA TỔ CHỨC (`fb_ads`: trạng thái · bài viết · creative · fanpage) ───
+ *
+ * Chủ nền tảng chốt 04/10/2026: dữ liệu ĐỌC Meta của tổ chức khách phải đủ như nhà. Bộ đồng bộ chi tiêu chỉ điền tên
+ * và cây cha–con vào `fb_ads` (insights không trả bài viết); phần còn lại là việc của `syncFacebookAdIndex` — ĐÚNG hàm
+ * của nhà, nhận client của tổ chức tiêm vào. Không lịch mới: chạy NGAY SAU chi tiêu trong cùng lượt `ads-spend-org`,
+ * có dòng `sync_runs` riêng (`ad_index_org`) để lỗi của nó đọc được mà không làm hỏng con số chi tiêu đã ghi.
+ */
+async function syncOrgAdIndex(client: FacebookAdsClient, options: { trigger?: SyncTrigger; actor?: string }) {
+  return runSyncJob({ source: "FACEBOOK", job: "ad_index_org", trigger: options.trigger, actor: options.actor }, async (ctx) => {
+    const r = await syncFacebookAdIndex({ client, log: ctx.log });
+    ctx.summary.updated = r.fetched;
+    ctx.summary.failed = r.missing;
+    ctx.summary.skipped = r.transient;
+    ctx.summary.detail = `${r.candidates} mẩu cần tra (${r.fromSpend} từ chi tiêu · ${r.candidates - r.fromSpend} từ đơn) · ${r.fetched} tra được · ${r.withoutPostLink} không có bài viết · ${r.missing} không tra được · ${r.transient} lỗi tạm thời`;
+    if (r.transient > 0 || r.errors.length) ctx.summary.warning = r.errors.slice(0, 3).join(" · ") || `${r.transient} mẩu lỗi tạm thời — tra lại lượt sau.`;
+    return r;
+  });
+}
+
+export async function syncOrgMetaAds(options: { trigger?: SyncTrigger; actor?: string; days?: number } = {}, deps: { keyState?: SecretsKeyState } = {}) {
+  const opened = await openOrgMetaAdsClient(deps);
+  if (!("ok" in opened)) return opened;
+  const { client } = opened;
   const days = options.days ?? ((await hasAutoFacebookRows()) ? META_ADS_ORG_DEFAULT_DAYS : META_ADS_ORG_FIRST_RUN_DAYS);
-  return syncFacebookAds({ trigger: options.trigger, actor: options.actor, days, client });
+  const spend = await syncFacebookAds({ trigger: options.trigger, actor: options.actor, days, client });
+  // Chi tiêu hỏng (token sai / hết hạn) ⇒ sổ mẩu cũng hỏng y như thế: không gọi thêm một loạt request vô ích.
+  if (spend.skippedBecauseRunning || spend.run.status === "FAILED") return spend;
+  const adIndex = await syncOrgAdIndex(client, options);
+  return { ...spend, adIndex: { run: adIndex.run, summary: adIndex.summary } };
 }

@@ -573,7 +573,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     fanOut: true,
     description:
       "Tổ chức khách đã bật kết nối «Quảng cáo Facebook (Meta) của tổ chức» ⇒ kéo chi tiêu theo ngày của các tài khoản quảng cáo đã khai vào bảng chi tiêu quảng cáo (cùng bộ đồng bộ, cùng khoá chống trùng với tổ chức nhà; dòng gõ tay không bị đụng). " +
-      "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Tổ chức nhà dùng «facebook-ads».",
+      "Lượt thường kéo lùi 3 ngày, lượt đầu tiên 30 ngày; days=N để kéo lùi N ngày. Tài khoản tính bằng USD quy đổi theo tỷ giá cấu hình của máy chủ, tiền tệ khác không ghi. Ngay sau đó tra sổ mẩu (trạng thái · bài viết · creative · fanpage) cho các mẩu chưa có bài viết, chỉ đọc, ghi nhật ký đồng bộ riêng. Tổ chức nhà dùng «facebook-ads» và «facebook-ad-index».",
     run: (o) => syncOrgMetaAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
   /*
