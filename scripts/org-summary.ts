@@ -8,7 +8,7 @@
   quảng cáo + lượt đồng bộ, giá vốn của mẫu mã, chi phí, hội thoại chatbot.
 
   KHÔNG đọc cột nào mang dữ liệu của NGƯỜI (tên, SĐT, địa chỉ, ghi chú, nội dung tin nhắn) — chỉ số đếm, tổng tiền, trạng
-  thái, mốc. Cả lượt chạy trong `ma_hoa_ket_qua`; dòng `[ops:tom-tat]` ra log công khai.
+  thái, mốc. Cả lượt chạy trong `ma_hoa_ket_qua`; dòng mang tiền tố "[ops:tom-tat] " ra log công khai.
 
   CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên); `main` hỏi lại rồi dừng nếu không phải.
 
