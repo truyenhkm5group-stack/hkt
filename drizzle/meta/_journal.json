@@ -1359,6 +1359,13 @@
       "when": 1790680300000,
       "tag": "0194_pricing_2026_10",
       "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1790766700000,
+      "tag": "0195_sales_chat_inbound_images",
+      "breakpoints": true
     }
   ]
 }

@@ -9594,6 +9594,8 @@ export const salesChatInbound = pgTable(
     /** Bình luận: bài viết + người bình luận — Pancake `private_replies` đòi cả hai. */
     postId: text("post_id"),
     fromId: text("from_id"),
+    /** Ảnh khách gửi trong tin (0195) — chờ bot đọc. Đọc xong ⇒ mô tả ghép vào `text`, cột về `NULL`. */
+    imageUrls: jsonb("image_urls").$type<string[]>(),
     createdAt: createdAt(),
   },
   (t) => [
