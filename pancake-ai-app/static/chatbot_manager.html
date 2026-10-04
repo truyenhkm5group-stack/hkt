@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pancake AI Sales Manager</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .hidden { display: none !important; }  /* vẫn đúng khi Tailwind CDN không tải được */
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .tab-btn.active { background: #1d4ed8; color: #fff; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; padding: 1rem; }
+  .btn { padding: .45rem .9rem; border-radius: .5rem; font-weight: 600; font-size: .875rem; }
+  .btn-primary { background: #1d4ed8; color: #fff; } .btn-primary:hover { background: #1e40af; }
+  .btn-ghost { background: #f3f4f6; } .btn-ghost:hover { background: #e5e7eb; }
+  .btn-danger { background: #dc2626; color: #fff; } .btn-ok { background: #059669; color: #fff; }
+  .inp { border: 1px solid #d1d5db; border-radius: .5rem; padding: .4rem .6rem; font-size: .875rem; width: 100%; }
+  .badge { display: inline-block; padding: 0 .45rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+  th { text-align: left; font-weight: 600; color: #4b5563; font-size: .78rem; text-transform: uppercase; }
+  td, th { padding: .45rem .5rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .bubble-shop { background: #dbeafe; } .bubble-cus { background: #f3f4f6; } .bubble-bot { background: #dcfce7; }
+  .muted { color: #6b7280; font-size: .8rem; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<header class="bg-white border-b sticky top-0 z-10">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+    <div class="text-lg font-bold">🥞 Pancake AI Sales Manager</div>
+    <span id="botState" class="badge bg-gray-200">…</span>
+    <nav class="flex flex-wrap gap-1 ml-auto text-sm" id="tabs">
+      <button class="tab-btn btn" data-tab="connect">⚙️ Kết nối</button>
+      <button class="tab-btn btn" data-tab="convs">💬 Hội thoại</button>
+      <button class="tab-btn btn" data-tab="mining">🧠 Nạp tri thức</button>
+      <button class="tab-btn btn" data-tab="knowledge">📚 Kho tri thức</button>
+      <button class="tab-btn btn" data-tab="sim">🧪 Chạy thử</button>
+      <button class="tab-btn btn" data-tab="alerts">🔔 Cảnh báo bức xúc <span id="nAlerts" class="badge bg-red-600 text-white hidden"></span></button>
+      <button class="tab-btn btn" data-tab="cancels">🛑 Huỷ đơn <span id="nCancels" class="badge bg-amber-500 text-white hidden"></span></button>
+      <button class="tab-btn btn" data-tab="cost">💰 Chi phí</button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-5 space-y-4">
+
+<!-- ============================ KẾT NỐI ============================ -->
+<section data-panel="connect" class="space-y-4">
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="card space-y-2">
+      <h2 class="font-bold">Pancake</h2>
+      <label class="muted">Page ID</label><input class="inp" data-k="pancake_page_id">
+      <label class="muted">Page Access Token (Pancake → Page → Cài đặt → Công cụ)</label><input class="inp" data-k="pancake_page_access_token" type="password">
+      <label class="muted">Shop ID (Pancake POS — tuỳ chọn, để bot biết giá/size/màu)</label><input class="inp" data-k="pancake_shop_id">
+      <label class="muted">POS API key (tuỳ chọn)</label><input class="inp" data-k="pancake_pos_api_key" type="password">
+      <label class="muted">Nhãn coi là "Đã chốt đơn" (phân cách dấu phẩy)</label><input class="inp" data-k="closed_tag_names">
+      <label class="muted">Nhãn tắt bot (phân cách dấu phẩy)</label><input class="inp" data-k="pause_tag_names">
+      <div class="flex gap-2 pt-1"><button class="btn btn-ghost" onclick="testPancake()">Kiểm tra kết nối</button></div>
+      <pre id="pancakeTest" class="muted whitespace-pre-wrap"></pre>
+    </div>
+    <div class="card space-y-2">
+      <h2 class="font-bold">Gemini AI</h2>
+      <label class="muted">API key (https://aistudio.google.com/apikey)</label><input class="inp" data-k="gemini_api_key" type="password">
+      <label class="muted">Model</label>
+      <select class="inp" data-k="gemini_model">
+        <option>gemini-2.5-flash</option><option>gemini-2.5-flash-lite</option><option>gemini-2.5-pro</option><option>gemini-2.0-flash</option>
+      </select>
+      <label class="muted">Tên shop</label><input class="inp" data-k="shop_name">
+      <label class="muted">Thông tin shop cho bot (giờ làm, phí ship, đổi trả, bảng size…)</label>
+      <textarea class="inp" rows="5" data-k="shop_profile"></textarea>
+      <button class="btn btn-ghost" onclick="testGemini()">Thử gọi Gemini</button>
+      <pre id="geminiTest" class="muted whitespace-pre-wrap"></pre>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="card space-y-2">
+      <h2 class="font-bold">Bot tự trả lời</h2>
+      <label class="flex items-center gap-2"><input type="checkbox" data-k="bot_enabled"> Bật bot (nhận webhook & xử lý tin khách)</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-k="auto_send"> Tự GỬI cho khách <span class="muted">(tắt = chỉ ghi gợi ý — nên chạy thử vài ngày trước)</span></label>
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="muted">Gom tin (giây)</label><input class="inp" type="number" data-k="debounce_seconds"></div>
+        <div><label class="muted">Số tin lịch sử đưa cho AI</label><input class="inp" type="number" data-k="history_limit"></div>
+        <div><label class="muted">Ngưỡng Fast-Path (0–1)</label><input class="inp" type="number" step="0.01" data-k="fastpath_threshold"></div>
+        <div><label class="muted">Max token / câu trả lời</label><input class="inp" type="number" data-k="max_output_tokens"></div>
+      </div>
+      <div class="muted">Webhook (dán vào Pancake → Cài đặt → Webhook):</div>
+      <code id="webhookUrl" class="block text-xs bg-slate-100 p-2 rounded break-all"></code>
+    </div>
+    <div class="card space-y-2">
+      <h2 class="font-bold">🔔 Bức xúc & 🛑 Giữ chân khách</h2>
+      <label class="flex items-center gap-2"><input type="checkbox" data-k="frustration_enabled"> Bật máy phát hiện bức xúc</label>
+      <div class="grid grid-cols-2 gap-2"><div><label class="muted">Ngưỡng điểm (0–100)</label><input class="inp" type="number" data-k="frustration_threshold"></div></div>
+      <label class="muted">Lời xin lỗi khi khách bức xúc</label><textarea class="inp" rows="2" data-k="frustration_apology_text"></textarea>
+      <label class="flex items-center gap-2 pt-2"><input type="checkbox" data-k="retention_enabled"> Bật kịch bản giữ chân khi khách muốn huỷ đơn</label>
+      <div class="text-xs bg-amber-50 border border-amber-200 rounded p-2">⚠️ Các câu ưu đãi dưới đây là <b>cam kết với khách</b>. Bot không tự sửa đơn trên POS — nhân viên áp ưu đãi / huỷ đơn theo tab 🛑 Huỷ đơn.</div>
+      <label class="muted">B1 · Hỏi lý do</label><textarea class="inp" rows="2" data-k="retention_ask_text"></textarea>
+      <label class="muted">B2 · Chê đắt / ngại phí ship</label><textarea class="inp" rows="2" data-k="retention_offer_price_text"></textarea>
+      <label class="muted">B2 · Phân vân size / màu</label><textarea class="inp" rows="2" data-k="retention_offer_size_text"></textarea>
+      <label class="muted">B2 · Lo giao chậm</label><textarea class="inp" rows="2" data-k="retention_offer_speed_text"></textarea>
+      <label class="muted">B2 · Lý do khác</label><textarea class="inp" rows="2" data-k="retention_offer_other_text"></textarea>
+      <label class="muted">Khách đồng ý giữ đơn</label><textarea class="inp" rows="2" data-k="retention_retained_text"></textarea>
+      <label class="muted">B3 · Khách vẫn huỷ</label><textarea class="inp" rows="2" data-k="retention_cancel_text"></textarea>
+    </div>
+  </div>
+  <div class="card space-y-2">
+    <h2 class="font-bold">🛡️ Hạn ngạch chi phí (Guardrail)</h2>
+    <div class="grid md:grid-cols-5 gap-2">
+      <div><label class="muted">Tối đa / ngày (USD)</label><input class="inp" type="number" step="0.1" data-k="daily_budget_usd"></div>
+      <div><label class="muted">Tối đa / tháng (USD)</label><input class="inp" type="number" step="1" data-k="monthly_budget_usd"></div>
+      <div><label class="muted">Tỷ giá USD→VNĐ</label><input class="inp" type="number" data-k="usd_vnd_rate"></div>
+      <div><label class="muted">Khi vượt hạn ngạch</label>
+        <select class="inp" data-k="guardrail_action"><option value="fastpath_only">Chỉ trả lời Fast-Path</option><option value="stop_all">Dừng bot hoàn toàn</option></select></div>
+    </div>
+    <label class="muted">Đơn giá USD / 1 triệu token (JSON — sửa theo bảng giá Google hiện hành)</label>
+    <textarea class="inp font-mono text-xs" rows="4" data-k="pricing_json" data-json="1"></textarea>
+  </div>
+  <div class="flex gap-2"><button class="btn btn-primary" onclick="saveSettings()">💾 Lưu cài đặt</button><span id="saveMsg" class="muted self-center"></span></div>
+</section>
+
+<!-- ============================ HỘI THOẠI ============================ -->
+<section data-panel="convs" class="space-y-3 hidden">
+  <div class="card flex flex-wrap items-end gap-2">
+    <div><label class="muted">Tải tối đa</label><input id="syncMax" class="inp w-28" type="number" value="1000"></div>
+    <div><label class="muted">Trong (ngày)</label><input id="syncDays" class="inp w-24" type="number" value="90"></div>
+    <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="syncMsgs"> Tải luôn lịch sử tin</label>
+    <button class="btn btn-primary" onclick="startSync()">⬇️ Đồng bộ từ Pancake</button>
+    <button class="btn btn-ghost" onclick="api('/api/sync/stop',{method:'POST'})">Dừng</button>
+    <span id="syncStatus" class="muted"></span>
+  </div>
+  <div class="card flex flex-wrap items-end gap-2">
+    <div class="grow min-w-40"><label class="muted">Tìm</label><input id="fQ" class="inp" placeholder="Tên khách, nội dung…"></div>
+    <div><label class="muted">Nhãn</label><select id="fTag" class="inp"><option value="">— tất cả —</option></select></div>
+    <div><label class="muted">Nhân viên sale</label><select id="fStaff" class="inp"><option value="">— tất cả —</option></select></div>
+    <div><label class="muted">Từ ngày</label><input id="fFrom" class="inp" type="date"></div>
+    <div><label class="muted">Đến ngày</label><input id="fTo" class="inp" type="date"></div>
+    <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="fClosed" checked> Chỉ "Đã chốt đơn"</label>
+    <button class="btn btn-ghost" onclick="loadConvs(1)">Lọc</button>
+  </div>
+  <div class="card flex flex-wrap items-center gap-2">
+    <span class="text-sm">Đã chọn: <b id="selCount">0</b></span>
+    <span class="muted">Tích nhanh theo bộ lọc:</span>
+    <button class="btn btn-ghost" onclick="selectTop(100)">100</button>
+    <button class="btn btn-ghost" onclick="selectTop(500)">500</button>
+    <button class="btn btn-ghost" onclick="selectTop(1000)">1.000</button>
+    <button class="btn btn-ghost" onclick="selected.clear();renderConvs()">Bỏ chọn</button>
+    <button class="btn btn-primary ml-auto" onclick="goMining()">🧠 Nạp các hội thoại đã chọn vào AI</button>
+  </div>
+  <div class="grid lg:grid-cols-5 gap-3">
+    <div class="card lg:col-span-3 overflow-x-auto">
+      <table class="w-full text-sm"><thead><tr><th><input type="checkbox" id="chkPage"></th><th>Khách</th><th>Nhãn</th><th>Nhân viên</th><th>Cập nhật</th><th>Tin</th></tr></thead>
+      <tbody id="convRows"></tbody></table>
+      <div class="flex items-center gap-2 pt-2"><button class="btn btn-ghost" onclick="loadConvs(convPage-1)">‹</button><span id="convPager" class="muted"></span><button class="btn btn-ghost" onclick="loadConvs(convPage+1)">›</button></div>
+    </div>
+    <div class="card lg:col-span-2">
+      <div class="flex items-center gap-2"><h3 class="font-bold">Lịch sử</h3><span id="histMeta" class="muted"></span></div>
+      <div id="histBox" class="space-y-1 max-h-[60vh] overflow-y-auto pt-2 text-sm"><div class="muted">Bấm một hội thoại để xem (đọc từ DB local).</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ NẠP TRI THỨC ============================ -->
+<section data-panel="mining" class="space-y-3 hidden">
+  <div class="card space-y-2">
+    <h2 class="font-bold">AI Knowledge Mining Studio</h2>
+    <p class="text-sm">Đã chọn <b id="mineCount">0</b> hội thoại. AI sẽ bóc tách: <b>FAQ mẫu</b>, <b>kịch bản xử lý từ chối</b> (giá cao / phí ship / ngại size), <b>mẫu câu xin SĐT/địa chỉ</b>. Số điện thoại được che trước khi gửi cho Gemini.</p>
+    <div class="flex flex-wrap items-end gap-2">
+      <div><label class="muted">Hội thoại / lượt AI</label><input id="mineBatch" class="inp w-24" type="number" value="15" min="3" max="30"></div>
+      <span id="mineEstimate" class="muted"></span>
+      <button class="btn btn-primary" onclick="startMining()">🚀 Bắt đầu nạp</button>
+    </div>
+  </div>
+  <div class="card"><h3 class="font-bold mb-2">Các lượt nạp</h3>
+    <table class="w-full text-sm"><thead><tr><th>#</th><th>Trạng thái</th><th>Tiến độ</th><th>FAQ</th><th>Kịch bản</th><th>Mẫu chốt</th><th></th></tr></thead><tbody id="jobRows"></tbody></table>
+  </div>
+  <div class="card"><h3 class="font-bold">Nhật ký <span id="jobTitle" class="muted"></span></h3><pre id="jobLog" class="text-xs whitespace-pre-wrap max-h-80 overflow-y-auto"></pre></div>
+</section>
+
+<!-- ============================ KHO TRI THỨC ============================ -->
+<section data-panel="knowledge" class="space-y-3 hidden">
+  <div class="card flex flex-wrap gap-2 items-end">
+    <select id="kKind" class="inp w-56" onchange="loadKnowledge()">
+      <option value="faqs">Câu hỏi & trả lời mẫu (FAQ)</option>
+      <option value="objection_scripts">Kịch bản xử lý từ chối</option>
+      <option value="closing_templates">Mẫu câu chốt đơn</option>
+    </select>
+    <input id="kQ" class="inp w-64" placeholder="Tìm…" onkeydown="if(event.key==='Enter')loadKnowledge()">
+    <button class="btn btn-ghost" onclick="loadKnowledge()">Tìm</button>
+    <button class="btn btn-primary" onclick="editKnowledge(null)">＋ Thêm</button>
+    <a class="btn btn-ghost" href="#" onclick="exportKnowledge();return false">⬇️ Xuất JSON</a>
+    <label class="btn btn-ghost cursor-pointer">⬆️ Nhập JSON<input type="file" accept=".json" class="hidden" onchange="importKnowledge(this)"></label>
+  </div>
+  <div class="card overflow-x-auto"><table class="w-full text-sm"><thead id="kHead"></thead><tbody id="kRows"></tbody></table></div>
+</section>
+
+<!-- ============================ CHẠY THỬ ============================ -->
+<section data-panel="sim" class="space-y-3 hidden">
+  <div class="card space-y-2">
+    <h2 class="font-bold">Chạy thử bộ máy trả lời <span class="muted">(không gửi cho khách)</span></h2>
+    <textarea id="simText" class="inp" rows="3" placeholder="Nhập câu khách hỏi, vd: ship về Hà Nội bao lâu vậy shop?"></textarea>
+    <input id="simConv" class="inp" placeholder="(tuỳ chọn) conversation_id để dùng lịch sử local">
+    <div class="flex gap-2">
+      <button class="btn btn-ghost" onclick="simMatch()">⚡ Chỉ thử Fast-Path (0 token)</button>
+      <button class="btn btn-ghost" onclick="simSentiment()">🔔 Chấm điểm bức xúc</button>
+      <button class="btn btn-primary" onclick="simFull()">🤖 Chạy đầy đủ</button>
+    </div>
+    <div id="simOut" class="text-sm"></div>
+  </div>
+</section>
+
+<!-- ============================ CẢNH BÁO BỨC XÚC ============================ -->
+<section data-panel="alerts" class="space-y-3 hidden">
+  <div class="card flex flex-wrap items-center gap-2">
+    <h2 class="font-bold">🔔 Khách đang bức xúc</h2>
+    <span class="muted">Hội thoại ở đây đã bị TẮT AI. Nhân viên nhảy vào chat, xử lý xong rồi mới bật lại bot.</span>
+    <label class="ml-auto text-sm flex items-center gap-1"><input type="checkbox" id="alertsAll" onchange="loadAlerts()"> Hiện cả đã xử lý</label>
+  </div>
+  <div id="alertList" class="space-y-2"></div>
+</section>
+
+<!-- ============================ HUỶ ĐƠN ============================ -->
+<section data-panel="cancels" class="space-y-3 hidden">
+  <div class="card flex flex-wrap items-center gap-2">
+    <h2 class="font-bold">🛑 Giữ chân khách & yêu cầu huỷ đơn</h2>
+    <span class="muted">Bot không sửa đơn trên POS: <b>CANCEL_REQUESTED</b> ⇒ huỷ đơn trên POS · <b>RETAINED</b> ⇒ áp ưu đãi đã hứa · <b>DETECTED</b> ⇒ bot đang chế độ gợi ý, nhân viên tự giữ chân.</span>
+    <label class="ml-auto text-sm flex items-center gap-1"><input type="checkbox" id="cancelsAll" onchange="loadCancels()"> Hiện cả đã xong</label>
+  </div>
+  <div class="card overflow-x-auto"><table class="w-full text-sm"><thead><tr><th>Trạng thái</th><th>Khách</th><th>Lý do</th><th>Diễn biến</th><th>Lúc</th><th></th></tr></thead><tbody id="cancelRows"></tbody></table></div>
+</section>
+
+<!-- ============================ CHI PHÍ ============================ -->
+<section data-panel="cost" class="space-y-3 hidden">
+  <div class="flex items-center gap-2"><select id="costDays" class="inp w-40" onchange="loadCost()"><option value="1">Hôm nay</option><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select><span id="guardBox" class="text-sm"></span></div>
+  <div id="kpis" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+  <div class="grid lg:grid-cols-2 gap-3">
+    <div class="card"><h3 class="font-bold mb-2">Chi phí Gemini theo ngày</h3><div id="costChart" class="space-y-1 text-xs"></div></div>
+    <div class="card"><h3 class="font-bold mb-2">Đường trả lời</h3><table class="w-full text-sm"><thead><tr><th>Đường</th><th>Số lượt</th><th>Độ trễ TB</th><th>Tiết kiệm (ước tính)</th></tr></thead><tbody id="pathRows"></tbody></table>
+      <h3 class="font-bold mt-4 mb-2">Token theo mục đích</h3><table class="w-full text-sm"><thead><tr><th>Mục đích</th><th>Lượt</th><th>Token vào</th><th>Token ra</th><th>Chi phí</th></tr></thead><tbody id="purposeRows"></tbody></table></div>
+  </div>
+  <div class="card overflow-x-auto"><h3 class="font-bold mb-2">30 lượt trả lời gần nhất</h3><table class="w-full text-sm"><thead><tr><th>Lúc</th><th>Đường</th><th>Khách hỏi</th><th>Trả lời</th><th>ms</th><th>Gửi</th></tr></thead><tbody id="recentRows"></tbody></table></div>
+</section>
+</main>
+
+<!-- modal sửa tri thức -->
+<div id="modal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-20 p-4">
+  <div class="bg-white rounded-xl p-4 w-full max-w-2xl space-y-2"><h3 id="mTitle" class="font-bold"></h3><div id="mBody" class="space-y-2"></div>
+  <div class="flex gap-2 justify-end"><button class="btn btn-ghost" onclick="closeModal()">Huỷ</button><button class="btn btn-primary" id="mSave">Lưu</button></div></div>
+</div>
+
+<script>
+// ------------------------------------------------------------ tiện ích
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }) : "—";
+const usd = (v) => v == null ? "—" : "$" + Number(v).toFixed(v < 1 ? 4 : 2);
+const vnd = (v) => v == null ? "—" : Math.round(v).toLocaleString("vi-VN") + " ₫";
+let ADMIN = "";
+try { ADMIN = localStorage.getItem("adminToken") || ""; } catch (e) {}
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(ADMIN ? { "X-Admin-Token": ADMIN } : {}) };
+  const res = await fetch(path, { ...opts, headers, body: opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body });
+  if (res.status === 401) {
+    ADMIN = prompt("Nhập mã quản trị (ADMIN_TOKEN):") || "";
+    try { localStorage.setItem("adminToken", ADMIN); } catch (e) {}
+    if (ADMIN) return api(path, opts);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : res.statusText);
+  return data;
+}
+const toast = (msg, bad) => { const d = document.createElement("div"); d.className = `fixed bottom-4 right-4 z-30 px-4 py-2 rounded-lg text-white ${bad ? "bg-red-600" : "bg-slate-800"}`; d.textContent = msg; document.body.appendChild(d); setTimeout(() => d.remove(), 3500); };
+
+// ------------------------------------------------------------ tabs
+let currentTab = "connect";
+function showTab(t) {
+  currentTab = t;
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
+  document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== t));
+  ({ connect: loadSettings, convs: () => { loadFilters(); loadConvs(1); }, mining: loadJobs, knowledge: loadKnowledge, alerts: loadAlerts, cancels: loadCancels, cost: loadCost })[t]?.();
+  try { localStorage.setItem("tab", t); } catch (e) {}
+}
+document.querySelectorAll(".tab-btn").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+
+// ------------------------------------------------------------ cài đặt
+let SETTINGS = {};
+async function loadSettings() {
+  SETTINGS = await api("/api/settings");
+  document.querySelectorAll("[data-k]").forEach((el) => {
+    const v = SETTINGS[el.dataset.k];
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.dataset.json) el.value = JSON.stringify(v, null, 1);
+    else el.value = v ?? "";
+  });
+  try { $("#webhookUrl").textContent = (await api("/api/webhook-info")).url; } catch (e) {}
+  updateBotState();
+}
+function updateBotState() {
+  const s = SETTINGS, el = $("#botState");
+  el.textContent = !s.bot_enabled ? "Bot TẮT" : s.auto_send ? "Bot ĐANG TỰ TRẢ LỜI" : "Bot chế độ GỢI Ý";
+  el.className = "badge " + (!s.bot_enabled ? "bg-gray-200" : s.auto_send ? "bg-green-600 text-white" : "bg-amber-400");
+}
+async function saveSettings() {
+  const values = {};
+  try {
+    document.querySelectorAll("[data-k]").forEach((el) => {
+      const k = el.dataset.k;
+      if (el.type === "checkbox") values[k] = el.checked;
+      else if (el.dataset.json) values[k] = JSON.parse(el.value);
+      else if (el.type === "number") values[k] = el.value === "" ? null : Number(el.value);
+      else values[k] = el.value;
+    });
+  } catch (e) { return toast("JSON đơn giá không hợp lệ", true); }
+  await api("/api/settings", { method: "POST", body: { values } });
+  $("#saveMsg").textContent = "Đã lưu " + new Date().toLocaleTimeString("vi-VN");
+  loadSettings();
+}
+async function testPancake() { $("#pancakeTest").textContent = "Đang kiểm tra…"; try { $("#pancakeTest").textContent = JSON.stringify(await api("/api/pancake/test", { method: "POST" }), null, 1); } catch (e) { $("#pancakeTest").textContent = e.message; } }
+async function testGemini() { $("#geminiTest").textContent = "Đang gọi…"; try { const r = await api("/api/gemini/test", { method: "POST" }); $("#geminiTest").textContent = r.ok ? `OK · ${r.model} · ${r.prompt_tokens}+${r.output_tokens} token · ${usd(r.cost_usd)} · ${r.latency_ms} ms` : r.error; } catch (e) { $("#geminiTest").textContent = e.message; } }
+
+// ------------------------------------------------------------ hội thoại
+const selected = new Set();
+let convPage = 1, convData = { items: [], total: 0 };
+function filterBody() { return { q: $("#fQ").value, tag: $("#fTag").value, staff: $("#fStaff").value, date_from: $("#fFrom").value || null, date_to: $("#fTo").value || null, only_closed: $("#fClosed").checked }; }
+async function loadFilters() {
+  const f = await api("/api/filters");
+  const tagSel = $("#fTag"), cur = tagSel.value;
+  tagSel.innerHTML = '<option value="">— tất cả —</option>' + f.tags.map((t) => `<option value="${esc(t.id)}">${esc(t.text)}</option>`).join("");
+  tagSel.value = cur;
+  const st = $("#fStaff"), cs = st.value;
+  st.innerHTML = '<option value="">— tất cả —</option>' + f.staff.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  st.value = cs;
+}
+async function loadConvs(page) {
+  page = Math.max(1, page || 1);
+  const qs = new URLSearchParams({ ...Object.fromEntries(Object.entries(filterBody()).filter(([, v]) => v !== null && v !== "" && v !== false)), page, page_size: 50 });
+  convData = await api("/api/conversations?" + qs);
+  const maxPage = Math.max(1, Math.ceil(convData.total / 50));
+  if (page > maxPage && convData.total) return loadConvs(maxPage);
+  convPage = page;
+  renderConvs();
+}
+function renderConvs() {
+  $("#convRows").innerHTML = convData.items.map((c) => `
+    <tr class="hover:bg-slate-50 cursor-pointer" onclick="openConv('${esc(c.id)}')">
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${selected.has(c.id) ? "checked" : ""} onchange="toggleSel('${esc(c.id)}', this.checked)"></td>
+      <td><div class="font-medium">${esc(c.customer_name || "(không tên)")} ${c.bot_paused ? '<span class="badge bg-red-100 text-red-700">AI tắt</span>' : ""}</div><div class="muted truncate max-w-xs">${esc(c.snippet)}</div></td>
+      <td>${c.tags.map((t) => `<span class="badge ${c.is_closed_order ? "bg-green-100 text-green-800" : "bg-slate-100"}">${esc(t.text)}</span>`).join(" ")}</td>
+      <td class="muted">${esc(c.staff_names.join(", "))}</td>
+      <td class="muted whitespace-nowrap">${fmtTime(c.updated_at)}</td>
+      <td class="muted">${c.messages_synced_at ? c.message_count : "—"}</td>
+    </tr>`).join("") || '<tr><td colspan="6" class="muted">Chưa có hội thoại — bấm "Đồng bộ từ Pancake".</td></tr>';
+  $("#convPager").textContent = `Trang ${convPage} · ${convData.total.toLocaleString("vi-VN")} hội thoại`;
+  $("#selCount").textContent = selected.size.toLocaleString("vi-VN");
+  $("#chkPage").checked = convData.items.length && convData.items.every((c) => selected.has(c.id));
+}
+$("#chkPage").onchange = (e) => { convData.items.forEach((c) => e.target.checked ? selected.add(c.id) : selected.delete(c.id)); renderConvs(); };
+function toggleSel(id, on) { on ? selected.add(id) : selected.delete(id); $("#selCount").textContent = selected.size.toLocaleString("vi-VN"); }
+async function selectTop(n) { const r = await api("/api/conversations/select", { method: "POST", body: { ...filterBody(), limit: n } }); r.ids.forEach((id) => selected.add(id)); renderConvs(); toast(`Đã tích ${r.count} hội thoại khớp bộ lọc`); }
+async function openConv(id) {
+  $("#histBox").innerHTML = '<div class="muted">Đang tải…</div>';
+  try { const r = await api(`/api/conversations/${encodeURIComponent(id)}/messages`); renderHistory(r, $("#histBox"), $("#histMeta")); }
+  catch (e) { $("#histBox").innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+}
+function renderHistory(r, box, meta) {
+  if (meta) meta.textContent = `${r.messages.length} tin · ${r.fetched_from_pancake ? "vừa tải từ Pancake (1 lần)" : "đọc từ DB local"}`;
+  box.innerHTML = r.messages.map((m) => `<div class="${m.from_page ? "text-right" : ""}"><div class="inline-block px-3 py-1.5 rounded-lg max-w-[90%] text-left ${m.source === "bot" ? "bubble-bot" : m.from_page ? "bubble-shop" : "bubble-cus"}">${esc(m.text)}<div class="muted text-[10px]">${m.source === "bot" ? "🤖 Bot · " : m.from_page ? esc(m.from_name || "Shop") + " · " : ""}${fmtTime(m.created_at)}</div></div></div>`).join("") || '<div class="muted">Không có tin.</div>';
+  box.scrollTop = box.scrollHeight;
+}
+async function startSync() { try { await api("/api/sync/conversations", { method: "POST", body: { max_conversations: +$("#syncMax").value, days: +$("#syncDays").value, fetch_messages: $("#syncMsgs").checked } }); pollSync(); } catch (e) { toast(e.message, true); } }
+async function pollSync() {
+  const s = await api("/api/sync/status");
+  $("#syncStatus").textContent = `${s.running ? "⏳ Đang đồng bộ: " : "Kho local: "}${s.running ? s.fetched + " hội thoại" + (s.messages_fetched ? ` · ${s.messages_fetched} lịch sử` : "") : `${s.local_conversations} hội thoại · ${s.local_with_history} có lịch sử · ${s.local_messages} tin`}${s.error ? " · Lỗi: " + s.error : ""}`;
+  if (s.running) setTimeout(pollSync, 1500); else if (currentTab === "convs") { loadFilters(); loadConvs(convPage); }
+}
+function goMining() { if (!selected.size) return toast("Chưa chọn hội thoại nào", true); showTab("mining"); }
+
+// ------------------------------------------------------------ nạp tri thức
+async function loadJobs() {
+  $("#mineCount").textContent = selected.size.toLocaleString("vi-VN");
+  if (selected.size) { const e = await api(`/api/mining/estimate?n=${selected.size}&batch_size=${$("#mineBatch").value}`); $("#mineEstimate").textContent = `Ước tính: ${e.calls} lượt AI · ~${usd(e.cost_usd)} (${vnd(e.cost_vnd)}) — số thật xem ở tab Chi phí`; }
+  const jobs = await api("/api/mining/jobs");
+  const color = { running: "bg-blue-100 text-blue-800", done: "bg-green-100 text-green-800", failed: "bg-red-100 text-red-700", blocked: "bg-amber-100 text-amber-800", cancelled: "bg-slate-200", queued: "bg-slate-100" };
+  $("#jobRows").innerHTML = jobs.map((j) => `<tr class="cursor-pointer hover:bg-slate-50" onclick="showJob(${j.id})"><td>${j.id}</td><td><span class="badge ${color[j.status] || ""}">${j.status}</span>${j.error ? `<div class="muted">${esc(j.error)}</div>` : ""}</td>
+    <td><div class="w-40 bg-slate-100 rounded h-2"><div class="bg-blue-600 h-2 rounded" style="width:${j.total ? (100 * j.processed / j.total) : 0}%"></div></div><span class="muted">${j.processed}/${j.total}</span></td>
+    <td>+${j.faqs_added} <span class="muted">(gộp ${j.faqs_merged})</span></td><td>+${j.scripts_added}</td><td>+${j.templates_added}</td>
+    <td>${["running", "queued"].includes(j.status) ? `<button class="btn btn-ghost" onclick="event.stopPropagation();api('/api/mining/jobs/${j.id}/cancel',{method:'POST'}).then(loadJobs)">Huỷ</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="7" class="muted">Chưa có lượt nạp nào.</td></tr>';
+  if (jobs.some((j) => ["running", "queued"].includes(j.status)) && currentTab === "mining") { if (shownJob) showJob(shownJob); setTimeout(loadJobs, 2500); }
+}
+let shownJob = null;
+async function showJob(id) { shownJob = id; const j = await api(`/api/mining/jobs/${id}`); $("#jobTitle").textContent = `#${id} · ${j.tokens?.prompt || 0}+${j.tokens?.output || 0} token · ${usd(j.cost_usd)}`; $("#jobLog").textContent = j.log.map((l) => { const [t, ...m] = l.split("|"); return fmtTime(+t) + "  " + m.join("|"); }).join("\n"); }
+async function startMining() {
+  if (!selected.size) return toast("Chưa chọn hội thoại nào (tab Hội thoại)", true);
+  try { const r = await api("/api/mining/jobs", { method: "POST", body: { conversation_ids: [...selected], batch_size: +$("#mineBatch").value } }); toast(`Đã tạo lượt nạp #${r.job_id}`); shownJob = r.job_id; loadJobs(); } catch (e) { toast(e.message, true); }
+}
+
+// ------------------------------------------------------------ kho tri thức
+const K_COLS = {
+  faqs: [["question", "Câu hỏi"], ["variants", "Cách hỏi khác"], ["answer", "Trả lời mẫu"], ["category", "Nhóm"], ["fast_path", "Fast-Path"], ["hit_count", "Lượt dùng"], ["enabled", "Bật"]],
+  objection_scripts: [["kind", "Loại"], ["customer_concern", "Khách lo ngại"], ["response", "Cách xử lý"], ["rationale", "Vì sao hiệu quả"], ["evidence", "Gặp lại"], ["enabled", "Bật"]],
+  closing_templates: [["purpose", "Mục đích"], ["template", "Mẫu câu"], ["score", "Điểm"], ["notes", "Ghi chú"], ["enabled", "Bật"]],
+};
+let kItems = [];
+async function loadKnowledge() {
+  const kind = $("#kKind").value; kItems = await api(`/api/knowledge/${kind}?q=${encodeURIComponent($("#kQ").value)}`);
+  $("#kHead").innerHTML = "<tr>" + K_COLS[kind].map(([, h]) => `<th>${h}</th>`).join("") + "<th></th></tr>";
+  $("#kRows").innerHTML = kItems.map((it) => "<tr>" + K_COLS[kind].map(([k]) => {
+    const v = it[k];
+    if (k === "enabled" || k === "fast_path") return `<td><input type="checkbox" ${v ? "checked" : ""} onchange="patchK(${it.id}, '${k}', this.checked ? 1 : 0)"></td>`;
+    if (k === "variants") return `<td class="muted text-xs">${esc((v || []).slice(0, 5).join(" · "))}${(v || []).length > 5 ? ` (+${v.length - 5})` : ""}</td>`;
+    return `<td>${esc(v)}</td>`;
+  }).join("") + `<td class="whitespace-nowrap"><button class="btn btn-ghost" onclick="editKnowledge(${it.id})">Sửa</button> <button class="btn btn-ghost text-red-600" onclick="delK(${it.id})">Xoá</button></td></tr>`).join("") || `<tr><td class="muted" colspan="9">Trống — nạp tri thức từ hội thoại hoặc bấm "＋ Thêm".</td></tr>`;
+}
+async function patchK(id, k, v) { await api(`/api/knowledge/${$("#kKind").value}/${id}`, { method: "PUT", body: { [k]: v } }); }
+async function delK(id) { if (confirm("Xoá mục này?")) { await api(`/api/knowledge/${$("#kKind").value}/${id}`, { method: "DELETE" }); loadKnowledge(); } }
+function closeModal() { $("#modal").classList.add("hidden"); $("#modal").classList.remove("flex"); }
+function editKnowledge(id) {
+  const kind = $("#kKind").value, it = kItems.find((x) => x.id === id) || {};
+  const fields = K_COLS[kind].filter(([k]) => !["enabled", "fast_path", "hit_count", "evidence"].includes(k));
+  $("#mTitle").textContent = id ? "Sửa" : "Thêm mới";
+  $("#mBody").innerHTML = fields.map(([k, h]) => `<label class="muted">${h}${k === "variants" ? " (mỗi dòng một cách hỏi)" : ""}</label><textarea class="inp" rows="${["answer", "response", "template", "variants"].includes(k) ? 4 : 2}" data-f="${k}">${esc(k === "variants" ? (it[k] || []).join("\n") : it[k])}</textarea>`).join("");
+  $("#mSave").onclick = async () => {
+    const body = {}; document.querySelectorAll("#mBody [data-f]").forEach((el) => { const k = el.dataset.f; body[k] = k === "variants" ? el.value.split("\n").map((s) => s.trim()).filter(Boolean) : k === "score" ? Number(el.value || 0) : el.value; });
+    await api(`/api/knowledge/${kind}${id ? "/" + id : ""}`, { method: id ? "PUT" : "POST", body }); closeModal(); loadKnowledge();
+  };
+  $("#modal").classList.remove("hidden"); $("#modal").classList.add("flex");
+}
+async function exportKnowledge() { const data = await api("/api/knowledge-export"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" })); a.download = "pancake_ai_knowledge.json"; a.click(); }
+async function importKnowledge(inp) { const f = inp.files[0]; if (!f) return; try { const r = await api("/api/knowledge-import", { method: "POST", body: JSON.parse(await f.text()) }); toast(`Nhập: +${r.faqs_added} FAQ, gộp ${r.faqs_merged}, +${r.scripts_added} kịch bản, +${r.templates_added} mẫu`); loadKnowledge(); } catch (e) { toast(e.message, true); } inp.value = ""; }
+
+// ------------------------------------------------------------ chạy thử
+const PATH_LABEL = { fastpath: "⚡ Fast-Path", gemini: "🤖 Gemini", handoff: "🙋 Chuyển nhân viên", blocked: "🛡️ Bị chặn (hạn ngạch)", error: "❌ Lỗi", frustration: "🔔 Bức xúc → xin lỗi + tắt AI", retention: "🛑 Giữ chân / huỷ đơn" };
+async function simMatch() { const r = await api("/api/match", { method: "POST", body: { text: $("#simText").value } }); $("#simOut").innerHTML = `<div class="card bg-slate-50">${r.matched ? "✅ Khớp" : "❌ Không khớp"} · điểm ${r.score} · <b>${r.latency_ms} ms</b> · ${esc(r.reason)}${r.faq ? `<div class="mt-2 p-2 bg-green-50 rounded">${esc(r.faq.answer)}</div>` : ""}${(r.candidates || []).map((c) => `<div class="muted">• ${c.score} — ${esc(c.question)}</div>`).join("")}</div>`; }
+async function simSentiment() { const r = await api("/api/sentiment", { method: "POST", body: { text: $("#simText").value, conversation_id: $("#simConv").value || null } }); $("#simOut").innerHTML = `<div class="card bg-slate-50">Điểm bức xúc <b class="${r.score > r.threshold ? "text-red-600" : ""}">${r.score}/100</b> (ngưỡng ${r.threshold}) · ${r.level}<ul class="list-disc pl-5">${r.signals.map((s) => `<li>${esc(s.label)} +${s.points}</li>`).join("")}</ul></div>`; }
+async function simFull() {
+  $("#simOut").innerHTML = '<div class="muted">Đang chạy…</div>';
+  try { const r = await api("/api/simulate", { method: "POST", body: { text: $("#simText").value, conversation_id: $("#simConv").value || null } });
+    $("#simOut").innerHTML = `<div class="card bg-slate-50 space-y-1"><div><b>${PATH_LABEL[r.path] || r.path}</b> · ${r.latency_ms} ms ${r.tokens ? `· ${r.tokens.prompt}+${r.tokens.output} token · ${usd(r.cost_usd)}` : "· 0 token"}</div>${r.sentiment ? `<div class="muted">Bức xúc: ${r.sentiment.score}/100</div>` : ""}${r.answer ? `<div class="p-2 bg-green-50 rounded whitespace-pre-wrap">${esc(r.answer)}</div>` : ""}${r.note ? `<div class="muted">${esc(r.note)}</div>` : ""}</div>`;
+  } catch (e) { $("#simOut").innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+}
+
+// ------------------------------------------------------------ cảnh báo bức xúc
+async function loadAlerts() {
+  const list = await api("/api/alerts?status=" + ($("#alertsAll").checked ? "all" : "active"));
+  const lv = (s) => s == null ? "bg-slate-200" : s > 85 ? "bg-red-600 text-white" : s > 70 ? "bg-orange-500 text-white" : "bg-amber-300";
+  $("#alertList").innerHTML = list.map((a) => `
+    <div class="card ${a.status === "OPEN" ? "border-red-300" : ""}">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="badge ${lv(a.score)}">${a.trigger === "handoff" ? "AI chuyển" : `🔥 ${a.score}/100`}</span>
+        <b>${esc(a.customer_name || a.conversation_id)}</b>
+        <span class="badge bg-slate-100">${a.status}</span>
+        ${a.bot_paused ? '<span class="badge bg-red-100 text-red-700">AI đang tắt</span>' : '<span class="badge bg-green-100 text-green-700">AI đang bật</span>'}
+        ${a.apology_sent ? '<span class="badge bg-blue-100 text-blue-700">Đã gửi lời xin lỗi</span>' : ""}
+        <span class="muted ml-auto">${fmtTime(a.created_at)}</span>
+      </div>
+      <div class="mt-2 p-2 rounded bg-red-50 text-sm whitespace-pre-wrap">“${esc(a.customer_text)}”</div>
+      <div class="muted mt-1">${a.signals.map((s) => esc(s.label) + (s.points ? ` +${s.points}` : "")).join(" · ")}</div>
+      ${a.handled_by || a.note ? `<div class="muted">👤 ${esc(a.handled_by || "")} ${esc(a.note || "")}</div>` : ""}
+      <div class="flex flex-wrap gap-2 mt-2">
+        <a class="btn btn-primary" target="_blank" rel="noopener" href="${esc(a.pancake_url)}" onclick="setAlert(${a.id}, 'IN_PROGRESS')">💬 Vào chat hỗ trợ (Pancake)</a>
+        <button class="btn btn-ghost" onclick="openChat('${esc(a.conversation_id)}')">Xem & nhắn trong app</button>
+        ${a.status !== "RESOLVED" ? `<button class="btn btn-ok" onclick="setAlert(${a.id}, 'RESOLVED', false)">✓ Đã xử lý (giữ AI tắt)</button>
+        <button class="btn btn-ghost" onclick="setAlert(${a.id}, 'RESOLVED', true)">✓ Đã xử lý & bật lại AI</button>` : ""}
+      </div>
+      <div id="chat-${esc(a.conversation_id)}" class="hidden mt-2"></div>
+    </div>`).join("") || '<div class="card muted">Không có khách nào đang bức xúc 🎉</div>';
+}
+async function setAlert(id, status, resumeBot) {
+  let who; try { who = localStorage.getItem("staffName"); } catch (e) {}
+  if (!who) { who = prompt("Tên nhân viên xử lý:") || ""; try { localStorage.setItem("staffName", who); } catch (e) {} }
+  await api(`/api/alerts/${id}`, { method: "POST", body: { status, handled_by: who || null, resume_bot: !!resumeBot } });
+  if (status !== "IN_PROGRESS") loadAlerts(); refreshBadges();
+}
+async function openChat(cid) {
+  const box = document.getElementById("chat-" + cid); box.classList.toggle("hidden"); if (box.classList.contains("hidden")) return;
+  box.innerHTML = `<div class="border rounded p-2"><div class="space-y-1 max-h-72 overflow-y-auto text-sm" data-h></div><div class="flex gap-2 mt-2"><input class="inp" data-t placeholder="Nhân viên trả lời khách…"><button class="btn btn-primary" data-s>Gửi</button></div></div>`;
+  const load = async () => renderHistory(await api(`/api/conversations/${encodeURIComponent(cid)}/messages`), box.querySelector("[data-h]"));
+  box.querySelector("[data-s]").onclick = async () => { const t = box.querySelector("[data-t]"); if (!t.value.trim()) return; try { await api(`/api/conversations/${encodeURIComponent(cid)}/send`, { method: "POST", body: { text: t.value } }); t.value = ""; load(); } catch (e) { toast(e.message, true); } };
+  load();
+}
+
+// ------------------------------------------------------------ huỷ đơn
+const C_STATUS = { CANCEL_REQUESTED: ["🛑 Cần huỷ trên POS", "bg-red-600 text-white"], RETAINED: ["🎁 Giữ được — áp ưu đãi", "bg-green-600 text-white"], DETECTED: ["👀 Nhân viên tự giữ chân", "bg-amber-400"], ASKED_REASON: ["Đang hỏi lý do", "bg-slate-200"], OFFERED: ["Đã đề xuất ưu đãi", "bg-blue-100 text-blue-800"], DONE: ["Đã xử lý", "bg-slate-100"], EXPIRED: ["Khách im lặng", "bg-slate-100"] };
+const REASON = { price: "Chê đắt / phí ship", size: "Size / màu", speed: "Lo giao chậm", other: "Khác" };
+async function loadCancels() {
+  const list = await api("/api/cancel-requests?status=" + ($("#cancelsAll").checked ? "all" : "active"));
+  $("#cancelRows").innerHTML = list.map((r) => { const [lbl, cls] = C_STATUS[r.status] || [r.status, ""]; return `<tr>
+    <td><span class="badge ${cls}">${lbl}</span></td><td><b>${esc(r.customer_name || r.conversation_id)}</b></td><td>${esc(REASON[r.reason] || "—")}</td>
+    <td class="text-xs space-y-1"><div>🗨️ ${esc(r.first_text)}</div>${r.reason_text && r.reason_text !== r.first_text ? `<div>🗨️ ${esc(r.reason_text)}</div>` : ""}${r.offer_text ? `<div class="text-green-700">🎁 ${esc(r.offer_text)}</div>` : ""}${r.final_text ? `<div>🗨️ ${esc(r.final_text)}</div>` : ""}${r.handled_by ? `<div class="muted">👤 ${esc(r.handled_by)} ${esc(r.note || "")}</div>` : ""}</td>
+    <td class="muted whitespace-nowrap">${fmtTime(r.updated_at)}</td>
+    <td class="whitespace-nowrap"><a class="btn btn-ghost" target="_blank" rel="noopener" href="${esc(r.pancake_url)}">💬 Chat</a> ${r.status !== "DONE" ? `<button class="btn btn-ok" onclick="doneCancel(${r.id})">✓ Đã xử lý trên POS</button>` : ""}</td></tr>`; }).join("") || '<tr><td colspan="6" class="muted">Không có yêu cầu huỷ đơn nào.</td></tr>';
+}
+async function doneCancel(id) {
+  let who; try { who = localStorage.getItem("staffName"); } catch (e) {}
+  if (!who) { who = prompt("Tên nhân viên xử lý:") || ""; try { localStorage.setItem("staffName", who); } catch (e) {} }
+  const note = prompt("Ghi chú (vd: đã huỷ đơn #123 trên POS):") || null;
+  await api(`/api/cancel-requests/${id}`, { method: "POST", body: { status: "DONE", handled_by: who || null, note } }); loadCancels(); refreshBadges();
+}
+
+// ------------------------------------------------------------ chi phí
+async function loadCost() {
+  const d = await api("/api/analytics?days=" + $("#costDays").value), g = d.guardrail;
+  $("#guardBox").innerHTML = g.blocked ? `<span class="badge bg-red-600 text-white">🛡️ ĐANG CHẶN: ${esc(g.reasons.join("; "))}</span>` : `<span class="muted">Hôm nay ${usd(g.spent_today_usd)} / ${usd(g.daily_budget_usd)} · Tháng ${usd(g.spent_month_usd)} / ${usd(g.monthly_budget_usd)}</span>`;
+  const kpi = (t, v, s) => `<div class="card"><div class="muted">${t}</div><div class="text-xl font-bold">${v}</div><div class="muted">${s || ""}</div></div>`;
+  $("#kpis").innerHTML = kpi("Chi phí Gemini", usd(d.total_cost_usd), vnd(d.total_cost_vnd) + (d.unpriced_calls ? ` · ${d.unpriced_calls} lượt chưa có đơn giá` : ""))
+    + kpi("Tiết kiệm nhờ Fast-Path", usd(d.saved_usd), vnd(d.saved_vnd) + " · ƯỚC TÍNH")
+    + kpi("Tỷ lệ Fast-Path", d.fastpath_ratio == null ? "—" : (100 * d.fastpath_ratio).toFixed(1) + "%", `Chi phí TB / lượt Gemini ${usd(d.avg_reply_cost_usd)}`)
+    + kpi("Kho tri thức", `${d.knowledge.faqs} FAQ`, `${d.knowledge.faqs_fastpath} Fast-Path · ${d.knowledge.scripts} kịch bản · ${d.knowledge.templates} mẫu chốt`);
+  const max = Math.max(...d.daily.map((x) => x.cost_usd || 0), 1e-9);
+  $("#costChart").innerHTML = d.daily.map((x) => `<div class="flex items-center gap-2"><span class="w-20 muted">${x.day.slice(5)}</span><div class="grow bg-slate-100 rounded h-3"><div class="bg-blue-600 h-3 rounded" style="width:${100 * (x.cost_usd || 0) / max}%"></div></div><span class="w-28 text-right">${usd(x.cost_usd)} · ${((x.prompt_tokens + x.output_tokens) / 1000).toFixed(1)}K</span></div>`).join("") || '<div class="muted">Chưa có lượt gọi Gemini.</div>';
+  $("#pathRows").innerHTML = d.paths.map((p) => `<tr><td>${PATH_LABEL[p.path] || p.path}</td><td>${p.n}</td><td>${p.avg_latency_ms == null ? "—" : Math.round(p.avg_latency_ms) + " ms"}</td><td>${p.path === "fastpath" ? usd(p.saved_usd) : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">Chưa có.</td></tr>';
+  $("#purposeRows").innerHTML = d.by_purpose.map((p) => `<tr><td>${{ mining: "Nạp tri thức", reply: "Trả lời khách", test: "Chạy thử" }[p.purpose] || p.purpose}</td><td>${p.calls}</td><td>${(p.prompt_tokens || 0).toLocaleString("vi-VN")}</td><td>${(p.output_tokens || 0).toLocaleString("vi-VN")}</td><td>${usd(p.cost_usd)}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Chưa có.</td></tr>';
+  $("#recentRows").innerHTML = d.recent_replies.map((r) => `<tr><td class="muted whitespace-nowrap">${fmtTime(r.created_at)}</td><td>${PATH_LABEL[r.path] || r.path}${r.simulated ? ' <span class="badge bg-slate-100">thử</span>' : ""}</td><td class="max-w-xs">${esc(r.question)}</td><td class="max-w-sm">${esc(r.answer || r.note)}</td><td>${Math.round(r.latency_ms || 0)}</td><td>${r.sent ? "✅" : "—"}</td></tr>`).join("");
+}
+
+// ------------------------------------------------------------ huy hiệu thông báo
+let lastAlertCount = null;
+async function refreshBadges() {
+  try {
+    const n = await api("/api/notifications");
+    const a = $("#nAlerts"), c = $("#nCancels"), cn = n.cancel_requested + n.retained + n.detected;
+    a.textContent = n.frustration_open; a.classList.toggle("hidden", !n.frustration_open);
+    c.textContent = cn; c.classList.toggle("hidden", !cn);
+    if (lastAlertCount !== null && n.frustration_open > lastAlertCount) toast("🔔 Có khách mới đang bức xúc!", true);
+    lastAlertCount = n.frustration_open;
+    if (currentTab === "alerts") loadAlerts();
+    if (currentTab === "cancels") loadCancels();
+  } catch (e) {}
+}
+
+// ------------------------------------------------------------ khởi động
+(async () => {
+  try { SETTINGS = await api("/api/settings"); updateBotState(); } catch (e) {}
+  let t = "connect"; try { t = localStorage.getItem("tab") || "connect"; } catch (e) {}
+  showTab(t); pollSync(); refreshBadges(); setInterval(refreshBadges, 15000);
+})();
+</script>
+</body>
+</html>
