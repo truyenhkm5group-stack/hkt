@@ -200,17 +200,28 @@ export function withinBusinessHours(cfg: SalesChatbotConfig["businessHours"], no
   return minutes < e && cfg.days.includes((day + 6) % 7);
 }
 
-export type ChatChannel = "TEST" | "WEB" | "FANPAGE";
+export type ChatChannel = "TEST" | "WEB" | "FANPAGE" | "ZALO";
+
+/** Kênh có khách thật (mọi kênh trừ khung thử) — đếm lượt / thống kê. */
+export const PUBLIC_CHAT_CHANNELS = ["WEB", "FANPAGE", "ZALO"] as const satisfies readonly ChatChannel[];
 
 /**
  * Kênh CÔNG KHAI = có khách thật ở đầu kia (trang chat web của tổ chức · tin nhắn fanpage qua Pancake): ghi đơn thật,
  * áp giờ làm việc, trần tin, chuyển người khi AI hỏng. `TEST` là khung thử của chủ shop — ghi mô phỏng.
  */
 export function isPublicChannel(channel: ChatChannel): boolean {
-  return channel === "WEB" || channel === "FANPAGE";
+  return (PUBLIC_CHAT_CHANNELS as readonly ChatChannel[]).includes(channel);
 }
 
-export const CHAT_CHANNEL_LABEL: Record<ChatChannel, string> = { TEST: "Khung thử", WEB: "Khách web", FANPAGE: "Fanpage" };
+/**
+ * Kênh NHẮN TIN (fanpage · Zalo OA): khách ở trong ứng dụng chat, nhân viên trả lời ngay trên đó ⇒ chuyển người là bot IM
+ * (không nhắn «em đã chuyển cho nhân viên…»). Khác WEB, nơi khách cần một câu để biết đã có người nhận.
+ */
+export function isMessagingChannel(channel: ChatChannel): boolean {
+  return channel === "FANPAGE" || channel === "ZALO";
+}
+
+export const CHAT_CHANNEL_LABEL: Record<ChatChannel, string> = { TEST: "Khung thử", WEB: "Khách web", FANPAGE: "Fanpage", ZALO: "Zalo OA" };
 
 /** Một dòng tin cho màn hình (đã lọc bỏ khối công cụ thô). */
 export type ChatView = {

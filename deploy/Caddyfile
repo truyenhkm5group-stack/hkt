@@ -36,6 +36,11 @@
 		# SEPAY_WEBHOOK_MAX_BODY_BYTES = 256 KiB
 		max_size 262144
 	}
+	@zaloOaWebhook path /api/webhooks/zalo-oa/*
+	request_body @zaloOaWebhook {
+		# ZALO_OA_WEBHOOK_MAX_BODY_BYTES = 256 KiB
+		max_size 262144
+	}
 
 	reverse_proxy app:3000 {
 		# SSE realtime (/api/events) cần giữ kết nối lâu
@@ -54,12 +59,13 @@
 		# ─── KHÔNG IN BÍ MẬT VÀO LOG TRUY CẬP ───
 		# Webhook Pancake mang bí mật TRÊN ĐƯỜNG DẪN, webhook Viettel Post nhận `?token=` — URL đã
 		# đăng ký với hai bên nên KHÔNG đổi được. Thay vào đó che chúng ở đây: đoạn bí mật sau
-		# /api/webhooks/pancake/ và giá trị của token / secret / access_token trên query.
+		# /api/webhooks/pancake/, token tổ chức sau /api/webhooks/{pancake-org,viettelpost-org,zalo-oa}/ và giá trị của
+		# token / secret / access_token trên query.
 		# Header mang bí mật bị xoá khỏi bản ghi (Authorization / Cookie Caddy đã tự che).
 		format filter {
 			wrap console
 			fields {
-				request>uri regexp "(/api/webhooks/pancake/(?:fanpage/)?)[^/?]+|([?&](?i:token|secret|access_token)=)[^&]*" "${1}${2}REDACTED"
+				request>uri regexp "(/api/webhooks/(?:pancake/(?:fanpage/)?|pancake-org/|viettelpost-org/|zalo-oa/))[^/?]+|([?&](?i:token|secret|access_token)=)[^&]*" "${1}${2}REDACTED"
 				request>headers>Token delete
 				request>headers>Secret delete
 				request>headers>X-Token delete

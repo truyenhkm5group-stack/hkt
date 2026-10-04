@@ -13,6 +13,7 @@ import { productCustomFieldOptions } from "@/lib/sales-chatbot/catalog";
 import { CHAT_CHANNEL_LABEL, SALES_BOT_CONNECTORS, salesBotError, type ChatChannel } from "@/lib/sales-chatbot/config";
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { fanpageSetupView } from "@/lib/sales-chatbot/fanpage";
+import { zaloSetupView } from "@/lib/sales-chatbot/zalo";
 import { loadPlaybook, loadPlaybookRun } from "@/lib/sales-chatbot/playbook";
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
@@ -52,6 +53,7 @@ export default async function SalesChatbotPage() {
     publicationOf(user.organization?.code ?? ""),
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
+  const zalo = manage && user.organization?.code ? await zaloSetupView(user.organization.code) : null;
   const [playbook, playbookRun, lessons] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun(), loadLessons()]) : [null, null, null];
   // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
   const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
@@ -131,6 +133,33 @@ export default async function SalesChatbotPage() {
                   <div className="space-y-1">
                     <p className="text-xs font-medium">URL webhook của shop (giữ kín — ai có URL này gửi được tin giả vào bot):</p>
                     <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]" data-testid="fanpage-webhook-url">{fanpage.webhookUrl}</code>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+                )}
+              </div>
+            </SectionCard>
+          ) : null}
+          {zalo ? (
+            <SectionCard title="Zalo OA" description="Bot trả lời tin nhắn khách gửi vào Zalo Official Account của shop — không cần Pancake. Cùng cấu hình, giá / tồn, luật chốt đơn.">
+              <div className="space-y-2 text-sm" data-testid="zalo-setup">
+                <p>
+                  Trạng thái: <b data-testid="zalo-status">{{ NOT_CONFIGURED: "CHƯA KHAI", DRAFT: "CHƯA BẬT", ACTIVE: "ĐANG BẬT", FAILED: "KIỂM TRA HỎNG" }[zalo.status]}</b>
+                  {zalo.oaId ? ` · OA ${zalo.oaId}` : ""} · bot đã xử lý {zalo.counts.done} tin · chờ {zalo.counts.pending} · bỏ qua {zalo.counts.skipped}
+                </p>
+                {zalo.counts.lastSkipReason ? <p className="text-xs text-muted-foreground">Lần bỏ qua gần nhất: {zalo.counts.lastSkipReason}</p> : null}
+                <ol className="list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
+                  <li>developers.zalo.me: tạo ứng dụng, liên kết OA của shop, lấy App ID · App Secret · OA Secret Key (mục Webhook); lấy refresh token ở API Explorer (loại OA Access Token).</li>
+                  <li>
+                    <Link href="/settings/connections" className="underline underline-offset-2">Cài đặt → Kết nối</Link> → «Zalo OA»: nhập đủ các ô → Lưu → Kiểm tra → Bật. Máy tự làm mới token và lưu cặp mới.
+                  </li>
+                  <li>Trong Zalo Developers → Webhook: dán URL dưới đây, bật sự kiện «Người dùng gửi tin nhắn» và «OA gửi tin nhắn» (để bot biết nhân viên đang trả lời).</li>
+                  <li>Bot chỉ trả lời trong 48 giờ từ tin cuối của khách — ngoài đó Zalo tính phí tin tư vấn nên bot không gửi. Nhân viên trả lời trong OA ⇒ bot nhường hội thoại 30 phút. Ảnh của câu trả lời mẫu chưa gửi được qua Zalo (chỉ phần chữ).</li>
+                </ol>
+                {zalo.webhookUrl ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium">URL webhook Zalo của shop (giữ kín):</p>
+                    <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]" data-testid="zalo-webhook-url">{zalo.webhookUrl}</code>
                   </div>
                 ) : (
                   <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>

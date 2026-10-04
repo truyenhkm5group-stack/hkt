@@ -5,6 +5,7 @@ import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import {
   PANCAKE_WEBHOOK_MAX_BODY_BYTES,
   SEPAY_WEBHOOK_MAX_BODY_BYTES,
+  ZALO_OA_WEBHOOK_MAX_BODY_BYTES,
   VTP_STATEMENT_MAX_BODY_BYTES,
   VTP_STATEMENT_MAX_UNAUTHENTICATED_READS,
   VTP_WEBHOOK_MAX_BODY_BYTES,
@@ -163,6 +164,7 @@ export async function testWebhookHardening() {
   assert.equal(caddyMaxSize(caddy, "/api/webhooks/vtp-statement"), VTP_STATEMENT_MAX_BODY_BYTES, "Caddyfile: trần bảng kê phải khớp hằng số (đổi MAX_LIST_* thì sửa Caddyfile)");
   assert.equal(caddyMaxSize(caddy, "/api/webhooks/pancake/*"), PANCAKE_WEBHOOK_MAX_BODY_BYTES, "Caddyfile: trần webhook Pancake phải khớp hằng số");
   assert.equal(caddyMaxSize(caddy, "/api/webhooks/sepay"), SEPAY_WEBHOOK_MAX_BODY_BYTES, "Caddyfile: trần webhook SePay phải khớp hằng số");
+  assert.equal(caddyMaxSize(caddy, "/api/webhooks/zalo-oa/*"), ZALO_OA_WEBHOOK_MAX_BODY_BYTES, "Caddyfile: trần webhook Zalo OA phải khớp hằng số");
   const regexpLine = /request>uri regexp "([^"]+)" "([^"]+)"/.exec(caddy);
   assert.ok(regexpLine, "log Caddy phải lọc request>uri");
   // Chạy chính biểu thức trong Caddyfile (cú pháp RE2 ⊂ JS, trừ cờ nội tuyến `(?i:` — đổi sang cờ i).
@@ -172,12 +174,14 @@ export async function testWebhookHardening() {
   assert.equal(thay("/api/webhooks/viettelpost?token=abc&x=1"), "/api/webhooks/viettelpost?token=REDACTED&x=1");
   assert.equal(thay("/api/webhooks/vtp-statement?x=1&SECRET=abc"), "/api/webhooks/vtp-statement?x=1&SECRET=REDACTED");
   assert.equal(thay("/orders?page=2"), "/orders?page=2", "URL thường không bị đụng");
+  // Token tổ chức trên đường dẫn của webhook theo tổ chức (URL_SECRET) cũng là bí mật.
+  for (const goc of ["pancake-org", "viettelpost-org", "zalo-oa"]) assert.equal(thay(`/api/webhooks/${goc}/hslc.AbC123/x`), `/api/webhooks/${goc}/REDACTED/x`, `log Caddy che token ${goc}`);
   for (const h of ["X-Webhook-Secret", "X-Token", "Token", "Secret", "X-Api-Key", "X-Cron-Secret"]) {
     assert.ok(caddy.includes(`request>headers>${h} delete`), `log Caddy phải xoá header ${h}`);
   }
 
   // Xác thực TRƯỚC khi đọc: không route webhook nào còn gọi request.text()/json() trần.
-  for (const tep of ["app/api/webhooks/viettelpost/route.ts", "app/api/webhooks/vtp-statement/route.ts", "app/api/webhooks/sepay/route.ts", "app/api/webhooks/pancake/[secret]/[[...event]]/route.ts"]) {
+  for (const tep of ["app/api/webhooks/viettelpost/route.ts", "app/api/webhooks/vtp-statement/route.ts", "app/api/webhooks/sepay/route.ts", "app/api/webhooks/pancake/[secret]/[[...event]]/route.ts", "app/api/webhooks/zalo-oa/[token]/route.ts"]) {
     const src = boChuThich(readFileSync(tep, "utf8"));
     assert.ok(!/request\.(text|json|arrayBuffer)\(\)/.test(src), `${tep} phải đọc body qua readBodyCapped, không đọc trần`);
     assert.ok(src.includes("readBodyCapped("), `${tep} phải dùng readBodyCapped`);

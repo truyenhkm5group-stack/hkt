@@ -9832,8 +9832,10 @@ export const salesChatConversations = pgTable(
   },
   (t) => [
     index("sales_chat_conversations_created_idx").on(t.createdAt),
-    check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB','FANPAGE')`),
+    // ZALO (migration zalo_oa_channel · lib/sales-chatbot/zalo.ts): tin nhắn Zalo OA của CHÍNH shop — khoá hội thoại băm (OA, người dùng Zalo).
+    check("sales_chat_conversations_channel_check", sql`${t.channel} IN ('TEST','WEB','FANPAGE','ZALO')`),
     uniqueIndex("sales_chat_conversations_fanpage_key").on(t.visitorKey).where(sql`${t.channel} = 'FANPAGE'`),
+    uniqueIndex("sales_chat_conversations_zalo_key").on(t.visitorKey).where(sql`${t.channel} = 'ZALO'`),
     check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','WAITING','HANDOFF','CLOSED')`),
     index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
   ],

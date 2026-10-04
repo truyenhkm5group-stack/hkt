@@ -1450,6 +1450,13 @@
       "when": 1790767420000,
       "tag": "0207_messenger_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 1790767480000,
+      "tag": "0208_zalo_oa_channel",
+      "breakpoints": true
     }
   ]
 }

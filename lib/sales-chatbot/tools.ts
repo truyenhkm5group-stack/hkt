@@ -32,7 +32,7 @@ import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
-import type { ChatChannel, SalesChatbotConfig, SalesTool } from "@/lib/sales-chatbot/config";
+import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
@@ -374,7 +374,7 @@ function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, pr
     orderDiscount: 0,
     shippingFee: priced.shippingFee ?? 0,
     note: notes.join("\n").slice(0, 2000),
-    channel: channel === "FANPAGE" ? "Chatbot fanpage" : "Chatbot web",
+    channel: channel === "FANPAGE" ? "Chatbot fanpage" : channel === "ZALO" ? "Chatbot Zalo" : "Chatbot web",
     recipient: { name: draft.recipient.name, phone: draft.recipient.phone, address: draft.recipient.address, province: draft.recipient.province },
   };
 }
@@ -661,7 +661,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       state.handoff = { reason: reason.success ? reason.data : "Khách cần nhân viên", at: new Date().toISOString() };
       if (!simulated) await notifySalesChatHandoff(ctx.conversationId, state.handoff.reason, state.customer, new Date());
       // Fanpage: nhân viên trả lời trực tiếp trên page ⇒ bot không nói gì thêm (lượt này cũng không được gửi đi).
-      if (ctx.channel === "FANPAGE") return ok("Chuyển nhân viên", { handed_off: true, simulated, say_to_customer: null, instruction: "KHÔNG viết gì cho khách — nhân viên sẽ trả lời trực tiếp." }, state);
+      if (isMessagingChannel(ctx.channel)) return ok("Chuyển nhân viên", { handed_off: true, simulated, say_to_customer: null, instruction: "KHÔNG viết gì cho khách — nhân viên sẽ trả lời trực tiếp." }, state);
       return ok(`${simulated ? "(Thử) " : ""}Chuyển nhân viên`, { handed_off: true, simulated, say_to_customer: ctx.config.handoff.message }, state);
     }
   }

@@ -155,6 +155,7 @@ const MOI = [
   "0205_sales_replay",
   "0206_sales_copilot",
   "0207_messenger_pages",
+  "0208_zalo_oa_channel",
 ] as const;
 
 /*

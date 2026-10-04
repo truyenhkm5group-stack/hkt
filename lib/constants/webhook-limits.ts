@@ -33,6 +33,9 @@ export const MESSENGER_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 /** SePay: một giao dịch ngân hàng — vài trăm byte. Chữ ký HMAC cần body nên phải đọc trước khi kiểm. */
 export const SEPAY_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
+/** Zalo OA: một sự kiện tin nhắn — vài KB (ảnh đi bằng URL, không nằm trong body). Chữ ký SHA-256 cần body thô nên phải đọc trước. */
+export const ZALO_OA_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
+
 /**
  * Bảng kê từ Gmail: tới `MAX_LIST_FILES` tệp, mỗi tệp tới `MAX_LIST_BASE64` ký tự base64 (đúng trần
  * mà lược đồ zod của route nhận), cộng phần bao JSON: tên tệp ≤ 300 ký tự + khoá mỗi phần tử, và

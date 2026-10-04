@@ -469,6 +469,7 @@ import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testCommerceAgent } from "./commerce-agent.test";
+import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
@@ -2703,6 +2704,7 @@ async function main() {
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
   await testCommerceAgent();
+  await testZaloOa();
   await testSalesEvents();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).

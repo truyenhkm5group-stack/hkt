@@ -28,10 +28,11 @@ export const VISION_LIMITS = {
 } as const;
 
 /**
- * Tên miền ảnh được tải: CDN ảnh của Facebook / Messenger / Instagram và Pancake. Địa chỉ ảnh tới từ webhook (đã xác thực bằng
- * bí mật trong URL) — vẫn KHÔNG tải tên miền khác: máy chủ đi lấy một URL bất kỳ là cửa SSRF vào mạng nội bộ.
+ * Tên miền ảnh được tải: CDN ảnh của Facebook / Messenger / Instagram, Pancake và Zalo (`zdn.vn` · `zadn.vn` — ảnh khách gửi
+ * Zalo OA). Địa chỉ ảnh tới từ webhook (đã xác thực bằng bí mật trong URL / chữ ký) — vẫn KHÔNG tải tên miền khác: máy chủ đi
+ * lấy một URL bất kỳ là cửa SSRF vào mạng nội bộ.
  */
-export const VISION_HOST_SUFFIXES = ["fbcdn.net", "fbsbx.com", "cdninstagram.com", "pancake.vn", "pages.fm"] as const;
+export const VISION_HOST_SUFFIXES = ["fbcdn.net", "fbsbx.com", "cdninstagram.com", "pancake.vn", "pages.fm", "zdn.vn", "zadn.vn"] as const;
 
 export function allowedImageUrl(raw: string): boolean {
   let u: URL;
