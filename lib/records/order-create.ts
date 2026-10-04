@@ -378,7 +378,7 @@ export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown): 
 
 /** Công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức ngữ cảnh (mặc định TẮT). */
 export async function loadAutoConfirmComplete(): Promise<boolean> {
-  return (await getSettingJson<unknown>(AUTO_CONFIRM_COMPLETE_SETTING_KEY, false)) === true;
+  return (await getSettingJson<{ enabled?: unknown }>(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: false })).enabled === true;
 }
 
 /**
@@ -719,7 +719,7 @@ export async function saveAutoConfirmCompleteCore(user: SessionUser, enabled: bo
   if (!gate.allowed) return fail(gate.code, gate.reason);
   if (!can(user, "settings:manage")) return fail("FORBIDDEN", "Cần quyền cấu hình (settings:manage) để đổi cách tính đơn.");
   const before = await loadAutoConfirmComplete();
-  await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, enabled === true);
+  await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: enabled === true });
   await audit({ userId: user.id, userEmail: user.email, action: "ORDER_AUTO_CONFIRM_COMPLETE", entity: "SETTINGS", entityId: AUTO_CONFIRM_COMPLETE_SETTING_KEY, before: { enabled: before }, after: { enabled: enabled === true }, reason: enabled ? "Đơn đủ thông tin (SĐT · địa chỉ · hàng) tính là đã xác nhận" : "Tắt tự xác nhận đơn đủ thông tin" });
   let promoted = 0;
   let kept = 0;

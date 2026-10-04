@@ -186,7 +186,7 @@ export const MANUAL_DELIVERY_FEE_SETTING_KEY = "orders.manualDeliveryFee";
  * ═══ ĐƠN ĐỦ THÔNG TIN = ĐÃ XÁC NHẬN (chủ shop HSLC 04/10/2026) ═══
  *
  * «Đơn có đầy đủ thông tin: SĐT, địa chỉ, SKU được tính là đơn hàng luôn (không cần xác nhận), chỉ trừ những đơn huỷ.»
- * Công tắc THEO TỔ CHỨC (`settings['orders.autoConfirmComplete']`, mặc định TẮT): bật thì đơn tay «Mới» đủ ba thứ ⇒ ghi
+ * Công tắc THEO TỔ CHỨC (`settings['orders.autoConfirmComplete']` = `{ enabled }`, mặc định TẮT): bật thì đơn tay «Mới» đủ ba thứ ⇒ ghi
  * thẳng «Đã xác nhận» ở lõi ghi đơn (`lib/records/order-create.ts`) — một chỗ cho chatbot, ghi đơn từ hội thoại và form
  * tạo tay, nên MỌI báo cáo đang đếm đơn đã xác nhận (hiệu quả quảng cáo, lợi nhuận danh nghĩa, marketer) tự đếm đúng mà
  * không báo cáo nào phải đổi định nghĩa «đơn». Giữ hàng ở kho như mọi đơn đã chốt. «Chờ hàng» là lựa chọn tường minh của
