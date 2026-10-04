@@ -420,3 +420,35 @@ export function trendOf(recent: number, previous: number): Trend {
 }
 
 export const TREND_LABEL: Record<Trend, string> = { UP: "Tăng", DOWN: "Giảm", FLAT: "Đều", NEW: "Mới bắt đầu", NONE: "—" };
+
+// ─────────────────────────── Xu hướng dùng theo tuần (sổ dùng 0204) ───────────────────────────
+
+export type UsageDayRow = { day: string; conversationsStarted: number; aiOrders: number };
+export type WeekBucket = { from: string; to: string; days: number; conversations: number | null; aiOrders: number | null };
+
+function addDaysIso(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * `weeks` tuần 7 ngày lùi từ `today` (tuần cuối kết thúc HÔM NAY), cũ trước. Tuần không có ngày nào trong sổ ⇒ `null` (chưa đo),
+ * không phải 0; `days` nói tuần đó có mấy ngày trong sổ (sổ bắt đầu giữa tuần ⇒ < 7). HÀM THUẦN.
+ */
+export function weeklyBuckets(rows: readonly UsageDayRow[], today: string, weeks = 4): WeekBucket[] {
+  const out: WeekBucket[] = [];
+  for (let w = weeks - 1; w >= 0; w--) {
+    const to = addDaysIso(today, -7 * w);
+    const from = addDaysIso(to, -6);
+    const inWeek = rows.filter((r) => r.day >= from && r.day <= to);
+    out.push({
+      from,
+      to,
+      days: inWeek.length,
+      conversations: inWeek.length ? inWeek.reduce((s, r) => s + r.conversationsStarted, 0) : null,
+      aiOrders: inWeek.length ? inWeek.reduce((s, r) => s + r.aiOrders, 0) : null,
+    });
+  }
+  return out;
+}

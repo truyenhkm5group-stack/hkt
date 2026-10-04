@@ -16,7 +16,8 @@
 5. **Kích hoạt · Time-to-Value** — phễu 7 mốc, "đã tới x/n", trung vị ngày từ lúc tạo; mốc chưa đo được in
    "Chưa đo được" kèm lý do khi rê chuột.
 6. **Từng tổ chức** — gói · vòng đời · MRR · AI nền tảng trả · đóng góp (+%) · lượt AI · xu hướng · lỗi AI · kích hoạt
-   (ngày tới kích hoạt, ngày tới đơn AI đầu) · đăng nhập cuối. Tên tổ chức dẫn sang `/platform/org/<mã>` (chẩn đoán,
+   (ngày tới kích hoạt, ngày tới đơn AI đầu) · đăng nhập cuối · hội thoại / bot / đơn AI 30 ngày kèm chuỗi 4 tuần (tuần chưa
+   có ngày nào trong sổ là «—») và xu hướng tuần này so tuần trước (dưới 10 hội thoại ⇒ «—»). Tên tổ chức dẫn sang `/platform/org/<mã>` (chẩn đoán,
    thu phí, sổ AI của tổ chức đó — đã có).
 
 ## Quyền riêng tư
@@ -42,6 +43,6 @@ hẳn sang job nền theo lô — ghi ở `docs/platform/scale-plan.md` khi tớ
 | LLM cost? theo tenant? | Hàng số · cột "AI nền tảng trả" |
 | Contribution margin từng tenant? | Cột "Đóng góp" (chưa phân bổ hạ tầng) |
 | Khách nào đang làm SaaS mất tiền? | Cột "Đóng góp" âm tô đỏ |
-| Khách nào healthy / có nguy cơ? | Tín hiệu rời: đăng nhập cuối, xu hướng AI, lỗi AI, kích hoạt — **không có điểm tổng** |
+| Khách nào healthy / có nguy cơ? | Tín hiệu rời: đăng nhập cuối, xu hướng AI, xu hướng hội thoại 4 tuần, lỗi AI, kích hoạt — **không có điểm tổng** |
 | Khách nào dùng AI hiệu quả nhất? | Lượt AI + đơn AI đầu tiên ở đây; hiệu quả bán hàng thật (đơn giao, doanh thu) nằm ở màn «Hiệu quả» của từng tổ chức (#522) |
 | Time to first value? | Kích hoạt · Time-to-Value |

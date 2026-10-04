@@ -21,6 +21,7 @@ import {
   type AiCost,
   type PlatformCostDeclaration,
   type SaasDailyRow,
+  type UsageDayRow,
 } from "@/lib/platform/saas-metrics";
 
 /**
@@ -367,4 +368,17 @@ export async function setPlatformCostDeclaration(user: SessionUser, raw: { infra
     actor: user.organization ? { orgCode: user.organization.code, userId: user.id, email: user.email } : null,
   });
   return { ok: true, message: "Đã lưu chi phí nền tảng — biên lợi nhuận tính lại ngay." };
+}
+
+/** Dòng sổ dùng theo ngày từ `fromDay`, gom theo tổ chức (cho xu hướng tuần của cockpit). */
+export async function readUsageDaily(fromDay: string): Promise<Map<string, UsageDayRow[]>> {
+  const pdb = await getPlatformDb();
+  const u = schema.platformTenantUsageDaily;
+  const rows = await pdb.select({ orgCode: u.orgCode, day: u.day, conversationsStarted: u.conversationsStarted, aiOrders: u.aiOrders }).from(u).where(gte(u.day, fromDay));
+  const out = new Map<string, UsageDayRow[]>();
+  for (const r of rows) {
+    if (!out.has(r.orgCode)) out.set(r.orgCode, []);
+    out.get(r.orgCode)!.push({ day: r.day, conversationsStarted: r.conversationsStarted, aiOrders: r.aiOrders });
+  }
+  return out;
 }

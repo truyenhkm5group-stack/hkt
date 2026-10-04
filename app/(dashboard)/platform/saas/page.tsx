@@ -118,6 +118,9 @@ function TenantTable({ rows }: { rows: TenantRow[] }) {
               </td>
               <td className="numeric px-3 py-2 text-right" title={t.usage30d ? `${t.usage30d.days} ngày trong sổ · ${formatNumber(t.usage30d.customerMessages)} tin khách · ${formatNumber(t.usage30d.botMessages)} tin bot` : "Chưa có ngày nào trong sổ dùng"}>
                 {t.usage30d ? `${formatNumber(t.usage30d.conversationsStarted)} · ${formatNumber(t.usage30d.aiActiveConversations)} · ${formatNumber(t.usage30d.aiOrders)}` : "—"}
+                <div className="text-xs text-muted-foreground" title={t.usageWeeks.map((w) => `${w.from} → ${w.to}: ${w.conversations ?? "—"} hội thoại, ${w.aiOrders ?? "—"} đơn AI (${w.days} ngày trong sổ)`).join(" · ")}>
+                  4 tuần: {t.usageWeeks.map((w) => (w.conversations === null ? "—" : formatNumber(w.conversations))).join(" → ")} · {TREND_LABEL[t.usageTrend]}
+                </div>
               </td>
               <td className="numeric px-3 py-2 text-right">{formatNumber(t.aiRequests30d)}</td>
               <td className="px-3 py-2">{TREND_LABEL[t.aiTrend]}</td>
