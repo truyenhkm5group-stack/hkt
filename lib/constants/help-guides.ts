@@ -272,6 +272,20 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
   },
 
   {
+    key: "real-estate",
+    topic: "SELL",
+    title: "Bảng hàng bất động sản",
+    summary: "Một bảng hàng chung cho cả đội sale: căn nào còn trống, ai đang giữ tới bao giờ — không ai giữ trùng một căn.",
+    href: "/real-estate",
+    permission: "real_estate:view",
+    steps: [
+      { text: "Quản lý sàn: ở khung «Tạo dự án» khai mã, tên và số giờ giữ chỗ tối đa; rồi dán danh sách căn ở khung «Thêm căn».", href: "/real-estate" },
+      { text: "Sale: căn còn trống bấm «Giữ chỗ», ghi tên khách — hết giờ mà chưa cọc thì căn tự trở về còn trống." },
+      { text: "Khách cọc: bấm «Đặt cọc» trên căn mình đang giữ. Quản lý xác nhận «Ký bán» bằng số hợp đồng, hoặc «Hoàn / bỏ cọc…» có lý do." },
+    ],
+  },
+
+  {
     key: "lots",
     topic: "SELL",
     title: "Lô & hạn dùng",

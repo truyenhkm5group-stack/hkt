@@ -461,6 +461,7 @@ import { testWarranty } from "./warranty.test";
 import { testStays } from "./stays.test";
 import { testStockLots } from "./stock-lots.test";
 import { testFieldJobs } from "./field-jobs.test";
+import { testRealEstate } from "./real-estate.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testCommerceAgent } from "./commerce-agent.test";
@@ -2678,6 +2679,7 @@ async function main() {
   await testStays();
   await testStockLots();
   await testFieldJobs();
+  await testRealEstate();
   await testAppointmentBookingBot();
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
