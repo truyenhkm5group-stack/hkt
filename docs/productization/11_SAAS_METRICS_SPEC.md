@@ -86,7 +86,7 @@ quét đầu sau deploy ra đúng mốc lịch sử mà không phải đoán. Đ
 | FIRST_CONVERSATION | `sales_chat_conversations` kênh ≠ TEST |
 | FIRST_AI_REPLY (= **đã kích hoạt**, `ACTIVATED_AT`) | hội thoại kênh ≠ TEST có `ai_calls > 0` — mốc mở hội thoại (cận dưới của lượt trả lời đầu) |
 | FIRST_AI_ORDER | `orders.created_at` của đơn gắn `sales_chat_conversations.order_id` (kênh ≠ TEST) |
-| FIRST_DELIVERED_AI_ORDER | **UNAVAILABLE** — kết cục giao hàng của tổ chức khách chưa có một định nghĩa chung đọc được từ mặt phẳng điều khiển; mở khi #522 xuất hàm kết cục theo đơn |
+| FIRST_DELIVERED_AI_ORDER | đơn AI đầu tiên có `ORDER_OUTCOME = DELIVERED` — mốc là lúc ĐẶT đơn ấy (kết cục không mang mốc giao); ghi khi máy THẤY nó giao thành công |
 
 Trung vị "từ lúc tạo tới mốc" dưới 3 tổ chức ⇒ `null` (`SAAS_MEDIAN_MIN_SAMPLE`).
 
@@ -117,7 +117,6 @@ chứng trọng số (yêu cầu §18 "không hardcode scoring formula"). Khi c�
 | CAC, Sales cycle, CAC payback | Chi phí bán hàng / quảng cáo **của nền tảng** chưa tách khỏi chi phí của tổ chức nhà; nguồn lead của đăng ký `/start` chưa ghi |
 | Support cost / tenant | Không có sổ yêu cầu hỗ trợ theo tổ chức (chỉ có lượt xem SUPPORT_VIEW) |
 | Infrastructure cost / tenant | Chưa có căn cứ phân bổ (CPU / dung lượng CSDL theo tổ chức chưa đo) |
-| First delivered AI order | Xem §5 |
 | NRR 12 tháng | Cần 12 tháng sổ |
 
 ## 9. Lùi

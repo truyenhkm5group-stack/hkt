@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { getDbFor, getPlatformDb, schema, type Db } from "@/db";
 import { addonMonthlyVnd, parseAddonPrices, parseAddonUnits } from "@/lib/billing/addons";
 import { billingStanding, mrrContribution, vnDate, type BillingStandingKind } from "@/lib/billing/rules";
@@ -10,6 +10,7 @@ import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
 import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
 import type { Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 import {
   ACTIVATION_MILESTONES,
@@ -189,6 +190,20 @@ export async function readOrgMilestones(db: Db, want: ReadonlySet<ActivationMile
     if (!want.has(m)) continue;
     const at = await firstAt(db, query);
     if (at) out[m] = at;
+  }
+  if (want.has("FIRST_DELIVERED_AI_ORDER")) {
+    // Kết cục đơn = ORDER_OUTCOME — MỘT công thức cho mọi báo cáo (AGENTS §0.2), không viết lại điều kiện giao thành công.
+    const o = schema.orders;
+    const s = schema.shipments;
+    const c = schema.salesChatConversations;
+    const [r] = await db
+      .select({ at: sql<Date | string | null>`min(${o.createdAt})` })
+      .from(o)
+      .innerJoin(c, eq(c.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      .where(and(ne(c.channel, "TEST"), sql`${ORDER_OUTCOME} = 'DELIVERED'`));
+    const at = minDate([r?.at ?? null]);
+    if (at) out.FIRST_DELIVERED_AI_ORDER = at;
   }
   return out;
 }
