@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { getPlatformDb, schema } from "@/db";
 import { secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
 
@@ -15,14 +17,17 @@ import { findOrganization, getHomeOrganization } from "@/lib/platform/organizati
  * đường dẫn (`secret_hash → tổ chức`); bí mật không khớp tổ chức nào thì 401, KHÔNG rơi về nhà.
  */
 
-export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG";
+export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER";
 
 /**
  * `HOME_ONLY` — bí mật là một biến môi trường của tổ chức nhà.
  * `URL_SECRET` — đường dẫn mang MỘT token «<mã tổ chức>.<chữ ký>», chữ ký = HMAC của khoá con dẫn xuất từ
  * `PLATFORM_SECRETS_KEY` trên (nhà cung cấp, mã tổ chức). Token sai / tổ chức không hoạt động ⇒ 401, KHÔNG rơi về nhà.
+ * `PAGE_INDEX` — MỘT địa chỉ chung cho mọi tổ chức (Meta chỉ cho khai một URL webhook mỗi app); gói tin đã xác thực bằng chữ
+ * ký của app, và MÃ PAGE trong gói tra ở `platform_messenger_pages` (một page thuộc đúng một tổ chức). Không có dòng / tổ
+ * chức không hoạt động ⇒ NÉM, không rơi về nhà.
  */
-export type WebhookBinding = { mode: "HOME_ONLY"; reason: string } | { mode: "URL_SECRET"; reason: string };
+export type WebhookBinding = { mode: "HOME_ONLY"; reason: string } | { mode: "URL_SECRET"; reason: string } | { mode: "PAGE_INDEX"; reason: string };
 
 export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>> = {
   PANCAKE: { mode: "HOME_ONLY", reason: "Bí mật trong đường dẫn so với PANCAKE_WEBHOOK_SECRET — một giá trị môi trường, của tổ chức nhà." },
@@ -32,6 +37,7 @@ export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>>
   PANCAKE_FANPAGE: { mode: "URL_SECRET", reason: "Tin fanpage của MỘT tổ chức khách: token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó (dẫn xuất từ PLATFORM_SECRETS_KEY)." },
   VIETTELPOST_ORG: { mode: "URL_SECRET", reason: "Hành trình vận đơn Viettel Post của MỘT tổ chức khách: gói VTP không mang mã khách, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
   PANCAKE_POS_ORG: { mode: "URL_SECRET", reason: "Đơn / khách / sản phẩm / tồn từ Pancake POS của MỘT tổ chức khách (kết nối «pancake-pos-org»): token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
+  MESSENGER: { mode: "PAGE_INDEX", reason: "Messenger trực tiếp (0207): Meta gửi mọi page về MỘT URL, ký X-Hub-Signature-256 bằng app secret của nền tảng; mã page trong gói tra ở platform_messenger_pages — page chưa nối / tổ chức không hoạt động ⇒ từ chối." },
 };
 
 /** Token trong đường dẫn không khớp tổ chức nào (URL_SECRET) — route trả 401, KHÔNG rơi về nhà. */
@@ -41,7 +47,7 @@ export class WebhookAuthError extends Error {}
  * Mã tổ chức mà gói tin của `provider` thuộc về. Nhà cung cấp chưa khai ⇒ NÉM, không đoán. Chế độ `URL_SECRET` cần `token`
  * (đoạn trong đường dẫn); sai / thiếu ⇒ NÉM `WebhookAuthError`.
  */
-export async function resolveWebhookOrganization(provider: WebhookProvider, opts: { token?: string } = {}): Promise<string> {
+export async function resolveWebhookOrganization(provider: WebhookProvider, opts: { token?: string; pageId?: string } = {}): Promise<string> {
   // `Object.hasOwn`: chuỗi lạ trùng tên thuộc tính của Object (`toString`, `constructor`…) không được
   // lọt qua như một dòng khai.
   const binding = Object.hasOwn(WEBHOOK_BINDINGS, provider) ? WEBHOOK_BINDINGS[provider] : undefined;
@@ -52,6 +58,11 @@ export async function resolveWebhookOrganization(provider: WebhookProvider, opts
     case "URL_SECRET": {
       const code = opts.token ? await resolveUrlSecretOrganization(provider, opts.token) : null;
       if (!code) throw new WebhookAuthError(`Sai token webhook ${provider}`);
+      return code;
+    }
+    case "PAGE_INDEX": {
+      const code = opts.pageId ? await resolvePageOrganization(opts.pageId) : null;
+      if (!code) throw new WebhookAuthError(`Page ${opts.pageId ?? "(trống)"} chưa nối với tổ chức nào (${provider})`);
       return code;
     }
     default:
@@ -98,3 +109,19 @@ export async function resolveUrlSecretOrganization(provider: WebhookProvider, to
   return org.code;
 }
 
+
+// ─── PAGE_INDEX: mã page ⇒ tổ chức ───
+
+/** Mã page Messenger ⇒ mã tổ chức đang hoạt động, hoặc `null`. Bảng chưa có (máy chưa migrate) ⇒ `null`. */
+export async function resolvePageOrganization(pageId: string): Promise<string | null> {
+  if (!/^\d{5,30}$/.test(pageId)) return null;
+  try {
+    const pdb = await getPlatformDb();
+    const [row] = await pdb.select({ orgCode: schema.platformMessengerPages.orgCode }).from(schema.platformMessengerPages).where(eq(schema.platformMessengerPages.pageId, pageId)).limit(1);
+    if (!row) return null;
+    const org = await findOrganization(row.orgCode);
+    return org && org.status === "ACTIVE" ? org.code : null;
+  } catch {
+    return null;
+  }
+}

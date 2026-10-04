@@ -293,6 +293,9 @@ export function organizationDatabaseName(code: string): string {
  *
  * Đã đủ trần thì ĐÓNG handle lâu không dùng nhất (LRU) — mở lại khi cần, cùng thư mục, dữ liệu còn nguyên (migrate idempotent).
  * PostgreSQL thật (production, VPS) KHÔNG đi qua nhánh này: bể kết nối của nó đã có trần riêng (`PGPOOL_MAX_ORG`).
+ *
+ * KHÔNG giữ biến `db` (từ getDb() / getDbFor()) qua một vòng quét mở nhiều tổ chức khác rồi dùng lại: handle PGlite của
+ * tổ chức đó có thể đã bị đóng — gọi lại getDb() sau vòng quét.
  */
 export const PGLITE_ORG_OPEN_MAX = 16;
 

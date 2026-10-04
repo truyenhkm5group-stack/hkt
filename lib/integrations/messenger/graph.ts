@@ -1,0 +1,216 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { env } from "@/lib/env";
+
+/**
+ * ═══════════ MESSENGER TRỰC TIẾP — GỌI GRAPH API CỦA META (docs/platform/messenger.md) ═══════════
+ *
+ * Kênh thứ hai cho bot fanpage, KHÔNG cần Pancake: app Facebook của NỀN TẢNG (cùng app «Đăng nhập bằng Facebook» —
+ * `FACEBOOK_LOGIN_APP_ID/SECRET`) được chủ page cấp quyền nhắn tin; webhook của Meta tới thẳng ERP; bot trả lời bằng Send API.
+ *
+ *  · Mọi lời gọi bằng page token đều kèm `appsecret_proof` (HMAC-SHA256 của token bằng app secret) — token lộ ra ngoài một
+ *    mình không dùng được với app này.
+ *  · Webhook xác thực bằng `X-Hub-Signature-256` (HMAC-SHA256 của THÂN GÓI GỐC bằng app secret), so thời gian hằng.
+ *  · Địa chỉ là HẰNG SỐ `graph.facebook.com` — người dùng không nhập URL nào. Không theo chuyển hướng, có trần thời gian.
+ *  · Token / app secret không bao giờ vào câu lỗi (`scrub`).
+ *
+ * Mọi hàm nhận `fetch` tiêm vào: bài kiểm không gọi mạng thật (luật 65).
+ */
+
+export const MESSENGER_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement", "business_management"] as const;
+/** Sự kiện trang mà app đăng ký nhận. `message_echoes`: tin page gửi đi (của bot, của nhân viên trong Hộp thư Meta). */
+export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_echoes"] as const;
+const TIMEOUT_MS = 15_000;
+/** Messenger nhận tối đa 2.000 ký tự một tin. */
+export const MESSENGER_TEXT_MAX = 2000;
+
+export function graphBase(): string {
+  const v = /^v\d+\.\d+$/.test(env.facebook.apiVersion) ? env.facebook.apiVersion : "v21.0";
+  return `https://graph.facebook.com/${v}`;
+}
+
+export type MessengerApp = { appId: string; appSecret: string };
+
+/** App Facebook của nền tảng — thiếu một trong hai ⇒ `null` (kênh Messenger chưa mở). */
+export function messengerApp(): MessengerApp | null {
+  const appId = env.oauth.facebookAppId;
+  const appSecret = env.oauth.facebookAppSecret;
+  return appId && appSecret ? { appId, appSecret } : null;
+}
+
+export function appSecretProof(token: string, appSecret: string): string {
+  return createHmac("sha256", appSecret).update(token).digest("hex");
+}
+
+function scrub(s: string, secrets: readonly string[]): string {
+  let out = s;
+  for (const v of secrets) if (v && v.length >= 6) out = out.split(v).join("…");
+  return out.slice(0, 400);
+}
+
+type Fetch = typeof fetch;
+type GraphError = { error?: { message?: string; code?: number; error_subcode?: number; type?: string } };
+
+async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string; code: number | null }> {
+  try {
+    const res = await fetchImpl(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const body = ((await res.json().catch(() => null)) ?? {}) as Record<string, unknown> & GraphError;
+    if (!res.ok || body.error) {
+      const msg = body.error?.message ?? `HTTP ${res.status}`;
+      return { ok: false, error: scrub(`Facebook từ chối: ${msg}`, hide), code: typeof body.error?.code === "number" ? body.error.code : null };
+    }
+    return { ok: true, body };
+  } catch (e) {
+    return { ok: false, error: scrub(`Không gọi được Facebook: ${e instanceof Error ? e.message : String(e)}`, hide), code: null };
+  }
+}
+
+// ─────────────────────────── Kết nối page (OAuth của chủ page) ───────────────────────────
+
+export function messengerConnectUrl(app: MessengerApp, redirectUri: string, state: string): string {
+  const q = new URLSearchParams({ client_id: app.appId, redirect_uri: redirectUri, response_type: "code", scope: MESSENGER_SCOPES.join(","), state });
+  return `https://www.facebook.com/${graphBase().split("/").pop()}/dialog/oauth?${q}`;
+}
+
+export type ConnectablePage = { id: string; name: string; token: string; canMessage: boolean };
+
+/**
+ * `code` ⇒ token người dùng (đổi sang token DÀI HẠN — page token dẫn xuất từ nó không hết hạn) ⇒ danh sách page người đó
+ * quản lý, kèm page token. Token người dùng KHÔNG được lưu ở đâu cả.
+ */
+export async function pagesFromCode(app: MessengerApp, code: string, redirectUri: string, fetchImpl: Fetch = fetch): Promise<{ pages: ConnectablePage[] } | { error: string }> {
+  const base = graphBase();
+  const hide = [app.appSecret, code];
+  const short = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ client_id: app.appId, client_secret: app.appSecret, redirect_uri: redirectUri, code })}`, { method: "GET" }, hide);
+  if (!short.ok) return { error: short.error };
+  const shortToken = typeof short.body.access_token === "string" ? short.body.access_token : "";
+  if (!shortToken) return { error: "Facebook không trả token." };
+  const long = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ grant_type: "fb_exchange_token", client_id: app.appId, client_secret: app.appSecret, fb_exchange_token: shortToken })}`, { method: "GET" }, [...hide, shortToken]);
+  const userToken = long.ok && typeof long.body.access_token === "string" ? long.body.access_token : shortToken;
+  const hideAll = [...hide, shortToken, userToken];
+  const acc = await graph(
+    fetchImpl,
+    `${base}/me/accounts?${new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) })}`,
+    { method: "GET" },
+    hideAll,
+  );
+  if (!acc.ok) return { error: acc.error };
+  const data = Array.isArray(acc.body.data) ? (acc.body.data as Record<string, unknown>[]) : [];
+  const pages = data
+    .map((p) => ({
+      id: typeof p.id === "string" ? p.id : "",
+      name: typeof p.name === "string" ? p.name.slice(0, 120) : "",
+      token: typeof p.access_token === "string" ? p.access_token : "",
+      canMessage: !Array.isArray(p.tasks) || (p.tasks as unknown[]).some((t) => t === "MESSAGING" || t === "MANAGE" || t === "MODERATE"),
+    }))
+    .filter((p) => /^\d{5,30}$/.test(p.id) && p.token);
+  return { pages };
+}
+
+/** Đăng ký app nhận webhook của page (tin nhắn + tiếng vọng). */
+export async function subscribePage(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await graph(
+    fetchImpl,
+    `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ subscribed_fields: MESSENGER_FIELDS.join(","), access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
+    { method: "POST" },
+    [pageToken, app.appSecret],
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận đăng ký webhook cho page." };
+}
+
+/** Kiểm tra kết nối: page token đọc được ĐÚNG page đã khai (chỉ đọc). */
+export async function checkPage(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const r = await graph(fetchImpl, `${graphBase()}/me?${new URLSearchParams({ fields: "id,name", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "GET" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error };
+  if (r.body.id !== pageId) return { ok: false, error: "Token không thuộc page đã khai." };
+  return { ok: true, name: typeof r.body.name === "string" ? r.body.name : pageId };
+}
+
+/**
+ * Gửi MỘT tin chữ cho khách (Send API, `messaging_type: RESPONSE` — trả lời trong khung 24 giờ kể từ tin cuối của khách).
+ * Chữ dài hơn 2.000 ký tự ⇒ nơi gọi chia trước (`chunkText`).
+ */
+export async function sendMessengerText(app: MessengerApp, pageToken: string, psid: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+  const r = await graph(
+    fetchImpl,
+    `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
+    [pageToken, app.appSecret],
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
+}
+
+// ─────────────────────────── Webhook ───────────────────────────
+
+/** `X-Hub-Signature-256: sha256=<hex>` khớp HMAC của THÂN GỐC. So thời gian hằng; thiếu / sai dạng ⇒ `false`. HÀM THUẦN. */
+export function verifyMessengerSignature(raw: Uint8Array | string, header: string | null | undefined, appSecret: string): boolean {
+  const m = /^sha256=([0-9a-f]{64})$/i.exec((header ?? "").trim());
+  if (!m || !appSecret) return false;
+  const expected = createHmac("sha256", appSecret).update(typeof raw === "string" ? Buffer.from(raw, "utf8") : Buffer.from(raw)).digest();
+  const got = Buffer.from(m[1], "hex");
+  return got.length === expected.length && timingSafeEqual(got, expected);
+}
+
+/** Mã xác minh khi khai webhook ở trang quản trị app Meta — DẪN XUẤT từ `AUTH_SECRET`, không phải biến môi trường thứ hai. */
+export function messengerVerifyToken(): string {
+  return createHmac("sha256", env.authSecret).update("messenger-webhook-verify/v1").digest("base64url").slice(0, 32);
+}
+
+export type MessengerEvent = {
+  pageId: string;
+  /** Mã khách trong phạm vi page (PSID) — là «hội thoại». */
+  psid: string;
+  mid: string;
+  text: string;
+  imageUrls: string[];
+  /** Tin page GỬI ĐI (tiếng vọng): của bot nếu `appId` = app nền tảng, còn lại là người / app khác. */
+  isEcho: boolean;
+  appId: string | null;
+  at: Date | null;
+};
+
+const s = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
+
+/**
+ * Gói webhook (object = "page") ⇒ các sự kiện TIN NHẮN. Bỏ: đã nhận / đã xem, tin bị xoá, phản ứng; nhãn dán (👍) không có chữ
+ * ⇒ không thành sự kiện. Nút bấm (postback) ⇒ dùng tiêu đề nút như chữ khách gõ. HÀM THUẦN.
+ */
+export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
+  const p = (payload && typeof payload === "object" ? payload : {}) as { object?: unknown; entry?: unknown };
+  if (p.object !== "page" || !Array.isArray(p.entry)) return [];
+  const out: MessengerEvent[] = [];
+  for (const entry of p.entry as Record<string, unknown>[]) {
+    const pageId = s(entry?.id);
+    const list = Array.isArray(entry?.messaging) ? (entry.messaging as Record<string, unknown>[]) : [];
+    for (const m of list) {
+      const sender = s((m.sender as { id?: unknown } | undefined)?.id);
+      const recipient = s((m.recipient as { id?: unknown } | undefined)?.id);
+      const at = typeof m.timestamp === "number" ? new Date(m.timestamp) : null;
+      const msg = m.message as Record<string, unknown> | undefined;
+      const postback = m.postback as Record<string, unknown> | undefined;
+      if (msg) {
+        const mid = s(msg.mid);
+        if (!mid || msg.is_deleted === true) continue;
+        const isEcho = msg.is_echo === true;
+        const atts = Array.isArray(msg.attachments) ? (msg.attachments as Record<string, unknown>[]) : [];
+        const sticker = Boolean(msg.sticker_id);
+        const imageUrls = sticker
+          ? []
+          : atts
+              .filter((a) => a.type === "image")
+              .map((a) => s((a.payload as { url?: unknown } | undefined)?.url))
+              .filter(Boolean)
+              .slice(0, 3);
+        const text = s(msg.text).slice(0, 2000);
+        if (!text && !imageUrls.length && !isEcho) continue;
+        out.push({ pageId, psid: isEcho ? recipient : sender, mid, text, imageUrls, isEcho, appId: msg.app_id === undefined || msg.app_id === null ? null : s(msg.app_id), at });
+      } else if (postback) {
+        const title = s(postback.title) || s(postback.payload);
+        const mid = s(postback.mid) || `postback:${sender}:${s(m.timestamp)}`;
+        if (title) out.push({ pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at });
+      }
+    }
+  }
+  return out.filter((e) => /^\d{5,30}$/.test(e.pageId) && /^\d{5,30}$/.test(e.psid));
+}

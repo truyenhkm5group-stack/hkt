@@ -18,7 +18,8 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { SALES_TONE_LABEL, type SalesChatbotConfig, salesBotBillingSource } from "@/lib/sales-chatbot/config";
 import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { PAGE_REPLY, sendFanpageText, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
+import { PAGE_REPLY, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
+import { sendBotText } from "@/lib/sales-chatbot/messenger";
 import { nextFollowupAt, withinMessagingWindow } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
@@ -167,7 +168,8 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         out.detail.push(`${row.id.slice(0, 8)}: bỏ lần ${attempt} — ${text ? "AI nêu giá" : "AI không viết được"}`);
         continue;
       }
-      const sent = await sendFanpageText(row.pageId, row.threadId, text, deps);
+      // Đúng đường của page: Pancake, hoặc Messenger trực tiếp (0207).
+      const sent = await sendBotText(row.pageId, row.threadId, text, deps);
       if (!sent.ok) {
         await db.update(c).set({ lastError: sent.error.slice(0, 300) }).where(eq(c.id, row.id));
         out.errors += 1;

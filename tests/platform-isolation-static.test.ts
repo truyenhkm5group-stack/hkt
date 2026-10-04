@@ -263,6 +263,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/net/public-url.ts": "Tải MỘT trang công khai do quản trị tổ chức gõ (nhập sản phẩm từ website) — không gửi khoá / token / cookie nào, chỉ GET địa chỉ đã kiểm không phải mạng nội bộ.",
   "lib/sales-chatbot/playbook.ts": "«Học từ hội thoại cũ»: ĐỌC lịch sử tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/fanpage.ts": "Trả lời tin fanpage qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
+  "lib/sales-chatbot/messenger.ts":
+    "Messenger trực tiếp (0207): Send API bằng page token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức). App secret là của app NỀN TẢNG (FACEBOOK_LOGIN_APP_SECRET — cùng app đăng nhập), chỉ dùng ký appsecret_proof cho token của tổ chức; không có khoá / token nào của tổ chức nhà.",
   "lib/sales-chatbot/order-sync.ts": "Ghi đơn từ hội thoại fanpage: ĐỌC tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà; AI đi qua provider BYOK của tổ chức.",
   "lib/landing/sheet.ts": "CSV công khai của Google Sheet, URL đọc từ `settings` của CHÍNH tổ chức đang chạy — không có credential môi trường.",
   "lib/actions/workshop-ledger.ts": "Link Google Sheet công khai do người dùng dán vào form — không có credential môi trường.",
@@ -398,6 +400,7 @@ export function testKhongIdNgoaiLamMacDinh() {
 const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/platform/": "Mã nền tảng: sổ tổ chức, cấu hình module, nhật ký nền tảng, cấp tổ chức — mặt phẳng điều khiển nằm ở CSDL nhà theo định nghĩa.",
   "db/": "Chỗ định nghĩa ba hàm, và lượt migrate CSDL nhà lúc khởi động (`ensureMigrated`).",
+  "lib/sales-chatbot/messenger.ts": "Chỉ mục page Messenger ⇒ tổ chức (`platform_messenger_pages`, 0207): Meta gửi mọi page về MỘT URL nên webhook phải tra được page thuộc tổ chức nào TRƯỚC khi vào ngữ cảnh tổ chức. Bảng control plane ở CSDL nhà theo định nghĩa; chỉ là chỉ mục — token page mã hoá ở CSDL tổ chức, mọi lượt khác đi qua getDb().",
   "lib/auth/identities.ts": "Chỉ mục danh tính TOÀN NỀN TẢNG (`platform_identities`, 0193): email / SĐT / Google / Facebook ⇒ (tổ chức, tài khoản) để đăng nhập ở trang chung không cần mã tổ chức. Bảng control plane ở CSDL nhà theo định nghĩa; chỉ là chỉ mục — mật khẩu, quyền, khoá vẫn đọc ở CSDL tổ chức qua withOrganization.",
   "lib/queries/platform-health.ts": "Máy quét sức khoẻ nền tảng: mở CSDL TỪNG tổ chức để đếm migration và bảng platform_* — việc của nó là nhìn sang mọi tổ chức.",
   "lib/queries/platform-org-diagnostics.ts": "Chẩn đoán MỘT tổ chức cho người vận hành nền tảng (/platform/org/<mã>, Phase 11 · H4): mở CSDL của tổ chức được chọn để ĐẾM (chỉ SELECT), kiểm platformOperatorDenial trước mọi truy vấn.",

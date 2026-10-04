@@ -226,7 +226,7 @@ export async function testPlatformProcessIsolation() {
 
     /* ── 7 · webhook và việc sau phản hồi ── */
     for (const p of Object.keys(WEBHOOK_BINDINGS) as WebhookProvider[]) {
-      if (WEBHOOK_BINDINGS[p].mode === "URL_SECRET") {
+      if (WEBHOOK_BINDINGS[p].mode === "URL_SECRET" || WEBHOOK_BINDINGS[p].mode === "PAGE_INDEX") {
         // 0182 · token theo tổ chức: KHÔNG token ⇒ ném WebhookAuthError, không bao giờ rơi về nhà — ở MỌI ngữ cảnh đang chạy.
         await assert.rejects(resolveWebhookOrganization(p), WebhookAuthError, `webhook ${p} không token ⇒ từ chối, không về nhà`);
         await assert.rejects(withOrganization(B, () => resolveWebhookOrganization(p)), WebhookAuthError, `webhook ${p} không lấy ngữ cảnh đang chạy làm tổ chức`);

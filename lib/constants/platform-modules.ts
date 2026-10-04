@@ -491,7 +491,7 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     core: false,
     dependsOn: ["customers", "products", "orders", "inventory"],
     features: [{ key: "ai_sales.web_chat", label: "Trang chat công khai", defaultEnabled: true, why: "`/chat` trên tên miền con đã xuất bản — khách của shop chat không cần tài khoản." }],
-    routes: ["/ai", "/api/ai-sales"],
+    routes: ["/ai", "/api/ai-sales", "/api/connect/messenger"],
     permissions: ["ai_sales:view", "ai_sales:manage"],
     homeOptIn: true,
     why: "Bot trả lời KHÁCH của shop — khác AI Builder (soạn cấu hình ERP) và khác bot Pancake của tổ chức nhà (`connector_pancake`). Giá và tồn luôn đọc từ ERP qua công cụ, không nằm trong lời nhắc. Mọi lượt ghi (khách, đơn) đi qua ĐÚNG lõi tạo tay của khách / đơn — không đường ghi thứ hai. Tắt cho tổ chức nhà (0180).",

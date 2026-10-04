@@ -1443,6 +1443,13 @@
       "when": 1790767360000,
       "tag": "0206_sales_copilot",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1790767420000,
+      "tag": "0207_messenger_pages",
+      "breakpoints": true
     }
   ]
 }
