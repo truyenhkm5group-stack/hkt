@@ -169,7 +169,7 @@ export class OrderBot {
         // TU XAC NHAN (chi khi chu shop bat): don nhan vien duyet tay thi nhan vien tu xac nhan tren Pancake
         if (settings.orderBot().autoConfirm && !byStaff) {
           it.confirmTried = true; // da thu xac nhan o lan nay -> luot quet khong kiem lai them mot lan (ton AI vo ich)
-          const chan = r.confirmBlockers || [];
+          const chan = this.dropSanctionedDiscount(r.confirmBlockers || [], r, pageId, messages);
           const kq = chan.length ? { ok: false, reason: chan.join("; ") } : await orderSync.confirmOrder(r.orderId, { conversationId, phone: r.phone, items: r.items }).catch((e) => ({ ok: false, reason: e.message }));
           if (kq.ok) {
             it.confirmedAt = Date.now();
@@ -209,6 +209,29 @@ export class OrderBot {
     } finally {
       this.running.delete(key);
     }
+  }
+
+  /**
+   * Chan "giam gia vuot 30% gia POS" la de bot khong tu xac nhan gia tu che. Nhung mau dang XA KHO (Q002 gia cu 749K,
+   * gia xa 299K — su co Nguyen Thi Triem #5710 04/10/2026) luon "giam" > 30% so voi gia POS, nen moi don xa kho deu ket
+   * o don nhap. Bo chan nay CHI khi tong khach chot: (1) chinh shop da noi trong hoi thoai, VA (2) la gia hop le theo
+   * bang gia cua page (cung bo kiem gia cua bot chat: so trong huong dan / POS, x so luong, + phi ship).
+   */
+  dropSanctionedDiscount(chan, r, pageId, messages) {
+    const i = chan.findIndex((c) => /^giảm giá .* vượt 30% tiền hàng$/.test(c));
+    if (i < 0 || !(r.agreed > 0)) return chan;
+    const so = String(r.agreed);
+    const shopNoi = (messages || []).some((m) => this.bot.isFromPage(m, pageId) && String(this.bot.messageText(m) || "").replace(/[.,\s]/g, "").includes(so));
+    if (!shopNoi) return chan;
+    let sys;
+    try {
+      sys = this.bot.buildSystemPrompt(pageId, { customerName: "Khách", type: "INBOX", saleActive: this.bot.saleActiveIn(pageId, messages) });
+    } catch {
+      return chan;
+    }
+    if (this.bot.findDisallowedPrices(`${r.agreed.toLocaleString("vi-VN")}đ`, sys).length) return chan;
+    log.info(`[orderbot] ${pageId}: tong ${so}d la gia trong bang gia cua page (xa kho / combo) -> khong chan vi giam > 30%`);
+    return chan.filter((_, j) => j !== i);
   }
 
   /** Cac SDT khach tu go trong hoi thoai (khong lay so cua shop) */
@@ -318,6 +341,11 @@ export class OrderBot {
       }
       // Don nhap bot da len CHUAN truoc khi bat tu xac nhan (hoac truoc ban nay): kiem lai MOT lan de xac nhan.
       // Don nhan vien duyet tay / nhan vien tu len don thi khong dong vao.
+      // Don nhap bi chan CHI vi "giam > 30%" truoc ban xa kho (04/10/2026): kiem lai MOT lan theo luat moi.
+      if (it.status === "DONE" && it.confirmTried && !it.discountRecheck && /vượt 30% tiền hàng/.test(it.confirmNote || "")) {
+        it.discountRecheck = true;
+        it.confirmTried = false;
+      }
       if (it.status === "DONE" && settings.orderBot().autoConfirm && !it.confirmedAt && !it.confirmTried && !it.approvedByStaff && !it.byStaffOrder && it.orderId && now - (it.doneAt || 0) < 3 * 86400000 && !/đã có đơn/.test(it.summary || "") && this.enabledFor(it.pageId)) {
         it.confirmTried = true;
         await this.check(key).catch((e) => log.warn(`[orderbot] ${key}: xac nhan don cu loi: ${e.message}`));
