@@ -37,7 +37,9 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "INVOICE_INFO_SET"
   | "INVOICE_VAT_ISSUED"
   // Người vận hành tạo liên kết đặt lại mật khẩu cho tài khoản của tổ chức khách (0191, lib/users/password-reset.ts).
-  | "PASSWORD_RESET_LINK";
+  | "PASSWORD_RESET_LINK"
+  // Chủ nền tảng khai chi phí hạ tầng / hỗ trợ khách theo tháng (0203, lib/platform/saas-ledger.ts) — mẫu số biên lợi nhuận.
+  | "PLATFORM_COSTS_SET";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 

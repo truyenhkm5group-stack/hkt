@@ -730,6 +730,9 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/billing/service.ts::resolveBillingPayment": "Đánh dấu đã xử lý một khoản tiền không khớp.",
   "lib/billing/service.ts::loadPlatformBilling": "Bảng thu phí mọi tổ chức ở /platform (MRR, hoá đơn mở, tiền chưa khớp).",
   "lib/billing/service.ts::loadOrgBilling": "Khung thu phí của MỘT tổ chức bất kỳ ở /platform/org/<mã>.",
+  // Sổ kinh tế SaaS (0203) — Owner Cockpit /platform/saas.
+  "lib/platform/saas-cockpit.ts::loadOwnerCockpit": "Owner Cockpit: MRR / biến động / biên lợi nhuận / kích hoạt của MỌI tổ chức — chụp ảnh hôm nay (mở CSDL từng tổ chức khách để đọc mốc kích hoạt) rồi đọc sổ.",
+  "lib/platform/saas-ledger.ts::setPlatformCostDeclaration": "Khai chi phí hạ tầng / hỗ trợ khách theo tháng của nền tảng — mẫu số biên lợi nhuận; bắt buộc căn cứ, nhật ký nền tảng.",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

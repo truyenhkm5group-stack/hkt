@@ -5,7 +5,7 @@ import {
   BILLING_DEFAULT_GRACE_DAYS,
   BILLING_GRACE_MAX,
   billingStanding,
-  countsTowardMrr,
+  mrrContribution,
   extractTransferCodes,
   isIsoDate,
   judgePayment,
@@ -951,10 +951,9 @@ export async function loadPlatformBilling(user: SessionUser, now: Date = new Dat
     const owned = ownedAddons(units);
     const monthly = addonMonthlyVnd(units, parseAddonPrices(plan?.addonPrices));
     countByStanding[standing.kind]++;
-    if (o.status === "ACTIVE" && countsTowardMrr(standing.kind) && plan?.priceVnd) {
-      mrr += plan.priceVnd + (monthly.ok ? monthly.vnd : 0);
-      if (!monthly.ok) addonUnpriced++;
-    }
+    const contribution = mrrContribution({ isHome: o.isHome, orgStatus: o.status, standing: standing.kind, planPriceVnd: plan?.priceVnd ?? null, addonMonthly: monthly });
+    mrr += contribution.mrrVnd;
+    if (contribution.paying && !monthly.ok) addonUnpriced++;
     rows.push({
       code: o.code,
       name: o.name,

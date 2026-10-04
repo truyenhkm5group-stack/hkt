@@ -46,6 +46,7 @@ import {
   LibraryBig,
   WandSparkles,
   ServerCog,
+  LineChart,
   RotateCcw,
   Scissors,
   ScrollText,
@@ -172,6 +173,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/ai/sales-chatbot": MessagesSquare,
   "/ai/sales-chatbot/performance": BarChart3,
   "/platform": ServerCog,
+  "/platform/saas": LineChart,
 };
 
 export function iconOf(href: string): typeof LayoutDashboard {

@@ -487,6 +487,7 @@ import { testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./
 import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
+import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
@@ -2717,6 +2718,8 @@ async function main() {
   // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
   await testPilotOps();
   await testPlatformBilling();
+  // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
+  await testPlatformSaas();
   await testPlatformUi();
   // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
   // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
