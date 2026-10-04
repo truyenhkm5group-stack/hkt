@@ -16,6 +16,15 @@ import {
   CircleAlert,
   CircleDollarSign,
   Clock,
+  Download,
+  Eye,
+  FileText,
+  FlaskConical,
+  Flag,
+  PenLine,
+  Rocket,
+  RotateCcw,
+  Building2,
   Globe,
   GraduationCap,
   HandCoins,
@@ -39,6 +48,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BrandGlyph, BrandLockup, ChotDonGlyph } from "@/components/brand";
+import { MissedOrdersCalculator } from "@/components/site/missed-orders-calculator";
 import { COMPANY, PRIVACY_POLICY, SERVICE_COMMITMENTS, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { TRIAL_DAYS } from "@/lib/billing/rules";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -227,8 +237,15 @@ const START_STEPS = [
   { title: "Bật trợ lý", text: "Một nút. AI có sẵn trong gói — không phải tự mua tài khoản AI." },
 ];
 
-function faqs(): { q: string; a: string }[] {
+function faqs(chotdon = false): { q: string; a: string }[] {
+  const extra = chotdon
+    ? [
+        { q: "Làm sao biết trợ lý trả lời tốt trước khi cho nó tự trả lời khách?", a: "Bắt đầu ở chế độ Quan sát (người của shop trả lời, trợ lý im lặng), rồi Copilot (trợ lý soạn sẵn, nhân viên duyệt rồi gửi), rồi Thử nghiệm AI so với người trên cùng lượng khách. Bạn còn phát lại được hội thoại cũ để đọc trợ lý hôm nay sẽ nói gì với chính khách của mình — mọi con số không có trong bảng giá đều bị gắn cờ." },
+        { q: "Có tự động trừ tiền không?", a: "Không. Chốt Đơn Tự Động không lưu thẻ và không tự trừ tiền. Gói chỉ gia hạn khi bạn chủ động chuyển khoản theo hoá đơn; cần hoá đơn VAT thì yêu cầu ngay lúc thanh toán." },
+      ]
+    : [];
   return [
+    ...extra,
     { q: "Trợ lý có báo sai giá không?", a: "Trợ lý chỉ báo giá, hàng còn và phí ship lấy từ hệ thống của shop. Sản phẩm chưa có giá thì trợ lý nói nhân viên sẽ báo sau, không tự đoán; không tự giảm giá ngoài bảng giá." },
     { q: "Trợ lý có tự chốt đơn không?", a: "Có. Trợ lý gửi bản tóm tắt đơn và chỉ chốt khi khách đồng ý, kiểm lại giá và hàng còn ngay trước khi chốt. Đơn chốt xong có mặt ngay trong hệ thống. Ca khó — khiếu nại, đòi gặp người, đơn sỉ ngoài bảng giá — được chuyển cho nhân viên." },
     { q: "Nhân viên muốn tự trả lời thì sao?", a: "Nhân viên nhắn vào cuộc trò chuyện là trợ lý tự im 30 phút. Muốn giao lại thì bấm “Trả lại cho AI”." },
@@ -440,6 +457,276 @@ function PlanLimits({ plan, inverted = false }: { plan: PublicPlan; inverted?: b
   );
 }
 
+
+// ═══════════ KHỐI RIÊNG CỦA «CHỐT ĐƠN TỰ ĐỘNG» ═══════════
+//
+// Mọi con số dưới đây là SỰ THẬT CỦA SẢN PHẨM hoặc CAM KẾT ĐÃ CÔNG BỐ — đọc từ hằng số đang chạy khi có (TRIAL_DAYS,
+// SERVICE_COMMITMENTS), hoặc từ hành vi đã khai trong lib/sales-chatbot (nhắn lại 1 · 6 · 22 giờ ở followup.ts, quét tin rơi
+// ~5 phút ở sweepStaleFanpageThreads, im 30 phút khi nhân viên nhắn ở HUMAN_TAKEOVER_MINUTES). KHÔNG có số liệu khách hàng,
+// tỷ lệ tăng trưởng hay lời chứng thực: chưa ai đo thì không in. Dòng thời gian trước / sau là VÍ DỤ và mang nhãn ấy.
+
+const CHOTDON_STATS: { value: string; label: string }[] = [
+  { value: "24/7", label: "Trực fanpage cả đêm, cuối tuần, ngày lễ" },
+  { value: "3 lần", label: "Tự nhắn lại khách im lặng: sau 1 · 6 · 22 giờ" },
+  { value: "≤ 5 phút", label: "Quét lại và trả lời tin nhắn bị rơi" },
+  { value: "0 đồng", label: `Cho ${TRIAL_DAYS} ngày đầu — không cần thẻ` },
+];
+
+function ChotDonHeroStats() {
+  return (
+    <dl className="mt-10 grid grid-cols-2 gap-x-6 gap-y-6 border-t border-border/70 pt-8 sm:grid-cols-4">
+      {CHOTDON_STATS.map((s) => (
+        <div key={s.value}>
+          <dt className="sr-only">{s.label}</dt>
+          <dd className={`${SERIF} text-3xl font-bold leading-none tracking-tight text-brand sm:text-[2.1rem]`}>{s.value}</dd>
+          <dd className="mt-2 text-xs leading-5 text-muted-foreground">{s.label}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+const BEFORE_AFTER: { topic: string; before: string; after: string }[] = [
+  { topic: "Giờ trả lời", before: "Phụ thuộc người trực — tối, đêm, cuối tuần bỏ trống", after: "Vài giây, ở mọi khung giờ" },
+  { topic: "Báo giá", before: "Nhớ giá trong đầu, dễ nhầm khi vừa đổi giá", after: "Đọc từ bảng giá đang áp dụng, không bao giờ báo bừa" },
+  { topic: "Hàng còn", before: "Hỏi kho rồi mới trả lời — khách chờ, khách đi", after: "Tra tồn theo size, màu ngay trong câu trả lời" },
+  { topic: "Khách im lặng", before: "Thường bị bỏ quên sau tin nhắn đầu", after: "Tự nhắn lại 3 lần: sau 1 · 6 · 22 giờ" },
+  { topic: "Lên đơn", before: "Chép tay số điện thoại, địa chỉ sang phần mềm", after: "Tóm tắt, chốt khi khách đồng ý, ghi thẳng vào sổ đơn" },
+  { topic: "Tin nhắn bị rơi", before: "Không ai biết cho tới khi khách phàn nàn", after: "Quét lại và trả lời trong khoảng 5 phút" },
+  { topic: "Nhân sự", before: "1–2 người trực page theo ca, kể cả ca đêm", after: "Trợ lý trực, người chỉ xử lý ca cần người" },
+];
+
+function BeforeAfter() {
+  return (
+    <section className="relative overflow-hidden border-t border-border/50 bg-background py-20 lg:py-28">
+      <GridBackdrop />
+      <div className={`relative ${WRAP}`}>
+        <SectionHead
+          eyebrow="Trước và sau"
+          title={
+            <>
+              Mỗi tin nhắn chưa trả lời là <Accent>một đơn hàng đang sang shop khác</Accent>
+            </>
+          }
+          text="Cùng một vị khách, cùng một câu hỏi lúc 23:04 — kết cục khác nhau chỉ vì ai trả lời trước."
+        />
+        <div className="mx-auto mt-12 grid max-w-5xl gap-4 md:grid-cols-2">
+          <div className="rounded-3xl border border-border/70 bg-card p-6">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Trước</p>
+            <ol className="mt-5 space-y-4 text-sm">
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums">23:04</span><span>Khách hỏi giá và size mẫu đầm trên fanpage.</span></li>
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums text-muted-foreground">23:04 →</span><span className="text-muted-foreground">Không ai trực. Tin nhắn nằm chờ.</span></li>
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums">08:30</span><span>Nhân viên trả lời — khách đã mua ở shop khác.</span></li>
+            </ol>
+            <p className="mt-6 flex items-center gap-2 rounded-2xl bg-destructive/10 px-4 py-3 text-sm font-semibold text-destructive">
+              <X className="size-4 shrink-0" aria-hidden /> Mất khách sau 9 giờ 26 phút chờ đợi
+            </p>
+          </div>
+          <div className="rounded-3xl border-2 border-brand/40 bg-card p-6 shadow-[var(--shadow-raised)]">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">Sau — với Chốt Đơn Tự Động</p>
+            <ol className="mt-5 space-y-4 text-sm">
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums">23:04</span><span>Khách hỏi giá và size mẫu đầm trên fanpage.</span></li>
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums text-brand">23:04</span><span>Trợ lý báo đúng giá, size M còn hàng, gửi ảnh mẫu.</span></li>
+              <li className="flex gap-3"><span className="w-14 shrink-0 font-bold tabular-nums text-brand">23:09</span><span>Khách xác nhận bản tóm tắt — đơn vào thẳng sổ đơn hàng.</span></li>
+            </ol>
+            <p className="mt-6 flex items-center gap-2 rounded-2xl bg-success/12 px-4 py-3 text-sm font-semibold text-success">
+              <Check className="size-4 shrink-0" aria-hidden /> Đơn chốt trong 5 phút, lúc cả shop đang ngủ
+            </p>
+          </div>
+        </div>
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">Ví dụ minh hoạ cách trợ lý làm việc.</p>
+        <div className="mx-auto mt-12 max-w-5xl overflow-hidden rounded-3xl border border-border/70 bg-card">
+          <div className="hidden grid-cols-[9rem_1fr_1fr] gap-4 border-b border-border/60 bg-[var(--surface-sunken)] px-6 py-3.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:grid">
+            <span />
+            <span>Khi chưa có trợ lý</span>
+            <span className="text-brand">Khi có Chốt Đơn Tự Động</span>
+          </div>
+          <ul className="divide-y divide-[var(--hairline)]">
+            {BEFORE_AFTER.map((r) => (
+              <li key={r.topic} className="grid gap-2 px-6 py-4 sm:grid-cols-[9rem_1fr_1fr] sm:gap-4">
+                <span className="font-semibold">{r.topic}</span>
+                <span className="flex gap-2 text-sm text-muted-foreground">
+                  <X className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+                  {r.before}
+                </span>
+                <span className="flex gap-2 text-sm font-medium">
+                  <Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+                  {r.after}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MissedOrdersSection({ planPriceVnd, signupUrl, signupLabel }: { planPriceVnd: number | null; signupUrl: string; signupLabel: string }) {
+  return (
+    <section id="tinh-thu" className="scroll-mt-20 py-20 lg:py-28">
+      <div className={WRAP}>
+        <SectionHead
+          eyebrow="Con số của chính shop bạn"
+          title={
+            <>
+              Shop bạn đang để lọt <Accent>bao nhiêu đơn mỗi tháng?</Accent>
+            </>
+          }
+          text="Kéo thanh trượt theo số thật của shop. Phép tính chạy ngay trên trình duyệt của bạn — không lưu, không gửi đi đâu."
+        />
+        <div className="mx-auto mt-12 max-w-6xl">
+          <MissedOrdersCalculator planPriceVnd={planPriceVnd} signupUrl={signupUrl} signupLabel={signupLabel} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const ROLLOUT: { icon: LucideIcon; name: string; text: string }[] = [
+  { icon: Eye, name: "Quan sát", text: "Người của shop vẫn trả lời; trợ lý im lặng ghi nhận để có nền so sánh. Không tốn đồng AI nào." },
+  { icon: PenLine, name: "Copilot", text: "Trợ lý soạn sẵn câu trả lời, nhân viên đọc, sửa nếu cần rồi mới gửi." },
+  { icon: FlaskConical, name: "Thử nghiệm", text: "Chia khách thành hai nhóm — một nhóm trợ lý trả lời, một nhóm người trả lời — rồi so sánh trên số thật của chính shop." },
+  { icon: Rocket, name: "Tự động", text: "Trợ lý trả lời và chốt đơn; ca khó vẫn tự chuyển cho nhân viên." },
+];
+
+function SafeRollout() {
+  return (
+    <section className="relative overflow-hidden border-y border-border/50 bg-background py-20 lg:py-28">
+      <GridBackdrop />
+      <div className={`relative ${WRAP}`}>
+        <SectionHead
+          eyebrow="Bạn kiểm soát từng bước"
+          title={
+            <>
+              Không bật AI rồi phó mặc. <Accent>Đo trước, tin sau.</Accent>
+            </>
+          }
+          text="Bốn chế độ vận hành để bạn tự quyết lúc nào trợ lý được tự trả lời khách — đổi chế độ ngay trong phần cài đặt của trợ lý."
+        />
+        <ol className="mt-14 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {ROLLOUT.map((r, i) => (
+            <li key={r.name} className="relative rounded-3xl border border-border/70 bg-card p-6">
+              <div className="flex items-center justify-between">
+                <span className="flex size-11 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                  <r.icon className="size-5" aria-hidden />
+                </span>
+                <span className={`${SERIF} text-3xl font-bold text-brand/25 tabular-nums`}>{String(i + 1).padStart(2, "0")}</span>
+              </div>
+              <h3 className="mt-4 text-lg font-bold">{r.name}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{r.text}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="mx-auto mt-10 grid max-w-6xl items-center gap-8 rounded-[2rem] border border-border/70 bg-card p-6 shadow-[var(--shadow-card)] sm:p-8 lg:grid-cols-[1fr_1.15fr]">
+          <div>
+            <p className="inline-flex items-center gap-2 rounded-full bg-brand/10 px-3 py-1 text-xs font-bold text-brand">
+              <RotateCcw className="size-3.5" aria-hidden /> Phát lại hội thoại cũ
+            </p>
+            <h3 className={`${SERIF} mt-4 text-2xl font-bold leading-tight sm:text-3xl`}>Đọc trợ lý sẽ nói gì với chính khách của bạn — trước khi nó nói thật</h3>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Chọn các hội thoại khách đã nhắn, xem đặt cạnh nhau: khách hỏi gì, nhân viên đã trả lời ra sao, trợ lý hôm nay sẽ trả lời thế nào. Mọi con số tiền không có trong bảng giá đều bị gắn cờ. Không tin nhắn nào được gửi tới khách.
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-border/70 text-[13px]">
+            <div className="grid grid-cols-3 gap-px bg-[var(--hairline)] text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              <span className="bg-[var(--surface-sunken)] px-3 py-2">Khách</span>
+              <span className="bg-[var(--surface-sunken)] px-3 py-2">Đã trả lời</span>
+              <span className="bg-[var(--surface-sunken)] px-3 py-2 text-brand">Trợ lý hôm nay</span>
+            </div>
+            <div className="grid grid-cols-3 gap-px bg-[var(--hairline)]">
+              <span className="bg-card px-3 py-3">Áo này size L còn không?</span>
+              <span className="bg-card px-3 py-3 text-muted-foreground">(trả lời sau 3 giờ) Còn ạ</span>
+              <span className="bg-card px-3 py-3">Dạ size L còn 4 chiếc, giá 295.000 ₫ ạ.</span>
+              <span className="bg-card px-3 py-3">Ship về Đà Nẵng bao nhiêu?</span>
+              <span className="bg-card px-3 py-3 text-muted-foreground">30k nha chị</span>
+              <span className="bg-card px-3 py-3">
+                Phí ship 45.000 ₫ ạ.
+                <span className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-destructive">
+                  <Flag className="size-3" aria-hidden /> Số tiền không có trong bảng giá
+                </span>
+              </span>
+            </div>
+            <p className="bg-[var(--surface-sunken)] px-3 py-2 text-[11px] text-muted-foreground">Ví dụ minh hoạ màn Phát lại hội thoại.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Commitments() {
+  const items: { value: string; title: string; text: string }[] = [
+    { value: `${TRIAL_DAYS} ngày`, title: "Dùng thử miễn phí", text: "Chạy thật trên fanpage của bạn, không cần thẻ ngân hàng, không ràng buộc." },
+    { value: "100%", title: "Hoàn tiền lần đầu", text: `Lần thanh toán đầu tiên được hoàn đủ nếu bạn yêu cầu trong ${SERVICE_COMMITMENTS.firstPaymentRefundDays} ngày.` },
+    { value: "0 đồng", title: "Không tự động trừ tiền", text: "Không lưu thẻ. Gói chỉ gia hạn khi bạn chủ động chuyển khoản theo hoá đơn." },
+    { value: `${SERVICE_COMMITMENTS.retainAfterExpiryDays} ngày`, title: "Giữ dữ liệu sau hết hạn", text: `Hết hạn mà chưa gia hạn, dữ liệu vẫn được giữ ít nhất ${SERVICE_COMMITMENTS.retainAfterExpiryDays} ngày; báo trước ${SERVICE_COMMITMENTS.deletionNoticeDays} ngày trước khi xoá.` },
+    { value: `${SERVICE_COMMITMENTS.priceChangeNoticeDays} ngày`, title: "Báo trước khi đổi giá", text: "Giá mới chỉ áp dụng từ kỳ gia hạn sau, không bao giờ áp ngược." },
+    { value: "1 chạm", title: "Dữ liệu là của bạn", text: "Tự xuất khách hàng, đơn hàng, sản phẩm ra tệp bất cứ lúc nào — kể cả khi gói đã hết hạn." },
+  ];
+  return (
+    <section className="py-20 lg:py-28">
+      <div className={WRAP}>
+        <SectionHead
+          eyebrow="Cam kết"
+          title={
+            <>
+              Rủi ro thuộc về chúng tôi, <Accent>không thuộc về bạn</Accent>
+            </>
+          }
+          text="Hoàn tiền, giữ dữ liệu và báo trước khi đổi giá được ghi trong Điều khoản sử dụng đã công bố — không phải lời hứa miệng."
+        />
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((c) => (
+            <article key={c.title} className="rounded-3xl border border-border/70 bg-card p-6">
+              <p className={`${SERIF} text-4xl font-bold leading-none tracking-tight text-brand`}>{c.value}</p>
+              <h3 className="mt-4 text-lg font-bold">{c.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{c.text}</p>
+            </article>
+          ))}
+        </div>
+        <p className="mt-6 text-center text-sm">
+          <a href={TERMS_OF_SERVICE.path} className="inline-flex items-center gap-1.5 font-semibold text-brand hover:underline">
+            <FileText className="size-4" aria-hidden /> Đọc Điều khoản sử dụng (phiên bản {TERMS_OF_SERVICE.version})
+          </a>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function TrustBlock() {
+  return (
+    <section className="pb-4">
+      <div className={WRAP}>
+        <div className="mx-auto grid max-w-5xl gap-6 rounded-[2rem] border border-border/70 bg-card p-6 sm:p-8 md:grid-cols-[auto_1fr]">
+          <span className="flex size-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+            <Building2 className="size-7" aria-hidden />
+          </span>
+          <div>
+            <h2 className={`${SERIF} text-2xl font-bold`}>Một sản phẩm của {COMPANY.name}</h2>
+            <dl className="mt-4 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+              <div><dt className="inline text-muted-foreground">Mã số thuế: </dt><dd className="inline font-semibold">{COMPANY.taxCode}</dd></div>
+              <div><dt className="inline text-muted-foreground">Hotline / Zalo: </dt><dd className="inline font-semibold">{COMPANY.phone}</dd></div>
+              <div className="sm:col-span-2"><dt className="inline text-muted-foreground">Địa chỉ: </dt><dd className="inline">{COMPANY.address}</dd></div>
+              <div><dt className="inline text-muted-foreground">Email: </dt><dd className="inline">{COMPANY.email}</dd></div>
+              <div>
+                <a href={PRIVACY_POLICY.path} className="font-semibold text-brand hover:underline">Chính sách quyền riêng tư</a>
+                {" · "}
+                <a href={TERMS_OF_SERVICE.path} className="font-semibold text-brand hover:underline">Điều khoản sử dụng</a>
+              </div>
+            </dl>
+            <p className="mt-4 flex items-start gap-2 text-sm text-muted-foreground">
+              <Download className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+              Mỗi cửa hàng một kho dữ liệu riêng, tách hẳn khỏi cửa hàng khác; hoá đơn VAT khi bạn yêu cầu.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ═══════════ TRANG ═══════════
 
 export default async function SitePage({ searchParams }: PageProps) {
@@ -463,6 +750,8 @@ export default async function SitePage({ searchParams }: PageProps) {
     text: INDUSTRY_COPY[t]?.text ?? BUSINESS_TYPE_SPEC[t].hint,
   }));
   const planCount = data.plans.length + (data.starterPlan ? 1 : 0);
+  // Gói thấp nhất ĐANG BÁN — máy tính so doanh thu giữ lại với phí tháng thật, không với một giá đoán.
+  const minPlanPrice = data.plans.reduce<number | null>((m, p) => (p.priceVnd && (m === null || p.priceVnd < m) ? p.priceVnd : m), null);
   const year = new Date().getFullYear();
 
   return (
@@ -539,25 +828,39 @@ export default async function SitePage({ searchParams }: PageProps) {
                 Nhân viên bán hàng AI cho fanpage
               </p>
               <h1 className={`${SERIF} mt-6 text-[clamp(2.25rem,1.2rem+3.2vw,4.4rem)] font-bold leading-[1.08] tracking-tight text-balance`}>
-                Trợ lý AI trực fanpage 24/7, <Accent>tự tư vấn và chốt đơn</Accent> cho shop.
+                {chotdon ? (
+                  <>
+                    Không bỏ lỡ tin nhắn nào. <Accent>Không để lọt đơn hàng nào.</Accent>
+                  </>
+                ) : (
+                  <>
+                    Trợ lý AI trực fanpage 24/7, <Accent>tự tư vấn và chốt đơn</Accent> cho shop.
+                  </>
+                )}
               </h1>
               <span className="mt-6 block h-0.5 w-14 rounded-full bg-brand" />
               <p className="mt-6 max-w-2xl text-[clamp(1rem,0.9rem+0.4vw,1.2rem)] leading-[1.75] text-muted-foreground">
-                Trả lời khách trong vài giây bằng đúng giá và tồn kho của shop, xem được ảnh khách gửi, lấy số điện thoại – địa chỉ, chốt đơn khi khách đồng ý. {chotdon ? "Đơn vào thẳng sổ đơn hàng và kho của shop — không chép tay." : "Rồi đơn chạy thẳng vào kho, tiền thu hộ và báo cáo lãi."}
+                {chotdon
+                  ? "Nhân viên bán hàng AI trực fanpage 24/7: trả lời trong vài giây bằng đúng giá và hàng còn của shop, xem ảnh khách gửi, chốt đơn khi khách đồng ý và ghi thẳng vào sổ đơn hàng — trong lúc bạn ngủ, nghỉ lễ hay đang bận việc khác."
+                  : "Trả lời khách trong vài giây bằng đúng giá và tồn kho của shop, xem được ảnh khách gửi, lấy số điện thoại – địa chỉ, chốt đơn khi khách đồng ý. Rồi đơn chạy thẳng vào kho, tiền thu hộ và báo cáo lãi."}
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-x-7 gap-y-4">
                 <PrimaryCta href={data.signupUrl}>{signup.label}</PrimaryCta>
-                <TextLink href="#cach-hoat-dong">Xem trợ lý làm việc</TextLink>
+                <TextLink href={chotdon ? "#tinh-thu" : "#cach-hoat-dong"}>{chotdon ? "Tính số đơn shop đang để lọt" : "Xem trợ lý làm việc"}</TextLink>
               </div>
               {signup.note ? <p className="mt-4 text-sm text-muted-foreground">{signup.note}</p> : null}
-              <ul className="mt-8 flex flex-col gap-2.5 text-sm text-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-7">
-                {["AI có sẵn trong gói", "Cài trong 3 bước", chotdon ? "Kèm sẵn sổ khách, sản phẩm, đơn, kho" : "Đơn vào thẳng kho & sổ sách"].map((t) => (
-                  <li key={t} className="flex items-center gap-2">
-                    <Check className="size-4 shrink-0 text-brand" aria-hidden />
-                    {t}
-                  </li>
-                ))}
-              </ul>
+              {chotdon ? (
+                <ChotDonHeroStats />
+              ) : (
+                <ul className="mt-8 flex flex-col gap-2.5 text-sm text-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-7">
+                  {["AI có sẵn trong gói", "Cài trong 3 bước", "Đơn vào thẳng kho & sổ sách"].map((t) => (
+                    <li key={t} className="flex items-center gap-2">
+                      <Check className="size-4 shrink-0 text-brand" aria-hidden />
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             <div className="px-2 sm:px-8 lg:px-0">
               <ChatMock brand={brand} />
@@ -566,6 +869,12 @@ export default async function SitePage({ searchParams }: PageProps) {
         </section>
 
         {/* ─── VẤN ĐỀ ─── */}
+        {chotdon ? (
+          <>
+            <BeforeAfter />
+            <MissedOrdersSection planPriceVnd={minPlanPrice} signupUrl={data.signupUrl} signupLabel={signup.label} />
+          </>
+        ) : (
         <section className="relative overflow-hidden border-t border-border/50 bg-background py-20 lg:py-28">
           <GridBackdrop />
           <div className={`relative ${WRAP}`}>
@@ -592,6 +901,7 @@ export default async function SitePage({ searchParams }: PageProps) {
             </p>
           </div>
         </section>
+        )}
 
         {/* ─── CÁCH HOẠT ĐỘNG ─── */}
         <section id="cach-hoat-dong" className="scroll-mt-20 py-20 lg:py-28">
@@ -706,6 +1016,8 @@ export default async function SitePage({ searchParams }: PageProps) {
           </div>
         </section>
 
+        {chotdon ? <SafeRollout /> : null}
+
         {/* ─── YÊN TÂM GIAO VIỆC ─── */}
         <section className="relative overflow-hidden bg-sidebar py-20 text-sidebar-foreground lg:py-28">
           <div className="pointer-events-none absolute -top-40 left-1/2 size-[40rem] -translate-x-1/2 rounded-full bg-brand/20 blur-3xl" aria-hidden />
@@ -807,6 +1119,8 @@ export default async function SitePage({ searchParams }: PageProps) {
         </section>
         )}
 
+        {chotdon ? <Commitments /> : null}
+
         {/* ─── BẢNG GIÁ ─── (ẩn khi không đọc được gói nào: không bao giờ in giá đoán) */}
         {planCount > 0 ? (
           <section id="bang-gia" className="relative scroll-mt-20 overflow-hidden border-t border-border/50 bg-background py-20 lg:py-28">
@@ -906,13 +1220,15 @@ export default async function SitePage({ searchParams }: PageProps) {
           </div>
         </section>
 
+        {chotdon ? <TrustBlock /> : null}
+
         {/* ─── HỎI ĐÁP ─── */}
         <section id="hoi-dap" className="relative scroll-mt-20 overflow-hidden border-t border-border/50 bg-background py-20 lg:py-28">
           <GridBackdrop />
           <div className="relative mx-auto w-full max-w-3xl px-4 sm:px-6">
             <SectionHead eyebrow="Hỏi đáp" title="Câu hỏi thường gặp" />
             <div className="mt-10 space-y-3">
-              {faqs().map((f) => (
+              {faqs(chotdon).map((f) => (
                 <details key={f.q} className="group rounded-2xl border border-border/70 bg-card p-5 [&_summary::-webkit-details-marker]:hidden">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">
                     {f.q}
