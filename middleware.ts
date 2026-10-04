@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
 import { SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteAppOrigin, siteDomainFrom, siteHostKind, siteRoute } from "@/lib/platform/site-host";
+import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -57,10 +58,12 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  * Pancake của nhà). Mỗi mục tự gác:
  *  · `/chat` — trang chat của chatbot bán hàng; chỉ chạy trên tên miền con của tổ chức ĐÃ XUẤT BẢN có bot đang bật
  *    (tra ở máy chủ), miền chính / tên miền lạ ⇒ "không có".
+ *  · `/chat/embed` · `/chat/widget.js` — khung chat nhúng website của shop và script vẽ nút (lib/sales-chatbot/widget.ts);
+ *    cùng lõi, cùng cách gác với `/chat`.
  *  · `/api/platform/domain-allowed` — Caddy on-demand TLS hỏi "có cấp chứng chỉ cho host này không": chỉ trả 200 cho tên
  *    miền con của tổ chức đã xuất bản, không lộ gì khác.
  */
-const PUBLIC_EXACT = ["/chat", "/api/platform/domain-allowed"];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed"];
 const COOKIE = SESSION_COOKIE;
 
 /**

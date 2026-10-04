@@ -87,8 +87,13 @@
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
-		X-Frame-Options SAMEORIGIN
 	}
+	# Ô CHAT NHÚNG website của shop (lib/sales-chatbot/widget.ts): CHỈ đúng `/chat/embed` được nằm trong khung trang khác;
+	# mọi đường khác giữ SAMEORIGIN (chống clickjacking trang ERP).
+	@chatEmbed path /chat/embed
+	header @chatEmbed Content-Security-Policy "frame-ancestors *"
+	@notChatEmbed not path /chat/embed
+	header @notChatEmbed X-Frame-Options SAMEORIGIN
 	log {
 		output stdout
 		format filter {
