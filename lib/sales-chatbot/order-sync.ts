@@ -48,6 +48,7 @@ import {
   ORDER_SYNC_OUTCOME_LABEL,
   ORDER_SYNC_SETTING_KEY,
   parseOrderSyncConfig,
+  syncedOrderGroupText,
   type OrderSyncConfig,
   type OrderSyncOutcome,
   type OrderSyncThreadState,
@@ -251,7 +252,7 @@ async function writeThreadLog(convId: string, log: OrderSyncThreadState): Promis
 }
 
 /** Đơn mới ghi từ hội thoại ⇒ chuông của người làm đơn + MỘT tin vào nhóm vận hành (nếu shop đã cấu hình). Không ném. */
-async function notifyOrderSynced(orderId: string, convId: string, lines: string[], now: Date): Promise<void> {
+async function notifyOrderSynced(orderId: string, convId: string, lines: string[], groupText: string, now: Date): Promise<void> {
   const title = "Đơn mới ghi từ hội thoại fanpage";
   const body = lines.join(" · ");
   const href = `/orders/${encodeURIComponent(orderId)}`;
@@ -262,7 +263,7 @@ async function notifyOrderSynced(orderId: string, convId: string, lines: string[
     const users = await activeUserIdsWhoCan("orders:write");
     await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_ORDER_SYNC", title, body, href, dedupeKey: `${key}:${userId}` })), db);
     const group = await operationsGroupChannel();
-    if (group) await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: [`🧾 ${title}`, ...lines, "Kiểm thông tin rồi chốt đơn trên ERP."].join("\n"), dedupeKey: `${key}:group`, event: "sales_order_sync.created", subject: { type: "SALES_CHAT", id: convId } });
+    if (group) await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: groupText, dedupeKey: `${key}:group`, event: "sales_order_sync.created", subject: { type: "SALES_CHAT", id: convId } });
   } catch {
     // Báo là đường phụ — đơn đã ghi.
   }
@@ -463,7 +464,20 @@ async function syncThread(a: {
   const total = priced.subtotal + (priced.shippingFee ?? 0);
   const who = `${decision.recipient.name} · ${decision.recipient.phone}`;
   const items = priced.lines.map((l) => `${l.name} × ${l.quantity}`).join("; ");
-  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, decision.addressFrom === "PREVIOUS" ? "Địa chỉ theo đơn trước — xác nhận với khách" : ""].filter(Boolean), now);
+  const fromPrevious = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS" ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — xác nhận với khách` : "";
+  const groupText = syncedOrderGroupText({
+    code,
+    name: decision.recipient.name,
+    phone: decision.recipient.phone,
+    address: decision.recipient.address,
+    province: decision.recipient.province,
+    lines: priced.lines,
+    subtotal: priced.subtotal,
+    shippingFee: priced.shippingFee,
+    shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn ship NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
+    warnings: [fromPrevious].filter(Boolean),
+  });
+  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now);
   return {
     outcome: "CREATED",
     result: `${code} · ${who} · ${items} · ${formatVND(total)}`,
