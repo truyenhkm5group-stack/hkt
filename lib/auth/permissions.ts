@@ -254,6 +254,17 @@ export const PERMISSION_GROUPS = [
       { key: "appointments:write", label: "Lịch hẹn: đặt / đổi / huỷ & mở liệu trình", hint: "Đặt lịch, đổi giờ / kỹ thuật viên, ghi khách tới / làm xong / không tới, huỷ có lý do; mở liệu trình N buổi cho khách." },
     ],
   },
+  /*
+    BẢO HÀNH (0196, module `warranty`): xem phiếu / ca, tra theo SĐT / serial; ghi = lập / huỷ phiếu (có lý do), mở / xử lý / đóng
+    ca bảo hành.
+  */
+  {
+    module: "Bảo hành",
+    items: [
+      { key: "warranty:view", label: "Bảo hành: xem phiếu & ca", hint: "Tra phiếu bảo hành theo SĐT / serial, xem hạn và lịch sử ca bảo hành." },
+      { key: "warranty:write", label: "Bảo hành: lập phiếu & xử lý ca", hint: "Lập / huỷ phiếu bảo hành (có lý do), mở ca, nhận ca, đóng ca với cách xử lý hoặc từ chối có lý do." },
+    ],
+  },
 ] as const;
 
 /**
@@ -357,7 +368,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   */
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write"],
+  // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

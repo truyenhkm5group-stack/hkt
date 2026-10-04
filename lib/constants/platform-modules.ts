@@ -59,6 +59,7 @@ export const MODULE_KEYS = [
   "apps",
   "ai_sales",
   "appointments",
+  "warranty",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -503,6 +504,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["appointments:view", "appointments:write"],
     homeOptIn: true,
     why: "Lịch là trục của ngành dịch vụ — khác hẳn đơn hàng giao đi. Dịch vụ là mẫu mã của module Sản phẩm (giá, tên), khách là khách của module Khách hàng; số buổi liệu trình KHÔNG lưu thành cột mà đếm từ lịch đã làm. Tắt cho tổ chức nhà (0190).",
+  },
+  {
+    key: "warranty",
+    label: "Bảo hành & đổi trả theo serial",
+    description: "Ngành bán hàng có bảo hành (gia dụng, điện máy nhỏ, đồ công nghệ): phiếu bảo hành theo serial, tra theo SĐT / serial, ca bảo hành sửa / đổi mới / hoàn tiền / trả nhà cung cấp, biết ngay còn hay hết bảo hành.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    dependsOn: ["customers", "products"],
+    features: [],
+    routes: ["/warranty"],
+    permissions: ["warranty:view", "warranty:write"],
+    homeOptIn: true,
+    why: "Bảo hành là nghĩa vụ SAU bán của ngành gia dụng — khác đổi trả hàng hoàn của thời trang COD. Sản phẩm là mẫu mã của module Sản phẩm, khách là khách của module Khách hàng; «còn bảo hành» KHÔNG lưu thành cột mà tính từ ngày mở ca so với hạn. Tắt cho tổ chức nhà (0196).",
   },
 ];
 

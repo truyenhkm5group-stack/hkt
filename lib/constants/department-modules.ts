@@ -172,6 +172,13 @@ export const NAV_MODULES = [
     why: "Ngành dịch vụ bán bằng LỊCH: lễ tân đặt, kỹ thuật viên làm, khách tới hay không — một màn hình theo ngày cho người đứng quầy.",
   },
   {
+    href: "/warranty",
+    label: "Bảo hành",
+    zone: "SALES",
+    permission: "warranty:view",
+    why: "Bảo hành là lời hứa của người bán với khách: CSKH tra phiếu theo SĐT / serial khi khách gọi báo lỗi, mở ca và theo tới lúc trả máy — đứng cạnh hồ sơ khách.",
+  },
+  {
     href: "/customers/reorder",
     label: "Nhắc mua lại",
     zone: "SALES",
