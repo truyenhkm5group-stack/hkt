@@ -154,13 +154,18 @@ export function mrrContribution(input: { isHome: boolean; orgStatus: string; sta
 // ─────────────────────────── Dùng thử của cửa hàng TỰ ĐĂNG KÝ ───────────────────────────
 
 /**
- * Cửa hàng tự đăng ký qua `/start` (nguồn OPEN) được bật thu phí NGAY lúc tạo với `paid_through` = hôm nay + 13 (tính cả
- * hôm nay = 14 ngày dùng thử) và ân hạn 3 ngày. Không có máy trạng thái thứ hai: hết hạn đi đúng đường «quá hạn → chỉ
+ * Cửa hàng tự đăng ký qua `/start` (nguồn OPEN) được bật thu phí NGAY lúc tạo với `paid_through` = hôm nay + 6 (tính cả
+ * hôm nay = 7 ngày dùng thử — chủ nền tảng chốt 04/10/2026, trước đó 14 ngày) và ân hạn 3 ngày. Không có máy trạng thái thứ hai: hết hạn đi đúng đường «quá hạn → chỉ
  * xem» của thuê bao trả tiền, KHÔNG xoá dữ liệu. Khách trả tiền sớm thì kỳ trả tiền nối SAU ngày cuối dùng thử
  * (`quoteRenewal` · START) — không mất ngày dùng thử nào.
  */
-export const TRIAL_DAYS = 14;
+export const TRIAL_DAYS = 7;
 export const TRIAL_GRACE_DAYS = 3;
+/**
+ * Dải nhắc dùng thử chuyển VÀNG khi còn bấy nhiêu ngày (tính cả hôm nay). Không dùng `BILLING_DUE_SOON_DAYS` (7) của gói trả
+ * tiền: với dùng thử 7 ngày thì ngưỡng ấy làm dải vàng ngay từ ngày đầu — một lời cảnh báo hiện suốt kỳ là lời không ai đọc.
+ */
+export const TRIAL_WARN_DAYS_LEFT = 3;
 
 /** Ngày cuối dùng thử (tính cả ngày đăng ký). */
 export function trialPaidThrough(today: string): string {
@@ -194,7 +199,7 @@ export function billingNotice(standing: BillingStanding, onTrial: boolean): Bill
   }
   if (onTrial) {
     const left = (daysLeft ?? 0) + 1;
-    return { tone: kind === "DUE_SOON" ? "warn" : "info", text: `Dùng thử miễn phí — còn ${left} ngày (tới hết ${viDate(paidThrough)}).`, cta: "Chọn gói" };
+    return { tone: left <= TRIAL_WARN_DAYS_LEFT ? "warn" : "info", text: `Dùng thử miễn phí — còn ${left} ngày (tới hết ${viDate(paidThrough)}).`, cta: "Chọn gói" };
   }
   if (kind === "DUE_SOON") return { tone: "warn", text: `${BILLING_STANDING_LABEL.DUE_SOON} — gói trả tới ${viDate(paidThrough)}.`, cta: "Gia hạn" };
   return null;

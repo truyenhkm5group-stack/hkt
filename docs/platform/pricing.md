@@ -71,10 +71,12 @@ thì nâng lên Tăng trưởng rẻ hơn mua thêm.
 **Mua thêm không làm lỗ.** Giá vốn biên của một người dùng / 1 GB / 1.000 bản ghi chỉ vài nghìn đồng, nên mỗi phần mua
 thêm gần như toàn bộ là lãi.
 
-## 5. Dùng thử 14 ngày (từ 04/10/2026)
+## 5. Dùng thử 7 ngày (chủ nền tảng chốt 04/10/2026; bản đầu cùng ngày là 14 ngày)
 
-- Cửa hàng tự đăng ký qua `/start` (cửa mở) được bật thu phí NGAY lúc tạo: `paid_through` = ngày đăng ký + 13 (tính cả
-  ngày đăng ký = 14 ngày), ân hạn 3 ngày, rồi CHỈ XEM. Không xoá dữ liệu.
+- Cửa hàng tự đăng ký qua `/start` (cửa mở) được bật thu phí NGAY lúc tạo: `paid_through` = ngày đăng ký + 6 (tính cả
+  ngày đăng ký = 7 ngày), ân hạn 3 ngày, rồi CHỈ XEM. Không xoá dữ liệu.
+- Áp cho cửa hàng tạo SAU lần deploy; cửa hàng đã đăng ký giữ nguyên `paid_through` đã ghi lúc tạo.
+- Dải nhắc chỉ chuyển vàng khi còn ≤ 3 ngày (`TRIAL_WARN_DAYS_LEFT`).
 - Nền tảng chưa khai tài khoản nhận tiền ⇒ KHÔNG bật (khách không có đường trả tiền thì không được khoá).
 - Khách mời và tổ chức người vận hành tạo: không đụng, người vận hành tự đặt điều khoản.
 - Đầu ERP luôn hiện «Dùng thử miễn phí — còn N ngày» kèm nút «Chọn gói».

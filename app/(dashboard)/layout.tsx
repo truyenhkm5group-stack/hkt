@@ -40,7 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const draft = org?.publishState === "DRAFT";
   // THU PHÍ (0187): nhắc khi còn ≤ 7 ngày / đang ân hạn / đã chỉ xem. Đọc sổ thuê bao qua đệm 10 giây — tổ chức nhà không hỏi.
   const billing = org ? await orgBillingStanding(org) : null;
-  // Gói `trial` (cửa hàng tự đăng ký, 14 ngày) ⇒ luôn hiện số ngày dùng thử còn lại; gói trả tiền chỉ nhắc khi gần / quá hạn.
+  // Gói `trial` (cửa hàng tự đăng ký, `TRIAL_DAYS` ngày) ⇒ luôn hiện số ngày dùng thử còn lại; gói trả tiền chỉ nhắc khi gần / quá hạn.
   const billingNotice = billing && org ? billingNoticeOf(billing, planKeyOf(org) === "trial") : null;
   const canPay = can(user, "settings:manage");
   return (

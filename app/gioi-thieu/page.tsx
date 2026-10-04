@@ -209,6 +209,7 @@ function faqs(): { q: string; a: string }[] {
     { q: "Ngoài fanpage, trợ lý chạy ở đâu nữa?", a: "Ô chat gắn lên website của shop bằng một dòng mã, và trang chat riêng ở địa chỉ của cửa hàng sau khi xuất bản." },
     { q: "Dùng thử thế nào, có mất tiền không?", a: `${TRIAL_DAYS} ngày miễn phí, không cần thẻ ngân hàng. Hết hạn mà chưa chọn gói thì cửa hàng chuyển sang chỉ xem; dữ liệu được giữ ít nhất ${SERVICE_COMMITMENTS.retainAfterExpiryDays} ngày.` },
     { q: "Thanh toán gói trả phí thế nào?", a: `Chuyển khoản theo mã thanh toán phần mềm tạo sẵn; tiền về, khớp mã là gói được gia hạn. Lần thanh toán đầu tiên được hoàn 100% nếu yêu cầu trong ${SERVICE_COMMITMENTS.firstPaymentRefundDays} ngày.` },
+    { q: "Cần hỗ trợ thì liên hệ ở đâu?", a: `Nhắn Zalo ${COMPANY.zalo} — có người của VNXcommerce trả lời trực tiếp. Gọi điện cùng số, hoặc email ${COMPANY.email}.` },
     { q: "Dữ liệu của tôi có an toàn không?", a: "Mỗi cửa hàng có kho dữ liệu riêng, tách hẳn khỏi cửa hàng khác. Trong cửa hàng, bạn quyết định nhân viên nào được xem phần nào." },
   ];
 }
@@ -443,6 +444,12 @@ export default async function SitePage() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2 sm:gap-4">
+            <a
+              href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer"
+              className="hidden items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-3 py-1.5 text-sm font-semibold text-info hover:bg-info/15 md:inline-flex"
+            >
+              <MessageCircle className="size-4" aria-hidden /> Zalo hỗ trợ
+            </a>
             <a href={`tel:${COMPANY.phoneHref}`} className="hidden items-center gap-1.5 text-sm font-medium text-foreground/70 hover:text-foreground xl:inline-flex">
               <Phone className="size-4" aria-hidden /> {COMPANY.phone}
             </a>
@@ -465,6 +472,9 @@ export default async function SitePage() {
                 ))}
                 <a href={data.loginUrl} className="mt-1 block rounded-xl border-t border-border/60 px-3 py-2.5 text-sm font-semibold text-brand hover:bg-muted">
                   Đăng nhập
+                </a>
+                <a href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer" className="block rounded-xl px-3 py-2.5 text-sm font-semibold text-info hover:bg-muted">
+                  Nhắn Zalo hỗ trợ · {COMPANY.zalo}
                 </a>
                 <a href={`tel:${COMPANY.phoneHref}`} className="block rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-muted">
                   Gọi tư vấn · {COMPANY.phone}
@@ -832,6 +842,29 @@ export default async function SitePage() {
           </div>
         </section>
 
+        {/* ─── HỖ TRỢ QUA ZALO ─── */}
+        <section id="ho-tro" className="scroll-mt-20 py-16 lg:py-20">
+          <div className={WRAP}>
+            <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 rounded-[2rem] border border-info/25 bg-info/5 p-8 text-center sm:p-10 lg:flex-row lg:text-left">
+              <span className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-info text-white shadow-[0_14px_30px_-12px_var(--info)]">
+                <MessageCircle className="size-8" aria-hidden />
+              </span>
+              <div className="flex-1">
+                <h2 className={`${SERIF} text-[clamp(1.5rem,1.1rem+1.2vw,2.25rem)] font-bold leading-tight`}>Cần hỗ trợ? Nhắn Zalo cho chúng tôi</h2>
+                <p className="mt-2 text-base leading-7 text-muted-foreground">
+                  Hỏi về cài đặt, kết nối fanpage, bảng giá hay cách dùng trợ lý — nhắn thẳng Zalo <span className="font-semibold whitespace-nowrap text-foreground">{COMPANY.zalo}</span>, có người của VNXcommerce trả lời.
+                </p>
+              </div>
+              <a
+                href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full bg-info px-6 py-3 text-base font-semibold text-white shadow-[0_14px_30px_-12px_var(--info)] hover:brightness-110"
+              >
+                <MessageCircle className="size-5" aria-hidden /> Nhắn Zalo ngay
+              </a>
+            </div>
+          </div>
+        </section>
+
         {/* ─── HỎI ĐÁP ─── */}
         <section id="hoi-dap" className="relative scroll-mt-20 overflow-hidden border-t border-border/50 bg-background py-20 lg:py-28">
           <GridBackdrop />
@@ -861,9 +894,12 @@ export default async function SitePage() {
             <p className="relative mx-auto mt-4 max-w-xl text-base leading-7 text-sidebar-foreground/70">{signup.note ?? "Tạo cửa hàng của bạn hoặc đăng nhập để dùng tiếp."}</p>
             <div className="relative mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-4">
               <PrimaryCta href={data.signupUrl}>{signup.label}</PrimaryCta>
-              <TextLink href={`tel:${COMPANY.phoneHref}`} invert>
-                Gọi tư vấn {COMPANY.phone}
-              </TextLink>
+              <a
+                href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full border border-sidebar-border bg-sidebar-accent/60 px-5 py-2.5 text-base font-semibold text-sidebar-foreground hover:bg-sidebar-accent"
+              >
+                <MessageCircle className="size-5 text-info" aria-hidden /> Nhắn Zalo hỗ trợ
+              </a>
             </div>
           </div>
         </section>
@@ -896,9 +932,25 @@ export default async function SitePage() {
             <a href={PRIVACY_POLICY.path} className="hover:text-foreground">
               Chính sách quyền riêng tư
             </a>
+            <a href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer" className="font-semibold text-info hover:text-foreground">
+              Zalo hỗ trợ
+            </a>
           </nav>
         </div>
       </footer>
+
+      {/* Nút Zalo nổi — luôn trong tầm bấm, kể cả trên điện thoại; chừa vùng an toàn của màn hình có tai thỏ / thanh home. */}
+      <a
+        href={COMPANY.zaloHref} target="_blank" rel="noopener noreferrer"
+        aria-label={`Nhắn Zalo hỗ trợ ${COMPANY.zalo}`}
+        className="fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-50 inline-flex items-center gap-2 rounded-full bg-info py-2.5 pr-4 pl-3 text-sm font-semibold text-white shadow-[0_16px_36px_-12px_var(--info)] transition hover:brightness-110 sm:right-6 sm:bottom-6"
+      >
+        <span className="relative flex size-8 items-center justify-center rounded-full bg-white/20">
+          <MessageCircle className="size-4.5" aria-hidden />
+          <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full border-2 border-info bg-success" />
+        </span>
+        Zalo hỗ trợ
+      </a>
     </div>
   );
 }
