@@ -77,8 +77,10 @@ export function CarrierBulkActions({ carriers, orderIds, clear }: { carriers: { 
         setError(res.error);
         return;
       }
-      if (win) win.location.href = res.url;
-      else window.location.href = res.url;
+      // Link có thể là đường dẫn TRONG ERP (nhãn GHTK chuyển tiếp) — đổi sang tuyệt đối trước khi giao cho cửa sổ about:blank.
+      const href = new URL(res.url, window.location.href).toString();
+      if (win) win.location.href = href;
+      else window.location.href = href;
     } finally {
       setPending(null);
     }

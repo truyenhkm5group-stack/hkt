@@ -12,7 +12,7 @@ import type { DraftProblem, VtpShipmentLine } from "@/lib/constants/carrier-vtp"
  *  · UNKNOWN — không có câu trả lời đọc được (mạng, quá giờ, 5xx) ⇒ KHÔNG BIẾT hãng đã làm hay chưa ⇒ giữ chỗ, người quyết.
  */
 
-export const CARRIER_KEYS = ["VTP", "GHN"] as const;
+export const CARRIER_KEYS = ["VTP", "GHN", "GHTK"] as const;
 export type CarrierKey = (typeof CARRIER_KEYS)[number];
 
 export type CarrierCall<T> = { kind: "OK"; value: T } | { kind: "REJECTED"; message: string } | { kind: "UNKNOWN"; message: string };
@@ -53,6 +53,11 @@ export interface CarrierSession {
   create(draft: CarrierDraft): Promise<CarrierCall<CarrierCreated>>;
   cancel(trackingCode: string, reason: string): Promise<CarrierCall<{ message: string }>>;
   printUrl(trackingCodes: readonly string[]): Promise<CarrierCall<{ url: string }>>;
+  /**
+   * Hãng chỉ trả nhãn dạng TỆP PDF sau token (GHTK) — không có link in công khai để mở thẳng. ERP chuyển tiếp tệp qua
+   * `/api/carriers/label` (có phiên + quyền), nên `printUrl` của hãng ấy trỏ về ERP, KHÔNG BAO GIỜ mang token ra trình duyệt.
+   */
+  labelPdf?(trackingCode: string): Promise<CarrierCall<Uint8Array>>;
   /** Gợi ý xã / phường cho ô nhập (danh mục chính thức của hãng); hãng không có danh mục ⇒ rỗng. */
   wardOptions?(provinceText: string): Promise<CarrierCall<{ province: string; wards: string[] }>>;
 }

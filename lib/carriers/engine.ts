@@ -419,6 +419,29 @@ export async function printLinkCore(user: SessionUser, shipmentId: unknown, deps
   return res.kind === "OK" ? { ok: true, message: "Mở nhãn in", url: res.value.url } : { ok: false, error: `Không lấy được link in: ${res.message}` };
 }
 
+/**
+ * Tệp nhãn PDF của MỘT vận đơn — cho hãng chỉ trả nhãn sau token (GHTK). Tuyến `/api/carriers/label` gọi vào đây: mã phải là
+ * mã của một lần gửi ERP tạo bằng ĐÚNG hãng đó, còn in được — không có đường nào biến tuyến này thành cửa tải nhãn tuỳ ý.
+ */
+export async function labelPdfCore(user: SessionUser, rawCarrier: unknown, rawCode: unknown, deps: CarrierDeps = {}): Promise<CarrierResult<{ pdf: Uint8Array; trackingCode: string }>> {
+  if (!can(user, PERMISSION)) return { ok: false, error: NO_PERMISSION };
+  if (!isCarrierKey(rawCarrier)) return { ok: false, error: "Hãng không hợp lệ." };
+  if (typeof rawCode !== "string" || !rawCode || rawCode.length > 60) return { ok: false, error: "Mã vận đơn không hợp lệ." };
+  const adapter = carrierAdapter(rawCarrier);
+  const db = await getDb();
+  const rows = await db.select().from(schema.shipments).where(and(eq(schema.shipments.carrier, adapter.shipmentCarrier), eq(schema.shipments.trackingCode, rawCode))).limit(5);
+  const view = rows
+    .filter((r) => r.orderId && isManualOrderId(r.orderId))
+    .map((r) => attemptView(r))
+    .find((v): v is CarrierAttemptView => v !== null && v.carrier === rawCarrier && v.canPrint && v.trackingCode === rawCode);
+  if (!view) return { ok: false, error: `Không có vận đơn ${adapter.label} do ERP tạo mang mã này còn in được.` };
+  const opened = await openSession(adapter, deps);
+  if (!opened.ok) return opened;
+  if (!opened.session.labelPdf) return { ok: false, error: `${adapter.label} in bằng link của hãng — dùng nút «In nhãn».` };
+  const res = await opened.session.labelPdf(rawCode);
+  return res.kind === "OK" ? { ok: true, message: "Nhãn in", pdf: res.value, trackingCode: rawCode } : { ok: false, error: `Không lấy được nhãn ${adapter.label}: ${res.message}` };
+}
+
 // ───────────────────────────── HÀNG LOẠT (danh sách đơn) ─────────────────────────────
 
 const idsZ = z.array(z.string().min(1).max(200)).min(1, "Chọn ít nhất một đơn.").max(BULK_MAX, `Tối đa ${BULK_MAX} đơn một lượt.`);

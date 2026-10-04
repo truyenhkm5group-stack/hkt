@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { ConnectorGroupTable } from "@/components/connectors/connector-group-table";
 import { OrgCarrierPanel } from "@/components/connectors/org-carrier-panel";
 import { OrgGhnPanel } from "@/components/connectors/org-ghn-panel";
+import { OrgGhtkPanel } from "@/components/connectors/org-ghtk-panel";
 import { OrgPosPanel } from "@/components/connectors/org-pos-panel";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -62,6 +63,7 @@ export default async function ConnectionsPage() {
       {!view.organization.isHome ? <OrgPosPanel orgCode={view.organization.code} /> : null}
       {!view.organization.isHome ? <OrgCarrierPanel orgCode={view.organization.code} /> : null}
       {!view.organization.isHome ? <OrgGhnPanel orgCode={view.organization.code} /> : null}
+      {!view.organization.isHome ? <OrgGhtkPanel orgCode={view.organization.code} /> : null}
       {view.groups.length === 0 ? (
         <EmptyState title="Chưa có connector nào trong sổ" description="Sổ connector của mã nguồn rỗng — không nên xảy ra; báo đội kỹ thuật." />
       ) : (

@@ -481,6 +481,7 @@ import { testCarrierVtp } from "./carrier-vtp.test";
 import { testCarrierGhn } from "./carrier-ghn.test";
 import { testErpNative } from "./erp-native.test";
 import { testChatOrder } from "./chat-order.test";
+import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testRestaurantTemplate } from "./restaurant.test";
@@ -2724,6 +2725,7 @@ async function main() {
   await testCarrierGhn();
   await testErpNative();
   await testChatOrder();
+  await testCarrierGhtk();
   await testFashionCodF3();
   await testWholesaleLeadHunter();
   await testRestaurantTemplate();

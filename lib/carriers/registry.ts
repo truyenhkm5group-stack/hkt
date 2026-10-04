@@ -1,4 +1,5 @@
 import { GHN_ADAPTER } from "@/lib/carriers/adapters/ghn";
+import { GHTK_ADAPTER } from "@/lib/carriers/adapters/ghtk";
 import { VTP_ADAPTER } from "@/lib/carriers/adapters/vtp";
 import { CARRIER_KEYS, type CarrierAdapter, type CarrierKey } from "@/lib/carriers/types";
 
@@ -6,6 +7,7 @@ import { CARRIER_KEYS, type CarrierAdapter, type CarrierKey } from "@/lib/carrie
 export const CARRIER_ADAPTERS: Readonly<Record<CarrierKey, CarrierAdapter>> = {
   VTP: VTP_ADAPTER,
   GHN: GHN_ADAPTER,
+  GHTK: GHTK_ADAPTER,
 };
 
 export function isCarrierKey(v: unknown): v is CarrierKey {
