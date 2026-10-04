@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import type { MetadataErrorCode } from "@/lib/metadata/errors";
 import type { FieldError } from "@/lib/metadata/types";
-import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, markManualDeliveryFailedCore, saveManualDeliveryFeeCore, undoManualDeliveryFailedCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
+import { cancelManualOrderCore, confirmManualDeliveryCore, createManualOrderCore, markManualDeliveryFailedCore, saveAutoConfirmCompleteCore, saveManualDeliveryFeeCore, undoManualDeliveryFailedCore, updateManualOrderCore, voidManualDeliveryCore } from "@/lib/records/order-create";
 import { recordManualPaymentCore, voidManualPaymentCore } from "@/lib/records/order-payments";
 
 /**
@@ -121,4 +121,13 @@ export async function voidManualPaymentAction(orderId: string, input: unknown): 
   revalidatePath("/orders");
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã huỷ chứng từ thanh toán" };
+}
+
+/** «Đơn đủ thông tin = đã xác nhận» (theo tổ chức). Bật ⇒ đơn «Mới» đủ thông tin đang có cũng được xác nhận ngay. */
+export async function saveAutoConfirmCompleteAction(enabled: boolean): Promise<{ ok: true; message: string } | Failure> {
+  const user = await requireUser();
+  const r = await saveAutoConfirmCompleteCore(user, enabled === true);
+  if (!r.ok) return failure(r);
+  revalidatePath("/orders");
+  return { ok: true, message: r.enabled ? `Đã bật — đơn đủ SĐT, địa chỉ, hàng tính là đơn ngay. Đã xác nhận ${r.promoted} đơn «Mới» đang có${r.kept ? ` · ${r.kept} đơn thiếu thông tin vẫn ở «Mới»` : ""}.` : "Đã tắt — đơn mới phải xác nhận tay như trước." };
 }

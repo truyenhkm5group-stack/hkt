@@ -44,6 +44,12 @@ export async function operationsGroupChannel(): Promise<{ connectorKey: Messagin
   return null;
 }
 
+/** Luật «báo nhóm» của MỘT sự kiện đơn đang chạy THẬT (ACTIVE + LIVE, có hành động gửi tin) — tin của luật đã tới nhóm. */
+export async function orderNotifyRuleLive(event: keyof typeof ORDER_NOTIFY_RULE_KEYS): Promise<boolean> {
+  const rule = (await listRules()).find((r) => r.key === ORDER_NOTIFY_RULE_KEYS[event] && r.status === "ACTIVE" && r.mode === "LIVE");
+  return Boolean(rule?.actions.some((a) => a.kind === "send_message"));
+}
+
 /** Tên khách hiện trên fanpage (tin khách gần nhất của hội thoại) — để nhân viên tìm đúng hội thoại trong Pancake. */
 async function fanpageCustomerName(conversationId: string): Promise<string | null> {
   const db = await getDb();

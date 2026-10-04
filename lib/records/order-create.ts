@@ -38,7 +38,7 @@
  * (cấu hình chatbot, công cụ được bật) quyết.
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { checkCredit } from "@/lib/constants/price-lists";
@@ -51,6 +51,8 @@ import {
   canMarkManualDeliveryFailed,
   DELIVERY_NOTE_LIMITS,
   MANUAL_DELIVERY_FEE_SETTING_KEY,
+  AUTO_CONFIRM_COMPLETE_SETTING_KEY,
+  manualOrderComplete,
   MANUAL_FAILED_FROM_STAGES,
   parseManualDeliveryFee,
   isManualOrderId,
@@ -58,6 +60,7 @@ import {
   manualOrderRaw,
   manualOrderStageLabel,
   manualOrderTotals,
+  MANUAL_ORDER_ID_PREFIX,
   MANUAL_ORDER_LIMITS,
   MANUAL_ORDER_ORIGIN,
   MANUAL_ORDER_STAGES,
@@ -373,10 +376,25 @@ export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown): 
   return createOrder(agentWriter(agent), rawInput);
 }
 
+/** Công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức ngữ cảnh (mặc định TẮT). */
+export async function loadAutoConfirmComplete(): Promise<boolean> {
+  return (await getSettingJson<unknown>(AUTO_CONFIRM_COMPLETE_SETTING_KEY, false)) === true;
+}
+
+/**
+ * Đơn «Mới» ĐỦ THÔNG TIN ở tổ chức bật công tắc ⇒ «Đã xác nhận» (`AUTO_CONFIRM_COMPLETE_SETTING_KEY`). Vượt hạn mức nợ ⇒ giữ
+ * «Mới» — hạn mức là quyết định của người, công tắc không được vượt qua nó.
+ */
+async function autoConfirmComplete(p: Prepared, existingOrderId?: string): Promise<Prepared> {
+  if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;
+  const promoted: Prepared = { ...p, stage: "CONFIRMED" };
+  return (await creditGate(promoted, existingOrderId)) ? p : promoted;
+}
+
 async function createOrder(w: Writer, rawInput: unknown): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
-  const p = prep.p;
+  const p = await autoConfirmComplete(prep.p);
   const credit = await creditGate(p);
   if (credit) return credit;
   const id = newManualOrderId();
@@ -436,8 +454,8 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
-  const p = prep.p;
   const row = existing.row;
+  const p = await autoConfirmComplete(prep.p, row.id);
   const credit = await creditGate(p, row.id);
   if (credit) return credit;
   const beforeItems = await itemsSnapshot(row.id);
@@ -689,6 +707,38 @@ export async function saveManualDeliveryFeeCore(user: SessionUser, raw: unknown)
   await setSettingJson(MANUAL_DELIVERY_FEE_SETTING_KEY, fee);
   await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FEE", entity: "SETTINGS", entityId: MANUAL_DELIVERY_FEE_SETTING_KEY, before: { fee: before }, after: { fee }, reason: fee === null ? "Xoá phí giao đồng giá" : "Khai phí giao đồng giá mỗi đơn giao thành công" });
   return { ok: true, fee };
+}
+
+/**
+ * Bật / tắt «đơn đủ thông tin = đã xác nhận». Bật ⇒ các đơn tay «Mới» ĐANG CÓ mà đủ thông tin cũng được xác nhận NGAY
+ * trong lượt bấm này — đi qua ĐÚNG đường sửa đơn (`updateOrder`: hạn mức nợ, sự kiện `order.confirmed`, nhật ký từng
+ * đơn), và kết quả trả về nói rõ bao nhiêu đơn được chuyển. Đơn thiếu SĐT / địa chỉ / hàng giữ «Mới».
+ */
+export async function saveAutoConfirmCompleteCore(user: SessionUser, enabled: boolean): Promise<{ ok: true; enabled: boolean; promoted: number; kept: number } | MetaFailure> {
+  const gate = await manualOrderGate(user);
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  if (!can(user, "settings:manage")) return fail("FORBIDDEN", "Cần quyền cấu hình (settings:manage) để đổi cách tính đơn.");
+  const before = await loadAutoConfirmComplete();
+  await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, enabled === true);
+  await audit({ userId: user.id, userEmail: user.email, action: "ORDER_AUTO_CONFIRM_COMPLETE", entity: "SETTINGS", entityId: AUTO_CONFIRM_COMPLETE_SETTING_KEY, before: { enabled: before }, after: { enabled: enabled === true }, reason: enabled ? "Đơn đủ thông tin (SĐT · địa chỉ · hàng) tính là đã xác nhận" : "Tắt tự xác nhận đơn đủ thông tin" });
+  let promoted = 0;
+  let kept = 0;
+  if (enabled === true) {
+    const db = await getDb();
+    const rows = await db.select({ id: schema.orders.id }).from(schema.orders).where(and(eq(schema.orders.stage, "NEW"), sql`${schema.orders.id} like ${`${MANUAL_ORDER_ID_PREFIX}%`}`));
+    for (const r of rows) {
+      const values = await manualOrderFormValues(r.id);
+      if (!values || !manualOrderComplete(values.recipient, values.lines.length)) {
+        kept += 1;
+        continue;
+      }
+      const res = await updateOrder(userWriter(user), r.id, values);
+      const [after] = await db.select({ stage: schema.orders.stage }).from(schema.orders).where(eq(schema.orders.id, r.id)).limit(1);
+      if (res.ok && after?.stage === "CONFIRMED") promoted += 1;
+      else kept += 1;
+    }
+  }
+  return { ok: true, enabled: enabled === true, promoted, kept };
 }
 
 const failedZ = z.object({ reason: z.string().trim().min(DELIVERY_NOTE_LIMITS.reasonMin, "nói vì sao giao không thành công (khách không nhận, sai địa chỉ…)").max(DELIVERY_NOTE_LIMITS.reasonMax) }).strict();
