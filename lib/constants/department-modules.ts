@@ -211,6 +211,13 @@ export const NAV_MODULES = [
     why: "Bảo hành là lời hứa của người bán với khách: CSKH tra phiếu theo SĐT / serial khi khách gọi báo lỗi, mở ca và theo tới lúc trả máy — đứng cạnh hồ sơ khách.",
   },
   {
+    href: "/stays",
+    label: "Lịch phòng",
+    zone: "SALES",
+    permission: "stays:view",
+    why: "Lưu trú bán đêm của phòng trên nhiều kênh: lễ tân cần MỘT lịch gộp Airbnb / Booking / khách trực tiếp, biết ngay trùng phòng, ai nhận / trả hôm nay, phòng nào phải dọn trước giờ nhận.",
+  },
+  {
     href: "/customers/reorder",
     label: "Nhắc mua lại",
     zone: "SALES",
