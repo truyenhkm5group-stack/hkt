@@ -38,7 +38,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { createOrderAsAgent } from "@/lib/records/order-create";
-import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
+import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { conversationFor, FANPAGE_CONNECTOR } from "@/lib/sales-chatbot/fanpage";
@@ -252,7 +252,7 @@ async function writeThreadLog(convId: string, log: OrderSyncThreadState): Promis
 }
 
 /** Đơn mới ghi từ hội thoại ⇒ chuông của người làm đơn + MỘT tin vào nhóm vận hành (nếu shop đã cấu hình). Không ném. */
-async function notifyOrderSynced(orderId: string, convId: string, lines: string[], groupText: string, now: Date): Promise<void> {
+async function notifyOrderSynced(orderId: string, convId: string, lines: string[], groupText: string, now: Date, confirmed = false): Promise<void> {
   const title = "Đơn mới ghi từ hội thoại fanpage";
   const body = lines.join(" · ");
   const href = `/orders/${encodeURIComponent(orderId)}`;
@@ -262,6 +262,8 @@ async function notifyOrderSynced(orderId: string, convId: string, lines: string[
     await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "info", title, body, href, entityType: "ORDER", entityId: orderId, dedupeKey: key, occurredAt: now }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
     const users = await activeUserIdsWhoCan("orders:write");
     await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_ORDER_SYNC", title, body, href, dedupeKey: `${key}:${userId}` })), db);
+    // Đơn đã tự xác nhận ⇒ luật «báo nhóm đơn xác nhận» (nếu đang chạy) đã gửi tin của nó — không gửi tin thứ hai.
+    if (confirmed && (await orderNotifyRuleLive("order.confirmed"))) return;
     const group = await operationsGroupChannel();
     if (group) await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: groupText, dedupeKey: `${key}:group`, event: "sales_order_sync.created", subject: { type: "SALES_CHAT", id: convId } });
   } catch {
@@ -458,9 +460,11 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  });
+  }, { pricing: a.botCfg.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}` });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
+  // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».
+  const confirmed = (await db.select({ stage: o.stage }).from(o).where(eq(o.id, created.id)).limit(1))[0]?.stage === "CONFIRMED";
   const total = priced.subtotal + (priced.shippingFee ?? 0);
   const who = `${decision.recipient.name} · ${decision.recipient.phone}`;
   const items = priced.lines.map((l) => `${l.name} × ${l.quantity}`).join("; ");
@@ -476,8 +480,9 @@ async function syncThread(a: {
     shippingFee: priced.shippingFee,
     shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn ship NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
     warnings: [fromPrevious].filter(Boolean),
+    confirmed,
   });
-  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now);
+  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now, confirmed);
   return {
     outcome: "CREATED",
     result: `${code} · ${who} · ${items} · ${formatVND(total)}`,

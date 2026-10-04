@@ -38,6 +38,7 @@ import {
   ReceiptText,
   RefreshCw,
   CalendarClock,
+  BedDouble,
   Blocks,
   LibraryBig,
   WandSparkles,
@@ -60,6 +61,9 @@ import {
   Wallet,
   Workflow,
   Rocket,
+  Store,
+  PhoneOutgoing,
+  Radar,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission, homeOrgPermissionDenied } from "@/lib/auth/permissions";
@@ -97,6 +101,12 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/customers/receivables": HandCoins,
   "/customers/reorder": RefreshCw,
   "/appointments": CalendarClock,
+  "/warranty": ShieldCheck,
+  "/wholesale/leads": Store,
+  "/wholesale/outreach": PhoneOutgoing,
+  "/wholesale/lead-hunter": Radar,
+  "/wholesale/dashboard": TrendingUp,
+  "/stays": BedDouble,
   "/outreach": HeartHandshake,
   "/chatbot": Bot,
   "/ads": Megaphone,

@@ -142,7 +142,8 @@ const workflowZ = z.strictObject({
 });
 
 const settingZ = z.strictObject({ key: z.enum(SAFE_SETTING_KEYS, { error: "Khoá cài đặt không nằm trong danh sách an toàn" }), value: z.unknown() });
-const integrationZ = z.strictObject({ connectorKey: moduleKeyZ, reason: text(300) });
+// connectorKey: module connector của nhà HOẶC kết nối theo tổ chức trong sổ connector — kiểm đúng loại ở validate.ts (integrationTarget).
+const integrationZ = z.strictObject({ connectorKey: z.string().regex(/^[a-z][a-z0-9_-]{1,59}$/), reason: text(300) });
 const aiZ = z.strictObject({
   businessProfile: z.string().trim().min(10, "Hồ sơ doanh nghiệp tối thiểu 10 ký tự").max(4000),
   glossary: z.array(z.strictObject({ term: text(80), meaning: text(300) })).max(100).optional(),

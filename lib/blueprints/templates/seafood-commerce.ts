@@ -18,18 +18,19 @@ export const SEAFOOD_COMMERCE_BLUEPRINT: Blueprint = {
   format: "erp-blueprint",
   formatVersion: 1,
   key: "seafood-commerce",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "Hải sản — bán lẻ + bán sỉ",
   description: "Shop hải sản tươi, đông lạnh, khô bán cho khách lẻ qua chat và cho quán ăn / nhà hàng / đại lý mua sỉ trả chậm. Bảng giá sỉ theo nhóm khách, hạn mức và công nợ, nhắc khách mua lại theo nhịp, nhập hàng từ nhà cung cấp, chatbot bán hàng.",
   industry: "Hải sản",
-  modules: ["core", "work", "customers", "products", "orders", "inventory", "purchasing", "ai_sales"],
+  // 1.1.0: thêm «Săn khách sỉ» (0197) — tìm nhà hàng / quán / khách sạn làm khách sỉ mới; module TẮT được ở /settings/modules.
+  modules: ["core", "work", "customers", "products", "orders", "inventory", "purchasing", "ai_sales", "wholesale_leads"],
   roles: [
     {
       key: "ban_hang",
       label: "Nhân viên bán hàng",
       description: "Tư vấn, báo giá, chốt đơn, gọi khách đến hạn mua lại, ghi liên hệ. Không sửa bảng giá, không nhập kho.",
       base: "VIEWER",
-      permissions: ["dashboard:view", "orders:read", "orders:write", "customers:view", "customers:write", "products:view", "work:view", "work:manage", "ai_sales:view"],
+      permissions: ["dashboard:view", "orders:read", "orders:write", "customers:view", "customers:write", "products:view", "work:view", "work:manage", "ai_sales:view", "wholesale:view", "wholesale:work"],
       defaultScope: "ALL",
     },
     {

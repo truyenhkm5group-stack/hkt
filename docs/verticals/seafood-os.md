@@ -7,6 +7,7 @@
 
 | Bước | Ở đâu | Trạng thái |
 |---|---|---|
+| **Tìm khách sỉ mới** (nhà hàng, quán, khách sạn) | Săn khách sỉ — Google Places, chấm điểm, hàng đợi liên hệ (`docs/verticals/wholesale-lead-hunter.md`) | Đã có (0197) |
 | Khách nhắn Facebook / web, **AI tư vấn** | Chatbot bán hàng (`lib/sales-chatbot`), kết nối fanpage qua Pancake | Đã có |
 | **Báo giá** lẻ / sỉ theo bậc | Bảng giá sỉ (`docs/verticals/price-lists-receivables.md`) và công tắc «Báo giá theo bảng giá sỉ» của bot | S1 + S4 |
 | Báo giá **theo kg, cân lại khi đóng hàng** | Chưa có. Số lượng kho và dòng đơn hiện là số nguyên | S2, xem mục cuối |
@@ -21,7 +22,7 @@
 
 Mẫu ngành chọn được khi đăng ký ở `/start` (loại hình «Hải sản (lẻ + sỉ)») hoặc cài sau ở Cài đặt → Mẫu ngành.
 
-- **Module:** lõi, việc, khách, sản phẩm, đơn, kho, mua hàng, chatbot bán hàng. Không bật «Vận chuyển» và «CSKH», vì hai
+- **Module:** lõi, việc, khách, sản phẩm, đơn, kho, mua hàng, chatbot bán hàng, săn khách sỉ (từ bản mẫu 1.1.0). Không bật «Vận chuyển» và «CSKH», vì hai
   module này dựng trên connector chỉ dành cho tổ chức nhà.
 - **Trường riêng của sản phẩm:** dạng hàng (tươi sống, ướp đá, đông lạnh, khô, chế biến), cỡ, đơn vị bán, vùng / nguồn
   hàng, bảo quản.

@@ -157,6 +157,25 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     sensitive: false,
   },
   {
+    /*
+      SĂN KHÁCH SỈ (0197): lead có người phụ trách là KHOÁ TÀI KHOẢN (`assigned_to_user_id`, luật 34). Nhân viên phạm vi
+      «Chỉ của mình» / «Được giao» chỉ thấy và chỉ chạm được lead giao cho mình; lead CHƯA giao ai không hiện với họ — đó
+      là việc của người giao (`wholesale:assign`, phạm vi Toàn công ty), không phải lỗ hổng của bộ lọc.
+    */
+    key: "WHOLESALE_LEADS",
+    enforcement: "SQL_ROWS",
+    label: "Khách sỉ tiềm năng",
+    readPermissions: ["wholesale:view"],
+    writePermission: "wholesale:work",
+    routes: ["/wholesale/leads", "/wholesale/leads/[id]", "/wholesale/outreach"],
+    table: "wholesale_leads",
+    rowOwner: { by: "USER_ID", column: "assigned_to_user_id" },
+    rowAssignee: { by: "USER_ID", column: "assigned_to_user_id" },
+    rowDepartmentColumn: null,
+    ownedBy: "SALES",
+    sensitive: false,
+  },
+  {
     key: "SHIPMENTS",
     enforcement: "DEPARTMENT_ONLY",
     label: "Vận đơn",

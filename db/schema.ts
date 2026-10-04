@@ -1,7 +1,7 @@
 // VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, primaryKey, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -1590,6 +1590,197 @@ export const customerPackages = pgTable(
  * LỊCH HẸN (0190). Kỹ thuật viên đi bằng khoá tài khoản (luật 34). Một kỹ thuật viên không có hai lịch ĐANG HIỆU LỰC
  * chồng giờ — chặn ở lib/records/appointments.ts trong giao dịch có khoá tư vấn theo người. Huỷ bắt buộc lý do.
  */
+/**
+ * PHIẾU BẢO HÀNH (0196, module `warranty`). Một serial chỉ thuộc MỘT phiếu đang hiệu lực (chỉ mục duy nhất có điều kiện, không
+ * phân biệt hoa thường). Hạn = ngày mua + số tháng, tính lúc GHI (lib/constants/warranty.ts::warrantyExpiry). Huỷ cần lý do.
+ */
+export const warrantyCards = pgTable(
+  "warranty_cards",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    variantId: text("variant_id"),
+    productName: text("product_name").notNull(),
+    serial: text("serial"),
+    orderId: text("order_id"),
+    purchasedOn: date("purchased_on", { mode: "string" }).notNull(),
+    months: integer("months").notNull(),
+    expiresOn: date("expires_on", { mode: "string" }).notNull(),
+    status: text("status").notNull().default("ACTIVE"),
+    voidReason: text("void_reason"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("warranty_cards_customer_idx").on(t.customerId),
+    uniqueIndex("warranty_cards_serial_active_uq").on(sql`lower(${t.serial})`).where(sql`${t.serial} IS NOT NULL AND ${t.status} = 'ACTIVE'`),
+    check("warranty_cards_months_check", sql`${t.months} BETWEEN 1 AND 120`),
+    check("warranty_cards_expiry_check", sql`${t.expiresOn} > ${t.purchasedOn}`),
+    check("warranty_cards_status_check", sql`${t.status} IN ('ACTIVE','VOID')`),
+    check("warranty_cards_void_check", sql`${t.status} <> 'VOID' OR length(btrim(coalesce(${t.voidReason}, ''))) >= 3`),
+    check("warranty_cards_serial_check", sql`${t.serial} IS NULL OR length(btrim(${t.serial})) BETWEEN 1 AND 80`),
+    check("warranty_cards_name_check", sql`length(trim(${t.productName})) BETWEEN 1 AND 200`),
+  ],
+);
+
+/**
+ * CA BẢO HÀNH (0196). «Còn bảo hành» KHÔNG lưu — tính lúc đọc từ `opened_at` so với hạn của phiếu. Người nhận / người mở đi bằng
+ * khoá tài khoản (luật 34); tên là ảnh chụp do máy chủ đọc. Chi phí / tiền thu khách `NULL` = chưa biết (luật 42).
+ */
+export const warrantyClaims = pgTable(
+  "warranty_claims",
+  {
+    id: id(),
+    cardId: text("card_id")
+      .notNull()
+      .references(() => warrantyCards.id, { onDelete: "cascade" }),
+    openedAt: ts("opened_at").notNull().defaultNow(),
+    issue: text("issue").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    resolution: text("resolution"),
+    rejectReason: text("reject_reason"),
+    costVnd: integer("cost_vnd"),
+    chargedVnd: integer("charged_vnd"),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    closedAt: ts("closed_at"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("warranty_claims_card_idx").on(t.cardId),
+    index("warranty_claims_status_idx").on(t.status, t.openedAt),
+    check("warranty_claims_issue_check", sql`length(btrim(${t.issue})) BETWEEN 5 AND 1000`),
+    check("warranty_claims_status_check", sql`${t.status} IN ('OPEN','IN_PROGRESS','DONE','REJECTED')`),
+    check("warranty_claims_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('REPAIRED','REPLACED','REFUNDED','RETURNED_TO_SUPPLIER','NO_FAULT')`),
+    check("warranty_claims_done_check", sql`${t.status} <> 'DONE' OR ${t.resolution} IS NOT NULL`),
+    check("warranty_claims_reject_check", sql`${t.status} <> 'REJECTED' OR length(btrim(coalesce(${t.rejectReason}, ''))) >= 3`),
+    check("warranty_claims_money_check", sql`(${t.costVnd} IS NULL OR ${t.costVnd} >= 0) AND (${t.chargedVnd} IS NULL OR ${t.chargedVnd} >= 0)`),
+  ],
+);
+
+/**
+ * PHÒNG / CĂN CHO THUÊ NGẮN NGÀY (0198, module `stays`). `ical_token` là phần bí mật của đường dẫn lịch .ics ERP phát cho kênh
+ * (`/api/ical/<mã tổ chức>.<token>`) — đổi được khi lộ.
+ */
+export const stayUnits = pgTable(
+  "stay_units",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    capacity: integer("capacity"),
+    address: text("address").notNull().default(""),
+    ownerName: text("owner_name").notNull().default(""),
+    icalToken: text("ical_token").notNull(),
+    active: boolean("active").notNull().default(true),
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("stay_units_code_uq").on(sql`lower(${t.code})`),
+    uniqueIndex("stay_units_ical_token_uq").on(t.icalToken),
+    check("stay_units_name_check", sql`length(btrim(${t.name})) BETWEEN 1 AND 120`),
+    check("stay_units_code_check", sql`length(btrim(${t.code})) BETWEEN 1 AND 20`),
+    check("stay_units_capacity_check", sql`${t.capacity} IS NULL OR ${t.capacity} BETWEEN 1 AND 100`),
+    check("stay_units_token_check", sql`length(${t.icalToken}) >= 24`),
+  ],
+);
+
+/**
+ * ĐẶT PHÒNG (0198): khoảng NỬA MỞ [check_in, check_out). `source = 'ICAL'` ⇒ khoá tự nhiên (phòng, kênh, UID của kênh).
+ * Trùng phòng KHÔNG chặn ở CSDL — hai kênh bán trùng là chuyện thật, phải hiện ra; đường ghi tay tự chặn. Tiền `NULL` = chưa
+ * biết (luật 42).
+ */
+export const stayBookings = pgTable(
+  "stay_bookings",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    checkIn: date("check_in", { mode: "string" }).notNull(),
+    checkOut: date("check_out", { mode: "string" }).notNull(),
+    channel: text("channel").notNull(),
+    status: text("status").notNull().default("CONFIRMED"),
+    source: text("source").notNull().default("MANUAL"),
+    externalUid: text("external_uid"),
+    summary: text("summary").notNull().default(""),
+    guestName: text("guest_name").notNull().default(""),
+    guestPhone: text("guest_phone").notNull().default(""),
+    guests: integer("guests"),
+    amountVnd: integer("amount_vnd"),
+    note: text("note").notNull().default(""),
+    cancelReason: text("cancel_reason"),
+    cancelledAt: ts("cancelled_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("stay_bookings_uid_uq").on(t.unitId, t.channel, t.externalUid).where(sql`${t.externalUid} IS NOT NULL`),
+    index("stay_bookings_unit_dates_idx").on(t.unitId, t.checkIn, t.checkOut),
+    index("stay_bookings_checkout_idx").on(t.checkOut),
+    check("stay_bookings_dates_check", sql`${t.checkOut} > ${t.checkIn} AND ${t.checkOut} - ${t.checkIn} <= 365`),
+    check("stay_bookings_channel_check", sql`${t.channel} IN ('AIRBNB','BOOKING','AGODA','TRAVELOKA','DIRECT','OTHER')`),
+    check("stay_bookings_status_check", sql`${t.status} IN ('CONFIRMED','BLOCKED','CANCELLED')`),
+    check("stay_bookings_source_check", sql`${t.source} IN ('MANUAL','ICAL')`),
+    check("stay_bookings_uid_check", sql`(${t.source} = 'ICAL') = (${t.externalUid} IS NOT NULL)`),
+    check("stay_bookings_cancel_check", sql`${t.status} <> 'CANCELLED' OR length(btrim(coalesce(${t.cancelReason}, ''))) >= 3`),
+    check("stay_bookings_money_check", sql`${t.amountVnd} IS NULL OR ${t.amountVnd} >= 0`),
+    check("stay_bookings_guests_check", sql`${t.guests} IS NULL OR ${t.guests} BETWEEN 1 AND 100`),
+  ],
+);
+
+/** DỌN PHÒNG xong cho (phòng, ngày) (0198). Người dọn đi bằng khoá tài khoản (luật 34). */
+export const stayTurnovers = pgTable(
+  "stay_turnovers",
+  {
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    day: date("day", { mode: "string" }).notNull(),
+    doneAt: ts("done_at").notNull().defaultNow(),
+    doneByUserId: text("done_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    doneByName: text("done_by_name").notNull().default(""),
+    note: text("note").notNull().default(""),
+  },
+  (t) => [primaryKey({ name: "stay_turnovers_pk", columns: [t.unitId, t.day] })],
+);
+
+/** Sổ mỗi lượt nhập lịch .ics (0198), kể cả CHẠY THỬ — «ai đã nhập tệp nào, nó đổi gì». */
+export const stayIcalImports = pgTable(
+  "stay_ical_imports",
+  {
+    id: id(),
+    unitId: text("unit_id")
+      .notNull()
+      .references(() => stayUnits.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    applied: boolean("applied").notNull(),
+    checksum: text("checksum").notNull(),
+    events: integer("events").notNull(),
+    skipped: integer("skipped").notNull(),
+    created: integer("created").notNull(),
+    updated: integer("updated").notNull(),
+    cancelled: integer("cancelled").notNull(),
+    unchanged: integer("unchanged").notNull(),
+    byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
+    byName: text("by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("stay_ical_imports_unit_idx").on(t.unitId, t.createdAt)],
+);
+
 export const appointments = pgTable(
   "appointments",
   {
@@ -9663,4 +9854,373 @@ export const userInvites = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("user_invites_token_uq").on(t.tokenHash), index("user_invites_email_idx").on(t.email)],
+);
+
+// ═══════════ SĂN KHÁCH SỈ (0197, module `wholesale_leads`) ═══════════
+// Hai loại dữ liệu tách bảng: `wholesale_place_snapshots` = trường NGUỒN GOOGLE có hạn lưu (`expires_at`); các bảng
+// còn lại = dữ liệu CỦA tổ chức (trạng thái bán, người phụ trách, ghi chú, cơ hội…). Xem docs/verticals/wholesale-lead-hunter.md.
+
+export const wholesaleCampaigns = pgTable(
+  "wholesale_campaigns",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    productFocus: text("product_focus").notNull().default(""),
+    status: text("status").notNull().default("DRAFT"),
+    pauseReason: text("pause_reason"),
+    isTemplate: boolean("is_template").notNull().default(false),
+    templateKey: text("template_key"),
+    provinces: jsonb("provinces").notNull().default(sql`'[]'::jsonb`),
+    keywordGroups: jsonb("keyword_groups").notNull().default(sql`'[]'::jsonb`),
+    excludeKeywords: text("exclude_keywords").array().notNull().default(sql`'{}'::text[]`),
+    targetSegments: text("target_segments").array().notNull().default(sql`'{}'::text[]`),
+    maxLeads: integer("max_leads").notNull().default(500),
+    minRating: doublePrecision("min_rating"),
+    minReviews: integer("min_reviews"),
+    requirePhone: boolean("require_phone").notNull().default(true),
+    requireWebsite: boolean("require_website").notNull().default(false),
+    searchMode: text("search_mode").notNull().default("TEXT"),
+    nearbyLat: doublePrecision("nearby_lat"),
+    nearbyLng: doublePrecision("nearby_lng"),
+    radiusM: integer("radius_m"),
+    discoveryTier: text("discovery_tier").notNull().default("PRO"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    startedAt: ts("started_at"),
+    pausedAt: ts("paused_at"),
+    stoppedAt: ts("stopped_at"),
+    completedAt: ts("completed_at"),
+    lastTickAt: ts("last_tick_at"),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_campaigns_template_uq").on(t.templateKey),
+    index("wholesale_campaigns_status_idx").on(t.status),
+    check("wholesale_campaigns_status_check", sql`${t.status} IN ('DRAFT','RUNNING','PAUSED','STOPPED','COMPLETED')`),
+    check("wholesale_campaigns_mode_check", sql`${t.searchMode} IN ('TEXT','NEARBY')`),
+    check("wholesale_campaigns_tier_check", sql`${t.discoveryTier} IN ('IDS_ONLY','PRO','ENTERPRISE')`),
+  ],
+);
+
+export const wholesaleSearchCells = pgTable(
+  "wholesale_search_cells",
+  {
+    id: id(),
+    cellKey: text("cell_key").notNull(),
+    keyword: text("keyword").notNull(),
+    provinceKey: text("province_key").notNull(),
+    provinceLabel: text("province_label").notNull(),
+    areaCode: text("area_code").notNull(),
+    areaName: text("area_name").notNull(),
+    queryText: text("query_text").notNull(),
+    searchMode: text("search_mode").notNull().default("TEXT"),
+    scanCount: integer("scan_count").notNull().default(0),
+    lastScannedAt: ts("last_scanned_at"),
+    lastStatus: text("last_status"),
+    lastCampaignId: text("last_campaign_id").references(() => wholesaleCampaigns.id, { onDelete: "set null" }),
+    resultsFound: integer("results_found").notNull().default(0),
+    newLeadsFound: integer("new_leads_found").notNull().default(0),
+    totalNewLeads: integer("total_new_leads").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("wholesale_search_cells_key_uq").on(t.cellKey), index("wholesale_search_cells_province_idx").on(t.provinceKey, t.areaCode)],
+);
+
+export const wholesaleCampaignCells = pgTable(
+  "wholesale_campaign_cells",
+  {
+    id: id(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => wholesaleCampaigns.id, { onDelete: "cascade" }),
+    cellId: text("cell_id")
+      .notNull()
+      .references(() => wholesaleSearchCells.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("PENDING"),
+    priority: integer("priority").notNull().default(0),
+    pageToken: text("page_token"),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    resultsFound: integer("results_found").notNull().default(0),
+    newPlaces: integer("new_places").notNull().default(0),
+    newLeads: integer("new_leads").notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: ts("next_attempt_at"),
+    lockedUntil: ts("locked_until"),
+    lastError: text("last_error"),
+    startedAt: ts("started_at"),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_campaign_cells_uq").on(t.campaignId, t.cellId),
+    index("wholesale_campaign_cells_queue_idx").on(t.campaignId, t.status, t.priority),
+    check("wholesale_campaign_cells_status_check", sql`${t.status} IN ('PENDING','RUNNING','DONE','SKIPPED_FRESH','FAILED','CANCELLED')`),
+  ],
+);
+
+export const wholesalePlaceSnapshots = pgTable(
+  "wholesale_place_snapshots",
+  {
+    placeId: text("place_id").primaryKey(),
+    displayName: text("display_name"),
+    formattedAddress: text("formatted_address"),
+    nationalPhone: text("national_phone"),
+    internationalPhone: text("international_phone"),
+    websiteUri: text("website_uri"),
+    googleMapsUri: text("google_maps_uri"),
+    primaryType: text("primary_type"),
+    types: text("types").array().notNull().default(sql`'{}'::text[]`),
+    rating: doublePrecision("rating"),
+    userRatingCount: integer("user_rating_count"),
+    businessStatus: text("business_status"),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    normalizedPhone: text("normalized_phone"),
+    phoneKind: text("phone_kind"),
+    websiteDomain: text("website_domain"),
+    nameKey: text("name_key"),
+    fieldsTier: text("fields_tier").notNull(),
+    fetchedAt: ts("fetched_at").notNull(),
+    detailsFetchedAt: ts("details_fetched_at"),
+    expiresAt: ts("expires_at").notNull(),
+    purgedAt: ts("purged_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("wholesale_place_snapshots_expires_idx").on(t.expiresAt).where(sql`${t.purgedAt} IS NULL`),
+    index("wholesale_place_snapshots_phone_idx").on(t.normalizedPhone),
+    index("wholesale_place_snapshots_domain_idx").on(t.websiteDomain),
+    index("wholesale_place_snapshots_name_idx").on(t.nameKey),
+    check("wholesale_place_snapshots_tier_check", sql`${t.fieldsTier} IN ('IDS_ONLY','PRO','ENTERPRISE','DETAILS')`),
+  ],
+);
+
+export const wholesaleLeads = pgTable(
+  "wholesale_leads",
+  {
+    id: id(),
+    placeId: text("place_id"),
+    source: text("source").notNull(),
+    businessName: text("business_name"),
+    address: text("address"),
+    phoneRaw: text("phone_raw"),
+    normalizedPhone: text("normalized_phone"),
+    phoneKind: text("phone_kind"),
+    phoneCountryCode: text("phone_country_code"),
+    phoneSource: text("phone_source"),
+    website: text("website"),
+    websiteDomain: text("website_domain"),
+    email: text("email"),
+    facebookUrl: text("facebook_url"),
+    zaloUrl: text("zalo_url"),
+    nameKey: text("name_key"),
+    provinceKey: text("province_key"),
+    provinceLabel: text("province_label"),
+    areaCode: text("area_code"),
+    areaName: text("area_name"),
+    segment: text("segment").notNull().default("UNCLASSIFIED"),
+    segmentEvidence: text("segment_evidence"),
+    leadScore: integer("lead_score"),
+    leadGrade: text("lead_grade"),
+    scoreReasons: jsonb("score_reasons"),
+    scoredAt: ts("scored_at"),
+    sourceQuery: text("source_query"),
+    sourceCampaignId: text("source_campaign_id").references(() => wholesaleCampaigns.id, { onDelete: "set null" }),
+    sourceCellId: text("source_cell_id").references(() => wholesaleSearchCells.id, { onDelete: "set null" }),
+    enrichmentStatus: text("enrichment_status").notNull().default("READY"),
+    filterReason: text("filter_reason"),
+    duplicateOfLeadId: text("duplicate_of_lead_id").references((): AnyPgColumn => wholesaleLeads.id, { onDelete: "set null" }),
+    detailsAttempts: integer("details_attempts").notNull().default(0),
+    detailsNextAt: ts("details_next_at"),
+    websiteStatus: text("website_status").notNull().default("NONE"),
+    websiteCheckedAt: ts("website_checked_at"),
+    contactStatus: text("contact_status").notNull().default("NEW"),
+    assignedToUserId: text("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+    assignedToName: text("assigned_to_name"),
+    assignedAt: ts("assigned_at"),
+    firstContactAt: ts("first_contact_at"),
+    firstResponseAt: ts("first_response_at"),
+    lastContactAt: ts("last_contact_at"),
+    nextFollowupAt: ts("next_followup_at"),
+    nextAction: text("next_action"),
+    contactAttemptCount: integer("contact_attempt_count").notNull().default(0),
+    response: text("response"),
+    qualifiedAt: ts("qualified_at"),
+    wonAt: ts("won_at"),
+    lostAt: ts("lost_at"),
+    lostReason: text("lost_reason"),
+    opportunityValue: bigint("opportunity_value", { mode: "number" }),
+    opportunityNote: text("opportunity_note"),
+    opportunityAt: ts("opportunity_at"),
+    customerId: text("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    convertedAt: ts("converted_at"),
+    staffEditedFields: text("staff_edited_fields").array().notNull().default(sql`'{}'::text[]`),
+    firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+    lastRefreshedAt: ts("last_refreshed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_leads_place_uq").on(t.placeId),
+    index("wholesale_leads_phone_idx").on(t.normalizedPhone),
+    index("wholesale_leads_domain_idx").on(t.websiteDomain),
+    index("wholesale_leads_name_idx").on(t.nameKey),
+    index("wholesale_leads_score_idx").on(t.leadScore),
+    index("wholesale_leads_status_idx").on(t.contactStatus),
+    index("wholesale_leads_assignee_idx").on(t.assignedToUserId),
+    index("wholesale_leads_enrichment_idx").on(t.enrichmentStatus, t.detailsNextAt),
+    index("wholesale_leads_campaign_idx").on(t.sourceCampaignId),
+    index("wholesale_leads_customer_idx").on(t.customerId),
+    check(
+      "wholesale_leads_status_check",
+      sql`${t.contactStatus} IN ('NEW','QUALIFIED','READY_TO_CONTACT','CONTACTED','NO_ANSWER','INTERESTED','CATALOG_SENT','PRICE_SENT','SAMPLE_REQUESTED','NEGOTIATING','WON','LOST','DO_NOT_CONTACT')`,
+    ),
+    check("wholesale_leads_enrichment_check", sql`${t.enrichmentStatus} IN ('PENDING_DETAILS','READY','FILTERED','DUPLICATE','FAILED')`),
+    check("wholesale_leads_lost_check", sql`${t.contactStatus} <> 'LOST' OR length(btrim(coalesce(${t.lostReason}, ''))) >= 3`),
+  ],
+);
+
+export const wholesalePlaceHits = pgTable(
+  "wholesale_place_hits",
+  {
+    id: id(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => wholesaleCampaigns.id, { onDelete: "cascade" }),
+    cellId: text("cell_id").references(() => wholesaleSearchCells.id, { onDelete: "set null" }),
+    placeId: text("place_id").notNull(),
+    outcome: text("outcome").notNull(),
+    reason: text("reason"),
+    leadId: text("lead_id").references(() => wholesaleLeads.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("wholesale_place_hits_uq").on(t.campaignId, t.placeId), check("wholesale_place_hits_outcome_check", sql`${t.outcome} IN ('NEW_LEAD','EXISTING_LEAD','FILTERED','SUPPRESSED','DUPLICATE')`)],
+);
+
+export const wholesaleLeadCampaigns = pgTable(
+  "wholesale_lead_campaigns",
+  {
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "cascade" }),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => wholesaleCampaigns.id, { onDelete: "cascade" }),
+    addedByUserId: text("added_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "wholesale_lead_campaigns_pk", columns: [t.leadId, t.campaignId] }), index("wholesale_lead_campaigns_campaign_idx").on(t.campaignId)],
+);
+
+export const wholesaleLeadActivities = pgTable(
+  "wholesale_lead_activities",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    channel: text("channel"),
+    outcome: text("outcome"),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
+    note: text("note").notNull().default(""),
+    meta: jsonb("meta"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("wholesale_lead_activities_lead_idx").on(t.leadId, t.createdAt)],
+);
+
+export const wholesaleLeadEnrichments = pgTable(
+  "wholesale_lead_enrichments",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    value: text("value").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("wholesale_lead_enrichments_uq").on(t.leadId, t.kind, t.value)],
+);
+
+export const wholesaleOutreachItems = pgTable(
+  "wholesale_outreach_items",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    message: text("message").notNull().default(""),
+    preparedBy: text("prepared_by").notNull(),
+    aiModel: text("ai_model"),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: ts("approved_at"),
+    sentByUserId: text("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    sentAt: ts("sent_at"),
+    result: text("result"),
+    resultNote: text("result_note"),
+    resultAt: ts("result_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_outreach_open_uq").on(t.leadId, t.channel).where(sql`${t.status} IN ('DRAFT','APPROVED')`),
+    index("wholesale_outreach_status_idx").on(t.status, t.createdAt),
+    check("wholesale_outreach_status_check", sql`${t.status} IN ('DRAFT','APPROVED','SENT','DONE','CANCELLED')`),
+  ],
+);
+
+export const wholesaleSuppressions = pgTable(
+  "wholesale_suppressions",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    value: text("value").notNull(),
+    reason: text("reason").notNull(),
+    leadId: text("lead_id").references(() => wholesaleLeads.id, { onDelete: "set null" }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("wholesale_suppressions_uq").on(t.kind, t.value), check("wholesale_suppressions_kind_check", sql`${t.kind} IN ('PHONE','DOMAIN','PLACE')`)],
+);
+
+export const wholesaleApiUsage = pgTable(
+  "wholesale_api_usage",
+  {
+    id: id(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    provider: text("provider").notNull(),
+    method: text("method").notNull(),
+    sku: text("sku"),
+    campaignId: text("campaign_id").references(() => wholesaleCampaigns.id, { onDelete: "set null" }),
+    cellId: text("cell_id").references(() => wholesaleSearchCells.id, { onDelete: "set null" }),
+    leadId: text("lead_id").references(() => wholesaleLeads.id, { onDelete: "set null" }),
+    query: text("query"),
+    httpStatus: integer("http_status"),
+    ok: boolean("ok").notNull(),
+    billable: boolean("billable").notNull().default(false),
+    attempts: integer("attempts").notNull().default(1),
+    resultCount: integer("result_count").notNull().default(0),
+    newCount: integer("new_count").notNull().default(0),
+    duplicateCount: integer("duplicate_count").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    costMicros: bigint("cost_micros", { mode: "number" }).notNull().default(0),
+    error: text("error"),
+  },
+  (t) => [index("wholesale_api_usage_at_idx").on(t.at), index("wholesale_api_usage_campaign_idx").on(t.campaignId, t.at)],
 );

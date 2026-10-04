@@ -102,7 +102,8 @@ const OUT_RETURN_HANDLED = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceive
  * NGOÀI (nối xong rồi `where pv.id in …`) không cứu được: Postgres vẫn gộp toàn bộ dòng đơn của
  * shop rồi mới vứt đi phần không dùng. Giá trị từng mẫu không đổi, vì phép gộp là theo mẫu.
  */
-export function variantSalesSubquery(db: Db, onlyVariantIds?: string[]) {
+/** `db` có thể là một GIAO DỊCH (`lib/commerce/stock.ts` đọc tồn trong cùng giao dịch ghi đơn) — chỉ dùng `select`. */
+export function variantSalesSubquery(db: Pick<Db, "select">, onlyVariantIds?: string[]) {
   return db
     .select({
       variantId: oi.variantId,
@@ -311,7 +312,7 @@ export async function listReservedQueue(filter: { variantId: string } | { produc
 }
 
 /** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. `onlyVariantIds`: như `variantSalesSubquery`. */
-export function variantReceiptsSubquery(db: Db, onlyVariantIds?: string[]) {
+export function variantReceiptsSubquery(db: Pick<Db, "select">, onlyVariantIds?: string[]) {
   return db
     .select({
       variantId: ri.variantId,

@@ -180,6 +180,36 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
     ],
   },
 
+  // ───────────────── SĂN KHÁCH SỈ ─────────────────
+  {
+    key: "wholesale-lead-hunter",
+    topic: "CUSTOMERS",
+    title: "Tìm khách sỉ mới (nhà hàng, quán, khách sạn)",
+    summary: "Quét Google Places theo từ khoá × khu vực, ERP tự lọc, khử trùng, chấm điểm; người bán chỉ gọi lead hạng cao.",
+    href: "/wholesale/lead-hunter",
+    permission: "wholesale:scan",
+    steps: [
+      { text: "Lần đầu: vào Cài đặt → Kết nối, mục «Google Places (tìm doanh nghiệp)», dán khoá API, kiểm tra rồi bật.", href: "/settings/connections" },
+      { text: "Ở Săn khách sỉ, bấm «Dùng mẫu» trên mẫu HSLC (hoặc điền form), bấm «Xem trước truy vấn» để thấy số truy vấn và chi phí ước tính." },
+      { text: "Bấm «Bắt đầu quét». Quét chạy nền, trang tự làm mới; «Tạm dừng» / «Tiếp tục» không mất tiến độ. Chạm trần chi phí ngày / tháng thì tự dừng và báo." },
+      { text: "Lead đủ điểm có SĐT tự lên «Đủ điều kiện». Ở danh sách, chọn lead rồi «Xếp hàng liên hệ» — ERP KHÔNG tự gửi tin." },
+    ],
+  },
+  {
+    key: "wholesale-leads-work",
+    topic: "CUSTOMERS",
+    title: "Gọi và chăm khách sỉ tiềm năng",
+    summary: "Mỗi ngày: mở lead được giao, gọi, ghi kết quả, gửi lời chào, chuyển thành khách khi chốt.",
+    href: "/wholesale/leads",
+    permission: "wholesale:view",
+    steps: [
+      { text: "Mở Khách sỉ tiềm năng, lọc Phụ trách = Của tôi, hoặc Liên hệ = «Đến hạn gọi lại».", href: "/wholesale/leads" },
+      { text: "Trong lead: bấm «Gọi», sau cuộc gọi bấm «Ghi cuộc gọi» và chọn kết quả; hẹn ngày gọi lại nếu cần." },
+      { text: "Muốn nhắn Zalo / SMS: «Soạn lời chào», duyệt ở Hàng đợi liên hệ, gửi bằng app rồi bấm «Đã gửi» và ghi kết quả." },
+      { text: "Khách đồng ý mua: «Chuyển thành khách hàng» — tên, SĐT, địa chỉ lấy từ lead, không nhập lại. Khách từ chối: «Không liên hệ nữa»." },
+    ],
+  },
+
   // ───────────────── DỊCH VỤ & LỊCH HẸN ─────────────────
   {
     key: "appointments",
@@ -194,6 +224,35 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
       { text: "Cập nhật ngay trên dòng lịch: «Khách đã tới», «Đã làm xong», «Khách không tới»; huỷ thì phải ghi lý do." },
       { text: "Khách mua liệu trình: chọn «Liệu trình» khi đặt lịch — số buổi còn lại tính từ các buổi đã làm xong." },
       { text: "Mỗi ngày: khung «Nhắc lịch ngày mai» (khi xem lịch hôm nay) liệt kê khách chưa xác nhận — bấm «Sao chép câu nhắc», gửi qua Zalo; khách đồng ý thì bấm «Khách đã xác nhận»." },
+    ],
+  },
+
+  {
+    key: "warranty",
+    topic: "SERVICE",
+    title: "Bảo hành theo serial",
+    summary: "Khách gọi báo lỗi: tra theo SĐT hoặc serial là biết khách mua gì, ngày nào, còn bảo hành hay không.",
+    href: "/warranty",
+    permission: "warranty:view",
+    steps: [
+      { text: "Mở Bảo hành, gõ SĐT / serial / tên khách vào ô tra.", href: "/warranty" },
+      { text: "Bán máy mới: điền khách, sản phẩm, serial, ngày mua, số tháng rồi bấm «Lập phiếu bảo hành» — hạn do ERP tính." },
+      { text: "Khách báo lỗi: trên phiếu bấm «Mở ca bảo hành», ghi lỗi; xử lý xong bấm «Đóng ca…» và chọn cách xử lý. Ca mở sau hạn được ghi «ngoài hạn»." },
+    ],
+  },
+
+  {
+    key: "stays",
+    topic: "SERVICE",
+    title: "Lịch phòng Airbnb / homestay",
+    summary: "Gộp lịch Airbnb / Booking / Agoda về một chỗ, biết ngay trùng phòng, ai nhận / trả và phòng nào phải dọn hôm nay.",
+    href: "/stays",
+    permission: "stays:view",
+    steps: [
+      { text: "Mở Lịch phòng, thẻ «Phòng & kênh», thêm từng phòng (mã, tên, chủ nhà nếu vận hành hộ).", href: "/stays?tab=phong" },
+      { text: "Chép đường dẫn lịch của phòng dán vào mục nhập lịch của Airbnb / Booking / Agoda — kênh sẽ tự khoá ngày đã bán ở nơi khác." },
+      { text: "Tải tệp lịch .ics từ kênh, ở khung «Nhập lịch của kênh» bấm «Chạy thử» để xem lượt mới / đổi / huỷ, rồi «Nhập thật»." },
+      { text: "Thẻ «Lịch»: trùng phòng hiện đỏ đầu trang; dọn xong thì bấm «Dọn xong»; khách đặt trực tiếp thì «Đặt phòng»." },
     ],
   },
 

@@ -51,7 +51,7 @@ import {
  * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
  * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
  */
-const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
 
 /**
  * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot

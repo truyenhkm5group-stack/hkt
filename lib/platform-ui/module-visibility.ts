@@ -130,6 +130,8 @@ export const SYNC_JOB_MODULES = {
   "pancake-inventory": ["connector_pancake"],
   "pancake-returns": ["connector_pancake"],
   "pancake-all": ["connector_pancake"],
+  // Pancake POS của tổ chức khách (kết nối «pancake-pos-org», module Đơn hàng). Nút chỉ đặt ở khung kết nối của tổ chức khách.
+  "pancake-org": ["orders"],
   "vtp-tracking": ["connector_viettelpost"],
   "vtp-import": ["connector_viettelpost"],
 } as const satisfies Record<string, readonly ModuleKey[]>;

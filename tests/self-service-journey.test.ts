@@ -1162,8 +1162,14 @@ async function testJourney() {
       const invNoCheck = await executeTool("check_inventory", { items: [{ variant_id: chaMuc, quantity: 999 }] }, { ...tctx({}), config: noCheckCfg });
       assert.ok(!invNoCheck.isError && /can_sell/.test(invNoCheck.content) && !/available|enough/.test(invNoCheck.content), `không đưa con số tồn cho AI: ${invNoCheck.content}`);
       assert.ok(systemPrompt(noCheckCfg, "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng") && !systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE").includes("KHÔNG BAO GIỜ nói hết hàng"));
-      const edited = await executeTool("update_draft_order", { items: [{ variant_id: chaMuc, quantity: 2 }] }, { ...rctx(shown.state, "lấy 2kg nhé, chốt luôn"), turn: 14 });
-      assert.ok((await executeTool("confirm_order", { customer_confirmation: "chốt luôn" }, { ...rctx(edited.state, "lấy 2kg nhé, chốt luôn"), turn: 14 })).isError, "sửa đơn ở lượt này ⇒ khách chưa thấy tóm tắt MỚI ⇒ chưa chốt");
+      // (04/10/2026 · «Nguyễn Lộc») khách ĐÃ thấy tóm tắt ở lượt 12, lượt 14 «ok» món mời thêm ⇒ sửa và chốt luôn — không hỏi
+      // «Em gửi đơn luôn nhé?» thêm lần nữa (khách dặn dò thay vì «ok» ⇒ đơn không chốt, nhóm không có tin «ĐƠN MỚI»).
+      const edited = await executeTool("update_draft_order", { items: [{ variant_id: chaMuc, quantity: 2 }] }, { ...rctx(shown.state, "ok lấy thêm 1kg nữa"), turn: 14 });
+      assert.ok(edited.state.draft?.shownTurn === 14 && edited.state.draft?.firstShownTurn === 12, JSON.stringify(edited.state.draft));
+      const addAndClose = await executeTool("confirm_order", { customer_confirmation: "ok lấy thêm" }, { ...rctx(edited.state, "ok lấy thêm 1kg nữa"), turn: 14 });
+      assert.ok(!addAndClose.isError && addAndClose.state.confirmed, `đã thấy tóm tắt + đồng ý thêm món ⇒ chốt cùng lượt: ${addAndClose.content}`);
+      const sp = systemPrompt(parseSalesChatbotConfig(null), "Shop", "", "FANPAGE");
+      for (const k of ["TUYỆT ĐỐI KHÔNG hỏi «Em gửi đơn luôn nhé?»", "Dạ, hàng chuẩn, chị yên tâm ạ", "KHÔNG nói chuyển kho"]) assert.ok(sp.includes(k), `lời nhắc thiếu «${k}»`);
       // AI chọn câu mẫu giữa luồng ⇒ khách nhận NGUYÊN VĂN câu mẫu (giá ERP) + ảnh, rồi câu hỏi tiếp của AI.
       let flowStep = 0;
       setSalesChatProviderForTests(() => ({

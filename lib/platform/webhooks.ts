@@ -15,7 +15,7 @@ import { findOrganization, getHomeOrganization } from "@/lib/platform/organizati
  * đường dẫn (`secret_hash → tổ chức`); bí mật không khớp tổ chức nào thì 401, KHÔNG rơi về nhà.
  */
 
-export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE";
+export type WebhookProvider = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG";
 
 /**
  * `HOME_ONLY` — bí mật là một biến môi trường của tổ chức nhà.
@@ -30,6 +30,8 @@ export const WEBHOOK_BINDINGS: Readonly<Record<WebhookProvider, WebhookBinding>>
   VTP_STATEMENT: { mode: "HOME_ONLY", reason: "Kịch bản Gmail của hộp thư tổ chức nhà, dùng chung VIETTELPOST_WEBHOOK_SECRET." },
   SEPAY: { mode: "HOME_ONLY", reason: "Chữ ký HMAC bằng SEPAY_WEBHOOK_SECRET — một giá trị môi trường, của tổ chức nhà." },
   PANCAKE_FANPAGE: { mode: "URL_SECRET", reason: "Tin fanpage của MỘT tổ chức khách: token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó (dẫn xuất từ PLATFORM_SECRETS_KEY)." },
+  VIETTELPOST_ORG: { mode: "URL_SECRET", reason: "Hành trình vận đơn Viettel Post của MỘT tổ chức khách: gói VTP không mang mã khách, nên token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
+  PANCAKE_POS_ORG: { mode: "URL_SECRET", reason: "Đơn / khách / sản phẩm / tồn từ Pancake POS của MỘT tổ chức khách (kết nối «pancake-pos-org»): token trong đường dẫn mang mã tổ chức + chữ ký HMAC riêng của tổ chức đó." },
 };
 
 /** Token trong đường dẫn không khớp tổ chức nào (URL_SECRET) — route trả 401, KHÔNG rơi về nhà. */

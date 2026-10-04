@@ -46,6 +46,30 @@ const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Module «Lịch hẹn & liệu trình» cố ý TẮT ở tổ chức nhà (0190, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/appointments.test.ts trên tổ chức khách thật.",
   },
+  "/warranty": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Bảo hành & đổi trả theo serial» cố ý TẮT ở tổ chức nhà (0196, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/warranty.test.ts trên tổ chức khách thật.",
+  },
+  "/wholesale/leads": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Khách sỉ tiềm năng» luôn chuyển về /module-disabled; trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",
+  },
+  "/wholesale/outreach": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Hàng đợi liên hệ sỉ» luôn chuyển về /module-disabled; trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",
+  },
+  "/wholesale/lead-hunter": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Săn khách sỉ» luôn chuyển về /module-disabled; trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",
+  },
+  "/wholesale/dashboard": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Hiệu quả khách sỉ» luôn chuyển về /module-disabled; trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",
+  },
+  "/stays": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Lưu trú ngắn ngày» cố ý TẮT ở tổ chức nhà (0198, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/stays.test.ts trên tổ chức khách thật.",
+  },
   "/customers/reorder": {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Nhắc mua lại đọc lịch sử ĐƠN TẠO TAY (0189) — tổ chức nhà đồng bộ đơn Pancake nên trang cố ý trả 404 ở nhà (mục menu tenantOnly); smoke chạy bằng quản trị của NHÀ. Trang được kiểm bằng tests/reorder-reminders.test.ts trên tổ chức khách thật.",

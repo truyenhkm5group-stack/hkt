@@ -1366,6 +1366,27 @@
       "when": 1790766700000,
       "tag": "0195_sales_chat_inbound_images",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1790766760000,
+      "tag": "0196_warranty",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1790766820000,
+      "tag": "0197_wholesale_lead_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1790766880000,
+      "tag": "0198_stays",
+      "breakpoints": true
     }
   ]
 }

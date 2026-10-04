@@ -17,7 +17,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { clearMemo } from "@/lib/cache";
-import { canMarkManualDeliveryFailed, parseManualDeliveryFee } from "@/lib/constants/manual-orders";
+import { canMarkManualDeliveryFailed, manualOrderComplete, parseManualDeliveryFee } from "@/lib/constants/manual-orders";
+import { syncedOrderGroupText } from "@/lib/sales-chatbot/order-sync-shared";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
@@ -33,7 +34,9 @@ import {
   cancelManualOrderCore,
   confirmManualDeliveryCore,
   createManualOrderCore,
+  loadAutoConfirmComplete,
   loadManualDeliveryFee,
+  saveAutoConfirmCompleteCore,
   markManualDeliveryFailedCore,
   saveManualDeliveryFeeCore,
   undoManualDeliveryFailedCore,
@@ -87,6 +90,12 @@ function testPure() {
   assert.deepEqual([parseManualDeliveryFee(40_000), parseManualDeliveryFee("40000"), parseManualDeliveryFee(0)], [40_000, 40_000, 0]);
   assert.deepEqual([parseManualDeliveryFee(-1), parseManualDeliveryFee(1.5), parseManualDeliveryFee("abc"), parseManualDeliveryFee(null), parseManualDeliveryFee(""), parseManualDeliveryFee(20_000_000)], [null, null, null, null, null, null]);
   assert.deepEqual(["CONFIRMED", "NEW", "WAITING", "DELIVERED", "RETURNED", "CANCELLED"].map(canMarkManualDeliveryFailed), [true, false, false, false, false, false], "chỉ «Đã xác nhận» mới báo giao không thành công");
+  // Đơn đủ thông tin (chủ shop HSLC 04/10/2026): SĐT 8–15 số · địa chỉ ≥ 5 ký tự · ≥ 1 dòng hàng.
+  assert.equal(manualOrderComplete({ phone: "0912 345 678", address: "12 Hàng Bạc" }, 1), true);
+  assert.deepEqual([manualOrderComplete({ phone: "", address: "12 Hàng Bạc" }, 1), manualOrderComplete({ phone: "0912345678", address: "HN" }, 1), manualOrderComplete({ phone: "0912345678", address: "12 Hàng Bạc" }, 0), manualOrderComplete({ phone: "1234", address: "12 Hàng Bạc" }, 1)], [false, false, false, false]);
+  const gt = { code: "#A", name: "Lan", phone: "0912345678", address: "12 Hàng Bạc", province: "Hà Nội", lines: [{ name: "Chả cá", quantity: 1, unitPrice: 280_000, lineTotal: 280_000 }], subtotal: 280_000, shippingFee: 0, shipText: null, warnings: [] };
+  assert.match(syncedOrderGroupText({ ...gt, confirmed: true }), /ĐÃ TÍNH ĐƠN[\s\S]*Đơn đã tính — sai thì sửa \/ huỷ trên ERP\.$/, "đơn tự xác nhận: tin nhóm không bảo «chốt đơn» nữa");
+  assert.match(syncedOrderGroupText(gt), /chờ kiểm[\s\S]*Kiểm thông tin rồi chốt đơn trên ERP\.$/);
   assert.equal(returnsPageParams(withDefaultReturnsBasis({}, true)).basis, "SHIPPED", "có vận chuyển: mặc định cũ không đổi (tổ chức nhà, job giữ ấm)");
   assert.equal(returnsPageParams(withDefaultReturnsBasis({}, false)).basis, "ORDERED", "không module vận chuyển ⇒ ngày lên đơn");
   assert.equal(returnsPageParams(withDefaultReturnsBasis({ basis: "SHIPPED" }, false)).basis, "SHIPPED", "người dùng chọn mốc thì mốc đó thắng");
@@ -187,9 +196,54 @@ export async function testManualOrderOutcome() {
       assert.ok((await confirmManualDeliveryCore(admin, b.id, { signedAt: new Date(Date.now() - 60_000).toISOString(), receiverName: "Chị Lan" })).ok);
       assert.equal((await db.query.orders.findFirst({ where: eq(schema.orders.id, b.id) }))?.partnerFee, 0, "chưa khai phí ⇒ không ghi gì");
       assert.equal((await db.query.orders.findFirst({ where: eq(schema.orders.id, a.id) }))?.partnerFee, 40_000, "đơn giao trước đó giữ phí cũ");
+
+      // ── ĐƠN ĐỦ THÔNG TIN = ĐÃ XÁC NHẬN (chủ shop HSLC 04/10/2026) ──
+      const stageOf = async (id: string) => (await db.query.orders.findFirst({ where: eq(schema.orders.id, id) }))?.stage;
+      assert.equal(await loadAutoConfirmComplete(), false, "mặc định TẮT");
+      const cu = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      assert.ok(cu.ok);
+      assert.equal(await stageOf(cu.id), "NEW", "công tắc tắt ⇒ đơn Mới vẫn Mới");
+      // Khách thiếu địa chỉ ⇒ đơn thiếu thông tin; khách có hạn mức nợ 0 ⇒ xác nhận sẽ vượt hạn mức.
+      const [noAddr] = await db.insert(schema.customers).values({ name: "Khách thiếu địa chỉ", phone: "0933000111", address: "" }).returning({ id: schema.customers.id });
+      const thieu = await createManualOrderCore(admin, { ...input(1), customerId: noAddr.id, stage: "NEW" });
+      assert.ok(thieu.ok);
+      const [noCredit] = await db.insert(schema.customers).values({ name: "Đại lý hết hạn mức", phone: "0933000222", address: "5 Lê Lợi, Huế" }).returning({ id: schema.customers.id });
+      await db.insert(schema.customerTradeTerms).values({ customerId: noCredit.id, creditLimit: 0 });
+      const no = await createManualOrderCore(admin, { ...input(1), customerId: noCredit.id, stage: "NEW" });
+      assert.ok(no.ok);
+      const avail0 = (await stockOf("erp-mo-var")).available;
+      clearMemo();
+      const nominalBefore = (await getNominalProfitReport(ALL)).totals.ordersDistinct;
+      assert.equal(codeOf(await saveAutoConfirmCompleteCore(sales, true)), "FORBIDDEN", "đổi cách tính đơn cần quyền cấu hình");
+      const on = await saveAutoConfirmCompleteCore(admin, true);
+      assert.ok(on.ok && on.enabled, JSON.stringify(on));
+      assert.deepEqual([on.ok && on.promoted, on.ok && on.kept], [2, 2], "bật ⇒ 2 đơn Mới đủ thông tin (đơn «neu» của đoạn trước + cu) được xác nhận NGAY; thiếu địa chỉ + vượt hạn mức nợ giữ Mới");
+      assert.deepEqual([await stageOf(neu.id), await stageOf(cu.id), await stageOf(thieu.id), await stageOf(no.id)], ["CONFIRMED", "CONFIRMED", "NEW", "NEW"]);
+      assert.equal((await stockOf("erp-mo-var")).available, avail0 - 2, "đơn vừa tính giữ hàng ở kho như mọi đơn đã chốt");
+      clearMemo();
+      assert.equal((await getNominalProfitReport(ALL)).totals.ordersDistinct, nominalBefore + 2, "báo cáo danh nghĩa (nền của /ads) đếm đơn vừa tính");
+      assert.equal((await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "ORDER_AUTO_CONFIRM_COMPLETE"))).length, 1);
+      // Đơn MỚI tạo sau khi bật: đủ thông tin ⇒ thẳng «Đã xác nhận»; «Chờ hàng» là lựa chọn của người ⇒ giữ nguyên.
+      const moi = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      assert.ok(moi.ok);
+      assert.equal(await stageOf(moi.id), "CONFIRMED", "đơn đủ SĐT · địa chỉ · hàng tính là đơn ngay");
+      const cho = await createManualOrderCore(admin, { ...input(1), stage: "WAITING" });
+      assert.ok(cho.ok);
+      assert.equal(await stageOf(cho.id), "WAITING");
+      // Sửa đơn thiếu thông tin cho đủ ⇒ tự xác nhận ở lượt sửa.
+      assert.ok((await updateManualOrderCore(admin, thieu.id, { ...input(1), customerId: noAddr.id, stage: "NEW", recipient: { name: "Khách", phone: "0933000111", address: "9 Trần Phú, Đà Nẵng", province: "" } })).ok);
+      assert.equal(await stageOf(thieu.id), "CONFIRMED");
+      // Huỷ vẫn là huỷ.
+      assert.ok((await cancelManualOrderCore(admin, moi.id, { reason: "khách huỷ" })).ok);
+      assert.equal(await stageOf(moi.id), "CANCELLED");
+      // Tắt ⇒ đơn Mới mới tạo lại phải xác nhận tay.
+      assert.ok((await saveAutoConfirmCompleteCore(admin, false)).ok);
+      const sau = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      assert.ok(sau.ok);
+      assert.equal(await stageOf(sau.id), "NEW");
     });
   } finally {
     await cleanupOrg();
   }
-  console.log("  ✓ đơn tay: giao không thành công ⇒ HOÀN + hàng về tồn ngay + hoàn tác · phí giao đồng giá theo đơn giao thành công · doanh thu + giá vốn khi đã giao (tiền thật vẫn theo phiếu thu) · báo cáo danh nghĩa có đơn tay · mốc trang GTC theo module vận chuyển");
+  console.log("  ✓ đơn tay: giao không thành công ⇒ HOÀN + hàng về tồn ngay + hoàn tác · phí giao đồng giá theo đơn giao thành công · doanh thu + giá vốn khi đã giao (tiền thật vẫn theo phiếu thu) · báo cáo danh nghĩa có đơn tay · mốc trang GTC theo module vận chuyển · đơn đủ thông tin = đã xác nhận (công tắc theo tổ chức, hạn mức nợ thắng, Chờ hàng giữ nguyên)");
 }

@@ -18,6 +18,20 @@ KHI TÓM TẮT MỘT KIỆN: (a) khách và đơn (mua gì, bao nhiêu tiền, k
 
 Câu trả lời dùng markdown nhẹ (gạch đầu dòng, in đậm), không bảng lớn, không tiêu đề cấp 1.`;
 
+const HOME_PROMPT_OPENING = "Bạn là trợ lý vận hành của VNXcommerce ERP (shop bán quần áo, giao qua Viettel Post, thu COD).";
+
+/**
+ * Lời nhắc của MỘT tổ chức. Tổ chức nhà giữ NGUYÊN văn bản cũ (đệm prompt không bị làm rỗng). Tổ chức khách: câu mở đầu
+ * mang tên CỦA HỌ — trợ lý của shop khác không được tự giới thiệu là VNX, cũng không được mặc định ngành / ĐVVC của VNX.
+ * Phần luật phía sau giữ nguyên (ổn định để đệm theo từng tổ chức).
+ */
+export function copilotSystemPrompt(org: { name: string; isHome: boolean } | null | undefined): string {
+  if (!org || org.isHome) return COPILOT_SYSTEM_PROMPT;
+  const name = org.name.replace(/[«»\r\n]/g, " ").trim().slice(0, 120) || "cửa hàng";
+  return COPILOT_SYSTEM_PROMPT.replace(HOME_PROMPT_OPENING, `Bạn là trợ lý vận hành ERP của «${name}».`);
+}
+
+
 /** Bối cảnh màn hình — đưa vào tin nhắn người dùng, không vào system (để system đệm được). */
 export function contextPreamble(ctx: { route: string; entityType: string; entityId: string; userName: string; now: Date }): string {
   const lines = [`[Bối cảnh] Người hỏi: ${ctx.userName}. Giờ hiện tại (UTC): ${ctx.now.toISOString()}. Màn hình: ${ctx.route || "(không rõ)"}.`];
