@@ -87,7 +87,7 @@ export async function testOrgSummaryDb() {
       const line = (p: string) => lines.find((l) => l.startsWith(p)) ?? "";
       assert.match(line("Module cần cho báo cáo"), /finance BẬT · marketing BẬT · returns TẮT/);
       assert.match(line("Cấu hình"), /chatbot TẮT · ghi đơn từ hội thoại BẬT từ 2026-10-03 10:00 · phí giao 40\.000 ₫/);
-      assert.match(line("Kết nối"), /meta-ads-org ACTIVE ✓kiểm .* · 2 TKQC/);
+      assert.match(line("Kết nối"), /meta-ads-org ACTIVE ✓kiểm \d{4}-\d{2}-\d{2}/);
       assert.match(line("Đơn 30 ngày theo trạng thái"), /DELIVERED 1 · 280\.000 ₫/);
       assert.match(line("Kết quả đơn 30 ngày"), /DELIVERED 1/);
       assert.match(line("Kết quả đơn 30 ngày"), /RETURNED 1/);

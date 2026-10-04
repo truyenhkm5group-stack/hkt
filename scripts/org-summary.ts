@@ -20,6 +20,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
+import { connectionStatusRows } from "@/lib/connectors/service";
 import { getEnabledModules } from "@/lib/platform/capabilities";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -40,7 +41,7 @@ export type OrgSummary = {
   org: { code: string; name: string; status: string; isHome: boolean };
   modules: Muc<string[]>;
   settings: Muc<{ chatbotEnabled: boolean | null; orderSyncEnabled: boolean | null; orderSyncSince: string | null; deliveryFee: number | null; receiptPricing: string | null }>;
-  connections: Muc<{ key: string; status: string; lastTestOk: boolean | null; lastTestAt: string | null; adAccounts: number | null }[]>;
+  connections: Muc<{ key: string; status: string; lastTestOk: boolean | null; lastTestAt: string | null }[]>;
   ordersByStage: Muc<Count[]>;
   ordersBySource: Muc<Count[]>;
   outcomes: Muc<Count[]>;
@@ -72,7 +73,7 @@ export function orgSummaryLines(s: OrgSummary): string[] {
     `Module bật: ${muc(s.modules, (m) => m.join(", ") || "(không)")}`,
     `Module cần cho báo cáo: ${muc(s.modules, (m) => ["finance", "marketing", "returns", "ai_sales"].map((k) => `${k} ${m.includes(k) ? "BẬT" : "TẮT"}`).join(" · "))}`,
     `Cấu hình: ${muc(s.settings, (v) => `chatbot ${v.chatbotEnabled === null ? "—" : v.chatbotEnabled ? "BẬT" : "TẮT"} · ghi đơn từ hội thoại ${v.orderSyncEnabled === null ? "—" : v.orderSyncEnabled ? `BẬT từ ${v.orderSyncSince ?? "—"}` : "TẮT"} · phí giao ${v.deliveryFee === null ? "chưa khai" : `${dem(v.deliveryFee)} ₫`} · định giá phiếu nhập ${v.receiptPricing ?? "mặc định"}`)}`,
-    `Kết nối: ${muc(s.connections, (cs) => (cs.length ? cs.map((c) => `${c.key} ${c.status}${c.lastTestOk === null ? "" : c.lastTestOk ? " ✓kiểm" : " ✗kiểm"}${c.lastTestAt ? ` ${c.lastTestAt}` : ""}${c.adAccounts !== null ? ` · ${c.adAccounts} TKQC` : ""}`).join(" | ") : "(chưa có)"))}`,
+    `Kết nối: ${muc(s.connections, (cs) => (cs.length ? cs.map((c) => `${c.key} ${c.status}${c.lastTestOk === null ? "" : c.lastTestOk ? " ✓kiểm" : " ✗kiểm"}${c.lastTestAt ? ` ${c.lastTestAt}` : ""}`).join(" | ") : "(chưa có)"))}`,
     `Đơn ${d} ngày theo trạng thái: ${muc(s.ordersByStage, (x) => counts(x, true))}`,
     `Đơn ${d} ngày theo kênh: ${muc(s.ordersBySource, (x) => counts(x))}`,
     `Kết quả đơn ${d} ngày (ORDER_OUTCOME): ${muc(s.outcomes, (x) => counts(x, true))}`,
@@ -126,14 +127,8 @@ export async function collectOrgSummary(org: OrgSummary["org"], db: Db, now: Dat
         receiptPricing: typeof pricing === "string" ? pricing : pricing && typeof pricing === "object" ? JSON.stringify(pricing).slice(0, 40) : null,
       };
     }),
-    connections: await doc(async () => {
-      const c = schema.orgConnections;
-      const rows = await db.select({ key: c.connectorKey, status: c.status, lastTestOk: c.lastTestOk, lastTestAt: c.lastTestAt, settings: c.settings }).from(c);
-      return rows.map((r) => {
-        const ids = (r.settings as Record<string, unknown> | null)?.adAccountIds;
-        return { key: r.key, status: r.status, lastTestOk: r.lastTestOk, lastTestAt: iso(r.lastTestAt), adAccounts: typeof ids === "string" ? ids.split(/[,\s]+/).filter(Boolean).length : Array.isArray(ids) ? ids.length : null };
-      });
-    }),
+    // Bảng kết nối chỉ đọc qua lib/connectors/service.ts (không bí mật, không ô cài đặt) — trên CHÍNH handle chỉ đọc.
+    connections: await doc(async () => (await connectionStatusRows(db)).map((r) => ({ key: r.connectorKey, status: r.status, lastTestOk: r.lastTestOk, lastTestAt: iso(r.lastTestAt) }))),
     ordersByStage: await doc(async () =>
       (await db.select({ key: o.stage, n: sql<number>`count(*)::int`, amount: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)::bigint` }).from(o).where(gte(o.insertedAt, since)).groupBy(o.stage)).map((r) => ({ key: String(r.key), n: num(r.n), amount: num(r.amount) })),
     ),
