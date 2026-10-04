@@ -1,0 +1,53 @@
+# Kiểm app Python pancake-ai-app trên Windows thật: chạy đúng run.bat như chủ shop bấm đúp,
+# rồi hỏi /api/health. Không chạm ERP, không dùng secret nào.
+name: pancake-ai-app (Windows)
+
+on:
+  push:
+    paths:
+      - "pancake-ai-app/**"
+      - ".github/workflows/pancake-ai-app-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: pancake-ai-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bài kiểm đơn vị
+        shell: pwsh
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m unittest discover -s tests -v
+
+      - name: Chạy run.bat và hỏi /api/health
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "run.bat < NUL > runbat.log 2>&1" -PassThru -WindowStyle Hidden
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-RestMethod -Uri "http://127.0.0.1:8800/api/health" -TimeoutSec 3
+              if ($r.ok) { $ok = $true; break }
+            } catch {}
+          }
+          if ($ok) {
+            Invoke-RestMethod -Uri "http://127.0.0.1:8800/" | Out-Null
+            Invoke-RestMethod -Uri "http://127.0.0.1:8800/api/legacy/preview" | ConvertTo-Json -Depth 4
+          }
+          Get-Content runbat.log -ErrorAction SilentlyContinue
+          taskkill /F /T /PID $p.Id 2>$null
+          if (-not $ok) { Write-Error "run.bat không khởi động được bot trong 180 giây"; exit 1 }
+          Write-Host "run.bat chạy được trên Windows: /api/health = ok"

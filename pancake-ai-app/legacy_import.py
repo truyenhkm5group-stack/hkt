@@ -25,13 +25,63 @@ import database as db
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _looks_like_old_bot(d: str) -> bool:
+    return os.path.isfile(os.path.join(d, "src", "bot.js")) or os.path.isfile(os.path.join(d, "erp-entry.mjs"))
+
+
+def _has_config(d: str) -> bool:
+    return os.path.isfile(os.path.join(d, ".env")) or os.path.isfile(os.path.join(d, "data", "pages_tokens.json"))
+
+
+def _scan_for_old_bots() -> list[str]:
+    """Dò thư mục bot cũ CÓ CẤU HÌNH ở các chỗ hay để trên Windows (sâu tối đa 3 cấp, bỏ node_modules)."""
+    home = os.path.expanduser("~")
+    roots = [os.path.join(APP_DIR, ".."), os.path.join(APP_DIR, "..", ".."), home]
+    for sub in ("Desktop", "Documents", "Downloads", "OneDrive", os.path.join("OneDrive", "Desktop"), os.path.join("OneDrive", "Documents")):
+        roots.append(os.path.join(home, sub))
+    if os.name == "nt":
+        roots += ["C:\\", "D:\\"]
+    found: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        root = os.path.abspath(root)
+        if not os.path.isdir(root):
+            continue
+        stack = [(root, 0)]
+        while stack:
+            d, depth = stack.pop()
+            if d in seen:
+                continue
+            seen.add(d)
+            if _looks_like_old_bot(d):
+                if _has_config(d) and d not in found:
+                    found.append(d)
+                continue
+            if depth >= 3:
+                continue
+            try:
+                for e in os.scandir(d):
+                    if e.is_dir(follow_symlinks=False) and not e.name.startswith((".", "$")) and e.name not in (
+                            "node_modules", "AppData", "Windows", "Program Files", "Program Files (x86)", "ProgramData", ".venv", "__pycache__"):
+                        stack.append((e.path, depth + 1))
+            except OSError:
+                continue
+    return found
+
+
 def candidate_dirs() -> list[str]:
-    out = []
-    for d in [os.environ.get("OLD_BOT_DIR", ""), os.path.join(APP_DIR, "..", "chatbot"), os.path.join(APP_DIR, "chatbot")]:
-        if d:
-            d = os.path.abspath(d)
-            if d not in out and os.path.isdir(d):
-                out.append(d)
+    """Thư mục bot cũ, ưu tiên: OLD_BOT_DIR → bot cũ CÓ .env tìm thấy trên máy → thư mục chatbot cạnh app (có thể rỗng)."""
+    out: list[str] = []
+    explicit = os.environ.get("OLD_BOT_DIR", "")
+    if explicit and os.path.isdir(explicit):
+        out.append(os.path.abspath(explicit))
+    for d in _scan_for_old_bots():
+        if d not in out:
+            out.append(d)
+    for d in (os.path.join(APP_DIR, "..", "chatbot"), os.path.join(APP_DIR, "chatbot")):
+        d = os.path.abspath(d)
+        if os.path.isdir(d) and d not in out:
+            out.append(d)
     return out
 
 
@@ -113,6 +163,7 @@ def preview(bot_dir: str | None = None) -> dict[str, Any]:
         return {"found": False, "searched": [os.path.abspath(os.path.join(APP_DIR, "..", "chatbot"))],
                 "hint": "Không thấy thư mục bot cũ. Nhập đường dẫn tới thư mục `chatbot` (nơi có file .env)."}
     d = dirs[0]
+    others = [x for x in dirs[1:] if _has_config(x)]
     if not os.path.isdir(d):
         return {"found": False, "searched": [d], "hint": "Đường dẫn không tồn tại."}
     cfg = read_old_bot(d)
@@ -125,6 +176,7 @@ def preview(bot_dir: str | None = None) -> dict[str, Any]:
         "pos_shop_id": cfg["pos_shop_id"] or None, "pos_api_key": _mask(cfg["pos_api_key"]) if cfg["pos_api_key"] else None,
         "prompt_path": cfg["prompt_path"],
         "hint": None if cfg["found_env"] else "Thư mục có nhưng không thấy file .env — bot cũ chưa cấu hình ở máy này (có thể đang chạy trên VPS).",
+        "other_dirs": others,
     }
 
 
