@@ -89,4 +89,6 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_org_milestones`);
   // 0204 · sổ dùng theo ngày của từng tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_tenant_usage_daily`);
+  // 0207 · page Messenger ⇒ tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_messenger_pages`);
 }

@@ -279,6 +279,7 @@ export function testNavigationCoverage() {
     "/settings/plan": "liên kết 'Gói & hạn mức' ở đầu thẻ Bắt đầu (trang chủ tổ chức không-nhà)",
     // 0183 · câu trả lời mẫu là cấu hình CỦA chatbot bán hàng (cùng quyền ai_sales:*), không phải module riêng.
     "/ai/sales-chatbot/quick-replies": "nút 'Câu trả lời mẫu (Q&A)' ở đầu trang /ai/sales-chatbot",
+    "/ai/sales-chatbot/messenger": "thẻ 'Messenger trực tiếp (không cần Pancake)' trong trang /ai/sales-chatbot (người có quyền cấu hình)",
   };
 
   const pages = walkPages("app/(dashboard)");

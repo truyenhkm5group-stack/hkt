@@ -310,8 +310,16 @@ async function kiemWebhook(home: Organization) {
   // Danh sách ĐÓNG các webhook phân giải theo token trong đường dẫn (0182). Mọi webhook khác vẫn HOME_ONLY — thêm một
   // webhook theo tổ chức là phải thêm TƯỜNG MINH vào đây, không lặng lẽ đổi chế độ của webhook của nhà.
   const URL_SECRET_PROVIDERS: readonly WebhookProvider[] = ["PANCAKE_FANPAGE", "PANCAKE_POS_ORG", "VIETTELPOST_ORG"];
+  // Danh sách ĐÓNG các webhook phân giải theo MÃ PAGE trong gói đã ký (0207 · Messenger trực tiếp).
+  const PAGE_INDEX_PROVIDERS: readonly WebhookProvider[] = ["MESSENGER"];
   for (const p of nhaCungCap) {
     assert.ok(WEBHOOK_BINDINGS[p].reason.length >= 20, `webhook ${p} phải kèm lý do`);
+    if (PAGE_INDEX_PROVIDERS.includes(p)) {
+      assert.equal(WEBHOOK_BINDINGS[p].mode, "PAGE_INDEX", `webhook ${p} phân giải theo mã page`);
+      await assert.rejects(resolveWebhookOrganization(p), WebhookAuthError, `webhook ${p} không mã page ⇒ NÉM, không rơi về nhà`);
+      await assert.rejects(resolveWebhookOrganization(p, { pageId: "1234567890" }), WebhookAuthError, `webhook ${p}: page chưa nối ⇒ NÉM, không rơi về nhà`);
+      continue;
+    }
     if (URL_SECRET_PROVIDERS.includes(p)) {
       assert.equal(WEBHOOK_BINDINGS[p].mode, "URL_SECRET", `webhook ${p} phân giải theo token của tổ chức`);
       await assert.rejects(resolveWebhookOrganization(p), WebhookAuthError, `webhook ${p} không token ⇒ NÉM, không rơi về nhà`);

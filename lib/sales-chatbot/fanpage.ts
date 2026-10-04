@@ -60,7 +60,7 @@ export const FOLLOWUP_WAIT_MS = 4_000;
  * coi lời chào là «page đã trả lời» và không ai trả lời khách). Thứ tự TỚI không phân biệt được hai ca; mốc TẠO tin của Pancake
  * thì được ⇒ `pancakeCreatedAfter` hỏi Pancake một lần cho đúng ca mơ hồ.
  */
-const FIRST_CONTACT_LOOKBACK_MS = 60_000;
+export const FIRST_CONTACT_LOOKBACK_MS = 60_000;
 
 /**
  * Dòng Pancake TỰ CHÈN vào hội thoại — nhãn tự động, giai đoạn khách hàng tiềm năng, «X đã trả lời một quảng cáo». Hiện như tin
@@ -114,16 +114,16 @@ async function pancakeCreatedAfter(pageId: string, threadId: string, token: stri
   }
 }
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
-const GRACE_SLACK_MS = 1_000;
-const RETRY_MS = 2_000;
+export const GRACE_SLACK_MS = 1_000;
+export const RETRY_MS = 2_000;
 /** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
 export const PAGE_REPLY = "PAGE_REPLY";
 /** Ghi chú tin khách khi bot KHÔNG trả lời vì chế độ vận hành (operating-mode-shared.ts). */
 export const OBSERVE_NOTE = "Chế độ quan sát — người của shop trả lời";
 export const OBSERVE_HUMAN_ARM_NOTE = "Thử nghiệm: hội thoại thuộc nhánh NGƯỜI";
 export const COPILOT_NOTE = "Copilot — bot đã soạn gợi ý, không gửi";
-const WAITING = "Đang đợi xem page có trả lời không";
-const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
+export const WAITING = "Đang đợi xem page có trả lời không";
+export const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
 /** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
 const ECHO_WINDOW_MS = 10 * 60_000;
 /** Tin ẢNH (không chữ) phía page tới trong khoảng này sau khi bot gửi ảnh cùng hội thoại ⇒ tiếng vọng ảnh của bot. */
@@ -140,11 +140,11 @@ const PRIVATE_ECHO_WINDOW_MS = 5 * 60_000;
 export function normalizeEcho(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
 }
-const CLAIM_STALE_MS = 3 * 60_000;
+export const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
-const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
+export const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
 /** Bot nhắn trong chừng này mà có tin phía page lạ tới ⇒ nhân viên đang vào hội thoại (Pancake không gắn uid). */
-const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
+export const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
 
 export type FanpageEvent = {
   pageId: string;
@@ -266,7 +266,7 @@ export function postContextPrompt(postText: string | null): string {
  * (nhân viên — kể cả khi Pancake không gắn uid — hay tự động của Pancake / Meta) hoặc bất kỳ phản hồi nào của khách (nhãn
  * dán, ảnh) đều chấm dứt nó. Không đụng hội thoại đang CẦN NGƯỜI XỬ LÝ.
  */
-async function stopFollowups(pageId: string, threadId: string, now: Date, customerReplied: boolean): Promise<void> {
+export async function stopFollowups(pageId: string, threadId: string, now: Date, customerReplied: boolean): Promise<void> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   await db
@@ -451,7 +451,7 @@ export async function conversationFor(pageId: string, threadId: string): Promise
  * Bot vừa trả lời xong ⇒ hội thoại CHỜ KHÁCH (`WAITING`) với lịch follow-up (0185) — trừ khi đã chốt đơn, khách từ chối rõ,
  * hay đang cần người xử lý (khi đó chỉ ghi mốc tin cuối của bot). `threadId` = hộp thư mới khi trả lời bình luận.
  */
-async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
+export async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
@@ -574,7 +574,7 @@ const CONTEXT_MAX = 12;
  * (trả lời tự động của Meta, nhân viên — trừ tin của chính bot) và tin khách bot đã bỏ qua (vì page trả lời / nhân viên đang
  * xử lý). Theo thứ tự thời gian, chỉ phần mới hơn mốc đã chép (`state.mirroredUntil`). Gọi TRƯỚC khi chụp `before`.
  */
-async function mirrorFanpageContext(conversationId: string, pageId: string, threadId: string, beforeAt: Date): Promise<void> {
+export async function mirrorFanpageContext(conversationId: string, pageId: string, threadId: string, beforeAt: Date): Promise<void> {
   const db = await getDb();
   const t = schema.salesChatInbound;
   const c = schema.salesChatConversations;
@@ -876,12 +876,16 @@ export async function processFanpageThreadDebounced(pageId: string, threadId: st
 /** Tin chờ quá lâu (lượt sau phản hồi bị mất vì máy khởi động lại…) của tổ chức ngữ cảnh — gọi kèm mỗi webhook mới. */
 export async function sweepStaleFanpageThreads(deps: FanpageDeps = {}): Promise<number> {
   const now = deps.now ?? (() => new Date());
+  // Chỉ page nối qua Pancake — page nối Messenger trực tiếp có lượt quét của nó (`sweepStaleMessengerThreads`).
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  const pancakePage = conn.ok ? (conn.settings.pageId ?? "").trim() : "";
+  if (!pancakePage) return 0;
   const db = await getDb();
   const t = schema.salesChatInbound;
   const stale = await db
     .selectDistinct({ pageId: t.pageId, threadId: t.threadId })
     .from(t)
-    .where(and(eq(t.status, "PENDING"), lt(t.createdAt, new Date(now().getTime() - 60_000)), or(isNull(t.claimId), lt(t.claimedAt, new Date(now().getTime() - CLAIM_STALE_MS)))))
+    .where(and(eq(t.pageId, pancakePage), eq(t.status, "PENDING"), lt(t.createdAt, new Date(now().getTime() - 60_000)), or(isNull(t.claimId), lt(t.claimedAt, new Date(now().getTime() - CLAIM_STALE_MS)))))
     .orderBy(asc(t.pageId))
     .limit(5);
   for (const s of stale) await processFanpageThread(s.pageId, s.threadId, deps);

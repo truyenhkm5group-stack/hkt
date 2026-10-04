@@ -99,14 +99,14 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
   path: string;
   /** Bên gửi xác thực bằng gì — một câu, không kèm giá trị. */
   verify: string;
-  tenantResolution: "URL_SECRET" | "SIGNATURE" | "HOME_ONLY";
+  tenantResolution: "URL_SECRET" | "SIGNATURE" | "HOME_ONLY" | "PAGE_INDEX";
   /** Khoá chống trùng thật mà route dùng (đọc từ mã, không phải ý muốn). */
   idempotencyKey: string;
   /** Dòng khai trong `WEBHOOK_BINDINGS`; `null` = tuyến máy-gọi-máy không qua bảng đó (vd cửa ghi sổ agent). */
@@ -700,6 +700,34 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     code: ["lib/connectors/testers.ts", "lib/sales-chatbot/fanpage.ts", "app/api/webhooks/pancake/fanpage/[token]/route.ts"],
     consumers: ["lib/sales-chatbot/fanpage.ts::processFanpageThread"],
     why: "Fanpage của CHÍNH tổ chức (page access token của Pancake). Tin khách vào fanpage ⇒ webhook Pancake ⇒ đúng tổ chức theo token trong đường dẫn ⇒ chatbot bán hàng của tổ chức trả lời (giá / tồn đọc từ ERP, khoá AI của shop, đơn ghi vào ERP) ⇒ gửi lại qua pages.fm reply_inbox. Khác «Pancake Pages» của nhà (biến môi trường, container bot riêng).",
+  },
+  {
+    key: "facebook-messenger",
+    label: "Messenger trực tiếp — bot trả lời tin nhắn (không cần Pancake)",
+    vendor: "Meta",
+    kind: "MESSAGING",
+    capabilities: ["read_conversations", "send_customer_message"],
+    auth: "OAUTH_TOKEN",
+    settings: [
+      { key: "pageId", label: "Page ID", type: "text", secret: false, required: true, pattern: "^[0-9]{5,30}$", maxLength: 30 },
+      { key: "pageName", label: "Tên page", type: "text", secret: false, required: false, maxLength: 120 },
+      { key: "pageAccessToken", label: "Page access token (cấp qua nút «Kết nối Facebook Page»)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9._-]{20,1000}$", maxLength: 1000 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/ai/sales-chatbot/messenger — chủ page bấm «Kết nối Facebook Page»; token mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/messenger",
+      verify: "X-Hub-Signature-256 = HMAC-SHA256 của thân gói gốc bằng app secret của nền tảng (FACEBOOK_LOGIN_APP_SECRET); GET xác minh bằng mã dẫn xuất từ AUTH_SECRET",
+      tenantResolution: "PAGE_INDEX",
+      idempotencyKey: "sales_chat_inbound.message_id (UNIQUE) = mid của Meta",
+      binding: "MESSENGER",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testFacebookMessenger",
+    module: "ai_sales",
+    code: ["lib/integrations/messenger/", "lib/sales-chatbot/messenger.ts", "app/api/webhooks/messenger/route.ts", "app/api/connect/messenger/start/route.ts", "app/api/connect/messenger/callback/route.ts"],
+    consumers: ["lib/sales-chatbot/messenger.ts::processMessengerThread"],
+    why: "Fanpage của CHÍNH tổ chức nối THẲNG với Meta qua app của nền tảng — shop không dùng Pancake vẫn có bot. Chủ page cấp quyền nhắn tin bằng Facebook Login; ERP lưu page token (mã hoá), đăng ký webhook cho page; tin khách ⇒ webhook chung ⇒ đúng tổ chức theo mã page ⇒ chatbot bán hàng của tổ chức ⇒ Send API. Cần app ở chế độ Live + quyền pages_messaging (Meta App Review) cho page của người ngoài app.",
   },
   /*
     HỘP THỬ (0180): kết nối nhắn tin KHÔNG gọi mạng — cùng giao diện `MessagingProvider` với Lark / Telegram, nhưng tin

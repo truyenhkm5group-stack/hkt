@@ -24,6 +24,12 @@ export const VTP_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 /** Pancake đẩy NGUYÊN bản ghi đơn/sản phẩm (kèm lịch sử, dòng hàng). Bí mật nằm trên đường dẫn nên kiểm được TRƯỚC khi đọc. */
 export const PANCAKE_WEBHOOK_MAX_BODY_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Messenger trực tiếp (0207): một gói Meta gom vài tin chữ — vài KB. Chữ ký HMAC cần body nên phải đọc trước khi kiểm; trần ở
+ * handler (Caddy chưa có dòng riêng cho đường này — chung trần mặc định).
+ */
+export const MESSENGER_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+
 /** SePay: một giao dịch ngân hàng — vài trăm byte. Chữ ký HMAC cần body nên phải đọc trước khi kiểm. */
 export const SEPAY_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 

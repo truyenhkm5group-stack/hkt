@@ -22,6 +22,7 @@
  */
 import { PANCAKE_POS_API, PANCAKE_POS_API_KEY_PATTERN, PANCAKE_POS_SHOP_ID_PATTERN } from "@/lib/constants/pancake-pos-org";
 import { isVtpPhone, normalizeVtpPhone, VTP_PARTNER_API } from "@/lib/constants/carrier-vtp";
+import { checkPage, messengerApp } from "@/lib/integrations/messenger/graph";
 import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
@@ -507,6 +508,21 @@ export async function testViettelPostCarrier(input: { secrets: Record<string, st
   }
 }
 
+/**
+ * Messenger trực tiếp: page token đọc được ĐÚNG page đã khai (`GET /me`, chỉ đọc, kèm appsecret_proof). App Facebook của nền
+ * tảng chưa cấu hình ⇒ không gọi.
+ */
+export async function testFacebookMessenger(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const pageId = (input.settings.pageId ?? "").trim();
+  const token = (input.secrets.pageAccessToken ?? "").trim();
+  if (!/^\d{5,30}$/.test(pageId)) return { ok: false, message: "Page ID không hợp lệ — không gọi." };
+  if (!token) return { ok: false, message: "Thiếu page access token — bấm «Kết nối Facebook Page»." };
+  const app = messengerApp();
+  if (!app) return { ok: false, message: "Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — báo người vận hành." };
+  const r = await checkPage(app, pageId, token, (deps.fetch ?? fetch) as typeof fetch);
+  return r.ok ? { ok: true, message: `Facebook nhận page «${r.name}» (${pageId}) — bot nhận tin qua webhook Messenger.` } : { ok: false, message: scrubSecrets(r.error, [token, app.appSecret]) };
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -521,4 +537,5 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
   "viettelpost-carrier": (input, deps) => testViettelPostCarrier(input, deps),
   "google-places": (input, deps) => testGooglePlaces(input, deps),
+  "facebook-messenger": (input, deps) => testFacebookMessenger(input, deps),
 };

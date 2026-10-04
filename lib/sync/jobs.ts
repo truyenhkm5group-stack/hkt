@@ -70,6 +70,7 @@ import { MUSIC_MOOD_KEYS, generateMusicLibrary } from "@/lib/video-scale/music-g
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
+import { sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
@@ -751,6 +752,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
         const cu = await catchUpFanpage();
+        // Messenger trực tiếp (0207): tin chờ quá lâu (lượt sau phản hồi mất lúc deploy) — trả lời bù trong 30 phút. Không ném.
+        const ms = await sweepStaleMessengerThreads().catch(() => 0);
         // Ghi đơn từ hội thoại do người chốt — công tắc RIÊNG, chạy cả khi bot tắt. Không ném.
         const os = await runFanpageOrderSync();
         const r = await runSalesFollowups();
@@ -763,7 +766,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
-        const cuText = cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "";
+        const cuText = (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);

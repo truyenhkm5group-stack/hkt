@@ -100,6 +100,13 @@ export default async function SalesChatbotPage() {
               <ModePanel config={modeConfig} manage={manage} />
             </SectionCard>
           ) : null}
+          {manage ? (
+            <SectionCard title="Messenger trực tiếp (không cần Pancake)" description="Nối fanpage thẳng với bot bằng một nút cấp quyền của Facebook — cho shop không dùng Pancake.">
+              <Link href="/ai/sales-chatbot/messenger" className="text-sm font-medium text-primary underline underline-offset-2" data-testid="messenger-link">
+                Mở cài đặt Messenger trực tiếp
+              </Link>
+            </SectionCard>
+          ) : null}
           {fanpage ? (
             <SectionCard title="Fanpage (qua Pancake)" description="Bot trả lời tin nhắn khách gửi vào fanpage của shop — cùng cấu hình, cùng giá / tồn, cùng luật chốt đơn với trang chat web.">
               <div className="space-y-2 text-sm" data-testid="fanpage-setup">

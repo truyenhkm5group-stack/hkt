@@ -5045,6 +5045,20 @@ export const platformIdentities = pgTable(
   ],
 );
 
+/**
+ * PAGE MESSENGER ⇒ TỔ CHỨC (0207 · lib/sales-chatbot/messenger.ts). Webhook Messenger của Meta tới MỘT địa chỉ chung cho
+ * mọi page — mã page trong gói tin là chứng cứ duy nhất «tin này của ai». Một page chỉ thuộc MỘT tổ chức (khoá chính):
+ * tổ chức khác nối cùng page ⇒ bị từ chối, không cướp. Chỉ là chỉ mục: token page nằm (mã hoá) ở CSDL của tổ chức.
+ */
+export const platformMessengerPages = pgTable("platform_messenger_pages", {
+  pageId: text("page_id").primaryKey(),
+  orgCode: text("org_code").notNull(),
+  pageName: text("page_name"),
+  connectedByEmail: text("connected_by_email"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
 export const platformSubscriptions = pgTable(
   "platform_subscriptions",
   {
