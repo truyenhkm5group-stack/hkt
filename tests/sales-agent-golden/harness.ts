@@ -24,6 +24,7 @@ import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabi
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { formatDate } from "@/lib/format";
 import { createProductCore } from "@/lib/records/product-create";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, nowPromptLine, openConversation, setSalesChatProviderForTests, visitorKeyOf } from "@/lib/sales-chatbot/engine";
@@ -123,12 +124,17 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 const SHORT_CODE_RE = /#[0-9A-F]{8}\b/g;
 
-/** Thay id / mốc giờ / mã đơn ngắn / dòng «bây giờ» bằng nhãn ổn định — cùng một id luôn ra cùng một nhãn trong một hội thoại. */
-function normalizer(nowLines: Set<string>, skuOfId: Map<string, string>) {
+/**
+ * Thay id / mốc giờ / mã đơn ngắn / dòng «bây giờ» / NGÀY HÔM NAY bằng nhãn ổn định — cùng một id luôn ra cùng một nhãn trong một
+ * hội thoại. Ngày hôm nay (giờ VN, dd/mm/yyyy) phải chuẩn hoá vì đơn tạo NGAY trong bài kiểm rồi được in lại («khách cũ: đã mua
+ * 1 đơn, gần nhất <ngày>»): không thay thì ảnh chụp đỏ mỗi nửa đêm giờ VN (05/10/2026: chặn mọi PR + deploy — AGENTS mục 50).
+ */
+function normalizer(nowLines: Set<string>, todays: Set<string>, skuOfId: Map<string, string>) {
   const ids = new Map<string, string>();
   const str = (s: string): string => {
     let out = s;
     for (const line of nowLines) out = out.split(line).join("<BÂY GIỜ>");
+    for (const day of todays) out = out.split(day).join("<HÔM NAY>");
     // Mã mẫu mã có thể mang tiền tố trước phần UUID — thay NGUYÊN mã trước, rồi mới tới UUID trần.
     for (const [id, sku] of skuOfId) out = out.split(id).join(`<mẫu ${sku}>`);
     out = out.replace(UUID_RE, (m) => {
@@ -177,6 +183,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
   const spec = GOLDEN_SHOPS[c.shop];
   const skuOfId = new Map([...ids.entries()].map(([sku, id]) => [id.toLowerCase(), sku]));
   const nowLines = new Set<string>();
+  const todays = new Set<string>();
   const promptsRaw: string[] = [];
   let steps: Step[] = [];
   let stepIdx = 0;
@@ -214,6 +221,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
         rounds = [];
         const now = new Date();
         nowLines.add(nowPromptLine(now));
+        todays.add(formatDate(now));
         const res = await chatTurn(conv.id, t.say, { channel: c.channel, visitorKey, now });
         if (!res.ok) throw new Error(`[${c.key}] lượt «${t.say}» lỗi: ${res.error}`);
         const msgs = res.view.messages;
@@ -249,7 +257,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>): Promise<GoldenT
           order,
         },
       };
-      return normalizer(nowLines, skuOfId)(transcript) as GoldenTranscript;
+      return normalizer(nowLines, todays, skuOfId)(transcript) as GoldenTranscript;
     } finally {
       setSalesChatProviderForTests(null);
     }
