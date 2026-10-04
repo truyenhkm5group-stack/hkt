@@ -483,6 +483,7 @@ import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testTenantAttack } from "./tenant-attack.test";
+import { testAiSalesIsolation } from "./ai-sales-isolation.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
@@ -2629,6 +2630,8 @@ async function main() {
   // server action / route / page component / dịch vụ bằng id, khoá, slug, tệp, mã mời của B; CSDL B + dòng mặt phẳng điều khiển
   // của B không đổi một dòng, 0 kết quả mang dữ liệu của B, 0 request mạng.
   await testTenantAttack();
+  // AI bán hàng (0180+) — hội thoại, câu mẫu, ảnh, sổ AI: hai tổ chức THẬT `asi-a` / `asi-b` tấn công nhau bằng id.
+  await testAiSalesIsolation();
   // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
   // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
   await testPageQueryBudget();
