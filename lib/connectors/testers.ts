@@ -25,6 +25,7 @@ import { telegramApiBase, telegramApiHost } from "@/lib/connectors/telegram-api"
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN_PATTERN, parseAdAccountIds } from "@/lib/constants/meta-ads-org";
 import { env } from "@/lib/env";
+import { GOOGLE_API_KEY_PATTERN, textSearch } from "@/lib/integrations/google-places/client";
 
 export type TesterResult = { ok: boolean; message: string };
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -434,6 +435,32 @@ export async function testPancakePosOrg(input: { secrets: Record<string, string>
   }
 }
 
+/*
+  ═══════════ GOOGLE PLACES (google-places) — MỘT LƯỢT TÌM CHỈ XIN PLACE ID ═══════════
+
+  Text Search với field mask `places.id` thuộc SKU «Text Search Essentials (IDs Only)» — Google không tính phí, nên bấm
+  «Kiểm tra» không tốn tiền của tổ chức. Trả lời đủ ba câu: khoá có hợp lệ không, «Places API (New)» đã bật trong dự án
+  chưa, và giới hạn khoá (IP / API) có cho máy chủ ERP gọi không — cả ba đều là HTTP 403 với câu chữ khác nhau, nên câu
+  của Google được in nguyên (đã che khoá).
+*/
+export async function testGooglePlaces(input: { secrets: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const key = (input.secrets.apiKey ?? "").trim();
+  if (!GOOGLE_API_KEY_PATTERN.test(key)) return { ok: false, message: "Khoá có ký tự lạ hoặc quá ngắn — dán NGUYÊN khoá API từ Google Cloud Console, không gửi." };
+  const r = await textSearch({ apiKey: key, timeoutMs: TIMEOUT_MS, maxRetries: 0 }, { textQuery: "nhà hàng hải sản Hà Nội", tier: "IDS_ONLY" }, { fetch: deps.fetch });
+  if (!r.ok) {
+    const why =
+      r.kind === "AUTH"
+        ? "Google từ chối khoá — khoá sai, «Places API (New)» chưa bật trong dự án, dự án chưa bật thanh toán, hoặc giới hạn khoá không cho IP máy chủ ERP"
+        : r.kind === "QUOTA"
+          ? "Google báo hết hạn mức (429) — kiểm tra Quotas trong Google Cloud"
+          : r.kind === "NETWORK"
+            ? "Không gọi được places.googleapis.com"
+            : "Google trả lỗi";
+    return { ok: false, message: scrubSecrets(`${why}: ${r.message}`, [key]) };
+  }
+  return { ok: true, message: `Google nhận khoá: lượt tìm thử trả ${r.places.length} địa điểm (lượt chỉ-Place-ID, không tính phí). Bật để job «wholesale-leads» chạy chiến dịch quét.` };
+}
+
 /** Bảng tra: connector → hàm kiểm tra. Khoá phải khớp `healthRef` trong sổ (bài kiểm đối chiếu). */
 export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: Record<string, string>; settings: Record<string, string>; orgName: string }, deps?: TesterDeps) => Promise<TesterResult>>> = {
   "lark-webhook": (input, deps) => testLarkWebhook(input, deps),
@@ -446,4 +473,5 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "pancake-fanpage": (input, deps) => testPancakeFanpage(input, deps),
   "meta-ads-org": (input, deps) => testMetaAdsOrg(input, deps),
   "pancake-pos-org": (input, deps) => testPancakePosOrg(input, deps),
+  "google-places": (input, deps) => testGooglePlaces(input, deps),
 };

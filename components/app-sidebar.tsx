@@ -60,6 +60,9 @@ import {
   Wallet,
   Workflow,
   Rocket,
+  Store,
+  PhoneOutgoing,
+  Radar,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { hasPermission, homeOrgPermissionDenied } from "@/lib/auth/permissions";
@@ -98,6 +101,10 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/customers/reorder": RefreshCw,
   "/appointments": CalendarClock,
   "/warranty": ShieldCheck,
+  "/wholesale/leads": Store,
+  "/wholesale/outreach": PhoneOutgoing,
+  "/wholesale/lead-hunter": Radar,
+  "/wholesale/dashboard": TrendingUp,
   "/outreach": HeartHandshake,
   "/chatbot": Bot,
   "/ads": Megaphone,

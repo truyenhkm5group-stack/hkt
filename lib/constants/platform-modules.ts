@@ -60,6 +60,7 @@ export const MODULE_KEYS = [
   "ai_sales",
   "appointments",
   "warranty",
+  "wholesale_leads",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -518,6 +519,23 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["warranty:view", "warranty:write"],
     homeOptIn: true,
     why: "Bảo hành là nghĩa vụ SAU bán của ngành gia dụng — khác đổi trả hàng hoàn của thời trang COD. Sản phẩm là mẫu mã của module Sản phẩm, khách là khách của module Khách hàng; «còn bảo hành» KHÔNG lưu thành cột mà tính từ ngày mở ca so với hạn. Tắt cho tổ chức nhà (0196).",
+  },
+  {
+    key: "wholesale_leads",
+    label: "Săn khách sỉ",
+    description: "Tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm từ dữ liệu doanh nghiệp công khai (Google Places), chấm điểm, phủ theo tỉnh × khu vực, hàng đợi liên hệ có danh sách không liên hệ, pipeline bán sỉ tới lúc thành khách hàng.",
+    category: "COMMERCE",
+    version: 1,
+    core: false,
+    dependsOn: ["customers"],
+    features: [
+      { key: "wholesale_leads.website_enrichment", label: "Đọc trang liên hệ công khai của website doanh nghiệp", defaultEnabled: true, why: "Tìm email / hotline / Facebook / Zalo trên chính website của doanh nghiệp, mỗi phát hiện lưu kèm URL nguồn; không vượt đăng nhập / captcha." },
+      { key: "wholesale_leads.ai_opener", label: "AI soạn lời chào", defaultEnabled: true, why: "AI chỉ diễn đạt lại từ dữ kiện có trong lead và cấu hình của shop; tắt thì dùng mẫu lời chào cố định." },
+    ],
+    routes: ["/wholesale", "/api/wholesale"],
+    permissions: ["wholesale:view", "wholesale:work", "wholesale:assign", "wholesale:scan", "wholesale:config"],
+    homeOptIn: true,
+    why: "Bán sỉ B2B cần KHÁCH MỚI mà chưa ai nhắn tin tới — khác AI bán hàng (trả lời khách đã tới) và khác Khách hàng (người đã mua). Lead chỉ thành dòng `customers` khi chốt được (WON) và đi qua đúng lõi tạo khách có sẵn, nên không có CRM thứ hai. Phụ thuộc Khách hàng vì chuyển đổi ghi vào đó. Khoá Google Places là của CHÍNH tổ chức (kết nối `google-places`). Tắt cho tổ chức nhà (0197).",
   },
 ];
 

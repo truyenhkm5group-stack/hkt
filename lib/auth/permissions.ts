@@ -265,6 +265,22 @@ export const PERMISSION_GROUPS = [
       { key: "warranty:write", label: "Bảo hành: lập phiếu & xử lý ca", hint: "Lập / huỷ phiếu bảo hành (có lý do), mở ca, nhận ca, đóng ca với cách xử lý hoặc từ chối có lý do." },
     ],
   },
+  /*
+    SĂN KHÁCH SỈ (0197, module `wholesale_leads`): năm mức tách theo đúng việc — XEM lead (theo phạm vi dữ liệu) · LÀM
+    lead của mình (gọi, ghi chú, đổi trạng thái, hàng đợi liên hệ, chuyển thành khách) · GIAO lead cho người khác · QUÉT
+    (chạy chiến dịch, TỐN TIỀN API) · CẤU HÌNH (khoá API, trần ngân sách, mẫu lời chào). Hai mức cuối là của chủ shop:
+    MANAGER mặc định KHÔNG có (danh sách loại trừ bên dưới).
+  */
+  {
+    module: "Săn khách sỉ",
+    items: [
+      { key: "wholesale:view", label: "Khách sỉ: xem lead & bảng hiệu quả", hint: "Xem danh sách lead khách sỉ, chi tiết, lịch sử liên hệ và bảng hiệu quả theo từ khoá / nhóm khách / tỉnh. Phạm vi dữ liệu SELF / ASSIGNED chỉ thấy lead được giao." },
+      { key: "wholesale:work", label: "Khách sỉ: chăm lead (gọi, ghi chú, trạng thái, liên hệ)", hint: "Ghi cuộc gọi / ghi chú, đổi trạng thái bán hàng, soạn và đánh dấu đã gửi lời chào, tạo cơ hội, chuyển lead thành khách hàng." },
+      { key: "wholesale:assign", label: "Khách sỉ: giao lead cho nhân viên", hint: "Giao / đổi người phụ trách lead, thêm lead vào chiến dịch, xuất danh sách đã chọn." },
+      { key: "wholesale:scan", label: "Khách sỉ: chạy chiến dịch quét (tốn phí API)", hint: "Tạo chiến dịch, xem trước truy vấn, bắt đầu / tạm dừng / tiếp tục / dừng quét Google Places, nhập lead từ tệp." },
+      { key: "wholesale:config", label: "Khách sỉ: cấu hình, trần ngân sách & danh sách không liên hệ", hint: "Sửa trần chi tiêu ngày / tháng, đơn giá API, vùng phục vụ, ngưỡng hạng, mẫu lời chào; gỡ số khỏi danh sách không liên hệ." },
+    ],
+  },
 ] as const;
 
 /**
@@ -352,10 +368,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage", "wholesale:scan", "wholesale:config"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "wholesale:view", "wholesale:work", "wholesale:assign"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
@@ -369,8 +385,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   // Lễ tân / chăm sóc khách là người đặt lịch ở ngành dịch vụ (0190) — module chỉ bật ở tổ chức khách.
   // Bảo hành (0196) cũng là việc của CSKH — module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write"],
-  MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
+  // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work"],
+  MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own", "wholesale:view", "wholesale:work"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };
 

@@ -464,6 +464,7 @@ import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
+import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testQuickStart } from "./quick-start.test";
@@ -2673,6 +2674,7 @@ async function main() {
   await testPancakePosOrgSync();
   await testViettelPostOrg();
   await testFashionCodF3();
+  await testWholesaleLeadHunter();
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   await testQuickStart();

@@ -119,13 +119,15 @@ async function kiemLich(fan: FanOut) {
   assert.ok(fan.FANOUT_JOBS.includes(WORKFLOWS_JOB));
   // `ads-spend-org` thêm 03/10/2026: chủ nền tảng yêu cầu chi tiêu quảng cáo Facebook của tổ chức khách ĐỒNG BỘ TỰ ĐỘNG,
   // bằng kết nối «meta-ads-org» của chính tổ chức (không cần credential của nhà — khẳng định ngay dưới vẫn kiểm điều đó).
-  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "messaging-retry", "sales-followup", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức");
+  // `wholesale-leads` thêm 04/10/2026 (0197): chiến dịch săn khách sỉ của tổ chức khách chạy nền bằng khoá Google của chính họ.
+  assert.deepEqual([...fan.AUTOMATION_FANOUT_JOBS].sort(), ["ads-spend-org", "messaging-retry", "sales-followup", "wholesale-leads", "work-recurrence", "workflows"], "tầng tự động hoá: luật + việc định kỳ + follow-up chatbot + gửi lại tin nhóm + chi tiêu quảng cáo của tổ chức + săn khách sỉ");
   for (const j of fan.AUTOMATION_FANOUT_JOBS) {
     assert.ok(fan.FANOUT_JOBS.includes(j), `${j} phải khai fanOut`);
     assert.ok(!HOME_CREDENTIAL_JOBS[j], `${j} không được cần credential của nhà`);
   }
   // `ads-spend-org` CHỈ fan-out: chi tiêu quảng cáo của nhà đi qua `facebook-ads` (biến môi trường), không qua job này.
-  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "ads-spend-org"]);
+  // `wholesale-leads` CHỈ fan-out: nhà tắt module Săn khách sỉ (homeOptIn, 0197).
+  assert.deepEqual([...fan.FANOUT_ONLY_JOBS], [WORKFLOWS_JOB, "sales-followup", "ads-spend-org", "wholesale-leads"]);
 
   const lich = doc("scripts/scheduler.mjs");
   const jobsLich = [...new Set([...lich.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]))];

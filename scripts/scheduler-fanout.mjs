@@ -40,7 +40,7 @@
  * PARTIAL mỗi 10 phút) · `landing-sheet` (mỗi phút; tổ chức chưa khai sheet thì hỏng mỗi phút) ·
  * mọi job kéo dữ liệu từ nhà cung cấp ngoài.
  */
-export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "messaging-retry", "ads-spend-org"]);
+export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize", "work-recurrence", "work-snapshot", "data-check", "workflows", "sales-followup", "messaging-retry", "ads-spend-org", "wholesale-leads"]);
 
 /**
  * Tầng tự động hoá (G-SCHED) — tập con của `FANOUT_JOBS`. `sales-followup` (follow-up chatbot fanpage — chủ shop yêu cầu
@@ -48,14 +48,17 @@ export const FANOUT_JOBS = Object.freeze(["dashboard-warm", "outcome-materialize
  * nhóm hỏng vì mạng — 01/10/2026) cũng vậy: tin «đơn mới» của tổ chức khách do luật của chính tổ chức đó gửi.
  * `ads-spend-org` (chi tiêu quảng cáo Facebook của tổ chức khách — chủ nền tảng chốt 03/10/2026 «đồng bộ tự động») kéo
  * bằng kết nối «meta-ads-org» CỦA CHÍNH tổ chức; tổ chức chưa bật kết nối bỏ qua ngay sau một câu đọc.
+ * `wholesale-leads` (Săn khách sỉ — 0197) chạy chiến dịch quét của TỪNG tổ chức khách bằng khoá Google Places của chính
+ * họ; không có chiến dịch / lead chờ ⇒ một câu đọc.
  */
-export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "messaging-retry", "ads-spend-org"]);
+export const AUTOMATION_FANOUT_JOBS = Object.freeze(["workflows", "work-recurrence", "sales-followup", "messaging-retry", "ads-spend-org", "wholesale-leads"]);
 
 /**
  * Job CHỈ chạy qua fan-out — bộ lập lịch KHÔNG gọi lượt của nhà cho chúng (luật của nhà chạy ké `alerts`; nhà TẮT module
- * AI bán hàng nên không có follow-up nào để chạy; chi tiêu quảng cáo của nhà đi qua `facebook-ads`).
+ * AI bán hàng nên không có follow-up nào để chạy; chi tiêu quảng cáo của nhà đi qua `facebook-ads`; nhà TẮT module Săn
+ * khách sỉ — 0197).
  */
-export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup", "ads-spend-org"]);
+export const FANOUT_ONLY_JOBS = Object.freeze(["workflows", "sales-followup", "ads-spend-org", "wholesale-leads"]);
 
 /**
  * Nhịp GÕ của job `workflows` (phút) — BẰNG `WORKFLOW_CADENCE_MIN_MINUTES` của `lib/constants/workflow-cadence.ts`
