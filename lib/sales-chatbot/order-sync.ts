@@ -48,7 +48,7 @@ import {
   ORDER_SYNC_OUTCOME_LABEL,
   ORDER_SYNC_SETTING_KEY,
   parseOrderSyncConfig,
-  syncedOrderGroupText,
+  orderGroupText,
   type OrderSyncConfig,
   type OrderSyncOutcome,
   type OrderSyncThreadState,
@@ -469,8 +469,8 @@ async function syncThread(a: {
   const who = `${decision.recipient.name} · ${decision.recipient.phone}`;
   const items = priced.lines.map((l) => `${l.name} × ${l.quantity}`).join("; ");
   const fromPrevious = decision.phoneFrom === "PREVIOUS" || decision.addressFrom === "PREVIOUS" ? `${[decision.phoneFrom === "PREVIOUS" ? "SĐT" : "", decision.addressFrom === "PREVIOUS" ? "Địa chỉ" : ""].filter(Boolean).join(" + ")} theo đơn trước — xác nhận với khách` : "";
-  const groupText = syncedOrderGroupText({
-    code,
+  const groupText = orderGroupText({
+    header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",
     name: decision.recipient.name,
     phone: decision.recipient.phone,
     address: decision.recipient.address,
@@ -478,7 +478,7 @@ async function syncThread(a: {
     lines: priced.lines,
     subtotal: priced.subtotal,
     shippingFee: priced.shippingFee,
-    shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn ship NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
+    shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn phí NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
     warnings: [fromPrevious].filter(Boolean),
     confirmed,
   });

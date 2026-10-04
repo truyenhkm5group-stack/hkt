@@ -36,8 +36,9 @@ export const ORDER_SYNC_LIMITS = { quietMinutes: 10, lookbackHours: 24, threadsP
 /** Nhãn kênh của đơn ghi từ hội thoại do người chốt — tách khỏi «Chatbot fanpage» (đơn bot tự chốt). */
 export const ORDER_SYNC_CHANNEL = "Fanpage (nhân viên chốt)";
 
-export type SyncedOrderSummary = {
-  code: string;
+export type OrderGroupSummary = {
+  /** Dòng đầu — loại đơn («🆕 ĐƠN MỚI (chưa xác nhận)», «🧾 ĐƠN MỚI — nhân viên chốt»). */
+  header: string;
   name: string;
   phone: string;
   address: string;
@@ -46,31 +47,30 @@ export type SyncedOrderSummary = {
   subtotal: number;
   /** `null` = chưa báo phí ship. */
   shippingFee: number | null;
-  /** Câu ship hiện cho nhân viên (miễn ship / miễn ship nếu đúng khu vực) — `null` = theo số `shippingFee`. */
+  /** Câu ship hiện cho nhân viên (miễn phí / miễn ship nếu đúng khu vực) — `null` = theo số `shippingFee`. */
   shipText: string | null;
-  /** Ghi chú cần kiểm (SĐT / địa chỉ lấy từ đơn trước…). */
+  /** Dòng cần kiểm (SĐT / địa chỉ lấy từ đơn trước, ghi chú của khách…). */
   warnings: readonly string[];
   /** Đơn đã ghi thẳng «Đã xác nhận» (tổ chức bật «đơn đủ thông tin = đã xác nhận») — tin không bảo «chốt đơn» nữa. */
   confirmed?: boolean;
 };
 
 /**
- * Tin nhóm vận hành cho đơn ghi từ hội thoại nhân viên — ĐỦ như tin «ĐƠN MỚI» của bot: tên, SĐT, địa chỉ, từng món × SL × đơn
- * giá, tiền hàng, ship, tiền thu. Chủ shop Hải Sản Làng Chài 04/10/2026: tin cũ chỉ có tên · SĐT · tên món · tổng — thiếu địa
- * chỉ và giá, kho không đóng gói được. HÀM THUẦN.
+ * Tin nhóm báo đơn — ĐỦ cho kho đóng gói và giao: tiền thu, tên, SĐT, địa chỉ, từng món × SL × đơn giá, tiền hàng, ship.
+ * Chủ shop Hải Sản Làng Chài 04/10/2026: «không cần mã đơn hàng, không cần nguồn đơn, không cần Xác nhận đơn trên ERP: <link>»
+ * — cùng kiểu với mẫu «ĐƠN MỚI» shop đã tự sửa (THU TIỀN ở dòng đầu). HÀM THUẦN.
  */
-export function syncedOrderGroupText(o: SyncedOrderSummary): string {
+export function orderGroupText(o: OrderGroupSummary): string {
   const address = o.province && !o.address.toLowerCase().includes(o.province.toLowerCase()) ? [o.address, o.province].filter(Boolean).join(", ") : o.address;
   const ship = o.shipText ?? (o.shippingFee === null ? "chưa báo" : formatVND(o.shippingFee));
   return [
-    `🧾 ĐƠN MỚI TỪ FANPAGE ${o.code} — nhân viên chốt, ${o.confirmed ? "ĐÃ TÍNH ĐƠN (đủ thông tin)" : "chờ kiểm"}`,
+    o.header,
+    `THU TIỀN: ${formatVND(o.subtotal + (o.shippingFee ?? 0))}${o.shippingFee === null ? " + ship" : ""}`,
     `Khách: ${o.name} · ${o.phone}`,
     `Địa chỉ: ${address || "—"}`,
     ...o.lines.map((l) => `• ${l.name} × ${l.quantity} × ${formatVND(l.unitPrice)} = ${formatVND(l.lineTotal)}`),
     `Tiền hàng: ${formatVND(o.subtotal)} · Ship: ${ship}`,
-    `THU: ${formatVND(o.subtotal + (o.shippingFee ?? 0))}${o.shippingFee === null ? " + ship" : ""}`,
     ...o.warnings,
-    o.confirmed ? "Đơn đã tính — sai thì sửa / huỷ trên ERP." : "Kiểm thông tin rồi chốt đơn trên ERP.",
   ].join("\n");
 }
 
