@@ -10,6 +10,7 @@ import {
   CircleDollarSign,
   HandCoins,
   LifeBuoy,
+  Menu,
   Lock,
   PhoneCall,
   Repeat,
@@ -36,6 +37,22 @@ import { getPublicSiteData, type PublicPlan, type PublicSiteData } from "@/lib/q
  */
 
 export const dynamic = "force-dynamic";
+
+/**
+ * KHUNG NỘI DUNG — MỘT chỗ khai cho mọi phần. Tính bằng rem (90rem = 1440px ở cỡ chữ gốc 16px) chứ không bằng px: ở màn
+ * rộng `SITE_SCALE_CSS` nâng cỡ chữ gốc, và khung giãn CÙNG tỷ lệ với chữ thay vì đứng yên giữa một biển khoảng trắng.
+ * Nền của từng phần vẫn trải hết bề ngang màn hình; chỉ chữ được giữ trong khung để dòng không dài quá mức đọc được.
+ */
+const WRAP = "mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-10 2xl:px-14";
+
+/**
+ * MÀN RỘNG: phóng cả trang theo cỡ chữ gốc. Mọi kích thước Tailwind tính bằng rem, nên chữ, khoảng cách, bo góc và khung
+ * nội dung lớn lên cùng một tỷ lệ — trang trên màn 2K trông như trên màn 1366px, chỉ to hơn. Thẻ `<style>` này chỉ sống
+ * trên trang giới thiệu: mọi lối ra đều là liên kết tải lại trang (sang host ERP hoặc trang chính sách), không có điều
+ * hướng phía trình duyệt nào mang nó sang trang khác.
+ */
+const SITE_SCALE_CSS =
+  "@media (min-width:1800px){html{font-size:17px}}@media (min-width:2200px){html{font-size:18.5px}}@media (min-width:2500px){html{font-size:20px}}@media (min-width:3200px){html{font-size:24px}}";
 
 const TITLE = "VNXcommerce — Phần mềm quản lý bán hàng online: biết lãi thật từng đơn";
 const DESCRIPTION =
@@ -221,8 +238,8 @@ const INDUSTRY_COPY: Partial<Record<BusinessType, { label: string; text: string 
 };
 
 const STEPS = [
-  { title: "Tạo tài khoản", text: "Tên cửa hàng, email và mật khẩu. Vài phút là xong." },
-  { title: "Chọn ngành hàng", text: "Phần mềm dựng sẵn mẫu cho ngành của bạn; xem trước rồi mới cài." },
+  { title: "Tạo tài khoản", text: "Tên cửa hàng, ngành hàng, số điện thoại, email, mật khẩu — hoặc một nút Google / Facebook." },
+  { title: "Có ngay mẫu ngành", text: "Phần mềm tự dựng danh mục và tính năng theo ngành bạn chọn, kèm sẵn trợ lý chat." },
   { title: "Đưa dữ liệu vào", text: "Nhập sản phẩm từ Excel, kết nối fanpage, tải tệp vận chuyển và sao kê ngân hàng." },
   { title: "Mời nhân viên", text: "Mỗi người một tài khoản, chỉ thấy đúng phần việc của mình." },
 ];
@@ -237,23 +254,23 @@ const PROMISES = [
 const FAQ = [
   { q: "Dữ liệu đưa vào phần mềm bằng cách nào?", a: "Sản phẩm nhập từ tệp Excel; đơn tạo ngay trên phần mềm hoặc do trợ lý chat lên đơn nháp từ fanpage; tệp danh sách vận đơn, bảng kê tiền thu hộ và sao kê ngân hàng thì tải lên để phần mềm tự khớp. Nhập lại tệp cũ không làm trùng số." },
   { q: "Bắt đầu có mất tiền không?", a: "Không. Cửa hàng tự đăng ký bắt đầu ở gói Dùng thử miễn phí, không cần thẻ ngân hàng. Khi cần thêm người dùng hay dung lượng thì chọn gói trả phí." },
-  { q: "Có phải cài đặt gì không?", a: "Không. Phần mềm chạy trên trình duyệt, máy tính hay điện thoại đều dùng được." },
+  { q: "Có phải cài đặt gì không?", a: "Không. Phần mềm chạy trên trình duyệt, máy tính hay điện thoại đều dùng được. Đăng nhập bằng email, số điện thoại hoặc tài khoản Google / Facebook." },
   { q: "Thanh toán gói trả phí thế nào?", a: "Chuyển khoản ngân hàng theo mã thanh toán phần mềm tạo sẵn. Tiền về, khớp mã là gói được gia hạn." },
-  { q: "Trợ lý chat cần những gì?", a: "Fanpage của shop (kết nối qua Pancake) và tài khoản AI của chính shop — chi phí AI do shop kiểm soát. Trợ lý chỉ lên đơn nháp, nhân viên duyệt rồi mới thành đơn." },
+  { q: "Trợ lý chat cần những gì?", a: "Chỉ cần kết nối fanpage của shop. Mỗi gói có sẵn hạn mức AI, không phải tự mua tài khoản AI; shop muốn dùng tài khoản AI riêng thì vẫn khai được. Trợ lý chỉ lên đơn nháp, nhân viên duyệt rồi mới thành đơn." },
   { q: "Dữ liệu của tôi có bị người khác xem được không?", a: "Không. Mỗi cửa hàng có kho dữ liệu riêng, tách hẳn khỏi cửa hàng khác. Trong cửa hàng, bạn quyết định nhân viên nào được xem phần nào." },
   { q: "Nhân viên mới có khó dùng không?", a: "Có sẵn trang Hướng dẫn sử dụng từng bước ngay trong phần mềm, mỗi người chỉ thấy bài dành cho phần việc của mình." },
 ];
 
-function signupCopy(data: PublicSiteData): { label: string; short: string; note: string | null } {
+function signupCopy(data: PublicSiteData): { label: string; short: string; tiny: string; note: string | null } {
   switch (data.signup) {
     case "open":
-      return { label: "Dùng thử miễn phí", short: "Dùng thử miễn phí", note: "Tạo cửa hàng trong vài phút · Không cần thẻ ngân hàng" };
+      return { label: "Dùng thử miễn phí", short: "Dùng thử miễn phí", tiny: "Dùng thử", note: "Tạo cửa hàng trong vài phút · Không cần thẻ ngân hàng" };
     case "invite":
-      return { label: "Đăng ký bằng mã mời", short: "Đăng ký", note: "Đang mở theo lời mời: cần mã mời để tạo cửa hàng mới." };
+      return { label: "Đăng ký bằng mã mời", short: "Đăng ký", tiny: "Đăng ký", note: "Đang mở theo lời mời: cần mã mời để tạo cửa hàng mới." };
     case "off":
-      return { label: "Đăng ký", short: "Đăng ký", note: "Tạm ngừng nhận cửa hàng mới. Đã có tài khoản thì đăng nhập để dùng tiếp." };
+      return { label: "Đăng ký", short: "Đăng ký", tiny: "Đăng ký", note: "Tạm ngừng nhận cửa hàng mới. Đã có tài khoản thì đăng nhập để dùng tiếp." };
     default:
-      return { label: "Đăng ký", short: "Đăng ký", note: null };
+      return { label: "Đăng ký", short: "Đăng ký", tiny: "Đăng ký", note: null };
   }
 }
 
@@ -268,6 +285,9 @@ function limitLines(plan: PublicPlan): string[] {
   return lines;
 }
 
+/** Số cột của bảng giá theo SỐ THẺ (gói khởi đầu + gói đang bán) — gói mới thêm ở /platform không được rơi lẻ một hàng. */
+const PLAN_GRID: Record<number, string> = { 1: "lg:grid-cols-1", 2: "lg:grid-cols-2", 3: "lg:grid-cols-3", 4: "lg:grid-cols-4", 5: "lg:grid-cols-3 xl:grid-cols-5" };
+
 const TONE: Record<Tone, string> = {
   good: "bg-success/15 text-success",
   bad: "bg-destructive/12 text-destructive",
@@ -277,9 +297,9 @@ const TONE: Record<Tone, string> = {
 
 function SectionHead({ eyebrow, title, text, invert = false }: { eyebrow: string; title: React.ReactNode; text?: string; invert?: boolean }) {
   return (
-    <div className="mx-auto max-w-2xl text-center">
+    <div className="mx-auto max-w-3xl text-center">
       <p className={`text-xs font-bold uppercase tracking-[0.2em] ${invert ? "text-brand-bright" : "text-brand"}`}>{eyebrow}</p>
-      <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-balance sm:text-4xl">{title}</h2>
+      <h2 className="mt-3 text-[clamp(1.5rem,1rem+1.6vw,2.6rem)] font-extrabold leading-tight tracking-tight text-balance">{title}</h2>
       {text ? <p className={`mt-4 text-base leading-7 ${invert ? "text-sidebar-foreground/70" : "text-muted-foreground"}`}>{text}</p> : null}
     </div>
   );
@@ -396,9 +416,10 @@ export default async function SitePage() {
 
   return (
     <div className="min-h-screen scroll-smooth bg-background text-foreground">
+      <style>{SITE_SCALE_CSS}</style>
       {/* ─── ĐẦU TRANG ─── */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
+        <div className={`${WRAP} flex h-16 items-center gap-3`}>
           <a href="#" aria-label="VNXcommerce — về đầu trang">
             <BrandLockup wordmarkClassName="text-base" />
           </a>
@@ -414,15 +435,34 @@ export default async function SitePage() {
               <a href={data.loginUrl}>Đăng nhập</a>
             </Button>
             <Button asChild size="sm" className="rounded-lg">
-              <a href={data.signupUrl}>{signup.short}</a>
+              <a href={data.signupUrl}>
+                <span className="sm:hidden">{signup.tiny}</span>
+                <span className="hidden sm:inline">{signup.short}</span>
+              </a>
             </Button>
+            {/* Mục lục cho điện thoại / máy tính bảng — `<details>` thuần, không cần JavaScript. */}
+            <details className="relative lg:hidden">
+              <summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-lg border border-border/70 bg-card [&::-webkit-details-marker]:hidden" aria-label="Mục lục">
+                <Menu className="size-5" aria-hidden />
+              </summary>
+              <nav className="absolute top-11 right-0 z-50 w-60 rounded-2xl bg-card p-2 text-card-foreground shadow-[var(--shadow-raised)]" aria-label="Mục lục trang">
+                {NAV.map((n) => (
+                  <a key={n.href} href={n.href} className="block rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-muted">
+                    {n.label}
+                  </a>
+                ))}
+                <a href={data.loginUrl} className="mt-1 block rounded-xl border-t border-border/60 px-3 py-2.5 text-sm font-semibold text-brand hover:bg-muted">
+                  Đăng nhập
+                </a>
+              </nav>
+            </details>
           </div>
         </div>
       </header>
 
       <main>
         {/* ─── PHẦN ĐẦU ─── */}
-        <section className="relative overflow-hidden bg-sidebar text-sidebar-foreground">
+        <section className="relative flex min-h-[calc(100svh-4rem)] items-center overflow-hidden bg-sidebar text-sidebar-foreground">
           <div
             className="pointer-events-none absolute inset-0 opacity-[0.07]"
             style={{ backgroundImage: "radial-gradient(currentColor 1px, transparent 1px)", backgroundSize: "22px 22px" }}
@@ -430,23 +470,23 @@ export default async function SitePage() {
           />
           <div className="pointer-events-none absolute -top-48 -right-40 size-[36rem] rounded-full bg-brand/30 blur-3xl" aria-hidden />
           <div className="pointer-events-none absolute -bottom-56 -left-32 size-[30rem] rounded-full bg-chart-2/25 blur-3xl" aria-hidden />
-          <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-4 pt-14 pb-20 sm:px-6 lg:grid-cols-[1.1fr_1fr] lg:pt-20 lg:pb-28">
+          <div className={`relative ${WRAP} grid items-center gap-14 py-14 lg:grid-cols-[1.05fr_1fr] lg:gap-20 lg:py-16`}>
             <div>
               <p className="inline-flex items-center gap-2 rounded-full border border-sidebar-border bg-sidebar-accent/70 px-3 py-1 text-xs font-semibold text-sidebar-foreground/85">
                 <Sparkles className="size-3.5 text-brand-bright" aria-hidden />
                 Phần mềm quản lý cho shop bán hàng online
               </p>
-              <h1 className="mt-6 text-[2rem] font-extrabold leading-[1.15] tracking-tight text-balance sm:text-5xl lg:text-[3.3rem]">
+              <h1 className="mt-6 text-[clamp(2rem,1rem+2.6vw,3.75rem)] font-extrabold leading-[1.12] tracking-tight text-balance">
                 Bán nhiều đơn chưa chắc đã lãi. <span className="text-brand-bright">Biết lãi thật từng đơn</span> mới giữ được tiền.
               </h1>
-              <p className="mt-6 max-w-xl text-lg leading-8 text-sidebar-foreground/75">
+              <p className="mt-6 max-w-2xl text-[clamp(1rem,0.9rem+0.4vw,1.25rem)] leading-[1.7] text-sidebar-foreground/75">
                 VNXcommerce đặt đơn hàng, vận chuyển, tiền thu hộ, chi phí và kho cạnh nhau. Mở phần mềm là biết ngay: lãi thật bao nhiêu, đơn nào có vấn đề, khoản tiền nào bên vận chuyển còn giữ.
               </p>
               <div className="mt-9">
                 <CtaButtons data={data} signup={signup} />
               </div>
               {signup.note ? <p className="mt-4 text-sm text-sidebar-foreground/60">{signup.note}</p> : null}
-              <ul className="mt-8 grid gap-2.5 text-sm text-sidebar-foreground/80 sm:grid-cols-3">
+              <ul className="mt-8 flex flex-col gap-2.5 text-sm text-sidebar-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-7">
                 {["Bắt đầu miễn phí", "Chạy trên trình duyệt", "Dữ liệu tách riêng"].map((t) => (
                   <li key={t} className="flex items-center gap-2">
                     <Check className="size-4 shrink-0 text-brand-bright" aria-hidden />
@@ -455,16 +495,16 @@ export default async function SitePage() {
                 ))}
               </ul>
             </div>
-            <div className="lg:pl-6">
+            <div className="mx-auto w-full max-w-xl px-2 sm:px-6 lg:max-w-none lg:px-0 lg:pl-6">
               <HeroReport />
             </div>
           </div>
         </section>
 
         {/* ─── NỖI ĐAU ─── */}
-        <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
+        <section className={`${WRAP} py-20 lg:py-28`}>
           <SectionHead eyebrow="Có phải shop bạn đang thế này?" title="Tiền rò rỉ ở những chỗ không ai nhìn thấy" text="Không phải vì bạn bán kém — mà vì mỗi nơi giữ một con số, và không ai đặt chúng cạnh nhau." />
-          <ul className="mx-auto mt-12 grid max-w-5xl gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
             {PAINS.map((p) => (
               <li key={p} className="flex gap-3 rounded-2xl bg-card p-5 text-sm leading-6 shadow-[var(--shadow-card)]">
                 <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-destructive/12 text-destructive">
@@ -481,7 +521,7 @@ export default async function SitePage() {
 
         {/* ─── LỢI ÍCH ─── */}
         <section id="loi-ich" className="scroll-mt-20 bg-[var(--surface-sunken)] py-20 lg:py-24">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className={WRAP}>
             <SectionHead
               eyebrow="Lợi ích"
               title={
@@ -492,7 +532,7 @@ export default async function SitePage() {
             />
             <div className="mt-14 space-y-16 lg:space-y-24">
               {BENEFITS.map((b, i) => (
-                <article key={b.title} className="grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+                <article key={b.title} className="grid items-center gap-8 lg:grid-cols-2 lg:gap-16 xl:gap-24">
                   <div className={i % 2 === 1 ? "lg:order-2" : ""}>
                     <p className="inline-flex items-center gap-2 rounded-full bg-accent px-3 py-1 text-xs font-bold text-accent-foreground">
                       <b.icon className="size-3.5" aria-hidden />
@@ -510,7 +550,7 @@ export default async function SitePage() {
                       ))}
                     </ul>
                   </div>
-                  <div className={`mx-auto w-full max-w-md ${i % 2 === 1 ? "lg:order-1" : ""}`}>
+                  <div className={`mx-auto w-full max-w-md xl:max-w-lg ${i % 2 === 1 ? "lg:order-1" : ""}`}>
                     <BenefitVisual v={b.visual} />
                   </div>
                 </article>
@@ -520,9 +560,9 @@ export default async function SitePage() {
         </section>
 
         {/* ─── SO SÁNH ─── */}
-        <section id="so-sanh" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6 lg:py-24">
+        <section id="so-sanh" className={`${WRAP} scroll-mt-20 py-20 lg:py-28`}>
           <SectionHead eyebrow="So sánh" title="Cách làm cũ và khi có VNXcommerce" />
-          <div className="mx-auto mt-12 max-w-4xl overflow-hidden rounded-3xl bg-card shadow-[var(--shadow-card)]">
+          <div className="mx-auto mt-12 max-w-5xl overflow-hidden rounded-3xl bg-card shadow-[var(--shadow-card)]">
             <div className="hidden grid-cols-[9rem_1fr_1fr] gap-4 border-b border-border/60 bg-[var(--table-head)] px-6 py-3 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:grid">
               <span />
               <span>Cách làm cũ</span>
@@ -548,7 +588,7 @@ export default async function SitePage() {
 
         {/* ─── NGÀNH HÀNG ─── */}
         <section id="nganh-hang" className="scroll-mt-20 bg-[var(--surface-sunken)] py-20 lg:py-24">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className={WRAP}>
             <SectionHead eyebrow="Ngành hàng" title="Có sẵn mẫu cho ngành của bạn" text="Chọn ngành lúc đăng ký, phần mềm dựng sẵn danh mục và tính năng phù hợp. Không phải bắt đầu từ trang trắng." />
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {industries.map((t) => (
@@ -566,9 +606,9 @@ export default async function SitePage() {
 
         {/* ─── BẢNG GIÁ ─── (ẩn khi không đọc được gói nào: không bao giờ in giá đoán) */}
         {planCount > 0 ? (
-          <section id="bang-gia" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6 lg:py-24">
+          <section id="bang-gia" className={`${WRAP} scroll-mt-20 py-20 lg:py-28`}>
             <SectionHead eyebrow="Bảng giá" title="Bắt đầu miễn phí, lớn lên mới trả tiền" text="Trả theo tháng bằng chuyển khoản. Đổi gói bất cứ lúc nào." />
-            <div className={`mt-12 grid gap-5 sm:grid-cols-2 ${planCount >= 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+            <div className={`mt-12 grid gap-5 sm:grid-cols-2 ${PLAN_GRID[Math.min(planCount, 5)] ?? "lg:grid-cols-3"}`}>
               {data.starterPlan ? (
                 <article className="flex flex-col rounded-3xl border-2 border-dashed border-brand/40 bg-card p-6 shadow-[var(--shadow-card)]">
                   <h3 className="font-bold">{data.starterPlan.name}</h3>
@@ -590,6 +630,11 @@ export default async function SitePage() {
                       <span className="text-3xl font-extrabold whitespace-nowrap tabular-nums lg:text-[1.75rem] xl:text-3xl">{formatVND(p.priceVnd)}</span>
                       <span className={`text-sm font-medium whitespace-nowrap ${featured ? "text-sidebar-foreground/60" : "text-muted-foreground"}`}>/ tháng</span>
                     </p>
+                    {p.yearlyFreeMonths > 0 ? (
+                      <p className={`mt-2 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${featured ? "bg-brand/25 text-brand-bright" : "bg-success/12 text-success"}`}>
+                        Trả 12 tháng, tặng {p.yearlyFreeMonths} tháng
+                      </p>
+                    ) : null}
                     {p.description ? <p className={`mt-3 text-sm leading-6 ${featured ? "text-sidebar-foreground/70" : "text-muted-foreground"}`}>{p.description}</p> : null}
                     <PlanLimits plan={p} inverted={featured} />
                     <Button asChild variant={featured ? "default" : "outline"} className="mt-6 rounded-xl">
@@ -605,7 +650,7 @@ export default async function SitePage() {
 
         {/* ─── BẮT ĐẦU ─── */}
         <section className="bg-sidebar py-20 text-sidebar-foreground lg:py-24">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className={WRAP}>
             <SectionHead eyebrow="Bắt đầu" title="Bốn bước là chạy" text="Tự làm được, không cần chờ đội triển khai. Bước nào cũng xem trước được, không có gì tự chạy khi bạn chưa bấm." invert />
             <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {STEPS.map((s, i) => (
@@ -620,9 +665,9 @@ export default async function SitePage() {
         </section>
 
         {/* ─── CAM KẾT VỀ SỐ LIỆU ─── */}
-        <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
+        <section className={`${WRAP} py-20 lg:py-28`}>
           <SectionHead eyebrow="Cam kết" title="Con số phải đủ tin để bạn dám quyết" text="Một con số sai mà trông hợp lý còn nguy hiểm hơn không có số. Bốn điều VNXcommerce không bao giờ làm khác:" />
-          <div className="mt-12 grid gap-4 sm:grid-cols-2">
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {PROMISES.map((p) => (
               <article key={p.title} className="flex gap-4 rounded-2xl bg-card p-6 shadow-[var(--shadow-card)]">
                 <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground">
@@ -639,7 +684,7 @@ export default async function SitePage() {
 
         {/* ─── HỎI ĐÁP ─── */}
         <section id="hoi-dap" className="scroll-mt-20 bg-[var(--surface-sunken)] py-20 lg:py-24">
-          <div className="mx-auto max-w-3xl px-4 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
             <SectionHead eyebrow="Hỏi đáp" title="Câu hỏi thường gặp" />
             <div className="mt-10 space-y-3">
               {FAQ.map((f) => (
@@ -656,10 +701,10 @@ export default async function SitePage() {
         </section>
 
         {/* ─── LỜI MỜI CUỐI ─── */}
-        <section className="px-4 py-20 sm:px-6">
-          <div className="relative mx-auto max-w-6xl overflow-hidden rounded-[2rem] bg-sidebar px-6 py-14 text-center text-sidebar-foreground sm:px-12">
+        <section className={`${WRAP} py-20`}>
+          <div className="relative overflow-hidden rounded-[2rem] bg-sidebar px-6 py-14 text-center text-sidebar-foreground sm:px-12 lg:py-20">
             <div className="pointer-events-none absolute -top-28 left-1/2 size-96 -translate-x-1/2 rounded-full bg-brand/30 blur-3xl" aria-hidden />
-            <h2 className="relative text-2xl font-extrabold tracking-tight text-balance sm:text-4xl">Biết lãi thật từ sáng mai</h2>
+            <h2 className="relative text-[clamp(1.5rem,1rem+1.6vw,2.6rem)] font-extrabold tracking-tight text-balance">Biết lãi thật từ sáng mai</h2>
             <p className="relative mx-auto mt-4 max-w-xl text-base leading-7 text-sidebar-foreground/70">{signup.note ?? "Tạo cửa hàng của bạn hoặc đăng nhập để dùng tiếp."}</p>
             <div className="relative mt-8">
               <CtaButtons data={data} signup={signup} center />
@@ -669,7 +714,7 @@ export default async function SitePage() {
       </main>
 
       <footer className="border-t border-border/60">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className={`${WRAP} flex flex-col gap-6 py-10 sm:flex-row sm:items-center sm:justify-between`}>
           <div className="space-y-2">
             <BrandLockup wordmarkClassName="text-base" />
             <p className="text-xs text-muted-foreground">© {year} VNXcommerce · Phần mềm quản lý cho shop bán hàng online</p>
