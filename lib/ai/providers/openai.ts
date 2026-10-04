@@ -1,4 +1,5 @@
 import OpenAI, { type ClientOptions } from "openai";
+import { lastUserIndex, openAiImageParts } from "@/lib/ai/images";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
 import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
 import { assertHomeCredentials } from "@/lib/platform/credentials";
@@ -30,9 +31,11 @@ export class OpenAiProvider implements AiProvider {
 
   private toInput(req: AiRequest): OpenAI.Responses.ResponseInputItem[] {
     const items: OpenAI.Responses.ResponseInputItem[] = [];
-    for (const m of req.messages) {
+    const imgAt = req.images?.length ? lastUserIndex(req.messages) : -1;
+    for (const [i, m] of req.messages.entries()) {
       const texts = m.content.filter((b): b is Extract<AiBlock, { type: "text" }> => b.type === "text");
-      if (texts.length) items.push({ type: "message", role: m.role, content: texts.map((t) => t.text).join("\n") } as OpenAI.Responses.EasyInputMessage);
+      if (i === imgAt) items.push({ type: "message", role: "user", content: [{ type: "input_text", text: texts.map((t) => t.text).join("\n") }, ...openAiImageParts(req.images)] } as OpenAI.Responses.EasyInputMessage);
+      else if (texts.length) items.push({ type: "message", role: m.role, content: texts.map((t) => t.text).join("\n") } as OpenAI.Responses.EasyInputMessage);
       for (const b of m.content) {
         if (b.type === "tool_use") items.push({ type: "function_call", call_id: b.id, name: b.name, arguments: JSON.stringify(b.input ?? {}) });
         else if (b.type === "tool_result") items.push({ type: "function_call_output", call_id: b.toolUseId, output: b.content });

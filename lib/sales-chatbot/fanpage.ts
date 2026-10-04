@@ -29,12 +29,13 @@ import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
+import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -150,6 +151,8 @@ export type FanpageEvent = {
   inbox: boolean;
   /** Bình luận (0184): bài viết + người bình luận (private reply đòi cả hai). `null` với tin nhắn. */
   comment: { postId: string; fromId: string } | null;
+  /** Ảnh KHÁCH gửi trong tin (0195 · `pancakeImageUrls`) — tin phía page luôn rỗng. */
+  imageUrls: string[];
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -187,7 +190,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const post = (conv?.post ?? {}) as { id?: unknown };
   const postId = str(msg?.post_id) || str(conv?.post_id) || str(post.id) || threadId.split("_")[0];
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox, comment };
+  const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox, comment, imageUrls };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -330,14 +334,17 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   }
   if (!ev.inbox && !ev.comment) return { queued: false, reason: "Không phải tin nhắn / bình luận" };
   if (ev.comment && !ev.comment.fromId) return { queued: false, reason: "Bình luận thiếu người gửi — không nhắn riêng được" };
-  if (!ev.text) {
-    // 👍 / ảnh / nhãn dán: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
+  // ẢNH (0195): tin nhắn có ảnh ⇒ vào hàng chờ như tin chữ, bot đọc ảnh lúc trả lời (`describeCustomerImages`). Bình luận
+  // kèm ảnh: chỉ dùng chữ (tin riêng trả lời bình luận đã đủ ngữ cảnh từ bài viết).
+  const images = ev.inbox ? ev.imageUrls : [];
+  if (!ev.text && !images.length) {
+    // 👍 / nhãn dán / video / ghi âm: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, true);
-    return { queued: false, reason: "Tin không có chữ (ảnh / nhãn dán) — để nhân viên xem" };
+    return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / video) — để nhân viên xem" };
   }
   const rows = await db
     .insert(t)
-    .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
+    .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(images.length ? { imageUrls: images } : {}), ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
     .onConflictDoNothing({ target: t.messageId })
     .returning({ id: t.id });
   return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
@@ -637,7 +644,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
       .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, staleBefore))))
-      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId, customerName: t.customerName });
+      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, messageId: t.messageId, kind: t.kind, postId: t.postId, fromId: t.fromId, customerName: t.customerName, imageUrls: t.imageUrls });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
     // Khách vừa nhắn ⇒ hết im lặng: dừng lịch follow-up, ghi mốc tin cuối của khách (khung 24 giờ của Facebook tính từ đây).
@@ -695,6 +702,15 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       const prof = await fetchPancakeThreadProfile(pageId, threadId, token, conv.createdAt, deps.fetch ?? fetch, now());
       const cv = schema.salesChatConversations;
       if (prof) await db.update(cv).set({ state: sql`${cv.state} || ${JSON.stringify({ returning: prof })}::jsonb` }).where(eq(cv.id, conv.id));
+    }
+    // ẢNH KHÁCH GỬI (0195): mô tả MỘT lần mỗi tin rồi ghi vào chính dòng tin (xoá địa chỉ ảnh) — lượt sau (hội thoại bận ⇒
+    // nhả tin, thử lại) không tốn tiền đọc lại ảnh. Đọc hỏng ⇒ dòng «bot chưa xem được ảnh»: bot vẫn trả lời, không im.
+    for (const r of claimed) {
+      const urls = Array.isArray(r.imageUrls) ? r.imageUrls.filter((u): u is string => typeof u === "string") : [];
+      if (!urls.length) continue;
+      const line = await describeCustomerImages(urls, { conversationId: conv.id, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+      r.text = [r.text, line].filter(Boolean).join("\n").slice(0, TEXT_MAX);
+      await db.update(t).set({ text: r.text, imageUrls: null }).where(eq(t.id, r.id));
     }
     const before = (await conversationView(conv.id))?.messages.length ?? 0;
     const text = claimed
@@ -939,7 +955,7 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
     for (const m of waiting) {
-      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null }, now());
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [] }, now());
       if (r.queued) {
         out.queued += 1;
         touched += 1;

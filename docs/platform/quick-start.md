@@ -120,3 +120,20 @@ Kết nối thẳng Facebook Messenger cần quyền `pages_messaging` / `pages_
 - Meta nói thường 2–3 ngày, thực tế có lúc tới vài tuần.
 
 Đó là việc của chủ nền tảng trước khi có thể làm.
+
+## 8. Bot đọc ảnh khách gửi (0195)
+
+Trước: tin chỉ có ảnh («còn mẫu này không shop» kèm ảnh chụp) bị bỏ qua «để nhân viên xem» — bot im, khách chờ.
+
+Sau:
+- Webhook giữ địa chỉ ảnh của tin khách (`sales_chat_inbound.image_urls`). Nhãn dán, ghi âm, video vẫn bỏ qua như cũ.
+- Tới lượt trả lời, máy chủ tải tối đa 3 ảnh và nhờ CHÍNH AI của bot mô tả ngắn: cùng khoá, cùng hạn mức gói, ghi cùng sổ
+  chi phí `sales_chatbot`. Mô tả vào lượt thành một dòng «[Khách gửi ảnh: …]».
+- Bot dùng mô tả để tìm mẫu gần nhất rồi HỎI KHÁCH XÁC NHẬN. Ảnh chuyển khoản ⇒ chuyển nhân viên kiểm tra.
+- Không đọc được (tên miền lạ, tệp hỏng, AI lỗi, hết hạn mức) ⇒ dòng «bot chưa xem được ảnh»: bot nhờ khách gõ tên mẫu, không
+  đoán nội dung ảnh.
+- An toàn: chỉ tải từ CDN ảnh của Facebook / Messenger / Instagram và Pancake (kể cả sau chuyển hướng), trần 5 MB, kiểu ảnh
+  nhận bằng chữ ký tệp.
+- Chi phí: Gemini 3.5 Flash-Lite đọc một ảnh khoảng 500 token vào + 100 token ra, cỡ 10 đồng mỗi ảnh.
+
+Mã: `lib/sales-chatbot/vision.ts` · `lib/ai/images.ts` · `describeCustomerImages` trong `lib/sales-chatbot/engine.ts`.

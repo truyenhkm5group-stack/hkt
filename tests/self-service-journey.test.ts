@@ -948,6 +948,55 @@ async function testJourney() {
       assert.ok("error" in (await setQuickReplyActive(admin, ruoc.id, true)), "còn [giá lấy từ ERP] ⇒ không bật được");
       assert.equal(await saveLearnedQuickReplies([], ADMIN_EMAIL), 0);
       assert.equal((await listQuickReplies()).filter((r) => r.source === "LEARNED").length, 0, "lượt học mới thay gợi ý cũ chưa ai bật / chưa dùng");
+      // ═══ ẢNH KHÁCH GỬI (0195 · lib/sales-chatbot/vision.ts): trước đây tin chỉ có ảnh bị bỏ qua «để nhân viên xem» ═══
+      const visionCalls: AiRequest[] = [];
+      const chatAfterImage: AiRequest[] = [];
+      setSalesChatProviderForTests(() => ({
+        ...baseBot,
+        complete: async (req: AiRequest) => {
+          const usage = { inputTokens: 300, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 };
+          if (req.images?.length) {
+            visionCalls.push(req);
+            return { content: [{ type: "text", text: "Ảnh chụp một chiếc áo sơ mi trắng cổ tàu, nhãn ghi «SM-01»." }], stopReason: "end_turn", usage, model: "claude-sonnet-5", latencyMs: 1 };
+          }
+          if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage, model: "claude-sonnet-5", latencyMs: 1 };
+          chatAfterImage.push(req);
+          return baseBot.complete(req);
+        },
+      }));
+      const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+      const strayHosts: string[] = [];
+      const imgFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith("https://scontent.xx.fbcdn.net/")) return new Response(JPEG, { status: 200 });
+        if (!url.includes("pages.fm")) strayHosts.push(url);
+        return qrFetch.fetch(input, init);
+      }) as typeof fetch;
+      const evImg = (id: string, text: string, attachments: unknown[], thread: string) =>
+        parsePancakeWebhook({ event_type: "messaging", page_id: PAGE, data: { conversation: { id: thread, type: "INBOX" }, message: { id, type: "INBOX", message: text, from: { id: "cust-12", name: "Chị Mười Hai" }, attachments } } })!;
+      const sticker = { type: "sticker", url: "https://scontent.xx.fbcdn.net/sticker.png", sticker_id: 369239263222822 };
+      assert.equal((await receiveFanpageEvent(evImg("m-img-st", "", [sticker], "t-995"))).queued, false, "chỉ nhãn dán (👍) ⇒ vẫn không trả lời");
+      const e1 = evImg("m-img-1", "", [{ type: "photo", url: "https://scontent.xx.fbcdn.net/v/t1.jpg?x=1" }, sticker], "t-995");
+      assert.deepEqual(e1.imageUrls, ["https://scontent.xx.fbcdn.net/v/t1.jpg?x=1"]);
+      assert.deepEqual(await receiveFanpageEvent(e1), { queued: true, reason: "Đã nhận" }, "ảnh không chữ ⇒ vào hàng chờ như tin chữ");
+      const p1 = await processFanpageThread(PAGE, "t-995", { fetch: imgFetch, now: in31s });
+      assert.ok(p1.replies >= 1 && !p1.error, JSON.stringify(p1));
+      assert.equal(visionCalls.length, 1, "đọc ảnh = MỘT lời gọi");
+      assert.ok(visionCalls[0].images?.[0].mimeType === "image/jpeg" && visionCalls[0].tools.length === 0, "gửi đúng ảnh, không công cụ");
+      assert.ok(chatAfterImage.length > 0 && JSON.stringify(chatAfterImage[0].messages).includes("[Khách gửi ảnh: Ảnh chụp một chiếc áo sơ mi trắng"), "chatbot đầy đủ nhận mô tả ảnh như một dòng chữ của khách");
+      assert.ok(/ẢNH KHÁCH GỬI/.test(chatAfterImage[0].system), "lời nhắc dặn cách dùng mô tả ảnh (hỏi khách xác nhận, không khẳng định)");
+      const [imgRow] = await db.select().from(schema.salesChatInbound).where(eq(schema.salesChatInbound.messageId, "m-img-1"));
+      assert.ok(imgRow.imageUrls === null && imgRow.text.includes("Khách gửi ảnh: Ảnh chụp một chiếc áo sơ mi trắng"), "mô tả ghi vào dòng tin, địa chỉ ảnh xoá — thử lại không tốn tiền đọc lại");
+      const visionUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.feature, "sales_chatbot"), eq(schema.platformAiUsage.inputTokens, 300), eq(schema.platformAiUsage.outputTokens, 20)));
+      assert.ok(visionUsage.length >= 1, "đọc ảnh ghi sổ chi phí AI của bot");
+      // Ảnh ở tên miền lạ ⇒ KHÔNG tải (SSRF), không gọi AI đọc ảnh; bot vẫn trả lời và biết là chưa xem được.
+      const before2 = chatAfterImage.length;
+      await receiveFanpageEvent(evImg("m-img-2", "mẫu này còn không shop", [{ type: "photo", url: "https://evil.example/a.jpg" }], "t-996"));
+      const p2 = await processFanpageThread(PAGE, "t-996", { fetch: imgFetch, now: in31s });
+      assert.ok(p2.replies >= 1 && !p2.error, JSON.stringify(p2));
+      assert.equal(visionCalls.length, 1, "tên miền lạ ⇒ không gọi AI đọc ảnh");
+      assert.ok(!strayHosts.some((h) => h.includes("evil.example")), "tên miền lạ ⇒ không một request nào");
+      assert.ok(JSON.stringify(chatAfterImage.slice(before2)[0]?.messages ?? "").includes("mẫu này còn không shop\\n[Khách gửi ảnh — bot chưa xem được ảnh]"), "chữ + dòng «chưa xem được» — bot hỏi lại, không bịa");
       setSalesChatProviderForTests(() => fakeProvider(hslcScript({ chaMuc, ruocTom })));
       // CHUYỂN NGƯỜI trên fanpage ⇒ bot IM LẶNG (không gửi «Em đã chuyển cho nhân viên…»), hội thoại chờ người.
       let handoffStep = 0;

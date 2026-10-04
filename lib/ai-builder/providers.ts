@@ -1,5 +1,6 @@
 import Anthropic, { type ClientOptions as AnthropicOptions } from "@anthropic-ai/sdk";
 import OpenAI, { type ClientOptions as OpenAiOptions } from "openai";
+import { anthropicImageBlocks, geminiImageParts, lastUserIndex, openAiImageParts } from "@/lib/ai/images";
 import { anthropicCapsOf, type AiBlock, type AiProvider, type AiRequest, type AiResponse } from "@/lib/ai/provider";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
@@ -61,15 +62,18 @@ export class ByokAnthropicProvider implements AiProvider {
       // Không `strict`: schema blueprint có ô `unknown` (trang, điều kiện) mà chế độ strict không nhận; cổng thật là
       // `validateBlueprint` ở máy chủ. Không ép `tool_choice`: câu trả lời không qua công cụ bị máy chủ BỎ.
       tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toDialectSchema(t.inputSchema, this.schemaDialect) as Anthropic.Beta.BetaTool["input_schema"] })),
-      messages: req.messages.map((m) => ({
+      messages: req.messages.map((m, i) => ({
         role: m.role,
-        content: m.content.map((b) =>
-          b.type === "text"
-            ? ({ type: "text", text: b.text } as const)
-            : b.type === "tool_use"
-              ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input } as const)
-              : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false } as const),
-        ),
+        content: [
+          ...(i === lastUserIndex(req.messages) ? anthropicImageBlocks(req.images) : []),
+          ...m.content.map((b) =>
+            b.type === "text"
+              ? ({ type: "text", text: b.text } as const)
+              : b.type === "tool_use"
+                ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input } as const)
+                : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false } as const),
+          ),
+        ],
       })),
     });
     const content: AiBlock[] = [];
@@ -111,9 +115,11 @@ export class ByokOpenAiProvider implements AiProvider {
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
     const input: OpenAI.Responses.ResponseInputItem[] = [];
-    for (const m of req.messages) {
+    const imgAt = req.images?.length ? lastUserIndex(req.messages) : -1;
+    for (const [i, m] of req.messages.entries()) {
       const texts = m.content.filter((b): b is Extract<AiBlock, { type: "text" }> => b.type === "text");
-      if (texts.length) input.push({ type: "message", role: m.role, content: texts.map((t) => t.text).join("\n") } as OpenAI.Responses.EasyInputMessage);
+      if (i === imgAt) input.push({ type: "message", role: "user", content: [{ type: "input_text", text: texts.map((t) => t.text).join("\n") }, ...openAiImageParts(req.images)] } as OpenAI.Responses.EasyInputMessage);
+      else if (texts.length) input.push({ type: "message", role: m.role, content: texts.map((t) => t.text).join("\n") } as OpenAI.Responses.EasyInputMessage);
       for (const b of m.content) {
         if (b.type === "tool_use") input.push({ type: "function_call", call_id: b.id, name: b.name, arguments: JSON.stringify(b.input ?? {}) });
         else if (b.type === "tool_result") input.push({ type: "function_call_output", call_id: b.toolUseId, output: b.content });
@@ -205,16 +211,17 @@ export function toGeminiSchema(schema: unknown): unknown {
   return out;
 }
 
-type GeminiPart = { text?: string; thought?: boolean; thoughtSignature?: string; functionCall?: { name?: string; args?: unknown }; functionResponse?: { name: string; response: Record<string, unknown> } };
+type GeminiPart = { inlineData?: { mimeType: string; data: string }; text?: string; thought?: boolean; thoughtSignature?: string; functionCall?: { name?: string; args?: unknown }; functionResponse?: { name: string; response: Record<string, unknown> } };
 type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
 type GeminiResponse = { candidates?: { content?: { parts?: GeminiPart[] }; finishReason?: string }[]; usageMetadata?: Record<string, number>; modelVersion?: string; error?: { message?: string } };
 
 /** Hội thoại của ERP ⇒ `contents` của Gemini. HÀM THUẦN (bài kiểm gọi thẳng). */
-export function toGeminiContents(messages: AiRequest["messages"]): GeminiContent[] {
+export function toGeminiContents(messages: AiRequest["messages"], images: AiRequest["images"] = []): GeminiContent[] {
   const names = new Map<string, string>();
   const out: GeminiContent[] = [];
-  for (const m of messages) {
-    const parts: GeminiPart[] = [];
+  const imgAt = images?.length ? lastUserIndex(messages) : -1;
+  for (const [i, m] of messages.entries()) {
+    const parts: GeminiPart[] = i === imgAt ? geminiImageParts(images) : [];
     for (const b of m.content) {
       if (b.type === "text") {
         if (b.text) parts.push({ text: b.text });
@@ -263,7 +270,7 @@ export class ByokGeminiProvider implements AiProvider {
     const generationConfig: Record<string, unknown> = { maxOutputTokens: req.maxTokens ?? 4000, ...(thinkingConfig ? { thinkingConfig } : {}) };
     const body = {
       systemInstruction: { parts: [{ text: req.system }] },
-      contents: toGeminiContents(req.messages),
+      contents: toGeminiContents(req.messages, req.images),
       generationConfig,
       ...(req.tools.length ? { tools: [{ functionDeclarations: req.tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.inputSchema) })) }] } : {}),
     };
