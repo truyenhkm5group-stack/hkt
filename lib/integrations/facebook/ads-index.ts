@@ -6,7 +6,7 @@
 import { and, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
-import { getFacebookAdsClient, type FbAdInfo } from "@/lib/integrations/facebook/client";
+import { getFacebookAdsClient, type FacebookAdsClient, type FbAdInfo } from "@/lib/integrations/facebook/client";
 import { TRANSIENT_META_ERRORS } from "@/lib/constants/meta-ad-post";
 import { loadAdsMapping, resolveMarketer } from "@/lib/integrations/facebook/mapping";
 import { isUsableAdId } from "@/lib/constants/ads-identity";
@@ -49,11 +49,18 @@ export type AdIndexResult = {
  */
 const POST_LINK_BATCH = 300;
 
-/** Tra Facebook cho các ad_id trong đơn N ngày gần đây chưa có trong fb_ads */
-export async function syncFacebookAdIndex(options: { days?: number; log?: (m: string) => void } = {}): Promise<AdIndexResult> {
+/**
+ * Tra Facebook cho các ad_id trong đơn N ngày gần đây chưa có trong fb_ads.
+ *
+ * `client` TIÊM VÀO = nhánh tổ chức khách (`FacebookAdsClient.fromOrgConnection`, job `ads-spend-org`), đúng cách
+ * `syncFacebookAds` nhận client: không hỏi biến môi trường nào của nhà, và vì đơn của tổ chức khách thường không mang
+ * `ad_id`, nguồn ứng viên "từ chi tiêu" vẫn chạy khi nguồn "từ đơn" rỗng. Không tiêm ⇒ ĐÚNG đường cũ của nhà.
+ */
+export async function syncFacebookAdIndex(options: { days?: number; log?: (m: string) => void; client?: FacebookAdsClient } = {}): Promise<AdIndexResult> {
   const result: AdIndexResult = { eligible: 0, fromSpend: 0, alreadyIndexed: 0, needPostLink: 0, candidates: 0, fetched: 0, resolved: 0, withoutPostLink: 0, missing: 0, transient: 0, invalid: 0, errors: [] };
   const log = options.log ?? (() => undefined);
-  if (!env.facebook.accessToken) {
+  const injected = options.client ?? null;
+  if (!injected && !env.facebook.accessToken) {
     result.errors.push("Chưa cấu hình FACEBOOK_ACCESS_TOKEN");
     return result;
   }
@@ -67,7 +74,7 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
   const wanted = all.filter((x) => isUsableAdId(x));
   result.eligible = wanted.length;
   result.invalid = all.length - wanted.length;
-  if (!wanted.length) return result;
+  if (!wanted.length && !injected) return result;
   const retryBefore = new Date(Date.now() - 7 * 86_400_000);
   /**
    * QUÉT MỘT LƯỢT ĐỂ ĐIỀN MỐI NỐI BÀI VIẾT.
@@ -81,16 +88,18 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
    * kể cả với mẩu mà Facebook không trả về creative.
    */
   const POST_LINK_SHIPPED_AT = new Date("2026-09-09T00:00:00Z");
-  const known = await db
-    .select({ id: schema.fbAds.id })
-    .from(schema.fbAds)
-    .where(
-      and(
-        inArray(schema.fbAds.id, wanted),
-        or(sql`${schema.fbAds.missing} = false`, gte(schema.fbAds.fetchedAt, retryBefore)),
-        sql`not (${schema.fbAds.postId} is null and ${schema.fbAds.fetchedAt} < ${POST_LINK_SHIPPED_AT.toISOString()}::timestamptz)`,
-      ),
-    );
+  const known = wanted.length
+    ? await db
+        .select({ id: schema.fbAds.id })
+        .from(schema.fbAds)
+        .where(
+          and(
+            inArray(schema.fbAds.id, wanted),
+            or(sql`${schema.fbAds.missing} = false`, gte(schema.fbAds.fetchedAt, retryBefore)),
+            sql`not (${schema.fbAds.postId} is null and ${schema.fbAds.fetchedAt} < ${POST_LINK_SHIPPED_AT.toISOString()}::timestamptz)`,
+          ),
+        )
+    : [];
   const knownSet = new Set(known.map((k) => k.id));
   const todoTuDon = wanted.filter((id) => !knownSet.has(id));
   result.alreadyIndexed = knownSet.size;
@@ -140,7 +149,7 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
     .from(schema.fbAds);
   result.needPostLink = Number(thieuNoi ?? 0);
   if (!todo.length) return result;
-  const client = getFacebookAdsClient();
+  const client = injected ?? getFacebookAdsClient();
   const infos = await client.getAdsByIds(todo);
   const now = new Date();
   for (const info of infos) {

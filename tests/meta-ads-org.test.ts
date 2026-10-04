@@ -257,7 +257,8 @@ export async function testMetaAdsOrgSync() {
     await withOrganization(ORG, async () => {
       const db = await getDb();
       const runs = await db.select().from(schema.syncRuns);
-      assert.ok(runs.length >= 2 && runs.every((x) => x.source === "FACEBOOK" && x.job === "ads_insights"), "mỗi lượt có dòng sync_runs trong CSDL của tổ chức");
+      // `ad_index_org` (04/10/2026): sổ mẩu chạy ngay sau chi tiêu trong cùng lượt, dòng sync_runs riêng — xem meta-ads-org-winners.test.ts.
+      assert.ok(runs.filter((x) => x.job === "ads_insights").length >= 2 && runs.every((x) => x.source === "FACEBOOK" && (x.job === "ads_insights" || x.job === "ad_index_org")), "mỗi lượt có dòng sync_runs trong CSDL của tổ chức");
       assert.ok(!JSON.stringify(runs).includes(TOKEN), "token không nằm trong sync_runs");
       assert.ok(!JSON.stringify(await db.select().from(schema.adSpends)).includes(TOKEN), "token không nằm trong ad_spends");
       assert.ok(!JSON.stringify(await db.select().from(schema.auditLogs)).includes(TOKEN), "token không nằm trong nhật ký");

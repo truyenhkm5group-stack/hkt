@@ -49,11 +49,30 @@ function GeneLine({ r }: { r: CreativeSourceRow }) {
 function OwnAdLine({ r }: { r: CreativeSourceRow }) {
   const m = r.ownAd;
   if (!m) return null;
+  const hang =
+    m.selectionMode === "RANK"
+      ? m.rankStatus === "RANKED"
+        ? `Hạng #${formatNumber(m.rankPosition)}${m.rankedOf !== null ? `/${formatNumber(m.rankedOf)}` : ""} · điểm ${formatNumber(m.rankScore)}`
+        : "Chưa đủ dữ liệu để xếp hạng"
+      : null;
   return (
-    <p className="text-[11.5px] text-muted-foreground" title={`Chi ${formatVND(m.spendVnd)} · ${formatNumber(m.messages)} tin nhắn · kỳ đo ${m.periodFrom ?? "—"} → ${m.periodTo ?? "—"} · mẩu ${r.fbAdId ?? "—"}`}>
+    <p
+      className="text-[11.5px] text-muted-foreground"
+      title={`Chi ${formatVND(m.spendVnd)} · ${formatNumber(m.messages)} tin nhắn · ${formatNumber(m.metaPurchases)} lượt mua (Meta) · kỳ đo ${m.periodFrom ?? "—"} → ${m.periodTo ?? "—"} · mẩu ${r.fbAdId ?? "—"}`}
+    >
       {m.reason ? <span className="font-semibold text-foreground">{OWN_AD_REASON_LABEL[m.reason]}</span> : null}
-      {m.reason ? " · " : ""}Chi/tin <span className="tabular-nums text-foreground">{formatVND(m.costPerMessageVnd)}</span> · <span className="tabular-nums text-foreground">{formatNumber(m.bookedOrders)}</span> đơn
-      {r.productId ? null : <span className="text-warning"> · chưa có mã hàng — chưa làm mẫu cha được</span>}
+      {hang ? <span className="font-semibold text-foreground">{hang}</span> : null}
+      {m.reason || hang ? " · " : ""}Chi/tin <span className="tabular-nums text-foreground">{formatVND(m.costPerMessageVnd)}</span> ·{" "}
+      {m.selectionMode === "RANK" ? (
+        <>
+          <span className="tabular-nums text-foreground">{formatNumber(m.metaPurchases)}</span> lượt mua (Meta)
+        </>
+      ) : (
+        <>
+          <span className="tabular-nums text-foreground">{formatNumber(m.bookedOrders)}</span> đơn
+        </>
+      )}
+      {r.productId ? (m.productBasis === "MANUAL" ? " · mã hàng do người nhập chọn" : null) : <span className="text-warning"> · chưa có mã hàng — chưa làm mẫu cha được</span>}
     </p>
   );
 }
@@ -137,7 +156,7 @@ export async function SourcesTab({ params, canWrite }: { params: ListParams; can
         {canWrite ? (
           <div className="flex flex-wrap gap-2">
             <PancakePhotoImportButton />
-            <OwnAdImportDialog />
+            <OwnAdImportDialog products={products} />
             <SourceForm products={products} />
           </div>
         ) : null}

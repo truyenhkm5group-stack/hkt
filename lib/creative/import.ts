@@ -3,7 +3,8 @@ import { schema, type Db } from "@/db";
 import { OWN_AD_IMPORT, PANCAKE_PHOTO_IMPORT_MAX, type OwnAdMetrics } from "@/lib/constants/creative-loop";
 import { CREATIVE_IMAGE_MAX_BYTES, storeCreativeImage } from "@/lib/creative/images";
 import { asArray, asRecord, str } from "@/lib/integrations/http";
-import { inferOwnAdProducts, listOwnAdCandidates, ownAdMetricsOf } from "@/lib/queries/creative-own-ads";
+import type { OwnAdMode } from "@/lib/constants/own-ad-ranking";
+import { listOwnAdCandidates, ownAdMetricsOf } from "@/lib/queries/creative-own-ads";
 
 /**
  * ═══════════ VÒNG MẪU — NHẬP NGUỒN ẢNH CÓ SẴN (PANCAKE · FACEBOOK) ═══════════
@@ -198,25 +199,70 @@ export type OwnAdImportSummary = {
  * `listOwnAdCandidates()` của bước xem trước, và số đo lưu vào nguồn là số máy chủ vừa đo — không nhận
  * số nào từ client.
  */
-export async function importOwnAds(db: Db, adIdsRaw: readonly string[], actor: ImportActor, deps: DownloadDeps & { graph: OwnAdGraph; now?: Date; winOrdersAbove: number }): Promise<OwnAdImportSummary> {
+export async function importOwnAds(
+  db: Db,
+  adIdsRaw: readonly string[],
+  actor: ImportActor,
+  deps: DownloadDeps & {
+    graph: OwnAdGraph;
+    now?: Date;
+    winOrdersAbove: number;
+    /** Nhánh chọn mẫu (`decideOwnAdMode`) — phải TRÙNG nhánh của bước xem trước. Mặc định luật cũ của nhà. */
+    mode?: OwnAdMode;
+    /**
+     * Mã hàng NGƯỜI NHẬP chọn cho từng mẩu (mẩu → products.id). Người chọn thắng phép suy: họ đang nói ảnh này dùng
+     * làm tham chiếu bố cục / phong cách cho mã nào. Mã không có trong sổ ⇒ bỏ mẩu ấy kèm lý do, không lặng lẽ bỏ mã.
+     */
+    productOverrides?: Readonly<Record<string, string>>;
+    /**
+     * «CHỈ ẢNH CỦA SHOP»: tài khoản quảng cáo được phép (kết nối «meta-ads-org» của tổ chức). Mẩu Graph báo thuộc tài
+     * khoản khác ⇒ bỏ. `undefined` = tổ chức nhà (ứng viên đã chỉ đến từ chi tiêu của chính tài khoản nhà).
+     */
+    allowedAccountIds?: readonly string[];
+  },
+): Promise<OwnAdImportSummary> {
   const now = deps.now ?? new Date();
+  const mode: OwnAdMode = deps.mode ?? "CLASSIFY";
   const summary: OwnAdImportSummary = { imported: [], existing: [], skipped: [], noProduct: [] };
   const adIds = [...new Set(adIdsRaw.map((x) => String(x).trim()).filter((x) => /^\d{5,}$/.test(x)))].slice(0, OWN_AD_IMPORT.maxPerImport);
   if (adIds.length === 0) return summary;
 
-  const { rows } = await listOwnAdCandidates(db, { now, winOrdersAbove: deps.winOrdersAbove, adIds, limit: adIds.length });
+  const { rows, ranking } = await listOwnAdCandidates(db, { now, winOrdersAbove: deps.winOrdersAbove, adIds, limit: adIds.length, mode });
   const byId = new Map(rows.map((r) => [r.adId, r]));
-  const products = await inferOwnAdProducts(db, adIds);
   const s = schema.creativeSources;
+  const allowed = deps.allowedAccountIds ? new Set(deps.allowedAccountIds.map((a) => a.replace(/^act_/, ""))) : null;
+
+  // Mã người chọn: chỉ nhận mã CÓ trong sổ sản phẩm của tổ chức đang chạy (CSDL của chính nó).
+  const overrides = new Map<string, string>();
+  for (const [adId, productId] of Object.entries(deps.productOverrides ?? {})) if (adIds.includes(adId) && typeof productId === "string" && productId.trim()) overrides.set(adId, productId.trim());
+  const knownProducts = overrides.size
+    ? new Set(
+        (
+          await db
+            .select({ id: schema.products.id })
+            .from(schema.products)
+            .where(inArray(schema.products.id, [...new Set(overrides.values())]))
+        ).map((p) => p.id),
+      )
+    : new Set<string>();
 
   for (const adId of adIds) {
     const c = byId.get(adId);
     if (!c) {
-      summary.skipped.push({ adId, name: "", reason: "Không còn đạt ngưỡng mẫu thắng / mẫu tốt (hoặc không có dòng chi cấp mẩu trong kỳ)." });
+      summary.skipped.push({
+        adId,
+        name: "",
+        reason: mode === "RANK" ? "Không có dòng chi cấp mẩu trong kỳ xét." : "Không còn đạt ngưỡng mẫu thắng / mẫu tốt (hoặc không có dòng chi cấp mẩu trong kỳ).",
+      });
       continue;
     }
     if (c.importedSourceId) {
       summary.existing.push({ adId, name: c.adName });
+      continue;
+    }
+    const chosen = overrides.get(adId) ?? null;
+    if (chosen && !knownProducts.has(chosen)) {
+      summary.skipped.push({ adId, name: c.adName, reason: "Mã hàng đã chọn không có trong sổ sản phẩm — chọn lại mã rồi nhập." });
       continue;
     }
     let content: OwnAdContent;
@@ -229,6 +275,13 @@ export async function importOwnAds(db: Db, adIdsRaw: readonly string[], actor: I
     if (!content.ok) {
       summary.skipped.push({ adId, name: c.adName, reason: content.reason });
       continue;
+    }
+    if (allowed) {
+      const account = content.accountId ?? c.accountId;
+      if (!account || !allowed.has(account)) {
+        summary.skipped.push({ adId, name: c.adName, reason: "Mẩu không thuộc tài khoản quảng cáo đã khai ở kết nối của tổ chức — chỉ nhận ảnh quảng cáo của chính shop." });
+        continue;
+      }
     }
     let imageUrl = content.imageUrl;
     if (!imageUrl && content.imageHash) {
@@ -256,8 +309,9 @@ export async function importOwnAds(db: Db, adIdsRaw: readonly string[], actor: I
       summary.skipped.push({ adId, name: c.adName, reason: `Tải ảnh lỗi: ${errText(e)}` });
       continue;
     }
-    const product = products.get(adId) ?? null;
-    const metrics: OwnAdMetrics = ownAdMetricsOf(c, product?.basis ?? "NONE", now);
+    // Người chọn thắng; không chọn ⇒ mã suy được (cùng `inferOwnAdProducts` của bước xem trước); không có nữa ⇒ để trống.
+    const product = chosen ? { productId: chosen, basis: "MANUAL" as const } : c.inferredProduct ? { productId: c.inferredProduct.productId, basis: c.inferredProduct.basis } : null;
+    const metrics: OwnAdMetrics = ownAdMetricsOf(c, product?.basis ?? "NONE", now, mode, mode === "RANK" ? ranking.ranked : null);
     const name = c.adName || content.name || `Quảng cáo ${adId}`;
     const [row] = await db
       .insert(s)
@@ -265,7 +319,11 @@ export async function importOwnAds(db: Db, adIdsRaw: readonly string[], actor: I
         kind: "OWN_AD",
         productId: product?.productId ?? null,
         title: name.slice(0, 200),
-        note: product ? "" : "Chưa suy được mã hàng (không có đơn mang ad_id này, tên chiến dịch không ghép được mã) — chưa làm mẫu cha được.",
+        note: !product
+          ? "Chưa suy được mã hàng (không có đơn mang ad_id này, tên chiến dịch không ghép được mã) — chưa làm mẫu cha được."
+          : product.basis === "MANUAL"
+            ? "Mã hàng do người nhập chọn — ảnh quảng cáo của shop dùng làm tham chiếu bố cục / phong cách cho mã này."
+            : "",
         sourceUrl: `https://www.facebook.com/adsmanager/manage/ads?selected_ad_ids=${adId}`,
         imageId: stored.id,
         fbAdId: adId,
