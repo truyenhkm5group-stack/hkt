@@ -16,7 +16,7 @@
  *     từ chối (vd tài khoản được chọn không tồn tại) ⇒ gỡ dòng khách VỪA chèn — không để lại một khách
  *     thiếu hồ sơ mà người bấm tưởng chưa được tạo.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -197,9 +197,16 @@ export async function createCustomerAsAgent(
   if (address.length < 5 && !(opts.addressOptional && address.length === 0)) errors.push({ field: "system:address", message: "Địa chỉ quá ngắn." });
   if (errors.length || !phone) return fail("INVALID", errors);
   const db = await getDb();
-  const [found] = await db.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
-  if (found) return { ok: true, id: found.id, existing: true };
-  const [created] = await db.insert(schema.customers).values({ name, phone, phones: [phone], address, province }).returning({ id: schema.customers.id });
+  // Tìm-rồi-thêm trong MỘT giao dịch có khoá theo SĐT (TD-20): hai hội thoại cùng SĐT gửi đồng thời không đẻ hai khách.
+  const res = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`customer-phone:${phone}`}, 0))`);
+    const [found] = await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
+    if (found) return { id: found.id, existing: true };
+    const [row] = await tx.insert(schema.customers).values({ name, phone, phones: [phone], address, province }).returning({ id: schema.customers.id });
+    return { id: row.id, existing: false };
+  });
+  if (res.existing) return { ok: true, id: res.id, existing: true };
+  const created = { id: res.id };
   await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "CUSTOMER_CREATE", entity: "CUSTOMER", entityId: created.id, before: null, after: { name, phone, address, province }, reason: `Tạo bởi ${agent.name}` });
   return { ok: true, id: created.id, existing: false };
 }

@@ -23,11 +23,12 @@ import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
 import { manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
-import { quoteUnitPrice, type PriceListBook } from "@/lib/constants/price-lists";
+import type { PriceListBook } from "@/lib/constants/price-lists";
 import { priceBooksFor } from "@/lib/queries/price-lists";
 import { createCustomerAsAgent, normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { activeAppointmentRanges, createAppointmentAsAgent } from "@/lib/records/appointments";
-import { createOrderAsAgent, updateOrderAsAgent, type OrderAgent } from "@/lib/records/order-create";
+import { createOrderAsAgent, updateOrderAsAgent, type AgentOrderOptions, type OrderAgent } from "@/lib/records/order-create";
+import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { freeShipVerdict, variantWeightGrams, type ShipVerdict } from "@/lib/sales-chatbot/shipping";
 import { foldVi, searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
@@ -297,8 +298,16 @@ async function booksForChat(cfg: SalesChatbotConfig, customerId: string | null):
 
 /** Đơn giá của MỘT dòng: giá lẻ khi chưa bật bảng giá; bật ⇒ `quoteUnitPrice` — CÙNG hàm với form đơn tay. */
 function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnType<typeof booksForChat>>): number | null {
-  if (!books) return it.price;
-  return quoteUnitPrice({ variantId: it.variantId, quantity, retailPrice: it.price, customerList: books.customerList, defaultList: books.defaultList })?.unitPrice ?? null;
+  // MỘT công thức với lõi đơn (lib/commerce/pricing.ts) — lõi tính lại đúng hàm này và từ chối đơn lệch giá.
+  return agentUnitPrice({ variantId: it.variantId, quantity, retailPrice: it.price, books });
+}
+
+/**
+ * Chế độ giá + khoá LẦN MUA cho lõi đơn: lõi tính lại đơn giá theo đúng chế độ bot đang báo giá, và tạo đơn nháp hai lần
+ * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
+ */
+function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean): AgentOrderOptions {
+  return { pricing: ctx.config.wholesalePricing ? "PRICE_BOOK" : "RETAIL", idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null };
 }
 
 /** `address` = địa chỉ giao (đơn nháp / khách đã lưu) — cho luật miễn ship theo khu vực; `null` khi chưa biết. */
@@ -550,7 +559,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines, unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, "NEW", ctx.config, ctx.channel);
-        const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload) : await createOrderAsAgent(ctx.agent, payload);
+        const r = draft.orderId ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false)) : await createOrderAsAgent(ctx.agent, payload, agentOrderOpts(ctx, state, true));
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state);
         draft.orderId = r.id;
       }
@@ -591,7 +600,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       let orderId: string | null = null;
       if (!simulated) {
         const payload = orderInput(state, { ...d, note: unknownStock ? [d.note, "Tồn chưa xác nhận lúc chốt — kho kiểm trước khi giao."].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
-        const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload);
+        const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload, agentOrderOpts(ctx, state, false));
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state);
         orderId = r.id;
       }
