@@ -81,7 +81,7 @@ export async function testOrgSummaryDb() {
       await db.insert(schema.adSpends).values({ platform: "facebook", campaign: `${BI_MAT} chiến dịch`, spend: 150_000, spendDate: now, accountId: "111", externalKey: "fb:111:x" });
 
       const view = await getDbForInspection({ code: ORG, isHome: false });
-      const lines = orgSummaryLines(await collectOrgSummary({ code: ORG, name: "Tóm tắt thử", status: "ACTIVE", isHome: false }, view, now));
+      const lines = orgSummaryLines(await collectOrgSummary({ code: ORG, name: `Tóm tắt thử ${BI_MAT}`, status: "ACTIVE", isHome: false }, view, now));
       const all = lines.join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT) && !all.includes(TOKEN) && !all.includes(TOKEN.slice(-4)), `không dòng nào lộ chuỗi bí mật / SĐT / token:\n${all}`);
       const line = (p: string) => lines.find((l) => l.startsWith(p)) ?? "";

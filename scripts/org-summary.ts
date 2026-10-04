@@ -67,7 +67,8 @@ const counts = (xs: readonly Count[], money = false) => (xs.length ? xs.map((x) 
 export function orgSummaryLines(s: OrgSummary): string[] {
   const d = ORG_SUMMARY_DAYS;
   const lines = [
-    `Tổ chức ${s.org.code} «${s.org.name}» · ${s.org.status}${s.org.isHome ? " · NHÀ" : ""}`,
+    // Tên tổ chức KHÔNG ra kênh công khai (ops-log-leak) — chỉ mã + trạng thái; tên in ở phần mã hoá.
+    `Tổ chức ${s.org.code} · ${s.org.status}${s.org.isHome ? " · NHÀ" : ""}`,
     `Module bật: ${muc(s.modules, (m) => m.join(", ") || "(không)")}`,
     `Module cần cho báo cáo: ${muc(s.modules, (m) => ["finance", "marketing", "returns", "ai_sales"].map((k) => `${k} ${m.includes(k) ? "BẬT" : "TẮT"}`).join(" · "))}`,
     `Cấu hình: ${muc(s.settings, (v) => `chatbot ${v.chatbotEnabled === null ? "—" : v.chatbotEnabled ? "BẬT" : "TẮT"} · ghi đơn từ hội thoại ${v.orderSyncEnabled === null ? "—" : v.orderSyncEnabled ? `BẬT từ ${v.orderSyncSince ?? "—"}` : "TẮT"} · phí giao ${v.deliveryFee === null ? "chưa khai" : `${dem(v.deliveryFee)} ₫`} · định giá phiếu nhập ${v.receiptPricing ?? "mặc định"}`)}`,
@@ -194,7 +195,9 @@ async function main() {
   const code = (process.argv[2] ?? "").trim();
   const list = await listOrganizations();
   if (!code) {
-    tomTat(`Chưa chọn tổ chức — ${list.length} tổ chức: ${list.map((x) => `${x.code} «${x.name}» ${x.status}${x.isHome ? " NHÀ" : ""}`).join(" | ")}`.slice(0, SUMMARY_MAX_CHARS * 3));
+    tomTat(`Chưa chọn tổ chức — ${list.length} tổ chức: ${list.map((x) => `${x.code} ${x.status}${x.isHome ? " NHÀ" : ""}`).join(" | ")}`.slice(0, SUMMARY_MAX_CHARS * 3));
+    // Tên đi phần MÃ HOÁ (không tiền tố tóm tắt).
+    for (const x of list) console.log(`${x.code}: ${x.name}`);
     process.exit(0);
   }
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(code)) {
@@ -212,6 +215,7 @@ async function main() {
     console.error("org-summary: phiên CSDL không ở chế độ chỉ đọc — KHÔNG chạy.");
     process.exit(1);
   }
+  console.log(`Tên tổ chức: ${org.name}`);
   const s = await collectOrgSummary({ code: org.code, name: org.name, status: org.status, isHome: org.isHome }, db);
   for (const line of orgSummaryLines(s)) tomTat(line);
   process.exit(0);
