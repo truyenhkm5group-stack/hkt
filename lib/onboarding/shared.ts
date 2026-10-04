@@ -73,7 +73,7 @@ export const SIGNUP_MODE_CONSEQUENCE: Record<SignupMode, string> = {
 
 // ═══ LOẠI HÌNH → MẪU GỢI Ý ═══
 
-export const BUSINESS_TYPES = ["fashion", "ecommerce", "food", "seafood", "spa", "restaurant", "household", "homestay", "homeservice", "realestate", "wholesale", "manufacturing", "service", "blank"] as const;
+export const BUSINESS_TYPES = ["ai_sales", "fashion", "ecommerce", "food", "seafood", "spa", "restaurant", "household", "homestay", "homeservice", "realestate", "wholesale", "manufacturing", "service", "blank"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
 /**
@@ -81,6 +81,7 @@ export type BusinessType = (typeof BUSINESS_TYPES)[number];
  * biến của Phase 6) gợi ý "bắt đầu trắng" kèm bộ module khởi đầu, và NÓI RA là chưa có mẫu.
  */
 export const BUSINESS_TYPE_SPEC: Record<BusinessType, { label: string; hint: string; templateKey: string | null; modules: ModuleKey[] }> = {
+  ai_sales: { label: "Chỉ cần AI bán hàng", hint: "Chatbot AI trả lời khách trên fanpage / Messenger / website 24/7: tư vấn, báo giá đúng giá shop, chốt và lên đơn, chuyển nhân viên khi cần. Kèm đúng phần bot cần (khách, sản phẩm, đơn, kho) — không cần dùng cả ERP.", templateKey: "ai-sales", modules: [] },
   fashion: { label: "Thời trang", hint: "Bán quần áo, phụ kiện online: mẫu mã theo size / màu, hàng hoàn, sản xuất đặt xưởng.", templateKey: "fashion-commerce", modules: [] },
   ecommerce: { label: "TMĐT chung", hint: "Bán lẻ online nhiều ngành hàng: đơn, khách, kho, vận chuyển.", templateKey: "general-ecommerce", modules: [] },
   food: { label: "Thực phẩm đóng gói", hint: "Thực phẩm / đặc sản / hải sản chế biến đã đóng gói, giá cố định theo gói: quy cách, bảo quản, giữ hàng khi chốt, chatbot bán hàng.", templateKey: "food-commerce", modules: [] },

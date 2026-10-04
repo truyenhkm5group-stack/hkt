@@ -63,9 +63,9 @@ function actionOf(plan: BlueprintPlan, kind: string, key: string): PlanAction | 
 // ═══════════ 1 · THUẦN ═══════════
 
 function testTemplatesPure() {
-  assert.equal(BLUEPRINT_TEMPLATES.length, 13, "mười ba mẫu tham chiếu (§4 + thực phẩm đóng gói 0180 + hải sản Seafood OS + spa 0190 + nhà hàng + gia dụng 0196 + homestay 0198 + dịch vụ tại nhà 0200 + sàn BĐS 0201)");
+  assert.equal(BLUEPRINT_TEMPLATES.length, 14, "mười bốn mẫu tham chiếu (§4 + thực phẩm đóng gói 0180 + hải sản Seafood OS + spa 0190 + nhà hàng + gia dụng 0196 + homestay 0198 + dịch vụ tại nhà 0200 + sàn BĐS 0201 + chỉ AI bán hàng)");
   const keys = BLUEPRINT_TEMPLATES.map((t) => t.key);
-  assert.deepEqual([...keys].sort(), ["fashion-commerce", "food-commerce", "general-ecommerce", "home-service", "homestay", "household", "manufacturing", "real-estate-agency", "restaurant", "seafood-commerce", "service-business", "spa-beauty", "wholesale"]);
+  assert.deepEqual([...keys].sort(), ["ai-sales", "fashion-commerce", "food-commerce", "general-ecommerce", "home-service", "homestay", "household", "manufacturing", "real-estate-agency", "restaurant", "seafood-commerce", "service-business", "spa-beauty", "wholesale"]);
   // Hai mẫu (b) dùng đối tượng tuỳ biến; mẫu dịch vụ có quan hệ tới khách từ HAI đối tượng.
   const svc = templateBlueprint("service-business")!;
   assert.deepEqual(svc.objects?.map((o) => o.key), ["x_contract", "x_project"]);
@@ -267,7 +267,7 @@ async function testOrgA() {
     let admin = await adminOf(ORG_A);
     assert.deepEqual([...(await getEnabledModules(ORG_A))].sort(), ["core", "work"], "tổ chức mới chỉ có lõi — mẫu không tự cài (luật 23)");
     const catalog = await loadTemplateCatalog(admin);
-    assert.ok(catalog.ok && catalog.value.templates.length === 13 && catalog.value.history.length === 0);
+    assert.ok(catalog.ok && catalog.value.templates.length === 14 && catalog.value.history.length === 0);
     assert.ok(catalog.value.templates.every((t) => t.installedVersion === null && !t.updateAvailable));
 
     // ── Xem trước = kế hoạch, không ghi ──
