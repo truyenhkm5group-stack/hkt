@@ -11,10 +11,11 @@ import { z } from "zod";
 import { ADMIN_PASSWORD_MIN, BUSINESS_TYPE_SPEC, RESERVED_ORG_CODES, type BusinessType } from "@/lib/onboarding/shared";
 
 /** Ngành hàng hiện ở form nhanh — những ngành có MẪU dựng sẵn và bán qua Fanpage. Ngành khác: trình hướng dẫn đầy đủ. */
-export const QUICK_BUSINESS_TYPES = ["food", "seafood", "fashion", "spa", "restaurant", "ecommerce"] as const satisfies readonly BusinessType[];
+export const QUICK_BUSINESS_TYPES = ["ai_sales", "food", "seafood", "fashion", "spa", "restaurant", "ecommerce"] as const satisfies readonly BusinessType[];
 export type QuickBusinessType = (typeof QUICK_BUSINESS_TYPES)[number];
 
 export const QUICK_BUSINESS_LABEL: Record<QuickBusinessType, string> = {
+  ai_sales: "Chỉ cần AI bán hàng (ngành khác)",
   food: "Thực phẩm, đặc sản",
   seafood: "Hải sản lẻ + sỉ",
   fashion: "Thời trang",

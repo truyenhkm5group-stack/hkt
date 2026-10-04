@@ -65,7 +65,7 @@ function testPure() {
   assert.equal(orgCodeBase("!!!"), "shop");
   assert.ok(orgCodeBase("Một tên cửa hàng rất rất dài hơn hai mươi tư ký tự").length <= 24);
   assert.deepEqual(orgCodeCandidates("abc").slice(0, 3), ["abc", "abc-2", "abc-3"]);
-  for (const t of ["food", "seafood", "fashion", "spa", "restaurant", "ecommerce"] as const) {
+  for (const t of ["ai_sales", "food", "seafood", "fashion", "spa", "restaurant", "ecommerce"] as const) {
     const m = quickModules(t).modules;
     for (const k of ["ai_sales", "customers", "products", "orders", "inventory"]) assert.ok(m.includes(k), `${t}: thiếu ${k} — đăng ký nhanh là để vào việc với Fanpage ngay`);
   }
