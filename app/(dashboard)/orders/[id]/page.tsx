@@ -36,9 +36,9 @@ import { canRecordPayment, PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL } from "@/li
 import { manualOrderPaymentView } from "@/lib/queries/order-payments";
 import { canConfirmManualDelivery, canMarkManualDeliveryFailed, isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { manualOrderDeliveryView, manualOrderGate } from "@/lib/records/order-create";
-import { vtpCarrierPanel } from "@/lib/carriers/vtp-shipments";
+import { carrierPanel } from "@/lib/carriers/engine";
 import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
-import { CreateVtpShipmentButton, VtpAttemptActions } from "@/app/(dashboard)/orders/[id]/carrier-shipment-actions";
+import { AttemptActions, CreateShipmentButton } from "@/app/(dashboard)/orders/[id]/carrier-shipment-actions";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -100,7 +100,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     mục 11), KHÔNG bằng phiếu XUẤT TAY: lối "Lập phiếu xuất kho" của bản trước đã bỏ — làm cả hai là trừ tồn hai lần.
   */
   const manual = isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null;
-  const [manualGate, delivery, payment, carrier] = manual ? await Promise.all([manualOrderGate(user), manualOrderDeliveryView(order.id), manualOrderPaymentView(order), vtpCarrierPanel(user, order.id)]) : [null, null, null, null];
+  const [manualGate, delivery, payment, carrier] = manual ? await Promise.all([manualOrderGate(user), manualOrderDeliveryView(order.id), manualOrderPaymentView(order), carrierPanel(user, order.id)]) : [null, null, null, null];
   // Lần gửi còn giữ đơn ở hãng ⇒ không sửa / huỷ đơn ở ERP (lõi cũng chặn — ẩn nút để không ai bấm vào một lời từ chối).
   const shipmentHolds = attempts.some((a) => attemptHoldsOrder({ stage: a.stage, raw: a.raw }));
   const manualEditable = manual && manualGate?.allowed === true && order.stage !== "CANCELLED" && order.stage !== "DELIVERED" && !shipmentHolds;
@@ -436,7 +436,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 />
                 {(() => {
                   const mine = carrier?.attempts.find((a) => a.id === s.id);
-                  return mine ? <VtpAttemptActions orderId={order.id} attempt={mine} /> : null;
+                  return mine ? <AttemptActions orderId={order.id} attempt={mine} /> : null;
                 })()}
                 <ShipmentTimeline events={s.events} />
               </div>
@@ -448,15 +448,21 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 {manual ? "Đơn chưa có vận đơn nào." : "Khi Pancake đẩy đơn sang Viettel Post, mã vận đơn và hành trình sẽ xuất hiện tại đây."}
               </p>
             )}
-            {/* POS TỰ CHỦ: đơn ERP tự tạo vận đơn bằng tài khoản Viettel Post của chính tổ chức (lib/carriers/vtp-shipments.ts). */}
+            {/* POS TỰ CHỦ: đơn ERP tự tạo vận đơn bằng tài khoản hãng của chính tổ chức (lib/carriers/engine.ts) — mỗi hãng đã bật một nút. */}
             {carrier ? (
               <div className={cn("mt-4 space-y-2", attempts.length > 0 && "border-t pt-4")}>
-                {!carrier.connectionReady ? (
+                {carrier.connectionNote ? (
                   <p className="text-[12.5px] text-muted-foreground">{carrier.connectionNote}</p>
                 ) : carrier.blockedReason ? (
                   attempts.length === 0 ? <p className="text-[12.5px] text-muted-foreground">{carrier.blockedReason}</p> : null
                 ) : (
-                  <CreateVtpShipmentButton orderId={order.id} defaults={carrier.defaults} />
+                  <div className="flex flex-wrap items-start gap-2">
+                    {carrier.carriers
+                      .filter((c) => c.ready)
+                      .map((c) => (
+                        <CreateShipmentButton key={c.key} orderId={order.id} carrier={c} defaults={carrier.defaults} />
+                      ))}
+                  </div>
                 )}
               </div>
             ) : null}

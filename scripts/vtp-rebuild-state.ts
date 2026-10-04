@@ -15,7 +15,8 @@
  */
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { CARRIER_EVENT_SOURCES, deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { VTP_EVENT_SOURCES } from "@/lib/constants/truth";
 import { eventStatusCode, resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 const apply = process.argv.includes("--apply");
@@ -33,7 +34,7 @@ async function main() {
   const blank = await db
     .select({ id: e.id, status: e.status, statusName: e.statusName })
     .from(e)
-    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt), inArray(e.source, CARRIER_EVENT_SOURCES)));
+    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt), inArray(e.source, VTP_EVENT_SOURCES)));
   let filled = 0;
   let unknownEvents = 0;
   for (const row of blank) {

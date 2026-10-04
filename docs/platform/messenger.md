@@ -46,7 +46,19 @@ Meta gửi tin thẳng về ERP.
    `pages_read_engagement`, `business_management`; cần Business Verification. Kèm video: bấm Kết nối → chọn page → nhắn vào
    page → bot trả lời.
 
-## 4. Giới hạn hôm nay
+## 4. Instagram DM (cùng đường)
+
+- Kết nối page xin thêm `instagram_basic`, `instagram_manage_messages`. Page gắn tài khoản Instagram doanh nghiệp ⇒ nối LUÔN
+  trong cùng lượt: `GET /{page}?fields=instagram_business_account{id,username}`, chỉ mục thêm một dòng (mã Instagram ⇒ tổ
+  chức). Instagram đã thuộc tổ chức khác ⇒ không nối, nói rõ.
+- Webhook: CÙNG URL, gói `object = "instagram"`, cùng khuôn `messaging`; tổ chức theo mã Instagram (PAGE_INDEX).
+- Gửi: CÙNG page token, CÙNG Send API (`/me/messages`, người nhận = IGSID).
+- Tiếng vọng Instagram KHÔNG mang mã app ⇒ tin của bot nhận ra bằng MÃ TIN đã ghi lúc gửi.
+- Người vận hành: trong app Meta thêm sản phẩm Instagram, Webhooks → object Instagram → trường `messages`,
+  `messaging_postbacks` (cùng Callback URL / verify token). App Review thêm `instagram_basic`, `instagram_manage_messages`.
+  Chủ shop phải bật «Cho phép truy cập tin nhắn» trong cài đặt Instagram (Quyền riêng tư → Tin nhắn → Công cụ kết nối).
+
+## 5. Giới hạn hôm nay
 
 - Ảnh của câu trả lời mẫu chưa gửi qua đường này (mã nội dung là của Pancake); phần chữ vẫn gửi.
 - Bình luận dưới bài viết chưa nối (cần trường `feed` + private reply của Graph).

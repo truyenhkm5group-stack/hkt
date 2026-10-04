@@ -49,7 +49,7 @@ import { alertsCarriesWorkflows } from "@/lib/constants/workflow-cadence";
  * `VTP_POLL` cố ý KHÔNG có trong danh sách: nguồn đó chưa từng sinh ra một sự kiện nào (đo
  * 11/09/2026), nên đưa vào chỉ làm người đọc tưởng nó có đóng góp.
  */
-const MOC_DVVC = sql`(select max(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION'))`;
+const MOC_DVVC = sql`(select max(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','GHN_WEBHOOK','GHTK_WEBHOOK'))`;
 
 type Candidate = {
   kind: string;

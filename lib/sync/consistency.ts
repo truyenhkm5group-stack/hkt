@@ -26,7 +26,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { codStatusForAmount } from "@/lib/constants/cod";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
-import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_DOCUMENT_SOURCES, sqlSourceList, VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
 import { RECONCILIATION_RULES, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { sqlIsTestTracking } from "@/lib/constants/truth";
@@ -186,7 +186,7 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
       db
         .select({ code: schema.shipmentEvents.status, n: sql<number>`count(*)` })
         .from(schema.shipmentEvents)
-        .where(sql`${schema.shipmentEvents.source} in (${sql.raw(DOC_SOURCES)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`)
+        .where(sql`${schema.shipmentEvents.source} in (${sql.raw(VTP_DOCUMENT_SOURCES_SQL)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`)
         .groupBy(schema.shipmentEvents.status)
         .limit(100),
       db

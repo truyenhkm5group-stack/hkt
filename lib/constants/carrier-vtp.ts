@@ -250,19 +250,53 @@ export function vtpPrintUrl(printCode: string): string {
  *  · REQUESTED — đã giữ chỗ (dòng shipments) và đang gọi hãng; người bấm thứ hai thấy chỗ đã giữ, không gửi lần hai.
  *  · CREATED — hãng trả mã vận đơn.
  *  · UNKNOWN — lượt gọi đứt giữa chừng (mạng / quá giờ): KHÔNG BIẾT hãng đã tạo hay chưa. Không tự xoá, không tự gửi lại —
- *    người tra trên viettelpost.vn theo mã ERP rồi bấm «Tạo lại» (hãng chặn trùng mã) hoặc «Bỏ lượt tạo».
+ *    người tra trên trang của hãng theo mã ERP rồi «Thử lại» (chỉ hãng trả lại đơn cũ khi gửi trùng mã — GHN) hoặc «Bỏ lượt
+ *    tạo».
+ * Ghi kèm HÃNG (`carrier` — dòng của bước 1 không có ⇒ Viettel Post) và BẢN NHÁP đã gửi (`draft`) để «Thử lại» gửi ĐÚNG những
+ * gì đã gửi lần trước.
  */
 export const CARRIER_CREATE_STATES = ["REQUESTED", "CREATED", "UNKNOWN"] as const;
 export type CarrierCreateState = (typeof CARRIER_CREATE_STATES)[number];
 
-export type CarrierCreateRaw = { state: CarrierCreateState; reference: string; by: string | null; at: string; message?: string; service?: string; sortCode?: string };
+const CREATE_CARRIERS = ["VTP", "GHN"] as const;
+export type CarrierCreateDraft = { weightGrams: number; cod: number; serviceCode: string; note: string; province: string; ward: string };
+export type CarrierCreateRaw = {
+  state: CarrierCreateState;
+  carrier?: (typeof CREATE_CARRIERS)[number];
+  reference: string;
+  by: string | null;
+  at: string;
+  message?: string;
+  service?: string;
+  sortCode?: string;
+  draft?: CarrierCreateDraft;
+};
 export type CarrierCancelRaw = { state: "ACCEPTED"; by: string | null; at: string; reason: string; message: string };
+
+function draftOfRaw(v: unknown): CarrierCreateDraft | undefined {
+  const d = rec(v);
+  if (!Object.keys(d).length) return undefined;
+  const int = (x: unknown) => (typeof x === "number" && Number.isInteger(x) ? x : NaN);
+  const out = { weightGrams: int(d.weightGrams), cod: int(d.cod), serviceCode: s(d.serviceCode), note: s(d.note), province: s(d.province), ward: s(d.ward) };
+  return Number.isFinite(out.weightGrams) && Number.isFinite(out.cod) && out.serviceCode ? out : undefined;
+}
 
 export function carrierCreateOf(raw: unknown): CarrierCreateRaw | null {
   const c = rec(rec(raw).carrierCreate);
   const state = s(c.state);
   if (!(CARRIER_CREATE_STATES as readonly string[]).includes(state)) return null;
-  return { state: state as CarrierCreateState, reference: s(c.reference), by: s(c.by) || null, at: s(c.at), message: s(c.message) || undefined, service: s(c.service) || undefined, sortCode: s(c.sortCode) || undefined };
+  const carrier = s(c.carrier);
+  return {
+    state: state as CarrierCreateState,
+    carrier: (CREATE_CARRIERS as readonly string[]).includes(carrier) ? (carrier as CarrierCreateRaw["carrier"]) : "VTP",
+    reference: s(c.reference),
+    by: s(c.by) || null,
+    at: s(c.at),
+    message: s(c.message) || undefined,
+    service: s(c.service) || undefined,
+    sortCode: s(c.sortCode) || undefined,
+    draft: draftOfRaw(c.draft),
+  };
 }
 
 export function carrierCancelOf(raw: unknown): CarrierCancelRaw | null {
@@ -280,11 +314,4 @@ export function attemptHoldsOrder(a: { stage: string; raw: unknown }): boolean {
   if (a.stage === "CANCELLED") return false;
   if (carrierCancelOf(a.raw)) return false;
   return true;
-}
-
-/** Huỷ được ở hãng khi: do ERP tạo, có mã vận đơn, chưa có lệnh huỷ được nhận, hãng chưa nhận hàng (mã < 200, hoặc chưa có mã nào). */
-export function canCancelAtCarrier(a: { vtpOrderNumber: string | null; vtpStatus: number | null; stage: string; raw: unknown }): boolean {
-  if (!a.vtpOrderNumber || a.stage === "CANCELLED" || carrierCancelOf(a.raw)) return false;
-  if (carrierCreateOf(a.raw)?.state !== "CREATED") return false;
-  return a.vtpStatus === null || a.vtpStatus < VTP_CANCELLABLE_BELOW_STATUS;
 }

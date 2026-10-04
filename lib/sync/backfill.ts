@@ -20,7 +20,7 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
-import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
+import { VTP_EVENT_SOURCES } from "@/lib/constants/truth";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
@@ -144,7 +144,7 @@ export async function runCanonicalBackfill(options: BackfillOptions = {}): Promi
   const blank = await db
     .select({ id: e.id, status: e.status, statusName: e.statusName })
     .from(e)
-    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt), inArray(e.source, [...CARRIER_EVENT_SOURCES])));
+    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt), inArray(e.source, [...VTP_EVENT_SOURCES])));
   let normalizedFilled = 0;
   let unknownEvents = 0;
   for (const row of blank) {

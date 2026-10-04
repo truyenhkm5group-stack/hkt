@@ -93,7 +93,7 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
       select e.occurred_at as at, coalesce(nullif(e.status_name, ''), e.status) as status, e.note, e.location, e.source
         from shipment_events e
        where e.shipment_id = ${shipmentId}
-         and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','MANUAL')
+         and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','GHN_WEBHOOK','GHTK_WEBHOOK','MANUAL')
        order by e.occurred_at desc
        limit 12
     `);

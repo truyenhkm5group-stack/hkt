@@ -99,7 +99,7 @@ export type SettingField = {
 export type ConnectorConfigStore = "ENV" | "ORG_CONNECTIONS" | "SETTINGS_TABLE" | "NONE";
 
 /** Khớp khoá của `WEBHOOK_BINDINGS` (lib/platform/webhooks.ts) — bài kiểm so hai bên. */
-export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "ZALO_OA";
+export type WebhookBindingKey = "PANCAKE" | "VIETTELPOST" | "VTP_STATEMENT" | "SEPAY" | "PANCAKE_FANPAGE" | "PANCAKE_POS_ORG" | "VIETTELPOST_ORG" | "MESSENGER" | "GHN_ORG" | "ZALO_OA";
 
 export type ConnectorWebhook = {
   /** Đường dẫn route theo cú pháp thư mục của Next (`[secret]`, `[[...event]]`). */
@@ -287,15 +287,44 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     health: "testConnection",
     healthRef: "lib/connectors/testers.ts::testViettelPostCarrier",
     module: "logistics",
-    code: ["lib/constants/carrier-vtp.ts", "lib/integrations/viettelpost/carrier-org.ts", "lib/carriers/vtp-shipments.ts"],
-    consumers: [
-      "lib/carriers/vtp-shipments.ts::quoteVtpShipmentCore",
-      "lib/carriers/vtp-shipments.ts::createVtpShipmentCore",
-      "lib/carriers/vtp-shipments.ts::cancelVtpShipmentCore",
-      "lib/carriers/vtp-shipments.ts::vtpPrintLinkCore",
-      "lib/carriers/vtp-shipments.ts::bulkVtpPrintLinkCore",
-    ],
+    code: ["lib/constants/carrier-vtp.ts", "lib/integrations/viettelpost/carrier-org.ts", "lib/carriers/adapters/vtp.ts", "lib/carriers/engine.ts", "lib/carriers/types.ts", "lib/carriers/registry.ts"],
+    // Lõi chung mở kết nối qua adapter (`VTP_ADAPTER.open`) cho mọi lượt: tính cước · tạo · thử lại · huỷ · in · hàng loạt.
+    consumers: ["lib/carriers/adapters/vtp.ts::VTP_ADAPTER.open"],
     why: "Tạo vận đơn Viettel Post từ đơn tạo trong ERP bằng tài khoản của CHÍNH tổ chức — shop không cần Pancake POS. Kiểm tra = đăng nhập (Login → ownerconnect) rồi đọc danh sách kho lấy hàng — chỉ đọc, chỉ tới partner.viettelpost.vn. Tạo đơn giữ chỗ trước khi gọi hãng + mã ERP gửi kèm CHECK_UNIQUE + không tự gửi lại ⇒ một lần gửi không thành hai vận đơn. Hành trình về qua webhook «viettelpost-org».",
+  },
+  /*
+    GIAO HÀNG NHANH CỦA TỔ CHỨC (POS tự chủ · docs/verticals/pos-tu-chu.md): token API + ShopId của CHÍNH shop (developer.ghn.vn
+    → Quản lý token). Tính cước (Preview — chạy thử, không tạo đơn) · tạo · huỷ · in; hành trình về qua webhook theo tổ chức
+    mang token riêng. Chủ shop duyệt nối mọi hãng và chốt trạng thái cuối của GHN là chứng từ (04/10/2026 — ORDER_OUTCOME 4.1).
+  */
+  {
+    key: "ghn-carrier",
+    label: "GHN của tổ chức (tạo vận đơn)",
+    vendor: "GHN",
+    kind: "SHIPPING",
+    capabilities: ["create_label", "update_order", "webhook_status"],
+    auth: "API_KEY",
+    settings: [
+      { key: "token", label: "Token API GHN", type: "text", secret: true, required: true, hint: "developer.ghn.vn → đăng nhập → Quản lý token → bấm con mắt (OTP) → chép. Token Production, không phải Staging.", pattern: "^[A-Za-z0-9-]{20,80}$", maxLength: 80 },
+      { key: "shopId", label: "Mã shop GHN (ShopId)", type: "text", secret: false, required: true, hint: "Số ShopId trong thông tin tài khoản GHN — người gửi / kho lấy hàng lấy theo shop này", pattern: "^[0-9]{1,12}$", maxLength: 12 },
+      { key: "requiredNote", label: "Cho xem hàng", type: "text", secret: false, required: false, hint: "CHOXEMHANGKHONGTHU (mặc định) · KHONGCHOXEMHANG · CHOTHUHANG", pattern: "^(CHOXEMHANGKHONGTHU|KHONGCHOXEMHANG|CHOTHUHANG)?$", maxLength: 20 },
+      { key: "defaultNote", label: "Ghi chú mặc định cho bưu tá", type: "text", secret: false, required: false, hint: "Ví dụ: Gọi trước khi giao", maxLength: 150 },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — token mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: {
+      path: "/api/webhooks/ghn-org/[token]",
+      verify: "Token «<mã tổ chức>.<chữ ký HMAC>» trong ĐƯỜNG DẪN (khoá con dẫn xuất từ PLATFORM_SECRETS_KEY), so hằng thời gian trước khi đọc body; tổ chức phải ACTIVE và bật module Giao vận",
+      tenantResolution: "URL_SECRET",
+      idempotencyKey: "webhookDedupeKey(GHN, [OrderCode, Type, Time]) — đúng khoá tài liệu GHN khuyên",
+      binding: "GHN_ORG",
+    },
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testGhnCarrier",
+    module: "logistics",
+    code: ["lib/constants/carrier-ghn.ts", "lib/integrations/ghn/client.ts", "lib/integrations/ghn/webhook.ts", "lib/carriers/adapters/ghn.ts", "app/api/webhooks/ghn-org/[token]/route.ts", "components/connectors/org-ghn-panel.tsx"],
+    consumers: ["lib/carriers/adapters/ghn.ts::GHN_ADAPTER.open"],
+    why: "Tạo vận đơn GHN từ đơn tạo trong ERP bằng token của CHÍNH tổ chức — shop không cần Pancake POS. Địa giới mới (tỉnh + xã): ERP so khớp tên trên đơn với danh mục chính thức của GHN, không khớp duy nhất thì người chọn. Kiểm tra = GET danh sách shop của token, đòi ShopId đã khai nằm trong đó — chỉ đọc, chỉ tới online-gateway.ghn.vn. client_order_code ⇒ gửi lại cùng mã không đẻ đơn thứ hai. Webhook trạng thái theo tổ chức; mã cuối là chứng từ (ORDER_OUTCOME 4.1).",
   },
   {
     key: "viettelpost",
@@ -710,7 +739,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
   },
   {
     key: "facebook-messenger",
-    label: "Messenger trực tiếp — bot trả lời tin nhắn (không cần Pancake)",
+    label: "Messenger + Instagram trực tiếp — bot trả lời tin nhắn (không cần Pancake)",
     vendor: "Meta",
     kind: "MESSAGING",
     capabilities: ["read_conversations", "send_customer_message"],
@@ -718,6 +747,8 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     settings: [
       { key: "pageId", label: "Page ID", type: "text", secret: false, required: true, pattern: "^[0-9]{5,30}$", maxLength: 30 },
       { key: "pageName", label: "Tên page", type: "text", secret: false, required: false, maxLength: 120 },
+      { key: "igAccountId", label: "Instagram doanh nghiệp gắn với page (tự đọc khi kết nối)", type: "text", secret: false, required: false, pattern: "^([0-9]{5,30})?$", maxLength: 30 },
+      { key: "igUsername", label: "Tên Instagram", type: "text", secret: false, required: false, maxLength: 60 },
       { key: "pageAccessToken", label: "Page access token (cấp qua nút «Kết nối Facebook Page»)", type: "text", secret: true, required: true, pattern: "^[A-Za-z0-9._-]{20,1000}$", maxLength: 1000 },
     ],
     config: { store: "ORG_CONNECTIONS", where: "/ai/sales-chatbot/messenger — chủ page bấm «Kết nối Facebook Page»; token mã hoá AES-256-GCM trong CSDL của tổ chức" },

@@ -49,7 +49,7 @@ export const TRUTH_DIMENSIONS: Record<TruthDimension, TruthDimensionSpec> = {
     label: "Trạng thái vận đơn (ĐVVC)",
     question: "Hàng đang ở đâu trên đường đi?",
     storedAt: "shipments.stage — ảnh chụp dựng từ shipment_events bởi materializeShipmentState()",
-    sourceOfTruth: "sự kiện đến thẳng từ Viettel Post (shipment_events, nguồn VTP_*/MANUAL)",
+    sourceOfTruth: "sự kiện đến thẳng từ ĐVVC (shipment_events, nguồn VTP_*/MANUAL; GHN_WEBHOOK / GHTK_WEBHOOK — ORDER_OUTCOME.md mục 4.1)",
     neverInferFrom: ["tiền COD", "cod_status", "bảng kê", "settlement", "trạng thái Pancake"],
     values: shipmentStageEnum.enumValues,
   },
@@ -97,8 +97,18 @@ export const TRUTH_DIMENSION_ORDER: TruthDimension[] = ["order_status", "shipmen
  *
  * Bản sao hành trình từ Pancake KHÔNG nằm trong cả hai: mốc thời gian của nó là giờ Pancake ghi
  * nhận, không phải giờ sự kiện của ĐVVC.
+ *
+ * HÃNG KHÁC VIETTEL POST (chủ shop chốt 04/10/2026 — ORDER_OUTCOME.md mục 4.1): webhook GHN / GHTK là
+ * chứng từ ĐVVC ngang webhook Viettel Post. Sự kiện của chúng mang mã trạng thái CỦA HÃNG ĐÓ (chuỗi
+ * `delivered` của GHN, số `5` của GHTK) — không bao giờ được dịch bằng bộ dịch Viettel Post; chặng
+ * chuẩn hoá ghi sẵn lúc nhận (`lib/constants/carrier-status.ts`).
  */
-export const CARRIER_EVENT_SOURCES = ["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL", "VTP_UI_MANUAL_VERIFICATION"] as const;
+export const VTP_DOCUMENT_SOURCES = ["VTP_WEBHOOK", "VTP_POLL", "VTP_IMPORT"] as const;
+export const OTHER_CARRIER_DOCUMENT_SOURCES = ["GHN_WEBHOOK", "GHTK_WEBHOOK"] as const;
+export type OtherCarrierDocumentSource = (typeof OTHER_CARRIER_DOCUMENT_SOURCES)[number];
+/** Nguồn mang CHỮ / MÃ của Viettel Post — chỉ nhóm này được dịch (lại) bằng bộ dịch Viettel Post (`resolveVtpStatus`). */
+export const VTP_EVENT_SOURCES = ["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL", "VTP_UI_MANUAL_VERIFICATION"] as const;
+export const CARRIER_EVENT_SOURCES = [...VTP_EVENT_SOURCES, ...OTHER_CARRIER_DOCUMENT_SOURCES] as const;
 
 /**
  * Chủ shop mở trang Viettel Post, đọc trạng thái rồi chép lại. Đây LÀ chứng từ của ĐVVC — chỉ là
@@ -110,10 +120,18 @@ export const CARRIER_EVENT_SOURCES = ["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "
  * thật của ĐVVC xảy ra SAU đó vẫn thắng và vòng đời vận đơn tiếp tục chạy bình thường.
  */
 export const MANUAL_VERIFICATION_SOURCE = "VTP_UI_MANUAL_VERIFICATION" as const;
-export const CARRIER_DOCUMENT_SOURCES = ["VTP_WEBHOOK", "VTP_POLL", "VTP_IMPORT"] as const;
+/**
+ * Chứng từ MÁY của MỌI hãng — dùng cho kết quả đơn, mốc bàn giao, chặng vận đơn. Màn hình đo sức khoẻ RIÊNG của
+ * Viettel Post (webhook VTP có đang về không, tệp VTP có khớp không) dùng `VTP_DOCUMENT_SOURCES`, không dùng danh sách
+ * này — trộn gói GHN vào là làm đẹp số đo của một đường truyền không liên quan.
+ */
+export const CARRIER_DOCUMENT_SOURCES = [...VTP_DOCUMENT_SOURCES, ...OTHER_CARRIER_DOCUMENT_SOURCES] as const;
 
 /** Danh sách dùng trong chuỗi SQL: `... in ('VTP_WEBHOOK','VTP_POLL',...)`. */
 export const sqlSourceList = (sources: readonly string[]) => sources.map((s) => `'${s}'`).join(",");
+
+/** `VTP_DOCUMENT_SOURCES` dạng chuỗi SQL — MỘT định nghĩa cho mọi câu chỉ hỏi về chứng từ Viettel Post. */
+export const VTP_DOCUMENT_SOURCES_SQL = sqlSourceList(VTP_DOCUMENT_SOURCES);
 
 /**
  * ───────── THANG THẨM QUYỀN CỦA BẰNG CHỨNG LOGISTICS ─────────
@@ -134,6 +152,8 @@ export const LOGISTICS_EVIDENCE_AUTHORITY = [
   { level: "HIGH", source: "VTP_WEBHOOK", what: "Sự kiện hành trình mang mã số của Viettel Post — đến thẳng hoặc do Pancake chuyển tiếp nguyên văn", decides: true },
   { level: "HIGH", source: "VTP_IMPORT", what: "Tệp danh sách vận đơn tải từ viettelpost.vn", decides: true },
   { level: "HIGH", source: "VTP_POLL", what: "Tra cứu hành trình qua API Viettel Post", decides: true },
+  { level: "HIGH", source: "GHN_WEBHOOK", what: "Webhook trạng thái của Giao Hàng Nhanh (đơn ERP tạo bằng tài khoản GHN của tổ chức) — chủ shop chốt 04/10/2026", decides: true },
+  { level: "HIGH", source: "GHTK_WEBHOOK", what: "Webhook trạng thái của Giao Hàng Tiết Kiệm (đơn ERP tạo bằng tài khoản GHTK của tổ chức) — chủ shop chốt 04/10/2026", decides: true },
   { level: "MEDIUM", source: "PANCAKE_PARTNER_STATUS", what: "Trạng thái vận đơn Pancake tự chuẩn hoá (partner_status) — chỉ dùng khi CHƯA có bằng chứng mức CAO", decides: false },
   { level: "LOW", source: "PANCAKE_ORDER_STAGE", what: "Trạng thái ĐƠN trên Pancake (\"Đã nhận\") — cao nhất chỉ được nói ĐANG GIAO", decides: false },
   { level: "NEVER", source: "PAYMENT_COD", what: "Tiền, COD, bảng kê, trạng thái thanh toán — KHÔNG BAO GIỜ là bằng chứng logistics", decides: false },

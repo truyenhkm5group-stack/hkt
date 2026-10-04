@@ -535,6 +535,9 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
  * sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho hội thoại đó (cùng khoá với công cụ `handoff_to_human`).
  * Khung THỬ không sinh thông báo — nó là của chủ shop, không có khách thật nào chờ.
  */
+/** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
+export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
+
 export const AI_DOWN_HANDOFF_REASON = "AI tạm không trả lời được — nhân viên liên hệ lại khách";
 
 function aiDownReply(cfg: SalesChatbotConfig): string {
@@ -700,6 +703,8 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     let status: "OK" | "ERROR" = "OK";
     let lastError: string | null = null;
     let leaks = 0;
+    // Lượt này đã có câu nào TỚI KHÁCH chưa (chữ còn lại sau bộ lọc, câu mẫu, câu báo của máy chủ) — xem «KHÔNG ĐỂ KHÁCH IM».
+    let spoke = false;
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -711,7 +716,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
         model = res.model || model;
         const c = estimateCostUsd(res.model || prov.provider.model, res.usage);
         cost = cost === null || c === null ? null : cost + c;
-        const raw = res.content.length ? res.content : [{ type: "text" as const, text: "Dạ, anh/chị nói rõ hơn giúp em nhé." }];
+        const raw = res.content.length ? res.content : [{ type: "text" as const, text: EMPTY_REPLY_TEXT }];
         // Messenger không hiển thị markdown — «*Họ tên, SĐT…*» tới khách nguyên dấu sao (03/10/2026, «Dương Bích Phượng»).
         // CHỮ GỬI KHÁCH QUA BỘ LỌC SUY LUẬN (03/10/2026, «Phuoc Ha»): model viết lẩm bẩm vào câu trả lời — tên công cụ, «Khách
         // vừa nhắn…», «Ta đáp:» — và cả đoạn đã tới khách. Lọc ở máy chủ, không trông vào lời dặn.
@@ -723,7 +728,10 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
           }
           const g = customerFacingText(b.text);
           if (g.leaked) leaks += 1;
-          if (g.text) content.push({ ...b, text: plainForMessenger(g.text) });
+          if (g.text) {
+            content.push({ ...b, text: plainForMessenger(g.text) });
+            spoke = true;
+          }
         }
         history.push({ role: "assistant", content });
         await appendMessage(conv.id, seq++, "assistant", content);
@@ -737,6 +745,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
             deliveredImages.push(...r.deliver.imageIds);
             deliveredReplyId = r.deliver.quickReplyId;
             deliveredText = r.deliver.text;
+            spoke = true;
             await markQuickReplyUsed(r.deliver.quickReplyId, now).catch(() => undefined);
           }
           // Công cụ thấy điều bất thường (giá thiếu, tồn âm) ⇒ CẦN NGƯỜI XỬ LÝ — không để AI tự quyết bán tiếp.
@@ -759,6 +768,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
         if (state.handoff) break;
         if (round === SALES_CHATBOT_LIMITS.toolRounds - 1) {
           await reply(conv, seq++, "Dạ em cần kiểm thêm — anh/chị đợi nhân viên hỗ trợ giúp em nhé.");
+          spoke = true;
           state = { ...state, handoff: { reason: "Quá số vòng công cụ", at: new Date().toISOString() } };
         }
       }
@@ -773,6 +783,18 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     }
     // Câu bị lọc suy luận ⇒ ghi cho người vận hành (màn hình chỉ in nhãn, không in câu gốc).
     if (leaks && !lastError) lastError = `AI viết suy luận nội bộ vào câu trả lời (${leaks} đoạn) — đã lọc trước khi gửi khách`;
+    // KHÔNG ĐỂ KHÁCH IM (04/10/2026 — bộ hội thoại vàng): model chỉ gọi công cụ chuyển người không kèm chữ, hoặc mọi chữ bị
+    // bộ lọc suy luận chặn (kể cả khi model nhại lỗi công cụ) ⇒ lượt kết thúc mà khách không nhận một câu nào. Luật kênh giữ
+    // nguyên: trên kênh NHẮN TIN (fanpage) chuyển người thì bot IM — nhân viên trả lời trực tiếp (chủ shop chốt 01/10/2026).
+    if (!spoke && status === "OK") {
+      const handedOffNow = Boolean(state.handoff) && conv.status !== "HANDOFF";
+      if (handedOffNow) {
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq++, cfg.handoff.message);
+      } else {
+        await reply(conv, seq++, EMPTY_REPLY_TEXT);
+        lastError = lastError ?? "Lượt không có câu nào gửi khách — đã gửi câu dự phòng";
+      }
+    }
     await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model, requests: calls, inputTokens: inTok, outputTokens: outTok, costUsd: calls ? cost : null, status, actorId: opts.actorId ?? null, ref: conv.id }).catch(() => undefined);
     await bump({
       state: state as Record<string, unknown>,

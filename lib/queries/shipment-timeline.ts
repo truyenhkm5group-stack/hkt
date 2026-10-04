@@ -7,6 +7,7 @@ import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { EVENT_LANE, type ActorKind, type TimelineEventType, type TimelineLane } from "@/lib/constants/shipment-timeline";
 import { eventStatusCode, resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
+import { carrierStatusMeta, isOtherCarrierSource } from "@/lib/constants/carrier-status";
 import { careSlaHours } from "@/lib/care/sla";
 import { outcomeOfShipment } from "@/lib/queries/shipments";
 import { OUTCOME_LABEL, type OrderOutcome } from "@/lib/constants/returns";
@@ -292,7 +293,8 @@ export async function getShipmentTimeline(shipmentId: string, options: { limit?:
   // ───────── 1. Chứng từ Viettel Post ─────────
   let truoc: string | null = null;
   for (const e of events) {
-    const resolved = resolveVtpStatus({ code: eventStatusCode(e.status), text: e.statusName || e.status });
+    // Hãng khác (GHN · GHTK): tra bảng mã của CHÍNH hãng đó — không dịch bằng bộ dịch Viettel Post (ORDER_OUTCOME.md 4.1).
+    const resolved = isOtherCarrierSource(e.source) ? { stage: carrierStatusMeta(e.source, e.status)?.stage ?? "UNKNOWN" } : resolveVtpStatus({ code: eventStatusCode(e.status), text: e.statusName || e.status });
     const mapped = resolved.stage !== "UNKNOWN";
     const stage = stageLabel(e.normalizedStage ?? (mapped ? resolved.stage : null));
     const eventType = carrierEventType(e.source, mapped);
