@@ -149,12 +149,25 @@ Hai quyết định của chủ shop ngày 04/10/2026, đặc tả ở `docs/bus
 - **Huỷ vận đơn ≠ huỷ đơn.** Đơn ERP còn sống mà lần gửi mới nhất bị hãng huỷ, chưa gửi lại ⇒ kết quả **«Chưa gửi»**, không
   phải «Đã huỷ». Tạo lần gửi mới ⇒ theo lần gửi mới; người huỷ đơn ⇒ «Đã huỷ».
 
+## P5 — Nhân viên tạo đơn ngay trong khung chat
+
+Người bán đang chat với khách thì tạo đơn tại chỗ, không chép sang trang Đơn hàng.
+
+- **Lối bấm hôm nay:** AI → Chatbot bán hàng → «Hội thoại gần đây» → «Tạo đơn» trên từng dòng (cần `orders:write`; khung
+  thử không có nút). Hộp thư M8 sẽ gắn cùng form (`components/orders/chat-order-form.tsx`, props `{ conversationId,
+  defaults?, onCreated? }`) cạnh khung tin nhắn.
+- **Một đường tạo đơn.** Lõi `lib/records/chat-order.ts` gọi đúng `createManualOrderCore` (cổng tổ chức, quyền, zod, khách /
+  mẫu mã có thật, một giao dịch, nhật ký) rồi gắn đơn về hội thoại: `orders.sales_conversation_id` + `origin = ERP_FORM`.
+- **Đơn của người là đơn của người.** Sự kiện hội thoại `order.confirmed` / `order.drafted` mang `actorKind = HUMAN` và khoá
+  tài khoản người bấm. Màn «Hiệu quả» so AI với người đọc đúng hai cột này.
+- **Một lượt bấm, một đơn.** Form sinh một khoá mỗi lần mở; bấm hai lần hay mạng gửi lại thì nhận lại đúng đơn đã tạo.
+- **Khách theo SĐT.** Chưa chọn khách ⇒ tìm theo SĐT. Đã có ⇒ dùng lại, KHÔNG sửa tên / địa chỉ đang lưu (mục 3.12). Chưa có
+  ⇒ tạo mới nếu người bấm có `customers:write`. Tên / địa chỉ của lần mua này vào người nhận của đơn.
+- **Cảnh báo, không chặn.** Hội thoại đã có đơn còn sống (bot chốt hay người tạo) ⇒ form liệt kê để người kiểm trước.
+
 ## Kế tiếp
 
 - **P3b.** GHTK: cùng lõi, cùng bảng mã đã khai trong đặc tả (mục 4.1).
   - Tài liệu chưa xác nhận GHTK nhận địa giới mới. Phải thử trên staging trước khi bật cho shop.
 - **J&T.** Cần shop đăng ký đối tác trên open.jtexpress.vn (xét duyệt 1–3 ngày, xin chạy thật từng API, mã khách hàng
   lấy ở bưu cục). Đây là HUMAN GATE.
-- **P4.** Nhập dữ liệu từ Pancake (khách, sản phẩm, đơn cũ) để shop chuyển sang trong một buổi.
-- **P5.** Nhân viên tạo đơn ngay trong khung chat. Đi đường người (`createManualOrderCore`, `origin = ERP_FORM`) và gắn
-  `sales_conversation_id`. Gắn vào màn hộp thư M8 khi phiên giữ M8 để sẵn khe.

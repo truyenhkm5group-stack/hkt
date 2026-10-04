@@ -187,6 +187,38 @@ export async function createCustomerAsAgent(
 ): Promise<{ ok: true; id: string; existing: boolean } | MetaFailure> {
   const gate = await customerOrgGate();
   if (!gate.allowed) return fail(gate.code, gate.reason);
+  const checked = checkByPhoneInput(input, opts);
+  if (!checked.ok) return checked;
+  const res = await findOrInsertByPhone(checked.row, true);
+  if (!res) return fail("INVALID", "Không tạo được khách.");
+  if (res.existing) return { ok: true, id: res.id, existing: true };
+  await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "CUSTOMER_CREATE", entity: "CUSTOMER", entityId: res.id, before: null, after: checked.row, reason: `Tạo bởi ${agent.name}` });
+  return { ok: true, id: res.id, existing: false };
+}
+
+/**
+ * NGƯỜI (nhân viên bán hàng tạo đơn trong khung chat) tìm hoặc tạo khách theo SĐT — cùng luật với lượt của máy ở trên: khách
+ * đã có cùng SĐT ⇒ dùng lại ĐÚNG khách đó, KHÔNG đổi tên / địa chỉ đang lưu (mục 3.12). Chưa có ⇒ chỉ tạo khi người này có
+ * quyền tạo khách (`customers:write`); nhật ký mang khoá tài khoản của người bấm (luật 34), không mang tên máy.
+ */
+export async function findOrCreateCustomerForUser(
+  user: SessionUser,
+  input: { name: string; phone: string; address: string; province?: string },
+): Promise<{ ok: true; id: string; existing: boolean } | MetaFailure> {
+  const gate = await customerOrgGate();
+  if (!gate.allowed) return fail(gate.code, gate.reason);
+  const checked = checkByPhoneInput(input, {});
+  if (!checked.ok) return checked;
+  const res = await findOrInsertByPhone(checked.row, can(user, "customers:write"));
+  if (!res) return fail("FORBIDDEN", "Chưa có khách mang SĐT này và bạn không có quyền tạo khách (customers:write) — chọn khách có sẵn hoặc nhờ người có quyền.");
+  if (res.existing) return { ok: true, id: res.id, existing: true };
+  await audit({ userId: user.id, userEmail: user.email, action: "CUSTOMER_CREATE", entity: "CUSTOMER", entityId: res.id, before: null, after: checked.row, reason: "Tạo khi tạo đơn trong khung chat" });
+  return { ok: true, id: res.id, existing: false };
+}
+
+type ByPhoneRow = { name: string; phone: string; address: string; province: string };
+
+function checkByPhoneInput(input: { name: string; phone: string; address: string; province?: string }, opts: { addressOptional?: boolean }): { ok: true; row: ByPhoneRow } | MetaFailure {
   const name = input.name.trim().slice(0, 200);
   const phone = normalizeCustomerPhone(input.phone);
   const address = input.address.trim().slice(0, 500);
@@ -196,19 +228,23 @@ export async function createCustomerAsAgent(
   if (!phone) errors.push({ field: "system:phone", message: "Số điện thoại chỉ gồm 8–15 chữ số (có thể có dấu + ở đầu)." });
   if (address.length < 5 && !(opts.addressOptional && address.length === 0)) errors.push({ field: "system:address", message: "Địa chỉ quá ngắn." });
   if (errors.length || !phone) return fail("INVALID", errors);
+  return { ok: true, row: { name, phone, address, province } };
+}
+
+/**
+ * Tìm-rồi-thêm trong MỘT giao dịch có khoá theo SĐT (TD-20): hai lượt cùng SĐT gửi đồng thời không đẻ hai khách. `mayInsert =
+ * false` và chưa có khách ⇒ `null` (không ghi gì).
+ */
+async function findOrInsertByPhone(row: ByPhoneRow, mayInsert: boolean): Promise<{ id: string; existing: boolean } | null> {
   const db = await getDb();
-  // Tìm-rồi-thêm trong MỘT giao dịch có khoá theo SĐT (TD-20): hai hội thoại cùng SĐT gửi đồng thời không đẻ hai khách.
-  const res = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`customer-phone:${phone}`}, 0))`);
-    const [found] = await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, phone)).limit(1);
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`customer-phone:${row.phone}`}, 0))`);
+    const [found] = await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.phone, row.phone)).limit(1);
     if (found) return { id: found.id, existing: true };
-    const [row] = await tx.insert(schema.customers).values({ name, phone, phones: [phone], address, province }).returning({ id: schema.customers.id });
-    return { id: row.id, existing: false };
+    if (!mayInsert) return null;
+    const [created] = await tx.insert(schema.customers).values({ name: row.name, phone: row.phone, phones: [row.phone], address: row.address, province: row.province }).returning({ id: schema.customers.id });
+    return { id: created.id, existing: false };
   });
-  if (res.existing) return { ok: true, id: res.id, existing: true };
-  const created = { id: res.id };
-  await audit({ userId: null, userEmail: `agent:${agent.source}`, actorKind: "AGENT", action: "CUSTOMER_CREATE", entity: "CUSTOMER", entityId: created.id, before: null, after: { name, phone, address, province }, reason: `Tạo bởi ${agent.name}` });
-  return { ok: true, id: created.id, existing: false };
 }
 
 // ─────────────────────────── Sửa thông tin cơ bản của khách TẠO TAY (pilot P1 #11) ───────────────────────────

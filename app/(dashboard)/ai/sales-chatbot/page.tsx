@@ -26,6 +26,7 @@ import { OrderSyncPanel } from "./order-sync-panel";
 import { orderSyncView } from "@/lib/sales-chatbot/order-sync";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
+import { ChatOrderButton } from "./chat-order-button";
 import { ResumeToAiButton } from "./resume-button";
 import { ModePanel } from "./mode-panel";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
@@ -45,6 +46,8 @@ const STATUS_LABEL: Record<string, string> = { OPEN: "Đang chat", WAITING: "Ch�
 export default async function SalesChatbotPage() {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
+  // Tạo đơn trong hội thoại (P5): quyền đơn hàng, không phải quyền cấu hình bot — lõi kiểm lại cổng tổ chức lúc mở form.
+  const orderWrite = can(user, "orders:write");
   const [cfg, fields, conversations, connections, pub] = await Promise.all([
     loadSalesChatbotConfig(),
     productCustomFieldOptions(),
@@ -209,6 +212,7 @@ export default async function SalesChatbotPage() {
                     </span>
                     <span className="flex items-center gap-3 text-xs text-muted-foreground">
                       {manage && c.status === "HANDOFF" ? <ResumeToAiButton id={c.id} /> : null}
+                      {orderWrite && c.channel !== "TEST" ? <ChatOrderButton conversationId={c.id} customerId={c.customerId ?? null} /> : null}
                       {c.orderId ? (
                         <Link href={`/orders/${encodeURIComponent(c.orderId)}`} className="underline underline-offset-2">
                           Đơn đã chốt
