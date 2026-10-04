@@ -131,12 +131,24 @@ function classify(status: number, body: string): PlacesErrorKind {
   return "UNKNOWN";
 }
 
+/** Lý do máy đọc được trong `error.details[].reason` (ErrorInfo) — câu `message` của 403 thường chỉ là «The caller does not have permission». */
+export function googleErrorReason(body: string): string | null {
+  try {
+    const j = JSON.parse(body) as { error?: { details?: unknown } };
+    const details = Array.isArray(j.error?.details) ? (j.error.details as { reason?: unknown }[]) : [];
+    return details.map((d) => d?.reason).find((x): x is string => typeof x === "string" && /^[A-Z0-9_]{3,80}$/.test(x)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function googleMessage(body: string): string {
   try {
     const j = JSON.parse(body) as { error?: { message?: unknown; status?: unknown } };
     const m = typeof j.error?.message === "string" ? j.error.message : "";
     const s = typeof j.error?.status === "string" ? j.error.status : "";
-    return [s, m].filter(Boolean).join(": ") || body.slice(0, 200);
+    const reason = googleErrorReason(body);
+    return [[s, m].filter(Boolean).join(": "), reason ? `(reason: ${reason})` : ""].filter(Boolean).join(" ") || body.slice(0, 200);
   } catch {
     return body.slice(0, 200);
   }
