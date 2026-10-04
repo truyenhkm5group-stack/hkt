@@ -10,9 +10,11 @@ import { createCampaignAction, previewCampaignAction, startCampaignAction } from
 import type { CampaignPreview } from "@/lib/wholesale/campaigns";
 import { DISCOVERY_TIER_LABEL, DISCOVERY_TIERS, type DiscoveryTier } from "@/lib/wholesale/config";
 import { formatNumber } from "@/lib/format";
+import { SCAN_TIER_LABEL, type ScanTier } from "@/lib/wholesale/areas";
 import { LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, type LeadSegment } from "@/lib/wholesale/segments";
 
-type ProvinceOpt = { key: string; label: string; areas: { code: string; name: string }[] };
+/** `tier`: hạng quét (1 = tỉnh quét trước · 2 = không có biển · 3 = ven biển) — tỉnh lấy hạng nhỏ nhất của khu vực. */
+type ProvinceOpt = { key: string; label: string; tier: 1 | 2 | 3; areas: { code: string; name: string; tier: 1 | 2 | 3 }[] };
 type GroupOpt = { key: string; label: string; keywords: string[]; enabled: boolean };
 
 const SELECTABLE_SEGMENTS = LEAD_SEGMENTS.filter((s) => s !== "NOT_FIT" && s !== "UNCLASSIFIED" && s !== "OTHER_FOOD");
@@ -26,7 +28,8 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
   const [pending, start] = useTransition();
   const [name, setName] = useState(defaults.name);
   const [productFocus, setProductFocus] = useState(defaults.productFocus);
-  const [selProv, setSelProv] = useState<string[]>(provinces.map((p) => p.key));
+  // Mặc định chỉ chọn đợt ① — chọn cả 34 tỉnh là hàng nghìn truy vấn; ba nút chọn nhanh ở dưới chọn theo đúng thứ tự quét.
+  const [selProv, setSelProv] = useState<string[]>(provinces.filter((p) => p.tier === 1).map((p) => p.key));
   const [areas, setAreas] = useState<Record<string, string[]>>({});
   const [customAreas, setCustomAreas] = useState("");
   const [groups, setGroups] = useState<Record<string, boolean>>(Object.fromEntries(keywordGroups.map((g) => [g.key, g.enabled])));
@@ -86,6 +89,25 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
     });
 
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  /** Chọn nhanh đúng một hạng: tỉnh có khu vực thuộc hạng đó, và CHỈ các khu vực ấy (tỉnh cả hạng ⇒ để trống = tất cả). */
+  const pickTier = (tier: ScanTier | "ALL" | "NONE") => {
+    if (tier === "NONE" || tier === "ALL") {
+      setSelProv(tier === "ALL" ? provinces.map((p) => p.key) : []);
+      setAreas({});
+      return;
+    }
+    const nextAreas: Record<string, string[]> = {};
+    const keys: string[] = [];
+    for (const p of provinces) {
+      const hit = p.areas.filter((a) => a.tier === tier).map((a) => a.code);
+      if (!hit.length) continue;
+      keys.push(p.key);
+      if (hit.length < p.areas.length) nextAreas[p.key] = hit;
+    }
+    setSelProv(keys);
+    setAreas(nextAreas);
+  };
+  const tiers: ScanTier[] = [1, 2, 3];
   const lbl = "block text-xs font-medium text-muted-foreground";
   const sel = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 
@@ -129,33 +151,58 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
       {mode === "TEXT" ? (
         <fieldset className="space-y-2">
           <legend className={lbl}>Tỉnh / thành và khu vực (quận / huyện)</legend>
-          <div className="grid gap-2 md:grid-cols-2">
-            {provinces.map((p) => {
-              const on = selProv.includes(p.key);
-              const picked = areas[p.key] ?? [];
-              return (
-                <div key={p.key} className="rounded-md border p-2">
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input type="checkbox" checked={on} onChange={() => setSelProv(toggle(selProv, p.key))} />
-                    {p.label} <span className="text-xs font-normal text-muted-foreground">({picked.length ? `${picked.length}/` : ""}{p.areas.length} khu vực)</span>
-                  </label>
-                  {on ? (
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-xs text-muted-foreground">Chọn khu vực (để trống = tất cả)</summary>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                        {p.areas.map((a) => (
-                          <label key={a.code} className="flex items-center gap-1 text-xs">
-                            <input type="checkbox" checked={picked.includes(a.code)} onChange={() => setAreas({ ...areas, [p.key]: toggle(picked, a.code) })} />
-                            {a.name}
-                          </label>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </div>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Chọn nhanh:</span>
+            {tiers.map((t) => (
+              <Button key={t} type="button" size="sm" variant="outline" onClick={() => pickTier(t)}>
+                {SCAN_TIER_LABEL[t]}
+              </Button>
+            ))}
+            <Button type="button" size="sm" variant="ghost" onClick={() => pickTier("ALL")}>
+              Tất cả
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => pickTier("NONE")}>
+              Bỏ chọn
+            </Button>
           </div>
+          <p className="text-xs text-muted-foreground">Chọn nhiều đợt trong một chiến dịch vẫn quét theo thứ tự ① → ② → ③ (khu vực ven biển xét theo tỉnh cũ trước sáp nhập).</p>
+          {tiers.map((t) => {
+            const group = provinces.filter((p) => p.tier === t);
+            if (!group.length) return null;
+            return (
+              <div key={t} className="space-y-1">
+                <div className="text-xs font-semibold">{SCAN_TIER_LABEL[t]}</div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {group.map((p) => {
+                    const on = selProv.includes(p.key);
+                    const picked = areas[p.key] ?? [];
+                    return (
+                      <div key={p.key} className="rounded-md border p-2">
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <input type="checkbox" checked={on} onChange={() => setSelProv(toggle(selProv, p.key))} />
+                          {p.label} <span className="text-xs font-normal text-muted-foreground">({picked.length ? `${picked.length}/` : ""}{p.areas.length} khu vực)</span>
+                        </label>
+                        {on ? (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-xs text-muted-foreground">Chọn khu vực (để trống = tất cả)</summary>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                              {p.areas.map((a) => (
+                                <label key={a.code} className="flex items-center gap-1 text-xs">
+                                  <input type="checkbox" checked={picked.includes(a.code)} onChange={() => setAreas({ ...areas, [p.key]: toggle(picked, a.code) })} />
+                                  {a.name}
+                                  {a.tier === 3 && p.tier !== 3 ? <span className="text-muted-foreground">(biển)</span> : null}
+                                </label>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
           <label className={lbl}>
             Khu vực tự khai — mỗi dòng «Tỉnh: khu vực 1, khu vực 2» (vd «Nghệ An: Vinh, Cửa Lò»)
             <Textarea rows={2} value={customAreas} onChange={(e) => setCustomAreas(e.target.value)} />

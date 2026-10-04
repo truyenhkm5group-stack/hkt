@@ -86,7 +86,8 @@ Phần này là cách kỹ thuật đã làm. Nó không phải ý kiến pháp 
   `minNewRatioForNextPage`.
 - **Ô còn mới không quét lại:** ô đã quét trong vòng `cellFreshDays` ngày (mặc định 30) được đánh dấu `SKIPPED_FRESH`
   khi chiến dịch bắt đầu.
-- **Ưu tiên ô:** từ khoá từng ra nhiều lead mới trên mỗi lượt quét thì được quét trước.
+- **Ưu tiên ô:** hạng quét đi trước (① tỉnh quét trước → ② không có biển → ③ ven biển, mục 14). TRONG cùng hạng, từ khoá
+  từng ra nhiều lead mới trên mỗi lượt quét thì được quét trước.
 
 Lưu ý khi so sánh chi phí: Text Search tính tiền theo **lượt tìm** (tới 20 địa điểm mỗi lượt), còn Place Details tính
 theo **địa điểm**. Vì vậy mức `ENTERPRISE` thường rẻ hơn tính trên mỗi lead khi tỉ lệ địa điểm qua lọc cao. Trang
@@ -204,6 +205,26 @@ Kênh liên hệ (bộ chuyển kênh `channelAction`) gồm Gọi điện · Za
 kênh là **thủ công**: ERP dựng link mở app và cho chép nội dung, người bấm gửi rồi ghi kết quả. Muốn thêm kênh tự gửi,
 viết bộ chuyển kênh mới và mở mức `AUTO_SEND`; hàng đợi không phải viết lại.
 
+**Gửi nhân viên thị trường** (`lib/wholesale/field-handoff.ts`, chủ shop yêu cầu 04/10/2026). Chủ shop gọi điện chào
+hàng trước, rồi chuyển khách cho nhân viên thị trường tới tận nơi. Có hai cách bấm:
+
+- nút «Gửi NV thị trường» ở trang lead;
+- thao tác hàng loạt ở danh sách lead (tối đa 50 khách mỗi lượt).
+
+Tin đi qua `deliverMessage`, dùng kết nối nhắn tin của tổ chức mà cấu hình chọn: Telegram mặc định, Zalo hoặc Lark cũng
+được. Nơi nhận là một danh sách «tên → Chat ID» khai ở `/wholesale/settings`. Mỗi lead đi thành một tin riêng, để nhân viên
+chuyển tiếp hay ghim được từng khách. Bấm lại trong cùng phút không gửi lần hai. Lead KHÔNG LIÊN HỆ và lead ngoài phạm vi
+dữ liệu của người bấm bị bỏ qua, có ghi lý do.
+
+Tin chỉ mang **dữ liệu của shop**, kèm link Google Maps:
+
+- Cuộc gọi «Nghe máy» hoặc «Hẹn gọi lại» chép tên và SĐT vừa gọi được thành dữ liệu của shop (`phone_source =
+  VERIFIED_CALL`).
+- Địa chỉ chỉ được chép khi người gọi tích «khách xác nhận đúng địa chỉ».
+- Lead chưa gọi thì tin ghi «chưa gọi xác nhận», và nhân viên mở bản đồ để xem tên, vị trí.
+
+Làm vậy vì nội dung Google không được mang ra ngoài ứng dụng (mục 4).
+
 **Lời chào AI** chỉ diễn đạt lại từ dữ kiện có thật: tên, loại hình và khu vực của lead, cùng tên shop, sản phẩm, MOQ,
 giao hàng và khuyến mãi khai ở cấu hình. Câu AI chứa số, link hoặc email không có trong dữ kiện bị loại, và hệ thống dùng
 mẫu thay thế. Chi phí AI ghi vào sổ AI của nền tảng (`lead_hunter`), chịu hạn mức của gói.
@@ -222,7 +243,7 @@ Phạm vi dữ liệu `WHOLESALE_LEADS` lọc theo `assigned_to_user_id`. Nhân 
 chỉ thấy và chỉ chạm được lead giao cho mình. Phạm vi được kiểm cả ở danh sách lẫn ở từng thao tác ghi (`rowInScope`).
 
 Nhật ký ghi các hành động: `WHOLESALE_CAMPAIGN_CREATE`, `WHOLESALE_SCAN_START/PAUSE/RESUME/STOP`,
-`WHOLESALE_LEAD_IMPORT`, `WHOLESALE_LEAD_STATUS/EDIT/ASSIGN/CONTACT/DNC/OPPORTUNITY/CONVERT/EXPORT/CAMPAIGN`,
+`WHOLESALE_LEAD_IMPORT`, `WHOLESALE_LEAD_STATUS/EDIT/ASSIGN/CONTACT/DNC/OPPORTUNITY/CONVERT/EXPORT/CAMPAIGN/HANDOFF`,
 `WHOLESALE_OUTREACH_QUEUE`, `WHOLESALE_CONFIG_UPDATE`, `WHOLESALE_SUPPRESSION_REMOVE`.
 
 ## 13. Cách lấy khoá Google Places API
@@ -245,8 +266,19 @@ xuống trình duyệt và luôn đi trong tiêu đề `X-Goog-Api-Key`, không 
 1. Bật module «Săn khách sỉ» ở Cài đặt → Module (tổ chức đã cài mẫu hải sản 1.1.0 thì module đã bật sẵn).
 2. Khai khoá Google (mục 13). Ở `/wholesale/settings`, đặt trần ngày / tháng theo ngân sách, kiểm vùng phục vụ và
    thông tin lời chào (MOQ, giao hàng, khuyến mãi).
-3. Ở `/wholesale/lead-hunter`, bấm «Dùng mẫu» trên mẫu **HSLC – Wholesale F&B Prospects** (6 tỉnh, 20 từ khoá, 9 nhóm
-   khách, bắt buộc có SĐT).
+3. Ở `/wholesale/lead-hunter`, bấm «Dùng mẫu» trên mẫu **HSLC – Wholesale F&B Prospects**. Mỗi mẫu có 20 từ khoá,
+   9 nhóm khách và bắt buộc có SĐT. Danh sách quét có đủ 34 tỉnh/thành sau sáp nhập 2025, chia ba đợt theo thứ tự chủ shop
+   chốt ngày 04/10/2026:
+   - ① Hà Nội + TP.HCM;
+   - ② vùng không có biển;
+   - ③ ven biển.
+
+   «Ven biển» xét theo **tỉnh cũ** của khu vực, tức danh sách 28 tỉnh giáp biển trước sáp nhập. Vì vậy Pleiku, Buôn Ma
+   Thuột, Đà Lạt và Kon Tum ở đợt ②, dù tỉnh mới của chúng nay giáp biển.
+
+   Chọn nhiều đợt trong một chiến dịch thì job vẫn quét theo thứ tự ① → ② → ③: độ ưu tiên ô = hạng quét × 100.000 +
+   kinh nghiệm từ khoá (`cellScanPriority`). Tỉnh quét trước và luật biển sửa được ở `/wholesale/settings`, mục
+   «Thứ tự quét».
 4. Lần đầu nên thu nhỏ chiến dịch: một tỉnh, vài khu vực, một hai nhóm từ khoá. Bấm «Xem trước truy vấn» để xem số truy
    vấn và chi phí, rồi bấm «Lưu & bắt đầu quét».
 5. Theo dõi tiến độ trực tiếp trên thẻ chiến dịch. Xong thì mở «Khách sỉ tiềm năng», lọc hạng A/B, giao cho nhân viên,

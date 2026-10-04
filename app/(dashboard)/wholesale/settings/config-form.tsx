@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { saveLeadHunterConfigAction } from "@/lib/actions/wholesale";
+import { MESSAGING_CONNECTOR_KEYS, MESSAGING_CONNECTOR_LABEL, MESSAGING_DESTINATION_HINT } from "@/lib/messaging/types";
 import { DISCOVERY_TIER_LABEL, DISCOVERY_TIERS, OUTREACH_AUTOMATION_LABEL, OUTREACH_AUTOMATION_LEVELS, PLACES_SKU_LABEL, PLACES_SKUS, type LeadHunterConfig } from "@/lib/wholesale/config";
 
 const lbl = "block text-xs font-medium text-muted-foreground";
@@ -103,6 +104,61 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
             <input type="checkbox" checked={c.websiteEnrichment.enabled} onChange={(e) => set("websiteEnrichment", { ...c.websiteEnrichment, enabled: e.target.checked })} /> Đọc trang liên hệ công khai của website
           </label>
         </div>
+        <div className="space-y-1">
+          <span className={lbl}>Thứ tự quét — tỉnh quét trước (áp khi bấm «Bắt đầu quét»; chiến dịch đang chạy giữ thứ tự cũ)</span>
+          <div className="flex flex-wrap gap-2">
+            {provinces.map((p) => (
+              <label key={p.key} className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm">
+                <input
+                  type="checkbox"
+                  checked={c.scanPriority.firstProvinces.includes(p.key)}
+                  onChange={(e) =>
+                    set("scanPriority", {
+                      ...c.scanPriority,
+                      firstProvinces: e.target.checked ? [...c.scanPriority.firstProvinces, p.key] : c.scanPriority.firstProvinces.filter((k) => k !== p.key),
+                    })
+                  }
+                />
+                {p.label}
+              </label>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={c.scanPriority.inlandBeforeCoastal} onChange={(e) => set("scanPriority", { ...c.scanPriority, inlandBeforeCoastal: e.target.checked })} /> Sau đó quét vùng KHÔNG có biển trước vùng ven biển (xét theo tỉnh cũ trước sáp nhập)
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-semibold">Gửi khách cho nhân viên thị trường</legend>
+        <p className="text-xs text-muted-foreground">
+          Dùng kết nối nhắn tin của tổ chức (Cài đặt → Kết nối). Telegram: tạo bot bằng @BotFather, thêm bot vào nhóm của nhân viên thị trường, dán token ở trang Kết nối rồi bấm «Tìm chat» để lấy Chat ID của nhóm. Mỗi dòng dưới đây là một nơi nhận (vd một nhóm theo khu vực); để trống thì gửi vào chat mặc định của kết nối.
+        </p>
+        <label className={lbl}>
+          Kênh gửi
+          <select className={sel} value={c.fieldSales.connectorKey} onChange={(e) => set("fieldSales", { ...c.fieldSales, connectorKey: e.target.value as LeadHunterConfig["fieldSales"]["connectorKey"] })}>
+            {MESSAGING_CONNECTOR_KEYS.map((k) => (
+              <option key={k} value={k}>
+                {MESSAGING_CONNECTOR_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-[11px] text-muted-foreground">{MESSAGING_DESTINATION_HINT[c.fieldSales.connectorKey]}</p>
+        {c.fieldSales.destinations.map((d, i) => (
+          <div key={i} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+            <Input placeholder="Tên nơi nhận (vd NV thị trường Hà Nội)" value={d.label} onChange={(e) => set("fieldSales", { ...c.fieldSales, destinations: c.fieldSales.destinations.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
+            <Input placeholder="Chat ID (vd -1001234567890)" value={d.chatId} onChange={(e) => set("fieldSales", { ...c.fieldSales, destinations: c.fieldSales.destinations.map((x, j) => (j === i ? { ...x, chatId: e.target.value } : x)) })} />
+            <Button type="button" size="sm" variant="ghost" onClick={() => set("fieldSales", { ...c.fieldSales, destinations: c.fieldSales.destinations.filter((_, j) => j !== i) })}>
+              Xoá
+            </Button>
+          </div>
+        ))}
+        {c.fieldSales.destinations.length < 20 ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => set("fieldSales", { ...c.fieldSales, destinations: [...c.fieldSales.destinations, { label: "", chatId: "" }] })}>
+            Thêm nơi nhận
+          </Button>
+        ) : null}
       </fieldset>
 
       <fieldset className="space-y-2">

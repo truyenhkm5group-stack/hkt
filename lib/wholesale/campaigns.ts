@@ -3,8 +3,8 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
-import { parseCustomAreas, SEARCH_PROVINCES, type SearchProvince } from "@/lib/wholesale/areas";
-import { DEFAULT_KEYWORD_GROUPS, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, type KeywordGroup } from "@/lib/wholesale/config";
+import { cellScanPriority, parseCustomAreas, SCAN_TIER_LABEL, SEARCH_PROVINCES, scanTier, type ScanPriority, type ScanTier, type SearchProvince } from "@/lib/wholesale/areas";
+import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, type KeywordGroup } from "@/lib/wholesale/config";
 import type { CampaignStatus } from "@/lib/wholesale/constants";
 import { type CostEstimate, enabledKeywords, estimateCost, planNearbyCell, planTextCells, type PlannedCell } from "@/lib/wholesale/query-plan";
 import { LEAD_SEGMENTS, type LeadSegment } from "@/lib/wholesale/segments";
@@ -261,6 +261,11 @@ export async function startCampaignCore(user: SessionUser, id: string, now = new
   }
   const since = new Date(now.getTime() - cfg.cellFreshDays * 86_400_000);
   const prio = await keywordPriorities();
+  // Hạng quét theo ảnh chụp tỉnh của CHÍNH chiến dịch (cờ ven biển); chiến dịch cũ thiếu cờ thì `scanTier` tra danh sách chuẩn.
+  const snapshotArea = new Map<string, { code: string; coastal?: boolean }>();
+  for (const p of (camp.provinces ?? []) as SearchProvince[]) for (const a of p.areas ?? []) snapshotArea.set(`${p.key}|${a.code}`, a);
+  const priorityOf = (cell: { keyword: string; provinceKey: string; areaCode: string }) =>
+    cellScanPriority(scanTier(cell.provinceKey, snapshotArea.get(`${cell.provinceKey}|${cell.areaCode}`) ?? { code: cell.areaCode }, cfg.scanPriority), prio.get(cell.keyword) ?? 0);
   let queued = 0;
   let skippedFresh = 0;
   for (let i = 0; i < plan.cells.length; i += 500) {
@@ -270,7 +275,7 @@ export async function startCampaignCore(user: SessionUser, id: string, now = new
       const fresh = cell.lastStatus === "DONE" && cell.lastScannedAt != null && cell.lastScannedAt >= since;
       if (fresh) skippedFresh++;
       else queued++;
-      return { campaignId: camp.id, cellId: cell.id, status: fresh ? "SKIPPED_FRESH" : "PENDING", priority: prio.get(cell.keyword) ?? 0, finishedAt: fresh ? now : null };
+      return { campaignId: camp.id, cellId: cell.id, status: fresh ? "SKIPPED_FRESH" : "PENDING", priority: priorityOf(cell), finishedAt: fresh ? now : null };
     });
     if (rows.length) await db.insert(schema.wholesaleCampaignCells).values(rows).onConflictDoNothing({ target: [schema.wholesaleCampaignCells.campaignId, schema.wholesaleCampaignCells.cellId] });
   }
@@ -331,12 +336,29 @@ export async function changeCampaignStateCore(user: SessionUser, id: string, op:
 export const HSLC_TEMPLATE_KEY = "hslc-wholesale-fnb";
 export const HSLC_TEMPLATE_NAME = "HSLC – Wholesale F&B Prospects";
 
-/** Mẫu chiến dịch đầu tiên cho HSLC (đặc tả mục 21). Mẫu KHÔNG tự chạy (luật 23) — người bấm «Dùng mẫu» mới có chiến dịch. */
-export function hslcTemplateValues() {
+/**
+ * Ba đợt quét theo thứ tự chủ shop chốt 04/10/2026. Đợt ① giữ khoá mẫu cũ (`hslc-wholesale-fnb`) để tổ chức đã có mẫu
+ * được cập nhật tại chỗ thay vì sinh thêm một dòng. Phạm vi mỗi đợt SUY RA từ `scanPriority` + cờ ven biển — không phải
+ * danh sách thứ hai: chủ shop đổi «tỉnh quét trước» thì ba mẫu đổi theo ở lần mở trang kế tiếp.
+ */
+export const HSLC_TEMPLATES = [
+  { key: HSLC_TEMPLATE_KEY, tier: 1, name: `${HSLC_TEMPLATE_NAME} · ① Hà Nội + TP.HCM` },
+  { key: "hslc-wholesale-fnb-inland", tier: 2, name: `${HSLC_TEMPLATE_NAME} · ② Vùng không có biển` },
+  { key: "hslc-wholesale-fnb-coastal", tier: 3, name: `${HSLC_TEMPLATE_NAME} · ③ Ven biển` },
+] as const satisfies readonly { key: string; tier: ScanTier; name: string }[];
+
+/** Tỉnh / khu vực thuộc đúng một hạng quét (HÀM THUẦN). Tỉnh không còn khu vực nào thì bỏ hẳn. */
+export function provincesOfTier(tier: ScanTier, prio: ScanPriority): SearchProvince[] {
+  return SEARCH_PROVINCES.map((p) => ({ ...p, areas: p.areas.filter((a) => scanTier(p.key, a, prio) === tier) })).filter((p) => p.areas.length > 0);
+}
+
+/** Giá trị chung của mẫu chiến dịch HSLC (đặc tả mục 21). Mẫu KHÔNG tự chạy (luật 23) — người bấm «Dùng mẫu» mới có chiến dịch. */
+export function hslcTemplateValues(tier: ScanTier = 1, prio: ScanPriority = DEFAULT_LEAD_HUNTER_CONFIG.scanPriority) {
+  const t = HSLC_TEMPLATES.find((x) => x.tier === tier) ?? HSLC_TEMPLATES[0];
   return {
-    name: HSLC_TEMPLATE_NAME,
+    name: t.name,
     productFocus: "Hải sản đóng gói cho nhà hàng / quán ăn / khách sạn",
-    provinces: SEARCH_PROVINCES.map((p) => ({ ...p, areas: [...p.areas] })),
+    provinces: provincesOfTier(t.tier, prio),
     keywordGroups: DEFAULT_KEYWORD_GROUPS.map((g) => ({ ...g, keywords: [...g.keywords] })),
     excludeKeywords: ["cà phê", "cafe", "trà sữa", "bánh mì", "chay"],
     targetSegments: [...DEFAULT_TARGET_SEGMENTS],
@@ -347,17 +369,29 @@ export function hslcTemplateValues() {
     requireWebsite: false,
     searchMode: "TEXT" as const,
     discoveryTier: "PRO" as const,
-    note: "Ưu tiên: có SĐT, đang hoạt động, điểm ≥ 65. Không tự gửi tin hàng loạt — lead đi Tìm thấy → Đủ điều kiện → Hàng đợi liên hệ.",
+    note: `${SCAN_TIER_LABEL[t.tier]}. Ưu tiên: có SĐT, đang hoạt động, điểm ≥ 65. Không tự gửi tin hàng loạt — lead đi Tìm thấy → Đủ điều kiện → Hàng đợi liên hệ.`,
   };
 }
 
-/** Dựng mẫu nếu chưa có (gọi khi mở trang Săn khách sỉ). Idempotent theo `template_key`. */
+/**
+ * Dựng / cập nhật ba mẫu (gọi khi mở trang Săn khách sỉ). Idempotent theo `template_key`; chỉ GHI khi phạm vi hoặc tên mẫu
+ * thật sự khác — mở trang không sinh một lượt UPDATE mỗi lần. Mẫu không bao giờ chạy nên sửa nó không đụng tới việc gì.
+ */
 export async function ensureTemplateCampaign(): Promise<void> {
   const db = await getDb();
-  await db
-    .insert(schema.wholesaleCampaigns)
-    .values({ ...hslcTemplateValues(), status: "DRAFT", isTemplate: true, templateKey: HSLC_TEMPLATE_KEY, createdByName: "Mẫu hệ thống" })
-    .onConflictDoNothing({ target: schema.wholesaleCampaigns.templateKey });
+  const cfg = await getLeadHunterConfig();
+  const c = schema.wholesaleCampaigns;
+  for (const t of HSLC_TEMPLATES) {
+    const v = hslcTemplateValues(t.tier, cfg.scanPriority);
+    await db
+      .insert(c)
+      .values({ ...v, status: "DRAFT", isTemplate: true, templateKey: t.key, createdByName: "Mẫu hệ thống" })
+      .onConflictDoUpdate({
+        target: c.templateKey,
+        set: { name: v.name, provinces: v.provinces, note: v.note, updatedAt: new Date() },
+        setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name)`,
+      });
+  }
 }
 
 /** «Dùng mẫu»: chép mẫu thành một chiến dịch NHÁP mới — người xem lại rồi mới bấm Bắt đầu. */

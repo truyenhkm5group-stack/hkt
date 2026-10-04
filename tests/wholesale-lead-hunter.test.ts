@@ -26,8 +26,10 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { parseListParams } from "@/lib/search-params";
 import { runJob } from "@/lib/sync/jobs";
 import { listWholesaleLeads, wholesaleDashboard } from "@/lib/queries/wholesale";
-import { areaCode, parseCustomAreas } from "@/lib/wholesale/areas";
-import { changeCampaignStateCore, createCampaignCore, previewCampaignCore, startCampaignCore } from "@/lib/wholesale/campaigns";
+import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
+import { provinceRegion } from "@/lib/constants/vn-regions";
+import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
+import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
 import { DEFAULT_LEAD_HUNTER_CONFIG, mergeLeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { purgeExpiredSnapshots, runLeadHunterTick } from "@/lib/wholesale/engine";
@@ -151,6 +153,103 @@ function testPlanAndCost() {
   assert.equal(ent.maxMicros, 100 * 3 * skuCostMicros("TEXT_SEARCH_ENTERPRISE", cfg), "Enterprise: không có lượt chi tiết");
   assert.equal(skuCostMicros("TEXT_SEARCH_PRO", cfg), 32_000, "32 US$ / 1.000 lượt = 0,032 US$ = 32.000 micro-USD");
   assert.equal(skuCostMicros("TEXT_SEARCH_IDS", cfg), 0);
+}
+
+/** Thứ tự quét chủ shop chốt 04/10/2026: Hà Nội + TP.HCM → không có biển → ven biển (theo tỉnh CŨ của khu vực). */
+function testScanPriority() {
+  assert.equal(SEARCH_PROVINCES.length, 34, "đủ 34 tỉnh / thành sau sáp nhập 2025");
+  assert.equal(new Set(SEARCH_PROVINCES.map((p) => p.key)).size, 34);
+  for (const p of SEARCH_PROVINCES) {
+    assert.ok(provinceRegion(p.key), `${p.key}: khoá tỉnh phải là khoá chuẩn của vn-regions (điểm vị trí + đọc địa chỉ dùng nó)`);
+    assert.equal(new Set(p.areas.map((a) => a.code)).size, p.areas.length, `${p.key}: mã khu vực trùng`);
+  }
+  const prio = DEFAULT_LEAD_HUNTER_CONFIG.scanPriority;
+  const tierOf = (prov: string, area: string) => {
+    const p = SEARCH_PROVINCES.find((x) => x.key === prov)!;
+    return scanTier(prov, p.areas.find((a) => a.name === area)!, prio);
+  };
+  assert.equal(tierOf("ha noi", "Cầu Giấy"), 1);
+  assert.equal(tierOf("ho chi minh", "Vũng Tàu"), 1, "tỉnh quét trước thắng cờ ven biển");
+  assert.equal(tierOf("gia lai", "Pleiku"), 2, "Pleiku thuộc Gia Lai cũ — không có biển dù Gia Lai mới giáp biển");
+  assert.equal(tierOf("gia lai", "Quy Nhơn"), 3);
+  assert.equal(tierOf("lam dong", "Đà Lạt"), 2);
+  assert.equal(tierOf("lam dong", "Phan Thiết"), 3);
+  assert.equal(tierOf("quang ngai", "Kon Tum"), 2);
+  assert.equal(tierOf("ninh binh", "Phủ Lý"), 2);
+  assert.equal(tierOf("ninh binh", "Nam Định"), 3);
+  assert.equal(tierOf("hai phong", "TP Hải Dương"), 2);
+  assert.equal(tierOf("hai phong", "Đồ Sơn"), 3);
+  assert.equal(scanTier("gia lai", { code: "quy-nhon" }, prio), 3, "ảnh chụp cũ không mang cờ ⇒ tra danh sách chuẩn");
+  assert.equal(scanTier("gia lai", { code: "quy-nhon" }, { ...prio, inlandBeforeCoastal: false }), 2, "tắt luật biển ⇒ mọi tỉnh còn lại cùng hạng");
+  assert.equal(provinceScanTier(SEARCH_PROVINCES.find((p) => p.key === "gia lai")!, prio), 2, "tỉnh có khu vực không biển nằm ở nhóm ②");
+  // Hạng quyết định trước, kinh nghiệm từ khoá chỉ xếp TRONG hạng.
+  assert.ok(cellScanPriority(1, 0) > cellScanPriority(2, 1e9));
+  assert.ok(cellScanPriority(2, 0) > cellScanPriority(3, 1e9));
+  assert.ok(cellScanPriority(2, 7) > cellScanPriority(2, 3));
+  assert.equal(cellScanPriority(3, Number.NaN), 0);
+  // Ba mẫu chia trọn danh sách: mỗi khu vực đúng một đợt.
+  const seen = new Map<string, number>();
+  for (const t of [1, 2, 3] as const) for (const p of provincesOfTier(t, prio)) for (const a of p.areas) seen.set(`${p.key}|${a.code}`, (seen.get(`${p.key}|${a.code}`) ?? 0) + 1);
+  assert.equal(seen.size, SEARCH_PROVINCES.reduce((n, p) => n + p.areas.length, 0));
+  assert.ok([...seen.values()].every((n) => n === 1));
+  assert.deepEqual(hslcTemplateValues(1).provinces.map((p) => p.key).sort(), ["ha noi", "ho chi minh"]);
+  assert.ok(hslcTemplateValues(2).provinces.every((p) => p.areas.every((a) => !a.coastal)));
+  assert.ok(hslcTemplateValues(3).provinces.every((p) => p.areas.every((a) => a.coastal)));
+  // Khu vực tự khai: có trong danh sách ⇒ mang cờ chuẩn; lạ ⇒ không có biển (không đoán).
+  const custom = parseCustomAreas("Gia Lai: Quy Nhơn, Chư Sê");
+  assert.deepEqual(custom.provinces[0]!.areas.map((a) => a.coastal), [true, false]);
+  // Vùng phục vụ: tỉnh quét trước = ưu tiên; mọi tỉnh khác trong danh sách = giao được.
+  const areas = DEFAULT_LEAD_HUNTER_CONFIG.serviceAreas;
+  assert.equal(areas["ha noi"], "PRIORITY");
+  assert.equal(areas["can tho"], "SERVED");
+  assert.equal(Object.keys(areas).length, 34);
+  const merged = mergeLeadHunterConfig({ budget: { dailyUsd: 2 } });
+  assert.deepEqual(merged.scanPriority, prio, "bản lưu cũ (chưa có khoá) ⇒ lấy mặc định");
+  assert.equal(merged.fieldSales.connectorKey, "telegram-bot");
+}
+
+function testFieldHandoffMessage() {
+  const base = {
+    ownName: null,
+    ownPhone: null,
+    ownAddress: null,
+    areaName: "Cầu Giấy",
+    provinceLabel: "Hà Nội",
+    mapsUrl: mapsLinkOf("ChIJabc", null, "Cầu Giấy"),
+    segment: "SEAFOOD_RESTAURANT",
+    grade: "A",
+    score: 86,
+    status: "QUALIFIED",
+    lastCall: null,
+    response: null,
+    nextAction: null,
+    nextFollowupAt: null,
+    opportunityNote: null,
+    senderName: "Chủ shop",
+    note: null,
+  };
+  const cold = fieldHandoffMessage(base);
+  assert.match(cold.title, /Cầu Giấy, Hà Nội/);
+  assert.match(cold.body, /Chưa gọi xác nhận tên/);
+  assert.match(cold.body, /Chưa có SĐT đã xác nhận/);
+  assert.match(cold.body, /query_place_id=ChIJabc/, "chưa gọi ⇒ nhân viên mở bản đồ");
+  assert.ok(cold.body.includes("hạng A (86 điểm)"), cold.body);
+  const warm = fieldHandoffMessage({ ...base, ownName: "Hải Sản Biển Đông", ownPhone: "+84905123456", lastCall: { outcome: "ANSWERED", note: "Muốn xem mẫu tôm", at: new Date("2026-10-04T03:00:00Z") }, nextAction: "Mang mẫu tôm", note: "Ghé trước 10h" });
+  assert.ok(warm.body.includes("Hải Sản Biển Đông"));
+  assert.ok(warm.body.includes("0905 123 456"), warm.body);
+  assert.ok(warm.body.includes("Nghe máy, đã nói chuyện — Muốn xem mẫu tôm"), warm.body);
+  assert.ok(warm.body.includes("Lời dặn: Ghé trước 10h"));
+  assert.equal(mapsLinkOf(null, null, "x"), null);
+  assert.equal(mapsLinkOf("ChIJabc", "https://maps.google.com/?cid=1", null), "https://maps.google.com/?cid=1");
+  assert.ok(mapsLinkOf("ChIJabc", "javascript:alert(1)", null)!.startsWith("https://www.google.com/maps/search/"), "link lạ ⇒ tự dựng link chuẩn");
+  // Gọi xác nhận ⇒ tên + SĐT thành của shop; địa chỉ chỉ khi tích; ô nhân viên đã sửa không bị đè.
+  const lead = { businessName: null, address: null, normalizedPhone: null, staffEditedFields: [] as string[] };
+  const snap = { displayName: "Biển Đông", formattedAddress: "12 Bạch Đằng", normalizedPhone: "+84905123456" };
+  assert.deepEqual(verifiedCallPatch(lead, snap, "ANSWERED", false), { businessName: "Biển Đông", normalizedPhone: "+84905123456" });
+  assert.deepEqual(verifiedCallPatch(lead, snap, "CALLBACK", true), { businessName: "Biển Đông", normalizedPhone: "+84905123456", address: "12 Bạch Đằng" });
+  assert.deepEqual(verifiedCallPatch(lead, snap, "NO_ANSWER", true), {}, "không nghe máy ⇒ chưa xác nhận gì");
+  assert.deepEqual(verifiedCallPatch({ ...lead, staffEditedFields: ["businessName"] }, snap, "ANSWERED", false), { normalizedPhone: "+84905123456" });
+  assert.deepEqual(verifiedCallPatch(lead, null, "ANSWERED", true), {}, "dữ liệu Google đã xoá ⇒ không có gì để chép");
 }
 
 function testDedupeKeys() {
@@ -593,6 +692,10 @@ async function testDb() {
       assert.ok("ok" in call && call.status === "CONTACTED");
       const afterCall = await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, seafood!.id) });
       assert.ok(afterCall?.firstContactAt && afterCall.firstResponseAt && afterCall.contactAttemptCount === 1);
+      assert.equal(afterCall?.businessName, mainName, "nghe máy ⇒ tên thành dữ liệu của shop");
+      assert.equal(afterCall?.normalizedPhone, "+84905123456");
+      assert.equal(afterCall?.phoneSource, "VERIFIED_CALL");
+      assert.equal(afterCall?.address, null, "chưa tích «khách xác nhận địa chỉ» ⇒ không chép địa chỉ");
 
       // ── Hàng đợi liên hệ: soạn (mẫu) → duyệt → đã gửi → kết quả ──
       const prep = await prepareOutreachCore(sales, seafood!.id, { channel: "ZALO", useAi: false });
@@ -656,6 +759,44 @@ async function testDb() {
       assert.equal(Number(custCount[0]!.n), 1);
       assert.ok("error" in (await updateLeadStatusCore(sales, seafood!.id, { status: "NEGOTIATING" })), "đã thành khách ⇒ không lùi trạng thái");
 
+      // ── Gửi nhân viên thị trường: qua sổ gửi tin (hộp thử), một tin / lead, bấm lại cùng phút không gửi lần hai ──
+      assert.ok("ok" in (await saveConnection(admin, { connectorKey: "sandbox-messaging", settings: { channelName: "Nhóm thị trường" } })));
+      assert.ok("ok" in (await testOrgConnection(admin, "sandbox-messaging")));
+      assert.ok("ok" in (await setConnectionStatus(admin, "sandbox-messaging", "ACTIVE")));
+      const cfgNow = mergeLeadHunterConfig((await db.query.settings.findFirst({ where: eq(schema.settings.key, "wholesale.leadHunter") }))?.value);
+      await saveLeadHunterConfig({ ...cfgNow, fieldSales: { connectorKey: "sandbox-messaging", destinations: [{ label: "NV thị trường Đà Nẵng", chatId: "Nhóm ĐN" }] } });
+      const at = new Date();
+      const ho = await sendLeadsToFieldCore(sales, { leadIds: [seafood!.id, hotpot!.id], destination: 0, note: "Ghé trước 10h" }, at);
+      assert.ok("ok" in ho, JSON.stringify(ho));
+      assert.equal(ho.report.sent, 1);
+      assert.deepEqual(ho.report.skipped.map((x) => x.reason), ["Ngoài phạm vi dữ liệu của bạn"], "Sales «Được giao» không gửi được lead của người khác");
+      const dl = await db.select().from(schema.messagingDeliveries).where(and(eq(schema.messagingDeliveries.subjectType, "WHOLESALE_LEAD"), eq(schema.messagingDeliveries.subjectId, seafood!.id)));
+      assert.equal(dl.length, 1);
+      assert.equal(dl[0]!.status, "SENT");
+      assert.equal(dl[0]!.destination, "Nhóm ĐN");
+      assert.ok(dl[0]!.body.includes(mainName) && dl[0]!.body.includes("0905 123 456") && dl[0]!.body.includes("Ghé trước 10h"), dl[0]!.body);
+      const twice = await sendLeadsToFieldCore(sales, { leadIds: [seafood!.id], destination: 0, note: "" }, at);
+      assert.ok("ok" in twice && twice.report.sent === 0 && twice.report.duplicate === 1, "bấm hai lần cùng phút không đẻ tin thứ hai");
+      const dncSend = await sendLeadsToFieldCore(admin, { leadIds: [hotpot!.id], destination: null, note: "" }, at);
+      assert.ok("ok" in dncSend && dncSend.report.sent === 0 && /KHÔNG LIÊN HỆ/.test(dncSend.report.skipped[0]?.reason ?? ""), JSON.stringify(dncSend));
+      assert.ok("error" in (await sendLeadsToFieldCore(admin, { leadIds: [seafood!.id], destination: 5, note: "" }, at)), "nơi nhận ngoài cấu hình ⇒ từ chối");
+      const handoffAct = await db.select().from(schema.wholesaleLeadActivities).where(and(eq(schema.wholesaleLeadActivities.leadId, seafood!.id), eq(schema.wholesaleLeadActivities.kind, "ASSIGN")));
+      assert.ok(handoffAct.some((x) => x.note.includes("NV thị trường Đà Nẵng")));
+
+      // ── Thứ tự quét: Hà Nội trước, rồi không biển (Pleiku), rồi ven biển (Quy Nhơn) — bất kể thứ tự khai ──
+      const order = await createCampaignCore(admin, { ...campInput, name: "Thứ tự", customAreas: ["Gia Lai: Quy Nhơn, Pleiku", "Hà Nội: Cầu Giấy"].join("\n") });
+      assert.ok("ok" in order);
+      assert.ok("ok" in (await startCampaignCore(admin, order.id)));
+      const prioRows = await db
+        .select({ area: schema.wholesaleSearchCells.areaCode, priority: schema.wholesaleCampaignCells.priority })
+        .from(schema.wholesaleCampaignCells)
+        .innerJoin(schema.wholesaleSearchCells, eq(schema.wholesaleSearchCells.id, schema.wholesaleCampaignCells.cellId))
+        .where(eq(schema.wholesaleCampaignCells.campaignId, order.id));
+      const maxOf = (a: string) => Math.max(...prioRows.filter((r) => r.area === a).map((r) => r.priority));
+      const minOf = (a: string) => Math.min(...prioRows.filter((r) => r.area === a).map((r) => r.priority));
+      assert.ok(minOf("cau-giay") > maxOf("pleiku") && minOf("pleiku") > maxOf("quy-nhon"), JSON.stringify(prioRows));
+      assert.ok("ok" in (await changeCampaignStateCore(admin, order.id, "stop")));
+
       // ── Bảng hiệu quả chạy được, phễu đếm đúng ──
       const dash = await wholesaleDashboard({ from: null, to: null, dimension: "keyword", decision: { allow: "ALL", explain: "test" } });
       assert.ok(dash.funnel.discovered >= 4);
@@ -686,11 +827,13 @@ export async function testWholesaleLeadHunter() {
   testSegments();
   testScoring();
   testPlanAndCost();
+  testScanPriority();
+  testFieldHandoffMessage();
   testDedupeKeys();
   testWebsiteParse();
   await testWebsiteGuards();
   await testPlacesClient();
   testOpenerAndConfig();
   await testDb();
-  console.log("✓ Săn khách sỉ: SĐT VN · chấm điểm xác định · ô quét + chi phí · Google giả (khoá trong tiêu đề) · khử trùng 10 lần = 1 lead · tạm dừng/tiếp tục · lỗi API · trần ngân sách · không liên hệ · nhập tệp · chuyển khách · phạm vi dữ liệu · hết hạn lưu");
+  console.log("✓ Săn khách sỉ: SĐT VN · chấm điểm xác định · ô quét + chi phí · Google giả (khoá trong tiêu đề) · khử trùng 10 lần = 1 lead · tạm dừng/tiếp tục · lỗi API · trần ngân sách · không liên hệ · nhập tệp · chuyển khách · phạm vi dữ liệu · hết hạn lưu · thứ tự quét 34 tỉnh · gửi nhân viên thị trường");
 }

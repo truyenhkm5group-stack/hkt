@@ -18,6 +18,8 @@ import {
   saveOpportunityAction,
   updateLeadStatusAction,
 } from "@/lib/actions/wholesale";
+import type { FieldHandoffOptions } from "@/lib/wholesale/field-handoff";
+import { HandoffPanel } from "@/app/(dashboard)/wholesale/leads/handoff-panel";
 import { CALL_OUTCOME_LABEL, CALL_OUTCOMES, LEAD_STATUS_LABEL, LEAD_STATUSES, OUTREACH_CHANNEL_LABEL, OUTREACH_CHANNELS, type CallOutcome, type LeadStatus, type OutreachChannel } from "@/lib/wholesale/constants";
 
 type LeadInfo = {
@@ -41,11 +43,11 @@ type LeadInfo = {
   ownWebsite: string | null;
 };
 
-type Panel = null | "note" | "call" | "status" | "opportunity" | "convert" | "dnc" | "outreach" | "edit";
+type Panel = null | "note" | "call" | "status" | "opportunity" | "convert" | "dnc" | "outreach" | "edit" | "handoff";
 
 const sel = "h-9 w-full rounded-md border bg-background px-2 text-sm";
 
-export function LeadActions({ lead, canWork, users }: { lead: LeadInfo; canWork: boolean; users: { id: string; name: string }[] }) {
+export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo; canWork: boolean; users: { id: string; name: string }[]; handoff: FieldHandoffOptions }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [panel, setPanel] = useState<Panel>(null);
@@ -53,6 +55,7 @@ export function LeadActions({ lead, canWork, users }: { lead: LeadInfo; canWork:
   const [followup, setFollowup] = useState("");
   const [nextAction, setNextAction] = useState("");
   const [outcome, setOutcome] = useState<CallOutcome>("ANSWERED");
+  const [addressConfirmed, setAddressConfirmed] = useState(false);
   const [status, setStatus] = useState<LeadStatus>(lead.status === "NEW" ? "QUALIFIED" : lead.status);
   const [lostReason, setLostReason] = useState("");
   const [value, setValue] = useState("");
@@ -117,6 +120,9 @@ export function LeadActions({ lead, canWork, users }: { lead: LeadInfo; canWork:
           <Button size="sm" variant="secondary" onClick={() => toggle("note")}>
             Thêm ghi chú
           </Button>
+          <Button size="sm" variant="secondary" onClick={() => toggle("handoff")}>
+            Gửi NV thị trường
+          </Button>
           <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => updateLeadStatusAction(lead.id, { status: "CONTACTED", note: "Đánh dấu đã liên hệ" }), "Đã đánh dấu đã liên hệ")}>
             Đã liên hệ
           </Button>
@@ -163,9 +169,22 @@ export function LeadActions({ lead, canWork, users }: { lead: LeadInfo; canWork:
             Hẹn gọi lại
             <Input type="date" value={followup} onChange={(e) => setFollowup(e.target.value)} />
           </label>
-          <Button size="sm" disabled={pending} onClick={() => run(() => logCallAction(lead.id, { outcome, note, nextFollowupAt: followupIso }), "Đã ghi cuộc gọi")}>
+          {(outcome === "ANSWERED" || outcome === "CALLBACK") && !lead.ownAddress && lead.address ? (
+            <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" className="mt-0.5" checked={addressConfirmed} onChange={(e) => setAddressConfirmed(e.target.checked)} />
+              <span>Khách xác nhận đúng địa chỉ «{lead.address}» — lưu làm địa chỉ của shop (gửi được cho nhân viên thị trường)</span>
+            </label>
+          ) : null}
+          <p className="text-[11px] text-muted-foreground">Nghe máy / hẹn gọi lại ⇒ tên và SĐT vừa gọi được lưu thành dữ liệu của shop.</p>
+          <Button size="sm" disabled={pending} onClick={() => run(() => logCallAction(lead.id, { outcome, note, nextFollowupAt: followupIso, addressConfirmed }), "Đã ghi cuộc gọi")}>
             Lưu cuộc gọi
           </Button>
+        </div>
+      ) : null}
+
+      {panel === "handoff" ? (
+        <div className="rounded-md border p-2">
+          <HandoffPanel leadIds={[lead.id]} options={handoff} onDone={() => setPanel(null)} />
         </div>
       ) : null}
 
