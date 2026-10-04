@@ -20,6 +20,8 @@
  * có tin phía page tới SAU nó thì bot bỏ qua. Tin do NHÂN VIÊN THẬT (có `uid` / `admin_id`, không phải tin bot vừa gửi)
  * còn làm bot nhường cả hội thoại `HUMAN_TAKEOVER_MINUTES` phút.
  */
+import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
+import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -116,6 +118,10 @@ const GRACE_SLACK_MS = 1_000;
 const RETRY_MS = 2_000;
 /** Dòng ghi tin phía page (Meta tự động / nhân viên) — chỉ để biết «đã có người trả lời», không phải tin chờ bot. */
 export const PAGE_REPLY = "PAGE_REPLY";
+/** Ghi chú tin khách khi bot KHÔNG trả lời vì chế độ vận hành (operating-mode-shared.ts). */
+export const OBSERVE_NOTE = "Chế độ quan sát — người của shop trả lời";
+export const OBSERVE_HUMAN_ARM_NOTE = "Thử nghiệm: hội thoại thuộc nhánh NGƯỜI";
+export const COPILOT_NOTE = "Copilot — bot đã soạn gợi ý, không gửi";
 const WAITING = "Đang đợi xem page có trả lời không";
 const PAGE_REPLIED_REASON = "Page đã trả lời (tự động của Meta / nhân viên) — bot không chen";
 /** Tin phía page trùng NGUYÊN VĂN một đoạn bot gửi trong khoảng này ⇒ là tiếng vọng của chính bot. */
@@ -700,6 +706,18 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
     }
     await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
+    // CHẾ ĐỘ VẬN HÀNH (lib/sales-chatbot/operating-mode-shared.ts): quan sát · copilot · thử nghiệm AI vs người · tự động — MỘT
+    // cổng cho mọi kênh có người trả lời song song. Đặt SAU khi chép lời page vào lịch sử (đường nền của người vẫn đủ) và
+    // TRƯỚC mọi lời gọi tốn tiền (hồ sơ khách cũ, đọc ảnh, AI). Mặc định TỰ ĐỘNG — shop chưa đổi chế độ không thấy gì khác.
+    const gate = replyGate(await loadModeConfig(), fanpageVisitorKey(pageId, threadId), readPinnedArm(conv.state));
+    await pinArm(conv.id, gate, now());
+    if (gate.mode === "OBSERVE") {
+      const note = gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE;
+      await finish("SKIPPED", note);
+      out.processed += ids.length;
+      out.skipped = note;
+      continue;
+    }
     // KHÁCH CŨ (02/10/2026): SĐT Pancake đã ghi nhận + tin cũ trước khi bot vào hội thoại ⇒ bot không hỏi lại SĐT / địa chỉ.
     // Một lời gọi ĐỌC, làm mới sau vài giờ; hỏng ⇒ bot trả lời như khách mới, không chặn lượt. Bình luận: không có hộp thư để đọc.
     if (!claimed.some((r) => r.kind === "COMMENT") && threadProfileStale((conv.state ?? {}) as ChatState, now())) {
@@ -735,6 +753,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         await db.update(cv).set({ state: sql`${cv.state} || ${JSON.stringify({ postContext: { postId: commentRow.postId, text: postText } })}::jsonb` }).where(eq(cv.id, conv.id));
       }
       context = postContextPrompt(postText);
+    }
+    if (gate.mode === "COPILOT") {
+      // Bot soạn ở hội thoại BÓNG, không gửi: người của shop trả lời; câu thật tới sau được đem so với gợi ý.
+      await draftCopilotSuggestion({ conversationId: conv.id, pageId, threadId, text, ...(context ? { context } : {}), now: now() });
+      await finish("SKIPPED", COPILOT_NOTE);
+      out.processed += ids.length;
+      out.skipped = COPILOT_NOTE;
+      continue;
     }
     const customerName = [...claimed].reverse().find((r) => r.customerName?.trim())?.customerName ?? null;
     const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageVisitorKey(pageId, threadId), now: now(), customerName, ...(context ? { context } : {}) });

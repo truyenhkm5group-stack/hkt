@@ -1429,6 +1429,20 @@
       "when": 1790767240000,
       "tag": "0204_platform_tenant_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "7",
+      "when": 1790767300000,
+      "tag": "0205_sales_replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "7",
+      "when": 1790767360000,
+      "tag": "0206_sales_copilot",
+      "breakpoints": true
     }
   ]
 }

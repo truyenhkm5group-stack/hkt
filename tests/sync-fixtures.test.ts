@@ -464,6 +464,8 @@ import { testFieldJobs } from "./field-jobs.test";
 import { testRealEstate } from "./real-estate.test";
 import { testAppointmentBookingBot } from "./appointment-booking-bot.test";
 import { testSalesOrderSync } from "./sales-order-sync.test";
+import { testSalesReplay } from "./sales-replay.test";
+import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
@@ -2685,6 +2687,10 @@ async function main() {
   await testAppointmentBookingBot();
   // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
   await testSalesOrderSync();
+  // Phát lại hội thoại cũ (Historical Replay): tổ chức THẬT `rp-shop` / `rp-khac`, provider giả, tự cấp, tự dọn.
+  await testSalesReplay();
+  // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
+  await testSalesOperatingMode();
   await testCommerceAgent();
   await testSalesEvents();
   await testMetaAdsOrgSync();

@@ -26,6 +26,8 @@ import { orderSyncView } from "@/lib/sales-chatbot/order-sync";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { countWaitingConversations } from "@/lib/sales-chatbot/engine";
 import { ResumeToAiButton } from "./resume-button";
+import { ModePanel } from "./mode-panel";
+import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { ChatCostPanel } from "./cost-panel";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
@@ -55,6 +57,7 @@ export default async function SalesChatbotPage() {
   const costReport = manage && user.organization?.code ? await loadChatCostReport(user.organization.code).catch(() => null) : null;
   const [followup, waitingCount] = fanpage ? await Promise.all([loadFollowupSettings(), countWaitingConversations()]) : [null, 0];
   const orderSync = fanpage ? await orderSyncView() : null;
+  const modeConfig = fanpage ? await loadModeConfig() : null;
   // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
   const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
@@ -80,6 +83,9 @@ export default async function SalesChatbotPage() {
             <Link href="/ai/sales-chatbot/performance" className="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="ai-perf-link">
               Hiệu quả
             </Link>
+            <Link href="/ai/sales-chatbot/replay" className="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="replay-link">
+              Phát lại hội thoại cũ
+            </Link>
             <Link href="/ai/sales-chatbot/quick-replies" className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted" data-testid="quick-replies-link">
               Câu trả lời mẫu (Q&amp;A)
             </Link>
@@ -89,6 +95,11 @@ export default async function SalesChatbotPage() {
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
           {orderSync ? <OrderSyncPanel view={orderSync} manage={manage} /> : null}
+          {modeConfig ? (
+            <SectionCard title="Chế độ vận hành" description="Quan sát → Copilot → Thử nghiệm AI vs Người → Tự động: đo người trước, rồi mới để AI tự trả lời.">
+              <ModePanel config={modeConfig} manage={manage} />
+            </SectionCard>
+          ) : null}
           {fanpage ? (
             <SectionCard title="Fanpage (qua Pancake)" description="Bot trả lời tin nhắn khách gửi vào fanpage của shop — cùng cấu hình, cùng giá / tồn, cùng luật chốt đơn với trang chat web.">
               <div className="space-y-2 text-sm" data-testid="fanpage-setup">
