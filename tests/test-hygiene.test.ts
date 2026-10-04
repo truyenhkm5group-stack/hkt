@@ -118,6 +118,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/zalo-oa.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Zalo OA» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá hay không.",
+  "tests/public-site.test.ts":
+    "XOÁ SITE_DOMAIN / CHOTDON_DOMAIN / CHOTDON_APP_URL để kiểm `appOriginForHost` đọc ĐÚNG giá trị mặc định trong mã (app.chotdontudong.com) và host lạ rơi về APP_URL — đó là ĐẦU VÀO của phép kiểm; kỳ vọng APP_URL dựng lại từ cùng biến mà mã đọc, trả nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến ấy hay không.",
   "tests/telegram-relay.test.ts":
     "ĐẶT TELEGRAM_API_BASE = «https://tg.vnxcommerce.com» (giá trị BỊA) để kiểm kiểm tra kết nối / tìm chat đi qua relay — đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai relay hay không.",
   "tests/self-service-journey.test.ts":
@@ -126,6 +128,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «Quảng cáo Facebook (Meta) của tổ chức» trong tổ chức thử và để job đọc lại nó (cùng cách sales-order-sync); fetch là bản giả đóng vai Graph API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/meta-ads-org-winners.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «Quảng cáo Facebook (Meta) của tổ chức» trong tổ chức thử, để job «ads-spend-org» (chi tiêu + sổ mẩu) và lượt nhập mẫu thắng đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Graph API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/meta-ads-org-publish.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «Quảng cáo Facebook (Meta) của tổ chức» trong tổ chức thử; ĐẶT ADS_WRITE_ENABLED = «true» + ADS_WRITE_MODE = «COPILOT» để cửa ghi đi tới nhánh token của tổ chức, và FACEBOOK_ACCESS_TOKEN = chuỗi BỊA để chứng minh token của nhà KHÔNG lọt sang ngữ cảnh tổ chức khách (cùng cách ads-kill-switch); fetch là bản giả đóng vai Graph API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/pancake-pos-org.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá BỊA của kết nối «Pancake POS của tổ chức» trong tổ chức thử và để job / webhook đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Pancake POS. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/carrier-vtp.test.ts":

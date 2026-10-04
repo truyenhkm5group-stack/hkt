@@ -1,3 +1,4 @@
+import type { SiteBrand } from "@/lib/platform/site-host";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,17 +41,51 @@ export function BrandWordmark({ className }: { className?: string }) {
   );
 }
 
+/** Ký hiệu «Chốt Đơn Tự Động»: bong bóng chat có dấu tích — cùng nét với `public/chotdon-icon.svg`. */
+export function ChotDonGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 44 36" className={cn("h-4 w-auto", className)} fill="none" stroke="currentColor" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+      <path d="M8 3h28a5 5 0 0 1 5 5v13a5 5 0 0 1-5 5H21l-9 7v-7H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5z" />
+      <path d="m14 15 5 5 11-11" strokeWidth={4.5} />
+    </svg>
+  );
+}
+
+/** Chữ «Chốt Đơn Tự Động» — sản phẩm AI bán hàng của VNXcommerce ở `chotdontudong.com`. */
+export function ChotDonWordmark({ className }: { className?: string }) {
+  return (
+    <span role="img" aria-label="Chốt Đơn Tự Động" className={cn("truncate font-black tracking-[-0.02em]", className)}>
+      Chốt Đơn <span className="font-semibold">Tự Động</span>
+    </span>
+  );
+}
+
 /**
  * Khối logo hoàn chỉnh: ô ký hiệu + chữ. `tone="brand"` cho chữ màu cam thương hiệu,
  * `tone="inherit"` cho chữ ăn theo màu chữ xung quanh (dùng trên nền tối của sidebar).
  */
-export function BrandLockup({ className, wordmarkClassName, tone = "brand", showWordmark = true }: { className?: string; wordmarkClassName?: string; tone?: "brand" | "inherit"; showWordmark?: boolean }) {
+export function BrandLockup({
+  className,
+  wordmarkClassName,
+  tone = "brand",
+  showWordmark = true,
+  brand = "vnx",
+}: {
+  className?: string;
+  wordmarkClassName?: string;
+  tone?: "brand" | "inherit";
+  showWordmark?: boolean;
+  /** Thương hiệu của host (lib/platform/host-brand.ts). Mặc định `vnx` — mọi chỗ gọi cũ giữ nguyên. */
+  brand?: SiteBrand;
+}) {
+  const chotdon = brand === "chotdon";
+  const wordClass = cn("text-[15px]", tone === "brand" ? "text-brand" : "text-current", wordmarkClassName);
   return (
     <span className={cn("flex items-center gap-2.5", className)}>
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-[0_8px_20px_-10px_var(--brand)]">
-        <BrandGlyph className="h-[13px]" />
+        {chotdon ? <ChotDonGlyph className="h-[15px]" /> : <BrandGlyph className="h-[13px]" />}
       </span>
-      {showWordmark ? <BrandWordmark className={cn("text-[15px]", tone === "brand" ? "text-brand" : "text-current", wordmarkClassName)} /> : null}
+      {showWordmark ? chotdon ? <ChotDonWordmark className={wordClass} /> : <BrandWordmark className={wordClass} /> : null}
     </span>
   );
 }

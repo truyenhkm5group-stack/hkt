@@ -36,7 +36,7 @@ import { setSettingJson } from "@/lib/settings";
 const ORG = "e2e-shop";
 const ADMIN_EMAIL = `chu@${ORG}.local`;
 
-function fakeProvider(script: (lastUser: string, results: Record<string, unknown>[]) => AiBlock[]): AiProvider {
+export function fakeProvider(script: (lastUser: string, results: Record<string, unknown>[]) => AiBlock[]): AiProvider {
   return {
     name: "fake",
     model: "claude-sonnet-5",
@@ -53,7 +53,7 @@ function fakeProvider(script: (lastUser: string, results: Record<string, unknown
 }
 
 /** Kịch bản bán: tìm → báo giá (số lấy từ kết quả công cụ) → kiểm tồn + giỏ → lưu khách + đơn nháp → chốt. */
-function shopScript(ids: { chaMuc: string; ruocTom: string }) {
+export function shopScript(ids: { chaMuc: string; ruocTom: string }) {
   let n = 0;
   const use = (name: string, input: unknown): AiBlock => ({ type: "tool_use", id: `tu-${++n}`, name, input });
   const items = [

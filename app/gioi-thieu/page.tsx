@@ -38,11 +38,13 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { BrandGlyph, BrandLockup } from "@/components/brand";
+import { BrandGlyph, BrandLockup, ChotDonGlyph } from "@/components/brand";
 import { COMPANY, PRIVACY_POLICY, SERVICE_COMMITMENTS, TERMS_OF_SERVICE } from "@/lib/constants/company";
 import { TRIAL_DAYS } from "@/lib/billing/rules";
 import { formatNumber, formatVND } from "@/lib/format";
 import { BUSINESS_TYPES, BUSINESS_TYPE_SPEC, type BusinessType } from "@/lib/onboarding/shared";
+import { hostBrand } from "@/lib/platform/host-brand";
+import { brandAppOrigin, type SiteBrand } from "@/lib/platform/site-host";
 import { getPublicSiteData, type PublicPlan, type PublicSiteData } from "@/lib/queries/public-site";
 
 /**
@@ -86,12 +88,34 @@ const TITLE = "VNXcommerce — Nhân viên bán hàng AI trực fanpage 24/7, t�
 const DESCRIPTION =
   "Trợ lý AI trả lời khách trên fanpage trong vài giây bằng đúng giá và tồn kho của shop, xem ảnh khách gửi, chốt đơn khi khách đồng ý — rồi đơn chạy thẳng vào kho, tiền thu hộ và báo cáo lãi. Dùng thử miễn phí.";
 
-export const metadata: Metadata = {
-  title: { absolute: TITLE },
-  description: DESCRIPTION,
-  robots: { index: true, follow: true },
-  openGraph: { title: TITLE, description: DESCRIPTION, type: "website", locale: "vi_VN" },
-};
+const CHOTDON_TITLE = "Chốt Đơn Tự Động — Nhân viên bán hàng AI trực fanpage 24/7, tự tư vấn và chốt đơn";
+const CHOTDON_DESCRIPTION =
+  "Trợ lý AI trả lời khách trên fanpage trong vài giây bằng đúng giá và hàng còn của shop, xem ảnh khách gửi, chốt đơn khi khách đồng ý. Có sẵn AI trong gói, cài trong 3 bước. Một sản phẩm của VNXcommerce.";
+
+type PageProps = { searchParams: Promise<{ "thuong-hieu"?: string }> };
+
+/**
+ * Thương hiệu của lượt xem: host quyết định (`chotdontudong.com` ⇒ `chotdon`, header máy chủ do middleware đặt).
+ * `?thuong-hieu=chot-don` chỉ để XEM TRƯỚC bản Chốt Đơn trên host ERP trước ngày DNS trỏ về — không đổi dữ liệu gì.
+ */
+async function pageBrand(searchParams: PageProps["searchParams"]): Promise<SiteBrand> {
+  const q = (await searchParams)["thuong-hieu"];
+  if (q === "chot-don") return "chotdon";
+  return hostBrand();
+}
+
+export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
+  const chotdon = (await pageBrand(searchParams)) === "chotdon";
+  const title = chotdon ? CHOTDON_TITLE : TITLE;
+  const description = chotdon ? CHOTDON_DESCRIPTION : DESCRIPTION;
+  return {
+    title: { absolute: title },
+    description,
+    robots: { index: true, follow: true },
+    openGraph: { title, description, type: "website", locale: "vi_VN", siteName: chotdon ? "Chốt Đơn Tự Động" : "VNXcommerce" },
+    ...(chotdon ? { icons: { icon: [{ url: "/chotdon-icon.svg", type: "image/svg+xml" }] } } : {}),
+  };
+}
 
 const NAV = [
   { href: "#cach-hoat-dong", label: "Cách hoạt động" },
@@ -185,6 +209,9 @@ const INDUSTRY_COPY: Partial<Record<BusinessType, { label: string; text: string 
   manufacturing: { label: "Sản xuất", text: "Nguyên liệu, đặt hàng, kế hoạch sản xuất và kho — bộ tính năng gợi ý sẵn." },
   service: { label: "Dịch vụ", text: "Khách hàng, chăm sóc khách, thu chi — bộ tính năng gợi ý sẵn." },
 };
+
+/** Ngành hiện trên bản Chốt Đơn — những ngành trợ lý có cách bán riêng; sản xuất / dịch vụ là chuyện của ERP đầy đủ. */
+const CHOTDON_INDUSTRIES: readonly BusinessType[] = ["fashion", "ecommerce", "food", "seafood", "spa", "restaurant", "wholesale"];
 
 const BEHIND: { icon: LucideIcon; title: string; text: string }[] = [
   { icon: CircleDollarSign, title: "Lãi thật", text: "Doanh thu theo tiền đã về; đơn hoàn, phí ship, giá vốn, quảng cáo trừ đủ." },
@@ -297,14 +324,14 @@ function TextLink({ href, children, invert = false }: { href: string; children: 
 }
 
 /** Hội thoại mẫu ở phần đầu — VÍ DỤ minh hoạ cách trợ lý làm việc, không phải hội thoại của khách nào. */
-function ChatMock() {
+function ChatMock({ brand }: { brand: SiteBrand }) {
   return (
     <div className="relative mx-auto w-full max-w-[26rem]">
       <div className="pointer-events-none absolute -inset-10 rounded-full bg-brand/15 blur-3xl" aria-hidden />
       <div className="relative overflow-hidden rounded-[2rem] border border-border/70 bg-card text-card-foreground shadow-[var(--shadow-raised)]">
         <div className="flex items-center gap-3 border-b border-border/60 px-5 py-3.5">
           <span className="flex size-9 items-center justify-center rounded-full bg-brand text-white">
-            <BrandGlyph className="h-3" />
+            {brand === "chotdon" ? <ChotDonGlyph className="h-3.5" /> : <BrandGlyph className="h-3" />}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">Trợ lý của Shop Mây</p>
@@ -415,10 +442,22 @@ function PlanLimits({ plan, inverted = false }: { plan: PublicPlan; inverted?: b
 
 // ═══════════ TRANG ═══════════
 
-export default async function SitePage() {
-  const data = await getPublicSiteData();
+export default async function SitePage({ searchParams }: PageProps) {
+  const brand = await pageBrand(searchParams);
+  const chotdon = brand === "chotdon";
+  const base = await getPublicSiteData();
+  /*
+    Bản Chốt Đơn dẫn vào PHẦN MỀM của chính nó (`app.chotdontudong.com`) — đăng ký ở đó tự chọn sẵn «Chỉ cần AI bán hàng»
+    (lib/onboarding/quick-shared.ts `initialQuickBusinessType`). Không xác định được gốc ⇒ giữ lối vào gốc, không đoán.
+  */
+  const chotdonOrigin = chotdon
+    ? brandAppOrigin("chotdon", { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL })
+    : null;
+  const data: PublicSiteData = chotdonOrigin ? { ...base, signupUrl: `${chotdonOrigin}/start`, loginUrl: `${chotdonOrigin}/login` } : base;
+  const nav = chotdon ? NAV.filter((n) => n.href !== "#he-thong") : NAV;
+  const systemParts = chotdon ? SYSTEM_PARTS.filter((p) => p.label !== "Báo cáo lãi thật") : SYSTEM_PARTS;
   const signup = signupCopy(data);
-  const industries = BUSINESS_TYPES.filter((t) => t !== "blank").map((t) => ({
+  const industries = BUSINESS_TYPES.filter((t) => t !== "blank" && (!chotdon || CHOTDON_INDUSTRIES.includes(t))).map((t) => ({
     key: t,
     label: INDUSTRY_COPY[t]?.label ?? BUSINESS_TYPE_SPEC[t].label,
     text: INDUSTRY_COPY[t]?.text ?? BUSINESS_TYPE_SPEC[t].hint,
@@ -434,10 +473,10 @@ export default async function SitePage() {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-card/85 backdrop-blur-md">
         <div className={`${WRAP} flex h-16 items-center gap-3`}>
           <a href="#" aria-label="VNXcommerce — về đầu trang">
-            <BrandLockup wordmarkClassName="text-base" />
+            <BrandLockup wordmarkClassName="text-base" brand={brand} />
           </a>
           <nav className="ml-8 hidden items-center gap-7 text-sm font-medium text-foreground/70 lg:flex" aria-label="Mục lục trang">
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <a key={n.href} href={n.href} className="transition-colors hover:text-foreground">
                 {n.label}
               </a>
@@ -465,7 +504,7 @@ export default async function SitePage() {
                 <Menu className="size-5" aria-hidden />
               </summary>
               <nav className="absolute top-11 right-0 z-50 w-60 rounded-2xl bg-card p-2 text-card-foreground shadow-[var(--shadow-raised)]" aria-label="Mục lục trang">
-                {NAV.map((n) => (
+                {nav.map((n) => (
                   <a key={n.href} href={n.href} className="block rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-muted">
                     {n.label}
                   </a>
@@ -504,7 +543,7 @@ export default async function SitePage() {
               </h1>
               <span className="mt-6 block h-0.5 w-14 rounded-full bg-brand" />
               <p className="mt-6 max-w-2xl text-[clamp(1rem,0.9rem+0.4vw,1.2rem)] leading-[1.75] text-muted-foreground">
-                Trả lời khách trong vài giây bằng đúng giá và tồn kho của shop, xem được ảnh khách gửi, lấy số điện thoại – địa chỉ, chốt đơn khi khách đồng ý. Rồi đơn chạy thẳng vào kho, tiền thu hộ và báo cáo lãi.
+                Trả lời khách trong vài giây bằng đúng giá và tồn kho của shop, xem được ảnh khách gửi, lấy số điện thoại – địa chỉ, chốt đơn khi khách đồng ý. {chotdon ? "Đơn vào thẳng sổ đơn hàng và kho của shop — không chép tay." : "Rồi đơn chạy thẳng vào kho, tiền thu hộ và báo cáo lãi."}
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-x-7 gap-y-4">
                 <PrimaryCta href={data.signupUrl}>{signup.label}</PrimaryCta>
@@ -512,7 +551,7 @@ export default async function SitePage() {
               </div>
               {signup.note ? <p className="mt-4 text-sm text-muted-foreground">{signup.note}</p> : null}
               <ul className="mt-8 flex flex-col gap-2.5 text-sm text-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-7">
-                {["AI có sẵn trong gói", "Cài trong 3 bước", "Đơn vào thẳng kho & sổ sách"].map((t) => (
+                {["AI có sẵn trong gói", "Cài trong 3 bước", chotdon ? "Kèm sẵn sổ khách, sản phẩm, đơn, kho" : "Đơn vào thẳng kho & sổ sách"].map((t) => (
                   <li key={t} className="flex items-center gap-2">
                     <Check className="size-4 shrink-0 text-brand" aria-hidden />
                     {t}
@@ -521,7 +560,7 @@ export default async function SitePage() {
               </ul>
             </div>
             <div className="px-2 sm:px-8 lg:px-0">
-              <ChatMock />
+              <ChatMock brand={brand} />
             </div>
           </div>
         </section>
@@ -628,7 +667,7 @@ export default async function SitePage() {
               <div>
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Hệ thống của shop</p>
                 <ul className="space-y-2.5">
-                  {SYSTEM_PARTS.map((c) => (
+                  {systemParts.map((c) => (
                     <li key={c.label} className="flex items-center gap-3 rounded-xl border border-border/70 bg-[var(--surface-sunken)] px-3.5 py-2.5 text-sm font-medium">
                       <c.icon className="size-4 shrink-0 text-success" aria-hidden />
                       {c.label}
@@ -743,6 +782,7 @@ export default async function SitePage() {
         </section>
 
         {/* ─── PHÍA SAU TRỢ LÝ: HỆ THỐNG QUẢN LÝ ─── */}
+        {chotdon ? null : (
         <section id="he-thong" className="scroll-mt-20 py-20 lg:py-28">
           <div className={WRAP}>
             <SectionHead
@@ -765,6 +805,7 @@ export default async function SitePage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* ─── BẢNG GIÁ ─── (ẩn khi không đọc được gói nào: không bao giờ in giá đoán) */}
         {planCount > 0 ? (
@@ -908,14 +949,16 @@ export default async function SitePage() {
       <footer className="border-t border-border/60 bg-background">
         <div className={`${WRAP} flex flex-col gap-6 py-10 sm:flex-row sm:items-center sm:justify-between`}>
           <div className="space-y-2">
-            <BrandLockup wordmarkClassName="text-base" />
-            <p className="text-xs text-muted-foreground">© {year} VNXcommerce · Nhân viên bán hàng AI và hệ thống quản lý cho shop online</p>
+            <BrandLockup wordmarkClassName="text-base" brand={brand} />
+            <p className="text-xs text-muted-foreground">
+              {chotdon ? `© ${year} Chốt Đơn Tự Động · Một sản phẩm của VNXcommerce` : `© ${year} VNXcommerce · Nhân viên bán hàng AI và hệ thống quản lý cho shop online`}
+            </p>
             <p className="text-xs text-muted-foreground">
               {COMPANY.name} · MST {COMPANY.taxCode} · {COMPANY.email} · {COMPANY.phone}
             </p>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground" aria-label="Liên kết chân trang">
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <a key={n.href} href={n.href} className="hover:text-foreground">
                 {n.label}
               </a>

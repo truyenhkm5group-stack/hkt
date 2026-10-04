@@ -14,6 +14,16 @@ import { ADMIN_PASSWORD_MIN, BUSINESS_TYPE_SPEC, RESERVED_ORG_CODES, type Busine
 export const QUICK_BUSINESS_TYPES = ["ai_sales", "food", "seafood", "fashion", "spa", "restaurant", "ecommerce"] as const satisfies readonly BusinessType[];
 export type QuickBusinessType = (typeof QUICK_BUSINESS_TYPES)[number];
 
+/**
+ * Ngành chọn sẵn ở form nhanh: `?nganh=` hợp lệ thắng; không có thì host «Chốt Đơn Tự Động» chọn sẵn «Chỉ cần AI bán
+ * hàng», host gốc giữ mặc định cũ. Tham số query mất khi đăng ký bằng Google / Facebook (callback về `/start` trơn), nên
+ * thương hiệu host mới là đường chắc chắn. Giá trị lạ ⇒ mặc định, không đoán.
+ */
+export function initialQuickBusinessType(raw: string | null | undefined, brand: "vnx" | "chotdon"): QuickBusinessType {
+  if (raw && (QUICK_BUSINESS_TYPES as readonly string[]).includes(raw)) return raw as QuickBusinessType;
+  return brand === "chotdon" ? "ai_sales" : "food";
+}
+
 export const QUICK_BUSINESS_LABEL: Record<QuickBusinessType, string> = {
   ai_sales: "Chỉ cần AI bán hàng (ngành khác)",
   food: "Thực phẩm, đặc sản",

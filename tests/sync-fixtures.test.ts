@@ -468,11 +468,13 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
+import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
+import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
 import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
 import { testCarrierVtp } from "./carrier-vtp.test";
@@ -492,7 +494,7 @@ import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
 import { testTestOrgCodes } from "./test-org-codes.test";
 import { testHelpGuides } from "./help-guides.test";
-import { testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
+import { testChotDonBrand, testPublicSiteData, testPublicSiteHost, testPublicSiteSource } from "./public-site.test";
 import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
@@ -2484,6 +2486,7 @@ async function main() {
   // Trang giới thiệu ở tên miền gốc: định tuyến host thuần + gác mã nguồn (middleware, Caddy, đường đọc công khai).
   testPublicSiteHost();
   testPublicSiteSource();
+  testChotDonBrand();
   testAgentIngestSourceGuards();
   testTestHygiene();
   testAiHealthSourceGuards();
@@ -2703,12 +2706,15 @@ async function main() {
   await testSalesOperatingMode();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
+  // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
+  await testSalesExperimentReport();
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();
+  await testMetaAdsOrgPublish();
   await testPancakePosOrgSync();
   await testViettelPostOrg();
   await testCarrierVtp();

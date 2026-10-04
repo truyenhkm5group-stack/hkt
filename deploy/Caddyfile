@@ -136,3 +136,36 @@
 		}
 	}
 }
+
+# CHỐT ĐƠN TỰ ĐỘNG — sản phẩm AI bán hàng (chủ nền tảng chốt 04/10/2026): `{$CHOTDON_DOMAIN}` + `www.` là mặt tiền (middleware
+# dựng trang giới thiệu bản Chốt Đơn), `app.{$CHOTDON_DOMAIN}` là PHẦN MỀM — cùng app, cùng CSDL; thương hiệu theo host
+# (lib/platform/site-host.ts `brandOfHost`). Chứng chỉ xin THEO YÊU CẦU qua /api/platform/domain-allowed như hai khối trên:
+# trước ngày DNS trỏ về máy này, khối không nhận request nào và Caddy không gọi Let's Encrypt lần nào. Webhook Pancake /
+# Viettel Post vẫn ở {$ERP_DOMAIN} (trần body và che bí mật trong log nằm ở khối đó).
+{$CHOTDON_DOMAIN:chotdontudong.com}, www.{$CHOTDON_DOMAIN:chotdontudong.com}, app.{$CHOTDON_DOMAIN:chotdontudong.com} {
+	tls {
+		on_demand
+	}
+	encode gzip zstd
+	reverse_proxy app:3000 {
+		# SSE realtime (/api/events) của phần mềm cần giữ kết nối lâu
+		flush_interval -1
+		transport http {
+			read_timeout 0
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+	}
+	log {
+		output stdout
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "([?&](?i:token|secret|access_token|invite|code|state)=)[^&]*" "${1}REDACTED"
+			}
+		}
+	}
+}

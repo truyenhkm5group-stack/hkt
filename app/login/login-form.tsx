@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2, LockKeyhole } from "lucide-react";
 import { loginAction, type LoginState } from "@/lib/actions/auth";
 import { BrandLockup } from "@/components/brand";
+import type { SiteBrand } from "@/lib/platform/site-host";
 import { OrDivider, SocialButtons } from "@/components/auth/social-buttons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +28,7 @@ export function LoginForm({
   orgName = null,
   providers = { google: false, facebook: false },
   signupOpen = false,
+  brand = "vnx",
 }: {
   next?: string;
   reason?: string;
@@ -36,6 +38,7 @@ export function LoginForm({
   orgName?: string | null;
   providers?: { google: boolean; facebook: boolean };
   signupOpen?: boolean;
+  brand?: SiteBrand;
 }) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
   // Ô có điều khiển: React xoá form sau mỗi lượt gửi, mà bước «chọn cửa hàng» phải gửi lại đúng email + mật khẩu vừa gõ.
@@ -46,7 +49,7 @@ export function LoginForm({
   return (
     <div className="w-full max-w-sm space-y-6">
       {/* Cột trái có logo nhưng bị ẩn dưới lg — màn hình nhỏ vẫn phải thấy thương hiệu */}
-      <BrandLockup className="justify-center lg:hidden" wordmarkClassName="text-lg" />
+      <BrandLockup className="justify-center lg:hidden" wordmarkClassName="text-lg" brand={brand} />
       <Card className="border-border/60 shadow-xl shadow-black/5">
         <CardHeader className="space-y-1">
           <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">

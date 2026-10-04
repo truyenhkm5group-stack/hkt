@@ -3,7 +3,10 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { IntegrationError, fetchJson } from "@/lib/integrations/http";
-import { assertHomeCredentials } from "@/lib/platform/credentials";
+import { assertConnectionOwner, assertHomeCredentials, peekIsNonHome } from "@/lib/platform/credentials";
+import { currentOrganization } from "@/lib/platform/context";
+import { META_ADS_ORG_CONNECTOR, orgAccountPathProblem } from "@/lib/constants/meta-ads-org";
+import { openOrgGraphCredential } from "@/lib/marketing/meta-ads-org-write";
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import {
   ADS_WRITE_LIMITS,
@@ -38,6 +41,14 @@ import { ADS_WRITE_KILL_KEY, killSwitchVerdict, parseAdsKillSwitch, type AdsKill
  * Sau chốt env, `graphPost` đọc LẠI dòng `settings["ads.write.kill"]` trước mỗi lời gọi ghi
  * (`lib/constants/ads-kill-switch.ts`). Nó chỉ LÀM HẸP: kéo ⇒ chặn mọi lời gọi tạo/tăng chi, chỉ
  * `{status: "PAUSED"}` còn đi; đọc lỗi ⇒ coi như đang kéo.
+ *
+ * ─── TỔ CHỨC KHÁCH: TOKEN CỦA CHÍNH HỌ (chủ nền tảng chốt 04/10/2026) ───
+ *
+ * Ngữ cảnh không phải nhà ⇒ `graphCredential` lấy token System User từ kết nối «meta-ads-org» của CHÍNH tổ chức
+ * (`lib/marketing/meta-ads-org-write.ts`) thay cho biến môi trường: chặn bằng `assertConnectionOwner` (chủ của khoá) chứ
+ * không bằng `assertHomeCredentials`, token đi trong tiêu đề `Authorization` (không vào URL / thân form), lời gọi nhắm
+ * `act_<id>` phải là tài khoản tổ chức đã khai. Lời GHI còn đòi công tắc riêng của tổ chức (`ads.write.org`). Chốt env
+ * `ADS_WRITE_ENABLED`, nấc COPILOT, công tắc khẩn cấp (đọc trong CSDL của chính tổ chức) và `retries: 0` giữ NGUYÊN.
  */
 
 /** Nấc quyền hạn thật, đã kẹp bằng trần cứng của mã nguồn. */
@@ -55,7 +66,8 @@ export function adsWriteHardEnabled(): boolean {
 export function adsWriteDisabledReason(): string | null {
   if (!adsWriteHardEnabled()) return "Chưa bật ADS_WRITE_ENABLED trên máy chủ (chốt ngoài cùng, chỉ nhận đúng chuỗi \"true\").";
   if (adsWriteMode() === "OFF") return "ADS_WRITE_MODE đang OFF.";
-  if (!env.facebook.accessToken) return "Chưa có FACEBOOK_ACCESS_TOKEN.";
+  // Tổ chức khách (ngữ cảnh tường minh) không dùng token môi trường — thiếu token của họ là việc của `graphCredential`.
+  if (!env.facebook.accessToken && !peekIsNonHome()) return "Chưa có FACEBOOK_ACCESS_TOKEN.";
   return null;
 }
 
@@ -122,14 +134,35 @@ function graphUrl(path: string) {
 
 type GraphRecord = Record<string, unknown>;
 
+/** Token cho MỘT lời gọi: `header` = đi trong tiêu đề `Authorization` (tổ chức khách), không thì như cũ (nhà). */
+type GraphCredential = { token: string; header: boolean };
+
+/**
+ * Token của lời gọi theo ngữ cảnh. NHÀ ⇒ `assertHomeCredentials` + biến môi trường, đúng như trước. TỔ CHỨC KHÁCH ⇒ kết
+ * nối «meta-ads-org» của chính nó (lời GHI còn đòi công tắc `ads.write.org`), `assertConnectionOwner`, và lời gọi nhắm
+ * `act_<id>` phải là tài khoản đã khai. `token` truyền vào = token FANPAGE (đăng Reel) — lấy bằng chính token này.
+ */
+async function graphCredential(purpose: "READ" | "WRITE", path: string, token?: string): Promise<GraphCredential> {
+  const org = await currentOrganization();
+  if (org.isHome) {
+    // Token Meta trong môi trường là của tổ chức nhà (P12) — chặn trước khi gắn token vào lời gọi.
+    await assertHomeCredentials("facebook");
+    return { token: token ?? env.facebook.accessToken, header: false };
+  }
+  const c = await openOrgGraphCredential(purpose);
+  if (!c.ok) throw new IntegrationError(`Facebook: ${purpose === "WRITE" ? "đường ghi quảng cáo đang đóng" : "chưa đọc được Facebook của tổ chức"} — ${c.reason}`, 403);
+  await assertConnectionOwner(META_ADS_ORG_CONNECTOR, c.org);
+  const lech = orgAccountPathProblem(path, c.adAccountIds);
+  if (lech) throw new IntegrationError(`Facebook: ${lech}`, 403);
+  return { token: token ?? c.token, header: true };
+}
+
 async function graphGet(path: string, params: Record<string, string>, token?: string): Promise<GraphRecord> {
-  // Token Meta trong môi trường là của tổ chức nhà (P12) — chặn trước khi gắn token vào URL.
-  await assertHomeCredentials("facebook");
+  const cred = await graphCredential("READ", path, token);
   const url = graphUrl(path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  // `token` = token FANPAGE (đăng Reel, đọc trạng thái Reel) — lấy từ chính token System User mỗi lần dùng, không lưu.
-  url.searchParams.set("access_token", token ?? env.facebook.accessToken);
-  const { body } = await fetchJson(url, { serviceName: "Facebook", timeoutMs: 30_000, retries: 2 });
+  if (!cred.header) url.searchParams.set("access_token", cred.token);
+  const { body } = await fetchJson(url, { serviceName: "Facebook", timeoutMs: 30_000, retries: 2, ...(cred.header ? { headers: { authorization: `Bearer ${cred.token}` } } : {}) });
   const rec = (body ?? {}) as GraphRecord;
   if (rec.error) {
     const e = rec.error as GraphRecord;
@@ -230,10 +263,11 @@ export async function listTokenPages(): Promise<TokenPage[]> {
  */
 async function graphPost(path: string, fields: Record<string, string>, via: WriteVia = {}): Promise<GraphRecord> {
   assertAdsWriteAllowed();
-  // Đường GHI tiêu tiền thật: tổ chức khác nhà không bao giờ được chạm tài khoản QC của tổ chức nhà (P12).
-  await assertHomeCredentials("facebook");
+  // Đường GHI tiêu tiền thật: tổ chức khác nhà không bao giờ được chạm tài khoản QC của tổ chức nhà (P12) — nó đi
+  // bằng token CỦA CHÍNH NÓ, và chỉ khi tổ chức đã bật công tắc đăng (`graphCredential`).
+  const cred = await graphCredential("WRITE", path, via.token);
   await assertKillSwitchAllows(fields);
-  const token = via.token ?? env.facebook.accessToken;
+  const token = cred.token;
   // Hai hình dạng, MỘT lời gọi mạng (bài kiểm đếm số lời gọi fetchJson trong tệp này — phải đúng HAI): form tới Graph API, hoặc byte video thô tới
   // máy tải lên của Facebook (`rupload`, chỉ nhận đúng máy ấy). Cả hai đã qua ĐỦ ba chốt ở trên.
   const upload = via.upload ? { url: assertRuploadUrl(via.upload.url), bytes: via.upload.bytes } : null;
@@ -244,8 +278,8 @@ async function graphPost(path: string, fields: Record<string, string>, via: Writ
     retries: 0,
     headers: upload
       ? { authorization: `OAuth ${token}`, offset: "0", file_size: String(upload.bytes.byteLength), "content-type": "application/octet-stream" }
-      : { "content-type": "application/x-www-form-urlencoded" },
-    body: upload ? upload.bytes : new URLSearchParams({ ...fields, access_token: token }).toString(),
+      : { "content-type": "application/x-www-form-urlencoded", ...(cred.header ? { authorization: `Bearer ${token}` } : {}) },
+    body: upload ? upload.bytes : new URLSearchParams(cred.header ? fields : { ...fields, access_token: token }).toString(),
   });
   const rec = (body ?? {}) as GraphRecord;
   if (rec.error) {

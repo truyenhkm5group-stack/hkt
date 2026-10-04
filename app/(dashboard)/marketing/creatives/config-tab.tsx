@@ -3,7 +3,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ConfigForm } from "@/app/(dashboard)/marketing/creatives/config-form";
 import { SectionCard } from "@/components/ui-bits";
-import { CREATIVE_WRITE_DENIAL_REASON, IMAGE_MODE_LABEL, IMAGE_QUALITY_LABEL, IMAGE_SIZE_LABEL, estimateImageUsd, imageModelBatchSupport } from "@/lib/constants/creative-loop";
+import { OrgAdsWriteCard } from "@/app/(dashboard)/marketing/creatives/org-ads-write";
+import { orgAdsWriteBlocker, readOrgAdsWrite } from "@/lib/marketing/meta-ads-org-write";
+import { currentOrganization } from "@/lib/platform/context";
+import { CREATIVE_HARD_LIMITS, CREATIVE_WRITE_DENIAL_REASON, IMAGE_MODE_LABEL, IMAGE_QUALITY_LABEL, IMAGE_SIZE_LABEL, estimateImageUsd, imageModelBatchSupport } from "@/lib/constants/creative-loop";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
 import { ADS_KILL_SOURCE_LABEL } from "@/lib/constants/ads-kill-switch";
@@ -27,6 +30,9 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
   const [state, counts, products, kill, scopes, tokenApp] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions(), readAdsKillSwitch(), getFbTokenScopes(), getFbTokenIdentity()]);
   const { config, problems } = state;
   const writeReason = adsWriteDisabledReason();
+  // Tổ chức khách: đăng bằng token System User của CHÍNH tổ chức, công tắc riêng; KHÔNG bắt luật tắt (chủ nền tảng 04/10/2026).
+  const org = await currentOrganization();
+  const orgWrite = org.isHome ? null : { ...(await readOrgAdsWrite()), blocker: await orgAdsWriteBlocker() };
   const thieu = problems.filter((p) => p.field !== "rules");
   const luatHong = problems.filter((p) => p.field === "rules");
   // Giá ước tính đọc từ hợp đồng (`estimateImageUsd`) — không gõ lại con số nào.
@@ -57,6 +63,15 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
       label: "Đường ghi quảng cáo (máy chủ)",
       detail: writeReason ?? "Đang mở. Mọi lượt ghi vẫn phải qua phiếu duyệt lô (nấc COPILOT).",
     },
+    ...(orgWrite
+      ? [
+          {
+            level: orgWrite.blocker ? "BLOCK" : "OK",
+            label: "Đăng bằng token của tổ chức",
+            detail: orgWrite.blocker ?? "Đang mở — Đăng camp dùng token System User và tài khoản quảng cáo tổ chức đã khai.",
+          } satisfies Check,
+        ]
+      : []),
     {
       level: kill.killed ? "BLOCK" : "OK",
       label: "Công tắc tắt khẩn cấp (settings ads.write.kill)",
@@ -113,7 +128,9 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
         ? luatHong.map((p) => p.message).join(" ")
         : config.killRules.length
           ? `${formatNumber(config.killRules.length)} luật.`
-          : "Chưa khai — máy sẽ KHÔNG tự tắt mẫu nào, và Đăng camp bị chặn: camp ngân sách ngày chạy liên tục, không có luật tắt thì không bao giờ tự dừng.",
+          : orgWrite
+            ? "Chưa khai — tổ chức của bạn không bắt buộc luật tắt: Đăng camp vẫn đăng, camp ngân sách ngày chạy tới khi bạn tắt trên Trình quản lý quảng cáo."
+            : "Chưa khai — máy sẽ KHÔNG tự tắt mẫu nào, và Đăng camp bị chặn: camp ngân sách ngày chạy liên tục, không có luật tắt thì không bao giờ tự dừng.",
     },
     {
       level: config.keepRules.length ? "OK" : "WARN",
@@ -135,7 +152,8 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
       ),
     },
     {
-      level: config.enabled ? "OK" : "BLOCK",
+      // Tổ chức khách không có vòng mẫu tự dựng lô — «Đăng camp» không cần công tắc này.
+      level: config.enabled ? "OK" : orgWrite ? "WARN" : "BLOCK",
       label: "Công tắc vòng mẫu",
       detail: config.enabled ? "Đang bật." : "Đang tắt — không lập lô mới. Job còn cần CREATIVE_LOOP_EVERY_MINUTES trên máy chủ.",
     },
@@ -144,6 +162,7 @@ export async function ConfigTab({ canManage, canKill }: { canManage: boolean; ca
 
   return (
     <div className="space-y-4">
+      {orgWrite ? <OrgAdsWriteCard enabled={orgWrite.enabled} blocker={orgWrite.blocker} canManage={canManage} caps={{ perCampVnd: CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd, dailyVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd }} /> : null}
       <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canManage} />
       <SectionCard
         title="Còn thiếu gì để vòng chạy thật"
