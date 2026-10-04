@@ -359,7 +359,7 @@ async function kickWorkflows() {
   }
 }
 
-export type ManualOrderResult = { ok: true; id: string } | MetaFailure;
+export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | MetaFailure;
 
 /** Đơn giá máy gửi phải đúng giá máy chủ tính theo chế độ đã khai; máy không chiết khấu. */
 async function agentPriceGate(p: Prepared, mode: AgentPricingMode): Promise<MetaFailure | null> {
@@ -420,10 +420,15 @@ async function creditGate(p: Prepared, existingOrderId?: string): Promise<MetaFa
   return fail("INVALID", [{ field: "customerId", message: `Vượt hạn mức nợ của ${p.customer.name}: dư nợ sau đơn ${vnd(c.exposureAfter)} > hạn mức ${vnd(c.limit)} (vượt ${vnd(c.overBy)}). Thu nợ trước, nâng hạn mức ở hồ sơ khách, hoặc lưu đơn ở trạng thái Mới.` }]);
 }
 
-export async function createManualOrderCore(user: SessionUser, rawInput: unknown): Promise<ManualOrderResult> {
+/**
+ * Người tạo đơn tay. `opts.idempotencyKey` — khoá của MỘT lượt bấm (form tạo đơn trong khung chat sinh một khoá mỗi lần mở):
+ * bấm hai lần / trình duyệt gửi lại cùng khoá ⇒ trả lại ĐÚNG đơn đã tạo (`reused: true`), không đẻ đơn thứ hai. Cùng chỗ lưu,
+ * cùng khoá giao dịch với khoá lần mua của máy (`raw.agentKey`).
+ */
+export async function createManualOrderCore(user: SessionUser, rawInput: unknown, opts: { idempotencyKey?: string | null } = {}): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return createOrder(userWriter(user), rawInput);
+  return createOrder(userWriter(user), rawInput, undefined, opts.idempotencyKey);
 }
 
 /** Máy (chatbot bán hàng) tạo đơn — cổng tổ chức y hệt, quyền do lớp gọi quyết; giá / tồn / khoá lần mua theo `opts`. */
@@ -448,7 +453,7 @@ async function autoConfirmComplete(p: Prepared, existingOrderId?: string): Promi
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
 
-async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions): Promise<ManualOrderResult> {
+async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions, userKey?: string | null): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
   if (agentOpts) {
@@ -464,7 +469,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   const id = newManualOrderId();
   const now = new Date();
   const db = await getDb();
-  const key = agentOpts?.idempotencyKey?.trim().slice(0, 200) || null;
+  const key = (agentOpts?.idempotencyKey ?? userKey)?.trim().slice(0, 200) || null;
   let reused = null as string | null;
   try {
     await db.transaction(async (tx) => {
@@ -487,7 +492,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
     if (error instanceof StockShortError) return error.failure;
     throw error;
   }
-  if (reused) return { ok: true, id: reused };
+  if (reused) return { ok: true, id: reused, reused: true };
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: w.agent ? `Tạo đơn bởi ${w.agent}` : "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
   if (p.stage === "CONFIRMED") await kickWorkflows();
   return { ok: true, id };
