@@ -62,9 +62,10 @@ const FIRST_CONTACT_LOOKBACK_MS = 60_000;
  * Dòng Pancake TỰ CHÈN vào hội thoại — nhãn tự động, giai đoạn khách hàng tiềm năng, «X đã trả lời một quảng cáo». Hiện như tin
  * phía page nhưng KHÔNG phải ai trả lời khách. Bot nhà gặp từ 07/09/2026 (`AUTO_NOTE_RE`, chatbot/src/bot.js); bot của tổ chức
  * gặp lại 03/10/2026 (Hải Sản Làng Chài, «Thủy Nguyễn»): khách gửi SĐT ⇒ Pancake chèn «Đã đặt giai đoạn … Đủ tiêu chuẩn» ⇒ bot
- * coi là «page đã trả lời», im đúng lúc khách sắp chốt đơn.
+ * coi là «page đã trả lời», im đúng lúc khách sắp chốt đơn. 04/10/2026 («Đỗ Thị Hoa»): khách vào từ bài viết, chốt «Mình lấy
+ * 1 kg» ⇒ Pancake chèn «Đỗ Thị Hoa đã trả lời về một bài viết. (link bài)» phía page ⇒ bot im — cùng lớp, khác câu chữ.
  */
-export const PANCAKE_AUTO_NOTE_RE = /nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng|đã trả lời một quảng cáo/i;
+export const PANCAKE_AUTO_NOTE_RE = /nhãn tự động|đánh dấu trạng thái đơn|đặt giai đoạn của khách hàng|đã trả lời (?:về )?một (?:quảng cáo|bài viết)/i;
 
 function pancakeMs(v: unknown): number | null {
   const s = typeof v === "string" ? v.trim() : "";

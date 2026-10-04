@@ -1490,6 +1490,13 @@ async function testJourney() {
       const fNote = await processFanpageThread(PAGE, "t-984", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fNote.replies >= 1 && fNote.processed === 1 && !/Page đã trả lời/.test(fNote.skipped ?? ""), `ghi chú tự động ⇒ bot vẫn trả lời khách: ${JSON.stringify(fNote)}`);
       assert.notEqual((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-984"))))[0]?.status, "HANDOFF", "ghi chú có uid cũng không làm bot nhường");
+      // (04/10/2026 · «Đỗ Thị Hoa») khách vào từ BÀI VIẾT chốt «Mình lấy 1 kg» ⇒ Pancake chèn «X đã trả lời về một bài viết. (link)»
+      // phía page ⇒ không phải ai trả lời ⇒ bot vẫn trả lời; lượt quét lại cũng không coi nó là trả lời.
+      await receiveFanpageEvent(ev("m-post-q", "Mình lấy 1 kg , nếu ngon lần sau mình mua nhiều", { id: "cust-hoa", name: "Đỗ Thị Hoa" }, "t-989"));
+      assert.match((await receiveFanpageEvent(ev("m-post-note", "Đỗ Thị Hoa đã trả lời về một bài viết. (https://www.facebook.com/permalink.php?story_fbid=pfbid0n7&id=100095151956127)", { id: PAGE }, "t-989"))).reason, /Ghi chú tự động của Pancake/);
+      const fPost = await processFanpageThread(PAGE, "t-989", { fetch: pancake.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fPost.replies >= 1 && !/Page đã trả lời/.test(fPost.skipped ?? ""), `«đã trả lời về một bài viết» ⇒ bot vẫn trả lời: ${JSON.stringify(fPost)}`);
+      assert.deepEqual(unansweredCustomerMessages(normalizeThreadMessages([{ id: "q", message: "Mình lấy 1 kg", from: { id: "c" }, inserted_at: "2026-10-04T02:35:00" }, { id: "n", message: "Đỗ Thị Hoa đã trả lời về một bài viết. (https://www.facebook.com/permalink.php?story_fbid=x)", from: { id: PAGE }, inserted_at: "2026-10-04T02:35:02" }], PAGE), Date.parse("2026-10-04T02:39:00Z"), 60_000, 1_800_000).map((m) => m.id), ["q"], "quét lại: dòng «trả lời về một bài viết» không tính là đã trả lời");
       // (03/10/2026 · «Nguyễn Loan») dòng hệ thống của Pancake tới qua webhook KHÔNG kèm chữ ⇒ không phải trả lời ⇒ bot vẫn trả lời.
       await receiveFanpageEvent(ev("m-empty-q", "Bán cho chị gói 2kg chả cá thu, 69 đường 13A Bình Hưng Hòa A, Bình Tân 0358038447", { id: "cust-loan", name: "Nguyễn Loan" }, "t-986"));
       assert.match((await receiveFanpageEvent(ev("m-empty-note", "", { id: PAGE }, "t-986"))).reason, /không có chữ/);
