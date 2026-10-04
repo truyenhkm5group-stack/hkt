@@ -12,7 +12,8 @@
  * KHÔNG mang sản phẩm, giá, khách hay bí mật của bất kỳ shop nào (mẫu là DỮ LIỆU CẤU HÌNH — backup-recovery.md §1): danh
  * mục của shop đi vào bằng «Nhập từ tệp» ở /products/import. KHÔNG có logic cân ký lẻ / hàng tươi theo khối lượng — hàng
  * đóng gói giá cố định: tiền đơn = đơn giá × số lượng − chiết khấu + phí ship (lib/constants/manual-orders.ts). HSD / số
- * lô theo phiếu nhập KHÔNG có ở đây (đổi lược đồ kho — phase riêng); hướng dẫn bảo quản / sử dụng là field của SẢN PHẨM.
+ * lô theo phiếu nhập là module `lots` (0199, bản 1.1.0 của mẫu): lớp gắn thêm lên phiếu kho, không đổi tồn; hướng dẫn bảo
+ * quản / sử dụng vẫn là field của SẢN PHẨM.
  *
  * GIỮ HÀNG KHÔNG PHẢI MỘT HÀNH ĐỘNG CỦA LUẬT: đơn «Đã xác nhận» tự trừ vào cột KHẢ DỤNG của sổ kho cho tới khi xuất
  * (AGENTS.md mục 3.10), huỷ đơn thì tự nhả. Hai luật dựng sẵn chỉ BÁO — ở NHÁP + CHẠY THỬ (luật 23: mẫu không tự kích
@@ -24,11 +25,11 @@ export const FOOD_COMMERCE_BLUEPRINT: Blueprint = {
   format: "erp-blueprint",
   formatVersion: 1,
   key: "food-commerce",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "Thực phẩm đóng gói bán online",
   description: "Shop bán thực phẩm / đặc sản / hải sản chế biến đã đóng gói, giá cố định theo gói. Khách, sản phẩm có quy cách & hướng dẫn bảo quản, đơn (tự xác nhận đã giao), kho giữ hàng khi chốt và chatbot AI bán hàng. Không có sản xuất, quảng cáo, lương; không bật Vận chuyển và CSKH — hai module ấy dựa trên kết nối của tổ chức nhà, cần thì bật ở Module của tổ chức.",
   industry: "Thực phẩm đóng gói",
-  modules: ["core", "work", "customers", "products", "orders", "inventory", "ai_sales"],
+  modules: ["core", "work", "customers", "products", "orders", "inventory", "lots", "ai_sales"],
   roles: [
     {
       key: "ban_hang",

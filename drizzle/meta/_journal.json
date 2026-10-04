@@ -1387,6 +1387,13 @@
       "when": 1790766880000,
       "tag": "0198_stays",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1790766940000,
+      "tag": "0199_stock_lots",
+      "breakpoints": true
     }
   ]
 }

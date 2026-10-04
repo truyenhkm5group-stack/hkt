@@ -2615,6 +2615,38 @@ export const stockReceiptItems = pgTable(
   ],
 );
 
+/**
+ * LÔ & HẠN DÙNG (0199, module `lots`): lớp gắn thêm lên MỘT dòng phiếu kho dương. KHÔNG tham gia phép tính tồn nào (luật 10) —
+ * «lô còn bao nhiêu» là ước tính lúc đọc (`lib/constants/lots.ts::estimateLotRemaining`).
+ */
+export const stockLots = pgTable(
+  "stock_lots",
+  {
+    id: id(),
+    receiptItemId: text("receipt_item_id")
+      .notNull()
+      .references(() => stockReceiptItems.id, { onDelete: "cascade" }),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "cascade" }),
+    lotCode: text("lot_code").notNull(),
+    expiresOn: date("expires_on", { mode: "string" }).notNull(),
+    producedOn: date("produced_on", { mode: "string" }),
+    quantity: integer("quantity").notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("stock_lots_item_code_uq").on(t.receiptItemId, sql`lower(${t.lotCode})`),
+    index("stock_lots_variant_idx").on(t.variantId, t.expiresOn),
+    check("stock_lots_qty_check", sql`${t.quantity} > 0`),
+    check("stock_lots_code_check", sql`length(btrim(${t.lotCode})) BETWEEN 1 AND 60`),
+    check("stock_lots_dates_check", sql`${t.producedOn} IS NULL OR ${t.producedOn} <= ${t.expiresOn}`),
+  ],
+);
+
 // ───────────────────────── Chi phí & marketing ─────────────────────────
 
 /**
