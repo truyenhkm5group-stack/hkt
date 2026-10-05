@@ -34,7 +34,9 @@ import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatc
 import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, nextCallCostMicros, paidCostMicros, quotaRetryAt, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
-import { purgeExpiredSnapshots, runLeadHunterTick } from "@/lib/wholesale/engine";
+import { COMPETITOR_SWEEP_SETTING_KEY, purgeExpiredSnapshots, runLeadHunterTick, sweepCompetitors } from "@/lib/wholesale/engine";
+import { competitorHit } from "@/lib/wholesale/competitor";
+import { getSettingJson } from "@/lib/settings";
 import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
 import { channelAction, openerLooksInvented, templateOpener } from "@/lib/wholesale/opener";
 import { approveOutreachCore, markOutreachSentCore, prepareOutreachCore, queueOutreachCore, recordOutreachResultCore } from "@/lib/wholesale/outreach";
@@ -43,7 +45,7 @@ import type { DiscoveryProvider, EnrichmentProvider } from "@/lib/wholesale/prov
 import { cellKeyOf, estimateCost, planTextCells, queryTextOf } from "@/lib/wholesale/query-plan";
 import { gradeOf, learnedAdjustment, scoreLead, type ScoreInput } from "@/lib/wholesale/scoring";
 import { classifySegment, SEGMENT_POINTS } from "@/lib/wholesale/segments";
-import { saveLeadHunterConfig } from "@/lib/wholesale/store";
+import { getLeadHunterConfig, saveLeadHunterConfig } from "@/lib/wholesale/store";
 import { isPrivateAddress } from "@/lib/net/public-url";
 import { allowed as relayAllowed, handle as relayHandle } from "../deploy/places-relay/relay.js";
 import { enrichFromWebsite } from "@/lib/wholesale/website";
@@ -111,6 +113,7 @@ function testSegments() {
   assert.equal(chainBrandHit("Hải sản Cô Lan", brands), null);
   assert.equal(chainBrandHit("Logogia", brands), null, "không khớp giữa chữ");
   assert.equal(brandKey("Nhà hàng Hải Sản Biển Đông 2"), "hai san bien dong");
+  assert.equal(classifySegment({ name: "Bánh Cuốn Chả Mực Hạ Long Phạm Ngọc" }).segment, "EATERY", "món ăn mang tên mặt hàng là QUÁN, không phải cửa hàng đặc sản");
   const ev = classifySegment({ name: "BBQ Garden", types: [] });
   assert.equal(ev.segment, "BBQ");
   assert.match(ev.evidence, /bbq/);
@@ -118,6 +121,26 @@ function testSegments() {
 
 function baseInput(over: Partial<ScoreInput> = {}): ScoreInput {
   return { segment: "SEAFOOD_RESTAURANT", segmentEvidence: "tên có «hai san»", reviewCount: 637, rating: 4.5, businessStatus: "OPERATIONAL", phoneKind: "MOBILE", hasWebsite: true, hasOtherChannel: false, provinceKey: "da nang", provinceLabel: "Đà Nẵng", siblingCount: 0, branchHint: false, hasAddress: true, hasName: true, ...over };
+}
+
+/** Tên thật đọc từ production HSLC 05/10/2026 (bộ từ khoá «chả mực Hạ Long»). */
+function testCompetitor() {
+  const f = DEFAULT_LEAD_HUNTER_CONFIG.competitorFilter;
+  // Tỉnh gốc: có «chả mực» trong tên là đối thủ.
+  assert.ok(competitorHit("Thuý chả mực giã tay - Đặc sản Hạ Long", "quang ninh", f));
+  assert.ok(competitorHit("Chả Mực Bà Nụ", "Quảng Ninh", f), "khoá tỉnh có dấu / không dấu như nhau");
+  assert.ok(competitorHit("SAO KIM - CHẢ MỰC HẠ LONG(CHUYÊN HẢI SẢN HẠ LONG)", "quang ninh", f));
+  // Tỉnh khác: chỉ khi có dấu hiệu sản xuất / bán buôn.
+  assert.match(competitorHit("Chả Mực Hạ Long Quảng Ninh Giã Tay Giá Sỉ Phuc Food", "ha noi", f) ?? "", /giã tay/);
+  assert.ok(competitorHit("Đại lý chả mực Hạ Long chính gốc tại Sài Gòn", "ho chi minh", f));
+  assert.equal(competitorHit("Chả mực Hạ Long tại Hà Nội", "ha noi", f), null, "nơi bán lại ở tỉnh khác có thể là khách — không đoán");
+  // Quán dùng chả mực làm món là KHÁCH, kể cả ở Quảng Ninh.
+  assert.equal(competitorHit("Bánh Cuốn Chả Mực Hạ Long Phạm Ngọc", "quang ninh", f), null);
+  assert.equal(competitorHit("Bún chả cá Hải Phòng", "quang ninh", f), null, "không có mặt hàng ⇒ không xét");
+  assert.equal(competitorHit("Cửa hàng đặc sản Hạ Long", "quang ninh", f), null);
+  assert.equal(competitorHit("Thuý chả mực giã tay", "quang ninh", { ...f, enabled: false }), null, "tắt luật ⇒ không loại");
+  assert.ok(!DEFAULT_KEYWORD_GROUPS.some((g) => g.keywords.some((k) => /chả mực/i.test(k))), "từ khoá «chả mực …» kéo về đối thủ ⇒ không còn trong bộ mặc định");
+  assert.deepEqual(mergeLeadHunterConfig({ competitorFilter: { enabled: false } }).competitorFilter.products, f.products, "bản lưu cũ thiếu khoá ⇒ ghép mặc định");
 }
 
 function testScoring() {
@@ -1017,6 +1040,25 @@ async function testDb() {
       assert.ok(dash.rows.length >= 1);
       assert.equal(dash.kpi.revenuePer100, null, "dưới 20 lead ⇒ không in doanh thu / 100 lead");
 
+      // ── Luật đối thủ áp lên lead CŨ: chỉ lead máy tìm, chưa ai liên hệ / giao; một lần cho mỗi bản luật ──
+      const rival = (name: string, over: Partial<typeof schema.wholesaleLeads.$inferInsert> = {}) =>
+        db.insert(schema.wholesaleLeads).values({ source: "GOOGLE_PLACES", businessName: name, provinceKey: "quang ninh", provinceLabel: "Quảng Ninh", enrichmentStatus: "READY", contactStatus: "QUALIFIED", ...over }).returning({ id: schema.wholesaleLeads.id });
+      const [r1] = await rival("Thoan chả mực");
+      const [r2] = await rival("Chả Mực Hải Đông", { lastContactAt: new Date() });
+      const [r3] = await rival("Chả mực Cô Ba", { source: "MANUAL_IMPORT" });
+      const [r4] = await rival("Bánh cuốn chả mực Cô Tư");
+      const [r5] = await rival("Chả mực Giã Tay Phuc Food", { provinceKey: "ha noi", provinceLabel: "Hà Nội", contactStatus: "NEW" });
+      await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 } });
+      const rivalCfg = await getLeadHunterConfig();
+      await db.delete(schema.settings).where(eq(schema.settings.key, COMPETITOR_SWEEP_SETTING_KEY));
+      assert.equal(await sweepCompetitors(rivalCfg, new Date()), 2, "loại r1 (tỉnh gốc) + r5 (giã tay); giữ lead đã liên hệ, lead nhập tay, quán bánh cuốn");
+      const st = async (id: string) => (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, id) }))!;
+      assert.equal((await st(r1!.id)).filterReason, "COMPETITOR");
+      assert.equal((await st(r5!.id)).enrichmentStatus, "FILTERED");
+      for (const r of [r2, r3, r4]) assert.equal((await st(r!.id)).enrichmentStatus, "READY");
+      assert.equal(await sweepCompetitors(rivalCfg, new Date()), 0, "cùng bản luật ⇒ không quét lại");
+      assert.ok(await getSettingJson<string | null>(COMPETITOR_SWEEP_SETTING_KEY, null));
+
       // ── Tuân thủ: dữ liệu Google hết hạn ⇒ xoá trắng, giữ Place ID; lead đang chăm thì làm mới ──
       await db.update(schema.wholesalePlaceSnapshots).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(schema.wholesalePlaceSnapshots.placeId, P.pub.placeId));
       const purged = await purgeExpiredSnapshots(new Date());
@@ -1038,6 +1080,7 @@ async function testDb() {
 export async function testWholesaleLeadHunter() {
   testPhone();
   testSegments();
+  testCompetitor();
   testScoring();
   testPlanAndCost();
   testScanPriority();
