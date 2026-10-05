@@ -50,6 +50,7 @@ import { readQuickReplyImage } from "@/lib/sales-chatbot/quick-replies";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
+import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -226,13 +227,15 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
       await db.insert(t).values({ pageId, threadId: psid, messageId: rowId, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
       const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
       if (!sent.ok) {
+        await noteMessengerGraphFailure(sent);
         await db.delete(t).where(eq(t.messageId, rowId));
         return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${parts.length} đoạn)` : sent.error };
       }
       continue;
     }
     const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
-    if (!sent.ok) return { ok: false, error: sent.error };
+    // Token hỏng / mất quyền ⇒ kết nối «cần nối lại» + báo người (messenger-health.ts); lỗi khác chỉ là lỗi của tin này.
+    if (!sent.ok) return (await noteMessengerGraphFailure(sent), { ok: false, error: sent.error });
     await db
       .insert(t)
       .values({ pageId, threadId: psid, messageId: sent.id ?? `bot-out:${randomUUID()}`, text: part.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" })
@@ -256,6 +259,7 @@ export async function sendMessengerPageImages(pageId: string, psid: string, imag
   for (const [i, img] of images.entries()) {
     const sent = await sendMessengerImage(app, token, psid, img, deps.fetch ?? fetch);
     if (!sent.ok) {
+      await noteMessengerGraphFailure(sent);
       if (i === 0) await db.delete(t).where(eq(t.messageId, rowId));
       return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${images.length} ảnh)` : sent.error };
     }
@@ -289,7 +293,7 @@ export async function sendBotImages(pageId: string, psid: string, imageIds: read
     const img = await readQuickReplyImage(id);
     if (!img) continue;
     const r = await sendMessengerImage(app, token, psid, { data: new Uint8Array(img.data), contentType: img.contentType }, deps.fetch ?? fetch);
-    if (!r.ok) return { ok: false, error: r.error };
+    if (!r.ok) return (await noteMessengerGraphFailure(r), { ok: false, error: r.error });
     sent += 1;
     await db.insert(t).values({ pageId, threadId: psid, messageId: r.id ?? `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
   }
@@ -454,6 +458,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       const app = messengerApp();
       const commentId = commentRow.messageId.replace(/^comment:/, "");
       const pr = replyText && app ? await sendPrivateReply(app, token, commentId, replyText, deps.fetch ?? fetch) : null;
+      if (pr && !pr.ok) await noteMessengerGraphFailure(pr);
       if (pr?.ok) {
         out.replies += 1;
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });

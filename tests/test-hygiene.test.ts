@@ -156,6 +156,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/conversation-control.test.ts":
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token), cùng cách messenger.test — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
+  "tests/messenger-health.test.ts":
+    "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token), cùng cách messenger.test — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/go-live.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá thử để mã hoá token Pancake) và PLATFORM_AI_* (bật AI dùng chung bằng khoá GIẢ) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/phone-otp.test.ts":

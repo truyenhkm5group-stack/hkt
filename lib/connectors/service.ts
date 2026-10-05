@@ -652,3 +652,30 @@ export async function disableConnectionAsOperator(input: { connectorKey: string;
   });
   return { ok: true, status: "DISABLED", changed: true, message: `Đã tắt «${spec.label}» của tổ chức.` };
 }
+
+/**
+ * ═══ NHÀ CUNG CẤP NÓI KẾT NỐI HỎNG ⇒ VỀ NHÁP (không bao giờ BẬT, không bao giờ TẮT HẲN) ═══
+ *
+ * Gọi khi một lời gọi thật vừa nhận lỗi «token hết hiệu lực / mất quyền» (vd Graph mã 190 — graph-errors.ts). Cùng hệ quả với
+ * một lần «Kiểm tra» trượt: ACTIVE ⇒ DRAFT, ghi câu lỗi vào `last_test_message` để trang kết nối nói rõ vì sao, nhật ký mang
+ * nhãn MÁY (`userId = null`). Có ĐIỀU KIỆN trên `status = 'ACTIVE'` ⇒ trăm tin hỏng cùng lúc chỉ ra MỘT lần chuyển + MỘT dòng
+ * nhật ký (`changed` cho nơi gọi biết có nên báo người không). Bật lại vẫn là việc của người (nối lại / Kiểm tra đạt).
+ */
+export async function markConnectionBrokenBySystem(input: { connectorKey: string; reason: string; actorLabel: string }): Promise<{ changed: boolean }> {
+  const spec = findConnector(input.connectorKey);
+  if (!spec) return { changed: false };
+  const ctx = await currentOrganization();
+  const row = await findRow(spec.key);
+  if (!row || tripwire(row, { code: ctx.code, name: ctx.code, isHome: ctx.isHome })) return { changed: false };
+  const db = await getDb();
+  const now = new Date();
+  const message = input.reason.slice(0, 500);
+  const [hit] = await db
+    .update(schema.orgConnections)
+    .set({ status: "DRAFT", lastTestAt: now, lastTestOk: false, lastTestMessage: message, activatedAt: null, activatedBy: null, updatedBy: input.actorLabel, updatedAt: now })
+    .where(and(eq(schema.orgConnections.id, row.id), eq(schema.orgConnections.status, "ACTIVE")))
+    .returning({ id: schema.orgConnections.id });
+  if (!hit) return { changed: false };
+  await audit({ userId: null, userEmail: input.actorLabel, action: "ORG_CONNECTION_AUTO_DRAFT", entity: "org_connection", entityId: spec.key, before: { status: "ACTIVE" }, after: { status: "DRAFT", by: "PROVIDER_ERROR" }, reason: message, actorKind: "SYSTEM" });
+  return { changed: true };
+}

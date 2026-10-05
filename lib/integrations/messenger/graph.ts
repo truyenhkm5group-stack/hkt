@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
+import { classifyGraphError, GRAPH_ERROR_HINT, type GraphErrorKind } from "@/lib/integrations/messenger/graph-errors";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — GỌI GRAPH API CỦA META (docs/platform/messenger.md) ═══════════
@@ -54,17 +55,23 @@ function scrub(s: string, secrets: readonly string[]): string {
 type Fetch = typeof fetch;
 type GraphError = { error?: { message?: string; code?: number; error_subcode?: number; type?: string } };
 
-async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string; code: number | null }> {
+/** Lỗi của MỘT lời gọi Graph: câu (đã che bí mật, kèm việc phải làm) + LOẠI (graph-errors.ts) để nơi gọi biết kết nối có hỏng không. */
+export type GraphFailure = { ok: false; error: string; code: number | null; kind: GraphErrorKind };
+
+async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: readonly string[]): Promise<{ ok: true; body: Record<string, unknown> } | GraphFailure> {
   try {
     const res = await fetchImpl(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = ((await res.json().catch(() => null)) ?? {}) as Record<string, unknown> & GraphError;
     if (!res.ok || body.error) {
       const msg = body.error?.message ?? `HTTP ${res.status}`;
-      return { ok: false, error: scrub(`Facebook từ chối: ${msg}`, hide), code: typeof body.error?.code === "number" ? body.error.code : null };
+      const code = typeof body.error?.code === "number" ? body.error.code : null;
+      const kind = classifyGraphError(code, typeof body.error?.error_subcode === "number" ? body.error.error_subcode : null);
+      const hint = GRAPH_ERROR_HINT[kind];
+      return { ok: false, error: scrub(`Facebook từ chối: ${msg}${hint ? ` — ${hint}` : ""}`, hide), code, kind };
     }
     return { ok: true, body };
   } catch (e) {
-    return { ok: false, error: scrub(`Không gọi được Facebook: ${e instanceof Error ? e.message : String(e)}`, hide), code: null };
+    return { ok: false, error: scrub(`Không gọi được Facebook: ${e instanceof Error ? e.message : String(e)}`, hide), code: null, kind: "OTHER" };
   }
 }
 
@@ -148,14 +155,14 @@ export async function instagramAccountOf(app: MessengerApp, pageId: string, page
  * Gửi MỘT tin chữ cho khách (Send API, `messaging_type: RESPONSE` — trả lời trong khung 24 giờ kể từ tin cuối của khách).
  * Chữ dài hơn 2.000 ký tự ⇒ nơi gọi chia trước (`chunkText`).
  */
-export async function sendMessengerText(app: MessengerApp, pageToken: string, psid: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+export async function sendMessengerText(app: MessengerApp, pageToken: string, psid: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const r = await graph(
     fetchImpl,
     `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
     [pageToken, app.appSecret],
   );
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
@@ -163,14 +170,14 @@ export async function sendMessengerText(app: MessengerApp, pageToken: string, ps
  * Gửi MỘT ảnh cho khách qua Send API — tải TỆP lên cùng lời gọi (`filedata`, multipart), không cần URL công khai của ảnh.
  * Cùng khung 24 giờ / `RESPONSE` với tin chữ. Trả mã tin Meta để tiếng vọng nhận ra là tin của chính page.
  */
-export async function sendMessengerImage(app: MessengerApp, pageToken: string, psid: string, image: { data: Uint8Array; contentType: string }, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+export async function sendMessengerImage(app: MessengerApp, pageToken: string, psid: string, image: { data: Uint8Array; contentType: string }, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const form = new FormData();
   form.append("recipient", JSON.stringify({ id: psid }));
   form.append("messaging_type", "RESPONSE");
   form.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
   form.append("filedata", new Blob([new Uint8Array(image.data)], { type: image.contentType }), `anh.${image.contentType.split("/")[1] ?? "jpg"}`);
   const r = await graph(fetchImpl, `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "POST", body: form }, [pageToken, app.appSecret]);
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
@@ -178,14 +185,14 @@ export async function sendMessengerImage(app: MessengerApp, pageToken: string, p
  * TIN RIÊNG trả lời MỘT bình luận (Private Replies): người nhận là `comment_id`, mở hộp thư Messenger với người bình luận.
  * Meta chỉ cho MỘT tin riêng mỗi bình luận, trong 7 ngày.
  */
-export async function sendPrivateReply(app: MessengerApp, pageToken: string, commentId: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null; recipientId: string | null } | { ok: false; error: string }> {
+export async function sendPrivateReply(app: MessengerApp, pageToken: string, commentId: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null; recipientId: string | null } | { ok: false; error: string; kind: GraphErrorKind }> {
   const r = await graph(
     fetchImpl,
     `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
     [pageToken, app.appSecret],
   );
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: r.error, kind: r.kind };
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null, recipientId: typeof r.body.recipient_id === "string" ? r.body.recipient_id : null };
 }
 
