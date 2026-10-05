@@ -2,9 +2,11 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
-import { assignableUsers, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { assignableUsers, inboxAssignees, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
-import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, type InboxChannel, type InboxFilter, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, INBOX_LIST_MAX, INBOX_PERIOD_LABEL, INBOX_PERIODS, type InboxChannel, type InboxFilter, type InboxPeriod, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
+import { organizationLevelPack } from "@/lib/sales-chatbot/levels";
+import { CUSTOMER_LEVEL_CLASS, CUSTOMER_LEVEL_LABEL, CUSTOMER_LEVELS, levelsForPack, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import { cn } from "@/lib/utils";
 import { InboxAutoRefresh } from "./auto-refresh";
 import { ChannelAvatar } from "./avatar";
@@ -33,28 +35,40 @@ function waitLabel(min: number): string {
 function ListItem({ r, href, active }: { r: InboxRow; href: string; active: boolean }) {
   const wait = waitMinutes(r.waitingSince);
   return (
-    <Link href={href} className={cn("flex gap-3 px-3 py-2.5 hover:bg-muted/60", active && "bg-primary/10 hover:bg-primary/10")} data-conversation={r.id} data-unread={r.unread ? "1" : "0"}>
+    <Link
+      href={href}
+      prefetch={false}
+      className={cn("flex gap-3 border-l-[3px] px-3 py-2.5 transition-colors hover:bg-muted", active ? "border-l-primary bg-primary/15 hover:bg-primary/15" : r.unread ? "border-l-primary/70 bg-primary/[0.06]" : "border-l-transparent")}
+      data-conversation={r.id}
+      data-unread={r.unread ? "1" : "0"}
+    >
       <ChannelAvatar name={r.customerName} channel={r.channel} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className={cn("truncate text-sm", r.unread ? "font-bold" : "font-medium")}>{r.customerName}</span>
-          <span className={cn("shrink-0 text-[11px]", r.unread ? "font-semibold text-primary" : "text-muted-foreground")}>{formatTimeAgo(r.lastActivityAt)}</span>
+          <span className={cn("truncate text-[14px] text-foreground", r.unread ? "font-extrabold" : "font-semibold")}>{r.customerName}</span>
+          <span className={cn("shrink-0 text-[11.5px]", r.unread ? "font-bold text-primary" : "text-foreground/60")}>{formatTimeAgo(r.lastActivityAt)}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <p className={cn("min-w-0 flex-1 truncate text-[13px]", r.unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+          <p className={cn("min-w-0 flex-1 truncate text-[13px]", r.unread ? "font-bold text-foreground" : "text-foreground/65")}>
             {r.previewSide ? SIDE_PREFIX[r.previewSide] : ""}
             {r.preview || "—"}
           </p>
           {r.unread ? <span className="size-2.5 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" /> : null}
         </div>
-        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length ? (
+        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length || r.level || r.customerPhone ? (
           <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
             {wait !== null ? (
               <span className={cn("rounded px-1.5 font-medium", wait >= WAIT_URGENT_MIN ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200")}>{waitLabel(wait)}</span>
             ) : null}
-            {r.status === "HANDOFF" ? <span className="rounded bg-rose-100 px-1.5 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200">Cần người</span> : null}
-            {r.assigneeName ? <span className="rounded bg-muted px-1.5 text-muted-foreground">{r.assigneeName}</span> : null}
-            {r.hasOrder ? <span className="rounded bg-muted px-1.5 text-muted-foreground">có đơn</span> : null}
+            {r.level && r.level !== "NEW_MESSAGE" ? <span className={cn("rounded px-1.5 font-medium", CUSTOMER_LEVEL_CLASS[r.level])}>{CUSTOMER_LEVEL_LABEL[r.level]}</span> : null}
+            {r.customerPhone ? (
+              <span className="rounded bg-emerald-600 px-1.5 font-semibold text-white" title={`Có SĐT ${r.customerPhone}`}>
+                SĐT
+              </span>
+            ) : null}
+            {r.status === "HANDOFF" ? <span className="rounded bg-rose-600 px-1.5 font-medium text-white">Cần người</span> : null}
+            {r.assigneeName ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">{r.assigneeName}</span> : null}
+            {r.hasOrder ? <span className="rounded bg-zinc-200 px-1.5 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">có đơn</span> : null}
             {r.labels.map((l) => (
               <LabelChip key={l.id} label={l} />
             ))}
@@ -81,12 +95,36 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const selected = one("c");
   const labels = await listLabels();
   const label = labels.some((l) => l.id === one("lb")) ? one("lb") : null;
+  const phone = one("sdt") === "co" ? "HAS" : one("sdt") === "khong" ? "NONE" : null;
+  const level = (CUSTOMER_LEVELS as readonly string[]).includes(one("lv")) ? (one("lv") as CustomerLevel) : null;
+  const assignee = one("nv") ? one("nv").slice(0, 100) : null;
+  const period = (INBOX_PERIODS as readonly string[]).includes(one("tg")) ? (one("tg") as InboxPeriod) : null;
+  const day = (k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(one(k)) ? one(k) : null);
+  const from = day("tu");
+  const to = day("den");
+  const limit = Math.min(INBOX_LIST_MAX, Math.max(100, Number(one("n")) || 100));
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
   const thread = selected ? await loadInboxThread(user, selected) : null;
-  const [list, users] = await Promise.all([listInbox(user, { filter, channel, q, label }), assignableUsers(user)]);
+  const [list, users, assignees, pack] = await Promise.all([listInbox(user, { filter, channel, q, label, phone, level, assignee, period, from, to, limit }), assignableUsers(user), inboxAssignees(user), organizationLevelPack()]);
+  const levels = levelsForPack(pack);
+  const advanced = Boolean(channel || label || assignee || period || phone === "NONE");
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
-    const cur: Record<string, string | null> = { f: filter === "ALL" ? null : filter, ch: channel, lb: label, q: q || null, c: selected || null, ...patch };
+    const cur: Record<string, string | null> = {
+      f: filter === "ALL" ? null : filter,
+      ch: channel,
+      lb: label,
+      q: q || null,
+      sdt: phone === "HAS" ? "co" : phone === "NONE" ? "khong" : null,
+      lv: level,
+      nv: assignee,
+      tg: period,
+      tu: from,
+      den: to,
+      n: limit > 100 ? String(limit) : null,
+      c: selected || null,
+      ...patch,
+    };
     for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
     const s = p.toString();
     return `/ai/sales-chatbot/inbox${s ? `?${s}` : ""}`;
@@ -111,7 +149,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
       {"error" in list ? (
         <p className="text-sm text-destructive">{list.error}</p>
       ) : (
-        <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border bg-background lg:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="grid h-[calc(100dvh-13.5rem)] min-h-[560px] overflow-hidden rounded-xl border border-foreground/15 bg-background lg:grid-cols-[360px_minmax(0,1fr)]">
           <aside className={cn("min-h-0 flex-col border-r", selected ? "hidden lg:flex" : "flex")}>
             <div className="space-y-2 border-b bg-muted/30 p-2">
               <div className="flex flex-wrap gap-1">
@@ -130,39 +168,112 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   </Link>
                 ))}
               </div>
-              <form method="get" action="/ai/sales-chatbot/inbox" className="flex gap-1">
-                {filter !== "ALL" ? <input type="hidden" name="f" value={filter} /> : null}
-                <input name="q" defaultValue={q} placeholder="Tìm tên / SĐT…" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px]" aria-label="Tìm khách" />
-                <select name="ch" defaultValue={channel ?? ""} className="h-8 w-[92px] rounded-md border bg-background px-1 text-[12px]" aria-label="Kênh">
-                  <option value="">Mọi kênh</option>
-                  {INBOX_CHANNELS.map((c) => (
-                    <option key={c} value={c}>
-                      {INBOX_CHANNEL_LABEL[c]}
-                    </option>
+              <div className="flex flex-wrap items-center gap-1">
+                <Link
+                  href={href({ sdt: phone === "HAS" ? null : "co", c: null })}
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[12px] font-medium", phone === "HAS" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 bg-background text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40")}
+                  data-filter="has-phone"
+                >
+                  Có SĐT {list.phoneCount}
+                </Link>
+                {(["TODAY", "YESTERDAY", "7D"] as const).map((t) => (
+                  <Link key={t} href={href({ tg: period === t ? null : t, tu: null, den: null, c: null })} className={cn("rounded-full border px-2.5 py-0.5 text-[12px]", period === t ? "border-foreground bg-foreground text-background" : "bg-background hover:bg-muted")}>
+                    {INBOX_PERIOD_LABEL[t]}
+                  </Link>
+                ))}
+              </div>
+              {levels.length ? (
+                <div className="flex gap-1 overflow-x-auto pb-0.5" data-testid="inbox-levels">
+                  {levels.map((l) => (
+                    <Link
+                      key={l}
+                      href={href({ lv: level === l ? null : l, c: null })}
+                      className={cn("shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium", CUSTOMER_LEVEL_CLASS[l], level === l ? "ring-2 ring-foreground ring-offset-1" : "opacity-90 hover:opacity-100")}
+                      title={`Lọc khách ở level «${CUSTOMER_LEVEL_LABEL[l]}»`}
+                    >
+                      {CUSTOMER_LEVEL_LABEL[l]} {list.levelCounts[l] ?? 0}
+                    </Link>
                   ))}
-                </select>
-                {labels.length ? (
-                  <select name="lb" defaultValue={label ?? ""} className="h-8 w-[92px] rounded-md border bg-background px-1 text-[12px]" aria-label="Nhãn">
-                    <option value="">Mọi nhãn</option>
-                    {labels.map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-                <button type="submit" className="h-8 rounded-md border bg-background px-2 text-[12px] hover:bg-muted">
-                  Lọc
-                </button>
+                </div>
+              ) : null}
+              <form method="get" action="/ai/sales-chatbot/inbox" className="space-y-1">
+                {filter !== "ALL" ? <input type="hidden" name="f" value={filter} /> : null}
+                {level ? <input type="hidden" name="lv" value={level} /> : null}
+                {phone === "HAS" ? <input type="hidden" name="sdt" value="co" /> : null}
+                <div className="flex gap-1">
+                  <input name="q" defaultValue={q} placeholder="Tìm tên / SĐT…" className="h-8 min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 text-[13px]" aria-label="Tìm khách" />
+                  <button type="submit" className="h-8 rounded-md bg-foreground px-3 text-[12px] font-medium text-background hover:opacity-90">
+                    Lọc
+                  </button>
+                </div>
+                <details open={advanced} className="rounded-md border border-foreground/15 bg-background px-2 py-1 text-[12px]">
+                  <summary className="cursor-pointer select-none font-medium">Lọc nâng cao{advanced ? " · đang bật" : ""}</summary>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5 pb-1">
+                    <select name="ch" defaultValue={channel ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Kênh">
+                      <option value="">Mọi kênh</option>
+                      {INBOX_CHANNELS.map((c) => (
+                        <option key={c} value={c}>
+                          {INBOX_CHANNEL_LABEL[c]}
+                        </option>
+                      ))}
+                    </select>
+                    <select name="lb" defaultValue={label ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Thẻ / nhãn">
+                      <option value="">Mọi thẻ</option>
+                      {labels.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select name="nv" defaultValue={assignee ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Nhân viên phụ trách">
+                      <option value="">Mọi nhân viên</option>
+                      <option value="none">Chưa ai nhận</option>
+                      {(users.length ? users : assignees).map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select name="sdt" defaultValue={phone === "HAS" ? "co" : phone === "NONE" ? "khong" : ""} className="h-8 rounded-md border bg-background px-1" aria-label="Số điện thoại">
+                      <option value="">Có / không SĐT</option>
+                      <option value="co">Có SĐT</option>
+                      <option value="khong">Chưa có SĐT</option>
+                    </select>
+                    <select name="tg" defaultValue={period ?? ""} className="h-8 rounded-md border bg-background px-1" aria-label="Thời gian tin cuối">
+                      <option value="">Mọi thời gian</option>
+                      {INBOX_PERIODS.map((t) => (
+                        <option key={t} value={t}>
+                          {INBOX_PERIOD_LABEL[t]}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <input type="date" name="tu" defaultValue={from ?? ""} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-1" aria-label="Từ ngày (chọn «Khoảng ngày»)" />
+                      <input type="date" name="den" defaultValue={to ?? ""} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-1" aria-label="Đến ngày" />
+                    </div>
+                  </div>
+                  {advanced || level || phone || q ? (
+                    <Link href="/ai/sales-chatbot/inbox" className="text-primary hover:underline">
+                      Xoá mọi bộ lọc
+                    </Link>
+                  ) : null}
+                </details>
               </form>
             </div>
-            <ul className="min-h-0 flex-1 divide-y overflow-y-auto" data-testid="inbox-list">
+            <ul className="min-h-0 flex-1 divide-y divide-foreground/10 overflow-y-auto" data-testid="inbox-list">
               {list.rows.length === 0 ? <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li> : null}
               {list.rows.map((r) => (
                 <li key={r.id}>
                   <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} />
                 </li>
               ))}
+              {list.rows.length >= limit && limit < INBOX_LIST_MAX ? (
+                <li className="p-2 text-center">
+                  <Link href={href({ n: String(Math.min(INBOX_LIST_MAX, limit + 100)) })} className="text-[13px] font-medium text-primary hover:underline">
+                    Xem thêm hội thoại ({list.rows.length}/{list.total})
+                  </Link>
+                </li>
+              ) : null}
             </ul>
           </aside>
           <section className={cn("min-h-0", selected ? "block" : "hidden lg:block")}>
