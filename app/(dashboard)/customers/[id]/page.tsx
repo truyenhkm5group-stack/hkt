@@ -12,6 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getCustomerDetail } from "@/lib/queries/customers";
+import { CUSTOMER_CONVERSATIONS_MAX, customerConversations } from "@/lib/queries/customer-conversations";
+import { CONVERSATION_CONTROL_LABEL } from "@/lib/sales-chatbot/conversation-control-shared";
+import { INBOX_CHANNEL_LABEL } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { CustomerProfileForm } from "@/app/(dashboard)/customers/[id]/customer-profile-form";
@@ -93,6 +96,9 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const showReturns = moduleOn(user, "returns");
   // Điều khoản bán & công nợ (0188) chỉ có nghĩa ở tổ chức TẠO ĐƠN TAY — tổ chức đồng bộ đơn Pancake đi theo bảng kê ĐVVC.
   const showTrade = (await manualOrderOrgGate()).allowed;
+  // Hội thoại của khách (Customer 360): chỉ ở tổ chức có Hộp thư khách và người xem đọc được hội thoại.
+  const showChats = moduleOn(user, "ai_sales") && can(user, "ai_sales:view");
+  const chats = showChats ? await customerConversations(customer.id) : [];
   const { stats } = customer;
   const addresses = parseAddresses(customer.addresses);
   const phones = Array.from(new Set([customer.phone, ...customer.phones].filter((p): p is string => Boolean(p))));
@@ -202,6 +208,34 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               <p className="px-5 py-4 text-sm text-muted-foreground">Khách hàng chưa có đơn nào trong ERP.</p>
             )}
           </SectionCard>
+
+          {showChats ? (
+            <SectionCard title={`Hội thoại (${formatNumber(chats.length)}${chats.length >= CUSTOMER_CONVERSATIONS_MAX ? "+" : ""})`} description="Mọi kênh · nối bằng khoá cứng (khách gắn vào hội thoại hoặc đơn của khách sinh ra từ hội thoại), không ghép theo tên" padded={false}>
+              {chats.length ? (
+                <ul className="divide-y" data-testid="customer-conversations">
+                  {chats.map((ch) => (
+                    <li key={ch.id}>
+                      <Link href={`/ai/sales-chatbot/inbox?c=${encodeURIComponent(ch.id)}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 py-2.5 text-sm hover:bg-muted/50">
+                        <span className="min-w-0">
+                          <span className="font-medium">{INBOX_CHANNEL_LABEL[ch.channel as keyof typeof INBOX_CHANNEL_LABEL] ?? ch.channel}</span>
+                          {ch.pageId ? <span className="text-muted-foreground"> · page {ch.pageId}</span> : null}
+                          {ch.orders ? <span className="text-muted-foreground"> · {formatNumber(ch.orders)} đơn</span> : null}
+                        </span>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span className={cn("rounded px-1.5 py-0.5", ch.control === "HUMAN" || ch.status === "HANDOFF" ? "bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200" : "bg-violet-50 text-violet-800 dark:bg-violet-950/40 dark:text-violet-200")}>
+                            {ch.control !== "AUTO" ? CONVERSATION_CONTROL_LABEL[ch.control] : ch.status === "HANDOFF" ? "Cần người" : CONVERSATION_CONTROL_LABEL.AUTO}
+                          </span>
+                          {formatTimeAgo(ch.lastActivityAt)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-5 py-4 text-sm text-muted-foreground">Chưa có hội thoại nào gắn với khách này.</p>
+              )}
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Sản phẩm đã mua nhiều nhất" description="Theo số lượng, không tính đơn huỷ/xoá">
             {customer.topProducts.length ? (

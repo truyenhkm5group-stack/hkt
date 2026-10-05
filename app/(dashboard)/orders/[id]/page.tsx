@@ -5,7 +5,7 @@ import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { notFound } from "next/navigation";
-import { ExternalLink, MapPin, Phone, ShoppingBag, Truck, User } from "lucide-react";
+import { ExternalLink, MapPin, MessageCircle, Phone, ShoppingBag, Truck, User } from "lucide-react";
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
@@ -21,11 +21,11 @@ import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/vie
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getDb } from "@/db";
-import { getOrderDetail, orderChatThreads } from "@/lib/queries/orders";
+import { chatLinkOf, getOrderDetail, orderChatThreads, salesInboxEnabled } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 import { getOrderValidation } from "@/lib/queries/preship-validation";
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/constants/preship-validation";
-import { pancakeConversationUrl, pancakePosOrderSearchUrl, pancakePosOrderUrlFromRaw, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
+import { pancakePosOrderSearchUrl, pancakePosOrderUrlFromRaw, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-delivery";
 import { promisedVerdict } from "@/lib/constants/promised-delivery";
 import { vnDateKey } from "@/lib/format";
@@ -114,9 +114,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const canReceipt = canPay && canRecordPayment("RECEIPT", order.stage);
   const canRefund = canPay && canRecordPayment("REFUND", order.stage) && (payment?.state.net ?? 0) > 0;
   const pancakeUrl = manual ? null : (pancakePosOrderUrlFromRaw(order.raw) ?? pancakePosOrderSearchUrl(order.shopId || env.pancake.shopId, order.systemId));
-  // Hội thoại Pancake của khách: đơn đồng bộ mang sẵn mã; đơn bot / ghi từ hội thoại tra ngược trong sổ hội thoại chatbot.
+  // Hội thoại của đơn (chatLinkOf): đơn bot / tạo trong khung chat ⇒ Hộp thư ERP (mọi kênh); đơn đồng bộ ⇒ Pancake như trước.
   const chatThread = manual ? (await orderChatThreads([order.id])).get(order.id) : undefined;
-  const chatUrl = chatThread ? pancakeConversationUrl(chatThread.pageId, chatThread.threadId) : pancakeConversationUrl(order.pageId, order.conversationId);
+  const chatLink = chatLinkOf(chatThread, chatThread ? await salesInboxEnabled() : false, { pageId: order.pageId, conversationId: order.conversationId });
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
   return (
@@ -139,9 +139,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </Button>
             ) : null}
             {manualEditable ? <CancelManualOrderButton orderId={order.id} /> : null}
-            {chatUrl ? (
+            {chatLink?.internal ? (
               <Button asChild variant="outline" size="sm">
-                <a href={chatUrl} target="_blank" rel="noreferrer">
+                <Link href={chatLink.href} title={chatThread?.pageId ? `Kênh ${chatThread.channel} · page ${chatThread.pageId}` : `Kênh ${chatThread?.channel ?? ""}`}>
+                  <MessageCircle className="size-4" /> Hội thoại của đơn
+                </Link>
+              </Button>
+            ) : chatLink ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={chatLink.href} target="_blank" rel="noreferrer">
                   <ExternalLink className="size-4" /> Hội thoại Pancake
                 </a>
               </Button>
