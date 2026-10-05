@@ -61,7 +61,14 @@ export type LeadListRow = {
   filterReason: string | null;
   googleExpired: boolean;
   source: string;
+  /** Ghi chú gần nhất (dòng NOTE hoặc CALL có chữ) + kết quả cuộc gọi đi kèm (nếu là dòng CALL). */
+  lastNote: string | null;
+  lastNoteOutcome: string | null;
+  lastNoteAt: string | null;
 };
+
+/** Dòng hoạt động có chữ mới nhất của lead — câu con tương quan, khoá lead viết TƯỜNG MINH (drizzle in `id` trần thành cột của bảng con). */
+const LAST_NOTE_ROW = sql`(select a.note, a.outcome, a.kind, a.created_at from wholesale_lead_activities a where a.lead_id = "wholesale_leads"."id" and a.kind in ('NOTE','CALL') and a.note <> '' order by a.created_at desc limit 1)`;
 
 function leadConditions(params: ListParams, viewerId: string | null): SQL[] {
   const f = params.filters;
@@ -142,6 +149,9 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
         purgedAt: ps.purgedAt,
         placeId: l.placeId,
         source: l.source,
+        lastNote: sql<string | null>`(select x.note from ${LAST_NOTE_ROW} x)`,
+        lastNoteOutcome: sql<string | null>`(select case when x.kind = 'CALL' then x.outcome end from ${LAST_NOTE_ROW} x)`,
+        lastNoteAt: sql<Date | string | null>`(select x.created_at from ${LAST_NOTE_ROW} x)`,
       })
       .from(l)
       .leftJoin(ps, eq(ps.placeId, l.placeId))
@@ -179,6 +189,9 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
       filterReason: r.filterReason,
       googleExpired: Boolean(r.placeId && r.purgedAt),
       source: LEAD_SOURCE_LABEL[r.source as LeadSourceKey] ?? r.source,
+      lastNote: r.lastNote,
+      lastNoteOutcome: r.lastNoteOutcome,
+      lastNoteAt: r.lastNoteAt ? new Date(r.lastNoteAt).toISOString() : null,
     };
   });
   return { rows: out, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
