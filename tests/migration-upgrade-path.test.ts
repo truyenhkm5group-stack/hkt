@@ -161,6 +161,7 @@ const MOI = [
   "0211_sales_inbox_media_labels",
   "0212_sales_inbox_seen",
   "0213_push_subscriptions",
+  "0214_platform_phone_otps",
 ] as const;
 
 /*

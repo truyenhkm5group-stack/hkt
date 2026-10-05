@@ -489,6 +489,7 @@ import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testQuickStart } from "./quick-start.test";
+import { testPhoneOtp } from "./phone-otp.test";
 import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
 import { testGoLive } from "./go-live.test";
@@ -2739,6 +2740,7 @@ async function main() {
   await testRestaurantTemplate();
   await testSelfServiceJourney();
   await testQuickStart();
+  await testPhoneOtp();
   await testSalesPacks();
   // Bộ hội thoại vàng (M1): phát lại hội thoại kịch bản qua chatTurn, so ảnh chụp — tổ chức THẬT `gd-food` / `gd-fashion`.
   await testSalesAgentGolden();

@@ -8,6 +8,7 @@ import type { SessionSubject } from "@/lib/auth/session";
 import { templateBlueprint } from "@/lib/blueprints/templates";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
+import { consumeSignupOtp, phoneOtpRequired, verifySignupOtp } from "@/lib/onboarding/phone-otp";
 import { createOrganizationFromSignup, listOnboardingStates, type SignupActor } from "@/lib/onboarding/service";
 import { ADMIN_PASSWORD_MIN, orgCodeBase, orgCodeCandidates, quickSignupZ } from "@/lib/onboarding/quick-shared";
 import { BUSINESS_TYPE_SPEC, closeUnderDependencies, firstIssue, SELECTABLE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
@@ -25,7 +26,7 @@ import { BUSINESS_TYPE_SPEC, closeUnderDependencies, firstIssue, SELECTABLE_MODU
  *    email / SĐT sau khi đặt mật khẩu qua liên kết đặt lại.
  */
 
-export type QuickSignupResult = { ok: true; orgCode: string; loggedIn: boolean } | { error: string };
+export type QuickSignupResult = { ok: true; orgCode: string; loggedIn: boolean } | { error: string; needOtp?: true };
 
 /** Mã tổ chức chưa ai dùng cho tên cửa hàng này. */
 export async function freeOrgCode(storeName: string): Promise<string> {
@@ -67,6 +68,14 @@ export async function quickSignup(raw: unknown, who: SignupActor, opts: { issue?
   const mine = Object.entries(states).find(([, s]) => s.adminEmail === email && s.source !== "OPERATOR" && (s.state === "DONE" || s.state === "RUNNING"));
   if (mine) return { error: mine[1].state === "RUNNING" ? "Cửa hàng của bạn đang được tạo — đợi vài giây rồi đăng nhập." : "Email này đã có cửa hàng — đăng nhập để vào." };
 
+  // XÁC MINH SĐT (khi người vận hành bật): SĐT sắp thành danh tính đăng nhập — phải là số của chính người đăng ký.
+  let otpId: string | null = null;
+  if (who.kind !== "operator" && (await phoneOtpRequired())) {
+    const v = await verifySignupOtp(phone, input.otp);
+    if ("error" in v) return { error: v.error, needOtp: true };
+    otpId = v.id;
+  }
+
   const code = await freeOrgCode(input.storeName);
   const plan = quickModules(input.businessType);
   const draft: SignupDraft = {
@@ -78,6 +87,7 @@ export async function quickSignup(raw: unknown, who: SignupActor, opts: { issue?
   };
   const r = await createOrganizationFromSignup(draft, who, opts.issue ? { issue: opts.issue } : {});
   if ("error" in r) return { error: r.error };
+  if (otpId) await consumeSignupOtp(otpId);
 
   // SĐT của quản trị + chỉ mục danh tính: đăng nhập lại bằng SĐT / email / nút Google·Facebook ở trang chung, không cần mã.
   const adminId = await withOrganization(code, async () => {

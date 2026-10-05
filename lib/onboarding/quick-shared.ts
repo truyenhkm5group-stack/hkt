@@ -41,6 +41,8 @@ export const quickSignupZ = z.object({
   email: z.string().trim().max(200).optional().default(""),
   password: z.string().max(200).optional().default(""),
   invite: z.string().trim().max(80).optional().nullable(),
+  /** Mã xác minh SĐT qua Zalo — chỉ đòi khi người vận hành bật (lib/onboarding/phone-otp.ts). */
+  otp: z.string().trim().max(12).optional().default(""),
 });
 export type QuickSignupInput = z.input<typeof quickSignupZ>;
 

@@ -206,3 +206,21 @@ export async function zaloGetOa(accessToken: string, deps: ZaloDeps = {}): Promi
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, oaId: str(r.data.oa_id), name: str(r.data.name) };
 }
+
+// ─────────────────────────── ZNS (tin theo mẫu tới SỐ ĐIỆN THOẠI) ───────────────────────────
+
+/** Tin ZNS theo mẫu Zalo đã duyệt — gửi tới SĐT (không cần khách quan tâm OA). Dùng cho mã OTP đăng ký (lib/onboarding/phone-otp.ts). */
+export const ZALO_ZNS_TEMPLATE_URL = "https://business.openapi.zalo.me/message/template";
+export const ZNS_TEMPLATE_ID_PATTERN = /^[0-9]{1,20}$/;
+/** Lỗi thuộc về SỐ ĐIỆN THOẠI (không dùng Zalo, chặn tin, số sai) — khác lỗi cấu hình của nền tảng. */
+export const ZNS_PHONE_SIDE_ERRORS = new Set([-108, -118, -119, -139]);
+
+export async function zaloSendZnsTemplate(
+  input: { accessToken: string; phone: string; templateId: string; data: Record<string, string>; trackingId: string },
+  deps: ZaloDeps = {},
+): Promise<{ ok: true; messageId: string | null } | { ok: false; error: string; phoneSide: boolean }> {
+  const body = JSON.stringify({ phone: input.phone, template_id: input.templateId, template_data: input.data, tracking_id: input.trackingId.slice(0, 48) });
+  const r = await callZalo(ZALO_ZNS_TEMPLATE_URL, { method: "POST", headers: { "content-type": "application/json", access_token: input.accessToken }, body }, [input.accessToken, ...Object.values(input.data)], deps);
+  if (!r.ok) return { ok: false, error: r.error, phoneSide: r.code !== null && ZNS_PHONE_SIDE_ERRORS.has(r.code) };
+  return { ok: true, messageId: str(r.data.msg_id) || null };
+}
