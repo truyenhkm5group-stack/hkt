@@ -8,13 +8,14 @@ import { normalizeProvince } from "@/lib/constants/vn-regions";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { searchProvince } from "@/lib/wholesale/areas";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
-import { ACTIVE_PIPELINE_STATUSES, ANSWERED_CALL_OUTCOMES, CALL_OUTCOMES, callOutcomeEffect, CONTACTED_STATUSES, isLeadStatus, LEAD_STATUSES, LEAD_STATUS_LABEL, RESPONDED_STATUSES, type LeadStatus, canTransitionLead } from "@/lib/wholesale/constants";
+import { ACTIVE_PIPELINE_STATUSES, ANSWERED_CALL_OUTCOMES, CALL_OUTCOMES, callOutcomeEffect, CONTACTED_STATUSES, isLeadStatus, LEAD_STATUSES, LEAD_STATUS_LABEL, RESPONDED_STATUSES, type LeadStatus, canTransitionLead, ZALO_RESULTS, zaloResultEffect, type ZaloStatus } from "@/lib/wholesale/constants";
+import { zaloMessage, zaloPhoneLink } from "@/lib/wholesale/opener";
 import { nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { finalizeLead, findMasterLead, leadView, rescoreLead } from "@/lib/wholesale/engine";
 import { verifiedCallPatch } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, normalizeVnPhone } from "@/lib/wholesale/phone";
 import { manualImportProvider } from "@/lib/wholesale/providers";
-import { classifySegment } from "@/lib/wholesale/segments";
+import { classifySegment, isLeadSegmentKey } from "@/lib/wholesale/segments";
 import { getLeadHunterConfig, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
 
 /**
@@ -155,6 +156,8 @@ const callSchema = z.object({
   nextFollowupAt: z.coerce.date().nullable().default(null),
   /** Người gọi tích «khách xác nhận đúng địa chỉ» ⇒ địa chỉ trên bản đồ thành địa chỉ của shop (xem `verifiedCallPatch`). */
   addressConfirmed: z.boolean().default(false),
+  /** Kênh của cuộc trao đổi: gọi điện, hoặc khách trả lời qua Zalo — cùng chín kết quả, cùng luật trạng thái. */
+  channel: z.enum(["PHONE_CALL", "ZALO"]).default("PHONE_CALL"),
 });
 
 /** Mốc 9 giờ sáng (giờ VN) của ngày cách `now` đúng `days` ngày — hẹn gọi lại mặc định. */
@@ -187,13 +190,13 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
   if ("error" in g) return g;
   const parsed = callSchema.safeParse(raw);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { outcome, note, nextFollowupAt, addressConfirmed } = parsed.data;
+  const { outcome, note, nextFollowupAt, addressConfirmed, channel } = parsed.data;
   const from = isLeadStatus(g.lead.contactStatus) ? g.lead.contactStatus : "NEW";
   if (from === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ — không ghi cuộc gọi mới." };
   if (outcome === "DO_NOT_CONTACT") {
     const r = await updateLeadStatusCore(user, leadId, { status: "DO_NOT_CONTACT", note: note || "Khách yêu cầu không liên hệ (qua điện thoại)" }, now);
     if ("error" in r) return r;
-    await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, note });
+    await activity(user, { leadId, kind: "CALL", channel, outcome, note });
     return { ok: true, status: r.status, nextFollowupAt: null };
   }
   const effect = callOutcomeEffect(from, outcome);
@@ -225,9 +228,80 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
       updatedAt: now,
     })
     .where(eq(schema.wholesaleLeads.id, leadId));
-  await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, fromStatus: from, toStatus: to !== from ? to : null, note, meta: Object.keys(verified).length ? { verified: Object.keys(verified) } : null });
+  await activity(user, { leadId, kind: "CALL", channel, outcome, fromStatus: from, toStatus: to !== from ? to : null, note, meta: Object.keys(verified).length ? { verified: Object.keys(verified) } : null });
   await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_CONTACT", entity: "WHOLESALE_LEAD", entityId: leadId, before: { status: from }, after: { status: to, outcome, verified: Object.keys(verified) }, reason: "Ghi cuộc gọi" });
   return { ok: true, status: to, nextFollowupAt: followup ? followup.toISOString() : null };
+}
+
+/** Bản nháp tin Zalo cho MỘT lead: lời chào đã cá nhân hoá + link mở Zalo theo SĐT (chỉ số di động) + số ảnh kèm. */
+export type ZaloDraft = { text: string; link: string | null; phoneDisplay: string | null; reason: string | null; images: number; zaloStatus: ZaloStatus | null };
+
+export async function zaloDraftCore(user: SessionUser, leadId: string): Promise<CoreResult<{ draft: ZaloDraft }>> {
+  const g = await gateLead(user, leadId);
+  if ("error" in g) return g;
+  const db = await getDb();
+  const snap = g.lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, g.lead.placeId) }) : null;
+  const v = leadView(g.lead, snap && !snap.purgedAt ? snap : null);
+  const cfg = await getLeadHunterConfig();
+  const segment = isLeadSegmentKey(g.lead.segment) ? g.lead.segment : "UNCLASSIFIED";
+  const text = zaloMessage(cfg, { businessName: v.name ?? "anh/chị", segment, areaName: g.lead.areaName, provinceLabel: g.lead.provinceLabel }, user.name);
+  const link = zaloPhoneLink(v.phone, v.phoneKind);
+  const zaloStatus = g.lead.zaloStatus === "FOUND" || g.lead.zaloStatus === "NOT_FOUND" ? g.lead.zaloStatus : null;
+  const reason =
+    g.lead.contactStatus === "DO_NOT_CONTACT"
+      ? "Khách ở danh sách KHÔNG LIÊN HỆ."
+      : !v.phone
+        ? "Chưa có SĐT."
+        : !link
+          ? "Số cố định / tổng đài — không có Zalo, gọi điện."
+          : zaloStatus === "NOT_FOUND"
+            ? "Đã thử: số này không có Zalo — gọi điện."
+            : null;
+  return { ok: true, draft: { text, link: reason ? null : link, phoneDisplay: v.phone ? formatVnPhone(v.phone) : null, reason, images: cfg.outreach.zaloImages.length, zaloStatus } };
+}
+
+/** Lượt BẤM «Nhắn Zalo»: chỉ ghi sự kiện (mở app Zalo chưa chứng minh đã gửi) — như `logCallInitiatedCore`. */
+export async function logZaloOpenedCore(user: SessionUser, leadId: string, now = new Date()): Promise<CoreResult> {
+  const g = await gateLead(user, leadId);
+  if ("error" in g) return g;
+  if (g.lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
+  const db = await getDb();
+  await db.insert(schema.wholesaleLeadActivities).values({ leadId, kind: "ZALO_OPENED", channel: "ZALO", note: "", actorId: user.id, actorName: user.name, createdAt: now });
+  return { ok: true };
+}
+
+const zaloResultSchema = z.object({ result: z.enum(ZALO_RESULTS), note: z.string().trim().max(2000).default("") });
+
+/**
+ * Kết quả mở Zalo do NHÂN VIÊN chọn (ERP không tự tra được số có Zalo hay không). Trạng thái, hẹn gọi lại và việc tiếp theo
+ * suy ra bằng `zaloResultEffect`; «Không có Zalo» được NHỚ (`zalo_status`) để không ai mở lại và lead lên hàng «Cần gọi».
+ */
+export async function logZaloResultCore(user: SessionUser, leadId: string, raw: unknown, now = new Date()): Promise<CoreResult<{ status: LeadStatus }>> {
+  const g = await gateLead(user, leadId);
+  if ("error" in g) return g;
+  const parsed = zaloResultSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { result, note } = parsed.data;
+  const from = isLeadStatus(g.lead.contactStatus) ? g.lead.contactStatus : "NEW";
+  if (from === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
+  const effect = zaloResultEffect(from, result);
+  const terminal = from === "WON" || from === "LOST";
+  const db = await getDb();
+  await db
+    .update(schema.wholesaleLeads)
+    .set({
+      zaloStatus: effect.zaloStatus,
+      zaloCheckedAt: now,
+      contactStatus: effect.to,
+      ...statusStamps(g.lead, effect.to, now),
+      ...(effect.counted ? { firstContactAt: g.lead.firstContactAt ?? now, lastContactAt: now, contactAttemptCount: sql`${schema.wholesaleLeads.contactAttemptCount} + 1` } : {}),
+      ...(terminal ? {} : { nextFollowupAt: effect.followupDays === 0 ? now : followupAt(now, effect.followupDays), nextAction: effect.nextAction }),
+      updatedAt: now,
+    })
+    .where(eq(schema.wholesaleLeads.id, leadId));
+  await activity(user, { leadId, kind: "ZALO", channel: "ZALO", outcome: result, fromStatus: from, toStatus: effect.to !== from ? effect.to : null, note });
+  await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_CONTACT", entity: "WHOLESALE_LEAD", entityId: leadId, before: { status: from, zalo: g.lead.zaloStatus }, after: { status: effect.to, zalo: effect.zaloStatus, result }, reason: "Nhắn Zalo" });
+  return { ok: true, status: effect.to };
 }
 
 const assignSchema = z.object({ leadIds: z.array(z.string().min(1).max(64)).min(1).max(500), userId: z.string().min(1).max(64).nullable() });

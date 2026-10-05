@@ -31,6 +31,7 @@ import {
   type FollowKey,
 } from "@/lib/wholesale/followup";
 import { cn } from "@/lib/utils";
+import { ZaloPanel } from "@/app/(dashboard)/wholesale/zalo-panel";
 
 /** «Chỉ ghi chú» — không có cuộc gọi nào (vd khách nhắn Zalo, ghé cửa hàng). */
 const NOTE_ONLY = "NOTE_ONLY" as const;
@@ -58,6 +59,8 @@ export function LeadQuickLog({
   const [follow, setFollow] = useState<FollowKey>("none");
   const [custom, setCustom] = useState("");
   const [saving, setSaving] = useState(false);
+  /** Khách trả lời qua Zalo hay qua điện thoại — cùng chín kết quả, khác kênh trong nhật ký. */
+  const [channel, setChannel] = useState<"PHONE_CALL" | "ZALO">("PHONE_CALL");
   const done = lead.status === "DO_NOT_CONTACT";
 
   const reset = () => {
@@ -65,6 +68,7 @@ export function LeadQuickLog({
     setNote("");
     setFollow("none");
     setCustom("");
+    setChannel("PHONE_CALL");
   };
   const choose = (c: Choice) => {
     setChoice(c);
@@ -93,6 +97,7 @@ export function LeadQuickLog({
             outcome: choice,
             note,
             nextFollowupAt,
+            channel,
           });
     setSaving(false);
     if ("error" in r) return void toast.error(r.error);
@@ -130,7 +135,7 @@ export function LeadQuickLog({
             disabled={done}
             title={done ? "Khách ở danh sách KHÔNG LIÊN HỆ" : undefined}
           >
-            Ghi kết quả
+            💬 Zalo · 📞 Gọi
           </Button>
         </DialogTrigger>
         {/* data-no-row-link: cú bấm trong hộp (cả ô chữ) không được mở trang lead của dòng bên dưới. */}
@@ -143,6 +148,18 @@ export function LeadQuickLog({
               {lead.name ?? "Khách sỉ"}
             </DialogTitle>
           </DialogHeader>
+          <ZaloPanel
+            leadId={lead.id}
+            onResult={(r) => {
+              if (r !== "NOT_FOUND") {
+                setOpen(false);
+                reset();
+              }
+            }}
+          />
+          <div className="pt-1 text-sm font-semibold">
+            📞 Bước 2 · Gọi điện / ghi kết quả
+          </div>
           {lead.phone ? (
             <a
               href={`tel:${lead.phone}`}
@@ -186,6 +203,25 @@ export function LeadQuickLog({
           </div>
           {choice ? (
             <div className="space-y-2.5">
+              {choice !== NOTE_ONLY ? (
+                <div className="flex gap-1 text-xs">
+                  {(["PHONE_CALL", "ZALO"] as const).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setChannel(c)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1",
+                        channel === c
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "hover:bg-muted",
+                      )}
+                    >
+                      {c === "ZALO" ? "💬 Khách trả lời qua Zalo" : "📞 Qua điện thoại"}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}

@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, ilike, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { andScope, type ScopeDecision } from "@/lib/auth/scope-guard";
-import { NAME, PHONE } from "@/lib/queries/wholesale";
+import { NAME, PHONE, PHONE_KIND } from "@/lib/queries/wholesale";
 import type { SearchParams } from "@/lib/search-params";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
 import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, PRICE_REQUEST_ACTION, type CallOutcome, type LeadSourceKey, type LeadStatus } from "@/lib/wholesale/constants";
@@ -14,6 +14,10 @@ import { isLeadSegmentKey, LEAD_SEGMENT_LABEL } from "@/lib/wholesale/segments";
  * Màn `/wholesale/mobile` (chủ shop 05/10/2026): nhân viên mở ERP bằng điện thoại, bấm «BẮT ĐẦU GỌI», máy đưa đúng khách
  * nên gọi tiếp theo. Mọi truy vấn đi qua `andScope` của tài nguyên `WHOLESALE_LEADS` — nhân viên phạm vi «Được giao» chỉ thấy
  * khách giao cho mình, cùng mệnh đề với danh sách trên máy tính.
+ *
+ * NHẮN ZALO TRƯỚC, GỌI SAU (chủ shop 06/10/2026): khách MỚI có SĐT DI ĐỘNG chưa ai thử Zalo nằm ở chip «Cần nhắn Zalo»,
+ * không ở «Cần gọi». Chip «Cần gọi» = khách mới mà Zalo không dùng được (số cố định / đã thử «không có Zalo») + mọi khách
+ * tới hẹn gọi lại — nhắn Zalo xong máy hẹn gọi sau 1 ngày, nên khách im lặng tự quay về hàng gọi.
  *
  * THỨ TỰ GỌI (`PRIORITY`): hẹn gọi lại đã QUÁ HẠN → hẹn trong HÔM NAY → khách đang quan tâm → điểm cao → mới tìm thấy.
  * «Khách tiếp theo» bỏ qua khách vừa liên hệ trong 2 giờ — vừa gọi xong mà máy lại đưa đúng khách đó là vòng lặp.
@@ -29,6 +33,7 @@ export const HOT_STATUSES: readonly LeadStatus[] = ["INTERESTED", "CATALOG_SENT"
 export const MOBILE_CHIPS = [
   { key: "all", label: "Tất cả" },
   { key: "new", label: "Mới" },
+  { key: "zalo", label: "Cần nhắn Zalo" },
   { key: "call", label: "Cần gọi" },
   { key: "today", label: "Gọi lại hôm nay" },
   { key: "hot", label: "Quan tâm" },
@@ -43,6 +48,8 @@ export function isMobileChip(v: unknown): v is MobileChip {
 
 const list = (xs: readonly string[]) => sql.join(xs.map((x) => sql`${x}`), sql`, `);
 const NOT_TERMINAL = sql`${l.contactStatus} not in (${list(TERMINAL_STATUSES)})`;
+/** Khách mới nên NHẮN ZALO trước: số di động, chưa ai thử Zalo, chưa liên hệ lần nào. */
+const ZALO_FIRST = sql`(${l.firstContactAt} is null and ${l.zaloStatus} is null and (${PHONE_KIND}) = 'MOBILE')`;
 
 function endOfTodayVn(now: Date): Date {
   return new Date(vnStartOfDay(vnDateKey(now)).getTime() + 86_400_000);
@@ -56,8 +63,10 @@ export function chipCondition(chip: MobileChip, now: Date): SQL {
       return NOT_TERMINAL;
     case "new":
       return and(NOT_TERMINAL, isNull(l.firstContactAt))!;
+    case "zalo":
+      return and(NOT_TERMINAL, ZALO_FIRST)!;
     case "call":
-      return and(NOT_TERMINAL, or(isNull(l.firstContactAt), sql`${l.nextFollowupAt} <= ${now}`))!;
+      return and(NOT_TERMINAL, or(and(isNull(l.firstContactAt), sql`not ${ZALO_FIRST}`), sql`${l.nextFollowupAt} <= ${now}`))!;
     case "today":
       return and(NOT_TERMINAL, sql`${l.nextFollowupAt} < ${eod}`)!;
     case "hot":
@@ -161,13 +170,14 @@ export async function nextLeadId(decision: ScopeDecision, chip: MobileChip, exce
 /** Props của trang chỉ-chuyển-hướng `/wholesale/mobile/next` (để ở đây cho tệp trang không có cú pháp JSX / kiểu tổng quát). */
 export type MobileNextProps = { searchParams: Promise<SearchParams> };
 
-export type MobileHome = { newCount: number; toCall: number; followupDue: number; interested: number; priceWaiting: number; won: number; myCallsToday: number; myAnsweredToday: number };
+export type MobileHome = { toZalo: number; myZaloToday: number; newCount: number; toCall: number; followupDue: number; interested: number; priceWaiting: number; won: number; myCallsToday: number; myAnsweredToday: number };
 
 export async function mobileHome(decision: ScopeDecision, userId: string, now = new Date()): Promise<MobileHome> {
   const db = await getDb();
   const eod = endOfTodayVn(now);
   const [row] = await db
     .select({
+      toZalo: sql<string>`count(*) filter (where ${chipCondition("zalo", now)})`,
       newCount: sql<string>`count(*) filter (where ${chipCondition("new", now)})`,
       toCall: sql<string>`count(*) filter (where ${chipCondition("call", now)})`,
       followupDue: sql<string>`count(*) filter (where ${NOT_TERMINAL} and ${l.nextFollowupAt} < ${eod})`,
@@ -187,7 +197,13 @@ export async function mobileHome(decision: ScopeDecision, userId: string, now = 
     })
     .from(a)
     .where(and(eq(a.kind, "CALL"), eq(a.actorId, userId), gte(a.createdAt, dayStart)));
+  const [zalo] = await db
+    .select({ n: sql<string>`count(*)` })
+    .from(a)
+    .where(and(eq(a.kind, "ZALO"), eq(a.actorId, userId), gte(a.createdAt, dayStart), ne(a.outcome, "NOT_FOUND")));
   return {
+    toZalo: Number(row?.toZalo ?? 0),
+    myZaloToday: Number(zalo?.n ?? 0),
     newCount: Number(row?.newCount ?? 0),
     toCall: Number(row?.toCall ?? 0),
     followupDue: Number(row?.followupDue ?? 0),

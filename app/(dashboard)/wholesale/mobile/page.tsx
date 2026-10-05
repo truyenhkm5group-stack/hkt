@@ -17,7 +17,7 @@ export default async function WholesaleMobileHome() {
   if (decision.allow === "NONE") return <ScopeDenied title="Gọi khách sỉ" reason={decision.reason} fix={decision.fix} />;
   const h = await mobileHome(decision, user.id);
   const tiles: { label: string; value: number; href: string; tone?: string }[] = [
-    { label: "Khách mới", value: h.newCount, href: "/wholesale/mobile/queue?f=new" },
+    { label: "Cần nhắn Zalo", value: h.toZalo, href: "/wholesale/mobile/queue?f=zalo", tone: "text-sky-600 dark:text-sky-400" },
     { label: "Cần gọi", value: h.toCall, href: "/wholesale/mobile/queue?f=call", tone: "text-primary" },
     { label: "Cần gọi lại", value: h.followupDue, href: "/wholesale/mobile/queue?f=today", tone: h.followupDue ? "text-amber-600 dark:text-amber-400" : undefined },
     { label: "Đang quan tâm", value: h.interested, href: "/wholesale/mobile/queue?f=hot", tone: "text-emerald-600 dark:text-emerald-400" },
@@ -32,7 +32,7 @@ export default async function WholesaleMobileHome() {
         title={`Chào ${user.name.split(" ").slice(-1)[0]} 👋`}
         description={
           <>
-            Đã gọi <b className="text-foreground">{formatNumber(h.myCallsToday)}</b> cuộc · <b className="text-foreground">{formatNumber(h.myAnsweredToday)}</b> khách nghe máy
+            Đã nhắn <b className="text-foreground">{formatNumber(h.myZaloToday)}</b> khách qua Zalo · gọi <b className="text-foreground">{formatNumber(h.myCallsToday)}</b> cuộc · <b className="text-foreground">{formatNumber(h.myAnsweredToday)}</b> khách nghe máy
           </>
         }
       />
@@ -45,8 +45,11 @@ export default async function WholesaleMobileHome() {
         ))}
       </div>
       <div className="space-y-2.5">
+        <Link href="/wholesale/mobile/next?f=zalo" className={cn(big, "bg-sky-600 text-white")}>
+          💬 BẮT ĐẦU NHẮN ZALO {h.toZalo ? `(${formatNumber(h.toZalo)})` : ""}
+        </Link>
         <Link href="/wholesale/mobile/next?f=call" className={cn(big, "bg-primary text-primary-foreground")}>
-          📞 BẮT ĐẦU GỌI
+          📞 BẮT ĐẦU GỌI {h.toCall ? `(${formatNumber(h.toCall)})` : ""}
         </Link>
         <Link href="/wholesale/mobile/queue?f=today" className={cn(big, "border bg-card")}>
           ⏰ KHÁCH CẦN GỌI LẠI {h.followupDue ? `(${formatNumber(h.followupDue)})` : ""}

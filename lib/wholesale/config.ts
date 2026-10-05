@@ -168,6 +168,20 @@ export const DEFAULT_SERVICE_AREAS: Record<string, ServiceAreaLevel> = Object.fr
   SEARCH_PROVINCES.map((p) => [p.key, DEFAULT_FIRST_PROVINCES.includes(p.key) ? "PRIORITY" : "SERVED"]),
 );
 
+/**
+ * Kịch bản NHẮN ZALO chào sỉ mặc định (chủ shop 06/10/2026: «nhắn Zalo trước, gọi sau»). Biến trong `{{…}}` lấy từ dữ
+ * kiện CÓ THẬT của lead + cấu hình shop (xem `zaloVariables`); dòng nào rỗng sau khi điền (vd chưa khai khuyến mãi) thì
+ * bỏ cả dòng. Không ghi giá: giá sỉ gửi sau khi khách hỏi.
+ */
+export const DEFAULT_ZALO_TEMPLATE = [
+  "Dạ em chào anh/chị {{ten_doanh_nghiep}} ạ!",
+  "Em là {{ten_nv}} bên {{ten_shop}}, chuyên cung cấp sỉ {{san_pham}}.",
+  "Em thấy bên mình kinh doanh {{loai_hinh}}{{khu_vuc}}, nên muốn giới thiệu để anh/chị {{loi_ich}}.",
+  "{{khuyen_mai}}",
+  "{{giao_hang}}",
+  "{{gui_anh}}Anh/chị quan tâm mẫu nào em gửi bảng giá sỉ chi tiết ngay ạ. Em cảm ơn anh/chị!",
+].join("\n");
+
 export const DEFAULT_OPENER_TEMPLATE =
   "Em chào {{ten_doanh_nghiep}}, bên em là {{ten_shop}}, chuyên cung cấp {{san_pham}} cho {{nhom_khach}}. Em thấy bên mình kinh doanh {{loai_hinh}}{{khu_vuc}} nên muốn gửi anh/chị bảng giá sỉ để tham khảo ạ.";
 
@@ -246,6 +260,10 @@ export const leadHunterConfigSchema = z.object({
     promotionNote: z.string().max(500),
     openerTemplate: z.string().min(10).max(1500),
     callScript: z.string().max(3000),
+    /** Kịch bản nhắn Zalo chào sỉ (biến `{{…}}` như lời chào + `{{ten_nv}}`, `{{loi_ich}}`). */
+    zaloTemplate: z.string().min(10).max(2000),
+    /** Ảnh gửi kèm tin Zalo (https, tối đa 10) — nhân viên chia sẻ sang Zalo bằng nút chia sẻ của điện thoại. */
+    zaloImages: z.array(z.string().trim().max(1000).regex(/^https:\/\/\S+$/, "Ảnh phải là link https")).max(10),
   }),
 });
 
@@ -297,6 +315,8 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
     deliveryNote: "",
     promotionNote: "",
     openerTemplate: DEFAULT_OPENER_TEMPLATE,
+    zaloTemplate: DEFAULT_ZALO_TEMPLATE,
+    zaloImages: [],
     callScript:
       "1. Chào, giới thiệu {{ten_shop}}.\n2. Hỏi bên mình đang nhập hải sản ở đâu, tần suất bao lâu một lần.\n3. Xin Zalo để gửi bảng giá sỉ / catalog.\n4. Hẹn ngày gọi lại hoặc gửi mẫu thử.",
   },
