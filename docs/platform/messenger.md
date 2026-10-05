@@ -60,8 +60,10 @@ Meta gửi tin thẳng về ERP.
 
 ## 5. Giới hạn hôm nay
 
-- Ảnh của câu trả lời mẫu chưa gửi qua đường này (mã nội dung là của Pancake); phần chữ vẫn gửi.
-- Bình luận dưới bài viết chưa nối (cần trường `feed` + private reply của Graph).
+- Ảnh của câu trả lời mẫu: gửi qua Send API (tải tệp kèm) ngay sau chữ của câu mẫu — như đường Pancake.
+- Bình luận dưới bài viết (trường `feed` của page): bot trả lời bằng MỘT tin riêng (Private Replies) có đọc nội dung bài;
+  không bao giờ trả lời công khai. Page nối TRƯỚC bản này chưa đăng ký `feed` ⇒ bấm «Đổi page» một lần. Người vận hành thêm
+  trường `feed` ở Webhooks → Page của app Meta. Ảnh câu mẫu không đi kèm tin riêng được (Meta chỉ cho một tin).
 - Không có lượt quét danh sách hội thoại như Pancake; tin chờ quá 1 phút (máy khởi động lại) được trả lời bù trong 30 phút
   (`sweepStaleMessengerThreads`, sau mỗi webhook và trong job `sales-followup`).
 - Không dùng song song «Fanpage qua Pancake» cho CÙNG một page — khách nhận hai câu trả lời.

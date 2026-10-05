@@ -4,7 +4,7 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { messagingConnectionSummaries, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, sendMessengerImage, sendMessengerText, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -29,6 +29,7 @@ import {
   OBSERVE_NOTE,
   PAGE_REPLIED_REASON,
   PAGE_REPLY,
+  postContextPrompt,
   RETRY_MS,
   sendFanpageImages,
   sendFanpageText,
@@ -45,6 +46,7 @@ import {
   type StaffMark,
 } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
+import { readQuickReplyImage } from "@/lib/sales-chatbot/quick-replies";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 
 /**
@@ -173,6 +175,16 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
       .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key)));
     return { queued: false, reason: "Nhân viên đang trả lời — bot nhường" };
   }
+  // BÌNH LUẬN dưới bài viết (trường `feed`): một hàng chờ riêng mỗi bình luận (`threadId` = «comment:<mã>») — bot trả lời bằng
+  // TIN RIÊNG (Private Replies), không bao giờ công khai. Mỗi bình luận Meta chỉ cho MỘT tin riêng.
+  if (ev.comment) {
+    const rows = await db
+      .insert(t)
+      .values({ pageId: ev.pageId, threadId: ev.mid, messageId: ev.mid, text: ev.text, kind: "COMMENT", postId: ev.comment.postId, fromId: ev.psid })
+      .onConflictDoNothing({ target: t.messageId })
+      .returning({ id: t.id });
+    return rows.length ? { queued: true, reason: "Đã nhận bình luận" } : { queued: false, reason: "Bình luận trùng — đã nhận trước đó" };
+  }
   if (!ev.text && !ev.imageUrls.length) {
     await stopFollowups(ev.pageId, ev.psid, now, true);
     // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
@@ -256,6 +268,32 @@ export async function sendPageImages(pageId: string, threadId: string, images: r
   return sendMessengerPageImages(pageId, threadId, images, deps, mark);
 }
 
+/**
+ * ẢNH CỦA CÂU TRẢ LỜI MẪU do BOT gửi qua Send API: đọc tệp ảnh của câu mẫu trong ERP, mỗi ảnh một lời gọi (tải tệp kèm).
+ * Mã tin Meta trả về ghi `BOT_SENT` — tiếng vọng tới sau là tin của bot (Instagram không mang mã app). Ảnh hỏng / mất ⇒ bỏ ảnh
+ * đó, không chặn ảnh sau; lỗi gửi ⇒ dừng, trả câu lỗi.
+ */
+export async function sendBotImages(pageId: string, psid: string, imageIds: readonly string[], deps: FanpageDeps = {}): Promise<{ ok: true; sent: number } | { ok: false; error: string }> {
+  const conn = await openActiveConnection(MESSENGER_CONNECTOR);
+  if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ok: false, error: "Kết nối Messenger chưa bật / khác page" };
+  const app = messengerApp();
+  if (!app) return { ok: false, error: "Nền tảng chưa cấu hình app Facebook" };
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
+  const now = deps.now ?? (() => new Date());
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  let sent = 0;
+  for (const id of imageIds) {
+    const img = await readQuickReplyImage(id);
+    if (!img) continue;
+    const r = await sendMessengerImage(app, token, psid, { data: new Uint8Array(img.data), contentType: img.contentType }, deps.fetch ?? fetch);
+    if (!r.ok) return { ok: false, error: r.error };
+    sent += 1;
+    await db.insert(t).values({ pageId, threadId: psid, messageId: r.id ?? `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  }
+  return { ok: true, sent };
+}
+
 /** Một tin của bot vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */
 export async function sendBotText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const viaPancake = await sendFanpageText(pageId, threadId, text, deps, mark);
@@ -271,6 +309,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
   const out: ProcessResult = { processed: 0, replies: 0, skipped: null, error: null };
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
   if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ...out, skipped: "Kết nối Messenger chưa bật / khác page" };
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
   const db = await getDb();
   const t = schema.salesChatInbound;
   for (let round = 0; round < 3; round++) {
@@ -301,7 +340,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       .update(t)
       .set({ claimId: claim, claimedAt: now() })
       .where(and(eq(t.pageId, pageId), eq(t.threadId, psid), eq(t.status, "PENDING"), or(isNull(t.claimId), lt(t.claimedAt, new Date(now().getTime() - CLAIM_STALE_MS)))))
-      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls });
+      .returning({ id: t.id, text: t.text, createdAt: t.createdAt, imageUrls: t.imageUrls, kind: t.kind, postId: t.postId, messageId: t.messageId });
     if (!claimed.length) break;
     const ids = claimed.map((r) => r.id);
     const finish = (status: "DONE" | "SKIPPED" | "PENDING", note: string | null) =>
@@ -365,15 +404,22 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       .map((r) => r.text)
       .join("\n")
       .slice(0, TEXT_MAX);
+    // BÌNH LUẬN: đọc nội dung bài viết để «cho giá» hiểu đúng món (cùng lời nhắc với đường Pancake).
+    const commentRow = [...claimed].reverse().find((r) => r.kind === "COMMENT");
+    let context = "";
+    if (commentRow?.postId) {
+      const app = messengerApp();
+      context = postContextPrompt(app ? await postMessage(app, token, commentRow.postId, deps.fetch ?? fetch) : null);
+    }
     if (gate.mode === "COPILOT") {
       // Bot soạn ở hội thoại BÓNG, không gửi: người của shop trả lời trong Hộp thư Meta; câu thật tới sau được đem so với gợi ý.
-      await draftCopilotSuggestion({ conversationId: conv.id, pageId, threadId: psid, text, now: now() });
+      await draftCopilotSuggestion({ conversationId: conv.id, pageId, threadId: psid, text, ...(context ? { context } : {}), now: now() });
       await finish("SKIPPED", COPILOT_NOTE);
       out.processed += ids.length;
       out.skipped = COPILOT_NOTE;
       continue;
     }
-    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null });
+    const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null, ...(context ? { context } : {}) });
     if (!turn.ok) {
       const busy = /Đang trả lời câu trước/.test(turn.error);
       await finish(busy ? "PENDING" : "SKIPPED", turn.error.slice(0, 300));
@@ -389,7 +435,34 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
+    if (commentRow) {
+      // MỘT tin riêng gộp mọi câu trả lời (Meta chỉ cho một tin riêng mỗi bình luận). Ảnh câu mẫu không đi kèm được tin riêng.
+      const replyText = replies.map((r) => r.text).join("\n\n").trim();
+      const app = messengerApp();
+      const commentId = commentRow.messageId.replace(/^comment:/, "");
+      const pr = replyText && app ? await sendPrivateReply(app, token, commentId, replyText, deps.fetch ?? fetch) : null;
+      if (pr?.ok) {
+        out.replies += 1;
+        if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+      }
+      await finish("DONE", pr && !pr.ok ? pr.error : replyText ? null : "Bot không có câu trả lời");
+      out.processed += ids.length;
+      if (pr && !pr.ok) {
+        out.error = pr.error;
+        break;
+      }
+      continue;
+    }
     let sendError: string | null = null;
+    let mediaDone = false;
+    // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
+    const sendMedia = async () => {
+      mediaDone = true;
+      const ids = turn.media?.imageIds ?? [];
+      if (!ids.length) return;
+      const r = await sendBotImages(pageId, psid, ids, deps);
+      if (!r.ok) sendError = r.error;
+    };
     for (const r of replies) {
       const sent = await sendMessengerPageText(pageId, psid, r.text, deps);
       if (!sent.ok) {
@@ -397,10 +470,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         break;
       }
       out.replies += 1;
+      if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
+        await sendMedia();
+        if (sendError) break;
+      }
     }
-    // Ảnh của câu trả lời mẫu (mã nội dung Pancake) chưa gửi được qua Messenger — chữ của câu mẫu vẫn đi.
-    const mediaNote = turn.media?.imageIds?.length ? "Ảnh của câu mẫu chưa gửi qua Messenger trực tiếp" : null;
-    await finish("DONE", sendError ?? mediaNote);
+    if (!sendError && !mediaDone) await sendMedia();
+    await finish("DONE", sendError);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
     out.processed += ids.length;
     if (sendError) {

@@ -22,7 +22,7 @@ import { env } from "@/lib/env";
  */
 export const MESSENGER_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement", "business_management", "instagram_basic", "instagram_manage_messages"] as const;
 /** Sự kiện trang mà app đăng ký nhận. `message_echoes`: tin page gửi đi (của bot, của nhân viên trong Hộp thư Meta). */
-export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_echoes"] as const;
+export const MESSENGER_FIELDS = ["messages", "messaging_postbacks", "message_echoes", "feed"] as const;
 const TIMEOUT_MS = 15_000;
 /** Messenger nhận tối đa 2.000 ký tự một tin. */
 export const MESSENGER_TEXT_MAX = 2000;
@@ -174,6 +174,28 @@ export async function sendMessengerImage(app: MessengerApp, pageToken: string, p
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
+/**
+ * TIN RIÊNG trả lời MỘT bình luận (Private Replies): người nhận là `comment_id`, mở hộp thư Messenger với người bình luận.
+ * Meta chỉ cho MỘT tin riêng mỗi bình luận, trong 7 ngày.
+ */
+export async function sendPrivateReply(app: MessengerApp, pageToken: string, commentId: string, text: string, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null; recipientId: string | null } | { ok: false; error: string }> {
+  const r = await graph(
+    fetchImpl,
+    `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text: text.slice(0, MESSENGER_TEXT_MAX) } }) },
+    [pageToken, app.appSecret],
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null, recipientId: typeof r.body.recipient_id === "string" ? r.body.recipient_id : null };
+}
+
+/** Nội dung bài viết khách bình luận dưới (để bot hiểu «cho giá» là giá món nào). Không đọc được ⇒ `null`. */
+export async function postMessage(app: MessengerApp, pageToken: string, postId: string, fetchImpl: Fetch = fetch): Promise<string | null> {
+  if (!/^[0-9_]{5,80}$/.test(postId)) return null;
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(postId)}?${new URLSearchParams({ fields: "message", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "GET" }, [pageToken, app.appSecret]);
+  return r.ok && typeof r.body.message === "string" ? r.body.message.slice(0, 2000) : null;
+}
+
 // ─────────────────────────── Webhook ───────────────────────────
 
 /** `X-Hub-Signature-256: sha256=<hex>` khớp HMAC của THÂN GỐC. So thời gian hằng; thiếu / sai dạng ⇒ `false`. HÀM THUẦN. */
@@ -204,6 +226,8 @@ export type MessengerEvent = {
   isEcho: boolean;
   appId: string | null;
   at: Date | null;
+  /** Bình luận dưới bài viết của page (trường `feed`): trả lời bằng TIN RIÊNG, không bao giờ công khai. `psid` = người bình luận. */
+  comment?: { commentId: string; postId: string };
 };
 
 const s = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
@@ -246,6 +270,24 @@ export function parseMessengerWebhook(payload: unknown): MessengerEvent[] {
         const title = s(postback.title) || s(postback.payload);
         const mid = s(postback.mid) || `postback:${sender}:${s(m.timestamp)}`;
         if (title) out.push({ platform, pageId, psid: sender, mid, text: title.slice(0, 2000), imageUrls: [], isEcho: false, appId: null, at });
+      }
+    }
+  }
+  // Bình luận (trường `feed`, chỉ của page — Instagram không có ở đây): bình luận MỚI của người khác, có chữ.
+  if (platform === "MESSENGER") {
+    for (const entry of p.entry as Record<string, unknown>[]) {
+      const pageId = s(entry?.id);
+      const changes = Array.isArray(entry?.changes) ? (entry.changes as Record<string, unknown>[]) : [];
+      for (const ch of changes) {
+        const v = (ch.value ?? {}) as Record<string, unknown>;
+        if (ch.field !== "feed" || v.item !== "comment" || v.verb !== "add") continue;
+        const from = (v.from ?? {}) as { id?: unknown };
+        const fromId = s(from.id);
+        const commentId = s(v.comment_id);
+        const postId = s(v.post_id);
+        const text = s(v.message).slice(0, 2000);
+        if (!fromId || fromId === pageId || !commentId || !text) continue;
+        out.push({ platform, pageId, psid: fromId, mid: `comment:${commentId}`, text, imageUrls: [], isEcho: false, appId: null, at: typeof v.created_time === "number" ? new Date(v.created_time * 1000) : null, comment: { commentId, postId } });
       }
     }
   }

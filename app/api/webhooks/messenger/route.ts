@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
       if (r.queued) queued += 1;
       after(
         await bindOrganization(async () => {
-          if (r.queued) await processMessengerThreadDebounced(ev.pageId, ev.psid);
+          // Bình luận: hàng chờ riêng của chính bình luận («comment:<mã>»); tin nhắn: hội thoại theo người gửi (PSID / IGSID).
+          if (r.queued) await processMessengerThreadDebounced(ev.pageId, ev.comment ? ev.mid : ev.psid);
           await sweepStaleMessengerThreads();
         }),
       );
