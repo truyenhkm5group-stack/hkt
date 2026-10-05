@@ -27,8 +27,9 @@ import { vnStartOfMonth } from "@/lib/wholesale/store";
 const l = schema.wholesaleLeads;
 const ps = schema.wholesalePlaceSnapshots;
 
-const NAME = sql<string | null>`coalesce(${l.businessName}, ${ps.displayName})`;
-const PHONE = sql<string | null>`coalesce(${l.normalizedPhone}, ${ps.normalizedPhone})`;
+/** Tên / SĐT hiển thị: dữ liệu của tổ chức trước, ảnh chụp Google sau. Dùng chung cho mọi truy vấn lead (cả màn điện thoại). */
+export const NAME = sql<string | null>`coalesce(${l.businessName}, ${ps.displayName})`;
+export const PHONE = sql<string | null>`coalesce(${l.normalizedPhone}, ${ps.normalizedPhone})`;
 const PHONE_KIND = sql<string | null>`case when ${l.normalizedPhone} is not null then ${l.phoneKind} else ${ps.phoneKind} end`;
 const WEBSITE = sql<string | null>`coalesce(${l.website}, ${ps.websiteUri})`;
 

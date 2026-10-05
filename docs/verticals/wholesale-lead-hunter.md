@@ -289,6 +289,52 @@ Tin chỉ mang **dữ liệu của shop**, kèm link Google Maps:
 
 Làm vậy vì nội dung Google không được mang ra ngoài ứng dụng (mục 4).
 
+**Gọi khách bằng điện thoại** (`/wholesale/mobile`, chủ shop 05/10/2026). Đây là màn riêng cho nhân viên sale sỉ cầm
+điện thoại, không phải bản thu nhỏ của màn máy tính. Mục menu tên là «Gọi khách sỉ (điện thoại)»; danh sách lead hiện thêm một
+nút lớn khi xem trên màn nhỏ.
+
+Các màn:
+
+1. **Hôm nay:** sáu con số và bốn nút lớn.
+2. **Danh sách gọi:** chip lọc một chạm, ô tìm theo tên / SĐT / khu vực.
+3. **Màn khách:** nút GỌI NGAY (`tel:`), chép SĐT, bản đồ, Zalo, website.
+4. **Lịch sử gọi.**
+
+Thứ tự gọi (`lib/queries/wholesale-mobile.ts`), khách đứng trên được gọi trước:
+
+1. hẹn gọi lại đã quá hạn;
+2. hẹn trong hôm nay;
+3. khách đang quan tâm;
+4. còn lại, xếp theo điểm cao rồi theo lượt tìm thấy mới nhất.
+
+«Khách tiếp theo» bỏ qua khách vừa liên hệ trong 2 giờ.
+
+**Bấm gọi khác với đã gọi.** Nút GỌI NGAY chỉ mở ứng dụng gọi và ghi `CALL_INITIATED` (migration 0210), gồm lead, người bấm, số và
+mốc. Nó không đổi trạng thái và không tăng số lần liên hệ. Khi quay lại ERP, bảng «Kết quả cuộc gọi?» tự bật lên, nhờ lượt bấm còn
+chờ được lưu trong trình duyệt.
+
+**Kết quả cuộc gọi tách khỏi trạng thái lead.** Người bán chọn một trong chín kết quả; trạng thái do `callOutcomeEffect` suy ra:
+
+| Kết quả | Trạng thái lead | Kèm theo |
+|---|---|---|
+| Có nhu cầu | INTERESTED | |
+| Gửi bảng giá | INTERESTED | việc tiếp theo «Gửi bảng giá», hiện ở chip «Chờ báo giá» |
+| Đang cân nhắc | INTERESTED | bắt buộc hẹn gọi lại 3 ngày |
+| Hẹn gọi lại | CONTACTED | bắt buộc hẹn, mặc định 9 giờ sáng mai |
+| Không nghe máy | NO_ANSWER | |
+| Sai người phụ trách | CONTACTED | việc tiếp theo «Xin SĐT người phụ trách nhập hàng» |
+| Không có nhu cầu | LOST | lý do + ghi chú |
+| Sai số | LOST | lý do + ghi chú |
+| Không liên hệ lại | danh sách chặn | |
+
+Hai luật giữ an toàn:
+
+- Không bao giờ lùi một lead đã đi xa.
+- Lead đã thành khách (WON) không đổi trạng thái.
+
+Ghi chú nhanh có chip một chạm. Micro của bàn phím điện thoại vẫn đọc giọng nói vào ô ghi chú như thường. Mọi cuộc gọi đi qua
+`logCallCore`, nên báo cáo «Hiệu quả» và màn máy tính thấy ngay.
+
 **Lời chào AI** chỉ diễn đạt lại từ dữ kiện có thật: tên, loại hình và khu vực của lead, cùng tên shop, sản phẩm, MOQ,
 giao hàng và khuyến mãi khai ở cấu hình. Câu AI chứa số, link hoặc email không có trong dữ kiện bị loại, và hệ thống dùng
 mẫu thay thế. Chi phí AI ghi vào sổ AI của nền tảng (`lead_hunter`), chịu hạn mức của gói.

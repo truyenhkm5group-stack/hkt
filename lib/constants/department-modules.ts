@@ -181,6 +181,14 @@ export const NAV_MODULES = [
     why: "Khách sỉ mua chịu: người bán là người gọi nhắc trả và quyết có chốt đơn tiếp không — công nợ đứng cạnh hồ sơ khách.",
   },
   {
+    href: "/wholesale/mobile",
+    label: "Gọi khách sỉ (điện thoại)",
+    zone: "SALES",
+    permission: "wholesale:work",
+    tenantOnly: true,
+    why: "Nhân viên sale sỉ cầm điện thoại gọi khách: bấm «Bắt đầu gọi» là vào khách nên gọi trước nhất, ghi kết quả bằng một chạm rồi sang khách tiếp theo — việc hằng ngày của phòng kinh doanh.",
+  },
+  {
     href: "/wholesale/leads",
     label: "Khách sỉ tiềm năng",
     zone: "SALES",

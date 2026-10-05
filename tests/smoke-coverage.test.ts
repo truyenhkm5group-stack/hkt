@@ -50,6 +50,10 @@ const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Module «Bảo hành & đổi trả theo serial» cố ý TẮT ở tổ chức nhà (0196, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang luôn chuyển về /module-disabled; trang được kiểm bằng tests/warranty.test.ts trên tổ chức khách thật.",
   },
+  "/wholesale/mobile": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Gọi khách sỉ (điện thoại)» luôn chuyển về /module-disabled; truy vấn của trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",
+  },
   "/wholesale/leads": {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Module «Săn khách sỉ» cố ý TẮT ở tổ chức nhà (0197, homeOptIn) — smoke chạy bằng quản trị của NHÀ nên trang «Khách sỉ tiềm năng» luôn chuyển về /module-disabled; trang được kiểm bằng tests/wholesale-lead-hunter.test.ts trên tổ chức khách thật.",

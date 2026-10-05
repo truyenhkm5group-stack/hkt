@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { ScopeDenied } from "@/components/scope-denied";
@@ -29,6 +30,9 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
         hint="Điểm 0–100 tính theo luật cố định (ngành, quy mô, liên hệ được, vị trí, chất lượng dữ liệu, kết quả bán của nhóm) — mở lead để xem lý do từng phần. Lead bị lọc / trùng không hiện ở đây; chọn «Hiển thị: Bị lọc / trùng» để xem."
       />
       <WholesaleNav user={user} active="leads" />
+      <Link href="/wholesale/mobile" className="flex min-h-12 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground md:hidden">
+        📱 Mở giao diện gọi khách trên điện thoại
+      </Link>
       <DataTableToolbar
         searchPlaceholder="Tên, địa chỉ, SĐT…"
         period={false}

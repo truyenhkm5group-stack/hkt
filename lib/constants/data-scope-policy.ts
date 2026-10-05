@@ -167,7 +167,7 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     label: "Khách sỉ tiềm năng",
     readPermissions: ["wholesale:view"],
     writePermission: "wholesale:work",
-    routes: ["/wholesale/leads", "/wholesale/leads/[id]", "/wholesale/outreach"],
+    routes: ["/wholesale/leads", "/wholesale/leads/[id]", "/wholesale/outreach", "/wholesale/mobile", "/wholesale/mobile/queue", "/wholesale/mobile/lead/[id]", "/wholesale/mobile/next", "/wholesale/mobile/history"],
     table: "wholesale_leads",
     rowOwner: { by: "USER_ID", column: "assigned_to_user_id" },
     rowAssignee: { by: "USER_ID", column: "assigned_to_user_id" },

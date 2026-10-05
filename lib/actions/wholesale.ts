@@ -17,6 +17,7 @@ import {
   editLeadCore,
   importLeadsCore,
   logCallCore,
+  logCallInitiatedCore,
   markQualifiedCore,
   removeSuppressionCore,
   requestRefreshCore,
@@ -125,7 +126,13 @@ export async function addLeadNoteAction(leadId: string, input: unknown): Promise
   return r;
 }
 
-export async function logCallAction(leadId: string, input: unknown): Promise<CoreResult<{ status: string }>> {
+/** Màn điện thoại: ghi lượt bấm «GỌI NGAY». Không làm mới trang — người bán đang rời sang ứng dụng gọi. */
+export async function logCallInitiatedAction(leadId: string): Promise<CoreResult> {
+  const user = await requireUser();
+  return logCallInitiatedCore(user, leadId);
+}
+
+export async function logCallAction(leadId: string, input: unknown): Promise<CoreResult<{ status: string; nextFollowupAt: string | null }>> {
   const user = await requireUser();
   const r = await logCallCore(user, leadId, input);
   if ("ok" in r) refreshLead(leadId);
