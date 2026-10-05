@@ -492,7 +492,7 @@ class FilterIn(BaseModel):
 
 class MiningIn(BaseModel):
     conversation_ids: list[str]
-    batch_size: int = 15  # create_job() tự kẹp về 3–30 — nhập 733 thì dùng 30, không báo lỗi
+    batch_size: int = 10  # create_job() tự kẹp về 3–30 — nhập 733 thì dùng 30, không báo lỗi
 
 
 class TextIn(BaseModel):
@@ -724,7 +724,8 @@ def estimate_mining(n: int = 1000, batch_size: int = 15) -> dict[str, Any]:
 
 @app.get("/api/mining/jobs", dependencies=admin)
 def list_jobs() -> list[dict[str, Any]]:
-    return db.rows("SELECT id, status, total, processed, batch_size, faqs_added, faqs_merged, scripts_added, templates_added, error, created_at, finished_at "
+    return db.rows("SELECT id, status, total, processed, batch_size, faqs_added, faqs_merged, scripts_added, templates_added, error, created_at, finished_at, "
+                   "CASE WHEN failed_ids_json IS NULL THEN NULL ELSE json_array_length(failed_ids_json) END AS failed_count "
                    "FROM mining_jobs ORDER BY id DESC LIMIT 50")
 
 
@@ -738,6 +739,23 @@ def get_job(job_id: int) -> dict[str, Any]:
     j["cost_usd"] = db.scalar("SELECT SUM(cost_usd) FROM token_usage WHERE job_id = ?", (job_id,))
     j["tokens"] = db.row("SELECT SUM(prompt_tokens) AS prompt, SUM(output_tokens + thinking_tokens) AS output FROM token_usage WHERE job_id = ?", (job_id,))
     return j
+
+
+@app.post("/api/mining/jobs/{job_id}/retry-failed", dependencies=admin)
+def retry_failed(job_id: int) -> dict[str, Any]:
+    """Nạp lại hội thoại chưa học được. Lịch sử đã ở máy ⇒ không gọi lại Pancake, chỉ tốn Gemini.
+    Lượt nạp của bản cũ không ghi phần lỗi ⇒ nạp lại cả lượt (FAQ trùng được gộp, không nhân đôi)."""
+    j = db.row("SELECT conversation_ids_json, failed_ids_json, status FROM mining_jobs WHERE id = ?", (job_id,))
+    if not j:
+        raise HTTPException(404, "Không có lượt nạp này")
+    if j["status"] in ("queued", "running"):
+        raise HTTPException(409, "Lượt nạp này đang chạy")
+    if db.scalar("SELECT COUNT(*) FROM mining_jobs WHERE status IN ('queued','running')"):
+        raise HTTPException(409, "Đang có một lượt nạp tri thức chạy — đợi xong hoặc huỷ")
+    ids = json.loads(j["failed_ids_json"]) if j["failed_ids_json"] is not None else json.loads(j["conversation_ids_json"])
+    if not ids:
+        raise HTTPException(400, "Lượt nạp này không có hội thoại nào lỗi")
+    return {"job_id": km.create_job(ids, 10), "count": len(ids), "whole_job": j["failed_ids_json"] is None}
 
 
 @app.post("/api/mining/jobs/{job_id}/cancel", dependencies=admin)

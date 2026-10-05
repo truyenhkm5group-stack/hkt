@@ -30,6 +30,10 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+class TruncatedOutput(GeminiError):
+    """JSON bị cắt ngang vì chạm trần token trả về — chia nhỏ lô rồi gọi lại, KHÔNG bỏ qua."""
+
+
 def price_for(model: str) -> dict[str, float] | None:
     table = db.get_setting("pricing_json") or {}
     if model in table:
@@ -106,7 +110,8 @@ def check_budget() -> None:
 # ---------------------------------------------------------------- Gemini
 def call_gemini(prompt: str, *, purpose: str, system: str | None = None, history: list[dict[str, str]] | None = None,
                 json_mode: bool = False, max_output_tokens: int | None = None, temperature: float = 0.6,
-                conversation_id: str | None = None, job_id: int | None = None, timeout: float = 120.0) -> dict[str, Any]:
+                conversation_id: str | None = None, job_id: int | None = None, timeout: float = 120.0,
+                response_schema: dict[str, Any] | None = None, no_thinking: bool = False) -> dict[str, Any]:
     """Trả {text, prompt_tokens, output_tokens, cost_usd, latency_ms}. Ném BudgetExceeded nếu vượt hạn ngạch."""
     api_key = db.get_setting("gemini_api_key")
     if not api_key:
@@ -123,8 +128,12 @@ def call_gemini(prompt: str, *, purpose: str, system: str | None = None, history
         gen_cfg["maxOutputTokens"] = max_output_tokens
     if json_mode:
         gen_cfg["responseMimeType"] = "application/json"
-    if purpose == "reply" and "2.5-flash" in model:
-        gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}  # trả lời chat không cần "suy nghĩ" ⇒ rẻ + nhanh
+        if response_schema:
+            gen_cfg["responseSchema"] = response_schema
+    if (purpose == "reply" or no_thinking) and "2.5" in model:
+        # Gemini 2.5 tính token "suy nghĩ" VÀO maxOutputTokens: để nó nghĩ thì câu trả lời JSON dài bị cắt ngang.
+        # Flash tắt hẳn được (0); Pro tối thiểu 128.
+        gen_cfg["thinkingConfig"] = {"thinkingBudget": 128 if "pro" in model else 0}
     body: dict[str, Any] = {"contents": contents, "generationConfig": gen_cfg}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
@@ -146,6 +155,10 @@ def call_gemini(prompt: str, *, purpose: str, system: str | None = None, history
             data = res.json()
         except ValueError:
             data = {}
+        if res.status_code == 400 and "responseSchema" in gen_cfg:
+            # Model / phiên bản API không nhận khuôn JSON ⇒ gọi lại không khuôn (vẫn JSON mode), không làm hỏng cả lượt
+            gen_cfg.pop("responseSchema")
+            continue
         if res.status_code >= 400:
             msg = (data.get("error") or {}).get("message") if isinstance(data, dict) else None
             raise GeminiError(f"Gemini lỗi {res.status_code}: {msg or res.text[:200]}")
@@ -157,10 +170,13 @@ def call_gemini(prompt: str, *, purpose: str, system: str | None = None, history
         cands = data.get("candidates") or []
         parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
         text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+        finish = cands[0].get("finishReason") if cands else None
         if not text:
-            reason = cands[0].get("finishReason") if cands else (data.get("promptFeedback") or {}).get("blockReason")
+            reason = finish or (data.get("promptFeedback") or {}).get("blockReason")
             raise GeminiError(f"Gemini không trả nội dung (lý do: {reason or 'không rõ'})")
-        return {"text": text, "model": model, "prompt_tokens": pt, "output_tokens": ot + th, "cost_usd": c,
+        if json_mode and finish == "MAX_TOKENS":
+            raise TruncatedOutput(f"Câu trả lời bị cắt vì quá dài ({ot + th} token)")
+        return {"text": text, "finish_reason": finish, "model": model, "prompt_tokens": pt, "output_tokens": ot + th, "cost_usd": c,
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
     raise GeminiError(f"Gemini không phản hồi sau 3 lần thử: {last_err}")
 

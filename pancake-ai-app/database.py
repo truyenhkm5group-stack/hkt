@@ -301,12 +301,17 @@ def init_db() -> None:
 
 
 # Cột thêm sau bản đầu — DB đã tạo trên máy người dùng không tự có (CREATE TABLE IF NOT EXISTS không thêm cột).
-_ADDED_COLUMNS = {"conversations": {"has_phone": "INTEGER DEFAULT 0"}}
+_ADDED_COLUMNS = {
+    "conversations": {"has_phone": "INTEGER DEFAULT 0"},
+    "mining_jobs": {"failed_ids_json": "TEXT"},  # NULL = bản cũ, không ghi phần lỗi; '[]' = không lỗi
+}
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
     for table, cols in _ADDED_COLUMNS.items():
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if not have:  # bảng chưa có — SCHEMA sẽ tạo đủ cột
+            continue
         for col, decl in cols.items():
             if col not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")

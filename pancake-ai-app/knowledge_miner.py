@@ -54,6 +54,30 @@ Trả về DUY NHẤT một JSON đúng dạng:
 }"""
 
 
+_STR = {"type": "STRING"}
+MINING_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "faqs": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "question": _STR, "variants": {"type": "ARRAY", "items": _STR}, "answer": _STR, "category": _STR,
+            "fast_path": {"type": "BOOLEAN"}}, "required": ["question", "answer"]}},
+        "objection_scripts": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "kind": {"type": "STRING", "enum": ["price", "shipping", "size", "trust", "other"]},
+            "customer_concern": _STR, "response": _STR, "rationale": _STR}, "required": ["customer_concern", "response"]}},
+        "closing_templates": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "purpose": {"type": "STRING", "enum": ["phone", "address", "phone_address", "confirm"]},
+            "template": _STR, "score": {"type": "NUMBER"}, "notes": _STR}, "required": ["template"]}},
+    },
+    "required": ["faqs", "objection_scripts", "closing_templates"],
+}
+MAX_SPLIT_DEPTH = 6  # lô hỏng ⇒ chia đôi tới từng hội thoại (30 → 15 → 8 → 4 → 2 → 1): chỉ đúng hội thoại hỏng bị bỏ lại
+
+
+def _max_output_tokens() -> int:
+    model = db.get_setting("gemini_model") or ""
+    return 8192 if "2.0" in model else 32768
+
+
 def mask_pii(text: str) -> str:
     return PHONE_RE.sub("[SĐT]", text or "")
 
@@ -184,7 +208,36 @@ def _update(job_id: int, **fields: Any) -> None:
         c.execute(f"UPDATE mining_jobs SET {sets} WHERE id = ?", list(fields.values()) + [job_id])
 
 
-def create_job(conversation_ids: list[str], batch_size: int = 15) -> int:
+def _mine_blocks(blocks: list[tuple[str, str]], job_id: int, label: str, depth: int = 0) -> tuple[dict[str, int], list[str]]:
+    """blocks: [(conversation_id, transcript)]. Trả (thống kê, id hội thoại KHÔNG học được). Hỏng thì chia đôi, không bỏ cả lô."""
+    zero = {"faqs_added": 0, "faqs_merged": 0, "scripts_added": 0, "templates_added": 0}
+    text = "\n\n".join(f"### HỘI THOẠI {i + 1}\n{t}" for i, (_, t) in enumerate(blocks))
+    try:
+        res = tt.call_gemini(
+            "Phân tích các hội thoại sau và trả JSON theo đúng định dạng:\n\n" + text,
+            purpose="mining", system=MINING_SYSTEM, json_mode=True, response_schema=MINING_SCHEMA, no_thinking=True,
+            temperature=0.3, job_id=job_id, max_output_tokens=_max_output_tokens(),
+        )
+        data = tt.parse_json(res["text"])
+    except tt.BudgetExceeded:
+        raise
+    except (tt.GeminiError, ValueError) as e:
+        if len(blocks) > 1 and depth < MAX_SPLIT_DEPTH:
+            half = (len(blocks) + 1) // 2
+            _log(job_id, f"{label}: {len(blocks)} hội thoại lỗi ({str(e)[:80]}) → chia đôi thử lại")
+            s1, f1 = _mine_blocks(blocks[:half], job_id, label + "a", depth + 1)
+            s2, f2 = _mine_blocks(blocks[half:], job_id, label + "b", depth + 1)
+            return {k: s1[k] + s2[k] for k in s1}, f1 + f2
+        _log(job_id, f"{label}: {len(blocks)} hội thoại không học được: {str(e)[:120]}")
+        return zero, [cid for cid, _ in blocks]
+    stats = merge_results(data if isinstance(data, dict) else {}, job_id)
+    cost = f"${res['cost_usd']:.4f}" if res["cost_usd"] is not None else "chưa có đơn giá"
+    _log(job_id, f"{label}: {len(blocks)} hội thoại · {res['prompt_tokens']}+{res['output_tokens']} token · {cost} · "
+                 f"+{stats['faqs_added']} FAQ, gộp {stats['faqs_merged']}, +{stats['scripts_added']} kịch bản, +{stats['templates_added']} mẫu chốt")
+    return stats, []
+
+
+def create_job(conversation_ids: list[str], batch_size: int = 10) -> int:
     ids = list(dict.fromkeys(str(i) for i in conversation_ids))[:5000]
     batch_size = max(3, min(int(batch_size or 15), 30))
     with db.tx() as c:
@@ -218,6 +271,7 @@ def run_job(job_id: int) -> None:
     _log(job_id, f"Bắt đầu nạp {len(ids)} hội thoại, {bs} hội thoại / lượt AI")
     client = None
     fetched = 0
+    failed: list[str] = []
     try:
         for start in range(0, len(ids), bs):
             if cancel.is_set():
@@ -225,7 +279,7 @@ def run_job(job_id: int) -> None:
                 _log(job_id, "Đã huỷ theo yêu cầu — giữ nguyên tri thức đã học")
                 return
             chunk = ids[start:start + bs]
-            blocks = []
+            blocks: list[tuple[str, str]] = []
             for cid in chunk:
                 try:
                     conv = db.row("SELECT messages_synced_at FROM conversations WHERE id = ?", (cid,))
@@ -235,32 +289,27 @@ def run_job(job_id: int) -> None:
                         fetched += 1
                     t = transcript(cid)
                     if t.count("\n") >= 1:
-                        blocks.append(f"### HỘI THOẠI {len(blocks) + 1}\n{t}")
+                        blocks.append((cid, t))
                 except PancakeError as e:
+                    failed.append(cid)
                     _log(job_id, f"Bỏ qua hội thoại {cid}: {e}")
             if blocks:
                 try:
-                    res = tt.call_gemini(
-                        "Phân tích các hội thoại sau và trả JSON theo đúng định dạng:\n\n" + "\n\n".join(blocks),
-                        purpose="mining", system=MINING_SYSTEM, json_mode=True, temperature=0.3, job_id=job_id,
-                        max_output_tokens=8192,
-                    )
-                    data = tt.parse_json(res["text"])
-                    stats = merge_results(data if isinstance(data, dict) else {}, job_id)
-                    for k, v in stats.items():
-                        totals[k] += v
-                    cost = f"${res['cost_usd']:.4f}" if res["cost_usd"] is not None else "chưa có đơn giá"
-                    _log(job_id, f"Lượt {start // bs + 1}: {len(blocks)} hội thoại · {res['prompt_tokens']}+{res['output_tokens']} token · {cost} · "
-                                 f"+{stats['faqs_added']} FAQ, gộp {stats['faqs_merged']}, +{stats['scripts_added']} kịch bản, +{stats['templates_added']} mẫu chốt")
+                    stats, bad = _mine_blocks(blocks, job_id, f"Lượt {start // bs + 1}")
                 except tt.BudgetExceeded as e:
-                    _update(job_id, status="blocked", error=str(e), processed=start, finished_at=db.now(), **totals)
+                    failed.extend(ids[start:])
+                    _update(job_id, status="blocked", error=str(e), processed=start, finished_at=db.now(),
+                            failed_ids_json=json.dumps(failed), **totals)
                     _log(job_id, f"DỪNG do vượt hạn ngạch: {e}")
                     return
-                except (tt.GeminiError, ValueError) as e:
-                    _log(job_id, f"Lượt {start // bs + 1} lỗi, bỏ qua: {e}")
+                failed.extend(bad)
+                for k, v in stats.items():
+                    totals[k] += v
+            _update(job_id, failed_ids_json=json.dumps(failed))
             _update(job_id, processed=min(start + bs, len(ids)), **totals)
         _update(job_id, status="done", finished_at=db.now(), processed=len(ids), **totals)
-        _log(job_id, f"Hoàn tất. Tải mới {fetched} lịch sử từ Pancake, phần còn lại đọc từ DB local.")
+        _log(job_id, f"Hoàn tất. Tải mới {fetched} lịch sử từ Pancake, phần còn lại đọc từ DB local. "
+                     + (f"{len(failed)} hội thoại chưa học được — bấm 'Nạp lại phần lỗi'." if failed else "Không hội thoại nào lỗi."))
     except Exception as e:  # noqa: BLE001 — job nền không được làm sập server
         _update(job_id, status="failed", error=str(e), finished_at=db.now(), **totals)
         _log(job_id, "Lỗi: " + "".join(traceback.format_exception_only(type(e), e)).strip())

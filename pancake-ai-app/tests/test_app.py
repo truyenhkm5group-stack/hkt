@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import json
 import time
 import unittest
 
@@ -35,7 +36,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         db.init_db()
         with db.tx() as c:
-            for t in ("faqs", "messages", "conversations", "bot_replies", "frustration_alerts", "cancel_requests", "token_usage", "settings"):
+            for t in ("faqs", "messages", "conversations", "bot_replies", "frustration_alerts", "cancel_requests", "token_usage", "settings", "mining_jobs"):
                 c.execute(f"DELETE FROM {t}")
         db.bump_faq_version()
         db.set_settings({"pancake_page_id": "P1", "pancake_page_access_token": "x", "bot_enabled": True, "auto_send": True})
@@ -167,6 +168,84 @@ class PhoneFilterTest(Base):
         db.upsert_conversation(cl.normalize_conversation({"id": "a", "from": {"id": "1"}}))
         r = db.list_conversations(only_phone=True, page_id="P1", ids_only_limit=1000)
         self.assertEqual(sorted(r["ids"]), ["a", "b", "c"])
+
+
+class MiningRobustnessTest(Base):
+    def _seed(self, n):
+        ids = []
+        for i in range(n):
+            cid = f"mc{i}"
+            db.upsert_conversation({"id": cid, "page_id": "P1", "tags": []})
+            db.insert_messages([{"id": f"{cid}-1", "conversation_id": cid, "from_page": False, "text": f"câu hỏi số {i}", "created_at": 1},
+                                {"id": f"{cid}-2", "conversation_id": cid, "from_page": True, "text": "Dạ shop trả lời", "created_at": 2}])
+            db.mark_messages_synced(cid)
+            ids.append(cid)
+        return ids
+
+    def test_truncated_batch_is_split_not_skipped(self):
+        ids = self._seed(12)
+        calls = []
+
+        def fake(prompt, **k):
+            n = prompt.count("### HỘI THOẠI")
+            calls.append(n)
+            self.assertTrue(k.get("no_thinking") and k.get("response_schema"))
+            if n > 4:
+                raise tt.TruncatedOutput("bị cắt")
+            if "câu hỏi số 7\n" in prompt or prompt.rstrip().endswith("câu hỏi số 7"):
+                raise ValueError("JSON hỏng")  # hội thoại số 7 hỏng thật, kể cả khi đứng một mình
+            return {"text": '{"faqs":[{"question":"Q%d","answer":"A"}],"objection_scripts":[],"closing_templates":[]}' % len(calls),
+                    "prompt_tokens": 1, "output_tokens": 1, "cost_usd": 0.0}
+        orig, tt.call_gemini = tt.call_gemini, fake
+        km.threading.Thread, orig_thread = (lambda **kw: type("T", (), {"start": lambda self: None})()), km.threading.Thread
+        try:
+            jid = km.create_job(ids, 12)
+            km.run_job(jid)
+        finally:
+            tt.call_gemini, km.threading.Thread = orig, orig_thread
+        job = db.row("SELECT status, failed_ids_json FROM mining_jobs WHERE id = ?", (jid,))
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(json.loads(job["failed_ids_json"]), ["mc7"])
+        self.assertEqual(calls[0], 12)  # thử cả lô trước, bị cắt thì mới chia
+        r = server.retry_failed(jid)
+        self.assertEqual((r["count"], r["whole_job"]), (1, False))
+
+    def test_gemini_request_disables_thinking_and_flags_truncation(self):
+        import httpx
+        sent = []
+
+        class R:
+            def __init__(self, code, data):
+                self.status_code, self._d, self.text = code, data, ""
+
+            def json(self):
+                return self._d
+        replies = [R(400, {"error": {"message": "schema not supported"}}),
+                   R(200, {"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 8192},
+                           "candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"faqs": [{"question": "a'}]}}]})]
+        orig = httpx.post
+        httpx.post = lambda url, params=None, json=None, timeout=None: (sent.append(json) or replies.pop(0))
+        db.set_settings({"gemini_api_key": "k", "gemini_model": "gemini-2.5-flash"})
+        try:
+            with self.assertRaises(tt.TruncatedOutput):
+                tt.call_gemini("x", purpose="mining", json_mode=True, response_schema={"type": "OBJECT"}, no_thinking=True, max_output_tokens=32768)
+        finally:
+            httpx.post = orig
+        cfg = sent[0]["generationConfig"]
+        self.assertEqual(cfg["thinkingConfig"], {"thinkingBudget": 0})
+        self.assertEqual(cfg["maxOutputTokens"], 32768)
+        self.assertNotIn("responseSchema", sent[1]["generationConfig"])  # 400 vì khuôn ⇒ gọi lại không khuôn
+
+    def test_old_job_without_failed_tracking_retries_whole_job(self):
+        with db.tx() as c:
+            c.execute("INSERT INTO mining_jobs(status, total, conversation_ids_json, created_at) VALUES('done', 2, '[\"a\",\"b\"]', 1)")
+            jid = c.execute("SELECT max(id) FROM mining_jobs").fetchone()[0]
+        km.threading.Thread, orig_thread = (lambda **kw: type("T", (), {"start": lambda self: None})()), km.threading.Thread
+        try:
+            r = server.retry_failed(jid)
+        finally:
+            km.threading.Thread = orig_thread
+        self.assertEqual((r["count"], r["whole_job"]), (2, True))
 
 
 class SandboxTest(Base):
