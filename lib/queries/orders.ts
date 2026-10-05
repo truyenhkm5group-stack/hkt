@@ -96,6 +96,7 @@ export async function listOrders(params: ListParams) {
         billFullName: true,
         billPhone: true,
         shipProvince: true,
+        shipCommune: true,
         source: true,
         totalPriceAfterDiscount: true,
         shippingFee: true,

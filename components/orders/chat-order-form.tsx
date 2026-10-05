@@ -6,6 +6,7 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AddressPlace, useAddressCheck } from "@/components/orders/address-place";
 import { chatOrderContextAction, createOrderFromChatAction } from "@/lib/actions/chat-orders";
 import { manualOrderTotals } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
@@ -49,6 +50,8 @@ export function ChatOrderForm({
   const [phone, setPhone] = useState(defaults?.phone ?? "");
   const [address, setAddress] = useState(defaults?.address ?? "");
   const [province, setProvince] = useState("");
+  // Xã / phường: bộ đọc địa chỉ của máy chủ đề xuất; người chọn thì người thắng.
+  const [pickedWard, setPickedWard] = useState("");
   const [stage, setStage] = useState<"CONFIRMED" | "NEW">("CONFIRMED");
   const [lines, setLines] = useState<Line[]>([{ ...EMPTY_LINE }]);
   const [shippingFee, setShippingFee] = useState("");
@@ -68,6 +71,11 @@ export function ChatOrderForm({
       alive = false;
     };
   }, [conversationId]);
+
+  const addressLine = address.trim() || (useCustomer ? (ctx?.customer?.address ?? "") : "");
+  const provinceLine = province.trim() || (useCustomer && !address.trim() ? (ctx?.customer?.province ?? "") : "");
+  const check = useAddressCheck(addressLine, provinceLine);
+  const ward = pickedWard || check?.ward || "";
 
   const variantById = useMemo(() => new Map((ctx?.variants ?? []).map((v) => [v.id, v])), [ctx]);
   const customerId = useCustomer ? (defaults?.customerId ?? ctx?.customer?.id ?? null) : null;
@@ -121,6 +129,7 @@ export function ChatOrderForm({
         phone,
         address,
         province,
+        ward,
         stage,
         lines: payloadLines,
         shippingFee: toInt(shippingFee, 0),
@@ -169,6 +178,7 @@ export function ChatOrderForm({
         <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder={customerId ? "SĐT nhận (trống = SĐT khách)" : "SĐT khách"} aria-label="SĐT người nhận" />
         <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder={customerId ? "Địa chỉ giao (trống = địa chỉ khách)" : "Địa chỉ giao"} aria-label="Địa chỉ giao" className="sm:col-span-2" />
         <Input value={province} onChange={(e) => setProvince(e.target.value)} placeholder="Tỉnh / thành (tuỳ chọn)" aria-label="Tỉnh / thành" />
+        <AddressPlace check={check} ward={ward} onPick={setPickedWard} />
       </div>
       {!customerId ? <p className="text-[11.5px] text-muted-foreground">Chưa chọn khách: ERP tìm khách theo SĐT; đã có thì dùng lại (không sửa hồ sơ), chưa có thì tạo mới.</p> : null}
 

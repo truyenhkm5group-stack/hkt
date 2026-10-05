@@ -175,7 +175,7 @@ async function testRealOrg() {
     const [rc2] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: "PN-CA-2", totalQuantity: 5, createdBy: ADMIN_EMAIL }).returning({ id: schema.stockReceipts.id });
     await db.insert(schema.stockReceiptItems).values({ receiptId: rc2.id, variantId: auto, quantity: 5, unitCost: 20_000 });
     await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: true });
-    const full = { recipient: { name: "Khách A", phone: "0901234567", address: "1 Lê Lợi, Q1", province: "HCM" } };
+    const full = { recipient: { name: "Khách A", phone: "0901234567", address: "1 Lê Lợi, Phường Bến Thành", province: "HCM" } };
     const enough = await createOrderAsAgent(AGENT, order([{ variantId: auto, quantity: 2, unitPrice: 50_000 }], "NEW", full), RETAIL);
     assert.ok(enough.ok);
     assert.equal((await db.query.orders.findFirst({ where: eq(schema.orders.id, enough.id) }))?.stage, "CONFIRMED", "đủ thông tin + đủ hàng ⇒ công tắc nâng lên Đã xác nhận");

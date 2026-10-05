@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { AddressPlace, useAddressCheck } from "@/components/orders/address-place";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,7 @@ import { cn } from "@/lib/utils";
  */
 
 type Line = { variantId: string; quantity: string; unitPrice: string; discount: string };
-type RecipientDraft = { name: string; phone: string; address: string; province: string };
+type RecipientDraft = { name: string; phone: string; address: string; province: string; ward?: string };
 export type ManualOrderFormValues = { customerId: string; stage: ManualOrderStage; channel: string; note: string; orderDiscount: string; shippingFee: string; lines: Line[]; recipient?: RecipientDraft };
 const EMPTY_RECIPIENT: RecipientDraft = { name: "", phone: "", address: "", province: "" };
 
@@ -73,9 +74,11 @@ export function ManualOrderForm({
     shippingFee: toInt(values.shippingFee, 0),
     lines: values.lines.map((l) => ({ variantId: l.variantId, quantity: toInt(l.quantity), unitPrice: toInt(l.unitPrice), discount: toInt(l.discount, 0) })),
     // Ô trống = lấy của hồ sơ khách (máy chủ quyết); chỉ gửi khi có ít nhất một ô.
-    ...(values.recipient && Object.values(values.recipient).some((x) => x.trim()) ? { recipient: values.recipient } : {}),
+    ...(values.recipient && Object.values(values.recipient).some((x) => (x ?? "").trim()) ? { recipient: { ...values.recipient, ward: values.recipient.ward || addressCheck?.ward || "" } } : {}),
   });
   const recipient = values.recipient ?? EMPTY_RECIPIENT;
+  // Xã / phường của địa chỉ giao: máy đọc từ dòng địa chỉ, người chọn thì người thắng (ô trống ⇒ máy chủ đọc lại lúc lưu).
+  const addressCheck = useAddressCheck(recipient.address, recipient.province);
   const setRecipient = (patch: Partial<RecipientDraft>) => setValues((prev) => ({ ...prev, recipient: { ...(prev.recipient ?? EMPTY_RECIPIENT), ...patch } }));
   const preview = manualOrderTotals(payload().lines, toInt(values.orderDiscount, 0), toInt(values.shippingFee, 0));
 
@@ -241,8 +244,9 @@ export function ManualOrderForm({
           <legend className="px-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Người nhận / địa chỉ giao (để trống = theo hồ sơ khách)</legend>
           <Input aria-label="Tên người nhận" placeholder="Tên người nhận" value={recipient.name} onChange={(e) => setRecipient({ name: e.target.value })} />
           <Input aria-label="SĐT người nhận" placeholder="SĐT người nhận" inputMode="tel" value={recipient.phone} onChange={(e) => setRecipient({ phone: e.target.value })} />
-          <Input aria-label="Địa chỉ giao" placeholder="Địa chỉ giao" className="sm:col-span-2" value={recipient.address} onChange={(e) => setRecipient({ address: e.target.value })} />
-          <Input aria-label="Tỉnh / thành" placeholder="Tỉnh / thành" value={recipient.province} onChange={(e) => setRecipient({ province: e.target.value })} />
+          <Input aria-label="Địa chỉ giao" placeholder="Địa chỉ giao" className="sm:col-span-2" value={recipient.address} onChange={(e) => setRecipient({ address: e.target.value, ward: "" })} />
+          <Input aria-label="Tỉnh / thành" placeholder="Tỉnh / thành" value={recipient.province} onChange={(e) => setRecipient({ province: e.target.value, ward: "" })} />
+          {recipient.address.trim() ? <AddressPlace check={addressCheck} ward={recipient.ward || addressCheck?.ward || ""} onPick={(w) => setRecipient({ ward: w })} /> : null}
           {err("recipient")}
         </fieldset>
         <div className="space-y-1 sm:col-span-2">

@@ -17,7 +17,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { clearMemo } from "@/lib/cache";
-import { canMarkManualDeliveryFailed, manualOrderComplete, parseManualDeliveryFee } from "@/lib/constants/manual-orders";
+import { canMarkManualDeliveryFailed, manualOrderComplete, manualOrderGaps, parseManualDeliveryFee } from "@/lib/constants/manual-orders";
 import { orderGroupText } from "@/lib/sales-chatbot/order-sync-shared";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -90,9 +90,12 @@ function testPure() {
   assert.deepEqual([parseManualDeliveryFee(40_000), parseManualDeliveryFee("40000"), parseManualDeliveryFee(0)], [40_000, 40_000, 0]);
   assert.deepEqual([parseManualDeliveryFee(-1), parseManualDeliveryFee(1.5), parseManualDeliveryFee("abc"), parseManualDeliveryFee(null), parseManualDeliveryFee(""), parseManualDeliveryFee(20_000_000)], [null, null, null, null, null, null]);
   assert.deepEqual(["CONFIRMED", "NEW", "WAITING", "DELIVERED", "RETURNED", "CANCELLED"].map(canMarkManualDeliveryFailed), [true, false, false, false, false, false], "chỉ «Đã xác nhận» mới báo giao không thành công");
-  // Đơn đủ thông tin (chủ shop HSLC 04/10/2026): SĐT 8–15 số · địa chỉ ≥ 5 ký tự · ≥ 1 dòng hàng.
-  assert.equal(manualOrderComplete({ phone: "0912 345 678", address: "12 Hàng Bạc" }, 1), true);
-  assert.deepEqual([manualOrderComplete({ phone: "", address: "12 Hàng Bạc" }, 1), manualOrderComplete({ phone: "0912345678", address: "HN" }, 1), manualOrderComplete({ phone: "0912345678", address: "12 Hàng Bạc" }, 0), manualOrderComplete({ phone: "1234", address: "12 Hàng Bạc" }, 1)], [false, false, false, false]);
+  // Đơn đủ thông tin (chủ shop HSLC 04/10/2026): SĐT 8–15 số · địa chỉ ≥ 5 ký tự · ≥ 1 dòng hàng; 05/10/2026: + tỉnh + xã đã ghép.
+  const place = { province: "Thành phố Hà Nội", ward: "Phường Hoàn Kiếm" };
+  assert.equal(manualOrderComplete({ phone: "0912 345 678", address: "12 Hàng Bạc", ...place }, 1), true);
+  assert.deepEqual([manualOrderComplete({ phone: "", address: "12 Hàng Bạc", ...place }, 1), manualOrderComplete({ phone: "0912345678", address: "HN", ...place }, 1), manualOrderComplete({ phone: "0912345678", address: "12 Hàng Bạc", ...place }, 0), manualOrderComplete({ phone: "1234", address: "12 Hàng Bạc", ...place }, 1)], [false, false, false, false]);
+  assert.deepEqual(manualOrderGaps({ phone: "0912345678", address: "12 Hàng Bạc" }, 1), ["tỉnh / thành"], "địa chỉ chưa ghép được tỉnh ⇒ chưa đủ");
+  assert.deepEqual(manualOrderGaps({ phone: "0912345678", address: "12 Hàng Bạc", province: "Thành phố Hà Nội" }, 1), ["xã / phường"], "chưa có xã ⇒ chưa đủ (xã cũ bị chia: người chọn)");
   const gt = { header: "🧾 ĐƠN MỚI", name: "Lan", phone: "0912345678", address: "12 Hàng Bạc", province: "Hà Nội", lines: [{ name: "Chả cá", quantity: 1, unitPrice: 280_000, lineTotal: 280_000 }], subtotal: 280_000, shippingFee: 0, shipText: null, warnings: [] };
   // (04/10/2026) chủ shop: tin nhóm không mã đơn, không nguồn, không câu «… trên ERP» — loại đơn nằm ở dòng đầu do nơi gọi đặt.
   assert.ok(!/ERP|#A/.test(orderGroupText({ ...gt, confirmed: true })) && orderGroupText(gt).startsWith("🧾 ĐƠN MỚI\nTHU TIỀN: 280.000"), orderGroupText(gt));
@@ -114,7 +117,7 @@ export async function testManualOrderOutcome() {
       const org = { code: ORG, name: "Hải sản thử kết quả đơn", isHome: false };
       const admin: SessionUser = { id: u.id, email: u.email, name: "QT hải sản", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: org, modules: [...enabled] };
       const sales: SessionUser = { ...admin, role: "MANAGER", permissions: ["orders:read", "orders:write", "customers:view", "products:view"] };
-      const [c] = await db.insert(schema.customers).values({ name: "Chị Lan", phone: "0912345678", address: "12 Hàng Bạc", province: "Hà Nội" }).returning({ id: schema.customers.id });
+      const [c] = await db.insert(schema.customers).values({ name: "Chị Lan", phone: "0912345678", address: "12 Hàng Bạc, Phường Hoàn Kiếm", province: "Hà Nội" }).returning({ id: schema.customers.id });
       await db.insert(schema.products).values({ id: "erp-mo-prod", name: "Chả cá thu", raw: { origin: "ERP_MANUAL", unit: "kg" } });
       await db.insert(schema.productVariants).values({ id: "erp-mo-var", productId: "erp-mo-prod", sku: "CCT-1", size: "1kg", retailPrice: 280_000 });
       const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: "PN-MO", totalQuantity: 20, createdBy: u.email }).returning({ id: schema.stockReceipts.id });
@@ -207,7 +210,7 @@ export async function testManualOrderOutcome() {
       const [noAddr] = await db.insert(schema.customers).values({ name: "Khách thiếu địa chỉ", phone: "0933000111", address: "" }).returning({ id: schema.customers.id });
       const thieu = await createManualOrderCore(admin, { ...input(1), customerId: noAddr.id, stage: "NEW" });
       assert.ok(thieu.ok);
-      const [noCredit] = await db.insert(schema.customers).values({ name: "Đại lý hết hạn mức", phone: "0933000222", address: "5 Lê Lợi, Huế" }).returning({ id: schema.customers.id });
+      const [noCredit] = await db.insert(schema.customers).values({ name: "Đại lý hết hạn mức", phone: "0933000222", address: "5 Lê Lợi, Phường Thuận Hóa, Huế" }).returning({ id: schema.customers.id });
       await db.insert(schema.customerTradeTerms).values({ customerId: noCredit.id, creditLimit: 0 });
       const no = await createManualOrderCore(admin, { ...input(1), customerId: noCredit.id, stage: "NEW" });
       assert.ok(no.ok);
@@ -227,11 +230,19 @@ export async function testManualOrderOutcome() {
       const moi = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
       assert.ok(moi.ok);
       assert.equal(await stageOf(moi.id), "CONFIRMED", "đơn đủ SĐT · địa chỉ · hàng tính là đơn ngay");
+      assert.deepEqual(await db.query.orders.findFirst({ where: eq(schema.orders.id, moi.id), columns: { shipProvince: true, shipCommune: true } }), { shipProvince: "Thành phố Hà Nội", shipCommune: "Phường Hoàn Kiếm" }, "lõi ghi đơn điền tỉnh + xã theo địa giới mới từ dòng địa chỉ");
+      // Địa chỉ không ghép được xã (05/10/2026) ⇒ CHƯA đủ thông tin ⇒ giữ «Mới» để người chọn xã.
+      const mo = await createManualOrderCore(admin, { ...input(1), stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm" } });
+      assert.ok(mo.ok);
+      assert.equal(await stageOf(mo.id), "NEW", "xã cũ bị chia cho nhiều xã mới ⇒ không tự xác nhận");
+      assert.ok((await updateManualOrderCore(admin, mo.id, { ...input(1), stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm", ward: "Phường Nhiêu Lộc" } })).ok);
+      assert.equal(await stageOf(mo.id), "CONFIRMED", "người chọn xã ⇒ đủ ⇒ tự xác nhận ở lượt sửa");
+      assert.ok((await cancelManualOrderCore(admin, mo.id, { reason: "đơn thử" })).ok);
       const cho = await createManualOrderCore(admin, { ...input(1), stage: "WAITING" });
       assert.ok(cho.ok);
       assert.equal(await stageOf(cho.id), "WAITING");
       // Sửa đơn thiếu thông tin cho đủ ⇒ tự xác nhận ở lượt sửa.
-      assert.ok((await updateManualOrderCore(admin, thieu.id, { ...input(1), customerId: noAddr.id, stage: "NEW", recipient: { name: "Khách", phone: "0933000111", address: "9 Trần Phú, Đà Nẵng", province: "" } })).ok);
+      assert.ok((await updateManualOrderCore(admin, thieu.id, { ...input(1), customerId: noAddr.id, stage: "NEW", recipient: { name: "Khách", phone: "0933000111", address: "9 Trần Phú, Phường Hải Châu, Đà Nẵng", province: "" } })).ok);
       assert.equal(await stageOf(thieu.id), "CONFIRMED");
       // Huỷ vẫn là huỷ.
       assert.ok((await cancelManualOrderCore(admin, moi.id, { reason: "khách huỷ" })).ok);

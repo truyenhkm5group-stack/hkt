@@ -95,6 +95,8 @@ const inputZ = z
     phone: z.string().trim().max(30).default(""),
     address: z.string().trim().max(300).default(""),
     province: z.string().trim().max(120).default(""),
+    /** Xã / phường người đã chọn (địa giới mới) — trống ⇒ lõi đọc từ dòng địa chỉ. */
+    ward: z.string().trim().max(120).default(""),
     stage: z.enum(["NEW", "CONFIRMED"]).default("CONFIRMED"),
     lines: z.array(lineZ).min(1, "Đơn cần ít nhất một dòng hàng").max(50),
     shippingFee: z.number().default(0),
@@ -139,7 +141,7 @@ export async function createOrderFromChatCore(user: SessionUser, conversationId:
       note: v.note,
       channel: CHAT_CHANNEL_LABEL[conv.channel as ChatChannel] ?? conv.channel,
       // Người nhận của LẦN MUA này — ô trống lấy của hồ sơ khách (lõi quyết).
-      recipient: { name: v.name, phone: v.phone, address: v.address, province: v.province },
+      recipient: { name: v.name, phone: v.phone, address: v.address, province: v.province, ward: v.ward },
     },
     { idempotencyKey: `chat:${conv.id}:${v.requestKey}` },
   );

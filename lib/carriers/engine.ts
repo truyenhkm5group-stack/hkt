@@ -1,3 +1,4 @@
+import { resolveRecipientPlace } from "@/lib/address/vn-address";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -68,15 +69,26 @@ async function outstandingOf(order: OrderRow): Promise<number> {
 
 type DraftInput = { weightGrams: number; cod: number; serviceCode?: string; note?: string; province?: string; ward?: string };
 
+/**
+ * Tỉnh + xã ĐÃ LƯU của đơn; đơn cũ chưa có (ghi trước bộ chuẩn hoá địa chỉ, 05/10/2026) ⇒ đọc từ dòng địa chỉ LÚC XEM — không
+ * ghi ngược vào đơn (không backfill im lặng, AGENTS 8.8); người bấm tạo vận đơn vẫn thấy và sửa được hai ô này.
+ */
+function storedPlace(order: OrderRow): { province: string; ward: string } {
+  if (order.shipProvince && order.shipCommune) return { province: order.shipProvince, ward: order.shipCommune };
+  const p = resolveRecipientPlace({ address: order.shipAddress || order.shipFullAddress || "", province: order.shipProvince ?? "", ward: order.shipCommune ?? "" });
+  return { province: p.province || order.shipProvince || "", ward: p.ward || order.shipCommune || "" };
+}
+
 function draftOf(order: OrderRow, lines: VtpShipmentLine[], input: DraftInput, reference: string): CarrierDraft {
+  const place = storedPlace(order);
   return {
     reference,
     receiver: {
       name: order.shipFullName || order.billFullName || "",
       phone: normalizeVtpPhone(order.shipPhone || order.billPhone || ""),
       address: receiverAddressLine(order),
-      province: (input.province ?? "").trim() || order.shipProvince || "",
-      ward: (input.ward ?? "").trim() || order.shipCommune || "",
+      province: (input.province ?? "").trim() || place.province,
+      ward: (input.ward ?? "").trim() || place.ward,
     },
     lines,
     goodsValue: Math.max(0, order.totalPriceAfterDiscount),
@@ -178,7 +190,7 @@ export async function carrierPanel(user: SessionUser, orderId: string): Promise<
     carriers,
     connectionNote: anyReady ? null : "Chưa bật hãng vận chuyển nào — Cài đặt → Kết nối → nhóm «Vận chuyển» («Viettel Post của tổ chức (tạo vận đơn)» hoặc «GHN của tổ chức»): khai tài khoản, Kiểm tra đạt rồi Bật.",
     blockedReason: eligibility(order, attempts),
-    defaults: { weightGrams: linesWeight(lines), cod: await outstandingOf(order), receiverAddress: receiverAddressLine(order), province: order.shipProvince ?? "", ward: order.shipCommune ?? "" },
+    defaults: { weightGrams: linesWeight(lines), cod: await outstandingOf(order), receiverAddress: receiverAddressLine(order), ...storedPlace(order) },
     attempts: attempts.map(attemptView).filter((x): x is CarrierAttemptView => x !== null),
   };
 }

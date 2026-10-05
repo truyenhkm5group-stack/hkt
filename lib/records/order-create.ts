@@ -37,6 +37,7 @@
  * `raw.createdBy = null`, `raw.agent` nói máy nào. Cổng module / nguồn đồng bộ áp y hệt; quyền của máy do lớp gọi
  * (cấu hình chatbot, công cụ được bật) quyết.
  */
+import { fullAddressLine, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -164,6 +165,8 @@ const orderInputZ = z
         phone: z.string().trim().max(30).default(""),
         address: z.string().trim().max(300).default(""),
         province: z.string().trim().max(120).default(""),
+        /** Xã / phường người đã CHỌN (địa giới mới) — bỏ trống ⇒ đọc từ dòng địa chỉ (`resolveRecipientPlace`). */
+        ward: z.string().trim().max(120).default(""),
       })
       .strict()
       .optional(),
@@ -175,7 +178,7 @@ function zodErrors(error: z.ZodError): FieldError[] {
   return error.issues.map((i) => ({ field: i.path.map(String).join(".") || "_", message: i.message }));
 }
 
-type Recipient = { name: string; phone: string; address: string; province: string };
+type Recipient = { name: string; phone: string; address: string; province: string; ward?: string };
 type Prepared = {
   customer: { id: string; name: string; phone: string | null; address: string; province: string };
   /** Người nhận của đơn — của khách, đè bởi ô `recipient` đã điền. */
@@ -228,13 +231,12 @@ async function prepare(rawInput: unknown): Promise<{ ok: true; p: Prepared } | M
   });
   if (errors.length || !customer) return fail("INVALID", errors);
   const r = v.recipient;
-  const recipient: Recipient = {
-    name: r?.name || customer.name,
-    phone: r?.phone || (customer.phone ?? ""),
-    address: r?.address || customer.address,
-    // Địa chỉ giao khác mà không nói tỉnh ⇒ KHÔNG mượn tỉnh của địa chỉ khách (hai địa chỉ, hai tỉnh có thể khác nhau).
-    province: r?.province || (r?.address ? "" : customer.province),
-  };
+  const address = r?.address || customer.address;
+  // Địa chỉ giao khác mà không nói tỉnh ⇒ KHÔNG mượn tỉnh của địa chỉ khách (hai địa chỉ, hai tỉnh có thể khác nhau).
+  const provinceText = r?.province || (r?.address ? "" : customer.province);
+  // Tỉnh + xã theo địa giới mới, đọc từ dòng địa chỉ khi chưa có — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
+  const place = resolveRecipientPlace({ address, province: provinceText, ward: r?.ward ?? "" });
+  const recipient: Recipient = { name: r?.name || customer.name, phone: r?.phone || (customer.phone ?? ""), address, province: place.province, ward: place.ward };
   return { ok: true, p: { customer, recipient, stage: v.stage, note: v.note.trim(), channel: v.channel.trim(), orderDiscount: v.orderDiscount, totals: t.totals, variants } };
 }
 
@@ -256,8 +258,9 @@ function orderColumns(p: Prepared, w: Writer, extraRaw: { agentKey?: string } = 
     shipFullName: p.recipient.name,
     shipPhone: p.recipient.phone,
     shipAddress: p.recipient.address,
-    shipFullAddress: [p.recipient.address, p.recipient.province].filter((x) => x.trim()).join(", "),
+    shipFullAddress: fullAddressLine(p.recipient.address, p.recipient.ward ?? "", p.recipient.province),
     shipProvince: p.recipient.province,
+    shipCommune: p.recipient.ward ?? "",
     totalPrice: t.totalPrice,
     totalDiscount: t.totalDiscount,
     totalPriceAfterDiscount: t.totalPriceAfterDiscount,
@@ -330,7 +333,7 @@ export function materialChanges(before: OrderMaterial, after: OrderMaterial): Or
   const out: OrderMaterialChange[] = [];
   const norm = (l: OrderMaterial["lines"]) => JSON.stringify(l.map((x) => [x.variantId, x.quantity, x.unitPrice, x.discount]).sort());
   if (norm(before.lines) !== norm(after.lines)) out.push("lines");
-  const rc = (r: Recipient) => [r.name, r.phone, r.address, r.province].map((x) => x.trim()).join("|");
+  const rc = (r: Recipient) => [r.name, r.phone, r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
   if (rc(before.recipient) !== rc(after.recipient)) out.push("shipping_address");
   if (before.amountDue !== after.amountDue) out.push("amount_due");
   if (before.customerId !== after.customerId) out.push("customer");
@@ -549,7 +552,7 @@ export async function updateOrderAsAgent(agent: OrderAgent, orderId: unknown, ra
 
 /** Người nhận đang lưu trên dòng đơn — để so với bản mới. */
 function storedRecipient(row: typeof schema.orders.$inferSelect): Recipient {
-  return { name: row.shipFullName ?? "", phone: row.shipPhone ?? "", address: row.shipAddress ?? "", province: row.shipProvince ?? "" };
+  return { name: row.shipFullName ?? "", phone: row.shipPhone ?? "", address: row.shipAddress ?? "", province: row.shipProvince ?? "", ward: row.shipCommune ?? "" };
 }
 
 async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions): Promise<ManualOrderResult> {

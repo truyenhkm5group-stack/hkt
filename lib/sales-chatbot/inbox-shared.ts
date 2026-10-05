@@ -64,7 +64,8 @@ export type SendWindow =
   | { kind: "CLOSED"; note: string }
   | { kind: "UNKNOWN"; note: string };
 
-export type InboxOrder = { id: string; shortCode: string; stage: string; outcome: string | null; outcomeLabel: string; total: number; insertedAt: string; byBot: boolean };
+/** `placeGap` = đơn ERP còn sống chưa ghép được tỉnh / xã (không gửi được hãng vận chuyển, không tự xác nhận) — `null` = đủ. */
+export type InboxOrder = { id: string; shortCode: string; stage: string; outcome: string | null; outcomeLabel: string; total: number; insertedAt: string; byBot: boolean; placeGap: string | null };
 
 export type InboxThread = {
   id: string;
