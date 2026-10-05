@@ -38,11 +38,11 @@ import { hubMembers } from "@/lib/constants/department-modules";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
-import { ORDER_MATERIAL_CHANGE_LABEL } from "@/lib/constants/manual-orders";
+import { ORDER_MATERIAL_CHANGE_LABEL, orderNoteForGroup, orderShipNote } from "@/lib/constants/manual-orders";
 import { loadNotificationSetup, saveOrderNotificationPreset } from "@/lib/messaging/presets";
 import { deliverMessage, nextRetryAt as messagingNextRetryAt, retryFailedDeliveries } from "@/lib/messaging/service";
 import { failedBeforeSending } from "@/lib/connectors/net-error";
-import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
+import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderOrderTemplate, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
 import { BUSINESS_TYPE_SPEC, CORE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -63,7 +63,7 @@ import { AI_DOWN_HANDOFF_REASON, isModelUnavailableError, loadSalesChatbotConfig
 import { saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
 import { reorderDigestText, sendReorderDigest, type DigestRow } from "@/lib/reorder/digest";
 import { newOrderAlertText, sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
-import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
@@ -153,6 +153,16 @@ function testPure() {
   // Mẫu tin: ô lạ giữ nguyên (người đọc thấy mình gõ sai), mẫu dựng sẵn chỉ dùng ô đã khai.
   assert.equal(renderTemplate("A {{order_code}} {{la}}", { order_code: "#1" }), "A #1 {{la}}");
   for (const t of Object.values(DEFAULT_ORDER_TEMPLATES)) assert.deepEqual(unknownTemplateKeys(t, ORDER_MESSAGE_VAR_KEYS), []);
+  // TIN ĐƠN NGẮN GỌN (chủ shop HSLC 05/10/2026): đoạn có ô trống / chiết khấu 0 bị bỏ, dòng chữ tự gõ giữ nguyên, khoá lạ giữ.
+  const shopTpl = ["🟢 ĐƠN MỚI", "THU TIỀN: {{cod}}", "Tiền hàng: {{subtotal}} · Chiết khấu: {{discount}} · Ship: {{shipping_fee}}", "Ghi chú: {{note}}", "Mã: {{la}}"].join("\n");
+  const shopVars = { cod: "280.000 ₫ + ship", subtotal: "280.000 ₫", discount: "0 ₫", shipping_fee: "chưa báo", note: "—" };
+  assert.equal(renderOrderTemplate(shopTpl, shopVars), ["🟢 ĐƠN MỚI", "THU TIỀN: 280.000 ₫ + ship", "Tiền hàng: 280.000 ₫ · Ship: chưa báo", "Mã: {{la}}"].join("\n"));
+  assert.ok(renderOrderTemplate(shopTpl, { ...shopVars, discount: "10.000 ₫", note: "giao giờ hành chính" }).includes("Chiết khấu: 10.000 ₫ · Ship") , "chiết khấu khác 0 vẫn in");
+  assert.ok(renderOrderTemplate(shopTpl, { ...shopVars, note: "giao giờ hành chính" }).includes("Ghi chú: giao giờ hành chính"));
+  const machineNote = ["Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.", "Lời chốt 10:01 05/10/2026 (khách): «0915159895 + giao giờ hành chính»", "giao giờ hành chính t2 đến t6", "Phí ship: CHƯA BÁO — cập nhật trước khi giao.", "Mã tin fanpage: m_Njz5p0i"].join("\n");
+  assert.equal(orderNoteForGroup(machineNote), "giao giờ hành chính t2 đến t6", "tin nhóm chỉ giữ phần người cần đọc");
+  assert.equal(orderNoteForGroup("Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.\nMã tin fanpage: m_1"), "", "toàn dòng máy ⇒ rỗng (ô bị bỏ)");
+  assert.deepEqual([orderShipNote(machineNote), orderShipNote("Miễn ship NẾU địa chỉ thuộc khu vực miễn ship"), orderShipNote("giao sáng")], ["UNKNOWN", "FREE_IF_AREA", null]);
   assert.equal(messagingStatusOf("sandbox-messaging", { status: "ACTIVE", lastTestOk: true }), "TEST_MODE", "hộp thử không bao giờ là «đã kết nối»");
   assert.equal(messagingStatusOf("lark-webhook", { status: "ACTIVE", lastTestOk: true }), "CONNECTED");
   assert.equal(messagingStatusOf("lark-webhook", { status: "DRAFT", lastTestOk: false }), "FAILED");
@@ -1213,11 +1223,11 @@ async function testJourney() {
       const retConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ret"))))[0];
       assert.deepEqual((retConv.state as ChatState).returning?.fbIds, ["psid-sang"], "mã Facebook của khách lấy từ tin của khách");
       const getsFirst = retFetch.calls.filter((c) => c.init?.method === "GET").length;
-      assert.equal(getsFirst, 2, "Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
+      assert.equal(getsFirst, 3, "1 lượt kiểm «page đã trả lời chưa» + hồ sơ: Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
       await receiveFanpageEvent(ev("m-ret-2", "ok em", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
       await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
       assert.equal(retSystems.length, 2);
-      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại");
+      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst + 1, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại — chỉ thêm MỘT lượt kiểm «page đã trả lời chưa»");
       // Hội thoại này đang chờ khách — gỡ lịch nhắc để khối follow-up bên dưới chỉ thấy hội thoại của nó.
       await db.update(schema.salesChatConversations).set({ nextFollowupAt: null }).where(eq(schema.salesChatConversations.id, retConv.id));
       assert.equal((await listConversations(50)).find((c) => c.id === flowConv.id)?.stage, "QUOTE", "danh sách hội thoại hiện bước bán");
@@ -1319,6 +1329,16 @@ async function testJourney() {
       await db.update(schema.salesChatConversations).set({ status: "OPEN", lastBotAt: new Date(Date.now() - 5 * 3_600_000) }).where(eq(schema.salesChatConversations.id, fc.id));
       assert.match((await receiveFanpageEvent(ev("m-fu-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100%", { id: PAGE }, "t-fu"))).reason, /tự động/);
       assert.equal((await fuConv()).status, "OPEN");
+      // (05/10/2026 · «Việt Phương») bot vừa báo giá thì page tự gửi bảng giá dài — NGUYÊN VĂN page đã gửi ở hội thoại KHÁC ⇒ tin
+      // mẫu tự động, KHÔNG phải nhân viên ⇒ bot không nhường (trước đây bot im 30 phút với câu «1kg có miễn síp ko»).
+      const priceTpl = "Dạ em chào anh/chị ! Chả cá thu bên em hiện đang có giá: - 1kg giá 280k - 2kg giảm 20k, còn 540k";
+      await receiveFanpageEvent(ev("m-tpl-other", priceTpl, { id: PAGE }, "t-tpl-other"));
+      await db.update(schema.salesChatConversations).set({ status: "OPEN", lastBotAt: new Date(Date.now() - 60_000) }).where(eq(schema.salesChatConversations.id, fc.id));
+      assert.match((await receiveFanpageEvent(ev("m-fu-tpl", priceTpl, { id: PAGE }, "t-fu"))).reason, /Tin mẫu tự động/);
+      assert.equal((await fuConv()).status, "OPEN", "tin mẫu không chuyển hội thoại sang người");
+      // Cờ tự động của Pancake / Meta ⇒ tự động, kể cả tin chưa từng thấy.
+      assert.match((await receiveFanpageEvent(ev("m-fu-flag", "Cảm ơn anh/chị đã quan tâm sản phẩm của shop ạ", { id: PAGE, is_automated: true }, "t-fu"))).reason, /Tin mẫu tự động/);
+      assert.equal((await fuConv()).status, "OPEN", "cờ is_automated không chuyển hội thoại sang người");
       // Hội thoại đã XẾP LỊCH trước khi có chặn lúc nhận (dòng phía page nằm sau tin cuối của bot) ⇒ job dừng, không nhắn.
       await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
       const postsBeforeStaff = fuFetch.calls.filter((c) => c.init?.method === "POST").length;
@@ -1525,6 +1545,25 @@ async function testJourney() {
       const autoFetch = timed([{ id: "m-new2-q", at: "2026-10-03T12:47:00.000000" }, { id: "m-new2-auto", at: "2026-10-03T12:47:01.000000" }]);
       const fAuto = await processFanpageThread(PAGE, "t-987", { fetch: autoFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fAuto.replies === 0 && /Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động tạo sau tin khách ⇒ nhường: ${JSON.stringify(fAuto)}`);
+      // (05/10/2026 · «Dư Thị Liên») khách bấm quảng cáo hỏi giá, page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó nhưng
+      // WEBHOOK của chúng chưa tới ⇒ Pancake đã có ⇒ bot KHÔNG gọi AI, không nhắn thêm bảng giá thứ hai.
+      await receiveFanpageEvent(ev("m-lien-q", "Báo giá chả cá thu?", { id: "cust-lien", name: "Dư Thị Liên" }, "t-989"));
+      const lienFetch = fakeFetchCalls((url, init) =>
+        init?.method === "GET" && url.includes("/messages")
+          ? {
+              success: true,
+              messages: [
+                { id: "m-lien-q", inserted_at: "2026-10-05T03:43:00.000000", from: { id: "cust-lien" }, message: "Báo giá chả cá thu?" },
+                { id: "m-lien-a1", inserted_at: "2026-10-05T03:43:01.000000", from: { id: PAGE }, message: "CHẢ CÁ THU NGUYÊN CHẤT 100% NGON KHÁC BIỆT!!! KHÔNG ĂN LÀ THIỆT" },
+                { id: "m-lien-a2", inserted_at: "2026-10-05T03:43:01.500000", from: { id: PAGE }, message: "Dạ em chào anh/chị ! Chả cá thu bên em hiện đang có giá: 1kg giá 280k, 2kg còn 540k" },
+              ],
+            }
+          : { success: true, id: `m-${Math.random().toString(36).slice(2)}` },
+      );
+      const fLien = await processFanpageThread(PAGE, "t-989", { fetch: lienFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
+      assert.ok(fLien.replies === 0 && fLien.processed === 1 && /Page đã trả lời/.test(fLien.skipped ?? ""), `page đã trả lời theo Pancake ⇒ bot không chen: ${JSON.stringify(fLien)}`);
+      assert.equal(lienFetch.calls.filter((c) => c.init?.method === "POST").length, 0, "không gửi tin nào");
+      assert.equal((await db.select({ turns: schema.salesChatConversations.turns }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-989"))))[0]?.turns ?? 0, 0, "bỏ qua TRƯỚC lượt AI — 0 token");
       // (03/10/2026) Hội thoại chuyển người vì AI HỎNG (ô model sai) ⇒ khách nhắn lại sau thời gian nhường thì bot thử lại, không
       // bắt ai bấm «Trả lại cho AI» cho từng hội thoại. Chưa hết thời gian nhường ⇒ vẫn nhường.
       await receiveFanpageEvent(ev("m-down-1", "Shop ơi", { id: "cust-down", name: "Cham Duong" }, "t-988"));
@@ -1541,6 +1580,19 @@ async function testJourney() {
       assert.ok(dLater.replies >= 1 && downConv.status !== "HANDOFF" && !(downConv.state as ChatState).handoff, `hết thời gian nhường ⇒ bot thử lại: ${JSON.stringify(dLater)} ${downConv.status}`);
       assert.equal(pancakeCreatedAfterVerdict([{ id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), true, "hội thoại mới: Meta trả lời sau ⇒ page đã trả lời");
       assert.equal(pancakeCreatedAfterVerdict([{ id: "o", inserted_at: "2026-07-17T09:00:00" }, { id: "q", inserted_at: "2026-10-03T09:48:00" }, { id: "a", inserted_at: "2026-10-03T09:48:01" }], ["q"], ["a"]), false, "hội thoại cũ ⇒ không");
+      // Page đã trả lời theo chính Pancake (05/10/2026 · «Dư Thị Liên») — bước kiểm ngay trước khi gọi AI.
+      const pm = (id: string, at: string, fromId: string, message: string) => ({ id, inserted_at: at, from: { id: fromId }, message });
+      const noOwn = { ids: new Set<string>(), texts: new Set<string>() };
+      const lien = [pm("q", "2026-10-05T03:43:00", "c", "Báo giá chả cá thu?"), pm("a1", "2026-10-05T03:43:01", PAGE, "CHẢ CÁ THU NGUYÊN CHẤT"), pm("a2", "2026-10-05T03:43:02", PAGE, "1kg giá 280k")];
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages(lien, PAGE), ["q"], noOwn), true, "page nhắn SAU tin khách ⇒ đã trả lời");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([pm("g", "2026-10-03T12:47:00", PAGE, "CHẢ CÁ THU NGUYÊN CHẤT"), pm("q", "2026-10-03T12:47:03", "c", "Xin giá")], PAGE), ["q"], noOwn), false, "lời chào tạo TRƯỚC tin khách ⇒ chưa ai trả lời");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([pm("o", "2026-07-17T09:00:00", "c", "hi"), pm("q", "2026-10-03T09:48:00", "c", "giá sao"), pm("g", "2026-10-03T09:48:01", PAGE, "CHẢ CÁ THU")], PAGE), ["q"], noOwn), false, "hội thoại cũ + MỘT tin page ⇒ lời chào quảng cáo, chưa ai trả lời");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([pm("o", "2026-07-17T09:00:00", "c", "hi"), ...lien], PAGE), ["q"], noOwn), true, "hội thoại cũ + HAI tin page (lời chào + bảng giá) ⇒ đã trả lời");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages(lien, PAGE), ["q"], { ids: new Set(["a1"]), texts: new Set(["1kg giá 280k"]) }), false, "tin của chính bot không tính");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([lien[0], pm("n", "2026-10-05T03:43:01", PAGE, "Dư Thị Liên đã trả lời một quảng cáo")], PAGE), ["q"], noOwn), false, "ghi chú tự động của Pancake không tính");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([lien[0], pm("e", "2026-10-05T03:43:01", PAGE, "")], PAGE), ["q"], noOwn), false, "tin page không chữ không tính");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages(lien.slice(1), PAGE), ["q"], noOwn), null, "không thấy tin khách ⇒ không kết luận");
+      assert.equal(pageAnsweredVerdict(normalizeThreadMessages([pm("q1", "2026-10-05T03:43:00", "c", "giá?"), pm("a", "2026-10-05T03:43:01", PAGE, "280k"), pm("q2", "2026-10-05T03:43:05", "c", "ship HN?")], PAGE), ["q1", "q2"], noOwn), false, "page trả lời câu trước, câu MỚI NHẤT của khách chưa ai trả lời");
       // Không đọc được mốc (Pancake lỗi) ⇒ coi là CHƯA trả lời — khách nhận một câu trùng còn hơn không ai trả lời.
       await receiveFanpageEvent(ev("m-unk-greet", "Chào mừng bạn tới Hải Sản Làng Chài", { id: PAGE }, "t-983"));
       await new Promise((r) => setTimeout(r, 5));

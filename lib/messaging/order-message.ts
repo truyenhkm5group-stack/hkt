@@ -10,7 +10,7 @@
  */
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { manualOrderRaw, manualOrderShortCode, ORDER_MATERIAL_CHANGE_LABEL, type OrderMaterialChange } from "@/lib/constants/manual-orders";
+import { manualOrderRaw, manualOrderShortCode, ORDER_MATERIAL_CHANGE_LABEL, orderNoteForGroup, orderShipNote, type OrderMaterialChange } from "@/lib/constants/manual-orders";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { formatVND } from "@/lib/format";
 import { organizationBaseUrl } from "@/lib/platform/publish";
@@ -36,6 +36,9 @@ export async function orderMessageVars(orderId: string, ev: OrderEventContext | 
         .join(", ")
     : "";
   const base = await organizationBaseUrl();
+  // Ship CHƯA BÁO: đơn lưu 0 nhưng đó là chưa biết (luật 42) ⇒ in chữ, và tiền thu kèm «+ ship».
+  const shipNote = orderShipNote(o.note);
+  const cod = formatVND(o.totalPriceAfterDiscount + o.shippingFee);
   return {
     order_code: `#${manualOrderShortCode(o.id)}`,
     status: ORDER_STAGE_LABEL[o.stage] ?? o.statusName ?? o.stage,
@@ -47,10 +50,11 @@ export async function orderMessageVars(orderId: string, ev: OrderEventContext | 
     items: lines.length ? lines.join("\n") : "(không có dòng hàng)",
     subtotal: formatVND(lineSum),
     discount: formatVND(o.totalDiscount),
-    shipping_fee: formatVND(o.shippingFee),
-    cod: formatVND(o.totalPriceAfterDiscount + o.shippingFee),
+    shipping_fee: shipNote === "UNKNOWN" ? "chưa báo" : shipNote === "FREE_IF_AREA" ? "miễn phí nếu đúng khu vực" : formatVND(o.shippingFee),
+    cod: shipNote === "UNKNOWN" ? `${cod} + ship` : cod,
     source: o.source || "—",
-    note: o.note?.trim() || "—",
+    // Chỉ phần người cần đọc — dòng máy viết (lời chốt, mã tin fanpage…) ở lại trong đơn.
+    note: orderNoteForGroup(o.note) || "—",
     changes: changes || "—",
     cancel_reason: typeof ev?.payload?.reason === "string" && ev.payload.reason.trim() ? ev.payload.reason.trim() : "—",
     erp_link: `${base}/orders/${encodeURIComponent(o.id)}`,

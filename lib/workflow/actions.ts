@@ -29,7 +29,7 @@ import { eq } from "drizzle-orm";
 import { saveCustomValues } from "@/lib/metadata/values";
 import { orderMessageVars } from "@/lib/messaging/order-message";
 import { deliverMessage } from "@/lib/messaging/service";
-import { isMessagingConnector, renderTemplate } from "@/lib/messaging/types";
+import { isMessagingConnector, renderOrderTemplate, renderTemplate } from "@/lib/messaging/types";
 import { createWorkflowTask } from "@/lib/work/service";
 import { machineEmailOf } from "@/lib/workflow/rules";
 import type { SubjectRef } from "@/lib/workflow/subject";
@@ -172,7 +172,8 @@ async function runOne(ctx: ActionContext, a: WorkflowAction, i: number): Promise
       const r = await deliverMessage({
         connectorKey: a.connectorKey,
         destination: a.destination?.trim() || null,
-        body: renderTemplate(a.template, vars),
+        // Tin đơn hàng bỏ phần trống («Chiết khấu: 0 ₫», «Ghi chú: —») — `renderOrderTemplate`.
+        body: ctx.subject?.objectKey === "order" ? renderOrderTemplate(a.template, vars) : renderTemplate(a.template, vars),
         dedupeKey,
         event: ev?.name ?? null,
         subject: ctx.subject ? { type: ctx.subject.objectKey, id: ctx.subject.recordId } : null,

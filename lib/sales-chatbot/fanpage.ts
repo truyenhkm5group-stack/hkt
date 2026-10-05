@@ -23,7 +23,7 @@
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -102,17 +102,62 @@ export function pancakeCreatedAfterVerdict(messages: readonly Record<string, unk
   return Math.max(...page) > Math.min(...cust);
 }
 
-async function pancakeCreatedAfter(pageId: string, threadId: string, token: string, customerIds: readonly string[], pageIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean | null> {
+/** Tin của MỘT hội thoại theo Pancake (một lượt ĐỌC). `null` = không đọc được — nơi gọi giữ nguyên hành vi cũ. */
+async function fetchThreadMessages(pageId: string, threadId: string, token: string, fetchImpl: typeof fetch): Promise<Record<string, unknown>[] | null> {
   try {
     const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
     const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10_000) });
     const body = (await res.json().catch(() => null)) as { messages?: unknown } | null;
-    if (!res.ok || !Array.isArray(body?.messages)) return null;
-    return pancakeCreatedAfterVerdict(body.messages as Record<string, unknown>[], customerIds, pageIds);
+    return res.ok && Array.isArray(body?.messages) ? (body.messages as Record<string, unknown>[]) : null;
   } catch {
     return null;
   }
 }
+
+async function pancakeCreatedAfter(pageId: string, threadId: string, token: string, customerIds: readonly string[], pageIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean | null> {
+  const messages = await fetchThreadMessages(pageId, threadId, token, fetchImpl);
+  return messages ? pancakeCreatedAfterVerdict(messages, customerIds, pageIds) : null;
+}
+
+/**
+ * PAGE ĐÃ TRẢ LỜI THEO CHÍNH PANCAKE — hỏi NGAY TRƯỚC khi tốn tiền (đọc ảnh, AI). 05/10/2026, «Dư Thị Liên» (Hải Sản Làng
+ * Chài): khách bấm quảng cáo hỏi «Báo giá chả cá thu?», page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó, vậy mà
+ * bot vẫn gọi AI và nhắn thêm một bảng giá nữa — tốn token, khách đọc hai lần. Kiểm tra cũ chỉ thấy tin page qua WEBHOOK, và
+ * webhook có thể tới trễ hơn khoảng chờ của bot; Pancake thì giữ tin ngay khi nhận.
+ *
+ * Đã trả lời = có tin phía page CÓ CHỮ (không phải ghi chú tự động của Pancake, không phải tin của chính bot) TẠO SAU tin khách
+ * MỚI NHẤT của lượt. Tạo TRƯỚC thì không tính (lời chào quảng cáo tới ngược thứ tự — «Moscow Hoàng Hải», 03/10). Hội thoại CŨ
+ * (có tin cũ hơn 1 ngày) mà page chỉ có ĐÚNG MỘT tin sau tin khách ⇒ coi là lời chào quảng cáo, chưa ai trả lời («Tuyet Nguyen»,
+ * 03/10 — cùng luật `pancakeCreatedAfterVerdict`). `null` = không thấy tin khách trong danh sách ⇒ không kết luận. HÀM THUẦN.
+ */
+export function pageAnsweredVerdict(msgs: readonly PancakeThreadMessage[], customerIds: readonly string[], own: { ids: ReadonlySet<string>; texts: ReadonlySet<string> }): boolean | null {
+  const cust = msgs.filter((m) => customerIds.includes(m.id));
+  if (!cust.length) return null;
+  const firstCust = Math.min(...cust.map((m) => m.at));
+  const lastCust = Math.max(...cust.map((m) => m.at));
+  const replies = msgs.filter((m) => m.fromPage && !m.autoNote && m.text.trim() && m.at > lastCust && !own.ids.has(m.id) && !own.texts.has(normalizeEcho(m.text)));
+  if (!replies.length) return false;
+  if (replies.length === 1 && msgs.some((m) => m.at < firstCust - OLD_THREAD_MS)) return false;
+  return true;
+}
+/** Tin phía page được coi là tin mẫu tự động — không chuyển hội thoại sang nhân viên. */
+export const AUTOMATION_REASON = "Tin mẫu tự động của page — không phải nhân viên, bot không nhường";
+/** Tin mẫu phải dài ít nhất chừng này ký tự: câu ngắn («Dạ», «Ok ạ») nhân viên gõ ở mọi hội thoại, không phải mẫu tự động. */
+export const TEMPLATE_MIN_CHARS = 40;
+const TEMPLATE_LOOKBACK_MS = 7 * 24 * 3_600_000;
+
+async function isPageTemplate(ev: FanpageEvent, now: Date): Promise<boolean> {
+  if (normalizeEcho(ev.text).length < TEMPLATE_MIN_CHARS) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const [seen] = await db
+    .select({ id: t.id })
+    .from(t)
+    .where(and(eq(t.pageId, ev.pageId), ne(t.threadId, ev.threadId), eq(t.note, PAGE_REPLY), eq(t.text, ev.text), gte(t.createdAt, new Date(now.getTime() - TEMPLATE_LOOKBACK_MS))))
+    .limit(1);
+  return Boolean(seen);
+}
+
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 export const GRACE_SLACK_MS = 1_000;
 export const RETRY_MS = 2_000;
@@ -176,6 +221,8 @@ export type FanpageEvent = {
   fromPage: boolean;
   /** Tin của NGƯỜI THẬT bên page (có uid / admin_id) — chưa loại tin bot vừa gửi (việc của `receiveFanpageEvent`). */
   humanStaff: boolean;
+  /** Pancake / Meta tự gắn cờ tin TỰ ĐỘNG (`is_automated` / `ai_generated`). Thiếu ⇒ chưa biết, không phải «người». */
+  automated?: boolean;
   inbox: boolean;
   /** Bình luận (0184): bài viết + người bình luận (private reply đòi cả hai). `null` với tin nhắn. */
   comment: { postId: string; fromId: string } | null;
@@ -219,7 +266,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const postId = str(msg?.post_id) || str(conv?.post_id) || str(post.id) || threadId.split("_")[0];
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
   const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox, comment, imageUrls };
+  const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -345,6 +393,12 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     const c = schema.salesChatConversations;
     if (!ev.humanStaff) {
+      // TIN MẪU TỰ ĐỘNG CỦA PAGE KHÔNG PHẢI NHÂN VIÊN (05/10/2026, «Việt Phương»): bot vừa báo giá thì page tự gửi bảng giá dài
+      // (đúng nguyên văn page đã gửi ở hội thoại «Dư Thị Liên») ⇒ luật «tin page tới giữa lúc bot đang trò chuyện ⇒ người» bên
+      // dưới bắt nhầm, bot nhường 30 phút và im với câu «1kg có miễn síp ko». Tin mẫu = cờ tự động của Pancake / Meta, HOẶC
+      // nguyên văn (đủ dài để không phải «Dạ» / «Ok») đã được page gửi ở một hội thoại KHÁC trong 7 ngày. Tin vẫn ghi
+      // `PAGE_REPLY` ở trên ⇒ tin khách đang chờ TRƯỚC nó vẫn được coi là đã có trả lời; chỉ không chuyển hội thoại sang người.
+      if (ev.automated || (await isPageTemplate(ev, now))) return { queued: false, reason: AUTOMATION_REASON };
       // Pancake KHÔNG gắn uid cho tin nhân viên gõ (03/10/2026, «Đỗ Là»: nhân viên vào xin địa chỉ, bot vẫn chen hai tin xin lỗi
       // dài). Trả lời tự động của Meta / lời chào quảng cáo chỉ tới ở ĐẦU hội thoại; tin phía page (không phải bot, không phải
       // ghi chú Pancake) tới GIỮA lúc bot đang trò chuyện ⇒ là người ⇒ nhường như nhân viên.
@@ -625,6 +679,20 @@ export async function mirrorFanpageContext(conversationId: string, pageId: strin
   if (last) await db.update(c).set({ state: sql`${c.state} || ${JSON.stringify({ mirroredUntil: last.toISOString() })}::jsonb` }).where(eq(c.id, conversationId));
 }
 
+async function pageAnsweredOnPancake(pageId: string, threadId: string, token: string, customerIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean> {
+  if (!token) return false;
+  const raw = await fetchThreadMessages(pageId, threadId, token, fetchImpl);
+  if (!raw) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const sent = await db
+    .select({ messageId: t.messageId, text: t.text })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, "BOT_SENT"), gte(t.createdAt, new Date(Date.now() - OLD_THREAD_MS))));
+  const own = { ids: new Set(sent.map((r) => r.messageId)), texts: new Set(sent.map((r) => r.text).filter(Boolean)) };
+  return pageAnsweredVerdict(normalizeThreadMessages(raw, pageId), customerIds, own) === true;
+}
+
 export type ProcessResult = { processed: number; replies: number; skipped: string | null; error: string | null };
 
 /**
@@ -734,6 +802,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       const cv = schema.salesChatConversations;
       await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
+    }
+    // Webhook của tin page có thể chưa tới ⇒ hỏi thẳng Pancake MỘT lần trước mọi bước tốn tiền (sau cổng «đang chuyển nhân viên» — hội thoại đang nhường thì khỏi hỏi) (`pageAnsweredVerdict`).
+    // Bình luận đi đường tin riêng, không có hộp thư để đọc.
+    if (!claimed.some((r) => r.kind === "COMMENT") && (await pageAnsweredOnPancake(pageId, threadId, token, claimed.map((r) => r.messageId), deps.fetch ?? fetch))) {
+      await finish("SKIPPED", PAGE_REPLIED_REASON);
+      out.processed += ids.length;
+      out.skipped = PAGE_REPLIED_REASON;
+      continue;
     }
     await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // CHẾ ĐỘ VẬN HÀNH (lib/sales-chatbot/operating-mode-shared.ts): quan sát · copilot · thử nghiệm AI vs người · tự động — MỘT

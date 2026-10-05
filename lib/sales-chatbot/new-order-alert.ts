@@ -12,7 +12,7 @@
  */
 import { and, asc, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { manualOrderRaw } from "@/lib/constants/manual-orders";
+import { manualOrderRaw, orderNoteForGroup } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { deliverMessage } from "@/lib/messaging/service";
 import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
@@ -38,11 +38,8 @@ export function newOrderAlertText(o: AlertOrder, lines: readonly AlertLine[], ru
   const weight = weights.some((w) => w === null) ? null : (weights as number[]).reduce((s, w) => s + w, 0);
   const free = freeShipVerdict(rule, subtotal, weight, o.address, formatVND).kind === "FREE";
   const fee = free ? 0 : o.shippingFee > 0 ? o.shippingFee : null;
-  const note = (o.note ?? "")
-    .split(/\r?\n/)
-    .map((x) => x.trim())
-    .filter((x) => x && !/^(Phí ship|Miễn ship|Tồn chưa xác nhận|Sổ kho đang thiếu|Mã tin fanpage)/i.test(x));
-  return orderGroupText({ header: "🆕 ĐƠN MỚI (chưa xác nhận)", name: o.name, phone: o.phone, address: o.address, province: "", lines, subtotal, shippingFee: fee, shipText: free ? "Miễn phí" : null, warnings: note.length ? [`Ghi chú: ${note.join(" · ")}`] : [] });
+  const note = orderNoteForGroup(o.note);
+  return orderGroupText({ header: "🆕 ĐƠN MỚI (chưa xác nhận)", name: o.name, phone: o.phone, address: o.address, province: "", lines, subtotal, shippingFee: fee, shipText: free ? "Miễn phí" : null, warnings: note ? [`Ghi chú: ${note}`] : [] });
 }
 
 export type NewOrderAlertResult = { candidates: number; sent: number; reason?: string };

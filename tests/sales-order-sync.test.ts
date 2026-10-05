@@ -28,8 +28,8 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, cycleStartTurns, loadSalesChatbotConfig, openConversation, POST_ORDER_HANDOFF_MS, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
-import { ORDER_SYNC_CHANNEL, ORDER_SYNC_SETTING_KEY, orderGroupText, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
+import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
+import { ORDER_SYNC_CHANNEL, ORDER_SYNC_LIMITS, ORDER_SYNC_SETTING_KEY, orderGroupText, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
@@ -225,6 +225,20 @@ export async function testSalesOrderSync() {
         const before = calls;
         const r2 = await runFanpageOrderSync({ fetch: fetchImpl });
         assert.deepEqual([r2.checked, r2.created, calls], [0, 0, before], JSON.stringify(r2));
+
+        // ── GHI NGAY (chủ shop HSLC 05/10/2026: tin báo đơn tới trễ 13–16 phút) ⇒ webhook hẹn MỘT lượt cho ĐÚNG hội thoại khi
+        // nó yên `quietMinutes` phút; tin mới hơn tới trong lúc đợi ⇒ lượt này thôi (lượt đợi của tin mới lo).
+        threads.set("t-q", [{ id: "q1", fromPage: false, text: "Cho chị 1kg chả mực nhé", at: min(-3) }]);
+        await inbound("t-q", "q1", "Cho chị 1kg chả mực nhé", min(-3));
+        const slept: number[] = [];
+        const nap = async (ms: number) => void slept.push(ms);
+        assert.equal(await syncFanpageThreadWhenQuiet(PAGE, "t-q", { fetch: fetchImpl, now: () => min(-2), sleep: nap }), null, "hội thoại chưa yên ⇒ chưa đọc");
+        assert.equal(slept[0], ORDER_SYNC_LIMITS.quietMinutes * 60_000 + 5_000, "đợi đúng khoảng yên");
+        assert.ok(ORDER_SYNC_LIMITS.quietMinutes <= 2, "tin báo đơn tới trong vài phút, không phải 10 + nhịp job");
+        const quiet = await syncFanpageThreadWhenQuiet(PAGE, "t-q", { fetch: fetchImpl, now: () => min(0), sleep: nap });
+        assert.equal(quiet?.checked, 1, `yên đủ ⇒ đọc ĐÚNG một hội thoại: ${JSON.stringify(quiet)}`);
+        const [cq] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-q"));
+        assert.ok(((cq.state as ChatState).orderSync as OrderSyncThreadState | undefined)?.lastRunAt, "hội thoại có nhật ký ghi đơn");
 
         // ── Khách cũ mua lại, KHÔNG gửi lại SĐT / địa chỉ ⇒ đơn MỚI theo đơn trước ──
         const later = (m: number) => new Date(t0 + 3 * 3_600_000 + m * 60_000);

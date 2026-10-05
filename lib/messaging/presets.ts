@@ -26,7 +26,7 @@ import {
   ORDER_MESSAGE_EVENTS,
   ORDER_MESSAGE_VAR_KEYS,
   ORDER_NOTIFY_RULE_KEYS,
-  renderTemplate,
+  renderOrderTemplate,
   unknownTemplateKeys,
   type MessagingConnectorKey,
   type MessagingStatus,
@@ -186,7 +186,7 @@ export async function sendTestNotification(user: SessionUser, raw: unknown): Pro
   const v = parsed.data;
   const connectorKey = v.connectorKey as MessagingConnectorKey;
   const { vars, sample, orderId } = await sampleOrderMessageVars();
-  const body = renderTemplate(v.template, vars);
+  const body = renderOrderTemplate(v.template, vars);
   const r = await deliverMessage({
     connectorKey,
     destination: v.destination && connectorKey !== "lark-webhook" ? v.destination : null,

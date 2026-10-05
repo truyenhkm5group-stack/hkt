@@ -68,6 +68,33 @@ export function renderTemplate(template: string, vars: Readonly<Record<string, s
   return template.replace(TEMPLATE_TOKEN, (whole, key: string) => (Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : whole));
 }
 
+/** Ô tiền chỉ in khi KHÁC 0 trong tin đơn hàng — «Chiết khấu: 0 ₫» là chữ thừa với người đóng gói. */
+export const ORDER_HIDE_ZERO_KEYS: readonly string[] = ["discount", "order_discount"];
+
+/**
+ * Điền mẫu tin ĐƠN HÀNG và BỎ phần trống (chủ shop HSLC 05/10/2026: «gửi nội dung ngắn gọn lại, bỏ những nội dung không cần
+ * thiết»). Mỗi dòng tách theo « · »; đoạn nào có ô điền mà MỌI ô đều trống («—», rỗng, hoặc tiền 0 ở `ORDER_HIDE_ZERO_KEYS`)
+ * thì bỏ đoạn đó, dòng hết đoạn thì bỏ cả dòng. Dòng / đoạn không có ô điền (chữ shop tự gõ) giữ nguyên. Khoá lạ không bao
+ * giờ là «trống» — người đọc vẫn thấy mình gõ sai. HÀM THUẦN.
+ */
+export function renderOrderTemplate(template: string, vars: Readonly<Record<string, string>>): string {
+  const blank = (key: string): boolean => {
+    if (!Object.prototype.hasOwnProperty.call(vars, key)) return false;
+    const v = vars[key].trim();
+    return !v || v === "—" || (ORDER_HIDE_ZERO_KEYS.includes(key) && /^[-+]?0(?!\d)\D*$/.test(v));
+  };
+  const out: string[] = [];
+  for (const line of template.split("\n")) {
+    const parts = line.split(" · ").filter((part) => {
+      const keys = [...part.matchAll(TEMPLATE_TOKEN)].map((m) => m[1]);
+      return !keys.length || !keys.every(blank);
+    });
+    if (!parts.length) continue;
+    out.push(renderTemplate(parts.join(" · "), vars));
+  }
+  return out.join("\n");
+}
+
 /** Khoá có trong mẫu mà không có trong bộ biến — màn hình báo trước khi lưu. */
 export function unknownTemplateKeys(template: string, known: readonly string[]): string[] {
   const out = new Set<string>();
