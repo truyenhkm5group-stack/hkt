@@ -10510,6 +10510,9 @@ export const wholesaleLeads = pgTable(
     email: text("email"),
     facebookUrl: text("facebook_url"),
     zaloUrl: text("zalo_url"),
+    /** Lời khai của nhân viên sau khi mở Zalo theo SĐT: FOUND · NOT_FOUND. NULL = chưa biết (ERP không tự tra được). */
+    zaloStatus: text("zalo_status"),
+    zaloCheckedAt: ts("zalo_checked_at"),
     nameKey: text("name_key"),
     provinceKey: text("province_key"),
     provinceLabel: text("province_label"),
@@ -10574,6 +10577,7 @@ export const wholesaleLeads = pgTable(
     ),
     check("wholesale_leads_enrichment_check", sql`${t.enrichmentStatus} IN ('PENDING_DETAILS','READY','FILTERED','DUPLICATE','FAILED')`),
     check("wholesale_leads_lost_check", sql`${t.contactStatus} <> 'LOST' OR length(btrim(coalesce(${t.lostReason}, ''))) >= 3`),
+    check("wholesale_leads_zalo_status_check", sql`${t.zaloStatus} IS NULL OR ${t.zaloStatus} IN ('FOUND','NOT_FOUND')`),
   ],
 );
 

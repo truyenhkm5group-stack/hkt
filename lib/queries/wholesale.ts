@@ -30,7 +30,7 @@ const ps = schema.wholesalePlaceSnapshots;
 /** Tên / SĐT hiển thị: dữ liệu của tổ chức trước, ảnh chụp Google sau. Dùng chung cho mọi truy vấn lead (cả màn điện thoại). */
 export const NAME = sql<string | null>`coalesce(${l.businessName}, ${ps.displayName})`;
 export const PHONE = sql<string | null>`coalesce(${l.normalizedPhone}, ${ps.normalizedPhone})`;
-const PHONE_KIND = sql<string | null>`case when ${l.normalizedPhone} is not null then ${l.phoneKind} else ${ps.phoneKind} end`;
+export const PHONE_KIND = sql<string | null>`case when ${l.normalizedPhone} is not null then ${l.phoneKind} else ${ps.phoneKind} end`;
 const WEBSITE = sql<string | null>`coalesce(${l.website}, ${ps.websiteUri})`;
 
 export const WHOLESALE_LEAD_SORTABLE = ["leadScore", "name", "rating", "reviews", "lastContactAt", "nextFollowupAt", "firstSeenAt", "status"];
@@ -46,6 +46,8 @@ export type LeadListRow = {
   phone: string | null;
   phoneDisplay: string | null;
   phoneKindLabel: string | null;
+  /** Lời khai của nhân viên sau khi mở Zalo: FOUND · NOT_FOUND · null (chưa thử). */
+  zaloStatus: string | null;
   rating: number | null;
   reviews: number | null;
   website: string | null;
@@ -134,6 +136,7 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
         province: l.provinceLabel,
         phone: PHONE,
         phoneKind: PHONE_KIND,
+        zaloStatus: l.zaloStatus,
         rating: ps.rating,
         reviews: ps.userRatingCount,
         website: WEBSITE,
@@ -174,6 +177,7 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
       phone: r.phone,
       phoneDisplay: r.phone ? formatVnPhone(r.phone) : null,
       phoneKindLabel: r.phoneKind ? PHONE_KIND_LABEL[r.phoneKind as PhoneKind] ?? null : null,
+      zaloStatus: r.zaloStatus,
       rating: r.rating,
       reviews: r.reviews,
       website: r.website,
@@ -219,6 +223,19 @@ export async function wholesaleLeadFacets(decision: ScopeDecision) {
 }
 
 /** Người nhận giao lead: tài khoản đang hoạt động có quyền chăm lead. */
+/** Ảnh sản phẩm (https) của tổ chức để chọn làm ảnh kèm tin Zalo chào sỉ — chỉ đọc, mới cập nhật trước. */
+export async function productImageChoices(limit = 48): Promise<{ name: string; url: string }[]> {
+  const db = await getDb();
+  const p = schema.products;
+  const rows = await db
+    .select({ name: p.name, url: p.image })
+    .from(p)
+    .where(and(eq(p.isHidden, false), sql`${p.image} like 'https://%'`))
+    .orderBy(desc(p.updatedAt))
+    .limit(limit);
+  return rows.filter((r): r is { name: string; url: string } => Boolean(r.url));
+}
+
 export async function assignableUsers(): Promise<{ id: string; name: string }[]> {
   const ids = await activeUserIdsWhoCan("wholesale:work");
   if (!ids.length) return [];

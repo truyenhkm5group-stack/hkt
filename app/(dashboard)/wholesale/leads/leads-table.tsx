@@ -79,7 +79,7 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
           ) : (
             <span className="text-muted-foreground">Chưa có SĐT</span>
           )}
-          <div className="text-[11px] text-muted-foreground">{[r.phoneKindLabel, r.website ? "có website" : null].filter(Boolean).join(" · ") || "—"}</div>
+          <div className="text-[11px] text-muted-foreground">{[r.phoneKindLabel, r.zaloStatus === "FOUND" ? "có Zalo" : r.zaloStatus === "NOT_FOUND" ? "không Zalo" : null, r.website ? "có website" : null].filter(Boolean).join(" · ") || "—"}</div>
         </div>
       );
     },

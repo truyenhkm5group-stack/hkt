@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber } from "@/lib/format";
-import { apiUsageSummary, suppressionList } from "@/lib/queries/wholesale";
+import { apiUsageSummary, productImageChoices, suppressionList } from "@/lib/queries/wholesale";
 import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
 import { PLACES_SKU_LABEL, type PlacesSku } from "@/lib/wholesale/config";
 import { LEAD_PROVIDER_CATALOG } from "@/lib/wholesale/providers";
@@ -15,7 +15,7 @@ export const metadata = { title: "Cấu hình săn khách sỉ" };
 
 export default async function WholesaleSettingsPage() {
   const user = await requirePermission("wholesale:config");
-  const [cfg, usage, suppressions] = await Promise.all([getLeadHunterConfig(), apiUsageSummary(), suppressionList()]);
+  const [cfg, usage, suppressions, productImages] = await Promise.all([getLeadHunterConfig(), apiUsageSummary(), suppressionList(), productImageChoices()]);
   return (
     <div className="space-y-4">
       <PageHeader
@@ -27,7 +27,7 @@ export default async function WholesaleSettingsPage() {
       <WholesaleNav user={user} active="settings" />
 
       <SectionCard title="Cấu hình">
-        <ConfigForm initial={cfg} provinces={SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label }))} />
+        <ConfigForm initial={cfg} provinces={SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label }))} productImages={productImages} />
       </SectionCard>
 
       <SectionCard title="Chi phí API tháng này theo loại lượt gọi" description="Ước tính theo đơn giá đã khai — hoá đơn Google Cloud mới là số thật (chưa trừ hạn mức miễn phí).">
