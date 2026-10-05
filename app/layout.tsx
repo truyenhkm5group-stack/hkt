@@ -26,7 +26,9 @@ const HOME_METADATA: Metadata = {
     Khai ở đây thì bố cục dashboard của tổ chức khác THAY được cả bộ (lib/branding/copy.ts::orgTabMetadata); tổ chức nhà
     nhận đúng hai thẻ như trước (ico 16×16 rồi svg).
   */
-  icons: { icon: [{ url: "/favicon.ico", type: "image/x-icon", sizes: "16x16" }, { url: "/icon.svg" }] },
+  icons: { icon: [{ url: "/favicon.ico", type: "image/x-icon", sizes: "16x16" }, { url: "/icon.svg" }], apple: [{ url: "/brand/vnx/apple-touch-icon.png", sizes: "180x180" }] },
+  // Cài lên màn hình điện thoại / máy tính (PWA) — nhận thông báo đẩy khi khách cần người (docs/platform/pwa.md).
+  manifest: "/brand/vnx/site.webmanifest",
 };
 
 /**

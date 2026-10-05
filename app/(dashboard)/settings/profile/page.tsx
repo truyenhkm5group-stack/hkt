@@ -1,11 +1,13 @@
 import { ChangePasswordForm } from "@/app/(dashboard)/settings/profile/change-password-form";
 import { LogoutAllForm } from "@/app/(dashboard)/settings/profile/logout-all-form";
+import { PushToggle } from "@/app/(dashboard)/settings/profile/push-toggle";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { requireUser } from "@/lib/auth/session";
 import { ROLE_HINT, ROLE_LABEL } from "@/lib/constants/roles";
 import { initials } from "@/lib/format";
+import { vapidKeys } from "@/lib/push/web-push";
 
 export const metadata = { title: "Tài khoản của tôi" };
 
@@ -43,7 +45,10 @@ export default async function ProfilePage() {
           <ChangePasswordForm />
         </SectionCard>
       </section>
-      <section>
+      <section className="grid gap-5 lg:grid-cols-2">
+        <SectionCard title="Thông báo trên điện thoại / máy tính" description="Cài ERP lên màn hình chính rồi bật để nhận tin ngay cả khi không mở ERP">
+          <PushToggle publicKey={vapidKeys().publicKey} />
+        </SectionCard>
         <SectionCard title="Phiên đăng nhập" description="Thu hồi mọi phiên đang mở mà không đổi mật khẩu">
           <LogoutAllForm />
         </SectionCard>

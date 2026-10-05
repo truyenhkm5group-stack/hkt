@@ -63,7 +63,7 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *  · `/api/platform/domain-allowed` — Caddy on-demand TLS hỏi "có cấp chứng chỉ cho host này không": chỉ trả 200 cho tên
  *    miền con của tổ chức đã xuất bản, không lộ gì khác.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed"];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js"];
 const COOKIE = SESSION_COOKIE;
 
 /**

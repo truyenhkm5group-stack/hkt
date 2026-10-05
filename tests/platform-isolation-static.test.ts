@@ -260,6 +260,7 @@ const CLIENT_BAT_BUOC = [
 /** Tệp máy chủ gọi mạng mà KHÔNG dùng credential môi trường — lý do bắt buộc. */
 const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/integrations/http.ts": "Bộ gửi chung `fetchJson` — không giữ khoá nào; mỗi client gọi nó đã tự chặn ở phương thức gửi của mình.",
+  "lib/push/web-push.ts": "Thông báo đẩy tới máy chủ đẩy của trình duyệt (endpoint đã kiểm thuộc Google / Mozilla / Apple / Microsoft). Chỉ gửi nội dung đã mã hoá + chữ ký VAPID dẫn xuất một chiều từ AUTH_SECRET của NỀN TẢNG (không phải khoá tích hợp của nhà); không token / cookie nào đi ra.",
   "lib/net/public-url.ts": "Tải MỘT trang công khai do quản trị tổ chức gõ (nhập sản phẩm từ website) — không gửi khoá / token / cookie nào, chỉ GET địa chỉ đã kiểm không phải mạng nội bộ.",
   "lib/sales-chatbot/playbook.ts": "«Học từ hội thoại cũ»: ĐỌC lịch sử tin nhắn qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",
   "lib/sales-chatbot/fanpage.ts": "Trả lời tin fanpage qua pages.fm bằng page access token của CHÍNH tổ chức (org_connections, giải mã trong ngữ cảnh tổ chức) — không có credential môi trường nào của nhà.",

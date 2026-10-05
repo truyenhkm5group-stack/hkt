@@ -160,6 +160,7 @@ const MOI = [
   "0210_wholesale_call_initiated",
   "0211_sales_inbox_media_labels",
   "0212_sales_inbox_seen",
+  "0213_push_subscriptions",
 ] as const;
 
 /*

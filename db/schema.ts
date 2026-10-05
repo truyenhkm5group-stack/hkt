@@ -7077,6 +7077,29 @@ export const payrollAdjustments = pgTable(
 );
 
 /**
+ * ĐĂNG KÝ NHẬN THÔNG BÁO ĐẨY của một trình duyệt / máy (0213 · lib/push/service.ts). Mỗi `endpoint` (máy chủ đẩy của trình
+ * duyệt) là MỘT dòng, thuộc người đang đăng nhập trên máy đó lúc bấm bật. Tin vào hộp thư cá nhân (`user_messages`) ⇒ đẩy
+ * tới mọi đăng ký của người nhận. Máy chủ đẩy báo đăng ký đã chết (404 / 410 / 401 / 403) ⇒ xoá dòng.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+    lastOkAt: ts("last_ok_at"),
+    lastError: text("last_error"),
+  },
+  (t) => [uniqueIndex("push_subscriptions_endpoint_key").on(t.endpoint), index("push_subscriptions_user_idx").on(t.userId)],
+);
+
+/**
  * ═══ HỘP THƯ CÁ NHÂN (migration 0126) ═══
  *
  * `notifications` là hàng đợi CHUNG của cả shop. Phiếu lương là tin của MỘT người — không được nằm
