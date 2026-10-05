@@ -172,6 +172,17 @@
 <section data-panel="mining" class="space-y-3 hidden">
   <div class="card space-y-2">
     <h2 class="font-bold">AI Knowledge Mining Studio</h2>
+    <div class="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+      <div class="font-semibold">⚡ Lấy nhanh hội thoại từ Pancake để nạp</div>
+      <div class="flex flex-wrap items-end gap-2">
+        <div><label class="muted">Số hội thoại</label><input id="quickN" class="inp w-28" type="number" value="1000" min="10" max="10000"></div>
+        <div><label class="muted">Trong (ngày)</label><input id="quickDays" class="inp w-24" type="number" value="180"></div>
+        <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="quickPhone" checked> Chỉ hội thoại có SĐT</label>
+        <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="quickClosed"> Chỉ "Đã chốt đơn"</label>
+        <button class="btn btn-primary" id="quickBtn" onclick="quickPick()">⬇️ Tải từ Pancake & tự chọn</button>
+      </div>
+      <div id="quickStatus" class="text-sm"></div>
+    </div>
     <p class="text-sm">Đã chọn <b id="mineCount">0</b> hội thoại. AI sẽ bóc tách: <b>FAQ mẫu</b>, <b>kịch bản xử lý từ chối</b> (giá cao / phí ship / ngại size), <b>mẫu câu xin SĐT/địa chỉ</b>. Số điện thoại được che trước khi gửi cho Gemini.</p>
     <div class="flex flex-wrap items-end gap-2">
       <div><label class="muted">Hội thoại / lượt AI</label><input id="mineBatch" class="inp w-24" type="number" value="15" min="3" max="30"></div>
@@ -412,6 +423,33 @@ function goMining() { if (!selected.size) return toast("Chưa chọn hội tho�
 function switchPage() { showTab("connect"); legacyPreview(); window.scrollTo(0, 0); toast("Chọn page trong khung 📥 rồi bấm Nhập"); }
 
 // ------------------------------------------------------------ nạp tri thức
+async function quickPick() {
+  const n = +$("#quickN").value || 1000, phone = $("#quickPhone").checked, closed = $("#quickClosed").checked;
+  const st = $("#quickStatus"), btn = $("#quickBtn");
+  btn.disabled = true;
+  try {
+    st.textContent = "Đang kết nối Pancake…";
+    try {
+      await api("/api/sync/conversations", { method: "POST", body: { max_conversations: Math.max(n * 10, 2000), stop_at_phone: phone ? n : null, days: +$("#quickDays").value || 180, fetch_messages: false } });
+    } catch (e) { if (!String(e.message).includes("Đang đồng bộ")) throw e; }
+    let s;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      s = await api("/api/sync/status");
+      st.textContent = `⏳ Đang tải: ${s.fetched} hội thoại · ${s.with_phone || 0} có SĐT…`;
+      if (!s.running) break;
+    }
+    if (s.error) throw new Error("Pancake báo lỗi: " + s.error + " — kiểm tra Page Access Token ở tab Kết nối");
+    const r = await api("/api/conversations/select", { method: "POST", body: { only_phone: phone, only_closed: closed, limit: n } });
+    selected.clear(); r.ids.forEach((id) => selected.add(id));
+    st.innerHTML = `✅ Trong máy có ${s.local_conversations} hội thoại (${s.local_with_phone} có SĐT) · <b>đã chọn ${r.count}</b>` +
+      (r.count < n ? ` <span class="text-amber-700">— ít hơn ${n}: tăng "Trong (ngày)" rồi bấm lại${closed ? ', hoặc bỏ "Chỉ Đã chốt đơn"' : ""}</span>` : "") +
+      (s.stop_reason ? ` <span class="muted">(${esc(s.stop_reason)})</span>` : "");
+    loadJobs();
+  } catch (e) { st.innerHTML = `<span class="text-red-600">❌ ${esc(e.message)}</span>`; }
+  finally { btn.disabled = false; }
+}
+
 async function loadJobs() {
   $("#mineCount").textContent = selected.size.toLocaleString("vi-VN");
   if (selected.size) { const e = await api(`/api/mining/estimate?n=${selected.size}&batch_size=${$("#mineBatch").value}`); $("#mineEstimate").textContent = `Ước tính: ${e.calls} lượt AI · ~${usd(e.cost_usd)} (${vnd(e.cost_vnd)}) — số thật xem ở tab Chi phí`; }
@@ -426,7 +464,7 @@ async function loadJobs() {
 let shownJob = null;
 async function showJob(id) { shownJob = id; const j = await api(`/api/mining/jobs/${id}`); $("#jobTitle").textContent = `#${id} · ${j.tokens?.prompt || 0}+${j.tokens?.output || 0} token · ${usd(j.cost_usd)}`; $("#jobLog").textContent = j.log.map((l) => { const [t, ...m] = l.split("|"); return fmtTime(+t) + "  " + m.join("|"); }).join("\n"); }
 async function startMining() {
-  if (!selected.size) return toast("Chưa chọn hội thoại nào (tab Hội thoại)", true);
+  if (!selected.size) return toast("Chưa chọn hội thoại nào — bấm ⬇️ Tải từ Pancake & tự chọn ở trên", true);
   try { const r = await api("/api/mining/jobs", { method: "POST", body: { conversation_ids: [...selected], batch_size: +$("#mineBatch").value } }); toast(`Đã tạo lượt nạp #${r.job_id}`); shownJob = r.job_id; loadJobs(); } catch (e) { toast(e.message, true); }
 }
 
