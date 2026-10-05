@@ -9,6 +9,7 @@ import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { ChatView } from "@/lib/sales-chatbot/config";
 import { conversationView } from "@/lib/sales-chatbot/engine";
 import { armStats, type ArmRaw, type ArmStats, type DrillFilter } from "@/lib/sales-chatbot/experiment-shared";
+import { BOT_CONFIRMED, HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 
@@ -98,11 +99,11 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
   const e = schema.salesConversationEvents;
   const c = schema.salesChatConversations;
   const since = new Date(dauNgayVN(now).getTime() - (f.days - 1) * 86_400_000);
-  const human = sql`bool_or(${e.type} in ('handoff.requested','human.took_over'))`;
+  const human = sql`bool_or(${HUMAN_TOUCHED})`;
   const conds = [sql`bool_or(${e.type} = 'message.received')`];
   if (f.cohort === "AI_ONLY") conds.push(sql`not ${human}`);
   if (f.cohort === "AI_THEN_HUMAN") conds.push(human);
-  if (f.confirmed) conds.push(sql`bool_or(${e.type} = 'order.confirmed')`);
+  if (f.confirmed) conds.push(sql`bool_or(${BOT_CONFIRMED})`);
   if (f.reason) conds.push(sql`bool_or(${e.type} in ('handoff.requested','human.took_over') and coalesce(${e.reasonCode}, 'OTHER') = ${f.reason})`);
   const ids = db
     .select({ id: e.conversationId })

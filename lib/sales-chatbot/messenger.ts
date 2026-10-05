@@ -8,6 +8,7 @@ import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, send
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
+import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import {
   CLAIM_STALE_MS,
   conversationFor,
@@ -164,11 +165,14 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
     const key = fanpageKey(ev.pageId, ev.psid);
     // Đang trò chuyện với bot mà page lên tiếng ⇒ là người ⇒ nhường như nhân viên. Đầu hội thoại ⇒ trả lời tự động của Meta.
     const [active] = await db
-      .select({ id: c.id })
+      .select({ id: c.id, status: c.status })
       .from(c)
       .where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, key), gte(c.lastBotAt, new Date(now.getTime() - STAFF_INFER_WINDOW_MS))))
       .limit(1);
     if (!active) return { queued: false, reason: "Trả lời tự động của page — bot không chen" };
+    // Sổ sự kiện: ghi «nhân viên nhận» khi hội thoại CHUYỂN sang người — như đường Pancake (fanpage.ts). Thiếu dòng này thì
+    // hội thoại nhân viên đã cầm trong Hộp thư Meta bị đếm vào nhóm «AI tự làm» ở màn «Hiệu quả».
+    if (active.status !== "HANDOFF") await recordConversationEvent(active.id, { type: "human.took_over", actorKind: "HUMAN", occurredAt: now, reasonCode: "STAFF_REPLIED", key: `staff:${ev.mid}` });
     await db
       .update(c)
       .set({ status: "HANDOFF", handoffReason: sql`case when ${c.status} = 'HANDOFF' and ${c.handoffReason} is not null and ${c.handoffReason} <> ${STAFF_REASON} then ${c.handoffReason} else ${STAFF_REASON} end`, updatedAt: now })

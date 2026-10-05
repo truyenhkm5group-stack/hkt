@@ -20,6 +20,7 @@ import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { HANDOFF_REASON_CODES, HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbot/events-shared";
+import { BOT_CONFIRMED, HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
 import {
   AI_SALES_PERFORMANCE_SETTING_KEY,
   cohortTable,
@@ -82,8 +83,10 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
       quoted: sql<boolean>`bool_or(${e.type} = 'quote.given')`,
       identified: sql<boolean>`bool_or(${e.type} = 'customer.identified')`,
       drafted: sql<boolean>`bool_or(${e.type} = 'order.drafted' and ${e.actorKind} = 'AI')`,
-      confirmed: sql<boolean>`bool_or(${e.type} = 'order.confirmed')`,
-      human: sql<boolean>`bool_or(${e.type} in ('handoff.requested','human.took_over'))`,
+      // Hai vị ngữ dùng chung (events-sql.ts): đơn NGƯỜI tạo trong khung chat không phải đơn bot chốt, và kéo hội thoại sang
+      // nhóm có người.
+      confirmed: sql<boolean>`bool_or(${BOT_CONFIRMED})`,
+      human: sql<boolean>`bool_or(${HUMAN_TOUCHED})`,
       upsellOffered: sql<boolean>`bool_or(${e.type} = 'upsell.offered')`,
       upsellAccepted: sql<boolean>`bool_or(${e.type} = 'upsell.accepted')`,
     })
@@ -138,7 +141,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     .where(and(inPeriod, inArray(e.type, ["upsell.offered", "upsell.accepted", "upsell.declined"])));
 
   // ── Đơn bot chốt ⇒ kết cục theo ORDER_OUTCOME ──
-  const confirmedIds = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(inPeriod, eq(e.type, "order.confirmed"), isNotNull(e.orderId)))).map((r) => r.id!).filter(Boolean);
+  const confirmedIds = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(inPeriod, BOT_CONFIRMED, isNotNull(e.orderId)))).map((r) => r.id!).filter(Boolean);
   let orders: AiSalesPerformance["orders"] = { confirmed: 0, confirmedValueVnd: 0, settled: 0, delivered: 0, deliveredRevenueVnd: 0, returned: 0, cancelled: 0, pending: 0, deliveryRate: null };
   if (confirmedIds.length) {
     const o = schema.orders;

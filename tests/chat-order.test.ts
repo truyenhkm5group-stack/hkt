@@ -20,6 +20,9 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { subscribe } from "@/lib/realtime/bus";
 import { chatOrderContext, createOrderFromChatCore } from "@/lib/records/chat-order";
+import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { listDrillConversations } from "@/lib/sales-chatbot/experiment-report";
+import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 
 const ORG = "don-trong-chat";
 
@@ -38,7 +41,7 @@ async function cleanupOrg(code: string) {
 export async function testChatOrder() {
   await cleanupOrg(ORG);
   try {
-    await provisionOrganization({ code: ORG, name: "Shop tạo đơn trong chat", plan: "standard", modules: ["customers", "products", "orders", "ai_sales"], admin: { email: `admin@${ORG}.local`, name: "QT", password: "DonTrongChat@123" }, source: "TEST", actor: null });
+    await provisionOrganization({ code: ORG, name: "Shop tạo đơn trong chat", plan: "standard", modules: ["customers", "products", "orders", "inventory", "ai_sales"], admin: { email: `admin@${ORG}.local`, name: "QT", password: "DonTrongChat@123" }, source: "TEST", actor: null });
     const enabled = await getEnabledModules(ORG);
     await withOrganization(ORG, async () => {
       const db = await getDb();
@@ -99,6 +102,24 @@ export async function testChatOrder() {
       const r3 = await createOrderFromChatCore(admin, conv.id, input("lan-bam-0003"));
       assert.ok(r3.ok, "có đơn bot vẫn tạo được — người quyết");
 
+      // ── Màn «Hiệu quả» + drill-down: đơn NGƯỜI tạo trong khung chat KHÔNG phải «đơn bot chốt» (events-sql.ts) ──
+      // Trước bản vá, `order.confirmed` tác nhân HUMAN của form này bị đếm vào đơn bot chốt, doanh thu AI và chi phí AI / đơn,
+      // và hội thoại chỉ có đơn người vẫn nằm ở nhóm «AI tự làm». Đối chứng: hội thoại thứ hai bot chốt THẬT (sự kiện mang
+      // tác nhân CUSTOMER — khách đồng ý với bot) vẫn phải đếm — lọc nhầm `actor = 'AI'` sẽ làm nó mất.
+      await recordConversationEvent(conv.id, { type: "message.received", actorKind: "CUSTOMER", occurredAt: new Date(), key: "msg:1" });
+      const [botConv] = await db.insert(schema.salesChatConversations).values({ channel: "FANPAGE" }).returning({ id: schema.salesChatConversations.id });
+      await db.insert(schema.orders).values({ id: "erp-bot-chot-2", stage: "CONFIRMED", status: 1, billFullName: "Anh Tú", totalPrice: 420_000, totalPriceAfterDiscount: 420_000, insertedAt: new Date(), origin: "AI_AGENT", salesConversationId: botConv.id });
+      await recordConversationEvent(botConv.id, { type: "message.received", actorKind: "CUSTOMER", occurredAt: new Date(), key: "msg:1" });
+      await recordConversationEvent(botConv.id, { type: "order.confirmed", actorKind: "CUSTOMER", occurredAt: new Date(), orderId: "erp-bot-chot-2", amountVnd: 420_000, key: "confirm:erp-bot-chot-2" });
+      const perf = await loadAiSalesPerformance(ORG, { withMoney: false });
+      assert.equal(perf.orders.confirmed, 1, `chỉ đơn bot chốt: ${JSON.stringify(perf.orders)}`);
+      assert.equal(perf.orders.confirmedValueVnd, 420_000);
+      assert.deepEqual([perf.cohorts.aiOnly.conversations, perf.cohorts.aiOnly.confirmed, perf.cohorts.aiThenHuman.conversations, perf.cohorts.aiThenHuman.confirmed], [1, 1, 1, 0], "hội thoại có đơn người ⇒ nhóm có người, không có đơn bot");
+      const drillAi = await listDrillConversations(admin, { days: 30, cohort: "AI_ONLY", reason: null, arm: null, confirmed: true });
+      assert.ok("ok" in drillAi && drillAi.rows.map((r) => r.id).join() === botConv.id, `ô «AI tự chốt» mở đúng hội thoại bot chốt: ${JSON.stringify(drillAi)}`);
+      const drillHuman = await listDrillConversations(admin, { days: 30, cohort: "AI_THEN_HUMAN", reason: null, arm: null, confirmed: false });
+      assert.ok("ok" in drillHuman && drillHuman.rows.map((r) => r.id).join() === conv.id, JSON.stringify(drillHuman));
+
       // ── Từ chối: khung thử, thiếu quyền, hội thoại lạ, khoá lượt bấm sai dạng ──
       const before = (await db.select().from(schema.orders)).length;
       const t = await createOrderFromChatCore(admin, testConv.id, input("lan-bam-0004"));
@@ -114,5 +135,5 @@ export async function testChatOrder() {
   } finally {
     await cleanupOrg(ORG);
   }
-  console.log("  ✓ Tạo đơn trong khung chat: đơn đi đường tạo đơn tay chung, origin ERP_FORM + khoá hội thoại, sự kiện HUMAN kèm khoá tài khoản; bấm hai lần cùng khoá ⇒ một đơn / một sự kiện / một nhật ký; khách theo SĐT dùng lại, không đè hồ sơ, tên / địa chỉ mới vào người nhận; đơn bot chốt hiện để cảnh báo, không chặn; khung thử / thiếu quyền / hội thoại lạ / khoá sai ⇒ từ chối, không ghi");
+  console.log("  ✓ Tạo đơn trong khung chat: đơn đi đường tạo đơn tay chung, origin ERP_FORM + khoá hội thoại, sự kiện HUMAN kèm khoá tài khoản; bấm hai lần cùng khoá ⇒ một đơn / một sự kiện / một nhật ký; đơn người KHÔNG vào «đơn bot chốt» và kéo hội thoại sang nhóm có người (màn Hiệu quả + drill-down), đơn bot chốt vẫn đếm; khách theo SĐT dùng lại, không đè hồ sơ, tên / địa chỉ mới vào người nhận; đơn bot chốt hiện để cảnh báo, không chặn; khung thử / thiếu quyền / hội thoại lạ / khoá sai ⇒ từ chối, không ghi");
 }

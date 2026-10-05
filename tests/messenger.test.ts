@@ -246,6 +246,11 @@ async function testFlow() {
       assert.match((await receiveMessengerEvent(ev("m.echo.2", "Chị đợi em check kho nhé", { isEcho: true, appId: "263902037430900" }))).reason, /bot nhường/);
       const conv = (await db.select().from(schema.salesChatConversations).where(and(eq(schema.salesChatConversations.channel, "FANPAGE"), eq(schema.salesChatConversations.threadId, PSID))))[0];
       assert.ok(conv?.status === "HANDOFF" && conv.pageId === PAGE, JSON.stringify(conv?.status));
+      // Sổ sự kiện: hội thoại chuyển sang người ⇒ ĐÚNG MỘT `human.took_over` (như đường Pancake). Thiếu nó thì màn «Hiệu quả»
+      // đếm hội thoại nhân viên đã cầm vào nhóm «AI tự làm». Tin thứ hai của nhân viên không ghi lại.
+      await receiveMessengerEvent(ev("m.echo.3", "Có size M chị nhé", { isEcho: true, appId: "263902037430900" }));
+      const took = await db.select().from(schema.salesConversationEvents).where(and(eq(schema.salesConversationEvents.conversationId, conv.id), eq(schema.salesConversationEvents.type, "human.took_over")));
+      assert.ok(took.length === 1 && took[0].actorKind === "HUMAN" && took[0].reasonCode === "STAFF_REPLIED", JSON.stringify(took));
       await receiveMessengerEvent(ev("m.6", "ok em"));
       const p2 = await processMessengerThread(PAGE, PSID, { fetch: g.fetch, now: () => new Date(Date.now() + 62_000) });
       assert.ok(p2.replies === 0, `nhân viên đang trả lời ⇒ bot im: ${JSON.stringify(p2)}`);
