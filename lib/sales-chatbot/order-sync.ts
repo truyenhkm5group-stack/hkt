@@ -272,6 +272,32 @@ async function notifyOrderSynced(orderId: string, convId: string, lines: string[
   }
 }
 
+/**
+ * GHI ĐƠN GẦN NHƯ NGAY (chủ shop HSLC 05/10/2026: «phần gửi đơn Telegram cần gửi realtime» — lời chốt 10:50 mà tin tới
+ * 11:04). Webhook gọi hàm này sau MỖI tin của hội thoại: đợi hội thoại yên `quietMinutes` phút; có tin mới hơn trong lúc đợi
+ * thì lượt đợi của tin MỚI đó lo, lượt này thôi. Chỉ đọc ĐÚNG hội thoại đó. Job 5 phút vẫn quét như cũ — lưới an toàn khi
+ * tiến trình khởi động lại giữa lúc đợi. Chạy trùng với job thì không đẻ đơn hai lần: khoá lần mua `order-sync:<hội
+ * thoại>:<tin chốt>` của lõi ghi đơn. Không ném.
+ */
+export async function syncFanpageThreadWhenQuiet(pageId: string, threadId: string, deps: { fetch?: typeof fetch; now?: () => Date; sleep?: (ms: number) => Promise<void> } = {}): Promise<OrderSyncRunResult | null> {
+  try {
+    if (!(await loadOrderSyncConfig()).enabled) return null;
+    const quietMs = ORDER_SYNC_LIMITS.quietMinutes * 60_000;
+    await (deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))))(quietMs + 5_000);
+    const now = (deps.now ?? (() => new Date()))();
+    const db = await getDb();
+    const t = schema.salesChatInbound;
+    const [last] = await db
+      .select({ at: sql<Date | string | null>`max(${t.createdAt})` })
+      .from(t)
+      .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`));
+    if (last?.at && new Date(last.at).getTime() > now.getTime() - quietMs) return null;
+    return await runFanpageOrderSync({ ...(deps.fetch ? { fetch: deps.fetch } : {}), now: () => now, threadId });
+  } catch {
+    return null;
+  }
+}
+
 /** Khách muốn sửa đơn vừa ghi ⇒ báo người làm đơn (không tự sửa: đơn có thể đã được nhân viên chốt / sửa tay). */
 async function notifyOrderChange(convId: string, text: string, dedupe: string, now: Date): Promise<void> {
   const title = "Khách nhắn sửa đơn đã ghi từ fanpage";
@@ -289,7 +315,7 @@ async function notifyOrderChange(convId: string, text: string, dedupe: string, n
  * MỘT lượt ghi đơn cho tổ chức ngữ cảnh. Công tắc tắt / không có kết nối fanpage / module tắt ⇒ không làm gì. Không ném.
  * `fetch` / `now` cho bài kiểm (luật 65 — không gọi mạng thật).
  */
-export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: () => Date } = {}): Promise<OrderSyncRunResult> {
+export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: () => Date; threadId?: string } = {}): Promise<OrderSyncRunResult> {
   const out: OrderSyncRunResult = { checked: 0, created: 0, changes: 0, skipped: 0, errors: 0, detail: [] };
   const now = (deps.now ?? (() => new Date()))();
   try {
@@ -309,7 +335,7 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
     const candidates = await db
       .select({ threadId: t.threadId, lastAt, customerName: sql<string | null>`(array_agg(${t.customerName} order by ${t.createdAt} desc) filter (where ${t.customerName} is not null))[1]` })
       .from(t)
-      .where(and(eq(t.pageId, pageId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`))
+      .where(and(eq(t.pageId, pageId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`, deps.threadId ? eq(t.threadId, deps.threadId) : undefined))
       .groupBy(t.threadId)
       .having(and(sql`bool_or(${t.kind} = 'INBOX' and coalesce(${t.note}, '') <> 'PAGE_REPLY')`, sql`max(${t.createdAt}) <= ${quietBefore}`))
       .orderBy(desc(lastAt))

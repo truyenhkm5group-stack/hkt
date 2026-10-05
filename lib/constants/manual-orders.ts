@@ -218,3 +218,30 @@ export function parseManualDeliveryFee(raw: unknown): number | null {
  */
 export const ORDER_MATERIAL_CHANGE_LABEL = { lines: "Hàng / số lượng / giá", shipping_address: "Người nhận / địa chỉ", amount_due: "Tiền thu (COD)", customer: "Khách hàng", stage: "Trạng thái" } as const;
 export type OrderMaterialChange = keyof typeof ORDER_MATERIAL_CHANGE_LABEL;
+
+/**
+ * Dòng ghi chú do MÁY viết vào đơn — máy cần chúng (chống trùng theo mã tin, nhắc nhân viên kiểm) nhưng người đóng gói thì
+ * không: «Ghi tự động… KIỂM rồi chốt đơn», «Lời chốt …», «Mã tin fanpage: m_…», dòng phí ship / tồn. Chủ shop HSLC
+ * 05/10/2026: tin báo đơn «gửi nội dung ngắn gọn lại, bỏ những nội dung không cần thiết». Ghi chú trong ĐƠN giữ nguyên.
+ */
+const MACHINE_NOTE_LINE = /^(Ghi tự động từ hội thoại|Lời chốt |Mã tin fanpage|Phí ship|Miễn ship|Tồn chưa xác nhận|Sổ kho đang thiếu)/i;
+
+/** Ghi chú đơn cho tin nhóm: chỉ phần NGƯỜI cần đọc (dặn giao hàng, cảnh báo SĐT / địa chỉ lấy từ đơn trước). HÀM THUẦN. */
+export function orderNoteForGroup(note: string | null | undefined): string {
+  return (note ?? "")
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter((x) => x && !MACHINE_NOTE_LINE.test(x))
+    .join(" · ");
+}
+
+/**
+ * Ghi chú máy nói gì về phí ship: CHƯA BÁO (đơn lưu 0 nhưng 0 đó là CHƯA BIẾT — luật 42: không in «0 ₫») · miễn phí NẾU
+ * đúng khu vực · không nói gì. HÀM THUẦN.
+ */
+export function orderShipNote(note: string | null | undefined): "UNKNOWN" | "FREE_IF_AREA" | null {
+  const lines = (note ?? "").split(/\r?\n/).map((x) => x.trim());
+  if (lines.some((x) => /^Phí ship: CHƯA BÁO/i.test(x))) return "UNKNOWN";
+  if (lines.some((x) => /^Miễn ship NẾU/i.test(x))) return "FREE_IF_AREA";
+  return null;
+}

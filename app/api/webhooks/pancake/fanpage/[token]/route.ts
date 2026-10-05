@@ -6,6 +6,7 @@ import { bindOrganization } from "@/lib/platform/background";
 import { withOrganization } from "@/lib/platform/context";
 import { resolveWebhookOrganization, WebhookAuthError } from "@/lib/platform/webhooks";
 import { parsePancakeWebhook, processFanpageThreadDebounced, receiveFanpageEvent, sweepStaleFanpageThreads } from "@/lib/sales-chatbot/fanpage";
+import { syncFanpageThreadWhenQuiet } from "@/lib/sales-chatbot/order-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         await sweepStaleFanpageThreads();
       }),
     );
+    // Ghi đơn nhân viên chốt trên fanpage NGAY khi hội thoại yên (công tắc «ghi đơn từ hội thoại» tắt ⇒ không làm gì).
+    if (r.reason !== "Tin của chính bot") after(await bindOrganization(() => syncFanpageThreadWhenQuiet(ev.pageId, ev.threadId)));
     return NextResponse.json({ ok: true, queued: r.queued, reason: r.reason });
   });
 }

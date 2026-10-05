@@ -38,11 +38,11 @@ import { hubMembers } from "@/lib/constants/department-modules";
 import { validateBlueprint } from "@/lib/blueprints/validate";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { SecretsKeyState } from "@/lib/connectors/secrets";
-import { ORDER_MATERIAL_CHANGE_LABEL } from "@/lib/constants/manual-orders";
+import { ORDER_MATERIAL_CHANGE_LABEL, orderNoteForGroup, orderShipNote } from "@/lib/constants/manual-orders";
 import { loadNotificationSetup, saveOrderNotificationPreset } from "@/lib/messaging/presets";
 import { deliverMessage, nextRetryAt as messagingNextRetryAt, retryFailedDeliveries } from "@/lib/messaging/service";
 import { failedBeforeSending } from "@/lib/connectors/net-error";
-import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
+import { DEFAULT_ORDER_TEMPLATES, messagingStatusOf, renderOrderTemplate, renderTemplate, unknownTemplateKeys, ORDER_MESSAGE_VAR_KEYS } from "@/lib/messaging/types";
 import { BUSINESS_TYPE_SPEC, CORE_MODULES, type SignupDraft } from "@/lib/onboarding/shared";
 import { createOrganizationFromSignup } from "@/lib/onboarding/service";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -153,6 +153,16 @@ function testPure() {
   // Mẫu tin: ô lạ giữ nguyên (người đọc thấy mình gõ sai), mẫu dựng sẵn chỉ dùng ô đã khai.
   assert.equal(renderTemplate("A {{order_code}} {{la}}", { order_code: "#1" }), "A #1 {{la}}");
   for (const t of Object.values(DEFAULT_ORDER_TEMPLATES)) assert.deepEqual(unknownTemplateKeys(t, ORDER_MESSAGE_VAR_KEYS), []);
+  // TIN ĐƠN NGẮN GỌN (chủ shop HSLC 05/10/2026): đoạn có ô trống / chiết khấu 0 bị bỏ, dòng chữ tự gõ giữ nguyên, khoá lạ giữ.
+  const shopTpl = ["🟢 ĐƠN MỚI", "THU TIỀN: {{cod}}", "Tiền hàng: {{subtotal}} · Chiết khấu: {{discount}} · Ship: {{shipping_fee}}", "Ghi chú: {{note}}", "Mã: {{la}}"].join("\n");
+  const shopVars = { cod: "280.000 ₫ + ship", subtotal: "280.000 ₫", discount: "0 ₫", shipping_fee: "chưa báo", note: "—" };
+  assert.equal(renderOrderTemplate(shopTpl, shopVars), ["🟢 ĐƠN MỚI", "THU TIỀN: 280.000 ₫ + ship", "Tiền hàng: 280.000 ₫ · Ship: chưa báo", "Mã: {{la}}"].join("\n"));
+  assert.ok(renderOrderTemplate(shopTpl, { ...shopVars, discount: "10.000 ₫", note: "giao giờ hành chính" }).includes("Chiết khấu: 10.000 ₫ · Ship") , "chiết khấu khác 0 vẫn in");
+  assert.ok(renderOrderTemplate(shopTpl, { ...shopVars, note: "giao giờ hành chính" }).includes("Ghi chú: giao giờ hành chính"));
+  const machineNote = ["Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.", "Lời chốt 10:01 05/10/2026 (khách): «0915159895 + giao giờ hành chính»", "giao giờ hành chính t2 đến t6", "Phí ship: CHƯA BÁO — cập nhật trước khi giao.", "Mã tin fanpage: m_Njz5p0i"].join("\n");
+  assert.equal(orderNoteForGroup(machineNote), "giao giờ hành chính t2 đến t6", "tin nhóm chỉ giữ phần người cần đọc");
+  assert.equal(orderNoteForGroup("Ghi tự động từ hội thoại fanpage (nhân viên chốt) — KIỂM rồi chốt đơn.\nMã tin fanpage: m_1"), "", "toàn dòng máy ⇒ rỗng (ô bị bỏ)");
+  assert.deepEqual([orderShipNote(machineNote), orderShipNote("Miễn ship NẾU địa chỉ thuộc khu vực miễn ship"), orderShipNote("giao sáng")], ["UNKNOWN", "FREE_IF_AREA", null]);
   assert.equal(messagingStatusOf("sandbox-messaging", { status: "ACTIVE", lastTestOk: true }), "TEST_MODE", "hộp thử không bao giờ là «đã kết nối»");
   assert.equal(messagingStatusOf("lark-webhook", { status: "ACTIVE", lastTestOk: true }), "CONNECTED");
   assert.equal(messagingStatusOf("lark-webhook", { status: "DRAFT", lastTestOk: false }), "FAILED");

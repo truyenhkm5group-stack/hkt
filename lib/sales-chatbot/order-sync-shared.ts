@@ -28,10 +28,11 @@ export function parseOrderSyncConfig(raw: unknown): OrderSyncConfig {
 }
 
 /**
- * Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): `quietMinutes` = hội thoại phải yên chừng này mới đọc (khách / nhân viên còn
+ * Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): `quietMinutes` = hội thoại phải yên chừng này mới đọc (chủ shop HSLC 05/10/2026:
+ * tin báo đơn phải tới gần như ngay — 10 phút + nhịp job 5 phút làm tin tới trễ 13–16 phút; khách / nhân viên còn
  * đang gõ thì chưa có gì để chốt); `threadsPerRun` = số hội thoại đọc mỗi lượt job (mỗi hội thoại một lời gọi AI).
  */
-export const ORDER_SYNC_LIMITS = { quietMinutes: 10, lookbackHours: 24, threadsPerRun: 8, candidates: 60, messages: 40, messageChars: 500, catalog: 200, recentOrderGuardMinutes: 30 } as const;
+export const ORDER_SYNC_LIMITS = { quietMinutes: 2, lookbackHours: 24, threadsPerRun: 8, candidates: 60, messages: 40, messageChars: 500, catalog: 200, recentOrderGuardMinutes: 30 } as const;
 
 /** Nhãn kênh của đơn ghi từ hội thoại do người chốt — tách khỏi «Chatbot fanpage» (đơn bot tự chốt). */
 export const ORDER_SYNC_CHANNEL = "Fanpage (nhân viên chốt)";

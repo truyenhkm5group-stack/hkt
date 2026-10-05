@@ -764,7 +764,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     description:
       "Hội thoại fanpage đang CHỜ KHÁCH tới mốc follow-up ⇒ AI của shop viết MỘT câu nhắc theo bước khách đang dừng (không nêu giá) và gửi qua Pancake. " +
       "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng). " +
-      "Cùng lượt: GHI ĐƠN TỪ HỘI THOẠI (công tắc riêng, không phụ thuộc bot bật / tắt) — hội thoại nhân viên phụ trách đã yên 10 phút ⇒ AI đọc lời chốt ⇒ lên đơn «Mới» cho nhân viên kiểm.",
+      "Cùng lượt: GHI ĐƠN TỪ HỘI THOẠI (công tắc riêng, không phụ thuộc bot bật / tắt) — hội thoại nhân viên phụ trách đã yên 2 phút ⇒ AI đọc lời chốt (webhook hẹn sẵn một lượt cho đúng hội thoại — job này là lưới an toàn) ⇒ lên đơn «Mới» cho nhân viên kiểm.",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
