@@ -100,7 +100,10 @@
         "worktree": "C:\\Users\\Admin\\Documents\\ChatGPT\\wt-atr-worker-agent",
         "baseRef": "ai-tech-room",
         "baseSha": "7ea269d555adcdca84341c0740d5619255413359",
-        "createdAt": "2026-10-05T14:56:47.772Z"
+        "createdAt": "2026-10-05T14:56:47.772Z",
+        "cleanedAt": "2026-10-05T16:08:51.093Z",
+        "mergedTip": "fe238ad027bb39f60006340cd96681af9e2683d6",
+        "mergedEvidence": "ANCESTOR"
       }
     },
     {
@@ -141,7 +144,10 @@
         "worktree": "C:\\Users\\Admin\\Documents\\ChatGPT\\wt-atr-reviewer-agent",
         "baseRef": "ai-tech-room",
         "baseSha": "7ea269d555adcdca84341c0740d5619255413359",
-        "createdAt": "2026-10-05T14:56:51.316Z"
+        "createdAt": "2026-10-05T14:56:51.316Z",
+        "cleanedAt": "2026-10-05T16:08:56.167Z",
+        "mergedTip": "c5ff8949957214a9d797fbdcac23a2ed50d11841",
+        "mergedEvidence": "ANCESTOR"
       }
     },
     {
