@@ -32,7 +32,7 @@ import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
 import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
-import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
+import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, nextCallCostMicros, paidCostMicros, quotaRetryAt, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { purgeExpiredSnapshots, runLeadHunterTick } from "@/lib/wholesale/engine";
 import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
@@ -302,7 +302,28 @@ function testCallOutcomes() {
   assert.equal(followupAt(new Date("2026-10-05T17:30:00Z"), 1).toISOString(), "2026-10-07T02:00:00.000Z", "00:30 giờ VN ngày 06 (vẫn là ngày 05 theo UTC) ⇒ «mai» là ngày 07 — ngày tính theo giờ VN");
 }
 
+/** Kịch bản đo chi phí / trần chi tiêu bằng tiền: KHÔNG có phần miễn phí, để mỗi lượt mang giá niêm yết. */
+const PAID_CFG = {
+  ...DEFAULT_LEAD_HUNTER_CONFIG,
+  freeTier: { ...DEFAULT_LEAD_HUNTER_CONFIG.freeTier, enabled: false, monthlyCalls: Object.fromEntries(Object.keys(DEFAULT_LEAD_HUNTER_CONFIG.freeTier.monthlyCalls).map((k) => [k, 0])) as typeof DEFAULT_LEAD_HUNTER_CONFIG.freeTier.monthlyCalls },
+};
+
 function testFreeTier() {
+  // Tiền THẬT = lượt vượt phần miễn phí × giá. Đo 05/10/2026: 305 chi tiết + 23 tìm nằm trong phần miễn phí mà ERP ghi 5 US$ rồi tự chặn trần ngày.
+  const cfg0 = DEFAULT_LEAD_HUNTER_CONFIG;
+  assert.deepEqual(paidCostMicros(cfg0, { DETAILS_ENTERPRISE: 305, TEXT_SEARCH_PRO: 23 }, { DETAILS_ENTERPRISE: 305, TEXT_SEARCH_PRO: 23 }).todayMicros, 0);
+  const over = paidCostMicros(cfg0, { DETAILS_ENTERPRISE: 1005 }, { DETAILS_ENTERPRISE: 10 });
+  assert.equal(over.monthMicros, 5 * 20_000, "chỉ 5 lượt vượt 1.000 lượt miễn phí bị tính tiền");
+  assert.equal(over.todayMicros, 5 * 20_000, "5 lượt vượt đều rơi vào hôm nay");
+  assert.equal(paidCostMicros(cfg0, { DETAILS_ENTERPRISE: 1200 }, { DETAILS_ENTERPRISE: 100 }).todayMicros, 100 * 20_000, "phần miễn phí đã hết từ hôm trước ⇒ cả 100 lượt hôm nay tính tiền");
+  assert.equal(nextCallCostMicros(cfg0, "DETAILS_ENTERPRISE", 999), 0);
+  assert.equal(nextCallCostMicros(cfg0, "DETAILS_ENTERPRISE", 1000), 20_000);
+  // 429 hạn mức NGÀY ⇒ chờ Google đặt lại (0 giờ giờ Thái Bình Dương ≈ 08:05 UTC), không hỏi lại mỗi 10 phút.
+  const daily = "RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'GetPlaceRequest' and limit 'GetPlaceRequest per day'";
+  assert.equal(quotaRetryAt(new Date("2026-10-05T06:00:00Z"), daily).toISOString(), "2026-10-05T08:05:00.000Z");
+  assert.equal(quotaRetryAt(new Date("2026-10-05T09:00:00Z"), daily).toISOString(), "2026-10-06T08:05:00.000Z");
+  assert.equal(quotaRetryAt(new Date("2026-10-05T09:00:00Z"), "Quota exceeded per minute").toISOString(), "2026-10-05T09:10:00.000Z");
+
   const cfg = DEFAULT_LEAD_HUNTER_CONFIG;
   assert.equal(cfg.discoveryTier, "ENTERPRISE", "mặc định tìm có SĐT ngay trong lượt tìm — rẻ nhất mỗi lead");
   assert.equal(freeTierLeft(cfg, "TEXT_SEARCH_ENTERPRISE", 0), 950, "1.000 lượt miễn phí, giữ 5% dự phòng");
@@ -619,7 +640,7 @@ async function testDb() {
       assert.ok("ok" in t, JSON.stringify(t));
       assert.ok("ok" in (await setConnectionStatus(admin, "google-places", "ACTIVE")));
       // Website: tắt ở bài kiểm job thật (không gọi DNS / mạng); phần đọc website đo riêng bằng bộ đọc giả.
-      await saveLeadHunterConfig({ ...DEFAULT_LEAD_HUNTER_CONFIG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 } });
+      await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 } });
 
       // ── Xem trước: 2 khu vực × 5 từ khoá = 10 truy vấn, không gọi Google ──
       const before = seen.length;
@@ -753,7 +774,7 @@ async function testDb() {
       assert.equal(Number(coBa[0]!.n), 1, "thử lại sau lỗi không sinh lead trùng");
 
       // ── Trần ngân sách: tự tạm dừng, báo chủ shop, tự mở lại ngày sau ──
-      await saveLeadHunterConfig({ ...DEFAULT_LEAD_HUNTER_CONFIG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 0.5, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
+      await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 0.5, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
       const c4 = await createCampaignCore(admin, { ...campInput, name: "Trần thử", customAreas: "Thanh Hóa: Sầm Sơn, Hậu Lộc" });
       assert.ok("ok" in c4);
       assert.ok("ok" in (await startCampaignCore(admin, c4.id)));
@@ -773,7 +794,7 @@ async function testDb() {
       const resumed = await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, c4.id) });
       assert.ok(resumed?.status === "RUNNING" || resumed?.status === "COMPLETED" || resumed?.status === "PAUSED", String(resumed?.status));
       assert.notEqual(resumed?.pauseReason, "BUDGET_DAILY", "sang ngày mới (trần ngày mở lại) ⇒ tự chạy lại");
-      await saveLeadHunterConfig({ ...DEFAULT_LEAD_HUNTER_CONFIG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: true, maxPages: 2 }, budget: { dailyUsd: 1000, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
+      await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: true, maxPages: 2 }, budget: { dailyUsd: 1000, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
 
       // ── Đọc website (bộ đọc giả): phát hiện có URL nguồn, chỉ điền ô trống ──
       const enricher: EnrichmentProvider = {
@@ -794,7 +815,7 @@ async function testDb() {
       const ers = await db.select().from(schema.wholesaleLeadEnrichments).where(eq(schema.wholesaleLeadEnrichments.leadId, seafood!.id));
       assert.ok(ers.some((e) => e.sourceUrl.endsWith("/lien-he")), "lưu URL nguồn để kiểm lại");
       // Phần còn lại chạy job thật: tắt đọc website để không lượt nào chạm DNS / mạng thật.
-      await saveLeadHunterConfig({ ...DEFAULT_LEAD_HUNTER_CONFIG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 1000, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
+      await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 1000, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
 
       // ── Phạm vi dữ liệu: Sales «Được giao» chỉ thấy / chỉ chạm lead của mình ──
       assert.ok("error" in (await assignLeadsCore(sales, { leadIds: [seafood!.id], userId: salesRow!.id })), "Sales không giao được");

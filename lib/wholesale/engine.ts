@@ -5,7 +5,7 @@ import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
 import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
-import { freeTierLeft, type LeadHunterConfig, type PlacesSku, skuCostMicros } from "@/lib/wholesale/config";
+import { freeTierLeft, nextCallCostMicros, quotaRetryAt, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
 import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
@@ -305,7 +305,7 @@ type Ctx = {
 function budgetBlock(ctx: Ctx, sku: PlacesSku): PauseReason | null {
   // Chế độ chỉ dùng miễn phí: chặn TRƯỚC lượt làm vượt hạn mức của đúng SKU sắp gọi (Google tính theo SKU, không theo tiền).
   if (ctx.cfg.freeTier.enabled && freeTierLeft(ctx.cfg, sku, ctx.spend.monthBySku[sku] ?? 0) <= 0) return "FREE_TIER";
-  const cost = skuCostMicros(sku, ctx.cfg);
+  const cost = nextCallCostMicros(ctx.cfg, sku, ctx.spend.monthBySku[sku] ?? 0);
   const dayCap = Math.round(ctx.cfg.budget.dailyUsd * 1_000_000);
   const monthCap = Math.round(ctx.cfg.budget.monthlyUsd * 1_000_000);
   if (ctx.spend.calls >= ctx.cfg.budget.dailyRequestLimit) return "REQUEST_LIMIT";
@@ -620,7 +620,7 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
     mode === "NEARBY"
       ? await ctx.provider.search({ mode: "NEARBY", tier, includedTypes: claimed.cell.keyword.split("+").filter(Boolean), center: { lat: camp.nearbyLat ?? 0, lng: camp.nearbyLng ?? 0 }, radiusM: camp.radiusM ?? 1000 })
       : await ctx.provider.search({ mode: "TEXT", textQuery: claimed.cell.queryText, tier, pageToken: claimed.pageToken });
-  const cost = page.meta.billable ? skuCostMicros(sku, ctx.cfg) : 0;
+  const cost = page.meta.billable ? nextCallCostMicros(ctx.cfg, sku, ctx.spend.monthBySku[sku] ?? 0) : 0;
   charge(ctx, cost, sku, page.meta.billable);
 
   if (!page.ok) {
@@ -631,7 +631,7 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
       return "STOP";
     }
     if (page.kind === "QUOTA") {
-      await release({ lastError: page.message, nextAttemptAt: addMs(ctx.now(), 10 * 60_000) });
+      await release({ lastError: page.message, nextAttemptAt: quotaRetryAt(ctx.now(), page.message) });
       ctx.stop = "REQUEST_LIMIT";
       return "STOP";
     }
@@ -704,7 +704,7 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   const snap = await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) });
   const full = !snap || snap.fieldsTier === "IDS_ONLY" || Boolean(snap.purgedAt);
   const r = await ctx.provider.details(lead.placeId, full);
-  const cost = r.meta.billable ? skuCostMicros("DETAILS_ENTERPRISE", ctx.cfg) : 0;
+  const cost = r.meta.billable ? nextCallCostMicros(ctx.cfg, "DETAILS_ENTERPRISE", ctx.spend.monthBySku.DETAILS_ENTERPRISE ?? 0) : 0;
   charge(ctx, cost, "DETAILS_ENTERPRISE", r.meta.billable);
   await recordUsage({ provider: "GOOGLE_PLACES", method: "PLACE_DETAILS", sku: "DETAILS_ENTERPRISE", campaignId: lead.sourceCampaignId, leadId: lead.id, query: lead.placeId, httpStatus: r.meta.httpStatus, ok: r.ok, billable: r.meta.billable, attempts: r.meta.attempts, resultCount: r.ok ? 1 : 0, durationMs: r.meta.durationMs, costMicros: cost, error: r.ok ? null : r.message, at: ctx.now() });
   if (!r.ok) {
@@ -714,7 +714,8 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
       return "STOP";
     }
     if (r.kind === "QUOTA") {
-      await db.update(l).set({ detailsNextAt: addMs(ctx.now(), 10 * 60_000) }).where(eq(l.id, lead.id));
+      // Hạn mức là của CẢ dự án ⇒ mọi lead đang chờ chi tiết cùng chờ, không chỉ lead vừa hỏi (nếu không, lượt sau hỏi lead khác và lại 429).
+      await db.update(l).set({ detailsNextAt: quotaRetryAt(ctx.now(), r.message) }).where(and(eq(l.enrichmentStatus, "PENDING_DETAILS"), or(isNull(l.detailsNextAt), lt(l.detailsNextAt, quotaRetryAt(ctx.now(), r.message)))));
       ctx.stop = "REQUEST_LIMIT";
       return "STOP";
     }

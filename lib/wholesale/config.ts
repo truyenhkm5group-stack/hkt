@@ -319,6 +319,52 @@ export function freeTierLeft(cfg: Pick<LeadHunterConfig, "freeTier">, sku: Place
   return Math.max(0, cap - usedThisMonth);
 }
 
+/**
+ * CHI PHÍ SAU KHI TRỪ PHẦN MIỄN PHÍ (HÀM THUẦN). Google không tính tiền N lượt đầu mỗi tháng của từng SKU
+ * (`freeTier.monthlyCalls` — áp cho mọi tài khoản, bật hay tắt chế độ «chỉ dùng miễn phí»). Đo 05/10/2026: 328 lượt
+ * (305 chi tiết + 23 tìm) đều nằm trong phần miễn phí mà ERP ghi 5 US$ theo giá niêm yết rồi tự chặn «chạm trần NGÀY» —
+ * trần chi tiêu phải so với TIỀN THẬT, không phải giá niêm yết.
+ *
+ * `monthCalls` = lượt ĐÃ TÍNH TIỀN (2xx) trong tháng tính tới giờ, gồm cả hôm nay; `todayCalls` = phần của hôm nay.
+ */
+export function paidCostMicros(
+  cfg: Pick<LeadHunterConfig, "freeTier" | "skuPriceUsdPer1000">,
+  monthCalls: Partial<Record<PlacesSku, number>>,
+  todayCalls: Partial<Record<PlacesSku, number>>,
+): { monthMicros: number; todayMicros: number; bySku: Partial<Record<PlacesSku, number>> } {
+  let monthMicros = 0;
+  let todayMicros = 0;
+  const bySku: Partial<Record<PlacesSku, number>> = {};
+  for (const sku of PLACES_SKUS) {
+    const month = monthCalls[sku] ?? 0;
+    const today = Math.min(todayCalls[sku] ?? 0, month);
+    const free = cfg.freeTier.monthlyCalls[sku] ?? 0;
+    const paidMonth = Math.max(0, month - free);
+    const paidBeforeToday = Math.max(0, month - today - free);
+    const unit = skuCostMicros(sku, cfg);
+    bySku[sku] = paidMonth * unit;
+    monthMicros += paidMonth * unit;
+    todayMicros += (paidMonth - paidBeforeToday) * unit;
+  }
+  return { monthMicros, todayMicros, bySku };
+}
+
+/** Giá của lượt gọi KẾ TIẾP của một SKU: 0 khi còn trong phần miễn phí của tháng. */
+export function nextCallCostMicros(cfg: Pick<LeadHunterConfig, "freeTier" | "skuPriceUsdPer1000">, sku: PlacesSku, usedThisMonth: number): number {
+  return usedThisMonth < (cfg.freeTier.monthlyCalls[sku] ?? 0) ? 0 : skuCostMicros(sku, cfg);
+}
+
+/**
+ * Google báo hết hạn mức (429). Hạn mức «per day» của Google đặt lại lúc 0 giờ giờ Thái Bình Dương (07:00–08:00 UTC tuỳ
+ * mùa) — hỏi lại sau 10 phút chỉ đẻ thêm lỗi (đo 05/10/2026: 107 lỗi 429 «GetPlaceRequest per day» trong 2 giờ). Hạn
+ * mức ngày ⇒ chờ tới 08:05 UTC kế tiếp; còn lại (theo phút) ⇒ 10 phút.
+ */
+export function quotaRetryAt(now: Date, message: string): Date {
+  if (!/per day|PerDay|daily/i.test(message)) return new Date(now.getTime() + 10 * 60_000);
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 8, 5, 0));
+  return next.getTime() > now.getTime() ? next : new Date(next.getTime() + 86_400_000);
+}
+
 /** Đơn giá một lượt gọi theo cấu hình, đơn vị micro-USD (số nguyên) để cộng dồn không sai số. */
 export function skuCostMicros(sku: PlacesSku, cfg: Pick<LeadHunterConfig, "skuPriceUsdPer1000">): number {
   return Math.round((cfg.skuPriceUsdPer1000[sku] ?? 0) * 1000); // USD/1000 lượt ⇒ micro-USD/lượt = ×1e6/1e3
