@@ -54,7 +54,7 @@ import { TRIAL_DAYS } from "@/lib/billing/rules";
 import { formatNumber, formatVND } from "@/lib/format";
 import { BUSINESS_TYPES, BUSINESS_TYPE_SPEC, type BusinessType } from "@/lib/onboarding/shared";
 import { hostBrand } from "@/lib/platform/host-brand";
-import { brandAppOrigin, type SiteBrand } from "@/lib/platform/site-host";
+import { brandAppOrigin, CHOTDON_ASSETS, chotdonDomainFrom, type SiteBrand } from "@/lib/platform/site-host";
 import { getPublicSiteData, type PublicPlan, type PublicSiteData } from "@/lib/queries/public-site";
 
 /**
@@ -114,17 +114,75 @@ async function pageBrand(searchParams: PageProps["searchParams"]): Promise<SiteB
   return hostBrand();
 }
 
+/** Bộ biểu tượng Chốt Đơn — khai TƯỜNG MINH đường `/brand/chotdon/…` để bản xem trước trên host ERP cũng đúng biểu tượng. */
+const CHOTDON_ICONS: NonNullable<Metadata["icons"]> = {
+  icon: [
+    { url: CHOTDON_ASSETS.favicon, sizes: "48x48" },
+    { url: CHOTDON_ASSETS.icon, type: "image/svg+xml" },
+  ],
+  apple: [{ url: CHOTDON_ASSETS.apple, sizes: "180x180" }],
+};
+
+/** Gốc mặt tiền Chốt Đơn (`https://chotdontudong.com`) — địa chỉ chuẩn và ảnh chia sẻ phải là URL tuyệt đối. */
+function chotdonSiteOrigin(): string | null {
+  const d = chotdonDomainFrom(process.env.CHOTDON_DOMAIN);
+  return d ? `https://${d}` : null;
+}
+
 export async function generateMetadata({ searchParams }: PageProps): Promise<Metadata> {
   const chotdon = (await pageBrand(searchParams)) === "chotdon";
   const title = chotdon ? CHOTDON_TITLE : TITLE;
   const description = chotdon ? CHOTDON_DESCRIPTION : DESCRIPTION;
+  const site = chotdon ? chotdonSiteOrigin() : null;
+  /*
+    Ảnh chia sẻ 1200×630 chỉ có ở bản Chốt Đơn: thiếu nó, link dán vào Facebook / Zalo hiện một ô trống. Ảnh không in
+    con số nào đọc từ cấu hình (số ngày dùng thử, giá) — ảnh tĩnh không đổi theo khi cấu hình đổi.
+  */
+  const image = site ? { url: `${site}${CHOTDON_ASSETS.og}`, width: 1200, height: 630, alt: "Chốt Đơn Tự Động — nhân viên bán hàng AI trực fanpage 24/7" } : null;
   return {
     title: { absolute: title },
     description,
     robots: { index: true, follow: true },
-    openGraph: { title, description, type: "website", locale: "vi_VN", siteName: chotdon ? "Chốt Đơn Tự Động" : "VNXcommerce" },
-    ...(chotdon ? { icons: { icon: [{ url: "/chotdon-icon.svg", type: "image/svg+xml" }] } } : {}),
+    ...(site ? { metadataBase: new URL(site), alternates: { canonical: "/" } } : {}),
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      locale: "vi_VN",
+      siteName: chotdon ? "Chốt Đơn Tự Động" : "VNXcommerce",
+      ...(site ? { url: `${site}/` } : {}),
+      ...(image ? { images: [image] } : {}),
+    },
+    ...(image ? { twitter: { card: "summary_large_image", title, description, images: [image.url] } } : {}),
+    ...(chotdon ? { icons: CHOTDON_ICONS, manifest: CHOTDON_ASSETS.manifest } : {}),
   };
+}
+
+/**
+ * Dữ liệu có cấu trúc (schema.org) cho bản Chốt Đơn: tên pháp nhân, liên hệ, logo — CHỈ thông tin có thật trong
+ * `COMPANY`. Không khai điểm đánh giá, số khách hay lời chứng thực: trang chưa có số đo nào như vậy.
+ */
+function chotdonJsonLd(site: string): string {
+  const data = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${site}/#to-chuc`,
+        name: COMPANY.name,
+        brand: { "@type": "Brand", name: "Chốt Đơn Tự Động", logo: `${site}${CHOTDON_ASSETS.icon}` },
+        url: `${site}/`,
+        logo: `${site}/brand/chotdon/icon-512.png`,
+        email: COMPANY.email,
+        telephone: COMPANY.phoneHref,
+        taxID: COMPANY.taxCode,
+        address: { "@type": "PostalAddress", streetAddress: COMPANY.address, addressCountry: "VN" },
+      },
+      { "@type": "WebSite", "@id": `${site}/#trang`, url: `${site}/`, name: "Chốt Đơn Tự Động", inLanguage: "vi", publisher: { "@id": `${site}/#to-chuc` } },
+    ],
+  };
+  // `<` trong chuỗi bị thoát để không ai đóng được thẻ <script> bằng dữ liệu.
+  return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
 const NAV = [
@@ -753,15 +811,17 @@ export default async function SitePage({ searchParams }: PageProps) {
   // Gói thấp nhất ĐANG BÁN — máy tính so doanh thu giữ lại với phí tháng thật, không với một giá đoán.
   const minPlanPrice = data.plans.reduce<number | null>((m, p) => (p.priceVnd && (m === null || p.priceVnd < m) ? p.priceVnd : m), null);
   const year = new Date().getFullYear();
+  const siteOrigin = chotdon ? chotdonSiteOrigin() : null;
 
   return (
     <div className={`${display.variable} min-h-screen scroll-smooth bg-card text-foreground`}>
       <style>{SITE_SCALE_CSS}</style>
+      {siteOrigin ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: chotdonJsonLd(siteOrigin) }} /> : null}
 
       {/* ─── ĐẦU TRANG ─── */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-card/85 backdrop-blur-md">
         <div className={`${WRAP} flex h-16 items-center gap-3`}>
-          <a href="#" aria-label="VNXcommerce — về đầu trang">
+          <a href="#" aria-label={chotdon ? "Chốt Đơn Tự Động — về đầu trang" : "VNXcommerce — về đầu trang"}>
             <BrandLockup wordmarkClassName="text-base" brand={brand} />
           </a>
           <nav className="ml-8 hidden items-center gap-7 text-sm font-medium text-foreground/70 lg:flex" aria-label="Mục lục trang">

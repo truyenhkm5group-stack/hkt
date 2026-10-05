@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { hostTabMetadata } from "@/lib/branding/copy";
 import { hostBrand } from "@/lib/platform/host-brand";
+import { CHOTDON_ASSETS } from "@/lib/platform/site-host";
 import { hostOrganization } from "@/lib/platform/host-org";
 import "./globals.css";
 
@@ -37,7 +38,14 @@ const HOME_METADATA: Metadata = {
 const CHOTDON_METADATA: Metadata = {
   title: { default: "Chốt Đơn Tự Động", template: "%s · Chốt Đơn Tự Động" },
   description: "Nhân viên bán hàng AI trực fanpage 24/7: tư vấn đúng giá, đúng hàng còn và chốt đơn cho shop. Một sản phẩm của VNXcommerce.",
-  icons: { icon: [{ url: "/chotdon-icon.svg", type: "image/svg+xml" }] },
+  icons: {
+    icon: [
+      { url: CHOTDON_ASSETS.favicon, sizes: "48x48" },
+      { url: CHOTDON_ASSETS.icon, type: "image/svg+xml" },
+    ],
+    apple: [{ url: CHOTDON_ASSETS.apple, sizes: "180x180" }],
+  },
+  manifest: CHOTDON_ASSETS.manifest,
 };
 
 export async function generateMetadata(): Promise<Metadata> {

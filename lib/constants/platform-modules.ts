@@ -111,8 +111,9 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/gioi-thieu`: trang giới thiệu nền tảng ở tên miền gốc (lib/platform/site-host.ts) — người đọc chưa có tổ chức;
  *    trang chỉ đọc gói cước và chế độ đăng ký của nền tảng.
  *  · `/_next`: tài nguyên tĩnh của Next.
+ *  · `/robots.txt`, `/sitemap.xml`: chỉ trả nội dung ở mặt tiền (lib/site/seo.ts), host khác 404 — không dữ liệu tổ chức.
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next", "/robots.txt", "/sitemap.xml"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {

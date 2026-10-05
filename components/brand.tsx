@@ -41,12 +41,15 @@ export function BrandWordmark({ className }: { className?: string }) {
   );
 }
 
-/** Ký hiệu «Chốt Đơn Tự Động»: bong bóng chat có dấu tích — cùng nét với `public/chotdon-icon.svg`. */
+/**
+ * Ký hiệu «Chốt Đơn Tự Động»: bong bóng chat ĐẶC có dấu tích — cùng hình với bộ biểu tượng `public/brand/chotdon/`
+ * (favicon, iOS, Android). Luôn đặt trên ô `bg-brand`: bong bóng lấy màu chữ, dấu tích lấy màu thương hiệu (khoét lỗ).
+ */
 export function ChotDonGlyph({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 44 36" className={cn("h-4 w-auto", className)} fill="none" stroke="currentColor" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" aria-hidden>
-      <path d="M8 3h28a5 5 0 0 1 5 5v13a5 5 0 0 1-5 5H21l-9 7v-7H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5z" />
-      <path d="m14 15 5 5 11-11" strokeWidth={4.5} />
+    <svg viewBox="10 12.5 44 40.5" className={cn("h-4 w-auto", className)} aria-hidden>
+      <path d="M17 13h30a7 7 0 0 1 7 7v17a7 7 0 0 1-7 7H32.5L22 52.5V44h-5a7 7 0 0 1-7-7V20a7 7 0 0 1 7-7z" fill="currentColor" />
+      <path d="m22 28.5 6.8 6.8L42.5 21.6" fill="none" stroke="var(--brand)" strokeWidth={5.6} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

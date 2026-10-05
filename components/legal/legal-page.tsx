@@ -2,12 +2,23 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { BrandLockup } from "@/components/brand";
 import { COMPANY, PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
+import { hostBrand } from "@/lib/platform/host-brand";
+import type { SiteBrand } from "@/lib/platform/site-host";
+
+/** Tên thương hiệu in trên tiêu đề tab của văn bản pháp lý — theo host đang mở (`chotdontudong.com` ⇒ Chốt Đơn Tự Động). */
+export function legalBrandName(brand: SiteBrand): string {
+  return brand === "chotdon" ? "Chốt Đơn Tự Động" : "VNXcommerce";
+}
 
 /**
  * Khung chung của văn bản pháp lý công khai (`/chinh-sach-bao-mat`, `/dieu-khoan-su-dung`): đầu trang, tiêu đề + phiên
  * bản, chân trang dẫn chéo hai văn bản. Trang tĩnh: không đọc CSDL, không cần phiên.
+ *
+ * Mở từ `chotdontudong.com` thì đầu trang mang logo Chốt Đơn Tự Động và một dòng nói rõ đây là sản phẩm của cùng pháp
+ * nhân, chạy trên cùng nền tảng — để người đọc không thấy mình bị đưa sang một công ty khác. NỘI DUNG văn bản (có số
+ * phiên bản) không đổi theo host: sửa câu chữ của văn bản là việc của phiên bản mới, không phải của giao diện.
  */
-export function LegalPage({
+export async function LegalPage({
   title,
   version,
   effective,
@@ -20,12 +31,13 @@ export function LegalPage({
   intro: ReactNode;
   children: ReactNode;
 }) {
+  const brand = await hostBrand();
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/60">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" aria-label="VNXcommerce — trang chủ">
-            <BrandLockup wordmarkClassName="text-base" />
+          <Link href="/" aria-label={`${legalBrandName(brand)} — trang chủ`}>
+            <BrandLockup wordmarkClassName="text-base" brand={brand} />
           </Link>
         </div>
       </header>
@@ -36,6 +48,12 @@ export function LegalPage({
             Phiên bản {version} · Hiệu lực từ {effective}
           </p>
           <div className="text-[15px] leading-7">{intro}</div>
+          {brand === "chotdon" ? (
+            <p className="rounded-lg border border-border/70 bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground">
+              <strong className="text-foreground">Chốt Đơn Tự Động</strong> (chotdontudong.com) là sản phẩm trợ lý AI bán hàng của {COMPANY.name},
+              chạy trên nền tảng VNXcommerce. Văn bản dưới đây áp dụng cho Chốt Đơn Tự Động.
+            </p>
+          ) : null}
         </div>
         {children}
       </main>
