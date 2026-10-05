@@ -349,6 +349,12 @@ function testWorktreePolicy() {
   assert.equal(can({ owner: null, idleHours: 72 }, true).ok, true, "cây không rõ chủ, đã vào, sạch, lâu không động: dọn được KHI chủ shop cho phép");
   assert.equal(can({ merged: "EMPTY", idleHours: 72 }).ok, true, "cây của mình dựng rồi bỏ, không commit nào, lâu không động");
   assert.equal(can({ merged: "ANCESTOR", uniqueLocal: 1 }).ok, true, "đầu nhánh nằm trong nhánh tích hợp ⇒ không commit nào mất");
+
+  // Cây LEAD sống suốt sứ mệnh: sạch + không commit riêng KHÔNG có nghĩa là bỏ đi (reviewer 06/10/2026).
+  assert.notEqual(cls({ role: "LEAD", merged: "EMPTY" }), "MERGED_SAFE_TO_CLEAN");
+  assert.notEqual(cls({ role: "LEAD" }), "MERGED_SAFE_TO_CLEAN");
+  refuse({ role: "LEAD" }, "LEAD");
+  assert.equal(cleanupDecision(w({ role: "LEAD" }), CFG, { allowUnowned: false, allowLead: true }).ok, true, "nêu đích tường minh kèm --lead thì dọn được");
 }
 
 /* ═════════════ 6 · ĐỐI CHIẾU KHI MAIN CHẠY TIẾP ═════════════ */
@@ -510,6 +516,49 @@ async function testLifecycle() {
       ),
     );
     assert.equal((await ai(repo, "validate", "m1")).code, 0);
+
+    // ── ĐIỂM VÀO: `lead` dựng cây Lead từ origin/main VỪA FETCH, không ghi gì vào checkout đang đứng ──
+    const headBefore = g(repo, "rev-parse", "HEAD");
+    const statusBefore = g(repo, "status", "--porcelain");
+    const ldry = await ai(repo, "lead", "m2", "--dry-run");
+    assert.equal(ldry.code, 0, ldry.text);
+    assert.equal(existsSync(path.join(tmp, "wt-m2")), false, "chạy thử không dựng cây Lead");
+    const ld = await ai(repo, "lead", "m2", "Sứ", "mệnh", "hai");
+    assert.equal(ld.code, 0, ld.text);
+    const wtLead = path.join(tmp, "wt-m2");
+    assert.equal(g(wtLead, "rev-parse", "HEAD"), originTip, "cây Lead dựng từ origin/main vừa fetch, không từ main cục bộ cũ");
+    assert.equal(g(wtLead, "rev-parse", "--abbrev-ref", "HEAD"), "claude/m2", "nhánh Lead mang tiền tố mà cầu nối mở PR chấp nhận");
+    const leadMission = JSON.parse(readFileSync(path.join(wtLead, ".ai", "missions", "m2.json"), "utf8")) as { title: string };
+    assert.equal(leadMission.title, "Sứ mệnh hai");
+    assert.deepEqual(validateMission(leadMission, CFG).errors, [], "khung sứ mệnh mới phải hợp lệ ngay");
+    assert.equal(existsSync(path.join(repo, ".ai", "missions", "m2.json")), false, "không ghi vào checkout đang đứng");
+    assert.equal(g(repo, "rev-parse", "HEAD"), headBefore);
+    assert.equal(g(repo, "status", "--porcelain"), statusBefore);
+    assert.equal(readManifest(wtLead)?.role, "LEAD");
+    assert.match((await ai(wtLead, "whoami")).text, /CÂY LEAD — sứ mệnh m2/);
+    assert.match((await ai(repo, "status", "m1")).text, /0\/4 worker đang chạy/, "cây Lead không ăn chỗ worker");
+    const ld2 = await ai(repo, "lead", "m2");
+    assert.equal(ld2.code, 1);
+    assert.match(ld2.text, /nhánh claude\/m2 đã tồn tại/);
+    assert.equal((await ai(repo, "lead", "Bad_Name")).code, 1, "tên sứ mệnh phải là slug");
+    mkdirSync(path.join(tmp, "wt-m3"));
+    assert.match((await ai(repo, "lead", "m3")).text, /thư mục .*wt-m3 đã tồn tại/);
+    g(repo, "push", "-q", "origin", "main:refs/heads/claude/m4");
+    assert.match((await ai(repo, "lead", "m4")).text, /nhánh origin\/claude\/m4 đã tồn tại/);
+    const cmLead = await ai(repo, "cleanup", "--merged", "--apply");
+    assert.ok(existsSync(wtLead) && !cmLead.text.includes("wt-m2"), "cleanup --merged không bao giờ chọn cây LEAD");
+    assert.match((await ai(repo, "cleanup", wtLead, "--apply")).text, /LEAD: cây Lead/);
+    assert.ok(existsSync(wtLead));
+
+    // Đường khởi động THẬT: chép công cụ ra NGOÀI kho rồi chạy bằng node trần trong một tiến trình con.
+    const outside = path.join(tmp, "ngoai-kho");
+    mkdirSync(outside);
+    const copy = path.join(outside, "ai-tech.ts");
+    writeFileSync(copy, readFileSync(path.join(__dirname, "..", "scripts", "ai-tech.ts")));
+    const nodeRun = spawnSync(process.execPath, ["--experimental-strip-types", copy, "lead", "m5", "--dry-run"], { cwd: repo, encoding: "utf8" });
+    assert.equal(nodeRun.status, 0, nodeRun.stderr);
+    assert.match(nodeRun.stdout, /\[CHẠY THỬ\] dựng cây Lead cho sứ mệnh m5/);
+    assert.ok(nodeRun.stdout.includes(originTip.slice(0, 12)), "từ tệp ngoài kho vẫn nhận đúng kho và đúng gốc");
 
     let st = await ai(repo, "status", "m1");
     assert.match(st.text, /READY\s+P1\s+LOW\s+t1/);
