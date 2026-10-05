@@ -33,23 +33,41 @@ jobs:
           python -m pip install -q -r requirements.txt
           python -m unittest discover -s tests -v
 
-      - name: Chạy run.bat và hỏi /api/health
+      - name: Chạy run.bat, rồi chạy LẠI khi bản cũ còn giữ cổng, rồi khi chương trình lạ giữ cổng
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "run.bat < NUL > runbat.log 2>&1" -PassThru -WindowStyle Hidden
-          $ok = $false
-          for ($i = 0; $i -lt 90; $i++) {
-            Start-Sleep -Seconds 2
-            try {
-              $r = Invoke-RestMethod -Uri "http://127.0.0.1:8800/api/health" -TimeoutSec 3
-              if ($r.ok) { $ok = $true; break }
-            } catch {}
+          function Health($port) { try { Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 3 } catch { $null } }
+          function WaitHealth($port, $notPid) {
+            for ($i = 0; $i -lt 90; $i++) { Start-Sleep -Seconds 2; $h = Health $port; if ($h -and $h.ok -and $h.pid -ne $notPid) { return $h } }
+            return $null
           }
-          if ($ok) {
-            Invoke-RestMethod -Uri "http://127.0.0.1:8800/" | Out-Null
-            Invoke-RestMethod -Uri "http://127.0.0.1:8800/api/legacy/preview" | ConvertTo-Json -Depth 4
-          }
-          Get-Content runbat.log -ErrorAction SilentlyContinue
-          taskkill /F /T /PID $p.Id 2>$null
-          if (-not $ok) { Write-Error "run.bat không khởi động được bot trong 180 giây"; exit 1 }
-          Write-Host "run.bat chạy được trên Windows: /api/health = ok"
+          function StartRunBat($log) { Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "run.bat < NUL > $log 2>&1" -PassThru -WindowStyle Hidden }
+
+          # 1) Lần đầu: tạo .venv, cài thư viện, bot lên
+          $a = StartRunBat "run1.log"
+          $h1 = WaitHealth 8800 0
+          Get-Content run1.log
+          if (-not $h1) { Write-Error "run.bat lần 1 không khởi động được bot"; exit 1 }
+          Invoke-RestMethod -Uri "http://127.0.0.1:8800/" | Out-Null
+          Write-Host "Lần 1 OK, pid=$($h1.pid)"
+
+          # 2) Bấm run.bat lần nữa khi bản cũ CÒN chạy (đúng tình huống chủ shop gặp) ⇒ phải tắt bản cũ và lên bản mới
+          $b = StartRunBat "run2.log"
+          $h2 = WaitHealth 8800 $h1.pid
+          Get-Content run2.log
+          if (-not $h2) { Write-Error "run.bat lần 2 không thay được bản cũ đang giữ cổng 8800"; exit 1 }
+          Write-Host "Lần 2 OK: bản cũ pid=$($h1.pid) đã tắt, bản mới pid=$($h2.pid)"
+          taskkill /F /T /PID $a.Id 2>$null; taskkill /F /T /PID $b.Id 2>$null
+          Stop-Process -Id $h2.pid -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
+          # 3) Chương trình LẠ giữ 8800 ⇒ không bị tắt, bot chuyển sang 8801
+          $foreign = Start-Process -FilePath "python" -ArgumentList "-m", "http.server", "8800", "--bind", "127.0.0.1" -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $c = StartRunBat "run3.log"
+          $h3 = WaitHealth 8801 0
+          Get-Content run3.log
+          if (-not $h3) { Write-Error "Cổng 8800 bị chương trình lạ giữ nhưng bot không chuyển sang 8801"; exit 1 }
+          if ($foreign.HasExited) { Write-Error "stop_old.ps1 đã tắt nhầm chương trình lạ"; exit 1 }
+          Write-Host "Lần 3 OK: chương trình lạ vẫn sống, bot chạy ở 8801"
+          taskkill /F /T /PID $c.Id 2>$null; Stop-Process -Id $h3.pid -Force -ErrorAction SilentlyContinue; Stop-Process -Id $foreign.Id -Force

@@ -510,7 +510,7 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "time": db.now(), "auth_required": bool(ADMIN_TOKEN)}
+    return {"ok": True, "app": "pancake-ai-sales-manager", "pid": os.getpid(), "time": db.now(), "auth_required": bool(ADMIN_TOKEN)}
 
 
 # ---------------------------------------------------------------------- cài đặt & kết nối
@@ -920,11 +920,20 @@ if __name__ == "__main__":
     import webbrowser
 
     host, port = os.environ.get("HOST", "127.0.0.1"), int(os.environ.get("PORT", "8800"))
-    with socket.socket() as sock:
-        if sock.connect_ex(("127.0.0.1", port)) == 0:
-            print(f"\n[LOI] Cong {port} dang bi chuong trinh khac dung (co the bot da chay o cua so khac).")
-            print(f"      Mo thu http://127.0.0.1:{port} hoac doi PORT trong file .env\n")
+    def _busy(p: int) -> bool:
+        with socket.socket() as sock:
+            return sock.connect_ex(("127.0.0.1", p)) == 0
+
+    if _busy(port):
+        # run.bat đã tắt bản cũ của CHÍNH app này (stop_old.ps1); còn bận nghĩa là chương trình khác giữ cổng
+        # ⇒ chuyển sang cổng trống kế tiếp thay vì dừng hẳn.
+        wanted = port
+        port = next((p for p in range(wanted + 1, wanted + 20) if not _busy(p)), 0)
+        if not port:
+            print(f"\n[LOI] Cong {wanted} va 19 cong ke tiep deu dang bi dung. Doi PORT trong file .env\n")
             raise SystemExit(1)
+        print(f"\n[CHU Y] Cong {wanted} dang bi chuong trinh khac dung -> bot chay o cong {port}.")
+        print(f"        Webhook / dia chi trinh duyet dung cong {port}. Muon co dinh: dat PORT={port} trong file .env\n")
 
     def _open_browser_when_ready() -> None:
         """Chỉ mở trình duyệt khi bot ĐÃ trả lời — mở sớm thì trình duyệt báo ERR_CONNECTION_REFUSED."""
