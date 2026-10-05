@@ -16,7 +16,7 @@
  * "đang trả lời câu trước", không chen tin vào giữa.
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
@@ -32,7 +32,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isMessagingChannel, isPublicChannel, PUBLIC_CHAT_CHANNELS, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
@@ -503,7 +503,13 @@ async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
 }
 
-/** Trần tin của một khách truy cập (WEB) trong 10 phút và của cả tổ chức trong ngày — chống bão tin làm tốn tiền của shop. */
+/**
+ * Trần tin của MỘT khách trong 10 phút — chống một người nhắn dồn dập làm tốn tiền của shop.
+ *
+ * KHÔNG có trần chung cả tổ chức theo ngày (bỏ 05/10/2026, chủ shop chốt): trần cũ cộng `turns` TRỌN ĐỜI của mọi hội thoại
+ * có tin trong 24 giờ, nên vài chục khách quen Messenger đủ chạm 500 và từ đó MỌI khách thật nhận câu «quá tải» mà không ai
+ * được báo gọi lại. Chặn cả cửa hàng vì một ngày đông khách là chặn đúng thứ bot sinh ra để làm.
+ */
 async function webRateProblem(conv: ConvRow): Promise<string | null> {
   const db = await getDb();
   const m = schema.salesChatMessages;
@@ -516,8 +522,6 @@ async function webRateProblem(conv: ConvRow): Promise<string | null> {
       .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
     if (Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min) return "Anh/chị nhắn nhanh quá — đợi vài phút rồi nhắn tiếp giúp em nhé.";
   }
-  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(inArray(c.channel, [...PUBLIC_CHAT_CHANNELS]), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
-  if (Number(d?.n ?? 0) >= SALES_CHATBOT_LIMITS.webTurnsPerOrgPerDay) return "Shop đang quá tải tin nhắn — nhân viên sẽ liên hệ lại sớm ạ.";
   return null;
 }
 
