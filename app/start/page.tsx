@@ -11,6 +11,7 @@ import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { hostBrand } from "@/lib/platform/host-brand";
 import { moduleDef } from "@/lib/constants/platform-modules";
 import { listPlans } from "@/lib/entitlements/check";
+import { phoneOtpRequired } from "@/lib/onboarding/phone-otp";
 import { signupMode } from "@/lib/onboarding/service";
 import { BUSINESS_TYPE_SPEC, BUSINESS_TYPES, CORE_MODULES, SELECTABLE_MODULES } from "@/lib/onboarding/shared";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
@@ -65,6 +66,7 @@ export default async function StartPage({ searchParams }: { searchParams: Promis
           providers={enabledProviders()}
           social={social ? { provider: social.provider, email: social.email, name: social.name } : null}
           initialBusinessType={initialQuickBusinessType(params.nganh, await hostBrand())}
+          otpRequired={await phoneOtpRequired()}
         />
       </main>
     );

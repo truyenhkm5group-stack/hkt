@@ -156,6 +156,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/go-live.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY (khoá thử để mã hoá token Pancake) và PLATFORM_AI_* (bật AI dùng chung bằng khoá GIẢ) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
+  "tests/phone-otp.test.ts":
+    "Đặt PLATFORM_SIGNUP_MODE=open trong khối try và TRẢ LẠI giá trị cũ ở finally — cùng mẫu với quick-start.test.ts: trần đăng ký là min(biến môi trường, cài đặt) nên bài kiểm phải tự dựng cả hai vế, không phụ thuộc máy đang chạy.",
   "tests/quick-start.test.ts":
     "ĐẶT PLATFORM_SIGNUP_MODE = open để đăng ký nhanh chạy được — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally. Biến AI dùng chung (PLATFORM_AI_*) đi qua bộ đọc giả `envOf`, không đọc môi trường của máy.",
   "tests/onboarding.test.ts":

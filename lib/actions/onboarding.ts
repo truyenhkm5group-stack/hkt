@@ -10,6 +10,7 @@ import { checkAdminStep, checkInviteStep, checkOrgStep, createOrganizationFromSi
 import type { SignupPreview, SignupStepResult } from "@/lib/onboarding/shared";
 import { setSignupSetting } from "@/lib/onboarding/signup-mode";
 import { quickSignup } from "@/lib/onboarding/quick";
+import { sendSignupOtp, sendTestOtp, setPhoneOtpSetting, type PhoneOtpSetting, type SendOtpResult } from "@/lib/onboarding/phone-otp";
 import { readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 
@@ -75,7 +76,12 @@ export async function createOrganizationAction(draft: unknown): Promise<{ ok: tr
  * ĐĂNG KÝ NHANH một màn hình (docs/platform/quick-start.md). Hồ sơ Google / Facebook (nếu có) đọc từ cookie KÝ ở MÁY CHỦ
  * — không bao giờ từ trình duyệt. Thành công ⇒ phiên của quản trị mới rồi vào `/` (trang «Bắt đầu»).
  */
-export async function quickSignupAction(input: unknown): Promise<{ error: string } | void> {
+/** Gửi mã xác minh SĐT qua Zalo (đăng ký nhanh, khi người vận hành bật). Trần gửi do lõi đếm từ bảng. */
+export async function sendSignupOtpAction(phone: unknown): Promise<SendOtpResult> {
+  return sendSignupOtp(phone, await whoAmI());
+}
+
+export async function quickSignupAction(input: unknown): Promise<{ error: string; needOtp?: true } | void> {
   const who = await whoAmI();
   if (who.kind === "operator") return { error: "Người vận hành tạo hộ khách bằng trình hướng dẫn đầy đủ (/start?day-du=1)." };
   const store = await cookies();
@@ -93,6 +99,22 @@ async function requireOperator(): Promise<{ user: SessionUser } | { error: strin
   const user = await requirePermission("platform:operate");
   const denial = platformOperatorDenial(user);
   return denial ? { error: denial } : { user };
+}
+
+/** Bật / tắt mã xác minh SĐT qua Zalo ZNS khi đăng ký (người vận hành). */
+export async function setPhoneOtpSettingAction(input: unknown): Promise<{ ok: true; setting: PhoneOtpSetting } | { error: string }> {
+  const r = await requireOperator();
+  if ("error" in r) return r;
+  const out = await setPhoneOtpSetting({ orgCode: r.user.organization!.code, userId: r.user.id, email: r.user.email }, input);
+  if ("ok" in out) revalidatePath("/platform");
+  return out;
+}
+
+/** Gửi THỬ một mã tới SĐT người vận hành nhập, bằng mẫu đang khai — trước khi bật cho khách. */
+export async function testPhoneOtpAction(input: { phone: unknown; templateId: unknown; param: unknown }): Promise<{ ok: true; message: string } | { error: string }> {
+  const r = await requireOperator();
+  if ("error" in r) return r;
+  return sendTestOtp(input);
 }
 
 export async function createInviteAction(input: { note?: string; planKey?: string; ttlDays?: number }): Promise<{ ok: true; code: string; expiresAt: string } | { error: string }> {

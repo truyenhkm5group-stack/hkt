@@ -4893,6 +4893,33 @@ export const platformSignupInvites = pgTable(
   ],
 );
 
+/**
+ * MÃ XÁC MINH SĐT KHI ĐĂNG KÝ (0214 · lib/onboarding/phone-otp.ts): mỗi lần gửi một dòng. Mã KHÔNG lưu thô — chỉ băm có khoá
+ * (`AUTH_SECRET`); IP chỉ lưu băm. Bảng này cũng là nguồn ĐẾM của trần gửi (theo SĐT / theo IP / toàn nền tảng) — mỗi tin
+ * Zalo ZNS là tiền thật.
+ */
+export const platformPhoneOtps = pgTable(
+  "platform_phone_otps",
+  {
+    id: id(),
+    phone: text("phone").notNull(),
+    codeHash: text("code_hash").notNull(),
+    ipHash: text("ip_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** `SENT` · `FAILED` (Zalo từ chối — vẫn tính vào trần, vì một lượt gọi hỏng vẫn có thể là lượt dò). */
+    status: text("status").notNull(),
+    error: text("error"),
+  },
+  (t) => [
+    index("platform_phone_otps_phone_at_idx").on(t.phone, t.createdAt),
+    index("platform_phone_otps_ip_at_idx").on(t.ipHash, t.createdAt),
+    check("platform_phone_otps_status_check", sql`${t.status} in ('SENT','FAILED')`),
+  ],
+);
+
 /** Mỗi lượt thử đăng ký / nhập mã mời — nguồn ĐẾM của trần theo IP (băm) và theo ngày. Không giữ IP thô. */
 export const platformSignupAttempts = pgTable(
   "platform_signup_attempts",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { OrDivider, SocialButtons } from "@/components/auth/social-buttons";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { forgetSocialSignupAction } from "@/lib/actions/oauth";
 import { TRIAL_DAYS } from "@/lib/billing/rules";
 import { PRIVACY_POLICY, TERMS_OF_SERVICE } from "@/lib/constants/company";
-import { quickSignupAction } from "@/lib/actions/onboarding";
+import { quickSignupAction, sendSignupOtpAction } from "@/lib/actions/onboarding";
 import { ADMIN_PASSWORD_MIN, QUICK_BUSINESS_LABEL, QUICK_BUSINESS_TYPES, type QuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,7 @@ export function QuickStart({
   providers,
   social,
   initialBusinessType = "food",
+  otpRequired = false,
 }: {
   needInvite: boolean;
   initialInvite: string;
@@ -33,6 +34,8 @@ export function QuickStart({
   social: Social;
   /** Ngành chọn sẵn — `ai_sales` trên host «Chốt Đơn Tự Động», hoặc `?nganh=` hợp lệ. */
   initialBusinessType?: QuickBusinessType;
+  /** Người vận hành bật xác minh SĐT qua Zalo (lib/onboarding/phone-otp.ts) ⇒ phải nhập mã trước khi tạo. */
+  otpRequired?: boolean;
 }) {
   const [storeName, setStoreName] = useState("");
   const [businessType, setBusinessType] = useState<QuickBusinessType>(initialBusinessType);
@@ -43,14 +46,38 @@ export function QuickStart({
   const [invite, setInvite] = useState(initialInvite);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [otp, setOtp] = useState("");
+  const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+  const [resendIn, setResendIn] = useState(0);
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
   const needEmail = !social || !social.email;
   const needPassword = !social;
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendOtp = () => {
     setError(null);
     start(async () => {
-      const r = await quickSignupAction({ storeName, businessType, phone, email, password, invite: needInvite ? invite : null });
+      const r = await sendSignupOtpAction(phone);
+      if ("error" in r) {
+        setError(r.error);
+        if (r.retryAfterSeconds) setResendIn(r.retryAfterSeconds);
+        return;
+      }
+      setOtpSentTo(r.sentTo);
+      setResendIn(r.resendAfterSeconds);
+    });
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Bước 1 khi phải xác minh: gửi mã trước (form vẫn kiểm đủ ô bắt buộc nhờ trình duyệt).
+    if (otpRequired && !otpSentTo) return sendOtp();
+    setError(null);
+    start(async () => {
+      const r = await quickSignupAction({ storeName, businessType, phone, email, password, invite: needInvite ? invite : null, otp });
       if (r && "error" in r) setError(r.error);
     });
   };
@@ -106,8 +133,32 @@ export function QuickStart({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="qs-phone">Số điện thoại</Label>
-          <Input id="qs-phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0912 345 678" maxLength={30} required />
+          <Input
+            id="qs-phone"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            value={phone}
+            onChange={(e) => {
+              setPhone(e.target.value);
+              setOtpSentTo(null);
+              setOtp("");
+            }}
+            placeholder="0912 345 678"
+            maxLength={30}
+            required
+          />
+          {otpRequired && !otpSentTo ? <p className="text-xs text-muted-foreground">Mã xác minh sẽ gửi qua Zalo tới số này.</p> : null}
         </div>
+        {otpRequired && otpSentTo ? (
+          <div className="space-y-1.5" data-quick-otp>
+            <Label htmlFor="qs-otp">Mã xác minh Zalo gửi tới {otpSentTo}</Label>
+            <Input id="qs-otp" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 số" maxLength={6} required autoFocus />
+            <button type="button" onClick={sendOtp} disabled={pending || resendIn > 0} className="text-xs text-primary hover:underline disabled:text-muted-foreground disabled:no-underline">
+              {resendIn > 0 ? `Gửi lại mã sau ${resendIn} giây` : "Gửi lại mã"}
+            </button>
+          </div>
+        ) : null}
         {needEmail ? (
           <div className="space-y-1.5">
             <Label htmlFor="qs-email">Email</Label>
@@ -135,7 +186,7 @@ export function QuickStart({
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
         <Button type="submit" className="h-10 w-full" disabled={pending} data-quick-submit>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-          {pending ? "Đang dựng cửa hàng… (dưới 1 phút)" : "Tạo cửa hàng"}
+          {otpRequired && !otpSentTo ? (pending ? "Đang gửi mã…" : "Gửi mã xác minh qua Zalo") : pending ? "Đang dựng cửa hàng… (dưới 1 phút)" : "Tạo cửa hàng"}
         </Button>
       </form>
 

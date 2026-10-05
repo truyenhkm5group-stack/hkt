@@ -33,6 +33,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, salesBotBillingSource } from "@/lib/sales
 import { quickModules, quickSignup } from "@/lib/onboarding/quick";
 import { orgCodeBase, orgCodeCandidates } from "@/lib/onboarding/quick-shared";
 import { hashIp } from "@/lib/onboarding/rate";
+import { PHONE_OTP_SETTING_KEY, sendSignupOtp, setPhoneOtpSetting } from "@/lib/onboarding/phone-otp";
 import { invalidateSignupSetting, SIGNUP_MODE_SETTING_KEY } from "@/lib/onboarding/signup-mode";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
@@ -172,6 +173,8 @@ async function cleanup() {
     }
   }
   await pdb.delete(schema.platformIdentities).where(inArray(schema.platformIdentities.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformPhoneOtps).where(eq(schema.platformPhoneOtps.phone, "84987654302"));
+  await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, PHONE_OTP_SETTING_KEY));
   await pdb.delete(schema.platformSignupAttempts).where(or(inArray(schema.platformSignupAttempts.organizationCode, [...ORGS]), eq(schema.platformSignupAttempts.ipHash, hashIp(IP))));
   await pdb.delete(schema.platformAuditLog).where(inArray(schema.platformAuditLog.targetOrgCode, [...ORGS]));
   await pdb.delete(schema.platformSubscriptions).where(inArray(schema.platformSubscriptions.orgCode, [...ORGS]));
@@ -244,8 +247,15 @@ async function testQuickSignupFlow() {
   assert.deepEqual(await resolveSocial(profile), { kind: "SIGNUP" }, "người mới ⇒ sang đăng ký");
   await pdb0.insert(schema.platformSettings).values({ key: BILLING_RECEIVER_KEY, value: { bin: "970422", accountNumber: "0123456789", accountName: "VNXCOMMERCE" }, updatedByEmail: "qs-test@local" });
   const dayBefore = vnDate(new Date());
-  const b = await quickSignup({ storeName: "QS Hải Sản Hai", businessType: "seafood", phone: "0987 654 302" }, who, { issue, social: profile });
+  // XÁC MINH SĐT qua Zalo bật ⇒ phải có mã; mã đúng ⇒ tạo được và mã bị tiêu (lib/onboarding/phone-otp.ts).
+  assert.ok("ok" in (await setPhoneOtpSetting({ orgCode: home, userId: "op", email: "op@local" }, { enabled: true, templateId: "312345" }, { zaloConnected: async () => true })));
+  const codes: string[] = [];
+  assert.ok("ok" in (await sendSignupOtp("0987 654 302", who, { send: async (i) => (codes.push(i.code), { ok: true }) })));
+  const b = await quickSignup({ storeName: "QS Hải Sản Hai", businessType: "seafood", phone: "0987 654 302", otp: codes[0] }, who, { issue, social: profile });
   assert.ok("ok" in b && b.orgCode === QS_B && b.loggedIn, JSON.stringify(b));
+  const [otpRow] = await pdb0.select({ consumedAt: schema.platformPhoneOtps.consumedAt }).from(schema.platformPhoneOtps).where(eq(schema.platformPhoneOtps.phone, "84987654302"));
+  assert.ok(otpRow?.consumedAt, "tạo xong ⇒ mã đã tiêu");
+  await setPhoneOtpSetting({ orgCode: home, userId: "op", email: "op@local" }, { enabled: false, templateId: "312345" });
   const adminB = await withOrganization(QS_B, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "chu@qs-b.vn") }));
   assert.equal(adminB?.name, "Chủ Hải Sản", "tên lấy từ hồ sơ Google");
   // Đã khai tài khoản nhận tiền ⇒ dùng thử TRIAL_DAYS ngày (tính cả hôm nay), ân hạn 3 ngày, rồi chỉ xem.
