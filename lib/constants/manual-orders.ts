@@ -186,6 +186,7 @@ export const MANUAL_DELIVERY_FEE_SETTING_KEY = "orders.manualDeliveryFee";
  * ═══ ĐƠN ĐỦ THÔNG TIN = ĐÃ XÁC NHẬN (chủ shop HSLC 04/10/2026) ═══
  *
  * «Đơn có đầy đủ thông tin: SĐT, địa chỉ, SKU được tính là đơn hàng luôn (không cần xác nhận), chỉ trừ những đơn huỷ.»
+ * 05/10/2026 thêm: địa chỉ phải GHÉP ĐƯỢC tỉnh + xã theo địa giới mới («tự tạo đơn đã xác nhận khi thông tin đã chính xác»).
  * Công tắc THEO TỔ CHỨC (`settings['orders.autoConfirmComplete']` = `{ enabled }`, mặc định TẮT): bật thì đơn tay «Mới» đủ ba thứ ⇒ ghi
  * thẳng «Đã xác nhận» ở lõi ghi đơn (`lib/records/order-create.ts`) — một chỗ cho chatbot, ghi đơn từ hội thoại và form
  * tạo tay, nên MỌI báo cáo đang đếm đơn đã xác nhận (hiệu quả quảng cáo, lợi nhuận danh nghĩa, marketer) tự đếm đúng mà
@@ -202,10 +203,26 @@ export const AUTO_CONFIRM_COMPLETE_SETTING_KEY = "orders.autoConfirmComplete";
  */
 export const ERP_NATIVE_SETTING_KEY = "orders.erpNative";
 
-/** Đơn ĐỦ THÔNG TIN: SĐT 8–15 chữ số · địa chỉ ≥ 5 ký tự · ít nhất một dòng hàng. HÀM THUẦN. */
-export function manualOrderComplete(recipient: { phone: string; address: string }, lineCount: number): boolean {
+/**
+ * Chỗ còn thiếu để đơn ĐỦ & ĐÚNG THÔNG TIN — rỗng = đủ. SĐT 8–15 chữ số · địa chỉ ≥ 5 ký tự · tỉnh + xã / phường đã ghép được
+ * vào danh mục địa giới mới · ít nhất một dòng hàng. Tỉnh + xã (chủ shop HSLC 05/10/2026: «tự tạo đơn đã xác nhận khi thông
+ * tin đã chính xác … chưa mapping được thì đưa phương án»): ô xã chỉ có giá trị khi lõi ghi đơn đã ĐỐI CHIẾU được với danh mục
+ * (`resolveRecipientPlace`) hoặc người đã chọn — nên «có xã» = «đã ghép được», đẩy sang hãng vận chuyển được. HÀM THUẦN.
+ */
+export function manualOrderGaps(recipient: { phone: string; address: string; province?: string; ward?: string }, lineCount: number): string[] {
   const digits = recipient.phone.replace(/\D/g, "");
-  return digits.length >= 8 && digits.length <= 15 && recipient.address.trim().length >= 5 && lineCount >= 1;
+  const out: string[] = [];
+  if (digits.length < 8 || digits.length > 15) out.push("SĐT");
+  if (recipient.address.trim().length < 5) out.push("địa chỉ");
+  else if (!(recipient.province ?? "").trim()) out.push("tỉnh / thành");
+  else if (!(recipient.ward ?? "").trim()) out.push("xã / phường");
+  if (lineCount < 1) out.push("hàng");
+  return out;
+}
+
+/** Đơn ĐỦ & ĐÚNG THÔNG TIN (`manualOrderGaps` rỗng). HÀM THUẦN. */
+export function manualOrderComplete(recipient: { phone: string; address: string; province?: string; ward?: string }, lineCount: number): boolean {
+  return manualOrderGaps(recipient, lineCount).length === 0;
 }
 export function parseManualDeliveryFee(raw: unknown): number | null {
   const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;

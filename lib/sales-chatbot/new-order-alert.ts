@@ -24,7 +24,16 @@ export const NEW_ORDER_ALERT = { settleMinutes: 5, lookbackHours: 24, perRun: 30
 
 const dedupeKeyOf = (orderId: string) => `order-new:${orderId}`;
 
-type AlertOrder = { shippingFee: number; name: string; phone: string; address: string; note: string | null };
+/** `province` / `ward` = ô tỉnh / xã đã ghép theo địa giới mới; `undefined` = nơi gọi không đọc (tin không nhắc gì). */
+type AlertOrder = { shippingFee: number; name: string; phone: string; address: string; note: string | null; province?: string; ward?: string };
+
+/** Dòng nhắc khi địa chỉ chưa ghép được tỉnh / xã — kho biết đơn này chưa gửi hãng vận chuyển được. HÀM THUẦN. */
+export function placeGapLine(o: { province?: string; ward?: string }): string {
+  if (o.province === undefined) return "";
+  if (!o.province.trim()) return "⚠ Chưa nhận ra tỉnh / thành từ địa chỉ — cần sửa địa chỉ đơn.";
+  if (o.ward !== undefined && !o.ward.trim()) return "⚠ Chưa chọn xã / phường — chọn ở đơn trước khi gửi hãng vận chuyển.";
+  return "";
+}
 type AlertLine = { name: string; quantity: number; unitPrice: number; lineTotal: number; weight: number | null };
 
 /**
@@ -39,7 +48,7 @@ export function newOrderAlertText(o: AlertOrder, lines: readonly AlertLine[], ru
   const free = freeShipVerdict(rule, subtotal, weight, o.address, formatVND).kind === "FREE";
   const fee = free ? 0 : o.shippingFee > 0 ? o.shippingFee : null;
   const note = orderNoteForGroup(o.note);
-  return orderGroupText({ header: "🆕 ĐƠN MỚI (chưa xác nhận)", name: o.name, phone: o.phone, address: o.address, province: "", lines, subtotal, shippingFee: fee, shipText: free ? "Miễn phí" : null, warnings: note ? [`Ghi chú: ${note}`] : [] });
+  return orderGroupText({ header: "🆕 ĐƠN MỚI (chưa xác nhận)", name: o.name, phone: o.phone, address: o.address, province: "", lines, subtotal, shippingFee: fee, shipText: free ? "Miễn phí" : null, warnings: [note ? `Ghi chú: ${note}` : "", placeGapLine(o)].filter(Boolean) });
 }
 
 export type NewOrderAlertResult = { candidates: number; sent: number; reason?: string };
@@ -51,7 +60,7 @@ export async function sendNewOrderAlerts(now: Date = new Date()): Promise<NewOrd
     const db = await getDb();
     const o = schema.orders;
     const rows = await db
-      .select({ id: o.id, raw: o.raw, shipPhone: o.shipPhone, billPhone: o.billPhone, shipFullAddress: o.shipFullAddress, shipAddress: o.shipAddress, shipFullName: o.shipFullName, billFullName: o.billFullName, shippingFee: o.shippingFee, note: o.note })
+      .select({ id: o.id, raw: o.raw, shipProvince: o.shipProvince, shipCommune: o.shipCommune, shipPhone: o.shipPhone, billPhone: o.billPhone, shipFullAddress: o.shipFullAddress, shipAddress: o.shipAddress, shipFullName: o.shipFullName, billFullName: o.billFullName, shippingFee: o.shippingFee, note: o.note })
       .from(o)
       .where(and(eq(o.stage, "NEW"), ne(o.source, ORDER_SYNC_CHANNEL), gte(o.insertedAt, new Date(now.getTime() - NEW_ORDER_ALERT.lookbackHours * 3_600_000)), lte(o.insertedAt, new Date(now.getTime() - NEW_ORDER_ALERT.settleMinutes * 60_000))))
       .limit(200);
@@ -75,7 +84,7 @@ export async function sendNewOrderAlerts(now: Date = new Date()): Promise<NewOrd
         .filter((x) => x.orderId === r.id)
         .map((x) => ({ name: x.variation ? `${x.name} (${x.variation})` : x.name, quantity: x.quantity, unitPrice: x.unitPrice, lineTotal: x.lineTotal, weight: variantWeightGrams(x.weight, x.name, x.variation ?? "") }));
       if (!lines.length) continue;
-      const body = newOrderAlertText({ shippingFee: r.shippingFee, name: r.shipFullName || r.billFullName || "—", phone: (r.shipPhone || r.billPhone || "").trim(), address: (r.shipFullAddress || r.shipAddress || "").trim(), note: r.note }, lines, rule);
+      const body = newOrderAlertText({ shippingFee: r.shippingFee, name: r.shipFullName || r.billFullName || "—", phone: (r.shipPhone || r.billPhone || "").trim(), address: (r.shipFullAddress || r.shipAddress || "").trim(), note: r.note, province: r.shipProvince ?? "", ward: r.shipCommune ?? "" }, lines, rule);
       await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title: "Đơn mới chưa xác nhận", body, dedupeKey: dedupeKeyOf(r.id), event: "order.new", subject: { type: "ORDER", id: r.id } });
       sent += 1;
     }

@@ -421,13 +421,21 @@ export function InboxThreadView({
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Đơn của khách</p>
           {ordersSummary.length === 0 ? <p className="text-muted-foreground">Chưa có đơn.</p> : null}
           {ordersSummary.map((o) => (
-            <Link key={o.id} href={`/orders/${encodeURIComponent(o.id)}`} className="flex items-center justify-between gap-2 rounded px-1 py-1 hover:bg-muted">
-              <span>
-                #{o.shortCode} · {o.totalText}
-                {o.byBot ? <span className="text-muted-foreground"> · bot</span> : null}
-              </span>
-              <span className={cn("text-[12px]", o.outcome === "DELIVERED" ? "text-emerald-700 dark:text-emerald-300" : o.outcome === "RETURNED" || o.outcome === "RETURNED_BY_RULE" ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>{o.outcomeLabel}</span>
-            </Link>
+            <div key={o.id}>
+              <Link href={`/orders/${encodeURIComponent(o.id)}`} className="flex items-center justify-between gap-2 rounded px-1 py-1 hover:bg-muted">
+                <span>
+                  #{o.shortCode} · {o.totalText}
+                  {o.byBot ? <span className="text-muted-foreground"> · bot</span> : null}
+                </span>
+                <span className={cn("text-[12px]", o.outcome === "DELIVERED" ? "text-emerald-700 dark:text-emerald-300" : o.outcome === "RETURNED" || o.outcome === "RETURNED_BY_RULE" ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>{o.outcomeLabel}</span>
+              </Link>
+              {/* Địa chỉ chưa ghép được tỉnh / xã ⇒ chưa gửi hãng vận chuyển được, chưa tự xác nhận — sửa ngay từ hộp thư. */}
+              {o.placeGap ? (
+                <Link href={`/orders/${encodeURIComponent(o.id)}/edit`} className="block px-1 text-[11.5px] font-medium text-amber-700 hover:underline dark:text-amber-300">
+                  ⚠ {o.placeGap} — sửa đơn →
+                </Link>
+              ) : null}
+            </div>
           ))}
           <Button size="sm" variant={showOrder ? "ghost" : "default"} className="mt-1 h-8 w-full" onClick={() => setShowOrder((v) => !v)}>
             {showOrder ? "Đóng form tạo đơn" : "+ Tạo đơn cho khách này"}

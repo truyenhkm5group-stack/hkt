@@ -62,6 +62,8 @@ function testPure() {
 
   // ── SĐT / địa chỉ / mốc cắt ──
   assert.deepEqual(phonesInText("Lan 0912 345 678, gọi +84 987.654.321 nhé, mã 12345"), ["0912345678", "0987654321"]);
+  assert.deepEqual(phonesInText("sđt 0909938344 1kg nhé"), ["0909938344"], "số di động 10 chữ số không nuốt chữ số của con số đứng sau");
+  assert.deepEqual(phonesInText("bàn 0243 826 1234"), ["02438261234"], "số bàn 11 chữ số giữ nguyên");
   const corpus = "Chị Lan 0912345678, 12 Hàng Bạc, Hoàn Kiếm, Hà Nội";
   assert.ok(addressGrounded("12 Hàng Bạc, Q. Hoàn Kiếm, Hà Nội", corpus), "AI viết gọn lại vẫn nhận (≥ 70% từ có trong hội thoại)");
   assert.ok(!addressGrounded("45 Lý Thường Kiệt, Hai Bà Trưng, Hà Nội", corpus), "địa chỉ không có trong hội thoại ⇒ không nhận");
@@ -285,6 +287,21 @@ export async function testSalesOrderSync() {
         assert.ok(r5.checked === 1 && calls > callsB, `người nhắn sau bot ⇒ hội thoại vẫn được đọc (${JSON.stringify(r5)})`);
         const [c3] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-3"));
         assert.notEqual(((c3.state as ChatState).orderSync as OrderSyncThreadState).lastOutcome, "BOT");
+        // ── «Bot phụ trách» KHÔNG khoá hội thoại (HSLC 05/10/2026: khách chốt 1kg lúc 14:07, kịch bản Pancake trả lời, hội thoại
+        //    bị ghi «BOT» rồi không bao giờ đọc lại): người nhắn mà khách KHÔNG nhắn thêm ⇒ lượt sau vẫn đọc. Máy không lên được
+        //    đơn (SĐT AI đưa không có trong hội thoại) mà khách đã để SĐT ⇒ báo người làm đơn, MỘT lần.
+        threads.set("t-2", [...(threads.get("t-2") ?? []), { id: "b2", fromPage: true, text: "Dạ em lên đơn 1kg cho anh ạ", at: min(-25) }]);
+        await inbound("t-2", "b2", "Dạ em lên đơn 1kg cho anh ạ", min(-25), "PAGE_REPLY");
+        const r6 = await runFanpageOrderSync({ fetch: fetchImpl });
+        assert.equal(r6.checked, 1, `hội thoại từng ghi «BOT» được đọc lại khi có người nhắn (${JSON.stringify(r6)})`);
+        const [c2b] = await db.select({ id: schema.salesChatConversations.id, state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-2"));
+        const log2 = (c2b.state as ChatState).orderSync as OrderSyncThreadState;
+        assert.equal(log2.lastOutcome, "SKIPPED");
+        assert.match(log2.lastResult, /đã báo nhân viên/);
+        const leads = await db.select({ body: schema.notifications.body }).from(schema.notifications).where(eq(schema.notifications.entityId, c2b.id));
+        assert.ok(leads.length === 1 && leads[0].body.includes("0987654321"), `một tin báo «khách để SĐT» kèm SĐT: ${JSON.stringify(leads)}`);
+        await runFanpageOrderSync({ fetch: fetchImpl });
+        assert.equal((await db.select({ id: schema.notifications.id }).from(schema.notifications).where(eq(schema.notifications.entityId, c2b.id))).length, 1, "không báo lại cùng SĐT");
         // Tắt ghi đơn không đụng bot.
         assert.ok("ok" in (await saveOrderSyncConfig(admin, false)));
         assert.equal((await loadSalesChatbotConfig()).enabled, true, "tắt ghi đơn KHÔNG tắt bot");

@@ -209,7 +209,8 @@ async function testFlow() {
       assert.ok("ok" in (await setConnectionStatus(admin, "ghn-carrier", "ACTIVE")));
       const panel = await carrierPanel(admin, orderId);
       assert.ok(panel?.carriers.find((x) => x.key === "GHN")?.ready && panel.carriers.find((x) => x.key === "GHN")?.needsStructuredAddress, JSON.stringify(panel));
-      assert.equal(panel.defaults.province, "TP. Hồ Chí Minh");
+      // Lõi ghi đơn đã ghép địa chỉ vào danh mục địa giới mới (05/10/2026): tên chuẩn + xã đọc từ «P. Sài Gòn».
+      assert.deepEqual([panel.defaults.province, panel.defaults.ward], ["Thành phố Hồ Chí Minh", "Phường Sài Gòn"]);
 
       // Gợi ý xã theo danh mục GHN.
       const wo = await carrierWardOptionsCore(admin, "GHN", "tp hồ chí minh", deps);

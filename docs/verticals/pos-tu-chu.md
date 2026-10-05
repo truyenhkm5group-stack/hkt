@@ -203,6 +203,26 @@ Người bán đang chat với khách thì tạo đơn tại chỗ, không chép
   ⇒ tạo mới nếu người bấm có `customers:write`. Tên / địa chỉ của lần mua này vào người nhận của đơn.
 - **Cảnh báo, không chặn.** Hội thoại đã có đơn còn sống (bot chốt hay người tạo) ⇒ form liệt kê để người kiểm trước.
 
+## P6 — Địa chỉ ghép thẳng vào tỉnh + xã theo địa giới mới; đơn đúng thì tự xác nhận
+
+Chủ shop HSLC 05/10/2026: «tự động đồng bộ vào các trường mapping với các bên ĐVVC … tự tạo đơn đã xác nhận khi thông tin đã
+chính xác, chưa mapping được thì cần đưa phương án». Trước đó mọi đơn bot / máy ghi chỉ có một dòng địa chỉ ⇒ trang Đơn hàng
+hiện «Địa chỉ chưa chuẩn hoá» trên từng đơn.
+
+- **Danh mục:** `lib/address/vn-admin-2025.json` — 34 tỉnh / 3.321 xã mới (địa giới từ 01/07/2025), mỗi xã mới mang danh sách
+  (huyện cũ, xã cũ) đã gộp vào nó. Nguồn: provinces.open-api.vn v2 + v1 + `/w/{code}/to-legacies`, tải 05/10/2026.
+- **Bộ đọc duy nhất:** `lib/address/vn-address.ts::normalizeVnAddress` — đọc cả địa chỉ MỚI («Phường Bàn Cờ, TP HCM») lẫn CŨ
+  («p13 q3 tphcm», «xã Ea Tu, TP Buôn Ma Thuột»), viết tắt, không dấu. KHÔNG ĐOÁN: xã cũ bị chia cho nhiều xã mới ⇒ danh sách
+  để người chọn; chỉ có tỉnh ⇒ chỉ điền tỉnh.
+- **Lõi ghi đơn** (`lib/records/order-create.ts`) điền `ship_province` + `ship_commune` theo tên chuẩn mỗi lần ghi — đơn bot,
+  đơn máy ghi từ hội thoại, đơn nhân viên tạo đều chung một đường. Xã người đã chọn thắng bộ đọc. Đơn cũ chưa có tỉnh / xã thì
+  khung tạo vận đơn đọc LÚC XEM, không ghi ngược (không backfill im lặng).
+- **«Đơn đủ thông tin = đã xác nhận»** (`orders.autoConfirmComplete`) nay đòi thêm tỉnh + xã đã ghép được
+  (`manualOrderGaps`). Chưa ghép được ⇒ đơn ở «Mới», tin nhóm ghi «⚠ Chưa chọn xã / phường», hộp thư hiện «sửa đơn →», form
+  tạo / sửa đơn có ô chọn xã với gợi ý lên đầu.
+- **Khách để SĐT mà máy không lên được đơn** (chưa rõ món, món ngoài danh mục, giá khác) ⇒ báo người làm đơn MỘT lần cho mỗi
+  hội thoại × SĐT; bot không hỏi lại khách (quyết định của chủ shop).
+
 ## Kế tiếp
 
 - **J&T.** Cần shop đăng ký đối tác trên open.jtexpress.vn (xét duyệt 1–3 ngày, xin chạy thật từng API, mã khách hàng

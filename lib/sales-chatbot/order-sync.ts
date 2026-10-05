@@ -39,6 +39,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { createOrderAsAgent } from "@/lib/records/order-create";
 import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
+import { placeGapLine } from "@/lib/sales-chatbot/new-order-alert";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
 import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
@@ -59,6 +60,9 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { linkAgentOrder, recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { mergeLines, priceLines, type CartLine, type ChatState, type Recipient } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
+
+/** Lời chốt cũ hơn chừng này (phút) lúc ghi ⇒ tin báo đơn kèm dòng «⚠ Ghi muộn». Trần kỹ thuật, không phải ngưỡng nghiệp vụ. */
+export const ORDER_SYNC_LATE_MINUTES = 120;
 
 export const ORDER_SYNC_AGENT = { name: "Ghi đơn từ hội thoại", source: "lib/sales-chatbot/order-sync.ts" } as const;
 
@@ -125,11 +129,16 @@ export function parseOrderSyncReply(text: string): OrderSyncReply | null {
   }
 }
 
-/** SĐT Việt Nam khách gõ trong một đoạn chữ (cho phép dấu cách / chấm / gạch giữa các số). HÀM THUẦN. */
+/**
+ * SĐT Việt Nam khách gõ trong một đoạn chữ (cho phép dấu cách / chấm / gạch giữa các số). Số di động từ 2018 có ĐÚNG 10 chữ
+ * số; chỉ số bàn (02x) còn 11. Bản cũ cho mọi số tới 11 chữ số ⇒ «0909938344 1kg» thành «09099383441» (đo HSLC 05/10/2026: 4/27
+ * hội thoại) — nay số di động dài 11 bị cắt về 10 chữ số đầu. HÀM THUẦN.
+ */
 export function phonesInText(text: string): string[] {
   const out = new Set<string>();
   for (const m of text.matchAll(/(?:\+?84|0)(?:[\s.-]?\d){8,10}/g)) {
-    const n = normalizeVnPhone(m[0]);
+    let n = normalizeVnPhone(m[0]);
+    if (n && n.length === 11 && !n.startsWith("02")) n = n.slice(0, 10);
     if (n) out.add(n);
   }
   return [...out];
@@ -298,6 +307,21 @@ export async function syncFanpageThreadWhenQuiet(pageId: string, threadId: strin
   }
 }
 
+/** Khách để SĐT mà máy không lên được đơn ⇒ chuông + hộp thư của người làm đơn (MỘT lần cho mỗi hội thoại × SĐT). Không ném. */
+async function notifyLeadWithoutOrder(convId: string, text: string, dedupe: string, now: Date): Promise<void> {
+  const title = "Khách để SĐT nhưng máy chưa lên được đơn";
+  const href = `/ai/sales-chatbot/inbox?c=${encodeURIComponent(convId)}`;
+  try {
+    const db = await getDb();
+    const [fresh] = await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "warning", title, body: text, href, entityType: "SALES_CHAT", entityId: convId, dedupeKey: dedupe, occurredAt: now }).onConflictDoNothing({ target: schema.notifications.dedupeKey }).returning({ id: schema.notifications.id });
+    if (!fresh) return;
+    const users = await activeUserIdsWhoCan("orders:write");
+    await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_ORDER_SYNC", title, body: text, href, dedupeKey: `${dedupe}:${userId}` })), db);
+  } catch {
+    // Đường phụ.
+  }
+}
+
 /** Khách muốn sửa đơn vừa ghi ⇒ báo người làm đơn (không tự sửa: đơn có thể đã được nhân viên chốt / sửa tay). */
 async function notifyOrderChange(convId: string, text: string, dedupe: string, now: Date): Promise<void> {
   const title = "Khách nhắn sửa đơn đã ghi từ fanpage";
@@ -353,7 +377,10 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       if (!row) continue;
       const conv: ConvRow = { ...row, state: (row.state ?? {}) as ChatState };
       const prev = conv.state.orderSync;
-      if (prev && new Date(prev.checkedUntil).getTime() >= threadLast.getTime()) continue;
+      // «Bot phụ trách» KHÔNG đóng dấu «đã đọc»: người có thể nhắn sau đó (hoặc bot nhường) mà khách không nhắn thêm — đo HSLC
+      // 05/10/2026: khách chốt 1kg + địa chỉ lúc 14:07, kịch bản tự động của Pancake trả lời, bot không vào, hội thoại bị ghi «BOT»
+      // rồi không bao giờ được đọc lại. Xét lại mỗi lượt (chỉ một câu SQL, chưa gọi AI) tới khi hết `lookbackHours`.
+      if (prev && prev.lastOutcome !== "BOT" && new Date(prev.checkedUntil).getTime() >= threadLast.getTime()) continue;
       const log = (outcome: OrderSyncOutcome, result: string, extra: Partial<OrderSyncThreadState> = {}) =>
         writeThreadLog(conv.id, { checkedUntil: threadLast.toISOString(), lastRunAt: now.toISOString(), lastOutcome: outcome, lastResult: result.slice(0, 300), orders: prev?.orders ?? [], ...(prev?.customer ? { customer: prev.customer } : {}), ...extra });
       // Bot đang bật và hội thoại không ở tay người ⇒ đơn là việc của bot (nó tự lên + chốt), không ghi lần hai. TRỪ KHI có NGƯỜI
@@ -368,7 +395,7 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
           .where(and(eq(t.pageId, pageId), eq(t.threadId, cand.threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, row.lastBotAt && row.lastBotAt > since ? row.lastBotAt : since)))
           .limit(1);
         if (!human) {
-          await log("BOT", "Bot đang trả lời hội thoại này — đơn do bot lên");
+          if (prev?.lastOutcome !== "BOT" || new Date(prev.checkedUntil).getTime() < threadLast.getTime()) await log("BOT", "Bot đang trả lời hội thoại này — đơn do bot lên");
           continue;
         }
       }
@@ -461,8 +488,14 @@ async function syncThread(a: {
   if (!reply) return { outcome: "ERROR", result: "AI trả lời sai định dạng — chưa ghi đơn (lượt sau đọc lại khi có tin mới)" };
 
   const decision = decideOrderSync({ reply, messages, cutoffMs, catalogIds: new Set(a.catalog.map((c) => c.variantId)), returning, knownPhones: profile.phones, fallbackName: a.customerName?.trim() || "Khách fanpage" });
-  if (decision.kind === "NONE") return { outcome: "NONE", result: decision.reason };
-  if (decision.kind === "SKIP") return { outcome: "SKIPPED", result: decision.reason };
+  if (decision.kind === "NONE" || decision.kind === "SKIP") {
+    // Khách ĐÃ để SĐT trong lượt mua này mà máy không lên được đơn (chưa rõ món, món ngoài danh mục, giá khác…) ⇒ báo người
+    // làm đơn kèm lý do — POS Pancake đẻ một đơn rỗng cho trường hợp này, ERP thì không bịa đơn nhưng cũng không im lặng.
+    const leadPhone = fresh.filter((m) => m.from === "customer").flatMap((m) => phonesInText(m.text))[0] ?? null;
+    if (leadPhone) await notifyLeadWithoutOrder(conv.id, `${a.customerName?.trim() || "Khách"} · ${leadPhone}: ${decision.reason}`, `sales-order-sync:lead:${conv.id}:${leadPhone}`, now);
+    const result = `${decision.reason}${leadPhone ? " — đã báo nhân viên lên đơn" : ""}`;
+    return decision.kind === "NONE" ? { outcome: "NONE", result } : { outcome: "SKIPPED", result };
+  }
   if (decision.kind === "CHANGE") {
     const text = `${a.customerName?.trim() || "Khách"}${lastRecorded ? ` (đơn ${lastRecorded})` : ""}: ${decision.summary}`;
     await notifyOrderChange(conv.id, text, `sales-order-sync:change:${conv.id}:${fresh[fresh.length - 1]?.at ?? now.toISOString()}`, now);
@@ -502,7 +535,14 @@ async function syncThread(a: {
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».
-  const confirmed = (await db.select({ stage: o.stage }).from(o).where(eq(o.id, created.id)).limit(1))[0]?.stage === "CONFIRMED";
+  const [saved] = await db.select({ stage: o.stage, province: o.shipProvince, ward: o.shipCommune, full: o.shipFullAddress }).from(o).where(eq(o.id, created.id)).limit(1);
+  const confirmed = saved?.stage === "CONFIRMED";
+  // Địa chỉ chưa ghép được tỉnh / xã (05/10/2026) ⇒ đơn ở «Mới» và tin nói rõ còn thiếu gì — người sửa, bot không hỏi lại khách.
+  const placeGap = placeGapLine({ province: saved?.province ?? "", ward: saved?.ward ?? "" });
+  // Lời chốt đã cũ (hội thoại được đọc lại muộn — lượt AI lỗi, hay hội thoại «bot phụ trách» được xét lại sau deploy) ⇒ nói rõ
+  // để kho không giao trùng một đơn người đã xử lý bằng đường khác.
+  const lateMin = Math.round((now.getTime() - new Date(ag.at).getTime()) / 60_000);
+  const late = lateMin >= ORDER_SYNC_LATE_MINUTES ? `⚠ Ghi muộn — lời chốt lúc ${formatDateTime(ag.at)}: kiểm đơn đã được xử lý / giao chưa trước khi đóng gói.` : "";
   const total = priced.subtotal + (priced.shippingFee ?? 0);
   const who = `${decision.recipient.name} · ${decision.recipient.phone}`;
   const items = priced.lines.map((l) => `${l.name} × ${l.quantity}`).join("; ");
@@ -511,19 +551,19 @@ async function syncThread(a: {
     header: confirmed ? "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (đã tính đơn)" : "🧾 ĐƠN MỚI — nhân viên chốt trên fanpage (máy ghi, cần kiểm)",
     name: decision.recipient.name,
     phone: decision.recipient.phone,
-    address: decision.recipient.address,
-    province: decision.recipient.province,
+    address: saved?.full || decision.recipient.address,
+    province: saved?.province || decision.recipient.province,
     lines: priced.lines,
     subtotal: priced.subtotal,
     shippingFee: priced.shippingFee,
     shipText: priced.ship.kind === "FREE" ? "Miễn phí" : priced.ship.kind === "FREE_IF_AREA" ? "miễn phí NẾU địa chỉ thuộc khu vực miễn ship — kiểm địa chỉ" : null,
-    warnings: [fromPrevious].filter(Boolean),
+    warnings: [late, fromPrevious, placeGap].filter(Boolean),
     confirmed,
   });
   // Sổ sự kiện (0202): đơn do NGƯỜI chốt, AI chỉ ghi hộ ⇒ actor HUMAN, nguồn AI_ORDER_SYNC — tách khỏi đơn AI tự chốt.
   await recordConversationEvent(conv.id, { type: "order.drafted", actorKind: "HUMAN", occurredAt: now, orderId: created.id, amountVnd: priced.subtotal, payload: { via: "ORDER_SYNC" }, key: `draft:${created.id}` });
   await linkAgentOrder(created.id, conv.id, "AI_ORDER_SYNC");
-  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, fromPrevious].filter(Boolean), groupText, now, confirmed);
+  await notifyOrderSynced(created.id, conv.id, [`${code} · ${who}`, items, `Tổng ${formatVND(total)}${priced.shippingFee === null ? " + ship (chưa báo)" : ""}`, late, fromPrevious, placeGap].filter(Boolean), groupText, now, confirmed);
   return {
     outcome: "CREATED",
     result: `${code} · ${who} · ${items} · ${formatVND(total)}`,

@@ -5,7 +5,7 @@ import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
 import { publish } from "@/lib/realtime/bus";
 import { can, type SessionUser } from "@/lib/auth/session";
-import { manualOrderShortCode } from "@/lib/constants/manual-orders";
+import { isManualOrderId, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { sha256Hex, sniffImageType } from "@/lib/creative/images";
 import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
@@ -329,7 +329,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const channelName = !cust && conv.pageId && conv.threadId ? ((await db.select({ name: schema.salesChatInbound.customerName }).from(schema.salesChatInbound).where(and(eq(schema.salesChatInbound.pageId, conv.pageId), eq(schema.salesChatInbound.threadId, conv.threadId), sql`${schema.salesChatInbound.customerName} is not null and ${schema.salesChatInbound.customerName} <> ''`)).orderBy(desc(schema.salesChatInbound.createdAt)).limit(1))[0]?.name ?? null) : null;
   const o = schema.orders;
   const orderRows = await db
-    .select({ id: o.id, stage: o.stage, total: o.totalPriceAfterDiscount, shippingFee: o.shippingFee, insertedAt: o.insertedAt, origin: o.origin, outcome: ORDER_OUTCOME })
+    .select({ id: o.id, stage: o.stage, total: o.totalPriceAfterDiscount, shippingFee: o.shippingFee, insertedAt: o.insertedAt, origin: o.origin, province: o.shipProvince, ward: o.shipCommune, outcome: ORDER_OUTCOME })
     .from(o)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
     .where(and(cust ? or(eq(o.customerId, cust.id), eq(o.salesConversationId, conv.id)) : eq(o.salesConversationId, conv.id), ne(o.stage, "DELETED")))
@@ -341,7 +341,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
     if (seen.has(r.id) || orders.length >= 10) continue;
     seen.add(r.id);
     const outcome = r.outcome ? String(r.outcome) : null;
-    orders.push({ id: r.id, shortCode: manualOrderShortCode(r.id), stage: r.stage, outcome, outcomeLabel: outcome ? (INBOX_OUTCOME_LABEL[outcome] ?? outcome) : "—", total: Number(r.total ?? 0) + Number(r.shippingFee ?? 0), insertedAt: r.insertedAt.toISOString(), byBot: r.origin === "AI_AGENT" || r.origin === "AI_ORDER_SYNC" });
+    orders.push({ id: r.id, shortCode: manualOrderShortCode(r.id), stage: r.stage, outcome, outcomeLabel: outcome ? (INBOX_OUTCOME_LABEL[outcome] ?? outcome) : "—", total: Number(r.total ?? 0) + Number(r.shippingFee ?? 0), insertedAt: r.insertedAt.toISOString(), byBot: r.origin === "AI_AGENT" || r.origin === "AI_ORDER_SYNC", placeGap: isManualOrderId(r.id) && ["NEW", "CONFIRMED", "WAITING"].includes(r.stage) ? (!r.province ? "Chưa nhận ra tỉnh / thành" : !r.ward ? "Chưa chọn xã / phường" : null) : null });
   }
 
   let assigneeName: string | null = null;

@@ -39,6 +39,9 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
         {/* Không có tỉnh nghĩa là Pancake chưa ghép được địa chỉ vào đơn vị hành chính → chưa gửi ĐVVC được. */}
         {!row.original.shipProvince && !["CANCELLED", "DELETED"].includes(row.original.stage) ? (
           <div className="text-xs font-medium text-amber-600">Địa chỉ chưa chuẩn hoá</div>
+        ) : !row.original.shipCommune && isManualOrderId(row.original.id) && !["CANCELLED", "DELETED"].includes(row.original.stage) ? (
+          // Đơn ERP có tỉnh mà chưa có xã: dòng địa chỉ có vài xã / phường mới khả dĩ (xã cũ bị chia) — người chọn ở trang đơn.
+          <div className="text-xs font-medium text-amber-600">Chưa chọn xã / phường</div>
         ) : null}
         {/* Khách có lịch sử hoàn cao / bị chặn: xin cọc hoặc xác nhận kỹ TRƯỚC khi gửi — thấy ngay trên dòng, không phải mở chi tiết. */}
         {row.original.risk && !["CANCELLED", "DELETED", "DELIVERED", "PAID"].includes(row.original.stage) ? (
