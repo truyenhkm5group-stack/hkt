@@ -9964,12 +9964,18 @@ export const salesChatConversations = pgTable(
     /** 0212: lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư — «chưa đọc» = tin khách mới hơn mốc này. */
     staffSeenAt: ts("staff_seen_at"),
     /**
-     * 0216: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
+     * 0217: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
      * mới (`refreshConversationLevels`) để lọc / đếm nhanh; `level_at` = lần tính gần nhất. Không phải nguồn sự thật.
      */
     customerLevel: text("customer_level"),
     customerPhone: text("customer_phone"),
     levelAt: ts("level_at"),
+    /**
+     * 0221 · NHẬP LỊCH SỬ (lib/sales-chatbot/history.ts): mốc tin MỚI NHẤT (mọi phía) đã nhập từ lịch sử kênh — tin khách tới
+     * mốc này là LỊCH SỬ, không phải «chờ trả lời»; và lần cuối lượt nhập đọc XONG hội thoại này.
+     */
+    historyUntil: ts("history_until"),
+    historyImportedAt: ts("history_imported_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -10189,6 +10195,8 @@ export const salesChatInbound = pgTable(
     fromId: text("from_id"),
     /** Ảnh khách gửi trong tin (0195) — chờ bot đọc. Đọc xong ⇒ mô tả ghép vào `text`, cột về `NULL`. */
     imageUrls: jsonb("image_urls").$type<string[]>(),
+    /** 0216: dòng do LƯỢT NHẬP LỊCH SỬ ghi (lib/sales-chatbot/history.ts) — `NULL` = tin sống (webhook / quét lại). */
+    importedAt: timestamp("imported_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [

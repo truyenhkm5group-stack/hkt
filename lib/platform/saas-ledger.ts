@@ -11,6 +11,7 @@ import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizat
 import type { Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { rowsOf } from "@/lib/sql-rows";
 import {
   ACTIVATION_MILESTONES,
@@ -82,14 +83,16 @@ export type OrgUsage = { conversationsStarted: number; customerMessages: number;
 export async function readOrgUsage(db: Db, from: Date, to: Date): Promise<OrgUsage> {
   const [r] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
-      with conv as (select id from sales_chat_conversations where channel <> 'TEST'),
+      with conv as (select id, created_by from sales_chat_conversations where channel <> 'TEST'),
       msg as (
         select m.conversation_id, m.role, m.content
         from sales_chat_messages m join conv on conv.id = m.conversation_id
         where m.created_at >= ${from} and m.created_at < ${to} and m.content->0->>'type' = 'text'
+          -- Lời chào mặc định của hội thoại do LƯỢT NHẬP LỊCH SỬ tạo (lib/sales-chatbot/history.ts) không phải tin bot gửi ai.
+          and not (m.seq = 1 and coalesce(conv.created_by, '') = ${HISTORY_CREATED_BY})
       )
       select
-        (select count(*) from sales_chat_conversations where channel <> 'TEST' and created_at >= ${from} and created_at < ${to})::int as started,
+        (select count(*) from sales_chat_conversations where channel <> 'TEST' and coalesce(created_by, '') <> ${HISTORY_CREATED_BY} and created_at >= ${from} and created_at < ${to})::int as started,
         (select count(*) from msg where role = 'user')::int as customer,
         (select count(*) from msg where role = 'assistant' and coalesce(content->0->>'text', '') not like '[Shop đã nhắn]%')::int as bot,
         (select count(distinct conversation_id) from msg where role = 'assistant' and coalesce(content->0->>'text', '') not like '[Shop đã nhắn]%')::int as active,
@@ -183,7 +186,8 @@ export async function readOrgMilestones(db: Db, want: ReadonlySet<ActivationMile
   }
   const q: Partial<Record<ActivationMilestone, ReturnType<typeof sql>>> = {
     CATALOG_IMPORTED: sql`select min(created_at) as at from products`,
-    FIRST_CONVERSATION: sql`select min(created_at) as at from sales_chat_conversations where channel <> 'TEST'`,
+    // Hội thoại do lượt nhập lịch sử tạo là khách CŨ của page, không phải lần đầu khách tới qua sản phẩm.
+    FIRST_CONVERSATION: sql`select min(created_at) as at from sales_chat_conversations where channel <> 'TEST' and coalesce(created_by, '') <> ${HISTORY_CREATED_BY}`,
     FIRST_AI_REPLY: sql`select min(created_at) as at from sales_chat_conversations where channel <> 'TEST' and ai_calls > 0`,
     FIRST_AI_ORDER: sql`select min(o.created_at) as at from orders o join sales_chat_conversations c on c.order_id = o.id where c.channel <> 'TEST'`,
   };

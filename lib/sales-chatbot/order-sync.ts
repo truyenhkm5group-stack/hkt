@@ -19,7 +19,7 @@
  *
  * Không ném — lỗi của một hội thoại ghi vào nhật ký của hội thoại đó, lượt đi tiếp.
  */
-import { and, desc, eq, gte, like, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, like, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
@@ -390,7 +390,9 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
     const candidates = await db
       .select({ threadId: t.threadId, lastAt, customerName: sql<string | null>`(array_agg(${t.customerName} order by ${t.createdAt} desc) filter (where ${t.customerName} is not null))[1]` })
       .from(t)
-      .where(and(eq(t.pageId, pageId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`, deps.threadId ? eq(t.threadId, deps.threadId) : undefined))
+      // Tin NHẬP TỪ LỊCH SỬ (history.ts) không bao giờ là ứng viên: lời chốt cũ đã thành đơn (hoặc không) từ lâu — đọc lại nó là
+      // đẻ đơn trùng. Hội thoại có tin SỐNG mới thì vẫn là ứng viên như cũ.
+      .where(and(eq(t.pageId, pageId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`, isNull(t.importedAt), deps.threadId ? eq(t.threadId, deps.threadId) : undefined))
       .groupBy(t.threadId)
       .having(
         and(

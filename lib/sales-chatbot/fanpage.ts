@@ -235,7 +235,8 @@ export type FanpageEvent = {
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
-function stripHtml(s: string): string {
+/** Chữ Pancake (HTML) ⇒ chữ thường — dùng chung với lượt nhập lịch sử (history.ts). HÀM THUẦN. */
+export function stripHtml(s: string): string {
   return s
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
@@ -742,7 +743,9 @@ export async function mirrorFanpageContext(conversationId: string, pageId: strin
   const rows = await db
     .select({ text: t.text, note: t.note, status: t.status, createdAt: t.createdAt })
     .from(t)
-    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), sql`${t.createdAt} > ${since}`, lt(t.createdAt, beforeAt), or(eq(t.note, PAGE_REPLY), eq(t.status, "SKIPPED"))))
+    // Tin NHẬP TỪ LỊCH SỬ (history.ts) không chép: lịch sử của bot bắt đầu từ lúc bot vào hội thoại, phần trước đó bot đọc qua
+    // hồ sơ khách cũ (`state.returning.prior`) — chép thêm ở đây là đưa cho AI nửa hội thoại (chỉ phía page) không theo thứ tự.
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), sql`${t.createdAt} > ${since}`, lt(t.createdAt, beforeAt), or(eq(t.note, PAGE_REPLY), eq(t.status, "SKIPPED")), isNull(t.importedAt)))
     .orderBy(asc(t.createdAt));
   const items = rows
     .filter((r) => r.text.trim())
@@ -1238,8 +1241,9 @@ export type FanpageInboundCounts = { pending: number; done: number; skipped: num
 export async function fanpageInboundCounts(): Promise<FanpageInboundCounts> {
   const db = await getDb();
   const t = schema.salesChatInbound;
-  // Dòng bot tự gửi và dòng tin phía page không phải tin khách — không đếm.
-  const notBotSent = sql`coalesce(${t.note}, '') not in ('BOT_SENT', ${PAGE_REPLY})`;
+  // Dòng bot tự gửi và dòng tin phía page không phải tin khách — không đếm. Tin NHẬP TỪ LỊCH SỬ (history.ts) không phải việc
+  // của bot — đếm vào đây là «bot đã xử lý» hàng nghìn tin nó chưa từng thấy.
+  const notBotSent = sql`coalesce(${t.note}, '') not in ('BOT_SENT', ${PAGE_REPLY}) and ${t.importedAt} is null`;
   const rows = await db.select({ status: t.status, n: sql<number>`count(*)::int` }).from(t).where(notBotSent).groupBy(t.status);
   const of = (s: string) => Number(rows.find((r) => r.status === s)?.n ?? 0);
   const reasons = await db

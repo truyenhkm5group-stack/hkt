@@ -13,6 +13,7 @@ import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { HISTORY_CREATED_BY } from "@/lib/sales-chatbot/history-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
@@ -85,16 +86,23 @@ export const WEB_STAFF_REASON = "Nhân viên đang trả lời trên chat web";
 export type InboxResult<T extends object = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 const C = "sales_chat_conversations";
-/** Tin khách CHƯA ai trả lời: mới hơn tin bot, tin nhân viên ERP, và mọi tin phía page ngoài ERP. Tên cột viết TƯỜNG MINH (câu con tương quan). */
+/**
+ * Tin khách CHƯA ai trả lời: mới hơn tin bot, tin nhân viên ERP, và mọi tin phía page ngoài ERP. Tên cột viết TƯỜNG MINH (câu con tương quan).
+ * Tin khách NHẬP TỪ LỊCH SỬ (`history_until`, lib/sales-chatbot/history.ts) không phải việc chờ — chỉ tin SỐNG tới sau mốc đó mới là.
+ */
 const NEEDS_REPLY = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null
+  and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz)
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz)
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz)
   and not exists (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
     and i.note = ${PAGE_REPLY} and i.created_at > "${sql.raw(C)}"."last_customer_at"))`;
 /** Chưa đọc: tin khách mới hơn lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư. */
 const UNREAD = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz))`;
-/** Mốc TIN cuối (khách · bot · nhân viên ERP), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được đẩy nó lên đầu. */
-const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), "${sql.raw(C)}"."created_at")`;
+/**
+ * Mốc TIN cuối (khách · bot · nhân viên ERP · tin nhập từ lịch sử), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được
+ * đẩy nó lên đầu. Hội thoại do LƯỢT NHẬP LỊCH SỬ tạo không lấy giờ nhập làm mốc (không nhảy lên đầu như tin mới).
+ */
+const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."history_until", 'epoch'::timestamptz), case when "${sql.raw(C)}"."created_by" = ${HISTORY_CREATED_BY} then 'epoch'::timestamptz else "${sql.raw(C)}"."created_at" end)`;
 const HAS_ORDER = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or "${sql.raw(C)}"."draft_order_id" is not null or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
 const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.customer_name is not null and i.customer_name <> '' order by i.created_at desc limit 1)`;
 

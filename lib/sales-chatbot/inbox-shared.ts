@@ -98,7 +98,7 @@ export type InboxCustomerHistory = {
   risk: { severity: "critical" | "warning"; reasons: string[] } | null;
 };
 
-/** Góp ý của nhân viên cho AI trên hội thoại (0216). */
+/** Góp ý của nhân viên cho AI trên hội thoại (0217). */
 export type InboxFeedback = { id: string; userName: string; text: string; lessons: string[]; status: "APPLIED" | "FAILED"; error: string | null; createdAt: string };
 
 export type InboxThread = {
