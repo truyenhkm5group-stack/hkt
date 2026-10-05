@@ -777,14 +777,6 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       out.skipped = PAGE_REPLIED_REASON;
       continue;
     }
-    // Webhook của tin page có thể chưa tới ⇒ hỏi thẳng Pancake MỘT lần trước mọi bước tốn tiền (`pageAnsweredVerdict`).
-    // Bình luận đi đường tin riêng, không có hộp thư để đọc.
-    if (!claimed.some((r) => r.kind === "COMMENT") && (await pageAnsweredOnPancake(pageId, threadId, token, claimed.map((r) => r.messageId), deps.fetch ?? fetch))) {
-      await finish("SKIPPED", PAGE_REPLIED_REASON);
-      out.processed += ids.length;
-      out.skipped = PAGE_REPLIED_REASON;
-      continue;
-    }
     const conv = await conversationFor(pageId, threadId);
     if (!conv) {
       await finish("PENDING", "Không mở được hội thoại");
@@ -810,6 +802,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       const cv = schema.salesChatConversations;
       await db.update(cv).set({ status: "OPEN", handoffReason: null, state: sql`${cv.state} - 'handoff'`, updatedAt: now() }).where(eq(cv.id, conv.id));
+    }
+    // Webhook của tin page có thể chưa tới ⇒ hỏi thẳng Pancake MỘT lần trước mọi bước tốn tiền (sau cổng «đang chuyển nhân viên» — hội thoại đang nhường thì khỏi hỏi) (`pageAnsweredVerdict`).
+    // Bình luận đi đường tin riêng, không có hộp thư để đọc.
+    if (!claimed.some((r) => r.kind === "COMMENT") && (await pageAnsweredOnPancake(pageId, threadId, token, claimed.map((r) => r.messageId), deps.fetch ?? fetch))) {
+      await finish("SKIPPED", PAGE_REPLIED_REASON);
+      out.processed += ids.length;
+      out.skipped = PAGE_REPLIED_REASON;
+      continue;
     }
     await mirrorFanpageContext(conv.id, pageId, threadId, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // CHẾ ĐỘ VẬN HÀNH (lib/sales-chatbot/operating-mode-shared.ts): quan sát · copilot · thử nghiệm AI vs người · tự động — MỘT

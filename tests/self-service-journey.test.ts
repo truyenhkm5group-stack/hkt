@@ -1553,7 +1553,7 @@ async function testJourney() {
       const fLien = await processFanpageThread(PAGE, "t-989", { fetch: lienFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fLien.replies === 0 && fLien.processed === 1 && /Page đã trả lời/.test(fLien.skipped ?? ""), `page đã trả lời theo Pancake ⇒ bot không chen: ${JSON.stringify(fLien)}`);
       assert.equal(lienFetch.calls.filter((c) => c.init?.method === "POST").length, 0, "không gửi tin nào");
-      assert.equal((await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-989")))).length, 0, "bỏ qua TRƯỚC khi mở lượt AI — 0 token");
+      assert.equal((await db.select({ turns: schema.salesChatConversations.turns }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-989"))))[0]?.turns ?? 0, 0, "bỏ qua TRƯỚC lượt AI — 0 token");
       // (03/10/2026) Hội thoại chuyển người vì AI HỎNG (ô model sai) ⇒ khách nhắn lại sau thời gian nhường thì bot thử lại, không
       // bắt ai bấm «Trả lại cho AI» cho từng hội thoại. Chưa hết thời gian nhường ⇒ vẫn nhường.
       await receiveFanpageEvent(ev("m-down-1", "Shop ơi", { id: "cust-down", name: "Cham Duong" }, "t-988"));
