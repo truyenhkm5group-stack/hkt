@@ -361,7 +361,16 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       .from(t)
       .where(and(eq(t.pageId, pageId), gte(t.createdAt, since), sql`coalesce(${t.note}, '') <> 'BOT_SENT'`, deps.threadId ? eq(t.threadId, deps.threadId) : undefined))
       .groupBy(t.threadId)
-      .having(and(sql`bool_or(${t.kind} = 'INBOX' and coalesce(${t.note}, '') <> 'PAGE_REPLY')`, sql`max(${t.createdAt}) <= ${quietBefore}`))
+      .having(
+        and(
+          sql`bool_or(${t.kind} = 'INBOX' and coalesce(${t.note}, '') <> 'PAGE_REPLY')`,
+          sql`max(${t.createdAt}) <= ${quietBefore}`,
+          // Hội thoại ĐÃ ĐỌC tới tin cuối (và không phải «bot phụ trách») bị loại NGAY trong SQL — trần `candidates` chỉ còn dành
+          // cho hội thoại thật sự cần xét. Đo HSLC 05/10/2026: trần 60 hội thoại MỚI NHẤT làm hội thoại 14:08 (khách chốt 1kg)
+          // trôi khỏi danh sách trước khi kịp đọc lại. Tên bảng viết tường minh: cột trần trong câu con tương quan sẽ bám nhầm bảng.
+          sql`not exists (select 1 from sales_chat_conversations sc where sc.channel = 'FANPAGE' and sc.page_id = ${pageId} and sc.thread_id = "sales_chat_inbound"."thread_id" and coalesce(sc.state->'orderSync'->>'lastOutcome', '') <> 'BOT' and (sc.state->'orderSync'->>'checkedUntil')::timestamptz >= max("sales_chat_inbound"."created_at"))`,
+        ),
+      )
       .orderBy(desc(lastAt))
       .limit(ORDER_SYNC_LIMITS.candidates);
     if (!candidates.length) return { ...out, detail: ["không hội thoại nào mới yên"] };
