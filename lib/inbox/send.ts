@@ -14,6 +14,7 @@
  */
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
+import { pushToUsers } from "@/lib/push/service";
 
 export type InboxMessage = {
   userId: string;
@@ -32,7 +33,11 @@ export async function sendInboxMessages(messages: readonly InboxMessage[], dbIn?
     .insert(schema.userMessages)
     .values(messages.map((m) => ({ userId: m.userId, kind: m.kind, title: m.title, body: m.body ?? "", href: m.href ?? "", dedupeKey: m.dedupeKey })))
     .onConflictDoNothing({ target: schema.userMessages.dedupeKey })
-    .returning({ id: schema.userMessages.id });
+    .returning({ id: schema.userMessages.id, userId: schema.userMessages.userId, title: schema.userMessages.title, body: schema.userMessages.body, href: schema.userMessages.href });
+  // THÔNG BÁO ĐẨY (0213): chỉ tin MỚI (tin trùng không đẩy lại), tới máy người nhận đã bật. KHÔNG chờ: gọi máy chủ đẩy là việc
+  // mạng. `dbIn` có thể là một giao dịch sắp đóng ⇒ khi ấy để dịch vụ đẩy tự mở CSDL của tổ chức trong phiên, không mượn nó.
+  // Hỏng ⇒ chỉ mất thông báo trên máy, tin trong ERP vẫn còn.
+  if (rows.length) void pushToUsers(rows.map((r) => ({ userId: r.userId, title: r.title, body: r.body, href: r.href, tag: r.id })), dbIn ? {} : { db }).catch(() => undefined);
   return rows.length;
 }
 
