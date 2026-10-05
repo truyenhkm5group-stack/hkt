@@ -237,7 +237,20 @@ async function main() {
 
   // 6. Nhịp job `sales-followup` trong ngày.
   const s = schema.syncRuns;
-  const runs = await db.select({ status: s.status, at: s.startedAt }).from(s).where(and(eq(s.job, "sales-followup"), gte(s.startedAt, from), lt(s.startedAt, to))).orderBy(s.startedAt);
+  const runs = await db.select({ status: s.status, at: s.startedAt, error: s.error, detail: s.detail }).from(s).where(and(eq(s.job, "sales-followup"), gte(s.startedAt, from), lt(s.startedAt, to))).orderBy(s.startedAt);
+  // Lượt lỗi + dòng «lỗi» trong chi tiết lượt thành công — gom theo câu (bỏ số / mã) để thấy NGUYÊN NHÂN, không phải 28 dòng rời.
+  const errKinds = new Map<string, { n: number; last: Date }>();
+  const bump = (k: string, at: Date) => {
+    const key = k.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, 160) || "(trống)";
+    const cur = errKinds.get(key);
+    errKinds.set(key, { n: (cur?.n ?? 0) + 1, last: at });
+  };
+  for (const r of runs) {
+    if (r.status !== "SUCCESS") bump(`[${r.status}] ${r.error ?? r.detail ?? ""}`, new Date(r.at));
+    for (const line of (r.detail ?? "").split(/\n| · |; /)) if (/lỗi|error|fail|timeout/i.test(line)) bump(`[chi tiết] ${line}`, new Date(r.at));
+  }
+  console.log("\n══ LỖI JOB sales-followup TRONG NGÀY (gom theo câu) ══");
+  for (const [k, v] of [...errKinds].sort((a, b) => b[1].n - a[1].n)) console.log(`${v.n} lần · cuối ${vnTime(v.last)} · ${k}`);
   let maxGap = 0;
   for (let i = 1; i < runs.length; i++) maxGap = Math.max(maxGap, (new Date(runs[i].at).getTime() - new Date(runs[i - 1].at).getTime()) / 60_000);
   const failed = runs.filter((r) => r.status !== "SUCCESS").length;
@@ -251,7 +264,7 @@ async function main() {
   tomTat(`Đơn không ghép được hội thoại có SĐT hôm nay: ${unmatchedOrders.length}`);
   tomTat(`Địa chỉ đơn: có tỉnh + xã ${today.filter((x) => x.ward).length} · chỉ tỉnh ${today.filter((x) => x.province && !x.ward).length} · chưa có tỉnh ${today.filter((x) => !x.province).length}`);
   for (const [src, xs] of lagBySource) tomTat(`Trễ (phút, tin khách cuối → đơn) «${src}»: n=${xs.length} · trung vị ${quantile(xs, 0.5) ?? "—"} · p90 ${quantile(xs, 0.9) ?? "—"} · max ${Math.max(...xs)}`);
-  tomTat(`Job sales-followup: ${runs.length} lượt · ${failed} lỗi · khoảng hở lớn nhất ${Math.round(maxGap)} phút`);
+  tomTat(`Job sales-followup: ${runs.length} lượt · ${failed} lỗi · khoảng hở lớn nhất ${Math.round(maxGap)} phút · ${errKinds.size} loại lỗi (chi tiết trong phần mã hoá)`);
   process.exit(0);
 }
 
