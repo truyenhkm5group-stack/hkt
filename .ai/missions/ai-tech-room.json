@@ -235,7 +235,12 @@
         "lead dựng cây từ origin/main vừa fetch, không ghi vào checkout đang đứng (có bài kiểm)",
         "skill /mission + mục «Giao một sứ mệnh» trong README",
         "PR vào main sau gates / gates xanh"
-      ]
+      ],
+      "pr": 594,
+      "decision": {
+        "state": "DONE",
+        "evidence": "PR #594 squash → 7c094bd2 sau khi gates / gates xanh; CI main xanh; hậu kiểm trên checkout sạch origin/main: validate sạch, lead --dry-run dựng từ origin/main vừa fetch, bài AI Tech Room ĐẠT. Không deploy (không đổi mã chạy trên VPS)."
+      }
     }
   ]
 }
