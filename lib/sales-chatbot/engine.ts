@@ -585,8 +585,10 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync'))` : undefined;
       await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
     };
+    // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
+    // đang tiếp nhận…» mỗi tin khách gửi thêm). Tin khách vẫn ghi ở trên để nhân viên đọc; khung THỬ vẫn thấy câu báo.
     if (conv.status === "HANDOFF") {
-      await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
+      if (!isPublicChannel(opts.channel)) await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }

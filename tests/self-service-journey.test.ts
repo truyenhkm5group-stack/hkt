@@ -717,7 +717,7 @@ async function testJourney() {
       assert.ok(!RAW.test(shown), `khách không thấy lỗi gốc: ${shown}`);
       assert.equal(a1.view!.status, "HANDOFF", "hội thoại chuyển nhân viên");
       const again = await chatTurn(a1.c.id, "Alo em ơi", { channel: "WEB", visitorKey: a1.vk });
-      assert.ok(again.ok && /Nhân viên của shop đang tiếp nhận/.test(again.view.messages[again.view.messages.length - 1].text), "khách nhắn tiếp ⇒ đã có người nhận, không gọi lại AI");
+      assert.ok(again.ok && again.view.messages[again.view.messages.length - 1].role === "user", "khách nhắn tiếp ⇒ đã có người nhận, bot im lặng, không gọi lại AI");
       await customer("b", "Còn hàng không em?");
       assert.equal(await ownerAlerts(), 1, "hai khách đâm vào tường ⇒ MỘT cảnh báo cho chủ shop trong ngày");
       const handoffs = (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff:%"))).filter((n) => n.body.startsWith(AI_DOWN_HANDOFF_REASON));

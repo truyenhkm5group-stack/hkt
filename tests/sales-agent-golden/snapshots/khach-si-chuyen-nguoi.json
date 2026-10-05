@@ -32,9 +32,7 @@
     {
       "customer": "alo shop oi",
       "rounds": [],
-      "shown": [
-        "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé."
-      ],
+      "shown": [],
       "status": "HANDOFF"
     }
   ],
