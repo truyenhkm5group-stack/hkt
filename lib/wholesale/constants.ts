@@ -135,7 +135,7 @@ export const PAUSE_REASON_LABEL: Record<PauseReason, string> = {
   REQUEST_LIMIT: "Chạm trần số lượt gọi ngày — tự chạy lại từ 0 giờ hôm sau",
   FREE_TIER: "Đã dùng hết lượt MIỄN PHÍ tháng này của Google (chế độ chỉ dùng miễn phí) — tự chạy lại từ ngày 1 tháng sau",
   API_AUTH: "Google từ chối khoá API — sửa kết nối rồi bấm Tiếp tục",
-  NO_CONNECTION: "Chưa bật kết nối Google Places — bật ở Cài đặt → Kết nối rồi bấm Tiếp tục",
+  NO_CONNECTION: "Chưa bật kết nối Google Places — bật ở Cài đặt → Kết nối, quét tự chạy lại",
 };
 
 export const OUTREACH_CHANNELS = ["PHONE_CALL", "ZALO", "SMS", "EMAIL", "FACEBOOK", "WHATSAPP"] as const;
