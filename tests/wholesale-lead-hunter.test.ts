@@ -524,6 +524,11 @@ async function testPlacesClient() {
   assert.ok(!ip.ok && ip.message.includes("IP máy chủ ERP") && ip.message.includes("reason: API_KEY_IP_ADDRESS_BLOCKED"), ip.message);
   const odd = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: denied("SOMETHING_NEW") });
   assert.ok(!odd.ok && odd.message.includes("reason: SOMETHING_NEW"), "lý do lạ vẫn được in nguyên, không bị nuốt");
+  // 429 hết hạn mức ngày: Google đã nhận khoá ⇒ kiểm tra ĐẠT (không hạ kết nối đang bật về Nháp), câu nói rõ là hết lượt.
+  const quota = (async () =>
+    new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for quota metric 'SearchTextRequest' and limit 'SearchTextRequest per day'" } }), { status: 429, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const q = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: quota });
+  assert.ok(q.ok && q.message.includes("HẾT HẠN MỨC") && !q.message.includes(API_KEY), q.message);
 
   // ── Trạm chuyển tiếp Cloud Run (Google chặn Places khi gọi từ IP Việt Nam, đo 04/10/2026) ──
   const RELAY = "https://places-relay-abc123-as.a.run.app";
@@ -814,6 +819,22 @@ async function testDb() {
       const waiting = await db.select({ next: cc.nextAttemptAt }).from(cc).where(and(eq(cc.campaignId, cQuota.id), eq(cc.status, "PENDING")));
       assert.ok(waiting.length > 1 && waiting.every((w) => w.next && w.next.getTime() > Date.now() + 60_000), "mọi ô đang chờ hẹn tới lúc Google đặt lại hạn mức");
       assert.ok("ok" in (await changeCampaignStateCore(admin, cQuota.id, "stop")));
+
+      // ── Kết nối tắt ⇒ máy tự dừng (NO_CONNECTION); bật lại ⇒ máy tự chạy lại, không cần ai bấm «Tiếp tục» ──
+      assert.ok("ok" in (await setConnectionStatus(admin, "google-places", "DISABLED")));
+      const cNc = await createCampaignCore(admin, { ...campInput, name: "Mất kết nối thử", customAreas: "Quảng Ninh: Móng Cái", keywordGroups: campInput.keywordGroups.map((g) => ({ ...g, enabled: g.key === "hai-san" })) });
+      assert.ok("ok" in cNc);
+      assert.ok("ok" in (await startCampaignCore(admin, cNc.id)));
+      const campStatus = async () => (await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, cNc.id) }))!;
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.equal((await campStatus()).pauseReason, "NO_CONNECTION");
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.equal((await campStatus()).status, "PAUSED", "kết nối còn tắt ⇒ vẫn dừng");
+      assert.ok("ok" in (await setConnectionStatus(admin, "google-places", "ACTIVE")));
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.notEqual((await campStatus()).status, "PAUSED", "kết nối bật lại ⇒ chiến dịch tự chạy lại");
+      const ncNow = await campStatus();
+      if (ncNow.status === "RUNNING") assert.ok("ok" in (await changeCampaignStateCore(admin, cNc.id, "stop")));
 
       // ── Trần ngân sách: tự tạm dừng, báo chủ shop, tự mở lại ngày sau ──
       await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 0.5, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });

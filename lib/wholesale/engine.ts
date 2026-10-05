@@ -352,10 +352,16 @@ async function pauseRunning(ctx: Ctx, reason: PauseReason, detail: string): Prom
 async function autoResume(ctx: Ctx): Promise<void> {
   const db = await getDb();
   const c = schema.wholesaleCampaigns;
-  const paused = await db.select().from(c).where(and(eq(c.status, "PAUSED"), inArray(c.pauseReason, ["BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT", "FREE_TIER"])));
+  const paused = await db.select().from(c).where(and(eq(c.status, "PAUSED"), inArray(c.pauseReason, ["BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT", "FREE_TIER", "NO_CONNECTION"])));
   const now = ctx.now();
   const nowKeys = periodKeys(now);
+  // Máy tự dừng vì kết nối chưa bật ⇒ máy tự chạy lại khi kết nối bật lại (người bấm «Bật» là đủ, không phải nhớ bấm «Tiếp tục»).
+  const connected = paused.some((p) => p.pauseReason === "NO_CONNECTION") && (await openActiveConnection("google-places")).ok;
   for (const camp of paused) {
+    if (camp.pauseReason === "NO_CONNECTION") {
+      if (connected) await db.update(c).set({ status: "RUNNING", pauseReason: null, pausedAt: null, lastError: null, updatedAt: now }).where(and(eq(c.id, camp.id), eq(c.status, "PAUSED")));
+      continue;
+    }
     if (!camp.pausedAt) continue;
     const at = periodKeys(camp.pausedAt);
     const monthly = camp.pauseReason === "BUDGET_MONTHLY" || camp.pauseReason === "FREE_TIER";

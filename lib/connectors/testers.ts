@@ -506,6 +506,12 @@ export async function testGooglePlaces(input: { secrets: Record<string, string>;
   if (relayUrl && (input.secrets.relaySecret ?? "").trim().length < 16) return { ok: false, message: "Đã khai «Địa chỉ trạm» nhưng thiếu «Mật khẩu trạm» (≥ 16 ký tự) — không gửi." };
   const relay = placesRelayOf(input.settings ?? {}, input.secrets);
   const r = await textSearch({ apiKey: key, timeoutMs: TIMEOUT_MS, maxRetries: 0, relay }, { textQuery: "nhà hàng hải sản Hà Nội", tier: "IDS_ONLY" }, { fetch: deps.fetch });
+  // 429 = Google ĐÃ nhận khoá (hạn mức tính theo dự án của khoá) rồi mới báo hết lượt — kết nối đúng, chỉ là hết lượt trong ngày.
+  // Coi là HỎNG thì kết nối đang bật bị hạ về Nháp và chiến dịch tạm dừng vì «chưa bật kết nối» (đo production 06/10/2026:
+  // một lượt «Kiểm tra» lúc hết hạn mức ngày đã làm đúng như vậy).
+  if (!r.ok && r.kind === "QUOTA") {
+    return { ok: true, message: scrubSecrets(`Google nhận khoá${relay ? " (qua trạm chuyển tiếp)" : ""} nhưng đang báo HẾT HẠN MỨC (429) — kết nối đúng; quét tự chạy tiếp khi Google đặt lại hạn mức. Chi tiết: ${r.message}`, [key]) };
+  }
   if (!r.ok) {
     const reason = /\(reason: ([A-Z0-9_]+)\)/.exec(r.message)?.[1];
     const why = reason && PLACES_REASON_HINT[reason]
