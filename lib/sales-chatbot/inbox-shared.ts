@@ -3,6 +3,7 @@
  *
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
+import type { ControlStamp } from "@/lib/sales-chatbot/conversation-control-shared";
 
 export const INBOX_FILTERS = ["ALL", "UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
@@ -74,6 +75,8 @@ export type InboxThread = {
   status: string;
   handoffReason: string | null;
   botYields: boolean;
+  /** Chế độ AI của RIÊNG hội thoại (Tiếp quản / AI gợi ý); `null` = theo chế độ của tổ chức (conversation-control-shared.ts). */
+  control: ControlStamp | null;
   customer: { id: string | null; name: string; phone: string | null; address: string | null; province: string | null };
   assigneeUserId: string | null;
   assigneeName: string | null;

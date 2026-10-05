@@ -498,6 +498,7 @@ import { testSalesVision } from "./sales-vision.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
+import { testConversationControl } from "./conversation-control.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
@@ -2753,6 +2754,9 @@ async function main() {
   testChatWidget();
   await testWebProductImport();
   await testMessenger();
+  // AI ↔ người trên từng hội thoại (Tiếp quản / AI gợi ý / Trả lại AI) + cổng gửi chống trả lời đôi — tổ chức THẬT
+  // `kiem-soat-hoi-thoai`, Messenger trực tiếp qua Graph giả.
+  await testConversationControl();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;

@@ -34,6 +34,8 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
+import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
+import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 
 export const ZALO_CONNECTOR = "zalo-oa";
 /** Đợi khách gõ xong trước khi trả lời (khách hay nhắn nhiều tin ngắn liên tiếp). */
@@ -304,10 +306,12 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     // CHẾ ĐỘ VẬN HÀNH (operating-mode-shared.ts — cùng MỘT cổng với fanpage): quan sát / nhánh NGƯỜI của thử nghiệm ⇒ không
     // gọi AI; copilot ⇒ soạn gợi ý, không gửi (câu thật của nhân viên tới qua tiếng vọng `oa_send_*` và được chấm như fanpage).
-    const gate = replyGate(await loadModeConfig(), zaloVisitorKey(oa.oaId, userId), readPinnedArm(conv.state));
+    // Chế độ của HỘI THOẠI (Tiếp quản / AI gợi ý) chỉ THU HẸP cổng của tổ chức.
+    const control = controlOf(conv.state);
+    const gate = applyConversationControl(replyGate(await loadModeConfig(), zaloVisitorKey(oa.oaId, userId), readPinnedArm(conv.state)), control);
     await pinArm(conv.id, gate, now());
     if (gate.mode === "OBSERVE") {
-      const note = gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE;
+      const note = controlSkipNote(control) ?? (gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE);
       await finish("SKIPPED", note);
       out.processed += ids.length;
       out.skipped = note;
@@ -341,6 +345,8 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
       out.skipped = COPILOT_NOTE;
       continue;
     }
+    // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn.
+    const sendGuard = await captureSendSnapshot(conv.id);
     const turn = await chatTurn(conv.id, text, { channel: "ZALO", visitorKey: zaloVisitorKey(oa.oaId, userId), now: now() });
     if (!turn.ok) {
       const busy = /Đang trả lời câu trước/.test(turn.error);
@@ -359,9 +365,16 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
+    let yielded: string | null = null;
     const token = replies.length ? await zaloAccessToken(deps) : null;
     if (token && !token.ok) sendError = token.error;
     for (const r of token?.ok ? replies : []) {
+      // Người vừa trả lời / tiếp quản trong lúc bot soạn ⇒ dừng, KHÔNG gửi phần còn lại.
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        yielded = may.reason;
+        break;
+      }
       for (const part of chunkText(r.text, TEXT_MAX)) {
         // Ghi TRƯỚC khi gửi: tiếng vọng `oa_send_text` có thể tới trước khi lời gọi gửi trả mã tin.
         await db.insert(t).values({ pageId, threadId: userId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
@@ -376,7 +389,8 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
       out.replies += 1;
     }
     const mediaNote = !sendError && (turn.media?.imageIds?.length ?? 0) > 0 ? "Ảnh của câu trả lời mẫu chưa gửi được qua Zalo — chỉ gửi phần chữ" : null;
-    await finish("DONE", sendError ?? mediaNote);
+    await finish("DONE", sendError ?? yielded ?? mediaNote);
+    if (yielded) out.skipped = yielded;
     if (out.replies > 0) await db.update(cv).set({ lastBotAt: now(), ...(sendError ? { lastError: sendError.slice(0, 300) } : {}) }).where(eq(cv.id, conv.id));
     else if (sendError) await db.update(cv).set({ lastError: sendError.slice(0, 300) }).where(eq(cv.id, conv.id));
     out.processed += ids.length;

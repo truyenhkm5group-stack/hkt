@@ -2,15 +2,16 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, Bot, ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
-import { assignConversationAction, claimConversationAction, handBackToAiAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
+import { assignConversationAction, claimConversationAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime, vnClock, vnDateKey } from "@/lib/format";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
+import { ConversationControlBar } from "./control-bar";
 import { LabelsPanel } from "./labels-panel";
 import { NotesPanel } from "./notes-panel";
 
@@ -81,7 +82,7 @@ export function InboxThreadView({
   const [text, setText] = useState("");
   const [requestKey, setRequestKey] = useState(newKey);
   const [confirmPaid, setConfirmPaid] = useState(false);
-  const [pending, setPending] = useState<null | "send" | "suggest" | "claim" | "release" | "assign" | "resume">(null);
+  const [pending, setPending] = useState<null | "send" | "suggest" | "claim" | "release" | "assign">(null);
   const [error, setError] = useState<string | null>(null);
   const [showOrder, setShowOrder] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -254,18 +255,8 @@ export function InboxThreadView({
           </div>
         </header>
 
-        {/* ── Trạng thái bot ── */}
-        <div className={cn("flex items-center justify-between gap-2 border-b px-4 py-1.5 text-[12px]", thread.botYields ? "bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" : "bg-violet-50 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200")}>
-          <span className="flex min-w-0 items-center gap-1.5 truncate">
-            <Bot className="size-3.5 shrink-0" />
-            {thread.botYields ? `Bot đang nhường cho người — ${thread.handoffReason ?? "cần người xử lý"}` : "Bot đang tự trả lời khách này. Bạn gửi tin thì bot nhường 30 phút."}
-          </span>
-          {thread.botYields && thread.canWork ? (
-            <button type="button" className="shrink-0 font-medium underline underline-offset-2" disabled={!!pending} onClick={() => void run("resume", () => handBackToAiAction(thread.id), "Đã trả lại cho AI")}>
-              Trả lại cho AI
-            </button>
-          ) : null}
-        </div>
+        {/* ── AI hay người trả lời khách (Tiếp quản / AI gợi ý / Trả lại AI) ── */}
+        <ConversationControlBar key={`${thread.control?.mode ?? "AUTO"}:${thread.status}`} conversationId={thread.id} channel={thread.channel} control={thread.control} botYields={thread.botYields} handoffReason={thread.handoffReason} canWork={thread.canWork} />
 
         {/* ── Tin nhắn ── */}
         <div className="relative min-h-0 flex-1">

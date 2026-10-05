@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import { assignConversationCore, claimConversationCore, handBackToAiCore, releaseConversationCore, sendStaffReplyCore, suggestReplyCore } from "@/lib/sales-chatbot/inbox";
+import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
+import type { ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, type InboxLabel, type InboxNote } from "@/lib/sales-chatbot/inbox-shared";
 
@@ -55,6 +57,14 @@ export async function assignConversationAction(conversationId: string, assigneeU
 export async function handBackToAiAction(conversationId: string): Promise<Out> {
   const user = await requireUser();
   const r = done(await handBackToAiCore(user, conversationId));
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+/** Tiếp quản / AI gợi ý / Trả lại AI cho MỘT hội thoại (conversation-control.ts) — lý do tuỳ chọn, vào nhật ký. */
+export async function setConversationControlAction(conversationId: string, mode: ConversationControl, reason?: string): Promise<Out<{ mode: ConversationControl; changed: boolean }>> {
+  const user = await requireUser();
+  const r = done(await setConversationControlCore(user, conversationId, mode, reason));
   if ("ok" in r) revalidatePath("/ai/sales-chatbot");
   return r;
 }

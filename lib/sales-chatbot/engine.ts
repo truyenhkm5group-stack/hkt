@@ -583,8 +583,10 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     const bump = async (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => {
       // `state.orderSync` thuộc job GHI ĐƠN TỪ HỘI THOẠI (order-sync.ts), không thuộc lượt này: lấy bản đang nằm trong CSDL,
       // không ghi đè bằng bản chụp lúc lượt bắt đầu (mất nhật ký ⇒ job đọc lại hội thoại và có thể ghi trùng đơn).
+      // `state.control` (Tiếp quản / AI gợi ý — conversation-control-shared.ts) thuộc NGƯỜI, cùng luật: nhân viên tiếp quản
+      // trong lúc AI đang soạn thì lượt này không được xoá mất lựa chọn đó.
       const { state, ...rest } = patch;
-      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync'))` : undefined;
+      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control'))` : undefined;
       await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
     };
     // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
@@ -894,7 +896,8 @@ export async function resumeConversationToAi(id: string): Promise<boolean> {
   const c = schema.salesChatConversations;
   const [row] = await db
     .update(c)
-    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff'`, updatedAt: new Date() })
+    // Trả lại cho AI cũng gỡ chế độ «người xử lý» của hội thoại (conversation-control-shared.ts) — nếu không, bot vẫn im.
+    .set({ status: "OPEN", handoffReason: null, state: sql`${c.state} - 'handoff' - 'control'`, updatedAt: new Date() })
     .where(and(eq(c.id, id), eq(c.status, "HANDOFF")))
     .returning({ id: c.id });
   return Boolean(row);

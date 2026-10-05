@@ -48,6 +48,8 @@ import {
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readQuickReplyImage } from "@/lib/sales-chatbot/quick-replies";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
+import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
+import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -382,10 +384,12 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
     await mirrorFanpageContext(conv.id, pageId, psid, new Date(Math.min(...claimed.map((r) => r.createdAt.getTime()))));
     // CHẾ ĐỘ VẬN HÀNH (operating-mode-shared.ts): CÙNG cổng với đường Pancake — quan sát · copilot · thử nghiệm · tự động. Đặt
     // TRƯỚC mọi lời gọi tốn tiền (đọc ảnh, AI). Mặc định TỰ ĐỘNG.
-    const gate = replyGate(await loadModeConfig(), fanpageKey(pageId, psid), readPinnedArm(conv.state));
+    // Chế độ của HỘI THOẠI (Tiếp quản / AI gợi ý) chỉ THU HẸP cổng của tổ chức.
+    const control = controlOf(conv.state);
+    const gate = applyConversationControl(replyGate(await loadModeConfig(), fanpageKey(pageId, psid), readPinnedArm(conv.state)), control);
     await pinArm(conv.id, gate, now());
     if (gate.mode === "OBSERVE") {
-      const note = gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE;
+      const note = controlSkipNote(control) ?? (gate.arm ? OBSERVE_HUMAN_ARM_NOTE : OBSERVE_NOTE);
       await finish("SKIPPED", note);
       out.processed += ids.length;
       out.skipped = note;
@@ -419,6 +423,8 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       out.skipped = COPILOT_NOTE;
       continue;
     }
+    // Ảnh chụp ĐẦU LƯỢT: người gửi tin / tiếp quản trong lúc AI đang soạn ⇒ bot không gửi câu đã soạn.
+    const sendGuard = await captureSendSnapshot(conv.id);
     const turn = await chatTurn(conv.id, text, { channel: "FANPAGE", visitorKey: fanpageKey(pageId, psid), now: now(), customerName: null, ...(context ? { context } : {}) });
     if (!turn.ok) {
       const busy = /Đang trả lời câu trước/.test(turn.error);
@@ -435,6 +441,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
+    const mayFirst = await botMaySend(conv.id, sendGuard);
+    if (!mayFirst.ok) {
+      await finish("DONE", mayFirst.reason);
+      out.processed += ids.length;
+      out.skipped = mayFirst.reason;
+      continue;
+    }
     if (commentRow) {
       // MỘT tin riêng gộp mọi câu trả lời (Meta chỉ cho một tin riêng mỗi bình luận). Ảnh câu mẫu không đi kèm được tin riêng.
       const replyText = replies.map((r) => r.text).join("\n\n").trim();
@@ -454,16 +467,31 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
+    let yielded: string | null = null;
     let mediaDone = false;
     // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
     const sendMedia = async () => {
       mediaDone = true;
       const ids = turn.media?.imageIds ?? [];
       if (!ids.length) return;
+      const may = await botMaySend(conv.id, sendGuard);
+      if (!may.ok) {
+        yielded = may.reason;
+        return;
+      }
       const r = await sendBotImages(pageId, psid, ids, deps);
       if (!r.ok) sendError = r.error;
     };
-    for (const r of replies) {
+    for (const [i, r] of replies.entries()) {
+      // Câu đầu đã được hỏi ở trên; từ câu thứ hai hỏi lại — người có thể vừa trả lời giữa hai câu.
+      if (i > 0) {
+        const may = await botMaySend(conv.id, sendGuard);
+        if (!may.ok) {
+          yielded = may.reason;
+          mediaDone = true;
+          break;
+        }
+      }
       const sent = await sendMessengerPageText(pageId, psid, r.text, deps);
       if (!sent.ok) {
         sendError = sent.error;
@@ -472,12 +500,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       out.replies += 1;
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
-        if (sendError) break;
+        if (sendError || yielded) break;
       }
     }
-    if (!sendError && !mediaDone) await sendMedia();
-    await finish("DONE", sendError);
+    if (!sendError && !yielded && !mediaDone) await sendMedia();
+    await finish("DONE", sendError ?? yielded);
     if (!sendError && out.replies > 0) await markWaitingForCustomer(conv.id, now());
+    if (yielded) out.skipped = yielded;
     out.processed += ids.length;
     if (sendError) {
       out.error = sendError;

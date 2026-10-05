@@ -11,6 +11,7 @@ import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
@@ -360,6 +361,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       status: conv.status,
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",
+      control: readConversationControl(conv.state),
       customer: cust
         ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }
         : { id: null, name: st.customer?.name || channelName || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },
