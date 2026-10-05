@@ -534,9 +534,10 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
 }
 
 /**
- * AI KHÔNG TRẢ LỜI ĐƯỢC ⇒ CHUYỂN NGƯỜI (UAT U29). Khách chỉ nhận câu xin lỗi + câu chuyển người shop đã khai; hội thoại
- * sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho hội thoại đó (cùng khoá với công cụ `handoff_to_human`).
- * Khung THỬ không sinh thông báo — nó là của chủ shop, không có khách thật nào chờ.
+ * AI KHÔNG TRẢ LỜI ĐƯỢC ⇒ CHUYỂN NGƯỜI (UAT U29). Hội thoại sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho
+ * hội thoại đó (cùng khoá với công cụ `handoff_to_human`). Khách ở kênh công khai KHÔNG nhận câu nào (chủ shop 05/10/2026:
+ * «em đang gặp trục trặc» làm khách bỏ đi) — chỉ khung THỬ của chủ shop còn thấy câu báo. Khung THỬ không sinh thông báo —
+ * nó là của chủ shop, không có khách thật nào chờ.
  */
 /** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
 export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
@@ -647,7 +648,6 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     const blocked = async (key: string, ownerLabel: string, internal: string): Promise<TurnResult> => {
       if (!isPublicChannel(opts.channel)) return { ok: false, error: internal };
       const st = (conv.state ?? {}) as ChatState;
-      await reply(conv, seq, aiDownReply(cfg));
       await bump({ turns: conv.turns + 1, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON });
       await notifyAiDownHandoff(conv, st, opts.channel, now).catch(() => undefined);
       await notifySalesChatAiDown(key, ownerLabel, now).catch(() => undefined);
@@ -775,7 +775,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       status = "ERROR";
       lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
       if (error instanceof SeqConflict) throw error;
-      await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
+      if (!isPublicChannel(opts.channel)) await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
       state = { ...state, handoff: { reason: AI_DOWN_HANDOFF_REASON, at: now.toISOString() } };
       await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
       await notifyProviderFailure(lastError, now).catch(() => undefined);
