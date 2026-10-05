@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
-import { brandAppOrigin, brandOfHost, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
+import { BRAND_ASSET_PREFIX, brandAppOrigin, brandIconPath, brandOfHost, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import {
   ERP_HEADER_PREFIX,
@@ -51,7 +51,7 @@ import {
  * 256 bit trong đường dẫn, tra trong CSDL của tổ chức ghi trong đường dẫn bằng `withOrganization` tường minh
  * (lib/users/invites.ts). Khai kèm dấu `/` cuối: chỉ mở đúng nhánh `/join/<tổ chức>/<mã>`.
  */
-const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
 
 /**
  * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot
@@ -123,6 +123,14 @@ function siteEnv(): SiteEnv {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const next = () => NextResponse.next({ request: { headers: serverHeaders(request, pathname) } });
+
+  // Biểu tượng mặc định (`/favicon.ico`…) theo thương hiệu của host — bot và trình duyệt xin thẳng, không đọc `<link>`.
+  const icon = brandIconPath(brandOfHost(request.headers.get("host"), siteEnv()), pathname);
+  if (icon) {
+    const url = request.nextUrl.clone();
+    url.pathname = icon;
+    return NextResponse.rewrite(url);
+  }
 
   /*
     TÊN MIỀN GỐC (`vnxcommerce.com`, `www.`) là trang giới thiệu, KHÔNG phải ERP — quyết định trước mọi phép kiểm phiên,
@@ -212,5 +220,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image).*)"],
 };

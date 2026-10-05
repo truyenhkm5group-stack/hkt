@@ -29,8 +29,48 @@ export const SITE_LEGAL_PATHS = ["/chinh-sach-bao-mat", "/dieu-khoan-su-dung"] a
 /** Bí danh tiếng Việt in trên tài liệu / danh thiếp → tuyến thật của ERP. */
 export const SITE_AUTH_ALIASES: Readonly<Record<string, string>> = { "/dang-ky": "/start", "/dang-nhap": "/login" };
 
+/**
+ * Tài nguyên tĩnh của MỘT thương hiệu (`public/brand/<thương hiệu>/`): biểu tượng, ảnh chia sẻ, manifest. Phải công khai ở
+ * CẢ mặt tiền lẫn host phần mềm — trước đây biểu tượng Chốt Đơn nằm ở `/chotdon-icon.svg`, mặt tiền chuyển nó sang
+ * `app.`, còn `app.` đòi đăng nhập ⇒ tab trình duyệt không có biểu tượng ở cả hai host (đo 05/10/2026).
+ */
+export const BRAND_ASSET_PREFIX = "/brand/";
+
 /** Tài nguyên tĩnh mà trang giới thiệu cần ngay trên tên miền gốc (JS/CSS của Next, biểu tượng, robots). */
-const SITE_STATIC_PREFIXES = ["/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots", "/sitemap"];
+const SITE_STATIC_PREFIXES = ["/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
+
+/** Bộ biểu tượng của «Chốt Đơn Tự Động» — dựng từ MỘT hình vẽ (bong bóng chat đặc + dấu tích), mọi cỡ cùng nét. */
+export const CHOTDON_ASSETS = {
+  /** SVG cho tab trình duyệt hiện đại. */
+  icon: "/brand/chotdon/icon.svg",
+  /** ICO 16 · 32 · 48 — trình duyệt cũ và Google Search đọc `/favicon.ico`. */
+  favicon: "/brand/chotdon/favicon.ico",
+  /** 180×180 tràn viền — iOS tự bo góc khi thêm vào màn hình chính. */
+  apple: "/brand/chotdon/apple-touch-icon.png",
+  /** Ảnh chia sẻ 1200×630 (Facebook, Zalo, Messenger). */
+  og: "/brand/chotdon/og.png",
+  manifest: "/brand/chotdon/site.webmanifest",
+} as const;
+
+/**
+ * Đường biểu tượng MẶC ĐỊNH mà trình duyệt / bot tự xin (không đọc thẻ `<link>`): `/favicon.ico`, `/apple-touch-icon.png`…
+ * Ở host Chốt Đơn chúng phải trả biểu tượng Chốt Đơn, không phải của VNXcommerce trong `public/`. Thương hiệu khác ⇒ `null`
+ * (giữ nguyên tệp gốc).
+ */
+export function brandIconPath(brand: SiteBrand, pathname: string): string | null {
+  if (brand !== "chotdon") return null;
+  switch (pathname) {
+    case "/favicon.ico":
+      return CHOTDON_ASSETS.favicon;
+    case "/icon.svg":
+      return CHOTDON_ASSETS.icon;
+    case "/apple-touch-icon.png":
+    case "/apple-touch-icon-precomposed.png":
+      return CHOTDON_ASSETS.apple;
+    default:
+      return null;
+  }
+}
 
 export type SiteHostKind = "APEX" | "WWW";
 

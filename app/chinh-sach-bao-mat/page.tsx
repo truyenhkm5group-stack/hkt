@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { LegalPage, LegalSection as Section, LegalTable as Table, supportMail as mail } from "@/components/legal/legal-page";
+import { LegalPage, LegalSection as Section, LegalTable as Table, legalBrandName, supportMail as mail } from "@/components/legal/legal-page";
 import { COMPANY, PRIVACY_POLICY, SERVICE_COMMITMENTS, TERMS_OF_SERVICE } from "@/lib/constants/company";
+import { hostBrand } from "@/lib/platform/host-brand";
 
 /**
  * CHÍNH SÁCH QUYỀN RIÊNG TƯ CÔNG KHAI — `vnxcommerce.com/chinh-sach-bao-mat` (lib/platform/site-host.ts::SITE_LEGAL_PATHS).
@@ -11,11 +12,13 @@ import { COMPANY, PRIVACY_POLICY, SERVICE_COMMITMENTS, TERMS_OF_SERVICE } from "
  * sửa trang này cùng lúc. Trang tĩnh: không đọc CSDL, không cần phiên.
  */
 
-export const metadata: Metadata = {
-  title: { absolute: "Chính sách quyền riêng tư — VNXcommerce" },
-  description: "Cách VNXcommerce thu thập, sử dụng, lưu trữ và bảo vệ dữ liệu cá nhân; cách yêu cầu xem, sửa, xoá dữ liệu.",
-  robots: { index: true, follow: true },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: { absolute: `Chính sách quyền riêng tư — ${legalBrandName(await hostBrand())}` },
+    description: "Cách VNXcommerce thu thập, sử dụng, lưu trữ và bảo vệ dữ liệu cá nhân; cách yêu cầu xem, sửa, xoá dữ liệu.",
+    robots: { index: true, follow: true },
+  };
+}
 
 export default function PrivacyPolicyPage() {
   return (

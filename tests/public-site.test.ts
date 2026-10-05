@@ -9,15 +9,19 @@
  *  · giá in trên trang là giá trong `platform_plans`, gói không bán (`price_vnd NULL`) không bao giờ in thành 0 ₫.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { DEFAULT_PLAN_KEY } from "@/lib/entitlements/check";
 import { appOriginForHost, redirectUri } from "@/lib/auth/oauth";
 import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { DAYS_PER_MONTH, estimateMissedOrders, MISSED_ORDERS_DEFAULTS, MISSED_ORDERS_LIMITS, normalizeMissedOrdersInput } from "@/lib/site/missed-orders";
+import { robotsTxt, SITE_INDEXABLE_PATHS, sitemapXml } from "@/lib/site/seo";
 import {
+  BRAND_ASSET_PREFIX,
   brandAppOrigin,
   brandFromHeader,
+  brandIconPath,
   brandOfHost,
+  CHOTDON_ASSETS,
   chotdonDomainFrom,
   DEFAULT_CHOTDON_DOMAIN,
   DEFAULT_SITE_DOMAIN,
@@ -244,6 +248,68 @@ export function testMissedOrdersCalculator() {
   const page = readFileSync("app/gioi-thieu/page.tsx", "utf8");
   assert.ok(page.includes("SERVICE_COMMITMENTS.firstPaymentRefundDays") && page.includes("SERVICE_COMMITMENTS.retainAfterExpiryDays"), "cam kết trên trang đọc từ hằng số Điều khoản, không gõ lại số");
   console.log("✓ Máy tính đơn lọt: số từ số khách nhập, đơn làm tròn xuống, không giá thì không so, ngoài khoảng bị kẹp; cam kết đọc từ hằng số");
+}
+
+/**
+ * BỘ BIỂU TƯỢNG + ROBOTS/SITEMAP CỦA CHỐT ĐƠN. Lỗi gốc (đo 05/10/2026): biểu tượng nằm ở `/chotdon-icon.svg`, mặt tiền
+ * chuyển nó sang `app.`, `app.` đòi đăng nhập ⇒ tab không có biểu tượng ở cả hai host, còn `/favicon.ico` trả logo của
+ * VNXcommerce. Bài này giữ: tài nguyên thương hiệu công khai ở CẢ HAI lớp định tuyến, biểu tượng mặc định đổi theo host,
+ * mọi tệp được khai đều có thật trong kho, và robots/sitemap chỉ liệt kê đường mặt tiền phục vụ tại chỗ.
+ */
+export function testChotDonAssets() {
+  // 1) Biểu tượng mặc định theo thương hiệu; thương hiệu gốc giữ tệp của mình
+  assert.equal(brandIconPath("chotdon", "/favicon.ico"), CHOTDON_ASSETS.favicon);
+  assert.equal(brandIconPath("chotdon", "/apple-touch-icon.png"), CHOTDON_ASSETS.apple);
+  assert.equal(brandIconPath("chotdon", "/apple-touch-icon-precomposed.png"), CHOTDON_ASSETS.apple);
+  assert.equal(brandIconPath("chotdon", "/icon.svg"), CHOTDON_ASSETS.icon);
+  assert.equal(brandIconPath("chotdon", "/"), null);
+  assert.equal(brandIconPath("vnx", "/favicon.ico"), null, "VNXcommerce giữ nguyên favicon của nhà");
+
+  // 2) Tài nguyên thương hiệu đi thẳng ở mặt tiền (không bị chuyển sang app.) — và công khai ở host phần mềm
+  const r = siteRoute({ host: "APEX", pathname: CHOTDON_ASSETS.icon, search: "", siteDomain: "chotdontudong.com", protocol: "https:", appOrigin: "https://app.chotdontudong.com" });
+  assert.deepEqual(r, { kind: "PASS" }, "mặt tiền phục vụ /brand/… tại chỗ");
+  for (const p of ["/robots.txt", "/sitemap.xml", "/apple-touch-icon.png"]) {
+    assert.deepEqual(siteRoute({ host: "APEX", pathname: p, search: "", siteDomain: "chotdontudong.com", protocol: "https:", appOrigin: "https://app.chotdontudong.com" }), { kind: "PASS" }, p);
+  }
+  const mw = readFileSync("middleware.ts", "utf8");
+  const list = mw.slice(mw.indexOf("const PUBLIC_PREFIXES"), mw.indexOf("]", mw.indexOf("const PUBLIC_PREFIXES")));
+  assert.ok(list.includes("BRAND_ASSET_PREFIX"), "host phần mềm (app.) không đòi đăng nhập cho /brand/…");
+  assert.ok(Object.values(CHOTDON_ASSETS).every((p) => p.startsWith(BRAND_ASSET_PREFIX)), "mọi tài nguyên Chốt Đơn nằm dưới tiền tố công khai");
+  assert.ok(!mw.includes("favicon.ico).*)"), "favicon.ico phải đi qua middleware thì mới đổi theo host được");
+  assert.ok(mw.includes("brandIconPath("), "middleware thay biểu tượng mặc định theo host");
+
+  // 3) Mọi tệp được khai có thật trong kho; ICO mang đủ ba cỡ
+  for (const p of Object.values(CHOTDON_ASSETS)) assert.ok(existsSync(`public${p}`), `thiếu public${p}`);
+  const ico = readFileSync(`public${CHOTDON_ASSETS.favicon}`);
+  assert.equal(ico.readUInt16LE(2), 1, "tệp ICO");
+  assert.deepEqual([0, 1, 2].map((i) => ico[6 + i * 16]), [16, 32, 48], "favicon.ico mang 16 · 32 · 48");
+  const manifest = JSON.parse(readFileSync(`public${CHOTDON_ASSETS.manifest}`, "utf8")) as { start_url: string; icons: { src: string; purpose?: string }[] };
+  assert.equal(manifest.start_url, "/", "start_url cùng gốc với trang — URL khác gốc bị trình duyệt bỏ qua");
+  for (const i of manifest.icons) assert.ok(existsSync(`public${i.src}`), `manifest trỏ tới tệp không có: ${i.src}`);
+  assert.ok(manifest.icons.some((i) => i.purpose === "maskable"), "có biểu tượng maskable cho Android");
+  assert.ok(!existsSync("public/chotdon-icon.svg"), "không để hai bản biểu tượng song song");
+
+  // 4) robots/sitemap: chỉ đường phục vụ tại chỗ, URL tuyệt đối theo đúng tên miền
+  assert.deepEqual([...SITE_INDEXABLE_PATHS], ["/", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung"]);
+  const robots = robotsTxt("chotdontudong.com");
+  assert.ok(robots.includes("Sitemap: https://chotdontudong.com/sitemap.xml") && robots.includes("Disallow: /api/"));
+  const xml = sitemapXml("chotdontudong.com");
+  assert.equal((xml.match(/<loc>/g) ?? []).length, 3);
+  assert.ok(xml.includes("<loc>https://chotdontudong.com/</loc>") && !xml.includes("/gioi-thieu") && !xml.includes("/login"), "không liệt kê đường bị chuyển sang phần mềm");
+  for (const route of ["app/robots.txt/route.ts", "app/sitemap.xml/route.ts"]) {
+    const src = readFileSync(route, "utf8");
+    assert.ok(src.includes("matchSite(") && src.includes("status: 404"), `${route}: chỉ mặt tiền có tệp, host phần mềm vẫn 404`);
+  }
+
+  // 5) Trang giới thiệu khai ảnh chia sẻ + biểu tượng đủ bộ; nhãn logo không mang tên thương hiệu khác
+  const page = readFileSync("app/gioi-thieu/page.tsx", "utf8");
+  assert.ok(page.includes("CHOTDON_ASSETS.og") && page.includes('card: "summary_large_image"'), "link chia sẻ có ảnh lớn");
+  assert.ok(page.includes("canonical"), "địa chỉ chuẩn cho công cụ tìm kiếm");
+  assert.ok(!/ratingValue|aggregateRating|review/i.test(page.slice(page.indexOf("function chotdonJsonLd"), page.indexOf("function chotdonJsonLd") + 2000)), "dữ liệu có cấu trúc không khai điểm đánh giá chưa ai đo");
+  assert.ok(page.includes('"Chốt Đơn Tự Động — về đầu trang"'), "logo bản Chốt Đơn không đọc thành VNXcommerce");
+  const legal = readFileSync("components/legal/legal-page.tsx", "utf8");
+  assert.ok(legal.includes("brand={brand}") && legal.includes("legalBrandName(brand)"), "văn bản pháp lý mang thương hiệu của host");
+  console.log("✓ Chốt Đơn: biểu tượng đổi theo host + công khai ở cả hai lớp định tuyến, đủ tệp (ICO 16·32·48, iOS, maskable, ảnh chia sẻ), robots/sitemap chỉ ở mặt tiền");
 }
 
 export async function testPublicSiteData() {
