@@ -58,7 +58,7 @@ lẻ / HSD / lô.
 - **Khung thử** (kênh `TEST`, trong ERP): đọc thật, GHI MÔ PHỎNG — không khách / đơn / tin nhóm thật.
 - **Trang chat công khai** `https://<slug>.<miền gốc>/chat` (kênh `WEB`): chỉ tổ chức ĐÃ XUẤT BẢN có bot đang bật; tổ chức
   lấy từ host, mọi truy vấn trong `withOrganization` tường minh (không bao giờ rơi về nhà); hội thoại khoá theo cookie
-  khách truy cập (băm); trần 20 tin / 10 phút / khách, 500 lượt / ngày / tổ chức.
+  khách truy cập (băm); trần 20 tin / 10 phút / khách (không có trần ngày cho cả tổ chức — bỏ 05/10/2026).
 - Mỗi lượt khách một dòng `platform_ai_usage` (feature `sales_chatbot`, nguồn `BYOK`). Trần LƯỢT/ngày của gói chỉ đếm AI
   Builder + Copilot; trần TIỀN USD tháng đếm mọi tính năng.
 - Đơn / khách do bot ghi mang tác nhân `AGENT` (luật 36): `raw.createdBy = null`, `raw.agent = "Chatbot bán hàng"`.

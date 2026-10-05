@@ -690,8 +690,8 @@ async function testJourney() {
       setSalesChatProviderForTests(null);
     }
 
-    // ── U29 · AI không trả lời được (đo UAT production 30/09/2026: khoá AI của shop hết credit giữa buổi) ⇒ khách chỉ
-    // nhận câu xin lỗi + câu chuyển người của shop, hội thoại sang HANDOFF, nhân viên nhận MỘT thông báo gọi lại cho mỗi
+    // ── U29 · AI không trả lời được (đo UAT production 30/09/2026: khoá AI của shop hết credit giữa buổi) ⇒ khách KHÔNG
+    // nhận câu nào (chủ shop 05/10/2026: «em đang gặp trục trặc» làm khách bỏ đi), hội thoại sang HANDOFF, nhân viên nhận MỘT thông báo gọi lại cho mỗi
     // khách, chủ shop MỘT cảnh báo mỗi ngày. KHÔNG màn hình nào in lỗi gốc của nhà cung cấp. Quá tải (tự khỏi) không
     // thêm cảnh báo chủ shop — nhưng khách vẫn được chuyển người, không bị bỏ lơ.
     assert.equal(salesBotError(null), null);
@@ -712,12 +712,12 @@ async function testJourney() {
       };
       const a1 = await customer("a", "Chả mực bao nhiêu?");
       const shown = a1.view!.messages.map((m) => m.text).join(" ");
-      assert.match(shown, /trục trặc/);
-      assert.ok(shown.includes(DEFAULT_SALES_CHATBOT_CONFIG.handoff.message), "khách nhận câu chuyển người của shop");
+      assert.doesNotMatch(shown, /trục trặc/, "khách không nhận câu «em đang gặp trục trặc»");
+      assert.equal(a1.view!.messages[a1.view!.messages.length - 1].role, "user", "AI hỏng ⇒ bot im lặng, tin cuối vẫn là của khách");
       assert.ok(!RAW.test(shown), `khách không thấy lỗi gốc: ${shown}`);
       assert.equal(a1.view!.status, "HANDOFF", "hội thoại chuyển nhân viên");
       const again = await chatTurn(a1.c.id, "Alo em ơi", { channel: "WEB", visitorKey: a1.vk });
-      assert.ok(again.ok && /Nhân viên của shop đang tiếp nhận/.test(again.view.messages[again.view.messages.length - 1].text), "khách nhắn tiếp ⇒ đã có người nhận, không gọi lại AI");
+      assert.ok(again.ok && again.view.messages[again.view.messages.length - 1].role === "user", "khách nhắn tiếp ⇒ đã có người nhận, bot im lặng, không gọi lại AI");
       await customer("b", "Còn hàng không em?");
       assert.equal(await ownerAlerts(), 1, "hai khách đâm vào tường ⇒ MỘT cảnh báo cho chủ shop trong ngày");
       const handoffs = (await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff:%"))).filter((n) => n.body.startsWith(AI_DOWN_HANDOFF_REASON));

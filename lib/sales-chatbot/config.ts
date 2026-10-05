@@ -70,7 +70,7 @@ export function salesBotBillingSource(key: SalesBotConnector): "PLATFORM" | "BYO
 }
 
 /** Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): chặn vòng lặp công cụ và bão tin trên trang chat công khai. */
-export const SALES_CHATBOT_LIMITS = { toolRounds: 10, historyMessages: 40, turnsPerConversation: 60, webMessagesPerVisitorPer10Min: 20, webTurnsPerOrgPerDay: 500, messageMax: 1000 } as const;
+export const SALES_CHATBOT_LIMITS = { toolRounds: 10, historyMessages: 40, turnsPerConversation: 60, webMessagesPerVisitorPer10Min: 20, messageMax: 1000 } as const;
 
 const timeZ = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Giờ dạng HH:MM");
 

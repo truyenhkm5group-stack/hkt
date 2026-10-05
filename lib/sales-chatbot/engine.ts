@@ -16,7 +16,7 @@
  * "đang trả lời câu trước", không chen tin vào giữa.
  */
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { AiImage } from "@/lib/ai/images";
 import { estimateCostUsd, type AiBlock, type AiMessage, type AiProvider } from "@/lib/ai/provider";
@@ -32,7 +32,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { notifySalesChatAiDown, notifySalesChatHandoff, notifySalesChatModelFallback } from "@/lib/sales-chatbot/alerts";
 import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { isMessagingChannel, isPublicChannel, PUBLIC_CHAT_CHANNELS, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
@@ -503,22 +503,25 @@ async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
 }
 
-/** Trần tin của một khách truy cập (WEB) trong 10 phút và của cả tổ chức trong ngày — chống bão tin làm tốn tiền của shop. */
-async function webRateProblem(conv: ConvRow): Promise<string | null> {
+/**
+ * Trần tin của MỘT khách trong 10 phút — chống một người nhắn dồn dập làm tốn tiền của shop. Chạm trần ⇒ bot IM LẶNG, không
+ * gửi câu báo nào cho khách.
+ *
+ * KHÔNG có trần chung cả tổ chức theo ngày (bỏ 05/10/2026, chủ shop chốt): trần cũ cộng `turns` TRỌN ĐỜI của mọi hội thoại
+ * có tin trong 24 giờ, nên vài chục khách quen Messenger đủ chạm 500 và từ đó MỌI khách thật nhận câu «quá tải» mà không ai
+ * được báo gọi lại. Chặn cả cửa hàng vì một ngày đông khách là chặn đúng thứ bot sinh ra để làm.
+ */
+async function overVisitorRate(conv: ConvRow): Promise<boolean> {
   const db = await getDb();
   const m = schema.salesChatMessages;
   const c = schema.salesChatConversations;
-  if (conv.visitorKey) {
-    const [r] = await db
+  if (!conv.visitorKey) return false;
+  const [r] = await db
       .select({ n: sql<number>`count(*)` })
-      .from(m)
-      .innerJoin(c, eq(c.id, m.conversationId))
-      .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
-    if (Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min) return "Anh/chị nhắn nhanh quá — đợi vài phút rồi nhắn tiếp giúp em nhé.";
-  }
-  const [d] = await db.select({ n: sql<number>`coalesce(sum(${c.turns}), 0)` }).from(c).where(and(inArray(c.channel, [...PUBLIC_CHAT_CHANNELS]), gte(c.updatedAt, new Date(Date.now() - 24 * 3_600_000))));
-  if (Number(d?.n ?? 0) >= SALES_CHATBOT_LIMITS.webTurnsPerOrgPerDay) return "Shop đang quá tải tin nhắn — nhân viên sẽ liên hệ lại sớm ạ.";
-  return null;
+    .from(m)
+    .innerJoin(c, eq(c.id, m.conversationId))
+    .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
+  return Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min;
 }
 
 /**
@@ -531,9 +534,10 @@ async function notifyProviderFailure(lastError: string | null, now: Date): Promi
 }
 
 /**
- * AI KHÔNG TRẢ LỜI ĐƯỢC ⇒ CHUYỂN NGƯỜI (UAT U29). Khách chỉ nhận câu xin lỗi + câu chuyển người shop đã khai; hội thoại
- * sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho hội thoại đó (cùng khoá với công cụ `handoff_to_human`).
- * Khung THỬ không sinh thông báo — nó là của chủ shop, không có khách thật nào chờ.
+ * AI KHÔNG TRẢ LỜI ĐƯỢC ⇒ CHUYỂN NGƯỜI (UAT U29). Hội thoại sang `HANDOFF`; nhân viên nhận MỘT thông báo gọi lại khách cho
+ * hội thoại đó (cùng khoá với công cụ `handoff_to_human`). Khách ở kênh công khai KHÔNG nhận câu nào (chủ shop 05/10/2026:
+ * «em đang gặp trục trặc» làm khách bỏ đi) — chỉ khung THỬ của chủ shop còn thấy câu báo. Khung THỬ không sinh thông báo —
+ * nó là của chủ shop, không có khách thật nào chờ.
  */
 /** Câu gửi khách khi model không trả chữ nào dùng được (rỗng, hoặc bị bộ lọc suy luận chặn hết) — một chữ cho mọi đường. */
 export const EMPTY_REPLY_TEXT = "Dạ, anh/chị nói rõ hơn giúp em nhé.";
@@ -581,8 +585,10 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync'))` : undefined;
       await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
     };
+    // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
+    // đang tiếp nhận…» mỗi tin khách gửi thêm). Tin khách vẫn ghi ở trên để nhân viên đọc; khung THỬ vẫn thấy câu báo.
     if (conv.status === "HANDOFF") {
-      await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
+      if (!isPublicChannel(opts.channel)) await reply(conv, seq, "Nhân viên của shop đang tiếp nhận hội thoại này — anh/chị đợi chút nhé.");
       await bump({ turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
@@ -598,13 +604,9 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       await bump({ status: "HANDOFF", handoffReason: "Hội thoại quá dài", turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (isPublicChannel(opts.channel)) {
-      const limited = await webRateProblem(conv);
-      if (limited) {
-        await reply(conv, seq, limited);
-        return { ok: true, view: (await conversationView(conv.id))! };
-      }
-    }
+    // Chạm trần ⇒ IM LẶNG (chủ shop 05/10/2026): không nhắn «nhắn nhanh quá» / «quá tải» — câu như vậy làm khách bỏ đi. Tin
+    // của khách vẫn đã ghi ở trên; nhân viên đọc được trong hộp thư như mọi tin khác.
+    if (isPublicChannel(opts.channel) && (await overVisitorRate(conv))) return { ok: true, view: (await conversationView(conv.id))! };
     // CÂU TRẢ LỜI MẪU (0183 · lib/sales-chatbot/quick-replies.ts): khớp CHỮ trước — 0 token. Khách đang có đơn nháp chưa
     // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
     const qrSettings = await loadQuickReplySettings();
@@ -648,7 +650,6 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     const blocked = async (key: string, ownerLabel: string, internal: string): Promise<TurnResult> => {
       if (!isPublicChannel(opts.channel)) return { ok: false, error: internal };
       const st = (conv.state ?? {}) as ChatState;
-      await reply(conv, seq, aiDownReply(cfg));
       await bump({ turns: conv.turns + 1, status: "HANDOFF", handoffReason: AI_DOWN_HANDOFF_REASON });
       await notifyAiDownHandoff(conv, st, opts.channel, now).catch(() => undefined);
       await notifySalesChatAiDown(key, ownerLabel, now).catch(() => undefined);
@@ -776,7 +777,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       status = "ERROR";
       lastError = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
       if (error instanceof SeqConflict) throw error;
-      await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
+      if (!isPublicChannel(opts.channel)) await reply(conv, seq++, aiDownReply(cfg)).catch(() => undefined);
       state = { ...state, handoff: { reason: AI_DOWN_HANDOFF_REASON, at: now.toISOString() } };
       await notifyAiDownHandoff(conv, state, opts.channel, now).catch(() => undefined);
       await notifyProviderFailure(lastError, now).catch(() => undefined);
