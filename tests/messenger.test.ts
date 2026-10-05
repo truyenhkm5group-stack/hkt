@@ -27,6 +27,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { resolveWebhookOrganization, WebhookAuthError } from "@/lib/platform/webhooks";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+import { addQuickReplyImages, saveQuickReply } from "@/lib/sales-chatbot/quick-replies";
 import { connectMessengerPage, disconnectMessengerPage, processMessengerThread, receiveMessengerEvent } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "msg-shop";
@@ -75,6 +76,25 @@ function testPure() {
     "chữ · ảnh · tiếng vọng (PSID = người nhận) · nút bấm; bỏ nhãn dán / đã nhận / đã xem / tin xoá / page lạ",
   );
   assert.deepEqual(parseMessengerWebhook({ object: "instagram", entry: [] }), []);
+  const feed = parseMessengerWebhook({
+    object: "page",
+    entry: [
+      {
+        id: PAGE,
+        changes: [
+          { field: "feed", value: { item: "comment", verb: "add", comment_id: "777_1", post_id: `${PAGE}_777`, from: { id: "5566770000001", name: "Chị Mai" }, message: "Cho giá ạ", created_time: 1790000000 } },
+          { field: "feed", value: { item: "comment", verb: "add", comment_id: "777_2", post_id: `${PAGE}_777`, from: { id: PAGE }, message: "Shop inbox chị nhé" } },
+          { field: "feed", value: { item: "comment", verb: "edited", comment_id: "777_3", post_id: `${PAGE}_777`, from: { id: "5566770000002" }, message: "sửa" } },
+          { field: "feed", value: { item: "reaction", verb: "add", post_id: `${PAGE}_777`, from: { id: "5566770000003" } } },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(
+    feed.map((e) => [e.mid, e.psid, e.text, e.comment?.commentId, e.comment?.postId]),
+    [["comment:777_1", "5566770000001", "Cho giá ạ", "777_1", `${PAGE}_777`]],
+    "bình luận MỚI của khách ⇒ một sự kiện; bình luận của chính page, sửa bình luận, cảm xúc ⇒ bỏ",
+  );
   const ig = parseMessengerWebhook({ object: "instagram", entry: [{ id: IG, messaging: [{ sender: { id: IGSID }, recipient: { id: IG }, timestamp: 2, message: { mid: "ig.m.1", text: "Áo này giá bao nhiêu?" } }, { sender: { id: IG }, recipient: { id: IGSID }, timestamp: 3, message: { mid: "ig.m.2", is_echo: true, text: "Dạ 359k ạ" } }] }] });
   assert.deepEqual(ig.map((e) => [e.platform, e.pageId, e.psid, e.isEcho, e.appId]), [["INSTAGRAM", IG, IGSID, false, null], ["INSTAGRAM", IG, IGSID, true, null]], "Instagram DM cùng khuôn; tiếng vọng Instagram không mang mã app");
   assert.deepEqual(parseMessengerWebhook({ object: "whatsapp_business_account", entry: [{ id: IG, messaging: [{ sender: { id: IGSID }, message: { mid: "w", text: "x" } }] }] }), [], "object lạ ⇒ không");
@@ -114,6 +134,7 @@ function fakeGraph(): { fetch: typeof fetch; calls: Call[] } {
     if (u.pathname.endsWith(`/${PAGE}`) && (u.searchParams.get("fields") ?? "").includes("instagram_business_account")) return json({ instagram_business_account: { id: IG, username: "shopaoa" }, id: PAGE });
     if (u.pathname.endsWith("/me") && u.searchParams.get("access_token") === PAGE_TOKEN) return json({ id: PAGE, name: "Shop Áo A" });
     if (u.pathname.endsWith("/me/messages")) return json({ recipient_id: PSID, message_id: `m.bot.${calls.length}` });
+    if (u.pathname.endsWith(`/${PAGE}_777`) && u.searchParams.get("fields") === "message") return json({ id: `${PAGE}_777`, message: "ÁO SƠ MI LINEN — 359K, đủ size S M L" });
     return json({ error: { message: `không có ${u.pathname} — token ${u.searchParams.get("access_token") ?? ""}`, code: 100 } }, 400);
   }) as typeof fetch;
   return { fetch: f, calls };
@@ -162,12 +183,14 @@ async function adminOf(code: string): Promise<SessionUser> {
   });
 }
 
+const botCalls: AiRequest[] = [];
 function fakeBot(): AiProvider {
   return {
     name: "fake",
     model: "claude-sonnet-5",
     schemaDialect: "anthropic",
     async complete(req: AiRequest): Promise<AiResponse> {
+      botCalls.push(req);
       const text = req.tools.length ? "Dạ size M còn hàng ạ, chị lấy mấy cái ạ?" : "NONE";
       return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
     },
@@ -238,6 +261,32 @@ async function testFlow() {
       const igBotMid = (await db.select().from(schema.salesChatInbound).where(and(eq(schema.salesChatInbound.threadId, IGSID), eq(schema.salesChatInbound.note, "BOT_SENT"))))[0]?.messageId;
       assert.ok(igBotMid, "mã tin bot gửi được ghi lại");
       assert.equal((await receiveMessengerEvent(igEv(igBotMid!, "Dạ size M còn hàng ạ", { isEcho: true }))).reason, "Tin của chính bot", "tiếng vọng Instagram (không mã app) nhận ra bằng mã tin");
+      // ẢNH CỦA CÂU TRẢ LỜI MẪU: bot gửi chữ rồi ảnh (tải tệp kèm) qua Send API — trước đây chỉ ghi «chưa gửi».
+      const PSID2 = "5566778899002";
+      const qr = await saveQuickReply(admin, { title: "Bảng size", triggers: "bảng size", answer: "Dạ bảng size bên em đây ạ.", active: true });
+      assert.ok("ok" in qr, JSON.stringify(qr));
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+      assert.ok("ok" in (await addQuickReplyImages(admin, qr.id, [png])));
+      await receiveMessengerEvent(ev("m.qr.1", "cho xem bảng size", { psid: PSID2 }));
+      const qrBefore = g.calls.length;
+      const pQr = await processMessengerThread(PAGE, PSID2, { fetch: g.fetch, now: in31s });
+      assert.ok(pQr.replies >= 1 && !pQr.error, JSON.stringify(pQr));
+      const qrCalls = g.calls.slice(qrBefore).filter((c) => c.url.includes("/me/messages"));
+      assert.ok(qrCalls.length >= 2 && String(qrCalls[0].init?.body).includes("bảng size") && qrCalls[1].init?.body instanceof FormData, "chữ của câu mẫu rồi tới ảnh (multipart)");
+      const imgForm = qrCalls[1].init?.body as FormData;
+      assert.ok(String(imgForm.get("recipient")).includes(PSID2) && imgForm.get("filedata") instanceof Blob, "ảnh tới đúng khách, tải tệp kèm");
+      // BÌNH LUẬN dưới bài viết ⇒ TIN RIÊNG (Private Replies) — bot đọc nội dung bài để hiểu «cho giá».
+      const cev = { platform: "MESSENGER" as const, pageId: PAGE, psid: "5566770000001", mid: "comment:777_1", text: "Cho giá ạ", imageUrls: [], isEcho: false, appId: null, at: null, comment: { commentId: "777_1", postId: `${PAGE}_777` } };
+      assert.deepEqual(await receiveMessengerEvent(cev), { queued: true, reason: "Đã nhận bình luận" });
+      assert.equal((await receiveMessengerEvent(cev)).queued, false, "Meta gửi lại ⇒ không nhận lần hai");
+      const cBefore = g.calls.length;
+      const botBefore = botCalls.length;
+      const pC = await processMessengerThread(PAGE, "comment:777_1", { fetch: g.fetch, now: in31s });
+      assert.ok(pC.replies === 1 && !pC.error, JSON.stringify(pC));
+      const pr = g.calls.slice(cBefore).filter((c) => c.url.includes("/me/messages"));
+      assert.equal(pr.length, 1, "MỘT tin riêng cho một bình luận");
+      assert.deepEqual((JSON.parse(String(pr[0].init?.body)) as { recipient: unknown }).recipient, { comment_id: "777_1" }, "trả lời riêng ĐÚNG bình luận, không công khai");
+      assert.ok(botCalls.slice(botBefore).some((r) => r.system.includes("ÁO SƠ MI LINEN") && r.system.includes("BÌNH LUẬN DƯỚI BÀI VIẾT")), "lời nhắc có nội dung bài viết");
       // Tin của page KHÁC page đã nối ⇒ không nhận.
       assert.equal((await receiveMessengerEvent({ ...ev("m.7", "hi"), pageId: "5555555555" })).queued, false);
       // Gỡ ⇒ chỉ mục mất ⇒ webhook của page không còn tới tổ chức.
@@ -268,5 +317,5 @@ export async function testMessenger() {
     }
     await cleanup();
   }
-  console.log("✓ Messenger trực tiếp: gói webhook ⇒ sự kiện, chữ ký app, cookie page mã hoá theo tổ chức + người; Graph giả: token dài hạn, appsecret_proof, Send API; nối page (mã hoá, đăng ký webhook, bật), tổ chức khác không cướp được page, webhook theo mã page không rơi về nhà, bot trả lời qua Send API (Messenger lẫn Instagram DM), tiếng vọng của bot bỏ qua (theo mã app hoặc mã tin), người trong Hộp thư Meta ⇒ bot nhường, gỡ ⇒ hết nhận");
+  console.log("✓ Messenger trực tiếp: gói webhook ⇒ sự kiện, chữ ký app, cookie page mã hoá theo tổ chức + người; Graph giả: token dài hạn, appsecret_proof, Send API; nối page (mã hoá, đăng ký webhook, bật), tổ chức khác không cướp được page, webhook theo mã page không rơi về nhà, bot trả lời qua Send API (Messenger lẫn Instagram DM, kèm ảnh câu mẫu), bình luận ⇒ tin riêng có ngữ cảnh bài viết, tiếng vọng của bot bỏ qua (theo mã app hoặc mã tin), người trong Hộp thư Meta ⇒ bot nhường, gỡ ⇒ hết nhận");
 }

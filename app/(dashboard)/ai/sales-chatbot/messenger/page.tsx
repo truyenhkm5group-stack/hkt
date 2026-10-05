@@ -85,7 +85,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
           <li>Bot dùng chung cấu hình, sản phẩm, câu mẫu, follow-up của <Link href="/ai/sales-chatbot" className="text-primary underline">Chatbot bán hàng</Link>.</li>
           <li>Nhân viên trả lời trong Hộp thư Meta Business Suite ⇒ bot tự nhường 30 phút cho hội thoại đó.</li>
           <li>Không dùng cùng lúc với «Fanpage qua Pancake» cho CÙNG một page — khách sẽ nhận hai câu trả lời.</li>
-          <li>Ảnh của câu trả lời mẫu chưa gửi được qua đường này; phần chữ vẫn gửi.</li>
+          <li>Khách bình luận dưới bài viết ⇒ bot trả lời bằng TIN RIÊNG (không công khai). Page nối trước 05/10/2026: bấm «Đổi page» một lần để bật.</li>
         </ul>
       </SectionCard>
 
@@ -103,7 +103,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
               </code>
             </dd>
             <dt className="text-muted-foreground">Trường đăng ký</dt>
-            <dd className="text-xs">Page: messages · messaging_postbacks · message_echoes — Instagram: messages · messaging_postbacks</dd>
+            <dd className="text-xs">Page: messages · messaging_postbacks · message_echoes · feed — Instagram: messages · messaging_postbacks</dd>
             <dt className="text-muted-foreground">OAuth redirect</dt>
             <dd>
               <code className="break-all text-xs">{`${env.appUrl}/api/connect/messenger/callback`}</code>
