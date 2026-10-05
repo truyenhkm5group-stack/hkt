@@ -37,7 +37,7 @@ import {
 import { botMaySend, captureSendSnapshot, setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
-import { sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
+import { listInbox, sendStaffReplyCore } from "@/lib/sales-chatbot/inbox";
 import { connectMessengerPage, processMessengerThread, receiveMessengerEvent } from "@/lib/sales-chatbot/messenger";
 import type { ReplyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 
@@ -279,6 +279,18 @@ async function testFlow() {
       assert.ok(!bogus.ok);
       const missing = await setConversationControlCore(lan, "khong-co-hoi-thoai-nay", "HUMAN");
       assert.ok(!missing.ok && missing.error.includes("Không có hội thoại"));
+
+      // ═══ D. Hộp thư lọc «Ai đang trả lời»: hai nhóm phủ kín, không giao nhau ═══
+      const ids = async (handler: "AI" | "HUMAN" | null) => {
+        const r = await listInbox(lan, { handler, limit: 500 });
+        assert.ok(r.ok, JSON.stringify(r));
+        return new Set(r.rows.map((x) => x.id));
+      };
+      const [all, ai, human] = await Promise.all([ids(null), ids("AI"), ids("HUMAN")]);
+      assert.ok(human.has(convB.id) && !ai.has(convB.id), "nhân viên vừa gửi tin ⇒ người đang xử lý");
+      assert.ok(ai.has(convA.id) && !human.has(convA.id), "đã trả lại AI ⇒ AI đang trả lời");
+      assert.equal(ai.size + human.size, all.size, "hai nhóm phủ kín");
+      assert.ok([...ai].every((id) => !human.has(id)), "không giao nhau");
     });
   } finally {
     duringTurn = null;

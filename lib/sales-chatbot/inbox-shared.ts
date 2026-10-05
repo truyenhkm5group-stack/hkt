@@ -18,6 +18,14 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   UNASSIGNED: "Chưa ai nhận",
 };
 
+/**
+ * Ai đang trả lời khách (conversation-control-shared.ts): AI = bot đang tự trả lời (không nhường, không ghi đè); HUMAN = đang
+ * nhường cho người · Tiếp quản · AI gợi ý (người gửi). Hai nhóm phủ kín, không giao nhau.
+ */
+export const INBOX_HANDLERS = ["AI", "HUMAN"] as const;
+export type InboxHandler = (typeof INBOX_HANDLERS)[number];
+export const INBOX_HANDLER_LABEL: Record<InboxHandler, string> = { AI: "AI đang trả lời", HUMAN: "Người đang xử lý" };
+
 /** Lọc theo mốc TIN cuối của hội thoại (giờ Việt Nam). `CUSTOM` = khoảng ngày người chọn. */
 export const INBOX_PERIODS = ["TODAY", "YESTERDAY", "7D", "30D", "CUSTOM"] as const;
 export type InboxPeriod = (typeof INBOX_PERIODS)[number];
