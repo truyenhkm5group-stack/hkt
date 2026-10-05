@@ -350,3 +350,17 @@ Không đếm số agent. Đo: thời gian từ READY tới MERGED · thời gia
 số lần `reconcile` ra CONFLICTS · số PR đỏ cổng lần đầu · số lần phải làm lại · số lần gọi chủ
 shop. Các mốc lấy từ git (thời điểm commit, `run.createdAt`, `run.cleanedAt`) và GitHub — không
 thêm sổ thứ hai.
+
+## 18. Giới hạn đã biết (đo, không phỏng đoán)
+
+Review độc lập 05/10/2026 tìm 1 lỗi HIGH + 3 MEDIUM — đã sửa, mỗi cái có bài kiểm hồi quy
+(`tests/ai-tech-room.test.ts`). Còn lại, cố ý chưa sửa:
+
+| Giới hạn | Hệ quả | Vì sao chấp nhận |
+|---|---|---|
+| Lead là người ghi DUY NHẤT tệp sứ mệnh; hai lệnh `spawn` chạy đồng thời cùng một sứ mệnh ghi đè `run` của nhau (đọc–sửa–ghi) | lệch trạng thái, không mất việc: cây + nhánh + phiếu vẫn đúng, `spawn` lại sẽ từ chối va chạm và Lead sửa tay `run` | không dựng khoá tệp cho một tình huống chính sách đã cấm |
+| `PR_SUBJECT` vẫn nói MERGED nếu PR bị revert sau đó | trạng thái MERGED sai; `cleanup` vẫn đòi mọi commit có trên remote nên không mất gì | revert là sự kiện hiếm và người làm revert biết; mở lại việc bằng cách xoá `pr` |
+| Tích hợp bằng fast-forward bị coi là "không có việc riêng" | việc kẹt ở REVIEW | kho merge qua PR (squash / merge commit); cục bộ dùng `--no-ff` |
+| Luật cấm của worker/reviewer (không PR, không ghi) nằm trong prompt, không do runtime cưỡng chế | một subagent bất tuân vẫn chạy được lệnh ghi | lá chắn thật nằm ở chỗ khác: `ready` của Lead, `gates / gates`, lượt duyệt người, ruleset |
+| `worktrees` quét cả máy ~30 giây với ~160 cây (Windows) | chậm | chạy khi cần, không nằm trong `status` |
+| Commit bị worker `reset` bỏ đi chỉ còn trong reflog sẽ mất khi dọn cây | mất thứ worker đã chủ động vứt | đúng ý worker; reflog không phải nơi lưu việc |
