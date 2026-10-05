@@ -488,7 +488,7 @@ class FilterIn(BaseModel):
 
 class MiningIn(BaseModel):
     conversation_ids: list[str]
-    batch_size: int = Field(15, ge=3, le=30)
+    batch_size: int = 15  # create_job() tự kẹp về 3–30 — nhập 733 thì dùng 30, không báo lỗi
 
 
 class TextIn(BaseModel):
