@@ -113,6 +113,7 @@ export const FILTER_REASON_LABEL: Record<string, string> = {
   DETAILS_FAILED: "Lấy chi tiết lỗi nhiều lần",
   CHAIN: "Chuỗi lớn (thường mua theo hợp đồng, đòi hoá đơn VAT)",
   TOO_LARGE: "Quá đông khách so với quy mô nhắm tới (thường đòi hoá đơn)",
+  COMPETITOR: "Đối thủ — cơ sở làm / bán buôn cùng mặt hàng",
 };
 
 export const CAMPAIGN_STATUSES = ["DRAFT", "RUNNING", "PAUSED", "STOPPED", "COMPLETED"] as const;
