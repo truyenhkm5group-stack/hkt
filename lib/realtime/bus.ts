@@ -3,7 +3,10 @@ import { currentOrganization, peekOrganization } from "@/lib/platform/context";
 
 export type RealtimeEvent =
   | { type: "sync"; source: string; job: string; status: string }
-  | { type: "order"; orderId: string; action: "created" | "updated" }
+  /** `source`: PANCAKE (đồng bộ) hay ERP (đơn tạo / sửa trong ERP — form, bot, khung chat). Thiếu = PANCAKE (bản cũ). */
+  | { type: "order"; orderId: string; action: "created" | "updated"; source?: "PANCAKE" | "ERP" }
+  /** Hộp thư khách (M8): khách vừa nhắn / nhân viên vừa gửi — trang hộp thư đang mở làm mới ngay. */
+  | { type: "chat"; conversationId: string | null }
   | { type: "shipment"; shipmentId: string; status?: string }
   /** Một lượt ghi của đội care (trạng thái · người · hẹn · note · kết quả) — xem `lib/care/service.ts`. */
   | { type: "care"; shipmentId: string }

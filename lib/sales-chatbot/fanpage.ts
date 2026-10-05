@@ -28,6 +28,7 @@ import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
+import { publish } from "@/lib/realtime/bus";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
@@ -426,7 +427,12 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   const images = ev.inbox ? ev.imageUrls : [];
   if (!ev.text && !images.length) {
     // 👍 / nhãn dán / video / ghi âm: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
-    if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, true);
+    if (ev.inbox) {
+      await stopFollowups(ev.pageId, ev.threadId, now, true);
+      // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
+      await db.insert(t).values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: MEDIA_ONLY_TEXT, customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE }).onConflictDoNothing({ target: t.messageId });
+      await noteCustomerArrived(ev.pageId, ev.threadId, now);
+    }
     return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / video) — để nhân viên xem" };
   }
   const rows = await db
@@ -434,6 +440,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     .values({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: ev.text, customerName: ev.customerName || null, ...(images.length ? { imageUrls: images } : {}), ...(ev.comment ? { kind: "COMMENT", postId: ev.comment.postId, fromId: ev.comment.fromId } : {}) })
     .onConflictDoNothing({ target: t.messageId })
     .returning({ id: t.id });
+  if (rows.length) await noteCustomerArrived(ev.pageId, ev.threadId, now);
   return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 
@@ -477,6 +484,32 @@ async function uploadPancakeContent(pageId: string, token: string, img: { data: 
     return { ok: true, id: str(body?.id) };
   } catch (e) {
     return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]) };
+  }
+}
+
+/**
+ * HỘP THƯ KHÔNG BỎ SÓT KHÁCH (M8): tin khách KHÔNG có chữ lẫn ảnh (nhãn dán · ghi âm · video · tệp · vị trí) — bot không trả lời
+ * được, nhưng NGƯỜI phải thấy. Trước đây đường nhận bỏ hẳn những tin này: khách gửi ghi âm hỏi giá mà hộp thư không có dòng nào.
+ * Nay ghi một dòng DONE (không vào hàng chờ của bot) với chữ giữ chỗ để nhân viên mở kênh xem.
+ */
+export const MEDIA_ONLY_NOTE = "MEDIA_ONLY";
+export const MEDIA_ONLY_TEXT = "[Khách gửi nhãn dán / ghi âm / video / tệp — mở trên kênh để xem]";
+
+/**
+ * Khách vừa nhắn ⇒ hội thoại PHẢI có trong hộp thư NGAY, không đợi bot tới lượt. Trước đây hội thoại chỉ được mở khi bot xử lý
+ * tin — page đã trả lời trước (nhân viên trên Pancake, Meta tự động) hay bot đang tắt thì khách nhắn mà hộp thư trống. Mở (hoặc
+ * lấy) hội thoại + đẩy mốc tin cuối của khách. Đường phụ: lỗi ở đây KHÔNG làm hỏng lượt nhận (tin đã nằm trong sổ tin thô).
+ */
+export async function noteCustomerArrived(pageId: string, threadId: string, at: Date): Promise<void> {
+  try {
+    const conv = await conversationFor(pageId, threadId);
+    if (!conv) return;
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    await db.update(c).set({ lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${at}), ${at})` }).where(eq(c.id, conv.id));
+    publish({ type: "chat", conversationId: conv.id });
+  } catch (error) {
+    console.error(`[hộp thư] không mở được hội thoại ${pageId}/${threadId}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

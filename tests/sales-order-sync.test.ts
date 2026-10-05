@@ -273,6 +273,18 @@ export async function testSalesOrderSync() {
         assert.equal((await db.select().from(schema.orders)).length, 2);
         const [c2] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-2"));
         assert.equal(((c2.state as ChatState).orderSync as OrderSyncThreadState).lastOutcome, "BOT");
+        // ── Bot BẬT nhưng NGƯỜI nhắn sau tin cuối của bot (nhân viên chốt trên Pancake) ⇒ vẫn đọc hội thoại — không miss đơn ──
+        threads.set("t-3", [
+          { id: "h1", fromPage: false, text: "chốt cho chị 1kg nhé", at: min(-26) },
+          { id: "h2", fromPage: true, text: "Dạ em lên đơn cho chị luôn ạ", at: min(-25) },
+        ]);
+        await inbound("t-3", "h1", "chốt cho chị 1kg nhé", min(-26));
+        await inbound("t-3", "h2", "Dạ em lên đơn cho chị luôn ạ", min(-25), "PAGE_REPLY");
+        const callsB = calls;
+        const r5 = await runFanpageOrderSync({ fetch: fetchImpl });
+        assert.ok(r5.checked === 1 && calls > callsB, `người nhắn sau bot ⇒ hội thoại vẫn được đọc (${JSON.stringify(r5)})`);
+        const [c3] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.threadId, "t-3"));
+        assert.notEqual(((c3.state as ChatState).orderSync as OrderSyncThreadState).lastOutcome, "BOT");
         // Tắt ghi đơn không đụng bot.
         assert.ok("ok" in (await saveOrderSyncConfig(admin, false)));
         assert.equal((await loadSalesChatbotConfig()).enabled, true, "tắt ghi đơn KHÔNG tắt bot");
@@ -307,7 +319,7 @@ export async function testSalesOrderSync() {
       }
       assert.notEqual(ORDER_SYNC_SETTING_KEY as string, SALES_CHATBOT_SETTING_KEY as string, "hai công tắc, hai khoá cài đặt");
     });
-    console.log("  ✓ ghi đơn từ hội thoại fanpage: bot TẮT vẫn lên đơn «Mới» · chạy lại không trùng · khách cũ không gửi lại SĐT/địa chỉ ⇒ đơn MỚI theo đơn trước · bot đang trả lời ⇒ không ghi · hai công tắc độc lập · trần lượt bot theo lượt mua · lượt chat giữ nhật ký ghi đơn");
+    console.log("  ✓ ghi đơn từ hội thoại fanpage: bot TẮT vẫn lên đơn «Mới» · chạy lại không trùng · khách cũ không gửi lại SĐT/địa chỉ ⇒ đơn MỚI theo đơn trước · bot đang trả lời ⇒ không ghi · người nhắn sau bot ⇒ vẫn đọc · hai công tắc độc lập · trần lượt bot theo lượt mua · lượt chat giữ nhật ký ghi đơn");
   } finally {
     if (savedSecretsKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;
     else process.env.PLATFORM_SECRETS_KEY = savedSecretsKey;

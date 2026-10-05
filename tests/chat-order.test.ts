@@ -18,6 +18,7 @@ import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabi
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { subscribe } from "@/lib/realtime/bus";
 import { chatOrderContext, createOrderFromChatCore } from "@/lib/records/chat-order";
 
 const ORG = "don-trong-chat";
@@ -60,7 +61,11 @@ export async function testChatOrder() {
       const input = (requestKey: string, extra: Record<string, unknown> = {}) => ({ requestKey, name: "Chị Lan", phone: "0912 345 678", address: "12 Hàng Bạc, Hoàn Kiếm", province: "Hà Nội", stage: "CONFIRMED", lines: [{ variantId: "erp-chat-var", quantity: 2, unitPrice: 350_000 }], shippingFee: 30_000, ...extra });
 
       // ── Tạo: khách mới theo SĐT; đơn của NGƯỜI gắn về hội thoại ──
+      const seen: { type: string; action?: string; source?: string; orderId?: string }[] = [];
+      const unsub = subscribe((e) => seen.push(e as never));
       const r1 = await createOrderFromChatCore(admin, conv.id, input("lan-bam-0001"));
+      unsub();
+      assert.ok(r1.ok && seen.some((e) => e.type === "order" && e.action === "created" && e.source === "ERP" && e.orderId === r1.orderId), `đơn ERP mới phát sự kiện realtime cho trang Đơn hàng đang mở (${JSON.stringify(seen)})`);
       assert.ok(r1.ok && !r1.reused && r1.customerExisting === false, JSON.stringify(r1));
       const [o1] = await db.select().from(schema.orders).where(eq(schema.orders.id, r1.orderId));
       assert.ok(o1.origin === "ERP_FORM" && o1.salesConversationId === conv.id && o1.stage === "CONFIRMED" && o1.source === "Fanpage", JSON.stringify({ origin: o1.origin, conv: o1.salesConversationId, stage: o1.stage, source: o1.source }));

@@ -27,10 +27,11 @@ import { env } from "@/lib/env";
 import { zaloSendImage, zaloSendText, zaloUploadImage, zaloWindow, ZALO_LIMITS, type ZaloDeps, type ZaloEvent } from "@/lib/integrations/zalo/oa";
 import { ensureZaloAccessToken, usableAccessToken } from "@/lib/integrations/zalo/token";
 import { chunkText } from "@/lib/messaging/providers";
+import { publish } from "@/lib/realtime/bus";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
+import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 
@@ -58,6 +59,16 @@ export function zaloVisitorKey(oaId: string, userId: string): string {
 }
 
 const inboundId = (msgId: string) => `zalo:${msgId}`;
+
+/** Mở (hoặc lấy) hội thoại Zalo ngay lúc nhận tin — đường phụ của hộp thư: lỗi KHÔNG làm hỏng lượt nhận. */
+async function ensureZaloInbox(oaId: string, userId: string): Promise<void> {
+  try {
+    const conv = await zaloConversation(oaId, userId);
+    publish({ type: "chat", conversationId: conv?.id ?? null });
+  } catch (error) {
+    console.error(`[hộp thư] không mở được hội thoại Zalo ${userId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 /**
  * Nhân viên gửi MỘT tin chữ cho khách Zalo TỪ HỘP THƯ ERP (0209 · lib/sales-chatbot/inbox.ts). Token qua `zaloAccessToken`
@@ -191,6 +202,9 @@ export async function receiveZaloEvent(ev: ZaloEvent, now: Date = new Date()): P
   }
   if (!ev.text && !ev.imageUrls.length) {
     // Nhãn dán / ghi âm / vị trí: bot không trả lời, nhưng khách ĐÃ tương tác ⇒ cửa sổ 48 giờ tính lại.
+    // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
+    await db.insert(t).values({ pageId, threadId: ev.userId, messageId: inboundId(ev.msgId), text: MEDIA_ONLY_TEXT, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE }).onConflictDoNothing({ target: t.messageId });
+    await ensureZaloInbox(oa.oaId, ev.userId);
     await touchCustomer(oa.oaId, ev.userId, now);
     return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / vị trí) — để nhân viên xem" };
   }
@@ -199,6 +213,11 @@ export async function receiveZaloEvent(ev: ZaloEvent, now: Date = new Date()): P
     .values({ pageId, threadId: ev.userId, messageId: inboundId(ev.msgId), text: ev.text.slice(0, TEXT_MAX), ...(ev.imageUrls.length ? { imageUrls: ev.imageUrls } : {}) })
     .onConflictDoNothing({ target: t.messageId })
     .returning({ id: t.id });
+  // Khách vừa nhắn ⇒ hội thoại có trong hộp thư NGAY, không đợi bot (bot tắt / nhân viên đã trả lời trên OA vẫn thấy).
+  if (rows.length) {
+    await ensureZaloInbox(oa.oaId, ev.userId);
+    await touchCustomer(oa.oaId, ev.userId, now);
+  }
   return rows.length ? { queued: true, reason: "Đã nhận", userId: ev.userId } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
+import { publish } from "@/lib/realtime/bus";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { sha256Hex, sniffImageType } from "@/lib/creative/images";
@@ -78,7 +79,10 @@ const NEEDS_REPLY = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null
   and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz)
   and not exists (select 1 from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id"
     and i.note = ${PAGE_REPLY} and i.created_at > "${sql.raw(C)}"."last_customer_at"))`;
-const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), "${sql.raw(C)}"."updated_at")`;
+/** Chưa đọc: tin khách mới hơn lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư. */
+const UNREAD = sql<boolean>`("${sql.raw(C)}"."last_customer_at" is not null and "${sql.raw(C)}"."last_customer_at" > coalesce("${sql.raw(C)}"."staff_seen_at", 'epoch'::timestamptz))`;
+/** Mốc TIN cuối (khách · bot · nhân viên ERP), không phải `updated_at` — mở / gắn nhãn / nhận hội thoại không được đẩy nó lên đầu. */
+const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_bot_at", 'epoch'::timestamptz), coalesce("${sql.raw(C)}"."last_staff_at", 'epoch'::timestamptz), "${sql.raw(C)}"."created_at")`;
 const HAS_ORDER = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or "${sql.raw(C)}"."draft_order_id" is not null or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
 const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.customer_name is not null and i.customer_name <> '' order by i.created_at desc limit 1)`;
 
@@ -126,6 +130,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   }
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
+    UNREAD: UNREAD,
     UNANSWERED: NEEDS_REPLY,
     NEEDS_HUMAN: eq(c.status, "HANDOFF"),
     MINE: eq(c.assigneeUserId, user.id),
@@ -158,6 +163,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       lastCustomerAt: c.lastCustomerAt,
       activity: ACTIVITY,
       needsReply: NEEDS_REPLY,
+      unread: UNREAD,
       assigneeUserId: c.assigneeUserId,
       assigneeName: u.name,
       hasOrder: HAS_ORDER,
@@ -216,6 +222,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       previewSide: previews.get(r.id)?.side ?? null,
       lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
       waitingSince: r.needsReply ? iso(r.lastCustomerAt) : null,
+      unread: Boolean(r.unread),
       assigneeUserId: r.assigneeUserId,
       assigneeName: r.assigneeName,
       hasOrder: Boolean(r.hasOrder),
@@ -259,16 +266,21 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const db = await getDb();
   const items: TimelineItem[] = [];
 
-  // Bot: lịch sử của bot (bỏ dòng «[Shop đã nhắn]» — đó là bản chép tin phía page, đã có ở nguồn của nó).
-  const m = schema.salesChatMessages;
-  const msgs = await db.select({ seq: m.seq, role: m.role, content: m.content, createdAt: m.createdAt }).from(m).where(eq(m.conversationId, conv.id)).orderBy(desc(m.seq)).limit(TIMELINE_MAX);
+  /*
+    Hộp thư hiện ĐÚNG thứ khách đã nhận. Chat web: lịch sử hội thoại chính là thứ khách thấy. Kênh nhắn tin (Facebook / Zalo):
+    tin bot đọc từ sổ ĐÃ GỬI (`BOT_SENT`) — lịch sử của bot còn có lời chào mặc định và câu bot soạn mà KHÔNG gửi (Copilot /
+    quan sát / gửi hỏng); hiện chúng là nói dối nhân viên rằng khách đã nhận.
+  */
   const messaging = Boolean(conv.pageId && conv.threadId);
-  for (const r of msgs) {
-    const text = textOf(r.content as AiBlock[]);
-    if (!text || text.startsWith(SHOP_SAID)) continue;
-    if (r.role === "assistant") items.push({ key: `m:${r.seq}`, at: r.createdAt.toISOString(), side: "BOT", text, images: [], author: null });
-    // Chat web: tin khách chỉ có ở đây. Kênh nhắn tin: tin khách lấy ở sổ tin thô (đủ cả tin bot bỏ qua + ảnh).
-    else if (!messaging) items.push({ key: `m:${r.seq}`, at: r.createdAt.toISOString(), side: "CUSTOMER", text, images: [], author: null });
+  if (!messaging) {
+    const m = schema.salesChatMessages;
+    const msgs = await db.select({ seq: m.seq, role: m.role, content: m.content, createdAt: m.createdAt }).from(m).where(eq(m.conversationId, conv.id)).orderBy(desc(m.seq)).limit(TIMELINE_MAX);
+    for (const r of msgs) {
+      const text = textOf(r.content as AiBlock[]);
+      // Dòng «[Shop đã nhắn]» = tin nhân viên — đã có ở bảng tin nhân viên (có tên người gửi).
+      if (!text || text.startsWith(SHOP_SAID)) continue;
+      items.push({ key: `m:${r.seq}`, at: r.createdAt.toISOString(), side: r.role === "assistant" ? "BOT" : "CUSTOMER", text, images: [], author: null });
+    }
   }
   if (messaging) {
     const t = schema.salesChatInbound;
@@ -278,10 +290,21 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       .where(and(eq(t.pageId, conv.pageId!), eq(t.threadId, conv.threadId!)))
       .orderBy(desc(t.createdAt))
       .limit(TIMELINE_MAX);
-    for (const r of rows) {
+    // Một tin bot có thể có HAI dòng BOT_SENT (dòng ghi sẵn `bot-out:` trước khi gửi + dòng mang mã kênh trả về) — giữ một.
+    const botSeen: { text: string; at: number }[] = [];
+    for (const r of [...rows].reverse()) {
       const side = inboundSide(r.note, r.messageId);
-      // Tin bot đã có ở lịch sử của bot (đúng chữ, không bị rút gọn khoảng trắng); tin nhân viên ERP có ở bảng của nó (có tên).
-      if (side === "BOT" || side === "STAFF") continue;
+      // Tin nhân viên ERP có ở bảng của nó (có tên người gửi).
+      if (side === "STAFF") continue;
+      if (side === "BOT") {
+        const norm = r.text.replace(/\s+/g, " ").trim();
+        if (!norm) continue;
+        const at = r.createdAt.getTime();
+        if (botSeen.some((b) => b.text === norm && Math.abs(b.at - at) < 5 * 60_000)) continue;
+        botSeen.push({ text: norm, at });
+        items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.text, images: [], author: null });
+        continue;
+      }
       const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (!r.text.trim() && !images.length) continue;
       items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.kind === "COMMENT" ? `[Bình luận] ${r.text}` : r.text, images, author: side === "PAGE" ? "Phía page (ngoài ERP)" : null });
@@ -302,6 +325,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const st = (conv.state ?? {}) as ChatState & { customer?: { name?: string; phone?: string; address?: string } };
   const cu = schema.customers;
   const [cust] = conv.customerId ? await db.select({ id: cu.id, name: cu.name, phone: cu.phone, address: cu.address, province: cu.province }).from(cu).where(eq(cu.id, conv.customerId)).limit(1) : [];
+  // Chưa có hồ sơ khách: tên khách mang theo tin của kênh (Pancake / Zalo) — cùng nguồn với dòng trên danh sách.
+  const channelName = !cust && conv.pageId && conv.threadId ? ((await db.select({ name: schema.salesChatInbound.customerName }).from(schema.salesChatInbound).where(and(eq(schema.salesChatInbound.pageId, conv.pageId), eq(schema.salesChatInbound.threadId, conv.threadId), sql`${schema.salesChatInbound.customerName} is not null and ${schema.salesChatInbound.customerName} <> ''`)).orderBy(desc(schema.salesChatInbound.createdAt)).limit(1))[0]?.name ?? null) : null;
   const o = schema.orders;
   const orderRows = await db
     .select({ id: o.id, stage: o.stage, total: o.totalPriceAfterDiscount, shippingFee: o.shippingFee, insertedAt: o.insertedAt, origin: o.origin, outcome: ORDER_OUTCOME })
@@ -323,6 +348,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (conv.assigneeUserId) assigneeName = (await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, conv.assigneeUserId)).limit(1))[0]?.name ?? null;
   const window = sendWindowOf(conv, now);
   const canReply = canReplyTo(user);
+  // Nhân viên (người trả lời được) đang mở hội thoại ⇒ đã đọc tới đây. Người chỉ xem không làm mất dấu «chưa đọc» của đội.
+  if (canReply) await db.update(schema.salesChatConversations).set({ staffSeenAt: now }).where(eq(schema.salesChatConversations.id, conv.id));
   const [labelMap, allLabels, notes] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id)]);
   return {
     ok: true,
@@ -335,7 +362,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       botYields: conv.status === "HANDOFF",
       customer: cust
         ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }
-        : { id: null, name: st.customer?.name || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },
+        : { id: null, name: st.customer?.name || channelName || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },
       assigneeUserId: conv.assigneeUserId,
       assigneeName,
       window,
@@ -487,6 +514,7 @@ export async function sendStaffReplyCore(user: SessionUser, conversationId: unkn
       updatedAt: at,
     })
     .where(eq(c.id, conv.id));
+  publish({ type: "chat", conversationId: conv.id });
   if (!wasHandoff) await recordConversationEvent(conv.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "STAFF_REPLIED", key: `staff:${STAFF_OUT_PREFIX}${mark.staffMessageId}` });
   await recordConversationEvent(conv.id, { type: "human.replied", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, payload: { via: "ERP_INBOX", chars: row.text.length, images: row.imageCount }, key: `human-reply:${mark.staffMessageId}` });
   return { ok: true, messageId: mark.staffMessageId, reused: false };
