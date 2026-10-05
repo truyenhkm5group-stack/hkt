@@ -146,6 +146,8 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
  * Từ khoá KHÔNG dấu (vd «hai san», «buffet») khớp trên chuỗi đã bỏ dấu, nên tên có / không dấu đều nhận.
  */
 const NAME_RULES: { segment: LeadSegment; words: string[] }[] = [
+  // Món ăn mang tên mặt hàng («Bánh cuốn chả mực») là QUÁN dùng hàng, không phải cửa hàng đặc sản.
+  { segment: "EATERY", words: ["bánh cuốn"] },
   // Đặc sản / đồ khô ĐỨNG TRƯỚC hải sản: «Hải sản khô Hạ Long» là cửa hàng bán lại, không phải nhà hàng.
   { segment: "SPECIALTY_STORE", words: ["dac san", "qua bieu", "qua que", "cha muc", "ruoc", "cha bong", "hai san kho", "do kho", "nuoc mam"] },
   { segment: "MOM_BABY", words: ["me va be", "me be", "mẹ bé", "baby", "an dam"] },
@@ -199,12 +201,19 @@ export type SegmentResult = { segment: LeadSegment; evidence: string };
  * đúng thứ họ bán, còn mã loại hình thường chỉ là `restaurant`; (2) `primaryType`; (3) các `types`
  * còn lại theo nhóm có điểm cao nhất. Không khớp gì ⇒ `UNCLASSIFIED`.
  */
+/**
+ * Từ đầu tiên trong `words` có mặt trong tên, theo RANH GIỚI TỪ. Có dấu ⇒ khớp trên tên có dấu (« lẩu » khớp «Lẩu Dê 404»,
+ * KHÔNG khớp «Lâu Đài»); không dấu ⇒ khớp trên tên đã bỏ dấu. HÀM THUẦN.
+ */
+export function nameWordHit(name: string | null | undefined, words: readonly string[]): string | null {
+  const folded = foldVietnamese(name);
+  const marked = lowerKeepMarks(name);
+  return words.find((w) => (hasMarks(w) ? marked.includes(` ${lowerKeepMarks(w).trim()} `) : folded.includes(` ${foldVietnamese(w).trim()} `))) ?? null;
+}
+
 export function classifySegment(input: SegmentInput): SegmentResult {
-  const folded = foldVietnamese(input.name);
-  const marked = lowerKeepMarks(input.name);
   for (const rule of NAME_RULES) {
-    // Khớp theo RANH GIỚI TỪ. Có dấu ⇒ khớp trên tên có dấu (« lẩu » khớp «Lẩu Dê 404», KHÔNG khớp «Lâu Đài»).
-    const hit = rule.words.find((w) => (hasMarks(w) ? marked.includes(` ${lowerKeepMarks(w).trim()} `) : folded.includes(` ${foldVietnamese(w).trim()} `)));
+    const hit = nameWordHit(input.name, rule.words);
     if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
   }
   const primary = input.primaryType ? TYPE_SEGMENT[input.primaryType] : undefined;

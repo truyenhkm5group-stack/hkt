@@ -1,3 +1,4 @@
+import { DEFAULT_COMPETITOR_FILTER } from "@/lib/wholesale/competitor";
 import { z } from "zod";
 import { DEFAULT_GRADE_THRESHOLDS, DEFAULT_LEARNING, type ServiceAreaLevel } from "@/lib/wholesale/scoring";
 import type { LeadSegment } from "@/lib/wholesale/segments";
@@ -91,12 +92,13 @@ export type KeywordGroup = { key: string; label: string; keywords: string[]; ena
  * xuất được hoá đơn VAT ⇒ khách là cửa hàng / quán VỪA và NHỎ nhập lại để bán hoặc dùng, không phải chuỗi / khách sạn /
  * bếp ăn công ty (những nơi mua theo hợp đồng có hoá đơn).
  *
- * Tám từ khoá BẬT sẵn là lõi: 8 từ × 57 khu vực đợt ① = 456 lượt tìm trang đầu — nằm trong 1.000 lượt Text Search
+ * Bảy từ khoá BẬT sẵn là lõi: 7 từ × 57 khu vực đợt ① = 399 lượt tìm trang đầu — nằm trong 1.000 lượt Text Search
  * Enterprise MIỄN PHÍ mỗi tháng của Google (xem `GOOGLE_FREE_MONTHLY_CALLS`). Nhóm «Mở rộng» bật khi còn lượt; nhóm «Lớn»
  * để TẮT cho tới khi xuất được hoá đơn.
  */
 export const DEFAULT_KEYWORD_GROUPS: readonly KeywordGroup[] = [
-  { key: "dac-san", label: "Cửa hàng đặc sản / quà biếu", keywords: ["cửa hàng đặc sản", "chả mực Hạ Long"], enabled: true },
+  // «chả mực Hạ Long» đã BỎ (05/10/2026): từ khoá ấy kéo về cơ sở làm chả mực — đối thủ, không phải khách (xem competitor.ts).
+  { key: "dac-san", label: "Cửa hàng đặc sản / quà biếu", keywords: ["cửa hàng đặc sản"], enabled: true },
   { key: "thuc-pham", label: "Thực phẩm sạch / đồ khô", keywords: ["cửa hàng thực phẩm sạch"], enabled: true },
   { key: "me-be", label: "Mẹ & bé (ruốc cho bé)", keywords: ["cửa hàng mẹ và bé"], enabled: true },
   { key: "tap-hoa", label: "Tạp hoá", keywords: ["tạp hoá"], enabled: true },
@@ -203,6 +205,14 @@ export const leadHunterConfigSchema = z.object({
     brands: z.array(z.string().trim().min(2).max(60)).max(300),
     maxSameName: z.number().int().min(1).max(50),
   }),
+  /** Loại nơi làm / bán buôn CÙNG mặt hàng với shop (đối thủ). Xem `competitorHit`. */
+  competitorFilter: z.object({
+    enabled: z.boolean(),
+    products: z.array(z.string().trim().min(2).max(60)).max(50),
+    homeProvinces: z.array(z.string().trim().min(2).max(60)).max(40),
+    sellerWords: z.array(z.string().trim().min(2).max(60)).max(50),
+    dishWords: z.array(z.string().trim().min(2).max(60)).max(50),
+  }),
   sizeProfile: z.enum(SIZE_PROFILES),
   /** Số đánh giá Google trên mức này ⇒ coi là nơi quá lớn (thường đòi hoá đơn) và lọc. `null` = không lọc. */
   maxReviews: z.number().int().min(100).max(1_000_000).nullable(),
@@ -260,6 +270,13 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
   scanPriority: { firstProvinces: [...DEFAULT_FIRST_PROVINCES], inlandBeforeCoastal: true },
   freeTier: { enabled: true, safetyPct: 0.05, monthlyCalls: { ...GOOGLE_FREE_MONTHLY_CALLS } },
   chainFilter: { enabled: true, brands: [...DEFAULT_CHAIN_BRANDS], maxSameName: 3 },
+  competitorFilter: {
+    ...DEFAULT_COMPETITOR_FILTER,
+    products: [...DEFAULT_COMPETITOR_FILTER.products],
+    homeProvinces: [...DEFAULT_COMPETITOR_FILTER.homeProvinces],
+    sellerWords: [...DEFAULT_COMPETITOR_FILTER.sellerWords],
+    dishWords: [...DEFAULT_COMPETITOR_FILTER.dishWords],
+  },
   sizeProfile: "SMALL_MEDIUM",
   maxReviews: 5000,
   // Nơi nhận rỗng = chat đã khai ở kết nối Telegram (ô «Chat ID» của trang Kết nối).
@@ -303,6 +320,7 @@ export function mergeLeadHunterConfig(raw: unknown): LeadHunterConfig {
       return { ...f, monthlyCalls: obj((r.freeTier as { monthlyCalls?: unknown } | undefined)?.monthlyCalls, base.freeTier.monthlyCalls) };
     })(),
     chainFilter: obj(r.chainFilter, base.chainFilter),
+    competitorFilter: obj(r.competitorFilter, base.competitorFilter),
     fieldSales: obj(r.fieldSales, base.fieldSales),
     gradeThresholds: obj(r.gradeThresholds, base.gradeThresholds),
     learning: obj(r.learning, base.learning),
