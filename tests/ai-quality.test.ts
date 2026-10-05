@@ -22,6 +22,9 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { loadQualityQueue, reviewQualityFindingCore } from "@/lib/sales-chatbot/quality";
 import { scanConversation, type ScanMessage } from "@/lib/sales-chatbot/quality-shared";
+import { DEFAULT_SALES_CHATBOT_CONFIG } from "@/lib/sales-chatbot/config";
+import { loadReadiness } from "@/lib/sales-chatbot/readiness";
+import { assessReadiness } from "@/lib/sales-chatbot/readiness-shared";
 
 const ORG = "ra-loi-ai";
 const T0 = new Date("2026-10-05T03:00:00Z");
@@ -59,6 +62,14 @@ function testPure() {
   const noBot = scanConversation([say(1, "user", "Áo này có size XL không ạ?"), say(2, "user", "Áo này có size XL không ạ?")], catalog);
   assert.equal(noBot.length, 0, "khách gửi hai lần liền khi bot CHƯA trả lời ⇒ không phải bot trả lời sai");
   assert.match(scanConversation([say(1, "assistant", "Gọi em 0912345678 giá 999k")], catalog)[0].evidence, /••••678/, "bằng chứng che SĐT");
+  // Sẵn sàng tự trả lời: một mục HỎNG ⇒ chưa sẵn sàng; chỉ còn lưu ý ⇒ sẵn sàng còn lưu ý; đủ ⇒ sẵn sàng.
+  const good = { botEnabled: true, aiReady: true, aiReason: null, pricedVariants: 12, sellWithoutStockCheck: false, stockReceipts: 3, notifyGroupOnHandoff: true, realConversations30d: 40, testDrafts30d: 2, replayRuns30d: 1, confirmedPriceErrors7d: 0 };
+  assert.equal(assessReadiness(good).verdict, "READY");
+  assert.equal(assessReadiness({ ...good, replayRuns30d: 0 }).verdict, "READY_WITH_WARNINGS");
+  assert.equal(assessReadiness({ ...good, pricedVariants: 0 }).verdict, "NOT_READY", "không có giá nào ⇒ bot không có gì để báo");
+  assert.equal(assessReadiness({ ...good, aiReady: false, aiReason: "Hết credit" }).checks.find((c) => c.key === "AI_READY")?.detail, "Hết credit", "nói đúng lý do khoá AI hỏng");
+  assert.equal(assessReadiness({ ...good, sellWithoutStockCheck: true, stockReceipts: 0 }).checks.find((c) => c.key === "STOCK")?.status, "WARN", "bán không kiểm tồn là lựa chọn của shop — lưu ý, không phải hỏng");
+  assert.equal(assessReadiness({ ...good, confirmedPriceErrors7d: 2 }).verdict, "READY_WITH_WARNINGS");
   console.log("✓ Rà lỗi AI · thuần: giá có căn cứ (bảng · ship · công cụ · đã nói) ⇒ không cờ, bịa ⇒ cờ MỘT lần · tin nhân viên không bị cờ nhưng là căn cứ · công cụ lỗi nêu tên · hỏi lại y nguyên sau khi bot trả lời ⇒ cờ, «ok» / chưa ai trả lời ⇒ không · bằng chứng che SĐT");
 }
 
@@ -114,8 +125,19 @@ async function testRealOrg() {
     const q2 = await loadQualityQueue(admin, { days: 1 });
     assert.ok("ok" in q2 && q2.value.open === 0 && q2.value.dismissed === 1 && q2.value.items[0].note === "chủ shop cho giảm hôm nay");
     assert.equal((await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "SALES_AI_REVIEW"))).length, 2, "mỗi lượt rà một dòng nhật ký");
+
+    // Sẵn sàng tự trả lời trên dữ liệu thật: bot tắt ⇒ chưa sẵn sàng; bật + AI dùng được ⇒ còn lưu ý (chưa phiếu nhập, chưa
+    // báo nhóm, chưa thử, chưa phát lại); một lỗi giá ĐÃ XÁC NHẬN hiện ra đúng số.
+    const off = await loadReadiness(DEFAULT_SALES_CHATBOT_CONFIG, { ready: true, reason: null });
+    assert.equal(off.verdict, "NOT_READY");
+    const on = await loadReadiness({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }, { ready: true, reason: null });
+    const st = Object.fromEntries(on.checks.map((c) => [c.key, c.status]));
+    assert.deepEqual(st, { BOT_ENABLED: "PASS", AI_READY: "PASS", PRICES: "PASS", STOCK: "WARN", HANDOFF: "WARN", CHANNEL: "WARN", TEST_ORDER: "WARN", REPLAY: "WARN", PRICE_ERRORS: "PASS" }, JSON.stringify(on.checks));
+    assert.equal(on.verdict, "READY_WITH_WARNINGS");
+    assert.ok("ok" in (await reviewQualityFindingCore(admin, { conversationId: real, seq: 3, kind: "PRICE_UNGROUNDED", status: "CONFIRMED" })));
+    assert.equal((await loadReadiness({ ...DEFAULT_SALES_CHATBOT_CONFIG, enabled: true }, { ready: true, reason: null })).checks.find((c) => c.key === "PRICE_ERRORS")?.label, "1 lỗi giá đã xác nhận (7 ngày)");
   });
-  console.log("✓ Rà lỗi AI · tổ chức thật: quét hội thoại bot trả lời trong kỳ (khung thử loại) · chỉ xem / tin không có phát hiện / khung thử / trạng thái lạ ⇒ từ chối, không ghi · rà lại sửa dòng cũ, người rà mang users.id + tên máy chủ đọc · nhật ký mỗi lượt");
+  console.log("✓ Rà lỗi AI · tổ chức thật: quét hội thoại bot trả lời trong kỳ (khung thử loại) · chỉ xem / tin không có phát hiện / khung thử / trạng thái lạ ⇒ từ chối, không ghi · rà lại sửa dòng cũ, người rà mang users.id + tên máy chủ đọc · nhật ký mỗi lượt · bảng sẵn sàng tự trả lời đọc số thật (bot tắt ⇒ chưa sẵn sàng; lỗi giá đã xác nhận hiện đúng số)");
 }
 
 export async function testAiQuality() {

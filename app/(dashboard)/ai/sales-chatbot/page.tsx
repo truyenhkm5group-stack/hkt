@@ -32,6 +32,8 @@ import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { ChatCostPanel } from "./cost-panel";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
+import { loadReadiness } from "@/lib/sales-chatbot/readiness";
+import { READINESS_VERDICT_LABEL } from "@/lib/sales-chatbot/readiness-shared";
 
 export const metadata = { title: "Chatbot bán hàng" };
 
@@ -68,6 +70,9 @@ export default async function SalesChatbotPage() {
     return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null };
   });
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
+  // Sẵn sàng tự trả lời (P8): chỉ đếm số thật; THÔNG TIN, không chặn đổi chế độ.
+  const selectedAi = aiConnections.find((a) => a.key === cfg.connectorKey);
+  const readiness = manage ? await loadReadiness(cfg, { ready: Boolean(selectedAi?.ready), reason: selectedAi?.reason ?? null }) : null;
   return (
     <div className="space-y-5">
       <PageHeader
@@ -97,6 +102,32 @@ export default async function SalesChatbotPage() {
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
         <div className="space-y-5">
           {orderSync ? <OrderSyncPanel view={orderSync} manage={manage} /> : null}
+          {readiness ? (
+            <SectionCard
+              title={`AI đã sẵn sàng tự trả lời khách? — ${READINESS_VERDICT_LABEL[readiness.verdict]}`}
+              description="Đọc từ dữ liệu thật của shop. Đây là bảng kiểm, không chặn bạn đổi chế độ."
+            >
+              <ul className="space-y-1.5 text-sm" data-testid="ai-readiness" data-verdict={readiness.verdict}>
+                {readiness.checks.map((c) => (
+                  <li key={c.key} className="flex items-start gap-2">
+                    <span className={`mt-0.5 shrink-0 rounded px-1.5 text-[11px] font-semibold ${c.status === "PASS" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : c.status === "WARN" ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200" : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"}`}>
+                      {c.status === "PASS" ? "Đạt" : c.status === "WARN" ? "Lưu ý" : "Hỏng"}
+                    </span>
+                    <span className="min-w-0">
+                      {c.href ? (
+                        <Link href={c.href} className="font-medium hover:underline">
+                          {c.label}
+                        </Link>
+                      ) : (
+                        <span className="font-medium">{c.label}</span>
+                      )}
+                      <span className="block text-xs text-muted-foreground">{c.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          ) : null}
           {modeConfig ? (
             <SectionCard title="Chế độ vận hành" description="Quan sát → Copilot → Thử nghiệm AI vs Người → Tự động: đo người trước, rồi mới để AI tự trả lời.">
               <ModePanel config={modeConfig} manage={manage} />
