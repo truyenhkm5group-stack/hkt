@@ -798,6 +798,8 @@ export type WorktreeFacts = {
   isMain: boolean;
   isCurrent: boolean;
   owner: { mission: string; task: string } | null;
+  /** Vai trong phiếu: LEAD = cây Lead của một sứ mệnh — không bao giờ là rác chỉ vì nó sạch. */
+  role?: "LEAD" | "WORKER";
   dirty: number;
   /** Commit không nằm trên BẤT KỲ ref remote nào — thứ duy nhất sẽ mất nếu xoá nhánh. -1 = không đo được. */
   uniqueLocal: number;
@@ -816,6 +818,14 @@ const isRealMerge = (m: MergeEvidence | null): boolean => m !== null && m !== "E
 export function classifyWorktree(f: WorktreeFacts, cfg: Config): { cls: WorktreeClass; note: string } {
   if (f.isMain) return { cls: "MAIN", note: "cây chính — không bao giờ dọn" };
   if (f.isCurrent) return { cls: "CURRENT", note: "cây đang chạy lệnh" };
+  if (f.role === "LEAD" && !f.prunable && f.head !== null && f.idleHours !== null) {
+    // Cây Lead sống suốt sứ mệnh và thường sạch giữa hai lượt — "sạch + không commit riêng" không có
+    // nghĩa là bỏ đi. Chỉ báo, không bao giờ xếp vào MERGED_SAFE_TO_CLEAN (reviewer 06/10/2026).
+    const idleLead = `${Math.round(f.idleHours)} giờ không động`;
+    return f.idleHours >= cfg.staleAfterDays * 24
+      ? { cls: f.dirty > 0 ? "STALE_DIRTY" : "STALE_CLEAN", note: `cây LEAD · ${idleLead}` }
+      : { cls: f.idleHours < cfg.activeWithinHours || f.dirty > 0 ? "ACTIVE" : "IDLE", note: `cây LEAD · ${idleLead}` };
+  }
   if (f.prunable) return { cls: "UNKNOWN", note: "thư mục không còn — `git worktree prune` gỡ được siêu dữ liệu" };
   if (f.head === null || f.dirty < 0 || f.idleHours === null) return { cls: "UNKNOWN", note: "không đọc được trạng thái" };
   const stale = f.idleHours >= cfg.staleAfterDays * 24;
@@ -837,10 +847,12 @@ export type CleanupDecision = { ok: boolean; refusals: string[]; deleteBranch: b
  * Được dọn KHÔNG. Mỗi lý do từ chối là một cách mất việc đã thấy hoặc tưởng tượng được; không có
  * cờ nào bỏ qua được vế "bẩn" hay "commit chưa lên remote".
  */
-export function cleanupDecision(f: WorktreeFacts, cfg: Config, opts: { allowUnowned: boolean }): CleanupDecision {
+export function cleanupDecision(f: WorktreeFacts, cfg: Config, opts: { allowUnowned: boolean; allowLead?: boolean }): CleanupDecision {
   const r: string[] = [];
   if (f.isMain) r.push("MAIN: cây chính của kho");
   if (f.isCurrent) r.push("CURRENT: không tự dọn cây đang đứng");
+  if (f.role === "LEAD" && !opts.allowLead)
+    r.push("LEAD: cây Lead của một sứ mệnh — chỉ dọn khi nêu ĐÍCH tường minh kèm --lead, sau khi mọi việc của sứ mệnh đã vào");
   if (f.locked) r.push("LOCKED: cây đang bị khoá (`git worktree lock`) — chủ của nó chưa cho gỡ");
   if (f.prunable) r.push("PRUNABLE: thư mục đã mất — dùng `git worktree prune`, không phải cleanup");
   if (f.dirty !== 0) r.push(f.dirty < 0 ? "UNKNOWN: không đọc được trạng thái" : `DIRTY: ${f.dirty} thay đổi chưa commit`);
@@ -993,7 +1005,7 @@ function writeManifest(worktree: string, m: Manifest): string {
   if (!dir) throw new Error(`không tìm được thư mục quản trị git của ${worktree}`);
   const file = path.join(dir, MANIFEST_FILE);
   writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
-  writeFileSync(path.join(dir, "ai-tech-brief.md"), renderBrief(m));
+  writeFileSync(path.join(dir, "ai-tech-brief.md"), m.role === "LEAD" ? renderLeadBrief(m) : renderBrief(m));
   return file;
 }
 
@@ -1182,6 +1194,7 @@ export function gatherWorktreeFacts(ctx: RepoCtx, e: WorktreeEntry, now: number)
     isMain: samePath(e.path, ctx.mainWorktree),
     isCurrent: samePath(e.path, ctx.top),
     owner: manifest ? { mission: manifest.mission.id, task: manifest.task.id } : null,
+    role: manifest ? (manifest.role ?? "WORKER") : undefined,
     dirty: d.n,
     uniqueLocal,
     merged: e.prunable ? null : mergeEvidence(ctx.top, tip, ref, { baseSha: manifest?.baseSha }),
@@ -1539,13 +1552,25 @@ function worktreeCollisions(ctx: RepoCtx, wts: readonly WorktreeEntry[], branch:
  * worktree cạnh đó, và ghi vào cây mới. Checkout cũ chưa có tệp này thì chạy bản trên main:
  *   git show origin/main:scripts/ai-tech.ts > <thư-mục-tạm>/ai-tech.ts && node <thư-mục-tạm>/ai-tech.ts lead <id>
  */
-function cmdLead(ctx: RepoCtx, id: string | undefined, titleWords: string[], flags: Set<string>): number {
+function cmdLead(ctxIn: RepoCtx, id: string | undefined, titleWords: string[], flags: Set<string>): number {
+  let ctx = ctxIn;
   if (!id || !SLUG_RE.test(id))
     throw new UsageError(`tên sứ mệnh phải khớp ${SLUG_RE} (thành nhánh ${ctx.config.branchPrefix}<tên> và cây ../${ctx.config.worktreePrefix}<tên>)`);
   const dry = flags.has("dry-run");
   if (!flags.has("offline")) {
     const f = gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
     if (f.code !== 0) throw new Error(`fetch ${ctx.config.remote} thất bại (${f.err}) — không dựng cây Lead trên một gốc có thể đã cũ`);
+  } else out("! --offline: KHÔNG fetch — cây Lead dựng trên origin/main đang có ở máy này, có thể đã cũ");
+  // Cấu hình lấy từ CHÍNH gốc sẽ dựng (origin/main vừa fetch), không từ checkout đang đứng — checkout
+  // ấy có thể cũ hoặc chưa có .ai/config.json (reviewer 06/10/2026).
+  const baseCfgRaw = gitTry(ctx.top, ["show", `${ctx.config.integrationRef}:.ai/config.json`]);
+  if (baseCfgRaw) {
+    try {
+      const parsed = parseConfig(JSON.parse(baseCfgRaw));
+      if (!parsed.errors.length) ctx = { ...ctx, config: parsed.config };
+    } catch {
+      /* cấu hình trên gốc hỏng — dùng cấu hình hiện có, `validate` sẽ báo */
+    }
   }
   const ref = ctx.config.integrationRef;
   const baseSha = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
@@ -1736,7 +1761,10 @@ function cmdCleanup(ctx: RepoCtx, targets: string[], flags: Set<string>): number
   const chosen: WorktreeEntry[] = [];
   for (const t of targets) {
     if (t === "merged") {
-      for (const w of wts) if (readManifest(w.path)) chosen.push(w);
+      for (const w of wts) {
+        const m = readManifest(w.path);
+        if (m && m.role !== "LEAD") chosen.push(w);
+      }
       continue;
     }
     const m = /^([a-z0-9-]+):([a-z0-9-]+)$/.exec(t);
@@ -1756,7 +1784,7 @@ function cmdCleanup(ctx: RepoCtx, targets: string[], flags: Set<string>): number
   out(apply ? "DỌN CÂY" : "DỌN CÂY [CHẠY THỬ — thêm --apply để làm thật]");
   for (const w of chosen) {
     const f = gatherWorktreeFacts(ctx, w, now);
-    const d = cleanupDecision(f, ctx.config, { allowUnowned: flags.has("allow-unowned") });
+    const d = cleanupDecision(f, ctx.config, { allowUnowned: flags.has("allow-unowned"), allowLead: flags.has("lead") && !targets.includes("merged") });
     if (!d.ok) {
       refused++;
       out(`  ✗ ${w.path}\n      ${d.refusals.join("\n      ")}`);
@@ -1846,7 +1874,8 @@ const HELP = `AI Tech Room — docs/ai-tech-room/README.md
   npm run ai -- validate [sứ-mệnh…]                      kiểm tệp sứ mệnh: DAG, chu trình, phạm vi, sàn rủi ro
   npm run ai -- new <sứ-mệnh> [tiêu đề]                  tạo .ai/missions/<sứ-mệnh>.json mẫu trong cây hiện tại
   npm run ai -- lead <sứ-mệnh> [tiêu đề] [--dry-run]     ĐIỂM VÀO: dựng cây Lead ../wt-<sứ-mệnh> từ origin/main vừa fetch
-                                                         (checkout cũ: git show origin/main:scripts/ai-tech.ts > tạm.ts && node tạm.ts lead …)
+                                                         (checkout cũ: git show origin/main:scripts/ai-tech.ts > <tạm>/ai-tech.ts && node <tạm>/ai-tech.ts lead …
+                                                          — tệp PHẢI tên ai-tech.ts, tên khác thì lệnh không chạy)
 `;
 
 export async function main(argv: readonly string[], cwd: string): Promise<number> {
