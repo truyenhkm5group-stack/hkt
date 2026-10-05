@@ -120,7 +120,7 @@ async function loadSources(days: number, now: Date, limit: number): Promise<Sour
 }
 
 /** Tập căn cứ của giá: giá bảng mọi mẫu mã còn bán + phí ship đã khai. Số do công cụ trả trong lượt cộng thêm ở `judgePoint`. */
-async function groundedPrices(): Promise<Set<number>> {
+export async function groundedPrices(): Promise<Set<number>> {
   const db = await getDb();
   const v = schema.productVariants;
   const rows = await db.select({ p: v.retailPrice, d: v.retailPriceAfterDiscount }).from(v).where(eq(v.isRemoved, false));

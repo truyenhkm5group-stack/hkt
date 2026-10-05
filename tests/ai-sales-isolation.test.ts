@@ -35,6 +35,7 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { loadCopilotView } from "@/lib/sales-chatbot/operating-mode";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
+import { loadQualityQueue, reviewQualityFindingCore } from "@/lib/sales-chatbot/quality";
 import { listReplayRuns, loadReplayRun } from "@/lib/sales-chatbot/replay";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -47,7 +48,7 @@ const markOf = (org: string) => `ASI-BIMAT-${org.toUpperCase()}-7731`;
 /** Ảnh PNG 1×1 thật (chữ ký + IHDR + IDAT + IEND). */
 const PNG = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
 
-const SALES_TABLES = ["sales_chat_conversations", "sales_chat_messages", "sales_chat_quick_replies", "sales_chat_quick_reply_images", "sales_conversation_events", "sales_replay_runs", "sales_replay_points", "sales_copilot_suggestions"] as const;
+const SALES_TABLES = ["sales_chat_conversations", "sales_chat_messages", "sales_chat_quick_replies", "sales_chat_quick_reply_images", "sales_conversation_events", "sales_replay_runs", "sales_replay_points", "sales_copilot_suggestions", "sales_ai_reviews"] as const;
 
 type Seeded = { admin: SessionUser; fanpageConv: string; testConv: string; quickReply: string; image: string; replayRun: string; suggestion: string };
 
@@ -71,6 +72,9 @@ async function seed(org: string): Promise<Seeded> {
       .values({ channel: "FANPAGE", status: "HANDOFF", visitorKey: `${org}-thread`, handoffReason: `Khách sỉ ${MARK}`, pageId: `${org}-page`, threadId: `${org}-thread`, state: { note: MARK } })
       .returning({ id: c.id });
     await db.insert(schema.salesChatMessages).values({ conversationId: fan.id, seq: 1, role: "user", content: [{ type: "text", text: `Cho em giá sỉ ${MARK}` }] });
+    // Rà lỗi AI (P7): câu bot có giá không căn cứ ⇒ một phát hiện trong hàng đợi của CHÍNH tổ chức này.
+    await db.insert(schema.salesChatMessages).values({ conversationId: fan.id, seq: 2, role: "assistant", content: [{ type: "text", text: `Giá sỉ 777k ${MARK}` }] });
+    await recordConversationEvent(fan.id, { type: "ai.replied", actorKind: "AI", occurredAt: new Date(), payload: { mode: "AI" }, key: `asi-reply-${org}` });
     const test = await openConversation("TEST", { createdBy: admin.email });
     const qr = await saveQuickReply(admin, { title: `Giá ship ${MARK}`, triggers: ["phí ship"], answer: `Phí ship {{ship}} ${MARK}`, active: false });
     assert.ok("ok" in qr, JSON.stringify(qr));
@@ -171,6 +175,12 @@ async function attack(attacker: string, admin: SessionUser, victimCode: string, 
     results.push(attr);
     const seen = attr.table.AI_ONLY.valueVnd + attr.table.AI_ASSISTED.valueVnd + attr.table.HUMAN_ONLY.valueVnd;
     if (seen !== orderValueOf(attacker)) refused.push(`quy kết đơn lẫn số của tổ chức khác (${seen} ≠ ${orderValueOf(attacker)})`);
+    const review = await reviewQualityFindingCore(admin, { conversationId: victim.fanpageConv, seq: 2, kind: "PRICE_UNGROUNDED", status: "DISMISSED" });
+    results.push(review);
+    if ("ok" in review) refused.push("rà lỗi AI trên hội thoại của tổ chức khác");
+    const queue = await loadQualityQueue(admin, { days: 30 });
+    results.push(queue);
+    if ("ok" in queue && queue.value.items.some((i) => i.conversationId === victim.fanpageConv)) refused.push("hàng đợi rà lẫn hội thoại của tổ chức khác");
     const convs = await listConversations(200);
     const qrs = await listQuickReplies();
     results.push(convs, qrs);
@@ -207,7 +217,7 @@ export async function testAiSalesIsolation() {
       assert.ok("ok" in (await setQuickReplyActive(b.admin, b.quickReply, true)), "B bật được câu mẫu của chính mình");
       assert.equal(await resumeConversationToAi(b.fanpageConv), true, "B trả được hội thoại của chính mình về AI");
     });
-    console.log("  ✓ AI bán hàng cô lập tổ chức: 15 đòn × 2 chiều bị từ chối (gồm sổ sự kiện, phát lại, Copilot, màn Hiệu quả), CSDL nạn nhân trước = sau, 0 dòng sổ AI, 0 chữ rò rỉ");
+    console.log("  ✓ AI bán hàng cô lập tổ chức: 18 đòn × 2 chiều bị từ chối (gồm sổ sự kiện, phát lại, Copilot, màn Hiệu quả, quy kết đơn, rà lỗi AI), CSDL nạn nhân trước = sau, 0 dòng sổ AI, 0 chữ rò rỉ");
   } finally {
     await cleanup();
   }

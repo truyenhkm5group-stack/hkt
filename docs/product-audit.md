@@ -61,7 +61,7 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
 | P4 | KPI còn thiếu: AOV, doanh thu / hội thoại, chi phí AI / hội thoại, doanh thu ÷ chi phí AI | 2 | XONG (nhánh) | `salesEconomics` (thuần); 9 khoá mới trong `AI_SALES_METRICS` |
 | P5 | Màn chủ shop «Hôm nay AI kiếm bao nhiêu» (di động trước) đọc CÙNG hàm của màn «Hiệu quả» | 2 | XONG (nhánh) | `components/onboarding/ai-sales-today.tsx` đầu trang chủ tổ chức khách: hôm nay = giá trị ĐẶT (chưa giao), 30 ngày = doanh thu ĐÃ GIAO; bài kiểm chặn công thức thứ hai |
 | P6 | Lý do mất khách + báo cáo «Vì sao khách không mua» + drill-down | 3 | XONG (nhánh) | KHÔNG đổi công cụ bot: phân loại LÚC ĐỌC (`lost-reasons-shared.ts`, `LOST_REASON_VERSION`). Từ khoá có dấu («đặt» ≠ «đắt»); im lặng quá 24 giờ là SUY RA; chuyển người không thấy đơn là nhóm riêng. Bước sau (đổi hành vi, cần bộ vàng): cho `mark_declined` nhận mã lý do |
-| P7 | Kiểm giá không căn cứ trên lượt THẬT ⇒ hàng đợi rà lỗi AI | 3 | CHỜ | Dùng lại bộ kiểm của phát lại |
+| P7 | Kiểm giá không căn cứ trên lượt THẬT ⇒ hàng đợi rà lỗi AI | 3 | XONG (nhánh) | `/ai/sales-chatbot/quality`: luật tất định (cùng bộ đọc tiền của phát lại) — giá không căn cứ · công cụ lỗi · khách hỏi lại y nguyên; tin nhân viên không bị cờ. Quyết định người rà ở `sales_ai_reviews` (migration `0216`, chỉ THÊM). Không dùng AI thứ hai làm giám khảo |
 | P8 | Cổng sẵn sàng trước khi bật Tự động | 5 | CHỜ | |
 
 ## 4. Nhật ký quyết định

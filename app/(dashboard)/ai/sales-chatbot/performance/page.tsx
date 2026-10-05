@@ -88,6 +88,9 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                 {d} ngày
               </Link>
             ))}
+            <Link href="/ai/sales-chatbot/quality" className="ml-2 inline-flex h-8 items-center rounded-md border px-3 text-sm hover:bg-muted">
+              Rà lỗi AI
+            </Link>
             <Link href="/ai/sales-chatbot" className="ml-2 inline-flex h-8 items-center rounded-md border px-3 text-sm hover:bg-muted">
               ← Chatbot
             </Link>

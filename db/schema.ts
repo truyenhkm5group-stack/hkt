@@ -10209,6 +10209,35 @@ export const salesReplayPoints = pgTable(
 );
 
 /**
+ * QUYẾT ĐỊNH RÀ LỖI AI (0216 · lib/sales-chatbot/quality.ts) — lớp GHI CHÚ của người lên một phát hiện TÍNH LÚC ĐỌC
+ * (`quality-shared.ts::scanConversation`). Không có dòng = «chờ rà»; phát hiện không lưu ở đâu cả (phép chiếu, AGENTS §19).
+ * Khoá tự nhiên (hội thoại, seq, loại): rà lại một phát hiện là SỬA dòng ấy, không đẻ dòng thứ hai. Người rà mang `users.id`
+ * + tên do máy chủ đọc (AGENTS §34).
+ */
+export const salesAiReviews = pgTable(
+  "sales_ai_reviews",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesChatConversations.id, { onDelete: "cascade" }),
+    messageSeq: integer("message_seq").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    note: text("note"),
+    reviewerUserId: text("reviewer_user_id"),
+    reviewerName: text("reviewer_name"),
+    reviewedAt: ts("reviewed_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_ai_reviews_key").on(t.conversationId, t.messageSeq, t.kind),
+    check("sales_ai_reviews_kind_check", sql`${t.kind} IN ('PRICE_UNGROUNDED','TOOL_ERROR','REPEATED_QUESTION')`),
+    check("sales_ai_reviews_status_check", sql`${t.status} IN ('CONFIRMED','DISMISSED')`),
+  ],
+);
+
+/**
  * GỢI Ý COPILOT (migration sales_copilot · lib/sales-chatbot/operating-mode.ts): câu bot soạn ở hội thoại bóng, KHÔNG gửi, ở
  * chế độ COPILOT; câu thật của page tới sau thì máy ghi kèm độ giống + phán quyết. Đo "người dùng lại gợi ý tới đâu".
  */
