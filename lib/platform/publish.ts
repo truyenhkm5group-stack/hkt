@@ -34,7 +34,7 @@ import { platformAudit } from "@/lib/platform/audit";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
 import { domainSlugProblem, subdomainOrigin } from "@/lib/platform/host";
-import { findOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
+import { invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
 import type { Organization } from "@/lib/platform/types";
 import { listRules, validateRuleInput } from "@/lib/workflow/rules";
 
@@ -63,16 +63,10 @@ export async function publicationOf(code: string): Promise<Publication> {
 }
 
 /**
- * Gốc URL để dựng liên kết cho người của tổ chức `code` (liên kết đơn trong tin nhóm, liên kết mời): tên miền con khi đã
- * XUẤT BẢN và nền tảng có miền gốc; còn lại `APP_URL` (đăng nhập bằng ô «Mã tổ chức»).
+ * Gốc liên kết cho người của tổ chức — sống ở `lib/platform/org-links.ts` (tệp nhẹ, đường gửi cảnh báo import được mà
+ * không kéo theo luật workflow / blueprint). Xuất lại ở đây để các chỗ gọi cũ giữ nguyên.
  */
-export async function organizationBaseUrl(code?: string): Promise<string> {
-  const c = code ?? (await currentOrganization()).code;
-  const org = await findOrganization(c);
-  const base = platformBaseDomain();
-  if (org && !org.isHome && org.publishState === "PUBLISHED" && org.domainSlug && base) return subdomainOrigin(org.domainSlug, base);
-  return env.appUrl;
-}
+export { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * Tổ chức mà tên miền con `slug` trỏ tới — CHỈ tổ chức đã xuất bản, đang hoạt động, không phải nhà. Không có ⇒ `null`

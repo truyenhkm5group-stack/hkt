@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { env } from "@/lib/env";
-import { MESSENGER_PAGES_COOKIE, openPendingPages } from "@/lib/integrations/messenger/connect";
+import { MESSENGER_PAGES_COOKIE, messengerRedirectUris, openPendingPages } from "@/lib/integrations/messenger/connect";
 import { messengerVerifyToken } from "@/lib/integrations/messenger/graph";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
@@ -105,8 +105,13 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
             <dt className="text-muted-foreground">Trường đăng ký</dt>
             <dd className="text-xs">Page: messages · messaging_postbacks · message_echoes · feed — Instagram: messages · messaging_postbacks</dd>
             <dt className="text-muted-foreground">OAuth redirect</dt>
-            <dd>
-              <code className="break-all text-xs">{`${env.appUrl}/api/connect/messenger/callback`}</code>
+            <dd className="space-y-1">
+              {/* Một đường cho MỖI gốc phần mềm — khách Chốt Đơn bấm kết nối từ app.chotdontudong.com. */}
+              {messengerRedirectUris().map((u) => (
+                <code key={u} className="block break-all text-xs">
+                  {u}
+                </code>
+              ))}
             </dd>
           </dl>
         </SectionCard>

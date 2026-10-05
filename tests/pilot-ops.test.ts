@@ -31,6 +31,7 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { currentOrganization, OrgContextError, setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { disableOrgConnection, setOrganizationSuspended, setWorkflowsPaused } from "@/lib/platform/kill-switches";
 import { invalidateOrgFlags } from "@/lib/platform/org-flags";
+import { setOrganizationBrand } from "@/lib/platform/org-brand";
 import { setOrganizationPlan } from "@/lib/platform/org-plan";
 import { checkEntitlement, listPlans } from "@/lib/entitlements/check";
 import { fanOutOrganizationCodes, getHomeOrganization, invalidateOrganizations, listOrganizations } from "@/lib/platform/organizations";
@@ -480,6 +481,28 @@ async function testOrgPlan(op: SessionUser, outsiders: SessionUser[]) {
   assert.equal(await planOf(), "trial");
 }
 
+/** 9 · ĐẶT THƯƠNG HIỆU cho tổ chức có từ trước 0215 — người vận hành quyết, có lý do + nhật ký; máy không đoán. */
+async function testOrgBrand(op: SessionUser, outsiders: SessionUser[]) {
+  const brandOf = async () => (await (await getPlatformDb()).query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, B) }))?.brand ?? null;
+  assert.equal(await brandOf(), null, "cấp không kèm thương hiệu ⇒ để trống (không theo dõi)");
+  for (const u of outsiders) assert.ok("error" in (await setOrganizationBrand(u, { orgCode: B, brand: "chotdon", reason: "tự đổi thương hiệu" })), `${u.email} không đổi được thương hiệu`);
+  assert.ok("error" in (await setOrganizationBrand(op, { orgCode: B, brand: "chotdon", reason: "" })), "thiếu lý do ⇒ từ chối");
+  assert.ok("error" in (await setOrganizationBrand(op, { orgCode: B, brand: "shopee", reason: "thương hiệu lạ" })), "thương hiệu lạ ⇒ từ chối");
+  assert.ok("error" in (await setOrganizationBrand(op, { orgCode: (await getHomeOrganization()).code, brand: "chotdon", reason: "đổi nhà sang Chốt Đơn" })), "nhà không đổi thương hiệu");
+  assert.equal(await brandOf(), null, "lượt bị từ chối không đổi một byte");
+  assert.equal((await auditRows(B, "ORG_BRAND_SET")).length, 0, "lượt bị từ chối không ghi nhật ký");
+  const set = await setOrganizationBrand(op, { orgCode: B, brand: "chotdon", reason: "Khách đăng ký từ chotdontudong.com ngày 04/10" });
+  assert.ok("ok" in set && set.changed, JSON.stringify(set));
+  assert.equal(await brandOf(), "chotdon");
+  assert.equal((await auditRows(B, "ORG_BRAND_SET")).length, 1);
+  const again = await setOrganizationBrand(op, { orgCode: B, brand: "chotdon", reason: "bấm lại lần hai" });
+  assert.ok("ok" in again && !again.changed, "bấm lại không đổi");
+  assert.equal((await auditRows(B, "ORG_BRAND_SET")).length, 1, "bấm lại không ghi thêm");
+  const back = await setOrganizationBrand(op, { orgCode: B, brand: "vnx", reason: "Khách nhờ chuyển về VNXcommerce" });
+  assert.ok("ok" in back && back.changed);
+  assert.equal(await brandOf(), "vnx");
+}
+
 export async function testPilotOps() {
   testPure();
   await cleanup();
@@ -497,6 +520,7 @@ export async function testPilotOps() {
     await testWorkflowPause(op, outsiders);
     await testConnectionDisable(op, outsiders);
     await testOrgPlan(op, outsiders);
+    await testOrgBrand(op, outsiders);
     // pop-b (tổ chức khác) không bị công tắc nào của pop-a chạm tới.
     assert.equal((await auditRows(B)).filter((r) => ["ORG_STATUS", "FLAG_SET", "CONNECTION_DISABLE", "SUPPORT_VIEW"].includes(r.action)).length, 0);
   } finally {

@@ -39,6 +39,8 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
+import { env } from "@/lib/env";
 
 const QS_A = "qs-banh-mi-mot";
 const QS_B = "qs-hai-san-hai";
@@ -249,13 +251,20 @@ async function testQuickSignupFlow() {
   const dayBefore = vnDate(new Date());
   // XÁC MINH SĐT qua Zalo bật ⇒ phải có mã; mã đúng ⇒ tạo được và mã bị tiêu (lib/onboarding/phone-otp.ts).
   assert.ok("ok" in (await setPhoneOtpSetting({ orgCode: home, userId: "op", email: "op@local" }, { enabled: true, templateId: "312345" }, { zaloConnected: async () => true })));
+  // Khách đứng ở app.chotdontudong.com (tầng action đọc `hostBrand()` rồi truyền vào) ⇒ sổ tổ chức ghi `chotdon`.
   const codes: string[] = [];
   assert.ok("ok" in (await sendSignupOtp("0987 654 302", who, { send: async (i) => (codes.push(i.code), { ok: true }) })));
-  const b = await quickSignup({ storeName: "QS Hải Sản Hai", businessType: "seafood", phone: "0987 654 302", otp: codes[0] }, who, { issue, social: profile });
+  const b = await quickSignup({ storeName: "QS Hải Sản Hai", businessType: "seafood", phone: "0987 654 302", otp: codes[0] }, who, { issue, social: profile, brand: "chotdon" });
   assert.ok("ok" in b && b.orgCode === QS_B && b.loggedIn, JSON.stringify(b));
   const [otpRow] = await pdb0.select({ consumedAt: schema.platformPhoneOtps.consumedAt }).from(schema.platformPhoneOtps).where(eq(schema.platformPhoneOtps.phone, "84987654302"));
   assert.ok(otpRow?.consumedAt, "tạo xong ⇒ mã đã tiêu");
   await setPhoneOtpSetting({ orgCode: home, userId: "op", email: "op@local" }, { enabled: false, templateId: "312345" });
+  const brandOf = async (code: string) => (await pdb0.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) }))?.brand ?? null;
+  assert.equal(await brandOf(QS_B), "chotdon", "đăng ký từ host Chốt Đơn ⇒ thương hiệu ghi vào sổ tổ chức");
+  assert.equal(await brandOf(QS_A), null, "không truyền thương hiệu ⇒ để trống (không theo dõi), không đoán");
+  invalidateOrganizations();
+  assert.equal(await organizationBaseUrl(QS_B), "https://app.chotdontudong.com", "liên kết mời / đặt lại mật khẩu / tin nhóm của khách Chốt Đơn về app.chotdontudong.com");
+  assert.equal(await organizationBaseUrl(QS_A), env.appUrl, "tổ chức không theo dõi giữ APP_URL như trước");
   const adminB = await withOrganization(QS_B, async () => (await getDb()).query.users.findFirst({ where: eq(schema.users.email, "chu@qs-b.vn") }));
   assert.equal(adminB?.name, "Chủ Hải Sản", "tên lấy từ hồ sơ Google");
   // Đã khai tài khoản nhận tiền ⇒ dùng thử TRIAL_DAYS ngày (tính cả hôm nay), ân hạn 3 ngày, rồi chỉ xem.

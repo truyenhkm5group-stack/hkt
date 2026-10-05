@@ -4,7 +4,9 @@ import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
 import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
 import { PageHeader } from "@/components/page-header";
 import { KillSwitchPanel, PilotPanel, SupportHealthPanel } from "@/components/platform/org-support-panels";
-import { OrgPlanControl } from "@/components/platform/pilot-ops";
+import { OrgBrandControl, OrgPlanControl } from "@/components/platform/pilot-ops";
+import { ORG_BRAND_LABEL, ORG_BRANDS } from "@/lib/platform/org-brand";
+import { findOrganization } from "@/lib/platform/organizations";
 import { OrgBillingSection } from "@/components/billing/org-billing-section";
 import { OperatorResetLinkPanel } from "@/components/platform/operator-reset-link";
 import { loadOrgBilling } from "@/lib/billing/service";
@@ -85,6 +87,8 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
   const o = d.organization;
   const ai = await loadOperatorOrgAi(user, o.code);
   const billing = o.isHome ? null : await loadOrgBilling(user, o.code);
+  // Thương hiệu (0215) — đọc từ sổ tổ chức; `null` = không theo dõi.
+  const brand = o.isHome ? null : ((await findOrganization(o.code))?.brand ?? null);
   const plans = o.isHome ? [] : (await listPlans()).filter((x) => x.key !== HOME_PLAN_KEY).map((x) => ({ key: x.key, name: x.name }));
   const stage = s.pilot?.record.stage ?? null;
 
@@ -151,6 +155,14 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
           {!o.isHome && plans.length ? (
             <div className="border-t border-hairline px-3 py-3" data-org-plan-control={o.code}>
               <OrgPlanControl orgCode={o.code} orgName={o.name} current={d.planKey} plans={plans} />
+            </div>
+          ) : null}
+          {!o.isHome ? (
+            <div className="space-y-2 border-t border-hairline px-3 py-3" data-org-brand-control={o.code}>
+              <p className="text-xs text-muted-foreground">
+                Thương hiệu: <span className="font-medium text-foreground">{brand ? ORG_BRAND_LABEL[brand] : "chưa ghi (tổ chức có từ trước) — liên kết về erp.vnxcommerce.com"}</span>
+              </p>
+              <OrgBrandControl orgCode={o.code} orgName={o.name} current={brand} options={ORG_BRANDS.map((k) => ({ key: k, label: ORG_BRAND_LABEL[k] }))} />
             </div>
           ) : null}
         </SectionCard>

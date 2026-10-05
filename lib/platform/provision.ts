@@ -30,6 +30,8 @@ export type ProvisionInput = {
   name: string;
   templateKey?: string | null;
   plan?: string | null;
+  /** Thương hiệu nơi khách tự đăng ký (0215). Chỉ ghi khi CHÈN dòng mới — cấp lại / chạy lại không đổi. */
+  brand?: "vnx" | "chotdon" | null;
   /** Module bật ngay khi cấp. Người gọi đảm bảo tập này đóng dưới phụ thuộc (sổ module kiểm). */
   modules: string[];
   admin?: { email: string; name: string; password: string };
@@ -50,7 +52,7 @@ export async function provisionOrganization(input: ProvisionInput): Promise<Prov
   if (!existing) {
     const inserted = await pdb
       .insert(schema.platformOrganizations)
-      .values({ code: input.code, name: input.name, status: "ACTIVE", isHome: false, moduleDefault: "DISABLED", templateKey: input.templateKey ?? null, plan: input.plan ?? null })
+      .values({ code: input.code, name: input.name, status: "ACTIVE", isHome: false, moduleDefault: "DISABLED", templateKey: input.templateKey ?? null, plan: input.plan ?? null, brand: input.brand ?? null })
       .onConflictDoNothing()
       .returning({ id: schema.platformOrganizations.id });
     created = inserted.length > 0;

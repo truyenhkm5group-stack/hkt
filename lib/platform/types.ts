@@ -27,6 +27,8 @@ export type Organization = {
   domainSlug?: string | null;
   /** `null` = không theo dõi (nhà / tổ chức có từ trước 0180) · `DRAFT` · `PUBLISHED`. */
   publishState?: "DRAFT" | "PUBLISHED" | null;
+  /** Thương hiệu nơi khách tự đăng ký (0215) — `null` = không theo dõi ⇒ liên kết về `APP_URL` như trước. */
+  brand?: "vnx" | "chotdon" | null;
 };
 
 /**

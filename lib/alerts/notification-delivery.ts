@@ -6,6 +6,7 @@ import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { NOTIFICATION_KIND_LABEL, type AlertConfig } from "@/lib/constants/alerts";
 import { maskDeliveryError, NOTIFY_BACKOFF_BASE_MINUTES, NOTIFY_MAX_ATTEMPTS, NOTIFY_RETRY_WINDOW_MINUTES } from "@/lib/constants/notification-retry";
 import { env } from "@/lib/env";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * ═══════ GỬI TIN CẢNH BÁO — LẦN ĐẦU VÀ GỬI LẠI, MỘT ĐƯỜNG (Company OS · Agent N) ═══════
@@ -95,7 +96,8 @@ export async function deliverNotifications(
   const n = schema.notifications;
   const now = opts.now ?? new Date();
   const senders = opts.senders ?? DEFAULT_SENDERS;
-  const appUrl = opts.appUrl ?? env.appUrl;
+  // Gốc liên kết của TỔ CHỨC đang chạy (tên miền con · app.chotdontudong.com · APP_URL) — không đọc APP_URL thẳng.
+  const appUrl = opts.appUrl ?? (await organizationBaseUrl().catch(() => env.appUrl));
   const out: DeliveryResult = { telegram: { sent: 0 }, lark: { sent: 0 }, sent: 0, retried: 0, failed: 0, gaveUp: 0 };
 
   // Kênh nào đang có: không kênh nào ⇒ không nhận dòng nào (lượt thử không bị đốt vì thiếu cấu hình).

@@ -45,6 +45,7 @@ import { periodLabelOf, readyMessageBody } from "@/lib/payroll/payslip-delivery"
 import { completePaidPeriods, ensurePayoutLines, matchPayoutLines, payoutSummary } from "@/lib/payroll/payout";
 import { settlementFor, settlementReference, type SettlementResult } from "@/lib/payroll/settlement";
 import type { Period } from "@/lib/search-params";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 export const MACHINE: PayrollActor = { id: null, email: PAYROLL_AUTOPILOT_ACTOR };
 
@@ -136,7 +137,7 @@ async function tellApprovers(msg: { kind: string; title: string; body: string; d
   if (moi > 0 && msg.larkLine) {
     const cfg = await loadAlertConfig();
     if (cfg.larkWebhookUrl) {
-      const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+      const appUrl = (await organizationBaseUrl().catch(() => process.env.APP_URL ?? "")).replace(/\/$/, "");
       await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, msg.title, [[{ text: msg.larkLine }], ...(appUrl ? [[{ text: "Mở trang Trả lương tự động", href: `${appUrl}/payroll/autopilot` }]] : [])]).catch(() => undefined);
     }
   }

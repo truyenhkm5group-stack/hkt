@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { disableOrgConnection, setOrganizationSuspended, setWorkflowsPaused, type KillSwitchResult } from "@/lib/platform/kill-switches";
+import { setOrganizationBrand } from "@/lib/platform/org-brand";
 import { setOrganizationPlan } from "@/lib/platform/org-plan";
 import { confirmPilotUat, setPilotStage, type PilotWriteResult } from "@/lib/platform/pilot";
 
@@ -57,6 +58,13 @@ export async function disableOrgConnectionAction(input: { orgCode: string; conne
 export async function setOrgPlanAction(input: { orgCode: string; planKey: string; reason: string }): Promise<KillSwitchResult> {
   const user = await requirePermission("platform:operate");
   const r = await setOrganizationPlan(user, input);
+  if ("ok" in r && r.changed) refresh(input?.orgCode);
+  return r;
+}
+
+export async function setOrgBrandAction(input: { orgCode: string; brand: string; reason: string }): Promise<KillSwitchResult> {
+  const user = await requirePermission("platform:operate");
+  const r = await setOrganizationBrand(user, input);
   if ("ok" in r && r.changed) refresh(input?.orgCode);
   return r;
 }

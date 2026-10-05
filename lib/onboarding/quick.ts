@@ -49,7 +49,11 @@ export function quickModules(businessType: keyof typeof BUSINESS_TYPE_SPEC): { t
   return { templateKey: tpl?.key ?? null, modules: closeUnderDependencies([...base, "ai_sales"]).modules };
 }
 
-export async function quickSignup(raw: unknown, who: SignupActor, opts: { issue?: (subject: SessionSubject) => Promise<void>; social?: SocialProfile | null } = {}): Promise<QuickSignupResult> {
+export async function quickSignup(
+  raw: unknown,
+  who: SignupActor,
+  opts: { issue?: (subject: SessionSubject) => Promise<void>; social?: SocialProfile | null; brand?: "vnx" | "chotdon" | null } = {},
+): Promise<QuickSignupResult> {
   const parsed = quickSignupZ.safeParse(raw);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const input = parsed.data;
@@ -85,7 +89,7 @@ export async function quickSignup(raw: unknown, who: SignupActor, opts: { issue?
     plan: { businessType: input.businessType, templateKey: plan.templateKey, modules: plan.modules },
     planKey: null,
   };
-  const r = await createOrganizationFromSignup(draft, who, opts.issue ? { issue: opts.issue } : {});
+  const r = await createOrganizationFromSignup(draft, who, { ...(opts.issue ? { issue: opts.issue } : {}), brand: opts.brand ?? null });
   if ("error" in r) return { error: r.error };
   if (otpId) await consumeSignupOtp(otpId);
 

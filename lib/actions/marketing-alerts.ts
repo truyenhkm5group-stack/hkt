@@ -8,6 +8,7 @@ import { sendLark } from "@/lib/alerts/lark";
 import { MARKETING_ALERT_KEY } from "@/lib/constants/marketing-alerts";
 import { loadMarketingAlertConfig, runMarketingDigest } from "@/lib/marketing/digest";
 import { setSettingJson } from "@/lib/settings";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * ═══════════ AI NHẬN BẢN TIN MARKETING — CẤU HÌNH TRONG ERP, KHÔNG PHẢI QUA SSH ═══════════
@@ -98,7 +99,7 @@ export async function sendTestMarketingLark(): Promise<{ ok: true } | { error: s
   const cfg = await loadMarketingAlertConfig();
   if (!cfg.managerWebhookUrl) return { error: "Chưa khai webhook nhóm quản lý" };
   const res = await sendLark(cfg.managerWebhookUrl, cfg.managerSecret, "✅ ERP đã kết nối bản tin marketing", [
-    [{ text: "Bản tin hiệu quả marketing hằng ngày sẽ gửi vào nhóm này. " }, { text: "Mở báo cáo", href: `${cfg.baseUrl || process.env.APP_URL || ""}/ads/daily` }],
+    [{ text: "Bản tin hiệu quả marketing hằng ngày sẽ gửi vào nhóm này. " }, { text: "Mở báo cáo", href: `${cfg.baseUrl || (await organizationBaseUrl())}/ads/daily` }],
   ]);
   return res.ok ? { ok: true } : { error: res.error ?? "Gửi thất bại" };
 }

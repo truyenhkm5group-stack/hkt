@@ -25,6 +25,7 @@ import { env } from "@/lib/env";
 import { getOwnerDecisionQueue, OWNER_DECISION_WRITE_TIMEOUT_MS } from "@/lib/queries/owner-decisions";
 import { getSettingJson } from "@/lib/settings";
 import { organizationStateKey } from "@/lib/platform/process-state";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * ═══════════ GỬI "CẦN ANH QUYẾT" VÀO NHÓM LARK QUẢN LÝ ═══════════
@@ -159,7 +160,8 @@ export async function runOwnerDecisionDigest(deps: OwnerDigestDeps = {}): Promis
   }
   const viewer = await ownerDigestViewer();
   const queue = await (deps.loadQueue ?? defaultLoadQueue)(viewer, now, morningDone ? OWNER_DIGEST_URGENT_KINDS : undefined);
-  const decision = decideOwnerDecisionDigest(before.ledger, queue, now, { enabled: true, appUrl: env.appUrl });
+  const appUrl = await organizationBaseUrl().catch(() => env.appUrl);
+  const decision = decideOwnerDecisionDigest(before.ledger, queue, now, { enabled: true, appUrl });
 
   if (!decision.send || !decision.message) {
     if (!morningDone && decision.reason === "SOURCES_FAILED") fullAtByOrg.set(orgKey, now.getTime());

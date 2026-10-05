@@ -52,6 +52,7 @@ async function load(): Promise<Organization[]> {
         templateKey: r.templateKey,
         domainSlug: r.domainSlug ?? null,
         publishState: r.publishState === "DRAFT" || r.publishState === "PUBLISHED" ? r.publishState : null,
+        brand: r.brand === "vnx" || r.brand === "chotdon" ? r.brand : null,
       }),
     );
     // Sổ rỗng (không nên xảy ra sau 0152) cũng nghĩa là: chỉ có tổ chức nhà.

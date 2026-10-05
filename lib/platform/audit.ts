@@ -19,6 +19,8 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "CONNECTION_DISABLE"
   // Người vận hành đổi gói của một tổ chức sau lúc tạo (`lib/platform/org-plan.ts`).
   | "ORG_PLAN_SET"
+  // Người vận hành đặt thương hiệu (vnx · chotdon) cho tổ chức có từ trước 0215 (`lib/platform/org-brand.ts`).
+  | "ORG_BRAND_SET"
   // Hành trình tự phục vụ (0180, `lib/platform/publish.ts`): khách chọn tên miền con, khách bấm Xuất bản.
   | "ORG_DOMAIN_SET"
   | "ORG_PUBLISH"

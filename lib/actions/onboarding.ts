@@ -13,6 +13,7 @@ import { quickSignup } from "@/lib/onboarding/quick";
 import { sendSignupOtp, sendTestOtp, setPhoneOtpSetting, type PhoneOtpSetting, type SendOtpResult } from "@/lib/onboarding/phone-otp";
 import { readOAuthToken, SOCIAL_SIGNUP_COOKIE, type SocialProfile } from "@/lib/auth/oauth";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import { hostBrand } from "@/lib/platform/host-brand";
 
 /**
  * ═══════════ SERVER ACTION CỦA `/start` VÀ MÃ MỜI Ở `/platform` (Phase 10) ═══════════
@@ -60,7 +61,9 @@ export async function previewSignupAction(input: { invite: string | null; orgCod
  */
 export async function createOrganizationAction(draft: unknown): Promise<{ ok: true; orgCode: string; operator: boolean } | { error: string }> {
   const who = await whoAmI();
-  const result = await createOrganizationFromSignup(draft, who, who.kind === "public" ? { issue: createSession } : {});
+  // Thương hiệu của host khách đang đứng (header MÁY CHỦ do middleware đặt) — liên kết về sau đi đúng phần mềm này.
+  const brand = await hostBrand();
+  const result = await createOrganizationFromSignup(draft, who, who.kind === "public" ? { issue: createSession, brand } : { brand });
   if ("error" in result) {
     if (result.setupFailed) revalidatePath("/platform");
     return { error: result.error };
@@ -86,7 +89,7 @@ export async function quickSignupAction(input: unknown): Promise<{ error: string
   if (who.kind === "operator") return { error: "Người vận hành tạo hộ khách bằng trình hướng dẫn đầy đủ (/start?day-du=1)." };
   const store = await cookies();
   const social = await readOAuthToken<SocialProfile>("erp-social-signup", store.get(SOCIAL_SIGNUP_COOKIE)?.value);
-  const r = await quickSignup(input, who, { issue: createSession, social });
+  const r = await quickSignup(input, who, { issue: createSession, social, brand: await hostBrand() });
   if ("error" in r) return r;
   // Hồ sơ Google / Facebook đã dùng xong — cho cookie hết hạn (không phải dữ liệu nghiệp vụ).
   store.set(SOCIAL_SIGNUP_COOKIE, "", { path: "/", maxAge: 0 });

@@ -16,6 +16,7 @@ import { env } from "@/lib/env";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { organizationStateKey } from "@/lib/platform/process-state";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * ═══════════ GỬI BẢNG THIẾU HÀNG VÀO LARK ═══════════
@@ -101,7 +102,7 @@ export async function runStockShortageDigest(opts: { force?: boolean; now?: Date
   if (!reason) return keepSkipped("không có gì mới để báo");
   if (!to.url) return keepSkipped("chưa cấu hình webhook Lark");
 
-  const appUrl = env.appUrl.replace(/\/$/, "");
+  const appUrl = (await organizationBaseUrl().catch(() => env.appUrl)).replace(/\/$/, "");
   const card = buildShortageLarkCard(snapshot, { appUrl, reason, changed: decision.changed });
   let via: ShortageDigestResult["via"] = "card";
   let r = await sendLarkCard(to.url, to.secret, card);

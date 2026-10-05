@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { readOAuthToken } from "@/lib/auth/oauth";
+import { appOriginForHost, readOAuthToken } from "@/lib/auth/oauth";
 import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
-import { env } from "@/lib/env";
 import { MESSENGER_CONNECT_PATH, MESSENGER_CONNECT_TTL_SEC, MESSENGER_PAGES_COOKIE, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, sealPendingPages } from "@/lib/integrations/messenger/connect";
 import { messengerApp, pagesFromCode } from "@/lib/integrations/messenger/graph";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
@@ -15,15 +14,17 @@ export const dynamic = "force-dynamic";
  * một page ⇒ nối luôn; nhiều page ⇒ cookie mã hoá, người bấm chọn ở trang cài đặt. Token người dùng không được lưu.
  */
 export async function GET(req: NextRequest) {
-  const secure = sessionCookieSecure(process.env.NODE_ENV, env.appUrl);
+  // Cùng gốc với lượt start (Facebook trả về đúng host đã gửi đi) — bước đổi mã phải dùng ĐÚNG redirect_uri đó.
+  const origin = appOriginForHost(req.headers.get("host"));
+  const secure = sessionCookieSecure(process.env.NODE_ENV, origin);
   const back = (q: string) => {
-    const res = NextResponse.redirect(new URL(`${MESSENGER_SETTINGS_PATH}?${q}`, env.appUrl));
+    const res = NextResponse.redirect(new URL(`${MESSENGER_SETTINGS_PATH}?${q}`, origin));
     res.cookies.set(MESSENGER_STATE_COOKIE, "", { path: MESSENGER_CONNECT_PATH, maxAge: 0, httpOnly: true, sameSite: "lax", secure });
     return res;
   };
   // Cổng chung (phiên · tổ chức còn hoạt động · module · quyền) — bị chặn thì về trang cài đặt / đăng nhập, không trả JSON.
   const guard = await apiGuard("settings:manage");
-  if (guard instanceof Response) return guard.status === 401 ? NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(MESSENGER_SETTINGS_PATH)}`, env.appUrl)) : back("loi=quyen");
+  if (guard instanceof Response) return guard.status === 401 ? NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(MESSENGER_SETTINGS_PATH)}`, origin)) : back("loi=quyen");
   const user = guard.user;
   if (!can(user, "settings:manage") || !user.organization) return back("loi=quyen");
   const app = messengerApp();
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   if (!st || st.state !== q.get("state") || st.org !== user.organization.code || st.uid !== user.id) return back("loi=state");
   const code = q.get("code") ?? "";
   if (!code) return back("loi=huy");
-  const got = await pagesFromCode(app, code, messengerRedirectUri());
+  const got = await pagesFromCode(app, code, messengerRedirectUri(origin));
   if ("error" in got) return back(`loi=fb&msg=${encodeURIComponent(got.error.slice(0, 200))}`);
   const pages = got.pages.filter((p) => p.canMessage);
   if (!pages.length) return back("loi=khongpage");
