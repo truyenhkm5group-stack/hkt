@@ -3,7 +3,6 @@
   "id": "ai-tech-room",
   "title": "AI Tech Room — nền điều phối nhiều worker cho kho này",
   "goal": "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người.",
-  "integrationRef": "ai-tech-room",
   "maxWorkers": 2,
   "tasks": [
     {
@@ -168,7 +167,7 @@
       "decision": {
         "state": "BLOCKED",
         "category": "APPROVAL_REQUIRED",
-        "reason": "Cây thuộc phiên khác; xoá worktree của người khác là quyết định của chủ shop (AGENTS.md mục 9, luật tuyệt đối của sứ mệnh).",
+        "reason": "Cây thuộc phiên khác; xoá worktree của người khác là quyết định của chủ shop. Chủ shop dặn 06/10/2026: CHƯA dọn.",
         "ownerAction": "Xem `npm run ai -- worktrees --all`, rồi nói 'dọn hết MERGED_SAFE_TO_CLEAN' hoặc liệt kê cây được dọn.",
         "resumes": "Lead chạy cleanup --allow-unowned --apply cho đúng danh sách; cây bẩn / chưa đẩy / vừa dùng vẫn bị công cụ từ chối."
       }
@@ -201,12 +200,42 @@
         "status cho thấy mọi việc MERGED/DONE"
       ],
       "decision": {
-        "state": "BLOCKED",
-        "category": "APPROVAL_REQUIRED",
-        "reason": "Phiên này không có gh / token GitHub nên không mở được PR; ruleset main bắt buộc một lượt duyệt của NGƯỜI.",
-        "ownerAction": "Mở PR từ https://github.com/truyenhkm5group-stack/hkt/compare/main...ai-tech-room?expand=1 (hoặc workflow agent-open-pr với head=ai-tech-room), đợi gates / gates xanh, duyệt và merge.",
-        "resumes": "Lead chạy status --github, đối chiếu các sứ mệnh đang mở với main mới, dọn cây dogfood."
-      }
+        "state": "DONE",
+        "evidence": "PR #592 (erp-agent-vnx[bot]) squash → aeacc763 trên main sau khi gates / gates xanh; hậu kiểm trên bản checkout sạch origin/main: validate sạch, bài AI Tech Room ĐẠT. Không deploy: không đổi mã chạy trên VPS (production c609d9b8 khoẻ)."
+      },
+      "pr": 592
+    },
+    {
+      "id": "entry-point",
+      "title": "Điểm vào cho sứ mệnh mới: /mission + lệnh lead",
+      "objective": "Chủ shop giao sứ mệnh bằng một tin nhắn từ bất kỳ checkout nào; Lead dựng cây riêng từ origin/main mà không ghi vào checkout đang đứng.",
+      "mode": "INLINE",
+      "priority": "P1",
+      "risk": "HIGH",
+      "dependsOn": [
+        "integrate-main"
+      ],
+      "owns": [
+        "scripts/ai-tech.ts",
+        "tests/ai-tech-room.test.ts",
+        "docs/ai-tech-room/",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/skills/mission/",
+        ".ai/missions/ai-tech-room.json"
+      ],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": [
+        "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts",
+        "npm run typecheck",
+        "npm run lint"
+      ],
+      "definitionOfDone": [
+        "lead dựng cây từ origin/main vừa fetch, không ghi vào checkout đang đứng (có bài kiểm)",
+        "skill /mission + mục «Giao một sứ mệnh» trong README",
+        "PR vào main sau gates / gates xanh"
+      ]
     }
   ]
 }
