@@ -18,8 +18,13 @@
       "readOnly": [],
       "doNotTouch": [],
       "tests": [],
-      "definitionOfDone": ["Biết ruleset, cổng, cầu nối PR, /tech có sẵn, số cây trên máy"],
-      "decision": { "state": "DONE", "evidence": "159 worktree (4 bẩn, 52 đầu nhánh trong origin/main); ruleset gates / gates + 1 duyệt; không gh/token trên máy; GitHub API công khai đọc được (HTTP 200)" }
+      "definitionOfDone": [
+        "Biết ruleset, cổng, cầu nối PR, /tech có sẵn, số cây trên máy"
+      ],
+      "decision": {
+        "state": "DONE",
+        "evidence": "159 worktree (4 bẩn, 52 đầu nhánh trong origin/main); ruleset gates / gates + 1 duyệt; không gh/token trên máy; GitHub API công khai đọc được (HTTP 200)"
+      }
     },
     {
       "id": "core-cli",
@@ -28,13 +33,33 @@
       "mode": "INLINE",
       "priority": "P0",
       "risk": "HIGH",
-      "dependsOn": ["audit"],
-      "owns": ["scripts/ai-tech.ts", ".ai/config.json", "tests/ai-tech-room.test.ts", "docs/ai-tech-room/", "AGENTS.md", "CLAUDE.md", "package.json", "tests/sync-fixtures.test.ts"],
+      "dependsOn": [
+        "audit"
+      ],
+      "owns": [
+        "scripts/ai-tech.ts",
+        ".ai/config.json",
+        "tests/ai-tech-room.test.ts",
+        "docs/ai-tech-room/",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "package.json",
+        "tests/sync-fixtures.test.ts"
+      ],
       "readOnly": [],
       "doNotTouch": [],
-      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
-      "definitionOfDone": ["typecheck + lint sạch", "tests/ai-tech-room.test.ts xanh", "vệ sinh mục 65 + toàn vẹn kho xanh"],
-      "decision": { "state": "DONE", "evidence": "commit 47007462 trên ai-tech-room" }
+      "tests": [
+        "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"
+      ],
+      "definitionOfDone": [
+        "typecheck + lint sạch",
+        "tests/ai-tech-room.test.ts xanh",
+        "vệ sinh mục 65 + toàn vẹn kho xanh"
+      ],
+      "decision": {
+        "state": "DONE",
+        "evidence": "commit 47007462 trên ai-tech-room"
+      }
     },
     {
       "id": "atr-worker-agent",
@@ -43,11 +68,25 @@
       "mode": "WORKER",
       "priority": "P2",
       "risk": "LOW",
-      "dependsOn": ["core-cli"],
-      "owns": [".claude/agents/ai-tech-worker.md"],
-      "readOnly": ["docs/ai-tech-room/README.md", "AGENTS.md", "scripts/ai-tech.ts"],
-      "doNotTouch": ["scripts/", "docs/", "tests/"],
-      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
+      "dependsOn": [
+        "core-cli"
+      ],
+      "owns": [
+        ".claude/agents/ai-tech-worker.md"
+      ],
+      "readOnly": [
+        "docs/ai-tech-room/README.md",
+        "AGENTS.md",
+        "scripts/ai-tech.ts"
+      ],
+      "doNotTouch": [
+        "scripts/",
+        "docs/",
+        "tests/"
+      ],
+      "tests": [
+        "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"
+      ],
       "definitionOfDone": [
         "Tệp có frontmatter hợp lệ của Claude Code (name, description, tools nếu cần) và thân tiếng Việt có dấu",
         "Thân khớp README mục 8 (luật worker), không mâu thuẫn AGENTS.md mục 9–10",
@@ -55,7 +94,14 @@
         "Commit tiếng Việt, đẩy nhánh"
       ],
       "expectedOutput": "Một tệp markdown ≤ 80 dòng.",
-      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng."
+      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng.",
+      "run": {
+        "branch": "claude/atr-worker-agent",
+        "worktree": "C:\\Users\\Admin\\Documents\\ChatGPT\\wt-atr-worker-agent",
+        "baseRef": "ai-tech-room",
+        "baseSha": "7ea269d555adcdca84341c0740d5619255413359",
+        "createdAt": "2026-10-05T14:56:47.772Z"
+      }
     },
     {
       "id": "atr-reviewer-agent",
@@ -64,18 +110,39 @@
       "mode": "WORKER",
       "priority": "P2",
       "risk": "LOW",
-      "dependsOn": ["core-cli"],
-      "owns": [".claude/agents/ai-tech-reviewer.md"],
-      "readOnly": ["docs/ai-tech-room/README.md", "AGENTS.md", "docs/business-rules/ORDER_OUTCOME.md"],
-      "doNotTouch": ["scripts/", "docs/", "tests/"],
-      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
+      "dependsOn": [
+        "core-cli"
+      ],
+      "owns": [
+        ".claude/agents/ai-tech-reviewer.md"
+      ],
+      "readOnly": [
+        "docs/ai-tech-room/README.md",
+        "AGENTS.md",
+        "docs/business-rules/ORDER_OUTCOME.md"
+      ],
+      "doNotTouch": [
+        "scripts/",
+        "docs/",
+        "tests/"
+      ],
+      "tests": [
+        "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"
+      ],
       "definitionOfDone": [
         "Tệp có frontmatter hợp lệ của Claude Code; tools giới hạn ở đọc (Read, Grep, Glob, Bash chỉ để git diff/log)",
         "Thân tiếng Việt có dấu, nêu rõ đầu ra (phát hiện + mức + tệp:dòng + cách tái hiện)",
         "Commit tiếng Việt, đẩy nhánh"
       ],
       "expectedOutput": "Một tệp markdown ≤ 80 dòng.",
-      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng."
+      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng.",
+      "run": {
+        "branch": "claude/atr-reviewer-agent",
+        "worktree": "C:\\Users\\Admin\\Documents\\ChatGPT\\wt-atr-reviewer-agent",
+        "baseRef": "ai-tech-room",
+        "baseSha": "7ea269d555adcdca84341c0740d5619255413359",
+        "createdAt": "2026-10-05T14:56:51.316Z"
+      }
     },
     {
       "id": "legacy-worktree-cleanup",
@@ -89,7 +156,9 @@
       "readOnly": [],
       "doNotTouch": [],
       "tests": [],
-      "definitionOfDone": ["Chủ shop quyết danh sách; Lead chạy cleanup <cây> --allow-unowned --apply từng cây"],
+      "definitionOfDone": [
+        "Chủ shop quyết danh sách; Lead chạy cleanup <cây> --allow-unowned --apply từng cây"
+      ],
       "decision": {
         "state": "BLOCKED",
         "category": "APPROVAL_REQUIRED",
@@ -105,12 +174,26 @@
       "mode": "INLINE",
       "priority": "P1",
       "risk": "HIGH",
-      "dependsOn": ["core-cli", "atr-worker-agent", "atr-reviewer-agent"],
-      "owns": ["AGENTS.md", "CLAUDE.md"],
+      "dependsOn": [
+        "core-cli",
+        "atr-worker-agent",
+        "atr-reviewer-agent"
+      ],
+      "owns": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
       "readOnly": [],
       "doNotTouch": [],
-      "tests": ["npm run typecheck", "npm run lint", "npm test"],
-      "definitionOfDone": ["PR merge vào main", "status cho thấy mọi việc MERGED/DONE"],
+      "tests": [
+        "npm run typecheck",
+        "npm run lint",
+        "npm test"
+      ],
+      "definitionOfDone": [
+        "PR merge vào main",
+        "status cho thấy mọi việc MERGED/DONE"
+      ],
       "decision": {
         "state": "BLOCKED",
         "category": "APPROVAL_REQUIRED",
