@@ -13,6 +13,7 @@ import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { invalidateAiControl } from "@/lib/ai-usage/control";
 import type { SessionUser } from "@/lib/auth/session";
 import { loadGoLive, quickConnectFanpage, quickEnableBot } from "@/lib/onboarding/go-live";
+import { loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
@@ -59,6 +60,8 @@ export async function testGoLive() {
       // Ô hiện cho quản trị, không cho người xem.
       const v0 = await loadGoLive(admin);
       assert.ok(v0.show && v0.canConnect && v0.canBot && v0.fanpage?.status === "NOT_CONFIGURED", JSON.stringify(v0));
+      // KHÔNG BẮT BUỘC PANCAKE: chưa nối gì ⇒ chưa có lối (màn hình cho chọn, khuyên nối thẳng Facebook), mốc đầu tiên.
+      assert.ok(v0.path === null && v0.stage === "ACCOUNT_CREATED" && !v0.messenger.connected && v0.messagesReceived === 0, JSON.stringify({ path: v0.path, stage: v0.stage }));
       assert.ok(v0.bot.usesPlatformAi && !v0.bot.aiReady && v0.bot.aiReason?.includes("chưa bật AI dùng chung"), "mặc định AI dùng chung; nền tảng chưa bật ⇒ nói rõ");
       assert.equal((await loadGoLive(viewer)).show, false, "không quyền ⇒ không vẽ ô");
       assert.ok("error" in (await quickConnectFanpage(viewer, { pageId: PAGE, pageAccessToken: TOKEN }, { tester: { fetch: fakePancake(true) } })), "không quyền ⇒ lõi chặn");
@@ -76,6 +79,27 @@ export async function testGoLive() {
       assert.equal(v1.fanpage?.status, "ACTIVE");
       assert.equal(v1.fanpage?.pageId, PAGE);
       assert.ok(v1.fanpage?.webhookUrl?.includes(`/api/webhooks/pancake/fanpage/${GL_ORG}.`), v1.fanpage?.webhookUrl ?? "thiếu URL");
+      assert.ok(v1.path === "PANCAKE" && v1.stage === "CHANNEL_CONNECTED", JSON.stringify({ path: v1.path, stage: v1.stage }));
+      // Tin khách vào hàng chờ (kể cả khi bot đang tắt) ⇒ «đã nhận tin»; tiếng vọng của bot / tin của page không tính.
+      await db.insert(schema.salesChatInbound).values([
+        { pageId: PAGE, threadId: "t1", messageId: "gl-m1", text: "Shop ơi" },
+        { pageId: PAGE, threadId: "t1", messageId: "gl-m2", text: "Dạ", note: "BOT_SENT" },
+      ]);
+      const vr = await loadGoLive(admin);
+      assert.ok(vr.messagesReceived === 1 && vr.stage === "MESSAGING_READY", JSON.stringify({ n: vr.messagesReceived, stage: vr.stage }));
+
+      // MỘT PAGE — MỘT ĐƯỜNG: Messenger trực tiếp bật cho CÙNG page đang chạy qua Pancake ⇒ Pancake thắng, màn hình nói rõ.
+      const oc = schema.orgConnections;
+      await db.insert(oc).values({ orgCode: GL_ORG, connectorKey: "facebook-messenger", status: "ACTIVE", settings: { pageId: PAGE, pageName: "Shop GL" }, lastTestOk: true });
+      const vd = await loadGoLive(admin);
+      assert.ok(vd.path === "PANCAKE" && vd.messenger.connected && vd.messenger.mutedByPancake, JSON.stringify({ path: vd.path, m: vd.messenger }));
+      assert.equal(transportOwnerOf(await loadTransportFacts(), PAGE), "PANCAKE");
+      // Page đã nối thẳng Facebook ⇒ nút nối nhanh Pancake từ chối page đó, không mở đường thứ hai.
+      await db.update(oc).set({ settings: { pageId: "9988776655", pageName: "Page khác" } }).where(eq(oc.connectorKey, "facebook-messenger"));
+      const dual = await quickConnectFanpage(admin, { pageId: "9988776655", pageAccessToken: TOKEN }, { tester: { fetch: fakePancake(true) } });
+      assert.ok("error" in dual && dual.error.includes("MỘT đường"), JSON.stringify(dual));
+      assert.equal((await loadGoLive(admin)).fanpage?.pageId, PAGE, "lượt bị từ chối không đổi kết nối Pancake đang chạy");
+      await db.delete(oc).where(eq(oc.connectorKey, "facebook-messenger"));
 
       // Bật bot: AI dùng chung chưa sẵn sàng ⇒ từ chối; nền tảng bật + gói Khởi đầu có credit ⇒ bật.
       const noAi = await quickEnableBot(admin);
@@ -97,5 +121,5 @@ export async function testGoLive() {
     }
     await cleanup();
   }
-  console.log("✓ Vào việc ngay: ô chỉ hiện cho người có quyền; kết nối fanpage một nút (Lưu → Kiểm tra → Bật), kiểm tra hỏng ⇒ không bật; có URL webhook; bật bot qua đúng lõi — AI dùng chung chưa sẵn sàng ⇒ từ chối nói rõ, sẵn sàng ⇒ bật");
+  console.log("✓ Vào việc ngay: KHÔNG bắt buộc Pancake — lối suy từ kết nối thật (chưa nối ⇒ cho chọn), mốc onboarding, tin khách đếm cả khi bot tắt; một page một đường (Pancake thắng, nối nhanh Pancake từ chối page đã nối thẳng Facebook); ô chỉ hiện cho người có quyền; kết nối fanpage một nút (Lưu → Kiểm tra → Bật), kiểm tra hỏng ⇒ không bật; có URL webhook; bật bot qua đúng lõi — AI dùng chung chưa sẵn sàng ⇒ từ chối nói rõ, sẵn sàng ⇒ bật");
 }

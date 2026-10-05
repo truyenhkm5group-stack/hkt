@@ -9,6 +9,7 @@ import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { dualConnectedPages, loadTransportFacts, PANCAKE_OWNS_PAGE_REASON, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 import {
   CLAIM_STALE_MS,
   conversationFor,
@@ -91,6 +92,10 @@ export async function connectMessengerPage(user: SessionUser, page: ConnectableP
   const app = messengerApp();
   if (!app) return { error: "Nền tảng chưa cấu hình app Facebook — báo người vận hành." };
   if (!/^\d{5,30}$/.test(page.id) || !page.token) return { error: "Page không hợp lệ." };
+  // MỘT PAGE — MỘT ĐƯỜNG (channel-ownership.ts): page đang chạy qua Pancake ⇒ không nối thêm đường thứ hai.
+  if (transportOwnerOf(await loadTransportFacts(), page.id) === "PANCAKE") {
+    return { error: `Page «${page.name || page.id}» đang nhận tin qua Pancake. Mỗi page chỉ nhận tin qua MỘT đường để khách không nhận hai câu trả lời — gỡ «Fanpage qua Pancake» ở Cài đặt → Kết nối rồi nối lại, hoặc giữ Pancake.` };
+  }
   const pdb = await getPlatformDb();
   const pages = schema.platformMessengerPages;
   const [owner] = await pdb.select({ orgCode: pages.orgCode }).from(pages).where(eq(pages.pageId, page.id)).limit(1);
@@ -145,6 +150,9 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
   if (!conn.ok) return { queued: false, reason: "Kết nối Messenger chưa bật" };
   if (!ownedIds(conn.settings).includes(ev.pageId)) return { queued: false, reason: "Tin của page khác page đã nối" };
+  // Page cùng lúc bật qua Pancake (trạng thái cũ / bật lại ở trang Kết nối) ⇒ Pancake thắng, đường này nhường MỌI gói tin của
+  // page đó (cả tiếng vọng) — không hội thoại thứ hai, không câu trả lời thứ hai.
+  if (transportOwnerOf(await loadTransportFacts(), ev.pageId) === "PANCAKE") return { queued: false, reason: PANCAKE_OWNS_PAGE_REASON };
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (ev.isEcho) {
@@ -535,14 +543,15 @@ export async function sweepStaleMessengerThreads(deps: FanpageDeps = {}): Promis
 
 // ─────────────────────────── Màn hình ───────────────────────────
 
-export type MessengerView = { appReady: boolean; page: { id: string; name: string } | null; instagram: { id: string; username: string } | null; status: string | null; lastTestOk: boolean | null };
+export type MessengerView = { appReady: boolean; page: { id: string; name: string } | null; instagram: { id: string; username: string } | null; status: string | null; lastTestOk: boolean | null; /** Page cùng lúc bật qua Pancake ⇒ đường này đang nhường (channel-ownership.ts). */ mutedByPancake: boolean };
 
 /** Trạng thái kết nối Messenger của tổ chức ngữ cảnh (không bí mật nào). */
 export async function messengerView(): Promise<MessengerView> {
   const appReady = messengerApp() !== null;
   const [row] = await messagingConnectionSummaries([MESSENGER_CONNECTOR]);
-  if (!row) return { appReady, page: null, instagram: null, status: null, lastTestOk: null };
+  if (!row) return { appReady, page: null, instagram: null, status: null, lastTestOk: null, mutedByPancake: false };
+  const mutedByPancake = dualConnectedPages(await loadTransportFacts()).length > 0;
   const id = row.plainSettings.pageId ?? "";
   const igId = row.plainSettings.igAccountId ?? "";
-  return { appReady, page: id ? { id, name: row.plainSettings.pageName || id } : null, instagram: igId ? { id: igId, username: row.plainSettings.igUsername ?? "" } : null, status: row.status, lastTestOk: row.lastTestOk };
+  return { appReady, page: id ? { id, name: row.plainSettings.pageName || id } : null, instagram: igId ? { id: igId, username: row.plainSettings.igUsername ?? "" } : null, status: row.status, lastTestOk: row.lastTestOk, mutedByPancake };
 }

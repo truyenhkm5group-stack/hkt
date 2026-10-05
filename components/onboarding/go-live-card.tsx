@@ -8,18 +8,31 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { quickConnectFanpageAction, quickEnableBotAction } from "@/lib/actions/go-live";
+import { COMPANY } from "@/lib/constants/company";
 import type { GoLiveView } from "@/lib/onboarding/go-live";
+import type { GoLivePath } from "@/lib/onboarding/go-live-shared";
+import { cn } from "@/lib/utils";
+
+const CHOICES: { key: GoLivePath; title: string; hint: string }[] = [
+  { key: "DIRECT", title: "Nối thẳng Facebook", hint: "Tôi không dùng phần mềm chat nào — khuyên dùng" },
+  { key: "PANCAKE", title: "Tôi dùng Pancake", hint: "Giữ Pancake, bot trả lời qua Pancake" },
+  { key: "OTHER", title: "Tôi dùng phần mềm khác", hint: "Xem các cách nối đang có" },
+];
 
 /**
- * Ô «Vào việc ngay» của trang Bắt đầu: (1) kết nối fanpage qua Pancake bằng MỘT nút, (2) dán URL webhook vào Pancake,
- * (3) bật chatbot bằng MỘT nút. Mỗi bước tự hiện «xong» khi dữ liệu thật đã có — không có ô bấm cho xong.
+ * Ô «Vào việc ngay» của trang Bắt đầu — KHÔNG BẮT BUỘC PANCAKE (`lib/onboarding/go-live-shared.ts`):
+ *  (1) nối kênh bán hàng theo cách shop đang quản lý tin nhắn — nối thẳng Facebook (khuyên dùng) · Pancake · phần mềm khác;
+ *  (2) nhận tin khách đầu tiên (hướng dẫn webhook CHỈ hiện cho lối Pancake);
+ *  (3) bật chatbot bằng MỘT nút.
+ * Mỗi bước tự hiện «xong» khi dữ liệu thật đã có — không có ô bấm cho xong.
  */
 export function GoLiveCard({ view }: { view: GoLiveView }) {
+  const [choice, setChoice] = useState<GoLivePath>(view.path ?? "DIRECT");
   const [pageId, setPageId] = useState(view.fanpage?.pageId ?? "");
   const [token, setToken] = useState("");
   const [pending, start] = useTransition();
-  const connected = view.fanpage?.status === "ACTIVE";
-  const received = (view.fanpage?.counts.done ?? 0) + (view.fanpage?.counts.pending ?? 0) + (view.fanpage?.counts.skipped ?? 0);
+  const pancakeOn = view.fanpage?.status === "ACTIVE";
+  const anyChannel = view.path !== null;
   const webhook = view.fanpage?.webhookUrl ?? null;
 
   const connect = () =>
@@ -39,49 +52,119 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
     });
 
   return (
-    <div className="space-y-5" data-go-live>
-      {/* 1. Kết nối fanpage */}
-      <div className="space-y-2" data-go-live-step="fanpage">
+    <div className="space-y-5" data-go-live data-go-live-path={view.path ?? "NONE"}>
+      {/* 1. Nối kênh bán hàng */}
+      <div className="space-y-2" data-go-live-step="channel">
         <p className="flex items-center gap-2 text-sm font-semibold">
-          {connected ? <CheckCircle2 className="size-4 text-emerald-600" /> : <Plug className="size-4 text-muted-foreground" />}
-          1. Kết nối fanpage (qua Pancake)
+          {anyChannel ? <CheckCircle2 className="size-4 text-emerald-600" /> : <Plug className="size-4 text-muted-foreground" />}
+          1. Nối kênh bán hàng
         </p>
-        {connected ? (
-          <p className="text-xs text-muted-foreground">Đã kết nối page {view.fanpage?.pageId}.</p>
-        ) : view.canConnect ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Công cụ → chép Page ID và Page access token rồi dán vào đây.</p>
-            <div className="grid gap-2 sm:grid-cols-[12rem_1fr_auto] sm:items-end">
-              <div className="space-y-1">
-                <Label htmlFor="gl-page">Page ID</Label>
-                <Input id="gl-page" value={pageId} onChange={(e) => setPageId(e.target.value)} maxLength={40} placeholder="1234567890" />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="gl-token">Page access token</Label>
-                <Input id="gl-token" type="password" value={token} onChange={(e) => setToken(e.target.value)} maxLength={600} autoComplete="off" />
-              </div>
-              <Button type="button" onClick={connect} disabled={pending || !pageId.trim() || !token.trim()} data-go-live-connect>
-                {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-                Kết nối
-              </Button>
-            </div>
-            {view.fanpage?.status === "FAILED" ? <p className="text-xs text-destructive">Lần kiểm tra trước chưa đạt — kiểm lại Page ID / token rồi bấm Kết nối.</p> : null}
-          </div>
+        {anyChannel ? (
+          <ul className="space-y-1 text-xs text-muted-foreground" data-go-live-connected>
+            {view.messenger.connected ? <li>Facebook (nối thẳng): page «{view.messenger.pageName}»{view.messenger.mutedByPancake ? " — đang nhường cho Pancake vì cùng page" : ""}.</li> : null}
+            {pancakeOn ? <li>Fanpage qua Pancake: page {view.fanpage?.pageId}.</li> : null}
+            {view.zalo.connected ? <li>Zalo OA.</li> : null}
+            {view.webChat ? <li>Ô chat trên website.</li> : null}
+            <li>
+              <Link href="/ai/sales-chatbot" className="text-primary hover:underline">
+                Thêm / đổi kênh
+              </Link>
+            </li>
+          </ul>
+        ) : !view.canConnect ? (
+          <p className="text-xs text-muted-foreground">Cần quản trị cửa hàng nối kênh (quyền Cài đặt).</p>
         ) : (
-          <p className="text-xs text-muted-foreground">Cần quản trị cửa hàng kết nối (quyền Cài đặt).</p>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Hiện bạn trả lời tin nhắn khách bằng gì?</p>
+            <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Cách quản lý tin nhắn">
+              {CHOICES.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={choice === c.key}
+                  onClick={() => setChoice(c.key)}
+                  data-go-live-choice={c.key}
+                  className={cn("rounded-lg border px-3 py-2 text-left", choice === c.key ? "border-primary bg-primary/5" : "hover:bg-muted")}
+                >
+                  <span className="block text-sm font-semibold">{c.title}</span>
+                  <span className="block text-xs text-muted-foreground">{c.hint}</span>
+                </button>
+              ))}
+            </div>
+
+            {choice === "DIRECT" ? (
+              <div className="space-y-2" data-go-live-direct>
+                <p className="text-xs text-muted-foreground">Đăng nhập Facebook bằng tài khoản quản trị page → cho phép nhắn tin → chọn page. Không cần phần mềm khác, không cần dán gì. Page có gắn Instagram doanh nghiệp thì bot trả lời cả Instagram.</p>
+                {view.messenger.appReady ? (
+                  <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-go-live-messenger>
+                    Kết nối Facebook Page
+                  </a>
+                ) : (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">Nền tảng chưa bật nối thẳng Facebook — báo người vận hành, hoặc chọn «Tôi dùng Pancake» nếu bạn có Pancake.</p>
+                )}
+              </div>
+            ) : null}
+
+            {choice === "PANCAKE" ? (
+              <div className="space-y-2" data-go-live-pancake>
+                <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Công cụ → chép Page ID và Page access token rồi dán vào đây.</p>
+                <div className="grid gap-2 sm:grid-cols-[12rem_1fr_auto] sm:items-end">
+                  <div className="space-y-1">
+                    <Label htmlFor="gl-page">Page ID</Label>
+                    <Input id="gl-page" value={pageId} onChange={(e) => setPageId(e.target.value)} maxLength={40} placeholder="1234567890" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="gl-token">Page access token</Label>
+                    <Input id="gl-token" type="password" value={token} onChange={(e) => setToken(e.target.value)} maxLength={600} autoComplete="off" />
+                  </div>
+                  <Button type="button" onClick={connect} disabled={pending || !pageId.trim() || !token.trim()} data-go-live-connect>
+                    {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Kết nối
+                  </Button>
+                </div>
+                {view.fanpage?.status === "FAILED" ? <p className="text-xs text-destructive">Lần kiểm tra trước chưa đạt — kiểm lại Page ID / token rồi bấm Kết nối.</p> : null}
+              </div>
+            ) : null}
+
+            {choice === "OTHER" ? (
+              <div className="space-y-1.5 text-xs text-muted-foreground" data-go-live-other>
+                <p>Bot chưa nối trực tiếp với phần mềm của bạn. Bạn vẫn bắt đầu được ngay bằng một trong các cách:</p>
+                <ul className="list-disc space-y-1 pl-4">
+                  <li>
+                    <b>Nối thẳng Facebook</b> cho page — rồi TẮT trả lời tự động của phần mềm kia trên page đó, để khách không nhận hai câu trả lời.
+                  </li>
+                  <li>
+                    <b>Zalo OA</b> hoặc <b>ô chat trên website</b> — ở{" "}
+                    <Link href="/ai/sales-chatbot" className="text-primary hover:underline">
+                      trang Chatbot bán hàng
+                    </Link>
+                    .
+                  </li>
+                </ul>
+                <p>
+                  Muốn bot nối thẳng với phần mềm bạn đang dùng?{" "}
+                  <a href={COMPANY.zaloHref} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    Nhắn Zalo hỗ trợ {COMPANY.zalo}
+                  </a>{" "}
+                  kèm tên phần mềm.
+                </p>
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 
-      {/* 2. Webhook */}
-      <div className="space-y-2" data-go-live-step="webhook">
+      {/* 2. Nhận tin khách đầu tiên */}
+      <div className="space-y-2" data-go-live-step="first-message">
         <p className="flex items-center gap-2 text-sm font-semibold">
-          {received > 0 ? <CheckCircle2 className="size-4 text-emerald-600" /> : <MessageCircle className="size-4 text-muted-foreground" />}
-          2. Dán URL webhook vào Pancake
+          {view.messagesReceived > 0 ? <CheckCircle2 className="size-4 text-emerald-600" /> : <MessageCircle className="size-4 text-muted-foreground" />}
+          2. Nhận tin khách đầu tiên
         </p>
-        {received > 0 ? (
-          <p className="text-xs text-muted-foreground">ERP đã nhận {received.toLocaleString("vi-VN")} tin từ fanpage — webhook chạy rồi.</p>
-        ) : connected && webhook ? (
-          <div className="space-y-1.5">
+        {view.messagesReceived > 0 ? (
+          <p className="text-xs text-muted-foreground">Đã nhận {view.messagesReceived.toLocaleString("vi-VN")} tin khách — kênh chạy rồi.</p>
+        ) : pancakeOn && webhook ? (
+          <div className="space-y-1.5" data-go-live-webhook>
             <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL này → Lưu. Giữ kín URL: ai có nó gửi được tin giả vào bot.</p>
             <div className="flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1.5 text-[11px]" title={webhook}>
@@ -93,8 +176,10 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
             </div>
             <p className="text-xs text-muted-foreground">Dán xong, nhắn thử một tin vào fanpage — bước này tự đánh dấu xong khi ERP nhận được tin.</p>
           </div>
-        ) : connected ? (
+        ) : pancakeOn ? (
           <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+        ) : anyChannel ? (
+          <p className="text-xs text-muted-foreground">Nhắn thử một tin vào kênh vừa nối (từ một tài khoản khác) — bước này tự xong khi bot nhận được.</p>
         ) : (
           <p className="text-xs text-muted-foreground">Làm sau bước 1.</p>
         )}

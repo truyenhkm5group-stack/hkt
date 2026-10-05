@@ -29,6 +29,7 @@ import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { addQuickReplyImages, saveQuickReply } from "@/lib/sales-chatbot/quick-replies";
 import { connectMessengerPage, disconnectMessengerPage, processMessengerThread, receiveMessengerEvent } from "@/lib/sales-chatbot/messenger";
+import { PANCAKE_OWNS_PAGE_REASON } from "@/lib/sales-chatbot/channel-ownership";
 
 const ORG = "msg-shop";
 const OTHER = "msg-other";
@@ -294,6 +295,17 @@ async function testFlow() {
       assert.ok(botCalls.slice(botBefore).some((r) => r.system.includes("ÁO SƠ MI LINEN") && r.system.includes("BÌNH LUẬN DƯỚI BÀI VIẾT")), "lời nhắc có nội dung bài viết");
       // Tin của page KHÁC page đã nối ⇒ không nhận.
       assert.equal((await receiveMessengerEvent({ ...ev("m.7", "hi"), pageId: "5555555555" })).queued, false);
+      // MỘT PAGE — MỘT ĐƯỜNG (channel-ownership.ts): CÙNG page bật thêm qua Pancake ⇒ Pancake thắng, đường Messenger nhường MỌI
+      // gói tin của page đó (không hàng chờ, không hội thoại thứ hai) và không cho nối lại page ấy.
+      const oc = schema.orgConnections;
+      await db.insert(oc).values({ orgCode: ORG, connectorKey: "pancake-fanpage", status: "ACTIVE", settings: { pageId: PAGE }, lastTestOk: true });
+      const inboundBefore = (await db.select().from(schema.salesChatInbound)).length;
+      assert.deepEqual(await receiveMessengerEvent(ev("m.dual.1", "Áo này còn không?")), { queued: false, reason: PANCAKE_OWNS_PAGE_REASON });
+      assert.equal((await receiveMessengerEvent(ev("m.dual.2", "Dạ còn ạ", { isEcho: true, appId: "263902037430900" }))).reason, PANCAKE_OWNS_PAGE_REASON, "tiếng vọng cũng nhường — không ép hội thoại sang người");
+      assert.equal((await db.select().from(schema.salesChatInbound)).length, inboundBefore, "không một dòng hàng chờ nào");
+      const again = await connectMessengerPage(admin, page, { fetch: g.fetch });
+      assert.ok("error" in again && again.error.includes("MỘT đường"), JSON.stringify(again));
+      await db.delete(oc).where(eq(oc.connectorKey, "pancake-fanpage"));
       // Gỡ ⇒ chỉ mục mất ⇒ webhook của page không còn tới tổ chức.
       assert.ok("ok" in (await disconnectMessengerPage(admin)));
     });

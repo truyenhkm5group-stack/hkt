@@ -40,6 +40,11 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
       {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-200">{error}</p> : null}
       {one("ok") ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">Đã nối page — nhắn thử một tin vào page để thấy bot trả lời.</p> : null}
 
+      {view.mutedByPancake ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/60 dark:text-amber-200" data-testid="messenger-muted-by-pancake">
+          Page này cũng đang nhận tin qua Pancake. Mỗi page chỉ nhận tin qua MỘT đường để khách không nhận hai câu trả lời — nên bot đang trả lời qua Pancake, đường Messenger trực tiếp tạm nhường. Muốn dùng đường trực tiếp: gỡ «Fanpage qua Pancake» ở Cài đặt → Kết nối.
+        </p>
+      ) : null}
       <SectionCard title="Page đang nối">
         {!view.appReady ? (
           <p className="text-sm text-muted-foreground">Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — người vận hành cần khai trước.</p>

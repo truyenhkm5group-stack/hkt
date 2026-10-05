@@ -4,8 +4,15 @@ import { CONNECTIONS_PERMISSION, saveConnection, setConnectionStatus, testOrgCon
 import type { TesterDeps } from "@/lib/connectors/testers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
-import { FANPAGE_CONNECTOR, fanpageSetupView, type FanpageSetupView } from "@/lib/sales-chatbot/fanpage";
+import { FANPAGE_CONNECTOR, fanpageSetupView, PAGE_REPLY, type FanpageSetupView } from "@/lib/sales-chatbot/fanpage";
 import { SALES_CHATBOT_MANAGE, saveSalesChatbotConfig } from "@/lib/sales-chatbot/settings";
+import { and, eq, sql } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { goLivePathOf, onboardingStage, type GoLivePath, type OnboardingStage } from "@/lib/onboarding/go-live-shared";
+import { publicationOf } from "@/lib/platform/publish";
+import { messengerView } from "@/lib/sales-chatbot/messenger";
+import { zaloSetupView } from "@/lib/sales-chatbot/zalo";
+import { loadTransportFacts, transportOwnerOf } from "@/lib/sales-chatbot/channel-ownership";
 
 /**
  * ═══════════ «VÀO VIỆC NGAY» — KẾT NỐI FANPAGE + BẬT CHATBOT TỪ TRANG BẮT ĐẦU (docs/platform/quick-start.md §6) ═══════════
@@ -19,6 +26,10 @@ import { SALES_CHATBOT_MANAGE, saveSalesChatbotConfig } from "@/lib/sales-chatbo
  * không bật kết nối (kết nối giữ nháp, câu lỗi của bộ kiểm trả nguyên cho người bấm).
  *
  * Bước dán URL webhook vào Pancake vẫn là việc tay: chưa có API công khai đã kiểm nào của Pancake để ERP tự đăng ký webhook.
+ *
+ * KHÔNG BẮT BUỘC PANCAKE (05/10/2026, lệnh chủ shop): ô này không còn mở đầu bằng Pancake. Shop chọn cách quản lý tin nhắn —
+ * nối thẳng Facebook (khuyên dùng: đăng nhập Facebook → chọn page, không webhook) · đang dùng Pancake · phần mềm khác — và
+ * chỉ thấy bước của lối mình chọn (`go-live-shared.ts`). Lối đang dùng suy từ kết nối thật, không lưu lựa chọn.
  */
 
 export type GoLiveView = {
@@ -26,7 +37,17 @@ export type GoLiveView = {
   show: boolean;
   canConnect: boolean;
   canBot: boolean;
+  /** Lối shop đang dùng, SUY RA từ kết nối thật (`goLivePathOf`); `null` = chưa nối gì ⇒ màn hình cho chọn, khuyên nối thẳng. */
+  path: GoLivePath | null;
   fanpage: FanpageSetupView | null;
+  /** Nối thẳng Facebook (Messenger + Instagram) — `appReady = false` khi nền tảng chưa cấu hình app Facebook. */
+  messenger: { appReady: boolean; connected: boolean; pageName: string | null; mutedByPancake: boolean };
+  zalo: { connected: boolean };
+  /** Ô chat trên website đã xuất bản. */
+  webChat: boolean;
+  /** Tin khách THẬT đã nhận qua mọi kênh (hàng chờ nhận tin + chat web; tiếng vọng của bot / tin của page không tính) — bước «nhận tin đầu tiên» xong khi > 0. */
+  messagesReceived: number;
+  stage: OnboardingStage;
   bot: { enabled: boolean; usesPlatformAi: boolean; aiReady: boolean; aiReason: string | null };
 };
 
@@ -34,17 +55,51 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
   const orgCode = user.organization?.code ?? null;
   const canConnect = can(user, CONNECTIONS_PERMISSION);
   const canBot = can(user, SALES_CHATBOT_MANAGE);
-  const off: GoLiveView = { show: false, canConnect, canBot, fanpage: null, bot: { enabled: false, usesPlatformAi: false, aiReady: false, aiReason: null } };
+  const off: GoLiveView = {
+    show: false,
+    canConnect,
+    canBot,
+    path: null,
+    fanpage: null,
+    messenger: { appReady: false, connected: false, pageName: null, mutedByPancake: false },
+    zalo: { connected: false },
+    webChat: false,
+    messagesReceived: 0,
+    stage: "ACCOUNT_CREATED",
+    bot: { enabled: false, usesPlatformAi: false, aiReady: false, aiReason: null },
+  };
   if (!orgCode || user.organization?.isHome || !(canConnect || canBot) || !(await canUseModule("ai_sales"))) return off;
-  const [fanpage, cfg] = await Promise.all([fanpageSetupView(orgCode), loadSalesChatbotConfig()]);
+  const [fanpage, cfg, messenger, zalo, pub] = await Promise.all([fanpageSetupView(orgCode), loadSalesChatbotConfig(), messengerView(), zaloSetupView(orgCode), publicationOf(orgCode)]);
   const usesPlatformAi = cfg.connectorKey === "platform";
   const plat = usesPlatformAi ? await platformChatAi(orgCode) : null;
+  const aiReady = plat ? plat.ok : true;
+  const db = await getDb();
+  const e = schema.salesConversationEvents;
+  const v = schema.productVariants;
+  // Tin khách đã nhận: hàng chờ của MỌI kênh nhắn (Pancake · Messenger · Instagram · Zalo — có cả khi bot đang tắt) + chat web
+  // (không qua hàng chờ, đọc ở sổ sự kiện). Tiếng vọng của bot / tin của page không phải tin khách.
+  const t = schema.salesChatInbound;
+  const [[inbound], [web], [priced], [drafts]] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(t).where(sql`coalesce(${t.note}, '') not in ('BOT_SENT', ${PAGE_REPLY})`),
+    db.select({ n: sql<number>`count(*)::int` }).from(e).where(and(eq(e.channel, "WEB"), eq(e.type, "message.received"))),
+    db.select({ n: sql<number>`count(*)::int` }).from(v).where(and(eq(v.isRemoved, false), sql`${v.retailPrice} > 0`)),
+    db.select({ n: sql<number>`count(*)::int` }).from(e).where(and(eq(e.channel, "TEST"), eq(e.type, "order.drafted"))),
+  ]);
+  const channels = { pancake: fanpage.status === "ACTIVE", messenger: messenger.status === "ACTIVE" && messenger.page !== null, zalo: zalo.status === "ACTIVE", webChat: pub.state === "PUBLISHED" };
+  const messagesReceived = Number(inbound?.n ?? 0) + Number(web?.n ?? 0);
+  const { stage } = onboardingStage({ ...channels, messagesReceived, pricedVariants: Number(priced?.n ?? 0), aiReady, testDrafts: Number(drafts?.n ?? 0), botEnabled: cfg.enabled });
   return {
     show: true,
     canConnect,
     canBot,
+    path: goLivePathOf(channels),
     fanpage,
-    bot: { enabled: cfg.enabled, usesPlatformAi, aiReady: plat ? plat.ok : true, aiReason: plat && !plat.ok ? plat.reason : null },
+    messenger: { appReady: messenger.appReady, connected: channels.messenger, pageName: messenger.page?.name ?? null, mutedByPancake: messenger.mutedByPancake },
+    zalo: { connected: channels.zalo },
+    webChat: channels.webChat,
+    messagesReceived,
+    stage,
+    bot: { enabled: cfg.enabled, usesPlatformAi, aiReady, aiReason: plat && !plat.ok ? plat.reason : null },
   };
 }
 
@@ -54,6 +109,8 @@ export async function quickConnectFanpage(user: SessionUser, raw: { pageId?: unk
   const pageId = typeof raw.pageId === "string" ? raw.pageId.trim() : "";
   const token = typeof raw.pageAccessToken === "string" ? raw.pageAccessToken.trim() : "";
   if (!pageId || !token) return { error: "Nhập Page ID và page access token (Pancake → Cài đặt page → Công cụ)." };
+  // MỘT PAGE — MỘT ĐƯỜNG (channel-ownership.ts): page đã nối thẳng Facebook ⇒ không nối thêm qua Pancake.
+  if (transportOwnerOf(await loadTransportFacts(), pageId) === "MESSENGER") return { error: "Page này đang nối thẳng với Facebook (Messenger trực tiếp). Mỗi page chỉ nhận tin qua MỘT đường — gỡ Messenger trực tiếp trước nếu muốn chuyển sang Pancake." };
   const saved = await saveConnection(user, { connectorKey: FANPAGE_CONNECTOR, settings: { pageId }, secrets: { pageAccessToken: token } });
   if ("error" in saved) return saved;
   const tested = await testOrgConnection(user, FANPAGE_CONNECTOR, deps.tester ? { tester: deps.tester } : {});
