@@ -64,6 +64,10 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
 | P7 | Kiểm giá không căn cứ trên lượt THẬT ⇒ hàng đợi rà lỗi AI | 3 | XONG (nhánh) | `/ai/sales-chatbot/quality`: luật tất định (cùng bộ đọc tiền của phát lại) — giá không căn cứ · công cụ lỗi · khách hỏi lại y nguyên; tin nhân viên không bị cờ. Quyết định người rà ở `sales_ai_reviews` (migration `0216`, chỉ THÊM). Không dùng AI thứ hai làm giám khảo |
 | P8 | Bảng «AI đã sẵn sàng tự trả lời khách?» | 5 | XONG (nhánh) | `readiness-shared.ts`: CHƯA SẴN SÀNG · SẴN SÀNG CÒN LƯU Ý · SẴN SÀNG từ 9 mục đo được (bot bật · khoá AI · giá · tồn · báo nhóm khi chuyển người · tin khách thật · thử lên đơn · phát lại · lỗi giá đã xác nhận). THÔNG TIN, không chặn đổi chế độ — chặn là đổi hành vi với tổ chức đang chạy Tự động (cần chủ shop quyết) |
 
+| P9 | **Không bắt buộc Pancake**: ô «Vào việc ngay» hỏi shop quản lý tin nhắn bằng gì (nối thẳng Facebook · Pancake · phần mềm khác); MỘT PAGE — MỘT ĐƯỜNG nhận tin | yêu cầu bổ sung 05/10 | XONG (nhánh) | `go-live-shared.ts`, `channel-ownership.ts`, `docs/messaging-providers.md`. Trước đó một page nối cả hai đường ⇒ hai hội thoại, hai câu trả lời |
+| P10 | **Pancake qua API, webhook tuỳ chọn** (webhook Pancake tốn 2 slot) | yêu cầu bổ sung 05/10 | XONG (nhánh) | `pancake-poll-shared.ts`: mốc đồng bộ lưu CSDL, đọc cũ trước, lùi khi lỗi / 429, page yên hỏi thưa; webhook nếu có chỉ làm tin nhanh hơn |
+| P11 | Nhịp đọc API < 5 phút · lai Meta + Pancake «chỉ đọc» · `ChannelAdapter` chung · nhiều page | — | CHỜ | `docs/messaging-providers.md` §6 — một việc chờ chủ shop (lịch scheduler), một việc chờ bằng chứng ánh xạ PSID ↔ Pancake |
+
 ## 4. Nhật ký quyết định
 
 - **05/10/2026 — Không tạo `docs/architecture.md`, `data-model.md`, `event-model.md`… như lệnh liệt kê.** Nội dung
@@ -72,6 +76,12 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
   (`docs/revenue-attribution.md` đi cùng P2).
 - **05/10/2026 — Sửa số trước khi thêm số.** P1 đứng trước mọi màn mới: một màn «AI kiếm bao nhiêu» đọc con số đang
   gộp đơn người là quảng cáo sai cho chính sản phẩm.
+
+- **05/10/2026 — Chống trùng Meta + Pancake bằng «một page — một đường», không bằng so mã tin.** Mã tin của Pancake có trùng
+  `mid` của Meta không được chứng minh ở đâu trong kho mã; luật dựa vào nó là đoán. Pancake thắng khi cả hai cùng bật vì shop
+  Pancake đang chạy thật phải giữ nguyên hành vi.
+- **05/10/2026 — Đường API của Pancake luôn chạy; webhook chỉ làm nhanh hơn.** Không bắt chủ shop chọn «chế độ»: mốc
+  «webhook có tin trong 2 giờ» tự đổi ngân sách. Không đổi lịch scheduler (AGENTS §7) — nhịp 5 phút là trần độ trễ hiện tại.
 
 ## 5. Baseline 05/10/2026 (cây sạch 317270ab, Windows)
 

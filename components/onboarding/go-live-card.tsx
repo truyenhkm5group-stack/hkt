@@ -14,15 +14,16 @@ import type { GoLivePath } from "@/lib/onboarding/go-live-shared";
 import { cn } from "@/lib/utils";
 
 const CHOICES: { key: GoLivePath; title: string; hint: string }[] = [
-  { key: "DIRECT", title: "Nối thẳng Facebook", hint: "Tôi không dùng phần mềm chat nào — khuyên dùng" },
-  { key: "PANCAKE", title: "Tôi dùng Pancake", hint: "Giữ Pancake, bot trả lời qua Pancake" },
+  { key: "DIRECT", title: "Nối thẳng Facebook", hint: "Tôi không dùng phần mềm chat nào — tin tới tức thì · khuyên dùng" },
+  { key: "PANCAKE", title: "Tôi dùng Pancake", hint: "Giữ Pancake · không tốn thêm slot Pancake" },
   { key: "OTHER", title: "Tôi dùng phần mềm khác", hint: "Xem các cách nối đang có" },
 ];
 
 /**
  * Ô «Vào việc ngay» của trang Bắt đầu — KHÔNG BẮT BUỘC PANCAKE (`lib/onboarding/go-live-shared.ts`):
  *  (1) nối kênh bán hàng theo cách shop đang quản lý tin nhắn — nối thẳng Facebook (khuyên dùng) · Pancake · phần mềm khác;
- *  (2) nhận tin khách đầu tiên (hướng dẫn webhook CHỈ hiện cho lối Pancake);
+ *  (2) nhận tin khách đầu tiên — Pancake KHÔNG cần webhook (ERP đọc tin qua API, webhook tốn 2 slot Pancake nên chỉ là tuỳ
+ *      chọn «nâng cao» cho ai muốn tin tới tức thì);
  *  (3) bật chatbot bằng MỘT nút.
  * Mỗi bước tự hiện «xong» khi dữ liệu thật đã có — không có ô bấm cho xong.
  */
@@ -108,7 +109,7 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
 
             {choice === "PANCAKE" ? (
               <div className="space-y-2" data-go-live-pancake>
-                <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Công cụ → chép Page ID và Page access token rồi dán vào đây.</p>
+                <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Công cụ → chép Page ID và Page access token rồi dán vào đây. Không cần bật Webhook của Pancake (không tốn thêm slot): ERP tự đọc tin mới từ Pancake vài phút một lần.</p>
                 <div className="grid gap-2 sm:grid-cols-[12rem_1fr_auto] sm:items-end">
                   <div className="space-y-1">
                     <Label htmlFor="gl-page">Page ID</Label>
@@ -163,21 +164,26 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
         </p>
         {view.messagesReceived > 0 ? (
           <p className="text-xs text-muted-foreground">Đã nhận {view.messagesReceived.toLocaleString("vi-VN")} tin khách — kênh chạy rồi.</p>
-        ) : pancakeOn && webhook ? (
-          <div className="space-y-1.5" data-go-live-webhook>
-            <p className="text-xs text-muted-foreground">Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL này → Lưu. Giữ kín URL: ai có nó gửi được tin giả vào bot.</p>
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1.5 text-[11px]" title={webhook}>
-                {webhook}
-              </code>
-              <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(webhook).then(() => toast.success("Đã chép URL webhook"))}>
-                <Copy className="size-3.5" /> Chép
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Dán xong, nhắn thử một tin vào fanpage — bước này tự đánh dấu xong khi ERP nhận được tin.</p>
-          </div>
         ) : pancakeOn ? (
-          <p className="text-xs text-amber-700 dark:text-amber-400">Máy chủ chưa có khoá bí mật nền tảng — chưa dựng được URL webhook. Báo người vận hành nền tảng.</p>
+          <div className="space-y-1.5" data-go-live-pancake-api>
+            <p className="text-xs text-muted-foreground">Không cần làm gì thêm: khi bot bật (bước 3), ERP tự đọc tin mới từ Pancake vài phút một lần — không cần Webhook, không tốn thêm slot Pancake. Nhắn thử một tin vào fanpage; bước này tự xong khi ERP nhận được.</p>
+            {webhook ? (
+              <details className="text-xs text-muted-foreground" data-go-live-webhook>
+                <summary className="cursor-pointer">Nâng cao — muốn tin tới tức thì (Webhook của Pancake, tốn 2 slot thuê bao)</summary>
+                <div className="mt-1.5 space-y-1.5">
+                  <p>Trong Pancake: Cài đặt page → Webhook → bật sự kiện tin nhắn (messaging) → dán URL này → Lưu. Giữ kín URL: ai có nó gửi được tin giả vào bot.</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1.5 text-[11px]" title={webhook}>
+                      {webhook}
+                    </code>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(webhook).then(() => toast.success("Đã chép URL webhook"))}>
+                      <Copy className="size-3.5" /> Chép
+                    </Button>
+                  </div>
+                </div>
+              </details>
+            ) : null}
+          </div>
         ) : anyChannel ? (
           <p className="text-xs text-muted-foreground">Nhắn thử một tin vào kênh vừa nối (từ một tài khoản khác) — bước này tự xong khi bot nhận được.</p>
         ) : (
