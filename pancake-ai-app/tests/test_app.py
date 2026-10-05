@@ -248,6 +248,30 @@ class MiningRobustnessTest(Base):
         self.assertEqual((r["count"], r["whole_job"]), (2, True))
 
 
+class DataLocationTest(unittest.TestCase):
+    def test_first_start_adopts_richest_old_db_from_other_folder(self):
+        """Đúng sự cố 05/10/2026: giải nén bản mới ra thư mục khác ⇒ app mở DB trống, tri thức "mất"."""
+        import subprocess
+        home = tempfile.mkdtemp()
+        app = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        code = (
+            "import sys, os, sqlite3; sys.path.insert(0, %r)\n"
+            "import database as db\n"
+            "def mk(p, faqs):\n"
+            "    os.makedirs(os.path.dirname(p), exist_ok=True); c = sqlite3.connect(p); c.executescript(db.SCHEMA)\n"
+            "    for i in range(faqs): c.execute(\"INSERT INTO faqs(question, answer) VALUES(?, 'a')\", ('q%%d' %% i,))\n"
+            "    c.execute(\"INSERT INTO settings VALUES('shop_name', '\\\"Linh T\\u00e2y Luxury\\\"')\"); c.commit(); c.close()\n"
+            "mk(os.path.join(%r, 'Downloads', 'cu', 'pancake-ai-app', 'data', 'pancake_ai.db'), 21)\n"
+            "mk(os.path.join(%r, 'Downloads', 'moi', 'pancake-ai-app', 'data', 'pancake_ai.db'), 0)\n"
+            "db.init_db()\n"
+            "print(db.DB_PATH.startswith(%r), db.scalar('SELECT COUNT(*) FROM faqs'), db.get_setting('shop_name'), db.ADOPTED.get('faqs'))\n"
+        ) % (app, home, home, home)
+        env = {k: v for k, v in os.environ.items() if k != "APP_DB_PATH"}
+        env.update(HOME=home, USERPROFILE=home)
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "True 21 Linh Tây Luxury 21", out.stderr)
+
+
 class SandboxTest(Base):
     def test_sandbox_multi_turn_teach_and_isolation(self):
         seen = []

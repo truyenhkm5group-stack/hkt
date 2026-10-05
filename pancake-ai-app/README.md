@@ -24,6 +24,14 @@ Khách nhắn ──► Pancake ──webhook──► server.py ──► lưu 
 
 macOS / Linux: `./run.sh`.
 
+### Dữ liệu nằm ở đâu
+Tri thức đã nạp, hội thoại, cài đặt nằm ở **một chỗ cố định**, KHÔNG trong thư mục app:
+`%LOCALAPPDATA%\PancakeAISalesManager\pancake_ai.db` (Windows) · `~/.pancake-ai-sales-manager/` (macOS/Linux).
+Cập nhật bản mới bằng cách giải nén ra bất cứ đâu — dữ liệu không mất. Bản đầu tiên lưu ở `pancake-ai-app\data\`:
+lần đầu chạy bản mới, app tự tìm file đó trên máy (cạnh app, Desktop, Documents, Downloads, OneDrive, C:\, D:\) và lấy về
+bản có nhiều dữ liệu nhất. Tab Kết nối → **💾 Dữ liệu của app** → **Tìm dữ liệu cũ trên máy** để chọn tay (dữ liệu
+đang dùng được sao lưu ra `.bak` trước). Sao lưu tri thức: tab Kho tri thức → **Xuất JSON**.
+
 ## 2. Kết nối (tab ⚙️ Kết nối)
 
 ### Cách nhanh: lấy từ bot cũ

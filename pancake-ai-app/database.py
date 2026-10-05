@@ -20,8 +20,22 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_NAME = "pancake_ai.db"
+
+
+def _default_data_dir() -> str:
+    """Chỗ CỐ ĐỊNH theo người dùng máy, KHÔNG nằm trong thư mục app: giải nén bản mới ra thư mục khác,
+    chép đè, hay xoá thư mục app cũ đều không làm "mất" dữ liệu (đã cắn thật 05/10/2026)."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        return os.path.join(base, "PancakeAISalesManager")
+    return os.path.join(os.path.expanduser("~"), ".pancake-ai-sales-manager")
+
+
 # Biến để trống trong .env (APP_DB_PATH=) cũng coi như chưa đặt
-DB_PATH = os.environ.get("APP_DB_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pancake_ai.db")
+DB_FROM_ENV = bool(os.environ.get("APP_DB_PATH"))
+DB_PATH = os.environ.get("APP_DB_PATH") or os.path.join(_default_data_dir(), DB_NAME)
 
 _local = threading.local()
 PHONE_IN_TEXT = re.compile(r"(?<!\d)(?:\+?84|0)[35789]\d{8}(?!\d)")
@@ -292,12 +306,146 @@ def init_db() -> None:
     with _init_lock:
         if _initialized:
             return
+        if not DB_FROM_ENV and not os.path.exists(DB_PATH):
+            adopt_richest_old_db()
         conn = _connect()
         conn.executescript(SCHEMA)
         _migrate(conn)
         conn.commit()
         conn.close()
         _initialized = True
+
+
+# ---------------------------------------------------------------- tìm & lấy lại dữ liệu cũ
+_SKIP_DIRS = {"node_modules", "AppData", "Windows", "Program Files", "Program Files (x86)", "ProgramData", ".venv",
+              "__pycache__", ".git", "$Recycle.Bin", "System Volume Information"}
+
+
+def _db_stats(path: str) -> dict[str, Any] | None:
+    try:
+        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            def n(sql: str) -> int:
+                try:
+                    return int(c.execute(sql).fetchone()[0] or 0)
+                except sqlite3.Error:
+                    return 0
+            shop = None
+            try:
+                r = c.execute("SELECT value FROM settings WHERE key = 'shop_name'").fetchone()
+                shop = json.loads(r[0]) if r else None
+            except (sqlite3.Error, ValueError):
+                pass
+            return {"path": os.path.abspath(path), "modified": int(os.path.getmtime(path)), "size": os.path.getsize(path),
+                    "shop_name": shop, "faqs": n("SELECT COUNT(*) FROM faqs"), "scripts": n("SELECT COUNT(*) FROM objection_scripts"),
+                    "templates": n("SELECT COUNT(*) FROM closing_templates"), "conversations": n("SELECT COUNT(*) FROM conversations"),
+                    "messages": n("SELECT COUNT(*) FROM messages"), "settings": n("SELECT COUNT(*) FROM settings")}
+        finally:
+            c.close()
+    except (sqlite3.Error, OSError):
+        return None
+
+
+def _richness(st: dict[str, Any]) -> tuple:
+    return (st["faqs"] + st["scripts"] + st["templates"], st["conversations"], st["settings"], st["modified"])
+
+
+def find_old_dbs(max_depth: int = 4) -> list[dict[str, Any]]:
+    """Mọi file pancake_ai.db trên máy (cạnh app, Desktop, Documents, Downloads, OneDrive), trừ DB đang dùng."""
+    home = os.path.expanduser("~")
+    roots = [APP_DIR, os.path.join(APP_DIR, ".."), os.path.join(APP_DIR, "..", ".."), os.path.join(APP_DIR, "..", "..", "..")]
+    roots += [os.path.join(home, d) for d in ("Desktop", "Documents", "Downloads", "OneDrive",
+                                               os.path.join("OneDrive", "Desktop"), os.path.join("OneDrive", "Documents"))]
+    if os.name == "nt":
+        roots += ["C:\\", "D:\\"]
+    current = os.path.abspath(DB_PATH)
+    found: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
+    for root in roots:
+        root = os.path.abspath(root)
+        if not os.path.isdir(root):
+            continue
+        stack = [(root, 0)]
+        while stack:
+            d, depth = stack.pop()
+            if d in seen:
+                continue
+            seen.add(d)
+            try:
+                entries = list(os.scandir(d))
+            except OSError:
+                continue
+            for e in entries:
+                try:
+                    if e.is_file(follow_symlinks=False) and e.name == DB_NAME:
+                        p = os.path.abspath(e.path)
+                        if p != current and p not in found:
+                            st = _db_stats(p)
+                            if st:
+                                found[p] = st
+                    elif depth < max_depth and e.is_dir(follow_symlinks=False) and e.name not in _SKIP_DIRS and not e.name.startswith("$"):
+                        stack.append((e.path, depth + 1))
+                except OSError:
+                    continue
+    return sorted(found.values(), key=_richness, reverse=True)
+
+
+def copy_db(src: str, dest_conn: sqlite3.Connection | None = None) -> None:
+    """Chép TOÀN BỘ một DB khác vào DB đang dùng bằng backup API của SQLite (an toàn cả khi đang mở)."""
+    s = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
+    try:
+        if dest_conn is None:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            d = sqlite3.connect(DB_PATH, timeout=30)
+            try:
+                s.backup(d)
+            finally:
+                d.close()
+        else:
+            s.backup(dest_conn)
+    finally:
+        s.close()
+
+
+def adopt_richest_old_db() -> dict[str, Any] | None:
+    """Lần đầu chạy ở chỗ dữ liệu mới: lấy về DB cũ có NHIỀU tri thức / hội thoại nhất. Không bao giờ ghi đè DB đang có."""
+    try:
+        cands = [c for c in find_old_dbs() if _richness(c)[:3] != (0, 0, 0)]
+    except Exception:  # noqa: BLE001 — dò thất bại không được chặn app khởi động
+        return None
+    if not cands or os.path.exists(DB_PATH):
+        return None
+    copy_db(cands[0]["path"])
+    ADOPTED.update(cands[0])
+    return cands[0]
+
+
+ADOPTED: dict[str, Any] = {}
+
+
+def adopt_db(src: str) -> dict[str, Any]:
+    """Người chọn một DB cũ: sao lưu DB hiện tại ra .bak rồi chép DB cũ vào chỗ (không xoá gì)."""
+    st = _db_stats(src)
+    if not st:
+        raise ValueError("Không đọc được file dữ liệu này")
+    backup = f"{DB_PATH}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    cur = get_conn()
+    cur.commit()
+    b = sqlite3.connect(backup)
+    try:
+        cur.backup(b)
+    finally:
+        b.close()
+    copy_db(src, cur)
+    cur.executescript(SCHEMA)
+    _migrate(cur)
+    cur.commit()
+    bump_faq_version()
+    return {"adopted": st, "backup_of_previous": backup}
+
+
+def current_db_stats() -> dict[str, Any] | None:
+    return _db_stats(DB_PATH)
 
 
 # Cột thêm sau bản đầu — DB đã tạo trên máy người dùng không tự có (CREATE TABLE IF NOT EXISTS không thêm cột).

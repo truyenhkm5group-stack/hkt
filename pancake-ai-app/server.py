@@ -64,6 +64,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     km.recover_interrupted_jobs()
     if not db.get_setting("webhook_secret"):
         db.set_settings({"webhook_secret": secrets.token_urlsafe(18)})
+    if db.ADOPTED:
+        log.warning("Đã tự lấy lại dữ liệu cũ từ %s (%s FAQ, %s hội thoại) sang chỗ cố định %s",
+                    db.ADOPTED["path"], db.ADOPTED["faqs"], db.ADOPTED["conversations"], db.DB_PATH)
     got = legacy_import.auto_import_on_startup()
     if got:
         log.info("Đã tự lấy cấu hình từ bot cũ: %s", got)
@@ -538,6 +541,32 @@ def save_settings(body: SettingsIn) -> dict[str, Any]:
 def webhook_info(request: Request) -> dict[str, Any]:
     base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or "https://<tên-miền-công-khai>"
     return {"url": f"{base}/webhook/pancake?secret={db.get_setting('webhook_secret')}", "local": str(request.base_url)}
+
+
+class AdoptIn(BaseModel):
+    path: str
+
+
+@app.get("/api/data", dependencies=admin)
+def data_info(scan: bool = False) -> dict[str, Any]:
+    """Dữ liệu đang dùng nằm ở đâu, có gì; scan=1 thì dò thêm các file dữ liệu cũ trên máy."""
+    return {"current": db.current_db_stats(), "db_path": db.DB_PATH, "adopted_on_start": db.ADOPTED or None,
+            "others": db.find_old_dbs() if scan else None}
+
+
+@app.post("/api/data/adopt", dependencies=admin)
+def data_adopt(body: AdoptIn) -> dict[str, Any]:
+    """Dùng một file dữ liệu cũ. CHỈ nhận file mà lượt dò vừa tìm thấy; dữ liệu hiện tại được sao lưu ra .bak trước."""
+    allowed = {o["path"] for o in db.find_old_dbs()}
+    if os.path.abspath(body.path) not in allowed:
+        raise HTTPException(400, "File này không nằm trong danh sách dữ liệu tìm thấy")
+    try:
+        res = db.adopt_db(os.path.abspath(body.path))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    _client_cache.update(key=None, client=None)
+    _catalog_cache.update(items=None, at=0)
+    return {"ok": True, **res}
 
 
 class LegacyIn(BaseModel):

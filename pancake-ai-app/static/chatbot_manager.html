@@ -41,9 +41,16 @@
 </header>
 
 <main class="max-w-7xl mx-auto px-4 py-5 space-y-4">
+<div id="dataBanner" class="hidden card border-amber-400 bg-amber-50 text-sm"></div>
 
 <!-- ============================ KẾT NỐI ============================ -->
 <section data-panel="connect" class="space-y-4">
+  <div class="card space-y-2" id="dataCard">
+    <div class="flex flex-wrap items-center gap-2"><h2 class="font-bold">💾 Dữ liệu của app</h2>
+      <button class="btn btn-ghost ml-auto" onclick="dataScan()">🔍 Tìm dữ liệu cũ trên máy</button></div>
+    <div id="dataNow" class="text-sm"></div>
+    <div id="dataOthers" class="text-sm"></div>
+  </div>
   <div class="card space-y-2 border-green-300" id="userTokenCard">
     <h2 class="font-bold">🔑 Kết nối page bằng tài khoản Pancake <span class="muted">(cách nhanh nhất)</span></h2>
     <p class="muted">Pancake → ảnh đại diện góc trên → <b>Cài đặt cá nhân</b> → <b>Access token</b> → sao chép, dán vào đây. App liệt kê các page bạn quản lý, bạn chọn page, app tự sinh Page Access Token. Mã tài khoản này <b>không được lưu</b>.</p>
@@ -324,7 +331,7 @@ function showTab(t) {
   currentTab = t;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
   document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== t));
-  ({ connect: loadSettings, convs: () => { loadFilters(); loadConvs(1); }, mining: loadJobs, knowledge: loadKnowledge, alerts: loadAlerts, cancels: loadCancels, cost: loadCost, sim: sbInit })[t]?.();
+  ({ connect: () => { loadSettings(); dataInfo(); }, convs: () => { loadFilters(); loadConvs(1); }, mining: loadJobs, knowledge: loadKnowledge, alerts: loadAlerts, cancels: loadCancels, cost: loadCost, sim: sbInit })[t]?.();
   try { localStorage.setItem("tab", t); } catch (e) {}
 }
 document.querySelectorAll(".tab-btn").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
@@ -365,6 +372,42 @@ async function saveSettings() {
 }
 async function testPancake() { $("#pancakeTest").textContent = "Đang kiểm tra…"; try { $("#pancakeTest").textContent = JSON.stringify(await api("/api/pancake/test", { method: "POST" }), null, 1); } catch (e) { $("#pancakeTest").textContent = e.message; } }
 async function testGemini() { $("#geminiTest").textContent = "Đang gọi…"; try { const r = await api("/api/gemini/test", { method: "POST" }); $("#geminiTest").textContent = r.ok ? `OK · ${r.model} · ${r.prompt_tokens}+${r.output_tokens} token · ${usd(r.cost_usd)} · ${r.latency_ms} ms` : r.error; } catch (e) { $("#geminiTest").textContent = e.message; } }
+
+// ------------------------------------------------------------ dữ liệu (chỗ lưu cố định + lấy lại dữ liệu cũ)
+const dbLine = (d) => `<b>${d.faqs}</b> câu mẫu · ${d.scripts} kịch bản · ${d.templates} mẫu chốt · ${d.conversations.toLocaleString("vi-VN")} hội thoại${d.shop_name ? " · shop <b>" + esc(d.shop_name) + "</b>" : ""} · sửa lúc ${fmtTime(d.modified)}`;
+async function dataInfo() {
+  const r = await api("/api/data");
+  $("#dataNow").innerHTML = `Đang dùng: <code class="text-xs">${esc(r.db_path)}</code><br>${r.current ? dbLine(r.current) : "(trống)"}`
+    + (r.adopted_on_start ? `<div class="text-green-700">✅ Đã tự lấy lại dữ liệu cũ từ <code class="text-xs">${esc(r.adopted_on_start.path)}</code></div>` : "");
+  return r;
+}
+async function dataScan(silent) {
+  if (!silent) $("#dataOthers").textContent = "Đang tìm trên máy…";
+  const r = await api("/api/data?scan=1");
+  const others = (r.others || []).filter((o) => o.faqs + o.scripts + o.templates + o.conversations > 0);
+  const html = others.length ? "<div class='mt-1'>Dữ liệu khác tìm thấy trên máy:</div>" + others.map((o) => `<div class="flex flex-wrap items-center gap-2 border rounded p-2 mt-1">
+      <div class="grow"><code class="text-xs">${esc(o.path)}</code><br>${dbLine(o)}</div>
+      <button class="btn btn-primary" onclick='dataAdopt(${JSON.stringify(o.path)})'>Dùng dữ liệu này</button></div>`).join("")
+    : (silent ? "" : "<span class='muted'>Không tìm thấy dữ liệu cũ nào khác trên máy.</span>");
+  $("#dataOthers").innerHTML = html;
+  return { r, others };
+}
+async function dataAdopt(path) {
+  if (!confirm("Dùng dữ liệu này? Dữ liệu hiện tại được SAO LƯU ra file .bak, không bị xoá.")) return;
+  try { const r = await api("/api/data/adopt", { method: "POST", body: { path } }); toast("Đã lấy lại dữ liệu cũ"); $("#dataBanner").classList.add("hidden"); await dataInfo(); await loadSettings(); }
+  catch (e) { toast(e.message, true); }
+}
+async function dataCheckOnStart() {
+  try {
+    const r = await api("/api/data");
+    const c = r.current || {};
+    if ((c.faqs || 0) + (c.conversations || 0) > 0) return;
+    const { others } = await dataScan(true);
+    if (!others.length) return;
+    const b = $("#dataBanner"); b.classList.remove("hidden");
+    b.innerHTML = `⚠️ App đang mở dữ liệu TRỐNG, nhưng trên máy có dữ liệu cũ: ${dbLine(others[0])}. <button class="btn btn-primary ml-2" onclick='dataAdopt(${JSON.stringify(others[0].path)})'>Lấy lại dữ liệu này</button>`;
+  } catch (e) {}
+}
 
 // ------------------------------------------------------------ kết nối bằng User Access Token
 async function userPages() {
@@ -733,7 +776,7 @@ async function refreshBadges() {
 (async () => {
   try { SETTINGS = await api("/api/settings"); updateBotState(); } catch (e) {}
   let t = "connect"; try { t = localStorage.getItem("tab") || "connect"; } catch (e) {}
-  showTab(t); pollSync(); refreshBadges(); setInterval(refreshBadges, 15000);
+  showTab(t); pollSync(); refreshBadges(); setInterval(refreshBadges, 15000); dataCheckOnStart();
 })();
 </script>
 </body>
