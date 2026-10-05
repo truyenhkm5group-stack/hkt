@@ -158,6 +158,9 @@ function testValidation() {
   const cfgBad = parseConfig({ maxImplementationWorkers: 50, branchPrefix: "Bad Prefix", hotspots: [{ path: "../x", rule: "SERIAL", reason: "r" }] });
   assert.equal(cfgBad.errors.length, 3);
   assert.deepEqual(parseConfig(undefined).errors, []);
+  assert.equal(parseConfig({ integrationRef: "--all" }).errors.length, 1, "ref bắt đầu bằng - là một CỜ của git, không phải ref");
+  assert.equal(parseConfig({ integrationRef: "HEAD" }).errors.length, 1);
+  assert.ok(validateMission(rawMission([task("a")], { integrationRef: "-x" }), CFG).errors.some((e) => e.includes("integrationRef")));
 }
 
 /* ═════════════ 2 · PHẠM VI ═════════════ */
@@ -298,7 +301,8 @@ function testWorktreePolicy() {
     dirty: 0,
     uniqueLocal: 0,
     merged: "CONTENT",
-    idleHours: 1,
+    idleHours: 48,
+    localSecrets: [],
   };
   const w = (o: Partial<WorktreeFacts>) => ({ ...base, ...o });
   const cls = (o: Partial<WorktreeFacts>) => classifyWorktree(w(o), CFG).cls;
@@ -314,6 +318,9 @@ function testWorktreePolicy() {
   assert.equal(cls({ merged: null, idleHours: 48 }), "IDLE");
   assert.equal(cls({ merged: null, idleHours: 24 * 30 }), "STALE_CLEAN");
   assert.equal(cls({ merged: "CONTENT", uniqueLocal: 3, idleHours: 48 }), "IDLE", "đã vào theo nội dung nhưng còn commit chỉ ở máy");
+  assert.equal(cls({ idleHours: 0.2 }), "ACTIVE", "vừa có người động thì KHÔNG BAO GIỜ là an toàn để dọn, dù đã vào");
+  assert.equal(cls({ merged: "EMPTY" }), "MERGED_SAFE_TO_CLEAN", "không commit riêng nào + lâu không động: không có gì để mất");
+  assert.equal(cls({ merged: "EMPTY", idleHours: 2 }), "ACTIVE");
   assert.equal(cls({ dirty: -1 }), "UNKNOWN");
   assert.equal(cls({ prunable: true }), "UNKNOWN");
 
@@ -334,6 +341,10 @@ function testWorktreePolicy() {
   refuse({ uniqueLocal: -1 }, "UNPUSHED?");
   refuse({ owner: null }, "UNOWNED");
   refuse({ owner: null, idleHours: 2 }, "UNOWNED_RECENT", true);
+  refuse({ idleHours: 0.1 }, "RECENT");
+  refuse({ idleHours: null }, "RECENT");
+  refuse({ localSecrets: [".env.local"] }, "LOCAL_SECRETS");
+  assert.equal(cleanupDecision(w({ idleHours: 0.1 }), { ...CFG, cleanupGraceMinutes: 0 }, { allowUnowned: false }).ok, true, "thời gian chờ chỉnh được — 0 là không chờ");
   refuse({ merged: "EMPTY", idleHours: 2 }, "EMPTY_BUT_RECENT");
   assert.equal(can({ owner: null, idleHours: 72 }, true).ok, true, "cây không rõ chủ, đã vào, sạch, lâu không động: dọn được KHI chủ shop cho phép");
   assert.equal(can({ merged: "EMPTY", idleHours: 72 }).ok, true, "cây của mình dựng rồi bỏ, không commit nào, lâu không động");
@@ -400,9 +411,13 @@ function testSourceGuards() {
   assert.ok(!/"push"/.test(src), "công cụ không tự đẩy gì lên remote");
   assert.ok(!/"stash"|"reset"|"clean"/.test(src), "không stash / reset / clean");
   assert.ok(src.includes('"--no-optional-locks"'), "đọc trạng thái cây khác không được làm mới index của họ");
-  // Nhánh chỉ bị -D sau khi cleanupDecision đã chứng minh không mất commit nào.
-  const iD = src.indexOf('"branch", "-D"');
-  assert.ok(iD > 0 && src.lastIndexOf("cleanupDecision(", iD) > 0);
+  // Nhánh chỉ bị xoá TRONG cmdCleanup, SAU lời gọi cleanupDecision, và bằng so-và-xoá theo SHA đã đo.
+  const body = src.slice(src.indexOf("function cmdCleanup("), src.indexOf("function markCleaned("));
+  const iDec = body.indexOf("cleanupDecision(");
+  const iDel = body.indexOf('"update-ref", "-d"');
+  assert.ok(iDec > 0 && iDel > iDec, "xoá nhánh phải đứng sau quyết định dọn trong cùng hàm");
+  assert.ok(/"update-ref", "-d", `refs\/heads\/\$\{f\.branch\}`, f\.head\]/.test(body), "xoá nhánh phải so với SHA đã đo (chống commit chen giữa)");
+  assert.ok(!/"branch", "-D"/.test(src), "không xoá nhánh vô điều kiện");
   const repoCfg = parseConfig(JSON.parse(readFileSync(path.join(__dirname, "..", ".ai", "config.json"), "utf8")));
   assert.deepEqual(repoCfg.errors, [], ".ai/config.json của kho phải hợp lệ");
   assert.ok(repoCfg.config.maxImplementationWorkers <= 4, "trần mặc định của kho là 4");
@@ -465,7 +480,7 @@ async function testLifecycle() {
     put(path.join(repo, ".gitattributes"), "* text=auto eol=lf\n");
     put(path.join(repo, "src", "a.ts"), "export const a = 1;\n");
     put(path.join(repo, "src", "b.ts"), "export const b = 1;\n");
-    put(path.join(repo, ".ai", "config.json"), JSON.stringify({ maxImplementationWorkers: 4, hotspots: [{ path: "drizzle/", rule: "SERIAL", reason: "số hiệu" }] }));
+    put(path.join(repo, ".ai", "config.json"), JSON.stringify({ maxImplementationWorkers: 4, cleanupGraceMinutes: 0, hotspots: [{ path: "drizzle/", rule: "SERIAL", reason: "số hiệu" }] }));
     g(repo, "add", "-A");
     g(repo, "commit", "-m", "gốc");
     g(repo, "remote", "add", "origin", origin);
@@ -600,6 +615,37 @@ async function testLifecycle() {
     const nx = await ai(repo, "next", "m1");
     assert.match(nx.text, /DỰNG CÂY\s+t3/);
 
+    // ── WORKER CHƯA COMMIT GÌ MÀ FAST-FORWARD LÊN MAIN: không được thành "đã vào" (reviewer, HIGH) ──
+    assert.equal((await ai(repo, "spawn", "m1", "t3")).code, 0);
+    const wt3 = path.join(tmp, "wt-t3");
+    g(other, "pull", "--ff-only", "origin", "main");
+    put(path.join(other, "src", "e.ts"), "export const e = 1;\n");
+    g(other, "add", "-A");
+    g(other, "commit", "-m", "main chạy tiếp lần nữa");
+    g(other, "push", "origin", "main");
+    g(wt3, "fetch", "origin");
+    g(wt3, "merge", "--ff-only", "origin/main");
+    st = await ai(repo, "status", "m1");
+    assert.match(st.text, /RUNNING .*t3\s+0 commit/, st.text);
+    assert.equal(mergeEvidence(repo, g(wt3, "rev-parse", "HEAD"), "origin/main", { baseSha: originTip }), "EMPTY");
+    const c3ff = await ai(repo, "cleanup", "m1:t3", "--apply");
+    assert.equal(c3ff.code, 1);
+    assert.match(c3ff.text, /EMPTY_BUT_RECENT/);
+    assert.ok(existsSync(wt3), "cây của worker đang làm không bao giờ bị dọn");
+
+    // ── WORKER MERGE MAIN VÀO RỒI MỚI XIN PR: tệp của main không bị tính là "ngoài phạm vi" ──
+    g(wt2, "rm", "-q", "src/ngoai.ts");
+    g(wt2, "commit", "-m", "t2: bỏ tệp ngoài phạm vi");
+    g(wt2, "fetch", "origin");
+    const mg = spawnSync("git", ["-c", "user.name=k", "-c", "user.email=k@example.invalid", "merge", "origin/main"], { cwd: wt2, encoding: "utf8" });
+    assert.notEqual(mg.status, 0, "phải xung đột ở src/b.ts như reconcile đã báo");
+    put(path.join(wt2, "src", "b.ts"), "export const b = 4;\n");
+    g(wt2, "add", "src/b.ts");
+    g(wt2, "commit", "--no-edit");
+    g(wt2, "push", "origin", "claude/t2");
+    const r2b = await ai(repo, "ready", "m1", "t2");
+    assert.equal(r2b.code, 0, r2b.text);
+
     // ── DỌN: chạy thử trước, rồi làm thật ──
     const cdry = await ai(repo, "cleanup", "m1:t1");
     assert.equal(cdry.code, 0, cdry.text);
@@ -618,6 +664,15 @@ async function testLifecycle() {
     g(repo, "fetch", "--prune", "origin");
     st = await ai(repo, "status", "m1");
     assert.match(st.text, /MERGED .*t1/, "việc xong không được thành ORPHANED sau khi mọi nhánh đã dọn");
+
+    // ── PHIÊN KHÁC DỰNG LẠI wt-t1 CHO VIỆC CỦA HỌ: không phải cây của t1, không nhận phiếu của t1 ──
+    g(repo, "worktree", "add", "-b", "viec-khac", wt1, "origin/main");
+    const reuse = await ai(repo, "spawn", "m1", "t1");
+    assert.equal(reuse.code, 1, reuse.text);
+    assert.equal(readManifest(wt1), null, "không bao giờ ghi phiếu vào cây của phiên khác");
+    const cm = await ai(repo, "cleanup", "--merged", "--apply");
+    assert.ok(existsSync(wt1), "cleanup --merged chỉ chọn cây CÓ phiếu");
+    assert.ok(!cm.text.includes("wt-t1"));
 
     // Chưa vào thì không dọn.
     const c3 = await ai(repo, "cleanup", "m1:t2", "--apply");
@@ -642,7 +697,7 @@ async function testLifecycle() {
     const census = JSON.parse((await ai(repo, "worktrees", "--json")).text) as { path: string; class: string; owner: unknown }[];
     const byName = (n: string) => census.find((c) => path.basename(c.path) === n);
     assert.equal(byName("kho")?.class, "MAIN");
-    assert.equal(byName("wt-cu")?.class, "MERGED_SAFE_TO_CLEAN");
+    assert.equal(byName("wt-cu")?.class, "ACTIVE", "cây lạ vừa dựng, 0 commit: đang được dùng, không phải rác (reviewer)");
     assert.equal(byName("wt-cu")?.owner, null);
     assert.equal(byName("wt-t2")?.class, "ACTIVE");
     assert.deepEqual(byName("wt-t2")?.owner, { mission: "m1", task: "t2" });

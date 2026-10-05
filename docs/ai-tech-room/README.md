@@ -128,10 +128,16 @@ mục 9 đã có), **điểm nóng** và **sàn rủi ro**:
 
 **Bằng chứng đã vào** (`mergeEvidence`), mạnh tới yếu — không có thì coi là CHƯA vào:
 
-- `ANCESTOR` — đầu nhánh là tổ tiên của nhánh tích hợp (merge thường / fast-forward);
+- `ANCESTOR` — nhánh có commit RIÊNG và đầu nhánh là tổ tiên của nhánh tích hợp (merge commit);
 - `PR_SUBJECT` — nhánh tích hợp có commit kết thúc bằng `(#<pr>)`, dấu squash-merge của kho này;
 - `PR_MERGED` — GitHub nói PR đã merge (khi gọi `--github`);
 - `CONTENT` — mọi tệp nhánh đã đổi đều **giống hệt** ở nhánh tích hợp (squash không ghi số PR).
+
+"Commit riêng" = commit trên chuỗi first-parent của nhánh mà không nằm trên chuỗi first-parent
+của nhánh tích hợp. Worker chưa commit gì mà fast-forward lên `main` thì có 0 commit riêng ⇒
+`EMPTY`, không bao giờ là "đã vào" (reviewer tái hiện lỗi này ở bản đầu: cây bị dọn dưới chân
+phiên đang chạy). Hệ quả: tích hợp bằng **fast-forward** không được nhận là đã vào — PR của kho
+merge bằng squash/merge commit, còn Lead tích hợp cục bộ thì dùng `git merge --no-ff`.
 
 Đã vào thì git thắng: một `decision: BLOCKED` cũ không giữ được việc đã MERGED. Khi dọn cây, bằng
 chứng được ghi vào `run.mergedEvidence` — sau khi GitHub tự xoá nhánh thì đó là dấu vết duy nhất.
@@ -203,7 +209,9 @@ Phiếu (`renderBrief`) là hợp đồng, AGENTS.md vẫn thắng phiếu:
   Lead quyết: mở rộng `owns`, tạo việc mới, tuần tự hoá, tự sửa hợp đồng chung tại chỗ, hay từ chối;
 - `npm ci` lần đầu; chạy `tests` của phiếu + `npm run typecheck` + `npm run lint` (bộ đầy đủ
   `npm test` chạy ở cổng PR — worker không phải chứng minh cả kho);
-- commit tiếng Việt, chỉ tệp của việc, rồi `git push -u origin <nhánh>`;
+- commit tiếng Việt, chỉ tệp của việc, rồi `git push -u origin <nhánh>`. Không tên model AI — kể cả
+  dòng `Co-Authored-By` mà công cụ tự chèn: xoá **trước** khi đẩy; không bao giờ đẩy đè (dogfood
+  05/10/2026: cả hai worker phải amend + force-push nhánh của mình vì đúng chỗ này);
 - **không** mở PR, merge, deploy, đụng `main`, sửa `.ai/`, hay vào cây khác;
 - báo cáo cuối: XONG/CHẶN · SHA · lệnh kiểm thử + kết quả · tệp đã đổi · rủi ro còn lại.
 
@@ -252,11 +260,14 @@ npm run ai -- cleanup --merged --apply     # mọi cây CÓ PHIẾU đủ điề
 
 Từ chối (mỗi lý do một mã): `MAIN` · `CURRENT` · `LOCKED` · `PRUNABLE` · `DIRTY` · `UNKNOWN` ·
 `NOT_MERGED` · `UNPUSHED` (commit không có trên bất kỳ ref remote nào và chưa nằm trong nhánh tích
-hợp) · `EMPTY_BUT_RECENT` · `UNOWNED` · `UNOWNED_RECENT`. Không có cờ nào bỏ qua được bẩn / chưa đẩy.
+hợp) · `LOCAL_SECRETS` (tệp `.env*` bị ignore — `worktree remove` xoá cả chúng) · `RECENT` (có
+người động vào trong `cleanupGraceMinutes` phút, mặc định 30 — bằng chứng merge nói về commit, không
+nói ai còn đứng trong cây) · `EMPTY_BUT_RECENT` · `UNOWNED` · `UNOWNED_RECENT`. Không có cờ nào bỏ
+qua được bẩn / chưa đẩy / bí mật cục bộ.
 
 Làm: `git worktree remove` **không `--force`** (git tự từ chối nếu cây vừa bẩn lên giữa lúc đo và
-lúc làm) → `git branch -D` nhánh cục bộ (an toàn vì đã chứng minh mọi commit có trên remote hoặc
-trong nhánh tích hợp) → ghi `cleanedAt` + bằng chứng. **Nhánh trên remote giữ nguyên** — GitHub tự
+lúc làm) → `git update-ref -d refs/heads/<nhánh> <SHA đã đo>` (so-và-xoá: worker commit thêm giữa
+lúc đo và lúc xoá thì nhánh được giữ) → ghi `cleanedAt` + bằng chứng. **Nhánh trên remote giữ nguyên** — GitHub tự
 xoá sau merge nếu kho bật, còn không thì đó là quyết định của chủ shop.
 
 `npm run ai -- worktrees` phân loại mọi cây trên máy: `MAIN · CURRENT · ACTIVE · IDLE ·

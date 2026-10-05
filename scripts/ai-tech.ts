@@ -96,6 +96,12 @@ export type MergeEvidence =
   | "EMPTY"; // nhánh không có commit nào ngoài gốc — không có gì để mất, cũng không có gì đã làm
 
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
+/**
+ * Tên ref đưa vào tham số git: không bắt đầu bằng `-` (nếu không `--all` thành một CỜ), không
+ * `HEAD` (đo theo cây đang đứng chứ không theo nhánh tích hợp), không `..`.
+ */
+export const REF_RE = /^(?!-)(?!HEAD$)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
+const SHA_RE = /^[0-9a-f]{40}$/;
 const MANIFEST_FILE = "ai-tech-task.json";
 
 /* ═════════════ 2 · KIỂU DỮ LIỆU ═════════════ */
@@ -168,6 +174,8 @@ export type Config = {
   worktreePrefix: string;
   activeWithinHours: number;
   staleAfterDays: number;
+  /** Mọi lượt dọn chờ ít nhất chừng này phút sau lần cuối có người động vào cây. */
+  cleanupGraceMinutes: number;
   hotspots: Hotspot[];
   riskFloor: RiskFloor[];
 };
@@ -180,6 +188,7 @@ export const DEFAULT_CONFIG: Config = {
   worktreePrefix: "wt-",
   activeWithinHours: 24,
   staleAfterDays: 7,
+  cleanupGraceMinutes: 30,
   hotspots: [],
   riskFloor: [],
 };
@@ -281,7 +290,7 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
   const c: Config = { ...DEFAULT_CONFIG, hotspots: [], riskFloor: [] };
   if (raw === undefined) return { config: c, errors };
   if (!isObj(raw)) return { config: c, errors: ["config: phải là một object JSON"] };
-  const num = (k: "maxImplementationWorkers" | "activeWithinHours" | "staleAfterDays", min: number, max: number) => {
+  const num = (k: "maxImplementationWorkers" | "activeWithinHours" | "staleAfterDays" | "cleanupGraceMinutes", min: number, max: number) => {
     if (raw[k] === undefined) return;
     const v = raw[k];
     if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) errors.push(`config.${k}: số nguyên ${min}–${max}`);
@@ -290,9 +299,10 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
   num("maxImplementationWorkers", 0, 8);
   num("activeWithinHours", 1, 24 * 14);
   num("staleAfterDays", 1, 365);
+  num("cleanupGraceMinutes", 0, 24 * 60);
   for (const k of ["remote", "integrationRef"] as const) {
     if (raw[k] === undefined) continue;
-    if (!isStr(raw[k]) || !/^[A-Za-z0-9._/-]+$/.test(raw[k] as string)) errors.push(`config.${k}: tên ref không hợp lệ`);
+    if (!isStr(raw[k]) || !REF_RE.test(raw[k] as string)) errors.push(`config.${k}: tên ref không hợp lệ`);
     else c[k] = raw[k] as string;
   }
   if (raw.branchPrefix !== undefined) {
@@ -414,7 +424,7 @@ export function validateMission(raw: unknown, cfg: Config): Validation {
   if (!isStr(raw.id) || !SLUG_RE.test(raw.id)) errors.push(`id: phải khớp ${SLUG_RE} (chữ thường, số, gạch ngang)`);
   if (!isStr(raw.title)) errors.push("title: bắt buộc");
   if (!isStr(raw.goal)) errors.push("goal: bắt buộc");
-  if (raw.integrationRef !== undefined && (!isStr(raw.integrationRef) || !/^[A-Za-z0-9._/-]+$/.test(raw.integrationRef)))
+  if (raw.integrationRef !== undefined && (!isStr(raw.integrationRef) || !REF_RE.test(raw.integrationRef)))
     errors.push("integrationRef: tên ref không hợp lệ");
   if (raw.maxWorkers !== undefined) {
     const v = raw.maxWorkers;
@@ -629,7 +639,8 @@ export function deriveTaskStatus(task: Task, facts: TaskFacts, depStatus: Readon
   if (d?.state === "DONE") return { status: "DONE", why: d.evidence };
   if (facts.merged && facts.merged !== "EMPTY") {
     if (task.deploy) return { status: "DEPLOYED", why: `${task.deploy.sha.slice(0, 7)} · ${task.deploy.evidence}` };
-    return { status: "MERGED", why: `bằng chứng ${facts.merged}` };
+    const left = facts.dirty > 0 ? ` · cây còn ${facts.dirty} thay đổi chưa commit` : facts.localBranch && facts.remoteBranch && !facts.pushed ? " · nhánh cục bộ có commit mới hơn remote" : "";
+    return { status: "MERGED", why: `bằng chứng ${facts.merged}${left}` };
   }
   if (d?.state === "BLOCKED") return { status: "BLOCKED", why: `[${d.category}] ${d.reason}` };
   if (d?.state === "DEFERRED") return { status: "DEFERRED", why: d.reason };
@@ -645,8 +656,10 @@ export function deriveTaskStatus(task: Task, facts: TaskFacts, depStatus: Readon
       }
       return { status: "REVIEW", why: `đã đẩy ${facts.commits} commit${facts.behind ? ` · sau nhánh tích hợp ${facts.behind}` : ""}` };
     }
-    if (facts.remoteBranch && facts.commits > 0)
+    if (facts.remoteBranch && facts.commits > 0 && (facts.pushed || !facts.localBranch))
       return { status: "REVIEW", why: `cây đã gỡ, nhánh còn trên remote (${facts.commits} commit)` };
+    if (facts.localBranch && facts.remoteBranch && facts.commits > 0)
+      return { status: "ORPHANED", why: "cây đã mất, nhánh cục bộ có commit CHƯA lên remote — đẩy nhánh trước khi làm gì khác" };
     if (facts.localBranch && facts.commits > 0)
       return { status: "ORPHANED", why: "cây đã mất, nhánh CHỈ còn ở máy này và chưa lên remote — đẩy nhánh hoặc dựng lại cây" };
     return { status: "ORPHANED", why: "tệp khai có lượt chạy nhưng git không còn cây lẫn nhánh — đối chiếu rồi xoá `run` hoặc dựng lại" };
@@ -788,7 +801,15 @@ export type WorktreeFacts = {
   uniqueLocal: number;
   merged: MergeEvidence | null;
   idleHours: number | null;
+  /**
+   * Tệp `.env*` bị git BỎ QUA nằm trong cây — `git worktree remove` không `--force` vẫn xoá chúng
+   * (đo bởi reviewer 05/10/2026). Đó thường là bí mật chỉ có ở máy này, không có bản nào khác.
+   */
+  localSecrets: string[];
 };
+
+/** Bằng chứng mà việc của nhánh thật sự đã vào (EMPTY = không có việc gì riêng để vào). */
+const isRealMerge = (m: MergeEvidence | null): boolean => m !== null && m !== "EMPTY";
 
 export function classifyWorktree(f: WorktreeFacts, cfg: Config): { cls: WorktreeClass; note: string } {
   if (f.isMain) return { cls: "MAIN", note: "cây chính — không bao giờ dọn" };
@@ -798,9 +819,11 @@ export function classifyWorktree(f: WorktreeFacts, cfg: Config): { cls: Worktree
   const stale = f.idleHours >= cfg.staleAfterDays * 24;
   const idle = `${Math.round(f.idleHours)} giờ không động`;
   if (f.dirty > 0) return stale ? { cls: "STALE_DIRTY", note: `${f.dirty} thay đổi chưa commit · ${idle} — CHỈ BÁO, không dọn` } : { cls: "ACTIVE", note: `${f.dirty} thay đổi chưa commit` };
-  if (f.merged && f.merged !== "EMPTY" && f.uniqueLocal === 0) return { cls: "MERGED_SAFE_TO_CLEAN", note: `đã vào (${f.merged}) · sạch · mọi commit đều có trên remote` };
-  if (f.merged === "ANCESTOR") return { cls: "MERGED_SAFE_TO_CLEAN", note: "đầu nhánh đã nằm trong nhánh tích hợp · sạch" };
-  if (f.idleHours < cfg.activeWithinHours) return { cls: "ACTIVE", note: idle };
+  if (f.idleHours < cfg.activeWithinHours) return { cls: "ACTIVE", note: `${idle}${isRealMerge(f.merged) ? ` · đã vào (${f.merged})` : ""}` };
+  const secrets = f.localSecrets.length ? ` · có ${f.localSecrets.join(", ")} chỉ ở máy này` : "";
+  if (isRealMerge(f.merged) && (f.uniqueLocal === 0 || f.merged === "ANCESTOR"))
+    return { cls: "MERGED_SAFE_TO_CLEAN", note: `đã vào (${f.merged}) · sạch · không commit nào chỉ ở máy này · ${idle}${secrets}` };
+  if (f.merged === "EMPTY") return { cls: "MERGED_SAFE_TO_CLEAN", note: `không có commit riêng nào · sạch · ${idle}${secrets}` };
   const unpushed = f.uniqueLocal > 0 ? ` · ${f.uniqueLocal} commit CHƯA lên remote` : "";
   if (stale) return { cls: "STALE_CLEAN", note: `${idle}${unpushed}` };
   return { cls: "IDLE", note: `${idle}${unpushed}` };
@@ -822,11 +845,20 @@ export function cleanupDecision(f: WorktreeFacts, cfg: Config, opts: { allowUnow
   if (f.merged === null) r.push("NOT_MERGED: không có bằng chứng đã vào nhánh tích hợp");
   if (f.uniqueLocal !== 0 && f.merged !== "ANCESTOR")
     r.push(f.uniqueLocal < 0 ? "UNPUSHED?: không đo được commit chưa lên remote" : `UNPUSHED: ${f.uniqueLocal} commit chỉ có ở máy này`);
-  const recent = f.idleHours === null || f.idleHours < cfg.activeWithinHours;
-  if (f.merged === "EMPTY" && recent) r.push("EMPTY_BUT_RECENT: chưa có commit nào nhưng vừa được dùng — có thể worker mới bắt đầu");
+  if (f.localSecrets.length) r.push(`LOCAL_SECRETS: ${f.localSecrets.join(", ")} bị git bỏ qua và sẽ mất cùng cây — chuyển đi trước`);
+  /*
+    MỌI lượt dọn đều chờ một khoảng sau lần cuối có người động vào cây. Bằng chứng merge nói về
+    COMMIT, không nói ai còn đang đứng trong cây: `worktree remove` xoá cả `node_modules` và tệp
+    bị bỏ qua dưới chân một phiên đang chạy.
+  */
+  const idleMin = f.idleHours === null ? null : f.idleHours * 60;
+  const recentGrace = idleMin === null || idleMin < cfg.cleanupGraceMinutes;
+  const recentDay = f.idleHours === null || f.idleHours < cfg.activeWithinHours;
+  if (recentGrace) r.push(`RECENT: cây vừa được động trong ${cfg.cleanupGraceMinutes} phút qua — đợi phiên đang giữ nó dừng`);
+  else if (f.merged === "EMPTY" && recentDay) r.push("EMPTY_BUT_RECENT: chưa có commit riêng nào nhưng vừa được dùng — có thể worker mới bắt đầu");
   if (!f.owner) {
     if (!opts.allowUnowned) r.push("UNOWNED: cây không có phiếu giao việc của AI Tech Room — không biết ai đang giữ (thêm --allow-unowned nếu chủ shop cho phép)");
-    else if (recent) r.push("UNOWNED_RECENT: cây không rõ chủ và vừa được dùng trong " + cfg.activeWithinHours + " giờ qua");
+    else if (recentDay) r.push("UNOWNED_RECENT: cây không rõ chủ và vừa được dùng trong " + cfg.activeWithinHours + " giờ qua");
   }
   return { ok: r.length === 0, refusals: r, deleteBranch: r.length === 0 && f.branch !== null };
 }
@@ -944,7 +976,11 @@ export function readManifest(worktree: string): Manifest | null {
   if (!dir) return null;
   try {
     const m = JSON.parse(readFileSync(path.join(dir, MANIFEST_FILE), "utf8")) as Manifest;
-    return m && m.schema === 1 && m.mission && m.task ? m : null;
+    // Phiếu là đầu vào của lời gọi git ⇒ kiểm như đầu vào lạ: ref và SHA phải đúng dạng.
+    const ok =
+      isObj(m) && m.schema === 1 && isObj(m.mission) && isObj(m.task) && SLUG_RE.test(String(m.mission.id)) && SLUG_RE.test(String(m.task.id)) &&
+      REF_RE.test(String(m.integrationRef)) && SHA_RE.test(String(m.baseSha));
+    return ok ? m : null;
   } catch {
     return null;
   }
@@ -992,24 +1028,62 @@ const countRange = (cwd: string, range: string[]): number => {
   return v === null ? -1 : Number(v);
 };
 
+const lines = (v: string | null): string[] => (v ?? "").split(/\r?\n/).filter(Boolean);
+
+/**
+ * Commit RIÊNG của việc: commit trên chuỗi first-parent của nhánh (từ gốc tới đầu) mà KHÔNG nằm
+ * trên chuỗi first-parent của nhánh tích hợp.
+ *
+ * Vì sao không phải `gốc..đầu`: worker chưa commit gì mà `git merge origin/main` (fast-forward)
+ * thì `gốc..đầu` toàn là commit của main, và đầu nhánh thành tổ tiên của main — trước bản sửa này
+ * việc đó bị coi là ĐÃ VÀO và cây bị dọn dưới chân phiên đang chạy (reviewer tái hiện 05/10/2026).
+ * Ngược lại, khi nhánh vào bằng merge commit, commit của nó nằm ở nhánh cha THỨ HAI của main nên
+ * không thuộc chuỗi first-parent của main. Hệ quả có chủ đích: tích hợp bằng fast-forward bị coi
+ * là "không có việc riêng" — kho này merge qua PR (squash / merge commit), và Lead tích hợp cục
+ * bộ phải dùng `--no-ff`.
+ */
+export function ownCommits(cwd: string, tip: string, ref: string, baseSha?: string): string[] | null {
+  const base = baseSha ?? gitTry(cwd, ["merge-base", tip, ref]);
+  if (!base) return null;
+  const mine = gitTry(cwd, ["rev-list", "--first-parent", `${base}..${tip}`]);
+  if (mine === null) return null;
+  const mainline = new Set(lines(gitTry(cwd, ["rev-list", "--first-parent", `${base}..${ref}`])));
+  return lines(mine).filter((c) => !mainline.has(c));
+}
+
 /**
  * Bằng chứng đã vào `ref`. Thứ tự từ mạnh tới yếu; trả `null` khi không chứng minh được — và
  * `null` nghĩa là KHÔNG DỌN, kể cả khi thực ra đã vào. Báo thiếu ở đây an toàn, báo thừa thì không.
  */
 export function mergeEvidence(cwd: string, tip: string | null, ref: string, opts: { baseSha?: string; pr?: number } = {}): MergeEvidence | null {
-  if (!tip) return null;
-  const own = opts.baseSha ? countRange(cwd, [`${opts.baseSha}..${tip}`]) : -1;
-  if (opts.baseSha && own === 0) return "EMPTY";
+  if (!tip || !REF_RE.test(ref)) return null;
+  const own = ownCommits(cwd, tip, ref, opts.baseSha);
+  if (own === null) return null;
+  if (own.length === 0) return "EMPTY";
   if (gitRun(cwd, ["merge-base", "--is-ancestor", tip, ref]).code === 0) return "ANCESTOR";
   if (opts.pr) {
     const hit = gitTry(cwd, ["log", "-n", "2000", "--format=%s", "--fixed-strings", `--grep=(#${opts.pr})`, ref]);
-    if (hit && hit.split(/\r?\n/).some((s) => s.trimEnd().endsWith(`(#${opts.pr})`))) return "PR_SUBJECT";
+    if (hit && lines(hit).some((s) => s.trimEnd().endsWith(`(#${opts.pr})`))) return "PR_SUBJECT";
   }
   const mb = gitTry(cwd, ["merge-base", tip, ref]);
   if (!mb) return null;
-  const files = (gitTry(cwd, ["diff", "--name-only", "--no-renames", mb, tip]) ?? "").split(/\r?\n/).filter(Boolean);
-  if (files.length === 0 || files.length > 300) return null;
-  return gitRun(cwd, ["diff", "--quiet", tip, ref, "--", ...files]).code === 0 ? "CONTENT" : null;
+  const mine = lines(gitTry(cwd, ["diff", "--name-only", "--no-renames", mb, tip]));
+  if (mine.length === 0) return null;
+  // Không truyền danh sách tệp làm pathspec: vài trăm đường dẫn dài vượt trần 32K ký tự dòng lệnh Windows.
+  const differ = gitTry(cwd, ["diff", "--name-only", "--no-renames", tip, ref]);
+  if (differ === null) return null;
+  const d = new Set(lines(differ));
+  return mine.every((f) => !d.has(f)) ? "CONTENT" : null;
+}
+
+/** Tệp `.env*` bị git bỏ qua trong cây (sẽ mất cùng cây — không có bản nào khác). */
+export function localSecretsOf(worktree: string): string[] {
+  const r = gitRun(worktree, ["--no-optional-locks", "status", "--porcelain", "--ignored", "--untracked-files=normal"]);
+  if (r.code !== 0) return [];
+  return lines(r.out)
+    .filter((l) => l.startsWith("!! "))
+    .map((l) => l.slice(3).replace(/^"|"$/g, ""))
+    .filter((f) => /(^|\/)\.env[^/]*$/.test(f));
 }
 
 /* ═════════════ 9 · NGỮ CẢNH KHO ═════════════ */
@@ -1070,9 +1144,12 @@ export function gatherTaskFacts(ctx: RepoCtx, m: Mission, t: Task, wts: readonly
   const tip = local ?? remote;
   if (!tip && t.run.cleanedAt && t.run.mergedEvidence)
     return { ...NO_FACTS, tip: t.run.mergedTip ?? null, merged: t.run.mergedEvidence, commits: 1 };
-  const wt = wts.find((w) => samePath(w.path, t.run?.worktree ?? "") && !w.prunable);
+  // Cây của việc = ĐÚNG đường dẫn VÀ ĐÚNG nhánh. Một phiên khác dựng lại `wt-<slug>` cho việc của
+  // họ sau khi cây cũ đã dọn thì đó KHÔNG phải cây của việc này — và không được nhận phiếu của nó.
+  const wt = wts.find((w) => samePath(w.path, t.run?.worktree ?? "") && w.branch === b && !w.prunable);
   const dirty = wt ? dirtyCount(wt.path).n : 0;
-  const commits = tip ? countRange(ctx.top, [`${t.run.baseSha}..${tip}`]) : 0;
+  // Commit RIÊNG, không phải baseSha..tip: commit của main mà worker merge vào không phải việc của nó.
+  const commits = tip ? (ownCommits(ctx.top, tip, ref, t.run.baseSha)?.length ?? 0) : 0;
   const behind = tip && gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", ref]) ? countRange(ctx.top, [`${tip}..${ref}`]) : 0;
   return {
     localBranch: local !== null,
@@ -1107,6 +1184,7 @@ export function gatherWorktreeFacts(ctx: RepoCtx, e: WorktreeEntry, now: number)
     uniqueLocal,
     merged: e.prunable ? null : mergeEvidence(ctx.top, tip, ref, { baseSha: manifest?.baseSha }),
     idleHours: e.prunable ? null : idleHoursOf(e.path, d.files, now),
+    localSecrets: e.prunable ? [] : localSecretsOf(e.path),
   };
 }
 
@@ -1173,7 +1251,7 @@ ${t.integrationNotes ?? "(không)"}
 1. Chỉ làm trong cây trên. Đọc \`AGENTS.md\` trước; luật nghiệp vụ ở đó thắng phiếu này.
 2. Chỉ sửa tệp trong phạm vi ĐƯỢC GHI. Cần sửa ngoài phạm vi (nhất là hợp đồng chung, \`db/schema.ts\`, \`drizzle/\`) ⇒ DỪNG, báo Lead "YÊU CẦU ĐỔI PHẠM VI: <tệp> — <vì sao>"; không tự sửa.
 3. Lần đầu vào cây: \`npm ci\`. Chạy kiểm thử của phiếu + \`npm run typecheck\` + \`npm run lint\` trước khi báo xong.
-4. Commit tiếng Việt có dấu, chỉ tệp của việc này (\`git add <tệp>\`, không \`git add -A\`). Không ghi tên model AI.
+4. Commit tiếng Việt có dấu, chỉ tệp của việc này (\`git add <tệp>\`, không \`git add -A\`). Không ghi tên model AI — kể cả dòng \`Co-Authored-By\` mà công cụ tự chèn: xoá nó TRƯỚC khi đẩy. Không bao giờ đẩy đè (\`--force\`) — đẩy sai thì commit sửa mới.
 5. \`git push -u ${"origin"} ${m.branch}\` khi xong. KHÔNG mở PR, KHÔNG merge, KHÔNG deploy, KHÔNG đụng \`main\` — Lead làm.
 6. Báo cáo cuối: XONG / CHẶN, SHA đã đẩy, lệnh kiểm thử đã chạy + kết quả, tệp đã đổi, rủi ro còn lại.
 7. Kiểm lại phạm vi trước khi báo xong: \`npm run ai -- ready ${m.mission.id} ${t.id}\` (chạy từ cây của Lead) hoặc \`git diff --name-only ${m.baseSha.slice(0, 12)}..HEAD\`.
@@ -1502,7 +1580,10 @@ function cmdReady(ctx: RepoCtx, id: string | undefined, taskId: string | undefin
   const ref = integrationRefOf(ctx, mission);
   const checks: { ok: boolean; label: string; fix?: string }[] = [];
   const tip = f.tip;
-  const changed = tip ? (gitTry(ctx.top, ["diff", "--name-only", "--no-renames", `${t.run.baseSha}..${tip}`]) ?? "").split(/\r?\n/).filter(Boolean) : [];
+  // merge-base..tip, KHÔNG baseSha..tip: worker đã merge main vào thì baseSha..tip gồm cả mọi tệp
+  // main đổi, và chính lời khuyên "git merge main" của lệnh này làm nó đỏ mãi (reviewer 05/10/2026).
+  const mbReady = tip ? gitTry(ctx.top, ["merge-base", tip, ref]) : null;
+  const changed = tip && mbReady ? lines(gitTry(ctx.top, ["diff", "--name-only", "--no-renames", mbReady, tip])) : [];
   checks.push({ ok: f.dirty === 0, label: `cây sạch (${f.dirty} thay đổi)`, fix: "commit hoặc bỏ thay đổi trong cây của việc" });
   checks.push({ ok: f.commits > 0, label: `${f.commits} commit của việc` });
   checks.push({ ok: f.pushed, label: "nhánh trên remote khớp cục bộ", fix: `git push -u ${ctx.config.remote} ${t.run.branch}` });
@@ -1571,7 +1652,7 @@ function cmdCleanup(ctx: RepoCtx, targets: string[], flags: Set<string>): number
     if (m) {
       const { mission } = requireMission(ctx, m[1]);
       const task = mission.tasks.find((x) => x.id === m[2]);
-      const w = task?.run ? wts.find((x) => samePath(x.path, task.run?.worktree ?? "")) : undefined;
+      const w = task?.run ? wts.find((x) => samePath(x.path, task.run?.worktree ?? "") && x.branch === task.run?.branch) : undefined;
       if (!w) throw new Error(`${t}: không thấy cây của việc này`);
       chosen.push(w);
       continue;
@@ -1590,7 +1671,7 @@ function cmdCleanup(ctx: RepoCtx, targets: string[], flags: Set<string>): number
       out(`  ✗ ${w.path}\n      ${d.refusals.join("\n      ")}`);
       continue;
     }
-    out(`  ✓ ${w.path} — git worktree remove${d.deleteBranch ? ` · git branch -D ${f.branch}` : ""}`);
+    out(`  ✓ ${w.path} — git worktree remove${d.deleteBranch ? ` · git update-ref -d refs/heads/${f.branch} ${short(f.head)}` : ""}`);
     if (!apply) continue;
     // Không --force: git tự từ chối nếu cây bẩn — lớp an toàn thứ hai, phòng khi trạng thái đổi giữa lúc đo và lúc làm.
     const rm = gitRun(ctx.top, ["worktree", "remove", w.path]);
@@ -1600,8 +1681,9 @@ function cmdCleanup(ctx: RepoCtx, targets: string[], flags: Set<string>): number
       continue;
     }
     if (d.deleteBranch && f.branch) {
-      // -D an toàn ở đây VÌ đã chứng minh: mọi commit có trên remote hoặc đã nằm trong nhánh tích hợp.
-      const br = gitRun(ctx.top, ["branch", "-D", f.branch]);
+      // Xoá có SO SÁNH: chỉ xoá nếu nhánh vẫn đứng ĐÚNG ở SHA đã đo. Worker commit thêm giữa lúc đo
+      // và lúc xoá (cây vẫn sạch nên `worktree remove` cho qua) thì lệnh này từ chối, commit còn nguyên.
+      const br = f.head ? gitRun(ctx.top, ["update-ref", "-d", `refs/heads/${f.branch}`, f.head]) : { code: 1, out: "", err: "không có SHA đã đo" };
       out(br.code === 0 ? `      đã xoá nhánh cục bộ ${f.branch} (nhánh trên remote GIỮ NGUYÊN)` : `      giữ nhánh ${f.branch}: ${br.err}`);
     }
     if (f.owner) markCleaned(ctx, f.owner.mission, f.owner.task, f);
@@ -1615,7 +1697,7 @@ function markCleaned(ctx: RepoCtx, missionId: string, taskId: string, f: Worktre
   if (!existsSync(file)) return;
   const raw = JSON.parse(readFileSync(file, "utf8")) as { tasks?: { id?: string; run?: Record<string, unknown> }[] };
   const t = raw.tasks?.find((x) => x.id === taskId);
-  if (!t?.run) return;
+  if (!t?.run || typeof t.run.worktree !== "string" || !samePath(t.run.worktree, f.path) || t.run.branch !== f.branch) return;
   t.run.cleanedAt = new Date().toISOString();
   if (f.head) t.run.mergedTip = f.head;
   if (f.merged && f.merged !== "EMPTY") t.run.mergedEvidence = f.merged;
