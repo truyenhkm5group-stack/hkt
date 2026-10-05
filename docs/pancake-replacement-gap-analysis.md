@@ -66,10 +66,10 @@ Trạng thái: **EXISTS** · **PARTIAL** · **MISSING** · **IN_PROGRESS_ELSEWHE
 | 1 | **Kiểm soát AI ↔ người trên hội thoại**: chặn bot gửi câu đã soạn khi người vừa trả lời / tiếp quản; chế độ hội thoại HUMAN · COPILOT · AUTO; Tiếp quản / Trả lại AI; nhật ký trước → sau + lý do | Tiêu chí nghiệm thu 14–17 («không double reply»), là lỗi thật đang chạy trên mọi kênh | XONG (nhánh) — kèm sửa `bump` xoá mất `state.control` giữa lượt AI |
 | 2 | Hộp thư dùng được trên điện thoại (cột khách / đơn / ghi chú) | Tiêu chí 27; tệp `thread-view.tsx` không nhánh nào đang sửa | XONG (nhánh) — đo trên Chrome 390 px; hàng lọc danh sách tràn ngang thuộc P13 của `wt-master-mission` |
 | 3 | Vòng đời token Meta: nhận lỗi 190 / thu hồi ⇒ kết nối «cần nối lại», báo người; ngắt kết nối gỡ đăng ký | §4 lệnh | XONG phần một kết nối (nhánh). Còn: ghi theo TỪNG page khi P12 vào main; gỡ đăng ký webhook lúc ngắt |
-| 4 | Hộp thư: «tải thêm», lọc AI / người | §7 lệnh | — |
-| 5 | Sức khoẻ webhook Meta | §22 lệnh | — |
+| 4 | Hộp thư: «tải thêm», lọc AI / người | §7 lệnh | «Xem thêm» + lọc SĐT / level / thời gian / nhân viên do #595 (đã vào main); lọc «AI đang trả lời / Người đang xử lý»: XONG (nhánh) |
+| 5 | Sức khoẻ webhook Meta | §22 lệnh | XONG (nhánh) — log có cấu trúc; chưa có màn hình sức khoẻ theo page (chờ P12) |
 | 6 | Đơn / khách truy về hội thoại; Customer 360 thấy hội thoại | §12, §14 lệnh | XONG (nhánh). KHÔNG ghi `orders.page_id` (đi vào quy kết marketer / hoa hồng — chủ shop quyết); đơn truy về page qua hội thoại |
-| 7 | Pancake về «Legacy / chuyển đổi» + hướng dẫn chuyển | §17 lệnh; sau P9 để không đụng `go-live-card` | — |
+| 7 | Pancake về «Legacy / chuyển đổi» + hướng dẫn chuyển | §17 lệnh; sau P9 để không đụng `go-live-card` | XONG phần trang Kết nối (nhánh); ô onboarding là P9 của `wt-master-mission` |
 | 8 | Đồng bộ hội thoại cũ Messenger | Sau `hop-thu-lich-su` | CHỜ |
 
 ## 4. Nhật ký quyết định
