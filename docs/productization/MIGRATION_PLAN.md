@@ -189,6 +189,27 @@ flowchart LR
   danh tính, và chỉ số theo người vẫn `UNAVAILABLE` cho hội thoại đó.
 - **Cổng người:** dùng thử với một nhân viên HSLC trước khi khuyến nghị cho tenant khác.
 
+**Đã làm (05/10/2026, chủ shop: «làm tốt hơn Pancake»)** — `lib/sales-chatbot/inbox.ts`, màn `/ai/sales-chatbot/inbox`,
+migration `0209_sales_inbox`:
+- Một danh sách cho mọi kênh (Facebook / Instagram qua Pancake hoặc Messenger trực tiếp · Zalo OA · chat web). Bộ lọc
+  «Chờ trả lời» xếp khách chờ LÂU NHẤT lên đầu và tính cả tin nhân viên trả lời ngoài ERP; «Cần người» · «Của tôi» · «Chưa ai nhận».
+- Trả lời đi qua ĐÚNG hàm gửi của kênh (`sendBotText` · `sendZaloText`) với dấu `staff-out:` + `PAGE_REPLY` — mọi chỗ đang
+  hiểu «page đã trả lời» hiểu đúng; tiếng vọng của kênh được nhận ra, không thành tin thứ hai. Không dựng `ChannelAdapter` mới.
+- Quy kết: bảng `sales_chat_staff_messages` (một dòng mỗi lượt «Gửi», `users.id` + tên máy chủ đọc, SENT / FAILED); sự kiện
+  `human.replied` + `human.took_over` mang `actor_user_id` (màn «Hiệu quả» đã đọc hai loại này). Chưa thêm `handoff.accepted`
+  (cần nới CHECK — việc sau, khi đo thời gian nhận handoff).
+- Hội thoại có người cầm (`assignee_user_id`): nhận · bỏ nhận · người quản lý giao lại. Bot nhường khi nhân viên gửi, tự nhận
+  lại sau 30 phút như khi nhân viên trả lời ngoài ERP; «Trả lại cho AI» ngay trong hộp thư.
+- Khung gửi của kênh hiện trên màn: Messenger 24 giờ (quá ⇒ cảnh báo), Zalo 48 giờ miễn phí → tin tính phí phải xác nhận →
+  quá 7 ngày không gửi.
+- AI gợi ý câu trả lời (Copilot, không gửi) — gợi ý lưu ở `sales_copilot_suggestions` nên màn Copilot đo được nhân viên gửi
+  nguyên văn / sửa / bỏ.
+- Cạnh khung chat: đơn cũ của khách với KẾT QUẢ THẬT theo `ORDER_OUTCOME` và form tạo đơn (P5).
+- Quyền: đọc `ai_sales:view`; trả lời `ai_sales:reply` (khoá mới trong module AI bán hàng — CS / trưởng nhóm / quản lý mặc
+  định có) hoặc `outreach:send`.
+
+**Chưa làm:** gửi ẢNH từ hộp thư (chỉ chữ); nguồn việc `SALES_HANDOFF` trên `/work`; nhãn / ghi chú nội bộ của hội thoại.
+
 ## M9 · Gia cố nền tảng cho > 5 tenant
 
 Không cần cho 2–5 tenant pilot; bắt buộc trước khi bán đại trà.

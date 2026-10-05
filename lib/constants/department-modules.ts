@@ -134,6 +134,14 @@ export const NAV_MODULES = [
     permission: "orders:read",
     why: "Sổ đơn là kết quả của khâu chốt đơn; người sửa một đơn sai địa chỉ là người gọi được khách.",
   },
+  // Hộp thư khách (M8 · 0209): nhân viên đọc và trả lời khách Facebook / Instagram / Zalo / chat web ngay trong ERP.
+  {
+    href: "/ai/sales-chatbot/inbox",
+    label: "Hộp thư khách",
+    zone: "SALES",
+    permission: "ai_sales:view",
+    why: "Người bán trả lời khách ở một chỗ cho mọi kênh: thấy khách nào đang chờ lâu nhất, ai đang cầm hội thoại, đơn cũ của khách giao hay hoàn — và mỗi tin gửi đi mang tên người gửi.",
+  },
   // AI bán hàng (0180): chatbot trả lời khách của CHÍNH tổ chức — cấu hình, khung thử, hội thoại đã chat.
   {
     href: "/ai/sales-chatbot",

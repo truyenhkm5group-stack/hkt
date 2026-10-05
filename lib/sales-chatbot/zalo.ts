@@ -30,7 +30,7 @@ import { chunkText } from "@/lib/messaging/providers";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { COPILOT_NOTE, HUMAN_TAKEOVER_MINUTES, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
+import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 
@@ -58,6 +58,34 @@ export function zaloVisitorKey(oaId: string, userId: string): string {
 }
 
 const inboundId = (msgId: string) => `zalo:${msgId}`;
+
+/**
+ * Nhân viên gửi MỘT tin chữ cho khách Zalo TỪ HỘP THƯ ERP (0209 · lib/sales-chatbot/inbox.ts). Token qua `zaloAccessToken`
+ * (đã lo làm mới + khoá); dòng ghi sẵn `staff-out:` note `PAGE_REPLY` để tiếng vọng `oa_send_text` không thành «nhân viên gõ
+ * ngoài ERP». Cửa sổ 48 giờ / tin tính phí do lớp gọi quyết (`zaloWindow`) — hàm này chỉ gửi. Gửi hỏng ⇒ xoá dòng ghi sẵn.
+ */
+export async function sendZaloText(userId: string, text: string, mark: StaffMark, deps: ZaloDeps = {}): Promise<{ ok: true } | { ok: false; error: string; window: boolean }> {
+  const oa = await activeOa();
+  if (!oa) return { ok: false, error: "Kết nối Zalo OA chưa bật", window: false };
+  const token = await zaloAccessToken(deps);
+  if (!token.ok) return { ok: false, error: token.error, window: false };
+  const now = deps.now ?? (() => new Date());
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const pageId = zaloPageKey(oa.oaId);
+  const parts = chunkText(text, TEXT_MAX);
+  for (const [i, part] of parts.entries()) {
+    const rowId = staffOutRowId(mark, i);
+    await db.insert(t).values({ pageId, threadId: userId, messageId: rowId, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+    const sent = await zaloSendText({ accessToken: token.token, userId, text: part }, deps);
+    if (!sent.ok) {
+      await db.delete(t).where(eq(t.messageId, rowId));
+      const error = sent.window ? `${ZALO_OUTSIDE_WINDOW} (${sent.error})` : sent.error;
+      return { ok: false, error: i > 0 ? `${error} (đã gửi ${i}/${parts.length} đoạn)` : error, window: sent.window };
+    }
+  }
+  return { ok: true };
+}
 
 export type ZaloDepsAll = ZaloDeps & { sleep?: (ms: number) => Promise<void>; catchUp?: boolean };
 
@@ -122,7 +150,7 @@ export async function receiveZaloEvent(ev: ZaloEvent, now: Date = new Date()): P
     const [own] = await db
       .select({ id: t.id })
       .from(t)
-      .where(or(eq(t.messageId, inboundId(ev.msgId)), and(eq(t.pageId, pageId), eq(t.threadId, ev.userId), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - ECHO_WINDOW_MS)))))
+      .where(or(eq(t.messageId, inboundId(ev.msgId)), and(eq(t.pageId, pageId), eq(t.threadId, ev.userId), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - ECHO_WINDOW_MS))), erpStaffEchoCond(pageId, ev.userId, echo, now)))
       .limit(1);
     if (own) return { queued: false, reason: "Tin của chính bot" };
     if (!echo) return { queued: false, reason: "Tin OA không có chữ — không tính là trả lời" };
