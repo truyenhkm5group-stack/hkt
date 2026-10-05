@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/lib/auth/session";
+import { requirePermission, requireUser } from "@/lib/auth/session";
 import { clearPendingPages, loadPendingPages, MESSENGER_SETTINGS_PATH } from "@/lib/integrations/messenger/connect";
 import { connectMessengerPages, disconnectMessengerPage, setMessengerPagesAi } from "@/lib/sales-chatbot/messenger";
+import { savePageOverride } from "@/lib/sales-chatbot/page-config";
 
 /**
  * Nối các page NGƯỜI CHỌN trong danh sách vừa cấp quyền (danh sách + token niêm phong ở máy chủ, khoá theo tổ chức + người;
@@ -39,6 +40,14 @@ export async function setMessengerPagesAiAction(pageIds: unknown, aiEnabled: boo
   const user = await requirePermission("settings:manage");
   const ids = Array.isArray(pageIds) ? pageIds.filter((x): x is string => typeof x === "string") : [];
   const r = await setMessengerPagesAi(user, ids, aiEnabled === true);
+  if ("ok" in r) revalidatePath(MESSENGER_SETTINGS_PATH);
+  return r;
+}
+
+/** Cấu hình AI riêng của MỘT page (tên bot · lời chào · chỉ dẫn riêng); `null` = dùng lại cấu hình chung. */
+export async function savePageOverrideAction(pageId: unknown, input: { botName?: string; greeting?: string; extraInstructions?: string } | null): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  const r = await savePageOverride(user, pageId, input === null ? null : { botName: input?.botName ?? "", greeting: input?.greeting ?? "", extraInstructions: input?.extraInstructions ?? "" });
   if ("ok" in r) revalidatePath(MESSENGER_SETTINGS_PATH);
   return r;
 }

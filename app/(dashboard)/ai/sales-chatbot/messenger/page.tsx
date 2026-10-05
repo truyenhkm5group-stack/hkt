@@ -7,6 +7,8 @@ import { loadPendingPages, messengerRedirectUris } from "@/lib/integrations/mess
 import { messengerVerifyToken } from "@/lib/integrations/messenger/graph";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { messengerView } from "@/lib/sales-chatbot/messenger";
+import { loadPageOverrides } from "@/lib/sales-chatbot/page-config";
+import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { DisconnectButton, PageManager, PagePicker } from "./messenger-panel";
 
 export const metadata = { title: "Messenger trực tiếp" };
@@ -29,6 +31,8 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const manage = can(user, "settings:manage");
   const view = await messengerView();
+  const canConfig = can(user, SALES_CHATBOT_MANAGE);
+  const overrides = canConfig ? await loadPageOverrides() : {};
   const pending = manage && user.organization && one("chon") ? await loadPendingPages(user.organization.code, user.id) : null;
   const operator = platformOperatorDenial(user) === null;
   const error = one("loi") ? (one("loi") === "fb" ? one("msg") || "Facebook từ chối." : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")) : null;
@@ -50,7 +54,7 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
           <p className="text-sm text-muted-foreground">Nền tảng chưa cấu hình app Facebook (FACEBOOK_LOGIN_APP_ID / SECRET) — người vận hành cần khai trước.</p>
         ) : (
           <div className="space-y-3">
-            {view.pages.length ? <PageManager pages={view.pages} manage={manage} /> : null}
+            {view.pages.length ? <PageManager pages={view.pages} manage={manage} canConfig={canConfig} overrides={overrides} /> : null}
             {manage ? (
               <div className="flex flex-wrap items-center gap-3">
                 <a href="/api/connect/messenger/start" className="inline-flex h-9 items-center rounded-md bg-[#1877F2] px-4 text-sm font-semibold text-white hover:opacity-90" data-testid="messenger-connect">

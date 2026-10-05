@@ -68,7 +68,8 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
 | P10 | **Pancake qua API, webhook tuỳ chọn** (webhook Pancake tốn 2 slot) | yêu cầu bổ sung 05/10 | XONG (nhánh) | `pancake-poll-shared.ts`: mốc đồng bộ lưu CSDL, đọc cũ trước, lùi khi lỗi / 429, page yên hỏi thưa; webhook nếu có chỉ làm tin nhanh hơn |
 | P12 | **Nhiều Facebook page một tổ chức** (MP-1): nối nhiều page một lượt, token riêng từng page, AI bật / tạm dừng theo page (hàng loạt), sức khoẻ + gỡ từng page | yêu cầu bổ sung 05/10 | XONG (nhánh) | `org_channel_pages` (migration `0217`, chỉ THÊM), `docs/messaging-providers.md` §7. Tổ chức cũ không backfill |
 | P13 | Hộp thư chung + lọc một page, tên page trên hội thoại · chỉ số theo page (cùng công thức) | yêu cầu bổ sung 05/10 | XONG (nhánh) | `inboxPages`, `listInbox({ page })`, `onPage()` |
-| P14 | Cấu hình AI theo page · drill-down giữ page · Instagram quy về page cha | yêu cầu bổ sung 05/10 | KẾ TIẾP | `docs/messaging-providers.md` §7 «Còn lại» |
+| P14 | Cấu hình AI theo page (mặc định tổ chức ⇒ phần đè của page, danh sách trắng) | yêu cầu bổ sung 05/10 | XONG (nhánh) | `page-config-shared.ts`; bot đọc cấu hình đã gộp theo page của hội thoại |
+| P15 | Danh mục / giá / tồn riêng từng page · drill-down giữ page · Instagram quy về page cha khi lọc | yêu cầu bổ sung 05/10 | KẾ TIẾP | `docs/messaging-providers.md` §7 «Còn lại» |
 | P11 | Nhịp đọc API < 5 phút · lai Meta + Pancake «chỉ đọc» · `ChannelAdapter` chung · nhiều page | — | CHỜ | `docs/messaging-providers.md` §6 — một việc chờ chủ shop (lịch scheduler), một việc chờ bằng chứng ánh xạ PSID ↔ Pancake |
 
 ## 4. Nhật ký quyết định

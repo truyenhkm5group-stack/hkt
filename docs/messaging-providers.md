@@ -111,11 +111,18 @@ Nền tảng ─ platform_messenger_pages (page_id → tổ chức) — định 
 - **Chỉ số theo page**: `onPage(pageId)` (`events-sql.ts`) là chiều lọc DUY NHẤT cho màn «Hiệu quả», quy kết từng đơn, lý do
   mất khách, bán chéo, chi phí AI (theo `ref` = hội thoại). Cùng công thức ⇒ «mọi page» = cộng các page (bài kiểm).
 
+### Cấu hình AI theo page (P14)
+
+`lib/sales-chatbot/page-config-shared.ts`: page THỪA HƯỞNG cấu hình tổ chức, chỉ đè danh sách trắng — tên bot · giọng · lời
+chào · giờ làm việc · chỉ dẫn riêng (thương hiệu / persona) · phí ship · miễn ship · câu chuyển người. Khoá AI, công cụ, chính
+sách chốt, giá sỉ, bán không kiểm tồn, đặt lịch ở lại cấp tổ chức. Phần đè làm cấu hình hỏng ⇒ page dùng nguyên cấu hình chung.
+Instagram theo page cha. Lượt bot đọc `loadSalesChatbotConfigFor(conv.pageId)`. Màn Messenger: «Cấu hình riêng» trên từng page.
+
 ### Còn lại
 
 | Việc | Ghi chú |
 |---|---|
-| Cấu hình AI theo page (persona · giờ · danh mục · giá) đè lên mặc định tổ chức | `loadSalesChatbotConfig()` đang là MỘT cấu hình tổ chức; cần quyết định trường nào được đè |
+| Danh mục / nguồn giá / nguồn tồn RIÊNG từng page | Hôm nay mọi page đọc chung sản phẩm của tổ chức; «chỉ dẫn riêng» của page nói được nhóm sản phẩm chính nhưng KHÔNG lọc công cụ tìm sản phẩm. Cần ánh xạ page → nhóm sản phẩm ở lõi công cụ |
 | Drill-down (danh sách hội thoại theo chỉ số) giữ bộ lọc page | `DrillFilter` chưa có `page` |
 | Instagram quy về page cha khi lọc | hôm nay lọc đúng mã tài khoản (page HOẶC Instagram) |
 | Nhiều page Pancake | Pancake vẫn một page mỗi tổ chức (TD-11 phía Pancake) |

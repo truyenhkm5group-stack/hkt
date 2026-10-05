@@ -5,8 +5,9 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { disconnectMessengerAction, pickMessengerPagesAction, setMessengerPagesAiAction } from "@/lib/actions/messenger";
+import { disconnectMessengerAction, pickMessengerPagesAction, savePageOverrideAction, setMessengerPagesAiAction } from "@/lib/actions/messenger";
 import type { MessengerPageView } from "@/lib/sales-chatbot/messenger";
+import type { PageOverride } from "@/lib/sales-chatbot/page-config-shared";
 import { cn } from "@/lib/utils";
 
 /**
@@ -79,7 +80,51 @@ function health(p: MessengerPageView): { label: string; tone: "ok" | "warn" | "b
 }
 
 /** Quản lý các page đã nối: chọn nhiều ⇒ bật / tạm dừng AI; gỡ TỪNG page (các page khác chạy tiếp). */
-export function PageManager({ pages, manage }: { pages: MessengerPageView[]; manage: boolean }) {
+/**
+ * CẤU HÌNH RIÊNG của một page — mặc định page dùng cấu hình chung của Chatbot bán hàng; chỉ khai phần KHÁC (tên bot · lời
+ * chào · chỉ dẫn riêng cho thương hiệu / sản phẩm của page). Ô để trống = dùng của cấu hình chung.
+ */
+function PageConfigForm({ pageId, current }: { pageId: string; current: PageOverride | null }) {
+  const [botName, setBotName] = useState(current?.botName ?? "");
+  const [greeting, setGreeting] = useState(current?.greeting ?? "");
+  const [extra, setExtra] = useState(current?.extraInstructions ?? "");
+  const [pending, start] = useTransition();
+  const save = (reset: boolean) =>
+    start(async () => {
+      const r = await savePageOverrideAction(pageId, reset ? null : { botName, greeting, extraInstructions: extra });
+      if ("error" in r) toast.error(r.error);
+      else {
+        toast.success(r.message);
+        if (reset) {
+          setBotName("");
+          setGreeting("");
+          setExtra("");
+        }
+      }
+    });
+  return (
+    <details className="mt-1 w-full text-xs" data-testid="page-config">
+      <summary className="cursor-pointer text-primary">{current ? "Cấu hình riêng (đang dùng)" : "Cấu hình riêng cho page này"}</summary>
+      <div className="mt-2 space-y-2">
+        <Input className="h-8" placeholder="Tên bot riêng (để trống = dùng tên chung)" value={botName} onChange={(e) => setBotName(e.target.value)} maxLength={60} aria-label="Tên bot của page" />
+        <Input className="h-8" placeholder="Lời chào riêng (để trống = dùng lời chào chung)" value={greeting} onChange={(e) => setGreeting(e.target.value)} maxLength={300} aria-label="Lời chào của page" />
+        <textarea className="min-h-16 w-full rounded-md border bg-background px-2 py-1.5 text-xs" placeholder="Chỉ dẫn riêng: thương hiệu, nhóm sản phẩm chính, cách xưng hô của page này…" value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={1500} aria-label="Chỉ dẫn riêng của page" />
+        <div className="flex gap-2">
+          <Button type="button" size="sm" className="h-8" disabled={pending} onClick={() => save(false)}>
+            Lưu cấu hình riêng
+          </Button>
+          {current ? (
+            <Button type="button" size="sm" variant="outline" className="h-8" disabled={pending} onClick={() => save(true)}>
+              Dùng lại cấu hình chung
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+export function PageManager({ pages, manage, canConfig = false, overrides = {} }: { pages: MessengerPageView[]; manage: boolean; canConfig?: boolean; overrides?: Record<string, PageOverride> }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
   const active = pages.filter((p) => p.status === "ACTIVE" && p.kind === "PAGE");
@@ -148,6 +193,7 @@ export function PageManager({ pages, manage }: { pages: MessengerPageView[]; man
                   </Button>
                 </div>
               ) : null}
+              {canConfig && p.status === "ACTIVE" && p.kind === "PAGE" ? <PageConfigForm pageId={p.id} current={overrides[p.id] ?? null} /> : null}
             </li>
           );
         })}

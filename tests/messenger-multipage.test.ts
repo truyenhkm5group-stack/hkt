@@ -24,6 +24,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/s
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
+import { savePageOverride } from "@/lib/sales-chatbot/page-config";
 import { connectMessengerPages, disconnectMessengerPage, messengerView, PAGE_AI_OFF_NOTE, processMessengerThread, receiveMessengerEvent, setMessengerPagesAi } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "msg-multi";
@@ -58,12 +59,14 @@ function fakeGraph(state: { failB: boolean }): { fetch: typeof fetch; calls: Cal
   return { fetch: f, calls };
 }
 
+const systems: { system: string }[] = [];
 function fakeBot(): AiProvider {
   return {
     name: "fake",
     model: "claude-sonnet-5",
     schemaDialect: "anthropic",
     async complete(req: AiRequest): Promise<AiResponse> {
+      if (req.tools.length) systems.push({ system: typeof req.system === "string" ? req.system : JSON.stringify(req.system) });
       return { content: [{ type: "text", text: req.tools.length ? "Dạ shop chào chị ạ" : "NONE" }], stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
     },
   };
@@ -160,6 +163,18 @@ export async function testMessengerMultiPage() {
       state.failB = false;
       const health = await listChannelPages("facebook-messenger");
       assert.ok(/Không có quyền gửi tin/.test(health.find((x) => x.pageId === PAGES.B)?.lastError ?? "") && health.find((x) => x.pageId === PAGES.A)?.lastError === null, JSON.stringify(health.map((x) => [x.pageId, x.lastError])));
+
+      // ── CẤU HÌNH AI THEO PAGE: page B có tên bot + chỉ dẫn riêng ⇒ lượt của B mang chúng; lượt của A vẫn cấu hình chung ──
+      assert.ok("ok" in (await savePageOverride(admin, PAGES.B, { botName: "Bot Thời Trang B", extraInstructions: "Page B chỉ bán váy" })));
+      assert.ok("error" in (await savePageOverride(admin, "9999999999", { botName: "Bot lạ" })), "page không thuộc tổ chức ⇒ từ chối");
+      systems.length = 0;
+      await receiveMessengerEvent(ev(PAGES.B, "psid-b", "mp.b9", "Váy này còn không"));
+      await receiveMessengerEvent(ev(PAGES.A, "psid-a", "mp.a9", "Còn hàng không"));
+      await processMessengerThread(PAGES.B, "psid-b", { fetch: g.fetch, now: later });
+      await processMessengerThread(PAGES.A, "psid-a", { fetch: g.fetch, now: later });
+      assert.ok(systems.length === 2 && systems[0].system.includes("Bot Thời Trang B") && systems[0].system.includes("Page B chỉ bán váy"), "lời nhắc của page B mang cấu hình riêng");
+      assert.ok(!systems[1].system.includes("Bot Thời Trang B") && !systems[1].system.includes("Page B chỉ bán váy"), "page A không nhiễm cấu hình của page B");
+      assert.ok("ok" in (await savePageOverride(admin, PAGES.B, null)), "bỏ phần đè ⇒ B dùng lại cấu hình chung");
 
       // ── HỘP THƯ CHUNG: mọi page ở một danh sách, mỗi hội thoại mang tên page; chọn một page = LỌC, không phải hộp thư thứ hai ──
       const all = await listInbox(admin, {});

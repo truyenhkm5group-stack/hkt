@@ -479,6 +479,7 @@ import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
 import { testAiQuality } from "./ai-quality.test";
 import { testPancakePoll } from "./pancake-poll.test";
+import { testPageConfig } from "./page-config.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
 import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
@@ -2737,6 +2738,7 @@ async function main() {
   await testLostReasons();
   await testAiQuality();
   testPancakePoll();
+  testPageConfig();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();
