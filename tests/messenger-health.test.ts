@@ -9,7 +9,7 @@
  *  · Lỗi ngoài 24 giờ ⇒ kết nối vẫn ACTIVE, không báo ai.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
@@ -19,6 +19,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { connectMessengerPage, sendMessengerPageText } from "@/lib/sales-chatbot/messenger";
+import { messengerWebhookLog, summarizeMessengerWebhook } from "@/lib/sales-chatbot/messenger-observability";
 
 const ORG = "msg-suc-khoe";
 const APP_ID = "777000555666";
@@ -43,6 +44,22 @@ function testPure() {
   assert.equal(classifyGraphError(100), "OTHER");
   assert.equal(classifyGraphError(null), "OTHER", "mạng hỏng không phải token hỏng");
   assert.deepEqual((["TOKEN", "PERMISSION", "WINDOW", "RECIPIENT", "RATE_LIMIT", "OTHER"] as const).filter(needsReconnect), ["TOKEN", "PERMISSION"]);
+
+  // Quan sát webhook: gói bình thường không ghi log; page lạ / sự kiện trùng ⇒ MỘT tóm tắt chỉ có số đếm + mã page.
+  assert.equal(summarizeMessengerWebhook([{ pageId: "1", outcome: "QUEUED" }, { pageId: "1", outcome: "IGNORED" }]), null);
+  assert.deepEqual(summarizeMessengerWebhook([{ pageId: "9", outcome: "UNKNOWN_PAGE" }, { pageId: "9", outcome: "UNKNOWN_PAGE" }, { pageId: "1", outcome: "DUPLICATE" }, { pageId: "1", outcome: "QUEUED" }]), { events: 4, queued: 1, duplicates: 1, ignored: 0, unknownPages: ["9"] });
+  const logged: string[] = [];
+  const orig = console.warn;
+  console.warn = (s: unknown) => void logged.push(String(s));
+  try {
+    messengerWebhookLog("messenger_process_failed", { org: "shop", pageId: "1", error: "x".repeat(1000) });
+  } finally {
+    console.warn = orig;
+  }
+  const line = JSON.parse(logged[0]) as { evt: string; error: string };
+  assert.ok(line.evt === "messenger_process_failed" && line.error.length === 300, "một dòng JSON, câu lỗi cắt ≤ 300 ký tự");
+  const route = readFileSync("app/api/webhooks/messenger/route.ts", "utf8");
+  assert.ok(!/messengerWebhookLog\([^)]*\b(ev\.text|ev\.psid|psid|text)\b/.test(route), "log của webhook không mang nội dung tin / PSID");
 }
 
 function fakeGraph(mode: { send: "OK" | "TOKEN" | "WINDOW" }) {
