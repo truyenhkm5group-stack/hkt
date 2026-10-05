@@ -85,29 +85,77 @@ export const OUTREACH_AUTOMATION_LABEL: Record<OutreachAutomationLevel, string> 
 
 export type KeywordGroup = { key: string; label: string; keywords: string[]; enabled: boolean };
 
-/** Bộ từ khoá mặc định «HSLC – Nhà hàng / F&B» — chủ shop bật / tắt từng nhóm trên form chiến dịch. */
+/**
+ * Bộ từ khoá mặc định theo DANH MỤC THẬT của HSLC (đọc 05/10/2026: chả mực giã tay, chả cá thu, nem hải sản tôm bề bề,
+ * ruốc bông tôm / cá thu, nước mắm cốt cá cơm — hàng đặc sản đóng gói 120–350 nghìn) và điều kiện bán hiện tại: CHƯA
+ * xuất được hoá đơn VAT ⇒ khách là cửa hàng / quán VỪA và NHỎ nhập lại để bán hoặc dùng, không phải chuỗi / khách sạn /
+ * bếp ăn công ty (những nơi mua theo hợp đồng có hoá đơn).
+ *
+ * Tám từ khoá BẬT sẵn là lõi: 8 từ × 57 khu vực đợt ① = 456 lượt tìm trang đầu — nằm trong 1.000 lượt Text Search
+ * Enterprise MIỄN PHÍ mỗi tháng của Google (xem `GOOGLE_FREE_MONTHLY_CALLS`). Nhóm «Mở rộng» bật khi còn lượt; nhóm «Lớn»
+ * để TẮT cho tới khi xuất được hoá đơn.
+ */
 export const DEFAULT_KEYWORD_GROUPS: readonly KeywordGroup[] = [
-  { key: "hai-san", label: "Hải sản", keywords: ["nhà hàng hải sản", "hải sản", "buffet hải sản", "lẩu hải sản"], enabled: true },
-  { key: "buffet", label: "Buffet", keywords: ["buffet"], enabled: true },
-  { key: "lau-nuong", label: "Lẩu / nướng / BBQ", keywords: ["nhà hàng lẩu", "nhà hàng nướng", "BBQ"], enabled: true },
-  { key: "nhau", label: "Quán nhậu / bia", keywords: ["quán nhậu", "beer garden"], enabled: true },
-  { key: "nha-hang", label: "Nhà hàng chung", keywords: ["nhà hàng"], enabled: true },
-  { key: "luu-tru", label: "Khách sạn / resort", keywords: ["khách sạn", "resort"], enabled: true },
-  { key: "tiec", label: "Tiệc / catering / bếp ăn", keywords: ["catering", "dịch vụ tiệc", "bếp ăn"], enabled: true },
-  { key: "thuc-pham", label: "Thực phẩm / siêu thị", keywords: ["cửa hàng thực phẩm đông lạnh", "thực phẩm sạch", "siêu thị thực phẩm", "siêu thị mini"], enabled: true },
+  { key: "dac-san", label: "Cửa hàng đặc sản / quà biếu", keywords: ["cửa hàng đặc sản", "chả mực Hạ Long"], enabled: true },
+  { key: "thuc-pham", label: "Thực phẩm sạch / đồ khô", keywords: ["cửa hàng thực phẩm sạch"], enabled: true },
+  { key: "me-be", label: "Mẹ & bé (ruốc cho bé)", keywords: ["cửa hàng mẹ và bé"], enabled: true },
+  { key: "tap-hoa", label: "Tạp hoá", keywords: ["tạp hoá"], enabled: true },
+  { key: "hai-san", label: "Quán hải sản", keywords: ["quán hải sản"], enabled: true },
+  { key: "nhau", label: "Quán nhậu", keywords: ["quán nhậu"], enabled: true },
+  { key: "quan-an", label: "Quán bún chả cá / quán cơm", keywords: ["bún chả cá"], enabled: true },
+  { key: "mo-rong", label: "Mở rộng (bật khi còn lượt)", keywords: ["đặc sản Quảng Ninh", "cửa hàng hải sản khô", "thực phẩm đông lạnh", "minimart", "quán cơm", "nhà hàng hải sản", "bia hơi", "quán lẩu"], enabled: false },
+  { key: "lon", label: "Nhà hàng lớn / khách sạn / tiệc (thường đòi hoá đơn VAT)", keywords: ["nhà hàng", "buffet", "khách sạn", "catering"], enabled: false },
 ];
+
+/**
+ * Lượt MIỄN PHÍ mỗi tháng theo SKU (bảng giá Google Maps Platform từ 01/03/2025: nhóm Essentials 10.000, Pro 5.000,
+ * Enterprise 1.000 lượt / SKU / tài khoản thanh toán / tháng; Text Search chỉ-ID không giới hạn). Chủ shop sửa ở cấu hình
+ * khi Google đổi bảng — hoá đơn Google Cloud mới là số thật.
+ */
+export const GOOGLE_FREE_MONTHLY_CALLS: Record<PlacesSku, number> = {
+  TEXT_SEARCH_IDS: 1_000_000,
+  TEXT_SEARCH_PRO: 5000,
+  TEXT_SEARCH_ENTERPRISE: 1000,
+  NEARBY_SEARCH_PRO: 5000,
+  NEARBY_SEARCH_ENTERPRISE: 1000,
+  DETAILS_PRO: 5000,
+  DETAILS_ENTERPRISE: 1000,
+};
+
+/**
+ * Chuỗi lớn — mua theo hợp đồng, đòi hoá đơn VAT, nên chưa phải khách của HSLC lúc này. Khớp theo TỪ trong tên đã bỏ dấu.
+ * Golden Gate · Redsun · chuỗi đồ ăn nhanh / cà phê · siêu thị / cửa hàng tiện lợi chuỗi. Sửa ở cấu hình.
+ */
+export const DEFAULT_CHAIN_BRANDS: readonly string[] = [
+  "Kichi-Kichi", "Kichi Kichi", "Gogi", "Manwah", "Sumo BBQ", "Hutong", "Ashima", "iSushi", "Vuvuzela", "Phố Ngon 37", "Cowboy Jack",
+  "Crystal Jade", "Daruma", "Shogun", "Gyu Shige", "K-Pub", "Kpub", "Citea", "Golden Gate",
+  "Hotpot Story", "Seoul Garden", "Khao Lao", "Buk Buk", "Thai Express", "Redsun",
+  "KFC", "Lotteria", "Jollibee", "McDonald", "Burger King", "Pizza Hut", "Domino", "Texas Chicken", "Popeyes",
+  "Highlands", "Phúc Long", "The Coffee House", "Starbucks", "Katinat",
+  "WinMart", "Winmart+", "Co.op", "Coopmart", "Co.opmart", "Bách Hóa Xanh", "Lotte Mart", "AEON", "Big C", "GO!", "MM Mega", "Emart",
+  "Circle K", "FamilyMart", "7-Eleven", "GS25", "Ministop", "Satrafoods", "Kingfoodmart", "Annam Gourmet", "Tops Market",
+];
+
+/** Quy mô khách nhắm tới: `SMALL_MEDIUM` = cửa hàng / quán vừa và nhỏ (chưa xuất được hoá đơn VAT); `ANY` = mọi cỡ. */
+export const SIZE_PROFILES = ["SMALL_MEDIUM", "ANY"] as const;
+export type SizeProfile = (typeof SIZE_PROFILES)[number];
+export const SIZE_PROFILE_LABEL: Record<SizeProfile, string> = {
+  SMALL_MEDIUM: "Vừa và nhỏ — ưu tiên quán / cửa hàng độc lập, loại chuỗi lớn và nơi quá đông",
+  ANY: "Mọi quy mô — cộng điểm cho nơi đông khách, nhiều chi nhánh",
+};
 
 /** Nhóm khách mục tiêu mặc định của HSLC (đặc tả mục 21). */
 export const DEFAULT_TARGET_SEGMENTS: readonly LeadSegment[] = [
+  "SPECIALTY_STORE",
+  "FROZEN_FOOD_STORE",
+  "MOM_BABY",
+  "GROCERY",
   "SEAFOOD_RESTAURANT",
+  "PUB_BEER",
+  "EATERY",
   "HOTPOT",
   "BBQ",
-  "BUFFET",
   "RESTAURANT",
-  "PUB_BEER",
-  "HOTEL_RESORT",
-  "CATERING",
-  "FROZEN_FOOD_STORE",
 ];
 
 /** Tỉnh quét trước (chủ shop chốt 04/10/2026): Hà Nội + TP.HCM; sau đó vùng không có biển, rồi ven biển (`scanTier`). */
@@ -143,6 +191,21 @@ export const leadHunterConfigSchema = z.object({
   /** Số ngày giữ trường dữ liệu nguồn Google trước khi phải làm mới hoặc xoá (xem docs mục tuân thủ). */
   googleRetentionDays: z.number().int().min(1).max(30),
   serviceAreas: z.record(z.string().min(1).max(60), z.enum(["PRIORITY", "SERVED"])),
+  /** CHỈ dùng lượt miễn phí của Google: còn dưới (1 − safetyPct) hạn mức của SKU sắp gọi ⇒ tự dừng, đầu tháng sau tự chạy. */
+  freeTier: z.object({
+    enabled: z.boolean(),
+    safetyPct: z.number().min(0).max(0.5),
+    monthlyCalls: z.object(Object.fromEntries(PLACES_SKUS.map((k) => [k, z.number().int().min(0).max(10_000_000)])) as Record<PlacesSku, z.ZodNumber>),
+  }),
+  /** Loại chuỗi lớn: tên khớp danh sách, hoặc cùng một tên xuất hiện ở hơn `maxSameName` địa điểm. */
+  chainFilter: z.object({
+    enabled: z.boolean(),
+    brands: z.array(z.string().trim().min(2).max(60)).max(300),
+    maxSameName: z.number().int().min(1).max(50),
+  }),
+  sizeProfile: z.enum(SIZE_PROFILES),
+  /** Số đánh giá Google trên mức này ⇒ coi là nơi quá lớn (thường đòi hoá đơn) và lọc. `null` = không lọc. */
+  maxReviews: z.number().int().min(100).max(1_000_000).nullable(),
   /** Thứ tự quét khi bấm Bắt đầu: tỉnh quét trước ⇒ (tuỳ chọn) không có biển ⇒ ven biển. Xem `scanTier`. */
   scanPriority: z.object({
     firstProvinces: z.array(z.string().min(1).max(60)).max(40),
@@ -183,7 +246,9 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
   budget: { dailyUsd: 5, monthlyUsd: 50, dailyRequestLimit: 1000 },
   skuPriceUsdPer1000: { ...DEFAULT_SKU_PRICE_USD_PER_1000 },
   usdToVnd: 26_000,
-  discoveryTier: "PRO",
+  // ENTERPRISE: SĐT + website + số đánh giá ngay trong lượt tìm (≤ 20 địa điểm / lượt), 1.000 lượt miễn phí mỗi tháng —
+  // rẻ nhất trên mỗi lead và đủ để lọc chuỗi / quy mô mà không cần lượt chi tiết.
+  discoveryTier: "ENTERPRISE",
   maxPagesPerCell: 3,
   minNewRatioForNextPage: 0.3,
   requestIntervalMs: 300,
@@ -193,6 +258,10 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
   googleRetentionDays: 30,
   serviceAreas: { ...DEFAULT_SERVICE_AREAS },
   scanPriority: { firstProvinces: [...DEFAULT_FIRST_PROVINCES], inlandBeforeCoastal: true },
+  freeTier: { enabled: true, safetyPct: 0.05, monthlyCalls: { ...GOOGLE_FREE_MONTHLY_CALLS } },
+  chainFilter: { enabled: true, brands: [...DEFAULT_CHAIN_BRANDS], maxSameName: 3 },
+  sizeProfile: "SMALL_MEDIUM",
+  maxReviews: 5000,
   // Nơi nhận rỗng = chat đã khai ở kết nối Telegram (ô «Chat ID» của trang Kết nối).
   fieldSales: { connectorKey: "telegram-bot", destinations: [] },
   gradeThresholds: { ...DEFAULT_GRADE_THRESHOLDS },
@@ -229,6 +298,11 @@ export function mergeLeadHunterConfig(raw: unknown): LeadHunterConfig {
     skuPriceUsdPer1000: obj(r.skuPriceUsdPer1000, base.skuPriceUsdPer1000),
     serviceAreas: r.serviceAreas && typeof r.serviceAreas === "object" ? (r.serviceAreas as Record<string, ServiceAreaLevel>) : base.serviceAreas,
     scanPriority: obj(r.scanPriority, base.scanPriority),
+    freeTier: (() => {
+      const f = obj(r.freeTier, base.freeTier);
+      return { ...f, monthlyCalls: obj((r.freeTier as { monthlyCalls?: unknown } | undefined)?.monthlyCalls, base.freeTier.monthlyCalls) };
+    })(),
+    chainFilter: obj(r.chainFilter, base.chainFilter),
     fieldSales: obj(r.fieldSales, base.fieldSales),
     gradeThresholds: obj(r.gradeThresholds, base.gradeThresholds),
     learning: obj(r.learning, base.learning),
@@ -237,6 +311,12 @@ export function mergeLeadHunterConfig(raw: unknown): LeadHunterConfig {
   };
   const parsed = leadHunterConfigSchema.safeParse(merged);
   return parsed.success ? parsed.data : base;
+}
+
+/** Lượt miễn phí còn dùng được của một SKU trong tháng (đã trừ biên an toàn). HÀM THUẦN. */
+export function freeTierLeft(cfg: Pick<LeadHunterConfig, "freeTier">, sku: PlacesSku, usedThisMonth: number): number {
+  const cap = Math.floor((cfg.freeTier.monthlyCalls[sku] ?? 0) * (1 - cfg.freeTier.safetyPct));
+  return Math.max(0, cap - usedThisMonth);
 }
 
 /** Đơn giá một lượt gọi theo cấu hình, đơn vị micro-USD (số nguyên) để cộng dồn không sai số. */

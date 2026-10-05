@@ -31,7 +31,8 @@ export function vnStartOfMonth(now: Date): Date {
   return vnStartOfDay(`${key.slice(0, 7)}-01`);
 }
 
-export type SpendSnapshot = { todayMicros: number; monthMicros: number; callsToday: number };
+/** `monthCallsBySku`: lượt Google ĐÃ TÍNH (2xx) trong tháng theo SKU — so với hạn mức miễn phí. */
+export type SpendSnapshot = { todayMicros: number; monthMicros: number; callsToday: number; monthCallsBySku: Record<string, number> };
 
 /** Chi phí API đã ghi hôm nay / tháng này (giờ VN) — chỉ lượt bị TÍNH TIỀN, chỉ nhà cung cấp tính tiền. */
 export async function currentSpend(now: Date): Promise<SpendSnapshot> {
@@ -47,7 +48,14 @@ export async function currentSpend(now: Date): Promise<SpendSnapshot> {
     })
     .from(u)
     .where(gte(u.at, monthStart));
-  return { todayMicros: Number(row?.today ?? 0), monthMicros: Number(row?.month ?? 0), callsToday: Number(row?.calls ?? 0) };
+  const bySku = await db
+    .select({ sku: u.sku, n: sql<string>`count(*)` })
+    .from(u)
+    .where(and(gte(u.at, monthStart), eq(u.provider, "GOOGLE_PLACES"), eq(u.billable, true)))
+    .groupBy(u.sku);
+  const monthCallsBySku: Record<string, number> = {};
+  for (const r of bySku) if (r.sku) monthCallsBySku[r.sku] = Number(r.n ?? 0);
+  return { todayMicros: Number(row?.today ?? 0), monthMicros: Number(row?.month ?? 0), callsToday: Number(row?.calls ?? 0), monthCallsBySku };
 }
 
 export type UsageRow = typeof schema.wholesaleApiUsage.$inferInsert;

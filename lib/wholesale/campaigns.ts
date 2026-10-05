@@ -4,11 +4,12 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { cellScanPriority, parseCustomAreas, SCAN_TIER_LABEL, SEARCH_PROVINCES, scanTier, type ScanPriority, type ScanTier, type SearchProvince } from "@/lib/wholesale/areas";
-import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, type KeywordGroup } from "@/lib/wholesale/config";
+import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, freeTierLeft, type KeywordGroup } from "@/lib/wholesale/config";
 import type { CampaignStatus } from "@/lib/wholesale/constants";
 import { type CostEstimate, enabledKeywords, estimateCost, planNearbyCell, planTextCells, type PlannedCell } from "@/lib/wholesale/query-plan";
 import { LEAD_SEGMENTS, type LeadSegment } from "@/lib/wholesale/segments";
-import { getLeadHunterConfig } from "@/lib/wholesale/store";
+import { currentSpend, getLeadHunterConfig } from "@/lib/wholesale/store";
+import { searchSku } from "@/lib/integrations/google-places/client";
 
 /**
  * ═══════════ CHIẾN DỊCH QUÉT — LÕI GHI (CHỈ MÁY CHỦ) ═══════════
@@ -172,6 +173,8 @@ export type CampaignPreview = {
   estimate: CostEstimate;
   usdToVnd: number;
   invalidAreas: string[];
+  /** Chế độ chỉ dùng miễn phí: còn bao nhiêu lượt của SKU tìm kiếm tháng này, và chiến dịch cần ít nhất / điển hình bao nhiêu. */
+  freeTier: { enabled: boolean; sku: string; left: number; monthly: number; needMin: number; needTypical: number };
 };
 
 /** «Xem trước truy vấn»: không ghi, không gọi Google. */
@@ -201,8 +204,16 @@ export async function previewCampaignCore(user: SessionUser, raw: unknown): Prom
       estimate: estimateCost({ cellCount: plan.cells.length, freshCount: fresh.size, mode: row.searchMode, tier: row.discoveryTier, maxLeads: row.maxLeads }, cfg),
       usdToVnd: cfg.usdToVnd,
       invalidAreas: invalid,
+      freeTier: await freeTierPreview(cfg, row.searchMode, row.discoveryTier, Math.max(0, plan.cells.length - fresh.size)),
     },
   };
+}
+
+async function freeTierPreview(cfg: Awaited<ReturnType<typeof getLeadHunterConfig>>, mode: "TEXT" | "NEARBY", tier: (typeof DISCOVERY_TIERS)[number], cellsToScan: number): Promise<CampaignPreview["freeTier"]> {
+  const sku = searchSku(mode, tier);
+  const spend = await currentSpend(new Date());
+  const typicalPages = mode === "NEARBY" ? 1 : Math.min(cfg.maxPagesPerCell, 1.5);
+  return { enabled: cfg.freeTier.enabled, sku, left: freeTierLeft(cfg, sku, spend.monthCallsBySku[sku] ?? 0), monthly: cfg.freeTier.monthlyCalls[sku] ?? 0, needMin: cellsToScan, needTypical: Math.round(cellsToScan * typicalPages) };
 }
 
 export async function createCampaignCore(user: SessionUser, raw: unknown): Promise<CoreResult<{ id: string }>> {
@@ -360,7 +371,7 @@ export function hslcTemplateValues(tier: ScanTier = 1, prio: ScanPriority = DEFA
     productFocus: "Hải sản đóng gói cho nhà hàng / quán ăn / khách sạn",
     provinces: provincesOfTier(t.tier, prio),
     keywordGroups: DEFAULT_KEYWORD_GROUPS.map((g) => ({ ...g, keywords: [...g.keywords] })),
-    excludeKeywords: ["cà phê", "cafe", "trà sữa", "bánh mì", "chay"],
+    excludeKeywords: ["cà phê", "cafe", "trà sữa", "bánh mì", "chay", "khách sạn", "resort"],
     targetSegments: [...DEFAULT_TARGET_SEGMENTS],
     maxLeads: 2000,
     minRating: null,
@@ -368,7 +379,7 @@ export function hslcTemplateValues(tier: ScanTier = 1, prio: ScanPriority = DEFA
     requirePhone: true,
     requireWebsite: false,
     searchMode: "TEXT" as const,
-    discoveryTier: "PRO" as const,
+    discoveryTier: "ENTERPRISE" as const,
     note: `${SCAN_TIER_LABEL[t.tier]}. Ưu tiên: có SĐT, đang hoạt động, điểm ≥ 65. Không tự gửi tin hàng loạt — lead đi Tìm thấy → Đủ điều kiện → Hàng đợi liên hệ.`,
   };
 }
@@ -388,8 +399,9 @@ export async function ensureTemplateCampaign(): Promise<void> {
       .values({ ...v, status: "DRAFT", isTemplate: true, templateKey: t.key, createdByName: "Mẫu hệ thống" })
       .onConflictDoUpdate({
         target: c.templateKey,
-        set: { name: v.name, provinces: v.provinces, note: v.note, updatedAt: new Date() },
-        setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name)`,
+        // Mẫu không bao giờ chạy ⇒ cập nhật trọn bộ khi luật đổi (05/10/2026: từ khoá + nhóm khách theo danh mục HSLC, mức ENTERPRISE).
+        set: { name: v.name, provinces: v.provinces, note: v.note, keywordGroups: v.keywordGroups, targetSegments: v.targetSegments, excludeKeywords: v.excludeKeywords, discoveryTier: v.discoveryTier, updatedAt: new Date() },
+        setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords)`,
       });
   }
 }

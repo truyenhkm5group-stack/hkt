@@ -74,7 +74,71 @@ Phần này là cách kỹ thuật đã làm. Nó không phải ý kiến pháp 
 - **Đọc website** đi qua rào SSRF dùng chung của kho (`lib/net/public-url.ts::fetchPublicUrl`), chỉ chạm trang công khai và tôn trọng `robots.txt`. Hệ thống không đăng nhập, không vượt captcha hay
   tường phí, và chỉ trích kênh liên hệ doanh nghiệp tự công bố.
 
+## 4a. Khách hợp với HSLC lúc này (chủ shop chốt 05/10/2026)
+
+**Hàng hoá.** Danh mục HSLC đọc ngày 05/10/2026 gồm: chả mực giã tay, chả cá thu, nem hải sản tôm bề bề, ruốc bông tôm,
+ruốc bông cá thu, nước mắm cốt cá cơm. Đây là hàng đặc sản đóng gói, giá 120–350 nghìn.
+
+**Ràng buộc.** HSLC chưa xuất được hoá đơn VAT. Vì vậy khách phù hợp là cửa hàng / quán **vừa và nhỏ**, nhập về để bán lại
+hoặc để dùng.
+
+**Nhóm khách mặc định** (`DEFAULT_TARGET_SEGMENTS`):
+
+- cửa hàng đặc sản / đồ khô / quà biếu;
+- cửa hàng thực phẩm sạch;
+- cửa hàng mẹ & bé (ruốc cho bé);
+- tạp hoá;
+- quán hải sản;
+- quán nhậu;
+- quán ăn / bún chả cá;
+- lẩu, nướng, nhà hàng chung.
+
+Khách sạn, tiệc / catering, buffet và siêu thị thường đòi hoá đơn, nên xuống cuối bảng điểm và không nằm trong mục tiêu mặc
+định.
+
+**Bộ lọc** (`chainFilter`, `maxReviews`, `sizeProfile` trong cấu hình):
+
+| Lọc | Cách nhận ra | Lý do lọc |
+|---|---|---|
+| Chuỗi theo danh sách | Tên khớp danh sách thương hiệu (Golden Gate, Redsun, đồ ăn nhanh, siêu thị và cửa hàng tiện lợi chuỗi…). Lọc ngay ở bước tìm, không tốn lượt chi tiết. | `CHAIN` |
+| Chuỗi theo số điểm bán | Cùng một tên xuất hiện ở hơn `maxSameName` địa điểm. | `CHAIN` |
+| Quá đông khách | Hơn `maxReviews` đánh giá Google (mặc định 5.000). | `TOO_LARGE` |
+
+Chỉ lead do máy tìm mới bị các bộ lọc này chặn. Lead do nhân viên nhập là quyết định của người.
+
+**Hồ sơ «vừa và nhỏ»** chấm điểm quy mô như sau:
+
+- cao nhất cho nơi có 30–1.199 đánh giá;
+- giảm dần với nơi đông hơn;
+- gần 0 khi có từ 3 điểm bán cùng thương hiệu trở lên.
+
+Hai điểm bán (một chi nhánh) vẫn được coi là cơ sở vừa.
+
 ## 5. Tiết kiệm chi phí API
+
+**Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh
+toán, theo bảng giá từ 03/2025:
+
+| Nhóm SKU | Lượt miễn phí / tháng |
+|---|---|
+| Essentials | 10.000 |
+| Pro | 5.000 |
+| Enterprise | 1.000 |
+| Text Search chỉ-ID | không giới hạn |
+
+Cách chặn:
+
+- Trước mỗi lượt gọi, engine đếm lượt đã bị tính trong tháng của đúng SKU sắp gọi.
+- Còn dưới 95% hạn mức thì tự dừng với lý do `FREE_TIER`; ngày 1 tháng sau tự chạy lại.
+- «Xem trước truy vấn» in số lượt miễn phí còn lại so với số lượt chiến dịch cần.
+
+Mặc định dùng mức `ENTERPRISE` vì đây là lựa chọn rẻ nhất trên mỗi lead:
+
+- một lượt trả tới 20 địa điểm, có sẵn SĐT và số đánh giá, không cần bước chi tiết;
+- 1.000 lượt miễn phí mỗi tháng.
+
+Bộ từ khoá lõi có 8 từ. Nhân với 57 khu vực của đợt ① là 456 lượt, nằm trong phần miễn phí.
+
 
 - **Stage A (tìm):** dùng field mask theo mức `discoveryTier`.
   - `PRO` là mặc định theo đặc tả. Bước tìm lấy tên, địa chỉ, loại hình, trạng thái và toạ độ (SKU Text Search Pro),
