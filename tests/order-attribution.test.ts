@@ -10,7 +10,7 @@
  *  · trên CSDL tổ chức thật: tổng ba nhãn + chưa quy kết = số đơn của kỳ, doanh thu giao thành công qua ORDER_OUTCOME.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -93,7 +93,12 @@ function testPure() {
   const noMoney = salesEconomics({ ...base, aiCostVnd: null });
   assert.ok(noMoney.aiCostPerConversationVnd === null && noMoney.revenuePerAiCost === null, "không thấy tiền / chưa biết ⇒ trống");
   assert.equal(salesEconomics({ ...base, unknownCostTurns: 3 }).costIsLowerBound, true);
-  console.log("✓ Quy kết từng đơn · thuần: AI tự bán / AI góp công / người bán theo việc bán hàng THẬT (một câu trả lời không phải góp công) · người chạm SAU mốc chốt không làm mất AI tự bán · công không chảy sang lượt mua sau · AI ghi hộ đơn nhân viên = người bán · không sự kiện ⇒ chưa biết · follow-up thu hồi chỉ khi đơn lên SAU tin trả lời cùng lượt mua · kinh tế bot: chưa có đơn / mẫu bé / chi phí 0 ⇒ trống");
+  // Trang chủ «Hôm nay AI làm ra bao nhiêu» KHÔNG có công thức riêng: chỉ đọc hai hàm của màn «Hiệu quả», không tự truy vấn.
+  const home = readFileSync("components/onboarding/ai-sales-today.tsx", "utf8");
+  assert.ok(home.includes("loadAiSalesPerformance(") && home.includes("loadOrderAttribution("), "trang chủ đọc đúng hai hàm của màn Hiệu quả");
+  assert.ok(!/drizzle-orm|@\/db"|getDb\(|sql`/.test(home), "trang chủ không tự viết truy vấn — một công thức thứ hai là hai con số");
+  assert.ok(readFileSync("components/onboarding/getting-started.tsx", "utf8").includes("<AiSalesToday user={user} />"), "khối AI hôm nay nằm trên trang chủ tổ chức khách");
+  console.log("✓ Quy kết từng đơn · thuần: AI tự bán / AI góp công / người bán theo việc bán hàng THẬT (một câu trả lời không phải góp công) · người chạm SAU mốc chốt không làm mất AI tự bán · công không chảy sang lượt mua sau · AI ghi hộ đơn nhân viên = người bán · không sự kiện ⇒ chưa biết · follow-up thu hồi chỉ khi đơn lên SAU tin trả lời cùng lượt mua · kinh tế bot: chưa có đơn / mẫu bé / chi phí 0 ⇒ trống · trang chủ «hôm nay AI làm ra bao nhiêu» đọc đúng hai hàm của màn Hiệu quả, không công thức riêng");
 }
 
 async function cleanupOrg(code: string) {
