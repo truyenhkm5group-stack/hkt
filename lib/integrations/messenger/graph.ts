@@ -159,6 +159,21 @@ export async function sendMessengerText(app: MessengerApp, pageToken: string, ps
   return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
 }
 
+/**
+ * Gửi MỘT ảnh cho khách qua Send API — tải TỆP lên cùng lời gọi (`filedata`, multipart), không cần URL công khai của ảnh.
+ * Cùng khung 24 giờ / `RESPONSE` với tin chữ. Trả mã tin Meta để tiếng vọng nhận ra là tin của chính page.
+ */
+export async function sendMessengerImage(app: MessengerApp, pageToken: string, psid: string, image: { data: Uint8Array; contentType: string }, fetchImpl: Fetch = fetch): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+  const form = new FormData();
+  form.append("recipient", JSON.stringify({ id: psid }));
+  form.append("messaging_type", "RESPONSE");
+  form.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
+  form.append("filedata", new Blob([new Uint8Array(image.data)], { type: image.contentType }), `anh.${image.contentType.split("/")[1] ?? "jpg"}`);
+  const r = await graph(fetchImpl, `${graphBase()}/me/messages?${new URLSearchParams({ access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "POST", body: form }, [pageToken, app.appSecret]);
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, id: typeof r.body.message_id === "string" ? r.body.message_id : null };
+}
+
 // ─────────────────────────── Webhook ───────────────────────────
 
 /** `X-Hub-Signature-256: sha256=<hex>` khớp HMAC của THÂN GỐC. So thời gian hằng; thiếu / sai dạng ⇒ `false`. HÀM THUẦN. */

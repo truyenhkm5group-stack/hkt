@@ -3,9 +3,11 @@ import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
 import { assignableUsers, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, type InboxChannel, type InboxFilter } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
 import { InboxAutoRefresh } from "./auto-refresh";
+import { LabelChip } from "./labels-panel";
 import { InboxThreadView } from "./thread-view";
 
 export const metadata = { title: "Hộp thư khách" };
@@ -26,10 +28,12 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const channel = (INBOX_CHANNELS as readonly string[]).includes(one("ch")) ? (one("ch") as InboxChannel) : null;
   const q = one("q").slice(0, 80);
   const selected = one("c");
-  const [list, thread, users] = await Promise.all([listInbox(user, { filter, channel, q }), selected ? loadInboxThread(user, selected) : Promise.resolve(null), assignableUsers(user)]);
+  const labels = await listLabels();
+  const label = labels.some((l) => l.id === one("lb")) ? one("lb") : null;
+  const [list, thread, users] = await Promise.all([listInbox(user, { filter, channel, q, label }), selected ? loadInboxThread(user, selected) : Promise.resolve(null), assignableUsers(user)]);
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
-    const cur: Record<string, string | null> = { f: filter === "ALL" ? null : filter, ch: channel, q: q || null, c: selected || null, ...patch };
+    const cur: Record<string, string | null> = { f: filter === "ALL" ? null : filter, ch: channel, lb: label, q: q || null, c: selected || null, ...patch };
     for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
     const s = p.toString();
     return `/ai/sales-chatbot/inbox${s ? `?${s}` : ""}`;
@@ -77,6 +81,16 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                     </option>
                   ))}
                 </select>
+                {labels.length ? (
+                  <select name="lb" defaultValue={label ?? ""} className="h-8 max-w-[110px] rounded-md border bg-background px-1 text-[12px]" aria-label="Nhãn">
+                    <option value="">Mọi nhãn</option>
+                    {labels.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <input name="q" defaultValue={q} placeholder="Tên / SĐT" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[12px]" aria-label="Tìm khách" />
                 <button type="submit" className="h-8 rounded-md border px-2 text-[12px] hover:bg-muted">
                   Lọc
@@ -102,6 +116,9 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                       {r.status === "HANDOFF" ? <span className="rounded bg-rose-100 px-1 text-rose-900 dark:bg-rose-950/50 dark:text-rose-200">Cần người</span> : null}
                       {r.assigneeName ? <span className="text-muted-foreground">· {r.assigneeName}</span> : null}
                       {r.hasOrder ? <span className="text-muted-foreground">· có đơn</span> : null}
+                      {r.labels.map((l) => (
+                        <LabelChip key={l.id} label={l} />
+                      ))}
                     </div>
                   </Link>
                 </li>

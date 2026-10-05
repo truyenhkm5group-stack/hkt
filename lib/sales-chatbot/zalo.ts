@@ -24,13 +24,13 @@ import { and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql } from "dri
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection, rotateOrgConnectionSecrets } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
-import { zaloSendText, zaloWindow, ZALO_LIMITS, type ZaloDeps, type ZaloEvent } from "@/lib/integrations/zalo/oa";
+import { zaloSendImage, zaloSendText, zaloUploadImage, zaloWindow, ZALO_LIMITS, type ZaloDeps, type ZaloEvent } from "@/lib/integrations/zalo/oa";
 import { ensureZaloAccessToken, usableAccessToken } from "@/lib/integrations/zalo/token";
 import { chunkText } from "@/lib/messaging/providers";
 import { webhookUrlToken } from "@/lib/platform/webhooks";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages, openConversation } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
-import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
+import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 
@@ -64,6 +64,29 @@ const inboundId = (msgId: string) => `zalo:${msgId}`;
  * (đã lo làm mới + khoá); dòng ghi sẵn `staff-out:` note `PAGE_REPLY` để tiếng vọng `oa_send_text` không thành «nhân viên gõ
  * ngoài ERP». Cửa sổ 48 giờ / tin tính phí do lớp gọi quyết (`zaloWindow`) — hàm này chỉ gửi. Gửi hỏng ⇒ xoá dòng ghi sẵn.
  */
+/** Nhân viên gửi ẢNH cho khách Zalo từ hộp thư (0211): tải từng ảnh lên OA ⇒ gửi tin «media». Zalo chỉ nhận JPG / PNG ≤ 1 MB. */
+export async function sendZaloImages(userId: string, images: readonly { data: Uint8Array; contentType: string }[], mark: StaffMark, deps: ZaloDeps = {}): Promise<{ ok: true } | { ok: false; error: string; window: boolean }> {
+  const oa = await activeOa();
+  if (!oa) return { ok: false, error: "Kết nối Zalo OA chưa bật", window: false };
+  const token = await zaloAccessToken(deps);
+  if (!token.ok) return { ok: false, error: token.error, window: false };
+  const now = deps.now ?? (() => new Date());
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rowId = `${STAFF_OUT_PREFIX}${mark.staffMessageId}:img`;
+  await db.insert(t).values({ pageId: zaloPageKey(oa.oaId), threadId: userId, messageId: rowId, text: STAFF_IMAGE_MARK, status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+  for (const [i, img] of images.entries()) {
+    const up = await zaloUploadImage({ accessToken: token.token, data: img.data, contentType: img.contentType }, deps);
+    const sent = up.ok ? await zaloSendImage({ accessToken: token.token, userId, attachmentId: up.attachmentId }, deps) : { ok: false as const, error: up.error, window: false };
+    if (!sent.ok) {
+      if (i === 0) await db.delete(t).where(eq(t.messageId, rowId));
+      const error = sent.window ? `${ZALO_OUTSIDE_WINDOW} (${sent.error})` : sent.error;
+      return { ok: false, error: i > 0 ? `${error} (đã gửi ${i}/${images.length} ảnh)` : error, window: sent.window };
+    }
+  }
+  return { ok: true };
+}
+
 export async function sendZaloText(userId: string, text: string, mark: StaffMark, deps: ZaloDeps = {}): Promise<{ ok: true } | { ok: false; error: string; window: boolean }> {
   const oa = await activeOa();
   if (!oa) return { ok: false, error: "Kết nối Zalo OA chưa bật", window: false };

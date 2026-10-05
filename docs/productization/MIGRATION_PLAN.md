@@ -208,7 +208,16 @@ migration `0209_sales_inbox`:
 - Quyền: đọc `ai_sales:view`; trả lời `ai_sales:reply` (khoá mới trong module AI bán hàng — CS / trưởng nhóm / quản lý mặc
   định có) hoặc `outreach:send`.
 
-**Chưa làm:** gửi ẢNH từ hộp thư (chỉ chữ); nguồn việc `SALES_HANDOFF` trên `/work`; nhãn / ghi chú nội bộ của hội thoại.
+**Thêm 05/10/2026 (migration `0211_sales_inbox_media_labels`):**
+- Gửi ẢNH (tối đa 4 ảnh / tin, mỗi ảnh ≤ 5 MB, JPG / PNG / WEBP nhận diện từ BYTE): Pancake (`upload_contents` ⇒ `content_ids`),
+  Messenger trực tiếp (Send API tải tệp kèm), Zalo OA (`upload/image` ⇒ tin «media»; chỉ JPG / PNG ≤ 1 MB). Ảnh lưu ở
+  `sales_chat_staff_images` để hộp thư hiện lại đúng ảnh đã gửi. Gửi chữ trước, ảnh sau; chữ đã tới khách thì ghi
+  `text_sent_at` ⇒ bấm lại tin hỏng ở phần ảnh chỉ gửi lại ẢNH. Chat web chưa nhận ảnh từ hộp thư.
+- NHÃN hội thoại (`lib/sales-chatbot/inbox-labels.ts`): bộ nhãn của tổ chức, bảng màu đóng; người trả lời khách tạo nhãn ngay
+  lúc gắn, trùng tên ⇒ dùng lại; lọc hộp thư theo nhãn; gỡ nhãn khỏi bộ nhãn cần `ai_sales:manage` và không gỡ khỏi hội thoại cũ.
+- GHI CHÚ NỘI BỘ: khách không thấy, không vào lịch sử bot, không phép tính nào đọc; mang tên người viết; xoá là đánh dấu.
+
+**Chưa làm:** nguồn việc `SALES_HANDOFF` trên `/work`; ảnh cho chat web.
 
 ## M9 · Gia cố nền tảng cho > 5 tenant
 

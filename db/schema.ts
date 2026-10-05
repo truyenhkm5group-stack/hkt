@@ -9870,6 +9870,9 @@ export const salesChatStaffMessages = pgTable(
     status: text("status").notNull().default("SENDING"),
     error: text("error"),
     sentAt: ts("sent_at"),
+    /** 0211: phần CHỮ đã tới khách — gửi lại một tin hỏng giữa chừng chỉ gửi phần còn thiếu (ảnh), không gửi chữ lần hai. */
+    textSentAt: ts("text_sent_at"),
+    imageCount: integer("image_count").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [
@@ -9877,6 +9880,77 @@ export const salesChatStaffMessages = pgTable(
     index("sales_chat_staff_messages_conv_idx").on(t.conversationId, t.createdAt),
     check("sales_chat_staff_messages_status_check", sql`${t.status} IN ('SENDING','SENT','FAILED')`),
   ],
+);
+
+/** Ảnh nhân viên gửi kèm tin từ hộp thư (0211). Lưu bản gốc để hộp thư hiện lại ĐÚNG ảnh đã gửi; loại ảnh nhận diện từ byte. */
+export const salesChatStaffImages = pgTable(
+  "sales_chat_staff_images",
+  {
+    id: id(),
+    staffMessageId: text("staff_message_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    position: integer("position").notNull().default(0),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    data: bytea("data").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_chat_staff_images_msg_idx").on(t.staffMessageId, t.position),
+    check("sales_chat_staff_images_type_check", sql`${t.contentType} IN ('image/jpeg','image/png','image/webp')`),
+    check("sales_chat_staff_images_size_check", sql`${t.bytes} > 0`),
+  ],
+);
+
+/**
+ * NHÃN HỘI THOẠI (0211 · lib/sales-chatbot/inbox-labels.ts): bộ nhãn của tổ chức (tên + màu trong bảng màu đóng). Nhãn chỉ để
+ * NGƯỜI phân loại / lọc hộp thư — không tham gia phép tính nào. Gỡ nhãn = lưu trữ (`archived_at`), không xoá dòng đã gắn.
+ */
+export const salesChatLabels = pgTable(
+  "sales_chat_labels",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("gray"),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+    archivedAt: ts("archived_at"),
+  },
+  (t) => [
+    uniqueIndex("sales_chat_labels_name_key").on(sql`lower(${t.name})`).where(sql`${t.archivedAt} is null`),
+    check("sales_chat_labels_color_check", sql`${t.color} IN ('gray','red','orange','amber','green','teal','blue','violet','pink')`),
+  ],
+);
+
+export const salesChatConversationLabels = pgTable(
+  "sales_chat_conversation_labels",
+  {
+    conversationId: text("conversation_id").notNull(),
+    labelId: text("label_id").notNull(),
+    addedBy: text("added_by"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.conversationId, t.labelId] }), index("sales_chat_conversation_labels_label_idx").on(t.labelId)],
+);
+
+/**
+ * GHI CHÚ NỘI BỘ của hội thoại (0211): nhân viên ghi cho nhau — KHÔNG gửi khách, KHÔNG vào lịch sử của bot, KHÔNG phép tính nào
+ * đọc. Mang khoá tài khoản + ảnh chụp tên do máy chủ đọc (luật 34). Xoá = đánh dấu (`deleted_at`), không xoá dòng.
+ */
+export const salesChatNotes = pgTable(
+  "sales_chat_notes",
+  {
+    id: id(),
+    conversationId: text("conversation_id").notNull(),
+    userId: text("user_id").notNull(),
+    userName: text("user_name").notNull().default(""),
+    text: text("text").notNull(),
+    createdAt: createdAt(),
+    deletedAt: ts("deleted_at"),
+    deletedBy: text("deleted_by"),
+  },
+  (t) => [index("sales_chat_notes_conv_idx").on(t.conversationId, t.createdAt)],
 );
 
 /**

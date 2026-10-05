@@ -5,10 +5,12 @@ import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
-import { zaloWindow } from "@/lib/integrations/zalo/oa";
+import { sha256Hex, sniffImageType } from "@/lib/creative/images";
+import { zaloWindow, ZALO_IMAGE_MAX_BYTES } from "@/lib/integrations/zalo/oa";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { appendContextMessages, resumeConversationToAi, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
+import { labelsFor, listLabels, notesFor } from "@/lib/sales-chatbot/inbox-labels";
 import { PAGE_REPLY, STAFF_OUT_PREFIX, STAFF_REASON, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
 import { MESSAGING_WINDOW_MS } from "@/lib/sales-chatbot/followup-shared";
 import {
@@ -16,6 +18,9 @@ import {
   INBOX_CHANNELS,
   INBOX_FILTERS,
   INBOX_OUTCOME_LABEL,
+  STAFF_IMAGE_MAX_BYTES,
+  STAFF_IMAGE_TYPES,
+  STAFF_IMAGES_MAX,
   STAFF_REPLY_MAX,
   type InboxChannel,
   type InboxFilter,
@@ -26,10 +31,12 @@ import {
   type TimelineItem,
   type TimelineSide,
 } from "@/lib/sales-chatbot/inbox-shared";
-import { sendBotText } from "@/lib/sales-chatbot/messenger";
+
+type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
+import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion } from "@/lib/sales-chatbot/operating-mode";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
-import { sendZaloText, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
+import { sendZaloImages, sendZaloText, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
 
 /**
  * ═══════════ HỘP THƯ NGƯỜI TRONG ERP (M8 · docs/productization/MIGRATION_PLAN.md) ═══════════
@@ -77,6 +84,7 @@ const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat
 
 const listZ = z.object({
   filter: z.enum(INBOX_FILTERS).catch("ALL"),
+  label: z.string().trim().min(1).max(100).nullable().catch(null),
   channel: z.enum(INBOX_CHANNELS).nullable().catch(null),
   q: z.string().trim().max(80).catch(""),
 });
@@ -111,6 +119,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   const u = schema.users;
   const base: SQL[] = [ne(c.channel, "TEST")];
   if (q.channel) base.push(eq(c.channel, q.channel));
+  if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
   if (q.q) {
     const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
     base.push(or(sql`${cu.name} ilike ${like}`, sql`${cu.phone} ilike ${like}`, sql`${c.state}->'customer'->>'name' ilike ${like}`, sql`${c.state}->'customer'->>'phone' ilike ${like}`, sql`${INBOUND_NAME} ilike ${like}`)!);
@@ -192,6 +201,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
     }
   }
 
+  const labels = await labelsFor(rows.map((r) => r.id));
   return {
     ok: true,
     counts,
@@ -209,6 +219,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       assigneeUserId: r.assigneeUserId,
       assigneeName: r.assigneeName,
       hasOrder: Boolean(r.hasOrder),
+      labels: labels.get(r.id) ?? [],
     })),
   };
 }
@@ -278,7 +289,13 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   }
   const s = schema.salesChatStaffMessages;
   const staff = await db.select().from(s).where(eq(s.conversationId, conv.id)).orderBy(desc(s.createdAt)).limit(TIMELINE_MAX);
-  for (const r of staff) items.push({ key: `s:${r.id}`, at: (r.sentAt ?? r.createdAt).toISOString(), side: "STAFF", text: r.text, images: [], author: r.userName || "Nhân viên", status: r.status as "SENDING" | "SENT" | "FAILED", error: r.error });
+  // Ảnh nhân viên đã gửi: đọc mã ảnh (không kéo byte) — trang mở ảnh qua tuyến có kiểm quyền.
+  const withImages = staff.filter((r) => r.imageCount > 0).map((r) => r.id);
+  const si = schema.salesChatStaffImages;
+  const imageRows = withImages.length ? await db.select({ id: si.id, staffMessageId: si.staffMessageId }).from(si).where(inArray(si.staffMessageId, withImages)).orderBy(asc(si.position)) : [];
+  const imagesOf = new Map<string, string[]>();
+  for (const r of imageRows) imagesOf.set(r.staffMessageId, [...(imagesOf.get(r.staffMessageId) ?? []), `/api/ai-sales/inbox-images/${r.id}`]);
+  for (const r of staff) items.push({ key: `s:${r.id}`, at: (r.sentAt ?? r.createdAt).toISOString(), side: "STAFF", text: r.text, images: imagesOf.get(r.id) ?? [], author: r.userName || "Nhân viên", status: r.status as "SENDING" | "SENT" | "FAILED", error: r.error });
   items.sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
 
   // Khách + đơn.
@@ -306,6 +323,7 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   if (conv.assigneeUserId) assigneeName = (await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, conv.assigneeUserId)).limit(1))[0]?.name ?? null;
   const window = sendWindowOf(conv, now);
   const canReply = canReplyTo(user);
+  const [labelMap, allLabels, notes] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id)]);
   return {
     ok: true,
     thread: {
@@ -324,29 +342,56 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       items: items.slice(-TIMELINE_MAX),
       orders,
       canReply: canReply && window.kind !== "CLOSED",
+      canWork: canReply,
       canManage: can(user, MANAGE),
       replyBlockedReason: !canReply ? NO_REPLY : window.kind === "CLOSED" ? window.note : null,
+      labels: labelMap.get(conv.id) ?? [],
+      allLabels,
+      notes,
     },
   };
 }
 
 const sendZ = z
   .object({
-    text: z.string().trim().min(1, "Tin trống.").max(STAFF_REPLY_MAX, `Tin tối đa ${STAFF_REPLY_MAX} ký tự.`),
+    text: z.string().trim().max(STAFF_REPLY_MAX, `Tin tối đa ${STAFF_REPLY_MAX} ký tự.`).default(""),
     requestKey: z.string().trim().regex(/^[A-Za-z0-9-]{8,64}$/, "Khoá lượt gửi không hợp lệ — tải lại trang."),
     confirmPaid: z.boolean().default(false),
   })
   .strict();
 
 export type SendDeps = FanpageDeps;
+export type StaffImageInput = { data: Uint8Array };
 
 /** Lý do «nhân viên đang trả lời» của kênh — bot tự nhận lại sau 30 phút (fanpage / Zalo); chat web chờ người trả lại. */
 function staffReasonOf(channel: string): string {
   return channel === "ZALO" ? ZALO_STAFF_REASON : channel === "WEB" ? WEB_STAFF_REASON : STAFF_REASON;
 }
 
-/** Nhân viên gửi MỘT tin cho khách từ hộp thư ERP. Không ném — lỗi trả về để form giữ nguyên chữ đã gõ. */
-export async function sendStaffReplyCore(user: SessionUser, conversationId: unknown, raw: unknown, deps: SendDeps = {}): Promise<InboxResult<{ messageId: string; reused: boolean }>> {
+/**
+ * Kiểm ảnh TRƯỚC khi ghi gì: loại nhận diện từ BYTE (không tin tên tệp / kiểu trình duyệt khai), trần số ảnh + dung lượng, và
+ * luật của kênh (Zalo: JPG / PNG ≤ 1 MB; chat web chưa nhận ảnh từ hộp thư).
+ */
+export function checkStaffImages(channel: string, images: readonly StaffImageInput[]): { ok: true; images: { data: Uint8Array; contentType: StaffImageType; sha256: string }[] } | { ok: false; error: string } {
+  if (!images.length) return { ok: true, images: [] };
+  if (images.length > STAFF_IMAGES_MAX) return { ok: false, error: `Mỗi tin tối đa ${STAFF_IMAGES_MAX} ảnh.` };
+  if (channel === "WEB") return { ok: false, error: "Chat web chưa nhận ảnh từ hộp thư — gửi chữ (hoặc link ảnh)." };
+  const out: { data: Uint8Array; contentType: StaffImageType; sha256: string }[] = [];
+  for (const [i, img] of images.entries()) {
+    const type = sniffImageType(img.data);
+    if (!type || !(STAFF_IMAGE_TYPES as readonly string[]).includes(type)) return { ok: false, error: `Ảnh ${i + 1}: chỉ nhận JPG / PNG / WEBP.` };
+    if (img.data.byteLength > STAFF_IMAGE_MAX_BYTES) return { ok: false, error: `Ảnh ${i + 1} quá ${Math.round(STAFF_IMAGE_MAX_BYTES / 1024 / 1024)} MB.` };
+    if (channel === "ZALO" && (type === "image/webp" || img.data.byteLength > ZALO_IMAGE_MAX_BYTES)) return { ok: false, error: `Ảnh ${i + 1}: Zalo chỉ nhận JPG / PNG tối đa 1 MB.` };
+    out.push({ data: img.data, contentType: type as StaffImageType, sha256: sha256Hex(img.data) });
+  }
+  return { ok: true, images: out };
+}
+
+/**
+ * Nhân viên gửi MỘT tin (chữ, ảnh, hoặc cả hai) cho khách từ hộp thư ERP. Không ném — lỗi trả về để form giữ nguyên tin đã soạn.
+ * Gửi chữ trước, ảnh sau; chữ đã tới khách thì ghi `text_sent_at` ⇒ bấm lại một tin hỏng ở phần ảnh chỉ gửi lại ẢNH.
+ */
+export async function sendStaffReplyCore(user: SessionUser, conversationId: unknown, raw: unknown, deps: SendDeps = {}, rawImages: readonly StaffImageInput[] = []): Promise<InboxResult<{ messageId: string; reused: boolean }>> {
   if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
   if (!canReplyTo(user)) return { ok: false, error: NO_REPLY };
   const parsed = sendZ.safeParse(raw);
@@ -354,6 +399,9 @@ export async function sendStaffReplyCore(user: SessionUser, conversationId: unkn
   const { text, requestKey, confirmPaid } = parsed.data;
   const conv = await loadConv(conversationId);
   if (!conv) return { ok: false, error: "Không có hội thoại này." };
+  const checked = checkStaffImages(conv.channel, rawImages);
+  if (!checked.ok) return checked;
+  if (!text && !checked.images.length) return { ok: false, error: "Tin trống — gõ chữ hoặc chọn ảnh." };
   const now = deps.now ?? (() => new Date());
   const window = sendWindowOf(conv, now());
   if (window.kind === "CLOSED") return { ok: false, error: window.note };
@@ -362,43 +410,65 @@ export async function sendStaffReplyCore(user: SessionUser, conversationId: unkn
 
   const db = await getDb();
   const s = schema.salesChatStaffMessages;
+  const si = schema.salesChatStaffImages;
   // Tên do MÁY CHỦ đọc từ `users` (luật 34) — không nhận từ trình duyệt.
   const [me] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, user.id)).limit(1);
   const inserted = await db
     .insert(s)
-    .values({ conversationId: conv.id, requestKey, userId: user.id, userName: me?.name ?? user.name ?? "", channel: conv.channel, text, status: "SENDING" })
+    .values({ conversationId: conv.id, requestKey, userId: user.id, userName: me?.name ?? user.name ?? "", channel: conv.channel, text, imageCount: checked.images.length, status: "SENDING" })
     .onConflictDoNothing({ target: [s.conversationId, s.requestKey] })
     .returning({ id: s.id });
   let rowId = inserted[0]?.id;
-  if (!rowId) {
+  let row: { text: string; textSentAt: Date | null; imageCount: number };
+  if (rowId) {
+    if (checked.images.length) await db.insert(si).values(checked.images.map((img, position) => ({ staffMessageId: rowId!, conversationId: conv.id, position, contentType: img.contentType, bytes: img.data.byteLength, sha256: img.sha256, data: Buffer.from(img.data) })));
+    row = { text, textSentAt: null, imageCount: checked.images.length };
+  } else {
     const [prev] = await db.select().from(s).where(and(eq(s.conversationId, conv.id), eq(s.requestKey, requestKey))).limit(1);
     if (!prev) return { ok: false, error: "Không ghi được tin — thử lại." };
     if (prev.status === "SENT") return { ok: true, messageId: prev.id, reused: true };
     if (prev.status === "SENDING") return { ok: false, error: "Tin này đang được gửi — đợi vài giây." };
-    // FAILED: lượt bấm lại cùng khoá = thử gửi lại đúng tin đó.
-    const retried = await db.update(s).set({ status: "SENDING", error: null, text }).where(and(eq(s.id, prev.id), eq(s.status, "FAILED"))).returning({ id: s.id });
+    // FAILED: lượt bấm lại cùng khoá = gửi lại ĐÚNG tin đã lưu (chữ + ảnh đã lưu), không phải thứ trình duyệt gửi lần này.
+    const retried = await db.update(s).set({ status: "SENDING", error: null }).where(and(eq(s.id, prev.id), eq(s.status, "FAILED"))).returning({ id: s.id });
     if (!retried.length) return { ok: false, error: "Tin này đang được gửi — đợi vài giây." };
     rowId = prev.id;
+    row = { text: prev.text, textSentAt: prev.textSentAt, imageCount: prev.imageCount };
   }
+  const mark = { staffMessageId: rowId };
 
-  let sent: { ok: true } | { ok: false; error: string };
+  const fail = async (error: string): Promise<InboxResult<{ messageId: string; reused: boolean }>> => {
+    await db.update(s).set({ status: "FAILED", error: error.slice(0, 500) }).where(eq(s.id, mark.staffMessageId));
+    return { ok: false, error };
+  };
   try {
-    if (conv.channel === "ZALO") sent = await sendZaloText(conv.threadId!, text, { staffMessageId: rowId }, deps);
-    else if (conv.channel === "FANPAGE") sent = await sendBotText(conv.pageId!, conv.threadId!, text, deps, { staffMessageId: rowId });
-    else if (conv.channel === "WEB") {
-      // Chat web không có kênh đẩy: tin vào lịch sử hội thoại, trang chat của khách tự đọc lại.
-      await appendContextMessages(conv.id, [{ role: "assistant", text }]);
-      sent = { ok: true };
-    } else sent = { ok: false, error: `Kênh ${conv.channel} chưa gửi được từ hộp thư.` };
+    // ── Chữ ──
+    if (row.text && !row.textSentAt) {
+      let sent: { ok: true } | { ok: false; error: string };
+      if (conv.channel === "ZALO") sent = await sendZaloText(conv.threadId!, row.text, mark, deps);
+      else if (conv.channel === "FANPAGE") sent = await sendBotText(conv.pageId!, conv.threadId!, row.text, deps, mark);
+      else if (conv.channel === "WEB") {
+        // Chat web không có kênh đẩy: tin vào lịch sử hội thoại, trang chat của khách tự đọc lại.
+        await appendContextMessages(conv.id, [{ role: "assistant", text: row.text }]);
+        sent = { ok: true };
+      } else sent = { ok: false, error: `Kênh ${conv.channel} chưa gửi được từ hộp thư.` };
+      if (!sent.ok) return await fail(sent.error);
+      await db.update(s).set({ textSentAt: now() }).where(eq(s.id, mark.staffMessageId));
+    }
+    // ── Ảnh (đọc từ CSDL — đúng ảnh đã lưu cho tin này) ──
+    if (row.imageCount > 0) {
+      const imgs = await db.select({ data: si.data, contentType: si.contentType }).from(si).where(eq(si.staffMessageId, mark.staffMessageId)).orderBy(asc(si.position));
+      const payload = imgs.map((i) => ({ data: new Uint8Array(i.data), contentType: i.contentType }));
+      let sent: { ok: true } | { ok: false; error: string };
+      if (conv.channel === "ZALO") sent = await sendZaloImages(conv.threadId!, payload, mark, deps);
+      else if (conv.channel === "FANPAGE") sent = await sendPageImages(conv.pageId!, conv.threadId!, payload, deps, mark);
+      else sent = { ok: false, error: "Kênh này chưa nhận ảnh từ hộp thư." };
+      if (!sent.ok) return await fail(row.text ? `Đã gửi chữ; ẢNH chưa gửi được: ${sent.error}` : sent.error);
+    }
   } catch (error) {
-    sent = { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-  if (!sent.ok) {
-    await db.update(s).set({ status: "FAILED", error: sent.error.slice(0, 500) }).where(eq(s.id, rowId));
-    return { ok: false, error: sent.error };
+    return await fail(error instanceof Error ? error.message : String(error));
   }
   const at = now();
-  await db.update(s).set({ status: "SENT", sentAt: at, error: null }).where(eq(s.id, rowId));
+  await db.update(s).set({ status: "SENT", sentAt: at, error: null }).where(eq(s.id, mark.staffMessageId));
 
   // Bot nhường + người cầm hội thoại. Đang CẦN NGƯỜI vì lý do khác ⇒ giữ lý do đó.
   const c = schema.salesChatConversations;
@@ -417,9 +487,18 @@ export async function sendStaffReplyCore(user: SessionUser, conversationId: unkn
       updatedAt: at,
     })
     .where(eq(c.id, conv.id));
-  if (!wasHandoff) await recordConversationEvent(conv.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "STAFF_REPLIED", key: `staff:${STAFF_OUT_PREFIX}${rowId}` });
-  await recordConversationEvent(conv.id, { type: "human.replied", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, payload: { via: "ERP_INBOX", chars: text.length }, key: `human-reply:${rowId}` });
-  return { ok: true, messageId: rowId, reused: false };
+  if (!wasHandoff) await recordConversationEvent(conv.id, { type: "human.took_over", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, reasonCode: "STAFF_REPLIED", key: `staff:${STAFF_OUT_PREFIX}${mark.staffMessageId}` });
+  await recordConversationEvent(conv.id, { type: "human.replied", actorKind: "HUMAN", actorUserId: user.id, occurredAt: at, payload: { via: "ERP_INBOX", chars: row.text.length, images: row.imageCount }, key: `human-reply:${mark.staffMessageId}` });
+  return { ok: true, messageId: mark.staffMessageId, reused: false };
+}
+
+/** Một ảnh nhân viên đã gửi — cho tuyến xem ảnh của hộp thư (đòi quyền xem ở tuyến). */
+export async function readStaffImage(id: string): Promise<{ contentType: string; data: Buffer } | null> {
+  if (!id || id.length > 100) return null;
+  const db = await getDb();
+  const si = schema.salesChatStaffImages;
+  const [row] = await db.select({ contentType: si.contentType, data: si.data }).from(si).where(eq(si.id, id)).limit(1);
+  return row ? { contentType: row.contentType, data: Buffer.from(row.data) } : null;
 }
 
 /** Nhận hội thoại về mình. Người khác đang cầm ⇒ chỉ người quản lý chatbot giao lại được (`assignConversationCore`). */

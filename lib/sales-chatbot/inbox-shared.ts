@@ -33,6 +33,7 @@ export type InboxRow = {
   assigneeUserId: string | null;
   assigneeName: string | null;
   hasOrder: boolean;
+  labels: InboxLabel[];
 };
 
 /** Ai nói: KHÁCH · BOT · NHÂN VIÊN qua hộp thư ERP (có tên) · PHÍA PAGE ngoài ERP (nhân viên trên Pancake / Hộp thư Meta / Zalo OA, hoặc trả lời tự động). */
@@ -76,8 +77,14 @@ export type InboxThread = {
   items: TimelineItem[];
   orders: InboxOrder[];
   canReply: boolean;
+  /** Có quyền làm việc với hội thoại (gắn nhãn, ghi chú) — không phụ thuộc khung gửi của kênh. */
+  canWork: boolean;
   canManage: boolean;
   replyBlockedReason: string | null;
+  /** Nhãn đang gắn · bộ nhãn để chọn · ghi chú nội bộ (0211). */
+  labels: InboxLabel[];
+  allLabels: InboxLabel[];
+  notes: InboxNote[];
 };
 
 /** Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. */
@@ -93,3 +100,30 @@ export const INBOX_OUTCOME_LABEL: Record<string, string> = {
 
 /** Tin nhân viên tối đa (chia đoạn theo trần từng kênh khi gửi). */
 export const STAFF_REPLY_MAX = 4_000;
+
+// ───────────────────────────── Ảnh · nhãn · ghi chú (0211) ─────────────────────────────
+
+/** Ảnh mỗi tin nhân viên gửi — tối đa 4 ảnh, mỗi ảnh ≤ 5 MB (Zalo: JPG / PNG ≤ 1 MB — kiểm ở máy chủ). */
+export const STAFF_IMAGES_MAX = 4;
+export const STAFF_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const STAFF_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+/** Bảng màu ĐÓNG của nhãn (CHECK ở CSDL) — không có ô gõ màu tự do. */
+export const LABEL_COLORS = ["gray", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"] as const;
+export type LabelColor = (typeof LABEL_COLORS)[number];
+export const LABEL_COLOR_CLASS: Record<LabelColor, string> = {
+  gray: "bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100",
+  red: "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-200",
+  orange: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-200",
+  amber: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
+  green: "bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-200",
+  teal: "bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200",
+  blue: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200",
+  violet: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-200",
+  pink: "bg-pink-100 text-pink-800 dark:bg-pink-950/60 dark:text-pink-200",
+};
+export const LABEL_NAME_MAX = 40;
+export const NOTE_MAX = 1_000;
+
+export type InboxLabel = { id: string; name: string; color: LabelColor };
+export type InboxNote = { id: string; text: string; author: string; userId: string; at: string; canDelete: boolean };

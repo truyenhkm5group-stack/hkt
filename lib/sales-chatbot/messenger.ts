@@ -4,7 +4,7 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { messagingConnectionSummaries, openActiveConnection, saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, sendMessengerText, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, sendMessengerImage, sendMessengerText, subscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -27,8 +27,11 @@ import {
   PAGE_REPLIED_REASON,
   PAGE_REPLY,
   RETRY_MS,
+  sendFanpageImages,
   sendFanpageText,
+  STAFF_IMAGE_MARK,
   STAFF_INFER_WINDOW_MS,
+  STAFF_OUT_PREFIX,
   STAFF_REASON,
   staffOutRowId,
   stopFollowups,
@@ -215,6 +218,35 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
       .onConflictDoNothing({ target: t.messageId });
   }
   return { ok: true };
+}
+
+/** Nhân viên gửi ẢNH qua Send API (0211): mỗi ảnh một lời gọi (tải tệp kèm). Dòng ghi sẵn «[Ảnh]» như đường Pancake. */
+export async function sendMessengerPageImages(pageId: string, psid: string, images: readonly { data: Uint8Array; contentType: string }[], deps: FanpageDeps, mark: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  const conn = await openActiveConnection(MESSENGER_CONNECTOR);
+  if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ok: false, error: "Kết nối Messenger chưa bật / khác page" };
+  const app = messengerApp();
+  if (!app) return { ok: false, error: "Nền tảng chưa cấu hình app Facebook" };
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
+  const now = deps.now ?? (() => new Date());
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rowId = `${STAFF_OUT_PREFIX}${mark.staffMessageId}:img`;
+  await db.insert(t).values({ pageId, threadId: psid, messageId: rowId, text: STAFF_IMAGE_MARK, status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+  for (const [i, img] of images.entries()) {
+    const sent = await sendMessengerImage(app, token, psid, img, deps.fetch ?? fetch);
+    if (!sent.ok) {
+      if (i === 0) await db.delete(t).where(eq(t.messageId, rowId));
+      return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${images.length} ảnh)` : sent.error };
+    }
+  }
+  return { ok: true };
+}
+
+/** Ảnh của nhân viên vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */
+export async function sendPageImages(pageId: string, threadId: string, images: readonly { data: Uint8Array; contentType: string }[], deps: FanpageDeps, mark: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  const viaPancake = await sendFanpageImages(pageId, threadId, images, deps, mark);
+  if (viaPancake.ok || !/chưa bật \/ khác page/.test(viaPancake.error)) return viaPancake;
+  return sendMessengerPageImages(pageId, threadId, images, deps, mark);
 }
 
 /** Một tin của bot vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */

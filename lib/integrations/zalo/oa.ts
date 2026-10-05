@@ -22,6 +22,9 @@ import { createHash, timingSafeEqual } from "node:crypto";
 export const ZALO_OAUTH_TOKEN_URL = "https://oauth.zaloapp.com/v4/oa/access_token";
 export const ZALO_MESSAGE_CS_URL = "https://openapi.zalo.me/v3.0/oa/message/cs";
 export const ZALO_GET_OA_URL = "https://openapi.zalo.me/v2.0/oa/getoa";
+/** Tải ảnh lên OA (multipart `file`) ⇒ `attachment_id` để gửi trong tin tư vấn. Zalo chỉ nhận JPG / PNG ≤ 1 MB. */
+export const ZALO_UPLOAD_IMAGE_URL = "https://openapi.zalo.me/v2.0/oa/upload/image";
+export const ZALO_IMAGE_MAX_BYTES = 1024 * 1024;
 
 export const ZALO_LIMITS = {
   timeoutMs: 10_000,
@@ -173,6 +176,26 @@ export async function zaloSendText(input: { accessToken: string; userId: string;
   const text = input.text.trim().slice(0, ZALO_LIMITS.textMax);
   if (!text) return { ok: false, error: "Tin trống.", window: false };
   const r = await callZalo(ZALO_MESSAGE_CS_URL, { method: "POST", headers: { "content-type": "application/json", access_token: input.accessToken }, body: JSON.stringify({ recipient: { user_id: input.userId }, message: { text } }) }, [input.accessToken], deps);
+  if (!r.ok) return { ok: false, error: r.error, window: r.code !== null && ZALO_WINDOW_ERRORS.has(r.code) };
+  return { ok: true, messageId: str(r.data.message_id) || null };
+}
+
+/** Tải MỘT ảnh lên OA ⇒ `attachment_id` (Zalo: JPG / PNG, ≤ 1 MB). Không gửi gì cho khách. */
+export async function zaloUploadImage(input: { accessToken: string; data: Uint8Array; contentType: string }, deps: ZaloDeps = {}): Promise<{ ok: true; attachmentId: string } | { ok: false; error: string }> {
+  if (input.contentType !== "image/jpeg" && input.contentType !== "image/png") return { ok: false, error: "Zalo chỉ nhận ảnh JPG hoặc PNG." };
+  if (input.data.byteLength > ZALO_IMAGE_MAX_BYTES) return { ok: false, error: "Zalo chỉ nhận ảnh tối đa 1 MB." };
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(input.data)], { type: input.contentType }), input.contentType === "image/png" ? "anh.png" : "anh.jpg");
+  const r = await callZalo(ZALO_UPLOAD_IMAGE_URL, { method: "POST", headers: { access_token: input.accessToken }, body: form }, [input.accessToken], deps);
+  if (!r.ok) return { ok: false, error: r.error };
+  const id = str(r.data.attachment_id);
+  return id ? { ok: true, attachmentId: id } : { ok: false, error: "Zalo nhận ảnh nhưng không trả mã ảnh." };
+}
+
+/** Gửi MỘT ảnh đã tải lên cho khách (tin tư vấn, mẫu «media»). Lỗi khung 48 giờ / 7 ngày mang cờ `window`. */
+export async function zaloSendImage(input: { accessToken: string; userId: string; attachmentId: string }, deps: ZaloDeps = {}): Promise<{ ok: true; messageId: string | null } | { ok: false; error: string; window: boolean }> {
+  const body = { recipient: { user_id: input.userId }, message: { attachment: { type: "template", payload: { template_type: "media", elements: [{ media_type: "image", attachment_id: input.attachmentId }] } } } };
+  const r = await callZalo(ZALO_MESSAGE_CS_URL, { method: "POST", headers: { "content-type": "application/json", access_token: input.accessToken }, body: JSON.stringify(body) }, [input.accessToken], deps);
   if (!r.ok) return { ok: false, error: r.error, window: r.code !== null && ZALO_WINDOW_ERRORS.has(r.code) };
   return { ok: true, messageId: str(r.data.message_id) || null };
 }
