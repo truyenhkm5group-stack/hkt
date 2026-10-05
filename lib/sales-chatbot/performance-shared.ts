@@ -25,7 +25,7 @@ export type AiSalesMetric = {
   actor: "AI" | "HUMAN" | "MIXED";
   minimumSample: number;
   direction: "HIGHER_BETTER" | "LOWER_BETTER" | "CONTEXT";
-  unit: "PERCENT" | "COUNT" | "VND" | "SECONDS";
+  unit: "PERCENT" | "COUNT" | "VND" | "SECONDS" | "RATIO";
   availability: "MEASURED" | "UNAVAILABLE";
   missingWhat?: string;
 };
@@ -50,6 +50,15 @@ export const AI_SALES_METRICS: readonly AiSalesMetric[] = [
   { key: "ai_sales.experiment_conversion_lift", label: "Chênh lệch ra đơn AI − người (thử nghiệm)", definition: "Tỷ lệ ra đơn / hội thoại của nhánh AI trừ nhánh người, hai nhánh chia NGẪU NHIÊN theo băm và ghim từ lượt đầu (ý định điều trị).", grain: "CONVERSATION", numerator: "đơn gắn với hội thoại của nhánh (orders.sales_conversation_id)", denominator: "hội thoại của nhánh CÓ đường ghi đơn — nhánh người chỉ đo được khi «AI ghi đơn hộ nhân viên» bật, tắt ⇒ chưa đo, không có chênh lệch", source: "sales_chat_conversations.state.experiment + orders · ORDER_OUTCOME", actor: "MIXED", minimumSample: AI_SALES_MIN_SAMPLE, direction: "CONTEXT", unit: "PERCENT", availability: "MEASURED" },
   { key: "ai_sales.copilot_adoption_rate", label: "Gợi ý copilot được dùng", definition: "Phần gợi ý AI mà nhân viên gửi gần như nguyên văn hoặc sửa nhẹ (độ giống với câu thật của page ≥ ngưỡng EDITED).", grain: "REPLY", numerator: "gợi ý chấm SAME hoặc EDITED", denominator: "gợi ý đã chấm có câu thật của page (trừ NO_REPLY — không ai trả lời không phải là từ chối gợi ý)", source: "sales_copilot_suggestions (verdict, similarity)", actor: "MIXED", minimumSample: AI_SALES_MIN_SAMPLE, direction: "HIGHER_BETTER", unit: "PERCENT", availability: "MEASURED" },
   { key: "ai_sales.replay_price_ungrounded_rate", label: "Câu báo giá không có căn cứ (phát lại)", definition: "Khi phát lại hội thoại cũ ở kênh THỬ: phần câu trả lời có số tiền KHÔNG nằm trong tập căn cứ (giá bảng · số công cụ trả · phí ship đã khai · số shop đã nói). Là cờ để người đọc, không phải bằng chứng chắc chắn bịa giá.", grain: "REPLY", numerator: "điểm phát lại mang cờ PRICE_UNGROUNDED", denominator: "điểm phát lại bot trả lời được (trừ cờ ERROR)", source: "sales_replay_points.flags", actor: "AI", minimumSample: AI_SALES_MIN_SAMPLE, direction: "LOWER_BETTER", unit: "PERCENT", availability: "MEASURED" },
+  { key: "ai_sales.ai_only_delivered_revenue", label: "Doanh thu AI tự bán (đã giao)", definition: "Đơn bot chốt mà không ai chạm vào lượt mua trước mốc chốt — doanh thu GIAO THÀNH CÔNG.", grain: "ORDER", numerator: null, denominator: "đơn có `order.confirmed` trong kỳ gắn hội thoại, nhãn AI_ONLY (`attributeOrder`), kết cục theo ORDER_OUTCOME", source: "sales_conversation_events · orders ⨝ shipments · ORDER_OUTCOME · REVENUE_RECOGNIZED_ON_DELIVERY", actor: "AI", minimumSample: 1, direction: "HIGHER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.ai_assisted_delivered_revenue", label: "Doanh thu AI góp công (đã giao)", definition: "Đơn có người chạm vào VÀ AI đã báo giá / lên nháp / mời mua thêm / lấy được SĐT trước mốc lên đơn — doanh thu GIAO THÀNH CÔNG. Không cộng gộp với AI tự bán.", grain: "ORDER", numerator: null, denominator: "đơn nhãn AI_ASSISTED (`attributeOrder`)", source: "sales_conversation_events · ORDER_OUTCOME", actor: "MIXED", minimumSample: 1, direction: "HIGHER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.human_only_delivered_revenue", label: "Doanh thu người bán trong hội thoại (đã giao)", definition: "Đơn người lên / chốt trong hội thoại mà AI không góp việc bán hàng nào (gồm đơn AI ghi hộ nhân viên). Đơn ngoài hội thoại không thuộc phép này.", grain: "ORDER", numerator: null, denominator: "đơn nhãn HUMAN_ONLY (`attributeOrder`)", source: "sales_conversation_events · ORDER_OUTCOME", actor: "HUMAN", minimumSample: 1, direction: "CONTEXT", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.followup_reply_rate", label: "Khách trả lời sau lời nhắc", definition: "Phần hội thoại bot nhắc trong kỳ mà khách nhắn lại sau lần nhắc (cùng lượt mua).", grain: "CONVERSATION", numerator: "hội thoại có `message.received` sau `followup.sent` cùng lượt mua", denominator: "hội thoại có `followup.sent` trong kỳ", source: "sales_conversation_events", actor: "AI", minimumSample: AI_SALES_MIN_SAMPLE, direction: "HIGHER_BETTER", unit: "PERCENT", availability: "MEASURED" },
+  { key: "ai_sales.followup_recovered_revenue", label: "Doanh thu follow-up thu hồi (đã giao)", definition: "Đơn chốt SAU khi khách trả lời một lời nhắc của bot (cùng lượt mua) — doanh thu GIAO THÀNH CÔNG. Khách tự quay lại không qua lời nhắc thì không tính.", grain: "ORDER", numerator: null, denominator: "đơn có `order.confirmed` trong kỳ, mốc lên đơn sau tin trả lời lời nhắc (`followupRecovery`)", source: "sales_conversation_events · ORDER_OUTCOME", actor: "AI", minimumSample: 1, direction: "HIGHER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.aov", label: "Giá trị đơn bot chốt trung bình", definition: "Σ giá trị đơn bot chốt ÷ số đơn bot chốt (giá trị đặt, chưa phải doanh thu).", grain: "ORDER", numerator: "Σ giá trị đơn bot chốt", denominator: "đơn bot chốt trong kỳ", source: "sales_conversation_events + orders", actor: "AI", minimumSample: 1, direction: "HIGHER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.delivered_revenue_per_conversation", label: "Doanh thu đã giao / hội thoại", definition: "Doanh thu giao thành công từ đơn bot ÷ hội thoại có khách nhắn.", grain: "CONVERSATION", numerator: "doanh thu giao thành công từ đơn bot", denominator: "hội thoại có khách nhắn trong kỳ", source: "sales_conversation_events · ORDER_OUTCOME", actor: "AI", minimumSample: AI_SALES_MIN_SAMPLE, direction: "HIGHER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.ai_cost_per_conversation", label: "Chi phí AI / hội thoại", definition: "Chi phí AI phần bán hàng ÷ hội thoại có khách nhắn. Có lượt chưa định giá ⇒ cận dưới.", grain: "CONVERSATION", numerator: "chi phí AI bán hàng (platform_ai_usage)", denominator: "hội thoại có khách nhắn trong kỳ", source: "platform_ai_usage · sales_conversation_events", actor: "AI", minimumSample: AI_SALES_MIN_SAMPLE, direction: "LOWER_BETTER", unit: "VND", availability: "MEASURED" },
+  { key: "ai_sales.revenue_per_ai_cost", label: "Doanh thu đã giao ÷ chi phí AI", definition: "Mỗi đồng chi phí AI bán hàng đi cùng bao nhiêu đồng doanh thu giao thành công từ đơn bot. Chi phí 0 / chưa biết ⇒ trống.", grain: "ORDER", numerator: "doanh thu giao thành công từ đơn bot", denominator: "chi phí AI bán hàng", source: "platform_ai_usage · ORDER_OUTCOME", actor: "AI", minimumSample: 1, direction: "HIGHER_BETTER", unit: "RATIO", availability: "MEASURED" },
   { key: "ai_sales.per_staff_conversion", label: "Ra đơn theo từng nhân viên", definition: "So AI với TỪNG nhân viên trên cùng loại hội thoại.", grain: "CONVERSATION", numerator: "hội thoại nhân viên X xử lý ra đơn", denominator: "hội thoại nhân viên X xử lý", source: "—", actor: "HUMAN", minimumSample: AI_SALES_MIN_SAMPLE, direction: "HIGHER_BETTER", unit: "PERCENT", availability: "UNAVAILABLE", missingWhat: "Pancake không cho biết nhân viên NÀO gõ tin trên page (không gửi uid). Cần nhân viên trả lời từ hộp thư trong ERP để có users.id cho từng câu trả lời (MIGRATION_PLAN.md M8)." },
   { key: "ai_sales.objection_rate", label: "Phản đối theo loại", definition: "Khách chê giá / chê ship / chưa tin / để suy nghĩ — bao nhiêu, bot gỡ được bao nhiêu.", grain: "CONVERSATION", numerator: "hội thoại có phản đối loại X", denominator: "hội thoại có khách nhắn", source: "—", actor: "AI", minimumSample: AI_SALES_MIN_SAMPLE, direction: "CONTEXT", unit: "PERCENT", availability: "UNAVAILABLE", missingWhat: "Chưa có bộ phân loại phản đối: bot không ghi nhãn loại phản đối của khách. Cần sự kiện `objection.raised` có nhãn trước khi đo." },
   { key: "ai_sales.csat", label: "Khách hài lòng", definition: "Khách chấm điểm cuộc trò chuyện.", grain: "CONVERSATION", numerator: "lượt chấm tốt", denominator: "lượt chấm", source: "—", actor: "MIXED", minimumSample: AI_SALES_MIN_SAMPLE, direction: "HIGHER_BETTER", unit: "PERCENT", availability: "UNAVAILABLE", missingWhat: "Chưa hỏi khách chấm điểm ở cuối hội thoại — không có dữ liệu nào để đọc." },
@@ -113,3 +122,25 @@ export function estimatedStaffSaving(aiOnlyConversations: number, humanCostPerCo
   return aiOnlyConversations * humanCostPerConversationVnd;
 }
 
+
+/**
+ * Bốn chỉ số kinh tế của bot, TÍNH TỪ đúng các số màn «Hiệu quả» đã có — không đọc nguồn thứ hai:
+ *  · `aovVnd` — giá trị trung bình một đơn bot chốt (giá trị đặt, chưa phải doanh thu). Chưa có đơn ⇒ `null`.
+ *  · `deliveredRevenuePerConversationVnd` — doanh thu GIAO THÀNH CÔNG của đơn bot ÷ hội thoại có khách nhắn (mẫu tối thiểu).
+ *  · `aiCostPerConversationVnd` — chi phí AI bán hàng ÷ hội thoại (mẫu tối thiểu). Có lượt chưa định giá ⇒ CẬN DƯỚI.
+ *  · `revenuePerAiCost` — doanh thu giao thành công ÷ chi phí AI bán hàng. Chi phí `null` hoặc 0 ⇒ `null` (không chia cho 0).
+ * HÀM THUẦN.
+ */
+export type SalesEconomics = { aovVnd: number | null; deliveredRevenuePerConversationVnd: number | null; aiCostPerConversationVnd: number | null; revenuePerAiCost: number | null; costIsLowerBound: boolean };
+
+export function salesEconomics(input: { conversations: number; confirmedOrders: number; confirmedValueVnd: number; deliveredRevenueVnd: number; aiCostVnd: number | null; unknownCostTurns: number }): SalesEconomics {
+  const enough = input.conversations >= AI_SALES_MIN_SAMPLE && input.conversations > 0;
+  const cost = input.aiCostVnd;
+  return {
+    aovVnd: input.confirmedOrders > 0 ? Math.round(input.confirmedValueVnd / input.confirmedOrders) : null,
+    deliveredRevenuePerConversationVnd: enough ? Math.round(input.deliveredRevenueVnd / input.conversations) : null,
+    aiCostPerConversationVnd: enough && cost !== null ? Math.round(cost / input.conversations) : null,
+    revenuePerAiCost: cost !== null && cost > 0 ? input.deliveredRevenueVnd / cost : null,
+    costIsLowerBound: input.unknownCostTurns > 0,
+  };
+}

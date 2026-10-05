@@ -27,8 +27,10 @@ import {
   estimatedStaffSaving,
   parsePerformanceSettings,
   rateOrNull,
+  salesEconomics,
   AI_SALES_MIN_SAMPLE,
   type AiSalesPerformanceSettings,
+  type SalesEconomics,
   type CohortTable,
 } from "@/lib/sales-chatbot/performance-shared";
 import { setSettingJson } from "@/lib/settings";
@@ -51,6 +53,8 @@ export type AiSalesPerformance = {
   /** `null` ở các ô tiền = không người xem nào có quyền thấy tiền (chỉ `ai_sales:manage`). */
   cost: { sellingVnd: number | null; unknownCost: number; turns: number; orderSyncVnd: number | null; testVnd: number | null; perDeliveredOrderVnd: number | null; perConfirmedOrderVnd: number | null; rateVndPerUsd: number } | null;
   human: (AiSalesPerformanceSettings & { estimatedSavingVnd: number | null }) | null;
+  /** AOV · doanh thu / hội thoại · chi phí AI / hội thoại · doanh thu ÷ chi phí AI (`salesEconomics`). Ô chi phí `null` khi không có quyền thấy tiền. */
+  economics: SalesEconomics;
 };
 
 const num = (v: unknown): number => {
@@ -234,6 +238,7 @@ export async function loadAiSalesPerformance(orgCode: string, opts: { days?: num
     orderSync: { orders: num(os?.n), valueVnd: num(os?.value) },
     cost,
     human,
+    economics: salesEconomics({ conversations: total, confirmedOrders: orders.confirmed, confirmedValueVnd: orders.confirmedValueVnd, deliveredRevenueVnd: orders.deliveredRevenueVnd, aiCostVnd: cost?.sellingVnd ?? null, unknownCostTurns: cost?.unknownCost ?? 0 }),
   };
 }
 

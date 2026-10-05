@@ -11,6 +11,8 @@ import { ExperimentBlock } from "./experiment-block";
 import { loadExperimentReport } from "@/lib/sales-chatbot/experiment-report";
 import { loadBasketStats } from "@/lib/sales-chatbot/basket";
 import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
+import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
+import { ORDER_ATTRIBUTIONS, ORDER_ATTRIBUTION_LABEL } from "@/lib/sales-chatbot/attribution-shared";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
 
@@ -59,6 +61,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage });
   const experiment = await loadExperimentReport();
   const basket = await loadBasketStats({ days });
+  const attr = await loadOrderAttribution({ days });
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -203,6 +206,33 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
             </SectionCard>
           </div>
 
+          <SectionCard
+            title="Đơn theo người làm ra"
+            hint={
+              <div className="space-y-1.5 text-xs leading-5">
+                <p>Mỗi đơn chốt trong hội thoại mang ĐÚNG MỘT nhãn. «AI tự bán»: bot chốt, không ai chạm vào trước lúc chốt. «AI góp công»: có người chạm vào và bot đã báo giá / lên nháp / mời mua thêm / lấy được SĐT trước lúc lên đơn. «Người bán»: bot không làm việc bán hàng nào — một câu chào không tính.</p>
+                <p>Ba nhãn không cộng gộp. Đơn ngoài hội thoại (lên tay trên POS) không thuộc bảng này. Doanh thu = đơn GIAO THÀNH CÔNG theo kết cục đơn chung của ERP.</p>
+              </div>
+            }
+          >
+            <div className="grid gap-2 sm:grid-cols-3" data-testid="ai-perf-attribution">
+              {ORDER_ATTRIBUTIONS.map((k) => (
+                <Stat key={k} label={ORDER_ATTRIBUTION_LABEL[k]} value={formatVND(attr.table[k].deliveredRevenueVnd)} sub={`${formatNumber(attr.table[k].delivered)}/${formatNumber(attr.table[k].orders)} đơn đã giao · đặt ${formatVND(attr.table[k].valueVnd)}`} />
+              ))}
+            </div>
+            {attr.table.unattributed ? <p className="mt-2 text-xs text-muted-foreground">{formatNumber(attr.table.unattributed)} đơn chưa quy kết được (thiếu sự kiện lên / chốt đơn trong sổ) — không tính là «người bán».</p> : null}
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="ai-perf-followup">
+              <Stat label="hội thoại bot nhắc lại" value={formatNumber(attr.followup.conversations)} />
+              <Stat label="khách trả lời sau lời nhắc" value={formatPercent(pctOf(attr.followup.replyRate), 0)} sub={`${formatNumber(attr.followup.replied)} hội thoại`} />
+              <Stat label="đơn follow-up thu hồi" value={formatNumber(attr.followup.recoveredOrders)} sub={`đặt ${formatVND(attr.followup.recoveredValueVnd)}`} />
+              <Stat label="doanh thu thu hồi đã giao" value={formatVND(attr.followup.recoveredDeliveredRevenueVnd)} sub={`${formatNumber(attr.followup.recoveredDelivered)} đơn đã giao`} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2" data-testid="ai-perf-economics">
+              <Stat label="giá trị đơn bot chốt trung bình" value={formatVND(r.economics.aovVnd)} />
+              <Stat label="doanh thu đã giao / hội thoại" value={formatVND(r.economics.deliveredRevenuePerConversationVnd)} sub={`${formatNumber(t.conversations)} hội thoại`} />
+            </div>
+          </SectionCard>
+
           {r.cost ? (
             <SectionCard
               title="Chi phí AI & ROI"
@@ -217,6 +247,8 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                 <Stat label="chi phí AI bán hàng (ước tính)" value={formatVND(r.cost.sellingVnd)} sub={r.cost.unknownCost ? `cận dưới · ${formatNumber(r.cost.unknownCost)} lượt chưa định giá` : `${formatNumber(r.cost.turns)} lượt`} />
                 <Stat label="AI / đơn bot chốt" value={formatVND(r.cost.perConfirmedOrderVnd)} />
                 <Stat label="AI / đơn giao thành công" value={formatVND(r.cost.perDeliveredOrderVnd)} />
+                <Stat label="AI / hội thoại" value={formatVND(r.economics.aiCostPerConversationVnd)} sub={r.economics.costIsLowerBound ? "cận dưới" : undefined} />
+                <Stat label="doanh thu đã giao ÷ chi phí AI" value={r.economics.revenuePerAiCost === null ? "—" : `${formatNumber(Math.round(r.economics.revenuePerAiCost))} lần`} sub={r.economics.costIsLowerBound ? "chi phí là cận dưới ⇒ tỷ lệ là cận trên" : undefined} />
                 <Stat label="AI ghi đơn hộ nhân viên" value={formatVND(r.cost.orderSyncVnd)} />
                 <Stat label="khung thử" value={formatVND(r.cost.testVnd)} />
                 <Stat label="tiết kiệm nhân sự (ước tính)" value={formatVND(r.human?.estimatedSavingVnd ?? null)} sub={r.human?.humanCostPerConversationVnd ? `${formatNumber(r.cohorts.aiOnly.conversations)} hội thoại × ${formatVND(r.human.humanCostPerConversationVnd)}` : "chưa khai chi phí người"} />

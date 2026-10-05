@@ -475,6 +475,7 @@ import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
+import { testOrderAttribution } from "./order-attribution.test";
 import { testMetaAdsOrgSync } from "./meta-ads-org.test";
 import { testMetaAdsOrgWinners } from "./meta-ads-org-winners.test";
 import { testMetaAdsOrgPublish } from "./meta-ads-org-publish.test";
@@ -2728,6 +2729,7 @@ async function main() {
   await testCommerceAgent();
   await testZaloOa();
   await testSalesEvents();
+  await testOrderAttribution();
   await testMetaAdsOrgSync();
   // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
   await testMetaAdsOrgWinners();

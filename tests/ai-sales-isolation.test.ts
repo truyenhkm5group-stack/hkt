@@ -34,6 +34,7 @@ import { addQuickReplyImages, deleteQuickReply, listQuickReplies, readQuickReply
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { loadCopilotView } from "@/lib/sales-chatbot/operating-mode";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
+import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
 import { listReplayRuns, loadReplayRun } from "@/lib/sales-chatbot/replay";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -56,6 +57,9 @@ async function adminOf(org: string): Promise<SessionUser> {
   return { id: u.id, email: u.email, name: u.name, role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: org, name: org, isHome: false } };
 }
 
+/** Giá trị đơn mẫu khác nhau theo tổ chức — để phép đọc quy kết lẫn số của tổ chức kia lộ ra ngay. */
+const orderValueOf = (org: string) => 100_000 + (ORGS as readonly string[]).indexOf(org) * 11_000;
+
 async function seed(org: string): Promise<Seeded> {
   const admin = await adminOf(org);
   const MARK = markOf(org);
@@ -77,6 +81,10 @@ async function seed(org: string): Promise<Seeded> {
     await recordConversationEvent(fan.id, { type: "handoff.requested", actorKind: "AI", occurredAt: new Date(), reasonCode: "WHOLESALE", payload: { note: MARK }, key: `asi-ev-${org}` });
     const [run] = await db.insert(schema.salesReplayRuns).values({ targetPoints: 5, days: 7, status: "DONE", summary: { note: MARK }, createdByUserId: admin.id, createdByEmail: admin.email }).returning({ id: schema.salesReplayRuns.id });
     await db.insert(schema.salesReplayPoints).values({ runId: run.id, sourceConversationId: fan.id, sourceChannel: "FANPAGE", sourceSeq: 1, customerText: `Cho em giá sỉ ${MARK}`, historicalSpeaker: "SHOP", aiReply: `Dạ ${MARK}` });
+    // Quy kết từng đơn (docs/revenue-attribution.md): mỗi tổ chức một đơn bot chốt với số tiền RIÊNG — kẻ tấn công đọc thấy số
+    // của nạn nhân là rò.
+    await db.insert(schema.orders).values({ id: `erp-asi-${org}`, stage: "CONFIRMED", status: 1, billFullName: `Khách ${MARK}`, totalPrice: orderValueOf(org), totalPriceAfterDiscount: orderValueOf(org), insertedAt: new Date(), origin: "AI_AGENT", salesConversationId: fan.id });
+    await recordConversationEvent(fan.id, { type: "order.confirmed", actorKind: "CUSTOMER", occurredAt: new Date(), orderId: `erp-asi-${org}`, amountVnd: orderValueOf(org), key: `asi-confirm-${org}` });
     const [sg] = await db.insert(schema.salesCopilotSuggestions).values({ conversationId: fan.id, pageId: `${org}-page`, threadId: `${org}-thread`, customerText: `Cho em giá sỉ ${MARK}`, suggestion: `Dạ ${MARK}` }).returning({ id: schema.salesCopilotSuggestions.id });
     return { admin, fanpageConv: fan.id, testConv: test.id, quickReply: qr.id, image: imgRow.id, replayRun: run.id, suggestion: sg.id };
   });
@@ -159,6 +167,10 @@ async function attack(attacker: string, admin: SessionUser, victimCode: string, 
     if ("ok" in copilot && copilot.rows.some((r) => r.id === victim.suggestion)) refused.push("gợi ý Copilot lẫn của tổ chức khác");
     const perf = await loadAiSalesPerformance(attacker, { withMoney: true });
     results.push(perf);
+    const attr = await loadOrderAttribution({ days: 180 });
+    results.push(attr);
+    const seen = attr.table.AI_ONLY.valueVnd + attr.table.AI_ASSISTED.valueVnd + attr.table.HUMAN_ONLY.valueVnd;
+    if (seen !== orderValueOf(attacker)) refused.push(`quy kết đơn lẫn số của tổ chức khác (${seen} ≠ ${orderValueOf(attacker)})`);
     const convs = await listConversations(200);
     const qrs = await listQuickReplies();
     results.push(convs, qrs);

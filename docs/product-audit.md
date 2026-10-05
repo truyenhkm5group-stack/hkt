@@ -56,9 +56,9 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
 | # | Việc | Phase lệnh | Trạng thái | Ghi chú |
 |---|---|---|---|---|
 | P1 | **Đơn người không thành đơn bot**: «Đơn bot chốt» / doanh thu AI / chi phí AI mỗi đơn chỉ đếm `order.confirmed` KHÔNG do người chốt; hội thoại có đơn do người tạo vào nhóm có người; Messenger ghi `human.took_over` | 1–2 | XONG (nhánh `wt-master-mission`) | Hai vị ngữ dùng chung `lib/sales-chatbot/events-sql.ts`. Đơn bot chốt mang tác nhân CUSTOMER — lọc `= 'AI'` là sai (bài kiểm đột biến bắt cả hai chiều). Tổ chức đã dùng form tạo đơn trong chat (#565, từ 04/10) sẽ thấy số đơn bot GIẢM — đúng hướng |
-| P2 | Quy kết từng đơn AI_ONLY / AI_ASSISTED / HUMAN_ONLY + doanh thu theo nhãn (`docs/revenue-attribution.md`) | 2 | KẾ TIẾP | Hàm thuần + bài kiểm biên |
-| P3 | Follow-up thu hồi: hội thoại có `followup.sent` → khách trả lời → đơn chốt; doanh thu thu hồi qua `ORDER_OUTCOME` | 2/4 | KẾ TIẾP | Đo được ngay từ sổ sự kiện hiện có |
-| P4 | KPI còn thiếu: AOV, doanh thu / hội thoại, chi phí AI / hội thoại, doanh thu ÷ chi phí AI | 2 | KẾ TIẾP | |
+| P2 | Quy kết từng đơn AI_ONLY / AI_ASSISTED / HUMAN_ONLY + doanh thu theo nhãn (`docs/revenue-attribution.md`) | 2 | XONG (nhánh) | `attribution-shared.ts` (luật thuần) + `attribution.ts`; khối «Đơn theo người làm ra» trên màn Hiệu quả; vào bài tấn công cô lập |
+| P3 | Follow-up thu hồi: hội thoại có `followup.sent` → khách trả lời → đơn chốt; doanh thu thu hồi qua `ORDER_OUTCOME` | 2/4 | XONG (nhánh) | `followupRecovery` — đơn phải lên SAU tin trả lời, cùng lượt mua |
+| P4 | KPI còn thiếu: AOV, doanh thu / hội thoại, chi phí AI / hội thoại, doanh thu ÷ chi phí AI | 2 | XONG (nhánh) | `salesEconomics` (thuần); 9 khoá mới trong `AI_SALES_METRICS` |
 | P5 | Màn chủ shop «Hôm nay AI kiếm bao nhiêu» (di động trước) đọc CÙNG hàm của màn «Hiệu quả» | 2 | KẾ TIẾP | Không viết công thức thứ hai |
 | P6 | Lý do mất khách: mã lý do đóng cho `mark_declined` + báo cáo | 3 | CHỜ P1–P5 | Đổi công cụ bot ⇒ đi qua bộ hội thoại vàng |
 | P7 | Kiểm giá không căn cứ trên lượt THẬT ⇒ hàng đợi rà lỗi AI | 3 | CHỜ | Dùng lại bộ kiểm của phát lại |
