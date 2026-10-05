@@ -225,6 +225,37 @@ def parse_webhook(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {"conversation": c, "message": {**helper.normalize_message(msg, c["id"]), "source": "webhook"}}
 
 
+USER_API = "https://pages.fm/api/v1"
+
+
+def list_user_pages(user_access_token: str) -> list[dict[str, str]]:
+    """Các page tài khoản Pancake quản lý (User Access Token: Pancake → Cài đặt cá nhân → Access token)."""
+    res = httpx.get(f"{USER_API}/pages", params={"access_token": user_access_token}, timeout=30)
+    try:
+        data = res.json()
+    except ValueError:
+        data = {}
+    if res.status_code >= 400 or (isinstance(data, dict) and data.get("success") is False):
+        raise PancakeError(f"Pancake không nhận User Access Token này ({res.status_code}): {(data or {}).get('message') or res.text[:150]}")
+    raw = ((data.get("categorized") or {}).get("activated") or data.get("pages") or data.get("data") or []) if isinstance(data, dict) else []
+    return [{"id": str(x["id"]), "name": str(x.get("name") or x.get("page_name") or "").strip(), "platform": x.get("platform") or ""}
+            for x in raw if isinstance(x, dict) and x.get("id")]
+
+
+def generate_page_token(user_access_token: str, page_id: str) -> str:
+    """Sinh Page Access Token cho một page bằng User Access Token của admin page."""
+    res = httpx.post(f"{USER_API}/pages/{page_id}/generate_page_access_token",
+                     params={"access_token": user_access_token, "page_id": page_id}, timeout=30)
+    try:
+        data = res.json()
+    except ValueError:
+        data = {}
+    tok = (data or {}).get("page_access_token") or (data or {}).get("access_token") or (data or {}).get("token")
+    if res.status_code >= 400 or not tok:
+        raise PancakeError(f"Pancake không sinh được token cho page {page_id} ({res.status_code}): {(data or {}).get('message') or 'tài khoản không phải quản trị page?'}")
+    return str(tok)
+
+
 class PancakePosClient:
     """Pancake POS Open API (tuỳ chọn) — đọc danh mục sản phẩm theo Shop ID để bot nói đúng giá / size / màu."""
 

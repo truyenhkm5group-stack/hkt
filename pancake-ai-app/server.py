@@ -28,6 +28,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,7 +48,7 @@ import legacy_import  # noqa: E402
 import sentiment_analyzer as sa  # noqa: E402
 import token_tracker as tt  # noqa: E402
 from canned_matcher import matcher, record_hit  # noqa: E402
-from pancake_client import PancakeClient, PancakeError, PancakePosClient, parse_webhook  # noqa: E402
+from pancake_client import PancakeClient, PancakeError, PancakePosClient, generate_page_token, list_user_pages, parse_webhook  # noqa: E402
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("pancake-ai")
@@ -556,6 +557,39 @@ def legacy_apply(body: LegacyIn) -> dict[str, Any]:
     _client_cache.update(key=None, client=None)
     _catalog_cache.update(items=None, at=0)
     return res
+
+
+class UserTokenIn(BaseModel):
+    user_token: str = Field(min_length=10)
+    page_id: str | None = None
+    name: str | None = None
+
+
+@app.post("/api/pancake/user-pages", dependencies=admin)
+def pancake_user_pages(body: UserTokenIn) -> dict[str, Any]:
+    """Liệt kê page của tài khoản. User Access Token KHÔNG được lưu."""
+    try:
+        return {"pages": list_user_pages(body.user_token.strip())}
+    except (PancakeError, httpx.HTTPError) as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/pancake/use-page", dependencies=admin)
+def pancake_use_page(body: UserTokenIn) -> dict[str, Any]:
+    """Sinh Page Access Token cho page đã chọn, THỬ nó với Pancake rồi mới lưu. User Access Token không được lưu."""
+    if not body.page_id:
+        raise HTTPException(400, "Chưa chọn page")
+    try:
+        token = generate_page_token(body.user_token.strip(), body.page_id)
+        probe = PancakeClient(body.page_id, token).test_connection()
+    except (PancakeError, httpx.HTTPError) as e:
+        raise HTTPException(400, str(e)) from e
+    vals: dict[str, Any] = {"pancake_page_id": str(body.page_id), "pancake_page_access_token": token}
+    if body.name:
+        vals["shop_name"] = body.name
+    db.set_settings(vals)
+    _client_cache.update(key=None, client=None)
+    return {"ok": True, "page_id": body.page_id, "name": body.name, **probe}
 
 
 @app.post("/api/pancake/test", dependencies=admin)

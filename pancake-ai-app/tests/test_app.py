@@ -169,6 +169,33 @@ class PhoneFilterTest(Base):
         self.assertEqual(sorted(r["ids"]), ["a", "b", "c"])
 
 
+class UserTokenTest(Base):
+    def test_list_pages_and_use_page_saves_token_not_user_token(self):
+        import httpx
+        import pancake_client as pc
+
+        class R:
+            def __init__(self, code, data):
+                self.status_code, self._d, self.text = code, data, ""
+
+            def json(self):
+                return self._d
+        orig_get, orig_post, orig_test = httpx.get, httpx.post, pc.PancakeClient.test_connection
+        try:
+            httpx.get = lambda url, params=None, timeout=None: R(200, {"categorized": {"activated": [{"id": 111, "name": "Linh Tây Luxury"}, {"id": 222, "name": "Khác"}]}})
+            httpx.post = lambda url, params=None, timeout=None: R(200, {"page_access_token": "eyJPAGE_TOKEN"})
+            pc.PancakeClient.test_connection = lambda self: {"ok": True, "sample_conversations": 60}
+            pages = server.pancake_user_pages(server.UserTokenIn(user_token="USER_TOKEN_SECRET"))["pages"]
+            self.assertEqual(pages[0], {"id": "111", "name": "Linh Tây Luxury", "platform": ""})
+            server.pancake_use_page(server.UserTokenIn(user_token="USER_TOKEN_SECRET", page_id="111", name="Linh Tây Luxury"))
+            self.assertEqual(db.get_setting("pancake_page_id"), "111")
+            self.assertEqual(db.get_setting("pancake_page_access_token"), "eyJPAGE_TOKEN")
+            dump = str(db.rows("SELECT * FROM settings"))
+            self.assertNotIn("USER_TOKEN_SECRET", dump)
+        finally:
+            httpx.get, httpx.post, pc.PancakeClient.test_connection = orig_get, orig_post, orig_test
+
+
 class LegacyImportTest(Base):
     def make_old_bot(self, pages_json=None, tokens_file=None):
         import json as _json

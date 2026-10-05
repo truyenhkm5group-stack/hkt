@@ -175,7 +175,9 @@ def preview(bot_dir: str | None = None) -> dict[str, Any]:
         "gemini_model": cfg["gemini_model"] or None,
         "pos_shop_id": cfg["pos_shop_id"] or None, "pos_api_key": _mask(cfg["pos_api_key"]) if cfg["pos_api_key"] else None,
         "prompt_path": cfg["prompt_path"],
-        "hint": None if cfg["found_env"] else "Thư mục có nhưng không thấy file .env — bot cũ chưa cấu hình ở máy này (có thể đang chạy trên VPS).",
+        "hint": (None if cfg["pages"] else
+                 "Bot cũ trên máy này KHÔNG có token page (có thể bot cũ chạy trên VPS). Dùng khung 🔑 Kết nối page bằng tài khoản Pancake ở trên.")
+                if cfg["found_env"] else "Thư mục có nhưng không thấy file .env — bot cũ chưa cấu hình ở máy này (có thể đang chạy trên VPS).",
         "other_dirs": others,
     }
 

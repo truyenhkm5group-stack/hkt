@@ -44,6 +44,15 @@
 
 <!-- ============================ KẾT NỐI ============================ -->
 <section data-panel="connect" class="space-y-4">
+  <div class="card space-y-2 border-green-300" id="userTokenCard">
+    <h2 class="font-bold">🔑 Kết nối page bằng tài khoản Pancake <span class="muted">(cách nhanh nhất)</span></h2>
+    <p class="muted">Pancake → ảnh đại diện góc trên → <b>Cài đặt cá nhân</b> → <b>Access token</b> → sao chép, dán vào đây. App liệt kê các page bạn quản lý, bạn chọn page, app tự sinh Page Access Token. Mã tài khoản này <b>không được lưu</b>.</p>
+    <div class="flex flex-wrap gap-2 items-end">
+      <div class="grow min-w-60"><label class="muted">User Access Token của Pancake</label><input id="userToken" class="inp" type="password" autocomplete="off"></div>
+      <button class="btn btn-primary" onclick="userPages()">📋 Lấy danh sách page</button>
+    </div>
+    <div id="userPagesBox" class="text-sm"></div>
+  </div>
   <div class="card space-y-2 border-blue-300">
     <h2 class="font-bold">📥 Lấy cấu hình từ bot cũ (thư mục <code>chatbot</code>)</h2>
     <p class="muted">Đọc Page ID, Page Access Token, Gemini key, Shop ID/POS key và kịch bản tư vấn từ <code>chatbot/.env</code>, <code>chatbot/data/pages_tokens.json</code>, <code>chatbot/prompts/system.md</code> trên máy này. Bot cũ không bị sửa gì.</p>
@@ -339,6 +348,31 @@ async function saveSettings() {
 async function testPancake() { $("#pancakeTest").textContent = "Đang kiểm tra…"; try { $("#pancakeTest").textContent = JSON.stringify(await api("/api/pancake/test", { method: "POST" }), null, 1); } catch (e) { $("#pancakeTest").textContent = e.message; } }
 async function testGemini() { $("#geminiTest").textContent = "Đang gọi…"; try { const r = await api("/api/gemini/test", { method: "POST" }); $("#geminiTest").textContent = r.ok ? `OK · ${r.model} · ${r.prompt_tokens}+${r.output_tokens} token · ${usd(r.cost_usd)} · ${r.latency_ms} ms` : r.error; } catch (e) { $("#geminiTest").textContent = e.message; } }
 
+// ------------------------------------------------------------ kết nối bằng User Access Token
+async function userPages() {
+  const box = $("#userPagesBox"), tok = $("#userToken").value.trim();
+  if (!tok) return toast("Dán User Access Token trước", true);
+  box.textContent = "Đang hỏi Pancake…";
+  try {
+    const r = await api("/api/pancake/user-pages", { method: "POST", body: { user_token: tok } });
+    if (!r.pages.length) { box.innerHTML = '<span class="text-amber-700">Tài khoản này không quản lý page nào.</span>'; return; }
+    const pick = r.pages.find((p) => /linh\s*t[aâ]y/i.test(p.name)) || r.pages[0];
+    box.innerHTML = `<input class="inp mb-1" placeholder="Tìm page…" oninput="document.querySelectorAll('#userPagesList label').forEach(l=>l.classList.toggle('hidden',!l.textContent.toLowerCase().includes(this.value.toLowerCase())))">
+      <div id="userPagesList" class="max-h-64 overflow-y-auto">${r.pages.map((p) => `<label class="flex items-center gap-2 py-0.5"><input type="radio" name="userPage" value="${esc(p.id)}" data-name="${esc(p.name)}" ${p.id === pick.id ? "checked" : ""}> <b>${esc(p.name || "(không tên)")}</b> <span class="muted">${esc(p.id)} ${esc(p.platform)}</span></label>`).join("")}</div>
+      <button class="btn btn-primary mt-2" onclick="useUserPage()">✅ Dùng page đã chọn</button>`;
+  } catch (e) { box.innerHTML = `<span class="text-red-600">❌ ${esc(e.message)}</span>`; }
+}
+async function useUserPage() {
+  const sel = document.querySelector('input[name="userPage"]:checked');
+  if (!sel) return toast("Chọn một page", true);
+  try {
+    const r = await api("/api/pancake/use-page", { method: "POST", body: { user_token: $("#userToken").value.trim(), page_id: sel.value, name: sel.dataset.name } });
+    $("#userToken").value = ""; selected.clear();
+    $("#userPagesBox").innerHTML = `<span class="text-green-700">✅ Đã kết nối <b>${esc(r.name || r.page_id)}</b> — Pancake trả ${r.sample_conversations} hội thoại mẫu. Sang tab 🧠 Nạp tri thức để tải hội thoại.</span>`;
+    await loadSettings();
+  } catch (e) { toast(e.message, true); }
+}
+
 // ------------------------------------------------------------ nhập từ bot cũ
 async function legacyPreview() {
   const box = $("#legacyBox"); box.textContent = "Đang tìm…";
@@ -446,7 +480,10 @@ async function quickPick() {
       (r.count < n ? ` <span class="text-amber-700">— ít hơn ${n}: tăng "Trong (ngày)" rồi bấm lại${closed ? ', hoặc bỏ "Chỉ Đã chốt đơn"' : ""}</span>` : "") +
       (s.stop_reason ? ` <span class="muted">(${esc(s.stop_reason)})</span>` : "");
     loadJobs();
-  } catch (e) { st.innerHTML = `<span class="text-red-600">❌ ${esc(e.message)}</span>`; }
+  } catch (e) {
+    const needPage = /Page ID|Page Access Token|token/i.test(e.message);
+    st.innerHTML = `<span class="text-red-600">❌ ${esc(e.message)}</span>` + (needPage ? ` <button class="btn btn-primary ml-2" onclick="showTab('connect');document.getElementById('userTokenCard').scrollIntoView();document.getElementById('userToken').focus()">🔑 Kết nối page ngay</button>` : "");
+  }
   finally { btn.disabled = false; }
 }
 
