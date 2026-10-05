@@ -227,6 +227,8 @@ export async function testSalesOrderSync() {
         const before = calls;
         const r2 = await runFanpageOrderSync({ fetch: fetchImpl });
         assert.deepEqual([r2.checked, r2.created, calls], [0, 0, before], JSON.stringify(r2));
+        // Hội thoại đã đọc tới tin cuối bị loại NGAY trong SQL (không chiếm chỗ trong trần ứng viên — HSLC 05/10/2026).
+        assert.deepEqual(r2.detail, ["không hội thoại nào mới yên"], "hội thoại đã đọc không còn là ứng viên");
 
         // ── GHI NGAY (chủ shop HSLC 05/10/2026: tin báo đơn tới trễ 13–16 phút) ⇒ webhook hẹn MỘT lượt cho ĐÚNG hội thoại khi
         // nó yên `quietMinutes` phút; tin mới hơn tới trong lúc đợi ⇒ lượt này thôi (lượt đợi của tin mới lo).
