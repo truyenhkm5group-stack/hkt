@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { formatTimeAgo, formatVND } from "@/lib/format";
-import { assignableUsers, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { assignableUsers, inboxPages, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { listLabels } from "@/lib/sales-chatbot/inbox-labels";
 import { INBOX_CHANNEL_LABEL, INBOX_CHANNELS, INBOX_FILTER_LABEL, INBOX_FILTERS, type InboxChannel, type InboxFilter, type InboxRow } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
@@ -30,7 +30,7 @@ function waitLabel(min: number): string {
   return `chờ ${Math.round(min / 1440)} ngày`;
 }
 
-function ListItem({ r, href, active }: { r: InboxRow; href: string; active: boolean }) {
+function ListItem({ r, href, active, showPage }: { r: InboxRow; href: string; active: boolean; showPage: boolean }) {
   const wait = waitMinutes(r.waitingSince);
   return (
     <Link href={href} className={cn("flex gap-3 px-3 py-2.5 hover:bg-muted/60", active && "bg-primary/10 hover:bg-primary/10")} data-conversation={r.id} data-unread={r.unread ? "1" : "0"}>
@@ -47,8 +47,13 @@ function ListItem({ r, href, active }: { r: InboxRow; href: string; active: bool
           </p>
           {r.unread ? <span className="size-2.5 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" /> : null}
         </div>
-        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length ? (
+        {wait !== null || r.status === "HANDOFF" || r.assigneeName || r.hasOrder || r.labels.length || (showPage && r.pageName) ? (
           <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+            {showPage && r.pageName ? (
+              <span className="max-w-[10rem] truncate rounded border px-1.5 text-muted-foreground" data-page-chip>
+                {r.pageName}
+              </span>
+            ) : null}
             {wait !== null ? (
               <span className={cn("rounded px-1.5 font-medium", wait >= WAIT_URGENT_MIN ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200")}>{waitLabel(wait)}</span>
             ) : null}
@@ -81,12 +86,15 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
   const selected = one("c");
   const labels = await listLabels();
   const label = labels.some((l) => l.id === one("lb")) ? one("lb") : null;
+  // NHIỀU PAGE: một hộp thư chung cho mọi page; chọn một page là LỌC trên cùng hội thoại, không phải một hộp thư thứ hai.
+  const pages = await inboxPages();
+  const page = pages.some((p) => p.id === one("pg")) ? one("pg") : null;
   // Mở hội thoại TRƯỚC (đánh dấu đã đọc) rồi mới đọc danh sách — không thì hội thoại đang mở vẫn hiện «chưa đọc».
   const thread = selected ? await loadInboxThread(user, selected) : null;
-  const [list, users] = await Promise.all([listInbox(user, { filter, channel, q, label }), assignableUsers(user)]);
+  const [list, users] = await Promise.all([listInbox(user, { filter, channel, q, label, page }), assignableUsers(user)]);
   const href = (patch: Record<string, string | null>) => {
     const p = new URLSearchParams();
-    const cur: Record<string, string | null> = { f: filter === "ALL" ? null : filter, ch: channel, lb: label, q: q || null, c: selected || null, ...patch };
+    const cur: Record<string, string | null> = { f: filter === "ALL" ? null : filter, ch: channel, lb: label, pg: page, q: q || null, c: selected || null, ...patch };
     for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
     const s = p.toString();
     return `/ai/sales-chatbot/inbox${s ? `?${s}` : ""}`;
@@ -141,6 +149,16 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                     </option>
                   ))}
                 </select>
+                {pages.length > 1 ? (
+                  <select name="pg" defaultValue={page ?? ""} className="h-8 w-[104px] rounded-md border bg-background px-1 text-[12px]" aria-label="Page" data-testid="inbox-page-filter">
+                    <option value="">Mọi page</option>
+                    {pages.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 {labels.length ? (
                   <select name="lb" defaultValue={label ?? ""} className="h-8 w-[92px] rounded-md border bg-background px-1 text-[12px]" aria-label="Nhãn">
                     <option value="">Mọi nhãn</option>
@@ -160,7 +178,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
               {list.rows.length === 0 ? <li className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào ở bộ lọc này.</li> : null}
               {list.rows.map((r) => (
                 <li key={r.id}>
-                  <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} />
+                  <ListItem r={r} href={href({ c: r.id })} active={r.id === selected} showPage={pages.length > 1 && !page} />
                 </li>
               ))}
             </ul>

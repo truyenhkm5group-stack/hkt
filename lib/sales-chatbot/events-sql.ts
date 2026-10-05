@@ -21,3 +21,12 @@ const e = schema.salesConversationEvents;
 export const BOT_CONFIRMED: SQL = sql`(${e.type} = 'order.confirmed' and ${e.actorKind} <> 'HUMAN')`;
 
 export const HUMAN_TOUCHED: SQL = sql`(${e.type} in ('handoff.requested','human.took_over','human.replied') or (${e.actorKind} = 'HUMAN' and ${e.type} in ('order.drafted','order.confirmed')))`;
+
+/**
+ * PHẠM VI MỘT PAGE (hộp thư / chỉ số nhiều page): sự kiện của hội thoại thuộc `pageId`. `null` = mọi page. Page là một CHIỀU
+ * lọc trên CÙNG công thức — không page nào có định nghĩa chỉ số riêng.
+ */
+export function onPage(pageId: string | null | undefined): SQL | undefined {
+  if (!pageId) return undefined;
+  return sql`${e.conversationId} in (select "id" from "sales_chat_conversations" where "page_id" = ${pageId})`;
+}

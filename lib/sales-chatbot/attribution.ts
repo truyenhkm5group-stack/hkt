@@ -16,6 +16,7 @@ import { isFinishedOutcome } from "@/lib/constants/truth";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { attributeOrder, attributionTable, followupRecovery, type AttributedOrder, type AttributionEvent, type AttributionTable } from "@/lib/sales-chatbot/attribution-shared";
+import { onPage } from "@/lib/sales-chatbot/events-sql";
 import { rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
 export type FollowupStats = {
@@ -46,13 +47,13 @@ async function inChunks<T>(ids: readonly string[], fn: (part: string[]) => Promi
 }
 
 /** Quy kết đơn + follow-up thu hồi của tổ chức NGỮ CẢNH trong `days` ngày (cùng cách tính kỳ với màn «Hiệu quả»). */
-export async function loadOrderAttribution(opts: { days?: number; now?: Date }): Promise<OrderAttributionReport> {
+export async function loadOrderAttribution(opts: { days?: number; now?: Date; pageId?: string | null }): Promise<OrderAttributionReport> {
   const days = Math.min(Math.max(Math.trunc(opts.days ?? 30), 1), 180);
   const now = opts.now ?? new Date();
   const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
   const db = await getDb();
   const e = schema.salesConversationEvents;
-  const inPeriod = and(gte(e.occurredAt, since), ne(e.channel, "TEST"));
+  const inPeriod = and(gte(e.occurredAt, since), ne(e.channel, "TEST"), onPage(opts.pageId));
 
   const confirmedRows = await db.selectDistinct({ conv: e.conversationId, orderId: e.orderId }).from(e).where(and(inPeriod, eq(e.type, "order.confirmed"), isNotNull(e.orderId)));
   const nudgedRows = await db.selectDistinct({ conv: e.conversationId }).from(e).where(and(inPeriod, eq(e.type, "followup.sent")));

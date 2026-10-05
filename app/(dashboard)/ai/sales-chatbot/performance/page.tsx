@@ -14,6 +14,7 @@ import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
 import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
 import { ORDER_ATTRIBUTIONS, ORDER_ATTRIBUTION_LABEL } from "@/lib/sales-chatbot/attribution-shared";
 import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
+import { inboxPages } from "@/lib/sales-chatbot/inbox";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
 
@@ -54,16 +55,20 @@ function FunnelCells({ row }: { row: FunnelRow }) {
  * thời gian trả lời, lý do chuyển người, upsell, đơn bot chốt theo kết cục GIAO THẬT (ORDER_OUTCOME), chi phí AI / đơn giao
  * thành công. Số đọc từ sổ sự kiện `sales_conversation_events` — trước ngày bật sổ là CHƯA ĐO.
  */
-export default async function AiSalesPerformancePage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
+export default async function AiSalesPerformancePage({ searchParams }: { searchParams: Promise<{ days?: string; pg?: string }> }) {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
   const sp = await searchParams;
   const days = PERIODS.find((d) => String(d) === sp.days) ?? 30;
-  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage });
+  // NHIỀU PAGE: page là một CHIỀU lọc trên cùng công thức — «mọi page» và «một page» đọc cùng các hàm dưới đây.
+  const pages = await inboxPages();
+  const pageId = pages.some((p) => p.id === sp.pg) ? (sp.pg as string) : null;
+  const pgQ = pageId ? `&pg=${encodeURIComponent(pageId)}` : "";
+  const r: AiSalesPerformance = await loadAiSalesPerformance(user.organization?.code ?? "", { days, withMoney: manage, pageId });
   const experiment = await loadExperimentReport();
-  const basket = await loadBasketStats({ days });
-  const attr = await loadOrderAttribution({ days });
-  const lost = await loadLostReasons({ days });
+  const basket = await loadBasketStats({ days, pageId });
+  const attr = await loadOrderAttribution({ days, pageId });
+  const lost = await loadLostReasons({ days, pageId });
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -72,7 +77,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
       <PageHeader
         eyebrow="AI"
         title="Hiệu quả AI bán hàng"
-        description={`${days} ngày gần nhất · ${user.organization?.name ?? ""}`}
+        description={`${days} ngày gần nhất · ${user.organization?.name ?? ""}${pageId ? ` · ${pages.find((p) => p.id === pageId)?.name ?? pageId}` : pages.length > 1 ? ` · ${pages.length} page` : ""}`}
         hint={
           <div className="space-y-1.5 text-xs leading-5">
             <p>Số đọc từ SỔ SỰ KIỆN của bot: mỗi tin khách, câu trả lời, báo giá, SĐT, đơn nháp / chốt, chuyển người đều có mốc. Trước ngày bật sổ là CHƯA ĐO — không phải 0.</p>
@@ -84,10 +89,26 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
         actions={
           <div className="flex items-center gap-1">
             {PERIODS.map((d) => (
-              <Link key={d} href={`/ai/sales-chatbot/performance?days=${d}`} className={`inline-flex h-8 items-center rounded-md border px-3 text-sm ${d === days ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
+              <Link key={d} href={`/ai/sales-chatbot/performance?days=${d}${pgQ}`} className={`inline-flex h-8 items-center rounded-md border px-3 text-sm ${d === days ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
                 {d} ngày
               </Link>
             ))}
+            {pages.length > 1 ? (
+              <form method="get" action="/ai/sales-chatbot/performance" className="ml-2 flex items-center gap-1" data-testid="ai-perf-page-filter">
+                <input type="hidden" name="days" value={days} />
+                <select name="pg" defaultValue={pageId ?? ""} className="h-8 max-w-[11rem] rounded-md border bg-background px-1 text-sm" aria-label="Page">
+                  <option value="">Mọi page</option>
+                  {pages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <button type="submit" className="h-8 rounded-md border px-2 text-sm hover:bg-muted">
+                  Xem
+                </button>
+              </form>
+            ) : null}
             <Link href="/ai/sales-chatbot/quality" className="ml-2 inline-flex h-8 items-center rounded-md border px-3 text-sm hover:bg-muted">
               Rà lỗi AI
             </Link>

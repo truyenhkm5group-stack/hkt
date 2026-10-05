@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { BOT_CONFIRMED } from "@/lib/sales-chatbot/events-sql";
+import { BOT_CONFIRMED, onPage } from "@/lib/sales-chatbot/events-sql";
 import { rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 
 /**
@@ -51,12 +51,12 @@ export function basketStats(orders: readonly BasketLine[][]): BasketStats {
 }
 
 /** Giỏ hàng của đơn bot chốt trong `days` ngày gần nhất của tổ chức NGỮ CẢNH — cả đơn chốt lẫn tập đã giao. */
-export async function loadBasketStats(opts: { days: number; now?: Date }): Promise<BasketReport> {
+export async function loadBasketStats(opts: { days: number; now?: Date; pageId?: string | null }): Promise<BasketReport> {
   const now = opts.now ?? new Date();
   const since = new Date(dauNgayVN(now).getTime() - (Math.max(1, opts.days) - 1) * 86_400_000);
   const db = await getDb();
   const e = schema.salesConversationEvents;
-  const ids = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(gte(e.occurredAt, since), ne(e.channel, "TEST"), BOT_CONFIRMED, isNotNull(e.orderId)))).map((r) => r.id!).filter(Boolean);
+  const ids = (await db.selectDistinct({ id: e.orderId }).from(e).where(and(gte(e.occurredAt, since), ne(e.channel, "TEST"), BOT_CONFIRMED, isNotNull(e.orderId), onPage(opts.pageId)))).map((r) => r.id!).filter(Boolean);
   const empty = (): BasketReport => ({ booked: basketStats([]), delivered: basketStats([]) });
   if (!ids.length) return empty();
   const o = schema.orders;

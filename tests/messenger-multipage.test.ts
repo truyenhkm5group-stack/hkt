@@ -22,6 +22,8 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
+import { inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
+import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { connectMessengerPages, disconnectMessengerPage, messengerView, PAGE_AI_OFF_NOTE, processMessengerThread, receiveMessengerEvent, setMessengerPagesAi } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "msg-multi";
@@ -159,6 +161,21 @@ export async function testMessengerMultiPage() {
       const health = await listChannelPages("facebook-messenger");
       assert.ok(/Không có quyền gửi tin/.test(health.find((x) => x.pageId === PAGES.B)?.lastError ?? "") && health.find((x) => x.pageId === PAGES.A)?.lastError === null, JSON.stringify(health.map((x) => [x.pageId, x.lastError])));
 
+      // ── HỘP THƯ CHUNG: mọi page ở một danh sách, mỗi hội thoại mang tên page; chọn một page = LỌC, không phải hộp thư thứ hai ──
+      const all = await listInbox(admin, {});
+      assert.ok(all.ok, JSON.stringify(all));
+      const byPage = Object.fromEntries(all.rows.map((x) => [x.pageId, x.pageName]));
+      assert.deepEqual(byPage, { [PAGES.A]: "Page A", [PAGES.B]: "Page B" }, `tên page trên từng hội thoại: ${JSON.stringify(byPage)}`);
+      const onlyA = await listInbox(admin, { page: PAGES.A });
+      assert.ok(onlyA.ok && onlyA.rows.length === 1 && onlyA.rows[0].pageId === PAGES.A && onlyA.counts.ALL === 1, JSON.stringify(onlyA.ok ? onlyA.counts : onlyA));
+      assert.ok((await inboxPages()).some((x) => x.id === PAGES.A && x.name === "Page A"));
+      // ── CHỈ SỐ THEO PAGE: cùng công thức, page chỉ là chiều lọc — «mọi page» = A + B ──
+      const perfAll = await loadAiSalesPerformance(ORG, { withMoney: false });
+      const perfA = await loadAiSalesPerformance(ORG, { withMoney: false, pageId: PAGES.A });
+      const perfB = await loadAiSalesPerformance(ORG, { withMoney: false, pageId: PAGES.B });
+      assert.ok(perfA.cohorts.total.conversations === 1 && perfB.cohorts.total.conversations === 1 && perfAll.cohorts.total.conversations === 2, JSON.stringify([perfAll.cohorts.total, perfA.cohorts.total, perfB.cohorts.total]));
+      assert.equal((await loadAiSalesPerformance(ORG, { withMoney: false, pageId: "9999999999" })).cohorts.total.conversations, 0, "page lạ ⇒ 0 hội thoại, không phải mọi page");
+
       // ── Gỡ RIÊNG B ⇒ A chạy tiếp; chỉ mục webhook của B mất ──
       assert.ok("ok" in (await disconnectMessengerPage(admin, PAGES.B)));
       assert.equal((await receiveMessengerEvent(ev(PAGES.B, "psid-b", "mp.b4", "alo"))).queued, false, "page đã gỡ ⇒ không nhận");
@@ -191,5 +208,5 @@ export async function testMessengerMultiPage() {
     }
     await cleanup();
   }
-  console.log("✓ Nhiều page một tổ chức: một lượt cấp quyền nối nhiều page (page của cửa hàng khác bị bỏ, page còn lại vẫn nối) · token riêng từng page, không dạng rõ, chép bản mã sang page khác không giải được · tin và câu trả lời đi đúng page / đúng token · tạm dừng AI một page không đụng page khác · lỗi gửi ghi vào sức khoẻ của đúng page · gỡ riêng một page · tổ chức nối trước bản này vẫn chạy và bật / tắt AI theo page được");
+  console.log("✓ Nhiều page một tổ chức: một lượt cấp quyền nối nhiều page (page của cửa hàng khác bị bỏ, page còn lại vẫn nối) · token riêng từng page, không dạng rõ, chép bản mã sang page khác không giải được · tin và câu trả lời đi đúng page / đúng token · tạm dừng AI một page không đụng page khác · lỗi gửi ghi vào sức khoẻ của đúng page · hộp thư chung mọi page kèm tên page, lọc một page chỉ còn page đó · chỉ số theo page cùng công thức (mọi page = cộng các page) · gỡ riêng một page · tổ chức nối trước bản này vẫn chạy và bật / tắt AI theo page được");
 }

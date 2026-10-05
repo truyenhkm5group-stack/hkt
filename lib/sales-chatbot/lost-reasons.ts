@@ -5,7 +5,7 @@
 import { and, gte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
-import { HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
+import { HUMAN_TOUCHED, onPage } from "@/lib/sales-chatbot/events-sql";
 import { lostReasonOf, lostReport, type LostReason, type LostReport } from "@/lib/sales-chatbot/lost-reasons-shared";
 
 export type LostReasonsResult = LostReport & { idsByReason: Partial<Record<LostReason, string[]>> };
@@ -13,7 +13,7 @@ export type LostReasonsResult = LostReport & { idsByReason: Partial<Record<LostR
 /** Trần số hội thoại giữ lại cho drill-down mỗi lý do (danh sách hiện 200 dòng). */
 const DRILL_CAP = 200;
 
-export async function loadLostReasons(opts: { days?: number; now?: Date }): Promise<LostReasonsResult> {
+export async function loadLostReasons(opts: { days?: number; now?: Date; pageId?: string | null }): Promise<LostReasonsResult> {
   const days = Math.min(Math.max(Math.trunc(opts.days ?? 30), 1), 180);
   const now = opts.now ?? new Date();
   const since = new Date(dauNgayVN(now).getTime() - (days - 1) * 86_400_000);
@@ -29,7 +29,7 @@ export async function loadLostReasons(opts: { days?: number; now?: Date }): Prom
       lastCustomerAt: sql<Date>`max(${e.occurredAt}) filter (where ${e.type} = 'message.received')`,
     })
     .from(e)
-    .where(and(gte(e.occurredAt, since), ne(e.channel, "TEST")))
+    .where(and(gte(e.occurredAt, since), ne(e.channel, "TEST"), onPage(opts.pageId)))
     .groupBy(e.conversationId)
     .having(sql`bool_or(${e.type} = 'message.received')`);
   const idsByReason: Partial<Record<LostReason, string[]>> = {};

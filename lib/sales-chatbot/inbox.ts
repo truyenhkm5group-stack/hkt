@@ -1,6 +1,8 @@
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { listChannelPages } from "@/lib/connectors/service";
+import { MESSENGER_DIRECT_KEY } from "@/lib/sales-chatbot/channel-ownership";
 import type { AiBlock } from "@/lib/ai/provider";
 import { audit } from "@/lib/audit";
 import { publish } from "@/lib/realtime/bus";
@@ -91,7 +93,29 @@ const listZ = z.object({
   label: z.string().trim().min(1).max(100).nullable().catch(null),
   channel: z.enum(INBOX_CHANNELS).nullable().catch(null),
   q: z.string().trim().max(80).catch(""),
+  /** MỘT page / tài khoản kênh (`sales_chat_conversations.page_id`); `null` = mọi page (hộp thư chung). */
+  page: z.string().trim().regex(/^[A-Za-z0-9_:.-]{1,80}$/).nullable().catch(null),
 });
+
+export type InboxPageOption = { id: string; name: string };
+
+/**
+ * Các page / tài khoản kênh của hộp thư — để LỌC và để in tên page trên từng hội thoại. Tên đọc từ page đã nối thẳng
+ * (`org_channel_pages`); page Pancake / Zalo / page cũ chưa có tên ⇒ nhãn theo kênh kèm mã. Chỉ page có hội thoại hoặc đang nối.
+ */
+export async function inboxPages(): Promise<InboxPageOption[]> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const used = await db.selectDistinct({ pageId: c.pageId, channel: c.channel }).from(c).where(and(ne(c.channel, "TEST"), isNotNull(c.pageId)));
+  const named = new Map((await listChannelPages(MESSENGER_DIRECT_KEY)).map((p) => [p.pageId, p.kind === "INSTAGRAM" ? p.name : p.name || p.pageId]));
+  const out = new Map<string, string>();
+  for (const [id, name] of named) out.set(id, name);
+  for (const r of used) {
+    if (!r.pageId || out.has(r.pageId)) continue;
+    out.set(r.pageId, r.channel === "ZALO" ? "Zalo OA" : r.pageId.startsWith("comment:") ? `Bình luận ${r.pageId.slice(8, 20)}` : `Fanpage ${r.pageId}`);
+  }
+  return [...out].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+}
 
 function iso(d: Date | string | null | undefined): string | null {
   if (!d) return null;
@@ -123,6 +147,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   const u = schema.users;
   const base: SQL[] = [ne(c.channel, "TEST")];
   if (q.channel) base.push(eq(c.channel, q.channel));
+  if (q.page) base.push(eq(c.pageId, q.page));
   if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
   if (q.q) {
     const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
@@ -208,12 +233,15 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   }
 
   const labels = await labelsFor(rows.map((r) => r.id));
+  const pageNames = new Map((await inboxPages()).map((p) => [p.id, p.name]));
   return {
     ok: true,
     counts,
     rows: rows.map((r) => ({
       id: r.id,
       channel: r.channel,
+      pageId: r.pageId,
+      pageName: r.pageId ? (pageNames.get(r.pageId) ?? null) : null,
       status: r.status,
       handoffReason: r.handoffReason,
       customerName: r.customerName || r.stateName || r.inboundName || "Khách",
@@ -356,7 +384,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
     thread: {
       id: conv.id,
       channel: conv.channel,
-      channelLabel: INBOX_CHANNEL_LABEL[conv.channel as InboxChannel] ?? conv.channel,
+      // Hội thoại LUÔN mang page nó tới từ đó — shop nhiều page phải thấy ngay đang trả lời ở page nào.
+      channelLabel: [INBOX_CHANNEL_LABEL[conv.channel as InboxChannel] ?? conv.channel, conv.pageId ? (await inboxPages()).find((p) => p.id === conv.pageId)?.name : null].filter(Boolean).join(" · "),
       status: conv.status,
       handoffReason: conv.handoffReason,
       botYields: conv.status === "HANDOFF",

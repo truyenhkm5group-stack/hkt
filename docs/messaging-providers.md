@@ -104,11 +104,18 @@ Nền tảng ─ platform_messenger_pages (page_id → tổ chức) — định 
 - **Tổ chức nối trước 0217**: không có hàng page nào ⇒ page của hàng kết nối đơn vẫn nhận / gửi như cũ (không backfill). Bật /
   tắt AI cho page đó ⇒ dựng một hàng KHÔNG token (token vẫn đọc ở hàng cũ).
 
-### Còn lại của «hộp thư đa page» (theo thứ tự)
+### Hộp thư và chỉ số theo page (MP-2)
+
+- **Hộp thư chung**: mọi page trong MỘT danh sách, mỗi hội thoại mang tên page (danh sách + đầu khung chat). Chọn một page là
+  LỌC trên cùng hội thoại (`listInbox({ page })`), không phải hộp thư thứ hai. Bộ chọn page chỉ hiện khi có hơn một page.
+- **Chỉ số theo page**: `onPage(pageId)` (`events-sql.ts`) là chiều lọc DUY NHẤT cho màn «Hiệu quả», quy kết từng đơn, lý do
+  mất khách, bán chéo, chi phí AI (theo `ref` = hội thoại). Cùng công thức ⇒ «mọi page» = cộng các page (bài kiểm).
+
+### Còn lại
 
 | Việc | Ghi chú |
 |---|---|
-| Hộp thư: lọc theo page + tên page trên từng hội thoại | `inbox.ts` đã chọn `page_id`; thiếu bộ lọc + tên |
-| Màn «Hiệu quả» theo page | nối `sales_conversation_events → sales_chat_conversations.page_id`; Instagram quy về page cha |
-| Cấu hình AI theo page (persona · giờ · danh mục) đè lên mặc định tổ chức | `loadSalesChatbotConfig()` đang là MỘT cấu hình tổ chức |
+| Cấu hình AI theo page (persona · giờ · danh mục · giá) đè lên mặc định tổ chức | `loadSalesChatbotConfig()` đang là MỘT cấu hình tổ chức; cần quyết định trường nào được đè |
+| Drill-down (danh sách hội thoại theo chỉ số) giữ bộ lọc page | `DrillFilter` chưa có `page` |
+| Instagram quy về page cha khi lọc | hôm nay lọc đúng mã tài khoản (page HOẶC Instagram) |
 | Nhiều page Pancake | Pancake vẫn một page mỗi tổ chức (TD-11 phía Pancake) |
