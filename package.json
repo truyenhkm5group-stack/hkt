@@ -43,7 +43,8 @@
     "agent:pr-text": "tsx --tsconfig tsconfig.json scripts/agent-pr-text.ts",
     "agent:reattach": "tsx --tsconfig tsconfig.json scripts/agent-run-reattach.ts",
     "cto:proof": "tsx --tsconfig tsconfig.json scripts/cto-proof.ts",
-    "agent:identity-proof": "tsx --tsconfig tsconfig.json scripts/agent-identity-proof.ts"
+    "agent:identity-proof": "tsx --tsconfig tsconfig.json scripts/agent-identity-proof.ts",
+    "ai": "tsx --tsconfig tsconfig.json scripts/ai-tech.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
