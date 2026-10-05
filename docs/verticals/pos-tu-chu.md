@@ -223,6 +223,48 @@ hiện «Địa chỉ chưa chuẩn hoá» trên từng đơn.
 - **Khách để SĐT mà máy không lên được đơn** (chưa rõ món, món ngoài danh mục, giá khác) ⇒ báo người làm đơn MỘT lần cho mỗi
   hội thoại × SĐT; bot không hỏi lại khách (quyết định của chủ shop).
 
+## P7 — Tuyến giao tự động: tự giao hoặc đi hãng
+
+Chủ shop 06/10/2026 (mọi tổ chức khách, không riêng HSLC): đơn đã xác nhận, địa chỉ đã ghép tỉnh + xã thì **tự đi tiếp sang
+giao hàng** theo hai đường cùng tồn tại.
+
+### Cách bật (quản trị shop tự làm)
+
+1. Đơn hàng → menu «Danh sách tự giao» → «Cấu hình tuyến giao» (`/orders/shipping-routes`, cần `settings:manage`).
+   - **Khu tự giao**: chọn tỉnh, rồi «Cả tỉnh» hoặc chọn từng xã / phường theo danh mục địa giới mới.
+   - **Hãng mặc định** cho đơn ngoài khu tự giao — chỉ bật được tự tạo khi hãng đã Kiểm tra đạt + Bật ở trang Kết nối.
+   - **Tự tạo vận đơn** (mặc định TẮT) + mã dịch vụ (để trống = dịch vụ rẻ nhất hãng báo cho từng đơn).
+2. «Danh sách tự giao» (`/orders/self-delivery`): ba khối.
+   - **Tự giao** — nhóm theo xã / phường; chọn đơn → «Giao cho người này» (khoá tài khoản); «In danh sách», «Xuất CSV»;
+     từng đơn «Đã giao» (phiếu giao có ký nhận, mặc định người ký = người nhận, mốc = bây giờ) hoặc «Không thành công».
+   - **Đi hãng — chưa có vận đơn** — cột «Máy tự tạo» nói lượt tới máy có tạo không, và vì sao không.
+   - **Giữ lại** — lý do + lối sửa (sửa đơn · cấu hình · trang Kết nối · trang đơn).
+
+### Luật
+
+- **Tuyến là hàm thuần, đọc lúc xem** (`lib/shipping/route.ts::decideShippingRoute`). Trang và job gọi CÙNG hàm. Thứ tự:
+  chưa xác nhận ⇒ giữ · đã có lần gửi còn hiệu lực ⇒ đã đi · thiếu tỉnh / xã ⇒ giữ · thuộc khu tự giao ⇒ tự giao (thắng hãng) ·
+  chưa chọn hãng / hãng chưa bật / mẫu mã thiếu cân ⇒ giữ · còn lại ⇒ đi hãng.
+- **Không đoán.** Tỉnh + xã đọc từ ô đã ghép của đơn, không đọc lại dòng địa chỉ. Thiếu cân ⇒ giữ, không gửi một con số bịa.
+- **Máy đi qua đúng lõi tạo vận đơn** (`autoCreateShipmentCore` → phần chung với nút bấm): giữ chỗ có khoá theo đơn, mã ERP
+  chống trùng ở hãng, lượt không rõ kết quả giữ chỗ ở UNKNOWN và KHÔNG tự gửi lại. Thu hộ = số khách còn phải trả.
+  - Tác nhân là MÁY: `carrierCreate.by = null`, nhật ký `job:shipping-route` (luật 34/36). Thẩm quyền đến từ công tắc do
+    người có `settings:manage` bật.
+- **Bật không kéo đơn cũ.** Chỉ đơn xác nhận từ mốc bật (`autoSince`) được máy tạo. Lưu lại không dời mốc; tắt rồi bật là
+  mốc mới.
+- **Không dội hãng.** Hãng từ chối ⇒ ghi lỗi trên đơn (`order_dispatch`), thử lại sau 30 phút, tối đa 3 lần; sửa đơn ⇒ thử
+  lại ngay. Quá 3 lần ⇒ đơn sang «Giữ lại» kèm câu lỗi của hãng.
+- **Job `shipping-route`**: fan-out tầng tự động hoá, mỗi 5 phút, chỉ tổ chức khách, tối đa 20 đơn / lượt, tuần tự. Công tắc
+  tắt / không việc ⇒ bỏ qua, không ghi `sync_runs`. Nút «Tạo vận đơn ngay» (cần `shipments:manage`) chạy cùng hàm.
+- **Không đổi ORDER_OUTCOME, không đổi tồn kho.** Tuyến chỉ quyết đơn đi đường nào. Kết quả giao vẫn theo phiếu giao (tự
+  giao) hoặc mã cuối của hãng.
+- Bảng `order_dispatch` (0216) chỉ giữ người giao + lượt máy gần nhất. Không phép tính nghiệp vụ nào đọc nó.
+
+### Chưa kiểm trên tài khoản thật
+
+- Lượt máy tạo vận đơn thật đầu tiên là HUMAN GATE như P1 (hãng cử bưu tá tới lấy hàng). Nên bật công tắc khi đã tạo tay
+  thành công một đơn với hãng đó.
+
 ## Kế tiếp
 
 - **J&T.** Cần shop đăng ký đối tác trên open.jtexpress.vn (xét duyệt 1–3 ngày, xin chạy thật từng API, mã khách hàng

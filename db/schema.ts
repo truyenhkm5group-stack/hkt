@@ -1440,6 +1440,41 @@ export const orderDeliveryNotes = pgTable(
 );
 
 /**
+ * ═══ ĐIỀU PHỐI GIAO CỦA ĐƠN TẠO TAY — NGƯỜI GIAO + LƯỢT MÁY TỰ TẠO VẬN ĐƠN (0216 · docs/verticals/pos-tu-chu.md P7) ═══
+ *
+ * TUYẾN của đơn (tự giao / hãng / giữ lại) KHÔNG lưu ở đây: nó là hàm THUẦN của đơn + cấu hình `shipping.routing` đọc LÚC
+ * XEM (`lib/shipping/route.ts`) — sửa cấu hình thì mọi đơn chưa giao đổi tuyến ngay, không có cột nào phải backfill. Bảng
+ * chỉ giữ hai thứ KHÔNG suy ra được:
+ *  · NGƯỜI GIAO của đơn tự giao — KHOÁ `users.id` (AGENTS 34); `courier_name` chỉ là ảnh chụp tên do máy chủ đọc từ `users`.
+ *  · LƯỢT MÁY TỰ TẠO VẬN ĐƠN gần nhất (job `shipping-route`): số lần hỏng liên tiếp + mốc + câu lỗi — để máy KHÔNG dội hãng
+ *    mỗi 5 phút bằng cùng một đơn hãng đã từ chối. Vận đơn thật vẫn chỉ ở `shipments` (lõi `lib/carriers/engine.ts`).
+ * Không phép tính nghiệp vụ nào (ORDER_OUTCOME, tồn kho, doanh thu) đọc bảng này.
+ */
+export const orderDispatch = pgTable(
+  "order_dispatch",
+  {
+    orderId: text("order_id")
+      .primaryKey()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    courierUserId: text("courier_user_id").references(() => users.id, { onDelete: "set null" }),
+    courierName: text("courier_name").notNull().default(""),
+    assignedAt: ts("assigned_at"),
+    assignedByUserId: text("assigned_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    autoAttempts: integer("auto_attempts").notNull().default(0),
+    autoLastAt: ts("auto_last_at"),
+    autoLastResult: text("auto_last_result"),
+    autoLastCarrier: text("auto_last_carrier"),
+    autoLastMessage: text("auto_last_message"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("order_dispatch_courier_idx").on(t.courierUserId),
+    check("order_dispatch_manual_check", sql`${t.orderId} LIKE 'erp-%'`),
+    check("order_dispatch_auto_result_check", sql`${t.autoLastResult} IS NULL OR ${t.autoLastResult} IN ('CREATED', 'FAILED')`),
+  ],
+);
+
+/**
  * ═══ CHỨNG TỪ THANH TOÁN CỦA ĐƠN TẠO TAY — PHIẾU THU / PHIẾU HOÀN TIỀN (ORDER_OUTCOME.md mục 11, 0181) ═══
  *
  * Chiều TIỀN của đơn không qua ĐVVC. Phiếu giao (bảng trên) nói hàng đã tới tay khách; bảng này nói tiền đã vào / ra

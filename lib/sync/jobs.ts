@@ -79,6 +79,7 @@ import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
+import { runShippingRouteJob } from "@/lib/shipping/routing";
 
 export type JobOptions = {
   trigger: SyncTrigger;
@@ -608,6 +609,23 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     description:
       "Chạy chiến dịch săn khách sỉ đang bật: tìm địa điểm theo ô từ khoá × khu vực, lọc, khử trùng, lấy SĐT / website, chấm điểm, đọc trang liên hệ công khai. Dùng khoá Google Places của tổ chức (Cài đặt → Kết nối), dừng tự động khi chạm trần chi tiêu ngày / tháng. budgetMs=N để đổi trần thời gian một lượt.",
     run: (o) => runWholesaleLeadsJob({ trigger: o.trigger, actor: o.actor, budgetMs: Math.min(240_000, num(o.params?.budgetMs) ?? 50_000) }),
+  },
+  /*
+    TUYẾN GIAO TỰ ĐỘNG (POS tự chủ P7 — chủ shop chốt 06/10/2026, mọi tổ chức khách): đơn tạo tay «Đã xác nhận», đã ghép tỉnh
+    + xã, NGOÀI khu tự giao ⇒ máy tạo vận đơn ở hãng mặc định bằng ĐÚNG lõi của nút bấm (lib/carriers/engine.ts — giữ chỗ chống
+    trùng, mã ERP chặn trùng ở hãng, không tự gửi lại lượt không rõ kết quả). Credential là kết nối hãng CỦA CHÍNH tổ chức, nên
+    job không nằm trong HOME_CREDENTIAL_JOBS. Công tắc «Tự tạo vận đơn» mặc định TẮT; tắt / không việc ⇒ bỏ qua sau một câu đọc,
+    không ghi sync_runs. Nhà đồng bộ đơn Pancake ⇒ không có đơn tạo tay ⇒ CHỈ fan-out.
+  */
+  "shipping-route": {
+    label: "Tuyến giao tự động (tạo vận đơn ở hãng)",
+    source: "ALL",
+    module: "logistics",
+    fanOut: true,
+    description:
+      "Tổ chức bật «Tự tạo vận đơn» ở Đơn hàng → Danh sách tự giao → Cấu hình tuyến giao ⇒ đơn đã xác nhận (từ lúc bật), đã ghép tỉnh + xã, ngoài khu tự giao được tạo vận đơn ở hãng mặc định: cân = cân mẫu mã × số lượng (thiếu ⇒ giữ lại, không đoán), thu hộ = số khách còn phải trả, dịch vụ = mã đã khai hoặc rẻ nhất. " +
+      "Tối đa 20 đơn một lượt, tuần tự. Hãng từ chối ⇒ ghi lỗi trên đơn, thử lại sau 30 phút (tối đa 3 lần) hoặc ngay khi đơn được sửa. Lượt không rõ kết quả giữ chỗ chờ người tra như nút bấm.",
+    run: (o) => runShippingRouteJob({ trigger: o.trigger, actor: o.actor }),
   },
   // Company OS · Agent A — sổ mẫu. Không có lịch RIÊNG: chạy lồng sau mỗi lượt `pancake-products` (P1), và chạy tay từ /models hoặc trang Kết nối dữ liệu.
   "model-registry": {

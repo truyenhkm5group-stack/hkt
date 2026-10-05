@@ -482,6 +482,7 @@ import { testPancakePosOrgSync } from "./pancake-pos-org.test";
 import { testViettelPostOrg } from "./viettelpost-org.test";
 import { testCarrierVtp } from "./carrier-vtp.test";
 import { testCarrierGhn } from "./carrier-ghn.test";
+import { testShippingRouting } from "./shipping-routing.test";
 import { testErpNative } from "./erp-native.test";
 import { testChatOrder } from "./chat-order.test";
 import { testCarrierGhtk } from "./carrier-ghtk.test";
@@ -2739,6 +2740,7 @@ async function main() {
   await testErpNative();
   await testChatOrder();
   await testCarrierGhtk();
+  await testShippingRouting();
   await testFashionCodF3();
   await testWholesaleLeadHunter();
   await testRestaurantTemplate();
