@@ -757,4 +757,6 @@ Việc nhỏ: một nhánh + một cây như mục 9, không cần gì thêm. S�
   remote, cây chưa có bằng chứng đã vào, hay cây không có phiếu (trừ khi chủ shop cho `--allow-unowned`).
 - **Gọi chủ shop chỉ vì chín lý do** (`OWNER_ESCALATIONS`, README mục 14) + mục 7; trong lúc chờ,
   làm tiếp việc READY khác.
+- **Điểm vào của sứ mệnh mới:** chủ shop gõ `/mission <mục tiêu>` (skill `.claude/skills/mission/`); Lead
+  dựng cây riêng bằng `npm run ai -- lead <sứ-mệnh>` — chạy được từ checkout cũ, không ghi vào checkout đó.
 - Phiên mới / sau sập máy: `npm run ai -- status` rồi `npm run ai -- worktrees` trước khi làm gì.

@@ -511,6 +511,31 @@ async function testLifecycle() {
     );
     assert.equal((await ai(repo, "validate", "m1")).code, 0);
 
+    // ── ĐIỂM VÀO: `lead` dựng cây Lead từ origin/main VỪA FETCH, không ghi gì vào checkout đang đứng ──
+    const headBefore = g(repo, "rev-parse", "HEAD");
+    const statusBefore = g(repo, "status", "--porcelain");
+    const ldry = await ai(repo, "lead", "m2", "--dry-run");
+    assert.equal(ldry.code, 0, ldry.text);
+    assert.equal(existsSync(path.join(tmp, "wt-m2")), false, "chạy thử không dựng cây Lead");
+    const ld = await ai(repo, "lead", "m2", "Sứ", "mệnh", "hai");
+    assert.equal(ld.code, 0, ld.text);
+    const wtLead = path.join(tmp, "wt-m2");
+    assert.equal(g(wtLead, "rev-parse", "HEAD"), originTip, "cây Lead dựng từ origin/main vừa fetch, không từ main cục bộ cũ");
+    assert.equal(g(wtLead, "rev-parse", "--abbrev-ref", "HEAD"), "claude/m2", "nhánh Lead mang tiền tố mà cầu nối mở PR chấp nhận");
+    const leadMission = JSON.parse(readFileSync(path.join(wtLead, ".ai", "missions", "m2.json"), "utf8")) as { title: string };
+    assert.equal(leadMission.title, "Sứ mệnh hai");
+    assert.deepEqual(validateMission(leadMission, CFG).errors, [], "khung sứ mệnh mới phải hợp lệ ngay");
+    assert.equal(existsSync(path.join(repo, ".ai", "missions", "m2.json")), false, "không ghi vào checkout đang đứng");
+    assert.equal(g(repo, "rev-parse", "HEAD"), headBefore);
+    assert.equal(g(repo, "status", "--porcelain"), statusBefore);
+    assert.equal(readManifest(wtLead)?.role, "LEAD");
+    assert.match((await ai(wtLead, "whoami")).text, /CÂY LEAD — sứ mệnh m2/);
+    assert.match((await ai(repo, "status", "m1")).text, /0\/4 worker đang chạy/, "cây Lead không ăn chỗ worker");
+    const ld2 = await ai(repo, "lead", "m2");
+    assert.equal(ld2.code, 1);
+    assert.match(ld2.text, /nhánh claude\/m2 đã tồn tại/);
+    assert.equal((await ai(repo, "lead", "Bad_Name")).code, 1, "tên sứ mệnh phải là slug");
+
     let st = await ai(repo, "status", "m1");
     assert.match(st.text, /READY\s+P1\s+LOW\s+t1/);
     assert.match(st.text, /BACKLOG .*t3\s+chờ t1\(READY\)/);

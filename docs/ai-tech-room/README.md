@@ -15,6 +15,38 @@ một tệp TypeScript không phụ thuộc gói nào, vài tệp JSON, và git.
 
 ---
 
+## Giao một sứ mệnh — chủ shop đọc mục này
+
+**Một phiên Claude Code, một tin nhắn.** Mở một phiên Claude Code mới ở bất kỳ thư mục nào của kho
+(kể cả `Code ERP`) — Lead tự dựng cây riêng của nó từ `origin/main`, không sửa thư mục bạn đang mở.
+
+Nếu phiên đó đã có skill (`/mission` hiện trong danh sách lệnh):
+
+```
+/mission <mục tiêu>
+```
+
+Nếu chưa (thư mục cũ, chưa có `.claude/skills/`), dán nguyên đoạn này:
+
+```
+Làm LEAD của AI Tech Room cho sứ mệnh dưới đây. Trước khi làm gì: git fetch origin rồi đọc
+origin/main:.claude/skills/mission/SKILL.md và làm đúng theo đó (dựng cây Lead bằng lệnh `lead`,
+không sửa thư mục đang mở).
+
+SỨ MỆNH: <một câu: muốn đạt kết quả gì>
+ĐO BẰNG: <con số / hành vi nhìn thấy được khi xong>
+RÀNG BUỘC: <hạn chót, thứ không được đụng, ngân sách — nếu có>
+ƯU TIÊN: <so với các sứ mệnh đang chạy — nếu có>
+ĐƯỢC TỰ: <ví dụ "gộp PR khi cổng xanh, deploy khi cần" — hoặc "dừng trước khi gộp">
+```
+
+Ba dòng cuối có thể bỏ trống — Lead dùng mặc định của kho (gộp qua PR + `gates / gates`; deploy theo
+AGENTS.md mục 6.6). Sau đó bạn **không phải** tạo nhánh, chia việc, chọn việc song song, theo dõi
+worker hay dọn cây. Lead chỉ quay lại hỏi khi gặp một trong chín lý do ở mục 14, và mọi lúc bạn có
+thể hỏi "tình hình sứ mệnh X?" — Lead trả lời bằng `npm run ai -- status X --github`.
+
+Muốn tự xem: `npm run ai -- status` (trong cây Lead) · `npm run ai -- worktrees` (cả máy).
+
 ## 0. Khác gì `/tech` trong ERP
 
 | | `/tech` (Phòng Tech AI, `docs/ai-tech-department-phase1.md`) | AI Tech Room (tài liệu này) |

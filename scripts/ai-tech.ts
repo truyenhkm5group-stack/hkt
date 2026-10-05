@@ -25,7 +25,7 @@
  *    không phải lệnh.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /* ═════════════ 1 · TỪ VỰNG ═════════════ */
@@ -205,6 +205,8 @@ export type Manifest = {
   integrationRef: string;
   createdAt: string;
   leadWorktree: string;
+  /** LEAD = cây của chính Lead (dựng bằng `lead`); vắng = WORKER. Cây LEAD không ăn chỗ worker. */
+  role?: "LEAD" | "WORKER";
 };
 
 /* ═════════════ 3 · KIỂM TRA ĐẦU VÀO ═════════════ */
@@ -1194,7 +1196,7 @@ export function globalRunningWorkers(ctx: RepoCtx, wts: readonly WorktreeEntry[]
   for (const w of wts) {
     if (w.prunable || w.bare) continue;
     const m = readManifest(w.path);
-    if (!m || !w.head) continue;
+    if (!m || !w.head || m.role === "LEAD") continue;
     const merged = mergeEvidence(ctx.top, w.head, m.integrationRef, { baseSha: m.baseSha });
     if (merged && merged !== "EMPTY") continue;
     const d = dirtyCount(w.path).n;
@@ -1487,13 +1489,7 @@ function cmdSpawn(ctx: RepoCtx, id: string | undefined, taskId: string | undefin
 
   const branch = branchFor(ctx.config, t);
   const wtPath = worktreeFor(ctx, t);
-  const problems: string[] = [];
-  if (gitTry(ctx.top, ["check-ref-format", "--branch", branch]) === null) problems.push(`tên nhánh ${branch} không hợp lệ`);
-  if (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) problems.push(`nhánh ${branch} đã tồn tại ở máy này`);
-  if (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`])) problems.push(`nhánh ${remote}/${branch} đã tồn tại`);
-  const reg = wts.find((w) => samePath(w.path, wtPath));
-  if (reg) problems.push(`worktree ${wtPath} đã được đăng ký (nhánh ${reg.branch ?? "tách rời"})`);
-  else if (existsSync(wtPath)) problems.push(`thư mục ${wtPath} đã tồn tại`);
+  const problems = worktreeCollisions(ctx, wts, branch, wtPath);
   if (problems.length)
     throw new Error(`không dựng được ${t.id}:\n  ${problems.join("\n  ")}\n  ⇒ đặt "slug" khác cho việc trong tệp sứ mệnh (tên phải là của RIÊNG việc này), không đè lên thứ đang có`);
 
@@ -1521,6 +1517,101 @@ function cmdSpawn(ctx: RepoCtx, id: string | undefined, taskId: string | undefin
   return 0;
 }
 
+/** Mọi lý do KHÔNG được dựng một nhánh + cây mới ở đây. Rỗng = an toàn. */
+function worktreeCollisions(ctx: RepoCtx, wts: readonly WorktreeEntry[], branch: string, wtPath: string): string[] {
+  const remote = ctx.config.remote;
+  const problems: string[] = [];
+  if (gitTry(ctx.top, ["check-ref-format", "--branch", branch]) === null) problems.push(`tên nhánh ${branch} không hợp lệ`);
+  if (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) problems.push(`nhánh ${branch} đã tồn tại ở máy này`);
+  if (gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`])) problems.push(`nhánh ${remote}/${branch} đã tồn tại`);
+  const reg = wts.find((w) => samePath(w.path, wtPath));
+  if (reg) problems.push(`worktree ${wtPath} đã được đăng ký (nhánh ${reg.branch ?? "tách rời"})`);
+  else if (existsSync(wtPath)) problems.push(`thư mục ${wtPath} đã tồn tại`);
+  return problems;
+}
+
+/**
+ * ĐIỂM VÀO của một sứ mệnh mới: dựng cây + nhánh RIÊNG cho Lead từ nhánh tích hợp VỪA FETCH, khai
+ * khung tệp sứ mệnh trong cây đó, ghi phiếu vai LEAD.
+ *
+ * Gọi được từ BẤT KỲ checkout nào của kho — kể cả cây chính dùng chung đang ở commit cũ và còn
+ * việc dở của phiên khác — vì nó KHÔNG ghi gì vào checkout đang đứng: chỉ fetch, thêm một
+ * worktree cạnh đó, và ghi vào cây mới. Checkout cũ chưa có tệp này thì chạy bản trên main:
+ *   git show origin/main:scripts/ai-tech.ts > <thư-mục-tạm>/ai-tech.ts && node <thư-mục-tạm>/ai-tech.ts lead <id>
+ */
+function cmdLead(ctx: RepoCtx, id: string | undefined, titleWords: string[], flags: Set<string>): number {
+  if (!id || !SLUG_RE.test(id))
+    throw new UsageError(`tên sứ mệnh phải khớp ${SLUG_RE} (thành nhánh ${ctx.config.branchPrefix}<tên> và cây ../${ctx.config.worktreePrefix}<tên>)`);
+  const dry = flags.has("dry-run");
+  if (!flags.has("offline")) {
+    const f = gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
+    if (f.code !== 0) throw new Error(`fetch ${ctx.config.remote} thất bại (${f.err}) — không dựng cây Lead trên một gốc có thể đã cũ`);
+  }
+  const ref = ctx.config.integrationRef;
+  const baseSha = gitTry(ctx.top, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  if (!baseSha) throw new Error(`không phân giải được ${ref}`);
+  const branch = `${ctx.config.branchPrefix}${id}`;
+  const wtPath = path.join(ctx.worktreeParent, `${ctx.config.worktreePrefix}${id}`);
+  const problems = worktreeCollisions(ctx, listWorktrees(ctx.top), branch, wtPath);
+  if (problems.length)
+    throw new Error(`không dựng được cây Lead cho ${id}:\n  ${problems.join("\n  ")}\n  ⇒ chọn tên sứ mệnh khác; nếu đây là sứ mệnh đang chạy thì mở phiên trong cây đã có`);
+  const existing = gitRun(ctx.top, ["cat-file", "-e", `${baseSha}:.ai/missions/${id}.json`]).code === 0;
+  out(`${dry ? "[CHẠY THỬ] " : ""}dựng cây Lead cho sứ mệnh ${id}`);
+  out(`  git worktree add -b ${branch} ${wtPath} ${baseSha.slice(0, 12)}   (gốc ${ref} vừa fetch)`);
+  out(`  ${existing ? `.ai/missions/${id}.json đã có trên ${ref} — giữ nguyên` : `khung .ai/missions/${id}.json trong cây mới`}`);
+  if (dry) return 0;
+  git(ctx.top, ["worktree", "add", "--no-track", "-b", branch, wtPath, baseSha]);
+  const title = titleWords.join(" ").trim() || id;
+  if (!existing) {
+    const missionFile = path.join(wtPath, ".ai", "missions", `${id}.json`);
+    mkdirSync(path.dirname(missionFile), { recursive: true });
+    writeFileSync(missionFile, `${JSON.stringify(missionScaffold(id, title), null, 2)}\n`);
+  }
+  writeManifest(wtPath, {
+    schema: 1,
+    role: "LEAD",
+    mission: { id, title, goal: "(xem tệp sứ mệnh)" },
+    task: {
+      id: "lead",
+      title: `Lead của sứ mệnh ${id}`,
+      objective: title,
+      mode: "INLINE",
+      priority: "P1",
+      risk: "LOW",
+      dependsOn: [],
+      owns: [`.ai/missions/${id}.json`],
+      readOnly: [],
+      doNotTouch: [],
+      tests: [],
+      definitionOfDone: ["Mọi việc của sứ mệnh MERGED/DONE, cây worker đã dọn"],
+    },
+    branch,
+    worktree: wtPath,
+    baseRef: ref,
+    baseSha,
+    integrationRef: ref,
+    createdAt: new Date().toISOString(),
+    leadWorktree: wtPath,
+  });
+  out(`✓ cây Lead: ${wtPath}`);
+  out(`  tiếp theo, trong cây đó: npm ci → sửa .ai/missions/${id}.json → npm run ai -- validate ${id} → npm run ai -- next ${id}`);
+  out(`  Claude Code: mở phiên trong cây đó rồi gõ /mission — hoặc giữ phiên hiện tại và chạy mọi lệnh bằng cd "${wtPath}" && …`);
+  return 0;
+}
+
+function renderLeadBrief(m: Manifest): string {
+  return `# CÂY LEAD — sứ mệnh ${m.mission.id}
+
+${m.mission.title}
+
+- Cây: \`${m.worktree}\` · nhánh \`${m.branch}\` (gốc \`${m.baseRef}\` @ \`${m.baseSha.slice(0, 12)}\`)
+- Tệp sứ mệnh: \`.ai/missions/${m.mission.id}.json\` — kế hoạch của bạn; commit + đẩy mỗi lần đổi.
+- Quy trình: \`docs/ai-tech-room/README.md\` mục «Giao một sứ mệnh» và mục 6 (vòng lặp Lead); skill \`/mission\`.
+
+Bắt đầu: \`npm run ai -- status ${m.mission.id}\` rồi \`npm run ai -- next ${m.mission.id}\`.
+`;
+}
+
 function cmdBrief(ctx: RepoCtx, id: string | undefined, taskId: string | undefined): number {
   const { mission } = requireMission(ctx, id);
   const t = mission.tasks.find((x) => x.id === taskId);
@@ -1542,7 +1633,7 @@ function cmdWhoami(ctx: RepoCtx): number {
     out("cây này không có phiếu giao việc của AI Tech Room — làm việc như một nhánh thường (AGENTS.md mục 9).");
     return 0;
   }
-  process.stdout.write(renderBrief(m));
+  process.stdout.write(m.role === "LEAD" ? renderLeadBrief(m) : renderBrief(m));
   return 0;
 }
 
@@ -1704,14 +1795,11 @@ function markCleaned(ctx: RepoCtx, missionId: string, taskId: string, f: Worktre
   writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
 }
 
-function cmdNew(ctx: RepoCtx, id: string | undefined, title: string[]): number {
-  if (!id || !SLUG_RE.test(id)) throw new UsageError(`tên sứ mệnh phải khớp ${SLUG_RE}`);
-  const file = path.join(missionsDir(ctx), `${id}.json`);
-  if (existsSync(file)) throw new Error(`${file} đã có`);
-  const m = {
+export function missionScaffold(id: string, title: string) {
+  return {
     schema: 1,
     id,
-    title: title.join(" ") || id,
+    title,
     goal: "Kết quả nghiệp vụ / kỹ thuật mà sứ mệnh này phải đạt — một câu đo được.",
     tasks: [
       {
@@ -1730,6 +1818,14 @@ function cmdNew(ctx: RepoCtx, id: string | undefined, title: string[]): number {
       },
     ],
   };
+}
+
+function cmdNew(ctx: RepoCtx, id: string | undefined, title: string[]): number {
+  if (!id || !SLUG_RE.test(id)) throw new UsageError(`tên sứ mệnh phải khớp ${SLUG_RE}`);
+  const file = path.join(missionsDir(ctx), `${id}.json`);
+  if (existsSync(file)) throw new Error(`${file} đã có`);
+  const m = missionScaffold(id, title.join(" ") || id);
+  mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
   out(`✓ ${file}\n  sửa tasks rồi: npm run ai -- validate ${id}`);
   return 0;
@@ -1748,7 +1844,9 @@ const HELP = `AI Tech Room — docs/ai-tech-room/README.md
   npm run ai -- cleanup <cây|sứ-mệnh:việc|merged> [--apply] [--allow-unowned]
                                                          mặc định CHẠY THỬ; không bao giờ dọn cây bẩn / chưa đẩy
   npm run ai -- validate [sứ-mệnh…]                      kiểm tệp sứ mệnh: DAG, chu trình, phạm vi, sàn rủi ro
-  npm run ai -- new <sứ-mệnh> [tiêu đề]                  tạo .ai/missions/<sứ-mệnh>.json mẫu
+  npm run ai -- new <sứ-mệnh> [tiêu đề]                  tạo .ai/missions/<sứ-mệnh>.json mẫu trong cây hiện tại
+  npm run ai -- lead <sứ-mệnh> [tiêu đề] [--dry-run]     ĐIỂM VÀO: dựng cây Lead ../wt-<sứ-mệnh> từ origin/main vừa fetch
+                                                         (checkout cũ: git show origin/main:scripts/ai-tech.ts > tạm.ts && node tạm.ts lead …)
 `;
 
 export async function main(argv: readonly string[], cwd: string): Promise<number> {
@@ -1781,6 +1879,8 @@ export async function main(argv: readonly string[], cwd: string): Promise<number
       return cmdCleanup(ctx, a.flags.has("merged") ? [...rest, "merged"] : rest, a.flags);
     case "validate":
       return cmdValidate(ctx, rest);
+    case "lead":
+      return cmdLead(ctx, rest[0], rest.slice(1), a.flags);
     case "new":
       return cmdNew(ctx, rest[0], rest.slice(1));
     default:
