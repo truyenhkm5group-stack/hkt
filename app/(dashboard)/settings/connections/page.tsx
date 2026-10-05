@@ -3,7 +3,7 @@ import { ConnectorGroupTable } from "@/components/connectors/connector-group-tab
 import { OrgCarrierPanel } from "@/components/connectors/org-carrier-panel";
 import { OrgGhnPanel } from "@/components/connectors/org-ghn-panel";
 import { OrgGhtkPanel } from "@/components/connectors/org-ghtk-panel";
-import { OrgPosPanel } from "@/components/connectors/org-pos-panel";
+import { LegacyConnections } from "@/components/connectors/legacy-connections";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { CONNECTIONS_PERMISSION, loadConnectionsView } from "@/lib/connectors/service";
@@ -67,7 +67,7 @@ export default async function ConnectionsPage() {
         </p>
       )}
       {directFacebook ? (
-        <SectionCard title="Facebook · Instagram — nối thẳng, không cần Pancake" description="Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư ERP, bot AI trả lời, nhân viên tiếp quản ngay trong ERP.">
+        <SectionCard title="Facebook · Instagram — nối thẳng, không cần phần mềm chat trung gian" description="Cách khuyên dùng cho shop bán qua Facebook: chủ page bấm Kết nối Facebook, chọn page — tin khách về Hộp thư ERP, bot AI trả lời, nhân viên tiếp quản ngay trong ERP.">
           <Link href="/ai/sales-chatbot/messenger" className="text-sm font-semibold text-primary hover:underline" data-testid="connections-direct-facebook">
             Mở Kết nối Facebook →
           </Link>
@@ -85,22 +85,7 @@ export default async function ConnectionsPage() {
           </SectionCard>
         ))
       )}
-      {view.organization.isHome ? null : (
-        <details open={split.legacyInUse} className="group space-y-3 rounded-xl border bg-muted/20 p-4" data-testid="connections-legacy">
-          <summary className="cursor-pointer select-none text-sm font-semibold">
-            Kết nối cũ / chuyển đổi — Pancake <span className="font-normal text-muted-foreground">· chỉ cho shop ĐANG dùng Pancake; shop mới không cần</span>
-          </summary>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Đang dùng Pancake và muốn chuyển: nối Facebook trực tiếp ở trên, kiểm tin vào Hộp thư ERP, rồi tắt kết nối Pancake của page đó (một page chỉ nhận tin qua một đường). Đồng bộ đơn Pancake POS là kết nối riêng — giữ hay bỏ tuỳ shop.
-          </p>
-          <OrgPosPanel orgCode={view.organization.code} />
-          {split.legacy.length ? (
-            <SectionCard title="Kết nối Pancake" description={`${split.legacy.length} connector`} padded={false} contentClassName="overflow-x-auto p-0">
-              <ConnectorGroupTable rows={split.legacy} secretsReady={view.secretsReady.ok} />
-            </SectionCard>
-          ) : null}
-        </details>
-      )}
+      {view.organization.isHome ? null : <LegacyConnections orgCode={view.organization.code} rows={split.legacy} open={split.legacyInUse} secretsReady={view.secretsReady.ok} />}
     </div>
   );
 }
