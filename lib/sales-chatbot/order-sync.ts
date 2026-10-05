@@ -277,9 +277,9 @@ async function notifyOrderChange(convId: string, text: string, dedupe: string, n
   const title = "Khách nhắn sửa đơn đã ghi từ fanpage";
   try {
     const db = await getDb();
-    await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "warning", title, body: text, href: "/ai/sales-chatbot", entityType: "SALES_CHAT", entityId: convId, dedupeKey: dedupe, occurredAt: now }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
+    await db.insert(schema.notifications).values({ kind: "SYSTEM", severity: "warning", title, body: text, href: `/ai/sales-chatbot/inbox?c=${encodeURIComponent(convId)}`, entityType: "SALES_CHAT", entityId: convId, dedupeKey: dedupe, occurredAt: now }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
     const users = await activeUserIdsWhoCan("orders:write");
-    await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_ORDER_SYNC", title, body: text, href: "/ai/sales-chatbot", dedupeKey: `${dedupe}:${userId}` })), db);
+    await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_ORDER_SYNC", title, body: text, href: `/ai/sales-chatbot/inbox?c=${encodeURIComponent(convId)}`, dedupeKey: `${dedupe}:${userId}` })), db);
   } catch {
     // Đường phụ.
   }

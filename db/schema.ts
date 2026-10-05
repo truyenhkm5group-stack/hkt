@@ -9824,6 +9824,13 @@ export const salesChatConversations = pgTable(
     followupsSent: integer("followups_sent").notNull().default(0),
     nextFollowupAt: ts("next_followup_at"),
     lastError: text("last_error"),
+    /**
+     * Hộp thư người (0209 · lib/sales-chatbot/inbox.ts): người đang CẦM hội thoại (khoá `users.id`, luật 34 — không lưu tên)
+     * và mốc tin cuối nhân viên gửi TỪ ERP. «Chờ trả lời» = tin khách mới hơn cả tin bot lẫn tin nhân viên.
+     */
+    assigneeUserId: text("assignee_user_id"),
+    assignedAt: ts("assigned_at"),
+    lastStaffAt: ts("last_staff_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -9838,6 +9845,37 @@ export const salesChatConversations = pgTable(
     uniqueIndex("sales_chat_conversations_zalo_key").on(t.visitorKey).where(sql`${t.channel} = 'ZALO'`),
     check("sales_chat_conversations_status_check", sql`${t.status} IN ('OPEN','WAITING','HANDOFF','CLOSED')`),
     index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
+    index("sales_chat_conversations_inbox_idx").on(t.lastCustomerAt),
+    index("sales_chat_conversations_assignee_idx").on(t.assigneeUserId).where(sql`${t.assigneeUserId} is not null`),
+  ],
+);
+
+/**
+ * TIN NHÂN VIÊN GỬI TỪ HỘP THƯ ERP (0209 · lib/sales-chatbot/inbox.ts). Một dòng cho MỘT lượt bấm «Gửi»: ai gửi (khoá
+ * `users.id` + ảnh chụp tên do MÁY CHỦ đọc — luật 34), gửi gì, kênh nào, kết quả. `request_key` do form sinh mỗi lần soạn ⇒
+ * bấm hai lần / trình duyệt gửi lại không gửi khách hai tin. Đây là nguồn quy kết theo NGƯỜI mà tin nhân viên gõ ngoài ERP
+ * (Pancake / Hộp thư Meta / Zalo OA) không bao giờ có.
+ */
+export const salesChatStaffMessages = pgTable(
+  "sales_chat_staff_messages",
+  {
+    id: id(),
+    conversationId: text("conversation_id").notNull(),
+    requestKey: text("request_key").notNull(),
+    userId: text("user_id").notNull(),
+    userName: text("user_name").notNull().default(""),
+    channel: text("channel").notNull(),
+    text: text("text").notNull(),
+    /** SENDING ⇒ SENT | FAILED. FAILED không vào lịch sử của bot và không tính là «đã trả lời». */
+    status: text("status").notNull().default("SENDING"),
+    error: text("error"),
+    sentAt: ts("sent_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_chat_staff_messages_request_key").on(t.conversationId, t.requestKey),
+    index("sales_chat_staff_messages_conv_idx").on(t.conversationId, t.createdAt),
+    check("sales_chat_staff_messages_status_check", sql`${t.status} IN ('SENDING','SENT','FAILED')`),
   ],
 );
 

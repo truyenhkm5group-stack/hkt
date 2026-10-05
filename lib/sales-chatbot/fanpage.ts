@@ -23,7 +23,7 @@
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -143,6 +143,27 @@ export function normalizeEcho(text: string): string {
 export const CLAIM_STALE_MS = 3 * 60_000;
 const TEXT_MAX = 2000;
 export const STAFF_REASON = "Nhân viên đang trả lời trên fanpage";
+
+/**
+ * TIN NHÂN VIÊN GỬI TỪ HỘP THƯ ERP (0209 · lib/sales-chatbot/inbox.ts). Dòng ghi sẵn TRƯỚC khi gửi mang mã
+ * `staff-out:<id tin ERP>:<đoạn>` và note `PAGE_REPLY` — CÙNG nghĩa «page đã trả lời» với tin nhân viên gõ ngoài ERP, nên mọi
+ * chỗ đang đọc `PAGE_REPLY` (bỏ qua tin khách đã có người trả lời, dừng follow-up, chép vào lịch sử của bot, chấm gợi ý
+ * Copilot, bài học của bot) hiểu đúng mà không sửa gì. Gửi hỏng ⇒ xoá dòng ghi sẵn (không để bot tưởng khách đã nhận).
+ */
+export const STAFF_OUT_PREFIX = "staff-out:";
+export type StaffMark = { staffMessageId: string };
+export function staffOutRowId(mark: StaffMark, part: number): string {
+  return `${STAFF_OUT_PREFIX}${mark.staffMessageId}:${part}`;
+}
+/**
+ * Tiếng vọng của tin nhân viên gửi từ ERP: trùng NGUYÊN VĂN đoạn ghi sẵn, cùng hội thoại, trong 10 phút. Nhận nó là «nhân
+ * viên trả lời ngoài ERP» thì lịch sử của bot và hộp thư có hai bản của cùng một tin.
+ */
+export function erpStaffEchoCond(pageId: string, threadId: string, echo: string, now: Date): SQL {
+  const t = schema.salesChatInbound;
+  if (!echo) return sql`false`;
+  return and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY), like(t.messageId, `${STAFF_OUT_PREFIX}%`), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - ECHO_WINDOW_MS))) ?? sql`false`;
+}
 /** Bot nhắn trong chừng này mà có tin phía page lạ tới ⇒ nhân viên đang vào hội thoại (Pancake không gắn uid). */
 export const STAFF_INFER_WINDOW_MS = 3 * 3_600_000;
 
@@ -305,6 +326,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
           and(eq(t.pageId, ev.pageId), eq(t.threadId, ev.threadId), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - (echo ? ECHO_WINDOW_MS : ECHO_MEDIA_WINDOW_MS)))),
           // Tin RIÊNG trả lời bình luận: hộp thư chưa biết lúc gửi ⇒ so nguyên văn trên cả page, khoảng ngắn.
           echo ? and(eq(t.pageId, ev.pageId), eq(t.threadId, PRIVATE_REPLY_THREAD), eq(t.note, "BOT_SENT"), eq(t.text, echo), gte(t.createdAt, new Date(now.getTime() - PRIVATE_ECHO_WINDOW_MS))) : sql`false`,
+          // Tin nhân viên gửi từ hộp thư ERP — đã ghi sẵn, đã quy kết người gửi, đã cho bot nhường.
+          erpStaffEchoCond(ev.pageId, ev.threadId, echo, now),
         ),
       )
       .limit(1);
@@ -473,19 +496,26 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
  * Gửi MỘT tin chữ của bot vào hội thoại fanpage (follow-up · 0185) — cùng đường gửi + dấu tiếng vọng như câu trả lời
  * thường. Đọc token của kết nối fanpage ĐANG BẬT của tổ chức ngữ cảnh; không ném.
  */
-export async function sendFanpageText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function sendFanpageText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối fanpage chưa bật / khác page" };
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   const now = deps.now ?? (() => new Date());
   const db = await getDb();
   const t = schema.salesChatInbound;
+  const parts = chunkText(text, TEXT_MAX);
+  const preIds = parts.map((_, i) => (mark ? staffOutRowId(mark, i) : `bot-out:${randomUUID()}`));
   await db
     .insert(t)
-    .values(chunkText(text, TEXT_MAX).map((part) => ({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: "BOT_SENT" })))
+    .values(parts.map((part, i) => ({ pageId, threadId, messageId: preIds[i], text: normalizeEcho(part), status: "DONE", processedAt: now(), note: mark ? PAGE_REPLY : "BOT_SENT" })))
     .onConflictDoNothing({ target: t.messageId });
   const sent = await sendInbox(pageId, threadId, token, text, deps.fetch ?? fetch);
-  if (!sent.ok) return { ok: false, error: sent.error };
+  if (!sent.ok) {
+    if (mark) await db.delete(t).where(inArray(t.messageId, preIds));
+    return { ok: false, error: sent.error };
+  }
+  // Tin nhân viên: MỘT dòng cho mỗi đoạn (dòng ghi sẵn) — ghi thêm dòng theo mã Pancake là chép tin vào lịch sử bot hai lần.
+  if (mark) return { ok: true };
   if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: text.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
   return { ok: true };
 }

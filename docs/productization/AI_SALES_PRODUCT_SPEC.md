@@ -35,7 +35,7 @@ ERP phía dưới (đơn, khách, sản phẩm, giá, tồn, thanh toán, vận 
 | 8 | **Upsell / cross-sell** | Một phần | Bước UPSELL, câu mời phải gửi trước khi chốt. **Chưa đánh dấu dòng hàng upsell, chưa đo doanh thu upsell** (M2) |
 | 9 | **Chốt đơn an toàn** | Đã có | `confirm_order` chặn khi khách chưa thấy tóm tắt, chưa có lời đồng ý nguyên văn, giá vừa đổi, hết hàng (`tools.ts:557-600`) |
 | 10 | **Tạo đơn trong ERP** | Đã có | `create_draft_order` / `update_draft_order` / `confirm_order` → `createOrderAsAgent` → `orders` + `order.*`. Không có idempotency (TD-03) |
-| 11 | **Handoff cho người** | Đã có | `handoff_to_human` với lý do theo nhóm; báo trong ERP + nhóm chat; nhân viên trả lời ⇒ bot nhường 30 phút; trả lại AI bằng nút. **Chưa có hộp thư người trong ERP** (M8) |
+| 11 | **Handoff cho người** | Đã có | `handoff_to_human` với lý do theo nhóm; báo trong ERP + nhóm chat; nhân viên trả lời ⇒ bot nhường 30 phút; trả lại AI bằng nút. **Hộp thư khách trong ERP (M8, 05/10/2026)**: `/ai/sales-chatbot/inbox` — nhân viên trả lời Facebook / Instagram / Zalo / chat web, mỗi tin mang `users.id` |
 | 12 | **Nhắc khách im lặng** | Đã có | `followup.ts` 1h / 6h / 22h trong khung 24 giờ; thôi khi nhân viên đã nói hoặc khách gửi 👍 |
 | 13 | **Ghi đơn hộ nhân viên** | Đã có (mặc định tắt) | `order-sync.ts`: hội thoại người chốt yên 10 phút ⇒ AI đọc ⇒ đơn "Mới" |
 | 14 | **Nhắc mua lại** | Đã có | `lib/reorder/*` + tin sáng khách đến hạn vào nhóm |

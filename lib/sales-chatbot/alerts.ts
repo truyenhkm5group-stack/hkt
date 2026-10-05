@@ -65,7 +65,7 @@ async function fanpageCustomerName(conversationId: string): Promise<string | nul
 export async function notifySalesChatHandoff(conversationId: string, reason: string, customer: { name: string; phone: string } | null | undefined, now: Date): Promise<void> {
   const title = "Chatbot chuyển khách cho nhân viên";
   const body = `${reason}${customer ? ` — ${customer.name} · ${customer.phone}` : ""}`;
-  const href = `/ai/sales-chatbot?conversation=${conversationId}`;
+  const href = `/ai/sales-chatbot/inbox?c=${encodeURIComponent(conversationId)}`;
   const key = `sales-chat:handoff:${conversationId}`;
   const db = await getDb();
   await db

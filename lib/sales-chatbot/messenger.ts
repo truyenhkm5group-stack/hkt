@@ -12,6 +12,7 @@ import {
   CLAIM_STALE_MS,
   conversationFor,
   COPILOT_NOTE,
+  erpStaffEchoCond,
   fanpageVisitorKey,
   FIRST_CONTACT_LOOKBACK_MS,
   FIRST_CONTACT_WAIT_MS,
@@ -19,6 +20,7 @@ import {
   GRACE_SLACK_MS,
   HUMAN_TAKEOVER_MINUTES,
   markWaitingForCustomer,
+  normalizeEcho,
   mirrorFanpageContext,
   OBSERVE_HUMAN_ARM_NOTE,
   OBSERVE_NOTE,
@@ -28,11 +30,13 @@ import {
   sendFanpageText,
   STAFF_INFER_WINDOW_MS,
   STAFF_REASON,
+  staffOutRowId,
   stopFollowups,
   WAITING,
   type FanpageDeps,
   type ProcessResult,
   type ReceiveResult,
+  type StaffMark,
 } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
@@ -135,6 +139,9 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   const db = await getDb();
   const t = schema.salesChatInbound;
   if (ev.isEcho) {
+    // Tin nhân viên gửi từ hộp thư ERP đi qua CHÍNH app nền tảng ⇒ phải bắt trước nhánh «mã app = bot», không thì thành tin bot.
+    const [staffEcho] = await db.select({ id: t.id }).from(t).where(erpStaffEchoCond(ev.pageId, ev.psid, normalizeEcho(ev.text), now)).limit(1);
+    if (staffEcho) return { queued: false, reason: "Tin nhân viên gửi từ hộp thư ERP" };
     const app = messengerApp();
     // Tin của chính bot: mã app của nền tảng, HOẶC đúng mã tin bot đã ghi lúc gửi (tiếng vọng Instagram không mang mã app).
     const [sentByBot] = await db.select({ id: t.id }).from(t).where(and(eq(t.messageId, ev.mid), eq(t.note, "BOT_SENT"))).limit(1);
@@ -178,7 +185,7 @@ const fanpageKey = (pageId: string, psid: string) => fanpageVisitorKey(pageId, p
 // ─────────────────────────── Gửi ───────────────────────────
 
 /** Gửi MỘT tin chữ của bot qua Send API (chia ≤ 2.000 ký tự). Ghi mã tin đã gửi — tiếng vọng tới sau là «tin của chính bot». */
-export async function sendMessengerPageText(pageId: string, psid: string, text: string, deps: FanpageDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function sendMessengerPageText(pageId: string, psid: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const conn = await openActiveConnection(MESSENGER_CONNECTOR);
   if (!conn.ok || !ownedIds(conn.settings).includes(pageId)) return { ok: false, error: "Kết nối Messenger chưa bật / khác page" };
   const app = messengerApp();
@@ -187,7 +194,19 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
   const now = deps.now ?? (() => new Date());
   const db = await getDb();
   const t = schema.salesChatInbound;
-  for (const part of chunkText(text, MESSENGER_TEXT_MAX)) {
+  const parts = chunkText(text, MESSENGER_TEXT_MAX);
+  for (const [i, part] of parts.entries()) {
+    if (mark) {
+      // Tin nhân viên (hộp thư ERP): ghi sẵn TRƯỚC khi gửi — tiếng vọng tới nhanh hơn phản hồi của Send API.
+      const rowId = staffOutRowId(mark, i);
+      await db.insert(t).values({ pageId, threadId: psid, messageId: rowId, text: normalizeEcho(part), status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+      const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
+      if (!sent.ok) {
+        await db.delete(t).where(eq(t.messageId, rowId));
+        return { ok: false, error: i > 0 ? `${sent.error} (đã gửi ${i}/${parts.length} đoạn)` : sent.error };
+      }
+      continue;
+    }
     const sent = await sendMessengerText(app, token, psid, part, deps.fetch ?? fetch);
     if (!sent.ok) return { ok: false, error: sent.error };
     await db
@@ -199,10 +218,10 @@ export async function sendMessengerPageText(pageId: string, psid: string, text: 
 }
 
 /** Một tin của bot vào hội thoại fanpage, ĐÚNG đường của page: Pancake nếu page nối qua Pancake, không thì Messenger trực tiếp. */
-export async function sendBotText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}): Promise<{ ok: true } | { ok: false; error: string }> {
-  const viaPancake = await sendFanpageText(pageId, threadId, text, deps);
+export async function sendBotText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  const viaPancake = await sendFanpageText(pageId, threadId, text, deps, mark);
   if (viaPancake.ok || !/chưa bật \/ khác page/.test(viaPancake.error)) return viaPancake;
-  return sendMessengerPageText(pageId, threadId, text, deps);
+  return sendMessengerPageText(pageId, threadId, text, deps, mark);
 }
 
 // ─────────────────────────── Xử lý lượt ───────────────────────────

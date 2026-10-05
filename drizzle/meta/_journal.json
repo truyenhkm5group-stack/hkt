@@ -1457,6 +1457,13 @@
       "when": 1790767480000,
       "tag": "0208_zalo_oa_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 209,
+      "version": "7",
+      "when": 1790767540000,
+      "tag": "0209_sales_inbox",
+      "breakpoints": true
     }
   ]
 }

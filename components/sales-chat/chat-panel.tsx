@@ -38,6 +38,25 @@ export function SalesChatPanel({ mode, title, className }: { mode: "test" | "pub
     bottom.current?.scrollIntoView({ block: "end" });
   }, [view, pending]);
 
+  // Trang chat CÔNG KHAI: nhân viên trả lời từ hộp thư ERP (không có kênh đẩy) ⇒ khung chat tự đọc lại hội thoại mỗi 15 giây
+  // khi tab đang mở và không có lượt gửi nào đang chạy. Chỉ thay khi CÙNG hội thoại và có thêm tin — không giật khung đang gõ.
+  const viewRef = useRef<ChatView | null>(null);
+  viewRef.current = view;
+  const pendingRef = useRef(false);
+  pendingRef.current = pending;
+  useEffect(() => {
+    if (mode !== "public") return;
+    const id = window.setInterval(async () => {
+      const cur = viewRef.current;
+      if (!cur || pendingRef.current || document.visibilityState !== "visible") return;
+      const r = await startPublicChatAction();
+      if ("error" in r || pendingRef.current) return;
+      const now = viewRef.current;
+      if (now && r.view.conversationId === now.conversationId && (r.view.messages.length > now.messages.length || r.view.status !== now.status)) setView(r.view);
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [mode]);
+
   const send = () => {
     const t = text.trim();
     if (!t || !view) return;

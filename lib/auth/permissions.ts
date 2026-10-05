@@ -240,6 +240,13 @@ export const PERMISSION_GROUPS = [
     module: "AI bán hàng",
     items: [
       { key: "ai_sales:view", label: "AI bán hàng: xem hội thoại", hint: "Đọc hội thoại khách đã chat với chatbot bán hàng và đơn bot đã lên." },
+      /*
+        Hộp thư khách (M8 · 0209): GỬI TIN cho khách từ ERP là việc của người bán / CSKH, không phải của người cấu hình bot.
+        Tổ chức chỉ mua AI bán hàng không có module «Chăm sóc & bán chéo» nên không dùng được `outreach:send` — vì vậy khoá
+        riêng trong module ai_sales. `outreach:send` vẫn được nhận (lib/sales-chatbot/inbox.ts) để vai trò đã lưu quyền ở
+        tổ chức nhà không mất việc trả lời khách.
+      */
+      { key: "ai_sales:reply", label: "AI bán hàng: trả lời khách trong hộp thư", hint: "Gửi tin cho khách Facebook / Instagram / Zalo / chat web từ Hộp thư khách, nhận hội thoại, trả lại cho AI. Mỗi tin mang tên người gửi." },
       { key: "ai_sales:manage", label: "AI bán hàng: cấu hình & xuất bản chatbot", hint: "Chọn khoá AI, giọng điệu, giờ làm việc, chính sách chuyển người / chốt đơn, công cụ bot được dùng; chạy khung thử; bật trang chat công khai." },
     ],
   },
@@ -416,7 +423,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage", "wholesale:scan", "wholesale:config"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "wholesale:view", "wholesale:work", "wholesale:assign"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "ai_sales:reply", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "wholesale:view", "wholesale:work", "wholesale:assign"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
@@ -433,7 +440,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Bảo hành (0196) cũng là việc của CSKH; sale bất động sản (0201) giữ chỗ / cọc — các module chỉ bật ở tổ chức khách.
   // Săn khách sỉ (0197): nhân viên bán / CSKH chăm lead được giao — module chỉ bật ở tổ chức khách.
   // Lễ tân lưu trú (0198) là người giữ lịch phòng; điều phối phiếu công việc (0200) cũng là việc của CSKH; sale bất động sản (0201) giữ chỗ / cọc — các module chỉ bật ở tổ chức khách.
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write", "field_jobs:view", "field_jobs:write", "real_estate:view", "real_estate:hold"],
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "ai_sales:reply", "landing:manage", "shipments:manage", "appointments:view", "appointments:write", "warranty:view", "warranty:write", "wholesale:view", "wholesale:work", "stays:view", "stays:write", "field_jobs:view", "field_jobs:write", "real_estate:view", "real_estate:hold"],
   MARKETING: [...VIEW_ALL, "ideas:write", "production:topic-open", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own", "wholesale:view", "wholesale:work"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

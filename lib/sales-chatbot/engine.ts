@@ -355,7 +355,9 @@ export async function conversationView(id: string): Promise<ChatView | null> {
       continue;
     }
     const tools = m.content.filter((b): b is Extract<AiBlock, { type: "tool_use" }> => b.type === "tool_use").map((b) => ({ name: b.name, ...(results.get(b.id) ?? { ok: true, summary: "" }) }));
-    const t = textOf(m.content);
+    // Tin nhân viên gửi từ hộp thư ERP (chat web) mang dấu «[Shop đã nhắn]» cho lịch sử của bot — khách không thấy dấu đó.
+    const raw = textOf(m.content);
+    const t = raw.startsWith(SHOP_SAID) ? raw.slice(SHOP_SAID.length).trim() : raw;
     const last = out[out.length - 1];
     if (!t && tools.length && last?.role === "assistant") last.tools = [...(last.tools ?? []), ...tools];
     else if (t || tools.length) out.push({ role: "assistant", text: t, ...(tools.length ? { tools } : {}) });
