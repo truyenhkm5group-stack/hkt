@@ -7,12 +7,12 @@ import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { ListParams } from "@/lib/search-params";
 import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
-import { DEFAULT_KEYWORD_GROUPS, type LeadHunterConfig } from "@/lib/wholesale/config";
+import { DEFAULT_KEYWORD_GROUPS, paidCostMicros, type LeadHunterConfig } from "@/lib/wholesale/config";
 import { CONTACTED_STATUSES, INTERESTED_STATUSES, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, NEGOTIATING_STATUSES, RESPONDED_STATUSES, type LeadSourceKey, type LeadStatus, isLeadStatus } from "@/lib/wholesale/constants";
 import { formatVnPhone, PHONE_KIND_LABEL, type PhoneKind } from "@/lib/wholesale/phone";
 import { enabledKeywords } from "@/lib/wholesale/query-plan";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
-import { vnStartOfMonth } from "@/lib/wholesale/store";
+import { billableCallsBySku, getLeadHunterConfig, vnStartOfMonth } from "@/lib/wholesale/store";
 
 /**
  * ═══════════ SĂN KHÁCH SỈ — TRUY VẤN CHỈ ĐỌC ═══════════
@@ -476,14 +476,19 @@ export async function apiUsageSummary(now = new Date()) {
       .orderBy(sql`1`),
     db.select().from(u).where(and(eq(u.ok, false), gte(u.at, since30))).orderBy(desc(u.at)).limit(20),
   ]);
+  const cfg = await getLeadHunterConfig();
+  const counts = await billableCallsBySku(monthStart, dayStart);
+  const paid = paidCostMicros(cfg, counts.month, counts.today);
   return {
-    todayMicros: Number(totals?.todayMicros ?? 0),
-    monthMicros: Number(totals?.monthMicros ?? 0),
+    // Tiền thật (đã trừ phần miễn phí theo tháng của từng SKU) — cùng phép tính với trần chi tiêu của máy quét.
+    todayMicros: paid.todayMicros,
+    monthMicros: paid.monthMicros,
+    freeUsed: counts.month,
     allMicros: Number(totals?.allMicros ?? 0),
     callsToday: Number(totals?.callsToday ?? 0),
     callsMonth: Number(totals?.callsMonth ?? 0),
     errorsToday: Number(totals?.errorsToday ?? 0),
-    bySku: bySku.map((r) => ({ sku: r.sku, method: r.method, calls: Number(r.calls), micros: Number(r.micros), avgMs: Number(r.avgMs ?? 0), results: Number(r.results), newCount: Number(r.newCount) })),
+    bySku: bySku.map((r) => ({ sku: r.sku, method: r.method, calls: Number(r.calls), micros: r.sku && r.sku in paid.bySku ? (paid.bySku[r.sku as keyof typeof paid.bySku] ?? 0) : Number(r.micros), avgMs: Number(r.avgMs ?? 0), results: Number(r.results), newCount: Number(r.newCount) })),
     byDay: byDay.map((r) => ({ day: r.day, calls: Number(r.calls), micros: Number(r.micros) })),
     errors: errors.map((e) => ({ at: e.at.toISOString(), method: e.method, status: e.httpStatus, query: e.query, error: e.error })),
   };

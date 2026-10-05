@@ -4,7 +4,7 @@ import { activeUserIdsWhoCan } from "@/lib/auth/session";
 import { sendInboxMessages } from "@/lib/inbox/send";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
-import { LEAD_HUNTER_SETTING_KEY, mergeLeadHunterConfig, type LeadHunterConfig } from "@/lib/wholesale/config";
+import { LEAD_HUNTER_SETTING_KEY, mergeLeadHunterConfig, paidCostMicros, PLACES_SKUS, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { RESOLVED_STATUSES } from "@/lib/wholesale/constants";
 import type { SegmentOutcomeStats } from "@/lib/wholesale/scoring";
 import { isLeadSegmentKey } from "@/lib/wholesale/segments";
@@ -41,21 +41,33 @@ export async function currentSpend(now: Date): Promise<SpendSnapshot> {
   const dayStart = vnStartOfDay(vnDateKey(now));
   const monthStart = vnStartOfMonth(now);
   const [row] = await db
-    .select({
-      today: sql<string>`coalesce(sum(case when ${u.at} >= ${dayStart} then ${u.costMicros} else 0 end), 0)`,
-      month: sql<string>`coalesce(sum(${u.costMicros}), 0)`,
-      calls: sql<string>`count(*) filter (where ${u.at} >= ${dayStart} and ${u.provider} = 'GOOGLE_PLACES')`,
-    })
+    .select({ calls: sql<string>`count(*) filter (where ${u.at} >= ${dayStart} and ${u.provider} = 'GOOGLE_PLACES')` })
     .from(u)
     .where(gte(u.at, monthStart));
-  const bySku = await db
-    .select({ sku: u.sku, n: sql<string>`count(*)` })
+  const counts = await billableCallsBySku(monthStart, dayStart);
+  // Tiền THẬT: trừ phần miễn phí theo tháng của từng SKU (không cộng `cost_micros` — dòng cũ ghi theo giá niêm yết).
+  const cfg = await getLeadHunterConfig();
+  const paid = paidCostMicros(cfg, counts.month, counts.today);
+  return { todayMicros: paid.todayMicros, monthMicros: paid.monthMicros, callsToday: Number(row?.calls ?? 0), monthCallsBySku: counts.month };
+}
+
+/** Lượt Google ĐÃ TÍNH TIỀN (2xx) theo SKU: cả tháng (gồm hôm nay) và riêng hôm nay. */
+export async function billableCallsBySku(monthStart: Date, dayStart: Date): Promise<{ month: Partial<Record<PlacesSku, number>>; today: Partial<Record<PlacesSku, number>> }> {
+  const db = await getDb();
+  const u = schema.wholesaleApiUsage;
+  const rows = await db
+    .select({ sku: u.sku, month: sql<string>`count(*)`, today: sql<string>`count(*) filter (where ${u.at} >= ${dayStart})` })
     .from(u)
     .where(and(gte(u.at, monthStart), eq(u.provider, "GOOGLE_PLACES"), eq(u.billable, true)))
     .groupBy(u.sku);
-  const monthCallsBySku: Record<string, number> = {};
-  for (const r of bySku) if (r.sku) monthCallsBySku[r.sku] = Number(r.n ?? 0);
-  return { todayMicros: Number(row?.today ?? 0), monthMicros: Number(row?.month ?? 0), callsToday: Number(row?.calls ?? 0), monthCallsBySku };
+  const month: Partial<Record<PlacesSku, number>> = {};
+  const today: Partial<Record<PlacesSku, number>> = {};
+  for (const r of rows) {
+    if (!r.sku || !(PLACES_SKUS as readonly string[]).includes(r.sku)) continue;
+    month[r.sku as PlacesSku] = Number(r.month ?? 0);
+    today[r.sku as PlacesSku] = Number(r.today ?? 0);
+  }
+  return { month, today };
 }
 
 export type UsageRow = typeof schema.wholesaleApiUsage.$inferInsert;
