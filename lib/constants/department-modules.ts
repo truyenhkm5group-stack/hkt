@@ -342,6 +342,15 @@ export const NAV_MODULES = [
     why: "Bàn làm việc với Viettel Post: hành trình kiện, ca chăm sóc, yêu cầu phát lại.",
   },
   {
+    href: "/orders/self-delivery",
+    label: "Danh sách tự giao",
+    zone: "LOGISTICS",
+    permission: "orders:read",
+    // Tuyến giao dựng trên ĐƠN TẠO TAY (POS tự chủ P7) — tổ chức nhà đồng bộ đơn Pancake, trang trả 404 ở nhà.
+    tenantOnly: true,
+    why: "Đơn đã xác nhận đi tiếp sang giao: người giao của shop nhận danh sách theo xã / phường, đơn ngoài khu đi hãng, đơn thiếu thông tin nằm ở «Giữ lại» — việc điều phối hằng ngày của giao vận.",
+  },
+  {
     href: "/returns",
     label: "Phiếu đổi / trả (Pancake)",
     zone: "LOGISTICS",
