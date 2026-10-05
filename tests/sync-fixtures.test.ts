@@ -501,6 +501,7 @@ import { testMessenger } from "./messenger.test";
 import { testConversationControl } from "./conversation-control.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
+import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
@@ -2764,6 +2765,7 @@ async function main() {
   await testConversationTrace();
   // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
   await testMessengerHealth();
+  testConnectorsLegacy();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
   // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
