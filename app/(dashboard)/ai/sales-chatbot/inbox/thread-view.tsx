@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ImagePlus, Loader2, Send, Sparkles, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
@@ -85,6 +85,9 @@ export function InboxThreadView({
   const [pending, setPending] = useState<null | "send" | "suggest" | "claim" | "release" | "assign">(null);
   const [error, setError] = useState<string | null>(null);
   const [showOrder, setShowOrder] = useState(false);
+  // Dưới 1280 px cột khách / đơn / ghi chú là một lớp PHỦ mở bằng nút trên đầu hội thoại — trước đây nó `hidden` hẳn nên trên
+  // điện thoại không tạo được đơn, không ghi chú được.
+  const [showSide, setShowSide] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [newBelow, setNewBelow] = useState(false);
@@ -203,11 +206,12 @@ export function InboxThreadView({
   const rows = layout(thread.items);
 
   return (
-    <div className="grid h-full min-h-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="flex h-full min-h-0 flex-col">
+    // `minmax(0,1fr)` cả khi chỉ có một cột: rãnh `auto` mặc định nở theo nội dung (tin dài, hàng nút) ⇒ tràn ngang trên điện thoại.
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
         {/* ── Đầu hội thoại ── */}
-        <header className="flex items-start justify-between gap-3 border-b px-4 py-2.5">
-          <div className="flex min-w-0 items-start gap-3">
+        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b px-4 py-2.5">
+          <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
             <Link href={backHref} className="mt-2 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Về danh sách">
               <ArrowLeft className="size-4" />
             </Link>
@@ -223,7 +227,10 @@ export function InboxThreadView({
               <LabelsPanel key={thread.labels.map((l) => l.id).join()} conversationId={thread.id} labels={thread.labels} allLabels={thread.allLabels} canEdit={thread.canWork} canManage={thread.canManage} />
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+            <Button size="sm" variant="outline" className="h-8 xl:hidden" onClick={() => setShowSide(true)} aria-label="Khách, đơn và ghi chú" data-testid="inbox-open-side">
+              <UserRound className="size-4" /> Khách · Đơn
+            </Button>
             {!thread.assigneeUserId && thread.canWork ? (
               <Button size="sm" className="h-8" disabled={!!pending} onClick={() => void run("claim", () => claimConversationAction(thread.id), "Đã nhận hội thoại")}>
                 Nhận hội thoại
@@ -390,8 +397,18 @@ export function InboxThreadView({
         </footer>
       </div>
 
-      {/* ── Cột khách ── */}
-      <aside className="hidden min-h-0 space-y-3 overflow-y-auto border-l bg-muted/10 p-3 text-[13px] xl:block">
+      {/* ── Cột khách (≥ 1280 px: cột cố định · nhỏ hơn: lớp phủ toàn màn hình) ── */}
+      <aside
+        className={cn("min-h-0 space-y-3 overflow-y-auto bg-muted/10 p-3 text-[13px] xl:static xl:z-auto xl:block xl:border-l xl:bg-muted/10", showSide ? "fixed inset-0 z-50 block bg-background pb-8" : "hidden")}
+        data-testid="inbox-side"
+        aria-label="Khách, đơn và ghi chú"
+      >
+        <div className="sticky -top-3 z-10 -mx-3 -mt-3 flex items-center justify-between border-b bg-background px-3 py-2 xl:hidden">
+          <span className="text-sm font-semibold">{thread.customer.name}</span>
+          <Button size="sm" variant="ghost" className="h-8" onClick={() => setShowSide(false)} aria-label="Đóng">
+            <X className="size-4" /> Đóng
+          </Button>
+        </div>
         <div className="space-y-1 rounded-lg border bg-background p-3">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Khách</p>
           <p className="font-medium">{thread.customer.name}</p>
