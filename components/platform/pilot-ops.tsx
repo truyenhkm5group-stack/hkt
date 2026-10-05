@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WORKFLOW_CADENCE_DEFAULT_MINUTES } from "@/lib/constants/workflow-cadence";
-import { confirmPilotUatAction, disableOrgConnectionAction, setOrgPlanAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
+import { confirmPilotUatAction, disableOrgConnectionAction, setOrgBrandAction, setOrgPlanAction, setOrgSuspendedAction, setPilotStageAction, setWorkflowsPausedAction } from "@/lib/actions/platform-ops";
 import { PILOT_OVERRIDE_MIN_REASON, PILOT_REASON_MIN, PILOT_STAGE_LABEL, PILOT_STAGES, type PilotStage } from "@/lib/constants/pilot";
 
 /**
@@ -114,6 +114,42 @@ export function OrgPlanControl({ orgCode, orgName, current, plans }: { orgCode: 
           {plans.map((x) => (
             <option key={x.key} value={x.key}>
               {x.name}
+              {x.key === current ? " (đang dùng)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+    </ConfirmWithReason>
+  );
+}
+
+/**
+ * Thương hiệu của tổ chức (0215) — quyết định liên kết gửi cho người của tổ chức về phần mềm nào. `current = null`: không
+ * theo dõi (tổ chức có từ trước) ⇒ liên kết về erp.vnxcommerce.com như cũ. Danh sách nhãn do trang truyền vào.
+ */
+export function OrgBrandControl({ orgCode, orgName, current, options }: { orgCode: string; orgName: string; current: string | null; options: { key: string; label: string }[] }) {
+  const [brand, setBrand] = useState(current ?? "");
+  const target = options.find((x) => x.key === brand);
+  return (
+    <ConfirmWithReason
+      id={`brand-${orgCode}`}
+      label="Đổi thương hiệu…"
+      title={`Đặt «${orgName}» thuộc ${target?.label ?? "…"}?`}
+      consequence="Liên kết mời, đặt lại mật khẩu và tin nhóm Lark / Telegram của tổ chức từ nay về phần mềm của thương hiệu này. Không đổi dữ liệu, quyền, gói hay module. Ghi vào nhật ký nền tảng."
+      minReason={PILOT_REASON_MIN}
+      placeholder="Khách đăng ký từ chotdontudong.com ngày 04/10"
+      disabled={!brand || brand === current}
+      run={async (reason) => toOutcome(await setOrgBrandAction({ orgCode, brand, reason }), "Đã đổi thương hiệu")}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <Label htmlFor={`brand-select-${orgCode}`}>Thương hiệu</Label>
+        <select id={`brand-select-${orgCode}`} value={brand} onChange={(e) => setBrand(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm sm:w-72" data-org-brand={current ?? ""}>
+          <option value="" disabled>
+            Chọn thương hiệu
+          </option>
+          {options.map((x) => (
+            <option key={x.key} value={x.key}>
+              {x.label}
               {x.key === current ? " (đang dùng)" : ""}
             </option>
           ))}

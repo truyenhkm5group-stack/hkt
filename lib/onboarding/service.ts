@@ -324,6 +324,8 @@ type SetupInput = {
   inviteId: string | null;
   who: SignupActor;
   isNew: boolean;
+  /** Thương hiệu nơi khách tự đăng ký (0215) — chỉ có nghĩa ở lượt TẠO; chạy lại truyền `null` và dòng cũ giữ nguyên. */
+  brand: "vnx" | "chotdon" | null;
 };
 
 /**
@@ -334,7 +336,7 @@ async function runSetup(input: SetupInput, step: { current: SetupStepName }): Pr
   const actor = platformActorOf(input.who);
   const source = "UI" as const;
   step.current = "PROVISION";
-  await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, modules: CORE_MODULES, source, actor });
+  await provisionOrganization({ code: input.code, name: input.name, templateKey: input.built.fromTemplate, plan: input.planKey, brand: input.brand, modules: CORE_MODULES, source, actor });
   // Vòng đời pilot (docs/platform/pilot-operations.md): tổ chức MỚI của luồng này bắt đầu ở «Vừa tạo». Chỉ ghi khi chưa
   // có giai đoạn — chạy lại sau hỏng không đè giai đoạn người vận hành đã đổi.
   if (input.isNew) await markPilotCreated(input.code, actor, source);
@@ -425,8 +427,11 @@ async function reactivateForRetry(code: string) {
 /**
  * Tạo tổ chức từ bản nháp. `issue` = ghi phiên cho quản trị vừa tạo (khách); bỏ trống ⇒ không đăng nhập (người vận
  * hành tạo hộ, hoặc bài kiểm muốn tự đăng nhập).
+ *
+ * `brand` = thương hiệu của host khách đang đứng khi bấm tạo (tầng action đọc `hostBrand()` rồi truyền vào — service không
+ * đọc header). Người vận hành tạo hộ ⇒ KHÔNG ghi: host của người vận hành không nói gì về khách.
  */
-export async function createOrganizationFromSignup(rawDraft: unknown, who: SignupActor, opts: { issue?: (subject: SessionSubject) => Promise<void> } = {}): Promise<CreateResult> {
+export async function createOrganizationFromSignup(rawDraft: unknown, who: SignupActor, opts: { issue?: (subject: SessionSubject) => Promise<void>; brand?: "vnx" | "chotdon" | null } = {}): Promise<CreateResult> {
   const g = await gate(who);
   if (!g.ok) return { error: g.error };
   const parsed = signupDraftZ.safeParse(rawDraft);
@@ -513,6 +518,7 @@ export async function createOrganizationFromSignup(rawDraft: unknown, who: Signu
         inviteId: invite?.id ?? null,
         who,
         isNew: !existing,
+        brand: who.kind === "operator" ? null : (opts.brand ?? null),
       },
       step,
     );
@@ -546,7 +552,7 @@ export async function retryOrganizationSetup(code: string, who: Extract<SignupAc
   const step: { current: SetupStepName } = { current: "PROVISION" };
   let installId: string | null = null;
   try {
-    installId = await runSetup({ code, name: org.name, planKey: org.plan ?? DEFAULT_PLAN_KEY, built, admin: null, adminEmail: state.adminEmail, source: state.source, inviteId: state.inviteId, who, isNew: false }, step);
+    installId = await runSetup({ code, name: org.name, planKey: org.plan ?? DEFAULT_PLAN_KEY, built, admin: null, adminEmail: state.adminEmail, source: state.source, inviteId: state.inviteId, who, isNew: false, brand: null }, step);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SetupBusyError) return { error: message, orgCode: code };

@@ -16,6 +16,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { ALERT_CONFIG_KEY, type AlertConfig } from "@/lib/constants/alerts";
 import { DEFAULT_OWNER_DIGEST_CONFIG, OWNER_DIGEST_CONFIG_KEY, type OwnerDigestConfig } from "@/lib/constants/owner-digest";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { organizationBaseUrl, organizationBrand, productNameFor } from "@/lib/platform/org-links";
 
 const configSchema = z.object({
   telegramBotToken: z.string().trim().max(200),
@@ -126,7 +127,8 @@ export async function sendTestTelegram(): Promise<{ ok: true } | { error: string
   const user = await requireUser();
   if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
-  const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `✅ <b>VNXcommerce ERP</b>: kết nối Telegram thành công. Cảnh báo đơn chờ xử lý / giao thất bại sẽ gửi vào đây.`);
+  const product = productNameFor(await organizationBrand());
+  const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `✅ <b>${product}</b>: kết nối Telegram thành công. Cảnh báo đơn chờ xử lý / giao thất bại sẽ gửi vào đây.`);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
@@ -134,7 +136,8 @@ export async function sendTestLark(): Promise<{ ok: true } | { error: string }> 
   const user = await requireUser();
   if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
-  const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ VNXcommerce ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
+  const product = productNameFor(await organizationBrand());
+  const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, `✅ ${product} đã kết nối Lark`, [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${await organizationBaseUrl()}/alerts` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
@@ -357,7 +360,7 @@ export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: str
   const cfg = await loadAlertConfig();
   const url = cfg.larkBillingWebhookUrl || cfg.larkWebhookUrl;
   if (!url) return { error: "Chưa cấu hình webhook Lark" };
-  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 VNXcommerce ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/ads` }]]);
+  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, `💳 ${productNameFor(await organizationBrand())} · cảnh báo ngưỡng thanh toán quảng cáo`, [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${await organizationBaseUrl()}/ads` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 

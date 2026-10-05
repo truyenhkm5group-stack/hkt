@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { EncryptJWT, jwtDecrypt } from "jose";
 import { env } from "@/lib/env";
 import type { ConnectablePage } from "@/lib/integrations/messenger/graph";
+import { brandAppOrigin } from "@/lib/platform/site-host";
 
 /**
  * Luồng «Kết nối Facebook Page» (docs/platform/messenger.md):
@@ -21,8 +22,20 @@ export const MESSENGER_SETTINGS_PATH = "/ai/sales-chatbot/messenger";
 /** Trần số page giữ trong cookie (cookie ~4 KB). Người quản lý nhiều page hơn ⇒ chọn trong 12 page đầu. */
 export const MESSENGER_PAGES_MAX = 12;
 
-export function messengerRedirectUri(): string {
-  return `${env.appUrl}${MESSENGER_CONNECT_PATH}/callback`;
+/**
+ * Đường quay về của hộp thoại Facebook — theo GỐC PHẦN MỀM của lượt đang chạy (`appOriginForHost`, lib/auth/oauth.ts).
+ * Cố định `APP_URL` thì người bấm ở `app.chotdontudong.com` bị Facebook trả về erp.vnxcommerce.com: host đó không có
+ * cookie phiên lẫn cookie `state` (cả hai gắn với host) ⇒ đá ra màn đăng nhập / «loi=state». Bước đổi mã phải dùng ĐÚNG
+ * chuỗi này, nên start và callback cùng tính từ một gốc.
+ */
+export function messengerRedirectUri(origin: string = env.appUrl): string {
+  return `${origin.replace(/\/$/, "")}${MESSENGER_CONNECT_PATH}/callback`;
+}
+
+/** Mọi đường quay về phải khai ở app Meta — một cho MỖI gốc phần mềm (in ở khối «Người vận hành» của trang cài đặt). */
+export function messengerRedirectUris(): string[] {
+  const chotdon = brandAppOrigin("chotdon", { SITE_DOMAIN: process.env.SITE_DOMAIN, CHOTDON_DOMAIN: process.env.CHOTDON_DOMAIN, APP_URL: process.env.APP_URL, CHOTDON_APP_URL: process.env.CHOTDON_APP_URL });
+  return [...new Set([env.appUrl, ...(chotdon ? [chotdon] : [])].map((o) => messengerRedirectUri(o)))];
 }
 
 function pagesKey(): Uint8Array {

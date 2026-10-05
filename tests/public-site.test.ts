@@ -15,6 +15,8 @@ import { appOriginForHost, redirectUri } from "@/lib/auth/oauth";
 import { initialQuickBusinessType } from "@/lib/onboarding/quick-shared";
 import { DAYS_PER_MONTH, estimateMissedOrders, MISSED_ORDERS_DEFAULTS, MISSED_ORDERS_LIMITS, normalizeMissedOrdersInput } from "@/lib/site/missed-orders";
 import { robotsTxt, SITE_INDEXABLE_PATHS, sitemapXml } from "@/lib/site/seo";
+import { messengerRedirectUri, messengerRedirectUris } from "@/lib/integrations/messenger/connect";
+import { organizationLinkOrigin, productNameFor } from "@/lib/platform/org-links";
 import {
   BRAND_ASSET_PREFIX,
   brandAppOrigin,
@@ -310,6 +312,60 @@ export function testChotDonAssets() {
   const legal = readFileSync("components/legal/legal-page.tsx", "utf8");
   assert.ok(legal.includes("brand={brand}") && legal.includes("legalBrandName(brand)"), "văn bản pháp lý mang thương hiệu của host");
   console.log("✓ Chốt Đơn: biểu tượng đổi theo host + công khai ở cả hai lớp định tuyến, đủ tệp (ICO 16·32·48, iOS, maskable, ảnh chia sẻ), robots/sitemap chỉ ở mặt tiền");
+}
+
+/**
+ * LIÊN KẾT THEO THƯƠNG HIỆU CỦA TỔ CHỨC (0215). Lỗi gốc: khách tự đăng ký ở app.chotdontudong.com nhận link mời, đặt lại
+ * mật khẩu, tin Lark / Telegram trỏ erp.vnxcommerce.com — tên miền họ chưa từng đăng nhập (cookie phiên gắn với host), và
+ * tin thử ghi cứng «VNXcommerce ERP». «Kết nối Messenger» bấm ở app. bị Facebook trả về erp. ⇒ mất phiên + state.
+ */
+export function testOrgLinkOrigin() {
+  const ctx = { baseDomain: "erp.vnxcommerce.com", appUrl: "https://erp.vnxcommerce.com", chotdonOrigin: "https://app.chotdontudong.com" };
+  const org = { isHome: false, publishState: null, domainSlug: null, brand: null } as const;
+  assert.equal(organizationLinkOrigin({ ...org, brand: "chotdon" }, ctx), "https://app.chotdontudong.com", "khách Chốt Đơn ⇒ app.chotdontudong.com");
+  assert.equal(organizationLinkOrigin({ ...org, brand: "vnx" }, ctx), ctx.appUrl);
+  assert.equal(organizationLinkOrigin(org, ctx), ctx.appUrl, "không theo dõi (NULL) ⇒ APP_URL như trước, không đoán");
+  assert.equal(organizationLinkOrigin({ ...org, brand: "chotdon", publishState: "PUBLISHED", domainSlug: "shop-a" }, ctx), "https://shop-a.erp.vnxcommerce.com", "đã xuất bản ⇒ tên miền con thắng");
+  assert.equal(organizationLinkOrigin({ ...org, brand: "chotdon", publishState: "DRAFT", domainSlug: "shop-a" }, ctx), "https://app.chotdontudong.com", "còn nháp ⇒ chưa có tên miền con");
+  assert.equal(organizationLinkOrigin({ ...org, isHome: true, brand: "chotdon" }, ctx), ctx.appUrl, "tổ chức nhà luôn APP_URL");
+  assert.equal(organizationLinkOrigin({ ...org, brand: "chotdon" }, { ...ctx, chotdonOrigin: null }), ctx.appUrl, "tắt Chốt Đơn ⇒ APP_URL, không dựng gốc đoán");
+  assert.equal(organizationLinkOrigin(null, ctx), ctx.appUrl);
+  assert.equal(productNameFor("chotdon"), "Chốt Đơn Tự Động");
+  assert.equal(productNameFor("vnx"), "VNXcommerce ERP");
+
+  // Messenger: đường quay về theo gốc của lượt; trang người vận hành in đủ một đường cho mỗi gốc.
+  assert.equal(messengerRedirectUri("https://app.chotdontudong.com/"), "https://app.chotdontudong.com/api/connect/messenger/callback");
+  assert.ok(messengerRedirectUris().includes("https://app.chotdontudong.com/api/connect/messenger/callback"), "khai sẵn đường của app.chotdontudong.com");
+  for (const route of ["app/api/connect/messenger/start/route.ts", "app/api/connect/messenger/callback/route.ts"]) {
+    const src = readFileSync(route, "utf8");
+    assert.ok(src.includes("appOriginForHost(") && src.includes("messengerRedirectUri(origin)") && !src.includes("env.appUrl"), `${route}: cả lượt đi theo gốc của host, không cố định APP_URL`);
+  }
+
+  // Đường gửi tin cho người của TỔ CHỨC không đọc APP_URL thẳng — chỉ còn ở nhánh dự phòng `.catch`.
+  const senders = [
+    "lib/alerts/notification-delivery.ts",
+    "lib/alerts/owner-decision-digest.ts",
+    "lib/alerts/stock-shortage-digest.ts",
+    "lib/payroll/autopilot.ts",
+    "lib/marketing/digest.ts",
+    "lib/actions/marketing-alerts.ts",
+    "lib/actions/alerts.ts",
+  ];
+  for (const f of senders) {
+    const src = readFileSync(f, "utf8");
+    assert.ok(src.includes("organizationBaseUrl("), `${f}: liên kết đi qua organizationBaseUrl`);
+    const direct = src.split("\n").filter((l) => /process\.env\.APP_URL|env\.appUrl/.test(l) && !/\.catch\(/.test(l));
+    assert.deepEqual(direct, [], `${f}: còn đọc APP_URL thẳng`);
+  }
+  assert.ok(!/VNXcommerce ERP/.test(readFileSync("lib/actions/alerts.ts", "utf8")), "tin thử / cảnh báo không ghi cứng tên thương hiệu");
+
+  // Đăng ký: tầng action truyền thương hiệu của host; người vận hành tạo hộ ⇒ không ghi; chạy lại ⇒ không đổi.
+  const actions = readFileSync("lib/actions/onboarding.ts", "utf8");
+  assert.equal((actions.match(/hostBrand\(\)/g) ?? []).length, 2, "cả trình đầy đủ lẫn đăng ký nhanh truyền thương hiệu của host");
+  const service = readFileSync("lib/onboarding/service.ts", "utf8");
+  assert.ok(service.includes('brand: who.kind === "operator" ? null : (opts.brand ?? null)'), "người vận hành tạo hộ ⇒ không lấy host của người vận hành");
+  assert.ok(service.includes("isNew: false, brand: null }"), "chạy lại lượt dựng hỏng không ghi thương hiệu");
+  console.log("✓ Liên kết theo thương hiệu: Chốt Đơn ⇒ app.chotdontudong.com, xuất bản ⇒ tên miền con, không theo dõi ⇒ APP_URL; Messenger theo gốc host; 7 đường gửi tin không đọc APP_URL thẳng");
 }
 
 export async function testPublicSiteData() {

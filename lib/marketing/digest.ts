@@ -14,6 +14,7 @@ import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot
 import { getMarketingBreakdown, getMarketingDaily, type MarketingDailyBase, type MarketingDailyRow } from "@/lib/queries/marketing-daily";
 import { ratioOf } from "@/lib/queries/marketing-daily";
 import type { Period } from "@/lib/search-params";
+import { organizationBaseUrl } from "@/lib/platform/org-links";
 
 /**
  * ═══════════ BẢN TIN MARKETING HẰNG NGÀY — MỘT LẦN MỘT NGÀY, ĐÚNG NGƯỜI ═══════════
@@ -221,7 +222,8 @@ export async function runMarketingDigest(now: Date = new Date(), opts: { preview
   const day = shiftDay(vnDay(now), -1); // hôm qua theo giờ VN
   const cfg = await loadMarketingAlertConfig();
   const [alertCfg, sentLedger] = await Promise.all([loadAlertConfig(), getSettingJson<Record<string, string>>(SENT_KEY, {})]);
-  const baseUrl = (cfg.baseUrl || process.env.APP_URL || "").replace(/\/$/, "");
+  // `cfg.baseUrl` = gốc chủ shop tự khai (thắng); thiếu ⇒ gốc liên kết của tổ chức, không phải APP_URL.
+  const baseUrl = (cfg.baseUrl || (await organizationBaseUrl().catch(() => process.env.APP_URL || ""))).replace(/\/$/, "");
 
   const dayP = dayPeriod(day);
   const baseFrom = shiftDay(day, -MARKETING_DIAGNOSIS.baselineDays);

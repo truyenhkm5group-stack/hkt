@@ -4818,11 +4818,18 @@ export const platformOrganizations = pgTable(
     publishState: text("publish_state"),
     publishedAt: ts("published_at"),
     publishedBy: text("published_by"),
+    /**
+     * Thương hiệu nơi khách TỰ đăng ký (0215): `vnx` · `chotdon` — quyết định liên kết gửi cho người của tổ chức về phần mềm
+     * nào (`organizationBaseUrl`). `NULL` = không theo dõi (nhà, tổ chức cũ, người vận hành tạo hộ) ⇒ như trước. Ghi MỘT
+     * lần lúc tạo (lib/platform/provision.ts), không backfill.
+     */
+    brand: text("brand"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("platform_organizations_code_key").on(t.code),
+    check("platform_organizations_brand_check", sql`${t.brand} IS NULL OR ${t.brand} IN ('vnx','chotdon')`),
     uniqueIndex("platform_organizations_domain_slug_key").on(t.domainSlug).where(sql`${t.domainSlug} IS NOT NULL`),
     check("platform_organizations_domain_slug_check", sql`${t.domainSlug} IS NULL OR ${t.domainSlug} ~ '^[a-z][a-z0-9-]{1,30}$'`),
     check("platform_organizations_publish_state_check", sql`${t.publishState} IS NULL OR ${t.publishState} IN ('DRAFT','PUBLISHED')`),
