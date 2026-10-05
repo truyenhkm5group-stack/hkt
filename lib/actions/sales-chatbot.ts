@@ -1,5 +1,6 @@
 "use server";
 
+import { saveLevelScripts } from "@/lib/sales-chatbot/levels";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { can, requireUser } from "@/lib/auth/session";
@@ -116,6 +117,14 @@ export async function learnLessonsNowAction(): Promise<PlaybookResult> {
   const r = await checkLearnNow(user);
   if ("error" in r) return r;
   after(await bindOrganization(async () => void (await learnLessons({ force: true, actor: { id: user.id, name: user.email } }))));
+  return r;
+}
+
+/** Kịch bản chat theo level khách (lib/sales-chatbot/levels.ts). */
+export async function saveLevelScriptsAction(scripts: unknown): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  const r = await saveLevelScripts(user, scripts);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
   return r;
 }
 

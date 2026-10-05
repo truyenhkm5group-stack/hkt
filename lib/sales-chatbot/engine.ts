@@ -35,6 +35,7 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { isMessagingChannel, isPublicChannel, parseSalesChatbotConfig, SALES_CHATBOT_LIMITS, SALES_THINKING_BUDGET, salesBotBillingSource, salesBotError, SALES_CHATBOT_SETTING_KEY, SALES_TONE_LABEL, withinBusinessHours, type ChatChannel, type ChatView, type SalesChatbotConfig } from "@/lib/sales-chatbot/config";
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
+import { levelPromptFor } from "@/lib/sales-chatbot/levels";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
@@ -693,7 +694,7 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
     const returning = await findReturningCustomer(known.customer || !syncCustomer ? known : { ...known, customer: { ...syncCustomer, simulated: false } }).catch(() => null);
     // ĐẶT LỊCH: shop bật trong cấu hình bot VÀ tổ chức bật module Lịch hẹn — thiếu một trong hai thì bot không có công cụ đặt lịch.
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null)), await learnedLessons(), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null)), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), opts.context ?? ""].filter(Boolean).join("\n");
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;

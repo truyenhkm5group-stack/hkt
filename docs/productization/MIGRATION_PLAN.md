@@ -217,6 +217,23 @@ migration `0209_sales_inbox`:
   lúc gắn, trùng tên ⇒ dùng lại; lọc hộp thư theo nhãn; gỡ nhãn khỏi bộ nhãn cần `ai_sales:manage` và không gỡ khỏi hội thoại cũ.
 - GHI CHÚ NỘI BỘ: khách không thấy, không vào lịch sử bot, không phép tính nào đọc; mang tên người viết; xoá là đánh dấu.
 
+**Thêm 06/10/2026 (migration `0217_sales_inbox_levels_feedback` — mọi tổ chức SaaS):**
+- LEVEL KHÁCH (`lib/sales-chatbot/levels-shared.ts` thuần + `levels.ts`): Ấn gửi tin nhắn · Cho số đo (chỉ ngành thời trang) ·
+  Chọn mẫu / món · Cho SĐT, thiếu địa chỉ · Cho địa chỉ, thiếu SĐT · Đủ SĐT + địa chỉ (đủ / thiếu thông tin đơn) · Phản hồi
+  upsell · Đã chốt đơn · Từ chối. Đọc từ tin KHÁCH của lượt mua đang xét + sổ trạng thái bot + đơn — không gọi AI, mức cao nhất
+  thắng, không chắc thì xếp thấp. Job `sales-followup` làm mới hội thoại có hoạt động mới + lấp dần 30 ngày; bot tính lại ngay
+  mỗi lượt và đọc KỊCH BẢN của level đó (shop viết ở trang Chatbot — ô trống = không thêm gì).
+- LỌC: Có SĐT · level · thời gian (hôm nay / hôm qua / 7 / 30 ngày / khoảng ngày, theo mốc TIN cuối, giờ VN) · nhân viên
+  phụ trách (kể cả «chưa ai nhận») · thẻ · kênh; đếm mọi thẻ bằng MỘT câu SQL; «Xem thêm» tới 500 hội thoại.
+- LỊCH SỬ MUA & GIAO của khách cạnh khung chat: đơn ERP cùng khách / cùng SĐT theo `ORDER_OUTCOME` (mỗi đơn một dòng —
+  `PRIMARY_ATTEMPT`, tập «hoàn» dùng `RETURNED_OUTCOMES_SQL`) + số Pancake ghi nhận + cảnh báo rủi ro dùng chung luật trang Đơn
+  hàng. Chưa biết khách ⇒ nói thẳng, không in 0.
+- GÓP Ý CHO AI (`inbox-feedback.ts`): nhân viên viết bot sai ở đâu ⇒ AI của shop rút 1–3 bài học «Khi … ⇒ …» đặt LÊN ĐẦU bộ
+  bài học của bot (bản trước quay lại được); góp ý luôn được lưu (`sales_chat_feedback`), AI lỗi ⇒ `FAILED`.
+- Giao diện: tương phản cao hơn, hội thoại chưa đọc in đậm + nền nổi + vạch trái; thẻ level / «SĐT» trên từng dòng.
+- Tin nhắc (follow-up) gửi hỏng VĨNH VIỄN (hội thoại không còn / khách chặn page) ⇒ thôi nhắc; hỏng tạm ⇒ sang mốc sau — trước
+  đây máy soạn lại bằng AI và gửi hỏng lại mỗi 5 phút.
+
 **Chưa làm:** nguồn việc `SALES_HANDOFF` trên `/work`; ảnh cho chat web.
 
 ## M9 · Gia cố nền tảng cho > 5 tenant

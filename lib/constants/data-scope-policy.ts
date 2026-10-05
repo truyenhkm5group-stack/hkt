@@ -110,7 +110,7 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     label: "Đơn hàng",
     readPermissions: ["orders:read"],
     writePermission: null,
-    routes: ["/orders", "/orders/verify"],
+    routes: ["/orders", "/orders/verify", "/orders/self-delivery"],
     table: "orders",
     rowOwner: null,
     rowAssignee: null,

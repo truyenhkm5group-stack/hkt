@@ -732,3 +732,31 @@ GIT_INDEX_FILE=/tmp/wip git read-tree HEAD && GIT_INDEX_FILE=/tmp/wip git add -A
 TREE=$(GIT_INDEX_FILE=/tmp/wip git write-tree)
 git push origin $(git commit-tree "$TREE" -p HEAD -m "wip: ảnh chụp"):refs/heads/wip/<tên>
 ```
+
+## 10. AI TECH ROOM — SỨ MỆNH LỚN CHẠY NHIỀU WORKER (`docs/ai-tech-room/README.md`)
+
+Việc nhỏ: một nhánh + một cây như mục 9, không cần gì thêm. Sứ mệnh cần tách việc thì Lead dùng
+`npm run ai -- …` (`scripts/ai-tech.ts`, chạy được cả bằng `node` trần trong cây chưa `npm ci`):
+
+- **Kế hoạch ở `.ai/missions/<id>.json`, sự thật ở git.** Tệp khai việc · `dependsOn` · `owns` (phạm
+  vi GHI) · `risk` · quyết định của người. RUNNING / REVIEW / MERGED được SUY RA mỗi lần `status` —
+  không bao giờ tin trạng thái đã lưu hơn git. Commit + đẩy tệp sứ mệnh mỗi lần đổi kế hoạch.
+- **INLINE khi nhỏ, WORKER khi độc lập thật.** `next` chọn lượt kế tiếp, trần mặc định **4 worker
+  cho cả máy** (`.ai/config.json`), và để việc NẰM LẠI kèm lý do khi chồng phạm vi, cùng điểm nóng
+  SERIAL (`drizzle/`, `db/schema.ts`, `package*.json`, `.github/`, `AGENTS.md`, `lib/auth/` …), hoặc
+  khi có việc CRITICAL đang chạy. Không dựng thêm worker chỉ để đông.
+- **Worker = `spawn`.** Gốc luôn là `origin/main` VỪA FETCH (không bao giờ `main` cục bộ); va chạm
+  tên nhánh / thư mục ⇒ từ chối; phiếu giao việc nằm trong thư mục quản trị git của cây và là DẤU SỞ
+  HỮU. Worker chỉ sửa `owns`, cần sửa ngoài ⇒ báo Lead; không mở PR / merge / deploy / sửa `.ai/`.
+- **Tích hợp qua `ready` rồi PR.** Ruleset `main` (đo 19/09/2026, `docs/main-protection.md`) từ chối
+  đẩy thẳng và bắt `gates / gates` + 1 lượt duyệt NGƯỜI: mọi thay đổi của sứ mệnh vào `main` bằng PR.
+  Mục 6.6–6.7 ("đẩy lên `main`", "không tạo PR") viết trước khi `main` bị khoá — với sứ mệnh AI Tech
+  Room, chủ shop đã giao việc kèm luồng PR, nên luồng PR là đường đúng; không bao giờ né cổng.
+- **`reconcile` khi `main` chạy tiếp**, cập nhật bằng `git merge` trong cây của chính việc đó.
+- **Dọn bằng `cleanup`** (mặc định chạy thử): không bao giờ dọn cây bẩn, cây có commit chưa lên
+  remote, cây chưa có bằng chứng đã vào, hay cây không có phiếu (trừ khi chủ shop cho `--allow-unowned`).
+- **Gọi chủ shop chỉ vì chín lý do** (`OWNER_ESCALATIONS`, README mục 14) + mục 7; trong lúc chờ,
+  làm tiếp việc READY khác.
+- **Điểm vào của sứ mệnh mới:** chủ shop gõ `/mission <mục tiêu>` (skill `.claude/skills/mission/`); Lead
+  dựng cây riêng bằng `npm run ai -- lead <sứ-mệnh>` — chạy được từ checkout cũ, không ghi vào checkout đó.
+- Phiên mới / sau sập máy: `npm run ai -- status` rồi `npm run ai -- worktrees` trước khi làm gì.

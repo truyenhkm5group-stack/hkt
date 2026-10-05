@@ -32,6 +32,14 @@ const BATCH = 20;
 /** AI tạm không dùng được (công tắc / hạn mức / khoá) ⇒ thử lại sau chừng này, không bỏ lượt. */
 const RETRY_LATER_MS = 15 * 60_000;
 
+/**
+ * Lỗi gửi mà gửi lại cũng không bao giờ được: Pancake không còn hội thoại («conversation_id not found»), khách không nhận tin
+ * từ page nữa («Người này hiện không có mặt» — chặn page / khoá tài khoản), Meta từ chối vĩnh viễn (mã 551 / 10 / 200). HÀM THUẦN.
+ */
+export function followupSendPermanent(error: string): boolean {
+  return /conversation_id not found|không có mặt|not available right now|\(#?551\)|\(#?10\)|\(#?200\)|blocked|đã chặn/i.test(error);
+}
+
 export type FollowupRunResult = { due: number; sent: number; stopped: number; deferred: number; errors: number; detail: string[] };
 
 export function followupSystemPrompt(cfg: Pick<SalesChatbotConfig, "botName" | "tone">, shop: string, stage: string, attempt: number, total: number, hasDraft: boolean, playbook: string, returning: string = ""): string {
@@ -171,9 +179,17 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       // Đúng đường của page: Pancake, hoặc Messenger trực tiếp (0207).
       const sent = await sendBotText(row.pageId, row.threadId, text, deps);
       if (!sent.ok) {
-        await db.update(c).set({ lastError: sent.error.slice(0, 300) }).where(eq(c.id, row.id));
+        // Gửi hỏng từng KHÔNG dời mốc ⇒ 5 phút sau AI soạn lại và gửi hỏng lại (đo HSLC 05/10/2026: cùng hội thoại hỏng 3 lần,
+        // mỗi lần một lời gọi AI). Lỗi VĨNH VIỄN (hội thoại không còn / khách chặn page) ⇒ thôi nhắc; lỗi tạm ⇒ bỏ lần này,
+        // sang mốc sau như khi AI không viết được.
+        const permanent = followupSendPermanent(sent.error);
+        if (permanent) await db.update(c).set({ lastError: sent.error.slice(0, 300), nextFollowupAt: null }).where(eq(c.id, row.id));
+        else {
+          await db.update(c).set({ lastError: sent.error.slice(0, 300) }).where(eq(c.id, row.id));
+          await scheduleNext(false);
+        }
         out.errors += 1;
-        out.detail.push(`${row.id.slice(0, 8)}: lỗi gửi — ${sent.error.slice(0, 120)}`);
+        out.detail.push(`${row.id.slice(0, 8)}: lỗi gửi${permanent ? " (thôi nhắc)" : ""} — ${sent.error.slice(0, 120)}`);
         continue;
       }
       await appendBotMessage(row.id, text);

@@ -1,0 +1,38 @@
+{
+  "maxImplementationWorkers": 4,
+  "remote": "origin",
+  "integrationRef": "origin/main",
+  "branchPrefix": "claude/",
+  "worktreePrefix": "wt-",
+  "activeWithinHours": 24,
+  "staleAfterDays": 7,
+  "hotspots": [
+    { "path": "drizzle/", "rule": "SERIAL", "reason": "số hiệu migration + _journal.json: hai nhánh cùng thêm migration là trùng số (AGENTS.md mục 4)" },
+    { "path": "db/schema.ts", "rule": "SERIAL", "reason": "lược đồ dùng chung — một người viết tại một thời điểm" },
+    { "path": "package.json", "rule": "SERIAL", "reason": "phụ thuộc + scripts; đi cùng package-lock.json" },
+    { "path": "package-lock.json", "rule": "SERIAL", "reason": "khoá phụ thuộc — xung đột không giải tay được" },
+    { "path": ".github/", "rule": "SERIAL", "reason": "workflow cổng / deploy — tên check `gates / gates` là khoá của main" },
+    { "path": "AGENTS.md", "rule": "SERIAL", "reason": "hợp đồng của mọi agent" },
+    { "path": "CLAUDE.md", "rule": "SERIAL", "reason": "hợp đồng của mọi agent" },
+    { "path": "lib/auth/", "rule": "SERIAL", "reason": "quyền truy cập — một đường tính (AGENTS.md mục 28)" },
+    { "path": "middleware.ts", "rule": "SERIAL", "reason": "cổng mọi request" },
+    { "path": "lib/queries/return-rate.ts", "rule": "SERIAL", "reason": "ORDER_OUTCOME — nguồn sự thật duy nhất của kết quả đơn" },
+    { "path": "tests/sync-fixtures.test.ts", "rule": "SHARED", "reason": "nơi đăng ký bài kiểm — mỗi việc chỉ NỐI THÊM một import + một lời gọi; xung đột cùng dòng thì giải bằng giữ cả hai" }
+  ],
+  "riskFloor": [
+    { "path": "lib/queries/return-rate.ts", "risk": "CRITICAL", "reason": "ORDER_OUTCOME (AGENTS.md mục 0)" },
+    { "path": "docs/business-rules/", "risk": "CRITICAL", "reason": "đặc tả luật nghiệp vụ không được thương lượng" },
+    { "path": "tests/contract-order-outcome.test.ts", "risk": "CRITICAL", "reason": "contract test — không được sửa kỳ vọng để CI xanh" },
+    { "path": "drizzle/", "risk": "HIGH", "reason": "migration production tự áp khi khởi động" },
+    { "path": "db/schema.ts", "risk": "HIGH", "reason": "lược đồ CSDL" },
+    { "path": "lib/auth/", "risk": "HIGH", "reason": "xác thực / phân quyền" },
+    { "path": "middleware.ts", "risk": "HIGH", "reason": "xác thực mọi request" },
+    { "path": ".github/", "risk": "HIGH", "reason": "cổng CI + deploy" },
+    { "path": "lib/payroll/", "risk": "HIGH", "reason": "lương (AGENTS.md mục 71)" },
+    { "path": "lib/billing/", "risk": "HIGH", "reason": "thu phí thuê bao (mục 73)" },
+    { "path": "lib/queries/stock.ts", "risk": "HIGH", "reason": "sổ kho (mục 3.10)" },
+    { "path": "lib/integrations/", "risk": "MEDIUM", "reason": "tích hợp production bên ngoài" },
+    { "path": "scripts/bootstrap.sh", "risk": "HIGH", "reason": "chạy trên VPS lúc deploy" },
+    { "path": "deploy/", "risk": "HIGH", "reason": "hạ tầng production" }
+  ]
+}

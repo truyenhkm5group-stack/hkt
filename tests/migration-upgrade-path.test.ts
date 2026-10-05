@@ -163,6 +163,8 @@ const MOI = [
   "0213_push_subscriptions",
   "0214_platform_phone_otps",
   "0215_platform_org_brand",
+  "0216_order_dispatch",
+  "0217_sales_inbox_levels_feedback",
 ] as const;
 
 /*

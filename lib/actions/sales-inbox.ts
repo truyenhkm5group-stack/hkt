@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth/session";
 import { assignConversationCore, claimConversationCore, releaseConversationCore, sendStaffReplyCore, suggestReplyCore } from "@/lib/sales-chatbot/inbox";
 import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
 import type { ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { submitConversationFeedbackCore } from "@/lib/sales-chatbot/inbox-feedback";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, type InboxLabel, type InboxNote } from "@/lib/sales-chatbot/inbox-shared";
 
@@ -93,4 +94,10 @@ export async function addNoteAction(conversationId: string, text: string): Promi
 export async function deleteNoteAction(noteId: string): Promise<Out> {
   const user = await requireUser();
   return done(await deleteNoteCore(user, noteId));
+}
+
+/** Góp ý của nhân viên cho AI trên một hội thoại ⇒ bài học của bot (lib/sales-chatbot/inbox-feedback.ts). */
+export async function submitFeedbackAction(conversationId: string, text: string): Promise<Out<{ message: string; lessons: string[] }>> {
+  const user = await requireUser();
+  return done(await submitConversationFeedbackCore(user, conversationId, text));
 }

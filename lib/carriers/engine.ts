@@ -239,6 +239,16 @@ const createZ = quoteZ.extend({ serviceCode: z.string().trim().regex(/^[A-Z0-9]{
 /** Bản nháp lưu cùng chỗ giữ — để «Thử lại» gửi ĐÚNG những gì đã gửi lần trước (cùng mã, cùng tiền, cùng địa chỉ). */
 type StoredDraft = { weightGrams: number; cod: number; serviceCode: string; note: string; province: string; ward: string };
 
+/**
+ * AI làm lượt tạo: NGƯỜI (phiên — `userId` là khoá tài khoản) hay MÁY (job tuyến giao — `userId: null`, `userEmail` dạng
+ * `job:<tên>` nên nhật ký tự ghi tác nhân SYSTEM; luật 34/36: máy không mượn tài khoản của ai). `via` đi vào lý do nhật ký.
+ */
+type CreateActor = { userId: string | null; userEmail: string; via?: string };
+
+const actorOf = (user: SessionUser): CreateActor => ({ userId: user.id, userEmail: user.email });
+
+type CreateInput = z.infer<typeof createZ>;
+
 export async function createShipmentCore(user: SessionUser, rawCarrier: unknown, orderId: unknown, rawInput: unknown, deps: CarrierDeps = {}): Promise<CarrierResult<{ shipmentId: string; trackingCode: string | null }>> {
   if (!can(user, PERMISSION)) return { ok: false, error: NO_PERMISSION };
   if (!isCarrierKey(rawCarrier)) return { ok: false, error: "Hãng không hợp lệ." };
@@ -249,15 +259,19 @@ export async function createShipmentCore(user: SessionUser, rawCarrier: unknown,
   if (!loaded.ok) return loaded;
   const opened = await openSession(adapter, deps);
   if (!opened.ok) return opened;
-  const { order, lines } = loaded;
-  const preview = draftOf(order, lines, parsed.data, "");
-  const problems = opened.session.problems(preview, { needService: true });
+  return createWithSession(actorOf(user), adapter, opened.session, loaded.order, loaded.lines, parsed.data);
+}
+
+/** Phần chung của tạo vận đơn (người bấm hay máy): kiểm bản nháp → ① giữ chỗ → ② gọi hãng → ③ ghi kết quả. */
+async function createWithSession(actor: CreateActor, adapter: CarrierAdapter, session: CarrierSession, order: OrderRow, lines: VtpShipmentLine[], input: CreateInput): Promise<CarrierResult<{ shipmentId: string; trackingCode: string | null }>> {
+  const preview = draftOf(order, lines, input, "");
+  const problems = session.problems(preview, { needService: true });
   if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" · ") };
 
   // ① GIỮ CHỖ — một giao dịch, khoá theo đơn: hai người bấm cùng lúc thì người sau thấy chỗ đã giữ.
   const db = await getDb();
   const now = new Date();
-  const stored: StoredDraft = { weightGrams: parsed.data.weightGrams, cod: parsed.data.cod, serviceCode: parsed.data.serviceCode, note: parsed.data.note, province: preview.receiver.province, ward: preview.receiver.ward };
+  const stored: StoredDraft = { weightGrams: input.weightGrams, cod: input.cod, serviceCode: input.serviceCode, note: input.note, province: preview.receiver.province, ward: preview.receiver.ward };
   const held = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`carrier-create:${order.id}`}, 0))`);
     const [fresh] = await tx.select().from(schema.orders).where(eq(schema.orders.id, order.id)).limit(1);
@@ -266,7 +280,7 @@ export async function createShipmentCore(user: SessionUser, rawCarrier: unknown,
     if (blocked) return { ok: false as const, error: blocked };
     const attemptNo = attempts.reduce((m, a) => Math.max(m, a.attemptNo ?? 0), 0) + 1;
     const reference = vtpReferenceFor(manualOrderShortCode(order.id), attemptNo);
-    const create: CarrierCreateRaw = { state: "REQUESTED", carrier: adapter.key, reference, by: user.id, at: now.toISOString(), service: parsed.data.serviceCode, draft: stored };
+    const create: CarrierCreateRaw = { state: "REQUESTED", carrier: adapter.key, reference, by: actor.userId, at: now.toISOString(), service: input.serviceCode, draft: stored };
     const [row] = await tx
       .insert(schema.shipments)
       .values({
@@ -275,9 +289,9 @@ export async function createShipmentCore(user: SessionUser, rawCarrier: unknown,
         direction: "OUTBOUND",
         carrier: adapter.shipmentCarrier,
         orderReference: reference,
-        codAmount: parsed.data.cod,
-        weight: parsed.data.weightGrams,
-        service: parsed.data.serviceCode,
+        codAmount: input.cod,
+        weight: input.weightGrams,
+        service: input.serviceCode,
         receiverName: preview.receiver.name,
         receiverPhone: preview.receiver.phone,
         receiverAddress: preview.receiver.address,
@@ -287,14 +301,14 @@ export async function createShipmentCore(user: SessionUser, rawCarrier: unknown,
     return { ok: true as const, shipmentId: row.id, reference, create };
   });
   if (!held.ok) return held;
-  return callCreate(user, adapter, opened.session, order.id, held.shipmentId, held.create, { ...preview, reference: held.reference, serviceCode: parsed.data.serviceCode, note: parsed.data.note });
+  return callCreate(actor, adapter, session, order.id, held.shipmentId, held.create, { ...preview, reference: held.reference, serviceCode: input.serviceCode, note: input.note });
 }
 
 /** ② GỌI HÃNG (ngoài giao dịch — không giữ khoá CSDL lúc chờ mạng) và ③ ghi kết quả vào chỗ đã giữ. */
-async function callCreate(user: SessionUser, adapter: CarrierAdapter, session: CarrierSession, orderId: string, shipmentId: string, create: CarrierCreateRaw, draft: CarrierDraft): Promise<CarrierResult<{ shipmentId: string; trackingCode: string | null }>> {
+async function callCreate(actor: CreateActor, adapter: CarrierAdapter, session: CarrierSession, orderId: string, shipmentId: string, create: CarrierCreateRaw, draft: CarrierDraft): Promise<CarrierResult<{ shipmentId: string; trackingCode: string | null }>> {
   const db = await getDb();
   const res = await session.create(draft);
-  const by = { userId: user.id, userEmail: user.email };
+  const by = { userId: actor.userId, userEmail: actor.userEmail };
 
   if (res.kind === "REJECTED") {
     // Hãng trả lời và từ chối ⇒ chắc chắn không có vận đơn: bỏ chỗ giữ, đơn quay lại như trước khi bấm.
@@ -343,8 +357,46 @@ async function callCreate(user: SessionUser, adapter: CarrierAdapter, session: C
     });
     finalId = orphan.id;
   }
-  await audit({ ...by, action: "SHIPMENT_CARRIER_CREATE", entity: "ORDER", entityId: orderId, after: { carrier: adapter.key, shipmentId: finalId, trackingCode: created.trackingCode, reference: draft.reference, service: draft.serviceCode, cod: patch.codAmount, fee: created.fee, weight: draft.weightGrams }, reason: `Tạo vận đơn ${adapter.label} từ đơn ERP` });
+  await audit({ ...by, action: "SHIPMENT_CARRIER_CREATE", entity: "ORDER", entityId: orderId, after: { carrier: adapter.key, shipmentId: finalId, trackingCode: created.trackingCode, reference: draft.reference, service: draft.serviceCode, cod: patch.codAmount, fee: created.fee, weight: draft.weightGrams }, reason: `Tạo vận đơn ${adapter.label} từ đơn ERP${actor.via ? ` — ${actor.via}` : ""}` });
   return { ok: true, message: `Đã tạo vận đơn ${adapter.label} ${created.trackingCode} — cước ${created.fee.toLocaleString("vi-VN")} ₫. Hành trình về qua webhook của tổ chức.`, shipmentId: finalId, trackingCode: created.trackingCode };
+}
+
+/**
+ * MÁY TỰ TẠO VẬN ĐƠN theo tuyến giao (job `shipping-route` — lib/shipping/routing.ts · POS tự chủ P7). Đi qua ĐÚNG phần chung
+ * của lượt người bấm (`createWithSession`: giữ chỗ có khoá theo đơn, mã ERP chống trùng ở hãng, lượt không rõ kết quả giữ
+ * chỗ ở UNKNOWN và KHÔNG tự gửi lại). Khác người bấm ở bốn điểm, đều là mặc định của chính đơn — không đoán:
+ *  · cân = cân mẫu mã × số lượng; có dòng chưa khai cân ⇒ từ chối (không gửi một con số bịa sang hãng);
+ *  · thu hộ = số khách CÒN PHẢI TRẢ theo chứng từ thanh toán (như hàng loạt);
+ *  · dịch vụ = mã cố định quản trị shop đã khai, hoặc (`null`) dịch vụ RẺ NHẤT trong bảng cước hãng trả cho chính đơn này;
+ *  · tác nhân là MÁY (`by: null`, nhật ký `job:shipping-route`) — thẩm quyền đến từ công tắc «Tự tạo vận đơn» do người có
+ *    `settings:manage` bật, nên hàm không hỏi quyền của phiên nào.
+ */
+export async function autoCreateShipmentCore(job: string, carrier: CarrierKey, orderId: string, opts: { serviceCode: string | null }, deps: CarrierDeps = {}): Promise<CarrierResult<{ shipmentId: string; trackingCode: string | null; serviceCode: string }>> {
+  const loaded = await loadOrder(orderId);
+  if (!loaded.ok) return loaded;
+  const blocked = eligibility(loaded.order, loaded.attempts);
+  if (blocked) return { ok: false, error: blocked };
+  const weightGrams = linesWeight(loaded.lines);
+  if (weightGrams === null) return { ok: false, error: "Mẫu mã chưa khai cân nặng — không gửi một con số đoán sang hãng." };
+  const adapter = carrierAdapter(carrier);
+  const opened = await openSession(adapter, deps);
+  if (!opened.ok) return opened;
+  const cod = await outstandingOf(loaded.order);
+  let serviceCode = opts.serviceCode;
+  if (!serviceCode) {
+    const draft = draftOf(loaded.order, loaded.lines, { weightGrams, cod }, "");
+    const problems = opened.session.problems(draft, { needService: false });
+    if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" · ") };
+    const q = await opened.session.quote(draft);
+    if (q.kind !== "OK") return { ok: false, error: `Không tính được cước: ${q.message}` };
+    const cheapest = [...q.value.services].sort((a, b) => a.fee - b.fee)[0];
+    if (!cheapest) return { ok: false, error: "Hãng không trả dịch vụ nào cho tuyến này — kiểm tra lại địa chỉ người nhận / người gửi." };
+    serviceCode = cheapest.code;
+  }
+  const input = createZ.safeParse({ weightGrams, cod, serviceCode, note: "" });
+  if (!input.success) return { ok: false, error: input.error.issues.map((i) => i.message).join(" · ") };
+  const r = await createWithSession({ userId: null, userEmail: `job:${job}`, via: "máy tự tạo theo tuyến giao" }, adapter, opened.session, loaded.order, loaded.lines, input.data);
+  return r.ok ? { ...r, serviceCode: input.data.serviceCode } : r;
 }
 
 // ───────────────────────────── HUỶ / BỎ LƯỢT / THỬ LẠI / IN ─────────────────────────────
@@ -415,7 +467,7 @@ export async function retryCreateCore(user: SessionUser, shipmentId: unknown, de
   const requested: CarrierCreateRaw = { ...create, state: "REQUESTED", at: new Date().toISOString(), message: undefined };
   const db = await getDb();
   await db.update(schema.shipments).set({ raw: { carrierCreate: requested }, updatedAt: new Date() }).where(eq(schema.shipments.id, row.id));
-  return callCreate(user, adapter, opened.session, order.order.id, row.id, requested, draft);
+  return callCreate(actorOf(user), adapter, opened.session, order.order.id, row.id, requested, draft);
 }
 
 /** Link in nhãn của chính hãng. Chỉ đọc ở hãng — không ghi gì vào ERP. */
