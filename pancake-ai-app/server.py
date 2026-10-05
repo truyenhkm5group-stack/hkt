@@ -252,10 +252,10 @@ class ReplyEngine:
             self._answered_upto[conversation_id] = last_id
             return result
 
-    async def answer(self, text: str, conversation_id: str | None = None, simulate: bool = False) -> dict[str, Any]:
+    async def answer(self, text: str, conversation_id: str | None = None, simulate: bool = False, sandbox: bool = False) -> dict[str, Any]:
         t0 = time.perf_counter()
         guard = tt.guardrail_status()
-        out: dict[str, Any] = {"question": text, "path": None, "answer": None, "sent": False}
+        out: dict[str, Any] = {"question": text, "path": None, "answer": None, "sent": False, "_sandbox": sandbox}
 
         # ---- 0a. Bức xúc: ưu tiên cao nhất — khách đang bực thì không bot nào được nói tiếp
         if db.get_setting("frustration_enabled"):
@@ -343,6 +343,10 @@ class ReplyEngine:
                 out["note"] = f"Gửi Pancake lỗi: {getattr(e, 'detail', e)}"
         if not simulate and conversation_id:
             self._after_reply(out, conversation_id)
+        elif out.pop("_sandbox", False) and conversation_id and out["path"] == "retention":
+            # Chat thử: kịch bản giữ chân phải đi tiếp qua nhiều câu như với khách thật (cuộc chat thử bị loại khỏi mọi danh sách)
+            retention.apply(conversation_id, out["retention"]["transition"])
+        out.pop("_sandbox", None)
         out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         with db.tx() as c:
             c.execute(
@@ -827,7 +831,7 @@ def sentiment(body: TextIn) -> dict[str, Any]:
 
 @app.get("/api/alerts", dependencies=admin)
 def alerts(status: str = "active") -> list[dict[str, Any]]:
-    cond = "status != 'RESOLVED'" if status == "active" else "1=1"
+    cond = ("status != 'RESOLVED'" if status == "active" else "1=1") + " AND a.conversation_id NOT LIKE 'sandbox-%'"
     data = db.rows(f"""SELECT a.*, c.bot_paused, c.snippet FROM frustration_alerts a LEFT JOIN conversations c ON c.id = a.conversation_id
                        WHERE {cond} ORDER BY CASE a.status WHEN 'OPEN' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
                        COALESCE(a.score, 0) DESC, a.id DESC LIMIT 300""")
@@ -852,7 +856,7 @@ def update_alert(alert_id: int, body: AlertUpdate) -> dict[str, Any]:
 
 @app.get("/api/cancel-requests", dependencies=admin)
 def cancel_requests(status: str = "active") -> list[dict[str, Any]]:
-    cond = "status NOT IN ('DONE','EXPIRED')" if status == "active" else "1=1"
+    cond = ("status NOT IN ('DONE','EXPIRED')" if status == "active" else "1=1") + " AND conversation_id NOT LIKE 'sandbox-%'"
     data = db.rows(f"""SELECT * FROM cancel_requests WHERE {cond}
                        ORDER BY CASE status WHEN 'CANCEL_REQUESTED' THEN 0 WHEN 'RETAINED' THEN 1 WHEN 'DETECTED' THEN 2 ELSE 3 END, id DESC LIMIT 300""")
     for d in data:
@@ -874,10 +878,10 @@ def update_cancel_request(req_id: int, body: CancelUpdate) -> dict[str, Any]:
 @app.get("/api/notifications", dependencies=admin)
 def notifications() -> dict[str, Any]:
     return {
-        "frustration_open": db.scalar("SELECT COUNT(*) FROM frustration_alerts WHERE status = 'OPEN'"),
-        "cancel_requested": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'CANCEL_REQUESTED'"),
-        "retained": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'RETAINED'"),
-        "detected": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'DETECTED'"),
+        "frustration_open": db.scalar("SELECT COUNT(*) FROM frustration_alerts WHERE status = 'OPEN' AND conversation_id NOT LIKE 'sandbox-%'"),
+        "cancel_requested": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'CANCEL_REQUESTED' AND conversation_id NOT LIKE 'sandbox-%'"),
+        "retained": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'RETAINED' AND conversation_id NOT LIKE 'sandbox-%'"),
+        "detected": db.scalar("SELECT COUNT(*) FROM cancel_requests WHERE status = 'DETECTED' AND conversation_id NOT LIKE 'sandbox-%'"),
     }
 
 
@@ -893,6 +897,81 @@ def staff_send(conversation_id: str, body: SendIn) -> dict[str, Any]:
                          "from_id": db.get_setting("pancake_page_id"), "from_name": "Nhân viên", "from_page": True,
                          "text": body.text, "created_at": db.now(), "source": "staff"}])
     return {"ok": True, "id": msg_id}
+
+
+# ---------------------------------------------------------------------- chat thử (sandbox)
+SANDBOX_PAGE = "SANDBOX"
+
+
+class SandboxMsg(BaseModel):
+    conversation_id: str = Field(pattern=r"^sandbox-[a-f0-9]{8,32}$")
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class TeachIn(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=2000)
+    category: str = "khac"
+    fast_path: bool = True
+
+
+@app.get("/api/sandbox/info", dependencies=admin)
+def sandbox_info() -> dict[str, Any]:
+    """Bot đang biết gì về sản phẩm — để người chạy thử hiểu vì sao bot trả lời như vậy."""
+    cat = catalog()
+    return {
+        "shop_name": db.get_setting("shop_name"),
+        "gemini_ready": bool(db.get_setting("gemini_api_key")),
+        "pos_connected": bool(db.get_setting("pancake_shop_id") and db.get_setting("pancake_pos_api_key")),
+        "catalog_products": len(cat) if cat else 0,
+        "catalog_sample": [p["name"] for p in (cat or [])[:8]],
+        "shop_profile_chars": len(db.get_setting("shop_profile") or ""),
+        "faqs": db.scalar("SELECT COUNT(*) FROM faqs WHERE enabled = 1"),
+        "scripts": db.scalar("SELECT COUNT(*) FROM objection_scripts WHERE enabled = 1"),
+        "templates": db.scalar("SELECT COUNT(*) FROM closing_templates WHERE enabled = 1"),
+    }
+
+
+@app.post("/api/sandbox/new", dependencies=admin)
+def sandbox_new() -> dict[str, Any]:
+    cid = f"sandbox-{uuid.uuid4().hex[:16]}"
+    db.upsert_conversation({"id": cid, "page_id": SANDBOX_PAGE, "customer_name": "Khách thử", "tags": []})
+    return {"conversation_id": cid}
+
+
+@app.post("/api/sandbox/message", dependencies=admin)
+async def sandbox_message(body: SandboxMsg) -> dict[str, Any]:
+    """Một lượt chat thử: bot trả lời theo ĐÚNG bộ máy thật, nhớ các câu trước, KHÔNG gửi cho khách nào."""
+    cid = body.conversation_id
+    if not db.row("SELECT 1 FROM conversations WHERE id = ?", (cid,)):
+        db.upsert_conversation({"id": cid, "page_id": SANDBOX_PAGE, "customer_name": "Khách thử", "tags": []})
+    res = await engine.answer(body.text, conversation_id=cid, simulate=True, sandbox=True)
+    now = db.now()
+    msgs = [{"id": f"{cid}-c-{uuid.uuid4().hex[:8]}", "conversation_id": cid, "page_id": SANDBOX_PAGE, "from_id": "khach",
+             "from_name": "Khách thử", "from_page": False, "text": body.text, "created_at": now, "source": "sandbox"}]
+    if res.get("answer"):
+        msgs.append({"id": f"{cid}-b-{uuid.uuid4().hex[:8]}", "conversation_id": cid, "page_id": SANDBOX_PAGE, "from_id": "bot",
+                     "from_name": "Bot AI", "from_page": True, "text": res["answer"], "created_at": now + 1, "source": "bot"})
+    db.insert_messages(msgs)
+    return res
+
+
+@app.post("/api/sandbox/teach", dependencies=admin)
+def sandbox_teach(body: TeachIn) -> dict[str, Any]:
+    """Dạy bot: câu khách hỏi → câu trả lời đúng. Trùng ý một FAQ có sẵn (≥ 0,85) thì SỬA FAQ đó và thêm cách hỏi này."""
+    q, a = body.question.strip(), body.answer.strip()
+    hit = matcher.search(q, top_k=1)
+    if hit and hit[0]["score"] >= 0.85:
+        fid = hit[0]["faq_id"]
+        old = db.row("SELECT question, variants_json FROM faqs WHERE id = ?", (fid,))
+        variants = json.loads((old or {}).get("variants_json") or "[]")
+        if old and q != old["question"] and q not in variants:
+            variants.append(q)
+        db.knowledge_save("faqs", {"answer": a, "variants": variants, "enabled": 1, "fast_path": int(body.fast_path)}, fid)
+        return {"ok": True, "action": "updated", "faq_id": fid, "matched_question": hit[0]["question"]}
+    fid = db.knowledge_save("faqs", {"question": q, "answer": a, "category": body.category, "variants": [],
+                                     "source": "manual", "enabled": 1, "fast_path": int(body.fast_path)})
+    return {"ok": True, "action": "created", "faq_id": fid}
 
 
 # ---------------------------------------------------------------------- analytics

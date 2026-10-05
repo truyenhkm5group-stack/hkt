@@ -169,6 +169,31 @@ class PhoneFilterTest(Base):
         self.assertEqual(sorted(r["ids"]), ["a", "b", "c"])
 
 
+class SandboxTest(Base):
+    def test_sandbox_multi_turn_teach_and_isolation(self):
+        seen = []
+        orig = tt.call_gemini
+        tt.call_gemini = lambda prompt, **k: (seen.append(len(k.get("history") or [])) or
+                                               {"text": "Dạ 499k ạ", "prompt_tokens": 1, "output_tokens": 1, "cost_usd": 0, "latency_ms": 1})
+        db.set_settings({"gemini_api_key": "x"})
+        try:
+            cid = server.sandbox_new()["conversation_id"]
+            run(server.sandbox_message(server.SandboxMsg(conversation_id=cid, text="giá sao shop")))
+            run(server.sandbox_message(server.SandboxMsg(conversation_id=cid, text="có màu đen không")))
+            self.assertEqual(seen, [0, 2])  # lượt 2 thấy lịch sử lượt 1
+            server.sandbox_teach(server.TeachIn(question="có màu đen không", answer="Dạ còn màu đen ạ"))
+            r = run(server.sandbox_message(server.SandboxMsg(conversation_id=cid, text="co mau den ko shop")))
+            self.assertEqual((r["path"], r["answer"]), ("fastpath", "Dạ còn màu đen ạ"))
+            for t in ("hủy đơn giúp mình", "đắt quá", "vẫn hủy"):
+                r = run(server.sandbox_message(server.SandboxMsg(conversation_id=cid, text=t)))
+            self.assertEqual(r["retention"]["step"], "cancel_confirmed")
+            self.assertEqual(server.cancel_requests("all"), [])  # chat thử không lọt vào danh sách thật
+            self.assertEqual(server.notifications()["cancel_requested"], 0)
+            self.assertEqual(self.fake.sent, [])  # không gửi gì ra Pancake
+        finally:
+            tt.call_gemini = orig
+
+
 class UserTokenTest(Base):
     def test_list_pages_and_use_page_saves_token_not_user_token(self):
         import httpx

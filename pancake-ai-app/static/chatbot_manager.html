@@ -32,7 +32,7 @@
       <button class="tab-btn btn" data-tab="convs">💬 Hội thoại</button>
       <button class="tab-btn btn" data-tab="mining">🧠 Nạp tri thức</button>
       <button class="tab-btn btn" data-tab="knowledge">📚 Kho tri thức</button>
-      <button class="tab-btn btn" data-tab="sim">🧪 Chạy thử</button>
+      <button class="tab-btn btn" data-tab="sim">💬 Chat thử</button>
       <button class="tab-btn btn" data-tab="alerts">🔔 Cảnh báo bức xúc <span id="nAlerts" class="badge bg-red-600 text-white hidden"></span></button>
       <button class="tab-btn btn" data-tab="cancels">🛑 Huỷ đơn <span id="nCancels" class="badge bg-amber-500 text-white hidden"></span></button>
       <button class="tab-btn btn" data-tab="cost">💰 Chi phí</button>
@@ -223,17 +223,30 @@
 </section>
 
 <!-- ============================ CHẠY THỬ ============================ -->
-<section data-panel="sim" class="space-y-3 hidden">
-  <div class="card space-y-2">
-    <h2 class="font-bold">Chạy thử bộ máy trả lời <span class="muted">(không gửi cho khách)</span></h2>
-    <textarea id="simText" class="inp" rows="3" placeholder="Nhập câu khách hỏi, vd: ship về Hà Nội bao lâu vậy shop?"></textarea>
-    <input id="simConv" class="inp" placeholder="(tuỳ chọn) conversation_id để dùng lịch sử local">
-    <div class="flex gap-2">
-      <button class="btn btn-ghost" onclick="simMatch()">⚡ Chỉ thử Fast-Path (0 token)</button>
-      <button class="btn btn-ghost" onclick="simSentiment()">🔔 Chấm điểm bức xúc</button>
-      <button class="btn btn-primary" onclick="simFull()">🤖 Chạy đầy đủ</button>
+<section data-panel="sim" class="hidden">
+  <div class="grid lg:grid-cols-3 gap-3">
+    <div class="card lg:col-span-2 flex flex-col" style="height:75vh">
+      <div class="flex items-center gap-2 pb-2 border-b">
+        <h2 class="font-bold">💬 Chat thử với bot</h2>
+        <span class="muted">Bạn đóng vai khách · bot trả lời đúng như với khách thật · <b>không gửi cho ai</b></span>
+        <button class="btn btn-ghost ml-auto" onclick="sbNew()">🔄 Cuộc chat mới</button>
+      </div>
+      <div id="sbLog" class="flex-1 overflow-y-auto space-y-2 py-3 text-sm"></div>
+      <div class="flex flex-wrap gap-1 pb-2" id="sbQuick"></div>
+      <div class="flex gap-2">
+        <textarea id="sbInput" class="inp" rows="2" placeholder="Nhắn như khách, vd: mẫu váy này còn size M không shop? (Enter để gửi, Shift+Enter xuống dòng)"></textarea>
+        <button class="btn btn-primary" id="sbSend" onclick="sbSend()">Gửi</button>
+      </div>
     </div>
-    <div id="simOut" class="text-sm"></div>
+    <div class="space-y-3">
+      <div class="card text-sm space-y-1"><h3 class="font-bold">🧠 Bot đang biết gì</h3><div id="sbInfo" class="space-y-1">…</div></div>
+      <div class="card text-sm space-y-2">
+        <h3 class="font-bold">✏️ Điều chỉnh bot</h3>
+        <p>Bot trả lời chưa đúng? Bấm <b>✏️ Sửa</b> dưới câu đó, gõ câu trả lời đúng → bot <b>học ngay</b>: lần sau khách hỏi tương tự, bot trả lời đúng câu bạn dạy trong &lt; 0,5 giây, không tốn tiền AI.</p>
+        <p>Bot nói sai <b>giá / mẫu / size / chính sách</b> ở nhiều câu? Sửa một chỗ: <a href="#" class="text-blue-700 underline" onclick="showTab('connect');setTimeout(()=>document.querySelector('[data-k=shop_profile]').focus(),300);return false">Thông tin shop</a>.</p>
+        <p class="muted">Câu đã dạy xem / sửa / xoá ở tab 📚 Kho tri thức.</p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -311,7 +324,7 @@ function showTab(t) {
   currentTab = t;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
   document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== t));
-  ({ connect: loadSettings, convs: () => { loadFilters(); loadConvs(1); }, mining: loadJobs, knowledge: loadKnowledge, alerts: loadAlerts, cancels: loadCancels, cost: loadCost })[t]?.();
+  ({ connect: loadSettings, convs: () => { loadFilters(); loadConvs(1); }, mining: loadJobs, knowledge: loadKnowledge, alerts: loadAlerts, cancels: loadCancels, cost: loadCost, sim: sbInit })[t]?.();
   try { localStorage.setItem("tab", t); } catch (e) {}
 }
 document.querySelectorAll(".tab-btn").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
@@ -548,13 +561,76 @@ async function importKnowledge(inp) { const f = inp.files[0]; if (!f) return; tr
 
 // ------------------------------------------------------------ chạy thử
 const PATH_LABEL = { fastpath: "⚡ Fast-Path", gemini: "🤖 Gemini", handoff: "🙋 Chuyển nhân viên", blocked: "🛡️ Bị chặn (hạn ngạch)", error: "❌ Lỗi", frustration: "🔔 Bức xúc → xin lỗi + tắt AI", retention: "🛑 Giữ chân / huỷ đơn" };
-async function simMatch() { const r = await api("/api/match", { method: "POST", body: { text: $("#simText").value } }); $("#simOut").innerHTML = `<div class="card bg-slate-50">${r.matched ? "✅ Khớp" : "❌ Không khớp"} · điểm ${r.score} · <b>${r.latency_ms} ms</b> · ${esc(r.reason)}${r.faq ? `<div class="mt-2 p-2 bg-green-50 rounded">${esc(r.faq.answer)}</div>` : ""}${(r.candidates || []).map((c) => `<div class="muted">• ${c.score} — ${esc(c.question)}</div>`).join("")}</div>`; }
-async function simSentiment() { const r = await api("/api/sentiment", { method: "POST", body: { text: $("#simText").value, conversation_id: $("#simConv").value || null } }); $("#simOut").innerHTML = `<div class="card bg-slate-50">Điểm bức xúc <b class="${r.score > r.threshold ? "text-red-600" : ""}">${r.score}/100</b> (ngưỡng ${r.threshold}) · ${r.level}<ul class="list-disc pl-5">${r.signals.map((s) => `<li>${esc(s.label)} +${s.points}</li>`).join("")}</ul></div>`; }
-async function simFull() {
-  $("#simOut").innerHTML = '<div class="muted">Đang chạy…</div>';
-  try { const r = await api("/api/simulate", { method: "POST", body: { text: $("#simText").value, conversation_id: $("#simConv").value || null } });
-    $("#simOut").innerHTML = `<div class="card bg-slate-50 space-y-1"><div><b>${PATH_LABEL[r.path] || r.path}</b> · ${r.latency_ms} ms ${r.tokens ? `· ${r.tokens.prompt}+${r.tokens.output} token · ${usd(r.cost_usd)}` : "· 0 token"}</div>${r.sentiment ? `<div class="muted">Bức xúc: ${r.sentiment.score}/100</div>` : ""}${r.answer ? `<div class="p-2 bg-green-50 rounded whitespace-pre-wrap">${esc(r.answer)}</div>` : ""}${r.note ? `<div class="muted">${esc(r.note)}</div>` : ""}</div>`;
-  } catch (e) { $("#simOut").innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+let SB = { id: null, turns: [] };
+const SB_QUICK = ["Mẫu này giá bao nhiêu shop?", "Còn size M không ạ?", "Mình 52kg mặc size gì?", "Chất liệu gì vậy shop?", "Ship về Hà Nội mấy ngày?", "Đắt quá, bớt được không?", "Có được kiểm hàng không?", "Hủy đơn giúp mình"];
+function sbStore() { try { localStorage.setItem("sandbox", JSON.stringify(SB)); } catch (e) {} }
+async function sbInit() {
+  try { const x = JSON.parse(localStorage.getItem("sandbox") || "null"); if (x && x.id) SB = x; } catch (e) {}
+  if (!SB.id) await sbNew(true);
+  $("#sbQuick").innerHTML = SB_QUICK.map((q) => `<button class="badge bg-slate-100 hover:bg-slate-200 py-1" onclick="sbSend(${esc(JSON.stringify(q))})">${esc(q)}</button>`).join("");
+  sbRender(); sbLoadInfo();
+}
+async function sbNew(silent) {
+  const r = await api("/api/sandbox/new", { method: "POST" });
+  SB = { id: r.conversation_id, turns: [] }; sbStore(); sbRender();
+  if (!silent) toast("Đã bắt đầu cuộc chat mới — bot quên các câu trước");
+}
+async function sbLoadInfo() {
+  const i = await api("/api/sandbox/info");
+  const line = (ok, t) => `<div>${ok ? "✅" : "⚠️"} ${t}</div>`;
+  $("#sbInfo").innerHTML =
+    line(i.gemini_ready, i.gemini_ready ? "Gemini đã kết nối" : "Chưa có Gemini key — bot chỉ trả lời được câu có trong kho FAQ") +
+    line(i.catalog_products > 0, i.catalog_products > 0 ? `Danh mục POS: <b>${i.catalog_products}</b> sản phẩm (giá, size, màu thật)<div class="muted">${esc(i.catalog_sample.join(" · "))}</div>`
+      : (i.pos_connected ? "Đã nhập Shop ID nhưng chưa đọc được danh mục POS" : "Chưa nối Pancake POS — bot chỉ biết sản phẩm/giá ghi trong <b>Thông tin shop</b>. Nhập Shop ID + POS API key ở tab Kết nối để bot biết giá, size, màu thật")) +
+    line(i.shop_profile_chars > 50, `Thông tin shop: ${i.shop_profile_chars.toLocaleString("vi-VN")} ký tự`) +
+    line(i.faqs > 0, `Kho tri thức: <b>${i.faqs}</b> câu mẫu · ${i.scripts} kịch bản · ${i.templates} mẫu chốt đơn`);
+}
+function sbRender() {
+  const box = $("#sbLog");
+  if (!SB.turns.length) { box.innerHTML = '<div class="muted text-center pt-8">Nhắn một câu như khách hàng để bắt đầu.<br>Hoặc bấm một câu gợi ý bên dưới.</div>'; return; }
+  box.innerHTML = SB.turns.map((t, i) => {
+    const cus = `<div class="text-right"><div class="inline-block px-3 py-2 rounded-2xl bubble-cus max-w-[80%] text-left whitespace-pre-wrap">${esc(t.q)}</div></div>`;
+    if (t.pending) return cus + '<div class="muted">Bot đang trả lời…</div>';
+    const r = t.r || {};
+    const meta = [PATH_LABEL[r.path] || r.path, r.latency_ms != null ? Math.round(r.latency_ms) + " ms" : "", r.tokens ? `${r.tokens.prompt}+${r.tokens.output} token · ${usd(r.cost_usd)}` : "0 token"].filter(Boolean).join(" · ");
+    const why = r.path === "fastpath" ? `Khớp câu mẫu (điểm ${r.match_score})` : r.path === "frustration" ? "Khách thật: bot TẮT AI hội thoại này và báo nhân viên" : r.path === "retention" ? `Kịch bản giữ chân: ${esc(r.retention?.step || "")}` : (r.note || "");
+    const body = r.answer ? esc(r.answer) : `<i>${esc(r.path === "handoff" ? "Bot không trả lời — chuyển nhân viên: " + (r.note || "") : r.note || "Không có câu trả lời")}</i>`;
+    return cus + `<div><div class="inline-block px-3 py-2 rounded-2xl ${r.answer ? "bubble-bot" : "bg-amber-50"} max-w-[85%] whitespace-pre-wrap">${body}</div>
+      <div class="muted text-xs mt-0.5">${meta}${why ? " · " + esc(why) : ""}
+        · <a href="#" class="text-blue-700" onclick="sbTeach(${i});return false">✏️ Sửa / dạy câu này</a>
+        ${r.answer ? ` · <a href="#" class="text-green-700" onclick="sbGood(${i});return false">👍 Đúng rồi, lưu làm câu mẫu</a>` : ""}</div></div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+async function sbSend(preset) {
+  const inp = $("#sbInput"), text = (preset || inp.value).trim();
+  if (!text) return;
+  if (!preset) inp.value = "";
+  const turn = { q: text, pending: true }; SB.turns.push(turn); sbRender();
+  $("#sbSend").disabled = true;
+  try { turn.r = await api("/api/sandbox/message", { method: "POST", body: { conversation_id: SB.id, text } }); }
+  catch (e) { turn.r = { path: "error", note: e.message }; }
+  finally { turn.pending = false; $("#sbSend").disabled = false; sbStore(); sbRender(); inp.focus(); }
+}
+$("#sbInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sbSend(); } });
+function sbTeach(i) {
+  const t = SB.turns[i];
+  $("#mTitle").textContent = "✏️ Dạy bot câu trả lời đúng";
+  $("#mBody").innerHTML = `<label class="muted">Khách hỏi</label><textarea class="inp" rows="2" id="tQ">${esc(t.q)}</textarea>
+    <label class="muted">Bot NÊN trả lời (sửa câu dưới cho đúng)</label><textarea class="inp" rows="5" id="tA">${esc(t.r?.answer || "")}</textarea>
+    <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="tFast" checked> Trả lời NGAY câu này khi khách hỏi tương tự (không qua AI). Bỏ tích nếu câu trả lời phụ thuộc từng khách.</label>`;
+  $("#mSave").onclick = async () => {
+    const a = $("#tA").value.trim(); if (!a) return toast("Nhập câu trả lời đúng", true);
+    const r = await api("/api/sandbox/teach", { method: "POST", body: { question: $("#tQ").value.trim(), answer: a, fast_path: $("#tFast").checked } });
+    closeModal(); t.r = { ...(t.r || {}), answer: a, taught: true }; sbStore(); sbRender(); sbLoadInfo();
+    toast(r.action === "updated" ? `Đã sửa câu mẫu có sẵn ("${r.matched_question}")` : "Đã dạy bot câu mới — hỏi lại để thử");
+  };
+  $("#modal").classList.remove("hidden"); $("#modal").classList.add("flex");
+}
+async function sbGood(i) {
+  const t = SB.turns[i];
+  const r = await api("/api/sandbox/teach", { method: "POST", body: { question: t.q, answer: t.r.answer, fast_path: true } });
+  toast(r.action === "updated" ? "Đã cập nhật câu mẫu có sẵn" : "Đã lưu làm câu mẫu"); sbLoadInfo();
 }
 
 // ------------------------------------------------------------ cảnh báo bức xúc
