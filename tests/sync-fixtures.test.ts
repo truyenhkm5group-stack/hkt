@@ -346,6 +346,7 @@ import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./compan
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
+import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -2172,6 +2173,8 @@ async function main() {
   // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
   testOrgSummaryPure();
   await testOrgSummaryDb();
+  // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
+  testOrgOrderAuditPure();
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
