@@ -23,7 +23,7 @@
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
@@ -140,6 +140,24 @@ export function pageAnsweredVerdict(msgs: readonly PancakeThreadMessage[], custo
   if (replies.length === 1 && msgs.some((m) => m.at < firstCust - OLD_THREAD_MS)) return false;
   return true;
 }
+/** Tin phía page được coi là tin mẫu tự động — không chuyển hội thoại sang nhân viên. */
+export const AUTOMATION_REASON = "Tin mẫu tự động của page — không phải nhân viên, bot không nhường";
+/** Tin mẫu phải dài ít nhất chừng này ký tự: câu ngắn («Dạ», «Ok ạ») nhân viên gõ ở mọi hội thoại, không phải mẫu tự động. */
+export const TEMPLATE_MIN_CHARS = 40;
+const TEMPLATE_LOOKBACK_MS = 7 * 24 * 3_600_000;
+
+async function isPageTemplate(ev: FanpageEvent, now: Date): Promise<boolean> {
+  if (normalizeEcho(ev.text).length < TEMPLATE_MIN_CHARS) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const [seen] = await db
+    .select({ id: t.id })
+    .from(t)
+    .where(and(eq(t.pageId, ev.pageId), ne(t.threadId, ev.threadId), eq(t.note, PAGE_REPLY), eq(t.text, ev.text), gte(t.createdAt, new Date(now.getTime() - TEMPLATE_LOOKBACK_MS))))
+    .limit(1);
+  return Boolean(seen);
+}
+
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 export const GRACE_SLACK_MS = 1_000;
 export const RETRY_MS = 2_000;
@@ -203,6 +221,8 @@ export type FanpageEvent = {
   fromPage: boolean;
   /** Tin của NGƯỜI THẬT bên page (có uid / admin_id) — chưa loại tin bot vừa gửi (việc của `receiveFanpageEvent`). */
   humanStaff: boolean;
+  /** Pancake / Meta tự gắn cờ tin TỰ ĐỘNG (`is_automated` / `ai_generated`). Thiếu ⇒ chưa biết, không phải «người». */
+  automated?: boolean;
   inbox: boolean;
   /** Bình luận (0184): bài viết + người bình luận (private reply đòi cả hai). `null` với tin nhắn. */
   comment: { postId: string; fromId: string } | null;
@@ -246,7 +266,8 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const postId = str(msg?.post_id) || str(conv?.post_id) || str(post.id) || threadId.split("_")[0];
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
   const imageUrls = fromPage ? [] : pancakeImageUrls(msg);
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, inbox, comment, imageUrls };
+  const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
@@ -372,6 +393,12 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     const c = schema.salesChatConversations;
     if (!ev.humanStaff) {
+      // TIN MẪU TỰ ĐỘNG CỦA PAGE KHÔNG PHẢI NHÂN VIÊN (05/10/2026, «Việt Phương»): bot vừa báo giá thì page tự gửi bảng giá dài
+      // (đúng nguyên văn page đã gửi ở hội thoại «Dư Thị Liên») ⇒ luật «tin page tới giữa lúc bot đang trò chuyện ⇒ người» bên
+      // dưới bắt nhầm, bot nhường 30 phút và im với câu «1kg có miễn síp ko». Tin mẫu = cờ tự động của Pancake / Meta, HOẶC
+      // nguyên văn (đủ dài để không phải «Dạ» / «Ok») đã được page gửi ở một hội thoại KHÁC trong 7 ngày. Tin vẫn ghi
+      // `PAGE_REPLY` ở trên ⇒ tin khách đang chờ TRƯỚC nó vẫn được coi là đã có trả lời; chỉ không chuyển hội thoại sang người.
+      if (ev.automated || (await isPageTemplate(ev, now))) return { queued: false, reason: AUTOMATION_REASON };
       // Pancake KHÔNG gắn uid cho tin nhân viên gõ (03/10/2026, «Đỗ Là»: nhân viên vào xin địa chỉ, bot vẫn chen hai tin xin lỗi
       // dài). Trả lời tự động của Meta / lời chào quảng cáo chỉ tới ở ĐẦU hội thoại; tin phía page (không phải bot, không phải
       // ghi chú Pancake) tới GIỮA lúc bot đang trò chuyện ⇒ là người ⇒ nhường như nhân viên.

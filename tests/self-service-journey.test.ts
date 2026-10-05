@@ -1319,6 +1319,16 @@ async function testJourney() {
       await db.update(schema.salesChatConversations).set({ status: "OPEN", lastBotAt: new Date(Date.now() - 5 * 3_600_000) }).where(eq(schema.salesChatConversations.id, fc.id));
       assert.match((await receiveFanpageEvent(ev("m-fu-greet", "CHẢ CÁ THU NGUYÊN CHẤT 100%", { id: PAGE }, "t-fu"))).reason, /tự động/);
       assert.equal((await fuConv()).status, "OPEN");
+      // (05/10/2026 · «Việt Phương») bot vừa báo giá thì page tự gửi bảng giá dài — NGUYÊN VĂN page đã gửi ở hội thoại KHÁC ⇒ tin
+      // mẫu tự động, KHÔNG phải nhân viên ⇒ bot không nhường (trước đây bot im 30 phút với câu «1kg có miễn síp ko»).
+      const priceTpl = "Dạ em chào anh/chị ! Chả cá thu bên em hiện đang có giá: - 1kg giá 280k - 2kg giảm 20k, còn 540k";
+      await receiveFanpageEvent(ev("m-tpl-other", priceTpl, { id: PAGE }, "t-tpl-other"));
+      await db.update(schema.salesChatConversations).set({ status: "OPEN", lastBotAt: new Date(Date.now() - 60_000) }).where(eq(schema.salesChatConversations.id, fc.id));
+      assert.match((await receiveFanpageEvent(ev("m-fu-tpl", priceTpl, { id: PAGE }, "t-fu"))).reason, /Tin mẫu tự động/);
+      assert.equal((await fuConv()).status, "OPEN", "tin mẫu không chuyển hội thoại sang người");
+      // Cờ tự động của Pancake / Meta ⇒ tự động, kể cả tin chưa từng thấy.
+      assert.match((await receiveFanpageEvent(ev("m-fu-flag", "Cảm ơn anh/chị đã quan tâm sản phẩm của shop ạ", { id: PAGE, is_automated: true }, "t-fu"))).reason, /Tin mẫu tự động/);
+      assert.equal((await fuConv()).status, "OPEN", "cờ is_automated không chuyển hội thoại sang người");
       // Hội thoại đã XẾP LỊCH trước khi có chặn lúc nhận (dòng phía page nằm sau tin cuối của bot) ⇒ job dừng, không nhắn.
       await rearm({ lastBotAt: new Date(Date.now() - 10 * 60_000) });
       const postsBeforeStaff = fuFetch.calls.filter((c) => c.init?.method === "POST").length;
