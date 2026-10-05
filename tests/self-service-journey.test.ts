@@ -1223,11 +1223,11 @@ async function testJourney() {
       const retConv = (await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-ret"))))[0];
       assert.deepEqual((retConv.state as ChatState).returning?.fbIds, ["psid-sang"], "mã Facebook của khách lấy từ tin của khách");
       const getsFirst = retFetch.calls.filter((c) => c.init?.method === "GET").length;
-      assert.equal(getsFirst, 2, "Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
+      assert.equal(getsFirst, 3, "1 lượt kiểm «page đã trả lời chưa» + hồ sơ: Pancake trả lại đúng trang cũ ⇒ dừng đọc ở trang thứ hai, không đọc đủ 3 trang");
       await receiveFanpageEvent(ev("m-ret-2", "ok em", { id: "psid-sang", name: "Sang Tran" }, "t-ret"));
       await processFanpageThread(PAGE, "t-ret", { fetch: retFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
       assert.equal(retSystems.length, 2);
-      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại");
+      assert.equal(retFetch.calls.filter((c) => c.init?.method === "GET").length, getsFirst + 1, "hồ sơ Pancake đọc ở lượt đầu, lượt sau dùng lại — chỉ thêm MỘT lượt kiểm «page đã trả lời chưa»");
       // Hội thoại này đang chờ khách — gỡ lịch nhắc để khối follow-up bên dưới chỉ thấy hội thoại của nó.
       await db.update(schema.salesChatConversations).set({ nextFollowupAt: null }).where(eq(schema.salesChatConversations.id, retConv.id));
       assert.equal((await listConversations(50)).find((c) => c.id === flowConv.id)?.stage, "QUOTE", "danh sách hội thoại hiện bước bán");
