@@ -26,6 +26,8 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { parseListParams } from "@/lib/search-params";
 import { runJob } from "@/lib/sync/jobs";
 import { listWholesaleLeads, wholesaleDashboard } from "@/lib/queries/wholesale";
+import { mobileHome, mobileQueue, nextLeadId } from "@/lib/queries/wholesale-mobile";
+import { callOutcomeEffect, PRICE_REQUEST_ACTION } from "@/lib/wholesale/constants";
 import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
@@ -33,7 +35,7 @@ import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previe
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { purgeExpiredSnapshots, runLeadHunterTick } from "@/lib/wholesale/engine";
-import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, importLeadsCore, logCallCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
+import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
 import { channelAction, openerLooksInvented, templateOpener } from "@/lib/wholesale/opener";
 import { approveOutreachCore, markOutreachSentCore, prepareOutreachCore, queueOutreachCore, recordOutreachResultCore } from "@/lib/wholesale/outreach";
 import { extractVnPhones, formatVnPhone, normalizeVnPhone, samePhone } from "@/lib/wholesale/phone";
@@ -280,6 +282,24 @@ function testFieldHandoffMessage() {
   assert.deepEqual(verifiedCallPatch(lead, snap, "NO_ANSWER", true), {}, "không nghe máy ⇒ chưa xác nhận gì");
   assert.deepEqual(verifiedCallPatch({ ...lead, staffEditedFields: ["businessName"] }, snap, "ANSWERED", false), { normalizedPhone: "+84905123456" });
   assert.deepEqual(verifiedCallPatch(lead, null, "ANSWERED", true), {}, "dữ liệu Google đã xoá ⇒ không có gì để chép");
+}
+
+function testCallOutcomes() {
+  // Người bán chọn KẾT QUẢ; máy suy ra trạng thái — không bao giờ lùi lead đã đi xa.
+  assert.equal(callOutcomeEffect("NEW", "INTERESTED").to, "INTERESTED");
+  assert.equal(callOutcomeEffect("NEGOTIATING", "NO_ANSWER").to, "NEGOTIATING", "không nghe máy không lùi lead đang thương lượng");
+  assert.equal(callOutcomeEffect("NEW", "NO_ANSWER").to, "NO_ANSWER");
+  const cb = callOutcomeEffect("NEW", "CALLBACK");
+  assert.ok(cb.to === "CONTACTED" && cb.followupRequired && cb.followupDays === 1);
+  assert.equal(callOutcomeEffect("QUALIFIED", "PRICE_REQUESTED").nextAction, PRICE_REQUEST_ACTION);
+  assert.equal(callOutcomeEffect("NEW", "CONSIDERING").followupRequired, true);
+  const lost = callOutcomeEffect("NEGOTIATING", "NOT_INTERESTED");
+  assert.ok(lost.to === "LOST" && (lost.lostReason ?? "").length >= 3, "LOST luôn kèm lý do (ràng buộc CSDL)");
+  assert.equal(callOutcomeEffect("NEW", "WRONG_NUMBER").to, "LOST");
+  assert.match(callOutcomeEffect("NEW", "WRONG_CONTACT").nextAction ?? "", /người phụ trách/);
+  assert.equal(callOutcomeEffect("CONTACTED", "DO_NOT_CONTACT").to, "DO_NOT_CONTACT");
+  assert.equal(followupAt(new Date("2026-10-05T16:30:00Z"), 1).toISOString(), "2026-10-06T02:00:00.000Z", "23:30 giờ VN ngày 05 ⇒ «mai» là 9 giờ ngày 06");
+  assert.equal(followupAt(new Date("2026-10-05T17:30:00Z"), 1).toISOString(), "2026-10-07T02:00:00.000Z", "00:30 giờ VN ngày 06 (vẫn là ngày 05 theo UTC) ⇒ «mai» là ngày 07 — ngày tính theo giờ VN");
 }
 
 function testFreeTier() {
@@ -860,6 +880,42 @@ async function testDb() {
       await changeCampaignStateCore(admin, c7.id, "stop");
       await saveLeadHunterConfig(cfgFree);
 
+      // ── Màn điện thoại: bấm gọi ≠ đã gọi; kết quả ⇒ trạng thái; thứ tự gọi; khách tiếp theo ──
+      const dAll = await decideScope("WHOLESALE_LEADS", admin);
+      const pubLead = (await leadByPlace(P.pub.placeId))!;
+      assert.equal(pubLead.enrichmentStatus, "READY");
+      assert.ok("ok" in (await logCallInitiatedCore(admin, pubLead.id)));
+      const ini = await db.select().from(schema.wholesaleLeadActivities).where(and(eq(schema.wholesaleLeadActivities.leadId, pubLead.id), eq(schema.wholesaleLeadActivities.kind, "CALL_INITIATED")));
+      assert.equal(ini.length, 1);
+      assert.equal((ini[0]!.meta as { phone?: string }).phone, "+842363555777", "ghi số đã mở");
+      const afterIni = (await leadByPlace(P.pub.placeId))!;
+      assert.equal(afterIni.contactAttemptCount, pubLead.contactAttemptCount, "bấm gọi KHÔNG phải một lần liên hệ");
+      assert.equal(afterIni.contactStatus, pubLead.contactStatus);
+      const cb = await logCallCore(admin, pubLead.id, { outcome: "CALLBACK", note: "Gọi lại chiều mai" });
+      assert.ok("ok" in cb && cb.status === "CONTACTED" && cb.nextFollowupAt, JSON.stringify(cb));
+      assert.equal(new Date(cb.nextFollowupAt!).toISOString().slice(11, 16), "02:00", "hẹn gọi lại mặc định 9 giờ sáng giờ VN");
+      // Hẹn đã QUÁ HẠN ⇒ đứng đầu hàng đợi «Cần gọi»; vừa gọi trong 2 giờ ⇒ «khách tiếp theo» bỏ qua.
+      await db.update(schema.wholesaleLeads).set({ nextFollowupAt: new Date(Date.now() - 3_600_000) }).where(eq(schema.wholesaleLeads.id, pubLead.id));
+      const queue = await mobileQueue(dAll, "call", "");
+      assert.equal(queue[0]?.id, pubLead.id, JSON.stringify(queue.map((x) => [x.name, x.rank])));
+      assert.equal(queue[0]?.rank, 0);
+      assert.notEqual(await nextLeadId(dAll, "call", null), pubLead.id, "vừa gọi xong thì không đưa lại ngay");
+      assert.equal((await mobileQueue(dAll, "call", "3555 777"))[0]?.id, pubLead.id, "tìm theo SĐT");
+      const smallLead = (await leadByPlace("ChIJsmall000000001"))!;
+      const pr = await logCallCore(admin, smallLead.id, { outcome: "PRICE_REQUESTED", note: "Cần bảng giá chả mực" });
+      assert.ok("ok" in pr && pr.status === "INTERESTED");
+      assert.equal((await leadByPlace("ChIJsmall000000001"))?.nextAction, PRICE_REQUEST_ACTION);
+      assert.ok((await mobileQueue(dAll, "price", "")).some((x) => x.id === smallLead.id), "chip «Chờ báo giá»");
+      const home = await mobileHome(dAll, admin.id);
+      assert.ok(home.priceWaiting >= 1 && home.followupDue >= 1 && home.myCallsToday >= 2, JSON.stringify(home));
+      const ni = await logCallCore(admin, smallLead.id, { outcome: "NOT_INTERESTED", note: "Đã có mối" });
+      assert.ok("ok" in ni && ni.status === "LOST");
+      const lostRow = (await leadByPlace("ChIJsmall000000001"))!;
+      assert.match(lostRow.lostReason ?? "", /^Không có nhu cầu — Đã có mối/);
+      assert.equal(lostRow.nextFollowupAt, null);
+      assert.ok((await mobileQueue(dAll, "done", "")).some((x) => x.id === smallLead.id));
+      assert.ok(!(await mobileQueue(dAll, "all", "")).some((x) => x.id === smallLead.id), "đã kết thúc ⇒ ra khỏi danh sách gọi");
+
       // ── Nhập tệp: +84… trùng 0… đã có ⇒ bỏ qua; số mới ⇒ tạo; số bị chặn ⇒ đếm riêng ──
       const csv = "Tên,SĐT,Địa chỉ,Tỉnh,Website\nHải sản Biển Đông (danh bạ),+84905123456,,Đà Nẵng,\nNhà hàng Sông Hàn,0905 999 888,5 Bạch Đằng,Đà Nẵng,https://songhan.vn\nLẩu Dê nhập tay,0905-222-333,,,\n,0905000000,,,";
       const imp = await importLeadsCore(admin, csv);
@@ -959,6 +1015,7 @@ export async function testWholesaleLeadHunter() {
   testPlanAndCost();
   testScanPriority();
   testFreeTier();
+  testCallOutcomes();
   testFieldHandoffMessage();
   testDedupeKeys();
   testWebsiteParse();

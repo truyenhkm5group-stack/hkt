@@ -157,6 +157,7 @@ const MOI = [
   "0207_messenger_pages",
   "0208_zalo_oa_channel",
   "0209_sales_inbox",
+  "0210_wholesale_call_initiated",
 ] as const;
 
 /*

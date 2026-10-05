@@ -10,7 +10,7 @@ import { deliverMessage } from "@/lib/messaging/service";
 import type { MessagingDeps } from "@/lib/messaging/providers";
 import { MESSAGING_CONNECTOR_LABEL } from "@/lib/messaging/types";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
-import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_STATUS_LABEL, type CallOutcome } from "@/lib/wholesale/constants";
+import { ANSWERED_CALL_OUTCOMES, CALL_OUTCOME_LABEL, isLeadStatus, LEAD_STATUS_LABEL, type CallOutcome } from "@/lib/wholesale/constants";
 import { formatVnPhone } from "@/lib/wholesale/phone";
 import { isLeadSegmentKey, LEAD_SEGMENT_LABEL } from "@/lib/wholesale/segments";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
@@ -206,7 +206,8 @@ export type CallVerifyLead = {
 };
 
 /**
- * Cuộc gọi NGHE MÁY / HẸN GỌI LẠI xác nhận địa điểm có thật và số gọi được ⇒ tên + SĐT thành dữ liệu của shop
+ * Cuộc gọi CÓ NGƯỜI NGHE (`ANSWERED_CALL_OUTCOMES`: nghe máy, có nhu cầu, xin bảng giá, hẹn gọi lại, cân nhắc, không có nhu
+ * cầu, sai người phụ trách) xác nhận địa điểm có thật và số gọi được ⇒ tên + SĐT thành dữ liệu của shop
  * (`phone_source = VERIFIED_CALL`), tương đương nhân viên tự gõ lại. Địa chỉ CHỈ chép khi người gọi tích «khách xác nhận
  * địa chỉ». Ô nhân viên đã sửa / đã có giá trị không bao giờ bị ghi đè. HÀM THUẦN — trả bản vá, không ghi.
  */
@@ -216,7 +217,7 @@ export function verifiedCallPatch(
   outcome: CallOutcome,
   addressConfirmed: boolean,
 ): { businessName?: string; address?: string; normalizedPhone?: string } {
-  if (!snap || (outcome !== "ANSWERED" && outcome !== "CALLBACK")) return {};
+  if (!snap || !ANSWERED_CALL_OUTCOMES.includes(outcome)) return {};
   const locked = (f: string) => lead.staffEditedFields.includes(f);
   const out: { businessName?: string; address?: string; normalizedPhone?: string } = {};
   if (!lead.businessName && !locked("businessName") && snap.displayName) out.businessName = snap.displayName;

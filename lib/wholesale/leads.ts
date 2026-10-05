@@ -8,7 +8,7 @@ import { normalizeProvince } from "@/lib/constants/vn-regions";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { searchProvince } from "@/lib/wholesale/areas";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
-import { ACTIVE_PIPELINE_STATUSES, CALL_OUTCOMES, CONTACTED_STATUSES, isLeadStatus, LEAD_STATUSES, LEAD_STATUS_LABEL, RESPONDED_STATUSES, type LeadStatus, canTransitionLead } from "@/lib/wholesale/constants";
+import { ACTIVE_PIPELINE_STATUSES, ANSWERED_CALL_OUTCOMES, CALL_OUTCOMES, callOutcomeEffect, CONTACTED_STATUSES, isLeadStatus, LEAD_STATUSES, LEAD_STATUS_LABEL, RESPONDED_STATUSES, type LeadStatus, canTransitionLead } from "@/lib/wholesale/constants";
 import { nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { finalizeLead, findMasterLead, leadView, rescoreLead } from "@/lib/wholesale/engine";
 import { verifiedCallPatch } from "@/lib/wholesale/field-handoff";
@@ -157,8 +157,32 @@ const callSchema = z.object({
   addressConfirmed: z.boolean().default(false),
 });
 
-/** Ghi một cuộc gọi (đã gọi thật — nút «Gọi» chỉ mở ứng dụng điện thoại). Kết quả kéo theo trạng thái hợp lý. */
-export async function logCallCore(user: SessionUser, leadId: string, raw: unknown, now = new Date()): Promise<CoreResult<{ status: LeadStatus }>> {
+/** Mốc 9 giờ sáng (giờ VN) của ngày cách `now` đúng `days` ngày — hẹn gọi lại mặc định. */
+export function followupAt(now: Date, days: number): Date {
+  const vn = new Date(now.getTime() + 7 * 3_600_000);
+  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate() + days, 2, 0, 0));
+}
+
+/**
+ * Lượt BẤM «GỌI NGAY» (màn điện thoại): chỉ ghi sự kiện `CALL_INITIATED` — lead · người bấm · số đã mở · mốc. KHÔNG đổi
+ * trạng thái, KHÔNG tăng số lần liên hệ: bấm gọi chỉ mở ứng dụng gọi của máy, chưa chứng minh có ai nghe.
+ */
+export async function logCallInitiatedCore(user: SessionUser, leadId: string, now = new Date()): Promise<CoreResult> {
+  const g = await gateLead(user, leadId);
+  if ("error" in g) return g;
+  if (g.lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
+  const db = await getDb();
+  const snap = g.lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, g.lead.placeId) }) : null;
+  const phone = leadView(g.lead, snap).phone;
+  await db.insert(schema.wholesaleLeadActivities).values({ leadId, kind: "CALL_INITIATED", channel: "PHONE_CALL", note: "", meta: { phone }, actorId: user.id, actorName: user.name, createdAt: now });
+  return { ok: true };
+}
+
+/**
+ * Ghi một cuộc gọi (đã gọi thật — nút «Gọi» chỉ mở ứng dụng điện thoại). Người gọi chọn KẾT QUẢ; trạng thái lead, lý do mất,
+ * việc tiếp theo và hẹn gọi lại suy ra bằng `callOutcomeEffect` (một luật cho màn máy tính lẫn màn điện thoại).
+ */
+export async function logCallCore(user: SessionUser, leadId: string, raw: unknown, now = new Date()): Promise<CoreResult<{ status: LeadStatus; nextFollowupAt: string | null }>> {
   const g = await gateLead(user, leadId);
   if ("error" in g) return g;
   const parsed = callSchema.safeParse(raw);
@@ -170,10 +194,13 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
     const r = await updateLeadStatusCore(user, leadId, { status: "DO_NOT_CONTACT", note: note || "Khách yêu cầu không liên hệ (qua điện thoại)" }, now);
     if ("error" in r) return r;
     await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, note });
-    return r;
+    return { ok: true, status: r.status, nextFollowupAt: null };
   }
-  const early: readonly LeadStatus[] = ["NEW", "QUALIFIED", "READY_TO_CONTACT", "NO_ANSWER", "CONTACTED"];
-  const to: LeadStatus = !early.includes(from) ? from : outcome === "ANSWERED" || outcome === "CALLBACK" ? "CONTACTED" : outcome === "NO_ANSWER" || outcome === "BUSY" ? "NO_ANSWER" : from;
+  const effect = callOutcomeEffect(from, outcome);
+  // Đã thành khách (WON) ⇒ cuộc gọi chỉ là lịch sử, không đổi trạng thái; đã mất (LOST) mà nay có nhu cầu ⇒ mở lại được.
+  const to: LeadStatus = from === "WON" ? from : from === "LOST" && effect.to !== "INTERESTED" ? from : from === "LOST" ? "INTERESTED" : effect.to;
+  const answered = ANSWERED_CALL_OUTCOMES.includes(outcome);
+  const followup = to === "LOST" ? null : (nextFollowupAt ?? (effect.followupRequired && effect.followupDays != null ? followupAt(now, effect.followupDays) : g.lead.nextFollowupAt));
   const db = await getDb();
   const snap = g.lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, g.lead.placeId) }) : null;
   const verified = verifiedCallPatch(g.lead, snap && !snap.purgedAt ? snap : null, outcome, addressConfirmed);
@@ -188,17 +215,19 @@ export async function logCallCore(user: SessionUser, leadId: string, raw: unknow
       contactStatus: to,
       ...statusStamps(g.lead, to, now),
       firstContactAt: g.lead.firstContactAt ?? now,
-      firstResponseAt: outcome === "ANSWERED" || outcome === "CALLBACK" ? (g.lead.firstResponseAt ?? now) : g.lead.firstResponseAt,
+      firstResponseAt: answered ? (g.lead.firstResponseAt ?? now) : g.lead.firstResponseAt,
       lastContactAt: now,
       contactAttemptCount: sql`${schema.wholesaleLeads.contactAttemptCount} + 1`,
-      nextFollowupAt: nextFollowupAt ?? g.lead.nextFollowupAt,
-      response: outcome === "ANSWERED" && note ? note.slice(0, 500) : g.lead.response,
+      nextFollowupAt: followup,
+      nextAction: to === "LOST" ? null : (effect.nextAction ?? g.lead.nextAction),
+      lostReason: to === "LOST" && from !== "LOST" ? `${effect.lostReason ?? "Kết thúc qua cuộc gọi"}${note ? ` — ${note.slice(0, 300)}` : ""}` : g.lead.lostReason,
+      response: answered && note ? note.slice(0, 500) : g.lead.response,
       updatedAt: now,
     })
     .where(eq(schema.wholesaleLeads.id, leadId));
   await activity(user, { leadId, kind: "CALL", channel: "PHONE_CALL", outcome, fromStatus: from, toStatus: to !== from ? to : null, note, meta: Object.keys(verified).length ? { verified: Object.keys(verified) } : null });
   await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_CONTACT", entity: "WHOLESALE_LEAD", entityId: leadId, before: { status: from }, after: { status: to, outcome, verified: Object.keys(verified) }, reason: "Ghi cuộc gọi" });
-  return { ok: true, status: to };
+  return { ok: true, status: to, nextFollowupAt: followup ? followup.toISOString() : null };
 }
 
 const assignSchema = z.object({ leadIds: z.array(z.string().min(1).max(64)).min(1).max(500), userId: z.string().min(1).max(64).nullable() });

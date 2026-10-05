@@ -179,18 +179,98 @@ export const OUTREACH_RESULT_STATUS: Record<OutreachResult, LeadStatus | null> =
   DO_NOT_CONTACT: "DO_NOT_CONTACT",
 };
 
-export const CALL_OUTCOMES = ["ANSWERED", "NO_ANSWER", "BUSY", "WRONG_NUMBER", "CALLBACK", "DO_NOT_CONTACT"] as const;
+/**
+ * KẾT QUẢ CUỘC GỌI — tách khỏi TRẠNG THÁI lead (chủ shop 05/10/2026, giao diện điện thoại): người bán chọn ĐIỀU XẢY RA
+ * trong cuộc gọi, máy suy ra trạng thái bằng `callOutcomeEffect` — người bán không cần hiểu quy trình phía sau. Kết quả
+ * lưu nguyên ở `wholesale_lead_activities.outcome` (dòng `CALL`), nên báo cáo đọc được cả hai tầng.
+ * `ANSWERED` / `BUSY` giữ cho dòng cũ và màn máy tính.
+ */
+export const CALL_OUTCOMES = ["INTERESTED", "PRICE_REQUESTED", "CALLBACK", "CONSIDERING", "NO_ANSWER", "NOT_INTERESTED", "WRONG_NUMBER", "WRONG_CONTACT", "DO_NOT_CONTACT", "ANSWERED", "BUSY"] as const;
 export type CallOutcome = (typeof CALL_OUTCOMES)[number];
 export const CALL_OUTCOME_LABEL: Record<CallOutcome, string> = {
-  ANSWERED: "Nghe máy, đã nói chuyện",
-  NO_ANSWER: "Không nghe máy",
-  BUSY: "Máy bận",
-  WRONG_NUMBER: "Sai số",
+  INTERESTED: "Có nhu cầu",
+  PRICE_REQUESTED: "Gửi bảng giá",
   CALLBACK: "Hẹn gọi lại",
-  DO_NOT_CONTACT: "Yêu cầu không liên hệ",
+  CONSIDERING: "Đang cân nhắc",
+  NO_ANSWER: "Không nghe máy",
+  NOT_INTERESTED: "Không có nhu cầu",
+  WRONG_NUMBER: "Sai số",
+  WRONG_CONTACT: "Sai người phụ trách",
+  DO_NOT_CONTACT: "Không liên hệ lại",
+  ANSWERED: "Nghe máy, đã nói chuyện",
+  BUSY: "Máy bận",
+};
+/** Chín nút của màn điện thoại, đúng thứ tự trên màn hình. */
+export const MOBILE_CALL_OUTCOMES = ["INTERESTED", "PRICE_REQUESTED", "CALLBACK", "CONSIDERING", "NO_ANSWER", "NOT_INTERESTED", "WRONG_NUMBER", "WRONG_CONTACT", "DO_NOT_CONTACT"] as const satisfies readonly CallOutcome[];
+export const CALL_OUTCOME_ICON: Record<CallOutcome, string> = {
+  INTERESTED: "✅",
+  PRICE_REQUESTED: "📋",
+  CALLBACK: "📞",
+  CONSIDERING: "⏳",
+  NO_ANSWER: "📵",
+  NOT_INTERESTED: "❌",
+  WRONG_NUMBER: "☎️",
+  WRONG_CONTACT: "👤",
+  DO_NOT_CONTACT: "🚫",
+  ANSWERED: "🗣️",
+  BUSY: "⛔",
+};
+/** Có người nghe máy và nói chuyện — mốc «phản hồi đầu tiên» và cửa chép tên + SĐT thành dữ liệu của shop. */
+export const ANSWERED_CALL_OUTCOMES: readonly CallOutcome[] = ["ANSWERED", "INTERESTED", "PRICE_REQUESTED", "CALLBACK", "CONSIDERING", "NOT_INTERESTED", "WRONG_CONTACT"];
+/** Việc tiếp theo máy ghi khi khách xin bảng giá — chip «Chờ báo giá» lọc đúng chuỗi này. */
+export const PRICE_REQUEST_ACTION = "Gửi bảng giá";
+
+export type CallOutcomeEffect = {
+  /** Trạng thái lead sau cuộc gọi (bằng `from` khi không đổi). */
+  to: LeadStatus;
+  nextAction: string | null;
+  lostReason: string | null;
+  /** Số ngày hẹn gọi lại gợi ý khi người bán không chọn ngày; `null` = không gợi ý. */
+  followupDays: number | null;
+  /** Bắt buộc phải có ngày gọi lại (người bán không chọn ⇒ dùng `followupDays`). */
+  followupRequired: boolean;
 };
 
+const EARLY_STATUSES: readonly LeadStatus[] = ["NEW", "QUALIFIED", "READY_TO_CONTACT", "NO_ANSWER", "CONTACTED"];
+
+/**
+ * Kết quả cuộc gọi ⇒ trạng thái lead. HÀM THUẦN. Không bao giờ LÙI một lead đã đi xa (đang thương lượng mà lần này không
+ * nghe máy thì vẫn đang thương lượng); «Không có nhu cầu» / «Sai số» kết thúc lead với lý do (ràng buộc LOST đòi lý do);
+ * «Không liên hệ lại» đi đường danh sách chặn riêng.
+ */
+export function callOutcomeEffect(from: LeadStatus, outcome: CallOutcome): CallOutcomeEffect {
+  const early = EARLY_STATUSES.includes(from);
+  const keep = (to: LeadStatus, extra: Partial<CallOutcomeEffect> = {}): CallOutcomeEffect => ({ to: early ? to : from, nextAction: null, lostReason: null, followupDays: null, followupRequired: false, ...extra });
+  switch (outcome) {
+    case "INTERESTED":
+      return keep("INTERESTED", { followupDays: 2 });
+    case "PRICE_REQUESTED":
+      return keep("INTERESTED", { nextAction: PRICE_REQUEST_ACTION, followupDays: 1 });
+    case "CONSIDERING":
+      return keep("INTERESTED", { nextAction: "Khách đang cân nhắc — gọi lại", followupDays: 3, followupRequired: true });
+    case "CALLBACK":
+      return keep("CONTACTED", { followupDays: 1, followupRequired: true });
+    case "ANSWERED":
+      return keep("CONTACTED");
+    case "NO_ANSWER":
+    case "BUSY":
+      return keep("NO_ANSWER", { followupDays: 1 });
+    case "WRONG_CONTACT":
+      return keep("CONTACTED", { nextAction: "Xin SĐT người phụ trách nhập hàng", followupDays: 1, followupRequired: true });
+    case "NOT_INTERESTED":
+      return { to: "LOST", nextAction: null, lostReason: "Không có nhu cầu", followupDays: null, followupRequired: false };
+    case "WRONG_NUMBER":
+      return { to: "LOST", nextAction: null, lostReason: "Sai số điện thoại", followupDays: null, followupRequired: false };
+    case "DO_NOT_CONTACT":
+      return { to: "DO_NOT_CONTACT", nextAction: null, lostReason: null, followupDays: null, followupRequired: false };
+  }
+}
+
+/** Ghi chú nhanh một chạm trên màn điện thoại (bàn phím điện thoại vẫn đọc giọng nói vào ô ghi chú như thường). */
+export const QUICK_NOTE_CHIPS = ["Cần bảng giá", "Quan tâm chả mực", "Quan tâm ruốc", "Quan tâm nước mắm", "Hỏi chiết khấu", "Gọi lại", "Cần gặp chủ", "Cần gặp người nhập hàng", "Đang có nhà cung cấp"] as const;
+
 export const ACTIVITY_KIND_LABEL: Record<string, string> = {
+  CALL_INITIATED: "Bấm gọi (mở ứng dụng gọi)",
   DISCOVERED: "Tìm thấy",
   IMPORTED: "Nhập tệp",
   ENRICHED: "Bổ sung dữ liệu",
