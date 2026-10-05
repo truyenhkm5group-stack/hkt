@@ -638,7 +638,15 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
       return "STOP";
     }
     if (page.kind === "QUOTA") {
-      await release({ lastError: page.message, nextAttemptAt: quotaRetryAt(ctx.now(), page.message) });
+      const retryAt = quotaRetryAt(ctx.now(), page.message);
+      await release({ lastError: page.message, nextAttemptAt: retryAt });
+      // Hạn mức là của CẢ dự án Google ⇒ mọi ô CÙNG KIỂU TÌM đang chờ cùng hoãn, không chỉ ô vừa hỏi. Nếu không, lượt sau
+      // lấy ô khác và lại 429: đo production 05/10/2026, mỗi 3 phút một lượt 429 — 257 «lỗi API» trong một buổi tối.
+      const sameMode = db.select({ id: schema.wholesaleSearchCells.id }).from(schema.wholesaleSearchCells).where(eq(schema.wholesaleSearchCells.searchMode, claimed.cell.searchMode));
+      await db
+        .update(cc)
+        .set({ nextAttemptAt: retryAt, updatedAt: ctx.now() })
+        .where(and(eq(cc.status, "PENDING"), inArray(cc.cellId, sameMode), or(isNull(cc.nextAttemptAt), lt(cc.nextAttemptAt, retryAt))));
       ctx.stop = "REQUEST_LIMIT";
       return "STOP";
     }

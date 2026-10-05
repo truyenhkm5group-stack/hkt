@@ -796,6 +796,25 @@ async function testDb() {
       const coBa = await db.select({ n: count() }).from(schema.wholesaleLeads).where(eq(schema.wholesaleLeads.placeId, "ChIJnhau000000001"));
       assert.equal(Number(coBa[0]!.n), 1, "thử lại sau lỗi không sinh lead trùng");
 
+      // ── 429 hạn mức NGÀY: MỌI ô đang chờ cùng hoãn tới lúc Google đặt lại — không hỏi ô khác mỗi lượt rồi lại 429 ──
+      let quotaCalls = 0;
+      const exhausted: DiscoveryProvider = {
+        ...provider,
+        async search() {
+          quotaCalls++;
+          return { ok: false, kind: "QUOTA", message: "HTTP 429 — RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'SearchTextRequest' and limit 'SearchTextRequest per day'", meta: { sku: "TEXT_SEARCH_PRO", httpStatus: 429, durationMs: 1, attempts: 1, billable: false } };
+        },
+      };
+      const cQuota = await createCampaignCore(admin, { ...campInput, name: "Hạn mức thử", customAreas: "Quảng Ninh: Cẩm Phả, Uông Bí", keywordGroups: campInput.keywordGroups.map((g) => ({ ...g, enabled: g.key === "hai-san" })) });
+      assert.ok("ok" in cQuota);
+      assert.ok("ok" in (await startCampaignCore(admin, cQuota.id)));
+      await runLeadHunterTick({ budgetMs: 20_000 }, { provider: exhausted, sleep: async () => undefined });
+      await runLeadHunterTick({ budgetMs: 20_000 }, { provider: exhausted, sleep: async () => undefined });
+      assert.equal(quotaCalls, 1, "429 hạn mức ngày ⇒ lượt sau không hỏi ô khác");
+      const waiting = await db.select({ next: cc.nextAttemptAt }).from(cc).where(and(eq(cc.campaignId, cQuota.id), eq(cc.status, "PENDING")));
+      assert.ok(waiting.length > 1 && waiting.every((w) => w.next && w.next.getTime() > Date.now() + 60_000), "mọi ô đang chờ hẹn tới lúc Google đặt lại hạn mức");
+      assert.ok("ok" in (await changeCampaignStateCore(admin, cQuota.id, "stop")));
+
       // ── Trần ngân sách: tự tạm dừng, báo chủ shop, tự mở lại ngày sau ──
       await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 0.5, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
       const c4 = await createCampaignCore(admin, { ...campInput, name: "Trần thử", customAreas: "Thanh Hóa: Sầm Sơn, Hậu Lộc" });
