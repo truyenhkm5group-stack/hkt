@@ -103,8 +103,15 @@ Khách sạn, tiệc / catering, buffet và siêu thị thường đòi hoá đ�
 | Chuỗi theo danh sách | Tên khớp danh sách thương hiệu (Golden Gate, Redsun, đồ ăn nhanh, siêu thị và cửa hàng tiện lợi chuỗi…). Lọc ngay ở bước tìm, không tốn lượt chi tiết. | `CHAIN` |
 | Chuỗi theo số điểm bán | Cùng một tên xuất hiện ở hơn `maxSameName` địa điểm. | `CHAIN` |
 | Quá đông khách | Hơn `maxReviews` đánh giá Google (mặc định 5.000). | `TOO_LARGE` |
+| Đối thủ | Tên có mặt hàng của shop (mặc định «chả mực») VÀ ở tỉnh gốc (mặc định Quảng Ninh) HOẶC có dấu hiệu sản xuất / bán buôn («giã tay», «giá sỉ», «đại lý», «xưởng»…). Tên là món ăn («bánh cuốn chả mực») thì giữ — quán dùng hàng là khách. Xem `lib/wholesale/competitor.ts`. | `COMPETITOR` |
 
 Chỉ lead do máy tìm mới bị các bộ lọc này chặn. Lead do nhân viên nhập là quyết định của người.
+
+**Đối thủ (05/10/2026).** Từ khoá «chả mực Hạ Long» kéo về 36 lead có chữ «chả mực», điểm 89–98, đứng đầu hàng đợi gọi —
+phần lớn là cơ sở làm chả mực ở Quảng Ninh. Từ khoá ấy đã bỏ khỏi bộ mặc định (chiến dịch tạo trước đó vẫn giữ ô đã lên
+lịch, nhưng kết quả của chúng qua lọc đối thủ). Luật áp lên lead ĐÃ CÓ một lần cho mỗi bản luật (`sweepCompetitors`, khoá
+`settings` `wholesale.competitorSweep`): chỉ lead máy tìm, chưa ai liên hệ, chưa giao. Lead bị loại chỉ đổi sang «Đã
+loại» với lý do `COMPETITOR`, không xoá. Chủ shop sửa mặt hàng / tỉnh gốc / dấu hiệu / tên món ở trang Cấu hình.
 
 **Hồ sơ «vừa và nhỏ»** chấm điểm quy mô như sau:
 
@@ -137,7 +144,7 @@ Mặc định dùng mức `ENTERPRISE` vì đây là lựa chọn rẻ nhất tr
 - một lượt trả tới 20 địa điểm, có sẵn SĐT và số đánh giá, không cần bước chi tiết;
 - 1.000 lượt miễn phí mỗi tháng.
 
-Bộ từ khoá lõi có 8 từ. Nhân với 57 khu vực của đợt ① là 456 lượt, nằm trong phần miễn phí.
+Bộ từ khoá lõi có 7 từ. Nhân với 57 khu vực của đợt ① là 399 lượt, nằm trong phần miễn phí.
 
 
 - **Stage A (tìm):** dùng field mask theo mức `discoveryTier`.

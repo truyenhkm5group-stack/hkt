@@ -28,7 +28,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_LIMITS, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, cycleStartTurns, loadSalesChatbotConfig, openConversation, POST_ORDER_HANDOFF_MS, setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
-import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
+import { addressGrounded, decideOrderSync, loadOrderSyncConfig, orderSyncPrompt, parseOrderSyncReply, phonesInText, reorderConfirmText, runFanpageOrderSync, saveOrderSyncConfig, syncCutoff, syncFanpageThreadWhenQuiet, type OrderSyncReply, type SyncMessage } from "@/lib/sales-chatbot/order-sync";
 import { ORDER_SYNC_CHANNEL, ORDER_SYNC_LIMITS, ORDER_SYNC_SETTING_KEY, orderGroupText, parseOrderSyncConfig, type OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import type { ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -107,6 +107,37 @@ function testPure() {
   const reorder = decideOrderSync({ ...base, messages: again, returning: old, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], use_previous_address: true, agreement_index: 2 }) });
   assert.ok(reorder.kind === "CREATE" && reorder.phoneFrom === "PREVIOUS" && reorder.addressFrom === "PREVIOUS", JSON.stringify(reorder));
   assert.deepEqual(reorder.recipient, { name: "Nguyễn Thị Lan", phone: "0912345678", address: "12 Hàng Bạc, Hoàn Kiếm", province: "Hà Nội" }, "khách cũ không gửi lại ⇒ SĐT / địa chỉ / tên đơn trước");
+  // ── Luật chốt của chủ shop HSLC (05/10/2026) ──
+  //  · «Nguyễn Thị Nguyệt Quế»: khách chỉ hỏi giá; nhân viên DÁN LẠI lời đặt hàng cũ của khách + «E giao về đây cho c nhé» ⇒
+  //    SĐT / địa chỉ chỉ nằm trong tin của SHOP ⇒ KHÔNG phải khách chốt hôm nay, dù AI chỉ vào tin nào.
+  const pasted: SyncMessage[] = [
+    { index: 1, id: "q1", from: "customer", text: "Báo giá chả cá thu?", at: at(0) },
+    { index: 2, id: "q2", from: "shop", text: "Dạ 280k/1kg, mình lấy 1kg hay 2kg ạ?", at: at(1) },
+    { index: 3, id: "q3", from: "shop", text: "Tôi một kí nhé, gởi về địa chỉ: 10/76/5 Hoàng Hoa Thám p 7 Q Bình Thạnh, số điện thoại: 0912345678", at: at(2) },
+    { index: 4, id: "q4", from: "shop", text: "E giao về đây cho c nhé", at: at(3) },
+  ];
+  const quePick = reply({ items: [{ variant_id: "v1", quantity: 1 }], recipient_phone: "0912345678", address: "10/76/5 Hoàng Hoa Thám p 7 Q Bình Thạnh", agreement_index: 4 });
+  for (const idx of [1, 3, 4]) {
+    const r = decideOrderSync({ ...base, messages: pasted, knownPhones: ["0912345678"], reply: { ...quePick, agreement_index: idx } });
+    assert.equal(r.kind, "SKIP", `SĐT / địa chỉ do SHOP dán lại ⇒ không lên đơn (tin ${idx}): ${JSON.stringify(r)}`);
+  }
+  const queOld = decideOrderSync({ ...base, messages: pasted, returning: old, reply: { ...quePick, agreement_index: 4 } });
+  assert.equal(queOld.kind, "SKIP", "khách cũ nhưng tin chốt là của shop ⇒ không lên đơn theo địa chỉ cũ");
+  //  · Khách TỰ gửi SĐT + địa chỉ rồi im lặng (shop nhắn «em lên đơn nhé») ⇒ CHỐT, lời chốt là tin khách gửi thông tin.
+  const gave: SyncMessage[] = [
+    { index: 1, id: "g1", from: "customer", text: "Báo giá chả cá thu?", at: at(0) },
+    { index: 2, id: "g2", from: "shop", text: "Dạ 280k/1kg ạ, mình nhắn SĐT + địa chỉ em giao", at: at(1) },
+    { index: 3, id: "g3", from: "customer", text: "Lan 0912345678, 12 Hàng Bạc, Hoàn Kiếm, Hà Nội", at: at(2) },
+    { index: 4, id: "g4", from: "shop", text: "Dạ em lên đơn cho chị nhé", at: at(3) },
+  ];
+  const silentOk = decideOrderSync({ ...base, messages: gave, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], recipient_phone: "0912345678", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội", agreement_index: 4 }) });
+  assert.ok(silentOk.kind === "CREATE" && silentOk.agreement.id === "g3" && silentOk.phoneFrom === "CHAT" && silentOk.addressFrom === "CHAT", `khách tự gửi đủ SĐT + địa chỉ, im lặng sau đó ⇒ chốt: ${JSON.stringify(silentOk)}`);
+  //  · Khách CŨ nhắn đặt lại về địa chỉ cũ ⇒ chốt theo thông tin lần trước (máy nhắn xác nhận lại cho khách).
+  const reorderMsgs: SyncMessage[] = [{ index: 1, id: "r1", from: "customer", text: "Giao lại cho chị 1kg chả cá về địa chỉ cũ nhé", at: at(0) }];
+  const re = decideOrderSync({ ...base, messages: reorderMsgs, returning: old, reply: reply({ items: [{ variant_id: "v1", quantity: 1 }], use_previous_address: true, agreement_index: 1 }) });
+  assert.ok(re.kind === "CREATE" && re.phoneFrom === "PREVIOUS" && re.addressFrom === "PREVIOUS" && re.agreement.id === "r1", JSON.stringify(re));
+  const conf = reorderConfirmText({ lines: [{ name: "Chả cá thu (1kg)", quantity: 1 }], total: 280_000, shippingFee: null, address: "12 Hàng Bạc, Hoàn Kiếm, Thành phố Hà Nội", phone: "0912345678" });
+  for (const k of ["Chả cá thu (1kg) × 1", "280.000", "+ phí ship", "12 Hàng Bạc", "0912345678"]) assert.ok(conf.includes(k), `tin xác nhận lại thiếu «${k}»: ${conf}`);
   assert.equal(decideOrderSync({ ...base, reply: reply({ kind: "CHANGE", summary: "thêm 1 hộp" }) }).kind, "CHANGE");
   assert.equal(decideOrderSync({ ...base, reply: reply({ kind: "NONE" }) }).kind, "NONE");
 

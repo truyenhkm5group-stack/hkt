@@ -34,6 +34,8 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
   );
   // Ô chữ tự do: tách thành danh sách lúc LƯU, không phải lúc gõ (tách khi gõ thì chữ đầu sau dấu phẩy bị nuốt).
   const [brandsText, setBrandsText] = useState(initial.chainFilter.brands.join(", "));
+  const cf = initial.competitorFilter;
+  const [rivalText, setRivalText] = useState({ products: cf.products.join(", "), homeProvinces: cf.homeProvinces.join(", "), sellerWords: cf.sellerWords.join(", "), dishWords: cf.dishWords.join(", ") });
   const set = <K extends keyof LeadHunterConfig>(k: K, v: LeadHunterConfig[K]) => setC((x) => ({ ...x, [k]: v }));
   const setOut = <K extends keyof LeadHunterConfig["outreach"]>(k: K, v: LeadHunterConfig["outreach"][K]) => setC((x) => ({ ...x, outreach: { ...x.outreach, [k]: v } }));
 
@@ -54,7 +56,15 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
         areas[key] = /uu tien|ưu tiên|priority/i.test(v ?? "") ? "PRIORITY" : "SERVED";
       }
       const brands = [...new Set(brandsText.split(/[,\n]/).map((s) => s.trim()).filter((s) => s.length >= 2))];
-      const r = await saveLeadHunterConfigAction({ ...c, serviceAreas: areas, chainFilter: { ...c.chainFilter, brands } });
+      const list = (t: string) => [...new Set(t.split(/[,\n]/).map((s) => s.trim()).filter((s) => s.length >= 2))];
+      const competitorFilter = {
+        enabled: c.competitorFilter.enabled,
+        products: list(rivalText.products),
+        homeProvinces: list(rivalText.homeProvinces),
+        sellerWords: list(rivalText.sellerWords),
+        dishWords: list(rivalText.dishWords),
+      };
+      const r = await saveLeadHunterConfigAction({ ...c, serviceAreas: areas, chainFilter: { ...c.chainFilter, brands }, competitorFilter });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success("Đã lưu cấu hình");
@@ -114,6 +124,32 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
           Thương hiệu chuỗi cần loại — ngăn cách bằng dấu phẩy
           <Textarea rows={3} value={brandsText} onChange={(e) => setBrandsText(e.target.value)} />
         </label>
+      </fieldset>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-semibold">Loại đối thủ (cơ sở làm / bán buôn cùng mặt hàng)</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={c.competitorFilter.enabled} onChange={(e) => set("competitorFilter", { ...c.competitorFilter, enabled: e.target.checked })} /> Loại nơi có mặt hàng của shop trong tên VÀ (ở tỉnh gốc HOẶC có dấu hiệu sản xuất / bán buôn). Quán dùng hàng làm món vẫn giữ.
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className={lbl}>
+            Mặt hàng của shop — ngăn cách bằng dấu phẩy
+            <Textarea rows={2} value={rivalText.products} onChange={(e) => setRivalText((x) => ({ ...x, products: e.target.value }))} />
+          </label>
+          <label className={lbl}>
+            Tỉnh gốc (có mặt hàng trong tên là loại)
+            <Textarea rows={2} value={rivalText.homeProvinces} onChange={(e) => setRivalText((x) => ({ ...x, homeProvinces: e.target.value }))} />
+          </label>
+          <label className={lbl}>
+            Dấu hiệu sản xuất / bán buôn (loại ở mọi tỉnh)
+            <Textarea rows={2} value={rivalText.sellerWords} onChange={(e) => setRivalText((x) => ({ ...x, sellerWords: e.target.value }))} />
+          </label>
+          <label className={lbl}>
+            Tên món ăn (quán dùng hàng ⇒ giữ)
+            <Textarea rows={2} value={rivalText.dishWords} onChange={(e) => setRivalText((x) => ({ ...x, dishWords: e.target.value }))} />
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">Lưu xong, lượt quét kế tiếp áp lại luật lên lead CHƯA ai liên hệ / chưa giao; lead bị loại vẫn xem được ở «Đã loại».</p>
       </fieldset>
 
       <fieldset className="space-y-2">

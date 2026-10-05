@@ -1,12 +1,14 @@
 import { and, asc, type Column, count, eq, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { openActiveConnection } from "@/lib/connectors/service";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
 import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
 import { freeTierLeft, nextCallCostMicros, quotaRetryAt, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
+import { competitorHit } from "@/lib/wholesale/competitor";
 import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
@@ -472,6 +474,10 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
       await setHit("FILTERED", "TOO_LARGE", null);
       return "FILTERED";
     }
+    if (competitorHit(place.name, (provinceFromAddress(place.address) ?? { key: cell.provinceKey }).key, ctx.cfg.competitorFilter)) {
+      await setHit("FILTERED", "COMPETITOR", null);
+      return "FILTERED";
+    }
     if (camp.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
       await setHit("FILTERED", "SEGMENT", null);
       return "FILTERED";
@@ -545,6 +551,7 @@ export async function finalizeLead(ctx: Pick<Ctx, "cfg" | "now" | "stats">, lead
     if (ctx.cfg.chainFilter.enabled && chainBrandHit(v.name, ctx.cfg.chainFilter.brands)) return filter("CHAIN");
     if (ctx.cfg.maxReviews != null && v.reviewCount != null && v.reviewCount > ctx.cfg.maxReviews) return filter("TOO_LARGE");
     if (ctx.cfg.chainFilter.enabled && (await sameNamePlaces(v.name, v.address)) > ctx.cfg.chainFilter.maxSameName) return filter("CHAIN");
+    if (competitorHit(v.name, provinceFromAddress(v.address)?.key ?? lead.provinceKey, ctx.cfg.competitorFilter)) return filter("COMPETITOR");
   }
   if (camp) {
     if (camp.requirePhone && !v.phone) return filter("NO_PHONE");
@@ -853,6 +860,48 @@ async function completeFinished(ctx: Ctx): Promise<void> {
  * mỗi chiến dịch một trang (xoay vòng) → đọc website → làm mới lead đang chăm sắp hết hạn → xoá dữ liệu hết hạn →
  * đánh dấu chiến dịch xong.
  */
+/** Khoá `settings` ghi bản luật đối thủ đã áp lên lead cũ — luật đổi (hoặc lần đầu có luật) thì quét lại một lần. */
+export const COMPETITOR_SWEEP_SETTING_KEY = "wholesale.competitorSweep";
+
+/**
+ * Áp luật đối thủ lên lead ĐÃ CÓ khi luật đổi. Chỉ chạm lead do MÁY tìm, CHƯA ai liên hệ và CHƯA giao cho ai — lead người
+ * đã cầm là quyết định của người. Lead bị loại chỉ đổi `enrichment_status` sang FILTERED (lý do COMPETITOR), không xoá:
+ * vẫn xem được ở bộ lọc «Đã loại». Trả số lead vừa loại.
+ */
+export async function sweepCompetitors(cfg: LeadHunterConfig, now: Date): Promise<number> {
+  const stamp = JSON.stringify(cfg.competitorFilter);
+  if ((await getSettingJson<string | null>(COMPETITOR_SWEEP_SETTING_KEY, null)) === stamp) return 0;
+  let n = 0;
+  if (cfg.competitorFilter.enabled) {
+    const db = await getDb();
+    const l = schema.wholesaleLeads;
+    const ps = schema.wholesalePlaceSnapshots;
+    const rows = await db
+      .select({ id: l.id, name: sql<string | null>`coalesce(${l.businessName}, ${ps.displayName})`, address: sql<string | null>`coalesce(${l.address}, ${ps.formattedAddress})`, provinceKey: l.provinceKey })
+      .from(l)
+      .leftJoin(ps, eq(ps.placeId, l.placeId))
+      .where(
+        and(
+          eq(l.source, "GOOGLE_PLACES"),
+          inArray(l.enrichmentStatus, ["READY", "PENDING_DETAILS"]),
+          inArray(l.contactStatus, ["NEW", "QUALIFIED"]),
+          isNull(l.lastContactAt),
+          isNull(l.assignedToUserId),
+        ),
+      );
+    const ids = rows.filter((r) => competitorHit(r.name, provinceFromAddress(r.address)?.key ?? r.provinceKey, cfg.competitorFilter)).map((r) => r.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      await db
+        .update(l)
+        .set({ enrichmentStatus: "FILTERED", filterReason: "COMPETITOR", detailsNextAt: null, updatedAt: now })
+        .where(inArray(l.id, ids.slice(i, i + 200)));
+    }
+    n = ids.length;
+  }
+  await setSettingJson(COMPETITOR_SWEEP_SETTING_KEY, stamp);
+  return n;
+}
+
 export async function runLeadHunterTick(opts: TickOptions = {}, deps: TickDeps = {}): Promise<TickResult> {
   const now = deps.now ?? (() => new Date());
   const started = Date.now();
@@ -876,6 +925,7 @@ export async function runLeadHunterTick(opts: TickOptions = {}, deps: TickDeps =
   const timeLeft = () => Date.now() < ctx.deadline;
 
   await autoResume(ctx);
+  await sweepCompetitors(cfg, now());
   const c = schema.wholesaleCampaigns;
   const l = schema.wholesaleLeads;
   const runningCount = Number((await db.select({ n: count() }).from(c).where(eq(c.status, "RUNNING")))[0]?.n ?? 0);
