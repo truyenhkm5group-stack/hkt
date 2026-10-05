@@ -25,6 +25,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { publish } from "@/lib/realtime/bus";
 import type { SessionUser } from "@/lib/auth/session";
 import { isManualOrderId, manualOrderRaw } from "@/lib/constants/manual-orders";
 import {
@@ -134,6 +135,7 @@ export async function recordManualPaymentCore(user: SessionUser, orderId: unknow
     after: { paymentId: out.paymentId, kind: v.kind, method: v.method, amount: v.amount, paidAt: paidAt.toISOString(), reference: v.reference || null, paymentStatus: out.after.status, net: out.after.net },
     reason: `${PAYMENT_KIND_LABEL[v.kind]} — chứng từ thanh toán của đơn tạo tay (ORDER_OUTCOME.md mục 11)`,
   });
+  publish({ type: "order", orderId: row.id, action: "updated", source: "ERP" });
   return { ok: true, id: row.id, paymentId: out.paymentId };
 }
 
@@ -181,5 +183,6 @@ export async function voidManualPaymentCore(user: SessionUser, orderId: unknown,
     after: { paymentId: out.pay.id, voided: true, paymentStatus: out.after.status, net: out.after.net },
     reason,
   });
+  publish({ type: "order", orderId: row.id, action: "updated", source: "ERP" });
   return { ok: true, id: row.id, paymentId: out.pay.id };
 }

@@ -1,36 +1,69 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, Bot, ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
 import { assignConversationAction, claimConversationAction, handBackToAiAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, vnClock, vnDateKey } from "@/lib/format";
 import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
+import { ChannelAvatar } from "./avatar";
 import { LabelsPanel } from "./labels-panel";
 import { NotesPanel } from "./notes-panel";
 
 /**
- * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian gộp + khung soạn + bảng khách / đơn. Mọi phép kiểm ở máy chủ
- * (`lib/sales-chatbot/inbox.ts`); trang chỉ giữ chữ đang gõ và khoá lượt gửi (`requestKey` — bấm hai lần không gửi khách hai tin;
- * gửi hỏng thì giữ nguyên khoá để bấm lại là gửi lại ĐÚNG tin đó).
+ * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian (vạch ngày, gộp tin liền nhau, khách bên trái — shop bên phải) + khung soạn luôn
+ * ở đáy (Enter gửi, Shift + Enter xuống dòng) + cột khách / ghi chú / đơn. Mọi phép kiểm ở máy chủ (`lib/sales-chatbot/inbox.ts`);
+ * trang chỉ giữ chữ đang gõ và khoá lượt gửi (`requestKey` — bấm hai lần không gửi khách hai tin; gửi hỏng thì giữ nguyên khoá để
+ * bấm lại là gửi lại ĐÚNG tin đó). Đang đọc tin cũ mà có tin mới ⇒ nút «Có tin mới ↓», không giật cuộn của người đang đọc.
  */
 
 function newKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-const SIDE_STYLE: Record<TimelineItem["side"], string> = {
-  CUSTOMER: "bg-muted",
-  BOT: "ml-auto bg-primary/10",
-  STAFF: "ml-auto bg-emerald-100 dark:bg-emerald-950/50",
-  PAGE: "ml-auto bg-sky-100 dark:bg-sky-950/50",
+const BUBBLE: Record<TimelineItem["side"], string> = {
+  CUSTOMER: "bg-muted text-foreground rounded-bl-md",
+  BOT: "bg-violet-600 text-white rounded-br-md dark:bg-violet-700",
+  STAFF: "bg-emerald-600 text-white rounded-br-md dark:bg-emerald-700",
+  PAGE: "bg-sky-600 text-white rounded-br-md dark:bg-sky-700",
 };
-const SIDE_LABEL: Record<TimelineItem["side"], string> = { CUSTOMER: "Khách", BOT: "Bot", STAFF: "Nhân viên", PAGE: "Phía page" };
+const SIDE_LABEL: Record<TimelineItem["side"], string> = { CUSTOMER: "Khách", BOT: "Bot", STAFF: "Nhân viên", PAGE: "Nhân viên / tự động (ngoài ERP)" };
+/** Tin cùng phía cách nhau ít hơn chừng này ⇒ gộp dưới một tên người gửi. */
+const GROUP_GAP_MS = 5 * 60_000;
+
+function dayLabel(key: string): string {
+  const today = vnDateKey(new Date());
+  const yesterday = vnDateKey(new Date(Date.now() - 86_400_000));
+  if (key === today) return "Hôm nay";
+  if (key === yesterday) return "Hôm qua";
+  const [y, m, d] = key.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+type Row = { kind: "day"; key: string; label: string } | { kind: "msg"; m: TimelineItem; head: boolean; author: string };
+
+function layout(items: readonly TimelineItem[]): Row[] {
+  const out: Row[] = [];
+  let lastDay = "";
+  let prev: TimelineItem | null = null;
+  for (const m of items) {
+    const day = vnDateKey(m.at);
+    if (day !== lastDay) {
+      out.push({ kind: "day", key: `d:${day}`, label: dayLabel(day) });
+      lastDay = day;
+      prev = null;
+    }
+    const author = m.author ?? SIDE_LABEL[m.side];
+    const head = !prev || prev.side !== m.side || (prev.author ?? SIDE_LABEL[prev.side]) !== author || new Date(m.at).getTime() - new Date(prev.at).getTime() > GROUP_GAP_MS;
+    out.push({ kind: "msg", m, head, author });
+    prev = m;
+  }
+  return out;
+}
 
 export function InboxThreadView({
   thread,
@@ -53,13 +86,32 @@ export function InboxThreadView({
   const [showOrder, setShowOrder] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [newBelow, setNewBelow] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const bottom = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const nearBottom = useRef(true);
   const lastKey = thread.items[thread.items.length - 1]?.key;
+  const firstRender = useRef(true);
 
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+  // Tin mới tới: đang ở đáy ⇒ cuộn theo; đang đọc tin cũ ⇒ KHÔNG giật cuộn, hiện nút «Có tin mới».
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (firstRender.current || nearBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      setNewBelow(false);
+    } else setNewBelow(true);
+    firstRender.current = false;
   }, [lastKey]);
+
+  // Ô soạn tự cao theo chữ (tối đa ~6 dòng).
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
 
   // Ảnh xem trước: URL tạm của trình duyệt, thu hồi khi đổi / rời trang.
   useEffect(() => {
@@ -67,6 +119,12 @@ export function InboxThreadView({
     setPreviews(urls);
     return () => urls.forEach((u) => URL.revokeObjectURL(u));
   }, [files]);
+
+  const toBottom = () => {
+    const el = scroller.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setNewBelow(false);
+  };
 
   const pickFiles = (list: FileList | null) => {
     if (!list) return;
@@ -101,17 +159,23 @@ export function InboxThreadView({
   const send = async () => {
     const body = text.trim();
     if ((!body && !files.length) || pending) return;
+    if (w.kind === "PAID" && !confirmPaid) {
+      toast.error("Tin ngoài 48 giờ của Zalo là tin tính phí — tick «Gửi tin tính phí» trước.");
+      return;
+    }
     const form = new FormData();
     form.set("text", body);
     form.set("requestKey", requestKey);
     if (confirmPaid) form.set("confirmPaid", "1");
     for (const f of files) form.append("images", f);
+    nearBottom.current = true;
     const ok = await run("send", () => sendStaffReplyAction(thread.id, form));
     if (ok) {
       setText("");
       setFiles([]);
       setRequestKey(newKey());
       setConfirmPaid(false);
+      input.current?.focus();
     }
   };
 
@@ -127,6 +191,7 @@ export function InboxThreadView({
       setText(r.suggestion);
       // Câu mới ⇒ lượt gửi mới.
       setRequestKey(newKey());
+      input.current?.focus();
     } finally {
       setPending(null);
     }
@@ -134,40 +199,42 @@ export function InboxThreadView({
 
   const mine = thread.assigneeUserId === me;
   const w = thread.window;
+  const rows = layout(thread.items);
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
-      <div className="flex min-h-[70vh] flex-col rounded-lg border bg-background">
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-          <div className="min-w-0">
-            <Link href={backHref} className="mr-2 text-[12px] text-primary hover:underline lg:hidden">
-              ← Danh sách
+    <div className="grid h-full min-h-0 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="flex h-full min-h-0 flex-col">
+        {/* ── Đầu hội thoại ── */}
+        <header className="flex items-start justify-between gap-3 border-b px-4 py-2.5">
+          <div className="flex min-w-0 items-start gap-3">
+            <Link href={backHref} className="mt-2 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Về danh sách">
+              <ArrowLeft className="size-4" />
             </Link>
-            <span className="font-semibold">{thread.customer.name}</span>
-            <span className="ml-2 text-[12px] text-muted-foreground">
-              {thread.channelLabel}
-              {thread.customer.phone ? ` · ${thread.customer.phone}` : ""}
-            </span>
-            <LabelsPanel key={thread.labels.map((l) => l.id).join()} conversationId={thread.id} labels={thread.labels} allLabels={thread.allLabels} canEdit={thread.canWork} canManage={thread.canManage} />
-            <div className="text-[11.5px] text-muted-foreground">
-              {thread.botYields ? <span className="text-rose-700 dark:text-rose-300">Bot đang nhường · {thread.handoffReason ?? "cần người"}</span> : <span>Bot đang trả lời</span>}
-              {" · "}
-              {thread.assigneeName ? `Người nhận: ${thread.assigneeName}` : "Chưa ai nhận"}
+            <ChannelAvatar name={thread.customer.name} channel={thread.channel} size="lg" />
+            <div className="min-w-0 space-y-0.5">
+              <p className="truncate text-base font-semibold leading-tight">{thread.customer.name}</p>
+              <p className="truncate text-[12px] text-muted-foreground">
+                {thread.channelLabel}
+                {thread.customer.phone ? ` · ${thread.customer.phone}` : ""}
+                {" · "}
+                {thread.assigneeName ? `Người nhận: ${thread.assigneeName}` : "Chưa ai nhận"}
+              </p>
+              <LabelsPanel key={thread.labels.map((l) => l.id).join()} conversationId={thread.id} labels={thread.labels} allLabels={thread.allLabels} canEdit={thread.canWork} canManage={thread.canManage} />
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {!thread.assigneeUserId ? (
-              <Button size="sm" variant="outline" className="h-7" disabled={!!pending} onClick={() => void run("claim", () => claimConversationAction(thread.id), "Đã nhận hội thoại")}>
-                Nhận
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            {!thread.assigneeUserId && thread.canWork ? (
+              <Button size="sm" className="h-8" disabled={!!pending} onClick={() => void run("claim", () => claimConversationAction(thread.id), "Đã nhận hội thoại")}>
+                Nhận hội thoại
               </Button>
-            ) : mine || thread.canManage ? (
-              <Button size="sm" variant="ghost" className="h-7" disabled={!!pending} onClick={() => void run("release", () => releaseConversationAction(thread.id), "Đã trả hội thoại")}>
+            ) : thread.assigneeUserId && (mine || thread.canManage) ? (
+              <Button size="sm" variant="ghost" className="h-8" disabled={!!pending} onClick={() => void run("release", () => releaseConversationAction(thread.id), "Đã bỏ nhận")}>
                 Bỏ nhận
               </Button>
             ) : null}
             {thread.canManage && users.length ? (
               <select
-                className="h-7 rounded-md border bg-background px-1 text-[12px]"
+                className="h-8 rounded-md border bg-background px-1 text-[12px]"
                 value=""
                 aria-label="Giao cho"
                 disabled={!!pending}
@@ -184,44 +251,79 @@ export function InboxThreadView({
                 ))}
               </select>
             ) : null}
-            {thread.botYields ? (
-              <Button size="sm" variant="outline" className="h-7" disabled={!!pending} onClick={() => void run("resume", () => handBackToAiAction(thread.id), "Đã trả lại cho AI")}>
-                Trả lại cho AI
-              </Button>
-            ) : null}
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-[13px]" data-testid="inbox-timeline">
-          {thread.items.length === 0 ? <p className="text-muted-foreground">Chưa có tin nào.</p> : null}
-          {thread.items.map((m) => (
-            <div key={m.key} className={cn("max-w-[85%] rounded-lg px-3 py-2", SIDE_STYLE[m.side], m.status === "FAILED" && "ring-1 ring-destructive")} data-side={m.side}>
-              <div className="mb-0.5 text-[10.5px] text-muted-foreground">
-                {m.author ?? SIDE_LABEL[m.side]} · {formatDateTime(m.at)}
-                {m.status === "SENDING" ? " · đang gửi" : m.status === "FAILED" ? " · GỬI HỎNG" : ""}
-              </div>
-              {m.text ? <div className="whitespace-pre-wrap break-words">{m.text}</div> : null}
-              {m.images.length ? (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {m.images.slice(0, 6).map((src) => (
-                    <a key={src} href={src} target="_blank" rel="noopener noreferrer">
-                      {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh nhân viên trong CSDL qua tuyến có kiểm quyền */}
-                      <img src={src} alt="Ảnh trong hội thoại" className="h-24 w-24 rounded-md border object-cover" loading="lazy" />
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-              {m.status === "FAILED" && m.error ? <div className="mt-1 text-[11px] text-destructive">{m.error}</div> : null}
-            </div>
-          ))}
-          <div ref={bottom} />
+        {/* ── Trạng thái bot ── */}
+        <div className={cn("flex items-center justify-between gap-2 border-b px-4 py-1.5 text-[12px]", thread.botYields ? "bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" : "bg-violet-50 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200")}>
+          <span className="flex min-w-0 items-center gap-1.5 truncate">
+            <Bot className="size-3.5 shrink-0" />
+            {thread.botYields ? `Bot đang nhường cho người — ${thread.handoffReason ?? "cần người xử lý"}` : "Bot đang tự trả lời khách này. Bạn gửi tin thì bot nhường 30 phút."}
+          </span>
+          {thread.botYields && thread.canWork ? (
+            <button type="button" className="shrink-0 font-medium underline underline-offset-2" disabled={!!pending} onClick={() => void run("resume", () => handBackToAiAction(thread.id), "Đã trả lại cho AI")}>
+              Trả lại cho AI
+            </button>
+          ) : null}
         </div>
 
-        <footer className="space-y-2 border-t p-2">
-          {w.note ? (
-            <p className={cn("rounded-md px-2 py-1 text-[11.5px]", w.kind === "OPEN" ? "bg-muted text-muted-foreground" : "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200")}>{w.note}</p>
-          ) : w.kind === "OPEN" && w.until ? (
-            <p className="text-[11.5px] text-muted-foreground">Gửi được tới {formatDateTime(w.until)} (khung của kênh, tính từ tin cuối của khách).</p>
+        {/* ── Tin nhắn ── */}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={scroller}
+            className="h-full overflow-y-auto bg-muted/20 px-4 py-3"
+            data-testid="inbox-timeline"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              if (nearBottom.current) setNewBelow(false);
+            }}
+          >
+            {rows.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">Chưa có tin nào.</p> : null}
+            {rows.map((r) =>
+              r.kind === "day" ? (
+                <div key={r.key} className="my-3 flex items-center gap-3 text-[11px] text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  {r.label}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              ) : (
+                <div key={r.m.key} className={cn("flex flex-col", r.m.side === "CUSTOMER" ? "items-start" : "items-end", r.head ? "mt-3" : "mt-0.5")} data-side={r.m.side}>
+                  {r.head ? (
+                    <span className="mb-0.5 px-1 text-[11px] text-muted-foreground">
+                      {r.author} · {vnClock(r.m.at).slice(0, 5)}
+                    </span>
+                  ) : null}
+                  <div className={cn("max-w-[78%] rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed shadow-sm", BUBBLE[r.m.side], r.m.status === "FAILED" && "bg-destructive/90 dark:bg-destructive/80", r.m.status === "SENDING" && "opacity-70")} title={formatDateTime(r.m.at)}>
+                    {r.m.text ? <div className="whitespace-pre-wrap break-words">{r.m.text}</div> : null}
+                    {r.m.images.length ? (
+                      <div className={cn("flex flex-wrap gap-1", r.m.text && "mt-1.5")}>
+                        {r.m.images.slice(0, 6).map((src) => (
+                          <a key={src} href={src} target="_blank" rel="noopener noreferrer">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh nhân viên trong CSDL qua tuyến có kiểm quyền */}
+                            <img src={src} alt="Ảnh trong hội thoại" className="h-32 w-32 rounded-lg border border-white/30 object-cover" loading="lazy" />
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {r.m.status === "SENDING" ? <span className="mt-0.5 px-1 text-[11px] text-muted-foreground">Đang gửi…</span> : null}
+                  {r.m.status === "FAILED" ? <span className="mt-0.5 max-w-[78%] px-1 text-right text-[11px] font-medium text-destructive">Gửi hỏng — {r.m.error ?? "thử lại"}</span> : null}
+                </div>
+              ),
+            )}
+          </div>
+          {newBelow ? (
+            <button type="button" className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground shadow-lg" onClick={toBottom}>
+              <ArrowDown className="size-3.5" /> Có tin mới
+            </button>
+          ) : null}
+        </div>
+
+        {/* ── Khung soạn ── */}
+        <footer className="space-y-2 border-t bg-background px-3 py-2">
+          {w.kind !== "OPEN" || w.note ? (
+            <p className={cn("rounded-md px-2 py-1 text-[12px]", w.kind === "OPEN" ? "bg-muted text-muted-foreground" : "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200")}>{w.note}</p>
           ) : null}
           {thread.canReply ? (
             <>
@@ -246,51 +348,62 @@ export function InboxThreadView({
                   ))}
                 </div>
               ) : null}
-              <Textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                maxLength={STAFF_REPLY_MAX}
-                rows={3}
-                placeholder="Nhập tin trả lời khách… (Ctrl + Enter để gửi)"
-                aria-label="Tin trả lời"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} aria-label="Chọn ảnh" />
-                  <Button size="sm" variant="outline" className="h-8" disabled={!!pending || files.length >= STAFF_IMAGES_MAX || thread.channel === "WEB"} title={thread.channel === "WEB" ? "Chat web chưa nhận ảnh từ hộp thư" : `Tối đa ${STAFF_IMAGES_MAX} ảnh, mỗi ảnh ≤ ${Math.round(STAFF_IMAGE_MAX_BYTES / 1024 / 1024)} MB${thread.channel === "ZALO" ? " (Zalo: JPG / PNG ≤ 1 MB)" : ""}`} onClick={() => fileInput.current?.click()}>
-                    <ImagePlus className="size-3.5" /> Ảnh
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-8" disabled={!!pending} onClick={() => void suggest()}>
-                    {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
-                  </Button>
-                  {w.kind === "PAID" ? (
-                    <label className="flex items-center gap-1 text-[12px]">
-                      <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} /> Gửi tin tính phí
-                    </label>
-                  ) : null}
-                </div>
-                <Button size="sm" className="h-8" disabled={!!pending || (!text.trim() && !files.length) || (w.kind === "PAID" && !confirmPaid)} onClick={() => void send()}>
-                  {pending === "send" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Gửi
+              <div className="flex items-end gap-2 rounded-xl border bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/30">
+                <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} aria-label="Chọn ảnh" />
+                <button
+                  type="button"
+                  className="mb-1 rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  disabled={!!pending || files.length >= STAFF_IMAGES_MAX || thread.channel === "WEB"}
+                  title={thread.channel === "WEB" ? "Chat web chưa nhận ảnh từ hộp thư" : `Gửi ảnh — tối đa ${STAFF_IMAGES_MAX} ảnh, mỗi ảnh ≤ ${Math.round(STAFF_IMAGE_MAX_BYTES / 1024 / 1024)} MB${thread.channel === "ZALO" ? " (Zalo: JPG / PNG ≤ 1 MB)" : ""}`}
+                  aria-label="Gửi ảnh"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <ImagePlus className="size-5" />
+                </button>
+                <textarea
+                  ref={input}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  maxLength={STAFF_REPLY_MAX}
+                  rows={1}
+                  placeholder="Nhập tin nhắn… (Enter để gửi · Shift + Enter xuống dòng)"
+                  aria-label="Tin trả lời"
+                  className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-[14px] outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                />
+                <Button size="sm" className="mb-0.5 h-9 px-4" disabled={!!pending || (!text.trim() && !files.length)} onClick={() => void send()}>
+                  {pending === "send" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Gửi
                 </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 px-1 text-[12px]">
+                <button type="button" className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300" disabled={!!pending} onClick={() => void suggest()}>
+                  {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
+                </button>
+                {w.kind === "PAID" ? (
+                  <label className="flex items-center gap-1 font-medium text-amber-800 dark:text-amber-200">
+                    <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} /> Gửi tin tính phí
+                  </label>
+                ) : null}
+                {w.kind === "OPEN" && w.until ? <span className="text-muted-foreground">Gửi được tới {formatDateTime(w.until)}</span> : null}
               </div>
             </>
           ) : (
-            <p className="text-[12px] text-muted-foreground">{thread.replyBlockedReason ?? "Bạn chỉ được xem hội thoại này."}</p>
+            <p className="px-1 py-2 text-[13px] text-muted-foreground">{thread.replyBlockedReason ?? "Bạn chỉ được xem hội thoại này."}</p>
           )}
-          {error ? <p className="text-[12px] text-destructive">{error}</p> : null}
+          {error ? <p className="px-1 text-[12px] text-destructive">{error}</p> : null}
         </footer>
       </div>
 
-      <aside className="space-y-3 text-[12.5px]">
-        <div className="space-y-1 rounded-lg border p-3">
-          <p className="font-semibold">Khách</p>
-          <p>{thread.customer.name}</p>
+      {/* ── Cột khách ── */}
+      <aside className="hidden min-h-0 space-y-3 overflow-y-auto border-l bg-muted/10 p-3 text-[13px] xl:block">
+        <div className="space-y-1 rounded-lg border bg-background p-3">
+          <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Khách</p>
+          <p className="font-medium">{thread.customer.name}</p>
           {thread.customer.phone ? <p>{thread.customer.phone}</p> : <p className="text-muted-foreground">Chưa có SĐT</p>}
           {thread.customer.address ? (
             <p className="text-muted-foreground">
@@ -304,21 +417,20 @@ export function InboxThreadView({
             </Link>
           ) : null}
         </div>
-        <NotesPanel conversationId={thread.id} notes={thread.notes} canWrite={thread.canWork} />
-        <div className="space-y-1.5 rounded-lg border p-3" data-testid="inbox-orders">
-          <p className="font-semibold">Đơn của khách</p>
+        <div className="space-y-1.5 rounded-lg border bg-background p-3" data-testid="inbox-orders">
+          <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Đơn của khách</p>
           {ordersSummary.length === 0 ? <p className="text-muted-foreground">Chưa có đơn.</p> : null}
           {ordersSummary.map((o) => (
-            <Link key={o.id} href={`/orders/${encodeURIComponent(o.id)}`} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted">
+            <Link key={o.id} href={`/orders/${encodeURIComponent(o.id)}`} className="flex items-center justify-between gap-2 rounded px-1 py-1 hover:bg-muted">
               <span>
                 #{o.shortCode} · {o.totalText}
                 {o.byBot ? <span className="text-muted-foreground"> · bot</span> : null}
               </span>
-              <span className={cn("text-[11px]", o.outcome === "DELIVERED" ? "text-emerald-700 dark:text-emerald-300" : o.outcome === "RETURNED" || o.outcome === "RETURNED_BY_RULE" ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>{o.outcomeLabel}</span>
+              <span className={cn("text-[12px]", o.outcome === "DELIVERED" ? "text-emerald-700 dark:text-emerald-300" : o.outcome === "RETURNED" || o.outcome === "RETURNED_BY_RULE" ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>{o.outcomeLabel}</span>
             </Link>
           ))}
-          <Button size="sm" variant="outline" className="mt-1 h-7 w-full" onClick={() => setShowOrder((v) => !v)}>
-            {showOrder ? "Đóng form tạo đơn" : "Tạo đơn cho khách này"}
+          <Button size="sm" variant={showOrder ? "ghost" : "default"} className="mt-1 h-8 w-full" onClick={() => setShowOrder((v) => !v)}>
+            {showOrder ? "Đóng form tạo đơn" : "+ Tạo đơn cho khách này"}
           </Button>
           {showOrder ? (
             <div className="pt-2">
@@ -326,6 +438,7 @@ export function InboxThreadView({
             </div>
           ) : null}
         </div>
+        <NotesPanel conversationId={thread.id} notes={thread.notes} canWrite={thread.canWork} />
       </aside>
     </div>
   );

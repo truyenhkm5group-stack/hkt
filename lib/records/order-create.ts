@@ -46,6 +46,7 @@ import { attemptHoldsOrder } from "@/lib/constants/carrier-vtp";
 import { manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { customerExposure } from "@/lib/queries/receivables";
 import { audit } from "@/lib/audit";
+import { publish } from "@/lib/realtime/bus";
 import { can, type SessionUser } from "@/lib/auth/session";
 import {
   canConfirmManualDelivery,
@@ -495,7 +496,18 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   if (reused) return { ok: true, id: reused, reused: true };
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CREATE", entity: "ORDER", entityId: id, before: null, after: snapshotOf(p), reason: w.agent ? `Tạo đơn bởi ${w.agent}` : "Tạo đơn tay trên ERP (tổ chức không đồng bộ đơn)" });
   if (p.stage === "CONFIRMED") await kickWorkflows();
+  announceOrder(id, "created");
   return { ok: true, id };
+}
+
+/**
+ * Đơn ERP vừa đổi ⇒ báo realtime cho mọi trang đang mở của CHÍNH tổ chức (SSE `/api/events`): đơn mới / đơn vừa chốt hiện ngay
+ * trên «Đơn hàng», không đợi một lượt làm mới khác. Trước bản này chỉ đồng bộ Pancake phát sự kiện đơn — đơn bot chốt, đơn nhân
+ * viên tạo trong khung chat hay ở form không làm trang đang mở nhúc nhích (chủ shop 05/10/2026: «realtime, không miss đơn»).
+ * Gọi SAU khi giao dịch đã ghi xong (trình duyệt đọc lại ngay sau khi nhận sự kiện).
+ */
+function announceOrder(orderId: string, action: "created" | "updated") {
+  publish({ type: "order", orderId, action, source: "ERP" });
 }
 
 type ExistingManual = { ok: true; row: typeof schema.orders.$inferSelect } | MetaFailure;
@@ -607,6 +619,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     reason: w.agent ? `Sửa đơn bởi ${w.agent}` : "Sửa đơn tạo tay",
   });
   if (event) await kickWorkflows();
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 
@@ -633,6 +646,7 @@ async function cancelOrder(w: Writer, orderId: unknown, rawInput: unknown): Prom
   });
   await audit({ userId: w.userId, userEmail: w.email, actorKind: w.actorKind === "AGENT" ? "AGENT" : undefined, action: "ORDER_MANUAL_CANCEL", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "CANCELLED" }, reason: parsed.data.reason });
   await kickWorkflows();
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 
@@ -748,6 +762,7 @@ export async function confirmManualDeliveryCore(user: SessionUser, orderId: unkn
     after: { stage: "DELIVERED", deliveryNoteId: noteId, signedAt: signedAt.toISOString(), receiverName: note.receiverName, note: note.note || null, ...(fee !== null ? { partnerFee: fee } : {}) },
     reason: "Xác nhận đã giao bằng phiếu giao có ký nhận (G-ORDER) — không ghi nhận tiền",
   });
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 
@@ -791,6 +806,7 @@ export async function voidManualDeliveryCore(user: SessionUser, orderId: unknown
     after: { stage: "CONFIRMED", deliveryNoteId: voided.id, voided: true },
     reason: parsed.data.reason,
   });
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 
@@ -924,6 +940,7 @@ export async function markManualDeliveryFailedCore(user: SessionUser, orderId: u
   });
   if (!moved) return fail("CONFLICT", "Đơn vừa đổi trạng thái — tải lại trang rồi thử lại.");
   await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FAILED", entity: "ORDER", entityId: row.id, before: { stage: row.stage }, after: { stage: "RETURNED" }, reason: parsed.data.reason });
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 
@@ -950,6 +967,7 @@ export async function undoManualDeliveryFailedCore(user: SessionUser, orderId: u
   });
   if (!moved) return fail("CONFLICT", "Đơn không ở trạng thái giao không thành công.");
   await audit({ userId: user.id, userEmail: user.email, action: "ORDER_MANUAL_DELIVERY_FAILED_UNDO", entity: "ORDER", entityId: row.id, before: { stage: "RETURNED" }, after: { stage: "CONFIRMED" }, reason: parsed.data.reason });
+  announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
 }
 

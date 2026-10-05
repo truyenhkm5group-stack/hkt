@@ -9831,6 +9831,8 @@ export const salesChatConversations = pgTable(
     assigneeUserId: text("assignee_user_id"),
     assignedAt: ts("assigned_at"),
     lastStaffAt: ts("last_staff_at"),
+    /** 0212: lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư — «chưa đọc» = tin khách mới hơn mốc này. */
+    staffSeenAt: ts("staff_seen_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),

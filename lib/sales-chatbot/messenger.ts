@@ -20,7 +20,10 @@ import {
   GRACE_SLACK_MS,
   HUMAN_TAKEOVER_MINUTES,
   markWaitingForCustomer,
+  MEDIA_ONLY_NOTE,
+  MEDIA_ONLY_TEXT,
   normalizeEcho,
+  noteCustomerArrived,
   mirrorFanpageContext,
   OBSERVE_HUMAN_ARM_NOTE,
   OBSERVE_NOTE,
@@ -172,6 +175,9 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
   }
   if (!ev.text && !ev.imageUrls.length) {
     await stopFollowups(ev.pageId, ev.psid, now, true);
+    // NGƯỜI phải thấy tin này trong hộp thư (MEDIA_ONLY — không vào hàng chờ của bot).
+    await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: MEDIA_ONLY_TEXT, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE }).onConflictDoNothing({ target: t.messageId });
+    await noteCustomerArrived(ev.pageId, ev.psid, now);
     return { queued: false, reason: "Tin không có chữ hay ảnh — để nhân viên xem" };
   }
   const rows = await db
@@ -179,6 +185,7 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
     .values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text, ...(ev.imageUrls.length ? { imageUrls: ev.imageUrls } : {}) })
     .onConflictDoNothing({ target: t.messageId })
     .returning({ id: t.id });
+  if (rows.length) await noteCustomerArrived(ev.pageId, ev.psid, now);
   return rows.length ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
 }
 

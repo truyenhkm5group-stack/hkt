@@ -4,10 +4,11 @@
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
 
-export const INBOX_FILTERS = ["ALL", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED"] as const;
+export const INBOX_FILTERS = ["ALL", "UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   ALL: "Tất cả",
+  UNREAD: "Chưa đọc",
   UNANSWERED: "Chờ trả lời",
   NEEDS_HUMAN: "Cần người",
   MINE: "Của tôi",
@@ -30,6 +31,8 @@ export type InboxRow = {
   lastActivityAt: string;
   /** Tin khách CHƯA ai trả lời (bot, nhân viên ERP, hay người ngoài ERP) — mốc tin khách đó; `null` = đã được trả lời. */
   waitingSince: string | null;
+  /** Tin khách mới hơn lần cuối một nhân viên mở hội thoại. */
+  unread: boolean;
   assigneeUserId: string | null;
   assigneeName: string | null;
   hasOrder: boolean;

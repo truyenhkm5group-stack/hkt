@@ -41,7 +41,7 @@ import { createOrderAsAgent } from "@/lib/records/order-create";
 import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
 import { sellableCatalog, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { loadSalesChatbotConfig, readJsonSetting, salesChatProvider } from "@/lib/sales-chatbot/engine";
-import { conversationFor, FANPAGE_CONNECTOR } from "@/lib/sales-chatbot/fanpage";
+import { conversationFor, FANPAGE_CONNECTOR, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import {
   ORDER_SYNC_CHANNEL,
   ORDER_SYNC_LIMITS,
@@ -356,10 +356,21 @@ export async function runFanpageOrderSync(deps: { fetch?: typeof fetch; now?: ()
       if (prev && new Date(prev.checkedUntil).getTime() >= threadLast.getTime()) continue;
       const log = (outcome: OrderSyncOutcome, result: string, extra: Partial<OrderSyncThreadState> = {}) =>
         writeThreadLog(conv.id, { checkedUntil: threadLast.toISOString(), lastRunAt: now.toISOString(), lastOutcome: outcome, lastResult: result.slice(0, 300), orders: prev?.orders ?? [], ...(prev?.customer ? { customer: prev.customer } : {}), ...extra });
-      // Bot đang bật và hội thoại không ở tay người ⇒ đơn là việc của bot (nó tự lên + chốt), không ghi lần hai.
+      // Bot đang bật và hội thoại không ở tay người ⇒ đơn là việc của bot (nó tự lên + chốt), không ghi lần hai. TRỪ KHI có NGƯỜI
+      // nhắn trong hội thoại SAU tin cuối của bot (nhân viên trả lời trên Pancake quá 3 giờ sau bot — đường nhận không coi là
+      // «nhân viên đang trả lời», hội thoại không về HANDOFF; hoặc bot đã tự nhận lại sau 30 phút): người có thể đã chốt đơn mà
+      // bot không biết ⇒ vẫn đọc hội thoại. Chủ shop 05/10/2026: «không bị miss đơn». Chống trùng giữ nguyên (mốc cắt + đơn gần
+      // đây của khách + khoá lần mua).
       if (botCfg.enabled && conv.status !== "HANDOFF") {
-        await log("BOT", "Bot đang trả lời hội thoại này — đơn do bot lên");
-        continue;
+        const [human] = await db
+          .select({ id: t.id })
+          .from(t)
+          .where(and(eq(t.pageId, pageId), eq(t.threadId, cand.threadId), eq(t.note, PAGE_REPLY), gte(t.createdAt, row.lastBotAt && row.lastBotAt > since ? row.lastBotAt : since)))
+          .limit(1);
+        if (!human) {
+          await log("BOT", "Bot đang trả lời hội thoại này — đơn do bot lên");
+          continue;
+        }
       }
       out.checked += 1;
       try {

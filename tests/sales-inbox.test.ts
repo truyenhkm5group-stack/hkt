@@ -25,7 +25,8 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { sendMessengerImage } from "@/lib/integrations/messenger/graph";
 import { zaloSendImage, zaloUploadImage, ZALO_MESSAGE_CS_URL, ZALO_UPLOAD_IMAGE_URL } from "@/lib/integrations/zalo/oa";
 import { conversationView } from "@/lib/sales-chatbot/engine";
-import { fanpageVisitorKey, mirrorFanpageContext, PAGE_REPLY, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
+import { fanpageVisitorKey, MEDIA_ONLY_TEXT, mirrorFanpageContext, PAGE_REPLY, receiveFanpageEvent, STAFF_REASON } from "@/lib/sales-chatbot/fanpage";
+import { subscribe } from "@/lib/realtime/bus";
 import { assignConversationCore, checkStaffImages, claimConversationCore, handBackToAiCore, listInbox, loadInboxThread, releaseConversationCore, sendStaffReplyCore, sendWindowOf, WEB_STAFF_REASON } from "@/lib/sales-chatbot/inbox";
 import { addNoteCore, archiveLabelCore, createLabelCore, deleteNoteCore, listLabels, setConversationLabelsCore } from "@/lib/sales-chatbot/inbox-labels";
 
@@ -263,6 +264,33 @@ export async function testSalesInbox() {
       assert.ok(w1.status === "HANDOFF" && w1.handoffReason === WEB_STAFF_REASON);
       const wt = await loadInboxThread(minh, web.id);
       assert.ok(wt.ok && wt.thread.items.map((i) => i.side).join() === "CUSTOMER,BOT,STAFF", JSON.stringify(wt.ok && wt.thread.items));
+
+      // ── KHÔNG BỎ SÓT KHÁCH (0212): tin nhãn dán / ghi âm của khách MỚI ⇒ hội thoại có NGAY trong hộp thư, chưa đọc ──
+      const events: { type: string }[] = [];
+      const unsub = subscribe((e) => events.push(e));
+      const media = await receiveFanpageEvent({ pageId: PAGE, threadId: "t-media", messageId: "m-media-1", text: "", customerName: "Chú Ba", fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [] });
+      unsub();
+      assert.equal(media.queued, false, "bot không trả lời tin không chữ");
+      const [mc] = await db.select().from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(PAGE, "t-media"))));
+      assert.ok(mc && mc.lastCustomerAt, "hội thoại mở NGAY lúc nhận tin, có mốc tin khách");
+      assert.ok(events.some((e) => e.type === "chat"), "hộp thư đang mở nhận sự kiện tin mới");
+      const unreadList = await listInbox(lan, { filter: "UNREAD" });
+      assert.ok(unreadList.ok && unreadList.rows.some((r) => r.id === mc.id && r.unread), "tin mới ⇒ chưa đọc");
+      const tm = await loadInboxThread(lan, mc.id);
+      assert.ok(tm.ok && tm.thread.items.length === 1 && tm.thread.items[0].side === "CUSTOMER" && tm.thread.items[0].text === MEDIA_ONLY_TEXT, JSON.stringify(tm.ok && tm.thread.items));
+      assert.ok(tm.ok && !tm.thread.items.some((i) => i.side === "BOT"), "lời chào mặc định CHƯA gửi tới khách ⇒ không hiện là tin bot");
+      const readList = await listInbox(lan, { filter: "UNREAD" });
+      assert.ok(readList.ok && !readList.rows.some((r) => r.id === mc.id), "nhân viên mở hội thoại ⇒ hết chưa đọc");
+      const viewerOpen = await listInbox(viewer, { filter: "ALL" });
+      assert.ok(viewerOpen.ok);
+
+      // Tin bot ĐÃ GỬI (sổ BOT_SENT) hiện một lần dù có hai dòng (ghi sẵn + mã kênh trả về).
+      await db.insert(t).values([
+        { pageId: PAGE, threadId: "t-media", messageId: "bot-out:x1", text: "Dạ shop chào chú ạ", status: "DONE", note: "BOT_SENT" },
+        { pageId: PAGE, threadId: "t-media", messageId: "pancake-bot-1", text: "Dạ shop  chào chú ạ", status: "DONE", note: "BOT_SENT" },
+      ]);
+      const tb = await loadInboxThread(lan, mc.id);
+      assert.ok(tb.ok && tb.thread.items.filter((i) => i.side === "BOT").length === 1, JSON.stringify(tb.ok && tb.thread.items));
 
       // ── Ảnh (0211): chữ + ảnh qua Pancake; ảnh hỏng ⇒ bấm lại chỉ gửi lại ẢNH ──
       const convImg = await mk("t-img", 2);
