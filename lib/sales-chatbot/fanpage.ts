@@ -102,16 +102,43 @@ export function pancakeCreatedAfterVerdict(messages: readonly Record<string, unk
   return Math.max(...page) > Math.min(...cust);
 }
 
-async function pancakeCreatedAfter(pageId: string, threadId: string, token: string, customerIds: readonly string[], pageIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean | null> {
+/** Tin của MỘT hội thoại theo Pancake (một lượt ĐỌC). `null` = không đọc được — nơi gọi giữ nguyên hành vi cũ. */
+async function fetchThreadMessages(pageId: string, threadId: string, token: string, fetchImpl: typeof fetch): Promise<Record<string, unknown>[] | null> {
   try {
     const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
     const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10_000) });
     const body = (await res.json().catch(() => null)) as { messages?: unknown } | null;
-    if (!res.ok || !Array.isArray(body?.messages)) return null;
-    return pancakeCreatedAfterVerdict(body.messages as Record<string, unknown>[], customerIds, pageIds);
+    return res.ok && Array.isArray(body?.messages) ? (body.messages as Record<string, unknown>[]) : null;
   } catch {
     return null;
   }
+}
+
+async function pancakeCreatedAfter(pageId: string, threadId: string, token: string, customerIds: readonly string[], pageIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean | null> {
+  const messages = await fetchThreadMessages(pageId, threadId, token, fetchImpl);
+  return messages ? pancakeCreatedAfterVerdict(messages, customerIds, pageIds) : null;
+}
+
+/**
+ * PAGE ĐÃ TRẢ LỜI THEO CHÍNH PANCAKE — hỏi NGAY TRƯỚC khi tốn tiền (đọc ảnh, AI). 05/10/2026, «Dư Thị Liên» (Hải Sản Làng
+ * Chài): khách bấm quảng cáo hỏi «Báo giá chả cá thu?», page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó, vậy mà
+ * bot vẫn gọi AI và nhắn thêm một bảng giá nữa — tốn token, khách đọc hai lần. Kiểm tra cũ chỉ thấy tin page qua WEBHOOK, và
+ * webhook có thể tới trễ hơn khoảng chờ của bot; Pancake thì giữ tin ngay khi nhận.
+ *
+ * Đã trả lời = có tin phía page CÓ CHỮ (không phải ghi chú tự động của Pancake, không phải tin của chính bot) TẠO SAU tin khách
+ * MỚI NHẤT của lượt. Tạo TRƯỚC thì không tính (lời chào quảng cáo tới ngược thứ tự — «Moscow Hoàng Hải», 03/10). Hội thoại CŨ
+ * (có tin cũ hơn 1 ngày) mà page chỉ có ĐÚNG MỘT tin sau tin khách ⇒ coi là lời chào quảng cáo, chưa ai trả lời («Tuyet Nguyen»,
+ * 03/10 — cùng luật `pancakeCreatedAfterVerdict`). `null` = không thấy tin khách trong danh sách ⇒ không kết luận. HÀM THUẦN.
+ */
+export function pageAnsweredVerdict(msgs: readonly PancakeThreadMessage[], customerIds: readonly string[], own: { ids: ReadonlySet<string>; texts: ReadonlySet<string> }): boolean | null {
+  const cust = msgs.filter((m) => customerIds.includes(m.id));
+  if (!cust.length) return null;
+  const firstCust = Math.min(...cust.map((m) => m.at));
+  const lastCust = Math.max(...cust.map((m) => m.at));
+  const replies = msgs.filter((m) => m.fromPage && !m.autoNote && m.text.trim() && m.at > lastCust && !own.ids.has(m.id) && !own.texts.has(normalizeEcho(m.text)));
+  if (!replies.length) return false;
+  if (replies.length === 1 && msgs.some((m) => m.at < firstCust - OLD_THREAD_MS)) return false;
+  return true;
 }
 /** Đệm lệch đồng hồ giữa máy ứng dụng và CSDL — lượt chờ ngủ thêm chừng này để tới lúc tỉnh tin chắc chắn đã đủ tuổi. */
 export const GRACE_SLACK_MS = 1_000;
@@ -625,6 +652,20 @@ export async function mirrorFanpageContext(conversationId: string, pageId: strin
   if (last) await db.update(c).set({ state: sql`${c.state} || ${JSON.stringify({ mirroredUntil: last.toISOString() })}::jsonb` }).where(eq(c.id, conversationId));
 }
 
+async function pageAnsweredOnPancake(pageId: string, threadId: string, token: string, customerIds: readonly string[], fetchImpl: typeof fetch): Promise<boolean> {
+  if (!token) return false;
+  const raw = await fetchThreadMessages(pageId, threadId, token, fetchImpl);
+  if (!raw) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const sent = await db
+    .select({ messageId: t.messageId, text: t.text })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, "BOT_SENT"), gte(t.createdAt, new Date(Date.now() - OLD_THREAD_MS))));
+  const own = { ids: new Set(sent.map((r) => r.messageId)), texts: new Set(sent.map((r) => r.text).filter(Boolean)) };
+  return pageAnsweredVerdict(normalizeThreadMessages(raw, pageId), customerIds, own) === true;
+}
+
 export type ProcessResult = { processed: number; replies: number; skipped: string | null; error: string | null };
 
 /**
@@ -704,6 +745,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
     // Page đã trả lời (Meta tự động / nhân viên) sau tin khách sớm nhất của lượt ⇒ bot không chen.
     if (await pageRepliedSince()) {
+      await finish("SKIPPED", PAGE_REPLIED_REASON);
+      out.processed += ids.length;
+      out.skipped = PAGE_REPLIED_REASON;
+      continue;
+    }
+    // Webhook của tin page có thể chưa tới ⇒ hỏi thẳng Pancake MỘT lần trước mọi bước tốn tiền (`pageAnsweredVerdict`).
+    // Bình luận đi đường tin riêng, không có hộp thư để đọc.
+    if (!claimed.some((r) => r.kind === "COMMENT") && (await pageAnsweredOnPancake(pageId, threadId, token, claimed.map((r) => r.messageId), deps.fetch ?? fetch))) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
       out.processed += ids.length;
       out.skipped = PAGE_REPLIED_REASON;
