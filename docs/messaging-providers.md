@@ -82,3 +82,33 @@ Chạy trong job `sales-followup` (5 phút, `catchUpFanpage`) cho mọi tổ ch�
 | Nhập lịch sử hội thoại Pancake vào ERP | Đường đã có là HỌC CÓ KIỂM DUYỆT: sổ tay học từ lịch sử (che SĐT + tên trước khi tới AI, chủ shop duyệt bản xuất bản — `playbook.ts`) và hồ sơ khách cũ đọc lúc chat (`returning.ts`). Không huấn luyện thẳng trên hội thoại thô | Nhu cầu báo cáo lùi kỳ cụ thể |
 | `ChannelAdapter` chung (TD-10) | Bốn đường đang chạy thật, mỗi đường có bài kiểm; rút thành một giao diện là thay đổi lớn ở mã đổi hằng ngày | Kênh thứ năm (TikTok / Shopee chat) |
 | Nhiều page mỗi tổ chức (TD-11) | Một kết nối mỗi loại mỗi tổ chức | Khách thứ hai cần nhiều page |
+
+## 7. Nhiều page một tổ chức (`org_channel_pages`, migration `0217`)
+
+```
+Tổ chức ─ org_connections['facebook-messenger']  («nhà cung cấp đã bật» — trang Kết nối, bộ kiểm đọc hàng này)
+             └─ org_channel_pages  (MỖI page / Instagram một hàng: token mã hoá riêng · trạng thái · bật/tắt AI · sức khoẻ)
+                   └─ sales_chat_conversations.page_id  →  sales_chat_inbound / tin nhắn
+Nền tảng ─ platform_messenger_pages (page_id → tổ chức) — định tuyến webhook theo TỪNG page (đã có từ 0207)
+```
+
+- **Nối**: một lần đăng nhập Facebook → `/me/accounts` (tối đa 100 page) → màn chọn nhiều page (tìm kiếm, chọn tất cả). Danh
+  sách + token chờ chọn lưu NIÊM PHONG ở máy chủ (JWE, 10 phút, gắn tổ chức + người) — không còn ở cookie (4 KB ⇒ cắt im lặng
+  ở ~12 page). Page này hỏng (thuộc cửa hàng khác · đang chạy qua Pancake · Meta từ chối) không chặn page kia. Nối thêm là THÊM.
+- **Token**: AAD gắn tổ chức + kết nối + page — bản mã chép sang hàng page khác không giải được (bài kiểm). Chỉ
+  `lib/connectors/service.ts` chạm bản mã; xoay `PLATFORM_SECRETS_KEY` mã hoá lại cả token page.
+- **Nhận / gửi**: tin vào đúng page; bot và nhân viên gửi bằng token của ĐÚNG page của hội thoại.
+- **AI theo page**: tạm dừng AI ở một page ⇒ như chế độ «quan sát» cho page đó (hội thoại vẫn mở, tin vẫn ở Hộp thư, bot im).
+  Bật / tạm dừng hàng loạt; Instagram đi theo page của nó.
+- **Sức khoẻ theo page**: mốc tin gần nhất + lỗi gửi gần nhất của TỪNG page (lỗi page A không đụng page B). Gỡ từng page.
+- **Tổ chức nối trước 0217**: không có hàng page nào ⇒ page của hàng kết nối đơn vẫn nhận / gửi như cũ (không backfill). Bật /
+  tắt AI cho page đó ⇒ dựng một hàng KHÔNG token (token vẫn đọc ở hàng cũ).
+
+### Còn lại của «hộp thư đa page» (theo thứ tự)
+
+| Việc | Ghi chú |
+|---|---|
+| Hộp thư: lọc theo page + tên page trên từng hội thoại | `inbox.ts` đã chọn `page_id`; thiếu bộ lọc + tên |
+| Màn «Hiệu quả» theo page | nối `sales_conversation_events → sales_chat_conversations.page_id`; Instagram quy về page cha |
+| Cấu hình AI theo page (persona · giờ · danh mục) đè lên mặc định tổ chức | `loadSalesChatbotConfig()` đang là MỘT cấu hình tổ chức |
+| Nhiều page Pancake | Pancake vẫn một page mỗi tổ chức (TD-11 phía Pancake) |

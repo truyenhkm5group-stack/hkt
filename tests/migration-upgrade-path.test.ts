@@ -164,6 +164,7 @@ const MOI = [
   "0214_platform_phone_otps",
   "0215_platform_org_brand",
   "0216_sales_ai_reviews",
+  "0217_org_channel_pages",
 ] as const;
 
 /*

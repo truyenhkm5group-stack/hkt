@@ -9655,6 +9655,44 @@ export const orgConnections = pgTable(
   ],
 );
 
+// ═══ NHIỀU PAGE DƯỚI MỘT KẾT NỐI (0217 · docs/messaging-providers.md §7) ═══
+//
+// `org_connections` giữ MỘT hàng mỗi loại kết nối (UNIQUE connector_key) ⇒ Messenger trực tiếp từng chỉ giữ được một page: nối
+// page B ghi đè page A. Bảng con này là các TÀI KHOẢN KÊNH (Facebook page · Instagram gắn với page) dưới một kết nối — mỗi page
+// một hàng, token mã hoá RIÊNG (AAD gắn tổ chức + kết nối + page, nên token của page này không giải được ở hàng page khác),
+// trạng thái người chọn (`status`), bật / tắt AI theo page, và sức khoẻ MÁY ghi (mốc tin gần nhất, lỗi gần nhất). Lỗi của page A
+// không đụng page B. Chỉ đọc / ghi qua lib/connectors/service.ts (cùng luật với org_connections). Tổ chức nối từ trước không có
+// hàng nào ⇒ đọc như cũ từ hàng kết nối đơn — không backfill.
+export const orgChannelPages = pgTable(
+  "org_channel_pages",
+  {
+    id: id(),
+    orgCode: text("org_code").notNull(),
+    connectorKey: text("connector_key").notNull(),
+    pageId: text("page_id").notNull(),
+    kind: text("kind").notNull().default("PAGE"),
+    /** Instagram: page Facebook mà tài khoản gắn vào. */
+    parentPageId: text("parent_page_id"),
+    name: text("name").notNull().default(""),
+    status: text("status").notNull().default("ACTIVE"),
+    aiEnabled: boolean("ai_enabled").notNull().default(true),
+    secretsEnc: bytea("secrets_enc"),
+    secretsKeyId: text("secrets_key_id"),
+    lastEventAt: ts("last_event_at"),
+    lastError: text("last_error"),
+    lastErrorAt: ts("last_error_at"),
+    connectedByUserId: text("connected_by_user_id"),
+    connectedByName: text("connected_by_name"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("org_channel_pages_key").on(t.connectorKey, t.pageId),
+    check("org_channel_pages_status_check", sql`${t.status} in ('ACTIVE','DISABLED')`),
+    check("org_channel_pages_kind_check", sql`${t.kind} in ('PAGE','INSTAGRAM')`),
+  ],
+);
+
 // ═══ PHASE 7 — BLUEPRINT + MẪU NGÀNH (docs/platform/phase-7-contracts.md mục 3) ═══
 //
 // Sổ cài đặt của gói metadata trong CSDL tổ chức. `blueprint_items` giữ hai băm của phép so ba chiều X4: băm của mục

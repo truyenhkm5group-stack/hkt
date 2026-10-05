@@ -12,7 +12,7 @@
  *    bỏ qua tin của page ấy. Pancake thắng vì shop Pancake đang chạy thật phải giữ nguyên hành vi (đọc lại hội thoại bị
  *    rơi, ghi đơn hộ nhân viên — những thứ đường Messenger chưa có).
  */
-import { messagingConnectionSummaries } from "@/lib/connectors/service";
+import { listChannelPages, messagingConnectionSummaries } from "@/lib/connectors/service";
 
 /** Khoá kết nối — giữ ở đây (không import từ fanpage.ts / messenger.ts) để hai tệp đó import được tệp này mà không vòng. */
 export const PANCAKE_FANPAGE_KEY = "pancake-fanpage";
@@ -47,8 +47,13 @@ export async function loadTransportFacts(): Promise<TransportFacts> {
   const p = rows.find((r) => r.connectorKey === PANCAKE_FANPAGE_KEY);
   const m = rows.find((r) => r.connectorKey === MESSENGER_DIRECT_KEY);
   const ids = (s: Record<string, string>) => [s.pageId, s.igAccountId].map((x) => (x ?? "").trim()).filter(Boolean);
+  // Nhiều page (0217): page đã nối thẳng = hàng page đang bật + page của hàng kết nối đơn cũ chưa có hàng riêng.
+  const pageRows = await listChannelPages(MESSENGER_DIRECT_KEY);
+  const known = new Set(pageRows.map((r) => r.pageId));
+  const legacy = m?.status === "ACTIVE" ? ids(m.plainSettings).filter((x) => !known.has(x)) : [];
+  const pageIds = [...new Set([...pageRows.filter((r) => r.status === "ACTIVE").map((r) => r.pageId), ...legacy])];
   return {
     pancake: { active: p?.status === "ACTIVE", pageId: (p?.plainSettings.pageId ?? "").trim() || null },
-    messenger: { active: m?.status === "ACTIVE", pageIds: m ? ids(m.plainSettings) : [] },
+    messenger: { active: pageIds.length > 0, pageIds },
   };
 }

@@ -46,7 +46,7 @@ function testPure() {
   assert.equal(armStats(raw, 9).conversion, null, "dưới 10 hội thoại ⇒ null");
   assert.equal(liftOrNull(0.3, null), null, "một bên chưa đo ⇒ không có chênh lệch — AI không thắng giả");
   assert.ok(Math.abs((liftOrNull(0.3, 0.2) ?? 0) - 0.1) < 1e-9);
-  assert.deepEqual(parseDrillFilter({ days: "999", cohort: "XYZ", arm: "AI", reason: "WHOLESALE", confirmed: "1" }), { days: 30, cohort: null, arm: "AI", reason: "WHOLESALE", confirmed: true });
+  assert.deepEqual(parseDrillFilter({ days: "999", cohort: "XYZ", arm: "AI", reason: "WHOLESALE", confirmed: "1" }), { days: 30, cohort: null, arm: "AI", reason: "WHOLESALE", confirmed: true, lost: null });
   assert.equal(parseDrillFilter({ reason: "drop table" }).reason, null);
   assert.equal(drillHref({ days: 7, cohort: "AI_ONLY" }), "/ai/sales-chatbot/conversations?days=7&cohort=AI_ONLY");
   assert.equal(maskPhones("SĐT em 0912345678 nhé"), "SĐT em ••••678 nhé");

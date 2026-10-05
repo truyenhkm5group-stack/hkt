@@ -66,6 +66,8 @@ Ký hiệu: **CÓ** · **MỘT PHẦN** · **THIẾU** · **LỖI** (có nhưng 
 
 | P9 | **Không bắt buộc Pancake**: ô «Vào việc ngay» hỏi shop quản lý tin nhắn bằng gì (nối thẳng Facebook · Pancake · phần mềm khác); MỘT PAGE — MỘT ĐƯỜNG nhận tin | yêu cầu bổ sung 05/10 | XONG (nhánh) | `go-live-shared.ts`, `channel-ownership.ts`, `docs/messaging-providers.md`. Trước đó một page nối cả hai đường ⇒ hai hội thoại, hai câu trả lời |
 | P10 | **Pancake qua API, webhook tuỳ chọn** (webhook Pancake tốn 2 slot) | yêu cầu bổ sung 05/10 | XONG (nhánh) | `pancake-poll-shared.ts`: mốc đồng bộ lưu CSDL, đọc cũ trước, lùi khi lỗi / 429, page yên hỏi thưa; webhook nếu có chỉ làm tin nhanh hơn |
+| P12 | **Nhiều Facebook page một tổ chức** (MP-1): nối nhiều page một lượt, token riêng từng page, AI bật / tạm dừng theo page (hàng loạt), sức khoẻ + gỡ từng page | yêu cầu bổ sung 05/10 | XONG (nhánh) | `org_channel_pages` (migration `0217`, chỉ THÊM), `docs/messaging-providers.md` §7. Tổ chức cũ không backfill |
+| P13 | Hộp thư lọc theo page · Hiệu quả theo page · cấu hình AI theo page | yêu cầu bổ sung 05/10 | KẾ TIẾP | §7 «Còn lại» |
 | P11 | Nhịp đọc API < 5 phút · lai Meta + Pancake «chỉ đọc» · `ChannelAdapter` chung · nhiều page | — | CHỜ | `docs/messaging-providers.md` §6 — một việc chờ chủ shop (lịch scheduler), một việc chờ bằng chứng ánh xạ PSID ↔ Pancake |
 
 ## 4. Nhật ký quyết định

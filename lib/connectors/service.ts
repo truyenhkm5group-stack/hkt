@@ -583,6 +583,42 @@ export async function rekeyOrgConnections(opts: { apply: boolean; keyState?: Sec
     out.counts[verdict] += 1;
     out.rows.push({ connectorKey: row.connectorKey, verdict, keyBefore: short(row.secretsKeyId), keyAfter: short(keyAfter) });
   }
+  // Token từng page (0217) — cùng luật, AAD theo page. Thiếu phần này thì xoay khoá xong mọi page nối thẳng sẽ chết.
+  const pages = await db.select().from(schema.orgChannelPages).orderBy(schema.orgChannelPages.connectorKey, schema.orgChannelPages.pageId);
+  for (const row of pages) {
+    const label = pageAad(row.connectorKey, row.pageId);
+    let verdict: RekeyVerdict;
+    let keyAfter: string | null = row.secretsKeyId;
+    if (row.orgCode !== ctx.code) verdict = "TRIPWIRE";
+    else if (!row.secretsEnc) verdict = "NO_SECRETS";
+    else if (row.secretsKeyId !== keyState.keyId && row.secretsKeyId !== keyState.previous?.keyId) verdict = "UNKNOWN_KEY";
+    else {
+      let plain: Record<string, string> | null = null;
+      try {
+        plain = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: label, keyId: row.secretsKeyId }, keyState);
+      } catch {
+        plain = null;
+      }
+      if (!plain) verdict = "DECRYPT_FAILED";
+      else if (row.secretsKeyId === keyState.keyId) verdict = "CURRENT";
+      else if (!opts.apply) verdict = "WOULD_REKEY";
+      else {
+        const sealed = sealSecrets(plain, { orgCode: ctx.code, connectorKey: label }, keyState);
+        const done = await db
+          .update(schema.orgChannelPages)
+          .set({ secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId })
+          .where(and(eq(schema.orgChannelPages.id, row.id), eq(schema.orgChannelPages.secretsKeyId, row.secretsKeyId ?? "")))
+          .returning({ id: schema.orgChannelPages.id });
+        verdict = done.length ? "REKEYED" : "CURRENT";
+        keyAfter = sealed.keyId;
+        if (done.length) {
+          await audit({ userEmail: opts.actorLabel ?? "script:rotate-platform-secrets", action: "ORG_CONNECTION_REKEY", entity: "org_channel_page", entityId: label, before: { keyBefore: short(row.secretsKeyId) }, after: { keyAfter: short(sealed.keyId) }, reason: "Xoay PLATFORM_SECRETS_KEY: mã hoá lại token page bằng khoá mới" });
+        }
+      }
+    }
+    out.counts[verdict] += 1;
+    out.rows.push({ connectorKey: label, verdict, keyBefore: short(row.secretsKeyId), keyAfter: short(keyAfter) });
+  }
   return out;
 }
 
@@ -651,4 +687,153 @@ export async function disableConnectionAsOperator(input: { connectorKey: string;
     reason: input.reason,
   });
   return { ok: true, status: "DISABLED", changed: true, message: `Đã tắt «${spec.label}» của tổ chức.` };
+}
+
+// ═══════════════════════════ TÀI KHOẢN KÊNH DƯỚI MỘT KẾT NỐI (0217 · org_channel_pages) ═══════════════════════════
+//
+// Một kết nối (vd Messenger trực tiếp) có NHIỀU page. Mỗi page một hàng: token mã hoá riêng — AAD gắn tổ chức + kết nối + PAGE
+// (`<khoá kết nối>#page:<mã page>`), nên bản mã chép sang hàng page khác không giải được. Trạng thái do NGƯỜI chọn; sức khoẻ
+// do MÁY ghi; lỗi page A không đụng page B. Cùng dây bẫy `org_code` với org_connections.
+
+export type ChannelPageRow = {
+  pageId: string;
+  kind: "PAGE" | "INSTAGRAM";
+  parentPageId: string | null;
+  name: string;
+  status: "ACTIVE" | "DISABLED";
+  aiEnabled: boolean;
+  lastEventAt: Date | null;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+  connectedByName: string | null;
+  updatedAt: Date;
+};
+
+const pageAad = (connectorKey: string, pageId: string) => `${connectorKey}#page:${pageId}`;
+
+/** Các page của một kết nối ở tổ chức NGỮ CẢNH (không bí mật nào). Hàng mang mã tổ chức khác (dây bẫy) bị bỏ. */
+export async function listChannelPages(connectorKey: string): Promise<ChannelPageRow[]> {
+  const ctx = await currentOrganization();
+  const p = schema.orgChannelPages;
+  const rows = await (await getDb()).select().from(p).where(eq(p.connectorKey, connectorKey)).orderBy(p.name, p.pageId);
+  return rows
+    .filter((r) => r.orgCode === ctx.code)
+    .map((r) => ({ pageId: r.pageId, kind: r.kind === "INSTAGRAM" ? "INSTAGRAM" : "PAGE", parentPageId: r.parentPageId, name: r.name, status: r.status === "DISABLED" ? "DISABLED" : "ACTIVE", aiEnabled: r.aiEnabled, lastEventAt: r.lastEventAt, lastError: r.lastError, lastErrorAt: r.lastErrorAt, connectedByName: r.connectedByName, updatedAt: r.updatedAt }));
+}
+
+/**
+ * Ghi / cập nhật MỘT page cùng token (mã hoá). Người gọi đã kiểm quyền + đã kiểm page thuộc tài khoản vừa cấp quyền. Nối lại
+ * một page đã có ⇒ thay token, bật lại (ACTIVE), xoá lỗi cũ; giữ nguyên lựa chọn bật / tắt AI.
+ */
+export async function upsertChannelPage(
+  user: SessionUser,
+  input: { connectorKey: string; pageId: string; kind: "PAGE" | "INSTAGRAM"; parentPageId: string | null; name: string; token: string },
+  deps: { keyState?: SecretsKeyState } = {},
+): Promise<{ ok: true; message: string } | { error: string }> {
+  const g = guard(user, input.connectorKey);
+  if ("error" in g) return g;
+  const org = await resolveOrg(user);
+  if ("error" in org) return org;
+  if (!input.pageId || !input.token) return { error: "Page không hợp lệ." };
+  const sealed = sealSecrets({ pageAccessToken: input.token }, { orgCode: org.code, connectorKey: pageAad(input.connectorKey, input.pageId) }, deps.keyState ?? secretsKeyState());
+  const db = await getDb();
+  const [me] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, user.id)).limit(1);
+  const p = schema.orgChannelPages;
+  const now = new Date();
+  const values = { orgCode: org.code, connectorKey: input.connectorKey, pageId: input.pageId, kind: input.kind, parentPageId: input.parentPageId, name: input.name.slice(0, 120), status: "ACTIVE", secretsEnc: sealed.ciphertext, secretsKeyId: sealed.keyId, lastError: null, lastErrorAt: null, connectedByUserId: user.id, connectedByName: me?.name ?? user.email, updatedAt: now };
+  await db.insert(p).values(values).onConflictDoUpdate({ target: [p.connectorKey, p.pageId], set: values });
+  await audit({ userId: user.id, userEmail: user.email, action: "ORG_CHANNEL_PAGE_CONNECT", entity: "org_channel_page", entityId: `${input.connectorKey}:${input.pageId}`, after: { kind: input.kind, name: input.name.slice(0, 120), parentPageId: input.parentPageId }, reason: "Nối page qua cấp quyền của nhà cung cấp" });
+  return { ok: true, message: `Đã nối «${input.name || input.pageId}».` };
+}
+
+/** Token của MỘT page đang bật. Page tắt / không có / hàng lệch tổ chức / giải mã hỏng ⇒ `ok: false` kèm lý do (không ném). */
+export async function openChannelPageToken(connectorKey: string, pageId: string, deps: { keyState?: SecretsKeyState } = {}): Promise<{ ok: true; token: string } | { ok: false; reason: string; known: boolean }> {
+  const ctx = await currentOrganization();
+  const p = schema.orgChannelPages;
+  const [row] = await (await getDb()).select().from(p).where(and(eq(p.connectorKey, connectorKey), eq(p.pageId, pageId))).limit(1);
+  if (!row) return { ok: false, reason: "Page chưa nối", known: false };
+  if (row.orgCode !== ctx.code) return { ok: false, reason: "Hàng page mang mã tổ chức khác ngữ cảnh — không dùng.", known: true };
+  if (row.status !== "ACTIVE") return { ok: false, reason: "Page đang tắt", known: true };
+  // Hàng dựng cho page của kết nối đơn cũ (chỉ để mang cờ AI) không có token riêng ⇒ người gọi đọc token ở hàng kết nối cũ.
+  if (!row.secretsEnc) return { ok: false, reason: "Page chưa có token riêng", known: false };
+  try {
+    const token = openSecrets(row.secretsEnc, { orgCode: ctx.code, connectorKey: pageAad(connectorKey, pageId), keyId: row.secretsKeyId }, deps.keyState ?? secretsKeyState()).pageAccessToken ?? "";
+    return token ? { ok: true, token } : { ok: false, reason: "Page chưa có token", known: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "Không giải mã được token page.", known: true };
+  }
+}
+
+/** NGƯỜI đổi trạng thái / AI của MỘT HAY NHIỀU page (thao tác hàng loạt). Page không thuộc kết nối bị bỏ qua, không lỗi cả lượt. */
+export async function setChannelPagesState(user: SessionUser, connectorKey: string, pageIds: readonly string[], patch: { status?: "ACTIVE" | "DISABLED"; aiEnabled?: boolean }): Promise<{ ok: true; message: string; changed: number } | { error: string }> {
+  const g = guard(user, connectorKey);
+  if ("error" in g) return g;
+  const org = await resolveOrg(user);
+  if ("error" in org) return org;
+  const ids = [...new Set(pageIds.map((x) => String(x ?? "").trim()).filter(Boolean))].slice(0, 500);
+  if (!ids.length || (patch.status === undefined && patch.aiEnabled === undefined)) return { error: "Chưa chọn page / thao tác." };
+  const p = schema.orgChannelPages;
+  const set: Partial<typeof p.$inferInsert> = { updatedAt: new Date() };
+  if (patch.status) set.status = patch.status;
+  if (patch.aiEnabled !== undefined) set.aiEnabled = patch.aiEnabled;
+  const done = await (await getDb())
+    .update(p)
+    .set(set)
+    .where(and(eq(p.connectorKey, connectorKey), eq(p.orgCode, org.code), sql`${p.pageId} in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})`))
+    .returning({ pageId: p.pageId });
+  await audit({ userId: user.id, userEmail: user.email, action: "ORG_CHANNEL_PAGE_STATE", entity: "org_channel_page", entityId: connectorKey, after: { pages: done.map((d) => d.pageId), ...patch }, reason: "Đổi trạng thái / AI của page" });
+  return { ok: true, message: `Đã cập nhật ${done.length} page.`, changed: done.length };
+}
+
+/** MÁY ghi sức khoẻ của MỘT page: có tin (`ok`) hoặc lỗi gửi / đọc. Không ném — webhook và lượt gửi không được chết vì sổ sức khoẻ. */
+export async function noteChannelPageHealth(connectorKey: string, pageId: string, health: { ok: true } | { ok: false; error: string }, now: Date = new Date()): Promise<void> {
+  try {
+    const p = schema.orgChannelPages;
+    await (await getDb())
+      .update(p)
+      .set(health.ok ? { lastEventAt: now } : { lastError: health.error.slice(0, 300), lastErrorAt: now })
+      .where(and(eq(p.connectorKey, connectorKey), eq(p.pageId, pageId)));
+  } catch {
+    // Không in log ở lib/connectors/* (bí mật không bao giờ vào log). Sổ sức khoẻ hỏng chỉ làm màn quản lý page thiếu một mốc.
+  }
+}
+
+/**
+ * GỠ page: hàng page về DISABLED (giữ token đã mã hoá để nối lại không cần thao tác gì thêm phía người — vẫn phải cấp quyền
+ * lại để lấy token mới). Page CHƯA có hàng (nối bằng hàng kết nối đơn cũ) ⇒ ghi một hàng DISABLED không token, để page đó rời
+ * khỏi danh sách đã nối mà không phải tắt cả kết nối (các page khác vẫn chạy).
+ */
+export async function disableChannelPages(user: SessionUser, connectorKey: string, pages: readonly { pageId: string; kind: "PAGE" | "INSTAGRAM"; parentPageId: string | null; name: string }[]): Promise<{ ok: true; changed: number } | { error: string }> {
+  const g = guard(user, connectorKey);
+  if ("error" in g) return g;
+  const org = await resolveOrg(user);
+  if ("error" in org) return org;
+  const p = schema.orgChannelPages;
+  const db = await getDb();
+  const now = new Date();
+  for (const x of pages) {
+    await db
+      .insert(p)
+      .values({ orgCode: org.code, connectorKey, pageId: x.pageId, kind: x.kind, parentPageId: x.parentPageId, name: x.name.slice(0, 120), status: "DISABLED", updatedAt: now })
+      .onConflictDoUpdate({ target: [p.connectorKey, p.pageId], set: { status: "DISABLED", updatedAt: now } });
+  }
+  await audit({ userId: user.id, userEmail: user.email, action: "ORG_CHANNEL_PAGE_DISCONNECT", entity: "org_channel_page", entityId: connectorKey, after: { pages: pages.map((x) => x.pageId) }, reason: "Gỡ page khỏi kết nối" });
+  return { ok: true, changed: pages.length };
+}
+
+/**
+ * Page của hàng kết nối ĐƠN cũ (nối trước 0217) chưa có hàng riêng ⇒ dựng hàng ACTIVE KHÔNG token, chỉ để mang trạng thái /
+ * cờ AI theo page. Token vẫn đọc ở hàng kết nối cũ. Hàng đã có ⇒ không đụng.
+ */
+export async function adoptLegacyChannelPages(user: SessionUser, connectorKey: string, pages: readonly { pageId: string; kind: "PAGE" | "INSTAGRAM"; parentPageId: string | null; name: string }[]): Promise<{ ok: true } | { error: string }> {
+  const g = guard(user, connectorKey);
+  if ("error" in g) return g;
+  const org = await resolveOrg(user);
+  if ("error" in org) return org;
+  const p = schema.orgChannelPages;
+  const db = await getDb();
+  for (const x of pages) {
+    await db.insert(p).values({ orgCode: org.code, connectorKey, pageId: x.pageId, kind: x.kind, parentPageId: x.parentPageId, name: x.name.slice(0, 120), status: "ACTIVE" }).onConflictDoNothing({ target: [p.connectorKey, p.pageId] });
+  }
+  return { ok: true };
 }
