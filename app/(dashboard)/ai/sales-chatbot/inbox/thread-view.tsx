@@ -2,15 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Loader2, Send, Sparkles } from "lucide-react";
+import { ImagePlus, Loader2, Send, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
 import { assignConversationAction, claimConversationAction, handBackToAiAction, releaseConversationAction, sendStaffReplyAction, suggestReplyAction } from "@/lib/actions/sales-inbox";
 import { formatDateTime } from "@/lib/format";
-import { STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
+import { STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
+import { LabelsPanel } from "./labels-panel";
+import { NotesPanel } from "./notes-panel";
 
 /**
  * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian gộp + khung soạn + bảng khách / đơn. Mọi phép kiểm ở máy chủ
@@ -49,12 +51,35 @@ export function InboxThreadView({
   const [pending, setPending] = useState<null | "send" | "suggest" | "claim" | "release" | "assign" | "resume">(null);
   const [error, setError] = useState<string | null>(null);
   const [showOrder, setShowOrder] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const lastKey = thread.items[thread.items.length - 1]?.key;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [lastKey]);
+
+  // Ảnh xem trước: URL tạm của trình duyệt, thu hồi khi đổi / rời trang.
+  useEffect(() => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
+
+  const pickFiles = (list: FileList | null) => {
+    if (!list) return;
+    const incoming = [...list].filter((f) => f.type.startsWith("image/"));
+    const tooBig = incoming.find((f) => f.size > STAFF_IMAGE_MAX_BYTES);
+    if (tooBig) toast.error(`«${tooBig.name}» quá ${Math.round(STAFF_IMAGE_MAX_BYTES / 1024 / 1024)} MB.`);
+    const next = [...files, ...incoming.filter((f) => f.size <= STAFF_IMAGE_MAX_BYTES)].slice(0, STAFF_IMAGES_MAX);
+    if (files.length + incoming.length > STAFF_IMAGES_MAX) toast.message(`Mỗi tin tối đa ${STAFF_IMAGES_MAX} ảnh.`);
+    setFiles(next);
+    // Ảnh đổi ⇒ tin khác ⇒ lượt gửi mới.
+    setRequestKey(newKey());
+    if (fileInput.current) fileInput.current.value = "";
+  };
 
   const run = async (kind: NonNullable<typeof pending>, fn: () => Promise<{ ok: true } | { error: string }>, okMsg?: string) => {
     setPending(kind);
@@ -75,10 +100,16 @@ export function InboxThreadView({
 
   const send = async () => {
     const body = text.trim();
-    if (!body || pending) return;
-    const ok = await run("send", () => sendStaffReplyAction(thread.id, { text: body, requestKey, confirmPaid }));
+    if ((!body && !files.length) || pending) return;
+    const form = new FormData();
+    form.set("text", body);
+    form.set("requestKey", requestKey);
+    if (confirmPaid) form.set("confirmPaid", "1");
+    for (const f of files) form.append("images", f);
+    const ok = await run("send", () => sendStaffReplyAction(thread.id, form));
     if (ok) {
       setText("");
+      setFiles([]);
       setRequestKey(newKey());
       setConfirmPaid(false);
     }
@@ -117,6 +148,7 @@ export function InboxThreadView({
               {thread.channelLabel}
               {thread.customer.phone ? ` · ${thread.customer.phone}` : ""}
             </span>
+            <LabelsPanel key={thread.labels.map((l) => l.id).join()} conversationId={thread.id} labels={thread.labels} allLabels={thread.allLabels} canEdit={thread.canWork} canManage={thread.canManage} />
             <div className="text-[11.5px] text-muted-foreground">
               {thread.botYields ? <span className="text-rose-700 dark:text-rose-300">Bot đang nhường · {thread.handoffReason ?? "cần người"}</span> : <span>Bot đang trả lời</span>}
               {" · "}
@@ -172,8 +204,9 @@ export function InboxThreadView({
               {m.images.length ? (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {m.images.slice(0, 6).map((src) => (
-                    <a key={src} href={src} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary underline">
-                      Ảnh
+                    <a key={src} href={src} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh nhân viên trong CSDL qua tuyến có kiểm quyền */}
+                      <img src={src} alt="Ảnh trong hội thoại" className="h-24 w-24 rounded-md border object-cover" loading="lazy" />
                     </a>
                   ))}
                 </div>
@@ -192,6 +225,27 @@ export function InboxThreadView({
           ) : null}
           {thread.canReply ? (
             <>
+              {previews.length ? (
+                <div className="flex flex-wrap gap-1.5" data-testid="inbox-image-previews">
+                  {previews.map((src, i) => (
+                    <div key={src} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- ảnh xem trước, URL tạm của trình duyệt */}
+                      <img src={src} alt={`Ảnh ${i + 1}`} className="h-16 w-16 rounded-md border object-cover" />
+                      <button
+                        type="button"
+                        className="absolute -right-1.5 -top-1.5 rounded-full bg-background p-0.5 shadow"
+                        aria-label={`Bỏ ảnh ${i + 1}`}
+                        onClick={() => {
+                          setFiles((prev) => prev.filter((_, j) => j !== i));
+                          setRequestKey(newKey());
+                        }}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <Textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -208,6 +262,10 @@ export function InboxThreadView({
               />
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
+                  <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} aria-label="Chọn ảnh" />
+                  <Button size="sm" variant="outline" className="h-8" disabled={!!pending || files.length >= STAFF_IMAGES_MAX || thread.channel === "WEB"} title={thread.channel === "WEB" ? "Chat web chưa nhận ảnh từ hộp thư" : `Tối đa ${STAFF_IMAGES_MAX} ảnh, mỗi ảnh ≤ ${Math.round(STAFF_IMAGE_MAX_BYTES / 1024 / 1024)} MB${thread.channel === "ZALO" ? " (Zalo: JPG / PNG ≤ 1 MB)" : ""}`} onClick={() => fileInput.current?.click()}>
+                    <ImagePlus className="size-3.5" /> Ảnh
+                  </Button>
                   <Button size="sm" variant="outline" className="h-8" disabled={!!pending} onClick={() => void suggest()}>
                     {pending === "suggest" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} AI gợi ý câu trả lời
                   </Button>
@@ -217,7 +275,7 @@ export function InboxThreadView({
                     </label>
                   ) : null}
                 </div>
-                <Button size="sm" className="h-8" disabled={!!pending || !text.trim() || (w.kind === "PAID" && !confirmPaid)} onClick={() => void send()}>
+                <Button size="sm" className="h-8" disabled={!!pending || (!text.trim() && !files.length) || (w.kind === "PAID" && !confirmPaid)} onClick={() => void send()}>
                   {pending === "send" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Gửi
                 </Button>
               </div>
@@ -246,6 +304,7 @@ export function InboxThreadView({
             </Link>
           ) : null}
         </div>
+        <NotesPanel conversationId={thread.id} notes={thread.notes} canWrite={thread.canWork} />
         <div className="space-y-1.5 rounded-lg border p-3" data-testid="inbox-orders">
           <p className="font-semibold">Đơn của khách</p>
           {ordersSummary.length === 0 ? <p className="text-muted-foreground">Chưa có đơn.</p> : null}

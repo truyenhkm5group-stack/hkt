@@ -454,23 +454,62 @@ async function contentIdsFor(pageId: string, token: string, imageIds: readonly s
       ids.push(img.pancakeContentId);
       continue;
     }
-    try {
-      const form = new FormData();
-      form.append("file", new Blob([new Uint8Array(img.data)], { type: img.contentType }), `anh.${img.contentType.split("/")[1] ?? "jpg"}`);
-      const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(token)}`;
-      const res = await fetchImpl(url, { method: "POST", body: form, redirect: "manual", signal: AbortSignal.timeout(30_000) });
-      const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
-      if (!res.ok || body?.success === false || !str(body?.id)) {
-        errors.push(scrubSecrets(`Pancake không nhận ảnh: ${str(body?.message) || `HTTP ${res.status}`}`, [token]));
-        continue;
-      }
-      ids.push(str(body?.id));
-      await rememberPancakeContent(id, pageId, str(body?.id), now);
-    } catch (e) {
-      errors.push(scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]));
+    const up = await uploadPancakeContent(pageId, token, img, fetchImpl);
+    if (!up.ok) {
+      errors.push(up.error);
+      continue;
     }
+    ids.push(up.id);
+    await rememberPancakeContent(id, pageId, up.id, now);
   }
   return { ids, errors };
+}
+
+/** Tải MỘT tệp ảnh lên page Pancake ⇒ mã nội dung (`upload_contents`). Không gửi gì cho khách. */
+async function uploadPancakeContent(pageId: string, token: string, img: { data: Uint8Array; contentType: string }, fetchImpl: typeof fetch): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(img.data)], { type: img.contentType }), `anh.${img.contentType.split("/")[1] ?? "jpg"}`);
+    const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(token)}`;
+    const res = await fetchImpl(url, { method: "POST", body: form, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+    const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
+    if (!res.ok || body?.success === false || !str(body?.id)) return { ok: false, error: scrubSecrets(`Pancake không nhận ảnh: ${str(body?.message) || `HTTP ${res.status}`}`, [token]) };
+    return { ok: true, id: str(body?.id) };
+  } catch (e) {
+    return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]) };
+  }
+}
+
+/** Dòng «page đã trả lời» cho tin ẢNH của nhân viên — chữ «[Ảnh]» để lịch sử của bot biết shop đã gửi ảnh. */
+export const STAFF_IMAGE_MARK = "[Ảnh]";
+
+/**
+ * Nhân viên gửi ẢNH từ hộp thư ERP qua Pancake (0211): tải từng ảnh lên page ⇒ gửi theo nhóm `IMAGES_PER_MESSAGE`. Dòng ghi
+ * sẵn `staff-out:<id>:img` (note PAGE_REPLY, chữ «[Ảnh]») — tiếng vọng ảnh không có chữ nên đường nhận đã bỏ qua nó. Hỏng ⇒ xoá
+ * dòng ghi sẵn.
+ */
+export async function sendFanpageImages(pageId: string, threadId: string, images: readonly { data: Uint8Array; contentType: string }[], deps: FanpageDeps, mark: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối fanpage chưa bật / khác page" };
+  const token = (conn.secrets.pageAccessToken ?? "").trim();
+  const fetchImpl = deps.fetch ?? fetch;
+  const now = deps.now ?? (() => new Date());
+  const ids: string[] = [];
+  for (const img of images) {
+    const up = await uploadPancakeContent(pageId, token, img, fetchImpl);
+    if (!up.ok) return up;
+    ids.push(up.id);
+  }
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rowId = `${STAFF_OUT_PREFIX}${mark.staffMessageId}:img`;
+  await db.insert(t).values({ pageId, threadId, messageId: rowId, text: STAFF_IMAGE_MARK, status: "DONE", processedAt: now(), note: PAGE_REPLY }).onConflictDoNothing({ target: t.messageId });
+  const sent = await sendImages(pageId, threadId, token, ids, fetchImpl);
+  if (!sent.ok) {
+    if (!sent.ids.length) await db.delete(t).where(eq(t.messageId, rowId));
+    return { ok: false, error: sent.error };
+  }
+  return { ok: true };
 }
 
 /** Gửi ảnh (đã có mã nội dung) vào hội thoại — mỗi tin tối đa `IMAGES_PER_MESSAGE` ảnh. */
