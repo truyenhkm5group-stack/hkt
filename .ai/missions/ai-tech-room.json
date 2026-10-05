@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "id": "ai-tech-room",
+  "title": "AI Tech Room — nền điều phối nhiều worker cho kho này",
+  "goal": "Một Lead mới vào kho chạy được sứ mệnh nhiều worker (chia việc, song song, tích hợp, dọn) mà chủ shop chỉ phải làm những việc cần một con người.",
+  "integrationRef": "ai-tech-room",
+  "maxWorkers": 2,
+  "tasks": [
+    {
+      "id": "audit",
+      "title": "Phase 0 — kiểm thực tế kho và máy",
+      "objective": "Đọc AGENTS/CLAUDE/HANDOFF, CI, ruleset, tooling agent sẵn có; đo worktree trên máy.",
+      "mode": "INLINE",
+      "priority": "P0",
+      "risk": "LOW",
+      "dependsOn": [],
+      "owns": [],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": [],
+      "definitionOfDone": ["Biết ruleset, cổng, cầu nối PR, /tech có sẵn, số cây trên máy"],
+      "decision": { "state": "DONE", "evidence": "159 worktree (4 bẩn, 52 đầu nhánh trong origin/main); ruleset gates / gates + 1 duyệt; không gh/token trên máy; GitHub API công khai đọc được (HTTP 200)" }
+    },
+    {
+      "id": "core-cli",
+      "title": "Phase 1–6 — hợp đồng vận hành + công cụ + kiểm thử",
+      "objective": "scripts/ai-tech.ts, .ai/config.json, tests/ai-tech-room.test.ts, docs/ai-tech-room/README.md, AGENTS.md mục 10.",
+      "mode": "INLINE",
+      "priority": "P0",
+      "risk": "HIGH",
+      "dependsOn": ["audit"],
+      "owns": ["scripts/ai-tech.ts", ".ai/config.json", "tests/ai-tech-room.test.ts", "docs/ai-tech-room/", "AGENTS.md", "CLAUDE.md", "package.json", "tests/sync-fixtures.test.ts"],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
+      "definitionOfDone": ["typecheck + lint sạch", "tests/ai-tech-room.test.ts xanh", "vệ sinh mục 65 + toàn vẹn kho xanh"],
+      "decision": { "state": "DONE", "evidence": "commit 47007462 trên ai-tech-room" }
+    },
+    {
+      "id": "atr-worker-agent",
+      "title": "Định nghĩa subagent ai-tech-worker cho Claude Code",
+      "objective": "Tạo .claude/agents/ai-tech-worker.md: subagent mà Lead gọi bằng subagent_type để làm MỘT việc theo phiếu giao việc — đọc phiếu (npm run ai -- whoami trong cây), chỉ sửa owns, chạy kiểm thử, commit, đẩy nhánh, báo cáo XONG/CHẶN; báo YÊU CẦU ĐỔI PHẠM VI thay vì tự sửa ngoài phạm vi.",
+      "mode": "WORKER",
+      "priority": "P2",
+      "risk": "LOW",
+      "dependsOn": ["core-cli"],
+      "owns": [".claude/agents/ai-tech-worker.md"],
+      "readOnly": ["docs/ai-tech-room/README.md", "AGENTS.md", "scripts/ai-tech.ts"],
+      "doNotTouch": ["scripts/", "docs/", "tests/"],
+      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
+      "definitionOfDone": [
+        "Tệp có frontmatter hợp lệ của Claude Code (name, description, tools nếu cần) và thân tiếng Việt có dấu",
+        "Thân khớp README mục 8 (luật worker), không mâu thuẫn AGENTS.md mục 9–10",
+        "Không cấp cho worker quyền mở PR / merge / deploy",
+        "Commit tiếng Việt, đẩy nhánh"
+      ],
+      "expectedOutput": "Một tệp markdown ≤ 80 dòng.",
+      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng."
+    },
+    {
+      "id": "atr-reviewer-agent",
+      "title": "Định nghĩa subagent ai-tech-reviewer cho Claude Code",
+      "objective": "Tạo .claude/agents/ai-tech-reviewer.md: subagent đọc-chỉ (không sửa mã) mà Lead gọi với bối cảnh mới cho việc rủi ro ≥ HIGH trước khi mở PR — kiểm đúng/hồi quy/bảo mật/cô lập tổ chức/migration/luật nghiệp vụ AGENTS.md, đối chiếu diff với owns của phiếu, trả danh sách phát hiện xếp theo mức nghiêm trọng.",
+      "mode": "WORKER",
+      "priority": "P2",
+      "risk": "LOW",
+      "dependsOn": ["core-cli"],
+      "owns": [".claude/agents/ai-tech-reviewer.md"],
+      "readOnly": ["docs/ai-tech-room/README.md", "AGENTS.md", "docs/business-rules/ORDER_OUTCOME.md"],
+      "doNotTouch": ["scripts/", "docs/", "tests/"],
+      "tests": ["npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts"],
+      "definitionOfDone": [
+        "Tệp có frontmatter hợp lệ của Claude Code; tools giới hạn ở đọc (Read, Grep, Glob, Bash chỉ để git diff/log)",
+        "Thân tiếng Việt có dấu, nêu rõ đầu ra (phát hiện + mức + tệp:dòng + cách tái hiện)",
+        "Commit tiếng Việt, đẩy nhánh"
+      ],
+      "expectedOutput": "Một tệp markdown ≤ 80 dòng.",
+      "integrationNotes": "Lead tích hợp cục bộ vào nhánh ai-tech-room (merge --no-ff), không PR riêng."
+    },
+    {
+      "id": "legacy-worktree-cleanup",
+      "title": "Dọn các cây không rõ chủ đã vào main",
+      "objective": "55 cây MERGED_SAFE_TO_CLEAN không có phiếu (npm run ai -- worktrees --all, đo 05/10/2026) là của các phiên khác; công cụ chỉ báo.",
+      "mode": "INLINE",
+      "priority": "P3",
+      "risk": "MEDIUM",
+      "dependsOn": [],
+      "owns": [],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": [],
+      "definitionOfDone": ["Chủ shop quyết danh sách; Lead chạy cleanup <cây> --allow-unowned --apply từng cây"],
+      "decision": {
+        "state": "BLOCKED",
+        "category": "APPROVAL_REQUIRED",
+        "reason": "Cây thuộc phiên khác; xoá worktree của người khác là quyết định của chủ shop (AGENTS.md mục 9, luật tuyệt đối của sứ mệnh).",
+        "ownerAction": "Xem `npm run ai -- worktrees --all`, rồi nói 'dọn hết MERGED_SAFE_TO_CLEAN' hoặc liệt kê cây được dọn.",
+        "resumes": "Lead chạy cleanup --allow-unowned --apply cho đúng danh sách; cây bẩn / chưa đẩy / vừa dùng vẫn bị công cụ từ chối."
+      }
+    },
+    {
+      "id": "integrate-main",
+      "title": "Đưa AI Tech Room vào main qua PR",
+      "objective": "PR ai-tech-room → main, gates / gates xanh, một lượt duyệt người, merge (không cần deploy: không đổi mã chạy trên VPS).",
+      "mode": "INLINE",
+      "priority": "P1",
+      "risk": "HIGH",
+      "dependsOn": ["core-cli", "atr-worker-agent", "atr-reviewer-agent"],
+      "owns": ["AGENTS.md", "CLAUDE.md"],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": ["npm run typecheck", "npm run lint", "npm test"],
+      "definitionOfDone": ["PR merge vào main", "status cho thấy mọi việc MERGED/DONE"],
+      "decision": {
+        "state": "BLOCKED",
+        "category": "APPROVAL_REQUIRED",
+        "reason": "Phiên này không có gh / token GitHub nên không mở được PR; ruleset main bắt buộc một lượt duyệt của NGƯỜI.",
+        "ownerAction": "Mở PR từ https://github.com/truyenhkm5group-stack/hkt/compare/main...ai-tech-room?expand=1 (hoặc workflow agent-open-pr với head=ai-tech-room), đợi gates / gates xanh, duyệt và merge.",
+        "resumes": "Lead chạy status --github, đối chiếu các sứ mệnh đang mở với main mới, dọn cây dogfood."
+      }
+    }
+  ]
+}
