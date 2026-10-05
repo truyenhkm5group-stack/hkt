@@ -69,7 +69,7 @@ export type DrillCohort = (typeof DRILL_COHORTS)[number];
 export const DRILL_ARMS = ["AI", "HUMAN"] as const;
 export type DrillArm = (typeof DRILL_ARMS)[number];
 
-export type DrillFilter = { days: number; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean; /** Lý do không mua (`lost-reasons-shared.ts`). */ lost?: LostReason | null };
+export type DrillFilter = { days: number; cohort: DrillCohort | null; reason: string | null; arm: DrillArm | null; confirmed: boolean; /** Lý do không mua (`lost-reasons-shared.ts`). */ lost?: LostReason | null; /** Một page (chiều lọc của shop nhiều page). */ page?: string | null };
 
 export const DRILL_PERIODS = [7, 30, 90] as const;
 
@@ -81,7 +81,8 @@ export function parseDrillFilter(sp: Record<string, string | string[] | undefine
   const arm = (DRILL_ARMS as readonly string[]).includes(one("arm") ?? "") ? (one("arm") as DrillArm) : null;
   const reason = one("reason");
   const lost = (LOST_REASONS as readonly string[]).includes(one("lost") ?? "") ? (one("lost") as LostReason) : null;
-  return { days, cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1", lost };
+  const pg = one("pg");
+  return { days, cohort, arm, reason: reason && /^[A-Z_]{2,40}$/.test(reason) ? reason : null, confirmed: one("confirmed") === "1", lost, page: pg && /^[A-Za-z0-9_:.-]{1,80}$/.test(pg) ? pg : null };
 }
 
 export function drillHref(f: Partial<DrillFilter>): string {
@@ -92,6 +93,7 @@ export function drillHref(f: Partial<DrillFilter>): string {
   if (f.arm) q.set("arm", f.arm);
   if (f.confirmed) q.set("confirmed", "1");
   if (f.lost) q.set("lost", f.lost);
+  if (f.page) q.set("pg", f.page);
   const s = q.toString();
   return `/ai/sales-chatbot/conversations${s ? `?${s}` : ""}`;
 }

@@ -114,12 +114,12 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
     .having(and(...conds));
   const LIMIT = 200;
   // Lý do không mua là phân loại LÚC ĐỌC (không có cột) ⇒ lấy đúng tập hội thoại của bảng «Vì sao khách không mua».
-  const lostIds = f.lost ? ((await loadLostReasons({ days: f.days, now })).idsByReason[f.lost] ?? []) : null;
+  const lostIds = f.lost ? ((await loadLostReasons({ days: f.days, now, pageId: f.page ?? null })).idsByReason[f.lost] ?? []) : null;
   if (lostIds && lostIds.length === 0) return { ok: true, rows: [], truncated: false };
   const rows = await db
     .select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, stage: sql<string | null>`${c.state}->>'stage'`, handoffReason: c.handoffReason, orderId: c.orderId, updatedAt: c.updatedAt, arm: sql<string | null>`${c.state}->'experiment'->>'arm'` })
     .from(c)
-    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : []), ...(lostIds ? [inArray(c.id, lostIds)] : [])))
+    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : []), ...(lostIds ? [inArray(c.id, lostIds)] : []), ...(f.page ? [eq(c.pageId, f.page)] : [])))
     .orderBy(desc(c.updatedAt))
     .limit(LIMIT + 1);
   return { ok: true, truncated: rows.length > LIMIT, rows: rows.slice(0, LIMIT).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() })) };

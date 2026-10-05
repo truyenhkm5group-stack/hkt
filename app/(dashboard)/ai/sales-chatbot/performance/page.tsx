@@ -152,7 +152,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                 <tbody>
                   <tr className="border-b">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ days, cohort: "AI_ONLY" })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref({ page: pageId, days, cohort: "AI_ONLY" })} className="underline-offset-2 hover:underline">
                         AI tự xử lý
                       </Link>
                     </td>
@@ -160,7 +160,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   </tr>
                   <tr className="border-b">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ days, cohort: "AI_THEN_HUMAN" })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref({ page: pageId, days, cohort: "AI_THEN_HUMAN" })} className="underline-offset-2 hover:underline">
                         AI rồi chuyển người
                       </Link>
                     </td>
@@ -168,7 +168,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   </tr>
                   <tr className="font-semibold">
                     <td className="py-1.5 pr-3">
-                      <Link href={drillHref({ days })} className="underline-offset-2 hover:underline">
+                      <Link href={drillHref({ page: pageId, days })} className="underline-offset-2 hover:underline">
                         Tổng
                       </Link>
                     </td>
@@ -208,7 +208,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                       r.handoffReasons.map((h) => (
                         <tr key={h.code} className="border-b last:border-0">
                           <td className="py-1 pr-3">
-                            <Link href={drillHref({ days, reason: h.code })} className="underline-offset-2 hover:underline">
+                            <Link href={drillHref({ page: pageId, days, reason: h.code })} className="underline-offset-2 hover:underline">
                               {h.label}
                             </Link>
                           </td>
@@ -277,7 +277,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
                   {lost.rows.map((row) => (
                     <tr key={row.code} className="border-b last:border-0">
                       <td className="py-1.5 pr-3">
-                        <Link href={drillHref({ days, lost: row.code })} className="underline-offset-2 hover:underline">
+                        <Link href={drillHref({ page: pageId, days, lost: row.code })} className="underline-offset-2 hover:underline">
                           {row.label}
                         </Link>
                       </td>

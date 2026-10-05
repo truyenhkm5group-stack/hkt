@@ -108,6 +108,7 @@ Nền tảng ─ platform_messenger_pages (page_id → tổ chức) — định 
 
 - **Hộp thư chung**: mọi page trong MỘT danh sách, mỗi hội thoại mang tên page (danh sách + đầu khung chat). Chọn một page là
   LỌC trên cùng hội thoại (`listInbox({ page })`), không phải hộp thư thứ hai. Bộ chọn page chỉ hiện khi có hơn một page.
+- **Drill-down giữ page**: bấm một ô số khi đang xem một page ⇒ danh sách hội thoại của đúng page đó (`DrillFilter.page`).
 - **Chỉ số theo page**: `onPage(pageId)` (`events-sql.ts`) là chiều lọc DUY NHẤT cho màn «Hiệu quả», quy kết từng đơn, lý do
   mất khách, bán chéo, chi phí AI (theo `ref` = hội thoại). Cùng công thức ⇒ «mọi page» = cộng các page (bài kiểm).
 
@@ -123,6 +124,5 @@ Instagram theo page cha. Lượt bot đọc `loadSalesChatbotConfigFor(conv.page
 | Việc | Ghi chú |
 |---|---|
 | Danh mục / nguồn giá / nguồn tồn RIÊNG từng page | Hôm nay mọi page đọc chung sản phẩm của tổ chức; «chỉ dẫn riêng» của page nói được nhóm sản phẩm chính nhưng KHÔNG lọc công cụ tìm sản phẩm. Cần ánh xạ page → nhóm sản phẩm ở lõi công cụ |
-| Drill-down (danh sách hội thoại theo chỉ số) giữ bộ lọc page | `DrillFilter` chưa có `page` |
 | Instagram quy về page cha khi lọc | hôm nay lọc đúng mã tài khoản (page HOẶC Instagram) |
 | Nhiều page Pancake | Pancake vẫn một page mỗi tổ chức (TD-11 phía Pancake) |

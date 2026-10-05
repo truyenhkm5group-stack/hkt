@@ -25,6 +25,7 @@ import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { inboxPages, listInbox } from "@/lib/sales-chatbot/inbox";
 import { loadAiSalesPerformance } from "@/lib/sales-chatbot/performance";
 import { savePageOverride } from "@/lib/sales-chatbot/page-config";
+import { listDrillConversations } from "@/lib/sales-chatbot/experiment-report";
 import { connectMessengerPages, disconnectMessengerPage, messengerView, PAGE_AI_OFF_NOTE, processMessengerThread, receiveMessengerEvent, setMessengerPagesAi } from "@/lib/sales-chatbot/messenger";
 
 const ORG = "msg-multi";
@@ -190,6 +191,11 @@ export async function testMessengerMultiPage() {
       const perfB = await loadAiSalesPerformance(ORG, { withMoney: false, pageId: PAGES.B });
       assert.ok(perfA.cohorts.total.conversations === 1 && perfB.cohorts.total.conversations === 1 && perfAll.cohorts.total.conversations === 2, JSON.stringify([perfAll.cohorts.total, perfA.cohorts.total, perfB.cohorts.total]));
       assert.equal((await loadAiSalesPerformance(ORG, { withMoney: false, pageId: "9999999999" })).cohorts.total.conversations, 0, "page lạ ⇒ 0 hội thoại, không phải mọi page");
+      // Drill-down (bấm ô số ⇒ danh sách hội thoại) giữ bộ lọc page.
+      const drillA = await listDrillConversations(admin, { days: 7, cohort: null, reason: null, arm: null, confirmed: false, page: PAGES.A });
+      assert.ok("ok" in drillA && drillA.rows.length === 1, JSON.stringify(drillA));
+      const drillAll = await listDrillConversations(admin, { days: 7, cohort: null, reason: null, arm: null, confirmed: false });
+      assert.ok("ok" in drillAll && drillAll.rows.length === 2);
 
       // ── Gỡ RIÊNG B ⇒ A chạy tiếp; chỉ mục webhook của B mất ──
       assert.ok("ok" in (await disconnectMessengerPage(admin, PAGES.B)));

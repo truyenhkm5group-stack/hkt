@@ -9,6 +9,7 @@ import { listDrillConversations } from "@/lib/sales-chatbot/experiment-report";
 import { DRILL_PERIODS, drillHref, parseDrillFilter } from "@/lib/sales-chatbot/experiment-shared";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 import { LOST_REASON_LABEL } from "@/lib/sales-chatbot/lost-reasons-shared";
+import { inboxPages } from "@/lib/sales-chatbot/inbox";
 
 export const metadata = { title: "Hội thoại theo chỉ số" };
 
@@ -24,12 +25,14 @@ export default async function DrillConversationsPage({ searchParams }: { searchP
   const user = await requirePermission("ai_sales:view");
   const f = parseDrillFilter(await searchParams);
   const r = await listDrillConversations(user, f);
+  const pageName = f.page ? ((await inboxPages()).find((p) => p.id === f.page)?.name ?? f.page) : null;
   const chips = [
     f.cohort ? COHORT_LABEL[f.cohort] : null,
     f.reason ? `Chuyển người: ${HANDOFF_REASON_LABEL[f.reason as HandoffReasonCode] ?? f.reason}` : null,
     f.arm ? ARM_LABEL[f.arm] : null,
     f.confirmed ? "Có đơn chốt" : null,
     f.lost ? `Không mua: ${LOST_REASON_LABEL[f.lost]}` : null,
+    pageName ? `Page: ${pageName}` : null,
   ].filter(Boolean);
   return (
     <div className="space-y-5">
@@ -38,7 +41,7 @@ export default async function DrillConversationsPage({ searchParams }: { searchP
         title="Hội thoại theo chỉ số"
         description={`${chips.length ? chips.join(" · ") : "Mọi hội thoại có khách nhắn"} · ${f.days} ngày`}
         actions={
-          <Link href={`/ai/sales-chatbot/performance?days=${f.days}`} className="text-sm font-medium text-primary hover:underline">
+          <Link href={`/ai/sales-chatbot/performance?days=${f.days}${f.page ? `&pg=${encodeURIComponent(f.page)}` : ""}`} className="text-sm font-medium text-primary hover:underline">
             ← Hiệu quả
           </Link>
         }
