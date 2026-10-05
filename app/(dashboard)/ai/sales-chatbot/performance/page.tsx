@@ -87,14 +87,14 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
           </div>
         }
         actions={
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             {PERIODS.map((d) => (
               <Link key={d} href={`/ai/sales-chatbot/performance?days=${d}${pgQ}`} className={`inline-flex h-8 items-center rounded-md border px-3 text-sm ${d === days ? "bg-muted font-semibold" : "hover:bg-muted"}`}>
                 {d} ngày
               </Link>
             ))}
             {pages.length > 1 ? (
-              <form method="get" action="/ai/sales-chatbot/performance" className="ml-2 flex items-center gap-1" data-testid="ai-perf-page-filter">
+              <form method="get" action="/ai/sales-chatbot/performance" className="flex items-center gap-1 sm:ml-2" data-testid="ai-perf-page-filter">
                 <input type="hidden" name="days" value={days} />
                 <select name="pg" defaultValue={pageId ?? ""} className="h-8 max-w-[11rem] rounded-md border bg-background px-1 text-sm" aria-label="Page">
                   <option value="">Mọi page</option>

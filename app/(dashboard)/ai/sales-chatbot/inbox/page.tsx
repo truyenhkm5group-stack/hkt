@@ -138,7 +138,7 @@ export default async function SalesInboxPage({ searchParams }: { searchParams: P
                   </Link>
                 ))}
               </div>
-              <form method="get" action="/ai/sales-chatbot/inbox" className="flex gap-1">
+              <form method="get" action="/ai/sales-chatbot/inbox" className="flex flex-wrap gap-1">
                 {filter !== "ALL" ? <input type="hidden" name="f" value={filter} /> : null}
                 <input name="q" defaultValue={q} placeholder="Tìm tên / SĐT…" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[13px]" aria-label="Tìm khách" />
                 <select name="ch" defaultValue={channel ?? ""} className="h-8 w-[92px] rounded-md border bg-background px-1 text-[12px]" aria-label="Kênh">

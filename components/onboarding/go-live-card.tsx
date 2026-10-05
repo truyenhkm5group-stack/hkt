@@ -62,7 +62,7 @@ export function GoLiveCard({ view }: { view: GoLiveView }) {
         </p>
         {anyChannel ? (
           <ul className="space-y-1 text-xs text-muted-foreground" data-go-live-connected>
-            {view.messenger.connected ? <li>Facebook (nối thẳng): page «{view.messenger.pageName}»{view.messenger.mutedByPancake ? " — đang nhường cho Pancake vì cùng page" : ""}.</li> : null}
+            {view.messenger.connected ? <li>Facebook (nối thẳng): {view.messenger.pageCount > 1 ? `${view.messenger.pageCount} page` : `page «${view.messenger.pageName}»`}{view.messenger.mutedByPancake ? " — có page đang nhường cho Pancake vì cùng page" : ""}.</li> : null}
             {pancakeOn ? <li>Fanpage qua Pancake: page {view.fanpage?.pageId}.</li> : null}
             {view.zalo.connected ? <li>Zalo OA.</li> : null}
             {view.webChat ? <li>Ô chat trên website.</li> : null}

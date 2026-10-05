@@ -41,7 +41,7 @@ export type GoLiveView = {
   path: GoLivePath | null;
   fanpage: FanpageSetupView | null;
   /** Nối thẳng Facebook (Messenger + Instagram) — `appReady = false` khi nền tảng chưa cấu hình app Facebook. */
-  messenger: { appReady: boolean; connected: boolean; pageName: string | null; mutedByPancake: boolean };
+  messenger: { appReady: boolean; connected: boolean; pageName: string | null; /** Số Facebook page đang nối thẳng (không tính Instagram). */ pageCount: number; mutedByPancake: boolean };
   zalo: { connected: boolean };
   /** Ô chat trên website đã xuất bản. */
   webChat: boolean;
@@ -61,7 +61,7 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     canBot,
     path: null,
     fanpage: null,
-    messenger: { appReady: false, connected: false, pageName: null, mutedByPancake: false },
+    messenger: { appReady: false, connected: false, pageName: null, pageCount: 0, mutedByPancake: false },
     zalo: { connected: false },
     webChat: false,
     messagesReceived: 0,
@@ -94,7 +94,7 @@ export async function loadGoLive(user: SessionUser): Promise<GoLiveView> {
     canBot,
     path: goLivePathOf(channels),
     fanpage,
-    messenger: { appReady: messenger.appReady, connected: channels.messenger, pageName: messenger.page?.name ?? null, mutedByPancake: messenger.mutedByPancake },
+    messenger: { appReady: messenger.appReady, connected: channels.messenger, pageName: messenger.page?.name ?? null, pageCount: messenger.pages.filter((p) => p.status === "ACTIVE" && p.kind === "PAGE").length, mutedByPancake: messenger.mutedByPancake },
     zalo: { connected: channels.zalo },
     webChat: channels.webChat,
     messagesReceived,
