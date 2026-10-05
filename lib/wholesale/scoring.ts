@@ -83,7 +83,33 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function scalePoints(input: ScoreInput): { points: number; reason: string } {
+/**
+ * Quy mô theo HỒ SƠ KHÁCH. `SMALL_MEDIUM` (chủ shop chốt 05/10/2026 — chưa xuất được hoá đơn VAT): điểm cao nhất cho nơi
+ * VỪA (30–1.199 đánh giá), giảm dần khi đông khách hơn, gần 0 cho nơi rất đông hoặc nhiều chi nhánh — những nơi đó mua
+ * theo hợp đồng có hoá đơn. `ANY`: luật cũ, càng lớn càng điểm cao.
+ */
+function scalePointsSmallMedium(input: ScoreInput): { points: number; reason: string } {
+  // Từ 3 điểm bán cùng thương hiệu trở lên = chuỗi. Hai điểm (một chi nhánh) vẫn là cơ sở vừa — chỉ không cộng điểm tối đa.
+  if (input.siblingCount >= 2) return { points: 2, reason: `có ${input.siblingCount + 1} điểm cùng thương hiệu — chuỗi thường đòi hoá đơn` };
+  const r = input.reviewCount;
+  const base: { points: number; reason: string } =
+    r == null
+      ? { points: 6, reason: "chưa có số đánh giá" }
+      : r === 0
+        ? { points: 4, reason: "0 đánh giá — rất mới / rất nhỏ" }
+        : r < 30
+          ? { points: 10, reason: `${r.toLocaleString("vi-VN")} đánh giá — quán / cửa hàng nhỏ` }
+          : r < 1200
+            ? { points: 18, reason: `${r.toLocaleString("vi-VN")} đánh giá — quy mô vừa, hợp nhập sỉ` }
+            : r < 3000
+              ? { points: 9, reason: `${r.toLocaleString("vi-VN")} đánh giá — khá lớn, có thể đòi hoá đơn` }
+              : { points: 2, reason: `${r.toLocaleString("vi-VN")} đánh giá — rất lớn, thường đòi hoá đơn VAT` };
+  if (input.siblingCount === 1 || input.branchHint) return { points: Math.min(base.points, 14), reason: `${base.reason} · có 2 điểm bán / chi nhánh` };
+  return base;
+}
+
+function scalePoints(input: ScoreInput, profile: "SMALL_MEDIUM" | "ANY" = "ANY"): { points: number; reason: string } {
+  if (profile === "SMALL_MEDIUM") return scalePointsSmallMedium(input);
   const r = input.reviewCount;
   let points = 0;
   let reason: string;
@@ -182,17 +208,17 @@ export function learnedAdjustment(segment: LeadSegment, stats: readonly SegmentO
   return { points, reason: `${mine.won}/${mine.resolved} lead nhóm này đã chốt (chung ${totalWon}/${totalResolved})` };
 }
 
-export function scoreLead(input: ScoreInput, opts: { areas: ServiceAreas; thresholds?: GradeThresholds; learned?: { points: number; reason: string } | null }): ScoreResult {
+export function scoreLead(input: ScoreInput, opts: { areas: ServiceAreas; thresholds?: GradeThresholds; learned?: { points: number; reason: string } | null; sizeProfile?: "SMALL_MEDIUM" | "ANY" }): ScoreResult {
   const seg = SEGMENT_POINTS[input.segment];
   const segLabel = LEAD_SEGMENT_LABEL[input.segment];
   const evidence = input.segmentEvidence ? ` (${input.segmentEvidence})` : "";
-  const scale = scalePoints(input);
+  const scale = scalePoints(input, opts.sizeProfile);
   const contact = contactPoints(input);
   const location = locationPoints(input, opts.areas);
   const quality = qualityPoints(input);
   const components: ScoreComponent[] = [
     { key: "categoryFit", label: SCORE_COMPONENT_LABEL.categoryFit, points: seg.fit, max: 30, reason: `${segLabel}${evidence}` },
-    { key: "purchaseIntent", label: SCORE_COMPONENT_LABEL.purchaseIntent, points: seg.intent, max: 15, reason: seg.intent >= 13 ? "nhóm ưu tiên nhập hàng số lượng lớn" : seg.intent >= 9 ? "nhóm có nhu cầu nhập đều" : "nhu cầu nhập hải sản không rõ" },
+    { key: "purchaseIntent", label: SCORE_COMPONENT_LABEL.purchaseIntent, points: seg.intent, max: 15, reason: seg.intent >= 13 ? "nhóm bán lại / dùng hàng đặc sản thường xuyên" : seg.intent >= 9 ? "nhóm có nhu cầu nhập đều" : "thường đòi hoá đơn hoặc nhu cầu không rõ" },
     { key: "scale", label: SCORE_COMPONENT_LABEL.scale, points: scale.points, max: 20, reason: scale.reason },
     { key: "contactability", label: SCORE_COMPONENT_LABEL.contactability, points: contact.points, max: 15, reason: contact.reason },
     { key: "location", label: SCORE_COMPONENT_LABEL.location, points: location.points, max: 10, reason: location.reason },
@@ -210,7 +236,7 @@ export function scoreLead(input: ScoreInput, opts: { areas: ServiceAreas; thresh
 function summarize(input: ScoreInput, segLabel: string, scale: string, contact: string, location: string, grade: LeadGrade): string {
   const fit =
     SEGMENT_POINTS[input.segment].intent >= 13
-      ? "phù hợp nhu cầu nhập hàng số lượng lớn"
+      ? "nhóm bán lại / dùng hàng đặc sản thường xuyên"
       : SEGMENT_POINTS[input.segment].fit >= 15
         ? "có nhu cầu nhập thực phẩm"
         : "chưa rõ nhu cầu nhập hải sản";

@@ -111,6 +111,8 @@ export const FILTER_REASON_LABEL: Record<string, string> = {
   DUPLICATE_DOMAIN: "Trùng website với lead đã có",
   DUPLICATE_NAME: "Trùng tên + địa chỉ với lead đã có",
   DETAILS_FAILED: "Lấy chi tiết lỗi nhiều lần",
+  CHAIN: "Chuỗi lớn (thường mua theo hợp đồng, đòi hoá đơn VAT)",
+  TOO_LARGE: "Quá đông khách so với quy mô nhắm tới (thường đòi hoá đơn)",
 };
 
 export const CAMPAIGN_STATUSES = ["DRAFT", "RUNNING", "PAUSED", "STOPPED", "COMPLETED"] as const;
@@ -123,13 +125,14 @@ export const CAMPAIGN_STATUS_LABEL: Record<CampaignStatus, string> = {
   COMPLETED: "Hoàn tất",
 };
 
-export const PAUSE_REASONS = ["MANUAL", "BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT", "API_AUTH", "NO_CONNECTION"] as const;
+export const PAUSE_REASONS = ["MANUAL", "BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT", "FREE_TIER", "API_AUTH", "NO_CONNECTION"] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 export const PAUSE_REASON_LABEL: Record<PauseReason, string> = {
   MANUAL: "Người dùng tạm dừng",
   BUDGET_DAILY: "Chạm trần chi tiêu NGÀY — tự chạy lại từ 0 giờ hôm sau",
   BUDGET_MONTHLY: "Chạm trần chi tiêu THÁNG — tự chạy lại từ ngày 1 tháng sau",
   REQUEST_LIMIT: "Chạm trần số lượt gọi ngày — tự chạy lại từ 0 giờ hôm sau",
+  FREE_TIER: "Đã dùng hết lượt MIỄN PHÍ tháng này của Google (chế độ chỉ dùng miễn phí) — tự chạy lại từ ngày 1 tháng sau",
   API_AUTH: "Google từ chối khoá API — sửa kết nối rồi bấm Tiếp tục",
   NO_CONNECTION: "Chưa bật kết nối Google Places — bật ở Cài đặt → Kết nối rồi bấm Tiếp tục",
 };

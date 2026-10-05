@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { saveLeadHunterConfigAction } from "@/lib/actions/wholesale";
 import { MESSAGING_CONNECTOR_KEYS, MESSAGING_CONNECTOR_LABEL, MESSAGING_DESTINATION_HINT } from "@/lib/messaging/types";
-import { DISCOVERY_TIER_LABEL, DISCOVERY_TIERS, OUTREACH_AUTOMATION_LABEL, OUTREACH_AUTOMATION_LEVELS, PLACES_SKU_LABEL, PLACES_SKUS, type LeadHunterConfig } from "@/lib/wholesale/config";
+import { DISCOVERY_TIER_LABEL, DISCOVERY_TIERS, OUTREACH_AUTOMATION_LABEL, OUTREACH_AUTOMATION_LEVELS, PLACES_SKU_LABEL, PLACES_SKUS, SIZE_PROFILE_LABEL, SIZE_PROFILES, type LeadHunterConfig } from "@/lib/wholesale/config";
 
 const lbl = "block text-xs font-medium text-muted-foreground";
 const sel = "h-9 w-full rounded-md border bg-background px-2 text-sm";
@@ -32,6 +32,8 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
       .map(([k, v]) => `${k}: ${v === "PRIORITY" ? "ưu tiên" : "giao được"}`)
       .join("\n"),
   );
+  // Ô chữ tự do: tách thành danh sách lúc LƯU, không phải lúc gõ (tách khi gõ thì chữ đầu sau dấu phẩy bị nuốt).
+  const [brandsText, setBrandsText] = useState(initial.chainFilter.brands.join(", "));
   const set = <K extends keyof LeadHunterConfig>(k: K, v: LeadHunterConfig[K]) => setC((x) => ({ ...x, [k]: v }));
   const setOut = <K extends keyof LeadHunterConfig["outreach"]>(k: K, v: LeadHunterConfig["outreach"][K]) => setC((x) => ({ ...x, outreach: { ...x.outreach, [k]: v } }));
 
@@ -51,7 +53,8 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
           .replace(/\s+/g, " ");
         areas[key] = /uu tien|ưu tiên|priority/i.test(v ?? "") ? "PRIORITY" : "SERVED";
       }
-      const r = await saveLeadHunterConfigAction({ ...c, serviceAreas: areas });
+      const brands = [...new Set(brandsText.split(/[,\n]/).map((s) => s.trim()).filter((s) => s.length >= 2))];
+      const r = await saveLeadHunterConfigAction({ ...c, serviceAreas: areas, chainFilter: { ...c.chainFilter, brands } });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success("Đã lưu cấu hình");
@@ -69,6 +72,48 @@ export function ConfigForm({ initial, provinces }: { initial: LeadHunterConfig; 
           <NumberField label="Trần lượt gọi / ngày" value={c.budget.dailyRequestLimit} onChange={(n) => set("budget", { ...c.budget, dailyRequestLimit: n })} />
           <NumberField label="Tỷ giá quy đổi (₫ / US$)" value={c.usdToVnd} onChange={(n) => set("usdToVnd", n)} />
         </div>
+      </fieldset>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-semibold">Chế độ chỉ dùng lượt MIỄN PHÍ của Google</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={c.freeTier.enabled} onChange={(e) => set("freeTier", { ...c.freeTier, enabled: e.target.checked })} /> Bật — sắp hết lượt miễn phí của loại lượt sắp gọi thì tự dừng, ngày 1 tháng sau tự chạy tiếp
+        </label>
+        <p className="text-xs text-muted-foreground">Mặc định theo bảng giá Google từ 03/2025: Text Search Enterprise (có SĐT, ≤ 20 quán / lượt) 1.000 lượt / tháng; Pro 5.000; chỉ-Place-ID không giới hạn. Hạn mức tính chung cho cả tài khoản thanh toán.</p>
+        <div className="grid gap-3 md:grid-cols-4">
+          <NumberField label="Giữ dự phòng (0–0,5)" step="0.01" value={c.freeTier.safetyPct} onChange={(n) => set("freeTier", { ...c.freeTier, safetyPct: n })} />
+          {PLACES_SKUS.filter((k) => k !== "TEXT_SEARCH_IDS").map((k) => (
+            <NumberField key={k} label={`Miễn phí / tháng — ${PLACES_SKU_LABEL[k]}`} value={c.freeTier.monthlyCalls[k]} onChange={(n) => set("freeTier", { ...c.freeTier, monthlyCalls: { ...c.freeTier.monthlyCalls, [k]: n } })} />
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-semibold">Quy mô khách nhắm tới</legend>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className={lbl}>
+            Hồ sơ quy mô
+            <select className={sel} value={c.sizeProfile} onChange={(e) => set("sizeProfile", e.target.value as LeadHunterConfig["sizeProfile"])}>
+              {SIZE_PROFILES.map((p) => (
+                <option key={p} value={p}>
+                  {SIZE_PROFILE_LABEL[p]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={lbl}>
+            Lọc nơi có hơn … đánh giá Google (để trống = không lọc)
+            <Input inputMode="numeric" value={c.maxReviews == null ? "" : String(c.maxReviews)} onChange={(e) => set("maxReviews", e.target.value.replace(/\D/g, "") ? Number(e.target.value.replace(/\D/g, "")) : null)} />
+          </label>
+          <NumberField label="Cùng tên ở hơn … địa điểm ⇒ coi là chuỗi" value={c.chainFilter.maxSameName} onChange={(n) => set("chainFilter", { ...c.chainFilter, maxSameName: n })} />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={c.chainFilter.enabled} onChange={(e) => set("chainFilter", { ...c.chainFilter, enabled: e.target.checked })} /> Loại chuỗi lớn (thường mua theo hợp đồng, đòi hoá đơn VAT)
+        </label>
+        <label className={lbl}>
+          Thương hiệu chuỗi cần loại — ngăn cách bằng dấu phẩy
+          <Textarea rows={3} value={brandsText} onChange={(e) => setBrandsText(e.target.value)} />
+        </label>
       </fieldset>
 
       <fieldset className="space-y-2">

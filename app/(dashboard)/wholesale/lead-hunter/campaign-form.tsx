@@ -302,6 +302,12 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
             Chi phí ước tính ({preview.estimate.searchSku}): ít nhất <b>{money(preview.estimate.minMicros, preview.usdToVnd)}</b> · điển hình <b>{money(preview.estimate.typicalMicros, preview.usdToVnd)}</b> · nhiều nhất <b>{money(preview.estimate.maxMicros, preview.usdToVnd)}</b>
           </div>
           <div className="text-xs text-muted-foreground">{preview.estimate.assumptions} Chưa trừ hạn mức miễn phí hằng tháng của Google. Trần chi tiêu ngày / tháng vẫn chặn bất kể ước tính.</div>
+          {preview.freeTier.enabled ? (
+            <div className={preview.freeTier.needTypical <= preview.freeTier.left ? "text-xs text-emerald-700 dark:text-emerald-400" : "text-xs text-amber-700 dark:text-amber-400"}>
+              Chế độ CHỈ DÙNG MIỄN PHÍ: tháng này còn <b>{formatNumber(preview.freeTier.left)}</b> / {formatNumber(preview.freeTier.monthly)} lượt miễn phí ({preview.freeTier.sku}); chiến dịch cần {formatNumber(preview.freeTier.needMin)}–{formatNumber(preview.freeTier.needTypical)} lượt.{" "}
+              {preview.freeTier.needTypical <= preview.freeTier.left ? "Đủ — không phát sinh tiền." : "Không đủ trong tháng này — máy quét tới khi hết lượt miễn phí rồi tự dừng, đầu tháng sau tự chạy tiếp (không phát sinh tiền)."}
+            </div>
+          ) : null}
           {preview.byProvince.length ? <div className="text-xs">{preview.byProvince.map((p) => `${p.label}: ${p.areas} khu vực · ${formatNumber(p.cells)} truy vấn`).join(" · ")}</div> : null}
           {preview.invalidAreas.length ? <div className="text-xs text-destructive">Dòng khu vực không đọc được: {preview.invalidAreas.join(" · ")}</div> : null}
           <details>

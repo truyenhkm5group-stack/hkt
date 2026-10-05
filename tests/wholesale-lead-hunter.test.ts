@@ -30,8 +30,8 @@ import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
 import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
-import { DEFAULT_LEAD_HUNTER_CONFIG, mergeLeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
-import { branchHint, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
+import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
+import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { purgeExpiredSnapshots, runLeadHunterTick } from "@/lib/wholesale/engine";
 import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, importLeadsCore, logCallCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
 import { channelAction, openerLooksInvented, templateOpener } from "@/lib/wholesale/opener";
@@ -40,7 +40,7 @@ import { extractVnPhones, formatVnPhone, normalizeVnPhone, samePhone } from "@/l
 import type { DiscoveryProvider, EnrichmentProvider } from "@/lib/wholesale/providers";
 import { cellKeyOf, estimateCost, planTextCells, queryTextOf } from "@/lib/wholesale/query-plan";
 import { gradeOf, learnedAdjustment, scoreLead, type ScoreInput } from "@/lib/wholesale/scoring";
-import { classifySegment } from "@/lib/wholesale/segments";
+import { classifySegment, SEGMENT_POINTS } from "@/lib/wholesale/segments";
 import { saveLeadHunterConfig } from "@/lib/wholesale/store";
 import { isPrivateAddress } from "@/lib/net/public-url";
 import { allowed as relayAllowed, handle as relayHandle } from "../deploy/places-relay/relay.js";
@@ -88,7 +88,27 @@ function testSegments() {
   assert.equal(classifySegment({ name: "Lẩu Dê 404", types: ["restaurant"] }).segment, "HOTPOT");
   assert.equal(classifySegment({ name: "Lâu Đài Café", primaryType: "cafe" }).segment, "OTHER_FOOD", "«Lâu» không phải «lẩu»");
   assert.equal(classifySegment({ name: "Khách sạn Mường Thanh", types: ["lodging"] }).segment, "HOTEL_RESORT");
-  assert.equal(classifySegment({ name: "Tạp hoá" }).segment, "UNCLASSIFIED", "không chứng cứ ⇒ không đoán");
+  assert.equal(classifySegment({ name: "Cô Ba Minh Anh" }).segment, "UNCLASSIFIED", "không chứng cứ ⇒ không đoán");
+  // Nhóm theo danh mục HSLC (05/10/2026): cửa hàng bán lại đặc sản đứng TRƯỚC nhà hàng hải sản.
+  assert.equal(classifySegment({ name: "Hải sản khô Hạ Long Cô Lan" }).segment, "SPECIALTY_STORE", "«hải sản khô» là cửa hàng bán lại, không phải nhà hàng");
+  assert.equal(classifySegment({ name: "Chả mực Hạ Long 79", types: ["restaurant"] }).segment, "SPECIALTY_STORE");
+  assert.equal(classifySegment({ name: "Đặc sản vùng miền Quê Nhà" }).segment, "SPECIALTY_STORE");
+  assert.equal(classifySegment({ name: "Shop Mẹ và Bé Kids" }).segment, "MOM_BABY");
+  assert.equal(classifySegment({ name: "Tạp hoá Minh Anh" }).segment, "GROCERY");
+  assert.equal(classifySegment({ name: "Bún chả cá Hải Phòng", types: ["restaurant"] }).segment, "EATERY");
+  assert.equal(classifySegment({ name: "Cửa hàng tiện ích", primaryType: "convenience_store" }).segment, "GROCERY");
+  assert.equal(classifySegment({ name: "Siêu thị Hà Nội", primaryType: "supermarket" }).segment, "SUPERMARKET");
+  assert.ok(SEGMENT_POINTS.SPECIALTY_STORE.fit > SEGMENT_POINTS.HOTEL_RESORT.fit && SEGMENT_POINTS.GROCERY.intent > SEGMENT_POINTS.CATERING.intent, "chưa xuất hoá đơn ⇒ khách bán lại xếp trên khách sạn / tiệc");
+  for (const sg of DEFAULT_TARGET_SEGMENTS) assert.ok(!["HOTEL_RESORT", "CATERING", "BUFFET", "SUPERMARKET"].includes(sg), `${sg}: nhóm thường đòi hoá đơn không nằm trong mục tiêu mặc định`);
+  // Chuỗi lớn: khớp theo TỪ trên tên đã bỏ dấu, gạch nối = khoảng trắng.
+  const brands = DEFAULT_LEAD_HUNTER_CONFIG.chainFilter.brands;
+  assert.equal(chainBrandHit("Kichi-Kichi Royal City", brands), "Kichi-Kichi");
+  assert.equal(chainBrandHit("Lẩu băng chuyền KICHI KICHI Times City", brands), "Kichi-Kichi");
+  assert.equal(chainBrandHit("Siêu thị Bách Hoá Xanh 123", brands), "Bách Hóa Xanh");
+  assert.equal(chainBrandHit("Quán Gogi Bà Tư", brands), "Gogi", "khớp theo từ — chủ shop sửa danh sách nếu nhầm");
+  assert.equal(chainBrandHit("Hải sản Cô Lan", brands), null);
+  assert.equal(chainBrandHit("Logogia", brands), null, "không khớp giữa chữ");
+  assert.equal(brandKey("Nhà hàng Hải Sản Biển Đông 2"), "hai san bien dong");
   const ev = classifySegment({ name: "BBQ Garden", types: [] });
   assert.equal(ev.segment, "BBQ");
   assert.match(ev.evidence, /bbq/);
@@ -116,6 +136,15 @@ function testScoring() {
   const unknownReviews = scoreLead(baseInput({ reviewCount: null }), { areas });
   assert.match(unknownReviews.components.find((c) => c.key === "scale")!.reason, /chưa có số đánh giá/, "chưa biết ⇒ nói chưa biết, không in 0");
   for (const c of a.components) assert.ok(c.points <= c.max && c.points >= 0, c.key);
+  // Hồ sơ «vừa và nhỏ» (chưa xuất hoá đơn): nơi vừa > nơi rất đông > chuỗi; lý do nói vì sao.
+  const sm = (over: Partial<ScoreInput>) => scoreLead(baseInput(over), { areas, sizeProfile: "SMALL_MEDIUM" });
+  const mid = sm({ reviewCount: 637 });
+  const huge = sm({ reviewCount: 8000 });
+  const chain = sm({ reviewCount: 637, siblingCount: 3 });
+  assert.ok(mid.score > huge.score && mid.score > chain.score, `${mid.score} ${huge.score} ${chain.score}`);
+  assert.match(huge.components.find((c) => c.key === "scale")!.reason, /hoá đơn/);
+  assert.match(chain.components.find((c) => c.key === "scale")!.reason, /chuỗi/);
+  assert.ok(scoreLead(baseInput({ reviewCount: 8000 }), { areas, sizeProfile: "ANY" }).score > huge.score, "hồ sơ «mọi quy mô» giữ luật cũ");
   assert.equal(gradeOf(80), "A");
   assert.equal(gradeOf(79), "B");
   assert.equal(gradeOf(65), "B");
@@ -251,6 +280,21 @@ function testFieldHandoffMessage() {
   assert.deepEqual(verifiedCallPatch(lead, snap, "NO_ANSWER", true), {}, "không nghe máy ⇒ chưa xác nhận gì");
   assert.deepEqual(verifiedCallPatch({ ...lead, staffEditedFields: ["businessName"] }, snap, "ANSWERED", false), { normalizedPhone: "+84905123456" });
   assert.deepEqual(verifiedCallPatch(lead, null, "ANSWERED", true), {}, "dữ liệu Google đã xoá ⇒ không có gì để chép");
+}
+
+function testFreeTier() {
+  const cfg = DEFAULT_LEAD_HUNTER_CONFIG;
+  assert.equal(cfg.discoveryTier, "ENTERPRISE", "mặc định tìm có SĐT ngay trong lượt tìm — rẻ nhất mỗi lead");
+  assert.equal(freeTierLeft(cfg, "TEXT_SEARCH_ENTERPRISE", 0), 950, "1.000 lượt miễn phí, giữ 5% dự phòng");
+  assert.equal(freeTierLeft(cfg, "TEXT_SEARCH_ENTERPRISE", 950), 0);
+  assert.equal(freeTierLeft(cfg, "TEXT_SEARCH_ENTERPRISE", 2000), 0, "không bao giờ âm");
+  assert.equal(freeTierLeft(cfg, "TEXT_SEARCH_PRO", 100), 4650);
+  const enabled = DEFAULT_KEYWORD_GROUPS.filter((g) => g.enabled).reduce((n, g) => n + g.keywords.length, 0);
+  assert.ok(enabled * 57 <= freeTierLeft(cfg, "TEXT_SEARCH_ENTERPRISE", 0), `từ khoá lõi × 57 khu vực đợt ① (${enabled * 57}) nằm trong lượt miễn phí một tháng`);
+  assert.ok(!DEFAULT_KEYWORD_GROUPS.find((g) => g.key === "lon")!.enabled, "nhóm thường đòi hoá đơn để TẮT");
+  const merged = mergeLeadHunterConfig({ freeTier: { enabled: false } });
+  assert.equal(merged.freeTier.enabled, false);
+  assert.equal(merged.freeTier.monthlyCalls.TEXT_SEARCH_ENTERPRISE, 1000, "bản lưu thiếu khoá con ⇒ lấy mặc định");
 }
 
 function testDedupeKeys() {
@@ -545,7 +589,7 @@ async function testDb() {
       assert.ok(!can(sales, "wholesale:scan") && !can(sales, "wholesale:assign") && can(sales, "wholesale:work"));
       assert.ok(!can(manager, "wholesale:scan") && !can(manager, "wholesale:config") && can(manager, "wholesale:assign"));
       assert.ok(!can({ ...admin, modules: modules.filter((m) => m !== "wholesale_leads") }, "wholesale:view"), "module tắt ⇒ kể cả ADMIN cũng không");
-      const campInput = { name: "Đà Nẵng thử", provinces: [], customAreas: "Đà Nẵng: Hải Châu, Sơn Trà", keywordGroups: [{ key: "hai-san", enabled: true }, { key: "buffet", enabled: true }, { key: "lau-nuong", enabled: false }, { key: "nhau", enabled: false }, { key: "nha-hang", enabled: false }, { key: "luu-tru", enabled: false }, { key: "tiec", enabled: false }, { key: "thuc-pham", enabled: false }], extraKeywords: "", excludeKeywords: "chay", targetSegments: ["SEAFOOD_RESTAURANT", "HOTPOT", "BUFFET", "PUB_BEER", "RESTAURANT"], maxLeads: 100, requirePhone: true, discoveryTier: "PRO" };
+      const campInput = { name: "Đà Nẵng thử", provinces: [], customAreas: "Đà Nẵng: Hải Châu, Sơn Trà", keywordGroups: DEFAULT_KEYWORD_GROUPS.map((g) => ({ key: g.key, enabled: false })), extraKeywords: "nhà hàng hải sản, hải sản, buffet hải sản, lẩu hải sản, buffet", excludeKeywords: "chay", targetSegments: ["SEAFOOD_RESTAURANT", "HOTPOT", "BUFFET", "PUB_BEER", "RESTAURANT"], maxLeads: 100, requirePhone: true, discoveryTier: "PRO" };
       assert.ok("error" in (await createCampaignCore(sales, campInput)), "Sales không tạo chiến dịch quét");
 
       // ── Kết nối «google-places»: lưu → kiểm tra (fetch giả) → bật ──
@@ -603,7 +647,7 @@ async function testDb() {
       assert.equal(seafood?.segment, "SEAFOOD_RESTAURANT", "«Hải sản» trong tên ⇒ nhà hàng hải sản (cả hai địa điểm)");
       assert.equal(seafood?.leadGrade, "A", JSON.stringify(seafood?.scoreReasons));
       assert.equal(seafood?.contactStatus, "QUALIFIED", "≥ 65 điểm + có SĐT ⇒ tự lên «Đủ điều kiện»");
-      assert.ok(String(JSON.stringify(seafood?.scoreReasons)).includes("2 điểm cùng thương hiệu"), "chi nhánh trùng SĐT nâng điểm quy mô của lead gốc");
+      assert.ok(String(JSON.stringify(seafood?.scoreReasons)).includes("có 2 điểm bán"), "chi nhánh trùng SĐT được ghi vào lý do quy mô của lead gốc (hai điểm vẫn là cơ sở vừa, chưa phải chuỗi)");
       assert.equal(hotpot?.enrichmentStatus, "READY");
       const snap = await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, P.hotpot.placeId) });
       assert.equal(snap?.normalizedPhone, "+84905222333", "SĐT chỉ có dạng quốc tế vẫn chuẩn hoá được");
@@ -783,6 +827,39 @@ async function testDb() {
       const hotpotAgain = await db.select().from(schema.wholesaleLeadCampaigns).where(and(eq(schema.wholesaleLeadCampaigns.leadId, hotpot!.id), eq(schema.wholesaleLeadCampaigns.campaignId, c5.id)));
       assert.equal(hotpotAgain.length, 0, "lead không liên hệ không bị kéo vào chiến dịch mới");
 
+      // ── Chuỗi lớn / nơi quá đông (chưa xuất hoá đơn ⇒ chưa phải khách lúc này) ──
+      world.places.ChIJkichi000000001 = place("ChIJkichi000000001", "Kichi-Kichi Vincom Đà Nẵng", { details: { nationalPhone: "0905777001", reviewCount: 900 } });
+      world.places.ChIJbigsea00000001 = place("ChIJbigsea00000001", "Nhà hàng Hải Sản Khổng Lồ", { details: { nationalPhone: "0905777002", reviewCount: 9000, rating: 4.3 } });
+      world.places.ChIJsmall000000001 = place("ChIJsmall000000001", "Quán Hải Sản Cô Ba", { details: { nationalPhone: "0905777003", reviewCount: 140, rating: 4.4 } });
+      const c6 = await createCampaignCore(admin, { ...campInput, name: "Loại chuỗi", customAreas: "Đà Nẵng: Thanh Khê" });
+      assert.ok("ok" in c6 && "ok" in (await startCampaignCore(admin, c6.id)));
+      world.search = (qq: string) => (qq.includes("Thanh Khê") ? ["ChIJkichi000000001", "ChIJbigsea00000001", "ChIJsmall000000001"] : []);
+      await runJob("wholesale-leads", { trigger: "CRON", actor: "wl-test", org: ORG });
+      await runJob("wholesale-leads", { trigger: "CRON", actor: "wl-test", org: ORG });
+      const kichiHit = await db.query.wholesalePlaceHits.findFirst({ where: eq(schema.wholesalePlaceHits.placeId, "ChIJkichi000000001") });
+      assert.equal(kichiHit?.reason, "CHAIN", "tên khớp danh sách chuỗi ⇒ lọc trước khi tốn lượt chi tiết");
+      assert.equal(await leadByPlace("ChIJkichi000000001"), undefined);
+      assert.ok(!seen.some((x) => x.url.includes("/v1/places/ChIJkichi000000001")), "chuỗi không tốn lượt Place Details");
+      assert.equal((await leadByPlace("ChIJbigsea00000001"))?.filterReason, "TOO_LARGE", "9.000 đánh giá > trần 5.000 ⇒ quá lớn");
+      assert.equal((await leadByPlace("ChIJsmall000000001"))?.enrichmentStatus, "READY", "quán vừa và nhỏ đi tiếp");
+      await changeCampaignStateCore(admin, c6.id, "stop").catch(() => undefined);
+
+      // ── Chế độ chỉ dùng miễn phí: hết lượt miễn phí của SKU ⇒ tự dừng TRƯỚC lượt gọi, không phát sinh tiền ──
+      const usedPro = Number((await db.select({ n: count() }).from(schema.wholesaleApiUsage).where(and(eq(schema.wholesaleApiUsage.sku, "TEXT_SEARCH_PRO"), eq(schema.wholesaleApiUsage.billable, true))))[0]?.n ?? 0);
+      assert.ok(usedPro > 0);
+      const cfgFree = mergeLeadHunterConfig((await db.query.settings.findFirst({ where: eq(schema.settings.key, "wholesale.leadHunter") }))?.value);
+      await saveLeadHunterConfig({ ...cfgFree, freeTier: { ...cfgFree.freeTier, enabled: true, monthlyCalls: { ...cfgFree.freeTier.monthlyCalls, TEXT_SEARCH_PRO: usedPro } } });
+      const c7 = await createCampaignCore(admin, { ...campInput, name: "Miễn phí", customAreas: "Đà Nẵng: Cẩm Lệ" });
+      assert.ok("ok" in c7 && "ok" in (await startCampaignCore(admin, c7.id)));
+      const callsBefore = seen.length;
+      await runJob("wholesale-leads", { trigger: "CRON", actor: "wl-test", org: ORG });
+      const c7row = await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, c7.id) });
+      assert.equal(c7row?.status, "PAUSED");
+      assert.equal(c7row?.pauseReason, "FREE_TIER");
+      assert.equal(seen.length, callsBefore, "hết lượt miễn phí ⇒ không gọi Google");
+      await changeCampaignStateCore(admin, c7.id, "stop");
+      await saveLeadHunterConfig(cfgFree);
+
       // ── Nhập tệp: +84… trùng 0… đã có ⇒ bỏ qua; số mới ⇒ tạo; số bị chặn ⇒ đếm riêng ──
       const csv = "Tên,SĐT,Địa chỉ,Tỉnh,Website\nHải sản Biển Đông (danh bạ),+84905123456,,Đà Nẵng,\nNhà hàng Sông Hàn,0905 999 888,5 Bạch Đằng,Đà Nẵng,https://songhan.vn\nLẩu Dê nhập tay,0905-222-333,,,\n,0905000000,,,";
       const imp = await importLeadsCore(admin, csv);
@@ -881,6 +958,7 @@ export async function testWholesaleLeadHunter() {
   testScoring();
   testPlanAndCost();
   testScanPriority();
+  testFreeTier();
   testFieldHandoffMessage();
   testDedupeKeys();
   testWebsiteParse();

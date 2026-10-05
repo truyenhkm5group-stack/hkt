@@ -62,6 +62,30 @@ export function nameAddressKey(name: string | null | undefined, address: string 
   return `${n}|${a}`;
 }
 
+/**
+ * Khoá THƯƠNG HIỆU: phần tên của `nameAddressKey` (bỏ từ chung, số thứ tự cơ sở). «Kichi-Kichi Royal City» và «Kichi Kichi
+ * 2» khác khoá — nên đếm chi nhánh bằng khoá này chỉ là chứng cứ phụ; danh sách chuỗi (`chainBrandHit`) mới là chặn chính.
+ */
+export function brandKey(name: string | null | undefined): string | null {
+  const n = foldVietnamese(name)
+    .trim()
+    .split(" ")
+    .filter((w) => w && !NAME_STOPWORDS.has(w) && !/^\d+$/.test(w))
+    .join(" ");
+  return n.replace(/\s/g, "").length < 4 ? null : n;
+}
+
+/** Tên khớp một thương hiệu chuỗi đã khai (so theo TỪ trên tên đã bỏ dấu, gạch nối = khoảng trắng). `null` = không khớp. */
+export function chainBrandHit(name: string | null | undefined, brands: readonly string[]): string | null {
+  const folded = foldVietnamese(name);
+  if (!folded.trim()) return null;
+  for (const b of brands) {
+    const f = foldVietnamese(b).trim();
+    if (f.length >= 2 && folded.includes(` ${f} `)) return b;
+  }
+  return null;
+}
+
 /** Tên có dấu hiệu chuỗi / nhiều cơ sở: «chi nhánh», «CN2», «cơ sở 3», «… - 2». */
 export function branchHint(name: string | null | undefined): boolean {
   const n = foldVietnamese(name);

@@ -5,9 +5,9 @@ import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
 import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
-import { type LeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
+import { freeTierLeft, type LeadHunterConfig, type PlacesSku, skuCostMicros } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
-import { branchHint, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
+import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
 import { learnedAdjustment, scoreLead, type ScoreResult, type SegmentOutcomeStats } from "@/lib/wholesale/scoring";
@@ -173,7 +173,7 @@ export async function rescoreLead(leadId: string, ctx: { cfg: LeadHunterConfig; 
       hasAddress: Boolean(v.address),
       hasName: Boolean(v.name),
     },
-    { areas: ctx.cfg.serviceAreas, thresholds: ctx.cfg.gradeThresholds, learned },
+    { areas: ctx.cfg.serviceAreas, thresholds: ctx.cfg.gradeThresholds, learned, sizeProfile: ctx.cfg.sizeProfile },
   );
   await db
     .update(schema.wholesaleLeads)
@@ -252,6 +252,20 @@ async function upsertSnapshot(place: PlaceRecord, tier: Snapshot["fieldsTier"], 
 }
 
 /** Lead khác (đang sống — không bị lọc / trùng) mang cùng SĐT / tên miền / khoá tên-địa chỉ. Lâu đời nhất thắng. */
+/**
+ * Số địa điểm Google KHÁC NHAU đã thấy mang cùng phần TÊN (khoá tên của `nameAddressKey`, khác địa chỉ) — dấu hiệu chuỗi
+ * nhiều chi nhánh. Chỉ đếm snapshot có số nhà (khoá tên + địa chỉ đủ cụ thể); không có khoá ⇒ 0, không đoán.
+ */
+async function sameNamePlaces(name: string | null, address: string | null): Promise<number> {
+  const key = nameAddressKey(name, address);
+  const namePart = key?.split("|")[0];
+  if (!namePart) return 0;
+  const db = await getDb();
+  const s = schema.wholesalePlaceSnapshots;
+  const [row] = await db.select({ n: sql<string>`count(distinct ${s.placeId})` }).from(s).where(sql`${s.nameKey} like ${`${namePart}|%`}`);
+  return Number(row?.n ?? 0);
+}
+
 export async function findMasterLead(selfId: string | null, key: { phone?: string | null; domain?: string | null; nameKey?: string | null }): Promise<{ id: string; by: "PHONE" | "DOMAIN" | "NAME" } | null> {
   const db = await getDb();
   const l = schema.wholesaleLeads;
@@ -281,14 +295,16 @@ type Ctx = {
   provider: DiscoveryProvider | null;
   enricher: EnrichmentProvider;
   stats: SegmentOutcomeStats[];
-  spend: { today: number; month: number; calls: number; dayKey: string; monthKey: string };
+  spend: { today: number; month: number; calls: number; dayKey: string; monthKey: string; monthBySku: Record<string, number> };
   result: TickResult;
   stop: PauseReason | null;
   sleep: (ms: number) => Promise<void>;
 };
 
 /** Trần trước một lượt gọi tính tiền. `null` = được gọi. */
-function budgetBlock(ctx: Ctx, sku: Parameters<typeof skuCostMicros>[0]): PauseReason | null {
+function budgetBlock(ctx: Ctx, sku: PlacesSku): PauseReason | null {
+  // Chế độ chỉ dùng miễn phí: chặn TRƯỚC lượt làm vượt hạn mức của đúng SKU sắp gọi (Google tính theo SKU, không theo tiền).
+  if (ctx.cfg.freeTier.enabled && freeTierLeft(ctx.cfg, sku, ctx.spend.monthBySku[sku] ?? 0) <= 0) return "FREE_TIER";
   const cost = skuCostMicros(sku, ctx.cfg);
   const dayCap = Math.round(ctx.cfg.budget.dailyUsd * 1_000_000);
   const monthCap = Math.round(ctx.cfg.budget.monthlyUsd * 1_000_000);
@@ -298,7 +314,8 @@ function budgetBlock(ctx: Ctx, sku: Parameters<typeof skuCostMicros>[0]): PauseR
   return null;
 }
 
-function charge(ctx: Ctx, costMicros: number) {
+function charge(ctx: Ctx, costMicros: number, sku: PlacesSku, billable: boolean) {
+  if (billable) ctx.spend.monthBySku[sku] = (ctx.spend.monthBySku[sku] ?? 0) + 1;
   ctx.spend.today += costMicros;
   ctx.spend.month += costMicros;
   ctx.spend.calls += 1;
@@ -333,17 +350,29 @@ async function pauseRunning(ctx: Ctx, reason: PauseReason, detail: string): Prom
 async function autoResume(ctx: Ctx): Promise<void> {
   const db = await getDb();
   const c = schema.wholesaleCampaigns;
-  const paused = await db.select().from(c).where(and(eq(c.status, "PAUSED"), inArray(c.pauseReason, ["BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT"])));
+  const paused = await db.select().from(c).where(and(eq(c.status, "PAUSED"), inArray(c.pauseReason, ["BUDGET_DAILY", "BUDGET_MONTHLY", "REQUEST_LIMIT", "FREE_TIER"])));
   const now = ctx.now();
   const nowKeys = periodKeys(now);
   for (const camp of paused) {
     if (!camp.pausedAt) continue;
     const at = periodKeys(camp.pausedAt);
-    const reset = camp.pauseReason === "BUDGET_MONTHLY" ? at.month !== nowKeys.month : at.day !== nowKeys.day;
+    const monthly = camp.pauseReason === "BUDGET_MONTHLY" || camp.pauseReason === "FREE_TIER";
+    const reset = monthly ? at.month !== nowKeys.month : at.day !== nowKeys.day;
     if (!reset) continue;
-    if (budgetBlock(ctx, "TEXT_SEARCH_PRO")) continue; // vẫn chạm trần ⇒ chờ
+    if (budgetBlock(ctx, searchSkuOf(camp.searchMode, camp.discoveryTier))) continue; // vẫn chạm trần ⇒ chờ
     await db.update(c).set({ status: "RUNNING", pauseReason: null, pausedAt: null, lastError: null, updatedAt: now }).where(and(eq(c.id, camp.id), eq(c.status, "PAUSED")));
   }
+}
+
+function searchSkuOf(searchMode: string, discoveryTier: string): PlacesSku {
+  const tier = discoveryTier as "IDS_ONLY" | "PRO" | "ENTERPRISE";
+  if (searchMode === "NEARBY") return tier === "ENTERPRISE" ? "NEARBY_SEARCH_ENTERPRISE" : "NEARBY_SEARCH_PRO";
+  return tier === "IDS_ONLY" ? "TEXT_SEARCH_IDS" : tier === "PRO" ? "TEXT_SEARCH_PRO" : "TEXT_SEARCH_ENTERPRISE";
+}
+
+function blockDetail(ctx: Ctx, reason: PauseReason, sku: PlacesSku): string {
+  if (reason === "FREE_TIER") return `Đã dùng ${ctx.spend.monthBySku[sku] ?? 0}/${ctx.cfg.freeTier.monthlyCalls[sku] ?? 0} lượt miễn phí ${sku} tháng này (giữ ${Math.round(ctx.cfg.freeTier.safetyPct * 100)}% dự phòng).`;
+  return `Đã chi ${(ctx.spend.today / 1e6).toFixed(2)} US$ hôm nay / ${(ctx.spend.month / 1e6).toFixed(2)} US$ tháng này, ${ctx.spend.calls} lượt gọi hôm nay.`;
 }
 
 async function campaignIsRunning(id: string): Promise<boolean> {
@@ -434,6 +463,15 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
       await setHit("FILTERED", "EXCLUDED_KEYWORD", null);
       return "FILTERED";
     }
+    // Chuỗi lớn / nơi quá đông — lọc TRƯỚC khi tốn lượt chi tiết (mức PRO) và trước khi thành lead.
+    if (ctx.cfg.chainFilter.enabled && chainBrandHit(place.name, ctx.cfg.chainFilter.brands)) {
+      await setHit("FILTERED", "CHAIN", null);
+      return "FILTERED";
+    }
+    if (ctx.cfg.maxReviews != null && place.reviewCount != null && place.reviewCount > ctx.cfg.maxReviews) {
+      await setHit("FILTERED", "TOO_LARGE", null);
+      return "FILTERED";
+    }
     if (camp.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
       await setHit("FILTERED", "SEGMENT", null);
       return "FILTERED";
@@ -502,6 +540,12 @@ export async function finalizeLead(ctx: Pick<Ctx, "cfg" | "now" | "stats">, lead
   };
   if (await suppressionHit({ placeId: lead.placeId, phone: v.phone, domain })) return filter("SUPPRESSED");
   if (v.businessStatus === "CLOSED_PERMANENTLY") return filter("CLOSED");
+  // Chỉ lead do MÁY tìm (Google) mới bị lọc chuỗi / quy mô; lead nhân viên nhập tay là quyết định của người.
+  if (lead.source === "GOOGLE_PLACES") {
+    if (ctx.cfg.chainFilter.enabled && chainBrandHit(v.name, ctx.cfg.chainFilter.brands)) return filter("CHAIN");
+    if (ctx.cfg.maxReviews != null && v.reviewCount != null && v.reviewCount > ctx.cfg.maxReviews) return filter("TOO_LARGE");
+    if (ctx.cfg.chainFilter.enabled && (await sameNamePlaces(v.name, v.address)) > ctx.cfg.chainFilter.maxSameName) return filter("CHAIN");
+  }
   if (camp) {
     if (camp.requirePhone && !v.phone) return filter("NO_PHONE");
     if (camp.requireWebsite && !v.website) return filter("NO_WEBSITE");
@@ -558,13 +602,13 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
   if (!claimed) return "NO_CELL";
   const tier = camp.discoveryTier as "IDS_ONLY" | "PRO" | "ENTERPRISE";
   const mode = claimed.cell.searchMode === "NEARBY" ? "NEARBY" : "TEXT";
-  const sku = mode === "NEARBY" ? (tier === "ENTERPRISE" ? "NEARBY_SEARCH_ENTERPRISE" : "NEARBY_SEARCH_PRO") : tier === "IDS_ONLY" ? "TEXT_SEARCH_IDS" : tier === "PRO" ? "TEXT_SEARCH_PRO" : "TEXT_SEARCH_ENTERPRISE";
+  const sku = searchSkuOf(mode, tier);
   const release = (extra: Partial<typeof cc.$inferInsert>) => db.update(cc).set({ status: "PENDING", lockedUntil: null, updatedAt: ctx.now(), ...extra }).where(eq(cc.id, claimed.id));
 
   const blocked = budgetBlock(ctx, sku);
   if (blocked) {
     await release({});
-    await pauseRunning(ctx, blocked, `Đã chi ${(ctx.spend.today / 1e6).toFixed(2)} US$ hôm nay / ${(ctx.spend.month / 1e6).toFixed(2)} US$ tháng này, ${ctx.spend.calls} lượt gọi hôm nay.`);
+    await pauseRunning(ctx, blocked, blockDetail(ctx, blocked, sku));
     return "STOP";
   }
   if (!(await campaignIsRunning(camp.id))) {
@@ -577,7 +621,7 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
       ? await ctx.provider.search({ mode: "NEARBY", tier, includedTypes: claimed.cell.keyword.split("+").filter(Boolean), center: { lat: camp.nearbyLat ?? 0, lng: camp.nearbyLng ?? 0 }, radiusM: camp.radiusM ?? 1000 })
       : await ctx.provider.search({ mode: "TEXT", textQuery: claimed.cell.queryText, tier, pageToken: claimed.pageToken });
   const cost = page.meta.billable ? skuCostMicros(sku, ctx.cfg) : 0;
-  charge(ctx, cost);
+  charge(ctx, cost, sku, page.meta.billable);
 
   if (!page.ok) {
     await recordUsage({ provider: "GOOGLE_PLACES", method: mode === "NEARBY" ? "NEARBY_SEARCH" : "TEXT_SEARCH", sku, campaignId: camp.id, cellId: claimed.cell.id, query: claimed.cell.queryText, httpStatus: page.meta.httpStatus, ok: false, billable: page.meta.billable, attempts: page.meta.attempts, durationMs: page.meta.durationMs, costMicros: cost, error: page.message, at: ctx.now() });
@@ -653,7 +697,7 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   if (!ctx.provider || !lead.placeId) return "STOP";
   const blocked = budgetBlock(ctx, "DETAILS_ENTERPRISE");
   if (blocked) {
-    await pauseRunning(ctx, blocked, `Đã chi ${(ctx.spend.today / 1e6).toFixed(2)} US$ hôm nay / ${(ctx.spend.month / 1e6).toFixed(2)} US$ tháng này.`);
+    await pauseRunning(ctx, blocked, blockDetail(ctx, blocked, "DETAILS_ENTERPRISE"));
     ctx.stop = blocked;
     return "STOP";
   }
@@ -661,7 +705,7 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   const full = !snap || snap.fieldsTier === "IDS_ONLY" || Boolean(snap.purgedAt);
   const r = await ctx.provider.details(lead.placeId, full);
   const cost = r.meta.billable ? skuCostMicros("DETAILS_ENTERPRISE", ctx.cfg) : 0;
-  charge(ctx, cost);
+  charge(ctx, cost, "DETAILS_ENTERPRISE", r.meta.billable);
   await recordUsage({ provider: "GOOGLE_PLACES", method: "PLACE_DETAILS", sku: "DETAILS_ENTERPRISE", campaignId: lead.sourceCampaignId, leadId: lead.id, query: lead.placeId, httpStatus: r.meta.httpStatus, ok: r.ok, billable: r.meta.billable, attempts: r.meta.attempts, resultCount: r.ok ? 1 : 0, durationMs: r.meta.durationMs, costMicros: cost, error: r.ok ? null : r.message, at: ctx.now() });
   if (!r.ok) {
     if (r.kind === "AUTH") {
@@ -823,7 +867,7 @@ export async function runLeadHunterTick(opts: TickOptions = {}, deps: TickDeps =
     provider: deps.provider ?? null,
     enricher: deps.enricher ?? websiteEnrichmentProvider(deps.website),
     stats: await segmentOutcomeStats(),
-    spend: { today: spendNow.todayMicros, month: spendNow.monthMicros, calls: spendNow.callsToday, dayKey: keys.day, monthKey: keys.month },
+    spend: { today: spendNow.todayMicros, month: spendNow.monthMicros, calls: spendNow.callsToday, dayKey: keys.day, monthKey: keys.month, monthBySku: { ...spendNow.monthCallsBySku } },
     result,
     stop: null,
     sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),

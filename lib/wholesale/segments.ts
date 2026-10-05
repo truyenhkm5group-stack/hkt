@@ -12,6 +12,10 @@
  */
 
 export const LEAD_SEGMENTS = [
+  "SPECIALTY_STORE",
+  "MOM_BABY",
+  "GROCERY",
+  "EATERY",
   "SEAFOOD_RESTAURANT",
   "HOTPOT",
   "BBQ",
@@ -33,6 +37,10 @@ export function isLeadSegmentKey(v: unknown): v is LeadSegment {
 }
 
 export const LEAD_SEGMENT_LABEL: Record<LeadSegment, string> = {
+  SPECIALTY_STORE: "Cửa hàng đặc sản / đồ khô / quà biếu",
+  MOM_BABY: "Cửa hàng mẹ & bé",
+  GROCERY: "Tạp hoá / cửa hàng thực phẩm nhỏ",
+  EATERY: "Quán ăn / quán cơm / bún chả cá",
   SEAFOOD_RESTAURANT: "Nhà hàng hải sản",
   HOTPOT: "Lẩu",
   BBQ: "Nướng / BBQ",
@@ -49,21 +57,26 @@ export const LEAD_SEGMENT_LABEL: Record<LeadSegment, string> = {
 };
 
 /**
- * Hai điểm thành phần theo nhóm: `fit` (0–30) = khả năng cần nhập hải sản / thực phẩm THƯỜNG XUYÊN;
- * `intent` (0–15) = mức ưu tiên mua sỉ theo kinh nghiệm bán hàng của HSLC (hải sản / lẩu / nướng /
- * buffet / tiệc cao nhất). Đây là BẢNG CHẤM của chủ shop — sửa ở đây, có bài kiểm khoá trần.
+ * Hai điểm thành phần theo nhóm: `fit` (0–30) = khả năng bán lại / dùng hàng của HSLC (chả mực, chả cá, nem hải sản,
+ * ruốc, nước mắm — đặc sản đóng gói); `intent` (0–15) = khả năng mua sỉ KHÔNG cần hoá đơn VAT lúc này. Chủ shop chốt
+ * 05/10/2026: ưu tiên cửa hàng / quán vừa và nhỏ; chuỗi, khách sạn, tiệc, buffet thường đòi hoá đơn nên xuống cuối.
+ * Đây là BẢNG CHẤM của chủ shop — sửa ở đây, có bài kiểm khoá trần.
  */
 export const SEGMENT_POINTS: Record<LeadSegment, { fit: number; intent: number }> = {
-  SEAFOOD_RESTAURANT: { fit: 30, intent: 15 },
-  BUFFET: { fit: 28, intent: 15 },
-  HOTPOT: { fit: 27, intent: 14 },
-  CATERING: { fit: 26, intent: 14 },
-  BBQ: { fit: 25, intent: 13 },
-  FROZEN_FOOD_STORE: { fit: 24, intent: 12 },
-  PUB_BEER: { fit: 22, intent: 10 },
-  HOTEL_RESORT: { fit: 18, intent: 9 },
+  SPECIALTY_STORE: { fit: 30, intent: 15 },
+  SEAFOOD_RESTAURANT: { fit: 28, intent: 13 },
+  FROZEN_FOOD_STORE: { fit: 27, intent: 13 },
+  PUB_BEER: { fit: 24, intent: 12 },
+  MOM_BABY: { fit: 22, intent: 11 },
+  GROCERY: { fit: 22, intent: 10 },
+  EATERY: { fit: 22, intent: 10 },
+  HOTPOT: { fit: 20, intent: 9 },
+  BBQ: { fit: 16, intent: 7 },
   RESTAURANT: { fit: 16, intent: 7 },
-  SUPERMARKET: { fit: 15, intent: 6 },
+  BUFFET: { fit: 12, intent: 4 },
+  SUPERMARKET: { fit: 12, intent: 4 },
+  CATERING: { fit: 10, intent: 3 },
+  HOTEL_RESORT: { fit: 6, intent: 2 },
   OTHER_FOOD: { fit: 4, intent: 0 },
   NOT_FIT: { fit: 0, intent: 0 },
   UNCLASSIFIED: { fit: 6, intent: 2 },
@@ -90,11 +103,16 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
   motel: "HOTEL_RESORT",
   inn: "HOTEL_RESORT",
   supermarket: "SUPERMARKET",
-  grocery_store: "SUPERMARKET",
-  food_store: "SUPERMARKET",
-  market: "SUPERMARKET",
-  asian_grocery_store: "SUPERMARKET",
-  convenience_store: "SUPERMARKET",
+  hypermarket: "SUPERMARKET",
+  grocery_store: "GROCERY",
+  food_store: "GROCERY",
+  market: "GROCERY",
+  asian_grocery_store: "GROCERY",
+  convenience_store: "GROCERY",
+  butcher_shop: "FROZEN_FOOD_STORE",
+  health_food_store: "FROZEN_FOOD_STORE",
+  gift_shop: "SPECIALTY_STORE",
+  baby_store: "MOM_BABY",
   restaurant: "RESTAURANT",
   vietnamese_restaurant: "RESTAURANT",
   chinese_restaurant: "RESTAURANT",
@@ -128,6 +146,9 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
  * Từ khoá KHÔNG dấu (vd «hai san», «buffet») khớp trên chuỗi đã bỏ dấu, nên tên có / không dấu đều nhận.
  */
 const NAME_RULES: { segment: LeadSegment; words: string[] }[] = [
+  // Đặc sản / đồ khô ĐỨNG TRƯỚC hải sản: «Hải sản khô Hạ Long» là cửa hàng bán lại, không phải nhà hàng.
+  { segment: "SPECIALTY_STORE", words: ["dac san", "qua bieu", "qua que", "cha muc", "ruoc", "cha bong", "hai san kho", "do kho", "nuoc mam"] },
+  { segment: "MOM_BABY", words: ["me va be", "me be", "mẹ bé", "baby", "an dam"] },
   { segment: "SEAFOOD_RESTAURANT", words: ["hai san", "seafood", "ốc", "tom hum", "cua ghe"] },
   { segment: "BUFFET", words: ["buffet"] },
   { segment: "HOTPOT", words: ["lẩu", "hotpot", "hot pot"] },
@@ -136,7 +157,9 @@ const NAME_RULES: { segment: LeadSegment; words: string[] }[] = [
   { segment: "FROZEN_FOOD_STORE", words: ["dong lanh", "frozen", "thuc pham sach", "thuc pham tuoi", "kho lanh"] },
   { segment: "PUB_BEER", words: ["quán nhậu", "nhậu", "beer", "bia hơi", "pub"] },
   { segment: "HOTEL_RESORT", words: ["resort", "hotel", "khach san"] },
-  { segment: "SUPERMARKET", words: ["sieu thi", "mart", "minimart", "bach hoa"] },
+  { segment: "GROCERY", words: ["tạp hoá", "tạp hóa", "minimart", "mini mart", "cua hang thuc pham"] },
+  { segment: "EATERY", words: ["quán cơm", "com binh dan", "com van phong", "bun cha ca", "bun ca", "banh da ca", "quán ăn"] },
+  { segment: "SUPERMARKET", words: ["sieu thi", "mart", "bach hoa"] },
 ];
 
 /** Chữ thường, NFC, mọi ký tự không phải chữ / số thành khoảng trắng — giữ nguyên DẤU. */
