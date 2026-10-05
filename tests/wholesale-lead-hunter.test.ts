@@ -915,6 +915,12 @@ async function testDb() {
       const cb = await logCallCore(admin, pubLead.id, { outcome: "CALLBACK", note: "Gọi lại chiều mai" });
       assert.ok("ok" in cb && cb.status === "CONTACTED" && cb.nextFollowupAt, JSON.stringify(cb));
       assert.equal(new Date(cb.nextFollowupAt!).toISOString().slice(11, 16), "02:00", "hẹn gọi lại mặc định 9 giờ sáng giờ VN");
+      // Danh sách lead hiện ghi chú gần nhất + kết quả cuộc gọi ngay trên dòng (không phải mở từng khách).
+      const listed = await listWholesaleLeads(parseListParams({ q: "Cây Dừa" }, { defaultSort: "leadScore", filterKeys: ["view"] }), dAll, admin.id);
+      const pubRow = listed.rows.find((x) => x.id === pubLead.id);
+      assert.equal(pubRow?.lastNote, "Gọi lại chiều mai", JSON.stringify(pubRow));
+      assert.equal(pubRow?.lastNoteOutcome, "CALLBACK");
+      assert.ok(pubRow?.lastNoteAt);
       // Hẹn đã QUÁ HẠN ⇒ đứng đầu hàng đợi «Cần gọi»; vừa gọi trong 2 giờ ⇒ «khách tiếp theo» bỏ qua.
       await db.update(schema.wholesaleLeads).set({ nextFollowupAt: new Date(Date.now() - 3_600_000) }).where(eq(schema.wholesaleLeads.id, pubLead.id));
       const queue = await mobileQueue(dAll, "call", "");

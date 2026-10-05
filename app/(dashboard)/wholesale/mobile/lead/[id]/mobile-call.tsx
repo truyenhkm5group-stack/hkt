@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logCallAction, logCallInitiatedAction } from "@/lib/actions/wholesale";
 import { CALL_OUTCOME_ICON, CALL_OUTCOME_LABEL, callOutcomeEffect, MOBILE_CALL_OUTCOMES, QUICK_NOTE_CHIPS, type CallOutcome, type LeadStatus } from "@/lib/wholesale/constants";
 import { cn } from "@/lib/utils";
+import { FOLLOW_OPTIONS, followIso, suggestedFollow, type FollowKey } from "@/lib/wholesale/followup";
 
 export type MobileLeadInfo = {
   id: string;
@@ -38,35 +39,6 @@ function writePending(v: { id: string; at: number } | null) {
   } catch {
     /* chế độ riêng tư / chặn lưu trữ — bảng kết quả vẫn mở bằng nút «Ghi kết quả» */
   }
-}
-
-const FOLLOW_OPTIONS = [
-  { key: "none", label: "Không hẹn" },
-  { key: "pm", label: "Chiều nay" },
-  { key: "d1", label: "Mai" },
-  { key: "d2", label: "2 ngày" },
-  { key: "d3", label: "3 ngày" },
-  { key: "d7", label: "1 tuần" },
-  { key: "custom", label: "Chọn ngày" },
-] as const;
-type FollowKey = (typeof FOLLOW_OPTIONS)[number]["key"];
-
-/** Mốc theo giờ Việt Nam: `days` ngày nữa lúc `hour` giờ. */
-function vnAt(days: number, hour: number): string {
-  const vn = new Date(Date.now() + 7 * 3_600_000);
-  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate() + days, hour - 7, 0, 0)).toISOString();
-}
-function followIso(k: FollowKey, custom: string): string | null {
-  if (k === "pm") return vnAt(0, 15);
-  if (k === "d1") return vnAt(1, 9);
-  if (k === "d2") return vnAt(2, 9);
-  if (k === "d3") return vnAt(3, 9);
-  if (k === "d7") return vnAt(7, 9);
-  if (k === "custom" && /^\d{4}-\d{2}-\d{2}$/.test(custom)) return new Date(`${custom}T09:00:00+07:00`).toISOString();
-  return null;
-}
-function suggestedFollow(days: number | null): FollowKey {
-  return days == null ? "none" : days <= 1 ? "d1" : days === 2 ? "d2" : days <= 3 ? "d3" : "d7";
 }
 
 /**
