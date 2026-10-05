@@ -504,25 +504,24 @@ async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
 }
 
 /**
- * Trần tin của MỘT khách trong 10 phút — chống một người nhắn dồn dập làm tốn tiền của shop.
+ * Trần tin của MỘT khách trong 10 phút — chống một người nhắn dồn dập làm tốn tiền của shop. Chạm trần ⇒ bot IM LẶNG, không
+ * gửi câu báo nào cho khách.
  *
  * KHÔNG có trần chung cả tổ chức theo ngày (bỏ 05/10/2026, chủ shop chốt): trần cũ cộng `turns` TRỌN ĐỜI của mọi hội thoại
  * có tin trong 24 giờ, nên vài chục khách quen Messenger đủ chạm 500 và từ đó MỌI khách thật nhận câu «quá tải» mà không ai
  * được báo gọi lại. Chặn cả cửa hàng vì một ngày đông khách là chặn đúng thứ bot sinh ra để làm.
  */
-async function webRateProblem(conv: ConvRow): Promise<string | null> {
+async function overVisitorRate(conv: ConvRow): Promise<boolean> {
   const db = await getDb();
   const m = schema.salesChatMessages;
   const c = schema.salesChatConversations;
-  if (conv.visitorKey) {
-    const [r] = await db
+  if (!conv.visitorKey) return false;
+  const [r] = await db
       .select({ n: sql<number>`count(*)` })
-      .from(m)
-      .innerJoin(c, eq(c.id, m.conversationId))
-      .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
-    if (Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min) return "Anh/chị nhắn nhanh quá — đợi vài phút rồi nhắn tiếp giúp em nhé.";
-  }
-  return null;
+    .from(m)
+    .innerJoin(c, eq(c.id, m.conversationId))
+    .where(and(eq(c.visitorKey, conv.visitorKey), eq(m.role, "user"), gte(m.createdAt, new Date(Date.now() - 10 * 60_000)), sql`${m.content}->0->>'type' = 'text'`));
+  return Number(r?.n ?? 0) >= SALES_CHATBOT_LIMITS.webMessagesPerVisitorPer10Min;
 }
 
 /**
@@ -602,13 +601,9 @@ async function chatTurnCore(conversationId: string, rawText: string, opts: { cha
       await bump({ status: "HANDOFF", handoffReason: "Hội thoại quá dài", turns: conv.turns + 1 });
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (isPublicChannel(opts.channel)) {
-      const limited = await webRateProblem(conv);
-      if (limited) {
-        await reply(conv, seq, limited);
-        return { ok: true, view: (await conversationView(conv.id))! };
-      }
-    }
+    // Chạm trần ⇒ IM LẶNG (chủ shop 05/10/2026): không nhắn «nhắn nhanh quá» / «quá tải» — câu như vậy làm khách bỏ đi. Tin
+    // của khách vẫn đã ghi ở trên; nhân viên đọc được trong hộp thư như mọi tin khác.
+    if (isPublicChannel(opts.channel) && (await overVisitorRate(conv))) return { ok: true, view: (await conversationView(conv.id))! };
     // CÂU TRẢ LỜI MẪU (0183 · lib/sales-chatbot/quick-replies.ts): khớp CHỮ trước — 0 token. Khách đang có đơn nháp chưa
     // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
     const qrSettings = await loadQuickReplySettings();
