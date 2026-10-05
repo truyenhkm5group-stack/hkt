@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -10,6 +10,7 @@ import type { ChatView } from "@/lib/sales-chatbot/config";
 import { conversationView } from "@/lib/sales-chatbot/engine";
 import { armStats, type ArmRaw, type ArmStats, type DrillFilter } from "@/lib/sales-chatbot/experiment-shared";
 import { BOT_CONFIRMED, HUMAN_TOUCHED } from "@/lib/sales-chatbot/events-sql";
+import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
 import { loadModeConfig } from "@/lib/sales-chatbot/operating-mode";
 import { loadOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
 
@@ -112,10 +113,13 @@ export async function listDrillConversations(user: SessionUser, f: DrillFilter, 
     .groupBy(e.conversationId)
     .having(and(...conds));
   const LIMIT = 200;
+  // Lý do không mua là phân loại LÚC ĐỌC (không có cột) ⇒ lấy đúng tập hội thoại của bảng «Vì sao khách không mua».
+  const lostIds = f.lost ? ((await loadLostReasons({ days: f.days, now })).idsByReason[f.lost] ?? []) : null;
+  if (lostIds && lostIds.length === 0) return { ok: true, rows: [], truncated: false };
   const rows = await db
     .select({ id: c.id, channel: c.channel, status: c.status, turns: c.turns, stage: sql<string | null>`${c.state}->>'stage'`, handoffReason: c.handoffReason, orderId: c.orderId, updatedAt: c.updatedAt, arm: sql<string | null>`${c.state}->'experiment'->>'arm'` })
     .from(c)
-    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : [])))
+    .where(and(sql`${c.id} in ${ids}`, ...(f.arm ? [sql`${c.state}->'experiment'->>'arm' = ${f.arm}`] : []), ...(lostIds ? [inArray(c.id, lostIds)] : [])))
     .orderBy(desc(c.updatedAt))
     .limit(LIMIT + 1);
   return { ok: true, truncated: rows.length > LIMIT, rows: rows.slice(0, LIMIT).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() })) };

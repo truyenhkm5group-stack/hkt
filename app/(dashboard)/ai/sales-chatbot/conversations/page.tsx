@@ -8,6 +8,7 @@ import { HANDOFF_REASON_LABEL, type HandoffReasonCode } from "@/lib/sales-chatbo
 import { listDrillConversations } from "@/lib/sales-chatbot/experiment-report";
 import { DRILL_PERIODS, drillHref, parseDrillFilter } from "@/lib/sales-chatbot/experiment-shared";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
+import { LOST_REASON_LABEL } from "@/lib/sales-chatbot/lost-reasons-shared";
 
 export const metadata = { title: "Hội thoại theo chỉ số" };
 
@@ -28,6 +29,7 @@ export default async function DrillConversationsPage({ searchParams }: { searchP
     f.reason ? `Chuyển người: ${HANDOFF_REASON_LABEL[f.reason as HandoffReasonCode] ?? f.reason}` : null,
     f.arm ? ARM_LABEL[f.arm] : null,
     f.confirmed ? "Có đơn chốt" : null,
+    f.lost ? `Không mua: ${LOST_REASON_LABEL[f.lost]}` : null,
   ].filter(Boolean);
   return (
     <div className="space-y-5">

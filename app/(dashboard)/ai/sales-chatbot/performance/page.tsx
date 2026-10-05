@@ -13,6 +13,7 @@ import { loadBasketStats } from "@/lib/sales-chatbot/basket";
 import { drillHref } from "@/lib/sales-chatbot/experiment-shared";
 import { loadOrderAttribution } from "@/lib/sales-chatbot/attribution";
 import { ORDER_ATTRIBUTIONS, ORDER_ATTRIBUTION_LABEL } from "@/lib/sales-chatbot/attribution-shared";
+import { loadLostReasons } from "@/lib/sales-chatbot/lost-reasons";
 
 export const metadata = { title: "Hiệu quả AI bán hàng" };
 
@@ -62,6 +63,7 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
   const experiment = await loadExperimentReport();
   const basket = await loadBasketStats({ days });
   const attr = await loadOrderAttribution({ days });
+  const lost = await loadLostReasons({ days });
   const t = r.cohorts.total;
   const coveragePct = r.coverage.conversationsActive > 0 ? (r.coverage.conversationsWithEvents / r.coverage.conversationsActive) * 100 : null;
   const unavailable = AI_SALES_METRICS.filter((m) => m.availability === "UNAVAILABLE");
@@ -231,6 +233,37 @@ export default async function AiSalesPerformancePage({ searchParams }: { searchP
               <Stat label="giá trị đơn bot chốt trung bình" value={formatVND(r.economics.aovVnd)} />
               <Stat label="doanh thu đã giao / hội thoại" value={formatVND(r.economics.deliveredRevenuePerConversationVnd)} sub={`${formatNumber(t.conversations)} hội thoại`} />
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Vì sao khách không mua"
+            description={`${formatNumber(lost.lost)} hội thoại không mua · ${formatNumber(lost.ordered)} có đơn · ${formatNumber(lost.open)} chưa ngã ngũ (khách nhắn trong 24 giờ qua)`}
+            hint={
+              <div className="space-y-1.5 text-xs leading-5">
+                <p>Khách TỪ CHỐI RÕ: lý do đọc từ câu bot ghi lại, xếp nhóm bằng từ khoá (không khớp ⇒ «lý do khác»). Khách IM quá 24 giờ (bot không còn được nhắn): nhóm «im lặng» là SUY RA, không phải lời khách.</p>
+                <p>«Chuyển người, ERP không thấy đơn» không có nghĩa là mất khách — nhân viên có thể đã bán trên kênh khác. Bấm một dòng để đọc lại đúng các hội thoại đó.</p>
+              </div>
+            }
+          >
+            {lost.rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Chưa có hội thoại nào ngã ngũ mà không mua trong kỳ.</p>
+            ) : (
+              <table className="w-full text-sm" data-testid="ai-perf-lost">
+                <tbody>
+                  {lost.rows.map((row) => (
+                    <tr key={row.code} className="border-b last:border-0">
+                      <td className="py-1.5 pr-3">
+                        <Link href={drillHref({ days, lost: row.code })} className="underline-offset-2 hover:underline">
+                          {row.label}
+                        </Link>
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{formatNumber(row.count)}</td>
+                      <td className="w-14 py-1.5 text-right text-xs tabular-nums text-muted-foreground">{formatPercent(pctOf(row.share), 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </SectionCard>
 
           {r.cost ? (
