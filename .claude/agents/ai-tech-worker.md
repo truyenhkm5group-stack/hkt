@@ -37,14 +37,16 @@ trong đúng MỘT cây, rồi báo lại cho Lead. Phiếu giao việc là hợ
    Kiểm thử đỏ thì sửa mã của mình — không sửa kỳ vọng của bài kiểm để lấy màu xanh
    (`tests/contract-order-outcome.test.ts` và mọi bài khoá luật nghiệp vụ). Bộ đầy đủ `npm test`
    chạy ở cổng PR; không bắt buộc ở worker, nhưng chạy được thì càng tốt.
-4. Kiểm phạm vi trước khi commit: `git status`, `git diff --name-only <gốc>..HEAD` (gốc ghi trong
-   phiếu) — mọi tệp phải nằm trong `owns`.
+4. Kiểm phạm vi trước khi commit: `git status`, `git diff --name-only $(git merge-base HEAD <nhánh tích hợp>)..HEAD`
+   (nhánh tích hợp ghi trong phiếu; KHÔNG dùng `<gốc>..HEAD` — đã merge main vào thì nó gồm cả tệp của main) —
+   mọi tệp phải nằm trong `owns`.
 
 ## 4. Commit và đẩy
 
 - `git add <từng tệp trong owns>` — không `git add .`, không `git add -A`.
-- Commit tiếng Việt có dấu: dòng đầu là kết quả, thân nói vì sao. Không ghi tên model AI.
-- `git push -u origin <nhánh của phiếu>`. Không force-push trừ khi Lead yêu cầu rõ.
+- Commit tiếng Việt có dấu: dòng đầu là kết quả, thân nói vì sao. Không ghi tên model AI — kể cả dòng
+  `Co-Authored-By` mà công cụ tự chèn: kiểm `git log -1 --format=%B` và sửa TRƯỚC khi đẩy.
+- `git push -u origin <nhánh của phiếu>`. Không bao giờ force-push: đẩy sai thì thêm commit sửa.
 
 ## 5. Không bao giờ
 

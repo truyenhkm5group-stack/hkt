@@ -19,9 +19,10 @@ Sứ mệnh + việc, cây và nhánh của worker, `baseSha`. Thiếu thì tự
 (từ cây Lead) hoặc đọc `.ai/missions/<sứ-mệnh>.json` để có `owns`, `doNotTouch`, `risk`, `tests`.
 
 ## Quy trình
-1. Phạm vi: `npm run ai -- ready <sứ-mệnh> <việc>` hoặc `git -C <cây> diff --name-only <baseSha>..HEAD`.
+1. Phạm vi: `npm run ai -- ready <sứ-mệnh> <việc>` hoặc `git -C <cây> diff --name-only $(git -C <cây> merge-base HEAD <nhánh tích hợp>)..HEAD`
+   (không dùng `<baseSha>..HEAD`: worker đã merge main vào thì nó gồm cả tệp của main).
    Mọi tệp ngoài `owns`, chạm `doNotTouch` hay `.ai/` là phát hiện CHẶN.
-2. Đọc TOÀN BỘ diff (`git diff <baseSha>..HEAD`) và đủ bối cảnh quanh từng thay đổi (hàm gọi, nơi dùng).
+2. Đọc TOÀN BỘ diff (`git diff <merge-base>..HEAD`) và đủ bối cảnh quanh từng thay đổi (hàm gọi, nơi dùng).
 3. Đọc `AGENTS.md` (mục 0, 3, 4, 9) và `docs/business-rules/ORDER_OUTCOME.md` khi diff chạm đơn, vận đơn,
    COD, doanh thu, tồn kho, lương, marketing hay báo cáo.
 4. Kiểm từng trục bên dưới; mỗi phát hiện phải chỉ ra được dòng cụ thể.
