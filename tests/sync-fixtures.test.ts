@@ -471,6 +471,7 @@ import { testSalesOrderSync } from "./sales-order-sync.test";
 import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
+import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
@@ -2725,6 +2726,8 @@ async function main() {
   // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
   await testSalesOperatingMode();
   await testSalesInbox();
+  // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
+  await testInboxAdvanced();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
   // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.

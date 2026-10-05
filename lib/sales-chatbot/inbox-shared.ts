@@ -4,6 +4,8 @@
  * Tệp THUẦN (không CSDL): trang hộp thư (client) chỉ được `import` từ đây; lõi đọc / ghi ở `lib/sales-chatbot/inbox.ts`.
  */
 
+import type { CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
+
 export const INBOX_FILTERS = ["ALL", "UNREAD", "UNANSWERED", "NEEDS_HUMAN", "MINE", "UNASSIGNED"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
@@ -14,6 +16,13 @@ export const INBOX_FILTER_LABEL: Record<InboxFilter, string> = {
   MINE: "Của tôi",
   UNASSIGNED: "Chưa ai nhận",
 };
+
+/** Lọc theo mốc TIN cuối của hội thoại (giờ Việt Nam). `CUSTOM` = khoảng ngày người chọn. */
+export const INBOX_PERIODS = ["TODAY", "YESTERDAY", "7D", "30D", "CUSTOM"] as const;
+export type InboxPeriod = (typeof INBOX_PERIODS)[number];
+export const INBOX_PERIOD_LABEL: Record<InboxPeriod, string> = { TODAY: "Hôm nay", YESTERDAY: "Hôm qua", "7D": "7 ngày", "30D": "30 ngày", CUSTOM: "Khoảng ngày" };
+/** Trần dòng một lần tải danh sách («Xem thêm» nâng dần tới đây). */
+export const INBOX_LIST_MAX = 500;
 
 export const INBOX_CHANNELS = ["FANPAGE", "ZALO", "WEB"] as const;
 export type InboxChannel = (typeof INBOX_CHANNELS)[number];
@@ -37,6 +46,8 @@ export type InboxRow = {
   assigneeName: string | null;
   hasOrder: boolean;
   labels: InboxLabel[];
+  /** Level khách (job tính — `levels-shared.ts`); `null` = chưa tính. */
+  level: CustomerLevel | null;
 };
 
 /** Ai nói: KHÁCH · BOT · NHÂN VIÊN qua hộp thư ERP (có tên) · PHÍA PAGE ngoài ERP (nhân viên trên Pancake / Hộp thư Meta / Zalo OA, hoặc trả lời tự động). */
@@ -67,6 +78,26 @@ export type SendWindow =
 /** `placeGap` = đơn ERP còn sống chưa ghép được tỉnh / xã (không gửi được hãng vận chuyển, không tự xác nhận) — `null` = đủ. */
 export type InboxOrder = { id: string; shortCode: string; stage: string; outcome: string | null; outcomeLabel: string; total: number; insertedAt: string; byBot: boolean; placeGap: string | null };
 
+/**
+ * Lịch sử mua của khách — kết quả đơn theo `ORDER_OUTCOME` (một công thức, AGENTS 0.2) trên đơn ERP cùng khách / cùng SĐT, cộng
+ * số Pancake ghi nhận (giao thành công / hoàn) nếu có; `risk` = đánh giá rủi ro dùng chung với trang Đơn hàng.
+ */
+export type InboxCustomerHistory = {
+  total: number;
+  delivered: number;
+  returned: number;
+  inTransit: number;
+  notShipped: number;
+  cancelled: number;
+  pancakeSucceed: number;
+  pancakeReturned: number;
+  blocked: boolean;
+  risk: { severity: "critical" | "warning"; reasons: string[] } | null;
+};
+
+/** Góp ý của nhân viên cho AI trên hội thoại (0216). */
+export type InboxFeedback = { id: string; userName: string; text: string; lessons: string[]; status: "APPLIED" | "FAILED"; error: string | null; createdAt: string };
+
 export type InboxThread = {
   id: string;
   channel: string;
@@ -89,6 +120,10 @@ export type InboxThread = {
   labels: InboxLabel[];
   allLabels: InboxLabel[];
   notes: InboxNote[];
+  /** Level khách hiện tại + gói ngành (để biết level nào hiện). */
+  level: CustomerLevel | null;
+  history: InboxCustomerHistory | null;
+  feedback: InboxFeedback[];
 };
 
 /** Nhãn kết quả đơn theo `ORDER_OUTCOME` (lib/queries/return-rate.ts) — chỉ để HIỆN, không tính gì. */
