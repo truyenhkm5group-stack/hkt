@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { addLeadsToCampaignAction, assignLeadsAction, markQualifiedAction, queueOutreachAction } from "@/lib/actions/wholesale";
 import { formatDate, formatNumber, formatTimeAgo } from "@/lib/format";
 import type { LeadListRow } from "@/lib/queries/wholesale";
-import { FILTER_REASON_LABEL, LEAD_STATUS_TONE, OUTREACH_CHANNEL_LABEL, OUTREACH_CHANNELS, type OutreachChannel } from "@/lib/wholesale/constants";
+import { CALL_OUTCOME_LABEL, type CallOutcome, FILTER_REASON_LABEL, LEAD_STATUS_TONE, OUTREACH_CHANNEL_LABEL, OUTREACH_CHANNELS, type OutreachChannel } from "@/lib/wholesale/constants";
 import { cn } from "@/lib/utils";
+import { LeadQuickLog } from "@/app/(dashboard)/wholesale/leads/lead-quick-log";
 import type { FieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { HandoffPanel } from "@/app/(dashboard)/wholesale/leads/handoff-panel";
 
@@ -114,28 +115,47 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
   },
   {
     id: "lastContactAt",
-    header: "Liên hệ gần nhất",
+    header: "Liên hệ & ghi chú",
     cell: ({ row }) => {
       const r = row.original;
       return (
-        <div className="min-w-[130px] text-sm">
+        <div className="min-w-[180px] max-w-[300px] text-sm">
           {r.lastContactAt ? formatTimeAgo(r.lastContactAt) : <span className="text-muted-foreground">Chưa liên hệ</span>}
-          <div className="truncate text-[11px] text-muted-foreground">
-            {r.nextFollowupAt ? `Gọi lại ${formatDate(r.nextFollowupAt)}` : ""}
-            {r.nextAction ? `${r.nextFollowupAt ? " · " : ""}${r.nextAction}` : ""}
-          </div>
+          {r.nextFollowupAt || r.nextAction ? (
+            <div className="truncate text-[11px] text-muted-foreground">
+              {r.nextFollowupAt ? `Gọi lại ${formatDate(r.nextFollowupAt)}` : ""}
+              {r.nextAction ? `${r.nextFollowupAt ? " · " : ""}${r.nextAction}` : ""}
+            </div>
+          ) : null}
+          {r.lastNote ? (
+            <div className="line-clamp-2 text-[11px] italic text-foreground/80" title={r.lastNote}>
+              {r.lastNoteOutcome ? `${CALL_OUTCOME_LABEL[r.lastNoteOutcome as CallOutcome] ?? r.lastNoteOutcome}: ` : ""}
+              {r.lastNote}
+            </div>
+          ) : null}
         </div>
       );
     },
   },
 ];
 
+/** Cột thao tác: ghi kết quả cuộc gọi / ghi chú ngay trên dòng (chỉ người có wholesale:work). */
+const actionColumn: ColumnDef<LeadListRow, unknown> = {
+  id: "actions",
+  header: "",
+  cell: ({ row }) => {
+    const r = row.original;
+    return <LeadQuickLog lead={{ id: r.id, name: r.name, status: r.status, phone: r.phone, phoneDisplay: r.phoneDisplay }} />;
+  },
+};
+
 const SORTABLE = ["leadScore", "status", "lastContactAt", "rating"];
+const columnsWithActions = [...columns, actionColumn];
 
 export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; total: number; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions }) {
   return (
     <DataTable
-      columns={columns}
+      columns={props.canWork ? columnsWithActions : columns}
       data={props.rows}
       pageCount={props.pageCount}
       total={props.total}

@@ -54,7 +54,7 @@ export function phonesIn(text: string): string[] {
   return [...out];
 }
 
-export type AuditOrder = { id: string; at: Date; stage: string; source: string; phones: string[]; name: string; convId: string | null; total: number };
+export type AuditOrder = { id: string; at: Date; stage: string; source: string; phones: string[]; name: string; convId: string | null; total: number; province?: string; ward?: string };
 export type AuditThread = {
   threadId: string;
   convId: string | null;
@@ -140,11 +140,11 @@ async function main() {
   // 1. Đơn ERP trong ngày + 7 ngày trước.
   const o = schema.orders;
   const orderRows = await db
-    .select({ id: o.id, at: o.insertedAt, stage: o.stage, source: o.source, bill: o.billPhone, ship: o.shipPhone, name: o.billFullName, conv: o.salesConversationId, total: o.totalPriceAfterDiscount })
+    .select({ id: o.id, at: o.insertedAt, stage: o.stage, source: o.source, bill: o.billPhone, ship: o.shipPhone, name: o.billFullName, conv: o.salesConversationId, total: o.totalPriceAfterDiscount, province: o.shipProvince, ward: o.shipCommune })
     .from(o)
     .where(and(gte(o.insertedAt, new Date(from.getTime() - PRIOR_ORDER_DAYS * 86_400_000)), lt(o.insertedAt, to)));
   const toPhones = (...xs: (string | null)[]) => [...new Set(xs.map((x) => normalizeVnPhone(x ?? "")).filter((x): x is string => Boolean(x)))];
-  const allOrders = orderRows.map((r) => ({ id: r.id, at: new Date(r.at), stage: String(r.stage), source: r.source, phones: toPhones(r.bill, r.ship), name: r.name ?? "", convId: r.conv, total: Number(r.total ?? 0) }));
+  const allOrders = orderRows.map((r) => ({ id: r.id, at: new Date(r.at), stage: String(r.stage), source: r.source, phones: toPhones(r.bill, r.ship), name: r.name ?? "", convId: r.conv, total: Number(r.total ?? 0), province: r.province ?? "", ward: r.ward ?? "" }));
   const today = allOrders.filter((x) => x.at >= from && x.stage !== "DELETED");
   const deletedToday = allOrders.filter((x) => x.at >= from && x.stage === "DELETED");
   const prior = allOrders.filter((x) => x.at < from && x.stage !== "DELETED");
@@ -197,7 +197,7 @@ async function main() {
     const th = threadOfOrder.get(x.id) ?? null;
     const lag = th ? orderLagMinutes(x.at, th.customerAts) : null;
     if (lag !== null) lagBySource.set(x.source, [...(lagBySource.get(x.source) ?? []), lag]);
-    console.log(`${vnTime(x.at)} · ${x.id.slice(-8)} · ${x.stage} · ${x.source} · ${x.name} · ${x.phones.join("/") || "không SĐT"} · ${x.total.toLocaleString("vi-VN")} ₫ · ${th ? `hội thoại …${th.threadId.slice(-8)} · trễ ${lag ?? "—"} phút sau tin khách cuối` : "KHÔNG ghép được hội thoại có SĐT"}`);
+    console.log(`${vnTime(x.at)} · ${x.id.slice(-8)} · ${x.stage} · ${x.source} · ${x.name} · ${x.phones.join("/") || "không SĐT"} · ${x.total.toLocaleString("vi-VN")} ₫ · ${x.ward ? `${x.ward}, ${x.province}` : x.province ? `${x.province} (CHƯA có xã)` : "CHƯA có tỉnh"} · ${th ? `hội thoại …${th.threadId.slice(-8)} · trễ ${lag ?? "—"} phút sau tin khách cuối` : "KHÔNG ghép được hội thoại có SĐT"}`);
   }
 
   const counts = { orderToday: 0, orderBefore: 0, noOrder: 0 };
@@ -249,6 +249,7 @@ async function main() {
   tomTat(`Hội thoại có SĐT hôm nay ${active.length}: có đơn hôm nay ${counts.orderToday} · đã có đơn ≤${PRIOR_ORDER_DAYS} ngày trước ${counts.orderBefore} · KHÔNG đơn ${counts.noOrder}`);
   tomTat(`Không đơn theo lý do: ${[...reasons].map(([k, n]) => `${k} ${n}`).join(" · ") || "0"}`);
   tomTat(`Đơn không ghép được hội thoại có SĐT hôm nay: ${unmatchedOrders.length}`);
+  tomTat(`Địa chỉ đơn: có tỉnh + xã ${today.filter((x) => x.ward).length} · chỉ tỉnh ${today.filter((x) => x.province && !x.ward).length} · chưa có tỉnh ${today.filter((x) => !x.province).length}`);
   for (const [src, xs] of lagBySource) tomTat(`Trễ (phút, tin khách cuối → đơn) «${src}»: n=${xs.length} · trung vị ${quantile(xs, 0.5) ?? "—"} · p90 ${quantile(xs, 0.9) ?? "—"} · max ${Math.max(...xs)}`);
   tomTat(`Job sales-followup: ${runs.length} lượt · ${failed} lỗi · khoảng hở lớn nhất ${Math.round(maxGap)} phút`);
   process.exit(0);
