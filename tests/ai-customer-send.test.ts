@@ -64,7 +64,10 @@ async function adminOf(): Promise<SessionUser> {
 }
 
 async function run() {
-  const st = { calls: 0, takeoverThread: null as string | null };
+  const st = { calls: 0, takeoverThread: null as string | null, script: [] as AiResponse[] };
+  const usage = { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const callTemplate = (): AiResponse => ({ content: [{ type: "tool_use", id: `tu-${st.calls}`, name: "send_quick_reply", input: { code: "Q1" } }], stopReason: "tool_use", usage, model: "claude-sonnet-5", latencyMs: 1 });
+  const modelText = (text: string): AiResponse => ({ content: [{ type: "text", text }], stopReason: "end_turn", usage, model: "claude-sonnet-5", latencyMs: 1 });
   const provider: AiProvider = {
     name: "fake",
     model: "claude-sonnet-5",
@@ -73,6 +76,8 @@ async function run() {
       st.calls += 1;
       // Nhân viên nhảy vào ĐÚNG lúc model đang soạn ⇒ bot phải nhường (không gửi câu đã soạn).
       if (st.takeoverThread) await (await getDb()).update(schema.salesChatConversations).set({ lastStaffAt: new Date(Date.now() + 60_000) }).where(eq(schema.salesChatConversations.threadId, st.takeoverThread));
+      const scripted = st.script.shift();
+      if (scripted) return scripted;
       return { content: [{ type: "text", text: "Dạ chả cá thu bên em 280k/kg ạ, anh/chị lấy mấy ký ạ?" }], stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
     },
   };
@@ -139,13 +144,42 @@ async function run() {
     assert.equal(posts.length, postsBefore + 1, "chỉ câu mẫu tới khách; câu model bị giữ lại");
     assert.equal(await count(), 1, "câu mẫu + câu AI bị nhường ⇒ không thêm khách AI");
 
+    // 2c · TRONG MỘT lượt model: model gửi CÂU MẪU (công cụ send_quick_reply) rồi viết câu của mình. Đếm theo nguồn từng câu:
+    //      câu mẫu đã tới + câu model bị nhường ⇒ 0 (câu mẫu chữ, rồi câu mẫu kèm ảnh); câu mẫu + câu model cùng tới ⇒ 1.
+    const takeoverAfterFirstSend = (thread: string) => () =>
+      db.update(schema.salesChatConversations).set({ lastStaffAt: new Date(Date.now() + 60_000) }).where(eq(schema.salesChatConversations.threadId, thread));
+    const qr = schema.salesChatQuickReplies;
+    const textEntry = (await db.select({ id: qr.id }).from(qr))[0].id;
+    for (const [thread, withImage] of [["tq-t1", false], ["ti-t1", true]] as const) {
+      if (withImage) {
+        await db.update(qr).set({ active: false }).where(eq(qr.id, textEntry));
+        const [img] = await db.insert(qr).values({ title: "Menu kèm ảnh", triggers: ["xem menu"], answer: "Dạ menu của shop đây ạ.", active: true }).returning({ id: qr.id });
+        await db.insert(schema.salesChatQuickReplyImages).values({ quickReplyId: img.id, contentType: "image/png", bytes: 3, sha256: "abc", data: Buffer.from([1, 2, 3]), pancakePageId: PAGE, pancakeContentId: "ct-1", pancakeUploadedAt: new Date() });
+      }
+      const before = posts.length;
+      st.script = [callTemplate(), modelText("Anh/chị muốn lấy mấy ký ạ?")];
+      injectAfterSend = takeoverAfterFirstSend(thread);
+      assert.ok((await receiveFanpageEvent(ev(`${thread}-m1`, "cho em hỏi chút", thread))).queued);
+      const rt = await processFanpageThread(PAGE, thread, { fetch: pancakeFetch, now: later(31) });
+      injectAfterSend = null;
+      assert.ok(posts.length > before, `câu mẫu tới khách (${JSON.stringify(rt)})`);
+      assert.ok(!posts.slice(before).some((p) => p.includes("mấy ký")), "câu model bị giữ lại");
+      assert.equal(await count(), 1, `câu mẫu ${withImage ? "kèm ảnh" : "chữ"} + câu model bị nhường ⇒ không thêm khách AI`);
+    }
+    st.script = [callTemplate(), modelText("Anh/chị muốn lấy mấy ký ạ?")];
+    assert.ok((await receiveFanpageEvent(ev("tb-m1", "cho em hỏi chút", "tb-t1"))).queued);
+    const rb = await processFanpageThread(PAGE, "tb-t1", { fetch: pancakeFetch, now: later(31) });
+    assert.ok(rb.replies >= 2 && !rb.error, JSON.stringify(rb));
+    assert.equal(await count(), 2, "câu mẫu + câu model cùng tới ⇒ 1 khách AI mới");
+    st.script = [];
+
     // 3 · Gửi HỎNG ⇒ khách chưa nhận câu AI nào ⇒ không đếm.
     sendFails = true;
     const callsBefore = st.calls;
     assert.ok((await receiveFanpageEvent(ev("f-m1", "Còn hàng không em?", "f-t1"))).queued);
     const r4 = await processFanpageThread(PAGE, "f-t1", { fetch: pancakeFetch, now: later(31) });
     assert.ok(r4.error && st.calls > callsBefore, JSON.stringify(r4));
-    assert.equal(await count(), 1, "gửi hỏng ⇒ 0 khách AI mới");
+    assert.equal(await count(), 2, "gửi hỏng ⇒ 0 khách AI mới");
     sendFails = false;
     const conv = (await db.select().from(schema.salesChatConversations).where(and(eq(schema.salesChatConversations.threadId, "f-t1"))))[0];
     assert.ok(conv, "hội thoại gửi hỏng vẫn tồn tại — chỉ không được đếm");

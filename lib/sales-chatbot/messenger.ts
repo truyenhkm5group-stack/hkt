@@ -652,7 +652,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       if (pr && !pr.ok) await noteMessengerGraphFailure(pr, pageId);
       if (pr?.ok) {
         out.replies += 1;
-        if (turn.aiGenerated) await noteAiCustomerReply(conv.id, now());
+        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now());
         if (pr.id) await db.insert(t).values({ pageId, threadId: psid, messageId: pr.id, text: replyText.slice(0, TEXT_MAX), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       }
       if (pr && !pr.ok) await deadLetter(db, ids, claim, `${DEAD_SEND_NOTE_PREFIX}${pr.error}`, pr.error, now());
@@ -665,9 +665,10 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       continue;
     }
     let sendError: string | null = null;
-    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH đã gửi THÀNH CÔNG ở CHÍNH lượt này (không theo bộ đếm cộng dồn các vòng,
-    // không tính câu mẫu đi kèm lượt model — `turn.media.afterText`).
+    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH (đánh dấu tại nguồn — `turn.aiTexts`) đã gửi THÀNH CÔNG ở CHÍNH lượt
+    // này; câu mẫu (chữ hay kèm ảnh) đi trong lượt model không bao giờ được đếm.
     let aiSent = 0;
+    const aiTexts = new Set(turn.aiTexts ?? []);
     let yielded: string | null = null;
     let mediaDone = false;
     // Ảnh của câu trả lời mẫu: gửi NGAY SAU chữ của chính câu mẫu đó (như đường Pancake); không khớp ⇒ sau toàn bộ phần chữ.
@@ -699,7 +700,7 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         break;
       }
       out.replies += 1;
-      if (turn.aiGenerated && r.text !== turn.media?.afterText) aiSent += 1;
+      if (aiTexts.has(r.text)) aiSent += 1;
       if (!mediaDone && turn.media?.afterText && r.text === turn.media.afterText) {
         await sendMedia();
         if (sendError || yielded) break;

@@ -1019,9 +1019,10 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
     }
     const replies = turn.view.messages.slice(before).filter((m) => m.role === "assistant" && m.text.trim());
     let sendError: string | null = null;
-    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH đã gửi THÀNH CÔNG ở CHÍNH lượt này (không theo bộ đếm cộng dồn các vòng,
-    // không tính câu mẫu đi kèm lượt model — `turn.media.afterText`).
+    // Đồng hồ khách AI (0226): đếm câu DO MODEL SINH (đánh dấu tại nguồn — `turn.aiTexts`) đã gửi THÀNH CÔNG ở CHÍNH lượt
+    // này; câu mẫu (chữ hay kèm ảnh) đi trong lượt model không bao giờ được đếm.
     let aiSent = 0;
+    const aiTexts = new Set(turn.aiTexts ?? []);
     let yielded: string | null = null;
     // BÌNH LUẬN: một tin RIÊNG trả lời bình luận MỚI NHẤT của lượt (gộp mọi câu trả lời) — không bao giờ công khai.
     const lastComment = [...claimed].reverse().find((r) => r.kind === "COMMENT" && r.postId && r.fromId);
@@ -1040,7 +1041,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       if (pr.kind === "SENT") {
         out.replies += 1;
         // Đồng hồ khách AI (0226): chỉ câu do MODEL sinh, chỉ sau khi gửi thành công; lỗi ghi sổ không chặn việc gửi.
-        if (turn.aiGenerated) await noteAiCustomerReply(conv.id, now());
+        if (replies.some((r) => (turn.aiTexts ?? []).includes(r.text))) await noteAiCustomerReply(conv.id, now());
         if (pr.inboxId) await markWaitingForCustomer(conv.id, now(), pr.inboxId);
       }
       // Gửi hỏng ⇒ DEAD (không tự gửi lại — lượt gửi có thể đã tới nơi); đã gửi / đã có ⇒ như cũ.
@@ -1094,7 +1095,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         break;
       }
       out.replies += 1;
-      if (turn.aiGenerated && r.text !== turn.media?.afterText) aiSent += 1;
+      if (aiTexts.has(r.text)) aiSent += 1;
       // Ghi mã tin bot vừa gửi: Pancake đẩy lại chính tin này qua webhook — gặp lại là tin của bot, không phải nhân viên.
       if (sent.ids.length) {
         await db

@@ -549,6 +549,20 @@ export async function testPricingV1() {
       await pdb.execute(sql.raw("ALTER TABLE platform_price_pins_tam RENAME TO platform_price_pins"));
       invalidatePriceBook();
     }
+    // Cô lập đệm «đọc được gần nhất»: A (Starter) đọc thành công, B CÙNG gói đọc lỗi ⇒ B KHÔNG nhận giá trị của A.
+    resetAiLimitsMemoForTests();
+    const aGood = await resolveAiLimits(A);
+    assert.ok(aGood?.limits.softOnly && aGood.limits.platformCreditUsdPerMonth > 0);
+    await setOrgPlan(B, "starter");
+    await pdb.execute(sql.raw("ALTER TABLE platform_price_pins RENAME TO platform_price_pins_tam"));
+    invalidatePriceBook();
+    try {
+      const bRead = await resolveAiLimits(B);
+      assert.deepEqual([bRead?.limits.platformCreditUsdPerMonth, bRead?.limits.costUsdPerMonth.soft, bRead?.limits.softOnly], [0, null, true], "B lỗi đọc ⇒ AI_LIMITS_UNREADABLE, không mượn đệm của A");
+    } finally {
+      await pdb.execute(sql.raw("ALTER TABLE platform_price_pins_tam RENAME TO platform_price_pins"));
+      invalidatePriceBook();
+    }
     await setOrgPlan(B, null);
 
     // ── 6. ĐỒNG HỒ KHÁCH AI — hàm ghi của điểm gửi (đường gửi thật: tests/ai-customer-send.test.ts).

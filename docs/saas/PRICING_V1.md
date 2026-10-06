@@ -171,3 +171,7 @@ gói đích thấp hơn số dùng AI thật.
 - **Đếm thiếu có chủ ý (thận trọng)**: tin nhắn lại (follow-up) do AI soạn (`lib/sales-chatbot/followup.ts`) chưa ghi khách AI;
   kênh Zalo OA và chat web cũng chưa. **Fanpage thêm 99.000 ₫** hôm nay chỉ tính qua dòng phần vượt của bảng kê — khách chưa tự
   mua thêm fanpage ở màn thanh toán được.
+- **Tiến trình vừa khởi động** mà lần đọc sổ giá đầu tiên lỗi ⇒ `AI_LIMITS_UNREADABLE` (không trần nào): NỚI chứ không chặn, có
+  đếm cảnh báo (`priceReadWarningCount`); đệm «đọc được gần nhất» theo khoá (tổ chức, gói) — tổ chức này không bao giờ mượn trần
+  của tổ chức khác. Khách AI đếm theo NGUỒN từng câu (`TurnResult.aiTexts` do engine đánh dấu): câu mẫu chữ / kèm ảnh trong lượt
+  model không bao giờ được đếm.
