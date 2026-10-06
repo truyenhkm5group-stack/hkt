@@ -799,6 +799,12 @@ export class Bot {
    * gia nay du huong dan page con ghi gia xa cu. Tin cua shop deu da qua chot chan gia (bot) hoac do nguoi / mau tin
    * Pancake gui, nen gia trong do la gia shop da cam ket voi khach.
    */
+  /** Cac so tien ghi trong huong dan rieng + huong dan khuyen mai cua page. */
+  pagePromptAmounts(pageId) {
+    const eff = settings.effective(pageId);
+    return amountsIn(`${eff.extraPrompt || ""}\n${eff.salePrompt || ""}`);
+  }
+
   quotedUnitPrice(pageId, messages) {
     for (const m of [...(messages || [])].reverse()) {
       // Su co Dung Phan 06/10/2026: tin "GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM" hien o phia KHACH — khach bam tra loi (trich)
@@ -808,12 +814,16 @@ export class Bot {
       // Su co Mong Lanh Tran 06/10/2026: khach CHUYEN TIEP nguyen tin deal cua shop (tu bai quang cao / kenh khac) ->
       // chu deal nam ngay trong noi dung tin khach. Chi tin khi dung MAU tin deal cua shop ("giảm giá / chỉ còn" + "giá cũ"),
       // khach tu go "249k/đầm được không" van khong tinh.
+      // Chu shop 06/10/2026: deal 249K CHI cho Q002 o page Linh Tay Luxury. Gia den tu tin KHACH (trich / chuyen tiep)
+      // co the la deal cua page KHAC -> chi nhan khi chinh huong dan cua page nay co ghi gia do.
       const raw = String(this.messageText(m) || "");
-      const t = this.isFromPage(m, pageId) ? raw : `${nestedText(m)}\n${MAU_TIN_DEAL.test(raw) ? raw : ""}`;
+      const cuaShop = this.isFromPage(m, pageId);
+      const t = cuaShop ? raw : `${nestedText(m)}\n${MAU_TIN_DEAL.test(raw) ? raw : ""}`;
       const g = t.match(GIA_MOI_SP);
       if (!g) continue;
       const n = /k$/i.test(g[1].trim()) ? Number(g[1].replace(/\D/g, "")) * 1000 : Number(g[1].replace(/\D/g, ""));
-      if (n >= 50000 && n < 10000000) return n;
+      if (n < 50000 || n >= 10000000) continue;
+      if (cuaShop || this.pagePromptAmounts(pageId).has(n)) return n;
     }
     return null;
   }
