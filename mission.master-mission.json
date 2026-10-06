@@ -3,7 +3,7 @@
   "mission_id": "master-mission",
   "title": "Master Mission — AI bán hàng nhiều page, đo tiền AI làm ra",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-master-mission",
@@ -56,11 +56,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:36.436Z",
-  "updated_at": "2026-10-06T06:45:41.087Z",
-  "last_heartbeat": "2026-10-06T05:09:36.436Z",
+  "updated_at": "2026-10-06T06:45:47.595Z",
+  "last_heartbeat": "2026-10-06T06:45:47.595Z",
   "definition_of_done": [],
   "evidence": {
     "verify": "PASS 183e70608d9ce7d626438ec78b2a8f499aae7b9c 2026-10-06T06:45:39.806Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37417089563"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37417089563",
+    "done": "#598 squash e0646e4c vào main; production 183e7060 chứa nó; verify ĐẠT"
   }
 }
