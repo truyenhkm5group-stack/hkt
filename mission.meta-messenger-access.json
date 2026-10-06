@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "meta-messenger-access",
+  "title": "Kết nối Facebook Page trực tiếp: Meta chưa cấp quyền Page cho app nền tảng",
+  "business_goal": "",
+  "status": "BLOCKED",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/messenger/graph.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T08:22:33.984Z",
+  "updated_at": "2026-10-06T08:22:33.984Z",
+  "last_heartbeat": "2026-10-06T08:22:33.984Z",
+  "definition_of_done": [],
+  "needs_owner": {
+    "category": "EXTERNAL_AUTH_REQUIRED",
+    "action": "App Dashboard của app Đăng nhập Facebook → Use cases → thêm «Engage with customers on Messenger from Meta» với pages_show_list, pages_messaging, pages_manage_metadata, pages_read_engagement (Standard Access) → bấm Kết nối Facebook Page MỘT lần bằng tài khoản quản trị app"
+  }
+}
