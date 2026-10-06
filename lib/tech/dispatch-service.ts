@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { DISPATCH_AUDIT_ACTION, canDispatchTask, checkDispatchQuota, type DispatchVerdict, type QuotaVerdict } from "@/lib/constants/agent-dispatch";
 import { dispatchAgentRun, dispatchConfig } from "@/lib/integrations/github/dispatch";
+import { loadTaskPlan } from "@/lib/tech/control-plane";
 import { recordTechTaskEvent, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
 import { checkRerun } from "@/lib/constants/agent-rerun";
 import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech";
@@ -81,9 +82,14 @@ export async function dispatchTaskToAgent(input: {
   const db = await getDb();
   const task = await db.query.techTasks.findFirst({
     where: eq(schema.techTasks.code, input.taskCode),
-    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true },
+    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true, missionId: true },
   });
   if (!task) return { ok: false, code: "UNKNOWN_TASK", reason: `Không có việc \`${input.taskCode}\`.` };
+
+  /* "Cần chủ shop" chỉ NGƯỜI gỡ, kèm câu đã quyết gì — nút giao sửa không phải đường tắt qua cổng đó. */
+  if (task.status === "NEEDS_OWNER") {
+    return { ok: false, code: "TASK", reason: `Việc ${task.code} đang chờ chủ shop — gỡ “Cần chủ shop” (ghi lại đã quyết gì) rồi mới giao lại.` };
+  }
 
   /*
     LƯỢT SỬA: việc phải CÓ nhánh, và phải chuyển được về "Đang làm".
@@ -123,6 +129,8 @@ export async function dispatchTaskToAgent(input: {
     */
     agentAllowedRisks: agent ? agent.allowedRisks : null,
     agentWriteGlobs: agent ? writeGlobsForRole(agent.role) : null,
+    // Sứ mệnh / mục tiêu không chạy ⇒ không giao (cùng luật cửa đọc của runner — `loadTaskPlan`).
+    plan: await loadTaskPlan(task.missionId),
   });
   if (!vTask.ok) return { ok: false, code: "TASK", reason: vTask.reason };
   /*

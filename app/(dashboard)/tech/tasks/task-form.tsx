@@ -36,7 +36,7 @@ import { classifyTechRisk, techRiskEmptyReason } from "@/lib/constants/tech-risk
  * Người gõ nhìn thấy cổng phê duyệt trước khi bấm Lưu, thay vì bị nó chặn sau đó mà không hiểu vì
  * sao. Kết quả hiện ở đây KHÔNG phải là thứ được lưu: máy chủ tự tính lại (không tin client).
  */
-export function TechTaskForm() {
+export function TechTaskForm({ missionId, missionLabel }: { missionId?: string; missionLabel?: string } = {}) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -62,7 +62,7 @@ export function TechTaskForm() {
 
   const gui = () => {
     start(async () => {
-      const res = await createTechTaskAction({ title, description, taskType, module, priority, source, branch });
+      const res = await createTechTaskAction({ title, description, taskType, module, priority, source, branch, missionId: missionId ?? null });
       if ("error" in res) {
         toast.error(res.error);
         return;
@@ -75,13 +75,15 @@ export function TechTaskForm() {
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="size-4" /> Ghi việc Tech
+        <Plus className="size-4" /> {missionId ? "Thêm việc vào sứ mệnh" : "Ghi việc Tech"}
       </Button>
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : dong())}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Ghi một việc Tech</DialogTitle>
-            <DialogDescription>Mức rủi ro do luật xếp trong lúc gõ. Đổi được sau, nhưng phải kèm lý do.</DialogDescription>
+            <DialogDescription>
+              {missionLabel ? `Việc vào sứ mệnh ${missionLabel}. ` : ""}Mức rủi ro do luật xếp trong lúc gõ. Đổi được sau, nhưng phải kèm lý do.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">

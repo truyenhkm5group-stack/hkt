@@ -22,7 +22,7 @@ export async function listTechAgents() {
   // Số việc đang cầm và lượt chạy gần nhất, gộp một lượt truy vấn cho cả sổ thay vì N+1.
   const [viec, luot] = await Promise.all([
     db
-      .select({ agentId: schema.techTasks.agentId, mo: sql<number>`count(*) filter (where ${schema.techTasks.status} <> 'DONE')`, tong: count() })
+      .select({ agentId: schema.techTasks.agentId, mo: sql<number>`count(*) filter (where ${schema.techTasks.status} not in ('DONE','CANCELLED'))`, tong: count() })
       .from(schema.techTasks)
       .groupBy(schema.techTasks.agentId),
     db

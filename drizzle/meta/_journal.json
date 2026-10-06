@@ -1576,6 +1576,13 @@
       "when": 1791350060000,
       "tag": "0225_sales_chat_ad_referral",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1791350120000,
+      "tag": "0226_tech_control_plane_goals",
+      "breakpoints": true
     }
   ]
 }
