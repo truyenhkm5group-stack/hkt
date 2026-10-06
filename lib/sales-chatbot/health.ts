@@ -12,7 +12,8 @@
  * (`bot-out:` · `staff-out:`), và là tin SỐNG (`imported_at IS NULL` — tin nhập lịch sử không bao giờ là việc của bot).
  */
 import { sql } from "drizzle-orm";
-import { getDb, getPlatformDb } from "@/db";
+import { getDb } from "@/db";
+import { salesAiUsageHealth } from "@/lib/ai-usage/sales-health";
 import { AI_SALES_SLO_SETTING_KEY, resolveAiSalesSlo, type AiSalesSlo } from "@/lib/constants/ai-sales-slo";
 import { listChannelPages } from "@/lib/connectors/service";
 import { currentOrganization } from "@/lib/platform/context";
@@ -164,26 +165,8 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     await db.execute(sql`select count(*) as n from sync_runs where job = 'sales-followup' and status = 'FAILED' and started_at >= ${new Date(now.getTime() - 86_400_000)}`),
   );
 
-  // SỔ AI CỦA NỀN TẢNG — đúng mã tổ chức, đúng tính năng bán hàng (gồm lượt ghi đơn `order-sync:`).
-  const pdb = await getPlatformDb();
-  const windowFrom = new Date(now.getTime() - s.providerWindowMinutes * 60_000);
-  const [prov] = rowsOf<Record<string, unknown>>(
-    await pdb.execute(sql`
-      select
-        count(*) filter (where status = 'OK' and at >= ${windowFrom}) as ok_w,
-        count(*) filter (where status = 'ERROR' and at >= ${windowFrom}) as err_w,
-        count(*) filter (where status = 'BLOCKED_QUOTA' and at >= ${windowFrom}) as blocked_w,
-        max(at) filter (where status = 'OK') as last_ok,
-        max(at) filter (where status <> 'OK') as last_err,
-        count(*) filter (where status = 'ERROR' and at >= ${new Date(now.getTime() - 86_400_000)}) as err_24h,
-        count(*) filter (where status = 'ERROR' and ref like 'order-sync:%' and at >= ${new Date(now.getTime() - 86_400_000)}) as sync_err_24h,
-        count(*) filter (where status = 'ERROR' and ref like 'order-sync:%' and at >= ${windowFrom}) as sync_err_w,
-        max(at) filter (where status = 'OK' and ref like 'order-sync:%') as sync_last_ok,
-        max(at) filter (where status <> 'OK' and ref like 'order-sync:%') as sync_last_err
-      from platform_ai_usage
-      where org_code = ${org.code} and feature = 'sales_chatbot' and at >= ${new Date(now.getTime() - 7 * 86_400_000)}
-    `),
-  );
+  // SỔ AI CỦA NỀN TẢNG — đúng mã tổ chức (từ ngữ cảnh máy chủ), đúng tính năng bán hàng (gồm lượt ghi đơn `order-sync:`).
+  const prov = await salesAiUsageHealth(org.code, now, s.providerWindowMinutes);
 
   const lastErr = typeof lastDown?.last_error === "string" ? salesBotError(lastDown.last_error) : null;
   const activePages = pages.filter((p) => p.status === "ACTIVE");
@@ -193,7 +176,7 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
   const ordersAi = num(ord?.ai_today);
   const failedSend = num(q?.failed_send);
   const aiDown = num(conv?.ai_down);
-  const provErr24 = num(prov?.err_24h);
+  const provErr24 = prov.errors24h;
   return {
     at,
     botEnabled: cfg.enabled,
@@ -210,18 +193,18 @@ export async function readSalesHealthSnapshot(now: Date = new Date(), slo?: AiSa
     silent: { customerHandled: num(q?.silent_threads), botSent: num(bot?.bot_window), windowMinutes: s.silentWindowMinutes },
     latency: { p50Seconds: numOrNull(lat?.p50), p95Seconds: numOrNull(lat?.p95), sample: num(lat?.sample), unanswered: num(lat?.unanswered) },
     provider: {
-      okInWindow: num(prov?.ok_w),
-      errorsInWindow: num(prov?.err_w),
-      blockedInWindow: num(prov?.blocked_w),
-      lastOkAt: iso(prov?.last_ok),
-      lastErrorAt: iso(prov?.last_err),
+      okInWindow: prov.okInWindow,
+      errorsInWindow: prov.errorsInWindow,
+      blockedInWindow: prov.blockedInWindow,
+      lastOkAt: iso(prov.lastOkAt),
+      lastErrorAt: iso(prov.lastErrorAt),
       lastErrorKind: lastErr?.kind ?? null,
       lastErrorLabel: lastErr?.label ?? null,
     },
     traffic: { lastHour: num(q?.last_hour), baselineSameHour: numOrNull(base?.median) === null ? null : Math.round(Number(base?.median)), baselineDays: num(base?.ngay) },
     followup: { lastRunAt: iso(job?.started_at), lastStatus: typeof job?.status === "string" ? job.status : null, lastError: typeof job?.error === "string" ? job.error : null },
-    orderSyncErrors24h: num(prov?.sync_err_24h),
-    orderSync: { errorsInWindow: num(prov?.sync_err_w), lastOkAt: iso(prov?.sync_last_ok), lastErrorAt: iso(prov?.sync_last_err) },
+    orderSyncErrors24h: prov.orderSyncErrors24h,
+    orderSync: { errorsInWindow: prov.orderSyncErrorsInWindow, lastOkAt: iso(prov.orderSyncLastOkAt), lastErrorAt: iso(prov.orderSyncLastErrorAt) },
     today: { conversationsAi, ordersAi, ordersSync: num(ord?.sync_today), orderValueAi: num(ord?.ai_value), conversionPct: conversationsAi > 0 ? Math.round((ordersAi / conversationsAi) * 1000) / 10 : null },
     errors24h: failedSend + aiDown + provErr24 + num(jobFails?.n),
   };
