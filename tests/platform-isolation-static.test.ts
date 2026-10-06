@@ -424,6 +424,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
   "lib/billing/": "Thu phí thuê bao (0187): platform_subscriptions / platform_invoices / platform_billing_payments / platform_plans ở mặt phẳng điều khiển, và sổ ngân hàng CỦA TỔ CHỨC NHÀ (nơi tiền thuê bao về) — đọc bằng getPlatformDb() vì tiền về tài khoản của nền tảng, không phải của tổ chức ngữ cảnh; không đọc dữ liệu nghiệp vụ của tổ chức khách nào.",
   "lib/pricing/": "Nền móng giá & thu phí (0222): platform_plans.commercial / platform_org_pricing / platform_settings (ngưỡng Margin Guard, giá đơn vị AI ghi đè) / platform_ai_usage ở mặt phẳng điều khiển (CSDL nhà); số dùng trong CSDL tổ chức đọc qua lib/platform/usage-meter.ts — tệp ở đây không tự mở CSDL tổ chức nào.",
+  "lib/saas/": "SaaS Control Plane (0224, docs/saas/README.md): tài khoản · thuê bao sản phẩm · sổ dùng · sổ chi phí · bảng kê · job cấp phát ở mặt phẳng điều khiển (CSDL nhà). Không tự mở CSDL tổ chức nào: cấp workspace đi qua provisionOrganization + withOrganization; module đi qua setOrganizationModule.",
   "lib/ai-usage/": "Sổ dùng AI + hạn mức AI + công tắc AI (pilot readiness 3): bảng platform_ai_usage / platform_plans / platform_settings / platform_organizations ở mặt phẳng điều khiển (CSDL nhà); mọi dòng khoá theo org_code do MÁY CHỦ lấy từ ngữ cảnh — không đọc dữ liệu nghiệp vụ của tổ chức nào.",
 };
 

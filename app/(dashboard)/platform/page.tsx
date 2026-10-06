@@ -100,9 +100,17 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         eyebrow="Hệ thống"
         title="Vận hành nền tảng"
         actions={
-          <Link href="/platform/saas" className="text-sm font-medium text-primary hover:underline">
-            Kinh tế nền tảng (MRR · biên · kích hoạt) →
-          </Link>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <Link href="/platform/customers" className="text-sm font-medium text-primary hover:underline">
+              Khách hàng SaaS →
+            </Link>
+            <Link href="/platform/products" className="text-sm font-medium text-primary hover:underline">
+              Sản phẩm →
+            </Link>
+            <Link href="/platform/saas" className="text-sm font-medium text-primary hover:underline">
+              Kinh tế nền tảng (MRR · biên · kích hoạt) →
+            </Link>
+          </div>
         }
         description={`${health.organizations.length} tổ chức · ${withProblems.length ? `${withProblems.length} tổ chức có vấn đề` : "không phát hiện vấn đề"} · đo lúc ${formatDateTime(new Date(health.checkedAt))}`}
         hint={

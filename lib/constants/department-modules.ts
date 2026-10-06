@@ -761,6 +761,20 @@ export const NAV_MODULES = [
     permission: "platform:operate",
     why: "MRR / ARR, biến động Mới · Mở rộng · Thu hẹp · Rời bỏ, GRR / NRR, biên lợi nhuận, chi phí AI và thời gian kích hoạt của từng cửa hàng — kinh tế của chính nền tảng. Chỉ người của tổ chức nhà.",
   },
+  {
+    href: "/platform/customers",
+    label: "Khách hàng SaaS",
+    zone: "SYSTEM",
+    permission: "platform:operate",
+    why: "Tài khoản khách (nội bộ lẫn bên ngoài, cùng một mô hình) → workspace → thuê bao từng sản phẩm, dùng, chi phí, biên, bảng kê, job cấp phát, nhật ký. Tạo khách mới không cần sửa CSDL. Chỉ người của tổ chức nhà.",
+  },
+  {
+    href: "/platform/products",
+    label: "Sản phẩm SaaS",
+    zone: "SYSTEM",
+    permission: "platform:operate",
+    why: "Danh mục sản phẩm (ERP, Chốt Đơn Tự Động…): khả năng → tính năng → gói, khách đang thuê, dùng, chi phí AI, doanh thu gói riêng. Chỉ người của tổ chức nhà.",
+  },
 ] as const satisfies readonly ModuleSpec[];
 
 /**

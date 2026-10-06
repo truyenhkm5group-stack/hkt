@@ -266,6 +266,9 @@ const ROUTES = [
   "/platform",
   // Owner Cockpit (0203): đọc sổ platform_saas_daily + mốc kích hoạt; mở trang có thể chụp ảnh hôm nay (≤ 1 lần / 30 phút).
   "/platform/saas",
+  // SaaS Control Plane (0224): danh sách khách + danh mục sản phẩm — đọc mặt phẳng điều khiển, không mở CSDL workspace nào.
+  "/platform/customers",
+  "/platform/products",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
 

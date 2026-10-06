@@ -12,6 +12,8 @@ import { isAddonKind } from "@/lib/billing/addons";
 import { formatDate, formatDateTime, formatVND } from "@/lib/format";
 import { CustomerUsageSection } from "@/components/pricing/customer-usage";
 import { loadCustomerPlan } from "@/lib/pricing/customer";
+import { MyProductsSection } from "@/components/saas/my-products";
+import { loadMyProducts } from "@/lib/saas/portal";
 
 export const metadata = { title: "Gói & thanh toán" };
 
@@ -31,6 +33,8 @@ export default async function PlanPage() {
   const billing = usage.isHome ? null : await loadTenantBilling(usage.orgCode);
   // Hạn mức THƯƠNG MẠI tháng này (0222): đơn vị dễ hiểu, không token / chi phí — cùng mã tổ chức của PHIÊN.
   const customer = usage.isHome ? null : await loadCustomerPlan(usage.orgCode);
+  // Sản phẩm đã thuê (0224): workspace lấy từ PHIÊN; khách nội bộ và khách ngoài cùng một khung.
+  const products = await loadMyProducts(user);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -39,6 +43,7 @@ export default async function PlanPage() {
         description={usage.plan ? `Gói «${usage.plan.name}»${usage.isHome ? " — tổ chức nhà, không giới hạn" : ""}` : "Không đọc được gói"}
         hint="Hạn mức kiểm ở đúng chỗ tạo: người dùng, trang tuỳ biến, luật tự động, tải tệp. Vượt thì thao tác đó báo lỗi rõ ràng, không có gì bị xoá. Thiếu đúng một hạng mục: mua thêm giữa kỳ, trả theo số ngày còn lại. Nâng gói: chọn gói ở khung Thanh toán, chuyển khoản theo mã QR — tiền về là gói mới có hiệu lực."
       />
+      {"error" in products ? null : <MyProductsSection view={products} />}
       {customer ? <CustomerUsageSection view={customer} /> : null}
       {billing ? <BillingSection billing={billing} /> : null}
       {!usage.plan ? (

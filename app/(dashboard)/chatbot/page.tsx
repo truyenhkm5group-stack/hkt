@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { getChatbotOrderSummary, getChatbotStatus } from "@/lib/integrations/chatbot/client";
 import { ChatbotImportForm } from "@/app/(dashboard)/chatbot/import-form";
+import { ChatbotProductEntry } from "@/components/saas/chatbot-entry";
 
 export const metadata = { title: "Bot chat bán hàng" };
 export const dynamic = "force-dynamic";
@@ -34,6 +35,8 @@ export default async function ChatbotPage({ searchParams }: { searchParams: Prom
           </Link>
         }
       />
+
+      <ChatbotProductEntry />
 
       {status.state === "UNREACHABLE" ? (
         <SectionCard title="Bot chưa chạy trên VPS">

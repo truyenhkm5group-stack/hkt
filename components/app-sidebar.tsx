@@ -182,6 +182,8 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/ai/sales-chatbot/cockpit": Activity,
   "/platform": ServerCog,
   "/platform/saas": LineChart,
+  "/platform/customers": Building2,
+  "/platform/products": PackageOpen,
 };
 
 export function iconOf(href: string): typeof LayoutDashboard {
