@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "mission_id": "saas-platform-restructure",
+  "title": "SaaS Control Plane: tài khoản · sản phẩm (ERP, Chốt Đơn) · thuê bao theo sản phẩm · entitlement · sổ usage/chi phí · chargeback nội bộ · VNXCommerce là khách nội bộ · Operator Console",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-saas-platform",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/saas-platform-restructure",
+  "base_sha": "51db3e4269cdfb5793fb4c79cf05bdf91bf9b0c6",
+  "domains": [],
+  "owned_paths": [
+    "lib/saas/",
+    "docs/saas/",
+    "db/schema.ts",
+    "db/migrate.ts",
+    "drizzle/",
+    "app/(dashboard)/platform/customers/",
+    "app/(dashboard)/platform/products/",
+    "components/saas/",
+    "tests/saas-platform.test.ts",
+    "lib/constants/saas-products.ts"
+  ],
+  "dependencies": [
+    "pricing-billing-foundation"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T13:25:25.486Z",
+  "updated_at": "2026-10-06T13:25:25.486Z",
+  "last_heartbeat": "2026-10-06T13:25:25.486Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
