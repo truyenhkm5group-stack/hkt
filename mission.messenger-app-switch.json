@@ -3,7 +3,7 @@
   "mission_id": "messenger-app-switch",
   "title": "Nối page từ ERP đi bằng app Meta Messenger riêng",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -35,13 +35,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T14:32:10.109Z",
-  "updated_at": "2026-10-06T15:36:31.323Z",
-  "last_heartbeat": "2026-10-06T14:37:06.460Z",
+  "updated_at": "2026-10-06T15:36:38.101Z",
+  "last_heartbeat": "2026-10-06T15:36:38.101Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#614 → 6a62afbbf6308c38c7eec35d4788649f67fc4c01",
     "verify": "PASS 6a62afbbf6308c38c7eec35d4788649f67fc4c01 2026-10-06T15:36:29.387Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37483380845"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37483380845",
+    "done": "PR #614 gộp 6a62afbb; deploy 37483380845 thành công; verify ĐẠT"
   },
   "handoff": {
     "branch": "feat/messenger-app-switch",
