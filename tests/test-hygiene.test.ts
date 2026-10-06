@@ -150,6 +150,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử (cùng cách sales-order-sync); Pancake và provider AI là bản giả. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-inbox.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử và để đường gửi của hộp thư đọc lại nó (cùng cách sales-operating-mode); fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/sales-inbox-history.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «pancake-fanpage» trong tổ chức thử và để lượt nhập lịch sử đọc lại nó (cùng cách sales-inbox); fetch là bản giả đóng vai Pancake. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/sales-order-sync.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu bí mật của kết nối «Fanpage qua Pancake» trong tổ chức thử — đó là ĐẦU VÀO của phép kiểm (cùng cách self-service-journey), trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/launch-gates.test.ts":

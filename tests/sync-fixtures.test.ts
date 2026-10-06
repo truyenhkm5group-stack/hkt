@@ -472,6 +472,7 @@ import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
+import { testSalesInboxHistory } from "./sales-inbox-history.test";
 import { testE2eAiSalesPlatform } from "./e2e-ai-sales-platform.test";
 import { testSalesExperimentReport } from "./sales-experiment-report.test";
 import { testCommerceAgent } from "./commerce-agent.test";
@@ -2734,6 +2735,8 @@ async function main() {
   await testSalesInbox();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
+  // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
+  await testSalesInboxHistory();
   // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
   await testE2eAiSalesPlatform();
   // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.

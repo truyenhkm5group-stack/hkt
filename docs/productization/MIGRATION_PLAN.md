@@ -234,7 +234,34 @@ migration `0209_sales_inbox`:
 - Tin nhắc (follow-up) gửi hỏng VĨNH VIỄN (hội thoại không còn / khách chặn page) ⇒ thôi nhắc; hỏng tạm ⇒ sang mốc sau — trước
   đây máy soạn lại bằng AI và gửi hỏng lại mỗi 5 phút.
 
-**Chưa làm:** nguồn việc `SALES_HANDOFF` trên `/work`; ảnh cho chat web.
+**Thêm 06/10/2026 — NHẬP ĐỦ LỊCH SỬ (migration `0221_sales_inbox_history`, `lib/sales-chatbot/history.ts`):** chủ shop muốn hộp thư
+có ĐỦ tin đã nhắn và TẤT CẢ khách từng nhắn fanpage, như Pancake — không chỉ tin tới sau lúc nối page.
+- Nút «Đồng bộ lịch sử» ở trang Chatbot bán hàng (`ai_sales:manage`): đọc `v2/pages/{page}/conversations` (INBOX, mới → cũ,
+  `last_conversation_id`) rồi `v1/…/conversations/{id}/messages` (`current_count`) bằng kết nối `pancake-fanpage` của tổ chức. Sau
+  danh sách là phần QUÉT LẠI hội thoại ERP của page chưa được lượt này đọc (hội thoại có tin mới giữa lúc nhập nhảy lên đầu danh
+  sách, sau con trỏ).
+- Chạy NỀN, tiến độ + con trỏ (trang danh sách · hội thoại đang đọc · `current_count`) ở `settings` `ai_sales.inbox_history`, lưu
+  sau MỖI lời gọi; mỗi lượt ≤ 2 phút / 250 lời gọi, cách nhau ≥ 400 ms; 429 ⇒ nghỉ (≥ 60 giây hoặc `Retry-After`); lỗi mạng / 5xx
+  lùi dần, 6 lần liền ⇒ dừng báo lỗi. Mỗi lượt một dòng `sync_runs` (`PANCAKE` · `sales-inbox-history`). Tiến trình khởi động lại
+  ⇒ job `sales-followup` (5 phút) dựng lại vòng từ con trỏ. «Dừng» / «Chạy tiếp» / «Chạy lại từ đầu».
+- Ghi đúng mô hình: hội thoại qua `conversationFor` (do lượt nhập tạo ⇒ `created_by = 'system:history-import'`), tin vào
+  `sales_chat_inbound` khoá `message_id` (nhập lại / trùng webhook ⇒ bỏ qua), `created_at` = mốc thật (UTC). Dấu lịch sử:
+  `imported_at` trên mọi dòng; tin khách `note = 'HISTORY'`, tin page `PAGE_REPLY`; `status = 'DONE'`. Tin mới hơn 60 phút KHÔNG
+  nhập (việc của webhook / bot). Tiếng vọng của tin bot / tin nhân viên ERP đã ghi không thành tin page thứ hai.
+- Không kích hoạt gì: không gửi, không tin chờ bot, không sự kiện; máy ghi đơn bỏ dòng lịch sử khỏi ứng viên; bot không chép dòng
+  lịch sử vào lịch sử của nó; «bot đã xử lý» không đếm; số «hội thoại mới» / mốc «hội thoại đầu tiên» của nền tảng không đếm hội
+  thoại do lượt nhập tạo (`saas-ledger.ts`). Hộp thư: `history_until` (tin mới nhất đã nhập) ⇒ tin khách tới mốc đó không «chờ trả
+  lời», `staff_seen_at` đẩy tới mốc đó ⇒ không «chưa đọc»; hội thoại do lượt nhập tạo xếp theo mốc tin thật, không theo giờ nhập.
+  `updated_at` (đồng hồ nhường 30 phút của bot) không bị chạm.
+- SĐT Pancake ghi nhận (`recent_phone_numbers` / `conv_phone_numbers`, chuẩn hoá 0xxxxxxxxx) ⇒ `state.pancakePhones` của hội thoại
+  (bộ lọc «có SĐT» đọc khoá này); ảnh đại diện chỉ lưu khi Pancake trả sẵn https KHÔNG mang khoá (`state.pancakeAvatarUrl`).
+- **Giới hạn đã biết:** tin khách SỐNG mà webhook làm rơi > 60 phút trước lúc nhập sẽ vào như lịch sử (không «chờ trả lời»); hội
+  thoại dài quá 200 trang tin bị cắt (đếm `truncated`); bình luận không nhập. **Messenger trực tiếp: chưa nhập** — Graph API
+  (`/{page}/conversations` → `messages`) chỉ trả chi tiết 20 tin MỚI NHẤT mỗi hội thoại, cần kiểm trên app thật (HUMAN GATE) trước
+  khi hứa. **Zalo OA: chưa nhập** — API OA (`listrecentchat` / `conversation`) chỉ trả tin gần đây theo lô nhỏ (`count` ≤ 10) và
+  chưa có tài khoản OA thật để kiểm; hộp thư Zalo vẫn chỉ có tin từ lúc nối OA.
+
+**Chưa làm:** nguồn việc `SALES_HANDOFF` trên `/work`; ảnh cho chat web; nhập lịch sử Messenger trực tiếp / Zalo OA.
 
 ## M9 · Gia cố nền tảng cho > 5 tenant
 

@@ -1541,6 +1541,13 @@
       "when": 1791346161000,
       "tag": "0220_org_channel_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 1791346221000,
+      "tag": "0221_sales_inbox_history",
+      "breakpoints": true
     }
   ]
 }

@@ -73,6 +73,7 @@ import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registr
 import { catchUpFanpage } from "@/lib/sales-chatbot/fanpage";
 import { sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
+import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
 import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
@@ -783,7 +784,8 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     description:
       "Hội thoại fanpage đang CHỜ KHÁCH tới mốc follow-up ⇒ AI của shop viết MỘT câu nhắc theo bước khách đang dừng (không nêu giá) và gửi qua Pancake. " +
       "Dừng khi khách nhắn lại, đã chốt đơn, từ chối rõ, cần người xử lý, hoặc quá khung 24 giờ kể từ tin cuối của khách. Mỗi hội thoại chỉ một lượt gửi mỗi mốc (giành dòng). " +
-      "Cùng lượt: GHI ĐƠN TỪ HỘI THOẠI (công tắc riêng, không phụ thuộc bot bật / tắt) — hội thoại nhân viên phụ trách đã yên 2 phút ⇒ AI đọc lời chốt (webhook hẹn sẵn một lượt cho đúng hội thoại — job này là lưới an toàn) ⇒ lên đơn «Mới» cho nhân viên kiểm.",
+      "Cùng lượt: GHI ĐƠN TỪ HỘI THOẠI (công tắc riêng, không phụ thuộc bot bật / tắt) — hội thoại nhân viên phụ trách đã yên 2 phút ⇒ AI đọc lời chốt (webhook hẹn sẵn một lượt cho đúng hội thoại — job này là lưới an toàn) ⇒ lên đơn «Mới» cho nhân viên kiểm. " +
+      "Và: lượt NHẬP LỊCH SỬ hộp thư đang chạy mà tiến trình vừa khởi động lại ⇒ chạy tiếp từ con trỏ đã lưu (chạy nền, ghi sync_runs «sales-inbox-history»).",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "sales-followup", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         // Quét lại tin khách bị rơi (webhook mất lúc deploy / bị bỏ qua oan) TRƯỚC follow-up — `catchUpFanpage` không ném.
@@ -801,11 +803,14 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const no = await sendNewOrderAlerts();
         // Level khách + SĐT của hội thoại (lọc hộp thư · kịch bản theo level) — hội thoại có hoạt động mới + lấp dần. Không ném.
         const lv = await refreshConversationLevels();
+        // Nhập lịch sử hộp thư (lib/sales-chatbot/history.ts): lượt đang chạy mà tiến trình này không có vòng nào (khởi động lại
+        // giữa chừng) ⇒ dựng lại vòng từ con trỏ đã lưu — KHÔNG chờ nó (job fan-out chạy tuần tự qua các tổ chức). Không ném.
+        const hs = await resumeInboxHistory().catch(() => "");
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         const cuText = (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
-        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "");
+        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;
