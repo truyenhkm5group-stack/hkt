@@ -184,3 +184,4 @@
 {"at":"2026-10-06T18:16:41.023Z","actor":"DESKTOP-56TH98Y:hkt-tech-control-plane","kind":"MIGRATION_RESERVED","mission":"tech-control-plane-workers","detail":"0229"}
 {"at":"2026-10-06T18:48:38.541Z","actor":"DESKTOP-56TH98Y:wt-saas-b","kind":"HANDOFF","mission":"saas-b-internal-special-cases","detail":"feat/saas-b-internal @ 2020eb214fbe · 7 lệnh kiểm thử"}
 {"at":"2026-10-06T18:50:03.971Z","actor":"DESKTOP-56TH98Y:wt-saas-a","kind":"HANDOFF","mission":"saas-a-vnx-runtime","detail":"feat/saas-a-vnx-runtime @ cf9c9808dcf4 · 4 lệnh kiểm thử"}
+{"at":"2026-10-06T18:51:45.910Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-a-vnx-runtime","detail":"#621 cho feat/saas-a-vnx-runtime @ cf9c9808dcf4"}
