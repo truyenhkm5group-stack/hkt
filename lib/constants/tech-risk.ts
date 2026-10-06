@@ -75,7 +75,7 @@ export const TECH_RISK_RULES: readonly TechRiskRule[] = [
     risk: "R2",
     modules: ["ACCESS"],
     taskTypes: ["SECURITY"],
-    keywords: ["quyen", "permission", "role", "scope", "auth", "dang nhap", "session"],
+    keywords: ["quyen", "permission", "role", "scope", "auth", "authentication", "authorization", "oauth", "xac thuc", "dang nhap", "session"],
   },
   {
     key: "MIGRATION",
@@ -201,6 +201,21 @@ export type TechRiskVerdict = {
  * Mặc định là `R0` — nhưng `R0` ở đây nghĩa là "không luật nào khớp", không phải "đã kiểm tra và
  * thấy an toàn". Màn hình phải nói đúng câu đó, và người vẫn đè được lên.
  */
+/**
+ * Khớp từ khoá THEO TỪ, không theo chuỗi con (dogfood 07/10/2026: `cod` — tiền COD — khớp nhầm "Claude **Cod**e",
+ * nên mọi việc Tech nhắc tới Claude Code bị đẩy lên R2; `auth` khớp "author", `role` khớp "controller"). Ranh giới là
+ * chữ / số; dấu gạch dưới, chấm, gạch nối là ranh giới (để `data_scope` vẫn khớp `scope`). Cho phép đuôi số nhiều
+ * `s` / `es` (`roles`, `migrations`). Từ khoá bắt đầu / kết thúc bằng ký tự không phải chữ (`.env`) chỉ xét ranh giới
+ * ở phía còn lại. Độ phủ bị thu hẹp được bù bằng từ khoá tường minh (`authentication`, `oauth`, `xac thuc`).
+ */
+function khopTu(text: string, k: string): boolean {
+  if (!k) return false;
+  const esc = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const trai = /^[a-z0-9]/.test(k) ? "(?<![a-z0-9])" : "";
+  const phai = /[a-z0-9]$/.test(k) ? "(?:s|es)?(?![a-z0-9])" : "";
+  return new RegExp(`${trai}${esc}${phai}`).test(text);
+}
+
 export function classifyTechRisk(input: TechRiskInput): TechRiskVerdict {
   const text = khongDau(`${input.title} ${input.description ?? ""}`);
   const khop: TechRiskRule[] = [];
@@ -208,7 +223,7 @@ export function classifyTechRisk(input: TechRiskInput): TechRiskVerdict {
   for (const rule of TECH_RISK_RULES) {
     const theoModule = rule.modules?.includes(input.module) ?? false;
     const theoLoai = rule.taskTypes?.includes(input.taskType) ?? false;
-    const theoTuKhoa = rule.keywords?.some((k) => text.includes(khongDau(k))) ?? false;
+    const theoTuKhoa = rule.keywords?.some((k) => khopTu(text, khongDau(k))) ?? false;
     if (theoModule || theoLoai || theoTuKhoa) khop.push(rule);
   }
 

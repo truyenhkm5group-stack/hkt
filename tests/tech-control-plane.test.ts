@@ -152,6 +152,15 @@ export function testTechRiskEngine() {
   assert.equal(nhe.requiresApproval, false);
   assert.deepEqual(nhe.rules, [], "không luật nào khớp thì danh sách luật phải RỖNG — không bịa ra một luật để giải thích");
 
+  // ───────── 2.3b Khớp THEO TỪ, không theo chuỗi con (dogfood 07/10/2026) ─────────
+  const code = classifyTechRisk({ taskType: "DOCS", module: "TECH", title: "Viết runbook chạy worker bằng Claude Code" });
+  assert.ok(!code.rules.includes("COD_MONEY"), "“Claude Code” KHÔNG phải tiền COD — chuỗi con không được kích luật");
+  assert.ok(!classifyTechRisk({ taskType: "DOCS", module: "TECH", title: "Ghi tên author vào tài liệu controller" }).rules.includes("ACCESS"), "author / controller không phải quyền");
+  assert.equal(classifyTechRisk({ taskType: "BUGFIX", module: "PLATFORM", title: "Sửa đối soát COD bị lệch" }).risk, "R2", "COD đứng riêng vẫn bắt");
+  for (const t of ["Sửa data_scope của user", "Thêm roles mới", "Đổi luồng authentication", "Đổi đăng nhập OAuth", "Sửa .env mẫu"]) {
+    assert.equal(classifyTechRisk({ taskType: "BUGFIX", module: "PLATFORM", title: t }).risk, "R2", `“${t}” vẫn phải bắt (không mất độ phủ)`);
+  }
+
   // ───────── 2.4 Hàm THUẦN: chạy hai lần ra đúng một kết quả ─────────
   const a = classifyTechRisk({ taskType: "MIGRATION", module: "ORDERS", title: "Thêm cột" });
   const b = classifyTechRisk({ taskType: "MIGRATION", module: "ORDERS", title: "Thêm cột" });
