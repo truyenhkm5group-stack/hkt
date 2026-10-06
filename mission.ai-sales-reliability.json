@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-reliability",
   "title": "AI Sales production-grade: giám sát sống/chết, SLO, failover provider, DLQ, cockpit, quyền Messenger, hồ sơ App Review, cứu hội thoại sót",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -46,11 +46,13 @@
   "migration_reservations": [],
   "migration_reserved_at": {},
   "created_at": "2026-10-06T09:51:01.832Z",
-  "updated_at": "2026-10-06T12:42:28.605Z",
+  "updated_at": "2026-10-06T13:07:52.335Z",
   "last_heartbeat": "2026-10-06T12:22:17.572Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#607 → d7c55eaf718133990f949e141ef6cffd77a4166f"
+    "merged": "#607 → d7c55eaf718133990f949e141ef6cffd77a4166f",
+    "verify": "PASS d7c55eaf718133990f949e141ef6cffd77a4166f 2026-10-06T13:07:50.740Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37465273143"
   },
   "handoff": {
     "branch": "feat/ai-sales-retry",
