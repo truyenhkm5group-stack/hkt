@@ -171,6 +171,8 @@ const MOI = [
   "0221_sales_inbox_history",
   "0222_sales_inbound_retry",
   "0223_pricing_billing_foundation",
+  "0224_saas_control_plane",
+  "0225_tech_control_plane_goals",
 ] as const;
 
 /*

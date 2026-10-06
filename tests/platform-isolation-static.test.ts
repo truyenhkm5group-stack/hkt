@@ -424,6 +424,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
   "lib/billing/": "Thu phí thuê bao (0187): platform_subscriptions / platform_invoices / platform_billing_payments / platform_plans ở mặt phẳng điều khiển, và sổ ngân hàng CỦA TỔ CHỨC NHÀ (nơi tiền thuê bao về) — đọc bằng getPlatformDb() vì tiền về tài khoản của nền tảng, không phải của tổ chức ngữ cảnh; không đọc dữ liệu nghiệp vụ của tổ chức khách nào.",
   "lib/pricing/": "Nền móng giá & thu phí (0222): platform_plans.commercial / platform_org_pricing / platform_settings (ngưỡng Margin Guard, giá đơn vị AI ghi đè) / platform_ai_usage ở mặt phẳng điều khiển (CSDL nhà); số dùng trong CSDL tổ chức đọc qua lib/platform/usage-meter.ts — tệp ở đây không tự mở CSDL tổ chức nào.",
+  "lib/saas/": "SaaS Control Plane (0224, docs/saas/README.md): tài khoản · thuê bao sản phẩm · sổ dùng · sổ chi phí · bảng kê · job cấp phát ở mặt phẳng điều khiển (CSDL nhà). Không tự mở CSDL tổ chức nào: cấp workspace đi qua provisionOrganization + withOrganization; module đi qua setOrganizationModule.",
   "lib/ai-usage/": "Sổ dùng AI + hạn mức AI + công tắc AI (pilot readiness 3): bảng platform_ai_usage / platform_plans / platform_settings / platform_organizations ở mặt phẳng điều khiển (CSDL nhà); mọi dòng khoá theo org_code do MÁY CHỦ lấy từ ngữ cảnh — không đọc dữ liệu nghiệp vụ của tổ chức nào.",
 };
 
@@ -763,6 +764,20 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/pricing/admin.ts::loadPricingAdmin": "Cấu hình gói + ghi đè của MỌI tổ chức (màn người vận hành).",
   "lib/pricing/admin.ts::loadPricingEconomics": "Kinh tế đơn vị + Margin Guard của MỌI tổ chức: sổ AI toàn nền tảng + đếm số dùng trong CSDL từng tổ chức khách (lib/platform/usage-meter.ts).",
   "lib/billing/provider.ts::cancelSepaySubscription": "Cổng thu tiền: người vận hành dừng thuê bao của MỘT tổ chức (huỷ hoá đơn đang mở qua voidInvoice).",
+  // SaaS Control Plane (0224, lib/saas/console.ts) — mặt phẳng điều khiển của CSDL nhà; cấp workspace qua provisionOrganization.
+  "lib/saas/console.ts::loadCustomersConsole": "Danh sách MỌI tài khoản khách: thuê bao, dùng, chi phí, biên, bảng kê nháp (/platform/customers).",
+  "lib/saas/console.ts::loadCustomerDetail": "MỘT tài khoản khách bất kỳ: workspace, entitlement, nhật ký, job, bảng kê, chi phí (/platform/customers/<mã>).",
+  "lib/saas/console.ts::loadProductsConsole": "Kinh tế theo sản phẩm trên MỌI khách (/platform/products).",
+  "lib/saas/console.ts::createCustomerAsOperator": "Tạo khách qua job cấp phát (tài khoản + workspace + CSDL + thuê bao + quản trị) rồi tạo liên kết kích hoạt.",
+  "lib/saas/console.ts::subscribeProductAsOperator": "Thuê thêm sản phẩm cho một workspace bất kỳ (job: bật module + mở thuê bao).",
+  "lib/saas/console.ts::changeSubscriptionAsOperator": "Tạm dừng / tiếp tục / huỷ (job: tắt module độc quyền) thuê bao của một workspace bất kỳ.",
+  "lib/saas/console.ts::retryProvisioningAsOperator": "Chạy lại một job cấp phát hỏng / treo.",
+  "lib/saas/console.ts::updateAccountAsOperator": "Sửa tài khoản khách (loại, cách lập chứng từ, trạng thái, hồ sơ pháp nhân) — bắt buộc lý do.",
+  "lib/saas/console.ts::moveWorkspaceAsOperator": "Chuyển workspace sang tài khoản khác (cách gộp hai tài khoản) — bắt buộc lý do.",
+  "lib/saas/console.ts::reconcileSubscriptionsAsOperator": "Mở thuê bao còn thiếu cho sản phẩm workspace đang bật module (chỉ thêm).",
+  "lib/saas/console.ts::addCostEntryAsOperator": "Ghi khoản chi phí ngoài AI có căn cứ phân bổ.",
+  "lib/saas/console.ts::voidCostEntryAsOperator": "Huỷ khoản chi phí (giữ dòng, lý do bắt buộc).",
+  "lib/saas/console.ts::finalizeStatementAsOperator": "Chốt bảng kê kỳ đã qua của một tài khoản (bất biến).",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

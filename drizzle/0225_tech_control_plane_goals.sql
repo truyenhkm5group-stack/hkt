@@ -1,4 +1,4 @@
--- 0224 · MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — PROJECT · GOAL · MISSION · SỰ KIỆN (docs/tech-control-plane/README.md).
+-- 0225 · MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — PROJECT · GOAL · MISSION · SỰ KIỆN (docs/tech-control-plane/README.md).
 --
 --  · CỘNG THÊM, không sửa dữ liệu cũ: bốn bảng mới + bốn cột trên `tech_tasks` (nullable / mặc định rỗng).
 --  · `tech_tasks.status` mở rộng thêm `NEEDS_OWNER` (kèm loại leo thang + việc chủ shop phải làm — CHECK) và

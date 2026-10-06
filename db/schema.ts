@@ -4859,11 +4859,18 @@ export const platformOrganizations = pgTable(
      * lần lúc tạo (lib/platform/provision.ts), không backfill.
      */
     brand: text("brand"),
+    /**
+     * TÀI KHOẢN THƯƠNG MẠI sở hữu workspace này (0224 · docs/saas/README.md). Workspace = tổ chức = ranh giới cô lập (một CSDL).
+     * Backfill 0224: mỗi workspace có từ trước một tài khoản riêng; gộp là việc tay của người vận hành. `NULL` chỉ tồn tại
+     * trước khi migration chạy — đọc như "chưa gắn tài khoản", không đoán. Chỉ `lib/saas/*` ghi.
+     */
+    accountId: text("account_id").references((): AnyPgColumn => platformAccounts.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("platform_organizations_code_key").on(t.code),
+    index("platform_organizations_account_idx").on(t.accountId),
     check("platform_organizations_brand_check", sql`${t.brand} IS NULL OR ${t.brand} IN ('vnx','chotdon')`),
     uniqueIndex("platform_organizations_domain_slug_key").on(t.domainSlug).where(sql`${t.domainSlug} IS NOT NULL`),
     check("platform_organizations_domain_slug_check", sql`${t.domainSlug} IS NULL OR ${t.domainSlug} ~ '^[a-z][a-z0-9-]{1,30}$'`),
@@ -4901,6 +4908,11 @@ export const platformPlans = pgTable(
      * giảm. Giảm giá là quyết định kinh doanh nên nó là MỘT CỘT đọc được, không phải một phép nhân giấu trong mã (luật 38).
      */
     yearlyFreeMonths: integer("yearly_free_months").notNull().default(0),
+    /**
+     * Gói phủ SẢN PHẨM nào (0224, khoá trong `lib/saas/catalog.ts`). `NULL` = gói GỘP — phủ mọi sản phẩm của workspace, như
+     * mọi gói bán từ trước 0224 ("phần mềm bán hàng + chatbot AI trong một gói"). Gói riêng một sản phẩm khai mảng.
+     */
+    productKeys: text("product_keys").array(),
     /**
      * Phần THƯƠNG MẠI của gói (0222 · docs/platform/pricing-billing-foundation.md): số ngày dùng thử, hiện ở /pricing không,
      * «Liên hệ», hạn mức theo THÁNG (fanpage · hội thoại AI · tin AI · đơn), tính năng (entitlement), chính sách vượt, mức áp
@@ -5359,6 +5371,220 @@ export const platformOrgPricing = pgTable(
   (t) => [check("platform_org_pricing_enforcement_check", sql`${t.enforcement} IN ('OFF','SOFT','HARD')`)],
 );
 
+// ═══ SAAS CONTROL PLANE (0224 · docs/saas/README.md) — Account → Workspace → Product Subscription ═══
+//
+// Mặt phẳng điều khiển: chỉ thật ở CSDL NHÀ (`getPlatformDb()`), xoá sạch ở CSDL tổ chức (db/migrate.ts). Danh mục SẢN PHẨM
+// là mã nguồn (`lib/saas/catalog.ts`, như sổ module — P6); bảng dưới đây chỉ giữ CẤU HÌNH + SỔ.
+
+/**
+ * KHÁCH HÀNG THƯƠNG MẠI. Khách nội bộ (VNXCommerce) và khách ngoài đi CÙNG một mô hình — khác nhau CHỈ ở `account_type` +
+ * `billing_mode`, không ở nhánh mã. Thông tin pháp nhân (tên pháp lý, MST) là hồ sơ thanh toán của tài khoản.
+ */
+export const platformAccounts = pgTable(
+  "platform_accounts",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    /** `INTERNAL` · `EXTERNAL`. KHÔNG cấp quyền gì — quyền vận hành nền tảng là `platform:operate`, tường minh. */
+    accountType: text("account_type").notNull().default("EXTERNAL"),
+    /** `INTERNAL_CHARGEBACK` (bảng kê nội bộ, không thu tiền) · `EXTERNAL_INVOICE` (hoá đơn + thu tiền như 0187). */
+    billingMode: text("billing_mode").notNull().default("EXTERNAL_INVOICE"),
+    status: text("status").notNull().default("ACTIVE"),
+    legalName: text("legal_name"),
+    taxCode: text("tax_code"),
+    billingEmail: text("billing_email"),
+    note: text("note"),
+    source: text("source").notNull().default("OPERATOR"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    uniqueIndex("platform_accounts_code_key").on(t.code),
+    check("platform_accounts_code_check", sql`${t.code} ~ '^[a-z][a-z0-9-]{1,40}$'`),
+    check("platform_accounts_type_check", sql`${t.accountType} IN ('INTERNAL','EXTERNAL')`),
+    check("platform_accounts_billing_mode_check", sql`${t.billingMode} IN ('INTERNAL_CHARGEBACK','EXTERNAL_INVOICE')`),
+    check("platform_accounts_status_check", sql`${t.status} IN ('ACTIVE','SUSPENDED','CLOSED')`),
+    check("platform_accounts_source_check", sql`${t.source} IN ('BACKFILL_0224','OPERATOR','PROVISIONING','SIGNUP','TEST')`),
+  ],
+);
+
+/**
+ * THUÊ BAO SẢN PHẨM: workspace × sản phẩm. `plan_key NULL` = theo gói của workspace (gói gộp, `platform_organizations.plan`)
+ * — không chép gói sang chỗ thứ hai. `state` là LỰA CHỌN của người vận hành (đang dùng · tạm dừng · đã huỷ); tình trạng HIỆU
+ * LỰC (dùng thử · quá hạn · hết hạn) là hàm thuần của `state` + thu phí (`lib/saas/policy.ts::effectiveSubscriptionStatus`).
+ * Huỷ rồi thuê lại = dòng MỚI (dòng cũ giữ làm lịch sử).
+ */
+export const platformProductSubscriptions = pgTable(
+  "platform_product_subscriptions",
+  {
+    id: id(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => platformAccounts.id),
+    orgCode: text("org_code").notNull(),
+    productKey: text("product_key").notNull(),
+    planKey: text("plan_key"),
+    state: text("state").notNull().default("ACTIVE"),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    endedAt: ts("ended_at"),
+    endReason: text("end_reason"),
+    scheduledPlanKey: text("scheduled_plan_key"),
+    scheduledAt: date("scheduled_at", { mode: "string" }),
+    source: text("source").notNull().default("OPERATOR"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    uniqueIndex("platform_product_subscriptions_live_key").on(t.orgCode, t.productKey).where(sql`${t.endedAt} IS NULL`),
+    index("platform_product_subscriptions_account_idx").on(t.accountId),
+    check("platform_product_subscriptions_product_check", sql`${t.productKey} ~ '^[a-z][a-z0-9_]{1,30}$'`),
+    check("platform_product_subscriptions_state_check", sql`${t.state} IN ('ACTIVE','PAUSED','CANCELED')`),
+    check("platform_product_subscriptions_ended_check", sql`(${t.state} = 'CANCELED') = (${t.endedAt} IS NOT NULL)`),
+    check("platform_product_subscriptions_schedule_check", sql`(${t.scheduledPlanKey} IS NULL) = (${t.scheduledAt} IS NULL)`),
+    check("platform_product_subscriptions_source_check", sql`${t.source} IN ('BACKFILL_0224','OPERATOR','PROVISIONING','SIGNUP','TEST')`),
+  ],
+);
+
+/**
+ * SỔ DÙNG CHUNG — chỉ thêm. Khoá idempotent (tổ chức, `event_key`): gói tin trùng / thử lại không ghi dòng thứ hai. Lượt gọi
+ * model KHÔNG ghi ở đây (chúng ở `platform_ai_usage` — một nguồn cho một khoản); sổ này cho chỉ số sản phẩm khai trong
+ * `lib/saas/catalog.ts` với nguồn `EVENT_LEDGER`. Ghi DUY NHẤT qua `lib/saas/usage.ts::recordUsage`.
+ */
+export const platformUsageEvents = pgTable(
+  "platform_usage_events",
+  {
+    id: id(),
+    occurredAt: ts("occurred_at").notNull(),
+    recordedAt: ts("recorded_at").notNull().defaultNow(),
+    accountId: text("account_id"),
+    orgCode: text("org_code").notNull(),
+    productKey: text("product_key").notNull(),
+    subscriptionId: text("subscription_id"),
+    metric: text("metric").notNull(),
+    quantity: bigint("quantity", { mode: "number" }).notNull(),
+    unit: text("unit").notNull(),
+    source: text("source").notNull(),
+    eventKey: text("event_key").notNull(),
+    correlationId: text("correlation_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [
+    uniqueIndex("platform_usage_events_org_key").on(t.orgCode, t.eventKey),
+    index("platform_usage_events_org_at_idx").on(t.orgCode, t.occurredAt),
+    check("platform_usage_events_metric_check", sql`${t.metric} ~ '^[a-z][a-z0-9_]{1,60}$'`),
+    check("platform_usage_events_product_check", sql`${t.productKey} ~ '^[a-z][a-z0-9_]{1,30}$'`),
+    check("platform_usage_events_quantity_check", sql`${t.quantity} >= 0`),
+    check("platform_usage_events_key_check", sql`length(${t.eventKey}) BETWEEN 1 AND 200`),
+  ],
+);
+
+/**
+ * SỔ CHI PHÍ NGOÀI AI. Mỗi dòng khai CĂN CỨ PHÂN BỔ trước khi nhân (cùng tinh thần luật 14). Chi phí AI chỉ ở
+ * `platform_ai_usage`; hạ tầng / hỗ trợ NỀN theo tháng chỉ ở `platform_settings['platform.economics.costs']` — sổ này không
+ * nhận hai hạng mục đó (CHECK hạng mục), nên không khoản nào được cộng hai lần. Huỷ = `voided_at` + lý do, không xoá.
+ */
+export const platformCostEntries = pgTable(
+  "platform_cost_entries",
+  {
+    id: id(),
+    periodMonth: date("period_month", { mode: "string" }).notNull(),
+    category: text("category").notNull(),
+    scope: text("scope").notNull(),
+    productKey: text("product_key"),
+    accountId: text("account_id"),
+    orgCode: text("org_code"),
+    allocationBasis: text("allocation_basis").notNull(),
+    amountVnd: bigint("amount_vnd", { mode: "number" }).notNull(),
+    description: text("description").notNull(),
+    entryKey: text("entry_key").notNull(),
+    createdByEmail: text("created_by_email"),
+    createdAt: createdAt(),
+    voidedAt: ts("voided_at"),
+    voidReason: text("void_reason"),
+  },
+  (t) => [
+    uniqueIndex("platform_cost_entries_key").on(t.entryKey),
+    index("platform_cost_entries_month_idx").on(t.periodMonth),
+    check("platform_cost_entries_month_check", sql`extract(day from ${t.periodMonth}) = 1`),
+    check("platform_cost_entries_category_check", sql`${t.category} IN ('EXTERNAL_API','MESSAGING','STORAGE','INFRA_DIRECT','OTHER')`),
+    check(
+      "platform_cost_entries_scope_check",
+      sql`(${t.scope} = 'PLATFORM' AND ${t.productKey} IS NULL AND ${t.accountId} IS NULL AND ${t.orgCode} IS NULL) OR (${t.scope} = 'PRODUCT' AND ${t.productKey} IS NOT NULL AND ${t.accountId} IS NULL AND ${t.orgCode} IS NULL) OR (${t.scope} = 'ACCOUNT' AND ${t.accountId} IS NOT NULL AND ${t.orgCode} IS NULL) OR (${t.scope} = 'WORKSPACE' AND ${t.orgCode} IS NOT NULL)`,
+    ),
+    check("platform_cost_entries_basis_check", sql`${t.allocationBasis} IN ('DIRECT','EQUAL_ACTIVE_WORKSPACES','AI_COST_SHARE')`),
+    check("platform_cost_entries_direct_check", sql`${t.allocationBasis} <> 'DIRECT' OR ${t.scope} IN ('ACCOUNT','WORKSPACE')`),
+    check("platform_cost_entries_amount_check", sql`${t.amountVnd} > 0`),
+    check("platform_cost_entries_void_check", sql`(${t.voidedAt} IS NULL) = (${t.voidReason} IS NULL)`),
+  ],
+);
+
+/**
+ * BẢNG KÊ KỲ ĐÃ CHỐT của một tài khoản: hoá đơn (khách ngoài) hoặc chargeback (khách nội bộ). Bảng kê NHÁP không lưu — tính
+ * lúc đọc. Chốt = đóng băng `snapshot` (dòng, nguồn, độ phủ); sửa công thức sau đó KHÔNG đổi số kỳ đã chốt (luật 21).
+ * Thu tiền khách ngoài vẫn đi đường hoá đơn gia hạn 0187 (`platform_invoices`) — bảng kê không phải lệnh thu thứ hai.
+ */
+export const platformBillingStatements = pgTable(
+  "platform_billing_statements",
+  {
+    id: id(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => platformAccounts.id),
+    periodMonth: date("period_month", { mode: "string" }).notNull(),
+    billingMode: text("billing_mode").notNull(),
+    status: text("status").notNull().default("FINAL"),
+    totalKnownVnd: bigint("total_known_vnd", { mode: "number" }).notNull(),
+    unknownLines: integer("unknown_lines").notNull().default(0),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    engineVersion: text("engine_version").notNull(),
+    finalizedAt: ts("finalized_at").notNull().defaultNow(),
+    finalizedByEmail: text("finalized_by_email"),
+  },
+  (t) => [
+    uniqueIndex("platform_billing_statements_account_month_key").on(t.accountId, t.periodMonth),
+    check("platform_billing_statements_month_check", sql`extract(day from ${t.periodMonth}) = 1`),
+    check("platform_billing_statements_mode_check", sql`${t.billingMode} IN ('INTERNAL_CHARGEBACK','EXTERNAL_INVOICE')`),
+    check("platform_billing_statements_status_check", sql`${t.status} IN ('FINAL')`),
+    check("platform_billing_statements_unknown_check", sql`${t.unknownLines} >= 0`),
+  ],
+);
+
+/**
+ * JOB CẤP PHÁT: tạo khách (tài khoản + workspace + thuê bao + quản trị), thuê / huỷ một sản phẩm. Khoá idempotent: gửi lại
+ * cùng khoá ⇒ trả job cũ; job FAILED chạy lại được (mỗi bước tự idempotent). `steps` = nhật ký từng bước (không bí mật).
+ */
+export const platformProvisioningJobs = pgTable(
+  "platform_provisioning_jobs",
+  {
+    id: id(),
+    kind: text("kind").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    accountId: text("account_id"),
+    orgCode: text("org_code"),
+    productKey: text("product_key"),
+    input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").notNull().default("PENDING"),
+    attempts: integer("attempts").notNull().default(0),
+    steps: jsonb("steps").$type<unknown[]>().notNull().default([]),
+    lastError: text("last_error"),
+    requestedByEmail: text("requested_by_email"),
+    createdAt: createdAt(),
+    startedAt: ts("started_at"),
+    finishedAt: ts("finished_at"),
+  },
+  (t) => [
+    uniqueIndex("platform_provisioning_jobs_key").on(t.idempotencyKey),
+    index("platform_provisioning_jobs_status_idx").on(t.status, t.createdAt),
+    check("platform_provisioning_jobs_kind_check", sql`${t.kind} IN ('CREATE_CUSTOMER','SUBSCRIBE_PRODUCT','CANCEL_SUBSCRIPTION')`),
+    check("platform_provisioning_jobs_status_check", sql`${t.status} IN ('PENDING','RUNNING','SUCCEEDED','FAILED')`),
+    check("platform_provisioning_jobs_error_check", sql`${t.status} <> 'FAILED' OR ${t.lastError} IS NOT NULL`),
+    check("platform_provisioning_jobs_key_check", sql`length(${t.idempotencyKey}) BETWEEN 1 AND 200`),
+  ],
+);
+
 /** Nhật ký nền tảng: ai đổi module / cờ / tổ chức nào, trước → sau, vì sao. Chỉ THÊM. */
 export const platformAuditLog = pgTable(
   "platform_audit_log",
@@ -5370,6 +5596,8 @@ export const platformAuditLog = pgTable(
     actorUserId: text("actor_user_id"),
     actorEmail: text("actor_email"),
     targetOrgCode: text("target_org_code").notNull(),
+    /** Thao tác ở cấp TÀI KHOẢN (0224) — `target_org_code` khi đó là workspace nhà (cùng quy ước thao tác cấp nền tảng). */
+    targetAccountId: text("target_account_id"),
     action: text("action").notNull(),
     subject: text("subject").notNull(),
     before: jsonb("before"),

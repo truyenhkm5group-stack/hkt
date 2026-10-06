@@ -40,7 +40,7 @@ import {
 import { createTechTask, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
 
 /**
- * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0224) ═══════════
+ * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0225) ═══════════
  *
  * docs/tech-control-plane/README.md. Bài này khoá:
  *  1. Vòng đời chuẩn là PHÉP CHIẾU đủ mọi trạng thái lưu, phụ thuộc chưa xong không bao giờ "sẵn sàng".
@@ -52,7 +52,7 @@ import { createTechTask, setTechTaskStatus, type TechActor } from "@/lib/tech/se
  */
 
 const goc = path.resolve(__dirname, "..");
-const MIGRATION = readFileSync(path.join(goc, "drizzle/0224_tech_control_plane_goals.sql"), "utf8");
+const MIGRATION = readFileSync(path.join(goc, "drizzle/0225_tech_control_plane_goals.sql"), "utf8");
 
 /* ═════════════════════ 1. HÀM THUẦN ═════════════════════ */
 

@@ -533,6 +533,7 @@ import { testDataExport } from "./data-export.test";
 import { testPilotOps } from "./pilot-ops.test";
 import { testPlatformBilling } from "./platform-billing.test";
 import { testPricingBilling } from "./pricing-billing.test";
+import { testSaasPlatform } from "./saas-platform.test";
 import { testPlatformSaas } from "./platform-saas.test";
 import { testTenantAttack } from "./tenant-attack.test";
 import { testAiSalesIsolation } from "./ai-sales-isolation.test";
@@ -2847,6 +2848,7 @@ async function main() {
   // Nền móng giá & thu phí (0222): gói cấu hình được, tính năng, hạn mức mềm / cứng, đồng hồ đo, sự kiện trùng, kinh tế đơn vị —
   // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
   await testPricingBilling();
+  await testSaasPlatform();
   // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
   await testPlatformSaas();
   await testPlatformUi();

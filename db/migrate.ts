@@ -95,4 +95,12 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_phone_otps`);
   // 0222 · ghi đè giá / tính năng / mức áp theo tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật.
   await db.execute(sql`delete from platform_org_pricing`);
+  // 0224 · SaaS control plane (tài khoản · thuê bao sản phẩm · sổ dùng · sổ chi phí · bảng kê · job cấp phát) — chỉ bản ở CSDL
+  // nhà là thật. Bảng có khoá ngoài tới `platform_accounts` xoá TRƯỚC; `platform_organizations` đã xoá ở trên.
+  await db.execute(sql`delete from platform_product_subscriptions`);
+  await db.execute(sql`delete from platform_billing_statements`);
+  await db.execute(sql`delete from platform_usage_events`);
+  await db.execute(sql`delete from platform_cost_entries`);
+  await db.execute(sql`delete from platform_provisioning_jobs`);
+  await db.execute(sql`delete from platform_accounts`);
 }
