@@ -56,18 +56,18 @@
     "0228": "2026-10-06T17:57:33.593Z"
   },
   "created_at": "2026-10-06T17:03:33.744Z",
-  "updated_at": "2026-10-06T20:18:34.048Z",
-  "last_heartbeat": "2026-10-06T20:18:34.048Z",
+  "updated_at": "2026-10-06T21:17:10.417Z",
+  "last_heartbeat": "2026-10-06T21:17:10.417Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/saas-d-pricing-v1",
-    "sha": "a3d5fc0c7df8186462a5f690fd7c0ecd029bae97",
-    "at": "2026-10-06T20:18:34.048Z",
+    "sha": "e8db32423f7a84b8e950530f952baa5f8873caeb",
+    "at": "2026-10-06T21:17:10.417Z",
     "actor": "DESKTOP-56TH98Y:wt-saas-d",
     "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
     "summary": "",
     "tests": [
-      "typecheck sạch · npm run lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (719 dòng ✓, tests/pricing-v1.test.ts mới) · npm run build xanh · đột biến 4/4 đỏ (dedupe khoá khách AI, làm tròn khối ceil→floor, bỏ ghim trong renewalPricing, bỏ ghim trong price-book)"
+      "typecheck · lint · npm test TẤT CẢ KIỂM THỬ ĐẠT (721 ✓) · build xanh · đột biến: bỏ trần AI theo phiên bản ⇒ đỏ, bỏ người dùng theo phiên bản ⇒ đỏ (+4 đột biến trước). Migration hiện 0226, chờ B gộp để renumber thành 0228"
     ]
   }
 }

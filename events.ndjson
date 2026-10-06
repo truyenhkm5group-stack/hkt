@@ -207,3 +207,4 @@
 {"at":"2026-10-06T21:06:02.671Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#622 @ 2cd8896a6cf1 · PASS @798c4cff + delta tích hợp: gộp main, 0225→0227, số trần trong tài liệu/SQL/test đổi theo; gates xanh"}
 {"at":"2026-10-06T21:08:38.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-a-vnx-runtime","detail":"#621 @ 4b6e3191e478 → 657fb7327a61 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-06T21:09:29.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"657fb7327a61 · run 37531822071 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37531822071"}
+{"at":"2026-10-06T21:17:10.447Z","actor":"DESKTOP-56TH98Y:wt-saas-d","kind":"HANDOFF","mission":"saas-d-pricing-overage","detail":"feat/saas-d-pricing-v1 @ e8db32423f7a · 1 lệnh kiểm thử"}
