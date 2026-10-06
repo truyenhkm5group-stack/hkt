@@ -4,7 +4,8 @@ import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { sessionCookieSecure } from "@/lib/constants/session";
 import { MESSENGER_CONNECT_PATH, MESSENGER_SETTINGS_PATH, MESSENGER_STATE_COOKIE, messengerRedirectUri, storePendingPages } from "@/lib/integrations/messenger/connect";
-import { messengerApp, pagesFromCode } from "@/lib/integrations/messenger/graph";
+import { discoveryLogLine, messengerApp, pagesFromCode, type DiscoveryDiagnostic } from "@/lib/integrations/messenger/graph";
+import { setSettingJson } from "@/lib/settings";
 import { connectMessengerPage } from "@/lib/sales-chatbot/messenger";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,12 @@ export async function GET(req: NextRequest) {
   if (!code) return back("loi=huy");
   const got = await pagesFromCode(app, code, messengerRedirectUri(origin));
   if ("error" in got) return back(`loi=fb&msg=${encodeURIComponent(got.error.slice(0, 200))}`);
+  // Vết của lượt khám phá: một dòng log (chỉ quyền + số đếm) + bản chẩn đoán đầy đủ trong CSDL tổ chức — không token nào.
+  console.info(discoveryLogLine(user.organization.code, got.diagnostic));
+  await setSettingJson("messenger.lastConnectDiagnostic", { at: new Date().toISOString(), by: user.id, ...got.diagnostic }).catch(() => undefined);
   const pages = got.pages.filter((p) => p.canMessage);
+  // Chặn theo QUYỀN trước (page hiện đủ mà thiếu pages_messaging thì gửi tin vẫn hỏng), rồi mới tới «không có page».
+  if (got.diagnostic.reason && (got.diagnostic.reason.startsWith("PERMISSION_") || !pages.length)) return back(`loi=khongpage&lydo=${got.diagnostic.reason}&ct=${encodeURIComponent(diagnosticDetail(got.diagnostic))}`);
   if (!pages.length) return back("loi=khongpage");
   if (pages.length === 1) {
     const r = await connectMessengerPage(user, pages[0]);
@@ -46,4 +52,12 @@ export async function GET(req: NextRequest) {
   // Nhiều page ⇒ cho chọn (nhiều page một lượt). Danh sách + token lưu niêm phong ở máy chủ, không ở cookie (trần 4 KB).
   await storePendingPages(user.organization.code, user.id, pages);
   return back("chon=1");
+}
+
+/** Phần cụ thể của lý do (tên quyền / tên page / quyền đang có trên page) — ngắn, không token. */
+function diagnosticDetail(d: DiscoveryDiagnostic): string {
+  if (d.reason === "PERMISSION_DECLINED" || d.reason === "PERMISSION_NOT_GRANTED") return d.missing.join(", ");
+  if (d.reason === "NO_PAGE_TOKEN") return `${d.accountsSeen} page${d.viaBusiness ? ` (${d.viaBusiness} qua Business Portfolio)` : ""}: ${d.withoutToken.slice(0, 3).join(", ")}`;
+  if (d.reason === "NO_MESSAGING_TASK") return d.withoutMessaging.slice(0, 3).map((p) => `${p.name} (${p.tasks.join("/") || "không quyền"})`).join(", ");
+  return d.granted ? `quyền đã cấp: ${d.granted.join(", ") || "không"}` : "";
 }

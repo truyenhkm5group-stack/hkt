@@ -514,6 +514,7 @@ import { testMessengerHealth } from "./messenger-health.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
+import { testMessengerDiscovery } from "./messenger-discovery.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2799,6 +2800,8 @@ async function main() {
   // Vòng đời page Meta + lịch sử hội thoại trực tiếp: phân trang /me/accounts, gỡ page ⇒ gỡ đăng ký webhook, nhập 20 tin gần nhất
   // mỗi hội thoại qua Conversations API — tổ chức THẬT `vong-doi-page`.
   await testMessengerLifecycle();
+  // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
+  await testMessengerDiscovery();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
