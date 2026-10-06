@@ -9,7 +9,7 @@
   "owner": "DESKTOP-56TH98Y:wt-saas-platform",
   "worker": null,
   "worktree": null,
-  "branch": "feat/saas-platform-restructure",
+  "branch": "integ/saas-platform",
   "base_sha": "51db3e4269cdfb5793fb4c79cf05bdf91bf9b0c6",
   "domains": [],
   "owned_paths": [
@@ -45,8 +45,8 @@
     "0224": "2026-10-06T13:26:29.899Z"
   },
   "created_at": "2026-10-06T13:25:25.486Z",
-  "updated_at": "2026-10-06T15:10:30.624Z",
-  "last_heartbeat": "2026-10-06T15:10:30.624Z",
+  "updated_at": "2026-10-06T15:49:05.441Z",
+  "last_heartbeat": "2026-10-06T15:49:05.441Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
