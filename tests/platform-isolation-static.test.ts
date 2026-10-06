@@ -274,6 +274,8 @@ const GOI_MANG_KHONG_CREDENTIAL: Record<string, string> = {
   "lib/creative/import.ts": "Tải ảnh từ một URL công khai (http/https) — không gắn khoá nào vào request.",
   "lib/ai-builder/providers.ts":
     "Provider AI BYOK của AI Builder (Phase 8): khoá là `apiKey` TƯỜNG MINH do lib/connectors/service.ts giải mã từ org_connections của CHÍNH tổ chức đang chạy; `authToken` / `organization` / `project` đặt null và `baseURL` là hằng, nên không biến môi trường nào của tổ chức nhà lọt vào. Đường của tổ chức nhà đi qua `getAiProvider` (lib/ai/provider.ts — đã gọi assertHomeCredentials). Nhánh AI do NỀN TẢNG trả tiền (mặc định tắt) cũng dựng provider này với khoá TƯỜNG MINH `PLATFORM_AI_API_KEY` (lib/ai-usage/platform-ai.ts — từ chối khi trùng khoá của nhà), không bao giờ `ANTHROPIC_API_KEY`.",
+  "lib/ai-usage/platform-model-probe.ts":
+    "Kiểm tra khả dụng model của AI DÙNG CHUNG (06/10/2026, docs/platform/ai-model-control.md): khoá là `apiKey` TƯỜNG MINH lấy từ `platformAiConfig()` — tức `PLATFORM_AI_API_KEY` của NỀN TẢNG, bị từ chối khi trùng mọi khoá của nhà (ANTHROPIC_* · OPENAI_API_KEY · GEMINI_API_KEY); tệp không đọc biến môi trường nào. Đích hằng generativelanguage.googleapis.com, khoá chỉ trong tiêu đề x-goog-api-key, không theo chuyển hướng, một lời gọi 1 chữ, câu lỗi đã che khoá.",
   "lib/messaging/providers.ts":
     "Gửi tin nhóm (0180) bằng bí mật của CHÍNH tổ chức ngữ cảnh qua `openActiveConnection` (AAD gắn tổ chức) — không đọc biến môi trường nào; chỉ hai loại đích cố định (webhook Custom Bot của Lark · api.telegram.org), không theo chuyển hướng; hộp thử không gọi mạng.",
   "lib/integrations/zalo/oa.ts":
@@ -733,6 +735,11 @@ const LOI_VAN_HANH: Record<string, string> = {
   "lib/platform/support.ts::listOrgSupportSummaries": "Tóm tắt mọi tổ chức ở /platform: mở CSDL từng tổ chức để đếm người dùng.",
   "lib/ai-usage/control.ts::setPlatformAiEnabled": "Công tắc AI toàn nền tảng.",
   "lib/ai-usage/control.ts::setOrgAiControl": "Công tắc AI + ghi đè hạn mức AI của một tổ chức.",
+  // Platform AI Model Control (06/10/2026) — model của AI DÙNG CHUNG cho mọi tổ chức khách; sổ AI nguồn PLATFORM toàn nền tảng.
+  "lib/ai-usage/platform-ai-admin.ts::loadPlatformAiControl": "Khung Platform AI Model Control: sổ AI nguồn PLATFORM của MỌI tổ chức (30 ngày theo model) + chính sách + lượt kiểm khả dụng + nhật ký.",
+  "lib/ai-usage/platform-ai-admin.ts::probePlatformAiModelAsOperator": "Kiểm khả dụng một model bằng khoá nền tảng — lưu kết quả, nhật ký PLATFORM_AI_MODEL_PROBE.",
+  "lib/ai-usage/platform-ai-admin.ts::setPlatformAiPolicy": "Chạy thử / áp dụng model AI dùng chung cho cả nền tảng — bắt buộc lý do + lượt kiểm AVAILABLE trong 24 giờ, nhật ký PLATFORM_AI_POLICY_SET.",
+  "lib/ai-usage/platform-ai-admin.ts::rollbackPlatformAiPolicy": "Hoàn tác chính sách model AI dùng chung — bắt buộc lý do, nhật ký PLATFORM_AI_POLICY_ROLLBACK.",
   "lib/ai-usage/view.ts::loadOperatorOrgAi": "Sổ AI theo ngày của MỘT tổ chức bất kỳ (màn người vận hành).",
   "lib/ai-usage/view.ts::loadPlatformAiSummary": "Top tổ chức theo chi phí AI toàn nền tảng.",
   "lib/platform/secrets-self-test.ts::runSecretsSelfTest": "Tự kiểm khoá bí mật của nền tảng (cổng mở bán A) — ghi nhật ký nền tảng.",
