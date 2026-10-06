@@ -3,7 +3,7 @@
   "mission_id": "tech-lead-delivery-v2",
   "title": "Tech Lead một cửa + sổ điều phối xuyên sứ mệnh + đường giao hàng V2",
   "business_goal": "Chủ shop giao mọi việc qua một cửa (/lead); sổ chung chặn trùng việc, chồng phạm vi, va số migration, hai người cùng gộp/deploy; cổng PR và deploy nhanh hơn mà không bỏ bài kiểm nào — đo trước/sau.",
-  "status": "RUNNING",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -40,7 +40,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T05:09:32.469Z",
-  "updated_at": "2026-10-06T06:03:33.280Z",
+  "updated_at": "2026-10-06T10:15:51.473Z",
   "last_heartbeat": "2026-10-06T06:03:33.280Z",
   "definition_of_done": [
     "Chủ shop giao mọi việc qua một cửa (/lead); sổ chung chặn trùng việc, chồng phạm vi, va số migration, hai người cùng gộp/deploy; cổng PR và deploy nhanh hơn mà không bỏ bài kiểm nào — đo trước/sau."
@@ -51,5 +51,9 @@
     "evidence": [
       "mở rộng AI Tech Room #592/#594 — không dựng hệ thống thứ hai"
     ]
+  },
+  "evidence": {
+    "verify": "PASS 0ca4ed97a85173961574c2cfcaea675d6119ef4e 2026-10-06T10:15:50.027Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37444778809"
   }
 }
