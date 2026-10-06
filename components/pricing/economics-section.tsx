@@ -1,11 +1,12 @@
 import { SectionCard } from "@/components/ui-bits";
-import { AiUnitPricesForm, GuardConfigForm, OrgPricingForm } from "@/components/pricing/operator-pricing";
+import { AiUnitPricesForm, GuardConfigForm, MarginConfigForm, OrgPricingForm, PriceVersionPinForm } from "@/components/pricing/operator-pricing";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { QUOTA_SPEC } from "@/lib/pricing/catalog";
 import { ENFORCEMENT_LABEL, QUOTA_LEVEL_LABEL, type QuotaLevel } from "@/lib/pricing/guard";
 import { MARGIN_RISK_LABEL, type MarginRisk } from "@/lib/pricing/economics";
 import type { PricingEconomics } from "@/lib/pricing/admin";
 import type { UnitPriceRow } from "@/lib/pricing/unit-prices";
+import { MARGIN_BAND_LABEL, USAGE_ALERT_LABEL, type MarginBand, type UsageAlertLevel } from "@/lib/pricing/versions";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,6 +31,26 @@ const RISK_TONE: Record<MarginRisk, string> = {
   UNKNOWN: "text-muted-foreground",
   OK: "text-emerald-700 dark:text-emerald-400",
   NO_COST: "text-muted-foreground",
+};
+
+const BAND_TONE: Record<MarginBand, string> = {
+  UNKNOWN: "text-muted-foreground",
+  CRITICAL: "font-semibold text-rose-700 dark:text-rose-400",
+  WARN: "text-amber-700 dark:text-amber-400",
+  BELOW_TARGET: "text-sky-700 dark:text-sky-400",
+  ON_TARGET: "text-emerald-700 dark:text-emerald-400",
+  ABOVE_TARGET: "text-emerald-700 dark:text-emerald-400",
+};
+const ALERT_TONE: Record<UsageAlertLevel, string> = {
+  UNKNOWN: "text-muted-foreground",
+  UNDECLARED: "text-muted-foreground",
+  UNLIMITED: "text-muted-foreground",
+  NOT_INCLUDED: "text-muted-foreground",
+  OK: "text-emerald-700 dark:text-emerald-400",
+  NOTIFY: "text-amber-700 dark:text-amber-400",
+  OVERAGE: "text-rose-700 dark:text-rose-400",
+  STRONG: "font-semibold text-rose-700 dark:text-rose-400",
+  REVIEW: "font-semibold text-rose-700 dark:text-rose-400",
 };
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -62,6 +83,8 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
           <Tile label="AI / đơn AI tạo" value={formatVND(t.aiCostPerOrderVnd === null ? null : Math.round(t.aiCostPerOrderVnd))} sub={`${formatNumber(t.aiOrders)} đơn AI tháng này`} />
           <Tile label="AI / hội thoại AI" value={formatVND(t.aiCostPerConversationVnd === null ? null : Math.round(t.aiCostPerConversationVnd))} sub={`${formatNumber(t.aiConversations)} hội thoại AI`} />
           <Tile label="Cần để ý" value={`${t.negativeRisk} âm biên · ${t.spikes} bất thường`} sub="AI / đơn giao thành công: CHƯA ĐO (cần nối ORDER_OUTCOME từng tổ chức)" />
+          <Tile label="Khách AI tháng này" value={formatNumber(data.aiCustomersTotal)} sub="đồng hồ thu chính — «—» khi có workspace chưa đo được" />
+          <Tile label="Dải biên lãi gộp" value={MARGIN_BAND_LABEL[data.marginBand]} sub={`đích ${data.margin.targetLowPct}–${data.margin.targetHighPct}% · cảnh báo < ${data.margin.warnBelowPct}% · nguy cấp < ${data.margin.criticalBelowPct}%`} />
         </div>
 
         {data.tenants.length === 0 ? (
@@ -93,6 +116,9 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
                     <td className="numeric py-2 pr-3 text-right">
                       <div>{formatVND(r.mrrVnd)}</div>
                       <div className="text-muted-foreground">{r.economics.grossMarginPct === null ? "—" : formatPercent(r.economics.grossMarginPct)}</div>
+                      <div className={cn(BAND_TONE[r.marginBand])} data-margin-band={r.marginBand}>
+                        chiếu {r.projectedMarginPct === null ? "—" : formatPercent(r.projectedMarginPct)} · {MARGIN_BAND_LABEL[r.marginBand].toLowerCase()}
+                      </div>
                       <div className="text-muted-foreground">AI/đơn {formatVND(r.economics.aiCostPerOrderVnd === null ? null : Math.round(r.economics.aiCostPerOrderVnd))}</div>
                     </td>
                     <td className="numeric py-2 pr-3 text-right">
@@ -104,6 +130,14 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
                       {r.unpricedCalls > 0 ? <div className="text-amber-700 dark:text-amber-400">{formatNumber(r.unpricedCalls)} lời gọi chưa định giá{r.reestimatedUnpricedUsd !== null ? ` ≈ ${r.reestimatedUnpricedUsd.toFixed(2)} USD (ước tính lại)` : ""}</div> : null}
                     </td>
                     <td className="py-2 pr-3">
+                      {r.aiCustomerAlert ? (
+                        <div className={cn("mb-0.5", ALERT_TONE[r.aiCustomerAlert.level])} data-ai-customers={r.aiCustomerAlert.level}>
+                          Khách AI: {r.aiCustomers?.value === null || !r.aiCustomers ? "—" : formatNumber(r.aiCustomers.value)}
+                          {r.aiCustomerIncluded === undefined ? " (chưa khai)" : r.aiCustomerIncluded === null ? " (không giới hạn)" : ` / ${formatNumber(r.aiCustomerIncluded)}`} · {USAGE_ALERT_LABEL[r.aiCustomerAlert.level].toLowerCase()}
+                          {r.overage && r.overage.knownVnd > 0 ? ` · vượt ước tính ${formatVND(r.overage.knownVnd)}` : ""}
+                        </div>
+                      ) : null}
+                      {r.fairUse?.flagged ? <div className={cn("mb-0.5", r.fairUse.review ? "font-semibold text-rose-700 dark:text-rose-400" : "text-amber-700 dark:text-amber-400")}>Fair-use: {r.fairUse.review ? "rà soát + giữ bằng chứng" : "vượt — chỉ nhắc"}</div> : null}
                       <ul className="space-y-0.5">
                         {r.quotas.map((q) => (
                           <li key={q.key} className={cn(LEVEL_TONE[q.level])}>
@@ -126,6 +160,8 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
                     <td className="py-2">
                       <div className="mb-1 text-muted-foreground">{ENFORCEMENT_LABEL[r.enforcement].split(" — ")[0]}</div>
                       <OrgPricingForm orgCode={r.code} orgName={r.name} current={{ grandfathered: r.grandfathered, enforcement: r.enforcement }} />
+                      <div className="mt-1 text-muted-foreground">Giá: {r.priceVersionKey ?? "—"}</div>
+                      <PriceVersionPinForm orgCode={r.code} orgName={r.name} current={r.priceVersionKey} />
                     </td>
                   </tr>
                 ))}
@@ -138,6 +174,8 @@ export function PricingEconomicsSection({ data, unitPrices }: { data: PricingEco
           <div className="space-y-2">
             <h3 className="font-semibold">Ngưỡng Margin Guard</h3>
             <GuardConfigForm current={data.guard} />
+            <h3 className="pt-2 font-semibold">Dải biên lãi gộp</h3>
+            <MarginConfigForm current={data.margin} />
           </div>
           <div className="space-y-2">
             <h3 className="font-semibold">Giá đơn vị AI theo model — ƯỚC TÍNH</h3>

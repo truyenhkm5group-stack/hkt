@@ -238,7 +238,8 @@ export function billingWriteDenied(input: { isHome: boolean; standing: BillingSt
 
 // ─────────────────────────── Báo giá gia hạn ───────────────────────────
 
-export type PricedPlan = { key: string; name: string; priceVnd: number | null; yearlyFreeMonths?: number };
+/** `yearlyPriceVnd` = giá 12 tháng TƯỜNG MINH của phiên bản giá (0225); vắng / `null` ⇒ giá tháng × (12 − tặng tháng). */
+export type PricedPlan = { key: string; name: string; priceVnd: number | null; yearlyFreeMonths?: number; yearlyPriceVnd?: number | null };
 
 export type RenewalKind = "START" | "RENEW" | "UPGRADE" | "DOWNGRADE";
 
@@ -285,8 +286,10 @@ export function quoteRenewal(input: { terms: SubscriptionTerms | null; currentPl
   if (target.priceVnd === null || !Number.isInteger(target.priceVnd) || target.priceVnd <= 0) return { error: `Gói «${target.name}» không bán — chọn một gói có giá.` };
   if (!(BILLING_MONTH_OPTIONS as readonly number[]).includes(months)) return { error: `Số tháng phải là một trong ${BILLING_MONTH_OPTIONS.join(" · ")}.` };
   const addonMonthly = Math.max(0, Math.trunc(input.targetAddonMonthlyVnd ?? 0));
-  // Kỳ 12 tháng của gói có «tặng tháng»: vẫn dùng ĐỦ 12 tháng, trả (12 − tặng) tháng.
-  const list = (target.priceVnd + addonMonthly) * billedMonths(months, target.yearlyFreeMonths);
+  // Kỳ 12 tháng của gói có «tặng tháng»: vẫn dùng ĐỦ 12 tháng, trả (12 − tặng) tháng. Phiên bản giá khai giá năm tường minh
+  // ⇒ phần gói của kỳ 12 tháng là đúng con số ấy (phần mua thêm vẫn theo tặng tháng).
+  const yearly = months === 12 && typeof target.yearlyPriceVnd === "number" && Number.isInteger(target.yearlyPriceVnd) && target.yearlyPriceVnd > 0 ? target.yearlyPriceVnd : null;
+  const list = yearly !== null ? yearly + addonMonthly * billedMonths(12, target.yearlyFreeMonths) : (target.priceVnd + addonMonthly) * billedMonths(months, target.yearlyFreeMonths);
   const standing = billingStanding(input.terms, today);
   const pt = input.terms?.paidThrough ?? null;
   const base = { planKey: target.key, months, listAmountVnd: list, addonMonthlyVnd: addonMonthly };

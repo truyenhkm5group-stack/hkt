@@ -42,6 +42,7 @@ import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
 import { afterPoll, pollDecision, type PancakePollState } from "@/lib/sales-chatbot/pancake-poll-shared";
 import { nextFollowupAt } from "@/lib/sales-chatbot/followup-shared";
 import { fetchPancakeThreadProfile, threadProfileStale } from "@/lib/sales-chatbot/returning";
+import { noteAiCustomerReply } from "@/lib/pricing/ai-customer";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
@@ -607,6 +608,8 @@ export async function conversationFor(pageId: string, threadId: string): Promise
  * hay đang cần người xử lý (khi đó chỉ ghi mốc tin cuối của bot). `threadId` = hộp thư mới khi trả lời bình luận.
  */
 export async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
+  // Đồng hồ khách AI (0225): chỉ được gọi SAU khi câu trả lời AI đã gửi thành công; không ném, lỗi ghi sổ không chặn việc gửi.
+  await noteAiCustomerReply(conversationId, now);
   const db = await getDb();
   const c = schema.salesChatConversations;
   const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);

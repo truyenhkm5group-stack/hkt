@@ -56,6 +56,7 @@ import { invalidateSubscriptions, orgBillingStanding } from "@/lib/billing/stand
 import { addonMonthlyVnd, applyAddons, parseAddonPrices, parseInvoiceInfo, quoteAddon, type AddonQuote } from "@/lib/billing/addons";
 import { createAddonInvoice, markVatIssued, previewAddon, setInvoiceInfo, setOrgAddons, setPlanAddonPrices } from "@/lib/billing/service";
 import { getPlanUsage, listPlans } from "@/lib/entitlements/check";
+import { catalogPlans, invalidatePriceBook, setOrgPriceVersion } from "@/lib/pricing/price-book";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { setSessionTokenSourceForTests, withOrganization } from "@/lib/platform/context";
 import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
@@ -253,8 +254,17 @@ async function cleanup(savedReceiver: unknown, savedPrices: Map<string, number |
   else await pdb.update(schema.platformSettings).set({ value: savedReceiver }).where(eq(schema.platformSettings.key, BILLING_RECEIVER_KEY));
   for (const [key, price] of savedPrices) await pdb.update(schema.platformPlans).set({ priceVnd: price }).where(eq(schema.platformPlans.key, key));
   for (const [key, prices] of savedAddonPrices) await pdb.update(schema.platformPlans).set({ addonPrices: (prices ?? {}) as Record<string, unknown> }).where(eq(schema.platformPlans.key, key));
+  // 0225: sửa giá = phát hành phiên bản giá mới (`cat-…`) — dọn mọi phiên bản bài kiểm tạo + ghim của tổ chức thử.
+  await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.orgCode, [...ORGS]));
+  const extra = (await pdb.select({ key: schema.platformPriceVersions.key }).from(schema.platformPriceVersions).where(like(schema.platformPriceVersions.key, "cat-%"))).map((r) => r.key);
+  if (extra.length) {
+    await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.versionKey, extra));
+    await pdb.delete(schema.platformPlanPrices).where(inArray(schema.platformPlanPrices.versionKey, extra));
+    await pdb.delete(schema.platformPriceVersions).where(inArray(schema.platformPriceVersions.key, extra));
+  }
+  invalidatePriceBook();
   const home = await getHomeOrganization();
-  await pdb.delete(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, home.code), inArray(schema.platformAuditLog.action, ["BILLING_RECEIVER_SET", "PLAN_PRICE_SET", "BILLING_PAYMENT_RESOLVE", "ADDON_PRICE_SET"])));
+  await pdb.delete(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.targetOrgCode, home.code), inArray(schema.platformAuditLog.action, ["BILLING_RECEIVER_SET", "PLAN_PRICE_SET", "BILLING_PAYMENT_RESOLVE", "ADDON_PRICE_SET", "PRICE_VERSION_PUBLISH"])));
   for (const code of ORGS) {
     const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, code) });
     if (org) {
@@ -327,7 +337,8 @@ export async function testPlatformBilling() {
 
   for (const code of ORGS) await provisionOrganization({ code, name: `Tổ chức ${code}`, modules: ["customers"], admin: { email: `admin@${code}.local`, name: `QT ${code}`, password: "Billing@12345" }, source: "TEST", actor: null });
   try {
-    // Ba gói bán gieo bằng 0187.
+    // Ba gói bán gieo bằng 0187 — `platform_plans` giữ nguyên (giá legacy, ảnh chụp ở 0225). Tổ chức MỚI (chưa ghim) mua theo
+    // bảng giá V1 đang niêm yết (0225): Starter 790.000 · Growth 1.490.000.
     const plans = await listPlans();
     assert.deepEqual(
       ["starter", "growth", "pro"].map((k) => plans.find((p) => p.key === k)?.priceVnd),
@@ -361,11 +372,11 @@ export async function testPlatformBilling() {
     const open = await openInvoices(A);
     assert.equal(open.length, 1, "tối đa MỘT hoá đơn đang mở");
     const inv = open[0];
-    assert.equal(inv.amountVnd, 1_497_000);
+    assert.equal(inv.amountVnd, 3 * 790_000, "tổ chức mới ⇒ giá V1 (Starter 790.000 × 3 tháng)");
     assert.match(inv.transferCode, TRANSFER_CODE_PATTERN);
     const view = await loadTenantBilling(A);
     assert.ok(view?.openInvoice?.qrPayload?.includes("0123456789") && view.openInvoice.qrPayload.includes(inv.transferCode), "mã VietQR mang số tài khoản + nội dung");
-    assert.equal(view?.offers.length, 4, "bốn gói bán: Cơ bản (0194) + ba gói của 0187");
+    assert.equal(view?.offers.length, 4, "bốn gói tự mua của V1: Inbox · Starter · Growth · Scale");
 
     // ── Tiền THIẾU ⇒ ghi, không gia hạn.
     const under = await bankIn(inv.amountVnd - 1_000, `CK ${inv.transferCode.toLowerCase()} thanh toan`);
@@ -427,7 +438,11 @@ export async function testPlatformBilling() {
     assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { aiDraftsPerDay: 10_000 }, reason: "hạng mục không bán" })));
     assert.ok("error" in (await setPlanAddonPrices(op, { planKey: "internal", prices: { users: 30_000 }, reason: "bán gói nội bộ" })));
     assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "starter", prices: { users: 30_000, storageMb: 20_000, pages: null }, reason: "Mở bán thêm cho gói Khởi đầu" })));
-    assert.deepEqual(parseAddonPrices((await listPlans()).find((p) => p.key === "starter")?.addonPrices), { users: 30_000, storageMb: 20_000 });
+    const cat1 = await catalogPlans();
+    assert.deepEqual(parseAddonPrices(cat1.plans.find((p) => p.key === "starter")?.addonPrices), { users: 30_000, storageMb: 20_000 }, "đơn giá mới nằm ở PHIÊN BẢN giá mới");
+    assert.ok("error" in (await previewAddon(A, { kind: "users", blocks: 2 })), "A đã ghim phiên bản lúc trả tiền ⇒ đơn giá mới chưa áp cho A");
+    for (const u of outsiders) assert.ok("error" in (await setOrgPriceVersion(u, { orgCode: A, versionKey: cat1.version!.key, reason: "chuyển giá" })));
+    assert.ok("ok" in (await setOrgPriceVersion(op, { orgCode: A, versionKey: cat1.version!.key, reason: "Khách đồng ý bảng giá có mua thêm" })));
 
     const subBefore = await pdb.query.platformSubscriptions.findFirst({ where: eq(schema.platformSubscriptions.orgCode, A) });
     const aq = await previewAddon(A, { kind: "users", blocks: 2 });
@@ -464,9 +479,10 @@ export async function testPlatformBilling() {
 
     // Gia hạn cộng phần mua thêm theo giá của gói ĐÍCH; gói đích không bán ⇒ báo lỗi, không đoán.
     const ren = await previewRenewal(A, "starter", 1);
-    assert.ok(isQuote(ren) && ren.listAmountVnd === 499_000 + 60_000 && ren.addonMonthlyVnd === 60_000, JSON.stringify(ren));
+    assert.ok(isQuote(ren) && ren.listAmountVnd === 790_000 + 60_000 && ren.addonMonthlyVnd === 60_000, JSON.stringify(ren));
+    assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "growth", prices: { users: 69_000 }, reason: "Mở bán thêm người dùng cho Growth" })));
     const toGrowthPriced = await previewRenewal(A, "growth", 3);
-    assert.ok(isQuote(toGrowthPriced) && toGrowthPriced.addonMonthlyVnd === 2 * 69_000, "gói đích CÓ bán ⇒ tính theo đơn giá của gói đích (0194: 69.000 / người)");
+    assert.ok(isQuote(toGrowthPriced) && toGrowthPriced.addonMonthlyVnd === 2 * 69_000, "gói đích CÓ bán ⇒ tính theo đơn giá của gói đích (69.000 / người)");
     assert.ok("ok" in (await setPlanAddonPrices(op, { planKey: "growth", prices: {}, reason: "Gỡ đơn giá để kiểm thử" })));
     const toGrowth = await previewRenewal(A, "growth", 3);
     assert.ok("error" in toGrowth && toGrowth.error.includes("người dùng"), JSON.stringify(toGrowth));
@@ -553,7 +569,7 @@ export async function testPlatformBilling() {
     assert.ok("error" in (await setPlanPrice(op, { planKey: "starter", priceVnd: 5, reason: "giá vô lý" })));
     assert.ok("ok" in (await setPlanPrice(op, { planKey: "starter", priceVnd: 599_000, reason: "Chốt bảng giá mới" })));
     const q = await previewRenewal(A, "starter", 1);
-    assert.ok(isQuote(q) && q.listAmountVnd === 599_000);
+    assert.ok(isQuote(q) && q.listAmountVnd === 599_000, "đổi gói ⇒ giá của phiên bản mới nhất");
 
     // Tắt thu phí ⇒ không nhắc, không khoá.
     assert.ok("ok" in (await setOrgBilling(op, { orgCode: A, enabled: false, paidThrough: vnDate(past), graceDays: 7, reason: "Khách chuyển sang hợp đồng năm" })));

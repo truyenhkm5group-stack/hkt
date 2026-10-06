@@ -19,13 +19,31 @@ import { PRODUCTS, productDef, type ProductDef } from "@/lib/saas/catalog";
 import { costInputs, currentPeriodMonth, readAiByWorkspaceProduct, readProductUsage, usdToVnd, type MetricReading } from "@/lib/saas/ledger";
 import { effectiveSubscriptionStatus, marginApplicable, subscriptionGrantsUse, type BillingMode, type EffectiveSubscriptionStatus } from "@/lib/saas/policy";
 import { buildStatement, type PlanRef, type Statement, type StatementWorkspace } from "@/lib/saas/statement";
+import { getPlanUsage } from "@/lib/entitlements/check";
+import { readAiCustomerUsage, type AiCustomerReading } from "@/lib/pricing/ai-customer";
+import { loadPriceBook } from "@/lib/pricing/price-book";
+import { computeOverage, currentCatalogVersion, fairUseVerdict, priceOf, resolveOrgVersion, yearlyAmountVnd, type FairUseVerdict, type OverageResult, type PlanPrice, type PriceBook } from "@/lib/pricing/versions";
+import { periodRange } from "@/lib/saas/ledger";
 
 export type PlanInfo = PlanRef & { addonPrices: unknown; productKeys: string[] | null; commercial: unknown };
 
 export type SubscriptionView = SubscriptionRow & { status: EffectiveSubscriptionStatus; planName: string; planSource: "WORKSPACE" | "OWN" };
 
+/** Giá của workspace theo phiên bản giá ĐÃ GHIM (0225) + phần vượt / fair-use của kỳ. */
+export type WorkspacePricing = {
+  versionKey: string | null;
+  versionLabel: string | null;
+  pinned: boolean;
+  price: PlanPrice | null;
+  yearlyVnd: number | null;
+  aiCustomers: AiCustomerReading | null;
+  overage: OverageResult | null;
+  fairUse: FairUseVerdict | null;
+};
+
 export type WorkspaceView = WorkspaceRow & {
   planKey: string;
+  pricing: WorkspacePricing;
   standing: BillingStandingKind;
   subscriptions: SubscriptionView[];
   endedSubscriptions: SubscriptionRow[];
@@ -58,15 +76,31 @@ export type CustomerView = {
 
 export type CommercialSnapshot = { periodMonth: string; customers: CustomerView[]; orphanWorkspaces: WorkspaceRow[]; plans: PlanInfo[]; usdToVnd: number };
 
-export async function readPlans(): Promise<PlanInfo[]> {
+/**
+ * Gói cho màn người vận hành, giá theo BẢNG GIÁ ĐANG NIÊM YẾT (0225) — gói không còn trong bảng giá hiện hành hiện giá
+ * legacy của nó. Giá RIÊNG của từng workspace (theo phiên bản đã ghim) nằm ở `WorkspaceView.pricing`.
+ */
+export async function readPlans(now: Date = new Date()): Promise<PlanInfo[]> {
   const pdb = await getPlatformDb();
-  const rows = await pdb.select().from(schema.platformPlans).orderBy(schema.platformPlans.position);
-  return rows.map((r) => ({ key: r.key, name: r.name, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices, productKeys: r.productKeys ?? null, commercial: r.commercial ?? {} }));
+  const [rows, book] = await Promise.all([pdb.select().from(schema.platformPlans).orderBy(schema.platformPlans.position), loadPriceBook()]);
+  const catalog = currentCatalogVersion(book, now);
+  return rows.map((r) => {
+    const hit = priceOf(book, catalog?.key ?? null, r.key);
+    const price = hit && !hit.price.contactSales ? hit.price.monthlyVnd : null;
+    return { key: r.key, name: hit?.source === "VERSION" ? hit.price.name : r.name, priceVnd: price, addonPrices: hit?.price.addonPrices ?? {}, productKeys: r.productKeys ?? null, commercial: r.commercial ?? {} };
+  });
 }
 
 function planRef(plans: readonly PlanInfo[], key: string): PlanRef {
   const p = plans.find((x) => x.key === key);
   return p ? { key: p.key, name: p.name, priceVnd: p.priceVnd } : { key, name: `${key} (không có trong bảng gói)`, priceVnd: null };
+}
+
+/** Gói theo PHIÊN BẢN GIÁ của workspace (0225): tên + giá tháng của phiên bản đã ghim; gói cũ theo dòng legacy. */
+function versionedPlanRef(book: PriceBook, versionKey: string | null, plans: readonly PlanInfo[], key: string): { ref: PlanRef; price: PlanPrice | null } {
+  const hit = priceOf(book, versionKey, key);
+  if (!hit) return { ref: { ...planRef(plans, key), priceVnd: null }, price: null };
+  return { ref: { key, name: hit.source === "LEGACY_FALLBACK" ? `${hit.price.name} (giá cũ)` : hit.price.name, priceVnd: hit.price.contactSales ? null : hit.price.monthlyVnd }, price: hit.price };
 }
 
 /** Toàn cảnh thương mại của kỳ. `periodMonth` mặc định tháng hiện tại (giờ VN). */
@@ -75,7 +109,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
   const periodMonth = opts.periodMonth ?? currentPeriodMonth(now);
   const catalog = opts.catalog ?? PRODUCTS;
   const pdb = await getPlatformDb();
-  const [registry, plans, terms, everPaid, ai, usage, costs, failed] = await Promise.all([
+  const [registry, plans, terms, everPaid, ai, usage, costs, failed, book, pins] = await Promise.all([
     readCommercialRegistry(),
     readPlans(),
     pdb.select().from(schema.platformSubscriptions),
@@ -88,7 +122,20 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       .from(schema.platformProvisioningJobs)
       .where(eq(schema.platformProvisioningJobs.status, "FAILED"))
       .groupBy(schema.platformProvisioningJobs.accountId, schema.platformProvisioningJobs.orgCode),
+    loadPriceBook(),
+    pdb
+      .select({ orgCode: schema.platformPricePins.orgCode, versionKey: schema.platformPricePins.versionKey })
+      .from(schema.platformPricePins)
+      .catch(() => [] as { orgCode: string; versionKey: string }[]),
   ]);
+  const pinBy = new Map(pins.map((p) => [p.orgCode, p.versionKey]));
+  // Khách AI (đồng hồ thu chính) kèm độ phủ, cho mọi workspace — đọc sổ dùng chung ở mặt phẳng điều khiển.
+  const range = periodRange(periodMonth);
+  const aiCustomers = await readAiCustomerUsage(
+    registry.workspaces.map((w) => w.code),
+    range,
+    now,
+  ).catch(() => new Map<string, AiCustomerReading>());
   const today = vnDate(now);
   const termsBy = new Map(terms.map((t) => [t.orgCode, t]));
   const accountById = new Map(registry.accounts.map((a) => [a.id, a]));
@@ -102,15 +149,36 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     entries: costs.entries,
   });
 
-  const workspaceView = (w: WorkspaceRow, mode: BillingMode): WorkspaceView => {
+  const workspaceView = async (w: WorkspaceRow, mode: BillingMode): Promise<WorkspaceView> => {
     const planKey = planKeyOf({ isHome: w.isHome, plan: w.plan });
     const t = termsBy.get(w.code);
     const standing = billingStanding(t ? { billingEnabled: t.billingEnabled, paidThrough: t.paidThrough, graceDays: t.graceDays } : null, today).kind;
     const subs = registry.subscriptions.filter((s) => s.orgCode === w.code);
     const live = subs.filter((s) => !s.endedAt);
+    const version = resolveOrgVersion(book, pinBy.get(w.code) ?? null, now);
+    // Gói RIÊNG của thuê bao Chốt Đơn (0224 `plan_key`) thắng gói workspace khi tính phần vượt khách AI — đường gán gói thường
+    // cho khách nội bộ (`lib/pricing/internal-fit.ts`) ghi ở đây, không đụng nhánh gói của workspace nhà.
+    const chotdonOwn = live.find((s) => s.productKey === "chotdon" && s.planKey)?.planKey ?? null;
+    const price = (chotdonOwn ? versionedPlanRef(book, version.version?.key ?? null, plans, chotdonOwn).price : null) ?? versionedPlanRef(book, version.version?.key ?? null, plans, planKey).price;
+    const ac = aiCustomers.get(w.code) ?? null;
+    const wsUsage = usage.get(w.code) ?? [];
+    // Phần vượt chỉ khi phiên bản của workspace có luật vượt THẬT (giá cũ ⇒ không có) — số người dùng / fanpage chỉ đọc khi cần.
+    let overage: OverageResult | null = null;
+    let fairUse: FairUseVerdict | null = null;
+    if (price && price.overage.mode === "BILLED") {
+      const usersUsed = await getPlanUsage(w.code)
+        .then((u) => u.rows.find((r) => r.kind === "users")?.used ?? null)
+        .catch(() => null);
+      const fanpages = await latestFanpages(w.code, range.fromDay, range.toDay);
+      const conv = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "conversations_started")?.value ?? null;
+      const replies = wsUsage.find((u) => u.productKey === "chotdon" && u.metric === "bot_messages")?.value ?? null;
+      overage = computeOverage(price, { aiCustomers: ac?.value ?? null, aiCustomersCoverage: ac?.coverage ?? "NOT_MEASURED", fanpages, users: usersUsed, aiConversations: conv, aiReplies: replies });
+      fairUse = fairUseVerdict({ aiConversations: conv, aiReplies: replies }, price.included, version.version?.alerts);
+    }
     return {
       ...w,
       planKey,
+      pricing: { versionKey: version.version?.key ?? null, versionLabel: version.version?.label ?? null, pinned: version.pinned, price, yearlyVnd: price ? yearlyAmountVnd(price) : null, aiCustomers: ac, overage, fairUse },
       standing,
       subscriptions: live.map((s) => ({
         ...s,
@@ -121,23 +189,29 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       endedSubscriptions: subs.filter((s) => s.endedAt),
       aiCost: [...(ai.get(w.code)?.entries() ?? [])].map(([productKey, c]) => ({ productKey, platformVnd: usdToVnd(c.platform.costUsd), byokUsd: c.byok.costUsd, requests: c.platform.requests + c.byok.requests, unpricedCalls: c.platform.unpriced })),
       allocated: allocation.byWorkspace.get(w.code) ?? [],
-      usage: usage.get(w.code) ?? [],
+      // Chỉ số khách AI đọc KÈM độ phủ (runtime cũ chưa ghi ⇒ `null`, không phải 0 của sổ trống).
+      usage: wsUsage.map((u) => (u.productKey === "chotdon" && u.metric === "ai_customers" ? { ...u, value: ac?.value ?? null, note: ac?.note ?? u.note } : u)),
     };
   };
 
-  const customers: CustomerView[] = registry.accounts.map((account) => {
+  const customers: CustomerView[] = [];
+  for (const account of registry.accounts) {
     const mode = account.billingMode as BillingMode;
-    const workspaces = registry.workspaces.filter((w) => w.accountId === account.id).map((w) => workspaceView(w, mode));
+    const workspaces: WorkspaceView[] = [];
+    for (const w of registry.workspaces.filter((x) => x.accountId === account.id)) workspaces.push(await workspaceView(w, mode));
     const stWorkspaces: StatementWorkspace[] = workspaces.map((w) => {
-      const plan = plans.find((p) => p.key === w.planKey);
       const t = termsBy.get(w.code);
+      const vk = w.pricing.versionKey;
+      const wsPlan = versionedPlanRef(book, vk, plans, w.planKey);
       return {
         orgCode: w.code,
         name: w.name,
-        plan: planRef(plans, w.planKey),
-        addon: addonMonthlyVnd(parseAddonUnits(t?.addons), parseAddonPrices(plan?.addonPrices)),
-        subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, ownPlan: s.planKey ? planRef(plans, s.planKey) : null, status: s.status })),
+        // Giá gói + mua thêm theo PHIÊN BẢN đã ghim (0225) — khách nội bộ và khách ngoài cùng một phép tính.
+        plan: wsPlan.ref,
+        addon: addonMonthlyVnd(parseAddonUnits(t?.addons), parseAddonPrices(wsPlan.price?.addonPrices)),
+        subscriptions: w.subscriptions.map((s) => ({ productKey: s.productKey, ownPlan: s.planKey ? versionedPlanRef(book, vk, plans, s.planKey).ref : null, status: s.status })),
         overage: [],
+        billedOverage: (w.pricing.overage?.lines ?? []).map((l) => ({ productKey: l.key === "aiCustomers" ? "chotdon" : null, label: l.label, quantity: l.blocks ?? l.overUnits, unitPriceVnd: l.unitVnd, amountVnd: l.amountVnd, note: l.note })),
         aiCost: w.aiCost.map((c) => ({ productKey: c.productKey, vnd: c.platformVnd, unpricedCalls: c.unpricedCalls })),
         allocated: w.allocated,
       };
@@ -162,7 +236,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
     if (statuses.includes("EXPIRED")) flags.push("EXPIRED");
     if (failedJobs) flags.push("PROVISIONING_FAILED");
     if (unknownCost) flags.push("UNKNOWN_COST");
-    return {
+    customers.push({
       account,
       workspaces,
       products: [...new Set(workspaces.flatMap((w) => w.subscriptions.filter((s) => subscriptionGrantsUse(s.status)).map((s) => s.productKey)))],
@@ -170,9 +244,26 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
       economics: { revenueVnd, costVnd, grossProfitVnd, marginPct, marginApplicable: applicable, byokUsd: workspaces.reduce((a, w) => a + w.aiCost.reduce((b, c) => b + c.byokUsd, 0), 0) },
       flags,
       failedJobs,
-    };
-  });
+    });
+  }
   return { periodMonth, customers, orphanWorkspaces: registry.workspaces.filter((w) => !w.accountId || !accountById.has(w.accountId)), plans, usdToVnd: usdToVnd(1) };
+}
+
+/** Fanpage đang chạy ở ảnh chụp MỚI NHẤT trong kỳ (sổ dùng theo ngày 0204). `null` = chưa chụp / chưa đo được — không phải 0. */
+async function latestFanpages(orgCode: string, fromDay: string, toDay: string): Promise<number | null> {
+  try {
+    const pdb = await getPlatformDb();
+    const u = schema.platformTenantUsageDaily;
+    const [r] = await pdb
+      .select({ n: u.fanpagesActive })
+      .from(u)
+      .where(sql`${u.orgCode} = ${orgCode} and ${u.day} >= ${fromDay} and ${u.day} <= ${toDay}`)
+      .orderBy(desc(u.day))
+      .limit(1);
+    return r?.n ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Kinh tế theo SẢN PHẨM: khách, thuê bao, doanh thu gói phân về sản phẩm, chi phí AI của sản phẩm. */

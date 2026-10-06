@@ -1569,6 +1569,13 @@
       "when": 1791350000000,
       "tag": "0224_saas_control_plane",
       "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "0225_pricing_v1_versions",
+      "breakpoints": true
     }
   ]
 }

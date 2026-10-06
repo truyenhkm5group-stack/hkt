@@ -213,10 +213,11 @@ function testNoPlanNameComparisons() {
   }
   assert.deepEqual(bad, [], "mã nghiệp vụ hỏi hasFeature(...) / checkUsageQuota(...), KHÔNG so khoá / tên gói bằng chuỗi gõ tay — gói là dữ liệu người vận hành sửa");
   assert.equal(homeDefs, 1, "HOME_PLAN_KEY khai đúng MỘT chỗ (lib/entitlements/kinds.ts)");
-  // Trang giá công khai chỉ đọc gói cước + chế độ đăng ký (qua public-site) — không import truy vấn dữ liệu khách nào.
+  // Trang giá công khai chỉ đọc BẢNG GIÁ ĐANG NIÊM YẾT (sổ giá có phiên bản, 0225) + chế độ đăng ký (qua public-site) — không
+  // import truy vấn dữ liệu khách nào.
   const pub = readFileSync(path.join(goc, "lib/queries/public-pricing.ts"), "utf8");
   const imports = [...pub.matchAll(/from "([^"]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(imports, ["@/lib/entitlements/check", "@/lib/entitlements/kinds", "@/lib/pricing/catalog", "@/lib/pricing/features", "@/lib/queries/public-site"], "public-pricing chỉ được đọc gói cước và dữ liệu trang giới thiệu");
+  assert.deepEqual(imports, ["@/lib/entitlements/kinds", "@/lib/pricing/catalog", "@/lib/pricing/features", "@/lib/pricing/price-book", "@/lib/pricing/versions", "@/lib/queries/public-site"], "public-pricing chỉ được đọc bảng giá và dữ liệu trang giới thiệu");
 }
 
 // ─────────────────────────── 3 · VÒNG THẬT ───────────────────────────

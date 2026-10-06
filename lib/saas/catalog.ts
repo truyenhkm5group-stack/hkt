@@ -137,9 +137,12 @@ export const PRODUCTS: readonly ProductDef[] = [
     needsCommerceCore: true,
     aiFeatures: ["sales_chatbot", "sales_playbook"],
     metrics: [
-      { key: "conversations_started", label: "Hội thoại mới", unit: "hội thoại", source: "DAILY_SNAPSHOT", snapshotColumn: "conversationsStarted", billable: true },
+      // ĐỒNG HỒ THU CHÍNH (0225 · docs/saas/PRICING_V1.md): khách nhận ít nhất một câu trả lời AI đã gửi trong kỳ — ghi ở điểm
+      // gửi thành công (`lib/pricing/ai-customer.ts`), khoá idempotent theo (kỳ, kênh, page, khách).
+      { key: "ai_customers", label: "Khách AI", unit: "khách AI", source: "EVENT_LEDGER", emitterLive: true, billable: true },
+      { key: "conversations_started", label: "Hội thoại mới", unit: "hội thoại", source: "DAILY_SNAPSHOT", snapshotColumn: "conversationsStarted", billable: false },
       { key: "customer_messages", label: "Tin khách", unit: "tin", source: "DAILY_SNAPSHOT", snapshotColumn: "customerMessages", billable: false },
-      { key: "bot_messages", label: "Tin AI gửi", unit: "tin", source: "DAILY_SNAPSHOT", snapshotColumn: "botMessages", billable: true },
+      { key: "bot_messages", label: "Tin AI gửi", unit: "tin", source: "DAILY_SNAPSHOT", snapshotColumn: "botMessages", billable: false },
       { key: "ai_orders", label: "Đơn AI chốt", unit: "đơn", source: "DAILY_SNAPSHOT", snapshotColumn: "aiOrders", billable: false },
       { key: "ai_calls", label: "Lượt gọi AI", unit: "lượt", source: "AI_LEDGER", aiMeasure: "requests", billable: false },
       { key: "ai_cost_usd", label: "Chi phí AI", unit: "USD", source: "AI_LEDGER", aiMeasure: "costUsd", billable: false },

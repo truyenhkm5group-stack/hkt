@@ -103,4 +103,9 @@ export async function migrateOrganizationDb(db: Db, opts: { pool?: Pool }) {
   await db.execute(sql`delete from platform_cost_entries`);
   await db.execute(sql`delete from platform_provisioning_jobs`);
   await db.execute(sql`delete from platform_accounts`);
+  // 0225 · bảng giá có phiên bản + ghim phiên bản theo tổ chức — chỉ bản ở CSDL nhà là thật. Bảng có khoá ngoài tới
+  // `platform_price_versions` xoá TRƯỚC.
+  await db.execute(sql`delete from platform_price_pins`);
+  await db.execute(sql`delete from platform_plan_prices`);
+  await db.execute(sql`delete from platform_price_versions`);
 }
