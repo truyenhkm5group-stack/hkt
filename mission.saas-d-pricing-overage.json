@@ -2,8 +2,8 @@
   "schema": 1,
   "mission_id": "saas-d-pricing-overage",
   "title": "Phase D: giá + thu phần vượt (chờ chủ shop chốt đơn giá + kỳ thu)",
-  "business_goal": "",
-  "status": "BLOCKED",
+  "business_goal": "Phase D: bảng giá ChotDonTuDong V1 (chủ shop chốt 07/10/2026) — gói có phiên bản + ngày hiệu lực, đồng hồ AI_CUSTOMER, phần vượt, fair-use, cảnh báo 80/100/120/150, biên lãi nội bộ, KPI đơn, nhà dùng gói thường + chargeback",
+  "status": "READY",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,11 +20,7 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:33.744Z",
-  "updated_at": "2026-10-06T17:03:33.744Z",
-  "last_heartbeat": "2026-10-06T17:03:33.744Z",
-  "definition_of_done": [],
-  "needs_owner": {
-    "category": "IRREVERSIBLE_BUSINESS_DECISION",
-    "action": "chốt bảng giá kinh doanh: giá tháng/năm từng gói, hạn mức (hội thoại AI · tin AI · đơn · fanpage), đơn giá phần vượt và kỳ thu — kỹ thuật sẽ gieo vào platform_plans.commercial, không tự đặt số (luật 38)"
-  }
+  "updated_at": "2026-10-06T17:40:45.724Z",
+  "last_heartbeat": "2026-10-06T17:40:45.724Z",
+  "definition_of_done": []
 }

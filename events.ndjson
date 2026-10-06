@@ -167,3 +167,4 @@
 {"at":"2026-10-06T17:38:46.671Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-handoff-doc","detail":"#616 @ 19a5f0b9fec0 → e8b63791241f (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-06T17:39:27.024Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-handoff-doc","detail":"PR #616 gộp e8b63791; chỉ docs/saas/HANDOFF.md"}
 {"at":"2026-10-06T17:39:58.055Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-c-shared-identity","detail":"#617 @ cf3235ce14c2 → 27764f377d63 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-06T17:40:45.778Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"saas-d-pricing-overage","detail":"BLOCKED → READY · 1 mẫu phạm vi · CRITICAL"}
