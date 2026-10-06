@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T11:43:44.434Z",
-  "updated_at": "2026-10-06T11:44:02.921Z",
-  "last_heartbeat": "2026-10-06T11:43:51.694Z",
+  "updated_at": "2026-10-06T12:26:31.002Z",
+  "last_heartbeat": "2026-10-06T12:26:31.002Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "fix/migration-release",
-    "sha": "d555b4fdba5472c5fdb0f8d3ece479a9dc8b0d87",
-    "at": "2026-10-06T11:43:51.694Z",
+    "sha": "b8324c086297cf2dc43259ea573671d44298b6d3",
+    "at": "2026-10-06T12:26:31.002Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Nhả số migration giữ chỗ (Delivery Controller)",
     "summary": "",
     "tests": [
-      "delivery-v2 ĐẠT · ai-tech-room ĐẠT · tsc + eslint --max-warnings=0 sạch"
+      "delivery-v2 + ai-tech-room ĐẠT; review độc lập PASS d555b4fd + sửa ghi chú"
     ]
   }
 }
