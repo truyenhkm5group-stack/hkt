@@ -20,6 +20,7 @@ import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { listConversations, loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { ChatbotConfigForm } from "./config-form";
+import { loadProviderHealth } from "@/lib/sales-chatbot/provider-failover";
 import { InboxHistoryPanel } from "./history-panel";
 import { MessengerHistoryPanel } from "./messenger-history-panel";
 import { loadMessengerHistoryView } from "@/lib/sales-chatbot/messenger-history";
@@ -63,6 +64,7 @@ export default async function SalesChatbotPage() {
   ]);
   const fanpage = manage && user.organization?.code ? await fanpageSetupView(user.organization.code) : null;
   const zalo = manage && user.organization?.code ? await zaloSetupView(user.organization.code) : null;
+  const providerHealth = manage ? Object.entries(await loadProviderHealth()).map(([key, h]) => ({ key, lastSuccessAt: h.lastSuccessAt, lastFailureAt: h.lastFailureAt, lastErrorClass: h.lastErrorClass, openUntil: h.openUntil })) : [];
   const [playbook, playbookRun, lessons] = manage ? await Promise.all([loadPlaybook(), loadPlaybookRun(), loadLessons()]) : [null, null, null];
   const [levelScripts, levelPack, levelCountMap] = manage ? await Promise.all([loadLevelScripts(), organizationLevelPack(), levelCounts()]) : [null, null, null];
   // Chi phí AI theo ngày — tiền là vùng nhạy cảm, chỉ người cấu hình bot thấy. Sổ AI ở CSDL nhà hỏng ⇒ ẩn bảng, không sập trang.
@@ -77,9 +79,10 @@ export default async function SalesChatbotPage() {
   // «AI dùng chung của nền tảng» (0193) không phải một kết nối của tổ chức: sẵn sàng = nền tảng bật + gói có credit + còn credit.
   const platformAi = user.organization?.code ? await platformChatAi(user.organization.code) : { ok: false as const, reason: "Không xác định được tổ chức." };
   const aiConnections = SALES_BOT_CONNECTORS.map((k) => {
-    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason };
+    // `vendor` = nhà cung cấp AI thật sau khoá (AI dùng chung: theo khoá nền tảng) — để form cảnh báo khoá dự phòng CÙNG nhà.
+    if (k === "platform") return { key: k, ready: platformAi.ok, configured: platformAi.ok, reason: platformAi.ok ? null : platformAi.reason, vendor: platformAi.ok ? platformAi.provider.name.split("-")[0] : null };
     const row = connections.find((c) => c.connectorKey === k);
-    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null };
+    return { key: k, ready: Boolean(row && row.status === "ACTIVE" && row.lastTestOk === true), configured: Boolean(row), reason: null, vendor: k.split("-")[0] };
   });
   const publicUrl = pub.state === "PUBLISHED" && pub.url ? `${pub.url}/chat` : null;
   // Sẵn sàng tự trả lời (P8): chỉ đếm số thật; THÔNG TIN, không chặn đổi chế độ.
@@ -218,7 +221,7 @@ export default async function SalesChatbotPage() {
           {levelScripts && levelPack && levelCountMap ? <LevelScriptsPanel key={JSON.stringify(levelScripts)} scripts={levelScripts} levels={levelsForPack(levelPack)} counts={levelCountMap} /> : null}
           {playbook && playbookRun ? <PlaybookPanel key={playbook.draft?.createdAt ?? "chua-co-nhap"} state={playbook} run={playbookRun} fanpageReady={fanpage?.status === "ACTIVE"} /> : null}
           {manage ? (
-            <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} appointmentsOn={moduleOn(user, "appointments")} />
+            <ChatbotConfigForm config={cfg} fields={fields} connections={aiConnections} appointmentsOn={moduleOn(user, "appointments")} health={providerHealth} />
           ) : (
             <SectionCard title="Cấu hình">
               <p className="text-sm text-muted-foreground">Bạn xem được hội thoại; cấu hình bot cần quyền «AI bán hàng: cấu hình & xuất bản chatbot».</p>

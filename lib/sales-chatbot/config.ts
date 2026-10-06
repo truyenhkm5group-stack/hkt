@@ -9,7 +9,7 @@
  * Tệp này KHÔNG import gì chạy được: form cấu hình và máy chủ dùng CHUNG lược đồ, mặc định và nhãn.
  */
 import { z } from "zod";
-import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass } from "@/lib/constants/ai-incidents";
+import { AI_CLASSES_CAN_NGUOI, classifyAiError, type AiErrorClass, type AiFailureClass } from "@/lib/constants/ai-incidents";
 import { bookingConfigZ, DEFAULT_BOOKING_CONFIG } from "@/lib/constants/booking";
 import { DEFAULT_FREE_SHIPPING } from "@/lib/sales-chatbot/shipping";
 
@@ -69,6 +69,27 @@ export function salesBotBillingSource(key: SalesBotConnector): "PLATFORM" | "BYO
   return key === "platform" ? "PLATFORM" : "BYOK";
 }
 
+/**
+ * Khoá dự phòng ĐANG CÓ HIỆU LỰC — `null` khi chưa chọn, công tắc tắt, hoặc trùng khoá chính (cùng tài khoản thì hết credit
+ * cùng lúc — chuyển sang chính nó không cứu được gì). MỘT chỗ quyết, máy chủ và form cùng hỏi. HÀM THUẦN.
+ */
+export function effectiveFallback(cfg: Pick<SalesChatbotConfig, "connectorKey" | "fallbackConnectorKey" | "fallbackModel" | "failoverEnabled">): { connectorKey: SalesBotConnector; model: string } | null {
+  if (!cfg.failoverEnabled || !cfg.fallbackConnectorKey || cfg.fallbackConnectorKey === cfg.connectorKey) return null;
+  return { connectorKey: cfg.fallbackConnectorKey, model: cfg.fallbackModel };
+}
+
+/** Lớp lỗi mịn (để chuyển nhà cung cấp) ⇒ câu cho chủ shop trên khung «Sức khoẻ khoá AI». */
+export const SALES_BOT_FAILURE_LABEL: Record<AiFailureClass, string> = {
+  CREDIT: "Hết tiền / hết credit",
+  AUTH: "Khoá bị từ chối",
+  RATE_LIMIT: "Quá tải / quá hạn mức",
+  MODEL_UNAVAILABLE: "Model không dùng được",
+  SERVER_ERROR: "Lỗi máy chủ / mất kết nối",
+  TIMEOUT: "Quá thời gian chờ",
+  INVALID_REQUEST: "Câu hỏi bị từ chối (không chuyển dự phòng)",
+  OTHER: "Lỗi chưa phân loại (không chuyển dự phòng)",
+};
+
 /** Trần KỸ THUẬT (không phải ngưỡng nghiệp vụ): chặn vòng lặp công cụ và bão tin trên trang chat công khai. */
 export const SALES_CHATBOT_LIMITS = { toolRounds: 10, historyMessages: 40, turnsPerConversation: 60, webMessagesPerVisitorPer10Min: 20, messageMax: 1000 } as const;
 
@@ -86,6 +107,25 @@ export const salesChatbotConfigZ = z
       .max(60)
       .regex(/^$|^[a-z][a-z0-9.-]{2,60}$/, "Tên model không hợp lệ")
       .default(""),
+    /**
+     * KHOÁ AI DỰ PHÒNG (06/10/2026 — sự cố Google AI Studio hết credit trả trước 11:38, bot im ~2 giờ): khoá chính hỏng
+     * kiểu chuyển được (hết credit · khoá bị từ chối · quá tải · lỗi máy chủ · hết giờ) ⇒ CÙNG câu hỏi gửi sang khoá này,
+     * TRƯỚC khi có chữ nào tới khách (lib/sales-chatbot/provider-failover.ts). `null` = KHÔNG có dự phòng ⇒ hành vi y như
+     * trước. Mặc định `null`: chọn trả tiền ở đâu khi khoá chính hỏng là quyết định của chủ shop — kể cả AI dùng chung
+     * (`platform`, vẫn qua kiểm credit gói như mọi lượt).
+     */
+    fallbackConnectorKey: z.enum(SALES_BOT_CONNECTORS).nullable().default(null),
+    /** Model của khoá dự phòng — để trống = mặc định của kết nối đó. */
+    fallbackModel: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(/^$|^[a-z][a-z0-9.-]{2,60}$/, "Tên model không hợp lệ")
+      .default(""),
+    /** Công tắc TẮT chuyển dự phòng của tổ chức (giữ nguyên khoá dự phòng đã chọn). */
+    failoverEnabled: z.boolean().default(true),
+    /** Hết credit / khoá bị từ chối ⇒ khoá đó bị NGẮT bấy nhiêu phút rồi mới thử lại một lượt (mạch nửa mở). */
+    failoverOpenMinutes: z.number().int().min(1).max(1440).default(30),
     tone: z.enum(SALES_TONES),
     thinking: z.enum(SALES_THINKING).default("SMART"),
     greeting: z.string().trim().min(2).max(300),
@@ -159,6 +199,10 @@ export const DEFAULT_SALES_CHATBOT_CONFIG: SalesChatbotConfig = {
   botName: "Trợ lý bán hàng",
   connectorKey: "platform",
   model: "",
+  fallbackConnectorKey: null,
+  fallbackModel: "",
+  failoverEnabled: true,
+  failoverOpenMinutes: 30,
   tone: "FRIENDLY",
   thinking: "SMART",
   greeting: "Chào anh/chị! Em có thể tư vấn sản phẩm, báo giá và lên đơn giúp mình ạ.",

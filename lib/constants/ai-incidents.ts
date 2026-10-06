@@ -69,9 +69,45 @@ export const AI_INCIDENT_RULE = {
 export function classifyAiError(message: string | null | undefined): AiErrorClass {
   const s = (message ?? "").toLowerCase();
   if (!s.trim()) return "OTHER";
-  if (/credit balance|insufficient[_ ]?quota|insufficient[_ ]?funds|billing|payment required|exceeded your current quota/.test(s)) return "CREDIT";
+  if (/credit balance|insufficient[_ ]?quota|insufficient[_ ]?funds|billing|payment required|exceeded your current quota|prepayment credits|credits? (?:are |is )?depleted/.test(s)) return "CREDIT";
   if (/\b401\b|\b403\b|unauthor|invalid[_ ]?api[_ ]?key|authentication|permission/.test(s)) return "AUTH";
   if (/\b429\b|rate[_ ]?limit|too many requests|overloaded|\b529\b/.test(s)) return "RATE_LIMIT";
+  return "OTHER";
+}
+
+/**
+ * ─── LỚP LỖI ĐỂ CHUYỂN NHÀ CUNG CẤP (06/10/2026 — lib/sales-chatbot/provider-failover.ts) ───
+ *
+ * `classifyAiError` giữ NGUYÊN bốn lớp: sổ sự cố, câu cho chủ shop (`salesBotError`) và bài kiểm cũ đứng trên nó — «Request
+ * timed out.» vẫn là `OTHER` ở đó. Việc CHUYỂN sang khoá dự phòng cần mịn hơn, vì câu hỏi khác hẳn: «gọi lại cùng câu này ở
+ * nhà cung cấp KHÁC có khả năng được không?»
+ *
+ *   · CREDIT · AUTH · MODEL_UNAVAILABLE — lỗi của TÀI KHOẢN / cấu hình, không tự khỏi ⇒ chuyển, và ngắt mạch lâu.
+ *   · RATE_LIMIT · SERVER_ERROR · TIMEOUT — nhà cung cấp đang ốm, tự khỏi ⇒ chuyển; lặp lại nhiều lần mới ngắt mạch ngắn.
+ *   · INVALID_REQUEST — chính CÂU HỎI bị từ chối (400 nội dung / sai hình / bộ lọc an toàn) ⇒ KHÔNG chuyển: gửi cùng câu sang
+ *     nhà khác là trả tiền hai lần cho cùng một lần hỏng.
+ *   · OTHER — chưa đọc được ⇒ KHÔNG chuyển (không đoán).
+ *
+ * Bốn lớp thô đi trước, nên câu «hết credit» không bao giờ rơi xuống thành «lỗi máy chủ» chỉ vì có số 5xx trong đó.
+ */
+export const AI_FAILURE_CLASSES = ["CREDIT", "AUTH", "RATE_LIMIT", "MODEL_UNAVAILABLE", "SERVER_ERROR", "TIMEOUT", "INVALID_REQUEST", "OTHER"] as const;
+export type AiFailureClass = (typeof AI_FAILURE_CLASSES)[number];
+
+/** Lớp lỗi được CHUYỂN sang nhà cung cấp dự phòng. Ngoài danh sách (nội dung · chưa rõ) ⇒ không chuyển. */
+export const AI_FAILOVER_CLASSES: readonly AiFailureClass[] = ["CREDIT", "AUTH", "RATE_LIMIT", "MODEL_UNAVAILABLE", "SERVER_ERROR", "TIMEOUT"];
+
+/** «Model không có / không còn cho khoá này» — một mẫu cho mọi nơi hỏi (engine lùi model · bộ phân loại chuyển provider). */
+export const MODEL_UNAVAILABLE_RE = /HTTP 404\b|model[_ ]not[_ ]found|no longer available|is not found for api version|models\/[a-z0-9.-]+ is not found|(?:model|models)\b[^\n]{0,80}\b(?:does not exist|not found|not supported|unknown)/i;
+
+export function classifyAiFailure(message: string | null | undefined): AiFailureClass {
+  const coarse = classifyAiError(message);
+  if (coarse !== "OTHER") return coarse;
+  const raw = message ?? "";
+  const s = raw.toLowerCase();
+  if (MODEL_UNAVAILABLE_RE.test(raw)) return "MODEL_UNAVAILABLE";
+  if (/timed? ?out|timeout|aborted due to timeout|etimedout|deadline exceeded|request timeout|http 408|^\s*408|\b504\b/.test(s)) return "TIMEOUT";
+  if (/^\s*5\d\d\b|http 5\d\d\b|status(?: code)?:? 5\d\d\b|internal server error|internal error|service unavailable|bad gateway|server_error|api_error|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket hang up|connection error|network error|other side closed/.test(s)) return "SERVER_ERROR";
+  if (/^\s*4\d\d\b|http 4\d\d\b|invalid_request|invalid argument|bad request|validation|safety|content policy|refus/.test(s)) return "INVALID_REQUEST";
   return "OTHER";
 }
 
