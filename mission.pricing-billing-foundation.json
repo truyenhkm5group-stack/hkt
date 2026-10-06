@@ -3,7 +3,7 @@
   "mission_id": "pricing-billing-foundation",
   "title": "Pricing & Billing Foundation: gói cấu hình được, đo usage, sổ chi phí AI, chặn lỗ, entitlement",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-pricing-billing",
@@ -49,7 +49,22 @@
   "migration_reservations": [],
   "migration_reserved_at": {},
   "created_at": "2026-10-06T10:04:31.315Z",
-  "updated_at": "2026-10-06T11:42:55.380Z",
-  "last_heartbeat": "2026-10-06T10:32:43.350Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T11:59:39.541Z",
+  "last_heartbeat": "2026-10-06T11:59:39.541Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "feat/pricing-billing-foundation",
+    "sha": "62dd4eb641e184154375d0b99825cc4c40c123f4",
+    "at": "2026-10-06T11:59:39.541Z",
+    "actor": "DESKTOP-56TH98Y:wt-pricing-billing",
+    "title": "Pricing & Billing Foundation: gói cấu hình được, đo usage, sổ chi phí AI, chặn lỗ, entitlement",
+    "summary": "Migration 0222 (va số với #607 ai-sales-reliability 0222_sales_inbound_retry — #607 chưa vào main lúc bàn giao, cần migration:renumber khi tích hợp). Mở rộng platform_plans.commercial, platform_ai_usage.event_key/conversation_id/modality, platform_tenant_usage_daily.fanpages_active; bảng mới platform_org_pricing (grandfathered + SOFT cho mọi tổ chức có sẵn). lib/pricing/*, /pricing công khai, khung hạn mức ở /settings/plan, kinh tế đơn vị + Margin Guard ở /platform/saas, BillingProvider bọc SePay. Rủi ro HIGH ⇒ cần ai-tech-reviewer.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch (0 lỗi, 0 cảnh báo)",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (lượt 4; lượt 3 đỏ vì máy hết RAM ở restore-drill-config — chạy riêng ĐẠT)",
+      "tests/pricing-billing.test.ts: đạt 3 lượt riêng + trong suite; đột biến (bỏ công tắc trần cứng, bỏ khoá sự kiện) đều đỏ",
+      "npm run build: đạt (/pricing ƒ)"
+    ]
+  }
 }
