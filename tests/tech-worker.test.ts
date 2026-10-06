@@ -135,7 +135,8 @@ export function testTechWorkerPure() {
   const iAuth = route.indexOf('authenticateTechWorker(req.headers.get("authorization"))');
   assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
-  assert.ok(!/CRON_SECRET|cronSecret/.test(route), "cửa worker không nhận khoá lập lịch chung");
+  const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.ok(!/CRON_SECRET|cronSecret|agentIngestSecret/.test(maRoute), "cửa worker không nhận khoá lập lịch / khoá chung");
 
   // Migration: CHECK provider / concurrency khớp hằng số.
   const mig = readFileSync(path.join(goc, "drizzle/0226_tech_workers.sql"), "utf8");
