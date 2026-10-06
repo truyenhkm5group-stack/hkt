@@ -35,6 +35,7 @@
     "bench:cs": "tsx --tsconfig tsconfig.json scripts/bench-cs-queue.ts",
     "payroll:reconcile": "tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts",
     "agent:run": "tsx --tsconfig tsconfig.json scripts/agent-run.ts",
+    "tech:worker": "tsx --tsconfig tsconfig.json scripts/tech-worker.ts",
     "agent:check": "tsx --tsconfig tsconfig.json scripts/agent-runner-check.ts",
     "agent:proof-setup": "tsx --tsconfig tsconfig.json scripts/agent-proof-setup.ts",
     "agent:proof-report": "tsx --tsconfig tsconfig.json scripts/agent-proof-report.ts",

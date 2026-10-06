@@ -193,8 +193,8 @@ toán, chi lớn, thao tác không hoàn tác, tắt bảo vệ, lách CI / bran
 | Pha | Nội dung | Trạng thái |
 |---|---|---|
 | 0 | Kiểm kê (tài liệu này) | XONG |
-| 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | ĐANG LÀM (PR 1) |
-| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành | |
+| 1 | Project · Goal · Mission · NEEDS_OWNER · CANCELLED · vòng đời chuẩn · sự kiện + audit · trang Goals/Missions | XONG trên nhánh `feat/company-ai-tech-control-plane` (migration 0225) |
+| 2 | Worker · lease · heartbeat · cửa worker · adapter thi hành · sổ năng lực tối thiểu · trang Worker | XONG trên nhánh `feat/tech-control-plane-workers` (migration 0226) — mục 8 |
 | 3 | Worktree theo mã việc · PR/CI/deploy chảy về · webhook GitHub · nối (B) | |
 | 4 | Rủi ro R0–R4 · ngân sách · watchdog | |
 | 5 | Cockpit mobile trên `/tech` | |
@@ -215,3 +215,36 @@ PR · CI · deploy · verify · chính sách · ngân sách · NEEDS_OWNER · au
   revert.
 - Worker/adapter (Pha 2) mặc định TẮT; tắt bằng cách dừng tiến trình worker — hàng đợi vẫn nguyên, lease hết
   hạn tự nhả.
+
+## 8. Pha 2 — worker headless (đã dựng)
+
+| Mảnh | Tệp |
+|---|---|
+| Luật thuần (lease 5′, nhịp tim 30′′, 3 lần thử, lùi dần 5′→60′, 10 lá chắn nhận việc, kết cục → bước kế, tên nhánh tất định, ranh giới thanh toán) | `lib/constants/tech-worker.ts` |
+| Sổ năng lực (15 năng lực, mỗi dòng trỏ tệp có thật; worker chỉ được khai năng lực `autonomous`) | `lib/constants/tech-capabilities.ts` |
+| Hàng đợi PostgreSQL: nhận việc `UPDATE … (SELECT … FOR UPDATE OF c SKIP LOCKED)`, fencing `lease_generation`, thu hồi lười | `lib/tech/worker-service.ts` |
+| Cửa worker `POST /api/tech/worker/{hello,heartbeat,claim,start,complete}` — khoá RIÊNG từng worker, CSDL giữ băm | `app/api/tech/worker/[op]/route.ts` |
+| Worker daemon + adapter (`SUBSCRIPTION_CLAUDE_CODE` · `ANTHROPIC_API`, cùng CLI Claude Code, khác đúng môi trường) | `scripts/tech-worker.ts`, `scripts/tech-worker/*` |
+| Trang | `/tech/workers` (đăng ký — khoá hiện một lần, bật/tắt, thu hồi lease, lượt chạy + nhật ký có trần) |
+
+Chạy một worker trên máy có Claude Code (đăng nhập gói thuê bao):
+
+```
+$env:TECH_WORKER_URL="https://erp.vnxcommerce.com"
+$env:TECH_WORKER_TOKEN="tw_…"            # /tech/workers → Đăng ký worker (hiện một lần)
+$env:TECH_WORKER_REPO="D:\tech-worker\hkt"   # bản clone RIÊNG cho worker
+npm run tech:worker -- --check           # kiểm cấu hình + adapter, không xin việc
+npm run tech:worker -- --once            # nhận một việc, làm, thoát
+npm run tech:worker                      # chạy mãi
+```
+
+Bất biến đã khoá bằng bài kiểm (`tests/tech-worker.test.ts`): hai worker không nhận trùng · phụ thuộc chưa DONE /
+R2 / sứ mệnh hoặc mục tiêu không chạy ⇒ không bao giờ nhận, và bản TypeScript `claimBlockers` nói đúng điều câu SQL
+làm · nhịp tim gia hạn lease, nhật ký có trần · thất bại còn lượt ⇒ về hàng đợi sau lùi dần, hết lượt ⇒ `FAILED` ·
+worker chết ⇒ lease hết hạn ⇒ thu hồi ⇒ việc về hàng đợi · fencing chặn worker cũ sống lại · người huỷ / chuyển
+"Cần chủ shop" giữa chừng ⇒ worker nhận lệnh DỪNG ở nhịp tim kế, kết quả nộp muộn không đè quyết định của người ·
+worker gói thuê bao không bao giờ thấy `ANTHROPIC_API_KEY` / `DATABASE_URL` / token · tiền của lượt gói thuê bao
+ghi `estimated: true`.
+
+Còn thiếu (Pha 3): worker đẩy nhánh nhưng CHƯA mở PR — PR phải mở bằng danh tính bot (`agent-open-pr.yml`) để
+chủ shop duyệt được; máy chủ ERP sẽ dispatch thay worker (worker không giữ quyền ghi GitHub nào ngoài `git push`).

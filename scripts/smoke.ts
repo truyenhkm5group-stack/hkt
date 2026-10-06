@@ -236,6 +236,7 @@ const ROUTES = [
   "/tech/needs-owner",
   "/tech/goals",
   "/tech/missions",
+  "/tech/workers",
   "/integrations",
   "/settings/users",
   "/audit",

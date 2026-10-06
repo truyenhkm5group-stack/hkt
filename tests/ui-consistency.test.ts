@@ -254,6 +254,7 @@ export function testNavigationCoverage() {
     "/tech/needs-owner": "tab 'Cần chủ shop' của /tech — và thẻ 'Cần chủ shop' trên trang tổng quan /tech",
     "/tech/goals": "tab 'Mục tiêu' của /tech",
     "/tech/missions": "tab 'Sứ mệnh' của /tech",
+    "/tech/workers": "tab 'Worker' của /tech",
     // Company OS · Agent C: form mở topic — vào từ nút 'Mở topic' trên /production, trên bàn sản xuất của
     // một mẫu (/production/models/[id]) và từ trang 360 của mẫu (`?model=<id>`, nút do Agent A2 đặt).
     "/production/topics/new": "đường CŨ, nay chỉ chuyển sang /marketing/topics/new (giữ ?model=) — các lối vào cũ vẫn trỏ tới",

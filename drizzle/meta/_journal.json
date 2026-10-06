@@ -1576,6 +1576,13 @@
       "when": 1791350060000,
       "tag": "0225_tech_control_plane_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1791350061000,
+      "tag": "0226_tech_workers",
+      "breakpoints": true
     }
   ]
 }

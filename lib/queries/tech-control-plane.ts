@@ -8,6 +8,7 @@ import {
   type CanonicalTaskState,
   type MissionExecution,
 } from "@/lib/constants/tech-control-plane";
+import { workerLiveness } from "@/lib/constants/tech-worker";
 
 /**
  * ───────────── TRUY VẤN MẶT PHẲNG ĐIỀU KHIỂN — GOAL · MISSION ─────────────
@@ -202,3 +203,51 @@ export async function techNeedsOwnerQueue() {
 }
 
 export type TechNeedsOwnerItem = Awaited<ReturnType<typeof techNeedsOwnerQueue>>[number];
+
+/* ═════════════════════ WORKER (Pha 2) ═════════════════════ */
+
+/**
+ * Worker kèm độ sống (hàm của nhịp tim cuối — không cột trạng thái) và các lượt đang chạy. Khoá bí mật KHÔNG
+ * bao giờ rời máy chủ: cột băm không được chọn ra.
+ */
+export async function listTechWorkers(now = new Date()) {
+  const db = await getDb();
+  const workers = await db.query.techWorkers.findMany({
+    columns: { secretHash: false },
+    orderBy: [desc(schema.techWorkers.createdAt)],
+  });
+  if (!workers.length) return [];
+  const runs = await db.query.techAgentRuns.findMany({
+    where: and(inArray(schema.techAgentRuns.workerId, workers.map((w) => w.id)), eq(schema.techAgentRuns.status, "RUNNING")),
+    columns: { id: true, workerId: true, taskId: true, startedAt: true, heartbeatAt: true, branch: true, metadata: true, provider: true, model: true },
+    with: { task: { columns: { id: true, code: true, title: true, status: true } } },
+  });
+  return workers.map((w) => ({
+    ...w,
+    liveness: workerLiveness(w.lastHeartbeatAt, now),
+    running: runs.filter((r) => r.workerId === w.id),
+  }));
+}
+
+export type TechWorkerListItem = Awaited<ReturnType<typeof listTechWorkers>>[number];
+
+/** Lượt chạy gần đây của worker hàng đợi, kèm nhật ký cuối (có trần) — cho trang Workers và trang việc. */
+export async function recentWorkerRuns(limit = 20, logTail = 40) {
+  const db = await getDb();
+  const runs = await db.query.techAgentRuns.findMany({
+    where: sql`${schema.techAgentRuns.workerId} IS NOT NULL`,
+    orderBy: [desc(schema.techAgentRuns.startedAt)],
+    limit,
+    columns: { id: true, status: true, startedAt: true, endedAt: true, heartbeatAt: true, branch: true, provider: true, model: true, summary: true, error: true, metadata: true, typecheckResult: true, lintResult: true, testResult: true, buildResult: true },
+    with: { task: { columns: { id: true, code: true, title: true } }, worker: { columns: { key: true } } },
+  });
+  if (!runs.length) return [];
+  const logs = await db
+    .select()
+    .from(schema.techRunLogs)
+    .where(sql`${schema.techRunLogs.runId} IN (${sql.join(runs.map((r) => sql`${r.id}`), sql`, `)}) AND ${schema.techRunLogs.seq} > (SELECT coalesce(max(l2.seq), 0) - ${logTail} FROM tech_run_logs l2 WHERE l2.run_id = ${schema.techRunLogs.runId})`)
+    .orderBy(asc(schema.techRunLogs.seq));
+  return runs.map((r) => ({ ...r, logs: logs.filter((l) => l.runId === r.id) }));
+}
+
+export type TechWorkerRunItem = Awaited<ReturnType<typeof recentWorkerRuns>>[number];

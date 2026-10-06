@@ -296,6 +296,14 @@ export const TECH_EVENT_NAMES = [
   "mission.created",
   "mission.status_changed",
   "mission.task_attached",
+  // Pha 2 — worker / lượt chạy (lib/tech/worker-service.ts)
+  "worker.registered",
+  "worker.enabled",
+  "worker.disabled",
+  "worker.claimed",
+  "run.succeeded",
+  "run.failed",
+  "run.lease_expired",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
@@ -311,4 +319,11 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "mission.created": "Tạo sứ mệnh",
   "mission.status_changed": "Sứ mệnh đổi trạng thái",
   "mission.task_attached": "Gắn việc vào sứ mệnh",
+  "worker.registered": "Đăng ký worker",
+  "worker.enabled": "Bật worker",
+  "worker.disabled": "Tắt worker",
+  "worker.claimed": "Worker nhận việc",
+  "run.succeeded": "Lượt chạy xong",
+  "run.failed": "Lượt chạy thất bại",
+  "run.lease_expired": "Lease hết hạn — việc về hàng đợi",
 };
