@@ -55,18 +55,18 @@
     "0223": "2026-10-06T12:49:34.228Z"
   },
   "created_at": "2026-10-06T10:04:31.315Z",
-  "updated_at": "2026-10-06T12:49:50.540Z",
-  "last_heartbeat": "2026-10-06T12:49:40.134Z",
+  "updated_at": "2026-10-06T15:19:36.900Z",
+  "last_heartbeat": "2026-10-06T15:19:36.900Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "feat/pricing-billing-foundation",
-    "sha": "dd47a09ca483adb2f33b229d2616566cb3e3d914",
-    "at": "2026-10-06T12:49:40.134Z",
+    "sha": "c6d24708d32be45cf56a4cb0e87212a1bf49ba60",
+    "at": "2026-10-06T15:19:36.900Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Pricing & Billing Foundation: gói cấu hình được, đo usage, sổ chi phí AI, chặn lỗ, entitlement",
     "summary": "",
     "tests": [
-      "ghép main + đổi số 0223: migration-journal + upgrade-path (86→223) + pricing + failover ĐẠT; tsc + eslint sạch; review độc lập PASS ở 62dd4eb6"
+      "ghép main tới #614: tsc sạch; migration-journal + upgrade-path (86→223) + pricing + failover + messenger-webhook ĐẠT; review độc lập PASS ở 62dd4eb6"
     ]
   }
 }
