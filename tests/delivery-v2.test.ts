@@ -187,6 +187,12 @@ function testDeployDungLaiBangChung() {
   assert.match(bc, /if \[ "\$REF" != "refs\/heads\/main" \]/, "deploy không từ main ⇒ không dùng lại bằng chứng của main");
   assert.ok(bc.includes('echo "sha=$ok_sha"') && !bc.includes('echo "sha=$SHA"'), "SHA xuất ra đọc từ chính lượt CI được chọn (.head_sha), không chép lại đầu vào");
   assert.match(bc, /if \[ -n "\$ok" \] && \[ "\$ok_sha" = "\$SHA" \]; then/, "và phải trùng SHA đang triển khai mới được dùng lại");
+  // Một lần hỏi KHÔNG thấy lượt CI nào không được là lý do chạy cổng lần hai (đo 06/10/2026, deploy 37444778809: CI của
+  // 0ca4ed97 chạy 09:41–09:59, một lần hỏi lúc 09:51 không thấy nó ⇒ +18 phút chạy trùng). Chỉ đỏ / huỷ thấy được mới thoát sớm.
+  assert.ok(bc.includes('.status == "completed" and .conclusion != "success"'), "phân biệt lượt ĐỎ / HUỶ với VẮNG MẶT");
+  assert.match(bc, /vang=\$\(\(vang \+ 1\)\)/, "vắng mặt được đếm, không thoát ngay");
+  assert.match(bc, /\[ "\$vang" -lt "\$tran" \] && \[ "\$\(date \+%s\)" -lt "\$han" \]/, "vắng mặt chỉ hỏi lại trong trần lần và trần thời gian");
+  assert.match(bc, /tran=4\n\s+\[ "\$thay" = 1 \] && tran=10/, "chưa từng thấy CI: 4 lần; đã thấy CI chạy: 10 lần");
   assert.match(d, /GATES_SHA: \$\{\{ needs\.gates\.result == 'success' && needs\.gates\.outputs\.sha \|\| needs\.bang_chung\.outputs\.sha \}\}/, "bước ba SHA so SHA của cổng vừa chạy, hoặc của bằng chứng");
 
   const ci = doc(".github/workflows/ci.yml");

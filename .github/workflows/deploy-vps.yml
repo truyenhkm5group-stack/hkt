@@ -100,6 +100,9 @@ jobs:
           fi
           URL="https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=20"
           han=$(( $(date +%s) + 28 * 60 ))
+          # `thay` = đã từng thấy lượt CI của SHA này đang chạy; `vang` = số lần hỏi liên tiếp KHÔNG thấy lượt nào.
+          thay=0
+          vang=0
           while :; do
             if ! body="$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$URL")"; then
               echo "Không hỏi được GitHub — chạy cổng (đường lùi an toàn)."; exit 0
@@ -116,12 +119,31 @@ jobs:
               exit 0
             fi
             dang="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status != "completed")] | length' 2>/dev/null)" || dang=0
-            if [ "${dang:-0}" -gt 0 ] 2>/dev/null && [ "$(date +%s)" -lt "$han" ]; then
-              echo "Lượt CI của $SHA trên main đang chạy — chờ nó thay vì chạy trùng ($(date -u +%T))."
-              sleep 30
-              continue
+            hong="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion != "success")] | length' 2>/dev/null)" || hong=0
+            if [ "${dang:-0}" -gt 0 ] 2>/dev/null; then
+              thay=1
+              vang=0
+              if [ "$(date +%s)" -lt "$han" ]; then
+                echo "Lượt CI của $SHA trên main đang chạy — chờ nó thay vì chạy trùng ($(date -u +%T))."
+                sleep 30
+                continue
+              fi
+            elif [ "${hong:-0}" -eq 0 ] 2>/dev/null; then
+              # KHÔNG THẤY lượt nào — không xanh, không đỏ, không đang chạy. Hai nghĩa vô hại: CI chưa kịp được tạo
+              # (vừa gộp), hoặc danh sách của GitHub thiếu một nhịp. Đo 06/10/2026 (deploy 37444778809): lượt CI của
+              # 0ca4ed97 ĐANG CHẠY từ 09:41 tới 09:59, nhưng lúc 09:51 một lần hỏi không thấy nó ⇒ bản cũ bỏ cuộc ngay,
+              # chạy cổng lần hai (+18 phút) cho đúng SHA vừa xanh 8 phút sau. Nên chỉ ĐỎ / HUỶ thấy được mới là lý do
+              # chạy cổng ngay; vắng mặt thì hỏi lại — 4 lần (2 phút) nếu chưa từng thấy CI chạy, 10 lần nếu đã thấy.
+              vang=$((vang + 1))
+              tran=4
+              [ "$thay" = 1 ] && tran=10
+              if [ "$vang" -lt "$tran" ] && [ "$(date +%s)" -lt "$han" ]; then
+                echo "Chưa thấy lượt CI nào của $SHA trên main (lần $vang/$tran) — hỏi lại sau 30 giây ($(date -u +%T))."
+                sleep 30
+                continue
+              fi
             fi
-            echo "Không có lượt cổng xanh nào của $SHA trên main (chưa có / đỏ / huỷ / chờ quá hạn) — chạy cổng."
+            echo "Không có lượt cổng xanh nào của $SHA trên main (đỏ / huỷ / vắng mặt quá lâu / chờ quá hạn) — chạy cổng."
             exit 0
           done
 
