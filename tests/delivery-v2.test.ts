@@ -260,6 +260,7 @@ function testChongPhamVi() {
   const mg = claimDecision(entry("g", { migration_reservations: ["0300"] }), [entry("h", { migration_reservations: ["0300"], owned_paths: ["lib/h/"] })], CFG);
   assert.match(mg.refusals.join(), /MIGRATION: 0300/, "trùng số giữ chỗ ⇒ từ chối");
   assert.deepEqual(inferOwnedPaths(["lib/sales-chatbot/a.ts", "lib/sales-chatbot/x/b.ts", "tests/a.test.ts", "app/(dashboard)/ai/page.tsx"]).sort(), ["app/(dashboard)/ai/", "lib/sales-chatbot/", "tests/a.test.ts"].sort(), "phạm vi suy từ nhánh: thư mục chứa tệp, tests/ giữ tệp");
+  assert.deepEqual(inferOwnedPaths(["docs/pancake-runbook.md", "scripts/x.ts"]), ["docs/pancake-runbook.md", "scripts/x.ts"], "tệp thẳng trong docs/ · scripts/ giữ tệp — lấy cả thư mục là báo chồng giả với mọi sứ mệnh có tài liệu");
 }
 
 function testDoiChieu() {
@@ -460,6 +461,9 @@ async function testVongDoi() {
     assert.equal(intake.code, 1);
     assert.match(intake.text, /DUPLICATE/);
     assert.equal((await ai(B, "claim", "m-c", "--title=C", "--paths=src/c/", "--intake=PARTIAL")).code, 0);
+    const lach = await ai(B, "claim", "m-c", "--status=DONE");
+    assert.notEqual(lach.code, 0, "claim --status=DONE là cửa lách bằng chứng của close");
+    assert.match(lach.text, /DONE đi qua `close/);
 
     // ── Khoá: một chủ, nhận lại khi phục hồi, người khác bị từ chối ──
     assert.equal((await ai(A, "lease", "acquire", "integration-lead", "--purpose=gộp lô")).code, 0);
@@ -533,6 +537,7 @@ async function testVongDoi() {
     const bd = await ai(B, "board");
     assert.match(bd.text, /INTEGRATING .* m-a/, bd.text);
     assert.match(bd.text, /đã vào main/);
+    assert.ok(!/BACKLOG .* m-b/.test(bd.text), "phụ thuộc đã VÀO MAIN là xong cho bên chờ — không phải đợi một dòng sổ");
     const close1 = await ai(A, "close", "m-a", "--status=DONE", "--evidence=gộp A");
     assert.equal(close1.code, 1, "DONE khi chưa hậu kiểm production ⇒ từ chối");
     assert.match(close1.text, /verify --record/);

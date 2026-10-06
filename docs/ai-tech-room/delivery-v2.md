@@ -115,7 +115,7 @@ tệp DAG ⇒ phạm vi DẪN XUẤT từ `owns` của các việc (không khai 
 Room ⇒ khai `--paths`, hoặc để trống và công cụ suy từ chính nhánh (thư mục chứa từng tệp đã đổi).
 
 `claim` từ chối khi chồng phạm vi / cùng điểm nóng SERIAL với một sứ mệnh ĐANG MỞ, và đưa đúng hai lối
-ra: **tuần tự hoá** (`--after=<sứ-mệnh>` ⇒ bảng giữ `BACKLOG` tới khi bên kia khép) hoặc **khai cách
+ra: **tuần tự hoá** (`--after=<sứ-mệnh>` ⇒ bảng giữ `BACKLOG` tới khi bên kia VÀO MAIN) hoặc **khai cách
 tích hợp** (`--accept-overlap="…"`, ghi `OVERLAP_ACCEPTED`). Đây là soft-lock: không ai bị khoá chết —
 sứ mệnh đã khép nhả phạm vi ngay, phiên chết thì bảng báo nhịp tim cũ để người đối chiếu.
 

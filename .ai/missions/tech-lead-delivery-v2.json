@@ -46,7 +46,7 @@
       "priority": "P0",
       "risk": "HIGH",
       "dependsOn": ["audit"],
-      "owns": ["scripts/ai-tech.ts", ".ai/config.json", "tests/delivery-v2.test.ts", "tests/ai-tech-room.test.ts", "tests/sync-fixtures.test.ts"],
+      "owns": ["scripts/ai-tech.ts", ".ai/config.json", "tests/delivery-v2.test.ts", "tests/ai-tech-room.test.ts", "tests/sync-fixtures.test.ts", "lib/constants/agent-scopes.ts"],
       "readOnly": [],
       "doNotTouch": [],
       "tests": ["npx tsx --tsconfig tsconfig.json tests/delivery-v2.test.ts", "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts", "npm run typecheck", "npm run lint"],

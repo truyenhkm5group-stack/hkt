@@ -1596,12 +1596,14 @@ export function entryFromMission(m: Mission, base: Partial<RegistryEntry> & { ow
 /**
  * Phạm vi dự kiến của một nhánh KHÔNG khai báo (sứ mệnh ngoài AI Tech Room): thư mục chứa từng tệp
  * nhánh đã đổi. Đây là SỰ THẬT của nhánh, nên nó không bao giờ báo thiếu so với cái nhánh đã chạm.
+ * Tệp nằm THẲNG trong một thư mục gốc (`docs/x.md`, `tests/y.ts`, `scripts/z.ts`) giữ nguyên tệp:
+ * các thư mục phẳng ấy mọi việc cùng dùng, lấy cả thư mục là báo chồng giả với mọi sứ mệnh khác.
  */
 export function inferOwnedPaths(files: readonly string[]): string[] {
   const out = new Set<string>();
   for (const f of files) {
-    const dir = f.includes("/") ? `${f.slice(0, f.lastIndexOf("/"))}/` : f;
-    out.add(dir === "tests/" ? f : dir); // tests/ là một thư mục phẳng mọi việc cùng dùng — giữ tệp, không giữ cả thư mục
+    const parts = f.split("/");
+    out.add(parts.length <= 2 ? f : `${parts.slice(0, -1).join("/")}/`);
   }
   // Bỏ thư mục con đã nằm trong thư mục cha cũng có mặt.
   const all = [...out].sort();
@@ -2946,10 +2948,14 @@ async function cmdBoard(ctx: RepoCtx, flags: Set<string>): Promise<number> {
       ghError = (e as Error).message;
     }
   const rows: { e: RegistryEntry; effective: MissionState; drift: string[] }[] = [];
-  for (const e of st.entries) {
-    const f = await entryFacts(ctx, e, st.entries, { get: gh?.get ?? null, prs, prodSha: prod.sha, ref });
-    const r = reconcileEntry(e, f, ctx.config, nowMs);
-    rows.push({ e, ...r });
+  const all: { e: RegistryEntry; f: EntryFacts }[] = [];
+  for (const e of st.entries) all.push({ e, f: await entryFacts(ctx, e, st.entries, { get: gh?.get ?? null, prs, prodSha: prod.sha, ref }) });
+  // Phụ thuộc đã VÀO MAIN là xong cho bên chờ nó — kể cả khi chủ của nó chưa kịp `close` (việc của
+  // bên sau là đứng trên mã đã tích hợp, không phải đợi một dòng sổ).
+  const landed = new Set(all.filter(({ f }) => (f.merged !== null && f.merged !== "EMPTY") || Boolean(f.pr?.merged)).map(({ e }) => e.mission_id));
+  for (const { e, f } of all) {
+    f.openDependencies = f.openDependencies.filter((d) => !landed.has(d));
+    rows.push({ e, ...reconcileEntry(e, f, ctx.config, nowMs) });
   }
   const leases = LEASE_NAMES.map((n) => {
     const l = st.leases.find((x) => x.name === n) ?? null;
@@ -3122,6 +3128,8 @@ function applyEntryFlags(base: Partial<RegistryEntry> & { owner: string }, value
 
 async function cmdClaim(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): Promise<number> {
   const id = mustMission(idIn);
+  // DONE chỉ đi qua `close` — nơi đòi bằng chứng đã vào main + hậu kiểm. `claim --status=DONE` là cửa lách.
+  if (values.get("status") === "DONE") throw new UsageError("DONE đi qua `close <mã> --status=DONE --evidence=…` (đòi bằng chứng), không qua claim");
   const actor = controlActor(ctx);
   const local = existsSync(path.join(missionsDir(ctx), `${id}.json`)) ? requireMission(ctx, id).mission : null;
   const here = gitTry(ctx.top, ["rev-parse", "--abbrev-ref", "HEAD"]);
