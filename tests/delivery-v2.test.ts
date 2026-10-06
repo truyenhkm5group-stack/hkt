@@ -10,6 +10,8 @@ import {
   DEFAULT_CONFIG,
   checkPrMigrations,
   handoffDecision,
+  isOwnPr,
+  scrubModelNames,
   mergeGate,
   prOpenDecision,
   renderHandoffPrBody,
@@ -416,7 +418,9 @@ function testDeployVaHauKiem() {
   assert.equal(verifyVerdict(good).pass, true);
   assert.equal(verifyVerdict({ ...good, health: { ...good.health, commit: "999999999999" } }).pass, false, "bản đang chạy khác bản mong đợi ⇒ KHÔNG ĐẠT, dù deploy xanh");
   assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: { migrations: 221 } } }).pass, false, "thiếu một migration ⇒ KHÔNG ĐẠT");
-  assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: { migrations: 223 } } }).pass, true, "bảng migration DƯ dòng lịch sử (production 06/10: 222 dòng / 221 mục sổ) ⇒ vẫn ĐẠT — chỉ THIẾU mới là lỗi");
+  assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: { migrations: 223 } } }).pass, false, "chưa khai độ lệch nền ⇒ đòi BẰNG sổ (dư một dòng không chứng minh migration cuối đã áp)");
+  assert.equal(verifyVerdict({ ...good, migrationOffset: 1, health: { ...good.health, platform: { migrations: 223 } } }).pass, true, "khai độ lệch nền 1 (production 06/10: 222 dòng / 221 mục) ⇒ 223 = 222 + 1 ĐẠT");
+  assert.equal(verifyVerdict({ ...good, migrationOffset: 1, health: { ...good.health, platform: { migrations: 222 } } }).pass, false, "review 06/10: phần dư che đúng MỘT migration thiếu — so chính xác thì lộ ra");
   assert.equal(verifyVerdict({ ...good, health: { ...good.health, platform: {} } }).pass, false, "không đọc được số migration ⇒ không ĐẠT");
   assert.equal(verifyVerdict({ ...good, deployRun: null }).pass, false);
   assert.equal(verifyVerdict({ ...good, deployRun: { conclusion: "failure", status: "completed", url: "u" } }).pass, false);
@@ -466,6 +470,14 @@ function testBanGiao() {
   assert.match(mergeGate(rows, 3, qi(3).sha).why, /NEEDS_REVIEW/, "HIGH chưa review ⇒ Delivery Controller cũng không gộp được");
   assert.match(mergeGate(rows, 4, qi(4).sha).why, /chưa phải clean/);
   assert.match(mergeGate(rows, 99, S).why, /không có trong hàng đợi/);
+  const sauBanGiao = orderQueue([qi(5, { handoffSha: S })], CFG);
+  assert.match(mergeGate(sauBanGiao, 5, qi(5).sha).why, /đi tiếp sau bàn giao/, "PR ở SHA khác SHA đã bàn giao ⇒ không gộp mã chưa ai khai đã kiểm");
+  assert.ok(mergeGate(orderQueue([qi(6, { handoffSha: qi(6).sha })], CFG), 6, qi(6).sha).ok, "đúng SHA đã bàn giao ⇒ gộp được");
+  const own = { head: { repo: { full_name: "o/r" }, ref: "feat/x" }, base: { ref: "main" } };
+  assert.ok(isOwnPr(own, "o/r", "main"));
+  assert.ok(!isOwnPr({ ...own, head: { repo: { full_name: "ke-la/r" }, ref: "feat/x" } }, "o/r", "main"), "PR từ fork trùng tên nhánh không được nhận là PR của sứ mệnh");
+  assert.ok(!isOwnPr({ ...own, base: { ref: "release" } }, "o/r", "main"), "PR nhắm base khác nhánh tích hợp không vào hàng đợi");
+  assert.equal(scrubModelNames("Việc X\nCo-Authored-By: Claude Opus 5.5 <x@y>\nLàm bởi claude code"), "Việc X\nLàm bởi AI");
 }
 
 /* ═════════════ 4 · VÒNG ĐỜI THẬT: HAI PHIÊN, MỘT SỔ, MỘT REMOTE TẠM ═════════════ */

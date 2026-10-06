@@ -195,6 +195,12 @@ export type Config = {
   verifyEndpoints: string[];
   /** Tệp nằm trọn trong các mẫu này mà không chạm sàn nào ⇒ LOW; ngoài ra mặc định MEDIUM. */
   lowRiskPaths: string[];
+  /**
+   * Số dòng `drizzle.__drizzle_migrations` DƯ so với sổ `_journal.json` trên production (lịch sử đánh số lại) — đo rồi khai.
+   * `null` = chưa khai ⇒ hậu kiểm đòi BẰNG đúng sổ. Dùng `≥` thay cho khai báo này là để một migration thiếu lọt qua đúng
+   * bằng cỡ phần dư (review 06/10/2026).
+   */
+  migrationRowOffset: number | null;
   /** Ai được gộp một PR theo rủi ro của nó (mục 13 · hàng đợi gộp). */
   mergePolicy: Record<Risk, MergePolicy>;
   /** Tệp KHÔNG chạy trên VPS — `close --no-runtime` chỉ được nhận khi mọi tệp sứ mệnh chạm đều nằm ở đây. */
@@ -222,6 +228,7 @@ export const DEFAULT_CONFIG: Config = {
   healthUrl: "",
   verifyEndpoints: [],
   lowRiskPaths: [],
+  migrationRowOffset: null,
   mergePolicy: { LOW: "AUTO", MEDIUM: "AUTO", HIGH: "LEAD_REVIEW", CRITICAL: "OWNER" },
   // `.github/` CỐ Ý không nằm đây: đổi đường deploy thì phải deploy thật một lượt và hậu kiểm nó.
   nonRuntimePaths: ["docs/", "tests/", ".ai/", ".claude/", "AGENTS.md", "CLAUDE.md", "README.md", "scripts/ai-tech.ts"],
@@ -359,6 +366,11 @@ export function parseConfig(raw: unknown): { config: Config; errors: string[] } 
     const v = strArr(raw.lowRiskPaths) ? raw.lowRiskPaths.map(normalizePattern) : null;
     if (!v || v.some((x) => x === null)) errors.push("config.lowRiskPaths: mảng mẫu đường dẫn tương đối");
     else c.lowRiskPaths = v as string[];
+  }
+  if (raw.migrationRowOffset !== undefined) {
+    const v = raw.migrationRowOffset;
+    if (v !== null && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 1000)) errors.push("config.migrationRowOffset: số nguyên 0–1000 hoặc null");
+    else c.migrationRowOffset = v;
   }
   if (raw.nonRuntimePaths !== undefined) {
     const v = strArr(raw.nonRuntimePaths) ? raw.nonRuntimePaths.map(normalizePattern) : null;
@@ -1964,6 +1976,8 @@ export type QueueItem = {
   files: string[];
   /** Đầu nhánh lúc xét — gộp phải kèm ĐÚNG SHA này. */
   sha: string;
+  /** SHA đã BÀN GIAO trong sổ (nếu nhánh đi qua `handoff`) — gộp chỉ khi bằng `sha`; `null` = không đi qua bàn giao. */
+  handoffSha?: string | null;
   migrationProblems: string[];
   createdAt: string;
   /** Có dấu review ĐẠT trong SỔ cho đúng `sha` này (`review <PR> --sha=… --verdict=PASS`, chỉ phiên cầm khoá Lead ghi được). */
@@ -2085,11 +2099,23 @@ export function mergeGate(rows: readonly QueueRow[], pr: number, sha: string): {
   if (r.verdict !== "MERGE_NOW" && r.verdict !== "MERGE_ISOLATED") return { ok: false, why: `hàng đợi xếp ${r.verdict}: ${r.why}` };
   if (r.item.sha !== sha) return { ok: false, why: `--sha ${sha.slice(0, 8)} khác đầu nhánh hàng đợi vừa xét (${r.item.sha.slice(0, 8)}) — chạy lại queue` };
   if (r.item.mergeable !== "clean") return { ok: false, why: `mergeable_state = ${r.item.mergeable}, chưa phải clean` };
+  if (r.item.handoffSha && r.item.handoffSha !== r.item.sha)
+    return { ok: false, why: `nhánh đã đi tiếp sau bàn giao (bàn giao ${r.item.handoffSha.slice(0, 8)}, PR ${r.item.sha.slice(0, 8)}) — mã chưa ai khai đã kiểm; worker bàn giao lại` };
   return { ok: true, why: `${r.verdict} · ${r.item.risk} · gates ${r.item.gates}` };
 }
 
 /** Thân PR dựng từ bản bàn giao — người đọc PR thấy worker đã khai gì, ai bàn giao, ở SHA nào. */
-export function renderHandoffPrBody(e: Pick<RegistryEntry, "mission_id" | "business_goal" | "definition_of_done" | "risk">, h: Handoff): string {
+/** Gỡ tên model AI khỏi chữ worker khai (AGENTS.md 6.6) — dòng «Co-authored-by» bỏ hẳn, tên model thay bằng «AI». HÀM THUẦN. */
+export function scrubModelNames(s: string): string {
+  return s
+    .split("\n")
+    .filter((l) => !/^\s*co-authored-by:/i.test(l))
+    .join("\n")
+    .replace(/\b(claude(?:[ -]code)?|anthropic|opus|sonnet|haiku)\b(?:[ -]?\d+(?:\.\d+)?)?/gi, "AI");
+}
+
+export function renderHandoffPrBody(e: Pick<RegistryEntry, "mission_id" | "business_goal" | "definition_of_done" | "risk">, hIn: Handoff): string {
+  const h: Handoff = { ...hIn, title: scrubModelNames(hIn.title), summary: scrubModelNames(hIn.summary), tests: hIn.tests.map(scrubModelNames) };
   const list = (xs: readonly string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- (không khai)");
   return [
     `## Bàn giao của worker — sứ mệnh \`${e.mission_id}\``,
@@ -2153,6 +2179,8 @@ export type VerifyInput = {
   health: { ok?: unknown; commit?: unknown; platform?: { migrations?: unknown } } | null;
   healthError?: string;
   expectedMigrations: number | null;
+  /** Độ lệch nền đã đo (`migrationRowOffset`) — `null` ⇒ đòi bằng đúng sổ. */
+  migrationOffset?: number | null;
   deployRun: { conclusion: string | null; status: string; url: string } | null;
   endpoints: { path: string; status: number | null }[];
 };
@@ -2167,8 +2195,11 @@ export function verifyVerdict(x: VerifyInput): { pass: boolean; checks: { ok: bo
   const mig = h && isObj(h.platform) && typeof h.platform.migrations === "number" ? h.platform.migrations : null;
   // `/api/health` đếm DÒNG của `drizzle.__drizzle_migrations` — bảng này dài hơn sổ `_journal.json` được (đo production 06/10/2026:
   // 222 dòng / 221 mục, dư do lịch sử đánh số lại). Điều phải chứng minh là KHÔNG THIẾU migration nào: đã áp ≥ sổ, không phải bằng.
-  if (x.expectedMigrations !== null)
-    checks.push({ ok: mig !== null && mig >= x.expectedMigrations, label: `migration đã áp ${mig ?? "?"} ≥ sổ của SHA ${x.expectedMigrations}${mig !== null && mig > x.expectedMigrations ? " (bảng dư dòng lịch sử — bình thường)" : ""}` });
+  if (x.expectedMigrations !== null) {
+    const off = x.migrationOffset ?? 0;
+    const want = x.expectedMigrations + off;
+    checks.push({ ok: mig !== null && mig === want, label: `migration đã áp ${mig ?? "?"} = sổ của SHA ${x.expectedMigrations}${off ? ` + ${off} dòng lịch sử đã đo` : ""}${mig !== null && mig !== want ? ` — LỆCH ${mig - want > 0 ? "+" : ""}${mig - want}` : ""}` });
+  }
   checks.push({
     ok: x.deployRun !== null && x.deployRun.status === "completed" && x.deployRun.conclusion === "success",
     label: x.deployRun ? `lượt deploy của SHA: ${x.deployRun.status}/${x.deployRun.conclusion ?? "—"} (gồm smoke trên VPS) ${x.deployRun.url}` : "không tìm thấy lượt deploy nào của SHA này",
@@ -2440,6 +2471,7 @@ function githubClient(ctx: RepoCtx, fetchImpl: FetchLike = fetch as unknown as F
   const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim() || null;
   const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "ai-tech-room" };
   if (token) headers.Authorization = `Bearer ${token}`;
+  ownPrFilter = { repoFull: `${repo.owner}/${repo.repo}`, base: ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "") };
   const get: GhGet = async (p) => {
     const url = p.startsWith("https://") ? p : `https://api.github.com/repos/${repo.owner}/${repo.repo}${p}`;
     const r = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15000) });
@@ -2474,6 +2506,14 @@ async function gatesOf(get: GhGet, sha: string): Promise<"success" | "failure" |
 }
 
 type OpenPr = { number: number; title: string; branch: string; sha: string; draft: boolean; createdAt: string; body: string };
+/** PR có phải của CHÍNH kho này, nhắm ĐÚNG nhánh tích hợp không — kho PUBLIC: fork mở được PR trùng tên nhánh. HÀM THUẦN. */
+export function isOwnPr(p: { head?: unknown; base?: unknown }, repoFull: string, baseBranch: string): boolean {
+  const head = isObj(p.head) ? p.head : null;
+  const base = isObj(p.base) ? p.base : null;
+  const headRepo = head && isObj(head.repo) ? String(head.repo.full_name ?? "") : "";
+  return headRepo.toLowerCase() === repoFull.toLowerCase() && String(base?.ref ?? "") === baseBranch;
+}
+let ownPrFilter: { repoFull: string; base: string } | null = null;
 const toOpenPr = (p: Record<string, unknown>): OpenPr => ({
   number: Number(p.number),
   title: String(p.title ?? ""),
@@ -2487,7 +2527,8 @@ async function openPrs(get: GhGet): Promise<OpenPr[]> {
   const all: OpenPr[] = [];
   for (let page = 1; page <= 10; page++) {
     const xs = arr(await get(`/pulls?state=open&per_page=100&page=${page}`));
-    all.push(...xs.map(toOpenPr));
+    const f = ownPrFilter;
+    all.push(...xs.filter((p) => !f || isOwnPr(p, f.repoFull, f.base)).map(toOpenPr));
     if (xs.length < 100) break;
   }
   return all;
@@ -3769,6 +3810,7 @@ async function buildQueue(ctx: RepoCtx): Promise<{ rows: QueueRow[]; st: Control
       migrationProblems: mig.problems,
       createdAt: p.createdAt,
       reviewed: reviewedAt(st.reviews, p.number, p.sha),
+      handoffSha: entry?.handoff && entry.handoff.branch === p.branch ? entry.handoff.sha : null,
     });
   }
   return { rows: orderQueue(items, ctx.config), st, prs };
@@ -3922,8 +3964,11 @@ async function cmdPrOpen(ctx: RepoCtx, idIn: string | undefined, flags: Set<stri
   let pr = existing;
   if (d.action === "OPEN" && h) {
     const base = ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "");
-    const res = (await gh.write("POST", "/pulls", { title: h.title, head: h.branch, base, body: renderHandoffPrBody(e, h) })) as Record<string, unknown>;
+    const res = (await gh.write("POST", "/pulls", { title: scrubModelNames(h.title), head: h.branch, base, body: renderHandoffPrBody(e, h) })) as Record<string, unknown>;
     pr = Number(res.number);
+    if (!Number.isInteger(pr) || pr <= 0) throw new Error("GitHub không trả số PR hợp lệ");
+    const headSha = isObj(res.head) ? String(res.head.sha ?? "") : "";
+    if (headSha && headSha !== h.sha) out(`! PR #${pr} mở ở ${headSha.slice(0, 8)}, KHÁC SHA đã bàn giao ${h.sha.slice(0, 8)} (worker đẩy thêm giữa chừng) — merge sẽ từ chối tới khi bàn giao lại`);
   }
   mutateControl(ctx, actor, (s2) => {
     const cur = s2.entries.find((x) => x.mission_id === id);
@@ -3950,8 +3995,11 @@ async function cmdMerge(ctx: RepoCtx, prIn: string | undefined, flags: Set<strin
     return 1;
   }
   const row = rows.find((x) => x.item.pr === pr) as QueueRow;
-  const res = (await gh.write("PUT", `/pulls/${pr}/merge`, { merge_method: "squash", sha, commit_title: `${row.item.title} (#${pr})` })) as Record<string, unknown>;
+  // `commit_message` TƯỜNG MINH: để trống thì GitHub ghép thân từ mọi commit của nhánh — kéo theo dòng «Co-authored-by» mang tên
+  // model AI (AGENTS.md 6.6 cấm) mà công cụ tự chèn ở phiên worker.
+  const res = (await gh.write("PUT", `/pulls/${pr}/merge`, { merge_method: "squash", sha, commit_title: `${row.item.title} (#${pr})`, commit_message: `Gộp bởi Delivery Controller (npm run ai -- merge) ở ${sha} — ${g.why}.` })) as Record<string, unknown>;
   const mergedSha = String(res.sha ?? "");
+  if (!SHA_RE.test(mergedSha)) out(`! GitHub không trả SHA commit gộp hợp lệ — kiểm trang PR #${pr}`);
   mutateControl(ctx, actor, (s2) => {
     const e = s2.entries.find((x) => x.branch === row.item.branch || x.related_prs.includes(pr));
     const put: Record<string, string> = {};
@@ -3973,8 +4021,16 @@ async function cmdDeploy(ctx: RepoCtx, flags: Set<string>, values: Map<string, s
     out(`✗ không deploy: ${plan.action} — ${plan.why}`);
     return 1;
   }
+  // Main có thể nhích giữa lúc lập kế hoạch và lúc dispatch (người gộp tay) — dispatch theo TÊN nhánh sẽ chạy một SHA kế hoạch
+  // không xét. Hỏi lại remote ngay trước khi bấm.
+  const branch = ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "");
+  const tipNow = (gitTry(ctx.top, ["ls-remote", ctx.config.remote, `refs/heads/${branch}`]) ?? "").split(/\s+/)[0] ?? "";
+  if (tipNow !== plan.sha) {
+    out(`✗ không deploy: ngọn ${branch} trên remote là ${tipNow.slice(0, 8) || "?"}, khác SHA của kế hoạch ${plan.sha.slice(0, 8)} — chạy lại deploy-plan`);
+    return 1;
+  }
   const before = arr(((await gh.get("/actions/workflows/deploy-vps.yml/runs?per_page=1")) as { workflow_runs?: unknown }).workflow_runs)[0];
-  const beforeId = before ? Number(before.id) : 0;
+  const beforeId = before && Number.isFinite(Number(before.id)) ? Number(before.id) : 0;
   await gh.write("POST", "/actions/workflows/deploy-vps.yml/dispatches", { ref: ctx.config.integrationRef.replace(new RegExp(`^${ctx.config.remote}/`), "") });
   let run: Record<string, unknown> | undefined;
   for (let i = 0; i < 18 && !run; i++) {
@@ -3982,6 +4038,10 @@ async function cmdDeploy(ctx: RepoCtx, flags: Set<string>, values: Map<string, s
     const rs = arr(((await gh.get("/actions/workflows/deploy-vps.yml/runs?per_page=10&event=workflow_dispatch")) as { workflow_runs?: unknown }).workflow_runs);
     // id lớn hơn BEFORE KHÔNG đủ (phiên khác có thể dispatch cùng lúc) — phải đúng SHA của kế hoạch.
     run = rs.filter((r) => Number(r.id) > beforeId && r.head_sha === plan.sha).sort((a, b) => Number(a.id) - Number(b.id))[0];
+    if (!run) {
+      const other = rs.filter((r) => Number(r.id) > beforeId).sort((a, b) => Number(a.id) - Number(b.id))[0];
+      if (other && i >= 6) out(`! thấy run ${String(other.id)} mới nhưng ở SHA ${String(other.head_sha).slice(0, 8)} — không phải SHA của kế hoạch`);
+    }
   }
   const tag = run ? `run ${String(run.id)} ${String(run.html_url)}` : "chưa thấy run của SHA này sau 90 giây — KHÔNG dispatch lại; tra Actions";
   mutateControl(ctx, actor, () => ({ change: { put: {}, events: [{ kind: "DEPLOY_DISPATCHED", detail: `${plan.sha?.slice(0, 12)} · ${tag}` }], message: `deploy ${plan.sha?.slice(0, 12)}` }, result: null }));
@@ -4023,7 +4083,7 @@ async function cmdVerify(ctx: RepoCtx, flags: Set<string>, values: Map<string, s
       }
     }
   }
-  const v = verifyVerdict({ expectedSha: sha, health: prod.health, healthError: prod.error, expectedMigrations, deployRun, endpoints });
+  const v = verifyVerdict({ expectedSha: sha, health: prod.health, healthError: prod.error, expectedMigrations, migrationOffset: ctx.config.migrationRowOffset, deployRun, endpoints });
   out(`HẬU KIỂM PRODUCTION · mong đợi ${short(sha)}`);
   for (const c of v.checks) out(`  ${c.ok ? "✓" : "✗"} ${c.label}`);
   out(`  ⇒ ${v.pass ? "ĐẠT" : "KHÔNG ĐẠT — INCIDENT: không tuyên bố xong. Không có rollback tự động (migration chỉ đi tới); sửa tiến bằng PR mới, hoặc báo chủ shop nếu production hỏng"}`);

@@ -9,6 +9,7 @@
   "controlBranch": "ai-control/registry",
   "staleHeartbeatHours": 24,
   "leaseMinutes": 60,
+  "migrationRowOffset": 1,
   "healthUrl": "https://erp.vnxcommerce.com/api/health",
   "verifyEndpoints": ["/api/health", "/login"],
   "lowRiskPaths": ["docs/", "tests/", "components/", "app/(dashboard)/", ".ai/missions/", "README.md"],
