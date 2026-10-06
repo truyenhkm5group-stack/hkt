@@ -3,7 +3,7 @@
   "mission_id": "migration-release",
   "title": "Nhả số migration giữ chỗ (Delivery Controller)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-06T11:43:44.434Z",
-  "updated_at": "2026-10-06T11:43:44.434Z",
-  "last_heartbeat": "2026-10-06T11:43:44.434Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-06T11:43:51.694Z",
+  "last_heartbeat": "2026-10-06T11:43:51.694Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/migration-release",
+    "sha": "d555b4fdba5472c5fdb0f8d3ece479a9dc8b0d87",
+    "at": "2026-10-06T11:43:51.694Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Nhả số migration giữ chỗ (Delivery Controller)",
+    "summary": "",
+    "tests": [
+      "delivery-v2 ĐẠT · ai-tech-room ĐẠT · tsc + eslint --max-warnings=0 sạch"
+    ]
+  }
 }

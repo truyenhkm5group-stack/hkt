@@ -63,3 +63,4 @@
 {"at":"2026-10-06T11:43:04.331Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"ai-sales-reliability","detail":"0223 — #607 dùng 0222, không dùng 0223 — trả lại cho việc khác"}
 {"at":"2026-10-06T11:43:44.598Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"migration-release","detail":"RUNNING · 2 mẫu phạm vi · HIGH"}
 {"at":"2026-10-06T11:43:44.598Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"migration-release","detail":"OVERLAP_ACCEPTED với deploy-reuse-wait: phạm vi tests/delivery-v2.test.ts — cách tích hợp: deploy-reuse-wait đã gộp (#606), chỉ chờ hậu kiểm; bài kiểm chỉ nối thêm một khối"}
+{"at":"2026-10-06T11:43:51.751Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-release","detail":"fix/migration-release @ d555b4fdba54 · 1 lệnh kiểm thử"}
