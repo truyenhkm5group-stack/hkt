@@ -25,7 +25,8 @@ import { phoneOtpSummary, readPhoneOtpSetting, homeZaloConnected } from "@/lib/o
 import { signupModeState } from "@/lib/onboarding/signup-mode";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { env } from "@/lib/env";
-import { MESSENGER_FIELDS, messengerVerifyToken, messengerWebhookSecrets } from "@/lib/integrations/messenger/graph";
+import { MESSENGER_FIELDS, messengerApp, messengerVerifyToken, messengerWebhookSecrets } from "@/lib/integrations/messenger/graph";
+import { messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
@@ -151,6 +152,16 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           </dd>
           <dt className="text-muted-foreground">Chữ ký được chấp nhận</dt>
           <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
+          <dt className="text-muted-foreground">Nối page dùng app</dt>
+          <dd className="text-xs">{messengerApp()?.source === "MESSENGER_APP" ? "App Messenger riêng" : messengerApp() ? "App đăng nhập (chưa khai đủ app Messenger)" : "Chưa khai app nào"}{env.oauth.facebookMessengerLoginConfigId ? " · hộp thoại theo Configuration ID (Login for Business)" : " · hộp thoại theo danh sách quyền (scope)"}</dd>
+          <dt className="text-muted-foreground">URI chuyển hướng OAuth hợp lệ</dt>
+          <dd className="space-y-1">
+            {messengerRedirectUris().map((u) => (
+              <code key={u} className="block break-all text-xs">
+                {u}
+              </code>
+            ))}
+          </dd>
         </dl>
       </SectionCard>
 
