@@ -98,3 +98,4 @@
 {"at":"2026-10-06T13:07:52.362Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ai-sales-reliability","detail":"PASS d7c55eaf718133990f949e141ef6cffd77a4166f 2026-10-06T13:07:50.740Z"}
 {"at":"2026-10-06T13:08:24.271Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#611 @ f4a76b7c80c5 · Review độc lập PASS ở 340e19c6 (bảo mật, đường deploy, bắt tay GET); f4a76b7c chỉ ghép main (#607) — gates xanh"}
 {"at":"2026-10-06T13:08:43.523Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"messenger-app-webhook","detail":"#611 @ f4a76b7c80c5 → 51db3e4269cd (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-06T13:09:07.234Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"51db3e4269cd · run 37468537396 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37468537396"}
