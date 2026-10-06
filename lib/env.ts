@@ -81,6 +81,13 @@ export const env = {
     get facebookMessengerAppSecret() {
       return read("FACEBOOK_MESSENGER_APP_SECRET");
     },
+    /**
+     * Configuration ID của «Facebook Login for Business» ở app Messenger (app kiểu Doanh nghiệp có thể bỏ qua tham số `scope` và
+     * chỉ cấp quyền theo cấu hình). Rỗng ⇒ hộp thoại xin quyền bằng `scope` như cũ.
+     */
+    get facebookMessengerLoginConfigId() {
+      return read("FACEBOOK_MESSENGER_LOGIN_CONFIG_ID");
+    },
   },
   pancake: {
     get apiKey() {

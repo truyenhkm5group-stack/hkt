@@ -34,7 +34,7 @@ const APP_ID = "777000777888";
 const APP_SECRET = "app-secret-native-test-0123456789abcd";
 const PAGE = "4059687183";
 const PAGE_TOKEN = "EAAGpagetoken_native_0123456789abcdef";
-const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
+const ENV_KEYS = ["FACEBOOK_LOGIN_APP_ID", "FACEBOOK_LOGIN_APP_SECRET", "FACEBOOK_MESSENGER_APP_ID", "FACEBOOK_MESSENGER_APP_SECRET", "PLATFORM_SECRETS_KEY"] as const;
 
 /** Mạng giả: Graph của Meta trả lời; MỌI host khác được ghi lại — bài kiểm đòi 0 lời gọi tới Pancake. */
 function fakeNet() {
@@ -189,6 +189,9 @@ export async function testNativeOrderSync() {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   process.env.FACEBOOK_LOGIN_APP_ID = APP_ID;
   process.env.FACEBOOK_LOGIN_APP_SECRET = APP_SECRET;
+  // Kênh Messenger ưu tiên app Messenger riêng khi đủ cặp — bài này đo đường của app đăng nhập, nên gỡ cặp kia (khôi phục ở finally).
+  delete process.env.FACEBOOK_MESSENGER_APP_ID;
+  delete process.env.FACEBOOK_MESSENGER_APP_SECRET;
   process.env.PLATFORM_SECRETS_KEY = "khoa-kiem-thu-chi-facebook-0123456789abcdefghijklmnopqrstuvwxyz";
   try {
     await cleanup();

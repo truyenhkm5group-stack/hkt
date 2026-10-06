@@ -4,7 +4,7 @@ import { getDb, getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
-import { instagramAccountOf, messengerApp, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -298,10 +298,10 @@ export async function receiveMessengerEvent(ev: MessengerEvent, now: Date = new 
     // Tin nhân viên gửi từ hộp thư ERP đi qua CHÍNH app nền tảng ⇒ phải bắt trước nhánh «mã app = bot», không thì thành tin bot.
     const [staffEcho] = await db.select({ id: t.id }).from(t).where(erpStaffEchoCond(ev.pageId, ev.psid, normalizeEcho(ev.text), now)).limit(1);
     if (staffEcho) return { queued: false, reason: "Tin nhân viên gửi từ hộp thư ERP" };
-    const app = messengerApp();
-    // Tin của chính bot: mã app của nền tảng, HOẶC đúng mã tin bot đã ghi lúc gửi (tiếng vọng Instagram không mang mã app).
+    // Tin của chính bot: mã app của nền tảng (app Messenger HOẶC app đăng nhập — trong lúc chuyển app cả hai là bot), HOẶC đúng
+    // mã tin bot đã ghi lúc gửi (tiếng vọng Instagram không mang mã app).
     const [sentByBot] = await db.select({ id: t.id }).from(t).where(and(eq(t.messageId, ev.mid), eq(t.note, "BOT_SENT"))).limit(1);
-    if ((app && ev.appId === app.appId) || sentByBot) {
+    if ((ev.appId !== null && messengerBotAppIds().includes(ev.appId)) || sentByBot) {
       await db.insert(t).values({ pageId: ev.pageId, threadId: ev.psid, messageId: ev.mid, text: ev.text.slice(0, TEXT_MAX), status: "DONE", processedAt: now, note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
       return { queued: false, reason: "Tin của chính bot" };
     }
