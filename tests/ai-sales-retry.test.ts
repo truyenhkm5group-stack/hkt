@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
-import type { AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
+import type { AiProvider, AiResponse } from "@/lib/ai/provider";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
@@ -83,7 +83,7 @@ function switchableProvider() {
     name: "fake",
     model: "claude-sonnet-5",
     schemaDialect: "anthropic",
-    async complete(_req: AiRequest): Promise<AiResponse> {
+    async complete(): Promise<AiResponse> {
       st.calls += 1;
       if (st.mode === "CREDIT") throw new Error("Gemini trả lỗi HTTP 429: Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.");
       return { content: [{ type: "text", text: "Dạ chả cá thu bên em 280k/kg ạ, anh/chị lấy mấy ký ạ?" }], stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
