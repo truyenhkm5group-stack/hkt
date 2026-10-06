@@ -3760,7 +3760,8 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
     const id = mustMission(values.get("mission"));
     const n = values.get("number") ?? "";
     const reason = values.get("reason") ?? "";
-    requireIntegrationLead(ctx, readControl(ctx, { fetch: !flags.has("offline") }), flags, values);
+    // Kiểm khoá trên sổ VỪA TẢI (bỏ qua --offline): nhả số của sứ mệnh khác không được dựa vào bản sổ cục bộ đã cũ.
+    requireIntegrationLead(ctx, readControl(ctx, { fetch: true }), flags, values);
     const r = mutateControl(ctx, controlActor(ctx), (st) => {
       const e = st.entries.find((x) => x.mission_id === id) ?? null;
       const d = releaseReservationDecision(e, n, reason);
@@ -3770,7 +3771,7 @@ async function cmdMigration(ctx: RepoCtx, op: string | undefined, flags: Set<str
       delete reservedAt[n];
       const next: RegistryEntry = { ...e, migration_reservations: e.migration_reservations.filter((x) => x !== n), migration_reserved_at: reservedAt, updated_at: at };
       return {
-        change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "MIGRATION_RELEASED", mission: id, detail: `${n} — ${reason.trim()}` }], message: `nhả giữ chỗ migration ${n} của ${id}` },
+        change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: "MIGRATION_RELEASED", mission: id, detail: `${n} — ${reason.trim()}`.slice(0, 400) }], message: `nhả giữ chỗ migration ${n} của ${id}` },
         result: `✓ đã nhả ${n} của ${id} — sứ mệnh đó lấy số mới bằng \`migration reserve\` hoặc \`npm run migration:renumber\` lúc tích hợp`,
       };
     });
