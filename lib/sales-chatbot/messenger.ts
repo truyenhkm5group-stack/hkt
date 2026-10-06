@@ -83,7 +83,7 @@ function ownedIds(settings: Record<string, string>): string[] {
  * NHIỀU PAGE (0220 · org_channel_pages): mỗi page đã nối một hàng, token riêng. Tổ chức nối từ TRƯỚC bản này chưa có hàng nào
  * ⇒ page của hàng kết nối đơn (page + Instagram gắn với nó) vẫn được coi là đã nối — không backfill, không đổi hành vi.
  */
-async function messengerOwnedPageIds(): Promise<string[]> {
+export async function messengerOwnedPageIds(): Promise<string[]> {
   const rows = await listChannelPages(MESSENGER_CONNECTOR);
   const active = rows.filter((r) => r.status === "ACTIVE").map((r) => r.pageId);
   const known = new Set(rows.map((r) => r.pageId));
@@ -104,7 +104,7 @@ async function messengerTokenFor(pageId: string): Promise<{ ok: true; token: str
 }
 
 /** AI có được trả lời trên page này không (bật / tắt AI theo page). Page cũ chưa có hàng ⇒ bật như trước. */
-async function messengerPageAiOn(pageId: string): Promise<boolean> {
+export async function messengerPageAiOn(pageId: string): Promise<boolean> {
   const row = (await listChannelPages(MESSENGER_CONNECTOR)).find((r) => r.pageId === pageId);
   return row ? row.aiEnabled : true;
 }

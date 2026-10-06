@@ -58,6 +58,32 @@ audit lại TOÀN BỘ P0 (EXISTS ⇒ REUSE/SKIP · PARTIAL ⇒ EXTEND · MISSIN
 | N2 | Bài kiểm «Pancake không tham gia runtime»: tổ chức chỉ nối Facebook trực tiếp chạy trọn nhận tin → bot → nhân viên → tạo đơn với `fetch` giả ĐẾM host — 0 lời gọi `pages.fm` | MISSING (chỉ kiểm thử) | Chỉ thêm bài kiểm | Bài kiểm mới |
 | N3 | Phủ cô lập tổ chức cho các lõi mới của nhánh (`setConversationControlCore`, `customerConversations`, `orderChatThreads`, `markConnectionBrokenBySystem`) trong bộ tấn công chéo tổ chức | MISSING (chỉ kiểm thử) | Chỉ thêm bài kiểm (D1 cũng sửa `ai-sales-isolation.test.ts` ⇒ làm sau D1 để khỏi xung đột) | Bài kiểm |
 
+### 1.4 Audit lại sau khi D1 (#598, `e0646e4c`) + D2 (#599, `419fe3be`) vào main — 06/10/2026
+
+Nhánh đã gộp main `419fe3be` (merge `a8156fa2`, `npm test` «TẤT CẢ KIỂM THỬ ĐẠT» 792 dòng). Ưu tiên của chủ shop (1–18) đối chiếu
+mã THẬT:
+
+| # | Năng lực | Trạng thái | Căn cứ | Hành động |
+|---|---|---|---|---|
+| 1 | Pancake khỏi runtime của khách mới | PARTIAL | Nhận / bot / nhân viên / follow-up không gọi Pancake; **ghi đơn từ hội thoại chỉ chạy với Pancake** (`order-sync.ts` dừng khi thiếu `pancake-fanpage`); chưa có bài kiểm đếm lời gọi = 0 | EXTEND N1 + BUILD N2 (lát A) |
+| 2 | Nối Facebook Page trực tiếp | EXISTS | `connectMessengerPages` (D1) | REUSE |
+| 3 | Vòng đời token + sức khoẻ | EXISTS | `noteChannelPageHealth` (D1) + báo token hỏng theo page (nhánh) | REUSE |
+| 4 | Webhook Meta: xác minh / ký / định tuyến | EXISTS | route + PAGE_INDEX + log có cấu trúc (nhánh) | REUSE |
+| 5 | Nhận Messenger trực tiếp | EXISTS | `receiveMessengerEvent` | REUSE |
+| 6 | Lịch sử Messenger trực tiếp | MISSING | `history.ts`: «Messenger trực tiếp và Zalo OA CHƯA nhập lịch sử»; Conversations API cho tối đa 20 tin gần nhất / hội thoại | EXTEND khung #599 (lát B) |
+| 7 | Gửi Messenger trực tiếp | EXISTS | `sendMessengerPageText` / ảnh / tin riêng theo token page | REUSE |
+| 8 | Hộp thư chung nhiều page trên kênh trực tiếp | EXISTS | `inboxPages` + `listInbox({ page })` (D1) | REUSE |
+| 9 | AI bán hàng trên Messenger trực tiếp | EXISTS | `processMessengerThread` + cấu hình AI theo page (D1) | REUSE |
+| 10 | Người / Copilot / Tự động | EXISTS | chế độ tổ chức + chế độ hội thoại + cổng gửi (nhánh) | REUSE |
+| 11 | Khách + đơn + quy kết | EXISTS / PARTIAL | đơn trong chat, quy kết từng đơn (D1), truy vết đơn ↔ hội thoại ↔ khách (nhánh); ghi đơn tự động khi người chat chỉ có với Pancake (= #1) | EXTEND N1 |
+| 12 | Bình luận | EXISTS | trường `feed` → tin riêng | REUSE |
+| 13 | Phân trang `/me/accounts` | PARTIAL | `limit=100`, không đọc `paging.next` | EXTEND (lát B) |
+| 14 | Token / nối lại / thu hồi / lỗi | EXISTS / PARTIAL | phân loại lỗi Graph + báo (nhánh); gỡ page KHÔNG gỡ đăng ký webhook ở Meta | EXTEND (lát B) |
+| 15 | Cô lập tổ chức / bảo mật / idempotent | PARTIAL | bộ tấn công có sẵn; lõi mới của nhánh chưa vào bộ tấn công chéo | BUILD N3 (lát C) |
+| 16 | Pancake chỉ là kết nối cũ / chuyển đổi | EXISTS | trang Kết nối (nhánh) + «một page — một đường» (D1) | REUSE |
+| 17 | Onboarding không bắt buộc Pancake | EXISTS | `GO_LIVE_PATHS` DIRECT khuyên dùng (D1) | REUSE |
+| 18 | Analytics AI vs người + quy kết doanh thu | EXISTS | `attribution*.ts`, màn «Hiệu quả» theo page (D1) | REUSE |
+
 ## 2. Ma trận
 
 Trạng thái: **EXISTS** · **PARTIAL** · **MISSING** · **IN_PROGRESS_ELSEWHERE** · **BLOCKED_EXTERNAL**.
