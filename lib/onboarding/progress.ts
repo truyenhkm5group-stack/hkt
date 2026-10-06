@@ -108,7 +108,7 @@ export async function getGettingStarted(user: SessionUser): Promise<GettingStart
   });
 
   const org = user.organization ? await findOrganization(user.organization.code) : null;
-  const plan = org ? await resolvePlan({ plan: org.plan }) : null;
+  const plan = org ? await resolvePlan({ isHome: org.isHome, plan: org.plan }) : null;
   const measurable = steps.filter((s) => s.done !== null);
   return { steps, done: measurable.filter((s) => s.done).length, measurable: measurable.length, pages, planName: plan?.name ?? (org ? planKeyOf(org) : null) };
 }

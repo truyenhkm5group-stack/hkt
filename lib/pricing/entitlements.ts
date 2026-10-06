@@ -89,7 +89,7 @@ export type OrgPricing = {
   quotas: Record<QuotaKey, number | null | undefined>;
 };
 
-export async function resolveOrgPricing(org: Pick<Organization, "code" | "plan">): Promise<OrgPricing> {
+export async function resolveOrgPricing(org: Pick<Organization, "code" | "isHome" | "plan">): Promise<OrgPricing> {
   const row = await readOrgPricingRow(org.code);
   const picked = effectivePlanRow(await listPlans(), planKeyOf(org));
   const p = picked?.row ?? null;

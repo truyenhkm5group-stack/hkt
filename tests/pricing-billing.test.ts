@@ -322,11 +322,11 @@ export async function testPricingBilling() {
     assert.equal(await hasFeature("api", { orgCode: A }), false, "gói Dùng thử không có API");
     await setOrgPlan(A, "pro");
     assert.equal(await hasFeature("api", { orgCode: A }), true, "NÂNG lên Chuyên nghiệp ⇒ có API");
-    assert.equal((await resolveOrgPricing({ code: A, plan: "pro" })).quotas.aiConversations, 1800);
+    assert.equal((await resolveOrgPricing({ code: A, isHome: false, plan: "pro" })).quotas.aiConversations, 1800);
     await setOrgPlan(A, "basic");
     assert.equal(await hasFeature("api", { orgCode: A }), false, "HẠ về Cơ bản ⇒ mất API");
     assert.equal(await hasFeature("multi_page_inbox", { orgCode: A }), false);
-    assert.equal((await resolveOrgPricing({ code: A, plan: "basic" })).quotas.aiConversations, 180);
+    assert.equal((await resolveOrgPricing({ code: A, isHome: false, plan: "basic" })).quotas.aiConversations, 180);
     assert.equal(await hasFeature("api", { orgCode: home.code }), true, "tổ chức nhà luôn đủ");
     assert.equal(await hasFeature("api", { orgCode: "khong-ton-tai" }), false, "không biết của ai ⇒ không cấp");
 

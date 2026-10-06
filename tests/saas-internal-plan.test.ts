@@ -5,7 +5,8 @@
  * `checkEntitlement`, `featureGranted` (nhánh HOME), `resolveOrgPricing` / `checkUsageQuota`, và trang `/settings/plan`.
  * Nay nhà đọc gói được GÁN cho nó qua ĐÚNG đường của khách: cột `platform_organizations.plan` (0225 ghi thành dữ liệu
  * đúng gói mã cũ tự gán — `internal`) → `platform_plans` → ghi đè `platform_org_pricing` → giữ từ trước. Không có gói ẩn
- * vô hạn nào trong mã (quyết định giá V1, 07/10/2026): đổi gói của nhà = ghi cột đó, bài này không phải sửa.
+ * vô hạn nào trong mã (quyết định giá V1, 07/10/2026): gán gói khác cho nhà = ghi cột đó, resolver không phải sửa (bài so
+ * này thì đổi theo — đó là thay đổi hành vi có chủ đích). Cột TRỐNG ở nhà ⇒ `internal` (nhánh khả dụng, xem `planKeyOf`).
  *
  * BÀI SO TRƯỚC / SAU. `legacyHomeDecisions()` là kết quả của mã CŨ (main 0b5ec24f) cho workspace nhà, chép thành giá trị:
  * mọi tính năng có, mọi hạn mức `{ ok: true, used: null, limit: null }`, mọi ô hạn mức tháng `UNLIMITED`, gói không giới hạn,
@@ -21,21 +22,25 @@
  * Mốc thời gian: không ghim ngày (luật 50 · 65) — đồng hồ đo đọc `new Date()` cùng nhịp với hàm được kiểm.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
-import { getPlatformDb, schema } from "@/db";
+import { getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { checkEntitlement, getPlanUsage, planKeyOf, resolvePlan } from "@/lib/entitlements/check";
 import { ENTITLEMENT_KINDS, HOME_PLAN_KEY } from "@/lib/entitlements/kinds";
-import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { findOrganization, getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
+import { provisionOrganization } from "@/lib/platform/provision";
+import { addDays, vnDate } from "@/lib/billing/rules";
+import { invalidateSubscriptions, orgBillingStanding } from "@/lib/billing/standing";
 import { loadTenantBilling } from "@/lib/billing/service";
 import { QUOTA_KEYS } from "@/lib/pricing/catalog";
 import { checkUsageQuota, featureDecisions, hasFeature, invalidatePricing, resolveOrgPricing } from "@/lib/pricing/entitlements";
 import { FEATURE_KEYS } from "@/lib/pricing/features";
-import { loadCustomerPlan, loadPlanPageFrame } from "@/lib/pricing/customer";
+import { loadCustomerPlan, loadPlanPageFrame, planPageFrame } from "@/lib/pricing/customer";
+import { accountOfWorkspace, updateAccount } from "@/lib/saas/accounts";
 import { loadMyProducts } from "@/lib/saas/portal";
-import { selfServeBilling } from "@/lib/saas/policy";
+import { billingLockApplies } from "@/lib/saas/policy";
 
 const MIGRATION = "drizzle/0225_internal_plan_binding.sql";
 const DELTAS = [1, 1_000_000] as const;
@@ -64,7 +69,8 @@ function legacyHomeDecisions(planName: string, planDescription: string | null): 
   // Trang /settings/plan: nhà không có khung thanh toán, không có khung «Hạn mức tháng này».
   out["page:billing"] = null;
   out["page:customerPlan"] = null;
-  out["page:selfServe"] = false;
+  out["page:billingFrame"] = false;
+  out["page:monthlyFrame"] = false;
   return out;
 }
 
@@ -88,9 +94,10 @@ async function currentHomeDecisions(orgCode: string): Promise<Decisions> {
   out["pricing:planKey"] = pricing.plan?.key ?? null;
   out.planKeyOf = planKeyOf(home);
   const frame = await loadPlanPageFrame(orgCode);
-  out["page:billing"] = frame.selfServe ? ((await loadTenantBilling(orgCode)) === null ? null : "SHOWN") : null;
+  out["page:billing"] = frame.billing ? ((await loadTenantBilling(orgCode)) === null ? null : "SHOWN") : null;
   out["page:customerPlan"] = (await loadCustomerPlan(orgCode)) === null ? null : "SHOWN";
-  out["page:selfServe"] = frame.selfServe;
+  out["page:billingFrame"] = frame.billing;
+  out["page:monthlyFrame"] = frame.monthlyQuotas;
   return out;
 }
 
@@ -115,24 +122,93 @@ function migrationStatements(): string[] {
 }
 
 function testSourceHasNoCommercialHomeBranch() {
-  // Năm tệp thương mại không còn hỏi "có phải nhà không". Trang gói được giữ đúng MỘT chỗ: khung AI đọc `ai.limits.isHome`
-  // của `resolveAiLimits` — nhánh đó ĐI CÙNG nguồn AI `HOME` (khoá AI của nhà, an toàn credential), không gỡ ở đây.
+  // Sáu tệp thương mại không còn ĐỌC `.isHome` để quyết định gói / hạn mức / tính năng / trang gói. Được giữ ĐÚNG hai lượt đọc,
+  // cả hai là nhánh AN TOÀN (docs/saas/ENTITLEMENTS.md «Nhánh GIỮ»):
+  //  · `planKeyOf`: cột gói TRỐNG ở nhà ⇒ `internal` (khả dụng trong lượt deploy / lô migration hỏng — gói đã gán luôn thắng);
+  //  · trang gói, khung AI: `ai.limits.isHome` của `resolveAiLimits` — đi cùng nguồn khoá AI `HOME` (an toàn credential).
+  // Khoá thanh toán đọc qua `lib/saas/policy.ts::billingLockApplies`, vị từ CHUNG với cổng ghi — không tệp nào ở đây tự hỏi.
+  const allowed: Record<string, number> = { "lib/entitlements/check.ts": 1, "app/(dashboard)/settings/plan/page.tsx": 1 };
   const files = ["lib/entitlements/check.ts", "lib/pricing/entitlements.ts", "lib/pricing/features.ts", "lib/pricing/customer.ts", "lib/saas/entitlements.ts", "app/(dashboard)/settings/plan/page.tsx"];
+  const read = (f: string) => readFileSync(path.join(process.cwd(), f), "utf8");
   for (const f of files) {
-    const src = readFileSync(path.join(process.cwd(), f), "utf8")
+    const src = read(f)
       .split("\n")
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-      .join("\n")
-      .replaceAll("ai.limits.isHome", "");
-    assert.ok(!/\bisHome\b/.test(src), `${f}: còn nhánh isHome thương mại — nhà phải đi đường của khách (đọc gói internal)`);
+      .join("\n");
+    const reads = src.match(/\.isHome\b/g)?.length ?? 0;
+    assert.equal(reads, allowed[f] ?? 0, `${f}: ${reads} lượt đọc .isHome (cho phép ${allowed[f] ?? 0}) — nhánh thương mại mới phải đi đường của khách`);
+  }
+  assert.ok(read("lib/entitlements/check.ts").includes("org.isHome ? HOME_PLAN_KEY : DEFAULT_PLAN_KEY"), "lượt đọc duy nhất ở check.ts là nhánh cột-trống của planKeyOf");
+  assert.ok(read("app/(dashboard)/settings/plan/page.tsx").includes("ai.limits.isHome"), "lượt đọc duy nhất ở trang gói là khung AI");
+  // Cổng ghi và trang gói đọc CÙNG một vị từ khoá thanh toán.
+  assert.ok(read("lib/auth/session.ts").includes("billingLockApplies(org)"), "cổng ghi khoá thanh toán qua billingLockApplies");
+  assert.ok(read("lib/pricing/customer.ts").includes("billingLockApplies(org)"), "trang gói hiện khung thanh toán qua billingLockApplies");
+}
+
+const C = "sbi-c";
+
+async function cleanupChargebackCustomer() {
+  const pdb = await getPlatformDb();
+  const org = await pdb.query.platformOrganizations.findFirst({ where: eq(schema.platformOrganizations.code, C) });
+  if (org) {
+    const accountId = org.accountId;
+    await pdb.delete(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, C));
+    await pdb.delete(schema.platformProductSubscriptions).where(eq(schema.platformProductSubscriptions.orgCode, C));
+    await pdb.delete(schema.platformOrgPricing).where(eq(schema.platformOrgPricing.orgCode, C));
+    await pdb.delete(schema.platformOrganizationModules).where(eq(schema.platformOrganizationModules.organizationId, org.id));
+    await pdb.delete(schema.platformFlagOverrides).where(eq(schema.platformFlagOverrides.organizationId, org.id));
+    await pdb.delete(schema.platformOrganizations).where(eq(schema.platformOrganizations.id, org.id));
+    if (accountId) {
+      const still = await pdb.select({ id: schema.platformOrganizations.id }).from(schema.platformOrganizations).where(eq(schema.platformOrganizations.accountId, accountId));
+      if (still.length === 0) {
+        await pdb.delete(schema.platformBillingStatements).where(eq(schema.platformBillingStatements.accountId, accountId));
+        await pdb.delete(schema.platformProductSubscriptions).where(eq(schema.platformProductSubscriptions.accountId, accountId));
+        await pdb.delete(schema.platformAccounts).where(eq(schema.platformAccounts.id, accountId));
+      }
+    }
+  }
+  await pdb.delete(schema.platformAuditLog).where(eq(schema.platformAuditLog.targetOrgCode, C));
+  rmSync(organizationDatabaseUrl({ code: C, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
+  invalidateOrganizations();
+  invalidateSubscriptions();
+  invalidatePricing();
+}
+
+/**
+ * ĐƯỜNG CỤT THANH TOÁN (review PR #622): workspace KHÁCH nằm trong tài khoản chargeback (`moveWorkspaceToAccount` /
+ * `updateAccount`) vẫn bị cổng ghi khoá khi hết hạn — nên trang gói PHẢI có khung gia hạn QR và khung hạn mức tháng.
+ */
+async function testChargebackCustomerNotStranded() {
+  await cleanupChargebackCustomer();
+  await provisionOrganization({ code: C, name: "Khách trong tài khoản chargeback", modules: ["customers"], admin: { email: `admin@${C}.local`, name: "QT", password: "Sbi@123456789" }, source: "TEST", actor: null });
+  try {
+    const acct = await accountOfWorkspace(C);
+    assert.ok(acct, "workspace mới có tài khoản thương mại");
+    await updateAccount(acct.id, { accountType: "INTERNAL", billingMode: "INTERNAL_CHARGEBACK" }, { actor: null, source: "TEST", reason: "khách đặt dưới tài khoản chargeback" });
+    const pdb = await getPlatformDb();
+    await pdb.insert(schema.platformSubscriptions).values({ orgCode: C, billingEnabled: true, paidThrough: addDays(vnDate(new Date()), -10), graceDays: 3 });
+    invalidateSubscriptions(C);
+    invalidateOrganizations();
+    const org = await findOrganization(C);
+    assert.ok(org);
+    assert.equal((await orgBillingStanding(org, new Date(), { fresh: true })).kind, "LOCKED", "hết hạn + hết ân hạn ⇒ chỉ xem");
+    assert.equal(billingLockApplies(org), true, "cổng ghi KHOÁ workspace này (vị từ chung)");
+    assert.deepEqual(await loadPlanPageFrame(C), { billing: true, monthlyQuotas: true }, "bị khoá ⇒ trang gói có khung thanh toán + hạn mức tháng");
+    const tb = await loadTenantBilling(C);
+    assert.ok(tb && tb.standing.kind === "LOCKED", "khung thanh toán dựng được (có chỗ cho mã QR gia hạn)");
+    assert.ok(await loadCustomerPlan(C), "khung hạn mức tháng dựng được");
+  } finally {
+    await cleanupChargebackCustomer();
   }
 }
 
 export async function testSaasInternalPlan() {
   testSourceHasNoCommercialHomeBranch();
-  // Chính sách: chỉ hoá đơn khách mới có khung tự thanh toán; chargeback nội bộ thì không (dữ liệu tài khoản, không phải nhánh mã).
-  assert.equal(selfServeBilling("EXTERNAL_INVOICE"), true);
-  assert.equal(selfServeBilling("INTERNAL_CHARGEBACK"), false);
+  // Vị từ khung trang gói — thuần: thanh toán theo khoá; hạn mức tháng khi có thanh toán HOẶC gói còn ô có trần.
+  const uncapped = { quotas: { aiConversations: null, aiMessages: null, orders: null, fanpages: null, users: null } };
+  assert.deepEqual(planPageFrame({ isHome: true }, uncapped), { billing: false, monthlyQuotas: false });
+  assert.deepEqual(planPageFrame({ isHome: true }, { quotas: { ...uncapped.quotas, aiConversations: 950 } }), { billing: false, monthlyQuotas: true }, "gán cho nhà gói có trần ⇒ khung hạn mức tháng tự hiện");
+  assert.deepEqual(planPageFrame({ isHome: false }, uncapped), { billing: true, monthlyQuotas: true }, "khách (kể cả gói không trần) giữ cả hai khung như trước");
 
   const pdb = await getPlatformDb();
   const home = await getHomeOrganization();
@@ -161,7 +237,14 @@ export async function testSaasInternalPlan() {
     assert.ok(!("error" in mine), "cổng khách đọc được sản phẩm của nhà");
     for (const p of mine.products) for (const f of p.features) assert.equal(f.effective, p.grantsUse, `${p.key}.${f.key}: nhà có mọi tính năng mà thuê bao cho dùng`);
 
-    // ── 2. Migration chạy lại được (idempotent), chỉ ghi khi cột gói của nhà còn TRỐNG, không đụng workspace khách nào.
+    // ── 2. TRƯỚC 0225 (cột gói của nhà trống — lượt deploy chưa migrate xong, hoặc lô migration bị hoàn): nhánh khả dụng
+    //       của `planKeyOf` cho đúng 64 quyết định cũ, KHÔNG rơi về trial.
+    await pdb.update(schema.platformOrganizations).set({ plan: null }).where(eq(schema.platformOrganizations.code, home.code));
+    assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "nhà với cột gói trống (trước 0225) giữ nguyên mọi quyết định cũ");
+    await pdb.update(schema.platformOrganizations).set({ plan: "  " }).where(eq(schema.platformOrganizations.code, home.code));
+    invalidateOrganizations();
+    assert.equal(planKeyOf(await getHomeOrganization()), HOME_PLAN_KEY, "cột chỉ có khoảng trắng = trống");
+    // Migration chạy lại được (idempotent), chỉ ghi khi cột gói của nhà còn TRỐNG, không đụng workspace khách nào.
     await pdb.update(schema.platformOrganizations).set({ plan: null }).where(eq(schema.platformOrganizations.code, home.code));
     for (let i = 0; i < 2; i++) for (const s of migrationStatements()) await pdb.execute(sql.raw(s));
     assert.deepEqual(diffs(legacy, await currentHomeDecisions(home.code)), [], "chạy lại 0225 (hai lần) trên cột trống đưa nhà về đúng hành vi cũ");
@@ -198,5 +281,6 @@ export async function testSaasInternalPlan() {
   } finally {
     await restore();
   }
-  console.log("✓ Phase 14 · nhà đi đường thương mại của khách: bài so trước/sau khớp từng ô (tính năng · hạn mức · hạn mức tháng · gói · trang gói) · 0225 idempotent, không đè gói đã gán · năm đột biến dữ liệu bị bắt · gói vắng ⇒ nhà lùi trial như khách");
+  await testChargebackCustomerNotStranded();
+  console.log("✓ Phase 14 · nhà đi đường thương mại của khách: bài so trước/sau khớp từng ô (tính năng · hạn mức · hạn mức tháng · gói · trang gói) · 0225 idempotent, không đè gói đã gán · năm đột biến dữ liệu bị bắt · gói vắng ⇒ nhà lùi trial như khách · cột gói trống (trước 0225) không khoá nhà · khách trong tài khoản chargeback bị khoá vẫn có khung gia hạn");
 }

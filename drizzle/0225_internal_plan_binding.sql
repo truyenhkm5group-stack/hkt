@@ -7,7 +7,8 @@
 --
 -- KHÔNG gieo, KHÔNG sửa, KHÔNG mở rộng gói nào (`platform_plans` không bị đụng — bảng giá là việc của sứ mệnh
 -- saas-d-pricing-overage). Chỉ ghi khi cột còn TRỐNG: gói đã được ai gán cho nhà (kể cả phase D chạy trước) giữ nguyên.
--- Đổi gói của nhà sau này = ghi cột này, không cần sửa mã.
+-- Gán gói khác cho nhà sau này = ghi cột này, không cần sửa resolver (đường ghi có chạy thử là việc của phase D —
+-- hôm nay org-plan.ts và đường khớp tiền gia hạn còn chặn đổi gói của nhà).
 -- Không workspace khách nào bị đụng; không trần cứng nào được bật. Mọi câu chạy lại được.
 INSERT INTO "platform_audit_log" ("id", "target_org_code", "action", "subject", "before", "after", "reason", "source")
 SELECT 'audit-0225-home-plan-internal', o."code", 'ORG_PLAN_SET', 'plan', jsonb_build_object('plan', o."plan"), '{"plan":"internal"}'::jsonb,
