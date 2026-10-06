@@ -65,3 +65,4 @@
 {"at":"2026-10-06T11:43:44.598Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"migration-release","detail":"OVERLAP_ACCEPTED với deploy-reuse-wait: phạm vi tests/delivery-v2.test.ts — cách tích hợp: deploy-reuse-wait đã gộp (#606), chỉ chờ hậu kiểm; bài kiểm chỉ nối thêm một khối"}
 {"at":"2026-10-06T11:43:51.751Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-release","detail":"fix/migration-release @ d555b4fdba54 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T11:44:02.962Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"migration-release","detail":"#609 cho fix/migration-release @ d555b4fdba54"}
+{"at":"2026-10-06T11:54:59.000Z","actor":"DESKTOP-56TH98Y:wt-ai-failover","kind":"HANDOFF","mission":"ai-provider-failover","detail":"feat/ai-provider-failover @ 8c1c115e798e · 5 lệnh kiểm thử"}
