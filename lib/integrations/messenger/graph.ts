@@ -80,17 +80,89 @@ async function graph(fetchImpl: Fetch, url: string, init: RequestInit, hide: rea
 // ─────────────────────────── Kết nối page (OAuth của chủ page) ───────────────────────────
 
 export function messengerConnectUrl(app: MessengerApp, redirectUri: string, state: string): string {
-  const q = new URLSearchParams({ client_id: app.appId, redirect_uri: redirectUri, response_type: "code", scope: MESSENGER_SCOPES.join(","), state });
+  // `auth_type=rerequest`: tài khoản TỪNG bỏ chọn quyền page (hoặc từng đăng nhập app này chỉ để Đăng nhập bằng Facebook) thì Facebook
+  // chỉ hiện «Bạn từng đăng nhập… Tiếp tục?» và KHÔNG hỏi lại — sự cố 06/10/2026: OAuth xong mà 0 page. Có cờ này Facebook hỏi lại.
+  const q = new URLSearchParams({ client_id: app.appId, redirect_uri: redirectUri, response_type: "code", scope: MESSENGER_SCOPES.join(","), state, auth_type: "rerequest" });
   return `https://www.facebook.com/${graphBase().split("/").pop()}/dialog/oauth?${q}`;
 }
 
 export type ConnectablePage = { id: string; name: string; token: string; canMessage: boolean };
 
 /**
+ * ═══ KHÁM PHÁ PAGE — VÌ SAO KHÔNG CÓ PAGE NÀO (sự cố 06/10/2026) ═══
+ *
+ * Trước bản này mọi thất bại sau OAuth gộp thành MỘT câu «không quản lý page nào có quyền nhắn tin», trong khi năm tình huống
+ * dưới đây sửa ở năm chỗ khác nhau — và người dùng (lẫn kỹ thuật) không biết nhìn vào đâu:
+ *  · PERMISSION_DECLINED    — quyền bắt buộc bị BỎ CHỌN ở hộp thoại (`/me/permissions` status = declined).
+ *  · PERMISSION_NOT_GRANTED — quyền bắt buộc KHÔNG có trong danh sách: hộp thoại không hề hỏi (app Development mà tài khoản
+ *                              không có vai trò · quyền chưa được duyệt Advanced Access · app Business cần Login for Business).
+ *  · NO_PAGES               — có quyền, Meta trả 0 page (kể cả qua Business Portfolio): tài khoản không có quyền với page nào.
+ *  · NO_PAGE_TOKEN          — Meta trả page nhưng KHÔNG kèm token: chưa tích page ở bước «Chọn trang», hoặc page chỉ thuộc
+ *                              Business Portfolio mà tài khoản không có quyền trực tiếp.
+ *  · NO_MESSAGING_TASK      — có page + token nhưng không có quyền Nhắn tin / Quản lý trên page nào.
+ * HÀM THUẦN — không token nào đi vào kết quả (chỉ tên quyền, tên page, đếm).
+ */
+export const MESSENGER_REQUIRED_PERMISSIONS = ["pages_show_list", "pages_messaging", "pages_manage_metadata"] as const;
+export type DiscoveryReason = "PERMISSION_DECLINED" | "PERMISSION_NOT_GRANTED" | "NO_PAGES" | "NO_PAGE_TOKEN" | "NO_MESSAGING_TASK";
+export type RawPage = { id: string; name: string; hasToken: boolean; tasks: string[] | null; viaBusiness: boolean };
+export type DiscoveryDiagnostic = {
+  /** Quyền Facebook xác nhận ĐÃ cấp — `null` = không đọc được `/me/permissions` (không suy đoán). */
+  granted: string[] | null;
+  declined: string[];
+  /** Quyền BẮT BUỘC chưa có (bị từ chối hoặc không có trong danh sách). */
+  missing: string[];
+  accountsSeen: number;
+  viaBusiness: number;
+  withoutToken: string[];
+  withoutMessaging: { name: string; tasks: string[] }[];
+  eligible: number;
+  reason: DiscoveryReason | null;
+};
+
+const MESSAGING_TASKS = new Set(["MESSAGING", "MANAGE", "MODERATE"]);
+export const pageCanMessage = (tasks: readonly string[] | null) => tasks === null || tasks.some((t) => MESSAGING_TASKS.has(t));
+
+export function diagnosePageDiscovery(x: { permissions: { permission: string; status: string }[] | null; raw: readonly RawPage[] }): DiscoveryDiagnostic {
+  const granted = x.permissions ? x.permissions.filter((p) => p.status === "granted").map((p) => p.permission) : null;
+  const declined = x.permissions ? x.permissions.filter((p) => p.status === "declined").map((p) => p.permission) : [];
+  const missing = granted ? MESSENGER_REQUIRED_PERMISSIONS.filter((p) => !granted.includes(p)) : [];
+  const seen = new Map<string, RawPage>();
+  for (const p of x.raw) if (!seen.has(p.id) || (p.hasToken && !seen.get(p.id)?.hasToken)) seen.set(p.id, p);
+  const all = [...seen.values()];
+  const withToken = all.filter((p) => p.hasToken);
+  const eligible = withToken.filter((p) => pageCanMessage(p.tasks));
+  const d: DiscoveryDiagnostic = {
+    granted,
+    declined,
+    missing: [...missing],
+    accountsSeen: all.length,
+    viaBusiness: all.filter((p) => p.viaBusiness).length,
+    withoutToken: all.filter((p) => !p.hasToken).map((p) => p.name || p.id).slice(0, 20),
+    withoutMessaging: withToken.filter((p) => !pageCanMessage(p.tasks)).map((p) => ({ name: p.name || p.id, tasks: p.tasks ?? [] })).slice(0, 20),
+    eligible: eligible.length,
+    reason: null,
+  };
+  // Quyền đi TRƯỚC page: page token thiếu `pages_messaging` không gửi được tin dù page hiện ra đủ.
+  const declinedRequired = missing.filter((p) => declined.includes(p));
+  if (declinedRequired.length) d.reason = "PERMISSION_DECLINED";
+  else if (missing.length) d.reason = "PERMISSION_NOT_GRANTED";
+  else if (eligible.length) d.reason = null;
+  else if (!all.length) d.reason = "NO_PAGES";
+  else if (!withToken.length) d.reason = "NO_PAGE_TOKEN";
+  else d.reason = "NO_MESSAGING_TASK";
+  return d;
+}
+
+/** Một dòng vết cho log máy chủ — CHỈ tên quyền + số đếm (không token, không tên page). */
+export function discoveryLogLine(org: string, d: DiscoveryDiagnostic): string {
+  return `[messenger-connect] org=${org} reason=${d.reason ?? "OK"} granted=${d.granted ? d.granted.join(",") || "-" : "?"} declined=${d.declined.join(",") || "-"} missing=${d.missing.join(",") || "-"} accounts=${d.accountsSeen} viaBusiness=${d.viaBusiness} noToken=${d.withoutToken.length} noMessaging=${d.withoutMessaging.length} eligible=${d.eligible}`;
+}
+
+/**
  * `code` ⇒ token người dùng (đổi sang token DÀI HẠN — page token dẫn xuất từ nó không hết hạn) ⇒ danh sách page người đó
  * quản lý, kèm page token. Token người dùng KHÔNG được lưu ở đâu cả.
  */
-export async function pagesFromCode(app: MessengerApp, code: string, redirectUri: string, fetchImpl: Fetch = fetch): Promise<{ pages: ConnectablePage[] } | { error: string }> {
+export async function pagesFromCode(app: MessengerApp, code: string, redirectUri: string, fetchImpl: Fetch = fetch): Promise<{ pages: ConnectablePage[]; diagnostic: DiscoveryDiagnostic } | { error: string }> {
   const base = graphBase();
   const hide = [app.appSecret, code];
   const short = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ client_id: app.appId, client_secret: app.appSecret, redirect_uri: redirectUri, code })}`, { method: "GET" }, hide);
@@ -100,6 +172,12 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
   const long = await graph(fetchImpl, `${base}/oauth/access_token?${new URLSearchParams({ grant_type: "fb_exchange_token", client_id: app.appId, client_secret: app.appSecret, fb_exchange_token: shortToken })}`, { method: "GET" }, [...hide, shortToken]);
   const userToken = long.ok && typeof long.body.access_token === "string" ? long.body.access_token : shortToken;
   const hideAll = [...hide, shortToken, userToken];
+  const proof = appSecretProof(userToken, app.appSecret);
+  // Quyền THẬT SỰ được cấp — không đọc được thì để `null` (không đoán), phần khám phá page vẫn chạy.
+  const permsRes = await graph(fetchImpl, `${base}/me/permissions?${new URLSearchParams({ access_token: userToken, appsecret_proof: proof })}`, { method: "GET" }, hideAll);
+  const permissions = permsRes.ok && Array.isArray(permsRes.body.data)
+    ? (permsRes.body.data as Record<string, unknown>[]).filter((p) => typeof p.permission === "string" && typeof p.status === "string").map((p) => ({ permission: String(p.permission), status: String(p.status) }))
+    : null;
   // Phân trang bằng con trỏ `after` (không theo URL `next` — URL đó chứa token). Shop quản > 100 page trước đây chỉ thấy 100 page đầu.
   const data: Record<string, unknown>[] = [];
   let after: string | null = null;
@@ -116,15 +194,33 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
     after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
     if (!after) break;
   }
-  const pages = data
-    .map((p) => ({
-      id: typeof p.id === "string" ? p.id : "",
-      name: typeof p.name === "string" ? p.name.slice(0, 120) : "",
-      token: typeof p.access_token === "string" ? p.access_token : "",
-      canMessage: !Array.isArray(p.tasks) || (p.tasks as unknown[]).some((t) => t === "MESSAGING" || t === "MANAGE" || t === "MODERATE"),
-    }))
-    .filter((p) => /^\d{5,30}$/.test(p.id) && p.token);
-  return { pages };
+  // Không page nào qua `/me/accounts` ⇒ hỏi thêm Business Portfolio (page chỉ được giao qua doanh nghiệp). Chỉ khi có
+  // `business_management` (hoặc chưa đọc được quyền) — không có quyền đó thì hỏi cũng chỉ nhận lỗi.
+  const viaBusiness: Record<string, unknown>[] = [];
+  if (!data.length && (permissions === null || permissions.some((p) => p.permission === "business_management" && p.status === "granted"))) {
+    const biz = await graph(fetchImpl, `${base}/me/businesses?${new URLSearchParams({ fields: "id", limit: "25", access_token: userToken, appsecret_proof: proof })}`, { method: "GET" }, hideAll);
+    const ids = biz.ok && Array.isArray(biz.body.data) ? (biz.body.data as Record<string, unknown>[]).map((b) => (typeof b.id === "string" ? b.id : "")).filter((id) => /^\d{5,30}$/.test(id)).slice(0, 10) : [];
+    for (const id of ids)
+      for (const edge of ["owned_pages", "client_pages"]) {
+        const r = await graph(fetchImpl, `${base}/${id}/${edge}?${new URLSearchParams({ fields: "id,name,access_token,tasks", limit: "100", access_token: userToken, appsecret_proof: proof })}`, { method: "GET" }, hideAll);
+        if (r.ok && Array.isArray(r.body.data)) viaBusiness.push(...(r.body.data as Record<string, unknown>[]));
+      }
+  }
+  const toRaw = (p: Record<string, unknown>, business: boolean): RawPage & { token: string } => ({
+    id: typeof p.id === "string" ? p.id : "",
+    name: typeof p.name === "string" ? p.name.slice(0, 120) : "",
+    token: typeof p.access_token === "string" ? p.access_token : "",
+    hasToken: typeof p.access_token === "string" && p.access_token.length > 0,
+    tasks: Array.isArray(p.tasks) ? (p.tasks as unknown[]).filter((t): t is string => typeof t === "string") : null,
+    viaBusiness: business,
+  });
+  const raw = [...data.map((p) => toRaw(p, false)), ...viaBusiness.map((p) => toRaw(p, true))].filter((p) => /^\d{5,30}$/.test(p.id));
+  const diagnostic = diagnosePageDiscovery({ permissions, raw: raw.map((p) => ({ id: p.id, name: p.name, hasToken: p.hasToken, tasks: p.tasks, viaBusiness: p.viaBusiness })) });
+  const seen = new Set<string>();
+  const pages = raw
+    .filter((p) => p.hasToken && !seen.has(p.id) && Boolean(seen.add(p.id)))
+    .map((p) => ({ id: p.id, name: p.name, token: p.token, canMessage: pageCanMessage(p.tasks) }));
+  return { pages, diagnostic };
 }
 
 /** Đăng ký app nhận webhook của page (tin nhắn + tiếng vọng). */

@@ -22,6 +22,18 @@ const ERROR_TEXT: Record<string, string> = {
 };
 
 /**
+ * Lý do CỤ THỂ khi OAuth xong mà không nối được page (graph.ts `diagnosePageDiscovery`) — mỗi lý do một việc phải làm. `{ct}` là
+ * phần chi tiết máy chủ đọc được từ Meta (tên quyền / tên page / quyền trên page), không có token.
+ */
+const DISCOVERY_TEXT: Record<string, string> = {
+  PERMISSION_DECLINED: "Ở hộp thoại Facebook, quyền {ct} đã bị bỏ chọn. Bấm «Kết nối Facebook Page» lại — Facebook sẽ hỏi lại; giữ nguyên MỌI quyền và tích đủ các page cần nối.",
+  PERMISSION_NOT_GRANTED: "Facebook không cấp quyền {ct} cho app (hộp thoại không hề hỏi quyền này). Thường do app Meta còn ở chế độ Development mà tài khoản này không có vai trò trong app, hoặc quyền chưa được duyệt Advanced Access — báo người vận hành kiểm tra app ở Meta Developer → App Review.",
+  NO_PAGES: "Facebook trả về 0 page cho tài khoản này dù đã cấp quyền xem page ({ct}). Tài khoản chưa có quyền với page nào — vào Meta Business Suite → Cài đặt → Trang, thêm tài khoản này với quyền Toàn quyền hoặc Nhắn tin, rồi kết nối lại.",
+  NO_PAGE_TOKEN: "Facebook thấy {ct} nhưng không cấp cho app quyền trên page nào — thường do ở bước «Chọn trang» chưa tích page, hoặc page chỉ thuộc Business Portfolio mà tài khoản không có quyền trực tiếp. Bấm kết nối lại và tích đủ page.",
+  NO_MESSAGING_TASK: "Tài khoản có page nhưng không có quyền Nhắn tin trên page nào: {ct}. Cần quyền Nhắn tin (Messages) hoặc Toàn quyền trên page.",
+};
+
+/**
  * MESSENGER TRỰC TIẾP (0207 · lib/sales-chatbot/messenger.ts) — nối fanpage với bot KHÔNG cần Pancake: một nút cấp quyền của
  * Facebook, chọn page, xong. Người vận hành nền tảng (tổ chức nhà) thấy thêm URL webhook + mã xác minh để khai ở app Meta.
  */
@@ -35,7 +47,14 @@ export default async function MessengerSettingsPage({ searchParams }: { searchPa
   const overrides = canConfig ? await loadPageOverrides() : {};
   const pending = manage && user.organization && one("chon") ? await loadPendingPages(user.organization.code, user.id) : null;
   const operator = platformOperatorDenial(user) === null;
-  const error = one("loi") ? (one("loi") === "fb" ? one("msg") || "Facebook từ chối." : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")) : null;
+  const lydo = one("lydo");
+  const error = one("loi")
+    ? one("loi") === "fb"
+      ? one("msg") || "Facebook từ chối."
+      : one("loi") === "khongpage" && DISCOVERY_TEXT[lydo]
+        ? DISCOVERY_TEXT[lydo].replace("{ct}", one("ct").slice(0, 300) || "—")
+        : (ERROR_TEXT[one("loi")] ?? "Kết nối chưa xong.")
+    : null;
   const activePages = view.pages.filter((p) => p.status === "ACTIVE");
   const connected = activePages.length > 0;
   return (
