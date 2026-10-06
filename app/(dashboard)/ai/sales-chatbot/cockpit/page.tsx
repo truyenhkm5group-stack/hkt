@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatPercent, formatTimeAgo, formatVND } from "@/lib/format";
 import { loadAiSalesSlo, readSalesHealthSnapshot, readSalesHealthState, salesHealthDrilldown } from "@/lib/sales-chatbot/health";
 import { evaluateSalesHealth, STATUS_DOT, STATUS_LABEL, type HealthLevel } from "@/lib/sales-chatbot/health-shared";
+import { findMissedConversations, MISSED_CLASS_LABEL, type MissedClass } from "@/lib/sales-chatbot/recovery";
 
 export const metadata = { title: "AI bán hàng — sống hay chết" };
 export const dynamic = "force-dynamic";
@@ -21,7 +22,8 @@ export default async function SalesCockpitPage() {
   await requirePermission("ai_sales:view");
   const now = new Date();
   const slo = await loadAiSalesSlo();
-  const [snap, stored, drill] = await Promise.all([readSalesHealthSnapshot(now, slo), readSalesHealthState(), salesHealthDrilldown(now)]);
+  const [snap, stored, drill, missed] = await Promise.all([readSalesHealthSnapshot(now, slo), readSalesHealthState(), salesHealthDrilldown(now), findMissedConversations(new Date(now.getTime() - 86_400_000), now, now)]);
+  const missedOrder: MissedClass[] = ["HUMAN_REVIEW", "AI_SAFE_RESUME", "STAFF_HANDLED", "HAS_ORDER"];
   const health = evaluateSalesHealth(snap, slo);
   const sec = (v: number | null) => (v === null ? "—" : `${Math.round(v)} giây`);
   const tiles: { label: string; value: string; hint?: string }[] = [
@@ -96,6 +98,46 @@ export default async function SalesCockpitPage() {
             </tr>
           </tbody>
         </table>
+      </SectionCard>
+
+      <SectionCard
+        title={`Hội thoại khách nhắn mà bot chưa trả lời (24 giờ) — ${missed.length}`}
+        description="Chỉ đọc, máy không gửi gì. «Cần nhân viên» = khách chờ quá 30 phút: bot không tự nhắn vào hội thoại đã nguội. «Máy tự thử lại» = đừng nhắn tay, khách sẽ nhận hai câu."
+      >
+        {missed.length ? (
+          <div className="space-y-3 text-sm">
+            {missedOrder.map((cls) => {
+              const rows = missed.filter((m) => m.cls === cls);
+              if (!rows.length) return null;
+              return (
+                <div key={cls}>
+                  <p className="font-medium">
+                    {MISSED_CLASS_LABEL[cls]} — {rows.length}
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {rows.slice(0, 20).map((m) => (
+                      <li key={`${m.pageId}-${m.threadId}`} className="flex gap-2">
+                        <span className="whitespace-nowrap text-muted-foreground">{formatDateTime(m.lastCustomerAt)}</span>
+                        {m.conversationId ? (
+                          <Link href={`/ai/sales-chatbot/conversations/${m.conversationId}`} className="text-primary underline">
+                            {m.customerName ?? "Mở hội thoại"}
+                          </Link>
+                        ) : (
+                          <span>{m.customerName ?? "—"}</span>
+                        )}
+                        <span className="max-w-[40ch] truncate text-muted-foreground" title={m.lastText}>
+                          {m.lastText}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Mọi tin khách trong 24 giờ đều đã có câu trả lời của bot.</p>
+        )}
       </SectionCard>
 
       <SectionCard title={`Tin lỗi / đang chờ (24 giờ) — ${drill.length}`} description="Bấm để mở hội thoại. Tin «AI hỏng → chuyển người» là khách đang chờ nhân viên gọi lại.">
