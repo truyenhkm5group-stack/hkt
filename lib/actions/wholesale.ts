@@ -18,12 +18,16 @@ import {
   importLeadsCore,
   logCallCore,
   logCallInitiatedCore,
+  logZaloOpenedCore,
+  logZaloResultCore,
   markQualifiedCore,
   removeSuppressionCore,
   requestRefreshCore,
   saveOpportunityCore,
   updateLeadStatusCore,
+  zaloDraftCore,
   type ImportReport,
+  type ZaloDraft,
 } from "@/lib/wholesale/leads";
 import { approveOutreachCore, cancelOutreachCore, markOutreachSentCore, prepareOutreachCore, queueOutreachCore, recordOutreachResultCore } from "@/lib/wholesale/outreach";
 
@@ -135,6 +139,25 @@ export async function logCallInitiatedAction(leadId: string): Promise<CoreResult
 export async function logCallAction(leadId: string, input: unknown): Promise<CoreResult<{ status: string; nextFollowupAt: string | null }>> {
   const user = await requireUser();
   const r = await logCallCore(user, leadId, input);
+  if ("ok" in r) refreshLead(leadId);
+  return r;
+}
+
+/** Bản nháp tin Zalo (lời chào cá nhân hoá + link mở Zalo) — chỉ đọc. */
+export async function zaloDraftAction(leadId: string): Promise<CoreResult<{ draft: ZaloDraft }>> {
+  const user = await requireUser();
+  return zaloDraftCore(user, leadId);
+}
+
+/** Lượt bấm «Nhắn Zalo». Không làm mới trang — người bán đang rời sang app Zalo. */
+export async function logZaloOpenedAction(leadId: string): Promise<CoreResult> {
+  const user = await requireUser();
+  return logZaloOpenedCore(user, leadId);
+}
+
+export async function logZaloResultAction(leadId: string, input: unknown): Promise<CoreResult<{ status: string }>> {
+  const user = await requireUser();
+  const r = await logZaloResultCore(user, leadId, input);
   if ("ok" in r) refreshLead(leadId);
   return r;
 }

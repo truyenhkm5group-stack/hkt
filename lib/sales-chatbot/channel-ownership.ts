@@ -47,7 +47,7 @@ export async function loadTransportFacts(): Promise<TransportFacts> {
   const p = rows.find((r) => r.connectorKey === PANCAKE_FANPAGE_KEY);
   const m = rows.find((r) => r.connectorKey === MESSENGER_DIRECT_KEY);
   const ids = (s: Record<string, string>) => [s.pageId, s.igAccountId].map((x) => (x ?? "").trim()).filter(Boolean);
-  // Nhiều page (0217): page đã nối thẳng = hàng page đang bật + page của hàng kết nối đơn cũ chưa có hàng riêng.
+  // Nhiều page (0220): page đã nối thẳng = hàng page đang bật + page của hàng kết nối đơn cũ chưa có hàng riêng.
   const pageRows = await listChannelPages(MESSENGER_DIRECT_KEY);
   const known = new Set(pageRows.map((r) => r.pageId));
   const legacy = m?.status === "ACTIVE" ? ids(m.plainSettings).filter((x) => !known.has(x)) : [];

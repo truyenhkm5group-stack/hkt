@@ -103,6 +103,11 @@ const JOBS = [
   */
   { job: "wholesale-leads", every: 3, offset: 2 },
   /*
+    TUYẾN GIAO TỰ ĐỘNG (POS tự chủ P7 — chủ shop chốt 06/10/2026) — CHỈ FAN-OUT tự động hoá, mỗi 5 phút (lệch pha 3). Tổ chức
+    chưa bật «Tự tạo vận đơn» (mặc định) / không đơn nào chờ trả ngay sau một câu đọc. Nhà không có đơn tạo tay.
+  */
+  { job: "shipping-route", every: 5, offset: 3 },
+  /*
     LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
 
     Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có

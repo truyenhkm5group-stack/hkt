@@ -77,7 +77,7 @@ function ownedIds(settings: Record<string, string>): string[] {
 }
 
 /**
- * NHIỀU PAGE (0217 · org_channel_pages): mỗi page đã nối một hàng, token riêng. Tổ chức nối từ TRƯỚC bản này chưa có hàng nào
+ * NHIỀU PAGE (0220 · org_channel_pages): mỗi page đã nối một hàng, token riêng. Tổ chức nối từ TRƯỚC bản này chưa có hàng nào
  * ⇒ page của hàng kết nối đơn (page + Instagram gắn với nó) vẫn được coi là đã nối — không backfill, không đổi hành vi.
  */
 async function messengerOwnedPageIds(): Promise<string[]> {
@@ -115,7 +115,7 @@ export type MessengerConnectResult = { ok: true; message: string } | { error: st
 export type MessengerPagesResult = { ok: true; message: string; connected: string[]; failed: { id: string; name: string; error: string }[] } | { error: string };
 
 /**
- * Nối MỘT HAY NHIỀU page vừa cấp quyền (0217): mỗi page một hàng `org_channel_pages` (token mã hoá riêng) + một dòng chỉ mục
+ * Nối MỘT HAY NHIỀU page vừa cấp quyền (0220): mỗi page một hàng `org_channel_pages` (token mã hoá riêng) + một dòng chỉ mục
  * webhook ở nền tảng. Page này hỏng (thuộc cửa hàng khác · đang chạy qua Pancake · Meta từ chối đăng ký) KHÔNG chặn page kia.
  * Không còn xoá chỉ mục của page đã nối trước — nối thêm page là THÊM. Hàng kết nối đơn (`org_connections`) vẫn được dựng một
  * lần ở page đầu tiên: nó là «nhà cung cấp đã bật» mà trang Kết nối, bộ kiểm và các màn khác đọc.
@@ -681,7 +681,7 @@ export type MessengerPageView = {
   lastEventAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
-  /** Page nối bằng hàng kết nối đơn cũ (trước 0217), chưa có hàng riêng. */
+  /** Page nối bằng hàng kết nối đơn cũ (trước 0220), chưa có hàng riêng. */
   legacy: boolean;
   /** Page này cũng bật qua Pancake ⇒ đường Messenger đang nhường (channel-ownership.ts). */
   mutedByPancake: boolean;

@@ -83,7 +83,7 @@ Chạy trong job `sales-followup` (5 phút, `catchUpFanpage`) cho mọi tổ ch�
 | `ChannelAdapter` chung (TD-10) | Bốn đường đang chạy thật, mỗi đường có bài kiểm; rút thành một giao diện là thay đổi lớn ở mã đổi hằng ngày | Kênh thứ năm (TikTok / Shopee chat) |
 | Nhiều page mỗi tổ chức (TD-11) | Một kết nối mỗi loại mỗi tổ chức | Khách thứ hai cần nhiều page |
 
-## 7. Nhiều page một tổ chức (`org_channel_pages`, migration `0217`)
+## 7. Nhiều page một tổ chức (`org_channel_pages`, migration `0220`)
 
 ```
 Tổ chức ─ org_connections['facebook-messenger']  («nhà cung cấp đã bật» — trang Kết nối, bộ kiểm đọc hàng này)
@@ -101,7 +101,7 @@ Nền tảng ─ platform_messenger_pages (page_id → tổ chức) — định 
 - **AI theo page**: tạm dừng AI ở một page ⇒ như chế độ «quan sát» cho page đó (hội thoại vẫn mở, tin vẫn ở Hộp thư, bot im).
   Bật / tạm dừng hàng loạt; Instagram đi theo page của nó.
 - **Sức khoẻ theo page**: mốc tin gần nhất + lỗi gửi gần nhất của TỪNG page (lỗi page A không đụng page B). Gỡ từng page.
-- **Tổ chức nối trước 0217**: không có hàng page nào ⇒ page của hàng kết nối đơn vẫn nhận / gửi như cũ (không backfill). Bật /
+- **Tổ chức nối trước 0220**: không có hàng page nào ⇒ page của hàng kết nối đơn vẫn nhận / gửi như cũ (không backfill). Bật /
   tắt AI cho page đó ⇒ dựng một hàng KHÔNG token (token vẫn đọc ở hàng cũ).
 
 ### Hộp thư và chỉ số theo page (MP-2)

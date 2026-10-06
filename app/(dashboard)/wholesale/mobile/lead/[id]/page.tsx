@@ -8,8 +8,9 @@ import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { getWholesaleLead } from "@/lib/queries/wholesale";
 import { isMobileChip } from "@/lib/queries/wholesale-mobile";
 import type { SearchParams } from "@/lib/search-params";
-import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, type LeadSourceKey } from "@/lib/wholesale/constants";
+import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, type LeadSourceKey, ZALO_RESULT_LABEL } from "@/lib/wholesale/constants";
 import { leadView } from "@/lib/wholesale/engine";
+import { zaloDraftCore } from "@/lib/wholesale/leads";
 import { mapsLinkOf } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone } from "@/lib/wholesale/phone";
 import { isLeadSegmentKey, LEAD_SEGMENT_LABEL } from "@/lib/wholesale/segments";
@@ -36,7 +37,10 @@ export default async function WholesaleMobileLead({ params, searchParams }: { pa
   const nationalMobile = v.phone && v.phoneKind === "MOBILE" && v.phone.startsWith("+84") ? `0${v.phone.slice(3)}` : null;
   // Zalo chỉ khi CÓ THẬT: link Zalo shop tự công bố, hoặc SĐT di động người bán đã gọi xác nhận / tự nhập (không đoán từ số Google).
   const zaloUrl = lead.zaloUrl ?? (nationalMobile && (lead.phoneSource === "VERIFIED_CALL" || lead.phoneSource === "STAFF") ? `https://zalo.me/${nationalMobile}` : null);
-  const calls = data.activities.filter((a) => a.kind === "CALL").slice(0, 3);
+  const canWork = can(user, "wholesale:work");
+  const zr = canWork ? await zaloDraftCore(user, lead.id) : null;
+  const zalo = zr && "ok" in zr ? zr.draft : null;
+  const calls = data.activities.filter((a) => a.kind === "CALL" || a.kind === "ZALO").slice(0, 3);
   const notes = data.activities.filter((a) => a.kind === "NOTE").slice(0, 2);
   return (
     <div className="mx-auto max-w-md space-y-4 pb-10">
@@ -68,7 +72,8 @@ export default async function WholesaleMobileLead({ params, searchParams }: { pa
           doNotContact: status === "DO_NOT_CONTACT",
         }}
         nextHref={`/wholesale/mobile/next?f=${chip}&after=${lead.id}`}
-        canWork={can(user, "wholesale:work")}
+        canWork={canWork}
+        zalo={zalo}
       />
       <div className="space-y-1.5 rounded-xl border bg-card p-3 text-sm">
         {v.address ? <div>📍 {v.address}</div> : null}
@@ -83,7 +88,13 @@ export default async function WholesaleMobileLead({ params, searchParams }: { pa
           {[...calls, ...notes].map((a) => (
             <div key={a.id} className="rounded-xl border bg-card p-2.5 text-sm">
               <div className="flex justify-between gap-2 text-xs text-muted-foreground">
-                <span>{a.kind === "CALL" ? ((CALL_OUTCOME_LABEL as Record<string, string>)[a.outcome ?? ""] ?? a.outcome) : "Ghi chú"}</span>
+                <span>
+                  {a.kind === "ZALO"
+                    ? `Zalo: ${(ZALO_RESULT_LABEL as Record<string, string>)[a.outcome ?? ""] ?? a.outcome}`
+                    : a.kind === "CALL"
+                      ? `${a.channel === "ZALO" ? "Zalo: " : ""}${(CALL_OUTCOME_LABEL as Record<string, string>)[a.outcome ?? ""] ?? a.outcome}`
+                      : "Ghi chú"}
+                </span>
                 <span>
                   {a.actorName} · {formatDateTime(a.createdAt)}
                 </span>

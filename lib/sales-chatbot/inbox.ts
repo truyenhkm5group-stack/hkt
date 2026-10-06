@@ -20,14 +20,18 @@ import {
   INBOX_CHANNEL_LABEL,
   INBOX_CHANNELS,
   INBOX_FILTERS,
+  INBOX_LIST_MAX,
   INBOX_OUTCOME_LABEL,
+  INBOX_PERIODS,
   STAFF_IMAGE_MAX_BYTES,
   STAFF_IMAGE_TYPES,
   STAFF_IMAGES_MAX,
   STAFF_REPLY_MAX,
   type InboxChannel,
+  type InboxCustomerHistory,
   type InboxFilter,
   type InboxOrder,
+  type InboxPeriod,
   type InboxRow,
   type InboxThread,
   type SendWindow,
@@ -38,7 +42,13 @@ import {
 type StaffImageType = (typeof STAFF_IMAGE_TYPES)[number];
 import { sendBotText, sendPageImages } from "@/lib/sales-chatbot/messenger";
 import { draftCopilotSuggestion } from "@/lib/sales-chatbot/operating-mode";
+import { feedbackFor } from "@/lib/sales-chatbot/inbox-feedback";
+import { CUSTOMER_LEVELS, parseCustomerLevel, type CustomerLevel } from "@/lib/sales-chatbot/levels-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
+import { assessCustomerRisk } from "@/lib/alerts/risk";
+import { loadAlertConfig } from "@/lib/alerts/config";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { sendZaloImages, sendZaloText, ZALO_STAFF_REASON } from "@/lib/sales-chatbot/zalo";
 
 /**
@@ -88,6 +98,10 @@ const ACTIVITY = sql<Date>`greatest(coalesce("${sql.raw(C)}"."last_customer_at",
 const HAS_ORDER = sql<boolean>`("${sql.raw(C)}"."order_id" is not null or "${sql.raw(C)}"."draft_order_id" is not null or exists (select 1 from "orders" o where o.sales_conversation_id = "${sql.raw(C)}"."id"))`;
 const INBOUND_NAME = sql<string | null>`(select i.customer_name from "sales_chat_inbound" i where i.page_id = "${sql.raw(C)}"."page_id" and i.thread_id = "${sql.raw(C)}"."thread_id" and i.customer_name is not null and i.customer_name <> '' order by i.created_at desc limit 1)`;
 
+/** Có SĐT: SĐT hội thoại (job level đọc từ tin khách / Pancake) · hồ sơ khách · sổ trạng thái bot. */
+const HAS_PHONE = sql<boolean>`(coalesce("${sql.raw(C)}"."customer_phone", '') <> '' or coalesce("customers"."phone", '') <> '' or coalesce("${sql.raw(C)}"."state"->'customer'->>'phone', '') <> '')`;
+
+const dayZ = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().catch(null);
 const listZ = z.object({
   filter: z.enum(INBOX_FILTERS).catch("ALL"),
   label: z.string().trim().min(1).max(100).nullable().catch(null),
@@ -95,6 +109,14 @@ const listZ = z.object({
   q: z.string().trim().max(80).catch(""),
   /** MỘT page / tài khoản kênh (`sales_chat_conversations.page_id`); `null` = mọi page (hộp thư chung). */
   page: z.string().trim().regex(/^[A-Za-z0-9_:.-]{1,80}$/).nullable().catch(null),
+  phone: z.enum(["HAS", "NONE"]).nullable().catch(null),
+  level: z.enum(CUSTOMER_LEVELS).nullable().catch(null),
+  /** Người phụ trách: mã tài khoản, hoặc «none» = chưa ai cầm. */
+  assignee: z.string().trim().min(1).max(100).nullable().catch(null),
+  period: z.enum(INBOX_PERIODS).nullable().catch(null),
+  from: dayZ,
+  to: dayZ,
+  limit: z.number().int().min(50).max(INBOX_LIST_MAX).catch(100),
 });
 
 export type InboxPageOption = { id: string; name: string };
@@ -115,6 +137,30 @@ export async function inboxPages(): Promise<InboxPageOption[]> {
     out.set(r.pageId, r.channel === "ZALO" ? "Zalo OA" : r.pageId.startsWith("comment:") ? `Bình luận ${r.pageId.slice(8, 20)}` : `Fanpage ${r.pageId}`);
   }
   return [...out].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+}
+
+/** Ngày giờ Việt Nam ⇒ mốc UTC đầu ngày. */
+const vnDayStart = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - 7 * 3_600_000);
+
+/** Khoảng thời gian của bộ lọc (theo mốc TIN cuối) — `null` = không lọc. HÀM THUẦN. */
+export function inboxPeriodRange(q: { period: InboxPeriod | null; from: string | null; to: string | null }, now: Date): { from: Date | null; to: Date | null } | null {
+  const today = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+  const start = vnDayStart(today);
+  switch (q.period) {
+    case "TODAY":
+      return { from: start, to: null };
+    case "YESTERDAY":
+      return { from: new Date(start.getTime() - 86_400_000), to: start };
+    case "7D":
+      return { from: new Date(start.getTime() - 6 * 86_400_000), to: null };
+    case "30D":
+      return { from: new Date(start.getTime() - 29 * 86_400_000), to: null };
+    case "CUSTOM":
+      if (!q.from && !q.to) return null;
+      return { from: q.from ? vnDayStart(q.from) : null, to: q.to ? new Date(vnDayStart(q.to).getTime() + 86_400_000) : null };
+    default:
+      return null;
+  }
 }
 
 function iso(d: Date | string | null | undefined): string | null {
@@ -138,7 +184,7 @@ function inboundSide(note: string | null, messageId: string): TimelineSide {
 }
 
 /** Danh sách hội thoại của hộp thư (tối đa 100) — lọc theo việc cần làm, kênh, tên / SĐT. Không kéo nội dung tin (chỉ một dòng xem trước). */
-export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<InboxResult<{ rows: InboxRow[]; counts: Record<InboxFilter, number> }>> {
+export async function listInbox(user: SessionUser, rawQuery: unknown, now: Date = new Date()): Promise<InboxResult<{ rows: InboxRow[]; counts: Record<InboxFilter, number>; levelCounts: Partial<Record<CustomerLevel, number>>; phoneCount: number; total: number }>> {
   if (!can(user, VIEW)) return { ok: false, error: NO_VIEW };
   const q = listZ.parse(rawQuery ?? {});
   const db = await getDb();
@@ -151,8 +197,17 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   if (q.label) base.push(sql`exists (select 1 from "sales_chat_conversation_labels" cl where cl.conversation_id = "${sql.raw(C)}"."id" and cl.label_id = ${q.label})`);
   if (q.q) {
     const like = `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-    base.push(or(sql`${cu.name} ilike ${like}`, sql`${cu.phone} ilike ${like}`, sql`${c.state}->'customer'->>'name' ilike ${like}`, sql`${c.state}->'customer'->>'phone' ilike ${like}`, sql`${INBOUND_NAME} ilike ${like}`)!);
+    base.push(or(sql`${cu.name} ilike ${like}`, sql`${cu.phone} ilike ${like}`, sql`${c.customerPhone} ilike ${like}`, sql`${c.state}->'customer'->>'name' ilike ${like}`, sql`${c.state}->'customer'->>'phone' ilike ${like}`, sql`${INBOUND_NAME} ilike ${like}`)!);
   }
+  if (q.phone === "HAS") base.push(HAS_PHONE);
+  if (q.phone === "NONE") base.push(sql`not ${HAS_PHONE}`);
+  if (q.assignee === "none") base.push(isNull(c.assigneeUserId));
+  else if (q.assignee) base.push(eq(c.assigneeUserId, q.assignee));
+  const range = inboxPeriodRange(q, now);
+  if (range?.from) base.push(sql`${ACTIVITY} >= ${range.from}`);
+  if (range?.to) base.push(sql`${ACTIVITY} < ${range.to}`);
+  // Bộ lọc level đứng RIÊNG: số đếm theo level tính trên các bộ lọc khác (chip level không tự triệt tiêu nhau).
+  const levelCond = q.level ? eq(c.customerLevel, q.level) : undefined;
   const byFilter: Record<InboxFilter, SQL | undefined> = {
     ALL: undefined,
     UNREAD: UNREAD,
@@ -161,17 +216,23 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
     MINE: eq(c.assigneeUserId, user.id),
     UNASSIGNED: and(isNull(c.assigneeUserId), or(eq(c.status, "HANDOFF"), NEEDS_REPLY)),
   };
-  const counts = {} as Record<InboxFilter, number>;
-  for (const f of INBOX_FILTERS) {
-    const extra = byFilter[f];
-    const [r] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(c)
-      .leftJoin(cu, eq(cu.id, c.customerId))
-      .where(and(...base, ...(extra ? [extra] : [])));
-    counts[f] = Number(r?.n ?? 0);
-  }
-  const where = and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : []));
+  // MỘT câu đếm cho mọi thẻ (trước đây sáu câu cho mỗi lượt làm mới 5 giây).
+  const countCols = Object.fromEntries(INBOX_FILTERS.map((f) => [f, byFilter[f] ? sql<number>`count(*) filter (where ${byFilter[f]})::int` : sql<number>`count(*)::int`])) as Record<InboxFilter, SQL<number>>;
+  const [countRow] = await db
+    .select({ ...countCols, phone: sql<number>`count(*) filter (where ${HAS_PHONE})::int` })
+    .from(c)
+    .leftJoin(cu, eq(cu.id, c.customerId))
+    .where(and(...base, ...(levelCond ? [levelCond] : [])));
+  const counts = Object.fromEntries(INBOX_FILTERS.map((f) => [f, Number((countRow as Record<string, unknown> | undefined)?.[f] ?? 0)])) as Record<InboxFilter, number>;
+  const levelRows = await db
+    .select({ level: c.customerLevel, n: sql<number>`count(*)::int` })
+    .from(c)
+    .leftJoin(cu, eq(cu.id, c.customerId))
+    .where(and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : [])))
+    .groupBy(c.customerLevel);
+  const levelCounts: Partial<Record<CustomerLevel, number>> = {};
+  for (const r of levelRows) if (r.level) levelCounts[r.level as CustomerLevel] = Number(r.n);
+  const where = and(...base, ...(byFilter[q.filter] ? [byFilter[q.filter]!] : []), ...(levelCond ? [levelCond] : []));
   const rows = await db
     .select({
       id: c.id,
@@ -192,6 +253,8 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       assigneeUserId: c.assigneeUserId,
       assigneeName: u.name,
       hasOrder: HAS_ORDER,
+      level: c.customerLevel,
+      convPhone: c.customerPhone,
     })
     .from(c)
     .leftJoin(cu, eq(cu.id, c.customerId))
@@ -199,7 +262,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
     .where(where)
     // «Chờ trả lời»: khách chờ LÂU NHẤT lên đầu (đúng thứ tự phải xử lý); còn lại: mới nhất lên đầu.
     .orderBy(q.filter === "UNANSWERED" ? asc(c.lastCustomerAt) : desc(ACTIVITY))
-    .limit(100);
+    .limit(q.limit);
 
   // Một dòng xem trước cho mỗi hội thoại — kênh nhắn tin đọc sổ tin thô của kênh, chat web đọc lịch sử của bot.
   const previews = new Map<string, { text: string; side: TimelineSide }>();
@@ -237,6 +300,9 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
   return {
     ok: true,
     counts,
+    levelCounts,
+    phoneCount: Number(countRow?.phone ?? 0),
+    total: counts[q.filter],
     rows: rows.map((r) => ({
       id: r.id,
       channel: r.channel,
@@ -245,7 +311,7 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       status: r.status,
       handoffReason: r.handoffReason,
       customerName: r.customerName || r.stateName || r.inboundName || "Khách",
-      customerPhone: r.customerPhone || r.statePhone || null,
+      customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
       preview: (previews.get(r.id)?.text ?? "").slice(0, 140),
       previewSide: previews.get(r.id)?.side ?? null,
       lastActivityAt: iso(r.activity) ?? new Date(0).toISOString(),
@@ -255,7 +321,45 @@ export async function listInbox(user: SessionUser, rawQuery: unknown): Promise<I
       assigneeName: r.assigneeName,
       hasOrder: Boolean(r.hasOrder),
       labels: labels.get(r.id) ?? [],
+      level: parseCustomerLevel(r.level),
     })),
+  };
+}
+
+/** Lịch sử mua của khách (đơn ERP cùng khách / cùng SĐT) theo `ORDER_OUTCOME` — mỗi đơn MỘT dòng (PRIMARY_ATTEMPT). */
+export async function customerHistory(customerId: string | null, phone: string | null): Promise<InboxCustomerHistory | null> {
+  const clean = (phone ?? "").replace(/\D/g, "");
+  if (!customerId && clean.length < 9) return null;
+  const db = await getDb();
+  const o = schema.orders;
+  const who = or(customerId ? eq(o.customerId, customerId) : undefined, clean.length >= 9 ? or(eq(o.billPhone, clean), eq(o.shipPhone, clean)) : undefined)!;
+  const [r] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')::int`,
+      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('IN_TRANSIT','AWAITING_PICKUP'))::int`,
+      notShipped: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED')::int`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')::int`,
+    })
+    .from(o)
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(and(who, ne(o.stage, "DELETED")));
+  const cu = schema.customers;
+  const [pc] = customerId ? await db.select({ succeed: cu.succeedOrderCount, returned: cu.returnedOrderCount, block: cu.isBlock }).from(cu).where(eq(cu.id, customerId)).limit(1) : [];
+  const cfg = await loadAlertConfig();
+  const risk = assessCustomerRisk({ succeed: Number(pc?.succeed ?? 0), returned: Number(pc?.returned ?? 0), isBlock: Boolean(pc?.block), erpDelivered: Number(r?.delivered ?? 0), erpReturned: Number(r?.returned ?? 0) }, { riskMinReturned: cfg.riskMinReturned, riskReturnRatePct: cfg.riskReturnRatePct });
+  return {
+    total: Number(r?.total ?? 0),
+    delivered: Number(r?.delivered ?? 0),
+    returned: Number(r?.returned ?? 0),
+    inTransit: Number(r?.inTransit ?? 0),
+    notShipped: Number(r?.notShipped ?? 0),
+    cancelled: Number(r?.cancelled ?? 0),
+    pancakeSucceed: Number(pc?.succeed ?? 0),
+    pancakeReturned: Number(pc?.returned ?? 0),
+    blocked: Boolean(pc?.block),
+    risk: risk.risky ? { severity: risk.severity, reasons: risk.reasons } : null,
   };
 }
 
@@ -378,7 +482,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   const canReply = canReplyTo(user);
   // Nhân viên (người trả lời được) đang mở hội thoại ⇒ đã đọc tới đây. Người chỉ xem không làm mất dấu «chưa đọc» của đội.
   if (canReply) await db.update(schema.salesChatConversations).set({ staffSeenAt: now }).where(eq(schema.salesChatConversations.id, conv.id));
-  const [labelMap, allLabels, notes] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id)]);
+  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? null;
+  const [labelMap, allLabels, notes, history, feedback] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id), customerHistory(cust?.id ?? null, phoneForHistory).catch(() => null), feedbackFor(conv.id).catch(() => [])]);
   return {
     ok: true,
     thread: {
@@ -404,6 +509,9 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       labels: labelMap.get(conv.id) ?? [],
       allLabels,
       notes,
+      level: parseCustomerLevel(conv.customerLevel),
+      history,
+      feedback,
     },
   };
 }
@@ -609,6 +717,20 @@ export async function assignableUsers(user: SessionUser): Promise<{ id: string; 
   if (!can(user, MANAGE)) return [];
   const db = await getDb();
   return db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(eq(schema.users.active, true)).orderBy(asc(schema.users.name)).limit(200);
+}
+
+/** Nhân viên đang / đã cầm hội thoại — cho bộ lọc «theo nhân viên» (ai xem hộp thư cũng thấy, không cần quyền quản lý). */
+export async function inboxAssignees(user: SessionUser): Promise<{ id: string; name: string }[]> {
+  if (!can(user, VIEW)) return [];
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const u = schema.users;
+  return db
+    .selectDistinct({ id: u.id, name: u.name })
+    .from(c)
+    .innerJoin(u, eq(u.id, c.assigneeUserId))
+    .orderBy(asc(u.name))
+    .limit(200);
 }
 
 /** Trả hội thoại lại cho AI (nhân viên xử lý xong) — cùng đường `resumeConversationToAi`, ghi `ai.resumed` mang khoá người bấm. */

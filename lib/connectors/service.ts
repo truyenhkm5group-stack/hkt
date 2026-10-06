@@ -583,7 +583,7 @@ export async function rekeyOrgConnections(opts: { apply: boolean; keyState?: Sec
     out.counts[verdict] += 1;
     out.rows.push({ connectorKey: row.connectorKey, verdict, keyBefore: short(row.secretsKeyId), keyAfter: short(keyAfter) });
   }
-  // Token từng page (0217) — cùng luật, AAD theo page. Thiếu phần này thì xoay khoá xong mọi page nối thẳng sẽ chết.
+  // Token từng page (0220) — cùng luật, AAD theo page. Thiếu phần này thì xoay khoá xong mọi page nối thẳng sẽ chết.
   const pages = await db.select().from(schema.orgChannelPages).orderBy(schema.orgChannelPages.connectorKey, schema.orgChannelPages.pageId);
   for (const row of pages) {
     const label = pageAad(row.connectorKey, row.pageId);
@@ -689,7 +689,7 @@ export async function disableConnectionAsOperator(input: { connectorKey: string;
   return { ok: true, status: "DISABLED", changed: true, message: `Đã tắt «${spec.label}» của tổ chức.` };
 }
 
-// ═══════════════════════════ TÀI KHOẢN KÊNH DƯỚI MỘT KẾT NỐI (0217 · org_channel_pages) ═══════════════════════════
+// ═══════════════════════════ TÀI KHOẢN KÊNH DƯỚI MỘT KẾT NỐI (0220 · org_channel_pages) ═══════════════════════════
 //
 // Một kết nối (vd Messenger trực tiếp) có NHIỀU page. Mỗi page một hàng: token mã hoá riêng — AAD gắn tổ chức + kết nối + PAGE
 // (`<khoá kết nối>#page:<mã page>`), nên bản mã chép sang hàng page khác không giải được. Trạng thái do NGƯỜI chọn; sức khoẻ
@@ -822,7 +822,7 @@ export async function disableChannelPages(user: SessionUser, connectorKey: strin
 }
 
 /**
- * Page của hàng kết nối ĐƠN cũ (nối trước 0217) chưa có hàng riêng ⇒ dựng hàng ACTIVE KHÔNG token, chỉ để mang trạng thái /
+ * Page của hàng kết nối ĐƠN cũ (nối trước 0220) chưa có hàng riêng ⇒ dựng hàng ACTIVE KHÔNG token, chỉ để mang trạng thái /
  * cờ AI theo page. Token vẫn đọc ở hàng kết nối cũ. Hàng đã có ⇒ không đụng.
  */
 export async function adoptLegacyChannelPages(user: SessionUser, connectorKey: string, pages: readonly { pageId: string; kind: "PAGE" | "INSTAGRAM"; parentPageId: string | null; name: string }[]): Promise<{ ok: true } | { error: string }> {

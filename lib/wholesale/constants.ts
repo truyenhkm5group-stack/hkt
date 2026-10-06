@@ -135,7 +135,7 @@ export const PAUSE_REASON_LABEL: Record<PauseReason, string> = {
   REQUEST_LIMIT: "Chạm trần số lượt gọi ngày — tự chạy lại từ 0 giờ hôm sau",
   FREE_TIER: "Đã dùng hết lượt MIỄN PHÍ tháng này của Google (chế độ chỉ dùng miễn phí) — tự chạy lại từ ngày 1 tháng sau",
   API_AUTH: "Google từ chối khoá API — sửa kết nối rồi bấm Tiếp tục",
-  NO_CONNECTION: "Chưa bật kết nối Google Places — bật ở Cài đặt → Kết nối rồi bấm Tiếp tục",
+  NO_CONNECTION: "Chưa bật kết nối Google Places — bật ở Cài đặt → Kết nối, quét tự chạy lại",
 };
 
 export const OUTREACH_CHANNELS = ["PHONE_CALL", "ZALO", "SMS", "EMAIL", "FACEBOOK", "WHATSAPP"] as const;
@@ -267,11 +267,54 @@ export function callOutcomeEffect(from: LeadStatus, outcome: CallOutcome): CallO
   }
 }
 
+/**
+ * NHẮN ZALO TRƯỚC, GỌI SAU (chủ shop 06/10/2026). Nút «Nhắn Zalo» chép lời chào đã cá nhân hoá rồi mở `zalo.me/<SĐT>`;
+ * ERP KHÔNG tự biết số có Zalo hay không (Zalo không mở API tra số) — app Zalo tự hiện hồ sơ hoặc báo «không tìm thấy»,
+ * nhân viên quay lại chọn MỘT trong ba kết quả dưới đây. Câu trả lời của khách (có nhu cầu, xin bảng giá…) ghi bằng chính
+ * chín kết quả của cuộc gọi, kênh ZALO — một luật trạng thái cho cả hai kênh.
+ */
+export const ZALO_RESULTS = ["SENT", "FRIEND_REQUEST", "NOT_FOUND"] as const;
+export type ZaloResult = (typeof ZALO_RESULTS)[number];
+export const ZALO_RESULT_LABEL: Record<ZaloResult, string> = {
+  SENT: "Đã gửi tin Zalo",
+  FRIEND_REQUEST: "Đã gửi kết bạn",
+  NOT_FOUND: "Không có Zalo",
+};
+export const ZALO_RESULT_ICON: Record<ZaloResult, string> = { SENT: "✅", FRIEND_REQUEST: "🤝", NOT_FOUND: "🚫" };
+export const ZALO_STATUSES = ["FOUND", "NOT_FOUND"] as const;
+export type ZaloStatus = (typeof ZALO_STATUSES)[number];
+/** Việc tiếp theo máy ghi — chip «Cần gọi» đọc hẹn gọi lại, nên chuỗi chỉ để người đọc. */
+export const ZALO_NEXT_ACTION: Record<ZaloResult, string> = {
+  SENT: "Gọi nếu khách chưa trả lời Zalo",
+  FRIEND_REQUEST: "Chờ khách đồng ý kết bạn Zalo — gọi nếu chưa",
+  NOT_FOUND: "Gọi điện (số không có Zalo)",
+};
+
+export type ZaloResultEffect = { to: LeadStatus; zaloStatus: ZaloStatus; nextAction: string; followupDays: number; counted: boolean };
+
+/**
+ * Luật một chỗ (HÀM THUẦN): đã gửi tin / kết bạn ⇒ lead giai đoạn đầu lên «Đã liên hệ», hẹn GỌI sau 1 ngày nếu khách im;
+ * không có Zalo ⇒ trạng thái giữ nguyên, hẹn gọi NGAY (0 ngày) để lead lên đầu hàng «Cần gọi». `counted` = có tính là một
+ * lượt liên hệ không (không tìm thấy Zalo thì chưa liên hệ được ai).
+ */
+export function zaloResultEffect(from: LeadStatus, result: ZaloResult): ZaloResultEffect {
+  const early = EARLY_STATUSES.includes(from) && from !== "CONTACTED";
+  switch (result) {
+    case "SENT":
+    case "FRIEND_REQUEST":
+      return { to: early ? "CONTACTED" : from, zaloStatus: "FOUND", nextAction: ZALO_NEXT_ACTION[result], followupDays: 1, counted: true };
+    case "NOT_FOUND":
+      return { to: from, zaloStatus: "NOT_FOUND", nextAction: ZALO_NEXT_ACTION.NOT_FOUND, followupDays: 0, counted: false };
+  }
+}
+
 /** Ghi chú nhanh một chạm trên màn điện thoại (bàn phím điện thoại vẫn đọc giọng nói vào ô ghi chú như thường). */
 export const QUICK_NOTE_CHIPS = ["Cần bảng giá", "Quan tâm chả mực", "Quan tâm ruốc", "Quan tâm nước mắm", "Hỏi chiết khấu", "Gọi lại", "Cần gặp chủ", "Cần gặp người nhập hàng", "Đang có nhà cung cấp"] as const;
 
 export const ACTIVITY_KIND_LABEL: Record<string, string> = {
   CALL_INITIATED: "Bấm gọi (mở ứng dụng gọi)",
+  ZALO_OPENED: "Bấm nhắn Zalo (mở app Zalo)",
+  ZALO: "Nhắn Zalo",
   DISCOVERED: "Tìm thấy",
   IMPORTED: "Nhập tệp",
   ENRICHED: "Bổ sung dữ liệu",

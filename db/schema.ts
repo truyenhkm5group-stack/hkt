@@ -1440,6 +1440,41 @@ export const orderDeliveryNotes = pgTable(
 );
 
 /**
+ * ═══ ĐIỀU PHỐI GIAO CỦA ĐƠN TẠO TAY — NGƯỜI GIAO + LƯỢT MÁY TỰ TẠO VẬN ĐƠN (0216 · docs/verticals/pos-tu-chu.md P7) ═══
+ *
+ * TUYẾN của đơn (tự giao / hãng / giữ lại) KHÔNG lưu ở đây: nó là hàm THUẦN của đơn + cấu hình `shipping.routing` đọc LÚC
+ * XEM (`lib/shipping/route.ts`) — sửa cấu hình thì mọi đơn chưa giao đổi tuyến ngay, không có cột nào phải backfill. Bảng
+ * chỉ giữ hai thứ KHÔNG suy ra được:
+ *  · NGƯỜI GIAO của đơn tự giao — KHOÁ `users.id` (AGENTS 34); `courier_name` chỉ là ảnh chụp tên do máy chủ đọc từ `users`.
+ *  · LƯỢT MÁY TỰ TẠO VẬN ĐƠN gần nhất (job `shipping-route`): số lần hỏng liên tiếp + mốc + câu lỗi — để máy KHÔNG dội hãng
+ *    mỗi 5 phút bằng cùng một đơn hãng đã từ chối. Vận đơn thật vẫn chỉ ở `shipments` (lõi `lib/carriers/engine.ts`).
+ * Không phép tính nghiệp vụ nào (ORDER_OUTCOME, tồn kho, doanh thu) đọc bảng này.
+ */
+export const orderDispatch = pgTable(
+  "order_dispatch",
+  {
+    orderId: text("order_id")
+      .primaryKey()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    courierUserId: text("courier_user_id").references(() => users.id, { onDelete: "set null" }),
+    courierName: text("courier_name").notNull().default(""),
+    assignedAt: ts("assigned_at"),
+    assignedByUserId: text("assigned_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    autoAttempts: integer("auto_attempts").notNull().default(0),
+    autoLastAt: ts("auto_last_at"),
+    autoLastResult: text("auto_last_result"),
+    autoLastCarrier: text("auto_last_carrier"),
+    autoLastMessage: text("auto_last_message"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("order_dispatch_courier_idx").on(t.courierUserId),
+    check("order_dispatch_manual_check", sql`${t.orderId} LIKE 'erp-%'`),
+    check("order_dispatch_auto_result_check", sql`${t.autoLastResult} IS NULL OR ${t.autoLastResult} IN ('CREATED', 'FAILED')`),
+  ],
+);
+
+/**
  * ═══ CHỨNG TỪ THANH TOÁN CỦA ĐƠN TẠO TAY — PHIẾU THU / PHIẾU HOÀN TIỀN (ORDER_OUTCOME.md mục 11, 0181) ═══
  *
  * Chiều TIỀN của đơn không qua ĐVVC. Phiếu giao (bảng trên) nói hàng đã tới tay khách; bảng này nói tiền đã vào / ra
@@ -9655,7 +9690,7 @@ export const orgConnections = pgTable(
   ],
 );
 
-// ═══ NHIỀU PAGE DƯỚI MỘT KẾT NỐI (0217 · docs/messaging-providers.md §7) ═══
+// ═══ NHIỀU PAGE DƯỚI MỘT KẾT NỐI (0220 · docs/messaging-providers.md §7) ═══
 //
 // `org_connections` giữ MỘT hàng mỗi loại kết nối (UNIQUE connector_key) ⇒ Messenger trực tiếp từng chỉ giữ được một page: nối
 // page B ghi đè page A. Bảng con này là các TÀI KHOẢN KÊNH (Facebook page · Instagram gắn với page) dưới một kết nối — mỗi page
@@ -9928,6 +9963,13 @@ export const salesChatConversations = pgTable(
     lastStaffAt: ts("last_staff_at"),
     /** 0212: lần cuối một NHÂN VIÊN mở hội thoại trong hộp thư — «chưa đọc» = tin khách mới hơn mốc này. */
     staffSeenAt: ts("staff_seen_at"),
+    /**
+     * 0216: level khách (`lib/sales-chatbot/levels-shared.ts::CUSTOMER_LEVELS`) + SĐT khách của hội thoại — KẾT QUẢ ĐỌC do job làm
+     * mới (`refreshConversationLevels`) để lọc / đếm nhanh; `level_at` = lần tính gần nhất. Không phải nguồn sự thật.
+     */
+    customerLevel: text("customer_level"),
+    customerPhone: text("customer_phone"),
+    levelAt: ts("level_at"),
     /** Giỏ nháp của khung THỬ (không ghi đơn thật) + mốc tóm tắt đã đọc cho khách — lib/sales-chatbot/engine.ts. */
     state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
     createdBy: text("created_by"),
@@ -9944,6 +9986,9 @@ export const salesChatConversations = pgTable(
     index("sales_chat_conversations_followup_idx").on(t.status, t.nextFollowupAt),
     index("sales_chat_conversations_inbox_idx").on(t.lastCustomerAt),
     index("sales_chat_conversations_assignee_idx").on(t.assigneeUserId).where(sql`${t.assigneeUserId} is not null`),
+    check("sales_chat_conversations_level_check", sql`${t.customerLevel} IS NULL OR ${t.customerLevel} IN ('ORDERED','UPSELL_REPLY','FULL_INFO_ORDER','FULL_INFO_NO_ITEM','PHONE_ONLY','ADDRESS_ONLY','PICKED_ITEM','MEASUREMENTS','NEW_MESSAGE','DECLINED')`),
+    index("sales_chat_conversations_level_idx").on(t.customerLevel).where(sql`${t.customerLevel} is not null`),
+    index("sales_chat_conversations_phone_idx").on(t.customerPhone).where(sql`${t.customerPhone} is not null`),
   ],
 );
 
@@ -10035,6 +10080,26 @@ export const salesChatConversationLabels = pgTable(
  * GHI CHÚ NỘI BỘ của hội thoại (0211): nhân viên ghi cho nhau — KHÔNG gửi khách, KHÔNG vào lịch sử của bot, KHÔNG phép tính nào
  * đọc. Mang khoá tài khoản + ảnh chụp tên do máy chủ đọc (luật 34). Xoá = đánh dấu (`deleted_at`), không xoá dòng.
  */
+/**
+ * GÓP Ý CHO AI của nhân viên trên MỘT hội thoại (0216 · lib/sales-chatbot/inbox-feedback.ts): chữ góp ý + bài học «Khi … ⇒ …»
+ * AI rút ra (đã nhập vào bộ bài học của bot). Append-only; `FAILED` giữ lại câu góp ý để thử lại.
+ */
+export const salesChatFeedback = pgTable(
+  "sales_chat_feedback",
+  {
+    id: id(),
+    conversationId: text("conversation_id").notNull(),
+    userId: text("user_id").notNull(),
+    userName: text("user_name").notNull().default(""),
+    text: text("text").notNull(),
+    lessons: jsonb("lessons").$type<string[]>().notNull().default([]),
+    status: text("status").notNull(),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("sales_chat_feedback_conv_idx").on(t.conversationId, t.createdAt), check("sales_chat_feedback_status_check", sql`${t.status} IN ('APPLIED','FAILED')`)],
+);
+
 export const salesChatNotes = pgTable(
   "sales_chat_notes",
   {
@@ -10247,7 +10312,7 @@ export const salesReplayPoints = pgTable(
 );
 
 /**
- * QUYẾT ĐỊNH RÀ LỖI AI (0216 · lib/sales-chatbot/quality.ts) — lớp GHI CHÚ của người lên một phát hiện TÍNH LÚC ĐỌC
+ * QUYẾT ĐỊNH RÀ LỖI AI (0219 · lib/sales-chatbot/quality.ts) — lớp GHI CHÚ của người lên một phát hiện TÍNH LÚC ĐỌC
  * (`quality-shared.ts::scanConversation`). Không có dòng = «chờ rà»; phát hiện không lưu ở đâu cả (phép chiếu, AGENTS §19).
  * Khoá tự nhiên (hội thoại, seq, loại): rà lại một phát hiện là SỬA dòng ấy, không đẻ dòng thứ hai. Người rà mang `users.id`
  * + tên do máy chủ đọc (AGENTS §34).
@@ -10512,6 +10577,9 @@ export const wholesaleLeads = pgTable(
     email: text("email"),
     facebookUrl: text("facebook_url"),
     zaloUrl: text("zalo_url"),
+    /** Lời khai của nhân viên sau khi mở Zalo theo SĐT: FOUND · NOT_FOUND. NULL = chưa biết (ERP không tự tra được). */
+    zaloStatus: text("zalo_status"),
+    zaloCheckedAt: ts("zalo_checked_at"),
     nameKey: text("name_key"),
     provinceKey: text("province_key"),
     provinceLabel: text("province_label"),
@@ -10576,6 +10644,7 @@ export const wholesaleLeads = pgTable(
     ),
     check("wholesale_leads_enrichment_check", sql`${t.enrichmentStatus} IN ('PENDING_DETAILS','READY','FILTERED','DUPLICATE','FAILED')`),
     check("wholesale_leads_lost_check", sql`${t.contactStatus} <> 'LOST' OR length(btrim(coalesce(${t.lostReason}, ''))) >= 3`),
+    check("wholesale_leads_zalo_status_check", sql`${t.zaloStatus} IS NULL OR ${t.zaloStatus} IN ('FOUND','NOT_FOUND')`),
   ],
 );
 

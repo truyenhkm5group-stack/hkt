@@ -1,5 +1,5 @@
 /**
- * ═══════════ MỘT TỔ CHỨC — NHIỀU FACEBOOK PAGE (0217 · org_channel_pages · docs/messaging-providers.md §7) ═══════════
+ * ═══════════ MỘT TỔ CHỨC — NHIỀU FACEBOOK PAGE (0220 · org_channel_pages · docs/messaging-providers.md §7) ═══════════
  *
  * Khoá:
  *  · một lượt cấp quyền nối NHIỀU page; page thuộc cửa hàng khác bị bỏ, các page còn lại vẫn nối (lỗi page này không chặn page kia);
@@ -205,7 +205,7 @@ export async function testMessengerMultiPage() {
       const view = await messengerView();
       assert.ok(view.pages.find((p) => p.id === PAGES.B)?.status === "DISABLED" && view.page?.id === PAGES.A, JSON.stringify(view.pages.map((p) => [p.id, p.status])));
 
-      // ── Tổ chức nối TRƯỚC 0217: chỉ có hàng kết nối đơn (không hàng page) ⇒ vẫn nhận / gửi; bật / tắt AI theo page được ──
+      // ── Tổ chức nối TRƯỚC 0220: chỉ có hàng kết nối đơn (không hàng page) ⇒ vẫn nhận / gửi; bật / tắt AI theo page được ──
       await db.delete(schema.orgChannelPages).where(and(eq(schema.orgChannelPages.connectorKey, "facebook-messenger"), eq(schema.orgChannelPages.pageId, PAGES.A)));
       await db.delete(schema.orgChannelPages).where(eq(schema.orgChannelPages.pageId, IG_A));
       assert.equal((await receiveMessengerEvent(ev(PAGES.A, "psid-a", "mp.a4", "Shop ơi"))).queued, true, "page của hàng kết nối đơn cũ vẫn nhận");

@@ -27,7 +27,7 @@ import { parseListParams } from "@/lib/search-params";
 import { runJob } from "@/lib/sync/jobs";
 import { listWholesaleLeads, wholesaleDashboard } from "@/lib/queries/wholesale";
 import { mobileHome, mobileQueue, nextLeadId } from "@/lib/queries/wholesale-mobile";
-import { callOutcomeEffect, PRICE_REQUEST_ACTION } from "@/lib/wholesale/constants";
+import { callOutcomeEffect, PRICE_REQUEST_ACTION, zaloResultEffect } from "@/lib/wholesale/constants";
 import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
@@ -37,8 +37,8 @@ import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websit
 import { COMPETITOR_SWEEP_SETTING_KEY, purgeExpiredSnapshots, runLeadHunterTick, sweepCompetitors } from "@/lib/wholesale/engine";
 import { competitorHit } from "@/lib/wholesale/competitor";
 import { getSettingJson } from "@/lib/settings";
-import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, updateLeadStatusCore } from "@/lib/wholesale/leads";
-import { channelAction, openerLooksInvented, templateOpener } from "@/lib/wholesale/opener";
+import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, logZaloOpenedCore, logZaloResultCore, updateLeadStatusCore, zaloDraftCore } from "@/lib/wholesale/leads";
+import { channelAction, openerLooksInvented, templateOpener, zaloMessage, zaloPhoneLink } from "@/lib/wholesale/opener";
 import { approveOutreachCore, markOutreachSentCore, prepareOutreachCore, queueOutreachCore, recordOutreachResultCore } from "@/lib/wholesale/outreach";
 import { extractVnPhones, formatVnPhone, normalizeVnPhone, samePhone } from "@/lib/wholesale/phone";
 import type { DiscoveryProvider, EnrichmentProvider } from "@/lib/wholesale/providers";
@@ -307,6 +307,32 @@ function testFieldHandoffMessage() {
   assert.deepEqual(verifiedCallPatch(lead, null, "ANSWERED", true), {}, "dữ liệu Google đã xoá ⇒ không có gì để chép");
 }
 
+/** Nhắn Zalo trước, gọi sau (chủ shop 06/10/2026): tin cá nhân hoá, link chỉ cho số di động, luật kết quả. */
+function testZaloFirst() {
+  const cfg = DEFAULT_LEAD_HUNTER_CONFIG;
+  const msg = zaloMessage(cfg, { businessName: "Quán Ốc Mút 68", segment: "PUB_BEER", areaName: "Hai Bà Trưng", provinceLabel: "Hà Nội" }, "Nguyễn Thị Hoa");
+  assert.match(msg, /Quán Ốc Mút 68/);
+  assert.match(msg, /Em là Hoa bên/, "tên gọi = chữ cuối của tên nhân viên");
+  assert.match(msg, /ở Hai Bà Trưng, Hà Nội/);
+  assert.match(msg, /món nhắm/, "câu lợi ích theo nhóm khách (quán nhậu)");
+  assert.ok(!msg.includes("{{") && !/\n\s*\n/.test(msg), "không lòi biến / dòng trống khi chưa khai khuyến mãi, giao hàng");
+  assert.ok(!/\d{2,}\.?\d*\s*(đ|k|nghìn|₫)/i.test(msg), "kịch bản mặc định không ghi giá");
+  const promo = zaloMessage({ ...cfg, outreach: { ...cfg.outreach, promotionNote: "Đơn đầu tặng 1 hộp ruốc" } }, { businessName: "A", segment: "MOM_BABY", areaName: null, provinceLabel: null }, "");
+  assert.match(promo, /\nĐơn đầu tặng 1 hộp ruốc\n/);
+  assert.match(promo, /Em là em bên/, "không biết tên nhân viên ⇒ «em»");
+  assert.ok(!/hình sản phẩm/.test(msg), "chưa chọn ảnh ⇒ không hứa gửi hình");
+  const withImg = zaloMessage({ ...cfg, outreach: { ...cfg.outreach, zaloImages: ["https://x.example/a.jpg"] } }, { businessName: "A", segment: "GROCERY", areaName: null, provinceLabel: null }, "Lan");
+  assert.match(withImg, /Em gửi anh\/chị vài hình sản phẩm tham khảo ạ\. Anh\/chị quan tâm/);
+  assert.equal(zaloPhoneLink("+84912345678", "MOBILE"), "https://zalo.me/0912345678");
+  assert.equal(zaloPhoneLink("+842033123456", "LANDLINE"), null, "số cố định không có Zalo");
+  assert.equal(zaloPhoneLink(null, "MOBILE"), null);
+  const sent = zaloResultEffect("QUALIFIED", "SENT");
+  assert.deepEqual([sent.to, sent.zaloStatus, sent.followupDays, sent.counted], ["CONTACTED", "FOUND", 1, true], "đã nhắn ⇒ đã liên hệ, hẹn gọi sau 1 ngày");
+  const none = zaloResultEffect("QUALIFIED", "NOT_FOUND");
+  assert.deepEqual([none.to, none.zaloStatus, none.followupDays, none.counted], ["QUALIFIED", "NOT_FOUND", 0, false], "không có Zalo ⇒ chưa liên hệ ai, gọi ngay");
+  assert.equal(zaloResultEffect("NEGOTIATING", "SENT").to, "NEGOTIATING", "nhắn Zalo không lùi lead đang thương lượng");
+}
+
 function testCallOutcomes() {
   // Người bán chọn KẾT QUẢ; máy suy ra trạng thái — không bao giờ lùi lead đã đi xa.
   assert.equal(callOutcomeEffect("NEW", "INTERESTED").to, "INTERESTED");
@@ -524,6 +550,11 @@ async function testPlacesClient() {
   assert.ok(!ip.ok && ip.message.includes("IP máy chủ ERP") && ip.message.includes("reason: API_KEY_IP_ADDRESS_BLOCKED"), ip.message);
   const odd = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: denied("SOMETHING_NEW") });
   assert.ok(!odd.ok && odd.message.includes("reason: SOMETHING_NEW"), "lý do lạ vẫn được in nguyên, không bị nuốt");
+  // 429 hết hạn mức ngày: Google đã nhận khoá ⇒ kiểm tra ĐẠT (không hạ kết nối đang bật về Nháp), câu nói rõ là hết lượt.
+  const quota = (async () =>
+    new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for quota metric 'SearchTextRequest' and limit 'SearchTextRequest per day'" } }), { status: 429, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const q = await testGooglePlaces({ secrets: { apiKey: API_KEY } }, { fetch: quota });
+  assert.ok(q.ok && q.message.includes("HẾT HẠN MỨC") && !q.message.includes(API_KEY), q.message);
 
   // ── Trạm chuyển tiếp Cloud Run (Google chặn Places khi gọi từ IP Việt Nam, đo 04/10/2026) ──
   const RELAY = "https://places-relay-abc123-as.a.run.app";
@@ -815,6 +846,22 @@ async function testDb() {
       assert.ok(waiting.length > 1 && waiting.every((w) => w.next && w.next.getTime() > Date.now() + 60_000), "mọi ô đang chờ hẹn tới lúc Google đặt lại hạn mức");
       assert.ok("ok" in (await changeCampaignStateCore(admin, cQuota.id, "stop")));
 
+      // ── Kết nối tắt ⇒ máy tự dừng (NO_CONNECTION); bật lại ⇒ máy tự chạy lại, không cần ai bấm «Tiếp tục» ──
+      assert.ok("ok" in (await setConnectionStatus(admin, "google-places", "DISABLED")));
+      const cNc = await createCampaignCore(admin, { ...campInput, name: "Mất kết nối thử", customAreas: "Quảng Ninh: Móng Cái", keywordGroups: campInput.keywordGroups.map((g) => ({ ...g, enabled: g.key === "hai-san" })) });
+      assert.ok("ok" in cNc);
+      assert.ok("ok" in (await startCampaignCore(admin, cNc.id)));
+      const campStatus = async () => (await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, cNc.id) }))!;
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.equal((await campStatus()).pauseReason, "NO_CONNECTION");
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.equal((await campStatus()).status, "PAUSED", "kết nối còn tắt ⇒ vẫn dừng");
+      assert.ok("ok" in (await setConnectionStatus(admin, "google-places", "ACTIVE")));
+      await runLeadHunterTick({ budgetMs: 20_000 });
+      assert.notEqual((await campStatus()).status, "PAUSED", "kết nối bật lại ⇒ chiến dịch tự chạy lại");
+      const ncNow = await campStatus();
+      if (ncNow.status === "RUNNING") assert.ok("ok" in (await changeCampaignStateCore(admin, cNc.id, "stop")));
+
       // ── Trần ngân sách: tự tạm dừng, báo chủ shop, tự mở lại ngày sau ──
       await saveLeadHunterConfig({ ...PAID_CFG, requestIntervalMs: 0, maxRetries: 0, websiteEnrichment: { enabled: false, maxPages: 2 }, budget: { dailyUsd: 0.5, monthlyUsd: 1000, dailyRequestLimit: 100_000 } });
       const c4 = await createCampaignCore(admin, { ...campInput, name: "Trần thử", customAreas: "Thanh Hóa: Sầm Sơn, Hậu Lộc" });
@@ -985,6 +1032,47 @@ async function testDb() {
       assert.ok((await mobileQueue(dAll, "done", "")).some((x) => x.id === smallLead.id));
       assert.ok(!(await mobileQueue(dAll, "all", "")).some((x) => x.id === smallLead.id), "đã kết thúc ⇒ ra khỏi danh sách gọi");
 
+      // ── Nhắn Zalo trước, gọi sau: khách mới số di động ở «Cần nhắn Zalo», KHÔNG ở «Cần gọi»; kết quả do người chọn ──
+      const zl = async (name: string, phone: string, kind: string) =>
+        (await db.insert(schema.wholesaleLeads).values({ source: "STAFF", businessName: name, normalizedPhone: phone, phoneRaw: phone, phoneKind: kind, segment: "PUB_BEER", areaName: "Hải Châu", provinceLabel: "Đà Nẵng", enrichmentStatus: "READY", contactStatus: "QUALIFIED", leadScore: 99 }).returning())[0]!;
+      const zMobile = await zl("Quán Nhậu Zalo Một", "+84912000771", "MOBILE");
+      const zMobile2 = await zl("Quán Nhậu Zalo Hai", "+84912000772", "MOBILE");
+      const zLand = await zl("Quán Nhậu Số Bàn", "+842363000773", "LANDLINE");
+      const inChip = async (chip: "zalo" | "call", id: string) => (await mobileQueue(dAll, chip, "")).some((x) => x.id === id);
+      assert.ok((await inChip("zalo", zMobile.id)) && !(await inChip("call", zMobile.id)), "số di động mới ⇒ nhắn Zalo trước");
+      assert.ok(!(await inChip("zalo", zLand.id)) && (await inChip("call", zLand.id)), "số cố định ⇒ thẳng hàng gọi");
+      const dr = await zaloDraftCore(admin, zMobile.id);
+      assert.ok("ok" in dr && dr.draft.link === "https://zalo.me/0912000771" && dr.draft.text.includes("Quán Nhậu Zalo Một") && dr.draft.text.includes("món nhắm"), JSON.stringify(dr));
+      const drLand = await zaloDraftCore(admin, zLand.id);
+      assert.ok("ok" in drLand && drLand.draft.link === null && /cố định/.test(drLand.draft.reason ?? ""));
+      assert.ok("ok" in (await logZaloOpenedCore(admin, zMobile.id)));
+      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, zMobile.id) }))?.contactAttemptCount, 0, "bấm mở Zalo KHÔNG phải một lần liên hệ");
+      const nf = await logZaloResultCore(admin, zMobile.id, { result: "NOT_FOUND" });
+      assert.ok("ok" in nf && nf.status === "QUALIFIED");
+      const nfRow = (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, zMobile.id) }))!;
+      assert.equal(nfRow.zaloStatus, "NOT_FOUND");
+      assert.equal(nfRow.contactAttemptCount, 0);
+      assert.ok(nfRow.nextFollowupAt && nfRow.nextFollowupAt.getTime() <= Date.now(), "không có Zalo ⇒ hẹn gọi NGAY");
+      assert.ok(!(await inChip("zalo", zMobile.id)) && (await inChip("call", zMobile.id)), "không có Zalo ⇒ chuyển sang hàng gọi");
+      const dr2 = await zaloDraftCore(admin, zMobile.id);
+      assert.ok("ok" in dr2 && dr2.draft.link === null && dr2.draft.zaloStatus === "NOT_FOUND", "đã thử không có Zalo ⇒ không mở lại");
+      const sentR = await logZaloResultCore(admin, zMobile2.id, { result: "SENT", note: "Đã gửi 3 ảnh" });
+      assert.ok("ok" in sentR && sentR.status === "CONTACTED");
+      const sentRow = (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, zMobile2.id) }))!;
+      assert.equal(sentRow.zaloStatus, "FOUND");
+      assert.equal(sentRow.contactAttemptCount, 1);
+      assert.equal(sentRow.nextFollowupAt?.toISOString().slice(11, 16), "02:00", "đã nhắn ⇒ hẹn GỌI 9 giờ sáng hôm sau nếu khách im");
+      assert.ok(!(await inChip("zalo", zMobile2.id)) && !(await inChip("call", zMobile2.id)), "vừa nhắn xong ⇒ chưa tới lượt gọi");
+      const zAct = await db.select({ kind: schema.wholesaleLeadActivities.kind, outcome: schema.wholesaleLeadActivities.outcome }).from(schema.wholesaleLeadActivities).where(eq(schema.wholesaleLeadActivities.leadId, zMobile2.id));
+      assert.deepEqual(zAct.map((x) => `${x.kind}:${x.outcome}`), ["ZALO:SENT"]);
+      // Khách TRẢ LỜI qua Zalo ⇒ cùng chín kết quả cuộc gọi, kênh ZALO.
+      const reply = await logCallCore(admin, zMobile2.id, { outcome: "PRICE_REQUESTED", note: "Xin bảng giá qua Zalo", channel: "ZALO" });
+      assert.ok("ok" in reply && reply.status === "INTERESTED");
+      const replyAct = await db.query.wholesaleLeadActivities.findFirst({ where: and(eq(schema.wholesaleLeadActivities.leadId, zMobile2.id), eq(schema.wholesaleLeadActivities.kind, "CALL")) });
+      assert.equal(replyAct?.channel, "ZALO");
+      assert.ok((await mobileHome(dAll, admin.id)).myZaloToday >= 1, "đếm tin Zalo đã gửi hôm nay (không đếm «không có Zalo»)");
+      assert.ok("error" in (await zaloDraftCore(sales, zLand.id)), "sale phạm vi «được giao» không soạn tin cho khách không giao cho mình");
+
       // ── Nhập tệp: +84… trùng 0… đã có ⇒ bỏ qua; số mới ⇒ tạo; số bị chặn ⇒ đếm riêng ──
       const csv = "Tên,SĐT,Địa chỉ,Tỉnh,Website\nHải sản Biển Đông (danh bạ),+84905123456,,Đà Nẵng,\nNhà hàng Sông Hàn,0905 999 888,5 Bạch Đằng,Đà Nẵng,https://songhan.vn\nLẩu Dê nhập tay,0905-222-333,,,\n,0905000000,,,";
       const imp = await importLeadsCore(admin, csv);
@@ -1105,6 +1193,7 @@ export async function testWholesaleLeadHunter() {
   testScanPriority();
   testFreeTier();
   testCallOutcomes();
+  testZaloFirst();
   testFieldHandoffMessage();
   testDedupeKeys();
   testWebsiteParse();

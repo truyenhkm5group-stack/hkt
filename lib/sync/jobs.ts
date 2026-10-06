@@ -75,10 +75,12 @@ import { sweepStaleMessengerThreads } from "@/lib/sales-chatbot/messenger";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { sendReorderDigest } from "@/lib/reorder/digest";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
+import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
 import { retryFailedDeliveries } from "@/lib/messaging/service";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
+import { runShippingRouteJob } from "@/lib/shipping/routing";
 
 export type JobOptions = {
   trigger: SyncTrigger;
@@ -609,6 +611,23 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
       "Chạy chiến dịch săn khách sỉ đang bật: tìm địa điểm theo ô từ khoá × khu vực, lọc, khử trùng, lấy SĐT / website, chấm điểm, đọc trang liên hệ công khai. Dùng khoá Google Places của tổ chức (Cài đặt → Kết nối), dừng tự động khi chạm trần chi tiêu ngày / tháng. budgetMs=N để đổi trần thời gian một lượt.",
     run: (o) => runWholesaleLeadsJob({ trigger: o.trigger, actor: o.actor, budgetMs: Math.min(240_000, num(o.params?.budgetMs) ?? 50_000) }),
   },
+  /*
+    TUYẾN GIAO TỰ ĐỘNG (POS tự chủ P7 — chủ shop chốt 06/10/2026, mọi tổ chức khách): đơn tạo tay «Đã xác nhận», đã ghép tỉnh
+    + xã, NGOÀI khu tự giao ⇒ máy tạo vận đơn ở hãng mặc định bằng ĐÚNG lõi của nút bấm (lib/carriers/engine.ts — giữ chỗ chống
+    trùng, mã ERP chặn trùng ở hãng, không tự gửi lại lượt không rõ kết quả). Credential là kết nối hãng CỦA CHÍNH tổ chức, nên
+    job không nằm trong HOME_CREDENTIAL_JOBS. Công tắc «Tự tạo vận đơn» mặc định TẮT; tắt / không việc ⇒ bỏ qua sau một câu đọc,
+    không ghi sync_runs. Nhà đồng bộ đơn Pancake ⇒ không có đơn tạo tay ⇒ CHỈ fan-out.
+  */
+  "shipping-route": {
+    label: "Tuyến giao tự động (tạo vận đơn ở hãng)",
+    source: "ALL",
+    module: "logistics",
+    fanOut: true,
+    description:
+      "Tổ chức bật «Tự tạo vận đơn» ở Đơn hàng → Danh sách tự giao → Cấu hình tuyến giao ⇒ đơn đã xác nhận (từ lúc bật), đã ghép tỉnh + xã, ngoài khu tự giao được tạo vận đơn ở hãng mặc định: cân = cân mẫu mã × số lượng (thiếu ⇒ giữ lại, không đoán), thu hộ = số khách còn phải trả, dịch vụ = mã đã khai hoặc rẻ nhất. " +
+      "Tối đa 20 đơn một lượt, tuần tự. Hãng từ chối ⇒ ghi lỗi trên đơn, thử lại sau 30 phút (tối đa 3 lần) hoặc ngay khi đơn được sửa. Lượt không rõ kết quả giữ chỗ chờ người tra như nút bấm.",
+    run: (o) => runShippingRouteJob({ trigger: o.trigger, actor: o.actor }),
+  },
   // Company OS · Agent A — sổ mẫu. Không có lịch RIÊNG: chạy lồng sau mỗi lượt `pancake-products` (P1), và chạy tay từ /models hoặc trang Kết nối dữ liệu.
   "model-registry": {
     label: "Đồng bộ sổ mẫu",
@@ -780,11 +799,13 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const ls = await learnLessons();
         // Đơn «Mới» đủ SĐT + địa chỉ + hàng mà chưa xác nhận ⇒ một tin vào nhóm báo đơn (lib/sales-chatbot/new-order-alert.ts). Không ném.
         const no = await sendNewOrderAlerts();
+        // Level khách + SĐT của hội thoại (lọc hộp thư · kịch bản theo level) — hội thoại có hoạt động mới + lấp dần. Không ném.
+        const lv = await refreshConversationLevels();
         ctx.summary.imported = r.sent;
         ctx.summary.skipped = r.stopped + r.deferred;
         if (r.errors) ctx.summary.warning = r.detail.filter((d) => /lỗi|:/.test(d)).slice(0, 5).join(" · ").slice(0, 500);
         const cuText = (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
-        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "");
+        const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
         ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;

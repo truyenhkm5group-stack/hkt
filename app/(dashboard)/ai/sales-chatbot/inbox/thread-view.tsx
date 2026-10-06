@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./avatar";
 import { LabelsPanel } from "./labels-panel";
 import { NotesPanel } from "./notes-panel";
+import { CustomerHistoryCard, FeedbackPanel } from "./customer-insight";
 
 /**
  * MỘT HỘI THOẠI CỦA HỘP THƯ (M8): dòng thời gian (vạch ngày, gộp tin liền nhau, khách bên trái — shop bên phải) + khung soạn luôn
@@ -400,7 +401,7 @@ export function InboxThreadView({
       </div>
 
       {/* ── Cột khách ── */}
-      <aside className="hidden min-h-0 space-y-3 overflow-y-auto border-l bg-muted/10 p-3 text-[13px] xl:block">
+      <aside className="hidden min-h-0 space-y-3 overflow-y-auto border-l border-foreground/15 bg-muted/20 p-3 text-[13px] xl:block">
         <div className="space-y-1 rounded-lg border bg-background p-3">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Khách</p>
           <p className="font-medium">{thread.customer.name}</p>
@@ -417,6 +418,7 @@ export function InboxThreadView({
             </Link>
           ) : null}
         </div>
+        <CustomerHistoryCard history={thread.history} level={thread.level} />
         <div className="space-y-1.5 rounded-lg border bg-background p-3" data-testid="inbox-orders">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">Đơn của khách</p>
           {ordersSummary.length === 0 ? <p className="text-muted-foreground">Chưa có đơn.</p> : null}
@@ -446,6 +448,7 @@ export function InboxThreadView({
             </div>
           ) : null}
         </div>
+        <FeedbackPanel conversationId={thread.id} feedback={thread.feedback} canWrite={thread.canWork} />
         <NotesPanel conversationId={thread.id} notes={thread.notes} canWrite={thread.canWork} />
       </aside>
     </div>

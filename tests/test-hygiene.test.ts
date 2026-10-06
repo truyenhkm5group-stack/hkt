@@ -132,6 +132,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «Quảng cáo Facebook (Meta) của tổ chức» trong tổ chức thử; ĐẶT ADS_WRITE_ENABLED = «true» + ADS_WRITE_MODE = «COPILOT» để cửa ghi đi tới nhánh token của tổ chức, và FACEBOOK_ACCESS_TOKEN = chuỗi BỊA để chứng minh token của nhà KHÔNG lọt sang ngữ cảnh tổ chức khách (cùng cách ads-kill-switch); fetch là bản giả đóng vai Graph API. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/pancake-pos-org.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá BỊA của kết nối «Pancake POS của tổ chức» trong tổ chức thử và để job / webhook đọc lại nó (cùng cách meta-ads-org); fetch là bản giả đóng vai Pancake POS. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
+  "tests/shipping-routing.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token GHN BỊA của kết nối «ghn-carrier» trong tổ chức thử và để job «shipping-route» đọc lại nó (cùng cách carrier-ghn); fetch là bản giả đóng vai GHN. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/carrier-ghn.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «GHN của tổ chức (tạo vận đơn)» trong tổ chức thử, để lõi tạo vận đơn đọc lại nó và để máy chủ cấp token webhook theo tổ chức (cùng cách carrier-vtp); fetch là bản giả đóng vai online-gateway.ghn.vn. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/carrier-ghtk.test.ts":
