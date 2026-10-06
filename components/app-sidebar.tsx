@@ -1,4 +1,5 @@
 import {
+  Activity,
   Banknote,
   Bot,
   BarChart3,
@@ -178,6 +179,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/ai/sales-chatbot/inbox": Inbox,
   "/ai/sales-chatbot": MessagesSquare,
   "/ai/sales-chatbot/performance": BarChart3,
+  "/ai/sales-chatbot/cockpit": Activity,
   "/platform": ServerCog,
   "/platform/saas": LineChart,
 };

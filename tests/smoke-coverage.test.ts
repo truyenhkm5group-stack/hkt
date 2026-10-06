@@ -106,6 +106,10 @@ const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Hộp thư khách (M8) thuộc cùng module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke của NHÀ luôn bị chuyển về /module-disabled. Lõi danh sách / dòng thời gian / gửi tin được kiểm bằng tests/sales-inbox.test.ts trên tổ chức khách thật.",
   },
+  "/ai/sales-chatbot/cockpit": {
+    nhom: "INTENTIONALLY_EXCLUDED",
+    lyDo: "Cùng module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke của NHÀ luôn bị chuyển về /module-disabled. Số của trang (ảnh chụp + đánh giá SLO) được kiểm bằng tests/ai-sales-health.test.ts trên tổ chức khách thật.",
+  },
   "/ai/sales-chatbot/performance": {
     nhom: "INTENTIONALLY_EXCLUDED",
     lyDo: "Cùng module «AI bán hàng» cố ý TẮT ở tổ chức nhà (0180) — smoke của NHÀ luôn bị chuyển về /module-disabled. Số của trang được kiểm bằng tests/sales-events.test.ts (loadAiSalesPerformance trên tổ chức khách thật).",
