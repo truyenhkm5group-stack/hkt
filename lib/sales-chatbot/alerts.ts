@@ -139,4 +139,15 @@ export async function notifySalesChatAiDown(key: string, label: string, now: Dat
     .onConflictDoNothing({ target: schema.notifications.dedupeKey });
   const users = await activeUserIdsWhoCan("ai_sales:manage");
   await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_AI_DOWN", title, body, href: "/ai/sales-chatbot", dedupeKey: `${dedupe}:${userId}` })), db);
+  // NHÓM CHAT (sự cố P0 06/10/2026): tài khoản AI hết tiền lúc 11:38, bot im và máy ngừng ghi đơn ~2 giờ — cảnh báo chỉ nằm
+  // trong chuông ERP, nơi không ai đang nhìn. Lớp lỗi KHÔNG tự khỏi (hết tiền · khoá bị từ chối) ⇒ MỘT tin vào nhóm vận hành mỗi
+  // lý do mỗi ngày (cùng khoá với chuông). KHÁC tin «chuyển nhân viên» (chủ shop 03/10 tắt): đây là sự cố cả shop, không phải
+  // một khách. Lỗi gửi không chặn lượt chat.
+  try {
+    const group = await operationsGroupChannel();
+    if (group)
+      await deliverMessage({ connectorKey: group.connectorKey, destination: group.destination, title, body: `🚨 ${title}\n${body}\nAI bán hàng ngừng cả trả lời lẫn TỰ GHI ĐƠN — sửa ngay để không sót đơn.`, dedupeKey: `${dedupe}:group`, event: "sales_chat.ai_down", subject: { type: "SALES_CHAT", id: key } });
+  } catch {
+    // Nhóm chat là đường phụ — chuông ERP ở trên đã ghi.
+  }
 }

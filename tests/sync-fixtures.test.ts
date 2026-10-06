@@ -515,6 +515,7 @@ import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
 import { testMessengerDiscovery } from "./messenger-discovery.test";
+import { testSalesAiDownAlert } from "./sales-ai-down-alert.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
@@ -2802,6 +2803,7 @@ async function main() {
   await testMessengerLifecycle();
   // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
   await testMessengerDiscovery();
+  testSalesAiDownAlert();
   await testMessengerMultiPage();
   await testPush();
   // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
