@@ -3,7 +3,7 @@
   "mission_id": "ai-provider-failover",
   "title": "AI Sales failover: primary → secondary → người, circuit breaker, cấu hình theo tenant, kill switch",
   "business_goal": "",
-  "status": "FAILED",
+  "status": "VERIFYING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -29,12 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T10:00:15.751Z",
-  "updated_at": "2026-10-06T12:39:15.579Z",
+  "updated_at": "2026-10-06T12:41:59.632Z",
   "last_heartbeat": "2026-10-06T11:54:58.947Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#610 → 1d84fb13708ce823884ea52a6a42307f87b9984b",
-    "verify": "FAIL 1d84fb13708ce823884ea52a6a42307f87b9984b 2026-10-06T12:39:13.853Z",
+    "verify": "PASS 1d84fb13708ce823884ea52a6a42307f87b9984b 2026-10-06T12:41:57.875Z",
     "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37462403157"
   },
   "handoff": {
