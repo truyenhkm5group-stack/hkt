@@ -2171,6 +2171,10 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.quotedUnitPrice("PAGE1", hoi), 249000, "lay gia MOI NHAT shop bao, khong lay gia cu 749K");
   assert.equal(bot.quotedUnitPrice("PAGE1", [shop("chị ơi 299k/đầm nha")]), 299000);
   assert.equal(bot.quotedUnitPrice("PAGE1", [khach("249.000Đ/ĐẦM được không")]), null, "gia khach noi khong tinh");
+  // Su co Dung Phan: khach TRICH (tra loi) tin deal cua shop -> chu 249K nam trong truong trich dan cua tin khach
+  const trich = { from: { id: "KHACH" }, message: "Ơ NÀY SOP ƠI BÁO GIẢM 50% CÒN 249 K . MÀ", replied_message: { from: { id: "PAGE1" }, message: "hôm nay dành riêng cho chị iu đây ạ ❤️ 🔥 GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM Giá cũ 749.000Đ" } };
+  assert.equal(bot.quotedUnitPrice("PAGE1", [shop("Giá ưu đãi: 499k + 25K ship"), trich]), 249000, "doc gia trong tin khach trich lai");
+  assert.equal(bot.quotedUnitPrice("PAGE1", [{ from: { id: "KHACH" }, message: "", attachments: [{ type: "template", title: "GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM" }] }]), 249000, "the dinh kem");
   assert.match(bot.quotedPriceBlock("PAGE1", hoi), /249\.000đ\/đầm/);
   const chot249 = "Dạ em chốt đơn cho chị:\n• Đầm Q002 Đen L x 1\n• Tổng: 249.000đ + 25.000đ ship = 274.000đ";
   assert.ok(bot.summaryUsesPrice(chot249, 249000));
@@ -2183,6 +2187,9 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   catalog.setProducts([{ id: "p2", code: "Q002", name: "Đầm Q002", note: "", attributes: {}, price: { min: 749000, max: 749000 }, images: [], variations: [{ id: "x", sku: "x", fields: {}, price: 749000, stock: 1, available: true, images: [] }] }]);
   const chot = shop(chot249);
   assert.deepEqual(bot.orderBot.dropSanctionedDiscount(["giảm giá 475.000đ vượt 30% tiền hàng"], { agreed: 274000 }, "PAGE1", [...hoi, chot]), []);
+  // Cau bao gia chep khoi mau "499k + 25K ship" khi shop da bao 249K -> lech; nhac gia cu 749K (gia POS) thi khong tinh
+  assert.deepEqual(bot.pricesOffQuote("⚡ Giá ưu đãi: 499k + 25K ship", 249000), [499000]);
+  assert.deepEqual(bot.pricesOffQuote("Chỉ còn 249.000đ/đầm (giá cũ 749.000đ), 2 đầm 498.000đ", 249000), []);
   catalog.setProducts(prevProducts);
   console.log("OK 51: gia shop da bao khach (xa 249K) dung cho ban chot, chot chan gia va tu xac nhan; gia khach tu noi khong tinh");
 }

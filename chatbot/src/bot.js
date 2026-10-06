@@ -108,6 +108,28 @@ export function amountsIn(t) {
   return out;
 }
 
+/**
+ * Chu trong cac truong LONG cua mot tin (tin duoc trich khi khach bam "tra loi", the chia se bai / quang cao,
+ * tin mau), bo qua noi dung chinh (message / original_message) va URL. Dung de doc gia shop da bao khi chinh khach
+ * trich lai tin do.
+ */
+export function nestedText(msg) {
+  const out = [];
+  const walk = (v, depth) => {
+    if (depth > 6 || v == null) return;
+    if (typeof v === "string") {
+      if (depth > 0 && v.length < 4000) out.push(stripHtml(v));
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v === "object") for (const [k, x] of Object.entries(v)) {
+      if (depth === 0 && (k === "message" || k === "original_message")) continue;
+      walk(x, depth + 1);
+    }
+  };
+  walk(msg, 0);
+  return out.filter((x) => x && !/^https?:\/\//i.test(x)).join(" \n ");
+}
 // "249.000Đ/ĐẦM", "299k/đầm", "giá 249.000đ / chiếc": gia MOT san pham shop bao trong tin
 const GIA_MOI_SP = /(\d{2,3}(?:[.,]\d{3})|\d{2,3}\s*[kK])\s*(?:đ|Đ|vnđ|VNĐ|vnd|VND)?\s*\/\s*(?:đầm|ĐẦM|Đầm|cái|chiếc|bộ|sp|sản phẩm|váy|áo)/i;
 
@@ -777,8 +799,12 @@ export class Bot {
    */
   quotedUnitPrice(pageId, messages) {
     for (const m of [...(messages || [])].reverse()) {
-      if (!this.isFromPage(m, pageId)) continue;
-      const g = String(this.messageText(m) || "").match(GIA_MOI_SP);
+      // Su co Dung Phan 06/10/2026: tin "GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM" hien o phia KHACH — khach bam tra loi (trich)
+      // tin cua shop, nen chu nam trong truong trich dan cua tin khach chu khong o noi dung. Bot khong thay, bao 499k.
+      // Tin khach: CHI doc phan trich dan / the dinh kem (noi dung cua shop / bai quang cao), KHONG doc chu khach go —
+      // khach tu go "100k/đầm" khong phai gia shop da bao.
+      const t = this.isFromPage(m, pageId) ? String(this.messageText(m) || "") : nestedText(m);
+      const g = t.match(GIA_MOI_SP);
       if (!g) continue;
       const n = /k$/i.test(g[1].trim()) ? Number(g[1].replace(/\D/g, "")) * 1000 : Number(g[1].replace(/\D/g, ""));
       if (n >= 50000 && n < 10000000) return n;
@@ -924,6 +950,17 @@ ${dong.join("\n")}
     else dong.splice(i, 0, `• Mẫu: ${ten}`);
     log.info(`[${pageId}] Ban chot don khong ghi ma mau -> dung ${ma}`);
     return dong.join("\n");
+  }
+
+  /**
+   * Cac muc gia SAN PHAM (>= 100K) trong cau tra loi khong khop gia shop da bao `gia` (x1..5, + ship), tru gia niem yet
+   * POS (duoc nhac lam "giá cũ" de so sanh). Vd da bao 249K ma cau tra loi neu "499k" -> [499000].
+   */
+  pricesOffQuote(reply, gia) {
+    const hopLe = new Set();
+    for (let n = 1; n <= 5; n++) for (const ship of [0, 20000, 25000, 30000]) hopLe.add(gia * n + ship);
+    const niemYet = new Set(catalog.products.flatMap((p) => p.variations.map((v) => v.price)).filter(Boolean));
+    return [...amountsIn(reply)].filter((n) => n >= 100000 && !hopLe.has(n) && !niemYet.has(n));
   }
 
   /** Ban chot co dung gia mot san pham `gia` khong: co mot so tien = gia x (1..5) (+ 0 / 20K / 25K / 30K ship). */
@@ -1944,12 +1981,16 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     // Ban chot don phai dung gia shop DA BAO khach (vd 249K xa kho) — bang gia cu trong huong dan van "hop le" voi chot
     // chan gia nen chot chan khong bat duoc 299K. Sai -> viet lai MOT lan; van sai thi giu nguyen (khong chan cung).
     const giaBao = this.quotedUnitPrice(pageId, messages);
-    if (giaBao && isOrderSummaryReply(reply, false) && !this.summaryUsesPrice(reply, giaBao)) {
+    // Moi cau bao gia (khong chi ban chot): khoi bao gia mau trong huong dan ("Giá ưu đãi: 499k + 25K ship") van "hop le"
+    // voi chot chan gia, nen bot chep nguyen khoi do du shop vua bao khach 249K (su co 06/10/2026, Linh Tay Luxury).
+    const lechGia = giaBao ? this.pricesOffQuote(reply, giaBao) : [];
+    if (giaBao && (lechGia.length || (isOrderSummaryReply(reply, false) && !this.summaryUsesPrice(reply, giaBao)))) {
       const v = giaBao.toLocaleString("vi-VN");
-      log.warn(`[${pageId}] ${conversationId}: ban chot don khong theo gia da bao khach ${v}d -> viet lai`);
+      log.warn(`[${pageId}] ${conversationId}: tra loi khong theo gia da bao khach ${v}d (${lechGia.join(", ")}) -> viet lai`);
       store.bumpStat(pageId, "quotedPriceGuard");
-      const r3 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nShop ĐÃ báo khách này giá ${v}đ/đầm. Bản chốt đơn vừa rồi dùng giá khác. Viết lại bản chốt đơn với đúng ${v}đ/đầm × số lượng (+ phí ship nếu có), giữ nguyên các dòng khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
-      if (r3?.text && this.summaryUsesPrice(r3.text, giaBao) && !this.findDisallowedPrices(r3.text, systemPrompt).length) reply = r3.text;
+      const r3 = await generateReply(systemPrompt + `\n\n## CẢNH BÁO TỪ HỆ THỐNG\nShop ĐÃ báo khách này giá ${v}đ/đầm. Câu trả lời vừa rồi dùng giá khác${lechGia.length ? ` (${lechGia.map((n) => n.toLocaleString("vi-VN") + "đ").join(", ")})` : ""}. Viết lại với đúng ${v}đ/đầm × số lượng (+ phí ship nếu có); có thể nhắc giá cũ để so sánh, giữ nguyên các ý khác.`, history, { model: eff.model, temperature: 0.2 }).catch(() => null);
+      const ok = (t) => t && !this.pricesOffQuote(t, giaBao).length && (!isOrderSummaryReply(t, false) || this.summaryUsesPrice(t, giaBao)) && !this.findDisallowedPrices(t, systemPrompt).length;
+      if (ok(r3?.text)) reply = r3.text;
     }
     // Chan bot NEU NHAM MA MAU (vd page chu luc Q002 ma bot chot "Dam Q004")
     let maLa = this.wrongModelInReply(reply, pageId, messages, maNhanDien);
