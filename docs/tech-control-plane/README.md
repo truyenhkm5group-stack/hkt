@@ -299,3 +299,34 @@ Cần bạn · Đang chạy (worker sống) · Đang chờ (sẵn sàng / tồn 
 request (CI đỏ · xanh chờ duyệt) · Chi API hôm nay (trần, tháng). Dưới đó: mỗi lượt đang chạy với việc · năng lực ·
 worker · provider · model · thời gian chạy · nhịp tim · bước · % · PR/nhánh · 5 dòng nhật ký cuối. Tab mới:
 Cần chủ shop · Mục tiêu · Sứ mệnh · Worker (ngân sách công ty ở trang Worker, ngân sách sứ mệnh ở trang sứ mệnh).
+
+## 13. Pha 6 — định tuyến model + sổ năng lực (đã dựng)
+
+- Sổ năng lực: `lib/constants/tech-capabilities.ts` (15 năng lực, mỗi dòng trỏ tệp có thật — bài kiểm mở từng tệp;
+  `autonomous = false` cho deploy / migration / review an ninh / e2e — worker không khai được). Vai PLANNER · DEV ·
+  QA · REVIEWER · OPS là nhóm năng lực, không phải tiến trình thường trực.
+- Định tuyến model: `lib/constants/tech-routing.ts` — bốn HẠNG (`cheap` · `coding` · `reasoning` · `critical`) theo
+  năng lực; mặc định là BÍ DANH của Claude Code (`sonnet` / `opus`), đè ở `settings["tech.model-routing"]` không cần
+  deploy; chuỗi đè sai hình dạng bị bỏ. Máy chủ chọn ở lượt nhận việc, worker truyền `--model`. Lý do có thật: lượt
+  dogfood đầu tiên (việc tài liệu R0) chạy mặc định bằng model mạnh nhất, ước tính $4,19 / lượt.
+
+## 14. Dogfood đầu-cuối đầu tiên (07/10/2026, cục bộ)
+
+Mặt phẳng điều khiển chạy cục bộ (Next dev + PGlite, mã của nhánh Pha 4), worker chạy headless bằng Claude Code gói
+thuê bao trên máy dev — không VS Code, không người can thiệp giữa chừng:
+
+```
+GOAL-1 (ACTIVE) → MIS-1 (ACTIVE) → TECH-1 "Viết runbook vận hành worker headless" (R0 · chính sách R0 · SPEC_READY)
+→ worker dogfood-local-1 nhận việc qua hàng đợi (lease, lần 1/3) → cây riêng wt-tech-tech-1-a1 từ origin/main
+→ npm ci → Claude Code headless (môi trường cho-phép, không khoá API) → cổng typecheck ✅ lint ✅
+→ worker commit + đẩy ai/worker/TECH-1-a1 (1 tệp, 254 dòng) → complete SUCCEEDED → TECH-1 REVIEW, lease nhả
+→ yêu cầu PR: pr.request_failed "chưa có ERP_GITHUB_REPO" (đúng: ERP cục bộ không có cấu hình GitHub)
+```
+
+16 phút · 38 dòng nhật ký · tiền ước tính $4,19 (gói thuê bao, `estimated: true`, không cộng vào tiền API).
+Ba lỗi dogfood lộ ra và đã sửa: `cod` khớp nhầm "Claude **Cod**e" (máy xếp rủi ro khớp theo từ), một nhịp tim
+lọt ra sau khi nộp kết quả, model mặc định là loại mạnh nhất cho việc tài liệu (định tuyến model).
+
+Hạn chế đã biết (Pha 8): Claude Code đọc được tệp NGOÀI cây làm việc (lượt dogfood đọc mã worker ở cây khác vì
+`origin/main` chưa có nó). Cô lập GHI đã giữ (diff đúng 1 tệp trong cây), cô lập ĐỌC cần chạy worker dưới tài khoản
+hệ điều hành / container riêng chỉ thấy bản clone của worker.

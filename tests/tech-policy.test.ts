@@ -11,6 +11,7 @@ import {
   resolveBudget,
 } from "@/lib/constants/tech-policy";
 import { techCockpit } from "@/lib/queries/tech-cockpit";
+import { DEFAULT_TIER_MODEL, MODEL_NAME_PATTERN, modelForCapability } from "@/lib/constants/tech-routing";
 import { apiSpend, setTechBudget } from "@/lib/tech/budget";
 import { createTechGoal, createTechMission, setTechMissionStatus } from "@/lib/tech/control-plane";
 import { createTechTask, reclassifyTechTaskPolicy, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
@@ -57,6 +58,15 @@ export function testTechPolicyPure() {
   assert.equal(apiSpendAlert({ ...EMPTY_BUDGET, apiUsdDaily: 10 }, 8), "WARN");
   assert.equal(apiSpendAlert({ ...EMPTY_BUDGET, apiUsdDaily: 10 }, 10), "EXCEEDED");
   assert.equal(BUDGET_DEFAULTS.maxAttempts, 3);
+
+  // Định tuyến model (Pha 6): theo HẠNG, không gắn cứng mã model; đè sai hình dạng bị bỏ.
+  assert.deepEqual(modelForCapability("write-docs"), { tier: "cheap", model: DEFAULT_TIER_MODEL.cheap });
+  assert.equal(modelForCapability("architecture-analysis").tier, "reasoning");
+  assert.equal(modelForCapability("năng-lực-lạ").tier, "coding", "năng lực lạ không tự leo lên hạng đắt");
+  assert.equal(modelForCapability("fix-bug", { coding: "haiku" }).model, "haiku", "chủ shop đè được không cần deploy");
+  assert.equal(modelForCapability("fix-bug", { coding: "sonnet --dangerously-skip-permissions" }).model, DEFAULT_TIER_MODEL.coding, "chuỗi lạ (cờ CLI) không bao giờ đi xuống worker");
+  assert.notEqual(DEFAULT_TIER_MODEL.cheap, DEFAULT_TIER_MODEL.critical, "không dùng model mạnh nhất cho mọi việc");
+  for (const m of Object.values(DEFAULT_TIER_MODEL)) assert.match(m, MODEL_NAME_PATTERN);
   console.log("✓ Chính sách & ngân sách (thuần): R0–R4 chỉ nâng, có lý do · từ khoá nguy hiểm ⇒ R4 · tầng hẹp đè từng ô · tiền API chưa khai ⇒ không chi");
 }
 
@@ -95,6 +105,8 @@ export async function testTechPolicyDb() {
     const c = (await claimNextTechTask(await w(api.id))).task;
     assert.ok(c && c.taskId === t.id, "đã khai trần + chính sách R0 ⇒ nhận được");
     assert.equal(c!.timeoutMinutes, BUDGET_DEFAULTS.maxRunMinutes);
+    assert.equal(c!.modelTier, "cheap", "việc tài liệu đi hạng rẻ");
+    assert.equal(c!.model, DEFAULT_TIER_MODEL.cheap);
 
     // 3 · Trần đồng thời cấp công ty = 1 ⇒ worker thứ hai không nhận dù còn việc.
     const sub = (await registerTechWorker({ key: "tp-t-sub", name: "Worker gói", provider: "SUBSCRIPTION_CLAUDE_CODE", capabilities: ["write-docs"] }, chuShop)) as { id: string };

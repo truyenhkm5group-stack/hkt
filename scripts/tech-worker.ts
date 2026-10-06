@@ -55,6 +55,8 @@ type Claimed = {
   /** Việc sửa CI: làm tiếp trên nhánh của PR đang mở thay vì mở nhánh mới. */
   existingBranch: boolean;
   timeoutMinutes: number;
+  modelTier: string;
+  model: string;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -97,6 +99,8 @@ function npmCi(cwd: string, env: NodeJS.ProcessEnv): boolean {
 }
 
 async function complete(t: Claimed, body: Record<string, unknown>) {
+  // Đã nộp kết quả ⇒ thôi đập nhịp cho lượt này (dogfood 07/10: một nhịp lọt ra sau khi nộp, máy chủ trả DỪNG/RUN_CLOSED).
+  active.delete(t.runId);
   const r = await api<{ ok?: true; error?: string; taskStatus?: string }>("complete", { runId: t.runId, leaseGeneration: t.leaseGeneration, ...body });
   log(`${t.code}: complete → ${r.status} ${r.data.taskStatus ?? r.data.error ?? ""}`);
 }
@@ -154,6 +158,8 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
       // Trần do máy chủ cấp (ngân sách); biến môi trường chỉ được HẠ thêm, không nới.
       timeoutMs: Math.min(cfg.timeoutMin, t.timeoutMinutes || cfg.timeoutMin) * 60_000,
       allowedTools: toolAllowlist(),
+      // Model do máy chủ định tuyến (hạng theo năng lực) — không dùng model mạnh nhất cho mọi việc.
+      model: t.model || undefined,
       maxTurns: 80,
       onLog: push,
       signal: a.abort.signal,

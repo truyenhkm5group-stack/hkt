@@ -17,6 +17,8 @@ import {
 } from "@/lib/constants/tech-worker";
 import { rowsOf } from "@/lib/sql-rows";
 import { BUDGET_DEFAULTS, apiSpendAllowed } from "@/lib/constants/tech-policy";
+import { MODEL_ROUTING_SETTING, modelForCapability } from "@/lib/constants/tech-routing";
+import { getSettingJson } from "@/lib/settings";
 import { apiSpend, effectiveBudget, runningWorkerRuns } from "@/lib/tech/budget";
 import { recordTechEvent } from "@/lib/tech/control-plane";
 import { requestWorkerPullRequest } from "@/lib/tech/delivery";
@@ -208,6 +210,9 @@ export type ClaimedTask = {
   existingBranch: boolean;
   /** Trần thời gian một lượt (ngân sách `maxRunMinutes`, mặc định 45′) — worker dừng agent khi quá. */
   timeoutMinutes: number;
+  /** Model do máy chủ định tuyến theo năng lực (`modelForCapability`) — hạng + bí danh / mã. */
+  modelTier: string;
+  model: string;
   mission: { code: string; title: string; definitionOfDone: string } | null;
 };
 
@@ -299,6 +304,7 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
     }
   }
   const capability = taskCapability(task);
+  const dinhTuyen = modelForCapability(capability, await getSettingJson<Record<string, unknown>>(MODEL_ROUTING_SETTING, {}));
   const tiepNhanh = capability === "ci-debug" && WORKER_BRANCH_PATTERN.test(task.branch);
   const branch = tiepNhanh ? task.branch : taskBranchName(task.code, task.attempts);
   const [run] = await db
@@ -313,7 +319,7 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       workerId: worker.id,
       provider: worker.provider,
       leaseGeneration: task.leaseGeneration,
-      metadata: { source: "tech-worker", attempt: task.attempts, capability },
+      metadata: { source: "tech-worker", attempt: task.attempts, capability, modelTier: dinhTuyen.tier, modelRequested: dinhTuyen.model },
     })
     .returning({ id: schema.techAgentRuns.id });
   await recordTechTaskEvent({ taskId: task.id, kind: "RUN", note: `Worker ${worker.key} nhận việc — lần thử ${task.attempts}/${task.maxAttempts}`, nextValue: run.id, payload: { workerId: worker.id, leaseGeneration: task.leaseGeneration, branch } }, workerActor(worker));
@@ -337,6 +343,8 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
       branch,
       existingBranch: tiepNhanh,
       timeoutMinutes: ngan.maxRunMinutes ?? BUDGET_DEFAULTS.maxRunMinutes,
+      modelTier: dinhTuyen.tier,
+      model: dinhTuyen.model,
       mission: task.mission ? { code: task.mission.code, title: task.mission.title, definitionOfDone: task.mission.definitionOfDone } : null,
     },
   };
@@ -494,6 +502,9 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
       model: input.model?.slice(0, 100) || run.model,
       metadata: {
         ...meta,
+        // Bước / % cuối: lượt đã kết thúc thì màn hình không được kẹt ở bước giữa chừng của nhịp tim cuối.
+        step: input.outcome === "SUCCEEDED" ? "xong — đã đẩy nhánh" : `kết thúc: ${input.outcome}`,
+        progressPct: input.outcome === "SUCCEEDED" ? 100 : (meta as { progressPct?: number }).progressPct ?? null,
         outcome: input.outcome,
         billing,
         cost: input.cost ? { ...input.cost, estimated: billing === "SUBSCRIPTION" ? true : (input.cost.estimated ?? false) } : null,
