@@ -11,7 +11,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { createResetLinkAsOperator } from "@/lib/users/password-reset";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import type { PlatformActor } from "@/lib/platform/audit";
-import { createAccount, findAccountByCode, findAccountById, moveWorkspaceToAccount, openSubscriptionsForProductsInUse, productsInUse, setSubscriptionState, updateAccount, accountMergeCandidates } from "@/lib/saas/accounts";
+import { findAccountByCode, findAccountById, moveWorkspaceToAccount, openSubscriptionsForProductsInUse, productsInUse, setSubscriptionState, updateAccount, accountMergeCandidates } from "@/lib/saas/accounts";
 import { finalizeStatement } from "@/lib/saas/billing";
 import { PRODUCT_KEYS, productDef } from "@/lib/saas/catalog";
 import { accountAuditTrail, accountProvisioningJobs, finalizedStatements, loadCommercialSnapshot, moduleDrift, productEconomics, workspaceReach, type CommercialSnapshot, type CustomerView } from "@/lib/saas/customers";
@@ -282,18 +282,3 @@ export async function finalizeStatementAsOperator(user: SessionUser, raw: unknow
   const r = await finalizeStatement(p.data.accountCode, p.data.periodMonth, { actor: actorOf(user), email: user.email, reason: p.data.reason, source: "UI" });
   return "ok" in r ? { ok: true, message: "Đã chốt bảng kê kỳ." } : r;
 }
-
-export async function createAccountAsOperator(user: SessionUser, raw: unknown): Promise<{ ok: true; code: string } | Denied> {
-  const denial = platformOperatorDenial(user);
-  if (denial) return { error: denial };
-  const p = accountInput.extend({ reason }).safeParse(raw);
-  if (!p.success) return { error: firstIssue(p.error) };
-  const { reason: why, ...d } = p.data;
-  try {
-    const a = await createAccount({ ...d, code: d.code || null }, { actor: actorOf(user), source: "OPERATOR", reason: why });
-    return { ok: true, code: a.code };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
-  }
-}
-

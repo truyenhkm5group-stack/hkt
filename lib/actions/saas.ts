@@ -5,7 +5,6 @@ import { requirePermission } from "@/lib/auth/session";
 import {
   addCostEntryAsOperator,
   changeSubscriptionAsOperator,
-  createAccountAsOperator,
   createCustomerAsOperator,
   finalizeStatementAsOperator,
   moveWorkspaceAsOperator,
@@ -33,12 +32,6 @@ function refresh(accountCode?: string | null) {
 export async function createCustomerAction(input: unknown) {
   const r = await createCustomerAsOperator(await op(), input);
   if ("ok" in r) refresh(r.accountCode);
-  return r;
-}
-
-export async function createAccountAction(input: unknown) {
-  const r = await createAccountAsOperator(await op(), input);
-  if ("ok" in r) refresh(r.code);
   return r;
 }
 
