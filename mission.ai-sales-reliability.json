@@ -3,7 +3,7 @@
   "mission_id": "ai-sales-reliability",
   "title": "AI Sales production-grade: giám sát sống/chết, SLO, failover provider, DLQ, cockpit, quyền Messenger, hồ sơ App Review, cứu hội thoại sót",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P0",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -46,9 +46,12 @@
   "migration_reservations": [],
   "migration_reserved_at": {},
   "created_at": "2026-10-06T09:51:01.832Z",
-  "updated_at": "2026-10-06T12:22:17.572Z",
+  "updated_at": "2026-10-06T12:42:28.605Z",
   "last_heartbeat": "2026-10-06T12:22:17.572Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#607 → d7c55eaf718133990f949e141ef6cffd77a4166f"
+  },
   "handoff": {
     "branch": "feat/ai-sales-retry",
     "sha": "14df84233d233f2ade7f46d5e910643eff7b9d51",
