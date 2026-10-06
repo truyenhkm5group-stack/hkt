@@ -75,3 +75,4 @@
 {"at":"2026-10-06T12:17:25.334Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"deploy-reuse-wait","detail":"PASS 208c824520f0d2c6326f5264ed9377b2135e90d8 2026-10-06T12:17:23.700Z"}
 {"at":"2026-10-06T12:17:32.094Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"messenger-permission-diag","detail":"PR #608 gộp 208c8245; deploy 37459821433 thành công; verify ĐẠT"}
 {"at":"2026-10-06T12:17:38.347Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"deploy-reuse-wait","detail":"PR #606 gộp 35c3ce71; deploy 37459821433 dùng lại CI của main (gates skipped, bang_chung 13,8′); verify ĐẠT"}
+{"at":"2026-10-06T12:18:12.174Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#610 @ 8c1c115e798e · Review độc lập: BLOCK ở 1cb67f3f (id công cụ Gemini → Anthropic 400) → sửa → PASS ở 8c1c115e (5/5 điểm)"}
