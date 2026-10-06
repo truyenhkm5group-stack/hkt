@@ -73,6 +73,20 @@ export function marginApplicable(mode: BillingMode): boolean {
   return mode === "EXTERNAL_INVOICE";
 }
 
+/**
+ * Workspace của tài khoản này có KHUNG TỰ THANH TOÁN ở `/settings/plan` không (gia hạn bằng QR, mua thêm, hạn mức tháng của
+ * gói bán). Chỉ hoá đơn khách: chargeback nội bộ không trả tiền cho chính nền tảng — chứng từ của nó là bảng kê chargeback ở
+ * màn người vận hành. Đây là chỗ DUY NHẤT trang gói phân biệt khách nội bộ (Phase 14 thay cho nhánh `isHome` của trang).
+ */
+export function selfServeBilling(mode: BillingMode): boolean {
+  return mode === "EXTERNAL_INVOICE";
+}
+
+/** Đọc `billing_mode` thô của một dòng tài khoản; thiếu tài khoản / giá trị lạ ⇒ hoá đơn khách (mặc định của khách ngoài). */
+export function billingModeOf(raw: string | null | undefined): BillingMode {
+  return (BILLING_MODES as readonly string[]).includes(raw ?? "") ? (raw as BillingMode) : "EXTERNAL_INVOICE";
+}
+
 /** Tài khoản loại này có được GỢI Ý gộp theo tên không — chỉ khách ngoài (khách nội bộ do người vận hành tự quản). */
 /**
  * Job cấp phát có được HUỶ thuê bao (thu hồi module độc quyền) của tài khoản loại này không. Nội bộ thì KHÔNG: huỷ ERP của

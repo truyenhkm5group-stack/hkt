@@ -4,6 +4,10 @@
  * Đọc cho `/settings/plan` của CHÍNH tổ chức người xem (mã tổ chức do trang lấy từ PHIÊN). Khách thấy: gói, giá tháng / năm,
  * ngày gia hạn, "3.245 / 5.000 hội thoại AI" + phần trăm + mức, tính năng gói có. Khách KHÔNG thấy token, model hay chi phí
  * AI của nền tảng — đó là việc của người vận hành (`lib/pricing/admin.ts`).
+ *
+ * Workspace có khung này hay không là DỮ LIỆU của tài khoản (`billing_mode`, `lib/saas/policy.ts::selfServeBilling`), không
+ * phải câu hỏi "có phải nhà không" (Phase 14). Workspace chưa gắn tài khoản ⇒ coi như hoá đơn khách (như
+ * `subscriptionStatusFor`) — khách cũ không mất khung nào vì thiếu một dòng tài khoản.
  */
 import { readSubscriptionTerms } from "@/lib/billing/standing";
 import { billingStanding, vnDate } from "@/lib/billing/rules";
@@ -15,6 +19,8 @@ import { evaluateQuota, usageLine, type QuotaVerdict } from "@/lib/pricing/guard
 import { featureGranted, FEATURE_KEYS, type FeatureDecision } from "@/lib/pricing/features";
 import { readGuardConfig, resolveOrgPricing, QUOTA_METER } from "@/lib/pricing/entitlements";
 import { usagePeriodOf } from "@/lib/pricing/meter";
+import { accountOfWorkspace } from "@/lib/saas/accounts";
+import { billingModeOf, selfServeBilling, type BillingMode } from "@/lib/saas/policy";
 
 export type CustomerQuotaRow = QuotaVerdict & { line: string };
 
@@ -34,9 +40,22 @@ export type CustomerPlanView = {
   errors: string[];
 };
 
+export type PlanPageFrame = { billingMode: BillingMode; selfServe: boolean };
+
+/**
+ * Khung của trang `/settings/plan` cho một workspace: có phần tự thanh toán + hạn mức tháng không. Đọc tài khoản lỗi (sổ
+ * thương mại chưa migrate / hỏng) ⇒ như chưa gắn tài khoản: khách giữ nguyên khung thanh toán — một lỗi đọc không được
+ * cắt đường trả tiền của khách.
+ */
+export async function loadPlanPageFrame(orgCode: string): Promise<PlanPageFrame> {
+  const account = await accountOfWorkspace(orgCode).catch(() => null);
+  const billingMode = billingModeOf(account?.billingMode);
+  return { billingMode, selfServe: selfServeBilling(billingMode) };
+}
+
 export async function loadCustomerPlan(orgCode: string, now: Date = new Date()): Promise<CustomerPlanView | null> {
   const org = await findOrganization(orgCode);
-  if (!org || org.isHome) return null;
+  if (!org || !(await loadPlanPageFrame(org.code)).selfServe) return null;
   const [pricing, config, terms, planUsage] = await Promise.all([resolveOrgPricing(org), readGuardConfig(), readSubscriptionTerms(org.code), getPlanUsage(org.code)]);
   const period = usagePeriodOf(now);
   const usage = await readPeriodUsage(org, period, now);
@@ -59,7 +78,7 @@ export async function loadCustomerPlan(orgCode: string, now: Date = new Date()):
     resetsOn: period.resetsOn,
     measuredAt: usage.measuredAt,
     quotas,
-    features: FEATURE_KEYS.map((key) => featureGranted({ key, isHome: false, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: c?.features ?? null })),
+    features: FEATURE_KEYS.map((key) => featureGranted({ key, grandfathered: pricing.row.grandfathered, overrides: pricing.row.featureOverrides, planFeatures: c?.features ?? null })),
     errors: usage.errors,
   };
 }

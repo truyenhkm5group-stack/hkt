@@ -97,8 +97,9 @@ function testPure() {
   assert.equal(trialDaysOf("growth"), null);
 
   // Bảng chân lý tính năng.
-  const base = { key: "api" as const, isHome: false, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
-  assert.deepEqual(featureGranted({ ...base, isHome: true }), { key: "api", granted: true, source: "HOME" });
+  const base = { key: "api" as const, grandfathered: false, overrides: {}, planFeatures: ["ai_sales" as const] };
+  // Không còn bậc "tổ chức nhà" (Phase 14): gói nội bộ khai đủ tính năng nên có API ở bậc GÓI, như mọi khách.
+  assert.deepEqual(featureGranted({ ...base, planFeatures: [...FEATURE_KEYS] }), { key: "api", granted: true, source: "PLAN" });
   assert.equal(featureGranted(base).granted, false);
   assert.equal(featureGranted({ ...base, grandfathered: true }).source, "GRANDFATHERED");
   assert.equal(featureGranted({ ...base, grandfathered: true, overrides: { api: false } }).granted, false, "ghi đè thắng cả giữ từ trước");
@@ -321,11 +322,11 @@ export async function testPricingBilling() {
     assert.equal(await hasFeature("api", { orgCode: A }), false, "gói Dùng thử không có API");
     await setOrgPlan(A, "pro");
     assert.equal(await hasFeature("api", { orgCode: A }), true, "NÂNG lên Chuyên nghiệp ⇒ có API");
-    assert.equal((await resolveOrgPricing({ code: A, isHome: false, plan: "pro" })).quotas.aiConversations, 1800);
+    assert.equal((await resolveOrgPricing({ code: A, plan: "pro" })).quotas.aiConversations, 1800);
     await setOrgPlan(A, "basic");
     assert.equal(await hasFeature("api", { orgCode: A }), false, "HẠ về Cơ bản ⇒ mất API");
     assert.equal(await hasFeature("multi_page_inbox", { orgCode: A }), false);
-    assert.equal((await resolveOrgPricing({ code: A, isHome: false, plan: "basic" })).quotas.aiConversations, 180);
+    assert.equal((await resolveOrgPricing({ code: A, plan: "basic" })).quotas.aiConversations, 180);
     assert.equal(await hasFeature("api", { orgCode: home.code }), true, "tổ chức nhà luôn đủ");
     assert.equal(await hasFeature("api", { orgCode: "khong-ton-tai" }), false, "không biết của ai ⇒ không cấp");
 

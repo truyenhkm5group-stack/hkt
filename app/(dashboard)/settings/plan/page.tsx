@@ -11,7 +11,7 @@ import { AddonPicker, InvoiceInfoForm, OpenInvoiceCard, RenewalPicker } from "@/
 import { isAddonKind } from "@/lib/billing/addons";
 import { formatDate, formatDateTime, formatVND } from "@/lib/format";
 import { CustomerUsageSection } from "@/components/pricing/customer-usage";
-import { loadCustomerPlan } from "@/lib/pricing/customer";
+import { loadCustomerPlan, loadPlanPageFrame } from "@/lib/pricing/customer";
 import { MyProductsSection } from "@/components/saas/my-products";
 import { loadMyProducts } from "@/lib/saas/portal";
 
@@ -30,9 +30,13 @@ export default async function PlanPage() {
   const usage = await getPlanUsage(user.organization?.code);
   // Mã tổ chức lấy từ PHIÊN (không từ URL): tổ chức chỉ thấy sổ AI của chính mình.
   const ai = await loadOrgAiUsage(usage.orgCode);
-  const billing = usage.isHome ? null : await loadTenantBilling(usage.orgCode);
+  // Khung tự thanh toán + hạn mức tháng: theo DỮ LIỆU tài khoản (`billing_mode`) — chargeback nội bộ không trả tiền cho
+  // chính nền tảng. Không còn câu hỏi "có phải nhà không" ở trang này (Phase 14).
+  const frame = await loadPlanPageFrame(usage.orgCode);
+  const billing = frame.selfServe ? await loadTenantBilling(usage.orgCode) : null;
   // Hạn mức THƯƠNG MẠI tháng này (0222): đơn vị dễ hiểu, không token / chi phí — cùng mã tổ chức của PHIÊN.
-  const customer = usage.isHome ? null : await loadCustomerPlan(usage.orgCode);
+  const customer = frame.selfServe ? await loadCustomerPlan(usage.orgCode) : null;
+  const unlimited = usage.plan ? Object.values(usage.plan.limits).every((v) => v === null) : false;
   // Sản phẩm đã thuê (0224): workspace lấy từ PHIÊN; khách nội bộ và khách ngoài cùng một khung.
   // Khung mới (0224) không được làm sập trang gói của mọi tổ chức (kể cả nhà) khi sổ thương mại lỗi — lỗi ⇒ ẩn khung.
   const products = await loadMyProducts(user).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
@@ -41,7 +45,7 @@ export default async function PlanPage() {
       <PageHeader
         eyebrow="Hệ thống"
         title="Gói & thanh toán"
-        description={usage.plan ? `Gói «${usage.plan.name}»${usage.isHome ? " — tổ chức nhà, không giới hạn" : ""}` : "Không đọc được gói"}
+        description={usage.plan ? `Gói «${usage.plan.name}»${!frame.selfServe && unlimited ? " — khách nội bộ, không giới hạn" : ""}` : "Không đọc được gói"}
         hint="Hạn mức kiểm ở đúng chỗ tạo: người dùng, trang tuỳ biến, luật tự động, tải tệp. Vượt thì thao tác đó báo lỗi rõ ràng, không có gì bị xoá. Thiếu đúng một hạng mục: mua thêm giữa kỳ, trả theo số ngày còn lại. Nâng gói: chọn gói ở khung Thanh toán, chuyển khoản theo mã QR — tiền về là gói mới có hiệu lực."
       />
       {"error" in products ? null : <MyProductsSection view={products} />}

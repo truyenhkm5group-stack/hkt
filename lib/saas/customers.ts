@@ -103,7 +103,7 @@ export async function loadCommercialSnapshot(opts: { periodMonth?: string; now?:
   });
 
   const workspaceView = (w: WorkspaceRow, mode: BillingMode): WorkspaceView => {
-    const planKey = planKeyOf({ isHome: w.isHome, plan: w.plan });
+    const planKey = planKeyOf({ plan: w.plan });
     const t = termsBy.get(w.code);
     const standing = billingStanding(t ? { billingEnabled: t.billingEnabled, paidThrough: t.paidThrough, graceDays: t.graceDays } : null, today).kind;
     const subs = registry.subscriptions.filter((s) => s.orgCode === w.code);

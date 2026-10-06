@@ -92,7 +92,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const suspended = registry.filter((o) => o.status === "SUSPENDED");
   const paused = registry.filter((o) => support[o.code]?.workflowsPaused);
   const secretsKey = secretsKeyPublicStatus();
-  const planOfCode = (code: string, isHome: boolean) => planKeyOf({ isHome, plan: registry.find((r) => r.code === code)?.plan ?? null });
+  const planOfCode = (code: string) => planKeyOf({ plan: registry.find((r) => r.code === code)?.plan ?? null });
   const planName = (key: string) => plans.find((p) => p.key === key)?.name ?? key;
 
   return (
@@ -225,7 +225,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {o.templateKey ? (ORG_TEMPLATES[o.templateKey]?.label ?? o.templateKey) : <span className="text-muted-foreground">—</span>}
-                      <div className="text-[11px] text-muted-foreground">Gói {planName(planOfCode(o.code, o.isHome))}</div>
+                      <div className="text-[11px] text-muted-foreground">Gói {planName(planOfCode(o.code))}</div>
                     </td>
                     <td className="numeric px-3 py-2 text-right" title={`Dòng module thiếu = ${o.moduleDefault === "ENABLED" ? "BẬT" : "TẮT"}`}>
                       {o.enabledModules ?? "—"}/{o.totalModules}

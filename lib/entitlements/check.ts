@@ -4,7 +4,9 @@
  * Gọi ở ĐÚNG điểm tạo: người dùng, trang, luật, tải tệp, đối tượng tuỳ biến (`createObject` + khôi phục), bản ghi tuỳ
  * biến (`createRecord`), bản nháp AI (`createDraft`). Vượt ⇒ `{ ok: false, error }` — LỖI NGHIỆP VỤ, không ném: điểm gọi trả thẳng câu đó cho người bấm.
  *
- *  · Tổ chức NHÀ = gói `internal`, không giới hạn, và KHÔNG đếm gì — hành vi của nhà không đổi một truy vấn (X7).
+ *  · KHÔNG có nhánh "tổ chức nhà" (Phase 14 · docs/saas/ENTITLEMENTS.md): nhà mang gói được GÁN cho nó bằng DỮ LIỆU (cột
+ *    `platform_organizations.plan`; 0225 ghi đúng gói mã cũ tự gán — `internal`) và đi ĐÚNG đường của khách. Đổi gói của
+ *    nhà = đổi cột đó; không cần sửa tệp này.
  *  · Đếm THẬT từ CSDL tổ chức (không bộ đếm riêng dễ lệch). Đệm 60 giây qua `memo` (khoá tự mang tổ chức) — NHƯNG khi
  *    số đệm đã tới 80% trần thì đếm lại tươi, VÀ mỗi lượt cho qua thì QUÊN số đệm (`forgetMemo`): lượt cho qua là lời
  *    hứa sắp có một dòng mới, nên số đệm vừa thấp hơn thật một đơn vị. Lượt ghi do NGƯỜI bấm đã xoá đệm qua `audit()`,
@@ -12,6 +14,7 @@
  *    cho lọt lượt thứ ba (bài kiểm H4 mô phỏng bằng một dòng chèn không qua `audit`).
  *  · Loại chưa có bộ đếm ⇒ cho qua và nói `used: null` (chưa biết ≠ 0): chặn một thứ không đo được là đoán.
  *  · Gói lạ trên tổ chức ⇒ dùng hạn mức `trial` (phía HẸP); không đọc được cả `trial` ⇒ từ chối, nói rõ vì sao.
+ *    Luật này áp cho MỌI workspace, kể cả nhà — không có gói ẩn vô hạn nào trong mã (quyết định giá V1, 07/10/2026).
  */
 import { count, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, schema } from "@/db";
@@ -36,14 +39,28 @@ export type EntitlementVerdict =
   | { ok: true; kind: EntitlementKind; planKey: string; used: number | null; limit: number | null }
   | { ok: false; kind: EntitlementKind; planKey: string; planName: string; used: number; limit: number; error: string };
 
-/** Gói danh nghĩa của một tổ chức: nhà LUÔN `internal`; khác thiếu ⇒ `trial`. */
-export function planKeyOf(org: Pick<Organization, "isHome" | "plan">): string {
-  if (org.isHome) return HOME_PLAN_KEY;
+/**
+ * Gói danh nghĩa của một workspace = cột `plan`; trống ⇒ `trial`. Workspace nhà KHÔNG được đối xử riêng: nó mang `internal`
+ * trong chính cột này (0225), và hai đường ghi gói (`setOrganizationPlan`, khớp tiền gia hạn) không cho đổi gói của nhà.
+ */
+export function planKeyOf(org: Pick<Organization, "plan">): string {
   return org.plan?.trim() || DEFAULT_PLAN_KEY;
 }
 
 /** `priceVnd` = giá MỘT THÁNG (0187); `null` = gói không bán (không phải giá 0). `addonPrices` = đơn giá mua thêm (0192, thô). */
 export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown; yearlyFreeMonths: number; commercial: unknown };
+
+/**
+ * Dòng gói HIỆU LỰC cho khoá `key` — MỘT phép chọn cho hạn mức kỹ thuật (`resolvePlan`) lẫn hạn mức thương mại / tính năng
+ * (`lib/pricing/entitlements.ts`): có trong sổ ⇒ dòng đó; vắng ⇒ `trial` (`fellBack`, phía hẹp); không cả `trial` ⇒ `null`
+ * (nơi gọi từ chối). Không khoá nào được đối xử riêng.
+ */
+export function effectivePlanRow(plans: readonly PlanRow[], key: string): { row: PlanRow; fellBack: boolean } | null {
+  const hit = plans.find((p) => p.key === key);
+  if (hit) return { row: hit, fellBack: false };
+  const trial = plans.find((p) => p.key === DEFAULT_PLAN_KEY);
+  return trial ? { row: trial, fellBack: true } : null;
+}
 
 /** Mọi gói (cho màn vận hành). Bảng chưa có ⇒ rỗng. */
 export async function listPlans(): Promise<PlanRow[]> {
@@ -57,22 +74,15 @@ export async function listPlans(): Promise<PlanRow[]> {
   }
 }
 
-export async function resolvePlan(org: Pick<Organization, "isHome" | "plan"> & { code?: string }): Promise<ResolvedPlan | null> {
-  const key = planKeyOf(org);
-  const plans = await listPlans();
-  const hit = plans.find((p) => p.key === key);
-  if (org.isHome) {
-    // Nhà không bao giờ bị giới hạn, kể cả khi dòng `internal` bị sửa tay.
-    const all = Object.fromEntries(ENTITLEMENT_KINDS.map((k) => [k, null])) as PlanLimits;
-    return { key: HOME_PLAN_KEY, name: hit?.name ?? "Nội bộ", description: hit?.description ?? null, limits: all, planLimits: all, addons: {}, undeclared: [], fellBack: false };
-  }
-  const row = hit ?? plans.find((p) => p.key === DEFAULT_PLAN_KEY);
-  if (!row) return null;
+export async function resolvePlan(org: Pick<Organization, "plan"> & { code?: string }): Promise<ResolvedPlan | null> {
+  const picked = effectivePlanRow(await listPlans(), planKeyOf(org));
+  if (!picked) return null;
+  const { row, fellBack } = picked;
   const parsed = parseLimits(row.limits);
   // Phần MUA THÊM cộng vào hạn mức gói (0192). Tổ chức không có `code` (gọi từ bước xem trước của onboarding) ⇒ chỉ gói.
   const addons: AddonUnits = org.code ? await readSubscriptionAddons(org.code) : {};
   const limits = hasAddons(addons) ? applyAddons(parsed.limits, addons) : parsed.limits;
-  return { key: row.key, name: row.name, description: row.description, limits, planLimits: parsed.limits, addons, undeclared: parsed.undeclared, fellBack: !hit };
+  return { key: row.key, name: row.name, description: row.description, limits, planLimits: parsed.limits, addons, undeclared: parsed.undeclared, fellBack };
 }
 
 // ─── Bộ đếm: ĐẾM THẬT trong CSDL của tổ chức NGỮ CẢNH ───
@@ -142,7 +152,6 @@ async function targetOrg(orgCode?: string): Promise<Organization | null> {
 export async function checkEntitlement(kind: EntitlementKind, delta = 1, opts: { orgCode?: string } = {}): Promise<EntitlementVerdict> {
   const org = await targetOrg(opts.orgCode);
   if (!org) return { ok: false, kind, planKey: "?", planName: "?", used: 0, limit: 0, error: "Không xác định được tổ chức — không kiểm được hạn mức gói." };
-  if (org.isHome) return { ok: true, kind, planKey: HOME_PLAN_KEY, used: null, limit: null };
   const plan = await resolvePlan(org);
   if (!plan) return { ok: false, kind, planKey: planKeyOf(org), planName: planKeyOf(org), used: 0, limit: 0, error: "Không đọc được gói dịch vụ của tổ chức — người vận hành nền tảng cần kiểm bảng gói." };
   const limit = plan.limits[kind];
@@ -159,12 +168,12 @@ export async function checkEntitlement(kind: EntitlementKind, delta = 1, opts: {
 }
 
 export type UsageRow = { kind: EntitlementKind; label: string; unit: string; used: number | null; limit: number | null; measured: boolean; undeclared: boolean; note: string | null };
-export type PlanUsage = { orgCode: string; isHome: boolean; plan: ResolvedPlan | null; rows: UsageRow[] };
+export type PlanUsage = { orgCode: string; plan: ResolvedPlan | null; rows: UsageRow[] };
 
 /** Mức dùng hiện tại — đếm TƯƠI (màn hình /settings/plan), không qua đệm. */
 export async function getPlanUsage(orgCode?: string): Promise<PlanUsage> {
   const org = await targetOrg(orgCode);
-  if (!org) return { orgCode: orgCode ?? "?", isHome: false, plan: null, rows: [] };
+  if (!org) return { orgCode: orgCode ?? "?", plan: null, rows: [] };
   const plan = await resolvePlan(org);
   const rows = await inOrg(org.code, async () => {
     const out: UsageRow[] = [];
@@ -184,7 +193,7 @@ export async function getPlanUsage(orgCode?: string): Promise<PlanUsage> {
     }
     return out;
   });
-  return { orgCode: org.code, isHome: org.isHome, plan, rows };
+  return { orgCode: org.code, plan, rows };
 }
 
 /** Kế hoạch sắp cài có vượt gói không (bước Xem trước của onboarding): trả câu cho mỗi loại vượt. */
