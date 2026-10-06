@@ -91,26 +91,62 @@ export type ConnectablePage = { id: string; name: string; token: string; canMess
 /**
  * ═══ KHÁM PHÁ PAGE — VÌ SAO KHÔNG CÓ PAGE NÀO (sự cố 06/10/2026) ═══
  *
- * Trước bản này mọi thất bại sau OAuth gộp thành MỘT câu «không quản lý page nào có quyền nhắn tin», trong khi năm tình huống
- * dưới đây sửa ở năm chỗ khác nhau — và người dùng (lẫn kỹ thuật) không biết nhìn vào đâu:
- *  · PERMISSION_DECLINED    — quyền bắt buộc bị BỎ CHỌN ở hộp thoại (`/me/permissions` status = declined).
- *  · PERMISSION_NOT_GRANTED — quyền bắt buộc KHÔNG có trong danh sách: hộp thoại không hề hỏi (app Development mà tài khoản
- *                              không có vai trò · quyền chưa được duyệt Advanced Access · app Business cần Login for Business).
- *  · NO_PAGES               — có quyền, Meta trả 0 page (kể cả qua Business Portfolio): tài khoản không có quyền với page nào.
- *  · NO_PAGE_TOKEN          — Meta trả page nhưng KHÔNG kèm token: chưa tích page ở bước «Chọn trang», hoặc page chỉ thuộc
- *                              Business Portfolio mà tài khoản không có quyền trực tiếp.
- *  · NO_MESSAGING_TASK      — có page + token nhưng không có quyền Nhắn tin / Quản lý trên page nào.
- * HÀM THUẦN — không token nào đi vào kết quả (chỉ tên quyền, tên page, đếm).
+ * Trước bản này mọi thất bại sau OAuth gộp thành MỘT câu «không quản lý page nào có quyền nhắn tin», trong khi các tình huống
+ * dưới đây sửa ở những chỗ khác nhau — và người dùng (lẫn kỹ thuật) không biết nhìn vào đâu. Thứ tự là thứ tự ƯU TIÊN:
+ *  · TOKEN_EXPIRED               — token người dùng không còn hợp lệ (`/debug_token` is_valid=false hoặc expires_at đã qua).
+ *  · PERMISSION_DECLINED         — quyền bắt buộc bị BỎ CHỌN ở hộp thoại (`/me/permissions` status = declined). Chủ page sửa.
+ *  · PERMISSION_NOT_IN_APP       — quyền bắt buộc không được cấp DÙ người bấm CÓ vai trò trong app (admin / developer / tester):
+ *                                  người có vai trò luôn được Standard Access ⇒ quyền chưa được THÊM vào app (use case Messenger
+ *                                  chưa thêm / chưa tuỳ chỉnh). Chủ nền tảng sửa ở App Dashboard.
+ *  · PERMISSION_NEEDS_APP_REVIEW — quyền bắt buộc không được cấp và người bấm KHÔNG có vai trò: cần Advanced Access (App Review +
+ *                                  Business Verification). Chủ nền tảng sửa.
+ *  · PERMISSION_NOT_GRANTED      — quyền bắt buộc không được cấp nhưng KHÔNG xác định được vai trò (gọi `/{app}/roles` lỗi) — giữ
+ *                                  tên cũ để tương thích; không đoán là thiếu quyền ở app hay thiếu App Review.
+ *  · NO_PAGES                    — có quyền, Meta trả 0 page (kể cả qua Business Portfolio).
+ *  · NO_PAGE_TOKEN               — Meta trả page nhưng KHÔNG kèm token: chưa tích page ở bước «Chọn trang», hoặc page chỉ thuộc
+ *                                  Business Portfolio mà tài khoản không có quyền trực tiếp.
+ *  · NO_MESSAGING_TASK           — có page + token nhưng tài khoản không có quyền quản trị / Nhắn tin trên page nào.
+ * Quyền đi TRƯỚC page: page token thiếu `pages_messaging` không gửi được tin dù page hiện ra đủ.
+ * Webhook chưa đăng ký (sau khi đã lưu page) là chẩn đoán THEO PAGE — `checkPageWebhook`, không phải lý do khám phá.
+ * HÀM THUẦN — không token nào đi vào kết quả (chỉ tên quyền, tên page, vai trò, đếm).
  */
-export const MESSENGER_REQUIRED_PERMISSIONS = ["pages_show_list", "pages_messaging", "pages_manage_metadata"] as const;
-export type DiscoveryReason = "PERMISSION_DECLINED" | "PERMISSION_NOT_GRANTED" | "NO_PAGES" | "NO_PAGE_TOKEN" | "NO_MESSAGING_TASK";
+export const MESSENGER_REQUIRED_PERMISSIONS = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement"] as const;
+export type RequiredPermission = (typeof MESSENGER_REQUIRED_PERMISSIONS)[number];
+export const DISCOVERY_REASONS = [
+  "TOKEN_EXPIRED",
+  "PERMISSION_DECLINED",
+  "PERMISSION_NOT_IN_APP",
+  "PERMISSION_NEEDS_APP_REVIEW",
+  "PERMISSION_NOT_GRANTED",
+  "NO_PAGES",
+  "NO_PAGE_TOKEN",
+  "NO_MESSAGING_TASK",
+] as const;
+export type DiscoveryReason = (typeof DISCOVERY_REASONS)[number];
 export type RawPage = { id: string; name: string; hasToken: boolean; tasks: string[] | null; viaBusiness: boolean };
+
+/** Vai trò trong app cho phép dùng quyền ở mức Standard Access. «insights users» KHÔNG đủ. */
+export const APP_ROLES_WITH_STANDARD_ACCESS = ["administrators", "developers", "testers"] as const;
+export type AppRoleCheck =
+  | { state: "HAS_ROLE"; role: (typeof APP_ROLES_WITH_STANDARD_ACCESS)[number] }
+  /** `role` = vai trò không đủ (vd «insights users»), `null` = không có vai trò nào. */
+  | { state: "NO_ROLE"; role: string | null }
+  /** Không đọc được — KHÔNG kết luận. `why` đã che bí mật. */
+  | { state: "UNKNOWN"; why: string };
+
+/** Kết quả `/debug_token`. `expiresAt` ISO; `null` = không hết hạn (expires_at = 0) hoặc không đọc được. */
+export type TokenCheck = { state: "VALID" | "EXPIRED" | "UNKNOWN"; expiresAt: string | null; why: string | null };
+
 export type DiscoveryDiagnostic = {
   /** Quyền Facebook xác nhận ĐÃ cấp — `null` = không đọc được `/me/permissions` (không suy đoán). */
   granted: string[] | null;
   declined: string[];
   /** Quyền BẮT BUỘC chưa có (bị từ chối hoặc không có trong danh sách). */
   missing: string[];
+  /** Vai trò của người bấm trong app — chỉ hỏi khi thiếu quyền mà không do bỏ chọn; `null` = không cần hỏi. */
+  appRole: AppRoleCheck | null;
+  /** Tình trạng token người dùng — chỉ hỏi khi không đọc được quyền; `null` = không cần hỏi. */
+  userToken: TokenCheck | null;
   accountsSeen: number;
   viaBusiness: number;
   withoutToken: string[];
@@ -122,7 +158,7 @@ export type DiscoveryDiagnostic = {
 const MESSAGING_TASKS = new Set(["MESSAGING", "MANAGE", "MODERATE"]);
 export const pageCanMessage = (tasks: readonly string[] | null) => tasks === null || tasks.some((t) => MESSAGING_TASKS.has(t));
 
-export function diagnosePageDiscovery(x: { permissions: { permission: string; status: string }[] | null; raw: readonly RawPage[] }): DiscoveryDiagnostic {
+export function diagnosePageDiscovery(x: { permissions: { permission: string; status: string }[] | null; raw: readonly RawPage[]; appRole?: AppRoleCheck | null; userToken?: TokenCheck | null }): DiscoveryDiagnostic {
   const granted = x.permissions ? x.permissions.filter((p) => p.status === "granted").map((p) => p.permission) : null;
   const declined = x.permissions ? x.permissions.filter((p) => p.status === "declined").map((p) => p.permission) : [];
   const missing = granted ? MESSENGER_REQUIRED_PERMISSIONS.filter((p) => !granted.includes(p)) : [];
@@ -131,10 +167,14 @@ export function diagnosePageDiscovery(x: { permissions: { permission: string; st
   const all = [...seen.values()];
   const withToken = all.filter((p) => p.hasToken);
   const eligible = withToken.filter((p) => pageCanMessage(p.tasks));
+  const appRole = x.appRole ?? null;
+  const userToken = x.userToken ?? null;
   const d: DiscoveryDiagnostic = {
     granted,
     declined,
     missing: [...missing],
+    appRole,
+    userToken,
     accountsSeen: all.length,
     viaBusiness: all.filter((p) => p.viaBusiness).length,
     withoutToken: all.filter((p) => !p.hasToken).map((p) => p.name || p.id).slice(0, 20),
@@ -142,10 +182,10 @@ export function diagnosePageDiscovery(x: { permissions: { permission: string; st
     eligible: eligible.length,
     reason: null,
   };
-  // Quyền đi TRƯỚC page: page token thiếu `pages_messaging` không gửi được tin dù page hiện ra đủ.
   const declinedRequired = missing.filter((p) => declined.includes(p));
-  if (declinedRequired.length) d.reason = "PERMISSION_DECLINED";
-  else if (missing.length) d.reason = "PERMISSION_NOT_GRANTED";
+  if (userToken?.state === "EXPIRED") d.reason = "TOKEN_EXPIRED";
+  else if (declinedRequired.length) d.reason = "PERMISSION_DECLINED";
+  else if (missing.length) d.reason = appRole?.state === "HAS_ROLE" ? "PERMISSION_NOT_IN_APP" : appRole?.state === "NO_ROLE" ? "PERMISSION_NEEDS_APP_REVIEW" : "PERMISSION_NOT_GRANTED";
   else if (eligible.length) d.reason = null;
   else if (!all.length) d.reason = "NO_PAGES";
   else if (!withToken.length) d.reason = "NO_PAGE_TOKEN";
@@ -153,9 +193,68 @@ export function diagnosePageDiscovery(x: { permissions: { permission: string; st
   return d;
 }
 
-/** Một dòng vết cho log máy chủ — CHỈ tên quyền + số đếm (không token, không tên page). */
+/** Lý do này là vấn đề QUYỀN / TOKEN (chặn trước, kể cả khi page hiện đủ). */
+export const isPermissionReason = (r: DiscoveryReason | null): boolean => r === "TOKEN_EXPIRED" || (r ?? "").startsWith("PERMISSION_");
+
+/** App access token `<app_id>|<app_secret>` — CHỨA app secret: luôn nằm trong danh sách che (`scrub`). */
+const appAccessToken = (app: MessengerApp) => `${app.appId}|${app.appSecret}`;
+
+/**
+ * Token có còn dùng được không (`GET /debug_token`, hỏi bằng app access token + appsecret_proof). `is_valid=false` hoặc
+ * `expires_at` đã qua ⇒ EXPIRED; `expires_at = 0` = không hết hạn. Lỗi gọi ⇒ UNKNOWN (không kết luận). Token của app KHÁC ⇒
+ * EXPIRED (không dùng được với app này).
+ */
+export async function inspectToken(app: MessengerApp, token: string, fetchImpl: Fetch = fetch, now: Date = new Date()): Promise<TokenCheck> {
+  const appToken = appAccessToken(app);
+  const hide = [token, app.appSecret, appToken];
+  const r = await graph(fetchImpl, `${graphBase()}/debug_token?${new URLSearchParams({ input_token: token, access_token: appToken, appsecret_proof: appSecretProof(appToken, app.appSecret) })}`, { method: "GET" }, hide);
+  if (!r.ok) return { state: "UNKNOWN", expiresAt: null, why: r.error };
+  const data = (r.body.data ?? {}) as { is_valid?: unknown; expires_at?: unknown; app_id?: unknown; error?: { message?: unknown } };
+  const exp = typeof data.expires_at === "number" && data.expires_at > 0 ? new Date(data.expires_at * 1000) : null;
+  const expiresAt = exp ? exp.toISOString() : null;
+  if (data.is_valid === false) return { state: "EXPIRED", expiresAt, why: scrub(typeof data.error?.message === "string" ? data.error.message : "Meta báo token không còn hợp lệ.", hide) };
+  if (exp && exp.getTime() <= now.getTime()) return { state: "EXPIRED", expiresAt, why: "Token đã quá hạn." };
+  if (typeof data.app_id === "string" && data.app_id && data.app_id !== app.appId) return { state: "EXPIRED", expiresAt, why: "Token thuộc một app Facebook khác." };
+  if (data.is_valid === true) return { state: "VALID", expiresAt, why: null };
+  return { state: "UNKNOWN", expiresAt, why: "Meta không trả is_valid." };
+}
+
+/**
+ * Người bấm có vai trò trong app không: `/me?fields=id` (token người dùng ⇒ mã người dùng theo app) so với
+ * `GET /{app-id}/roles` (app access token). Bất kỳ bước nào lỗi ⇒ UNKNOWN — không đoán.
+ */
+export async function appRoleOf(app: MessengerApp, userToken: string, fetchImpl: Fetch = fetch): Promise<AppRoleCheck> {
+  if (!/^\d{5,30}$/.test(app.appId)) return { state: "UNKNOWN", why: "Mã app không hợp lệ." };
+  const appToken = appAccessToken(app);
+  const hide = [userToken, app.appSecret, appToken];
+  const me = await graph(fetchImpl, `${graphBase()}/me?${new URLSearchParams({ fields: "id", access_token: userToken, appsecret_proof: appSecretProof(userToken, app.appSecret) })}`, { method: "GET" }, hide);
+  const uid = me.ok && typeof me.body.id === "string" ? me.body.id : "";
+  if (!me.ok || !uid) return { state: "UNKNOWN", why: me.ok ? "Meta không trả mã người dùng." : me.error };
+  let after: string | null = null;
+  for (let i = 0; i < 5; i++) {
+    const q = new URLSearchParams({ limit: "500", access_token: appToken, appsecret_proof: appSecretProof(appToken, app.appSecret) });
+    if (after) q.set("after", after);
+    const r = await graph(fetchImpl, `${graphBase()}/${app.appId}/roles?${q}`, { method: "GET" }, hide);
+    if (!r.ok) return { state: "UNKNOWN", why: r.error };
+    const rows = Array.isArray(r.body.data) ? (r.body.data as Record<string, unknown>[]) : [];
+    const mine = rows.find((x) => String(x.user ?? "") === uid);
+    if (mine) {
+      const role = String(mine.role ?? "").trim().toLowerCase();
+      const ok = APP_ROLES_WITH_STANDARD_ACCESS.find((x) => x === role);
+      return ok ? { state: "HAS_ROLE", role: ok } : { state: "NO_ROLE", role: role.slice(0, 40) || null };
+    }
+    const paging = (r.body.paging ?? {}) as { cursors?: { after?: unknown }; next?: unknown };
+    after = typeof paging.cursors?.after === "string" && paging.next ? paging.cursors.after : null;
+    if (!after) break;
+  }
+  return { state: "NO_ROLE", role: null };
+}
+
+const roleTag = (r: AppRoleCheck | null) => (!r ? "-" : r.state === "HAS_ROLE" ? `has:${r.role}` : r.state === "NO_ROLE" ? `none${r.role ? `:${r.role.replace(/\s+/g, "_")}` : ""}` : "?");
+
+/** Một dòng vết cho log máy chủ — CHỈ tên quyền + vai trò + số đếm (không token, không tên page, không mã người dùng). */
 export function discoveryLogLine(org: string, d: DiscoveryDiagnostic): string {
-  return `[messenger-connect] org=${org} reason=${d.reason ?? "OK"} granted=${d.granted ? d.granted.join(",") || "-" : "?"} declined=${d.declined.join(",") || "-"} missing=${d.missing.join(",") || "-"} accounts=${d.accountsSeen} viaBusiness=${d.viaBusiness} noToken=${d.withoutToken.length} noMessaging=${d.withoutMessaging.length} eligible=${d.eligible}`;
+  return `[messenger-connect] org=${org} reason=${d.reason ?? "OK"} granted=${d.granted ? d.granted.join(",") || "-" : "?"} declined=${d.declined.join(",") || "-"} missing=${d.missing.join(",") || "-"} appRole=${roleTag(d.appRole)} userToken=${d.userToken ? d.userToken.state : "-"} accounts=${d.accountsSeen} viaBusiness=${d.viaBusiness} noToken=${d.withoutToken.length} noMessaging=${d.withoutMessaging.length} eligible=${d.eligible}`;
 }
 
 /**
@@ -178,6 +277,15 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
   const permissions = permsRes.ok && Array.isArray(permsRes.body.data)
     ? (permsRes.body.data as Record<string, unknown>[]).filter((p) => typeof p.permission === "string" && typeof p.status === "string").map((p) => ({ permission: String(p.permission), status: String(p.status) }))
     : null;
+  // Không đọc được quyền ⇒ hỏi xem token có còn hợp lệ không (hết hạn thì mọi bước sau đều vô nghĩa — dừng, nói rõ).
+  let userTokenCheck: TokenCheck | null = null;
+  if (permissions === null) {
+    userTokenCheck = await inspectToken(app, userToken, fetchImpl);
+    if (userTokenCheck.state === "EXPIRED") return { pages: [], diagnostic: diagnosePageDiscovery({ permissions, raw: [], userToken: userTokenCheck }) };
+  }
+  // Thiếu quyền bắt buộc mà KHÔNG do bỏ chọn ⇒ hỏi vai trò của người bấm trong app để tách «quyền chưa thêm vào app» với
+  // «cần App Review». Chỉ hỏi khi cần — luồng bình thường không tốn thêm lời gọi nào.
+  const appRole = diagnosePageDiscovery({ permissions, raw: [] }).reason === "PERMISSION_NOT_GRANTED" ? await appRoleOf(app, userToken, fetchImpl) : null;
   // Phân trang bằng con trỏ `after` (không theo URL `next` — URL đó chứa token). Shop quản > 100 page trước đây chỉ thấy 100 page đầu.
   const data: Record<string, unknown>[] = [];
   let after: string | null = null;
@@ -215,7 +323,7 @@ export async function pagesFromCode(app: MessengerApp, code: string, redirectUri
     viaBusiness: business,
   });
   const raw = [...data.map((p) => toRaw(p, false)), ...viaBusiness.map((p) => toRaw(p, true))].filter((p) => /^\d{5,30}$/.test(p.id));
-  const diagnostic = diagnosePageDiscovery({ permissions, raw: raw.map((p) => ({ id: p.id, name: p.name, hasToken: p.hasToken, tasks: p.tasks, viaBusiness: p.viaBusiness })) });
+  const diagnostic = diagnosePageDiscovery({ permissions, raw: raw.map((p) => ({ id: p.id, name: p.name, hasToken: p.hasToken, tasks: p.tasks, viaBusiness: p.viaBusiness })), appRole, userToken: userTokenCheck });
   const seen = new Set<string>();
   const pages = raw
     .filter((p) => p.hasToken && !seen.has(p.id) && Boolean(seen.add(p.id)))
@@ -233,6 +341,38 @@ export async function subscribePage(app: MessengerApp, pageId: string, pageToken
   );
   if (!r.ok) return { ok: false, error: r.error };
   return r.body.success === true ? { ok: true } : { ok: false, error: "Facebook không xác nhận đăng ký webhook cho page." };
+}
+
+/**
+ * ═══ WEBHOOK CỦA PAGE CÓ THẬT SỰ ĐĂNG KÝ KHÔNG (chỉ ĐỌC) ═══
+ *
+ * Lưu page xong chưa chắc tin đã về: `POST subscribed_apps` có thể bị Meta gỡ sau đó (chủ page gỡ app trong Business Suite,
+ * đổi quyền, token bị thu hồi). `GET /{page}/subscribed_apps` nói app NÀO đang nhận sự kiện của page, với những TRƯỜNG nào:
+ *  · OK              — app của nền tảng có trong danh sách và đủ `MESSENGER_FIELDS`;
+ *  · NOT_SUBSCRIBED  — app không có trong danh sách (tin khách nhắn không bao giờ tới ERP);
+ *  · MISSING_FIELDS  — có app nhưng thiếu trường (vd thiếu `feed` ⇒ không trả lời bình luận);
+ *  · TOKEN_EXPIRED   — `/debug_token` báo token page hết hạn / không hợp lệ, hoặc Meta trả mã 190;
+ *  · UNKNOWN         — không đọc được (mạng, quyền) — KHÔNG kết luận.
+ * Không gọi POST nào: hàm này không sửa gì ở Meta.
+ */
+export const WEBHOOK_STATES = ["OK", "NOT_SUBSCRIBED", "MISSING_FIELDS", "TOKEN_EXPIRED", "UNKNOWN"] as const;
+export type WebhookState = (typeof WEBHOOK_STATES)[number];
+export type PageWebhookCheck = { pageId: string; state: WebhookState; missingFields: string[]; token: TokenCheck; detail: string | null };
+
+export async function checkPageWebhook(app: MessengerApp, pageId: string, pageToken: string, fetchImpl: Fetch = fetch, now: Date = new Date()): Promise<PageWebhookCheck> {
+  const unknownToken: TokenCheck = { state: "UNKNOWN", expiresAt: null, why: null };
+  if (!/^\d{5,30}$/.test(pageId)) return { pageId, state: "UNKNOWN", missingFields: [], token: unknownToken, detail: "Mã page không hợp lệ." };
+  const token = await inspectToken(app, pageToken, fetchImpl, now);
+  if (token.state === "EXPIRED") return { pageId, state: "TOKEN_EXPIRED", missingFields: [], token, detail: token.why };
+  const r = await graph(fetchImpl, `${graphBase()}/${encodeURIComponent(pageId)}/subscribed_apps?${new URLSearchParams({ fields: "id,name,subscribed_fields", access_token: pageToken, appsecret_proof: appSecretProof(pageToken, app.appSecret) })}`, { method: "GET" }, [pageToken, app.appSecret]);
+  if (!r.ok) return { pageId, state: r.kind === "TOKEN" ? "TOKEN_EXPIRED" : "UNKNOWN", missingFields: [], token, detail: r.error };
+  const rows = Array.isArray(r.body.data) ? (r.body.data as Record<string, unknown>[]) : [];
+  const mine = rows.find((x) => String(x.id ?? "") === app.appId);
+  if (!mine) return { pageId, state: "NOT_SUBSCRIBED", missingFields: [...MESSENGER_FIELDS], token, detail: rows.length ? `Page đang gửi sự kiện cho ${rows.length} app khác, không có app của nền tảng.` : null };
+  if (!Array.isArray(mine.subscribed_fields)) return { pageId, state: "UNKNOWN", missingFields: [], token, detail: "Meta không trả danh sách trường đã đăng ký." };
+  const fields = (mine.subscribed_fields as unknown[]).map((f) => String(f));
+  const missingFields = MESSENGER_FIELDS.filter((f) => !fields.includes(f));
+  return { pageId, state: missingFields.length ? "MISSING_FIELDS" : "OK", missingFields: [...missingFields], token, detail: null };
 }
 
 /**
