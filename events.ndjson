@@ -205,3 +205,4 @@
 {"at":"2026-10-06T20:48:49.020Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#621 @ 4b6e3191e478 · PASS @cf9c9808 (review độc lập) + delta đọc bởi Lead: gỡ va #618 (nhánh HOME trước platform, Policy chỉ cho khoá nền tảng), followup truyền home, runJob nhà đòi ai_sales tường minh (chỉ chặt hơn)"}
 {"at":"2026-10-06T21:05:50.716Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-b-internal-special-cases","detail":"feat/saas-b-internal @ 2cd8896a6cf1 · 1 lệnh kiểm thử"}
 {"at":"2026-10-06T21:06:02.671Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#622 @ 2cd8896a6cf1 · PASS @798c4cff + delta tích hợp: gộp main, 0225→0227, số trần trong tài liệu/SQL/test đổi theo; gates xanh"}
+{"at":"2026-10-06T21:08:38.494Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-a-vnx-runtime","detail":"#621 @ 4b6e3191e478 → 657fb7327a61 (MERGE_ISOLATED · HIGH · gates success)"}
