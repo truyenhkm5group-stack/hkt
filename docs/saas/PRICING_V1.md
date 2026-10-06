@@ -78,9 +78,18 @@ cùng khách đếm một lần mỗi kỳ · hội thoại lặp không sinh ph
   enterprise`. Gói `inbox`, `scale` thêm vào `platform_plans` (danh tính + hạn mức kỹ thuật cho `checkEntitlement`); giá chỉ ở
   phiên bản. Tính năng theo gói là đề xuất kỹ thuật (quyết định chỉ chốt «INBOX không có AI Sales»): Inbox = hộp thư · chuyển
   người · báo cáo · nhiều người dùng; Starter thêm AI bán hàng, tạo đơn, upsell, nhắn lại; Growth thêm cross-sell, báo cáo nâng
-  cao, dạy AI, webhook; Scale / Enterprise thêm API. Credit AI nền tảng (0194) của gói mới `inbox` / `scale` = 0 — chủ nền
-  tảng chưa khai; gói `starter` / `growth` / `trial` dùng chung dòng `platform_plans` nên giữ credit + trần AI kỹ thuật cũ
-  (Starter 500 lượt / tháng · Growth 2.000) — CHƯA định cỡ lại cho 1.500 / 3.000 khách AI.
+  cao, dạy AI, webhook; Scale / Enterprise thêm API.
+- **Trần kỹ thuật theo phiên bản** (tổ chức ghim / theo bảng giá CATALOG; legacy GIỮ NGUYÊN trần cũ của `platform_plans`):
+  - Người dùng (`checkEntitlement` qua `resolvePlan` → `plansForOrg`): trial 2 · inbox 3 · starter 5 · growth 10 · scale 25,
+    cộng phần mua thêm 0192. Fanpage gồm 1 · 3 · 3 · 10 · 30 là hạn mức THƯƠNG MẠI (`resolveOrgPricing.quotas.fanpages`,
+    màn khách, phần vượt 99.000 ₫ / page) — ERP không có trần kỹ thuật fanpage (khoá `pages` của `checkEntitlement` là
+    «trang tuỳ biến», không phải fanpage).
+  - AI (`resolveAiLimits` → `lib/pricing/versions.ts::catalogAiLimits`): gói có `ai_sales` ⇒ KHÔNG trần cứng nào (lượt /
+    ngày, lượt / tháng, tiền), credit nền tảng = NGÂN SÁCH MỀM (`softOnly`, chỉ cảnh báo):
+    `ngân sách USD/tháng = giá gốc tháng × (1 − ngưỡng biên nguy cấp/100) ÷ tỷ giá USD→VND` (giá gốc = giá tháng; dùng thử
+    ⇒ giá tháng rẻ nhất của gói AI tự mua cùng phiên bản; hợp đồng ⇒ giá «từ …»; nguy cấp mặc định 60% ⇒ 40% giá cho AI).
+    INBOX không có `ai_sales` ⇒ AI bán hàng tắt bằng entitlement, trần AI kỹ thuật giữ dòng `platform_plans`. Ghi đè AI tay
+    của người vận hành (chính sách lạm dụng / bất thường chi phí) vẫn áp như cũ.
 - **Legacy** = `legacy`: chép NGUYÊN `platform_plans` lúc migration chạy (mọi khoá gói, kể cả `standard`, `basic`, `pro`,
   `internal`, giá, tặng tháng, mua thêm, limits, commercial). MỌI tổ chức có từ trước 0225 được ghim `legacy` ⇒ số tiền khách
   hiện tại trả KHÔNG ĐỔI (bài kiểm so báo giá 1/3/6/12 tháng trước / sau). Phiên bản legacy chỉ thay GIÁ; hạn mức kỹ thuật và

@@ -18,7 +18,10 @@ import { listPlans, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit, type PlatformActor } from "@/lib/platform/audit";
 import { getHomeOrganization } from "@/lib/platform/organizations";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
+import type { AiLimits } from "@/lib/ai-usage/types";
+import { env } from "@/lib/env";
 import {
+  catalogAiLimits,
   currentCatalogVersion,
   LEGACY_VERSION_KEY,
   overlayPlanRow,
@@ -115,6 +118,16 @@ export async function catalogPlans(now: Date = new Date()): Promise<{ version: P
       return overlayPlanRow(base, { price, source: "VERSION" }, version.kind);
     });
   return { version, plans: rows };
+}
+
+/**
+ * Trần AI kỹ thuật theo PHIÊN BẢN giá đã ghim (`catalogAiLimits`): gói AI của bảng giá CATALOG ⇒ không trần cứng, ngân sách
+ * mềm dẫn xuất từ giá tháng + ngưỡng biên nguy cấp. `null` ⇒ giữ trần cũ của `platform_plans` (legacy, gói cũ, INBOX).
+ */
+export async function orgAiLimits(orgCode: string, planKey: string, now: Date = new Date()): Promise<AiLimits | null> {
+  const [v, margin] = await Promise.all([orgPriceVersion(orgCode, now), readMarginConfig()]);
+  const versionPrices = v.version ? v.book.prices.filter((p) => p.versionKey === v.version!.key) : [];
+  return catalogAiLimits({ hit: priceOf(v.book, v.version?.key, planKey), versionKind: v.version?.kind ?? null, versionPrices, criticalBelowPct: margin.criticalBelowPct, usdToVnd: env.facebook.usdToVnd });
 }
 
 export async function readMarginConfig(): Promise<MarginConfig> {

@@ -14,6 +14,7 @@
  *    phí). ĐƠN không bao giờ sinh phí. Số dùng chưa biết ⇒ phần vượt chưa biết (`null`), không phải 0 (luật 42).
  *  · KHÔNG hàm nào ở đây tắt bot: `pauseBot` là hằng `false` trong kiểu trả về.
  */
+import type { AiLimits } from "@/lib/ai-usage/types";
 import { billedMonths } from "@/lib/billing/rules";
 import { parseFeatureList, type FeatureKey } from "@/lib/pricing/features";
 
@@ -533,4 +534,29 @@ export function aiCustomerCoverage(input: { aiSalesOn: boolean; legacyChatbotOn:
   if (input.legacyChatbotOn) return { coverage: "PARTIAL", note: "Một phần hội thoại đi qua runtime cũ (chatbot/) chưa ghi đồng hồ — số là cận dưới." };
   if (input.meterLiveAt.getTime() > input.periodFrom.getTime()) return { coverage: "PARTIAL", note: `Đồng hồ khách AI bắt đầu ghi từ ${new Date(input.meterLiveAt.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)} — kỳ này đo chưa trọn.` };
   return { coverage: "MEASURED", note: null };
+}
+
+// ─────────────────────────── Trần AI kỹ thuật của gói AI theo phiên bản ───────────────────────────
+
+/**
+ * Trần AI KỸ THUẬT của tổ chức ở một gói AI của bảng giá CATALOG (V1): KHÔNG trần cứng nào (lượt / ngày, lượt / tháng, tiền)
+ * — quyết định 07/10/2026 «không tự tắt Sales AI đang khoẻ chỉ vì vượt hạn mức»; dùng nhiều thì thu bằng phần vượt khách AI,
+ * 150% thì người vận hành rà soát. Credit nền tảng = NGÂN SÁCH MỀM (cảnh báo, khung biên):
+ *
+ *   ngân sách USD / tháng = giá gốc tháng × (1 − ngưỡng biên nguy cấp / 100) ÷ tỷ giá USD→VND
+ *
+ * (phần doanh thu được phép tiêu cho AI trước khi biên lãi gộp xuống dưới mức NGUY CẤP). Giá gốc = giá tháng của gói; gói
+ * không có giá tháng (dùng thử) lấy giá tháng rẻ nhất của gói AI tự mua trong CÙNG phiên bản; gói hợp đồng lấy giá «từ …».
+ * `null` = không áp (phiên bản legacy, gói cũ đọc dòng legacy, gói không có `ai_sales` như INBOX — AI bán hàng của INBOX tắt
+ * bằng entitlement, không bằng trần) ⇒ nơi gọi giữ trần cũ của `platform_plans`. HÀM THUẦN.
+ */
+export function catalogAiLimits(input: { hit: PlanPriceHit | null; versionKind: PriceVersionKind | null; versionPrices: readonly PlanPrice[]; criticalBelowPct: number; usdToVnd: number }): AiLimits | null {
+  const { hit } = input;
+  if (!hit || hit.source !== "VERSION" || input.versionKind !== "CATALOG") return null;
+  if (!(hit.price.features ?? []).includes("ai_sales")) return null;
+  const cheapest = input.versionPrices.filter((p) => isSellable(p) && (p.features ?? []).includes("ai_sales")).reduce<number | null>((m, p) => (m === null || (p.monthlyVnd ?? 0) < m ? p.monthlyVnd : m), null);
+  const base = hit.price.monthlyVnd ?? hit.price.priceFromVnd ?? cheapest;
+  const share = Math.max(0, 1 - input.criticalBelowPct / 100);
+  const budget = base !== null && input.usdToVnd > 0 ? Math.round(((base * share) / input.usdToVnd) * 100) / 100 : 0;
+  return { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: budget > 0 ? budget : null, hard: null }, platformCreditUsdPerMonth: budget, softOnly: true };
 }

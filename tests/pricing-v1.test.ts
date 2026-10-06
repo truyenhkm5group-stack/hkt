@@ -24,7 +24,11 @@ import type { SessionUser } from "@/lib/auth/session";
 import { addDays, quoteRenewal, vnDate } from "@/lib/billing/rules";
 import { invalidateSubscriptions } from "@/lib/billing/standing";
 import { loadTenantBilling, previewRenewal, setPlanPrice } from "@/lib/billing/service";
-import { listPlans } from "@/lib/entitlements/check";
+import { getPlanUsage, listPlans } from "@/lib/entitlements/check";
+import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { checkAiQuota, resolveAiLimits } from "@/lib/ai-usage/quota";
+import { evaluateAiQuota, parseAiLimits } from "@/lib/ai-usage/types";
+import { env } from "@/lib/env";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
@@ -38,6 +42,7 @@ import { AI_CUSTOMER_METER_LIVE_KEY, invalidatePriceBook, loadPriceBook, pinOrgP
 import { buildValueKpis, VALUE_KPI_KEYS, VALUE_KPI_SPEC } from "@/lib/pricing/value-kpis";
 import {
   aiCustomerBlocks,
+  catalogAiLimits,
   aiCustomerCoverage,
   aiCustomerEventKey,
   computeOverage,
@@ -222,6 +227,20 @@ function testPure() {
   assert.deepEqual([kp.orders_closed_by_ai, kp.orders_assisted, kp.revenue_attributed_to_ai, kp.gmv_attributed_to_ai, kp.conversion_rate, kp.upsell_rate], [3, 2, 600_000, 1_400_000, 0.25, 0.3], "doanh thu theo ORDER_OUTCOME, GMV = giá trị lúc tạo, người bán không tính cho AI");
   assert.equal(VALUE_KPI_KEYS.length, 8);
 
+  // ── Trần AI kỹ thuật của gói AI V1: không trần cứng; ngân sách mềm = giá tháng × (1 − biên nguy cấp) ÷ tỷ giá.
+  const vPrices = V1_PRICES;
+  const ai = catalogAiLimits({ hit: { price: GROWTH, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 });
+  assert.deepEqual(ai, { requestsPerDay: null, requestsPerMonth: null, costUsdPerMonth: { soft: 23.84, hard: null }, platformCreditUsdPerMonth: 23.84, softOnly: true }, "Growth: 1.490.000 × 40% ÷ 25.000");
+  assert.equal(catalogAiLimits({ hit: { price: TRIAL, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 })?.platformCreditUsdPerMonth, 12.64, "dùng thử: giá gói AI rẻ nhất (Starter)");
+  assert.equal(catalogAiLimits({ hit: { price: ENTERPRISE, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 })?.platformCreditUsdPerMonth, 95.84, "hợp đồng: giá «từ …»");
+  assert.equal(catalogAiLimits({ hit: { price: INBOX, source: "VERSION" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 }), null, "INBOX: AI bán hàng tắt bằng entitlement, không bằng trần");
+  assert.equal(catalogAiLimits({ hit: { price: STARTER, source: "VERSION" }, versionKind: "LEGACY_SNAPSHOT", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 }), null, "legacy giữ trần cũ");
+  assert.equal(catalogAiLimits({ hit: { price: STARTER, source: "LEGACY_FALLBACK" }, versionKind: "CATALOG", versionPrices: vPrices, criticalBelowPct: 60, usdToVnd: 25_000 }), null, "gói cũ đọc dòng legacy giữ trần cũ");
+  const big = { requestsToday: 99_999, requestsMonth: 999_999, costUsdMonth: 9_999, unknownCostMonth: 0 };
+  const v1Verdict = evaluateAiQuota("PLATFORM", ai!, big);
+  assert.ok(v1Verdict.ok && v1Verdict.softExceeded, "dùng gấp nhiều lần ngân sách ⇒ vẫn cho chạy, chỉ cảnh báo");
+  assert.equal(evaluateAiQuota("PLATFORM", { ...ai!, softOnly: false }, big).ok, false, "bỏ softOnly ⇒ credit thành trần cứng (đột biến phải đỏ)");
+
   // ── Đổi gói không được lặng lẽ chặn AI: trần AI kỹ thuật của gói đích thấp hơn số dùng thật ⇒ không gán.
   const lim = { requestsPerDay: 30, requestsPerMonth: 500, costUsdPerMonth: { soft: 30, hard: 60 }, platformCreditUsdPerMonth: 3 };
   assert.equal(aiLimitCheck({ requests: 400, costUsd: 10 }, lim).wouldExceed, false);
@@ -254,6 +273,7 @@ function testSource() {
 async function cleanup(saved: { meterLive: unknown }) {
   const pdb = await getPlatformDb();
   await pdb.delete(schema.platformUsageEvents).where(inArray(schema.platformUsageEvents.orgCode, [...ORGS]));
+  await pdb.delete(schema.platformAiUsage).where(inArray(schema.platformAiUsage.orgCode, [...ORGS]));
   await pdb.delete(schema.platformPricePins).where(inArray(schema.platformPricePins.orgCode, [...ORGS]));
   const extra = await pdb.select({ key: schema.platformPriceVersions.key }).from(schema.platformPriceVersions).where(like(schema.platformPriceVersions.key, "cat-%"));
   if (extra.length) {
@@ -443,6 +463,51 @@ export async function testPricingV1() {
     assert.deepEqual([pB.quotas.users, pB.quotas.fanpages, pB.plan?.priceVersionKey], [3, 3, V1]);
     await setOrgPlan(B, "growth");
     assert.equal(await hasFeature("ai_sales", { orgCode: B }), true);
+    await setOrgPlan(B, null);
+
+    // ── 5b. Trần kỹ thuật theo phiên bản: người dùng + AI. V1 đọc phiên bản; legacy giữ platform_plans.
+    const usersLimit = async (code: string) => (await getPlanUsage(code)).rows.find((r) => r.kind === "users")?.limit;
+    const legacyUsers = (code: string) => (plans.find((p) => p.key === code)?.limits as { users?: number }).users;
+    for (const [plan, users] of [["trial", 2], ["inbox", 3], ["starter", 5], ["growth", 10], ["scale", 25]] as const) {
+      await setOrgPlan(B, plan);
+      assert.equal(await usersLimit(B), users, `V1 ${plan}: ${users} người dùng (checkEntitlement đọc phiên bản)`);
+      const pq = await resolveOrgPricing({ code: B, isHome: false, plan });
+      assert.equal(pq.quotas.users, users);
+    }
+    await setOrgPlan(B, null);
+    assert.equal(await usersLimit(LEG), legacyUsers("starter"), "legacy: người dùng theo platform_plans cũ");
+    assert.equal(await usersLimit(A), 5, "A (Starter V1) = 5");
+    // Phần mua thêm đã có (0192) cộng TRÊN số gồm của phiên bản.
+    await setOrgPlan(B, "growth");
+    await pdb.insert(schema.platformSubscriptions).values({ orgCode: B, addons: { users: 2 } }).onConflictDoUpdate({ target: schema.platformSubscriptions.orgCode, set: { addons: { users: 2 } } });
+    invalidateSubscriptions(B);
+    assert.equal(await usersLimit(B), 12, "Growth V1 10 + mua thêm 2");
+    await pdb.delete(schema.platformSubscriptions).where(eq(schema.platformSubscriptions.orgCode, B));
+    invalidateSubscriptions(B);
+    await setOrgPlan(B, null);
+    // AI: tổ chức V1 Starter / Scale dùng GẤP ĐÔI mọi trần cũ ⇒ checkAiQuota vẫn cho; legacy bị chặn như cũ.
+    await setOrgPlan(B, "scale");
+    const scaleLimits = await resolveAiLimits(B);
+    assert.ok(scaleLimits?.limits.softOnly && scaleLimits.limits.platformCreditUsdPerMonth > 0, "Scale V1: credit nền tảng = ngân sách mềm > 0 (credit 0 ở platform_plans không chặn)");
+    assert.equal(scaleLimits?.limits.platformCreditUsdPerMonth, Math.round(((2_990_000 * 0.4) / env.facebook.usdToVnd) * 100) / 100);
+    // Sổ AI đếm LƯỢT = dòng: gấp đôi trần lượt / ngày cũ của Starter + một lượt tốn gấp đôi trần tiền / credit.
+    const starterOld = parseAiLimits(plans.find((p) => p.key === "starter")?.limits).limits;
+    const rowsNeeded = 2 * (starterOld.requestsPerDay ?? 30) + 1;
+    const bigCost = 2 * Math.max(starterOld.costUsdPerMonth.hard ?? 60, starterOld.platformCreditUsdPerMonth, scaleLimits!.limits.platformCreditUsdPerMonth) + 1;
+    const usageAi = async (org: string) => {
+      for (let i = 0; i < rowsNeeded; i++) await recordAiUsage({ orgCode: org, feature: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0.001, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-${i}` });
+      await recordAiUsage({ orgCode: org, feature: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: bigCost, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-big` });
+    };
+    for (const org of [A, B]) {
+      await usageAi(org);
+      const v = await checkAiQuota(org, "PLATFORM", { now: new Date(), notify: false });
+      assert.ok(v.ok && v.softExceeded, `${org}: gói AI V1 dùng 2× ⇒ AI vẫn chạy, chỉ cảnh báo (${"error" in v ? v.error : ""})`);
+    }
+    await setOrgPlan(LEG, "starter");
+    await usageAi(LEG);
+    const legAi = await checkAiQuota(LEG, "PLATFORM", { now: new Date(), notify: false });
+    assert.equal(legAi.ok, false, "legacy giữ trần cũ y nguyên");
+    assert.equal((await resolveAiLimits(LEG))?.limits.softOnly, undefined);
     await setOrgPlan(B, null);
 
     // ── 6. ĐỒNG HỒ KHÁCH AI ở đúng điểm gửi (markWaitingForCustomer).
