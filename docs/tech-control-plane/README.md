@@ -248,3 +248,12 @@ ghi `estimated: true`.
 
 Còn thiếu (Pha 3): worker đẩy nhánh nhưng CHƯA mở PR — PR phải mở bằng danh tính bot (`agent-open-pr.yml`) để
 chủ shop duyệt được; máy chủ ERP sẽ dispatch thay worker (worker không giữ quyền ghi GitHub nào ngoài `git push`).
+## 9. Hạn chế đã biết (Pha 1)
+
+- Việc vào "Cần chủ shop" từ `OBSERVING` không quay lại được `OBSERVING` / `DONE`: bảng chuyển không cho NEEDS_OWNER
+  vào khâu deploy (để không ai lách cổng duyệt deploy). Lối ra hiện tại là `FAILED` / quay lui rồi đi lại đường deploy.
+  Sửa đúng cần "quay về đúng khâu đã rời" có kiểm chứng từ nhật ký — để Pha 4 (chính sách).
+- Việc vào "Cần chủ shop" từ `DEPLOYING` / `OBSERVING` không HUỶ được (dịch vụ đọc khâu đã rời từ nhật ký) — đúng ý đồ.
+- Bỏ mục tiêu / huỷ sứ mệnh không đổi trạng thái các VIỆC bên dưới (việc vẫn hiện, người huỷ từng việc nếu muốn), nhưng
+  cổng giao việc cho agent (`dispatch-service`) và hàng đợi worker (Pha 2) đều từ chối việc của sứ mệnh / mục tiêu
+  không chạy.

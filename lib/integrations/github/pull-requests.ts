@@ -223,7 +223,8 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
   const tasks = await db.query.techTasks.findMany({
     where: and(
       or(isNotNull(schema.techTasks.prNumber), ne(schema.techTasks.branch, "")),
-      or(ne(schema.techTasks.status, "DONE"), notInArray(schema.techTasks.prState, ["MERGED", "CLOSED"])),
+      // Việc ĐÃ HUỶ có PR còn mở thì THÔI đọc — chủ shop đã bỏ nó, đọc mãi là tiêu hạn mức GitHub cho thứ không ai nhìn.
+      or(notInArray(schema.techTasks.status, ["DONE", "CANCELLED"]), and(eq(schema.techTasks.status, "DONE"), notInArray(schema.techTasks.prState, ["MERGED", "CLOSED"]))),
     ),
     // Lâu chưa đọc nhất đi trước; chưa đọc lần nào (`NULL`) đứng đầu. Đây là thứ làm cái trần ở
     // trên thành một phép XOAY VÒNG thay vì một phép cắt bỏ.

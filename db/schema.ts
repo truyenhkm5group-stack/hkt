@@ -8641,6 +8641,8 @@ export const techEvents = pgTable(
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     actorKind: text("actor_kind").notNull(),
     actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    /** Agent đã làm, khi `actor_kind = 'AI_AGENT'` — khoá, không chỉ tên (AGENTS.md mục 34). */
+    actorAgentId: text("actor_agent_id").references(() => techAgents.id, { onDelete: "set null" }),
     actorName: text("actor_name").notNull().default(""),
     /** Gửi lại cùng khoá (job chạy lại, bấm hai lần) không đẻ dòng thứ hai. */
     dedupeKey: text("dedupe_key"),
@@ -8655,6 +8657,7 @@ export const techEvents = pgTable(
     check("tech_events_subject_check", sql`${t.subjectType} IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT')`),
     check("tech_events_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
     check("tech_events_human_link_check", sql`${t.actorKind} = 'HUMAN' OR ${t.actorId} IS NULL`),
+    check("tech_events_agent_link_check", sql`${t.actorKind} = 'AI_AGENT' OR ${t.actorAgentId} IS NULL`),
   ],
 );
 

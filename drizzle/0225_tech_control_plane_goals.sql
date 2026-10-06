@@ -3,8 +3,8 @@
 --  · CỘNG THÊM, không sửa dữ liệu cũ: bốn bảng mới + bốn cột trên `tech_tasks` (nullable / mặc định rỗng).
 --  · `tech_tasks.status` mở rộng thêm `NEEDS_OWNER` (kèm loại leo thang + việc chủ shop phải làm — CHECK) và
 --    `CANCELLED`. Không dòng nào bị đổi trạng thái; vòng đời chuẩn BACKLOG…DONE là PHÉP CHIẾU tính lúc đọc.
---  · Gieo bốn dự án kỹ thuật (ERP · ChotDonTuDong · HSLC · SaaS) theo khoá — chạy lại không đổi gì, dòng người
---    vận hành đã sửa không bị đè.
+--  · KHÔNG gieo dự án ở đây: migration chạy trên CSDL của MỌI tổ chức (mỗi tổ chức một CSDL), và danh sách dự án
+--    kỹ thuật là của tổ chức nhà. Bốn dự án mặc định gieo bằng nút "Khởi tạo dự án" ở /tech/goals (người bấm).
 --  · Viết tay, idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS`).
 
 CREATE TABLE IF NOT EXISTS "tech_projects" (
@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS "tech_events" (
 	"payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"actor_kind" text NOT NULL,
 	"actor_id" text,
+	"actor_agent_id" text,
 	"actor_name" text DEFAULT '' NOT NULL,
 	"dedupe_key" text,
 	"occurred_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -113,19 +114,14 @@ CREATE TABLE IF NOT EXISTS "tech_events" (
 	CONSTRAINT "tech_events_mission_id_tech_missions_id_fk" FOREIGN KEY ("mission_id") REFERENCES "tech_missions"("id") ON DELETE set null,
 	CONSTRAINT "tech_events_goal_id_tech_goals_id_fk" FOREIGN KEY ("goal_id") REFERENCES "tech_goals"("id") ON DELETE set null,
 	CONSTRAINT "tech_events_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "users"("id") ON DELETE set null,
+	CONSTRAINT "tech_events_actor_agent_id_tech_agents_id_fk" FOREIGN KEY ("actor_agent_id") REFERENCES "tech_agents"("id") ON DELETE set null,
 	CONSTRAINT "tech_events_name_check" CHECK ("tech_events"."name" ~ '^[a-z_]+(\.[a-z_]+)+$'),
 	CONSTRAINT "tech_events_subject_check" CHECK ("tech_events"."subject_type" IN ('GOAL','MISSION','TASK','WORKER','RUN','DEPLOYMENT','INCIDENT')),
 	CONSTRAINT "tech_events_actor_kind_check" CHECK ("tech_events"."actor_kind" IN ('HUMAN','SYSTEM','AI_AGENT')),
-	CONSTRAINT "tech_events_human_link_check" CHECK ("tech_events"."actor_kind" = 'HUMAN' OR "tech_events"."actor_id" IS NULL)
+	CONSTRAINT "tech_events_human_link_check" CHECK ("tech_events"."actor_kind" = 'HUMAN' OR "tech_events"."actor_id" IS NULL),
+	CONSTRAINT "tech_events_agent_link_check" CHECK ("tech_events"."actor_kind" = 'AI_AGENT' OR "tech_events"."actor_agent_id" IS NULL)
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "tech_events_dedupe_uq" ON "tech_events" USING btree ("dedupe_key");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "tech_events_subject_idx" ON "tech_events" USING btree ("subject_type","subject_id","occurred_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "tech_events_occurred_idx" ON "tech_events" USING btree ("occurred_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "tech_events_mission_idx" ON "tech_events" USING btree ("mission_id","occurred_at");--> statement-breakpoint
-
-INSERT INTO "tech_projects" ("id", "key", "name", "description") VALUES
-  (gen_random_uuid()::text, 'erp', 'VNXCommerce ERP', 'ERP vận hành shop thời trang — đơn, vận đơn, kho, tài chính, lương.'),
-  (gen_random_uuid()::text, 'chotdon', 'ChotDonTuDong', 'AI chốt đơn qua Messenger / Zalo cho shop bán hàng online.'),
-  (gen_random_uuid()::text, 'hslc', 'HSLC', 'Quảng cáo hiệu suất · lập camp · creative.'),
-  (gen_random_uuid()::text, 'saas', 'SaaS Platform', 'Lớp nền tảng nhiều tổ chức: tài khoản, gói, thu phí, tách dữ liệu.')
-ON CONFLICT ("key") DO NOTHING;
+CREATE INDEX IF NOT EXISTS "tech_events_mission_idx" ON "tech_events" USING btree ("mission_id","occurred_at");

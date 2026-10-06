@@ -205,7 +205,7 @@ export function countOpenDependencies(dependsOn: readonly string[], statusById: 
 
 /* ═════════════════════ TRẠNG THÁI THI HÀNH CỦA MISSION (SUY RA) ═════════════════════ */
 
-export const MISSION_EXECUTION_STATES = ["EMPTY", "NEEDS_OWNER", "FAILED", "BLOCKED", "RUNNING", "READY", "BACKLOG", "COMPLETE"] as const;
+export const MISSION_EXECUTION_STATES = ["EMPTY", "NEEDS_OWNER", "FAILED", "BLOCKED", "RUNNING", "READY", "BACKLOG", "COMPLETE", "ALL_CANCELLED"] as const;
 export type MissionExecutionState = (typeof MISSION_EXECUTION_STATES)[number];
 
 export const MISSION_EXECUTION_LABEL: Record<MissionExecutionState, string> = {
@@ -216,7 +216,8 @@ export const MISSION_EXECUTION_LABEL: Record<MissionExecutionState, string> = {
   RUNNING: "Đang chạy",
   READY: "Có việc sẵn sàng",
   BACKLOG: "Chỉ còn tồn đọng",
-  COMPLETE: "Mọi việc đã xong",
+  COMPLETE: "Mọi việc đã kết thúc",
+  ALL_CANCELLED: "Mọi việc đã huỷ — không phải xong",
 };
 
 export type MissionExecution = {
@@ -254,6 +255,8 @@ export function deriveMissionExecution(states: readonly CanonicalTaskState[]): M
   else if (IN_FLIGHT.some((s) => byState[s] > 0)) state = "RUNNING";
   else if (byState.READY > 0) state = "READY";
   else if (byState.BACKLOG > 0) state = "BACKLOG";
+  // Toàn việc huỷ KHÔNG phải xong — cùng câu `missionDoneBlockers` nói.
+  else if (byState.CANCELLED === total) state = "ALL_CANCELLED";
   else state = "COMPLETE";
 
   return { state, total, byState, done, progressPct };
@@ -304,6 +307,7 @@ export const TECH_EVENT_NAMES = [
   "run.succeeded",
   "run.failed",
   "run.lease_expired",
+  "mission.task_detached",
 ] as const;
 export type TechEventName = (typeof TECH_EVENT_NAMES)[number];
 
@@ -326,4 +330,5 @@ export const TECH_EVENT_LABEL: Record<TechEventName, string> = {
   "run.succeeded": "Lượt chạy xong",
   "run.failed": "Lượt chạy thất bại",
   "run.lease_expired": "Lease hết hạn — việc về hàng đợi",
+  "mission.task_detached": "Việc rời sứ mệnh",
 };

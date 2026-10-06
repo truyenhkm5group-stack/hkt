@@ -296,7 +296,8 @@ export async function setTechTaskStatus(
     if (!isTechOwnerEscalation(input.ownerEscalation)) {
       return { error: "Gọi chủ shop thì phải chọn đúng một trong chín lý do (duyệt · khoá · thanh toán · đăng nhập ngoài · quyết định không hoàn tác · sự cố production · sự cố an ninh · luật mâu thuẫn · trạng thái lạ rủi ro cao)." };
     }
-    if (ownerAction.length < OWNER_ACTION_MIN_CHARS) {
+    // Đếm theo KÝ TỰ (code point) như `length()` của PostgreSQL trong CHECK — `.length` của JS đếm đơn vị UTF-16.
+    if ([...ownerAction].length < OWNER_ACTION_MIN_CHARS) {
       return { error: "Phải viết rõ chủ shop cần làm ĐÚNG việc gì (bấm ở đâu, cấp quyền gì) — đủ để làm theo mà không phải hỏi lại." };
     }
   }
@@ -308,6 +309,22 @@ export async function setTechTaskStatus(
   if (input.to === "CANCELLED") {
     if (actor.kind !== "HUMAN") return { error: "Chỉ NGƯỜI huỷ được việc — máy và agent không tự bỏ việc được giao." };
     if (note.length < 10) return { error: "Huỷ việc thì phải nói vì sao (ít nhất một câu)." };
+    /*
+      ĐƯỜNG VÒNG: DEPLOYING / OBSERVING không huỷ được (mã đã hoặc sắp nằm trên production), nên đi qua
+      "Cần chủ shop" cũng không được. Đọc khâu mà việc đã RỜI để vào NEEDS_OWNER — lối ra của nó là
+      FAILED / quay lui, không phải "huỷ".
+    */
+    if (from === "NEEDS_OWNER") {
+      const [vao] = await db
+        .select({ prev: schema.techTaskEvents.previousValue })
+        .from(schema.techTaskEvents)
+        .where(and(eq(schema.techTaskEvents.taskId, input.taskId), eq(schema.techTaskEvents.kind, "STATUS"), eq(schema.techTaskEvents.nextValue, "NEEDS_OWNER")))
+        .orderBy(desc(schema.techTaskEvents.createdAt))
+        .limit(1);
+      if (vao && (vao.prev === "DEPLOYING" || vao.prev === "OBSERVING")) {
+        return { error: "Việc đã vào khâu deploy trước khi gọi chủ shop — mã có thể đang chạy trên production, không huỷ được. Đánh dấu thất bại / quay lui thay vì huỷ." };
+      }
+    }
   }
   /*
     CỔNG PHÊ DUYỆT CHẶN Ở CẢ HAI BƯỚC, KHÔNG CHỈ Ở LƯỢT DEPLOY.

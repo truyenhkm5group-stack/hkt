@@ -81,9 +81,27 @@ export async function dispatchTaskToAgent(input: {
   const db = await getDb();
   const task = await db.query.techTasks.findFirst({
     where: eq(schema.techTasks.code, input.taskCode),
-    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true },
+    columns: { id: true, code: true, risk: true, status: true, approvalRequired: true, approvalStatus: true, agentId: true, branch: true, missionId: true },
   });
   if (!task) return { ok: false, code: "UNKNOWN_TASK", reason: `Không có việc \`${input.taskCode}\`.` };
+
+  /*
+    SỨ MỆNH / MỤC TIÊU KHÔNG CHẠY ⇒ KHÔNG GIAO (docs/tech-control-plane/README.md mục 3). Bỏ mục tiêu, huỷ hay
+    tạm dừng sứ mệnh là quyết định của chủ shop; giao việc của nó cho agent sau đó là tiêu tiền cho thứ đã bỏ.
+    Việc lẻ (không thuộc sứ mệnh nào) không bị cổng này chạm tới.
+  */
+  if (task.missionId) {
+    const m = await db.query.techMissions.findFirst({ where: eq(schema.techMissions.id, task.missionId), columns: { code: true, status: true, goalId: true } });
+    if (m && m.status !== "ACTIVE") return { ok: false, code: "TASK", reason: `Sứ mệnh ${m.code} đang ở ${m.status} — chỉ sứ mệnh đang chạy mới giao việc cho agent.` };
+    if (m?.goalId) {
+      const g = await db.query.techGoals.findFirst({ where: eq(schema.techGoals.id, m.goalId), columns: { code: true, status: true } });
+      if (g && g.status !== "ACTIVE") return { ok: false, code: "TASK", reason: `Mục tiêu ${g.code} đang ở ${g.status} — bật lại mục tiêu trước khi giao việc của nó.` };
+    }
+  }
+  /* "Cần chủ shop" chỉ NGƯỜI gỡ, kèm câu đã quyết gì — nút giao sửa không phải đường tắt qua cổng đó. */
+  if (task.status === "NEEDS_OWNER") {
+    return { ok: false, code: "TASK", reason: `Việc ${task.code} đang chờ chủ shop — gỡ “Cần chủ shop” (ghi lại đã quyết gì) rồi mới giao lại.` };
+  }
 
   /*
     LƯỢT SỬA: việc phải CÓ nhánh, và phải chuyển được về "Đang làm".

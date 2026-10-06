@@ -814,6 +814,7 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
       việc đang chờ chủ shop ký được nâng lên vì nó đứng im cho tới khi có người bấm.
     */
     const choKy = r.approvalStatus === "PENDING";
+    const choChuShop = r.status === "NEEDS_OWNER";
     const score = caseScore({
       severity: r.priority === "P0" ? "critical" : r.priority === "P1" || choKy ? "warning" : "info",
       ageHours,
@@ -833,9 +834,12 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
       sourceKey: r.id,
       kind: r.taskType,
       title: `${r.code} · ${r.title}`,
-      summary: choKy
-        ? `Việc mức ${r.risk} đang CHỜ CHỦ SHOP PHÊ DUYỆT — không đi tiếp được cho tới khi có người ký.`
-        : (r.description || "").split("\n")[0].slice(0, 300),
+      // Chờ chủ shop: phép chiếu nói đúng việc phải làm, không chỉ "bị chặn" (AGENTS.md mục 19, 45).
+      summary: choChuShop
+        ? `CẦN CHỦ SHOP: ${r.ownerAction}`.slice(0, 300)
+        : choKy
+          ? `Việc mức ${r.risk} đang CHỜ CHỦ SHOP PHÊ DUYỆT — không đi tiếp được cho tới khi có người ký.`
+          : (r.description || "").split("\n")[0].slice(0, 300),
       department: "MANAGEMENT" as DepartmentCode,
       /*
         LUÔN `null`. Người phụ trách của nguồn này là một AGENT, và agent KHÔNG phải một con người
@@ -863,10 +867,10 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
       money: MONEY_UNKNOWN,
       tags: r.agent ? [...nhan, `agent:${r.agent.key}`, WORK_TAG_MACHINE_HELD] : nhan,
       evidence: { source: "Phòng Tech AI", detail: `${r.status} · mức ${r.risk} · ${r.module}${r.branch ? ` · ${r.branch}` : ""}` },
-      blockedReason: r.blockedReason,
+      blockedReason: choChuShop ? `Cần chủ shop: ${r.ownerAction}` : r.blockedReason,
       creationSource: (r.createdByKind === "HUMAN" ? "MANUAL" : "AUTO") as WorkItem["creationSource"],
       actions: actionsOf("TECH_TASK"),
-      recommendedAction: choKy ? "Mở việc và bấm Duyệt hoặc Từ chối" : "Mở việc ở Phòng Tech AI",
+      recommendedAction: choChuShop ? r.ownerAction : choKy ? "Mở việc và bấm Duyệt hoặc Từ chối" : "Mở việc ở Phòng Tech AI",
     };
   });
 }

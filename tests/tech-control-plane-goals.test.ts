@@ -34,10 +34,12 @@ import {
   createTechGoal,
   createTechMission,
   recordTechEvent,
+  seedTechProjects,
   setTechGoalStatus,
   setTechMissionStatus,
 } from "@/lib/tech/control-plane";
 import { createTechTask, setTechTaskStatus, type TechActor } from "@/lib/tech/service";
+import { techOverviewCounts } from "@/lib/queries/tech";
 
 /**
  * ═══════════ MẶT PHẲNG ĐIỀU KHIỂN CÔNG TY — GOAL · MISSION · NEEDS_OWNER (0225) ═══════════
@@ -90,6 +92,7 @@ export function testTechControlPlaneVocabulary() {
   assert.equal(deriveMissionExecution(["READY", "CLAIMED"]).state, "RUNNING");
   assert.equal(deriveMissionExecution(["READY", "BACKLOG"]).state, "READY");
   assert.equal(deriveMissionExecution(["DONE", "CANCELLED"]).state, "COMPLETE");
+  assert.equal(deriveMissionExecution(["CANCELLED", "CANCELLED"]).state, "ALL_CANCELLED", "toàn việc huỷ KHÔNG được in là xong");
   const tienDo = deriveMissionExecution(["DONE", "DONE", "RUNNING", "CANCELLED"]);
   assert.equal(tienDo.progressPct, 67, "việc huỷ không nằm trong mẫu số tiến độ");
   assert.equal(deriveMissionExecution(["CANCELLED"]).progressPct, null);
@@ -128,12 +131,17 @@ export function testTechControlPlaneVocabulary() {
   const checkOwner = /"tech_tasks_needs_owner_check" CHECK \(.*?"owner_escalation" IN \(([^)]+)\)/.exec(MIGRATION);
   assert.ok(checkOwner, "migration phải có CHECK cho NEEDS_OWNER");
   assert.deepEqual(checkOwner![1].split(",").map((x) => x.trim().replace(/'/g, "")), [...TECH_OWNER_ESCALATIONS]);
-  for (const p of TECH_SEED_PROJECTS) {
-    assert.match(p.key, TECH_PROJECT_KEY_PATTERN);
-    assert.ok(MIGRATION.includes(`'${p.key}', '${p.name}'`), `migration phải gieo dự án ${p.key}`);
-  }
+  for (const p of TECH_SEED_PROJECTS) assert.match(p.key, TECH_PROJECT_KEY_PATTERN);
   for (const n of TECH_EVENT_NAMES) assert.match(n, TECH_EVENT_NAME_PATTERN);
-  assert.ok(MIGRATION.includes("ON CONFLICT (\"key\") DO NOTHING"), "gieo dự án phải chạy lại được mà không đè dòng người đã sửa");
+  // Migration chạy trên CSDL của MỌI tổ chức — dự án kỹ thuật của tổ chức nhà KHÔNG được gieo vào CSDL khách.
+  assert.ok(!/INSERT\s+INTO\s+"tech_projects"/i.test(MIGRATION), "migration không được gieo dự án — người bấm 'Khởi tạo dự án'");
+  // Chín lý do gọi chủ shop phải ĐÚNG BẰNG danh sách của AI Tech Room — hai nơi gọi chủ shop, một từ vựng.
+  const aiTech = readFileSync(path.join(goc, "scripts/ai-tech.ts"), "utf8");
+  const dsAiTech = /export const OWNER_ESCALATIONS = \[([^\]]+)\]/.exec(aiTech);
+  assert.ok(dsAiTech, "không đọc được OWNER_ESCALATIONS của scripts/ai-tech.ts");
+  assert.deepEqual(dsAiTech![1].split(",").map((x) => x.trim().replace(/"/g, "")).filter(Boolean), [...TECH_OWNER_ESCALATIONS], "hai danh sách lý do gọi chủ shop đã lệch nhau");
+  // Đường vòng huỷ việc đã vào khâu deploy (qua NEEDS_OWNER) bị chặn ở dịch vụ — bảng chuyển vẫn cho NEEDS_OWNER → CANCELLED
+  // nên luật nằm ở `setTechTaskStatus`; khối CSDL bên dưới đo nó.
   assert.ok(!/\bUPDATE\s+"tech_tasks"/i.test(MIGRATION), "migration KHÔNG được ghi lại dữ liệu việc cũ");
 
   console.log(`✓ Mặt phẳng điều khiển: ${TECH_TASK_STATUSES.length} trạng thái lưu → ${CANONICAL_TASK_STATES.length} trạng thái chuẩn, phụ thuộc chặn READY, "chờ chủ shop" ưu tiên nhất, CHECK khớp hằng số`);
@@ -155,9 +163,14 @@ export async function testTechControlPlaneGoalsDb() {
   const taskIds: string[] = [];
 
   try {
-    // 2.1 Dự án gieo sẵn.
+    // 2.1 Dự án: chỉ người gieo; bấm lại không nhân đôi.
+    assert.ok("error" in (await seedTechProjects(agent)), "agent không gieo được dự án");
+    const gieo1 = await seedTechProjects(chuShop);
+    assert.ok("ok" in gieo1);
+    const gieo2 = await seedTechProjects(chuShop);
+    assert.ok("ok" in gieo2 && gieo2.created === 0, "bấm lại không nhân đôi dự án");
     const projects = await listTechProjects();
-    for (const p of TECH_SEED_PROJECTS) assert.ok(projects.some((x) => x.key === p.key), `thiếu dự án gieo sẵn ${p.key}`);
+    for (const p of TECH_SEED_PROJECTS) assert.ok(projects.some((x) => x.key === p.key), `thiếu dự án ${p.key}`);
 
     // 2.2 Mục tiêu: agent chỉ tạo nháp, không bật được; người bật.
     const agentBat = await createTechGoal({ title: "tcp-t mục tiêu agent tự bật", priority: "P2", activate: true }, agent);
@@ -257,6 +270,20 @@ export async function testTechControlPlaneGoalsDb() {
     assert.equal(chiTiet.execution.state, "COMPLETE");
     assert.equal(chiTiet.execution.progressPct, 100);
     assert.ok("error" in (await createTechTask({ title: "tcp-t việc vào sứ mệnh đã chốt", taskType: "DOCS", module: "PLATFORM", priority: "P3", source: "OWNER", missionId: m1Id }, chuShop)));
+
+    // 2.7b Đường vòng: việc đã vào DEPLOYING ⇒ gọi chủ shop ⇒ KHÔNG huỷ được (mã có thể đang chạy trên production).
+    const t3 = (await createTechTask({ title: "tcp-t việc đã vào deploy", taskType: "DOCS", module: "PLATFORM", priority: "P3", source: "OWNER" }, chuShop)) as { id: string };
+    taskIds.push(t3.id);
+    for (const to of ["TRIAGED", "BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY", "DEPLOYING"] as const) assert.ok("ok" in (await setTechTaskStatus({ taskId: t3.id, to }, chuShop)), to);
+    assert.ok("ok" in (await setTechTaskStatus({ taskId: t3.id, to: "NEEDS_OWNER", ownerEscalation: "PRODUCTION_INCIDENT", ownerAction: "Xem lượt deploy đang treo trên GitHub Actions" }, agent)));
+    const vong = await setTechTaskStatus({ taskId: t3.id, to: "CANCELLED", note: "Thôi không làm nữa, huỷ cho gọn" }, chuShop);
+    assert.ok("error" in vong && vong.error.includes("deploy"), "DEPLOYING → NEEDS_OWNER → CANCELLED là đường vòng huỷ thứ đã lên production — phải chặn");
+    assert.ok("ok" in (await setTechTaskStatus({ taskId: t3.id, to: "FAILED", note: "Deploy treo, đánh dấu thất bại" }, chuShop)), "lối ra đúng là FAILED");
+
+    // 2.7c Số "còn mở" của tổng quan bằng đúng tập TECH_TASK_OPEN — việc đã huỷ KHÔNG được đếm.
+    const dem = await techOverviewCounts();
+    const [moThat] = await db.select({ n: sql<number>`count(*)` }).from(schema.techTasks).where(sql`${schema.techTasks.status} not in ('DONE','CANCELLED')`);
+    assert.equal(Number(dem.tasks.open), Number(moThat.n), "thẻ 'đang mở' phải bằng số dòng của bộ lọc open=1");
 
     // 2.8 Mục tiêu: còn sứ mệnh mở ⇒ không "đạt"; bỏ mục tiêu ⇒ huỷ dây chuyền sứ mệnh còn mở.
     const m2 = await createTechMission({ title: "tcp-t Onboarding khách thứ nhất", priority: "P2", goalId }, chuShop);

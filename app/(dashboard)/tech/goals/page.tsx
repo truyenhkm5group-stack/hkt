@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ExecutionBadge, ExecutionProgress, GoalStatusBadge } from "@/app/(dashboard)/tech/control-plane-bits";
-import { GoalForm } from "@/app/(dashboard)/tech/goals/goal-form";
+import { GoalForm, SeedProjects } from "@/app/(dashboard)/tech/goals/goal-form";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
 import { TechPriorityBadge } from "@/app/(dashboard)/tech/badges";
 import { PageHeader } from "@/components/page-header";
@@ -34,7 +34,7 @@ export default async function TechGoalsPage({ searchParams }: { searchParams: Pr
             có con số nào được ghi tay. Agent chỉ tạo được bản nháp, không tự bật mục tiêu.
           </>
         }
-        actions={canManage ? <GoalForm projects={activeProjects} /> : null}
+        actions={canManage ? activeProjects.length ? <GoalForm projects={activeProjects} /> : <SeedProjects /> : null}
       />
       <TechNav />
 

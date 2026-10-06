@@ -9,8 +9,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { createTechGoalAction } from "@/lib/actions/tech-control-plane";
+import { createTechGoalAction, seedTechProjectsAction } from "@/lib/actions/tech-control-plane";
 import { TECH_PRIORITIES, TECH_PRIORITY_LABEL, type TechPriority } from "@/lib/constants/tech";
+
+/** Chưa có dự án nào ⇒ một nút gieo bốn dự án mặc định (người bấm — không migration nào tự gieo). */
+export function SeedProjects() {
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={pending}
+      onClick={() =>
+        start(async () => {
+          const res = await seedTechProjectsAction();
+          if ("error" in res) toast.error(res.error);
+          else toast.success(`Đã thêm ${res.created} dự án`);
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-4 animate-spin" /> : null} Khởi tạo dự án (ERP · ChotDonTuDong · HSLC · SaaS)
+    </Button>
+  );
+}
 
 /**
  * Chủ shop đặt MỤC TIÊU bằng lời thường ("ChotDonTuDong sẵn sàng cho 10 khách trả tiền đầu tiên"). Không
