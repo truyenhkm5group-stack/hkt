@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { eq, like, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
+  API_RUN_RESERVE_USD,
   BUDGET_DEFAULTS,
   EMPTY_BUDGET,
   apiSpendAlert,
@@ -123,6 +124,10 @@ export async function testTechPolicyDb() {
     const c2 = (await claimNextTechTask(await w(sub.id))).task!;
     await completeTechWorkerRun(await w(sub.id), { runId: c2.runId, leaseGeneration: c2.leaseGeneration, outcome: "SUCCEEDED", branch: c2.branch, cost: { usd: 3 } });
     assert.equal((await apiSpend()).todayUsd, chi.todayUsd, "ước tính của gói thuê bao KHÔNG cộng vào tiền API");
+    // Tiền API CHƯA BIẾT (lượt đang chạy / bị huỷ / không báo) ⇒ GIỮ CHỖ, không phải 0 (review 07/10).
+    const truocGiu = (await apiSpend()).todayUsd;
+    await db.insert(schema.techAgentRuns).values({ agentKey: "worker:tp-t-api", taskId: t.id, status: "FAILED", endedAt: new Date(), workerId: api.id, provider: "ANTHROPIC_API", metadata: { source: "tech-worker" } });
+    assert.equal((await apiSpend()).todayUsd, truocGiu + API_RUN_RESERVE_USD, "lượt API không báo tiền ⇒ tính tiền giữ chỗ");
     const t3 = (await createTechTask({ title: "tp-t tài liệu ba", taskType: "DOCS", module: "TECH", priority: "P1", source: "OWNER", missionId: m.id }, chuShop)) as { id: string };
     for (const to of ["TRIAGED", "SPEC_READY"] as const) await setTechTaskStatus({ taskId: t3.id, to }, chuShop);
     assert.equal((await claimNextTechTask(await w(api.id))).reason, "API_BUDGET_DAILY_CAP", "chạm trần ngày ⇒ worker API dừng");

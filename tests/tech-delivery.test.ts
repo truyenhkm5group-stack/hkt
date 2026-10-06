@@ -150,6 +150,19 @@ export async function testTechDeliveryDb() {
     assert.equal(sc.ownerEscalation, "PRODUCTION_INCIDENT");
     void dep;
 
+    // 5 · Quay lui: lượt deploy MỚI hơn KHÔNG chứa commit gộp ⇒ việc đang quan sát thành ROLLED_BACK, không bao giờ DONE.
+    const q = (await createTechTask({ title: "td-t việc bị quay lui", taskType: "DOCS", module: "TECH", priority: "P2", source: "OWNER" }, chuShop)) as { id: string };
+    for (const to of ["TRIAGED", "BUILDING", "REVIEW", "QA"] as const) await setTechTaskStatus({ taskId: q.id, to }, chuShop);
+    await db.update(schema.techTasks).set({ prNumber: 905, prState: "MERGED" }).where(eq(schema.techTasks.id, q.id));
+    chua = true;
+    await advanceDeployedTasks(50);
+    assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, q.id) }))?.status, "OBSERVING");
+    await db.insert(schema.techDeployments).values({ commitSha: "9999999999999999999999999999999999999999", provider: "GITHUB_ACTIONS", externalRunId: "td-t-run-2", status: "SUCCEEDED", verification: "VERIFIED", actorKind: "SYSTEM", notes: "td-t", startedAt: new Date(Date.now() - 3600_000) });
+    chua = false;
+    await verifyObservedTasks();
+    assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, q.id) }))?.status, "ROLLED_BACK", "production không còn chứa mã của việc ⇒ ROLLED_BACK");
+    chua = true;
+
     const ev = await db.select({ name: schema.techEvents.name }).from(schema.techEvents).where(sql`${schema.techEvents.taskId} in (${t.id}, ${g.id}, ${h.id})`);
     for (const n of ["pr.requested", "ci.failed", "ci.fix_requested", "ci.retry_exhausted", "deploy.reached", "verification.passed", "verification.failed"]) assert.ok(ev.some((e) => e.name === n), `thiếu sự kiện ${n}`);
     console.log("✓ Giao hàng (CSDL): PR mở qua cầu nối bot · CI đỏ ⇒ việc sửa trên chính nhánh, có trần ⇒ FAILED · deploy chỉ nối khi commit đang chạy CHỨA commit gộp, R2 chưa duyệt đứng yên · hậu kiểm ĐẠT ⇒ bằng chứng + DONE, sự cố nặng ⇒ Cần chủ shop");

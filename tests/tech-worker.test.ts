@@ -15,6 +15,7 @@ import {
   decideCompletion,
   taskBranchName,
   WORKER_BRANCH_PATTERN,
+  forbiddenTouched,
   workerLiveness,
   type ClaimCandidate,
 } from "@/lib/constants/tech-worker";
@@ -142,6 +143,25 @@ export function testTechWorkerPure() {
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
   const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
   assert.ok(!/CRON_SECRET|cronSecret|agentIngestSecret/.test(maRoute), "cửa worker không nhận khoá lập lịch / khoá chung");
+
+  // Review 07/10 — đường cấm của agent (kiểm ở worker trước khi chạy cổng / đẩy, và ở máy chủ trước khi mở PR).
+  assert.deepEqual(forbiddenTouched(["docs/a.md", "lib/x.ts"]), []);
+  for (const f of [".github/workflows/ci.yml", "drizzle/0300_x.sql", "db/schema.ts", "middleware.ts", "lib/auth/session.ts", "package.json", "package-lock.json", ".env", ".env.local", "AGENTS.md", "scripts/tech-worker.ts", "scripts/tech-worker/adapters.ts"]) {
+    assert.deepEqual(forbiddenTouched([f]), [f], `${f} phải là đường cấm`);
+  }
+  assert.deepEqual(forbiddenTouched(["drizzle\\meta\\_journal.json"]), ["drizzle/meta/_journal.json"], "đường dẫn Windows cũng bị bắt");
+  // Review 07/10 — LỖI CHẶN: cổng / npm ci chạy mã agent viết ⇒ môi trường phải là danh sách CHO PHÉP, không phải `...process.env`.
+  const tw = readFileSync(path.join(goc, "scripts/tech-worker.ts"), "utf8");
+  const twMa = tw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.ok(!/\.\.\.process\.env/.test(twMa), "worker không được trải process.env xuống tiến trình con");
+  assert.match(twMa, /const childEnv = buildChildEnv\("SUBSCRIPTION_CLAUDE_CODE", process\.env, null\)/, "env của cổng dựng bằng buildChildEnv");
+  assert.ok(!/spawnSync/.test(twMa), "không spawnSync — khoá event loop làm nhịp tim đứng, lease hết hạn giữa cổng dài");
+  assert.ok(twMa.indexOf("forbiddenTouched(files)") > 0 && twMa.indexOf("forbiddenTouched(files)") < twMa.indexOf("runGate(dir"), "đường cấm kiểm TRƯỚC khi chạy cổng");
+  const ad = readFileSync(path.join(goc, "scripts/tech-worker/adapters.ts"), "utf8");
+  assert.match(ad, /"--setting-sources",\s*"project"/, "Claude Code bỏ qua cấu hình người dùng (apiKeyHelper)");
+  assert.ok(!toolAllowlist().some((x) => x.includes("npx")), "không cho npx (tải và chạy gói lạ)");
+  const ds = readFileSync(path.join(goc, "lib/tech/dispatch-service.ts"), "utf8");
+  assert.match(ds, /task\.leaseWorkerId && task\.leaseExpiresAt/, "giao GitHub Actions bị từ chối khi worker hàng đợi đang giữ lease");
 
   // Migration: CHECK provider / concurrency khớp hằng số.
   const mig = readFileSync(path.join(goc, "drizzle/0226_tech_workers.sql"), "utf8");
@@ -274,9 +294,11 @@ export async function testTechWorkerDb() {
     await db.update(schema.techTasks).set({ nextAttemptAt: null }).where(eq(schema.techTasks.id, t1));
     const c3 = (await claimNextTechTask(giu)).task!;
     assert.equal(c3.attempt, 3);
-    assert.equal(c3.leaseGeneration, 3);
-    await startTechWorkerRun(giu, { runId: c3.runId, leaseGeneration: 3 });
-    const ok3 = await completeTechWorkerRun(giu, { runId: c3.runId, leaseGeneration: 3, outcome: "SUCCEEDED", branch: c3.branch, resultCommit: "def", summary: "Đã viết tài liệu", gates: { typecheck: "PASSED", lint: "PASSED" }, cost: { usd: 0.42 } });
+    assert.equal(c3.leaseGeneration, 4, "thu hồi TĂNG generation (review 07/10) ⇒ claim kế tiếp là 4");
+    await startTechWorkerRun(giu, { runId: c3.runId, leaseGeneration: 4 });
+    const lechNhanh = await completeTechWorkerRun(giu, { runId: c3.runId, leaseGeneration: 4, outcome: "SUCCEEDED", branch: "ai/worker/VIEC-KHAC-a1" });
+    assert.ok("error" in lechNhanh && lechNhanh.error === "BRANCH_MISMATCH", "nhánh báo về phải đúng nhánh máy chủ cấp");
+    const ok3 = await completeTechWorkerRun(giu, { runId: c3.runId, leaseGeneration: 4, outcome: "SUCCEEDED", branch: c3.branch, resultCommit: "def", summary: "Đã viết tài liệu", gates: { typecheck: "PASSED", lint: "PASSED" }, cost: { usd: 0.42 } });
     assert.ok("ok" in ok3 && ok3.taskStatus === "REVIEW", JSON.stringify(ok3));
     const t1Xong = (await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, t1) }))!;
     assert.equal(t1Xong.branch, c3.branch, "nhánh vào việc ⇒ bộ đồng bộ PR ghép được");
@@ -306,9 +328,26 @@ export async function testTechWorkerDb() {
     assert.ok("ok" in no && no.taskStatus === "NEEDS_OWNER");
     assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, tDung) }))?.ownerEscalation, "EXTERNAL_AUTH_REQUIRED");
 
-    // 2.10 Worker bị tắt ⇒ không nhận việc; mục tiêu tạm dừng ⇒ không việc nào của nó được nhận.
+    // 2.9b Máy chủ kiểm lại đường cấm: lượt "thành công" chạm drizzle/ ⇒ BLOCKED, không mở PR.
+    const tCam = (await createTechTask({ title: "tw-t việc tài liệu thứ năm", taskType: "DOCS", module: "TECH", priority: "P0", source: "OWNER", missionId: m.id }, chuShop)) as { id: string };
+    taskIds.push(tCam.id);
+    for (const to of ["TRIAGED", "SPEC_READY"] as const) await setTechTaskStatus({ taskId: tCam.id, to }, chuShop);
+    const cCam = (await claimNextTechTask(giu)).task!;
+    assert.equal(cCam.taskId, tCam.id);
+    const camRes = await completeTechWorkerRun(giu, { runId: cCam.runId, leaseGeneration: cCam.leaseGeneration, outcome: "SUCCEEDED", branch: cCam.branch, filesChanged: ["docs/a.md", "drizzle/0999_x.sql"] });
+    assert.ok("ok" in camRes && camRes.taskStatus === "BLOCKED", "chạm đường cấm ⇒ BLOCKED, không bao giờ REVIEW / PR");
+    // Người trả việc ĐANG LÀM về hàng đợi ⇒ từ chối (chỉ máy); người đưa về SPEC_READY từ BLOCKED ⇒ lần thử đếm lại.
+    assert.ok("ok" in (await setTechTaskStatus({ taskId: tCam.id, to: "SPEC_READY", note: "người mở lại" }, chuShop)));
+    assert.equal((await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, tCam.id) }))?.attempts, 0, "người mở lại ⇒ lần thử đếm lại từ đầu");
+    const cCam2 = (await claimNextTechTask(giu)).task!;
+    await startTechWorkerRun(giu, { runId: cCam2.runId, leaseGeneration: cCam2.leaseGeneration });
+    assert.ok("error" in (await setTechTaskStatus({ taskId: tCam.id, to: "SPEC_READY" }, chuShop)), "người không trả việc đang làm về hàng đợi");
+
+    // 2.10 Worker bị tắt ⇒ không nhận việc, KHÔNG nộp được kết quả; mục tiêu tạm dừng ⇒ không việc nào của nó được nhận.
     await setTechWorkerEnabled({ workerId: giu.id, enabled: false, reason: "bảo trì máy" }, chuShop);
     assert.equal((await claimNextTechTask(await worker(giu.id))).reason, "WORKER_DISABLED");
+    const tat = await completeTechWorkerRun(await worker(giu.id), { runId: cCam2.runId, leaseGeneration: cCam2.leaseGeneration, outcome: "SUCCEEDED", branch: cCam2.branch });
+    assert.ok("error" in tat && tat.error === "WORKER_DISABLED", "tắt worker là công tắc ngắt thật — không nộp được");
     await setTechGoalStatus({ goalId: g.id, to: "PAUSED" }, chuShop);
     void tR2;
 

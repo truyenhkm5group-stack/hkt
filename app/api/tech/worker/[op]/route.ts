@@ -74,12 +74,29 @@ const completeSchema = z
   .strict();
 
 /** Lỗi fencing là câu trả lời BÌNH THƯỜNG (worker cũ sống lại) ⇒ 409, không phải 500. */
-const FENCE_ERRORS = new Set(["RUN_NOT_YOURS", "RUN_CLOSED", "STALE_LEASE"]);
+const FENCE_ERRORS = new Set(["RUN_NOT_YOURS", "RUN_CLOSED", "STALE_LEASE", "BRANCH_MISMATCH", "WORKER_DISABLED"]);
+
+/**
+ * Trần lượt gọi theo worker (review 07/10, mục 18): 120 lượt / phút là gấp ~30 lần nhịp bình thường (nhịp tim 30″ +
+ * xin việc 60″). Trong bộ nhớ tiến trình — đủ cho một máy chủ ERP; vượt trần ⇒ 429, không chạm CSDL thêm.
+ */
+const LUOT = new Map<string, { phut: number; n: number }>();
+function quaTran(id: string): boolean {
+  const phut = Math.floor(Date.now() / 60_000);
+  const c = LUOT.get(id);
+  if (!c || c.phut !== phut) {
+    LUOT.set(id, { phut, n: 1 });
+    return false;
+  }
+  c.n += 1;
+  return c.n > 120;
+}
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }) {
   const { op } = await ctx.params;
   const worker = await authenticateTechWorker(req.headers.get("authorization"));
   if (!worker) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (quaTran(worker.id)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   let body: unknown = {};
   try {

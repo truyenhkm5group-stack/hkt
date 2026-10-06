@@ -16,12 +16,12 @@
  * không deploy (Pha 3 thêm yêu cầu mở PR qua máy chủ — bằng danh tính bot, để chủ shop duyệt được).
  * Không chạy được việc ⇒ báo `BLOCKED` / `NEEDS_OWNER` kèm lý do; không bao giờ chờ một lời nhắc tương tác.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TECH_OWNER_ESCALATIONS, type TechOwnerEscalation } from "@/lib/constants/tech";
-import { TECH_LEASE, isTechExecutionProvider, taskWorktreeDirName, type TechExecutionProvider, type TechRunOutcome } from "@/lib/constants/tech-worker";
+import { TECH_LEASE, buildChildEnv, forbiddenTouched, isTechExecutionProvider, taskWorktreeDirName, type TechExecutionProvider, type TechRunOutcome } from "@/lib/constants/tech-worker";
 import { buildAgentPrompt, gatesForTask, parseAgentResult, toolAllowlist } from "./tech-worker/brief";
 import { createAdapter, type ExecutionAdapter } from "./tech-worker/adapters";
 
@@ -81,21 +81,35 @@ function git(cwd: string, ...a: string[]): string {
   return execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-/** Chạy một lệnh cổng (exit code THẬT — model không tự chấm mình). `npm` gọi qua `npm-cli.js` + `node`, giữ `shell:false`. */
-function runGate(cwd: string, script: string, env: NodeJS.ProcessEnv): "PASSED" | "FAILED" {
+/**
+ * Chạy `npm <args>` BẤT ĐỒNG BỘ (review 07/10: `spawnSync` khoá event loop ⇒ nhịp tim đứng ⇒ lease 5′ hết hạn giữa
+ * `npm test` dài ⇒ lượt bị thu hồi dù vẫn đang chạy). `npm` gọi qua `npm-cli.js` + `node`, giữ `shell:false`
+ * (AGENTS.md mục 65); không tìm thấy `npm-cli.js` ⇒ báo rõ, không thử `spawn("npm")` (ENOENT trên Windows).
+ * Exit code THẬT — model không tự chấm mình.
+ */
+function npmAsync(cwd: string, args: string[], env: Record<string, string>, timeoutMs: number): Promise<number | null> {
   const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  const r = existsSync(npmCli)
-    ? spawnSync(process.execPath, [npmCli, "run", script], { cwd, env, stdio: "ignore", shell: false, timeout: 40 * 60_000 })
-    : spawnSync("npm", ["run", script], { cwd, env, stdio: "ignore", shell: false, timeout: 40 * 60_000 });
-  return r.status === 0 ? "PASSED" : "FAILED";
+  if (!existsSync(npmCli)) return Promise.reject(new Error(`Không tìm thấy npm-cli.js cạnh ${process.execPath}`));
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [npmCli, ...args], { cwd, env: env as NodeJS.ProcessEnv, stdio: "ignore", shell: false, windowsHide: true });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
 }
 
-function npmCi(cwd: string, env: NodeJS.ProcessEnv): boolean {
-  const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  const r = existsSync(npmCli)
-    ? spawnSync(process.execPath, [npmCli, "ci", "--no-audit", "--no-fund", "--prefer-offline"], { cwd, env, stdio: "ignore", shell: false, timeout: 20 * 60_000 })
-    : spawnSync("npm", ["ci", "--no-audit", "--no-fund", "--prefer-offline"], { cwd, env, stdio: "ignore", shell: false, timeout: 20 * 60_000 });
-  return r.status === 0;
+async function runGate(cwd: string, script: string, env: Record<string, string>): Promise<"PASSED" | "FAILED"> {
+  return (await npmAsync(cwd, ["run", script], env, 40 * 60_000)) === 0 ? "PASSED" : "FAILED";
+}
+
+async function npmCi(cwd: string, env: Record<string, string>): Promise<boolean> {
+  return (await npmAsync(cwd, ["ci", "--no-audit", "--no-fund", "--prefer-offline"], env, 20 * 60_000)) === 0;
 }
 
 async function complete(t: Claimed, body: Record<string, unknown>) {
@@ -140,11 +154,13 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
     // 2. Phụ thuộc — cổng cần node_modules.
     a.step = "cài phụ thuộc";
     a.progressPct = 10;
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, ERP_READ_ONLY: "1", CI: "1" };
-    delete childEnv.TECH_WORKER_TOKEN;
-    delete childEnv.TECH_WORKER_ANTHROPIC_API_KEY;
-    delete childEnv.DATABASE_URL;
-    if (!npmCi(dir, childEnv)) {
+    /*
+      MÔI TRƯỜNG CỦA `npm ci` VÀ CÁC CỔNG = DANH SÁCH CHO PHÉP (review 07/10, lỗi CHẶN): cổng chạy CHÍNH mã agent vừa
+      viết, nên nó chỉ được thấy đúng thứ tiến trình agent thấy — không token GitHub, không khoá API, không CSDL, không
+      biến nào "quên xoá". Dùng lại `buildChildEnv` của gói thuê bao (không khoá API nào) cho mọi worker.
+    */
+    const childEnv = buildChildEnv("SUBSCRIPTION_CLAUDE_CODE", process.env, null);
+    if (!(await npmCi(dir, childEnv))) {
       await complete(t, { outcome: "BLOCKED" satisfies TechRunOutcome, error: "npm ci thất bại trong cây làm việc của worker", branch: t.branch });
       return;
     }
@@ -197,12 +213,21 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
       return;
     }
 
-    // 5. Cổng — exit code thật.
+    // 5. ĐƯỜNG CẤM — kiểm TRƯỚC khi chạy cổng (cổng thực thi mã agent) và trước khi đẩy (CI chạy workflow của nhánh).
+    git(dir, "add", "-A");
+    const files = git(dir, "diff", "--cached", "--name-only").split("\n").filter(Boolean);
+    const cam = forbiddenTouched(files);
+    if (cam.length) {
+      await complete(t, { outcome: "BLOCKED", error: `Agent sửa đường cấm (${cam.join(", ")}) — không chạy cổng, không đẩy. Việc này cần người làm hoặc nâng chính sách.`, filesChanged: files, model: res.model, cost, branch: t.branch });
+      return;
+    }
+
+    // 6. Cổng — exit code thật.
     a.step = "chạy cổng";
     a.progressPct = 70;
     const gates: Record<string, "PASSED" | "FAILED" | "SKIPPED"> = {};
     for (const g of gatesForTask(t)) {
-      gates[g] = runGate(dir, g === "test" ? "test" : g, childEnv);
+      gates[g] = await runGate(dir, g === "test" ? "test" : g, childEnv);
       push(gates[g] === "PASSED" ? "info" : "error", `cổng ${g}: ${gates[g]}`);
       if (gates[g] === "FAILED") break;
     }
@@ -211,11 +236,9 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
       return;
     }
 
-    // 6. Worker commit + đẩy (agent không có quyền git). Không PR ở đây — Pha 3.
+    // 7. Worker commit + đẩy (agent không có quyền git). PR do máy chủ yêu cầu bằng danh tính bot.
     a.step = "commit + đẩy nhánh";
     a.progressPct = 90;
-    git(dir, "add", "-A");
-    const files = git(dir, "diff", "--cached", "--name-only").split("\n").filter(Boolean);
     git(dir, "-c", "user.name=tech-worker", "-c", "user.email=tech-worker@users.noreply.github.com", "commit", "-q", "-m", `${t.code}: ${t.title}\n\n${(khai.summary || res.resultText).slice(0, 3000)}\n\nWorker: ${VERSION} · lượt ${t.runId} · lần thử ${t.attempt}`);
     const resultCommit = git(dir, "rev-parse", "HEAD");
     git(dir, "push", "-q", "origin", `${t.branch}:${t.branch}`);

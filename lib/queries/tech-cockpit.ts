@@ -35,7 +35,8 @@ export async function techCockpit(now = new Date()) {
     ciFailing: open.filter((x) => x.prState === "OPEN" && x.ciState === "FAILURE").length,
     awaitingReview: open.filter((x) => x.prState === "OPEN" && x.ciState === "SUCCESS" && x.reviewState !== "APPROVED").length,
   };
-  const choDuyet = open.filter((x) => x.approvalStatus === "PENDING").length;
+  // Không đếm trùng việc vừa NEEDS_OWNER vừa chờ duyệt (review 07/10, mục 15).
+  const choDuyet = open.filter((x) => x.approvalStatus === "PENDING" && x.status !== "NEEDS_OWNER").length;
 
   const runs = await db.query.techAgentRuns.findMany({
     where: and(isNotNull(schema.techAgentRuns.workerId), eq(schema.techAgentRuns.status, "RUNNING")),
@@ -78,7 +79,9 @@ export async function techCockpit(now = new Date()) {
   // Tiền: API thật; gói thuê bao ước tính (CLI tự báo) — hai con số, hai nhãn.
   const ngan = await effectiveBudget(null);
   const chi = await apiSpend({ now });
-  const dauThang = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // Đầu tháng theo giờ Việt Nam — cùng quy ước với tiền ngày (`apiSpend`).
+  const vn = new Date(now.getTime() + 7 * 3600_000);
+  const dauThang = new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), 1) - 7 * 3600_000);
   const [thang] = await db
     .select({
       api: sql<number>`coalesce(sum(nullif(${schema.techAgentRuns.metadata}->'cost'->>'usd', '')::float8) filter (where ${schema.techAgentRuns.metadata}->>'billing' = 'API'), 0)`,

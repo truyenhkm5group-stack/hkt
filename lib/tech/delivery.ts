@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lte, ne } from "drizzle-orm";
+import { getSyncState, setSyncState } from "@/lib/sync/runner";
 import { getDb, schema } from "@/db";
 import type { TechTaskStatus } from "@/lib/constants/tech";
 import { ciFixDecision, deployCatchUpSteps, observationVerdict, prTransitionEvents, type PrSnapshot } from "@/lib/constants/tech-delivery";
@@ -19,6 +20,7 @@ import { createTechTask, recordTechTaskEvent, setTechTaskStatus, verifyTechTaskO
  */
 
 const MAY: TechActor = { kind: "SYSTEM", name: "job:tech-delivery" };
+const CON_TRO_GIAO_HANG = "tech-delivery.deploy-cursor";
 
 /* ═════════════════════ 1 · YÊU CẦU MỞ PR ═════════════════════ */
 
@@ -146,11 +148,18 @@ export async function advanceDeployedTasks(limit = 10) {
   const dep = await latestVerifiedDeployment();
   const out = { considered: 0, advanced: 0, notContained: 0, skippedApproval: 0, errors: 0 };
   if (!dep) return out;
-  const tasks = await db.query.techTasks.findMany({
-    where: and(inArray(schema.techTasks.status, ["QA", "READY_TO_DEPLOY", "DEPLOYING"]), eq(schema.techTasks.prState, "MERGED"), isNotNull(schema.techTasks.prNumber)),
-    orderBy: [asc(schema.techTasks.updatedAt)],
-    limit,
-  });
+  /*
+    XOAY VÒNG (review 07/10, mục 13): con trỏ theo `id` lưu ở sync_state — việc gộp nhầm nhánh / không bao giờ lên
+    production không chiếm chỗ mãi. Hết vòng thì quay về đầu.
+  */
+  const conTro = (await getSyncState<string>(CON_TRO_GIAO_HANG)) ?? "";
+  const dieuKien = and(inArray(schema.techTasks.status, ["QA", "READY_TO_DEPLOY", "DEPLOYING"]), eq(schema.techTasks.prState, "MERGED"), isNotNull(schema.techTasks.prNumber));
+  let tasks = await db.query.techTasks.findMany({ where: and(dieuKien, gt(schema.techTasks.id, conTro)), orderBy: [asc(schema.techTasks.id)], limit });
+  if (tasks.length < limit && conTro) {
+    const dau = await db.query.techTasks.findMany({ where: and(dieuKien, lte(schema.techTasks.id, conTro)), orderBy: [asc(schema.techTasks.id)], limit: limit - tasks.length });
+    tasks = [...tasks, ...dau];
+  }
+  if (tasks.length) await setSyncState(CON_TRO_GIAO_HANG, tasks[tasks.length - 1].id);
   for (const t of tasks) {
     out.considered += 1;
     if (t.approvalRequired && t.approvalStatus !== "APPROVED") {
@@ -189,7 +198,7 @@ export async function advanceDeployedTasks(limit = 10) {
  */
 export async function verifyObservedTasks(now = new Date(), limit = 20) {
   const db = await getDb();
-  const out = { considered: 0, passed: 0, incident: 0, waiting: 0, noEvidence: 0 };
+  const out = { considered: 0, passed: 0, incident: 0, waiting: 0, noEvidence: 0, rolledBack: 0 };
   const tasks = await db.query.techTasks.findMany({ where: eq(schema.techTasks.status, "OBSERVING"), orderBy: [asc(schema.techTasks.updatedAt)], limit });
   if (!tasks.length) return out;
   const dep = await latestVerifiedDeployment();
@@ -201,7 +210,30 @@ export async function verifyObservedTasks(now = new Date(), limit = 20) {
       .where(and(eq(schema.techEvents.taskId, t.id), eq(schema.techEvents.name, "deploy.reached")))
       .orderBy(asc(schema.techEvents.occurredAt))
       .limit(1);
-    const deployedAt = toi ? new Date(String((toi.payload as { deployedAt?: string }).deployedAt ?? toi.at.toISOString())) : null;
+    const p = (toi?.payload ?? {}) as { deployedAt?: string; deploymentId?: string; mergeSha?: string };
+    const deployedAt = toi ? new Date(String(p.deployedAt ?? toi.at.toISOString())) : null;
+    /*
+      PRODUCTION CÒN CHẠY MÃ CỦA VIỆC KHÔNG (review 07/10, mục 4): lượt deploy hiện hành khác lượt đã đưa việc lên ⇒
+      kiểm LẠI commit đang chạy có chứa commit gộp. Không chứa (deploy lại một SHA cũ / quay lui) ⇒ ROLLED_BACK,
+      không bao giờ DONE. Không đối chiếu được (GitHub lỗi) ⇒ chờ lượt sau, không kết luận.
+    */
+    let conChay: boolean | null = null;
+    if (toi && dep && p.mergeSha) {
+      if (dep.id === p.deploymentId) conChay = true;
+      else conChay = await commitContains(dep.commitSha, p.mergeSha).catch(() => null);
+    }
+    if (conChay === false) {
+      const r = await setTechTaskStatus({ taskId: t.id, to: "ROLLED_BACK", note: `Lượt deploy hiện hành ${dep?.externalRunId || dep?.id} (commit ${dep?.commitSha.slice(0, 12)}) KHÔNG chứa commit gộp ${p.mergeSha?.slice(0, 12)} — mã của việc không còn trên production.` }, MAY);
+      if ("ok" in r) {
+        out.rolledBack += 1;
+        await recordTechEvent(db, { name: "verification.failed", subjectType: "TASK", subjectId: t.id, taskId: t.id, missionId: t.missionId, payload: { taskCode: t.code, reason: "NOT_IN_PRODUCTION", deploymentId: dep?.id }, dedupeKey: `verifygone:${t.id}:${dep?.id}` }, MAY);
+      }
+      continue;
+    }
+    if (conChay === null && toi) {
+      out.waiting += 1;
+      continue;
+    }
     const severe = deployedAt
       ? (
           await db
@@ -223,8 +255,13 @@ export async function verifyObservedTasks(now = new Date(), limit = 20) {
         await recordTechEvent(db, { name: "verification.failed", subjectType: "TASK", subjectId: t.id, taskId: t.id, missionId: t.missionId, payload: { taskCode: t.code, incidents: severe }, dedupeKey: `verifyfail:${t.id}:${severe.join(",")}` }, MAY);
       }
     } else {
-      const evidence = `Máy hậu kiểm: lượt deploy ${dep?.externalRunId || dep?.id} commit ${dep?.commitSha.slice(0, 12)} đã đối chiếu với commit đang chạy; quan sát ≥ ${Math.round((now.getTime() - deployedAt!.getTime()) / 60000)} phút, 0 sự cố SEV0/SEV1 mở sau mốc deploy.`;
-      await verifyTechTaskOnProduction({ taskId: t.id, evidence }, MAY);
+      const evidence = `Máy hậu kiểm: lượt deploy ${dep?.externalRunId || dep?.id} commit ${dep?.commitSha.slice(0, 12)} đã đối chiếu với commit đang chạy và CHỨA commit gộp ${p.mergeSha?.slice(0, 12)}; quan sát ≥ ${Math.round((now.getTime() - deployedAt!.getTime()) / 60000)} phút, 0 sự cố SEV0/SEV1 mở sau mốc deploy.`;
+      // Không ghi được bằng chứng xác minh ⇒ KHÔNG đóng (DONE không được đi bằng câu ghi chú thay cho chứng cứ).
+      const xm = await verifyTechTaskOnProduction({ taskId: t.id, evidence }, MAY);
+      if ("error" in xm) {
+        out.waiting += 1;
+        continue;
+      }
       const r = await setTechTaskStatus({ taskId: t.id, to: "DONE", note: evidence }, MAY);
       if ("ok" in r) {
         out.passed += 1;
@@ -238,6 +275,6 @@ export async function verifyObservedTasks(now = new Date(), limit = 20) {
 /** Một bước của job đã có lịch (`task-advance-watch`): nối deploy rồi hậu kiểm. Không ném lỗi ra ngoài. */
 export async function runDeliveryWatch(now = new Date()) {
   const deploy = await advanceDeployedTasks().catch(() => ({ considered: 0, advanced: 0, notContained: 0, skippedApproval: 0, errors: 1 }));
-  const verify = await verifyObservedTasks(now).catch(() => ({ considered: 0, passed: 0, incident: 0, waiting: 0, noEvidence: 0 }));
+  const verify = await verifyObservedTasks(now).catch(() => ({ considered: 0, passed: 0, incident: 0, waiting: 0, noEvidence: 0, rolledBack: 0 }));
   return { deploy, verify, at: now.toISOString() };
 }

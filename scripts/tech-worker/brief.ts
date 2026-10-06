@@ -32,10 +32,8 @@ export function toolAllowlist(): string[] {
     "Bash(git status:*)",
     "Bash(git diff:*)",
     "Bash(git log:*)",
-    "Bash(npm run typecheck:*)",
-    "Bash(npm run lint:*)",
-    "Bash(npx tsc:*)",
-    "Bash(npx eslint:*)",
+    "Bash(npm run typecheck)",
+    "Bash(npm run lint)",
   ];
 }
 

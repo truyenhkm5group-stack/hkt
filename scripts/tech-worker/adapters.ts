@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { assertBillingBoundary, buildChildEnv, type TechExecutionProvider } from "@/lib/constants/tech-worker";
 
@@ -86,6 +86,17 @@ class ClaudeCodeAdapter implements ExecutionAdapter {
     const bin = resolveClaudeBin();
     if (!bin) return { ok: false as const, reason: "Không tìm thấy Claude Code CLI (claude.exe) — cài Claude Code hoặc đặt TECH_WORKER_CLAUDE_BIN." };
     if (this.provider === "ANTHROPIC_API" && !this.apiKey) return { ok: false as const, reason: "Worker API thiếu TECH_WORKER_ANTHROPIC_API_KEY — không mượn khoá của máy." };
+    if (this.provider === "SUBSCRIPTION_CLAUDE_CODE") {
+      // Lưới thứ hai cho ranh giới thanh toán: cấu hình người dùng có đường tính tiền API ⇒ báo, không chạy.
+      for (const goc of [process.env.USERPROFILE, process.env.HOME].filter(Boolean) as string[]) {
+        const f = path.join(goc, ".claude", "settings.json");
+        if (!existsSync(f)) continue;
+        const raw = readFileSync(f, "utf8");
+        if (/apiKeyHelper|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN/.test(raw)) {
+          return { ok: false as const, reason: `${f} khai đường tính tiền API (apiKeyHelper / ANTHROPIC_*) — worker gói thuê bao không chạy cho tới khi gỡ.` };
+        }
+      }
+    }
     try {
       buildChildEnv(this.provider, process.env, this.apiKey);
     } catch (e) {
@@ -110,6 +121,10 @@ class ClaudeCodeAdapter implements ExecutionAdapter {
       "--allowedTools",
       req.allowedTools.join(","),
       "--no-session-persistence",
+      // Chỉ cấu hình của KHO — bỏ qua `~/.claude/settings.json` của người dùng (nơi có thể có `apiKeyHelper` /
+      // `env.ANTHROPIC_API_KEY` khiến CLI tính tiền API dù môi trường sạch — review 07/10, mục 17).
+      "--setting-sources",
+      "project",
     ];
     if (req.model) args.push("--model", req.model);
     if (req.maxTurns) args.push("--max-turns", String(req.maxTurns));

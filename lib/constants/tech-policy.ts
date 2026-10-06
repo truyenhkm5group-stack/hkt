@@ -113,6 +113,12 @@ export type TechBudgetLimits = {
 
 export const EMPTY_BUDGET: TechBudgetLimits = { apiUsdDaily: null, apiUsdTotal: null, maxRunMinutes: null, maxAttempts: null, maxConcurrentRuns: null };
 
+/**
+ * GIỮ CHỖ tiền cho MỘT lượt API mà chưa biết tiền thật (đang chạy, bị huỷ, quá giờ, thu hồi lease, CLI không báo).
+ * Chưa biết KHÔNG phải 0 (AGENTS.md mục 42) — trần chi tính trên tiền giữ chỗ (cùng luật mục 72). Nhãn ƯỚC TÍNH.
+ */
+export const API_RUN_RESERVE_USD = 5;
+
 /** Mặc định khi KHÔNG phạm vi nào khai — chỉ cho trần thời gian / lần thử / đồng thời; tiền API thì KHÔNG có mặc định. */
 export const BUDGET_DEFAULTS = { maxRunMinutes: 45, maxAttempts: 3, maxConcurrentRuns: 4 } as const;
 

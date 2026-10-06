@@ -157,6 +157,23 @@ export function testTechRiskEngine() {
   assert.ok(!code.rules.includes("COD_MONEY"), "“Claude Code” KHÔNG phải tiền COD — chuỗi con không được kích luật");
   assert.ok(!classifyTechRisk({ taskType: "DOCS", module: "TECH", title: "Ghi tên author vào tài liệu controller" }).rules.includes("ACCESS"), "author / controller không phải quyền");
   assert.equal(classifyTechRisk({ taskType: "BUGFIX", module: "PLATFORM", title: "Sửa đối soát COD bị lệch" }).risk, "R2", "COD đứng riêng vẫn bắt");
+  // Review 07/10: định danh camelCase / từ ghép KHÔNG được lọt (khớp theo từ chỉ áp cho cod · auth · role).
+  for (const t of [
+    "Sửa requirePermission cho /api/x",
+    "Đổi accessToken hết hạn",
+    "Sửa passwordHash",
+    "Đổi webhookSecret",
+    "Sửa sessionOrgClaim",
+    "Đổi dataScope mặc định",
+    "Hàm authorize mới",
+    "authenticateUser lỗi",
+    "Sửa codStatus khi import",
+    "Sửa stockKnown",
+    "Đổi crontab",
+    "Thêm requireRole cho trang",
+  ]) {
+    assert.equal(classifyTechRisk({ taskType: "BUGFIX", module: "PLATFORM", title: t }).risk, "R2", `“${t}” phải là R2 — đổi cách khớp không được HẠ cổng`);
+  }
   for (const t of ["Sửa data_scope của user", "Thêm roles mới", "Đổi luồng authentication", "Đổi đăng nhập OAuth", "Sửa .env mẫu"]) {
     assert.equal(classifyTechRisk({ taskType: "BUGFIX", module: "PLATFORM", title: t }).risk, "R2", `“${t}” vẫn phải bắt (không mất độ phủ)`);
   }

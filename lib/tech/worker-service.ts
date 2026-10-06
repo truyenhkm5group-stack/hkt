@@ -12,6 +12,7 @@ import {
   leaseExpiry,
   taskBranchName,
   WORKER_BRANCH_PATTERN,
+  forbiddenTouched,
   type TechExecutionProvider,
   type TechRunOutcome,
 } from "@/lib/constants/tech-worker";
@@ -128,6 +129,23 @@ export async function authenticateTechWorker(header: string | null | undefined):
   return w;
 }
 
+/* ═════════════════════ TRẦN LẦN THỬ HIỆU LỰC ═════════════════════ */
+
+/**
+ * Trần lần thử của MỘT việc = nhỏ nhất của cột việc và ngân sách hiệu lực (sứ mệnh → mục tiêu → dự án → công ty).
+ * Dùng CÙNG một hàm ở nhận việc, kết thúc lượt và thu hồi (review 07/10, mục 9: trước đây ba chỗ ba trần ⇒ việc kẹt
+ * SPEC_READY mãi, không bao giờ FAILED).
+ */
+export async function effectiveMaxAttempts(task: { maxAttempts: number; missionId?: string | null; id?: string }): Promise<number> {
+  let missionId = task.missionId;
+  if (missionId === undefined && task.id) {
+    const db = await getDb();
+    missionId = (await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, task.id), columns: { missionId: true } }))?.missionId ?? null;
+  }
+  const b = await effectiveBudget(missionId ?? null);
+  return Math.min(task.maxAttempts, b.maxAttempts ?? Number.POSITIVE_INFINITY);
+}
+
 /* ═════════════════════ THU HỒI LEASE HẾT HẠN ═════════════════════ */
 
 /**
@@ -145,26 +163,34 @@ export async function reapExpiredTechLeases(now = new Date()): Promise<{ reaped:
   const may: TechActor = { kind: "SYSTEM", name: "job:tech-lease-reaper" };
   let reaped = 0;
   for (const row of expired) {
-    // Nhả lease có điều kiện: chỉ khi vẫn đúng generation đã đọc — một worker vừa gia hạn kịp thì thôi.
-    const released = await db
-      .update(t)
-      .set({ leaseWorkerId: null, leaseExpiresAt: null })
-      .where(and(eq(t.id, row.id), eq(t.leaseGeneration, row.leaseGeneration), sql`${t.leaseExpiresAt} <= ${now}`))
-      .returning({ id: t.id });
-    if (!released.length) continue;
+    /*
+      Nhả lease + đóng lượt chạy trong MỘT giao dịch, có điều kiện generation đã đọc (worker vừa gia hạn kịp thì
+      thôi). Nhả lease TĂNG generation (review 07/10, mục 7): mọi lời gọi về sau của worker cũ — kể cả một `complete`
+      chen giữa — trượt fencing thay vì ghi đè lượt đã đóng.
+    */
+    const released = await db.transaction(async (tx) => {
+      const r = await tx
+        .update(t)
+        .set({ leaseWorkerId: null, leaseExpiresAt: null, leaseGeneration: sql`${t.leaseGeneration} + 1` })
+        .where(and(eq(t.id, row.id), eq(t.leaseGeneration, row.leaseGeneration), sql`${t.leaseExpiresAt} <= ${now}`))
+        .returning({ id: t.id });
+      if (!r.length) return false;
+      await tx
+        .update(schema.techAgentRuns)
+        .set({ status: "FAILED", endedAt: now, error: "Lease hết hạn — worker mất nhịp tim; việc đã được thả về hàng đợi." })
+        .where(and(eq(schema.techAgentRuns.taskId, row.id), eq(schema.techAgentRuns.leaseGeneration, row.leaseGeneration), eq(schema.techAgentRuns.status, "RUNNING")));
+      return true;
+    });
+    if (!released) continue;
     reaped += 1;
-    await db
-      .update(schema.techAgentRuns)
-      .set({ status: "FAILED", endedAt: now, error: "Lease hết hạn — worker mất nhịp tim; việc đã được thả về hàng đợi." })
-      .where(and(eq(schema.techAgentRuns.taskId, row.id), eq(schema.techAgentRuns.leaseGeneration, row.leaseGeneration), eq(schema.techAgentRuns.status, "RUNNING")));
-    const conLan = row.attempts < row.maxAttempts;
+    const conLan = row.attempts < (await effectiveMaxAttempts(row));
     if (row.status === "BUILDING" || row.status === "SPEC_READY") {
       if (conLan) {
         if (row.status === "BUILDING") await setTechTaskStatus({ taskId: row.id, to: "SPEC_READY", note: "Lease hết hạn — trả về hàng đợi" }, may);
         await db.update(t).set({ nextAttemptAt: new Date(now.getTime() + backoffMinutes(row.attempts) * 60_000) }).where(eq(t.id, row.id));
       } else {
         if (row.status === "SPEC_READY") await setTechTaskStatus({ taskId: row.id, to: "BUILDING", note: "Lease hết hạn ở lần thử cuối" }, may);
-        await setTechTaskStatus({ taskId: row.id, to: "FAILED", note: `Hết ${row.maxAttempts} lần thử — lần cuối mất nhịp tim` }, may);
+        await setTechTaskStatus({ taskId: row.id, to: "FAILED", note: `Hết lần thử — lần cuối mất nhịp tim` }, may);
       }
     }
     await db.update(t).set({ lastError: "Lease hết hạn — worker mất nhịp tim" }).where(eq(t.id, row.id));
@@ -268,9 +294,13 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
         AND (c.mission_id IS NULL OR m.status = 'ACTIVE')
         AND (m.goal_id IS NULL OR g.status = 'ACTIVE')
         AND (c.lease_worker_id IS NULL OR c.lease_expires_at <= ${now})
-        AND c.attempts < LEAST(c.max_attempts, ${tranLan})
+        AND c.attempts < LEAST(c.max_attempts, ${tranLan}, coalesce((select bm.max_attempts from tech_budgets bm where bm.scope_kind = 'MISSION' and bm.scope_id = c.mission_id), 10))
         AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ${now})
         AND ${capSql} IN (${capList})
+        AND NOT EXISTS (
+          SELECT 1 FROM tech_task_events ev
+          WHERE ev.task_id = c.id AND ev.kind = 'RUN' AND ev.payload->>'workflow' = 'agent-run.yml' AND ev.created_at > ${new Date(now.getTime() - 90 * 60_000)}
+        )
         AND NOT EXISTS (
           SELECT 1 FROM jsonb_array_elements_text(c.depends_on) d(dep_id)
           LEFT JOIN tech_tasks dt ON dt.id = d.dep_id
@@ -299,7 +329,11 @@ export async function claimNextTechTask(worker: TechWorkerRow, now = new Date())
     const chi = await apiSpend({ missionId: task.missionId, now });
     const ok = apiSpendAllowed(ngan, chi.todayUsd, chi.totalUsd);
     if (!ok.ok) {
-      await db.update(t).set({ leaseWorkerId: null, leaseExpiresAt: null, attempts: sql`greatest(${t.attempts} - 1, 0)` }).where(and(eq(t.id, task.id), eq(t.leaseGeneration, task.leaseGeneration)));
+      // Lùi giờ việc này 60′ (review 07/10, mục 10): không thì nó đứng đầu hàng đợi và chặn mọi sứ mệnh khác.
+      await db
+        .update(t)
+        .set({ leaseWorkerId: null, leaseExpiresAt: null, attempts: sql`greatest(${t.attempts} - 1, 0)`, nextAttemptAt: new Date(now.getTime() + 60 * 60_000), lastError: `Sứ mệnh hết trần chi API: ${ok.detail}` })
+        .where(and(eq(t.id, task.id), eq(t.leaseGeneration, task.leaseGeneration)));
       return { task: null, reason: `API_BUDGET_${ok.reason}` };
     }
   }
@@ -438,6 +472,8 @@ async function appendRunLogs(db: Db, runId: string, logs: { level?: string; line
 
 /** Worker đã dựng xong cây làm việc ⇒ việc sang `BUILDING` (vòng đời chuẩn: CLAIMED → RUNNING). */
 export async function startTechWorkerRun(worker: TechWorkerRow, input: Fence & { baseCommit?: string; worktree?: string; model?: string }): Promise<TechResult> {
+  // Tắt worker là công tắc ngắt THẬT (review 07/10, mục 12): không bắt đầu, không nộp — lease tự hết hạn.
+  if (!worker.enabled) return { error: "WORKER_DISABLED" };
   const db = await getDb();
   const f = await fenced(db, worker, input);
   if (!f.ok) return { error: f.reason };
@@ -475,13 +511,41 @@ const gate = (g: TechGateResult | undefined): TechGateResult => (g && (TECH_GATE
  * đổi trạng thái giữa chừng (huỷ, chờ chủ shop) thì chỉ GHI kết quả lượt chạy, không đè quyết định của người.
  */
 export async function completeTechWorkerRun(worker: TechWorkerRow, input: CompleteRunInput, now = new Date()): Promise<TechResult<{ taskStatus: TechTaskStatus }>> {
+  if (!worker.enabled) return { error: "WORKER_DISABLED" };
   const db = await getDb();
   const f = await fenced(db, worker, input);
   if (!f.ok) return { error: f.reason };
   const { run, task } = f;
-  const d = decideCompletion(input.outcome, task.attempts, task.maxAttempts);
+  // Nhánh do worker báo phải ĐÚNG nhánh máy chủ đã cấp (review 07/10, mục 8) — không thì một token lộ gắn được PR lạ.
+  if (input.branch && input.branch !== run.branch) return { error: "BRANCH_MISMATCH" };
+  /*
+    ĐƯỜNG CẤM kiểm lại ở máy chủ (review 07/10, mục 6) — worker có thể là bản cũ / bị sửa. Chạm đường cấm thì
+    THÀNH CÔNG cũng bị hạ xuống BLOCKED: không yêu cầu mở PR, việc chờ người.
+  */
+  const cam = forbiddenTouched(input.filesChanged ?? []);
+  if (cam.length && input.outcome === "SUCCEEDED") {
+    input = { ...input, outcome: "BLOCKED", error: `Diff chạm đường cấm: ${cam.join(", ")} — không mở PR tự động.` };
+  }
+  const d = decideCompletion(input.outcome, task.attempts, await effectiveMaxAttempts(task));
   const meta = (run.metadata as Record<string, unknown> | null) ?? {};
   const billing = worker.provider === "ANTHROPIC_API" ? "API" : "SUBSCRIPTION";
+
+  /*
+    NHẢ LEASE TRƯỚC, có điều kiện đúng generation + đúng worker (review 07/10, mục 7). Lượt thu hồi vừa chạy (đã tăng
+    generation) ⇒ 0 dòng ⇒ STALE_LEASE, KHÔNG ghi đè lượt chạy đã đóng.
+  */
+  const nha = await db
+    .update(schema.techTasks)
+    .set({
+      leaseWorkerId: null,
+      leaseExpiresAt: null,
+      lastError: input.outcome === "SUCCEEDED" ? "" : (input.error ?? input.summary ?? "").slice(0, 2000),
+      nextAttemptAt: d.requeue && d.backoffMinutes ? new Date(now.getTime() + d.backoffMinutes * 60_000) : null,
+      branch: input.outcome === "SUCCEEDED" && input.branch ? input.branch.slice(0, 255) : task.branch,
+    })
+    .where(and(eq(schema.techTasks.id, task.id), eq(schema.techTasks.leaseGeneration, input.leaseGeneration), eq(schema.techTasks.leaseWorkerId, worker.id)))
+    .returning({ id: schema.techTasks.id });
+  if (!nha.length) return { error: "STALE_LEASE" };
 
   await db
     .update(schema.techAgentRuns)
@@ -510,19 +574,7 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
         cost: input.cost ? { ...input.cost, estimated: billing === "SUBSCRIPTION" ? true : (input.cost.estimated ?? false) } : null,
       },
     })
-    .where(eq(schema.techAgentRuns.id, run.id));
-
-  // Nhả lease (có điều kiện generation — một lượt thu hồi vừa chạy thì thôi).
-  await db
-    .update(schema.techTasks)
-    .set({
-      leaseWorkerId: null,
-      leaseExpiresAt: null,
-      lastError: input.outcome === "SUCCEEDED" ? "" : (input.error ?? input.summary ?? "").slice(0, 2000),
-      nextAttemptAt: d.requeue && d.backoffMinutes ? new Date(now.getTime() + d.backoffMinutes * 60_000) : null,
-      branch: input.outcome === "SUCCEEDED" && input.branch ? input.branch.slice(0, 255) : task.branch,
-    })
-    .where(and(eq(schema.techTasks.id, task.id), eq(schema.techTasks.leaseGeneration, input.leaseGeneration)));
+    .where(and(eq(schema.techAgentRuns.id, run.id), eq(schema.techAgentRuns.status, "RUNNING")));
 
   const actor = workerActor(worker);
   let status = task.status as TechTaskStatus;

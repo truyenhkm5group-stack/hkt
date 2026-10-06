@@ -1,6 +1,6 @@
 import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { EMPTY_BUDGET, TECH_BUDGET_SCOPES, resolveBudget, type TechBudgetLimits, type TechBudgetScope } from "@/lib/constants/tech-policy";
+import { API_RUN_RESERVE_USD, EMPTY_BUDGET, TECH_BUDGET_SCOPES, resolveBudget, type TechBudgetLimits, type TechBudgetScope } from "@/lib/constants/tech-policy";
 import { recordTechEvent } from "@/lib/tech/control-plane";
 import type { TechActor, TechResult } from "@/lib/tech/service";
 
@@ -26,7 +26,12 @@ export async function effectiveBudget(missionId?: string | null): Promise<TechBu
   return resolveBudget([lay("COMPANY", ""), m.projectId ? lay("PROJECT", m.projectId) : null, m.goalId ? lay("GOAL", m.goalId) : null, lay("MISSION", m.id)]);
 }
 
-const apiCost = sql<number>`coalesce(sum(nullif(${schema.techAgentRuns.metadata}->'cost'->>'usd', '')::float8) filter (where ${schema.techAgentRuns.metadata}->>'billing' = 'API'), 0)`;
+/*
+  Tiền API của một lượt: tiền thật nếu CLI đã báo; CHƯA BIẾT (đang chạy · quá giờ · huỷ · thu hồi · không báo) ⇒ GIỮ CHỖ
+  `API_RUN_RESERVE_USD` (review 07/10, mục 3 — NULL không phải 0; trần chi tính trên tiền giữ chỗ như mục 72).
+  Lượt API nhận diện bằng `provider` (máy chủ ghi lúc nhận việc), không bằng lời khai `billing` của lúc kết thúc.
+*/
+const apiCost = sql<number>`coalesce(sum(coalesce(nullif(${schema.techAgentRuns.metadata}->'cost'->>'usd', '')::float8, ${API_RUN_RESERVE_USD})) filter (where ${schema.techAgentRuns.provider} = 'ANTHROPIC_API'), 0)`;
 
 /** Tiền API THẬT đã chi: hôm nay (theo giờ VN) và tổng — toàn công ty, hoặc của một sứ mệnh. */
 export async function apiSpend(opts: { missionId?: string | null; now?: Date } = {}): Promise<{ todayUsd: number; totalUsd: number }> {

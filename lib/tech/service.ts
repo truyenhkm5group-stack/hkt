@@ -288,6 +288,10 @@ export async function setTechTaskStatus(
   if (!canTransitionTechTask(from, input.to)) {
     return { error: `Không đi thẳng từ “${TECH_TASK_STATUS_LABEL[from]}” sang “${TECH_TASK_STATUS_LABEL[input.to]}” được.` };
   }
+  // Trả việc về hàng đợi worker (BUILDING → SPEC_READY) là thao tác của MÁY (lease / lần thử) — review 07/10, mục 14.
+  if (from === "BUILDING" && input.to === "SPEC_READY" && actor.kind !== "SYSTEM") {
+    return { error: "Chỉ máy trả việc đang làm về hàng đợi (khi lease hết hạn / lần thử thất bại). Người muốn làm lại thì chuyển sang Bị chặn rồi mở lại." };
+  }
   if (input.to === "BLOCKED" && note.length < 5) {
     return { error: "Báo bị chặn thì phải nói bị chặn bởi cái gì — chặn mà không nói vì sao thì không ai gỡ được." };
   }
@@ -374,6 +378,8 @@ export async function setTechTaskStatus(
       // sẽ hiện ra ở lần gọi chủ shop SAU như thể là việc mới (nhật ký vẫn giữ nguyên câu cũ).
       ownerEscalation: input.to === "NEEDS_OWNER" ? (input.ownerEscalation as string) : "",
       ownerAction: input.to === "NEEDS_OWNER" ? ownerAction : "",
+      // NGƯỜI đưa việc về "Đã có đặc tả" = quyết định làm lại ⇒ lần thử đếm lại từ đầu (review 07/10, mục 18).
+      ...(input.to === "SPEC_READY" && actor.kind === "HUMAN" ? { attempts: 0, nextAttemptAt: null, lastError: "" } : {}),
     })
     .where(eq(schema.techTasks.id, input.taskId));
 

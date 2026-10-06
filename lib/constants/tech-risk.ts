@@ -75,7 +75,7 @@ export const TECH_RISK_RULES: readonly TechRiskRule[] = [
     risk: "R2",
     modules: ["ACCESS"],
     taskTypes: ["SECURITY"],
-    keywords: ["quyen", "permission", "role", "scope", "auth", "authentication", "authorization", "oauth", "xac thuc", "dang nhap", "session"],
+    keywords: ["quyen", "permission", "role", "scope", "auth", "authentication", "authorization", "authorize", "authenticate", "oauth", "xac thuc", "dang nhap", "session"],
   },
   {
     key: "MIGRATION",
@@ -202,22 +202,31 @@ export type TechRiskVerdict = {
  * thấy an toàn". Màn hình phải nói đúng câu đó, và người vẫn đè được lên.
  */
 /**
- * Khớp từ khoá THEO TỪ, không theo chuỗi con (dogfood 07/10/2026: `cod` — tiền COD — khớp nhầm "Claude **Cod**e",
- * nên mọi việc Tech nhắc tới Claude Code bị đẩy lên R2; `auth` khớp "author", `role` khớp "controller"). Ranh giới là
- * chữ / số; dấu gạch dưới, chấm, gạch nối là ranh giới (để `data_scope` vẫn khớp `scope`). Cho phép đuôi số nhiều
- * `s` / `es` (`roles`, `migrations`). Từ khoá bắt đầu / kết thúc bằng ký tự không phải chữ (`.env`) chỉ xét ranh giới
- * ở phía còn lại. Độ phủ bị thu hẹp được bù bằng từ khoá tường minh (`authentication`, `oauth`, `xac thuc`).
+ * Từ khoá NGẮN và MƠ HỒ — chỉ những từ này khớp THEO TỪ (dogfood 07/10/2026: `cod` — tiền COD — khớp nhầm
+ * "Claude **Cod**e", nên mọi việc Tech nhắc tới Claude Code bị đẩy lên R2; `auth` khớp "author", `role` khớp
+ * "controller"). MỌI từ khoá khác vẫn khớp CHUỖI CON như trước: đổi cả bộ sang khớp theo từ là một lần HẠ ngầm của
+ * cổng an toàn (review 07/10: `requirePermission`, `accessToken`, `passwordHash`, `webhookSecret` sẽ lọt). Danh sách
+ * này chỉ được dài thêm kèm bài kiểm chứng minh không mất độ phủ; độ phủ của `auth` bù bằng `authentication`,
+ * `authorization`, `authorize`, `authenticate`, `oauth`, `xac thuc`.
  */
+const KHOP_THEO_TU = new Set(["cod", "auth", "role"]);
+
 function khopTu(text: string, k: string): boolean {
   if (!k) return false;
-  const esc = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const trai = /^[a-z0-9]/.test(k) ? "(?<![a-z0-9])" : "";
-  const phai = /[a-z0-9]$/.test(k) ? "(?:s|es)?(?![a-z0-9])" : "";
-  return new RegExp(`${trai}${esc}${phai}`).test(text);
+  if (!KHOP_THEO_TU.has(k)) return text.includes(k);
+  // Ranh giới là chữ / số (gạch dưới, chấm là ranh giới để `access_role` vẫn khớp); cho phép đuôi số nhiều.
+  return new RegExp(`(?<![a-z0-9])${k}(?:s|es)?(?![a-z0-9])`).test(text);
+}
+
+/** Tách camelCase TRƯỚC khi hạ chữ thường: `codStatus` → `cod status`, `requireRole` → `require role`. */
+function tachCamel(s: string): string {
+  return s.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
 export function classifyTechRisk(input: TechRiskInput): TechRiskVerdict {
-  const text = khongDau(`${input.title} ${input.description ?? ""}`);
+  const goc = `${input.title} ${input.description ?? ""}`;
+  // Xét CẢ chuỗi gốc lẫn chuỗi đã tách camelCase — chỉ có thể khớp THÊM, không bao giờ ít hơn.
+  const text = `${khongDau(goc)} ${khongDau(tachCamel(goc))}`;
   const khop: TechRiskRule[] = [];
 
   for (const rule of TECH_RISK_RULES) {

@@ -312,3 +312,42 @@ export function assertBillingBoundary(provider: TechExecutionProvider, env: Reco
   const lo = API_BILLING_ENV.filter((k) => typeof env[k] === "string" && env[k] !== "");
   if (lo.length) throw new Error(`Ranh giới thanh toán: worker gói thuê bao không được có ${lo.join(", ")} trong môi trường.`);
 }
+
+/* ═════════════════════ ĐƯỜNG CẤM CỦA AGENT (review Pha 2–6, mục 6) ═════════════════════ */
+
+/**
+ * Tệp / thư mục agent tự động KHÔNG BAO GIỜ được đổi — luật này nằm trong prompt nhưng prompt chỉ là lời đề nghị,
+ * nên nó được KIỂM LẠI ở hai chỗ: worker trước `git push` (diff chạm ⇒ BLOCKED, không đẩy) và máy chủ trước khi yêu
+ * cầu mở PR. CI (`pull_request`) chạy tệp workflow của nhánh head trước khi người review — một nhánh worker sửa
+ * `.github/` là chạy mã chưa ai đọc với quyền của CI.
+ */
+export const AGENT_FORBIDDEN_PATHS = [
+  ".github/",
+  "drizzle/",
+  "db/schema.ts",
+  "db/index.ts",
+  "db/migrate.ts",
+  "middleware.ts",
+  "lib/auth/",
+  "lib/platform/",
+  "package.json",
+  "package-lock.json",
+  ".env",
+  ".claude/",
+  ".ai/",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "docs/business-rules/",
+  "scripts/tech-worker",
+  "app/api/tech/worker/",
+  "lib/tech/worker-service.ts",
+  "lib/constants/tech-worker.ts",
+  "tests/contract-order-outcome.test.ts",
+] as const;
+
+/** Tệp nào trong danh sách đổi chạm đường cấm. Đường dẫn chuẩn hoá `/` (AGENTS.md mục 65). */
+export function forbiddenTouched(files: readonly string[]): string[] {
+  return files
+    .map((f) => f.split("\\").join("/").replace(/^\.\//, ""))
+    .filter((f) => AGENT_FORBIDDEN_PATHS.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p || f.startsWith(`${p}.`) || f.startsWith(`${p}/`))));
+}
