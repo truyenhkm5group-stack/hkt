@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "mission_id": "tech-control-plane-workers",
+  "title": "/tech Pha 2: worker headless, hàng đợi PostgreSQL có lease/nhịp tim/thu hồi",
+  "business_goal": "Worker headless nhận việc R0/R1 từ /tech qua hàng đợi PostgreSQL (FOR UPDATE SKIP LOCKED, lease có fencing, nhịp tim, thu hồi khi chết), adapter Claude Code subscription/API tách ranh giới thanh toán",
+  "status": "RUNNING",
+  "priority": "P1",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:hkt-tech-control-plane",
+  "worker": null,
+  "worktree": null,
+  "branch": "feat/tech-control-plane-workers",
+  "base_sha": "27764f377d63f155b3bcb9a7babe23bad2112bcb",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/tech/workers/",
+    "app/api/tech/worker/",
+    "lib/tech/worker-service.ts",
+    "lib/constants/tech-worker.ts",
+    "lib/constants/tech-capabilities.ts",
+    "lib/constants/tech-control-plane.ts",
+    "lib/constants/tech.ts",
+    "lib/queries/tech-control-plane.ts",
+    "lib/actions/tech-control-plane.ts",
+    "db/schema.ts",
+    "drizzle/",
+    "middleware.ts",
+    "package.json",
+    "scripts/tech-worker.ts",
+    "scripts/tech-worker/",
+    "scripts/smoke.ts",
+    "tests/tech-worker.test.ts",
+    "tests/access-control.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/ui-consistency.test.ts",
+    "tests/migration-upgrade-path.test.ts",
+    "docs/tech-control-plane/"
+  ],
+  "dependencies": [
+    "tech-control-plane"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-06T18:16:09.859Z",
+  "updated_at": "2026-10-06T18:16:09.859Z",
+  "last_heartbeat": "2026-10-06T18:16:09.859Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
