@@ -2171,6 +2171,9 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   assert.equal(bot.quotedUnitPrice("PAGE1", hoi), 249000, "lay gia MOI NHAT shop bao, khong lay gia cu 749K");
   assert.equal(bot.quotedUnitPrice("PAGE1", [shop("chị ơi 299k/đầm nha")]), 299000);
   assert.equal(bot.quotedUnitPrice("PAGE1", [khach("249.000Đ/ĐẦM được không")]), null, "gia khach noi khong tinh");
+  // Su co Mong Lanh Tran: khach chuyen tiep nguyen tin deal cua shop (noi dung tin khach)
+  assert.equal(bot.quotedUnitPrice("PAGE1", [shop("🔥 GIÁ XẢ CHỈ 299.000Đ/ĐẦM\nGiá cũ 749."), khach("DEAL siêu hời hôm nay dành riêng cho chị iu đây ạ ❤️\n🔥 GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM\nGiá cũ 749.000Đ – giảm gần 50%")]), 249000, "tin deal khach chuyen tiep");
+  assert.equal(bot.quotedUnitPrice("PAGE1", [khach("chỉ còn 199k/đầm thôi shop")]), null, "khach tu go khong co gia cu -> khong tinh");
   // Su co Dung Phan: khach TRICH (tra loi) tin deal cua shop -> chu 249K nam trong truong trich dan cua tin khach
   const trich = { from: { id: "KHACH" }, message: "Ơ NÀY SOP ƠI BÁO GIẢM 50% CÒN 249 K . MÀ", replied_message: { from: { id: "PAGE1" }, message: "hôm nay dành riêng cho chị iu đây ạ ❤️ 🔥 GIẢM GIÁ CHỈ CÒN 249.000Đ/ĐẦM Giá cũ 749.000Đ" } };
   assert.equal(bot.quotedUnitPrice("PAGE1", [shop("Giá ưu đãi: 499k + 25K ship"), trich]), 249000, "doc gia trong tin khach trich lai");

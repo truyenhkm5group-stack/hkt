@@ -131,6 +131,8 @@ export function nestedText(msg) {
   return out.filter((x) => x && !/^https?:\/\//i.test(x)).join(" \n ");
 }
 // "249.000Đ/ĐẦM", "299k/đầm", "giá 249.000đ / chiếc": gia MOT san pham shop bao trong tin
+// Mau tin deal cua shop khach chuyen tiep lai: co ca "giảm giá"/"chỉ còn" lan "giá cũ"
+const MAU_TIN_DEAL = /^(?=[\s\S]*(?:giảm giá|chỉ còn|giá xả))(?=[\s\S]*giá cũ)/i;
 const GIA_MOI_SP = /(\d{2,3}(?:[.,]\d{3})|\d{2,3}\s*[kK])\s*(?:đ|Đ|vnđ|VNĐ|vnd|VND)?\s*\/\s*(?:đầm|ĐẦM|Đầm|cái|chiếc|bộ|sp|sản phẩm|váy|áo)/i;
 
 export function isOrderSummaryReply(reply, handoff) {
@@ -803,7 +805,11 @@ export class Bot {
       // tin cua shop, nen chu nam trong truong trich dan cua tin khach chu khong o noi dung. Bot khong thay, bao 499k.
       // Tin khach: CHI doc phan trich dan / the dinh kem (noi dung cua shop / bai quang cao), KHONG doc chu khach go —
       // khach tu go "100k/đầm" khong phai gia shop da bao.
-      const t = this.isFromPage(m, pageId) ? String(this.messageText(m) || "") : nestedText(m);
+      // Su co Mong Lanh Tran 06/10/2026: khach CHUYEN TIEP nguyen tin deal cua shop (tu bai quang cao / kenh khac) ->
+      // chu deal nam ngay trong noi dung tin khach. Chi tin khi dung MAU tin deal cua shop ("giảm giá / chỉ còn" + "giá cũ"),
+      // khach tu go "249k/đầm được không" van khong tinh.
+      const raw = String(this.messageText(m) || "");
+      const t = this.isFromPage(m, pageId) ? raw : `${nestedText(m)}\n${MAU_TIN_DEAL.test(raw) ? raw : ""}`;
       const g = t.match(GIA_MOI_SP);
       if (!g) continue;
       const n = /k$/i.test(g[1].trim()) ? Number(g[1].replace(/\D/g, "")) * 1000 : Number(g[1].replace(/\D/g, ""));
