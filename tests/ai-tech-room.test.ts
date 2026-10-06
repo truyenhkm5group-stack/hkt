@@ -414,7 +414,9 @@ function testSourceGuards() {
   assert.ok(!/shell:\s*true/.test(src), "không chạy git qua shell");
   assert.ok(!/\bexecSync\b|\bexecFile\b|[^.\w]exec\(/.test(src), "chỉ spawnSync với mảng tham số (RegExp.exec thì được)");
   assert.ok(!src.includes('"--force"') && !src.includes("'--force'") && !/"-f"/.test(src), "không --force ở bất kỳ lệnh git nào");
-  assert.ok(!/"push"/.test(src), "công cụ không tự đẩy gì lên remote");
+  // Đẩy lên remote: ĐÚNG một chỗ, chỉ lên nhánh điều khiển ai-control/… (sổ xuyên sứ mệnh) — refspec
+  // và tên nhánh được khoá ở tests/delivery-v2.test.ts. Nhánh MÃ thì công cụ vẫn không bao giờ đẩy.
+  assert.equal(src.split('"push"').length - 1, 1, "công cụ chỉ đẩy ở đúng một chỗ (sổ điều khiển)");
   assert.ok(!/"stash"|"reset"|"clean"/.test(src), "không stash / reset / clean");
   assert.ok(src.includes('"--no-optional-locks"'), "đọc trạng thái cây khác không được làm mới index của họ");
   // Nhánh chỉ bị xoá TRONG cmdCleanup, SAU lời gọi cleanupDecision, và bằng so-và-xoá theo SHA đã đo.

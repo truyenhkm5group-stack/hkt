@@ -760,3 +760,30 @@ Việc nhỏ: một nhánh + một cây như mục 9, không cần gì thêm. S�
 - **Điểm vào của sứ mệnh mới:** chủ shop gõ `/mission <mục tiêu>` (skill `.claude/skills/mission/`); Lead
   dựng cây riêng bằng `npm run ai -- lead <sứ-mệnh>` — chạy được từ checkout cũ, không ghi vào checkout đó.
 - Phiên mới / sau sập máy: `npm run ai -- status` rồi `npm run ai -- worktrees` trước khi làm gì.
+
+### 10.1 ĐIỀU PHỐI V2 — MỘT TECH LEAD, MỘT SỔ CHUNG (`docs/ai-tech-room/delivery-v2.md`)
+
+Chủ shop giao MỌI việc phát triển qua MỘT cửa: skill `/lead` (Tech Lead). Luật cho mọi phiên:
+
+- **`main` là nguồn tích hợp duy nhất.** Đọc `origin/main` vừa fetch, không đọc `main` cục bộ hay cây chung.
+- **Kiểm trước, dựng sau.** Trước khi tạo sứ mệnh / nhánh: `npm run ai -- intake "<yêu cầu>" --kw=… --record`
+  (main đã có? sứ mệnh / PR / nhánh nào đang làm?). Đã có ⇒ dùng lại; đang có người làm ⇒ phối hợp, không
+  dựng việc thứ hai chỉ vì tên khác.
+- **Một sứ mệnh = một phạm vi ghi có khai báo.** `npm run ai -- claim <id> …` TRƯỚC khi viết mã; chồng phạm
+  vi / điểm nóng SERIAL với sứ mệnh đang mở ⇒ tuần tự hoá (`--after`) hoặc khai cách tích hợp — không khai
+  phạm vi hẹp hơn sự thật để lọt qua. Cần migration ⇒ `migration reserve` trước khi đặt tên tệp.
+- **Sổ chung (nhánh `ai-control/registry`) là trạng thái điều phối bền; git/GitHub thắng sổ.** Không sửa tay
+  nhánh đó; `board` in mọi chỗ sổ nói khác git — tin git, rồi cập nhật sổ.
+- **Worker không tự gộp, không tự deploy.** Chỉ phiên cầm khoá `integration-lead` (`npm run ai -- lease acquire
+  integration-lead`, trình mã phiên bằng `--token`) được gộp PR và dispatch deploy, theo `queue` (lô rủi ro thấp ·
+  HIGH đi riêng — HIGH chỉ gộp khi sổ có `review <PR> --sha=<đầu nhánh>` ĐẠT cho đúng SHA hiện tại) và
+  `deploy-plan` (một lượt cho cả lô, không chồng, không khi main đỏ). Khoá hết hạn = nhả; tiếp quản để lại
+  dấu vết.
+- **DONE chỉ sau hậu kiểm production.** Workflow deploy xanh chưa phải DONE: `verify --record` phải ĐẠT (SHA ·
+  số migration · lượt deploy + smoke · endpoint), rồi `close --status=DONE` (hoặc `--no-runtime` khi không
+  đổi mã chạy trên VPS). KHÔNG ĐẠT ⇒ INCIDENT, sửa tiến, không rollback tự động (migration chỉ đi tới).
+- **Không bao giờ phá việc của cây khác.** Không reset / rebase / xoá cây hay nhánh của sứ mệnh khác; dọn chỉ
+  bằng `cleanup` (từ chối cây bẩn / chưa đẩy / chưa vào / không rõ chủ).
+- **Cổng chạy song song, không cổng nào bị nới.** `gates.yml` = bốn job + job gom tên `gates` (luôn chạy, đỏ khi
+  bất kỳ nhánh nào không xanh); deploy dùng lại lượt cổng XANH của ĐÚNG SHA trên `main` (job `bang_chung`),
+  không có thì tự chạy cổng. Đổi một trong hai là đổi hàng rào — `tests/delivery-v2.test.ts` khoá cả hai.

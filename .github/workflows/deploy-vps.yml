@@ -50,8 +50,84 @@ jobs:
   #
   # Trước đây năm bước cổng được CHÉP thẳng vào đây. Nay chúng sống ở `gates.yml` và cả CI của PR
   # lẫn deploy đều gọi cùng một tệp — hai bản chép sẽ trôi xa nhau, và bản trôi chậm hơn là bản
-  # người ta tin. Deploy vẫn KHÔNG chạy nếu cổng đỏ: job `release` khai `needs: [gates, …]`.
+  # người ta tin. Deploy vẫn KHÔNG chạy nếu cổng đỏ: job `release` khai `needs: [bang_chung, gates, …]`
+  # và một điều kiện tường minh (dưới).
+  #
+  # ═══ MỘT SHA, MỘT LƯỢT CỔNG — DÙNG LẠI BẰNG CHỨNG, KHÔNG CHẠY LẠI ═══
+  #
+  # Đo 06/10/2026 (20 lượt deploy xanh gần nhất): deploy median 42,4′, trong đó job `gates` 37,4′ —
+  # đúng 37′ mà lượt CI trên `main` của CÙNG SHA vừa chạy xong. Cùng tệp `gates.yml`, cùng commit,
+  # cùng kết quả: lượt thứ hai không chứng minh thêm điều gì, chỉ bắt chủ shop chờ thêm nửa giờ.
+  #
+  # `bang_chung` hỏi GitHub: có LƯỢT CHẠY WORKFLOW nào của `.github/workflows/ci.yml`, sự kiện `push`,
+  # nhánh `main`, `head_sha` = đúng SHA đang triển khai, kết luận `success` không?
+  #
+  #   · có                       ⇒ dùng lại (job `gates` dưới đây BỎ QUA), SHA lấy từ chính lượt ấy;
+  #   · đang chạy / đang chờ     ⇒ CHỜ nó (tối đa ~28′) thay vì dựng một lượt trùng song song;
+  #   · không có / đỏ / bị huỷ   ⇒ tự chạy `gates.yml` như trước — hành vi cũ là đường lùi.
+  #
+  # VÌ SAO HỎI "LƯỢT CHẠY WORKFLOW" CHỨ KHÔNG HỎI "CHECK RUN": một check run tên `gates / gates` thì
+  # job nào có quyền `checks: write` cũng TẠO ĐƯỢC trên bất kỳ SHA nào. Còn `path`, `event`,
+  # `head_branch` của một workflow run là do GitHub ghi; lượt `push` lên `main` chạy đúng `ci.yml`
+  # của chính commit đó — mã đã qua PR và ruleset. Không ai giả được nó bằng một lời gọi API.
+  #
+  # Mọi lỗi của chính bước hỏi (mạng, API, jq) đều rơi về `reuse=false` — tức là CHẠY CỔNG, không
+  # bao giờ là "bỏ qua cổng". `tests/delivery-v2.test.ts` khoá cả ba nhánh và điều kiện của `release`.
+  bang_chung:
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse: ${{ steps.tim.outputs.reuse }}
+      sha: ${{ steps.tim.outputs.sha }}
+      run_url: ${{ steps.tim.outputs.run_url }}
+    steps:
+      - name: Tìm lượt cổng XANH của đúng SHA này trên main (dùng lại thay vì chạy lại)
+        id: tim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -uo pipefail
+          echo "reuse=false" >> "$GITHUB_OUTPUT"
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "Triển khai từ $REF (không phải main) — không có bằng chứng CI của main để dùng lại; chạy cổng."
+            exit 0
+          fi
+          URL="https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=20"
+          han=$(( $(date +%s) + 28 * 60 ))
+          while :; do
+            if ! body="$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$URL")"; then
+              echo "Không hỏi được GitHub — chạy cổng (đường lùi an toàn)."; exit 0
+            fi
+            ok="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion == "success")] | first | if . == null then empty else "\(.html_url) \(.head_sha)" end' 2>/dev/null)" || ok=""
+            # SHA xuất ra là `.head_sha` ĐỌC TỪ chính lượt CI được chọn — đo, không chép lại đầu vào.
+            ok_url="${ok% *}"
+            ok_sha="${ok##* }"
+            if [ -n "$ok" ] && [ "$ok_sha" = "$SHA" ]; then
+              echo "✓ Dùng lại lượt cổng xanh của $ok_sha: $ok_url"
+              echo "reuse=true" >> "$GITHUB_OUTPUT"
+              echo "sha=$ok_sha" >> "$GITHUB_OUTPUT"
+              echo "run_url=$ok_url" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            dang="$(printf '%s' "$body" | jq -r --arg sha "$SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status != "completed")] | length' 2>/dev/null)" || dang=0
+            if [ "${dang:-0}" -gt 0 ] 2>/dev/null && [ "$(date +%s)" -lt "$han" ]; then
+              echo "Lượt CI của $SHA trên main đang chạy — chờ nó thay vì chạy trùng ($(date -u +%T))."
+              sleep 30
+              continue
+            fi
+            echo "Không có lượt cổng xanh nào của $SHA trên main (chưa có / đỏ / huỷ / chờ quá hạn) — chạy cổng."
+            exit 0
+          done
+
   gates:
+    needs: bang_chung
+    if: ${{ needs.bang_chung.outputs.reuse != 'true' }}
     uses: ./.github/workflows/gates.yml
     with:
       ref: ${{ github.sha }}
@@ -111,7 +187,11 @@ jobs:
   # khoá bắt đầu từ giây đầu tiên của cả workflow, nên ~20 phút cổng + dựng ảnh trên máy GitHub
   # cũng chặn mọi lượt `status` / `logs` / `db-query` của các phiên khác.
   release:
-    needs: [gates, build_image]
+    needs: [bang_chung, gates, build_image]
+    # Chạy khi và CHỈ khi: ảnh đã dựng xong VÀ (cổng vừa chạy XANH, HOẶC cổng được bỏ qua vì có bằng
+    # chứng XANH của đúng SHA này). `gates` bị bỏ qua vì `bang_chung` đỏ ⇒ vế hai sai ⇒ không deploy.
+    # Không có tổ hợp nào mà cổng đỏ / bị huỷ / không có bằng chứng lại tới được máy chủ.
+    if: ${{ !cancelled() && needs.build_image.result == 'success' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && needs.bang_chung.result == 'success' && needs.bang_chung.outputs.reuse == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     # KHÔNG có `concurrency` ở đây nữa. PR #15 dùng nhóm `vps-mutating` của GitHub làm hàng đợi,
@@ -134,13 +214,16 @@ jobs:
       # thông báo nào. So ở đây thì lỗi ấy dừng TRƯỚC khi SSH chạy.
       - name: Ba SHA phải trùng (cổng · ảnh · bản triển khai)
         env:
-          GATES_SHA: ${{ needs.gates.outputs.sha }}
+          # Cổng chạy trong lượt này ⇒ SHA nó THẬT SỰ checkout; cổng được dùng lại ⇒ SHA của lượt CI
+          # xanh mà `bang_chung` tìm được. Cả hai đều phải bằng SHA đang triển khai.
+          GATES_SHA: ${{ needs.gates.result == 'success' && needs.gates.outputs.sha || needs.bang_chung.outputs.sha }}
+          GATES_FROM: ${{ needs.gates.result == 'success' && 'chạy trong lượt này' || needs.bang_chung.outputs.run_url }}
           BUILD_SHA: ${{ needs.build_image.outputs.sha }}
           ERP_IMAGE: ${{ needs.build_image.outputs.image }}
           ERP_DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          echo "cổng đã kiểm  : $GATES_SHA"
+          echo "cổng đã kiểm  : $GATES_SHA ($GATES_FROM)"
           echo "ảnh đã dựng   : $BUILD_SHA  ($ERP_IMAGE)"
           echo "sắp triển khai: $ERP_DEPLOY_SHA"
           if [ "$GATES_SHA" != "$ERP_DEPLOY_SHA" ]; then

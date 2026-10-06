@@ -37,3 +37,38 @@ permissions:
 jobs:
   gates:
     uses: ./.github/workflows/gates.yml
+
+  # ═══ VA SỐ MIGRATION GIỮA CÁC PR ĐANG MỞ — PHÁT HIỆN SỚM, KHÔNG PHẢI CHECK BẮT BUỘC ═══
+  #
+  # Ca #598/#599 (05/10/2026): hai PR cùng lấy 0219, mỗi PR xanh khi đứng một mình — trùng số chỉ lộ
+  # ra lúc PR thứ hai gộp và phải làm lại. Bài kiểm trong `gates` (tests/migration-journal…) chỉ thấy
+  # MỘT cây; job này nhìn sang PR khác + sổ giữ chỗ (`npm run ai -- migration reserve`).
+  #
+  # Bên ĐẾN SAU (PR mở sau / giữ chỗ sau) đỏ, bên kia chỉ nhận cảnh báo — nên đây KHÔNG là check
+  # bắt buộc: nếu bắt buộc thì PR của người làm đúng bị khoá bởi lỗi của người khác. Chỉ chạy trên
+  # pull_request, nên lượt `push` lên main (thứ `deploy-vps.yml` dùng làm bằng chứng cổng) không có
+  # job này và không bao giờ đỏ vì nó.
+  migration:
+    name: Va số migration giữa các PR
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Không `npm ci`: công cụ chỉ dùng thư viện chuẩn và chạy bằng `node` trần (Node 22 bỏ kiểu TS).
+      - name: Lấy main + sổ giữ chỗ
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
+          git fetch --no-tags --depth=1 origin "+refs/heads/ai-control/registry:refs/remotes/origin/ai-control/registry" || echo "chưa có sổ giữ chỗ — chỉ so với main và PR"
+      - name: So số migration của PR này với main · PR mở trước · giữ chỗ
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ai-tech.ts migration check --pr=${{ github.event.pull_request.number }} --github --offline

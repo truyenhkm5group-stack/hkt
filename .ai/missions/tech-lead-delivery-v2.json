@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "id": "tech-lead-delivery-v2",
+  "title": "Tech Lead một cửa + sổ điều phối xuyên sứ mệnh + đường giao hàng V2",
+  "goal": "Chủ shop giao mọi việc qua một cửa (/lead); sổ chung chặn trùng việc, chồng phạm vi, va số migration, hai người cùng gộp/deploy; cổng PR và deploy nhanh hơn mà không bỏ bài kiểm nào — đo trước/sau.",
+  "maxWorkers": 1,
+  "tasks": [
+    {
+      "id": "audit",
+      "title": "Kiểm thực tế: AI Tech Room, worktree, PR, ruleset, CI, deploy",
+      "objective": "Đọc AI Tech Room (#592/#594), 163 worktree, PR đang mở, ruleset main, gates/ci/deploy; đo baseline CI/deploy qua GitHub API.",
+      "mode": "INLINE",
+      "priority": "P0",
+      "risk": "LOW",
+      "dependsOn": [],
+      "owns": [],
+      "readOnly": [],
+      "doNotTouch": ["lib/sales-chatbot/", "app/(dashboard)/"],
+      "tests": [],
+      "definitionOfDone": ["Biết đã có gì để dùng lại, nút thắt đo được ở đâu"],
+      "decision": {
+        "state": "DONE",
+        "evidence": "AI Tech Room đã có DAG/worker/dọn trong MỘT sứ mệnh; thiếu sổ xuyên sứ mệnh. Cổng PR median 37,3′ (2×15′ test nối đuôi); deploy 42,4′ (chạy lại cổng 37′); 7 ngày: gộp→production median 44,6′ — nút thắt lớn nhất."
+      }
+    },
+    {
+      "id": "cong-song-song",
+      "title": "Cổng song song + deploy dùng lại bằng chứng cổng của đúng SHA",
+      "objective": "gates.yml bốn job + job gom `gates`; deploy-vps.yml job bang_chung; ci.yml job va số migration giữa PR.",
+      "mode": "INLINE",
+      "priority": "P0",
+      "risk": "HIGH",
+      "dependsOn": ["audit"],
+      "owns": [".github/workflows/gates.yml", ".github/workflows/deploy-vps.yml", ".github/workflows/ci.yml", "tests/ops-concurrency.test.ts"],
+      "readOnly": ["tests/test-hygiene.test.ts"],
+      "doNotTouch": [],
+      "tests": ["npx tsx --tsconfig tsconfig.json tests/delivery-v2.test.ts", "npx tsx --tsconfig tsconfig.json tests/ops-concurrency.test.ts"],
+      "definitionOfDone": ["Check bắt buộc vẫn là gates / gates", "Bảng chân lý của release: không cổng xanh, không bằng chứng ⇒ không chạm máy chủ", "Kiểm đột biến 8/8 bị bắt"],
+      "decision": { "state": "DONE", "evidence": "tests/delivery-v2.test.ts ĐẠT; 8/8 đột biến bị bắt (bỏ always(), coi skipped là xanh, bỏ vế reuse, bỏ lọc event, khoá, chồng phạm vi, va số, đẩy ép)" }
+    },
+    {
+      "id": "mat-phang-dieu-khien",
+      "title": "Sổ chung ai-control/registry + intake · claim · lease · migration · queue · deploy-plan · verify · metrics · board",
+      "objective": "Mở rộng scripts/ai-tech.ts (mục 12–13), không hệ thống thứ hai.",
+      "mode": "INLINE",
+      "priority": "P0",
+      "risk": "HIGH",
+      "dependsOn": ["audit"],
+      "owns": ["scripts/ai-tech.ts", ".ai/config.json", "tests/delivery-v2.test.ts", "tests/ai-tech-room.test.ts", "tests/sync-fixtures.test.ts", "lib/constants/agent-scopes.ts", "tests/agent-scopes.test.ts"],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": ["npx tsx --tsconfig tsconfig.json tests/delivery-v2.test.ts", "npx tsx --tsconfig tsconfig.json tests/ai-tech-room.test.ts", "npm run typecheck", "npm run lint"],
+      "definitionOfDone": ["Vòng đời thật hai phiên trên remote tạm ĐẠT", "Công cụ chỉ đẩy ở một chỗ, chỉ lên ai-control/…"],
+      "decision": { "state": "DONE", "evidence": "tests/delivery-v2.test.ts + tests/ai-tech-room.test.ts ĐẠT; typecheck + lint sạch" }
+    },
+    {
+      "id": "luat-va-cua-vao",
+      "title": "Skill /lead, AGENTS.md 10.1, CLAUDE.md, docs/ai-tech-room/delivery-v2.md",
+      "objective": "Một cửa vào cho chủ shop; luật cho mọi phiên; quy trình phục hồi; báo cáo trước/sau.",
+      "mode": "INLINE",
+      "priority": "P1",
+      "risk": "MEDIUM",
+      "dependsOn": ["cong-song-song", "mat-phang-dieu-khien"],
+      "owns": [".claude/skills/lead/", "AGENTS.md", "CLAUDE.md", "docs/ai-tech-room/", ".ai/missions/tech-lead-delivery-v2.json"],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": ["npm test"],
+      "definitionOfDone": ["Chủ shop đọc mục đầu delivery-v2.md là biết mở đâu, nói gì"],
+      "decision": { "state": "DONE", "evidence": "docs/ai-tech-room/delivery-v2.md · .claude/skills/lead/SKILL.md · AGENTS.md 10.1" }
+    },
+    {
+      "id": "tich-hop",
+      "title": "PR → gates → gộp → deploy chứng minh đường mới → verify → đăng ký sứ mệnh đang chạy vào sổ",
+      "objective": "Đo AFTER trên chính lượt CI của PR và lượt deploy đầu tiên sau gộp.",
+      "mode": "INLINE",
+      "priority": "P1",
+      "risk": "HIGH",
+      "dependsOn": ["luat-va-cua-vao"],
+      "owns": [".github/workflows/gates.yml"],
+      "readOnly": [],
+      "doNotTouch": [],
+      "tests": ["npm run typecheck", "npm run lint", "npm test", "npm run build"],
+      "definitionOfDone": ["PR vào main sau gates / gates xanh", "Lượt deploy dùng đường mới xanh + verify ĐẠT", "pancake-replacement có trong sổ, không bị đụng"]
+    }
+  ]
+}

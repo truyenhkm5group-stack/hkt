@@ -6,6 +6,13 @@
   "worktreePrefix": "wt-",
   "activeWithinHours": 24,
   "staleAfterDays": 7,
+  "controlBranch": "ai-control/registry",
+  "staleHeartbeatHours": 24,
+  "leaseMinutes": 60,
+  "healthUrl": "https://erp.vnxcommerce.com/api/health",
+  "verifyEndpoints": ["/api/health", "/login"],
+  "lowRiskPaths": ["docs/", "tests/", "components/", "app/(dashboard)/", ".ai/missions/", "README.md"],
+  "mergePolicy": { "LOW": "AUTO", "MEDIUM": "AUTO", "HIGH": "LEAD_REVIEW", "CRITICAL": "OWNER" },
   "hotspots": [
     { "path": "drizzle/", "rule": "SERIAL", "reason": "số hiệu migration + _journal.json: hai nhánh cùng thêm migration là trùng số (AGENTS.md mục 4)" },
     { "path": "db/schema.ts", "rule": "SERIAL", "reason": "lược đồ dùng chung — một người viết tại một thời điểm" },
@@ -33,6 +40,10 @@
     { "path": "lib/queries/stock.ts", "risk": "HIGH", "reason": "sổ kho (mục 3.10)" },
     { "path": "lib/integrations/", "risk": "MEDIUM", "reason": "tích hợp production bên ngoài" },
     { "path": "scripts/bootstrap.sh", "risk": "HIGH", "reason": "chạy trên VPS lúc deploy" },
-    { "path": "deploy/", "risk": "HIGH", "reason": "hạ tầng production" }
+    { "path": "deploy/", "risk": "HIGH", "reason": "hạ tầng production" },
+    { "path": "lib/platform/", "risk": "HIGH", "reason": "cô lập tổ chức · bí mật kết nối theo tổ chức (SaaS nhiều tổ chức)" },
+    { "path": "db/index.ts", "risk": "HIGH", "reason": "getDb() — đường DUY NHẤT tới CSDL theo tổ chức (cô lập dữ liệu)" },
+    { "path": ".ai/config.json", "risk": "HIGH", "reason": "chính sách điều phối (sàn rủi ro · chính sách gộp · điểm nóng) — đổi nó là đổi luật cho mọi sứ mệnh" },
+    { "path": "scripts/ai-tech.ts", "risk": "HIGH", "reason": "bộ máy THỰC THI chính sách gộp / phân loại rủi ro / khoá — sửa mã là đổi chính sách mà không qua review" }
   ]
 }

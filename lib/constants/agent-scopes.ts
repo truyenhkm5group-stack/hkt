@@ -151,6 +151,13 @@ export const NEVER_WRITE: readonly string[] = [
   "tests/department-map.test.ts",
   "tests/test-hygiene.test.ts",
   "tests/agent-scopes.test.ts",
+  /*
+    Bài kiểm của ĐƯỜNG GIAO HÀNG (AGENTS.md mục 10.1): khoá điều kiện để `release` chạm máy chủ
+    (cổng xanh HOẶC bằng chứng cổng xanh của đúng SHA), job gom `gates` đỏ khi một nhánh không xanh,
+    và chỗ DUY NHẤT công cụ điều phối được đẩy lên remote. Agent sửa được nó là agent tự mở được
+    đường deploy không qua cổng.
+  */
+  "tests/delivery-v2.test.ts",
 ];
 
 /**

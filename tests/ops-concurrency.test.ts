@@ -79,7 +79,7 @@ export function testKhongDungConcurrencyLamHangDoi() {
     assert.equal(khoaMucWorkflow(boChuThich(doc(f))), null, `${f}: không được khai \`concurrency\` ở mức workflow`);
   }
   assert.equal(khoaCuaJob(doc("ops-vps.yml"), "ops"), null, "job `ops` không được có `concurrency`: nó phải KHỞI ĐỘNG rồi chờ bằng flock");
-  for (const job of ["gates", "build_image", "release"]) {
+  for (const job of ["bang_chung", "gates", "build_image", "release"]) {
     assert.equal(
       khoaCuaJob(doc("deploy-vps.yml"), job),
       null,
@@ -270,7 +270,9 @@ export function testKhoaCuaRelease() {
   assert.ok(tran / 60 < sshPhut, `trần chờ ${tran}s phải NHỎ HƠN command_timeout ${sshPhut}m`);
   assert.ok(tran / 60 < jobPhut, `trần chờ ${tran}s phải NHỎ HƠN timeout-minutes ${jobPhut}m của job`);
 
-  assert.match(src, /^ {2}release:\n {4}needs: \[gates, build_image\]$/m, "release vẫn phải cần CẢ hai cổng");
+  // `bang_chung` = lượt cổng XANH của đúng SHA trên main (dùng lại thay vì chạy lại). Điều kiện `if`
+  // của release được khoá từng vế ở tests/delivery-v2.test.ts.
+  assert.match(src, /^ {2}release:\n {4}needs: \[bang_chung, gates, build_image\]$/m, "release vẫn phải cần cổng (hoặc bằng chứng cổng) VÀ ảnh");
   console.log(`✓ release: flock -x trên cùng ổ khoá vòng đời, lấy trước bootstrap.sh, trần ${tran}s < SSH ${sshPhut}m và job ${jobPhut}m`);
 }
 
