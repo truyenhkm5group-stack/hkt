@@ -22,10 +22,9 @@ import { dauNgayVN } from "@/lib/ai/budget";
 import { applyAddons, hasAddons, type AddonUnits } from "@/lib/billing/addons";
 import { readSubscriptionAddons } from "@/lib/billing/standing";
 import type { Organization } from "@/lib/platform/types";
-import { ENTITLEMENT_KINDS, ENTITLEMENT_SPEC, overLimitMessage, parseLimits, type EntitlementKind, type PlanLimits } from "@/lib/entitlements/kinds";
+import { DEFAULT_PLAN_KEY, ENTITLEMENT_KINDS, ENTITLEMENT_SPEC, HOME_PLAN_KEY, overLimitMessage, parseLimits, type EntitlementKind, type PlanLimits } from "@/lib/entitlements/kinds";
 
-export const HOME_PLAN_KEY = "internal";
-export const DEFAULT_PLAN_KEY = "trial";
+export { HOME_PLAN_KEY, DEFAULT_PLAN_KEY };
 const CACHE_MS = 60_000;
 const FRESH_AT = 0.8;
 const MB = 1024 * 1024;
@@ -44,14 +43,15 @@ export function planKeyOf(org: Pick<Organization, "isHome" | "plan">): string {
 }
 
 /** `priceVnd` = giá MỘT THÁNG (0187); `null` = gói không bán (không phải giá 0). `addonPrices` = đơn giá mua thêm (0192, thô). */
-export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown; yearlyFreeMonths: number };
+export type PlanRow = { key: string; name: string; description: string | null; limits: unknown; position: number; priceVnd: number | null; addonPrices: unknown; yearlyFreeMonths: number; commercial: unknown };
 
 /** Mọi gói (cho màn vận hành). Bảng chưa có ⇒ rỗng. */
 export async function listPlans(): Promise<PlanRow[]> {
   const pdb = await getPlatformDb();
   try {
     const rows = await pdb.select().from(schema.platformPlans).orderBy(schema.platformPlans.position);
-    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices, yearlyFreeMonths: r.yearlyFreeMonths ?? 0 }));
+    // `commercial` (0222) đọc qua `lib/pricing/catalog.ts::parseCommercial` — máy chưa migrate tới 0222 thì ô vắng ⇒ `{}` = chưa khai.
+    return rows.map((r) => ({ key: r.key, name: r.name, description: r.description, limits: r.limits, position: r.position, priceVnd: r.priceVnd ?? null, addonPrices: r.addonPrices, yearlyFreeMonths: r.yearlyFreeMonths ?? 0, commercial: r.commercial ?? {} }));
   } catch {
     return [];
   }

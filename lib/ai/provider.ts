@@ -122,6 +122,14 @@ export function giaCuaModel(model: string): { input: number; output: number; cac
   return k ? PRICE_PER_MTOK[k] : null;
 }
 
+/**
+ * Bản sao CHỈ ĐỌC của bảng giá trong mã — cho màn kinh tế SaaS (`lib/pricing/unit-prices.ts`) in ra kèm nhãn ƯỚC TÍNH và
+ * cho bộ đề xuất model rẻ hơn. Không có đường nào sửa bảng gốc từ ngoài tệp này.
+ */
+export function modelPriceTable(): Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> {
+  return Object.fromEntries(Object.entries(PRICE_PER_MTOK).map(([k, v]) => [k, { ...v }]));
+}
+
 export function estimateCostUsd(model: string, usage: AiUsage): number | null {
   const p = giaCuaModel(model);
   if (!p) return null;

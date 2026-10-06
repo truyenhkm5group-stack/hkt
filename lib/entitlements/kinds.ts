@@ -7,6 +7,14 @@
  * `lib/entitlements/check.ts`, điểm tạo gọi `checkEntitlement(<loại>)`.
  */
 
+/**
+ * Khoá gói của tổ chức NHÀ (và tổ chức nội bộ) — dấu hiệu "không giới hạn, không thu phí", KHÔNG phải một hạng thương mại.
+ * Đặt ở tệp thuần để mọi nơi (kể cả hàm thuần, client) so bằng HẰNG này thay vì gõ lại chuỗi — bài kiểm quét mã nguồn cấm so
+ * khoá gói bằng chuỗi gõ tay (`tests/pricing-billing.test.ts`).
+ */
+export const HOME_PLAN_KEY = "internal";
+export const DEFAULT_PLAN_KEY = "trial";
+
 export const ENTITLEMENT_KINDS = ["users", "pages", "objects", "records", "workflows", "aiDraftsPerDay", "storageMb"] as const;
 export type EntitlementKind = (typeof ENTITLEMENT_KINDS)[number];
 

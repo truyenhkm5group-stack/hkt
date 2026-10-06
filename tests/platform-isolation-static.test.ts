@@ -423,6 +423,7 @@ const CSDL_CHI_DINH_DUOC_PHEP: Record<string, string> = {
   "scripts/restore-drill-org-config.ts": "Script DIỄN TẬP KHÔI PHỤC tầng cấu hình chạy tay / trong bài kiểm (sẵn sàng thương mại C), không nằm trong đường chạy của ứng dụng: trên PGlite RIÊNG của chính nó (không đọc .env), cấp một tổ chức thử, xoá rồi cấp lại dòng sổ ở mặt phẳng điều khiển; dữ liệu của tổ chức chỉ chạm qua provisionOrganization + withOrganization + getDb().",
   "lib/entitlements/": "Gói + hạn mức (Phase 10): đọc bảng platform_plans ở CSDL nhà; bộ đếm mức dùng vẫn đi getDb() của tổ chức ngữ cảnh.",
   "lib/billing/": "Thu phí thuê bao (0187): platform_subscriptions / platform_invoices / platform_billing_payments / platform_plans ở mặt phẳng điều khiển, và sổ ngân hàng CỦA TỔ CHỨC NHÀ (nơi tiền thuê bao về) — đọc bằng getPlatformDb() vì tiền về tài khoản của nền tảng, không phải của tổ chức ngữ cảnh; không đọc dữ liệu nghiệp vụ của tổ chức khách nào.",
+  "lib/pricing/": "Nền móng giá & thu phí (0222): platform_plans.commercial / platform_org_pricing / platform_settings (ngưỡng Margin Guard, giá đơn vị AI ghi đè) / platform_ai_usage ở mặt phẳng điều khiển (CSDL nhà); số dùng trong CSDL tổ chức đọc qua lib/platform/usage-meter.ts — tệp ở đây không tự mở CSDL tổ chức nào.",
   "lib/ai-usage/": "Sổ dùng AI + hạn mức AI + công tắc AI (pilot readiness 3): bảng platform_ai_usage / platform_plans / platform_settings / platform_organizations ở mặt phẳng điều khiển (CSDL nhà); mọi dòng khoá theo org_code do MÁY CHỦ lấy từ ngữ cảnh — không đọc dữ liệu nghiệp vụ của tổ chức nào.",
 };
 
@@ -641,6 +642,7 @@ export function testServerActionQuaCongPhien(): number {
 const ACTION_NHAN_MA_TO_CHUC: Record<string, { lyDo: string; loai: "VAN_HANH" | "CONG_KHAI" }> = {
   "lib/actions/billing.ts::setOrgBillingAction": { loai: "VAN_HANH", lyDo: "Người vận hành bật / tắt / sửa ngày trả tới + ân hạn thu phí của MỘT tổ chức (/platform/org/<mã>) — requirePermission(platform:operate), lõi setOrgBilling hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng." },
   "lib/actions/oauth.ts::pickSocialOrgAction": { loai: "CONG_KHAI", lyDo: "Chọn cửa hàng sau đăng nhập Google / Facebook (CHƯA có phiên): mã tổ chức gửi lên chỉ được chấp nhận khi nằm trong danh sách của cookie KÝ do máy chủ ghi ở bước callback (sau khi đổi code lấy hồ sơ ở nhà cung cấp); completeProviderLogin kiểm tài khoản + trạng thái trong withOrganization." },
+  "lib/actions/pricing.ts::setOrgPricingAction": { loai: "VAN_HANH", lyDo: "Người vận hành ghi đè tính năng / hạn mức / mức áp của MỘT tổ chức (/platform/saas, 0222) — requirePermission(platform:operate), lõi setOrgPricing hỏi platformOperatorDenial trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_PRICING_SET." },
   "lib/actions/billing.ts::setOrgAddonsAction": { loai: "VAN_HANH", lyDo: "Người vận hành sửa phần MUA THÊM hạn mức của MỘT tổ chức (/platform/org/<mã>, 0192) — requirePermission(platform:operate), lõi setOrgAddons hỏi platformOperatorDenial + parseOperatorTarget trước mọi lượt đọc, bắt buộc lý do, nhật ký nền tảng ORG_ADDONS_SET." },
   "lib/actions/platform-modules.ts::toggleModuleForOrgAction": { loai: "VAN_HANH", lyDo: "Người vận hành nền tảng bật/tắt module của tổ chức khác từ /platform — requirePermission(platform:operate) + platformOperatorDenial (chỉ tổ chức nhà), ghi nhật ký nền tảng kèm lý do." },
   "lib/actions/ai-usage.ts::setOrgAiControlAction": { loai: "VAN_HANH", lyDo: "Người vận hành tắt AI / ghi đè hạn mức AI của MỘT tổ chức từ /platform/org/<mã> — requirePermission(platform:operate), lõi setOrgAiControl kiểm lại người vận hành + tổ chức nhà, bắt buộc lý do, ghi platform_audit_log." },
@@ -753,6 +755,14 @@ const LOI_VAN_HANH: Record<string, string> = {
   // Sổ kinh tế SaaS (0203) — Owner Cockpit /platform/saas.
   "lib/platform/saas-cockpit.ts::loadOwnerCockpit": "Owner Cockpit: MRR / biến động / biên lợi nhuận / kích hoạt của MỌI tổ chức — chụp ảnh hôm nay (mở CSDL từng tổ chức khách để đọc mốc kích hoạt) rồi đọc sổ.",
   "lib/platform/saas-ledger.ts::setPlatformCostDeclaration": "Khai chi phí hạ tầng / hỗ trợ khách theo tháng của nền tảng — mẫu số biên lợi nhuận; bắt buộc căn cứ, nhật ký nền tảng.",
+  // Nền móng giá & thu phí (0222) — cấu hình gói, ghi đè theo tổ chức, Margin Guard, kinh tế đơn vị.
+  "lib/pricing/admin.ts::setPlanCommercial": "Sửa tên / hạn mức tháng / tính năng / chính sách vượt của một gói — bắt buộc lý do, nhật ký PLAN_COMMERCIAL_SET.",
+  "lib/pricing/admin.ts::setOrgPricing": "Ghi đè tính năng / hạn mức / mức áp / cờ giữ từ trước của MỘT tổ chức — bắt buộc lý do, nhật ký ORG_PRICING_SET.",
+  "lib/pricing/admin.ts::setPricingGuard": "Ngưỡng Margin Guard + công tắc trần cứng của cả nền tảng — bắt buộc lý do, nhật ký PRICING_GUARD_SET.",
+  "lib/pricing/admin.ts::setAiUnitPrices": "Bảng giá đơn vị AI ghi đè (ƯỚC TÍNH) — bắt buộc lý do, nhật ký AI_UNIT_PRICES_SET.",
+  "lib/pricing/admin.ts::loadPricingAdmin": "Cấu hình gói + ghi đè của MỌI tổ chức (màn người vận hành).",
+  "lib/pricing/admin.ts::loadPricingEconomics": "Kinh tế đơn vị + Margin Guard của MỌI tổ chức: sổ AI toàn nền tảng + đếm số dùng trong CSDL từng tổ chức khách (lib/platform/usage-meter.ts).",
+  "lib/billing/provider.ts::cancelSepaySubscription": "Cổng thu tiền: người vận hành dừng thuê bao của MỘT tổ chức (huỷ hoá đơn đang mở qua voidInvoice).",
 };
 
 const DOC_PHIEN = new Set(["requireUser", "requirePermission", "getCurrentUser", "resolveCurrentUser", "getSession"]);

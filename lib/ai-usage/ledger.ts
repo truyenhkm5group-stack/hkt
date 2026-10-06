@@ -16,12 +16,14 @@ import { dauNgayVN } from "@/lib/ai/budget";
 import {
   AI_BILLING_SOURCES,
   AI_USAGE_FEATURES,
+  AI_USAGE_MODALITIES,
   AI_USAGE_STATUSES,
   EMPTY_SOURCE_USAGE,
   monthStartVN,
   type AiBillingSource,
   type AiSourceUsage,
   type AiUsageFeature,
+  type AiUsageModality,
   type AiUsageStatus,
 } from "@/lib/ai-usage/types";
 
@@ -42,17 +44,31 @@ export type AiUsageEntry = {
   actorId: string | null;
   ref?: string | null;
   at?: Date;
+  /**
+   * KHOÁ SỰ KIỆN (0222): cùng tổ chức + cùng khoá ⇒ chỉ MỘT dòng — lượt thử lại của CÙNG lời gọi AI không bị tính hai lần.
+   * Dựng bằng `lib/pricing/meter.ts::usageEventKey`. Bỏ trống ⇒ ghi như trước (mỗi lời gọi một dòng).
+   */
+  eventKey?: string | null;
+  /** Hội thoại khách sinh ra lượt — chi phí AI / hội thoại chính xác (0222). */
+  conversationId?: string | null;
+  /** `TEXT` · `VISION` · `IMAGE` (0222). */
+  modality?: AiUsageModality | null;
 };
 
 const intOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
 
-/** Ghi MỘT dòng. Ném khi dữ liệu sai hình hoặc CSDL hỏng — nơi gọi quyết (AI Builder: lỗi hiện ra; Copilot: nuốt). */
-export async function recordAiUsage(e: AiUsageEntry): Promise<void> {
+/**
+ * Ghi MỘT dòng. Ném khi dữ liệu sai hình hoặc CSDL hỏng — nơi gọi quyết (AI Builder: lỗi hiện ra; Copilot: nuốt).
+ * `recorded: false` = khoá sự kiện đã có (lượt thử lại / gói tin trùng) — KHÔNG có dòng thứ hai, không tính tiền hai lần.
+ */
+export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolean }> {
   if (!(AI_USAGE_FEATURES as readonly string[]).includes(e.feature)) throw new Error(`Tính năng AI lạ: ${e.feature}`);
   if (!(AI_BILLING_SOURCES as readonly string[]).includes(e.source)) throw new Error(`Nguồn tính tiền AI lạ: ${e.source}`);
   if (!(AI_USAGE_STATUSES as readonly string[]).includes(e.status)) throw new Error(`Trạng thái lượt AI lạ: ${e.status}`);
+  if (e.modality && !(AI_USAGE_MODALITIES as readonly string[]).includes(e.modality)) throw new Error(`Loại lượt AI lạ: ${e.modality}`);
+  const eventKey = e.eventKey?.trim() ? e.eventKey.trim().slice(0, 200) : null;
   const pdb = await getPlatformDb();
-  await pdb.insert(schema.platformAiUsage).values({
+  const insert = pdb.insert(schema.platformAiUsage).values({
     orgCode: e.orgCode,
     feature: e.feature,
     billingSource: e.source,
@@ -65,8 +81,18 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<void> {
     status: e.status,
     actorId: e.actorId,
     ref: e.ref ?? null,
+    eventKey,
+    conversationId: e.conversationId ?? null,
+    modality: e.modality ?? null,
     ...(e.at ? { at: e.at } : {}),
   });
+  if (!eventKey) {
+    await insert;
+    return { recorded: true };
+  }
+  // Chỉ mục duy nhất (org_code, event_key) là ràng buộc duy nhất có thể va (id là ngẫu nhiên) — va ⇒ lượt trùng, bỏ qua.
+  const rows = await insert.onConflictDoNothing().returning({ id: schema.platformAiUsage.id });
+  return { recorded: rows.length > 0 };
 }
 
 const t = schema.platformAiUsage;

@@ -14,7 +14,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { ORG_TEMPLATES } from "@/lib/constants/platform-modules";
 import { AI_BILLING_SOURCE_LABEL, formatUsd } from "@/lib/ai-usage/types";
 import { loadPlatformAiSummary } from "@/lib/ai-usage/view";
-import { listPlans, planKeyOf } from "@/lib/entitlements/check";
+import { HOME_PLAN_KEY, listPlans, planKeyOf } from "@/lib/entitlements/check";
 import { formatDateTime } from "@/lib/format";
 import { INVITE_STATUS_LABEL, listInvites } from "@/lib/onboarding/invites";
 import { listOrganizations } from "@/lib/platform/organizations";
@@ -429,7 +429,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         }
       >
         <div className="space-y-4">
-          <InvitePanel plans={plans.filter((p) => p.key !== "internal").map((p) => ({ key: p.key, name: p.name }))} />
+          <InvitePanel plans={plans.filter((p) => p.key !== HOME_PLAN_KEY).map((p) => ({ key: p.key, name: p.name }))} />
           {invites.length === 0 ? (
             <EmptyState title="Chưa có mã mời nào" description="Tạo mã ở trên rồi gửi liên kết cho khách." />
           ) : (

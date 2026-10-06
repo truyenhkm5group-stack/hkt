@@ -9,6 +9,7 @@
  *  · Không có điểm "sức khoẻ" tổng: chưa có dữ liệu kiểm chứng trọng số (yêu cầu §18) — chỉ trả tín hiệu rời.
  */
 import type { BillingStandingKind } from "@/lib/billing/rules";
+import { HOME_PLAN_KEY } from "@/lib/entitlements/kinds";
 
 export const SAAS_METRICS_VERSION = "2026-10-04.1";
 
@@ -238,7 +239,7 @@ export const TENANT_LIFECYCLE_LABEL: Record<TenantLifecycle, string> = {
  *  · CHURNED = đã từng có hoá đơn đã thu, nay không còn tính MRR (khoá / tắt thu phí / lưu trữ / về gói không giá).
  */
 export function tenantLifecycle(row: Pick<SaasDailyRow, "isHome" | "orgStatus" | "billingEnabled" | "standing" | "paying" | "planKey">, everPaid: boolean): TenantLifecycle {
-  if (row.isHome || row.planKey === "internal") return "INTERNAL";
+  if (row.isHome || row.planKey === HOME_PLAN_KEY) return "INTERNAL";
   if (row.orgStatus === "SUSPENDED") return "SUSPENDED";
   // Tính MRR = trả tiền, kể cả khi tiền về ngoài hệ thống và người vận hành tự đặt «đã trả tới» — cùng định nghĩa với MRR.
   if (row.paying) return "PAID";
