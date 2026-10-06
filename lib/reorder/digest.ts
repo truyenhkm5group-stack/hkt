@@ -22,6 +22,7 @@ import { deliverMessage } from "@/lib/messaging/service";
 import { organizationBaseUrl } from "@/lib/platform/publish";
 import { loadReorderBoard, type ReorderRow } from "@/lib/queries/reorder";
 import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
+import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 
 /** Giờ VN sớm nhất gửi tin sáng; số khách tối đa liệt kê (phần còn lại ghi «+N khách khác»). */
 export const REORDER_DIGEST = { fromHourVn: 8, maxRows: 15 } as const;
@@ -52,6 +53,9 @@ export type DigestResult = { sent: boolean; due: number; reason: string };
 /** Một lượt cho tổ chức NGỮ CẢNH (gọi trong job `sales-followup`). Không ném. */
 export async function sendReorderDigest(now: Date = new Date()): Promise<DigestResult> {
   try {
+    // Workspace nhà chưa page nào LIVE cho bot Chốt Đơn ⇒ runtime mới chưa phục vụ khách nhà, không gửi tin nhóm (page-runtime.ts).
+    const idle = await homeRuntimeIdleReason();
+    if (idle) return { sent: false, due: 0, reason: idle };
     if ((now.getUTCHours() + 7) % 24 < REORDER_DIGEST.fromHourVn) return { sent: false, due: 0, reason: "trước 8 giờ sáng" };
     const today = vnDateKey(now);
     const key = `reorder-digest:${today}`;

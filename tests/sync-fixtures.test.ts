@@ -571,6 +571,7 @@ import { testPlatformProcessIsolation } from "./platform-process-isolation.test"
 import { testPlatformJobs } from "./platform-jobs.test";
 import { testGSched } from "./g-sched.test";
 import { testSaasVnxRuntime } from "./saas-vnx-runtime.test";
+import { testSaasPageGate } from "./saas-page-gate.test";
 
 async function main() {
   await ensureMigrated();
@@ -2873,6 +2874,9 @@ async function main() {
   // Phase 8b: nhà chạy được runtime Chốt Đơn KHI bật ai_sales — webhook fanpage/Zalo, lịch job, nguồn AI HOME; nhà tắt ⇒ như
   // cũ; khách không đổi (mã `vr-`, tự cấp và tự dọn; dòng ai_sales của nhà trả lại nguyên trạng trong finally).
   await testSaasVnxRuntime();
+  // Cổng page của nhà: module ai_sales + bot bật mà danh sách page rỗng ⇒ 0 tin trên mọi đường; BÓNG lưu câu soạn, 0 gửi;
+  // LIVE như khách; khách không đổi (CSDL nhà dọn trong finally, tổ chức `pg-khach` tự cấp và tự dọn).
+  await testSaasPageGate();
   // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
   // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
   await testPlatformRbac();

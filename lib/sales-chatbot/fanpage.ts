@@ -47,6 +47,8 @@ import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { pancakeImageUrls } from "@/lib/sales-chatbot/vision";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
+import { inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -652,6 +654,8 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
 export async function sendFanpageText(pageId: string, threadId: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const conn = await openActiveConnection(FANPAGE_CONNECTOR);
   if (!conn.ok || (conn.settings.pageId ?? "").trim() !== pageId) return { ok: false, error: "Kết nối fanpage chưa bật / khác page" };
+  // Chốt cuối của cổng page (page-runtime.ts): tin BOT (follow-up, xác nhận đặt lại) chỉ đi khi page LIVE. Tin nhân viên (`mark`) không qua cổng.
+  if (!mark && (await pageRuntimeMode(pageId)) !== "LIVE") return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   const now = deps.now ?? (() => new Date());
   const db = await getDb();
@@ -888,6 +892,14 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         .update(t)
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+    // CỔNG PAGE CỦA NHÀ (page-runtime.ts): OFF ⇒ im; SHADOW ⇒ soạn bóng, không gửi. Khách luôn LIVE ⇒ đi tiếp như cũ.
+    const pageGate = await inboundPageGate({ pageId, threadId, rows: claimed, conversation: () => conversationFor(pageId, threadId), mirror: (id, at) => mirrorFanpageContext(id, pageId, threadId, at) });
+    if (pageGate) {
+      await finish("SKIPPED", pageGate);
+      out.processed += ids.length;
+      out.skipped = pageGate;
+      continue;
+    }
     // Page đã trả lời (Meta tự động / nhân viên) sau tin khách sớm nhất của lượt ⇒ bot không chen.
     if (await pageRepliedSince()) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
@@ -1214,6 +1226,8 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
   const pageId = (conn.settings.pageId ?? "").trim();
   const token = (conn.secrets.pageAccessToken ?? "").trim();
   if (!pageId || !token) return { ...out, detail: ["kết nối fanpage thiếu page / token"] };
+  // Page của nhà đang OFF ⇒ không đọc Pancake, không nhận / mở lại tin nào (page-runtime.ts).
+  if ((await pageRuntimeMode(pageId)) === "OFF") return { ...out, detail: [PAGE_OFF_NOTE] };
   // Chế độ API (không cần webhook — webhook của Pancake tốn 2 slot thuê bao): mốc đồng bộ + ngân sách + lùi khi lỗi theo
   // `pancake-poll-shared.ts`. Mốc lưu trong CSDL tổ chức ⇒ sống qua khởi động lại.
   const nowMs0 = now().getTime();

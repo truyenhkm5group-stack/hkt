@@ -55,6 +55,8 @@ import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-sha
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 import { noteMessengerGraphFailure } from "@/lib/sales-chatbot/messenger-health";
+import { inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
+import { PAGE_NOT_LIVE_SEND_ERROR } from "@/lib/sales-chatbot/page-runtime-shared";
 
 /**
  * ═══════════ MESSENGER TRỰC TIẾP — BOT FANPAGE KHÔNG CẦN PANCAKE (0207 · docs/platform/messenger.md) ═══════════
@@ -369,6 +371,8 @@ const fanpageKey = (pageId: string, psid: string) => fanpageVisitorKey(pageId, p
 export async function sendMessengerPageText(pageId: string, psid: string, text: string, deps: FanpageDeps = {}, mark?: StaffMark): Promise<{ ok: true } | { ok: false; error: string }> {
   const tk = await messengerTokenFor(pageId);
   if (!tk.ok) return { ok: false, error: tk.error };
+  // Chốt cuối của cổng page (page-runtime.ts): tin BOT chỉ đi khi page LIVE; tin nhân viên (`mark`) không qua cổng.
+  if (!mark && (await pageRuntimeMode(pageId)) !== "LIVE") return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR };
   const app = messengerApp();
   if (!app) return { ok: false, error: "Nền tảng chưa cấu hình app Facebook" };
   const token = tk.token;
@@ -533,6 +537,14 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
     const lastCustomerAt = new Date(Math.max(...claimed.map((r) => r.createdAt.getTime())));
+    // CỔNG PAGE CỦA NHÀ (page-runtime.ts) — cùng cổng với đường Pancake.
+    const pageGate = await inboundPageGate({ pageId, threadId: psid, rows: claimed, conversation: () => conversationFor(pageId, psid), mirror: (id, at) => mirrorFanpageContext(id, pageId, psid, at) });
+    if (pageGate) {
+      await finish("SKIPPED", pageGate);
+      out.processed += ids.length;
+      out.skipped = pageGate;
+      continue;
+    }
     if (await pageRepliedSince()) {
       await finish("SKIPPED", PAGE_REPLIED_REASON);
       out.processed += ids.length;

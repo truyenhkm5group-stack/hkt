@@ -34,6 +34,7 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { COPILOT_NOTE, erpStaffEchoCond, HUMAN_TAKEOVER_MINUTES, MEDIA_ONLY_NOTE, MEDIA_ONLY_TEXT, normalizeEcho, OBSERVE_HUMAN_ARM_NOTE, OBSERVE_NOTE, PAGE_REPLY, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, staffOutRowId, type StaffMark } from "@/lib/sales-chatbot/fanpage";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
+import { inboundPageGate } from "@/lib/sales-chatbot/page-runtime";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
 
@@ -277,6 +278,14 @@ export async function processZaloThread(userId: string, deps: ZaloDepsAll = {}):
         .update(t)
         .set(status === "PENDING" ? { claimId: null, claimedAt: null, note } : { status, processedAt: now(), note })
         .where(and(inArray(t.id, ids), eq(t.claimId, claim)));
+    // CỔNG PAGE CỦA NHÀ (page-runtime.ts; «page» của Zalo là `zalo:<OA>`) — cùng cổng với fanpage.
+    const pageGate = await inboundPageGate({ pageId, threadId: userId, rows: claimed, conversation: () => zaloConversation(oa.oaId, userId) });
+    if (pageGate) {
+      await finish("SKIPPED", pageGate);
+      out.processed += ids.length;
+      out.skipped = pageGate;
+      continue;
+    }
     // Nhân viên đã trả lời trong OA Manager SAU tin khách sớm nhất của lượt ⇒ bot không chen.
     const [staff] = await db.select({ id: t.id }).from(t).where(and(eq(t.pageId, pageId), eq(t.threadId, userId), eq(t.note, PAGE_REPLY), gte(t.createdAt, oldest))).limit(1);
     if (staff) {
