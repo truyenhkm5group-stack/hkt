@@ -83,6 +83,9 @@ const FENCE_ERRORS = new Set(["RUN_NOT_YOURS", "RUN_CLOSED", "STALE_LEASE", "BRA
 const LUOT = new Map<string, { phut: number; n: number }>();
 function quaTran(id: string): boolean {
   const phut = Math.floor(Date.now() / 60_000);
+  // Dọn mục của phút cũ và đặt trần kích thước — chuỗi id ngẫu nhiên không làm phình bộ nhớ (review 07/10, mục B).
+  if (LUOT.size > 1000) for (const [k, v] of LUOT) if (v.phut !== phut) LUOT.delete(k);
+  if (LUOT.size > 5000) LUOT.clear();
   const c = LUOT.get(id);
   if (!c || c.phut !== phut) {
     LUOT.set(id, { phut, n: 1 });
@@ -97,9 +100,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
   // Trần TRƯỚC khi tra CSDL: khoá theo id ghi trong header (đã khớp hình dạng) — khoá sai cũng bị giới hạn.
   const auth = req.headers.get("authorization");
   const idTho = /^Bearer\s+tw_([A-Za-z0-9-]{8,64})\./.exec(auth?.trim() ?? "")?.[1] ?? "khong-hop-le";
-  if (quaTran(idTho)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (quaTran(`tho:${idTho}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const worker = await authenticateTechWorker(auth);
   if (!worker) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Ngăn RIÊNG của khoá đã xác thực: người biết id của một worker không làm nó bị 429 bằng khoá sai.
+  if (quaTran(`ok:${worker.id}`)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   let body: unknown = {};
   try {

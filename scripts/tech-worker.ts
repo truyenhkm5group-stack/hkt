@@ -186,6 +186,12 @@ async function execute(adapter: ExecutionAdapter, provider: TechExecutionProvide
     childEnv.USERPROFILE = nhaTam;
     childEnv.APPDATA = path.join(nhaTam, "AppData");
     childEnv.XDG_CONFIG_HOME = path.join(nhaTam, ".config");
+    // Git for Windows khai `credential.helper=manager` ở cấu hình HỆ THỐNG (review 07/10, mục A): tắt cấu hình hệ
+    // thống / toàn cục và mọi lời nhắc, để mã trong cổng không `git credential fill` ra token của máy.
+    childEnv.GIT_CONFIG_NOSYSTEM = "1";
+    childEnv.GIT_CONFIG_GLOBAL = path.join(nhaTam, ".gitconfig");
+    childEnv.GIT_TERMINAL_PROMPT = "0";
+    childEnv.GCM_INTERACTIVE = "never";
     if (!(await npmCi(dir, childEnv))) {
       await complete(t, { outcome: "BLOCKED" satisfies TechRunOutcome, error: "npm ci thất bại trong cây làm việc của worker", branch: t.branch });
       return;

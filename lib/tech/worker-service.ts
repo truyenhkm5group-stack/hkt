@@ -541,6 +541,7 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
     NHẢ LEASE TRƯỚC, có điều kiện đúng generation + đúng worker (review 07/10, mục 7). Lượt thu hồi vừa chạy (đã tăng
     generation) ⇒ 0 dòng ⇒ STALE_LEASE, KHÔNG ghi đè lượt chạy đã đóng.
   */
+  let trangThaiLucNop = task.status as TechTaskStatus;
   const nha = await db.transaction(async (tx) => {
    const r = await tx
     .update(schema.techTasks)
@@ -554,6 +555,10 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
     .where(and(eq(schema.techTasks.id, task.id), eq(schema.techTasks.leaseGeneration, input.leaseGeneration), eq(schema.techTasks.leaseWorkerId, worker.id)))
     .returning({ id: schema.techTasks.id });
    if (!r.length) return false;
+   // Đọc LẠI trạng thái trong cùng giao dịch (review 07/10, mục C): người vừa chuyển việc (BLOCKED, huỷ, chờ chủ
+   // shop) sau nhịp tim cuối thì kết quả nộp muộn KHÔNG đè quyết định đó.
+   const [hienTai] = await tx.select({ status: schema.techTasks.status }).from(schema.techTasks).where(eq(schema.techTasks.id, task.id));
+   trangThaiLucNop = (hienTai?.status ?? task.status) as TechTaskStatus;
    await tx
     .update(schema.techAgentRuns)
     .set({
@@ -588,7 +593,7 @@ export async function completeTechWorkerRun(worker: TechWorkerRow, input: Comple
   if (!nha) return { error: "STALE_LEASE" };
 
   const actor = workerActor(worker);
-  let status = task.status as TechTaskStatus;
+  let status = trangThaiLucNop;
   if (status === "SPEC_READY" || status === "BUILDING") {
     // Lượt kết thúc trước khi kịp "bắt đầu" ⇒ đi qua BUILDING để nhật ký kể đúng đường đi.
     if (status === "SPEC_READY" && d.taskTo !== "SPEC_READY") {

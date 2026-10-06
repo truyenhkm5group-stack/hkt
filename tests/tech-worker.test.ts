@@ -140,7 +140,7 @@ export function testTechWorkerPure() {
   // Cửa worker tự xác thực TRƯỚC mọi việc khác (nó được miễn khoá phiên ở middleware và access-control).
   const route = readFileSync(path.join(goc, "app/api/tech/worker/[op]/route.ts"), "utf8");
   const iAuth = route.indexOf("authenticateTechWorker(auth)");
-  assert.ok(route.indexOf("quaTran(idTho)") > 0 && route.indexOf("quaTran(idTho)") < iAuth, "trần lượt gọi đứng TRƯỚC lượt tra CSDL xác thực");
+  assert.ok(route.indexOf("quaTran(`tho:${idTho}`)") > 0 && route.indexOf("quaTran(`tho:${idTho}`)") < iAuth, "trần lượt gọi đứng TRƯỚC lượt tra CSDL xác thực");
   assert.ok(iAuth > 0 && route.indexOf("status: 401") > iAuth, "route worker phải xác thực khoá riêng và trả 401 khi sai");
   assert.ok(iAuth < route.indexOf("req.json()"), "xác thực phải đứng TRƯỚC lượt đọc thân gói");
   const maRoute = route.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -157,6 +157,7 @@ export function testTechWorkerPure() {
   const twMa = tw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
   assert.ok(!/\.\.\.process\.env/.test(twMa), "worker không được trải process.env xuống tiến trình con");
   assert.match(twMa, /const childEnv = buildChildEnv\("SUBSCRIPTION_CLAUDE_CODE", process\.env, null\)/, "env của cổng dựng bằng buildChildEnv");
+  assert.match(twMa, /GIT_CONFIG_NOSYSTEM = "1"/, "cổng không đọc được credential git cấp hệ thống");
   assert.ok(!/spawnSync/.test(twMa), "không spawnSync — khoá event loop làm nhịp tim đứng, lease hết hạn giữa cổng dài");
   assert.ok(twMa.indexOf("forbiddenTouched(files)") > 0 && twMa.indexOf("forbiddenTouched(files)") < twMa.indexOf("runGate(dir"), "đường cấm kiểm TRƯỚC khi chạy cổng");
   const ad = readFileSync(path.join(goc, "scripts/tech-worker/adapters.ts"), "utf8");
