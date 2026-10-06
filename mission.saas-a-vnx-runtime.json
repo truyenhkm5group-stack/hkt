@@ -3,7 +3,7 @@
   "mission_id": "saas-a-vnx-runtime",
   "title": "Phase A: chuyển runtime chatbot VNX sang Chốt Đơn — gỡ 4 chặn kỹ thuật (ai_sales nhà vẫn TẮT), rồi bóng từng page",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P1",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,11 +33,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-06T17:03:14.603Z",
-  "updated_at": "2026-10-06T21:08:38.452Z",
+  "updated_at": "2026-10-06T21:32:24.132Z",
   "last_heartbeat": "2026-10-06T20:48:09.650Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#621 → 657fb7327a61bae802c43b3eaf8f00aa76a353ce"
+    "merged": "#621 → 657fb7327a61bae802c43b3eaf8f00aa76a353ce",
+    "verify": "PASS 657fb7327a61bae802c43b3eaf8f00aa76a353ce 2026-10-06T21:32:21.652Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/37531822071"
   },
   "handoff": {
     "branch": "feat/saas-a-vnx-runtime",
