@@ -2,10 +2,27 @@ import type { StoredDeliveryRateOverride } from "@/lib/constants/delivery-rate";
 
 /** Giả định dùng cho báo cáo lợi nhuận danh nghĩa theo mã hàng (lưu trong settings: profit.assumptions) */
 export type ProfitAssumptions = {
-  /** Cước gửi ĐVVC cho MỌI đơn gửi đi, kể cả đơn sau đó hoàn (đ) — 0 = tự tính bình quân 90 ngày từ dữ liệu */
-  shipFeeDelivered: number;
-  /** Tổng cước một đơn hoàn = cước gửi + phí hoàn về (đ) — 0 = cước gửi + phí hoàn bình quân (nếu có dữ liệu), không thì gấp đôi cước gửi */
-  shipFeeReturned: number;
+  /**
+   * Cước gửi ĐVVC cho MỌI đơn gửi đi, kể cả đơn sau đó hoàn (đ). `null` = để trống ⇒ tự tính bình
+   * quân 90 ngày từ dữ liệu; một con số — KỂ CẢ 0 — là số đặt tay. Đọc qua `manualShipFee()`.
+   */
+  shipFeeDelivered: number | null;
+  /**
+   * Tổng cước một đơn hoàn = cước gửi + phí hoàn về (đ). `null` = để trống ⇒ cước gửi + phí hoàn
+   * bình quân (nếu có dữ liệu), không thì gấp đôi cước gửi; một con số — KỂ CẢ 0 — là số đặt tay.
+   */
+  shipFeeReturned: number | null;
+  /**
+   * ═══ SỐ 0 CỦA Ô CƯỚC LÀ 0 THẬT ═══
+   *
+   * Bản lưu trước 06/10/2026 dùng 0 cho "để trống ⇒ tự tính", nên chủ shop gõ 0 (shop tự giao,
+   * không trả cước) thì màn hình vẫn in 17.000 ₫ và lợi nhuận vẫn trừ cước. Từ bản này biểu mẫu
+   * lưu `null` cho ô trống và bật cờ này; THIẾU cờ là dòng cũ, 0 của nó vẫn đọc theo nghĩa cũ —
+   * không backfill, không đổi nghĩa một dòng đã lưu (AGENTS.md mục 8.8). KHÔNG đặt cờ này trong
+   * `DEFAULT_PROFIT_ASSUMPTIONS`: `getSettingJson` trộn mặc định vào dòng đã lưu, và cờ ở mặc định
+   * sẽ biến 0 "tự tính" của mọi dòng cũ thành 0 ₫.
+   */
+  shipFeeExplicitZero?: boolean;
   /** Chi phí đóng hàng (túi, thùng, in bill…) cho mỗi đơn gửi đi (đ) */
   packingFeePerOrder: number;
   /** Chi phí nhân viên vận đơn cho mỗi đơn xử lý (đ) */
@@ -129,6 +146,44 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
 
 export const FALLBACK_SHIP_FEE_DELIVERED = 17_000;
 export const FALLBACK_SHIP_FEE_RETURNED = 34_000;
+
+/** Ô cước chủ shop đặt tay (số ≥ 0, kể cả 0), hoặc `null` = để trống ⇒ tự tính. Xem `shipFeeExplicitZero`. */
+export function manualShipFee(
+  saved: Pick<ProfitAssumptions, "shipFeeDelivered" | "shipFeeReturned" | "shipFeeExplicitZero">,
+  key: "shipFeeDelivered" | "shipFeeReturned",
+): number | null {
+  const v = saved[key];
+  if (v === null || v === undefined || (typeof v === "string" && v === "")) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const rounded = Math.max(0, Math.round(n));
+  if (rounded === 0 && saved.shipFeeExplicitZero !== true) return null;
+  return rounded;
+}
+
+export type ShipFeeSource = "setting" | "data" | "fallback";
+
+/**
+ * Cước dùng cho phép tính: ô đặt tay thắng; ô trống lấy từ dữ liệu 90 ngày, không có dữ liệu thì
+ * 17.000 ₫ / gấp đôi. Hàm THUẦN — phần đọc dữ liệu nằm ở `resolveAssumptions()`.
+ */
+export function resolveShipFees(
+  manual: { delivered: number | null; returned: number | null },
+  data: { delivered: number; returnFee: number },
+): { delivered: number; returned: number; source: ShipFeeSource } {
+  let source: ShipFeeSource = "setting";
+  let delivered = manual.delivered;
+  if (delivered === null) {
+    delivered = data.delivered > 0 ? data.delivered : FALLBACK_SHIP_FEE_DELIVERED;
+    source = data.delivered > 0 ? "data" : "fallback";
+  }
+  let returned = manual.returned;
+  if (returned === null) {
+    returned = delivered + (data.returnFee > 0 ? data.returnFee : delivered);
+    if (source === "setting") source = data.returnFee > 0 ? "data" : "fallback";
+  }
+  return { delivered, returned, source };
+}
 
 /** Số ngày bình quân một tháng để quy đổi chi phí cố định theo kỳ */
 export const DAYS_PER_MONTH = 365 / 12;

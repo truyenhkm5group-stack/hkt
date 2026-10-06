@@ -12,6 +12,7 @@ import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
+import { chatAdCoverage, loadChatAttributionWindowDays } from "@/lib/sales-chatbot/ad-referral";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
 import { adsRatio } from "@/lib/constants/profit";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
@@ -376,6 +377,24 @@ export type AdsDecision = {
     totalOrders: number;
     /** Đơn KHÔNG có dấu vết Facebook nào — đứng ngoài mẫu số, và phải nhìn thấy. */
     notFromAdsOrders: number;
+    /**
+     * Trong số trên: đơn do ERP ghi (đơn tay · bot bán hàng · ghi đơn từ hội thoại) — đường ghi KHÔNG lưu quảng cáo dẫn
+     * khách tới, nên với chúng "không dấu vết" là CHƯA BIẾT nguồn, không phải "không đến từ quảng cáo". Bảng KHÔNG quy kết
+     * được chúng về chiến dịch nào: «0 đơn chốt» của một chiến dịch khi ấy là CHƯA QUY KẾT, không phải chiến dịch không ra đơn.
+     */
+    erpRecordedNoTraceOrders: number;
+    erpRecordedNoTraceRevenue: number;
+    /**
+     * 0225 · ĐỘ PHỦ MÃ QUẢNG CÁO TỪ HỘI THOẠI — đo được trên màn hình vì CHƯA BIẾT Pancake có gửi trường quảng cáo không.
+     * `erpOrdersWithAd`/`erpOrders`: đơn ERP trong kỳ mang mã quảng cáo. `chatConversationsWithAd`/`chatConversations`: hội thoại
+     * fanpage có khách nhắn trong kỳ mang mã quảng cáo. `chatConversations = 0` ⇒ CHƯA ĐO ĐƯỢC, không phải 0%.
+     */
+    erpOrders: number;
+    erpOrdersWithAd: number;
+    chatConversations: number;
+    chatConversationsWithAd: number;
+    /** Cửa sổ quy kết đang áp (ngày) — `lib/constants/chat-ad-attribution.ts`. */
+    chatAttributionWindowDays: number;
   };
 };
 
@@ -1153,13 +1172,15 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
     phép gộp mới biết số tiền ấy.
   */
   const rates = await productDeliveryRates(period);
-  const [aggs, spend, coverage, spendDetail, cha] = await Promise.all([
+  const [aggs, spend, coverage, spendDetail, cha, chatAds] = await Promise.all([
     dimension === "product" ? aggregateByProduct(period, rates) : aggregateByOrder(period, dimension, rates),
     spendByKey(period, dimension),
     adsAttributionCoverage(period.from, period.to),
     spendGrainCoverage(period),
     parentNames(dimension),
+    chatAdCoverage(period.from, period.to),
   ]);
+  const chatWindow = await loadChatAttributionWindowDays();
 
   const rows: AdsDecisionRow[] = [];
   const seen = new Set<string>();
@@ -1345,6 +1366,13 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
       attributableOrders: coverage.attributable,
       totalOrders: coverage.total,
       notFromAdsOrders: coverage.notFromAds,
+      erpRecordedNoTraceOrders: coverage.notFromAdsErpRecorded,
+      erpRecordedNoTraceRevenue: coverage.notFromAdsErpRecordedRevenue,
+      erpOrders: coverage.erpRecorded,
+      erpOrdersWithAd: coverage.erpRecordedWithAd,
+      chatConversations: chatAds.conversations,
+      chatConversationsWithAd: chatAds.withAd,
+      chatAttributionWindowDays: chatWindow,
     },
   };
 }

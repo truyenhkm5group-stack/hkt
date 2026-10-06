@@ -187,6 +187,23 @@ cho ra ROAS thấp giả tạo.
 nói rõ bảng mô tả PHẦN ĐƠN CÓ MÃ QUẢNG CÁO, không phải toàn shop. Phần không quy kết được **không
 bao giờ** chia đều cho các chiến dịch.
 
+**Đơn do ERP ghi (`erp-…`: đơn tay · bot bán hàng · ghi đơn từ hội thoại) không mang `page_id` /
+`post_id` / `ad_id`** — đường ghi (`lib/records/order-create.ts`) không lưu quảng cáo dẫn khách tới.
+Chúng rơi vào nhóm "không dấu vết Facebook" (ngoài mẫu số) như trước, nhưng được ĐẾM RIÊNG
+(`notFromAdsErpRecorded` + doanh số) vì với chúng thiếu dấu vết là CHƯA BIẾT nguồn, không phải "không
+đến từ quảng cáo". Khi con số này > 0, ba cấp chiến dịch / nhóm / mẩu phải nói ra rằng «0 đơn chốt»
+là CHƯA QUY KẾT ĐƯỢC.
+
+**Đơn bot / đơn ghi từ hội thoại mang `ad_id` của quảng cáo dẫn khách vào hội thoại** (0225, chủ shop
+HSLC chốt 06/10/2026 — phương án A). Mã đọc từ gói tin của KHÁCH (`lib/sales-chatbot/ad-referral-shared.ts`:
+Pancake `ad_clicks` / `ads` / `ad_id`, Messenger `referral` có `source = ADS`), lưu lên
+`sales_chat_conversations.ad_id` / `ad_seen_at` / `ad_source`, và chỉ ghi vào đơn lúc TẠO khi lượt bấm
+nằm trong cửa sổ `ads.chatAttributionWindowDays` (mặc định = cửa sổ «sau lượt bấm» mặc định của Meta,
+khai DUY NHẤT ở `lib/constants/chat-ad-attribution.ts`). Sửa đơn không đổi mã; không backfill; không
+ghi `page_id` / `post_id`. Từ đó đơn đi qua `ORDER_CAMPAIGN_ID` như mọi đơn có `ad_id`. Bảng in hai độ
+phủ — đơn ERP mang mã, và hội thoại fanpage có mã — vì CHƯA ĐO được Pancake có gửi trường quảng cáo:
+0 hội thoại có mã sau một ngày nghĩa là nguồn không gửi, và màn hình phải nói ra điều đó.
+
 ---
 
 ## 7. Quy tắc khuyến nghị — từ chối kết luận TRƯỚC, kết luận SAU

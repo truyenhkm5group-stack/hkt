@@ -95,6 +95,8 @@ SĐT / mã người dùng Google · Facebook ⇒ (tổ chức, tài khoản).
 - **Sổ AI:** ghi nguồn `PLATFORM` hay `BYOK` theo đúng lựa chọn. Hạn mức kiểm đúng nguồn đó.
 - **Nhà cung cấp:** `PLATFORM_AI_PROVIDER=gemini` (khuyên dùng — rẻ nhất cho chat) hoặc `anthropic` (mặc định cũ).
   - `PLATFORM_AI_MODEL` để trống ⇒ `gemini-3.5-flash-lite`.
+  - Đổi model không cần deploy: Platform AI Model Control ở `/platform/saas` (kiểm khả dụng → chạy thử → áp dụng → hoàn tác,
+    `ai-model-control.md`).
   - Credit tính bằng USD nên **đổi model chỉ đổi số hội thoại, không đổi trần chi phí**.
 - **Khai:** Secret `PLATFORM_AI_API_KEY`; Variables `PLATFORM_AI_ENABLED=1`, `PLATFORM_AI_PROVIDER`, `PLATFORM_AI_MODEL`.
 - **Tắt:** xoá Variable `PLATFORM_AI_ENABLED` rồi deploy (launch-gates mục D).

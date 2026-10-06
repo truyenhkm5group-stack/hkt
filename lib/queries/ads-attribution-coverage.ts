@@ -3,6 +3,7 @@ import { postKeySql, usablePostKeySql } from "@/lib/queries/ads-identity-sql";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { populationFilter } from "@/lib/queries/metrics";
+import { IS_MANUAL_ORDER } from "@/lib/queries/manual-order-sql";
 
 /**
  * ───────────── ĐỘ PHỦ QUY KẾT QUẢNG CÁO, THEO NGÀY ─────────────
@@ -78,6 +79,27 @@ const NO_FB_SIGNAL = sql`(
   coalesce(${o.pageId}, '') = '' and coalesce(${o.adId}, '') = '' and coalesce(${o.postId}, '') = ''
 )`;
 
+/**
+ * ───────────── "KHÔNG CÓ DẤU VẾT" CỦA ĐƠN DO ERP GHI LÀ CHƯA BIẾT, KHÔNG PHẢI "KHÔNG ĐẾN TỪ QUẢNG CÁO" ─────────────
+ *
+ * `NO_FB_SIGNAL` đúng với đơn đồng bộ Pancake: Pancake điền `page_id` / `post_id` / `ad_id` từ chính hội thoại đẻ ra
+ * đơn, nên thiếu cả ba thì đơn quả thật không đi qua fanpage nào. Đơn do ERP ghi (`erp-…`: đơn tay, bot bán hàng tự
+ * chốt, ghi đơn từ hội thoại fanpage — `lib/records/order-create.ts::orderColumns`) không mang `page_id`/`post_id`, và chỉ
+ * mang `ad_id` khi hội thoại đã thấy mã quảng cáo khách bấm trong cửa sổ quy kết (0225 · `lib/sales-chatbot/ad-referral.ts`).
+ * Đơn tay, đơn từ hội thoại chưa thấy mã, và mọi đơn ghi TRƯỚC 0225 thì không. Ở đó "không có dấu vết" là thuộc tính của
+ * ĐƯỜNG GHI, không phải bằng chứng về nguồn khách.
+ *
+ * Đo 06/10/2026 (tổ chức khách chỉ có đơn ERP, bán qua bot fanpage): bảng /ads in «0/0 đơn» và «0 đơn chốt» ở MỌI
+ * chiến dịch, trong khi tổ chức có hàng chục đơn mỗi ngày — và lời giải thích cạnh nó nói những đơn ấy "chưa bao giờ đi
+ * qua quảng cáo". Câu đó sai.
+ *
+ * Nên nhóm này được ĐẾM RIÊNG như một TẬP CON của `notFromAds` — cố ý không đổi mẫu số, không đổi bốn nhóm: đẩy chúng
+ * vào mẫu số là đổi độ phủ (và kết luận đủ / chưa đủ) của mọi tổ chức có đơn tay mà không ai đo; còn coi chúng là "mất
+ * dấu" thì lại khẳng định chúng đến từ fanpage, cũng là điều chưa chứng minh. Con số chỉ để NÓI RA: bảng không quy kết
+ * được phần này, và nó lớn chừng nào.
+ */
+const ERP_RECORDED_NO_TRACE = sql`(${NO_FB_SIGNAL} and ${IS_MANUAL_ORDER})`;
+
 export type AttributionCoverage = {
   /** Đơn ĐÃ CHỐT trong kỳ — cùng phạm vi với bảng quyết định (`populationFilter("confirmed")`). */
   total: number;
@@ -87,6 +109,20 @@ export type AttributionCoverage = {
   lostFacebook: number;
   /** KHÔNG có dấu vết Facebook nào ⇒ nằm NGOÀI mẫu số của mọi tỷ lệ quảng cáo. */
   notFromAds: number;
+  /**
+   * TẬP CON của `notFromAds`: đơn do ERP ghi (`erp-…`) — với chúng thiếu dấu vết là CHƯA BIẾT nguồn, vì đường ghi không
+   * lưu quảng cáo nào. Không phải nhóm thứ năm: bốn nhóm vẫn cộng đúng `total`.
+   */
+  notFromAdsErpRecorded: number;
+  /** Doanh số lên đơn (`total_price_after_discount`) của tập con trên — để thấy bảng đang không quy kết được bao nhiêu tiền. */
+  notFromAdsErpRecordedRevenue: number;
+  /**
+   * 0225 · ĐỘ PHỦ MÃ QUẢNG CÁO TỪ HỘI THOẠI: đơn ERP (`erp-…`) trong phạm vi, và bao nhiêu trong số đó mang `ad_id` (đơn bot /
+   * ghi đơn từ hội thoại đọc mã quảng cáo khách đã bấm — `lib/sales-chatbot/ad-referral.ts`). Đơn ERP đã mang mã thì KHÔNG còn
+   * ở tập con «không dấu vết» bên trên: nó vào nhóm quy kết được (mã có trong sổ mẩu) hoặc mất dấu (chưa có).
+   */
+  erpRecorded: number;
+  erpRecordedWithAd: number;
   /** Mẫu số đúng: `total − notFromAds`. */
   attributable: number;
   /**
@@ -113,6 +149,10 @@ function shape(row: Record<string, unknown> | undefined): AttributionCoverage {
     ambiguous: Number(row?.ambiguous ?? 0),
     lostFacebook: Number(row?.lostFacebook ?? 0),
     notFromAds,
+    notFromAdsErpRecorded: Number(row?.notFromAdsErpRecorded ?? 0),
+    notFromAdsErpRecordedRevenue: Number(row?.notFromAdsErpRecordedRevenue ?? 0),
+    erpRecorded: Number(row?.erpRecorded ?? 0),
+    erpRecordedWithAd: Number(row?.erpRecordedWithAd ?? 0),
     attributable,
     coveragePct: attributable > 0 ? Math.round((uniqueDeterministic / attributable) * 1000) / 10 : null,
     withTrackingCode: Number(row?.withTrackingCode ?? 0),
@@ -127,6 +167,10 @@ const SELECT = {
   ambiguous: sql<number>`count(*) filter (where not ${NOI_DUOC} and ${HAS_ANY_POST})`,
   lostFacebook: sql<number>`count(*) filter (where not ${NOI_DUOC} and not ${HAS_ANY_POST} and not ${NO_FB_SIGNAL})`,
   notFromAds: sql<number>`count(*) filter (where not ${NOI_DUOC} and ${NO_FB_SIGNAL})`,
+  notFromAdsErpRecorded: sql<number>`count(*) filter (where not ${NOI_DUOC} and ${ERP_RECORDED_NO_TRACE})`,
+  notFromAdsErpRecordedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where not ${NOI_DUOC} and ${ERP_RECORDED_NO_TRACE}), 0)`,
+  erpRecorded: sql<number>`count(*) filter (where ${IS_MANUAL_ORDER})`,
+  erpRecordedWithAd: sql<number>`count(*) filter (where ${IS_MANUAL_ORDER} and coalesce(${o.adId}, '') <> '')`,
   withTrackingCode: sql<number>`count(*) filter (where coalesce(${o.utmCampaign}, '') <> '' or coalesce(${o.referralCode}, '') <> '')`,
 };
 

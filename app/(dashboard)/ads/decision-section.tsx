@@ -1,4 +1,5 @@
 import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
+import { CHAT_AD_ATTRIBUTION_DEFAULT_WINDOW_DAYS, CHAT_AD_ATTRIBUTION_SETTING_KEY } from "@/lib/constants/chat-ad-attribution";
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
@@ -202,10 +203,17 @@ export async function AdsDecisionSection({
             <InfoHint>
               <p>
                 {formatNumber(d.confidence.attributedOrders)}/{formatNumber(d.confidence.attributableOrders)} đơn CÓ DẤU VẾT FACEBOOK nối được về quảng cáo.{" "}
-                {d.confidence.notFromAdsOrders > 0 ? (
+                {d.confidence.notFromAdsOrders - d.confidence.erpRecordedNoTraceOrders > 0 ? (
                   <>
-                    {formatNumber(d.confidence.notFromAdsOrders)} đơn khác trong kỳ không có fanpage, bài viết hay mẩu quảng cáo nào — chúng chưa bao
-                    giờ đi qua quảng cáo nên đứng NGOÀI mẫu số này.{" "}
+                    {formatNumber(d.confidence.notFromAdsOrders - d.confidence.erpRecordedNoTraceOrders)} đơn khác trong kỳ không có fanpage, bài viết
+                    hay mẩu quảng cáo nào — chúng chưa bao giờ đi qua quảng cáo nên đứng NGOÀI mẫu số này.{" "}
+                  </>
+                ) : null}
+                {d.confidence.erpRecordedNoTraceOrders > 0 ? (
+                  <>
+                    {formatNumber(d.confidence.erpRecordedNoTraceOrders)} đơn do ERP ghi (đơn tay · bot bán hàng · ghi đơn từ hội thoại) cũng đứng
+                    ngoài mẫu số — nhưng vì ĐƯỜNG GHI không lưu quảng cáo dẫn khách tới, không phải vì chúng không đến từ quảng cáo: nguồn của chúng
+                    là CHƯA BIẾT.{" "}
                   </>
                 ) : null}
                 {d.confidence.coveragePct === null ? "Không có đơn nào trong phạm vi để đo." : lowCoverage ? null : "Đủ để kết luận ở cấp chiến dịch."}
@@ -213,6 +221,39 @@ export async function AdsDecisionSection({
               <p className="mt-1">Đây là CẬN DƯỚI: phần chưa nối được vẫn lẫn đơn hữu cơ nhắn thẳng vào fanpage mà ERP không tách ra được.</p>
             </InfoHint>
           </span>
+
+          {/*
+            MÃ QUẢNG CÁO TỪ HỘI THOẠI (0225) — hai độ phủ, mỗi cái một mẫu số: đơn ERP mang mã, và hội thoại có mã.
+            Hội thoại 0 trong kỳ ⇒ CHƯA ĐO ĐƯỢC (không phải 0%).
+          */}
+          {dimension !== "product" && (d.confidence.erpOrders > 0 || d.confidence.chatConversations > 0) ? (
+            <span className="inline-flex items-center gap-1">
+              <span className="numeric">
+                Mã QC từ hội thoại: <b className="text-foreground">{formatNumber(d.confidence.erpOrdersWithAd)}</b>/{formatNumber(d.confidence.erpOrders)} đơn ERP ·{" "}
+                {d.confidence.chatConversations > 0 ? (
+                  <>
+                    <b className="text-foreground">{formatNumber(d.confidence.chatConversationsWithAd)}</b>/{formatNumber(d.confidence.chatConversations)} hội thoại
+                  </>
+                ) : (
+                  "hội thoại: chưa đo được"
+                )}
+              </span>
+              <InfoHint>
+                <p>
+                  {formatNumber(d.confidence.erpOrdersWithAd)}/{formatNumber(d.confidence.erpOrders)} đơn ERP (đơn tay · bot · ghi từ hội thoại) đã chốt
+                  trong kỳ mang mã quảng cáo khách bấm để vào hội thoại — chỉ khi lượt bấm nằm trong {formatNumber(d.confidence.chatAttributionWindowDays)}{" "}
+                  ngày trước lúc lên đơn (mặc định {formatNumber(CHAT_AD_ATTRIBUTION_DEFAULT_WINDOW_DAYS)} ngày — bằng cửa sổ «sau lượt bấm» mặc định của Meta; đổi ở setting{" "}
+                  {CHAT_AD_ATTRIBUTION_SETTING_KEY}).
+                </p>
+                <p className="mt-1">
+                  {d.confidence.chatConversations > 0
+                    ? `${formatNumber(d.confidence.chatConversationsWithAd)}/${formatNumber(d.confidence.chatConversations)} hội thoại fanpage có khách nhắn trong kỳ mang mã quảng cáo.`
+                    : "Chưa có hội thoại fanpage nào có khách nhắn trong kỳ — chưa đo được nguồn có gửi mã quảng cáo không."}{" "}
+                  Đơn tay và đơn khách tự tìm tới (không qua quảng cáo) KHÔNG BAO GIỜ mang mã — nên tỷ lệ này không phải độ phủ của riêng quảng cáo.
+                </p>
+              </InfoHint>
+            </span>
+          ) : null}
 
           {/*
             ═══════════ BẰNG CHỨNG DỪNG Ở ĐÂU — VÀ BAO NHIÊU TIỀN ĐANG ĐỨNG SAU CHỖ DỪNG ẤY ═══════════
@@ -334,6 +375,34 @@ export async function AdsDecisionSection({
           <DataWarnings
             tone={d.rateBasis.projectionError ? "danger" : "warn"}
             items={[
+              /*
+                ĐƠN DO ERP GHI KHÔNG QUY KẾT ĐƯỢC — nói TRƯỚC mọi cảnh báo khác khi nó có mặt.
+
+                Tổ chức chỉ bán qua bot / hội thoại / đơn tay thì MỌI đơn ở đây, và bảng in «0 đơn chốt» ở mọi
+                chiến dịch. Không có câu này, người đọc kết luận "quảng cáo không ra đơn" — đúng ngược sự thật.
+                Chỉ ở ba cấp quy kết theo quảng cáo; cấp Mã hàng đếm đơn không qua quy kết nên không thiếu chúng.
+              */
+              dimension !== "product" && d.confidence.erpRecordedNoTraceOrders > 0 ? (
+                <>
+                  <b>{formatNumber(d.confidence.erpRecordedNoTraceOrders)}</b> đơn · {formatVND(d.confidence.erpRecordedNoTraceRevenue)} doanh số lên đơn
+                  trong kỳ do ERP ghi (đơn tay · bot bán hàng · ghi đơn từ hội thoại) <b>không mang mã quảng cáo, bài viết hay fanpage</b> — đơn tay, hoặc
+                  đơn từ hội thoại mà ERP chưa thấy mã quảng cáo khách bấm trong {formatNumber(d.confidence.chatAttributionWindowDays)} ngày trước khi lên
+                  đơn — nên bảng này KHÔNG quy kết được chúng về chiến dịch. «Đơn chốt» = 0 ở một chiến dịch khi ấy là <b>CHƯA QUY KẾT ĐƯỢC</b>, không
+                  phải chiến dịch không ra đơn. Đơn và doanh số của chúng có ở tab Mã hàng.
+                </>
+              ) : null,
+              /*
+                NGUỒN MÃ QUẢNG CÁO TỪ HỘI THOẠI CÓ ĐANG CHẢY KHÔNG (0225) — chưa đo được Pancake có gửi trường quảng cáo
+                hay không, nên im lặng ở đây là nói dối: 0 hội thoại có mã sau một ngày nghĩa là nguồn KHÔNG gửi, và mọi
+                đơn bot sẽ tiếp tục «chưa quy kết được».
+              */
+              dimension !== "product" && d.confidence.chatConversations > 0 && d.confidence.chatConversationsWithAd === 0 ? (
+                <>
+                  <b>0/{formatNumber(d.confidence.chatConversations)}</b> hội thoại fanpage có khách nhắn trong kỳ mang mã quảng cáo. Nếu sau một ngày
+                  vẫn là 0 thì nguồn tin nhắn (Pancake / Meta) <b>KHÔNG gửi mã quảng cáo</b> khách đã bấm — đơn bot và đơn ghi từ hội thoại sẽ tiếp
+                  tục không quy kết được về chiến dịch. Mã chỉ được ghi từ lúc bản cập nhật này chạy; hội thoại cũ không được dựng lại.
+                </>
+              ) : null,
               lowCoverage
                 ? `Độ phủ quy kết dưới ngưỡng ${d.confidence.threshold}%: bảng này mô tả đúng PHẦN ĐƠN NỐI ĐƯỢC, không mô tả toàn shop. Phần còn lại cố ý không chia đều cho các chiến dịch.`
                 : null,
