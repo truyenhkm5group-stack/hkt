@@ -9,7 +9,7 @@
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
   "worker": null,
   "worktree": null,
-  "branch": "feat/ai-sales-reliability",
+  "branch": "feat/ai-sales-retry",
   "base_sha": "0ca4ed97a85173961574c2cfcaea675d6119ef4e",
   "domains": [],
   "owned_paths": [
@@ -18,15 +18,25 @@
     "lib/sales-chatbot/fanpage.ts",
     "lib/sales-chatbot/messenger.ts",
     "lib/sales-chatbot/alerts.ts",
+    "lib/sales-chatbot/inbound-retry.ts",
+    "lib/sales-chatbot/retry-runner.ts",
     "lib/sales-chatbot/recovery.ts",
+    "lib/ai-usage/sales-health.ts",
     "lib/constants/ai-sales-slo.ts",
-    "app/(dashboard)/ai/cockpit/",
+    "lib/constants/department-modules.ts",
+    "components/app-sidebar.tsx",
+    "app/(dashboard)/ai/sales-chatbot/cockpit/",
     "lib/sync/jobs.ts",
     "scripts/scheduler.mjs",
+    "scripts/scheduler-fanout.mjs",
     "db/schema.ts",
     "drizzle/",
     "tests/ai-sales-health.test.ts",
-    "tests/ai-sales-retry.test.ts"
+    "tests/ai-sales-retry.test.ts",
+    "tests/g-sched.test.ts",
+    "tests/smoke-coverage.test.ts",
+    "tests/test-hygiene.test.ts",
+    "tests/sync-fixtures.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
@@ -38,7 +48,7 @@
     "0223": "2026-10-06T10:33:52.474Z"
   },
   "created_at": "2026-10-06T09:51:01.832Z",
-  "updated_at": "2026-10-06T10:33:52.474Z",
-  "last_heartbeat": "2026-10-06T10:00:05.832Z",
+  "updated_at": "2026-10-06T11:15:15.752Z",
+  "last_heartbeat": "2026-10-06T11:15:15.752Z",
   "definition_of_done": []
 }
